@@ -1,0 +1,33 @@
+flowchart TD
+    A[Goal + Current State] --> B[Observe]
+    B --> C[Orient / Analyze Gap]
+    C --> D[Generate Options]
+    D --> E{Decision}
+
+    E -->|Continue| F[Execute Current Task Graph]
+    E -->|Repair| G[Repair Failure]
+    E -->|Refactor| H[Refactor Structure]
+    E -->|Replan| I[Revise Plan]
+    E -->|Redirect| J[Update Goal and Plan]
+    E -->|Branch| K[Create New Version Branch]
+    E -->|Rebirth| L[Propose Rebirth]
+    E -->|Pause| M[Suspend Safely]
+    E -->|Complete| N[Complete]
+
+    F --> O[Verify]
+    G --> O
+    H --> O
+    I --> C
+    J --> C
+    K --> C
+    L --> P{User Confirms?}
+    P -->|Yes| C
+    P -->|No| I
+    M --> Q[Resume / Redirect / Branch / Manual]
+    Q --> C
+
+    O --> R{Passed?}
+    R -->|Yes| S[Commit / Checkpoint]
+    R -->|No| D
+    S --> T[Reflect]
+    T --> C

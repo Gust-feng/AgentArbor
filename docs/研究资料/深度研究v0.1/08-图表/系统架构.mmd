@@ -1,0 +1,45 @@
+flowchart TD
+    U[User Goal / New Requirement] --> WB[AgentArbor Workbench]
+    WB --> API[Application Server]
+    API --> AK[Autonomy Kernel]
+
+    subgraph CORE[AgentArbor Core]
+        AK --> GM[Goal Manager]
+        AK --> SO[State Observer]
+        AK --> GA[Gap Analyzer]
+        AK --> OG[Option Generator]
+        AK --> DE[Decision Engine]
+        AK --> RE[Reflection Engine]
+        AK --> ED[Evolution Decider]
+    end
+
+    DE --> AO[Agent Organization]
+    AO --> R[Root Orchestrator]
+    R --> PL[Phase Lead Agents]
+    PL --> W[Worker Agents]
+
+    W --> ER[Execution Runtime]
+    ER --> CF[Capability Fabric]
+    CF --> MCP[MCP Connectors]
+    CF --> SK[Skills]
+    CF --> AG[.agent Manifests]
+    CF --> PG[Plugins]
+    CF --> BI[Built-in Tools]
+
+    ER --> WS[Workspace]
+    ER --> TEST[Test Runner]
+    ER --> GIT[Git Engine]
+    ER --> LOG[Event Bus]
+
+    TEST --> VS[Verification System]
+    VS --> RE
+    RE --> ED
+    ED --> EV[Evolution System]
+    EV --> GIT
+
+    GOV[Governance System] --> AK
+    GOV --> ER
+    GOV --> CF
+
+    LOG --> API
+    API --> WB

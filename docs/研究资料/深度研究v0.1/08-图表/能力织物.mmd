@@ -1,0 +1,27 @@
+flowchart TD
+    CR[Capability Router] --> BI[Built-in Capabilities]
+    CR --> MCP[MCP Connectors]
+    CR --> SK[Skills]
+    CR --> AG[.agent Manifests]
+    CR --> PL[Plugins]
+    CR --> UC[User-defined Capabilities]
+
+    BI --> FS[File System]
+    BI --> GIT[Git]
+    BI --> SHELL[Shell]
+    BI --> TEST[Test Runner]
+    BI --> DIFF[Diff]
+
+    MCP --> GH[GitHub]
+    MCP --> DB[Database]
+    MCP --> BROWSER[Browser]
+    MCP --> DOCS[Docs]
+
+    SK --> UI[UI Skill]
+    SK --> ARCH[Architecture Skill]
+    SK --> REVIEW[Review Skill]
+    SK --> MCPGEN[MCP Server Skill]
+
+    PL --> PANEL[New UI Panel]
+    PL --> TEMPLATE[New AgentApp Template]
+    PL --> POLICY[New Governance Policy]

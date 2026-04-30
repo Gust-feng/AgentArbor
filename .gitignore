@@ -1,0 +1,29 @@
+etc/
+
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+build/
+coverage/
+.turbo/
+
+# Local environment
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+
+# Local AI development adapters and runtime state.
+# These directories are development-state by default; promote any shared
+# template or product runtime asset explicitly before committing it.
+.codex
+.cospec
+.opencode
+.claude
+.agents
+.agentarbor
+.trellis

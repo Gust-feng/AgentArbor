@@ -1,0 +1,23 @@
+flowchart TD
+    RO[RootOrchestrator] --> GS[GoalStewardAgent]
+    RO --> EO[EvolutionAgent]
+    RO --> GOV[GovernanceAgent]
+    RO --> PL1[PhaseLead: Genesis]
+    RO --> PL2[PhaseLead: Planning]
+    RO --> PL3[PhaseLead: Execution]
+
+    PL1 --> RA[ResearchAgent]
+    PL1 --> PA[ProductAgent]
+    PL1 --> RISK[RiskAgent]
+
+    PL2 --> ARCH[ArchitectAgent]
+    PL2 --> TECH[TechStackAgent]
+    PL2 --> WF[WorkflowDesignerAgent]
+    PL2 --> CRITIC[CriticAgent]
+
+    PL3 --> BUILDER[BuilderAgent]
+    PL3 --> TEST[TestAgent]
+    PL3 --> REVIEW[ReviewAgent]
+    PL3 --> REPAIR[RepairAgent]
+    PL3 --> GIT[GitAgent]
+    PL3 --> DOC[DocumentationAgent]

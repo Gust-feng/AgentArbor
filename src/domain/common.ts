@@ -35,6 +35,11 @@ export type AgentLayer =
 
 export type ArborMessageType =
   | "goal.received"
+  | "underground.exploration_planned"
+  | "rootlet_cluster.started"
+  | "exploration_candidate.produced"
+  | "candidate_pool.updated"
+  | "convergence_review.completed"
   | "direction_handoff.requested"
   | "direction_handoff.completed"
   | "direction_handoff.revision_requested"

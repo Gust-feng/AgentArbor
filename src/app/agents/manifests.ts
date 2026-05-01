@@ -14,7 +14,14 @@ export function createDemoAgentManifests(): AgentManifest[] {
       },
       capabilities: ["goal.shape", "risk.discovery", "option.mapping", "direction.handoff"],
       inputEvents: ["goal.received"],
-      outputEvents: ["direction_handoff.completed"],
+      outputEvents: [
+        "underground.exploration_planned",
+        "rootlet_cluster.started",
+        "exploration_candidate.produced",
+        "candidate_pool.updated",
+        "convergence_review.completed",
+        "direction_handoff.completed",
+      ],
       permissions: {
         read: ["soil_index"],
         write: ["direction_handoff"],

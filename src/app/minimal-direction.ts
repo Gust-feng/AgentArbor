@@ -1,15 +1,17 @@
 import {
   createApprovedDirectionHandoff,
-  markCandidatesAccepted,
 } from "../domain/agentarbor/direction-handoff.js";
 import { createDirectionHandoffPackage } from "../domain/agentarbor/direction-handoff-package.js";
 import type {
+  CandidatePool,
   Constraint,
   ConvergenceReview,
   DirectionHandoff,
   DirectionHandoffPackage,
   ExplorationCandidateRef,
+  UndergroundConvergenceReport,
 } from "../domain/contracts.js";
+import { selectHandoffSourceCandidates } from "../domain/underground/index.js";
 import { createId, nowIso } from "../kernel/id.js";
 
 export type MinimalDirectionMaterial = {
@@ -24,50 +26,21 @@ export function createMinimalDirectionMaterial(input: {
   goal: string;
   producedByAgentId: string;
   constraints: Constraint[];
+  candidatePool: CandidatePool;
+  convergenceReport: UndergroundConvergenceReport;
 }): MinimalDirectionMaterial {
-  const sourceCandidates = createMinimalSourceCandidates(input.producedByAgentId);
-  const convergenceReview = createMinimalConvergenceReview(input.producedByAgentId, sourceCandidates);
+  const sourceCandidates = selectHandoffSourceCandidates(input.candidatePool, input.convergenceReport);
+  const convergenceReview: ConvergenceReview = input.convergenceReport;
   const directionHandoff = createMinimalDirectionHandoff({
     goalId: input.goalId,
     goal: input.goal,
-    sourceCandidates: markCandidatesAccepted(sourceCandidates, convergenceReview.acceptedCandidateRefs),
+    sourceCandidates,
     convergenceReview,
     constraints: input.constraints,
   });
   const directionHandoffPackage = createDirectionHandoffPackage({ directionHandoff, convergenceReview });
 
   return { sourceCandidates, convergenceReview, directionHandoff, directionHandoffPackage };
-}
-
-function createMinimalSourceCandidates(producedByAgentId: string): ExplorationCandidateRef[] {
-  return [
-    {
-      id: createId("candidate"),
-      kind: "claim_candidate",
-      producedByAgentId,
-      clusterId: "underground-rootlet-minimal",
-      sourceRefs: ["goal.received"],
-      status: "candidate",
-    },
-  ];
-}
-
-function createMinimalConvergenceReview(
-  leadAgentId: string,
-  sourceCandidates: ExplorationCandidateRef[]
-): ConvergenceReview {
-  const candidateIds = sourceCandidates.map((candidate) => candidate.id);
-  return {
-    reviewId: createId("convergence"),
-    reviewedByAgentIds: [leadAgentId],
-    leadAgentId,
-    crossCheckedCandidateRefs: candidateIds,
-    deduplicatedCandidateRefs: candidateIds,
-    acceptedCandidateRefs: candidateIds,
-    rejectedCandidateRefs: [],
-    conflictResolutionRefs: [],
-    provenanceRefs: ["goal.received", "soil:minimal-constraints"],
-  };
 }
 
 function createMinimalDirectionHandoff(input: {
@@ -87,7 +60,7 @@ function createMinimalDirectionHandoff(input: {
       rawUserInputRef: "goal.received",
       clarifiedGoal: input.goal,
       nonGoals: ["real_llm", "real_agentarbor_assets", "ui", "database", "external_adapters"],
-      assumptions: ["The user-confirmed plan is sufficient for a deterministic first runtime loop."],
+      assumptions: ["The user-confirmed plan is sufficient for deterministic minimal radial exploration."],
       missingInformation: [],
       soilRefs: ["soil:minimal-constraints"],
       evidenceRefs: [
@@ -104,7 +77,7 @@ function createMinimalDirectionHandoff(input: {
       options: [
         {
           optionId: selectedOptionId,
-          directionSummary: "Run an in-memory deterministic minimal AgentArbor loop.",
+          directionSummary: "Run an in-memory deterministic AgentArbor loop with minimal Underground radial exploration.",
           supportingEvidenceRefs: ["minimal-runtime-contract"],
           soilAssetFitRefs: ["soil:minimal-constraints"],
           constraintImpact: input.constraints.map((constraint) => constraint.id),

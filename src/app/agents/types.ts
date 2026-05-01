@@ -10,6 +10,7 @@ import type {
   PathBias,
   RunMemory,
   TaskSpec,
+  UndergroundExplorationReport,
   WorkflowIR,
 } from "../../domain/contracts.js";
 
@@ -18,6 +19,7 @@ export type DirectionOutput = {
   convergenceReview: ConvergenceReview;
   directionHandoff: DirectionHandoff;
   directionHandoffPackage: DirectionHandoffPackage;
+  undergroundReport: UndergroundExplorationReport;
 };
 
 export type PlanOutput = {

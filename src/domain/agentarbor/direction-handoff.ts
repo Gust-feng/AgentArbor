@@ -1,4 +1,8 @@
 import type { ConvergenceReview, DirectionHandoff, ExplorationCandidateRef } from "../underground/contracts.js";
+import {
+  assertHandoffSourceCandidates,
+  type UndergroundConvergenceReport,
+} from "../underground/radial-growth.js";
 
 export class DirectionHandoffConvergenceError extends Error {
   constructor(message: string) {
@@ -23,14 +27,43 @@ export function assertDirectionHandoffConverged(
     );
   }
 
-  const convergedCandidateIds = new Set([
+  const report = convergenceReview as ConvergenceReview & Partial<UndergroundConvergenceReport>;
+  const mergedCandidateRefs = report.mergedCandidateRefs ?? [];
+  const handoffCandidateRefs = report.handoffCandidateRefs ?? [
     ...convergenceReview.acceptedCandidateRefs,
-    ...convergenceReview.deduplicatedCandidateRefs,
-  ]);
+    ...mergedCandidateRefs,
+  ];
+
+  try {
+    assertHandoffSourceCandidates(handoff.sourceCandidateRefs, {
+      reviewId: convergenceReview.reviewId,
+      reviewedByAgentIds: convergenceReview.reviewedByAgentIds,
+      leadAgentId: convergenceReview.leadAgentId,
+      crossCheckedCandidateRefs: convergenceReview.crossCheckedCandidateRefs,
+      deduplicatedCandidateRefs: convergenceReview.deduplicatedCandidateRefs,
+      acceptedCandidateRefs: convergenceReview.acceptedCandidateRefs,
+      mergedCandidateRefs,
+      rejectedCandidateRefs: convergenceReview.rejectedCandidateRefs,
+      unknownCandidateRefs: report.unknownCandidateRefs ?? [],
+      conflictResolutionRefs: convergenceReview.conflictResolutionRefs,
+      provenanceRefs: convergenceReview.provenanceRefs,
+      decisions: report.decisions ?? [],
+      summary: report.summary ?? "",
+      outcome: report.outcome ?? "approved",
+      userEscalationRequired: report.userEscalationRequired ?? false,
+      budgetExhausted: report.budgetExhausted ?? false,
+      stopReason: report.stopReason,
+      handoffCandidateRefs,
+    });
+  } catch (error) {
+    throw new DirectionHandoffConvergenceError(
+      error instanceof Error ? error.message : "DirectionHandoff source candidates did not converge."
+    );
+  }
 
   const unconverged = handoff.sourceCandidateRefs.filter(
     (candidate) =>
-      !convergedCandidateIds.has(candidate.id) ||
+      !handoffCandidateRefs.includes(candidate.id) ||
       (candidate.status !== "accepted" && candidate.status !== "merged")
   );
 

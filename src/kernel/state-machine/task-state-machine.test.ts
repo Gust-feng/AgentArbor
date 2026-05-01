@@ -64,3 +64,53 @@ test("hard constraints can require user confirmation", () => {
     UserConfirmationRequiredError
   );
 });
+
+test("proposed hard constraints block task assignment for non-user conflict policies", () => {
+  for (const conflictPolicy of [
+    "block",
+    "aboveground_center_decides",
+    "verification_reviews",
+    "governance_review",
+  ] as const) {
+    const proposedHardConstraint: Constraint = {
+      id: "constraint-minimal-runtime-only",
+      source: "user",
+      type: "scope",
+      level: "hard",
+      statement: `This hard constraint is proposed and uses ${conflictPolicy}.`,
+      owner: "user",
+      appliesTo: ["minimal-runtime-kernel"],
+      evidenceRefs: ["test"],
+      enforcementGate: "task_assignment",
+      conflictPolicy,
+      status: "proposed",
+    };
+
+    assert.throws(
+      () => runMinimalLoop(undefined, { constraints: [proposedHardConstraint] }),
+      ConstraintBlockedError,
+      `${conflictPolicy} must not default to Assigned while proposed`
+    );
+  }
+});
+
+test("governance_review hard constraints require approval before assignment", () => {
+  const governanceReviewConstraint: Constraint = {
+    id: "constraint-minimal-runtime-only",
+    source: "governance",
+    type: "asset_governance",
+    level: "hard",
+    statement: "Governance review must approve this hard constraint before assignment.",
+    owner: "governance",
+    appliesTo: ["minimal-runtime-kernel"],
+    evidenceRefs: ["test"],
+    enforcementGate: "task_assignment",
+    conflictPolicy: "governance_review",
+    status: "proposed",
+  };
+
+  assert.throws(
+    () => runMinimalLoop(undefined, { constraints: [governanceReviewConstraint] }),
+    ConstraintBlockedError
+  );
+});

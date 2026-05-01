@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { DirectionHandoffPackageValidationError } from "../domain/agentarbor/direction-handoff-package.js";
+import {
+  createAwaitingUserDirectionHandoffPackageFixture,
+  tamperAwaitingUserPackageToApprovedShape,
+} from "../domain/agentarbor/test-fixtures.js";
 import { StateGuardError } from "../kernel/state-machine/task-state-machine.js";
 import { AbovegroundPlanner } from "./agents.js";
 import { runMinimalLoop } from "./minimal-loop.js";
@@ -26,6 +30,25 @@ test("aboveground planner blocks draft and awaiting_user DirectionHandoffPackage
       DirectionHandoffPackageValidationError
     );
   }
+});
+
+test("aboveground planner rejects awaiting_user package tampered into approved status", () => {
+  const result = runMinimalLoop();
+  const planner = new AbovegroundPlanner();
+  const { directionHandoffPackage } = createAwaitingUserDirectionHandoffPackageFixture();
+  const tamperedPackage = tamperAwaitingUserPackageToApprovedShape(directionHandoffPackage);
+  result.runtime.directionHandoffPackageStore.save(tamperedPackage);
+
+  assert.throws(
+    () =>
+      planner.plan(
+        tamperedPackage.manifest.directionId,
+        tamperedPackage.manifest.directionVersion,
+        "trace-test",
+        result.runtime
+      ),
+    DirectionHandoffPackageValidationError
+  );
 });
 
 test("aboveground planner rejects ad-hoc DirectionHandoff material", () => {

@@ -8,7 +8,12 @@ import {
   FileSystemDirectionHandoffPackageStore,
   InMemoryDirectionHandoffPackageStore,
 } from "./direction-handoff-package.js";
-import { clonePackage, createDirectionHandoffPackageFixture } from "./test-fixtures.js";
+import {
+  clonePackage,
+  createAwaitingUserDirectionHandoffPackageFixture,
+  createDirectionHandoffPackageFixture,
+  tamperAwaitingUserPackageToApprovedShape,
+} from "./test-fixtures.js";
 
 test("validates and lists an approved DirectionHandoffPackage", () => {
   const { directionHandoff, directionHandoffPackage } = createDirectionHandoffPackageFixture();
@@ -58,6 +63,70 @@ test("package validation fails with unconverged candidates", () => {
 
   assert.equal(validation.passed, false);
   assert.equal(validation.errors.some((error) => error.code === "UNCONVERGED_SOURCE_CANDIDATES"), true);
+});
+
+test("package validation rejects awaiting_user package tampered into approved status with convergence evidence intact", () => {
+  const { directionHandoffPackage } = createAwaitingUserDirectionHandoffPackageFixture();
+  const tamperedPackage = tamperAwaitingUserPackageToApprovedShape(directionHandoffPackage);
+
+  const validation = new InMemoryDirectionHandoffPackageStore().validate(tamperedPackage);
+
+  assert.equal(validation.passed, false);
+  for (const code of [
+    "APPROVED_CONVERGENCE_HAS_CLARIFICATION_OPEN_QUESTION",
+    "APPROVED_CONVERGENCE_HAS_BLOCKING_OPEN_QUESTION",
+    "APPROVED_CONVERGENCE_REQUIRES_USER_CLARIFICATION",
+  ]) {
+    assert.equal(validation.errors.some((error) => error.code === code), true, `${code} should fail validation`);
+  }
+  for (const code of [
+    "APPROVED_HANDOFF_HAS_MISSING_INFORMATION",
+    "APPROVED_HANDOFF_REQUIRES_USER_DECISION",
+    "APPROVED_HANDOFF_OPTION_HAS_UNKNOWNS",
+    "APPROVED_HANDOFF_OPTION_HAS_CLARIFICATION_BLOCKER",
+    "APPROVED_HANDOFF_HAS_USER_DECISION_RISK",
+    "APPROVED_HANDOFF_HAS_CLARIFICATION_ESCALATION",
+  ]) {
+    assert.equal(validation.errors.some((error) => error.code === code), false, `${code} should have been cleaned`);
+  }
+});
+
+test("package validation allows non-blocking unknown evidence that is not part of approved handoff candidates", () => {
+  const { directionHandoffPackage } = createDirectionHandoffPackageFixture();
+  const approvedPackageWithOpenUnknown = clonePackage(directionHandoffPackage);
+  approvedPackageWithOpenUnknown.convergenceReview.unknownCandidateRefs = ["candidate-nonblocking-unknown"];
+  approvedPackageWithOpenUnknown.convergenceReview.openQuestions = [
+    {
+      candidateId: "candidate-nonblocking-unknown",
+      reason: "critical_fact_missing",
+      question: "Keep this non-blocking uncertainty visible for later review.",
+      blockingLevel: "non_blocking",
+      disposition: "remain_open",
+      evidenceRefs: [],
+    },
+  ];
+
+  const validation = new InMemoryDirectionHandoffPackageStore().validate(approvedPackageWithOpenUnknown);
+
+  assert.equal(validation.passed, true);
+});
+
+test("package validation rejects approved convergence when unknown candidates overlap handoff candidates", () => {
+  const { candidate, directionHandoffPackage } = createDirectionHandoffPackageFixture();
+  const invalidPackage = clonePackage(directionHandoffPackage);
+  invalidPackage.convergenceReview.unknownCandidateRefs = [candidate.id];
+
+  const validation = new InMemoryDirectionHandoffPackageStore().validate(invalidPackage);
+
+  assert.equal(validation.passed, false);
+  assert.equal(
+    validation.errors.some((error) => error.code === "APPROVED_CONVERGENCE_UNKNOWN_SOURCE_CANDIDATE"),
+    true
+  );
+  assert.equal(
+    validation.errors.some((error) => error.code === "APPROVED_CONVERGENCE_UNKNOWN_HANDOFF_CANDIDATE"),
+    true
+  );
 });
 
 test("package validation fails when Soil asset content is inlined", () => {

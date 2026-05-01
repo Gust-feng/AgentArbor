@@ -11,26 +11,37 @@ export type EventLogEntry<TPayload = unknown> = {
 export class InMemoryEventLog {
   private readonly entries: EventLogEntry[] = [];
 
-  append(message: ArborMessage): EventLogEntry {
-    const entry: EventLogEntry = {
+  append<TPayload>(message: ArborMessage<TPayload>): EventLogEntry<TPayload> {
+    const entry: EventLogEntry<TPayload> = {
       sequence: this.entries.length + 1,
       type: message.type,
-      message,
+      message: cloneFact(message),
       recordedAt: nowIso(),
     };
     this.entries.push(entry);
-    return entry;
+    return cloneEventLogEntry(entry);
   }
 
   list(): EventLogEntry[] {
-    return [...this.entries];
+    return this.entries.map(cloneEventLogEntry);
   }
 
   replay(): ArborMessage[] {
-    return this.entries.map((entry) => entry.message);
+    return this.entries.map((entry) => cloneFact(entry.message));
   }
 
   types(): ArborMessageType[] {
     return this.entries.map((entry) => entry.type);
   }
+}
+
+function cloneEventLogEntry<TPayload>(entry: EventLogEntry<TPayload>): EventLogEntry<TPayload> {
+  return {
+    ...entry,
+    message: cloneFact(entry.message),
+  };
+}
+
+function cloneFact<T>(value: T): T {
+  return globalThis.structuredClone(value);
 }

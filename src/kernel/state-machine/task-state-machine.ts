@@ -63,15 +63,22 @@ export function enforceHardConstraints(
     if (constraint === undefined) {
       throw new ConstraintBlockedError(`Missing hard constraint at ${gate}: ${ref.constraintId}`);
     }
-    if (constraint.status === "violated" || constraint.conflictPolicy === "block") {
-      if (constraint.status === "active" || constraint.status === "approved") {
-        continue;
-      }
-      throw new ConstraintBlockedError(`Hard constraint blocks ${gate}: ${constraint.id}`);
+
+    if (constraint.status === "active" || constraint.status === "approved") {
+      continue;
     }
-    if (constraint.conflictPolicy === "ask_user" && constraint.status !== "active" && constraint.status !== "approved") {
+
+    if (constraint.conflictPolicy === "ask_user") {
       throw new UserConfirmationRequiredError(`Hard constraint requires user confirmation at ${gate}: ${constraint.id}`);
     }
+
+    if (constraint.status === "violated" || constraint.conflictPolicy === "block") {
+      throw new ConstraintBlockedError(`Hard constraint blocks ${gate}: ${constraint.id}`);
+    }
+
+    throw new ConstraintBlockedError(
+      `Unmet hard constraint cannot pass ${gate} without ${constraint.conflictPolicy}: ${constraint.id}`
+    );
   }
 }
 

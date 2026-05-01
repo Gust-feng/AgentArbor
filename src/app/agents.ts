@@ -3,11 +3,17 @@ import {
   createApprovedDirectionHandoff,
   markCandidatesAccepted,
 } from "../domain/agentarbor/direction-handoff.js";
+import {
+  assertDirectionHandoffPackageValidForPlanning,
+  createDirectionHandoffPackage,
+  DirectionHandoffPackageValidationError,
+} from "../domain/agentarbor/direction-handoff-package.js";
 import type {
   ArborMessageType,
   ConvergenceReview,
   Constraint,
   DirectionHandoff,
+  DirectionHandoffPackage,
   ExperienceCandidate,
   ExplorationCandidateRef,
   FruitCandidate,
@@ -21,16 +27,23 @@ import type {
 } from "../domain/contracts.js";
 import { createId, nowIso } from "../kernel/id.js";
 import { createMessage } from "../kernel/messages/create-message.js";
-import { assignTask, assertLayerCanCreateExplorationCandidate, enterPlanning } from "../kernel/state-machine/task-state-machine.js";
+import {
+  assignTask,
+  assertLayerCanCreateExplorationCandidate,
+  enterPlanning,
+  StateGuardError,
+} from "../kernel/state-machine/task-state-machine.js";
 import type { MinimalRuntime } from "./runtime.js";
 
 type DirectionOutput = {
   sourceCandidates: ExplorationCandidateRef[];
   convergenceReview: ConvergenceReview;
   directionHandoff: DirectionHandoff;
+  directionHandoffPackage: DirectionHandoffPackage;
 };
 
 type PlanOutput = {
+  directionHandoffPackage: DirectionHandoffPackage;
   growthPlan: GrowthPlan;
   workflow: WorkflowIR;
   task: TaskSpec;
@@ -137,6 +150,10 @@ export class UndergroundAnalyzer {
       convergenceReview
     );
 
+    const directionHandoffPackage = runtime.directionHandoffPackageStore.save(
+      createDirectionHandoffPackage({ directionHandoff, convergenceReview })
+    );
+
     runtime.bus.publish(
       createMessage({
         traceId,
@@ -144,18 +161,45 @@ export class UndergroundAnalyzer {
         to: { role: "aboveground_center" },
         type: "direction_handoff.completed",
         intent: "complete_direction_handoff",
-        payload: { directionHandoff },
+        payload: {
+          directionHandoff,
+          directionPackage: {
+            packageId: directionHandoffPackage.manifest.packageId,
+            directionId: directionHandoffPackage.manifest.directionId,
+            version: directionHandoffPackage.manifest.directionVersion,
+            status: directionHandoffPackage.manifest.status,
+          },
+        },
       })
     );
 
-    return { sourceCandidates, convergenceReview, directionHandoff };
+    return { sourceCandidates, convergenceReview, directionHandoff, directionHandoffPackage };
   }
 }
 
 export class AbovegroundPlanner {
   readonly agentId = "aboveground-planner";
 
-  plan(directionHandoff: DirectionHandoff, traceId: string, runtime: MinimalRuntime): PlanOutput {
+  plan(directionId: string, version: number, traceId: string, runtime: MinimalRuntime): PlanOutput {
+    if (typeof directionId !== "string" || !Number.isInteger(version)) {
+      throw new StateGuardError(
+        "PLANNING_REQUIRES_DIRECTION_HANDOFF_PACKAGE_REF",
+        "AbovegroundPlanner must load a validated DirectionHandoffPackage by direction id and version."
+      );
+    }
+
+    const loadedPackage = runtime.directionHandoffPackageStore.load(directionId, version);
+    const validation = runtime.directionHandoffPackageStore.validate(loadedPackage);
+    const directionHandoffPackage = {
+      ...loadedPackage,
+      validation,
+    };
+    if (!validation.passed) {
+      throw new DirectionHandoffPackageValidationError(validation);
+    }
+
+    assertDirectionHandoffPackageValidForPlanning(directionHandoffPackage);
+    const { directionHandoff } = directionHandoffPackage;
     enterPlanning(directionHandoff);
 
     const growthPlanId = createId("growth-plan");
@@ -288,7 +332,7 @@ export class AbovegroundPlanner {
       })
     );
 
-    return { growthPlan, workflow, task };
+    return { directionHandoffPackage, growthPlan, workflow, task };
   }
 
   createExplorationCandidate(): ExplorationCandidateRef {

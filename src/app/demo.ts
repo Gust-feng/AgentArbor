@@ -18,6 +18,11 @@ console.log("Summary:");
 console.log(
   JSON.stringify(
     {
+      loadedDirectionPackage: {
+        id: result.loadedDirectionHandoffPackage.manifest.directionId,
+        version: result.loadedDirectionHandoffPackage.manifest.directionVersion,
+        status: result.loadedDirectionHandoffPackage.manifest.status,
+      },
       fruit: result.fruit,
       runMemory: {
         id: result.runMemory.id,

@@ -2,6 +2,7 @@ import type {
   ArborMessageType,
   Constraint,
   DirectionHandoff,
+  DirectionHandoffPackage,
   ExperienceCandidate,
   FruitCandidate,
   GrowthPlan,
@@ -36,6 +37,8 @@ export const EXPECTED_DEMO_EVENTS: ArborMessageType[] = [
 export type MinimalLoopResult = {
   runtime: MinimalRuntime;
   directionHandoff: DirectionHandoff;
+  directionHandoffPackage: DirectionHandoffPackage;
+  loadedDirectionHandoffPackage: DirectionHandoffPackage;
   growthPlan: GrowthPlan;
   workflow: WorkflowIR;
   task: TaskSpec;
@@ -80,8 +83,13 @@ export function runMinimalLoop(
   const verifier = new Verifier();
   const governanceReview = new GovernanceReview();
 
-  const { directionHandoff } = undergroundAnalyzer.analyze(goalId, goal, traceId, runtime);
-  const { growthPlan, workflow, task } = abovegroundPlanner.plan(directionHandoff, traceId, runtime);
+  const { directionHandoff, directionHandoffPackage } = undergroundAnalyzer.analyze(goalId, goal, traceId, runtime);
+  const {
+    directionHandoffPackage: loadedDirectionHandoffPackage,
+    growthPlan,
+    workflow,
+    task,
+  } = abovegroundPlanner.plan(directionHandoff.id, directionHandoff.version, traceId, runtime);
   const assignedAgent = runtime.router.route(task);
   const assignedTask = workerAgent.assignTask(task, growthPlan, runtime.constraints, traceId, runtime);
   if (assignedAgent.id !== workerAgent.agentId) {
@@ -103,6 +111,8 @@ export function runMinimalLoop(
   return {
     runtime,
     directionHandoff,
+    directionHandoffPackage,
+    loadedDirectionHandoffPackage,
     growthPlan,
     workflow,
     task: assignedTask,

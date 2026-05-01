@@ -27,6 +27,44 @@ Direction Handoff 只表达方向、证据、约束和升级条件，不直接�
 - `recommendedOptionId`：地下中枢推荐方向。
 - `growthEntry`：地上中枢可接管的入口、运行形态建议和升级条件。
 
+## Direction Handoff Package V0.2 契约
+
+第一阶段 V0.2 将内存中的 `DirectionHandoff` 边界扩展为可校验、可序列化、可读写的 Direction Handoff Package。包裹内容包括：
+
+- `DirectionHandoff`：方向、约束引用、Soil 引用、证据索引、风险和 Growth Entry。
+- `ConvergenceReview`：候选材料交叉校验、去重、归因和裁决记录。
+- candidate reference index：只保存候选引用、来源和收束状态。
+- package manifest / file list：声明包版本、方向 ID、状态和文件契约。
+- validation result：以 `passed`、`errors`、`warnings` 记录包是否可被地上中枢接管。
+
+文件契约固定为：
+
+```text
+handoff.meta.json
+direction.md
+options.json
+decision-record.md
+constraints.json
+soil-refs.json
+evidence-index.md
+risk-register.md
+open-questions.md
+escalation-rules.md
+growth-entry.json
+```
+
+`options.json`、`decision-record.md` 和 `risk-register.md` 仍然只是方向证据，不能变成 GrowthPlan。地上中枢必须从已保存的 package 按 `directionId + version` 加载并校验，不能从临时拼出来的 handoff 材料直接规划。
+
+验证规则至少包含：
+
+- `status` 必须是 `approved` 才能进入地上规划。
+- 必须存在 `convergenceReviewRef`。
+- 必须存在 `sourceCandidateRefs`，且候选只能是已收束的 `accepted` 或 `merged` 引用。
+- package 只能保存 Soil 引用，不能内联 Soil 资产正文、内容副本或 body。
+- package 不能内联 GrowthPlan；GrowthPlan 只能由 Aboveground Center 在校验通过后生成。
+
+默认运行路径使用内存 store。文件系统 store 只能在调用方显式传入根目录时使用；当前 demo 和默认测试不得创建 repo-root `.agentarbor/` 运行资产。
+
 ## GrowthPlan 必填内容
 
 - `goal`：目标摘要。

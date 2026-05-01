@@ -7,11 +7,13 @@ AgentArbor 的 Agent 集群依附于原生概念树，而不是独立漂浮的�
 ```text
 Soil
   -> Underground Center
-      -> Goal Framer
-      -> Constraint Framer
-      -> Evidence Explorer
-      -> Direction Critic
-      -> Direction Synthesizer
+      -> Intent Core
+      -> Growth Governor
+      -> Constraint Sentinel
+      -> Evidence Ledger
+      -> Convergence Judge
+      -> Handoff Steward
+      -> Radial Exploration Clusters
   -> .agentarbor
   -> Aboveground Center
       -> Growth Planner
@@ -36,13 +38,16 @@ Soil
 | 类型 | 位置 | 自由度 | 目的 |
 | --- | --- | --- | --- |
 | 固定核心集群 | Underground Center、Aboveground Center、Governance | 低 | 抵抗单点认知失败，保证方向、计划、验证和入土裁决稳定 |
+| 临时探索根须集群 | Underground Center | 中 | 围绕方向成形发散探索、反驳、补证据和评估资产适配 |
 | 动态任务集群 | Aboveground Growth | 高 | 扩展执行、协作、竞争验证和局部问题解决能力 |
 
-原则是：越靠近执行，集群越动态；越靠近方向、计划和治理，集群越固定、低自由度、强验证。
+原则是：中枢能力必须稳定，临时集群必须有预算和退场条件；越靠近执行，集群越动态；越靠近方向、计划和治理，集群越固定、低自由度、强验证。
 
 ## Underground Center
 
-地下中枢负责需求成形、证据探索和方向综合。它可以包含多个探索 agent，但交付物必须收敛为 `.agentarbor` 方向交接包。
+地下中枢负责需求成形、证据探索、方向综合、反驳和养料供给。它可以生成临时探索根须集群，但交付物必须收敛为 `.agentarbor` 方向交接包、Nutrient Patch、用户升级确认或停止依据。
+
+单个探索 agent、单个根须 agent 或单个临时根须集群只产出候选材料。它们的输出只能作为 `Observation`、`Evidence Candidate` 或 `Claim Candidate`，不能直接成为 Direction Handoff、Nutrient Patch、ConstraintRef、风险裁决或其他正式交接材料。对应 cluster lead、Convergence Judge 或 Handoff Steward 必须先完成交叉校验、去重、来源归因和冲突裁决。
 
 地下中枢不调度地上执行，不创建长期资产，不让候选约束自动变成 hard constraint。
 

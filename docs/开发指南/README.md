@@ -4,7 +4,7 @@
 
 开发指南不是过程归档、版本路线图或会议纪要。它只写稳定结论、工程边界和可执行契约。
 
-当前产品架构事实源是 [ADR-0018-AgentArbor原生概念树架构](../架构设计/产品架构/ADR-0018-AgentArbor原生概念树架构.md)。本指南只承接该 ADR 的当前结论；其他 ADR 和研究资料只作为背景输入。
+当前产品架构事实源是 [ADR-0018-AgentArbor原生概念树架构](../架构设计/产品架构/ADR-0018-AgentArbor原生概念树架构.md)。本指南只承接该 ADR 的当前结论；被产品架构索引标记为当前决策的 ADR 可作为 ADR-0018 的下位细化，研究资料只作为背景输入。
 
 ## 阅读顺序
 
@@ -19,8 +19,6 @@
 ## 一句话定位
 
 AgentArbor 是目标驱动的智能体 / 智能体应用（AgentApp）孕育与演化平台。它以 `Soil -> Underground Center -> .agentarbor -> Aboveground Center -> Fruits -> Governance -> Soil` 为原生概念树：土壤保存长期事实和能力资产，地下中枢完成需求成形、约束提取、证据探索和方向综合，`.agentarbor` 承担方向交接，地上中枢制定 Growth Plan、Workflow IR、执行组织、验证门和修订机制，果实经过治理后才允许回流土壤。
-
-## 方向校正
 
 ## 架构原则
 

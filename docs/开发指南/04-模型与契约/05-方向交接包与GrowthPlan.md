@@ -22,6 +22,8 @@ Direction Handoff 只表达方向、证据、约束和升级条件，不直接�
 - `constraintRefs`：目标、权限、时间、技术和治理约束的引用。自然语言说明只能解释背景，不能替代可执行约束源。
 - `risks`：执行和交付风险。
 - `options`：可选方向。
+- `decisionRecord`：方向保留、合并、淘汰、用户确认和备选方向的裁决记录。
+- `riskRegister`：风险、反驳、失败模式和阻断项。
 - `recommendedOptionId`：地下中枢推荐方向。
 - `growthEntry`：地上中枢可接管的入口、运行形态建议和升级条件。
 

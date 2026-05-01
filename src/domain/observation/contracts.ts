@@ -22,6 +22,10 @@ import type {
   UndergroundCenterRole,
   UndergroundConvergenceOutcome,
   UndergroundExplorationReport,
+  UserClarificationQuestion,
+  UserClarificationReason,
+  UserClarificationRequest,
+  UserClarificationStatus,
 } from "../underground/index.js";
 
 export type RunPhase =
@@ -122,6 +126,7 @@ export type ObservationRef = {
     | "candidate"
     | "candidate_pool"
     | "convergence_review"
+    | "user_clarification"
     | "verification"
     | "fruit"
     | "run_memory"
@@ -258,11 +263,25 @@ export type RunObservationUndergroundView = {
     readonly budgetExhausted: boolean;
     readonly stopReason?: string;
     readonly handoffCandidateRefs: readonly string[];
+    readonly openQuestions: readonly {
+      readonly candidateId: string;
+      readonly reason: UserClarificationReason;
+      readonly question: string;
+      readonly blockingLevel: "blocking" | "non_blocking";
+      readonly disposition: "request_user_clarification" | "remain_open";
+      readonly evidenceRefs: readonly string[];
+    }[];
   };
   readonly userEscalationRequired: boolean;
   readonly userEscalation: {
     readonly required: boolean;
-    readonly reason?: string;
+    readonly reason?: UserClarificationReason;
+    readonly blockingLevel?: UserClarificationRequest["blockingLevel"];
+    readonly requestId?: string;
+    readonly status?: UserClarificationStatus;
+    readonly relatedCandidateRefs: readonly string[];
+    readonly questions: readonly UserClarificationQuestion[];
+    readonly request?: UserClarificationRequest;
   };
 };
 

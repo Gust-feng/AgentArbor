@@ -103,12 +103,13 @@ function createUndergroundView(
       budgetExhausted: report.convergenceReport.budgetExhausted,
       stopReason: report.convergenceReport.stopReason,
       handoffCandidateRefs: [...report.convergenceReport.handoffCandidateRefs],
+      openQuestions: report.convergenceReport.openQuestions.map((question) => ({
+        ...question,
+        evidenceRefs: [...question.evidenceRefs],
+      })),
     },
     userEscalationRequired: report.convergenceReport.userEscalationRequired,
-    userEscalation: {
-      required: report.convergenceReport.userEscalationRequired,
-      reason: report.convergenceReport.stopReason,
-    },
+    userEscalation: createUserEscalationView(report),
   };
 }
 
@@ -198,19 +199,53 @@ function statusForHandoffPackage(
   status: RunObservationSnapshotInput["directionHandoffPackage"]["manifest"]["status"],
   validationPassed: boolean
 ): ObservationStatus {
+  if (status === "awaiting_user") {
+    return "pending";
+  }
   if (!validationPassed) {
     return "failed";
   }
   if (status === "approved") {
     return "completed";
   }
-  if (status === "awaiting_user") {
-    return "pending";
-  }
   if (status === "superseded") {
     return "skipped";
   }
   return "in_progress";
+}
+
+function createUserEscalationView(
+  report: RunObservationSnapshotInput["undergroundReport"]
+): RunObservationUndergroundView["userEscalation"] {
+  const request = report.convergenceReport.userClarificationRequest;
+  if (request === undefined) {
+    return {
+      required: false,
+      relatedCandidateRefs: [],
+      questions: [],
+    };
+  }
+
+  return {
+    required: true,
+    reason: request.primaryReason,
+    blockingLevel: request.blockingLevel,
+    requestId: request.requestId,
+    status: request.status,
+    relatedCandidateRefs: [...request.relatedCandidateRefs],
+    questions: request.questions.map((question) => ({
+      ...question,
+      relatedCandidateRefs: [...question.relatedCandidateRefs],
+    })),
+    request: {
+      ...request,
+      relatedCandidateRefs: [...request.relatedCandidateRefs],
+      questions: request.questions.map((question) => ({
+        ...question,
+        relatedCandidateRefs: [...question.relatedCandidateRefs],
+      })),
+    },
+  };
 }
 
 function statusForFruits(input: RunObservationSnapshotInput): ObservationStatus {

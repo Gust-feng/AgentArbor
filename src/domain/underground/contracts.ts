@@ -1,5 +1,6 @@
 import type { RuntimeShape } from "../common.js";
 import type { ConstraintRef } from "../constraints.js";
+import type { OpenQuestionDisposition, UserClarificationRequest } from "./clarification.js";
 
 export type DirectionOption = {
   optionId: string;
@@ -45,6 +46,13 @@ export type ExplorationCandidateRef = {
   status: "candidate" | "accepted" | "merged" | "rejected" | "unknown";
 };
 
+export type ConvergenceReviewOutcome = "approved" | "awaiting_user" | "stopped";
+
+export type ConvergenceStopReason =
+  | "budget_exhausted_without_converged_candidates"
+  | "no_converged_candidates"
+  | "requires_user_clarification";
+
 export type ConvergenceReview = {
   reviewId: string;
   reviewedByAgentIds: string[];
@@ -52,9 +60,18 @@ export type ConvergenceReview = {
   crossCheckedCandidateRefs: string[];
   deduplicatedCandidateRefs: string[];
   acceptedCandidateRefs: string[];
+  mergedCandidateRefs?: string[];
   rejectedCandidateRefs: string[];
+  unknownCandidateRefs?: string[];
   conflictResolutionRefs: string[];
   provenanceRefs: string[];
+  outcome?: ConvergenceReviewOutcome;
+  userEscalationRequired?: boolean;
+  userClarificationRequest?: UserClarificationRequest;
+  openQuestions?: OpenQuestionDisposition[];
+  budgetExhausted?: boolean;
+  stopReason?: ConvergenceStopReason;
+  handoffCandidateRefs?: string[];
 };
 
 export type DirectionHandoff = {

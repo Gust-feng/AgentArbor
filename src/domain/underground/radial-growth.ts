@@ -1,4 +1,12 @@
 import type { ConstraintRef } from "../constraints.js";
+import type { ConvergenceReviewOutcome, ConvergenceStopReason } from "./contracts.js";
+import {
+  classifyUnknownsForClarification,
+  cloneOpenQuestionDisposition,
+  cloneUserClarificationRequest,
+  type OpenQuestionDisposition,
+  type UserClarificationRequest,
+} from "./clarification.js";
 import type { ExplorationCandidateRef } from "./contracts.js";
 
 export const UNDERGROUND_CENTER_ROLES = [
@@ -100,7 +108,7 @@ export type CandidateConvergenceDecision = {
   provenanceRefs: string[];
 };
 
-export type UndergroundConvergenceOutcome = "approved" | "awaiting_user" | "stopped";
+export type UndergroundConvergenceOutcome = ConvergenceReviewOutcome;
 
 export type UndergroundConvergenceReport = {
   reviewId: string;
@@ -118,8 +126,10 @@ export type UndergroundConvergenceReport = {
   summary: string;
   outcome: UndergroundConvergenceOutcome;
   userEscalationRequired: boolean;
+  userClarificationRequest?: UserClarificationRequest;
+  openQuestions: OpenQuestionDisposition[];
   budgetExhausted: boolean;
-  stopReason?: "budget_exhausted_without_converged_candidates" | "requires_user_clarification";
+  stopReason?: ConvergenceStopReason;
   handoffCandidateRefs: string[];
 };
 
@@ -200,17 +210,29 @@ export function createUndergroundConvergenceReport(input: {
   provenanceRefs: string[];
   budget: ExplorationBudget;
   summary: string;
+  openQuestionDispositions?: readonly OpenQuestionDisposition[];
+  userClarificationRequestId?: string;
+  createdAt?: string;
 }): UndergroundConvergenceReport {
   assertDecisionRefs(input.candidatePool, input.decisions);
   const acceptedCandidateRefs = refsByStatus(input.decisions, "accepted");
   const mergedCandidateRefs = refsByStatus(input.decisions, "merged");
   const rejectedCandidateRefs = refsByStatus(input.decisions, "rejected");
   const unknownCandidateRefs = refsByStatus(input.decisions, "unknown");
-  const userEscalationRequired = unknownCandidateRefs.length > 0;
+  const clarificationClassification = classifyUnknownsForClarification({
+    goalId: input.candidatePool.goalId,
+    unknownCandidateRefs,
+    dispositions: input.openQuestionDispositions,
+    requestId: input.userClarificationRequestId ?? `${input.reviewId}:user-clarification`,
+    createdAt: input.createdAt ?? input.candidatePool.updatedAt,
+  });
+  const userClarificationRequest = clarificationClassification.userClarificationRequest;
+  const userEscalationRequired = userClarificationRequest !== undefined;
   const outcome = resolveConvergenceOutcome({
     acceptedCandidateRefs,
     mergedCandidateRefs,
     unknownCandidateRefs,
+    blockingClarificationRefs: userClarificationRequest?.relatedCandidateRefs ?? [],
     budget: input.budget,
   });
 
@@ -230,6 +252,9 @@ export function createUndergroundConvergenceReport(input: {
     summary: input.summary,
     outcome: outcome.outcome,
     userEscalationRequired,
+    userClarificationRequest:
+      userClarificationRequest === undefined ? undefined : cloneUserClarificationRequest(userClarificationRequest),
+    openQuestions: clarificationClassification.openQuestions.map(cloneOpenQuestionDisposition),
     budgetExhausted: input.budget.exhausted,
     stopReason: outcome.stopReason,
     handoffCandidateRefs: [...acceptedCandidateRefs, ...mergedCandidateRefs],
@@ -240,21 +265,22 @@ export function resolveConvergenceOutcome(input: {
   acceptedCandidateRefs: readonly string[];
   mergedCandidateRefs: readonly string[];
   unknownCandidateRefs: readonly string[];
+  blockingClarificationRefs?: readonly string[];
   budget: ExplorationBudget;
 }): Pick<UndergroundConvergenceReport, "outcome" | "stopReason"> {
-  if (input.acceptedCandidateRefs.length + input.mergedCandidateRefs.length > 0) {
-    return { outcome: "approved" };
+  if ((input.blockingClarificationRefs?.length ?? 0) > 0) {
+    return { outcome: "awaiting_user", stopReason: "requires_user_clarification" };
   }
 
-  if (input.unknownCandidateRefs.length > 0) {
-    return { outcome: "awaiting_user", stopReason: "requires_user_clarification" };
+  if (input.acceptedCandidateRefs.length + input.mergedCandidateRefs.length > 0) {
+    return { outcome: "approved" };
   }
 
   if (input.budget.exhausted) {
     return { outcome: "stopped", stopReason: "budget_exhausted_without_converged_candidates" };
   }
 
-  return { outcome: "awaiting_user", stopReason: "requires_user_clarification" };
+  return { outcome: "stopped", stopReason: "no_converged_candidates" };
 }
 
 export function selectHandoffSourceCandidates(

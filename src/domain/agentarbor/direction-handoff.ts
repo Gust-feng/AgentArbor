@@ -51,6 +51,8 @@ export function assertDirectionHandoffConverged(
       summary: report.summary ?? "",
       outcome: report.outcome ?? "approved",
       userEscalationRequired: report.userEscalationRequired ?? false,
+      userClarificationRequest: report.userClarificationRequest,
+      openQuestions: report.openQuestions ?? [],
       budgetExhausted: report.budgetExhausted ?? false,
       stopReason: report.stopReason,
       handoffCandidateRefs,

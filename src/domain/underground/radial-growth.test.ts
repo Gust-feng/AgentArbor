@@ -4,6 +4,7 @@ import {
   applyCandidateConvergenceDecisions,
   assertHandoffSourceCandidates,
   createCandidatePool,
+  createOpenQuestionDisposition,
   createUndergroundConvergenceReport,
   resolveConvergenceOutcome,
   UndergroundConvergenceError,
@@ -96,6 +97,7 @@ test("budget exhaustion resolves to approved, awaiting_user, or stopped with a r
       acceptedCandidateRefs: [],
       mergedCandidateRefs: [],
       unknownCandidateRefs: ["candidate-needs-user"],
+      blockingClarificationRefs: ["candidate-needs-user"],
       budget: exhausted,
     }),
     { outcome: "awaiting_user", stopReason: "requires_user_clarification" }
@@ -109,6 +111,144 @@ test("budget exhaustion resolves to approved, awaiting_user, or stopped with a r
     }),
     { outcome: "stopped", stopReason: "budget_exhausted_without_converged_candidates" }
   );
+});
+
+test("non-blocking unknown without handoff candidates stops when budget is exhausted", () => {
+  const output = makeRootletOutput("output-risk", "rootlet-risk");
+  const candidate = makeCandidate("candidate-open-only", output);
+  const pool = createCandidatePool({
+    poolId: "pool-open-only",
+    goalId: "goal-open-only",
+    rootletOutputs: [output],
+    candidates: [candidate],
+    updatedAt: "2026-05-01T00:00:00.000Z",
+  });
+  const decisions: CandidateConvergenceDecision[] = [
+    makeDecision("decision-open-only", candidate.id, "unknown"),
+  ];
+  const convergedPool = applyCandidateConvergenceDecisions(pool, decisions, "2026-05-01T00:00:01.000Z");
+  const report = createUndergroundConvergenceReport({
+    reviewId: "review-open-only",
+    reviewedByAgentIds: ["underground-analyzer"],
+    leadAgentId: "underground-analyzer",
+    candidatePool: convergedPool,
+    decisions,
+    provenanceRefs: ["candidate_pool.updated"],
+    budget: { ...BASE_BUDGET, exhausted: true },
+    summary: "non-blocking unknown without handoff candidates",
+    openQuestionDispositions: [
+      createOpenQuestionDisposition({
+        candidateId: candidate.id,
+        reason: "critical_fact_missing",
+        question: "This question remains open and cannot approve a handoff candidate.",
+        blockingLevel: "non_blocking",
+      }),
+    ],
+    createdAt: "2026-05-01T00:00:02.000Z",
+  });
+
+  assert.equal(report.outcome, "stopped");
+  assert.equal(report.stopReason, "budget_exhausted_without_converged_candidates");
+  assert.equal(report.userEscalationRequired, false);
+  assert.equal(report.userClarificationRequest, undefined);
+  assert.equal(report.openQuestions[0]?.disposition, "remain_open");
+  assert.deepEqual(report.handoffCandidateRefs, []);
+});
+
+test("blocking unknown candidate creates a user clarification request", () => {
+  const outputs = [
+    makeRootletOutput("output-a", "rootlet-option"),
+    makeRootletOutput("output-b", "rootlet-constraint"),
+  ];
+  const candidates = outputs.map((output, index) => makeCandidate(`candidate-${index + 1}`, output));
+  const pool = createCandidatePool({
+    poolId: "pool-blocking",
+    goalId: "goal-blocking",
+    rootletOutputs: outputs,
+    candidates,
+    updatedAt: "2026-05-01T00:00:00.000Z",
+  });
+  const decisions: CandidateConvergenceDecision[] = [
+    makeDecision("decision-a", "candidate-1", "accepted"),
+    makeDecision("decision-b", "candidate-2", "unknown"),
+  ];
+  const convergedPool = applyCandidateConvergenceDecisions(pool, decisions, "2026-05-01T00:00:01.000Z");
+  const report = createUndergroundConvergenceReport({
+    reviewId: "review-blocking",
+    reviewedByAgentIds: ["underground-analyzer"],
+    leadAgentId: "underground-analyzer",
+    candidatePool: convergedPool,
+    decisions,
+    provenanceRefs: ["candidate_pool.updated"],
+    budget: BASE_BUDGET,
+    summary: "blocking unknown test",
+    openQuestionDispositions: [
+      createOpenQuestionDisposition({
+        candidateId: "candidate-2",
+        reason: "hard_constraint_unclear",
+        question: "Which hard constraint applies before this direction can be approved?",
+        blockingLevel: "blocking",
+      }),
+    ],
+    userClarificationRequestId: "clarification-blocking",
+    createdAt: "2026-05-01T00:00:02.000Z",
+  });
+
+  assert.equal(report.outcome, "awaiting_user");
+  assert.equal(report.userEscalationRequired, true);
+  assert.equal(report.userClarificationRequest?.requestId, "clarification-blocking");
+  assert.equal(report.userClarificationRequest?.primaryReason, "hard_constraint_unclear");
+  assert.deepEqual(report.userClarificationRequest?.relatedCandidateRefs, ["candidate-2"]);
+  assert.equal(report.userClarificationRequest?.questions[0]?.blocking, true);
+  assert.deepEqual(report.handoffCandidateRefs, ["candidate-1"]);
+});
+
+test("non-blocking unknown remains an open question without entering handoff candidates", () => {
+  const outputs = [
+    makeRootletOutput("output-a", "rootlet-option"),
+    makeRootletOutput("output-b", "rootlet-risk"),
+  ];
+  const candidates = outputs.map((output, index) => makeCandidate(`candidate-${index + 1}`, output));
+  const pool = createCandidatePool({
+    poolId: "pool-open-question",
+    goalId: "goal-open-question",
+    rootletOutputs: outputs,
+    candidates,
+    updatedAt: "2026-05-01T00:00:00.000Z",
+  });
+  const decisions: CandidateConvergenceDecision[] = [
+    makeDecision("decision-a", "candidate-1", "accepted"),
+    makeDecision("decision-b", "candidate-2", "unknown"),
+  ];
+  const convergedPool = applyCandidateConvergenceDecisions(pool, decisions, "2026-05-01T00:00:01.000Z");
+  const report = createUndergroundConvergenceReport({
+    reviewId: "review-open-question",
+    reviewedByAgentIds: ["underground-analyzer"],
+    leadAgentId: "underground-analyzer",
+    candidatePool: convergedPool,
+    decisions,
+    provenanceRefs: ["candidate_pool.updated"],
+    budget: BASE_BUDGET,
+    summary: "non-blocking unknown test",
+    openQuestionDispositions: [
+      createOpenQuestionDisposition({
+        candidateId: "candidate-2",
+        reason: "critical_fact_missing",
+        question: "This fact can remain open for later evidence enrichment.",
+        blockingLevel: "non_blocking",
+      }),
+    ],
+    userClarificationRequestId: "clarification-non-blocking",
+    createdAt: "2026-05-01T00:00:02.000Z",
+  });
+
+  assert.equal(report.outcome, "approved");
+  assert.equal(report.userEscalationRequired, false);
+  assert.equal(report.userClarificationRequest, undefined);
+  assert.equal(report.openQuestions[0]?.disposition, "remain_open");
+  assert.equal(report.openQuestions[0]?.blockingLevel, "non_blocking");
+  assert.deepEqual(report.handoffCandidateRefs, ["candidate-1"]);
+  assert.equal(report.handoffCandidateRefs.includes("candidate-2"), false);
 });
 
 function makeRootletOutput(outputId: string, clusterId: string): RootletOutput {
@@ -171,6 +311,7 @@ function createReport(accepted: string[], merged: string[]) {
     summary: "test report",
     outcome: "approved" as const,
     userEscalationRequired: false,
+    openQuestions: [],
     budgetExhausted: false,
     handoffCandidateRefs: [...accepted, ...merged],
   };

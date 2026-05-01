@@ -176,6 +176,7 @@ function refsForEvent(entry: RunObservationEventEntry): ObservationRef[] {
   pushObjectIdRef(refs, payload, "pathBias", "path_bias");
   pushPackageRef(refs, payload);
   pushConvergenceRef(refs, payload);
+  pushClarificationRequestRef(refs, payload);
   pushCandidatePoolRef(refs, payload);
   pushRootletRefs(refs, payload);
 
@@ -228,6 +229,13 @@ function pushConvergenceRef(refs: ObservationRef[], payload: Readonly<Record<str
   const convergenceReport = asRecord(payload.convergenceReport);
   if (typeof convergenceReport.reviewId === "string") {
     refs.push({ kind: "convergence_review", id: convergenceReport.reviewId });
+  }
+}
+
+function pushClarificationRequestRef(refs: ObservationRef[], payload: Readonly<Record<string, unknown>>): void {
+  const clarificationRequest = asRecord(payload.clarificationRequest);
+  if (typeof clarificationRequest.requestId === "string") {
+    refs.push({ kind: "user_clarification", id: clarificationRequest.requestId });
   }
 }
 

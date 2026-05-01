@@ -1,5 +1,6 @@
 export * from "./common.js";
 export * from "./constraints.js";
+export * from "./underground/clarification.js";
 export * from "./underground/contracts.js";
 export * from "./underground/radial-growth.js";
 export * from "./agentarbor/direction-handoff-package/contracts.js";

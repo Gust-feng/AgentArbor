@@ -2,6 +2,7 @@ import { existsSync, readdirSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createRunObservationEventViews, resolveRunObservationPosition } from "../domain/observation/index.js";
 import { EXPECTED_DEMO_EVENTS, runMinimalLoop } from "./minimal-loop.js";
 
 test("runs the fixed minimal event sequence in order", () => {
@@ -61,7 +62,11 @@ test("RunObservationSnapshot is serializable and reflects underground state", ()
   assert.deepEqual(parsed, result.observationSnapshot);
   assert.equal(parsed.traceId, result.runtime.eventLog.list()[0]?.message.traceId);
   assert.equal(parsed.currentPhase, "completed");
+  assert.equal(parsed.currentStage, "path_bias_suggested");
   assert.equal(parsed.eventCursor.eventCount, EXPECTED_DEMO_EVENTS.length);
+  assert.equal(parsed.handoff.status, "completed");
+  assert.equal(parsed.handoff.packageId, result.loadedDirectionHandoffPackage.manifest.packageId);
+  assert.equal(parsed.handoff.validationPassed, true);
   assert.equal(parsed.underground.candidatePool.total, 6);
   assert.equal(parsed.underground.candidatePool.accepted, 2);
   assert.equal(parsed.underground.candidatePool.merged, 2);
@@ -71,6 +76,101 @@ test("RunObservationSnapshot is serializable and reflects underground state", ()
   assert.equal(parsed.aboveground.taskStatus, "Assigned");
   assert.equal(parsed.verification.status, "passed");
   assert.equal(parsed.governance.pathBiasId, result.pathBias.id);
+  assert.equal(parsed.soilReturnStub.pathBiasId, result.pathBias.id);
+});
+
+test("RunObservationSnapshot phase and stage are derived from the EventLog cursor", () => {
+  const result = runMinimalLoop();
+  const entries = result.runtime.eventLog.list();
+
+  assert.deepEqual(resolveRunObservationPosition([]), {
+    currentPhase: "not_started",
+    currentStage: "not_started",
+  });
+  assert.deepEqual(resolveRunObservationPosition(entries.slice(0, 7)), {
+    currentPhase: "handoff",
+    currentStage: "direction_handoff_completed",
+  });
+  assert.deepEqual(resolveRunObservationPosition(entries), {
+    currentPhase: "completed",
+    currentStage: "path_bias_suggested",
+  });
+});
+
+test("RunObservationEventView adds frontend-readable metadata from EventLog entries only", () => {
+  const result = runMinimalLoop();
+  const eventViews = createRunObservationEventViews(result.runtime.eventLog.list());
+  const firstEvent = eventViews[0];
+  const handoffEvent = eventViews.find((event) => event.type === "direction_handoff.completed");
+  const artifactEvent = eventViews.find((event) => event.type === "artifact.produced");
+
+  assert.equal(eventViews.length, EXPECTED_DEMO_EVENTS.length);
+  assert.equal(firstEvent?.summary, "User goal entered the runtime.");
+  assert.equal(firstEvent?.scope, "soil");
+  assert.equal(firstEvent?.severity, "info");
+  assert.equal(firstEvent?.progress.status, "completed");
+  assert.equal(firstEvent?.progress.step, 1);
+  assert.equal(firstEvent?.progress.total, EXPECTED_DEMO_EVENTS.length);
+  assert.equal(firstEvent?.refs.some((ref) => ref.kind === "goal" && ref.id === result.observationSnapshot.goalId), true);
+  assert.equal(handoffEvent?.scope, "handoff");
+  assert.equal(
+    handoffEvent?.refs.some(
+      (ref) =>
+        ref.kind === "direction_package" && ref.id === result.loadedDirectionHandoffPackage.manifest.packageId
+    ),
+    true
+  );
+  assert.equal(
+    artifactEvent?.refs.some(
+      (ref) => ref.kind === "artifact" && ref.id === result.artifact.ref.id && ref.version === result.artifact.ref.version
+    ),
+    true
+  );
+});
+
+test("RunObservationSnapshot exposes every underground rootlet, candidate, and convergence decision", () => {
+  const result = runMinimalLoop();
+  const underground = result.observationSnapshot.underground;
+
+  assert.equal(underground.rootletClusters.length, result.undergroundReport.plan.rootletClusters.length);
+  assert.equal(underground.rootletOutputs.length, result.undergroundReport.rootletOutputs.length);
+  assert.equal(underground.candidatePool.candidates.length, result.undergroundReport.candidatePool.candidates.length);
+  assert.equal(underground.convergence.decisions.length, result.undergroundReport.convergenceReport.decisions.length);
+  assert.deepEqual(
+    underground.rootletClusters.map((cluster) => cluster.clusterId),
+    result.undergroundReport.plan.rootletClusters.map((cluster) => cluster.clusterId)
+  );
+  assert.deepEqual(
+    underground.candidatePool.candidates.map((candidate) => candidate.id),
+    result.undergroundReport.candidatePool.candidates.map((candidate) => candidate.id)
+  );
+  assert.deepEqual(
+    underground.convergence.decisions.map((decision) => decision.decisionId),
+    result.undergroundReport.convergenceReport.decisions.map((decision) => decision.decisionId)
+  );
+  assert.deepEqual(
+    underground.convergence.handoffCandidateRefs,
+    result.undergroundReport.convergenceReport.handoffCandidateRefs
+  );
+});
+
+test("Observation Kernel preserves handoff, aboveground load, and fixed EventLog regressions", () => {
+  const result = runMinimalLoop();
+  const snapshot = result.observationSnapshot;
+
+  assert.deepEqual(result.eventTypes, EXPECTED_DEMO_EVENTS);
+  assert.equal(snapshot.handoff.directionId, result.loadedDirectionHandoffPackage.manifest.directionId);
+  assert.equal(snapshot.handoff.version, result.loadedDirectionHandoffPackage.manifest.directionVersion);
+  assert.deepEqual(
+    snapshot.handoff.sourceCandidateRefs,
+    result.directionHandoff.sourceCandidateRefs.map((candidate) => candidate.id)
+  );
+  assert.equal(snapshot.aboveground.status, "completed");
+  assert.equal(snapshot.aboveground.growthPlanId, result.growthPlan.id);
+  assert.equal(snapshot.aboveground.workflowId, result.workflow.id);
+  assert.equal(snapshot.aboveground.taskId, result.task.id);
+  assert.equal(snapshot.fruits.verification.reportId, result.verification.id);
+  assert.equal(snapshot.governance.status, "completed");
 });
 
 test("default demo path keeps DirectionHandoffPackage in memory and does not create repo-root .agentarbor assets", () => {

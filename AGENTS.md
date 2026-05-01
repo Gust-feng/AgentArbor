@@ -67,7 +67,7 @@ Soil -> Underground Center -> .agentarbor -> Aboveground Center -> Fruits -> Gov
 - `.opencode/`：OpenCode 开发适配层。
 - `.claude/`：Claude Code 开发适配层。
 - `.agentarbor/`：未来 AgentArbor 原生方向交接包目录，负责从地下中枢向地上中枢传递方向、约束、证据和 Growth Entry；不保存最终资产，不替代 Soil。只有契约稳定、有真实出生依据时才增量创建。
-- `src/`：未来 TypeScript 实现代码。
+- `src/`：AgentArbor TypeScript 实现代码。当前第一阶段只包含确定性最小运行内核、内存版闭环、事件、状态、产物、验证和治理回流。
 
 禁止把这些层混用。平台适配文件不是 AgentArbor 原生产品事实源，未来运行时资产也不能替代当前开发文档。
 
@@ -91,9 +91,9 @@ Soil -> Underground Center -> .agentarbor -> Aboveground Center -> Fruits -> Gov
 
 ## 开发边界
 
-- 当前仓库尚未进入运行时代码实现阶段。
-- 不引入包管理器、构建系统、运行时代码或测试框架，除非用户明确要求进入实现。
-- 未来实现以 TypeScript 自研架构为主。
+- 当前仓库已进入第一阶段运行时代码实现。根目录工具链使用 `pnpm + TypeScript + tsc + node:test`，当前代码范围限制为确定性最小运行内核。
+- 不引入新的包管理器、构建系统、运行时代码框架或测试框架，除非用户明确要求扩展实现阶段。
+- 实现以 TypeScript 自研架构为主。
 - 外部模型、工具、协议和平台通过 adapter 接入，不能反向污染核心领域模型。
 - `.agentarbor/` 不提前填充占位 agent、workflow、memory 或 schema；方向交接包也必须等契约稳定和真实任务出生后再增量创建。
 - 新增或修改 Codex skill 时，只改 `.agents/skills/`，并遵守 Agent Skills 标准。

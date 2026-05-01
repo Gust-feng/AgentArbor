@@ -2,7 +2,7 @@
 
 AgentArbor 是目标驱动的 Agent / AgentApp 孕育与演化平台。它以 `Soil -> Underground Center -> .agentarbor -> Aboveground Center -> Fruits -> Governance -> Soil` 为原生概念树：土壤保存长期事实和能力资产，地下中枢把用户想象、约束、证据和方向成形为 `.agentarbor` 方向交接包，地上中枢把交接包转为 Growth Plan、Workflow IR、执行组织和验证门，果实经过治理后才允许回流土壤。当前产品架构事实源是 [ADR-0018-AgentArbor原生概念树架构](docs/架构设计/产品架构/ADR-0018-AgentArbor原生概念树架构.md)。
 
-当前仓库处于正式开发准备阶段，尚未包含运行时代码。开发前请先阅读 [docs/README.md](docs/README.md)、[开发指南](docs/开发指南/README.md) 和 [任务看板](docs/任务看板/README.md)。
+当前仓库已进入第一阶段确定性最小运行内核实现，运行时代码仍限制在内存版闭环、事件、状态、产物、验证和治理回流范围内。开发前请先阅读 [docs/README.md](docs/README.md)、[开发指南](docs/开发指南/README.md) 和 [任务看板](docs/任务看板/README.md)。
 
 ## 仓库结构
 
@@ -29,7 +29,7 @@ AgentArbor 是目标驱动的 Agent / AgentApp 孕育与演化平台。它以 `S
 - `.opencode/`：OpenCode 开发适配层。
 - `.claude/`：Claude Code 开发适配层。
 - `.agentarbor/`：未来 AgentArbor 原生方向交接包目录，用于地下中枢向地上中枢传递方向、约束、证据和 Growth Entry；不保存最终资产，不替代 Soil，只有在契约稳定后才增量创建。
-- `src/`：未来 TypeScript 实现代码。
+- `src/`：AgentArbor TypeScript 实现代码。当前只包含第一阶段确定性最小运行内核，不包含真实 LLM、数据库、UI 或外部 adapter。
 
 上述点目录当前默认属于本地开发态工具层，并被 `.gitignore` 忽略。后续如果需要把某些 Trellis 模板、平台适配模板或 AgentArbor 原生运行时资产纳入团队共享基线，必须先明确它们的职责、验证方式和提交范围，再单独调整忽略规则。
 

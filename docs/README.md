@@ -81,7 +81,7 @@ docs/
 - `.opencode/` 保存 OpenCode 开发适配文件。
 - `.claude/` 保存 Claude Code 开发适配文件。
 - `.agentarbor/` 保存未来 AgentArbor 运行时自己的方向交接包，只在契约稳定后增量创建；它不保存最终资产，也不替代 Soil。
-- `src/` 保存未来实现代码。
+- `src/` 保存 AgentArbor TypeScript 实现代码；当前第一阶段只包含确定性最小运行内核。
 
 `docs/开发指南/` 负责当前开发规则。
 

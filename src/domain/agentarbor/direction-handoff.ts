@@ -1,4 +1,4 @@
-import type { ConvergenceReview, DirectionHandoff, ExplorationCandidateRef } from "../contracts.js";
+import type { ConvergenceReview, DirectionHandoff, ExplorationCandidateRef } from "../underground/contracts.js";
 
 export class DirectionHandoffConvergenceError extends Error {
   constructor(message: string) {

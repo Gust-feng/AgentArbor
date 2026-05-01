@@ -1,4 +1,5 @@
-import type { AgentManifest, TaskSpec } from "../../domain/contracts.js";
+import type { AgentManifest } from "../../domain/common.js";
+import type { TaskSpec } from "../../domain/aboveground/contracts.js";
 import type { InMemoryAgentRegistry } from "../registry/in-memory-agent-registry.js";
 
 export class RoutingError extends Error {

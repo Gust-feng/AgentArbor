@@ -33,47 +33,50 @@ export type AgentLayer =
   | "fruits"
   | "governance";
 
-export type ArborMessageType =
-  | "goal.received"
-  | "underground.exploration_planned"
-  | "rootlet_cluster.started"
-  | "exploration_candidate.produced"
-  | "candidate_pool.updated"
-  | "convergence_review.completed"
-  | "direction_handoff.requested"
-  | "direction_handoff.completed"
-  | "direction_handoff.revision_requested"
-  | "user_approval.requested"
-  | "user_approval.received"
-  | "nutrient_request.requested"
-  | "nutrient_patch.supplied"
-  | "growth_plan.requested"
-  | "growth_plan.completed"
-  | "growth_plan.revision_requested"
-  | "growth_plan.revised"
-  | "workflow.created"
-  | "task.created"
-  | "task.assigned"
-  | "task.started"
-  | "task.progress"
-  | "task.blocked"
-  | "task.completed"
-  | "task.failed"
-  | "artifact.produced"
-  | "artifact.updated"
-  | "verification.requested"
-  | "verification.completed"
-  | "verification.failed"
-  | "acceptance.requested"
-  | "acceptance.completed"
-  | "acceptance.rejected"
-  | "fruit.proposed"
-  | "run_memory.captured"
-  | "experience_candidate.proposed"
-  | "path_bias.suggested"
-  | "governance.review.requested"
-  | "governance.review.completed"
-  | "error.raised";
+export const ARBOR_MESSAGE_TYPES = [
+  "goal.received",
+  "underground.exploration_planned",
+  "rootlet_cluster.started",
+  "exploration_candidate.produced",
+  "candidate_pool.updated",
+  "convergence_review.completed",
+  "direction_handoff.requested",
+  "direction_handoff.completed",
+  "direction_handoff.revision_requested",
+  "user_approval.requested",
+  "user_approval.received",
+  "nutrient_request.requested",
+  "nutrient_patch.supplied",
+  "growth_plan.requested",
+  "growth_plan.completed",
+  "growth_plan.revision_requested",
+  "growth_plan.revised",
+  "workflow.created",
+  "task.created",
+  "task.assigned",
+  "task.started",
+  "task.progress",
+  "task.blocked",
+  "task.completed",
+  "task.failed",
+  "artifact.produced",
+  "artifact.updated",
+  "verification.requested",
+  "verification.completed",
+  "verification.failed",
+  "acceptance.requested",
+  "acceptance.completed",
+  "acceptance.rejected",
+  "fruit.proposed",
+  "run_memory.captured",
+  "experience_candidate.proposed",
+  "path_bias.suggested",
+  "governance.review.requested",
+  "governance.review.completed",
+  "error.raised",
+] as const;
+
+export type ArborMessageType = (typeof ARBOR_MESSAGE_TYPES)[number];
 
 export type ArtifactRef = {
   id: string;

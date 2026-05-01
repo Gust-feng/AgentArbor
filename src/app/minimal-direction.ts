@@ -2,17 +2,17 @@ import {
   createApprovedDirectionHandoff,
 } from "../domain/agentarbor/direction-handoff.js";
 import { createDirectionHandoffPackage } from "../domain/agentarbor/direction-handoff-package.js";
+import type { DirectionHandoffPackage } from "../domain/agentarbor/direction-handoff-package/contracts.js";
+import type { Constraint } from "../domain/constraints.js";
 import type {
   CandidatePool,
-  Constraint,
   ConvergenceReview,
   DirectionHandoff,
-  DirectionHandoffPackage,
   DirectionRiskRecord,
   ExplorationCandidateRef,
   UndergroundConvergenceReport,
   UserClarificationRequest,
-} from "../domain/contracts.js";
+} from "../domain/underground/index.js";
 import { selectHandoffSourceCandidates } from "../domain/underground/index.js";
 import { createId, nowIso } from "../kernel/id.js";
 

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { ArborMessage } from "../../domain/contracts.js";
+import type { ArborMessage } from "../../domain/common.js";
 import { createMessage } from "../messages/create-message.js";
 import { InMemoryEventLog, type EventLogEntry } from "./in-memory-event-log.js";
 

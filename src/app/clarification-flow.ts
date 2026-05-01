@@ -1,12 +1,12 @@
 import type {
-  ArborMessageType,
   CandidateConvergenceDecision,
   DirectionHandoff,
-  DirectionHandoffPackage,
-  RunObservationSnapshot,
   UndergroundExplorationReport,
   UserClarificationRequest,
-} from "../domain/contracts.js";
+} from "../domain/underground/index.js";
+import type { DirectionHandoffPackage } from "../domain/agentarbor/direction-handoff-package/contracts.js";
+import type { ArborMessageType } from "../domain/common.js";
+import type { RunObservationSnapshot } from "../domain/observation/contracts.js";
 import { createRunObservationSnapshot } from "../domain/observation/index.js";
 import {
   applyCandidateConvergenceDecisions,
@@ -18,23 +18,12 @@ import {
 import { createId, nowIso } from "../kernel/id.js";
 import { createMessage } from "../kernel/messages/create-message.js";
 import { createAwaitingUserDirectionMaterial } from "./minimal-direction.js";
-import {
-  completeRootletClusters,
-  createMinimalCandidatePool,
-  createMinimalUndergroundExplorationPlan,
-  createUndergroundExplorationReport,
-  produceMinimalRootletOutputs,
-  spendCandidateBudget,
-  startRootletClusters,
-} from "./minimal-underground.js";
 import { createMinimalRuntime, type MinimalRuntime } from "./runtime.js";
 import {
-  publishCandidatePoolUpdated,
-  publishConvergenceReviewCompleted,
-  publishExplorationCandidatesProduced,
-  publishRootletClustersStarted,
-  publishUndergroundExplorationPlanned,
-} from "./underground-events.js";
+  runUndergroundExploration,
+  type UndergroundConvergenceInput,
+  type UndergroundConvergenceResult,
+} from "./underground-runner.js";
 
 export const EXPECTED_CLARIFICATION_REQUIRED_EVENTS: ArborMessageType[] = [
   "goal.received",
@@ -76,72 +65,12 @@ export function runClarificationRequiredUndergroundFlow(
     })
   );
 
-  const plan = createMinimalUndergroundExplorationPlan(goalId);
-  publishUndergroundExplorationPlanned({ runtime, traceId, agentId, plan });
-
-  const startedPlan = startRootletClusters(plan);
-  publishRootletClustersStarted({ runtime, traceId, agentId, plan: startedPlan });
-
-  const rootletOutputs = produceMinimalRootletOutputs({
-    plan: startedPlan,
-    producedByAgentId: agentId,
-    constraints: runtime.constraints,
-  });
-  publishExplorationCandidatesProduced({ runtime, traceId, agentId, rootletOutputs });
-
-  const candidatePool = createMinimalCandidatePool({
-    goalId,
-    producedByAgentId: agentId,
-    rootletOutputs,
-  });
-  publishCandidatePoolUpdated({ runtime, traceId, agentId, candidatePool });
-
-  const completedPlan = spendCandidateBudget(completeRootletClusters(startedPlan), rootletOutputs.length);
-  const decisions = createClarificationRequiredDecisions(candidatePool);
-  const convergedCandidatePool = applyCandidateConvergenceDecisions(candidatePool, decisions, nowIso());
-  const unknownCandidateIds = decisions
-    .filter((decision) => decision.status === "unknown")
-    .map((decision) => decision.candidateId);
-  const convergenceReport = createUndergroundConvergenceReport({
-    reviewId: createId("convergence"),
-    reviewedByAgentIds: [agentId],
-    leadAgentId: agentId,
-    candidatePool: convergedCandidatePool,
-    decisions,
-    provenanceRefs: ["goal.received", "candidate_pool.updated", "soil:minimal-constraints"],
-    budget: {
-      ...completedPlan.budget,
-      spentCandidateOutputs: convergedCandidatePool.candidates.length,
-      exhausted:
-        completedPlan.budget.exhausted &&
-        convergedCandidatePool.candidates.length >= completedPlan.budget.maxCandidateOutputs,
-    },
-    summary: "Minimal radial exploration found a viable direction but requires user clarification before handoff approval.",
-    openQuestionDispositions: unknownCandidateIds.map((candidateId) =>
-      createOpenQuestionDisposition({
-        candidateId,
-        reason: "permission_boundary_unclear",
-        question: "Can Aboveground execution proceed within the current permission boundary?",
-        blockingLevel: "blocking",
-        evidenceRefs: ["AGENTS.md"],
-      })
-    ),
-    userClarificationRequestId: createId("user-clarification"),
-    createdAt: nowIso(),
-  });
-  const undergroundReport = createUndergroundExplorationReport({
-    plan: completedPlan,
-    rootletOutputs,
-    candidatePool: convergedCandidatePool,
-    convergenceReport,
-  });
-  publishConvergenceReviewCompleted({
+  const { candidatePool: convergedCandidatePool, convergenceReport, undergroundReport } = runUndergroundExploration({
     runtime,
     traceId,
+    goalId,
     agentId,
-    convergenceReport,
-    candidatePool: convergedCandidatePool,
-    undergroundReport,
+    converge: createClarificationRequiredConvergence,
   });
 
   const material = createAwaitingUserDirectionMaterial({
@@ -199,6 +128,46 @@ export function runClarificationRequiredUndergroundFlow(
     clarificationRequest: material.clarificationRequest,
     observationSnapshot,
     eventTypes: runtime.eventLog.types(),
+  };
+}
+
+function createClarificationRequiredConvergence(
+  input: UndergroundConvergenceInput
+): UndergroundConvergenceResult {
+  const decisions = createClarificationRequiredDecisions(input.candidatePool);
+  const candidatePool = applyCandidateConvergenceDecisions(input.candidatePool, decisions, nowIso());
+  const unknownCandidateIds = decisions
+    .filter((decision) => decision.status === "unknown")
+    .map((decision) => decision.candidateId);
+
+  return {
+    candidatePool,
+    convergenceReport: createUndergroundConvergenceReport({
+      reviewId: createId("convergence"),
+      reviewedByAgentIds: [input.agentId],
+      leadAgentId: input.agentId,
+      candidatePool,
+      decisions,
+      provenanceRefs: ["goal.received", "candidate_pool.updated", "soil:minimal-constraints"],
+      budget: {
+        ...input.plan.budget,
+        spentCandidateOutputs: candidatePool.candidates.length,
+        exhausted: input.plan.budget.exhausted && candidatePool.candidates.length >= input.plan.budget.maxCandidateOutputs,
+      },
+      summary:
+        "Minimal radial exploration found a viable direction but requires user clarification before handoff approval.",
+      openQuestionDispositions: unknownCandidateIds.map((candidateId) =>
+        createOpenQuestionDisposition({
+          candidateId,
+          reason: "permission_boundary_unclear",
+          question: "Can Aboveground execution proceed within the current permission boundary?",
+          blockingLevel: "blocking",
+          evidenceRefs: ["AGENTS.md"],
+        })
+      ),
+      userClarificationRequestId: createId("user-clarification"),
+      createdAt: nowIso(),
+    }),
   };
 }
 

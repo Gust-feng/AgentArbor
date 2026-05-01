@@ -4,7 +4,7 @@ import {
   createApprovedDirectionHandoff,
   DirectionHandoffConvergenceError,
 } from "./direction-handoff.js";
-import type { ConvergenceReview, ExplorationCandidateRef } from "../contracts.js";
+import type { ConvergenceReview, ExplorationCandidateRef } from "../underground/contracts.js";
 import { minimalDirectionHandoff } from "./test-fixtures.js";
 
 test("rejects a DirectionHandoff that keeps unconverged candidates", () => {

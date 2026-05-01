@@ -2,16 +2,11 @@ import type {
   ArborMessage,
   ArborMessageType,
   ArtifactRef,
-  DirectionHandoffPackage,
-  ExperienceCandidate,
-  FruitCandidate,
-  GrowthPlan,
-  PathBias,
-  RunMemory,
-  TaskSpec,
-  VerificationReport,
-  WorkflowIR,
-} from "../contracts.js";
+} from "../common.js";
+import type { DirectionHandoffPackage } from "../agentarbor/direction-handoff-package/contracts.js";
+import type { GrowthPlan, TaskSpec, WorkflowIR } from "../aboveground/contracts.js";
+import type { ExperienceCandidate, FruitCandidate, PathBias, RunMemory } from "../fruits/contracts.js";
+import type { VerificationReport } from "../governance/contracts.js";
 import type {
   CandidateConvergenceDecision,
   CandidatePoolCounts,

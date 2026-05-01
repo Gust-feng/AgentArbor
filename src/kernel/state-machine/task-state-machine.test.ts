@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { Constraint, DirectionHandoff } from "../../domain/contracts.js";
+import type { GrowthPlan, TaskSpec } from "../../domain/aboveground/contracts.js";
+import type { Constraint } from "../../domain/constraints.js";
+import type { DirectionHandoff } from "../../domain/underground/contracts.js";
 import {
   ConstraintBlockedError,
   StateGuardError,
@@ -8,12 +10,10 @@ import {
   assignTask,
   enterPlanning,
 } from "./task-state-machine.js";
-import { runMinimalLoop } from "../../app/minimal-loop.js";
 
 test("does not enter Planning with an unapproved DirectionHandoff", () => {
-  const result = runMinimalLoop();
   const draftHandoff: DirectionHandoff = {
-    ...result.directionHandoff,
+    ...minimalDirectionHandoff(),
     status: "draft",
   };
 
@@ -21,9 +21,7 @@ test("does not enter Planning with an unapproved DirectionHandoff", () => {
 });
 
 test("does not assign a task without a GrowthPlan", () => {
-  const result = runMinimalLoop();
-
-  assert.throws(() => assignTask(result.task, undefined, result.runtime.constraints), StateGuardError);
+  assert.throws(() => assignTask(minimalTaskSpec(), undefined, [activeHardConstraint()]), StateGuardError);
 });
 
 test("hard constraints block task assignment", () => {
@@ -41,7 +39,10 @@ test("hard constraints block task assignment", () => {
     status: "violated",
   };
 
-  assert.throws(() => runMinimalLoop(undefined, { constraints: [violatedHardConstraint] }), ConstraintBlockedError);
+  assert.throws(
+    () => assignTask(minimalTaskSpec(), minimalGrowthPlan(), [violatedHardConstraint]),
+    ConstraintBlockedError
+  );
 });
 
 test("hard constraints can require user confirmation", () => {
@@ -60,7 +61,7 @@ test("hard constraints can require user confirmation", () => {
   };
 
   assert.throws(
-    () => runMinimalLoop(undefined, { constraints: [unapprovedHardConstraint] }),
+    () => assignTask(minimalTaskSpec(), minimalGrowthPlan(), [unapprovedHardConstraint]),
     UserConfirmationRequiredError
   );
 });
@@ -87,7 +88,7 @@ test("proposed hard constraints block task assignment for non-user conflict poli
     };
 
     assert.throws(
-      () => runMinimalLoop(undefined, { constraints: [proposedHardConstraint] }),
+      () => assignTask(minimalTaskSpec(), minimalGrowthPlan(), [proposedHardConstraint]),
       ConstraintBlockedError,
       `${conflictPolicy} must not default to Assigned while proposed`
     );
@@ -110,7 +111,132 @@ test("governance_review hard constraints require approval before assignment", ()
   };
 
   assert.throws(
-    () => runMinimalLoop(undefined, { constraints: [governanceReviewConstraint] }),
+    () => assignTask(minimalTaskSpec(), minimalGrowthPlan(), [governanceReviewConstraint]),
     ConstraintBlockedError
   );
 });
+
+function minimalDirectionHandoff(): DirectionHandoff {
+  return {
+    id: "direction-test",
+    version: 1,
+    sourceGoalId: "goal-test",
+    rawUserInputRef: "goal.received",
+    clarifiedGoal: "test goal",
+    nonGoals: [],
+    assumptions: [],
+    missingInformation: [],
+    soilRefs: [],
+    evidenceRefs: [],
+    constraintRefs: [],
+    candidateConstraintRefs: [],
+    risks: [],
+    options: [
+      {
+        optionId: "option-test",
+        directionSummary: "test option",
+        supportingEvidenceRefs: [],
+        soilAssetFitRefs: [],
+        constraintImpact: [],
+        riskProfile: [],
+        costProfile: [],
+        unknowns: [],
+        whyNot: [],
+        doNotChooseWhen: [],
+      },
+    ],
+    decisionRecord: {
+      retainedOptionId: "option-test",
+      mergedOptionIds: [],
+      rejectedOptionIds: [],
+      userDecisionRequired: [],
+      abovegroundReferenceOptionIds: ["option-test"],
+      rationaleEvidenceRefs: [],
+      rationaleConstraintRefs: [],
+      rationaleRiskRefs: [],
+    },
+    riskRegister: [],
+    sourceCandidateRefs: [
+      {
+        id: "candidate-test",
+        kind: "claim_candidate",
+        producedByAgentId: "underground-analyzer",
+        clusterId: "rootlet-option",
+        sourceRefs: ["rootlet-output-test"],
+        status: "accepted",
+      },
+    ],
+    convergenceReviewRef: "convergence-test",
+    recommendedOptionId: "option-test",
+    growthEntry: {
+      allowedRuntimeShapes: ["single_agent"],
+      suggestedFirstWorkflowNodes: ["generate"],
+      escalationRules: [],
+    },
+    status: "approved",
+    createdAt: "2026-05-01T00:00:00.000Z",
+    updatedAt: "2026-05-01T00:00:00.000Z",
+  };
+}
+
+function minimalGrowthPlan(): GrowthPlan {
+  return {
+    id: "growth-plan-test",
+    version: 1,
+    goalId: "goal-test",
+    directionHandoffId: "direction-test",
+    directionHandoffVersion: 1,
+    selectedOptionId: "option-test",
+    pathBiasDecision: "none",
+    pathBiasRationale: "test",
+    workflowId: "workflow-test",
+    runtimeShape: "single_agent",
+    tasks: [minimalTaskSpec()],
+    reuseStrategy: [],
+    sedimentationStrategy: [],
+    constraintRefs: [hardConstraintRef()],
+    constraintDistribution: [{ taskId: "task-test", constraintRefs: [hardConstraintRef()] }],
+    verificationGates: ["test"],
+    nutrientRequestTriggers: [],
+    createdAt: "2026-05-01T00:00:00.000Z",
+  };
+}
+
+function minimalTaskSpec(): TaskSpec {
+  return {
+    id: "task-test",
+    goalId: "goal-test",
+    growthPlanId: "growth-plan-test",
+    title: "Test task",
+    description: "A minimal task-state-machine fixture.",
+    requiredCapabilities: ["test"],
+    acceptanceCriteria: ["passes"],
+    constraintRefs: [hardConstraintRef()],
+    status: "Draft",
+    createdAt: "2026-05-01T00:00:00.000Z",
+  };
+}
+
+function hardConstraintRef() {
+  return {
+    constraintId: "constraint-minimal-runtime-only",
+    requiredLevel: "hard" as const,
+    enforcementGate: "task_assignment" as const,
+  };
+}
+
+function activeHardConstraint(): Constraint {
+  return {
+    id: "constraint-minimal-runtime-only",
+    source: "user",
+    type: "scope",
+    level: "hard",
+    statement: "This hard constraint is active for baseline assignment.",
+    owner: "user",
+    appliesTo: ["minimal-runtime-kernel"],
+    evidenceRefs: ["test"],
+    enforcementGate: "task_assignment",
+    conflictPolicy: "block",
+    status: "active",
+  };
+}

@@ -5,9 +5,9 @@ import { createDirectionHandoffPackage } from "./direction-handoff-package.js";
 import type {
   ConvergenceReview,
   DirectionHandoff,
-  DirectionHandoffPackage,
   ExplorationCandidateRef,
-} from "../contracts.js";
+} from "../underground/contracts.js";
+import type { DirectionHandoffPackage } from "./direction-handoff-package/contracts.js";
 
 export function createDirectionHandoffPackageFixture(): {
   candidate: ExplorationCandidateRef;

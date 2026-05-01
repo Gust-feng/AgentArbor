@@ -1,4 +1,4 @@
-import type { ArborMessage, ArborMessageType } from "../../domain/contracts.js";
+import type { ArborMessage, ArborMessageType } from "../../domain/common.js";
 import { nowIso } from "../id.js";
 
 export type EventLogEntry<TPayload = unknown> = {

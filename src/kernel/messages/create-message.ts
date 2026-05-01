@@ -1,4 +1,4 @@
-import type { ArborMessage } from "../../domain/contracts.js";
+import type { ArborMessage } from "../../domain/common.js";
 import { createId, nowIso } from "../id.js";
 
 export type MessageInput<TPayload> = Omit<ArborMessage<TPayload>, "id" | "createdAt"> &

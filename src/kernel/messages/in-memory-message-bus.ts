@@ -1,4 +1,4 @@
-import type { ArborMessage, ArborMessageType } from "../../domain/contracts.js";
+import type { ArborMessage, ArborMessageType } from "../../domain/common.js";
 import type { InMemoryEventLog } from "../events/in-memory-event-log.js";
 
 type SubscriptionType = ArborMessageType | "*";

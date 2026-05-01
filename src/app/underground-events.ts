@@ -4,7 +4,7 @@ import type {
   UndergroundConvergenceReport,
   UndergroundExplorationPlan,
   UndergroundExplorationReport,
-} from "../domain/contracts.js";
+} from "../domain/underground/index.js";
 import { createMessage } from "../kernel/messages/create-message.js";
 import type { MinimalRuntime } from "./runtime.js";
 

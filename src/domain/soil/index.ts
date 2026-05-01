@@ -1,4 +1,4 @@
-import type { Constraint } from "../contracts.js";
+import type { Constraint } from "../constraints.js";
 
 export function createMinimalSoilConstraints(): Constraint[] {
   return [

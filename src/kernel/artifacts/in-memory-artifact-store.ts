@@ -1,4 +1,4 @@
-import type { ArtifactRef } from "../../domain/contracts.js";
+import type { ArtifactRef } from "../../domain/common.js";
 import { createId, nowIso } from "../id.js";
 
 export type ArtifactRecord = {

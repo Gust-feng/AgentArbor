@@ -1,4 +1,7 @@
-import type { Constraint, ConstraintRef, DirectionHandoff, GrowthPlan, TaskSpec, TaskState } from "../../domain/contracts.js";
+import type { GrowthPlan, TaskSpec } from "../../domain/aboveground/contracts.js";
+import type { Constraint, ConstraintRef } from "../../domain/constraints.js";
+import type { TaskState } from "../../domain/common.js";
+import type { DirectionHandoff } from "../../domain/underground/contracts.js";
 
 export class StateGuardError extends Error {
   constructor(

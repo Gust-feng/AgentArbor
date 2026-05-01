@@ -1,4 +1,4 @@
-import type { AgentManifest } from "../../domain/contracts.js";
+import type { AgentManifest } from "../../domain/common.js";
 
 export class AgentRegistryError extends Error {
   constructor(message: string) {

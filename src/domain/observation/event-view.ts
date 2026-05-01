@@ -1,13 +1,10 @@
-import type { ArborMessageType } from "../contracts.js";
 import type {
   ObservationProgress,
   ObservationRef,
-  ObservationScope,
-  ObservationSeverity,
-  ObservationStatus,
   RunObservationEventEntry,
   RunObservationEventView,
 } from "./contracts.js";
+import { getEventObservationMetadata } from "./event-metadata.js";
 
 export function createRunObservationEventViews(
   entries: readonly RunObservationEventEntry[]
@@ -20,13 +17,14 @@ export function createRunObservationEventView(
   entry: RunObservationEventEntry,
   total?: number
 ): RunObservationEventView {
+  const metadata = getEventObservationMetadata(entry.type);
   return {
     sequence: entry.sequence,
     type: entry.type,
-    summary: summarizeEvent(entry.type),
-    scope: scopeForEvent(entry.type),
-    severity: severityForEvent(entry.type),
-    progress: progressForEvent(entry.type, entry.sequence, total),
+    summary: metadata.summary,
+    scope: metadata.scope,
+    severity: metadata.severity,
+    progress: progressForEvent(metadata.progress, entry.sequence, total),
     refs: refsForEvent(entry),
     traceId: entry.message.traceId,
     taskId: entry.message.taskId,
@@ -38,118 +36,17 @@ export function createRunObservationEventView(
   };
 }
 
-function summarizeEvent(type: ArborMessageType): string {
-  switch (type) {
-    case "goal.received":
-      return "User goal entered the runtime.";
-    case "underground.exploration_planned":
-      return "Underground Center planned bounded radial exploration.";
-    case "rootlet_cluster.started":
-      return "Underground rootlet clusters started.";
-    case "exploration_candidate.produced":
-      return "Rootlets produced exploration candidates.";
-    case "candidate_pool.updated":
-      return "Candidate pool was updated.";
-    case "convergence_review.completed":
-      return "Convergence review judged candidate outcomes.";
-    case "direction_handoff.completed":
-      return "Direction Handoff Package was completed.";
-    case "growth_plan.completed":
-      return "Aboveground Center completed the Growth Plan.";
-    case "workflow.created":
-      return "Workflow IR was created.";
-    case "task.created":
-      return "Executable task was created.";
-    case "task.assigned":
-      return "Task was assigned to an aboveground worker.";
-    case "artifact.produced":
-      return "Worker produced an artifact.";
-    case "verification.completed":
-      return "Verification completed.";
-    case "fruit.proposed":
-      return "Fruit candidate was proposed.";
-    case "governance.review.completed":
-      return "Governance review completed.";
-    case "run_memory.captured":
-      return "Run Memory was captured.";
-    case "experience_candidate.proposed":
-      return "Experience Candidate was proposed.";
-    case "path_bias.suggested":
-      return "Path Bias was suggested for future similar runs.";
-    case "error.raised":
-      return "Runtime raised an error.";
-    default:
-      return humanizeEventType(type);
-  }
-}
-
-function scopeForEvent(type: ArborMessageType): ObservationScope {
-  if (type === "goal.received") {
-    return "soil";
-  }
-  if (
-    type.startsWith("underground.") ||
-    type.startsWith("rootlet_") ||
-    type.startsWith("exploration_candidate") ||
-    type.startsWith("candidate_") ||
-    type.startsWith("convergence_review")
-  ) {
-    return "underground";
-  }
-  if (type.startsWith("direction_handoff") || type.startsWith("user_approval")) {
-    return "handoff";
-  }
-  if (type.startsWith("growth_plan") || type.startsWith("workflow") || type.startsWith("task")) {
-    return "aboveground";
-  }
-  if (type.startsWith("verification") || type.startsWith("acceptance")) {
-    return "verification";
-  }
-  if (type.startsWith("artifact") || type.startsWith("fruit")) {
-    return "fruits";
-  }
-  if (type.startsWith("governance") || type.startsWith("run_memory") || type.startsWith("experience_candidate")) {
-    return "governance";
-  }
-  if (type.startsWith("path_bias")) {
-    return "soil";
-  }
-  return "runtime";
-}
-
-function severityForEvent(type: ArborMessageType): ObservationSeverity {
-  if (type === "error.raised") {
-    return "error";
-  }
-  if (type.includes("failed") || type.includes("blocked") || type.includes("rejected")) {
-    return "warning";
-  }
-  if (type.endsWith("revision_requested") || type.endsWith("requested")) {
-    return "info";
-  }
-  return "info";
-}
-
-function progressForEvent(type: ArborMessageType, step: number, total?: number): ObservationProgress {
+function progressForEvent(
+  progress: Pick<ObservationProgress, "status" | "label">,
+  step: number,
+  total?: number
+): ObservationProgress {
   return {
-    status: progressStatusForEvent(type),
+    status: progress.status,
     step,
     total,
-    label: humanizeEventType(type),
+    label: progress.label,
   };
-}
-
-function progressStatusForEvent(type: ArborMessageType): ObservationStatus {
-  if (type === "error.raised" || type.includes("failed")) {
-    return "failed";
-  }
-  if (type.includes("blocked") || type.includes("rejected")) {
-    return "blocked";
-  }
-  if (type.endsWith("requested") || type.endsWith("started") || type.endsWith("progress")) {
-    return "in_progress";
-  }
-  return "completed";
 }
 
 function refsForEvent(entry: RunObservationEventEntry): ObservationRef[] {
@@ -257,10 +154,6 @@ function pushRootletRefs(refs: ObservationRef[], payload: Readonly<Record<string
       refs.push({ kind: "rootlet", id: cluster.clusterId });
     }
   }
-}
-
-function humanizeEventType(type: ArborMessageType): string {
-  return type.replaceAll("_", " ").replaceAll(".", " ");
 }
 
 function asRecord(value: unknown): Readonly<Record<string, unknown>> {

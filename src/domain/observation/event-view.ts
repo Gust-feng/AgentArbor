@@ -105,11 +105,23 @@ function pushObjectIdRef(
 }
 
 function pushPackageRef(refs: ObservationRef[], payload: Readonly<Record<string, unknown>>): void {
-  const directionPackage = asRecord(payload.directionPackage);
+  for (const key of [
+    "directionPackage",
+    "previousDirectionPackage",
+    "approvedDirectionPackage",
+    "awaitingUserDirectionPackage",
+  ]) {
+    pushPackageRefFromValue(refs, payload[key], key);
+  }
+}
+
+function pushPackageRefFromValue(refs: ObservationRef[], value: unknown, label: string): void {
+  const directionPackage = asRecord(value);
   if (typeof directionPackage.packageId === "string") {
     refs.push({
       kind: "direction_package",
       id: directionPackage.packageId,
+      label,
       version: typeof directionPackage.version === "number" ? directionPackage.version : undefined,
     });
   }
@@ -117,6 +129,7 @@ function pushPackageRef(refs: ObservationRef[], payload: Readonly<Record<string,
     refs.push({
       kind: "direction_handoff",
       id: directionPackage.directionId,
+      label,
       version: typeof directionPackage.version === "number" ? directionPackage.version : undefined,
     });
   }
@@ -133,6 +146,14 @@ function pushClarificationRequestRef(refs: ObservationRef[], payload: Readonly<R
   const clarificationRequest = asRecord(payload.clarificationRequest);
   if (typeof clarificationRequest.requestId === "string") {
     refs.push({ kind: "user_clarification", id: clarificationRequest.requestId });
+  }
+  const clarificationResponse = asRecord(payload.clarificationResponse);
+  if (typeof clarificationResponse.requestId === "string") {
+    refs.push({ kind: "user_clarification", id: clarificationResponse.requestId, label: "response" });
+  }
+  const requestId = payload.requestId;
+  if (typeof requestId === "string") {
+    refs.push({ kind: "user_clarification", id: requestId });
   }
 }
 

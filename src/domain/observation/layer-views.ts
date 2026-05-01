@@ -1,5 +1,6 @@
 import type {
   ObservationStatus,
+  RunObservationEventEntry,
   RunObservationAbovegroundView,
   RunObservationFruitsView,
   RunObservationGovernanceView,
@@ -8,6 +9,7 @@ import type {
   RunObservationSoilReturnStubView,
   RunObservationUndergroundView,
 } from "./contracts.js";
+import type { UserClarificationResponse } from "../underground/index.js";
 
 export type RunObservationLayerViews = {
   readonly underground: RunObservationUndergroundView;
@@ -20,7 +22,7 @@ export type RunObservationLayerViews = {
 
 export function createRunObservationLayerViews(input: RunObservationSnapshotInput): RunObservationLayerViews {
   return {
-    underground: createUndergroundView(input.undergroundReport),
+    underground: createUndergroundView(input),
     handoff: createHandoffView(input),
     aboveground: createAbovegroundView(input),
     fruits: createFruitsView(input),
@@ -29,9 +31,8 @@ export function createRunObservationLayerViews(input: RunObservationSnapshotInpu
   };
 }
 
-function createUndergroundView(
-  report: RunObservationSnapshotInput["undergroundReport"]
-): RunObservationUndergroundView {
+function createUndergroundView(input: RunObservationSnapshotInput): RunObservationUndergroundView {
+  const report = input.undergroundReport;
   const outputRefByClusterId = new Map(report.rootletOutputs.map((output) => [output.clusterId, output.outputId]));
   return {
     planId: report.plan.planId,
@@ -110,6 +111,7 @@ function createUndergroundView(
     },
     userEscalationRequired: report.convergenceReport.userEscalationRequired,
     userEscalation: createUserEscalationView(report),
+    clarificationResponses: createClarificationResponses(input.eventEntries),
   };
 }
 
@@ -124,6 +126,13 @@ function createHandoffView(input: RunObservationSnapshotInput): RunObservationHa
     validationPassed: pkg.validation.passed,
     sourceCandidateRefs: pkg.directionHandoff.sourceCandidateRefs.map((candidate) => candidate.id),
     convergenceReviewRef: pkg.directionHandoff.convergenceReviewRef,
+    lineage: {
+      current: { ...pkg.lineage.current },
+      previous: pkg.lineage.previous === undefined ? undefined : { ...pkg.lineage.previous },
+      revisionReason: pkg.lineage.revisionReason,
+      sourceRefs: [...pkg.lineage.sourceRefs],
+      createdAt: pkg.lineage.createdAt,
+    },
   };
 }
 
@@ -246,6 +255,73 @@ function createUserEscalationView(
       })),
     },
   };
+}
+
+function createClarificationResponses(
+  eventEntries: readonly RunObservationEventEntry[]
+): UserClarificationResponse[] {
+  const responses: UserClarificationResponse[] = [];
+  for (const entry of eventEntries) {
+    if (entry.type !== "user_approval.received") {
+      continue;
+    }
+    const response = parseClarificationResponse(entry.message.payload);
+    if (response !== undefined) {
+      responses.push(response);
+    }
+  }
+  return responses;
+}
+
+function parseClarificationResponse(payload: unknown): UserClarificationResponse | undefined {
+  const payloadRecord = asRecord(payload);
+  const response = asRecord(payloadRecord.clarificationResponse);
+  if (
+    typeof response.requestId !== "string" ||
+    typeof response.goalId !== "string" ||
+    typeof response.answeredAt !== "string" ||
+    response.status !== "answered" ||
+    !Array.isArray(response.answers)
+  ) {
+    return undefined;
+  }
+
+  return {
+    requestId: response.requestId,
+    goalId: response.goalId,
+    answeredAt: response.answeredAt,
+    status: "answered",
+    answers: response.answers.flatMap((answer) => {
+      const record = asRecord(answer);
+      if (typeof record.questionId !== "string" || typeof record.answer !== "string") {
+        return [];
+      }
+      return [
+        {
+          questionId: record.questionId,
+          answer: record.answer,
+          selectedOptionId:
+            typeof record.selectedOptionId === "string" ? record.selectedOptionId : undefined,
+          evidenceRefs: stringArray(record.evidenceRefs),
+        },
+      ];
+    }),
+    evidenceRefs: stringArray(response.evidenceRefs),
+  };
+}
+
+function asRecord(value: unknown): Readonly<Record<string, unknown>> {
+  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+    return value as Readonly<Record<string, unknown>>;
+  }
+  return {};
+}
+
+function stringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.filter((entry): entry is string => typeof entry === "string");
 }
 
 function statusForFruits(input: RunObservationSnapshotInput): ObservationStatus {

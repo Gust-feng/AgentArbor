@@ -43,6 +43,26 @@ export type DirectionHandoffPackageManifest = {
   files: DirectionHandoffPackageFile[];
 };
 
+export type DirectionHandoffPackageRef = {
+  packageId: string;
+  directionId: string;
+  version: number;
+  status: DirectionHandoff["status"];
+  schemaVersion: DirectionHandoffPackageManifest["schemaVersion"];
+};
+
+export type DirectionHandoffPackageRevisionReason =
+  | "initial"
+  | "user_clarification_answered";
+
+export type DirectionHandoffPackageLineage = {
+  current: DirectionHandoffPackageRef;
+  previous?: DirectionHandoffPackageRef;
+  revisionReason: DirectionHandoffPackageRevisionReason;
+  sourceRefs: string[];
+  createdAt: string;
+};
+
 export type DirectionHandoffPackageCandidateReference = {
   candidateId: string;
   kind: ExplorationCandidateRef["kind"];
@@ -69,6 +89,7 @@ export type DirectionHandoffPackageValidationResult = {
 
 export type DirectionHandoffPackage = {
   manifest: DirectionHandoffPackageManifest;
+  lineage: DirectionHandoffPackageLineage;
   directionHandoff: DirectionHandoff;
   convergenceReview: ConvergenceReview;
   candidateReferenceIndex: DirectionHandoffPackageCandidateReference[];

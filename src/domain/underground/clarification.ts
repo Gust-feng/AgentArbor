@@ -44,6 +44,7 @@ export type UserClarificationResponse = {
   answeredAt: string;
   status: Extract<UserClarificationStatus, "answered">;
   answers: UserClarificationAnswer[];
+  evidenceRefs: string[];
 };
 
 export type OpenQuestionDisposition = {
@@ -165,6 +166,55 @@ export function cloneUserClarificationRequest(request: UserClarificationRequest)
       relatedCandidateRefs: [...question.relatedCandidateRefs],
     })),
   };
+}
+
+export function cloneUserClarificationResponse(response: UserClarificationResponse): UserClarificationResponse {
+  return {
+    ...response,
+    answers: response.answers.map((answer) => ({
+      ...answer,
+      evidenceRefs: [...answer.evidenceRefs],
+    })),
+    evidenceRefs: [...response.evidenceRefs],
+  };
+}
+
+export function assertUserClarificationResponseMatchesRequest(
+  request: UserClarificationRequest,
+  response: UserClarificationResponse
+): void {
+  if (request.status !== "requested") {
+    throw new UserClarificationError(`Cannot recover from clarification request in ${request.status} status.`);
+  }
+  if (response.status !== "answered") {
+    throw new UserClarificationError("Clarification recovery requires an answered response.");
+  }
+  if (response.requestId !== request.requestId) {
+    throw new UserClarificationError("Clarification response requestId must match the request.");
+  }
+  if (response.goalId !== request.goalId) {
+    throw new UserClarificationError("Clarification response goalId must match the request.");
+  }
+  if (typeof response.answeredAt !== "string" || response.answeredAt.trim() === "") {
+    throw new UserClarificationError("Clarification response must record answeredAt.");
+  }
+
+  const requiredQuestionIds = new Set(request.questions.map((question) => question.questionId));
+  const answeredQuestionIds = new Set<string>();
+  for (const answer of response.answers) {
+    if (!requiredQuestionIds.has(answer.questionId)) {
+      throw new UserClarificationError(`Clarification response answers unknown question: ${answer.questionId}.`);
+    }
+    if (typeof answer.answer !== "string" || answer.answer.trim() === "") {
+      throw new UserClarificationError(`Clarification response answer is empty: ${answer.questionId}.`);
+    }
+    answeredQuestionIds.add(answer.questionId);
+  }
+  for (const questionId of requiredQuestionIds) {
+    if (!answeredQuestionIds.has(questionId)) {
+      throw new UserClarificationError(`Clarification response is missing answer for question: ${questionId}.`);
+    }
+  }
 }
 
 function defaultQuestionForReason(reason: UserClarificationReason, candidateId: string): string {

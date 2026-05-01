@@ -5,6 +5,7 @@ import type {
   DirectionHandoffPackage,
   DirectionHandoffPackageCandidateReference,
   DirectionHandoffPackageFile,
+  DirectionHandoffPackageLineage,
   DirectionHandoffPackageStore,
   DirectionHandoffPackageValidationResult,
 } from "./contracts.js";
@@ -45,6 +46,7 @@ export class FileSystemDirectionHandoffPackageStore implements DirectionHandoffP
 
     const meta = JSON.parse(readFileSync(metaPath, "utf8")) as {
       manifest: DirectionHandoffPackage["manifest"];
+      lineage: DirectionHandoffPackageLineage;
       directionHandoff: DirectionHandoff;
       convergenceReview: ConvergenceReview;
       candidateReferenceIndex: DirectionHandoffPackageCandidateReference[];
@@ -54,6 +56,7 @@ export class FileSystemDirectionHandoffPackageStore implements DirectionHandoffP
 
     return withValidation({
       manifest: meta.manifest,
+      lineage: meta.lineage,
       directionHandoff: meta.directionHandoff,
       convergenceReview: meta.convergenceReview,
       candidateReferenceIndex: meta.candidateReferenceIndex,

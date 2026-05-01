@@ -25,6 +25,9 @@ test("validates and lists an approved DirectionHandoffPackage", () => {
   assert.equal(saved.manifest.status, "approved");
   assert.equal(saved.validation.passed, true);
   assert.deepEqual(saved.validation.warnings, []);
+  assert.equal(saved.lineage.revisionReason, "initial");
+  assert.equal(saved.lineage.current.packageId, saved.manifest.packageId);
+  assert.equal(saved.lineage.previous, undefined);
   assert.deepEqual(store.listVersions(directionHandoff.id), [1]);
 });
 
@@ -152,6 +155,7 @@ test("file-system DirectionHandoffPackage store round-trips through a temp direc
     const loaded = store.load(saved.manifest.directionId, saved.manifest.directionVersion);
 
     assert.equal(loaded.validation.passed, true);
+    assert.deepEqual(loaded.lineage, saved.lineage);
     assert.deepEqual(store.listVersions(saved.manifest.directionId), [saved.manifest.directionVersion]);
 
     for (const file of DIRECTION_HANDOFF_PACKAGE_FILES) {

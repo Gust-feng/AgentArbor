@@ -20,6 +20,7 @@ import type {
   UserClarificationQuestion,
   UserClarificationReason,
   UserClarificationRequest,
+  UserClarificationResponse,
   UserClarificationStatus,
 } from "../underground/index.js";
 
@@ -278,6 +279,7 @@ export type RunObservationUndergroundView = {
     readonly questions: readonly UserClarificationQuestion[];
     readonly request?: UserClarificationRequest;
   };
+  readonly clarificationResponses: readonly UserClarificationResponse[];
 };
 
 export type RunObservationHandoffView = {
@@ -289,6 +291,7 @@ export type RunObservationHandoffView = {
   readonly validationPassed: boolean;
   readonly sourceCandidateRefs: readonly string[];
   readonly convergenceReviewRef: string;
+  readonly lineage: DirectionHandoffPackage["lineage"];
 };
 
 export type RunObservationAbovegroundView = {

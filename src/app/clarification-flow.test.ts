@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { DirectionHandoffPackageValidationError } from "../domain/agentarbor/direction-handoff-package.js";
-import { createRunObservationEventViews } from "../domain/observation/index.js";
+import { createRunObservationEventViews, resolveRunObservationPosition } from "../domain/observation/index.js";
 import { AbovegroundPlanner } from "./agents.js";
 import {
   EXPECTED_CLARIFICATION_REQUIRED_EVENTS,
+  EXPECTED_CLARIFICATION_RECOVERY_EVENTS,
+  runClarificationRecoveryFlow,
   runClarificationRequiredUndergroundFlow,
 } from "./clarification-flow.js";
 import { EXPECTED_DEMO_EVENTS, runMinimalLoop } from "./minimal-loop.js";
@@ -73,6 +75,147 @@ test("clarification-required observation exposes user escalation and event refs"
     ),
     true
   );
+});
+
+test("clarification recovery records user approval and creates approved v2 handoff lineage", () => {
+  const result = runClarificationRecoveryFlow();
+  const eventViews = createRunObservationEventViews(result.runtime.eventLog.list());
+  const approvalReceivedEvent = eventViews.find((event) => event.type === "user_approval.received");
+  const revisionRequestedEvent = eventViews.find((event) => event.type === "direction_handoff.revision_requested");
+  const convergenceEvents = eventViews.filter((event) => event.type === "convergence_review.completed");
+  const finalHandoffEvent = eventViews.at(-1);
+  const entries = result.runtime.eventLog.list();
+
+  assert.deepEqual(result.eventTypes, EXPECTED_CLARIFICATION_RECOVERY_EVENTS);
+  assert.equal(convergenceEvents.length, 2);
+  assert.equal(result.awaitingUserDirectionHandoffPackage.manifest.status, "awaiting_user");
+  assert.equal(result.loadedApprovedDirectionHandoffPackage.manifest.status, "approved");
+  assert.equal(
+    result.loadedApprovedDirectionHandoffPackage.manifest.directionId,
+    result.awaitingUserDirectionHandoffPackage.manifest.directionId
+  );
+  assert.deepEqual(
+    result.runtime.directionHandoffPackageStore.listVersions(
+      result.loadedApprovedDirectionHandoffPackage.manifest.directionId
+    ),
+    [1, 2]
+  );
+  assert.equal(result.awaitingUserDirectionHandoffPackage.validation.passed, false);
+  assert.equal(result.loadedApprovedDirectionHandoffPackage.validation.passed, true);
+  assert.equal(
+    result.loadedApprovedDirectionHandoffPackage.directionHandoff.risks.some((risk) =>
+      risk.toLowerCase().includes("blocked until user clarification")
+    ),
+    false
+  );
+  assert.equal(result.approvedConvergenceReport.outcome, "approved");
+  assert.equal(result.approvedConvergenceReport.userEscalationRequired, false);
+  assert.equal(result.clarificationResponse.status, "answered");
+  assert.equal(result.clarificationResponse.requestId, result.clarificationRequest.requestId);
+  assert.deepEqual(resolveRunObservationPosition(entries.slice(0, 8)), {
+    currentPhase: "handoff",
+    currentStage: "user_approval_received",
+  });
+  assert.deepEqual(resolveRunObservationPosition(entries.slice(0, 9)), {
+    currentPhase: "handoff",
+    currentStage: "direction_handoff_revision_requested",
+  });
+  assert.deepEqual(resolveRunObservationPosition(entries.slice(0, 10)), {
+    currentPhase: "underground",
+    currentStage: "convergence_review_completed",
+  });
+  assert.deepEqual(resolveRunObservationPosition(entries), {
+    currentPhase: "handoff",
+    currentStage: "direction_handoff_completed",
+  });
+
+  const lineage = result.loadedApprovedDirectionHandoffPackage.lineage;
+  assert.equal(lineage.current.directionId, result.awaitingUserDirectionHandoffPackage.manifest.directionId);
+  assert.equal(lineage.current.version, 2);
+  assert.equal(lineage.previous?.version, 1);
+  assert.equal(lineage.revisionReason, "user_clarification_answered");
+  assert.equal(lineage.sourceRefs.includes(result.clarificationRequest.requestId), true);
+  assert.equal(lineage.sourceRefs.includes("user_approval.received"), true);
+
+  assert.equal(
+    approvalReceivedEvent?.refs.some(
+      (ref) => ref.kind === "user_clarification" && ref.id === result.clarificationRequest.requestId
+    ),
+    true
+  );
+  assert.equal(
+    approvalReceivedEvent?.refs.some(
+      (ref) =>
+        ref.kind === "direction_package" &&
+        ref.id === result.awaitingUserDirectionHandoffPackage.manifest.packageId
+    ),
+    true
+  );
+  assert.equal(revisionRequestedEvent?.progress.status, "in_progress");
+  assert.equal(revisionRequestedEvent?.refs.some((ref) => ref.kind === "direction_handoff"), true);
+  assert.equal(convergenceEvents[1]?.scope, "underground");
+  assert.equal(convergenceEvents[1]?.refs.some((ref) => ref.kind === "convergence_review"), true);
+  assert.equal(finalHandoffEvent?.type, "direction_handoff.completed");
+  assert.equal(
+    finalHandoffEvent?.refs.some(
+      (ref) =>
+        ref.kind === "direction_package" &&
+        ref.id === result.loadedApprovedDirectionHandoffPackage.manifest.packageId &&
+        ref.version === 2
+    ),
+    true
+  );
+});
+
+test("clarification recovery snapshot round-trips and exposes response and v2 handoff refs", () => {
+  const result = runClarificationRecoveryFlow();
+  const parsed = JSON.parse(JSON.stringify(result.observationSnapshot)) as typeof result.observationSnapshot;
+
+  assert.deepEqual(parsed, result.observationSnapshot);
+  assert.equal(parsed.currentPhase, "handoff");
+  assert.equal(parsed.currentStage, "direction_handoff_completed");
+  assert.equal(parsed.underground.status, "completed");
+  assert.equal(parsed.underground.userEscalationRequired, false);
+  assert.equal(parsed.underground.clarificationResponses.length, 1);
+  assert.equal(parsed.underground.clarificationResponses[0]?.requestId, result.clarificationRequest.requestId);
+  assert.deepEqual(
+    parsed.underground.clarificationResponses[0]?.evidenceRefs,
+    result.clarificationResponse.evidenceRefs
+  );
+  assert.equal(parsed.handoff.status, "completed");
+  assert.equal(parsed.handoff.directionId, result.loadedApprovedDirectionHandoffPackage.manifest.directionId);
+  assert.equal(parsed.handoff.version, 2);
+  assert.equal(parsed.handoff.lineage.revisionReason, "user_clarification_answered");
+  assert.equal(parsed.handoff.lineage.previous?.version, 1);
+  assert.equal(parsed.directionPackageRef.status, "approved");
+  assert.equal(parsed.aboveground.status, "not_started");
+});
+
+test("aboveground rejects awaiting-user v1 and accepts recovered approved v2", () => {
+  const result = runClarificationRecoveryFlow();
+  const planner = new AbovegroundPlanner();
+  const directionId = result.loadedApprovedDirectionHandoffPackage.manifest.directionId;
+
+  assert.throws(
+    () =>
+      planner.plan(
+        directionId,
+        result.awaitingUserDirectionHandoffPackage.manifest.directionVersion,
+        "trace-recovery-planning",
+        result.runtime
+      ),
+    DirectionHandoffPackageValidationError
+  );
+
+  const planned = planner.plan(
+    directionId,
+    result.loadedApprovedDirectionHandoffPackage.manifest.directionVersion,
+    "trace-recovery-planning",
+    result.runtime
+  );
+
+  assert.equal(planned.directionHandoffPackage.manifest.status, "approved");
+  assert.equal(planned.growthPlan.directionHandoffVersion, 2);
 });
 
 test("main minimal loop keeps the fixed 18-event happy path", () => {

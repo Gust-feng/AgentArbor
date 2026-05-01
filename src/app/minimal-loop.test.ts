@@ -22,6 +22,9 @@ test("returns the minimal loop result with package, artifact, verification, and 
   assert.equal(result.loadedDirectionHandoffPackage.manifest.directionVersion, result.directionHandoff.version);
   assert.equal(result.loadedDirectionHandoffPackage.manifest.status, "approved");
   assert.equal(result.loadedDirectionHandoffPackage.validation.passed, true);
+  assert.equal(result.loadedDirectionHandoffPackage.lineage.revisionReason, "initial");
+  assert.equal(result.loadedDirectionHandoffPackage.lineage.current.version, 1);
+  assert.equal(result.loadedDirectionHandoffPackage.lineage.previous, undefined);
   assert.deepEqual(result.undergroundReport.candidatePool.counts, {
     total: 6,
     candidate: 0,
@@ -67,11 +70,13 @@ test("RunObservationSnapshot is serializable and reflects underground state", ()
   assert.equal(parsed.handoff.status, "completed");
   assert.equal(parsed.handoff.packageId, result.loadedDirectionHandoffPackage.manifest.packageId);
   assert.equal(parsed.handoff.validationPassed, true);
+  assert.equal(parsed.handoff.lineage.revisionReason, "initial");
   assert.equal(parsed.underground.candidatePool.total, 6);
   assert.equal(parsed.underground.candidatePool.accepted, 2);
   assert.equal(parsed.underground.candidatePool.merged, 2);
   assert.equal(parsed.underground.convergence.outcome, "approved");
   assert.equal(parsed.underground.userEscalationRequired, false);
+  assert.deepEqual(parsed.underground.clarificationResponses, []);
   assert.equal(parsed.directionPackageRef.status, "approved");
   assert.equal(parsed.aboveground.taskStatus, "Assigned");
   assert.equal(parsed.verification.status, "passed");

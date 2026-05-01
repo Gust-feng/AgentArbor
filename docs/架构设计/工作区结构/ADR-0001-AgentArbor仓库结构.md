@@ -38,11 +38,11 @@ AgentArbor 后续开发任务复杂且长期，不能依赖一次性对话和临
 
 `.codex/` 和 `.opencode/` 是开发工具适配层。
 
-`.agentarbor/` 是未来 AgentArbor 产品运行时的原生启动资产区，不是当前文档工作区。
+`.agentarbor/` 是未来 AgentArbor 原生方向交接包目录，用于从地下中枢向地上中枢传递方向、约束、证据和 Growth Entry；它不是当前文档工作区，也不是最终资产仓库。
 
 ## Consequences
 
 - 历史经验、推进记录、阶段计划、会话交接、准备包和草案包不保留在 `docs/` 活跃知识面中。
 - 新增文档必须进入 `开发指南`、`任务看板`、`研究资料` 或 `架构设计` 四类之一；否则不应新增。`任务看板` 只能保存从 Trellis 派生的人类可读视图，不能保存计划源数据。
-- 新 AgentArbor 原生智能体必须进入 `.agentarbor/agents/`，并且只能在契约、权限和出生理由明确后创建。
+- 新 AgentArbor 原生智能体不能直接以 `.codex/agents/` 或 `.opencode/agents/` 为产品事实源；可脱离能力必须先作为 Fruit 接受治理，再以 Capability Asset 或适配输出形式沉淀。
 - Codex 或 OpenCode 开发态智能体不能作为 AgentArbor 产品原生智能体事实源。

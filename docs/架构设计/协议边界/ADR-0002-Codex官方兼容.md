@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted, amended by [ADR-0003](ADR-0003-AgentArbor原生智能体.md), [ADR-0004](../工作区结构/ADR-0004-AgentArbor原生工作区.md), and [ADR-0010](ADR-0010-产品层与开发工具层.md)
+Accepted, amended by [ADR-0003](ADR-0003-AgentArbor原生智能体.md), [ADR-0004](../工作区结构/ADR-0004-AgentArbor原生工作区.md), [ADR-0010](ADR-0010-产品层与开发工具层.md), and [ADR-0018](../产品架构/ADR-0018-AgentArbor原生概念树架构.md)
 
 ## Context
 
@@ -21,15 +21,15 @@ AgentArbor 采用官方兼容优先策略：
 
 - `.agents/` 下只保留 `skills/` 和未来可选 `plugins/`。
 - `.codex/agents/` 保存开发 AgentArbor 仓库时使用的 Codex custom subagents，也可以保存从产品层导出的 Codex adapter 输出；无论哪种情况，都不保存 AgentArbor 原生 agent source-of-truth。
-- AgentArbor 自定义 registry、agent manifest、workflow、memory 和 schema 迁入 `.agentarbor/`。
+- AgentArbor 原生方向交接材料归入 `.agentarbor/`；长期能力资产、agent 能力、workflow 经验、memory 和 schema 必须按 Fruits、Governance、Soil 的治理边界沉淀，不能直接把 `.agentarbor/` 当资产仓库。
 - 项目内不再定义 `skill-creator` skill，避免和 Codex 系统 `$skill-creator` 混淆。
 
-未来 AgentArbor 生成 skill 时，必须先输出 Agent Skills 兼容格式。未来 AgentArbor 生成自己的 agent 时，必须先输出 AgentArbor 原生格式；如需供 Codex 调用，再导出 `.codex/agents/*.toml` 适配产物。
+未来 AgentArbor 生成 skill 时，必须先输出 Agent Skills 兼容格式。未来 AgentArbor 生成自己的 agent 时，必须先作为 Fruit 候选并经过治理；如需供 Codex 调用，再导出 `.codex/agents/*.toml` 适配产物。
 
 ## Consequences
 
 - 当前 Codex 可执行协议和 AgentArbor 未来产品协议分层清晰。
-- `.agentarbor/registry.json` 只是未来 AgentArbor runtime 草案，不是 Codex 官方索引。
-- 旧 `.agents` 自定义资料保留在 `.agentarbor/`，不静默删除。
+- `.agentarbor/` 是方向交接包目录，不是 Codex 官方索引、最终资产仓库或 Soil 副本。
+- 旧 `.agents` 自定义资料不得静默塞回 `.agentarbor/`；只有符合方向交接包契约的材料才能进入。
 - 后续实现阶段必须避免重新把自定义协议塞回 `.agents/` 根目录。
-- 参见 [ADR-0010](ADR-0010-产品层与开发工具层.md)：当前 Codex 开发工具层不能压缩 `.agentarbor/` 产品运行层。
+- 参见 [ADR-0010](ADR-0010-产品层与开发工具层.md)：当前 Codex 开发工具层不能压缩 AgentArbor 产品运行层。

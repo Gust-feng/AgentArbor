@@ -1,6 +1,6 @@
 # AgentArbor
 
-AgentArbor 是目标驱动的 Agent / AgentApp 孕育与演化平台。它把用户提示词视为想象，由 Seed Cluster 前置成像为可审阅的 Seed Packet；用户确认后把种子种入受治理的 Soil，Root System 初始生根并在运行期持续生长，Core Control Cluster 制定和修订 Growth Plan 与 Workflow IR，Branch / Leaf / Flower 组织执行与验证，最后通过 Run Memory、Experience Candidate、Path Bias、Capability Asset、Fruit 和 Ring Memory 反哺土壤。
+AgentArbor 是目标驱动的 Agent / AgentApp 孕育与演化平台。它以 `Soil -> Underground Center -> .agentarbor -> Aboveground Center -> Fruits -> Governance -> Soil` 为原生概念树：土壤保存长期事实和能力资产，地下中枢把用户想象、约束、证据和方向成形为 `.agentarbor` 方向交接包，地上中枢把交接包转为 Growth Plan、Workflow IR、执行组织和验证门，果实经过治理后才允许回流土壤。当前产品架构事实源是 [ADR-0018-AgentArbor原生概念树架构](docs/架构设计/产品架构/ADR-0018-AgentArbor原生概念树架构.md)。
 
 当前仓库处于正式开发准备阶段，尚未包含运行时代码。开发前请先阅读 [docs/README.md](docs/README.md)、[开发指南](docs/开发指南/README.md) 和 [任务看板](docs/任务看板/README.md)。
 
@@ -28,7 +28,7 @@ AgentArbor 是目标驱动的 Agent / AgentApp 孕育与演化平台。它把用
 - `.codex/`：Codex 开发适配层。
 - `.opencode/`：OpenCode 开发适配层。
 - `.claude/`：Claude Code 开发适配层。
-- `.agentarbor/`：未来 AgentArbor 原生机器可读启动资产，只有在契约稳定后才增量创建。
+- `.agentarbor/`：未来 AgentArbor 原生方向交接包目录，用于地下中枢向地上中枢传递方向、约束、证据和 Growth Entry；不保存最终资产，不替代 Soil，只有在契约稳定后才增量创建。
 - `src/`：未来 TypeScript 实现代码。
 
 上述点目录当前默认属于本地开发态工具层，并被 `.gitignore` 忽略。后续如果需要把某些 Trellis 模板、平台适配模板或 AgentArbor 原生运行时资产纳入团队共享基线，必须先明确它们的职责、验证方式和提交范围，再单独调整忽略规则。
@@ -47,14 +47,15 @@ AgentArbor 是目标驱动的 Agent / AgentApp 孕育与演化平台。它把用
 
 ## 当前原则
 
-- 不把旧讨论稿、路线残留、经验流水或演示资产混入当前开发入口。
+- 不把未治理草案、路线残留、经验流水或演示资产混入当前开发入口。
 - 只在 `docs/` 保留开发指南、架构设计和对未来开发有用的研究报告。
 - 历史经验、推进记录、阶段计划、会话沉淀、草案包和准备包不保留在活跃文档树。
-- 早期计划书中“自然语言生成 AgentApp”的价值应被吸收，但方向要校正为目标驱动的孕育、验证、谱系和演化闭环。
-- 当前正式产品主线是 `Imagination -> Seed Cluster -> Seed Packet -> User Approval Gate -> Soil -> Initial Rooting -> Root Brief -> Core Control Cluster -> Growth Plan -> Workflow IR -> Branch / Leaf / Flower / Fruit -> Root Callback -> Run Memory / Ring Memory / Soil`。
-- Seed Cluster 是启动门，不属于地下 Root System，也不属于地上执行组织。
-- Root System 是持续地下生命系统，生成第一版 Root Brief 后仍可通过 Root Callback 继续侧根扩展或深根重探。
-- Core Control Cluster 是主干固定核心，负责制定和修订 Growth Plan 与 Workflow IR。
+- 当前正式产品主线是 `Soil -> Underground Center -> .agentarbor -> Aboveground Center -> Fruits -> Governance -> Soil`。
+- 地下中枢负责需求成形、用户确认、约束提取、证据探索、方向综合和运行期养料供给。
+- `.agentarbor` 是方向交接包，不是最终资产仓库，也不是 Soil 的副本。
+- 地上中枢负责 Growth Plan、Workflow IR、上下文拓扑、执行组织、验证门和计划修订。
+- Fruits 不是 Soil；交付物、AgentApp、能力包、可脱离子 agent 和经验候选必须经过 Governance 才能入土。
+- 约束工程贯穿 Soil、Underground Center、`.agentarbor`、Aboveground Center、Fruits、Governance 和回流后的 Soil；Path Bias 不能覆盖 hard constraint。
 - 不让 Codex、OpenCode 或其他平台格式反向定义 AgentArbor 产品语义。
 - 不提前填充 `.agentarbor/` 作为假完整结构。
 - 不创建没有职责、契约、权限和验证依据的 agent、skill 或 runtime 资产。

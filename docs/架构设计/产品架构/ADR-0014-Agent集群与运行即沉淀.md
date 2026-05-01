@@ -4,7 +4,7 @@
 
 已采纳。
 
-本 ADR 的运行沉淀口径已被 [ADR-0015](ADR-0015-树形语义基线与Root重定义.md) 和 [ADR-0016](ADR-0016-种子层与持续根系架构.md) 细化：Seed Cluster 负责前置成像，Root System 负责持续探索，Branch / Leaf 负责执行，运行结束后形成 Run Memory、Experience Candidate 和 Path Bias。
+本 ADR 的运行沉淀口径已被 [ADR-0018](ADR-0018-AgentArbor原生概念树架构.md) 和 [ADR-0017](ADR-0017-约束工程与可执行约束模型.md) 细化：Underground Center 负责方向成形，Aboveground Center 负责计划控制，Aboveground Growth 负责执行，Fruits 与 Governance 负责候选沉淀和入土裁决。
 
 ## 背景
 
@@ -19,21 +19,21 @@
 AgentArbor 正式采用以下规则：
 
 1. Agent 集群是运行层的核心组织形态，是内核骨架之上的运行血肉。
-2. Agent 集群包括前置成像集群、持续根系、主干固定核心集群、动态分支执行集群、叶层执行个体和花层验证集群。
-3. Agent 集群不是固定角色表，也不是多 agent 聊天室，而是按目标、能力、风险、权限、历史收获、Path Bias 和 Workflow IR 动态组建，并受 Core Control Cluster 与状态机约束。
+2. Agent 集群包括地下中枢、地上中枢、地上生长协调、地上执行个体、验证组织和果实治理组织。
+3. Agent 集群不是固定角色表，也不是多 agent 聊天室，而是按目标、能力、风险、权限、历史收获、Path Bias 和 Workflow IR 动态组建，并受 Aboveground Center 与状态机约束。
 4. 每个 agent 和每个集群都必须产生结构化交付物，否则不应被调度。
 5. 每次运行都必须产生 Run Memory。可复用内容先成为 Experience Candidate，不自动等同于长期资产。
-6. 后续相似任务应形成 Path Bias，优先参考已验证的路径、能力证据、失败模式和验证规则，但不能被历史路径强制锁死。
+6. 后续相似任务应形成 Path Bias，优先参考已验证的路径、能力证据、失败模式和验证规则，但不能被历史路径强制锁死，也不能覆盖 hard constraint。
 7. 长期资产、固定 agent、果实 agent 和可脱离子 agent 仍必须经过治理门。
 
 ## 架构影响
 
 系统需要保留以下核心能力：
 
-- `Core Control Cluster`、`Router` 或同类控制与调度组件。
+- `Aboveground Center`、`Router` 或同类控制与调度组件。
 - 集群生命周期：组建、输入、执行、验证、收获、解散或晋升。
 - `RunMemory`、`ExperienceCandidate` 或同类运行沉淀。
-- Workflow IR 中的收获节点、Root Callback、Path Bias 和复用条件。
+- Workflow IR 中的收获节点、Nutrient Request、Nutrient Patch、Path Bias 和复用条件。
 - Agent / Cluster 输出的结构化交付物约束。
 - 收获候选到长期资产的治理门。
 

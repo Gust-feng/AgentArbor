@@ -2,7 +2,9 @@
 
 ## Status
 
-Accepted as predecessor decision. Refined by [ADR-0012](ADR-0012-植物学融合架构候选基线.md) and superseded for current tree semantics by [ADR-0015](ADR-0015-树形语义基线与Root重定义.md).
+Accepted. Current architecture source: [ADR-0018](ADR-0018-AgentArbor原生概念树架构.md).
+
+本 ADR 记录 Agent 集群、动态发育、分层通信和能力治理的结构原则；完整产品全景以 ADR-0018 的原生概念树架构为准。
 
 ## Context
 
@@ -19,9 +21,11 @@ AgentArbor 需要一个既能保证稳定性又能提供无限扩展能力的架
 
 ## Decision
 
-AgentArbor 未来产品形态采用**固定骨架+动态发育+分层通信**的融合架构。
+AgentArbor 采用**固定骨架 + 动态发育 + 分层通信**的融合架构。这个判断由当前树形语义承接：Underground Center、`.agentarbor`、Aboveground Center、Aboveground Growth、Verification、Fruits、Run Memory、Path Bias、Governance 和 Soil 共同构成完整系统。
 
-### 架构全景图
+### 旧融合架构局部图
+
+下图主要描述地上任务执行组织如何分派、拆解和收敛结果；它必须与 Soil、Underground Center、`.agentarbor`、Fruits、Governance、Run Memory、Path Bias 和约束工程共同使用。
 
 ```
 AgentArbor 未来形态
@@ -42,7 +46,7 @@ AgentArbor 未来形态
 │   │   ├── 接收复杂任务
 │   │   ├── 分析任务复杂度
 │   │   ├── 决定委派策略
-│   │   └── 只接收结果
+│   │   └── 接收结果与证据摘要
 │   │
 │   ├── 代理Agent（Proxy Agent）
 │   │   ├── 接收母Agent任务
@@ -52,7 +56,7 @@ AgentArbor 未来形态
 │   │
 │   └── 子Agent（Child Agent）
 │       ├── 专心执行任务
-│       ├── 不关心全局
+│       ├── 不裁决全局
 │       └── 输出简洁结果
 │
 └── 能力层（Capability Layer）- 动态加载
@@ -63,9 +67,23 @@ AgentArbor 未来形态
     └── 原生能力（Git、Shell、Test等）
 ```
 
+当前映射如下：
+
+| 旧概念 | 当前处理 |
+| --- | --- |
+| Canopy 集群 | 拆入 Underground Center、Aboveground Center、Verification 和 Governance，不再作为唯一决策中枢 |
+| 母 Agent | 作为 Aboveground Center / Branch 协调职责的早期雏形，不等同于当前地上固定核心 |
+| 代理 Agent | 映射到 Branch Agent / Branch Cluster，负责局部分支协调 |
+| 子 Agent | 映射到 Leaf Agent，负责具体执行任务 |
+| 能力层 | 能力资产进入 Soil，运行期能力通过 Capability Asset 和权限治理引用 |
+
+执行个体可以不承担全局裁决，但必须接收与任务相关的约束切片，提交证据，报告偏离，并在信息不足、验证失败、Path Bias 失效或权限/成本前提变化时触发 Nutrient Request。
+
 ### 骨架层设计
 
-#### 1. Canopy集群（决策层）
+#### 1. Canopy集群（历史决策层）
+
+Canopy 集群不再作为当前唯一决策层。其目标守护、演化裁决和治理哨兵思想被拆入当前的 Underground Center、Aboveground Center、Verification、Governance Gate 和约束工程。
 
 - **GoalSteward（目标守护）**
   - 职责：维护北极星目标、约束、停止条件
@@ -119,17 +137,17 @@ AgentArbor 未来形态
 
 ### 发育层设计
 
-#### 1. 母Agent（Mother Agent）
+#### 1. 母Agent（Mother Agent，历史名称）
 
-- **职责**：接收复杂任务，分析任务复杂度，决定委派策略，只接收结果
+- **职责**：接收复杂任务，分析任务复杂度，决定委派策略，接收结果与证据摘要
 - **特点**：
   - 不直接执行具体任务
-  - 只关心决策和结果
+  - 关心决策、证据、约束满足情况和结果
   - 避免上下文污染
 - **功能**：
   - 分析任务复杂度
   - 决定创建子Agent或代理Agent
-  - 只接收结果，不关心执行过程
+  - 接收结果、证据和偏离报告，并在必要时触发 Nutrient Request 或计划修订
 
 #### 2. 代理Agent（Proxy Agent）
 
@@ -144,16 +162,16 @@ AgentArbor 未来形态
   - 协调集群工作
   - 合并结果
 
-#### 3. 子Agent（Child Agent）
+#### 3. 子Agent（Child Agent，历史名称）
 
-- **职责**：专心执行任务，不关心全局，输出简洁结果
+- **职责**：专心执行任务，不裁决全局，输出结果与证据
 - **特点**：
   - 只知道自己的任务
-  - 不关心其他Agent
+  - 不裁决其他 Agent 的工作
   - 专注于具体工作
 - **功能**：
   - 执行具体任务
-  - 输出简洁结果
+  - 输出结果、证据、约束满足情况和异常信号
 
 ### 通信机制设计
 
@@ -214,7 +232,7 @@ Step 7: 子Agent/代理Agent返回结果
 ├── 动作：返回执行结果
 └── 方式：MessageBus 请求响应
 
-Step 8: 母Agent接收结果
+Step 8: 母Agent接收结果与证据
 ├── 动作：确认接收
 └── 方式：MessageBus 请求响应
 
@@ -270,16 +288,15 @@ Step 9: 记录到事件总线
 
 #### 兼容点
 
-- 保留了Canopy/Trunk/Root三层结构
-- 保留了10个核心Agent角色
-- 保留了状态机和演化系统
-- 保留了验收矩阵和债务账本
-- 保留了谱系管理和Git集成
+- 吸收了 Canopy / Trunk / Root 研究中的目标驱动、治理、验证和演化思想。
+- 吸收了固定核心与动态执行并存的组织方式。
+- 吸收了状态机、验收矩阵、债务账本、谱系管理和 Git 集成思想。
+- 吸收了动态 Agent 生成、上下文隔离和执行集群生命周期管理思想。
 
 #### 扩展点
 
 - 引入了动态Agent生成
-- 引入了母Agent→子Agent→代理Agent机制
+- 引入了母Agent→子Agent→代理Agent机制，并在当前架构中收敛为 Core Control / Branch / Leaf 组织模型
 - 引入了混合通信模式
 - 引入了上下文隔离
 - 引入了Agent生命周期管理
@@ -290,8 +307,8 @@ Step 9: 记录到事件总线
 | 创新点 | 说明 |
 |--------|------|
 | **骨架+动态** | 固定骨架保证稳定性，动态发育提供扩展性 |
-| **Agent发育** | 母Agent可以分化子Agent和代理Agent，形成完整体系 |
-| **上下文隔离** | 母Agent全局上下文，代理Agent任务上下文，子Agent最小上下文 |
+| **Agent发育** | 历史母 Agent 可以分化子 Agent 和代理 Agent；当前映射为 Branch / Leaf 动态任务集群 |
+| **上下文隔离** | 主干保留全局证据与约束，分支保留局部上下文，叶层只接收任务相关切片 |
 | **统一消息通信** | MessageBus 请求响应保证可靠性，事件流提供灵活性 |
 | **优胜劣汰** | Agent可以被评估、保留或淘汰，持续进化 |
 | **递归分化** | 代理Agent可以进一步分化，形成递归结构 |
@@ -323,7 +340,7 @@ Step 9: 记录到事件总线
 ## Related
 
 - [深度研究报告](../../研究资料/深度研究报告.md)
-- [ADR-0012: 植物学融合架构候选基线](ADR-0012-植物学融合架构候选基线.md)
-- [ADR-0015: 树形语义基线与 Root 重定义](ADR-0015-树形语义基线与Root重定义.md)
+- [ADR-0018: AgentArbor 原生概念树架构](ADR-0018-AgentArbor原生概念树架构.md)
+- [ADR-0017: 约束工程与可执行约束模型](ADR-0017-约束工程与可执行约束模型.md)
 - [ADR-0010: 产品运行层与开发工具层分离](../协议边界/ADR-0010-产品层与开发工具层.md)
 - [ADR-0003: AgentArbor 原生 Agent 不存放在 `.codex`](../协议边界/ADR-0003-AgentArbor原生智能体.md)

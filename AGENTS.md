@@ -4,23 +4,23 @@
 
 AgentArbor 的开发必须统领全局。局部的最优解往往不是全局的最优解；任何计划、代码、文档、agent、skill、workflow 或平台适配变更，都不能为了眼前方便留下结构性技术债。
 
-交付必须完整、清楚、可继承。不能只做“能用”的最小改动后留下索引不清、职责不明、边界不清、验证缺失或旧规则残留。
+交付必须完整、清楚、可继承。不能只做“能用”的最小改动后留下索引不清、职责不明、边界不清、验证缺失或残留规则。
 
 ## 项目定位
 
-AgentArbor 是目标驱动的 Agent / AgentApp 孕育与演化平台。它围绕用户想象、Seed Cluster、Seed Packet、User Approval Gate、受治理土壤、持续 Root System、Root Brief、Core Control Cluster、Growth Plan、Workflow IR、Branch / Leaf / Flower、验证证据、Run Memory、Path Bias、Capability Asset、谱系记录和可控导出构建，不是聊天机器人、提示词集合、外部平台配置仓库、一次性脚手架或短期演示工程。
+AgentArbor 是目标驱动的 Agent / AgentApp 孕育与演化平台。它围绕用户想象、受治理土壤、地下中枢、`.agentarbor` 方向交接包、地上中枢、地上生长、果实、治理回流、验证证据、Run Memory、Path Bias、Capability Asset、谱系记录和可控导出构建，不是聊天机器人、提示词集合、外部平台配置仓库、一次性脚手架或短期演示工程。
 
 当前正式树形语义是：
 
 ```text
-Imagination -> Seed Cluster -> Seed Packet -> User Approval Gate -> Soil
-  -> Initial Rooting -> Root Brief -> Core Control Cluster -> Growth Plan
-  -> Workflow IR
-  -> Branch / Leaf / Flower / Fruit
-  -> Root Callback / Re-rooting -> Run Memory / Ring Memory / Soil
+Soil -> Underground Center -> .agentarbor -> Aboveground Center -> Fruits -> Governance -> Soil
 ```
 
-Seed Cluster 是启动门，负责把用户提示词这个“想象”前置成像为 Seed Packet，并通过用户确认门决定是否种入土壤。Root System 是持续地下生命系统，负责初始生根、侧根扩展和深根重探；Core Control Cluster 是主干固定核心，负责制定和修订 Growth Plan 与 Workflow IR。任何把 Root System 写成一次性前置调研、把 Seed Cluster 写成执行层、或把 Core Control Cluster 写成单点万能 agent 的设计都必须修正。
+当前产品架构事实源是 `docs/架构设计/产品架构/ADR-0018-AgentArbor原生概念树架构.md`；活跃开发指南必须承接该 ADR 的稳定结论。
+
+地下中枢负责把用户想象转为可判断目标、约束、证据和方向，并在授权边界不清、目标冲突或关键事实不足时询问用户。`.agentarbor` 是地下中枢交给地上中枢的方向交接包，不是最终资产仓库，也不是 Soil 的副本。地上中枢负责把方向交接包转为 Growth Plan、Workflow IR、上下文拓扑、执行组织、验证门和修订机制。Fruits 只是交付物、AgentApp、能力包或经验候选；只有经过 Governance 的果实才能以 Capability Asset、Path Bias、长期约束或验证证据形式进入 Soil。
+
+约束工程贯穿 Soil、Underground Center、`.agentarbor`、Aboveground Center、Fruits、Governance 和回流后的 Soil。目标、非目标、权限、成本、技术边界、安全要求、人工确认、验收门和资产治理不能停留在自然语言备注中；它们必须能通过 Constraint / ConstraintRef 被引用、分发、执行、验证和沉淀。Path Bias 只能影响 preference 和方案排序，不能覆盖 hard constraint。
 
 开发前必须先读：
 
@@ -58,7 +58,7 @@ Seed Cluster 是启动门，负责把用户提示词这个“想象”前置成�
 - `.codex/`：Codex 开发适配层。
 - `.opencode/`：OpenCode 开发适配层。
 - `.claude/`：Claude Code 开发适配层。
-- `.agentarbor/`：未来 AgentArbor 原生机器可读启动资产。只有契约稳定、有真实出生依据时才增量创建。
+- `.agentarbor/`：未来 AgentArbor 原生方向交接包目录，负责从地下中枢向地上中枢传递方向、约束、证据和 Growth Entry；不保存最终资产，不替代 Soil。只有契约稳定、有真实出生依据时才增量创建。
 - `src/`：未来 TypeScript 实现代码。
 
 禁止把这些层混用。平台适配文件不是 AgentArbor 原生产品事实源，未来运行时资产也不能替代当前开发文档。
@@ -67,17 +67,17 @@ Seed Cluster 是启动门，负责把用户提示词这个“想象”前置成�
 
 ## 文档规则
 
-`docs/` 必须保持开发前清爽，但“清爽”不等于删除有价值研究和未来态讨论。
+`docs/` 必须保持开发前清爽，但“清爽”不等于删除有长期参考价值的研究和未来态材料。
 
 - 顶级只保留 `README.md` 和必要中文目录。
 - 目录名、文档名和正文默认使用简体中文，`README.md` 作为索引文件例外。
 - `docs/开发指南/` 只保存当前稳定开发口径。
 - `docs/任务看板/` 只保存从 `.trellis/tasks/` 派生的人类态势看板资产，用于展示前置任务、当前任务和未来方向，不保存计划源数据。
-- `docs/研究资料/` 保存研究报告、早期计划书、工程研究和外部参考研究。
+- `docs/研究资料/` 保存研究报告、工程研究、外部参考研究和有长期参考价值的材料。
 - `docs/架构设计/` 保存长期架构决策、协议边界、工作区结构和植物学融合架构。
 - 历史经验、推进记录、阶段计划、会话沉淀、草案包和准备包不保留在 `docs/` 活跃知识面中。
 - 阶段推进、任务续接、检查点和工作流状态由 `.trellis/` 管理；不新增根目录 `Plan/` 或 `Plans/` 作为第二套计划入口。每次 Trellis 阶段推进、任务切换、完成或归档后，应使用 repo-local skill `trellis-task-board` 刷新 `docs/任务看板/看板.md`，并在看板结构或规则变化时同步检查 `docs/任务看板/README.md` 与 `docs/任务看板/规则.md`。
-- 旧资料只有在具有明确架构或研究价值时才保留；对未来开发没有用的材料必须删除。
+- 资料只有在具有明确架构或研究价值时才保留；对未来开发没有用的材料必须删除。
 - 文档索引必须准确指向当前存在的文件。
 - 文档内容必须能指导实现，不能只保留口号、历史过程或无主张材料。
 
@@ -87,7 +87,7 @@ Seed Cluster 是启动门，负责把用户提示词这个“想象”前置成�
 - 不引入包管理器、构建系统、运行时代码或测试框架，除非用户明确要求进入实现。
 - 未来实现以 TypeScript 自研架构为主。
 - 外部模型、工具、协议和平台通过 adapter 接入，不能反向污染核心领域模型。
-- `.agentarbor/` 不提前填充占位 agent、workflow、memory 或 schema。
+- `.agentarbor/` 不提前填充占位 agent、workflow、memory 或 schema；方向交接包也必须等契约稳定和真实任务出生后再增量创建。
 - 新增或修改 Codex skill 时，只改 `.agents/skills/`，并遵守 Agent Skills 标准。
 - 新增 Codex custom subagent 使用 `.codex/agents/*.toml`。
 - 新增 OpenCode 适配内容使用 `.opencode/`。
@@ -100,10 +100,11 @@ Seed Cluster 是启动门，负责把用户提示词这个“想象”前置成�
 - Experience Candidate 是可复用经验候选，必须经过验证、去重、归因和治理。
 - Capability Asset 是进入土壤的正式能力资产，必须有来源、输入输出契约、权限边界、版本、评估和退役路径。
 - Path Bias 只能牵引下一次相似任务，不得机械复刻历史流程。
+- Path Bias 不能覆盖 hard constraint；soft constraint 的偏离必须记录理由和证据，preference 只能影响默认选择或方案排序。
 - Ring Memory 只能作为 EventLog、Run Memory 和 Experience Candidate 的聚合视图，不能成为新的平行事实源。
-- Seed Packet 是启动种子，不是长期资产，也不是 Growth Plan。
-- Root Callback 是运行期补探机制，不是推倒重来；它必须产出新的 Root Brief 版本或明确无需重探的证据。
-- Growth Plan Revision 必须引用具体 Root Brief 版本，并记录继续、回退、分叉或停止的依据。
+- 地下中枢方向材料不是长期资产，也不是 Growth Plan。
+- Nutrient Request 是地上组织向地下中枢请求养料的运行期机制，不是推倒重来，也不是地上自建方向探索集群；它必须产出 Nutrient Patch、新的方向交接包版本或明确无需补充的证据。
+- Growth Plan Revision 必须引用具体方向交接包版本或 Nutrient Patch，并记录继续、回退、分叉或停止的依据。
 - 成熟子 agent 是能力资产的一种，可以成为果实，但脱离母体运行时必须经过显式治理。
 - 脱离子 agent 默认不继承母体运行时权限、密钥、资产图、历史任务或注册表写权限。
 - Codex、OpenCode 或其他平台 agent 文件只是适配输出，不是 AgentArbor 原生 agent 事实源。
@@ -114,12 +115,12 @@ Seed Cluster 是启动门，负责把用户提示词这个“想象”前置成�
 
 1. 用户目标已被当前变更满足。
 2. 相关索引指向真实存在的文件。
-3. `docs/` 没有重新出现旧讨论、历史流水、经验库或演示资产。
+3. `docs/` 没有重新出现过程残留、历史流水、经验库或演示资产。
 4. JSON、YAML、TOML、Markdown 链接和 skill frontmatter 已按影响范围验证。
 5. 没有把平台适配层写成 AgentArbor 产品源数据。
 6. 没有提前创建无契约、无权限、无验证依据的未来运行时资产。
 
-除非用户明确要求，不把开发流水或经验记录放进当前开发入口；但对 AgentArbor 未来态有参考价值的历史讨论必须进入资料库，而不是被删除。
+除非用户明确要求，不把开发流水或经验记录放进当前开发入口；但对 AgentArbor 未来态有参考价值的研究材料必须进入资料库，而不是被删除。
 
 ## 禁止事项
 

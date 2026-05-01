@@ -1,8 +1,10 @@
 # 开发指南
 
-本目录是 AgentArbor 开发前的正式指南。它采用分册结构，吸收 `docs/研究资料/深度研究v0.1/` 和早期项目计划书中有价值的结构化表达，但以当前已经校正的产品方向为准。
+本目录是 AgentArbor 开发前的正式指南。它采用分册结构，直接以 AgentArbor 原生概念树作为当前产品方向。
 
-开发指南不是历史归档、版本路线图或会议纪要。它只写稳定结论、工程边界和可执行契约。
+开发指南不是过程归档、版本路线图或会议纪要。它只写稳定结论、工程边界和可执行契约。
+
+当前产品架构事实源是 [ADR-0018-AgentArbor原生概念树架构](../架构设计/产品架构/ADR-0018-AgentArbor原生概念树架构.md)。本指南只承接该 ADR 的当前结论；其他 ADR 和研究资料只作为背景输入。
 
 ## 阅读顺序
 
@@ -16,17 +18,21 @@
 
 ## 一句话定位
 
-AgentArbor 是目标驱动的智能体 / 智能体应用（AgentApp）孕育与演化平台。它把用户提示词视为想象，由 Seed Cluster 前置成像为 Seed Packet；用户确认后种入 Soil，Root System 初始生根并在运行期持续生长，Core Control Cluster 制定和修订 Growth Plan 与 Workflow IR，Branch / Leaf / Flower 组织执行与验证，并通过 Run Memory、Path Bias、Experience Candidate、Capability Asset 和 Ring Memory 反哺土壤。
+AgentArbor 是目标驱动的智能体 / 智能体应用（AgentApp）孕育与演化平台。它以 `Soil -> Underground Center -> .agentarbor -> Aboveground Center -> Fruits -> Governance -> Soil` 为原生概念树：土壤保存长期事实和能力资产，地下中枢完成需求成形、约束提取、证据探索和方向综合，`.agentarbor` 承担方向交接，地上中枢制定 Growth Plan、Workflow IR、执行组织、验证门和修订机制，果实经过治理后才允许回流土壤。
 
 ## 方向校正
 
-早期计划书中“用自然语言生成垂直 Agent 应用”的方向保留，但需要校正：
+## 架构原则
 
 - AgentArbor 不是一次性脚手架，也不是比赛式 demo 生成器。
 - AgentArbor 不是简单的本地文件治理工具。
-- AgentArbor 的主线不是“生成更多 agent 文件”，而是“让想象成种、种子生根、根系持续吸收、主干调控、地上执行、验证成熟、沉淀反哺形成闭环”。
-- Seed Cluster 是启动门，Root System 是持续地下生命系统，Core Control Cluster 是主干固定核心，Branch / Leaf / Flower 是地上动态组织；它们都不能退化成固定模板或多 agent 聊天。
-- 子 agent 可以是果实，但必须由真实任务、评估、权限收敛和谱系记录共同证明，不能从角色命名直接出生。
+- AgentArbor 的主线不是“生成更多 agent 文件”，而是“从土壤出发，经地下成形、方向交接、地上生长、果实治理，再回到土壤”。
+- 约束不能停留在提示词备注里；约束工程必须让 hard constraint、soft constraint 和 preference 在计划、执行、验证和沉淀中可追踪。
+- 地下中枢承担需求成形、用户确认、约束提取、证据探索和养料供给职责；它不能制定地上执行计划。
+- `.agentarbor` 只承担方向交接；它引用 Soil，不复制 Soil，也不保存最终资产。
+- 地上中枢承担计划、调度、执行控制、验证和修订职责；地上生长组织不能绕过 Growth Plan 和 Workflow IR。
+- 子 agent 可以成为果实，但必须由真实任务、评估、权限收敛和谱系记录共同证明，不能从角色命名直接出生。
+- Fruits 不是 Soil；候选能力、经验和交付物必须经过 Governance 才能入土。
 - Codex、OpenCode、Agent Skills 等平台格式是适配层，不是 AgentArbor 产品语义的事实源。
 
 ## 使用规则
@@ -35,7 +41,7 @@ AgentArbor 是目标驱动的智能体 / 智能体应用（AgentApp）孕育与�
 
 本目录不保存：
 
-- 旧版本说明。
+- 版本路线说明。
 - 会议或会话记录。
 - 历史经验库。
 - 研究资料原文。

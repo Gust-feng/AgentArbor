@@ -52,6 +52,54 @@ test("dynamic rootlet selection starts simple goals without all six clusters", (
   );
 });
 
+test("Intent Core extracts richer Chinese product concepts and derived acceptance criteria", () => {
+  const profile = createGoalIntentProfile({
+    goalId: "goal-product-concepts",
+    rawGoal: "构建任务管理平台，支持用户管理和任务管理，包含测试和监控；不接数据库；默认使用内存实现。",
+    constraints,
+    createdAt: "2026-05-02T00:00:00.000Z",
+  });
+
+  assert.equal(profile.keyConcepts.includes("task_management"), true);
+  assert.equal(profile.keyConcepts.includes("user_management"), true);
+  assert.equal(profile.keyConcepts.includes("monitoring"), true);
+  assert.equal(profile.nonGoals.some((item) => item.includes("不接数据库")), true);
+  assert.equal(profile.acceptanceCriteria.includes("The system must be built and functional."), true);
+  assert.equal(profile.acceptanceCriteria.includes("All specified features must be supported."), true);
+  assert.equal(profile.acceptanceCriteria.includes("Tests must pass and verification must succeed."), true);
+  assert.equal(profile.riskHints.includes("data_persistence"), false);
+});
+
+test("Intent Core handles English casing in derived criteria and risk hints", () => {
+  const profile = createGoalIntentProfile({
+    goalId: "goal-english-casing",
+    rawGoal: "Build an Authentication service with Security checks and Deployment verification.",
+    constraints,
+    createdAt: "2026-05-02T00:00:00.000Z",
+  });
+
+  assert.equal(profile.acceptanceCriteria.includes("The system must be built and functional."), true);
+  assert.equal(profile.acceptanceCriteria.includes("The system must be deployable."), true);
+  assert.equal(profile.riskHints.includes("authentication"), true);
+  assert.equal(profile.riskHints.includes("security"), true);
+});
+
+test("dynamic rootlet selection follows richer asset, evidence, and counterfactual signals", () => {
+  const profile = createGoalIntentProfile({
+    goalId: "goal-richer-rootlets",
+    rawGoal: "复用模板组件，补充验证证据，并给出备选方案。",
+    constraints,
+    createdAt: "2026-05-02T00:00:00.000Z",
+  });
+
+  assert.deepEqual(selectRootletClusterKindsForGoalIntent(profile), [
+    "option",
+    "asset_fit",
+    "evidence",
+    "counterfactual",
+  ]);
+});
+
 test("candidate comparison drives convergence differently for the same cluster kind", () => {
   const riskOutput = makeRootletOutput("output-risk", "risk");
   const riskCandidate = makeCandidate("candidate-risk", riskOutput);

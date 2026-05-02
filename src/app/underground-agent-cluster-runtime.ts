@@ -234,6 +234,8 @@ function completeUndergroundAgentClusterExploration(input: RunUndergroundAgentCl
     runtime: input.runtime,
     traceId: input.traceId,
     agentId: "underground-growth-governor",
+    goalId: input.goalId,
+    planId: input.prepared.startedPlan.planId,
     rootletOutputs: input.rootletOutputs,
     agentCluster: {
       plan: input.prepared.agentClusterPlan,
@@ -250,6 +252,8 @@ function completeUndergroundAgentClusterExploration(input: RunUndergroundAgentCl
     runtime: input.runtime,
     traceId: input.traceId,
     agentId: "underground-growth-governor",
+    goalId: input.goalId,
+    planId: input.prepared.startedPlan.planId,
     candidatePool,
     agentCluster: {
       plan: input.prepared.agentClusterPlan,
@@ -303,6 +307,8 @@ function completeUndergroundAgentClusterExploration(input: RunUndergroundAgentCl
     runtime: input.runtime,
     traceId: input.traceId,
     agentId: completedConvergenceInvocation.agentId,
+    goalId: input.goalId,
+    planId: completedPlan.planId,
     convergenceReport: convergence.convergenceReport,
     candidatePool: convergence.candidatePool,
     undergroundReport,
@@ -401,6 +407,12 @@ export function createUndergroundAgentClusterPlan(input: {
         schedulingReason: `Run ${cluster.kind} rootlet because goal intent selected it for this run.`,
       })
     ),
+    clusterPlanAgent({
+      agentId: "underground-candidate-pool",
+      role: "candidate_pool",
+      inputRefs: [input.explorationPlan.planId],
+      schedulingReason: "Collect completed rootlet outputs into the only formal candidate pool before convergence.",
+    }),
     clusterPlanAgent({
       agentId: "underground-convergence-judge",
       role: "convergence_judge",

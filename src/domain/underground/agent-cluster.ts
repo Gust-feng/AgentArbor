@@ -5,6 +5,7 @@ export const UNDERGROUND_AGENT_ROLES = [
   "intent_core",
   "growth_governor",
   "rootlet_agent",
+  "candidate_pool",
   "convergence_judge",
   "handoff_steward",
 ] as const;

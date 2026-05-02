@@ -134,6 +134,14 @@ export function createUndergroundAgentClusterManifests(): AgentManifest[] {
     }),
     ...ROOTLET_CLUSTER_KINDS.map(createUndergroundRootletAgentManifest),
     undergroundClusterManifest({
+      id: "underground-candidate-pool",
+      name: "Underground Candidate Pool",
+      description: "Builds the formal candidate pool after rootlet outputs arrive.",
+      capabilities: ["candidate.pool", "rootlet.output.collect"],
+      inputEvents: ["exploration_candidate.produced"],
+      outputEvents: ["candidate_pool.updated"],
+    }),
+    undergroundClusterManifest({
       id: "underground-convergence-judge",
       name: "Underground Convergence Judge",
       description: "Judges candidate pool outputs before handoff material can be approved.",

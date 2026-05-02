@@ -18,7 +18,7 @@ test("message-driven underground session emits stage events from handler agents"
   assert.equal(fromIdByType.get("underground.exploration_planned"), "underground-intent-core");
   assert.equal(fromIdByType.get("rootlet_cluster.started"), "underground-growth-governor");
   assert.equal(fromIdByType.get("exploration_candidate.produced"), "underground-rootlet-option");
-  assert.equal(fromIdByType.get("candidate_pool.updated"), "underground-growth-governor");
+  assert.equal(fromIdByType.get("candidate_pool.updated"), "underground-candidate-pool");
   assert.equal(fromIdByType.get("convergence_review.completed"), "underground-convergence-judge");
   assert.equal(fromIdByType.get("direction_handoff.completed"), "underground-handoff-steward");
 });

@@ -96,6 +96,8 @@ export function recoverUndergroundDirectionSession(
     runtime: awaitingSession.runtime,
     traceId: awaitingSession.traceId,
     agentId,
+    goalId: awaitingSession.goalId,
+    planId: awaitingSession.undergroundReport.plan.planId,
     convergenceReport: material.convergenceReview,
     candidatePool: recoveredCandidatePool,
     undergroundReport: recoveredUndergroundReport,

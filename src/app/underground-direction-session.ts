@@ -12,10 +12,7 @@ import type { RunObservationSnapshot } from "../domain/observation/contracts.js"
 import { createRunObservationSnapshot } from "../domain/observation/index.js";
 import { createId } from "../kernel/id.js";
 import { createMessage } from "../kernel/messages/create-message.js";
-import {
-  MessageDrivenUndergroundDispatcher,
-  type UndergroundMessageDrivenDispatchResult,
-} from "./underground-message-dispatcher.js";
+import { UndergroundAgentRunner, type UndergroundAgentRunnerResult } from "./underground/cluster/agent-runner.js";
 import { createMinimalRuntime, type MinimalRuntime } from "./runtime.js";
 
 export type UndergroundDirectionSessionTerminalStatus =
@@ -56,13 +53,13 @@ export function runUndergroundDirectionSession(
 ): UndergroundDirectionSessionResult {
   const { runtime, storage } = createUndergroundSessionRuntime(options);
   const { traceId, goalId, message } = createUndergroundGoalMessage(goal);
-  const dispatcher = new MessageDrivenUndergroundDispatcher({ runtime });
+  const runner = new UndergroundAgentRunner({ runtime });
   try {
     runtime.bus.publish(message);
-    const dispatchResult = requireDispatchResult(dispatcher.dispatchUntilIdle());
+    const dispatchResult = requireDispatchResult(runner.dispatchUntilIdle());
     return completeUndergroundDirectionSession({ runtime, storage, traceId, goalId, dispatchResult });
   } finally {
-    dispatcher.dispose();
+    runner.dispose();
   }
 }
 
@@ -73,13 +70,13 @@ export async function runUndergroundDirectionSessionWithIntelligence(
   const { runtime, storage } = createUndergroundSessionRuntime(options);
   const { traceId, goalId, message } = createUndergroundGoalMessage(goal);
   const intelligenceChannel = options.createIntelligenceChannel(runtime);
-  const dispatcher = new MessageDrivenUndergroundDispatcher({ runtime, intelligenceChannel });
+  const runner = new UndergroundAgentRunner({ runtime, intelligenceChannel });
   try {
     runtime.bus.publish(message);
-    const dispatchResult = requireDispatchResult(await dispatcher.dispatchUntilIdleAsync());
+    const dispatchResult = requireDispatchResult(await runner.dispatchUntilIdleAsync());
     return completeUndergroundDirectionSession({ runtime, storage, traceId, goalId, dispatchResult });
   } finally {
-    dispatcher.dispose();
+    runner.dispose();
   }
 }
 
@@ -125,7 +122,7 @@ function completeUndergroundDirectionSession(input: {
   storage: { packageStore?: DirectionHandoffPackageStore; outputDirectory?: string };
   traceId: string;
   goalId: string;
-  dispatchResult: UndergroundMessageDrivenDispatchResult;
+  dispatchResult: UndergroundAgentRunnerResult;
 }): UndergroundDirectionSessionResult {
   const observationSnapshot = createRunObservationSnapshot({
     traceId: input.traceId,
@@ -182,8 +179,8 @@ function resolveDirectionHandoffSessionStorage(
 }
 
 function requireDispatchResult(
-  result: UndergroundMessageDrivenDispatchResult | undefined
-): UndergroundMessageDrivenDispatchResult {
+  result: UndergroundAgentRunnerResult | undefined
+): UndergroundAgentRunnerResult {
   if (result === undefined) {
     throw new Error("Underground dispatcher reached idle state without a terminal handoff result.");
   }

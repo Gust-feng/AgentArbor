@@ -52,6 +52,7 @@ export function publishRootletClustersStarted(input: {
       type: "rootlet_cluster.started",
       intent: "start_rootlet_clusters",
       payload: {
+        goalId: input.plan.goalId,
         planId: input.plan.planId,
         rootletClusters: input.plan.rootletClusters,
         budget: input.plan.budget,
@@ -65,6 +66,8 @@ export function publishExplorationCandidatesProduced(input: {
   runtime: MinimalRuntime;
   traceId: string;
   agentId: string;
+  goalId: string;
+  planId: string;
   rootletOutputs: readonly RootletOutput[];
   agentCluster?: UndergroundEventAgentClusterPayload;
 }): void {
@@ -76,6 +79,8 @@ export function publishExplorationCandidatesProduced(input: {
       type: "exploration_candidate.produced",
       intent: "produce_exploration_candidates",
       payload: {
+        goalId: input.goalId,
+        planId: input.planId,
         rootletOutputs: input.rootletOutputs,
         agentCluster: input.agentCluster,
       },
@@ -87,6 +92,8 @@ export function publishCandidatePoolUpdated(input: {
   runtime: MinimalRuntime;
   traceId: string;
   agentId: string;
+  goalId: string;
+  planId: string;
   candidatePool: CandidatePool;
   agentCluster?: UndergroundEventAgentClusterPayload;
 }): void {
@@ -98,6 +105,9 @@ export function publishCandidatePoolUpdated(input: {
       type: "candidate_pool.updated",
       intent: "update_candidate_pool",
       payload: {
+        goalId: input.goalId,
+        planId: input.planId,
+        candidatePoolId: input.candidatePool.poolId,
         candidatePool: input.candidatePool,
         agentCluster: input.agentCluster,
       },
@@ -109,6 +119,8 @@ export function publishConvergenceReviewCompleted(input: {
   runtime: MinimalRuntime;
   traceId: string;
   agentId: string;
+  goalId: string;
+  planId: string;
   convergenceReport: UndergroundConvergenceReport;
   candidatePool: CandidatePool;
   undergroundReport: UndergroundExplorationReport;
@@ -122,6 +134,10 @@ export function publishConvergenceReviewCompleted(input: {
       type: "convergence_review.completed",
       intent: "complete_convergence_review",
       payload: {
+        goalId: input.goalId,
+        planId: input.planId,
+        candidatePoolId: input.candidatePool.poolId,
+        reviewId: input.convergenceReport.reviewId,
         convergenceReport: input.convergenceReport,
         candidatePool: input.candidatePool,
         undergroundReport: input.undergroundReport,

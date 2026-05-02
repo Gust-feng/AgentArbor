@@ -28,6 +28,8 @@
 - `CandidateComparison`：记录 candidate 的 `goalMatch`、`evidenceSupport`、`constraintImpact`、`riskLevel`、`unknowns`、`whyNot`、`conclusion` 和 `evidenceRefs`。
 - `compareCandidatesForGoal(...)`：基于目标画像、候选和 rootlet output 生成比较、收束决策和 evidence entries；不得按 `clusterId` 硬编码 accepted / merged / rejected。
 - `UndergroundEvidenceLedger`：地下证据账本，收纳 goal intent、Soil constraint、rootlet output、candidate comparison 和 convergence decision evidence。
+- `createRootletOutputsForInvocation(...)`：单个 rootlet invocation 可以按 rootlet kind 和预算产出多个 `RootletOutput`；输出仍只是候选材料，必须进入 `CandidatePool`。
+- `CandidatePool.candidatesByKind`：按 `RootletClusterKind` 分组的候选视图，必须与扁平 `candidates` 和 `counts` 同步。
 - `runUndergroundDirectionSession(goal, options?)`：地下-only 入口，返回 `approved_package_created`、`awaiting_user` 或 `stopped`，并生成 JSON-safe observation snapshot。`options` 可包含 `constraints`、显式 `packageStore` 或显式 `outputDirectory`；不传 store / output directory 时只能使用 in-memory package store。
 - `recoverUndergroundDirectionSession(awaitingSession, clarificationResponse?)`：地下-only 恢复入口，接收 awaiting-user session 与可选澄清回答；未传回答时创建 deterministic demo/test response，保存同一 direction 的 approved v2 package。
 - `createUndergroundDemoSummary(result, recovery?)`：地下-only demo 的纯投影函数，输入 `UndergroundDirectionSessionResult` 和可选恢复结果，输出 JSON-safe summary；不得读取 CLI、写文件或访问 store。
@@ -40,7 +42,10 @@
 - Intent Core 先用确定性规则解析目标，不接真实 LLM；解析结果必须进入后续 rootlet 选择、候选比较和 handoff 字段派生。
 - Rootlet 选择由 `GoalIntentProfile` 驱动；简单目标默认只启动 `option`，风险/资产/证据/约束/反驳明显时才启动对应 cluster。
 - 单个 `RootletOutput` 只能进入 `CandidatePool`，不能直接进入 Direction Handoff Package。
-- Convergence Judge 必须基于 `CandidateComparison.conclusion` 生成 `accepted/merged/rejected/unknown`，并记录 source candidate refs 和 evidence refs。
+- 单个 rootlet invocation 可以产出多个 `RootletOutput`，但数量必须受该 rootlet cluster 的 `budget.maxCandidateOutputs` 限制；公共 EventLog 仍只记录一次 `exploration_candidate.produced` 阶段事件，payload 可携带多个输出。
+- CandidatePool 必须同时提供扁平候选列表和按 rootlet kind 分组的 `candidatesByKind`；二者都是同一候选事实的视图，不得成为两套事实源。
+- Convergence Judge 必须基于 `CandidateComparison.conclusion` 生成 `accepted/merged/rejected/unknown`，并记录 source candidate refs、evidence refs、推荐主方向、合并项、淘汰原因、需要用户确认的冲突和地上参考方向。
+- option 候选之间应产生保留 / 合并 / 淘汰裁决；risk、evidence、constraint、asset_fit 和 counterfactual 候选不能直接成为主方向，必须作为证据、约束、风险或 why-not 材料参与交叉裁决。
 - `approved_package_created` 只允许在有 accepted / merged handoff candidates 且无 blocking unknown 时出现。
 - `awaiting_user` 只允许在存在 blocking unknown 和 `UserClarificationRequest` 时出现；non-blocking unknown 不得单独制造等待用户状态。
 - `stopped` 必须带可审计停止理由，例如 `budget_exhausted_without_converged_candidates`；停止状态不得伪造 approved package。
@@ -50,6 +55,7 @@
 - deterministic auto-answer 只属于地下-only demo/test 边界，不代表真实用户交互设计，也不得进入 Soil、RunMemory、Experience Candidate 或 Capability Asset。
 - 恢复成功后的 demo summary 以 approved v2 作为当前 `directionPackage`，并暴露 `recoveredPackage`、`lineage`、`versions` 和可选 `writtenPackagePath`；无恢复时 `recoveredPackage` 必须为空。
 - Direction Handoff 的 `clarifiedGoal`、`nonGoals`、`assumptions`、`risks`、`options` 和 `missingInformation` 必须由 `GoalIntentProfile + CandidatePool + ConvergenceReport` 派生，不得回退到固定 minimal 文案。
+- Direction Handoff 的 `options` 必须保留所有 option 候选方向的取舍记录，不得只写推荐方向；`decisionRecord` 必须记录 retained / merged / rejected / userDecisionRequired / abovegroundReference；`riskRegister` 必须保留风险候选与淘汰候选的来源归因。
 - 地下约束交接链当前只在 `direction_handoff` 阶段执行阻断校验；其他 6 个 gate 作为 `candidateConstraintRefs` 可追踪交接，不实现后续层执行。
 - Evidence Ledger 是运行期证据索引，不是 Soil、RunMemory 或长期资产库；它必须由 EventLog / 地下运行结果派生并随 report 暴露。
 - 地下-only demo summary 是可读投影，不是 EventLog、RunMemory、Soil 或长期资产；它不得成为新的事实源。
@@ -84,6 +90,9 @@
 - Intent Core 能从不同目标派生 key concepts、nonGoals、acceptance criteria、assumptions、risk hints、constraint hints 和 unknowns。
 - 动态 rootlet selection：简单目标不全量启动，复杂目标按信号启动对应 cluster。
 - CandidateComparison 对同一 rootlet kind 在不同目标下能产生不同 convergence decision。
+- 单个 rootlet invocation 产出多个候选并受预算限制。
+- CandidatePool 按 `RootletClusterKind` 分组，且分组与扁平候选列表一致。
+- Convergence Judge 覆盖 option 合并、option 与 hard boundary 冲突淘汰、风险候选作为 non-selectable open risk 的裁决。
 - Direction Handoff 字段从 goal profile、候选和收束报告派生，且不回退固定 minimal 文案。
 - blocking unknown / stopped / approved 三类地下-only 终态均有测试。
 - awaiting_user 通过 `recoverUndergroundDirectionSession` 或 `--auto-answer` 恢复为 approved v2，保持同一 direction id，store versions 为 `[1, 2]`。

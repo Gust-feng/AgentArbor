@@ -25,7 +25,7 @@
 - Event view 只能从 EventLog entry 派生，不能读取 runtime store。
 - Event ref 提取必须按事件类型区分同名字段。`model.requested`、`model.completed`、`model.failed` 中的 `requestId` / `responseId` 只能生成 `model_call` refs；`user_approval.requested`、`user_approval.received` 和 `direction_handoff.revision_requested` 中的 clarification id 才能生成 `user_clarification` refs。
 - `currentPhase` 和 `currentStage` 必须由 EventLog cursor 派生；没有事件时为 `not_started`。
-- Underground view 必须展示预算、rootlet clusters、rootlet outputs、candidate pool counts、每个 candidate、每个 convergence decision、收束摘要、handoff candidate refs、open questions 和用户升级状态。
+- Underground view 必须展示预算、rootlet clusters、rootlet outputs、candidate pool counts、`candidatesByKind`、每个 candidate、每个 convergence decision、candidate comparison、推荐 option、淘汰原因、需要用户确认的冲突、地上参考 option、收束摘要、handoff candidate refs、open questions 和用户升级状态。
 - `underground.userEscalation` 必须在 blocking unknown 存在时暴露 request id、reason、blocking level、status、related candidate refs、questions 和 JSON-safe request 数据；non-blocking unknown 只应出现在 `convergence.openQuestions`。
 - `underground.clarificationResponses` 必须从 EventLog 中的 `user_approval.received` payload 派生，暴露 request id、answers、answeredAt 和 evidence refs；不得把 response 作为 EventLog 之外的第二事实源。
 - Handoff view 必须暴露 package ref、direction id/version/status、validation 状态、source candidate refs、convergence review ref 和 package lineage；不能内联 Growth Plan 或 Soil asset content。
@@ -65,7 +65,7 @@
 - Snapshot can round-trip through `JSON.stringify` / `JSON.parse`。
 - `currentPhase` 和 `RunStage` 从 EventLog 派生。
 - Event views include `summary` / `scope` / `severity` / `progress` / `refs` and are projected from EventLog entries only。
-- Underground view lists every rootlet cluster、rootlet output、candidate and convergence decision。
+- Underground view lists every rootlet cluster、rootlet output、candidate、candidate kind group、candidate comparison and convergence decision。
 - Underground view exposes blocking user clarification request details and non-blocking open questions。
 - Event views expose `user_clarification` refs when `user_approval.requested` carries a clarification request payload。
 - Event views expose `user_clarification` refs when `user_approval.received` carries a clarification response payload。

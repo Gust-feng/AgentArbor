@@ -36,6 +36,8 @@
 - `lineage.sourceRefs` 必须记录本次版本来源，例如 previous package、previous convergence review、clarification request、`user_approval.received` 和回答证据 refs。
 - approved DirectionHandoffPackage 的创建 / 保存是当前地下独立闭环的完成标志；后续 Aboveground planning 只能接管它，不能把未批准 package、临时 handoff 材料或根须原始输出当作闭环完成。
 - Direction Handoff 的 `clarifiedGoal`、`nonGoals`、`assumptions`、`risks`、`options` 和 `missingInformation` 必须由 GoalIntentProfile、CandidatePool 和 ConvergenceReport 派生；固定 minimal 文案只能作为没有 profile 的兼容 fallback。
+- Direction Handoff 的 `options` 必须覆盖收束报告中的所有 option 候选方向，并用 `recommendationScore`、`whyNot`、`doNotChooseWhen` 和 `decisionRecord` 表达推荐、合并、淘汰和地上参考关系；不得只把推荐方向写入 package。
+- Direction Handoff 的 `riskRegister` 必须承接 risk rootlet 候选、淘汰候选和用户澄清风险；风险条目只能作为方向证据和交接上下文，不能绕过 convergence 成为正式执行计划。
 - 文件系统 store 的 root directory 是调用方必须显式提供的运行边界。没有显式 root directory、任务出生依据和写入授权时，任何 demo、默认 runtime 或测试 helper 都不得写入仓库根 `.agentarbor/`。
 - 文件系统 store 的 canonical payload 路径是 `<root>/directions/<encoded directionId>/v<version>/handoff.meta.json`；对外展示或断言该路径时必须通过导出的 resolver 获取。
 - store API 固定保持 `save(pkg)`、`load(directionId, version)`、`listVersions(directionId)`、`validate(pkg)`；不得为了谱系增加平行读取接口。
@@ -85,6 +87,7 @@
 - inline Soil asset content 被拒绝。
 - handoff 文本弱化 hard constraint 被拒绝。
 - 地下-only session 生成的 handoff 字段来自目标画像、候选和收束报告，而不是固定 minimal 文案。
+- 多候选地下 session 生成的 `options.json` / `decision-record.md` / `risk-register.md` 反映 retained、merged、rejected、userDecisionRequired 和 abovegroundReference，不退化为单一结论。
 - file-system store 在临时目录 save/load/list round-trip。
 - explicit `outputDirectory` session 能通过 filesystem store round-trip 读取 `handoff.meta.json`。
 - 默认 demo 不创建或修改仓库根 `.agentarbor/`。

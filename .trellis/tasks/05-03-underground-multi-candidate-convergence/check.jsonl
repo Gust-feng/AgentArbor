@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Quality gate entrypoint and relevant backend specs."}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Check module ownership and no adapter/UI/DB drift."}
+{"file": ".trellis/spec/backend/underground-radial-growth.md", "reason": "Check multi-candidate rootlet, grouped candidate pool, convergence, and handoff invariants."}
+{"file": ".trellis/spec/backend/direction-handoff-package.md", "reason": "Check handoff source candidates, validation, and package content roles."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Run build/test/demo and no repo-root .agentarbor checks."}
+{"file": ".trellis/spec/guides/agentarbor-governance-guide.md", "reason": "Check Trellis/docs board and no stale Seed/Root active口径 drift."}

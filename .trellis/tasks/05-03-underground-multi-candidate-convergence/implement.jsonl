@@ -1,0 +1,10 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Runtime spec entrypoint and pre-development checklist."}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Keep domain/app/kernel boundaries while extending underground candidates and convergence."}
+{"file": ".trellis/spec/backend/underground-radial-growth.md", "reason": "Primary executable spec for rootlet outputs, candidate pool, convergence, user escalation, and handoff guards."}
+{"file": ".trellis/spec/backend/direction-handoff-package.md", "reason": "Direction Handoff Package boundary, validation, file roles, and source candidate constraints."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Build, test, demo, and no repo-root .agentarbor validation requirements."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Feature changes data flow across rootlet output, candidate pool, convergence report, package, and observation."}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Avoid duplicating candidate generation, grouping, and convergence rules across agents and helpers."}
+{"file": "docs/开发指南/03-系统架构/07-地下中枢与方向成形.md", "reason": "Product-level requirement for multi-option exploration, cross-checking, attribution, and convergence records."}
+{"file": "docs/开发指南/03-系统架构/04-Agent集群运行结构.md", "reason": "Agent cluster boundary: rootlet output is candidate-only until central convergence."}
+{"file": "docs/开发指南/02-核心闭环/02-智能体应用孕育闭环.md", "reason": "Direction handoff remains a prerequisite before aboveground growth."}

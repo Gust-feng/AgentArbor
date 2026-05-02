@@ -1,6 +1,7 @@
 export * from "./artifacts/in-memory-artifact-store.js";
 export * from "./events/in-memory-event-log.js";
 export * from "./id.js";
+export * from "./intelligence/index.js";
 export * from "./messages/create-message.js";
 export * from "./messages/in-memory-message-bus.js";
 export * from "./registry/in-memory-agent-registry.js";

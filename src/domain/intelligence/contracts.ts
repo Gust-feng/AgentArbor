@@ -1,0 +1,141 @@
+import type { ArtifactRef } from "../common.js";
+import type { ConstraintRef } from "../constraints.js";
+import type { ObservationRef } from "../observation/contracts.js";
+
+export const MODEL_PROTOCOL_KINDS = [
+  "openai_compatible_chat_completions",
+  "openai_responses",
+  "anthropic_messages",
+  "gemini_generate_content",
+] as const;
+
+export type ModelProtocolKind = (typeof MODEL_PROTOCOL_KINDS)[number];
+
+export type ModelProviderKind = "fake" | "openai_compatible" | "openai" | "anthropic" | "gemini" | "local";
+
+export type ModelPurpose =
+  | "intent_profile"
+  | "rootlet_candidate"
+  | "counterfactual"
+  | "plan_draft"
+  | "verification_advice"
+  | "governance_advice";
+
+export type ModelOutputKind = "candidate" | "draft" | "explanation" | "evidence_suggestion";
+
+export type ModelMessage = {
+  readonly role: "system" | "user" | "assistant";
+  readonly content: string;
+  readonly ref?: string;
+};
+
+export type ModelBudget = {
+  readonly maxInputTokens?: number;
+  readonly maxOutputTokens?: number;
+  readonly maxTotalTokens?: number;
+  readonly maxLatencyMs?: number;
+  readonly maxCostUsd?: number;
+};
+
+export type ModelOutputContract = {
+  readonly contractId: string;
+  readonly outputKind: ModelOutputKind;
+  readonly format: "json_object" | "text";
+  readonly requiredFields?: readonly string[];
+  readonly requiredStringFields?: readonly string[];
+  readonly minTextLength?: number;
+  readonly maxTextLength?: number;
+};
+
+export type ModelOutputValidationIssue = {
+  readonly code: string;
+  readonly message: string;
+  readonly path?: string;
+};
+
+export type ModelOutputValidationResult = {
+  readonly status: "pending" | "passed" | "failed";
+  readonly checkedAt: string;
+  readonly issues: readonly ModelOutputValidationIssue[];
+};
+
+export type ModelRequest = {
+  readonly requestId: string;
+  readonly traceId: string;
+  readonly callerRef: ObservationRef | string;
+  readonly purpose: ModelPurpose;
+  readonly inputRefs: readonly ObservationRef[];
+  readonly sanitizedMessages: readonly ModelMessage[];
+  readonly outputContract: ModelOutputContract;
+  readonly constraintRefs: readonly ConstraintRef[];
+  readonly budget: ModelBudget;
+  readonly sensitivity: "public" | "internal" | "restricted";
+  readonly requestedAt: string;
+};
+
+export type ModelUsage = {
+  readonly inputTokens?: number;
+  readonly outputTokens?: number;
+  readonly totalTokens?: number;
+  readonly estimatedCostUsd?: number;
+  readonly latencyMs?: number;
+};
+
+export type ModelFailureKind =
+  | "request_validation"
+  | "provider_config"
+  | "provider_auth"
+  | "provider_rate_limit"
+  | "provider_timeout"
+  | "provider_network"
+  | "provider_response"
+  | "output_validation";
+
+export type ModelFailure = {
+  readonly kind: ModelFailureKind;
+  readonly retryable: boolean;
+  readonly message: string;
+  readonly sanitizedErrorRef?: string;
+};
+
+export type ModelResponse = {
+  readonly responseId: string;
+  readonly requestId: string;
+  readonly providerId: string;
+  readonly providerKind: ModelProviderKind;
+  readonly protocolKind: ModelProtocolKind;
+  readonly model: string;
+  readonly status: "completed" | "failed" | "cancelled";
+  readonly outputKind: ModelOutputKind;
+  readonly structuredOutput?: unknown;
+  readonly textOutput?: string;
+  readonly textOutputRef?: ArtifactRef;
+  readonly usage?: ModelUsage;
+  readonly finishReason?: "stop" | "length" | "tool_call" | "content_filter" | "error";
+  readonly validation: ModelOutputValidationResult;
+  readonly failure?: ModelFailure;
+  readonly completedAt: string;
+};
+
+export type ModelCallRef = {
+  readonly requestId: string;
+  readonly responseId?: string;
+  readonly providerId?: string;
+  readonly model?: string;
+  readonly outputKind: ModelOutputKind;
+  readonly eventRefs: readonly string[];
+  readonly validationStatus: "pending" | "passed" | "failed";
+};
+
+export type ModelProvider = {
+  readonly providerId: string;
+  readonly providerKind: ModelProviderKind;
+  readonly protocolKind: ModelProtocolKind;
+  readonly model: string;
+  complete(request: ModelRequest): Promise<ModelResponse>;
+};
+
+export type IntelligenceChannel = {
+  request(request: ModelRequest): Promise<ModelResponse>;
+  validateResponse(request: ModelRequest, response: ModelResponse): ModelOutputValidationResult;
+};

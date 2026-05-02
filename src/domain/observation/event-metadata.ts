@@ -54,6 +54,27 @@ export const EVENT_OBSERVATION_METADATA = {
     phase: "underground",
     stage: "candidate_pool_updated",
   }),
+  "model.requested": metadata({
+    summary: "Intelligence Channel requested model output.",
+    scope: "runtime",
+    progressStatus: "in_progress",
+    phase: "underground",
+    stage: "model_requested",
+  }),
+  "model.completed": metadata({
+    summary: "Intelligence Channel completed model output validation.",
+    scope: "runtime",
+    phase: "underground",
+    stage: "model_completed",
+  }),
+  "model.failed": metadata({
+    summary: "Intelligence Channel failed or rejected model output.",
+    scope: "runtime",
+    severity: "warning",
+    progressStatus: "failed",
+    phase: "underground",
+    stage: "model_failed",
+  }),
   "convergence_review.completed": metadata({
     summary: "Convergence review judged candidate outcomes.",
     scope: "underground",

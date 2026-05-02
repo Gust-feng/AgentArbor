@@ -1,3 +1,4 @@
+import type { ArborMessageType } from "../common.js";
 import type {
   ObservationProgress,
   ObservationRef,
@@ -73,7 +74,8 @@ function refsForEvent(entry: RunObservationEventEntry): ObservationRef[] {
   pushObjectIdRef(refs, payload, "pathBias", "path_bias");
   pushPackageRef(refs, payload);
   pushConvergenceRef(refs, payload);
-  pushClarificationRequestRef(refs, payload);
+  pushModelCallRefs(refs, entry.type, payload);
+  pushClarificationRequestRef(refs, entry.type, payload);
   pushCandidatePoolRef(refs, payload);
   pushRootletRefs(refs, payload);
 
@@ -102,6 +104,18 @@ function pushObjectIdRef(
   if (typeof value.id === "string") {
     refs.push({ kind, id: value.id });
   }
+}
+
+function pushModelCallRefs(
+  refs: ObservationRef[],
+  type: ArborMessageType,
+  payload: Readonly<Record<string, unknown>>
+): void {
+  if (type !== "model.requested" && type !== "model.completed" && type !== "model.failed") {
+    return;
+  }
+  pushStringRef(refs, payload, "requestId", "model_call");
+  pushStringRef(refs, payload, "responseId", "model_call");
 }
 
 function pushPackageRef(refs: ObservationRef[], payload: Readonly<Record<string, unknown>>): void {
@@ -142,7 +156,11 @@ function pushConvergenceRef(refs: ObservationRef[], payload: Readonly<Record<str
   }
 }
 
-function pushClarificationRequestRef(refs: ObservationRef[], payload: Readonly<Record<string, unknown>>): void {
+function pushClarificationRequestRef(
+  refs: ObservationRef[],
+  type: ArborMessageType,
+  payload: Readonly<Record<string, unknown>>
+): void {
   const clarificationRequest = asRecord(payload.clarificationRequest);
   if (typeof clarificationRequest.requestId === "string") {
     refs.push({ kind: "user_clarification", id: clarificationRequest.requestId });
@@ -150,6 +168,9 @@ function pushClarificationRequestRef(refs: ObservationRef[], payload: Readonly<R
   const clarificationResponse = asRecord(payload.clarificationResponse);
   if (typeof clarificationResponse.requestId === "string") {
     refs.push({ kind: "user_clarification", id: clarificationResponse.requestId, label: "response" });
+  }
+  if (type !== "user_approval.received" && type !== "direction_handoff.revision_requested") {
+    return;
   }
   const requestId = payload.requestId;
   if (typeof requestId === "string") {

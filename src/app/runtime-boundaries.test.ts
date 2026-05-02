@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
 import test from "node:test";
 import { DirectionHandoffPackageValidationError } from "../domain/agentarbor/direction-handoff-package.js";
 import {
@@ -69,3 +71,61 @@ test("aboveground planner cannot create direction exploration candidates", () =>
 
   assert.throws(() => planner.createExplorationCandidate(), StateGuardError);
 });
+
+test("runtime has no external LLM SDK dependency or direct provider adapter import outside adapter tests", () => {
+  const packageJson = JSON.parse(readFileSync("package.json", "utf8")) as {
+    dependencies?: Record<string, string>;
+    devDependencies?: Record<string, string>;
+  };
+  const prohibitedPackages = [
+    "ai",
+    "openai",
+    "@ai-sdk/openai",
+    "@anthropic-ai/sdk",
+    "@google/genai",
+    "langchain",
+    "@langchain/core",
+  ];
+  const allDependencies = {
+    ...(packageJson.dependencies ?? {}),
+    ...(packageJson.devDependencies ?? {}),
+  };
+
+  for (const packageName of prohibitedPackages) {
+    assert.equal(packageName in allDependencies, false, `${packageName} must not be introduced as a dependency`);
+  }
+
+  for (const file of sourceFiles(["src/domain", "src/kernel", "src/app"])) {
+    const source = readFileSync(file, "utf8");
+    assert.equal(
+      /from\s+["'][^"']*adapters\/intelligence/.test(source),
+      false,
+      `${file} must not import provider adapters`
+    );
+    assert.equal(
+      /from\s+["'](?:openai|ai|@ai-sdk\/openai|@anthropic-ai\/sdk|@google\/genai|langchain|@langchain\/core)["']/.test(source),
+      false,
+      `${file} must not import external LLM SDKs`
+    );
+  }
+});
+
+function sourceFiles(roots: readonly string[]): string[] {
+  const files: string[] = [];
+  const walk = (path: string): void => {
+    for (const entry of readdirSync(path)) {
+      const child = join(path, entry);
+      const stats = statSync(child);
+      if (stats.isDirectory()) {
+        walk(child);
+      } else if (child.endsWith(".ts")) {
+        files.push(child);
+      }
+    }
+  };
+
+  for (const root of roots) {
+    walk(root);
+  }
+  return files;
+}

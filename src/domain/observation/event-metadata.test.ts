@@ -37,14 +37,46 @@ test("event view and phase-stage resolution use the same event metadata source",
   });
 });
 
-function minimalEventEntry(type: (typeof ARBOR_MESSAGE_TYPES)[number], sequence: number): RunObservationEventEntry {
+test("model event refs do not collide with user clarification request ids", () => {
+  const view = createRunObservationEventView(
+    minimalEventEntry("model.completed", 1, {
+      requestId: "model-request-test",
+      responseId: "model-response-test",
+    })
+  );
+
+  assert.equal(view.refs.some((ref) => ref.kind === "model_call" && ref.id === "model-request-test"), true);
+  assert.equal(view.refs.some((ref) => ref.kind === "model_call" && ref.id === "model-response-test"), true);
+  assert.equal(view.refs.some((ref) => ref.kind === "user_clarification"), false);
+});
+
+test("clarification request refs do not collide with model call ids", () => {
+  const view = createRunObservationEventView(
+    minimalEventEntry("user_approval.received", 1, {
+      requestId: "clarification-request-test",
+      clarificationResponse: { requestId: "clarification-request-test" },
+    })
+  );
+
+  assert.equal(
+    view.refs.some((ref) => ref.kind === "user_clarification" && ref.id === "clarification-request-test"),
+    true
+  );
+  assert.equal(view.refs.some((ref) => ref.kind === "model_call"), false);
+});
+
+function minimalEventEntry(
+  type: (typeof ARBOR_MESSAGE_TYPES)[number],
+  sequence: number,
+  payload: ArborMessage["payload"] = {}
+): RunObservationEventEntry {
   const message: ArborMessage = {
     id: `msg-${sequence}`,
     traceId: "trace-metadata-test",
     from: { id: "test", role: "underground_center" },
     type,
     intent: "metadata_test",
-    payload: {},
+    payload,
     createdAt: "2026-05-01T00:00:00.000Z",
   };
 

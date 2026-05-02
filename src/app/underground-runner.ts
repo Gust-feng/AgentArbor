@@ -51,6 +51,7 @@ export type RunUndergroundExplorationInput = {
   readonly rawGoal?: string;
   readonly goalIntentProfile?: GoalIntentProfile;
   readonly agentId: string;
+  readonly extraRootletOutputs?: readonly RootletOutput[];
   readonly converge?: (input: UndergroundConvergenceInput) => UndergroundConvergenceResult;
 };
 
@@ -88,12 +89,15 @@ export function runUndergroundExploration(
     plan: startedPlan,
   });
 
-  const rootletOutputs = produceMinimalRootletOutputs({
-    plan: startedPlan,
-    producedByAgentId: input.agentId,
-    constraints: input.runtime.constraints,
-    goalIntentProfile,
-  });
+  const rootletOutputs = [
+    ...produceMinimalRootletOutputs({
+      plan: startedPlan,
+      producedByAgentId: input.agentId,
+      constraints: input.runtime.constraints,
+      goalIntentProfile,
+    }),
+    ...(input.extraRootletOutputs ?? []),
+  ];
   publishExplorationCandidatesProduced({
     runtime: input.runtime,
     traceId: input.traceId,

@@ -11,4 +11,5 @@ export * from "./agentarbor/direction-handoff-package/contracts.js";
 export * from "./aboveground/contracts.js";
 export * from "./governance/contracts.js";
 export * from "./fruits/contracts.js";
+export * from "./intelligence/contracts.js";
 export * from "./observation/contracts.js";

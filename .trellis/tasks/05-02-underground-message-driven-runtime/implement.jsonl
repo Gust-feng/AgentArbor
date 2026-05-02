@@ -1,0 +1,7 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Runtime spec index and pre-development boundaries."}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Module ownership for adding app dispatcher and keeping domain focused."}
+{"file": ".trellis/spec/backend/underground-radial-growth.md", "reason": "Underground agent cluster, candidate pool, convergence and handoff invariants."}
+{"file": ".trellis/spec/backend/observation-read-model.md", "reason": "EventLog and Snapshot projection rules for message-driven visibility."}
+{"file": ".trellis/spec/backend/intelligence-channel.md", "reason": "AI output must remain handler-owned candidate/advice material."}
+{"file": ".trellis/spec/backend/direction-handoff-package.md", "reason": "Handoff package validation boundary must not be bypassed by dispatcher."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Build, test and demo quality gates."}

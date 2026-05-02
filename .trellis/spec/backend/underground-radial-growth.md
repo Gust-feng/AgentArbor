@@ -183,6 +183,78 @@ createMinimalCandidatePool({ goalId, rootletOutputs: [rootletOutput], agentInvoc
 
 正式候选池只接受能回溯到 agent invocation 的 rootlet output；这保证地下组织是调度出来的，而不是 session helper 拼出来的。
 
+## Scenario: 地下消息驱动调度内核
+
+### 1. Scope / Trigger
+
+- Trigger：修改 `src/app/underground-message-dispatcher.ts`、`src/app/underground-direction-session.ts`、地下阶段事件发布 helper、地下消息驱动测试或 handler 级 `from.id` 约定。
+- Scope：只覆盖内存版 MessageBus 驱动地下单环；不引入持久 broker、后台重试、并发执行器、UI、HTTP、数据库、MCP、A2A、AG-UI、真实 LLM CLI demo、外部 SDK 或 repo-root `.agentarbor/` 运行资产。
+
+### 2. Signatures
+
+- `MessageDrivenUndergroundDispatcher({ runtime, intelligenceChannel?, maxDispatchSteps? })`：订阅地下阶段消息并按队列推进 handler。
+- `dispatchUntilIdle()`：同步推进确定性地下 handler；若遇到需要异步智能通道的 handler，必须失败并要求调用异步入口。
+- `dispatchUntilIdleAsync()`：推进可能调用 `IntelligenceChannel` 的 rootlet handler。
+- `UndergroundMessageDrivenDispatchResult`：返回终态、地下报告、方向交接包、loaded package ref、processed message ids 和 dispatch step count。
+
+### 3. Contracts
+
+- `runUndergroundDirectionSession` 默认只能创建并发布 `goal.received`，地下阶段推进必须由 dispatcher 订阅 MessageBus 后触发；session 不得重新串行调用 prepare / rootlet / candidate pool / convergence / handoff helper。
+- handler 之间的跨阶段推进必须通过正式 `ArborMessage`：`goal.received -> underground.exploration_planned -> rootlet_cluster.started -> exploration_candidate.produced -> candidate_pool.updated -> convergence_review.completed -> direction_handoff.completed | user_approval.requested`。
+- 每个 handler 输出事件必须带对应 agent `from.id`：Intent Core、Growth Governor、Rootlet Agent、Convergence Judge、Handoff Steward；EventLog 必须能直接读出推进者。
+- dispatcher 可以维护 trace-scoped typed context store，但写入和读取必须由消息触发；context store 不能替代 EventLog、DirectionHandoffPackageStore 或 Observation Snapshot 的事实源。
+- dispatcher 必须记录 processed message id、phase guard 和 max dispatch steps；重复消息不能重复产出地下结果。
+- 直接发布后续阶段事件、但没有同 trace 的 `goal.received` context 时，dispatcher 必须失败，不得跳阶段产出 convergence、handoff package 或用户澄清请求。
+- 智能通道只允许在 rootlet handler 内把模型输出包装为 `RootletOutput`；模型输出仍必须经过 candidate pool、convergence 和 handoff validation。
+
+### 4. Validation & Error Matrix
+
+| 条件 | 结果 |
+| --- | --- |
+| `goal.received` 经 MessageBus 发布 | dispatcher 逐步发布地下阶段事件并返回终态结果 |
+| 未发布任何消息即调用 dispatch | 返回 `undefined`，EventLog 不新增地下结果 |
+| 重复发布同一 message id 或同 trace 同阶段消息 | 只处理首个阶段推进，地下结果只产出一次 |
+| dispatch step 超过 `maxDispatchSteps` | 抛 `UndergroundMessageDispatcherError`，不得继续推进后续阶段 |
+| 直接发布 `candidate_pool.updated` 等后续阶段且缺少 context | 抛 `UndergroundMessageDispatcherError`，不得产出 `convergence_review.completed` 或 handoff 事件 |
+| session 重新直接调用旧 cluster 串行 runtime | 设计违规，测试应通过消息驱动断言暴露回归 |
+| rootlet handler 绕过智能通道或 candidate pool 直接写 approved handoff | 智能通道和 handoff validation 测试失败 |
+
+### 5. Good / Base / Bad Cases
+
+- Good：地下-only session 发布一个 `goal.received` 后，由 dispatcher 队列逐步推进，并在 EventLog 中看到每个 handler 的 `from.id`。
+- Good：重复 goal message 不会生成第二个 `underground.exploration_planned` 或第二个 handoff package。
+- Base：旧的 agent cluster runtime helper 可以继续作为 handler 内部纯计算/兼容入口存在，但 session 默认路径不再直接调用它。
+- Bad：session 在发布 `goal.received` 后继续手动调用 rootlet、candidate pool、convergence 和 handoff helper。
+- Bad：测试直接构造 context store 或 package 结果来证明成功，而不是通过 MessageBus 发布消息驱动 dispatcher。
+
+### 6. Tests Required
+
+- handler `from.id` 覆盖正常地下阶段事件。
+- 重复 message id / 同 trace 同阶段消息不会重复推进。
+- `maxDispatchSteps` 能阻断递归或失控 dispatch。
+- 没有 `goal.received` context 的后续阶段消息不能跳阶段产出地下结果。
+- `runUndergroundDirectionSessionWithIntelligence` 仍只让模型输出进入 rootlet output / candidate pool，不绕过 convergence 和 handoff validation。
+- Observation Snapshot 仍从 EventLog + runtime result 派生，并保持 JSON-safe。
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```ts
+runtime.bus.publish(goalMessage);
+const exploration = runUndergroundAgentClusterExploration({ runtime, traceId, goalId, rawGoal });
+```
+
+#### Correct
+
+```ts
+const dispatcher = new MessageDrivenUndergroundDispatcher({ runtime });
+runtime.bus.publish(goalMessage);
+const result = dispatcher.dispatchUntilIdle();
+```
+
+跨 agent / 跨阶段推进只能由 dispatcher 消费 MessageBus 事件完成；纯函数 helper 只能保留为 handler 内部实现细节。
+
 ## Signatures
 
 - 固定 center roles：`intent_core`、`growth_governor`、`constraint_sentinel`、`evidence_ledger`、`convergence_judge`、`handoff_steward`。

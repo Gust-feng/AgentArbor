@@ -1,0 +1,7 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Quality gate entrypoint and backend spec routing."}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Verify dispatcher/runtime files do not blur domain/kernel/app responsibilities."}
+{"file": ".trellis/spec/backend/underground-radial-growth.md", "reason": "Verify message-driven runtime preserves underground invariants."}
+{"file": ".trellis/spec/backend/observation-read-model.md", "reason": "Verify EventLog/Snapshot remain the frontend-readable source."}
+{"file": ".trellis/spec/backend/intelligence-channel.md", "reason": "Verify model output cannot bypass rootlet handler and candidate pool."}
+{"file": ".trellis/spec/backend/direction-handoff-package.md", "reason": "Verify handoff validation is still the approval boundary."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Verify required build/test/demo gates."}

@@ -1,5 +1,6 @@
 import type { RuntimeShape } from "../common.js";
 import type { ConstraintRef } from "../constraints.js";
+import type { CandidateComparison } from "./candidate-comparison.js";
 import type { OpenQuestionDisposition, UserClarificationRequest } from "./clarification.js";
 
 export type DirectionOption = {
@@ -65,6 +66,7 @@ export type ConvergenceReview = {
   unknownCandidateRefs?: string[];
   conflictResolutionRefs: string[];
   provenanceRefs: string[];
+  candidateComparisons?: CandidateComparison[];
   outcome?: ConvergenceReviewOutcome;
   userEscalationRequired?: boolean;
   userClarificationRequest?: UserClarificationRequest;

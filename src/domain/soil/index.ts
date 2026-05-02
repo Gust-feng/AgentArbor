@@ -1,4 +1,5 @@
 import type { Constraint } from "../constraints.js";
+export * from "./store.js";
 
 export function createMinimalSoilConstraints(): Constraint[] {
   return [

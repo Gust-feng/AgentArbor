@@ -26,15 +26,20 @@ test("returns the minimal loop result with package, artifact, verification, and 
   assert.equal(result.loadedDirectionHandoffPackage.lineage.current.version, 1);
   assert.equal(result.loadedDirectionHandoffPackage.lineage.previous, undefined);
   assert.deepEqual(result.undergroundReport.candidatePool.counts, {
-    total: 6,
+    total: 1,
     candidate: 0,
-    accepted: 2,
-    merged: 2,
-    rejected: 2,
+    accepted: 1,
+    merged: 0,
+    rejected: 0,
     unknown: 0,
   });
-  assert.equal(result.undergroundReport.convergenceReport.decisions.length, 6);
-  assert.equal(result.undergroundReport.convergenceReport.handoffCandidateRefs.length, 4);
+  assert.equal(result.undergroundReport.plan.rootletClusters.length, 1);
+  assert.deepEqual(
+    result.undergroundReport.plan.rootletClusters.map((cluster) => cluster.kind),
+    ["option"]
+  );
+  assert.equal(result.undergroundReport.convergenceReport.decisions.length, 1);
+  assert.equal(result.undergroundReport.convergenceReport.handoffCandidateRefs.length, 1);
   assert.equal(
     result.directionHandoff.sourceCandidateRefs.every(
       (candidate) => candidate.status === "accepted" || candidate.status === "merged"
@@ -71,9 +76,9 @@ test("RunObservationSnapshot is serializable and reflects underground state", ()
   assert.equal(parsed.handoff.packageId, result.loadedDirectionHandoffPackage.manifest.packageId);
   assert.equal(parsed.handoff.validationPassed, true);
   assert.equal(parsed.handoff.lineage.revisionReason, "initial");
-  assert.equal(parsed.underground.candidatePool.total, 6);
-  assert.equal(parsed.underground.candidatePool.accepted, 2);
-  assert.equal(parsed.underground.candidatePool.merged, 2);
+  assert.equal(parsed.underground.candidatePool.total, 1);
+  assert.equal(parsed.underground.candidatePool.accepted, 1);
+  assert.equal(parsed.underground.candidatePool.merged, 0);
   assert.equal(parsed.underground.convergence.outcome, "approved");
   assert.equal(parsed.underground.userEscalationRequired, false);
   assert.deepEqual(parsed.underground.clarificationResponses, []);

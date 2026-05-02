@@ -1,5 +1,5 @@
 import { InMemoryDirectionHandoffPackageStore } from "../domain/agentarbor/direction-handoff-package.js";
-import { createMinimalSoilConstraints } from "../domain/soil/index.js";
+import { createMinimalReadonlySoilStore, createMinimalSoilConstraints } from "../domain/soil/index.js";
 import { InMemoryArtifactStore } from "../kernel/artifacts/in-memory-artifact-store.js";
 import { InMemoryEventLog } from "../kernel/events/in-memory-event-log.js";
 import { InMemoryMessageBus } from "../kernel/messages/in-memory-message-bus.js";
@@ -16,6 +16,8 @@ export function createMinimalRuntime() {
   const artifactStore = new InMemoryArtifactStore();
   const directionHandoffPackageStore = new InMemoryDirectionHandoffPackageStore();
   const router = new SimpleRouter(registry);
+  const constraints = createMinimalSoilConstraints();
+  const soilStore = createMinimalReadonlySoilStore(constraints);
 
   for (const manifest of createDemoAgentManifests()) {
     registry.register(manifest);
@@ -28,6 +30,7 @@ export function createMinimalRuntime() {
     artifactStore,
     directionHandoffPackageStore,
     router,
-    constraints: createMinimalSoilConstraints(),
+    soilStore,
+    constraints: soilStore.listConstraints(),
   };
 }

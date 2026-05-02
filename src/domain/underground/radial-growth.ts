@@ -1,5 +1,8 @@
 import type { ConstraintRef } from "../constraints.js";
+import type { CandidateComparison } from "./candidate-comparison.js";
 import type { ConvergenceReviewOutcome, ConvergenceStopReason } from "./contracts.js";
+import type { UndergroundEvidenceLedger } from "./evidence-ledger.js";
+import type { GoalIntentProfile } from "./intent-core.js";
 import {
   classifyUnknownsForClarification,
   cloneOpenQuestionDisposition,
@@ -106,6 +109,7 @@ export type CandidateConvergenceDecision = {
   decidedByRole: "convergence_judge";
   reason: string;
   provenanceRefs: string[];
+  evidenceRefs?: string[];
 };
 
 export type UndergroundConvergenceOutcome = ConvergenceReviewOutcome;
@@ -123,6 +127,7 @@ export type UndergroundConvergenceReport = {
   conflictResolutionRefs: string[];
   provenanceRefs: string[];
   decisions: CandidateConvergenceDecision[];
+  candidateComparisons?: CandidateComparison[];
   summary: string;
   outcome: UndergroundConvergenceOutcome;
   userEscalationRequired: boolean;
@@ -135,6 +140,8 @@ export type UndergroundConvergenceReport = {
 
 export type UndergroundExplorationReport = {
   plan: UndergroundExplorationPlan;
+  goalIntentProfile?: GoalIntentProfile;
+  evidenceLedger?: UndergroundEvidenceLedger;
   rootletOutputs: RootletOutput[];
   candidatePool: CandidatePool;
   convergenceReport: UndergroundConvergenceReport;
@@ -207,6 +214,7 @@ export function createUndergroundConvergenceReport(input: {
   leadAgentId: string;
   candidatePool: CandidatePool;
   decisions: readonly CandidateConvergenceDecision[];
+  candidateComparisons?: readonly CandidateComparison[];
   provenanceRefs: string[];
   budget: ExplorationBudget;
   summary: string;
@@ -248,8 +256,15 @@ export function createUndergroundConvergenceReport(input: {
     unknownCandidateRefs,
     conflictResolutionRefs: mergedCandidateRefs,
     provenanceRefs: input.provenanceRefs,
-    decisions: input.decisions.map((decision) => ({ ...decision, sourceCandidateRefs: [...decision.sourceCandidateRefs] })),
-    summary: input.summary,
+    decisions: input.decisions.map(cloneCandidateConvergenceDecision),
+    candidateComparisons: (input.candidateComparisons ?? []).map(cloneCandidateComparison),
+    summary: createConvergenceSummary(input.summary, {
+      acceptedCandidateRefs,
+      mergedCandidateRefs,
+      rejectedCandidateRefs,
+      unknownCandidateRefs,
+      handoffCandidateRefs: [...acceptedCandidateRefs, ...mergedCandidateRefs],
+    }),
     outcome: outcome.outcome,
     userEscalationRequired,
     userClarificationRequest:
@@ -352,6 +367,47 @@ function refsByStatus(
   status: CandidateConvergenceStatus
 ): string[] {
   return decisions.filter((decision) => decision.status === status).map((decision) => decision.candidateId);
+}
+
+function cloneCandidateConvergenceDecision(decision: CandidateConvergenceDecision): CandidateConvergenceDecision {
+  return {
+    ...decision,
+    sourceCandidateRefs: [...decision.sourceCandidateRefs],
+    provenanceRefs: [...decision.provenanceRefs],
+    evidenceRefs: [...(decision.evidenceRefs ?? [])],
+  };
+}
+
+function cloneCandidateComparison(comparison: CandidateComparison): CandidateComparison {
+  return {
+    ...comparison,
+    unknowns: [...comparison.unknowns],
+    whyNot: [...comparison.whyNot],
+    evidenceRefs: [...comparison.evidenceRefs],
+  };
+}
+
+function createConvergenceSummary(
+  baseSummary: string,
+  refs: {
+    acceptedCandidateRefs: readonly string[];
+    mergedCandidateRefs: readonly string[];
+    rejectedCandidateRefs: readonly string[];
+    unknownCandidateRefs: readonly string[];
+    handoffCandidateRefs: readonly string[];
+  }
+): string {
+  const handoffReason =
+    refs.handoffCandidateRefs.length > 0
+      ? `handoff candidates ${refs.handoffCandidateRefs.join(", ")} are accepted or merged`
+      : "no accepted or merged handoff candidates exist";
+  const reviewShape = [
+    `accepted=${refs.acceptedCandidateRefs.length}`,
+    `merged=${refs.mergedCandidateRefs.length}`,
+    `rejected=${refs.rejectedCandidateRefs.length}`,
+    `unknown=${refs.unknownCandidateRefs.length}`,
+  ].join(", ");
+  return `${baseSummary} Current direction is handoff-ready when ${handoffReason}; convergence shape: ${reviewShape}.`;
 }
 
 function isRootletOutput(value: unknown): value is RootletOutput {

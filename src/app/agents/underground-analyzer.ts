@@ -12,6 +12,7 @@ export class UndergroundAnalyzer {
       runtime,
       traceId,
       goalId,
+      rawGoal: goal,
       agentId: this.agentId,
     });
 
@@ -20,6 +21,7 @@ export class UndergroundAnalyzer {
       goal,
       producedByAgentId: this.agentId,
       constraints: runtime.constraints,
+      goalIntentProfile: undergroundReport.goalIntentProfile,
       candidatePool,
       convergenceReport,
     });

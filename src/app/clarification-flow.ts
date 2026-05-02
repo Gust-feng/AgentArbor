@@ -1,5 +1,4 @@
 import type {
-  CandidateConvergenceDecision,
   ConvergenceReview,
   DirectionHandoff,
   UndergroundExplorationReport,
@@ -17,14 +16,16 @@ import type { RunObservationSnapshot } from "../domain/observation/contracts.js"
 import { createRunObservationSnapshot } from "../domain/observation/index.js";
 import {
   applyCandidateConvergenceDecisions,
+  compareCandidatesForGoal,
+  createDefaultGoalIntentProfile,
   createOpenQuestionDisposition,
   createUndergroundConvergenceReport,
   type CandidatePool,
-  type ExplorationCandidateRef,
 } from "../domain/underground/index.js";
 import { createId, nowIso } from "../kernel/id.js";
 import { createMessage } from "../kernel/messages/create-message.js";
 import { createAwaitingUserDirectionMaterial } from "./minimal-direction.js";
+import { createMinimalUndergroundEvidenceLedger } from "./minimal-underground.js";
 import { createMinimalRuntime, type MinimalRuntime } from "./runtime.js";
 import {
   createClarificationRecoveryDirectionMaterial,
@@ -82,7 +83,7 @@ export type ClarificationRecoveryFlowResult = {
 };
 
 export function runClarificationRequiredUndergroundFlow(
-  goal = "Build only if the user confirms the permission boundary."
+  goal = "Build only if the permission boundary is unknown and must be confirmed."
 ): ClarificationRequiredUndergroundFlowResult {
   const runtime = createMinimalRuntime();
   const traceId = createId("trace");
@@ -104,6 +105,7 @@ export function runClarificationRequiredUndergroundFlow(
     runtime,
     traceId,
     goalId,
+    rawGoal: goal,
     agentId,
     converge: createClarificationRequiredConvergence,
   });
@@ -113,6 +115,7 @@ export function runClarificationRequiredUndergroundFlow(
     goal,
     producedByAgentId: agentId,
     constraints: runtime.constraints,
+    goalIntentProfile: undergroundReport.goalIntentProfile,
     candidatePool: convergedCandidatePool,
     convergenceReport,
   });
@@ -167,7 +170,7 @@ export function runClarificationRequiredUndergroundFlow(
 }
 
 export function runClarificationRecoveryFlow(
-  goal = "Build only if the user confirms the permission boundary."
+  goal = "Build only if the permission boundary is unknown and must be confirmed."
 ): ClarificationRecoveryFlowResult {
   const awaiting = runClarificationRequiredUndergroundFlow(goal);
   const response = createDefaultClarificationResponse(awaiting.clarificationRequest);
@@ -334,20 +337,37 @@ function publishDirectionHandoffRevisionRequested(input: {
 function createClarificationRequiredConvergence(
   input: UndergroundConvergenceInput
 ): UndergroundConvergenceResult {
-  const decisions = createClarificationRequiredDecisions(input.candidatePool);
-  const candidatePool = applyCandidateConvergenceDecisions(input.candidatePool, decisions, nowIso());
-  const unknownCandidateIds = decisions
+  const createdAt = nowIso();
+  const goalIntentProfile = input.goalIntentProfile ?? createDefaultGoalIntentProfile(input.goalId, createdAt);
+  const comparisonResult = compareCandidatesForGoal({
+    goalProfile: goalIntentProfile,
+    candidates: input.candidatePool.candidates,
+    rootletOutputs: input.rootletOutputs,
+    createdAt,
+  });
+  const decisions = comparisonResult.decisions;
+  const candidatePool = applyCandidateConvergenceDecisions(input.candidatePool, decisions, createdAt);
+  const unknownCandidateIds = new Set(decisions
     .filter((decision) => decision.status === "unknown")
-    .map((decision) => decision.candidateId);
+    .map((decision) => decision.candidateId));
+  const evidenceLedger = createMinimalUndergroundEvidenceLedger({
+    goalIntentProfile,
+    constraints: input.constraints,
+    rootletOutputs: input.rootletOutputs,
+    extraEntries: comparisonResult.evidenceEntries,
+    createdAt,
+  });
 
   return {
     candidatePool,
+    evidenceLedger,
     convergenceReport: createUndergroundConvergenceReport({
       reviewId: createId("convergence"),
       reviewedByAgentIds: [input.agentId],
       leadAgentId: input.agentId,
       candidatePool,
       decisions,
+      candidateComparisons: comparisonResult.comparisons,
       provenanceRefs: ["goal.received", "candidate_pool.updated", "soil:minimal-constraints"],
       budget: {
         ...input.plan.budget,
@@ -356,57 +376,26 @@ function createClarificationRequiredConvergence(
       },
       summary:
         "Minimal radial exploration found a viable direction but requires user clarification before handoff approval.",
-      openQuestionDispositions: unknownCandidateIds.map((candidateId) =>
-        createOpenQuestionDisposition({
-          candidateId,
-          reason: "permission_boundary_unclear",
-          question: "Can Aboveground execution proceed within the current permission boundary?",
-          blockingLevel: "blocking",
-          evidenceRefs: ["AGENTS.md"],
-        })
-      ),
+      openQuestionDispositions: comparisonResult.comparisons
+        .filter((comparison) => unknownCandidateIds.has(comparison.candidateId))
+        .sort((left, right) => Number(right.conclusion === "needs_user") - Number(left.conclusion === "needs_user"))
+        .map((comparison) =>
+          createOpenQuestionDisposition({
+            candidateId: comparison.candidateId,
+            reason:
+              comparison.conclusion === "needs_user"
+                ? "permission_boundary_unclear"
+                : "critical_fact_missing",
+            question:
+              comparison.conclusion === "needs_user"
+                ? "Can Aboveground execution proceed within the current permission boundary?"
+                : "Keep this non-blocking uncertainty visible for later review.",
+            blockingLevel: comparison.conclusion === "needs_user" ? "blocking" : "non_blocking",
+            evidenceRefs: comparison.evidenceRefs,
+          })
+        ),
       userClarificationRequestId: createId("user-clarification"),
-      createdAt: nowIso(),
+      createdAt,
     }),
   };
-}
-
-function createClarificationRequiredDecisions(candidatePool: CandidatePool): CandidateConvergenceDecision[] {
-  return candidatePool.candidates.map((candidate) => ({
-    decisionId: createId("convergence-decision"),
-    candidateId: candidate.id,
-    sourceCandidateRefs: [candidate.id],
-    status: clarificationRequiredStatusForCandidate(candidate),
-    decidedByRole: "convergence_judge",
-    reason: clarificationRequiredReason(candidate),
-    provenanceRefs: [...candidate.sourceRefs, "candidate_pool.updated"],
-  }));
-}
-
-function clarificationRequiredStatusForCandidate(
-  candidate: ExplorationCandidateRef
-): CandidateConvergenceDecision["status"] {
-  if (candidate.clusterId.includes("option") || candidate.clusterId.includes("evidence")) {
-    return "accepted";
-  }
-  if (candidate.clusterId.includes("asset-fit")) {
-    return "merged";
-  }
-  if (candidate.clusterId.includes("constraint")) {
-    return "unknown";
-  }
-  return "rejected";
-}
-
-function clarificationRequiredReason(candidate: ExplorationCandidateRef): string {
-  if (candidate.clusterId.includes("constraint")) {
-    return "The permission boundary is unclear and must be clarified by the user before approval.";
-  }
-  if (candidate.clusterId.includes("option") || candidate.clusterId.includes("evidence")) {
-    return `${candidate.clusterId} supports the awaiting-user direction draft.`;
-  }
-  if (candidate.clusterId.includes("asset-fit")) {
-    return `${candidate.clusterId} is merged into the awaiting-user direction draft.`;
-  }
-  return `${candidate.clusterId} remains review evidence but is excluded from handoff input.`;
 }

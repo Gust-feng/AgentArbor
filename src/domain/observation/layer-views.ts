@@ -100,6 +100,7 @@ function createUndergroundView(input: RunObservationSnapshotInput): RunObservati
         ...decision,
         sourceCandidateRefs: [...decision.sourceCandidateRefs],
         provenanceRefs: [...decision.provenanceRefs],
+        evidenceRefs: [...(decision.evidenceRefs ?? [])],
       })),
       budgetExhausted: report.convergenceReport.budgetExhausted,
       stopReason: report.convergenceReport.stopReason,

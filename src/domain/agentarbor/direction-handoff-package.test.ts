@@ -145,6 +145,28 @@ test("package validation fails when Soil asset content is inlined", () => {
   assert.equal(validation.errors.some((error) => error.code === "INLINE_SOIL_ASSET_CONTENT"), true);
 });
 
+test("package validation rejects handoff text that weakens a hard constraint", () => {
+  const { directionHandoffPackage } = createDirectionHandoffPackageFixture();
+  const invalidPackage = clonePackage(directionHandoffPackage);
+  const hardConstraintRef = {
+    constraintId: "constraint-hard-test",
+    requiredLevel: "hard" as const,
+    enforcementGate: "direction_handoff" as const,
+  };
+  invalidPackage.directionHandoff.constraintRefs.push(hardConstraintRef);
+  invalidPackage.directionHandoff.assumptions.push(
+    `Hard constraint ${hardConstraintRef.constraintId} can be ignored after planning starts.`
+  );
+
+  const validation = new InMemoryDirectionHandoffPackageStore().validate(invalidPackage);
+
+  assert.equal(validation.passed, false);
+  assert.equal(
+    validation.errors.some((error) => error.code === "HARD_CONSTRAINT_WEAKENED_IN_HANDOFF_TEXT"),
+    true
+  );
+});
+
 test("file-system DirectionHandoffPackage store round-trips through a temp directory", () => {
   const { directionHandoffPackage } = createDirectionHandoffPackageFixture();
   const tempRoot = mkdtempSync(join(tmpdir(), "agentarbor-direction-package-"));

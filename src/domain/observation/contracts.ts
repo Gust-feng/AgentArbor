@@ -11,6 +11,8 @@ import type {
   CandidateConvergenceDecision,
   CandidatePoolCounts,
   ExplorationBudget,
+  UndergroundAgentClusterRun,
+  UndergroundAgentInvocationStatus,
   RootletClusterKind,
   RootletClusterStatus,
   RootletOutput,
@@ -198,6 +200,36 @@ export type RunObservationSnapshot = {
 };
 
 export type RunObservationUndergroundView = {
+  readonly agentCluster?: {
+    readonly runId: string;
+    readonly terminalStatus: UndergroundAgentClusterRun["terminalStatus"];
+    readonly candidateRefs: readonly string[];
+    readonly packageRef?: UndergroundAgentClusterRun["packageRef"];
+    readonly plan: {
+      readonly planId: string;
+      readonly goalId: string;
+      readonly rootletKinds: readonly string[];
+      readonly schedulingReasons: readonly string[];
+      readonly agents: readonly {
+        readonly agentId: string;
+        readonly role: string;
+        readonly rootletKind?: string;
+        readonly inputRefs: readonly string[];
+        readonly schedulingReason: string;
+      }[];
+    };
+    readonly invocations: readonly {
+      readonly invocationId: string;
+      readonly agentId: string;
+      readonly role: string;
+      readonly inputRefs: readonly string[];
+      readonly outputRefs: readonly string[];
+      readonly status: UndergroundAgentInvocationStatus;
+      readonly startedAt: string;
+      readonly completedAt?: string;
+      readonly failureReason?: string;
+    }[];
+  };
   readonly planId: string;
   readonly status: ObservationStatus;
   readonly budget: ExplorationBudget;
@@ -210,10 +242,15 @@ export type RunObservationUndergroundView = {
     readonly inputRefs: readonly string[];
     readonly exitCriteria: readonly string[];
     readonly budget: Pick<ExplorationBudget, "maxCandidateOutputs">;
+    readonly agentId?: string;
+    readonly invocationId?: string;
+    readonly invocationStatus?: UndergroundAgentInvocationStatus;
+    readonly invocationOutputRefs: readonly string[];
     readonly outputRef?: string;
   }[];
   readonly rootletOutputs: readonly {
     readonly outputId: string;
+    readonly invocationId: string;
     readonly clusterId: string;
     readonly kind: RootletOutput["kind"];
     readonly producedByAgentId: string;

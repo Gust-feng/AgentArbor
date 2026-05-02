@@ -79,6 +79,9 @@ test("RunObservationSnapshot is serializable and reflects underground state", ()
   assert.equal(parsed.underground.candidatePool.total, 1);
   assert.equal(parsed.underground.candidatePool.accepted, 1);
   assert.equal(parsed.underground.candidatePool.merged, 0);
+  assert.equal(parsed.underground.agentCluster?.terminalStatus, "approved_package_created");
+  assert.deepEqual(parsed.underground.agentCluster?.plan.rootletKinds, ["option"]);
+  assert.equal(parsed.underground.agentCluster?.candidateRefs.length, 1);
   assert.equal(parsed.underground.convergence.outcome, "approved");
   assert.equal(parsed.underground.userEscalationRequired, false);
   assert.deepEqual(parsed.underground.clarificationResponses, []);
@@ -144,6 +147,7 @@ test("RunObservationSnapshot exposes every underground rootlet, candidate, and c
 
   assert.equal(underground.rootletClusters.length, result.undergroundReport.plan.rootletClusters.length);
   assert.equal(underground.rootletOutputs.length, result.undergroundReport.rootletOutputs.length);
+  assert.equal(underground.agentCluster?.invocations.length, result.undergroundReport.agentClusterRun?.invocations.length);
   assert.equal(underground.candidatePool.candidates.length, result.undergroundReport.candidatePool.candidates.length);
   assert.equal(underground.convergence.decisions.length, result.undergroundReport.convergenceReport.decisions.length);
   assert.deepEqual(
@@ -160,6 +164,10 @@ test("RunObservationSnapshot exposes every underground rootlet, candidate, and c
   );
   assert.deepEqual(
     underground.convergence.handoffCandidateRefs,
+    result.undergroundReport.convergenceReport.handoffCandidateRefs
+  );
+  assert.deepEqual(
+    underground.agentCluster?.candidateRefs,
     result.undergroundReport.convergenceReport.handoffCandidateRefs
   );
 });

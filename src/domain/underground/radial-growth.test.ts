@@ -12,6 +12,7 @@ import {
   type ExplorationBudget,
   type ExplorationCandidateRef,
   type RootletOutput,
+  type UndergroundAgentInvocation,
 } from "./index.js";
 
 const BASE_BUDGET: ExplorationBudget = {
@@ -32,6 +33,73 @@ test("rootlet output cannot directly enter handoff source candidates", () => {
   );
 });
 
+test("rootlet output without a completed agent invocation cannot enter candidate pool", () => {
+  const output = makeRootletOutput("output-unowned", "rootlet-option");
+  const candidate = makeCandidate("candidate-unowned", output);
+
+  assert.throws(
+    () =>
+      createCandidatePool({
+        poolId: "pool-unowned",
+        goalId: "goal-unowned",
+        rootletOutputs: [output],
+        agentInvocations: [],
+        candidates: [candidate],
+        updatedAt: "2026-05-01T00:00:00.000Z",
+      }),
+    UndergroundConvergenceError
+  );
+});
+
+test("rootlet output invocation invariants are enforced before candidate pool creation", () => {
+  const baseOutput = makeRootletOutput("output-invariant", "rootlet-option");
+  const candidate = makeCandidate("candidate-invariant", baseOutput);
+  const baseInvocation = makeInvocations([baseOutput])[0];
+  assert.notEqual(baseInvocation, undefined);
+  const cases: readonly {
+    readonly name: string;
+    readonly output: RootletOutput;
+    readonly invocations: readonly UndergroundAgentInvocation[];
+  }[] = [
+    {
+      name: "missing invocation id",
+      output: { ...baseOutput, invocationId: undefined as unknown as string },
+      invocations: [baseInvocation],
+    },
+    {
+      name: "non-rootlet invocation role",
+      output: baseOutput,
+      invocations: [{ ...baseInvocation, role: "convergence_judge" }],
+    },
+    {
+      name: "producer mismatch",
+      output: baseOutput,
+      invocations: [{ ...baseInvocation, agentId: "other-rootlet-agent" }],
+    },
+    {
+      name: "missing output ref",
+      output: baseOutput,
+      invocations: [{ ...baseInvocation, outputRefs: [] }],
+    },
+  ];
+
+  for (const item of cases) {
+    assert.throws(
+      () =>
+        createCandidatePool({
+          poolId: `pool-${item.name}`,
+          goalId: "goal-invariant",
+          rootletOutputs: [item.output],
+          agentInvocations: item.invocations,
+          candidates: [candidate],
+          updatedAt: "2026-05-01T00:00:00.000Z",
+        }),
+      UndergroundConvergenceError,
+      item.name
+    );
+  }
+});
+
 test("convergence decisions preserve accepted, merged, rejected, and unknown source refs", () => {
   const outputs = [
     makeRootletOutput("output-a", "rootlet-option"),
@@ -44,6 +112,7 @@ test("convergence decisions preserve accepted, merged, rejected, and unknown sou
     poolId: "pool-test",
     goalId: "goal-test",
     rootletOutputs: outputs,
+    agentInvocations: makeInvocations(outputs),
     candidates,
     updatedAt: "2026-05-01T00:00:00.000Z",
   });
@@ -120,6 +189,7 @@ test("non-blocking unknown without handoff candidates stops when budget is exhau
     poolId: "pool-open-only",
     goalId: "goal-open-only",
     rootletOutputs: [output],
+    agentInvocations: makeInvocations([output]),
     candidates: [candidate],
     updatedAt: "2026-05-01T00:00:00.000Z",
   });
@@ -165,6 +235,7 @@ test("blocking unknown candidate creates a user clarification request", () => {
     poolId: "pool-blocking",
     goalId: "goal-blocking",
     rootletOutputs: outputs,
+    agentInvocations: makeInvocations(outputs),
     candidates,
     updatedAt: "2026-05-01T00:00:00.000Z",
   });
@@ -213,6 +284,7 @@ test("non-blocking unknown remains an open question without entering handoff can
     poolId: "pool-open-question",
     goalId: "goal-open-question",
     rootletOutputs: outputs,
+    agentInvocations: makeInvocations(outputs),
     candidates,
     updatedAt: "2026-05-01T00:00:00.000Z",
   });
@@ -254,9 +326,10 @@ test("non-blocking unknown remains an open question without entering handoff can
 function makeRootletOutput(outputId: string, clusterId: string): RootletOutput {
   return {
     outputId,
+    invocationId: `invocation-${outputId}`,
     clusterId,
     kind: clusterId.includes("asset") ? "asset_fit" : clusterId.includes("risk") ? "risk" : "option",
-    producedByAgentId: "underground-analyzer",
+    producedByAgentId: `agent-${outputId}`,
     summary: "test output",
     sourceRefs: ["goal.received"],
     evidenceRefs: [],
@@ -265,6 +338,19 @@ function makeRootletOutput(outputId: string, clusterId: string): RootletOutput {
     riskRefs: [],
     status: "produced",
   };
+}
+
+function makeInvocations(outputs: readonly RootletOutput[]): UndergroundAgentInvocation[] {
+  return outputs.map((output) => ({
+    invocationId: output.invocationId,
+    agentId: output.producedByAgentId,
+    role: "rootlet_agent",
+    inputRefs: [output.clusterId],
+    outputRefs: [output.outputId],
+    status: "completed",
+    startedAt: "2026-05-01T00:00:00.000Z",
+    completedAt: "2026-05-01T00:00:01.000Z",
+  }));
 }
 
 function makeCandidate(id: string, output: RootletOutput): ExplorationCandidateRef {

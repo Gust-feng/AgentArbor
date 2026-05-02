@@ -19,9 +19,27 @@ test("Underground intelligence output enters candidate pool and waits for conver
   });
 
   assert.equal(result.terminalStatus, "approved_package_created");
-  assert.deepEqual(result.eventTypes.slice(0, 3), ["goal.received", "model.requested", "model.completed"]);
+  assert.deepEqual(result.eventTypes.slice(0, 5), [
+    "goal.received",
+    "underground.exploration_planned",
+    "rootlet_cluster.started",
+    "model.requested",
+    "model.completed",
+  ]);
   assert.equal(result.eventTypes.indexOf("convergence_review.completed") < result.eventTypes.indexOf("direction_handoff.completed"), true);
-  assert.equal(result.undergroundReport.rootletOutputs.some((output) => output.evidenceRefs.some((ref) => ref.startsWith("model-call:"))), true);
+  const modelOutput = result.undergroundReport.rootletOutputs.find((output) =>
+    output.evidenceRefs.some((ref) => ref.startsWith("model-call:"))
+  );
+  assert.notEqual(modelOutput, undefined);
+  assert.equal(
+    result.undergroundReport.agentClusterRun?.invocations.some(
+      (invocation) =>
+        invocation.invocationId === modelOutput?.invocationId &&
+        invocation.role === "rootlet_agent" &&
+        invocation.outputRefs.includes(modelOutput.outputId)
+    ),
+    true
+  );
   assert.equal(result.undergroundReport.candidatePool.counts.total, 2);
   assert.deepEqual(
     result.directionHandoff?.sourceCandidateRefs.map((candidate) => candidate.id),
@@ -45,7 +63,13 @@ test("Contract-violating AI output does not enter an approved Direction Handoff"
     }
   );
 
-  assert.deepEqual(result.eventTypes.slice(0, 3), ["goal.received", "model.requested", "model.failed"]);
+  assert.deepEqual(result.eventTypes.slice(0, 5), [
+    "goal.received",
+    "underground.exploration_planned",
+    "rootlet_cluster.started",
+    "model.requested",
+    "model.failed",
+  ]);
   assert.equal(result.terminalStatus, "stopped");
   assert.equal(result.loadedDirectionHandoffPackage.validation.passed, false);
   assert.equal(

@@ -9,6 +9,7 @@ import type { RunObservationSnapshot } from "../domain/observation/contracts.js"
 import { createRunObservationSnapshot } from "../domain/observation/index.js";
 import type {
   DirectionHandoff,
+  UndergroundAgentClusterRun,
   UndergroundConvergenceReport,
   UndergroundExplorationReport,
   UserClarificationRequest,
@@ -85,7 +86,7 @@ export function recoverUndergroundDirectionSession(
     material.convergenceReview.decisions,
     material.clarificationResponse.answeredAt
   );
-  const recoveredUndergroundReport: UndergroundExplorationReport = {
+  let recoveredUndergroundReport: UndergroundExplorationReport = {
     ...awaitingSession.undergroundReport,
     candidatePool: recoveredCandidatePool,
     convergenceReport: material.convergenceReview,
@@ -108,11 +109,20 @@ export function recoverUndergroundDirectionSession(
     approvedDirectionHandoffPackage.manifest.directionVersion
   );
   const directionHandoffPackageRef = createDirectionHandoffPackageRef(loadedApprovedDirectionHandoffPackage);
+  recoveredUndergroundReport = {
+    ...recoveredUndergroundReport,
+    agentClusterRun: recoverAgentClusterRun({
+      run: awaitingSession.undergroundReport.agentClusterRun,
+      packageRef: directionHandoffPackageRef,
+      candidateRefs: material.convergenceReview.handoffCandidateRefs,
+      completedAt: material.clarificationResponse.answeredAt,
+    }),
+  };
 
   awaitingSession.runtime.bus.publish(
     createMessage({
       traceId: awaitingSession.traceId,
-      from: { id: agentId, role: "underground_center" },
+      from: { id: "underground-handoff-steward", role: "underground_center" },
       to: { role: "aboveground_center" },
       type: "direction_handoff.completed",
       intent: "complete_direction_handoff_revision",
@@ -127,6 +137,14 @@ export function recoverUndergroundDirectionSession(
           reviewId: material.convergenceReview.reviewId,
           outcome: material.convergenceReview.outcome,
         },
+        agentCluster:
+          recoveredUndergroundReport.agentClusterRun === undefined
+            ? undefined
+            : {
+                plan: recoveredUndergroundReport.agentClusterRun.plan,
+                run: recoveredUndergroundReport.agentClusterRun,
+                invocations: recoveredUndergroundReport.agentClusterRun.invocations,
+              },
       },
     })
   );
@@ -168,6 +186,39 @@ export function recoverUndergroundDirectionSession(
             loadedApprovedDirectionHandoffPackage.manifest.directionId,
             loadedApprovedDirectionHandoffPackage.manifest.directionVersion
           ),
+  };
+}
+
+function recoverAgentClusterRun(input: {
+  run?: UndergroundAgentClusterRun;
+  packageRef: DirectionHandoffPackageRef;
+  candidateRefs: readonly string[];
+  completedAt: string;
+}): UndergroundAgentClusterRun | undefined {
+  if (input.run === undefined) {
+    return undefined;
+  }
+  return {
+    ...input.run,
+    invocations: input.run.invocations.map((invocation) =>
+      invocation.role === "handoff_steward"
+        ? {
+            ...invocation,
+            outputRefs: Array.from(new Set([...invocation.outputRefs, input.packageRef.packageId])),
+            status: "completed",
+            completedAt: input.completedAt,
+          }
+        : {
+            ...invocation,
+            inputRefs: [...invocation.inputRefs],
+            outputRefs: [...invocation.outputRefs],
+          }
+    ),
+    terminalStatus: "approved_package_created",
+    candidateRefs: [...input.candidateRefs],
+    packageRef: input.packageRef,
+    completedAt: input.completedAt,
+    stopReason: undefined,
   };
 }
 

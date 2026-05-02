@@ -1,6 +1,9 @@
 import type {
   CandidatePool,
   RootletOutput,
+  UndergroundAgentClusterPlan,
+  UndergroundAgentClusterRun,
+  UndergroundAgentInvocation,
   UndergroundConvergenceReport,
   UndergroundExplorationPlan,
   UndergroundExplorationReport,
@@ -13,6 +16,7 @@ export function publishUndergroundExplorationPlanned(input: {
   traceId: string;
   agentId: string;
   plan: UndergroundExplorationPlan;
+  agentCluster?: UndergroundEventAgentClusterPayload;
 }): void {
   input.runtime.bus.publish(
     createMessage({
@@ -27,6 +31,7 @@ export function publishUndergroundExplorationPlanned(input: {
         budget: input.plan.budget,
         rootletClusters: input.plan.rootletClusters,
         centerRoles: input.plan.centerRoles,
+        agentCluster: input.agentCluster,
       },
     })
   );
@@ -37,6 +42,7 @@ export function publishRootletClustersStarted(input: {
   traceId: string;
   agentId: string;
   plan: UndergroundExplorationPlan;
+  agentCluster?: UndergroundEventAgentClusterPayload;
 }): void {
   input.runtime.bus.publish(
     createMessage({
@@ -49,6 +55,7 @@ export function publishRootletClustersStarted(input: {
         planId: input.plan.planId,
         rootletClusters: input.plan.rootletClusters,
         budget: input.plan.budget,
+        agentCluster: input.agentCluster,
       },
     })
   );
@@ -59,6 +66,7 @@ export function publishExplorationCandidatesProduced(input: {
   traceId: string;
   agentId: string;
   rootletOutputs: readonly RootletOutput[];
+  agentCluster?: UndergroundEventAgentClusterPayload;
 }): void {
   input.runtime.bus.publish(
     createMessage({
@@ -69,6 +77,7 @@ export function publishExplorationCandidatesProduced(input: {
       intent: "produce_exploration_candidates",
       payload: {
         rootletOutputs: input.rootletOutputs,
+        agentCluster: input.agentCluster,
       },
     })
   );
@@ -79,6 +88,7 @@ export function publishCandidatePoolUpdated(input: {
   traceId: string;
   agentId: string;
   candidatePool: CandidatePool;
+  agentCluster?: UndergroundEventAgentClusterPayload;
 }): void {
   input.runtime.bus.publish(
     createMessage({
@@ -89,6 +99,7 @@ export function publishCandidatePoolUpdated(input: {
       intent: "update_candidate_pool",
       payload: {
         candidatePool: input.candidatePool,
+        agentCluster: input.agentCluster,
       },
     })
   );
@@ -101,6 +112,7 @@ export function publishConvergenceReviewCompleted(input: {
   convergenceReport: UndergroundConvergenceReport;
   candidatePool: CandidatePool;
   undergroundReport: UndergroundExplorationReport;
+  agentCluster?: UndergroundEventAgentClusterPayload;
 }): void {
   input.runtime.bus.publish(
     createMessage({
@@ -113,7 +125,14 @@ export function publishConvergenceReviewCompleted(input: {
         convergenceReport: input.convergenceReport,
         candidatePool: input.candidatePool,
         undergroundReport: input.undergroundReport,
+        agentCluster: input.agentCluster,
       },
     })
   );
 }
+
+export type UndergroundEventAgentClusterPayload = {
+  readonly plan: UndergroundAgentClusterPlan;
+  readonly run?: UndergroundAgentClusterRun;
+  readonly invocations?: readonly UndergroundAgentInvocation[];
+};

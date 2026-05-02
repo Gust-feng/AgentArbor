@@ -1,7 +1,8 @@
 import type { Constraint } from "../domain/contracts.js";
 import type { IntelligenceChannel, ModelOutputContract } from "../domain/intelligence/index.js";
-import type { RootletOutput } from "../domain/underground/index.js";
+import type { RootletClusterPlan, RootletOutput, UndergroundAgentInvocation } from "../domain/underground/index.js";
 import { createId, nowIso } from "../kernel/id.js";
+import { createRootletOutputForInvocation } from "./underground-rootlets.js";
 
 export const UNDERGROUND_ROOTLET_CANDIDATE_ADVICE_CONTRACT: ModelOutputContract = {
   contractId: "underground.rootlet_candidate_advice.v1",
@@ -16,7 +17,8 @@ export async function requestUndergroundRootletCandidateAdvice(input: {
   readonly traceId: string;
   readonly goalId: string;
   readonly goal: string;
-  readonly producedByAgentId: string;
+  readonly cluster: RootletClusterPlan;
+  readonly invocation: UndergroundAgentInvocation;
   readonly constraints: readonly Constraint[];
 }): Promise<RootletOutput[]> {
   const requestId = createId("model-request");
@@ -63,19 +65,15 @@ export async function requestUndergroundRootletCandidateAdvice(input: {
   }
 
   return [
-    {
-      outputId: createId("rootlet-output"),
-      clusterId: "rootlet-option",
-      kind: "option",
-      producedByAgentId: input.producedByAgentId,
+    createRootletOutputForInvocation({
+      goalId: input.goalId,
+      cluster: input.cluster,
+      invocation: input.invocation,
+      constraints: [...input.constraints],
       summary,
-      sourceRefs: [input.goalId, response.requestId, response.responseId],
+      sourceRefs: [response.requestId, response.responseId],
       evidenceRefs: [`model-call:${response.responseId}`],
-      soilAssetFitRefs: [],
-      constraintRefs: [],
-      riskRefs: [],
-      status: "produced",
-    },
+    }),
   ];
 }
 

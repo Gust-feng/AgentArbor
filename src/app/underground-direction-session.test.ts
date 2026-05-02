@@ -28,6 +28,44 @@ test("runUndergroundDirectionSession creates an approved package without enterin
   assert.equal(result.eventTypes.includes("direction_handoff.completed"), true);
   assert.equal(result.eventTypes.includes("growth_plan.completed"), false);
   assert.equal(result.observationSnapshot.aboveground.status, "not_started");
+  const plannedPayload = result.runtime.eventLog
+    .list()
+    .find((entry) => entry.type === "underground.exploration_planned")?.message.payload as
+    | { agentCluster?: { plan?: { rootletKinds?: readonly string[] } } }
+    | undefined;
+  const producedPayload = result.runtime.eventLog
+    .list()
+    .find((entry) => entry.type === "exploration_candidate.produced")?.message.payload as
+    | { agentCluster?: { invocations?: readonly { role: string; outputRefs: readonly string[] }[] } }
+    | undefined;
+  assert.deepEqual(plannedPayload?.agentCluster?.plan?.rootletKinds, ["option"]);
+  assert.equal(
+    producedPayload?.agentCluster?.invocations?.some(
+      (invocation) => invocation.role === "rootlet_agent" && invocation.outputRefs.length > 0
+    ),
+    true
+  );
+  assert.equal(result.undergroundReport.agentClusterRun?.terminalStatus, "approved_package_created");
+  assert.equal(result.observationSnapshot.underground.agentCluster?.terminalStatus, "approved_package_created");
+  assert.deepEqual(result.observationSnapshot.underground.agentCluster?.plan.rootletKinds, ["option"]);
+  assert.equal(
+    result.observationSnapshot.underground.agentCluster?.invocations.some(
+      (invocation) => invocation.role === "rootlet_agent" && invocation.outputRefs.length > 0
+    ),
+    true
+  );
+  assert.equal(
+    result.undergroundReport.rootletOutputs.every((output) =>
+      result.undergroundReport.agentClusterRun?.invocations.some(
+        (invocation) =>
+          invocation.invocationId === output.invocationId &&
+          invocation.role === "rootlet_agent" &&
+          invocation.status === "completed" &&
+          invocation.outputRefs.includes(output.outputId)
+      )
+    ),
+    true
+  );
 });
 
 test("runUndergroundDirectionSession derives handoff fields from goal intent profile", () => {
@@ -62,6 +100,27 @@ test("runUndergroundDirectionSession waits for user when blocking unknown exists
   assert.equal(result.eventTypes.includes("user_approval.requested"), true);
   assert.equal(result.eventTypes.includes("growth_plan.completed"), false);
   assert.equal(result.observationSnapshot.underground.userEscalation.required, true);
+  assert.equal(result.observationSnapshot.underground.agentCluster?.terminalStatus, "awaiting_user");
+  assert.equal(result.observationSnapshot.aboveground.status, "not_started");
+});
+
+test("runUndergroundDirectionSession schedules rootlet agent invocations for dynamic rootlet selection", () => {
+  const result = runUndergroundDirectionSession(
+    "需要风险、安全、资产、证据、约束和反驳，并且权限未知待确认。"
+  );
+  const rootletKinds = result.undergroundReport.plan.rootletClusters.map((cluster) => cluster.kind);
+  const rootletInvocations = result.observationSnapshot.underground.agentCluster?.invocations.filter(
+    (invocation) => invocation.role === "rootlet_agent"
+  );
+
+  assert.deepEqual(rootletKinds, ["option", "risk", "asset_fit", "evidence", "constraint", "counterfactual"]);
+  assert.deepEqual(result.observationSnapshot.underground.agentCluster?.plan.rootletKinds, rootletKinds);
+  assert.equal(rootletInvocations?.length, rootletKinds.length);
+  assert.equal(rootletInvocations?.every((invocation) => invocation.status === "completed"), true);
+  assert.deepEqual(
+    result.observationSnapshot.underground.rootletClusters.map((cluster) => cluster.invocationStatus),
+    rootletKinds.map(() => "completed")
+  );
 });
 
 test("recoverUndergroundDirectionSession turns awaiting_user into approved v2 without entering Aboveground", () => {
@@ -85,6 +144,16 @@ test("recoverUndergroundDirectionSession turns awaiting_user into approved v2 wi
   assert.equal(recovery.loadedApprovedDirectionHandoffPackage.lineage.previous?.version, 1);
   assert.equal(recovery.loadedApprovedDirectionHandoffPackage.lineage.revisionReason, "user_clarification_answered");
   assert.equal(recovery.observationSnapshot.aboveground.status, "not_started");
+  const handoffInvocation = recovery.recoveredUndergroundReport.agentClusterRun?.invocations.find(
+    (invocation) => invocation.role === "handoff_steward"
+  );
+  assert.equal(handoffInvocation?.agentId, "underground-handoff-steward");
+  assert.equal(handoffInvocation?.outputRefs.includes(recovery.directionHandoffPackageRef.packageId), true);
+  const completedEvents = recovery.runtime.eventLog
+    .list()
+    .filter((entry) => entry.type === "direction_handoff.completed");
+  const finalCompletedEvent = completedEvents[completedEvents.length - 1];
+  assert.equal(finalCompletedEvent?.message.from.id, "underground-handoff-steward");
 });
 
 test("runUndergroundDirectionSession stops without fabricating an approved package", () => {
@@ -98,6 +167,8 @@ test("runUndergroundDirectionSession stops without fabricating an approved packa
   assert.equal(result.eventTypes.includes("user_approval.requested"), false);
   assert.equal(result.observationSnapshot.currentPhase, "underground");
   assert.equal(result.observationSnapshot.handoff.directionStatus, "draft");
+  assert.equal(result.observationSnapshot.underground.agentCluster?.terminalStatus, "stopped");
+  assert.equal(result.observationSnapshot.aboveground.status, "not_started");
 });
 
 test("underground-only session does not write repo-root .agentarbor assets", () => {

@@ -34,7 +34,13 @@ export function createRunObservationLayerViews(input: RunObservationSnapshotInpu
 function createUndergroundView(input: RunObservationSnapshotInput): RunObservationUndergroundView {
   const report = input.undergroundReport;
   const outputRefByClusterId = new Map(report.rootletOutputs.map((output) => [output.clusterId, output.outputId]));
+  const rootletInvocationByAgentId = new Map(
+    (report.agentClusterRun?.invocations ?? [])
+      .filter((invocation) => invocation.role === "rootlet_agent")
+      .map((invocation) => [invocation.agentId, invocation])
+  );
   return {
+    agentCluster: createAgentClusterView(report.agentClusterRun),
     planId: report.plan.planId,
     status: statusForUnderground(report),
     budget: { ...report.plan.budget },
@@ -47,10 +53,17 @@ function createUndergroundView(input: RunObservationSnapshotInput): RunObservati
       inputRefs: [...cluster.inputRefs],
       exitCriteria: [...cluster.exitCriteria],
       budget: { ...cluster.budget },
+      agentId: rootletAgentIdForKind(cluster.kind),
+      invocationId: rootletInvocationByAgentId.get(rootletAgentIdForKind(cluster.kind))?.invocationId,
+      invocationStatus: rootletInvocationByAgentId.get(rootletAgentIdForKind(cluster.kind))?.status,
+      invocationOutputRefs: [
+        ...(rootletInvocationByAgentId.get(rootletAgentIdForKind(cluster.kind))?.outputRefs ?? []),
+      ],
       outputRef: outputRefByClusterId.get(cluster.clusterId),
     })),
     rootletOutputs: report.rootletOutputs.map((output) => ({
       outputId: output.outputId,
+      invocationId: output.invocationId,
       clusterId: output.clusterId,
       kind: output.kind,
       producedByAgentId: output.producedByAgentId,
@@ -114,6 +127,48 @@ function createUndergroundView(input: RunObservationSnapshotInput): RunObservati
     userEscalation: createUserEscalationView(report),
     clarificationResponses: createClarificationResponses(input.eventEntries),
   };
+}
+
+function createAgentClusterView(
+  run: RunObservationSnapshotInput["undergroundReport"]["agentClusterRun"]
+): RunObservationUndergroundView["agentCluster"] {
+  if (run === undefined) {
+    return undefined;
+  }
+  return {
+    runId: run.runId,
+    terminalStatus: run.terminalStatus,
+    candidateRefs: [...run.candidateRefs],
+    packageRef: run.packageRef === undefined ? undefined : { ...run.packageRef },
+    plan: {
+      planId: run.plan.planId,
+      goalId: run.plan.goalId,
+      rootletKinds: [...run.plan.rootletKinds],
+      schedulingReasons: [...run.plan.schedulingReasons],
+      agents: run.plan.agents.map((agent) => ({
+        agentId: agent.agentId,
+        role: agent.role,
+        rootletKind: agent.rootletKind,
+        inputRefs: [...agent.inputRefs],
+        schedulingReason: agent.schedulingReason,
+      })),
+    },
+    invocations: run.invocations.map((invocation) => ({
+      invocationId: invocation.invocationId,
+      agentId: invocation.agentId,
+      role: invocation.role,
+      inputRefs: [...invocation.inputRefs],
+      outputRefs: [...invocation.outputRefs],
+      status: invocation.status,
+      startedAt: invocation.startedAt,
+      completedAt: invocation.completedAt,
+      failureReason: invocation.failureReason,
+    })),
+  };
+}
+
+function rootletAgentIdForKind(kind: string): string {
+  return `underground-rootlet-${kind.replace("_", "-")}`;
 }
 
 function createHandoffView(input: RunObservationSnapshotInput): RunObservationHandoffView {

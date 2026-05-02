@@ -4,32 +4,31 @@ import {
   type ExplorationCandidateRef,
   type RootletClusterKind,
   type RootletOutput,
+  type UndergroundAgentInvocation,
 } from "../domain/underground/index.js";
 import { createId, nowIso } from "../kernel/id.js";
 
 export function createMinimalCandidatePool(input: {
   goalId: string;
-  producedByAgentId: string;
   rootletOutputs: readonly RootletOutput[];
+  agentInvocations: readonly UndergroundAgentInvocation[];
 }): CandidatePool {
-  const candidates = input.rootletOutputs.map((output) => createCandidateFromRootletOutput(output, input.producedByAgentId));
+  const candidates = input.rootletOutputs.map(createCandidateFromRootletOutput);
   return createCandidatePool({
     poolId: createId("candidate-pool"),
     goalId: input.goalId,
     rootletOutputs: input.rootletOutputs,
+    agentInvocations: input.agentInvocations,
     candidates,
     updatedAt: nowIso(),
   });
 }
 
-function createCandidateFromRootletOutput(
-  output: RootletOutput,
-  producedByAgentId: string
-): ExplorationCandidateRef {
+function createCandidateFromRootletOutput(output: RootletOutput): ExplorationCandidateRef {
   return {
     id: createId("candidate"),
     kind: candidateKindForRootlet(output.kind),
-    producedByAgentId,
+    producedByAgentId: output.producedByAgentId,
     clusterId: output.clusterId,
     sourceRefs: [output.outputId],
     status: "candidate",

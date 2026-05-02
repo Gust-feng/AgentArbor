@@ -1,6 +1,7 @@
 export * from "./common.js";
 export * from "./constraints.js";
 export * from "./soil/store.js";
+export * from "./underground/agent-cluster.js";
 export * from "./underground/candidate-comparison.js";
 export * from "./underground/clarification.js";
 export * from "./underground/contracts.js";

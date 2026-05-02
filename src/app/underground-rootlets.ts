@@ -6,6 +6,7 @@ import {
   UNDERGROUND_CENTER_ROLES,
   type ExplorationBudget,
   type GoalIntentProfile,
+  type UndergroundAgentInvocation,
   type RootletClusterKind,
   type RootletClusterPlan,
   type RootletOutput,
@@ -100,30 +101,67 @@ export function spendCandidateBudget(
 
 export function produceMinimalRootletOutputs(input: {
   plan: UndergroundExplorationPlan;
-  producedByAgentId: string;
+  rootletInvocations: readonly UndergroundAgentInvocation[];
   constraints: Constraint[];
   goalIntentProfile?: GoalIntentProfile;
 }): RootletOutput[] {
-  return input.plan.rootletClusters.map((cluster) => ({
+  const invocationByRootletKind = new Map(
+    input.rootletInvocations
+      .filter((invocation) => invocation.role === "rootlet_agent")
+      .map((invocation) => [rootletKindFromAgentId(invocation.agentId), invocation])
+  );
+  return input.plan.rootletClusters.map((cluster) => {
+    const invocation = invocationByRootletKind.get(cluster.kind);
+    if (invocation === undefined) {
+      throw new Error(`Missing rootlet agent invocation for cluster kind: ${cluster.kind}`);
+    }
+    return createRootletOutputForInvocation({
+      goalId: input.plan.goalId,
+      cluster,
+      invocation,
+      constraints: input.constraints,
+      goalIntentProfile: input.goalIntentProfile,
+    });
+  });
+}
+
+export function createRootletOutputForInvocation(input: {
+  goalId: string;
+  cluster: RootletClusterPlan;
+  invocation: UndergroundAgentInvocation;
+  constraints: Constraint[];
+  goalIntentProfile?: GoalIntentProfile;
+  summary?: string;
+  sourceRefs?: readonly string[];
+  evidenceRefs?: readonly string[];
+}): RootletOutput {
+  return {
     outputId: createId("rootlet-output"),
-    clusterId: cluster.clusterId,
-    kind: cluster.kind,
-    producedByAgentId: input.producedByAgentId,
-    summary: rootletSummary(cluster.kind, input.goalIntentProfile),
-    sourceRefs: [evidenceId(input.plan.goalId, "goal-intent"), "goal.received", cluster.clusterId],
-    evidenceRefs: rootletEvidenceRefs(input.plan.goalId, cluster.kind),
-    soilAssetFitRefs: cluster.kind === "asset_fit" ? ["soil:minimal-constraints"] : [],
+    invocationId: input.invocation.invocationId,
+    clusterId: input.cluster.clusterId,
+    kind: input.cluster.kind,
+    producedByAgentId: input.invocation.agentId,
+    summary: input.summary ?? rootletSummary(input.cluster.kind, input.goalIntentProfile),
+    sourceRefs: [
+      evidenceId(input.goalId, "goal-intent"),
+      "goal.received",
+      input.cluster.clusterId,
+      input.invocation.invocationId,
+      ...(input.sourceRefs ?? []),
+    ],
+    evidenceRefs: [...rootletEvidenceRefs(input.goalId, input.cluster.kind), ...(input.evidenceRefs ?? [])],
+    soilAssetFitRefs: input.cluster.kind === "asset_fit" ? ["soil:minimal-constraints"] : [],
     constraintRefs:
-      cluster.kind === "constraint"
+      input.cluster.kind === "constraint"
         ? input.constraints.map((constraint) => ({
             constraintId: constraint.id,
             requiredLevel: constraint.level,
             enforcementGate: constraint.enforcementGate,
           }))
         : [],
-    riskRefs: cluster.kind === "risk" ? ["risk-fake-agent-overreach"] : [],
+    riskRefs: input.cluster.kind === "risk" ? ["risk-fake-agent-overreach"] : [],
     status: "produced",
-  }));
+  };
 }
 
 function createRootletClusterPlan(kind: RootletClusterKind, goalIntentProfile?: GoalIntentProfile): RootletClusterPlan {
@@ -196,4 +234,13 @@ function rootletEvidenceRefs(goalId: string, kind: RootletClusterKind): string[]
     );
   }
   return refs;
+}
+
+function rootletKindFromAgentId(agentId: string): RootletClusterKind | undefined {
+  const prefix = "underground-rootlet-";
+  if (!agentId.startsWith(prefix)) {
+    return undefined;
+  }
+  const kind = agentId.slice(prefix.length).replace("-", "_");
+  return ROOTLET_CLUSTER_KINDS.find((rootletKind) => rootletKind === kind);
 }

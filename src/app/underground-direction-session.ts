@@ -10,18 +10,22 @@ import {
 } from "../domain/agentarbor/direction-handoff-package.js";
 import type { IntelligenceChannel } from "../domain/intelligence/index.js";
 import type { RunObservationSnapshot } from "../domain/observation/contracts.js";
-import type { RootletOutput } from "../domain/underground/index.js";
 import { createRunObservationSnapshot } from "../domain/observation/index.js";
 import { createId } from "../kernel/id.js";
 import { createMessage } from "../kernel/messages/create-message.js";
+import {
+  finalizeUndergroundAgentClusterRun,
+  runUndergroundAgentClusterExploration,
+  runUndergroundAgentClusterExplorationWithIntelligence,
+  type RunUndergroundAgentClusterExplorationResult,
+} from "./underground-agent-cluster-runtime.js";
 import {
   createAwaitingUserDirectionMaterial,
   createMinimalDirectionMaterial,
   createStoppedDirectionMaterial,
 } from "./minimal-direction.js";
+import { createUndergroundExplorationReport } from "./underground-report.js";
 import { createMinimalRuntime, type MinimalRuntime } from "./runtime.js";
-import { requestUndergroundRootletCandidateAdvice } from "./underground-intelligence.js";
-import { runUndergroundExploration } from "./underground-runner.js";
 
 export type UndergroundDirectionSessionTerminalStatus =
   | "approved_package_created"
@@ -61,6 +65,13 @@ export function runUndergroundDirectionSession(
 ): UndergroundDirectionSessionResult {
   const { runtime, storage } = createUndergroundSessionRuntime(options);
   const { traceId, goalId, agentId } = publishUndergroundGoal(runtime, goal);
+  const exploration = runUndergroundAgentClusterExploration({
+    runtime,
+    traceId,
+    goalId,
+    rawGoal: goal,
+    coordinatorAgentId: agentId,
+  });
 
   return completeUndergroundDirectionSession({
     runtime,
@@ -69,6 +80,7 @@ export function runUndergroundDirectionSession(
     goalId,
     agentId,
     goal,
+    exploration,
   });
 }
 
@@ -79,13 +91,13 @@ export async function runUndergroundDirectionSessionWithIntelligence(
   const { runtime, storage } = createUndergroundSessionRuntime(options);
   const { traceId, goalId, agentId } = publishUndergroundGoal(runtime, goal);
   const intelligenceChannel = options.createIntelligenceChannel(runtime);
-  const extraRootletOutputs = await requestUndergroundRootletCandidateAdvice({
-    intelligenceChannel,
+  const exploration = await runUndergroundAgentClusterExplorationWithIntelligence({
+    runtime,
     traceId,
     goalId,
-    goal,
-    producedByAgentId: agentId,
-    constraints: runtime.constraints,
+    rawGoal: goal,
+    coordinatorAgentId: agentId,
+    intelligenceChannel,
   });
 
   return completeUndergroundDirectionSession({
@@ -95,7 +107,7 @@ export async function runUndergroundDirectionSessionWithIntelligence(
     goalId,
     agentId,
     goal,
-    extraRootletOutputs,
+    exploration,
   });
 }
 
@@ -143,22 +155,15 @@ function completeUndergroundDirectionSession(input: {
   goalId: string;
   agentId: string;
   goal: string;
-  extraRootletOutputs?: readonly RootletOutput[];
+  exploration: RunUndergroundAgentClusterExplorationResult;
 }): UndergroundDirectionSessionResult {
-  const { candidatePool, convergenceReport, undergroundReport } = runUndergroundExploration({
-    runtime: input.runtime,
-    traceId: input.traceId,
-    goalId: input.goalId,
-    rawGoal: input.goal,
-    agentId: input.agentId,
-    extraRootletOutputs: input.extraRootletOutputs,
-  });
+  const { candidatePool, convergenceReport } = input.exploration;
   const materialInput = {
     goalId: input.goalId,
     goal: input.goal,
     producedByAgentId: input.agentId,
     constraints: input.runtime.constraints,
-    goalIntentProfile: undergroundReport.goalIntentProfile,
+    goalIntentProfile: input.exploration.undergroundReport.goalIntentProfile,
     candidatePool,
     convergenceReport,
   };
@@ -175,12 +180,28 @@ function completeUndergroundDirectionSession(input: {
   );
   const directionHandoffPackageRef = createDirectionHandoffPackageRef(loadedDirectionHandoffPackage);
   const terminalStatus = terminalStatusForConvergence(convergenceReport.outcome);
+  const agentClusterRun = finalizeUndergroundAgentClusterRun({
+    run: input.exploration.agentClusterRun,
+    terminalStatus,
+    candidateRefs: convergenceReport.handoffCandidateRefs,
+    packageRef: directionHandoffPackageRef,
+    stopReason: convergenceReport.stopReason,
+  });
+  const undergroundReport = createUndergroundExplorationReport({
+    plan: input.exploration.undergroundReport.plan,
+    agentClusterRun,
+    goalIntentProfile: input.exploration.undergroundReport.goalIntentProfile,
+    evidenceLedger: input.exploration.undergroundReport.evidenceLedger,
+    rootletOutputs: [...input.exploration.undergroundReport.rootletOutputs],
+    candidatePool,
+    convergenceReport,
+  });
 
   if (terminalStatus === "approved_package_created") {
     input.runtime.bus.publish(
       createMessage({
         traceId: input.traceId,
-        from: { id: input.agentId, role: "underground_center" },
+        from: { id: "underground-handoff-steward", role: "underground_center" },
         to: { role: "aboveground_center" },
         type: "direction_handoff.completed",
         intent: "complete_direction_handoff",
@@ -188,6 +209,12 @@ function completeUndergroundDirectionSession(input: {
           goalId: input.goalId,
           directionHandoff: material.directionHandoff,
           directionPackage: directionHandoffPackageRef,
+          agentCluster: {
+            plan: agentClusterRun.plan,
+            run: agentClusterRun,
+            invocation: agentClusterRun.invocations.find((invocation) => invocation.role === "handoff_steward"),
+            invocations: agentClusterRun.invocations,
+          },
         },
       })
     );
@@ -195,7 +222,7 @@ function completeUndergroundDirectionSession(input: {
     input.runtime.bus.publish(
       createMessage({
         traceId: input.traceId,
-        from: { id: input.agentId, role: "underground_center" },
+        from: { id: "underground-handoff-steward", role: "underground_center" },
         to: { role: "user" },
         type: "user_approval.requested",
         intent: "request_user_clarification",
@@ -206,6 +233,12 @@ function completeUndergroundDirectionSession(input: {
           convergenceReport: {
             reviewId: convergenceReport.reviewId,
             outcome: convergenceReport.outcome,
+          },
+          agentCluster: {
+            plan: agentClusterRun.plan,
+            run: agentClusterRun,
+            invocation: agentClusterRun.invocations.find((invocation) => invocation.role === "handoff_steward"),
+            invocations: agentClusterRun.invocations,
           },
         },
       })

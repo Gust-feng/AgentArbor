@@ -1,4 +1,5 @@
 import type { ConstraintRef } from "../constraints.js";
+import type { UndergroundAgentClusterRun, UndergroundAgentInvocation } from "./agent-cluster.js";
 import type { CandidateComparison } from "./candidate-comparison.js";
 import type { ConvergenceReviewOutcome, ConvergenceStopReason } from "./contracts.js";
 import type { UndergroundEvidenceLedger } from "./evidence-ledger.js";
@@ -66,6 +67,7 @@ export type UndergroundExplorationPlan = {
 
 export type RootletOutput = {
   outputId: string;
+  invocationId: string;
   clusterId: string;
   kind: RootletClusterKind;
   producedByAgentId: string;
@@ -140,6 +142,7 @@ export type UndergroundConvergenceReport = {
 
 export type UndergroundExplorationReport = {
   plan: UndergroundExplorationPlan;
+  agentClusterRun?: UndergroundAgentClusterRun;
   goalIntentProfile?: GoalIntentProfile;
   evidenceLedger?: UndergroundEvidenceLedger;
   rootletOutputs: RootletOutput[];
@@ -175,9 +178,11 @@ export function createCandidatePool(input: {
   poolId: string;
   goalId: string;
   rootletOutputs: readonly RootletOutput[];
+  agentInvocations: readonly UndergroundAgentInvocation[];
   candidates: readonly ExplorationCandidateRef[];
   updatedAt: string;
 }): CandidatePool {
+  assertRootletOutputsComeFromCompletedInvocations(input.rootletOutputs, input.agentInvocations);
   assertRootletOutputsAreOnlyPoolSources(input.rootletOutputs, input.candidates);
   return {
     poolId: input.poolId,
@@ -187,6 +192,39 @@ export function createCandidatePool(input: {
     counts: countCandidatePool(input.candidates),
     updatedAt: input.updatedAt,
   };
+}
+
+function assertRootletOutputsComeFromCompletedInvocations(
+  rootletOutputs: readonly RootletOutput[],
+  agentInvocations: readonly UndergroundAgentInvocation[]
+): void {
+  const invocationById = new Map(agentInvocations.map((invocation) => [invocation.invocationId, invocation]));
+  for (const output of rootletOutputs) {
+    if (typeof output.invocationId !== "string" || output.invocationId.trim().length === 0) {
+      throw new UndergroundConvergenceError(`Rootlet output ${output.outputId} must reference an agent invocation.`);
+    }
+    const invocation = invocationById.get(output.invocationId);
+    if (invocation === undefined) {
+      throw new UndergroundConvergenceError(
+        `Rootlet output ${output.outputId} references unknown agent invocation: ${output.invocationId}.`
+      );
+    }
+    if (invocation.role !== "rootlet_agent") {
+      throw new UndergroundConvergenceError(
+        `Rootlet output ${output.outputId} must come from a rootlet_agent invocation.`
+      );
+    }
+    if (invocation.agentId !== output.producedByAgentId) {
+      throw new UndergroundConvergenceError(
+        `Rootlet output ${output.outputId} producer does not match invocation ${invocation.invocationId}.`
+      );
+    }
+    if (invocation.status !== "completed" || !invocation.outputRefs.includes(output.outputId)) {
+      throw new UndergroundConvergenceError(
+        `Rootlet output ${output.outputId} cannot enter the candidate pool before its invocation completes.`
+      );
+    }
+  }
 }
 
 export function applyCandidateConvergenceDecisions(

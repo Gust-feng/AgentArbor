@@ -4,12 +4,14 @@ import type {
   RootletOutput,
   UndergroundConvergenceReport,
   UndergroundEvidenceLedger,
+  UndergroundAgentClusterRun,
   UndergroundExplorationPlan,
   UndergroundExplorationReport,
 } from "../domain/underground/index.js";
 
 export function createUndergroundExplorationReport(input: {
   plan: UndergroundExplorationPlan;
+  agentClusterRun?: UndergroundAgentClusterRun;
   goalIntentProfile?: GoalIntentProfile;
   evidenceLedger?: UndergroundEvidenceLedger;
   rootletOutputs: RootletOutput[];
@@ -18,6 +20,7 @@ export function createUndergroundExplorationReport(input: {
 }): UndergroundExplorationReport {
   return {
     plan: input.plan,
+    agentClusterRun: input.agentClusterRun === undefined ? undefined : cloneAgentClusterRun(input.agentClusterRun),
     goalIntentProfile: input.goalIntentProfile === undefined ? undefined : cloneGoalIntentProfile(input.goalIntentProfile),
     evidenceLedger: input.evidenceLedger === undefined ? undefined : cloneEvidenceLedger(input.evidenceLedger),
     rootletOutputs: input.rootletOutputs.map((output) => ({ ...output })),
@@ -41,6 +44,29 @@ export function createUndergroundExplorationReport(input: {
         evidenceRefs: [...comparison.evidenceRefs],
       })),
     },
+  };
+}
+
+function cloneAgentClusterRun(run: UndergroundAgentClusterRun): UndergroundAgentClusterRun {
+  return {
+    ...run,
+    plan: {
+      ...run.plan,
+      budget: { ...run.plan.budget },
+      agents: run.plan.agents.map((agent) => ({
+        ...agent,
+        inputRefs: [...agent.inputRefs],
+      })),
+      rootletKinds: [...run.plan.rootletKinds],
+      schedulingReasons: [...run.plan.schedulingReasons],
+    },
+    invocations: run.invocations.map((invocation) => ({
+      ...invocation,
+      inputRefs: [...invocation.inputRefs],
+      outputRefs: [...invocation.outputRefs],
+    })),
+    candidateRefs: [...run.candidateRefs],
+    packageRef: run.packageRef === undefined ? undefined : { ...run.packageRef },
   };
 }
 

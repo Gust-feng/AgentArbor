@@ -136,6 +136,7 @@ test("candidate comparison drives convergence differently for the same cluster k
 function makeRootletOutput(outputId: string, kind: RootletOutput["kind"]): RootletOutput {
   return {
     outputId,
+    invocationId: `invocation-${outputId}`,
     clusterId: `rootlet-${kind.replace("_", "-")}`,
     kind,
     producedByAgentId: "underground-analyzer",

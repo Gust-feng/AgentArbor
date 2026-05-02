@@ -1,4 +1,5 @@
 import type { AgentManifest } from "../../domain/contracts.js";
+import { ROOTLET_CLUSTER_KINDS, type RootletClusterKind } from "../../domain/underground/index.js";
 
 export function createDemoAgentManifests(): AgentManifest[] {
   return [
@@ -111,4 +112,86 @@ export function createDemoAgentManifests(): AgentManifest[] {
       },
     },
   ];
+}
+
+export function createUndergroundAgentClusterManifests(): AgentManifest[] {
+  return [
+    undergroundClusterManifest({
+      id: "underground-intent-core",
+      name: "Underground Intent Core",
+      description: "Creates the deterministic goal intent profile that drives underground scheduling.",
+      capabilities: ["goal.intent_profile", "constraint.extract"],
+      inputEvents: ["goal.received"],
+      outputEvents: ["underground.exploration_planned"],
+    }),
+    undergroundClusterManifest({
+      id: "underground-growth-governor",
+      name: "Underground Growth Governor",
+      description: "Bounds radial exploration budget and rootlet startup.",
+      capabilities: ["growth.budget", "rootlet.schedule"],
+      inputEvents: ["underground.exploration_planned"],
+      outputEvents: ["rootlet_cluster.started"],
+    }),
+    ...ROOTLET_CLUSTER_KINDS.map(createUndergroundRootletAgentManifest),
+    undergroundClusterManifest({
+      id: "underground-convergence-judge",
+      name: "Underground Convergence Judge",
+      description: "Judges candidate pool outputs before handoff material can be approved.",
+      capabilities: ["candidate.compare", "convergence.judge"],
+      inputEvents: ["candidate_pool.updated"],
+      outputEvents: ["convergence_review.completed"],
+    }),
+    undergroundClusterManifest({
+      id: "underground-handoff-steward",
+      name: "Underground Handoff Steward",
+      description: "Packages approved or awaiting underground direction material at the handoff boundary.",
+      capabilities: ["direction.handoff", "package.reference"],
+      inputEvents: ["convergence_review.completed"],
+      outputEvents: ["direction_handoff.completed", "user_approval.requested"],
+    }),
+  ];
+}
+
+function createUndergroundRootletAgentManifest(kind: RootletClusterKind): AgentManifest {
+  return undergroundClusterManifest({
+    id: undergroundRootletAgentId(kind),
+    name: `Underground Rootlet ${kind}`,
+    description: `Produces bounded ${kind} rootlet output for the current underground run.`,
+    capabilities: [`rootlet.${kind}`, "rootlet.output"],
+    inputEvents: ["rootlet_cluster.started"],
+    outputEvents: ["exploration_candidate.produced"],
+  });
+}
+
+export function undergroundRootletAgentId(kind: RootletClusterKind): string {
+  return `underground-rootlet-${kind.replace("_", "-")}`;
+}
+
+function undergroundClusterManifest(input: {
+  id: string;
+  name: string;
+  description: string;
+  capabilities: string[];
+  inputEvents: AgentManifest["inputEvents"];
+  outputEvents: AgentManifest["outputEvents"];
+}): AgentManifest {
+  return {
+    id: input.id,
+    name: input.name,
+    layer: "underground_center",
+    description: input.description,
+    lifecycle: {
+      status: "active",
+      createdReason: "Runtime-only underground agent cluster scheduling proof.",
+      retirementCondition: "A governed underground capability asset replaces this deterministic runtime manifest.",
+    },
+    capabilities: input.capabilities,
+    inputEvents: input.inputEvents,
+    outputEvents: input.outputEvents,
+    permissions: {
+      read: ["soil_index", "direction_handoff_context"],
+      write: ["underground_candidate_pool", "direction_handoff"],
+      execute: [],
+    },
+  };
 }

@@ -1,0 +1,111 @@
+# 运行观察读模型
+
+本文件记录 V0.4 Observation Kernel 契约。当前没有真实 UI、HTTP、SSE、WebSocket、数据库、真实 LLM、MCP、A2A 或 AG-UI adapter；观察模型只是从 EventLog 和 runtime result 派生出的 JSON-safe readonly 投影。
+
+## Scope / Trigger
+
+- Trigger：修改 `src/domain/observation/**`、`src/app/minimal-loop.ts` 的 observation snapshot 输出，或新增未来前端观察字段。
+- Scope：`RunObservationSnapshot`、`RunObservationEventView`、`RunPhase`、`RunStage`、分层 view 和 EventLog 派生规则。
+
+## Signatures
+
+- `RunObservationSnapshot`：跨运行可读的 Observation Kernel 快照；必须包含 `traceId`、`goalId`、`currentPhase`、`currentStage`、`eventCursor`、`events`、`underground`、`handoff`、`aboveground`、`fruits`、`governance` 和 `soilReturnStub`。
+- `RunObservationEventView`：EventLog entry 的 JSON-safe 视图；除 sequence、type、traceId、taskId、intent、from、to、createdAt、recordedAt 外，必须提供 `summary`、`scope`、`severity`、`progress` 和 `refs`。
+- `RunPhase`：稳定运行相位，不再使用无约束 string。当前相位覆盖 `not_started`、`underground`、`handoff`、`aboveground`、`verification`、`fruits`、`governance`、`soil_return`、`completed`。
+- `RunStage`：由最后一个 EventLog event 派生的细粒度阶段，用于未来前端定位当前事件游标。
+- `ObservationScope`、`ObservationSeverity`、`ObservationProgress`、`ObservationRef`、`ObservationStatus`：事件视图和层视图共享的前端可读元数据。V0.5 起 `ObservationRef.kind` 包含 `user_clarification`，用于引用 `UserClarificationRequest` 和 `UserClarificationResponse`。
+
+## Contracts
+
+- EventLog 是 source of truth；Observation Kernel 只能派生，不能成为新的事实源。
+- EventLog 对外 `list()` / `replay()` 返回值不能暴露内部可变 message 引用；调用方修改返回 entry、message 或 payload 后，不得改变 EventLog 内部事实。
+- Snapshot 必须是普通 JSON-safe 数据：不包含 class instance、函数、store 引用、runtime 引用或可调用对象。
+- `createRunObservationSnapshot` 是公开入口；内部投影应按职责拆分为事件视图、phase/stage 解析、层视图和 JSON-safe finalizer，避免把所有逻辑堆在单文件中。
+- `RunObservationEventView` 的 `summary`、`scope`、`severity`、`progress` 以及 `currentPhase` / `currentStage` 的事件映射必须来自同一个集中 metadata 模块；新增 `ArborMessageType` 时必须同步补全 metadata，并用测试证明 event view 与 phase/stage 没有分叉。
+- Event view 只能从 EventLog entry 派生，不能读取 runtime store。
+- `currentPhase` 和 `currentStage` 必须由 EventLog cursor 派生；没有事件时为 `not_started`。
+- Underground view 必须展示预算、rootlet clusters、rootlet outputs、candidate pool counts、每个 candidate、每个 convergence decision、收束摘要、handoff candidate refs、open questions 和用户升级状态。
+- `underground.userEscalation` 必须在 blocking unknown 存在时暴露 request id、reason、blocking level、status、related candidate refs、questions 和 JSON-safe request 数据；non-blocking unknown 只应出现在 `convergence.openQuestions`。
+- `underground.clarificationResponses` 必须从 EventLog 中的 `user_approval.received` payload 派生，暴露 request id、answers、answeredAt 和 evidence refs；不得把 response 作为 EventLog 之外的第二事实源。
+- Handoff view 必须暴露 package ref、direction id/version/status、validation 状态、source candidate refs、convergence review ref 和 package lineage；不能内联 Growth Plan 或 Soil asset content。
+- Aboveground、Fruits、Governance 和 Soil return 当前可以是 summary/stub，但字段必须稳定、JSON-safe、未来可扩展。
+- V0.3 兼容字段如 `directionPackageRef`、`artifactRefs`、`verification` 可以保留给现有调用方；新代码应优先读取 `handoff` 和分层 view。
+- Future frontend 应消费 snapshot / event view，不应绕过 EventLog 直接读取内存 store。
+
+## Validation & Error Matrix
+
+| 条件 | 结果 |
+| --- | --- |
+| EventLog 为空 | `currentPhase === "not_started"` 且 `currentStage === "not_started"` |
+| 外部修改 `EventLog.list()` 或 `EventLog.replay()` 返回的 message payload | 后续读取到的 EventLog 内部事实不变 |
+| 最后事件为 `direction_handoff.completed` | `currentPhase === "handoff"` 且 `currentStage === "direction_handoff_completed"` |
+| 最后事件为 `path_bias.suggested` | `currentPhase === "completed"` 且 `currentStage === "path_bias_suggested"` |
+| Snapshot 包含 runtime store、class instance、函数或可调用对象 | JSON round-trip 测试失败，必须移除引用并改为 plain data |
+| Event view 需要读取 artifact store、package store 或 runtime 对象才能补字段 | 设计违规；事件视图必须只接收 EventLog entries |
+| Underground view 缺少任一 rootlet、candidate 或 convergence decision | 测试失败；不得只保留汇总 counts |
+| `user_approval.requested` payload 携带 clarification request 但 event refs 缺少 `user_clarification` | 测试失败；事件 ref 必须从 payload 派生 |
+| `user_approval.received` payload 携带 clarification response 但 event refs 缺少 `user_clarification` | 测试失败；事件 ref 必须从 payload 派生 |
+| recovery 事件 payload 携带 direction package ref 但 event refs 缺少 `direction_package` / `direction_handoff` | 测试失败；事件 ref 必须从 payload 派生 |
+| blocking unknown 的 Observation view 未暴露 request details | 测试失败；不得只保留 `userEscalationRequired: true` |
+| Direction package view 内联 Growth Plan 或 Soil asset content | 设计违规；只能暴露 refs、status、validation 和 source candidate refs |
+| 18 步 main EventLog sequence 改变 | 测试失败；除非任务 PRD 明确批准新增/替换事件 |
+
+## Good / Base / Bad Cases
+
+- Good：`snapshot.ts` 只编排事件视图、phase/stage、层视图和 JSON-safe finalizer；`event-view.ts` 只读 EventLog entry；`layer-views.ts` 只把 runtime result 转成 plain view。
+- Base：保留 `directionPackageRef`、`artifactRefs` 和 `verification` 给 V0.3 调用方，但新字段以 `handoff`、`fruits` 和其他分层 view 为主。
+- Bad：在 snapshot 中保存 `runtime.eventLog`、`directionHandoffPackageStore`、`artifactStore` 或其他 live store 引用。
+- Bad：为了前端方便从 observation 层重新推导或修改领域事实，导致 Snapshot 成为 EventLog 之外的第二事实源。
+
+## Tests Required
+
+- Snapshot can round-trip through `JSON.stringify` / `JSON.parse`。
+- `currentPhase` 和 `RunStage` 从 EventLog 派生。
+- Event views include `summary` / `scope` / `severity` / `progress` / `refs` and are projected from EventLog entries only。
+- Underground view lists every rootlet cluster、rootlet output、candidate and convergence decision。
+- Underground view exposes blocking user clarification request details and non-blocking open questions。
+- Event views expose `user_clarification` refs when `user_approval.requested` carries a clarification request payload。
+- Event views expose `user_clarification` refs when `user_approval.received` carries a clarification response payload。
+- Recovery path event views expose direction package refs for `user_approval.received`、`direction_handoff.revision_requested` 和最终 `direction_handoff.completed`。
+- Snapshot exposes clarification responses and handoff lineage while staying JSON-safe。
+- Direction Handoff Package、Aboveground store load 和固定 18 步 main EventLog sequence 不回归。
+- Snapshot event cursor matches EventLog length and last event。
+- Snapshot does not expose mutable store references。
+- EventLog `list()` / `replay()` returned messages are cloned or otherwise immutable from callers.
+
+## Wrong vs Correct
+
+### Wrong
+
+```ts
+const snapshot = {
+  eventLog: runtime.eventLog,
+  artifactStore: runtime.artifactStore,
+  currentPhase: "completed",
+};
+```
+
+这会把 live runtime store 泄露给观察层，并让前端有机会绕过 EventLog 读取或解释事实。
+
+### Correct
+
+```ts
+const snapshot = createRunObservationSnapshot({
+  traceId,
+  goalId,
+  eventEntries: runtime.eventLog.list(),
+  undergroundReport,
+  directionHandoffPackage: loadedDirectionHandoffPackage,
+  growthPlan,
+  workflow,
+  task,
+  artifactRefs,
+  verification,
+  fruit,
+  runMemory,
+  experienceCandidate,
+  pathBias,
+});
+```
+
+这样 Snapshot 只接收可投影输入，输出仍是 JSON-safe plain data；EventLog 和领域结果继续拥有事实来源。

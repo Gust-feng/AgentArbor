@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Check runtime implementation against backend/runtime baseline and avoid unsupported framework assumptions."}
+{"file": ".trellis/spec/guides/index.md", "reason": "Shared checklist for quality review triggers."}
+{"file": ".trellis/spec/guides/agentarbor-governance-guide.md", "reason": "Verify AgentArbor structural boundaries, docs cleanliness, and .agentarbor non-persistence rule."}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Verify constants and shared logic were not duplicated unnecessarily."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Verify event, state, artifact, and governance data survive layer boundaries."}

@@ -1,0 +1,10 @@
+{"file":"AGENTS.md","reason":"确认仓库根规则和持续树形架构入口一致。"}
+{"file":"README.md","reason":"确认项目入口给出当前产品定位和主线。"}
+{"file":"docs/README.md","reason":"确认 docs 总入口索引正确。"}
+{"file":"docs/开发指南/README.md","reason":"确认正式开发指南索引正确。"}
+{"file":"docs/开发指南/00-总览.md","reason":"确认开发总览不再沿用线性 Root 流程。"}
+{"file":"docs/开发指南/03-系统架构/08-持续根系与根系回调.md","reason":"确认 Root System 被定义为持续运行系统。"}
+{"file":"docs/开发指南/04-模型与契约/05-RootBrief与GrowthPlan.md","reason":"确认 Root Brief Versioning 和 Growth Plan Revision 关系清楚。"}
+{"file":"docs/开发指南/04-模型与契约/06-SeedPacket与RootCallback.md","reason":"确认 Seed Packet 和 Root Callback 契约清楚。"}
+{"file":"docs/架构设计/产品架构/ADR-0016-种子层与持续根系架构.md","reason":"确认正式 ADR 覆盖新主线。"}
+{"file":"docs/任务看板/看板.md","reason":"确认人类可读看板反映 Trellis 当前状态。"}

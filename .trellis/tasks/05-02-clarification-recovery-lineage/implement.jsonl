@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend runtime, observation, package lineage, and deterministic test rules for this implementation."}
+{"file": ".trellis/spec/frontend/index.md", "reason": "Confirm no frontend/UI scope is required and avoid cross-layer leakage."}

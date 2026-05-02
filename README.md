@@ -31,7 +31,7 @@ AgentArbor 是目标驱动的 Agent / AgentApp 孕育与演化平台。它以 `S
 - `.agentarbor/`：未来 AgentArbor 原生方向交接包目录，用于地下中枢向地上中枢传递方向、约束、证据和 Growth Entry；不保存最终资产，不替代 Soil，只有在契约稳定后才增量创建。
 - `src/`：AgentArbor TypeScript 实现代码。当前只包含第一阶段确定性最小运行内核，不包含真实 LLM、数据库、UI 或外部 adapter。
 
-上述点目录当前默认属于本地开发态工具层，并被 `.gitignore` 忽略。后续如果需要把某些 Trellis 模板、平台适配模板或 AgentArbor 原生运行时资产纳入团队共享基线，必须先明确它们的职责、验证方式和提交范围，再单独调整忽略规则。
+`.trellis/spec/`、`.trellis/tasks/`、`.trellis/scripts/`、`.trellis/workflow.md`、`.trellis/config.yaml`、`.trellis/.version` 和 `.trellis/.gitignore` 是当前共享 Trellis 事实源；`.trellis/.runtime/`、`.trellis/workspace/`、`.trellis/.developer` 和 `.trellis/.current-task` 继续作为本地运行态忽略。其他点目录默认仍属于本地开发态工具层；若未来需要把平台适配模板或 AgentArbor 原生运行时资产纳入团队共享基线，必须先明确职责、验证方式和提交范围，再单独调整忽略规则。
 
 ## 快速阅读
 

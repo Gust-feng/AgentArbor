@@ -1,0 +1,10 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Runtime kernel spec index and required quality gates."}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Verify module boundary compliance."}
+{"file": ".trellis/spec/backend/underground-radial-growth.md", "reason": "Verify V0.5 Underground clarification and convergence invariants."}
+{"file": ".trellis/spec/backend/direction-handoff-package.md", "reason": "Verify awaiting_user package and Aboveground planning guard behavior."}
+{"file": ".trellis/spec/backend/observation-read-model.md", "reason": "Verify Observation Kernel output and event sequence stability."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Verify guard errors remain deterministic and specific."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Verify build, test, demo, and diff checks."}
+{"file": ".trellis/spec/guides/agentarbor-governance-guide.md", "reason": "Verify docs, task board, and no repo-root .agentarbor runtime writes."}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Verify helper additions do not duplicate existing source-of-truth logic."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Verify clarification data shape survives domain/package/event/observation boundaries."}

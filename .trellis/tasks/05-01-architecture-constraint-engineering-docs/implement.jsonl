@@ -1,0 +1,6 @@
+{"file":"docs/README.md","reason":"确认人类文档入口与约束工程、全景架构口径一致。"}
+{"file":"docs/开发指南/README.md","reason":"确认正式开发指南入口能指向新增约束工程契约。"}
+{"file":"docs/开发指南/00-总览.md","reason":"确认产品主线包含真正全景与约束工程位置。"}
+{"file":"docs/架构设计/产品架构/ADR-0011-AgentArbor未来架构.md","reason":"将旧全景图降级为历史局部参考，并补充映射。"}
+{"file":"docs/架构设计/产品架构/ADR-0016-种子层与持续根系架构.md","reason":"确认当前正式树形运行架构仍为主基线。"}
+{"file":".trellis/spec/guides/agentarbor-governance-guide.md","reason":"结构性文档变更必须遵守治理边界与收尾协议。"}

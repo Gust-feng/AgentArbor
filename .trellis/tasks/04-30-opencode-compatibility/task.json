@@ -1,0 +1,32 @@
+{
+  "id": "opencode-compatibility",
+  "name": "opencode-compatibility",
+  "title": "Add OpenCode compatibility",
+  "description": "Add OpenCode as a Trellis-compatible platform adapter and explain the cross-platform compatibility mechanism.",
+  "status": "completed",
+  "dev_type": "docs",
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "xzf28",
+  "assignee": "xzf28",
+  "createdAt": "2026-04-30",
+  "completedAt": "2026-04-30",
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [
+    ".opencode/",
+    ".trellis/",
+    ".agents/skills/trellis-meta/references/platform-files/platform-map.md",
+    ".agents/skills/trellis-meta/references/platform-files/overview.md",
+    ".trellis/spec/guides/agentarbor-governance-guide.md"
+  ],
+  "notes": "OpenCode compatibility should be added as a platform adapter around the shared .trellis workflow, not as AgentArbor product runtime data.",
+  "meta": {}
+}

@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend TypeScript runtime conventions for V0.4 Observation Kernel implementation."}
+{"file": ".trellis/spec/backend/observation-read-model.md", "reason": "Existing V0.3 observation snapshot contract to evolve into V0.4."}
+{"file": ".trellis/spec/guides/agentarbor-governance-guide.md", "reason": "Required when touching docs, specs, task board, and AgentArbor governance surfaces."}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Required for modularizing shared observation projection helpers without duplicating rules."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Required because the read model spans EventLog, runtime stores, app demo output, tests, specs, and future frontend contract."}

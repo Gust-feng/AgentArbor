@@ -1,0 +1,8 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Quality check entry point for runtime kernel changes."}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Verify focused module placement and forbidden adapter/UI/database boundaries."}
+{"file": ".trellis/spec/backend/underground-radial-growth.md", "reason": "Verify rootlet, candidate pool, convergence, and handoff input boundaries."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Verify convergence and handoff guard failures remain deterministic."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Verify build/test/demo checks and demo readability."}
+{"file": ".trellis/spec/backend/direction-handoff-package.md", "reason": "Verify package validation and Aboveground store-loading boundaries."}
+{"file": ".trellis/spec/backend/observation-read-model.md", "reason": "Verify snapshot remains JSON-safe and EventLog-derived."}
+{"file": ".trellis/spec/guides/agentarbor-governance-guide.md", "reason": "Verify no repo-root .agentarbor runtime assets or governance boundary violations."}

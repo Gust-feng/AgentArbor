@@ -1,0 +1,9 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Runtime kernel spec index and quality check entry point."}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Review module boundaries and app/domain/kernel dependency direction."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Review guard and failure semantics after refactor."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Review required build, test, and diff checks."}
+{"file": ".trellis/spec/backend/underground-radial-growth.md", "reason": "Review underground flow behavior and clarification escalation invariants."}
+{"file": ".trellis/spec/backend/direction-handoff-package.md", "reason": "Review handoff package contract and fixture compatibility."}
+{"file": ".trellis/spec/backend/observation-read-model.md", "reason": "Review observation read-model metadata and event projection semantics."}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Review single-source metadata and extracted helper reuse."}
+{"file": ".trellis/spec/guides/agentarbor-governance-guide.md", "reason": "Review governance-sensitive boundaries and no accidental runtime asset creation."}

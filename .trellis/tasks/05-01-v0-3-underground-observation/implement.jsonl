@@ -1,0 +1,10 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Runtime kernel task entry point and required backend guideline checklist."}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Defines focused domain/kernel/app module boundaries for runtime changes."}
+{"file": ".trellis/spec/backend/underground-radial-growth.md", "reason": "Defines V0.3 Underground radial growth, candidate pool, convergence, and handoff input guards."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Defines guard error behavior for convergence and package validation failures."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Defines pnpm build/test/demo quality gates for runtime work."}
+{"file": ".trellis/spec/backend/direction-handoff-package.md", "reason": "Defines DirectionHandoffPackage store, validation, and Aboveground loading boundaries."}
+{"file": ".trellis/spec/backend/observation-read-model.md", "reason": "Defines JSON-safe EventLog-derived RunObservationSnapshot contract."}
+{"file": ".trellis/spec/guides/agentarbor-governance-guide.md", "reason": "Protects Underground radial growth, Trellis, docs, and .agentarbor governance boundaries."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Observation snapshot crosses EventLog, runtime result, and future frontend contract boundaries."}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Task adds helpers/factories and event constants that must not duplicate existing patterns."}

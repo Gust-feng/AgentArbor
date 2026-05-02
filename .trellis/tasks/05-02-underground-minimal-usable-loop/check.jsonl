@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Quality check entry point for runtime kernel expectations."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Required build, test, and demo validation scope."}
+{"file": ".trellis/spec/backend/underground-radial-growth.md", "reason": "Verify clarification recovery and underground-only session behavior."}
+{"file": ".trellis/spec/backend/direction-handoff-package.md", "reason": "Verify handoff validation, persistence, versioning, and lineage behavior."}
+{"file": ".trellis/spec/backend/observation-read-model.md", "reason": "Verify recovery event ordering and JSON-safe projections."}
+{"file": ".trellis/spec/guides/agentarbor-governance-guide.md", "reason": "Verify .trellis git-ignore sharing does not include local runtime state."}

@@ -1,0 +1,11 @@
+{"file":"docs/README.md","reason":"文档总入口必须指向当前开发指南、架构资料、研究资料和任务看板。"}
+{"file":"docs/开发指南/README.md","reason":"正式开发指南入口统一到持续生长树形架构。"}
+{"file":"docs/开发指南/00-总览.md","reason":"总览承接 Imagination、Seed Packet、持续根系、Growth Plan 与运行沉淀闭环。"}
+{"file":"docs/开发指南/03-系统架构/05-植物学语义映射.md","reason":"植物学语义映射修正 Root 与持续根系含义。"}
+{"file":"docs/开发指南/03-系统架构/08-持续根系与根系回调.md","reason":"补充 Root Continuity 与 Root Callback 运行机制。"}
+{"file":"docs/开发指南/04-模型与契约/05-RootBrief与GrowthPlan.md","reason":"Root Brief 与 Growth Plan 契约加入版本化和修订关系。"}
+{"file":"docs/开发指南/04-模型与契约/06-SeedPacket与RootCallback.md","reason":"Seed Packet 与 Root Callback 成为前置成像和地下回调契约。"}
+{"file":"docs/开发指南/05-智能体生命周期/01-智能体组织与果实.md","reason":"智能体组织从单 agent 改为固定核心集群与动态任务集群。"}
+{"file":"docs/架构设计/产品架构/ADR-0015-树形语义基线与Root重定义.md","reason":"记录 Root 语义从元控制修正为探索型根系的正式决策。"}
+{"file":"docs/架构设计/产品架构/ADR-0016-种子层与持续根系架构.md","reason":"记录 Seed Cluster、持续根系和 Root Callback 的正式决策。"}
+{"file":".trellis/spec/guides/agentarbor-governance-guide.md","reason":"Trellis 治理指南同步当前文档边界和架构口径。"}

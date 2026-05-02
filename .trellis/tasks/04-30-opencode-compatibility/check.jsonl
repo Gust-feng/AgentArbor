@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/guides/agentarbor-governance-guide.md", "reason": "Check AgentArbor structural and record-placement boundaries after adding OpenCode."}
+{"file": ".agents/skills/trellis-meta/references/platform-files/platform-map.md", "reason": "Check OpenCode files are generated in the expected platform paths."}
+{"file": ".agents/skills/trellis-meta/references/platform-files/overview.md", "reason": "Check shared versus platform-specific responsibilities remain clear."}

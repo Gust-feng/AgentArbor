@@ -1,0 +1,8 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Quality gate entry for backend/runtime changes."}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Verify module ownership after refactor."}
+{"file": ".trellis/spec/backend/direction-handoff-package.md", "reason": "Verify store API, validation shape, package files, and .agentarbor safety."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Verify guard/error semantics remain intact."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Required build, test, and demo validation commands."}
+{"file": ".trellis/spec/guides/agentarbor-governance-guide.md", "reason": "Verify governance, docs, Trellis, and root-directory boundaries."}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Verify refactor avoids duplicated structural logic."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Verify validation/serialization/store boundaries remain explicit."}

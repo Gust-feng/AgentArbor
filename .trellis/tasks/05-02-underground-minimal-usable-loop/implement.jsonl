@@ -1,0 +1,10 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Runtime kernel spec index and pre-development checklist for underground and handoff changes."}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Keep new runtime modules inside the established TypeScript kernel boundaries."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Preserve guard and failure semantics for stopped and invalid handoff states."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Apply required build, test, and demo validation expectations."}
+{"file": ".trellis/spec/backend/underground-radial-growth.md", "reason": "Clarification, recovery, convergence, and underground-only handoff behavior are in scope."}
+{"file": ".trellis/spec/backend/direction-handoff-package.md", "reason": "Direction package validation, storage, version lineage, and filesystem boundary are in scope."}
+{"file": ".trellis/spec/backend/observation-read-model.md", "reason": "Recovery event refs and runtime result projection must stay observable and JSON-safe."}
+{"file": ".trellis/spec/backend/soil-store.md", "reason": "Underground direction session reads Soil constraints and refs through the minimal store boundary."}
+{"file": ".trellis/spec/guides/agentarbor-governance-guide.md", "reason": "The task changes .trellis sharing and must preserve AgentArbor governance boundaries."}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "The task adds helpers/options and must search for existing patterns before creating new abstractions."}

@@ -89,4 +89,4 @@ docs/
 
 阶段推进、任务计划、续接状态和工作流记录由 `.trellis/` 管理；根目录不新增 `Plan/` 或 `Plans/` 作为并行计划入口。稳定的实现边界和验收门写入 `docs/开发指南/06-工程实现/`。
 
-当前 `.trellis/`、`.agents/`、`.codex/`、`.opencode/`、`.claude/` 和 `.agentarbor/` 默认是本地开发态点目录，不进入当前提交基线。未来需要共享其中任何一类模板或运行时资产时，应先在架构设计或开发指南中明确边界，再调整提交策略。
+当前 `.trellis/spec/`、`.trellis/tasks/`、`.trellis/scripts/`、`.trellis/workflow.md`、`.trellis/config.yaml`、`.trellis/.version` 和 `.trellis/.gitignore` 已作为共享 Trellis 事实源进入提交计划；`.trellis/.runtime/`、`.trellis/workspace/`、`.trellis/.developer` 和 `.trellis/.current-task` 继续保持本地运行态。`.agents/`、`.codex/`、`.opencode/`、`.claude/` 和 `.agentarbor/` 默认仍是本地开发态点目录，不进入当前提交基线。未来需要共享平台适配模板或运行时资产时，应先在架构设计或开发指南中明确边界，再调整提交策略。

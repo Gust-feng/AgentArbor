@@ -1,0 +1,9 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Runtime kernel spec index and required pre-development checklist for src changes."}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Defines allowed runtime module boundaries and ownership for domain, app, kernel, and tests."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Ensures refactor preserves deterministic guard and failure semantics."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Defines build, test, and verification expectations for runtime refactors."}
+{"file": ".trellis/spec/backend/underground-radial-growth.md", "reason": "Covers Underground Center rootlet, candidate pool, convergence, and clarification escalation behavior."}
+{"file": ".trellis/spec/backend/direction-handoff-package.md", "reason": "Covers handoff package boundaries touched by focused domain imports and fixture construction."}
+{"file": ".trellis/spec/backend/observation-read-model.md", "reason": "Covers EventLog and Observation Kernel read-model semantics touched by event metadata centralization."}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Required because the task extracts repeated helper and metadata sources."}
+{"file": ".trellis/spec/guides/agentarbor-governance-guide.md", "reason": "Required because the task touches Trellis task assets and AgentArbor governance-sensitive boundaries."}

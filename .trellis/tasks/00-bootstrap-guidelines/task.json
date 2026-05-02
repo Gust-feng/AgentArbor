@@ -1,0 +1,33 @@
+{
+  "id": "00-bootstrap-guidelines",
+  "name": "00-bootstrap-guidelines",
+  "title": "Bootstrap Guidelines",
+  "description": "Establish real AgentArbor Trellis guidance without inventing backend/frontend conventions before runtime code exists.",
+  "status": "completed",
+  "dev_type": "docs",
+  "scope": null,
+  "package": null,
+  "priority": "P1",
+  "creator": "xzf28",
+  "assignee": "xzf28",
+  "createdAt": "2026-04-30",
+  "completedAt": "2026-04-30T12:00:00.000Z",
+  "branch": null,
+  "base_branch": null,
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [
+    ".trellis/spec/backend/index.md",
+    ".trellis/spec/frontend/index.md",
+    ".trellis/spec/guides/agentarbor-governance-guide.md",
+    "docs/README.md",
+    "docs/任务看板/README.md",
+    "AGENTS.md"
+  ],
+  "notes": "First-time Trellis setup is complete for the current docs/planning phase. Backend and frontend specs intentionally defer implementation conventions until real code, framework, and toolchain choices exist.",
+  "meta": {}
+}

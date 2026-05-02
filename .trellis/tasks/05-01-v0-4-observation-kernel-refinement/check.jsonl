@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Verify backend TypeScript runtime conventions and quality gates."}
+{"file": ".trellis/spec/backend/observation-read-model.md", "reason": "Verify V0.4 Observation Kernel contract and regression expectations."}
+{"file": ".trellis/spec/guides/agentarbor-governance-guide.md", "reason": "Verify docs/spec/task-board changes preserve AgentArbor governance boundaries."}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Verify projection helpers avoid duplicated rules and parallel sources of truth."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Verify consistency across EventLog, snapshot contract, tests, demo, specs, and task board."}

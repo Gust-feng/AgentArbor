@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Check backend runtime, observation metadata, package lineage, tests, and deterministic behavior."}
+{"file": ".trellis/spec/frontend/index.md", "reason": "Check that no frontend/UI adapter scope was introduced."}

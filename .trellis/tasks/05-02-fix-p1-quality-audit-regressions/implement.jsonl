@@ -1,0 +1,10 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend/runtime spec index and required pre-development checklist for minimal runtime changes."}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Defines domain/kernel/app boundaries for runtime code changes."}
+{"file": ".trellis/spec/backend/underground-radial-growth.md", "reason": "Owns Underground convergence, user clarification, stopped outcome, and handoff candidate rules."}
+{"file": ".trellis/spec/backend/direction-handoff-package.md", "reason": "Owns package validation and Aboveground planning input boundary."}
+{"file": ".trellis/spec/backend/observation-read-model.md", "reason": "Keeps EventLog as source of truth and protects the fixed happy-path observation contract."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Defines guard error semantics for constraints, planning, and user confirmation."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Defines build, test, demo, and regression requirements for runtime changes."}
+{"file": ".trellis/spec/guides/agentarbor-governance-guide.md", "reason": "Preserves AgentArbor/Trellis/.agentarbor/documentation boundary rules."}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Guides search-before-edit and shared validation helper decisions."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Guides package validation and Aboveground planning cross-boundary checks."}

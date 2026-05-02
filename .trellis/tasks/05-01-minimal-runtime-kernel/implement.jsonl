@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Runtime kernel and TypeScript implementation belong to backend/runtime-oriented work; index documents current delayed-code baseline and prevents inventing unrelated backend conventions."}
+{"file": ".trellis/spec/guides/index.md", "reason": "Shared thinking guide index for cross-layer, reuse, and governance triggers."}
+{"file": ".trellis/spec/guides/agentarbor-governance-guide.md", "reason": "Required for AgentArbor structure, docs, Trellis, and .agentarbor boundary governance."}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "New shared kernel types/utilities and toolchain config require search-first reuse discipline."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "The minimal loop crosses domain, kernel, app, artifacts, verification, and governance layers."}

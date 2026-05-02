@@ -1,0 +1,6 @@
+{"file":"docs/开发指南/04-模型与契约/04-最小运行契约.md","reason":"检查约束字段从字符串备注升级为约束引用。"}
+{"file":"docs/开发指南/04-模型与契约/README.md","reason":"检查新增约束工程章节已进入索引。"}
+{"file":"docs/开发指南/03-系统架构/01-系统总览.md","reason":"检查系统总览包含完整树形主线与 Root Callback 循环。"}
+{"file":"docs/开发指南/03-系统架构/04-Agent集群运行结构.md","reason":"检查执行集群必须接收约束切片和提交证据。"}
+{"file":"docs/架构设计/产品架构/README.md","reason":"检查 ADR-0017 已进入产品架构决策索引。"}
+{"file":"docs/任务看板/看板.md","reason":"检查人类可读看板反映本次 Trellis 任务。"}

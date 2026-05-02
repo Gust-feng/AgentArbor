@@ -1,0 +1,7 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend/runtime quality gate index for the final review."}
+{"file": ".trellis/spec/backend/underground-radial-growth.md", "reason": "Verify Underground convergence and user clarification invariants."}
+{"file": ".trellis/spec/backend/direction-handoff-package.md", "reason": "Verify package validation and Aboveground planning boundary invariants."}
+{"file": ".trellis/spec/backend/observation-read-model.md", "reason": "Verify EventLog source-of-truth and happy-path stability."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Verify explicit guard error semantics."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Verify required build, test, demo, and diff checks."}
+{"file": ".trellis/spec/guides/agentarbor-governance-guide.md", "reason": "Verify no prohibited .agentarbor or Plan boundary changes were introduced."}

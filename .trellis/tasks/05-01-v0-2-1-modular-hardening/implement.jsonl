@@ -1,0 +1,8 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend runtime spec index for minimal kernel work."}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Module split must preserve domain/kernel/app/adapters ownership boundaries."}
+{"file": ".trellis/spec/backend/direction-handoff-package.md", "reason": "Direction Handoff Package contract, store API, validation, and .agentarbor boundary."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Runtime/domain errors must stay owned by the proper boundary and not be swallowed."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Build/test/demo gates and no-new-tooling constraints."}
+{"file": ".trellis/spec/guides/agentarbor-governance-guide.md", "reason": "Repository governance, docs/Trellis/.agentarbor boundary, and closeout checks."}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Refactor should extract shared logic without duplicating behavior."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Data flow spans domain package, app runtime, stores, serialization, and tests."}

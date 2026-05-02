@@ -1,0 +1,2 @@
+{"file":".trellis/spec/guides/agentarbor-governance-guide.md","reason":"Structural documentation migration touches docs, root instructions, .agentarbor semantics, and governance boundaries."}
+{"file":".trellis/spec/guides/index.md","reason":"Use project thinking triggers for governance, cross-layer consistency, and code reuse boundaries during architecture docs work."}

@@ -5,7 +5,7 @@
 ## Scope / Trigger
 
 - Trigger：修改 `src/` 下运行时内核、领域契约、fake agents、demo 或测试。
-- Scope：内存版最小闭环；不包含 HTTP API、数据库、UI、真实 LLM、MCP、A2A 或 AG-UI adapter。
+- Scope：内存版最小闭环；不包含 HTTP API、数据库、UI、MCP、A2A 或 AG-UI adapter。真实模型接入必须先遵守 [智能通道运行时规范](./intelligence-channel.md)。
 
 ## Signatures
 
@@ -21,7 +21,7 @@
 - `src/kernel/` 保存消息、事件、注册、路由、状态机、产物存储和确定性守卫。
 - `src/app/` 保存应用编排、fake agents 和 demo；fake agents 不是长期 Capability Asset。
 - `src/app/underground-demo-summary.ts` 保存地下-only demo 的纯 summary 投影；CLI 入口只负责读取参数和打印，不把 console 输出逻辑塞进地下运行核心。
-- `src/adapters/` 本阶段只能保留空 adapter 边界，不实现真实外部适配。
+- `src/adapters/` 本阶段只能保留 adapter 边界；真实模型 provider adapter 只能在智能通道任务中进入 `src/adapters/intelligence/`。
 - `src/domain/contracts.ts` 是兼容 barrel；新增领域类型应优先落到 `common`、`constraints`、`underground`、`agentarbor`、`aboveground`、`governance` 或 `fruits` 的 focused module，再由 barrel 重导出。
 - `src/app/minimal-underground.ts` 是兼容 barrel；地下确定性材料必须按职责拆到 `underground-rootlets`、`underground-candidates`、`underground-convergence`、`underground-evidence`、`underground-goal-profile` 和 `underground-report` 等 focused modules。
 - `src/app/minimal-direction.ts` 只保留 Direction Handoff material 入口；字段派生和 7 gate constraint refs 由 `direction-handoff-derivation` 负责，避免 package 创建、目标画像派生和风险/约束组装堆在一个文件。
@@ -40,7 +40,8 @@
 | --- | --- |
 | Aboveground Center 试图创建方向探索候选 | 抛出 `StateGuardError` |
 | 内部 agent 试图用 `to.id` 私聊 | 抛出 `MessageBusPolicyError` |
-| demo 需要真实 adapter、数据库或 LLM | 超出当前目录规范，应拆新任务和新 spec |
+| demo 需要数据库、HTTP 或非智能通道 adapter | 超出当前目录规范，应拆新任务和新 spec |
+| 真实模型接入绕过智能通道 | 违反智能通道规范，测试必须失败 |
 | `pnpm demo:underground` 进入 Growth Plan / Aboveground / Fruits / Governance | 违反地下-only 边界，测试必须失败 |
 
 ## Good / Base / Bad Cases

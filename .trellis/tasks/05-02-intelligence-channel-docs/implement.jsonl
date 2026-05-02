@@ -1,0 +1,8 @@
+{"file":"AGENTS.md","reason":"根规则、目录边界、文档治理和概念树事实源。"}
+{"file":"docs/README.md","reason":"人类文档入口和 docs 边界。"}
+{"file":"docs/开发指南/README.md","reason":"正式开发指南入口。"}
+{"file":"docs/开发指南/00-总览.md","reason":"当前产品主线和稳定结论。"}
+{"file":"docs/开发指南/03-系统架构/02-核心模块.md","reason":"智能通道应落入系统模块边界。"}
+{"file":"docs/开发指南/06-工程实现/03-人工智能与确定性边界.md","reason":"AI 与确定性系统的核心边界。"}
+{"file":".trellis/spec/backend/index.md","reason":"后续运行时规范索引。"}
+{"file":".trellis/spec/guides/agentarbor-governance-guide.md","reason":"AgentArbor 文档治理与 ADR 源规则。"}

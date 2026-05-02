@@ -9,6 +9,7 @@ Use this guide whenever work touches AgentArbor repository structure, docs, skil
 - `docs/开发指南/` is the formal chaptered product and development guide.
 - `docs/架构设计/产品架构/ADR-0018-AgentArbor原生概念树架构.md` is the current product architecture fact source.
 - `docs/架构设计/产品架构/ADR-0019-地下辐射生长模型.md` defines the accepted Underground Center radial-growth model.
+- `docs/架构设计/产品架构/ADR-0020-智能通道与模型接入边界.md` defines the accepted model access boundary.
 - `.trellis/` is the current workflow harness and contextual spec layer.
 - `.agents/skills/` is the shared Agent Skills layer.
 - `.codex/` is Codex development adapter configuration.
@@ -28,6 +29,7 @@ Soil -> Underground Center -> .agentarbor -> Aboveground Center -> Fruits -> Gov
 - `.agentarbor` carries task authorization, direction basis, constraint references, evidence references, asset references, risks, and Growth Entry fields from Underground Center to Aboveground Center.
 - Aboveground Center turns the handoff package into Growth Plan, Workflow IR, context topology, execution organization, validation gates, and revision control.
 - Current implementation priority is the independent Underground loop: user need -> underground exploration / contradiction / convergence -> necessary user clarification and recovery -> approved `.agentarbor` Direction Handoff Package. Its terminal states are `approved_package_created`, `awaiting_user`, and `stopped`.
+- Intelligence Channel is the only model access route. AI output remains candidate, draft, explanation, or advice until deterministic convergence, validation, verification, or governance promotes it.
 - Aboveground organizations eventually grow along the approved direction. When evidence, Soil asset fit, external facts, constraint detail, context, capability hints, or key-assumption validation are missing, they send a Nutrient Request to Underground Center instead of creating their own direction-exploration cluster. This is a later cross-stage collaboration route and must not become the immediate next mainline before the Underground single loop and Aboveground single loop are stable.
 - Fruits are deliverables, AgentApps, capability packages, run memories, or experience candidates; they are not Soil until Governance validates, attributes, versions, permissions, and retirement policy.
 - Governance is the only route from Fruits back into Soil.

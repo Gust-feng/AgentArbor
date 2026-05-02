@@ -1,0 +1,5 @@
+{"file":"docs/架构设计/产品架构/README.md","reason":"确认新 ADR 已进入产品架构索引。"}
+{"file":"docs/开发指南/04-模型与契约/README.md","reason":"确认智能通道契约已进入开发指南索引。"}
+{"file":"docs/开发指南/06-工程实现/02-模块划分.md","reason":"确认未来 src 模块边界没有把 provider 细节散入领域层。"}
+{"file":".trellis/spec/backend/intelligence-channel.md","reason":"确认后续实现可执行规范完整。"}
+{"file":"docs/任务看板/看板.md","reason":"确认人类看板指向当前 Trellis 任务且不是第二套计划源。"}

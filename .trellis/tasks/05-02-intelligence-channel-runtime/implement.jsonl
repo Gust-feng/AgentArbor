@@ -1,0 +1,10 @@
+{"file":"AGENTS.md","reason":"根规则、目录边界、模型能力不能污染核心语义。"}
+{"file":"docs/架构设计/产品架构/ADR-0020-智能通道与模型接入边界.md","reason":"智能通道长期架构事实源。"}
+{"file":"docs/开发指南/04-模型与契约/08-智能通道契约.md","reason":"模型调用类型、事件和配置契约。"}
+{"file":"docs/开发指南/06-工程实现/02-模块划分.md","reason":"src/domain/kernel/adapters/app 模块边界。"}
+{"file":"docs/开发指南/06-工程实现/03-人工智能与确定性边界.md","reason":"AI 输出和确定性系统职责边界。"}
+{"file":".trellis/spec/backend/intelligence-channel.md","reason":"本任务最直接的可执行规范。"}
+{"file":".trellis/spec/backend/directory-structure.md","reason":"运行时目录结构和 demo 边界。"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"pnpm build/test/demo 验收规则。"}
+{"file":".trellis/spec/backend/underground-radial-growth.md","reason":"首个接入点是地下目标理解与 rootlet 候选，必须保留收束守卫。"}
+{"file":".trellis/spec/backend/observation-read-model.md","reason":"模型调用事件需要进入未来前端可读观察模型。"}

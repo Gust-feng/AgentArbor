@@ -1,0 +1,5 @@
+{"file":".trellis/spec/backend/intelligence-channel.md","reason":"确认实现符合智能通道可执行规范。"}
+{"file":".trellis/spec/backend/index.md","reason":"确认新增实现没有绕过后端规范入口。"}
+{"file":"docs/开发指南/04-模型与契约/08-智能通道契约.md","reason":"确认实现类型和事件契约不漂移。"}
+{"file":"docs/开发指南/06-工程实现/03-人工智能与确定性边界.md","reason":"确认 AI 输出没有越过确定性边界。"}
+{"file":"docs/任务看板/看板.md","reason":"收尾时同步人类可读任务态势。"}

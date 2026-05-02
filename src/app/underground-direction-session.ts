@@ -2,8 +2,11 @@ import type { ArborMessageType } from "../domain/common.js";
 import type { Constraint, DirectionHandoff, UndergroundExplorationReport } from "../domain/contracts.js";
 import {
   createDirectionHandoffPackageRef,
+  FileSystemDirectionHandoffPackageStore,
+  resolveDirectionHandoffPackageMetaPath,
   type DirectionHandoffPackage,
   type DirectionHandoffPackageRef,
+  type DirectionHandoffPackageStore,
 } from "../domain/agentarbor/direction-handoff-package.js";
 import type { RunObservationSnapshot } from "../domain/observation/contracts.js";
 import { createRunObservationSnapshot } from "../domain/observation/index.js";
@@ -24,6 +27,8 @@ export type UndergroundDirectionSessionTerminalStatus =
 
 export type RunUndergroundDirectionSessionOptions = {
   constraints?: readonly Constraint[];
+  packageStore?: DirectionHandoffPackageStore;
+  outputDirectory?: string;
 };
 
 export type UndergroundDirectionSessionResult = {
@@ -38,13 +43,17 @@ export type UndergroundDirectionSessionResult = {
   loadedDirectionHandoffPackage: DirectionHandoffPackage;
   observationSnapshot: RunObservationSnapshot;
   eventTypes: ArborMessageType[];
+  packageVersions: number[];
+  writtenPackagePath?: string;
+  outputDirectory?: string;
 };
 
 export function runUndergroundDirectionSession(
   goal: string,
   options: RunUndergroundDirectionSessionOptions = {}
 ): UndergroundDirectionSessionResult {
-  const runtime = createMinimalRuntime();
+  const storage = resolveDirectionHandoffSessionStorage(options);
+  const runtime = createMinimalRuntime({ directionHandoffPackageStore: storage.packageStore });
   if (options.constraints !== undefined) {
     runtime.constraints = options.constraints.map((constraint) => ({
       ...constraint,
@@ -153,6 +162,37 @@ export function runUndergroundDirectionSession(
     loadedDirectionHandoffPackage,
     observationSnapshot,
     eventTypes: runtime.eventLog.types(),
+    packageVersions: runtime.directionHandoffPackageStore.listVersions(
+      loadedDirectionHandoffPackage.manifest.directionId
+    ),
+    writtenPackagePath:
+      storage.outputDirectory === undefined
+        ? undefined
+        : resolveDirectionHandoffPackageMetaPath(
+            storage.outputDirectory,
+            loadedDirectionHandoffPackage.manifest.directionId,
+            loadedDirectionHandoffPackage.manifest.directionVersion
+          ),
+    outputDirectory: storage.outputDirectory,
+  };
+}
+
+function resolveDirectionHandoffSessionStorage(
+  options: RunUndergroundDirectionSessionOptions
+): { packageStore?: DirectionHandoffPackageStore; outputDirectory?: string } {
+  if (options.packageStore !== undefined && options.outputDirectory !== undefined) {
+    throw new Error("Specify either packageStore or outputDirectory, not both.");
+  }
+
+  if (options.outputDirectory !== undefined) {
+    return {
+      packageStore: new FileSystemDirectionHandoffPackageStore(options.outputDirectory),
+      outputDirectory: options.outputDirectory,
+    };
+  }
+
+  return {
+    packageStore: options.packageStore,
   };
 }
 

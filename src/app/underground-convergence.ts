@@ -3,6 +3,7 @@ import {
   applyCandidateConvergenceDecisions,
   compareCandidatesForGoal,
   createDefaultGoalIntentProfile,
+  createOpenQuestionDisposition,
   createUndergroundConvergenceReport,
   evidenceId,
   type CandidateComparison,
@@ -40,6 +41,9 @@ export function convergeMinimalCandidatePool(input: {
   });
   const decisions = comparisonResult.decisions;
   const candidatePool = applyCandidateConvergenceDecisions(input.pool, decisions, createdAt);
+  const unknownCandidateIds = new Set(decisions
+    .filter((decision) => decision.status === "unknown")
+    .map((decision) => decision.candidateId));
   const evidenceLedger = createMinimalUndergroundEvidenceLedger({
     existingLedger: input.evidenceLedger,
     goalIntentProfile,
@@ -63,6 +67,26 @@ export function convergeMinimalCandidatePool(input: {
         input.plan.budget.exhausted && candidatePool.candidates.length >= input.plan.budget.maxCandidateOutputs,
     },
     summary: `Underground compared ${candidatePool.candidates.length} candidates against the goal intent profile.`,
+    openQuestionDispositions: comparisonResult.comparisons
+      .filter((comparison) => unknownCandidateIds.has(comparison.candidateId))
+      .sort((left, right) => Number(right.conclusion === "needs_user") - Number(left.conclusion === "needs_user"))
+      .map((comparison) =>
+        createOpenQuestionDisposition({
+          candidateId: comparison.candidateId,
+          reason:
+            comparison.conclusion === "needs_user"
+              ? "permission_boundary_unclear"
+              : "critical_fact_missing",
+          question:
+            comparison.conclusion === "needs_user"
+              ? "Can Aboveground execution proceed within the current permission boundary?"
+              : "Keep this non-blocking uncertainty visible for later review.",
+          blockingLevel: comparison.conclusion === "needs_user" ? "blocking" : "non_blocking",
+          evidenceRefs: comparison.evidenceRefs,
+        })
+      ),
+    userClarificationRequestId: createId("user-clarification"),
+    createdAt,
   });
 
   return { candidatePool, convergenceReport, evidenceLedger, candidateComparisons: comparisonResult.comparisons };

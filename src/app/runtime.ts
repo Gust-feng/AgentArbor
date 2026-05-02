@@ -1,4 +1,7 @@
-import { InMemoryDirectionHandoffPackageStore } from "../domain/agentarbor/direction-handoff-package.js";
+import {
+  InMemoryDirectionHandoffPackageStore,
+  type DirectionHandoffPackageStore,
+} from "../domain/agentarbor/direction-handoff-package.js";
 import { createMinimalReadonlySoilStore, createMinimalSoilConstraints } from "../domain/soil/index.js";
 import { InMemoryArtifactStore } from "../kernel/artifacts/in-memory-artifact-store.js";
 import { InMemoryEventLog } from "../kernel/events/in-memory-event-log.js";
@@ -9,12 +12,17 @@ import { createDemoAgentManifests } from "./agents/manifests.js";
 
 export type MinimalRuntime = ReturnType<typeof createMinimalRuntime>;
 
-export function createMinimalRuntime() {
+export type CreateMinimalRuntimeOptions = {
+  directionHandoffPackageStore?: DirectionHandoffPackageStore;
+};
+
+export function createMinimalRuntime(options: CreateMinimalRuntimeOptions = {}) {
   const eventLog = new InMemoryEventLog();
   const bus = new InMemoryMessageBus(eventLog);
   const registry = new InMemoryAgentRegistry();
   const artifactStore = new InMemoryArtifactStore();
-  const directionHandoffPackageStore = new InMemoryDirectionHandoffPackageStore();
+  const directionHandoffPackageStore =
+    options.directionHandoffPackageStore ?? new InMemoryDirectionHandoffPackageStore();
   const router = new SimpleRouter(registry);
   const constraints = createMinimalSoilConstraints();
   const soilStore = createMinimalReadonlySoilStore(constraints);

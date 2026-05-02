@@ -1,7 +1,14 @@
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import assert from "node:assert/strict";
 import test from "node:test";
+import {
+  FileSystemDirectionHandoffPackageStore,
+  InMemoryDirectionHandoffPackageStore,
+} from "../domain/agentarbor/direction-handoff-package.js";
+import { EXPECTED_CLARIFICATION_RECOVERY_EVENTS } from "./clarification-flow.js";
+import { recoverUndergroundDirectionSession } from "./underground-direction-recovery.js";
 import { runUndergroundDirectionSession } from "./underground-direction-session.js";
 
 test("runUndergroundDirectionSession creates an approved package without entering Aboveground", () => {
@@ -57,6 +64,29 @@ test("runUndergroundDirectionSession waits for user when blocking unknown exists
   assert.equal(result.observationSnapshot.underground.userEscalation.required, true);
 });
 
+test("recoverUndergroundDirectionSession turns awaiting_user into approved v2 without entering Aboveground", () => {
+  const awaiting = runUndergroundDirectionSession(
+    "Build the helper, but permission boundary and hard constraint are unknown and must be confirmed."
+  );
+  const recovery = recoverUndergroundDirectionSession(awaiting);
+
+  assert.equal(recovery.terminalStatus, "approved_package_created");
+  assert.deepEqual(recovery.eventTypes, EXPECTED_CLARIFICATION_RECOVERY_EVENTS);
+  assert.equal(recovery.awaitingUserDirectionHandoffPackage.manifest.status, "awaiting_user");
+  assert.equal(recovery.awaitingUserDirectionHandoffPackage.validation.passed, false);
+  assert.equal(recovery.loadedApprovedDirectionHandoffPackage.manifest.status, "approved");
+  assert.equal(recovery.loadedApprovedDirectionHandoffPackage.validation.passed, true);
+  assert.equal(
+    recovery.loadedApprovedDirectionHandoffPackage.manifest.directionId,
+    awaiting.loadedDirectionHandoffPackage.manifest.directionId
+  );
+  assert.equal(recovery.loadedApprovedDirectionHandoffPackage.manifest.directionVersion, 2);
+  assert.deepEqual(recovery.packageVersions, [1, 2]);
+  assert.equal(recovery.loadedApprovedDirectionHandoffPackage.lineage.previous?.version, 1);
+  assert.equal(recovery.loadedApprovedDirectionHandoffPackage.lineage.revisionReason, "user_clarification_answered");
+  assert.equal(recovery.observationSnapshot.aboveground.status, "not_started");
+});
+
 test("runUndergroundDirectionSession stops without fabricating an approved package", () => {
   const result = runUndergroundDirectionSession("Stop because no viable candidate should be produced.");
 
@@ -77,6 +107,50 @@ test("underground-only session does not write repo-root .agentarbor assets", () 
   runUndergroundDirectionSession("Build a small deterministic helper.");
 
   assert.deepEqual(snapshotTree(repoRootAgentArbor), before);
+});
+
+test("underground session recovery does not write repo-root .agentarbor without explicit output", () => {
+  const repoRootAgentArbor = resolve(process.cwd(), ".agentarbor");
+  const before = snapshotTree(repoRootAgentArbor);
+
+  const awaiting = runUndergroundDirectionSession(
+    "Build the helper, but permission boundary and hard constraint are unknown and must be confirmed."
+  );
+  recoverUndergroundDirectionSession(awaiting);
+
+  assert.deepEqual(snapshotTree(repoRootAgentArbor), before);
+});
+
+test("runUndergroundDirectionSession can use an injected package store", () => {
+  const packageStore = new InMemoryDirectionHandoffPackageStore();
+  const result = runUndergroundDirectionSession("Build a small deterministic helper.", { packageStore });
+
+  assert.deepEqual(packageStore.listVersions(result.loadedDirectionHandoffPackage.manifest.directionId), [1]);
+  assert.deepEqual(result.packageVersions, [1]);
+});
+
+test("runUndergroundDirectionSession writes and round-trips packages only with explicit output directory", () => {
+  const tempRoot = mkdtempSync(join(tmpdir(), "agentarbor-direction-package-"));
+  try {
+    const result = runUndergroundDirectionSession("Build a small deterministic helper.", {
+      outputDirectory: tempRoot,
+    });
+
+    assert.notEqual(result.writtenPackagePath, undefined);
+    assert.equal(existsSync(result.writtenPackagePath ?? ""), true);
+
+    const meta = JSON.parse(readFileSync(result.writtenPackagePath ?? "", "utf8")) as {
+      manifest: { packageId: string; directionId: string; directionVersion: number };
+    };
+    assert.equal(meta.manifest.packageId, result.loadedDirectionHandoffPackage.manifest.packageId);
+
+    const store = new FileSystemDirectionHandoffPackageStore(tempRoot);
+    const loaded = store.load(meta.manifest.directionId, meta.manifest.directionVersion);
+    assert.equal(loaded.manifest.packageId, result.loadedDirectionHandoffPackage.manifest.packageId);
+    assert.deepEqual(store.listVersions(meta.manifest.directionId), [1]);
+  } finally {
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
 });
 
 function snapshotTree(root: string): string[] {

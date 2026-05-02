@@ -15,6 +15,22 @@ import { clonePackage } from "./utils.js";
 import { validateDirectionHandoffPackage } from "./validation.js";
 import { withValidation } from "./validated-package.js";
 
+export function resolveDirectionHandoffPackageDirectory(
+  rootDirectory: string,
+  directionId: string,
+  version: number
+): string {
+  return join(rootDirectory, "directions", encodeURIComponent(directionId), `v${version}`);
+}
+
+export function resolveDirectionHandoffPackageMetaPath(
+  rootDirectory: string,
+  directionId: string,
+  version: number
+): string {
+  return join(resolveDirectionHandoffPackageDirectory(rootDirectory, directionId, version), "handoff.meta.json");
+}
+
 export class FileSystemDirectionHandoffPackageStore implements DirectionHandoffPackageStore {
   constructor(private readonly rootDirectory: string) {
     if (rootDirectory.trim() === "") {
@@ -83,6 +99,6 @@ export class FileSystemDirectionHandoffPackageStore implements DirectionHandoffP
 
   private packageDirectory(directionId: string, version: number): string {
     // Callers must pass a deliberate root; this store never chooses repo-root .agentarbor implicitly.
-    return join(this.rootDirectory, "directions", encodeURIComponent(directionId), `v${version}`);
+    return resolveDirectionHandoffPackageDirectory(this.rootDirectory, directionId, version);
   }
 }

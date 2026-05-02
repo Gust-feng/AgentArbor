@@ -1,5 +1,9 @@
 import type { ArborMessageType } from "../domain/common.js";
-import type { DirectionHandoffPackageValidationResult } from "../domain/agentarbor/direction-handoff-package/contracts.js";
+import type {
+  DirectionHandoffPackage,
+  DirectionHandoffPackageLineage,
+  DirectionHandoffPackageValidationResult,
+} from "../domain/agentarbor/direction-handoff-package/contracts.js";
 import type { ObservationStatus, RunPhase, RunStage } from "../domain/observation/contracts.js";
 import type {
   CandidatePoolCounts,
@@ -12,16 +16,23 @@ import type {
   UndergroundDirectionSessionResult,
   UndergroundDirectionSessionTerminalStatus,
 } from "./underground-direction-session.js";
+import type { UndergroundDirectionSessionRecoveryResult } from "./underground-direction-recovery.js";
+
+type DirectionPackageSummary = {
+  readonly id: string;
+  readonly directionId: string;
+  readonly version: number;
+  readonly status: string;
+  readonly validation: Pick<DirectionHandoffPackageValidationResult, "passed" | "errors" | "warnings">;
+};
 
 export type UndergroundDemoSummary = {
   readonly terminalStatus: UndergroundDirectionSessionTerminalStatus;
-  readonly directionPackage: {
-    readonly id: string;
-    readonly directionId: string;
-    readonly version: number;
-    readonly status: string;
-    readonly validation: Pick<DirectionHandoffPackageValidationResult, "passed" | "errors" | "warnings">;
-  };
+  readonly directionPackage: DirectionPackageSummary;
+  readonly recoveredPackage?: DirectionPackageSummary;
+  readonly lineage: DirectionHandoffPackageLineage;
+  readonly versions: readonly number[];
+  readonly writtenPackagePath?: string;
   readonly underground: {
     readonly rootletKinds: readonly RootletClusterKind[];
     readonly budget: ExplorationBudget;
@@ -60,29 +71,28 @@ export type UndergroundDemoSummary = {
 };
 
 export function createUndergroundDemoSummary(
-  result: UndergroundDirectionSessionResult
+  result: UndergroundDirectionSessionResult,
+  recovery?: UndergroundDirectionSessionRecoveryResult
 ): UndergroundDemoSummary {
-  const pkg = result.loadedDirectionHandoffPackage;
-  const convergence = result.undergroundReport.convergenceReport;
+  const pkg = recovery?.loadedApprovedDirectionHandoffPackage ?? result.loadedDirectionHandoffPackage;
+  const convergence = (recovery?.recoveredUndergroundReport ?? result.undergroundReport).convergenceReport;
   const escalation = convergence.userClarificationRequest;
+  const observationSnapshot = recovery?.observationSnapshot ?? result.observationSnapshot;
 
   return {
-    terminalStatus: result.terminalStatus,
-    directionPackage: {
-      id: pkg.manifest.packageId,
-      directionId: pkg.manifest.directionId,
-      version: pkg.manifest.directionVersion,
-      status: pkg.manifest.status,
-      validation: {
-        passed: pkg.validation.passed,
-        errors: pkg.validation.errors,
-        warnings: pkg.validation.warnings,
-      },
-    },
+    terminalStatus: recovery?.terminalStatus ?? result.terminalStatus,
+    directionPackage: summarizeDirectionPackage(pkg),
+    recoveredPackage:
+      recovery === undefined ? undefined : summarizeDirectionPackage(recovery.loadedApprovedDirectionHandoffPackage),
+    lineage: pkg.lineage,
+    versions: recovery?.packageVersions ?? result.packageVersions,
+    writtenPackagePath: recovery?.writtenPackagePath ?? result.writtenPackagePath,
     underground: {
-      rootletKinds: result.undergroundReport.plan.rootletClusters.map((cluster) => cluster.kind),
-      budget: result.undergroundReport.plan.budget,
-      candidateCounts: result.undergroundReport.candidatePool.counts,
+      rootletKinds: (recovery?.recoveredUndergroundReport ?? result.undergroundReport).plan.rootletClusters.map(
+        (cluster) => cluster.kind
+      ),
+      budget: (recovery?.recoveredUndergroundReport ?? result.undergroundReport).plan.budget,
+      candidateCounts: (recovery?.recoveredUndergroundReport ?? result.undergroundReport).candidatePool.counts,
       convergence: {
         reviewId: convergence.reviewId,
         outcome: convergence.outcome,
@@ -104,18 +114,32 @@ export function createUndergroundDemoSummary(
             relatedCandidateRefs: escalation.relatedCandidateRefs,
           },
     observationSnapshot: {
-      phase: result.observationSnapshot.currentPhase,
-      stage: result.observationSnapshot.currentStage,
-      eventCursor: result.observationSnapshot.eventCursor,
+      phase: observationSnapshot.currentPhase,
+      stage: observationSnapshot.currentStage,
+      eventCursor: observationSnapshot.eventCursor,
       layerStatuses: {
-        underground: result.observationSnapshot.underground.status,
-        handoff: result.observationSnapshot.handoff.status,
-        aboveground: result.observationSnapshot.aboveground.status,
-        fruits: result.observationSnapshot.fruits.status,
-        governance: result.observationSnapshot.governance.status,
-        soilReturnStub: result.observationSnapshot.soilReturnStub.status,
+        underground: observationSnapshot.underground.status,
+        handoff: observationSnapshot.handoff.status,
+        aboveground: observationSnapshot.aboveground.status,
+        fruits: observationSnapshot.fruits.status,
+        governance: observationSnapshot.governance.status,
+        soilReturnStub: observationSnapshot.soilReturnStub.status,
       },
     },
-    eventLog: result.eventTypes,
+    eventLog: recovery?.eventTypes ?? result.eventTypes,
+  };
+}
+
+function summarizeDirectionPackage(pkg: DirectionHandoffPackage): DirectionPackageSummary {
+  return {
+    id: pkg.manifest.packageId,
+    directionId: pkg.manifest.directionId,
+    version: pkg.manifest.directionVersion,
+    status: pkg.manifest.status,
+    validation: {
+      passed: pkg.validation.passed,
+      errors: pkg.validation.errors,
+      warnings: pkg.validation.warnings,
+    },
   };
 }

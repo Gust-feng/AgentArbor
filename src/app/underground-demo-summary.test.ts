@@ -3,6 +3,7 @@ import { join, resolve } from "node:path";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { runUndergroundDirectionSession } from "./underground-direction-session.js";
+import { recoverUndergroundDirectionSession } from "./underground-direction-recovery.js";
 import { createUndergroundDemoSummary } from "./underground-demo-summary.js";
 
 test("createUndergroundDemoSummary reports an approved underground package", () => {
@@ -11,6 +12,11 @@ test("createUndergroundDemoSummary reports an approved underground package", () 
 
   assert.equal(summary.terminalStatus, "approved_package_created");
   assert.equal(summary.directionPackage.status, "approved");
+  assert.equal(summary.directionPackage.version, 1);
+  assert.deepEqual(summary.versions, [1]);
+  assert.equal(summary.lineage.revisionReason, "initial");
+  assert.equal(summary.recoveredPackage, undefined);
+  assert.equal(summary.writtenPackagePath, undefined);
   assert.equal(summary.directionPackage.validation.passed, true);
   assert.deepEqual(summary.underground.rootletKinds, ["option"]);
   assert.equal(summary.underground.candidateCounts.accepted, 1);
@@ -19,6 +25,27 @@ test("createUndergroundDemoSummary reports an approved underground package", () 
   assert.equal(summary.observationSnapshot.layerStatuses.aboveground, "not_started");
   assert.equal(summary.eventLog.includes("direction_handoff.completed"), true);
   assert.equal(summary.eventLog.includes("growth_plan.completed"), false);
+});
+
+test("createUndergroundDemoSummary reports auto-answer recovery as approved v2", () => {
+  const result = runUndergroundDirectionSession(
+    "Build the helper, but permission boundary and hard constraint are unknown and must be confirmed."
+  );
+  const recovery = recoverUndergroundDirectionSession(result);
+  const summary = createUndergroundDemoSummary(result, recovery);
+
+  assert.equal(summary.terminalStatus, "approved_package_created");
+  assert.equal(summary.directionPackage.status, "approved");
+  assert.equal(summary.directionPackage.version, 2);
+  assert.equal(summary.recoveredPackage?.version, 2);
+  assert.deepEqual(summary.versions, [1, 2]);
+  assert.equal(summary.lineage.previous?.version, 1);
+  assert.equal(summary.lineage.revisionReason, "user_clarification_answered");
+  assert.equal(summary.underground.convergence.outcome, "approved");
+  assert.equal(summary.underground.convergence.userEscalationRequired, false);
+  assert.equal(summary.eventLog.includes("user_approval.received"), true);
+  assert.equal(summary.eventLog.includes("direction_handoff.completed"), true);
+  assert.equal(summary.observationSnapshot.layerStatuses.aboveground, "not_started");
 });
 
 test("createUndergroundDemoSummary exposes awaiting-user escalation without entering Aboveground", () => {

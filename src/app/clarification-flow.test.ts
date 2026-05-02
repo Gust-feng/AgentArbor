@@ -56,7 +56,7 @@ test("clarification-required observation exposes user escalation and event refs"
   assert.equal(snapshot.underground.userEscalation.requestId, result.clarificationRequest.requestId);
   assert.equal(snapshot.underground.userEscalation.reason, "permission_boundary_unclear");
   assert.equal(snapshot.underground.userEscalation.blockingLevel, "blocking");
-  assert.equal(snapshot.underground.userEscalation.questions.length, 1);
+  assert.equal(snapshot.underground.userEscalation.questions.length >= 1, true);
   assert.equal(snapshot.underground.userEscalation.request?.requestId, result.clarificationRequest.requestId);
   assert.equal(
     snapshot.underground.convergence.openQuestions.some(

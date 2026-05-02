@@ -26,10 +26,10 @@ test("returns the minimal loop result with package, artifact, verification, and 
   assert.equal(result.loadedDirectionHandoffPackage.lineage.current.version, 1);
   assert.equal(result.loadedDirectionHandoffPackage.lineage.previous, undefined);
   assert.deepEqual(result.undergroundReport.candidatePool.counts, {
-    total: 1,
+    total: 2,
     candidate: 0,
     accepted: 1,
-    merged: 0,
+    merged: 1,
     rejected: 0,
     unknown: 0,
   });
@@ -38,8 +38,9 @@ test("returns the minimal loop result with package, artifact, verification, and 
     result.undergroundReport.plan.rootletClusters.map((cluster) => cluster.kind),
     ["option"]
   );
-  assert.equal(result.undergroundReport.convergenceReport.decisions.length, 1);
-  assert.equal(result.undergroundReport.convergenceReport.handoffCandidateRefs.length, 1);
+  assert.equal(result.undergroundReport.convergenceReport.decisions.length, 2);
+  assert.equal(result.undergroundReport.convergenceReport.handoffCandidateRefs.length, 2);
+  assert.notEqual(result.undergroundReport.convergenceReport.recommendedOptionId, undefined);
   assert.equal(
     result.directionHandoff.sourceCandidateRefs.every(
       (candidate) => candidate.status === "accepted" || candidate.status === "merged"
@@ -76,13 +77,16 @@ test("RunObservationSnapshot is serializable and reflects underground state", ()
   assert.equal(parsed.handoff.packageId, result.loadedDirectionHandoffPackage.manifest.packageId);
   assert.equal(parsed.handoff.validationPassed, true);
   assert.equal(parsed.handoff.lineage.revisionReason, "initial");
-  assert.equal(parsed.underground.candidatePool.total, 1);
+  assert.equal(parsed.underground.candidatePool.total, 2);
   assert.equal(parsed.underground.candidatePool.accepted, 1);
-  assert.equal(parsed.underground.candidatePool.merged, 0);
+  assert.equal(parsed.underground.candidatePool.merged, 1);
+  assert.equal(parsed.underground.candidatePool.candidatesByKind.option.length, 2);
   assert.equal(parsed.underground.agentCluster?.terminalStatus, "approved_package_created");
   assert.deepEqual(parsed.underground.agentCluster?.plan.rootletKinds, ["option"]);
-  assert.equal(parsed.underground.agentCluster?.candidateRefs.length, 1);
+  assert.equal(parsed.underground.agentCluster?.candidateRefs.length, 2);
   assert.equal(parsed.underground.convergence.outcome, "approved");
+  assert.equal(parsed.underground.convergence.candidateComparisons.length, 2);
+  assert.notEqual(parsed.underground.convergence.recommendedOptionId, undefined);
   assert.equal(parsed.underground.userEscalationRequired, false);
   assert.deepEqual(parsed.underground.clarificationResponses, []);
   assert.equal(parsed.directionPackageRef.status, "approved");

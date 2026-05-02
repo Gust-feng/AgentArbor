@@ -1,7 +1,9 @@
 import type { Constraint } from "../domain/constraints.js";
 import type {
+  CandidateComparison,
   ConvergenceReview,
   DirectionHandoff,
+  DirectionOption,
   DirectionRiskRecord,
   ExplorationCandidateRef,
   GoalIntentProfile,
@@ -30,10 +32,13 @@ export function deriveDirectionHandoffDraft(input: {
   goalIntentProfile?: GoalIntentProfile;
   clarificationRequest?: UserClarificationRequest;
 }): Omit<DirectionHandoff, "status"> {
-  const selectedOptionId = createId("direction-option");
+  const convergenceReport = input.convergenceReview as UndergroundConvergenceReport;
   const profile = input.goalIntentProfile;
   const clarificationQuestions = input.clarificationRequest?.questions.map((question) => question.prompt) ?? [];
-  const userDecisionRequired = input.clarificationRequest?.questions.map((question) => question.questionId) ?? [];
+  const userDecisionRequired = unique([
+    ...(convergenceReport.userDecisionRequired ?? []),
+    ...(input.clarificationRequest?.questions.map((question) => question.questionId) ?? []),
+  ]);
   const candidateConstraintRefs = createCandidateConstraintRefs({
     goalId: input.goalId,
     constraints: input.constraints,
@@ -44,12 +49,26 @@ export function deriveDirectionHandoffDraft(input: {
     ...input.sourceCandidates.flatMap((candidate) => candidate.sourceRefs),
     ...input.convergenceReview.provenanceRefs,
   ]);
-  const rejectedDecisionReasons = (input.convergenceReview as UndergroundConvergenceReport).decisions
+  const rejectedDecisionReasons = convergenceReport.decisions
     ?.filter((decision) => decision.status === "rejected")
     .map((decision) => decision.reason) ?? [];
-  const unknownDecisionReasons = (input.convergenceReview as UndergroundConvergenceReport).decisions
+  const unknownDecisionReasons = convergenceReport.decisions
     ?.filter((decision) => decision.status === "unknown")
     .map((decision) => decision.reason) ?? [];
+  const directionOptions = createDirectionOptions({
+    goal: input.goal,
+    goalIntentProfile: profile,
+    convergenceReview: input.convergenceReview,
+    sourceEvidenceRefs,
+    candidateConstraintRefs,
+    clarificationQuestions,
+    constraints: input.constraints,
+  });
+  const selectedOptionId =
+    convergenceReport.recommendedOptionId ??
+    directionOptions.find((option) => option.recommendationScore === 1)?.optionId ??
+    directionOptions[0]?.optionId ??
+    createId("direction-option");
 
   return {
     id: createId("direction-handoff"),
@@ -82,32 +101,16 @@ export function deriveDirectionHandoffDraft(input: {
         ? []
         : ["Aboveground planning is blocked until user clarification is answered."]),
     ]),
-    options: [
-      {
-        optionId: selectedOptionId,
-        directionSummary: profile?.goalStatement ?? input.goal,
-        supportingEvidenceRefs: sourceEvidenceRefs,
-        soilAssetFitRefs: ["soil:minimal-constraints"],
-        constraintImpact: candidateConstraintRefs.map((constraint) => constraint.constraintId),
-        riskProfile: unique([...(profile?.riskHints ?? []), ...unknownDecisionReasons]),
-        costProfile: profile?.keyConcepts.includes("cost") === true ? ["cost-sensitive"] : ["local-deterministic-runtime"],
-        unknowns: clarificationQuestions,
-        whyNot: rejectedDecisionReasons,
-        recommendationScore: input.clarificationRequest === undefined ? 1 : 0.5,
-        doNotChooseWhen: unique([
-          ...createDoNotChooseWhen(profile, input.constraints),
-          ...(input.clarificationRequest === undefined
-            ? []
-            : ["The blocking user clarification request remains unanswered."]),
-        ]),
-      },
-    ],
+    options: directionOptions,
     decisionRecord: {
       retainedOptionId: selectedOptionId,
-      mergedOptionIds: input.convergenceReview.mergedCandidateRefs ?? [],
-      rejectedOptionIds: input.convergenceReview.rejectedCandidateRefs,
+      mergedOptionIds: optionCandidateIdsByConclusion(input.convergenceReview, ["merge"]),
+      rejectedOptionIds: optionCandidateIdsByConclusion(input.convergenceReview, ["reject"]),
       userDecisionRequired,
-      abovegroundReferenceOptionIds: [selectedOptionId],
+      abovegroundReferenceOptionIds:
+        convergenceReport.abovegroundReferenceOptionIds?.length === 0
+          ? directionOptions.map((option) => option.optionId).filter((optionId) => optionId !== selectedOptionId)
+          : convergenceReport.abovegroundReferenceOptionIds ?? [],
       rationaleEvidenceRefs: sourceEvidenceRefs,
       rationaleConstraintRefs: candidateConstraintRefs.map((constraint) => constraint.constraintId),
       rationaleRiskRefs: [
@@ -118,6 +121,7 @@ export function deriveDirectionHandoffDraft(input: {
     riskRegister: createRiskRegister({
       goalIntentProfile: profile,
       rejectedDecisionReasons,
+      convergenceReview: input.convergenceReview,
       clarificationRequest: input.clarificationRequest,
     }),
     sourceCandidateRefs: input.sourceCandidates,
@@ -141,6 +145,7 @@ export function deriveDirectionHandoffDraft(input: {
 function createRiskRegister(input: {
   goalIntentProfile?: GoalIntentProfile;
   rejectedDecisionReasons: readonly string[];
+  convergenceReview: ConvergenceReview;
   clarificationRequest?: UserClarificationRequest;
 }): DirectionRiskRecord[] {
   const risks: DirectionRiskRecord[] =
@@ -166,6 +171,24 @@ function createRiskRegister(input: {
     });
   }
 
+  const riskComparisons =
+    input.convergenceReview.candidateComparisons?.filter((comparison) => comparison.rootletKind === "risk") ?? [];
+  for (const [index, comparison] of riskComparisons.entries()) {
+    risks.push({
+      riskId: `risk-candidate-${index + 1}`,
+      name: comparison.candidateSummary,
+      source: comparison.rootletOutputRef,
+      impactScope: ["underground_center", "agentarbor_handoff", "aboveground_center"],
+      blockingLevel:
+        comparison.conclusion === "needs_user" ? "ask_user" : comparison.riskLevel === "blocking" ? "block" : "watch",
+      evidenceRefs: comparison.evidenceRefs,
+      mitigation:
+        comparison.whyNot.length > 0
+          ? comparison.whyNot
+          : ["Keep this risk visible while evaluating the retained option."],
+    });
+  }
+
   if (input.clarificationRequest !== undefined) {
     risks.push({
       riskId: `risk-${input.clarificationRequest.requestId}`,
@@ -179,6 +202,76 @@ function createRiskRegister(input: {
   }
 
   return risks;
+}
+
+function createDirectionOptions(input: {
+  goal: string;
+  goalIntentProfile?: GoalIntentProfile;
+  convergenceReview: ConvergenceReview;
+  sourceEvidenceRefs: readonly string[];
+  candidateConstraintRefs: ReturnType<typeof createCandidateConstraintRefs>;
+  clarificationQuestions: readonly string[];
+  constraints: readonly Constraint[];
+}): DirectionOption[] {
+  const optionComparisons =
+    input.convergenceReview.candidateComparisons?.filter((comparison) => comparison.rootletKind === "option") ?? [];
+  const convergenceReport = input.convergenceReview as UndergroundConvergenceReport;
+  const recommendedOptionId = convergenceReport.recommendedOptionId;
+  const rejectedReasonByCandidateId = new Map(
+    (convergenceReport.rejectedCandidateRefsWithReasons ?? []).map((item) => [item.candidateId, item.reason])
+  );
+  const fallbackOptionId = createId("direction-option");
+  const comparisons =
+    optionComparisons.length > 0
+      ? optionComparisons
+      : [
+          {
+            candidateId: fallbackOptionId,
+            candidateSummary: input.goalIntentProfile?.goalStatement ?? input.goal,
+            evidenceRefs: [...input.sourceEvidenceRefs],
+            unknowns: [...input.clarificationQuestions],
+            whyNot: [],
+            conclusion: "accept" as const,
+          },
+        ];
+
+  return comparisons.map((comparison) => {
+    const isRecommended = comparison.candidateId === recommendedOptionId || recommendedOptionId === undefined;
+    const rejectedReason = rejectedReasonByCandidateId.get(comparison.candidateId);
+    return {
+      optionId: comparison.candidateId,
+      directionSummary: comparison.candidateSummary,
+      supportingEvidenceRefs: unique([...input.sourceEvidenceRefs, ...comparison.evidenceRefs]),
+      soilAssetFitRefs: ["soil:minimal-constraints"],
+      constraintImpact: input.candidateConstraintRefs.map((constraint) => constraint.constraintId),
+      riskProfile: unique([...(input.goalIntentProfile?.riskHints ?? []), rejectedReason ?? ""]),
+      costProfile:
+        input.goalIntentProfile?.keyConcepts.includes("cost") === true
+          ? ["cost-sensitive"]
+          : ["local-deterministic-runtime"],
+      unknowns: [...input.clarificationQuestions, ...comparison.unknowns],
+      whyNot: unique([...(comparison.whyNot ?? []), rejectedReason ?? ""]),
+      recommendationScore:
+        comparison.conclusion === "reject" ? 0 : isRecommended ? 1 : comparison.conclusion === "merge" ? 0.75 : 0.5,
+      doNotChooseWhen: unique([
+        ...createDoNotChooseWhen(input.goalIntentProfile, input.constraints),
+        ...(input.clarificationQuestions.length === 0
+          ? []
+          : ["The blocking user clarification request remains unanswered."]),
+      ]),
+    };
+  });
+}
+
+function optionCandidateIdsByConclusion(
+  convergenceReview: ConvergenceReview,
+  conclusions: readonly CandidateComparison["conclusion"][]
+): string[] {
+  return (
+    convergenceReview.candidateComparisons
+      ?.filter((comparison) => comparison.rootletKind === "option" && conclusions.includes(comparison.conclusion))
+      .map((comparison) => comparison.candidateId) ?? []
+  );
 }
 
 function createCandidateConstraintRefs(input: {

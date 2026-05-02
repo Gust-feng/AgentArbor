@@ -3,7 +3,9 @@ import test from "node:test";
 import {
   applyCandidateConvergenceDecisions,
   assertHandoffSourceCandidates,
+  compareCandidatesForGoal,
   createCandidatePool,
+  createGoalIntentProfile,
   createOpenQuestionDisposition,
   createUndergroundConvergenceReport,
   resolveConvergenceOutcome,
@@ -147,6 +149,62 @@ test("convergence decisions preserve accepted, merged, rejected, and unknown sou
   assert.deepEqual(report.rejectedCandidateRefs, ["candidate-3"]);
   assert.deepEqual(report.unknownCandidateRefs, ["candidate-4"]);
   assert.equal(report.decisions.every((decision) => decision.sourceCandidateRefs.includes(decision.candidateId)), true);
+});
+
+test("candidate pool groups candidates by rootlet kind", () => {
+  const outputs = [
+    makeRootletOutput("output-option-1", "rootlet-option"),
+    makeRootletOutput("output-option-2", "rootlet-option"),
+    makeRootletOutput("output-risk-1", "rootlet-risk"),
+    makeRootletOutput("output-constraint-1", "rootlet-constraint"),
+  ];
+  const candidates = outputs.map((output, index) => makeCandidate(`candidate-group-${index + 1}`, output));
+  const pool = createCandidatePool({
+    poolId: "pool-grouped",
+    goalId: "goal-grouped",
+    rootletOutputs: outputs,
+    agentInvocations: makeInvocations(outputs),
+    candidates,
+    updatedAt: "2026-05-01T00:00:00.000Z",
+  });
+
+  assert.deepEqual(
+    pool.candidatesByKind.option.map((candidate) => candidate.id),
+    ["candidate-group-1", "candidate-group-2"]
+  );
+  assert.deepEqual(
+    pool.candidatesByKind.risk.map((candidate) => candidate.id),
+    ["candidate-group-3"]
+  );
+  assert.deepEqual(
+    pool.candidatesByKind.constraint.map((candidate) => candidate.id),
+    ["candidate-group-4"]
+  );
+  assert.equal(pool.candidatesByKind.evidence.length, 0);
+});
+
+test("candidate comparison rejects option candidates that conflict with hard boundaries", () => {
+  const profile = createGoalIntentProfile({
+    goalId: "goal-conflict",
+    rawGoal: "Build a deterministic helper; do not use database; hard constraint: no database.",
+    constraints: [],
+    createdAt: "2026-05-01T00:00:00.000Z",
+  });
+  const output = {
+    ...makeRootletOutput("output-conflict", "rootlet-option"),
+    summary: "Primary direction requires database persistence.",
+  };
+  const candidate = makeCandidate("candidate-conflict", output);
+  const comparison = compareCandidatesForGoal({
+    goalProfile: profile,
+    candidates: [candidate],
+    rootletOutputs: [output],
+    createdAt: "2026-05-01T00:00:01.000Z",
+  });
+
+  assert.equal(comparison.comparisons[0]?.conclusion, "reject");
+  assert.equal(comparison.decisions[0]?.status, "rejected");
+  assert.equal(comparison.comparisons[0]?.constraintImpact, "blocking");
 });
 
 test("budget exhaustion resolves to approved, awaiting_user, or stopped with a reason", () => {
@@ -328,7 +386,7 @@ function makeRootletOutput(outputId: string, clusterId: string): RootletOutput {
     outputId,
     invocationId: `invocation-${outputId}`,
     clusterId,
-    kind: clusterId.includes("asset") ? "asset_fit" : clusterId.includes("risk") ? "risk" : "option",
+    kind: kindFromClusterId(clusterId),
     producedByAgentId: `agent-${outputId}`,
     summary: "test output",
     sourceRefs: ["goal.received"],
@@ -338,6 +396,25 @@ function makeRootletOutput(outputId: string, clusterId: string): RootletOutput {
     riskRefs: [],
     status: "produced",
   };
+}
+
+function kindFromClusterId(clusterId: string): RootletOutput["kind"] {
+  if (clusterId.includes("asset")) {
+    return "asset_fit";
+  }
+  if (clusterId.includes("risk")) {
+    return "risk";
+  }
+  if (clusterId.includes("evidence")) {
+    return "evidence";
+  }
+  if (clusterId.includes("constraint")) {
+    return "constraint";
+  }
+  if (clusterId.includes("counterfactual")) {
+    return "counterfactual";
+  }
+  return "option";
 }
 
 function makeInvocations(outputs: readonly RootletOutput[]): UndergroundAgentInvocation[] {
@@ -359,6 +436,7 @@ function makeCandidate(id: string, output: RootletOutput): ExplorationCandidateR
     kind: "claim_candidate",
     producedByAgentId: "underground-analyzer",
     clusterId: output.clusterId,
+    summary: output.summary,
     sourceRefs: [output.outputId],
     status: "candidate",
   };
@@ -394,6 +472,9 @@ function createReport(accepted: string[], merged: string[]) {
     conflictResolutionRefs: [],
     provenanceRefs: [],
     decisions: [],
+    rejectedCandidateRefsWithReasons: [],
+    userDecisionRequired: [],
+    abovegroundReferenceOptionIds: [],
     summary: "test report",
     outcome: "approved" as const,
     userEscalationRequired: false,

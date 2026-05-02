@@ -30,6 +30,7 @@ function createCandidateFromRootletOutput(output: RootletOutput): ExplorationCan
     kind: candidateKindForRootlet(output.kind),
     producedByAgentId: output.producedByAgentId,
     clusterId: output.clusterId,
+    summary: output.summary,
     sourceRefs: [output.outputId],
     status: "candidate",
   };

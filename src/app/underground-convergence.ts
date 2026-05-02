@@ -64,7 +64,7 @@ export function convergeMinimalCandidatePool(input: {
       ...input.plan.budget,
       spentCandidateOutputs: candidatePool.candidates.length,
       exhausted:
-        input.plan.budget.exhausted && candidatePool.candidates.length >= input.plan.budget.maxCandidateOutputs,
+        input.plan.budget.exhausted || candidatePool.candidates.length >= input.plan.budget.maxCandidateOutputs,
     },
     summary: `Underground compared ${candidatePool.candidates.length} candidates against the goal intent profile.`,
     openQuestionDispositions: comparisonResult.comparisons

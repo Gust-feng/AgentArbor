@@ -19,6 +19,7 @@ export type CandidateComparison = {
   goalId: string;
   rootletOutputRef: string;
   rootletKind: RootletOutput["kind"];
+  candidateSummary: string;
   goalMatch: CandidateComparisonLevel;
   evidenceSupport: CandidateComparisonLevel;
   constraintImpact: CandidateComparisonLevel;
@@ -44,15 +45,25 @@ export function compareCandidatesForGoal(input: {
   createdAt: string;
 }): CandidateComparisonResult {
   const outputById = new Map(input.rootletOutputs.map((output) => [output.outputId, output]));
-  const comparisons = input.candidates.map((candidate) => {
+  const candidateContexts = input.candidates.map((candidate, index) => {
     const rootletOutput = findRootletOutput(candidate, outputById);
-    return compareCandidateForGoal({
+    return { candidate, rootletOutput, index };
+  });
+  const comparisons = candidateContexts.map(({ candidate, rootletOutput, index }) =>
+    compareCandidateForGoal({
       goalProfile: input.goalProfile,
       candidate,
       rootletOutput,
+      candidateIndex: index,
+      optionCandidateIds: candidateContexts
+        .filter((context) => context.rootletOutput.kind === "option")
+        .map((context) => context.candidate.id),
+      evidenceCandidateRefs: candidateContexts
+        .filter((context) => context.rootletOutput.kind === "evidence")
+        .flatMap((context) => [context.candidate.id, ...context.rootletOutput.evidenceRefs]),
       createdAt: input.createdAt,
-    });
-  });
+    })
+  );
   const decisions = comparisons.map((comparison) =>
     createConvergenceDecisionFromComparison({
       comparison,
@@ -105,6 +116,9 @@ export function compareCandidateForGoal(input: {
   goalProfile: GoalIntentProfile;
   candidate: ExplorationCandidateRef;
   rootletOutput: RootletOutput;
+  candidateIndex?: number;
+  optionCandidateIds?: readonly string[];
+  evidenceCandidateRefs?: readonly string[];
   createdAt: string;
 }): CandidateComparison {
   const stopRequested = hasStopIntent(input.goalProfile);
@@ -112,6 +126,9 @@ export function compareCandidateForGoal(input: {
     includesAny(unknown.toLowerCase(), ["permission", "权限", "hard constraint", "硬约束", "constraint", "约束"])
   );
   const comparisonId = evidenceId(input.goalProfile.goalId, `comparison:${input.candidate.id}`);
+  const optionCandidateIds = input.optionCandidateIds ?? [];
+  const optionOrdinal = input.rootletOutput.kind === "option" ? optionCandidateIds.indexOf(input.candidate.id) : -1;
+  const evidenceCandidateRefs = input.evidenceCandidateRefs ?? [];
   const baseEvidenceRefs = [
     comparisonId,
     ...input.rootletOutput.evidenceRefs,
@@ -125,6 +142,7 @@ export function compareCandidateForGoal(input: {
       goalId: input.goalProfile.goalId,
       rootletOutputRef: input.rootletOutput.outputId,
       rootletKind: input.rootletOutput.kind,
+      candidateSummary: input.rootletOutput.summary,
       goalMatch: "blocking",
       evidenceSupport: "weak",
       constraintImpact: "blocking",
@@ -144,6 +162,7 @@ export function compareCandidateForGoal(input: {
       goalId: input.goalProfile.goalId,
       rootletOutputRef: input.rootletOutput.outputId,
       rootletKind: input.rootletOutput.kind,
+      candidateSummary: input.rootletOutput.summary,
       goalMatch: "partial",
       evidenceSupport: "partial",
       constraintImpact: "blocking",
@@ -158,16 +177,29 @@ export function compareCandidateForGoal(input: {
 
   switch (input.rootletOutput.kind) {
     case "option":
+      if (optionConflictsWithGoalBoundaries(input.rootletOutput.summary, input.goalProfile)) {
+        return createComparison(input, {
+          conclusion: "reject",
+          goalMatch: "weak",
+          evidenceSupport: evidenceCandidateRefs.length > 0 ? "partial" : "weak",
+          constraintImpact: "blocking",
+          riskLevel: "blocking",
+          whyNot: ["The option conflicts with a non-goal or hard constraint boundary in the goal profile."],
+          extraEvidenceRefs: evidenceCandidateRefs,
+        });
+      }
       return createComparison(input, {
-        conclusion: "accept",
+        conclusion: optionOrdinal <= 0 ? "accept" : "merge",
         goalMatch: "strong",
-        evidenceSupport: input.rootletOutput.evidenceRefs.length > 0 ? "strong" : "partial",
+        evidenceSupport: evidenceCandidateRefs.length > 0 || input.rootletOutput.evidenceRefs.length > 0 ? "strong" : "partial",
         constraintImpact: "partial",
         riskLevel: "partial",
+        whyNot: optionOrdinal > 0 ? ["Compatible option variant is merged into the recommended direction."] : [],
+        extraEvidenceRefs: evidenceCandidateRefs,
       });
     case "evidence":
       return createComparison(input, {
-        conclusion: "accept",
+        conclusion: optionCandidateIds.length > 0 ? "merge" : "accept",
         goalMatch: "strong",
         evidenceSupport: "strong",
         constraintImpact: "partial",
@@ -190,7 +222,12 @@ export function compareCandidateForGoal(input: {
         constraintImpact: "partial",
         riskLevel: input.goalProfile.riskHints.length > 0 ? "strong" : "partial",
         unknowns: input.goalProfile.riskHints.length > 0 ? input.goalProfile.riskHints : [],
-        whyNot: ["Risk rootlet informs the handoff but is not itself a selectable direction."],
+        whyNot: [
+          optionCandidateIds.length > 0
+            ? `Risk rootlet covers option candidates ${optionCandidateIds.join(", ")} but is not itself a selectable direction.`
+            : "Risk rootlet has no option candidate to cover.",
+        ],
+        extraEvidenceRefs: optionCandidateIds,
       });
     case "counterfactual":
       return createComparison(input, {
@@ -219,6 +256,7 @@ function createComparison(
     riskLevel: CandidateComparisonLevel;
     unknowns?: readonly string[];
     whyNot?: readonly string[];
+    extraEvidenceRefs?: readonly string[];
   }
 ): CandidateComparison {
   const comparisonId = evidenceId(input.goalProfile.goalId, `comparison:${input.candidate.id}`);
@@ -228,6 +266,7 @@ function createComparison(
     goalId: input.goalProfile.goalId,
     rootletOutputRef: input.rootletOutput.outputId,
     rootletKind: input.rootletOutput.kind,
+    candidateSummary: input.rootletOutput.summary,
     goalMatch: decision.goalMatch,
     evidenceSupport: decision.evidenceSupport,
     constraintImpact: decision.constraintImpact,
@@ -239,6 +278,7 @@ function createComparison(
       comparisonId,
       ...input.rootletOutput.evidenceRefs,
       ...input.rootletOutput.sourceRefs,
+      ...(decision.extraEvidenceRefs ?? []),
     ]),
     createdAt: input.createdAt,
   };
@@ -284,6 +324,71 @@ function decisionReason(comparison: CandidateComparison): string {
     case "reject":
       return comparison.whyNot[0] ?? `Candidate ${comparison.candidateId} does not support the current handoff direction.`;
   }
+}
+
+function optionConflictsWithGoalBoundaries(summary: string, profile: GoalIntentProfile): boolean {
+  const normalizedSummary = summary.toLowerCase();
+  const boundaryTexts = [
+    ...profile.nonGoals,
+    ...profile.constraintHints.filter((hint) => hint.includes("hard_constraint") || hint.includes("硬约束")),
+  ];
+  const forbiddenTerms = unique(boundaryTexts.flatMap(extractBoundaryTokens));
+  return forbiddenTerms.some((term) => term.length > 0 && summaryAffirmsForbiddenTerm(normalizedSummary, term));
+}
+
+function summaryAffirmsForbiddenTerm(normalizedSummary: string, term: string): boolean {
+  let startIndex = normalizedSummary.indexOf(term);
+  while (startIndex >= 0) {
+    const prefix = normalizedSummary.slice(Math.max(0, startIndex - 18), startIndex);
+    if (!hasNegationMarker(prefix)) {
+      return true;
+    }
+    startIndex = normalizedSummary.indexOf(term, startIndex + term.length);
+  }
+  return false;
+}
+
+function hasNegationMarker(value: string): boolean {
+  return [
+    "without",
+    "do not",
+    "don't",
+    "must not",
+    "no ",
+    "不要",
+    "不需要",
+    "不新增",
+    "不接",
+    "不能",
+    "禁止",
+  ].some((marker) => value.includes(marker));
+}
+
+function extractBoundaryTokens(value: string): string[] {
+  const normalized = value.toLowerCase();
+  const englishStopWords = new Set([
+    "and",
+    "but",
+    "can",
+    "cannot",
+    "constraint",
+    "do",
+    "goal",
+    "hard",
+    "must",
+    "need",
+    "not",
+    "the",
+    "use",
+    "with",
+    "without",
+  ]);
+  const english = normalized.match(/[a-z][a-z0-9_-]{2,}/g) ?? [];
+  const chineseBoundaryTerms = ["数据库", "前端", "后端", "真实模型", "外部依赖", "持久化", "网络", "权限", "资产"];
+  return [
+    ...english.filter((token) => !englishStopWords.has(token)),
+    ...chineseBoundaryTerms.filter((term) => normalized.includes(term)),
+  ];
 }
 
 function includesAny(value: string, needles: readonly string[]): boolean {

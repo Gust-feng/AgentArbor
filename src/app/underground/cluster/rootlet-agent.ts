@@ -3,7 +3,7 @@ import {
   completeUndergroundAgentInvocation,
   cloneUndergroundAgentInvocation,
 } from "../../underground-agent-cluster-runtime.js";
-import { createRootletOutputForInvocation } from "../../underground-rootlets.js";
+import { createRootletOutputsForInvocation } from "../../underground-rootlets.js";
 import { requestUndergroundRootletCandidateAdvice } from "../../underground-intelligence.js";
 import { publishExplorationCandidatesProduced } from "../../underground-events.js";
 import type { RootletClusterKind, RootletOutput, UndergroundAgentInvocation } from "../../../domain/underground/index.js";
@@ -65,7 +65,7 @@ export class RootletAgent implements UndergroundAgent {
       runningRootletInvocations.find((candidate) => candidate.invocationId === message.payload.invocationId),
       `rootlet invocation ${message.payload.invocationId}`
     );
-    const deterministicRootletOutput = createRootletOutputForInvocation({
+    const deterministicRootletOutputs = createRootletOutputsForInvocation({
       goalId,
       cluster,
       invocation,
@@ -75,10 +75,14 @@ export class RootletAgent implements UndergroundAgent {
     });
     if (this.kind === "option" && ctx.intelligenceChannel !== undefined) {
       return this.requestModelOutputs(ctx, message, cluster, invocation, goalId, rawGoal).then((modelRootletOutputs) => {
-        this.completeRootletInvocation(ctx, message, [deterministicRootletOutput, ...modelRootletOutputs]);
+        const remainingBudget = Math.max(0, cluster.budget.maxCandidateOutputs - deterministicRootletOutputs.length);
+        this.completeRootletInvocation(ctx, message, [
+          ...deterministicRootletOutputs,
+          ...modelRootletOutputs.slice(0, remainingBudget),
+        ]);
       });
     }
-    this.completeRootletInvocation(ctx, message, [deterministicRootletOutput]);
+    this.completeRootletInvocation(ctx, message, deterministicRootletOutputs);
   }
 
   private completeRootletInvocation(

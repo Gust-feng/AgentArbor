@@ -8,9 +8,11 @@ import type { GrowthPlan, TaskSpec, WorkflowIR } from "../aboveground/contracts.
 import type { ExperienceCandidate, FruitCandidate, PathBias, RunMemory } from "../fruits/contracts.js";
 import type { VerificationReport } from "../governance/contracts.js";
 import type {
+  CandidateComparison,
   CandidateConvergenceDecision,
   CandidatePoolCounts,
   ExplorationBudget,
+  RejectedCandidateRefWithReason,
   UndergroundAgentClusterRun,
   UndergroundAgentInvocationStatus,
   RootletClusterKind,
@@ -247,6 +249,7 @@ export type RunObservationUndergroundView = {
     readonly invocationStatus?: UndergroundAgentInvocationStatus;
     readonly invocationOutputRefs: readonly string[];
     readonly outputRef?: string;
+    readonly outputRefs: readonly string[];
   }[];
   readonly rootletOutputs: readonly {
     readonly outputId: string;
@@ -278,9 +281,24 @@ export type RunObservationUndergroundView = {
       readonly kind: string;
       readonly producedByAgentId: string;
       readonly clusterId: string;
+      readonly summary?: string;
       readonly sourceRefs: readonly string[];
       readonly status: string;
     }[];
+    readonly candidatesByKind: Readonly<
+      Record<
+        RootletClusterKind,
+        readonly {
+          readonly id: string;
+          readonly kind: string;
+          readonly producedByAgentId: string;
+          readonly clusterId: string;
+          readonly summary?: string;
+          readonly sourceRefs: readonly string[];
+          readonly status: string;
+        }[]
+      >
+    >;
   };
   readonly convergence: {
     readonly reviewId: string;
@@ -297,6 +315,11 @@ export type RunObservationUndergroundView = {
     readonly conflictResolutionRefs: readonly string[];
     readonly provenanceRefs: readonly string[];
     readonly decisions: readonly CandidateConvergenceDecision[];
+    readonly candidateComparisons: readonly CandidateComparison[];
+    readonly recommendedOptionId?: string;
+    readonly rejectedCandidateRefsWithReasons: readonly RejectedCandidateRefWithReason[];
+    readonly userDecisionRequired: readonly string[];
+    readonly abovegroundReferenceOptionIds: readonly string[];
     readonly budgetExhausted: boolean;
     readonly stopReason?: string;
     readonly handoffCandidateRefs: readonly string[];

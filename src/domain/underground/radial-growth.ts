@@ -89,11 +89,14 @@ export type CandidatePoolCounts = {
   unknown: number;
 };
 
+export type CandidatePoolByKind = Record<RootletClusterKind, ExplorationCandidateRef[]>;
+
 export type CandidatePool = {
   poolId: string;
   goalId: string;
   sourceRootletOutputRefs: string[];
   candidates: ExplorationCandidateRef[];
+  candidatesByKind: CandidatePoolByKind;
   counts: CandidatePoolCounts;
   updatedAt: string;
 };
@@ -114,6 +117,12 @@ export type CandidateConvergenceDecision = {
   evidenceRefs?: string[];
 };
 
+export type RejectedCandidateRefWithReason = {
+  candidateId: string;
+  reason: string;
+  provenanceRefs: string[];
+};
+
 export type UndergroundConvergenceOutcome = ConvergenceReviewOutcome;
 
 export type UndergroundConvergenceReport = {
@@ -130,6 +139,10 @@ export type UndergroundConvergenceReport = {
   provenanceRefs: string[];
   decisions: CandidateConvergenceDecision[];
   candidateComparisons?: CandidateComparison[];
+  recommendedOptionId?: string;
+  rejectedCandidateRefsWithReasons: RejectedCandidateRefWithReason[];
+  userDecisionRequired: string[];
+  abovegroundReferenceOptionIds: string[];
   summary: string;
   outcome: UndergroundConvergenceOutcome;
   userEscalationRequired: boolean;
@@ -184,11 +197,13 @@ export function createCandidatePool(input: {
 }): CandidatePool {
   assertRootletOutputsComeFromCompletedInvocations(input.rootletOutputs, input.agentInvocations);
   assertRootletOutputsAreOnlyPoolSources(input.rootletOutputs, input.candidates);
+  const candidates = input.candidates.map((candidate) => ({ ...candidate }));
   return {
     poolId: input.poolId,
     goalId: input.goalId,
     sourceRootletOutputRefs: input.rootletOutputs.map((output) => output.outputId),
-    candidates: input.candidates.map((candidate) => ({ ...candidate })),
+    candidates,
+    candidatesByKind: groupCandidatesByRootletKind(candidates, input.rootletOutputs),
     counts: countCandidatePool(input.candidates),
     updatedAt: input.updatedAt,
   };
@@ -241,6 +256,7 @@ export function applyCandidateConvergenceDecisions(
   return {
     ...pool,
     candidates,
+    candidatesByKind: updateCandidatesByKind(pool.candidatesByKind, candidates),
     counts: countCandidatePool(candidates),
     updatedAt,
   };
@@ -261,10 +277,31 @@ export function createUndergroundConvergenceReport(input: {
   createdAt?: string;
 }): UndergroundConvergenceReport {
   assertDecisionRefs(input.candidatePool, input.decisions);
+  const comparisonByCandidateId = new Map(
+    (input.candidateComparisons ?? []).map((comparison) => [comparison.candidateId, comparison])
+  );
+  const decisionByCandidateId = new Map(input.decisions.map((decision) => [decision.candidateId, decision]));
   const acceptedCandidateRefs = refsByStatus(input.decisions, "accepted");
   const mergedCandidateRefs = refsByStatus(input.decisions, "merged");
   const rejectedCandidateRefs = refsByStatus(input.decisions, "rejected");
   const unknownCandidateRefs = refsByStatus(input.decisions, "unknown");
+  const handoffCandidateRefs = [...acceptedCandidateRefs, ...mergedCandidateRefs].filter((candidateId) =>
+    isHandoffEligibleCandidate(candidateId, comparisonByCandidateId)
+  );
+  const recommendedOptionId = resolveRecommendedOptionId(input.decisions, comparisonByCandidateId);
+  const abovegroundReferenceOptionIds = resolveAbovegroundReferenceOptionIds(
+    input.decisions,
+    comparisonByCandidateId,
+    recommendedOptionId
+  );
+  const rejectedCandidateRefsWithReasons = rejectedCandidateRefs.map((candidateId) => {
+    const decision = decisionByCandidateId.get(candidateId);
+    return {
+      candidateId,
+      reason: decision?.reason ?? "Candidate was rejected by convergence review.",
+      provenanceRefs: [...(decision?.provenanceRefs ?? [])],
+    };
+  });
   const clarificationClassification = classifyUnknownsForClarification({
     goalId: input.candidatePool.goalId,
     unknownCandidateRefs,
@@ -274,9 +311,13 @@ export function createUndergroundConvergenceReport(input: {
   });
   const userClarificationRequest = clarificationClassification.userClarificationRequest;
   const userEscalationRequired = userClarificationRequest !== undefined;
+  const handoffAcceptedCandidateRefs = acceptedCandidateRefs.filter((candidateId) =>
+    handoffCandidateRefs.includes(candidateId)
+  );
+  const handoffMergedCandidateRefs = mergedCandidateRefs.filter((candidateId) => handoffCandidateRefs.includes(candidateId));
   const outcome = resolveConvergenceOutcome({
-    acceptedCandidateRefs,
-    mergedCandidateRefs,
+    acceptedCandidateRefs: handoffAcceptedCandidateRefs,
+    mergedCandidateRefs: handoffMergedCandidateRefs,
     unknownCandidateRefs,
     blockingClarificationRefs: userClarificationRequest?.relatedCandidateRefs ?? [],
     budget: input.budget,
@@ -292,16 +333,20 @@ export function createUndergroundConvergenceReport(input: {
     mergedCandidateRefs,
     rejectedCandidateRefs,
     unknownCandidateRefs,
-    conflictResolutionRefs: mergedCandidateRefs,
+    conflictResolutionRefs: [...mergedCandidateRefs, ...rejectedCandidateRefs],
     provenanceRefs: input.provenanceRefs,
     decisions: input.decisions.map(cloneCandidateConvergenceDecision),
     candidateComparisons: (input.candidateComparisons ?? []).map(cloneCandidateComparison),
+    recommendedOptionId,
+    rejectedCandidateRefsWithReasons,
+    userDecisionRequired: [...(userClarificationRequest?.relatedCandidateRefs ?? [])],
+    abovegroundReferenceOptionIds,
     summary: createConvergenceSummary(input.summary, {
       acceptedCandidateRefs,
       mergedCandidateRefs,
       rejectedCandidateRefs,
       unknownCandidateRefs,
-      handoffCandidateRefs: [...acceptedCandidateRefs, ...mergedCandidateRefs],
+      handoffCandidateRefs,
     }),
     outcome: outcome.outcome,
     userEscalationRequired,
@@ -310,7 +355,7 @@ export function createUndergroundConvergenceReport(input: {
     openQuestions: clarificationClassification.openQuestions.map(cloneOpenQuestionDisposition),
     budgetExhausted: input.budget.exhausted,
     stopReason: outcome.stopReason,
-    handoffCandidateRefs: [...acceptedCandidateRefs, ...mergedCandidateRefs],
+    handoffCandidateRefs,
   };
 }
 
@@ -405,6 +450,88 @@ function refsByStatus(
   status: CandidateConvergenceStatus
 ): string[] {
   return decisions.filter((decision) => decision.status === status).map((decision) => decision.candidateId);
+}
+
+function emptyCandidatePoolByKind(): CandidatePoolByKind {
+  return ROOTLET_CLUSTER_KINDS.reduce((result, kind) => {
+    result[kind] = [];
+    return result;
+  }, {} as CandidatePoolByKind);
+}
+
+function groupCandidatesByRootletKind(
+  candidates: readonly ExplorationCandidateRef[],
+  rootletOutputs: readonly RootletOutput[]
+): CandidatePoolByKind {
+  const outputKindById = new Map(rootletOutputs.map((output) => [output.outputId, output.kind]));
+  const grouped = emptyCandidatePoolByKind();
+  for (const candidate of candidates) {
+    const sourceKind = candidate.sourceRefs.map((sourceRef) => outputKindById.get(sourceRef)).find((kind) => kind !== undefined);
+    if (sourceKind !== undefined) {
+      grouped[sourceKind].push({ ...candidate });
+    }
+  }
+  return grouped;
+}
+
+function updateCandidatesByKind(
+  candidatesByKind: CandidatePoolByKind,
+  candidates: readonly ExplorationCandidateRef[]
+): CandidatePoolByKind {
+  const candidateById = new Map(candidates.map((candidate) => [candidate.id, candidate]));
+  const grouped = emptyCandidatePoolByKind();
+  for (const kind of ROOTLET_CLUSTER_KINDS) {
+    grouped[kind] = candidatesByKind[kind].flatMap((candidate) => {
+      const updated = candidateById.get(candidate.id);
+      return updated === undefined ? [] : [{ ...updated }];
+    });
+  }
+  return grouped;
+}
+
+function isHandoffEligibleCandidate(
+  candidateId: string,
+  comparisonByCandidateId: ReadonlyMap<string, CandidateComparison>
+): boolean {
+  const comparison = comparisonByCandidateId.get(candidateId);
+  if (comparison === undefined) {
+    return true;
+  }
+  return comparison.rootletKind !== "risk" && comparison.rootletKind !== "counterfactual";
+}
+
+function resolveRecommendedOptionId(
+  decisions: readonly CandidateConvergenceDecision[],
+  comparisonByCandidateId: ReadonlyMap<string, CandidateComparison>
+): string | undefined {
+  return (
+    findOptionDecision(decisions, comparisonByCandidateId, "accepted") ??
+    findOptionDecision(decisions, comparisonByCandidateId, "merged")
+  );
+}
+
+function findOptionDecision(
+  decisions: readonly CandidateConvergenceDecision[],
+  comparisonByCandidateId: ReadonlyMap<string, CandidateComparison>,
+  status: CandidateConvergenceStatus
+): string | undefined {
+  return decisions.find((decision) => {
+    const comparison = comparisonByCandidateId.get(decision.candidateId);
+    return decision.status === status && comparison?.rootletKind === "option";
+  })?.candidateId;
+}
+
+function resolveAbovegroundReferenceOptionIds(
+  decisions: readonly CandidateConvergenceDecision[],
+  comparisonByCandidateId: ReadonlyMap<string, CandidateComparison>,
+  recommendedOptionId: string | undefined
+): string[] {
+  return decisions
+    .filter((decision) => {
+      const comparison = comparisonByCandidateId.get(decision.candidateId);
+      return comparison?.rootletKind === "option" && decision.candidateId !== recommendedOptionId;
+    })
+    .map((decision) => decision.candidateId);
 }
 
 function cloneCandidateConvergenceDecision(decision: CandidateConvergenceDecision): CandidateConvergenceDecision {

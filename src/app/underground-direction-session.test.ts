@@ -22,12 +22,26 @@ test("runUndergroundDirectionSession creates an approved package without enterin
     result.undergroundReport.plan.rootletClusters.map((cluster) => cluster.kind),
     ["option"]
   );
-  assert.equal(result.undergroundReport.convergenceReport.candidateComparisons?.length, 1);
+  assert.equal(
+    result.undergroundReport.convergenceReport.candidateComparisons?.length,
+    result.undergroundReport.candidatePool.counts.total
+  );
+  assert.equal(result.undergroundReport.candidatePool.candidatesByKind.option.length, 2);
+  assert.equal(result.undergroundReport.convergenceReport.mergedCandidateRefs.length >= 1, true);
   assert.notEqual(result.undergroundReport.evidenceLedger, undefined);
   assert.equal((result.undergroundReport.evidenceLedger?.entries.length ?? 0) > 0, true);
   assert.equal(result.eventTypes.includes("direction_handoff.completed"), true);
   assert.equal(result.eventTypes.includes("growth_plan.completed"), false);
   assert.equal(result.observationSnapshot.aboveground.status, "not_started");
+  assert.equal(result.directionHandoff?.options.length, 2);
+  assert.equal(
+    result.directionHandoff?.decisionRecord.mergedOptionIds.length ?? 0,
+    1
+  );
+  assert.deepEqual(
+    result.directionHandoff?.decisionRecord.abovegroundReferenceOptionIds,
+    result.undergroundReport.convergenceReport.abovegroundReferenceOptionIds
+  );
   const plannedPayload = result.runtime.eventLog
     .list()
     .find((entry) => entry.type === "underground.exploration_planned")?.message.payload as

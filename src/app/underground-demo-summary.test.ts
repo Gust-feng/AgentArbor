@@ -20,6 +20,7 @@ test("createUndergroundDemoSummary reports an approved underground package", () 
   assert.equal(summary.directionPackage.validation.passed, true);
   assert.deepEqual(summary.underground.rootletKinds, ["option"]);
   assert.equal(summary.underground.candidateCounts.accepted, 1);
+  assert.equal(summary.underground.candidateCounts.merged, 1);
   assert.equal(summary.underground.convergence.outcome, "approved");
   assert.equal(summary.userEscalation, undefined);
   assert.equal(summary.observationSnapshot.layerStatuses.aboveground, "not_started");

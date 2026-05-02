@@ -40,7 +40,8 @@ test("Underground intelligence output enters candidate pool and waits for conver
     ),
     true
   );
-  assert.equal(result.undergroundReport.candidatePool.counts.total, 2);
+  assert.equal(result.undergroundReport.candidatePool.counts.total, 3);
+  assert.equal(result.undergroundReport.candidatePool.candidatesByKind.option.length, 3);
   assert.deepEqual(
     result.directionHandoff?.sourceCandidateRefs.map((candidate) => candidate.id),
     result.undergroundReport.convergenceReport.handoffCandidateRefs

@@ -158,6 +158,19 @@ function createApprovedConvergenceReviewFromClarification(input: {
       ...responseEvidenceRefs,
     ]),
     decisions,
+    candidateComparisons: previousReview.candidateComparisons?.map((comparison) => ({ ...comparison })),
+    recommendedOptionId: previousReview.recommendedOptionId,
+    rejectedCandidateRefsWithReasons: uniqueRejectedCandidateRefsWithReasons([
+      ...(previousReview.rejectedCandidateRefsWithReasons ?? []),
+      ...input.clarificationRequest.relatedCandidateRefs.map((candidateId) => ({
+        candidateId,
+        reason:
+          "User clarification answered this blocking unknown; it is resolved as revision evidence and excluded from handoff source candidates.",
+        provenanceRefs: [input.clarificationRequest.requestId, ...responseEvidenceRefs],
+      })),
+    ]),
+    userDecisionRequired: [],
+    abovegroundReferenceOptionIds: [...(previousReview.abovegroundReferenceOptionIds ?? [])],
     summary: "User clarification was answered; blocking unknowns no longer block the direction handoff.",
     outcome: "approved",
     userEscalationRequired: false,
@@ -170,6 +183,20 @@ function createApprovedConvergenceReviewFromClarification(input: {
     budgetExhausted: previousReview.budgetExhausted ?? true,
     handoffCandidateRefs: sourceCandidateRefs.map((candidate) => candidate.id),
   };
+}
+
+function uniqueRejectedCandidateRefsWithReasons(
+  items: readonly { candidateId: string; reason: string; provenanceRefs: readonly string[] }[]
+): { candidateId: string; reason: string; provenanceRefs: string[] }[] {
+  const byCandidateId = new Map<string, { candidateId: string; reason: string; provenanceRefs: string[] }>();
+  for (const item of items) {
+    byCandidateId.set(item.candidateId, {
+      candidateId: item.candidateId,
+      reason: item.reason,
+      provenanceRefs: [...item.provenanceRefs],
+    });
+  }
+  return [...byCandidateId.values()];
 }
 
 function createRecoveredDecisions(input: {
@@ -219,7 +246,6 @@ function createApprovedRecoveredDirectionHandoff(input: {
 }): DirectionHandoff {
   const previousHandoff = input.awaitingUserPackage.directionHandoff;
   const { status: _status, ...draft } = previousHandoff;
-  const questionIds = new Set(input.clarificationRequest.questions.map((question) => question.questionId));
   const responseEvidenceRefs = collectClarificationEvidenceRefs(input.clarificationResponse);
 
   return createApprovedDirectionHandoff(
@@ -242,9 +268,9 @@ function createApprovedRecoveredDirectionHandoff(input: {
       })),
       decisionRecord: {
         ...previousHandoff.decisionRecord,
-        userDecisionRequired: previousHandoff.decisionRecord.userDecisionRequired.filter(
-          (questionId) => !questionIds.has(questionId)
-        ),
+        // Recovery creates a new approved handoff version. Any unresolved user-decision
+        // marker must be removed here; validation is the final guard if a blocker survives.
+        userDecisionRequired: [],
         rationaleEvidenceRefs: uniqueStrings([
           ...previousHandoff.decisionRecord.rationaleEvidenceRefs,
           input.clarificationResponse.requestId,
@@ -309,6 +335,7 @@ function isClarificationBlockerText(value: string, request: UserClarificationReq
     value.includes(request.requestId) ||
     normalized.includes("blocked until user clarification is answered") ||
     normalized.includes("blocking user clarification") ||
+    normalized.includes("requires user clarification") ||
     normalized.includes("clarification request remains unanswered") ||
     normalized.includes("resolve user clarification request")
   );

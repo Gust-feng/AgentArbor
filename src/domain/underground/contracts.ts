@@ -43,6 +43,7 @@ export type ExplorationCandidateRef = {
   kind: "observation" | "evidence_candidate" | "claim_candidate";
   producedByAgentId: string;
   clusterId: string;
+  summary?: string;
   sourceRefs: string[];
   status: "candidate" | "accepted" | "merged" | "rejected" | "unknown";
 };
@@ -63,10 +64,18 @@ export type ConvergenceReview = {
   acceptedCandidateRefs: string[];
   mergedCandidateRefs?: string[];
   rejectedCandidateRefs: string[];
+  rejectedCandidateRefsWithReasons?: {
+    candidateId: string;
+    reason: string;
+    provenanceRefs: string[];
+  }[];
   unknownCandidateRefs?: string[];
   conflictResolutionRefs: string[];
   provenanceRefs: string[];
   candidateComparisons?: CandidateComparison[];
+  recommendedOptionId?: string;
+  userDecisionRequired?: string[];
+  abovegroundReferenceOptionIds?: string[];
   outcome?: ConvergenceReviewOutcome;
   userEscalationRequired?: boolean;
   userClarificationRequest?: UserClarificationRequest;

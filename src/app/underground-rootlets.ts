@@ -32,15 +32,34 @@ const ROOTLET_EXIT_CRITERIA: Record<RootletClusterKind, string[]> = {
   counterfactual: ["A non-selected path is recorded for convergence review."],
 };
 
+const ROOTLET_MAX_OUTPUTS: Record<RootletClusterKind, number> = {
+  option: 3,
+  risk: 3,
+  asset_fit: 2,
+  evidence: 3,
+  constraint: 3,
+  counterfactual: 2,
+};
+
+const ROOTLET_DETERMINISTIC_OUTPUTS: Record<RootletClusterKind, number> = {
+  option: 2,
+  risk: 2,
+  asset_fit: 1,
+  evidence: 2,
+  constraint: 2,
+  counterfactual: 1,
+};
+
 export function createMinimalUndergroundExplorationPlan(
   goalId: string,
   goalIntentProfile?: GoalIntentProfile
 ): UndergroundExplorationPlan {
   const selectedKinds =
     goalIntentProfile === undefined ? ROOTLET_CLUSTER_KINDS : selectRootletClusterKindsForGoalIntent(goalIntentProfile);
+  const rootletClusters = selectedKinds.map((kind) => createRootletClusterPlan(kind, goalIntentProfile));
   const budget: ExplorationBudget = {
     maxRootletClusters: selectedKinds.length,
-    maxCandidateOutputs: selectedKinds.length,
+    maxCandidateOutputs: rootletClusters.reduce((total, cluster) => total + cluster.budget.maxCandidateOutputs, 0),
     spentRootletClusters: 0,
     spentCandidateOutputs: 0,
     exhausted: false,
@@ -51,7 +70,7 @@ export function createMinimalUndergroundExplorationPlan(
     goalId,
     centerRoles: UNDERGROUND_CENTER_ROLES,
     budget,
-    rootletClusters: selectedKinds.map((kind) => createRootletClusterPlan(kind, goalIntentProfile)),
+    rootletClusters,
     createdAt: goalIntentProfile?.createdAt ?? nowIso(),
   };
 }
@@ -110,12 +129,12 @@ export function produceMinimalRootletOutputs(input: {
       .filter((invocation) => invocation.role === "rootlet_agent")
       .map((invocation) => [rootletKindFromAgentId(invocation.agentId), invocation])
   );
-  return input.plan.rootletClusters.map((cluster) => {
+  return input.plan.rootletClusters.flatMap((cluster) => {
     const invocation = invocationByRootletKind.get(cluster.kind);
     if (invocation === undefined) {
       throw new Error(`Missing rootlet agent invocation for cluster kind: ${cluster.kind}`);
     }
-    return createRootletOutputForInvocation({
+    return createRootletOutputsForInvocation({
       goalId: input.plan.goalId,
       cluster,
       invocation,
@@ -123,6 +142,27 @@ export function produceMinimalRootletOutputs(input: {
       goalIntentProfile: input.goalIntentProfile,
     });
   });
+}
+
+export function createRootletOutputsForInvocation(input: {
+  goalId: string;
+  cluster: RootletClusterPlan;
+  invocation: UndergroundAgentInvocation;
+  constraints: Constraint[];
+  goalIntentProfile?: GoalIntentProfile;
+  sourceRefs?: readonly string[];
+}): RootletOutput[] {
+  const maxOutputs = Math.max(0, input.cluster.budget.maxCandidateOutputs);
+  return rootletSummaries(input.cluster.kind, input.goalIntentProfile)
+    .slice(0, maxOutputs)
+    .map((summary, index) =>
+      createRootletOutputForInvocation({
+        ...input,
+        summary,
+        sourceRefs: [...(input.sourceRefs ?? []), `rootlet-variant:${input.cluster.kind}:${index + 1}`],
+        evidenceRefs: [evidenceId(input.goalId, `rootlet:${input.cluster.kind}:${index + 1}`)],
+      })
+    );
 }
 
 export function createRootletOutputForInvocation(input: {
@@ -177,7 +217,7 @@ function createRootletClusterPlan(kind: RootletClusterKind, goalIntentProfile?: 
     ],
     exitCriteria: ROOTLET_EXIT_CRITERIA[kind],
     status: "planned",
-    budget: { maxCandidateOutputs: 1 },
+    budget: { maxCandidateOutputs: ROOTLET_MAX_OUTPUTS[kind] },
   };
 }
 
@@ -206,22 +246,50 @@ function rootletObjective(kind: RootletClusterKind, goalIntentProfile?: GoalInte
 }
 
 function rootletSummary(kind: RootletClusterKind, goalIntentProfile?: GoalIntentProfile): string {
+  return rootletSummaries(kind, goalIntentProfile)[0] ?? ROOTLET_OBJECTIVES[kind];
+}
+
+function rootletSummaries(kind: RootletClusterKind, goalIntentProfile?: GoalIntentProfile): string[] {
   if (goalIntentProfile === undefined) {
-    return ROOTLET_OBJECTIVES[kind];
+    return [ROOTLET_OBJECTIVES[kind]];
   }
+  const targetCount = ROOTLET_DETERMINISTIC_OUTPUTS[kind];
+  const goal = goalIntentProfile.goalStatement;
   switch (kind) {
     case "option":
-      return `Direction option for ${goalIntentProfile.goalStatement}`;
+      return [
+        `Primary in-memory direction for ${goal}`,
+        `Modular verification-first direction for ${goal}`,
+        `Deferred persistence direction for ${goal}`,
+      ].slice(0, targetCount);
     case "risk":
-      return `Risk hints for ${goalIntentProfile.riskHints.join(", ") || goalIntentProfile.goalStatement}`;
+      return [
+        `Risk source and impact for ${goalIntentProfile.riskHints[0] ?? goal}`,
+        `Risk blocking assessment for ${goalIntentProfile.riskHints[1] ?? goal}`,
+        `Risk mitigation boundary for ${goal}`,
+      ].slice(0, targetCount);
     case "asset_fit":
-      return `Soil asset fit refs for ${goalIntentProfile.goalStatement}`;
+      return [
+        `Soil asset fit refs for ${goal}`,
+        `Soil asset non-fit boundaries for ${goal}`,
+      ].slice(0, targetCount);
     case "evidence":
-      return `Evidence needs for ${goalIntentProfile.acceptanceCriteria.join("; ")}`;
+      return [
+        `Evidence candidate for ${goalIntentProfile.acceptanceCriteria[0] ?? goal}`,
+        `Verification evidence candidate for ${goalIntentProfile.acceptanceCriteria[1] ?? goal}`,
+        `Monitoring evidence candidate for ${goal}`,
+      ].slice(0, targetCount);
     case "constraint":
-      return `Constraint hints for ${goalIntentProfile.constraintHints.join(", ") || goalIntentProfile.goalStatement}`;
+      return [
+        `Constraint mapping for ${goalIntentProfile.constraintHints[0] ?? goal}`,
+        `Enforcement gate mapping for ${goalIntentProfile.constraintHints[1] ?? goal}`,
+        `Constraint non-weakening check for ${goal}`,
+      ].slice(0, targetCount);
     case "counterfactual":
-      return `Why-not alternatives for ${goalIntentProfile.goalStatement}`;
+      return [
+        `Counterfactual why-not alternative for ${goal}`,
+        `Counterfactual fallback direction for ${goal}`,
+      ].slice(0, targetCount);
   }
 }
 

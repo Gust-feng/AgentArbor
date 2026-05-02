@@ -33,7 +33,7 @@ export function createRunObservationLayerViews(input: RunObservationSnapshotInpu
 
 function createUndergroundView(input: RunObservationSnapshotInput): RunObservationUndergroundView {
   const report = input.undergroundReport;
-  const outputRefByClusterId = new Map(report.rootletOutputs.map((output) => [output.clusterId, output.outputId]));
+  const outputRefsByClusterId = groupRootletOutputRefsByCluster(report.rootletOutputs);
   const rootletInvocationByAgentId = new Map(
     (report.agentClusterRun?.invocations ?? [])
       .filter((invocation) => invocation.role === "rootlet_agent")
@@ -59,7 +59,8 @@ function createUndergroundView(input: RunObservationSnapshotInput): RunObservati
       invocationOutputRefs: [
         ...(rootletInvocationByAgentId.get(rootletAgentIdForKind(cluster.kind))?.outputRefs ?? []),
       ],
-      outputRef: outputRefByClusterId.get(cluster.clusterId),
+      outputRef: outputRefsByClusterId.get(cluster.clusterId)?.[0],
+      outputRefs: outputRefsByClusterId.get(cluster.clusterId) ?? [],
     })),
     rootletOutputs: report.rootletOutputs.map((output) => ({
       outputId: output.outputId,
@@ -86,14 +87,15 @@ function createUndergroundView(input: RunObservationSnapshotInput): RunObservati
       rejected: report.candidatePool.counts.rejected,
       unknown: report.candidatePool.counts.unknown,
       sourceRootletOutputRefs: [...report.candidatePool.sourceRootletOutputRefs],
-      candidates: report.candidatePool.candidates.map((candidate) => ({
-        id: candidate.id,
-        kind: candidate.kind,
-        producedByAgentId: candidate.producedByAgentId,
-        clusterId: candidate.clusterId,
-        sourceRefs: [...candidate.sourceRefs],
-        status: candidate.status,
-      })),
+      candidates: report.candidatePool.candidates.map(createCandidateView),
+      candidatesByKind: {
+        option: report.candidatePool.candidatesByKind.option.map(createCandidateView),
+        risk: report.candidatePool.candidatesByKind.risk.map(createCandidateView),
+        asset_fit: report.candidatePool.candidatesByKind.asset_fit.map(createCandidateView),
+        evidence: report.candidatePool.candidatesByKind.evidence.map(createCandidateView),
+        constraint: report.candidatePool.candidatesByKind.constraint.map(createCandidateView),
+        counterfactual: report.candidatePool.candidatesByKind.counterfactual.map(createCandidateView),
+      },
     },
     convergence: {
       reviewId: report.convergenceReport.reviewId,
@@ -115,6 +117,20 @@ function createUndergroundView(input: RunObservationSnapshotInput): RunObservati
         provenanceRefs: [...decision.provenanceRefs],
         evidenceRefs: [...(decision.evidenceRefs ?? [])],
       })),
+      candidateComparisons: (report.convergenceReport.candidateComparisons ?? []).map((comparison) => ({
+        ...comparison,
+        unknowns: [...comparison.unknowns],
+        whyNot: [...comparison.whyNot],
+        evidenceRefs: [...comparison.evidenceRefs],
+      })),
+      recommendedOptionId: report.convergenceReport.recommendedOptionId,
+      rejectedCandidateRefsWithReasons: report.convergenceReport.rejectedCandidateRefsWithReasons.map((item) => ({
+        candidateId: item.candidateId,
+        reason: item.reason,
+        provenanceRefs: [...item.provenanceRefs],
+      })),
+      userDecisionRequired: [...report.convergenceReport.userDecisionRequired],
+      abovegroundReferenceOptionIds: [...report.convergenceReport.abovegroundReferenceOptionIds],
       budgetExhausted: report.convergenceReport.budgetExhausted,
       stopReason: report.convergenceReport.stopReason,
       handoffCandidateRefs: [...report.convergenceReport.handoffCandidateRefs],
@@ -126,6 +142,38 @@ function createUndergroundView(input: RunObservationSnapshotInput): RunObservati
     userEscalationRequired: report.convergenceReport.userEscalationRequired,
     userEscalation: createUserEscalationView(report),
     clarificationResponses: createClarificationResponses(input.eventEntries),
+  };
+}
+
+function groupRootletOutputRefsByCluster(
+  outputs: RunObservationSnapshotInput["undergroundReport"]["rootletOutputs"]
+): Map<string, string[]> {
+  const grouped = new Map<string, string[]>();
+  for (const output of outputs) {
+    grouped.set(output.clusterId, [...(grouped.get(output.clusterId) ?? []), output.outputId]);
+  }
+  return grouped;
+}
+
+function createCandidateView(
+  candidate: RunObservationSnapshotInput["undergroundReport"]["candidatePool"]["candidates"][number]
+): {
+  readonly id: string;
+  readonly kind: string;
+  readonly producedByAgentId: string;
+  readonly clusterId: string;
+  readonly summary?: string;
+  readonly sourceRefs: readonly string[];
+  readonly status: string;
+} {
+  return {
+    id: candidate.id,
+    kind: candidate.kind,
+    producedByAgentId: candidate.producedByAgentId,
+    clusterId: candidate.clusterId,
+    summary: candidate.summary,
+    sourceRefs: [...candidate.sourceRefs],
+    status: candidate.status,
   };
 }
 

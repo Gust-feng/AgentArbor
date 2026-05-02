@@ -55,7 +55,20 @@ test("RootletAgent runs from an explicit internal invocation request without add
 
   assert.equal(eventTypes.filter((type) => type === "rootlet_cluster.started").length, 1);
   assert.equal(eventTypes.filter((type) => type === "exploration_candidate.produced").length, 1);
-  assert.equal(result.undergroundReport.rootletOutputs.length, result.undergroundReport.plan.rootletClusters.length);
+  assert.equal(
+    result.undergroundReport.rootletOutputs.length > result.undergroundReport.plan.rootletClusters.length,
+    true
+  );
+  assert.equal(
+    result.undergroundReport.rootletOutputs.length <= result.undergroundReport.plan.budget.maxCandidateOutputs,
+    true
+  );
+  assert.equal(result.undergroundReport.candidatePool.candidatesByKind.option.length, 2);
+  assert.equal(result.undergroundReport.candidatePool.candidatesByKind.risk.length, 2);
+  assert.equal(result.undergroundReport.candidatePool.candidatesByKind.asset_fit.length, 1);
+  assert.equal(result.undergroundReport.candidatePool.candidatesByKind.evidence.length, 2);
+  assert.equal(result.undergroundReport.candidatePool.candidatesByKind.constraint.length, 2);
+  assert.equal(result.undergroundReport.candidatePool.candidatesByKind.counterfactual.length, 1);
   assert.equal(
     result.undergroundReport.rootletOutputs.every((output) =>
       output.sourceRefs.some((sourceRef) => sourceRef.startsWith("rootlet-invocation-request")) &&

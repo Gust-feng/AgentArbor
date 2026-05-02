@@ -1,0 +1,7 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Runtime spec index and required pre-development boundaries for backend changes."}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Module ownership rules for adding focused underground cluster runtime files."}
+{"file": ".trellis/spec/backend/underground-radial-growth.md", "reason": "Existing Underground Center candidate pool, convergence, clarification and handoff guards."}
+{"file": ".trellis/spec/backend/observation-read-model.md", "reason": "Observation Snapshot and EventLog projection rules for new agent cluster visibility."}
+{"file": ".trellis/spec/backend/intelligence-channel.md", "reason": "AI output boundary: model output can only enter agent candidate/advice layers."}
+{"file": ".trellis/spec/backend/direction-handoff-package.md", "reason": "Direction Handoff Package validation and lineage boundaries must remain intact."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Build, test and demo validation expectations."}

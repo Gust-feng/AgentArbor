@@ -111,6 +111,78 @@ const comparison = compareCandidateForGoal({ goalProfile, candidate, rootletOutp
 
 Rootlet 是否启动和候选如何收束都必须从目标画像和比较结果出发，而不是从固定 fixture 或 cluster 名称出发。
 
+## Scenario: 地下 Agent 集群调度内核
+
+### 1. Scope / Trigger
+
+- Trigger：修改 `src/domain/underground/agent-cluster.ts`、`src/app/underground-agent-cluster-runtime.ts`、地下 session、rootlet output、candidate pool、智能通道地下接入或 Observation underground view。
+- Scope：只覆盖确定性内存地下 agent 集群调度；不引入 UI、HTTP、SSE、WebSocket、数据库、真实 LLM demo、MCP、A2A、AG-UI、外部 LLM SDK 或 repo-root `.agentarbor/` 运行资产。
+
+### 2. Signatures
+
+- `UndergroundAgentRole` 固定覆盖 `intent_core`、`growth_governor`、`rootlet_agent`、`convergence_judge`、`handoff_steward`。
+- `UndergroundAgentClusterPlan` 记录 `goalId`、raw goal、budget、将启动的 agents、rootlet kinds 和 scheduling reasons。
+- `UndergroundAgentInvocation` 必须包含 `invocationId`、`agentId`、`role`、`inputRefs`、`outputRefs`、`status`、`startedAt`、可选 `completedAt` / `failureReason`。
+- `UndergroundAgentClusterRun` 记录 plan、invocations、terminal status、candidate refs、可选 package ref、started/completed timestamps 和 stop reason。
+- `RootletOutput` 必须包含 `invocationId`；`createCandidatePool(...)` 必须接收同一运行的 `agentInvocations` 并验证 rootlet output 来自 completed `rootlet_agent` invocation。
+
+### 3. Contracts
+
+- 地下 session 默认必须走 agent cluster runtime；不能回退到 app helper 直接把 rootlet output 塞进 candidate pool。
+- 调度器必须先注册地下 agent manifests，再按 `GoalIntentProfile` 和动态 rootlet 选择结果启动 rootlet agent invocations。
+- rootlet output 进入正式 candidate pool 前，必须能追溯到 completed `rootlet_agent` invocation，且 `output.producedByAgentId === invocation.agentId`、`invocation.outputRefs` 包含 `output.outputId`。
+- `IntelligenceChannel` 只能作为 rootlet agent 的能力来源；AI output 只有被 rootlet invocation 包装成 `RootletOutput` 后，才能进入 candidate pool。
+- Convergence Judge 与 Handoff Steward 仍是确定性守门；模型输出不能绕过 candidate pool、convergence report、Direction Handoff Package validation。
+- 不新增事件类型时，复用的地下事件 payload 必须包含 `agentCluster` / `invocation` 信息，证明 plan、run 和 invocations 被调度；Observation Snapshot 必须投影 `underground.agentCluster`。
+
+### 4. Validation & Error Matrix
+
+| 条件 | 结果 |
+| --- | --- |
+| RootletOutput 缺少 invocationId | `UndergroundConvergenceError`，不得进入 candidate pool |
+| invocation 不存在、不是 `rootlet_agent`、未 completed、producer 不匹配或 outputRefs 不包含 outputId | `UndergroundConvergenceError` |
+| AI output 不符合输出契约 | 智能通道发布 failed，rootlet invocation 不产生 AI rootlet output |
+| 动态 rootlet 选择为 N 个 rootlet kind | Observation 中必须存在 N 个 completed `rootlet_agent` invocations |
+| awaiting_user / stopped | 仍必须生成 agent cluster run 观测结果，且 Aboveground 保持 `not_started` |
+| EventLog / Snapshot 出现 API key、token 或 provider secret | 测试失败 |
+
+### 5. Good / Base / Bad Cases
+
+- Good：简单目标只启动 `option` rootlet，并在 Observation 中显示 intent、growth、option rootlet、convergence 和 handoff invocations。
+- Good：智能通道候选建议被包装为 option rootlet invocation 的 output，再进入 candidate pool 和 convergence。
+- Base：完整 demo 继续保持固定地下事件顺序，只在 payload 和 Observation view 中增加 agent cluster 信息。
+- Bad：`runUndergroundDirectionSessionWithIntelligence` 先拿模型输出再把它作为 loose `extraRootletOutputs` 直接并入候选池。
+- Bad：为了展示 agent cluster 新增长期 Capability Asset、repo-root `.agentarbor/` 占位资产或外部 provider SDK。
+
+### 6. Tests Required
+
+- 地下-only happy path 通过 agent cluster runtime 产出 approved package，且 EventLog payload 包含 `agentCluster`。
+- Rootlet output 没有关联 completed rootlet invocation 时不能进入 candidate pool。
+- AI output 必须通过 rootlet invocation 才能进入 candidate pool。
+- 动态 rootlet selection 形成对应数量的 rootlet agent invocations。
+- awaiting_user / stopped 仍暴露 agent cluster run，且不进入 Aboveground。
+- Observation Snapshot 展示 cluster plan、invocations、candidate refs 和 package refs。
+- EventLog / Snapshot 不包含 API key / token。
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```ts
+const extraRootletOutputs = await requestUndergroundRootletCandidateAdvice(...);
+createMinimalCandidatePool({ goalId, rootletOutputs: extraRootletOutputs });
+```
+
+#### Correct
+
+```ts
+const invocation = startRootletAgentInvocation(...);
+const rootletOutput = createRootletOutputForInvocation({ invocation, ... });
+createMinimalCandidatePool({ goalId, rootletOutputs: [rootletOutput], agentInvocations: [completedInvocation] });
+```
+
+正式候选池只接受能回溯到 agent invocation 的 rootlet output；这保证地下组织是调度出来的，而不是 session helper 拼出来的。
+
 ## Signatures
 
 - 固定 center roles：`intent_core`、`growth_governor`、`constraint_sentinel`、`evidence_ledger`、`convergence_judge`、`handoff_steward`。

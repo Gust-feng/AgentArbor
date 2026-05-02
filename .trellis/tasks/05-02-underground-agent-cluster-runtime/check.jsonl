@@ -1,0 +1,7 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Quality gate entrypoint and relevant backend runtime specs."}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Verify new cluster modules keep ownership boundaries focused."}
+{"file": ".trellis/spec/backend/underground-radial-growth.md", "reason": "Verify rootlet/candidate/convergence invariants are not weakened."}
+{"file": ".trellis/spec/backend/observation-read-model.md", "reason": "Verify Snapshot/EventLog projections expose agent cluster state without new facts."}
+{"file": ".trellis/spec/backend/intelligence-channel.md", "reason": "Verify AI output remains advice/candidate material and adapter boundaries hold."}
+{"file": ".trellis/spec/backend/direction-handoff-package.md", "reason": "Verify package validation and handoff boundaries remain intact."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Verify required build/test/demo quality checks."}

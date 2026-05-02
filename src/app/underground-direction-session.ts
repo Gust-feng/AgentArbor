@@ -1,7 +1,6 @@
-import type { ArborMessageType } from "../domain/common.js";
+import type { ArborMessage, ArborMessageType } from "../domain/common.js";
 import type { Constraint, DirectionHandoff, UndergroundExplorationReport } from "../domain/contracts.js";
 import {
-  createDirectionHandoffPackageRef,
   FileSystemDirectionHandoffPackageStore,
   resolveDirectionHandoffPackageMetaPath,
   type DirectionHandoffPackage,
@@ -14,17 +13,9 @@ import { createRunObservationSnapshot } from "../domain/observation/index.js";
 import { createId } from "../kernel/id.js";
 import { createMessage } from "../kernel/messages/create-message.js";
 import {
-  finalizeUndergroundAgentClusterRun,
-  runUndergroundAgentClusterExploration,
-  runUndergroundAgentClusterExplorationWithIntelligence,
-  type RunUndergroundAgentClusterExplorationResult,
-} from "./underground-agent-cluster-runtime.js";
-import {
-  createAwaitingUserDirectionMaterial,
-  createMinimalDirectionMaterial,
-  createStoppedDirectionMaterial,
-} from "./minimal-direction.js";
-import { createUndergroundExplorationReport } from "./underground-report.js";
+  MessageDrivenUndergroundDispatcher,
+  type UndergroundMessageDrivenDispatchResult,
+} from "./underground-message-dispatcher.js";
 import { createMinimalRuntime, type MinimalRuntime } from "./runtime.js";
 
 export type UndergroundDirectionSessionTerminalStatus =
@@ -64,24 +55,15 @@ export function runUndergroundDirectionSession(
   options: RunUndergroundDirectionSessionOptions = {}
 ): UndergroundDirectionSessionResult {
   const { runtime, storage } = createUndergroundSessionRuntime(options);
-  const { traceId, goalId, agentId } = publishUndergroundGoal(runtime, goal);
-  const exploration = runUndergroundAgentClusterExploration({
-    runtime,
-    traceId,
-    goalId,
-    rawGoal: goal,
-    coordinatorAgentId: agentId,
-  });
-
-  return completeUndergroundDirectionSession({
-    runtime,
-    storage,
-    traceId,
-    goalId,
-    agentId,
-    goal,
-    exploration,
-  });
+  const { traceId, goalId, message } = createUndergroundGoalMessage(goal);
+  const dispatcher = new MessageDrivenUndergroundDispatcher({ runtime });
+  try {
+    runtime.bus.publish(message);
+    const dispatchResult = requireDispatchResult(dispatcher.dispatchUntilIdle());
+    return completeUndergroundDirectionSession({ runtime, storage, traceId, goalId, dispatchResult });
+  } finally {
+    dispatcher.dispose();
+  }
 }
 
 export async function runUndergroundDirectionSessionWithIntelligence(
@@ -89,26 +71,16 @@ export async function runUndergroundDirectionSessionWithIntelligence(
   options: RunUndergroundDirectionSessionWithIntelligenceOptions
 ): Promise<UndergroundDirectionSessionResult> {
   const { runtime, storage } = createUndergroundSessionRuntime(options);
-  const { traceId, goalId, agentId } = publishUndergroundGoal(runtime, goal);
+  const { traceId, goalId, message } = createUndergroundGoalMessage(goal);
   const intelligenceChannel = options.createIntelligenceChannel(runtime);
-  const exploration = await runUndergroundAgentClusterExplorationWithIntelligence({
-    runtime,
-    traceId,
-    goalId,
-    rawGoal: goal,
-    coordinatorAgentId: agentId,
-    intelligenceChannel,
-  });
-
-  return completeUndergroundDirectionSession({
-    runtime,
-    storage,
-    traceId,
-    goalId,
-    agentId,
-    goal,
-    exploration,
-  });
+  const dispatcher = new MessageDrivenUndergroundDispatcher({ runtime, intelligenceChannel });
+  try {
+    runtime.bus.publish(message);
+    const dispatchResult = requireDispatchResult(await dispatcher.dispatchUntilIdleAsync());
+    return completeUndergroundDirectionSession({ runtime, storage, traceId, goalId, dispatchResult });
+  } finally {
+    dispatcher.dispose();
+  }
 }
 
 function createUndergroundSessionRuntime(options: RunUndergroundDirectionSessionOptions): {
@@ -127,25 +99,25 @@ function createUndergroundSessionRuntime(options: RunUndergroundDirectionSession
   return { runtime, storage };
 }
 
-function publishUndergroundGoal(runtime: MinimalRuntime, goal: string): {
+function createUndergroundGoalMessage(goal: string): {
   traceId: string;
   goalId: string;
-  agentId: string;
+  message: ArborMessage<{ goalId: string; goal: string }>;
 } {
   const traceId = createId("trace");
   const goalId = createId("goal");
-  const agentId = "underground-analyzer";
-  runtime.bus.publish(
-    createMessage({
+  return {
+    traceId,
+    goalId,
+    message: createMessage({
       traceId,
       from: { id: "user", role: "user" },
       to: { role: "underground_center" },
       type: "goal.received",
       intent: "receive_user_goal",
       payload: { goalId, goal },
-    })
-  );
-  return { traceId, goalId, agentId };
+    }),
+  };
 }
 
 function completeUndergroundDirectionSession(input: {
@@ -153,128 +125,38 @@ function completeUndergroundDirectionSession(input: {
   storage: { packageStore?: DirectionHandoffPackageStore; outputDirectory?: string };
   traceId: string;
   goalId: string;
-  agentId: string;
-  goal: string;
-  exploration: RunUndergroundAgentClusterExplorationResult;
+  dispatchResult: UndergroundMessageDrivenDispatchResult;
 }): UndergroundDirectionSessionResult {
-  const { candidatePool, convergenceReport } = input.exploration;
-  const materialInput = {
-    goalId: input.goalId,
-    goal: input.goal,
-    producedByAgentId: input.agentId,
-    constraints: input.runtime.constraints,
-    goalIntentProfile: input.exploration.undergroundReport.goalIntentProfile,
-    candidatePool,
-    convergenceReport,
-  };
-  const material =
-    convergenceReport.outcome === "approved"
-      ? createMinimalDirectionMaterial(materialInput)
-      : convergenceReport.outcome === "awaiting_user"
-        ? createAwaitingUserDirectionMaterial(materialInput)
-        : createStoppedDirectionMaterial(materialInput);
-  const directionHandoffPackage = input.runtime.directionHandoffPackageStore.save(material.directionHandoffPackage);
-  const loadedDirectionHandoffPackage = input.runtime.directionHandoffPackageStore.load(
-    directionHandoffPackage.manifest.directionId,
-    directionHandoffPackage.manifest.directionVersion
-  );
-  const directionHandoffPackageRef = createDirectionHandoffPackageRef(loadedDirectionHandoffPackage);
-  const terminalStatus = terminalStatusForConvergence(convergenceReport.outcome);
-  const agentClusterRun = finalizeUndergroundAgentClusterRun({
-    run: input.exploration.agentClusterRun,
-    terminalStatus,
-    candidateRefs: convergenceReport.handoffCandidateRefs,
-    packageRef: directionHandoffPackageRef,
-    stopReason: convergenceReport.stopReason,
-  });
-  const undergroundReport = createUndergroundExplorationReport({
-    plan: input.exploration.undergroundReport.plan,
-    agentClusterRun,
-    goalIntentProfile: input.exploration.undergroundReport.goalIntentProfile,
-    evidenceLedger: input.exploration.undergroundReport.evidenceLedger,
-    rootletOutputs: [...input.exploration.undergroundReport.rootletOutputs],
-    candidatePool,
-    convergenceReport,
-  });
-
-  if (terminalStatus === "approved_package_created") {
-    input.runtime.bus.publish(
-      createMessage({
-        traceId: input.traceId,
-        from: { id: "underground-handoff-steward", role: "underground_center" },
-        to: { role: "aboveground_center" },
-        type: "direction_handoff.completed",
-        intent: "complete_direction_handoff",
-        payload: {
-          goalId: input.goalId,
-          directionHandoff: material.directionHandoff,
-          directionPackage: directionHandoffPackageRef,
-          agentCluster: {
-            plan: agentClusterRun.plan,
-            run: agentClusterRun,
-            invocation: agentClusterRun.invocations.find((invocation) => invocation.role === "handoff_steward"),
-            invocations: agentClusterRun.invocations,
-          },
-        },
-      })
-    );
-  } else if (terminalStatus === "awaiting_user" && "clarificationRequest" in material) {
-    input.runtime.bus.publish(
-      createMessage({
-        traceId: input.traceId,
-        from: { id: "underground-handoff-steward", role: "underground_center" },
-        to: { role: "user" },
-        type: "user_approval.requested",
-        intent: "request_user_clarification",
-        payload: {
-          goalId: input.goalId,
-          clarificationRequest: material.clarificationRequest,
-          directionPackage: directionHandoffPackageRef,
-          convergenceReport: {
-            reviewId: convergenceReport.reviewId,
-            outcome: convergenceReport.outcome,
-          },
-          agentCluster: {
-            plan: agentClusterRun.plan,
-            run: agentClusterRun,
-            invocation: agentClusterRun.invocations.find((invocation) => invocation.role === "handoff_steward"),
-            invocations: agentClusterRun.invocations,
-          },
-        },
-      })
-    );
-  }
-
   const observationSnapshot = createRunObservationSnapshot({
     traceId: input.traceId,
     goalId: input.goalId,
     eventEntries: input.runtime.eventLog.list(),
-    undergroundReport,
-    directionHandoffPackage: loadedDirectionHandoffPackage,
+    undergroundReport: input.dispatchResult.undergroundReport,
+    directionHandoffPackage: input.dispatchResult.loadedDirectionHandoffPackage,
   });
 
   return {
     runtime: input.runtime,
     traceId: input.traceId,
     goalId: input.goalId,
-    terminalStatus,
-    undergroundReport,
-    directionHandoff: material.directionHandoff,
-    directionHandoffPackage,
-    directionHandoffPackageRef,
-    loadedDirectionHandoffPackage,
+    terminalStatus: input.dispatchResult.terminalStatus,
+    undergroundReport: input.dispatchResult.undergroundReport,
+    directionHandoff: input.dispatchResult.directionHandoff,
+    directionHandoffPackage: input.dispatchResult.directionHandoffPackage,
+    directionHandoffPackageRef: input.dispatchResult.directionHandoffPackageRef,
+    loadedDirectionHandoffPackage: input.dispatchResult.loadedDirectionHandoffPackage,
     observationSnapshot,
     eventTypes: input.runtime.eventLog.types(),
     packageVersions: input.runtime.directionHandoffPackageStore.listVersions(
-      loadedDirectionHandoffPackage.manifest.directionId
+      input.dispatchResult.loadedDirectionHandoffPackage.manifest.directionId
     ),
     writtenPackagePath:
       input.storage.outputDirectory === undefined
         ? undefined
         : resolveDirectionHandoffPackageMetaPath(
             input.storage.outputDirectory,
-            loadedDirectionHandoffPackage.manifest.directionId,
-            loadedDirectionHandoffPackage.manifest.directionVersion
+            input.dispatchResult.loadedDirectionHandoffPackage.manifest.directionId,
+            input.dispatchResult.loadedDirectionHandoffPackage.manifest.directionVersion
           ),
     outputDirectory: input.storage.outputDirectory,
   };
@@ -299,15 +181,11 @@ function resolveDirectionHandoffSessionStorage(
   };
 }
 
-function terminalStatusForConvergence(
-  outcome: UndergroundExplorationReport["convergenceReport"]["outcome"]
-): UndergroundDirectionSessionTerminalStatus {
-  switch (outcome) {
-    case "approved":
-      return "approved_package_created";
-    case "awaiting_user":
-      return "awaiting_user";
-    case "stopped":
-      return "stopped";
+function requireDispatchResult(
+  result: UndergroundMessageDrivenDispatchResult | undefined
+): UndergroundMessageDrivenDispatchResult {
+  if (result === undefined) {
+    throw new Error("Underground dispatcher reached idle state without a terminal handoff result.");
   }
+  return result;
 }

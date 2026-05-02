@@ -80,7 +80,7 @@ export function runUndergroundAgentClusterExploration(
     constraints: input.runtime.constraints,
     goalIntentProfile: prepared.goalIntentProfile,
   });
-  const completedRootletInvocations = completeRootletInvocations(
+  const completedRootletInvocations = completeUndergroundRootletInvocations(
     prepared.runningRootletInvocations,
     deterministicRootletOutputs
   );
@@ -108,7 +108,7 @@ export async function runUndergroundAgentClusterExplorationWithIntelligence(
     prepared,
   });
   const rootletOutputs = [...deterministicRootletOutputs, ...modelRootletOutputs];
-  const completedRootletInvocations = completeRootletInvocations(
+  const completedRootletInvocations = completeUndergroundRootletInvocations(
     prepared.runningRootletInvocations,
     rootletOutputs
   );
@@ -133,8 +133,8 @@ export function finalizeUndergroundAgentClusterRun(input: {
     ...input.run,
     invocations: input.run.invocations.map((invocation) =>
       invocation.role === "handoff_steward" && invocation.status === "running"
-        ? completeInvocation(invocation, [input.packageRef.packageId], completedAt)
-        : cloneInvocation(invocation)
+        ? completeUndergroundAgentInvocation(invocation, [input.packageRef.packageId], completedAt)
+        : cloneUndergroundAgentInvocation(invocation)
     ),
     terminalStatus: input.terminalStatus,
     candidateRefs: [...input.candidateRefs],
@@ -148,7 +148,7 @@ function prepareUndergroundAgentCluster(
   input: RunUndergroundAgentClusterExplorationInput
 ): PreparedUndergroundAgentCluster {
   ensureUndergroundAgentClusterManifests(input.runtime);
-  const intentInvocation = startInvocation({
+  const intentInvocation = startUndergroundAgentInvocation({
     agentId: "underground-intent-core",
     role: "intent_core",
     inputRefs: [input.goalId, "goal.received"],
@@ -158,11 +158,11 @@ function prepareUndergroundAgentCluster(
     rawGoal: input.rawGoal,
     constraints: input.runtime.constraints,
   });
-  const completedIntentInvocation = completeInvocation(intentInvocation, [
+  const completedIntentInvocation = completeUndergroundAgentInvocation(intentInvocation, [
     evidenceId(input.goalId, "goal-intent"),
   ]);
   const explorationPlan = createMinimalUndergroundExplorationPlan(input.goalId, goalIntentProfile);
-  const agentClusterPlan = createAgentClusterPlan({
+  const agentClusterPlan = createUndergroundAgentClusterPlan({
     rawGoal: input.rawGoal,
     explorationPlan,
     goalIntentProfile,
@@ -178,18 +178,18 @@ function prepareUndergroundAgentCluster(
     },
   });
 
-  const growthInvocation = startInvocation({
+  const growthInvocation = startUndergroundAgentInvocation({
     agentId: "underground-growth-governor",
     role: "growth_governor",
     inputRefs: [explorationPlan.planId, agentClusterPlan.planId],
   });
   const startedPlan = startRootletClusters(explorationPlan);
-  const completedGrowthInvocation = completeInvocation(growthInvocation, [
+  const completedGrowthInvocation = completeUndergroundAgentInvocation(growthInvocation, [
     startedPlan.planId,
     ...startedPlan.rootletClusters.map((cluster) => cluster.clusterId),
   ]);
   const runningRootletInvocations = startedPlan.rootletClusters.map((cluster) =>
-    startInvocation({
+    startUndergroundAgentInvocation({
       agentId: undergroundRootletAgentId(cluster.kind),
       role: "rootlet_agent",
       inputRefs: [input.goalId, explorationPlan.planId, cluster.clusterId],
@@ -213,7 +213,7 @@ function prepareUndergroundAgentCluster(
     agentClusterPlan,
     centerInvocations: [completedIntentInvocation, completedGrowthInvocation],
     runningRootletInvocations,
-    runningHandoffInvocation: startInvocation({
+    runningHandoffInvocation: startUndergroundAgentInvocation({
       agentId: "underground-handoff-steward",
       role: "handoff_steward",
       inputRefs: [input.goalId, explorationPlan.planId],
@@ -257,7 +257,7 @@ function completeUndergroundAgentClusterExploration(input: RunUndergroundAgentCl
     },
   });
 
-  const convergenceInvocation = startInvocation({
+  const convergenceInvocation = startUndergroundAgentInvocation({
     agentId: "underground-convergence-judge",
     role: "convergence_judge",
     inputRefs: [candidatePool.poolId],
@@ -275,7 +275,7 @@ function completeUndergroundAgentClusterExploration(input: RunUndergroundAgentCl
     rootletOutputs: input.rootletOutputs,
     candidatePool,
   });
-  const completedConvergenceInvocation = completeInvocation(convergenceInvocation, [
+  const completedConvergenceInvocation = completeUndergroundAgentInvocation(convergenceInvocation, [
     convergence.convergenceReport.reviewId,
   ]);
   const agentClusterRun: UndergroundAgentClusterRun = {
@@ -321,7 +321,7 @@ function completeUndergroundAgentClusterExploration(input: RunUndergroundAgentCl
   };
 }
 
-function convergeDefaultUndergroundCandidatePool(input: {
+export function convergeDefaultUndergroundCandidatePool(input: {
   readonly goalId: string;
   readonly agentId: string;
   readonly plan: UndergroundExplorationPlan;
@@ -373,7 +373,7 @@ async function requestModelRootletOutputs(input: RunUndergroundAgentClusterExplo
   return outputs;
 }
 
-function createAgentClusterPlan(input: {
+export function createUndergroundAgentClusterPlan(input: {
   readonly rawGoal: string;
   readonly explorationPlan: UndergroundExplorationPlan;
   readonly goalIntentProfile: GoalIntentProfile;
@@ -443,7 +443,7 @@ function clusterPlanAgent(input: {
   };
 }
 
-function ensureUndergroundAgentClusterManifests(runtime: MinimalRuntime): void {
+export function ensureUndergroundAgentClusterManifests(runtime: MinimalRuntime): void {
   const existingIds = new Set(runtime.registry.list().map((manifest) => manifest.id));
   for (const manifest of createUndergroundAgentClusterManifests()) {
     if (!existingIds.has(manifest.id)) {
@@ -453,7 +453,7 @@ function ensureUndergroundAgentClusterManifests(runtime: MinimalRuntime): void {
   }
 }
 
-function startInvocation(input: {
+export function startUndergroundAgentInvocation(input: {
   readonly agentId: string;
   readonly role: UndergroundAgentRole;
   readonly inputRefs: readonly string[];
@@ -469,7 +469,7 @@ function startInvocation(input: {
   };
 }
 
-function completeInvocation(
+export function completeUndergroundAgentInvocation(
   invocation: UndergroundAgentInvocation,
   outputRefs: readonly string[],
   completedAt = nowIso()
@@ -482,12 +482,12 @@ function completeInvocation(
   };
 }
 
-function completeRootletInvocations(
+export function completeUndergroundRootletInvocations(
   invocations: readonly UndergroundAgentInvocation[],
   rootletOutputs: readonly RootletOutput[]
 ): UndergroundAgentInvocation[] {
   return invocations.map((invocation) =>
-    completeInvocation(
+    completeUndergroundAgentInvocation(
       invocation,
       rootletOutputs
         .filter((output) => output.invocationId === invocation.invocationId)
@@ -496,7 +496,7 @@ function completeRootletInvocations(
   );
 }
 
-function cloneInvocation(invocation: UndergroundAgentInvocation): UndergroundAgentInvocation {
+export function cloneUndergroundAgentInvocation(invocation: UndergroundAgentInvocation): UndergroundAgentInvocation {
   return {
     ...invocation,
     inputRefs: [...invocation.inputRefs],

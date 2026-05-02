@@ -27,3 +27,4 @@ coverage/
 .agents
 .agentarbor
 .trellis
+.cursor

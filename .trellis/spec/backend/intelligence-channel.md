@@ -1,6 +1,8 @@
 # 智能通道运行时规范
 
-本规范记录后续真实模型接入的可执行边界。当前任务只补文档；实现阶段必须先实现智能通道，再接具体 provider adapter。
+本规范记录后续真实模型接入的可执行边界。实现阶段必须先实现 AgentArbor 原生智能通道，再接具体 provider protocol adapter。
+
+当前运行时不引入 Vercel AI SDK、OpenAI SDK、LangChain、Anthropic SDK、Gemini SDK 或其他外部 LLM SDK。真实 provider 接入以自研 `IntelligenceChannel` 为内核，通过 Node global `fetch` 直接兼容主流 HTTP 协议。首个真实协议实现是 `openai_compatible_chat_completions`；`openai_responses`、`anthropic_messages`、`gemini_generate_content` 只保留枚举和边界，不在本轮实现网络协议。
 
 ## Scope / Trigger
 
@@ -12,25 +14,26 @@
 
 - `ModelRequest`：内部模型调用请求，必须包含 `requestId`、`traceId`、`callerRef`、`purpose`、`inputRefs`、`sanitizedMessages`、`outputContract`、`constraintRefs`、`budget`、`sensitivity`、`requestedAt`。
 - `ModelResponse`：归一化模型响应，必须包含 `responseId`、`requestId`、`providerId`、`model`、`status`、`outputKind`、`validation`、`completedAt`。
-- `ModelUsage`：归一化 token、成本和延迟字段；provider 未返回时保持空值，不伪造。
+- `ModelUsage`：归一化 token、成本和延迟字段；provider 未返回时保持空值，不伪造。deterministic fake provider 也不得返回 fabricated zero token usage。
 - `ModelCallRef`：正式材料引用模型调用的唯一方式。
 - `ModelProvider.complete(request)`：provider adapter 最小接口。
 - `IntelligenceChannel.request(request)`：业务层唯一模型调用入口。
 
 ## Contracts
 
-- `src/domain/intelligence/` 保存模型调用领域契约、purpose taxonomy、输出类型和 `ModelCallRef`。它不能依赖 provider SDK。
+- `src/domain/intelligence/` 保存模型调用领域契约、purpose taxonomy、输出类型、protocol / provider kind 和 `ModelCallRef`。它不能依赖 provider SDK、provider adapter 或 provider-specific response shape。
 - `src/kernel/intelligence/` 保存智能通道实现、请求校验、输出校验、事件发布、降级策略和 provider registry。
-- `src/adapters/intelligence/` 保存 OpenAI-compatible、Anthropic、Gemini、Qwen、Ollama/vLLM 或其他 provider adapter。只有这一层可以直接依赖 provider SDK 或读取 provider 凭证。
-- `src/app/**` 的运行流程只能通过注入的 `IntelligenceChannel` 使用模型能力；应用组合根可以装配智能通道和 provider adapter，但不能直接调用 provider SDK 或读取 provider-specific response 字段。
+- `src/adapters/intelligence/` 保存 OpenAI-compatible Chat Completions、后续 OpenAI Responses、Anthropic Messages、Gemini generateContent 或其他 provider protocol adapter。只有这一层可以读取 provider 凭证或执行 provider HTTP 协议映射；本阶段不得引入外部 LLM SDK。
+- `src/app/**` 的运行流程只能通过注入的 `IntelligenceChannel` 使用模型能力；应用组合根可以装配智能通道和 provider adapter，但不能直接调用 provider SDK、读取 provider-specific response 字段或导入 adapter 实现参与业务流程。
 - `src/domain/underground/**`、`src/domain/aboveground/**`、`src/domain/governance/**` 和 `src/kernel/**` 不得直接导入 provider adapter。
 
 ## 生效规则
 
-- 任何直接在领域层、kernel 业务边界、app demo 运行流程或测试 fixture 中调用 provider SDK 的实现都违规。
+- 任何直接在领域层、kernel 业务边界、app demo 运行流程或测试 fixture 中调用 provider SDK、外部 LLM SDK 或 provider adapter 的实现都违规。
 - 模型输出默认是不可信候选；不能直接写入 Direction Handoff、Growth Plan、Verification Result、Run Memory、Experience Candidate、Capability Asset 或 Soil。
 - `model.requested`、`model.completed`、`model.failed` 事件必须由智能通道统一发布；调用方不得手写伪造模型调用事件。
 - EventLog 和 Observation Snapshot 只能记录清洗后的请求摘要、引用、usage、状态和错误引用。
+- Observation refs 必须按事件类型解析：`model.*` payload 中的 `requestId` / `responseId` 只能生成 `model_call` ref；`user_approval.*` 和 direction-handoff revision payload 中的 clarification ids 才能生成 `user_clarification` ref。
 - API key、token、完整敏感 prompt、未授权 Soil 内容和 provider 原始敏感错误不得进入 EventLog、Snapshot、方向交接包或测试快照。
 - Provider 输出不符合 `outputContract` 时必须形成 validation failed，不得被调用方当作成功响应继续收束。
 - hard constraint、Direction Handoff Package validation、状态机守卫和 Governance gate 不得因为模型建议而被跳过。
@@ -39,18 +42,23 @@
 
 | 条件 | 结果 |
 | --- | --- |
-| provider SDK 被 `domain/`、`kernel/` 或 app 运行流程直接导入 | 测试或静态导入检查失败 |
+| 外部 LLM SDK 依赖进入 `package.json` | 测试或静态导入检查失败 |
+| provider SDK 或 provider adapter 被 `domain/`、`kernel/` 或 app 运行流程直接导入 | 测试或静态导入检查失败 |
 | 请求缺少 purpose / output contract / budget | `IntelligenceChannel` 拒绝请求并发布失败状态 |
 | provider 超时或鉴权失败 | 返回 failed response，发布 `model.failed` |
 | provider 输出不符合结构契约 | 返回 validation failed，不进入候选池提升 |
 | 模型建议违反 hard constraint | 保留为 rejected candidate 或失败说明，不得放行 |
 | EventLog 出现 API key 或 token 字段 | 安全边界失败 |
+| global fetch 缺失且未注入 fetch | 返回 provider config failed response，不添加 polyfill |
+| fake provider 返回 fabricated token usage | 测试失败；usage 必须保持 unknown |
+| `model.*` event 的 `requestId` 被投影成 `user_clarification` ref | Observation 回归测试失败 |
 
 ## Good / Base / Bad Cases
 
 - Good：Underground Intent Core 请求智能通道生成目标画像建议，再由确定性规则转成 `GoalIntentProfile`。
 - Good：rootlet 请求候选方向，输出先进入 candidate pool，再由 Convergence Judge 裁决。
 - Good：provider adapter 只负责请求/响应映射、鉴权、usage 归一化和错误映射。
+- Good：fake provider 只返回 deterministic 内容和 validation 状态；usage 字段保持空值，避免测试误导成本/用量逻辑。
 - Base：没有 provider 配置时使用 deterministic fallback 或明确 failed/stopped，不伪造模型成功。
 - Bad：在 `src/domain/underground/intent-core.ts` 中直接导入 OpenAI SDK。
 - Bad：把模型 JSON 直接保存为 approved Direction Handoff。
@@ -59,17 +67,20 @@
 ## Tests Required
 
 - `IntelligenceChannel` 请求校验：缺少 purpose、output contract、budget 时失败。
-- provider adapter 失败映射：鉴权失败、超时、rate limit、输出不合约。
+- fake provider completed / failed 路径事件顺序：`model.requested -> model.completed` 或 `model.requested -> model.failed`。
+- OpenAI-compatible Chat Completions adapter 使用 stubbed fetch 验证 `/v1/chat/completions` 请求与归一化响应映射，不发真实网络。
+- provider adapter 失败映射：鉴权失败、超时、rate limit、输出不合约、fetch 缺失。
 - 事件顺序：`model.requested -> model.completed` 或 `model.requested -> model.failed`。
-- 导入边界：`domain/**`、`kernel/**`、app 运行流程不直接导入 provider SDK；组合根只允许装配 adapter factory。
+- 导入边界：不引入外部 LLM SDK；`domain/**`、`kernel/**`、app 运行流程不直接导入 provider SDK 或 provider adapter；组合根只允许装配 adapter factory。
 - 密钥边界：EventLog、Snapshot 和测试快照不包含 API key / token。
+- Observation ref 边界：`model.completed` 的 `requestId` / `responseId` 生成 `model_call` ref，不能生成 `user_clarification` ref。
 - Underground 接入：模型输出只能进入候选池，不能绕过收束直接进入 package。
 
 ## Wrong vs Correct
 
 ### Wrong
 
-Intent Core 直接调用 OpenAI SDK，拿到 JSON 后写入 approved Direction Handoff。
+Intent Core 直接调用 OpenAI SDK 或 OpenAI-compatible HTTP endpoint，拿到 JSON 后写入 approved Direction Handoff。
 
 ### Correct
 

@@ -2,7 +2,7 @@
 
 ## Goal
 
-把真实 AI 接入从“直接调用模型”收敛为 AgentArbor 内部的智能通道。第一轮只实现最小运行内核和一个 provider adapter 边界，让 Underground Center 后续可以通过通道获取目标理解与 rootlet 候选建议，同时保持收束、方向包校验、状态机和治理边界仍由确定性系统掌握。
+把真实 AI 接入从“直接调用模型”收敛为 AgentArbor 内部的智能通道。第一轮实现最小运行内核、确定性 fake provider 和首个原生协议 adapter：`openai_compatible_chat_completions`。不引入 Vercel AI SDK、OpenAI SDK、LangChain 或其他外部 LLM SDK；真实 provider 通过 Node global `fetch` 直接兼容主流 HTTP 协议。Underground Center 后续可以通过通道获取目标理解与 rootlet 候选建议，同时保持收束、方向包校验、状态机和治理边界仍由确定性系统掌握。
 
 ## Requirements
 
@@ -15,6 +15,7 @@
   - `IntelligenceChannel`
   - `ModelOutputContract`
   - `ModelOutputValidationResult`
+  - protocol / provider kind types：本轮实现 `openai_compatible_chat_completions`，仅保留 `openai_responses`、`anthropic_messages`、`gemini_generate_content` 枚举边界。
 - 新增运行内核：
   - 请求校验：purpose、budget、output contract、trace、caller ref 必须存在。
   - 输出校验：provider 返回必须符合 output contract；失败不能伪造成成功。
@@ -22,7 +23,8 @@
   - 敏感信息边界：EventLog / Snapshot / 测试快照不得包含 API key、token、完整敏感 prompt 或 provider 原始敏感错误。
 - 新增 provider adapter 边界：
   - 先实现一个 deterministic fake provider，保证测试和 demo 不依赖真实网络。
-  - 预留 OpenAI-compatible provider adapter 入口，但真实 SDK / fetch 调用需在用户确认后进入。
+  - 实现 OpenAI-compatible Chat Completions provider adapter，使用 Node global `fetch` 或测试注入 fetch 映射到 `/v1/chat/completions`；不添加 polyfill，不引入外部 SDK。
+  - Adapter 接收 `baseUrl`、`apiKey`、`model` 和可选测试 fetch 注入；api key 不得进入 EventLog、Snapshot 或测试快照。
   - provider adapter 只能位于 `src/adapters/intelligence/`。
 - 首个业务接入只做最薄路径：
   - Underground Intent Core 或 rootlet 候选生成可以通过注入的 `IntelligenceChannel` 获取建议。
@@ -40,8 +42,9 @@
 - [ ] `IntelligenceChannel` 请求缺少 purpose / output contract / budget 时失败。
 - [ ] fake provider completed 路径发布 `model.requested -> model.completed`。
 - [ ] fake provider failed 路径发布 `model.requested -> model.failed`。
+- [ ] OpenAI-compatible adapter 使用 stubbed fetch 验证请求/响应映射，不发真实网络。
 - [ ] 输出不符合契约时 validation failed，不能进入已收束方向包。
-- [ ] `domain/**`、`kernel/**` 和 app 运行流程不直接导入 provider SDK。
+- [ ] 静态导入边界证明没有外部 LLM SDK 依赖，`domain/**`、`kernel/**` 和 app 运行流程不直接导入 provider SDK 或 provider adapter。
 - [ ] EventLog / Snapshot / 测试快照不包含 API key / token。
 - [ ] 地下接入测试证明模型输出只进入候选池，不能绕过 Convergence Judge 直接进入 package。
 - [ ] 默认 demo 不接真实 LLM、不写 repo-root `.agentarbor/`。
@@ -49,7 +52,7 @@
 ## Definition of Done
 
 - 智能通道类型、内核、fake provider、事件和测试模块化落地。
-- 后续真实 OpenAI-compatible adapter 可以在不改领域模型的情况下接入。
+- OpenAI-compatible Chat Completions adapter 可以在不改领域模型的情况下通过显式 provider 配置接入；默认 demo 不触发真实网络。
 - 没有把模型输出写成事实源，没有削弱 existing package validation / hard constraint / EventLog 边界。
 - 看板更新到当前任务状态。
 
@@ -57,6 +60,7 @@
 
 - 不实现 UI、HTTP、SSE、WebSocket、数据库、MCP、A2A、AG-UI。
 - 不默认调用真实 OpenAI 或其他 provider。
+- 不引入 Vercel AI SDK、OpenAI SDK、Anthropic SDK、Gemini SDK、LangChain 或其他外部 LLM SDK。
 - 不把 provider 配置写进代码常量。
 - 不实现完整 Aboveground / Verification / Governance 模型调用。
 - 不创建 repo-root `.agentarbor/` 运行资产。

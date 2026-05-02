@@ -13,7 +13,7 @@
 - `RunObservationEventView`：EventLog entry 的 JSON-safe 视图；除 sequence、type、traceId、taskId、intent、from、to、createdAt、recordedAt 外，必须提供 `summary`、`scope`、`severity`、`progress` 和 `refs`。
 - `RunPhase`：稳定运行相位，不再使用无约束 string。当前相位覆盖 `not_started`、`underground`、`handoff`、`aboveground`、`verification`、`fruits`、`governance`、`soil_return`、`completed`。
 - `RunStage`：由最后一个 EventLog event 派生的细粒度阶段，用于未来前端定位当前事件游标。
-- `ObservationScope`、`ObservationSeverity`、`ObservationProgress`、`ObservationRef`、`ObservationStatus`：事件视图和层视图共享的前端可读元数据。V0.5 起 `ObservationRef.kind` 包含 `user_clarification`，用于引用 `UserClarificationRequest` 和 `UserClarificationResponse`。
+- `ObservationScope`、`ObservationSeverity`、`ObservationProgress`、`ObservationRef`、`ObservationStatus`：事件视图和层视图共享的前端可读元数据。V0.5 起 `ObservationRef.kind` 包含 `user_clarification`，用于引用 `UserClarificationRequest` 和 `UserClarificationResponse`。智能通道事件起 `ObservationRef.kind` 包含 `model_call`，用于引用 `ModelRequest` 和 `ModelResponse`。
 
 ## Contracts
 
@@ -23,6 +23,7 @@
 - `createRunObservationSnapshot` 是公开入口；内部投影应按职责拆分为事件视图、phase/stage 解析、层视图和 JSON-safe finalizer，避免把所有逻辑堆在单文件中。
 - `RunObservationEventView` 的 `summary`、`scope`、`severity`、`progress` 以及 `currentPhase` / `currentStage` 的事件映射必须来自同一个集中 metadata 模块；新增 `ArborMessageType` 时必须同步补全 metadata，并用测试证明 event view 与 phase/stage 没有分叉。
 - Event view 只能从 EventLog entry 派生，不能读取 runtime store。
+- Event ref 提取必须按事件类型区分同名字段。`model.requested`、`model.completed`、`model.failed` 中的 `requestId` / `responseId` 只能生成 `model_call` refs；`user_approval.requested`、`user_approval.received` 和 `direction_handoff.revision_requested` 中的 clarification id 才能生成 `user_clarification` refs。
 - `currentPhase` 和 `currentStage` 必须由 EventLog cursor 派生；没有事件时为 `not_started`。
 - Underground view 必须展示预算、rootlet clusters、rootlet outputs、candidate pool counts、每个 candidate、每个 convergence decision、收束摘要、handoff candidate refs、open questions 和用户升级状态。
 - `underground.userEscalation` 必须在 blocking unknown 存在时暴露 request id、reason、blocking level、status、related candidate refs、questions 和 JSON-safe request 数据；non-blocking unknown 只应出现在 `convergence.openQuestions`。
@@ -45,6 +46,8 @@
 | Underground view 缺少任一 rootlet、candidate 或 convergence decision | 测试失败；不得只保留汇总 counts |
 | `user_approval.requested` payload 携带 clarification request 但 event refs 缺少 `user_clarification` | 测试失败；事件 ref 必须从 payload 派生 |
 | `user_approval.received` payload 携带 clarification response 但 event refs 缺少 `user_clarification` | 测试失败；事件 ref 必须从 payload 派生 |
+| `model.completed` payload 携带 model request id / response id 但 event refs 缺少 `model_call` | 测试失败；事件 ref 必须从 payload 派生 |
+| `model.*` payload 的 `requestId` 被误识别成 `user_clarification` | 测试失败；同名字段必须按 event type 分流 |
 | recovery 事件 payload 携带 direction package ref 但 event refs 缺少 `direction_package` / `direction_handoff` | 测试失败；事件 ref 必须从 payload 派生 |
 | blocking unknown 的 Observation view 未暴露 request details | 测试失败；不得只保留 `userEscalationRequired: true` |
 | Direction package view 内联 Growth Plan 或 Soil asset content | 设计违规；只能暴露 refs、status、validation 和 source candidate refs |
@@ -66,6 +69,7 @@
 - Underground view exposes blocking user clarification request details and non-blocking open questions。
 - Event views expose `user_clarification` refs when `user_approval.requested` carries a clarification request payload。
 - Event views expose `user_clarification` refs when `user_approval.received` carries a clarification response payload。
+- Event views expose `model_call` refs for `model.requested` / `model.completed` / `model.failed` and do not expose false `user_clarification` refs from model `requestId` fields。
 - Recovery path event views expose direction package refs for `user_approval.received`、`direction_handoff.revision_requested` 和最终 `direction_handoff.completed`。
 - Snapshot exposes clarification responses and handoff lineage while staying JSON-safe。
 - Direction Handoff Package、Aboveground store load 和固定 18 步 main EventLog sequence 不回归。

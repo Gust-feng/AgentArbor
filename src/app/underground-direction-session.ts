@@ -20,10 +20,17 @@ export type UndergroundDirectionSessionTerminalStatus =
   | "awaiting_user"
   | "stopped";
 
+export type UndergroundDirectionSessionRuntimeContext = {
+  readonly runtime: MinimalRuntime;
+  readonly traceId: string;
+  readonly goalId: string;
+};
+
 export type RunUndergroundDirectionSessionOptions = {
   constraints?: readonly Constraint[];
   packageStore?: DirectionHandoffPackageStore;
   outputDirectory?: string;
+  onRuntimeReady?: (context: UndergroundDirectionSessionRuntimeContext) => void;
 };
 
 export type RunUndergroundDirectionSessionWithIntelligenceOptions = RunUndergroundDirectionSessionOptions & {
@@ -55,6 +62,7 @@ export function runUndergroundDirectionSession(
   const { traceId, goalId, message } = createUndergroundGoalMessage(goal);
   const runner = new UndergroundAgentRunner({ runtime });
   try {
+    options.onRuntimeReady?.({ runtime, traceId, goalId });
     runtime.bus.publish(message);
     const dispatchResult = requireDispatchResult(runner.dispatchUntilIdle());
     return completeUndergroundDirectionSession({ runtime, storage, traceId, goalId, dispatchResult });
@@ -72,6 +80,7 @@ export async function runUndergroundDirectionSessionWithIntelligence(
   const intelligenceChannel = options.createIntelligenceChannel(runtime);
   const runner = new UndergroundAgentRunner({ runtime, intelligenceChannel });
   try {
+    options.onRuntimeReady?.({ runtime, traceId, goalId });
     runtime.bus.publish(message);
     const dispatchResult = requireDispatchResult(await runner.dispatchUntilIdleAsync());
     return completeUndergroundDirectionSession({ runtime, storage, traceId, goalId, dispatchResult });

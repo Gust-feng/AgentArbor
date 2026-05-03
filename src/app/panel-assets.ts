@@ -259,6 +259,40 @@ export function createPanelHtml(): string {
       min-height: 148px;
     }
 
+    .transcript-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .work-note {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      padding: 10px;
+      min-height: 132px;
+      display: grid;
+      gap: 7px;
+    }
+
+    .note-header {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      align-items: start;
+    }
+
+    .note-agent {
+      font-weight: 750;
+      overflow-wrap: anywhere;
+    }
+
+    .note-status {
+      color: var(--muted);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
     .kv {
       display: grid;
       gap: 4px;
@@ -338,13 +372,13 @@ export function createPanelHtml(): string {
     }
 
     @media (max-width: 1080px) {
-      .rootlet-grid, .summary-grid {
+      .rootlet-grid, .summary-grid, .transcript-grid {
         grid-template-columns: repeat(2, minmax(0, 1fr));
       }
     }
 
     @media (max-width: 920px) {
-      .layout, .split, .summary-grid, .row, .rootlet-grid {
+      .layout, .split, .summary-grid, .row, .rootlet-grid, .transcript-grid {
         grid-template-columns: 1fr;
       }
 
@@ -388,7 +422,7 @@ export function createPanelHtml(): string {
             <div class="actions">
               <button id="runButton" type="submit">启动地下运行</button>
             </div>
-            <p class="hint">当前版本为单请求模式：点击后立即显示阶段骨架，服务返回后刷新完整事件与追踪。</p>
+            <p class="hint">点击后立即创建运行 job；面板会轮询事件游标、等待点、工作笔记和模型调用状态。</p>
           </form>
         </section>
 
@@ -457,6 +491,11 @@ export function createPanelHtml(): string {
               <ul id="modelCallList"></ul>
             </div>
           </div>
+        </section>
+
+        <section class="section">
+          <h2>Agent Transcript</h2>
+          <div id="agentTranscript" class="transcript-grid"></div>
         </section>
 
         <section class="section split">
@@ -582,7 +621,7 @@ export function createPanelHtml(): string {
       skipped: "跳过"
     };
 
-    const state = { config: undefined, lastRun: undefined };
+    const state = { config: undefined, lastRun: undefined, pollToken: 0 };
 
     const runStatus = document.getElementById("runStatus");
     const goalInput = document.getElementById("goalInput");
@@ -645,11 +684,13 @@ export function createPanelHtml(): string {
       const goal = goalInput.value;
       const aiMode = aiModeInput.value;
       const config = getCurrentConfig();
+      const pollToken = state.pollToken + 1;
+      state.pollToken = pollToken;
       setButtons(false);
       setStatus("running");
       renderRunningSkeleton({ goal, aiMode, config });
       try {
-        const response = await requestJson("/api/underground/run", {
+        const response = await requestJson("/api/underground/runs", {
           method: "POST",
           body: {
             goal,
@@ -660,12 +701,37 @@ export function createPanelHtml(): string {
         state.config = response.config;
         setStatus(response.status);
         renderRun(response);
+        if (!isTerminalRun(response)) {
+          await pollRunUntilDone(response.runId, pollToken);
+        }
       } catch (error) {
         setStatus("failed");
         showError(error);
       } finally {
         setButtons(true);
       }
+    }
+
+    async function pollRunUntilDone(runId, pollToken) {
+      while (state.pollToken === pollToken) {
+        await delay(1500);
+        const response = await requestJson("/api/underground/runs/" + encodeURIComponent(runId));
+        state.lastRun = response;
+        state.config = response.config;
+        setStatus(response.status);
+        renderRun(response);
+        if (isTerminalRun(response)) {
+          return;
+        }
+      }
+    }
+
+    function isTerminalRun(response) {
+      return response.status === "completed" || response.status === "failed";
+    }
+
+    function delay(ms) {
+      return new Promise((resolve) => setTimeout(resolve, ms));
     }
 
     async function requestJson(path, options = {}) {
@@ -715,6 +781,7 @@ export function createPanelHtml(): string {
       renderWorkflowTimeline(createIdleTimeline());
       renderRootletCards(createIdleRootlets());
       renderModelTraceIdle(config);
+      renderTranscript({ workNotes: [], modelCalls: [] });
       renderTextBlock("convergenceExplanation", ["暂无运行。启动后会解释 accepted / merged / rejected / unknown 的收束含义。"]);
       renderTextBlock("packageResult", ["暂无方向包。地下运行完成后展示版本、状态、校验和 Aboveground not_started 边界。"]);
       renderList("eventList", []);
@@ -730,11 +797,12 @@ export function createPanelHtml(): string {
         ["目标", compactText(input.goal, 72)],
         ["AI 模式", formatAiMode(input.aiMode)],
         ["Provider", PROVIDER_STATUS_LABELS[providerStatus] || providerStatus],
-        ["运行提示", "正在等待地下运行返回；当前版本为单请求模式，完成后刷新完整事件。"]
+        ["运行提示", "正在创建后台 job；随后按轮询刷新事件游标和 transcript。"]
       ]);
       renderWorkflowTimeline(createRunningTimeline(input.aiMode));
       renderRootletCards(createRunningRootlets(input.aiMode));
       renderModelTraceRunning(input);
+      renderTranscript({ workNotes: [], modelCalls: [] });
       renderTextBlock("convergenceExplanation", [
         "正在等待候选池与收束评审返回。",
         "完成后会按 accepted / merged / rejected / unknown 解释每类候选处置。"
@@ -743,7 +811,7 @@ export function createPanelHtml(): string {
         "正在等待方向交接包结果。",
         "完成后会展示 package 状态、版本、校验、错误 / 警告和 Aboveground not_started。"
       ]);
-      renderList("eventList", ["正在等待地下运行返回；完整 EventLog 将在单请求完成后刷新。"]);
+      renderList("eventList", ["正在创建后台运行 job；事件游标会在轮询返回后刷新。"]);
       document.getElementById("snapshotView").textContent = JSON.stringify({ status: "running", mode: input.aiMode }, null, 2);
     }
 
@@ -756,15 +824,23 @@ export function createPanelHtml(): string {
         ["当前阶段", labelWithId(STAGE_LABELS, tracking.run.stage)],
         ["模型调用", tracking.modelTotals.requested + " / " + tracking.modelTotals.completed + " / " + tracking.modelTotals.failed],
         ["候选总数", String(tracking.candidates.total.total)],
-        ["方向包状态", packageStatusLabel(tracking.package.status)]
+        ["等待点", tracking.run.waitingPoint]
       ]);
-      renderWorkflowTimeline(createCompletedTimeline(response));
+      renderWorkflowTimeline(createTimeline(response));
       renderRootletWorkspace(tracking);
       renderModelTrace(response);
+      renderTranscript(response.transcript);
       renderConvergenceExplanation(tracking);
-      renderPackageResult(response);
-      renderEventList(response.observation.events);
-      document.getElementById("snapshotView").textContent = JSON.stringify(response.observation, null, 2);
+      if (tracking.package && response.summary && response.observation) {
+        renderPackageResult(response);
+      } else {
+        renderTextBlock("packageResult", [
+          response.error ? "未生成方向包：" + response.error.message : "方向包尚未生成。",
+          "当前等待点：" + tracking.run.waitingPoint
+        ]);
+      }
+      renderEventList(getRunEvents(response));
+      document.getElementById("snapshotView").textContent = JSON.stringify(response.observation || response.trace || {}, null, 2);
     }
 
     function renderWorkflowTimeline(stages) {
@@ -799,7 +875,7 @@ export function createPanelHtml(): string {
     function createRunningTimeline(aiMode) {
       return WORKFLOW_STAGES.map((stage) => {
         if (stage.id === "goal") {
-          return { title: stage.title, state: "active", detail: "目标已提交到本地 panel server，等待地下运行返回。" };
+          return { title: stage.title, state: "active", detail: "目标已提交到本地 panel server，等待后台 job 返回事件游标。" };
         }
         if (stage.id === "model" && aiMode === "none") {
           return { title: stage.title, state: "skipped", detail: "当前 AI 模式为 none，本次不会触发 provider 或模型事件。" };
@@ -807,7 +883,33 @@ export function createPanelHtml(): string {
         if (stage.id === "model") {
           return { title: stage.title, state: "active", detail: "正在等待服务返回；provider 只会通过 IntelligenceChannel 调用。" };
         }
-        return { title: stage.title, state: "waiting", detail: "等待地下运行返回后刷新完整事件。" };
+        return { title: stage.title, state: "waiting", detail: "等待轮询返回后刷新事件和 transcript。" };
+      });
+    }
+
+    function createTimeline(response) {
+      if (response.status === "completed" && response.summary && response.observation) {
+        return createCompletedTimeline(response);
+      }
+      const events = getRunEvents(response);
+      const eventTypes = new Set(events.map((event) => event.type));
+      const lastEventType = response.trace?.eventCursor?.lastEventType;
+      const aiMode = response.tracking?.provider?.requestedMode || aiModeInput.value;
+      return WORKFLOW_STAGES.map((stage) => {
+        if (stage.id === "model" && aiMode === "none") {
+          return { title: stage.title, state: "skipped", detail: "当前 AI 模式为 none，本次不会触发 provider 或模型事件。" };
+        }
+        const hasStageEvent = stage.events.some((eventType) => eventTypes.has(eventType));
+        if (response.status === "failed" && hasStageEvent && stage.events.includes(lastEventType)) {
+          return { title: stage.title, state: "failed", detail: response.error?.message || "运行失败。" };
+        }
+        if (hasStageEvent && response.status === "running" && stage.events.includes(lastEventType)) {
+          return { title: stage.title, state: "active", detail: response.tracking.run.waitingPoint };
+        }
+        if (hasStageEvent) {
+          return { title: stage.title, state: "done", detail: stage.detail };
+        }
+        return { title: stage.title, state: "waiting", detail: stage.detail };
       });
     }
 
@@ -943,7 +1045,7 @@ export function createPanelHtml(): string {
       renderList("modelEventList", [
         input.aiMode === "none"
           ? "AI 模式 none：不会创建 provider，也不会发布 model.* 事件。"
-          : "正在等待地下运行返回；当前版本为单请求模式，完成后刷新完整事件。"
+          : "正在等待轮询返回模型事件；provider 只会通过 IntelligenceChannel 调用。"
       ]);
       renderList("modelCallList", [
         input.aiMode === "openai-compatible"
@@ -953,35 +1055,85 @@ export function createPanelHtml(): string {
     }
 
     function renderModelTrace(response) {
-      const ai = response.summary.ai;
+      const ai = response.summary?.ai;
+      const counts = response.tracking.modelTotals;
+      const modelCalls = response.transcript?.modelCalls || [];
+      const modelStatus =
+        ai?.status ||
+        (counts.failed > 0 ? "failed" : counts.completed > 0 ? "completed" : counts.requested > 0 ? "requested" : "not_requested");
       renderMetricsInto("modelTraceMetrics", [
-        ["模型状态", formatStatus(ai.status)],
+        ["模型状态", formatStatus(modelStatus)],
         ["Provider", PROVIDER_STATUS_LABELS[response.tracking.provider.status] || response.tracking.provider.status],
-        ["模型", response.tracking.provider.model || ai.model || "未配置"],
-        ["成功 / 失败", ai.eventCounts.completed + " / " + ai.eventCounts.failed],
-        ["AI 候选", String(ai.aiCandidateCount)],
-        ["回退", ai.aiFallbackUsed ? ai.fallbackCount + "，已触发" : String(ai.fallbackCount)]
+        ["模型", response.tracking.provider.model || ai?.model || "未配置"],
+        ["成功 / 失败", counts.completed + " / " + counts.failed],
+        ["AI 候选", String(response.tracking.aiCandidates.total)],
+        ["回退", response.tracking.aiCandidates.fallbackUsed ? response.tracking.aiCandidates.fallbackTotal + "，已触发" : String(response.tracking.aiCandidates.fallbackTotal)]
       ]);
 
-      const modelEvents = response.observation.events.filter((event) =>
+      const modelEvents = getRunEvents(response).filter((event) =>
         event.type === "model.requested" || event.type === "model.completed" || event.type === "model.failed"
       );
       renderList("modelEventList", modelEvents.length === 0
         ? ["本次无模型事件。"]
         : modelEvents.map((event) => "#" + event.sequence + " " + labelWithId(EVENT_LABELS, event.type) + formatEventRefs(event)));
 
-      renderList("modelCallList", ai.modelCallRefs.length === 0
+      renderList("modelCallList", modelCalls.length === 0
         ? ["本次无模型调用引用。"]
-        : ai.modelCallRefs.map((call) => {
+        : modelCalls.map((call) => {
             const kind = call.rootletKind ? rootletLabel(call.rootletKind) : "未归属 rootlet";
             const responseId = call.responseId ? "；response " + call.responseId : "";
             const validation = call.validationStatus ? "；校验 " + call.validationStatus : "";
-            return kind + "：request " + call.requestId + responseId + validation + "；候选 " + call.candidateRefs.length;
+            return kind + "：" + formatStatus(call.status) + "；request " + call.requestId + responseId + validation + "；候选 " + call.candidateRefs.length;
           }));
+    }
+
+    function renderTranscript(transcript) {
+      const host = document.getElementById("agentTranscript");
+      const notes = transcript?.workNotes || [];
+      if (notes.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "empty";
+        empty.textContent = "暂无工作笔记。启动运行后会显示各 agent 的观察、动作、产出和引用。";
+        host.replaceChildren(empty);
+        return;
+      }
+      host.replaceChildren(...notes.map((note) => {
+        const card = document.createElement("div");
+        card.className = "work-note";
+        const header = document.createElement("div");
+        header.className = "note-header";
+        const agent = document.createElement("div");
+        agent.className = "note-agent";
+        agent.textContent = note.agentLabel + " · " + note.stage;
+        const status = document.createElement("div");
+        status.className = "note-status";
+        status.textContent = formatStatus(note.status);
+        header.append(agent, status);
+        const summary = document.createElement("div");
+        summary.textContent = note.summary;
+        const detail = document.createElement("div");
+        detail.className = "stage-detail";
+        detail.textContent = note.detail;
+        const refs = document.createElement("div");
+        refs.className = "stage-detail";
+        refs.textContent =
+          "事件 " + note.eventRefs.length +
+          "；候选 " + note.candidateRefs.length +
+          "；模型调用 " + note.modelCallRefs.length;
+        card.append(header, summary, detail, refs);
+        return card;
+      }));
     }
 
     function renderConvergenceExplanation(tracking) {
       const convergence = tracking.convergence;
+      if (!convergence) {
+        renderTextBlock("convergenceExplanation", [
+          "收束评审尚未完成。",
+          "当前等待点：" + tracking.run.waitingPoint
+        ]);
+        return;
+      }
       renderTextBlock("convergenceExplanation", [
         "收束结果：" + convergenceLabel(convergence.outcome) + "；review " + convergence.reviewId + "。",
         "accepted 接受：" + convergence.accepted + "，可直接进入方向交接候选。",
@@ -1013,6 +1165,10 @@ export function createPanelHtml(): string {
         const progress = event.progress ? "；状态 " + formatStatus(event.progress.status) : "";
         return "#" + event.sequence + " " + eventLabel + progress + formatEventRefs(event);
       }));
+    }
+
+    function getRunEvents(response) {
+      return response.observation?.events || response.trace?.events || [];
     }
 
     function renderMetricsInto(id, items) {
@@ -1073,6 +1229,7 @@ export function createPanelHtml(): string {
       renderWorkflowTimeline(createFailedTimeline(message));
       renderRootletCards(createIdleRootlets());
       renderModelTraceError(details, message);
+      renderTranscript({ workNotes: [], modelCalls: [] });
       renderTextBlock("convergenceExplanation", ["错误：" + message]);
       renderTextBlock("packageResult", ["未生成方向包。"]);
       renderList("eventList", []);

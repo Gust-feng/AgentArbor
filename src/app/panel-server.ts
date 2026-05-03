@@ -1,19 +1,28 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { createUndergroundAiRuntimeConfig, UndergroundAiConfigurationError, type UndergroundAiMode } from "./intelligence-channel-factory.js";
-import { runUndergroundDirectionSession, runUndergroundDirectionSessionWithIntelligence } from "./underground-direction-session.js";
+import {
+  runUndergroundDirectionSession,
+  runUndergroundDirectionSessionWithIntelligence,
+  type UndergroundDirectionSessionRuntimeContext,
+} from "./underground-direction-session.js";
 import { createUndergroundDemoSummary, type UndergroundDemoAiInput, type UndergroundDemoSummary } from "./underground-demo-summary.js";
 import { ConfigCenter, createLocalConfigCenter } from "./config-center.js";
 import { createPanelHtml } from "./panel-assets.js";
-import type { RunObservationSnapshot } from "../domain/observation/index.js";
 import type { SanitizedModelProviderConfig, UpdateModelProviderConfigInput } from "../domain/config/index.js";
 import {
-  ROOTLET_CLUSTER_KINDS,
-  type CandidatePoolCounts,
-  type RootletClusterKind,
-} from "../domain/underground/index.js";
-
-export type PanelRunStatus = "pending" | "running" | "completed" | "failed";
+  createPanelRunTrace,
+  createPanelRunTracking,
+  createPanelRunTranscript,
+  toPanelObservation,
+  type PanelObservationReadModel,
+  type PanelRunStatus,
+  type PanelRunTraceReadModel,
+  type PanelRunTrackingReadModel,
+  type PanelRunTranscript,
+} from "./panel-run-read-model.js";
+import { PanelRunJobStore, type PanelRunJob } from "./panel-run-jobs.js";
+import type { EventLogEntry } from "../kernel/events/in-memory-event-log.js";
 
 export type PanelServerOptions = {
   readonly host?: string;
@@ -47,6 +56,7 @@ type PanelRuntime = {
   readonly configCenter: ConfigCenter;
   readonly configDirectory?: string;
   readonly providerFetch?: PanelProviderFetch;
+  readonly runJobs: PanelRunJobStore;
 };
 
 type PanelRunResponse = {
@@ -56,79 +66,9 @@ type PanelRunResponse = {
   readonly summary: UndergroundDemoSummary;
   readonly observation: PanelObservationReadModel;
   readonly tracking: PanelRunTrackingReadModel;
-};
-
-type PanelObservationReadModel = Pick<
-  RunObservationSnapshot,
-  "traceId" | "goalId" | "currentPhase" | "currentStage" | "eventCursor" | "events" | "underground" | "handoff" | "aboveground"
->;
-
-type PanelRunTrackingReadModel = {
-  readonly run: {
-    readonly status: PanelRunStatus;
-    readonly phase: RunObservationSnapshot["currentPhase"];
-    readonly stage: RunObservationSnapshot["currentStage"];
-    readonly eventCount: number;
-    readonly lastEventType?: string;
-    readonly abovegroundStatus: RunObservationSnapshot["aboveground"]["status"];
-  };
-  readonly provider: {
-    readonly requestedMode: UndergroundAiMode;
-    readonly defaultAiMode: SanitizedModelProviderConfig["defaultAiMode"];
-    readonly providerKind: SanitizedModelProviderConfig["providerKind"];
-    readonly protocolKind: SanitizedModelProviderConfig["protocolKind"];
-    readonly baseUrl: string;
-    readonly model?: string;
-    readonly secretConfigured: boolean;
-    readonly status:
-      | "network_disabled"
-      | "fake_provider"
-      | "ready"
-      | "missing_model"
-      | "missing_secret"
-      | "missing_model_and_secret";
-  };
-  readonly rootletsByKind: Readonly<Record<RootletClusterKind, PanelRootletTrackingReadModel>>;
-  readonly modelTotals: {
-    readonly requested: number;
-    readonly completed: number;
-    readonly failed: number;
-  };
-  readonly candidates: {
-    readonly total: CandidatePoolCounts;
-    readonly byKind: Readonly<Record<RootletClusterKind, CandidatePoolCounts>>;
-  };
-  readonly aiCandidates: {
-    readonly total: number;
-    readonly fallbackTotal: number;
-    readonly fallbackUsed: boolean;
-  };
-  readonly convergence: UndergroundDemoSummary["underground"]["convergence"];
-  readonly package: {
-    readonly id: string;
-    readonly version: number;
-    readonly status: string;
-    readonly validationPassed: boolean;
-    readonly validationErrorCount: number;
-    readonly validationWarningCount: number;
-  };
-};
-
-type PanelRootletTrackingReadModel = {
-  readonly kind: RootletClusterKind;
-  readonly clusterStatus: string;
-  readonly invocationStatus?: string;
-  readonly outputCount: number;
-  readonly model: {
-    readonly status: "not_requested" | "requested" | "completed" | "failed";
-    readonly requested: number;
-    readonly completed: number;
-    readonly failed: number;
-  };
-  readonly candidates: CandidatePoolCounts;
-  readonly aiCandidateCount: number;
-  readonly fallbackCount: number;
-  readonly aiFallbackUsed: boolean;
+  readonly trace: PanelRunTraceReadModel;
+  readonly transcript: PanelRunTranscript;
+  readonly workNotes: PanelRunTranscript["workNotes"];
 };
 
 class PanelHttpError extends Error {
@@ -177,6 +117,7 @@ function createPanelRuntime(options: PanelServerOptions): PanelRuntime {
       configCenter: options.configCenter,
       configDirectory: options.configDirectory,
       providerFetch: options.providerFetch,
+      runJobs: new PanelRunJobStore(),
     };
   }
   const local = createLocalConfigCenter({ configDirectory: options.configDirectory });
@@ -184,6 +125,7 @@ function createPanelRuntime(options: PanelServerOptions): PanelRuntime {
     configCenter: local.configCenter,
     configDirectory: local.configDirectory,
     providerFetch: options.providerFetch,
+    runJobs: new PanelRunJobStore(),
   };
 }
 
@@ -240,6 +182,17 @@ async function handlePanelRequest(
     return;
   }
 
+  if (request.method === "POST" && url.pathname === "/api/underground/runs") {
+    await handleStartRunRequest(runtime, request, response);
+    return;
+  }
+
+  const runMatch = /^\/api\/underground\/runs\/([^/]+)$/.exec(url.pathname);
+  if (request.method === "GET" && runMatch !== null) {
+    handleGetRunRequest(runtime, decodeURIComponent(runMatch[1] ?? ""), response);
+    return;
+  }
+
   writeJson(response, 404, {
     ok: false,
     status: "failed",
@@ -262,10 +215,23 @@ async function handleRunRequest(
   try {
     const run = await runUndergroundForPanel(runtime, runInput.goal, runInput.aiMode);
     const currentConfig = await runtime.configCenter.getModelProviderConfig();
+    const trace = createPanelRunTrace({ status: "completed", eventEntries: run.eventEntries });
     const tracking = createPanelRunTracking({
+      status: "completed",
       config: currentConfig,
+      requestedMode: runInput.aiMode,
       summary: run.summary,
       observation: run.observation,
+      eventEntries: run.eventEntries,
+    });
+    const transcript = createPanelRunTranscript({
+      runId: run.observation.traceId,
+      status: "completed",
+      eventEntries: run.eventEntries,
+      summary: run.summary,
+      observation: run.observation,
+      createdAt: run.eventEntries[0]?.recordedAt ?? new Date(0).toISOString(),
+      updatedAt: run.eventEntries.at(-1)?.recordedAt ?? new Date(0).toISOString(),
     });
     writeJson(response, 200, {
       ok: true,
@@ -274,6 +240,9 @@ async function handleRunRequest(
       summary: run.summary,
       observation: run.observation,
       tracking,
+      trace,
+      transcript,
+      workNotes: transcript.workNotes,
     } satisfies PanelRunResponse);
   } catch (error) {
     if (error instanceof UndergroundAiConfigurationError) {
@@ -299,15 +268,167 @@ async function handleRunRequest(
   }
 }
 
+async function handleStartRunRequest(
+  runtime: PanelRuntime,
+  request: IncomingMessage,
+  response: ServerResponse
+): Promise<void> {
+  const body = await readJsonBody(request);
+  const config = await runtime.configCenter.getModelProviderConfig();
+  const runInput = parseRunInput(body, config.defaultAiMode);
+  const job = runtime.runJobs.create({
+    goal: runInput.goal,
+    aiMode: runInput.aiMode,
+    config,
+  });
+
+  writeJson(response, 202, createPanelRunJobResponse(job));
+  schedulePanelRunJob(runtime, job.runId);
+}
+
+function handleGetRunRequest(runtime: PanelRuntime, runId: string, response: ServerResponse): void {
+  const job = runtime.runJobs.get(runId);
+  if (job === undefined) {
+    throw new PanelHttpError(404, "run_not_found", "未找到地下运行 job。");
+  }
+  writeJson(response, 200, createPanelRunJobResponse(job));
+}
+
+async function executePanelRunJob(runtime: PanelRuntime, runId: string): Promise<void> {
+  const job = runtime.runJobs.get(runId);
+  if (job === undefined) {
+    return;
+  }
+  runtime.runJobs.markRunning(runId);
+  try {
+    const run = await runUndergroundForPanel(runtime, job.goal, job.aiMode, {
+      onRuntimeReady: (context) => {
+        runtime.runJobs.attachRuntime({
+          runId,
+          runtime: context.runtime,
+          traceId: context.traceId,
+          goalId: context.goalId,
+        });
+      },
+    });
+    const currentConfig = await runtime.configCenter.getModelProviderConfig();
+    runtime.runJobs.complete(runId, {
+      config: currentConfig,
+      summary: run.summary,
+      observation: run.observation,
+    });
+  } catch (error) {
+    const config = await runtime.configCenter.getModelProviderConfig().catch(() => job.config);
+    if (error instanceof UndergroundAiConfigurationError) {
+      const message = panelConfigurationErrorMessage(error.issue.code);
+      runtime.runJobs.fail(runId, {
+        config,
+        error: {
+          code: error.issue.code,
+          message,
+        },
+        summary: {
+          ai: createConfigurationFailedAiSummary(error.issue.summaryInput, error, message),
+        },
+      });
+      return;
+    }
+    if (error instanceof PanelHttpError) {
+      runtime.runJobs.fail(runId, {
+        config,
+        error: {
+          code: error.code,
+          message: error.message,
+        },
+      });
+      return;
+    }
+    runtime.runJobs.fail(runId, {
+      config,
+      error: {
+        code: "panel_internal_error",
+        message: "地下运行 job 失败。",
+      },
+    });
+  }
+}
+
+function schedulePanelRunJob(runtime: PanelRuntime, runId: string): void {
+  setImmediate(() => {
+    void executePanelRunJob(runtime, runId);
+  });
+}
+
+function createPanelRunJobResponse(job: PanelRunJob): {
+  readonly ok: true;
+  readonly runId: string;
+  readonly status: PanelRunStatus;
+  readonly config: SanitizedModelProviderConfig;
+  readonly trace: PanelRunTraceReadModel;
+  readonly tracking: PanelRunTrackingReadModel;
+  readonly transcript: PanelRunTranscript;
+  readonly workNotes: PanelRunTranscript["workNotes"];
+  readonly summary?: UndergroundDemoSummary | { readonly ai: UndergroundDemoSummary["ai"] };
+  readonly observation?: PanelObservationReadModel;
+  readonly error?: {
+    readonly code: string;
+    readonly message: string;
+  };
+} {
+  const eventEntries = job.runtime?.eventLog.list() ?? [];
+  const config = job.completed?.config ?? job.failed?.config ?? job.config;
+  const summary = job.completed?.summary;
+  const observation = job.completed?.observation;
+  const trace = createPanelRunTrace({ status: job.status, eventEntries });
+  const tracking = createPanelRunTracking({
+    status: job.status,
+    config,
+    requestedMode: job.aiMode,
+    summary,
+    observation,
+    eventEntries,
+  });
+  const transcript = createPanelRunTranscript({
+    runId: job.runId,
+    status: job.status,
+    eventEntries,
+    summary,
+    observation,
+    createdAt: job.createdAt,
+    updatedAt: job.updatedAt,
+  });
+
+  return {
+    ok: true,
+    runId: job.runId,
+    status: job.status,
+    config,
+    trace,
+    tracking,
+    transcript,
+    workNotes: transcript.workNotes,
+    summary: job.completed?.summary ?? job.failed?.summary,
+    observation: job.completed?.observation,
+    error: job.failed?.error,
+  };
+}
+
 async function runUndergroundForPanel(
   runtime: PanelRuntime,
   goal: string,
-  aiMode: UndergroundAiMode
-): Promise<{ summary: UndergroundDemoSummary; observation: PanelObservationReadModel }> {
+  aiMode: UndergroundAiMode,
+  options: {
+    readonly onRuntimeReady?: (context: UndergroundDirectionSessionRuntimeContext) => void;
+  } = {}
+): Promise<{ summary: UndergroundDemoSummary; observation: PanelObservationReadModel; eventEntries: readonly EventLogEntry[] }> {
   if (aiMode === "none") {
-    const result = runUndergroundDirectionSession(goal);
+    const result = runUndergroundDirectionSession(goal, { onRuntimeReady: options.onRuntimeReady });
     const summary = createUndergroundDemoSummary(result, undefined, { enabled: false, mode: "none" });
-    return { summary, observation: toPanelObservation(result.observationSnapshot) };
+    return {
+      summary,
+      observation: toPanelObservation(result.observationSnapshot),
+      eventEntries: result.runtime.eventLog.list(),
+    };
   }
 
   const aiConfig =
@@ -325,22 +446,13 @@ async function runUndergroundForPanel(
 
   const result = await runUndergroundDirectionSessionWithIntelligence(goal, {
     createIntelligenceChannel: aiConfig.createIntelligenceChannel,
+    onRuntimeReady: options.onRuntimeReady,
   });
   const summary = createUndergroundDemoSummary(result, undefined, aiConfig.summaryInput);
-  return { summary, observation: toPanelObservation(result.observationSnapshot) };
-}
-
-function toPanelObservation(snapshot: RunObservationSnapshot): PanelObservationReadModel {
   return {
-    traceId: snapshot.traceId,
-    goalId: snapshot.goalId,
-    currentPhase: snapshot.currentPhase,
-    currentStage: snapshot.currentStage,
-    eventCursor: snapshot.eventCursor,
-    events: snapshot.events,
-    underground: snapshot.underground,
-    handoff: snapshot.handoff,
-    aboveground: snapshot.aboveground,
+    summary,
+    observation: toPanelObservation(result.observationSnapshot),
+    eventEntries: result.runtime.eventLog.list(),
   };
 }
 
@@ -363,129 +475,6 @@ function createConfigurationFailedAiSummary(
       message,
     },
   };
-}
-
-function createPanelRunTracking(input: {
-  readonly config: SanitizedModelProviderConfig;
-  readonly summary: UndergroundDemoSummary;
-  readonly observation: PanelObservationReadModel;
-}): PanelRunTrackingReadModel {
-  const rootletAiByKind = new Map(input.summary.ai.rootletKinds.map((item) => [item.kind, item]));
-  const clusterByKind = new Map(input.observation.underground.rootletClusters.map((cluster) => [cluster.kind, cluster]));
-  const rootletsByKind = ROOTLET_CLUSTER_KINDS.reduce((result, kind) => {
-    const ai = rootletAiByKind.get(kind);
-    const cluster = clusterByKind.get(kind);
-    result[kind] = {
-      kind,
-      clusterStatus: cluster?.status ?? "skipped",
-      invocationStatus: cluster?.invocationStatus,
-      outputCount: cluster?.outputRefs.length ?? 0,
-      model: {
-        status: ai?.status ?? "not_requested",
-        requested: ai?.requested ?? 0,
-        completed: ai?.completed ?? 0,
-        failed: ai?.failed ?? 0,
-      },
-      candidates: countCandidateViews(input.observation.underground.candidatePool.candidatesByKind[kind]),
-      aiCandidateCount: ai?.aiCandidateCount ?? 0,
-      fallbackCount: ai?.fallbackCount ?? 0,
-      aiFallbackUsed: ai?.aiFallbackUsed ?? false,
-    };
-    return result;
-  }, {} as Record<RootletClusterKind, PanelRootletTrackingReadModel>);
-
-  return {
-    run: {
-      status: "completed",
-      phase: input.observation.currentPhase,
-      stage: input.observation.currentStage,
-      eventCount: input.observation.eventCursor.eventCount,
-      lastEventType: input.observation.eventCursor.lastEventType,
-      abovegroundStatus: input.observation.aboveground.status,
-    },
-    provider: {
-      requestedMode: input.summary.ai.mode,
-      defaultAiMode: input.config.defaultAiMode,
-      providerKind: input.config.providerKind,
-      protocolKind: input.config.protocolKind,
-      baseUrl: input.config.baseUrl,
-      model: input.config.model,
-      secretConfigured: input.config.secretConfigured,
-      status: providerStatus(input.config, input.summary.ai.mode),
-    },
-    rootletsByKind,
-    modelTotals: input.summary.ai.eventCounts,
-    candidates: {
-      total: input.summary.underground.candidateCounts,
-      byKind: ROOTLET_CLUSTER_KINDS.reduce((result, kind) => {
-        result[kind] = rootletsByKind[kind].candidates;
-        return result;
-      }, {} as Record<RootletClusterKind, CandidatePoolCounts>),
-    },
-    aiCandidates: {
-      total: input.summary.ai.aiCandidateCount,
-      fallbackTotal: input.summary.ai.fallbackCount,
-      fallbackUsed: input.summary.ai.aiFallbackUsed,
-    },
-    convergence: input.summary.underground.convergence,
-    package: {
-      id: input.summary.directionPackage.id,
-      version: input.summary.directionPackage.version,
-      status: input.summary.directionPackage.status,
-      validationPassed: input.summary.directionPackage.validation.passed,
-      validationErrorCount: input.summary.directionPackage.validation.errors.length,
-      validationWarningCount: input.summary.directionPackage.validation.warnings.length,
-    },
-  };
-}
-
-function countCandidateViews(
-  candidates: PanelObservationReadModel["underground"]["candidatePool"]["candidates"]
-): CandidatePoolCounts {
-  const counts: CandidatePoolCounts = {
-    total: candidates.length,
-    candidate: 0,
-    accepted: 0,
-    merged: 0,
-    rejected: 0,
-    unknown: 0,
-  };
-  for (const candidate of candidates) {
-    if (
-      candidate.status === "candidate" ||
-      candidate.status === "accepted" ||
-      candidate.status === "merged" ||
-      candidate.status === "rejected" ||
-      candidate.status === "unknown"
-    ) {
-      counts[candidate.status] += 1;
-    }
-  }
-  return counts;
-}
-
-function providerStatus(
-  config: SanitizedModelProviderConfig,
-  requestedMode: UndergroundAiMode
-): PanelRunTrackingReadModel["provider"]["status"] {
-  if (requestedMode === "none") {
-    return "network_disabled";
-  }
-  if (requestedMode === "fake") {
-    return "fake_provider";
-  }
-  const missingModel = config.model === undefined;
-  const missingSecret = !config.secretConfigured;
-  if (missingModel && missingSecret) {
-    return "missing_model_and_secret";
-  }
-  if (missingModel) {
-    return "missing_model";
-  }
-  if (missingSecret) {
-    return "missing_secret";
-  }
-  return "ready";
 }
 
 function parseConfigUpdate(raw: unknown): UpdateModelProviderConfigInput {
@@ -594,7 +583,11 @@ function asRecord(value: unknown): Record<string, unknown> {
 }
 
 function isPanelRuntime(value: PanelServerOptions | PanelRuntime): value is PanelRuntime {
-  return value.configCenter instanceof ConfigCenter;
+  return (
+    value.configCenter instanceof ConfigCenter &&
+    "runJobs" in value &&
+    value.runJobs instanceof PanelRunJobStore
+  );
 }
 
 function listen(server: Server, port: number, host: string): Promise<void> {

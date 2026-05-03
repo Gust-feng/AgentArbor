@@ -59,6 +59,10 @@ async function main(): Promise<void> {
             completed: 0,
             failed: 0,
           },
+          aiCandidateCount: 0,
+          fallbackCount: 0,
+          aiFallbackUsed: false,
+          rootletKinds: [],
           modelCallRefs: [],
           configurationError: {
             code: error.issue.code,

@@ -50,14 +50,78 @@ export class FakeModelProvider implements ModelProvider {
       model: this.model,
       status: "completed",
       outputKind: request.outputContract.outputKind,
-      structuredOutput: this.options.output ?? {
-        summary: "Fake model candidate advice.",
-        rationale: "Deterministic fake provider output for tests and demos.",
-      },
+      structuredOutput: this.options.output ?? defaultFakeOutput(request),
       textOutput: this.options.textOutput,
       finishReason: "stop",
       validation: pendingModelOutputValidation(),
       completedAt: nowIso(),
     };
+  }
+}
+
+function defaultFakeOutput(request: ModelRequest): unknown {
+  if (request.outputContract.requiredFields?.includes("candidates")) {
+    const kind = rootletKindFromContractId(request.outputContract.contractId);
+    return {
+      candidates: [fakeCandidateForKind(kind, 1), fakeCandidateForKind(kind, 2)],
+    };
+  }
+
+  return {
+    summary: "Fake model candidate advice.",
+    rationale: "Deterministic fake provider output for tests and demos.",
+  };
+}
+
+function rootletKindFromContractId(contractId: string): string {
+  const marker = "underground.rootlet_candidate_advice.";
+  if (!contractId.startsWith(marker)) {
+    return "option";
+  }
+  return contractId.slice(marker.length).split(".")[0] ?? "option";
+}
+
+function fakeCandidateForKind(kind: string, index: number): Record<string, unknown> {
+  const summary = `Fake ${kind} candidate advice ${index}.`;
+  switch (kind) {
+    case "risk":
+      return {
+        summary,
+        impactScope: "runtime boundary and user trust",
+        severity: index === 1 ? "medium" : "low",
+        mitigation: "Keep deterministic convergence and package validation in charge.",
+      };
+    case "asset_fit":
+      return {
+        summary,
+        assetRefs: ["soil:minimal-constraints"],
+        fitConditions: ["Only use refs that match the goal profile."],
+        doNotApplyWhen: ["The asset would copy Soil body content into the prompt."],
+      };
+    case "evidence":
+      return {
+        summary,
+        evidenceType: "verification",
+        confidence: index === 1 ? "medium" : "low",
+      };
+    case "constraint":
+      return {
+        summary,
+        constraintLevel: "hard",
+        enforcementGate: "direction_handoff",
+      };
+    case "counterfactual":
+      return {
+        summary,
+        alternativeDirection: "Defer the broader architecture change.",
+        whyNotChosen: "It does not satisfy the current underground direction boundary.",
+      };
+    case "option":
+    default:
+      return {
+        summary,
+        tradeoffs: ["more candidate diversity", "requires deterministic convergence"],
+        applicability: "Use when the goal profile needs another direction candidate.",
+      };
   }
 }

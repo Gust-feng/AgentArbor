@@ -28,7 +28,7 @@ export class RootletAgent implements UndergroundAgent {
         this.agentId,
         ROOTLET_INVOCATION_REQUESTED,
         (message) => this.handleInvocationRequested(ctx, message),
-        { requiresAsync: () => this.kind === "option" && ctx.intelligenceChannel !== undefined }
+        { requiresAsync: () => ctx.intelligenceChannel !== undefined }
       )
     );
   }
@@ -65,23 +65,36 @@ export class RootletAgent implements UndergroundAgent {
       runningRootletInvocations.find((candidate) => candidate.invocationId === message.payload.invocationId),
       `rootlet invocation ${message.payload.invocationId}`
     );
+    const baseSourceRefs = [message.id, message.type];
+    if (ctx.intelligenceChannel !== undefined && state.goalIntentProfile !== undefined) {
+      return this.requestModelOutputs(ctx, message, cluster, invocation, goalId, rawGoal).then((modelAdvice) => {
+        if (modelAdvice.rootletOutputs.length > 0) {
+          this.completeRootletInvocation(
+            ctx,
+            message,
+            modelAdvice.rootletOutputs.slice(0, cluster.budget.maxCandidateOutputs)
+          );
+          return;
+        }
+        const deterministicRootletOutputs = createRootletOutputsForInvocation({
+          goalId,
+          cluster,
+          invocation,
+          constraints: ctx.runtime.constraints,
+          goalIntentProfile: state.goalIntentProfile,
+          sourceRefs: [...baseSourceRefs, ...modelAdvice.fallbackSourceRefs],
+        });
+        this.completeRootletInvocation(ctx, message, deterministicRootletOutputs);
+      });
+    }
     const deterministicRootletOutputs = createRootletOutputsForInvocation({
       goalId,
       cluster,
       invocation,
       constraints: ctx.runtime.constraints,
       goalIntentProfile: state.goalIntentProfile,
-      sourceRefs: [message.id, message.type],
+      sourceRefs: baseSourceRefs,
     });
-    if (this.kind === "option" && ctx.intelligenceChannel !== undefined) {
-      return this.requestModelOutputs(ctx, message, cluster, invocation, goalId, rawGoal).then((modelRootletOutputs) => {
-        const remainingBudget = Math.max(0, cluster.budget.maxCandidateOutputs - deterministicRootletOutputs.length);
-        this.completeRootletInvocation(ctx, message, [
-          ...deterministicRootletOutputs,
-          ...modelRootletOutputs.slice(0, remainingBudget),
-        ]);
-      });
-    }
     this.completeRootletInvocation(ctx, message, deterministicRootletOutputs);
   }
 
@@ -139,18 +152,27 @@ export class RootletAgent implements UndergroundAgent {
     invocation: UndergroundAgentInvocation,
     goalId: string,
     rawGoal: string
-  ): Promise<RootletOutput[]> {
-    if (this.kind !== "option" || ctx.intelligenceChannel === undefined) {
-      return [];
+  ): Promise<Awaited<ReturnType<typeof requestUndergroundRootletCandidateAdvice>>> {
+    const goalIntentProfile = ctx.shared.require("goalIntentProfile", "goalIntentProfile");
+    if (ctx.intelligenceChannel === undefined) {
+      return {
+        rootletOutputs: [],
+        modelRequestId: "",
+        status: "empty",
+        validationStatus: "pending",
+        fallbackSourceRefs: [],
+      };
     }
     return requestUndergroundRootletCandidateAdvice({
       intelligenceChannel: ctx.intelligenceChannel,
       traceId: message.traceId,
       goalId,
       goal: rawGoal,
+      goalIntentProfile,
       cluster,
       invocation,
       constraints: ctx.runtime.constraints,
+      sourceRefs: [message.id, message.type],
     });
   }
 }

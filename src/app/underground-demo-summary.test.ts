@@ -2,7 +2,12 @@ import { existsSync, readdirSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import assert from "node:assert/strict";
 import test from "node:test";
+import type { ModelProvider, ModelRequest, ModelResponse } from "../domain/intelligence/index.js";
+import { nowIso } from "../kernel/id.js";
+import { NativeIntelligenceChannel } from "../kernel/intelligence/channel.js";
+import { pendingModelOutputValidation } from "../kernel/intelligence/validation.js";
 import { runUndergroundDirectionSession } from "./underground-direction-session.js";
+import { runUndergroundDirectionSessionWithIntelligence } from "./underground-direction-session.js";
 import { recoverUndergroundDirectionSession } from "./underground-direction-recovery.js";
 import { createUndergroundDemoSummary } from "./underground-demo-summary.js";
 
@@ -73,10 +78,54 @@ test("createUndergroundDemoSummary reports model events and candidate-layer refs
   assert.equal(summary.ai.providerKind, "fake");
   assert.equal(summary.ai.protocolKind, "openai_compatible_chat_completions");
   assert.equal(summary.ai.model, "fake-deterministic-model");
+  assert.equal(summary.ai.aiCandidateCount, 2);
+  assert.equal(summary.ai.fallbackCount, 0);
+  assert.equal(summary.ai.aiFallbackUsed, false);
+  assert.deepEqual(summary.ai.rootletKinds, [
+    {
+      kind: "option",
+      status: "completed",
+      requested: 1,
+      completed: 1,
+      failed: 0,
+      aiCandidateCount: 2,
+      fallbackCount: 0,
+      aiFallbackUsed: false,
+    },
+  ]);
   assert.equal(summary.ai.modelCallRefs.length, 1);
-  assert.equal(summary.ai.modelCallRefs[0]?.rootletOutputRefs.length, 1);
-  assert.equal(summary.ai.modelCallRefs[0]?.candidateRefs.length, 1);
+  assert.equal(summary.ai.modelCallRefs[0]?.rootletKind, "option");
+  assert.equal(summary.ai.modelCallRefs[0]?.rootletOutputRefs.length, 2);
+  assert.equal(summary.ai.modelCallRefs[0]?.candidateRefs.length, 2);
   assert.equal(JSON.stringify(summary).includes("Fake model candidate advice"), false);
+});
+
+test("createUndergroundDemoSummary reports AI fallback counts without model content", async () => {
+  const result = await runUndergroundDirectionSessionWithIntelligence("Build a small deterministic helper.", {
+    createIntelligenceChannel: (runtime) =>
+      new NativeIntelligenceChannel({
+        provider: new EmptyCandidateProvider(),
+        bus: runtime.bus,
+      }),
+  });
+  const summary = createUndergroundDemoSummary(result, undefined, {
+    enabled: true,
+    mode: "fake",
+    providerId: "empty-candidate-provider",
+    providerKind: "fake",
+    protocolKind: "openai_compatible_chat_completions",
+    model: "empty-candidate-model",
+  });
+
+  assert.equal(summary.ai.status, "completed");
+  assert.equal(summary.ai.aiCandidateCount, 0);
+  assert.equal(summary.ai.fallbackCount, 2);
+  assert.equal(summary.ai.aiFallbackUsed, true);
+  assert.equal(summary.ai.rootletKinds[0]?.kind, "option");
+  assert.equal(summary.ai.rootletKinds[0]?.fallbackCount, 2);
+  assert.equal(summary.ai.modelCallRefs[0]?.rootletOutputRefs.length, 2);
+  assert.equal(summary.ai.modelCallRefs[0]?.candidateRefs.length, 2);
+  assert.equal(JSON.stringify(summary).includes("empty provider raw text"), false);
 });
 
 test("createUndergroundDemoSummary exposes awaiting-user escalation without entering Aboveground", () => {
@@ -139,4 +188,29 @@ function snapshotTree(root: string): string[] {
 
   walk(root, "");
   return entries;
+}
+
+class EmptyCandidateProvider implements ModelProvider {
+  readonly providerId = "empty-candidate-provider";
+  readonly providerKind = "fake" as const;
+  readonly protocolKind = "openai_compatible_chat_completions" as const;
+  readonly model = "empty-candidate-model";
+
+  async complete(request: ModelRequest): Promise<ModelResponse> {
+    return {
+      responseId: "model-response-empty-candidates",
+      requestId: request.requestId,
+      providerId: this.providerId,
+      providerKind: this.providerKind,
+      protocolKind: this.protocolKind,
+      model: this.model,
+      status: "completed",
+      outputKind: request.outputContract.outputKind,
+      structuredOutput: { candidates: [] },
+      textOutput: "empty provider raw text",
+      finishReason: "stop",
+      validation: pendingModelOutputValidation(),
+      completedAt: nowIso(),
+    };
+  }
 }

@@ -1,0 +1,214 @@
+import type { RootletClusterKind } from "../../domain/underground/index.js";
+import {
+  getUndergroundRootletCandidateAdviceContract,
+  type UndergroundRootletCandidateFieldContract,
+} from "./intelligence-contracts.js";
+
+export type UndergroundRootletCandidateAdviceValue = string | readonly string[];
+
+export type ParsedUndergroundRootletCandidateAdvice = {
+  readonly kind: RootletClusterKind;
+  readonly summary: string;
+  readonly details: Readonly<Record<string, UndergroundRootletCandidateAdviceValue>>;
+  readonly sourceIndex: number;
+};
+
+export type UndergroundRootletCandidateAdviceParseIssue = {
+  readonly code: string;
+  readonly message: string;
+  readonly path: string;
+};
+
+export type ParseUndergroundRootletCandidateAdviceOutputResult = {
+  readonly candidates: readonly ParsedUndergroundRootletCandidateAdvice[];
+  readonly discardedCount: number;
+  readonly issues: readonly UndergroundRootletCandidateAdviceParseIssue[];
+};
+
+export function parseUndergroundRootletCandidateAdviceOutput(input: {
+  readonly kind: RootletClusterKind;
+  readonly output: unknown;
+  readonly maxCandidates: number;
+}): ParseUndergroundRootletCandidateAdviceOutputResult {
+  const contract = getUndergroundRootletCandidateAdviceContract(input.kind);
+  const issues: UndergroundRootletCandidateAdviceParseIssue[] = [];
+  const record = asRecord(input.output);
+  if (record === undefined) {
+    return {
+      candidates: [],
+      discardedCount: 0,
+      issues: [issue("ROOTLET_ADVICE_OUTPUT_NOT_OBJECT", "Model output must be an object.", "$")],
+    };
+  }
+
+  const rawCandidates = record[contract.candidateArrayField];
+  if (!Array.isArray(rawCandidates)) {
+    return {
+      candidates: [],
+      discardedCount: 0,
+      issues: [
+        issue(
+          "ROOTLET_ADVICE_CANDIDATES_NOT_ARRAY",
+          "Model output candidates field must be an array.",
+          contract.candidateArrayField
+        ),
+      ],
+    };
+  }
+
+  const maxCandidates = Math.max(0, Math.floor(input.maxCandidates));
+  const candidates: ParsedUndergroundRootletCandidateAdvice[] = [];
+  let discardedCount = 0;
+
+  rawCandidates.forEach((candidate, index) => {
+    if (candidates.length >= maxCandidates) {
+      return;
+    }
+
+    const parsed = parseCandidate(input.kind, candidate, index, contract.candidateFields);
+    if (parsed.candidate === undefined) {
+      discardedCount += 1;
+      issues.push(...parsed.issues);
+      return;
+    }
+    candidates.push(parsed.candidate);
+  });
+
+  return {
+    candidates,
+    discardedCount,
+    issues,
+  };
+}
+
+export function formatUndergroundRootletCandidateAdviceSummary(
+  candidate: ParsedUndergroundRootletCandidateAdvice
+): string {
+  switch (candidate.kind) {
+    case "option":
+      return `${candidate.summary} Tradeoffs: ${formatDetail(candidate.details.tradeoffs)}. Applicability: ${formatDetail(candidate.details.applicability)}.`;
+    case "risk":
+      return `${candidate.summary} Impact scope: ${formatDetail(candidate.details.impactScope)}. Severity: ${formatDetail(candidate.details.severity)}. Mitigation: ${formatDetail(candidate.details.mitigation)}.`;
+    case "asset_fit":
+      return `${candidate.summary} Asset refs: ${formatDetail(candidate.details.assetRefs)}. Fit conditions: ${formatDetail(candidate.details.fitConditions)}. Do not apply when: ${formatDetail(candidate.details.doNotApplyWhen)}.`;
+    case "evidence":
+      return `${candidate.summary} Evidence type: ${formatDetail(candidate.details.evidenceType)}. Confidence: ${formatDetail(candidate.details.confidence)}.`;
+    case "constraint":
+      return `${candidate.summary} Constraint level: ${formatDetail(candidate.details.constraintLevel)}. Enforcement gate: ${formatDetail(candidate.details.enforcementGate)}.`;
+    case "counterfactual":
+      return `${candidate.summary} Alternative direction: ${formatDetail(candidate.details.alternativeDirection)}. Why not chosen: ${formatDetail(candidate.details.whyNotChosen)}.`;
+  }
+}
+
+function parseCandidate(
+  kind: RootletClusterKind,
+  value: unknown,
+  index: number,
+  fields: readonly UndergroundRootletCandidateFieldContract[]
+): {
+  readonly candidate?: ParsedUndergroundRootletCandidateAdvice;
+  readonly issues: readonly UndergroundRootletCandidateAdviceParseIssue[];
+} {
+  const record = asRecord(value);
+  const issues: UndergroundRootletCandidateAdviceParseIssue[] = [];
+  if (record === undefined) {
+    return {
+      issues: [
+        issue("ROOTLET_ADVICE_CANDIDATE_NOT_OBJECT", "Each candidate must be an object.", `candidates.${index}`),
+      ],
+    };
+  }
+
+  const details: Record<string, UndergroundRootletCandidateAdviceValue> = {};
+  for (const field of fields) {
+    const parsed = parseField(record[field.name], field, `candidates.${index}.${field.name}`);
+    if (parsed.issue !== undefined) {
+      issues.push(parsed.issue);
+    } else if (parsed.value !== undefined) {
+      details[field.name] = parsed.value;
+    }
+  }
+
+  const summary = details.summary;
+  if (issues.length > 0 || typeof summary !== "string") {
+    return { issues };
+  }
+
+  return {
+    candidate: {
+      kind,
+      summary,
+      details,
+      sourceIndex: index,
+    },
+    issues,
+  };
+}
+
+function parseField(
+  value: unknown,
+  field: UndergroundRootletCandidateFieldContract,
+  path: string
+): {
+  readonly value?: UndergroundRootletCandidateAdviceValue;
+  readonly issue?: UndergroundRootletCandidateAdviceParseIssue;
+} {
+  if (field.type === "string") {
+    const normalized = typeof value === "string" ? value.trim() : "";
+    return normalized.length > 0
+      ? { value: normalized }
+      : {
+          issue: issue(
+            "ROOTLET_ADVICE_STRING_FIELD_REQUIRED",
+            `Candidate field ${field.name} must be a non-empty string.`,
+            path
+          ),
+        };
+  }
+
+  if (!Array.isArray(value)) {
+    return {
+      issue: issue(
+        "ROOTLET_ADVICE_STRING_ARRAY_FIELD_REQUIRED",
+        `Candidate field ${field.name} must be a non-empty string array.`,
+        path
+      ),
+    };
+  }
+
+  const values = value.filter((item): item is string => typeof item === "string").map((item) => item.trim()).filter(Boolean);
+  return values.length > 0
+    ? { value: values }
+    : {
+        issue: issue(
+          "ROOTLET_ADVICE_STRING_ARRAY_FIELD_REQUIRED",
+          `Candidate field ${field.name} must be a non-empty string array.`,
+          path
+        ),
+      };
+}
+
+function formatDetail(value: UndergroundRootletCandidateAdviceValue | undefined): string {
+  if (Array.isArray(value)) {
+    return value.join("; ");
+  }
+  if (typeof value === "string") {
+    return value;
+  }
+  return "unspecified";
+}
+
+function issue(
+  code: string,
+  message: string,
+  path: string
+): UndergroundRootletCandidateAdviceParseIssue {
+  return { code, message, path };
+}
+
+function asRecord(value: unknown): Readonly<Record<string, unknown>> | undefined {
+  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+    return value as Readonly<Record<string, unknown>>;
+  }
+  return undefined;
+}

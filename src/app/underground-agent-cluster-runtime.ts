@@ -30,6 +30,7 @@ import {
   spendCandidateBudget,
   startRootletClusters,
 } from "./minimal-underground.js";
+import { createRootletOutputsForInvocation } from "./underground-rootlets.js";
 import type { MinimalRuntime } from "./runtime.js";
 import { requestUndergroundRootletCandidateAdvice } from "./underground-intelligence.js";
 import {
@@ -97,26 +98,19 @@ export async function runUndergroundAgentClusterExplorationWithIntelligence(
   input: RunUndergroundAgentClusterExplorationWithIntelligenceInput
 ): Promise<RunUndergroundAgentClusterExplorationResult> {
   const prepared = prepareUndergroundAgentCluster(input);
-  const deterministicRootletOutputs = produceMinimalRootletOutputs({
-    plan: prepared.startedPlan,
-    rootletInvocations: prepared.runningRootletInvocations,
-    constraints: input.runtime.constraints,
-    goalIntentProfile: prepared.goalIntentProfile,
-  });
   const modelRootletOutputs = await requestModelRootletOutputs({
     ...input,
     prepared,
   });
-  const rootletOutputs = [...deterministicRootletOutputs, ...modelRootletOutputs];
   const completedRootletInvocations = completeUndergroundRootletInvocations(
     prepared.runningRootletInvocations,
-    rootletOutputs
+    modelRootletOutputs
   );
 
   return completeUndergroundAgentClusterExploration({
     ...input,
     prepared,
-    rootletOutputs,
+    rootletOutputs: modelRootletOutputs,
     completedRootletInvocations,
   });
 }
@@ -355,25 +349,35 @@ async function requestModelRootletOutputs(input: RunUndergroundAgentClusterExplo
 }): Promise<RootletOutput[]> {
   const outputs: RootletOutput[] = [];
   for (const cluster of input.prepared.startedPlan.rootletClusters) {
-    if (cluster.kind !== "option") {
-      continue;
-    }
     const invocation = input.prepared.runningRootletInvocations.find(
       (candidate) => candidate.agentId === undergroundRootletAgentId(cluster.kind)
     );
     if (invocation === undefined) {
       continue;
     }
+    const modelAdvice = await requestUndergroundRootletCandidateAdvice({
+      intelligenceChannel: input.intelligenceChannel,
+      traceId: input.traceId,
+      goalId: input.goalId,
+      goal: input.rawGoal,
+      goalIntentProfile: input.prepared.goalIntentProfile,
+      cluster,
+      invocation,
+      constraints: input.runtime.constraints,
+    });
+    if (modelAdvice.rootletOutputs.length > 0) {
+      outputs.push(...modelAdvice.rootletOutputs.slice(0, cluster.budget.maxCandidateOutputs));
+      continue;
+    }
     outputs.push(
-      ...(await requestUndergroundRootletCandidateAdvice({
-        intelligenceChannel: input.intelligenceChannel,
-        traceId: input.traceId,
+      ...createRootletOutputsForInvocation({
         goalId: input.goalId,
-        goal: input.rawGoal,
         cluster,
         invocation,
         constraints: input.runtime.constraints,
-      }))
+        goalIntentProfile: input.prepared.goalIntentProfile,
+        sourceRefs: modelAdvice.fallbackSourceRefs,
+      })
     );
   }
   return outputs;

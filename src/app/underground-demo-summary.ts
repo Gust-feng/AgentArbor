@@ -103,7 +103,21 @@ export type UndergroundDemoAiSummary = {
     readonly completed: number;
     readonly failed: number;
   };
+  readonly aiCandidateCount: number;
+  readonly fallbackCount: number;
+  readonly aiFallbackUsed: boolean;
+  readonly rootletKinds: readonly {
+    readonly kind: RootletClusterKind;
+    readonly status: "requested" | "completed" | "failed";
+    readonly requested: number;
+    readonly completed: number;
+    readonly failed: number;
+    readonly aiCandidateCount: number;
+    readonly fallbackCount: number;
+    readonly aiFallbackUsed: boolean;
+  }[];
   readonly modelCallRefs: readonly {
+    readonly rootletKind?: RootletClusterKind;
     readonly requestId: string;
     readonly responseId?: string;
     readonly providerId?: string;
@@ -218,6 +232,9 @@ function summarizeAi(input: {
   };
   const firstPayload = modelEvents.map((entry) => asRecord(entry.message.payload)).find(hasProviderIdentity);
   const enabled = input.aiInput?.enabled ?? modelEvents.length > 0;
+  const rootletKindSummaries = summarizeRootletKindAi(modelEvents, input.undergroundReport);
+  const aiCandidateCount = rootletKindSummaries.reduce((total, item) => total + item.aiCandidateCount, 0);
+  const fallbackCount = rootletKindSummaries.reduce((total, item) => total + item.fallbackCount, 0);
 
   return {
     enabled,
@@ -228,6 +245,10 @@ function summarizeAi(input: {
     model: input.aiInput?.model ?? stringOrUndefined(firstPayload?.model),
     status: aiStatus(enabled, input.aiInput, eventCounts),
     eventCounts,
+    aiCandidateCount,
+    fallbackCount,
+    aiFallbackUsed: fallbackCount > 0,
+    rootletKinds: rootletKindSummaries,
     modelCallRefs: summarizeModelCallRefs(modelEvents, input.undergroundReport),
     configurationError: input.aiInput?.configurationError,
   };
@@ -248,8 +269,10 @@ function summarizeModelCallRefs(
       model?: string;
       outputKind?: string;
       validationStatus?: string;
+      rootletKind?: RootletClusterKind;
     }
   >();
+  const rootletKindByRequestId = rootletKindsByRequestId(modelEvents);
 
   for (const event of modelEvents) {
     const payload = asRecord(event.message.payload);
@@ -267,6 +290,7 @@ function summarizeModelCallRefs(
       model: stringOrUndefined(payload.model) ?? existing.model,
       outputKind: stringOrUndefined(payload.outputKind) ?? existing.outputKind,
       validationStatus: stringOrUndefined(payload.validationStatus) ?? existing.validationStatus,
+      rootletKind: rootletKindByRequestId.get(requestId) ?? existing.rootletKind,
     });
   }
 
@@ -280,6 +304,76 @@ function summarizeModelCallRefs(
         .map((candidate) => candidate.id),
     };
   });
+}
+
+function summarizeRootletKindAi(
+  modelEvents: ReturnType<UndergroundDirectionSessionResult["runtime"]["eventLog"]["list"]>,
+  undergroundReport: UndergroundDirectionSessionResult["undergroundReport"]
+): UndergroundDemoAiSummary["rootletKinds"] {
+  const kindByRequestId = rootletKindsByRequestId(modelEvents);
+  const counts = new Map<
+    RootletClusterKind,
+    {
+      kind: RootletClusterKind;
+      requested: number;
+      completed: number;
+      failed: number;
+    }
+  >();
+
+  for (const event of modelEvents) {
+    const payload = asRecord(event.message.payload);
+    const requestId = stringOrUndefined(payload.requestId);
+    const kind = requestId === undefined ? undefined : kindByRequestId.get(requestId);
+    if (kind === undefined) {
+      continue;
+    }
+    const current = counts.get(kind) ?? { kind, requested: 0, completed: 0, failed: 0 };
+    if (event.type === "model.requested") {
+      current.requested += 1;
+    } else if (event.type === "model.completed") {
+      current.completed += 1;
+    } else if (event.type === "model.failed") {
+      current.failed += 1;
+    }
+    counts.set(kind, current);
+  }
+
+  return [...counts.values()].map((item) => {
+    const aiCandidateCount = undergroundReport.rootletOutputs.filter(
+      (output) => output.kind === item.kind && output.evidenceRefs.some((ref) => ref.startsWith("model-call:"))
+    ).length;
+    const fallbackCount = undergroundReport.rootletOutputs.filter(
+      (output) => output.kind === item.kind && output.sourceRefs.some((ref) => ref === `ai-fallback:${item.kind}`)
+    ).length;
+    return {
+      ...item,
+      status: item.failed > 0 ? "failed" : item.completed > 0 ? "completed" : "requested",
+      aiCandidateCount,
+      fallbackCount,
+      aiFallbackUsed: fallbackCount > 0,
+    };
+  });
+}
+
+function rootletKindsByRequestId(
+  modelEvents: ReturnType<UndergroundDirectionSessionResult["runtime"]["eventLog"]["list"]>
+): ReadonlyMap<string, RootletClusterKind> {
+  const result = new Map<string, RootletClusterKind>();
+  for (const event of modelEvents) {
+    if (event.type !== "model.requested") {
+      continue;
+    }
+    const payload = asRecord(event.message.payload);
+    const requestId = stringOrUndefined(payload.requestId);
+    const outputContract = asRecord(payload.outputContract);
+    const contractId = stringOrUndefined(outputContract.contractId);
+    const kind = rootletKindFromAdviceContractId(contractId);
+    if (requestId !== undefined && kind !== undefined) {
+      result.set(requestId, kind);
+    }
+  }
+  return result;
 }
 
 function inputRelatedRootletOutputRefs(
@@ -322,6 +416,29 @@ function aiStatus(
     return "requested";
   }
   return "not_requested";
+}
+
+function rootletKindFromAdviceContractId(contractId: string | undefined): RootletClusterKind | undefined {
+  if (contractId === undefined) {
+    return undefined;
+  }
+  const prefix = "underground.rootlet_candidate_advice.";
+  if (!contractId.startsWith(prefix)) {
+    return undefined;
+  }
+  const kind = contractId.slice(prefix.length).split(".")[0];
+  return isRootletClusterKind(kind) ? kind : undefined;
+}
+
+function isRootletClusterKind(value: string | undefined): value is RootletClusterKind {
+  return (
+    value === "option" ||
+    value === "risk" ||
+    value === "asset_fit" ||
+    value === "evidence" ||
+    value === "constraint" ||
+    value === "counterfactual"
+  );
 }
 
 function hasProviderIdentity(payload: Readonly<Record<string, unknown>> | undefined): payload is Readonly<Record<string, unknown>> {

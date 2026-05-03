@@ -29,8 +29,8 @@ test("underground demo CLI --ai fake emits model events and keeps AI candidate-l
   assert.equal(summary.ai.status, "completed");
   assert.deepEqual(summary.ai.eventCounts, { requested: 1, completed: 1, failed: 0 });
   assert.equal(summary.ai.modelCallRefs.length, 1);
-  assert.equal(summary.ai.modelCallRefs[0]?.rootletOutputRefs.length, 1);
-  assert.equal(summary.ai.modelCallRefs[0]?.candidateRefs.length, 1);
+  assert.equal(summary.ai.modelCallRefs[0]?.rootletOutputRefs.length, 2);
+  assert.equal(summary.ai.modelCallRefs[0]?.candidateRefs.length, 2);
   assert.deepEqual(
     summary.eventLog.filter((type) => !type.startsWith("model.")),
     [

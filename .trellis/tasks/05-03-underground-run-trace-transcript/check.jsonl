@@ -1,0 +1,10 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend check entrypoint and quality checklist."}
+{"file": ".trellis/spec/backend/observation-read-model.md", "reason": "Verify transcript/job state remain derived read models and do not become fact sources."}
+{"file": ".trellis/spec/backend/intelligence-channel.md", "reason": "Verify AI config remains explicit, sanitized, and fake/stubbed in tests."}
+{"file": ".trellis/spec/backend/underground-radial-growth.md", "reason": "Verify event/transcript mapping matches underground semantics."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Verify backend tests and error handling coverage."}
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend check entrypoint."}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Verify polling and transcript UI contract."}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "Verify running/completed/error state lifecycle."}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Verify panel smoke expectations."}
+{"file": ".trellis/spec/guides/agentarbor-governance-guide.md", "reason": "Verify docs/spec/task-board changes preserve AgentArbor governance boundaries."}

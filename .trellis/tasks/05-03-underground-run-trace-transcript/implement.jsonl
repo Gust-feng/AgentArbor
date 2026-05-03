@@ -1,0 +1,10 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend implementation entrypoint and required pre-development checklist."}
+{"file": ".trellis/spec/backend/observation-read-model.md", "reason": "Panel run job and transcript must remain derived observation read models."}
+{"file": ".trellis/spec/backend/intelligence-channel.md", "reason": "OpenAI-compatible model calls, redaction, and no-network-by-default boundaries."}
+{"file": ".trellis/spec/backend/underground-radial-growth.md", "reason": "Underground runtime events, rootlet cluster, convergence, and handoff semantics."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Backend tests and quality rules for route/store/read-model changes."}
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend implementation entrypoint and required checklist."}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Panel polling and transcript UI behavior must follow component guidelines."}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "Polling lifecycle and UI state transitions need consistent frontend state handling."}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Frontend smoke and quality expectations for panel changes."}
+{"file": ".trellis/spec/guides/agentarbor-governance-guide.md", "reason": "Task touches Trellis specs and docs task board; governance boundaries apply."}

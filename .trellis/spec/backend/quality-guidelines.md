@@ -24,7 +24,7 @@
 - 地下-only demo 必须只打印到 `.agentarbor` Direction Handoff Package 边界为止，摘要包含 terminal status、package id/version/status/validation、地下 rootlet / budget / candidate / convergence 信息、可选用户升级信息、AI rootlet kind 状态 / candidate count / fallback count 和 observation layer status。
 - 地下-only demo summary 在恢复路径必须包含 `recoveredPackage`、`lineage`、`versions` 和可选 `writtenPackagePath`；不传 `--out` 时 `writtenPackagePath` 应为空，且 repo-root `.agentarbor/` 不得变化。
 - 配置中心必须区分普通 settings store 和 local-dev secret store；默认目录不得落在仓库内，测试必须使用临时目录。
-- panel HTTP JSON 只能返回脱敏 provider config、地下 demo summary、Observation Snapshot 子集和由这些输入派生的 tracking read model；不得包含 raw API key、token、完整 prompt、provider 原始敏感错误或 runtime/store 引用。
+- panel HTTP JSON 只能返回脱敏 provider config、地下 demo summary、Observation Snapshot 子集、trace、transcript 和由这些输入派生的 tracking read model；不得包含 raw API key、token、完整 prompt、raw model output、provider 原始敏感错误或 runtime/store 引用。
 - `dist/`、`node_modules/` 和 coverage 输出必须保持忽略。
 
 ## 生效规则
@@ -46,7 +46,7 @@
 | 默认地下-only demo 发布 `model.*` 事件或创建 provider | `pnpm test` 或 `pnpm demo:underground` 验收失败 |
 | `--ai openai-compatible` 缺少 key / model 时仍尝试网络或泄漏密钥 | `pnpm test` 或边界检查失败 |
 | panel `openai-compatible` 缺少 key 时仍调用 provider fetch | `pnpm test` 失败 |
-| settings store、EventLog、Snapshot、summary、HTTP JSON 或测试快照出现 raw API key / token | `pnpm test` 或安全检查失败 |
+| settings store、EventLog、Snapshot、summary、trace、transcript、HTTP JSON 或测试快照出现 raw API key / token / 完整 prompt / raw model output | `pnpm test` 或安全检查失败 |
 | `pnpm panel` 不能启动并打印 URL | panel smoke 失败 |
 
 ## Good / Base / Bad Cases
@@ -55,7 +55,7 @@
 - Good：新增 demo 命令时同步测试 summary 纯函数，并运行对应 demo 命令。
 - Good：新增 AI demo 开关时同时覆盖默认 no-AI、fake AI、OpenAI-compatible 配置失败和密钥不泄漏。
 - Good：新增 rootlet AI 输出契约时同时覆盖 6 种 kind 的 contract / prompt / parser、fake AI 复杂目标、AI 失败 fallback 和默认 deterministic no-AI。
-- Good：新增本地 panel 时同时覆盖配置更新、no-AI run、fake AI run、openai-compatible 缺 key / 缺 model、HTTP 响应脱敏、中文 UI、tracking read model 和 panel command smoke。
+- Good：新增本地 panel 时同时覆盖配置更新、no-AI run、fake AI run、openai-compatible 缺 key / 缺 model、async run job、partial / final polling、HTTP 响应脱敏、中文 UI、tracking / transcript read model 和 panel command smoke。
 - Base：纯类型补充仍运行 `pnpm build` 和 `pnpm test`。
 - Bad：只运行 `pnpm demo` 或 `pnpm demo:underground` 后宣称测试通过。
 
@@ -68,7 +68,7 @@
 - artifact 产出和 verification passed。
 - RunMemory / ExperienceCandidate / PathBias 生成。
 - MessageBus 禁止内部私聊。
-- 配置中心 raw secret 不进入普通 settings store；panel HTTP JSON 不回显 raw secret。
+- 配置中心 raw secret 不进入普通 settings store；panel HTTP JSON 不回显 raw secret；transcript 不包含完整 prompt 或 raw model output。
 - openai-compatible 缺 key 在 provider fetch 前失败。
 
 ## Wrong vs Correct

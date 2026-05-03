@@ -48,6 +48,7 @@ export function deriveDirectionHandoffDraft(input: {
     ...(profile === undefined ? [] : [evidenceId(profile.goalId, "goal-intent")]),
     ...input.sourceCandidates.flatMap((candidate) => candidate.sourceRefs),
     ...input.convergenceReview.provenanceRefs,
+    ...collectConvergenceAttributionEvidenceRefs(convergenceReport),
   ]);
   const rejectedDecisionReasons = convergenceReport.decisions
     ?.filter((decision) => decision.status === "rejected")
@@ -140,6 +141,31 @@ export function deriveDirectionHandoffDraft(input: {
     createdAt: nowIso(),
     updatedAt: nowIso(),
   };
+}
+
+function collectConvergenceAttributionEvidenceRefs(
+  convergenceReport: UndergroundConvergenceReport
+): string[] {
+  return unique([
+    ...(convergenceReport.evidenceLedgerRef === undefined ? [] : [convergenceReport.evidenceLedgerRef]),
+    ...(convergenceReport.candidateComparisons ?? []).flatMap((comparison) => [
+      comparison.comparisonId,
+      ...comparison.evidenceRefs,
+    ]),
+    ...(convergenceReport.decisions ?? []).flatMap((decision) => [
+      decision.decisionId,
+      ...decision.evidenceRefs,
+      ...decision.provenanceRefs,
+    ]),
+    ...convergenceReport.openQuestions.flatMap((question) => question.evidenceRefs),
+    ...(convergenceReport.userClarificationRequest === undefined
+      ? []
+      : [
+          convergenceReport.userClarificationRequest.requestId,
+          ...convergenceReport.userClarificationRequest.relatedCandidateRefs,
+          ...convergenceReport.userClarificationRequest.questions.map((question) => question.questionId),
+        ]),
+  ]);
 }
 
 function createRiskRegister(input: {

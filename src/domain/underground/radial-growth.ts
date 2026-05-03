@@ -114,7 +114,7 @@ export type CandidateConvergenceDecision = {
   decidedByRole: "convergence_judge";
   reason: string;
   provenanceRefs: string[];
-  evidenceRefs?: string[];
+  evidenceRefs: string[];
 };
 
 export type RejectedCandidateRefWithReason = {
@@ -139,6 +139,7 @@ export type UndergroundConvergenceReport = {
   provenanceRefs: string[];
   decisions: CandidateConvergenceDecision[];
   candidateComparisons?: CandidateComparison[];
+  evidenceLedgerRef?: string;
   recommendedOptionId?: string;
   rejectedCandidateRefsWithReasons: RejectedCandidateRefWithReason[];
   userDecisionRequired: string[];
@@ -269,6 +270,7 @@ export function createUndergroundConvergenceReport(input: {
   candidatePool: CandidatePool;
   decisions: readonly CandidateConvergenceDecision[];
   candidateComparisons?: readonly CandidateComparison[];
+  evidenceLedgerRef?: string;
   provenanceRefs: string[];
   budget: ExplorationBudget;
   summary: string;
@@ -337,6 +339,7 @@ export function createUndergroundConvergenceReport(input: {
     provenanceRefs: input.provenanceRefs,
     decisions: input.decisions.map(cloneCandidateConvergenceDecision),
     candidateComparisons: (input.candidateComparisons ?? []).map(cloneCandidateComparison),
+    evidenceLedgerRef: input.evidenceLedgerRef,
     recommendedOptionId,
     rejectedCandidateRefsWithReasons,
     userDecisionRequired: [...(userClarificationRequest?.relatedCandidateRefs ?? [])],
@@ -442,6 +445,11 @@ function assertDecisionRefs(pool: CandidatePool, decisions: readonly CandidateCo
         `Convergence decision ${decision.decisionId} must include its source candidate ref.`
       );
     }
+    if (decision.evidenceRefs.length === 0) {
+      throw new UndergroundConvergenceError(
+        `Convergence decision ${decision.decisionId} must include evidence refs.`
+      );
+    }
   }
 }
 
@@ -539,13 +547,16 @@ function cloneCandidateConvergenceDecision(decision: CandidateConvergenceDecisio
     ...decision,
     sourceCandidateRefs: [...decision.sourceCandidateRefs],
     provenanceRefs: [...decision.provenanceRefs],
-    evidenceRefs: [...(decision.evidenceRefs ?? [])],
+    evidenceRefs: [...decision.evidenceRefs],
   };
 }
 
 function cloneCandidateComparison(comparison: CandidateComparison): CandidateComparison {
   return {
     ...comparison,
+    evidenceGaps: [...comparison.evidenceGaps],
+    hardConstraintConflictRefs: [...comparison.hardConstraintConflictRefs],
+    riskCoverage: [...comparison.riskCoverage],
     unknowns: [...comparison.unknowns],
     whyNot: [...comparison.whyNot],
     evidenceRefs: [...comparison.evidenceRefs],

@@ -21,9 +21,15 @@ export type CandidateComparison = {
   rootletKind: RootletOutput["kind"];
   candidateSummary: string;
   goalMatch: CandidateComparisonLevel;
+  goalMatchBasis: string;
   evidenceSupport: CandidateComparisonLevel;
+  evidenceSupportBasis: string;
+  evidenceGaps: string[];
   constraintImpact: CandidateComparisonLevel;
+  constraintImpactBasis: string;
+  hardConstraintConflictRefs: string[];
   riskLevel: CandidateComparisonLevel;
+  riskCoverage: string[];
   unknowns: string[];
   whyNot: string[];
   conclusion: CandidateComparisonConclusion;
@@ -71,24 +77,34 @@ export function compareCandidatesForGoal(input: {
       decidedByRole: input.decidedByRole ?? "convergence_judge",
     })
   );
-  const evidenceEntries = comparisons.flatMap((comparison) => [
-    createUndergroundEvidenceEntry({
-      evidenceId: comparison.evidenceRefs[0] ?? evidenceId(input.goalProfile.goalId, `comparison:${comparison.candidateId}`),
-      goalId: input.goalProfile.goalId,
-      kind: "candidate_comparison",
-      summary: `Candidate ${comparison.candidateId} comparison concluded ${comparison.conclusion}.`,
-      sourceRefs: [comparison.rootletOutputRef, ...comparison.evidenceRefs.slice(1)],
-      createdAt: input.createdAt,
-    }),
-    createUndergroundEvidenceEntry({
-      evidenceId: evidenceId(input.goalProfile.goalId, `decision:${comparison.candidateId}`),
-      goalId: input.goalProfile.goalId,
-      kind: "convergence_decision",
-      summary: `Candidate ${comparison.candidateId} is ${statusForConclusion(comparison.conclusion)}.`,
-      sourceRefs: [comparison.comparisonId],
-      createdAt: input.createdAt,
-    }),
-  ]);
+  const decisionByCandidateId = new Map(decisions.map((decision) => [decision.candidateId, decision]));
+  const evidenceEntries = comparisons.flatMap((comparison) => {
+    const decision = decisionByCandidateId.get(comparison.candidateId);
+    return [
+      createUndergroundEvidenceEntry({
+        evidenceId: comparison.comparisonId,
+        goalId: input.goalProfile.goalId,
+        kind: "candidate_comparison",
+        summary: [
+          `Candidate ${comparison.candidateId} comparison concluded ${comparison.conclusion}.`,
+          `goal=${comparison.goalMatch}: ${comparison.goalMatchBasis}`,
+          `evidence=${comparison.evidenceSupport}: ${comparison.evidenceSupportBasis}`,
+          `constraint=${comparison.constraintImpact}: ${comparison.constraintImpactBasis}`,
+          `risk=${comparison.riskLevel}: ${comparison.riskCoverage.join("; ") || "no dedicated risk signal"}`,
+        ].join(" "),
+        sourceRefs: unique([comparison.rootletOutputRef, ...comparison.evidenceRefs.slice(1)]),
+        createdAt: input.createdAt,
+      }),
+      createUndergroundEvidenceEntry({
+        evidenceId: decision?.evidenceRefs[0] ?? evidenceId(input.goalProfile.goalId, `decision:${comparison.candidateId}`),
+        goalId: input.goalProfile.goalId,
+        kind: "convergence_decision",
+        summary: `Candidate ${comparison.candidateId} is ${statusForConclusion(comparison.conclusion)} because ${decisionReason(comparison)}`,
+        sourceRefs: unique([comparison.comparisonId, ...comparison.evidenceRefs, ...(decision?.provenanceRefs ?? [])]),
+        createdAt: input.createdAt,
+      }),
+    ];
+  });
 
   return { comparisons, decisions, evidenceEntries };
 }
@@ -100,15 +116,16 @@ export function createConvergenceDecisionFromComparison(input: {
 }): CandidateConvergenceDecision {
   const candidateSourceRefs = input.candidate?.sourceRefs ?? [input.comparison.rootletOutputRef];
   const status = statusForConclusion(input.comparison.conclusion);
+  const decisionEvidenceRef = evidenceId(input.comparison.goalId, `decision:${input.comparison.candidateId}`);
   return {
-    decisionId: evidenceId(input.comparison.goalId, `decision:${input.comparison.candidateId}`),
+    decisionId: decisionEvidenceRef,
     candidateId: input.comparison.candidateId,
     sourceCandidateRefs: [input.comparison.candidateId],
     status,
     decidedByRole: input.decidedByRole ?? "convergence_judge",
     reason: decisionReason(input.comparison),
-    provenanceRefs: [...candidateSourceRefs, input.comparison.comparisonId],
-    evidenceRefs: [evidenceId(input.comparison.goalId, `decision:${input.comparison.candidateId}`)],
+    provenanceRefs: unique([...candidateSourceRefs, input.comparison.comparisonId, ...input.comparison.evidenceRefs]),
+    evidenceRefs: unique([decisionEvidenceRef, input.comparison.comparisonId, ...input.comparison.evidenceRefs]),
   };
 }
 
@@ -132,6 +149,7 @@ export function compareCandidateForGoal(input: {
   const baseEvidenceRefs = [
     comparisonId,
     ...input.rootletOutput.evidenceRefs,
+    ...input.rootletOutput.sourceRefs,
     ...input.rootletOutput.constraintRefs.map((constraint) => `constraint:${constraint.constraintId}`),
   ];
 
@@ -144,9 +162,15 @@ export function compareCandidateForGoal(input: {
       rootletKind: input.rootletOutput.kind,
       candidateSummary: input.rootletOutput.summary,
       goalMatch: "blocking",
+      goalMatchBasis: "The raw goal explicitly asks Underground to stop or provides no viable direction.",
       evidenceSupport: "weak",
+      evidenceSupportBasis: "Stop intent prevents positive direction evidence from being sufficient.",
+      evidenceGaps: ["A stopped goal cannot produce an approved direction without new user input."],
       constraintImpact: "blocking",
+      constraintImpactBasis: "Stop intent is treated as a hard boundary for convergence.",
+      hardConstraintConflictRefs: hardConstraintConflictRefsFor(input.rootletOutput, "blocking"),
       riskLevel: "blocking",
+      riskCoverage: ["The candidate would violate the user's stop intent."],
       unknowns: [],
       whyNot: ["The goal explicitly asks Underground to stop or declares no viable candidate."],
       conclusion: "reject",
@@ -164,9 +188,15 @@ export function compareCandidateForGoal(input: {
       rootletKind: input.rootletOutput.kind,
       candidateSummary: input.rootletOutput.summary,
       goalMatch: "partial",
+      goalMatchBasis: "The constraint rootlet matches the goal boundary but cannot approve it without clarification.",
       evidenceSupport: "partial",
+      evidenceSupportBasis: "The goal exposes a permission or hard constraint signal, but the boundary remains unresolved.",
+      evidenceGaps: input.goalProfile.unknowns,
       constraintImpact: "blocking",
+      constraintImpactBasis: "A hard constraint or permission boundary is unclear enough to block approval.",
+      hardConstraintConflictRefs: hardConstraintConflictRefsFor(input.rootletOutput, "blocking"),
       riskLevel: "blocking",
+      riskCoverage: ["Permission or hard constraint ambiguity is retained as a blocking risk."],
       unknowns: input.goalProfile.unknowns,
       whyNot: ["The hard constraint or permission boundary is not clear enough for approved handoff."],
       conclusion: "needs_user",
@@ -254,6 +284,12 @@ function createComparison(
     evidenceSupport: CandidateComparisonLevel;
     constraintImpact: CandidateComparisonLevel;
     riskLevel: CandidateComparisonLevel;
+    goalMatchBasis?: string;
+    evidenceSupportBasis?: string;
+    evidenceGaps?: readonly string[];
+    constraintImpactBasis?: string;
+    hardConstraintConflictRefs?: readonly string[];
+    riskCoverage?: readonly string[];
     unknowns?: readonly string[];
     whyNot?: readonly string[];
     extraEvidenceRefs?: readonly string[];
@@ -268,9 +304,20 @@ function createComparison(
     rootletKind: input.rootletOutput.kind,
     candidateSummary: input.rootletOutput.summary,
     goalMatch: decision.goalMatch,
+    goalMatchBasis: decision.goalMatchBasis ?? goalMatchBasis(decision.goalMatch, input.rootletOutput, input.goalProfile),
     evidenceSupport: decision.evidenceSupport,
+    evidenceSupportBasis:
+      decision.evidenceSupportBasis ??
+      evidenceSupportBasis(decision.evidenceSupport, input.rootletOutput, decision.extraEvidenceRefs ?? []),
+    evidenceGaps: [...(decision.evidenceGaps ?? defaultEvidenceGaps(decision.evidenceSupport))],
     constraintImpact: decision.constraintImpact,
+    constraintImpactBasis:
+      decision.constraintImpactBasis ?? constraintImpactBasis(decision.constraintImpact, input.rootletOutput),
+    hardConstraintConflictRefs: [
+      ...(decision.hardConstraintConflictRefs ?? hardConstraintConflictRefsFor(input.rootletOutput, decision.constraintImpact)),
+    ],
     riskLevel: decision.riskLevel,
+    riskCoverage: [...(decision.riskCoverage ?? riskCoverage(decision.riskLevel, input.rootletOutput, input.goalProfile))],
     unknowns: [...(decision.unknowns ?? [])],
     whyNot: [...(decision.whyNot ?? [])],
     conclusion: decision.conclusion,
@@ -295,6 +342,73 @@ function findRootletOutput(
     }
   }
   throw new Error(`Candidate ${candidate.id} does not reference a known rootlet output.`);
+}
+
+function goalMatchBasis(
+  level: CandidateComparisonLevel,
+  output: RootletOutput,
+  profile: GoalIntentProfile
+): string {
+  switch (level) {
+    case "strong":
+      return `The ${output.kind} rootlet summary directly supports ${profile.goalStatement}.`;
+    case "partial":
+      return `The ${output.kind} rootlet contributes context but is not sufficient as the primary direction.`;
+    case "weak":
+      return `The ${output.kind} rootlet is retained mainly as negative or alternative evidence.`;
+    case "blocking":
+      return `The ${output.kind} rootlet conflicts with the current goal or approval boundary.`;
+  }
+}
+
+function evidenceSupportBasis(
+  level: CandidateComparisonLevel,
+  output: RootletOutput,
+  extraEvidenceRefs: readonly string[]
+): string {
+  const supportingRefs = unique([...output.evidenceRefs, ...extraEvidenceRefs]);
+  if (supportingRefs.length > 0) {
+    return `${level} support from refs ${supportingRefs.join(", ")}.`;
+  }
+  return `${level} support because no dedicated evidence ref beyond the rootlet output is available.`;
+}
+
+function defaultEvidenceGaps(level: CandidateComparisonLevel): string[] {
+  return level === "weak" || level === "blocking" ? ["Dedicated supporting evidence is insufficient."] : [];
+}
+
+function constraintImpactBasis(level: CandidateComparisonLevel, output: RootletOutput): string {
+  const refs = output.constraintRefs.map((constraint) => constraint.constraintId);
+  if (refs.length > 0) {
+    return `${level} constraint impact from refs ${refs.join(", ")}.`;
+  }
+  return `${level} constraint impact inferred from goal and rootlet kind ${output.kind}.`;
+}
+
+function hardConstraintConflictRefsFor(
+  output: RootletOutput,
+  constraintImpact: CandidateComparisonLevel
+): string[] {
+  if (constraintImpact !== "blocking") {
+    return [];
+  }
+  return output.constraintRefs
+    .filter((constraint) => constraint.requiredLevel === "hard")
+    .map((constraint) => constraint.constraintId);
+}
+
+function riskCoverage(
+  level: CandidateComparisonLevel,
+  output: RootletOutput,
+  profile: GoalIntentProfile
+): string[] {
+  const refs = unique([...output.riskRefs, ...profile.riskHints]);
+  if (refs.length > 0) {
+    return [`${level} risk coverage from ${refs.join(", ")}.`];
+  }
+  return level === "weak" || level === "blocking"
+    ? ["Risk coverage is insufficient for a selectable handoff direction."]
+    : ["No blocking risk remains for this candidate."];
 }
 
 function statusForConclusion(conclusion: CandidateComparisonConclusion): CandidateConvergenceStatus {

@@ -189,7 +189,7 @@ export function createRootletOutputForInvocation(input: {
       input.invocation.invocationId,
       ...(input.sourceRefs ?? []),
     ],
-    evidenceRefs: [...rootletEvidenceRefs(input.goalId, input.cluster.kind), ...(input.evidenceRefs ?? [])],
+    evidenceRefs: unique([...(input.evidenceRefs ?? []), ...rootletEvidenceRefs(input.goalId, input.cluster.kind)]),
     soilAssetFitRefs: input.cluster.kind === "asset_fit" ? ["soil:minimal-constraints"] : [],
     constraintRefs:
       input.cluster.kind === "constraint"
@@ -302,6 +302,10 @@ function rootletEvidenceRefs(goalId: string, kind: RootletClusterKind): string[]
     );
   }
   return refs;
+}
+
+function unique(values: readonly string[]): string[] {
+  return [...new Set(values.filter((value) => value.trim().length > 0))];
 }
 
 function rootletKindFromAgentId(agentId: string): RootletClusterKind | undefined {

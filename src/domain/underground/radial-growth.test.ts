@@ -205,6 +205,12 @@ test("candidate comparison rejects option candidates that conflict with hard bou
   assert.equal(comparison.comparisons[0]?.conclusion, "reject");
   assert.equal(comparison.decisions[0]?.status, "rejected");
   assert.equal(comparison.comparisons[0]?.constraintImpact, "blocking");
+  assert.equal((comparison.comparisons[0]?.goalMatchBasis.length ?? 0) > 0, true);
+  assert.equal((comparison.comparisons[0]?.evidenceSupportBasis.length ?? 0) > 0, true);
+  assert.equal((comparison.comparisons[0]?.constraintImpactBasis.length ?? 0) > 0, true);
+  assert.equal((comparison.comparisons[0]?.riskCoverage.length ?? 0) > 0, true);
+  assert.equal((comparison.comparisons[0]?.evidenceRefs.length ?? 0) > 0, true);
+  assert.equal((comparison.decisions[0]?.evidenceRefs.length ?? 0) > 0, true);
 });
 
 test("budget exhaustion resolves to approved, awaiting_user, or stopped with a reason", () => {
@@ -455,6 +461,7 @@ function makeDecision(
     decidedByRole: "convergence_judge",
     reason: "test decision",
     provenanceRefs: ["candidate_pool.updated"],
+    evidenceRefs: [`evidence:goal-test:${decisionId}`],
   };
 }
 

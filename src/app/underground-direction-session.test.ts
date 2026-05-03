@@ -30,6 +30,49 @@ test("runUndergroundDirectionSession creates an approved package without enterin
   assert.equal(result.undergroundReport.convergenceReport.mergedCandidateRefs.length >= 1, true);
   assert.notEqual(result.undergroundReport.evidenceLedger, undefined);
   assert.equal((result.undergroundReport.evidenceLedger?.entries.length ?? 0) > 0, true);
+  assert.equal(
+    result.undergroundReport.convergenceReport.evidenceLedgerRef,
+    result.undergroundReport.evidenceLedger?.ledgerId
+  );
+  const evidenceEntryIds = new Set(
+    result.undergroundReport.evidenceLedger?.entries.map((entry) => entry.evidenceId)
+  );
+  assert.equal(
+    result.undergroundReport.rootletOutputs.every((output) =>
+      output.evidenceRefs.some((evidenceRef) => evidenceEntryIds.has(evidenceRef))
+    ),
+    true
+  );
+  assert.equal(
+    result.undergroundReport.convergenceReport.candidateComparisons?.every(
+      (comparison) =>
+        comparison.goalMatchBasis.length > 0 &&
+        comparison.evidenceSupportBasis.length > 0 &&
+        comparison.constraintImpactBasis.length > 0 &&
+        comparison.riskCoverage.length > 0 &&
+        comparison.evidenceRefs.some((evidenceRef) => evidenceEntryIds.has(evidenceRef))
+    ),
+    true
+  );
+  assert.equal(
+    result.undergroundReport.convergenceReport.decisions.every((decision) =>
+      decision.evidenceRefs.some((evidenceRef) => evidenceEntryIds.has(evidenceRef))
+    ),
+    true
+  );
+  assert.equal(
+    result.directionHandoff?.evidenceRefs.includes(result.undergroundReport.evidenceLedger?.ledgerId ?? ""),
+    true
+  );
+  assert.equal(result.observationSnapshot.underground.evidenceLedger.totalEntries, evidenceEntryIds.size);
+  assert.equal(result.observationSnapshot.underground.evidenceLedger.countsByKind.rootlet_output, 2);
+  assert.equal(result.observationSnapshot.underground.evidenceLedger.recommendedEvidenceRefs.length > 0, true);
+  assert.equal(
+    result.observationSnapshot.underground.evidenceLedger.recommendedEvidenceRefs
+      .filter((ref) => ref !== result.undergroundReport.convergenceReport.evidenceLedgerRef)
+      .every((ref) => evidenceEntryIds.has(ref)),
+    true
+  );
   assert.equal(result.eventTypes.includes("direction_handoff.completed"), true);
   assert.equal(result.eventTypes.includes("growth_plan.completed"), false);
   assert.equal(result.observationSnapshot.aboveground.status, "not_started");
@@ -114,6 +157,7 @@ test("runUndergroundDirectionSession waits for user when blocking unknown exists
   assert.equal(result.eventTypes.includes("user_approval.requested"), true);
   assert.equal(result.eventTypes.includes("growth_plan.completed"), false);
   assert.equal(result.observationSnapshot.underground.userEscalation.required, true);
+  assert.equal(result.observationSnapshot.underground.evidenceLedger.countsByKind.user_clarification, 1);
   assert.equal(result.observationSnapshot.underground.agentCluster?.terminalStatus, "awaiting_user");
   assert.equal(result.observationSnapshot.aboveground.status, "not_started");
 });
@@ -157,6 +201,10 @@ test("recoverUndergroundDirectionSession turns awaiting_user into approved v2 wi
   assert.deepEqual(recovery.packageVersions, [1, 2]);
   assert.equal(recovery.loadedApprovedDirectionHandoffPackage.lineage.previous?.version, 1);
   assert.equal(recovery.loadedApprovedDirectionHandoffPackage.lineage.revisionReason, "user_clarification_answered");
+  assert.equal(
+    recovery.recoveredUndergroundReport.convergenceReport.evidenceLedgerRef,
+    awaiting.undergroundReport.convergenceReport.evidenceLedgerRef
+  );
   assert.equal(recovery.observationSnapshot.aboveground.status, "not_started");
   const handoffInvocation = recovery.recoveredUndergroundReport.agentClusterRun?.invocations.find(
     (invocation) => invocation.role === "handoff_steward"
@@ -181,6 +229,13 @@ test("runUndergroundDirectionSession stops without fabricating an approved packa
   assert.equal(result.eventTypes.includes("user_approval.requested"), false);
   assert.equal(result.observationSnapshot.currentPhase, "underground");
   assert.equal(result.observationSnapshot.handoff.directionStatus, "draft");
+  assert.equal(result.observationSnapshot.underground.evidenceLedger.countsByKind.stop_reason, 1);
+  assert.equal(
+    result.observationSnapshot.underground.evidenceLedger.insufficientEvidenceRefs.every((ref) =>
+      result.undergroundReport.evidenceLedger?.entries.some((entry) => entry.evidenceId === ref)
+    ),
+    true
+  );
   assert.equal(result.observationSnapshot.underground.agentCluster?.terminalStatus, "stopped");
   assert.equal(result.observationSnapshot.aboveground.status, "not_started");
 });
@@ -233,6 +288,19 @@ test("runUndergroundDirectionSession writes and round-trips packages only with e
     const loaded = store.load(meta.manifest.directionId, meta.manifest.directionVersion);
     assert.equal(loaded.manifest.packageId, result.loadedDirectionHandoffPackage.manifest.packageId);
     assert.deepEqual(store.listVersions(meta.manifest.directionId), [1]);
+    const evidenceIndex = readFileSync(
+      join(
+        tempRoot,
+        "directions",
+        encodeURIComponent(meta.manifest.directionId),
+        `v${meta.manifest.directionVersion}`,
+        "evidence-index.md"
+      ),
+      "utf8"
+    );
+    assert.equal(evidenceIndex.includes("## Candidate Comparisons"), true);
+    assert.equal(evidenceIndex.includes("## Convergence Decisions"), true);
+    assert.equal(evidenceIndex.includes("candidate-"), true);
   } finally {
     rmSync(tempRoot, { recursive: true, force: true });
   }

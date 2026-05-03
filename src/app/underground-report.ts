@@ -28,6 +28,14 @@ export function createUndergroundExplorationReport(input: {
       ...input.candidatePool,
       sourceRootletOutputRefs: [...input.candidatePool.sourceRootletOutputRefs],
       candidates: input.candidatePool.candidates.map((candidate) => ({ ...candidate })),
+      candidatesByKind: {
+        option: input.candidatePool.candidatesByKind.option.map((candidate) => ({ ...candidate })),
+        risk: input.candidatePool.candidatesByKind.risk.map((candidate) => ({ ...candidate })),
+        asset_fit: input.candidatePool.candidatesByKind.asset_fit.map((candidate) => ({ ...candidate })),
+        evidence: input.candidatePool.candidatesByKind.evidence.map((candidate) => ({ ...candidate })),
+        constraint: input.candidatePool.candidatesByKind.constraint.map((candidate) => ({ ...candidate })),
+        counterfactual: input.candidatePool.candidatesByKind.counterfactual.map((candidate) => ({ ...candidate })),
+      },
     },
     convergenceReport: {
       ...input.convergenceReport,
@@ -39,6 +47,9 @@ export function createUndergroundExplorationReport(input: {
       })),
       candidateComparisons: (input.convergenceReport.candidateComparisons ?? []).map((comparison) => ({
         ...comparison,
+        evidenceGaps: [...comparison.evidenceGaps],
+        hardConstraintConflictRefs: [...comparison.hardConstraintConflictRefs],
+        riskCoverage: [...comparison.riskCoverage],
         unknowns: [...comparison.unknowns],
         whyNot: [...comparison.whyNot],
         evidenceRefs: [...comparison.evidenceRefs],

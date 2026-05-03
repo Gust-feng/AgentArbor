@@ -15,6 +15,7 @@ import type {
   RejectedCandidateRefWithReason,
   UndergroundAgentClusterRun,
   UndergroundAgentInvocationStatus,
+  UndergroundEvidenceKind,
   RootletClusterKind,
   RootletClusterStatus,
   RootletOutput,
@@ -299,6 +300,17 @@ export type RunObservationUndergroundView = {
         }[]
       >
     >;
+  };
+  readonly evidenceLedger: {
+    readonly ledgerId?: string;
+    readonly status: ObservationStatus;
+    readonly totalEntries: number;
+    readonly countsByKind: Readonly<Record<UndergroundEvidenceKind, number>>;
+    readonly recommendedEvidenceRefs: readonly string[];
+    readonly conflictEvidenceRefs: readonly string[];
+    readonly insufficientEvidenceRefs: readonly string[];
+    readonly hasConflicts: boolean;
+    readonly hasInsufficientEvidence: boolean;
   };
   readonly convergence: {
     readonly reviewId: string;

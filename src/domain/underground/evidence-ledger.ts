@@ -3,7 +3,9 @@ export type UndergroundEvidenceKind =
   | "soil_constraint"
   | "rootlet_output"
   | "candidate_comparison"
-  | "convergence_decision";
+  | "convergence_decision"
+  | "user_clarification"
+  | "stop_reason";
 
 export type UndergroundEvidenceEntry = {
   evidenceId: string;

@@ -81,6 +81,12 @@ test("RunObservationSnapshot is serializable and reflects underground state", ()
   assert.equal(parsed.underground.candidatePool.accepted, 1);
   assert.equal(parsed.underground.candidatePool.merged, 1);
   assert.equal(parsed.underground.candidatePool.candidatesByKind.option.length, 2);
+  assert.equal(parsed.underground.evidenceLedger.totalEntries > 0, true);
+  assert.equal(parsed.underground.evidenceLedger.countsByKind.goal_intent, 1);
+  assert.equal(parsed.underground.evidenceLedger.countsByKind.rootlet_output, 2);
+  assert.equal(parsed.underground.evidenceLedger.countsByKind.candidate_comparison, 2);
+  assert.equal(parsed.underground.evidenceLedger.countsByKind.convergence_decision, 2);
+  assert.equal(parsed.underground.evidenceLedger.recommendedEvidenceRefs.length > 0, true);
   assert.equal(parsed.underground.agentCluster?.terminalStatus, "approved_package_created");
   assert.deepEqual(parsed.underground.agentCluster?.plan.rootletKinds, ["option"]);
   assert.equal(parsed.underground.agentCluster?.candidateRefs.length, 2);
@@ -154,6 +160,10 @@ test("RunObservationSnapshot exposes every underground rootlet, candidate, and c
   assert.equal(underground.agentCluster?.invocations.length, result.undergroundReport.agentClusterRun?.invocations.length);
   assert.equal(underground.candidatePool.candidates.length, result.undergroundReport.candidatePool.candidates.length);
   assert.equal(underground.convergence.decisions.length, result.undergroundReport.convergenceReport.decisions.length);
+  assert.equal(
+    underground.evidenceLedger.totalEntries,
+    result.undergroundReport.evidenceLedger?.entries.length
+  );
   assert.deepEqual(
     underground.rootletClusters.map((cluster) => cluster.clusterId),
     result.undergroundReport.plan.rootletClusters.map((cluster) => cluster.clusterId)

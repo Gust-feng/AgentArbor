@@ -1,4 +1,5 @@
 import type { DirectionHandoff } from "../../underground/contracts.js";
+import type { UndergroundConvergenceReport } from "../../underground/radial-growth.js";
 import type { DirectionHandoffPackage, DirectionHandoffPackageFilePath } from "./contracts.js";
 
 export function serializeDirectionHandoffPackageFiles(
@@ -19,7 +20,7 @@ export function serializeDirectionHandoffPackageFiles(
       2
     )}\n`,
     "soil-refs.json": `${JSON.stringify({ soilRefs: pkg.directionHandoff.soilRefs }, null, 2)}\n`,
-    "evidence-index.md": renderList("Evidence Index", pkg.directionHandoff.evidenceRefs),
+    "evidence-index.md": renderEvidenceIndex(pkg),
     "risk-register.md": renderRiskRegister(pkg.directionHandoff),
     "open-questions.md": renderList("Open Questions", pkg.directionHandoff.missingInformation),
     "escalation-rules.md": renderList("Escalation Rules", pkg.directionHandoff.growthEntry.escalationRules),
@@ -51,6 +52,46 @@ function renderDecisionRecord(handoff: DirectionHandoff): string {
 - rejectedOptionIds: ${handoff.decisionRecord.rejectedOptionIds.join(", ") || "none"}
 - userDecisionRequired: ${handoff.decisionRecord.userDecisionRequired.join(", ") || "none"}
 - abovegroundReferenceOptionIds: ${handoff.decisionRecord.abovegroundReferenceOptionIds.join(", ") || "none"}
+`;
+}
+
+function renderEvidenceIndex(pkg: DirectionHandoffPackage): string {
+  const handoff = pkg.directionHandoff;
+  const convergenceReview = pkg.convergenceReview as Partial<UndergroundConvergenceReport>;
+  const comparisons = convergenceReview.candidateComparisons ?? [];
+  const decisions = convergenceReview.decisions ?? [];
+  return `# Evidence Index
+
+## Direction Evidence Refs
+${markdownList(handoff.evidenceRefs)}
+
+## Source Candidates
+${markdownList(
+  handoff.sourceCandidateRefs.map((candidate) =>
+    `${candidate.id} (${candidate.status}, ${candidate.kind}) from ${candidate.sourceRefs.join(", ") || "none"}`
+  )
+)}
+
+## Candidate Comparisons
+${markdownList(
+  comparisons.map((comparison) =>
+    `${comparison.comparisonId}: ${comparison.candidateId} -> ${comparison.conclusion}; refs ${comparison.evidenceRefs.join(", ") || "none"}`
+  )
+)}
+
+## Convergence Decisions
+${markdownList(
+  decisions.map((decision) =>
+    `${decision.decisionId}: ${decision.candidateId} -> ${decision.status}; refs ${decision.evidenceRefs.join(", ")}`
+  )
+)}
+
+## Candidate Reference Index
+${markdownList(
+  pkg.candidateReferenceIndex.map((candidate) =>
+    `${candidate.candidateId}: convergence ${candidate.convergenceReviewRef}; source refs ${candidate.sourceRefs.join(", ") || "none"}`
+  )
+)}
 `;
 }
 

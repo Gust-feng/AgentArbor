@@ -159,6 +159,7 @@ function createApprovedConvergenceReviewFromClarification(input: {
     ]),
     decisions,
     candidateComparisons: previousReview.candidateComparisons?.map((comparison) => ({ ...comparison })),
+    evidenceLedgerRef: previousReview.evidenceLedgerRef,
     recommendedOptionId: previousReview.recommendedOptionId,
     rejectedCandidateRefsWithReasons: uniqueRejectedCandidateRefsWithReasons([
       ...(previousReview.rejectedCandidateRefsWithReasons ?? []),
@@ -214,6 +215,7 @@ function createRecoveredDecisions(input: {
     decidedByRole: "convergence_judge" as const,
     reason: `${candidate.clusterId} remains selected for the recovered direction handoff.`,
     provenanceRefs: [...candidate.sourceRefs],
+    evidenceRefs: [`recovered-decision:${candidate.id}`],
   }));
 
   return previousDecisions.map((decision) => {
@@ -222,10 +224,16 @@ function createRecoveredDecisions(input: {
         ...decision,
         sourceCandidateRefs: [...decision.sourceCandidateRefs],
         provenanceRefs: [...decision.provenanceRefs],
+        evidenceRefs: [...decision.evidenceRefs],
       };
     }
     return {
       ...decision,
+      evidenceRefs: uniqueStrings([
+        ...decision.evidenceRefs,
+        input.clarificationResponse.requestId,
+        ...input.responseEvidenceRefs,
+      ]),
       status: "rejected",
       reason:
         "User clarification answered this blocking unknown; it is resolved as revision evidence and excluded from handoff source candidates.",

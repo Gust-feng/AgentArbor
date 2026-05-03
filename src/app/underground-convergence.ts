@@ -15,7 +15,10 @@ import {
   type UndergroundExplorationPlan,
 } from "../domain/underground/index.js";
 import { createId, nowIso } from "../kernel/id.js";
-import { createMinimalUndergroundEvidenceLedger } from "./underground-evidence.js";
+import {
+  appendUndergroundConvergenceOutcomeEvidence,
+  createMinimalUndergroundEvidenceLedger,
+} from "./underground-evidence.js";
 
 export function convergeMinimalCandidatePool(input: {
   pool: CandidatePool;
@@ -44,7 +47,7 @@ export function convergeMinimalCandidatePool(input: {
   const unknownCandidateIds = new Set(decisions
     .filter((decision) => decision.status === "unknown")
     .map((decision) => decision.candidateId));
-  const evidenceLedger = createMinimalUndergroundEvidenceLedger({
+  let evidenceLedger = createMinimalUndergroundEvidenceLedger({
     existingLedger: input.evidenceLedger,
     goalIntentProfile,
     constraints: input.constraints ?? [],
@@ -59,6 +62,7 @@ export function convergeMinimalCandidatePool(input: {
     candidatePool,
     decisions,
     candidateComparisons: comparisonResult.comparisons,
+    evidenceLedgerRef: evidenceLedger.ledgerId,
     provenanceRefs: [evidenceId(input.pool.goalId, "goal-intent"), "goal.received", "candidate_pool.updated"],
     budget: {
       ...input.plan.budget,
@@ -86,6 +90,11 @@ export function convergeMinimalCandidatePool(input: {
         })
       ),
     userClarificationRequestId: createId("user-clarification"),
+    createdAt,
+  });
+  evidenceLedger = appendUndergroundConvergenceOutcomeEvidence({
+    ledger: evidenceLedger,
+    convergenceReport,
     createdAt,
   });
 

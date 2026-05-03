@@ -9,7 +9,7 @@ import type {
   RunObservationSoilReturnStubView,
   RunObservationUndergroundView,
 } from "./contracts.js";
-import type { UserClarificationResponse } from "../underground/index.js";
+import type { UndergroundEvidenceKind, UserClarificationResponse } from "../underground/index.js";
 
 export type RunObservationLayerViews = {
   readonly underground: RunObservationUndergroundView;
@@ -97,6 +97,7 @@ function createUndergroundView(input: RunObservationSnapshotInput): RunObservati
         counterfactual: report.candidatePool.candidatesByKind.counterfactual.map(createCandidateView),
       },
     },
+    evidenceLedger: createEvidenceLedgerView(report),
     convergence: {
       reviewId: report.convergenceReport.reviewId,
       outcome: report.convergenceReport.outcome,
@@ -143,6 +144,106 @@ function createUndergroundView(input: RunObservationSnapshotInput): RunObservati
     userEscalation: createUserEscalationView(report),
     clarificationResponses: createClarificationResponses(input.eventEntries),
   };
+}
+
+function createEvidenceLedgerView(
+  report: RunObservationSnapshotInput["undergroundReport"]
+): RunObservationUndergroundView["evidenceLedger"] {
+  const entries = report.evidenceLedger?.entries ?? [];
+  const ledgerEntryIds = new Set(entries.map((entry) => entry.evidenceId));
+  const countsByKind: Record<UndergroundEvidenceKind, number> = {
+    goal_intent: 0,
+    soil_constraint: 0,
+    rootlet_output: 0,
+    candidate_comparison: 0,
+    convergence_decision: 0,
+    user_clarification: 0,
+    stop_reason: 0,
+  };
+  for (const entry of entries) {
+    countsByKind[entry.kind] += 1;
+  }
+
+  const recommendedEvidenceRefs = recommendedEvidenceRefsFor(report, ledgerEntryIds);
+  const conflictEvidenceRefs = filterLedgerEvidenceRefs(
+    [
+      ...report.convergenceReport.decisions
+        .filter((decision) => decision.status === "rejected")
+        .flatMap((decision) => decision.evidenceRefs),
+      ...(report.convergenceReport.candidateComparisons ?? [])
+        .filter(
+          (comparison) =>
+            comparison.constraintImpact === "blocking" ||
+            comparison.conclusion === "reject" ||
+            comparison.conclusion === "needs_user"
+        )
+        .flatMap((comparison) => comparison.evidenceRefs),
+      ...report.convergenceReport.openQuestions
+        .filter((question) => question.blockingLevel === "blocking")
+        .flatMap((question) => question.evidenceRefs),
+      ...entries.filter((entry) => entry.kind === "user_clarification").map((entry) => entry.evidenceId),
+    ],
+    ledgerEntryIds
+  );
+  const insufficientEvidenceRefs = filterLedgerEvidenceRefs(
+    [
+      ...(report.convergenceReport.candidateComparisons ?? [])
+        .filter((comparison) => comparison.evidenceSupport === "weak" || comparison.evidenceGaps.length > 0)
+        .flatMap((comparison) => comparison.evidenceRefs),
+      ...report.convergenceReport.openQuestions.flatMap((question) => question.evidenceRefs),
+      ...entries.filter((entry) => entry.kind === "stop_reason").map((entry) => entry.evidenceId),
+    ],
+    ledgerEntryIds
+  );
+  const hasConflicts = conflictEvidenceRefs.length > 0;
+  const hasInsufficientEvidence = insufficientEvidenceRefs.length > 0;
+
+  return {
+    ledgerId: report.evidenceLedger?.ledgerId,
+    status:
+      entries.length === 0
+        ? "not_started"
+        : report.convergenceReport.userEscalationRequired || report.convergenceReport.outcome === "stopped"
+          ? "blocked"
+          : hasConflicts || hasInsufficientEvidence
+            ? "pending"
+            : "completed",
+    totalEntries: entries.length,
+    countsByKind,
+    recommendedEvidenceRefs,
+    conflictEvidenceRefs,
+    insufficientEvidenceRefs,
+    hasConflicts,
+    hasInsufficientEvidence,
+  };
+}
+
+function recommendedEvidenceRefsFor(
+  report: RunObservationSnapshotInput["undergroundReport"],
+  ledgerEntryIds: ReadonlySet<string>
+): string[] {
+  const recommendedOptionId = report.convergenceReport.recommendedOptionId;
+  const handoffCandidateRefs = new Set(report.convergenceReport.handoffCandidateRefs);
+  return unique([
+    ...(report.convergenceReport.evidenceLedgerRef === undefined ? [] : [report.convergenceReport.evidenceLedgerRef]),
+    ...filterLedgerEvidenceRefs(
+      [
+        ...(report.convergenceReport.candidateComparisons ?? [])
+          .filter((comparison) =>
+            comparison.candidateId === recommendedOptionId || handoffCandidateRefs.has(comparison.candidateId)
+          )
+          .flatMap((comparison) => [comparison.comparisonId, ...comparison.evidenceRefs]),
+        ...report.convergenceReport.decisions
+          .filter((decision) => decision.candidateId === recommendedOptionId || handoffCandidateRefs.has(decision.candidateId))
+          .flatMap((decision) => [decision.decisionId, ...decision.evidenceRefs]),
+      ],
+      ledgerEntryIds
+    ),
+  ]);
+}
+
+function filterLedgerEvidenceRefs(values: readonly string[], ledgerEntryIds: ReadonlySet<string>): string[] {
+  return unique(values.filter((value) => ledgerEntryIds.has(value)));
 }
 
 function groupRootletOutputRefsByCluster(
@@ -426,6 +527,10 @@ function stringArray(value: unknown): string[] {
     return [];
   }
   return value.filter((entry): entry is string => typeof entry === "string");
+}
+
+function unique(values: readonly string[]): string[] {
+  return [...new Set(values.filter((value) => value.trim().length > 0))];
 }
 
 function statusForFruits(input: RunObservationSnapshotInput): ObservationStatus {

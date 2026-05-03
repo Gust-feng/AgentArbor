@@ -1,11 +1,11 @@
 # 后端质量规范
 
-当前阶段已建立第一阶段运行时工具链：`pnpm + TypeScript + tsc + node:test`。这里的“后端质量”指内存 runtime kernel 质量，不包含 HTTP 服务、数据库或 UI。
+当前阶段已建立第一阶段运行时工具链：`pnpm + TypeScript + tsc + node:test`。这里的“后端质量”指内存 runtime kernel、本地配置中心和本地 Underground panel 原型质量，不包含数据库或正式 backend 服务。
 
 ## Scope / Trigger
 
-- Trigger：修改 `package.json`、`tsconfig.json`、`src/**`、`tests/**` 或 demo 行为。
-- Scope：最小运行内核构建、测试和 demo 验收。
+- Trigger：修改 `package.json`、`tsconfig.json`、`src/**`、`tests/**`、demo、panel 或配置中心行为。
+- Scope：最小运行内核构建、测试、demo、panel smoke 和密钥边界验收。
 
 ## Signatures
 
@@ -13,6 +13,8 @@
 - `pnpm test`：先 build，再执行 `node --test "dist/**/*.test.js"`。
 - `pnpm demo`：先 build，再执行 `node dist/app/demo.js`。
 - `pnpm demo:underground`：先 build，再执行 `node dist/app/underground-demo.js`；可通过 `-- "<goal>"` 传入自定义目标，可通过 `-- --auto-answer "<goal>"` 演示 awaiting_user 恢复，可通过 `-- --out <dir> "<goal>"` 显式写出 Direction Handoff Package；可通过 `-- --ai fake "<goal>"` 显式验证 fake AI rootlet 候选接入；`-- --ai openai-compatible "<goal>"` 只有配置完整时才允许真实网络路径。
+- `pnpm panel`：先 build，再执行 `node dist/app/panel.js`，启动本地 Node HTTP panel 并打印 URL；默认配置目录使用 `AGENTARBOR_CONFIG_DIR` 或用户本地配置目录。
+- `pnpm panel:smoke`：先 build，再执行 `node dist/app/panel.js --port 0 --smoke`，证明 panel 命令可启动并退出。
 
 ## Contracts
 
@@ -21,6 +23,8 @@
 - 完整 demo 必须打印完整 EventLog 顺序和最终 Fruit / RunMemory / ExperienceCandidate / PathBias 摘要。
 - 地下-only demo 必须只打印到 `.agentarbor` Direction Handoff Package 边界为止，摘要包含 terminal status、package id/version/status/validation、地下 rootlet / budget / candidate / convergence 信息、可选用户升级信息、AI rootlet kind 状态 / candidate count / fallback count 和 observation layer status。
 - 地下-only demo summary 在恢复路径必须包含 `recoveredPackage`、`lineage`、`versions` 和可选 `writtenPackagePath`；不传 `--out` 时 `writtenPackagePath` 应为空，且 repo-root `.agentarbor/` 不得变化。
+- 配置中心必须区分普通 settings store 和 local-dev secret store；默认目录不得落在仓库内，测试必须使用临时目录。
+- panel HTTP JSON 只能返回脱敏 provider config、地下 demo summary、Observation Snapshot 子集和由这些输入派生的 tracking read model；不得包含 raw API key、token、完整 prompt、provider 原始敏感错误或 runtime/store 引用。
 - `dist/`、`node_modules/` 和 coverage 输出必须保持忽略。
 
 ## 生效规则
@@ -41,6 +45,9 @@
 | 地下-only demo 进入 Aboveground 或写入 repo-root `.agentarbor/` | `pnpm test` 或 `pnpm demo:underground` 验收失败 |
 | 默认地下-only demo 发布 `model.*` 事件或创建 provider | `pnpm test` 或 `pnpm demo:underground` 验收失败 |
 | `--ai openai-compatible` 缺少 key / model 时仍尝试网络或泄漏密钥 | `pnpm test` 或边界检查失败 |
+| panel `openai-compatible` 缺少 key 时仍调用 provider fetch | `pnpm test` 失败 |
+| settings store、EventLog、Snapshot、summary、HTTP JSON 或测试快照出现 raw API key / token | `pnpm test` 或安全检查失败 |
+| `pnpm panel` 不能启动并打印 URL | panel smoke 失败 |
 
 ## Good / Base / Bad Cases
 
@@ -48,6 +55,7 @@
 - Good：新增 demo 命令时同步测试 summary 纯函数，并运行对应 demo 命令。
 - Good：新增 AI demo 开关时同时覆盖默认 no-AI、fake AI、OpenAI-compatible 配置失败和密钥不泄漏。
 - Good：新增 rootlet AI 输出契约时同时覆盖 6 种 kind 的 contract / prompt / parser、fake AI 复杂目标、AI 失败 fallback 和默认 deterministic no-AI。
+- Good：新增本地 panel 时同时覆盖配置更新、no-AI run、fake AI run、openai-compatible 缺 key / 缺 model、HTTP 响应脱敏、中文 UI、tracking read model 和 panel command smoke。
 - Base：纯类型补充仍运行 `pnpm build` 和 `pnpm test`。
 - Bad：只运行 `pnpm demo` 或 `pnpm demo:underground` 后宣称测试通过。
 
@@ -60,6 +68,8 @@
 - artifact 产出和 verification passed。
 - RunMemory / ExperienceCandidate / PathBias 生成。
 - MessageBus 禁止内部私聊。
+- 配置中心 raw secret 不进入普通 settings store；panel HTTP JSON 不回显 raw secret。
+- openai-compatible 缺 key 在 provider fetch 前失败。
 
 ## Wrong vs Correct
 

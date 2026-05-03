@@ -1,0 +1,10 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend runtime spec index and quality checklist."}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Check app/panel/config directory boundaries."}
+{"file": ".trellis/spec/backend/intelligence-channel.md", "reason": "Check provider config, model event and secret boundary rules."}
+{"file": ".trellis/spec/backend/underground-radial-growth.md", "reason": "Check underground-only and no repo-root .agentarbor boundaries."}
+{"file": ".trellis/spec/backend/observation-read-model.md", "reason": "Check JSON-safe panel response / observation projection."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Check build, tests, demo and panel validation gates."}
+{"file": ".trellis/spec/frontend/index.md", "reason": "Check frontend specs were updated now that first UI code exists."}
+{"file": ".trellis/spec/frontend/directory-structure.md", "reason": "Check UI/panel file placement and responsibilities."}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Check panel UI clarity and accessibility basics."}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Check UI/panel verification coverage."}

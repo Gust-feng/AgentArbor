@@ -1,0 +1,11 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend runtime spec index and pre-development checklist."}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "App-layer entry, demo, panel server and runtime boundaries."}
+{"file": ".trellis/spec/backend/intelligence-channel.md", "reason": "Provider config, IntelligenceChannel, model event and secret boundary rules."}
+{"file": ".trellis/spec/backend/underground-radial-growth.md", "reason": "Underground-only run boundaries, AI rootlet summary and .agentarbor non-write rules."}
+{"file": ".trellis/spec/backend/observation-read-model.md", "reason": "Panel must consume JSON-safe Observation Snapshot / summary projections."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "HTTP/config/provider failure response semantics."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Build, test, demo and new panel validation gates."}
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend spec placeholder that must be updated when the first UI code is born."}
+{"file": ".trellis/spec/frontend/directory-structure.md", "reason": "Minimum UI/panel directory boundary to establish for the first panel implementation."}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Basic UI composition/accessibility conventions for the panel prototype."}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "UI/panel verification expectations for the first frontend surface."}

@@ -1,11 +1,20 @@
 # 前端目录结构
 
-当前阶段未进入前端实现，不能从空 `src/` 推导 UI 目录结构。
+当前阶段只有本地 Underground panel 原型，UI 代码不单独出生 `src/frontend/`。面板使用 Node 内置 HTTP server 发送静态 HTML/CSS/JS，用于验证未来工作台的最小读写面。
+
+## 当前目录
+
+- `src/app/panel.ts`：panel CLI 入口，由 `pnpm panel` 调用，只负责启动本地服务并打印 URL。
+- `src/app/panel-server.ts`：本地 HTTP API 和运行编排，只调用配置中心、地下-only API、地下 demo summary 和 Observation Snapshot；可返回由这些输入派生的 panel tracking read model，但不能保存第二套运行事实。
+- `src/app/panel-assets.ts`：静态 HTML/CSS/JS 字符串；不引入前端构建链；默认文案使用简体中文，并用中文标签包裹必要技术 id。
+- `src/app/panel-server.test.ts`：panel HTTP API、安全响应和运行路径测试。
 
 ## 生效规则
 
-- 不编造 pages、components、hooks、stores、assets 等目录。
-- 不把未来可能采用的框架目录写成当前事实。
-- 只有真实前端代码和模块边界出生后，才能在这里记录目录约定和示例。
+- 不创建 `src/frontend/`、`pages/`、`components/`、`hooks/`、`stores/` 或 `assets/` 目录来伪装正式前端。
+- 不引入 React、Vite、Next、Tailwind、组件库或状态管理框架。
+- panel 只能作为未来工作台原型，不能绕过 EventLog、Observation Snapshot、配置中心、IntelligenceChannel、CandidatePool、Convergence 或 Handoff validation。
+- panel 只展示地下运行、配置中心和 direction handoff 摘要；不得扩展到 Aboveground / Fruits / Governance 面板，除非后续 Trellis 任务明确出生。
+- API key 输入只允许写入 secret store，页面和 HTTP 响应只能展示 configured 状态。
 
 进入实现前，优先遵守 `AGENTS.md`、`docs/开发指南/` 和 `.trellis/spec/guides/agentarbor-governance-guide.md`。

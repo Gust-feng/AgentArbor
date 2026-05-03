@@ -1,11 +1,11 @@
 # 运行观察读模型
 
-本文件记录 V0.4 Observation Kernel 契约。当前没有真实 UI、HTTP、SSE、WebSocket、数据库、真实 LLM、MCP、A2A 或 AG-UI adapter；观察模型只是从 EventLog 和 runtime result 派生出的 JSON-safe readonly 投影。
+本文件记录 V0.4 Observation Kernel 契约。当前只有本地 Underground panel 原型会消费观察读模型；没有正式前端框架、SSE、WebSocket、数据库、MCP、A2A 或 AG-UI adapter。观察模型只是从 EventLog 和 runtime result 派生出的 JSON-safe readonly 投影。
 
 ## Scope / Trigger
 
-- Trigger：修改 `src/domain/observation/**`、`src/app/minimal-loop.ts` 的 observation snapshot 输出，或新增未来前端观察字段。
-- Scope：`RunObservationSnapshot`、`RunObservationEventView`、`RunPhase`、`RunStage`、分层 view 和 EventLog 派生规则。
+- Trigger：修改 `src/domain/observation/**`、`src/app/minimal-loop.ts` 的 observation snapshot 输出、本地 panel 观察响应，或新增未来前端观察字段。
+- Scope：`RunObservationSnapshot`、`RunObservationEventView`、`RunPhase`、`RunStage`、分层 view、本地 panel 读模型和 EventLog 派生规则。
 
 ## Signatures
 
@@ -31,6 +31,8 @@
 - `underground.clarificationResponses` 必须从 EventLog 中的 `user_approval.received` payload 派生，暴露 request id、answers、answeredAt 和 evidence refs；不得把 response 作为 EventLog 之外的第二事实源。
 - Handoff view 必须暴露 package ref、direction id/version/status、validation 状态、source candidate refs、convergence review ref 和 package lineage；不能内联 Growth Plan 或 Soil asset content。
 - 地下 demo summary 的 AI 观测摘要必须从 EventLog 与地下运行结果派生，只暴露启用状态、provider / protocol / model、`model.*` 事件计数、completed / failed / configuration_failed 状态、按 rootlet kind 的调用状态、AI candidate count、fallback count / `aiFallbackUsed`，以及与 rootlet output / candidate ref 相关的 `ModelCallRef` 摘要；不得保存完整 prompt、模型正文、API key、token、provider 原始敏感错误或 live provider 对象。
+- 本地 panel HTTP 响应只能返回地下 demo summary、Observation Snapshot 的 JSON-safe 子集、脱敏配置状态，以及由这三者派生的 panel tracking read model；不得返回 EventLog 原始 payload、runtime/store 引用、API key、token、完整模型 prompt 或 provider 原始错误。
+- Panel tracking read model 只服务本地面板展示，必须从 summary / Observation Snapshot / sanitized config 派生，覆盖 phase / stage / status、rootlet kind 集群状态、按 kind 的模型 requested / completed / failed 计数、按 kind 的候选计数、AI candidate / fallback、收束结果、方向包校验和 provider 配置状态；它不能成为 EventLog、Observation Snapshot 或 demo summary 之外的事实源。
 - Aboveground、Fruits、Governance 和 Soil return 当前可以是 summary/stub，但字段必须稳定、JSON-safe、未来可扩展。
 - V0.3 兼容字段如 `directionPackageRef`、`artifactRefs`、`verification` 可以保留给现有调用方；新代码应优先读取 `handoff` 和分层 view。
 - Future frontend 应消费 snapshot / event view，不应绕过 EventLog 直接读取内存 store。
@@ -55,6 +57,7 @@
 | recovery 事件 payload 携带 direction package ref 但 event refs 缺少 `direction_package` / `direction_handoff` | 测试失败；事件 ref 必须从 payload 派生 |
 | blocking unknown 的 Observation view 未暴露 request details | 测试失败；不得只保留 `userEscalationRequired: true` |
 | Direction package view 内联 Growth Plan 或 Soil asset content | 设计违规；只能暴露 refs、status、validation 和 source candidate refs |
+| panel HTTP JSON 响应包含 raw EventLog payload、API key、token 或完整 prompt | 测试失败；必须改为 summary / event view / refs |
 | 18 步 main EventLog sequence 改变 | 测试失败；除非任务 PRD 明确批准新增/替换事件 |
 
 ## Good / Base / Bad Cases
@@ -76,6 +79,7 @@
 - Event views expose `user_clarification` refs when `user_approval.received` carries a clarification response payload。
 - Event views expose `model_call` refs for `model.requested` / `model.completed` / `model.failed` and do not expose false `user_clarification` refs from model `requestId` fields。
 - Underground demo summary exposes secret-free AI event counts, per-rootlet-kind model call status, AI candidate / fallback counts and candidate-related model call refs for explicit AI runs, and reports disabled AI with zero model events for the default run。
+- 本地 panel response 覆盖 no-AI、fake AI、openai-compatible 配置失败和 tracking read model，并证明 HTTP JSON 不包含 raw secret、token 或完整模型 prompt。
 - Recovery path event views expose direction package refs for `user_approval.received`、`direction_handoff.revision_requested` 和最终 `direction_handoff.completed`。
 - Snapshot exposes clarification responses and handoff lineage while staying JSON-safe。
 - Direction Handoff Package、Aboveground store load 和固定 18 步 main EventLog sequence 不回归。

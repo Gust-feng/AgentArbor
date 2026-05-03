@@ -8,7 +8,9 @@
     "build": "tsc -p tsconfig.json",
     "test": "pnpm build && node --test \"dist/**/*.test.js\"",
     "demo": "pnpm build && node dist/app/demo.js",
-    "demo:underground": "pnpm build && node dist/app/underground-demo.js"
+    "demo:underground": "pnpm build && node dist/app/underground-demo.js",
+    "panel": "pnpm build && node dist/app/panel.js",
+    "panel:smoke": "pnpm build && node dist/app/panel.js --port 0 --smoke"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

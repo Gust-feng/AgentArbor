@@ -1,40 +1,91 @@
-import { runUndergroundDirectionSession } from "./underground-direction-session.js";
+import {
+  runUndergroundDirectionSession,
+  runUndergroundDirectionSessionWithIntelligence,
+} from "./underground-direction-session.js";
 import { recoverUndergroundDirectionSession } from "./underground-direction-recovery.js";
 import { createUndergroundDemoSummary } from "./underground-demo-summary.js";
+import {
+  createUndergroundAiRuntimeConfig,
+  UndergroundAiConfigurationError,
+  type UndergroundAiMode,
+} from "./intelligence-channel-factory.js";
 
 const DEFAULT_GOAL = "Build a small deterministic helper.";
 
-const args = parseUndergroundDemoArgs(process.argv.slice(2));
-const result = runUndergroundDirectionSession(args.goal, { outputDirectory: args.outputDirectory });
-const recovery =
-  args.autoAnswer && result.terminalStatus === "awaiting_user"
-    ? recoverUndergroundDirectionSession(result)
-    : undefined;
-const summary = createUndergroundDemoSummary(result, recovery);
+await main();
 
-console.log("AgentArbor underground-only demo");
-console.log("");
-console.log("Goal:");
-console.log(args.goal);
+async function main(): Promise<void> {
+  try {
+    const args = parseUndergroundDemoArgs(process.argv.slice(2));
+    const aiConfig = createUndergroundAiRuntimeConfig({ mode: args.aiMode });
+    const result = aiConfig.enabled
+      ? await runUndergroundDirectionSessionWithIntelligence(args.goal, {
+          outputDirectory: args.outputDirectory,
+          createIntelligenceChannel: aiConfig.createIntelligenceChannel,
+        })
+      : runUndergroundDirectionSession(args.goal, { outputDirectory: args.outputDirectory });
+    const recovery =
+      args.autoAnswer && result.terminalStatus === "awaiting_user"
+        ? recoverUndergroundDirectionSession(result)
+        : undefined;
+    const summary = createUndergroundDemoSummary(result, recovery, aiConfig.summaryInput);
 
-console.log("");
-console.log("EventLog replay:");
-for (const entry of result.runtime.eventLog.list()) {
-  console.log(`${String(entry.sequence).padStart(2, "0")}. ${entry.type}`);
+    console.log("AgentArbor underground-only demo");
+    console.log("");
+    console.log("Goal:");
+    console.log(args.goal);
+
+    console.log("");
+    console.log("AI:");
+    console.log(summary.ai.enabled ? `${summary.ai.mode} (${summary.ai.status})` : "disabled");
+
+    console.log("");
+    console.log("EventLog replay:");
+    for (const entry of result.runtime.eventLog.list()) {
+      console.log(`${String(entry.sequence).padStart(2, "0")}. ${entry.type}`);
+    }
+
+    console.log("");
+    console.log("Summary:");
+    console.log(JSON.stringify(summary, null, 2));
+  } catch (error) {
+    if (error instanceof UndergroundAiConfigurationError) {
+      const configurationSummary = {
+        ai: {
+          ...error.issue.summaryInput,
+          status: "configuration_failed",
+          eventCounts: {
+            requested: 0,
+            completed: 0,
+            failed: 0,
+          },
+          modelCallRefs: [],
+          configurationError: {
+            code: error.issue.code,
+            message: error.issue.message,
+          },
+        },
+      };
+      console.error("AgentArbor underground-only demo configuration error");
+      console.error(error.issue.message);
+      console.error(JSON.stringify(configurationSummary, null, 2));
+      process.exitCode = 1;
+      return;
+    }
+    throw error;
+  }
 }
-
-console.log("");
-console.log("Summary:");
-console.log(JSON.stringify(summary, null, 2));
 
 function parseUndergroundDemoArgs(argv: readonly string[]): {
   goal: string;
   autoAnswer: boolean;
   outputDirectory?: string;
+  aiMode: UndergroundAiMode;
 } {
   const goalParts: string[] = [];
   let autoAnswer = false;
   let outputDirectory: string | undefined;
+  let aiMode: UndergroundAiMode = "none";
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -62,6 +113,19 @@ function parseUndergroundDemoArgs(argv: readonly string[]): {
       outputDirectory = value;
       continue;
     }
+    if (arg === "--ai") {
+      const next = argv[index + 1];
+      if (next === undefined || next.trim() === "") {
+        throw new Error("--ai requires one of: fake, openai-compatible.");
+      }
+      aiMode = parseAiMode(next);
+      index += 1;
+      continue;
+    }
+    if (arg.startsWith("--ai=")) {
+      aiMode = parseAiMode(arg.slice("--ai=".length));
+      continue;
+    }
     goalParts.push(arg);
   }
 
@@ -69,5 +133,13 @@ function parseUndergroundDemoArgs(argv: readonly string[]): {
     goal: goalParts.join(" ").trim() || DEFAULT_GOAL,
     autoAnswer,
     outputDirectory,
+    aiMode,
   };
+}
+
+function parseAiMode(value: string): UndergroundAiMode {
+  if (value === "fake" || value === "openai-compatible") {
+    return value;
+  }
+  throw new Error("--ai requires one of: fake, openai-compatible.");
 }

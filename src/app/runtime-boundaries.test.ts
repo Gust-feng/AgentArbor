@@ -97,11 +97,13 @@ test("runtime has no external LLM SDK dependency or direct provider adapter impo
 
   for (const file of sourceFiles(["src/domain", "src/kernel", "src/app"])) {
     const source = readFileSync(file, "utf8");
-    assert.equal(
-      /from\s+["'][^"']*adapters\/intelligence/.test(source),
-      false,
-      `${file} must not import provider adapters`
-    );
+    if (!isAllowedProviderAdapterCompositionRoot(file)) {
+      assert.equal(
+        /from\s+["'][^"']*adapters\/intelligence/.test(source),
+        false,
+        `${file} must not import provider adapters`
+      );
+    }
     assert.equal(
       /from\s+["'](?:openai|ai|@ai-sdk\/openai|@anthropic-ai\/sdk|@google\/genai|langchain|@langchain\/core)["']/.test(source),
       false,
@@ -128,4 +130,8 @@ function sourceFiles(roots: readonly string[]): string[] {
     walk(root);
   }
   return files;
+}
+
+function isAllowedProviderAdapterCompositionRoot(file: string): boolean {
+  return file.endsWith(join("src", "app", "intelligence-channel-factory.ts"));
 }

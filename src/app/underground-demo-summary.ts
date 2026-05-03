@@ -33,6 +33,7 @@ export type UndergroundDemoSummary = {
   readonly lineage: DirectionHandoffPackageLineage;
   readonly versions: readonly number[];
   readonly writtenPackagePath?: string;
+  readonly ai: UndergroundDemoAiSummary;
   readonly underground: {
     readonly rootletKinds: readonly RootletClusterKind[];
     readonly budget: ExplorationBudget;
@@ -70,12 +71,64 @@ export type UndergroundDemoSummary = {
   readonly eventLog: readonly ArborMessageType[];
 };
 
+export type UndergroundDemoAiInput = {
+  readonly enabled: boolean;
+  readonly mode: "none" | "fake" | "openai-compatible";
+  readonly providerId?: string;
+  readonly providerKind?: string;
+  readonly protocolKind?: string;
+  readonly model?: string;
+  readonly configurationError?: {
+    readonly code: string;
+    readonly message: string;
+  };
+};
+
+export type UndergroundDemoAiSummary = {
+  readonly enabled: boolean;
+  readonly mode: UndergroundDemoAiInput["mode"];
+  readonly providerId?: string;
+  readonly providerKind?: string;
+  readonly protocolKind?: string;
+  readonly model?: string;
+  readonly status:
+    | "disabled"
+    | "not_requested"
+    | "requested"
+    | "completed"
+    | "failed"
+    | "configuration_failed";
+  readonly eventCounts: {
+    readonly requested: number;
+    readonly completed: number;
+    readonly failed: number;
+  };
+  readonly modelCallRefs: readonly {
+    readonly requestId: string;
+    readonly responseId?: string;
+    readonly providerId?: string;
+    readonly providerKind?: string;
+    readonly protocolKind?: string;
+    readonly model?: string;
+    readonly outputKind?: string;
+    readonly validationStatus?: string;
+    readonly rootletOutputRefs: readonly string[];
+    readonly candidateRefs: readonly string[];
+  }[];
+  readonly configurationError?: {
+    readonly code: string;
+    readonly message: string;
+  };
+};
+
 export function createUndergroundDemoSummary(
   result: UndergroundDirectionSessionResult,
-  recovery?: UndergroundDirectionSessionRecoveryResult
+  recovery?: UndergroundDirectionSessionRecoveryResult,
+  aiInput?: UndergroundDemoAiInput
 ): UndergroundDemoSummary {
   const pkg = recovery?.loadedApprovedDirectionHandoffPackage ?? result.loadedDirectionHandoffPackage;
-  const convergence = (recovery?.recoveredUndergroundReport ?? result.undergroundReport).convergenceReport;
+  const undergroundReport = recovery?.recoveredUndergroundReport ?? result.undergroundReport;
+  const convergence = undergroundReport.convergenceReport;
   const escalation = convergence.userClarificationRequest;
   const observationSnapshot = recovery?.observationSnapshot ?? result.observationSnapshot;
 
@@ -87,12 +140,16 @@ export function createUndergroundDemoSummary(
     lineage: pkg.lineage,
     versions: recovery?.packageVersions ?? result.packageVersions,
     writtenPackagePath: recovery?.writtenPackagePath ?? result.writtenPackagePath,
+    ai: summarizeAi({
+      result,
+      recovery,
+      undergroundReport,
+      aiInput,
+    }),
     underground: {
-      rootletKinds: (recovery?.recoveredUndergroundReport ?? result.undergroundReport).plan.rootletClusters.map(
-        (cluster) => cluster.kind
-      ),
-      budget: (recovery?.recoveredUndergroundReport ?? result.undergroundReport).plan.budget,
-      candidateCounts: (recovery?.recoveredUndergroundReport ?? result.undergroundReport).candidatePool.counts,
+      rootletKinds: undergroundReport.plan.rootletClusters.map((cluster) => cluster.kind),
+      budget: undergroundReport.plan.budget,
+      candidateCounts: undergroundReport.candidatePool.counts,
       convergence: {
         reviewId: convergence.reviewId,
         outcome: convergence.outcome,
@@ -142,4 +199,142 @@ function summarizeDirectionPackage(pkg: DirectionHandoffPackage): DirectionPacka
       warnings: pkg.validation.warnings,
     },
   };
+}
+
+function summarizeAi(input: {
+  result: UndergroundDirectionSessionResult;
+  recovery?: UndergroundDirectionSessionRecoveryResult;
+  undergroundReport: UndergroundDirectionSessionResult["undergroundReport"];
+  aiInput?: UndergroundDemoAiInput;
+}): UndergroundDemoAiSummary {
+  const eventEntries = (input.recovery?.runtime ?? input.result.runtime).eventLog.list();
+  const modelEvents = eventEntries.filter(
+    (entry) => entry.type === "model.requested" || entry.type === "model.completed" || entry.type === "model.failed"
+  );
+  const eventCounts = {
+    requested: modelEvents.filter((entry) => entry.type === "model.requested").length,
+    completed: modelEvents.filter((entry) => entry.type === "model.completed").length,
+    failed: modelEvents.filter((entry) => entry.type === "model.failed").length,
+  };
+  const firstPayload = modelEvents.map((entry) => asRecord(entry.message.payload)).find(hasProviderIdentity);
+  const enabled = input.aiInput?.enabled ?? modelEvents.length > 0;
+
+  return {
+    enabled,
+    mode: input.aiInput?.mode ?? (enabled ? "fake" : "none"),
+    providerId: input.aiInput?.providerId ?? stringOrUndefined(firstPayload?.providerId),
+    providerKind: input.aiInput?.providerKind ?? stringOrUndefined(firstPayload?.providerKind),
+    protocolKind: input.aiInput?.protocolKind ?? stringOrUndefined(firstPayload?.protocolKind),
+    model: input.aiInput?.model ?? stringOrUndefined(firstPayload?.model),
+    status: aiStatus(enabled, input.aiInput, eventCounts),
+    eventCounts,
+    modelCallRefs: summarizeModelCallRefs(modelEvents, input.undergroundReport),
+    configurationError: input.aiInput?.configurationError,
+  };
+}
+
+function summarizeModelCallRefs(
+  modelEvents: ReturnType<UndergroundDirectionSessionResult["runtime"]["eventLog"]["list"]>,
+  undergroundReport: UndergroundDirectionSessionResult["undergroundReport"]
+): UndergroundDemoAiSummary["modelCallRefs"] {
+  const calls = new Map<
+    string,
+    {
+      requestId: string;
+      responseId?: string;
+      providerId?: string;
+      providerKind?: string;
+      protocolKind?: string;
+      model?: string;
+      outputKind?: string;
+      validationStatus?: string;
+    }
+  >();
+
+  for (const event of modelEvents) {
+    const payload = asRecord(event.message.payload);
+    const requestId = stringOrUndefined(payload.requestId);
+    if (requestId === undefined) {
+      continue;
+    }
+    const existing = calls.get(requestId) ?? { requestId };
+    calls.set(requestId, {
+      ...existing,
+      responseId: stringOrUndefined(payload.responseId) ?? existing.responseId,
+      providerId: stringOrUndefined(payload.providerId) ?? existing.providerId,
+      providerKind: stringOrUndefined(payload.providerKind) ?? existing.providerKind,
+      protocolKind: stringOrUndefined(payload.protocolKind) ?? existing.protocolKind,
+      model: stringOrUndefined(payload.model) ?? existing.model,
+      outputKind: stringOrUndefined(payload.outputKind) ?? existing.outputKind,
+      validationStatus: stringOrUndefined(payload.validationStatus) ?? existing.validationStatus,
+    });
+  }
+
+  return [...calls.values()].map((call) => {
+    const rootletOutputRefs = inputRelatedRootletOutputRefs(call, undergroundReport);
+    return {
+      ...call,
+      rootletOutputRefs,
+      candidateRefs: undergroundReport.candidatePool.candidates
+        .filter((candidate) => candidate.sourceRefs.some((ref) => rootletOutputRefs.includes(ref)))
+        .map((candidate) => candidate.id),
+    };
+  });
+}
+
+function inputRelatedRootletOutputRefs(
+  call: {
+    requestId: string;
+    responseId?: string;
+  },
+  undergroundReport: UndergroundDirectionSessionResult["undergroundReport"]
+): string[] {
+  return undergroundReport.rootletOutputs
+    .filter((output) => {
+      const refs = [...output.sourceRefs, ...output.evidenceRefs];
+      return (
+        refs.includes(call.requestId) ||
+        (call.responseId !== undefined &&
+          (refs.includes(call.responseId) || refs.includes(`model-call:${call.responseId}`)))
+      );
+    })
+    .map((output) => output.outputId);
+}
+
+function aiStatus(
+  enabled: boolean,
+  aiInput: UndergroundDemoAiInput | undefined,
+  eventCounts: UndergroundDemoAiSummary["eventCounts"]
+): UndergroundDemoAiSummary["status"] {
+  if (aiInput?.configurationError !== undefined) {
+    return "configuration_failed";
+  }
+  if (!enabled) {
+    return "disabled";
+  }
+  if (eventCounts.failed > 0) {
+    return "failed";
+  }
+  if (eventCounts.completed > 0) {
+    return "completed";
+  }
+  if (eventCounts.requested > 0) {
+    return "requested";
+  }
+  return "not_requested";
+}
+
+function hasProviderIdentity(payload: Readonly<Record<string, unknown>> | undefined): payload is Readonly<Record<string, unknown>> {
+  return payload !== undefined && typeof payload.providerId === "string";
+}
+
+function stringOrUndefined(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value : undefined;
+}
+
+function asRecord(value: unknown): Readonly<Record<string, unknown>> {
+  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+    return value as Readonly<Record<string, unknown>>;
+  }
+  return {};
 }

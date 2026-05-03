@@ -18,6 +18,10 @@ test("createUndergroundDemoSummary reports an approved underground package", () 
   assert.equal(summary.recoveredPackage, undefined);
   assert.equal(summary.writtenPackagePath, undefined);
   assert.equal(summary.directionPackage.validation.passed, true);
+  assert.equal(summary.ai.enabled, false);
+  assert.equal(summary.ai.status, "disabled");
+  assert.deepEqual(summary.ai.eventCounts, { requested: 0, completed: 0, failed: 0 });
+  assert.deepEqual(summary.ai.modelCallRefs, []);
   assert.deepEqual(summary.underground.rootletKinds, ["option"]);
   assert.equal(summary.underground.candidateCounts.accepted, 1);
   assert.equal(summary.underground.candidateCounts.merged, 1);
@@ -47,6 +51,32 @@ test("createUndergroundDemoSummary reports auto-answer recovery as approved v2",
   assert.equal(summary.eventLog.includes("user_approval.received"), true);
   assert.equal(summary.eventLog.includes("direction_handoff.completed"), true);
   assert.equal(summary.observationSnapshot.layerStatuses.aboveground, "not_started");
+});
+
+test("createUndergroundDemoSummary reports model events and candidate-layer refs without model content", async () => {
+  const { createUndergroundAiRuntimeConfig } = await import("./intelligence-channel-factory.js");
+  const { runUndergroundDirectionSessionWithIntelligence } = await import("./underground-direction-session.js");
+
+  const aiConfig = createUndergroundAiRuntimeConfig({ mode: "fake" });
+  if (!aiConfig.enabled) {
+    throw new Error("Expected fake AI config to be enabled.");
+  }
+  const result = await runUndergroundDirectionSessionWithIntelligence("Build a small deterministic helper.", {
+    createIntelligenceChannel: aiConfig.createIntelligenceChannel,
+  });
+  const summary = createUndergroundDemoSummary(result, undefined, aiConfig.summaryInput);
+
+  assert.equal(summary.ai.enabled, true);
+  assert.equal(summary.ai.mode, "fake");
+  assert.equal(summary.ai.status, "completed");
+  assert.deepEqual(summary.ai.eventCounts, { requested: 1, completed: 1, failed: 0 });
+  assert.equal(summary.ai.providerKind, "fake");
+  assert.equal(summary.ai.protocolKind, "openai_compatible_chat_completions");
+  assert.equal(summary.ai.model, "fake-deterministic-model");
+  assert.equal(summary.ai.modelCallRefs.length, 1);
+  assert.equal(summary.ai.modelCallRefs[0]?.rootletOutputRefs.length, 1);
+  assert.equal(summary.ai.modelCallRefs[0]?.candidateRefs.length, 1);
+  assert.equal(JSON.stringify(summary).includes("Fake model candidate advice"), false);
 });
 
 test("createUndergroundDemoSummary exposes awaiting-user escalation without entering Aboveground", () => {

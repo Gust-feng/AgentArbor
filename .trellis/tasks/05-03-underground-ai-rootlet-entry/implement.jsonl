@@ -1,0 +1,7 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend runtime spec index and pre-development checklist."}
+{"file": ".trellis/spec/backend/intelligence-channel.md", "reason": "Primary IntelligenceChannel, provider adapter, model event and secret boundary rules."}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Composition root, app, adapter and domain/kernel directory boundaries."}
+{"file": ".trellis/spec/backend/underground-radial-growth.md", "reason": "Underground rootlet AI output must enter candidate pool through invocation and convergence guards."}
+{"file": ".trellis/spec/backend/observation-read-model.md", "reason": "Model events and demo summary must remain JSON-safe and secret-free."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Provider configuration failure and guard error semantics."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Required build, test and demo validation gates."}

@@ -21,6 +21,7 @@
 - `src/kernel/` 保存消息、事件、注册、路由、状态机、产物存储和确定性守卫。
 - `src/app/` 保存应用编排、fake agents 和 demo；fake agents 不是长期 Capability Asset。
 - `src/app/underground-demo-summary.ts` 保存地下-only demo 的纯 summary 投影；CLI 入口只负责读取参数和打印，不把 console 输出逻辑塞进地下运行核心。
+- `src/app/intelligence-channel-factory.ts` 保存 CLI / demo 组合根的智能通道装配；它是 app 层唯一允许导入 provider adapter 的窄入口，地下业务编排只接收注入的 `IntelligenceChannel`。
 - `src/adapters/` 本阶段只能保留 adapter 边界；真实模型 provider adapter 只能在智能通道任务中进入 `src/adapters/intelligence/`。
 - `src/domain/contracts.ts` 是兼容 barrel；新增领域类型应优先落到 `common`、`constraints`、`underground`、`agentarbor`、`aboveground`、`governance` 或 `fruits` 的 focused module，再由 barrel 重导出。
 - `src/app/minimal-underground.ts` 是兼容 barrel；地下确定性材料必须按职责拆到 `underground-rootlets`、`underground-candidates`、`underground-convergence`、`underground-evidence`、`underground-goal-profile` 和 `underground-report` 等 focused modules。

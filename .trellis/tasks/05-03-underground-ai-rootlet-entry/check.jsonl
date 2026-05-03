@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend runtime spec index and quality checklist."}
+{"file": ".trellis/spec/backend/intelligence-channel.md", "reason": "Check IntelligenceChannel, provider adapter, model event and secret boundaries."}
+{"file": ".trellis/spec/backend/underground-radial-growth.md", "reason": "Check underground AI output remains candidate-layer only."}
+{"file": ".trellis/spec/backend/observation-read-model.md", "reason": "Check model observation refs and JSON-safe summary."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Check configuration failure handling."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Check build, test, demo and workspace hygiene gates."}

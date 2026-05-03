@@ -25,6 +25,7 @@
 - `src/kernel/intelligence/` 保存智能通道实现、请求校验、输出校验、事件发布、降级策略和 provider registry。
 - `src/adapters/intelligence/` 保存 OpenAI-compatible Chat Completions、后续 OpenAI Responses、Anthropic Messages、Gemini generateContent 或其他 provider protocol adapter。只有这一层可以读取 provider 凭证或执行 provider HTTP 协议映射；本阶段不得引入外部 LLM SDK。
 - `src/app/**` 的运行流程只能通过注入的 `IntelligenceChannel` 使用模型能力；应用组合根可以装配智能通道和 provider adapter，但不能直接调用 provider SDK、读取 provider-specific response 字段或导入 adapter 实现参与业务流程。
+- `src/app/intelligence-channel-factory.ts` 是当前 CLI / demo 组合根装配 provider adapter 的唯一 app 层例外；地下 session、runner、rootlet、summary 和其他业务编排只能接收 `IntelligenceChannel` 或清洗后的 AI 观测输入，不得直接导入 provider adapter。
 - `src/domain/underground/**`、`src/domain/aboveground/**`、`src/domain/governance/**` 和 `src/kernel/**` 不得直接导入 provider adapter。
 
 ## 生效规则
@@ -37,6 +38,8 @@
 - API key、token、完整敏感 prompt、未授权 Soil 内容和 provider 原始敏感错误不得进入 EventLog、Snapshot、方向交接包或测试快照。
 - Provider 输出不符合 `outputContract` 时必须形成 validation failed，不得被调用方当作成功响应继续收束。
 - hard constraint、Direction Handoff Package validation、状态机守卫和 Governance gate 不得因为模型建议而被跳过。
+- `pnpm demo:underground` 默认不得创建 provider、不得触发真实网络、不得发布 `model.*` 事件；只有显式 `--ai fake` 或 `--ai openai-compatible` 才能启用地下 rootlet 智能通道。
+- `--ai openai-compatible` 必须先完成环境配置校验：`AGENTARBOR_MODEL_API_KEY` 或 `OPENAI_API_KEY` 必须存在，`AGENTARBOR_MODEL_NAME` 必须存在；缺失时必须返回配置失败并确认未尝试网络调用。`AGENTARBOR_MODEL_BASE_URL` 可选，配置和 summary 不得泄漏 API key / token。
 
 ## Validation & Error Matrix
 
@@ -52,6 +55,8 @@
 | global fetch 缺失且未注入 fetch | 返回 provider config failed response，不添加 polyfill |
 | fake provider 返回 fabricated token usage | 测试失败；usage 必须保持 unknown |
 | `model.*` event 的 `requestId` 被投影成 `user_clarification` ref | Observation 回归测试失败 |
+| 未传 `--ai` 的 underground demo 发布 `model.*` 事件 | demo / 测试失败 |
+| `--ai openai-compatible` 缺少 API key 或模型名仍发起 fetch | 配置边界测试失败 |
 
 ## Good / Base / Bad Cases
 
@@ -75,6 +80,7 @@
 - 密钥边界：EventLog、Snapshot 和测试快照不包含 API key / token。
 - Observation ref 边界：`model.completed` 的 `requestId` / `responseId` 生成 `model_call` ref，不能生成 `user_clarification` ref。
 - Underground 接入：模型输出只能进入候选池，不能绕过收束直接进入 package。
+- Underground demo CLI：默认 no-AI、`--ai fake`、`--ai openai-compatible` 配置失败和密钥不泄漏都必须有测试或边界检查。
 
 ## Wrong vs Correct
 

@@ -36,6 +36,8 @@
 - `pnpm demo:underground -- "<goal>"`：地下-only CLI 命令，只运行 Underground Center 到 Direction Handoff Package 边界，不进入 Aboveground。
 - `pnpm demo:underground -- --auto-answer "<goal>"`：仅当地下 session 停在 `awaiting_user` 时自动发布 deterministic 澄清回答并恢复为 approved v2；`approved` / `stopped` 不得伪造恢复。
 - `pnpm demo:underground -- --out <dir> "<goal>"`：只在调用方显式提供 `<dir>` 时写出 Direction Handoff Package；不得默认选择 repo-root `.agentarbor/`。
+- `pnpm demo:underground -- --ai fake "<goal>"`：显式启用 deterministic fake provider，经 `IntelligenceChannel` 触发 `model.requested -> model.completed`，模型输出只能被 rootlet invocation 包装为 `RootletOutput` 后进入 CandidatePool。
+- `pnpm demo:underground -- --ai openai-compatible "<goal>"`：显式启用 OpenAI-compatible Chat Completions provider；配置缺失时必须在 app 组合根失败，不能发起网络调用，不能泄漏 API key / token。
 
 ### 3. Contracts
 
@@ -59,6 +61,7 @@
 - 地下约束交接链当前只在 `direction_handoff` 阶段执行阻断校验；其他 6 个 gate 作为 `candidateConstraintRefs` 可追踪交接，不实现后续层执行。
 - Evidence Ledger 是运行期证据索引，不是 Soil、RunMemory 或长期资产库；它必须由 EventLog / 地下运行结果派生并随 report 暴露。每个 `RootletOutput` 至少引用一条 ledger entry；`UndergroundConvergenceReport.evidenceLedgerRef` 必须指向同一运行的 ledger；user clarification 和 stopped outcome 必须留下对应 evidence entry。
 - 地下-only demo summary 是可读投影，不是 EventLog、RunMemory、Soil 或长期资产；它不得成为新的事实源。
+- 地下-only demo summary 可以从 `model.*` EventLog 派生 AI 观测摘要，字段仅限启用状态、provider / protocol / model、事件计数、completed / failed 状态和与候选池相关的 model call refs；不得包含 API key、token、完整 prompt、provider 原始错误或模型正文。
 
 ### 4. Validation & Error Matrix
 
@@ -76,6 +79,9 @@
 | 地下-only demo 带 `--auto-answer` 且 v1 为 `awaiting_user` | 终态映射回 `approved_package_created`，package version 为 2，Aboveground 仍为 `not_started` |
 | 地下-only demo 未传 `--out` | repo-root `.agentarbor/` 不得新增或修改 |
 | 地下-only demo 传入 `--out <dir>` | package 可从 `<dir>` round-trip load，summary 暴露 canonical `handoff.meta.json` 路径 |
+| 地下-only demo 未传 `--ai` | 不创建 provider、不发布 `model.*` 事件、不触发真实网络 |
+| 地下-only demo 传入 `--ai fake` | 发布 `model.requested -> model.completed`，非 model 地下公开事件仍保持 7 步并停在 handoff boundary |
+| `--ai openai-compatible` 缺少 API key 或模型名 | 返回明确配置失败，不进入 provider fetch，不泄漏密钥 |
 
 ### 5. Good / Base / Bad Cases
 
@@ -103,6 +109,8 @@
 - `runUndergroundDirectionSession` 覆盖 injected package store、显式 `outputDirectory` round-trip 和未传 `--out` 不写 repo-root `.agentarbor/`。
 - 默认 demo 和地下-only session 都不写 repo-root `.agentarbor/`。
 - `pnpm demo:underground` 可运行默认目标和自定义目标，并保持 7 步地下-only EventLog。
+- `pnpm demo:underground -- --ai fake "<goal>"` 覆盖模型事件、AI summary、候选层接入和 Direction Handoff 边界。
+- `pnpm demo:underground -- --ai openai-compatible "<goal>"` 覆盖缺配置失败、无网络调用和密钥不泄漏。
 
 ### 7. Wrong vs Correct
 

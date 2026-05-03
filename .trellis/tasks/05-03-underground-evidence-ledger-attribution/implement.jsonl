@@ -1,0 +1,7 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend runtime spec index and pre-development checklist for src changes."}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Module ownership and directory boundaries for new evidence ledger code."}
+{"file": ".trellis/spec/backend/underground-radial-growth.md", "reason": "Primary Underground Center, CandidatePool, ConvergenceReport, Evidence Ledger and handoff input rules."}
+{"file": ".trellis/spec/backend/direction-handoff-package.md", "reason": "Direction Handoff Package evidence-index, source candidate and validation boundaries."}
+{"file": ".trellis/spec/backend/observation-read-model.md", "reason": "Observation Snapshot JSON-safe projection rules for evidence ledger summary."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Runtime guard and validation failure semantics."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Required build, test and demo validation gates."}

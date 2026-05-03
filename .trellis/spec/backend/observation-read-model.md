@@ -25,7 +25,8 @@
 - Event view 只能从 EventLog entry 派生，不能读取 runtime store。
 - Event ref 提取必须按事件类型区分同名字段。`model.requested`、`model.completed`、`model.failed` 中的 `requestId` / `responseId` 只能生成 `model_call` refs；`user_approval.requested`、`user_approval.received` 和 `direction_handoff.revision_requested` 中的 clarification id 才能生成 `user_clarification` refs。
 - `currentPhase` 和 `currentStage` 必须由 EventLog cursor 派生；没有事件时为 `not_started`。
-- Underground view 必须展示预算、rootlet clusters、rootlet outputs、candidate pool counts、`candidatesByKind`、每个 candidate、每个 convergence decision、candidate comparison、推荐 option、淘汰原因、需要用户确认的冲突、地上参考 option、收束摘要、handoff candidate refs、open questions 和用户升级状态。
+- Underground view 必须展示预算、rootlet clusters、rootlet outputs、candidate pool counts、`candidatesByKind`、每个 candidate、每个 convergence decision、candidate comparison、推荐 option、淘汰原因、需要用户确认的冲突、地上参考 option、收束摘要、handoff candidate refs、open questions、用户升级状态和 evidence ledger 摘要。
+- `underground.evidenceLedger` 必须是 JSON-safe 派生视图，暴露 ledger id、证据总数、按 evidence kind 计数、推荐方向相关 evidence refs、冲突 evidence refs、不足 evidence refs、`hasConflicts`、`hasInsufficientEvidence` 和状态；它不能保存 live ledger/store 引用，也不能成为新的事实源。
 - `underground.userEscalation` 必须在 blocking unknown 存在时暴露 request id、reason、blocking level、status、related candidate refs、questions 和 JSON-safe request 数据；non-blocking unknown 只应出现在 `convergence.openQuestions`。
 - `underground.clarificationResponses` 必须从 EventLog 中的 `user_approval.received` payload 派生，暴露 request id、answers、answeredAt 和 evidence refs；不得把 response 作为 EventLog 之外的第二事实源。
 - Handoff view 必须暴露 package ref、direction id/version/status、validation 状态、source candidate refs、convergence review ref 和 package lineage；不能内联 Growth Plan 或 Soil asset content。
@@ -44,6 +45,7 @@
 | Snapshot 包含 runtime store、class instance、函数或可调用对象 | JSON round-trip 测试失败，必须移除引用并改为 plain data |
 | Event view 需要读取 artifact store、package store 或 runtime 对象才能补字段 | 设计违规；事件视图必须只接收 EventLog entries |
 | Underground view 缺少任一 rootlet、candidate 或 convergence decision | 测试失败；不得只保留汇总 counts |
+| Underground evidence ledger 摘要缺少总数、类型计数或推荐方向 evidence refs | 测试失败；不得只展示自然语言摘要 |
 | `user_approval.requested` payload 携带 clarification request 但 event refs 缺少 `user_clarification` | 测试失败；事件 ref 必须从 payload 派生 |
 | `user_approval.received` payload 携带 clarification response 但 event refs 缺少 `user_clarification` | 测试失败；事件 ref 必须从 payload 派生 |
 | `model.completed` payload 携带 model request id / response id 但 event refs 缺少 `model_call` | 测试失败；事件 ref 必须从 payload 派生 |
@@ -66,6 +68,7 @@
 - `currentPhase` 和 `RunStage` 从 EventLog 派生。
 - Event views include `summary` / `scope` / `severity` / `progress` / `refs` and are projected from EventLog entries only。
 - Underground view lists every rootlet cluster、rootlet output、candidate、candidate kind group、candidate comparison and convergence decision。
+- Underground view exposes evidence ledger summary with total entries、counts by kind、recommended evidence refs、conflict / insufficient evidence state and JSON round-trip safety。
 - Underground view exposes blocking user clarification request details and non-blocking open questions。
 - Event views expose `user_clarification` refs when `user_approval.requested` carries a clarification request payload。
 - Event views expose `user_clarification` refs when `user_approval.received` carries a clarification response payload。

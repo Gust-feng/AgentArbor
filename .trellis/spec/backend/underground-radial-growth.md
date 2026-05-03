@@ -25,9 +25,9 @@
 - `GoalIntentProfile`：包含 `goalId`、`rawGoal`、`goalStatement`、`keyConcepts`、`nonGoals`、`acceptanceCriteria`、`assumptions`、`riskHints`、`constraintHints`、`unknowns`、`createdAt`。
 - `createGoalIntentProfile({ goalId, rawGoal, constraints, createdAt? })`：确定性 Intent Core 解析器。
 - `selectRootletClusterKindsForGoalIntent(profile)`：根据目标画像选择 `option/risk/asset_fit/evidence/constraint/counterfactual`，简单目标不得全量启动 rootlet。
-- `CandidateComparison`：记录 candidate 的 `goalMatch`、`evidenceSupport`、`constraintImpact`、`riskLevel`、`unknowns`、`whyNot`、`conclusion` 和 `evidenceRefs`。
+- `CandidateComparison`：记录 candidate 的 `goalMatch`、`goalMatchBasis`、`evidenceSupport`、`evidenceSupportBasis`、`evidenceGaps`、`constraintImpact`、`constraintImpactBasis`、`hardConstraintConflictRefs`、`riskLevel`、`riskCoverage`、`unknowns`、`whyNot`、`conclusion` 和 `evidenceRefs`。
 - `compareCandidatesForGoal(...)`：基于目标画像、候选和 rootlet output 生成比较、收束决策和 evidence entries；不得按 `clusterId` 硬编码 accepted / merged / rejected。
-- `UndergroundEvidenceLedger`：地下证据账本，收纳 goal intent、Soil constraint、rootlet output、candidate comparison 和 convergence decision evidence。
+- `UndergroundEvidenceLedger`：地下证据账本，收纳 goal intent、Soil constraint、rootlet output、candidate comparison、convergence decision、user clarification 和 stop reason evidence。
 - `createRootletOutputsForInvocation(...)`：单个 rootlet invocation 可以按 rootlet kind 和预算产出多个 `RootletOutput`；输出仍只是候选材料，必须进入 `CandidatePool`。
 - `CandidatePool.candidatesByKind`：按 `RootletClusterKind` 分组的候选视图，必须与扁平 `candidates` 和 `counts` 同步。
 - `runUndergroundDirectionSession(goal, options?)`：地下-only 入口，返回 `approved_package_created`、`awaiting_user` 或 `stopped`，并生成 JSON-safe observation snapshot。`options` 可包含 `constraints`、显式 `packageStore` 或显式 `outputDirectory`；不传 store / output directory 时只能使用 in-memory package store。
@@ -44,7 +44,7 @@
 - 单个 `RootletOutput` 只能进入 `CandidatePool`，不能直接进入 Direction Handoff Package。
 - 单个 rootlet invocation 可以产出多个 `RootletOutput`，但数量必须受该 rootlet cluster 的 `budget.maxCandidateOutputs` 限制；公共 EventLog 仍只记录一次 `exploration_candidate.produced` 阶段事件，payload 可携带多个输出。
 - CandidatePool 必须同时提供扁平候选列表和按 rootlet kind 分组的 `candidatesByKind`；二者都是同一候选事实的视图，不得成为两套事实源。
-- Convergence Judge 必须基于 `CandidateComparison.conclusion` 生成 `accepted/merged/rejected/unknown`，并记录 source candidate refs、evidence refs、推荐主方向、合并项、淘汰原因、需要用户确认的冲突和地上参考方向。
+- Convergence Judge 必须基于 `CandidateComparison.conclusion` 生成 `accepted/merged/rejected/unknown`，并记录 source candidate refs、evidence refs、推荐主方向、合并项、淘汰原因、需要用户确认的冲突和地上参考方向；每个 `CandidateConvergenceDecision` 必须带可追溯的 `evidenceRefs`，并能回到对应 comparison 和 evidence ledger entry。
 - option 候选之间应产生保留 / 合并 / 淘汰裁决；risk、evidence、constraint、asset_fit 和 counterfactual 候选不能直接成为主方向，必须作为证据、约束、风险或 why-not 材料参与交叉裁决。
 - `approved_package_created` 只允许在有 accepted / merged handoff candidates 且无 blocking unknown 时出现。
 - `awaiting_user` 只允许在存在 blocking unknown 和 `UserClarificationRequest` 时出现；non-blocking unknown 不得单独制造等待用户状态。
@@ -57,7 +57,7 @@
 - Direction Handoff 的 `clarifiedGoal`、`nonGoals`、`assumptions`、`risks`、`options` 和 `missingInformation` 必须由 `GoalIntentProfile + CandidatePool + ConvergenceReport` 派生，不得回退到固定 minimal 文案。
 - Direction Handoff 的 `options` 必须保留所有 option 候选方向的取舍记录，不得只写推荐方向；`decisionRecord` 必须记录 retained / merged / rejected / userDecisionRequired / abovegroundReference；`riskRegister` 必须保留风险候选与淘汰候选的来源归因。
 - 地下约束交接链当前只在 `direction_handoff` 阶段执行阻断校验；其他 6 个 gate 作为 `candidateConstraintRefs` 可追踪交接，不实现后续层执行。
-- Evidence Ledger 是运行期证据索引，不是 Soil、RunMemory 或长期资产库；它必须由 EventLog / 地下运行结果派生并随 report 暴露。
+- Evidence Ledger 是运行期证据索引，不是 Soil、RunMemory 或长期资产库；它必须由 EventLog / 地下运行结果派生并随 report 暴露。每个 `RootletOutput` 至少引用一条 ledger entry；`UndergroundConvergenceReport.evidenceLedgerRef` 必须指向同一运行的 ledger；user clarification 和 stopped outcome 必须留下对应 evidence entry。
 - 地下-only demo summary 是可读投影，不是 EventLog、RunMemory、Soil 或长期资产；它不得成为新的事实源。
 
 ### 4. Validation & Error Matrix
@@ -90,9 +90,11 @@
 - Intent Core 能从不同目标派生 key concepts、nonGoals、acceptance criteria、assumptions、risk hints、constraint hints 和 unknowns。
 - 动态 rootlet selection：简单目标不全量启动，复杂目标按信号启动对应 cluster。
 - CandidateComparison 对同一 rootlet kind 在不同目标下能产生不同 convergence decision。
+- CandidateComparison 必须暴露目标匹配依据、证据支持/不足、约束影响、硬约束冲突、风险覆盖、unknown / why-not 和最终 conclusion 的 evidence refs。
 - 单个 rootlet invocation 产出多个候选并受预算限制。
 - CandidatePool 按 `RootletClusterKind` 分组，且分组与扁平候选列表一致。
 - Convergence Judge 覆盖 option 合并、option 与 hard boundary 冲突淘汰、风险候选作为 non-selectable open risk 的裁决。
+- Evidence Ledger 覆盖 goal intent、rootlet output、candidate comparison、convergence decision、user clarification / stop reason，并保证 rootlet output、comparison、decision、report 和 Direction Handoff 之间的 evidence refs 可串联。
 - Direction Handoff 字段从 goal profile、候选和收束报告派生，且不回退固定 minimal 文案。
 - blocking unknown / stopped / approved 三类地下-only 终态均有测试。
 - awaiting_user 通过 `recoverUndergroundDirectionSession` 或 `--auto-answer` 恢复为 approved v2，保持同一 direction id，store versions 为 `[1, 2]`。

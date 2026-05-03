@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend runtime spec index and quality checklist."}
+{"file": ".trellis/spec/backend/underground-radial-growth.md", "reason": "Check Underground evidence ledger, candidate comparison and convergence contracts."}
+{"file": ".trellis/spec/backend/direction-handoff-package.md", "reason": "Check package evidence-index, validation and .agentarbor boundary contracts."}
+{"file": ".trellis/spec/backend/observation-read-model.md", "reason": "Check JSON-safe Observation Snapshot evidence projection."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Check guard and error semantics."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Check build, tests, demo and workspace hygiene gates."}

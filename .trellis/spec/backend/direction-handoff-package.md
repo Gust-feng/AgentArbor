@@ -25,6 +25,7 @@
 ### 3. Contracts
 
 - 包文件清单固定为 `handoff.meta.json`、`direction.md`、`options.json`、`decision-record.md`、`constraints.json`、`soil-refs.json`、`evidence-index.md`、`risk-register.md`、`open-questions.md`、`escalation-rules.md`、`growth-entry.json`。
+- `evidence-index.md` 是 canonical payload 的只读渲染视图，必须展示最终方向相关 evidence refs、source candidates、candidate comparisons、convergence decisions 和 candidate reference index；不得内联 Soil asset 正文、运行时密钥或把 split file 反向变成事实源。
 - `options.json`、`decision-record.md`、`risk-register.md` 的角色只能是 `direction_evidence`，不能承载 Growth Plan。
 - `soilRefs` 只能保存字符串引用；不能内联 Soil asset 的 `content`、`body`、`copy` 或等价字段。
 - Aboveground planning 只能通过 `directionId + version` 从 store 读取已批准并通过校验的 package，不能接收临时手拼的 `DirectionHandoff`。
@@ -38,6 +39,7 @@
 - Direction Handoff 的 `clarifiedGoal`、`nonGoals`、`assumptions`、`risks`、`options` 和 `missingInformation` 必须由 GoalIntentProfile、CandidatePool 和 ConvergenceReport 派生；固定 minimal 文案只能作为没有 profile 的兼容 fallback。
 - Direction Handoff 的 `options` 必须覆盖收束报告中的所有 option 候选方向，并用 `recommendationScore`、`whyNot`、`doNotChooseWhen` 和 `decisionRecord` 表达推荐、合并、淘汰和地上参考关系；不得只把推荐方向写入 package。
 - Direction Handoff 的 `riskRegister` 必须承接 risk rootlet 候选、淘汰候选和用户澄清风险；风险条目只能作为方向证据和交接上下文，不能绕过 convergence 成为正式执行计划。
+- Direction Handoff 的 `evidenceRefs` 必须承接 evidence ledger ref、rootlet output refs、candidate comparison refs、convergence decision refs、open question refs 和必要的 user clarification refs；`evidence-index.md` 只能渲染这些引用和摘要，不复制 Soil 内容。
 - 文件系统 store 的 root directory 是调用方必须显式提供的运行边界。没有显式 root directory、任务出生依据和写入授权时，任何 demo、默认 runtime 或测试 helper 都不得写入仓库根 `.agentarbor/`。
 - 文件系统 store 的 canonical payload 路径是 `<root>/directions/<encoded directionId>/v<version>/handoff.meta.json`；对外展示或断言该路径时必须通过导出的 resolver 获取。
 - store API 固定保持 `save(pkg)`、`load(directionId, version)`、`listVersions(directionId)`、`validate(pkg)`；不得为了谱系增加平行读取接口。
@@ -88,6 +90,7 @@
 - handoff 文本弱化 hard constraint 被拒绝。
 - 地下-only session 生成的 handoff 字段来自目标画像、候选和收束报告，而不是固定 minimal 文案。
 - 多候选地下 session 生成的 `options.json` / `decision-record.md` / `risk-register.md` 反映 retained、merged、rejected、userDecisionRequired 和 abovegroundReference，不退化为单一结论。
+- `evidence-index.md` 对显式文件系统输出不为空，并包含 source candidates、candidate comparisons 和 convergence decisions 的引用视图。
 - file-system store 在临时目录 save/load/list round-trip。
 - explicit `outputDirectory` session 能通过 filesystem store round-trip 读取 `handoff.meta.json`。
 - 默认 demo 不创建或修改仓库根 `.agentarbor/`。

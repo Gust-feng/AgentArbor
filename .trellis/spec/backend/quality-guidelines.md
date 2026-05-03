@@ -19,7 +19,7 @@
 - TypeScript 必须保持 `strict: true`。
 - 测试源码可以放在 `src/**/*.test.ts`，编译后由 Node test runner 执行。
 - 完整 demo 必须打印完整 EventLog 顺序和最终 Fruit / RunMemory / ExperienceCandidate / PathBias 摘要。
-- 地下-only demo 必须只打印到 `.agentarbor` Direction Handoff Package 边界为止，摘要包含 terminal status、package id/version/status/validation、地下 rootlet / budget / candidate / convergence 信息、可选用户升级信息和 observation layer status。
+- 地下-only demo 必须只打印到 `.agentarbor` Direction Handoff Package 边界为止，摘要包含 terminal status、package id/version/status/validation、地下 rootlet / budget / candidate / convergence 信息、可选用户升级信息、AI rootlet kind 状态 / candidate count / fallback count 和 observation layer status。
 - 地下-only demo summary 在恢复路径必须包含 `recoveredPackage`、`lineage`、`versions` 和可选 `writtenPackagePath`；不传 `--out` 时 `writtenPackagePath` 应为空，且 repo-root `.agentarbor/` 不得变化。
 - `dist/`、`node_modules/` 和 coverage 输出必须保持忽略。
 
@@ -47,6 +47,7 @@
 - Good：新守卫加失败测试，新事件改动更新顺序断言。
 - Good：新增 demo 命令时同步测试 summary 纯函数，并运行对应 demo 命令。
 - Good：新增 AI demo 开关时同时覆盖默认 no-AI、fake AI、OpenAI-compatible 配置失败和密钥不泄漏。
+- Good：新增 rootlet AI 输出契约时同时覆盖 6 种 kind 的 contract / prompt / parser、fake AI 复杂目标、AI 失败 fallback 和默认 deterministic no-AI。
 - Base：纯类型补充仍运行 `pnpm build` 和 `pnpm test`。
 - Bad：只运行 `pnpm demo` 或 `pnpm demo:underground` 后宣称测试通过。
 

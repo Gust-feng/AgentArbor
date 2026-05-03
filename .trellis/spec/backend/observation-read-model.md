@@ -30,7 +30,7 @@
 - `underground.userEscalation` 必须在 blocking unknown 存在时暴露 request id、reason、blocking level、status、related candidate refs、questions 和 JSON-safe request 数据；non-blocking unknown 只应出现在 `convergence.openQuestions`。
 - `underground.clarificationResponses` 必须从 EventLog 中的 `user_approval.received` payload 派生，暴露 request id、answers、answeredAt 和 evidence refs；不得把 response 作为 EventLog 之外的第二事实源。
 - Handoff view 必须暴露 package ref、direction id/version/status、validation 状态、source candidate refs、convergence review ref 和 package lineage；不能内联 Growth Plan 或 Soil asset content。
-- 地下 demo summary 的 AI 观测摘要必须从 EventLog 与地下运行结果派生，只暴露启用状态、provider / protocol / model、`model.*` 事件计数、completed / failed / configuration_failed 状态，以及与 rootlet output / candidate ref 相关的 `ModelCallRef` 摘要；不得保存完整 prompt、模型正文、API key、token、provider 原始敏感错误或 live provider 对象。
+- 地下 demo summary 的 AI 观测摘要必须从 EventLog 与地下运行结果派生，只暴露启用状态、provider / protocol / model、`model.*` 事件计数、completed / failed / configuration_failed 状态、按 rootlet kind 的调用状态、AI candidate count、fallback count / `aiFallbackUsed`，以及与 rootlet output / candidate ref 相关的 `ModelCallRef` 摘要；不得保存完整 prompt、模型正文、API key、token、provider 原始敏感错误或 live provider 对象。
 - Aboveground、Fruits、Governance 和 Soil return 当前可以是 summary/stub，但字段必须稳定、JSON-safe、未来可扩展。
 - V0.3 兼容字段如 `directionPackageRef`、`artifactRefs`、`verification` 可以保留给现有调用方；新代码应优先读取 `handoff` 和分层 view。
 - Future frontend 应消费 snapshot / event view，不应绕过 EventLog 直接读取内存 store。
@@ -75,7 +75,7 @@
 - Event views expose `user_clarification` refs when `user_approval.requested` carries a clarification request payload。
 - Event views expose `user_clarification` refs when `user_approval.received` carries a clarification response payload。
 - Event views expose `model_call` refs for `model.requested` / `model.completed` / `model.failed` and do not expose false `user_clarification` refs from model `requestId` fields。
-- Underground demo summary exposes secret-free AI event counts and candidate-related model call refs for explicit AI runs, and reports disabled AI with zero model events for the default run。
+- Underground demo summary exposes secret-free AI event counts, per-rootlet-kind model call status, AI candidate / fallback counts and candidate-related model call refs for explicit AI runs, and reports disabled AI with zero model events for the default run。
 - Recovery path event views expose direction package refs for `user_approval.received`、`direction_handoff.revision_requested` 和最终 `direction_handoff.completed`。
 - Snapshot exposes clarification responses and handoff lineage while staying JSON-safe。
 - Direction Handoff Package、Aboveground store load 和固定 18 步 main EventLog sequence 不回归。

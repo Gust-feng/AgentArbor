@@ -1,0 +1,7 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend runtime spec index and pre-development checklist."}
+{"file": ".trellis/spec/backend/intelligence-channel.md", "reason": "IntelligenceChannel, provider adapter, model event, output contract and secret boundary rules."}
+{"file": ".trellis/spec/backend/underground-radial-growth.md", "reason": "Underground rootlet, CandidatePool, convergence and AI candidate-layer rules."}
+{"file": ".trellis/spec/backend/observation-read-model.md", "reason": "Model event refs and JSON-safe observation/demo summary constraints."}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Focused module placement and app/domain/kernel/adapter boundaries."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "AI failure, fallback and validation failure semantics."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Build, test, demo and workspace hygiene validation gates."}

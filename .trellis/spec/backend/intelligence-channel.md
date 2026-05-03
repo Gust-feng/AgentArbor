@@ -26,6 +26,7 @@
 - `src/adapters/intelligence/` 保存 OpenAI-compatible Chat Completions、后续 OpenAI Responses、Anthropic Messages、Gemini generateContent 或其他 provider protocol adapter。只有这一层可以读取 provider 凭证或执行 provider HTTP 协议映射；本阶段不得引入外部 LLM SDK。
 - `src/app/**` 的运行流程只能通过注入的 `IntelligenceChannel` 使用模型能力；应用组合根可以装配智能通道和 provider adapter，但不能直接调用 provider SDK、读取 provider-specific response 字段或导入 adapter 实现参与业务流程。
 - `src/app/intelligence-channel-factory.ts` 是当前 CLI / demo 组合根装配 provider adapter 的唯一 app 层例外；地下 session、runner、rootlet、summary 和其他业务编排只能接收 `IntelligenceChannel` 或清洗后的 AI 观测输入，不得直接导入 provider adapter。
+- 地下 rootlet AI 建议的 app 层契约拆分为 `src/app/underground/intelligence-contracts.ts`、`intelligence-prompts.ts` 和 `intelligence-output.ts`；6 种 rootlet kind 都必须使用 kind 专属 prompt 和 output contract，请求仍经 `IntelligenceChannel`，响应采用顶层 `candidates` 数组。数组项的 kind 专属字段由 app parser 校验、归一化、丢弃非法项并按 rootlet budget 截断；不要把完整数组 schema 推入当前 `ModelOutputContract` 内核。
 - `src/domain/underground/**`、`src/domain/aboveground/**`、`src/domain/governance/**` 和 `src/kernel/**` 不得直接导入 provider adapter。
 
 ## 生效规则
@@ -37,6 +38,7 @@
 - Observation refs 必须按事件类型解析：`model.*` payload 中的 `requestId` / `responseId` 只能生成 `model_call` ref；`user_approval.*` 和 direction-handoff revision payload 中的 clarification ids 才能生成 `user_clarification` ref。
 - API key、token、完整敏感 prompt、未授权 Soil 内容和 provider 原始敏感错误不得进入 EventLog、Snapshot、方向交接包或测试快照。
 - Provider 输出不符合 `outputContract` 时必须形成 validation failed，不得被调用方当作成功响应继续收束。
+- rootlet AI 调用成功但 app parser 得不到合法候选、provider 失败或输出契约 validation failed 时，rootlet invocation 必须不中断，回退 deterministic output；fallback 必须能从 `model.failed` / `model.completed` 事件、demo summary 和 deterministic output 的 `ai-fallback:*` source refs 观测。
 - hard constraint、Direction Handoff Package validation、状态机守卫和 Governance gate 不得因为模型建议而被跳过。
 - `pnpm demo:underground` 默认不得创建 provider、不得触发真实网络、不得发布 `model.*` 事件；只有显式 `--ai fake` 或 `--ai openai-compatible` 才能启用地下 rootlet 智能通道。
 - `--ai openai-compatible` 必须先完成环境配置校验：`AGENTARBOR_MODEL_API_KEY` 或 `OPENAI_API_KEY` 必须存在，`AGENTARBOR_MODEL_NAME` 必须存在；缺失时必须返回配置失败并确认未尝试网络调用。`AGENTARBOR_MODEL_BASE_URL` 可选，配置和 summary 不得泄漏 API key / token。
@@ -73,6 +75,7 @@
 
 - `IntelligenceChannel` 请求校验：缺少 purpose、output contract、budget 时失败。
 - fake provider completed / failed 路径事件顺序：`model.requested -> model.completed` 或 `model.requested -> model.failed`。
+- 6 种 underground rootlet kind 的候选数组 output contract、kind prompt 和 app parser 必须有 focused 测试；fake AI 复杂目标必须证明每种被选中的 rootlet kind 都经过 `IntelligenceChannel` 发布 `model.requested -> model.completed`。
 - OpenAI-compatible Chat Completions adapter 使用 stubbed fetch 验证 `/v1/chat/completions` 请求与归一化响应映射，不发真实网络。
 - provider adapter 失败映射：鉴权失败、超时、rate limit、输出不合约、fetch 缺失。
 - 事件顺序：`model.requested -> model.completed` 或 `model.requested -> model.failed`。

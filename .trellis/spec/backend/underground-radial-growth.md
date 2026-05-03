@@ -38,6 +38,7 @@
 - `pnpm demo:underground -- --out <dir> "<goal>"`：只在调用方显式提供 `<dir>` 时写出 Direction Handoff Package；不得默认选择 repo-root `.agentarbor/`。
 - `pnpm demo:underground -- --ai fake "<goal>"`：显式启用 deterministic fake provider，经 `IntelligenceChannel` 触发 `model.requested -> model.completed`，模型输出只能被 rootlet invocation 包装为 `RootletOutput` 后进入 CandidatePool。
 - `pnpm demo:underground -- --ai openai-compatible "<goal>"`：显式启用 OpenAI-compatible Chat Completions provider；配置缺失时必须在 app 组合根失败，不能发起网络调用，不能泄漏 API key / token。
+- `requestUndergroundRootletCandidateAdvice(...)`：app 层地下 AI rootlet 调用边界；接收 `GoalIntentProfile`、rootlet cluster、invocation、constraints 和注入的 `IntelligenceChannel`，按 rootlet kind 构造 prompt / output contract，解析顶层 `candidates` 数组，并把合法候选转换为 `RootletOutput`。
 
 ### 3. Contracts
 
@@ -45,6 +46,9 @@
 - Rootlet 选择由 `GoalIntentProfile` 驱动；简单目标默认只启动 `option`，风险/资产/证据/约束/反驳明显时才启动对应 cluster。
 - 单个 `RootletOutput` 只能进入 `CandidatePool`，不能直接进入 Direction Handoff Package。
 - 单个 rootlet invocation 可以产出多个 `RootletOutput`，但数量必须受该 rootlet cluster 的 `budget.maxCandidateOutputs` 限制；公共 EventLog 仍只记录一次 `exploration_candidate.produced` 阶段事件，payload 可携带多个输出。
+- 当地下 session 显式注入 `IntelligenceChannel` 时，所有被动态选中的 rootlet kind 都可以各自最多发起一次 AI 候选建议调用；prompt 必须包含 raw goal、`GoalIntentProfile`、ConstraintRef/约束摘要、rootlet kind、cluster budget、exit criteria 和“AI 只提供候选、不做最终裁决”的约束。
+- rootlet AI 响应必须采用顶层 `candidates` 数组；`option`、`risk`、`asset_fit`、`evidence`、`constraint` 和 `counterfactual` 的数组项字段各自独立。非法项由 app parser 丢弃，合法项按 budget 截断，再包装为 `RootletOutput` 后进入 CandidatePool。
+- AI 失败、输出契约 validation failed 或合法候选为空时，rootlet invocation 必须继续 deterministic fallback；fallback output 的 source refs 必须包含可审计的 `ai-fallback:*` 标记和对应 model request / response refs，不能静默吞掉模型失败。
 - CandidatePool 必须同时提供扁平候选列表和按 rootlet kind 分组的 `candidatesByKind`；二者都是同一候选事实的视图，不得成为两套事实源。
 - Convergence Judge 必须基于 `CandidateComparison.conclusion` 生成 `accepted/merged/rejected/unknown`，并记录 source candidate refs、evidence refs、推荐主方向、合并项、淘汰原因、需要用户确认的冲突和地上参考方向；每个 `CandidateConvergenceDecision` 必须带可追溯的 `evidenceRefs`，并能回到对应 comparison 和 evidence ledger entry。
 - option 候选之间应产生保留 / 合并 / 淘汰裁决；risk、evidence、constraint、asset_fit 和 counterfactual 候选不能直接成为主方向，必须作为证据、约束、风险或 why-not 材料参与交叉裁决。
@@ -61,7 +65,7 @@
 - 地下约束交接链当前只在 `direction_handoff` 阶段执行阻断校验；其他 6 个 gate 作为 `candidateConstraintRefs` 可追踪交接，不实现后续层执行。
 - Evidence Ledger 是运行期证据索引，不是 Soil、RunMemory 或长期资产库；它必须由 EventLog / 地下运行结果派生并随 report 暴露。每个 `RootletOutput` 至少引用一条 ledger entry；`UndergroundConvergenceReport.evidenceLedgerRef` 必须指向同一运行的 ledger；user clarification 和 stopped outcome 必须留下对应 evidence entry。
 - 地下-only demo summary 是可读投影，不是 EventLog、RunMemory、Soil 或长期资产；它不得成为新的事实源。
-- 地下-only demo summary 可以从 `model.*` EventLog 派生 AI 观测摘要，字段仅限启用状态、provider / protocol / model、事件计数、completed / failed 状态和与候选池相关的 model call refs；不得包含 API key、token、完整 prompt、provider 原始错误或模型正文。
+- 地下-only demo summary 可以从 `model.*` EventLog 派生 AI 观测摘要，字段仅限启用状态、provider / protocol / model、事件计数、completed / failed 状态、按 rootlet kind 的 model call 状态、AI candidate count、fallback count / `aiFallbackUsed` 和与候选池相关的 model call refs；不得包含 API key、token、完整 prompt、provider 原始错误或模型正文。
 
 ### 4. Validation & Error Matrix
 
@@ -80,7 +84,7 @@
 | 地下-only demo 未传 `--out` | repo-root `.agentarbor/` 不得新增或修改 |
 | 地下-only demo 传入 `--out <dir>` | package 可从 `<dir>` round-trip load，summary 暴露 canonical `handoff.meta.json` 路径 |
 | 地下-only demo 未传 `--ai` | 不创建 provider、不发布 `model.*` 事件、不触发真实网络 |
-| 地下-only demo 传入 `--ai fake` | 发布 `model.requested -> model.completed`，非 model 地下公开事件仍保持 7 步并停在 handoff boundary |
+| 地下-only demo 传入 `--ai fake` | 被目标画像选中的每种 rootlet kind 各自发布 `model.requested -> model.completed`，非 model 地下公开事件仍保持 7 步并停在 handoff boundary |
 | `--ai openai-compatible` 缺少 API key 或模型名 | 返回明确配置失败，不进入 provider fetch，不泄漏密钥 |
 
 ### 5. Good / Base / Bad Cases
@@ -109,7 +113,7 @@
 - `runUndergroundDirectionSession` 覆盖 injected package store、显式 `outputDirectory` round-trip 和未传 `--out` 不写 repo-root `.agentarbor/`。
 - 默认 demo 和地下-only session 都不写 repo-root `.agentarbor/`。
 - `pnpm demo:underground` 可运行默认目标和自定义目标，并保持 7 步地下-only EventLog。
-- `pnpm demo:underground -- --ai fake "<goal>"` 覆盖模型事件、AI summary、候选层接入和 Direction Handoff 边界。
+- `pnpm demo:underground -- --ai fake "<goal>"` 覆盖模型事件、按 rootlet kind 的 AI summary、候选层接入和 Direction Handoff 边界；复杂目标必须覆盖 6 种 rootlet kind。
 - `pnpm demo:underground -- --ai openai-compatible "<goal>"` 覆盖缺配置失败、无网络调用和密钥不泄漏。
 
 ### 7. Wrong vs Correct
@@ -150,7 +154,7 @@ Rootlet 是否启动和候选如何收束都必须从目标画像和比较结果
 - 地下 session 默认必须走 agent cluster runtime；不能回退到 app helper 直接把 rootlet output 塞进 candidate pool。
 - 调度器必须先注册地下 agent manifests，再按 `GoalIntentProfile` 和动态 rootlet 选择结果启动 rootlet agent invocations。
 - rootlet output 进入正式 candidate pool 前，必须能追溯到 completed `rootlet_agent` invocation，且 `output.producedByAgentId === invocation.agentId`、`invocation.outputRefs` 包含 `output.outputId`。
-- `IntelligenceChannel` 只能作为 rootlet agent 的能力来源；AI output 只有被 rootlet invocation 包装成 `RootletOutput` 后，才能进入 candidate pool。
+- `IntelligenceChannel` 只能作为 rootlet agent 的能力来源；所有 rootlet kind 的 AI output 都只有被 rootlet invocation 包装成 `RootletOutput` 后，才能进入 candidate pool。
 - Convergence Judge 与 Handoff Steward 仍是确定性守门；模型输出不能绕过 candidate pool、convergence report、Direction Handoff Package validation。
 - 不新增事件类型时，复用的地下事件 payload 必须包含 `agentCluster` / `invocation` 信息，证明 plan、run 和 invocations 被调度；Observation Snapshot 必须投影 `underground.agentCluster`。
 
@@ -172,7 +176,7 @@ Rootlet 是否启动和候选如何收束都必须从目标画像和比较结果
 | --- | --- |
 | RootletOutput 缺少 invocationId | `UndergroundConvergenceError`，不得进入 candidate pool |
 | invocation 不存在、不是 `rootlet_agent`、未 completed、producer 不匹配或 outputRefs 不包含 outputId | `UndergroundConvergenceError` |
-| AI output 不符合输出契约 | 智能通道发布 failed，rootlet invocation 不产生 AI rootlet output |
+| AI output 不符合输出契约 | 智能通道发布 failed，rootlet invocation 不产生 AI rootlet output，并以可观测 `ai-fallback:*` refs 回退 deterministic output |
 | 动态 rootlet 选择为 N 个 rootlet kind | Observation 中必须存在 N 个 completed `rootlet_agent` invocations |
 | awaiting_user / stopped | 仍必须生成 agent cluster run 观测结果，且 Aboveground 保持 `not_started` |
 | EventLog / Snapshot 出现 API key、token 或 provider secret | 测试失败 |
@@ -189,7 +193,7 @@ Rootlet 是否启动和候选如何收束都必须从目标画像和比较结果
 
 - 地下-only happy path 通过 agent cluster runtime 产出 approved package，且 EventLog payload 包含 `agentCluster`。
 - Rootlet output 没有关联 completed rootlet invocation 时不能进入 candidate pool。
-- AI output 必须通过 rootlet invocation 才能进入 candidate pool。
+- AI output 必须通过 rootlet invocation 才能进入 candidate pool，且 6 种 rootlet kind 的 fake AI 成功、失败 / validation failed 和默认 no-AI deterministic 路径都要有测试。
 - 动态 rootlet selection 形成对应数量的 rootlet agent invocations。
 - awaiting_user / stopped 仍暴露 agent cluster run，且不进入 Aboveground。
 - Observation Snapshot 展示 cluster plan、invocations、candidate refs 和 package refs。

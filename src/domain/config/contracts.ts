@@ -1,5 +1,7 @@
 export type ConfiguredUndergroundAiMode = "none" | "fake" | "openai-compatible";
 
+export type ConfiguredWebSearchProvider = "tavily" | "none";
+
 export type ConfiguredInformationSourceKind =
   | "web"
   | "page"
@@ -50,6 +52,10 @@ export type UpdateModelProviderConfigInput = {
 
 export type InformationAccessSettings = {
   readonly sourcePreference: readonly ConfiguredInformationSourceKind[];
+  readonly webSearch: {
+    readonly provider: ConfiguredWebSearchProvider;
+    readonly updatedAt: string;
+  };
   readonly tavily: {
     readonly providerKind: "tavily";
     readonly maxResults: number;
@@ -61,20 +67,40 @@ export type InformationAccessSettings = {
 export type SanitizedInformationAccessConfig = {
   readonly sourcePreference: readonly ConfiguredInformationSourceKind[];
   readonly web: {
+    readonly provider: ConfiguredWebSearchProvider;
     readonly providerKind: "tavily";
     readonly maxResults: number;
     readonly secretRef: string;
     readonly secretConfigured: boolean;
     readonly secretUpdatedAt?: string;
+    readonly status: "ready" | "no-provider" | "disabled";
     readonly updatedAt: string;
   };
   readonly stubs: Readonly<Record<"docs" | "packages" | "github" | "run_memory", "stub" | "readonly_stub">>;
+};
+
+export type SanitizedWebSearchConfig = {
+  readonly provider: ConfiguredWebSearchProvider;
+  readonly maxResults: number;
+  readonly secretRef: string;
+  readonly secretConfigured: boolean;
+  readonly secretUpdatedAt?: string;
+  readonly status: "ready" | "no-provider" | "disabled";
+  readonly updatedAt: string;
 };
 
 export type UpdateInformationAccessConfigInput = {
   readonly sourcePreference?: readonly ConfiguredInformationSourceKind[];
   readonly tavilyMaxResults?: number;
   readonly tavilyApiKey?: string;
+};
+
+export type UpdateWebSearchConfigInput = {
+  readonly provider?: ConfiguredWebSearchProvider;
+  readonly apiKey?: string;
+  readonly tavilyApiKey?: string;
+  readonly maxResults?: number;
+  readonly tavilyMaxResults?: number;
 };
 
 export type NormalSettingsStore = {

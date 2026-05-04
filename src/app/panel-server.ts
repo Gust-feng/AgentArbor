@@ -1,6 +1,11 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
-import { createUndergroundAiRuntimeConfig, UndergroundAiConfigurationError, type UndergroundAiMode } from "./intelligence-channel-factory.js";
+import {
+  createConfiguredToolCenterFactory,
+  createUndergroundAiRuntimeConfig,
+  UndergroundAiConfigurationError,
+  type UndergroundAiMode,
+} from "./intelligence-channel-factory.js";
 import {
   runUndergroundDirectionSession,
   runUndergroundDirectionSessionWithIntelligence,
@@ -12,8 +17,10 @@ import { createPanelHtml } from "./panel-assets.js";
 import type {
   SanitizedInformationAccessConfig,
   SanitizedModelProviderConfig,
+  SanitizedWebSearchConfig,
   UpdateInformationAccessConfigInput,
   UpdateModelProviderConfigInput,
+  UpdateWebSearchConfigInput,
 } from "../domain/config/index.js";
 import {
   createPanelRunTrace,
@@ -75,6 +82,10 @@ type PanelRunResponse = {
   readonly trace: PanelRunTraceReadModel;
   readonly transcript: PanelRunTranscript;
   readonly workNotes: PanelRunTranscript["workNotes"];
+};
+
+type PanelToolsConfig = {
+  readonly webSearch: SanitizedWebSearchConfig;
 };
 
 class PanelHttpError extends Error {
@@ -174,6 +185,19 @@ async function handlePanelRequest(
     return;
   }
 
+  if (request.method === "GET" && url.pathname === "/api/config/tools") {
+    const tools: PanelToolsConfig = {
+      webSearch: await runtime.configCenter.getWebSearchConfig(),
+    };
+    writeJson(response, 200, {
+      ok: true,
+      status: "completed",
+      tools,
+      informationAccess: await runtime.configCenter.getInformationAccessConfig(),
+    });
+    return;
+  }
+
   if (request.method === "POST" && url.pathname === "/api/config/model-provider") {
     const body = await readJsonBody(request);
     const config = await runtime.configCenter.updateModelProviderConfig(parseConfigUpdate(body));
@@ -193,6 +217,18 @@ async function handlePanelRequest(
       ok: true,
       status: "completed",
       informationAccess,
+    });
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/config/tools/web-search") {
+    const body = await readJsonBody(request);
+    const webSearch = await runtime.configCenter.updateWebSearchConfig(parseWebSearchUpdate(body));
+    writeJson(response, 200, {
+      ok: true,
+      status: "completed",
+      tools: { webSearch },
+      informationAccess: await runtime.configCenter.getInformationAccessConfig(),
     });
     return;
   }
@@ -468,12 +504,13 @@ async function runUndergroundForPanel(
     };
   }
 
+  const aiEnvironment = await runtime.configCenter.createUndergroundAiEnvironment();
   const aiConfig =
     aiMode === "fake"
-      ? createUndergroundAiRuntimeConfig({ mode: "fake", env: await runtime.configCenter.createUndergroundAiEnvironment() })
+      ? createUndergroundAiRuntimeConfig({ mode: "fake", env: aiEnvironment })
       : createUndergroundAiRuntimeConfig({
           mode: "openai-compatible",
-          env: await runtime.configCenter.createUndergroundAiEnvironment(),
+          env: aiEnvironment,
           fetch: runtime.providerFetch,
         });
 
@@ -481,9 +518,12 @@ async function runUndergroundForPanel(
     throw new Error("Panel AI runtime config unexpectedly disabled for an enabled AI mode.");
   }
 
+  const createToolCenter = await createConfiguredToolCenterFactory(runtime.configCenter, {
+    fetch: runtime.providerFetch,
+  });
   const result = await runUndergroundDirectionSessionWithIntelligence(goal, {
     createIntelligenceChannel: aiConfig.createIntelligenceChannel,
-    createToolCenter: aiConfig.createToolCenter,
+    createToolCenter,
     onRuntimeReady: options.onRuntimeReady,
   });
   const summary = createUndergroundDemoSummary(result, undefined, aiConfig.summaryInput);
@@ -532,6 +572,27 @@ function parseInformationAccessUpdate(raw: unknown): UpdateInformationAccessConf
     tavilyMaxResults: numberOrUndefined(record.tavilyMaxResults),
     sourcePreference: informationSourcePreferenceOrUndefined(record.sourcePreference),
   };
+}
+
+function parseWebSearchUpdate(raw: unknown): UpdateWebSearchConfigInput {
+  const record = asRecord(raw);
+  return {
+    provider: parseOptionalWebSearchProvider(record.provider),
+    apiKey: optionalString(record.apiKey),
+    tavilyApiKey: optionalString(record.tavilyApiKey),
+    maxResults: numberOrUndefined(record.maxResults),
+    tavilyMaxResults: numberOrUndefined(record.tavilyMaxResults),
+  };
+}
+
+function parseOptionalWebSearchProvider(value: unknown): UpdateWebSearchConfigInput["provider"] {
+  if (value === undefined || value === null || value === "") {
+    return undefined;
+  }
+  if (value === "tavily" || value === "none") {
+    return value;
+  }
+  throw new PanelHttpError(400, "invalid_web_search_provider", "搜索工具 provider 无效。");
 }
 
 function informationSourcePreferenceOrUndefined(

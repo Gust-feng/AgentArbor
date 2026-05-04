@@ -24,6 +24,9 @@ test("panel HTML defaults to Simplified Chinese labels and status text", () => {
   assert.equal(html.includes("启动地下运行"), true);
   assert.equal(html.includes("配置中心"), true);
   assert.equal(html.includes("信息源配置"), true);
+  assert.equal(html.includes("工具配置"), true);
+  assert.equal(html.includes("搜索工具 Provider"), true);
+  assert.equal(html.includes("保存搜索工具"), true);
   assert.equal(html.includes("Tavily API Key"), true);
   assert.equal(html.includes("待启动 (pending)"), true);
   assert.equal(html.includes("面板会轮询事件游标、等待点、工作笔记和模型调用状态"), true);
@@ -73,6 +76,103 @@ test("panel config API returns sanitized provider config and never echoes raw AP
     assert.equal(config.body.informationAccess.web.secretConfigured, true);
     assert.equal(update.body.config.baseUrl, "https://provider.example");
     assert.equal(update.body.config.defaultAiMode, "fake");
+  } finally {
+    await server.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("panel tools config routes return sanitized web search config and never echo raw key", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-tools-config-"));
+  const tavilySecret = "tvly-panel-tools-secret";
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+  try {
+    const initial = await requestJson(server.url, "/api/config/tools");
+    const update = await requestJson(server.url, "/api/config/tools/web-search", {
+      method: "POST",
+      body: {
+        provider: "tavily",
+        apiKey: tavilySecret,
+        maxResults: 2,
+      },
+    });
+    const after = await requestJson(server.url, "/api/config/tools");
+    const settingsRaw = await fs.readFile(new FileSystemNormalSettingsStore(directory).settingsPath, "utf8");
+
+    assert.equal(initial.status, 200);
+    assert.equal(initial.body.tools.webSearch.provider, "tavily");
+    assert.equal(initial.body.tools.webSearch.status, "no-provider");
+    assert.equal(update.status, 200);
+    assert.equal(after.status, 200);
+    assert.equal(update.text.includes(tavilySecret), false);
+    assert.equal(after.text.includes(tavilySecret), false);
+    assert.equal(settingsRaw.includes(tavilySecret), false);
+    assert.equal(update.body.tools.webSearch.secretConfigured, true);
+    assert.equal(update.body.tools.webSearch.status, "ready");
+    assert.equal(update.body.tools.webSearch.maxResults, 2);
+    assert.equal(after.body.tools.webSearch.secretConfigured, true);
+  } finally {
+    await server.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("panel tools route can disable web search without using the stored Tavily key", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-tools-disabled-"));
+  const modelSecret = "sk-disabled-tools-secret";
+  const tavilySecret = "tvly-disabled-panel-secret";
+  let modelFetchCalls = 0;
+  let tavilyFetchCalls = 0;
+  const providerFetch: PanelProviderFetch = async (url, init) => {
+    if (url === "https://api.tavily.com/search") {
+      tavilyFetchCalls += 1;
+      throw new Error("Disabled web search provider must not call Tavily fetch.");
+    }
+
+    modelFetchCalls += 1;
+    const body = JSON.parse(init.body) as { messages?: readonly { role?: string }[] };
+    const hasToolMessage = body.messages?.some((message) => message.role === "tool") ?? false;
+    return hasToolMessage ? createStubOpenAiResponse("disabled-tools-model") : createOpenAiSearchToolCallResponse();
+  };
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory, providerFetch });
+  try {
+    await requestJson(server.url, "/api/config/model-provider", {
+      method: "POST",
+      body: {
+        baseUrl: "https://provider.example",
+        model: "disabled-tools-model",
+        apiKey: modelSecret,
+      },
+    });
+    await requestJson(server.url, "/api/config/tools/web-search", {
+      method: "POST",
+      body: {
+        provider: "tavily",
+        apiKey: tavilySecret,
+        maxResults: 1,
+      },
+    });
+    const disabled = await requestJson(server.url, "/api/config/tools/web-search", {
+      method: "POST",
+      body: { provider: "none" },
+    });
+
+    const run = await requestJson(server.url, "/api/underground/run", {
+      method: "POST",
+      body: { goal: "Build a small deterministic helper.", aiMode: "openai-compatible" },
+    });
+
+    assert.equal(disabled.status, 200);
+    assert.equal(disabled.body.tools.webSearch.provider, "none");
+    assert.equal(disabled.body.tools.webSearch.status, "disabled");
+    assert.equal(disabled.body.tools.webSearch.secretConfigured, true);
+    assert.equal(disabled.text.includes(tavilySecret), false);
+    assert.equal(run.status, 200);
+    assert.equal(modelFetchCalls >= 2, true);
+    assert.equal(tavilyFetchCalls, 0);
+    assert.equal(run.body.trace.events.some((event: { type: string }) => event.type === "tool.completed"), true);
+    assert.equal(JSON.stringify(run.body).includes(modelSecret), false);
+    assert.equal(JSON.stringify(run.body).includes(tavilySecret), false);
   } finally {
     await server.close();
     await fs.rm(directory, { recursive: true, force: true });
@@ -424,6 +524,74 @@ test("panel openai-compatible missing key fails before provider fetch", async ()
   }
 });
 
+test("panel openai-compatible run uses configured ToolCenter search from tools route", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-configured-tools-run-"));
+  const modelSecret = "sk-configured-tools-secret";
+  const tavilySecret = "tvly-configured-tools-secret";
+  let modelFetchCalls = 0;
+  let tavilyFetchCalls = 0;
+  const providerFetch: PanelProviderFetch = async (url, init) => {
+    if (url === "https://api.tavily.com/search") {
+      tavilyFetchCalls += 1;
+      const body = JSON.parse(init.body) as { api_key?: string; max_results?: number };
+      assert.equal(body.api_key, tavilySecret);
+      assert.equal(body.max_results, 1);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          results: [
+            {
+              title: "Configured panel search",
+              url: "https://example.test/panel-search",
+              content: "Panel configured ToolCenter search snippet.",
+            },
+          ],
+        }),
+      };
+    }
+
+    modelFetchCalls += 1;
+    const body = JSON.parse(init.body) as { messages?: readonly { role?: string }[] };
+    const hasToolMessage = body.messages?.some((message) => message.role === "tool") ?? false;
+    return hasToolMessage ? createStubOpenAiResponse("configured-tools-model") : createOpenAiSearchToolCallResponse();
+  };
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory, providerFetch });
+  try {
+    await requestJson(server.url, "/api/config/model-provider", {
+      method: "POST",
+      body: {
+        baseUrl: "https://provider.example",
+        model: "configured-tools-model",
+        apiKey: modelSecret,
+      },
+    });
+    await requestJson(server.url, "/api/config/tools/web-search", {
+      method: "POST",
+      body: {
+        provider: "tavily",
+        apiKey: tavilySecret,
+        maxResults: 1,
+      },
+    });
+
+    const run = await requestJson(server.url, "/api/underground/run", {
+      method: "POST",
+      body: { goal: "Build a small deterministic helper.", aiMode: "openai-compatible" },
+    });
+
+    assert.equal(run.status, 200);
+    assert.equal(modelFetchCalls >= 2, true);
+    assert.equal(tavilyFetchCalls, 1);
+    assert.equal(run.body.trace.events.some((event: { type: string }) => event.type === "tool.completed"), true);
+    assert.equal(JSON.stringify(run.body).includes(modelSecret), false);
+    assert.equal(JSON.stringify(run.body).includes(tavilySecret), false);
+  } finally {
+    await server.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("panel openai-compatible missing model does not leak configured API key", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-missing-model-"));
   const secret = "sk-model-missing-secret";
@@ -556,6 +724,38 @@ function createStubOpenAiResponse(
         completion_tokens: 12,
         total_tokens: 22,
       },
+    }),
+  };
+}
+
+function createOpenAiSearchToolCallResponse(): Awaited<ReturnType<PanelProviderFetch>> {
+  return {
+    ok: true,
+    status: 200,
+    json: async () => ({
+      model: "configured-tools-model",
+      choices: [
+        {
+          finish_reason: "tool_calls",
+          message: {
+            role: "assistant",
+            content: "",
+            tool_calls: [
+              {
+                id: "call-panel-search",
+                type: "function",
+                function: {
+                  name: "search",
+                  arguments: JSON.stringify({
+                    query: "AgentArbor configured panel search",
+                    sources: ["web"],
+                  }),
+                },
+              },
+            ],
+          },
+        },
+      ],
     }),
   };
 }

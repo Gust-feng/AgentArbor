@@ -7,6 +7,7 @@ import { NativeIntelligenceChannel } from "../kernel/intelligence/channel.js";
 import type { IntelligenceChannel } from "../domain/intelligence/index.js";
 import type { InformationSourceKind } from "../domain/research/index.js";
 import type { ToolExecutionBroker } from "../domain/tools/index.js";
+import type { ConfigCenter } from "./config-center.js";
 import type { MinimalRuntime } from "./runtime.js";
 import {
   createDefaultResearchRuntime,
@@ -159,6 +160,43 @@ export function createDefaultToolCenter(input: {
   readonly sourcePreference?: readonly InformationSourceKind[];
   readonly tavilyMaxResults?: number;
 } = {}): ToolExecutionBroker {
+  return createToolCenterFromEnvironment(input);
+}
+
+export async function createConfiguredToolCenter(
+  configCenter: ConfigCenter,
+  input: {
+    readonly runtime?: MinimalRuntime;
+    readonly fetch?: FetchLike;
+    readonly sourcePreference?: readonly InformationSourceKind[];
+    readonly tavilyMaxResults?: number;
+  } = {}
+): Promise<ToolExecutionBroker> {
+  return createToolCenterFromEnvironment({
+    ...input,
+    env: await configCenter.createUndergroundAiEnvironment(),
+  });
+}
+
+export async function createConfiguredToolCenterFactory(
+  configCenter: ConfigCenter,
+  input: {
+    readonly fetch?: FetchLike;
+    readonly sourcePreference?: readonly InformationSourceKind[];
+    readonly tavilyMaxResults?: number;
+  } = {}
+): Promise<(runtime: MinimalRuntime) => ToolExecutionBroker> {
+  const env = await configCenter.createUndergroundAiEnvironment();
+  return (runtime) => createToolCenterFromEnvironment({ ...input, runtime, env });
+}
+
+function createToolCenterFromEnvironment(input: {
+  readonly runtime?: MinimalRuntime;
+  readonly env?: UndergroundAiEnvironment;
+  readonly fetch?: FetchLike;
+  readonly sourcePreference?: readonly InformationSourceKind[];
+  readonly tavilyMaxResults?: number;
+}): ToolExecutionBroker {
   const env = input.env ?? process.env;
   const center = new ToolCenter();
   const researchRuntime = createDefaultResearchRuntime({

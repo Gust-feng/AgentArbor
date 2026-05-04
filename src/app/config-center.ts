@@ -7,12 +7,15 @@ import {
 import type {
   AgentArborLocalSettings,
   ConfiguredUndergroundAiMode,
+  ConfiguredWebSearchProvider,
   LocalDevSecretStore,
   NormalSettingsStore,
   SanitizedInformationAccessConfig,
   SanitizedModelProviderConfig,
+  SanitizedWebSearchConfig,
   UpdateInformationAccessConfigInput,
   UpdateModelProviderConfigInput,
+  UpdateWebSearchConfigInput,
 } from "../domain/config/index.js";
 import type { ConfiguredInformationSourceKind, InformationAccessSettings } from "../domain/config/index.js";
 
@@ -82,24 +85,33 @@ export class ConfigCenter {
     return this.toSanitizedInformationAccessConfig(settings);
   }
 
+  async getWebSearchConfig(): Promise<SanitizedWebSearchConfig> {
+    const settings = await this.readOrCreateSettings();
+    return this.toSanitizedWebSearchConfig(settings);
+  }
+
   async updateInformationAccessConfig(
     input: UpdateInformationAccessConfigInput
   ): Promise<SanitizedInformationAccessConfig> {
     const current = await this.readOrCreateSettings();
     const now = new Date().toISOString();
     const currentInformation = normalizeInformationAccessSettings(current.informationAccess, now);
+    const tavilyApiKey = normalizeOptionalString(input.tavilyApiKey);
     const nextInformation: InformationAccessSettings = {
       sourcePreference:
         input.sourcePreference === undefined || input.sourcePreference.length === 0
           ? currentInformation.sourcePreference
           : normalizeSourcePreference(input.sourcePreference),
+      webSearch: {
+        provider: tavilyApiKey === undefined ? currentInformation.webSearch.provider : "tavily",
+        updatedAt: now,
+      },
       tavily: {
         ...currentInformation.tavily,
         maxResults: normalizePositiveInteger(input.tavilyMaxResults) ?? currentInformation.tavily.maxResults,
         updatedAt: now,
       },
     };
-    const tavilyApiKey = normalizeOptionalString(input.tavilyApiKey);
     if (tavilyApiKey !== undefined) {
       await this.options.secretStore.writeSecret(nextInformation.tavily.secretRef, tavilyApiKey);
     }
@@ -112,11 +124,49 @@ export class ConfigCenter {
     return this.toSanitizedInformationAccessConfig({ ...current, informationAccess: nextInformation, updatedAt: now });
   }
 
+  async updateWebSearchConfig(input: UpdateWebSearchConfigInput): Promise<SanitizedWebSearchConfig> {
+    const current = await this.readOrCreateSettings();
+    const now = new Date().toISOString();
+    const currentInformation = normalizeInformationAccessSettings(current.informationAccess, now);
+    const apiKey = firstNonBlank(input.apiKey, input.tavilyApiKey);
+    const provider =
+      normalizeWebSearchProvider(input.provider) ??
+      (apiKey === undefined ? currentInformation.webSearch.provider : "tavily");
+    const nextInformation: InformationAccessSettings = {
+      sourcePreference: currentInformation.sourcePreference,
+      webSearch: {
+        provider,
+        updatedAt: now,
+      },
+      tavily: {
+        ...currentInformation.tavily,
+        maxResults:
+          normalizePositiveInteger(input.maxResults) ??
+          normalizePositiveInteger(input.tavilyMaxResults) ??
+          currentInformation.tavily.maxResults,
+        updatedAt: now,
+      },
+    };
+    if (apiKey !== undefined) {
+      await this.options.secretStore.writeSecret(nextInformation.tavily.secretRef, apiKey);
+    }
+    await this.options.settingsStore.writeSettings({
+      ...current,
+      version: 2,
+      informationAccess: nextInformation,
+      updatedAt: now,
+    });
+    return this.toSanitizedWebSearchConfig({ ...current, informationAccess: nextInformation, updatedAt: now });
+  }
+
   async createUndergroundAiEnvironment(): Promise<UndergroundAiConfigEnvironment> {
     const settings = await this.readOrCreateSettings();
     const apiKey = await this.options.secretStore.readSecret(settings.modelProvider.secretRef);
     const informationAccess = normalizeInformationAccessSettings(settings.informationAccess, settings.updatedAt);
-    const tavilyApiKey = await this.options.secretStore.readSecret(informationAccess.tavily.secretRef);
+    const tavilyApiKey =
+      informationAccess.webSearch.provider === "none"
+        ? undefined
+        : await this.options.secretStore.readSecret(informationAccess.tavily.secretRef);
     return {
       AGENTARBOR_MODEL_API_KEY: apiKey,
       AGENTARBOR_MODEL_NAME: settings.modelProvider.model,
@@ -159,16 +209,18 @@ export class ConfigCenter {
     settings: AgentArborLocalSettings
   ): Promise<SanitizedInformationAccessConfig> {
     const informationAccess = normalizeInformationAccessSettings(settings.informationAccess, settings.updatedAt);
-    const secret = await this.options.secretStore.getMetadata(informationAccess.tavily.secretRef);
+    const webSearch = await this.toSanitizedWebSearchConfig(settings);
     return {
       sourcePreference: [...informationAccess.sourcePreference],
       web: {
+        provider: webSearch.provider,
         providerKind: informationAccess.tavily.providerKind,
-        maxResults: informationAccess.tavily.maxResults,
-        secretRef: informationAccess.tavily.secretRef,
-        secretConfigured: secret.configured,
-        secretUpdatedAt: secret.updatedAt,
-        updatedAt: informationAccess.tavily.updatedAt,
+        maxResults: webSearch.maxResults,
+        secretRef: webSearch.secretRef,
+        secretConfigured: webSearch.secretConfigured,
+        secretUpdatedAt: webSearch.secretUpdatedAt,
+        status: webSearch.status,
+        updatedAt: webSearch.updatedAt,
       },
       stubs: {
         docs: "stub",
@@ -176,6 +228,21 @@ export class ConfigCenter {
         github: "stub",
         run_memory: "readonly_stub",
       },
+    };
+  }
+
+  private async toSanitizedWebSearchConfig(settings: AgentArborLocalSettings): Promise<SanitizedWebSearchConfig> {
+    const informationAccess = normalizeInformationAccessSettings(settings.informationAccess, settings.updatedAt);
+    const secret = await this.options.secretStore.getMetadata(informationAccess.tavily.secretRef);
+    const provider = informationAccess.webSearch.provider;
+    return {
+      provider,
+      maxResults: informationAccess.tavily.maxResults,
+      secretRef: informationAccess.tavily.secretRef,
+      secretConfigured: secret.configured,
+      secretUpdatedAt: secret.updatedAt,
+      status: provider === "none" ? "disabled" : secret.configured ? "ready" : "no-provider",
+      updatedAt: informationAccess.webSearch.updatedAt,
     };
   }
 }
@@ -215,6 +282,10 @@ export function createDefaultLocalSettings(now: string = new Date().toISOString(
 function createDefaultInformationAccessSettings(now: string): InformationAccessSettings {
   return {
     sourcePreference: [...DEFAULT_INFORMATION_SOURCE_PREFERENCE],
+    webSearch: {
+      provider: "tavily",
+      updatedAt: now,
+    },
     tavily: {
       providerKind: "tavily",
       maxResults: DEFAULT_TAVILY_MAX_RESULTS,
@@ -233,6 +304,10 @@ function normalizeInformationAccessSettings(
   }
   return {
     sourcePreference: normalizeSourcePreference(settings.sourcePreference),
+    webSearch: {
+      provider: normalizeWebSearchProvider(settings.webSearch?.provider) ?? "tavily",
+      updatedAt: normalizeOptionalString(settings.webSearch?.updatedAt) ?? settings.tavily.updatedAt ?? now,
+    },
     tavily: {
       providerKind: "tavily",
       maxResults: normalizePositiveInteger(settings.tavily.maxResults) ?? DEFAULT_TAVILY_MAX_RESULTS,
@@ -256,6 +331,10 @@ function normalizeOptionalString(value: string | undefined): string | undefined 
 
 function normalizeAiMode(value: ConfiguredUndergroundAiMode | undefined): ConfiguredUndergroundAiMode | undefined {
   return value === "none" || value === "fake" || value === "openai-compatible" ? value : undefined;
+}
+
+function normalizeWebSearchProvider(value: ConfiguredWebSearchProvider | undefined): ConfiguredWebSearchProvider | undefined {
+  return value === "tavily" || value === "none" ? value : undefined;
 }
 
 function normalizeSourcePreference(
@@ -283,4 +362,14 @@ function normalizePositiveInteger(value: number | undefined): number | undefined
     return undefined;
   }
   return Math.max(1, Math.floor(value));
+}
+
+function firstNonBlank(...values: readonly (string | undefined)[]): string | undefined {
+  for (const value of values) {
+    const normalized = normalizeOptionalString(value);
+    if (normalized !== undefined) {
+      return normalized;
+    }
+  }
+  return undefined;
 }

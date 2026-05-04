@@ -30,6 +30,8 @@ export function buildUndergroundRootletCandidateAdviceMessages(
         "Classify information needs before tool use: real-world cases, implementation approaches, project state, technical docs, existing packages, known issues, and historical similar runs.",
         "`search` returns research refs and short snippets; `read` expands a selected ref or URL into a truncated safe preview.",
         "AI output is candidate advice only. It must not approve a Direction Handoff, bypass CandidatePool, bypass Convergence Judge, or weaken hard constraints.",
+        "You have access to research tools: search(query, sources?) finds safe refs across web, codebase, docs, packages, github, soil, and run_memory; read(ref) opens a selected research ref or URL into a truncated safe preview.",
+        "Research workflow: identify the information need, always search before speculating, read the most relevant ref before relying on it, cite research:* refs in candidate sourceRefs/evidenceRefs, and stop when the tool reports no-provider/stub instead of inventing facts.",
         "Use research refs, model refs, tool refs, and concise summaries. Do not inline Soil asset body content, raw provider output, full page text, prompts, or secrets.",
       ].join("\n"),
       ref: "docs/开发指南/04-模型与契约/08-智能通道契约.md",

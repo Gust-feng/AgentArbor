@@ -489,16 +489,32 @@ export function createPanelHtml(): string {
               <button id="configButton" type="submit">保存配置</button>
               <span id="secretState" class="hint">密钥未配置</span>
             </div>
-            <h3>信息源配置</h3>
+          </form>
+          <form id="toolConfigForm" class="fields" style="margin-top: 14px;">
+            <h3>工具配置</h3>
             <div class="row">
-              <label>Tavily API Key
-                <input id="tavilyApiKeyInput" type="password" autocomplete="new-password" placeholder="仅写入，不回显">
+              <label>搜索工具 Provider
+                <select id="webSearchProviderInput">
+                  <option value="tavily">Tavily 搜索 (tavily)</option>
+                  <option value="none">不启用搜索 provider (none)</option>
+                </select>
               </label>
               <label>搜索结果数
                 <input id="tavilyMaxResultsInput" type="number" min="1" max="10" step="1">
               </label>
             </div>
-            <p id="informationSourceState" class="hint">信息源未配置</p>
+            <div class="row">
+              <label>Tavily API Key
+                <input id="tavilyApiKeyInput" type="password" autocomplete="new-password" placeholder="仅写入，不回显">
+              </label>
+              <label>信息源配置
+                <input id="informationSourcePreferenceInput" autocomplete="off" readonly>
+              </label>
+            </div>
+            <div class="actions">
+              <button id="toolConfigButton" type="submit">保存搜索工具</button>
+              <span id="informationSourceState" class="hint">搜索工具未配置</span>
+            </div>
           </form>
         </section>
 
@@ -654,6 +670,11 @@ export function createPanelHtml(): string {
       missing_secret: "缺少 API key",
       missing_model_and_secret: "缺少模型名和 API key"
     };
+    const WEB_SEARCH_STATUS_LABELS = {
+      ready: "Tavily 已配置",
+      "no-provider": "Tavily 未配置",
+      disabled: "搜索 provider 已禁用"
+    };
     const CONVERGENCE_LABELS = {
       approved: "已批准 (approved)",
       awaiting_user: "等待用户澄清 (awaiting_user)",
@@ -672,7 +693,7 @@ export function createPanelHtml(): string {
       skipped: "跳过"
     };
 
-    const state = { config: undefined, informationAccess: undefined, lastRun: undefined, pollToken: 0 };
+    const state = { config: undefined, informationAccess: undefined, tools: undefined, lastRun: undefined, pollToken: 0 };
 
     const runStatus = document.getElementById("runStatus");
     const goalInput = document.getElementById("goalInput");
@@ -682,11 +703,14 @@ export function createPanelHtml(): string {
     const defaultAiModeInput = document.getElementById("defaultAiModeInput");
     const apiKeyInput = document.getElementById("apiKeyInput");
     const secretState = document.getElementById("secretState");
+    const webSearchProviderInput = document.getElementById("webSearchProviderInput");
     const tavilyApiKeyInput = document.getElementById("tavilyApiKeyInput");
     const tavilyMaxResultsInput = document.getElementById("tavilyMaxResultsInput");
+    const informationSourcePreferenceInput = document.getElementById("informationSourcePreferenceInput");
     const informationSourceState = document.getElementById("informationSourceState");
     const runButton = document.getElementById("runButton");
     const configButton = document.getElementById("configButton");
+    const toolConfigButton = document.getElementById("toolConfigButton");
 
     document.getElementById("runForm").addEventListener("submit", async (event) => {
       event.preventDefault();
@@ -698,14 +722,21 @@ export function createPanelHtml(): string {
       await saveConfig();
     });
 
+    document.getElementById("toolConfigForm").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      await saveToolConfig();
+    });
+
     loadConfig().catch((error) => showError(error));
 
     async function loadConfig() {
       const response = await requestJson("/api/config");
+      const toolsResponse = await requestJson("/api/config/tools");
       state.config = response.config;
       state.informationAccess = response.informationAccess;
+      state.tools = toolsResponse.tools;
       renderConfig(response.config);
-      renderInformationAccess(response.informationAccess);
+      renderInformationAccess(toolsResponse.informationAccess || response.informationAccess, toolsResponse.tools);
       renderProviderStatus(response.config, undefined, response.informationAccess);
       renderIdleWorkbench(response.config);
     }
@@ -722,23 +753,37 @@ export function createPanelHtml(): string {
             apiKey: apiKeyInput.value
           }
         });
-        const informationResponse = await requestJson("/api/config/information-sources", {
-          method: "POST",
-          body: {
-            tavilyApiKey: tavilyApiKeyInput.value,
-            tavilyMaxResults: Number(tavilyMaxResultsInput.value || "5")
-          }
-        });
         apiKeyInput.value = "";
-        tavilyApiKeyInput.value = "";
         state.config = response.config;
-        state.informationAccess = informationResponse.informationAccess;
+        state.informationAccess = response.informationAccess || state.informationAccess;
         renderConfig(response.config);
-        renderInformationAccess(informationResponse.informationAccess);
-        renderProviderStatus(response.config, undefined, informationResponse.informationAccess);
+        renderProviderStatus(response.config, undefined, state.informationAccess);
         if (!state.lastRun) {
           renderIdleWorkbench(response.config);
         }
+      } catch (error) {
+        showError(error);
+      } finally {
+        setButtons(true);
+      }
+    }
+
+    async function saveToolConfig() {
+      setButtons(false);
+      try {
+        const response = await requestJson("/api/config/tools/web-search", {
+          method: "POST",
+          body: {
+            provider: webSearchProviderInput.value,
+            apiKey: tavilyApiKeyInput.value,
+            maxResults: Number(tavilyMaxResultsInput.value || "5")
+          }
+        });
+        tavilyApiKeyInput.value = "";
+        state.tools = response.tools;
+        state.informationAccess = response.informationAccess || state.informationAccess;
+        renderInformationAccess(state.informationAccess, response.tools);
+        renderProviderStatus(getCurrentConfig(), undefined, state.informationAccess);
       } catch (error) {
         showError(error);
       } finally {
@@ -823,14 +868,20 @@ export function createPanelHtml(): string {
       secretState.textContent = config.secretConfigured ? "密钥已配置" : "密钥未配置";
     }
 
-    function renderInformationAccess(informationAccess) {
+    function renderInformationAccess(informationAccess, tools) {
       if (!informationAccess) {
         tavilyMaxResultsInput.value = "5";
-        informationSourceState.textContent = "信息源未配置";
+        informationSourcePreferenceInput.value = "";
+        informationSourceState.textContent = "搜索工具未配置";
         return;
       }
-      tavilyMaxResultsInput.value = String(informationAccess.web?.maxResults || 5);
-      informationSourceState.textContent = informationAccess.web?.secretConfigured ? "Tavily 已配置" : "Tavily 未配置";
+      const webSearch = tools?.webSearch || informationAccess.web;
+      webSearchProviderInput.value = webSearch?.provider || "tavily";
+      tavilyMaxResultsInput.value = String(webSearch?.maxResults || 5);
+      tavilyApiKeyInput.placeholder = webSearch?.secretConfigured ? "已配置，留空保持不变" : "仅写入，不回显";
+      informationSourcePreferenceInput.value = (informationAccess.sourcePreference || []).join(", ");
+      informationSourceState.textContent =
+        WEB_SEARCH_STATUS_LABELS[webSearch?.status] || (webSearch?.secretConfigured ? "Tavily 已配置" : "Tavily 未配置");
     }
 
     function renderProviderStatus(config, provider, informationAccess) {
@@ -843,7 +894,7 @@ export function createPanelHtml(): string {
         ["接口地址", config.baseUrl || "未配置"],
         ["密钥", config.secretConfigured ? "已配置" : "未配置"],
         ["协议", config.protocolKind || "未配置"],
-        ["Tavily", sources?.web?.secretConfigured ? "已配置" : "未配置"],
+        ["搜索工具", WEB_SEARCH_STATUS_LABELS[sources?.web?.status] || (sources?.web?.secretConfigured ? "Tavily 已配置" : "Tavily 未配置")],
         ["信息源", (sources?.sourcePreference || []).join(" / ") || "未配置"]
       ]);
     }
@@ -1437,6 +1488,7 @@ export function createPanelHtml(): string {
     function setButtons(enabled) {
       runButton.disabled = !enabled;
       configButton.disabled = !enabled;
+      toolConfigButton.disabled = !enabled;
     }
 
     function formatAiMode(mode) {

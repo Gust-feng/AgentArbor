@@ -25,6 +25,7 @@ test("ConfigCenter keeps raw API key out of the normal settings store", async ()
       tavilyApiKey: tavilySecret,
       tavilyMaxResults: 3,
     });
+    const webSearch = await configCenter.getWebSearchConfig();
     const env = await configCenter.createUndergroundAiEnvironment();
     const settingsRaw = await fs.readFile(settingsStore.settingsPath, "utf8");
     const secretsRaw = await fs.readFile(secretStore.secretsPath, "utf8");
@@ -46,6 +47,76 @@ test("ConfigCenter keeps raw API key out of the normal settings store", async ()
     assert.equal(informationAccess.web.secretConfigured, true);
     assert.equal(informationAccess.web.maxResults, 3);
     assert.equal(JSON.stringify(informationAccess).includes(tavilySecret), false);
+    assert.equal(webSearch.provider, "tavily");
+    assert.equal(webSearch.secretConfigured, true);
+    assert.equal(webSearch.status, "ready");
+    assert.equal(JSON.stringify(webSearch).includes(tavilySecret), false);
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("ConfigCenter web search compatibility API stores key only in secret store", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-web-search-config-"));
+  const tavilySecret = "tvly-web-search-secret";
+  try {
+    const settingsStore = new FileSystemNormalSettingsStore(directory);
+    const secretStore = new FileSystemLocalDevSecretStore(directory);
+    const configCenter = new ConfigCenter({ settingsStore, secretStore });
+
+    const updated = await configCenter.updateWebSearchConfig({
+      provider: "tavily",
+      apiKey: tavilySecret,
+      maxResults: 2,
+    });
+    const fromGetter = await configCenter.getWebSearchConfig();
+    const env = await configCenter.createUndergroundAiEnvironment();
+    const settingsRaw = await fs.readFile(settingsStore.settingsPath, "utf8");
+    const secretsRaw = await fs.readFile(secretStore.secretsPath, "utf8");
+
+    assert.equal(updated.provider, "tavily");
+    assert.equal(updated.status, "ready");
+    assert.equal(updated.secretConfigured, true);
+    assert.equal(updated.maxResults, 2);
+    assert.equal(JSON.stringify(updated).includes(tavilySecret), false);
+    assert.deepEqual(fromGetter, updated);
+    assert.equal(env.AGENTARBOR_TAVILY_API_KEY, tavilySecret);
+    assert.equal(settingsRaw.includes(tavilySecret), false);
+    assert.equal(secretsRaw.includes(tavilySecret), true);
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("ConfigCenter web search provider none disables Tavily environment projection", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-web-search-disabled-"));
+  const tavilySecret = "tvly-disabled-secret";
+  try {
+    const settingsStore = new FileSystemNormalSettingsStore(directory);
+    const secretStore = new FileSystemLocalDevSecretStore(directory);
+    const configCenter = new ConfigCenter({ settingsStore, secretStore });
+
+    await configCenter.updateWebSearchConfig({
+      provider: "tavily",
+      apiKey: tavilySecret,
+      maxResults: 4,
+    });
+    const disabled = await configCenter.updateWebSearchConfig({ provider: "none" });
+    const informationAccess = await configCenter.getInformationAccessConfig();
+    const env = await configCenter.createUndergroundAiEnvironment();
+    const settingsRaw = await fs.readFile(settingsStore.settingsPath, "utf8");
+    const secretsRaw = await fs.readFile(secretStore.secretsPath, "utf8");
+
+    assert.equal(disabled.provider, "none");
+    assert.equal(disabled.status, "disabled");
+    assert.equal(disabled.secretConfigured, true);
+    assert.equal(disabled.maxResults, 4);
+    assert.equal(informationAccess.web.provider, "none");
+    assert.equal(informationAccess.web.status, "disabled");
+    assert.equal(env.AGENTARBOR_TAVILY_API_KEY, undefined);
+    assert.equal(env.TAVILY_API_KEY, undefined);
+    assert.equal(settingsRaw.includes(tavilySecret), false);
+    assert.equal(secretsRaw.includes(tavilySecret), true);
   } finally {
     await fs.rm(directory, { recursive: true, force: true });
   }

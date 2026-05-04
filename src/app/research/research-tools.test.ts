@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
+import { promises as fs } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
-import { createDefaultToolCenter } from "../intelligence-channel-factory.js";
+import { FileSystemLocalDevSecretStore, FileSystemNormalSettingsStore } from "../../adapters/config/index.js";
+import { ConfigCenter } from "../config-center.js";
+import { createConfiguredToolCenter, createDefaultToolCenter } from "../intelligence-channel-factory.js";
 import type { FetchLike } from "../tool-center/index.js";
 
 test("default ToolCenter exposes model-visible search and read tools", async () => {
@@ -55,4 +60,103 @@ test("default ToolCenter passes configured Tavily max results into ResearchRunti
   assert.equal(bodies[0]?.max_results, 2);
   assert.equal(output.results?.length, 2);
   assert.equal(JSON.stringify(search.output).includes("tvly-configured-secret"), false);
+});
+
+test("configured ToolCenter reads Tavily config, registers search/read, and redacts the key", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-configured-tool-center-"));
+  const bodies: Record<string, unknown>[] = [];
+  const fetch: FetchLike = async (_url, init) => {
+    bodies.push(JSON.parse(init.body) as Record<string, unknown>);
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        results: [{ title: "Configured search", url: "https://example.test/configured", content: "configured snippet" }],
+      }),
+    };
+  };
+  try {
+    const configCenter = new ConfigCenter({
+      settingsStore: new FileSystemNormalSettingsStore(directory),
+      secretStore: new FileSystemLocalDevSecretStore(directory),
+    });
+    await configCenter.updateWebSearchConfig({
+      provider: "tavily",
+      apiKey: "tvly-configured-tool-secret",
+      maxResults: 1,
+    });
+
+    const center = await createConfiguredToolCenter(configCenter, { fetch });
+    const names = center.list().map((tool) => tool.name);
+    const search = await center.execute(
+      { callId: "call-search", toolName: "search", input: { query: "AgentArbor", sources: ["web"] } },
+      { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
+      { callerAgentId: "agent-test", allowedTools: ["search", "read"] }
+    );
+
+    assert.deepEqual(names, ["search", "read"]);
+    assert.equal(search.status, "completed");
+    assert.equal(bodies[0]?.max_results, 1);
+    assert.equal(JSON.stringify(search.output).includes("tvly-configured-tool-secret"), false);
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("configured ToolCenter still registers search/read and degrades web search without Tavily key", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-configured-tool-center-nokey-"));
+  try {
+    const configCenter = new ConfigCenter({
+      settingsStore: new FileSystemNormalSettingsStore(directory),
+      secretStore: new FileSystemLocalDevSecretStore(directory),
+    });
+    const center = await createConfiguredToolCenter(configCenter);
+    const names = center.list().map((tool) => tool.name);
+    const search = await center.execute(
+      { callId: "call-search", toolName: "search", input: { query: "AgentArbor", sources: ["web"] } },
+      { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
+      { callerAgentId: "agent-test", allowedTools: ["search", "read"] }
+    );
+
+    assert.deepEqual(names, ["search", "read"]);
+    assert.equal(search.status, "completed");
+    assert.equal((search.output as { status?: string }).status, "no-provider");
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("configured ToolCenter keeps web search disabled even when a historical Tavily key exists", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-configured-tool-center-disabled-"));
+  let fetchCalls = 0;
+  const fetch: FetchLike = async () => {
+    fetchCalls += 1;
+    throw new Error("Disabled web search provider must not call Tavily fetch.");
+  };
+  try {
+    const configCenter = new ConfigCenter({
+      settingsStore: new FileSystemNormalSettingsStore(directory),
+      secretStore: new FileSystemLocalDevSecretStore(directory),
+    });
+    await configCenter.updateWebSearchConfig({
+      provider: "tavily",
+      apiKey: "tvly-disabled-tool-secret",
+      maxResults: 1,
+    });
+    await configCenter.updateWebSearchConfig({ provider: "none" });
+
+    const center = await createConfiguredToolCenter(configCenter, { fetch });
+    const search = await center.execute(
+      { callId: "call-search", toolName: "search", input: { query: "AgentArbor", sources: ["web"] } },
+      { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
+      { callerAgentId: "agent-test", allowedTools: ["search", "read"] }
+    );
+
+    assert.equal(search.status, "completed");
+    assert.equal((search.output as { status?: string }).status, "no-provider");
+    assert.equal(JSON.stringify(search.output).includes("tvly-disabled-tool-secret"), false);
+    assert.equal(fetchCalls, 0);
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+  }
 });

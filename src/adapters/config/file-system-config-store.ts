@@ -133,6 +133,7 @@ function parseSettingsFile(raw: unknown): AgentArborLocalSettings {
   const record = asRecord(raw);
   const modelProvider = asRecord(record.modelProvider);
   const informationAccess = asRecord(record.informationAccess);
+  const webSearch = asRecord(informationAccess.webSearch);
   const tavily = asRecord(informationAccess.tavily);
   return {
     version: record.version === 2 ? 2 : 1,
@@ -151,6 +152,13 @@ function parseSettingsFile(raw: unknown): AgentArborLocalSettings {
         ? undefined
         : {
             sourcePreference: parseInformationSourcePreference(informationAccess.sourcePreference),
+            webSearch: {
+              provider: parseWebSearchProvider(webSearch.provider),
+              updatedAt:
+                optionalString(webSearch.updatedAt) ??
+                optionalString(tavily.updatedAt) ??
+                requiredString(record.updatedAt, "settings.updatedAt"),
+            },
             tavily: {
               providerKind: "tavily",
               maxResults: positiveInteger(tavily.maxResults) ?? 5,
@@ -188,6 +196,12 @@ function parseAiMode(value: unknown): AgentArborLocalSettings["modelProvider"]["
     return value;
   }
   return "none";
+}
+
+function parseWebSearchProvider(
+  value: unknown
+): NonNullable<AgentArborLocalSettings["informationAccess"]>["webSearch"]["provider"] {
+  return value === "none" ? "none" : "tavily";
 }
 
 function parseInformationSourcePreference(value: unknown): NonNullable<AgentArborLocalSettings["informationAccess"]>["sourcePreference"] {

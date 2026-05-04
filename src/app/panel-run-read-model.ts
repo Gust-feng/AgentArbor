@@ -58,10 +58,11 @@ export type PanelRunTrackingReadModel = {
   readonly informationSources: {
     readonly sourcePreference: SanitizedInformationAccessConfig["sourcePreference"];
     readonly web: {
+      readonly provider: SanitizedInformationAccessConfig["web"]["provider"];
       readonly providerKind: "tavily";
       readonly maxResults: number;
       readonly secretConfigured: boolean;
-      readonly status: "ready" | "no-provider";
+      readonly status: "ready" | "no-provider" | "disabled";
     };
     readonly stubs: SanitizedInformationAccessConfig["stubs"];
   };
@@ -221,10 +222,11 @@ export function createPanelRunTracking(input: {
     informationSources: {
       sourcePreference: input.informationAccess.sourcePreference,
       web: {
+        provider: input.informationAccess.web.provider,
         providerKind: input.informationAccess.web.providerKind,
         maxResults: input.informationAccess.web.maxResults,
         secretConfigured: input.informationAccess.web.secretConfigured,
-        status: input.informationAccess.web.secretConfigured ? "ready" : "no-provider",
+        status: input.informationAccess.web.status,
       },
       stubs: input.informationAccess.stubs,
     },

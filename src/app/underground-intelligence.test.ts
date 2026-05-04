@@ -6,8 +6,8 @@ import { nowIso } from "../kernel/id.js";
 import { NativeIntelligenceChannel } from "../kernel/intelligence/channel.js";
 import { createFailedModelResponse } from "../kernel/intelligence/failures.js";
 import { pendingModelOutputValidation } from "../kernel/intelligence/validation.js";
-import { createUndergroundAiRuntimeConfig } from "./intelligence-channel-factory.js";
-import { ToolCenter, createWebSearchTool, type FetchLike } from "./tool-center/index.js";
+import { createDefaultToolCenter, createUndergroundAiRuntimeConfig } from "./intelligence-channel-factory.js";
+import type { FetchLike } from "./tool-center/index.js";
 import {
   runUndergroundDirectionSession,
   runUndergroundDirectionSessionWithIntelligence,
@@ -110,7 +110,7 @@ test("All selected rootlet kinds request AI candidate advice through Intelligenc
   }
 });
 
-test("Rootlet AI can call web_search through ToolCenter before producing candidate output", async () => {
+test("Rootlet AI can call unified search through ToolCenter before producing candidate output", async () => {
   const fetch: FetchLike = async () => ({
     ok: true,
     status: 200,
@@ -133,8 +133,8 @@ test("Rootlet AI can call web_search through ToolCenter before producing candida
               toolCalls: [
                 {
                   callId: "call-search",
-                  toolName: "web_search",
-                  input: { query: "AgentArbor ToolCenter" },
+                  toolName: "search",
+                  input: { query: "AgentArbor ToolCenter", sources: ["web"] },
                 },
               ],
             },
@@ -153,11 +153,12 @@ test("Rootlet AI can call web_search through ToolCenter before producing candida
         }),
         bus: runtime.bus,
       }),
-    createToolCenter: () => {
-      const center = new ToolCenter();
-      center.register(createWebSearchTool({ apiKey: "tvly-test-secret", fetch }));
-      return center;
-    },
+    createToolCenter: (runtime) =>
+      createDefaultToolCenter({
+        runtime,
+        env: { AGENTARBOR_TAVILY_API_KEY: "tvly-test-secret" },
+        fetch,
+      }),
   });
 
   assert.equal(result.terminalStatus, "approved_package_created");
@@ -170,7 +171,98 @@ test("Rootlet AI can call web_search through ToolCenter before producing candida
   );
   assert.notEqual(modelOutput, undefined);
   assert.equal(modelOutput?.evidenceRefs.includes("tool-call:call-search"), true);
+  assert.equal(modelOutput?.sourceRefs.some((ref) => ref.startsWith("research:web:")), true);
+  assert.equal(modelOutput?.evidenceRefs.some((ref) => ref.startsWith("research:web:")), true);
+  assert.equal(JSON.stringify(modelOutput).includes("Tool search result snippet"), false);
   assert.equal(JSON.stringify(result.runtime.eventLog.list()).includes("tvly-test-secret"), false);
+});
+
+test("Rootlet AI can call unified search then read before producing candidate output", async () => {
+  const fetch: FetchLike = async (_url, init) => {
+    if ((init as { method: string }).method === "GET") {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({}),
+        text: async () =>
+          "<html><body><h1>ToolCenter read result</h1><p>Page read body should stay out of EventLog.</p></body></html>",
+      };
+    }
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        results: [
+          {
+            title: "ToolCenter result",
+            url: "https://example.test/tool-center",
+            content: "Tool search result snippet.",
+          },
+        ],
+      }),
+    };
+  };
+  const result = await runUndergroundDirectionSessionWithIntelligence("Build a small deterministic helper.", {
+    createIntelligenceChannel: (runtime) =>
+      new NativeIntelligenceChannel({
+        provider: new TestModelProvider({
+          responses: [
+            {
+              toolCalls: [
+                {
+                  callId: "call-search",
+                  toolName: "search",
+                  input: { query: "AgentArbor ToolCenter", sources: ["web"] },
+                },
+              ],
+            },
+            {
+              toolCalls: [
+                {
+                  callId: "call-read",
+                  toolName: "read",
+                  input: { ref: "https://example.test/tool-center", source: "page" },
+                },
+              ],
+            },
+            {
+              output: {
+                candidates: [
+                  {
+                    summary: "Model used search and read before suggesting the candidate.",
+                    tradeoffs: ["adds current-information evidence", "keeps research as candidate material"],
+                    applicability: "Use when a rootlet needs a search result and a page preview.",
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+        bus: runtime.bus,
+      }),
+    createToolCenter: (runtime) =>
+      createDefaultToolCenter({
+        runtime,
+        env: { AGENTARBOR_TAVILY_API_KEY: "tvly-test-secret" },
+        fetch,
+      }),
+  });
+
+  const toolEvents = result.runtime.eventLog.types().filter((type) => type.startsWith("tool."));
+  const modelOutput = result.undergroundReport.rootletOutputs.find((output) =>
+    output.sourceRefs.includes("tool-call:call-read")
+  );
+  const eventLogText = JSON.stringify(result.runtime.eventLog.list());
+
+  assert.equal(result.terminalStatus, "approved_package_created");
+  assert.deepEqual(toolEvents, ["tool.requested", "tool.completed", "tool.requested", "tool.completed"]);
+  assert.notEqual(modelOutput, undefined);
+  assert.equal(modelOutput?.sourceRefs.some((ref) => ref.startsWith("research:web:")), true);
+  assert.equal(modelOutput?.sourceRefs.some((ref) => ref.startsWith("research:page:")), true);
+  assert.equal(modelOutput?.evidenceRefs.includes("tool-call:call-search"), true);
+  assert.equal(modelOutput?.evidenceRefs.includes("tool-call:call-read"), true);
+  assert.equal(eventLogText.includes("tvly-test-secret"), false);
+  assert.equal(eventLogText.includes("Page read body should stay out of EventLog"), false);
 });
 
 test("Contract-violating AI output does not enter an approved Direction Handoff", async () => {

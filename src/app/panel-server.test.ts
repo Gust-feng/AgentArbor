@@ -23,6 +23,8 @@ test("panel HTML defaults to Simplified Chinese labels and status text", () => {
   assert.equal(html.includes("方向包结果"), true);
   assert.equal(html.includes("启动地下运行"), true);
   assert.equal(html.includes("配置中心"), true);
+  assert.equal(html.includes("信息源配置"), true);
+  assert.equal(html.includes("Tavily API Key"), true);
   assert.equal(html.includes("待启动 (pending)"), true);
   assert.equal(html.includes("面板会轮询事件游标、等待点、工作笔记和模型调用状态"), true);
   assert.equal(html.includes("调试视图：Observation Snapshot"), true);
@@ -34,6 +36,7 @@ test("panel HTML defaults to Simplified Chinese labels and status text", () => {
 test("panel config API returns sanitized provider config and never echoes raw API key", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-config-"));
   const secret = "sk-panel-secret";
+  const tavilySecret = "tvly-panel-secret";
   const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
   try {
     const update = await requestJson(server.url, "/api/config/model-provider", {
@@ -45,15 +48,29 @@ test("panel config API returns sanitized provider config and never echoes raw AP
         apiKey: secret,
       },
     });
+    const informationUpdate = await requestJson(server.url, "/api/config/information-sources", {
+      method: "POST",
+      body: {
+        tavilyApiKey: tavilySecret,
+        tavilyMaxResults: 2,
+      },
+    });
     const config = await requestJson(server.url, "/api/config");
     const settingsRaw = await fs.readFile(new FileSystemNormalSettingsStore(directory).settingsPath, "utf8");
 
     assert.equal(update.status, 200);
+    assert.equal(informationUpdate.status, 200);
     assert.equal(config.status, 200);
     assert.equal(update.text.includes(secret), false);
+    assert.equal(informationUpdate.text.includes(tavilySecret), false);
     assert.equal(config.text.includes(secret), false);
+    assert.equal(config.text.includes(tavilySecret), false);
     assert.equal(settingsRaw.includes(secret), false);
+    assert.equal(settingsRaw.includes(tavilySecret), false);
     assert.equal(update.body.config.secretConfigured, true);
+    assert.equal(informationUpdate.body.informationAccess.web.secretConfigured, true);
+    assert.equal(informationUpdate.body.informationAccess.web.maxResults, 2);
+    assert.equal(config.body.informationAccess.web.secretConfigured, true);
     assert.equal(update.body.config.baseUrl, "https://provider.example");
     assert.equal(update.body.config.defaultAiMode, "fake");
   } finally {

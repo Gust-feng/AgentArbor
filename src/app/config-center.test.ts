@@ -9,6 +9,7 @@ import { ConfigCenter } from "./config-center.js";
 test("ConfigCenter keeps raw API key out of the normal settings store", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-config-center-"));
   const secret = "sk-local-dev-secret";
+  const tavilySecret = "tvly-local-dev-secret";
   try {
     const settingsStore = new FileSystemNormalSettingsStore(directory);
     const secretStore = new FileSystemLocalDevSecretStore(directory);
@@ -20,6 +21,10 @@ test("ConfigCenter keeps raw API key out of the normal settings store", async ()
       defaultAiMode: "openai-compatible",
       apiKey: secret,
     });
+    const informationAccess = await configCenter.updateInformationAccessConfig({
+      tavilyApiKey: tavilySecret,
+      tavilyMaxResults: 3,
+    });
     const env = await configCenter.createUndergroundAiEnvironment();
     const settingsRaw = await fs.readFile(settingsStore.settingsPath, "utf8");
     const secretsRaw = await fs.readFile(secretStore.secretsPath, "utf8");
@@ -30,9 +35,82 @@ test("ConfigCenter keeps raw API key out of the normal settings store", async ()
     assert.equal(sanitized.defaultAiMode, "openai-compatible");
     assert.equal(JSON.stringify(sanitized).includes(secret), false);
     assert.equal(settingsRaw.includes(secret), false);
+    assert.equal(settingsRaw.includes(tavilySecret), false);
     assert.equal(secretsRaw.includes(secret), true);
+    assert.equal(secretsRaw.includes(tavilySecret), true);
     assert.equal(env.AGENTARBOR_MODEL_API_KEY, secret);
+    assert.equal(env.AGENTARBOR_TAVILY_API_KEY, tavilySecret);
+    assert.equal(env.AGENTARBOR_TAVILY_MAX_RESULTS, "3");
+    assert.equal(env.AGENTARBOR_INFORMATION_SOURCE_PREFERENCE, "web,codebase,soil,run_memory,docs,packages,github");
     assert.equal(env.OPENAI_API_KEY, undefined);
+    assert.equal(informationAccess.web.secretConfigured, true);
+    assert.equal(informationAccess.web.maxResults, 3);
+    assert.equal(JSON.stringify(informationAccess).includes(tavilySecret), false);
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("ConfigCenter reads v1 settings and upgrades information source settings to v2", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-config-v1-"));
+  try {
+    const settingsStore = new FileSystemNormalSettingsStore(directory);
+    const secretStore = new FileSystemLocalDevSecretStore(directory);
+    const now = new Date("2026-05-04T00:00:00.000Z").toISOString();
+    await fs.mkdir(directory, { recursive: true });
+    await fs.writeFile(
+      settingsStore.settingsPath,
+      `${JSON.stringify(
+        {
+          version: 1,
+          modelProvider: {
+            profileId: "default",
+            providerKind: "openai_compatible",
+            protocolKind: "openai_compatible_chat_completions",
+            baseUrl: "https://legacy.example",
+            defaultAiMode: "fake",
+            secretRef: "secret://local-dev/model-provider/default/api-key",
+            updatedAt: now,
+          },
+          updatedAt: now,
+        },
+        null,
+        2
+      )}\n`
+    );
+
+    const configCenter = new ConfigCenter({ settingsStore, secretStore });
+    const modelConfig = await configCenter.getModelProviderConfig();
+    const defaultInformation = await configCenter.getInformationAccessConfig();
+    const updatedInformation = await configCenter.updateInformationAccessConfig({
+      sourcePreference: ["codebase", "web"],
+      tavilyMaxResults: 2,
+    });
+    const settingsRaw = JSON.parse(await fs.readFile(settingsStore.settingsPath, "utf8")) as {
+      version: number;
+      informationAccess?: {
+        sourcePreference?: readonly string[];
+        tavily?: { maxResults?: number };
+      };
+    };
+
+    assert.equal(modelConfig.baseUrl, "https://legacy.example");
+    assert.equal(modelConfig.defaultAiMode, "fake");
+    assert.equal(defaultInformation.web.maxResults, 5);
+    assert.deepEqual(defaultInformation.sourcePreference, [
+      "web",
+      "codebase",
+      "soil",
+      "run_memory",
+      "docs",
+      "packages",
+      "github",
+    ]);
+    assert.equal(updatedInformation.web.maxResults, 2);
+    assert.deepEqual(updatedInformation.sourcePreference, ["codebase", "web"]);
+    assert.equal(settingsRaw.version, 2);
+    assert.deepEqual(settingsRaw.informationAccess?.sourcePreference, ["codebase", "web"]);
+    assert.equal(settingsRaw.informationAccess?.tavily?.maxResults, 2);
   } finally {
     await fs.rm(directory, { recursive: true, force: true });
   }

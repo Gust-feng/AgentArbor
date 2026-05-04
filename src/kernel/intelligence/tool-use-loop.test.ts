@@ -46,9 +46,36 @@ test("executeToolUseLoop executes one tool round and returns final model output"
   assert.equal(result.finalOutput.structuredOutput, channel.responses.at(-1)?.structuredOutput);
 });
 
-test("executeToolUseLoop stops at max rounds", async () => {
+test("executeToolUseLoop allows final model output after the last allowed tool round", async () => {
   const channel = new SequenceIntelligenceChannel([
     toolCallResponse("model-request-test", "call-1", "web_search"),
+    completedResponse("model-request-final", { summary: "Final answer after one allowed tool round." }),
+  ]);
+  const center = new TestToolBroker();
+  center.register("web_search", async () => ({ ok: true }));
+
+  const result = await executeToolUseLoop(
+    {
+      intelligenceChannel: channel,
+      toolCenter: center,
+      callerAgentId: "agent-test",
+      traceId: "trace-test",
+      goalId: "goal-test",
+      maxToolRounds: 1,
+      allowedTools: ["web_search"],
+    },
+    createValidModelRequest()
+  );
+
+  assert.equal(result.stoppedReason, "completed");
+  assert.equal(result.rounds, 1);
+  assert.equal(channel.requests.length, 2);
+});
+
+test("executeToolUseLoop stops when the model requests another tool after max rounds", async () => {
+  const channel = new SequenceIntelligenceChannel([
+    toolCallResponse("model-request-test", "call-1", "web_search"),
+    toolCallResponse("model-request-next", "call-2", "web_search"),
     completedResponse("unused", { summary: "unused" }),
   ]);
   const center = new TestToolBroker();
@@ -69,7 +96,8 @@ test("executeToolUseLoop stops at max rounds", async () => {
 
   assert.equal(result.stoppedReason, "max_rounds");
   assert.equal(result.rounds, 1);
-  assert.equal(channel.requests.length, 1);
+  assert.equal(result.toolCalls.length, 1);
+  assert.equal(channel.requests.length, 2);
 });
 
 test("executeToolUseLoop appends failed tool results without throwing", async () => {
@@ -100,6 +128,70 @@ test("executeToolUseLoop appends failed tool results without throwing", async ()
   assert.equal(result.toolCalls[0]?.status, "failed");
   assert.deepEqual(eventLog.types(), ["tool.requested", "tool.failed"]);
   assert.equal(channel.requests[1]?.sanitizedMessages.at(-1)?.role, "tool");
+});
+
+test("executeToolUseLoop keeps verbose tool output out of EventLog and redacts tool messages", async () => {
+  const eventLog = new InMemoryEventLog();
+  const channel = new SequenceIntelligenceChannel([
+    toolCallResponse("model-request-test", "call-read", "read"),
+    completedResponse("model-request-final", { summary: "Final answer with redacted tool result." }),
+  ]);
+  const center = new TestToolBroker();
+  center.register("read", async () => ({
+    action: "read",
+    ref: "https://example.test/secret",
+    status: "completed",
+    result: {
+      refId: "research:page:secret",
+      source: "page",
+      title: "Secret page",
+      status: "completed",
+      summary: "Short page summary with sk-event-secret-token and Bearer event-token-value.",
+      contentPreview: "Complete page body must not enter EventLog. sk-preview-secret-token",
+      truncated: false,
+    },
+    trace: {
+      traceId: "research-trace-secret",
+      action: "read",
+      ref: "https://example.test/secret",
+      requestedSources: ["page"],
+      status: "completed",
+      startedAt: "2026-05-04T00:00:00.000Z",
+      completedAt: "2026-05-04T00:00:00.001Z",
+      sourceSteps: [{ source: "page", status: "completed", resultRefs: ["research:page:secret"] }],
+    },
+  }));
+
+  await executeToolUseLoop(
+    {
+      intelligenceChannel: channel,
+      toolCenter: center,
+      callerAgentId: "agent-test",
+      traceId: "trace-test",
+      goalId: "goal-test",
+      allowedTools: ["read"],
+      publishToolEvent: (message) => {
+        eventLog.append(message);
+      },
+    },
+    createValidModelRequest()
+  );
+
+  const completedPayloadText = JSON.stringify(eventLog.list().at(-1)?.message.payload);
+  const toolMessage = channel.requests[1]?.sanitizedMessages.at(-1);
+  const toolMessageText = JSON.stringify(toolMessage);
+
+  assert.equal(completedPayloadText.includes("contentPreview"), false);
+  assert.equal(completedPayloadText.includes("Complete page body must not enter EventLog"), false);
+  assert.equal(completedPayloadText.includes("sk-event-secret-token"), false);
+  assert.equal(completedPayloadText.includes("Bearer event-token-value"), false);
+  assert.equal(completedPayloadText.includes("research:page:secret"), true);
+  assert.equal(completedPayloadText.includes("verboseOutputOmitted"), true);
+  assert.equal(toolMessage?.role, "tool");
+  assert.equal(toolMessageText.includes("sk-preview-secret-token"), false);
+  assert.equal(toolMessageText.includes("Bearer event-token-value"), false);
+  assert.equal(toolMessageText.includes("[redacted-secret]"), true);
+  assert.equal(toolMessageText.includes("contentPreview"), true);
 });
 
 function createValidModelRequest(overrides: Partial<ModelRequest> = {}): ModelRequest {

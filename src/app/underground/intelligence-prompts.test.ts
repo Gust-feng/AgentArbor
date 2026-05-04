@@ -38,6 +38,10 @@ test("rootlet AI prompts include goal profile, constraints, budget, and kind-spe
     assert.match(content, /exitCriteria: Rootlet must return bounded candidates/);
     assert.match(content, /candidate advice only/i);
     assert.match(content, /must not approve a Direction Handoff/);
+    assert.match(content, /search/);
+    assert.match(content, /read/);
+    assert.match(content, /real-world cases/);
+    assert.match(content, /historical similar runs/);
     for (const marker of KIND_MARKERS[kind]) {
       assert.match(content, new RegExp(marker));
     }

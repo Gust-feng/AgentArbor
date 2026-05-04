@@ -1,0 +1,8 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Quality check must confirm relevant backend spec checklist was respected."}
+{"file": ".trellis/spec/backend/underground-radial-growth.md", "reason": "Review candidate pool, convergence, and handoff guard behavior."}
+{"file": ".trellis/spec/backend/direction-handoff-package.md", "reason": "Review direction handoff validation and option legality."}
+{"file": ".trellis/spec/backend/observation-read-model.md", "reason": "Review auditability and event/ref privacy."}
+{"file": ".trellis/spec/backend/intelligence-channel.md", "reason": "Review AI output boundaries and secret/raw payload handling."}
+{"file": ".trellis/spec/backend/tool-runtime.md", "reason": "Review AgentTurnRuntime usage and no ToolCenter/ResearchRuntime core regression."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Review fallback semantics."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Confirm focused tests and pnpm build."}

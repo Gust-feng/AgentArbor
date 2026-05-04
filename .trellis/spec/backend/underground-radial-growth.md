@@ -54,6 +54,10 @@
 - 固定地下核心 agent 默认通过 turn policy 显式禁用模型和工具；后续若要启用 AI，必须经统一 `AgentTurnRuntime` 和任务契约更新，不能在各 agent 内私接 `IntelligenceChannel` 或 ToolCenter。
 - CandidatePool 必须同时提供扁平候选列表和按 rootlet kind 分组的 `candidatesByKind`；二者都是同一候选事实的视图，不得成为两套事实源。
 - Convergence Judge 必须基于 `CandidateComparison.conclusion` 生成 `accepted/merged/rejected/unknown`，并记录 source candidate refs、evidence refs、推荐主方向、合并项、淘汰原因、需要用户确认的冲突和地上参考方向；每个 `CandidateConvergenceDecision` 必须带可追溯的 `evidenceRefs`，并能回到对应 comparison 和 evidence ledger entry。
+- Convergence AI advisory 只能在 `candidate_pool.updated` 后由 `ConvergenceJudgeAgent` 主线通过注入的 `AgentTurnRuntime` 请求；advisory 必须作为 `convergeDefaultUndergroundCandidatePool` 输入参与收束，不能在 session helper、Direction Handoff builder 或 demo summary 中绕过 CandidatePool / Convergence / Handoff validation。
+- Convergence AI advisory 的 `recommendedOptionId` 只有同时存在于 CandidatePool 且进入 `handoffCandidateRefs` 时才能保留；不存在、rejected、unknown、risk、counterfactual 或其他非 handoff candidate 的推荐必须被忽略，且不得进入 Direction Handoff `recommendedOptionId`、`retainedOptionId` 或 `sourceCandidateRefs`。
+- Convergence AI advisory 只能 enrich 与已有 candidate 绑定的 comparison / report / handoff 说明字段；`overallDirectionSummary` 不得替代 `DirectionHandoff.clarifiedGoal`，正式 clarified goal 必须继续来自 GoalIntentProfile 或 raw user goal。
+- Convergence AI advisory 进入 `candidateComparisons`、`convergenceReport`、EventLog、Observation Snapshot、demo summary 或 Direction Handoff 视图前，所有 AI 可见文本必须做 secret/token 脱敏和长度裁剪；不得暴露 raw prompt、raw provider response、API key、token 或 provider 原始敏感错误。
 - option 候选之间应产生保留 / 合并 / 淘汰裁决；risk、evidence、constraint、asset_fit 和 counterfactual 候选不能直接成为主方向，必须作为证据、约束、风险或 why-not 材料参与交叉裁决。
 - `approved_package_created` 只允许在有 accepted / merged handoff candidates 且无 blocking unknown 时出现。
 - `awaiting_user` 只允许在存在 blocking unknown 和 `UserClarificationRequest` 时出现；non-blocking unknown 不得单独制造等待用户状态。

@@ -1,0 +1,9 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Runtime kernel checklist and required backend specs for Underground convergence/intelligence changes."}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Preserve src/domain, src/kernel, src/app ownership boundaries while touching app cluster runtime code."}
+{"file": ".trellis/spec/backend/underground-radial-growth.md", "reason": "Candidate pool, convergence, user clarification, and handoff input guard contracts."}
+{"file": ".trellis/spec/backend/direction-handoff-package.md", "reason": "Ensure AI advisory cannot bypass direction handoff package validation or option legality."}
+{"file": ".trellis/spec/backend/observation-read-model.md", "reason": "Use existing observation/ref patterns for auditable fallback without leaking raw model/provider data."}
+{"file": ".trellis/spec/backend/intelligence-channel.md", "reason": "Respect IntelligenceChannel boundaries, model event semantics, and model-output validation constraints."}
+{"file": ".trellis/spec/backend/tool-runtime.md", "reason": "Use AgentTurnRuntime as the existing model/tool turn boundary without modifying ToolCenter or ResearchRuntime core."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Match existing fallback and guard failure semantics."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Required build/test validation for runtime changes."}

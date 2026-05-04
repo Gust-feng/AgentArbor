@@ -66,6 +66,109 @@ test("OpenAI-compatible Chat Completions adapter maps request and response throu
   assert.equal(JSON.stringify(eventLog.list()).includes("token"), false);
 });
 
+test("OpenAI-compatible adapter maps tools, tool results, and provider tool calls", async () => {
+  const calls: { body: Record<string, unknown> }[] = [];
+  const fetch: FetchLike = async (_url, init) => {
+    calls.push({ body: JSON.parse(init.body) as Record<string, unknown> });
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        id: "chatcmpl-tool-test",
+        model: "gpt-compatible-test",
+        choices: [
+          {
+            message: {
+              role: "assistant",
+              content: "",
+              tool_calls: [
+                {
+                  id: "call-search",
+                  type: "function",
+                  function: {
+                    name: "web_search",
+                    arguments: JSON.stringify({ query: "AgentArbor tools" }),
+                  },
+                },
+              ],
+            },
+            finish_reason: "tool_calls",
+          },
+        ],
+      }),
+    };
+  };
+  const provider = new OpenAICompatibleChatCompletionsProvider({
+    baseUrl: "https://llm.example.test",
+    apiKey: "sk-test-secret-token",
+    model: "gpt-compatible-test",
+    fetch,
+  });
+
+  const response = await provider.complete(
+    createValidModelRequest({
+      tools: [
+        {
+          name: "web_search",
+          description: "Search the web.",
+          inputSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] },
+        },
+      ],
+      toolChoice: "auto",
+      sanitizedMessages: [
+        { role: "user", content: "Search first." },
+        {
+          role: "assistant",
+          content: "",
+          toolCalls: [{ callId: "call-old", toolName: "web_search", input: { query: "old" } }],
+        },
+        {
+          role: "tool",
+          toolCallId: "call-old",
+          toolName: "web_search",
+          content: JSON.stringify({ status: "completed", output: { results: [] } }),
+        },
+      ],
+    })
+  );
+
+  assert.deepEqual(response.toolCalls, [
+    { callId: "call-search", toolName: "web_search", input: { query: "AgentArbor tools" } },
+  ]);
+  assert.equal(response.finishReason, "tool_call");
+  assert.deepEqual(calls[0]?.body.tools, [
+    {
+      type: "function",
+      function: {
+        name: "web_search",
+        description: "Search the web.",
+        parameters: { type: "object", properties: { query: { type: "string" } }, required: ["query"] },
+      },
+    },
+  ]);
+  assert.equal(calls[0]?.body.tool_choice, "auto");
+  assert.deepEqual(calls[0]?.body.messages, [
+    { role: "user", content: "Search first." },
+    {
+      role: "assistant",
+      content: "",
+      tool_calls: [
+        {
+          id: "call-old",
+          type: "function",
+          function: { name: "web_search", arguments: JSON.stringify({ query: "old" }) },
+        },
+      ],
+    },
+    {
+      role: "tool",
+      tool_call_id: "call-old",
+      name: "web_search",
+      content: JSON.stringify({ status: "completed", output: { results: [] } }),
+    },
+  ]);
+});
+
 test("OpenAI-compatible adapter returns provider_config failure when fetch is unavailable", async () => {
   const originalFetch = globalThis.fetch;
   try {

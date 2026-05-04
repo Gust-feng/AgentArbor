@@ -33,6 +33,14 @@ export type AgentLayer =
   | "fruits"
   | "governance";
 
+export type AgentTurnPermissionPolicy = {
+  readonly allowModel: boolean;
+  readonly allowedTools: readonly string[];
+  readonly maxModelRounds: number;
+  readonly maxToolRounds: number;
+  readonly fallback: "deterministic" | "disabled";
+};
+
 export const ARBOR_MESSAGE_TYPES = [
   "goal.received",
   "underground.exploration_planned",
@@ -42,6 +50,9 @@ export const ARBOR_MESSAGE_TYPES = [
   "model.requested",
   "model.completed",
   "model.failed",
+  "tool.requested",
+  "tool.completed",
+  "tool.failed",
   "convergence_review.completed",
   "direction_handoff.requested",
   "direction_handoff.completed",
@@ -131,4 +142,5 @@ export type AgentManifest = {
     write: string[];
     execute: string[];
   };
+  turnPolicy: AgentTurnPermissionPolicy;
 };

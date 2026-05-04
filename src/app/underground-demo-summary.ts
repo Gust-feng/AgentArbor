@@ -35,6 +35,7 @@ export type UndergroundDemoSummary = {
   readonly versions: readonly number[];
   readonly writtenPackagePath?: string;
   readonly ai: UndergroundDemoAiSummary;
+  readonly tools: UndergroundDemoToolSummary;
   readonly underground: {
     readonly rootletKinds: readonly RootletClusterKind[];
     readonly budget: ExplorationBudget;
@@ -137,6 +138,22 @@ export type UndergroundDemoAiSummary = {
   };
 };
 
+export type UndergroundDemoToolSummary = {
+  readonly eventCounts: {
+    readonly requested: number;
+    readonly completed: number;
+    readonly failed: number;
+  };
+  readonly toolCallRefs: readonly {
+    readonly callId: string;
+    readonly toolName?: string;
+    readonly callerAgentId?: string;
+    readonly status: "requested" | "completed" | "failed";
+    readonly durationMs?: number;
+    readonly eventRefs: readonly string[];
+  }[];
+};
+
 export function createUndergroundDemoSummary(
   result: UndergroundDirectionSessionResult,
   recovery?: UndergroundDirectionSessionRecoveryResult,
@@ -162,6 +179,7 @@ export function createUndergroundDemoSummary(
       undergroundReport,
       aiInput,
     }),
+    tools: summarizeTools((recovery?.runtime ?? result.runtime).eventLog.list()),
     underground: {
       rootletKinds: undergroundReport.plan.rootletClusters.map((cluster) => cluster.kind),
       budget: undergroundReport.plan.budget,
@@ -214,6 +232,55 @@ function summarizeDirectionPackage(pkg: DirectionHandoffPackage): DirectionPacka
       errors: pkg.validation.errors,
       warnings: pkg.validation.warnings,
     },
+  };
+}
+
+function summarizeTools(
+  eventEntries: ReturnType<UndergroundDirectionSessionResult["runtime"]["eventLog"]["list"]>
+): UndergroundDemoToolSummary {
+  const toolEvents = eventEntries.filter(
+    (entry) => entry.type === "tool.requested" || entry.type === "tool.completed" || entry.type === "tool.failed"
+  );
+  const calls = new Map<
+    string,
+    {
+      callId: string;
+      toolName?: string;
+      callerAgentId?: string;
+      status: "requested" | "completed" | "failed";
+      durationMs?: number;
+      eventRefs: string[];
+    }
+  >();
+
+  for (const event of toolEvents) {
+    const payload = asRecord(event.message.payload);
+    const callId = stringOrUndefined(payload.callId);
+    if (callId === undefined) {
+      continue;
+    }
+    const existing = calls.get(callId) ?? {
+      callId,
+      status: "requested" as const,
+      eventRefs: [],
+    };
+    calls.set(callId, {
+      ...existing,
+      toolName: stringOrUndefined(payload.toolName) ?? existing.toolName,
+      callerAgentId: stringOrUndefined(payload.callerAgentId) ?? existing.callerAgentId,
+      status: event.type === "tool.failed" ? "failed" : event.type === "tool.completed" ? "completed" : existing.status,
+      durationMs: numberOrUndefined(payload.durationMs) ?? existing.durationMs,
+      eventRefs: [...existing.eventRefs, event.message.id],
+    });
+  }
+
+  return {
+    eventCounts: {
+      requested: toolEvents.filter((entry) => entry.type === "tool.requested").length,
+      completed: toolEvents.filter((entry) => entry.type === "tool.completed").length,
+      failed: toolEvents.filter((entry) => entry.type === "tool.failed").length,
+    },
+    toolCallRefs: [...calls.values()],
   };
 }
 
@@ -451,6 +518,10 @@ function hasProviderIdentity(payload: Readonly<Record<string, unknown>> | undefi
 
 function stringOrUndefined(value: unknown): string | undefined {
   return typeof value === "string" && value.trim().length > 0 ? value : undefined;
+}
+
+function numberOrUndefined(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 function modelVisibleOutputOrUndefined(value: unknown): ModelVisibleOutputProjection | undefined {

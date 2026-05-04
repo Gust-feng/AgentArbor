@@ -69,6 +69,14 @@ export function validateModelResponse(
     };
   }
 
+  if ((response.toolCalls?.length ?? 0) > 0) {
+    return {
+      status: "passed",
+      checkedAt: nowIso(),
+      issues: [],
+    };
+  }
+
   return validateOutputContract(request.outputContract, response.structuredOutput, response.textOutput);
 }
 

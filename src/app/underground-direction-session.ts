@@ -8,9 +8,11 @@ import {
   type DirectionHandoffPackageStore,
 } from "../domain/agentarbor/direction-handoff-package.js";
 import type { IntelligenceChannel } from "../domain/intelligence/index.js";
+import type { ToolExecutionBroker } from "../domain/tools/index.js";
 import type { RunObservationSnapshot } from "../domain/observation/contracts.js";
 import { createRunObservationSnapshot } from "../domain/observation/index.js";
 import { createId } from "../kernel/id.js";
+import { AgentTurnRuntime } from "../kernel/intelligence/index.js";
 import { createMessage } from "../kernel/messages/create-message.js";
 import { UndergroundAgentRunner, type UndergroundAgentRunnerResult } from "./underground/cluster/agent-runner.js";
 import { createMinimalRuntime, type MinimalRuntime } from "./runtime.js";
@@ -35,6 +37,7 @@ export type RunUndergroundDirectionSessionOptions = {
 
 export type RunUndergroundDirectionSessionWithIntelligenceOptions = RunUndergroundDirectionSessionOptions & {
   createIntelligenceChannel: (runtime: MinimalRuntime) => IntelligenceChannel;
+  createToolCenter?: (runtime: MinimalRuntime) => ToolExecutionBroker;
 };
 
 export type UndergroundDirectionSessionResult = {
@@ -78,7 +81,14 @@ export async function runUndergroundDirectionSessionWithIntelligence(
   const { runtime, storage } = createUndergroundSessionRuntime(options);
   const { traceId, goalId, message } = createUndergroundGoalMessage(goal);
   const intelligenceChannel = options.createIntelligenceChannel(runtime);
-  const runner = new UndergroundAgentRunner({ runtime, intelligenceChannel });
+  const toolCenter = options.createToolCenter?.(runtime);
+  toolCenter?.resetCallCount();
+  const agentTurnRuntime = new AgentTurnRuntime({
+    intelligenceChannel,
+    toolCenter,
+    publishToolEvent: (event) => runtime.bus.publish(event),
+  });
+  const runner = new UndergroundAgentRunner({ runtime, intelligenceChannel, toolCenter, agentTurnRuntime });
   try {
     options.onRuntimeReady?.({ runtime, traceId, goalId });
     runtime.bus.publish(message);

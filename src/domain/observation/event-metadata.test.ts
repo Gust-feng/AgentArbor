@@ -65,6 +65,19 @@ test("clarification request refs do not collide with model call ids", () => {
   assert.equal(view.refs.some((ref) => ref.kind === "model_call"), false);
 });
 
+test("tool event refs do not collide with model or clarification refs", () => {
+  const view = createRunObservationEventView(
+    minimalEventEntry("tool.completed", 1, {
+      callId: "tool-call-test",
+      requestId: "same-name-field-is-ignored",
+    })
+  );
+
+  assert.equal(view.refs.some((ref) => ref.kind === "tool_call" && ref.id === "tool-call-test"), true);
+  assert.equal(view.refs.some((ref) => ref.kind === "model_call"), false);
+  assert.equal(view.refs.some((ref) => ref.kind === "user_clarification"), false);
+});
+
 function minimalEventEntry(
   type: (typeof ARBOR_MESSAGE_TYPES)[number],
   sequence: number,

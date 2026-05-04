@@ -75,6 +75,7 @@ function refsForEvent(entry: RunObservationEventEntry): ObservationRef[] {
   pushPackageRef(refs, payload);
   pushConvergenceRef(refs, payload);
   pushModelCallRefs(refs, entry.type, payload);
+  pushToolCallRefs(refs, entry.type, payload);
   pushClarificationRequestRef(refs, entry.type, payload);
   pushCandidatePoolRef(refs, payload);
   pushRootletRefs(refs, payload);
@@ -116,6 +117,17 @@ function pushModelCallRefs(
   }
   pushStringRef(refs, payload, "requestId", "model_call");
   pushStringRef(refs, payload, "responseId", "model_call");
+}
+
+function pushToolCallRefs(
+  refs: ObservationRef[],
+  type: ArborMessageType,
+  payload: Readonly<Record<string, unknown>>
+): void {
+  if (type !== "tool.requested" && type !== "tool.completed" && type !== "tool.failed") {
+    return;
+  }
+  pushStringRef(refs, payload, "callId", "tool_call");
 }
 
 function pushPackageRef(refs: ObservationRef[], payload: Readonly<Record<string, unknown>>): void {

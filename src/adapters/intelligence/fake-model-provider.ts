@@ -1,4 +1,5 @@
 import type {
+  ModelToolCall,
   ModelProvider,
   ModelRequest,
   ModelResponse,
@@ -12,6 +13,16 @@ export type FakeModelProviderOptions = {
   readonly model?: string;
   readonly output?: unknown;
   readonly textOutput?: string;
+  readonly toolCalls?: readonly ModelToolCall[];
+  readonly fail?: boolean;
+  readonly failureMessage?: string;
+  readonly responses?: readonly FakeModelProviderResponse[];
+};
+
+export type FakeModelProviderResponse = {
+  readonly output?: unknown;
+  readonly textOutput?: string;
+  readonly toolCalls?: readonly ModelToolCall[];
   readonly fail?: boolean;
   readonly failureMessage?: string;
 };
@@ -21,6 +32,7 @@ export class FakeModelProvider implements ModelProvider {
   readonly providerKind = "fake" as const;
   readonly protocolKind = "openai_compatible_chat_completions" as const;
   readonly model: string;
+  private callCount = 0;
 
   constructor(private readonly options: FakeModelProviderOptions = {}) {
     this.providerId = options.providerId ?? "fake-model-provider";
@@ -28,7 +40,8 @@ export class FakeModelProvider implements ModelProvider {
   }
 
   async complete(request: ModelRequest): Promise<ModelResponse> {
-    if (this.options.fail) {
+    const step = this.nextStep();
+    if (step.fail) {
       return createFailedModelResponse({
         requestId: request.requestId,
         providerId: this.providerId,
@@ -37,7 +50,7 @@ export class FakeModelProvider implements ModelProvider {
         model: this.model,
         outputKind: request.outputContract.outputKind,
         failureKind: "provider_response",
-        message: this.options.failureMessage ?? "Fake provider was configured to fail.",
+        message: step.failureMessage ?? "Fake provider was configured to fail.",
       });
     }
 
@@ -50,12 +63,32 @@ export class FakeModelProvider implements ModelProvider {
       model: this.model,
       status: "completed",
       outputKind: request.outputContract.outputKind,
-      structuredOutput: this.options.output ?? defaultFakeOutput(request),
-      textOutput: this.options.textOutput,
-      finishReason: "stop",
+      structuredOutput:
+        step.output ?? (step.toolCalls === undefined || step.toolCalls.length === 0 ? defaultFakeOutput(request) : undefined),
+      textOutput: step.textOutput,
+      toolCalls: step.toolCalls?.map((toolCall) => ({
+        callId: toolCall.callId,
+        toolName: toolCall.toolName,
+        input: globalThis.structuredClone(toolCall.input),
+      })),
+      finishReason: step.toolCalls === undefined || step.toolCalls.length === 0 ? "stop" : "tool_call",
       validation: pendingModelOutputValidation(),
       completedAt: nowIso(),
     };
+  }
+
+  private nextStep(): FakeModelProviderResponse {
+    const step = this.options.responses?.[this.callCount];
+    this.callCount += 1;
+    return (
+      step ?? {
+        output: this.options.output,
+        textOutput: this.options.textOutput,
+        toolCalls: this.options.toolCalls,
+        fail: this.options.fail,
+        failureMessage: this.options.failureMessage,
+      }
+    );
   }
 }
 

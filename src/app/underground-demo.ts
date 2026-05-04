@@ -19,10 +19,11 @@ async function main(): Promise<void> {
     const args = parseUndergroundDemoArgs(process.argv.slice(2));
     const aiConfig = createUndergroundAiRuntimeConfig({ mode: args.aiMode });
     const result = aiConfig.enabled
-      ? await runUndergroundDirectionSessionWithIntelligence(args.goal, {
-          outputDirectory: args.outputDirectory,
-          createIntelligenceChannel: aiConfig.createIntelligenceChannel,
-        })
+        ? await runUndergroundDirectionSessionWithIntelligence(args.goal, {
+            outputDirectory: args.outputDirectory,
+            createIntelligenceChannel: aiConfig.createIntelligenceChannel,
+            createToolCenter: aiConfig.createToolCenter,
+          })
       : runUndergroundDirectionSession(args.goal, { outputDirectory: args.outputDirectory });
     const recovery =
       args.autoAnswer && result.terminalStatus === "awaiting_user"

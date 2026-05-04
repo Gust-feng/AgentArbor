@@ -38,7 +38,8 @@
 - `pnpm demo:underground -- --out <dir> "<goal>"`：只在调用方显式提供 `<dir>` 时写出 Direction Handoff Package；不得默认选择 repo-root `.agentarbor/`。
 - `pnpm demo:underground -- --ai fake "<goal>"`：显式启用 deterministic fake provider，经 `IntelligenceChannel` 触发 `model.requested -> model.completed`，模型输出只能被 rootlet invocation 包装为 `RootletOutput` 后进入 CandidatePool。
 - `pnpm demo:underground -- --ai openai-compatible "<goal>"`：显式启用 OpenAI-compatible Chat Completions provider；配置缺失时必须在 app 组合根失败，不能发起网络调用，不能泄漏 API key / token。
-- `requestUndergroundRootletCandidateAdvice(...)`：app 层地下 AI rootlet 调用边界；接收 `GoalIntentProfile`、rootlet cluster、invocation、constraints 和注入的 `IntelligenceChannel`，按 rootlet kind 构造 prompt / output contract，解析顶层 `candidates` 数组，并把合法候选转换为 `RootletOutput`。
+- `requestUndergroundRootletCandidateAdvice(...)`：app 层地下 AI rootlet 调用边界；接收 `GoalIntentProfile`、rootlet cluster、invocation、constraints 和注入的 `AgentTurnRuntime` / turn policy，按 rootlet kind 构造 prompt / output contract，解析顶层 `candidates` 数组，并把合法候选转换为 `RootletOutput`。
+- 地下 agent 是 `AgentTurnRuntime` 的消费者，不拥有工具注册、MCP、sandbox、search provider 或工具市场生命周期；工具中心由 app 组合根注入为 `ToolExecutionBroker`。
 
 ### 3. Contracts
 
@@ -49,6 +50,8 @@
 - 当地下 session 显式注入 `IntelligenceChannel` 时，所有被动态选中的 rootlet kind 都可以各自最多发起一次 AI 候选建议调用；prompt 必须包含 raw goal、`GoalIntentProfile`、ConstraintRef/约束摘要、rootlet kind、cluster budget、exit criteria 和“AI 只提供候选、不做最终裁决”的约束。
 - rootlet AI 响应必须采用顶层 `candidates` 数组；`option`、`risk`、`asset_fit`、`evidence`、`constraint` 和 `counterfactual` 的数组项字段各自独立。非法项由 app parser 丢弃，合法项按 budget 截断，再包装为 `RootletOutput` 后进入 CandidatePool。
 - AI 失败、输出契约 validation failed 或合法候选为空时，rootlet invocation 必须继续 deterministic fallback；fallback output 的 source refs 必须包含可审计的 `ai-fallback:*` 标记和对应 model request / response refs，不能静默吞掉模型失败。
+- rootlet 工具调用必须由 agent manifest / turn policy 裁剪；工具结果只能追加为模型 tool message，并在最终 rootlet output 中以 `tool-call:<id>` source/evidence refs 表达，不得跳过 CandidatePool 或 Convergence Judge。
+- 固定地下核心 agent 默认通过 turn policy 显式禁用模型和工具；后续若要启用 AI，必须经统一 `AgentTurnRuntime` 和任务契约更新，不能在各 agent 内私接 `IntelligenceChannel` 或 ToolCenter。
 - CandidatePool 必须同时提供扁平候选列表和按 rootlet kind 分组的 `candidatesByKind`；二者都是同一候选事实的视图，不得成为两套事实源。
 - Convergence Judge 必须基于 `CandidateComparison.conclusion` 生成 `accepted/merged/rejected/unknown`，并记录 source candidate refs、evidence refs、推荐主方向、合并项、淘汰原因、需要用户确认的冲突和地上参考方向；每个 `CandidateConvergenceDecision` 必须带可追溯的 `evidenceRefs`，并能回到对应 comparison 和 evidence ledger entry。
 - option 候选之间应产生保留 / 合并 / 淘汰裁决；risk、evidence、constraint、asset_fit 和 counterfactual 候选不能直接成为主方向，必须作为证据、约束、风险或 why-not 材料参与交叉裁决。
@@ -66,6 +69,7 @@
 - Evidence Ledger 是运行期证据索引，不是 Soil、RunMemory 或长期资产库；它必须由 EventLog / 地下运行结果派生并随 report 暴露。每个 `RootletOutput` 至少引用一条 ledger entry；`UndergroundConvergenceReport.evidenceLedgerRef` 必须指向同一运行的 ledger；user clarification 和 stopped outcome 必须留下对应 evidence entry。
 - 地下-only demo summary 是可读投影，不是 EventLog、RunMemory、Soil 或长期资产；它不得成为新的事实源。
 - 地下-only demo summary 可以从 `model.*` EventLog 派生 AI 观测摘要，字段仅限启用状态、provider / protocol / model、事件计数、completed / failed 状态、按 rootlet kind 的 model call 状态、AI candidate count、fallback count / `aiFallbackUsed` 和与候选池相关的 model call refs；不得包含 API key、token、完整 prompt、provider 原始错误或模型正文。
+- 地下-only demo summary 可以从 `tool.*` EventLog 派生工具调用摘要，字段仅限 requested / completed / failed 计数、tool call id、tool name、caller agent、duration 和 event refs；不得包含 raw tool output、搜索 provider 原始响应、API key 或 token。
 
 ### 4. Validation & Error Matrix
 
@@ -85,6 +89,9 @@
 | 地下-only demo 传入 `--out <dir>` | package 可从 `<dir>` round-trip load，summary 暴露 canonical `handoff.meta.json` 路径 |
 | 地下-only demo 未传 `--ai` | 不创建 provider、不发布 `model.*` 事件、不触发真实网络 |
 | 地下-only demo 传入 `--ai fake` | 被目标画像选中的每种 rootlet kind 各自发布 `model.requested -> model.completed`，非 model 地下公开事件仍保持 7 步并停在 handoff boundary |
+| 模型在 rootlet AI 调用中请求允许的工具 | AgentTurnRuntime 发布 `tool.requested -> tool.completed`，随后模型继续输出候选；工具结果只进入 rootlet source/evidence refs |
+| 模型请求未授权工具或工具失败 | 发布 `tool.failed`，rootlet 继续模型回合或 fallback，不静默吞错 |
+| 固定地下核心 agent 的 turn policy 禁用模型/工具 | 不产生 `model.*` / `tool.*` 事件，不进入 provider 或 ToolCenter |
 | `--ai openai-compatible` 缺少 API key 或模型名 | 返回明确配置失败，不进入 provider fetch，不泄漏密钥 |
 
 ### 5. Good / Base / Bad Cases
@@ -114,6 +121,8 @@
 - 默认 demo 和地下-only session 都不写 repo-root `.agentarbor/`。
 - `pnpm demo:underground` 可运行默认目标和自定义目标，并保持 7 步地下-only EventLog。
 - `pnpm demo:underground -- --ai fake "<goal>"` 覆盖模型事件、按 rootlet kind 的 AI summary、候选层接入和 Direction Handoff 边界；复杂目标必须覆盖 6 种 rootlet kind。
+- rootlet AI 工具循环覆盖 `web_search` 成功 / 无 provider / 未授权 / max rounds，且 rootlet output refs 能回到 tool call。
+- 至少一个非 rootlet 地下核心 agent 通过统一 turn policy 证明模型 / 工具不可用时不会私自调用。
 - `pnpm demo:underground -- --ai openai-compatible "<goal>"` 覆盖缺配置失败、无网络调用和密钥不泄漏。
 
 ### 7. Wrong vs Correct

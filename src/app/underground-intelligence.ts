@@ -1,8 +1,9 @@
-import type { Constraint } from "../domain/contracts.js";
+import type { AgentTurnPermissionPolicy, Constraint } from "../domain/contracts.js";
 import type {
-  IntelligenceChannel,
   ModelOutputValidationResult,
+  ModelResponse,
 } from "../domain/intelligence/index.js";
+import type { ToolCallResult } from "../domain/tools/index.js";
 import type {
   GoalIntentProfile,
   RootletClusterPlan,
@@ -10,6 +11,7 @@ import type {
   UndergroundAgentInvocation,
 } from "../domain/underground/index.js";
 import { createId, nowIso } from "../kernel/id.js";
+import type { AgentTurnPolicy, AgentTurnRuntime } from "../kernel/intelligence/index.js";
 import { getUndergroundRootletCandidateAdviceContract } from "./underground/intelligence-contracts.js";
 import {
   formatUndergroundRootletCandidateAdviceSummary,
@@ -27,8 +29,36 @@ export type UndergroundRootletCandidateAdviceRequestResult = {
   readonly fallbackSourceRefs: readonly string[];
 };
 
+export function createUndergroundRootletAgentTurnPolicy(input: {
+  readonly basePolicy: AgentTurnPermissionPolicy;
+  readonly callerAgentId: string;
+  readonly traceId: string;
+  readonly goalId: string;
+  readonly kind: RootletClusterPlan["kind"];
+}): AgentTurnPolicy {
+  const adviceContract = getUndergroundRootletCandidateAdviceContract(input.kind);
+  return {
+    allowModel: input.basePolicy.allowModel,
+    allowedTools: input.basePolicy.allowedTools,
+    maxModelRounds: input.basePolicy.maxModelRounds,
+    maxToolRounds: input.basePolicy.maxToolRounds,
+    fallback: input.basePolicy.fallback,
+    callerAgentId: input.callerAgentId,
+    traceId: input.traceId,
+    goalId: input.goalId,
+    purpose: "rootlet_candidate",
+    outputContract: adviceContract.modelOutputContract,
+    budget: {
+      maxOutputTokens: 256,
+      maxLatencyMs: 30_000,
+    },
+    sensitivity: "internal",
+  };
+}
+
 export async function requestUndergroundRootletCandidateAdvice(input: {
-  readonly intelligenceChannel: IntelligenceChannel;
+  readonly agentTurnRuntime: AgentTurnRuntime;
+  readonly turnPolicy: AgentTurnPolicy;
   readonly traceId: string;
   readonly goalId: string;
   readonly goal: string;
@@ -40,11 +70,10 @@ export async function requestUndergroundRootletCandidateAdvice(input: {
 }): Promise<UndergroundRootletCandidateAdviceRequestResult> {
   const requestId = createId("model-request");
   const adviceContract = getUndergroundRootletCandidateAdviceContract(input.cluster.kind);
-  const response = await input.intelligenceChannel.request({
+  const turn = await input.agentTurnRuntime.execute({
+    policy: input.turnPolicy,
     requestId,
-    traceId: input.traceId,
     callerRef: { kind: "rootlet", id: input.cluster.clusterId, label: input.cluster.kind },
-    purpose: "rootlet_candidate",
     inputRefs: [
       { kind: "goal", id: input.goalId },
       { kind: "rootlet", id: input.cluster.clusterId, label: input.cluster.kind },
@@ -55,34 +84,58 @@ export async function requestUndergroundRootletCandidateAdvice(input: {
       cluster: input.cluster,
       constraints: input.constraints,
     }),
-    outputContract: adviceContract.modelOutputContract,
     constraintRefs: input.constraints.map((constraint) => ({
       constraintId: constraint.id,
       requiredLevel: constraint.level,
       enforcementGate: constraint.enforcementGate,
     })),
-    budget: {
-      maxOutputTokens: 256,
-      maxLatencyMs: 30_000,
-    },
-    sensitivity: "internal",
     requestedAt: nowIso(),
   });
+  const response: ModelResponse | undefined = turn.finalOutput;
+  const toolCalls = turn.toolCalls;
+
+  if (
+    response === undefined ||
+    turn.status !== "completed" ||
+    turn.stoppedReason === "max_tool_rounds" ||
+    turn.stoppedReason === "max_model_rounds"
+  ) {
+    return {
+      rootletOutputs: [],
+      modelRequestId: turn.modelRequestId ?? requestId,
+      modelResponseId: turn.modelResponseId,
+      status: "failed",
+      validationStatus: response?.validation.status ?? "pending",
+      fallbackSourceRefs: [
+        ...modelFallbackSourceRefs({
+          kind: input.cluster.kind,
+          requestId: turn.modelRequestId ?? requestId,
+          responseId: turn.modelResponseId,
+          reason: turn.stoppedReason,
+          terminalEvent: response === undefined ? undefined : response.status === "completed" ? "model.completed" : "model.failed",
+        }),
+        ...toolCallSourceRefs(toolCalls),
+      ],
+    };
+  }
 
   if (response.status !== "completed" || response.validation.status !== "passed") {
     return {
       rootletOutputs: [],
-      modelRequestId: requestId,
+      modelRequestId: response.requestId,
       modelResponseId: response.responseId,
       status: "failed",
       validationStatus: response.validation.status,
-      fallbackSourceRefs: modelFallbackSourceRefs({
-        kind: input.cluster.kind,
-        requestId,
-        responseId: response.responseId,
-        reason: response.failure?.kind ?? "output_validation",
-        terminalEvent: "model.failed",
-      }),
+      fallbackSourceRefs: [
+        ...modelFallbackSourceRefs({
+          kind: input.cluster.kind,
+          requestId: response.requestId,
+          responseId: response.responseId,
+          reason: response.failure?.kind ?? "output_validation",
+          terminalEvent: "model.failed",
+        }),
+        ...toolCallSourceRefs(toolCalls),
+      ],
     };
   }
 
@@ -94,17 +147,20 @@ export async function requestUndergroundRootletCandidateAdvice(input: {
   if (parsed.candidates.length === 0) {
     return {
       rootletOutputs: [],
-      modelRequestId: requestId,
+      modelRequestId: response.requestId,
       modelResponseId: response.responseId,
       status: "empty",
       validationStatus: response.validation.status,
-      fallbackSourceRefs: modelFallbackSourceRefs({
-        kind: input.cluster.kind,
-        requestId,
-        responseId: response.responseId,
-        reason: parsed.issues.length > 0 ? "app_output_parse" : "empty_candidates",
-        terminalEvent: "model.completed",
-      }),
+      fallbackSourceRefs: [
+        ...modelFallbackSourceRefs({
+          kind: input.cluster.kind,
+          requestId: response.requestId,
+          responseId: response.responseId,
+          reason: parsed.issues.length > 0 ? "app_output_parse" : "empty_candidates",
+          terminalEvent: "model.completed",
+        }),
+        ...toolCallSourceRefs(toolCalls),
+      ],
     };
   }
 
@@ -121,15 +177,16 @@ export async function requestUndergroundRootletCandidateAdvice(input: {
           ...(input.sourceRefs ?? []),
           "model.requested",
           "model.completed",
-          requestId,
+          response.requestId,
           response.responseId,
           adviceContract.modelOutputContract.contractId,
           `model-candidate:${input.cluster.kind}:${candidate.sourceIndex + 1}`,
+          ...toolCallSourceRefs(toolCalls),
         ],
-        evidenceRefs: [`model-call:${response.responseId}`],
+        evidenceRefs: [`model-call:${response.responseId}`, ...completedToolEvidenceRefs(toolCalls)],
       })
     ),
-    modelRequestId: requestId,
+    modelRequestId: response.requestId,
     modelResponseId: response.responseId,
     status: "completed",
     validationStatus: response.validation.status,
@@ -137,17 +194,31 @@ export async function requestUndergroundRootletCandidateAdvice(input: {
   };
 }
 
+function toolCallSourceRefs(toolCalls: readonly ToolCallResult[]): string[] {
+  return toolCalls.flatMap((toolCall) => [
+    `tool-call:${toolCall.callId}`,
+    `tool:${toolCall.toolName}:${toolCall.status}`,
+    toolCall.status === "completed" ? "tool.completed" : "tool.failed",
+  ]);
+}
+
+function completedToolEvidenceRefs(toolCalls: readonly ToolCallResult[]): string[] {
+  return toolCalls
+    .filter((toolCall) => toolCall.status === "completed")
+    .map((toolCall) => `tool-call:${toolCall.callId}`);
+}
+
 function modelFallbackSourceRefs(input: {
   readonly kind: RootletClusterPlan["kind"];
   readonly requestId: string;
   readonly responseId?: string;
   readonly reason: string;
-  readonly terminalEvent: "model.completed" | "model.failed";
+  readonly terminalEvent?: "model.completed" | "model.failed";
 }): string[] {
   return [
     `ai-fallback:${input.kind}`,
     `ai-fallback-reason:${input.reason}`,
-    "model.requested",
+    input.terminalEvent === undefined ? undefined : "model.requested",
     input.terminalEvent,
     input.requestId,
     input.responseId,

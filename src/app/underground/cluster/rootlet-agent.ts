@@ -4,7 +4,10 @@ import {
   cloneUndergroundAgentInvocation,
 } from "../../underground-agent-cluster-runtime.js";
 import { createRootletOutputsForInvocation } from "../../underground-rootlets.js";
-import { requestUndergroundRootletCandidateAdvice } from "../../underground-intelligence.js";
+import {
+  createUndergroundRootletAgentTurnPolicy,
+  requestUndergroundRootletCandidateAdvice,
+} from "../../underground-intelligence.js";
 import { publishExplorationCandidatesProduced } from "../../underground-events.js";
 import type { RootletClusterKind, RootletOutput, UndergroundAgentInvocation } from "../../../domain/underground/index.js";
 import type {
@@ -28,7 +31,7 @@ export class RootletAgent implements UndergroundAgent {
         this.agentId,
         ROOTLET_INVOCATION_REQUESTED,
         (message) => this.handleInvocationRequested(ctx, message),
-        { requiresAsync: () => ctx.intelligenceChannel !== undefined }
+        { requiresAsync: () => ctx.agentTurnRuntime !== undefined }
       )
     );
   }
@@ -66,7 +69,7 @@ export class RootletAgent implements UndergroundAgent {
       `rootlet invocation ${message.payload.invocationId}`
     );
     const baseSourceRefs = [message.id, message.type];
-    if (ctx.intelligenceChannel !== undefined && state.goalIntentProfile !== undefined) {
+    if (ctx.agentTurnRuntime !== undefined && state.goalIntentProfile !== undefined) {
       return this.requestModelOutputs(ctx, message, cluster, invocation, goalId, rawGoal).then((modelAdvice) => {
         if (modelAdvice.rootletOutputs.length > 0) {
           this.completeRootletInvocation(
@@ -154,7 +157,7 @@ export class RootletAgent implements UndergroundAgent {
     rawGoal: string
   ): Promise<Awaited<ReturnType<typeof requestUndergroundRootletCandidateAdvice>>> {
     const goalIntentProfile = ctx.shared.require("goalIntentProfile", "goalIntentProfile");
-    if (ctx.intelligenceChannel === undefined) {
+    if (ctx.agentTurnRuntime === undefined) {
       return {
         rootletOutputs: [],
         modelRequestId: "",
@@ -163,8 +166,16 @@ export class RootletAgent implements UndergroundAgent {
         fallbackSourceRefs: [],
       };
     }
+    const manifest = ctx.runtime.registry.get(this.agentId);
     return requestUndergroundRootletCandidateAdvice({
-      intelligenceChannel: ctx.intelligenceChannel,
+      agentTurnRuntime: ctx.agentTurnRuntime,
+      turnPolicy: createUndergroundRootletAgentTurnPolicy({
+        basePolicy: manifest.turnPolicy,
+        callerAgentId: this.agentId,
+        traceId: message.traceId,
+        goalId,
+        kind: cluster.kind,
+      }),
       traceId: message.traceId,
       goalId,
       goal: rawGoal,

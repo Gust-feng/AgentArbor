@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { ModelProvider, ModelRequest, ModelResponse } from "../domain/intelligence/index.js";
+import type { ModelProvider, ModelRequest, ModelResponse, ModelToolCall } from "../domain/intelligence/index.js";
 import type { RootletClusterKind } from "../domain/underground/index.js";
 import { nowIso } from "../kernel/id.js";
 import { NativeIntelligenceChannel } from "../kernel/intelligence/channel.js";
 import { createFailedModelResponse } from "../kernel/intelligence/failures.js";
 import { pendingModelOutputValidation } from "../kernel/intelligence/validation.js";
 import { createUndergroundAiRuntimeConfig } from "./intelligence-channel-factory.js";
+import { ToolCenter, createWebSearchTool, type FetchLike } from "./tool-center/index.js";
 import {
   runUndergroundDirectionSession,
   runUndergroundDirectionSessionWithIntelligence,
@@ -107,6 +108,69 @@ test("All selected rootlet kinds request AI candidate advice through Intelligenc
       true
     );
   }
+});
+
+test("Rootlet AI can call web_search through ToolCenter before producing candidate output", async () => {
+  const fetch: FetchLike = async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({
+      results: [
+        {
+          title: "ToolCenter result",
+          url: "https://example.test/tool-center",
+          content: "Tool search result snippet.",
+        },
+      ],
+    }),
+  });
+  const result = await runUndergroundDirectionSessionWithIntelligence("Build a small deterministic helper.", {
+    createIntelligenceChannel: (runtime) =>
+      new NativeIntelligenceChannel({
+        provider: new TestModelProvider({
+          responses: [
+            {
+              toolCalls: [
+                {
+                  callId: "call-search",
+                  toolName: "web_search",
+                  input: { query: "AgentArbor ToolCenter" },
+                },
+              ],
+            },
+            {
+              output: {
+                candidates: [
+                  {
+                    summary: "Model used a tool before suggesting the candidate.",
+                    tradeoffs: ["adds current-information evidence"],
+                    applicability: "Use when a rootlet needs external context.",
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+        bus: runtime.bus,
+      }),
+    createToolCenter: () => {
+      const center = new ToolCenter();
+      center.register(createWebSearchTool({ apiKey: "tvly-test-secret", fetch }));
+      return center;
+    },
+  });
+
+  assert.equal(result.terminalStatus, "approved_package_created");
+  assert.deepEqual(
+    result.runtime.eventLog.types().filter((type) => type.startsWith("tool.")),
+    ["tool.requested", "tool.completed"]
+  );
+  const modelOutput = result.undergroundReport.rootletOutputs.find((output) =>
+    output.sourceRefs.includes("tool-call:call-search")
+  );
+  assert.notEqual(modelOutput, undefined);
+  assert.equal(modelOutput?.evidenceRefs.includes("tool-call:call-search"), true);
+  assert.equal(JSON.stringify(result.runtime.eventLog.list()).includes("tvly-test-secret"), false);
 });
 
 test("Contract-violating AI output does not enter an approved Direction Handoff", async () => {
@@ -241,8 +305,16 @@ test("EventLog and Observation Snapshot do not expose provider secret values", a
 
 type TestModelProviderOptions = {
   readonly output?: unknown;
+  readonly toolCalls?: readonly ModelToolCall[];
   readonly fail?: boolean;
   readonly secret?: string;
+  readonly responses?: readonly TestModelProviderResponse[];
+};
+
+type TestModelProviderResponse = {
+  readonly output?: unknown;
+  readonly toolCalls?: readonly ModelToolCall[];
+  readonly fail?: boolean;
 };
 
 class TestModelProvider implements ModelProvider {
@@ -250,11 +322,13 @@ class TestModelProvider implements ModelProvider {
   readonly providerKind = "fake" as const;
   readonly protocolKind = "openai_compatible_chat_completions" as const;
   readonly model = "test-underground-model";
+  private callCount = 0;
 
   constructor(private readonly options: TestModelProviderOptions = {}) {}
 
   async complete(request: ModelRequest): Promise<ModelResponse> {
-    if (this.options.fail) {
+    const step = this.nextStep();
+    if (step.fail) {
       return createFailedModelResponse({
         requestId: request.requestId,
         providerId: this.providerId,
@@ -276,18 +350,37 @@ class TestModelProvider implements ModelProvider {
       model: this.model,
       status: "completed",
       outputKind: request.outputContract.outputKind,
-      structuredOutput: this.options.output ?? {
-        candidates: [
-          {
-            summary: "Candidate advice from test provider.",
-            tradeoffs: ["deterministic test output"],
-            applicability: "Use as a test candidate.",
-          },
-        ],
-      },
-      finishReason: "stop",
+      structuredOutput:
+        step.output ??
+        (step.toolCalls === undefined || step.toolCalls.length === 0
+          ? {
+              candidates: [
+                {
+                  summary: "Candidate advice from test provider.",
+                  tradeoffs: ["deterministic test output"],
+                  applicability: "Use as a test candidate.",
+                },
+              ],
+            }
+          : undefined),
+      toolCalls: step.toolCalls?.map((toolCall) => ({
+        callId: toolCall.callId,
+        toolName: toolCall.toolName,
+        input: globalThis.structuredClone(toolCall.input),
+      })),
+      finishReason: step.toolCalls === undefined || step.toolCalls.length === 0 ? "stop" : "tool_call",
       validation: pendingModelOutputValidation(),
       completedAt: nowIso(),
+    };
+  }
+
+  private nextStep(): TestModelProviderResponse {
+    const step = this.options.responses?.[this.callCount];
+    this.callCount += 1;
+    return step ?? {
+      output: this.options.output,
+      toolCalls: this.options.toolCalls,
+      fail: this.options.fail,
     };
   }
 }

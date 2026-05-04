@@ -29,6 +29,32 @@ test("FakeModelProvider failed path emits model.requested then model.failed", as
   assert.deepEqual(eventLog.types(), ["model.requested", "model.failed"]);
 });
 
+test("FakeModelProvider can emit a deterministic tool call fixture", async () => {
+  const { channel, eventLog } = createFakeProviderChannel({
+    toolCalls: [{ callId: "call-search", toolName: "web_search", input: { query: "AgentArbor tools" } }],
+  });
+
+  const response = await channel.request(
+    createValidModelRequest({
+      tools: [
+        {
+          name: "web_search",
+          description: "Search the web.",
+          inputSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] },
+        },
+      ],
+      toolChoice: "auto",
+    })
+  );
+
+  assert.equal(response.status, "completed");
+  assert.equal(response.finishReason, "tool_call");
+  assert.deepEqual(response.toolCalls, [
+    { callId: "call-search", toolName: "web_search", input: { query: "AgentArbor tools" } },
+  ]);
+  assert.deepEqual(eventLog.types(), ["model.requested", "model.completed"]);
+});
+
 function createFakeProviderChannel(options: ConstructorParameters<typeof FakeModelProvider>[0] = {}) {
   const eventLog = new InMemoryEventLog();
   const bus = new InMemoryMessageBus(eventLog);

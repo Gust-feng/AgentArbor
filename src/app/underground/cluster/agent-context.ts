@@ -2,6 +2,8 @@ import type { ArborMessage, ArborMessageType } from "../../../domain/common.js";
 import { createId } from "../../../kernel/id.js";
 import type { MinimalRuntime } from "../../runtime.js";
 import type { IntelligenceChannel } from "../../../domain/intelligence/index.js";
+import type { ToolExecutionBroker } from "../../../domain/tools/index.js";
+import type { AgentTurnRuntime } from "../../../kernel/intelligence/index.js";
 import type { RootletClusterKind } from "../../../domain/underground/index.js";
 import type { UndergroundSharedContext } from "./shared-context.js";
 
@@ -61,6 +63,8 @@ export class UndergroundAgentContext {
       readonly runtime: MinimalRuntime;
       readonly shared: UndergroundSharedContext;
       readonly intelligenceChannel?: IntelligenceChannel;
+      readonly toolCenter?: ToolExecutionBroker;
+      readonly agentTurnRuntime?: AgentTurnRuntime;
       readonly enqueue: (message: UndergroundQueuedAgentMessage) => void;
     }
   ) {}
@@ -75,6 +79,14 @@ export class UndergroundAgentContext {
 
   get intelligenceChannel(): IntelligenceChannel | undefined {
     return this.input.intelligenceChannel;
+  }
+
+  get toolCenter(): ToolExecutionBroker | undefined {
+    return this.input.toolCenter;
+  }
+
+  get agentTurnRuntime(): AgentTurnRuntime | undefined {
+    return this.input.agentTurnRuntime;
   }
 
   subscribe<TType extends ArborMessageType>(

@@ -14,3 +14,4 @@ export * from "./governance/contracts.js";
 export * from "./fruits/contracts.js";
 export * from "./intelligence/contracts.js";
 export * from "./observation/contracts.js";
+export * from "./tools/contracts.js";

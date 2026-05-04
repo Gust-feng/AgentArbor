@@ -1,0 +1,7 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend runtime spec index for verification"}
+{"file": ".trellis/spec/backend/underground-radial-growth.md", "reason": "Verify underground agent runner and candidate boundaries"}
+{"file": ".trellis/spec/backend/intelligence-channel.md", "reason": "Verify model/tool boundary does not bypass IntelligenceChannel constraints"}
+{"file": ".trellis/spec/backend/observation-read-model.md", "reason": "Verify tool observation/read-model safety"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Verify required project quality gates"}
+{"file": ".trellis/spec/backend/tool-runtime.md", "reason": "Verify ToolCenter and tool-use-loop runtime contract"}

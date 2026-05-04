@@ -1,6 +1,7 @@
 import type { DirectionHandoffPackageRef } from "../domain/agentarbor/direction-handoff-package.js";
 import type { Constraint } from "../domain/contracts.js";
 import type { IntelligenceChannel } from "../domain/intelligence/index.js";
+import type { ToolExecutionBroker } from "../domain/tools/index.js";
 import type {
   CandidatePool,
   GoalIntentProfile,
@@ -32,7 +33,11 @@ import {
 } from "./minimal-underground.js";
 import { createRootletOutputsForInvocation } from "./underground-rootlets.js";
 import type { MinimalRuntime } from "./runtime.js";
-import { requestUndergroundRootletCandidateAdvice } from "./underground-intelligence.js";
+import {
+  createUndergroundRootletAgentTurnPolicy,
+  requestUndergroundRootletCandidateAdvice,
+} from "./underground-intelligence.js";
+import { AgentTurnRuntime } from "../kernel/intelligence/index.js";
 import {
   publishCandidatePoolUpdated,
   publishConvergenceReviewCompleted,
@@ -62,6 +67,7 @@ export type RunUndergroundAgentClusterExplorationInput = {
 export type RunUndergroundAgentClusterExplorationWithIntelligenceInput =
   RunUndergroundAgentClusterExplorationInput & {
     readonly intelligenceChannel: IntelligenceChannel;
+    readonly toolCenter?: ToolExecutionBroker;
   };
 
 export type RunUndergroundAgentClusterExplorationResult = {
@@ -348,6 +354,11 @@ async function requestModelRootletOutputs(input: RunUndergroundAgentClusterExplo
   readonly prepared: PreparedUndergroundAgentCluster;
 }): Promise<RootletOutput[]> {
   const outputs: RootletOutput[] = [];
+  const agentTurnRuntime = new AgentTurnRuntime({
+    intelligenceChannel: input.intelligenceChannel,
+    toolCenter: input.toolCenter,
+    publishToolEvent: (event) => input.runtime.bus.publish(event),
+  });
   for (const cluster of input.prepared.startedPlan.rootletClusters) {
     const invocation = input.prepared.runningRootletInvocations.find(
       (candidate) => candidate.agentId === undergroundRootletAgentId(cluster.kind)
@@ -355,8 +366,16 @@ async function requestModelRootletOutputs(input: RunUndergroundAgentClusterExplo
     if (invocation === undefined) {
       continue;
     }
+    const manifest = input.runtime.registry.get(invocation.agentId);
     const modelAdvice = await requestUndergroundRootletCandidateAdvice({
-      intelligenceChannel: input.intelligenceChannel,
+      agentTurnRuntime,
+      turnPolicy: createUndergroundRootletAgentTurnPolicy({
+        basePolicy: manifest.turnPolicy,
+        callerAgentId: invocation.agentId,
+        traceId: input.traceId,
+        goalId: input.goalId,
+        kind: cluster.kind,
+      }),
       traceId: input.traceId,
       goalId: input.goalId,
       goal: input.rawGoal,

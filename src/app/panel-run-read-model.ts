@@ -61,6 +61,11 @@ export type PanelRunTrackingReadModel = {
     readonly completed: number;
     readonly failed: number;
   };
+  readonly toolTotals: {
+    readonly requested: number;
+    readonly completed: number;
+    readonly failed: number;
+  };
   readonly candidates: {
     readonly total: CandidatePoolCounts;
     readonly byKind: Readonly<Record<RootletClusterKind, CandidatePoolCounts>>;
@@ -204,6 +209,7 @@ export function createPanelRunTracking(input: {
     },
     rootletsByKind,
     modelTotals: input.summary?.ai.eventCounts ?? countModelEvents(input.eventEntries),
+    toolTotals: input.summary?.tools.eventCounts ?? countToolEvents(input.eventEntries),
     candidates: {
       total: input.summary?.underground.candidateCounts ?? zeroCandidateCounts(),
       byKind: ROOTLET_CLUSTER_KINDS.reduce((result, kind) => {
@@ -389,6 +395,9 @@ function createRootletAgentsNote(input: NoteFactoryInput): AgentWorkNote {
     "model.requested",
     "model.completed",
     "model.failed",
+    "tool.requested",
+    "tool.completed",
+    "tool.failed",
     "exploration_candidate.produced",
     "candidate_pool.updated",
   ]);
@@ -407,7 +416,7 @@ function createRootletAgentsNote(input: NoteFactoryInput): AgentWorkNote {
       : rootletsStarted
         ? "Rootlet agents 正在产出候选和模型建议引用。"
         : "等待 Rootlet 集群启动。",
-    detail: `Rootlet kinds: ${rootletKindsFor(input).join(" / ")}。模型只记录调用引用、状态和候选引用，不展示 prompt 或 raw output。`,
+    detail: `Rootlet kinds: ${rootletKindsFor(input).join(" / ")}。模型和工具只记录调用引用、状态和候选引用，不展示 prompt、raw output 或 secret。`,
     eventRefs,
     candidateRefs: input.candidateRefs,
     modelCallRefs,
@@ -587,6 +596,14 @@ function countModelEvents(eventEntries: readonly EventLogEntry[]): PanelRunTrack
   };
 }
 
+function countToolEvents(eventEntries: readonly EventLogEntry[]): PanelRunTrackingReadModel["toolTotals"] {
+  return {
+    requested: eventEntries.filter((entry) => entry.type === "tool.requested").length,
+    completed: eventEntries.filter((entry) => entry.type === "tool.completed").length,
+    failed: eventEntries.filter((entry) => entry.type === "tool.failed").length,
+  };
+}
+
 function countModelEventsByKind(
   eventEntries: readonly EventLogEntry[]
 ): ReadonlyMap<RootletClusterKind, { kind: RootletClusterKind; requested: number; completed: number; failed: number }> {
@@ -667,6 +684,11 @@ function waitingPointFor(status: PanelRunStatus, lastEventType: ArborMessageType
     case "model.completed":
     case "model.failed":
       return "模型调用已返回，Rootlet Agents 正在整理候选或 fallback。";
+    case "tool.requested":
+      return "已发出工具调用，等待工具返回脱敏结果引用。";
+    case "tool.completed":
+    case "tool.failed":
+      return "工具调用已返回，模型将基于工具结果继续生成候选。";
     case "exploration_candidate.produced":
       return "候选已产出，等待候选池更新。";
     case "candidate_pool.updated":

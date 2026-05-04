@@ -5,7 +5,9 @@ import {
 } from "../adapters/intelligence/index.js";
 import { NativeIntelligenceChannel } from "../kernel/intelligence/channel.js";
 import type { IntelligenceChannel } from "../domain/intelligence/index.js";
+import type { ToolExecutionBroker } from "../domain/tools/index.js";
 import type { MinimalRuntime } from "./runtime.js";
+import { ToolCenter, createWebSearchTool } from "./tool-center/index.js";
 import type { UndergroundDemoAiInput } from "./underground-demo-summary.js";
 
 export type UndergroundAiMode = "none" | "fake" | "openai-compatible";
@@ -23,6 +25,7 @@ export type UndergroundAiRuntimeConfig =
       readonly mode: Exclude<UndergroundAiMode, "none">;
       readonly summaryInput: UndergroundDemoAiInput;
       createIntelligenceChannel(runtime: MinimalRuntime): IntelligenceChannel;
+      createToolCenter(runtime: MinimalRuntime): ToolExecutionBroker;
     };
 
 export type UndergroundAiConfigurationIssueCode = "missing_api_key" | "missing_model_name";
@@ -79,6 +82,7 @@ export function createUndergroundAiRuntimeConfig(input: {
           provider: new FakeModelProvider(),
           bus: runtime.bus,
         }),
+      createToolCenter: () => createDefaultToolCenter({ env: input.env ?? process.env, fetch: input.fetch }),
     };
   }
 
@@ -137,7 +141,23 @@ function createOpenAICompatibleConfig(input: {
         }),
         bus: runtime.bus,
       }),
+    createToolCenter: () => createDefaultToolCenter({ env: input.env, fetch: input.fetch }),
   };
+}
+
+export function createDefaultToolCenter(input: {
+  readonly env?: UndergroundAiEnvironment;
+  readonly fetch?: FetchLike;
+} = {}): ToolExecutionBroker {
+  const env = input.env ?? process.env;
+  const center = new ToolCenter();
+  center.register(
+    createWebSearchTool({
+      apiKey: firstNonBlank(env.AGENTARBOR_TAVILY_API_KEY, env.TAVILY_API_KEY),
+      fetch: input.fetch,
+    })
+  );
+  return center;
 }
 
 function firstNonBlank(...values: readonly (string | undefined)[]): string | undefined {

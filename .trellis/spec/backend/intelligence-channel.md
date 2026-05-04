@@ -12,17 +12,21 @@
 
 ## Signatures
 
-- `ModelRequest`：内部模型调用请求，必须包含 `requestId`、`traceId`、`callerRef`、`purpose`、`inputRefs`、`sanitizedMessages`、`outputContract`、`constraintRefs`、`budget`、`sensitivity`、`requestedAt`。
-- `ModelResponse`：归一化模型响应，必须包含 `responseId`、`requestId`、`providerId`、`model`、`status`、`outputKind`、`validation`、`completedAt`。
+- `ModelRequest`：内部模型调用请求，必须包含 `requestId`、`traceId`、`callerRef`、`purpose`、`inputRefs`、`sanitizedMessages`、`outputContract`、`constraintRefs`、`budget`、`sensitivity`、`requestedAt`；可选 `tools` 和 `toolChoice` 只声明当前 agent 被允许使用的工具。
+- `ModelMessage`：支持 `system/user/assistant/tool`；assistant message 可以携带 `toolCalls`，tool message 必须引用 `toolCallId` 和 `toolName`。
+- `ModelResponse`：归一化模型响应，必须包含 `responseId`、`requestId`、`providerId`、`model`、`status`、`outputKind`、`validation`、`completedAt`；可选 `toolCalls` 表示模型要求进入工具回合。
 - `ModelUsage`：归一化 token、成本和延迟字段；provider 未返回时保持空值，不伪造。deterministic fake provider 也不得返回 fabricated zero token usage。
 - `ModelCallRef`：正式材料引用模型调用的唯一方式。
 - `ModelProvider.complete(request)`：provider adapter 最小接口。
 - `IntelligenceChannel.request(request)`：业务层唯一模型调用入口。
+- `AgentTurnRuntime.execute(...)`：所有 agent 多轮模型 + 工具回合的统一运行入口；它在 IntelligenceChannel 外层统一承载 tool call loop、tool result 回填、权限、预算、轮次和 fallback。kernel 只依赖 `ToolExecutionBroker` 接口，不依赖 app `ToolCenter` concrete class。
+- `executeToolUseLoop(...)`：低层兼容 helper，可被 AgentTurnRuntime 复用；rootlet 等业务 agent 不应继续把它当私有入口。
 
 ## Contracts
 
-- `src/domain/intelligence/` 保存模型调用领域契约、purpose taxonomy、输出类型、protocol / provider kind 和 `ModelCallRef`。它不能依赖 provider SDK、provider adapter 或 provider-specific response shape。
-- `src/kernel/intelligence/` 保存智能通道实现、请求校验、输出校验、事件发布、降级策略和 provider registry。
+- `src/domain/intelligence/` 保存模型调用领域契约、purpose taxonomy、输出类型、protocol / provider kind、tool call 字段和 `ModelCallRef`。它不能依赖 provider SDK、provider adapter 或 provider-specific response shape。
+- `src/domain/tools/` 保存工具定义、工具调用请求/结果、执行上下文和 tool runner 接口；它是工具能力的领域契约层。
+- `src/kernel/intelligence/` 保存智能通道实现、请求校验、输出校验、事件发布、降级策略、provider registry、AgentTurnRuntime 和工具循环；AgentTurnRuntime / 工具循环不能导入 app 层 ToolCenter 或地下模块。
 - `src/adapters/intelligence/` 保存 OpenAI-compatible Chat Completions、后续 OpenAI Responses、Anthropic Messages、Gemini generateContent 或其他 provider protocol adapter。只有这一层可以读取 provider 凭证或执行 provider HTTP 协议映射；本阶段不得引入外部 LLM SDK。
 - `src/app/**` 的运行流程只能通过注入的 `IntelligenceChannel` 使用模型能力；应用组合根可以装配智能通道和 provider adapter，但不能直接调用 provider SDK、读取 provider-specific response 字段或导入 adapter 实现参与业务流程。
 - `src/app/intelligence-channel-factory.ts` 是当前 CLI / demo 组合根装配 provider adapter 的唯一 app 层例外；地下 session、runner、rootlet、summary 和其他业务编排只能接收 `IntelligenceChannel` 或清洗后的 AI 观测输入，不得直接导入 provider adapter。
@@ -35,7 +39,9 @@
 
 - 任何直接在领域层、kernel 业务边界、app demo 运行流程或测试 fixture 中调用 provider SDK、外部 LLM SDK 或 provider adapter 的实现都违规。
 - 模型输出默认是不可信候选；不能直接写入 Direction Handoff、Growth Plan、Verification Result、Run Memory、Experience Candidate、Capability Asset 或 Soil。
+- 模型返回 `toolCalls` 时只能由 AgentTurnRuntime 触发受权限裁剪的工具循环；工具结果也是不可信材料，必须作为 tool message 回到模型或作为 source/evidence refs 进入候选层，不能直接变成事实源。
 - `model.requested`、`model.completed`、`model.failed` 事件必须由智能通道统一发布；调用方不得手写伪造模型调用事件。
+- `tool.requested`、`tool.completed`、`tool.failed` 事件必须由工具循环 / ToolCenter 集成统一发布；payload 只允许 safe input/output summary、refs、duration 和错误摘要。
 - EventLog 和 Observation Snapshot 只能记录清洗后的请求摘要、引用、usage、状态和错误引用。
 - Observation refs 必须按事件类型解析：`model.*` payload 中的 `requestId` / `responseId` 只能生成 `model_call` ref；`user_approval.*` 和 direction-handoff revision payload 中的 clarification ids 才能生成 `user_clarification` ref。
 - API key、token、完整敏感 prompt、未授权 Soil 内容和 provider 原始敏感错误不得进入 EventLog、Snapshot、方向交接包或测试快照。
@@ -55,6 +61,7 @@
 | 请求缺少 purpose / output contract / budget | `IntelligenceChannel` 拒绝请求并发布失败状态 |
 | provider 超时或鉴权失败 | 返回 failed response，发布 `model.failed` |
 | provider 输出不符合结构契约 | 返回 validation failed，不进入候选池提升 |
+| provider 返回 tool calls | response validation 通过，调用方进入工具循环；最终候选输出仍需通过 output contract |
 | `visibleOutput.fieldTypes` 与 rootlet parser 字段类型不一致，导致 parser 丢弃的候选仍可见 | 测试失败；visible output 必须被抑制或只展示 parser 可接受字段 |
 | 模型建议违反 hard constraint | 保留为 rejected candidate 或失败说明，不得放行 |
 | EventLog 出现 API key 或 token 字段 | 安全边界失败 |
@@ -83,6 +90,9 @@
 - 6 种 underground rootlet kind 的候选数组 output contract、kind prompt 和 app parser 必须有 focused 测试；fake AI 复杂目标必须证明每种被选中的 rootlet kind 都经过 `IntelligenceChannel` 发布 `model.requested -> model.completed`。
 - visible output field type policy 必须覆盖 rootlet candidate 字段，并证明 app parser 会拒绝的字段类型不会生成 approved visible output。
 - OpenAI-compatible Chat Completions adapter 使用 stubbed fetch 验证 `/v1/chat/completions` 请求与归一化响应映射，不发真实网络。
+- OpenAI-compatible Chat Completions adapter 使用 stubbed fetch 验证 `tools`、`tool_choice`、assistant `tool_calls`、tool result message 和 provider `tool_calls` 归一化映射。
+- fake provider 支持 deterministic tool call fixture，以便测试工具循环而不引入真实网络。
+- AgentTurnRuntime 覆盖模型禁用、未授权工具、工具回填继续模型、模型/工具轮次上限和边界导入规则。
 - provider adapter 失败映射：鉴权失败、超时、rate limit、输出不合约、fetch 缺失。
 - 事件顺序：`model.requested -> model.completed` 或 `model.requested -> model.failed`。
 - 导入边界：不引入外部 LLM SDK；`domain/**`、`kernel/**`、app 运行流程不直接导入 provider SDK 或 provider adapter；组合根只允许装配 adapter factory。

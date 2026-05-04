@@ -1,4 +1,6 @@
 import type { IntelligenceChannel } from "../domain/intelligence/index.js";
+import type { ToolExecutionBroker } from "../domain/tools/index.js";
+import { AgentTurnRuntime } from "../kernel/intelligence/index.js";
 import type { MinimalRuntime } from "./runtime.js";
 import {
   UndergroundAgentRunner,
@@ -16,6 +18,7 @@ export class UndergroundMessageDispatcherError extends UndergroundAgentRunnerErr
 export type MessageDrivenUndergroundDispatcherOptions = {
   readonly runtime: MinimalRuntime;
   readonly intelligenceChannel?: IntelligenceChannel;
+  readonly toolCenter?: ToolExecutionBroker;
   readonly maxDispatchSteps?: number;
 };
 
@@ -25,7 +28,17 @@ export class MessageDrivenUndergroundDispatcher {
   private readonly runner: UndergroundAgentRunner;
 
   constructor(options: MessageDrivenUndergroundDispatcherOptions) {
-    this.runner = new UndergroundAgentRunner(options);
+    this.runner = new UndergroundAgentRunner({
+      ...options,
+      agentTurnRuntime:
+        options.intelligenceChannel === undefined
+          ? undefined
+          : new AgentTurnRuntime({
+              intelligenceChannel: options.intelligenceChannel,
+              toolCenter: options.toolCenter,
+              publishToolEvent: (event) => options.runtime.bus.publish(event),
+            }),
+    });
   }
 
   dispose(): void {

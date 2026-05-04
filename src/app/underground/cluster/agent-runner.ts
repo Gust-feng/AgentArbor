@@ -5,6 +5,8 @@ import type {
   DirectionHandoffPackageRef,
 } from "../../../domain/agentarbor/direction-handoff-package.js";
 import type { IntelligenceChannel } from "../../../domain/intelligence/index.js";
+import type { ToolExecutionBroker } from "../../../domain/tools/index.js";
+import type { AgentTurnRuntime } from "../../../kernel/intelligence/index.js";
 import type { RootletClusterKind } from "../../../domain/underground/index.js";
 import { ensureUndergroundAgentClusterManifests } from "../../underground-agent-cluster-runtime.js";
 import type { MinimalRuntime } from "../../runtime.js";
@@ -33,6 +35,8 @@ export class UndergroundAgentRunnerError extends UndergroundAgentRuntimeError {}
 export type UndergroundAgentRunnerOptions = {
   readonly runtime: MinimalRuntime;
   readonly intelligenceChannel?: IntelligenceChannel;
+  readonly toolCenter?: ToolExecutionBroker;
+  readonly agentTurnRuntime?: AgentTurnRuntime;
   readonly maxDispatchSteps?: number;
 };
 
@@ -67,6 +71,8 @@ export class UndergroundAgentRunner {
       runtime: options.runtime,
       shared: this.shared,
       intelligenceChannel: options.intelligenceChannel,
+      toolCenter: options.toolCenter,
+      agentTurnRuntime: options.agentTurnRuntime,
       enqueue: (message) => this.queue.push(message),
     });
     this.fixedAgents = [

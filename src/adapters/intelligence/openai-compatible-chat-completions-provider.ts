@@ -1,9 +1,12 @@
 import type {
+  ModelMessage,
   ModelFailureKind,
   ModelProvider,
   ModelRequest,
   ModelResponse,
+  ModelToolChoice,
 } from "../../domain/intelligence/index.js";
+import type { ToolCallRequest, ToolDefinition } from "../../domain/tools/index.js";
 import { createId, nowIso } from "../../kernel/id.js";
 import { createFailedModelResponse } from "../../kernel/intelligence/failures.js";
 import { pendingModelOutputValidation } from "../../kernel/intelligence/validation.js";
@@ -75,10 +78,9 @@ export class OpenAICompatibleChatCompletionsProvider implements ModelProvider {
         },
         body: JSON.stringify({
           model: this.model,
-          messages: request.sanitizedMessages.map((message) => ({
-            role: message.role,
-            content: message.content,
-          })),
+          messages: request.sanitizedMessages.map(toOpenAIMessage),
+          tools: request.tools === undefined || request.tools.length === 0 ? undefined : request.tools.map(toOpenAITool),
+          tool_choice: toOpenAIToolChoice(request.toolChoice),
           response_format:
             request.outputContract.format === "json_object" ? { type: "json_object" } : undefined,
         }),
@@ -139,6 +141,7 @@ function normalizeOpenAICompatibleResponse(input: {
   const message = asRecord(firstChoice.message);
   const content = typeof message.content === "string" ? message.content : "";
   const parsedOutput = parseStructuredOutput(content);
+  const toolCalls = parseToolCalls(message.tool_calls);
   const usage = asRecord(raw.usage);
 
   return {
@@ -150,8 +153,10 @@ function normalizeOpenAICompatibleResponse(input: {
     model: typeof raw.model === "string" ? raw.model : input.model,
     status: "completed",
     outputKind: input.request.outputContract.outputKind,
-    structuredOutput: input.request.outputContract.format === "json_object" ? parsedOutput : undefined,
+    structuredOutput:
+      toolCalls.length > 0 ? undefined : input.request.outputContract.format === "json_object" ? parsedOutput : undefined,
     textOutput: content,
+    toolCalls: toolCalls.length === 0 ? undefined : toolCalls,
     usage: {
       inputTokens: numberOrUndefined(usage.prompt_tokens),
       outputTokens: numberOrUndefined(usage.completion_tokens),
@@ -204,6 +209,99 @@ function finishReasonForOpenAI(value: unknown): ModelResponse["finishReason"] {
       return "content_filter";
     default:
       return undefined;
+  }
+}
+
+function toOpenAIMessage(message: ModelMessage): Record<string, unknown> {
+  if (message.role === "tool") {
+    return {
+      role: "tool",
+      tool_call_id: message.toolCallId,
+      name: message.toolName,
+      content: message.content,
+    };
+  }
+
+  if (message.role === "assistant" && message.toolCalls !== undefined && message.toolCalls.length > 0) {
+    return {
+      role: "assistant",
+      content: message.content,
+      tool_calls: message.toolCalls.map(toOpenAIToolCall),
+    };
+  }
+
+  return {
+    role: message.role,
+    content: message.content,
+  };
+}
+
+function toOpenAITool(definition: ToolDefinition): Record<string, unknown> {
+  return {
+    type: "function",
+    function: {
+      name: definition.name,
+      description: definition.description,
+      parameters: definition.inputSchema,
+    },
+  };
+}
+
+function toOpenAIToolChoice(choice: ModelToolChoice | undefined): unknown {
+  if (choice === undefined) {
+    return undefined;
+  }
+  if (choice === "auto" || choice === "none") {
+    return choice;
+  }
+  return {
+    type: "function",
+    function: {
+      name: choice.function.name,
+    },
+  };
+}
+
+function toOpenAIToolCall(toolCall: ToolCallRequest): Record<string, unknown> {
+  return {
+    id: toolCall.callId,
+    type: "function",
+    function: {
+      name: toolCall.toolName,
+      arguments: JSON.stringify(toolCall.input),
+    },
+  };
+}
+
+function parseToolCalls(value: unknown): ToolCallRequest[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const calls: ToolCallRequest[] = [];
+  for (const item of value) {
+    const record = asRecord(item);
+    const fn = asRecord(record.function);
+    const name = typeof fn.name === "string" ? fn.name : undefined;
+    if (name === undefined) {
+      continue;
+    }
+    calls.push({
+      callId: typeof record.id === "string" ? record.id : createId("tool-call"),
+      toolName: name,
+      input: parseToolArguments(fn.arguments),
+    });
+  }
+  return calls;
+}
+
+function parseToolArguments(value: unknown): unknown {
+  if (typeof value !== "string") {
+    return value ?? {};
+  }
+  try {
+    return JSON.parse(value);
+  } catch {
+    return { rawArguments: value };
   }
 }
 

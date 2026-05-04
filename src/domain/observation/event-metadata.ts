@@ -75,6 +75,27 @@ export const EVENT_OBSERVATION_METADATA = {
     phase: "underground",
     stage: "model_failed",
   }),
+  "tool.requested": metadata({
+    summary: "ToolCenter requested a tool execution.",
+    scope: "runtime",
+    progressStatus: "in_progress",
+    phase: "underground",
+    stage: "tool_requested",
+  }),
+  "tool.completed": metadata({
+    summary: "ToolCenter completed a tool execution.",
+    scope: "runtime",
+    phase: "underground",
+    stage: "tool_completed",
+  }),
+  "tool.failed": metadata({
+    summary: "ToolCenter failed or denied a tool execution.",
+    scope: "runtime",
+    severity: "warning",
+    progressStatus: "failed",
+    phase: "underground",
+    stage: "tool_failed",
+  }),
   "convergence_review.completed": metadata({
     summary: "Convergence review judged candidate outcomes.",
     scope: "underground",

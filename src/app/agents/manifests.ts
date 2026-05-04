@@ -1,5 +1,22 @@
-import type { AgentManifest } from "../../domain/contracts.js";
+import type { AgentManifest, AgentTurnPermissionPolicy } from "../../domain/contracts.js";
 import { ROOTLET_CLUSTER_KINDS, type RootletClusterKind } from "../../domain/underground/index.js";
+
+const DISABLED_TURN_POLICY: AgentTurnPermissionPolicy = {
+  allowModel: false,
+  allowedTools: [],
+  maxModelRounds: 0,
+  maxToolRounds: 0,
+  fallback: "disabled",
+};
+
+const ROOTLET_SEARCH_TOOLS_BY_KIND: Readonly<Record<RootletClusterKind, readonly string[]>> = {
+  option: ["web_search"],
+  risk: [],
+  asset_fit: [],
+  evidence: ["web_search"],
+  constraint: [],
+  counterfactual: [],
+};
 
 export function createDemoAgentManifests(): AgentManifest[] {
   return [
@@ -28,6 +45,7 @@ export function createDemoAgentManifests(): AgentManifest[] {
         write: ["direction_handoff"],
         execute: [],
       },
+      turnPolicy: DISABLED_TURN_POLICY,
     },
     {
       id: "aboveground-planner",
@@ -47,6 +65,7 @@ export function createDemoAgentManifests(): AgentManifest[] {
         write: ["growth_plan", "workflow_ir", "task_spec"],
         execute: [],
       },
+      turnPolicy: DISABLED_TURN_POLICY,
     },
     {
       id: "worker-agent",
@@ -66,6 +85,7 @@ export function createDemoAgentManifests(): AgentManifest[] {
         write: ["artifact_store"],
         execute: [],
       },
+      turnPolicy: DISABLED_TURN_POLICY,
     },
     {
       id: "verifier",
@@ -85,6 +105,7 @@ export function createDemoAgentManifests(): AgentManifest[] {
         write: ["verification_report"],
         execute: [],
       },
+      turnPolicy: DISABLED_TURN_POLICY,
     },
     {
       id: "governance-review",
@@ -110,6 +131,7 @@ export function createDemoAgentManifests(): AgentManifest[] {
         write: ["fruit_candidate", "run_memory", "experience_candidate", "path_bias"],
         execute: [],
       },
+      turnPolicy: DISABLED_TURN_POLICY,
     },
   ];
 }
@@ -161,6 +183,7 @@ export function createUndergroundAgentClusterManifests(): AgentManifest[] {
 }
 
 function createUndergroundRootletAgentManifest(kind: RootletClusterKind): AgentManifest {
+  const allowedTools = ROOTLET_SEARCH_TOOLS_BY_KIND[kind];
   return undergroundClusterManifest({
     id: undergroundRootletAgentId(kind),
     name: `Underground Rootlet ${kind}`,
@@ -168,6 +191,14 @@ function createUndergroundRootletAgentManifest(kind: RootletClusterKind): AgentM
     capabilities: [`rootlet.${kind}`, "rootlet.output"],
     inputEvents: ["rootlet_cluster.started"],
     outputEvents: ["exploration_candidate.produced"],
+    execute: allowedTools,
+    turnPolicy: {
+      allowModel: true,
+      allowedTools,
+      maxModelRounds: 3,
+      maxToolRounds: 2,
+      fallback: "deterministic",
+    },
   });
 }
 
@@ -182,6 +213,8 @@ function undergroundClusterManifest(input: {
   capabilities: string[];
   inputEvents: AgentManifest["inputEvents"];
   outputEvents: AgentManifest["outputEvents"];
+  execute?: readonly string[];
+  turnPolicy?: AgentTurnPermissionPolicy;
 }): AgentManifest {
   return {
     id: input.id,
@@ -199,7 +232,8 @@ function undergroundClusterManifest(input: {
     permissions: {
       read: ["soil_index", "direction_handoff_context"],
       write: ["underground_candidate_pool", "direction_handoff"],
-      execute: [],
+      execute: [...(input.execute ?? [])],
     },
+    turnPolicy: input.turnPolicy ?? DISABLED_TURN_POLICY,
   };
 }

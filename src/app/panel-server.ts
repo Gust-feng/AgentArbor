@@ -446,6 +446,7 @@ async function runUndergroundForPanel(
 
   const result = await runUndergroundDirectionSessionWithIntelligence(goal, {
     createIntelligenceChannel: aiConfig.createIntelligenceChannel,
+    createToolCenter: aiConfig.createToolCenter,
     onRuntimeReady: options.onRuntimeReady,
   });
   const summary = createUndergroundDemoSummary(result, undefined, aiConfig.summaryInput);

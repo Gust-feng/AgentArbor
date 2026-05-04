@@ -1,6 +1,7 @@
 import type { ArtifactRef } from "../common.js";
 import type { ConstraintRef } from "../constraints.js";
 import type { ObservationRef } from "../observation/contracts.js";
+import type { ToolCallRequest, ToolDefinition } from "../tools/index.js";
 
 export const MODEL_PROTOCOL_KINDS = [
   "openai_compatible_chat_completions",
@@ -24,9 +25,12 @@ export type ModelPurpose =
 export type ModelOutputKind = "candidate" | "draft" | "explanation" | "evidence_suggestion";
 
 export type ModelMessage = {
-  readonly role: "system" | "user" | "assistant";
+  readonly role: "system" | "user" | "assistant" | "tool";
   readonly content: string;
   readonly ref?: string;
+  readonly toolCallId?: string;
+  readonly toolName?: string;
+  readonly toolCalls?: readonly ToolCallRequest[];
 };
 
 export type ModelBudget = {
@@ -96,12 +100,21 @@ export type ModelRequest = {
   readonly purpose: ModelPurpose;
   readonly inputRefs: readonly ObservationRef[];
   readonly sanitizedMessages: readonly ModelMessage[];
+  readonly tools?: readonly ToolDefinition[];
+  readonly toolChoice?: ModelToolChoice;
   readonly outputContract: ModelOutputContract;
   readonly constraintRefs: readonly ConstraintRef[];
   readonly budget: ModelBudget;
   readonly sensitivity: "public" | "internal" | "restricted";
   readonly requestedAt: string;
 };
+
+export type ModelToolChoice =
+  | "auto"
+  | "none"
+  | { readonly type: "function"; readonly function: { readonly name: string } };
+
+export type ModelToolCall = ToolCallRequest;
 
 export type ModelUsage = {
   readonly inputTokens?: number;
@@ -140,6 +153,7 @@ export type ModelResponse = {
   readonly structuredOutput?: unknown;
   readonly textOutput?: string;
   readonly textOutputRef?: ArtifactRef;
+  readonly toolCalls?: readonly ToolCallRequest[];
   readonly usage?: ModelUsage;
   readonly finishReason?: "stop" | "length" | "tool_call" | "content_filter" | "error";
   readonly validation: ModelOutputValidationResult;

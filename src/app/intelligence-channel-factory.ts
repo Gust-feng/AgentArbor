@@ -5,9 +5,16 @@ import {
 } from "../adapters/intelligence/index.js";
 import { NativeIntelligenceChannel } from "../kernel/intelligence/channel.js";
 import type { IntelligenceChannel } from "../domain/intelligence/index.js";
+import type { InformationSourceKind } from "../domain/research/index.js";
 import type { ToolExecutionBroker } from "../domain/tools/index.js";
 import type { MinimalRuntime } from "./runtime.js";
-import { ToolCenter, createWebSearchTool } from "./tool-center/index.js";
+import {
+  createDefaultResearchRuntime,
+  createResearchReadTool,
+  createResearchSearchTool,
+  type PageFetchLike,
+} from "./research/index.js";
+import { ToolCenter } from "./tool-center/index.js";
 import type { UndergroundDemoAiInput } from "./underground-demo-summary.js";
 
 export type UndergroundAiMode = "none" | "fake" | "openai-compatible";
@@ -82,7 +89,7 @@ export function createUndergroundAiRuntimeConfig(input: {
           provider: new FakeModelProvider(),
           bus: runtime.bus,
         }),
-      createToolCenter: () => createDefaultToolCenter({ env: input.env ?? process.env, fetch: input.fetch }),
+      createToolCenter: (runtime) => createDefaultToolCenter({ runtime, env: input.env ?? process.env, fetch: input.fetch }),
     };
   }
 
@@ -141,23 +148,64 @@ function createOpenAICompatibleConfig(input: {
         }),
         bus: runtime.bus,
       }),
-    createToolCenter: () => createDefaultToolCenter({ env: input.env, fetch: input.fetch }),
+    createToolCenter: (runtime) => createDefaultToolCenter({ runtime, env: input.env, fetch: input.fetch }),
   };
 }
 
 export function createDefaultToolCenter(input: {
+  readonly runtime?: MinimalRuntime;
   readonly env?: UndergroundAiEnvironment;
   readonly fetch?: FetchLike;
+  readonly sourcePreference?: readonly InformationSourceKind[];
+  readonly tavilyMaxResults?: number;
 } = {}): ToolExecutionBroker {
   const env = input.env ?? process.env;
   const center = new ToolCenter();
-  center.register(
-    createWebSearchTool({
-      apiKey: firstNonBlank(env.AGENTARBOR_TAVILY_API_KEY, env.TAVILY_API_KEY),
-      fetch: input.fetch,
-    })
-  );
+  const researchRuntime = createDefaultResearchRuntime({
+    env,
+    tavilyFetch: input.fetch,
+    pageFetch: input.fetch as unknown as PageFetchLike,
+    constraints: input.runtime?.constraints,
+    sourcePreference: input.sourcePreference ?? parseInformationSourcePreference(env.AGENTARBOR_INFORMATION_SOURCE_PREFERENCE),
+    tavilyMaxResults: input.tavilyMaxResults ?? positiveIntegerFromString(env.AGENTARBOR_TAVILY_MAX_RESULTS),
+  });
+  center.register(createResearchSearchTool(researchRuntime));
+  center.register(createResearchReadTool(researchRuntime));
   return center;
+}
+
+function parseInformationSourcePreference(value: string | undefined): readonly InformationSourceKind[] | undefined {
+  if (value === undefined || value.trim().length === 0) {
+    return undefined;
+  }
+  const sources = [...new Set(value.split(",").map((item) => informationSourceOrUndefined(item.trim())))].filter(
+    (source): source is InformationSourceKind => source !== undefined
+  );
+  return sources.length === 0 ? undefined : sources;
+}
+
+function informationSourceOrUndefined(value: string): InformationSourceKind | undefined {
+  if (
+    value === "web" ||
+    value === "page" ||
+    value === "codebase" ||
+    value === "soil" ||
+    value === "run_memory" ||
+    value === "docs" ||
+    value === "packages" ||
+    value === "github"
+  ) {
+    return value;
+  }
+  return undefined;
+}
+
+function positiveIntegerFromString(value: string | undefined): number | undefined {
+  if (value === undefined || value.trim().length === 0) {
+    return undefined;
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.max(1, Math.floor(parsed)) : undefined;
 }
 
 function firstNonBlank(...values: readonly (string | undefined)[]): string | undefined {

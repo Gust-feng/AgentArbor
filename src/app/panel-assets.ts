@@ -489,6 +489,16 @@ export function createPanelHtml(): string {
               <button id="configButton" type="submit">保存配置</button>
               <span id="secretState" class="hint">密钥未配置</span>
             </div>
+            <h3>信息源配置</h3>
+            <div class="row">
+              <label>Tavily API Key
+                <input id="tavilyApiKeyInput" type="password" autocomplete="new-password" placeholder="仅写入，不回显">
+              </label>
+              <label>搜索结果数
+                <input id="tavilyMaxResultsInput" type="number" min="1" max="10" step="1">
+              </label>
+            </div>
+            <p id="informationSourceState" class="hint">信息源未配置</p>
           </form>
         </section>
 
@@ -662,7 +672,7 @@ export function createPanelHtml(): string {
       skipped: "跳过"
     };
 
-    const state = { config: undefined, lastRun: undefined, pollToken: 0 };
+    const state = { config: undefined, informationAccess: undefined, lastRun: undefined, pollToken: 0 };
 
     const runStatus = document.getElementById("runStatus");
     const goalInput = document.getElementById("goalInput");
@@ -672,6 +682,9 @@ export function createPanelHtml(): string {
     const defaultAiModeInput = document.getElementById("defaultAiModeInput");
     const apiKeyInput = document.getElementById("apiKeyInput");
     const secretState = document.getElementById("secretState");
+    const tavilyApiKeyInput = document.getElementById("tavilyApiKeyInput");
+    const tavilyMaxResultsInput = document.getElementById("tavilyMaxResultsInput");
+    const informationSourceState = document.getElementById("informationSourceState");
     const runButton = document.getElementById("runButton");
     const configButton = document.getElementById("configButton");
 
@@ -690,8 +703,10 @@ export function createPanelHtml(): string {
     async function loadConfig() {
       const response = await requestJson("/api/config");
       state.config = response.config;
+      state.informationAccess = response.informationAccess;
       renderConfig(response.config);
-      renderProviderStatus(response.config);
+      renderInformationAccess(response.informationAccess);
+      renderProviderStatus(response.config, undefined, response.informationAccess);
       renderIdleWorkbench(response.config);
     }
 
@@ -707,10 +722,20 @@ export function createPanelHtml(): string {
             apiKey: apiKeyInput.value
           }
         });
+        const informationResponse = await requestJson("/api/config/information-sources", {
+          method: "POST",
+          body: {
+            tavilyApiKey: tavilyApiKeyInput.value,
+            tavilyMaxResults: Number(tavilyMaxResultsInput.value || "5")
+          }
+        });
         apiKeyInput.value = "";
+        tavilyApiKeyInput.value = "";
         state.config = response.config;
+        state.informationAccess = informationResponse.informationAccess;
         renderConfig(response.config);
-        renderProviderStatus(response.config);
+        renderInformationAccess(informationResponse.informationAccess);
+        renderProviderStatus(response.config, undefined, informationResponse.informationAccess);
         if (!state.lastRun) {
           renderIdleWorkbench(response.config);
         }
@@ -798,15 +823,28 @@ export function createPanelHtml(): string {
       secretState.textContent = config.secretConfigured ? "密钥已配置" : "密钥未配置";
     }
 
-    function renderProviderStatus(config, provider) {
+    function renderInformationAccess(informationAccess) {
+      if (!informationAccess) {
+        tavilyMaxResultsInput.value = "5";
+        informationSourceState.textContent = "信息源未配置";
+        return;
+      }
+      tavilyMaxResultsInput.value = String(informationAccess.web?.maxResults || 5);
+      informationSourceState.textContent = informationAccess.web?.secretConfigured ? "Tavily 已配置" : "Tavily 未配置";
+    }
+
+    function renderProviderStatus(config, provider, informationAccess) {
       const providerStatus = provider?.status || inferProviderStatus(config, config.defaultAiMode || "none");
+      const sources = informationAccess || state.informationAccess;
       renderMetricsInto("configStatus", [
         ["默认模式", formatAiMode(config.defaultAiMode || "none")],
         ["Provider", PROVIDER_STATUS_LABELS[providerStatus] || providerStatus],
         ["模型", config.model || "未配置"],
         ["接口地址", config.baseUrl || "未配置"],
         ["密钥", config.secretConfigured ? "已配置" : "未配置"],
-        ["协议", config.protocolKind || "未配置"]
+        ["协议", config.protocolKind || "未配置"],
+        ["Tavily", sources?.web?.secretConfigured ? "已配置" : "未配置"],
+        ["信息源", (sources?.sourcePreference || []).join(" / ") || "未配置"]
       ]);
     }
 
@@ -832,7 +870,7 @@ export function createPanelHtml(): string {
 
     function renderRunningSkeleton(input) {
       const providerStatus = inferProviderStatus(input.config, input.aiMode);
-      renderProviderStatus(input.config, { status: providerStatus });
+      renderProviderStatus(input.config, { status: providerStatus }, state.informationAccess);
       renderMetricsInto("overviewMetrics", [
         ["运行状态", "运行中 (running)"],
         ["当前阶段", "请求已发出"],
@@ -860,7 +898,9 @@ export function createPanelHtml(): string {
 
     function renderRun(response) {
       const tracking = response.tracking;
-      renderProviderStatus(response.config, tracking.provider);
+      state.informationAccess = response.informationAccess || state.informationAccess;
+      renderInformationAccess(state.informationAccess);
+      renderProviderStatus(response.config, tracking.provider, tracking.informationSources || state.informationAccess);
       renderMetricsInto("overviewMetrics", [
         ["运行状态", formatStatus(tracking.run.status)],
         ["当前相位", labelWithId(PHASE_LABELS, tracking.run.phase)],
@@ -1336,7 +1376,7 @@ export function createPanelHtml(): string {
       const details = error?.details;
       const config = details?.config || getCurrentConfig();
       if (config) {
-        renderProviderStatus(config);
+        renderProviderStatus(config, undefined, details?.informationAccess || state.informationAccess);
       }
       renderMetricsInto("overviewMetrics", [
         ["运行状态", "失败 (failed)"],

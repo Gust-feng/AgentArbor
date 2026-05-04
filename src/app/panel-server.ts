@@ -9,7 +9,12 @@ import {
 import { createUndergroundDemoSummary, type UndergroundDemoAiInput, type UndergroundDemoSummary } from "./underground-demo-summary.js";
 import { ConfigCenter, createLocalConfigCenter } from "./config-center.js";
 import { createPanelHtml } from "./panel-assets.js";
-import type { SanitizedModelProviderConfig, UpdateModelProviderConfigInput } from "../domain/config/index.js";
+import type {
+  SanitizedInformationAccessConfig,
+  SanitizedModelProviderConfig,
+  UpdateInformationAccessConfigInput,
+  UpdateModelProviderConfigInput,
+} from "../domain/config/index.js";
 import {
   createPanelRunTrace,
   createPanelRunTracking,
@@ -63,6 +68,7 @@ type PanelRunResponse = {
   readonly ok: true;
   readonly status: "completed";
   readonly config: SanitizedModelProviderConfig;
+  readonly informationAccess: SanitizedInformationAccessConfig;
   readonly summary: UndergroundDemoSummary;
   readonly observation: PanelObservationReadModel;
   readonly tracking: PanelRunTrackingReadModel;
@@ -152,6 +158,7 @@ async function handlePanelRequest(
       ok: true,
       status: "completed",
       config: await runtime.configCenter.getModelProviderConfig(),
+      informationAccess: await runtime.configCenter.getInformationAccessConfig(),
       configDirectory: runtime.configDirectory,
     });
     return;
@@ -162,6 +169,7 @@ async function handlePanelRequest(
       ok: true,
       status: "completed",
       config: await runtime.configCenter.getModelProviderConfig(),
+      informationAccess: await runtime.configCenter.getInformationAccessConfig(),
     });
     return;
   }
@@ -173,6 +181,18 @@ async function handlePanelRequest(
       ok: true,
       status: "completed",
       config,
+      informationAccess: await runtime.configCenter.getInformationAccessConfig(),
+    });
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/config/information-sources") {
+    const body = await readJsonBody(request);
+    const informationAccess = await runtime.configCenter.updateInformationAccessConfig(parseInformationAccessUpdate(body));
+    writeJson(response, 200, {
+      ok: true,
+      status: "completed",
+      informationAccess,
     });
     return;
   }
@@ -210,15 +230,18 @@ async function handleRunRequest(
 ): Promise<void> {
   const body = await readJsonBody(request);
   const config = await runtime.configCenter.getModelProviderConfig();
+  const informationAccess = await runtime.configCenter.getInformationAccessConfig();
   const runInput = parseRunInput(body, config.defaultAiMode);
 
   try {
     const run = await runUndergroundForPanel(runtime, runInput.goal, runInput.aiMode);
     const currentConfig = await runtime.configCenter.getModelProviderConfig();
+    const currentInformationAccess = await runtime.configCenter.getInformationAccessConfig();
     const trace = createPanelRunTrace({ status: "completed", eventEntries: run.eventEntries });
     const tracking = createPanelRunTracking({
       status: "completed",
       config: currentConfig,
+      informationAccess: currentInformationAccess,
       requestedMode: runInput.aiMode,
       summary: run.summary,
       observation: run.observation,
@@ -237,6 +260,7 @@ async function handleRunRequest(
       ok: true,
       status: "completed",
       config: currentConfig,
+      informationAccess: currentInformationAccess,
       summary: run.summary,
       observation: run.observation,
       tracking,
@@ -252,6 +276,7 @@ async function handleRunRequest(
         ok: false,
         status: "failed",
         config,
+        informationAccess,
         error: {
           code: error.issue.code,
           message,
@@ -261,7 +286,7 @@ async function handleRunRequest(
       return;
     }
     if (error instanceof PanelHttpError) {
-      writePanelError(response, error, { config });
+      writePanelError(response, error, { config, informationAccess });
       return;
     }
     throw error;
@@ -275,11 +300,13 @@ async function handleStartRunRequest(
 ): Promise<void> {
   const body = await readJsonBody(request);
   const config = await runtime.configCenter.getModelProviderConfig();
+  const informationAccess = await runtime.configCenter.getInformationAccessConfig();
   const runInput = parseRunInput(body, config.defaultAiMode);
   const job = runtime.runJobs.create({
     goal: runInput.goal,
     aiMode: runInput.aiMode,
     config,
+    informationAccess,
   });
 
   writeJson(response, 202, createPanelRunJobResponse(job));
@@ -312,17 +339,21 @@ async function executePanelRunJob(runtime: PanelRuntime, runId: string): Promise
       },
     });
     const currentConfig = await runtime.configCenter.getModelProviderConfig();
+    const currentInformationAccess = await runtime.configCenter.getInformationAccessConfig();
     runtime.runJobs.complete(runId, {
       config: currentConfig,
+      informationAccess: currentInformationAccess,
       summary: run.summary,
       observation: run.observation,
     });
   } catch (error) {
     const config = await runtime.configCenter.getModelProviderConfig().catch(() => job.config);
+    const informationAccess = await runtime.configCenter.getInformationAccessConfig().catch(() => job.informationAccess);
     if (error instanceof UndergroundAiConfigurationError) {
       const message = panelConfigurationErrorMessage(error.issue.code);
       runtime.runJobs.fail(runId, {
         config,
+        informationAccess,
         error: {
           code: error.issue.code,
           message,
@@ -336,6 +367,7 @@ async function executePanelRunJob(runtime: PanelRuntime, runId: string): Promise
     if (error instanceof PanelHttpError) {
       runtime.runJobs.fail(runId, {
         config,
+        informationAccess,
         error: {
           code: error.code,
           message: error.message,
@@ -345,6 +377,7 @@ async function executePanelRunJob(runtime: PanelRuntime, runId: string): Promise
     }
     runtime.runJobs.fail(runId, {
       config,
+      informationAccess,
       error: {
         code: "panel_internal_error",
         message: "地下运行 job 失败。",
@@ -364,6 +397,7 @@ function createPanelRunJobResponse(job: PanelRunJob): {
   readonly runId: string;
   readonly status: PanelRunStatus;
   readonly config: SanitizedModelProviderConfig;
+  readonly informationAccess: SanitizedInformationAccessConfig;
   readonly trace: PanelRunTraceReadModel;
   readonly tracking: PanelRunTrackingReadModel;
   readonly transcript: PanelRunTranscript;
@@ -377,12 +411,14 @@ function createPanelRunJobResponse(job: PanelRunJob): {
 } {
   const eventEntries = job.runtime?.eventLog.list() ?? [];
   const config = job.completed?.config ?? job.failed?.config ?? job.config;
+  const informationAccess = job.completed?.informationAccess ?? job.failed?.informationAccess ?? job.informationAccess;
   const summary = job.completed?.summary;
   const observation = job.completed?.observation;
   const trace = createPanelRunTrace({ status: job.status, eventEntries });
   const tracking = createPanelRunTracking({
     status: job.status,
     config,
+    informationAccess,
     requestedMode: job.aiMode,
     summary,
     observation,
@@ -403,6 +439,7 @@ function createPanelRunJobResponse(job: PanelRunJob): {
     runId: job.runId,
     status: job.status,
     config,
+    informationAccess,
     trace,
     tracking,
     transcript,
@@ -433,7 +470,7 @@ async function runUndergroundForPanel(
 
   const aiConfig =
     aiMode === "fake"
-      ? createUndergroundAiRuntimeConfig({ mode: "fake" })
+      ? createUndergroundAiRuntimeConfig({ mode: "fake", env: await runtime.configCenter.createUndergroundAiEnvironment() })
       : createUndergroundAiRuntimeConfig({
           mode: "openai-compatible",
           env: await runtime.configCenter.createUndergroundAiEnvironment(),
@@ -486,6 +523,25 @@ function parseConfigUpdate(raw: unknown): UpdateModelProviderConfigInput {
     defaultAiMode: parseOptionalAiMode(record.defaultAiMode, "默认 AI 模式无效。"),
     apiKey: optionalString(record.apiKey),
   };
+}
+
+function parseInformationAccessUpdate(raw: unknown): UpdateInformationAccessConfigInput {
+  const record = asRecord(raw);
+  return {
+    tavilyApiKey: optionalString(record.tavilyApiKey),
+    tavilyMaxResults: numberOrUndefined(record.tavilyMaxResults),
+    sourcePreference: informationSourcePreferenceOrUndefined(record.sourcePreference),
+  };
+}
+
+function informationSourcePreferenceOrUndefined(
+  value: unknown
+): UpdateInformationAccessConfigInput["sourcePreference"] {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const sources = value.filter(isInformationSourceKind);
+  return sources.length === 0 ? undefined : [...new Set(sources)];
 }
 
 function parseRunInput(raw: unknown, defaultAiMode: UndergroundAiMode): { goal: string; aiMode: UndergroundAiMode } {
@@ -574,6 +630,25 @@ function panelConfigurationErrorMessage(code: UndergroundAiConfigurationError["i
 
 function optionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function numberOrUndefined(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function isInformationSourceKind(
+  value: unknown
+): value is NonNullable<UpdateInformationAccessConfigInput["sourcePreference"]>[number] {
+  return (
+    value === "web" ||
+    value === "page" ||
+    value === "codebase" ||
+    value === "soil" ||
+    value === "run_memory" ||
+    value === "docs" ||
+    value === "packages" ||
+    value === "github"
+  );
 }
 
 function asRecord(value: unknown): Record<string, unknown> {

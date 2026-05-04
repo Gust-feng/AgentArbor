@@ -10,12 +10,12 @@ const DISABLED_TURN_POLICY: AgentTurnPermissionPolicy = {
 };
 
 const ROOTLET_SEARCH_TOOLS_BY_KIND: Readonly<Record<RootletClusterKind, readonly string[]>> = {
-  option: ["web_search"],
-  risk: [],
-  asset_fit: [],
-  evidence: ["web_search"],
-  constraint: [],
-  counterfactual: [],
+  option: ["search", "read"],
+  risk: ["search", "read"],
+  asset_fit: ["search", "read"],
+  evidence: ["search", "read"],
+  constraint: ["search", "read"],
+  counterfactual: ["search", "read"],
 };
 
 export function createDemoAgentManifests(): AgentManifest[] {

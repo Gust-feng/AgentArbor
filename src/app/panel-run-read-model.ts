@@ -1,5 +1,5 @@
 import type { ArborMessageType } from "../domain/common.js";
-import type { SanitizedModelProviderConfig } from "../domain/config/index.js";
+import type { SanitizedInformationAccessConfig, SanitizedModelProviderConfig } from "../domain/config/index.js";
 import type { ModelVisibleOutputProjection } from "../domain/intelligence/index.js";
 import {
   createRunObservationEventViews,
@@ -54,6 +54,16 @@ export type PanelRunTrackingReadModel = {
       | "missing_model"
       | "missing_secret"
       | "missing_model_and_secret";
+  };
+  readonly informationSources: {
+    readonly sourcePreference: SanitizedInformationAccessConfig["sourcePreference"];
+    readonly web: {
+      readonly providerKind: "tavily";
+      readonly maxResults: number;
+      readonly secretConfigured: boolean;
+      readonly status: "ready" | "no-provider";
+    };
+    readonly stubs: SanitizedInformationAccessConfig["stubs"];
   };
   readonly rootletsByKind: Readonly<Record<RootletClusterKind, PanelRootletTrackingReadModel>>;
   readonly modelTotals: {
@@ -180,6 +190,7 @@ export function createPanelRunTrace(input: {
 export function createPanelRunTracking(input: {
   readonly status: PanelRunStatus;
   readonly config: SanitizedModelProviderConfig;
+  readonly informationAccess: SanitizedInformationAccessConfig;
   readonly requestedMode: UndergroundAiMode;
   readonly summary?: UndergroundDemoSummary;
   readonly observation?: PanelObservationReadModel;
@@ -206,6 +217,16 @@ export function createPanelRunTracking(input: {
       model: input.config.model,
       secretConfigured: input.config.secretConfigured,
       status: providerStatus(input.config, input.requestedMode),
+    },
+    informationSources: {
+      sourcePreference: input.informationAccess.sourcePreference,
+      web: {
+        providerKind: input.informationAccess.web.providerKind,
+        maxResults: input.informationAccess.web.maxResults,
+        secretConfigured: input.informationAccess.web.secretConfigured,
+        status: input.informationAccess.web.secretConfigured ? "ready" : "no-provider",
+      },
+      stubs: input.informationAccess.stubs,
     },
     rootletsByKind,
     modelTotals: input.summary?.ai.eventCounts ?? countModelEvents(input.eventEntries),

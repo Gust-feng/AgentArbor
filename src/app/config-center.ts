@@ -9,12 +9,26 @@ import type {
   ConfiguredUndergroundAiMode,
   LocalDevSecretStore,
   NormalSettingsStore,
+  SanitizedInformationAccessConfig,
   SanitizedModelProviderConfig,
+  UpdateInformationAccessConfigInput,
   UpdateModelProviderConfigInput,
 } from "../domain/config/index.js";
+import type { ConfiguredInformationSourceKind, InformationAccessSettings } from "../domain/config/index.js";
 
 export const DEFAULT_MODEL_PROVIDER_BASE_URL = "https://api.openai.com";
 export const MODEL_PROVIDER_SECRET_REF = "secret://local-dev/model-provider/default/api-key";
+export const INFORMATION_TAVILY_SECRET_REF = "secret://local-dev/information-source/tavily/default/api-key";
+const DEFAULT_INFORMATION_SOURCE_PREFERENCE: readonly ConfiguredInformationSourceKind[] = [
+  "web",
+  "codebase",
+  "soil",
+  "run_memory",
+  "docs",
+  "packages",
+  "github",
+];
+const DEFAULT_TAVILY_MAX_RESULTS = 5;
 
 export type ConfigCenterOptions = {
   readonly settingsStore: NormalSettingsStore;
@@ -42,7 +56,7 @@ export class ConfigCenter {
     const current = await this.readOrCreateSettings();
     const now = new Date().toISOString();
     const next: AgentArborLocalSettings = {
-      version: 1,
+      version: 2,
       modelProvider: {
         ...current.modelProvider,
         baseUrl: normalizeBaseUrl(input.baseUrl) ?? current.modelProvider.baseUrl,
@@ -50,6 +64,7 @@ export class ConfigCenter {
         defaultAiMode: normalizeAiMode(input.defaultAiMode) ?? current.modelProvider.defaultAiMode,
         updatedAt: now,
       },
+      informationAccess: normalizeInformationAccessSettings(current.informationAccess, now),
       updatedAt: now,
     };
 
@@ -62,13 +77,54 @@ export class ConfigCenter {
     return this.toSanitizedConfig(next);
   }
 
+  async getInformationAccessConfig(): Promise<SanitizedInformationAccessConfig> {
+    const settings = await this.readOrCreateSettings();
+    return this.toSanitizedInformationAccessConfig(settings);
+  }
+
+  async updateInformationAccessConfig(
+    input: UpdateInformationAccessConfigInput
+  ): Promise<SanitizedInformationAccessConfig> {
+    const current = await this.readOrCreateSettings();
+    const now = new Date().toISOString();
+    const currentInformation = normalizeInformationAccessSettings(current.informationAccess, now);
+    const nextInformation: InformationAccessSettings = {
+      sourcePreference:
+        input.sourcePreference === undefined || input.sourcePreference.length === 0
+          ? currentInformation.sourcePreference
+          : normalizeSourcePreference(input.sourcePreference),
+      tavily: {
+        ...currentInformation.tavily,
+        maxResults: normalizePositiveInteger(input.tavilyMaxResults) ?? currentInformation.tavily.maxResults,
+        updatedAt: now,
+      },
+    };
+    const tavilyApiKey = normalizeOptionalString(input.tavilyApiKey);
+    if (tavilyApiKey !== undefined) {
+      await this.options.secretStore.writeSecret(nextInformation.tavily.secretRef, tavilyApiKey);
+    }
+    await this.options.settingsStore.writeSettings({
+      ...current,
+      version: 2,
+      informationAccess: nextInformation,
+      updatedAt: now,
+    });
+    return this.toSanitizedInformationAccessConfig({ ...current, informationAccess: nextInformation, updatedAt: now });
+  }
+
   async createUndergroundAiEnvironment(): Promise<UndergroundAiConfigEnvironment> {
     const settings = await this.readOrCreateSettings();
     const apiKey = await this.options.secretStore.readSecret(settings.modelProvider.secretRef);
+    const informationAccess = normalizeInformationAccessSettings(settings.informationAccess, settings.updatedAt);
+    const tavilyApiKey = await this.options.secretStore.readSecret(informationAccess.tavily.secretRef);
     return {
       AGENTARBOR_MODEL_API_KEY: apiKey,
       AGENTARBOR_MODEL_NAME: settings.modelProvider.model,
       AGENTARBOR_MODEL_BASE_URL: settings.modelProvider.baseUrl,
+      AGENTARBOR_TAVILY_API_KEY: tavilyApiKey,
+      AGENTARBOR_TAVILY_MAX_RESULTS: String(informationAccess.tavily.maxResults),
+      AGENTARBOR_INFORMATION_SOURCE_PREFERENCE: informationAccess.sourcePreference.join(","),
+      TAVILY_API_KEY: undefined,
       OPENAI_API_KEY: undefined,
     };
   }
@@ -98,6 +154,30 @@ export class ConfigCenter {
       updatedAt: settings.modelProvider.updatedAt,
     };
   }
+
+  private async toSanitizedInformationAccessConfig(
+    settings: AgentArborLocalSettings
+  ): Promise<SanitizedInformationAccessConfig> {
+    const informationAccess = normalizeInformationAccessSettings(settings.informationAccess, settings.updatedAt);
+    const secret = await this.options.secretStore.getMetadata(informationAccess.tavily.secretRef);
+    return {
+      sourcePreference: [...informationAccess.sourcePreference],
+      web: {
+        providerKind: informationAccess.tavily.providerKind,
+        maxResults: informationAccess.tavily.maxResults,
+        secretRef: informationAccess.tavily.secretRef,
+        secretConfigured: secret.configured,
+        secretUpdatedAt: secret.updatedAt,
+        updatedAt: informationAccess.tavily.updatedAt,
+      },
+      stubs: {
+        docs: "stub",
+        packages: "stub",
+        github: "stub",
+        run_memory: "readonly_stub",
+      },
+    };
+  }
 }
 
 export function createLocalConfigCenter(options: CreateLocalConfigCenterOptions = {}): {
@@ -117,7 +197,7 @@ export function createLocalConfigCenter(options: CreateLocalConfigCenterOptions 
 
 export function createDefaultLocalSettings(now: string = new Date().toISOString()): AgentArborLocalSettings {
   return {
-    version: 1,
+    version: 2,
     modelProvider: {
       profileId: "default",
       providerKind: "openai_compatible",
@@ -127,7 +207,38 @@ export function createDefaultLocalSettings(now: string = new Date().toISOString(
       secretRef: MODEL_PROVIDER_SECRET_REF,
       updatedAt: now,
     },
+    informationAccess: createDefaultInformationAccessSettings(now),
     updatedAt: now,
+  };
+}
+
+function createDefaultInformationAccessSettings(now: string): InformationAccessSettings {
+  return {
+    sourcePreference: [...DEFAULT_INFORMATION_SOURCE_PREFERENCE],
+    tavily: {
+      providerKind: "tavily",
+      maxResults: DEFAULT_TAVILY_MAX_RESULTS,
+      secretRef: INFORMATION_TAVILY_SECRET_REF,
+      updatedAt: now,
+    },
+  };
+}
+
+function normalizeInformationAccessSettings(
+  settings: InformationAccessSettings | undefined,
+  now: string
+): InformationAccessSettings {
+  if (settings === undefined) {
+    return createDefaultInformationAccessSettings(now);
+  }
+  return {
+    sourcePreference: normalizeSourcePreference(settings.sourcePreference),
+    tavily: {
+      providerKind: "tavily",
+      maxResults: normalizePositiveInteger(settings.tavily.maxResults) ?? DEFAULT_TAVILY_MAX_RESULTS,
+      secretRef: normalizeOptionalString(settings.tavily.secretRef) ?? INFORMATION_TAVILY_SECRET_REF,
+      updatedAt: normalizeOptionalString(settings.tavily.updatedAt) ?? now,
+    },
   };
 }
 
@@ -145,4 +256,31 @@ function normalizeOptionalString(value: string | undefined): string | undefined 
 
 function normalizeAiMode(value: ConfiguredUndergroundAiMode | undefined): ConfiguredUndergroundAiMode | undefined {
   return value === "none" || value === "fake" || value === "openai-compatible" ? value : undefined;
+}
+
+function normalizeSourcePreference(
+  value: readonly ConfiguredInformationSourceKind[] | undefined
+): readonly ConfiguredInformationSourceKind[] {
+  const normalized = [...new Set((value ?? []).filter(isConfiguredInformationSourceKind))];
+  return normalized.length === 0 ? [...DEFAULT_INFORMATION_SOURCE_PREFERENCE] : normalized;
+}
+
+function isConfiguredInformationSourceKind(value: string): value is ConfiguredInformationSourceKind {
+  return (
+    value === "web" ||
+    value === "page" ||
+    value === "codebase" ||
+    value === "soil" ||
+    value === "run_memory" ||
+    value === "docs" ||
+    value === "packages" ||
+    value === "github"
+  );
+}
+
+function normalizePositiveInteger(value: number | undefined): number | undefined {
+  if (value === undefined || !Number.isFinite(value)) {
+    return undefined;
+  }
+  return Math.max(1, Math.floor(value));
 }

@@ -1,4 +1,4 @@
-import type { SanitizedModelProviderConfig } from "../domain/config/index.js";
+import type { SanitizedInformationAccessConfig, SanitizedModelProviderConfig } from "../domain/config/index.js";
 import { createId, nowIso } from "../kernel/id.js";
 import type { UndergroundAiMode } from "./intelligence-channel-factory.js";
 import type { PanelObservationReadModel, PanelRunStatus } from "./panel-run-read-model.js";
@@ -7,12 +7,14 @@ import type { UndergroundDemoSummary } from "./underground-demo-summary.js";
 
 export type PanelRunCompletedPayload = {
   readonly config: SanitizedModelProviderConfig;
+  readonly informationAccess: SanitizedInformationAccessConfig;
   readonly summary: UndergroundDemoSummary;
   readonly observation: PanelObservationReadModel;
 };
 
 export type PanelRunFailedPayload = {
   readonly config: SanitizedModelProviderConfig;
+  readonly informationAccess: SanitizedInformationAccessConfig;
   readonly error: {
     readonly code: string;
     readonly message: string;
@@ -30,6 +32,7 @@ export type PanelRunJob = {
   status: PanelRunStatus;
   updatedAt: string;
   config: SanitizedModelProviderConfig;
+  informationAccess: SanitizedInformationAccessConfig;
   runtime?: MinimalRuntime;
   traceId?: string;
   goalId?: string;
@@ -44,6 +47,7 @@ export class PanelRunJobStore {
     readonly goal: string;
     readonly aiMode: UndergroundAiMode;
     readonly config: SanitizedModelProviderConfig;
+    readonly informationAccess: SanitizedInformationAccessConfig;
   }): PanelRunJob {
     const now = nowIso();
     const job: PanelRunJob = {
@@ -51,6 +55,7 @@ export class PanelRunJobStore {
       goal: input.goal,
       aiMode: input.aiMode,
       config: input.config,
+      informationAccess: input.informationAccess,
       status: "pending",
       createdAt: now,
       updatedAt: now,
@@ -91,6 +96,7 @@ export class PanelRunJobStore {
     const job = this.requireJob(runId);
     job.status = "completed";
     job.config = completed.config;
+    job.informationAccess = completed.informationAccess;
     job.completed = completed;
     job.updatedAt = nowIso();
   }
@@ -99,6 +105,7 @@ export class PanelRunJobStore {
     const job = this.requireJob(runId);
     job.status = "failed";
     job.config = failed.config;
+    job.informationAccess = failed.informationAccess;
     job.failed = failed;
     job.updatedAt = nowIso();
   }

@@ -132,8 +132,10 @@ async function readJsonFile(filePath: string): Promise<unknown | undefined> {
 function parseSettingsFile(raw: unknown): AgentArborLocalSettings {
   const record = asRecord(raw);
   const modelProvider = asRecord(record.modelProvider);
+  const informationAccess = asRecord(record.informationAccess);
+  const tavily = asRecord(informationAccess.tavily);
   return {
-    version: 1,
+    version: record.version === 2 ? 2 : 1,
     modelProvider: {
       profileId: "default",
       providerKind: "openai_compatible",
@@ -144,6 +146,20 @@ function parseSettingsFile(raw: unknown): AgentArborLocalSettings {
       secretRef: requiredString(modelProvider.secretRef, "settings.modelProvider.secretRef"),
       updatedAt: requiredString(modelProvider.updatedAt, "settings.modelProvider.updatedAt"),
     },
+    informationAccess:
+      Object.keys(informationAccess).length === 0
+        ? undefined
+        : {
+            sourcePreference: parseInformationSourcePreference(informationAccess.sourcePreference),
+            tavily: {
+              providerKind: "tavily",
+              maxResults: positiveInteger(tavily.maxResults) ?? 5,
+              secretRef:
+                optionalString(tavily.secretRef) ??
+                "secret://local-dev/information-source/tavily/default/api-key",
+              updatedAt: optionalString(tavily.updatedAt) ?? requiredString(record.updatedAt, "settings.updatedAt"),
+            },
+          },
     updatedAt: requiredString(record.updatedAt, "settings.updatedAt"),
   };
 }
@@ -172,6 +188,31 @@ function parseAiMode(value: unknown): AgentArborLocalSettings["modelProvider"]["
     return value;
   }
   return "none";
+}
+
+function parseInformationSourcePreference(value: unknown): NonNullable<AgentArborLocalSettings["informationAccess"]>["sourcePreference"] {
+  if (!Array.isArray(value)) {
+    return ["web", "codebase", "soil", "run_memory", "docs", "packages", "github"];
+  }
+  const parsed = value.filter(isConfiguredInformationSourceKind);
+  return parsed.length === 0 ? ["web", "codebase", "soil", "run_memory", "docs", "packages", "github"] : [...new Set(parsed)];
+}
+
+function isConfiguredInformationSourceKind(value: unknown): value is NonNullable<AgentArborLocalSettings["informationAccess"]>["sourcePreference"][number] {
+  return (
+    value === "web" ||
+    value === "page" ||
+    value === "codebase" ||
+    value === "soil" ||
+    value === "run_memory" ||
+    value === "docs" ||
+    value === "packages" ||
+    value === "github"
+  );
+}
+
+function positiveInteger(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? Math.max(1, Math.floor(value)) : undefined;
 }
 
 function requiredString(value: unknown, fieldName: string): string {

@@ -182,8 +182,13 @@ export async function requestUndergroundRootletCandidateAdvice(input: {
           adviceContract.modelOutputContract.contractId,
           `model-candidate:${input.cluster.kind}:${candidate.sourceIndex + 1}`,
           ...toolCallSourceRefs(toolCalls),
+          ...researchRefsFromToolCalls(toolCalls),
         ],
-        evidenceRefs: [`model-call:${response.responseId}`, ...completedToolEvidenceRefs(toolCalls)],
+        evidenceRefs: [
+          `model-call:${response.responseId}`,
+          ...completedToolEvidenceRefs(toolCalls),
+          ...researchRefsFromToolCalls(toolCalls),
+        ],
       })
     ),
     modelRequestId: response.requestId,
@@ -206,6 +211,44 @@ function completedToolEvidenceRefs(toolCalls: readonly ToolCallResult[]): string
   return toolCalls
     .filter((toolCall) => toolCall.status === "completed")
     .map((toolCall) => `tool-call:${toolCall.callId}`);
+}
+
+function researchRefsFromToolCalls(toolCalls: readonly ToolCallResult[]): string[] {
+  const refs = new Set<string>();
+  for (const toolCall of toolCalls) {
+    if (toolCall.status !== "completed") {
+      continue;
+    }
+    collectResearchRefs(toolCall.output, refs, 0);
+  }
+  return [...refs];
+}
+
+function collectResearchRefs(value: unknown, refs: Set<string>, depth: number): void {
+  if (depth > 8 || value === undefined || value === null) {
+    return;
+  }
+  if (typeof value === "string") {
+    if (value.startsWith("research:")) {
+      refs.add(value);
+    }
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      collectResearchRefs(item, refs, depth + 1);
+    }
+    return;
+  }
+  if (typeof value !== "object") {
+    return;
+  }
+  for (const [key, item] of Object.entries(value as Readonly<Record<string, unknown>>)) {
+    if (key === "contentPreview" || key === "snippet" || key === "summary") {
+      continue;
+    }
+    collectResearchRefs(item, refs, depth + 1);
+  }
 }
 
 function modelFallbackSourceRefs(input: {

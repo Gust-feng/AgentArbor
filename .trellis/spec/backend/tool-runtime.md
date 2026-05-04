@@ -23,6 +23,10 @@
 - `read` tool：模型可见信息读取入口，输入 research ref、URL 或 repo path；返回 `ReadResultRef`、短 summary、截断 preview 和 trace 摘要。
 - `createWebSearchTool({ apiKey?, maxResults?, fetch? })`：保留为低层 Tavily adapter；它不再是地下 prompt / rootlet manifest 的主工具名。
 - source adapters：当前覆盖 `web`、`page`、`codebase`、`soil`、`run_memory`、`docs`、`packages`、`github`；`docs` / `packages` / `github` 当前必须显式返回 stub/no-provider。
+- `ConfigCenter.getWebSearchConfig()`：返回 `SanitizedWebSearchConfig`，只包含 `provider`、`maxResults`、`secretRef`、`secretConfigured`、`secretUpdatedAt`、`status` 和 `updatedAt`。
+- `ConfigCenter.updateWebSearchConfig({ provider?, apiKey?, tavilyApiKey?, maxResults?, tavilyMaxResults? })`：更新 web search provider / Tavily max results，并把 raw key 只写入 local-dev secret store。
+- `createConfiguredToolCenter(configCenter, options?)` / `createConfiguredToolCenterFactory(configCenter, options?)`：app 组合根从 ConfigCenter 读取 Tavily secret 环境，创建 ResearchRuntime，并注册模型可见 `search` / `read` 工具。
+- Panel 配置路由：`GET /api/config/tools` 返回 `{ tools: { webSearch }, informationAccess }` 脱敏视图；`POST /api/config/tools/web-search` 接收 web search 更新输入并返回同样的脱敏视图。
 - `ModelRequest.tools?: ToolDefinition[]`，`ModelRequest.toolChoice?: "auto" | "none" | { type: "function"; function: { name } }`。
 - `ModelMessage.role` 覆盖 `system | user | assistant | tool`；assistant message 可携带 `toolCalls`，tool message 必须携带 `toolCallId` / `toolName`。
 - `ModelResponse.toolCalls?: ToolCallRequest[]`；带 tool calls 的 response 允许 `finishReason = "tool_call"`，不要求最终 output contract 已满足。
@@ -47,6 +51,9 @@
 - `codebase` source 只在 repo 根内做文本搜索 / read，必须防路径逃逸，忽略 `node_modules`、`dist`、`.git` 等生成或外部目录。
 - `soil` / `run_memory` source 当前只读已有 Soil refs / historical run refs 或返回 stub；不得内联 Soil asset body，也不得把 Run Memory stub 当长期资产事实。
 - Tavily key 可来自配置中心 information source secret、环境变量 `AGENTARBOR_TAVILY_API_KEY` / `TAVILY_API_KEY` 或显式注入；Tavily max results 和 source preference 可由配置中心环境投影或显式组合根参数传入；普通 settings store、EventLog、Snapshot、summary 和 panel HTTP JSON 不得保存 raw key。
+- `informationAccess.webSearch.provider = "none"` 必须禁用 Tavily secret 环境投影并让 web source 降级为 disabled / no-provider；不能因为 secret store 仍有历史 key 就继续联网。
+- 面板 `工具配置` 只管理本地信息源 provider / secret 状态，不注册任意工具、不展示工具市场、不允许地下 agent 管理 ToolCenter 生命周期。
+- 面板运行入口启用 AI 时必须通过 `createConfiguredToolCenterFactory(configCenter, { fetch })` 装配 ToolCenter；不得复用只来自模型 provider config 的默认工具中心，也不得让 rootlet 自己读取 ConfigCenter 或 secret store。
 - OpenAI-compatible adapter 必须把 `tools`、`tool_choice`、assistant `tool_calls`、tool result messages 和 provider `tool_calls` 互相映射；外部 LLM SDK 仍禁止。
 - tool result 作为 `role: "tool"` message 追加回模型上下文；工具输出必须先清洗、截断和 JSON-safe 化。
 - `tool.*` EventLog payload 只记录 call id、tool name、caller agent、duration、safe input/output summary 或 error；不得记录 raw provider response、API key、token、完整 prompt、完整页面正文或 live对象。
@@ -62,6 +69,9 @@
 | `allowedTools` 不包含请求工具 | 工具被拒绝，`ToolCenter.getCallCount()` 不增加 |
 | 超过 `maxCallsPerRun` | 工具返回 budget exhausted failure，不继续执行 executor |
 | `search` 使用 web source 但无 Tavily key / fetch | 返回 `no-provider` trace，流程继续 |
+| web search provider 为 `none` | ConfigCenter 不投影 Tavily key，panel 显示 disabled，地下运行继续但 web source 不联网 |
+| `GET /api/config/tools` | 返回 `tools.webSearch` 和 `informationAccess` 脱敏视图，不包含 raw key |
+| `POST /api/config/tools/web-search` 提交 API key | raw key 只写入 secret store，响应和普通 settings 不回显 |
 | `search` 使用 web source 且 provider HTTP 失败 | 返回 `provider-failed` trace，ToolCenter 仍视为 completed 工具输出，由模型/调用方判断 |
 | `read` 读取 http/https page | 返回清洗、截断的 `ReadResultRef`，不包含完整页面正文 |
 | `read` 读取非 http/https page ref | 返回 `invalid-input`，不触发浏览器或登录态能力 |
@@ -80,6 +90,7 @@
 - Good：`underground-intent-core` 的 turn policy 禁用模型和工具，同步调度不会产生 `model.*` 或 `tool.*` 事件。
 - Base：fake provider 默认不返回 tool calls；`--ai fake` 和 no-AI 路径保持原有 deterministic / 单轮行为。
 - Base：无 Tavily key 时 `search` 的 web source 返回 `no-provider`，不触发真实网络；docs/packages/github 返回 stub。
+- Base：面板保留 `/api/config/information-sources` 兼容路由，但新的搜索工具表单走 `/api/config/tools` 和 `/api/config/tools/web-search`。
 - Bad：kernel tool loop 直接 import app `ToolCenter`。
 - Bad：把工具 raw output、Tavily raw response、完整页面正文或完整 prompt 直接塞进 Direction Handoff options、panel transcript 或 EventLog payload。
 - Bad：把 search API key 写入普通 settings 或测试快照。
@@ -94,6 +105,9 @@
 - codebase source 覆盖 repo 内文本搜索、read 和路径逃逸守卫。
 - soil / run_memory / docs / packages / github source 覆盖只读 refs 或 stub/no-provider。
 - ToolCenter 默认注册 `search` / `read`，且默认地下 rootlet manifest 不再授权 `web_search`。
+- ConfigCenter 覆盖 `getWebSearchConfig()`、`updateWebSearchConfig()`、provider `none` 禁用、raw key 只进 secret store、v1 / 旧 v2 settings 兼容归一化。
+- `createConfiguredToolCenter()` / factory 有 key 时注册 `search` / `read` 并把 key 传给 Tavily mock；无 key 或 provider `none` 时仍注册工具并降级。
+- Panel 覆盖 `GET /api/config/tools`、`POST /api/config/tools/web-search`、工具配置 HTML、保存后不回显 key，以及 openai-compatible 地下运行使用配置中心 ToolCenter。
 - fake provider tool call fixture。
 - OpenAI-compatible adapter tools / tool result / tool_calls 映射。
 - `executeToolUseLoop` 一轮工具后完成、max rounds、工具失败不中断。

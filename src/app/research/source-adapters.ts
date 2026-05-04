@@ -1,0 +1,546 @@
+import { promises as fs } from "node:fs";
+import path from "node:path";
+import type {
+  InformationAccessStatus,
+  InformationSourceKind,
+  ReadResultRef,
+  SearchResultRef,
+} from "../../domain/research/index.js";
+import type { ReadonlySoilStore } from "../../domain/soil/index.js";
+import { createWebSearchTool, type FetchLike as TavilyFetchLike } from "../tool-center/adapters/web-search-tool.js";
+
+export type InformationSourceSearchRequest = {
+  readonly query: string;
+  readonly limit: number;
+  readonly traceId?: string;
+  readonly goalId?: string;
+};
+
+export type InformationSourceReadRequest = {
+  readonly ref: string;
+  readonly query?: string;
+  readonly uri?: string;
+  readonly title?: string;
+  readonly maxLength: number;
+  readonly sourceResult?: SearchResultRef;
+};
+
+export type InformationSourceSearchResponse = {
+  readonly status: InformationAccessStatus;
+  readonly results: readonly SearchResultRef[];
+  readonly message?: string;
+};
+
+export type InformationSourceReadResponse = {
+  readonly status: InformationAccessStatus;
+  readonly result?: ReadResultRef;
+  readonly message?: string;
+};
+
+export interface InformationSourceAdapter {
+  readonly source: InformationSourceKind;
+  search?(request: InformationSourceSearchRequest): Promise<InformationSourceSearchResponse>;
+  read?(request: InformationSourceReadRequest): Promise<InformationSourceReadResponse>;
+}
+
+export type PageFetchLike = (
+  url: string,
+  init: {
+    readonly method: "GET";
+    readonly headers: Record<string, string>;
+  }
+) => Promise<{
+  readonly ok: boolean;
+  readonly status: number;
+  readonly text: () => Promise<string>;
+}>;
+
+export function createWebInformationSourceAdapter(options: {
+  readonly apiKey?: string;
+  readonly fetch?: TavilyFetchLike;
+  readonly maxResults?: number;
+} = {}): InformationSourceAdapter {
+  const tool = createWebSearchTool({ apiKey: options.apiKey, fetch: options.fetch, maxResults: options.maxResults });
+  return {
+    source: "web",
+    async search(request) {
+      const output = asRecord(
+        await tool.execute(
+          { query: request.query },
+          {
+            callerAgentId: "research-runtime",
+            traceId: request.traceId ?? "research-trace",
+            goalId: request.goalId ?? "research-goal",
+          }
+        )
+      );
+      const status = stringOrUndefined(output.status);
+      if (status === "invalid_input") {
+        return { status: "invalid-input", results: [], message: stringOrUndefined(output.message) };
+      }
+      if (status === "no_search_provider") {
+        return { status: "no-provider", results: [], message: stringOrUndefined(output.message) };
+      }
+      if (status === "provider_failed") {
+        return { status: "provider-failed", results: [], message: stringOrUndefined(output.message) };
+      }
+
+      const results = arrayItems(output.results).slice(0, request.limit).map((item, index) => {
+        const record = asRecord(item);
+        const uri = stringOrUndefined(record.url);
+        return {
+          refId: createResearchRefId("web", `${request.query}:${uri ?? index}`),
+          source: "web" as const,
+          title: stringOrUndefined(record.title) ?? "Untitled web result",
+          uri,
+          snippet: truncate(normalizeWhitespace(stringOrUndefined(record.snippet) ?? ""), 320),
+          status: uri === undefined ? "no-provider" as const : "available" as const,
+          metadata: { provider: "tavily" },
+        };
+      });
+      return {
+        status: results.length > 0 ? "completed" : "empty",
+        results,
+      };
+    },
+  };
+}
+
+export function createPageInformationSourceAdapter(options: {
+  readonly fetch?: PageFetchLike;
+  readonly defaultMaxLength?: number;
+} = {}): InformationSourceAdapter {
+  return {
+    source: "page",
+    async read(request) {
+      const uri = request.uri ?? request.ref;
+      if (!isHttpUrl(uri)) {
+        return {
+          status: "invalid-input",
+          message: "page read requires an http or https URL.",
+        };
+      }
+      const fetchImpl = options.fetch ?? resolveGlobalPageFetch();
+      if (fetchImpl === undefined) {
+        return {
+          status: "no-provider",
+          message: "No fetch implementation is available for page reads.",
+        };
+      }
+      const response = await fetchImpl(uri, {
+        method: "GET",
+        headers: {
+          accept: "text/html,text/plain;q=0.9,*/*;q=0.5",
+          "user-agent": "AgentArbor-ResearchRuntime/0.1",
+        },
+      });
+      if (!response.ok) {
+        return {
+          status: "provider-failed",
+          message: `Page read returned HTTP ${response.status}.`,
+        };
+      }
+      const text = normalizeWhitespace(cleanPageText(await response.text()));
+      const maxLength = Math.max(200, request.maxLength || options.defaultMaxLength || 1_200);
+      const contentPreview = truncate(text, maxLength);
+      const refId = createResearchRefId("page", uri);
+      return {
+        status: "completed",
+        result: {
+          refId,
+          source: "page",
+          title: request.title ?? titleFromHtmlText(text) ?? uri,
+          uri,
+          status: "completed",
+          summary: truncate(contentPreview, 260),
+          contentPreview,
+          truncated: text.length > contentPreview.length,
+          sourceSearchRef: request.sourceResult?.refId,
+          metadata: { contentLength: text.length },
+        },
+      };
+    },
+  };
+}
+
+export function createCodebaseInformationSourceAdapter(options: {
+  readonly rootDirectory?: string;
+  readonly maxFiles?: number;
+} = {}): InformationSourceAdapter {
+  const rootDirectory = path.resolve(options.rootDirectory ?? process.cwd());
+  const maxFiles = Math.max(1, Math.floor(options.maxFiles ?? 800));
+  return {
+    source: "codebase",
+    async search(request) {
+      const query = normalizeWhitespace(request.query);
+      if (query.length === 0) {
+        return { status: "invalid-input", results: [], message: "codebase search requires a query." };
+      }
+      const files = await collectTextFiles(rootDirectory, maxFiles);
+      const queryLower = query.toLowerCase();
+      const results: SearchResultRef[] = [];
+      for (const file of files) {
+        const text = await readTextFile(file);
+        if (text === undefined) {
+          continue;
+        }
+        const index = text.toLowerCase().indexOf(queryLower);
+        if (index < 0) {
+          continue;
+        }
+        const relativePath = toRepositoryPath(path.relative(rootDirectory, file));
+        results.push({
+          refId: createResearchRefId("codebase", relativePath),
+          source: "codebase",
+          title: relativePath,
+          uri: `repo://${relativePath}`,
+          snippet: snippetAround(text, index, query.length),
+          status: "available",
+          metadata: { path: relativePath },
+        });
+        if (results.length >= request.limit) {
+          break;
+        }
+      }
+      return {
+        status: results.length > 0 ? "completed" : "empty",
+        results,
+      };
+    },
+    async read(request) {
+      const relativePath = pathFromCodebaseReadRequest(request);
+      if (relativePath === undefined) {
+        return { status: "invalid-input", message: "codebase read requires a repository file ref or repo:// URI." };
+      }
+      const absolutePath = path.resolve(rootDirectory, relativePath);
+      if (!isPathInside(rootDirectory, absolutePath)) {
+        return { status: "invalid-input", message: "codebase read path escapes repository root." };
+      }
+      const text = await readTextFile(absolutePath);
+      if (text === undefined) {
+        return { status: "provider-failed", message: "codebase read could not read the requested text file." };
+      }
+      const normalized = normalizeWhitespace(text);
+      const contentPreview = truncate(normalized, request.maxLength);
+      const repoPath = toRepositoryPath(path.relative(rootDirectory, absolutePath));
+      return {
+        status: "completed",
+        result: {
+          refId: createResearchRefId("codebase-read", repoPath),
+          source: "codebase",
+          title: repoPath,
+          uri: `repo://${repoPath}`,
+          status: "completed",
+          summary: truncate(contentPreview, 260),
+          contentPreview,
+          truncated: normalized.length > contentPreview.length,
+          sourceSearchRef: request.sourceResult?.refId,
+          metadata: { path: repoPath },
+        },
+      };
+    },
+  };
+}
+
+export function createSoilInformationSourceAdapter(options: {
+  readonly soilStore?: ReadonlySoilStore;
+} = {}): InformationSourceAdapter {
+  return createReadonlyRefSourceAdapter({
+    source: "soil",
+    emptyStatus: options.soilStore === undefined ? "no-provider" : "empty",
+    emptyMessage:
+      options.soilStore === undefined
+        ? "No readonly Soil store is configured for research."
+        : "Readonly Soil store has no matching refs.",
+    items: () => {
+      const soilStore = options.soilStore;
+      if (soilStore === undefined) {
+        return [];
+      }
+      return [
+        ...soilStore.listConstraints().map((constraint) => ({
+          id: constraint.id,
+          title: `Constraint ${constraint.id}`,
+          summary: `${constraint.level} ${constraint.enforcementGate} ${constraint.status}: ${constraint.statement}`,
+          metadata: { kind: "constraint", status: constraint.status, level: constraint.level },
+        })),
+        ...soilStore.listCapabilityAssetRefs().map((ref) => ({
+          id: ref.id,
+          title: ref.id,
+          summary: ref.summary,
+          metadata: { kind: ref.kind },
+        })),
+        ...soilStore.listPathBiasRefs().map((ref) => ({
+          id: ref.id,
+          title: ref.id,
+          summary: ref.summary,
+          metadata: { kind: ref.kind },
+        })),
+      ];
+    },
+  });
+}
+
+export function createRunMemoryInformationSourceAdapter(options: {
+  readonly soilStore?: ReadonlySoilStore;
+} = {}): InformationSourceAdapter {
+  return createReadonlyRefSourceAdapter({
+    source: "run_memory",
+    emptyStatus: options.soilStore === undefined ? "stub" : "empty",
+    emptyMessage:
+      options.soilStore === undefined
+        ? "Run Memory provider is a stub in this MVP."
+        : "Readonly Soil store has no historical run refs yet.",
+    items: () =>
+      options.soilStore?.listHistoricalRunRefs().map((ref) => ({
+        id: ref.id,
+        title: ref.id,
+        summary: ref.summary,
+        metadata: { kind: ref.kind },
+      })) ?? [],
+  });
+}
+
+export function createStubInformationSourceAdapter(
+  source: Extract<InformationSourceKind, "docs" | "packages" | "github">
+): InformationSourceAdapter {
+  const label = source === "docs" ? "technical docs" : source === "packages" ? "package registry" : "GitHub";
+  return {
+    source,
+    async search() {
+      return {
+        status: "stub",
+        results: [],
+        message: `${label} provider is a stub/no-provider in this MVP.`,
+      };
+    },
+    async read(request) {
+      return {
+        status: "stub",
+        result: {
+          refId: createResearchRefId(source, request.ref),
+          source,
+          title: `${label} stub`,
+          status: "stub",
+          summary: `${label} provider is not connected in this MVP.`,
+          truncated: false,
+          sourceSearchRef: request.sourceResult?.refId,
+        },
+      };
+    },
+  };
+}
+
+function createReadonlyRefSourceAdapter(input: {
+  readonly source: Extract<InformationSourceKind, "soil" | "run_memory">;
+  readonly emptyStatus: InformationAccessStatus;
+  readonly emptyMessage: string;
+  readonly items: () => readonly {
+    readonly id: string;
+    readonly title: string;
+    readonly summary: string;
+    readonly metadata?: Readonly<Record<string, string | number | boolean>>;
+  }[];
+}): InformationSourceAdapter {
+  return {
+    source: input.source,
+    async search(request) {
+      const query = request.query.toLowerCase();
+      const results = input.items()
+        .filter((item) => `${item.id} ${item.title} ${item.summary}`.toLowerCase().includes(query))
+        .slice(0, request.limit)
+        .map((item) => ({
+          refId: createResearchRefId(input.source, item.id),
+          source: input.source,
+          title: item.title,
+          uri: item.id,
+          snippet: truncate(normalizeWhitespace(item.summary), 320),
+          status: "available" as const,
+          metadata: item.metadata,
+        }));
+      return {
+        status: results.length > 0 ? "completed" : input.emptyStatus,
+        results,
+        message: results.length > 0 ? undefined : input.emptyMessage,
+      };
+    },
+    async read(request) {
+      const item = input.items().find((candidate) => candidate.id === request.ref || request.ref.endsWith(hash(candidate.id)));
+      if (item === undefined) {
+        return {
+          status: input.emptyStatus,
+          message: input.emptyMessage,
+        };
+      }
+      return {
+        status: "completed",
+        result: {
+          refId: createResearchRefId(input.source, item.id),
+          source: input.source,
+          title: item.title,
+          uri: item.id,
+          status: "completed",
+          summary: truncate(item.summary, 260),
+          contentPreview: truncate(item.summary, request.maxLength),
+          truncated: item.summary.length > request.maxLength,
+          sourceSearchRef: request.sourceResult?.refId,
+          metadata: item.metadata,
+        },
+      };
+    },
+  };
+}
+
+function pathFromCodebaseReadRequest(request: InformationSourceReadRequest): string | undefined {
+  const metadataPath = request.sourceResult?.metadata?.path;
+  if (typeof metadataPath === "string") {
+    return metadataPath;
+  }
+  const uri = request.uri ?? request.ref;
+  if (uri.startsWith("repo://")) {
+    return uri.slice("repo://".length);
+  }
+  return uri.includes("://") || uri.startsWith("research:") ? undefined : uri;
+}
+
+async function collectTextFiles(root: string, maxFiles: number): Promise<string[]> {
+  const files: string[] = [];
+  const walk = async (directory: string): Promise<void> => {
+    if (files.length >= maxFiles) {
+      return;
+    }
+    const entries = await fs.readdir(directory, { withFileTypes: true }).catch(() => []);
+    for (const entry of entries) {
+      if (files.length >= maxFiles || shouldIgnoreEntry(entry.name)) {
+        continue;
+      }
+      const child = path.join(directory, entry.name);
+      if (entry.isDirectory()) {
+        await walk(child);
+      } else if (entry.isFile() && isTextFileName(entry.name)) {
+        files.push(child);
+      }
+    }
+  };
+  await walk(root);
+  return files;
+}
+
+function shouldIgnoreEntry(name: string): boolean {
+  return (
+    name === ".git" ||
+    name === "node_modules" ||
+    name === "dist" ||
+    name === ".runtime" ||
+    name === "workspace" ||
+    name.endsWith(".png") ||
+    name.endsWith(".jpg") ||
+    name.endsWith(".jpeg") ||
+    name.endsWith(".gif")
+  );
+}
+
+function isTextFileName(name: string): boolean {
+  return /\.(?:ts|tsx|js|jsx|json|md|txt|yaml|yml|toml|html|css|svg)$/i.test(name);
+}
+
+async function readTextFile(filePath: string): Promise<string | undefined> {
+  try {
+    return await fs.readFile(filePath, "utf8");
+  } catch {
+    return undefined;
+  }
+}
+
+function isPathInside(root: string, child: string): boolean {
+  const relative = path.relative(path.resolve(root), path.resolve(child));
+  return relative.length === 0 || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+function snippetAround(text: string, index: number, queryLength: number): string {
+  const start = Math.max(0, index - 120);
+  const end = Math.min(text.length, index + Math.max(queryLength, 1) + 180);
+  return truncate(normalizeWhitespace(text.slice(start, end)), 320);
+}
+
+function createResearchRefId(source: string, value: string): string {
+  return `research:${source}:${hash(value)}`;
+}
+
+function hash(value: string): string {
+  let result = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    result ^= value.charCodeAt(index);
+    result = Math.imul(result, 16777619);
+  }
+  return (result >>> 0).toString(36);
+}
+
+function cleanPageText(value: string): string {
+  return decodeHtmlEntities(
+    value
+      .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, " ")
+      .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, " ")
+      .replace(/<!--[\s\S]*?-->/g, " ")
+      .replace(/<[^>]+>/g, " ")
+  );
+}
+
+function decodeHtmlEntities(value: string): string {
+  return value
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'");
+}
+
+function titleFromHtmlText(value: string): string | undefined {
+  const firstSentence = normalizeWhitespace(value).split(/[.!?。！？]/)[0];
+  return firstSentence.length > 0 ? truncate(firstSentence, 90) : undefined;
+}
+
+function resolveGlobalPageFetch(): PageFetchLike | undefined {
+  const fetchImpl = (globalThis as { fetch?: PageFetchLike }).fetch;
+  return typeof fetchImpl === "function" ? fetchImpl : undefined;
+}
+
+function isHttpUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function arrayItems(value: unknown): readonly unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function asRecord(value: unknown): Readonly<Record<string, unknown>> {
+  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+    return value as Readonly<Record<string, unknown>>;
+  }
+  return {};
+}
+
+function stringOrUndefined(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function toRepositoryPath(value: string): string {
+  return value.split(path.sep).join("/");
+}
+
+function normalizeWhitespace(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function truncate(value: string, maxLength: number): string {
+  if (value.length <= maxLength) {
+    return value;
+  }
+  return `${value.slice(0, Math.max(0, maxLength - 3))}...`;
+}

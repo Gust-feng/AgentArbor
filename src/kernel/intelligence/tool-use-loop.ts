@@ -103,10 +103,6 @@ export async function executeToolUseLoop(
     if (modelRounds >= maxModelRounds) {
       return { finalOutput: response, toolCalls, modelRounds, rounds, stoppedReason: "max_model_rounds" };
     }
-
-    if (rounds >= maxToolRounds) {
-      return { finalOutput: response, toolCalls, modelRounds, rounds, stoppedReason: "max_rounds" };
-    }
   }
 }
 

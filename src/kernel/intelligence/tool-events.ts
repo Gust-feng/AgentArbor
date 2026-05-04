@@ -37,7 +37,7 @@ export function createToolRequestedMessage(input: {
       callerAgentId: input.context.callerAgentId,
       callId: input.request.callId,
       toolName: input.request.toolName,
-      input: toSafeToolEventValue(input.request.input),
+      input: toSafeToolEventSummaryValue(input.request.input),
     },
   });
 }
@@ -58,8 +58,8 @@ export function createToolCompletedMessage(input: {
       callerAgentId: input.context.callerAgentId,
       callId: input.result.callId,
       toolName: input.result.toolName,
-      input: toSafeToolEventValue(input.result.input),
-      output: toSafeToolEventValue(input.result.output),
+      input: toSafeToolEventSummaryValue(input.result.input),
+      output: toSafeToolEventSummaryValue(input.result.output),
       durationMs: input.result.durationMs,
     },
   });
@@ -81,7 +81,7 @@ export function createToolFailedMessage(input: {
       callerAgentId: input.context.callerAgentId,
       callId: input.result.callId,
       toolName: input.result.toolName,
-      input: toSafeToolEventValue(input.result.input),
+      input: toSafeToolEventSummaryValue(input.result.input),
       error: sanitizeError(input.result.error ?? "Tool execution failed."),
       durationMs: input.result.durationMs,
     },
@@ -89,7 +89,11 @@ export function createToolFailedMessage(input: {
 }
 
 export function toSafeToolEventValue(value: unknown): unknown {
-  return truncateDeep(toJsonSafe(value), 0);
+  return truncateDeep(toJsonSafe(value), 0, { omitVerboseOutput: false });
+}
+
+function toSafeToolEventSummaryValue(value: unknown): unknown {
+  return truncateDeep(toJsonSafe(value), 0, { omitVerboseOutput: true });
 }
 
 function toJsonSafe(value: unknown): unknown {
@@ -97,7 +101,7 @@ function toJsonSafe(value: unknown): unknown {
     return value;
   }
   if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
-    return value;
+    return typeof value === "string" ? redactSensitiveText(value) : value;
   }
   if (Array.isArray(value)) {
     return value.map(toJsonSafe);
@@ -116,12 +120,16 @@ function toJsonSafe(value: unknown): unknown {
   return String(value);
 }
 
-function truncateDeep(value: unknown, depth: number): unknown {
+function truncateDeep(
+  value: unknown,
+  depth: number,
+  options: { readonly omitVerboseOutput: boolean }
+): unknown {
   if (typeof value === "string") {
     return value.length > 500 ? `${value.slice(0, 497)}...` : value;
   }
   if (Array.isArray(value)) {
-    const items = value.slice(0, 8).map((item) => truncateDeep(item, depth + 1));
+    const items = value.slice(0, 8).map((item) => truncateDeep(item, depth + 1, options));
     return value.length > 8 ? [...items, "[truncated]"] : items;
   }
   if (typeof value === "object" && value !== null) {
@@ -130,11 +138,20 @@ function truncateDeep(value: unknown, depth: number): unknown {
     }
     const entries = Object.entries(value as Record<string, unknown>).slice(0, 16);
     const result: Record<string, unknown> = {};
+    const hasVerboseOutput = options.omitVerboseOutput && entries.some(([key]) => isVerboseToolOutputKey(key));
+    let verboseOutputOmitted = false;
     for (const [key, item] of entries) {
-      result[key] = truncateDeep(item, depth + 1);
+      if (options.omitVerboseOutput && (isVerboseToolOutputKey(key) || (hasVerboseOutput && isDerivedVerboseSummaryKey(key)))) {
+        verboseOutputOmitted = true;
+        continue;
+      }
+      result[key] = truncateDeep(item, depth + 1, options);
     }
     if (Object.keys(value as Record<string, unknown>).length > entries.length) {
       result.truncated = true;
+    }
+    if (verboseOutputOmitted) {
+      result.verboseOutputOmitted = true;
     }
     return result;
   }
@@ -142,10 +159,43 @@ function truncateDeep(value: unknown, depth: number): unknown {
 }
 
 function sanitizeError(value: string): string {
-  return value.replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [redacted]").slice(0, 500);
+  return redactSensitiveText(value).slice(0, 500);
+}
+
+function redactSensitiveText(value: string): string {
+  return value
+    .replace(/sk-[A-Za-z0-9_-]{6,}/g, "[redacted-secret]")
+    .replace(/tvly-[A-Za-z0-9_-]{6,}/g, "[redacted-secret]")
+    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [redacted-token]")
+    .replace(/api[_ -]?key\s*[:=]\s*[^;\s]+/gi, "api key=[redacted-secret]")
+    .replace(/token\s*[:=]\s*[^;\s]+/gi, "token=[redacted-token]");
 }
 
 function isSecretLikeKey(key: string): boolean {
   const normalized = key.toLowerCase();
   return normalized.includes("apikey") || normalized.includes("api_key") || normalized.includes("token") || normalized.includes("secret");
+}
+
+function isVerboseToolOutputKey(key: string): boolean {
+  const normalized = key.toLowerCase();
+  return (
+    normalized === "contentpreview" ||
+    normalized === "raw" ||
+    normalized === "rawoutput" ||
+    normalized === "rawresponse" ||
+    normalized === "providerresponse" ||
+    normalized === "fulltext" ||
+    normalized === "pagetext" ||
+    normalized === "pagebody" ||
+    normalized === "html" ||
+    normalized === "body" ||
+    normalized === "prompt" ||
+    normalized === "sanitizedmessages" ||
+    normalized === "messages"
+  );
+}
+
+function isDerivedVerboseSummaryKey(key: string): boolean {
+  const normalized = key.toLowerCase();
+  return normalized === "summary" || normalized === "title";
 }

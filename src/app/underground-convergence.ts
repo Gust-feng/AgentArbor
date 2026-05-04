@@ -10,6 +10,7 @@ import {
   type CandidatePool,
   type GoalIntentProfile,
   type RootletOutput,
+  type UndergroundConvergenceAiAdvisory,
   type UndergroundConvergenceReport,
   type UndergroundEvidenceLedger,
   type UndergroundExplorationPlan,
@@ -28,6 +29,7 @@ export function convergeMinimalCandidatePool(input: {
   goalIntentProfile?: GoalIntentProfile;
   constraints?: readonly Constraint[];
   evidenceLedger?: UndergroundEvidenceLedger;
+  aiAdvisory?: UndergroundConvergenceAiAdvisory;
 }): {
   candidatePool: CandidatePool;
   convergenceReport: UndergroundConvergenceReport;
@@ -42,6 +44,7 @@ export function convergeMinimalCandidatePool(input: {
     rootletOutputs: input.rootletOutputs,
     createdAt,
   });
+  const enrichedComparisons = enrichComparisonsWithAdvisory(comparisonResult.comparisons, input.aiAdvisory);
   const decisions = comparisonResult.decisions;
   const candidatePool = applyCandidateConvergenceDecisions(input.pool, decisions, createdAt);
   const unknownCandidateIds = new Set(decisions
@@ -61,7 +64,7 @@ export function convergeMinimalCandidatePool(input: {
     leadAgentId: input.leadAgentId,
     candidatePool,
     decisions,
-    candidateComparisons: comparisonResult.comparisons,
+    candidateComparisons: enrichedComparisons,
     evidenceLedgerRef: evidenceLedger.ledgerId,
     provenanceRefs: [evidenceId(input.pool.goalId, "goal-intent"), "goal.received", "candidate_pool.updated"],
     budget: {
@@ -71,6 +74,7 @@ export function convergeMinimalCandidatePool(input: {
         input.plan.budget.exhausted || candidatePool.candidates.length >= input.plan.budget.maxCandidateOutputs,
     },
     summary: `Underground compared ${candidatePool.candidates.length} candidates against the goal intent profile.`,
+    aiAdvisory: input.aiAdvisory,
     openQuestionDispositions: comparisonResult.comparisons
       .filter((comparison) => unknownCandidateIds.has(comparison.candidateId))
       .sort((left, right) => Number(right.conclusion === "needs_user") - Number(left.conclusion === "needs_user"))
@@ -98,5 +102,29 @@ export function convergeMinimalCandidatePool(input: {
     createdAt,
   });
 
-  return { candidatePool, convergenceReport, evidenceLedger, candidateComparisons: comparisonResult.comparisons };
+  return { candidatePool, convergenceReport, evidenceLedger, candidateComparisons: enrichedComparisons };
+}
+
+function enrichComparisonsWithAdvisory(
+  comparisons: CandidateComparison[],
+  advisory?: UndergroundConvergenceAiAdvisory
+): CandidateComparison[] {
+  if (advisory === undefined || advisory.status !== "completed") {
+    return comparisons;
+  }
+  const analysisByCandidateId = new Map(
+    advisory.candidateAnalyses.map((analysis) => [analysis.candidateId, analysis])
+  );
+  return comparisons.map((comparison) => {
+    const analysis = analysisByCandidateId.get(comparison.candidateId);
+    if (analysis === undefined) {
+      return comparison;
+    }
+    return {
+      ...comparison,
+      contentDifference: analysis.contentDifference || comparison.contentDifference,
+      whyPreferred: analysis.whyPreferred || comparison.whyPreferred,
+      conflictWith: analysis.conflictWith.length > 0 ? [...analysis.conflictWith] : comparison.conflictWith,
+    };
+  });
 }

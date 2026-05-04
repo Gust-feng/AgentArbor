@@ -152,6 +152,23 @@ export type UndergroundConvergenceReport = {
   budgetExhausted: boolean;
   stopReason?: ConvergenceStopReason;
   handoffCandidateRefs: string[];
+  aiAdvisory?: UndergroundConvergenceAiAdvisory;
+};
+
+export type UndergroundConvergenceAiAdvisory = {
+  readonly advisoryId: string;
+  readonly recommendedOptionId?: string;
+  readonly candidateAnalyses: readonly {
+    readonly candidateId: string;
+    readonly kind: string;
+    readonly contentDifference: string;
+    readonly whyPreferred: string;
+    readonly conflictWith: readonly string[];
+  }[];
+  readonly conflictsNeedingUserInput: readonly string[];
+  readonly constraintViolations: readonly string[];
+  readonly overallDirectionSummary: string;
+  readonly status: "completed" | "failed";
 };
 
 export type UndergroundExplorationReport = {
@@ -276,6 +293,7 @@ export function createUndergroundConvergenceReport(input: {
   summary: string;
   openQuestionDispositions?: readonly OpenQuestionDisposition[];
   userClarificationRequestId?: string;
+  aiAdvisory?: UndergroundConvergenceAiAdvisory;
   createdAt?: string;
 }): UndergroundConvergenceReport {
   assertDecisionRefs(input.candidatePool, input.decisions);
@@ -359,6 +377,7 @@ export function createUndergroundConvergenceReport(input: {
     budgetExhausted: input.budget.exhausted,
     stopReason: outcome.stopReason,
     handoffCandidateRefs,
+    aiAdvisory: input.aiAdvisory,
   };
 }
 

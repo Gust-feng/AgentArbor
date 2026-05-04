@@ -17,7 +17,7 @@ import {
   formatUndergroundRootletCandidateAdviceSummary,
   parseUndergroundRootletCandidateAdviceOutput,
 } from "./underground/intelligence-output.js";
-import { buildUndergroundRootletCandidateAdviceMessages } from "./underground/intelligence-prompts.js";
+import { buildUndergroundRootletCandidateAdviceMessages, type SoilRefSummary } from "./underground/intelligence-prompts.js";
 import { createRootletOutputForInvocation } from "./underground-rootlets.js";
 
 export type UndergroundRootletCandidateAdviceRequestResult = {
@@ -67,6 +67,8 @@ export async function requestUndergroundRootletCandidateAdvice(input: {
   readonly invocation: UndergroundAgentInvocation;
   readonly constraints: readonly Constraint[];
   readonly sourceRefs?: readonly string[];
+  readonly soilRefs?: readonly SoilRefSummary[];
+  readonly historicalPathBias?: string;
 }): Promise<UndergroundRootletCandidateAdviceRequestResult> {
   const requestId = createId("model-request");
   const adviceContract = getUndergroundRootletCandidateAdviceContract(input.cluster.kind);
@@ -83,6 +85,8 @@ export async function requestUndergroundRootletCandidateAdvice(input: {
       goalIntentProfile: input.goalIntentProfile,
       cluster: input.cluster,
       constraints: input.constraints,
+      soilRefs: input.soilRefs,
+      historicalPathBias: input.historicalPathBias,
     }),
     constraintRefs: input.constraints.map((constraint) => ({
       constraintId: constraint.id,

@@ -7,6 +7,7 @@ import type {
   DirectionRiskRecord,
   ExplorationCandidateRef,
   GoalIntentProfile,
+  UndergroundConvergenceAiAdvisory,
   UndergroundConvergenceReport,
   UserClarificationRequest,
 } from "../domain/underground/index.js";
@@ -56,6 +57,7 @@ export function deriveDirectionHandoffDraft(input: {
   const unknownDecisionReasons = convergenceReport.decisions
     ?.filter((decision) => decision.status === "unknown")
     .map((decision) => decision.reason) ?? [];
+  const aiAdvisory = convergenceReport.aiAdvisory;
   const directionOptions = createDirectionOptions({
     goal: input.goal,
     goalIntentProfile: profile,
@@ -64,9 +66,11 @@ export function deriveDirectionHandoffDraft(input: {
     candidateConstraintRefs,
     clarificationQuestions,
     constraints: input.constraints,
+    aiAdvisory,
   });
   const selectedOptionId =
     convergenceReport.recommendedOptionId ??
+    aiAdvisory?.recommendedOptionId ??
     directionOptions.find((option) => option.recommendationScore === 1)?.optionId ??
     directionOptions[0]?.optionId ??
     createId("direction-option");
@@ -76,11 +80,16 @@ export function deriveDirectionHandoffDraft(input: {
     version: 1,
     sourceGoalId: input.goalId,
     rawUserInputRef: "goal.received",
-    clarifiedGoal: profile?.goalStatement ?? input.goal,
+    clarifiedGoal: aiAdvisory?.overallDirectionSummary && aiAdvisory.overallDirectionSummary.length > 0
+      ? aiAdvisory.overallDirectionSummary
+      : profile?.goalStatement ?? input.goal,
     nonGoals: createHandoffNonGoals(profile, input.constraints),
     assumptions: [
       ...(profile?.assumptions ?? ["The deterministic Underground profile is sufficient for this handoff."]),
       `Convergence review ${input.convergenceReview.reviewId} is the source of handoff candidate selection.`,
+      ...(aiAdvisory !== undefined && aiAdvisory.status === "completed"
+        ? ["AI-assisted convergence advisory enriched candidate analysis and direction recommendation."]
+        : []),
       ...(input.clarificationRequest === undefined
         ? []
         : ["Blocking user clarification is required before Aboveground planning."]),
@@ -98,6 +107,8 @@ export function deriveDirectionHandoffDraft(input: {
       ...(profile?.riskHints.map((hint) => `Intent risk hint: ${hint}`) ?? []),
       ...unknownDecisionReasons,
       ...rejectedDecisionReasons,
+      ...(aiAdvisory?.conflictsNeedingUserInput.map((conflict) => `AI-identified conflict: ${conflict}`) ?? []),
+      ...(aiAdvisory?.constraintViolations.map((violation) => `AI-identified constraint risk: ${violation}`) ?? []),
       ...(input.clarificationRequest === undefined
         ? []
         : ["Aboveground planning is blocked until user clarification is answered."]),
@@ -238,6 +249,7 @@ function createDirectionOptions(input: {
   candidateConstraintRefs: ReturnType<typeof createCandidateConstraintRefs>;
   clarificationQuestions: readonly string[];
   constraints: readonly Constraint[];
+  aiAdvisory?: UndergroundConvergenceAiAdvisory;
 }): DirectionOption[] {
   const optionComparisons =
     input.convergenceReview.candidateComparisons?.filter((comparison) => comparison.rootletKind === "option") ?? [];
@@ -261,12 +273,18 @@ function createDirectionOptions(input: {
           },
         ];
 
+  const advisoryAnalysisByCandidateId = new Map(
+    (input.aiAdvisory?.candidateAnalyses ?? []).map((analysis) => [analysis.candidateId, analysis])
+  );
+
   return comparisons.map((comparison) => {
     const isRecommended = comparison.candidateId === recommendedOptionId || recommendedOptionId === undefined;
     const rejectedReason = rejectedReasonByCandidateId.get(comparison.candidateId);
+    const advisoryAnalysis = advisoryAnalysisByCandidateId.get(comparison.candidateId);
+    const enrichedSummary = buildEnrichedDirectionSummary(comparison, advisoryAnalysis);
     return {
       optionId: comparison.candidateId,
-      directionSummary: comparison.candidateSummary,
+      directionSummary: enrichedSummary,
       supportingEvidenceRefs: unique([...input.sourceEvidenceRefs, ...comparison.evidenceRefs]),
       soilAssetFitRefs: ["soil:minimal-constraints"],
       constraintImpact: input.candidateConstraintRefs.map((constraint) => constraint.constraintId),
@@ -370,4 +388,25 @@ function uniqueConstraintRefs<T extends { constraintId: string; enforcementGate:
 
 function unique(values: readonly string[]): string[] {
   return [...new Set(values.filter((value) => value.trim().length > 0))];
+}
+
+function buildEnrichedDirectionSummary(
+  comparison: { readonly candidateSummary: string; readonly contentDifference?: string },
+  advisoryAnalysis?: { readonly contentDifference: string; readonly whyPreferred: string }
+): string {
+  const base = comparison.candidateSummary;
+  if (advisoryAnalysis === undefined) {
+    if (comparison.contentDifference !== undefined && comparison.contentDifference.length > 0) {
+      return `${base}\n\nKey differentiator: ${comparison.contentDifference}`;
+    }
+    return base;
+  }
+  const parts = [base];
+  if (advisoryAnalysis.contentDifference.length > 0) {
+    parts.push(`\n\nKey differentiator: ${advisoryAnalysis.contentDifference}`);
+  }
+  if (advisoryAnalysis.whyPreferred.length > 0) {
+    parts.push(`\nWhy this direction: ${advisoryAnalysis.whyPreferred}`);
+  }
+  return parts.join("");
 }

@@ -20,7 +20,8 @@ export type ModelPurpose =
   | "counterfactual"
   | "plan_draft"
   | "verification_advice"
-  | "governance_advice";
+  | "governance_advice"
+  | "convergence_advisory";
 
 export type ModelOutputKind = "candidate" | "draft" | "explanation" | "evidence_suggestion";
 

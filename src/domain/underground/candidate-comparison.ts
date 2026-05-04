@@ -35,6 +35,9 @@ export type CandidateComparison = {
   conclusion: CandidateComparisonConclusion;
   evidenceRefs: string[];
   createdAt: string;
+  contentDifference?: string;
+  whyPreferred?: string;
+  conflictWith?: string[];
 };
 
 export type CandidateComparisonResult = {
@@ -328,6 +331,9 @@ function createComparison(
       ...(decision.extraEvidenceRefs ?? []),
     ]),
     createdAt: input.createdAt,
+    contentDifference: deterministicContentDifference(input.rootletOutput, input.goalProfile),
+    whyPreferred: deterministicWhyPreferred(decision.conclusion, input.rootletOutput),
+    conflictWith: deterministicConflictWith(input.rootletOutput, input.goalProfile),
   };
 }
 
@@ -511,4 +517,55 @@ function includesAny(value: string, needles: readonly string[]): boolean {
 
 function unique(values: readonly string[]): string[] {
   return [...new Set(values.filter((value) => value.trim().length > 0))];
+}
+
+function deterministicContentDifference(output: RootletOutput, profile: GoalIntentProfile): string {
+  const kindLabel = output.kind;
+  if (kindLabel === "option") {
+    return `This option proposes: ${truncate(output.summary, 100)}`;
+  }
+  if (kindLabel === "risk") {
+    return `Risk analysis covering: ${truncate(output.summary, 100)}`;
+  }
+  if (kindLabel === "constraint") {
+    return `Constraint boundary: ${truncate(output.summary, 100)}`;
+  }
+  return `${kindLabel} insight: ${truncate(output.summary, 100)}`;
+}
+
+function deterministicWhyPreferred(conclusion: CandidateComparisonConclusion, output: RootletOutput): string {
+  switch (conclusion) {
+    case "accept":
+      return `Strongly matches the goal intent with ${output.evidenceRefs.length} supporting evidence refs.`;
+    case "merge":
+      return `Provides complementary context (${output.kind}) that strengthens the primary direction.`;
+    case "needs_user":
+      return "Requires user input to resolve an ambiguity before it can be accepted or rejected.";
+    case "keep_unknown":
+      return "Retained as open uncertainty for future resolution.";
+    case "reject":
+      return "Does not align with the current goal direction or violates constraints.";
+  }
+}
+
+function deterministicConflictWith(output: RootletOutput, profile: GoalIntentProfile): string[] {
+  const conflicts: string[] = [];
+  for (const nonGoal of profile.nonGoals) {
+    if (output.summary.toLowerCase().includes(nonGoal.toLowerCase().slice(0, 8))) {
+      conflicts.push(`Non-goal overlap: ${nonGoal}`);
+    }
+  }
+  for (const constraint of output.constraintRefs) {
+    if (constraint.requiredLevel === "hard") {
+      conflicts.push(`Hard constraint: ${constraint.constraintId}`);
+    }
+  }
+  return conflicts;
+}
+
+function truncate(value: string, maxLength: number): string {
+  if (value.length <= maxLength) {
+    return value;
+  }
+  return `${value.slice(0, Math.max(0, maxLength - 3))}...`;
 }

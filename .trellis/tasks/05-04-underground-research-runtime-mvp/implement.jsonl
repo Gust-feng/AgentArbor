@@ -1,0 +1,7 @@
+{"path":".trellis/spec/backend/directory-structure.md","reason":"Runtime/app/domain boundary rules for ResearchRuntime, ConfigCenter, panel, and ToolCenter integration."}
+{"path":".trellis/spec/backend/intelligence-channel.md","reason":"AgentTurnRuntime and model tool-call boundary; research tools remain model-adjacent candidate material."}
+{"path":".trellis/spec/backend/tool-runtime.md","reason":"ToolCenter, tool event, tool output safety, and search/read tool contract extension point."}
+{"path":".trellis/spec/backend/underground-radial-growth.md","reason":"Underground rootlet, CandidatePool, Convergence Judge, and handoff material boundaries."}
+{"path":".trellis/spec/backend/observation-read-model.md","reason":"EventLog/Observation/panel safe projection constraints for tool and research summaries."}
+{"path":".trellis/spec/backend/quality-guidelines.md","reason":"Build/test/panel smoke and secret leakage verification expectations."}
+{"path":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Feature crosses config, app runtime, tools, underground prompt, panel, and tests."}

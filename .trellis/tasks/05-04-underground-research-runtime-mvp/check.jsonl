@@ -1,0 +1,5 @@
+{"path":".trellis/spec/backend/intelligence-channel.md","reason":"Verify model/tool loop remains through AgentTurnRuntime and provider boundaries are preserved."}
+{"path":".trellis/spec/backend/tool-runtime.md","reason":"Verify ToolCenter, search/read tools, event safety, and domain/kernel import boundaries."}
+{"path":".trellis/spec/backend/underground-radial-growth.md","reason":"Verify research outputs enter rootlet/candidate/evidence refs only."}
+{"path":".trellis/spec/backend/observation-read-model.md","reason":"Verify summary/panel/tracking do not leak raw research/tool output or secrets."}
+{"path":".trellis/spec/backend/quality-guidelines.md","reason":"Run build, test, panel smoke, and diff checks or environment equivalents."}

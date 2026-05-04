@@ -12,7 +12,7 @@ AgentArbor 已进入第一阶段确定性最小运行内核实现。当前 `src/
 | [运行观察读模型](./observation-read-model.md) | EventLog 派生的 JSON-safe Observation Kernel 读模型和恢复路径事件 refs。 | 生效：V0.4+ recovery observation |
 | [Soil Store 只读接口](./soil-store.md) | 地下独立闭环读取 Soil 约束、能力资产引用、Path Bias 引用和历史运行引用。 | 生效：地下单环最小只读 store |
 | [智能通道](./intelligence-channel.md) | 真实模型接入的统一调用入口、provider adapter 边界、事件观测、输出契约和密钥边界。 | 生效：模型接入前置规范 |
-| [工具运行时](./tool-runtime.md) | AgentTurnRuntime、ToolCenter、工具契约、IntelligenceChannel 多轮工具循环、web_search adapter、工具事件和权限边界。 | 生效：统一 agent turn runtime MVP |
+| [工具运行时](./tool-runtime.md) | AgentTurnRuntime、ToolCenter、ResearchRuntime、`search` / `read` 信息工具、工具事件和权限边界。 | 生效：统一 agent turn runtime + research runtime MVP |
 | [数据库规范](./database-guidelines.md) | 数据访问、schema、迁移和事务约定。 | 延后：本阶段无数据库 |
 | [错误处理](./error-handling.md) | 运行时错误类型和守卫失败语义。 | 生效：最小 runtime kernel |
 | [日志规范](./logging-guidelines.md) | 日志等级、隐私、追踪和观测模式。 | 延后：本阶段无日志系统 |
@@ -27,7 +27,7 @@ AgentArbor 已进入第一阶段确定性最小运行内核实现。当前 `src/
 - 若改动 `src/domain/soil/**`、Soil refs、Capability Asset refs、Path Bias refs 或历史运行 refs，读 [Soil Store 只读接口](./soil-store.md)。
 - 若改动 EventLog 观察、未来前端读模型、本地 panel response 或 runtime result 投影，读 [运行观察读模型](./observation-read-model.md)。
 - 若改动真实模型调用、provider adapter、模型调用事件、模型配置或 AI 输出校验，读 [智能通道](./intelligence-channel.md)。
-- 若改动 AgentTurnRuntime、ToolCenter、工具契约、工具调用事件、`web_search`、agent turn policy、rootlet 工具权限或模型 tool calls，读 [工具运行时](./tool-runtime.md)。
+- 若改动 AgentTurnRuntime、ToolCenter、ResearchRuntime、工具契约、工具调用事件、`search` / `read`、agent turn policy、rootlet 工具权限或模型 tool calls，读 [工具运行时](./tool-runtime.md)。
 - 若改动正式数据库、通用 HTTP backend、日志或其他外部 adapter，不要套用当前最小内核 / 本地 panel 规则；先创建对应任务并补齐新的可执行规范。
 
 ## Quality Check

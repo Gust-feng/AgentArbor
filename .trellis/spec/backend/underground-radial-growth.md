@@ -121,7 +121,7 @@
 - 默认 demo 和地下-only session 都不写 repo-root `.agentarbor/`。
 - `pnpm demo:underground` 可运行默认目标和自定义目标，并保持 7 步地下-only EventLog。
 - `pnpm demo:underground -- --ai fake "<goal>"` 覆盖模型事件、按 rootlet kind 的 AI summary、候选层接入和 Direction Handoff 边界；复杂目标必须覆盖 6 种 rootlet kind。
-- rootlet AI 工具循环覆盖 `web_search` 成功 / 无 provider / 未授权 / max rounds，且 rootlet output refs 能回到 tool call。
+- rootlet AI 工具循环覆盖统一 `search` / `read` 成功、no-provider / stub、未授权和 max rounds，且 rootlet output refs 能回到 tool call / research refs。
 - 至少一个非 rootlet 地下核心 agent 通过统一 turn policy 证明模型 / 工具不可用时不会私自调用。
 - `pnpm demo:underground -- --ai openai-compatible "<goal>"` 覆盖缺配置失败、无网络调用和密钥不泄漏。
 

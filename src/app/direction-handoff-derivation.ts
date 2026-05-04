@@ -57,7 +57,8 @@ export function deriveDirectionHandoffDraft(input: {
   const unknownDecisionReasons = convergenceReport.decisions
     ?.filter((decision) => decision.status === "unknown")
     .map((decision) => decision.reason) ?? [];
-  const aiAdvisory = convergenceReport.aiAdvisory;
+  const aiAdvisory =
+    convergenceReport.aiAdvisory?.status === "completed" ? convergenceReport.aiAdvisory : undefined;
   const directionOptions = createDirectionOptions({
     goal: input.goal,
     goalIntentProfile: profile,
@@ -68,9 +69,14 @@ export function deriveDirectionHandoffDraft(input: {
     constraints: input.constraints,
     aiAdvisory,
   });
+  const directionOptionIds = new Set(directionOptions.map((option) => option.optionId));
+  const deterministicRecommendedOptionId =
+    convergenceReport.recommendedOptionId !== undefined &&
+    directionOptionIds.has(convergenceReport.recommendedOptionId)
+      ? convergenceReport.recommendedOptionId
+      : undefined;
   const selectedOptionId =
-    convergenceReport.recommendedOptionId ??
-    aiAdvisory?.recommendedOptionId ??
+    deterministicRecommendedOptionId ??
     directionOptions.find((option) => option.recommendationScore === 1)?.optionId ??
     directionOptions[0]?.optionId ??
     createId("direction-option");
@@ -80,9 +86,7 @@ export function deriveDirectionHandoffDraft(input: {
     version: 1,
     sourceGoalId: input.goalId,
     rawUserInputRef: "goal.received",
-    clarifiedGoal: aiAdvisory?.overallDirectionSummary && aiAdvisory.overallDirectionSummary.length > 0
-      ? aiAdvisory.overallDirectionSummary
-      : profile?.goalStatement ?? input.goal,
+    clarifiedGoal: profile?.goalStatement ?? input.goal,
     nonGoals: createHandoffNonGoals(profile, input.constraints),
     assumptions: [
       ...(profile?.assumptions ?? ["The deterministic Underground profile is sufficient for this handoff."]),

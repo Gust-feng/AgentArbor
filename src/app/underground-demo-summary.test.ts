@@ -74,7 +74,7 @@ test("createUndergroundDemoSummary reports model events and candidate-layer refs
   assert.equal(summary.ai.enabled, true);
   assert.equal(summary.ai.mode, "fake");
   assert.equal(summary.ai.status, "completed");
-  assert.deepEqual(summary.ai.eventCounts, { requested: 1, completed: 1, failed: 0 });
+  assert.deepEqual(summary.ai.eventCounts, { requested: 2, completed: 2, failed: 0 });
   assert.equal(summary.ai.providerKind, "fake");
   assert.equal(summary.ai.protocolKind, "openai_compatible_chat_completions");
   assert.equal(summary.ai.model, "fake-deterministic-model");
@@ -93,10 +93,13 @@ test("createUndergroundDemoSummary reports model events and candidate-layer refs
       aiFallbackUsed: false,
     },
   ]);
-  assert.equal(summary.ai.modelCallRefs.length, 1);
-  assert.equal(summary.ai.modelCallRefs[0]?.rootletKind, "option");
-  assert.equal(summary.ai.modelCallRefs[0]?.rootletOutputRefs.length, 2);
-  assert.equal(summary.ai.modelCallRefs[0]?.candidateRefs.length, 2);
+  const rootletModelCall = summary.ai.modelCallRefs.find((ref) => ref.rootletKind === "option");
+  const advisoryModelCall = summary.ai.modelCallRefs.find((ref) => ref.rootletKind === undefined);
+  assert.equal(summary.ai.modelCallRefs.length, 2);
+  assert.notEqual(rootletModelCall, undefined);
+  assert.notEqual(advisoryModelCall, undefined);
+  assert.equal(rootletModelCall?.rootletOutputRefs.length, 2);
+  assert.equal(rootletModelCall?.candidateRefs.length, 2);
   assert.equal(JSON.stringify(summary).includes("Fake model candidate advice"), false);
 });
 
@@ -123,8 +126,9 @@ test("createUndergroundDemoSummary reports AI fallback counts without model cont
   assert.equal(summary.ai.aiFallbackUsed, true);
   assert.equal(summary.ai.rootletKinds[0]?.kind, "option");
   assert.equal(summary.ai.rootletKinds[0]?.fallbackCount, 2);
-  assert.equal(summary.ai.modelCallRefs[0]?.rootletOutputRefs.length, 2);
-  assert.equal(summary.ai.modelCallRefs[0]?.candidateRefs.length, 2);
+  const rootletModelCall = summary.ai.modelCallRefs.find((ref) => ref.rootletKind === "option");
+  assert.equal(rootletModelCall?.rootletOutputRefs.length, 2);
+  assert.equal(rootletModelCall?.candidateRefs.length, 2);
   assert.equal(JSON.stringify(summary).includes("empty provider raw text"), false);
 });
 
@@ -197,6 +201,15 @@ class EmptyCandidateProvider implements ModelProvider {
   readonly model = "empty-candidate-model";
 
   async complete(request: ModelRequest): Promise<ModelResponse> {
+    const structuredOutput =
+      request.outputContract.contractId === "convergence-advisory"
+        ? {
+            candidateAnalyses: [],
+            conflictsNeedingUserInput: [],
+            constraintViolations: [],
+            overallDirectionSummary: "Empty candidate provider leaves convergence advisory neutral.",
+          }
+        : { candidates: [] };
     return {
       responseId: "model-response-empty-candidates",
       requestId: request.requestId,
@@ -206,7 +219,7 @@ class EmptyCandidateProvider implements ModelProvider {
       model: this.model,
       status: "completed",
       outputKind: request.outputContract.outputKind,
-      structuredOutput: { candidates: [] },
+      structuredOutput,
       textOutput: "empty provider raw text",
       finishReason: "stop",
       validation: pendingModelOutputValidation(),

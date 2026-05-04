@@ -6,6 +6,8 @@ import {
   createOpenQuestionDisposition,
   createUndergroundConvergenceReport,
   evidenceId,
+  sanitizeUndergroundConvergenceAiAdvisoryText,
+  sanitizeUndergroundConvergenceAiAdvisoryTexts,
   type CandidateComparison,
   type CandidatePool,
   type GoalIntentProfile,
@@ -44,7 +46,8 @@ export function convergeMinimalCandidatePool(input: {
     rootletOutputs: input.rootletOutputs,
     createdAt,
   });
-  const enrichedComparisons = enrichComparisonsWithAdvisory(comparisonResult.comparisons, input.aiAdvisory);
+  const aiAdvisory = sanitizeConvergenceAdvisoryForComparison(input.aiAdvisory);
+  const enrichedComparisons = enrichComparisonsWithAdvisory(comparisonResult.comparisons, aiAdvisory);
   const decisions = comparisonResult.decisions;
   const candidatePool = applyCandidateConvergenceDecisions(input.pool, decisions, createdAt);
   const unknownCandidateIds = new Set(decisions
@@ -74,7 +77,7 @@ export function convergeMinimalCandidatePool(input: {
         input.plan.budget.exhausted || candidatePool.candidates.length >= input.plan.budget.maxCandidateOutputs,
     },
     summary: `Underground compared ${candidatePool.candidates.length} candidates against the goal intent profile.`,
-    aiAdvisory: input.aiAdvisory,
+    aiAdvisory,
     openQuestionDispositions: comparisonResult.comparisons
       .filter((comparison) => unknownCandidateIds.has(comparison.candidateId))
       .sort((left, right) => Number(right.conclusion === "needs_user") - Number(left.conclusion === "needs_user"))
@@ -103,6 +106,29 @@ export function convergeMinimalCandidatePool(input: {
   });
 
   return { candidatePool, convergenceReport, evidenceLedger, candidateComparisons: enrichedComparisons };
+}
+
+function sanitizeConvergenceAdvisoryForComparison(
+  advisory?: UndergroundConvergenceAiAdvisory
+): UndergroundConvergenceAiAdvisory | undefined {
+  if (advisory === undefined) {
+    return undefined;
+  }
+  return {
+    advisoryId: advisory.advisoryId,
+    recommendedOptionId: advisory.recommendedOptionId,
+    candidateAnalyses: advisory.candidateAnalyses.map((analysis) => ({
+      candidateId: analysis.candidateId,
+      kind: sanitizeUndergroundConvergenceAiAdvisoryText(analysis.kind),
+      contentDifference: sanitizeUndergroundConvergenceAiAdvisoryText(analysis.contentDifference),
+      whyPreferred: sanitizeUndergroundConvergenceAiAdvisoryText(analysis.whyPreferred),
+      conflictWith: sanitizeUndergroundConvergenceAiAdvisoryTexts(analysis.conflictWith),
+    })),
+    conflictsNeedingUserInput: sanitizeUndergroundConvergenceAiAdvisoryTexts(advisory.conflictsNeedingUserInput),
+    constraintViolations: sanitizeUndergroundConvergenceAiAdvisoryTexts(advisory.constraintViolations),
+    overallDirectionSummary: sanitizeUndergroundConvergenceAiAdvisoryText(advisory.overallDirectionSummary),
+    status: advisory.status,
+  };
 }
 
 function enrichComparisonsWithAdvisory(

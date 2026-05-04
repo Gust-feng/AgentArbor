@@ -39,6 +39,57 @@ export type RequestConvergenceAiAdvisoryInput = {
   readonly constraints: readonly Constraint[];
 };
 
+export type RequestConvergenceAiAdvisoryForCandidatePoolInput = Omit<
+  RequestConvergenceAiAdvisoryInput,
+  "turnPolicy"
+> & {
+  readonly traceId: string;
+};
+
+export async function requestConvergenceAiAdvisoryForCandidatePool(
+  input: RequestConvergenceAiAdvisoryForCandidatePoolInput
+): Promise<ConvergenceAiAdvisory> {
+  return requestConvergenceAiAdvisory({
+    ...input,
+    turnPolicy: createConvergenceAiAdvisoryTurnPolicy({
+      callerAgentId: "underground-convergence-judge",
+      traceId: input.traceId,
+      goalId: input.goalId,
+    }),
+  });
+}
+
+export function createConvergenceAiAdvisoryTurnPolicy(input: {
+  readonly callerAgentId: string;
+  readonly traceId: string;
+  readonly goalId: string;
+}): AgentTurnPolicy {
+  return {
+    allowModel: true,
+    maxModelRounds: 1,
+    maxToolRounds: 0,
+    fallback: "deterministic",
+    callerAgentId: input.callerAgentId,
+    traceId: input.traceId,
+    goalId: input.goalId,
+    purpose: "convergence_advisory",
+    outputContract: {
+      contractId: "convergence-advisory",
+      outputKind: "explanation",
+      format: "json_object",
+      requiredFields: [
+        "candidateAnalyses",
+        "conflictsNeedingUserInput",
+        "constraintViolations",
+        "overallDirectionSummary",
+      ],
+      requiredStringFields: ["overallDirectionSummary"],
+    },
+    sensitivity: "internal",
+    budget: { maxOutputTokens: 512, maxLatencyMs: 15_000 },
+  };
+}
+
 export async function requestConvergenceAiAdvisory(
   input: RequestConvergenceAiAdvisoryInput
 ): Promise<ConvergenceAiAdvisory> {
@@ -69,6 +120,9 @@ export async function requestConvergenceAiAdvisory(
     }
 
     const parsed = parseConvergenceAdvisory(response.structuredOutput, advisoryId);
+    if (parsed === undefined) {
+      return failedAdvisory(advisoryId);
+    }
     return {
       ...parsed,
       modelRequestId: turn.modelRequestId,
@@ -148,8 +202,17 @@ function buildConvergenceAdvisoryMessages(
 function parseConvergenceAdvisory(
   structuredOutput: unknown,
   advisoryId: string
-): Omit<ConvergenceAiAdvisory, "modelRequestId" | "modelResponseId"> {
+): Omit<ConvergenceAiAdvisory, "modelRequestId" | "modelResponseId"> | undefined {
   const record = asRecord(structuredOutput);
+  if (
+    !Array.isArray(record.candidateAnalyses) ||
+    !Array.isArray(record.conflictsNeedingUserInput) ||
+    !Array.isArray(record.constraintViolations) ||
+    typeof record.overallDirectionSummary !== "string" ||
+    record.overallDirectionSummary.trim().length === 0
+  ) {
+    return undefined;
+  }
   const candidateAnalysesRaw = Array.isArray(record.candidateAnalyses) ? record.candidateAnalyses : [];
   const candidateAnalyses: CandidateAiAnalysis[] = candidateAnalysesRaw
     .map((item) => {

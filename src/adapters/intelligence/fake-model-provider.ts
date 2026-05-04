@@ -93,6 +93,16 @@ export class FakeModelProvider implements ModelProvider {
 }
 
 function defaultFakeOutput(request: ModelRequest): unknown {
+  if (request.outputContract.contractId === "convergence-advisory") {
+    return {
+      candidateAnalyses: [],
+      conflictsNeedingUserInput: [],
+      constraintViolations: [],
+      overallDirectionSummary:
+        "Fake convergence advisory confirms the deterministic convergence judge remains the final decision boundary.",
+    };
+  }
+
   if (request.outputContract.requiredFields?.includes("candidates")) {
     const kind = rootletKindFromContractId(request.outputContract.contractId);
     return {

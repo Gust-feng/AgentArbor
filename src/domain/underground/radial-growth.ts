@@ -33,6 +33,8 @@ export const ROOTLET_CLUSTER_KINDS = [
   "counterfactual",
 ] as const;
 
+const MAX_AI_ADVISORY_TEXT_LENGTH = 600;
+
 export type RootletClusterKind = (typeof ROOTLET_CLUSTER_KINDS)[number];
 
 export type RootletClusterStatus = "planned" | "started" | "completed" | "skipped";
@@ -342,6 +344,11 @@ export function createUndergroundConvergenceReport(input: {
     blockingClarificationRefs: userClarificationRequest?.relatedCandidateRefs ?? [],
     budget: input.budget,
   });
+  const aiAdvisory = sanitizeConvergenceAiAdvisory({
+    aiAdvisory: input.aiAdvisory,
+    candidatePool: input.candidatePool,
+    handoffCandidateRefs,
+  });
 
   return {
     reviewId: input.reviewId,
@@ -377,7 +384,7 @@ export function createUndergroundConvergenceReport(input: {
     budgetExhausted: input.budget.exhausted,
     stopReason: outcome.stopReason,
     handoffCandidateRefs,
-    aiAdvisory: input.aiAdvisory,
+    aiAdvisory,
   };
 }
 
@@ -470,6 +477,77 @@ function assertDecisionRefs(pool: CandidatePool, decisions: readonly CandidateCo
       );
     }
   }
+}
+
+function sanitizeConvergenceAiAdvisory(input: {
+  readonly aiAdvisory?: UndergroundConvergenceAiAdvisory;
+  readonly candidatePool: CandidatePool;
+  readonly handoffCandidateRefs: readonly string[];
+}): UndergroundConvergenceAiAdvisory | undefined {
+  if (input.aiAdvisory === undefined) {
+    return undefined;
+  }
+  if (input.aiAdvisory.status !== "completed") {
+    return {
+      advisoryId: input.aiAdvisory.advisoryId,
+      candidateAnalyses: [],
+      conflictsNeedingUserInput: sanitizeUndergroundConvergenceAiAdvisoryTexts(input.aiAdvisory.conflictsNeedingUserInput),
+      constraintViolations: sanitizeUndergroundConvergenceAiAdvisoryTexts(input.aiAdvisory.constraintViolations),
+      overallDirectionSummary: "",
+      status: "failed",
+    };
+  }
+
+  const candidateIds = new Set(input.candidatePool.candidates.map((candidate) => candidate.id));
+  const handoffCandidateIds = new Set(input.handoffCandidateRefs);
+  const recommendedOptionId =
+    input.aiAdvisory.recommendedOptionId !== undefined &&
+    handoffCandidateIds.has(input.aiAdvisory.recommendedOptionId)
+      ? input.aiAdvisory.recommendedOptionId
+      : undefined;
+  const unsafeRecommendation =
+    input.aiAdvisory.recommendedOptionId !== undefined && recommendedOptionId === undefined;
+
+  return {
+    advisoryId: input.aiAdvisory.advisoryId,
+    recommendedOptionId,
+    candidateAnalyses: input.aiAdvisory.candidateAnalyses
+      .filter((analysis) => candidateIds.has(analysis.candidateId))
+      .map((analysis) => ({
+        candidateId: analysis.candidateId,
+        kind: sanitizeUndergroundConvergenceAiAdvisoryText(analysis.kind),
+        contentDifference: sanitizeUndergroundConvergenceAiAdvisoryText(analysis.contentDifference),
+        whyPreferred: sanitizeUndergroundConvergenceAiAdvisoryText(analysis.whyPreferred),
+        conflictWith: sanitizeUndergroundConvergenceAiAdvisoryTexts(analysis.conflictWith),
+      })),
+    conflictsNeedingUserInput: sanitizeUndergroundConvergenceAiAdvisoryTexts(input.aiAdvisory.conflictsNeedingUserInput),
+    constraintViolations: sanitizeUndergroundConvergenceAiAdvisoryTexts(input.aiAdvisory.constraintViolations),
+    overallDirectionSummary: unsafeRecommendation
+      ? ""
+      : sanitizeUndergroundConvergenceAiAdvisoryText(input.aiAdvisory.overallDirectionSummary),
+    status: "completed",
+  };
+}
+
+export function sanitizeUndergroundConvergenceAiAdvisoryTexts(values: readonly string[]): string[] {
+  return values.map(sanitizeUndergroundConvergenceAiAdvisoryText).filter((value) => value.length > 0);
+}
+
+export function sanitizeUndergroundConvergenceAiAdvisoryText(value: string): string {
+  const redacted = redactSensitiveText(value.trim());
+  if (redacted.length <= MAX_AI_ADVISORY_TEXT_LENGTH) {
+    return redacted;
+  }
+  return `${redacted.slice(0, MAX_AI_ADVISORY_TEXT_LENGTH - 3)}...`;
+}
+
+function redactSensitiveText(value: string): string {
+  return value
+    .replace(/sk-[A-Za-z0-9_-]{6,}/g, "[redacted-secret]")
+    .replace(/tvly-[A-Za-z0-9_-]{6,}/g, "[redacted-secret]")
+    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [redacted-token]")
+    .replace(/api[_ -]?key\s*[:=]\s*[^;\s]+/gi, "api key=[redacted-secret]")
+    .replace(/token\s*[:=]\s*[^;\s]+/gi, "token=[redacted-token]");
 }
 
 function refsByStatus(

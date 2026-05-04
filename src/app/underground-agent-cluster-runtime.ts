@@ -46,7 +46,10 @@ import {
   publishRootletClustersStarted,
   publishUndergroundExplorationPlanned,
 } from "./underground-events.js";
-import { requestConvergenceAiAdvisory, type ConvergenceAiAdvisory } from "./underground/convergence-intelligence.js";
+import {
+  requestConvergenceAiAdvisoryForCandidatePool,
+  type ConvergenceAiAdvisory,
+} from "./underground/convergence-intelligence.js";
 
 type PreparedUndergroundAgentCluster = {
   readonly goalIntentProfile: GoalIntentProfile;
@@ -106,19 +109,30 @@ export async function runUndergroundAgentClusterExplorationWithIntelligence(
   input: RunUndergroundAgentClusterExplorationWithIntelligenceInput
 ): Promise<RunUndergroundAgentClusterExplorationResult> {
   const prepared = prepareUndergroundAgentCluster(input);
+  const agentTurnRuntime = createClusterAgentTurnRuntime(input);
   const modelRootletOutputs = await requestModelRootletOutputs({
     ...input,
     prepared,
+    agentTurnRuntime,
   });
   const completedRootletInvocations = completeUndergroundRootletInvocations(
     prepared.runningRootletInvocations,
     modelRootletOutputs
   );
-
+  const candidatePool = createCandidatePoolForCompletedRootlets({
+    goalId: input.goalId,
+    rootletOutputs: modelRootletOutputs,
+    invocations: [
+      ...prepared.centerInvocations,
+      ...completedRootletInvocations,
+    ],
+  });
   const aiAdvisory = await callConvergenceAdvisoryIfAvailable({
     ...input,
     prepared,
+    agentTurnRuntime,
     rootletOutputs: modelRootletOutputs,
+    candidatePool,
   });
 
   return completeUndergroundAgentClusterExploration({
@@ -126,6 +140,7 @@ export async function runUndergroundAgentClusterExplorationWithIntelligence(
     prepared,
     rootletOutputs: modelRootletOutputs,
     completedRootletInvocations,
+    candidatePool,
     aiAdvisory,
   });
 }
@@ -234,6 +249,7 @@ function completeUndergroundAgentClusterExploration(input: RunUndergroundAgentCl
   readonly prepared: PreparedUndergroundAgentCluster;
   readonly rootletOutputs: readonly RootletOutput[];
   readonly completedRootletInvocations: readonly UndergroundAgentInvocation[];
+  readonly candidatePool?: CandidatePool;
   readonly aiAdvisory?: ConvergenceAiAdvisory;
 }): RunUndergroundAgentClusterExplorationResult {
   const invocationsBeforeConvergence = [
@@ -253,11 +269,13 @@ function completeUndergroundAgentClusterExploration(input: RunUndergroundAgentCl
     },
   });
 
-  const candidatePool = createMinimalCandidatePool({
-    goalId: input.goalId,
-    rootletOutputs: input.rootletOutputs,
-    agentInvocations: invocationsBeforeConvergence,
-  });
+  const candidatePool =
+    input.candidatePool ??
+    createCandidatePoolForCompletedRootlets({
+      goalId: input.goalId,
+      rootletOutputs: input.rootletOutputs,
+      invocations: invocationsBeforeConvergence,
+    });
   publishCandidatePoolUpdated({
     runtime: input.runtime,
     traceId: input.traceId,
@@ -365,13 +383,9 @@ export function convergeDefaultUndergroundCandidatePool(input: {
 
 async function requestModelRootletOutputs(input: RunUndergroundAgentClusterExplorationWithIntelligenceInput & {
   readonly prepared: PreparedUndergroundAgentCluster;
+  readonly agentTurnRuntime: AgentTurnRuntime;
 }): Promise<RootletOutput[]> {
   const outputs: RootletOutput[] = [];
-  const agentTurnRuntime = new AgentTurnRuntime({
-    intelligenceChannel: input.intelligenceChannel,
-    toolCenter: input.toolCenter,
-    publishToolEvent: (event) => input.runtime.bus.publish(event),
-  });
   for (const cluster of input.prepared.startedPlan.rootletClusters) {
     const invocation = input.prepared.runningRootletInvocations.find(
       (candidate) => candidate.agentId === undergroundRootletAgentId(cluster.kind)
@@ -381,7 +395,7 @@ async function requestModelRootletOutputs(input: RunUndergroundAgentClusterExplo
     }
     const manifest = input.runtime.registry.get(invocation.agentId);
     const modelAdvice = await requestUndergroundRootletCandidateAdvice({
-      agentTurnRuntime,
+      agentTurnRuntime: input.agentTurnRuntime,
       turnPolicy: createUndergroundRootletAgentTurnPolicy({
         basePolicy: manifest.turnPolicy,
         callerAgentId: invocation.agentId,
@@ -554,53 +568,38 @@ export function cloneUndergroundAgentInvocation(invocation: UndergroundAgentInvo
 
 async function callConvergenceAdvisoryIfAvailable(input: RunUndergroundAgentClusterExplorationWithIntelligenceInput & {
   readonly prepared: PreparedUndergroundAgentCluster;
+  readonly agentTurnRuntime: AgentTurnRuntime;
   readonly rootletOutputs: readonly RootletOutput[];
+  readonly candidatePool: CandidatePool;
 }): Promise<ConvergenceAiAdvisory | undefined> {
-  const agentTurnRuntime = new AgentTurnRuntime({
+  return requestConvergenceAiAdvisoryForCandidatePool({
+    agentTurnRuntime: input.agentTurnRuntime,
+    traceId: input.traceId,
+    goalId: input.goalId,
+    goal: input.rawGoal,
+    goalIntentProfile: input.prepared.goalIntentProfile,
+    candidatePool: input.candidatePool,
+    rootletOutputs: input.rootletOutputs,
+    constraints: input.runtime.constraints,
+  });
+}
+
+function createClusterAgentTurnRuntime(input: RunUndergroundAgentClusterExplorationWithIntelligenceInput): AgentTurnRuntime {
+  return new AgentTurnRuntime({
     intelligenceChannel: input.intelligenceChannel,
     toolCenter: input.toolCenter,
     publishToolEvent: (event) => input.runtime.bus.publish(event),
   });
-  const invocationsBeforeConvergence = [
-    ...input.prepared.centerInvocations,
-    ...completeUndergroundRootletInvocations(
-      input.prepared.runningRootletInvocations,
-      input.rootletOutputs
-    ),
-  ];
-  const candidatePool = createMinimalCandidatePool({
+}
+
+function createCandidatePoolForCompletedRootlets(input: {
+  readonly goalId: string;
+  readonly rootletOutputs: readonly RootletOutput[];
+  readonly invocations: readonly UndergroundAgentInvocation[];
+}): CandidatePool {
+  return createMinimalCandidatePool({
     goalId: input.goalId,
     rootletOutputs: input.rootletOutputs,
-    agentInvocations: invocationsBeforeConvergence,
+    agentInvocations: input.invocations,
   });
-  try {
-    return await requestConvergenceAiAdvisory({
-      agentTurnRuntime,
-      turnPolicy: {
-        allowModel: true,
-        maxModelRounds: 1,
-        maxToolRounds: 0,
-        fallback: "deterministic",
-        callerAgentId: "underground-convergence-judge",
-        traceId: input.traceId,
-        goalId: input.goalId,
-        purpose: "convergence_advisory",
-        outputContract: {
-          contractId: "convergence-advisory",
-          outputKind: "explanation",
-          format: "json_object",
-        },
-        sensitivity: "internal",
-        budget: { maxOutputTokens: 512, maxLatencyMs: 15_000 },
-      },
-      goalId: input.goalId,
-      goal: input.rawGoal,
-      goalIntentProfile: input.prepared.goalIntentProfile,
-      candidatePool,
-      rootletOutputs: input.rootletOutputs,
-      constraints: input.runtime.constraints,
-    });
-  } catch {
-    return undefined;
-  }
 }

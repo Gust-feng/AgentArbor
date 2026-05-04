@@ -61,6 +61,8 @@
 - 默认不触发真实网络。
 - 只有用户显式选择 `openai-compatible` 且配置中心中 provider 配置完整时，才允许真实 provider 调用。
 - API key 不得进入 EventLog、Observation Snapshot、demo summary、HTTP 响应 JSON 或测试快照；面板可以提交新 key，但服务端响应只能返回 `secretConfigured: true/false`、secret ref 或更新时间。
+- 面板允许展示 **model visible output**：即经过 `outputContract` validation 且符合 `visibleOutput.fieldTypes` 展示策略的 `ModelResponse.structuredOutput` / `textOutput` 安全投影，或由这些输出生成的 rootlet outputs / candidates。这里的可见输出必须按 rootlet kind 展示结构化字段摘要，例如 option 的 summary / tradeoffs / applicability，risk 的 impactScope / severity / mitigation，asset_fit / evidence / constraint / counterfactual 的对应契约字段；字段过长必须截断并标注 truncated。
+- 面板仍禁止展示 provider raw response、完整 prompt、hidden reasoning、API key、token、raw sensitive error、runtime/store 引用、未经过 outputContract validation 的模型输出，或 rootlet app parser 会丢弃的候选字段。validation failed、provider failed、parser rejected 或 fallback 时只能展示失败原因、validation 状态、fallback 状态和安全引用，不得当作 approved model output 展示。
 - 面板不得写 repo-root `.agentarbor/` 运行资产；如后续需要导出，必须另开显式输出目录任务。
 
 ### 配置中心
@@ -88,6 +90,10 @@
 - [ ] 面板可以写入 OpenAI-compatible base URL、model、默认 AI 模式和 API key；刷新后普通配置仍可读取，API key 只能显示 configured 状态。
 - [ ] `openai-compatible` 缺少 API key 时在服务端返回配置错误，不访问网络，不泄漏密钥。
 - [ ] HTTP JSON 响应不包含 API key / token / 完整 prompt。
+- [ ] fake AI 输出能在 HTTP JSON 和 UI 中看到按 rootlet kind 投影的结构化 model visible output 字段。
+- [ ] OpenAI-compatible stubbed / fake 响应不泄漏 API key / token / 完整 prompt / provider raw response / hidden reasoning / raw sensitive error。
+- [ ] 过长 model visible output 字段会截断并标注 truncated。
+- [ ] validation failed 或 app parser 会拒绝的模型输出不会被当作 approved model visible output 展示，只展示失败 / fallback 状态。
 - [ ] 配置中心测试证明 raw secret 不进入 settings store、EventLog、Snapshot、summary 或 HTTP 响应。
 - [ ] 本地 raw secret 默认只写入用户本地配置目录；测试只能写入临时目录。
 - [ ] 面板不进入 Aboveground，不写 repo-root `.agentarbor/`。

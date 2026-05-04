@@ -28,7 +28,7 @@
 - `src/app/intelligence-channel-factory.ts` 是当前 CLI / demo 组合根装配 provider adapter 的唯一 app 层例外；地下 session、runner、rootlet、summary 和其他业务编排只能接收 `IntelligenceChannel` 或清洗后的 AI 观测输入，不得直接导入 provider adapter。
 - `src/app/config-center.ts` 负责把本地配置中心中的脱敏 settings 与 local-dev secret store 转成组合根可消费的 provider 环境；它不能把 raw secret 返回给 panel HTTP、summary、Snapshot 或 EventLog。
 - `src/domain/config/` 保存 provider profile、默认 AI mode、secret ref 和脱敏视图；`src/adapters/config/` 只负责普通 settings 文件与 local-dev secret 文件读写。普通 settings store 不得保存 raw secret。
-- 地下 rootlet AI 建议的 app 层契约拆分为 `src/app/underground/intelligence-contracts.ts`、`intelligence-prompts.ts` 和 `intelligence-output.ts`；6 种 rootlet kind 都必须使用 kind 专属 prompt 和 output contract，请求仍经 `IntelligenceChannel`，响应采用顶层 `candidates` 数组。数组项的 kind 专属字段由 app parser 校验、归一化、丢弃非法项并按 rootlet budget 截断；不要把完整数组 schema 推入当前 `ModelOutputContract` 内核。
+- 地下 rootlet AI 建议的 app 层契约拆分为 `src/app/underground/intelligence-contracts.ts`、`intelligence-prompts.ts` 和 `intelligence-output.ts`；6 种 rootlet kind 都必须使用 kind 专属 prompt 和 output contract，请求仍经 `IntelligenceChannel`，响应采用顶层 `candidates` 数组。数组项的 kind 专属字段由 app parser 校验、归一化、丢弃非法项并按 rootlet budget 截断；不要把完整数组 schema 推入当前 `ModelOutputContract` 内核。`ModelOutputContract.visibleOutput.fieldTypes` 只服务安全展示投影，必须与 app parser 的字段类型保持一致；parser 会丢弃的候选不得生成 approved visible output。
 - `src/domain/underground/**`、`src/domain/aboveground/**`、`src/domain/governance/**` 和 `src/kernel/**` 不得直接导入 provider adapter。
 
 ## 生效规则
@@ -55,6 +55,7 @@
 | 请求缺少 purpose / output contract / budget | `IntelligenceChannel` 拒绝请求并发布失败状态 |
 | provider 超时或鉴权失败 | 返回 failed response，发布 `model.failed` |
 | provider 输出不符合结构契约 | 返回 validation failed，不进入候选池提升 |
+| `visibleOutput.fieldTypes` 与 rootlet parser 字段类型不一致，导致 parser 丢弃的候选仍可见 | 测试失败；visible output 必须被抑制或只展示 parser 可接受字段 |
 | 模型建议违反 hard constraint | 保留为 rejected candidate 或失败说明，不得放行 |
 | EventLog 出现 API key 或 token 字段 | 安全边界失败 |
 | 普通 settings store、panel HTTP JSON、Observation Snapshot 或 demo summary 出现 API key / token | 安全边界失败 |
@@ -80,6 +81,7 @@
 - `IntelligenceChannel` 请求校验：缺少 purpose、output contract、budget 时失败。
 - fake provider completed / failed 路径事件顺序：`model.requested -> model.completed` 或 `model.requested -> model.failed`。
 - 6 种 underground rootlet kind 的候选数组 output contract、kind prompt 和 app parser 必须有 focused 测试；fake AI 复杂目标必须证明每种被选中的 rootlet kind 都经过 `IntelligenceChannel` 发布 `model.requested -> model.completed`。
+- visible output field type policy 必须覆盖 rootlet candidate 字段，并证明 app parser 会拒绝的字段类型不会生成 approved visible output。
 - OpenAI-compatible Chat Completions adapter 使用 stubbed fetch 验证 `/v1/chat/completions` 请求与归一化响应映射，不发真实网络。
 - provider adapter 失败映射：鉴权失败、超时、rate limit、输出不合约、fetch 缺失。
 - 事件顺序：`model.requested -> model.completed` 或 `model.requested -> model.failed`。

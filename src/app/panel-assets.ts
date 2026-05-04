@@ -259,13 +259,15 @@ export function createPanelHtml(): string {
       min-height: 148px;
     }
 
-    .transcript-grid {
+    .transcript-grid,
+    .model-output-grid {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 10px;
     }
 
-    .work-note {
+    .work-note,
+    .model-output-card {
       border: 1px solid var(--line);
       border-radius: 8px;
       background: #fff;
@@ -291,6 +293,40 @@ export function createPanelHtml(): string {
       color: var(--muted);
       font-size: 12px;
       white-space: nowrap;
+    }
+
+    .visible-output-items {
+      display: grid;
+      gap: 8px;
+    }
+
+    .visible-output-item {
+      display: grid;
+      gap: 4px;
+      border-top: 1px solid #eef2f5;
+      padding-top: 6px;
+    }
+
+    .visible-output-field {
+      display: grid;
+      grid-template-columns: 128px minmax(0, 1fr);
+      gap: 8px;
+      font-size: 12px;
+    }
+
+    .visible-output-field span:first-child {
+      color: var(--muted);
+      font-weight: 650;
+      overflow-wrap: anywhere;
+    }
+
+    .visible-output-field span:last-child {
+      overflow-wrap: anywhere;
+    }
+
+    .truncated-mark {
+      color: var(--warn);
+      font-weight: 700;
     }
 
     .kv {
@@ -372,13 +408,13 @@ export function createPanelHtml(): string {
     }
 
     @media (max-width: 1080px) {
-      .rootlet-grid, .summary-grid, .transcript-grid {
+      .rootlet-grid, .summary-grid, .transcript-grid, .model-output-grid {
         grid-template-columns: repeat(2, minmax(0, 1fr));
       }
     }
 
     @media (max-width: 920px) {
-      .layout, .split, .summary-grid, .row, .rootlet-grid, .transcript-grid {
+      .layout, .split, .summary-grid, .row, .rootlet-grid, .transcript-grid, .model-output-grid {
         grid-template-columns: 1fr;
       }
 
@@ -491,6 +527,11 @@ export function createPanelHtml(): string {
               <ul id="modelCallList"></ul>
             </div>
           </div>
+        </section>
+
+        <section class="section">
+          <h2>模型输出</h2>
+          <div id="modelOutputList" class="model-output-grid"></div>
         </section>
 
         <section class="section">
@@ -781,6 +822,7 @@ export function createPanelHtml(): string {
       renderWorkflowTimeline(createIdleTimeline());
       renderRootletCards(createIdleRootlets());
       renderModelTraceIdle(config);
+      renderModelVisibleOutputIdle();
       renderTranscript({ workNotes: [], modelCalls: [] });
       renderTextBlock("convergenceExplanation", ["暂无运行。启动后会解释 accepted / merged / rejected / unknown 的收束含义。"]);
       renderTextBlock("packageResult", ["暂无方向包。地下运行完成后展示版本、状态、校验和 Aboveground not_started 边界。"]);
@@ -802,6 +844,7 @@ export function createPanelHtml(): string {
       renderWorkflowTimeline(createRunningTimeline(input.aiMode));
       renderRootletCards(createRunningRootlets(input.aiMode));
       renderModelTraceRunning(input);
+      renderModelVisibleOutputRunning(input.aiMode);
       renderTranscript({ workNotes: [], modelCalls: [] });
       renderTextBlock("convergenceExplanation", [
         "正在等待候选池与收束评审返回。",
@@ -829,6 +872,7 @@ export function createPanelHtml(): string {
       renderWorkflowTimeline(createTimeline(response));
       renderRootletWorkspace(tracking);
       renderModelTrace(response);
+      renderModelVisibleOutputs(response.transcript?.modelCalls || []);
       renderTranscript(response.transcript);
       renderConvergenceExplanation(tracking);
       if (tracking.package && response.summary && response.observation) {
@@ -1087,6 +1131,82 @@ export function createPanelHtml(): string {
           }));
     }
 
+    function renderModelVisibleOutputIdle() {
+      renderModelVisibleOutputs([]);
+    }
+
+    function renderModelVisibleOutputRunning(aiMode) {
+      const host = document.getElementById("modelOutputList");
+      const empty = document.createElement("div");
+      empty.className = "empty";
+      empty.textContent = aiMode === "none"
+        ? "AI 模式 none：本次不会产生模型输出。"
+        : "等待通过 outputContract validation 的模型输出安全投影。";
+      host.replaceChildren(empty);
+    }
+
+    function renderModelVisibleOutputs(modelCalls) {
+      const host = document.getElementById("modelOutputList");
+      const visibleCalls = modelCalls.filter((call) => call.visibleOutput);
+      if (visibleCalls.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "empty";
+        empty.textContent = modelCalls.length === 0
+          ? "暂无模型输出。"
+          : "暂无通过 outputContract validation 的模型输出；validation failed、provider failed 或 fallback 只展示状态和安全引用。";
+        host.replaceChildren(empty);
+        return;
+      }
+      host.replaceChildren(...visibleCalls.map(renderModelVisibleOutputCard));
+    }
+
+    function renderModelVisibleOutputCard(call) {
+      const output = call.visibleOutput;
+      const card = document.createElement("div");
+      card.className = "model-output-card";
+      const title = document.createElement("h3");
+      title.textContent = (call.rootletKind ? rootletLabel(call.rootletKind) : "未归属 rootlet") + " · " + call.requestId;
+
+      const meta = document.createElement("div");
+      meta.className = "stage-detail";
+      meta.textContent =
+        "校验 " + output.validationStatus +
+        "；contract " + output.contractId +
+        "；output kind " + output.outputKind +
+        "；source " + output.source +
+        (output.truncated ? "；已截断 (truncated)" : "");
+
+      const items = document.createElement("div");
+      items.className = "visible-output-items";
+      items.replaceChildren(...output.items.map((item) => renderModelVisibleOutputItem(item)));
+      card.append(title, meta, items);
+      return card;
+    }
+
+    function renderModelVisibleOutputItem(item) {
+      const node = document.createElement("div");
+      node.className = "visible-output-item";
+      const label = document.createElement("div");
+      label.className = "stage-detail";
+      label.textContent = "输出项 " + item.itemId;
+      node.append(label, ...item.fields.map((field) => renderModelVisibleOutputField(field)));
+      return node;
+    }
+
+    function renderModelVisibleOutputField(field) {
+      const row = document.createElement("div");
+      row.className = "visible-output-field";
+      const name = document.createElement("span");
+      name.textContent = field.name;
+      const value = document.createElement("span");
+      value.textContent = field.value + (field.truncated ? " 已截断 (truncated)" : "");
+      if (field.truncated) {
+        value.className = "truncated-mark";
+      }
+      row.append(name, value);
+      return row;
+    }
+
     function renderTranscript(transcript) {
       const host = document.getElementById("agentTranscript");
       const notes = transcript?.workNotes || [];
@@ -1229,6 +1349,7 @@ export function createPanelHtml(): string {
       renderWorkflowTimeline(createFailedTimeline(message));
       renderRootletCards(createIdleRootlets());
       renderModelTraceError(details, message);
+      renderModelVisibleOutputs(details?.transcript?.modelCalls || []);
       renderTranscript({ workNotes: [], modelCalls: [] });
       renderTextBlock("convergenceExplanation", ["错误：" + message]);
       renderTextBlock("packageResult", ["未生成方向包。"]);

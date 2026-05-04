@@ -1,5 +1,6 @@
 import type { ArborMessageType } from "../domain/common.js";
 import type { SanitizedModelProviderConfig } from "../domain/config/index.js";
+import type { ModelVisibleOutputProjection } from "../domain/intelligence/index.js";
 import {
   createRunObservationEventViews,
   resolveRunObservationPosition,
@@ -123,6 +124,7 @@ export type PanelTranscriptModelCall = {
   readonly model?: string;
   readonly outputKind?: string;
   readonly validationStatus?: string;
+  readonly visibleOutput?: ModelVisibleOutputProjection;
   readonly candidateRefs: readonly string[];
   readonly eventRefs: readonly string[];
 };
@@ -336,6 +338,8 @@ function createPanelTranscriptModelCalls(
       model: stringOrUndefined(payload.model) ?? existing?.model ?? summaryCall?.model,
       outputKind: stringOrUndefined(payload.outputKind) ?? existing?.outputKind ?? summaryCall?.outputKind,
       validationStatus: stringOrUndefined(payload.validationStatus) ?? existing?.validationStatus ?? summaryCall?.validationStatus,
+      visibleOutput:
+        modelVisibleOutputOrUndefined(payload.visibleOutput) ?? existing?.visibleOutput ?? summaryCall?.visibleOutput,
       candidateRefs: summaryCall?.candidateRefs ?? existing?.candidateRefs ?? [],
       eventRefs: unique([...(existing?.eventRefs ?? []), entry.message.id]),
     };
@@ -744,6 +748,20 @@ function asRecord(value: unknown): Readonly<Record<string, unknown>> {
 
 function stringOrUndefined(value: unknown): string | undefined {
   return typeof value === "string" && value.trim().length > 0 ? value : undefined;
+}
+
+function modelVisibleOutputOrUndefined(value: unknown): ModelVisibleOutputProjection | undefined {
+  const record = asRecord(value);
+  if (
+    typeof record.contractId !== "string" ||
+    typeof record.outputKind !== "string" ||
+    (record.source !== "structured_output" && record.source !== "text_output") ||
+    record.validationStatus !== "passed" ||
+    !Array.isArray(record.items)
+  ) {
+    return undefined;
+  }
+  return record as unknown as ModelVisibleOutputProjection;
 }
 
 function unique<T>(values: readonly T[]): T[] {

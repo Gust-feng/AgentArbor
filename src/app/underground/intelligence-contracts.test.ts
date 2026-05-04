@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import type { ModelResponse } from "../../domain/intelligence/index.js";
 import { ROOTLET_CLUSTER_KINDS, type RootletClusterKind } from "../../domain/underground/index.js";
+import { createModelVisibleOutputProjection } from "../../kernel/intelligence/safe-visible-output.js";
 import { getUndergroundRootletCandidateAdviceContract } from "./intelligence-contracts.js";
 
 const EXPECTED_FIELDS: Record<RootletClusterKind, readonly string[]> = {
@@ -10,6 +12,20 @@ const EXPECTED_FIELDS: Record<RootletClusterKind, readonly string[]> = {
   evidence: ["summary", "evidenceType", "confidence"],
   constraint: ["summary", "constraintLevel", "enforcementGate"],
   counterfactual: ["summary", "alternativeDirection", "whyNotChosen"],
+};
+
+const EXPECTED_FIELD_TYPES: Record<RootletClusterKind, Record<string, "string" | "string_array">> = {
+  option: { summary: "string", tradeoffs: "string_array", applicability: "string" },
+  risk: { summary: "string", impactScope: "string", severity: "string", mitigation: "string" },
+  asset_fit: {
+    summary: "string",
+    assetRefs: "string_array",
+    fitConditions: "string_array",
+    doNotApplyWhen: "string_array",
+  },
+  evidence: { summary: "string", evidenceType: "string", confidence: "string" },
+  constraint: { summary: "string", constraintLevel: "string", enforcementGate: "string" },
+  counterfactual: { summary: "string", alternativeDirection: "string", whyNotChosen: "string" },
 };
 
 test("every underground rootlet kind has a candidate array output contract", () => {
@@ -26,5 +42,41 @@ test("every underground rootlet kind has a candidate array output contract", () 
       contract.candidateFields.map((field) => field.name),
       EXPECTED_FIELDS[kind]
     );
+    assert.deepEqual(contract.modelOutputContract.visibleOutput?.fields, EXPECTED_FIELDS[kind]);
+    assert.deepEqual(contract.modelOutputContract.visibleOutput?.fieldTypes, EXPECTED_FIELD_TYPES[kind]);
   }
 });
+
+test("rootlet visible output suppresses candidates the app parser would reject", () => {
+  const contract = getUndergroundRootletCandidateAdviceContract("option").modelOutputContract;
+  const projection = createModelVisibleOutputProjection({
+    outputContract: contract,
+    response: createCompletedResponse({
+      candidates: [
+        {
+          summary: "Parser rejects this candidate.",
+          tradeoffs: "not a string array",
+          applicability: "It should not be visible as approved output.",
+        },
+      ],
+    }),
+  });
+
+  assert.equal(projection, undefined);
+});
+
+function createCompletedResponse(structuredOutput: unknown): ModelResponse {
+  return {
+    responseId: "model-response-test",
+    requestId: "model-request-test",
+    providerId: "test-provider",
+    providerKind: "fake",
+    protocolKind: "openai_compatible_chat_completions",
+    model: "test-model",
+    status: "completed",
+    outputKind: "candidate",
+    structuredOutput,
+    validation: { status: "passed", checkedAt: "2026-05-04T00:00:00.000Z", issues: [] },
+    completedAt: "2026-05-04T00:00:00.000Z",
+  };
+}

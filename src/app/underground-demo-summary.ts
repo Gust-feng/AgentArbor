@@ -12,6 +12,7 @@ import type {
   UndergroundConvergenceOutcome,
   UserClarificationReason,
 } from "../domain/underground/index.js";
+import type { ModelVisibleOutputProjection } from "../domain/intelligence/index.js";
 import type {
   UndergroundDirectionSessionResult,
   UndergroundDirectionSessionTerminalStatus,
@@ -126,6 +127,7 @@ export type UndergroundDemoAiSummary = {
     readonly model?: string;
     readonly outputKind?: string;
     readonly validationStatus?: string;
+    readonly visibleOutput?: ModelVisibleOutputProjection;
     readonly rootletOutputRefs: readonly string[];
     readonly candidateRefs: readonly string[];
   }[];
@@ -269,6 +271,7 @@ function summarizeModelCallRefs(
       model?: string;
       outputKind?: string;
       validationStatus?: string;
+      visibleOutput?: ModelVisibleOutputProjection;
       rootletKind?: RootletClusterKind;
     }
   >();
@@ -290,6 +293,7 @@ function summarizeModelCallRefs(
       model: stringOrUndefined(payload.model) ?? existing.model,
       outputKind: stringOrUndefined(payload.outputKind) ?? existing.outputKind,
       validationStatus: stringOrUndefined(payload.validationStatus) ?? existing.validationStatus,
+      visibleOutput: modelVisibleOutputOrUndefined(payload.visibleOutput) ?? existing.visibleOutput,
       rootletKind: rootletKindByRequestId.get(requestId) ?? existing.rootletKind,
     });
   }
@@ -447,6 +451,20 @@ function hasProviderIdentity(payload: Readonly<Record<string, unknown>> | undefi
 
 function stringOrUndefined(value: unknown): string | undefined {
   return typeof value === "string" && value.trim().length > 0 ? value : undefined;
+}
+
+function modelVisibleOutputOrUndefined(value: unknown): ModelVisibleOutputProjection | undefined {
+  const record = asRecord(value);
+  if (
+    typeof record.contractId !== "string" ||
+    typeof record.outputKind !== "string" ||
+    (record.source !== "structured_output" && record.source !== "text_output") ||
+    record.validationStatus !== "passed" ||
+    !Array.isArray(record.items)
+  ) {
+    return undefined;
+  }
+  return record as unknown as ModelVisibleOutputProjection;
 }
 
 function asRecord(value: unknown): Readonly<Record<string, unknown>> {

@@ -45,6 +45,13 @@ export type ModelOutputContract = {
   readonly requiredStringFields?: readonly string[];
   readonly minTextLength?: number;
   readonly maxTextLength?: number;
+  readonly visibleOutput?: {
+    readonly arrayField?: string;
+    readonly fields: readonly string[];
+    readonly fieldTypes?: Readonly<Record<string, ModelVisibleOutputFieldType>>;
+    readonly maxItems?: number;
+    readonly maxFieldLength?: number;
+  };
 };
 
 export type ModelOutputValidationIssue = {
@@ -57,6 +64,29 @@ export type ModelOutputValidationResult = {
   readonly status: "pending" | "passed" | "failed";
   readonly checkedAt: string;
   readonly issues: readonly ModelOutputValidationIssue[];
+};
+
+export type ModelVisibleOutputFieldType = "string" | "string_array";
+
+export type ModelVisibleOutputField = {
+  readonly name: string;
+  readonly value: string;
+  readonly truncated: boolean;
+};
+
+export type ModelVisibleOutputItem = {
+  readonly itemId: string;
+  readonly fields: readonly ModelVisibleOutputField[];
+};
+
+export type ModelVisibleOutputProjection = {
+  readonly source: "structured_output" | "text_output";
+  readonly contractId: string;
+  readonly outputKind: ModelOutputKind;
+  readonly validationStatus: ModelOutputValidationResult["status"];
+  readonly rootletKind?: string;
+  readonly items: readonly ModelVisibleOutputItem[];
+  readonly truncated: boolean;
 };
 
 export type ModelRequest = {

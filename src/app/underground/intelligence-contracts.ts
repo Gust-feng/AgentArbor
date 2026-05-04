@@ -67,6 +67,8 @@ function createAdviceContract(
   kind: RootletClusterKind,
   candidateFields: readonly UndergroundRootletCandidateFieldContract[]
 ): UndergroundRootletCandidateAdviceContract {
+  const visibleFields = candidateFields.map((field) => field.name);
+  const visibleFieldTypes = Object.fromEntries(candidateFields.map((field) => [field.name, field.type]));
   return {
     kind,
     modelOutputContract: {
@@ -74,6 +76,13 @@ function createAdviceContract(
       outputKind: "candidate",
       format: "json_object",
       requiredFields: ["candidates"],
+      visibleOutput: {
+        arrayField: "candidates",
+        fields: visibleFields,
+        fieldTypes: visibleFieldTypes,
+        maxItems: 3,
+        maxFieldLength: 180,
+      },
     },
     candidateArrayField: "candidates",
     candidateFields,

@@ -17,6 +17,7 @@ test("panel HTML defaults to Simplified Chinese labels and status text", () => {
   assert.equal(html.includes("工作流阶段时间线"), true);
   assert.equal(html.includes("Rootlet 工作区"), true);
   assert.equal(html.includes("模型调用追踪"), true);
+  assert.equal(html.includes("模型输出"), true);
   assert.equal(html.includes("Agent Transcript"), true);
   assert.equal(html.includes("收束解释"), true);
   assert.equal(html.includes("方向包结果"), true);
@@ -98,8 +99,16 @@ test("panel can run no-AI underground session without writing a package path or 
 
 test("panel fake AI run exposes model and candidate summaries without model prompt content", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-fake-"));
+  const secret = "sk-visible-output-secret";
   const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
   try {
+    await requestJson(server.url, "/api/config/model-provider", {
+      method: "POST",
+      body: {
+        model: "unused-fake-model",
+        apiKey: secret,
+      },
+    });
     const run = await requestJson(server.url, "/api/underground/run", {
       method: "POST",
       body: {
@@ -112,12 +121,50 @@ test("panel fake AI run exposes model and candidate summaries without model prom
     assert.equal(run.body.summary.ai.mode, "fake");
     assert.equal(run.body.summary.ai.eventCounts.requested > 0, true);
     assert.equal(run.body.summary.ai.modelCallRefs.length > 0, true);
+    assert.equal(run.body.summary.ai.modelCallRefs.some((call: { visibleOutput?: unknown }) => call.visibleOutput !== undefined), true);
     assert.equal(run.body.tracking.provider.status, "fake_provider");
     assert.equal(run.body.tracking.modelTotals.requested > 0, true);
     assert.equal(run.body.tracking.rootletsByKind.option.model.completed > 0, true);
     assert.equal(run.body.tracking.aiCandidates.total > 0, true);
     assert.equal(run.body.tracking.convergence.outcome === "approved" || run.body.tracking.convergence.outcome === "awaiting_user", true);
-    assert.equal(run.text.includes("sanitizedMessages"), false);
+    const visibleCalls = run.body.transcript.modelCalls.filter(
+      (call: { visibleOutput?: unknown }) => call.visibleOutput !== undefined
+    ) as {
+      readonly rootletKind?: string;
+      readonly visibleOutput: {
+        readonly contractId: string;
+        readonly outputKind: string;
+        readonly validationStatus: string;
+        readonly rootletKind?: string;
+        readonly truncated: boolean;
+        readonly items: readonly {
+          readonly fields: readonly { readonly name: string; readonly value: string; readonly truncated: boolean }[];
+        }[];
+      };
+    }[];
+    const optionCall = visibleCalls.find((call: { rootletKind?: string }) => call.rootletKind === "option");
+    const riskCall = visibleCalls.find((call: { rootletKind?: string }) => call.rootletKind === "risk");
+    assert.equal(visibleCalls.length > 0, true);
+    if (optionCall === undefined) {
+      throw new Error("Expected option visible output in fake AI panel run.");
+    }
+    if (riskCall === undefined) {
+      throw new Error("Expected risk visible output in fake AI panel run.");
+    }
+    assert.equal(optionCall.visibleOutput.contractId, "underground.rootlet_candidate_advice.option.v2");
+    assert.equal(optionCall.visibleOutput.outputKind, "candidate");
+    assert.equal(optionCall.visibleOutput.validationStatus, "passed");
+    assert.equal(optionCall.visibleOutput.rootletKind, "option");
+    assert.equal(optionCall.visibleOutput.truncated, false);
+    const optionFields = optionCall.visibleOutput.items[0]?.fields ?? [];
+    assert.equal(optionFields.some((field: { name: string; value: string }) => field.name === "summary" && field.value === "Fake option candidate advice 1."), true);
+    assert.equal(optionFields.some((field: { name: string; value: string }) => field.name === "tradeoffs" && field.value.includes("deterministic convergence")), true);
+    assert.equal(optionFields.some((field: { name: string; truncated: boolean }) => field.name === "applicability" && field.truncated === false), true);
+    assert.equal(
+      riskCall.visibleOutput.items[0].fields.some((field: { name: string }) => field.name === "impactScope"),
+      true
+    );
+    assertSafePanelJsonText(run.text);
     assert.equal(run.text.includes("API key"), false);
   } finally {
     await server.close();
@@ -240,10 +287,89 @@ test("panel async fake AI transcript includes agent work notes and redacts model
     assert.equal(agentIds.includes("underground-convergence-judge"), true);
     assert.equal(agentIds.includes("underground-handoff-steward"), true);
     assert.equal(completed.body.transcript.modelCalls.length > 0, true);
+    assert.equal(
+      completed.body.transcript.modelCalls.some((call: { visibleOutput?: unknown }) => call.visibleOutput !== undefined),
+      true
+    );
     assert.equal(transcriptText.includes(secret), false);
     assert.equal(transcriptText.includes("sanitizedMessages"), false);
     assert.equal(transcriptText.includes("Return JSON only"), false);
-    assert.equal(transcriptText.includes("Fake option candidate advice"), false);
+    assertSafePanelJsonText(transcriptText);
+    assert.equal(transcriptText.includes("Fake option candidate advice"), true);
+  } finally {
+    await server.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("panel openai-compatible visible output truncates long fields and excludes raw provider response", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-visible-output-"));
+  const secret = "sk-visible-output-secret";
+  const longSummary = "Long visible model output ".repeat(20);
+  const providerFetch: PanelProviderFetch = async () =>
+    createStubOpenAiResponse("visible-output-model", { summary: longSummary });
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory, providerFetch });
+  try {
+    await requestJson(server.url, "/api/config/model-provider", {
+      method: "POST",
+      body: {
+        baseUrl: "https://provider.example",
+        model: "visible-output-model",
+        apiKey: secret,
+      },
+    });
+
+    const run = await requestJson(server.url, "/api/underground/run", {
+      method: "POST",
+      body: { goal: "Build a visible output helper.", aiMode: "openai-compatible" },
+    });
+    const visibleOutput = run.body.transcript.modelCalls.find(
+      (call: { visibleOutput?: unknown }) => call.visibleOutput !== undefined
+    )?.visibleOutput;
+    const summaryField = visibleOutput?.items[0].fields.find((field: { name: string }) => field.name === "summary");
+
+    assert.equal(run.status, 200);
+    assert.equal(visibleOutput?.validationStatus, "passed");
+    assert.equal(summaryField?.truncated, true);
+    assert.equal(summaryField.value.length <= 180, true);
+    assert.equal(run.text.includes(longSummary), false);
+    assert.equal(run.text.includes("choices"), false);
+    assertSafePanelJsonText(run.text);
+  } finally {
+    await server.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("panel validation failed model output falls back without approved visible output", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-invalid-output-"));
+  const secret = "sk-invalid-output-secret";
+  const providerFetch: PanelProviderFetch = async () => createInvalidOpenAiResponse("invalid-output-model");
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory, providerFetch });
+  try {
+    await requestJson(server.url, "/api/config/model-provider", {
+      method: "POST",
+      body: {
+        baseUrl: "https://provider.example",
+        model: "invalid-output-model",
+        apiKey: secret,
+      },
+    });
+
+    const run = await requestJson(server.url, "/api/underground/run", {
+      method: "POST",
+      body: { goal: "Build a helper with invalid provider output.", aiMode: "openai-compatible" },
+    });
+    const failedCall = run.body.transcript.modelCalls.find((call: { status: string }) => call.status === "failed");
+
+    assert.equal(run.status, 200);
+    assert.equal(failedCall?.validationStatus, "failed");
+    assert.equal(failedCall?.visibleOutput, undefined);
+    assert.equal(run.body.summary.ai.fallbackCount > 0, true);
+    assert.equal(run.text.includes("bad raw output"), false);
+    assert.equal(run.text.includes("hidden_reasoning"), false);
+    assert.equal(run.text.includes("provider raw response marker"), false);
+    assertSafePanelJsonText(run.text);
   } finally {
     await server.close();
     await fs.rm(directory, { recursive: true, force: true });
@@ -374,7 +500,10 @@ async function waitForRun(
   throw new Error(`Timed out waiting for panel run ${runId}; last=${last?.text}`);
 }
 
-function createStubOpenAiResponse(model: string): Awaited<ReturnType<PanelProviderFetch>> {
+function createStubOpenAiResponse(
+  model: string,
+  candidateOverrides: Record<string, unknown> = {}
+): Awaited<ReturnType<PanelProviderFetch>> {
   return {
     ok: true,
     status: 200,
@@ -398,6 +527,7 @@ function createStubOpenAiResponse(model: string): Awaited<ReturnType<PanelProvid
                   enforcementGate: "direction_handoff",
                   alternativeDirection: "Use no AI.",
                   whyNotChosen: "This test needs model.requested visibility.",
+                  ...candidateOverrides,
                 },
               ],
             }),
@@ -411,4 +541,38 @@ function createStubOpenAiResponse(model: string): Awaited<ReturnType<PanelProvid
       },
     }),
   };
+}
+
+function createInvalidOpenAiResponse(model: string): Awaited<ReturnType<PanelProviderFetch>> {
+  return {
+    ok: true,
+    status: 200,
+    json: async () => ({
+      model,
+      choices: [
+        {
+          finish_reason: "stop",
+          message: {
+            role: "assistant",
+            content: JSON.stringify({
+              rationale: "bad raw output with provider raw response marker",
+              hidden_reasoning: "must not leave provider normalization with Bearer leaked-token, system prompt, and sk-raw-secret",
+            }),
+          },
+        },
+      ],
+    }),
+  };
+}
+
+function assertSafePanelJsonText(text: string): void {
+  const lower = text.toLowerCase();
+  assert.equal(/\bsk-[A-Za-z0-9_-]{6,}/.test(text), false);
+  assert.equal(text.includes("Bearer "), false);
+  assert.equal(lower.includes("system prompt"), false);
+  assert.equal(text.includes("完整 prompt"), false);
+  assert.equal(text.includes("sanitizedMessages"), false);
+  assert.equal(text.includes("Return JSON only"), false);
+  assert.equal(lower.includes("provider raw response"), false);
+  assert.equal(lower.includes("hidden reasoning"), false);
 }

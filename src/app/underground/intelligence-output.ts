@@ -25,6 +25,9 @@ export type ParseUndergroundRootletCandidateAdviceOutputResult = {
   readonly issues: readonly UndergroundRootletCandidateAdviceParseIssue[];
 };
 
+const MAX_ROOTLET_ADVICE_SUMMARY_FIELD_LENGTH = 180;
+const TRUNCATED_MARKER = "... (truncated)";
+
 export function parseUndergroundRootletCandidateAdviceOutput(input: {
   readonly kind: RootletClusterKind;
   readonly output: unknown;
@@ -84,19 +87,20 @@ export function parseUndergroundRootletCandidateAdviceOutput(input: {
 export function formatUndergroundRootletCandidateAdviceSummary(
   candidate: ParsedUndergroundRootletCandidateAdvice
 ): string {
+  const summary = formatDetail(candidate.summary);
   switch (candidate.kind) {
     case "option":
-      return `${candidate.summary} Tradeoffs: ${formatDetail(candidate.details.tradeoffs)}. Applicability: ${formatDetail(candidate.details.applicability)}.`;
+      return `${summary} Tradeoffs: ${formatDetail(candidate.details.tradeoffs)}. Applicability: ${formatDetail(candidate.details.applicability)}.`;
     case "risk":
-      return `${candidate.summary} Impact scope: ${formatDetail(candidate.details.impactScope)}. Severity: ${formatDetail(candidate.details.severity)}. Mitigation: ${formatDetail(candidate.details.mitigation)}.`;
+      return `${summary} Impact scope: ${formatDetail(candidate.details.impactScope)}. Severity: ${formatDetail(candidate.details.severity)}. Mitigation: ${formatDetail(candidate.details.mitigation)}.`;
     case "asset_fit":
-      return `${candidate.summary} Asset refs: ${formatDetail(candidate.details.assetRefs)}. Fit conditions: ${formatDetail(candidate.details.fitConditions)}. Do not apply when: ${formatDetail(candidate.details.doNotApplyWhen)}.`;
+      return `${summary} Asset refs: ${formatDetail(candidate.details.assetRefs)}. Fit conditions: ${formatDetail(candidate.details.fitConditions)}. Do not apply when: ${formatDetail(candidate.details.doNotApplyWhen)}.`;
     case "evidence":
-      return `${candidate.summary} Evidence type: ${formatDetail(candidate.details.evidenceType)}. Confidence: ${formatDetail(candidate.details.confidence)}.`;
+      return `${summary} Evidence type: ${formatDetail(candidate.details.evidenceType)}. Confidence: ${formatDetail(candidate.details.confidence)}.`;
     case "constraint":
-      return `${candidate.summary} Constraint level: ${formatDetail(candidate.details.constraintLevel)}. Enforcement gate: ${formatDetail(candidate.details.enforcementGate)}.`;
+      return `${summary} Constraint level: ${formatDetail(candidate.details.constraintLevel)}. Enforcement gate: ${formatDetail(candidate.details.enforcementGate)}.`;
     case "counterfactual":
-      return `${candidate.summary} Alternative direction: ${formatDetail(candidate.details.alternativeDirection)}. Why not chosen: ${formatDetail(candidate.details.whyNotChosen)}.`;
+      return `${summary} Alternative direction: ${formatDetail(candidate.details.alternativeDirection)}. Why not chosen: ${formatDetail(candidate.details.whyNotChosen)}.`;
   }
 }
 
@@ -189,6 +193,15 @@ function parseField(
 }
 
 function formatDetail(value: UndergroundRootletCandidateAdviceValue | undefined): string {
+  const formatted = formatRawDetail(value);
+  if (formatted.length <= MAX_ROOTLET_ADVICE_SUMMARY_FIELD_LENGTH) {
+    return formatted;
+  }
+  const sliceLength = Math.max(0, MAX_ROOTLET_ADVICE_SUMMARY_FIELD_LENGTH - TRUNCATED_MARKER.length);
+  return `${formatted.slice(0, sliceLength)}${TRUNCATED_MARKER}`;
+}
+
+function formatRawDetail(value: UndergroundRootletCandidateAdviceValue | undefined): string {
   if (Array.isArray(value)) {
     return value.join("; ");
   }

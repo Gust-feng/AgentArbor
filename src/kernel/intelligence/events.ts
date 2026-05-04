@@ -6,8 +6,10 @@ import type {
   ModelRequest,
   ModelResponse,
   ModelUsage,
+  ModelVisibleOutputProjection,
 } from "../../domain/intelligence/index.js";
 import { createMessage } from "../messages/create-message.js";
+import { createModelVisibleOutputProjection } from "./safe-visible-output.js";
 
 export type ModelRequestedEventPayload = {
   readonly requestId: string;
@@ -35,6 +37,7 @@ export type ModelCompletedEventPayload = {
   readonly finishReason?: ModelResponse["finishReason"];
   readonly outputKind: ModelResponse["outputKind"];
   readonly validationStatus: ModelResponse["validation"]["status"];
+  readonly visibleOutput?: ModelVisibleOutputProjection;
 };
 
 export type ModelFailedEventPayload = {
@@ -99,6 +102,10 @@ export function createModelCompletedMessage(input: {
       finishReason: input.response.finishReason,
       outputKind: input.response.outputKind,
       validationStatus: input.response.validation.status,
+      visibleOutput: createModelVisibleOutputProjection({
+        outputContract: input.request.outputContract,
+        response: input.response,
+      }),
     },
   });
 }
@@ -134,5 +141,16 @@ function cloneOutputContract(contract: ModelOutputContract): ModelOutputContract
     ...contract,
     requiredFields: [...(contract.requiredFields ?? [])],
     requiredStringFields: [...(contract.requiredStringFields ?? [])],
+    visibleOutput:
+      contract.visibleOutput === undefined
+        ? undefined
+        : {
+            ...contract.visibleOutput,
+            fields: [...contract.visibleOutput.fields],
+            fieldTypes:
+              contract.visibleOutput.fieldTypes === undefined
+                ? undefined
+                : { ...contract.visibleOutput.fieldTypes },
+          },
   };
 }

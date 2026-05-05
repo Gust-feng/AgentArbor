@@ -4,6 +4,7 @@ import {
   createPanelDesktopWindowOptions,
   startPanelDesktopSession,
   type PanelDesktopDependencies,
+  type PanelDesktopWindowHandle,
   type PanelDesktopWindowOptions,
 } from "./panel-desktop-launcher.js";
 
@@ -40,12 +41,14 @@ test("panel desktop smoke starts and closes the local server without creating a 
     loads: string[];
     quits: number;
     closes: number;
+    sessionClosed: number;
   } = {
     start: [],
     windows: [],
     loads: [],
     quits: 0,
     closes: 0,
+    sessionClosed: 0,
   };
   let beforeQuitHandler: (() => void) | undefined;
   let windowAllClosedHandler: (() => void) | undefined;
@@ -66,7 +69,9 @@ test("panel desktop smoke starts and closes the local server without creating a 
     },
     createWindow: (options) => {
       calls.windows.push(options);
+      const window = createFakePanelDesktopWindow();
       return {
+        ...window,
         loadUrl: async (url) => {
           calls.loads.push(url);
         },
@@ -78,6 +83,9 @@ test("panel desktop smoke starts and closes the local server without creating a 
     },
     onWindowAllClosed: (handler) => {
       windowAllClosedHandler = handler;
+    },
+    onSessionClosed: () => {
+      calls.sessionClosed += 1;
     },
     quit: () => {
       calls.quits += 1;
@@ -104,6 +112,7 @@ test("panel desktop smoke starts and closes the local server without creating a 
   assert.equal(calls.windows.length, 0);
   assert.equal(calls.loads.length, 0);
   assert.equal(calls.closes, 1);
+  assert.equal(calls.sessionClosed, 1);
   assert.equal(calls.quits, 1);
   assert.equal(beforeQuitHandler !== undefined, true);
   assert.equal(windowAllClosedHandler !== undefined, true);
@@ -114,6 +123,7 @@ test("panel desktop smoke starts and closes the local server without creating a 
   await flushMicrotasks();
 
   assert.equal(calls.closes, 1);
+  assert.equal(calls.sessionClosed, 1);
   assert.equal(calls.quits, 2);
 });
 
@@ -124,9 +134,11 @@ test("panel desktop session loads the panel url and closes on quit", async () =>
     loads: [] as string[],
     closes: 0,
     quits: 0,
+    sessionClosed: 0,
   };
   let beforeQuitHandler: (() => void) | undefined;
   let windowAllClosedHandler: (() => void) | undefined;
+  let createdWindow: FakePanelDesktopWindow | undefined;
   const dependencies: PanelDesktopDependencies = {
     startPanelServer: async () => {
       calls.start += 1;
@@ -140,9 +152,12 @@ test("panel desktop session loads the panel url and closes on quit", async () =>
     },
     createWindow: (options) => {
       calls.windows.push(options);
+      createdWindow = createFakePanelDesktopWindow();
       return {
+        ...createdWindow,
         loadUrl: async (url) => {
           calls.loads.push(url);
+          await createdWindow?.loadUrl(url);
         },
       };
     },
@@ -152,6 +167,9 @@ test("panel desktop session loads the panel url and closes on quit", async () =>
     },
     onWindowAllClosed: (handler) => {
       windowAllClosedHandler = handler;
+    },
+    onSessionClosed: () => {
+      calls.sessionClosed += 1;
     },
     quit: () => {
       calls.quits += 1;
@@ -174,23 +192,102 @@ test("panel desktop session loads the panel url and closes on quit", async () =>
   assert.equal(calls.windows.length, 1);
   assert.deepEqual(calls.loads, ["http://127.0.0.1:54322/"]);
   assert.equal(calls.closes, 0);
+  assert.equal(calls.sessionClosed, 0);
   assert.equal(calls.quits, 0);
   assert.equal(calls.windows[0]?.webPreferences.contextIsolation, true);
   assert.equal(calls.windows[0]?.webPreferences.nodeIntegration, false);
   assert.equal(calls.windows[0]?.webPreferences.sandbox, true);
   assert.equal(calls.windows[0]?.webPreferences.webviewTag, false);
+  assert.equal(createdWindow?.getShowCount(), 1);
 
   windowAllClosedHandler?.();
   await flushMicrotasks();
   assert.equal(calls.closes, 1);
+  assert.equal(calls.sessionClosed, 1);
   assert.equal(calls.quits, 1);
 
   beforeQuitHandler?.();
   await flushMicrotasks();
   assert.equal(calls.closes, 1);
+  assert.equal(calls.sessionClosed, 1);
 
   await session.close();
   assert.equal(calls.closes, 1);
+  assert.equal(calls.sessionClosed, 1);
+});
+
+test("panel desktop session keeps ready-to-show and load fallback display idempotent", async () => {
+  let createdWindow: FakePanelDesktopWindow | undefined;
+  const dependencies: PanelDesktopDependencies = {
+    startPanelServer: async () => ({
+      url: "http://127.0.0.1:54324/",
+      close: async () => undefined,
+    }),
+    createWindow: () => {
+      createdWindow = createFakePanelDesktopWindow();
+      return {
+        ...createdWindow,
+        loadUrl: async (url) => {
+          await createdWindow?.loadUrl(url);
+          createdWindow?.triggerReadyToShow();
+        },
+      };
+    },
+    whenReady: Promise.resolve(),
+    onBeforeQuit: () => undefined,
+    onWindowAllClosed: () => undefined,
+    quit: () => undefined,
+  };
+
+  await startPanelDesktopSession(
+    {
+      host: "127.0.0.1",
+      port: 0,
+      smoke: false,
+    },
+    dependencies
+  );
+
+  assert.deepEqual(createdWindow?.loads, ["http://127.0.0.1:54324/"]);
+  assert.equal(createdWindow?.getShowCount(), 1);
+  createdWindow?.triggerReadyToShow();
+  assert.equal(createdWindow?.getShowCount(), 1);
+});
+
+test("panel desktop session does not show a destroyed window after load", async () => {
+  let createdWindow: FakePanelDesktopWindow | undefined;
+  const dependencies: PanelDesktopDependencies = {
+    startPanelServer: async () => ({
+      url: "http://127.0.0.1:54325/",
+      close: async () => undefined,
+    }),
+    createWindow: () => {
+      createdWindow = createFakePanelDesktopWindow();
+      return {
+        ...createdWindow,
+        loadUrl: async (url) => {
+          await createdWindow?.loadUrl(url);
+          createdWindow?.destroy();
+        },
+      };
+    },
+    whenReady: Promise.resolve(),
+    onBeforeQuit: () => undefined,
+    onWindowAllClosed: () => undefined,
+    quit: () => undefined,
+  };
+
+  await startPanelDesktopSession(
+    {
+      host: "127.0.0.1",
+      port: 0,
+      smoke: false,
+    },
+    dependencies
+  );
+
+  assert.deepEqual(createdWindow?.loads, ["http://127.0.0.1:54325/"]);
+  assert.equal(createdWindow?.getShowCount(), 0);
 });
 
 test("panel desktop session closes the local server when Electron startup fails", async () => {
@@ -198,6 +295,7 @@ test("panel desktop session closes the local server when Electron startup fails"
     closes: 0,
     windows: 0,
     quits: 0,
+    sessionClosed: 0,
   };
   const dependencies: PanelDesktopDependencies = {
     startPanelServer: async () => ({
@@ -208,13 +306,14 @@ test("panel desktop session closes the local server when Electron startup fails"
     }),
     createWindow: () => {
       calls.windows += 1;
-      return {
-        loadUrl: async () => undefined,
-      };
+      return createFakePanelDesktopWindow();
     },
     whenReady: Promise.reject(new Error("electron ready failed")),
     onBeforeQuit: () => undefined,
     onWindowAllClosed: () => undefined,
+    onSessionClosed: () => {
+      calls.sessionClosed += 1;
+    },
     quit: () => {
       calls.quits += 1;
     },
@@ -234,6 +333,7 @@ test("panel desktop session closes the local server when Electron startup fails"
   );
 
   assert.equal(calls.closes, 1);
+  assert.equal(calls.sessionClosed, 1);
   assert.equal(calls.windows, 0);
   assert.equal(calls.quits, 0);
 });
@@ -242,4 +342,42 @@ async function flushMicrotasks(): Promise<void> {
   await new Promise<void>((resolve) => {
     setImmediate(resolve);
   });
+}
+
+type FakePanelDesktopWindow = PanelDesktopWindowHandle & {
+  readonly loads: string[];
+  readonly getShowCount: () => number;
+  readonly triggerReadyToShow: () => void;
+  readonly destroy: () => void;
+};
+
+function createFakePanelDesktopWindow(): FakePanelDesktopWindow {
+  const loads: string[] = [];
+  let readyToShowHandler: (() => void) | undefined;
+  let showCount = 0;
+  let visible = false;
+  let destroyed = false;
+
+  return {
+    loads,
+    getShowCount: () => showCount,
+    triggerReadyToShow: () => {
+      readyToShowHandler?.();
+    },
+    destroy: () => {
+      destroyed = true;
+    },
+    loadUrl: async (url) => {
+      loads.push(url);
+    },
+    onReadyToShow: (handler) => {
+      readyToShowHandler = handler;
+    },
+    show: () => {
+      showCount += 1;
+      visible = true;
+    },
+    isVisible: () => visible,
+    isDestroyed: () => destroyed,
+  };
 }

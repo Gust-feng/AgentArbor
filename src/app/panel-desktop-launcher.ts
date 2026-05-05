@@ -21,6 +21,10 @@ export type PanelDesktopWindowOptions = {
 
 export type PanelDesktopWindowHandle = {
   loadUrl(url: string): Promise<void>;
+  onReadyToShow(handler: () => void): void;
+  show(): void;
+  isVisible(): boolean;
+  isDestroyed(): boolean;
 };
 
 export type PanelDesktopSession = {
@@ -35,6 +39,7 @@ export type PanelDesktopDependencies = {
   readonly whenReady: Promise<void>;
   readonly onWindowAllClosed: (handler: () => void) => void;
   readonly onBeforeQuit: (handler: () => void) => void;
+  readonly onSessionClosed?: () => void;
   readonly quit: () => void;
 };
 
@@ -55,6 +60,7 @@ export async function startPanelDesktopSession(
     }
     closed = true;
     await server.close();
+    dependencies.onSessionClosed?.();
   };
 
   dependencies.onBeforeQuit(() => {
@@ -87,7 +93,11 @@ export async function startPanelDesktopSession(
   try {
     await dependencies.whenReady;
     const window = dependencies.createWindow(createPanelDesktopWindowOptions());
+    window.onReadyToShow(() => {
+      showPanelDesktopWindow(window);
+    });
     await window.loadUrl(server.url);
+    showPanelDesktopWindow(window);
   } catch (error) {
     await closeServer();
     throw error;
@@ -98,6 +108,13 @@ export async function startPanelDesktopSession(
     configDirectory: server.configDirectory,
     close: closeServer,
   };
+}
+
+function showPanelDesktopWindow(window: PanelDesktopWindowHandle): void {
+  if (window.isDestroyed() || window.isVisible()) {
+    return;
+  }
+  window.show();
 }
 
 export function createPanelDesktopWindowOptions(): PanelDesktopWindowOptions {

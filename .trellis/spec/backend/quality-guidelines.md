@@ -13,9 +13,9 @@
 - `pnpm test`：先 build，再执行 `node --test "dist/**/*.test.js"`。
 - `pnpm demo`：先 build，再执行 `node dist/app/demo.js`。
 - `pnpm demo:underground`：先 build，再执行 `node dist/app/underground-demo.js`；可通过 `-- "<goal>"` 传入自定义目标，可通过 `-- --auto-answer "<goal>"` 演示 awaiting_user 恢复，可通过 `-- --out <dir> "<goal>"` 显式写出 Direction Handoff Package；可通过 `-- --ai fake "<goal>"` 显式验证 fake AI rootlet 候选接入；`-- --ai openai-compatible "<goal>"` 只有配置完整时才允许真实网络路径。
-- `pnpm panel`：先 build，再执行 `node dist/app/panel.js`，启动本地 Node HTTP panel 并打印 URL；默认配置目录使用 `AGENTARBOR_CONFIG_DIR` 或用户本地配置目录。
+- `pnpm panel`：先 build，再执行 `node dist/app/panel.js`，启动本地 Node HTTP panel 并打印 URL；默认监听 `127.0.0.1:9090`，作为手动浏览器调试入口；默认配置目录使用 `AGENTARBOR_CONFIG_DIR` 或用户本地配置目录。
 - `pnpm panel:smoke`：先 build，再执行 `node dist/app/panel.js --port 0 --smoke`，证明 panel 命令可启动并退出。
-- `pnpm panel:desktop`：先 build，再执行 Electron 桌面入口 `dist/app/panel-desktop.js`，创建桌面窗口并加载本地 panel server URL。
+- `pnpm panel:desktop`：先 build，再执行 Electron 桌面入口 `dist/app/panel-desktop.js`，默认请求动态端口 `0` 后创建桌面窗口并加载本地 panel server URL；只有用户显式传入 `--port` 时才使用固定端口。
 - `pnpm panel:desktop:smoke`：先 build，再执行 Electron 桌面入口的 smoke 模式，证明桌面宿主能启动本地 server、关闭 server 并退出，且不创建窗口。
 
 ## Contracts

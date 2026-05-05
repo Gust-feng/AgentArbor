@@ -7,10 +7,22 @@ export type PanelLaunchArgs = {
 
 export const DEFAULT_PANEL_HOST = "127.0.0.1";
 export const DEFAULT_PANEL_PORT = 9090;
+export const DEFAULT_PANEL_DESKTOP_PORT = 0;
 
 export function parsePanelArgs(argv: readonly string[]): PanelLaunchArgs {
+  return parsePanelArgsWithDefaults(argv, { port: DEFAULT_PANEL_PORT });
+}
+
+export function parsePanelDesktopArgs(argv: readonly string[]): PanelLaunchArgs {
+  return parsePanelArgsWithDefaults(argv, { port: DEFAULT_PANEL_DESKTOP_PORT });
+}
+
+function parsePanelArgsWithDefaults(
+  argv: readonly string[],
+  defaults: { readonly port: number }
+): PanelLaunchArgs {
   let host = DEFAULT_PANEL_HOST;
-  let port = DEFAULT_PANEL_PORT;
+  let port = defaults.port;
   let configDirectory: string | undefined;
   let smoke = false;
 

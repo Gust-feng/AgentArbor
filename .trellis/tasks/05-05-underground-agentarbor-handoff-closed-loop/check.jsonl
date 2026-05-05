@@ -1,0 +1,9 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/backend/index.md", "reason": "Runtime scope and quality checklist for review."}
+{"file": ".trellis/spec/backend/underground-radial-growth.md", "reason": "Check underground rootlet, candidate pool, convergence, and handoff invariants."}
+{"file": ".trellis/spec/backend/direction-handoff-package.md", "reason": "Check package completeness, validation, lineage, and .agentarbor write boundary."}
+{"file": ".trellis/spec/backend/soil-store.md", "reason": "Check Soil refs remain references and Path Bias constraints are not bypassed."}
+{"file": ".trellis/spec/backend/intelligence-channel.md", "reason": "Check model output safety, validation, and provider adapter boundaries."}
+{"file": ".trellis/spec/backend/tool-runtime.md", "reason": "Check tool permissions, search/read safety, and AgentTurnRuntime boundaries."}
+{"file": ".trellis/spec/backend/observation-read-model.md", "reason": "Check read models and panel projections do not become second fact sources."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Check required validation commands and regression scope."}

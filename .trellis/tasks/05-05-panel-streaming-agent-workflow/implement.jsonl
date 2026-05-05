@@ -1,0 +1,10 @@
+{"file":".trellis/spec/frontend/index.md","reason":"panel frontend context and current local panel constraints"}
+{"file":".trellis/spec/frontend/directory-structure.md","reason":"static panel asset and no frontend framework boundary"}
+{"file":".trellis/spec/frontend/component-guidelines.md","reason":"current panel UI rules that must be replaced by streaming transcript rules"}
+{"file":".trellis/spec/frontend/quality-guidelines.md","reason":"panel smoke and UI regression expectations"}
+{"file":".trellis/spec/backend/index.md","reason":"runtime and panel boundary overview"}
+{"file":".trellis/spec/backend/directory-structure.md","reason":"panel server and app layer ownership"}
+{"file":".trellis/spec/backend/observation-read-model.md","reason":"safe EventLog/Observation projections and transcript boundaries"}
+{"file":".trellis/spec/backend/intelligence-channel.md","reason":"model/provider adapter boundaries and model output safety"}
+{"file":".trellis/spec/backend/tool-runtime.md","reason":"safe tool event projection and raw tool output boundary"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"build/test/panel smoke validation requirements"}

@@ -1,0 +1,7 @@
+{"file":".trellis/spec/frontend/component-guidelines.md","reason":"verify default UI is streaming transcript, not template card workbench"}
+{"file":".trellis/spec/frontend/quality-guidelines.md","reason":"verify panel smoke and UI regression tests"}
+{"file":".trellis/spec/backend/observation-read-model.md","reason":"verify stream/transcript projection is safe and not raw EventLog/provider data"}
+{"file":".trellis/spec/backend/intelligence-channel.md","reason":"verify model streaming does not leak prompt/provider raw response/hidden reasoning"}
+{"file":".trellis/spec/backend/tool-runtime.md","reason":"verify tool stream events only expose safe summaries and refs"}
+{"file":".trellis/spec/backend/error-handling.md","reason":"verify SSE and panel route failures stay sanitized"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"verify required build/test/smoke gates"}

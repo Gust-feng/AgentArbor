@@ -1,0 +1,11 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend runtime spec index and quality checklist for underground handoff changes."}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Preserve app/domain/kernel ownership while changing underground runtime and package boundaries."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Use existing guard, stopped, failed, and validation error semantics."}
+{"file": ".trellis/spec/backend/underground-radial-growth.md", "reason": "Primary contract for Underground Center, rootlets, candidate pool, convergence, handoff, and user escalation."}
+{"file": ".trellis/spec/backend/direction-handoff-package.md", "reason": "Direction Handoff Package file contract, validation, lineage, and .agentarbor write boundary."}
+{"file": ".trellis/spec/backend/soil-store.md", "reason": "Soil refs, capability refs, path bias refs, and no Soil body copy boundary."}
+{"file": ".trellis/spec/backend/intelligence-channel.md", "reason": "AI task understanding and model output must use IntelligenceChannel safely."}
+{"file": ".trellis/spec/backend/tool-runtime.md", "reason": "AgentTurnRuntime, ToolCenter, ResearchRuntime, search/read, and tool event boundary."}
+{"file": ".trellis/spec/backend/observation-read-model.md", "reason": "EventLog, Observation, summary, and panel projection must stay derived and safe."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Required build/test/panel validation expectations."}

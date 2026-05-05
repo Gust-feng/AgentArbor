@@ -6,6 +6,18 @@
 
 交付必须完整、清楚、可继承。不能只做“能用”的最小改动后留下索引不清、职责不明、边界不清、验证缺失或残留规则。
 
+## 功能模块化开发原则
+
+AgentArbor 的模块化首先是按功能闭环模块化，其次才是按技术层分层。`domain`、`app`、`kernel`、`adapters` 等横向层只能作为实现手段，不能取代功能所有权；每个长期功能模块都应尽量拥有自己的输入输出契约、运行过程、证据链、验证门、可观察投影和测试边界。
+
+横向基础设施负责提供可复用能力，例如事件、消息、状态机、工具运行、模型运行、外部协议适配、配置和审计；纵向功能模块负责完成业务闭环，例如 Soil、Underground Direction、Direction Handoff、Aboveground Planning、Growth Runtime、Verification / Governance、Fruits 和 Observation Panel。开发时必须优先判断当前变更属于哪个功能闭环，避免为了追随横向分层而把同一功能拆散到多个无主文件中。
+
+大模型接入层必须作为独立功能模块演进，而不是被视为普通 provider adapter 的附属实现。模型运行时应独立承担模型接入、provider 选择、配置边界、流式输出、模型-工具-模型多轮运行、输出脱敏、结构化校验、可见输出投影、模型事件和失败归一化等职责。Underground、Aboveground、Verification、Governance、Panel 等模块只能通过模型运行时契约使用模型能力，不能直接绑定外部 LLM SDK、provider 私有字段或临时流式协议。
+
+不同模块之间必须通过强契约互信：调用方应相信被调用模块会履行自己的契约，并按标准结果返回成功、失败、取消、预算耗尽或验证失败；调用方只处理本模块的业务决策，不能因为不信任其他模块而复制其职责、重建其内部规则或绕过其边界。确定性工程规则应保护 Agent 的权限、预算、证据、审计、验证和治理边界，不能替代 Agent 的目标理解、方案探索、工具选择、计划草案和反思能力。
+
+禁止工程边界替 Agent 思考。schema、类型、状态机、validation、budget、permission、脱敏、fallback、关键词规则和文件边界只能说明“什么不能越界、如何记录、如何失败、如何交接”，不能承担“用户真正要什么、候选之间如何取舍、是否继续探索、该调用什么工具、风险如何权衡、方向如何综合”等 agent 语义职责。
+
 ## 协作规则
 
 用户主要负责方向调整、价值判断和边界确认；AI 开发者负责把方向转化为可落地的架构、文档、任务计划和实现路径。
@@ -25,10 +37,6 @@ Soil -> Underground Center -> .agentarbor -> Aboveground Center -> Fruits -> Gov
 ```
 
 当前产品架构事实源是 `docs/架构设计/产品架构/ADR-0018-AgentArbor原生概念树架构.md`；活跃开发指南必须承接该 ADR 的稳定结论。
-
-地下中枢负责把用户想象转为可判断目标、约束、证据和方向，并在授权边界不清、目标冲突或关键事实不足时询问用户。`.agentarbor` 是地下中枢交给地上中枢的方向交接包，不是最终资产仓库，也不是 Soil 的副本。地上中枢负责把方向交接包转为 Growth Plan、Workflow IR、上下文拓扑、执行组织、验证门和修订机制。Fruits 只是交付物、AgentApp、能力包或经验候选；只有经过 Governance 的果实才能以 Capability Asset、Path Bias、长期约束或验证证据形式进入 Soil。
-
-约束工程贯穿 Soil、Underground Center、`.agentarbor`、Aboveground Center、Fruits、Governance 和回流后的 Soil。目标、非目标、权限、成本、技术边界、安全要求、人工确认、验收门和资产治理不能停留在自然语言备注中；它们必须能通过 Constraint / ConstraintRef 被引用、分发、执行、验证和沉淀。Path Bias 只能影响 preference 和方案排序，不能覆盖 hard constraint。
 
 开发前必须先读：
 
@@ -67,7 +75,7 @@ Soil -> Underground Center -> .agentarbor -> Aboveground Center -> Fruits -> Gov
 - `.opencode/`：OpenCode 开发适配层。
 - `.claude/`：Claude Code 开发适配层。
 - `.agentarbor/`：未来 AgentArbor 原生方向交接包目录，负责从地下中枢向地上中枢传递方向、约束、证据和 Growth Entry；不保存最终资产，不替代 Soil。只有契约稳定、有真实出生依据时才增量创建。
-- `src/`：AgentArbor TypeScript 实现代码。当前第一阶段只包含确定性最小运行内核、内存版闭环、事件、状态、产物、验证和治理回流。
+- `src/`：AgentArbor TypeScript 实现代码。当前已有确定性最小运行内核作为状态、验证、审计和兜底基础；地下集群重构必须在该基础上推进 AI 驱动的 agent 协作主线。
 
 禁止把这些层混用。平台适配文件不是 AgentArbor 原生产品事实源，未来运行时资产也不能替代当前开发文档。
 
@@ -91,7 +99,7 @@ Soil -> Underground Center -> .agentarbor -> Aboveground Center -> Fruits -> Gov
 
 ## 开发边界
 
-- 当前仓库已进入第一阶段运行时代码实现。根目录工具链使用 `pnpm + TypeScript + tsc + node:test`，当前代码范围限制为确定性最小运行内核。
+- 当前仓库已进入运行时代码实现。根目录工具链使用 `pnpm + TypeScript + tsc + node:test`；确定性最小内核是工程守卫和 fallback，不是地下集群长期智能主线。
 - 不引入新的包管理器、构建系统、运行时代码框架或测试框架，除非用户明确要求扩展实现阶段。
 - 实现以 TypeScript 自研架构为主。
 - 外部模型、工具、协议和平台通过 adapter 接入，不能反向污染核心领域模型。
@@ -129,12 +137,3 @@ Soil -> Underground Center -> .agentarbor -> Aboveground Center -> Fruits -> Gov
 6. 没有提前创建无契约、无权限、无验证依据的未来运行时资产。
 
 除非用户明确要求，不把开发流水或经验记录放进当前开发入口；但对 AgentArbor 未来态有参考价值的研究材料必须进入资料库，而不是被删除。
-
-## 禁止事项
-
-- 不把 AgentArbor 自定义 registry、workflow、memory 或 schema 伪装成 Codex、OpenCode 或 Agent Skills 官方协议。
-- 不在 `.agents/` 下放除 `skills/` 和可选 `plugins/` 之外的内容。
-- 不把 AgentArbor 原生 agent 放入 `.codex/agents/` 或 `.opencode/agents/`。
-- 不用平台适配文件替代 AgentArbor 原生产品语义。
-- 不让临时 prompt 代替正式 agent、skill 或能力契约。
-- 不记录隐藏思维链、密钥、凭证或用户未授权的隐私数据。

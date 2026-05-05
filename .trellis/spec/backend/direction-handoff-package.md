@@ -31,6 +31,7 @@
 - Aboveground planning 只能通过 `directionId + version` 从 store 读取已批准并通过校验的 package，不能接收临时手拼的 `DirectionHandoff`。
 - validation module 只负责校验和校验结果附着；serialization module 只负责渲染 package 文件视图；store module 只负责保存、加载、版本列表和按 Store API 委托校验。
 - `handoff.meta.json` 是 V0.2 文件系统 store 的 canonical payload；其他 split files 是给人类和后续运行时读取的视图，不能反向成为第二事实源。
+- package validation 必须覆盖内容完整性和目标相关性：approved package 的 retained option、options / source candidates 和 split file 渲染视图都必须能从 canonical payload 证明与 clarified goal 相关，不能仅靠把目标文本拼进 option summary 来放行模板化或无关方向。
 - package schema version 暂不因 lineage 增量改名，仍使用 `direction-handoff-package/v0.2`；lineage 是 canonical payload 的字段，必须由 builder 统一填充。
 - 初始 package 的 `lineage.revisionReason` 必须是 `initial`，且不得有 previous。
 - 用户澄清回答后的新版 package 必须保持同一 `directionId`、版本号递增、`lineage.revisionReason = "user_clarification_answered"`，并在 `previous` 指向 v1 awaiting-user package。
@@ -68,6 +69,9 @@
 | source candidate 未被 convergence review 收束 | `validation.errors` 记录错误 |
 | package 中出现 Soil asset 正文或副本 | `validation.errors` 记录 `INLINE_SOIL_ASSET_CONTENT` |
 | hard constraint 在 handoff 文本中被弱化 | `validation.errors` 记录 `HARD_CONSTRAINT_WEAKENED_IN_HANDOFF_TEXT` |
+| approved package 的 options / source candidates 与 clarified goal 无目标概念交集 | `validation.errors` 记录 `HANDOFF_GOAL_RELEVANCE_MISSING` |
+| retained option 只回显 clarified goal、没有独立目标概念 | `validation.errors` 记录 `HANDOFF_RETAINED_OPTION_GOAL_RELEVANCE_MISSING` |
+| split file 渲染为空或缺少关键 section | `validation.errors` 记录 `HANDOFF_SPLIT_FILE_EMPTY` 或对应完整性错误 |
 | Aboveground 传入 ad-hoc handoff 材料 | `StateGuardError` |
 
 ### 5. Good / Base / Bad Cases
@@ -91,6 +95,7 @@
 - 地下-only session 生成的 handoff 字段来自目标画像、候选和收束报告，而不是固定 minimal 文案。
 - 多候选地下 session 生成的 `options.json` / `decision-record.md` / `risk-register.md` 反映 retained、merged、rejected、userDecisionRequired 和 abovegroundReference，不退化为单一结论。
 - `evidence-index.md` 对显式文件系统输出不为空，并包含 source candidates、candidate comparisons 和 convergence decisions 的引用视图。
+- approved package 的目标相关性校验拒绝模板化、明显无关或只回显 goal 的 retained option，同时不误杀合法中文目标概念。
 - file-system store 在临时目录 save/load/list round-trip。
 - explicit `outputDirectory` session 能通过 filesystem store round-trip 读取 `handoff.meta.json`。
 - 默认 demo 不创建或修改仓库根 `.agentarbor/`。

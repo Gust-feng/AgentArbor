@@ -41,8 +41,8 @@
 ## 生效规则
 
 - 任何直接在领域层、kernel 业务边界、app demo 运行流程或测试 fixture 中调用 provider SDK、外部 LLM SDK 或 provider adapter 的实现都违规。
-- 模型输出默认是不可信候选；不能直接写入 Direction Handoff、Growth Plan、Verification Result、Run Memory、Experience Candidate、Capability Asset 或 Soil。
-- 模型返回 `toolCalls` 时只能由 AgentTurnRuntime 触发受权限裁剪的工具循环；工具结果也是不可信材料，必须作为 tool message 回到模型或作为 source/evidence refs 进入候选层，不能直接变成事实源。
+- 单次模型输出、单个 rootlet/subagent 输出、工具结果和搜索结果默认是未收束材料；不能直接写入 Direction Handoff、Growth Plan、Verification Result、Run Memory、Experience Candidate、Capability Asset 或 Soil。上层 agent 收束后的判断可以成为正式材料输入，但必须经过协议、权限、预算、hard constraint、谱系、脱敏和 package validation。
+- 模型返回 `toolCalls` 时只能由 AgentTurnRuntime 触发受权限裁剪的工具循环；工具结果也是未收束材料，必须作为 tool message 回到模型或作为 source/evidence refs 进入候选层，不能直接变成事实源。
 - `model.requested`、`model.completed`、`model.failed` 事件必须由智能通道统一发布；调用方不得手写伪造模型调用事件。
 - 面板的 `model.output.delta` / `model.output.completed` 只能作为 `PanelRunStreamEvent` 安全读模型出现；它们不得携带 provider hidden reasoning、完整 prompt、raw response、未校验输出或 secret，也不能替代 `model.completed` 的 validation 结果。
 - `tool.requested`、`tool.completed`、`tool.failed` 事件必须由工具循环 / ToolCenter 集成统一发布；payload 只允许 safe input/output summary、refs、duration 和错误摘要。
@@ -53,6 +53,7 @@
 - rootlet AI 调用成功但 app parser 得不到合法候选、provider 失败或输出契约 validation failed 时，rootlet invocation 必须不中断，回退 deterministic output；fallback 必须能从 `model.failed` / `model.completed` 事件、demo summary 和 deterministic output 的 `ai-fallback:*` source refs 观测。
 - 自治主线与 rootlet fallback 不同：启用 autonomy 时，缺少 `AgentTurnRuntime`、模型失败、输出 validation failed 或 app parser 拒绝时，不能回退为 deterministic 成功；必须产生 failed/stopped autonomy decision，并经 Convergence Judge 形成 `ai_required_for_autonomy`、`autonomy_decision_failed`、`autonomy_cycle_guard_exceeded` 或 `autonomy_stopped` 等可审计终态。
 - hard constraint、Direction Handoff Package validation、状态机守卫和 Governance gate 不得因为模型建议而被跳过。
+- 工程边界不得替 agent 思考：`ModelOutputContract`、parser、visible output projection、validation、budget、permission 和 fallback 只负责裁剪、校验、脱敏、失败归一和引用边界；不得把这些机制写成目标理解、候选排序、工具选择、继续探索或收束裁决的主逻辑。
 - `pnpm demo:underground` 默认不得创建 provider、不得触发真实网络、不得发布 `model.*` 事件；只有显式 `--ai fake` 或 `--ai openai-compatible` 才能启用地下 rootlet 智能通道。
 - `--ai openai-compatible` 必须先完成环境配置校验：`AGENTARBOR_MODEL_API_KEY` 或 `OPENAI_API_KEY` 必须存在，`AGENTARBOR_MODEL_NAME` 必须存在；缺失时必须返回配置失败并确认未尝试网络调用。`AGENTARBOR_MODEL_BASE_URL` 可选，配置和 summary 不得泄漏 API key / token。
 - `pnpm panel` 的 OpenAI-compatible 配置来源是本地配置中心，不直接读取用户 shell 环境；panel 只返回 base URL、model、默认 AI mode、secret ref、`secretConfigured` 和由脱敏状态派生的 provider readiness，永不返回 secret value。
@@ -82,8 +83,8 @@
 
 ## Good / Base / Bad Cases
 
-- Good：Underground Intent Core 请求智能通道生成目标画像建议，再由确定性规则转成 `GoalIntentProfile`。
-- Good：rootlet 请求候选方向，输出先进入 candidate pool，再由 Convergence Judge 裁决。
+- Good：Underground Intent Core 请求智能通道生成目标画像候选，上层 agent / 守卫把它收束为 `GoalIntentProfile`，而不是由 provider response 直接写入 handoff。
+- Good：rootlet 请求候选方向，输出先进入 candidate pool，再由 AI 驱动的 Convergence Judge 主线裁决，并受 hard constraint / package validation 守卫。
 - Good：Autonomy Core 在 candidate pool 更新后经 AgentTurnRuntime 使用 `search` / `read` 补充判断依据，只发布 autonomy decision 和后续收束请求，不直接写 handoff。
 - Good：provider adapter 只负责请求/响应映射、鉴权、usage 归一化和错误映射。
 - Good：fake provider 只返回 deterministic 内容和 validation 状态；usage 字段保持空值，避免测试误导成本/用量逻辑。
@@ -110,7 +111,7 @@
 - 密钥边界：EventLog、Snapshot 和测试快照不包含 API key / token。
 - 配置中心：raw secret 只进入 local-dev secret store 和 provider adapter 构造参数；settings store、panel HTTP JSON、summary、Snapshot 和测试快照不包含 raw secret。
 - Observation ref 边界：`model.completed` 的 `requestId` / `responseId` 生成 `model_call` ref，不能生成 `user_clarification` ref。
-- Underground 接入：模型输出只能进入候选池，不能绕过收束直接进入 package。
+- Underground 接入：下层模型/rootlet/tool 输出只能进入候选池或收束输入，不能绕过上层 agent 收束和 handoff validation 直接进入 package。
 - Underground demo CLI：默认 no-AI、`--ai fake`、`--ai openai-compatible` 配置失败和密钥不泄漏都必须有测试或边界检查。
 
 ## Wrong vs Correct
@@ -121,4 +122,4 @@ Intent Core 直接调用 OpenAI SDK 或 OpenAI-compatible HTTP endpoint，拿到
 
 ### Correct
 
-Intent Core 构造 `ModelRequest`，通过注入的 `IntelligenceChannel` 获取 `ModelResponse`；响应被校验后作为候选输入进入 Underground candidate pool，再由 Convergence Judge 和 Handoff Steward 形成正式方向包。
+Intent Core 构造 `ModelRequest`，通过注入的 `IntelligenceChannel` 获取 `ModelResponse`；响应被校验后作为目标画像候选进入 Underground 上层 agent 收束流程，再由 Convergence Judge 和 Handoff Steward 形成正式方向包，并通过 package validation。

@@ -1,6 +1,6 @@
 # 工具运行时
 
-本规范记录 ToolCenter、ResearchRuntime、工具契约、AgentTurnRuntime、IntelligenceChannel 多轮工具循环和地下 agent 工具接入的可执行边界。工具能力是运行期能力，不是长期 Capability Asset；工具输出和模型输出一样是不可信候选材料，必须经过既有候选池、收束和方向交接校验。
+本规范记录 ToolCenter、ResearchRuntime、工具契约、AgentTurnRuntime、IntelligenceChannel 多轮工具循环和地下 agent 工具接入的可执行边界。工具能力是运行期能力，不是长期 Capability Asset；单次工具输出、搜索结果和模型输出都是未收束材料，必须经过父层 agent 汇总/交叉验证以及既有候选池、收束和方向交接校验。
 
 ## Scenario: AgentTurnRuntime + ToolCenter 多轮工具循环
 
@@ -91,7 +91,7 @@
 - Good：rootlet model response 请求 `search`，ToolCenter 发布 `tool.requested -> tool.completed`，tool result 包含 research refs 和 trace 摘要，下一轮模型可用 `read` 展开选中 ref，最终 rootlet output source refs 包含 `tool-call:<id>` 和 `research:*` refs。
 - Good：未授权 rootlet 请求 `search` 或 `read` 时得到 failed tool result，模型仍可用失败结果继续，EventLog 有 `tool.failed`。
 - Good：`underground-intent-core` 的 turn policy 禁用模型和工具，同步调度不会产生 `model.*` 或 `tool.*` 事件。
-- Good：`underground-autonomy-core` 通过同一个 AgentTurnRuntime 调用 `search` / `read` 后再输出 autonomy decision；Convergence Judge 仍是唯一收敛报告 owner。
+- Good：`underground-autonomy-core` 通过同一个 AgentTurnRuntime 调用 `search` / `read` 后再输出 autonomy decision；Convergence Judge 仍是唯一收敛报告 owner，并可用 AI 主线综合这些工具证据。
 - Base：fake provider 默认不返回 tool calls；`--ai fake` 和 no-AI 路径保持原有 deterministic / 单轮行为。
 - Base：无 Tavily key 时 `search` 的 web source 返回 `no-provider`，不触发真实网络；docs/packages/github 返回 stub。
 - Base：面板保留 `/api/config/information-sources` 兼容路由，但新的搜索工具表单走 `/api/config/tools` 和 `/api/config/tools/web-search`。

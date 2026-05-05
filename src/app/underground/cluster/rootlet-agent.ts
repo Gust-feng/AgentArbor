@@ -110,6 +110,7 @@ export class RootletAgent implements UndergroundAgent {
     const startedPlan = requireValue(state.startedPlan, "startedPlan");
     const agentClusterPlan = requireValue(state.agentClusterPlan, "agentClusterPlan");
     const goalId = requireValue(state.goalId, "goalId");
+    const currentCycle = requireValue(state.currentCycle, "currentCycle");
     const runningRootletInvocations = requireValue(
       state.runningRootletInvocations,
       "runningRootletInvocations"
@@ -141,6 +142,7 @@ export class RootletAgent implements UndergroundAgent {
       goalId,
       planId: startedPlan.planId,
       rootletOutputs: nextRootletOutputs,
+      cycle: currentCycle,
       agentCluster: {
         plan: agentClusterPlan,
         invocations: [...state.centerInvocations, ...nextCompletedInvocations.map(cloneUndergroundAgentInvocation)],
@@ -192,9 +194,10 @@ function allExpectedRootletsCompleted(
   ctx: UndergroundAgentContext,
   completedRootletInvocations: readonly UndergroundAgentInvocation[]
 ): boolean {
-  const expectedRootletKinds = ctx.shared.require("expectedRootletKinds", "expectedRootletKinds");
-  const completedKinds = new Set(
-    completedRootletInvocations.map((invocation) => invocation.agentId.replace("underground-rootlet-", "").replace("-", "_"))
+  const runningRootletInvocations = ctx.shared.require(
+    "runningRootletInvocations",
+    "runningRootletInvocations"
   );
-  return expectedRootletKinds.every((kind) => completedKinds.has(kind));
+  const completedInvocationIds = new Set(completedRootletInvocations.map((invocation) => invocation.invocationId));
+  return runningRootletInvocations.every((invocation) => completedInvocationIds.has(invocation.invocationId));
 }

@@ -74,7 +74,7 @@ test("createUndergroundDemoSummary reports model events and candidate-layer refs
   assert.equal(summary.ai.enabled, true);
   assert.equal(summary.ai.mode, "fake");
   assert.equal(summary.ai.status, "completed");
-  assert.deepEqual(summary.ai.eventCounts, { requested: 2, completed: 2, failed: 0 });
+  assert.deepEqual(summary.ai.eventCounts, { requested: 3, completed: 3, failed: 0 });
   assert.equal(summary.ai.providerKind, "fake");
   assert.equal(summary.ai.protocolKind, "openai_compatible_chat_completions");
   assert.equal(summary.ai.model, "fake-deterministic-model");
@@ -95,7 +95,7 @@ test("createUndergroundDemoSummary reports model events and candidate-layer refs
   ]);
   const rootletModelCall = summary.ai.modelCallRefs.find((ref) => ref.rootletKind === "option");
   const advisoryModelCall = summary.ai.modelCallRefs.find((ref) => ref.rootletKind === undefined);
-  assert.equal(summary.ai.modelCallRefs.length, 2);
+  assert.equal(summary.ai.modelCallRefs.length, 3);
   assert.notEqual(rootletModelCall, undefined);
   assert.notEqual(advisoryModelCall, undefined);
   assert.equal(rootletModelCall?.rootletOutputRefs.length, 2);
@@ -209,6 +209,15 @@ class EmptyCandidateProvider implements ModelProvider {
             constraintViolations: [],
             overallDirectionSummary: "Empty candidate provider leaves convergence advisory neutral.",
           }
+        : request.outputContract.contractId === "underground.autonomy_decision.v1"
+          ? {
+              action: "request_convergence",
+              completionAssessment: "Empty candidate provider allows convergence after deterministic fallback.",
+              informationGaps: [],
+              spawnRequests: [],
+              rationale: "Convergence Judge still owns the final report.",
+              sourceRefs: [],
+            }
         : { candidates: [] };
     return {
       responseId: "model-response-empty-candidates",

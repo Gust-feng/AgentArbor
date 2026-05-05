@@ -5,6 +5,7 @@ import type {
   UndergroundConvergenceReport,
   UndergroundEvidenceLedger,
   UndergroundAgentClusterRun,
+  UndergroundAutonomyReview,
   UndergroundExplorationPlan,
   UndergroundExplorationReport,
 } from "../domain/underground/index.js";
@@ -13,6 +14,7 @@ export function createUndergroundExplorationReport(input: {
   plan: UndergroundExplorationPlan;
   agentClusterRun?: UndergroundAgentClusterRun;
   goalIntentProfile?: GoalIntentProfile;
+  autonomy?: UndergroundAutonomyReview;
   evidenceLedger?: UndergroundEvidenceLedger;
   rootletOutputs: RootletOutput[];
   candidatePool: CandidatePool;
@@ -22,6 +24,7 @@ export function createUndergroundExplorationReport(input: {
     plan: input.plan,
     agentClusterRun: input.agentClusterRun === undefined ? undefined : cloneAgentClusterRun(input.agentClusterRun),
     goalIntentProfile: input.goalIntentProfile === undefined ? undefined : cloneGoalIntentProfile(input.goalIntentProfile),
+    autonomy: input.autonomy === undefined ? undefined : cloneAutonomyReview(input.autonomy),
     evidenceLedger: input.evidenceLedger === undefined ? undefined : cloneEvidenceLedger(input.evidenceLedger),
     rootletOutputs: input.rootletOutputs.map((output) => ({ ...output })),
     candidatePool: {
@@ -55,6 +58,39 @@ export function createUndergroundExplorationReport(input: {
         evidenceRefs: [...comparison.evidenceRefs],
       })),
     },
+  };
+}
+
+function cloneAutonomyReview(review: UndergroundAutonomyReview): UndergroundAutonomyReview {
+  return {
+    enabled: review.enabled,
+    latestDecision: review.latestDecision === undefined ? undefined : cloneAutonomyDecision(review.latestDecision),
+    decisions: review.decisions.map(cloneAutonomyDecision),
+    cycles: review.cycles.map((cycle) => ({
+      ...cycle,
+      rootletKinds: [...cycle.rootletKinds],
+    })),
+    stopReason: review.stopReason,
+  };
+}
+
+function cloneAutonomyDecision(
+  decision: NonNullable<UndergroundAutonomyReview["latestDecision"]>
+): NonNullable<UndergroundAutonomyReview["latestDecision"]> {
+  return {
+    ...decision,
+    informationGaps: [...decision.informationGaps],
+    spawnRequests: decision.spawnRequests.map((request) => ({
+      ...request,
+      informationNeeds: [...request.informationNeeds],
+      sourceHints: [...request.sourceHints],
+      expectedEvidence: [...request.expectedEvidence],
+    })),
+    sourceRefs: [...decision.sourceRefs],
+    modelCallRefs: decision.modelCallRefs.map((ref) => ({
+      ...ref,
+      eventRefs: [...ref.eventRefs],
+    })),
   };
 }
 

@@ -32,6 +32,8 @@ export type RunUndergroundDirectionSessionOptions = {
   constraints?: readonly Constraint[];
   packageStore?: DirectionHandoffPackageStore;
   outputDirectory?: string;
+  requireAutonomy?: boolean;
+  maxAutonomyCycles?: number;
   onRuntimeReady?: (context: UndergroundDirectionSessionRuntimeContext) => void;
 };
 
@@ -63,7 +65,11 @@ export function runUndergroundDirectionSession(
 ): UndergroundDirectionSessionResult {
   const { runtime, storage } = createUndergroundSessionRuntime(options);
   const { traceId, goalId, message } = createUndergroundGoalMessage(goal);
-  const runner = new UndergroundAgentRunner({ runtime });
+  const runner = new UndergroundAgentRunner({
+    runtime,
+    enableAutonomy: options.requireAutonomy,
+    maxAutonomyCycles: options.maxAutonomyCycles,
+  });
   try {
     options.onRuntimeReady?.({ runtime, traceId, goalId });
     runtime.bus.publish(message);
@@ -88,7 +94,14 @@ export async function runUndergroundDirectionSessionWithIntelligence(
     toolCenter,
     publishToolEvent: (event) => runtime.bus.publish(event),
   });
-  const runner = new UndergroundAgentRunner({ runtime, intelligenceChannel, toolCenter, agentTurnRuntime });
+  const runner = new UndergroundAgentRunner({
+    runtime,
+    intelligenceChannel,
+    toolCenter,
+    agentTurnRuntime,
+    enableAutonomy: true,
+    maxAutonomyCycles: options.maxAutonomyCycles,
+  });
   try {
     options.onRuntimeReady?.({ runtime, traceId, goalId });
     runtime.bus.publish(message);

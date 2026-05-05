@@ -11,6 +11,7 @@ import type { RootletClusterKind } from "../../../domain/underground/index.js";
 import { ensureUndergroundAgentClusterManifests } from "../../underground-agent-cluster-runtime.js";
 import type { MinimalRuntime } from "../../runtime.js";
 import { CandidatePoolAgent } from "./candidate-pool-agent.js";
+import { AutonomyCoreAgent } from "./autonomy-core-agent.js";
 import { ConvergenceJudgeAgent } from "./convergence-judge-agent.js";
 import { GrowthGovernorAgent } from "./growth-governor-agent.js";
 import { HandoffStewardAgent } from "./handoff-steward-agent.js";
@@ -21,7 +22,7 @@ import {
   UndergroundAgentRuntimeError,
   type UndergroundAgent,
   type UndergroundQueuedAgentMessage,
-  ensureMessageFromAgent,
+  ensureMessageFromOneOf,
   ensurePayloadStringEquals,
   readPayloadRecord,
   requireValue,
@@ -37,6 +38,8 @@ export type UndergroundAgentRunnerOptions = {
   readonly intelligenceChannel?: IntelligenceChannel;
   readonly toolCenter?: ToolExecutionBroker;
   readonly agentTurnRuntime?: AgentTurnRuntime;
+  readonly enableAutonomy?: boolean;
+  readonly maxAutonomyCycles?: number;
   readonly maxDispatchSteps?: number;
 };
 
@@ -73,12 +76,15 @@ export class UndergroundAgentRunner {
       intelligenceChannel: options.intelligenceChannel,
       toolCenter: options.toolCenter,
       agentTurnRuntime: options.agentTurnRuntime,
+      autonomyEnabled: options.enableAutonomy,
+      maxAutonomyCycles: options.maxAutonomyCycles,
       enqueue: (message) => this.queue.push(message),
     });
     this.fixedAgents = [
       new IntentCoreAgent(),
       new GrowthGovernorAgent(),
       new CandidatePoolAgent(),
+      ...(options.enableAutonomy ? [new AutonomyCoreAgent()] : []),
       new ConvergenceJudgeAgent(),
       new HandoffStewardAgent(),
     ];
@@ -147,7 +153,7 @@ export class UndergroundAgentRunner {
       if (this.processedMessageIds.has(publicMessage.id)) {
         return;
       }
-      const phaseKey = `${publicMessage.traceId}:${publicMessage.type}`;
+      const phaseKey = publicPhaseKey(publicMessage);
       this.processedMessageIds.add(publicMessage.id);
       if (this.processedPhaseKeys.has(phaseKey)) {
         return;
@@ -172,7 +178,7 @@ export class UndergroundAgentRunner {
       "runningRootletInvocations"
     );
     const payload = readPayloadRecord(message);
-    ensureMessageFromAgent(message, "underground-growth-governor");
+    ensureMessageFromOneOf(message, ["underground-growth-governor", "underground-autonomy-core"]);
     ensurePayloadStringEquals(payload, "goalId", goalId, message.type);
     ensurePayloadStringEquals(payload, "planId", startedPlan.planId, message.type);
 
@@ -228,4 +234,14 @@ export class UndergroundAgentRunner {
 
 function isPromiseLike(value: void | Promise<void>): value is Promise<void> {
   return typeof value === "object" && value !== null && "then" in value;
+}
+
+function publicPhaseKey(message: ArborMessage): string {
+  const payload = typeof message.payload === "object" && message.payload !== null && !Array.isArray(message.payload)
+    ? (message.payload as Readonly<Record<string, unknown>>)
+    : {};
+  const cycleId = typeof payload.explorationCycleId === "string" ? payload.explorationCycleId : undefined;
+  return cycleId === undefined
+    ? `${message.traceId}:${message.type}`
+    : `${message.traceId}:${message.type}:${cycleId}`;
 }

@@ -38,6 +38,7 @@ export class GrowthGovernorAgent implements UndergroundAgent {
     const explorationPlan = requireValue(state.explorationPlan, "explorationPlan");
     const agentClusterPlan = requireValue(state.agentClusterPlan, "agentClusterPlan");
     const goalId = requireValue(state.goalId, "goalId");
+    const currentCycle = requireValue(state.currentCycle, "currentCycle");
     const payload = readPayloadRecord(message);
     ensureMessageFromAgent(message, "underground-intent-core");
     ensurePayloadStringEquals(payload, "goalId", goalId, message.type);
@@ -74,6 +75,7 @@ export class GrowthGovernorAgent implements UndergroundAgent {
       traceId: message.traceId,
       agentId: completedGrowthInvocation.agentId,
       plan: startedPlan,
+      cycle: currentCycle,
       agentCluster: {
         plan: agentClusterPlan,
         invocations: [...centerInvocations, ...runningRootletInvocations],

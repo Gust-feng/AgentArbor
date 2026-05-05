@@ -96,6 +96,19 @@ export const EVENT_OBSERVATION_METADATA = {
     phase: "underground",
     stage: "tool_failed",
   }),
+  "autonomy_review.completed": metadata({
+    summary: "Underground autonomy core completed a cycle decision.",
+    scope: "underground",
+    phase: "underground",
+    stage: "autonomy_review_completed",
+  }),
+  "convergence_review.requested": metadata({
+    summary: "Underground autonomy core requested convergence review.",
+    scope: "underground",
+    progressStatus: "in_progress",
+    phase: "underground",
+    stage: "convergence_review_requested",
+  }),
   "convergence_review.completed": metadata({
     summary: "Convergence review judged candidate outcomes.",
     scope: "underground",

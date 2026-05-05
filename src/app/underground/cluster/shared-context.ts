@@ -11,6 +11,9 @@ import type {
   UndergroundAgentClusterPlan,
   UndergroundAgentClusterRun,
   UndergroundAgentInvocation,
+  UndergroundAutonomyDecision,
+  UndergroundAutonomyReview,
+  UndergroundExplorationCycle,
   UndergroundConvergenceReport,
   UndergroundEvidenceLedger,
   UndergroundExplorationPlan,
@@ -34,6 +37,11 @@ export type UndergroundSharedContextState = {
   startedPlan?: UndergroundExplorationPlan;
   runningRootletInvocations?: readonly UndergroundAgentInvocation[];
   expectedRootletKinds?: readonly RootletClusterKind[];
+  currentCycle?: UndergroundExplorationCycle;
+  autonomyCycles: readonly UndergroundExplorationCycle[];
+  autonomyDecisions: readonly UndergroundAutonomyDecision[];
+  autonomyReview?: UndergroundAutonomyReview;
+  completedAutonomyInvocations: readonly UndergroundAgentInvocation[];
   rootletOutputs: readonly RootletOutput[];
   completedRootletInvocations: readonly UndergroundAgentInvocation[];
   candidatePool?: CandidatePool;
@@ -61,9 +69,14 @@ const SHARED_CONTEXT_FIELD_OWNERS: Record<SharedContextField, readonly string[]>
   explorationPlan: ["underground-intent-core"],
   agentClusterPlan: ["underground-intent-core"],
   centerInvocations: ["underground-intent-core", "underground-growth-governor"],
-  startedPlan: ["underground-growth-governor"],
-  runningRootletInvocations: ["underground-growth-governor"],
-  expectedRootletKinds: ["underground-growth-governor"],
+  startedPlan: ["underground-growth-governor", "underground-autonomy-core"],
+  runningRootletInvocations: ["underground-growth-governor", "underground-autonomy-core"],
+  expectedRootletKinds: ["underground-growth-governor", "underground-autonomy-core"],
+  currentCycle: ["underground-intent-core", "underground-autonomy-core"],
+  autonomyCycles: ["underground-intent-core", "underground-autonomy-core"],
+  autonomyDecisions: ["underground-autonomy-core"],
+  autonomyReview: ["underground-autonomy-core"],
+  completedAutonomyInvocations: ["underground-autonomy-core"],
   rootletOutputs: [ROOTLET_AGENT_OWNER],
   completedRootletInvocations: [ROOTLET_AGENT_OWNER],
   candidatePool: ["underground-candidate-pool"],
@@ -82,6 +95,9 @@ const SHARED_CONTEXT_FIELD_OWNERS: Record<SharedContextField, readonly string[]>
 export class UndergroundSharedContext {
   private readonly state: UndergroundSharedContextState = {
     centerInvocations: [],
+    autonomyCycles: [],
+    autonomyDecisions: [],
+    completedAutonomyInvocations: [],
     rootletOutputs: [],
     completedRootletInvocations: [],
   };
@@ -106,6 +122,25 @@ export class UndergroundSharedContext {
         this.state.runningRootletInvocations === undefined ? undefined : [...this.state.runningRootletInvocations],
       expectedRootletKinds:
         this.state.expectedRootletKinds === undefined ? undefined : [...this.state.expectedRootletKinds],
+      currentCycle:
+        this.state.currentCycle === undefined
+          ? undefined
+          : cloneAutonomyCycle(this.state.currentCycle),
+      autonomyCycles: this.state.autonomyCycles.map(cloneAutonomyCycle),
+      autonomyDecisions: this.state.autonomyDecisions.map(cloneAutonomyDecision),
+      autonomyReview:
+        this.state.autonomyReview === undefined
+          ? undefined
+          : {
+              ...this.state.autonomyReview,
+              latestDecision:
+                this.state.autonomyReview.latestDecision === undefined
+                  ? undefined
+                  : cloneAutonomyDecision(this.state.autonomyReview.latestDecision),
+              decisions: this.state.autonomyReview.decisions.map(cloneAutonomyDecision),
+              cycles: this.state.autonomyReview.cycles.map(cloneAutonomyCycle),
+            },
+      completedAutonomyInvocations: [...this.state.completedAutonomyInvocations],
       rootletOutputs: [...this.state.rootletOutputs],
       completedRootletInvocations: [...this.state.completedRootletInvocations],
     };
@@ -135,4 +170,29 @@ export function assertSharedContextWriteOwner(agentId: string, field: SharedCont
 
 function isRootletAgentId(agentId: string): boolean {
   return agentId.startsWith("underground-rootlet-");
+}
+
+function cloneAutonomyCycle(cycle: UndergroundExplorationCycle): UndergroundExplorationCycle {
+  return {
+    ...cycle,
+    rootletKinds: [...cycle.rootletKinds],
+  };
+}
+
+function cloneAutonomyDecision(decision: UndergroundAutonomyDecision): UndergroundAutonomyDecision {
+  return {
+    ...decision,
+    informationGaps: [...decision.informationGaps],
+    spawnRequests: decision.spawnRequests.map((request) => ({
+      ...request,
+      informationNeeds: [...request.informationNeeds],
+      sourceHints: [...request.sourceHints],
+      expectedEvidence: [...request.expectedEvidence],
+    })),
+    sourceRefs: [...decision.sourceRefs],
+    modelCallRefs: decision.modelCallRefs.map((ref) => ({
+      ...ref,
+      eventRefs: [...ref.eventRefs],
+    })),
+  };
 }

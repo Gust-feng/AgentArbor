@@ -53,6 +53,8 @@ export const ARBOR_MESSAGE_TYPES = [
   "tool.requested",
   "tool.completed",
   "tool.failed",
+  "autonomy_review.completed",
+  "convergence_review.requested",
   "convergence_review.completed",
   "direction_handoff.requested",
   "direction_handoff.completed",

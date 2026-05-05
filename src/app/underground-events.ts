@@ -4,7 +4,9 @@ import type {
   UndergroundAgentClusterPlan,
   UndergroundAgentClusterRun,
   UndergroundAgentInvocation,
+  UndergroundAutonomyDecision,
   UndergroundConvergenceReport,
+  UndergroundExplorationCycle,
   UndergroundExplorationPlan,
   UndergroundExplorationReport,
 } from "../domain/underground/index.js";
@@ -16,6 +18,7 @@ export function publishUndergroundExplorationPlanned(input: {
   traceId: string;
   agentId: string;
   plan: UndergroundExplorationPlan;
+  cycle?: UndergroundEventCyclePayload;
   agentCluster?: UndergroundEventAgentClusterPayload;
 }): void {
   input.runtime.bus.publish(
@@ -31,6 +34,7 @@ export function publishUndergroundExplorationPlanned(input: {
         budget: input.plan.budget,
         rootletClusters: input.plan.rootletClusters,
         centerRoles: input.plan.centerRoles,
+        ...cyclePayload(input.cycle),
         agentCluster: input.agentCluster,
       },
     })
@@ -42,6 +46,7 @@ export function publishRootletClustersStarted(input: {
   traceId: string;
   agentId: string;
   plan: UndergroundExplorationPlan;
+  cycle?: UndergroundEventCyclePayload;
   agentCluster?: UndergroundEventAgentClusterPayload;
 }): void {
   input.runtime.bus.publish(
@@ -56,6 +61,7 @@ export function publishRootletClustersStarted(input: {
         planId: input.plan.planId,
         rootletClusters: input.plan.rootletClusters,
         budget: input.plan.budget,
+        ...cyclePayload(input.cycle),
         agentCluster: input.agentCluster,
       },
     })
@@ -69,6 +75,7 @@ export function publishExplorationCandidatesProduced(input: {
   goalId: string;
   planId: string;
   rootletOutputs: readonly RootletOutput[];
+  cycle?: UndergroundEventCyclePayload;
   agentCluster?: UndergroundEventAgentClusterPayload;
 }): void {
   input.runtime.bus.publish(
@@ -82,6 +89,7 @@ export function publishExplorationCandidatesProduced(input: {
         goalId: input.goalId,
         planId: input.planId,
         rootletOutputs: input.rootletOutputs,
+        ...cyclePayload(input.cycle),
         agentCluster: input.agentCluster,
       },
     })
@@ -95,6 +103,7 @@ export function publishCandidatePoolUpdated(input: {
   goalId: string;
   planId: string;
   candidatePool: CandidatePool;
+  cycle?: UndergroundEventCyclePayload;
   agentCluster?: UndergroundEventAgentClusterPayload;
 }): void {
   input.runtime.bus.publish(
@@ -109,6 +118,73 @@ export function publishCandidatePoolUpdated(input: {
         planId: input.planId,
         candidatePoolId: input.candidatePool.poolId,
         candidatePool: input.candidatePool,
+        ...cyclePayload(input.cycle),
+        agentCluster: input.agentCluster,
+      },
+    })
+  );
+}
+
+export function publishAutonomyReviewCompleted(input: {
+  runtime: MinimalRuntime;
+  traceId: string;
+  agentId: string;
+  goalId: string;
+  planId: string;
+  candidatePool: CandidatePool;
+  autonomyDecision: UndergroundAutonomyDecision;
+  cycle: UndergroundEventCyclePayload;
+  agentCluster?: UndergroundEventAgentClusterPayload;
+}): void {
+  input.runtime.bus.publish(
+    createMessage({
+      traceId: input.traceId,
+      from: { id: input.agentId, role: "underground_center" },
+      to: { group: "underground-center" },
+      type: "autonomy_review.completed",
+      intent: "complete_autonomy_review",
+      payload: {
+        goalId: input.goalId,
+        planId: input.planId,
+        candidatePoolId: input.candidatePool.poolId,
+        candidatePool: input.candidatePool,
+        autonomyDecision: input.autonomyDecision,
+        action: input.autonomyDecision.action,
+        spawnedRootletCount: input.autonomyDecision.spawnRequests.length,
+        stopReason: input.autonomyDecision.stopReason,
+        ...cyclePayload(input.cycle),
+        agentCluster: input.agentCluster,
+      },
+    })
+  );
+}
+
+export function publishConvergenceReviewRequested(input: {
+  runtime: MinimalRuntime;
+  traceId: string;
+  agentId: string;
+  goalId: string;
+  planId: string;
+  candidatePool: CandidatePool;
+  autonomyDecision: UndergroundAutonomyDecision;
+  cycle: UndergroundEventCyclePayload;
+  agentCluster?: UndergroundEventAgentClusterPayload;
+}): void {
+  input.runtime.bus.publish(
+    createMessage({
+      traceId: input.traceId,
+      from: { id: input.agentId, role: "underground_center" },
+      to: { group: "underground-center" },
+      type: "convergence_review.requested",
+      intent: "request_convergence_review",
+      payload: {
+        goalId: input.goalId,
+        planId: input.planId,
+        candidatePoolId: input.candidatePool.poolId,
+        candidatePool: input.candidatePool,
+        autonomyDecisionId: input.autonomyDecision.decisionId,
+        autonomyAction: input.autonomyDecision.action,
+        ...cyclePayload(input.cycle),
         agentCluster: input.agentCluster,
       },
     })
@@ -124,6 +200,7 @@ export function publishConvergenceReviewCompleted(input: {
   convergenceReport: UndergroundConvergenceReport;
   candidatePool: CandidatePool;
   undergroundReport: UndergroundExplorationReport;
+  cycle?: UndergroundEventCyclePayload;
   agentCluster?: UndergroundEventAgentClusterPayload;
 }): void {
   input.runtime.bus.publish(
@@ -141,6 +218,7 @@ export function publishConvergenceReviewCompleted(input: {
         convergenceReport: input.convergenceReport,
         candidatePool: input.candidatePool,
         undergroundReport: input.undergroundReport,
+        ...cyclePayload(input.cycle),
         agentCluster: input.agentCluster,
       },
     })
@@ -152,3 +230,14 @@ export type UndergroundEventAgentClusterPayload = {
   readonly run?: UndergroundAgentClusterRun;
   readonly invocations?: readonly UndergroundAgentInvocation[];
 };
+
+export type UndergroundEventCyclePayload = Pick<UndergroundExplorationCycle, "explorationCycleId" | "cycleIndex">;
+
+function cyclePayload(cycle: UndergroundEventCyclePayload | undefined): UndergroundEventCyclePayload | Record<string, never> {
+  return cycle === undefined
+    ? {}
+    : {
+        explorationCycleId: cycle.explorationCycleId,
+        cycleIndex: cycle.cycleIndex,
+      };
+}

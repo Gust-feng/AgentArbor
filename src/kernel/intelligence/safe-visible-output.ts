@@ -150,7 +150,8 @@ function formatVisibleValue(value: unknown, fieldType?: ModelVisibleOutputFieldT
 function redactSensitiveText(value: string): string {
   return value
     .replace(/sk-[A-Za-z0-9_-]{6,}/g, "[redacted-secret]")
-    .replace(/Bearer\s+[A-Za-z0-9._-]+/gi, "Bearer [redacted-token]")
+    .replace(/tvly-[A-Za-z0-9_-]{6,}/g, "[redacted-secret]")
+    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [redacted-token]")
     .replace(/api[_ -]?key\s*[:=]\s*[^;\s]+/gi, "api key=[redacted-secret]")
     .replace(/token\s*[:=]\s*[^;\s]+/gi, "token=[redacted-token]");
 }

@@ -38,6 +38,7 @@ export class CandidatePoolAgent implements UndergroundAgent {
     const goalId = requireValue(state.goalId, "goalId");
     const startedPlan = requireValue(state.startedPlan, "startedPlan");
     const agentClusterPlan = requireValue(state.agentClusterPlan, "agentClusterPlan");
+    const currentCycle = requireValue(state.currentCycle, "currentCycle");
     const rootletOutputs = state.rootletOutputs;
     const completedRootletInvocations = state.completedRootletInvocations;
     const payload = readPayloadRecord(message);
@@ -84,6 +85,7 @@ export class CandidatePoolAgent implements UndergroundAgent {
       goalId,
       planId: startedPlan.planId,
       candidatePool,
+      cycle: currentCycle,
       agentCluster: {
         plan: agentClusterPlan,
         invocations: [...invocationsBeforeCandidatePool, completedCandidatePoolInvocation],

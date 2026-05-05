@@ -86,6 +86,16 @@ export type PanelRunTrackingReadModel = {
     readonly fallbackTotal: number;
     readonly fallbackUsed: boolean;
   };
+  readonly autonomy: {
+    readonly enabled: boolean;
+    readonly cycleCount: number;
+    readonly latestAction?: string;
+    readonly latestDecisionStatus?: "completed" | "failed";
+    readonly spawnedRootletCount: number;
+    readonly stopReason?: string;
+    readonly sourceRefs: readonly string[];
+    readonly modelCallRefs: readonly string[];
+  };
   readonly convergence?: UndergroundDemoSummary["underground"]["convergence"];
   readonly package?: {
     readonly id: string;
@@ -245,6 +255,16 @@ export function createPanelRunTracking(input: {
       fallbackTotal: input.summary?.ai.fallbackCount ?? 0,
       fallbackUsed: input.summary?.ai.aiFallbackUsed ?? false,
     },
+    autonomy: input.summary?.underground.autonomy ?? {
+      enabled: input.observation?.underground.autonomy.enabled ?? false,
+      cycleCount: input.observation?.underground.autonomy.cycles.length ?? 0,
+      latestAction: input.observation?.underground.autonomy.latestDecision?.action,
+      latestDecisionStatus: input.observation?.underground.autonomy.latestDecision?.status,
+      spawnedRootletCount: input.observation?.underground.autonomy.latestDecision?.spawnedRootletCount ?? 0,
+      stopReason: input.observation?.underground.autonomy.stopReason,
+      sourceRefs: input.observation?.underground.autonomy.latestDecision?.sourceRefs ?? [],
+      modelCallRefs: input.observation?.underground.autonomy.latestDecision?.modelCallRefs ?? [],
+    },
     convergence: input.summary?.underground.convergence,
     package:
       input.summary === undefined
@@ -281,6 +301,7 @@ export function createPanelRunTranscript(input: {
       createGrowthGovernorNote(noteInput),
       createRootletAgentsNote(noteInput),
       createModelCallsNote(noteInput),
+      createAutonomyCoreNote(noteInput),
       createConvergenceJudgeNote(noteInput),
       createHandoffStewardNote(noteInput),
     ],
@@ -479,10 +500,70 @@ function createModelCallsNote(input: NoteFactoryInput): AgentWorkNote {
   });
 }
 
-function createConvergenceJudgeNote(input: NoteFactoryInput): AgentWorkNote {
-  const eventRefs = eventRefsFor(input.eventEntries, ["candidate_pool.updated", "convergence_review.completed"]);
-  const completed = hasEvent(input.eventEntries, "convergence_review.completed");
+function createAutonomyCoreNote(input: NoteFactoryInput): AgentWorkNote {
+  const eventRefs = eventRefsFor(input.eventEntries, [
+    "candidate_pool.updated",
+    "autonomy_review.completed",
+    "convergence_review.requested",
+    "rootlet_cluster.started",
+  ]);
+  const autonomy = autonomyNoteSummary(input);
+  const completed = hasEvent(input.eventEntries, "autonomy_review.completed");
   const poolUpdated = hasEvent(input.eventEntries, "candidate_pool.updated");
+  return note({
+    input,
+    noteId: "autonomy-core",
+    agentId: "underground-autonomy-core",
+    agentLabel: "Autonomy Core",
+    stage: "autonomy_review",
+    status: completed ? "completed" : poolUpdated ? "running" : "pending",
+    summary:
+      autonomy?.latestAction === undefined
+        ? "等待候选池后进行自治评审。"
+        : `自治动作 ${autonomy.latestAction}，cycle 数 ${autonomy.cycleCount}。`,
+    detail:
+      autonomy?.stopReason === undefined
+        ? "自治核心只决定继续探索、请求收束、请求用户澄清或停止，不直接批准方向包。"
+        : `停止原因 ${autonomy.stopReason}；模型调用和候选引用仅保留安全摘要。`,
+    eventRefs,
+    evidenceRefs: autonomy?.sourceRefs ?? [],
+    modelCallRefs: autonomy?.modelCallRefs ?? [],
+  });
+}
+
+function autonomyNoteSummary(input: NoteFactoryInput):
+  | {
+      readonly latestAction?: string;
+      readonly cycleCount: number;
+      readonly stopReason?: string;
+      readonly sourceRefs: readonly string[];
+      readonly modelCallRefs: readonly string[];
+    }
+  | undefined {
+  if (input.summary?.underground.autonomy !== undefined) {
+    return input.summary.underground.autonomy;
+  }
+  const autonomy = input.observation?.underground.autonomy;
+  if (autonomy === undefined) {
+    return undefined;
+  }
+  return {
+    latestAction: autonomy.latestDecision?.action,
+    cycleCount: autonomy.cycles.length,
+    stopReason: autonomy.stopReason,
+    sourceRefs: autonomy.latestDecision?.sourceRefs ?? [],
+    modelCallRefs: autonomy.latestDecision?.modelCallRefs ?? [],
+  };
+}
+
+function createConvergenceJudgeNote(input: NoteFactoryInput): AgentWorkNote {
+  const eventRefs = eventRefsFor(input.eventEntries, [
+    "autonomy_review.completed",
+    "convergence_review.requested",
+    "convergence_review.completed",
+  ]);
+  const completed = hasEvent(input.eventEntries, "convergence_review.completed");
+  const requested = hasEvent(input.eventEntries, "convergence_review.requested");
   const convergence = input.summary?.underground.convergence;
   return note({
     input,
@@ -490,7 +571,7 @@ function createConvergenceJudgeNote(input: NoteFactoryInput): AgentWorkNote {
     agentId: "underground-convergence-judge",
     agentLabel: "Convergence Judge",
     stage: "convergence_review",
-    status: completed ? "completed" : poolUpdated ? "running" : "pending",
+    status: completed ? "completed" : requested ? "running" : "pending",
     summary: convergence === undefined ? "等待候选池进入收束评审。" : `收束结果 ${convergence.outcome}，review ${convergence.reviewId}。`,
     detail:
       convergence === undefined
@@ -715,7 +796,11 @@ function waitingPointFor(status: PanelRunStatus, lastEventType: ArborMessageType
     case "exploration_candidate.produced":
       return "候选已产出，等待候选池更新。";
     case "candidate_pool.updated":
-      return "候选池已更新，等待 Convergence Judge 收束。";
+      return "候选池已更新，等待 Autonomy Core 自治评审或 Convergence Judge 收束。";
+    case "autonomy_review.completed":
+      return "自治评审已完成，等待继续探索、请求收束或进入地下终态。";
+    case "convergence_review.requested":
+      return "自治核心已请求收束，等待 Convergence Judge 生成收束报告。";
     case "convergence_review.completed":
       return "收束评审已完成，等待 Handoff Steward 组装方向包。";
     default:

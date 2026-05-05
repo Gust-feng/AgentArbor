@@ -15,6 +15,8 @@ import type {
   RejectedCandidateRefWithReason,
   UndergroundAgentClusterRun,
   UndergroundAgentInvocationStatus,
+  UndergroundAutonomyAction,
+  UndergroundAutonomyStopReason,
   UndergroundEvidenceKind,
   RootletClusterKind,
   RootletClusterStatus,
@@ -53,6 +55,8 @@ export type RunStage =
   | "tool_requested"
   | "tool_completed"
   | "tool_failed"
+  | "autonomy_review_completed"
+  | "convergence_review_requested"
   | "convergence_review_completed"
   | "direction_handoff_requested"
   | "direction_handoff_completed"
@@ -132,6 +136,7 @@ export type ObservationRef = {
     | "rootlet"
     | "candidate"
     | "candidate_pool"
+    | "autonomy_decision"
     | "convergence_review"
     | "model_call"
     | "tool_call"
@@ -304,6 +309,34 @@ export type RunObservationUndergroundView = {
         }[]
       >
     >;
+  };
+  readonly autonomy: {
+    readonly enabled: boolean;
+    readonly stopReason?: UndergroundAutonomyStopReason;
+    readonly cycles: readonly {
+      readonly explorationCycleId: string;
+      readonly cycleIndex: number;
+      readonly rootletKinds: readonly RootletClusterKind[];
+      readonly candidatePoolId?: string;
+      readonly autonomyDecisionId?: string;
+      readonly action?: UndergroundAutonomyAction;
+      readonly spawnedRootletCount: number;
+      readonly stopReason?: UndergroundAutonomyStopReason;
+      readonly status: "running" | "completed" | "stopped" | "failed";
+    }[];
+    readonly latestDecision?: {
+      readonly decisionId: string;
+      readonly cycleId: string;
+      readonly action: UndergroundAutonomyAction;
+      readonly status: "completed" | "failed";
+      readonly completionAssessment: string;
+      readonly informationGaps: readonly string[];
+      readonly spawnedRootletCount: number;
+      readonly rationale: string;
+      readonly sourceRefs: readonly string[];
+      readonly modelCallRefs: readonly string[];
+      readonly stopReason?: UndergroundAutonomyStopReason;
+    };
   };
   readonly evidenceLedger: {
     readonly ledgerId?: string;

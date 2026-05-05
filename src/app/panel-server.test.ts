@@ -17,6 +17,8 @@ test("panel HTML defaults to Simplified Chinese labels and status text", () => {
   assert.equal(html.includes("工作流阶段时间线"), true);
   assert.equal(html.includes("Rootlet 工作区"), true);
   assert.equal(html.includes("模型调用追踪"), true);
+  assert.equal(html.includes("工具调用"), true);
+  assert.equal(html.includes("自治评审"), true);
   assert.equal(html.includes("模型输出"), true);
   assert.equal(html.includes("Agent Transcript"), true);
   assert.equal(html.includes("收束解释"), true);
@@ -582,7 +584,7 @@ test("panel openai-compatible run uses configured ToolCenter search from tools r
 
     assert.equal(run.status, 200);
     assert.equal(modelFetchCalls >= 2, true);
-    assert.equal(tavilyFetchCalls, 1);
+    assert.equal(tavilyFetchCalls, 2);
     assert.equal(run.body.trace.events.some((event: { type: string }) => event.type === "tool.completed"), true);
     assert.equal(JSON.stringify(run.body).includes(modelSecret), false);
     assert.equal(JSON.stringify(run.body).includes(tavilySecret), false);

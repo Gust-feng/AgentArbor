@@ -27,10 +27,10 @@ test("underground demo CLI --ai fake emits model events and keeps AI candidate-l
   assert.equal(summary.ai.enabled, true);
   assert.equal(summary.ai.mode, "fake");
   assert.equal(summary.ai.status, "completed");
-  assert.deepEqual(summary.ai.eventCounts, { requested: 2, completed: 2, failed: 0 });
+  assert.deepEqual(summary.ai.eventCounts, { requested: 3, completed: 3, failed: 0 });
   const rootletModelCall = summary.ai.modelCallRefs.find((ref) => ref.rootletKind === "option");
   const advisoryModelCall = summary.ai.modelCallRefs.find((ref) => ref.rootletKind === undefined);
-  assert.equal(summary.ai.modelCallRefs.length, 2);
+  assert.equal(summary.ai.modelCallRefs.length, 3);
   assert.notEqual(rootletModelCall, undefined);
   assert.notEqual(advisoryModelCall, undefined);
   assert.equal(rootletModelCall?.rootletOutputRefs.length, 2);
@@ -43,6 +43,8 @@ test("underground demo CLI --ai fake emits model events and keeps AI candidate-l
       "rootlet_cluster.started",
       "exploration_candidate.produced",
       "candidate_pool.updated",
+      "autonomy_review.completed",
+      "convergence_review.requested",
       "convergence_review.completed",
       "direction_handoff.completed",
     ]

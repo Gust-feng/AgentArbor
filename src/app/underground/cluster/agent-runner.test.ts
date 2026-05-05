@@ -89,4 +89,12 @@ test("UndergroundSharedContext enforces write ownership for stage fields", () =>
     () => shared.write("underground-candidate-pool", { convergenceReport: {} as never }),
     UndergroundSharedContextError
   );
+  assert.throws(
+    () => shared.write("underground-handoff-steward", { convergenceReport: {} as never }),
+    UndergroundSharedContextError
+  );
+  assert.throws(
+    () => shared.write("underground-handoff-steward", { autonomyReview: {} as never }),
+    UndergroundSharedContextError
+  );
 });

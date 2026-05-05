@@ -164,11 +164,26 @@ export function createUndergroundAgentClusterManifests(): AgentManifest[] {
       outputEvents: ["candidate_pool.updated"],
     }),
     undergroundClusterManifest({
+      id: "underground-autonomy-core",
+      name: "Underground Autonomy Core",
+      description: "AI-required reviewer that decides whether to continue exploration, request convergence, ask the user, or stop.",
+      capabilities: ["autonomy.review", "rootlet.spawn.request", "convergence.request"],
+      inputEvents: ["candidate_pool.updated"],
+      outputEvents: ["autonomy_review.completed", "convergence_review.requested", "rootlet_cluster.started"],
+      turnPolicy: {
+        allowModel: true,
+        allowedTools: ["search", "read"],
+        maxModelRounds: 3,
+        maxToolRounds: 2,
+        fallback: "disabled",
+      },
+    }),
+    undergroundClusterManifest({
       id: "underground-convergence-judge",
       name: "Underground Convergence Judge",
-      description: "Judges candidate pool outputs before handoff material can be approved.",
+      description: "Judges candidate pool outputs only after the autonomy core requests convergence.",
       capabilities: ["candidate.compare", "convergence.judge"],
-      inputEvents: ["candidate_pool.updated"],
+      inputEvents: ["convergence_review.requested"],
       outputEvents: ["convergence_review.completed"],
     }),
     undergroundClusterManifest({

@@ -65,7 +65,7 @@ test("Underground intelligence output enters candidate pool and waits for conver
   );
   assert.equal(result.undergroundReport.candidatePool.counts.total, 1);
   assert.equal(result.undergroundReport.candidatePool.candidatesByKind.option.length, 1);
-  assert.equal(result.runtime.eventLog.types().filter((type) => type === "model.requested").length, 2);
+  assert.equal(result.runtime.eventLog.types().filter((type) => type === "model.requested").length, 3);
   assert.equal(result.undergroundReport.convergenceReport.aiAdvisory?.status, "completed");
   assert.equal(
     result.undergroundReport.convergenceReport.aiAdvisory?.recommendedOptionId,
@@ -216,8 +216,8 @@ test("All selected rootlet kinds request AI candidate advice through Intelligenc
     "constraint",
     "counterfactual",
   ]);
-  assert.equal(result.runtime.eventLog.types().filter((type) => type === "model.requested").length, 7);
-  assert.equal(result.runtime.eventLog.types().filter((type) => type === "model.completed").length, 7);
+  assert.equal(result.runtime.eventLog.types().filter((type) => type === "model.requested").length, 8);
+  assert.equal(result.runtime.eventLog.types().filter((type) => type === "model.completed").length, 8);
   assert.equal(result.runtime.eventLog.types().filter((type) => type === "model.failed").length, 0);
   assert.equal(result.undergroundReport.convergenceReport.aiAdvisory?.status, "completed");
 
@@ -430,7 +430,7 @@ test("Completed AI calls with empty candidate arrays fall back to deterministic 
       }),
   });
 
-  assert.equal(result.runtime.eventLog.types().filter((type) => type === "model.completed").length, 2);
+  assert.equal(result.runtime.eventLog.types().filter((type) => type === "model.completed").length, 3);
   assert.equal(result.runtime.eventLog.types().filter((type) => type === "model.failed").length, 0);
   assert.equal(result.undergroundReport.convergenceReport.aiAdvisory?.status, "completed");
   assert.equal(
@@ -443,7 +443,7 @@ test("Completed AI calls with empty candidate arrays fall back to deterministic 
   );
 });
 
-test("AI provider failures fall back to deterministic rootlet outputs for every selected kind", async () => {
+test("AI provider failures fall back to deterministic rootlet outputs before autonomy stops", async () => {
   const result = await runUndergroundDirectionSessionWithIntelligence(COMPLEX_ALL_ROOTLETS_GOAL, {
     createIntelligenceChannel: (runtime) =>
       new NativeIntelligenceChannel({
@@ -452,9 +452,11 @@ test("AI provider failures fall back to deterministic rootlet outputs for every 
       }),
   });
 
+  assert.equal(result.terminalStatus, "stopped");
   assert.equal(result.runtime.eventLog.types().filter((type) => type === "model.requested").length, 7);
   assert.equal(result.runtime.eventLog.types().filter((type) => type === "model.failed").length, 7);
-  assert.equal(result.undergroundReport.convergenceReport.aiAdvisory?.status, "failed");
+  assert.equal(result.undergroundReport.convergenceReport.aiAdvisory, undefined);
+  assert.equal(result.undergroundReport.convergenceReport.stopReason, "autonomy_decision_failed");
   assert.equal(
     result.undergroundReport.rootletOutputs.some((output) => output.evidenceRefs.some((ref) => ref.startsWith("model-call:"))),
     false
@@ -599,6 +601,14 @@ class TestModelProvider implements ModelProvider {
   constructor(private readonly options: TestModelProviderOptions = {}) {}
 
   async complete(request: ModelRequest): Promise<ModelResponse> {
+    if (!this.options.fail && request.outputContract.contractId === "underground.autonomy_decision.v1") {
+      return completedTestResponse({
+        request,
+        provider: this,
+        structuredOutput: createLegalAutonomyDecisionOutput(),
+      });
+    }
+
     const step = this.nextStep();
     if (step.fail) {
       return createFailedModelResponse({
@@ -618,25 +628,12 @@ class TestModelProvider implements ModelProvider {
       convergenceOutput: this.options.convergenceOutput,
     });
 
-    return {
-      responseId: "model-response-underground-test",
-      requestId: request.requestId,
-      providerId: this.providerId,
-      providerKind: this.providerKind,
-      protocolKind: this.protocolKind,
-      model: this.model,
-      status: "completed",
-      outputKind: request.outputContract.outputKind,
+    return completedTestResponse({
+      request,
+      provider: this,
       structuredOutput,
-      toolCalls: step.toolCalls?.map((toolCall) => ({
-        callId: toolCall.callId,
-        toolName: toolCall.toolName,
-        input: globalThis.structuredClone(toolCall.input),
-      })),
-      finishReason: step.toolCalls === undefined || step.toolCalls.length === 0 ? "stop" : "tool_call",
-      validation: pendingModelOutputValidation(),
-      completedAt: nowIso(),
-    };
+      toolCalls: step.toolCalls,
+    });
   }
 
   private nextStep(): TestModelProviderResponse {
@@ -648,6 +645,44 @@ class TestModelProvider implements ModelProvider {
       fail: this.options.fail,
     };
   }
+}
+
+function completedTestResponse(input: {
+  readonly request: ModelRequest;
+  readonly provider: TestModelProvider;
+  readonly structuredOutput: unknown;
+  readonly toolCalls?: readonly ModelToolCall[];
+}): ModelResponse {
+  return {
+    responseId: "model-response-underground-test",
+    requestId: input.request.requestId,
+    providerId: input.provider.providerId,
+    providerKind: input.provider.providerKind,
+    protocolKind: input.provider.protocolKind,
+    model: input.provider.model,
+    status: "completed",
+    outputKind: input.request.outputContract.outputKind,
+    structuredOutput: input.structuredOutput,
+    toolCalls: input.toolCalls?.map((toolCall) => ({
+      callId: toolCall.callId,
+      toolName: toolCall.toolName,
+      input: globalThis.structuredClone(toolCall.input),
+    })),
+    finishReason: input.toolCalls === undefined || input.toolCalls.length === 0 ? "stop" : "tool_call",
+    validation: pendingModelOutputValidation(),
+    completedAt: nowIso(),
+  };
+}
+
+function createLegalAutonomyDecisionOutput(): Record<string, unknown> {
+  return {
+    action: "request_convergence",
+    completionAssessment: "The current candidate pool has enough material for convergence.",
+    informationGaps: [],
+    spawnRequests: [],
+    rationale: "Convergence Judge remains the only promotion path.",
+    sourceRefs: [],
+  };
 }
 
 function resolveStructuredOutput(input: {

@@ -103,6 +103,17 @@ function defaultFakeOutput(request: ModelRequest): unknown {
     };
   }
 
+  if (request.outputContract.contractId === "underground.autonomy_decision.v1") {
+    return {
+      action: "request_convergence",
+      completionAssessment: "Fake autonomy review found enough candidate material for convergence.",
+      informationGaps: [],
+      spawnRequests: [],
+      rationale: "Deterministic fake provider keeps Convergence Judge as the final direction boundary.",
+      sourceRefs: [],
+    };
+  }
+
   if (request.outputContract.requiredFields?.includes("candidates")) {
     const kind = rootletKindFromContractId(request.outputContract.contractId);
     return {

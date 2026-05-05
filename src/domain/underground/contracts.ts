@@ -53,7 +53,11 @@ export type ConvergenceReviewOutcome = "approved" | "awaiting_user" | "stopped";
 export type ConvergenceStopReason =
   | "budget_exhausted_without_converged_candidates"
   | "no_converged_candidates"
-  | "requires_user_clarification";
+  | "requires_user_clarification"
+  | "ai_required_for_autonomy"
+  | "autonomy_decision_failed"
+  | "autonomy_stopped"
+  | "autonomy_cycle_guard_exceeded";
 
 export type ConvergenceReview = {
   reviewId: string;

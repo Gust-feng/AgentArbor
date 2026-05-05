@@ -19,6 +19,8 @@ export type MessageDrivenUndergroundDispatcherOptions = {
   readonly runtime: MinimalRuntime;
   readonly intelligenceChannel?: IntelligenceChannel;
   readonly toolCenter?: ToolExecutionBroker;
+  readonly enableAutonomy?: boolean;
+  readonly maxAutonomyCycles?: number;
   readonly maxDispatchSteps?: number;
 };
 
@@ -38,6 +40,8 @@ export class MessageDrivenUndergroundDispatcher {
               toolCenter: options.toolCenter,
               publishToolEvent: (event) => options.runtime.bus.publish(event),
             }),
+      enableAutonomy: options.enableAutonomy,
+      maxAutonomyCycles: options.maxAutonomyCycles,
     });
   }
 

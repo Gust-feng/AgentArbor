@@ -65,6 +65,8 @@ export class UndergroundAgentContext {
       readonly intelligenceChannel?: IntelligenceChannel;
       readonly toolCenter?: ToolExecutionBroker;
       readonly agentTurnRuntime?: AgentTurnRuntime;
+      readonly autonomyEnabled?: boolean;
+      readonly maxAutonomyCycles?: number;
       readonly enqueue: (message: UndergroundQueuedAgentMessage) => void;
     }
   ) {}
@@ -89,10 +91,19 @@ export class UndergroundAgentContext {
     return this.input.agentTurnRuntime;
   }
 
+  get autonomyEnabled(): boolean {
+    return this.input.autonomyEnabled ?? false;
+  }
+
+  get maxAutonomyCycles(): number {
+    return this.input.maxAutonomyCycles ?? 2;
+  }
+
   subscribe<TType extends ArborMessageType>(
     agentId: string,
     type: TType,
-    handler: UndergroundAgentMessageHandler<ArborMessage>
+    handler: UndergroundAgentMessageHandler<ArborMessage>,
+    options: { readonly requiresAsync?: boolean | ((message: ArborMessage) => boolean) } = {}
   ): () => void {
     return this.input.runtime.bus.subscribe(type, (message) => {
       this.input.enqueue({
@@ -100,7 +111,7 @@ export class UndergroundAgentContext {
         message,
         handler: handler as UndergroundAgentMessageHandler<UndergroundRuntimeMessage>,
         isPublicMessage: true,
-        requiresAsync: false,
+        requiresAsync: resolveRequiresAsync(options.requiresAsync ?? false, message),
       });
     });
   }
@@ -268,9 +279,9 @@ export function requireValue<T>(value: T | undefined, label: string): T {
   return value;
 }
 
-function resolveRequiresAsync(
-  requiresAsync: boolean | ((message: RootletInvocationRequestedMessage) => boolean),
-  message: RootletInvocationRequestedMessage
+function resolveRequiresAsync<TMessage extends RootletInvocationRequestedMessage | ArborMessage>(
+  requiresAsync: boolean | ((message: TMessage) => boolean),
+  message: TMessage
 ): boolean {
   return typeof requiresAsync === "function" ? requiresAsync(message) : requiresAsync;
 }

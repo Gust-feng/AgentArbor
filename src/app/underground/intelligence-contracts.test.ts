@@ -65,6 +65,29 @@ test("rootlet visible output suppresses candidates the app parser would reject",
   assert.equal(projection, undefined);
 });
 
+test("rootlet visible output redacts model-visible API key shapes", () => {
+  const contract = getUndergroundRootletCandidateAdviceContract("option").modelOutputContract;
+  const projection = createModelVisibleOutputProjection({
+    outputContract: contract,
+    response: createCompletedResponse({
+      candidates: [
+        {
+          summary: "Use Tavily key tvly-visible-output-secret only as a redaction probe.",
+          tradeoffs: ["Bearer visible-output-token must not leak"],
+          applicability: "api key: sk-visible-output-secret must be redacted.",
+        },
+      ],
+    }),
+  });
+  const text = JSON.stringify(projection);
+
+  assert.notEqual(projection, undefined);
+  assert.equal(text.includes("tvly-visible-output-secret"), false);
+  assert.equal(text.includes("visible-output-token"), false);
+  assert.equal(text.includes("sk-visible-output-secret"), false);
+  assert.equal(text.includes("[redacted-secret]"), true);
+});
+
 function createCompletedResponse(structuredOutput: unknown): ModelResponse {
   return {
     responseId: "model-response-test",

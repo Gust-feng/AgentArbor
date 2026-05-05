@@ -73,6 +73,7 @@ function refsForEvent(entry: RunObservationEventEntry): ObservationRef[] {
   pushObjectIdRef(refs, payload, "experienceCandidate", "experience_candidate");
   pushObjectIdRef(refs, payload, "pathBias", "path_bias");
   pushPackageRef(refs, payload);
+  pushAutonomyRef(refs, payload);
   pushConvergenceRef(refs, payload);
   pushModelCallRefs(refs, entry.type, payload);
   pushToolCallRefs(refs, entry.type, payload);
@@ -81,6 +82,17 @@ function refsForEvent(entry: RunObservationEventEntry): ObservationRef[] {
   pushRootletRefs(refs, payload);
 
   return refs;
+}
+
+function pushAutonomyRef(refs: ObservationRef[], payload: Readonly<Record<string, unknown>>): void {
+  const autonomyDecision = asRecord(payload.autonomyDecision);
+  if (typeof autonomyDecision.decisionId === "string") {
+    refs.push({ kind: "autonomy_decision", id: autonomyDecision.decisionId });
+  }
+  const autonomyDecisionId = payload.autonomyDecisionId;
+  if (typeof autonomyDecisionId === "string") {
+    refs.push({ kind: "autonomy_decision", id: autonomyDecisionId });
+  }
 }
 
 function pushStringRef(

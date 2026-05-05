@@ -18,6 +18,7 @@ export const UNDERGROUND_CENTER_ROLES = [
   "growth_governor",
   "constraint_sentinel",
   "evidence_ledger",
+  "autonomy_core",
   "convergence_judge",
   "handoff_steward",
 ] as const;
@@ -177,6 +178,7 @@ export type UndergroundExplorationReport = {
   plan: UndergroundExplorationPlan;
   agentClusterRun?: UndergroundAgentClusterRun;
   goalIntentProfile?: GoalIntentProfile;
+  autonomy?: import("./autonomy.js").UndergroundAutonomyReview;
   evidenceLedger?: UndergroundEvidenceLedger;
   rootletOutputs: RootletOutput[];
   candidatePool: CandidatePool;
@@ -296,6 +298,7 @@ export function createUndergroundConvergenceReport(input: {
   openQuestionDispositions?: readonly OpenQuestionDisposition[];
   userClarificationRequestId?: string;
   aiAdvisory?: UndergroundConvergenceAiAdvisory;
+  forcedStopReason?: ConvergenceStopReason;
   createdAt?: string;
 }): UndergroundConvergenceReport {
   assertDecisionRefs(input.candidatePool, input.decisions);
@@ -382,7 +385,7 @@ export function createUndergroundConvergenceReport(input: {
       userClarificationRequest === undefined ? undefined : cloneUserClarificationRequest(userClarificationRequest),
     openQuestions: clarificationClassification.openQuestions.map(cloneOpenQuestionDisposition),
     budgetExhausted: input.budget.exhausted,
-    stopReason: outcome.stopReason,
+    stopReason: outcome.outcome === "stopped" ? input.forcedStopReason ?? outcome.stopReason : outcome.stopReason,
     handoffCandidateRefs,
     aiAdvisory,
   };

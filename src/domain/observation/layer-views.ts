@@ -97,6 +97,7 @@ function createUndergroundView(input: RunObservationSnapshotInput): RunObservati
         counterfactual: report.candidatePool.candidatesByKind.counterfactual.map(createCandidateView),
       },
     },
+    autonomy: createAutonomyView(report),
     evidenceLedger: createEvidenceLedgerView(report),
     convergence: {
       reviewId: report.convergenceReport.reviewId,
@@ -143,6 +144,36 @@ function createUndergroundView(input: RunObservationSnapshotInput): RunObservati
     userEscalationRequired: report.convergenceReport.userEscalationRequired,
     userEscalation: createUserEscalationView(report),
     clarificationResponses: createClarificationResponses(input.eventEntries),
+  };
+}
+
+function createAutonomyView(
+  report: RunObservationSnapshotInput["undergroundReport"]
+): RunObservationUndergroundView["autonomy"] {
+  const latestDecision = report.autonomy?.latestDecision;
+  return {
+    enabled: report.autonomy?.enabled ?? false,
+    stopReason: report.autonomy?.stopReason,
+    cycles: (report.autonomy?.cycles ?? []).map((cycle) => ({
+      ...cycle,
+      rootletKinds: [...cycle.rootletKinds],
+    })),
+    latestDecision:
+      latestDecision === undefined
+        ? undefined
+        : {
+            decisionId: latestDecision.decisionId,
+            cycleId: latestDecision.cycleId,
+            action: latestDecision.action,
+            status: latestDecision.status,
+            completionAssessment: latestDecision.completionAssessment,
+            informationGaps: [...latestDecision.informationGaps],
+            spawnedRootletCount: latestDecision.spawnRequests.length,
+            rationale: latestDecision.rationale,
+            sourceRefs: [...latestDecision.sourceRefs],
+            modelCallRefs: latestDecision.modelCallRefs.map((ref) => ref.requestId),
+            stopReason: latestDecision.stopReason,
+          },
   };
 }
 

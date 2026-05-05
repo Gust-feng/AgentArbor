@@ -1,4 +1,5 @@
 export type UndergroundBoundary = "exploration_candidate" | "convergence_review" | "direction_handoff";
+export * from "./autonomy.js";
 export * from "./agent-cluster.js";
 export * from "./candidate-comparison.js";
 export * from "./clarification.js";

@@ -165,6 +165,26 @@ export function createRootletOutputsForInvocation(input: {
     );
 }
 
+export function createSpawnedRootletClusterPlan(input: {
+  kind: RootletClusterKind;
+  goalIntentProfile?: GoalIntentProfile;
+  objective?: string;
+  inputRefs?: readonly string[];
+  exitCriteria?: readonly string[];
+}): RootletClusterPlan {
+  const base = createRootletClusterPlan(input.kind, input.goalIntentProfile);
+  return {
+    ...base,
+    clusterId: createId(`rootlet-${input.kind.replace("_", "-")}-cycle`),
+    objective: input.objective ?? rootletObjective(input.kind, input.goalIntentProfile),
+    inputRefs: [...(input.inputRefs ?? base.inputRefs)],
+    exitCriteria:
+      input.exitCriteria === undefined || input.exitCriteria.length === 0
+        ? ROOTLET_EXIT_CRITERIA[input.kind]
+        : [...input.exitCriteria],
+  };
+}
+
 export function createRootletOutputForInvocation(input: {
   goalId: string;
   cluster: RootletClusterPlan;

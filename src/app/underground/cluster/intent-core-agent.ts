@@ -1,4 +1,5 @@
 import { evidenceId } from "../../../domain/underground/index.js";
+import { createId } from "../../../kernel/id.js";
 import { createGoalIntentProfileForMinimalUnderground } from "../../underground-goal-profile.js";
 import { createMinimalUndergroundExplorationPlan } from "../../underground-rootlets.js";
 import { createUndergroundAgentClusterPlan, startUndergroundAgentInvocation } from "../../underground-agent-cluster-runtime.js";
@@ -46,6 +47,13 @@ export class IntentCoreAgent implements UndergroundAgent {
       explorationPlan,
       goalIntentProfile,
     });
+    const currentCycle = {
+      explorationCycleId: createId("exploration-cycle"),
+      cycleIndex: 1,
+      rootletKinds: explorationPlan.rootletClusters.map((cluster) => cluster.kind),
+      spawnedRootletCount: explorationPlan.rootletClusters.length,
+      status: "running" as const,
+    };
 
     ctx.shared.write(this.agentId, {
       traceId: message.traceId,
@@ -55,6 +63,8 @@ export class IntentCoreAgent implements UndergroundAgent {
       explorationPlan,
       agentClusterPlan,
       centerInvocations: [completedIntentInvocation],
+      currentCycle,
+      autonomyCycles: ctx.autonomyEnabled ? [currentCycle] : [],
     });
 
     publishUndergroundExplorationPlanned({
@@ -62,6 +72,7 @@ export class IntentCoreAgent implements UndergroundAgent {
       traceId: message.traceId,
       agentId: completedIntentInvocation.agentId,
       plan: explorationPlan,
+      cycle: currentCycle,
       agentCluster: {
         plan: agentClusterPlan,
         invocations: [completedIntentInvocation],

@@ -105,6 +105,7 @@ export class HandoffStewardAgent implements UndergroundAgent {
       plan: completedPlan,
       agentClusterRun,
       goalIntentProfile: state.goalIntentProfile,
+      autonomy: state.autonomyReview,
       evidenceLedger: state.evidenceLedger,
       rootletOutputs: [...state.rootletOutputs],
       candidatePool,

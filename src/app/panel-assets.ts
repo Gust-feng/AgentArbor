@@ -596,7 +596,9 @@ export function createPanelHtml(): string {
       { id: "planning", title: "探索规划", events: ["underground.exploration_planned"], detail: "Intent Core 和 Growth Governor 规划 rootlet 集群。" },
       { id: "rootlets", title: "Rootlet 集群", events: ["rootlet_cluster.started"], detail: "按目标画像启动 option / risk / asset / evidence / constraint / counterfactual 根须。" },
       { id: "model", title: "模型调用", events: ["model.requested", "model.completed", "model.failed"], detail: "仅在 fake 或 OpenAI-compatible 模式下经 IntelligenceChannel 调用。" },
+      { id: "tools", title: "工具调用", events: ["tool.requested", "tool.completed", "tool.failed"], detail: "工具只通过统一 ToolCenter 执行，并只展示安全引用和摘要。" },
       { id: "candidates", title: "候选池", events: ["exploration_candidate.produced", "candidate_pool.updated"], detail: "rootlet 输出被包装为候选并进入唯一候选池。" },
+      { id: "autonomy", title: "自治评审", events: ["autonomy_review.completed", "convergence_review.requested"], detail: "Autonomy Core 判断继续探索、请求收束、询问用户或停止。" },
       { id: "convergence", title: "收束评审", events: ["convergence_review.completed"], detail: "Convergence Judge 解释 accepted / merged / rejected / unknown。" },
       { id: "handoff", title: "方向交接", events: ["direction_handoff.completed", "user_approval.requested"], detail: "Handoff Steward 生成方向交接包或请求用户澄清。" }
     ];
@@ -634,6 +636,11 @@ export function createPanelHtml(): string {
       model_requested: "模型请求已发出",
       model_completed: "模型请求已完成",
       model_failed: "模型请求失败",
+      tool_requested: "工具调用已发出",
+      tool_completed: "工具调用已完成",
+      tool_failed: "工具调用失败",
+      autonomy_review_completed: "自治评审已完成",
+      convergence_review_requested: "收束评审已请求",
       convergence_review_completed: "收束评审已完成",
       direction_handoff_completed: "方向交接已完成",
       user_approval_requested: "等待用户确认",
@@ -648,6 +655,11 @@ export function createPanelHtml(): string {
       "model.requested": "模型请求已发出",
       "model.completed": "模型请求已完成",
       "model.failed": "模型请求失败",
+      "tool.requested": "工具调用已发出",
+      "tool.completed": "工具调用已完成",
+      "tool.failed": "工具调用失败",
+      "autonomy_review.completed": "自治评审已完成",
+      "convergence_review.requested": "收束评审已请求",
       "convergence_review.completed": "收束评审已完成",
       "direction_handoff.completed": "方向交接已完成",
       "user_approval.requested": "请求用户澄清",
@@ -1055,6 +1067,9 @@ export function createPanelHtml(): string {
         if (stage.id === "model" && aiMode === "none") {
           return { title: stage.title, state: "skipped", detail: "本次无 AI 模式，未触发模型调用。" };
         }
+        if (stage.id === "tools" && response.summary.tools.eventCounts.requested === 0) {
+          return { title: stage.title, state: "skipped", detail: "本次未触发工具调用。" };
+        }
         const hasStageEvent = stage.events.some((eventType) => eventTypes.has(eventType));
         if (!hasStageEvent) {
           return { title: stage.title, state: "waiting", detail: stage.detail };
@@ -1087,8 +1102,15 @@ export function createPanelHtml(): string {
       if (stageId === "model") {
         return "模型事件 requested/completed/failed = " + response.summary.ai.eventCounts.requested + "/" + response.summary.ai.eventCounts.completed + "/" + response.summary.ai.eventCounts.failed + "。";
       }
+      if (stageId === "tools") {
+        return "工具事件 requested/completed/failed = " + response.summary.tools.eventCounts.requested + "/" + response.summary.tools.eventCounts.completed + "/" + response.summary.tools.eventCounts.failed + "。";
+      }
       if (stageId === "candidates") {
         return "候选池总数 " + response.tracking.candidates.total.total + "，并按 rootlet kind 分组展示。";
+      }
+      if (stageId === "autonomy") {
+        const autonomy = response.tracking.autonomy;
+        return "自治动作：" + (autonomy.latestAction || "未产生") + "；cycles " + autonomy.cycleCount + "；spawned rootlets " + autonomy.spawnedRootletCount + "。";
       }
       if (stageId === "convergence") {
         return "收束结果：" + convergenceLabel(response.tracking.convergence.outcome) + "。";

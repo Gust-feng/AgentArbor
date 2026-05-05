@@ -464,10 +464,16 @@ export function createUndergroundAgentClusterPlan(input: {
       schedulingReason: "Collect completed rootlet outputs into the only formal candidate pool before convergence.",
     }),
     clusterPlanAgent({
+      agentId: "underground-autonomy-core",
+      role: "autonomy_core",
+      inputRefs: [input.explorationPlan.planId],
+      schedulingReason: "Review the candidate pool and decide whether to continue exploration or request convergence.",
+    }),
+    clusterPlanAgent({
       agentId: "underground-convergence-judge",
       role: "convergence_judge",
       inputRefs: [input.explorationPlan.planId],
-      schedulingReason: "Converge the candidate pool before any Direction Handoff package can be approved.",
+      schedulingReason: "Converge the candidate pool only after the autonomy core requests convergence.",
     }),
     clusterPlanAgent({
       agentId: "underground-handoff-steward",

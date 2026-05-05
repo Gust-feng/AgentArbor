@@ -21,6 +21,7 @@ export type ModelPurpose =
   | "plan_draft"
   | "verification_advice"
   | "governance_advice"
+  | "autonomy_decision"
   | "convergence_advisory";
 
 export type ModelOutputKind = "candidate" | "draft" | "explanation" | "evidence_suggestion";

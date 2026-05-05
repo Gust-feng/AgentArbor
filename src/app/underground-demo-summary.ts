@@ -9,6 +9,8 @@ import type {
   CandidatePoolCounts,
   ExplorationBudget,
   RootletClusterKind,
+  UndergroundAutonomyAction,
+  UndergroundAutonomyStopReason,
   UndergroundConvergenceOutcome,
   UserClarificationReason,
 } from "../domain/underground/index.js";
@@ -37,6 +39,16 @@ export type UndergroundDemoSummary = {
   readonly ai: UndergroundDemoAiSummary;
   readonly tools: UndergroundDemoToolSummary;
   readonly underground: {
+    readonly autonomy: {
+      readonly enabled: boolean;
+      readonly cycleCount: number;
+      readonly latestAction?: UndergroundAutonomyAction;
+      readonly latestDecisionStatus?: "completed" | "failed";
+      readonly spawnedRootletCount: number;
+      readonly stopReason?: UndergroundAutonomyStopReason;
+      readonly sourceRefs: readonly string[];
+      readonly modelCallRefs: readonly string[];
+    };
     readonly rootletKinds: readonly RootletClusterKind[];
     readonly budget: ExplorationBudget;
     readonly candidateCounts: CandidatePoolCounts;
@@ -181,6 +193,17 @@ export function createUndergroundDemoSummary(
     }),
     tools: summarizeTools((recovery?.runtime ?? result.runtime).eventLog.list()),
     underground: {
+      autonomy: {
+        enabled: undergroundReport.autonomy?.enabled ?? false,
+        cycleCount: undergroundReport.autonomy?.cycles.length ?? 0,
+        latestAction: undergroundReport.autonomy?.latestDecision?.action,
+        latestDecisionStatus: undergroundReport.autonomy?.latestDecision?.status,
+        spawnedRootletCount: undergroundReport.autonomy?.latestDecision?.spawnRequests.length ?? 0,
+        stopReason: undergroundReport.autonomy?.stopReason ?? undergroundReport.autonomy?.latestDecision?.stopReason,
+        sourceRefs: undergroundReport.autonomy?.latestDecision?.sourceRefs ?? [],
+        modelCallRefs:
+          undergroundReport.autonomy?.latestDecision?.modelCallRefs.map((ref) => ref.requestId) ?? [],
+      },
       rootletKinds: undergroundReport.plan.rootletClusters.map((cluster) => cluster.kind),
       budget: undergroundReport.plan.budget,
       candidateCounts: undergroundReport.candidatePool.counts,

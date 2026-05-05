@@ -58,6 +58,12 @@
 - Convergence AI advisory 的 `recommendedOptionId` 只有同时存在于 CandidatePool 且进入 `handoffCandidateRefs` 时才能保留；不存在、rejected、unknown、risk、counterfactual 或其他非 handoff candidate 的推荐必须被忽略，且不得进入 Direction Handoff `recommendedOptionId`、`retainedOptionId` 或 `sourceCandidateRefs`。
 - Convergence AI advisory 只能 enrich 与已有 candidate 绑定的 comparison / report / handoff 说明字段；`overallDirectionSummary` 不得替代 `DirectionHandoff.clarifiedGoal`，正式 clarified goal 必须继续来自 GoalIntentProfile 或 raw user goal。
 - Convergence AI advisory 进入 `candidateComparisons`、`convergenceReport`、EventLog、Observation Snapshot、demo summary 或 Direction Handoff 视图前，所有 AI 可见文本必须做 secret/token 脱敏和长度裁剪；不得暴露 raw prompt、raw provider response、API key、token 或 provider 原始敏感错误。
+- 自治主线启用时，`candidate_pool.updated` 不再直接触发最终收束；必须先由固定 `underground-autonomy-core` 经 `AgentTurnRuntime` 产生 `UndergroundAutonomyDecision`，发布 `autonomy_review.completed`，再根据 action 决定继续探索、请求收束、请求用户澄清或停止。
+- `UndergroundAutonomyDecision` 只能决定路由：`continue_exploration`、`request_convergence`、`request_user_clarification` 或 `stop`。它不能批准 Direction Handoff，不能直接写 Growth Plan / Fruit / Run Memory / Experience Candidate / Capability Asset / Soil，也不能绕过 CandidatePool、Convergence Judge 和 Handoff Steward validation。
+- `underground-autonomy-core` 是固定地下核心 agent 的明确 AI 例外：manifest / turn policy 必须 `allowModel=true`，并只允许统一 `search` / `read` 工具；其他固定核心 agent 默认仍禁用模型和工具。自治核心的工具结果只作为 tool message 回填给模型或作为 safe refs 进入自治决策，不得直接进入 handoff 正式材料。
+- 自治主线无 `AgentTurnRuntime`、模型失败、输出 contract 不合法、非法 action、非法 rootlet kind、未知 candidate ref、cycle guard 触发或敏感/超长文本无法安全投影时，必须形成 `status=failed` 或 stopped 的 `UndergroundAutonomyDecision`，再由 Convergence Judge 生成可审计 terminal convergence report；不得伪造成功自治或 approved package。
+- `continue_exploration` 只能出生本轮运行期临时 rootlet invocation：AI 可给出 objective、information needs、source hints、expected evidence 和 specialist label，但必须映射到既有 `RootletClusterKind`，并重新发布带新 `explorationCycleId` / `cycleIndex` 的 `rootlet_cluster.started`。动态 rootlet output 仍必须先进入 CandidatePool。
+- `request_convergence` 只发布 `convergence_review.requested`；`ConvergenceJudgeAgent` 是唯一允许写 `convergenceReport` 的 agent。`request_user_clarification`、`stop` 和 failed autonomy 也必须经 Convergence Judge 生成 terminal report，Handoff Steward 只消费该 report 打包，不得自己创建收敛报告。
 - option 候选之间应产生保留 / 合并 / 淘汰裁决；risk、evidence、constraint、asset_fit 和 counterfactual 候选不能直接成为主方向，必须作为证据、约束、风险或 why-not 材料参与交叉裁决。
 - `approved_package_created` 只允许在有 accepted / merged handoff candidates 且无 blocking unknown 时出现。
 - `awaiting_user` 只允许在存在 blocking unknown 和 `UserClarificationRequest` 时出现；non-blocking unknown 不得单独制造等待用户状态。
@@ -96,6 +102,12 @@
 | 模型在 rootlet AI 调用中请求允许的工具 | AgentTurnRuntime 发布 `tool.requested -> tool.completed`，随后模型继续输出候选；工具结果只进入 rootlet source/evidence refs |
 | 模型请求未授权工具或工具失败 | 发布 `tool.failed`，rootlet 继续模型回合或 fallback，不静默吞错 |
 | 固定地下核心 agent 的 turn policy 禁用模型/工具 | 不产生 `model.*` / `tool.*` 事件，不进入 provider 或 ToolCenter |
+| 自治主线无 AgentTurnRuntime | 发布 failed autonomy decision，经 Convergence Judge 收束为 `stopped` / `ai_required_for_autonomy`，不伪造模型完成 |
+| 自治 decision 为 `continue_exploration` | 产生新的 `explorationCycleId` / `cycleIndex`，再次启动 rootlet、产出候选并更新 CandidatePool |
+| 自治 decision 为 `request_convergence` | 先发布 `convergence_review.requested`，再由 Convergence Judge 生成 `convergence_review.completed` |
+| 自治 decision 为 `request_user_clarification`、`stop` 或 failed | Convergence Judge 生成 awaiting-user 或 stopped terminal report；Handoff Steward 不写 convergence report |
+| 同一 cycle 的同类 public event 重复投递 | phase guard 拦截；不同 cycle 的 `rootlet_cluster.started` / `exploration_candidate.produced` / `candidate_pool.updated` 不得被误判为重复 |
+| 自治输出非法 action / rootlet kind / candidate id 或泄漏 secret | 返回 `autonomy_decision_failed` 或脱敏截断后的 stopped reason，并进入可审计 terminal report |
 | `--ai openai-compatible` 缺少 API key 或模型名 | 返回明确配置失败，不进入 provider fetch，不泄漏密钥 |
 
 ### 5. Good / Base / Bad Cases
@@ -127,6 +139,8 @@
 - `pnpm demo:underground -- --ai fake "<goal>"` 覆盖模型事件、按 rootlet kind 的 AI summary、候选层接入和 Direction Handoff 边界；复杂目标必须覆盖 6 种 rootlet kind。
 - rootlet AI 工具循环覆盖统一 `search` / `read` 成功、no-provider / stub、未授权和 max rounds，且 rootlet output refs 能回到 tool call / research refs。
 - 至少一个非 rootlet 地下核心 agent 通过统一 turn policy 证明模型 / 工具不可用时不会私自调用。
+- 自治主线覆盖：无 AI stopped/disabled；`continue_exploration` 产生第二个 cycle；`request_convergence` 后才触发 Convergence Judge / Handoff；同 cycle 去重不同 cycle 不误删；非法 action、非法 rootlet kind、未知 candidate ref、超长文本和 secret/token 脱敏/拒绝。
+- 自治核心工具权限覆盖：`underground-autonomy-core` 只能通过统一 `AgentTurnRuntime` 使用 `search` / `read`，工具事件进入 safe summary，工具输出不得绕过 CandidatePool / Convergence / Handoff。
 - `pnpm demo:underground -- --ai openai-compatible "<goal>"` 覆盖缺配置失败、无网络调用和密钥不泄漏。
 
 ### 7. Wrong vs Correct
@@ -426,6 +440,31 @@ goal.received
 -> convergence_review.completed
 -> direction_handoff.completed
 ```
+
+启用自治主线且 AI 决定收束时，地下-only approved demo 的正常 EventLog 固定停在：
+
+```text
+goal.received
+-> underground.exploration_planned
+-> rootlet_cluster.started
+-> exploration_candidate.produced
+-> candidate_pool.updated
+-> autonomy_review.completed
+-> convergence_review.requested
+-> convergence_review.completed
+-> direction_handoff.completed
+```
+
+若自治 decision 为 `continue_exploration`，同一 trace 下可以出现新的 `explorationCycleId`，并重复：
+
+```text
+rootlet_cluster.started
+-> exploration_candidate.produced
+-> candidate_pool.updated
+-> autonomy_review.completed
+```
+
+这些重复只在不同 cycle 下合法；同一 cycle / 同一 payload id 的重复 public event 仍必须被 phase guard 拦截。
 
 `pnpm demo:underground` 只能展示该地下单环边界；完整闭环仍由 `pnpm demo` 负责。
 

@@ -43,7 +43,7 @@
 - `kernel/intelligence/agent-turn-runtime.ts` 是模型 + 工具多轮 agent turn 的统一入口；它只能依赖 `IntelligenceChannel`、`ToolExecutionBroker`、领域契约和事件发布接口，不能导入 app `ToolCenter` concrete class 或地下模块。
 - `kernel/intelligence/tool-use-loop.ts` 只能依赖 `IntelligenceChannel` 和 `ToolExecutionBroker` 接口，不能导入 `src/app/tool-center` concrete class；它可以作为 `AgentTurnRuntime` 的低层 helper，但不能成为 rootlet 私有能力。
 - `ToolCenter` 负责注册、查询、执行、权限检查、预算检查和失败归一化；工具不存在、未授权、预算耗尽或 executor 抛错都返回 `status: "failed"`，不把 provider 原始异常向上抛。
-- `allowedTools` 必须来自 agent manifest / runtime policy；rootlet agent 当前通过 `turnPolicy.allowedTools` / `permissions.execute` 获得工具，固定地下核心 agent 默认 `allowModel = false` 且无工具执行权限。
+- `allowedTools` 必须来自 agent manifest / runtime policy；rootlet agent 当前通过 `turnPolicy.allowedTools` / `permissions.execute` 获得工具，固定地下核心 agent 默认 `allowModel = false` 且无工具执行权限。`underground-autonomy-core` 是明确例外：它允许模型并只允许 `search` / `read`，用于判断继续探索或请求收束；工具结果不得直接进入 Direction Handoff。
 - `allowModel = false` 的 agent turn 必须由 `AgentTurnRuntime` 返回明确 disabled / skipped 状态，不能偷偷调用 `IntelligenceChannel`。
 - 默认 ToolCenter 只能把 `search` / `read` 暴露给地下 rootlet prompt；`web_search` / `page_reader` 不得作为地下 prompt 主入口或 rootlet manifest 默认工具名。
 - `web` source 默认不联网；没有 Tavily key 或 fetch 时返回 deterministic `no-provider` / `no_search_provider` 降级，不得为了演示成功访问未知公共搜索 API。
@@ -59,7 +59,7 @@
 - `tool.*` EventLog payload 只记录 call id、tool name、caller agent、duration、safe input/output summary 或 error；不得记录 raw provider response、API key、token、完整 prompt、完整页面正文或 live对象。
 - `ResearchTrace` 只能记录 query、source、ref、status、短摘要和调用链；不得保存 raw provider response、完整页面正文、完整 prompt、API key 或 token。
 - rootlet 工具结果只能以 `tool-call:*` 和 `research:*` refs 进入 rootlet output `sourceRefs` / `evidenceRefs`，再进入 CandidatePool 和 Convergence Judge；不得把 tool raw output、Tavily raw response、完整 page preview 或搜索 snippet 直接写入候选、Direction Handoff、Growth Plan、Fruit、Run Memory、Experience Candidate、Capability Asset 或 Soil。
-- `maxModelRounds` 和 `maxToolRounds` 必须限制循环轮数；达到上限时调用方走声明的 fallback / failed advice 路径，不能无限继续请求模型或工具。
+- `maxModelRounds` 和 `maxToolRounds` 是单次 agent turn 的工程级 runaway guard；达到上限时调用方走声明的 fallback / failed advice 路径，不能无限继续请求模型或工具，也不能把 guard reached 当作任务完成。
 
 ### 4. Validation & Error Matrix
 
@@ -80,6 +80,8 @@
 | tool loop 超过 `maxToolRounds` | AgentTurnRuntime 返回 `stoppedReason = "max_tool_rounds"`，调用方使用声明 fallback |
 | model loop 超过 `maxModelRounds` | AgentTurnRuntime 返回 `stoppedReason = "max_model_rounds"`，不得继续请求模型 |
 | `allowModel = false` | AgentTurnRuntime 返回 disabled / skipped 状态，`model.*` 事件计数保持 0 |
+| `underground-autonomy-core` 请求 `search` / `read` | 工具通过统一 ToolCenter 执行，EventLog 只记录 safe tool summary，结果只回填模型或成为 autonomy decision refs |
+| `underground-autonomy-core` 请求未授权工具 | ToolCenter 返回 failed，EventLog 发布 `tool.failed`，自治决策失败或停止，不绕过收束 |
 | EventLog / Snapshot / summary / panel JSON 出现 API key、token、raw provider response、完整 prompt 或完整页面正文 | 安全边界失败 |
 | rootlet 工具结果绕过 CandidatePool / Convergence Judge | 地下边界测试失败 |
 
@@ -88,11 +90,13 @@
 - Good：rootlet model response 请求 `search`，ToolCenter 发布 `tool.requested -> tool.completed`，tool result 包含 research refs 和 trace 摘要，下一轮模型可用 `read` 展开选中 ref，最终 rootlet output source refs 包含 `tool-call:<id>` 和 `research:*` refs。
 - Good：未授权 rootlet 请求 `search` 或 `read` 时得到 failed tool result，模型仍可用失败结果继续，EventLog 有 `tool.failed`。
 - Good：`underground-intent-core` 的 turn policy 禁用模型和工具，同步调度不会产生 `model.*` 或 `tool.*` 事件。
+- Good：`underground-autonomy-core` 通过同一个 AgentTurnRuntime 调用 `search` / `read` 后再输出 autonomy decision；Convergence Judge 仍是唯一收敛报告 owner。
 - Base：fake provider 默认不返回 tool calls；`--ai fake` 和 no-AI 路径保持原有 deterministic / 单轮行为。
 - Base：无 Tavily key 时 `search` 的 web source 返回 `no-provider`，不触发真实网络；docs/packages/github 返回 stub。
 - Base：面板保留 `/api/config/information-sources` 兼容路由，但新的搜索工具表单走 `/api/config/tools` 和 `/api/config/tools/web-search`。
 - Bad：kernel tool loop 直接 import app `ToolCenter`。
 - Bad：把工具 raw output、Tavily raw response、完整页面正文或完整 prompt 直接塞进 Direction Handoff options、panel transcript 或 EventLog payload。
+- Bad：给自治核心新增私有搜索 helper、直接读 ConfigCenter secret，或让它管理 ToolCenter / provider 生命周期。
 - Bad：把 search API key 写入普通 settings 或测试快照。
 
 ### 6. Tests Required
@@ -112,6 +116,7 @@
 - OpenAI-compatible adapter tools / tool result / tool_calls 映射。
 - `executeToolUseLoop` 一轮工具后完成、max rounds、工具失败不中断。
 - `AgentTurnRuntime` 覆盖模型禁用、未授权工具、一轮工具后继续模型、`maxToolRounds`、`maxModelRounds` 和 fallback status。
+- 地下自治核心覆盖：manifest / turn policy 只授权 `search` / `read`，工具调用发布 `tool.requested` / `tool.completed`，safe refs 进入 autonomy summary，工具 raw output 不进入 handoff / panel transcript。
 - Observation metadata 覆盖 `tool.*`，tool refs 不误识别为 model/user clarification refs。
 - rootlet AI 调用 `search` / `read` 后候选进入 CandidatePool，source/evidence refs 包含 tool call / research refs，EventLog 不泄漏 key。
 - 至少一个非 rootlet 地下核心 agent 通过 turn policy 证明模型 / 工具不可用时不会私自调用。

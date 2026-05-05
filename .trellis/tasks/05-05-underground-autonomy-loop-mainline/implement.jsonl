@@ -1,0 +1,11 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend runtime spec index and quality checklist for underground runtime changes."}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Preserve runtime module ownership and app/domain/kernel boundaries."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Use existing runtime guard and stopped/failure semantics."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Required build/test/panel validation expectations."}
+{"file": ".trellis/spec/backend/underground-radial-growth.md", "reason": "Primary contract for Underground Center, rootlets, candidate pool, convergence, handoff, and autonomy loop boundaries."}
+{"file": ".trellis/spec/backend/intelligence-channel.md", "reason": "AI-required autonomy must use IntelligenceChannel and AgentTurnRuntime boundaries safely."}
+{"file": ".trellis/spec/backend/tool-runtime.md", "reason": "Autonomy/rootlet tool use must respect search/read, ToolCenter, and event sanitization boundaries."}
+{"file": ".trellis/spec/backend/observation-read-model.md", "reason": "Summary, Observation, and panel tracking projections must remain derived and secret-free."}
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend/panel spec index for local panel tracking changes."}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Panel tracking must show autonomy state without creating a second fact source."}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Panel smoke and display safety expectations for local UI changes."}

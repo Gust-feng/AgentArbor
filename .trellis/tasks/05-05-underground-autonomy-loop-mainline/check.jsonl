@@ -1,0 +1,8 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend runtime quality checklist for verification."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Required validation commands and runtime quality expectations."}
+{"file": ".trellis/spec/backend/underground-radial-growth.md", "reason": "Verify autonomy loop preserves candidate pool, convergence, handoff, and cycle contracts."}
+{"file": ".trellis/spec/backend/intelligence-channel.md", "reason": "Verify AI-required autonomy uses IntelligenceChannel safely and does not leak prompt/provider data."}
+{"file": ".trellis/spec/backend/tool-runtime.md", "reason": "Verify tool boundaries, AgentTurnRuntime permissions, and safe tool projections."}
+{"file": ".trellis/spec/backend/observation-read-model.md", "reason": "Verify Observation and panel data remain derived and secret-free."}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Verify panel tracking displays autonomy state from sanitized runtime projections."}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Verify panel smoke and frontend display safety expectations."}

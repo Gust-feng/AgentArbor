@@ -21,6 +21,7 @@
 - `IntelligenceChannel.request(request)`：业务层唯一模型调用入口。
 - `AgentTurnRuntime.execute(...)`：所有 agent 多轮模型 + 工具回合的统一运行入口；它在 IntelligenceChannel 外层统一承载 tool call loop、tool result 回填、权限、预算、轮次和 fallback。kernel 只依赖 `ToolExecutionBroker` 接口，不依赖 app `ToolCenter` concrete class。
 - `executeToolUseLoop(...)`：低层兼容 helper，可被 AgentTurnRuntime 复用；rootlet 等业务 agent 不应继续把它当私有入口。
+- `ModelPurpose` 覆盖 `autonomy_decision`：地下自治核心使用该 purpose 请求结构化 `UndergroundAutonomyDecision`，模型输出只能决定继续探索、请求收束、询问用户或停止，不能直接批准 handoff。
 
 ## Contracts
 
@@ -33,6 +34,7 @@
 - `src/app/config-center.ts` 负责把本地配置中心中的脱敏 settings 与 local-dev secret store 转成组合根可消费的 provider 环境；它不能把 raw secret 返回给 panel HTTP、summary、Snapshot 或 EventLog。
 - `src/domain/config/` 保存 provider profile、默认 AI mode、secret ref 和脱敏视图；`src/adapters/config/` 只负责普通 settings 文件与 local-dev secret 文件读写。普通 settings store 不得保存 raw secret。
 - 地下 rootlet AI 建议的 app 层契约拆分为 `src/app/underground/intelligence-contracts.ts`、`intelligence-prompts.ts` 和 `intelligence-output.ts`；6 种 rootlet kind 都必须使用 kind 专属 prompt 和 output contract，请求仍经 `IntelligenceChannel`，响应采用顶层 `candidates` 数组。数组项的 kind 专属字段由 app parser 校验、归一化、丢弃非法项并按 rootlet budget 截断；不要把完整数组 schema 推入当前 `ModelOutputContract` 内核。`ModelOutputContract.visibleOutput.fieldTypes` 只服务安全展示投影，必须与 app parser 的字段类型保持一致；parser 会丢弃的候选不得生成 approved visible output。
+- 地下自治 AI 建议的 app 层契约位于 `src/app/underground/autonomy-intelligence.ts`；`underground.autonomy_decision.v1` 必须返回 JSON object，字段至少包含 `action`、`completionAssessment`、`informationGaps`、`spawnRequests`、`rationale` 和可选 `sourceRefs`。app parser 必须校验 action 枚举、spawn rootlet kind、candidate refs、长度和 secret/token 脱敏。
 - `src/domain/underground/**`、`src/domain/aboveground/**`、`src/domain/governance/**` 和 `src/kernel/**` 不得直接导入 provider adapter。
 
 ## 生效规则
@@ -47,6 +49,7 @@
 - API key、token、完整敏感 prompt、未授权 Soil 内容和 provider 原始敏感错误不得进入 EventLog、Snapshot、方向交接包或测试快照。
 - Provider 输出不符合 `outputContract` 时必须形成 validation failed，不得被调用方当作成功响应继续收束。
 - rootlet AI 调用成功但 app parser 得不到合法候选、provider 失败或输出契约 validation failed 时，rootlet invocation 必须不中断，回退 deterministic output；fallback 必须能从 `model.failed` / `model.completed` 事件、demo summary 和 deterministic output 的 `ai-fallback:*` source refs 观测。
+- 自治主线与 rootlet fallback 不同：启用 autonomy 时，缺少 `AgentTurnRuntime`、模型失败、输出 validation failed 或 app parser 拒绝时，不能回退为 deterministic 成功；必须产生 failed/stopped autonomy decision，并经 Convergence Judge 形成 `ai_required_for_autonomy`、`autonomy_decision_failed`、`autonomy_cycle_guard_exceeded` 或 `autonomy_stopped` 等可审计终态。
 - hard constraint、Direction Handoff Package validation、状态机守卫和 Governance gate 不得因为模型建议而被跳过。
 - `pnpm demo:underground` 默认不得创建 provider、不得触发真实网络、不得发布 `model.*` 事件；只有显式 `--ai fake` 或 `--ai openai-compatible` 才能启用地下 rootlet 智能通道。
 - `--ai openai-compatible` 必须先完成环境配置校验：`AGENTARBOR_MODEL_API_KEY` 或 `OPENAI_API_KEY` 必须存在，`AGENTARBOR_MODEL_NAME` 必须存在；缺失时必须返回配置失败并确认未尝试网络调用。`AGENTARBOR_MODEL_BASE_URL` 可选，配置和 summary 不得泄漏 API key / token。
@@ -64,6 +67,9 @@
 | provider 返回 tool calls | response validation 通过，调用方进入工具循环；最终候选输出仍需通过 output contract |
 | `visibleOutput.fieldTypes` 与 rootlet parser 字段类型不一致，导致 parser 丢弃的候选仍可见 | 测试失败；visible output 必须被抑制或只展示 parser 可接受字段 |
 | 模型建议违反 hard constraint | 保留为 rejected candidate 或失败说明，不得放行 |
+| 自治模型输出非法 action / rootlet kind / candidate ref | 返回 failed autonomy decision，Convergence Judge 生成 stopped terminal report，不进入 approved handoff |
+| 自治模型请求 `search` / `read` | AgentTurnRuntime 执行工具回合并回填 tool message；工具结果只作为 safe refs/摘要影响自治 decision |
+| 自治主线无 AgentTurnRuntime | 返回 disabled/stopped，不发布伪造 `model.completed` |
 | EventLog 出现 API key 或 token 字段 | 安全边界失败 |
 | 普通 settings store、panel HTTP JSON、Observation Snapshot 或 demo summary 出现 API key / token | 安全边界失败 |
 | global fetch 缺失且未注入 fetch | 返回 provider config failed response，不添加 polyfill |
@@ -76,11 +82,13 @@
 
 - Good：Underground Intent Core 请求智能通道生成目标画像建议，再由确定性规则转成 `GoalIntentProfile`。
 - Good：rootlet 请求候选方向，输出先进入 candidate pool，再由 Convergence Judge 裁决。
+- Good：Autonomy Core 在 candidate pool 更新后经 AgentTurnRuntime 使用 `search` / `read` 补充判断依据，只发布 autonomy decision 和后续收束请求，不直接写 handoff。
 - Good：provider adapter 只负责请求/响应映射、鉴权、usage 归一化和错误映射。
 - Good：fake provider 只返回 deterministic 内容和 validation 状态；usage 字段保持空值，避免测试误导成本/用量逻辑。
 - Base：没有 provider 配置时使用 deterministic fallback 或明确 failed/stopped，不伪造模型成功。
 - Bad：在 `src/domain/underground/intent-core.ts` 中直接导入 OpenAI SDK。
 - Bad：把模型 JSON 直接保存为 approved Direction Handoff。
+- Bad：把自治模型的 `request_convergence` 当作批准信号，跳过 Convergence Judge 或 Handoff validation。
 - Bad：为了演示成功把 provider 错误吞掉并返回空 approved candidate。
 
 ## Tests Required
@@ -93,6 +101,7 @@
 - OpenAI-compatible Chat Completions adapter 使用 stubbed fetch 验证 `tools`、`tool_choice`、assistant `tool_calls`、tool result message 和 provider `tool_calls` 归一化映射。
 - fake provider 支持 deterministic tool call fixture，以便测试工具循环而不引入真实网络。
 - AgentTurnRuntime 覆盖模型禁用、未授权工具、工具回填继续模型、模型/工具轮次上限和边界导入规则。
+- 自治 decision 覆盖 `request_convergence`、`continue_exploration`、无 AI disabled、provider failure、非法输出、工具 `search` / `read` 回合和 secret/token 脱敏；断言模型/工具输出只影响候选与收束边界，不直接进入 Direction Handoff。
 - provider adapter 失败映射：鉴权失败、超时、rate limit、输出不合约、fetch 缺失。
 - 事件顺序：`model.requested -> model.completed` 或 `model.requested -> model.failed`。
 - 导入边界：不引入外部 LLM SDK；`domain/**`、`kernel/**`、app 运行流程不直接导入 provider SDK 或 provider adapter；组合根只允许装配 adapter factory。

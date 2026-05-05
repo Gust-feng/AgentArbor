@@ -27,6 +27,7 @@ test("rootlet AI prompts include goal profile, constraints, budget, and kind-spe
     assert.match(content, /GoalIntentProfile:/);
     assert.match(content, /goalStatement: Build a task platform/);
     assert.match(content, /keyConcepts: task_management; testing; monitoring/);
+    assert.match(content, /domainConcepts: task_management/);
     assert.match(content, /nonGoals: Do not use a database/);
     assert.match(content, /acceptanceCriteria: Tests pass/);
     assert.match(content, /assumptions: Current runtime is in-memory/);
@@ -60,6 +61,7 @@ function makeGoalIntentProfile(): GoalIntentProfile {
     rawGoal: "Build a task platform with tests, monitoring, no database, and counterfactual alternatives.",
     goalStatement: "Build a task platform.",
     keyConcepts: ["task_management", "testing", "monitoring"],
+    domainConcepts: ["task_management"],
     nonGoals: ["Do not use a database."],
     acceptanceCriteria: ["Tests pass."],
     assumptions: ["Current runtime is in-memory."],

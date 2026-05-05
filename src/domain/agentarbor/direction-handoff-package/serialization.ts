@@ -22,16 +22,31 @@ export function serializeDirectionHandoffPackageFiles(
     "soil-refs.json": `${JSON.stringify({ soilRefs: pkg.directionHandoff.soilRefs }, null, 2)}\n`,
     "evidence-index.md": renderEvidenceIndex(pkg),
     "risk-register.md": renderRiskRegister(pkg.directionHandoff),
-    "open-questions.md": renderList("Open Questions", pkg.directionHandoff.missingInformation),
-    "escalation-rules.md": renderList("Escalation Rules", pkg.directionHandoff.growthEntry.escalationRules),
+    "open-questions.md": renderOpenQuestions(pkg),
+    "escalation-rules.md": renderEscalationRules(pkg),
     "growth-entry.json": `${JSON.stringify(pkg.directionHandoff.growthEntry, null, 2)}\n`,
   };
 }
 
 function renderDirection(handoff: DirectionHandoff): string {
+  const retainedOption = handoff.options.find((option) => option.optionId === handoff.decisionRecord.retainedOptionId);
   return `# Direction Handoff
 
-Direction: ${handoff.clarifiedGoal}
+## Source Goal
+- sourceGoalId: ${handoff.sourceGoalId}
+- rawUserInputRef: ${handoff.rawUserInputRef}
+
+## Clarified Goal
+${handoff.clarifiedGoal}
+
+## Recommended Direction
+${retainedOption?.directionSummary ?? handoff.options[0]?.directionSummary ?? "No retained option is available."}
+
+## Aboveground Handoff Notes
+- recommendedOptionId: ${handoff.recommendedOptionId ?? "none"}
+- sourceCandidateRefs: ${handoff.sourceCandidateRefs.map((candidate) => candidate.id).join(", ") || "none"}
+- convergenceReviewRef: ${handoff.convergenceReviewRef}
+- allowedRuntimeShapes: ${handoff.growthEntry.allowedRuntimeShapes.join(", ") || "none"}
 
 ## Non Goals
 ${markdownList(handoff.nonGoals)}
@@ -45,6 +60,7 @@ ${markdownList(handoff.risks)}
 }
 
 function renderDecisionRecord(handoff: DirectionHandoff): string {
+  const retainedOption = handoff.options.find((option) => option.optionId === handoff.decisionRecord.retainedOptionId);
   return `# Decision Record
 
 - retainedOptionId: ${handoff.decisionRecord.retainedOptionId}
@@ -52,6 +68,18 @@ function renderDecisionRecord(handoff: DirectionHandoff): string {
 - rejectedOptionIds: ${handoff.decisionRecord.rejectedOptionIds.join(", ") || "none"}
 - userDecisionRequired: ${handoff.decisionRecord.userDecisionRequired.join(", ") || "none"}
 - abovegroundReferenceOptionIds: ${handoff.decisionRecord.abovegroundReferenceOptionIds.join(", ") || "none"}
+
+## Retained Direction
+${retainedOption?.directionSummary ?? "No retained direction summary is available."}
+
+## Rationale Evidence Refs
+${markdownList(handoff.decisionRecord.rationaleEvidenceRefs)}
+
+## Rationale Constraint Refs
+${markdownList(handoff.decisionRecord.rationaleConstraintRefs)}
+
+## Rationale Risk Refs
+${markdownList(handoff.decisionRecord.rationaleRiskRefs)}
 `;
 }
 
@@ -68,7 +96,7 @@ ${markdownList(handoff.evidenceRefs)}
 ## Source Candidates
 ${markdownList(
   handoff.sourceCandidateRefs.map((candidate) =>
-    `${candidate.id} (${candidate.status}, ${candidate.kind}) from ${candidate.sourceRefs.join(", ") || "none"}`
+    `${candidate.id} (${candidate.status}, ${candidate.kind}) ${candidate.summary ?? "no summary"} from ${candidate.sourceRefs.join(", ") || "none"}`
   )
 )}
 
@@ -97,11 +125,53 @@ ${markdownList(
 
 function renderRiskRegister(handoff: DirectionHandoff): string {
   const risks = handoff.riskRegister.map(
-    (risk) => `- ${risk.riskId}: ${risk.name} (${risk.blockingLevel})`
+    (risk) => [
+      `- ${risk.riskId}: ${risk.name} (${risk.blockingLevel})`,
+      `  - source: ${risk.source}`,
+      `  - impactScope: ${risk.impactScope.join(", ") || "none"}`,
+      `  - evidenceRefs: ${risk.evidenceRefs.join(", ") || "none"}`,
+      `  - mitigation: ${risk.mitigation.join("; ") || "none"}`,
+    ].join("\n")
   );
   return `# Risk Register
 
-${risks.length > 0 ? risks.join("\n") : "- none"}
+${risks.length > 0 ? risks.join("\n") : [
+  "- no-promoted-risk: No blocking risks were promoted during convergence.",
+  "  - source: convergence_review.completed",
+  "  - impactScope: underground_center, agentarbor_handoff, aboveground_center",
+  "  - evidenceRefs: none",
+  "  - mitigation: Keep convergence evidence, open questions, and validation results visible during planning.",
+].join("\n")}
+`;
+}
+
+function renderOpenQuestions(pkg: DirectionHandoffPackage): string {
+  const convergenceReview = pkg.convergenceReview as Partial<UndergroundConvergenceReport>;
+  const openQuestions = convergenceReview.openQuestions ?? [];
+  const entries = [
+    ...pkg.directionHandoff.missingInformation.map((question) => `handoff: ${question}`),
+    ...openQuestions.map((question) =>
+      `${question.candidateId} [${question.blockingLevel}/${question.disposition}]: ${question.question} evidence=${question.evidenceRefs.join(", ") || "none"}`
+    ),
+  ];
+  return `# Open Questions
+
+${entries.length > 0 ? entries.map((entry) => `- ${entry}`).join("\n") : "- No blocking open questions; validate assumptions during Aboveground planning."}
+`;
+}
+
+function renderEscalationRules(pkg: DirectionHandoffPackage): string {
+  const convergenceReview = pkg.convergenceReview as Partial<UndergroundConvergenceReport>;
+  const entries = [
+    ...pkg.directionHandoff.growthEntry.escalationRules,
+    ...(convergenceReview.stopReason === undefined ? [] : [`Convergence stop reason: ${convergenceReview.stopReason}`]),
+    ...(convergenceReview.userClarificationRequest === undefined
+      ? []
+      : [`User clarification required: ${convergenceReview.userClarificationRequest.requestId}`]),
+  ];
+  return `# Escalation Rules
+
+${markdownList(entries)}
 `;
 }
 

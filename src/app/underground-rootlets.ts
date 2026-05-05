@@ -192,6 +192,7 @@ export function createRootletOutputForInvocation(input: {
   constraints: Constraint[];
   goalIntentProfile?: GoalIntentProfile;
   summary?: string;
+  source?: RootletOutput["source"];
   sourceRefs?: readonly string[];
   evidenceRefs?: readonly string[];
 }): RootletOutput {
@@ -219,8 +220,9 @@ export function createRootletOutputForInvocation(input: {
             enforcementGate: constraint.enforcementGate,
           }))
         : [],
-    riskRefs: input.cluster.kind === "risk" ? ["risk-fake-agent-overreach"] : [],
+    riskRefs: input.cluster.kind === "risk" ? rootletRiskRefs(input.goalId, input.goalIntentProfile) : [],
     status: "produced",
+    source: input.source ?? "deterministic_fallback",
   };
 }
 
@@ -275,40 +277,45 @@ function rootletSummaries(kind: RootletClusterKind, goalIntentProfile?: GoalInte
   }
   const targetCount = ROOTLET_DETERMINISTIC_OUTPUTS[kind];
   const goal = goalIntentProfile.goalStatement;
+  const domain = goalDomainSummary(goalIntentProfile);
+  const acceptance = goalIntentProfile.acceptanceCriteria[0] ?? "the stated user goal can be verified";
+  const unknowns = goalIntentProfile.unknowns.length > 0
+    ? goalIntentProfile.unknowns.join("; ")
+    : "no blocking unknown has been identified yet";
   switch (kind) {
     case "option":
       return [
-        `Primary in-memory direction for ${goal}`,
-        `Modular verification-first direction for ${goal}`,
-        `Deferred persistence direction for ${goal}`,
+        `Direction option for ${goal}: shape the ${domain} AgentApp around explicit input intake, structured output, evidence refs, and Aboveground handoff assumptions.`,
+        `Verification-first option for ${goal}: keep the first growth path narrow, prove ${acceptance}, and defer unresolved integration choices to open questions.`,
+        `Scoped handoff option for ${goal}: document target users, accepted inputs, generated outputs, validation gates, and Nutrient Request triggers before execution planning.`,
       ].slice(0, targetCount);
     case "risk":
       return [
-        `Risk source and impact for ${goalIntentProfile.riskHints[0] ?? goal}`,
-        `Risk blocking assessment for ${goalIntentProfile.riskHints[1] ?? goal}`,
-        `Risk mitigation boundary for ${goal}`,
+        `Risk source for ${goal}: ${goalIntentProfile.riskHints[0] ?? domain} can distort the handoff if source data, authority, or review boundary is not explicit.`,
+        `Risk blocking assessment for ${goal}: unresolved details (${unknowns}) must stay visible instead of being hidden inside an approved package.`,
+        `Risk mitigation for ${goal}: require evidence refs, human escalation rules, and Aboveground validation gates before any generated agent is treated as reliable.`,
       ].slice(0, targetCount);
     case "asset_fit":
       return [
-        `Soil asset fit refs for ${goal}`,
-        `Soil asset non-fit boundaries for ${goal}`,
+        `Soil asset fit for ${goal}: reuse only stable Soil refs and prior constraints that match ${domain}; do not copy asset body content into the handoff.`,
+        `Soil asset non-fit boundary for ${goal}: if no governed asset covers ${domain}, mark the gap and let Aboveground request nutrients instead of inventing reusable capability.`,
       ].slice(0, targetCount);
     case "evidence":
       return [
-        `Evidence candidate for ${goalIntentProfile.acceptanceCriteria[0] ?? goal}`,
-        `Verification evidence candidate for ${goalIntentProfile.acceptanceCriteria[1] ?? goal}`,
-        `Monitoring evidence candidate for ${goal}`,
+        `Evidence candidate for ${goal}: cite source material, rootlet outputs, model/tool refs, and comparison evidence needed to prove ${acceptance}.`,
+        `Verification evidence for ${goal}: the package must show how each key output maps back to the original goal concepts (${goalIntentProfile.keyConcepts.slice(0, 6).join(", ") || domain}).`,
+        `Monitoring evidence for ${goal}: track unresolved assumptions, fallback material, and handoff validation results so Aboveground can decide whether to continue or request nutrients.`,
       ].slice(0, targetCount);
     case "constraint":
       return [
-        `Constraint mapping for ${goalIntentProfile.constraintHints[0] ?? goal}`,
-        `Enforcement gate mapping for ${goalIntentProfile.constraintHints[1] ?? goal}`,
-        `Constraint non-weakening check for ${goal}`,
+        `Constraint mapping for ${goal}: preserve user-stated boundaries and Soil constraints across direction_handoff, growth_plan, task_assignment, tool_execution, verification, fruit_governance, and soil_promotion gates.`,
+        `Enforcement gate mapping for ${goal}: unresolved permission, data, evidence, or review constraints must remain candidate constraints until confirmed.`,
+        `Constraint non-weakening check for ${goal}: no option may turn hard boundaries, evidence retention, or data authority requirements into optional preferences.`,
       ].slice(0, targetCount);
     case "counterfactual":
       return [
-        `Counterfactual why-not alternative for ${goal}`,
-        `Counterfactual fallback direction for ${goal}`,
+        `Counterfactual why-not for ${goal}: do not start by generating a generic agent scaffold before the ${domain} inputs, outputs, evidence boundaries, and validation gates are settled.`,
+        `Counterfactual fallback for ${goal}: if core evidence or authority is missing, stop or request user clarification instead of approving an unrelated direction.`,
       ].slice(0, targetCount);
   }
 }
@@ -322,6 +329,29 @@ function rootletEvidenceRefs(goalId: string, kind: RootletClusterKind): string[]
     );
   }
   return refs;
+}
+
+function rootletRiskRefs(goalId: string, goalIntentProfile?: GoalIntentProfile): string[] {
+  const hints = goalIntentProfile?.riskHints ?? [];
+  const refs = hints.length > 0 ? hints.map((hint) => `risk:${goalId}:${hint}`) : [`risk:${goalId}:handoff-quality`];
+  return unique(refs);
+}
+
+function goalDomainSummary(goalIntentProfile: GoalIntentProfile): string {
+  const genericConcepts = new Set([
+    "agent",
+    "agent_app",
+    "application",
+    "feature",
+    "requirement",
+    "system",
+  ]);
+  const domainConcepts = unique([...goalIntentProfile.domainConcepts, ...goalIntentProfile.keyConcepts])
+    .filter((concept) => !genericConcepts.has(concept));
+  if (domainConcepts.length === 0) {
+    return "target-domain";
+  }
+  return domainConcepts.slice(0, 4).join("/");
 }
 
 function unique(values: readonly string[]): string[] {

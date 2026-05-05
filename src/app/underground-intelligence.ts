@@ -177,6 +177,7 @@ export async function requestUndergroundRootletCandidateAdvice(input: {
         constraints: [...input.constraints],
         goalIntentProfile: input.goalIntentProfile,
         summary: formatUndergroundRootletCandidateAdviceSummary(candidate),
+        source: "ai",
         sourceRefs: [
           ...(input.sourceRefs ?? []),
           "model.requested",

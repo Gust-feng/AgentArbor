@@ -317,7 +317,7 @@ function outputForRequest(request: ModelRequest): unknown {
       candidateAnalyses: [],
       conflictsNeedingUserInput: [],
       constraintViolations: [],
-      overallDirectionSummary: "Autonomy loop test advisory keeps deterministic convergence in charge.",
+      overallDirectionSummary: "Autonomy loop test advisory remains bounded by package validation.",
     };
   }
   return {
@@ -377,39 +377,39 @@ function candidateForKind(kind: RootletClusterKind): Record<string, unknown> {
   switch (kind) {
     case "risk":
       return {
-        summary: "Autonomy loop risk candidate.",
+        summary: "Autonomy loop risk candidate for the helper goal.",
         impactScope: "runtime boundary",
         severity: "low",
         mitigation: "Keep CandidatePool and Convergence Judge in charge.",
       };
     case "asset_fit":
       return {
-        summary: "Autonomy loop asset fit candidate.",
+        summary: "Autonomy loop asset fit candidate for the helper goal.",
         assetRefs: ["soil:minimal-constraints"],
         fitConditions: ["Use refs only."],
         doNotApplyWhen: ["A ref would be copied as Soil body content."],
       };
     case "evidence":
       return {
-        summary: "Autonomy loop evidence candidate.",
+        summary: "Autonomy loop evidence candidate for the helper goal.",
         evidenceType: "verification",
         confidence: "medium",
       };
     case "constraint":
       return {
-        summary: "Autonomy loop constraint candidate.",
+        summary: "Autonomy loop constraint candidate for the helper goal.",
         constraintLevel: "hard",
         enforcementGate: "direction_handoff",
       };
     case "counterfactual":
       return {
-        summary: "Autonomy loop counterfactual candidate.",
+        summary: "Autonomy loop counterfactual candidate for the helper goal.",
         alternativeDirection: "Stop before handoff.",
         whyNotChosen: "It would skip convergence.",
       };
     case "option":
       return {
-        summary: "Autonomy loop option candidate.",
+        summary: "Autonomy loop option candidate for the helper goal.",
         tradeoffs: ["keeps autonomy as routing only"],
         applicability: "Use only after convergence.",
       };

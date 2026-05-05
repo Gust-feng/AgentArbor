@@ -121,6 +121,7 @@ function cloneGoalIntentProfile(profile: GoalIntentProfile): GoalIntentProfile {
   return {
     ...profile,
     keyConcepts: [...profile.keyConcepts],
+    domainConcepts: [...profile.domainConcepts],
     nonGoals: [...profile.nonGoals],
     acceptanceCriteria: [...profile.acceptanceCriteria],
     assumptions: [...profile.assumptions],

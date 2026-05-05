@@ -155,7 +155,7 @@ function buildConvergenceAdvisoryMessages(
       content: [
         "You are the convergence advisory AI for AgentArbor's underground agent cluster.",
         "Your job is to analyze candidate outputs from multiple rootlets and provide advisory recommendations.",
-        "Return JSON only. Your output is advisory — the deterministic convergence judge makes the final decision.",
+        "Return JSON only. Your output is advisory for the current implementation; Convergence Judge must still write the final report through CandidatePool, hard-constraint, and package-validation guards.",
         "",
         "You must analyze:",
         "1. Which candidates represent truly different directions (not just rephrased versions of the same idea)",

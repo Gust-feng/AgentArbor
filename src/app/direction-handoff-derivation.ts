@@ -86,10 +86,10 @@ export function deriveDirectionHandoffDraft(input: {
     version: 1,
     sourceGoalId: input.goalId,
     rawUserInputRef: "goal.received",
-    clarifiedGoal: profile?.goalStatement ?? input.goal,
+    clarifiedGoal: createClarifiedGoal(input.goal, profile),
     nonGoals: createHandoffNonGoals(profile, input.constraints),
     assumptions: [
-      ...(profile?.assumptions ?? ["The deterministic Underground profile is sufficient for this handoff."]),
+      ...createHandoffAssumptions(profile),
       `Convergence review ${input.convergenceReview.reviewId} is the source of handoff candidate selection.`,
       ...(aiAdvisory !== undefined && aiAdvisory.status === "completed"
         ? ["AI-assisted convergence advisory enriched candidate analysis and direction recommendation."]
@@ -144,18 +144,38 @@ export function deriveDirectionHandoffDraft(input: {
     convergenceReviewRef: input.convergenceReview.reviewId,
     recommendedOptionId: selectedOptionId,
     growthEntry: {
-      allowedRuntimeShapes: ["single_agent"],
-      suggestedFirstWorkflowNodes: ["generate", "verify", "memory", "govern"],
-      escalationRules: [
-        "Do not let Aboveground create a parallel direction exploration path.",
-        ...(input.clarificationRequest === undefined
-          ? []
-          : [`Resolve user clarification request ${input.clarificationRequest.requestId} before planning.`]),
-      ],
+      allowedRuntimeShapes: deriveAllowedRuntimeShapes(profile),
+      suggestedFirstWorkflowNodes: deriveSuggestedFirstWorkflowNodes(profile, directionOptions),
+      escalationRules: createGrowthEntryEscalationRules({
+        goalIntentProfile: profile,
+        clarificationRequest: input.clarificationRequest,
+        convergenceReport,
+      }),
     },
     createdAt: nowIso(),
     updatedAt: nowIso(),
   };
+}
+
+function createClarifiedGoal(goal: string, profile?: GoalIntentProfile): string {
+  if (profile === undefined) {
+    return goal;
+  }
+  const domain = profile.domainConcepts.slice(0, 5).join(", ");
+  if (domain.length === 0) {
+    return profile.goalStatement;
+  }
+  return `${profile.goalStatement} Target domain concepts: ${domain}.`;
+}
+
+function createHandoffAssumptions(profile?: GoalIntentProfile): string[] {
+  if (profile === undefined) {
+    return ["The deterministic Underground profile is sufficient for this handoff."];
+  }
+  return unique([
+    ...profile.assumptions,
+    ...profile.unknowns.map((unknown) => `Non-blocking assumption pending Aboveground validation: ${unknown}`),
+  ]);
 }
 
 function collectConvergenceAttributionEvidenceRefs(
@@ -285,7 +305,7 @@ function createDirectionOptions(input: {
     const isRecommended = comparison.candidateId === recommendedOptionId || recommendedOptionId === undefined;
     const rejectedReason = rejectedReasonByCandidateId.get(comparison.candidateId);
     const advisoryAnalysis = advisoryAnalysisByCandidateId.get(comparison.candidateId);
-    const enrichedSummary = buildEnrichedDirectionSummary(comparison, advisoryAnalysis);
+    const enrichedSummary = buildEnrichedDirectionSummary(comparison, advisoryAnalysis, input.goalIntentProfile);
     return {
       optionId: comparison.candidateId,
       directionSummary: enrichedSummary,
@@ -296,8 +316,8 @@ function createDirectionOptions(input: {
       costProfile:
         input.goalIntentProfile?.keyConcepts.includes("cost") === true
           ? ["cost-sensitive"]
-          : ["local-deterministic-runtime"],
-      unknowns: [...input.clarificationQuestions, ...comparison.unknowns],
+          : deriveCostProfile(input.goalIntentProfile),
+      unknowns: [...input.clarificationQuestions],
       whyNot: unique([...(comparison.whyNot ?? []), rejectedReason ?? ""]),
       recommendationScore:
         comparison.conclusion === "reject" ? 0 : isRecommended ? 1 : comparison.conclusion === "merge" ? 0.75 : 0.5,
@@ -309,6 +329,84 @@ function createDirectionOptions(input: {
       ]),
     };
   });
+}
+
+function deriveAllowedRuntimeShapes(profile?: GoalIntentProfile): DirectionHandoff["growthEntry"]["allowedRuntimeShapes"] {
+  if (profile === undefined) {
+    return ["single_agent"];
+  }
+  const concepts = new Set([...profile.domainConcepts, ...profile.keyConcepts]);
+  const complexAgentApp =
+    concepts.has("agent") ||
+    concepts.has("agent_app") ||
+    profile.acceptanceCriteria.length >= 4 ||
+    profile.rawGoal.includes("，") ||
+    profile.rawGoal.includes("、");
+  if (concepts.has("quality_review") || concepts.has("customer_service_quality_review")) {
+    return ["shared_team_cluster", "sub_agent_tree", "single_agent"];
+  }
+  if (complexAgentApp) {
+    return ["sub_agent_tree", "shared_team_cluster", "single_agent"];
+  }
+  return ["single_agent"];
+}
+
+function deriveSuggestedFirstWorkflowNodes(
+  profile: GoalIntentProfile | undefined,
+  options: readonly DirectionOption[]
+): string[] {
+  const nodes = new Set<string>([
+    "confirm_direction_handoff",
+    "define_input_contract",
+    "derive_execution_plan",
+    "verify_with_evidence",
+  ]);
+  const concepts = new Set([...(profile?.domainConcepts ?? []), ...(profile?.keyConcepts ?? [])]);
+  if (concepts.has("input_reading") || concepts.has("meeting_transcript") || concepts.has("text_processing")) {
+    nodes.add("map_source_materials");
+  }
+  if (concepts.has("structured_extraction") || concepts.has("action_items") || concepts.has("todo_items")) {
+    nodes.add("define_structured_outputs");
+  }
+  if (concepts.has("quality_review") || concepts.has("customer_service_quality_review") || concepts.has("scoring")) {
+    nodes.add("define_review_rubric");
+    nodes.add("human_escalation_gate");
+  }
+  if (options.some((option) => option.supportingEvidenceRefs.length > 0)) {
+    nodes.add("preserve_evidence_refs");
+  }
+  nodes.add("prepare_nutrient_request_triggers");
+  return [...nodes];
+}
+
+function createGrowthEntryEscalationRules(input: {
+  goalIntentProfile?: GoalIntentProfile;
+  clarificationRequest?: UserClarificationRequest;
+  convergenceReport: UndergroundConvergenceReport;
+}): string[] {
+  return unique([
+    "Do not let Aboveground create a parallel direction exploration path.",
+    "Trigger Nutrient Request when source evidence, Soil asset fit, permission boundary, or validation criteria are insufficient.",
+    "Stop or ask the user before executing if the generated Growth Plan would weaken hard constraints or evidence retention.",
+    ...(input.goalIntentProfile?.unknowns.map((unknown) => `Treat unresolved question as a planning assumption until verified: ${unknown}`) ?? []),
+    ...(input.convergenceReport.openQuestions ?? []).map(
+      (question) => `Carry open question ${question.candidateId} into planning review: ${question.question}`
+    ),
+    ...(input.clarificationRequest === undefined
+      ? []
+      : [`Resolve user clarification request ${input.clarificationRequest.requestId} before planning.`]),
+  ]);
+}
+
+function deriveCostProfile(profile?: GoalIntentProfile): string[] {
+  const profileConcepts = new Set([...(profile?.domainConcepts ?? []), ...(profile?.keyConcepts ?? [])]);
+  if (profileConcepts.has("evidence_traceability") || profileConcepts.has("meeting_minutes_evidence")) {
+    return ["evidence-retention-cost", "review-workflow-cost"];
+  }
+  if (profileConcepts.has("customer_service_quality_review")) {
+    return ["sampling-and-review-cost", "human-escalation-cost"];
+  }
+  return ["bounded-local-runtime", "aboveground-validation-cost"];
 }
 
 function optionCandidateIdsByConclusion(
@@ -396,9 +494,10 @@ function unique(values: readonly string[]): string[] {
 
 function buildEnrichedDirectionSummary(
   comparison: { readonly candidateSummary: string; readonly contentDifference?: string },
-  advisoryAnalysis?: { readonly contentDifference: string; readonly whyPreferred: string }
+  advisoryAnalysis?: { readonly contentDifference: string; readonly whyPreferred: string },
+  profile?: GoalIntentProfile
 ): string {
-  const base = comparison.candidateSummary;
+  const base = addGoalContextToSummary(comparison.candidateSummary, profile);
   if (advisoryAnalysis === undefined) {
     if (comparison.contentDifference !== undefined && comparison.contentDifference.length > 0) {
       return `${base}\n\nKey differentiator: ${comparison.contentDifference}`;
@@ -413,4 +512,24 @@ function buildEnrichedDirectionSummary(
     parts.push(`\nWhy this direction: ${advisoryAnalysis.whyPreferred}`);
   }
   return parts.join("");
+}
+
+function addGoalContextToSummary(summary: string, profile?: GoalIntentProfile): string {
+  if (profile === undefined || summarySharesGoalTerm(summary, profile)) {
+    return summary;
+  }
+  return `For ${profile.goalStatement}: ${summary}`;
+}
+
+function summarySharesGoalTerm(summary: string, profile: GoalIntentProfile): boolean {
+  const haystack = summary.toLowerCase();
+  const englishTerms = profile.goalStatement.toLowerCase().match(/[a-z][a-z0-9_-]{2,}/g) ?? [];
+  const chineseTerms = profile.goalStatement.match(/[\u4e00-\u9fff]{2,8}/gu) ?? [];
+  const terms = unique([
+    ...profile.domainConcepts,
+    ...profile.keyConcepts,
+    ...englishTerms,
+    ...chineseTerms,
+  ]);
+  return terms.some((term) => haystack.includes(term.toLowerCase()));
 }

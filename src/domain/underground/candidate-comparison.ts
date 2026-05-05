@@ -208,6 +208,22 @@ export function compareCandidateForGoal(input: {
     };
   }
 
+  const relevance = evaluateCandidateGoalRelevance(input.goalProfile, input.candidate, input.rootletOutput);
+  if (!relevance.isRelevant) {
+    return createComparison(input, {
+      conclusion: "reject",
+      goalMatch: "blocking",
+      evidenceSupport: "weak",
+      constraintImpact: "partial",
+      riskLevel: "blocking",
+      goalMatchBasis: `The candidate does not share task concepts with the original goal. Expected one of ${relevance.expectedTerms.join(", ")}; matched none.`,
+      evidenceSupportBasis: "Unrelated or template-only material cannot support the Direction Handoff.",
+      evidenceGaps: ["Goal relevance evidence is missing for this candidate."],
+      riskCoverage: ["Unrelated candidate material would produce an invalid or misleading handoff package."],
+      whyNot: ["Rejected because the candidate is not meaningfully related to the user's original goal."],
+    });
+  }
+
   switch (input.rootletOutput.kind) {
     case "option":
       if (optionConflictsWithGoalBoundaries(input.rootletOutput.summary, input.goalProfile)) {
@@ -561,6 +577,140 @@ function deterministicConflictWith(output: RootletOutput, profile: GoalIntentPro
     }
   }
   return conflicts;
+}
+
+function evaluateCandidateGoalRelevance(
+  profile: GoalIntentProfile,
+  candidate: ExplorationCandidateRef,
+  output: RootletOutput
+): {
+  readonly isRelevant: boolean;
+  readonly expectedTerms: readonly string[];
+  readonly matchedTerms: readonly string[];
+} {
+  const expectedTerms = goalRelevanceTerms(profile);
+  if (expectedTerms.length === 0) {
+    return { isRelevant: true, expectedTerms, matchedTerms: [] };
+  }
+  const haystack = normalizeForRelevance(`${candidate.summary ?? ""} ${output.summary} ${output.sourceRefs.join(" ")}`);
+  const matchedTerms = expectedTerms.filter((term) => haystack.includes(normalizeForRelevance(term)));
+  const isTemplateOnly =
+    matchedTerms.length === 0 &&
+    ["primary in-memory direction", "test output", "generic direction", "placeholder"].some((marker) =>
+      haystack.includes(marker)
+    );
+  const isObviousUnrelated = matchedTerms.length === 0 && hasObviousUnrelatedDomainMarker(haystack, profile);
+  return {
+    isRelevant: matchedTerms.length > 0 && !isTemplateOnly && !isObviousUnrelated,
+    expectedTerms,
+    matchedTerms,
+  };
+}
+
+function goalRelevanceTerms(profile: GoalIntentProfile): string[] {
+  const concepts = [
+    ...profile.domainConcepts,
+    ...profile.keyConcepts,
+    ...extractRelevanceTokens(profile.goalStatement),
+    ...extractRelevanceTokens(profile.rawGoal),
+  ];
+  const genericTerms = new Set([
+    "agent",
+    "application",
+    "feature",
+    "requirement",
+    "system",
+    "platform",
+    "service",
+    "build",
+    "create",
+    "implement",
+    "direction",
+    "goal",
+    "evidence",
+    "constraint",
+    "risk",
+    "智能体",
+    "应用",
+    "系统",
+    "平台",
+    "服务",
+    "功能",
+    "目标",
+    "方向",
+    "证据",
+    "约束",
+    "风险",
+  ]);
+  return unique(
+    concepts
+      .flatMap(expandConceptForRelevance)
+      .map((term) => term.trim())
+      .filter((term) => term.length >= 2 && !genericTerms.has(term.toLowerCase()))
+  ).slice(0, 16);
+}
+
+function expandConceptForRelevance(concept: string): string[] {
+  const normalized = concept.trim();
+  if (normalized.length === 0) {
+    return [];
+  }
+  const aliases = relevanceAliasesForConcept(normalized);
+  const parts = normalized.split(/[_\s/-]+/u).filter((part) => part.length >= 3);
+  return parts.length === 0 ? [normalized, ...aliases] : [normalized, ...aliases, ...parts];
+}
+
+function relevanceAliasesForConcept(concept: string): string[] {
+  const aliases: Readonly<Record<string, readonly string[]>> = {
+    meeting_minutes: ["会议纪要", "纪要整理", "纪要"],
+    meeting_transcript: ["会议文本", "会议记录", "转写"],
+    action_items: ["行动项"],
+    todo_items: ["待办", "todo"],
+    todo_generation: ["生成待办", "待办"],
+    evidence_traceability: ["保留证据", "证据留存", "溯源"],
+    input_reading: ["读取", "导入", "解析"],
+    structured_extraction: ["提取", "抽取", "行动项"],
+    customer_service_quality_review: ["客服质检", "质检", "评分", "抽检"],
+    customer_service: ["客服"],
+    quality_review: ["质检", "质量审核"],
+    text_processing: ["文本"],
+  };
+  return [...(aliases[concept] ?? [])];
+}
+
+function extractRelevanceTokens(value: string): string[] {
+  const english = value.toLowerCase().match(/[a-z][a-z0-9_-]{2,}/g) ?? [];
+  const chinese = value.match(/[\u4e00-\u9fff]{2,8}/gu) ?? [];
+  const chinesePhrases = value.match(/[\u4e00-\u9fff]{2,10}(?:agent|Agent|智能体|纪要|文本|行动项|待办|质检|评分|证据)?/gu) ?? [];
+  return [...english, ...chinese, ...chinesePhrases];
+}
+
+function normalizeForRelevance(value: string): string {
+  return value.toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+function hasObviousUnrelatedDomainMarker(haystack: string, profile: GoalIntentProfile): boolean {
+  const goalText = normalizeForRelevance(`${profile.rawGoal} ${profile.goalStatement} ${profile.domainConcepts.join(" ")}`);
+  const unrelatedMarkers = [
+    "weather",
+    "forecast",
+    "temperature",
+    "map layer",
+    "recipe",
+    "restaurant",
+    "stock price",
+    "crypto",
+    "game level",
+    "ecommerce cart",
+    "天气",
+    "气温",
+    "地图图层",
+    "菜谱",
+    "餐厅",
+    "股票",
+    "加密货币",
+  ];
+  return unrelatedMarkers.some((marker) => haystack.includes(marker) && !goalText.includes(marker));
 }
 
 function truncate(value: string, maxLength: number): string {

@@ -65,6 +65,7 @@ test("Underground intelligence output enters candidate pool and waits for conver
   );
   assert.equal(result.undergroundReport.candidatePool.counts.total, 1);
   assert.equal(result.undergroundReport.candidatePool.candidatesByKind.option.length, 1);
+  assert.equal(modelOutput?.source, "ai");
   assert.equal(result.runtime.eventLog.types().filter((type) => type === "model.requested").length, 3);
   assert.equal(result.undergroundReport.convergenceReport.aiAdvisory?.status, "completed");
   assert.equal(
@@ -267,9 +268,9 @@ test("Rootlet AI can call unified search through ToolCenter before producing can
               output: {
                 candidates: [
                   {
-                    summary: "Model used a tool before suggesting the candidate.",
-                    tradeoffs: ["adds current-information evidence"],
-                    applicability: "Use when a rootlet needs external context.",
+                    summary: "Model used a tool before suggesting the deterministic helper candidate.",
+                    tradeoffs: ["adds current-information evidence for the helper goal"],
+                    applicability: "Use when a deterministic helper rootlet needs external context.",
                   },
                 ],
               },
@@ -354,9 +355,9 @@ test("Rootlet AI can call unified search then read before producing candidate ou
               output: {
                 candidates: [
                   {
-                    summary: "Model used search and read before suggesting the candidate.",
-                    tradeoffs: ["adds current-information evidence", "keeps research as candidate material"],
-                    applicability: "Use when a rootlet needs a search result and a page preview.",
+                    summary: "Model used search and read before suggesting the deterministic helper candidate.",
+                    tradeoffs: ["adds current-information evidence for the helper goal", "keeps research as candidate material"],
+                    applicability: "Use when a deterministic helper rootlet needs a search result and a page preview.",
                   },
                 ],
               },
@@ -419,6 +420,10 @@ test("Contract-violating AI output does not enter an approved Direction Handoff"
     result.undergroundReport.rootletOutputs.some((output) => output.sourceRefs.includes("ai-fallback:option")),
     true
   );
+  assert.equal(
+    result.undergroundReport.rootletOutputs.every((output) => output.source === "deterministic_fallback"),
+    true
+  );
 });
 
 test("Completed AI calls with empty candidate arrays fall back to deterministic rootlet output", async () => {
@@ -439,6 +444,10 @@ test("Completed AI calls with empty candidate arrays fall back to deterministic 
   );
   assert.equal(
     result.undergroundReport.rootletOutputs.every((output) => output.sourceRefs.includes("ai-fallback:option")),
+    true
+  );
+  assert.equal(
+    result.undergroundReport.rootletOutputs.every((output) => output.source === "deterministic_fallback"),
     true
   );
 });
@@ -476,6 +485,10 @@ test("AI provider failures fall back to deterministic rootlet outputs before aut
     "constraint",
     "counterfactual",
   ]);
+  assert.equal(
+    result.undergroundReport.rootletOutputs.every((output) => output.source === "deterministic_fallback"),
+    true
+  );
 });
 
 test("Default underground session stays deterministic with no model events or AI fallback refs", () => {
@@ -488,6 +501,10 @@ test("Default underground session stays deterministic with no model events or AI
       output.sourceRefs.some((ref) => ref.startsWith("ai-fallback:"))
     ),
     false
+  );
+  assert.equal(
+    result.undergroundReport.rootletOutputs.every((output) => output.source === "deterministic_fallback"),
+    true
   );
   assert.equal(
     result.undergroundReport.rootletOutputs.some((output) =>

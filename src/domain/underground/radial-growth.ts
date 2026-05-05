@@ -81,6 +81,7 @@ export type RootletOutput = {
   constraintRefs: ConstraintRef[];
   riskRefs: string[];
   status: "produced";
+  source: "ai" | "deterministic_fallback";
 };
 
 export type CandidatePoolCounts = {

@@ -401,6 +401,7 @@ function makeRootletOutput(outputId: string, clusterId: string): RootletOutput {
     constraintRefs: [],
     riskRefs: [],
     status: "produced",
+    source: "deterministic_fallback",
   };
 }
 

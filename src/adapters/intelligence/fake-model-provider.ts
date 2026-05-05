@@ -155,7 +155,7 @@ function defaultFakeOutput(request: ModelRequest): unknown {
       conflictsNeedingUserInput: [],
       constraintViolations: [],
       overallDirectionSummary:
-        "Fake convergence advisory confirms the deterministic convergence judge remains the final decision boundary.",
+        "Fake convergence advisory keeps CandidatePool, Convergence Judge, and package validation as promotion boundaries.",
     };
   }
 
@@ -165,15 +165,16 @@ function defaultFakeOutput(request: ModelRequest): unknown {
       completionAssessment: "Fake autonomy review found enough candidate material for convergence.",
       informationGaps: [],
       spawnRequests: [],
-      rationale: "Deterministic fake provider keeps Convergence Judge as the final direction boundary.",
+      rationale: "Fake provider asks Convergence Judge to review candidate material before handoff.",
       sourceRefs: [],
     };
   }
 
   if (request.outputContract.requiredFields?.includes("candidates")) {
     const kind = rootletKindFromContractId(request.outputContract.contractId);
+    const goalAnchor = rootletGoalAnchor(request);
     return {
-      candidates: [fakeCandidateForKind(kind, 1), fakeCandidateForKind(kind, 2)],
+      candidates: [fakeCandidateForKind(kind, 1, goalAnchor), fakeCandidateForKind(kind, 2, goalAnchor)],
     };
   }
 
@@ -191,27 +192,45 @@ function rootletKindFromContractId(contractId: string): string {
   return contractId.slice(marker.length).split(".")[0] ?? "option";
 }
 
-function fakeCandidateForKind(kind: string, index: number): Record<string, unknown> {
+function rootletGoalAnchor(request: ModelRequest): string {
+  const content = request.sanitizedMessages.map((message) => message.content).join("\n");
+  const domainConcepts = matchLineValue(content, "- domainConcepts:");
+  if (domainConcepts !== undefined && domainConcepts !== "none") {
+    return domainConcepts.split(";").map((value) => value.trim()).filter(Boolean).slice(0, 4).join("/");
+  }
+  const rawGoal = matchLineValue(content, "Raw goal:");
+  if (rawGoal !== undefined && rawGoal.length > 0) {
+    return truncate(rawGoal, 80);
+  }
+  return "current goal";
+}
+
+function matchLineValue(content: string, prefix: string): string | undefined {
+  const line = content.split("\n").find((candidate) => candidate.trim().startsWith(prefix));
+  return line?.slice(line.indexOf(prefix) + prefix.length).trim();
+}
+
+function fakeCandidateForKind(kind: string, index: number, goalAnchor: string): Record<string, unknown> {
   const summary = `Fake ${kind} candidate advice ${index}.`;
   switch (kind) {
     case "risk":
       return {
         summary,
-        impactScope: "runtime boundary and user trust",
+        impactScope: `${goalAnchor} runtime boundary and user trust`,
         severity: index === 1 ? "medium" : "low",
-        mitigation: "Keep deterministic convergence and package validation in charge.",
+        mitigation: "Keep Convergence Judge and package validation in charge.",
       };
     case "asset_fit":
       return {
         summary,
         assetRefs: ["soil:minimal-constraints"],
-        fitConditions: ["Only use refs that match the goal profile."],
+        fitConditions: [`Only use refs that match ${goalAnchor}.`],
         doNotApplyWhen: ["The asset would copy Soil body content into the prompt."],
       };
     case "evidence":
       return {
         summary,
-        evidenceType: "verification",
+        evidenceType: `${goalAnchor} verification`,
         confidence: index === 1 ? "medium" : "low",
       };
     case "constraint":
@@ -223,15 +242,22 @@ function fakeCandidateForKind(kind: string, index: number): Record<string, unkno
     case "counterfactual":
       return {
         summary,
-        alternativeDirection: "Defer the broader architecture change.",
+        alternativeDirection: `Defer ${goalAnchor} execution until evidence and constraints are clearer.`,
         whyNotChosen: "It does not satisfy the current underground direction boundary.",
       };
     case "option":
     default:
       return {
         summary,
-        tradeoffs: ["more candidate diversity", "requires deterministic convergence"],
-        applicability: "Use when the goal profile needs another direction candidate.",
+        tradeoffs: ["more candidate diversity", `goal-specific ${goalAnchor}`, "requires convergence validation"],
+        applicability: `Use when the ${goalAnchor} goal profile needs another direction candidate.`,
       };
   }
+}
+
+function truncate(value: string, maxLength: number): string {
+  if (value.length <= maxLength) {
+    return value;
+  }
+  return `${value.slice(0, Math.max(0, maxLength - 3))}...`;
 }

@@ -14,6 +14,7 @@ import {
 } from "./file-boundary-validation.js";
 import { validateHardConstraintTextBoundary } from "./hard-constraint-boundary.js";
 import { validateLineage } from "./lineage-validation.js";
+import { validateGoalRelevanceAndFileContent } from "./content-integrity-validation.js";
 import { DIRECTION_HANDOFF_PACKAGE_SCHEMA_VERSION } from "./schema.js";
 import { nowIso } from "./utils.js";
 
@@ -110,6 +111,7 @@ export function validateDirectionHandoffPackage(
   validateSoilReferences(pkg, addError);
   validateDirectionEvidenceBoundary(pkg, addError);
   validateHardConstraintTextBoundary(pkg, addError);
+  validateGoalRelevanceAndFileContent(pkg, addError);
 
   return {
     passed: errors.length === 0,

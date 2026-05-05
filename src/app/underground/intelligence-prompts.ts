@@ -74,6 +74,7 @@ function buildUserPromptContent(input: BuildUndergroundRootletCandidateAdviceMes
     `- goalId: ${input.goalIntentProfile.goalId}`,
     `- goalStatement: ${input.goalIntentProfile.goalStatement}`,
     `- keyConcepts: ${formatList(input.goalIntentProfile.keyConcepts)}`,
+    `- domainConcepts: ${formatList(input.goalIntentProfile.domainConcepts)}`,
     `- nonGoals: ${formatList(input.goalIntentProfile.nonGoals)}`,
     `- acceptanceCriteria: ${formatList(input.goalIntentProfile.acceptanceCriteria)}`,
     `- assumptions: ${formatList(input.goalIntentProfile.assumptions)}`,

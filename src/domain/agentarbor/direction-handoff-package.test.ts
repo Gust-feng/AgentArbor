@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import assert from "node:assert/strict";
@@ -167,6 +167,73 @@ test("package validation rejects handoff text that weakens a hard constraint", (
   );
 });
 
+test("package validation rejects approved handoff options unrelated to the clarified goal", () => {
+  const { directionHandoffPackage } = createDirectionHandoffPackageFixture();
+  const invalidPackage = clonePackage(directionHandoffPackage);
+  invalidPackage.directionHandoff.clarifiedGoal =
+    "会议纪要整理 agent must read meeting transcripts, extract action items, generate todos, and retain evidence.";
+  invalidPackage.directionHandoff.options = invalidPackage.directionHandoff.options.map((option) => ({
+    ...option,
+    directionSummary: "Weather forecast dashboard with map layers and temperature alerts.",
+  }));
+  invalidPackage.directionHandoff.sourceCandidateRefs = invalidPackage.directionHandoff.sourceCandidateRefs.map((candidate) => ({
+    ...candidate,
+    summary: "Weather forecast dashboard candidate.",
+  }));
+
+  const validation = new InMemoryDirectionHandoffPackageStore().validate(invalidPackage);
+
+  assert.equal(validation.passed, false);
+  assert.equal(validation.errors.some((error) => error.code === "HANDOFF_GOAL_RELEVANCE_MISSING"), true);
+});
+
+test("package validation rejects specific but off-domain approved handoff options", () => {
+  const { directionHandoffPackage } = createDirectionHandoffPackageFixture();
+  const invalidPackage = clonePackage(directionHandoffPackage);
+  invalidPackage.directionHandoff.clarifiedGoal =
+    "会议纪要整理 agent must read meeting transcripts, extract action items, generate todos, and retain evidence. Target domain concepts: meeting_minutes, action_items, todo_items.";
+  invalidPackage.directionHandoff.options = invalidPackage.directionHandoff.options.map((option) => ({
+    ...option,
+    directionSummary: "Invoice approval workflow routes finance bills, purchase approvals, and reimbursement exceptions.",
+  }));
+  invalidPackage.directionHandoff.sourceCandidateRefs = invalidPackage.directionHandoff.sourceCandidateRefs.map((candidate) => ({
+    ...candidate,
+    summary: "Finance approval workflow candidate with reimbursement routing.",
+  }));
+
+  const validation = new InMemoryDirectionHandoffPackageStore().validate(invalidPackage);
+
+  assert.equal(validation.passed, false);
+  assert.equal(validation.errors.some((error) => error.code === "HANDOFF_GOAL_RELEVANCE_MISSING"), true);
+  assert.equal(
+    validation.errors.some((error) => error.code === "HANDOFF_RETAINED_OPTION_GOAL_RELEVANCE_MISSING"),
+    true
+  );
+});
+
+test("package validation rejects options that only echo the goal before generic handoff text", () => {
+  const { directionHandoffPackage } = createDirectionHandoffPackageFixture();
+  const invalidPackage = clonePackage(directionHandoffPackage);
+  invalidPackage.directionHandoff.clarifiedGoal =
+    "会议纪要整理 agent must read meeting transcripts, extract action items, generate todos, and retain evidence. Target domain concepts: meeting_minutes, action_items, todo_items.";
+  invalidPackage.directionHandoff.options = invalidPackage.directionHandoff.options.map((option) => ({
+    ...option,
+    directionSummary: `For ${invalidPackage.directionHandoff.clarifiedGoal}: create a useful agent workflow with clear steps.`,
+  }));
+  invalidPackage.directionHandoff.sourceCandidateRefs = invalidPackage.directionHandoff.sourceCandidateRefs.map((candidate) => ({
+    ...candidate,
+    summary: "Useful agent workflow candidate.",
+  }));
+
+  const validation = new InMemoryDirectionHandoffPackageStore().validate(invalidPackage);
+
+  assert.equal(validation.passed, false);
+  assert.equal(
+    validation.errors.some((error) => error.code === "HANDOFF_RETAINED_OPTION_GOAL_RELEVANCE_MISSING"),
+    true
+  );
+});
+
 test("file-system DirectionHandoffPackage store round-trips through a temp directory", () => {
   const { directionHandoffPackage } = createDirectionHandoffPackageFixture();
   const tempRoot = mkdtempSync(join(tmpdir(), "agentarbor-direction-package-"));
@@ -195,6 +262,18 @@ test("file-system DirectionHandoffPackage store round-trips through a temp direc
         `${file.path} should be written in the temp package directory`
       );
     }
+    const packageDir = join(
+      tempRoot,
+      "directions",
+      encodeURIComponent(saved.manifest.directionId),
+      `v${saved.manifest.directionVersion}`
+    );
+    const direction = readFileSync(join(packageDir, "direction.md"), "utf8");
+    const decisionRecord = readFileSync(join(packageDir, "decision-record.md"), "utf8");
+    const riskRegister = readFileSync(join(packageDir, "risk-register.md"), "utf8");
+    assert.equal(direction.includes("## Recommended Direction"), true);
+    assert.equal(decisionRecord.includes("## Rationale Evidence Refs"), true);
+    assert.equal(riskRegister.includes("impactScope"), true);
   } finally {
     if (tempRoot.startsWith(tmpdir())) {
       rmSync(tempRoot, { recursive: true, force: true });

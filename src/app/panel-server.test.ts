@@ -306,7 +306,7 @@ test("panel fake AI run exposes model and candidate summaries without model prom
     assert.equal(optionCall.visibleOutput.truncated, false);
     const optionFields = optionCall.visibleOutput.items[0]?.fields ?? [];
     assert.equal(optionFields.some((field: { name: string; value: string }) => field.name === "summary" && field.value === "Fake option candidate advice 1."), true);
-    assert.equal(optionFields.some((field: { name: string; value: string }) => field.name === "tradeoffs" && field.value.includes("deterministic convergence")), true);
+    assert.equal(optionFields.some((field: { name: string; value: string }) => field.name === "tradeoffs" && field.value.includes("goal-specific")), true);
     assert.equal(optionFields.some((field: { name: string; truncated: boolean }) => field.name === "applicability" && field.truncated === false), true);
     assert.equal(
       riskCall.visibleOutput.items[0].fields.some((field: { name: string }) => field.name === "impactScope"),
@@ -941,7 +941,7 @@ function createStubOpenAiResponse(
               candidates: [
                 {
                   summary: "Stub candidate advice.",
-                  tradeoffs: ["observable run state", "deterministic convergence remains in charge"],
+                  tradeoffs: ["observable run state", "package validation remains in charge"],
                   applicability: "Use for panel polling tests.",
                   mitigation: "Keep provider output as candidate advice only.",
                   evidenceType: "test",

@@ -8,14 +8,18 @@ export function createPanelHtml(): string {
   <style>
     :root {
       color-scheme: light;
-      --bg: #f6f7f9;
-      --surface: #ffffff;
-      --surface-strong: #eef2f5;
-      --line: #d7dde3;
-      --text: #17202a;
-      --muted: #5b6875;
-      --accent: #0f766e;
-      --accent-strong: #0b5f59;
+      --bg: #f5f6f7;
+      --sidebar: #eef1f0;
+      --sidebar-strong: #e7ecea;
+      --canvas: #ffffff;
+      --panel: #fafbfb;
+      --line: #d9dfdc;
+      --line-soft: #edf0ee;
+      --text: #202622;
+      --muted: #68736d;
+      --accent: #167554;
+      --accent-strong: #0d5d41;
+      --accent-soft: #e7f3ed;
       --warn: #a16207;
       --danger: #b42318;
       --ok: #15803d;
@@ -62,7 +66,7 @@ export function createPanelHtml(): string {
     }
 
     textarea {
-      min-height: 112px;
+      min-height: 84px;
       resize: vertical;
     }
 
@@ -74,29 +78,18 @@ export function createPanelHtml(): string {
       font-weight: 650;
     }
 
-    main {
-      max-width: 1360px;
-      margin: 0 auto;
-      padding: 18px;
-    }
-
-    .topbar {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 16px;
-      padding: 0 0 14px;
-      border-bottom: 1px solid var(--line);
+    h1, h2, h3, p {
+      margin-top: 0;
     }
 
     h1 {
-      margin: 0;
-      font-size: 20px;
-      line-height: 1.2;
+      margin-bottom: 10px;
+      font-size: 40px;
+      line-height: 1.12;
     }
 
     h2 {
-      margin: 0 0 12px;
+      margin-bottom: 12px;
       font-size: 15px;
     }
 
@@ -105,36 +98,610 @@ export function createPanelHtml(): string {
       font-size: 13px;
     }
 
+    .app-shell {
+      display: grid;
+      grid-template-columns: 264px minmax(0, 1fr) 320px;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    .sidebar {
+      display: grid;
+      grid-template-rows: auto auto auto auto minmax(0, 1fr) auto;
+      gap: 18px;
+      height: 100vh;
+      overflow: auto;
+      padding: 18px;
+      border-right: 1px solid var(--line);
+      background: var(--sidebar);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 18px;
+      font-weight: 800;
+      color: var(--accent-strong);
+    }
+
+    .arbor-mark,
+    .profile-mark {
+      position: relative;
+      display: inline-grid;
+      place-items: center;
+      width: 34px;
+      height: 34px;
+      border: 1px solid #a9c9bb;
+      border-radius: 50%;
+      background: #fff;
+      color: var(--accent);
+      font-weight: 800;
+    }
+
+    .arbor-mark::before {
+      content: "A";
+      font-size: 18px;
+      line-height: 1;
+      transform: translateY(1px);
+    }
+
+    .arbor-mark::after {
+      content: "";
+      position: absolute;
+      width: 13px;
+      height: 11px;
+      border-top: 2px solid currentColor;
+      border-right: 2px solid currentColor;
+      border-radius: 0 8px 0 0;
+      opacity: 0.58;
+      transform: translate(8px, -7px) rotate(-18deg);
+    }
+
+    .sidebar-action {
+      width: 100%;
+      justify-content: center;
+      background: #fff;
+      color: var(--accent-strong);
+    }
+
+    .nav-list,
+    .task-list {
+      display: grid;
+      gap: 7px;
+      list-style: none;
+      margin: 0;
+      padding: 0;
+    }
+
+    .nav-item,
+    .task-item {
+      border-radius: 8px;
+      padding: 9px 10px;
+      color: var(--muted);
+    }
+
+    .nav-item {
+      display: grid;
+      grid-template-columns: 24px minmax(0, 1fr);
+      align-items: center;
+      gap: 8px;
+    }
+
+    .nav-glyph {
+      display: inline-grid;
+      place-items: center;
+      width: 22px;
+      height: 22px;
+      border-radius: 6px;
+      background: rgba(255, 255, 255, 0.72);
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .nav-item.active,
+    .task-item.active {
+      background: var(--sidebar-strong);
+      color: var(--accent-strong);
+      font-weight: 750;
+    }
+
+    .nav-item.active .nav-glyph {
+      background: var(--accent-soft);
+      color: var(--accent-strong);
+    }
+
+    .empty-direction-card {
+      display: grid;
+      grid-template-columns: 28px minmax(0, 1fr);
+      gap: 10px;
+      align-items: start;
+      border: 1px dashed #cbd5d0;
+      background: rgba(255, 255, 255, 0.58);
+    }
+
+    .empty-dot {
+      display: inline-grid;
+      place-items: center;
+      width: 24px;
+      height: 24px;
+      border-radius: 7px;
+      background: #fff;
+      color: var(--accent-strong);
+      font-weight: 800;
+    }
+
+    .sidebar-heading {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 750;
+    }
+
+    .task-meta,
+    .profile-meta,
+    .hint,
+    .stage-detail {
+      color: var(--muted);
+      font-size: 12px;
+      overflow-wrap: anywhere;
+    }
+
+    .profile {
+      grid-row: 6;
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      align-self: end;
+      padding-top: 16px;
+      border-top: 1px solid var(--line);
+    }
+
+    .profile-mark::before {
+      content: "AA";
+      font-size: 12px;
+      letter-spacing: 0;
+    }
+
+    .profile-name {
+      font-weight: 750;
+    }
+
+    .workbench {
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr) auto auto auto;
+      height: 100vh;
+      min-height: 0;
+      overflow: hidden;
+      background: var(--canvas);
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      min-height: 58px;
+      padding: 0 22px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.92);
+    }
+
+    .topbar-left,
+    .topbar-actions {
+      display: flex;
+      align-items: center;
+      min-width: 0;
+    }
+
+    .topbar-left {
+      gap: 10px;
+    }
+
+    .topbar-title {
+      font-weight: 750;
+      color: var(--text);
+    }
+
+    .topbar-kicker {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .topbar-actions {
+      justify-content: flex-end;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .topbar-action {
+      min-height: 32px;
+      border-color: transparent;
+      background: transparent;
+      color: var(--muted);
+      padding: 0 9px;
+      font-size: 13px;
+    }
+
+    .topbar-action:hover,
+    .topbar-action:focus-visible {
+      border-color: var(--line);
+      background: var(--panel);
+      color: var(--text);
+    }
+
     .status-pill {
       border: 1px solid var(--line);
       border-radius: 999px;
-      background: var(--surface);
+      background: var(--panel);
       color: var(--muted);
-      padding: 6px 10px;
-      min-width: 128px;
+      padding: 5px 9px;
+      min-width: 116px;
       text-align: center;
       white-space: nowrap;
+      font-size: 12px;
     }
 
     .status-pill.completed { color: var(--ok); border-color: #86efac; }
     .status-pill.failed { color: var(--danger); border-color: #fecaca; }
     .status-pill.running { color: var(--warn); border-color: #fde68a; }
 
-    .layout {
+    .canvas-scroll {
       display: grid;
-      grid-template-columns: minmax(320px, 410px) minmax(0, 1fr);
-      gap: 18px;
-      margin-top: 18px;
-      align-items: start;
+      align-items: center;
+      justify-items: center;
+      min-height: 0;
+      padding: 22px 36px;
+      overflow: auto;
     }
 
-    .stack {
+    .center-stage {
+      width: min(880px, 100%);
+      text-align: center;
+    }
+
+    .hero-mark {
+      width: 52px;
+      height: 52px;
+      margin-bottom: 14px;
+      background: var(--accent-soft);
+    }
+
+    .hero-mark::before {
+      font-size: 26px;
+    }
+
+    .hero-mark::after {
+      width: 16px;
+      height: 13px;
+      transform: translate(10px, -9px) rotate(-18deg);
+    }
+
+    .subtitle {
+      margin: 0 auto 26px;
+      max-width: 620px;
+      color: var(--muted);
+      font-size: 17px;
+    }
+
+    .capability-grid {
       display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .capability-card {
+      min-height: 140px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      padding: 20px 16px;
+      display: grid;
+      gap: 10px;
+      align-content: center;
+      line-height: 1.42;
+      transition: border-color 120ms ease, box-shadow 120ms ease, transform 120ms ease;
+    }
+
+    .capability-card:hover,
+    .capability-card:focus-visible {
+      border-color: #b7cac2;
+      box-shadow: 0 10px 24px rgba(22, 45, 34, 0.08);
+      outline: 0;
+      transform: translateY(-1px);
+    }
+
+    .capability-icon {
+      display: grid;
+      place-items: center;
+      width: 44px;
+      height: 44px;
+      margin: 0 auto;
+      border-radius: 8px;
+      background: var(--accent-soft);
+      border: 1px solid #d3e7de;
+      color: var(--accent-strong);
+      font-weight: 800;
+      font-size: 18px;
+      box-shadow: inset 0 -1px 0 rgba(13, 93, 65, 0.08);
+    }
+
+    .capability-card h2 {
+      margin: 0;
+      font-size: 17px;
+    }
+
+    .capability-card p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .activity-view,
+    .result-view {
+      display: none;
+      text-align: left;
+    }
+
+    body[data-run-state="running"] .start-view,
+    body[data-run-state="completed"] .start-view,
+    body[data-run-state="failed"] .start-view {
+      display: none;
+    }
+
+    body[data-run-state="running"] .activity-view,
+    body[data-run-state="failed"] .activity-view {
+      display: block;
+    }
+
+    body[data-run-state="completed"] .result-view {
+      display: block;
+    }
+
+    .activity-feed {
+      display: grid;
+      gap: 10px;
+    }
+
+    .activity-item {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      padding: 12px;
+      display: grid;
+      gap: 5px;
+    }
+
+    .activity-title {
+      font-weight: 750;
+    }
+
+    .prompt-dock {
+      margin: 0 36px 14px;
+      border: 1px solid #c9d3cf;
+      border-radius: 8px;
+      background: #fff;
+      box-shadow: 0 12px 26px rgba(18, 31, 25, 0.08);
+      padding: 12px;
+      display: grid;
+      gap: 8px;
+    }
+
+    .prompt-dock textarea {
+      min-height: 58px;
+      border: 0;
+      padding: 4px;
+      resize: vertical;
+    }
+
+    .prompt-dock textarea:focus {
+      outline: 0;
+    }
+
+    .prompt-controls,
+    .actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .prompt-controls {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      justify-content: space-between;
+      border-top: 1px solid var(--line-soft);
+      padding-top: 8px;
+    }
+
+    .control-group {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: nowrap;
+      min-width: 0;
+    }
+
+    .workspace-hint {
+      flex: 0 0 auto;
+    }
+
+    .toolbar-field {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+      white-space: nowrap;
+    }
+
+    .compact-select {
+      width: min(178px, 100%);
+      min-width: 0;
+      max-width: 178px;
+      height: 34px;
+      padding: 6px 28px 6px 9px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    #todoList {
+      display: grid;
+      gap: 0;
+      list-style: none;
+      margin: 0;
+      padding: 4px;
+      border: 1px solid var(--line-soft);
+      border-radius: 8px;
+      background: #fff;
+    }
+
+    #todoList li {
+      border: 0;
+      border-top: 1px solid var(--line-soft);
+      border-radius: 0;
+      background: transparent;
+      color: var(--muted);
+      padding: 9px 10px;
+      line-height: 1.42;
+    }
+
+    #todoList li:first-child {
+      border-top: 0;
+      color: var(--text);
+      font-weight: 750;
+    }
+
+    .inspector {
+      display: grid;
+      align-content: start;
+      gap: 0;
+      height: 100vh;
+      overflow: auto;
+      border-left: 1px solid var(--line);
+      background: var(--panel);
+    }
+
+    .inspector-section {
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .inspector-section h2 {
+      margin-bottom: 10px;
+      font-size: 14px;
+    }
+
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .inspector .summary-grid {
+      grid-template-columns: 1fr;
+      gap: 0;
+      overflow: hidden;
+      border: 1px solid var(--line-soft);
+      border-radius: 8px;
+      background: #fff;
+    }
+
+    .metric {
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 9px 10px;
+      background: #fff;
+      min-height: 56px;
+    }
+
+    .metric .label {
+      color: var(--muted);
+      font-size: 12px;
+      margin-bottom: 4px;
+    }
+
+    .metric .value {
+      font-size: 15px;
+      font-weight: 750;
+      overflow-wrap: anywhere;
+    }
+
+    .inspector .metric {
+      display: grid;
+      grid-template-columns: 76px minmax(0, 1fr);
+      gap: 8px;
+      align-items: baseline;
+      min-height: 0;
+      border: 0;
+      border-top: 1px solid var(--line-soft);
+      border-radius: 0;
+      background: transparent;
+      padding: 9px 10px;
+    }
+
+    .inspector .metric:first-child {
+      border-top: 0;
+    }
+
+    .inspector .metric .label {
+      margin: 0;
+      line-height: 1.35;
+    }
+
+    .inspector .metric .value {
+      font-size: 14px;
+      line-height: 1.36;
+    }
+
+    .settings-dock {
+      margin: 0 22px 18px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      padding: 12px 14px;
+      overflow: auto;
+    }
+
+    .settings-dock[open] {
+      max-height: min(62vh, 680px);
+    }
+
+    .bottom-status {
+      display: flex;
+      justify-content: flex-end;
       gap: 14px;
+      align-items: center;
+      min-height: 34px;
+      padding: 0 22px 10px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .bottom-status span {
+      border-left: 1px solid var(--line);
+      padding-left: 14px;
+    }
+
+    .bottom-status span:first-child {
+      border-left: 0;
+      color: var(--accent-strong);
+      font-weight: 750;
+    }
+
+    .details-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+      margin-top: 14px;
     }
 
     .section {
-      background: var(--surface);
+      background: var(--canvas);
       border: 1px solid var(--line);
       border-radius: 8px;
       padding: 14px;
@@ -145,56 +712,11 @@ export function createPanelHtml(): string {
       gap: 12px;
     }
 
-    .row {
+    .row,
+    .split {
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: 12px;
-    }
-
-    .actions {
-      display: flex;
-      gap: 10px;
-      flex-wrap: wrap;
-      align-items: center;
-      margin-top: 12px;
-    }
-
-    .hint {
-      color: var(--muted);
-      font-size: 13px;
-      margin: 8px 0 0;
-    }
-
-    .summary-grid {
-      display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 10px;
-    }
-
-    .metric {
-      border: 1px solid var(--line);
-      border-radius: 6px;
-      padding: 10px;
-      background: var(--surface-strong);
-      min-height: 68px;
-    }
-
-    .metric .label {
-      color: var(--muted);
-      font-size: 12px;
-      margin-bottom: 4px;
-    }
-
-    .metric .value {
-      font-size: 16px;
-      font-weight: 750;
-      overflow-wrap: anywhere;
-    }
-
-    .split {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-      gap: 14px;
     }
 
     .timeline {
@@ -207,7 +729,7 @@ export function createPanelHtml(): string {
 
     .timeline-item {
       display: grid;
-      grid-template-columns: 108px minmax(0, 1fr);
+      grid-template-columns: 96px minmax(0, 1fr);
       gap: 10px;
       align-items: start;
       border: 1px solid var(--line);
@@ -223,7 +745,7 @@ export function createPanelHtml(): string {
       font-size: 12px;
       font-weight: 700;
       color: var(--muted);
-      background: var(--surface-strong);
+      background: var(--line-soft);
     }
 
     .stage-state.done { color: var(--ok); background: #ecfdf3; }
@@ -232,33 +754,13 @@ export function createPanelHtml(): string {
     .stage-state.failed { color: var(--danger); background: #fff5f5; }
     .stage-state.skipped { color: var(--muted); background: #f8fafc; }
 
-    .stage-title {
+    .stage-title,
+    .note-agent {
       font-weight: 750;
       overflow-wrap: anywhere;
     }
 
-    .stage-detail {
-      color: var(--muted);
-      margin-top: 3px;
-      overflow-wrap: anywhere;
-    }
-
-    .rootlet-grid {
-      display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 10px;
-    }
-
-    .rootlet-card {
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      padding: 10px;
-      background: #fff;
-      display: grid;
-      gap: 7px;
-      min-height: 148px;
-    }
-
+    .rootlet-grid,
     .transcript-grid,
     .model-output-grid {
       display: grid;
@@ -266,13 +768,14 @@ export function createPanelHtml(): string {
       gap: 10px;
     }
 
+    .rootlet-card,
     .work-note,
     .model-output-card {
       border: 1px solid var(--line);
       border-radius: 8px;
       background: #fff;
       padding: 10px;
-      min-height: 132px;
+      min-height: 126px;
       display: grid;
       gap: 7px;
     }
@@ -282,11 +785,6 @@ export function createPanelHtml(): string {
       justify-content: space-between;
       gap: 8px;
       align-items: start;
-    }
-
-    .note-agent {
-      font-weight: 750;
-      overflow-wrap: anywhere;
     }
 
     .note-status {
@@ -303,7 +801,7 @@ export function createPanelHtml(): string {
     .visible-output-item {
       display: grid;
       gap: 4px;
-      border-top: 1px solid #eef2f5;
+      border-top: 1px solid var(--line-soft);
       padding-top: 6px;
     }
 
@@ -340,7 +838,7 @@ export function createPanelHtml(): string {
       display: flex;
       justify-content: space-between;
       gap: 8px;
-      border-top: 1px solid #eef2f5;
+      border-top: 1px solid var(--line-soft);
       padding-top: 4px;
     }
 
@@ -371,14 +869,7 @@ export function createPanelHtml(): string {
       overflow-wrap: anywhere;
     }
 
-    details {
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      background: var(--surface);
-      padding: 12px 14px;
-    }
-
-    summary {
+    details summary {
       cursor: pointer;
       font-weight: 750;
     }
@@ -407,200 +898,384 @@ export function createPanelHtml(): string {
       color: var(--danger);
     }
 
-    @media (max-width: 1080px) {
-      .rootlet-grid, .summary-grid, .transcript-grid, .model-output-grid {
+    @media (max-width: 1180px) {
+      .app-shell {
+        grid-template-columns: 220px minmax(0, 1fr) 296px;
+      }
+
+      .canvas-scroll {
+        padding: 20px 24px;
+      }
+
+      .prompt-dock {
+        margin: 0 24px 14px;
+      }
+
+      .settings-dock {
+        margin: 0 24px 18px;
+      }
+
+      .capability-grid {
         grid-template-columns: repeat(2, minmax(0, 1fr));
       }
     }
 
-    @media (max-width: 920px) {
-      .layout, .split, .summary-grid, .row, .rootlet-grid, .transcript-grid, .model-output-grid {
+    @media (max-width: 820px) {
+      .app-shell,
+      .details-grid,
+      .row,
+      .split,
+      .summary-grid,
+      .rootlet-grid,
+      .transcript-grid,
+      .model-output-grid,
+      .inspector {
         grid-template-columns: 1fr;
       }
 
-      main {
-        padding: 12px;
+      .app-shell {
+        height: auto;
+        min-height: 100vh;
+        overflow: visible;
+      }
+
+      .sidebar,
+      .workbench,
+      .inspector {
+        height: auto;
+        overflow: visible;
+      }
+
+      .workbench {
+        order: 1;
+      }
+
+      .sidebar {
+        order: 2;
+      }
+
+      .inspector {
+        order: 3;
+      }
+
+      .canvas-scroll {
+        padding: 28px 16px;
+      }
+
+      h1 {
+        font-size: 32px;
+      }
+
+      .prompt-dock {
+        margin: 0 16px 16px;
+      }
+
+      .prompt-controls {
+        grid-template-columns: 1fr;
+      }
+
+      .control-group {
+        flex-wrap: wrap;
+      }
+
+      .toolbar-field {
+        width: 100%;
+        flex-wrap: wrap;
+      }
+
+      .compact-select {
+        width: 100%;
+        max-width: none;
+      }
+
+      #runButton {
+        justify-self: end;
+      }
+
+      .settings-dock {
+        margin: 0 16px 16px;
       }
 
       .topbar {
         align-items: flex-start;
         flex-direction: column;
+        padding: 12px 16px;
       }
 
-      .timeline-item {
+      .timeline-item,
+      .visible-output-field {
         grid-template-columns: 1fr;
       }
     }
   </style>
 </head>
-<body>
-  <main>
-    <div class="topbar">
-      <h1>AgentArbor 地下运行面板</h1>
-      <div id="runStatus" class="status-pill" aria-live="polite">待启动 (pending)</div>
-    </div>
+<body data-run-state="idle">
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="AgentArbor 工作台导航">
+      <div class="brand"><span class="arbor-mark brand-mark" aria-hidden="true"></span><span>AgentArbor</span></div>
+      <button class="sidebar-action" type="button">新建方向</button>
+      <nav>
+        <ul class="nav-list">
+          <li class="nav-item"><span class="nav-glyph">土</span><span>土壤</span></li>
+          <li class="nav-item active"><span class="nav-glyph">地</span><span>地下组织</span></li>
+          <li class="nav-item"><span class="nav-glyph">上</span><span>地上组织</span></li>
+          <li class="nav-item"><span class="nav-glyph">自</span><span>自动化</span></li>
+        </ul>
+      </nav>
+      <section>
+        <div class="sidebar-heading"><span>方向记录</span><span>+</span></div>
+        <ul class="task-list">
+          <li class="task-item empty-direction-card">
+            <span class="empty-dot" aria-hidden="true">-</span>
+            <div>
+              <div>暂无方向任务</div>
+              <div class="task-meta">运行后会在这里显示方向记录。</div>
+            </div>
+          </li>
+        </ul>
+      </section>
+      <div class="profile">
+        <span class="profile-mark" aria-hidden="true"></span>
+        <div>
+          <div class="profile-name">本地会话</div>
+          <div class="profile-meta">本地工作区</div>
+        </div>
+      </div>
+    </aside>
 
-    <div class="layout">
-      <div class="stack">
-        <section class="section">
-          <h2>运行输入</h2>
-          <form id="runForm" class="fields">
-            <label>目标
-              <textarea id="goalInput" required>构建一个小型确定性助手。</textarea>
-            </label>
-            <label>AI 模式
-              <select id="aiModeInput">
-                <option value="none">无 AI (none)</option>
-                <option value="fake">Fake AI (fake)</option>
-                <option value="openai-compatible">OpenAI-compatible (openai-compatible)</option>
+    <main class="workbench">
+      <div class="topbar">
+        <div class="topbar-left">
+          <div class="topbar-title">地下组织工作台</div>
+          <div class="topbar-kicker">本地地下组织运行面</div>
+        </div>
+        <div class="topbar-actions">
+          <button class="topbar-action" type="button">文档</button>
+          <button class="topbar-action" type="button">设置</button>
+          <div id="runStatus" class="status-pill" aria-live="polite">待启动 (pending)</div>
+        </div>
+      </div>
+
+      <section class="canvas-scroll" aria-label="方向工作区">
+        <div class="center-stage">
+          <div class="start-view">
+            <div class="arbor-mark hero-mark" aria-hidden="true"></div>
+            <h1>把想法长成方向</h1>
+            <p class="subtitle">地下组织先理解、探索、收束，再交给地上生长</p>
+            <div class="capability-grid" aria-label="地下组织能力入口">
+              <article class="capability-card" tabindex="0">
+                <div class="capability-icon">研</div>
+                <h2>网页研究</h2>
+                <p>搜索互联网信息，了解现状、案例与趋势</p>
+              </article>
+              <article class="capability-card" tabindex="0">
+                <div class="capability-icon">码</div>
+                <h2>代码理解</h2>
+                <p>理解本地代码库，梳理实现与依赖脉络</p>
+              </article>
+              <article class="capability-card" tabindex="0">
+                <div class="capability-icon">证</div>
+                <h2>证据整理</h2>
+                <p>整合多源证据，构建事实链与关键洞察</p>
+              </article>
+              <article class="capability-card" tabindex="0">
+                <div class="capability-icon">交</div>
+                <h2>方向交接</h2>
+                <p>形成方向交接包，交给地上组织继续生长</p>
+              </article>
+            </div>
+          </div>
+
+          <div class="activity-view">
+            <h1>地下组织正在扎根</h1>
+            <p class="subtitle">目标已进入地下组织，活动流会随轮询持续刷新。</p>
+            <div id="workflowTimeline" class="activity-feed"></div>
+          </div>
+
+          <div class="result-view">
+            <h1>方向已收束</h1>
+            <p class="subtitle">中央区域只展示方向判断与交接审查；底部详情保留运行证据。</p>
+            <section class="section split">
+              <div>
+                <h2>方向判断</h2>
+                <div id="convergenceExplanation" class="text-block"></div>
+              </div>
+              <div>
+                <h2>方向交接摘要</h2>
+                <div id="packageResult" class="text-block"></div>
+              </div>
+            </section>
+          </div>
+        </div>
+      </section>
+
+      <form id="runForm" class="prompt-dock">
+        <textarea id="goalInput" required placeholder="描述你的目标，地下组织会先把问题想清楚。"></textarea>
+        <div class="prompt-controls">
+          <div class="control-group">
+            <span class="hint workspace-hint">本地工作区</span>
+            <label class="toolbar-field"><span>模型</span>
+              <select id="aiModeInput" class="compact-select">
+                <option value="none">无 AI</option>
+                <option value="fake">Fake AI</option>
+                <option value="openai-compatible">OpenAI-compatible</option>
               </select>
             </label>
-            <div class="actions">
-              <button id="runButton" type="submit">启动地下运行</button>
-            </div>
-            <p class="hint">点击后立即创建运行 job；面板会轮询事件游标、等待点、工作笔记和模型调用状态。</p>
-          </form>
-        </section>
-
-        <section class="section">
-          <h2>配置中心</h2>
-          <form id="configForm" class="fields">
-            <div class="row">
-              <label>模型接口地址
-                <input id="baseUrlInput" autocomplete="off">
-              </label>
-              <label>模型名
-                <input id="modelInput" autocomplete="off" placeholder="gpt-4.1-mini">
-              </label>
-            </div>
-            <div class="row">
-              <label>默认 AI 模式
-                <select id="defaultAiModeInput">
-                  <option value="none">无 AI (none)</option>
-                  <option value="fake">Fake AI (fake)</option>
-                  <option value="openai-compatible">OpenAI-compatible (openai-compatible)</option>
-                </select>
-              </label>
-              <label>API Key
-                <input id="apiKeyInput" type="password" autocomplete="new-password" placeholder="仅写入，不回显">
-              </label>
-            </div>
-            <div class="actions">
-              <button id="configButton" type="submit">保存配置</button>
-              <span id="secretState" class="hint">密钥未配置</span>
-            </div>
-          </form>
-          <form id="toolConfigForm" class="fields" style="margin-top: 14px;">
-            <h3>工具配置</h3>
-            <div class="row">
-              <label>搜索工具 Provider
-                <select id="webSearchProviderInput">
-                  <option value="tavily">Tavily 搜索 (tavily)</option>
-                  <option value="none">不启用搜索 provider (none)</option>
-                </select>
-              </label>
-              <label>搜索结果数
-                <input id="tavilyMaxResultsInput" type="number" min="1" max="10" step="1">
-              </label>
-            </div>
-            <div class="row">
-              <label>Tavily API Key
-                <input id="tavilyApiKeyInput" type="password" autocomplete="new-password" placeholder="仅写入，不回显">
-              </label>
-              <label>信息源配置
-                <input id="informationSourcePreferenceInput" autocomplete="off" readonly>
-              </label>
-            </div>
-            <div class="actions">
-              <button id="toolConfigButton" type="submit">保存搜索工具</button>
-              <span id="informationSourceState" class="hint">搜索工具未配置</span>
-            </div>
-          </form>
-        </section>
-
-        <section class="section">
-          <h2>配置 / Provider 状态</h2>
-          <div id="configStatus" class="summary-grid"></div>
-        </section>
-      </div>
-
-      <div class="stack">
-        <section class="section">
-          <h2>运行总览</h2>
-          <div id="overviewMetrics" class="summary-grid"></div>
-        </section>
-
-        <section class="section">
-          <h2>工作流阶段时间线</h2>
-          <ol id="workflowTimeline" class="timeline"></ol>
-        </section>
-
-        <section class="section">
-          <h2>Rootlet 工作区</h2>
-          <div id="rootletWorkspace" class="rootlet-grid"></div>
-        </section>
-
-        <section class="section">
-          <h2>模型调用追踪</h2>
-          <div id="modelTraceMetrics" class="summary-grid"></div>
-          <div class="split" style="margin-top: 12px;">
-            <div>
-              <h3>模型事件序列</h3>
-              <ul id="modelEventList"></ul>
-            </div>
-            <div>
-              <h3>模型调用引用</h3>
-              <ul id="modelCallList"></ul>
-            </div>
           </div>
-        </section>
+          <button id="runButton" type="submit">启动地下运行</button>
+        </div>
+      </form>
 
-        <section class="section">
-          <h2>模型输出</h2>
-          <div id="modelOutputList" class="model-output-grid"></div>
-        </section>
+      <details class="settings-dock">
+        <summary>设置与调试详情</summary>
+        <div class="details-grid">
+          <section class="section">
+            <h2>模型配置</h2>
+            <form id="configForm" class="fields">
+              <div class="row">
+                <label>模型接口地址
+                  <input id="baseUrlInput" autocomplete="off">
+                </label>
+                <label>模型名
+                  <input id="modelInput" autocomplete="off" placeholder="gpt-4.1-mini">
+                </label>
+              </div>
+              <div class="row">
+                <label>默认 AI 模式
+                  <select id="defaultAiModeInput">
+                    <option value="none">无 AI (none)</option>
+                    <option value="fake">Fake AI (fake)</option>
+                    <option value="openai-compatible">OpenAI-compatible (openai-compatible)</option>
+                  </select>
+                </label>
+                <label>API Key
+                  <input id="apiKeyInput" type="password" autocomplete="new-password" placeholder="仅写入，不回显">
+                </label>
+              </div>
+              <div class="actions">
+                <button id="configButton" type="submit">保存配置</button>
+                <span id="secretState" class="hint">密钥未配置</span>
+              </div>
+            </form>
+          </section>
 
-        <section class="section">
-          <h2>Agent Transcript</h2>
-          <div id="agentTranscript" class="transcript-grid"></div>
-        </section>
+          <section class="section">
+            <h2>工具配置</h2>
+            <form id="toolConfigForm" class="fields">
+              <div class="row">
+                <label>搜索工具 Provider
+                  <select id="webSearchProviderInput">
+                    <option value="tavily">Tavily 搜索 (tavily)</option>
+                    <option value="none">不启用搜索 provider (none)</option>
+                  </select>
+                </label>
+                <label>搜索结果数
+                  <input id="tavilyMaxResultsInput" type="number" min="1" max="10" step="1">
+                </label>
+              </div>
+              <div class="row">
+                <label>Tavily API Key
+                  <input id="tavilyApiKeyInput" type="password" autocomplete="new-password" placeholder="仅写入，不回显">
+                </label>
+                <label>信息源配置
+                  <input id="informationSourcePreferenceInput" autocomplete="off" readonly>
+                </label>
+              </div>
+              <div class="actions">
+                <button id="toolConfigButton" type="submit">保存搜索工具</button>
+                <span id="informationSourceState" class="hint">搜索工具未配置</span>
+              </div>
+            </form>
+          </section>
 
-        <section class="section split">
-          <div>
-            <h2>收束解释</h2>
-            <div id="convergenceExplanation" class="text-block"></div>
-          </div>
-          <div>
-            <h2>方向包结果</h2>
-            <div id="packageResult" class="text-block"></div>
-          </div>
-        </section>
+          <section class="section">
+            <h2>运行详情</h2>
+            <div class="split">
+              <div>
+                <h3>Rootlet 详情</h3>
+                <div id="rootletWorkspace" class="rootlet-grid"></div>
+              </div>
+              <div>
+                <h3>模型输出</h3>
+                <div id="modelOutputList" class="model-output-grid"></div>
+              </div>
+            </div>
+          </section>
 
-        <section class="section">
-          <h2>事件流摘要</h2>
-          <ul id="eventList"></ul>
-        </section>
+          <section class="section">
+            <h2>模型与 Provider 指标</h2>
+            <div id="configStatus" class="summary-grid"></div>
+            <div id="modelTraceMetrics" class="summary-grid" style="margin-top: 10px;"></div>
+          </section>
 
-        <details>
-          <summary>调试视图：Observation Snapshot</summary>
-          <pre id="snapshotView">{}</pre>
-        </details>
-      </div>
-    </div>
-  </main>
+          <section class="section">
+            <h2>调试视图</h2>
+            <div class="split">
+              <div>
+                <h3>模型事件序列</h3>
+                <ul id="modelEventList"></ul>
+              </div>
+              <div>
+                <h3>模型调用引用</h3>
+                <ul id="modelCallList"></ul>
+              </div>
+            </div>
+            <h3 style="margin-top: 12px;">事件流摘要</h3>
+            <ul id="eventList"></ul>
+            <h3 style="margin-top: 12px;">Agent Transcript</h3>
+            <div id="agentTranscript" class="transcript-grid"></div>
+            <details style="margin-top: 12px;">
+              <summary>Observation Snapshot</summary>
+              <pre id="snapshotView">{}</pre>
+            </details>
+          </section>
+        </div>
+      </details>
+
+      <footer class="bottom-status" aria-label="底部状态栏">
+        <span id="bottomToolStatus">工具状态待检测</span>
+        <span>安全模式</span>
+      </footer>
+    </main>
+
+    <aside class="inspector" aria-label="右侧检查器">
+      <section class="inspector-section">
+        <h2>待办</h2>
+        <ul id="todoList">
+          <li>暂无待办</li>
+          <li>需要你确认的事项会显示在这里。</li>
+        </ul>
+      </section>
+
+      <section class="inspector-section">
+        <h2>上下文</h2>
+        <div id="contextMetrics" class="summary-grid">
+          <div class="metric"><div class="label">上下文容量</div><div class="value">待计算</div></div>
+          <div class="metric"><div class="label">规则</div><div class="value">AGENTS.md</div></div>
+          <div class="metric"><div class="label">任务看板</div><div class="value">已连接</div></div>
+          <div class="metric"><div class="label">开发指南</div><div class="value">已连接</div></div>
+        </div>
+      </section>
+
+      <section class="inspector-section">
+        <h2>运行状态</h2>
+        <div id="overviewMetrics" class="summary-grid"></div>
+      </section>
+    </aside>
+  </div>
 
   <script>
     const ROOTLET_KINDS = ["option", "risk", "asset_fit", "evidence", "constraint", "counterfactual"];
     const WORKFLOW_STAGES = [
-      { id: "goal", title: "目标接收", events: ["goal.received"], detail: "接收用户目标并生成地下运行上下文。" },
-      { id: "planning", title: "探索规划", events: ["underground.exploration_planned"], detail: "Intent Core 和 Growth Governor 规划 rootlet 集群。" },
-      { id: "rootlets", title: "Rootlet 集群", events: ["rootlet_cluster.started"], detail: "按目标画像启动 option / risk / asset / evidence / constraint / counterfactual 根须。" },
-      { id: "model", title: "模型调用", events: ["model.requested", "model.completed", "model.failed"], detail: "仅在 fake 或 OpenAI-compatible 模式下经 IntelligenceChannel 调用。" },
-      { id: "tools", title: "工具调用", events: ["tool.requested", "tool.completed", "tool.failed"], detail: "工具只通过统一 ToolCenter 执行，并只展示安全引用和摘要。" },
-      { id: "candidates", title: "候选池", events: ["exploration_candidate.produced", "candidate_pool.updated"], detail: "rootlet 输出被包装为候选并进入唯一候选池。" },
-      { id: "autonomy", title: "自治评审", events: ["autonomy_review.completed", "convergence_review.requested"], detail: "Autonomy Core 判断继续探索、请求收束、询问用户或停止。" },
-      { id: "convergence", title: "收束评审", events: ["convergence_review.completed"], detail: "Convergence Judge 解释 accepted / merged / rejected / unknown。" },
-      { id: "handoff", title: "方向交接", events: ["direction_handoff.completed", "user_approval.requested"], detail: "Handoff Steward 生成方向交接包或请求用户澄清。" }
+      { id: "goal", title: "理解目标", events: ["goal.received"], detail: "接收用户目标并生成地下运行上下文。" },
+      { id: "planning", title: "规划探索", events: ["underground.exploration_planned"], detail: "地下组织判断需要哪些探索根须。" },
+      { id: "rootlets", title: "根须探索", events: ["rootlet_cluster.started"], detail: "围绕选项、风险、证据、约束和反事实并行探索。" },
+      { id: "model", title: "智能补充", events: ["model.requested", "model.completed", "model.failed"], detail: "仅在 fake 或 OpenAI-compatible 模式下经 IntelligenceChannel 调用。" },
+      { id: "tools", title: "信息获取", events: ["tool.requested", "tool.completed", "tool.failed"], detail: "工具只通过统一 ToolCenter 执行，并只展示安全引用和摘要。" },
+      { id: "candidates", title: "整理候选", events: ["exploration_candidate.produced", "candidate_pool.updated"], detail: "探索输出被包装为候选并进入唯一候选池。" },
+      { id: "autonomy", title: "自治判断", events: ["autonomy_review.completed", "convergence_review.requested"], detail: "地下自治核心判断继续探索、请求收束、询问用户或停止。" },
+      { id: "convergence", title: "收束方向", events: ["convergence_review.completed"], detail: "收束评审解释 accepted / merged / rejected / unknown。" },
+      { id: "handoff", title: "方向交接", events: ["direction_handoff.completed", "user_approval.requested"], detail: "生成方向交接包或请求用户澄清。" }
     ];
     const STATUS_LABELS = {
       pending: "待启动 (pending)",
@@ -723,6 +1398,8 @@ export function createPanelHtml(): string {
     const runButton = document.getElementById("runButton");
     const configButton = document.getElementById("configButton");
     const toolConfigButton = document.getElementById("toolConfigButton");
+    const todoList = document.getElementById("todoList");
+    const bottomToolStatus = document.getElementById("bottomToolStatus");
 
     document.getElementById("runForm").addEventListener("submit", async (event) => {
       event.preventDefault();
@@ -885,6 +1562,7 @@ export function createPanelHtml(): string {
         tavilyMaxResultsInput.value = "5";
         informationSourcePreferenceInput.value = "";
         informationSourceState.textContent = "搜索工具未配置";
+        bottomToolStatus.textContent = "工具状态待检测";
         return;
       }
       const webSearch = tools?.webSearch || informationAccess.web;
@@ -892,8 +1570,13 @@ export function createPanelHtml(): string {
       tavilyMaxResultsInput.value = String(webSearch?.maxResults || 5);
       tavilyApiKeyInput.placeholder = webSearch?.secretConfigured ? "已配置，留空保持不变" : "仅写入，不回显";
       informationSourcePreferenceInput.value = (informationAccess.sourcePreference || []).join(", ");
-      informationSourceState.textContent =
-        WEB_SEARCH_STATUS_LABELS[webSearch?.status] || (webSearch?.secretConfigured ? "Tavily 已配置" : "Tavily 未配置");
+      const statusLabel = WEB_SEARCH_STATUS_LABELS[webSearch?.status] || (webSearch?.secretConfigured ? "Tavily 已配置" : "Tavily 未配置");
+      informationSourceState.textContent = statusLabel;
+      bottomToolStatus.textContent = webSearch?.status === "ready"
+        ? "搜索工具就绪"
+        : webSearch?.status === "disabled"
+          ? "搜索工具已禁用"
+          : "搜索工具未配置";
     }
 
     function renderProviderStatus(config, provider, informationAccess) {
@@ -912,13 +1595,15 @@ export function createPanelHtml(): string {
     }
 
     function renderIdleWorkbench(config) {
+      setWorkbenchState("idle");
+      renderTodoList([
+        "暂无待办",
+        "需要你确认的事项会显示在这里。"
+      ]);
       renderMetricsInto("overviewMetrics", [
-        ["运行状态", "待启动 (pending)"],
+        ["运行状态", "准备扎根"],
         ["当前阶段", "未开始 (not_started)"],
-        ["AI 模式", formatAiMode(config.defaultAiMode || "none")],
-        ["Provider", PROVIDER_STATUS_LABELS[inferProviderStatus(config, config.defaultAiMode || "none")]],
-        ["模型调用", "0 / 0 / 0"],
-        ["方向包状态", "暂无"]
+        ["等待点", "等待目标输入"]
       ]);
       renderWorkflowTimeline(createIdleTimeline());
       renderRootletCards(createIdleRootlets());
@@ -933,14 +1618,18 @@ export function createPanelHtml(): string {
 
     function renderRunningSkeleton(input) {
       const providerStatus = inferProviderStatus(input.config, input.aiMode);
+      setWorkbenchState("running");
+      renderTodoList([
+        "目标已提交，等待地下组织返回第一批事件。",
+        "当前待办：观察目标是否需要补充边界。",
+        input.aiMode === "none" ? "本次不会访问模型 provider。" : "模型与工具只展示脱敏状态和安全引用。"
+      ]);
       renderProviderStatus(input.config, { status: providerStatus }, state.informationAccess);
       renderMetricsInto("overviewMetrics", [
-        ["运行状态", "运行中 (running)"],
+        ["运行状态", "正在扎根 (running)"],
         ["当前阶段", "请求已发出"],
         ["目标", compactText(input.goal, 72)],
-        ["AI 模式", formatAiMode(input.aiMode)],
-        ["Provider", PROVIDER_STATUS_LABELS[providerStatus] || providerStatus],
-        ["运行提示", "正在创建后台 job；随后按轮询刷新事件游标和 transcript。"]
+        ["等待点", "等待后台 job 返回"]
       ]);
       renderWorkflowTimeline(createRunningTimeline(input.aiMode));
       renderRootletCards(createRunningRootlets(input.aiMode));
@@ -962,15 +1651,17 @@ export function createPanelHtml(): string {
     function renderRun(response) {
       const tracking = response.tracking;
       state.informationAccess = response.informationAccess || state.informationAccess;
+      setWorkbenchState(response.status);
+      renderRunTodos(response);
       renderInformationAccess(state.informationAccess);
       renderProviderStatus(response.config, tracking.provider, tracking.informationSources || state.informationAccess);
       renderMetricsInto("overviewMetrics", [
         ["运行状态", formatStatus(tracking.run.status)],
         ["当前相位", labelWithId(PHASE_LABELS, tracking.run.phase)],
         ["当前阶段", labelWithId(STAGE_LABELS, tracking.run.stage)],
-        ["模型调用", tracking.modelTotals.requested + " / " + tracking.modelTotals.completed + " / " + tracking.modelTotals.failed],
-        ["候选总数", String(tracking.candidates.total.total)],
-        ["等待点", tracking.run.waitingPoint]
+        ["等待点", tracking.run.waitingPoint],
+        ["方向包状态", tracking.package?.status || "尚未生成"],
+        ["用户确认", tracking.convergence?.userEscalationRequired ? "需要确认" : "暂无阻塞"]
       ]);
       renderWorkflowTimeline(createTimeline(response));
       renderRootletWorkspace(tracking);
@@ -990,17 +1681,58 @@ export function createPanelHtml(): string {
       document.getElementById("snapshotView").textContent = JSON.stringify(response.observation || response.trace || {}, null, 2);
     }
 
+    function renderTodoList(items) {
+      todoList.replaceChildren(...items.map((item) => {
+        const node = document.createElement("li");
+        node.textContent = item;
+        return node;
+      }));
+    }
+
+    function renderRunTodos(response) {
+      const tracking = response.tracking;
+      if (response.status === "running") {
+        renderTodoList([
+          "地下组织正在推进：" + labelWithId(STAGE_LABELS, tracking.run.stage),
+          "当前等待点：" + tracking.run.waitingPoint,
+          tracking.convergence?.userEscalationRequired ? "可能需要你补充方向边界。" : "暂无阻塞待办。"
+        ]);
+        return;
+      }
+      if (tracking.convergence?.userEscalationRequired || tracking.package?.status === "awaiting_user") {
+        renderTodoList([
+          "需要你确认方向边界或开放问题。",
+          "审查收束解释中的 unknown 项。",
+          "确认后再生成新的方向交接版本。"
+        ]);
+        return;
+      }
+      if (response.status === "completed") {
+        renderTodoList([
+          "审查方向判断是否符合目标。",
+          "确认方向交接摘要可交给地上组织。",
+          "必要时展开设置与调试详情查看证据。"
+        ]);
+        return;
+      }
+      renderTodoList([
+        "运行失败，需要检查错误摘要。",
+        "确认模型 / 工具配置是否完整。",
+        "修正后重新启动地下运行。"
+      ]);
+    }
+
     function renderWorkflowTimeline(stages) {
       const host = document.getElementById("workflowTimeline");
       host.replaceChildren(...stages.map((stage) => {
-        const item = document.createElement("li");
-        item.className = "timeline-item";
+        const item = document.createElement("div");
+        item.className = "activity-item";
         const status = document.createElement("div");
         status.className = "stage-state " + stage.state;
         status.textContent = STAGE_STATE_LABELS[stage.state] || stage.state;
         const body = document.createElement("div");
         const title = document.createElement("div");
-        title.className = "stage-title";
+        title.className = "activity-title";
         title.textContent = stage.title;
         const detail = document.createElement("div");
         detail.className = "stage-detail";
@@ -1097,7 +1829,7 @@ export function createPanelHtml(): string {
         return "已规划 rootlet kind：" + response.summary.underground.rootletKinds.join(" / ") + "。";
       }
       if (stageId === "rootlets") {
-        return "Rootlet 工作区已展示每种 kind 的启动、调用、候选和 AI / 回退状态。";
+        return "根须详情已展示每种 kind 的启动、调用、候选和 AI / 回退状态。";
       }
       if (stageId === "model") {
         return "模型事件 requested/completed/failed = " + response.summary.ai.eventCounts.requested + "/" + response.summary.ai.eventCounts.completed + "/" + response.summary.ai.eventCounts.failed + "。";
@@ -1448,6 +2180,12 @@ export function createPanelHtml(): string {
       const message = error?.message || String(error);
       const details = error?.details;
       const config = details?.config || getCurrentConfig();
+      setWorkbenchState("failed");
+      renderTodoList([
+        "运行失败，需要检查错误摘要。",
+        "确认模型 / 工具配置是否完整。",
+        "修正后重新启动地下运行。"
+      ]);
       if (config) {
         renderProviderStatus(config, undefined, details?.informationAccess || state.informationAccess);
       }
@@ -1503,8 +2241,14 @@ export function createPanelHtml(): string {
     }
 
     function setStatus(status) {
+      setWorkbenchState(status);
       runStatus.textContent = formatStatus(status);
       runStatus.className = "status-pill " + status;
+    }
+
+    function setWorkbenchState(status) {
+      document.body.dataset.runState =
+        status === "running" || status === "completed" || status === "failed" ? status : "idle";
     }
 
     function setButtons(enabled) {

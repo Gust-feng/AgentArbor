@@ -19,6 +19,7 @@
 - `ModelCallRef`：正式材料引用模型调用的唯一方式。
 - `ModelProvider.complete(request)`：provider adapter 最小接口。
 - `IntelligenceChannel.request(request)`：业务层唯一模型调用入口。
+- `PanelRunStreamEvent.model.output.delta`：panel 专用安全输出增量，只能从模型可见输出安全投影或 provider adapter 的脱敏流式 chunk 派生；它不是 raw provider stream，也不是正式事实源。
 - `AgentTurnRuntime.execute(...)`：所有 agent 多轮模型 + 工具回合的统一运行入口；它在 IntelligenceChannel 外层统一承载 tool call loop、tool result 回填、权限、预算、轮次和 fallback。kernel 只依赖 `ToolExecutionBroker` 接口，不依赖 app `ToolCenter` concrete class。
 - `executeToolUseLoop(...)`：低层兼容 helper，可被 AgentTurnRuntime 复用；rootlet 等业务 agent 不应继续把它当私有入口。
 - `ModelPurpose` 覆盖 `autonomy_decision`：地下自治核心使用该 purpose 请求结构化 `UndergroundAutonomyDecision`，模型输出只能决定继续探索、请求收束、询问用户或停止，不能直接批准 handoff。
@@ -43,6 +44,7 @@
 - 模型输出默认是不可信候选；不能直接写入 Direction Handoff、Growth Plan、Verification Result、Run Memory、Experience Candidate、Capability Asset 或 Soil。
 - 模型返回 `toolCalls` 时只能由 AgentTurnRuntime 触发受权限裁剪的工具循环；工具结果也是不可信材料，必须作为 tool message 回到模型或作为 source/evidence refs 进入候选层，不能直接变成事实源。
 - `model.requested`、`model.completed`、`model.failed` 事件必须由智能通道统一发布；调用方不得手写伪造模型调用事件。
+- 面板的 `model.output.delta` / `model.output.completed` 只能作为 `PanelRunStreamEvent` 安全读模型出现；它们不得携带 provider hidden reasoning、完整 prompt、raw response、未校验输出或 secret，也不能替代 `model.completed` 的 validation 结果。
 - `tool.requested`、`tool.completed`、`tool.failed` 事件必须由工具循环 / ToolCenter 集成统一发布；payload 只允许 safe input/output summary、refs、duration 和错误摘要。
 - EventLog 和 Observation Snapshot 只能记录清洗后的请求摘要、引用、usage、状态和错误引用。
 - Observation refs 必须按事件类型解析：`model.*` payload 中的 `requestId` / `responseId` 只能生成 `model_call` ref；`user_approval.*` 和 direction-handoff revision payload 中的 clarification ids 才能生成 `user_clarification` ref。

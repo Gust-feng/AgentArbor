@@ -1,7 +1,7 @@
 import type { SanitizedInformationAccessConfig, SanitizedModelProviderConfig } from "../domain/config/index.js";
 import { createId, nowIso } from "../kernel/id.js";
 import type { UndergroundAiMode } from "./intelligence-channel-factory.js";
-import type { PanelObservationReadModel, PanelRunStatus } from "./panel-run-read-model.js";
+import type { PanelObservationReadModel, PanelRunStatus, PanelRunStreamEvent } from "./panel-run-read-model.js";
 import type { MinimalRuntime } from "./runtime.js";
 import type { UndergroundDemoSummary } from "./underground-demo-summary.js";
 
@@ -36,6 +36,9 @@ export type PanelRunJob = {
   runtime?: MinimalRuntime;
   traceId?: string;
   goalId?: string;
+  streamEvents: PanelRunStreamEvent[];
+  streamEventIds: Set<string>;
+  nextStreamSequence: number;
   completed?: PanelRunCompletedPayload;
   failed?: PanelRunFailedPayload;
 };
@@ -59,6 +62,9 @@ export class PanelRunJobStore {
       status: "pending",
       createdAt: now,
       updatedAt: now,
+      streamEvents: [],
+      streamEventIds: new Set<string>(),
+      nextStreamSequence: 1,
     };
     this.jobs.set(job.runId, job);
     return job;
@@ -108,6 +114,25 @@ export class PanelRunJobStore {
     job.informationAccess = failed.informationAccess;
     job.failed = failed;
     job.updatedAt = nowIso();
+  }
+
+  appendStreamEvent(runId: string, event: Omit<PanelRunStreamEvent, "sequence">): PanelRunStreamEvent {
+    const job = this.requireJob(runId);
+    const existing = job.streamEventIds.has(event.eventId)
+      ? job.streamEvents.find((item) => item.eventId === event.eventId)
+      : undefined;
+    if (existing !== undefined) {
+      return existing;
+    }
+    const next: PanelRunStreamEvent = {
+      ...event,
+      sequence: job.nextStreamSequence,
+    };
+    job.nextStreamSequence += 1;
+    job.streamEvents.push(next);
+    job.streamEventIds.add(next.eventId);
+    job.updatedAt = nowIso();
+    return next;
   }
 
   private requireJob(runId: string): PanelRunJob {

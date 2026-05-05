@@ -57,6 +57,7 @@
 - OpenAI-compatible adapter 必须把 `tools`、`tool_choice`、assistant `tool_calls`、tool result messages 和 provider `tool_calls` 互相映射；外部 LLM SDK 仍禁止。
 - tool result 作为 `role: "tool"` message 追加回模型上下文；工具输出必须先清洗、截断和 JSON-safe 化。
 - `tool.*` EventLog payload 只记录 call id、tool name、caller agent、duration、safe input/output summary 或 error；不得记录 raw provider response、API key、token、完整 prompt、完整页面正文或 live对象。
+- panel SSE / transcript 可以展示 `tool.requested`、`tool.completed`、`tool.failed` 的安全摘要、tool name、duration 和 tool call refs；不得展示 raw tool output、Tavily raw response、完整页面正文、完整 prompt、API key 或 token。
 - `ResearchTrace` 只能记录 query、source、ref、status、短摘要和调用链；不得保存 raw provider response、完整页面正文、完整 prompt、API key 或 token。
 - rootlet 工具结果只能以 `tool-call:*` 和 `research:*` refs 进入 rootlet output `sourceRefs` / `evidenceRefs`，再进入 CandidatePool 和 Convergence Judge；不得把 tool raw output、Tavily raw response、完整 page preview 或搜索 snippet 直接写入候选、Direction Handoff、Growth Plan、Fruit、Run Memory、Experience Candidate、Capability Asset 或 Soil。
 - `maxModelRounds` 和 `maxToolRounds` 是单次 agent turn 的工程级 runaway guard；达到上限时调用方走声明的 fallback / failed advice 路径，不能无限继续请求模型或工具，也不能把 guard reached 当作任务完成。

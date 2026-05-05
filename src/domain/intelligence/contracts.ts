@@ -126,6 +126,15 @@ export type ModelUsage = {
   readonly latencyMs?: number;
 };
 
+export type ModelOutputDelta = {
+  readonly requestId: string;
+  readonly providerId: string;
+  readonly model: string;
+  readonly delta: string;
+  readonly index: number;
+  readonly createdAt: string;
+};
+
 export type ModelFailureKind =
   | "request_validation"
   | "provider_config"

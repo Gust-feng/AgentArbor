@@ -66,6 +66,56 @@ test("OpenAI-compatible Chat Completions adapter maps request and response throu
   assert.equal(JSON.stringify(eventLog.list()).includes("token"), false);
 });
 
+test("OpenAI-compatible Chat Completions adapter streams safe output deltas", async () => {
+  const calls: { body: Record<string, unknown> }[] = [];
+  const deltas: string[] = [];
+  const fetch: FetchLike = async (_url, init) => {
+    calls.push({ body: JSON.parse(init.body) as Record<string, unknown> });
+    return {
+      ok: true,
+      status: 200,
+      body: sseChunks([
+        {
+          model: "gpt-compatible-test",
+          choices: [{ delta: { content: "{\"summary\":\"" }, finish_reason: null }],
+        },
+        {
+          model: "gpt-compatible-test",
+          choices: [{ delta: { content: "Streamed provider response." }, finish_reason: null }],
+        },
+        {
+          model: "gpt-compatible-test",
+          choices: [{ delta: { content: "\"}" }, finish_reason: "stop" }],
+        },
+      ]),
+      json: async () => {
+        throw new Error("Streaming response should not be read through json().");
+      },
+    };
+  };
+  const provider = new OpenAICompatibleChatCompletionsProvider({
+    baseUrl: "https://llm.example.test",
+    apiKey: "sk-test-secret-token",
+    model: "gpt-compatible-test",
+    fetch,
+    stream: true,
+    onOutputDelta: (delta) => {
+      deltas.push(delta.delta);
+    },
+  });
+
+  const response = await provider.complete(createValidModelRequest());
+
+  assert.equal(response.status, "completed");
+  assert.deepEqual(response.structuredOutput, { summary: "Streamed provider response." });
+  assert.equal(response.textOutput, "{\"summary\":\"Streamed provider response.\"}");
+  assert.equal(response.finishReason, "stop");
+  assert.deepEqual(deltas, ["{\"summary\":\"", "Streamed provider response.", "\"}"]);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0]?.body.stream, true);
+  assert.equal(JSON.stringify(deltas).includes("sk-test-secret-token"), false);
+});
+
 test("OpenAI-compatible adapter maps tools, tool results, and provider tool calls", async () => {
   const calls: { body: Record<string, unknown> }[] = [];
   const fetch: FetchLike = async (_url, init) => {
@@ -195,6 +245,13 @@ test("OpenAI-compatible adapter returns provider_config failure when fetch is un
     });
   }
 });
+
+async function* sseChunks(chunks: readonly unknown[]): AsyncGenerator<string> {
+  for (const chunk of chunks) {
+    yield `data: ${JSON.stringify(chunk)}\n\n`;
+  }
+  yield "data: [DONE]\n\n";
+}
 
 function createValidModelRequest(overrides: Partial<ModelRequest> = {}): ModelRequest {
   return {

@@ -1,4 +1,5 @@
 import type {
+  ModelOutputDelta,
   ModelToolCall,
   ModelProvider,
   ModelRequest,
@@ -17,6 +18,7 @@ export type FakeModelProviderOptions = {
   readonly fail?: boolean;
   readonly failureMessage?: string;
   readonly responses?: readonly FakeModelProviderResponse[];
+  readonly onOutputDelta?: (delta: ModelOutputDelta) => void;
 };
 
 export type FakeModelProviderResponse = {
@@ -54,6 +56,17 @@ export class FakeModelProvider implements ModelProvider {
       });
     }
 
+    const output =
+      step.output ?? (step.toolCalls === undefined || step.toolCalls.length === 0 ? defaultFakeOutput(request) : undefined);
+    emitFakeOutputDeltas({
+      request,
+      providerId: this.providerId,
+      model: this.model,
+      output,
+      textOutput: step.textOutput,
+      emit: this.options.onOutputDelta,
+    });
+
     return {
       responseId: createId("model-response"),
       requestId: request.requestId,
@@ -63,8 +76,7 @@ export class FakeModelProvider implements ModelProvider {
       model: this.model,
       status: "completed",
       outputKind: request.outputContract.outputKind,
-      structuredOutput:
-        step.output ?? (step.toolCalls === undefined || step.toolCalls.length === 0 ? defaultFakeOutput(request) : undefined),
+      structuredOutput: output,
       textOutput: step.textOutput,
       toolCalls: step.toolCalls?.map((toolCall) => ({
         callId: toolCall.callId,
@@ -90,6 +102,50 @@ export class FakeModelProvider implements ModelProvider {
       }
     );
   }
+}
+
+function emitFakeOutputDeltas(input: {
+  readonly request: ModelRequest;
+  readonly providerId: string;
+  readonly model: string;
+  readonly output: unknown;
+  readonly textOutput?: string;
+  readonly emit?: (delta: ModelOutputDelta) => void;
+}): void {
+  if (input.emit === undefined) {
+    return;
+  }
+  const text =
+    typeof input.textOutput === "string" && input.textOutput.trim().length > 0
+      ? input.textOutput
+      : typeof input.output === "string"
+        ? input.output
+        : input.output === undefined
+          ? ""
+          : JSON.stringify(input.output);
+  const chunks = chunkText(text, 80);
+  chunks.forEach((delta, index) => {
+    input.emit?.({
+      requestId: input.request.requestId,
+      providerId: input.providerId,
+      model: input.model,
+      delta,
+      index: index + 1,
+      createdAt: nowIso(),
+    });
+  });
+}
+
+function chunkText(value: string, maxLength: number): readonly string[] {
+  const text = value.trim();
+  if (text.length === 0) {
+    return [];
+  }
+  const chunks: string[] = [];
+  for (let index = 0; index < text.length; index += maxLength) {
+    chunks.push(text.slice(index, index + maxLength));
+  }
+  return chunks;
 }
 
 function defaultFakeOutput(request: ModelRequest): unknown {

@@ -22,12 +22,16 @@ import type {
   UpdateModelProviderConfigInput,
   UpdateWebSearchConfigInput,
 } from "../domain/config/index.js";
+import type { ModelOutputDelta } from "../domain/intelligence/index.js";
 import {
   createPanelRunTrace,
+  createPanelRunStreamEvents,
   createPanelRunTracking,
   createPanelRunTranscript,
   toPanelObservation,
   type PanelObservationReadModel,
+  type PanelRunStreamCursor,
+  type PanelRunStreamEvent,
   type PanelRunStatus,
   type PanelRunTraceReadModel,
   type PanelRunTrackingReadModel,
@@ -82,6 +86,7 @@ type PanelRunResponse = {
   readonly trace: PanelRunTraceReadModel;
   readonly transcript: PanelRunTranscript;
   readonly workNotes: PanelRunTranscript["workNotes"];
+  readonly streamCursor: PanelRunStreamCursor;
 };
 
 type PanelToolsConfig = {
@@ -249,6 +254,12 @@ async function handlePanelRequest(
     return;
   }
 
+  const runStreamMatch = /^\/api\/underground\/runs\/([^/]+)\/stream$/.exec(url.pathname);
+  if (request.method === "GET" && runStreamMatch !== null) {
+    handleGetRunStreamRequest(runtime, decodeURIComponent(runStreamMatch[1] ?? ""), url, request, response);
+    return;
+  }
+
   writeJson(response, 404, {
     ok: false,
     status: "failed",
@@ -303,6 +314,10 @@ async function handleRunRequest(
       trace,
       transcript,
       workNotes: transcript.workNotes,
+      streamCursor: {
+        runId: run.observation.traceId,
+        lastSequence: transcript.events.at(-1)?.sequence ?? 0,
+      },
     } satisfies PanelRunResponse);
   } catch (error) {
     if (error instanceof UndergroundAiConfigurationError) {
@@ -357,6 +372,77 @@ function handleGetRunRequest(runtime: PanelRuntime, runId: string, response: Ser
   writeJson(response, 200, createPanelRunJobResponse(job));
 }
 
+function handleGetRunStreamRequest(
+  runtime: PanelRuntime,
+  runId: string,
+  url: URL,
+  request: IncomingMessage,
+  response: ServerResponse
+): void {
+  const job = runtime.runJobs.get(runId);
+  if (job === undefined) {
+    throw new PanelHttpError(404, "run_not_found", "未找到地下运行 job。");
+  }
+
+  let lastSequence = parseStreamCursor(url.searchParams.get("cursor"), request.headers["last-event-id"]);
+  let closed = false;
+  response.writeHead(200, {
+    "content-type": "text/event-stream; charset=utf-8",
+    "cache-control": "no-store, no-cache",
+    connection: "keep-alive",
+    "x-accel-buffering": "no",
+  });
+  response.write(`: AgentArbor panel run stream ${runId}\n\n`);
+
+  const flush = (): void => {
+    if (closed) {
+      return;
+    }
+    const current = runtime.runJobs.get(runId);
+    if (current === undefined) {
+      writeSseEvent(response, {
+        eventId: `${runId}:run.failed:not-found`,
+        runId,
+        sequence: lastSequence + 1,
+        type: "run.failed",
+        createdAt: new Date().toISOString(),
+        agentLabel: "地下组织",
+        summary: "运行已不存在。",
+        status: "failed",
+        sourceRefs: [],
+        modelCallRefs: [],
+        toolCallRefs: [],
+      });
+      cleanup();
+      return;
+    }
+    const events = syncPanelRunStreamEventsForJob(current);
+    for (const event of events) {
+      if (event.sequence <= lastSequence) {
+        continue;
+      }
+      writeSseEvent(response, event);
+      lastSequence = event.sequence;
+    }
+    if (current.status === "completed" || current.status === "failed") {
+      cleanup();
+    }
+  };
+
+  const cleanup = (): void => {
+    if (closed) {
+      return;
+    }
+    closed = true;
+    clearInterval(interval);
+    response.end();
+  };
+
+  const interval = setInterval(flush, 100);
+  request.on("close", cleanup);
+  flush();
+}
+
 async function executePanelRunJob(runtime: PanelRuntime, runId: string): Promise<void> {
   const job = runtime.runJobs.get(runId);
   if (job === undefined) {
@@ -372,6 +458,9 @@ async function executePanelRunJob(runtime: PanelRuntime, runId: string): Promise
           traceId: context.traceId,
           goalId: context.goalId,
         });
+      },
+      onModelOutputDelta: (delta) => {
+        appendLiveModelOutputDelta(runtime, runId, delta);
       },
     });
     const currentConfig = await runtime.configCenter.getModelProviderConfig();
@@ -438,6 +527,7 @@ function createPanelRunJobResponse(job: PanelRunJob): {
   readonly tracking: PanelRunTrackingReadModel;
   readonly transcript: PanelRunTranscript;
   readonly workNotes: PanelRunTranscript["workNotes"];
+  readonly streamCursor: PanelRunStreamCursor;
   readonly summary?: UndergroundDemoSummary | { readonly ai: UndergroundDemoSummary["ai"] };
   readonly observation?: PanelObservationReadModel;
   readonly error?: {
@@ -460,15 +550,19 @@ function createPanelRunJobResponse(job: PanelRunJob): {
     observation,
     eventEntries,
   });
-  const transcript = createPanelRunTranscript({
-    runId: job.runId,
-    status: job.status,
-    eventEntries,
-    summary,
-    observation,
-    createdAt: job.createdAt,
-    updatedAt: job.updatedAt,
-  });
+  const streamEvents = syncPanelRunStreamEventsForJob(job);
+  const transcript = {
+    ...createPanelRunTranscript({
+      runId: job.runId,
+      status: job.status,
+      eventEntries,
+      summary,
+      observation,
+      createdAt: job.createdAt,
+      updatedAt: job.updatedAt,
+    }),
+    events: streamEvents,
+  };
 
   return {
     ok: true,
@@ -480,10 +574,88 @@ function createPanelRunJobResponse(job: PanelRunJob): {
     tracking,
     transcript,
     workNotes: transcript.workNotes,
+    streamCursor: {
+      runId: job.runId,
+      lastSequence: transcript.events.at(-1)?.sequence ?? 0,
+    },
     summary: job.completed?.summary ?? job.failed?.summary,
     observation: job.completed?.observation,
     error: job.failed?.error,
   };
+}
+
+function syncPanelRunStreamEventsForJob(job: PanelRunJob): readonly PanelRunStreamEvent[] {
+  const derived = createPanelRunStreamEvents({
+    runId: job.runId,
+    status: job.status,
+    eventEntries: job.runtime?.eventLog.list() ?? [],
+    summary: job.completed?.summary ?? job.failed?.summary,
+    observation: job.completed?.observation,
+    createdAt: job.createdAt,
+    updatedAt: job.updatedAt,
+    error: job.failed?.error,
+  });
+  for (const event of derived) {
+    appendPanelRunStreamEvent(job, event);
+  }
+  return [...job.streamEvents].sort((left, right) => left.sequence - right.sequence);
+}
+
+function appendPanelRunStreamEvent(job: PanelRunJob, event: Omit<PanelRunStreamEvent, "sequence"> | PanelRunStreamEvent): PanelRunStreamEvent {
+  const existing = job.streamEventIds.has(event.eventId)
+    ? job.streamEvents.find((item) => item.eventId === event.eventId)
+    : undefined;
+  if (existing !== undefined) {
+    return existing;
+  }
+  if (event.type === "model.output.delta") {
+    const liveDelta = liveModelDeltaForSameCall(job, event);
+    if (liveDelta !== undefined) {
+      return liveDelta;
+    }
+  }
+  const next: PanelRunStreamEvent = {
+    ...event,
+    sequence: job.nextStreamSequence,
+  };
+  job.nextStreamSequence += 1;
+  job.streamEvents.push(next);
+  job.streamEventIds.add(next.eventId);
+  return next;
+}
+
+function liveModelDeltaForSameCall(
+  job: PanelRunJob,
+  event: Omit<PanelRunStreamEvent, "sequence"> | PanelRunStreamEvent
+): PanelRunStreamEvent | undefined {
+  const requestIds = new Set(event.modelCallRefs);
+  if (requestIds.size === 0) {
+    return undefined;
+  }
+  return job.streamEvents.find(
+    (item) =>
+      item.type === "model.output.delta" &&
+      item.eventId.startsWith(`${job.runId}:live:model.output.delta:`) &&
+      item.modelCallRefs.some((requestId) => requestIds.has(requestId))
+  );
+}
+
+function appendLiveModelOutputDelta(runtime: PanelRuntime, runId: string, delta: ModelOutputDelta): void {
+  if (delta.delta.length === 0) {
+    return;
+  }
+  runtime.runJobs.appendStreamEvent(runId, {
+    eventId: `${runId}:live:model.output.delta:${delta.requestId}:${delta.index}`,
+    runId,
+    type: "model.output.delta",
+    createdAt: delta.createdAt,
+    agentLabel: "模型",
+    delta: delta.delta,
+    status: "running",
+    sourceRefs: [],
+    modelCallRefs: [delta.requestId],
+    toolCallRefs: [],
+  });
 }
 
 async function runUndergroundForPanel(
@@ -492,6 +664,7 @@ async function runUndergroundForPanel(
   aiMode: UndergroundAiMode,
   options: {
     readonly onRuntimeReady?: (context: UndergroundDirectionSessionRuntimeContext) => void;
+    readonly onModelOutputDelta?: (delta: ModelOutputDelta) => void;
   } = {}
 ): Promise<{ summary: UndergroundDemoSummary; observation: PanelObservationReadModel; eventEntries: readonly EventLogEntry[] }> {
   if (aiMode === "none") {
@@ -507,11 +680,12 @@ async function runUndergroundForPanel(
   const aiEnvironment = await runtime.configCenter.createUndergroundAiEnvironment();
   const aiConfig =
     aiMode === "fake"
-      ? createUndergroundAiRuntimeConfig({ mode: "fake", env: aiEnvironment })
+      ? createUndergroundAiRuntimeConfig({ mode: "fake", env: aiEnvironment, onModelOutputDelta: options.onModelOutputDelta })
       : createUndergroundAiRuntimeConfig({
           mode: "openai-compatible",
           env: aiEnvironment,
           fetch: runtime.providerFetch,
+          onModelOutputDelta: options.onModelOutputDelta,
         });
 
   if (!aiConfig.enabled) {
@@ -652,6 +826,12 @@ function writeJson(response: ServerResponse, statusCode: number, body: unknown):
   response.end(`${JSON.stringify(body)}\n`);
 }
 
+function writeSseEvent(response: ServerResponse, event: PanelRunStreamEvent): void {
+  response.write(`id: ${event.sequence}\n`);
+  response.write(`event: ${event.type}\n`);
+  response.write(`data: ${JSON.stringify(event)}\n\n`);
+}
+
 function writePanelError(response: ServerResponse, error: PanelHttpError, extra?: Record<string, unknown>): void {
   writeJson(response, error.statusCode, {
     ok: false,
@@ -673,6 +853,12 @@ function parseOptionalAiMode(value: unknown, invalidMessage: string): Undergroun
     throw new PanelHttpError(400, "invalid_ai_mode", invalidMessage);
   }
   return parsed;
+}
+
+function parseStreamCursor(queryValue: string | null, lastEventId: string | string[] | undefined): number {
+  const raw = queryValue ?? (Array.isArray(lastEventId) ? lastEventId[0] : lastEventId);
+  const parsed = raw === undefined ? 0 : Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 0;
 }
 
 function parseAiMode(value: unknown): UndergroundAiMode | undefined {

@@ -26,7 +26,7 @@
 - 地下-only demo 必须只打印到 `.agentarbor` Direction Handoff Package 边界为止，摘要包含 terminal status、package id/version/status/validation、地下 rootlet / budget / candidate / convergence 信息、可选用户升级信息、AI rootlet kind 状态 / candidate count / fallback count 和 observation layer status。
 - 地下-only demo summary 在恢复路径必须包含 `recoveredPackage`、`lineage`、`versions` 和可选 `writtenPackagePath`；不传 `--out` 时 `writtenPackagePath` 应为空，且 repo-root `.agentarbor/` 不得变化。
 - 配置中心必须区分普通 settings store 和 local-dev secret store；默认目录不得落在仓库内，测试必须使用临时目录。
-- panel HTTP JSON 只能返回脱敏 provider config、地下 demo summary、Observation Snapshot 子集、trace、transcript、model visible output 安全投影和由这些输入派生的 tracking read model；可见输出必须来自通过 `outputContract` validation 与 `visibleOutput.fieldTypes` 展示策略的 `ModelResponse.structuredOutput` / `textOutput` 投影或其生成的 rootlet outputs / candidates。不得包含 raw API key、token、完整 prompt、provider raw response、hidden reasoning、provider 原始敏感错误、未校验模型输出、rootlet parser 会拒绝的候选字段或 runtime/store 引用。
+- panel HTTP JSON / SSE 只能返回脱敏 provider config、地下 demo summary、Observation Snapshot 子集、trace、stream transcript、model visible output 安全投影和由这些输入派生的 tracking read model；可见输出必须来自通过 `outputContract` validation 与 `visibleOutput.fieldTypes` 展示策略的 `ModelResponse.structuredOutput` / `textOutput` 投影或其生成的 rootlet outputs / candidates。不得包含 raw API key、token、完整 prompt、provider raw response、hidden reasoning、provider 原始敏感错误、raw tool output、未校验模型输出、rootlet parser 会拒绝的候选字段或 runtime/store 引用。
 - panel 桌面宿主只能是薄 Electron shell：窗口生命周期、`startLocalPanelServer()` 启停和本地 URL 加载。`BrowserWindow` 必须保持 `contextIsolation: true`、`nodeIntegration: false`、`sandbox: true`，不得新增 raw EventLog、完整 prompt、provider raw response、工具 raw output 或 secret 暴露面。
 - `dist/`、`node_modules/` 和 coverage 输出必须保持忽略。
 
@@ -49,7 +49,7 @@
 | 默认地下-only demo 发布 `model.*` 事件或创建 provider | `pnpm test` 或 `pnpm demo:underground` 验收失败 |
 | `--ai openai-compatible` 缺少 key / model 时仍尝试网络或泄漏密钥 | `pnpm test` 或边界检查失败 |
 | panel `openai-compatible` 缺少 key 时仍调用 provider fetch | `pnpm test` 失败 |
-| settings store、EventLog、Snapshot、summary、trace、transcript、HTTP JSON 或测试快照出现 raw API key / token / 完整 prompt / provider raw response / hidden reasoning / 未校验模型输出 / rootlet parser 会拒绝的候选字段 | `pnpm test` 或安全检查失败 |
+| settings store、EventLog、Snapshot、summary、trace、transcript、SSE、HTTP JSON 或测试快照出现 raw API key / token / 完整 prompt / provider raw response / hidden reasoning / raw tool output / 未校验模型输出 / rootlet parser 会拒绝的候选字段 | `pnpm test` 或安全检查失败 |
 | `pnpm panel` 不能启动并打印 URL | panel smoke 失败 |
 | `pnpm panel:desktop:smoke` 不能启动后退出，或 smoke 创建真实窗口 | desktop smoke 失败 |
 
@@ -59,7 +59,7 @@
 - Good：新增 demo 命令时同步测试 summary 纯函数，并运行对应 demo 命令。
 - Good：新增 AI demo 开关时同时覆盖默认 no-AI、fake AI、OpenAI-compatible 配置失败和密钥不泄漏。
 - Good：新增 rootlet AI 输出契约时同时覆盖 6 种 kind 的 contract / prompt / parser、fake AI 复杂目标、AI 失败 fallback 和默认 deterministic no-AI。
-- Good：新增本地 panel 时同时覆盖配置更新、no-AI run、fake AI run、openai-compatible 缺 key / 缺 model、async run job、partial / final polling、HTTP 响应脱敏、中文 UI、tracking / transcript / model visible output read model 和 panel command smoke。
+- Good：新增本地 panel 时同时覆盖配置更新、no-AI run、fake AI run、openai-compatible 缺 key / 缺 model、async run job、partial / final polling、SSE stream、cursor 续传、stream 断开不影响后台 run、HTTP / SSE 响应脱敏、中文 UI、tracking / transcript / model visible output read model 和 panel command smoke。
 - Good：新增桌面宿主时复用现有 panel server，单元测试注入 window/server 依赖覆盖安全默认值、smoke 不创建窗口、关闭幂等和启动失败清理。
 - Base：纯类型补充仍运行 `pnpm build` 和 `pnpm test`。
 - Bad：只运行 `pnpm demo` 或 `pnpm demo:underground` 后宣称测试通过。

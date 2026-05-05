@@ -4,7 +4,7 @@ import {
   type FetchLike,
 } from "../adapters/intelligence/index.js";
 import { NativeIntelligenceChannel } from "../kernel/intelligence/channel.js";
-import type { IntelligenceChannel } from "../domain/intelligence/index.js";
+import type { IntelligenceChannel, ModelOutputDelta } from "../domain/intelligence/index.js";
 import type { InformationSourceKind } from "../domain/research/index.js";
 import type { ToolExecutionBroker } from "../domain/tools/index.js";
 import type { ConfigCenter } from "./config-center.js";
@@ -59,6 +59,7 @@ export function createUndergroundAiRuntimeConfig(input: {
   readonly mode?: UndergroundAiMode;
   readonly env?: UndergroundAiEnvironment;
   readonly fetch?: FetchLike;
+  readonly onModelOutputDelta?: (delta: ModelOutputDelta) => void;
 }): UndergroundAiRuntimeConfig {
   const mode = input.mode ?? "none";
 
@@ -87,7 +88,7 @@ export function createUndergroundAiRuntimeConfig(input: {
       },
       createIntelligenceChannel: (runtime) =>
         new NativeIntelligenceChannel({
-          provider: new FakeModelProvider(),
+          provider: new FakeModelProvider({ onOutputDelta: input.onModelOutputDelta }),
           bus: runtime.bus,
         }),
       createToolCenter: (runtime) => createDefaultToolCenter({ runtime, env: input.env ?? process.env, fetch: input.fetch }),
@@ -97,12 +98,14 @@ export function createUndergroundAiRuntimeConfig(input: {
   return createOpenAICompatibleConfig({
     env: input.env ?? process.env,
     fetch: input.fetch,
+    onModelOutputDelta: input.onModelOutputDelta,
   });
 }
 
 function createOpenAICompatibleConfig(input: {
   readonly env: UndergroundAiEnvironment;
   readonly fetch?: FetchLike;
+  readonly onModelOutputDelta?: (delta: ModelOutputDelta) => void;
 }): UndergroundAiRuntimeConfig {
   const apiKey = firstNonBlank(input.env.AGENTARBOR_MODEL_API_KEY, input.env.OPENAI_API_KEY);
   const model = firstNonBlank(input.env.AGENTARBOR_MODEL_NAME);
@@ -146,6 +149,8 @@ function createOpenAICompatibleConfig(input: {
           apiKey,
           model,
           fetch: input.fetch,
+          stream: input.onModelOutputDelta !== undefined,
+          onOutputDelta: input.onModelOutputDelta,
         }),
         bus: runtime.bus,
       }),

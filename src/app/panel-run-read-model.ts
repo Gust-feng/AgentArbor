@@ -155,10 +155,44 @@ export type PanelTranscriptModelCall = {
   readonly eventRefs: readonly string[];
 };
 
+export type PanelRunStreamEventType =
+  | "run.started"
+  | "agent.note.delta"
+  | "agent.note.completed"
+  | "model.output.delta"
+  | "model.output.completed"
+  | "tool.requested"
+  | "tool.completed"
+  | "tool.failed"
+  | "final.result"
+  | "run.failed";
+
+export type PanelRunStreamEvent = {
+  readonly eventId: string;
+  readonly runId: string;
+  readonly sequence: number;
+  readonly type: PanelRunStreamEventType;
+  readonly createdAt: string;
+  readonly agentLabel?: string;
+  readonly summary?: string;
+  readonly delta?: string;
+  readonly status?: "pending" | "running" | "completed" | "failed";
+  readonly toolName?: string;
+  readonly sourceRefs: readonly string[];
+  readonly modelCallRefs: readonly string[];
+  readonly toolCallRefs: readonly string[];
+};
+
+export type PanelRunStreamCursor = {
+  readonly runId: string;
+  readonly lastSequence: number;
+};
+
 export type PanelRunTranscript = {
   readonly runId: string;
   readonly status: PanelRunStatus;
   readonly updatedAt: string;
+  readonly events: readonly PanelRunStreamEvent[];
   readonly workNotes: readonly AgentWorkNote[];
   readonly modelCalls: readonly PanelTranscriptModelCall[];
 };
@@ -290,12 +324,22 @@ export function createPanelRunTranscript(input: {
   readonly updatedAt: string;
 }): PanelRunTranscript {
   const modelCalls = createPanelTranscriptModelCalls(input.eventEntries, input.summary);
+  const streamEvents = createPanelRunStreamEvents({
+    runId: input.runId,
+    status: input.status,
+    eventEntries: input.eventEntries,
+    summary: input.summary,
+    observation: input.observation,
+    createdAt: input.createdAt,
+    updatedAt: input.updatedAt,
+  });
   const candidateRefs = candidateRefsFromObservation(input.observation);
   const noteInput = { ...input, modelCalls, candidateRefs };
   return {
     runId: input.runId,
     status: input.status,
     updatedAt: input.updatedAt,
+    events: streamEvents,
     workNotes: [
       createIntentCoreNote(noteInput),
       createGrowthGovernorNote(noteInput),
@@ -307,6 +351,340 @@ export function createPanelRunTranscript(input: {
     ],
     modelCalls,
   };
+}
+
+export function createPanelRunStreamEvents(input: {
+  readonly runId: string;
+  readonly status: PanelRunStatus;
+  readonly eventEntries: readonly EventLogEntry[];
+  readonly summary?: UndergroundDemoSummary | { readonly ai: UndergroundDemoSummary["ai"] };
+  readonly observation?: PanelObservationReadModel;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly error?: { readonly code: string; readonly message: string };
+}): readonly PanelRunStreamEvent[] {
+  const events: PanelRunStreamEvent[] = [];
+  const observationViews = createRunObservationEventViews(input.eventEntries);
+  const viewBySequence = new Map(observationViews.map((view) => [view.sequence, view]));
+  const push = (event: Omit<PanelRunStreamEvent, "sequence">): void => {
+    events.push({ ...event, sequence: events.length + 1 });
+  };
+
+  push({
+    eventId: `${input.runId}:run.started`,
+    runId: input.runId,
+    type: "run.started",
+    createdAt: input.createdAt,
+    agentLabel: "地下组织",
+    summary: "目标已提交，地下组织准备开始工作。",
+    status: input.status === "pending" ? "pending" : "running",
+    sourceRefs: [],
+    modelCallRefs: [],
+    toolCallRefs: [],
+  });
+
+  for (const entry of input.eventEntries) {
+    const view = viewBySequence.get(entry.sequence);
+    appendStreamEventsForEvent({
+      runId: input.runId,
+      entry,
+      view,
+      push,
+    });
+  }
+
+  if (input.status === "completed") {
+    const finalSummary = finalResultSummary(input);
+    push({
+      eventId: `${input.runId}:final.result`,
+      runId: input.runId,
+      type: "final.result",
+      createdAt: input.updatedAt,
+      agentLabel: "地下组织",
+      summary: finalSummary,
+      status: "completed",
+      sourceRefs: finalSourceRefs(input),
+      modelCallRefs: [],
+      toolCallRefs: [],
+    });
+  }
+
+  if (input.status === "failed") {
+    push({
+      eventId: `${input.runId}:run.failed`,
+      runId: input.runId,
+      type: "run.failed",
+      createdAt: input.updatedAt,
+      agentLabel: "地下组织",
+      summary: input.error?.message ?? "地下运行失败。",
+      status: "failed",
+      sourceRefs: [],
+      modelCallRefs: [],
+      toolCallRefs: [],
+    });
+  }
+
+  return events;
+}
+
+function appendStreamEventsForEvent(input: {
+  readonly runId: string;
+  readonly entry: EventLogEntry;
+  readonly view?: RunObservationEventView;
+  readonly push: (event: Omit<PanelRunStreamEvent, "sequence">) => void;
+}): void {
+  const payload = asRecord(input.entry.message.payload);
+  const base = {
+    runId: input.runId,
+    createdAt: input.entry.recordedAt,
+    sourceRefs: sourceRefsForView(input.view),
+    modelCallRefs: modelCallRefsFor(input.entry, payload),
+    toolCallRefs: toolCallRefsFor(input.entry, payload),
+  };
+
+  if (input.entry.type === "model.requested") {
+    input.push({
+      ...base,
+      eventId: `${input.runId}:event:${input.entry.sequence}:agent.note.delta`,
+      type: "agent.note.delta",
+      agentLabel: "模型",
+      summary: modelRequestedSummary(payload),
+      status: "running",
+    });
+    return;
+  }
+
+  if (input.entry.type === "model.completed") {
+    const text = visibleOutputText(payload.visibleOutput);
+    const chunks = chunkText(text, 90);
+    if (chunks.length === 0) {
+      input.push({
+        ...base,
+        eventId: `${input.runId}:event:${input.entry.sequence}:model.output.completed`,
+        type: "model.output.completed",
+        agentLabel: "模型",
+        summary: "模型调用完成；本次没有通过安全策略展示的可见输出。",
+        status: "completed",
+      });
+      return;
+    }
+    chunks.forEach((chunk, index) => {
+      input.push({
+        ...base,
+        eventId: `${input.runId}:event:${input.entry.sequence}:model.output.delta:${index + 1}`,
+        type: "model.output.delta",
+        agentLabel: "模型",
+        delta: chunk,
+        status: "running",
+      });
+    });
+    input.push({
+      ...base,
+      eventId: `${input.runId}:event:${input.entry.sequence}:model.output.completed`,
+      type: "model.output.completed",
+      agentLabel: "模型",
+      summary: modelCompletedSummary(payload, chunks.length),
+      status: "completed",
+    });
+    return;
+  }
+
+  if (input.entry.type === "model.failed") {
+    input.push({
+      ...base,
+      eventId: `${input.runId}:event:${input.entry.sequence}:agent.note.completed`,
+      type: "agent.note.completed",
+      agentLabel: "模型",
+      summary: modelFailedSummary(payload),
+      status: "failed",
+    });
+    return;
+  }
+
+  if (input.entry.type === "tool.requested" || input.entry.type === "tool.completed" || input.entry.type === "tool.failed") {
+    input.push({
+      ...base,
+      eventId: `${input.runId}:event:${input.entry.sequence}:${input.entry.type}`,
+      type: input.entry.type,
+      agentLabel: "工具",
+      toolName: stringOrUndefined(payload.toolName),
+      summary: toolSummary(input.entry.type, payload),
+      status: input.entry.type === "tool.requested" ? "running" : input.entry.type === "tool.completed" ? "completed" : "failed",
+    });
+    return;
+  }
+
+  const note = agentNoteForEvent(input.entry, payload);
+  if (note !== undefined) {
+    input.push({
+      ...base,
+      eventId: `${input.runId}:event:${input.entry.sequence}:agent.note.completed`,
+      type: "agent.note.completed",
+      agentLabel: note.agentLabel,
+      summary: note.summary,
+      status: note.status,
+    });
+  }
+}
+
+function sourceRefsForView(view: RunObservationEventView | undefined): readonly string[] {
+  return (
+    view?.refs
+      .filter((ref) => ref.kind !== "model_call" && ref.kind !== "tool_call")
+      .map((ref) => `${ref.kind}:${ref.id}`) ?? []
+  );
+}
+
+function modelCallRefsFor(entry: EventLogEntry, payload: Readonly<Record<string, unknown>>): readonly string[] {
+  if (entry.type !== "model.requested" && entry.type !== "model.completed" && entry.type !== "model.failed") {
+    return [];
+  }
+  return unique([stringOrUndefined(payload.requestId), stringOrUndefined(payload.responseId)].filter(isString));
+}
+
+function toolCallRefsFor(entry: EventLogEntry, payload: Readonly<Record<string, unknown>>): readonly string[] {
+  if (entry.type !== "tool.requested" && entry.type !== "tool.completed" && entry.type !== "tool.failed") {
+    return [];
+  }
+  return stringOrUndefined(payload.callId) === undefined ? [] : [stringOrUndefined(payload.callId) as string];
+}
+
+function modelRequestedSummary(payload: Readonly<Record<string, unknown>>): string {
+  const purpose = stringOrUndefined(payload.purpose) ?? "unknown";
+  const model = stringOrUndefined(payload.model) ?? "unknown model";
+  return `模型开始处理 ${purpose}，使用 ${model}。`;
+}
+
+function modelCompletedSummary(payload: Readonly<Record<string, unknown>>, chunkCount: number): string {
+  const validation = stringOrUndefined(payload.validationStatus) ?? "unknown";
+  const model = stringOrUndefined(payload.model) ?? "unknown model";
+  return `模型输出完成，${chunkCount} 个可见增量已进入 transcript；校验 ${validation}，模型 ${model}。`;
+}
+
+function modelFailedSummary(payload: Readonly<Record<string, unknown>>): string {
+  const failureKind = stringOrUndefined(payload.failureKind) ?? "model_failed";
+  const retryable = payload.retryable === true ? "可重试" : "不可重试";
+  return `模型调用失败：${failureKind}，${retryable}。`;
+}
+
+function toolSummary(type: "tool.requested" | "tool.completed" | "tool.failed", payload: Readonly<Record<string, unknown>>): string {
+  const toolName = stringOrUndefined(payload.toolName) ?? "unknown";
+  if (type === "tool.requested") {
+    return `工具 ${toolName} 开始执行。`;
+  }
+  const duration = typeof payload.durationMs === "number" ? `，耗时 ${Math.round(payload.durationMs)}ms` : "";
+  if (type === "tool.completed") {
+    return `工具 ${toolName} 已完成${duration}；结果只展示安全摘要和引用。`;
+  }
+  return `工具 ${toolName} 调用失败${duration}；错误已脱敏。`;
+}
+
+function agentNoteForEvent(
+  entry: EventLogEntry,
+  payload: Readonly<Record<string, unknown>>
+): { readonly agentLabel: string; readonly summary: string; readonly status: PanelRunStreamEvent["status"] } | undefined {
+  switch (entry.type) {
+    case "goal.received":
+      return { agentLabel: "用户", summary: "目标已进入地下组织，原文不会在调试区外展开。", status: "completed" };
+    case "underground.exploration_planned":
+      return { agentLabel: "地下中枢", summary: "目标画像和探索计划已形成。", status: "completed" };
+    case "rootlet_cluster.started":
+      return { agentLabel: "Rootlet 集群", summary: "动态 rootlet 已启动，开始探索候选方向。", status: "running" };
+    case "exploration_candidate.produced":
+      return { agentLabel: "Rootlet 集群", summary: "Rootlet 已产出候选材料，等待进入候选池。", status: "completed" };
+    case "candidate_pool.updated":
+      return { agentLabel: "候选池", summary: "候选池已更新，正式事实边界仍由收束和方向交接校验掌握。", status: "completed" };
+    case "autonomy_review.completed":
+      return {
+        agentLabel: "自治中枢",
+        summary: autonomySummary(payload),
+        status: "completed",
+      };
+    case "convergence_review.requested":
+      return { agentLabel: "自治中枢", summary: "自治中枢请求进入收束评审。", status: "running" };
+    case "convergence_review.completed":
+      return { agentLabel: "收束判断", summary: "候选材料已由 Convergence Judge 完成正式收束。", status: "completed" };
+    case "direction_handoff.requested":
+      return { agentLabel: "方向交接", summary: "方向交接包开始组装。", status: "running" };
+    case "direction_handoff.completed":
+      return { agentLabel: "方向交接", summary: "方向交接包已通过现有校验链生成。", status: "completed" };
+    case "direction_handoff.revision_requested":
+      return { agentLabel: "方向交接", summary: "方向交接包需要修订或补充。", status: "running" };
+    case "user_approval.requested":
+      return { agentLabel: "用户确认", summary: "地下组织需要用户澄清后继续。", status: "running" };
+    case "user_approval.received":
+      return { agentLabel: "用户确认", summary: "用户澄清已收到，地下组织继续推进。", status: "completed" };
+    default:
+      return undefined;
+  }
+}
+
+function autonomySummary(payload: Readonly<Record<string, unknown>>): string {
+  const decision = asRecord(payload.autonomyDecision);
+  const action = stringOrUndefined(decision.action) ?? stringOrUndefined(payload.action) ?? "unknown";
+  return `自治评审完成，决策动作：${action}。`;
+}
+
+function visibleOutputText(value: unknown): string {
+  const output = modelVisibleOutputOrUndefined(value);
+  if (output === undefined) {
+    return "";
+  }
+  const parts: string[] = [];
+  for (const item of output.items) {
+    for (const field of item.fields) {
+      const valueText = field.value.trim();
+      if (valueText.length > 0) {
+        parts.push(`${field.name}: ${valueText}${field.truncated ? " (truncated)" : ""}`);
+      }
+    }
+  }
+  return parts.join("\n");
+}
+
+function chunkText(value: string, maxLength: number): readonly string[] {
+  const text = value.trim();
+  if (text.length === 0) {
+    return [];
+  }
+  const chunks: string[] = [];
+  for (let index = 0; index < text.length; index += maxLength) {
+    chunks.push(text.slice(index, index + maxLength));
+  }
+  return chunks;
+}
+
+function finalResultSummary(input: {
+  readonly summary?: UndergroundDemoSummary | { readonly ai: UndergroundDemoSummary["ai"] };
+  readonly observation?: PanelObservationReadModel;
+}): string {
+  const summary = fullSummaryOrUndefined(input.summary);
+  if (summary !== undefined) {
+    return `地下运行完成，方向包 ${summary.directionPackage.id} v${summary.directionPackage.version}，状态 ${summary.directionPackage.status}。`;
+  }
+  const stage = input.observation?.currentStage;
+  return stage === undefined ? "地下运行完成。" : `地下运行完成，当前阶段 ${stage}。`;
+}
+
+function finalSourceRefs(input: {
+  readonly summary?: UndergroundDemoSummary | { readonly ai: UndergroundDemoSummary["ai"] };
+  readonly observation?: PanelObservationReadModel;
+}): readonly string[] {
+  const summary = fullSummaryOrUndefined(input.summary);
+  if (summary !== undefined) {
+    return [
+      `direction_package:${summary.directionPackage.id}`,
+      `direction_handoff:${summary.directionPackage.directionId}`,
+    ];
+  }
+  const handoff = input.observation?.handoff;
+  return handoff === undefined || handoff.packageId.length === 0
+    ? []
+    : [`direction_package:${handoff.packageId}`, `direction_handoff:${handoff.directionId}`];
+}
+
+function fullSummaryOrUndefined(value: UndergroundDemoSummary | { readonly ai: UndergroundDemoSummary["ai"] } | undefined): UndergroundDemoSummary | undefined {
+  return value !== undefined && "directionPackage" in value ? value : undefined;
 }
 
 function createRootletTracking(input: {
@@ -878,6 +1256,10 @@ function asRecord(value: unknown): Readonly<Record<string, unknown>> {
 
 function stringOrUndefined(value: unknown): string | undefined {
   return typeof value === "string" && value.trim().length > 0 ? value : undefined;
+}
+
+function isString(value: unknown): value is string {
+  return typeof value === "string";
 }
 
 function modelVisibleOutputOrUndefined(value: unknown): ModelVisibleOutputProjection | undefined {

@@ -11,50 +11,34 @@ import { startLocalPanelServer, type PanelProviderFetch } from "./panel-server.j
 test("panel HTML defaults to Simplified Chinese labels and status text", () => {
   const html = createPanelHtml();
 
-  assert.equal(html.includes("AgentArbor 地下运行面板"), true);
-  assert.equal(html.includes("地下组织工作台"), true);
-  assert.equal(html.includes("把想法长成方向"), true);
-  assert.equal(html.includes("地下组织先理解、探索、收束，再交给地上生长"), true);
-  assert.equal(html.includes("网页研究"), true);
-  assert.equal(html.includes("代码理解"), true);
-  assert.equal(html.includes("证据整理"), true);
-  assert.equal(html.includes("方向交接"), true);
-  assert.equal(html.includes("描述你的目标，地下组织会先把问题想清楚。"), true);
+  assert.equal(html.includes("AgentArbor 面板"), true);
+  assert.equal(html.includes("地下 Agent 工作流"), true);
+  assert.equal(html.includes("把想法交给地下组织"), true);
+  assert.equal(html.includes("Agent transcript 为空"), true);
+  assert.equal(html.includes("模型可见工作笔记、输出增量、工具摘要和最终结果"), true);
+  assert.equal(html.includes("描述你的目标。地下组织会先理解、探索、收束，再形成可交给下一阶段的方向结果。"), true);
   assert.equal(html.includes('<option value="none">无 AI</option>'), true);
   assert.equal(html.includes('<option value="fake">Fake AI</option>'), true);
   assert.equal(html.includes('<option value="openai-compatible">OpenAI-compatible</option>'), true);
-  assert.equal(html.includes("文档"), true);
-  assert.equal(html.includes("设置"), true);
-  assert.equal(html.includes("待办"), true);
-  assert.equal(html.includes("暂无待办"), true);
-  assert.equal(html.includes("需要你确认的事项会显示在这里。"), true);
-  assert.equal(html.includes("上下文"), true);
-  assert.equal(html.includes("待计算"), true);
-  assert.equal(html.includes("AGENTS.md"), true);
-  assert.equal(html.includes("任务看板"), true);
-  assert.equal(html.includes("开发指南"), true);
-  assert.equal(html.includes("准备扎根"), true);
+  assert.equal(html.includes("运行状态"), true);
+  assert.equal(html.includes("折叠调试区"), true);
   assert.equal(html.includes("地上组织"), true);
   assert.equal(html.includes("暂无方向任务"), true);
-  assert.equal(html.includes("运行后会在这里显示方向记录。"), true);
-  assert.equal(html.includes("设置与调试详情"), true);
   assert.equal(html.includes("模型配置"), true);
   assert.equal(html.includes("工具配置"), true);
-  assert.equal(html.includes("模型与 Provider 指标"), true);
-  assert.equal(html.includes("信息获取"), true);
-  assert.equal(html.includes("自治判断"), true);
-  assert.equal(html.includes("模型输出"), true);
-  assert.equal(html.includes("Agent Transcript"), true);
-  assert.equal(html.includes("收束方向"), true);
-  assert.equal(html.includes("方向交接摘要"), true);
-  assert.equal(html.includes("启动地下运行"), true);
-  assert.equal(html.includes("信息源配置"), true);
-  assert.equal(html.includes("搜索工具 Provider"), true);
-  assert.equal(html.includes("保存搜索工具"), true);
+  assert.equal(html.includes("启动"), true);
+  assert.equal(html.includes("搜索 Provider"), true);
+  assert.equal(html.includes("保存工具配置"), true);
   assert.equal(html.includes("Tavily API Key"), true);
-  assert.equal(html.includes("工具状态待检测"), true);
-  assert.equal(html.includes("安全模式"), true);
   assert.equal(html.includes("待启动 (pending)"), true);
+  assert.equal(html.includes("run.started"), true);
+  assert.equal(html.includes("model.output.delta"), true);
+  assert.equal(html.includes("tool.completed"), true);
+  assert.equal(html.includes("final.result"), true);
+  assert.equal(html.includes("网页研究"), false);
+  assert.equal(html.includes("代码理解"), false);
+  assert.equal(html.includes("证据整理"), false);
+  assert.equal(html.includes("方向交接"), false);
   assert.equal(html.includes("短视频平台差异化优势与发展路径调研"), false);
   assert.equal(html.includes("产品定位与核心指标体系梳理"), false);
   assert.equal(html.includes("AI 内容创作工具方向探索"), false);
@@ -396,6 +380,51 @@ test("panel async underground run starts without waiting for provider completion
   }
 });
 
+test("panel run stream disconnect does not stop the background run", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-sse-disconnect-"));
+  const secret = "sk-sse-disconnect-secret";
+  let fetchCalls = 0;
+  let releaseFirstFetch: (() => void) | undefined;
+  const firstFetchGate = new Promise<void>((resolve) => {
+    releaseFirstFetch = resolve;
+  });
+  const providerFetch: PanelProviderFetch = async () => {
+    fetchCalls += 1;
+    if (fetchCalls === 1) {
+      await firstFetchGate;
+    }
+    return createStubOpenAiResponse("sse-disconnect-model");
+  };
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory, providerFetch });
+  try {
+    await requestJson(server.url, "/api/config/model-provider", {
+      method: "POST",
+      body: {
+        baseUrl: "https://provider.example",
+        model: "sse-disconnect-model",
+        defaultAiMode: "openai-compatible",
+        apiKey: secret,
+      },
+    });
+    const start = await requestJson(server.url, "/api/underground/runs", {
+      method: "POST",
+      body: { goal: "Build an observable run that survives stream disconnect.", aiMode: "openai-compatible" },
+    });
+
+    await openAndAbortSse(server.url, `/api/underground/runs/${encodeURIComponent(start.body.runId)}/stream?cursor=0`);
+    releaseFirstFetch?.();
+    const completed = await waitForRun(server.url, start.body.runId, (body) => body.status === "completed");
+
+    assert.equal(completed.body.status, "completed");
+    assert.equal(completed.text.includes(secret), false);
+    assert.equal(completed.body.transcript.events.some((event: { type: string }) => event.type === "final.result"), true);
+  } finally {
+    releaseFirstFetch?.();
+    await server.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("panel async no-AI run returns initial job state before deterministic session executes", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-async-noai-"));
   const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
@@ -408,15 +437,95 @@ test("panel async no-AI run returns initial job state before deterministic sessi
     assert.equal(start.status, 202);
     assert.equal(start.body.status, "pending");
     assert.equal(start.body.trace.eventCursor.eventCount, 0);
+    assert.equal(start.body.transcript.events[0].type, "run.started");
     assert.equal(start.body.tracking.run.waitingPoint, "等待后台地下运行启动。");
     assert.equal(start.body.summary, undefined);
     assert.equal(start.body.observation, undefined);
 
     const completed = await waitForRun(server.url, start.body.runId, (body) => body.status === "completed");
     assert.equal(completed.body.status, "completed");
+    assert.equal(
+      completed.body.transcript.events.some((event: { type: string }) => event.type === "final.result"),
+      true
+    );
     assert.equal(completed.body.summary.ai.enabled, false);
     assert.equal(completed.body.observation.aboveground.status, "not_started");
     assert.equal(completed.body.trace.eventCursor.eventCount, completed.body.observation.eventCursor.eventCount);
+  } finally {
+    await server.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("panel run stream returns safe SSE events with fake model output deltas", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-sse-fake-"));
+  const secret = "sk-sse-fake-secret";
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+  try {
+    await requestJson(server.url, "/api/config/model-provider", {
+      method: "POST",
+      body: {
+        model: "unused-fake-model",
+        apiKey: secret,
+      },
+    });
+    const start = await requestJson(server.url, "/api/underground/runs", {
+      method: "POST",
+      body: {
+        goal: "需要风险、安全、资产、证据、约束和反驳，并且权限未知待确认。",
+        aiMode: "fake",
+      },
+    });
+
+    const stream = await requestSse(server.url, `/api/underground/runs/${encodeURIComponent(start.body.runId)}/stream?cursor=0`);
+    const deltas = stream.events.filter((event) => event.type === "model.output.delta");
+
+    assert.equal(stream.status, 200);
+    assert.equal(String(stream.headers["content-type"]).includes("text/event-stream"), true);
+    assert.equal(stream.events[0].type, "run.started");
+    assert.equal(deltas.length > 1, true);
+    const liveDeltaRequestIds = new Set(
+      deltas
+        .filter((event) => event.eventId.includes(":live:model.output.delta:"))
+        .flatMap((event) => event.modelCallRefs)
+    );
+    assert.equal(
+      deltas.some(
+        (event) =>
+          !event.eventId.includes(":live:model.output.delta:") &&
+          event.modelCallRefs.some((requestId: string) => liveDeltaRequestIds.has(requestId))
+      ),
+      false
+    );
+    assert.equal(stream.events.some((event) => event.type === "model.output.completed"), true);
+    assert.equal(stream.events.some((event) => event.type === "final.result"), true);
+    assert.equal(stream.text.includes(secret), false);
+    assert.equal(stream.text.includes("sanitizedMessages"), false);
+    assert.equal(stream.text.includes("Return JSON only"), false);
+    assertSafePanelJsonText(stream.text);
+  } finally {
+    await server.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("panel run stream cursor resumes without repeating older events", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-sse-cursor-"));
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+  try {
+    const start = await requestJson(server.url, "/api/underground/runs", {
+      method: "POST",
+      body: { goal: "Build a deterministic helper through a resumable stream.", aiMode: "none" },
+    });
+    const completed = await waitForRun(server.url, start.body.runId, (body) => body.status === "completed");
+    const cursor = completed.body.transcript.events[1].sequence;
+    const stream = await requestSse(server.url, `/api/underground/runs/${encodeURIComponent(start.body.runId)}/stream?cursor=${cursor}`);
+
+    assert.equal(stream.status, 200);
+    assert.equal(stream.events.length > 0, true);
+    assert.equal(stream.events.some((event) => event.sequence <= cursor), false);
+    assert.equal(new Set(stream.events.map((event) => event.sequence)).size, stream.events.length);
+    assert.equal(stream.events.some((event) => event.type === "final.result"), true);
   } finally {
     await server.close();
     await fs.rm(directory, { recursive: true, force: true });
@@ -675,6 +784,13 @@ type RequestJsonResult = {
   readonly body: any;
 };
 
+type RequestSseResult = {
+  readonly status: number;
+  readonly headers: Record<string, string | string[] | undefined>;
+  readonly text: string;
+  readonly events: readonly any[];
+};
+
 function requestJson(baseUrl: string, pathname: string, options: RequestJsonOptions = {}): Promise<RequestJsonResult> {
   const url = new URL(pathname, baseUrl);
   const body = options.body === undefined ? undefined : JSON.stringify(options.body);
@@ -712,6 +828,81 @@ function requestJson(baseUrl: string, pathname: string, options: RequestJsonOpti
     }
     req.end();
   });
+}
+
+function requestSse(baseUrl: string, pathname: string, timeoutMs = 5_000): Promise<RequestSseResult> {
+  const url = new URL(pathname, baseUrl);
+  return new Promise((resolve, reject) => {
+    const req = request(url, { method: "GET" }, (response) => {
+      let text = "";
+      const timeout = setTimeout(() => {
+        req.destroy(new Error(`Timed out waiting for SSE ${pathname}`));
+      }, timeoutMs);
+      response.setEncoding("utf8");
+      response.on("data", (chunk) => {
+        text += chunk;
+      });
+      response.on("end", () => {
+        clearTimeout(timeout);
+        resolve({
+          status: response.statusCode ?? 0,
+          headers: response.headers,
+          text,
+          events: parseSseEvents(text),
+        });
+      });
+    });
+    req.on("error", reject);
+    req.end();
+  });
+}
+
+function openAndAbortSse(baseUrl: string, pathname: string, timeoutMs = 2_000): Promise<void> {
+  const url = new URL(pathname, baseUrl);
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const timeout = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        req.destroy();
+        reject(new Error(`Timed out waiting for first SSE chunk ${pathname}`));
+      }
+    }, timeoutMs);
+    const req = request(url, { method: "GET" }, (response) => {
+      response.setEncoding("utf8");
+      response.once("data", () => {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timeout);
+          req.destroy();
+          resolve();
+        }
+      });
+    });
+    req.on("error", (error) => {
+      if (!settled) {
+        settled = true;
+        clearTimeout(timeout);
+        reject(error);
+      }
+    });
+    req.end();
+  });
+}
+
+function parseSseEvents(text: string): readonly any[] {
+  return text
+    .split(/\n\n/g)
+    .map((block) => block.trim())
+    .filter((block) => block.length > 0 && !block.startsWith(":"))
+    .map((block) => {
+      const dataLine = block.split(/\n/g).find((line) => line.startsWith("data: "));
+      if (dataLine === undefined) {
+        return undefined;
+      }
+      return JSON.parse(dataLine.slice("data: ".length));
+    })
+    .filter((event): event is any => event !== undefined);
 }
 
 async function waitForRun(

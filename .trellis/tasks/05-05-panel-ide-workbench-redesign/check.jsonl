@@ -1,0 +1,5 @@
+{"file": ".trellis/tasks/05-05-panel-ide-workbench-redesign/prd.md", "reason": "Verify the implemented UI matches the generated-image baseline and acceptance criteria."}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Check workbench shell, Chinese labels, user mental model, and debug-view placement."}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Check build/test/panel smoke and UI readability expectations."}
+{"file": ".trellis/spec/backend/observation-read-model.md", "reason": "Ensure panel response and transcript remain safe derived projections."}
+{"file": ".trellis/spec/backend/tool-runtime.md", "reason": "Ensure tool activity displays safe summaries only, not raw outputs or secrets."}

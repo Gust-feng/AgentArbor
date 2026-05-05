@@ -1,0 +1,6 @@
+{"file": ".trellis/tasks/05-05-panel-ide-workbench-redesign/prd.md", "reason": "Primary product and acceptance contract for the panel workbench redesign."}
+{"file": ".trellis/spec/frontend/directory-structure.md", "reason": "Panel remains app-layer static HTML/CSS/JS without a new frontend stack."}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Current panel UI composition, safety, Chinese-label, and debug-view boundaries."}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Panel build/test/smoke and visual readability expectations."}
+{"file": ".trellis/spec/backend/observation-read-model.md", "reason": "Panel data must remain derived and secret-free."}
+{"file": ".trellis/spec/guides/agentarbor-governance-guide.md", "reason": "Trellis/docs governance and AgentArbor concept-tree boundaries."}

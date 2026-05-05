@@ -10,10 +10,13 @@
     "demo": "pnpm build && node dist/app/demo.js",
     "demo:underground": "pnpm build && node dist/app/underground-demo.js",
     "panel": "pnpm build && node dist/app/panel.js",
-    "panel:smoke": "pnpm build && node dist/app/panel.js --port 0 --smoke"
+    "panel:smoke": "pnpm build && node dist/app/panel.js --port 0 --smoke",
+    "panel:desktop": "pnpm build && pnpm exec electron dist/app/panel-desktop.js",
+    "panel:desktop:smoke": "pnpm build && pnpm exec electron dist/app/panel-desktop.js --port 0 --smoke"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
+    "electron": "^36.9.5",
     "typescript": "^5.9.0"
   }
 }

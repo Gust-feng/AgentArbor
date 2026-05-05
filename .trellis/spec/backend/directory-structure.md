@@ -13,8 +13,11 @@
 - 完整闭环 demo 入口：`src/app/demo.ts`，由 `pnpm demo` 调用。
 - 地下-only demo 入口：`src/app/underground-demo.ts`，由 `pnpm demo:underground -- "<goal>"` 调用；默认目标只能证明地下单环，不进入 Aboveground。
 - 本地 panel 入口：`src/app/panel.ts`，由 `pnpm panel` 调用；只启动本机 HTTP 服务并打印 URL。
+- 本地 panel 参数解析：`src/app/panel-args.ts`；由浏览器调试入口和桌面入口共享，避免两套启动参数语义分叉。
 - 本地 panel HTTP 编排：`src/app/panel-server.ts`；只能调用地下-only API、配置中心和 JSON-safe summary / snapshot 投影；可生成由 summary / snapshot / sanitized config 派生的 tracking read model。
 - 静态 panel 资产：`src/app/panel-assets.ts`；使用 Node 内置 HTTP 服务发送静态 HTML/CSS/JS，不引入前端构建链；默认简体中文 UI，并用中文标签包裹必要技术 id。
+- 本地 panel 桌面生命周期薄壳：`src/app/panel-desktop-launcher.ts`；只能装配 `startLocalPanelServer()`、Electron window 创建依赖和关闭流程，不保存第二套运行事实。
+- 本地 panel Electron 入口：`src/app/panel-desktop.ts`，由 `pnpm panel:desktop` 调用；只创建安全默认的 `BrowserWindow` 并加载本地 panel URL。
 - 配置中心：`src/app/config-center.ts` 组合普通 settings store 与 local-dev secret store；领域契约位于 `src/domain/config/`，文件系统实现位于 `src/adapters/config/`。
 - 最小闭环 API：`runMinimalLoop(goal?: string, options?: RunMinimalLoopOptions): MinimalLoopResult`。
 - 地下-only API：`runUndergroundDirectionSession(goal: string, options?: RunUndergroundDirectionSessionOptions): UndergroundDirectionSessionResult`。
@@ -26,6 +29,7 @@
 - `src/kernel/` 保存消息、事件、注册、路由、状态机、产物存储和确定性守卫。
 - `src/app/` 保存应用编排、fake agents 和 demo；fake agents 不是长期 Capability Asset。
 - `src/app/panel-server.ts` 是本地用户面板 API 边界；它不能直接导入 provider adapter，真实模型仍必须通过 `src/app/intelligence-channel-factory.ts` 装配后的 `IntelligenceChannel`。
+- `src/app/panel-desktop-launcher.ts` 和 `src/app/panel-desktop.ts` 是桌面宿主边界；它们不能直接读取 EventLog payload、Observation store、provider adapter、API key、完整 prompt 或工具 raw output，只能通过既有 panel server URL 承载工作台。
 - `src/app/underground-demo-summary.ts` 保存地下-only demo 的纯 summary 投影；CLI 入口只负责读取参数和打印，不把 console 输出逻辑塞进地下运行核心。
 - `src/app/intelligence-channel-factory.ts` 保存 CLI / demo 组合根的智能通道装配；它是 app 层唯一允许导入 provider adapter 的窄入口，地下业务编排只接收注入的 `IntelligenceChannel`。
 - `src/adapters/config/` 只处理本地文件读写；普通 settings store 和 local-dev secret store 必须分文件保存，普通 settings 不得保存 raw secret。
@@ -53,6 +57,7 @@
 | 真实模型接入绕过智能通道 | 违反智能通道规范，测试必须失败 |
 | `pnpm demo:underground` 进入 Growth Plan / Aboveground / Fruits / Governance | 违反地下-only 边界，测试必须失败 |
 | panel HTTP 响应、settings store、EventLog、Snapshot 或 summary 出现 API key / token | 密钥边界失败 |
+| panel 桌面宿主绕过 `startLocalPanelServer()` 直接读取 runtime/store/provider 事实 | 桌面边界失败 |
 
 ## Good / Base / Bad Cases
 

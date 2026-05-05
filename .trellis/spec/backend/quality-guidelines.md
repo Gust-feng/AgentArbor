@@ -15,6 +15,8 @@
 - `pnpm demo:underground`：先 build，再执行 `node dist/app/underground-demo.js`；可通过 `-- "<goal>"` 传入自定义目标，可通过 `-- --auto-answer "<goal>"` 演示 awaiting_user 恢复，可通过 `-- --out <dir> "<goal>"` 显式写出 Direction Handoff Package；可通过 `-- --ai fake "<goal>"` 显式验证 fake AI rootlet 候选接入；`-- --ai openai-compatible "<goal>"` 只有配置完整时才允许真实网络路径。
 - `pnpm panel`：先 build，再执行 `node dist/app/panel.js`，启动本地 Node HTTP panel 并打印 URL；默认配置目录使用 `AGENTARBOR_CONFIG_DIR` 或用户本地配置目录。
 - `pnpm panel:smoke`：先 build，再执行 `node dist/app/panel.js --port 0 --smoke`，证明 panel 命令可启动并退出。
+- `pnpm panel:desktop`：先 build，再执行 Electron 桌面入口 `dist/app/panel-desktop.js`，创建桌面窗口并加载本地 panel server URL。
+- `pnpm panel:desktop:smoke`：先 build，再执行 Electron 桌面入口的 smoke 模式，证明桌面宿主能启动本地 server、关闭 server 并退出，且不创建窗口。
 
 ## Contracts
 
@@ -25,6 +27,7 @@
 - 地下-only demo summary 在恢复路径必须包含 `recoveredPackage`、`lineage`、`versions` 和可选 `writtenPackagePath`；不传 `--out` 时 `writtenPackagePath` 应为空，且 repo-root `.agentarbor/` 不得变化。
 - 配置中心必须区分普通 settings store 和 local-dev secret store；默认目录不得落在仓库内，测试必须使用临时目录。
 - panel HTTP JSON 只能返回脱敏 provider config、地下 demo summary、Observation Snapshot 子集、trace、transcript、model visible output 安全投影和由这些输入派生的 tracking read model；可见输出必须来自通过 `outputContract` validation 与 `visibleOutput.fieldTypes` 展示策略的 `ModelResponse.structuredOutput` / `textOutput` 投影或其生成的 rootlet outputs / candidates。不得包含 raw API key、token、完整 prompt、provider raw response、hidden reasoning、provider 原始敏感错误、未校验模型输出、rootlet parser 会拒绝的候选字段或 runtime/store 引用。
+- panel 桌面宿主只能是薄 Electron shell：窗口生命周期、`startLocalPanelServer()` 启停和本地 URL 加载。`BrowserWindow` 必须保持 `contextIsolation: true`、`nodeIntegration: false`、`sandbox: true`，不得新增 raw EventLog、完整 prompt、provider raw response、工具 raw output 或 secret 暴露面。
 - `dist/`、`node_modules/` 和 coverage 输出必须保持忽略。
 
 ## 生效规则
@@ -48,6 +51,7 @@
 | panel `openai-compatible` 缺少 key 时仍调用 provider fetch | `pnpm test` 失败 |
 | settings store、EventLog、Snapshot、summary、trace、transcript、HTTP JSON 或测试快照出现 raw API key / token / 完整 prompt / provider raw response / hidden reasoning / 未校验模型输出 / rootlet parser 会拒绝的候选字段 | `pnpm test` 或安全检查失败 |
 | `pnpm panel` 不能启动并打印 URL | panel smoke 失败 |
+| `pnpm panel:desktop:smoke` 不能启动后退出，或 smoke 创建真实窗口 | desktop smoke 失败 |
 
 ## Good / Base / Bad Cases
 
@@ -56,6 +60,7 @@
 - Good：新增 AI demo 开关时同时覆盖默认 no-AI、fake AI、OpenAI-compatible 配置失败和密钥不泄漏。
 - Good：新增 rootlet AI 输出契约时同时覆盖 6 种 kind 的 contract / prompt / parser、fake AI 复杂目标、AI 失败 fallback 和默认 deterministic no-AI。
 - Good：新增本地 panel 时同时覆盖配置更新、no-AI run、fake AI run、openai-compatible 缺 key / 缺 model、async run job、partial / final polling、HTTP 响应脱敏、中文 UI、tracking / transcript / model visible output read model 和 panel command smoke。
+- Good：新增桌面宿主时复用现有 panel server，单元测试注入 window/server 依赖覆盖安全默认值、smoke 不创建窗口、关闭幂等和启动失败清理。
 - Base：纯类型补充仍运行 `pnpm build` 和 `pnpm test`。
 - Bad：只运行 `pnpm demo` 或 `pnpm demo:underground` 后宣称测试通过。
 
@@ -70,6 +75,7 @@
 - MessageBus 禁止内部私聊。
 - 配置中心 raw secret 不进入普通 settings store；panel HTTP JSON 不回显 raw secret；transcript 可以展示通过 validation 和 field type policy 的 visible output 安全投影，但不包含完整 prompt、provider raw response、hidden reasoning、未校验模型输出或 rootlet parser 会拒绝的候选字段。
 - openai-compatible 缺 key 在 provider fetch 前失败。
+- 桌面 launcher 覆盖安全 `BrowserWindow` defaults、smoke 启停、窗口关闭时 server 清理和 Electron 启动失败清理。
 
 ## Wrong vs Correct
 

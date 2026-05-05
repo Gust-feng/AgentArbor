@@ -1,0 +1,8 @@
+{"file":".trellis/spec/frontend/index.md","reason":"panel UX baseline and current first-screen rules"}
+{"file":".trellis/spec/frontend/directory-structure.md","reason":"current panel file boundaries and no frontend framework rule"}
+{"file":".trellis/spec/frontend/component-guidelines.md","reason":"UI behavior, empty states, and secret boundaries"}
+{"file":".trellis/spec/frontend/quality-guidelines.md","reason":"panel smoke and visual regression gate"}
+{"file":".trellis/spec/backend/index.md","reason":"runtime and panel boundary overview"}
+{"file":".trellis/spec/backend/directory-structure.md","reason":"app layer and panel server ownership"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"build, test, smoke, and secret leak gate"}
+{"file":".trellis/tasks/05-05-panel-desktop-shell/research/desktop-shell-options.md","reason":"host option comparison and recommendation"}

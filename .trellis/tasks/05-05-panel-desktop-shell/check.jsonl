@@ -1,0 +1,9 @@
+{"file":".trellis/spec/frontend/component-guidelines.md","reason":"verify desktop shell keeps current workbench UX and empty-state rules"}
+{"file":".trellis/spec/frontend/directory-structure.md","reason":"verify Electron shell does not create a parallel frontend framework or asset tree"}
+{"file":".trellis/spec/frontend/quality-guidelines.md","reason":"verify smoke, width, and secret boundary expectations"}
+{"file":".trellis/spec/backend/directory-structure.md","reason":"verify app-layer panel host boundary stays intact"}
+{"file":".trellis/spec/backend/error-handling.md","reason":"verify panel errors remain sanitized"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"verify desktop scripts, smoke gate, and launcher lifecycle tests"}
+{"file":".trellis/spec/backend/observation-read-model.md","reason":"verify observation and transcript projections stay secret-free"}
+{"file":".trellis/spec/backend/intelligence-channel.md","reason":"verify model/provider boundary does not leak into the host"}
+{"file":".trellis/tasks/05-05-panel-desktop-shell/research/desktop-shell-options.md","reason":"recheck chosen host path against official docs and trade-offs"}

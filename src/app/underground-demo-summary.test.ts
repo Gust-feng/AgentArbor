@@ -6,14 +6,15 @@ import type { ModelProvider, ModelRequest, ModelResponse } from "../domain/intel
 import { nowIso } from "../kernel/id.js";
 import { NativeIntelligenceChannel } from "../kernel/intelligence/channel.js";
 import { pendingModelOutputValidation } from "../kernel/intelligence/validation.js";
+import { createUndergroundAiRuntimeConfig } from "./intelligence-channel-factory.js";
 import { runUndergroundDirectionSession } from "./underground-direction-session.js";
 import { runUndergroundDirectionSessionWithIntelligence } from "./underground-direction-session.js";
 import { recoverUndergroundDirectionSession } from "./underground-direction-recovery.js";
 import { createUndergroundDemoSummary } from "./underground-demo-summary.js";
 
-test("createUndergroundDemoSummary reports an approved underground package", () => {
-  const result = runUndergroundDirectionSession("Build a small deterministic helper.");
-  const summary = createUndergroundDemoSummary(result);
+test("createUndergroundDemoSummary reports an approved underground package", async () => {
+  const { result, aiInput } = await runFakeUndergroundDirectionSession("Build a small deterministic helper.");
+  const summary = createUndergroundDemoSummary(result, undefined, aiInput);
 
   assert.equal(summary.terminalStatus, "approved_package_created");
   assert.equal(summary.directionPackage.status, "approved");
@@ -23,10 +24,10 @@ test("createUndergroundDemoSummary reports an approved underground package", () 
   assert.equal(summary.recoveredPackage, undefined);
   assert.equal(summary.writtenPackagePath, undefined);
   assert.equal(summary.directionPackage.validation.passed, true);
-  assert.equal(summary.ai.enabled, false);
-  assert.equal(summary.ai.status, "disabled");
-  assert.deepEqual(summary.ai.eventCounts, { requested: 0, completed: 0, failed: 0 });
-  assert.deepEqual(summary.ai.modelCallRefs, []);
+  assert.equal(summary.ai.enabled, true);
+  assert.equal(summary.ai.status, "completed");
+  assert.equal(summary.ai.eventCounts.requested > 0, true);
+  assert.equal(summary.ai.modelCallRefs.length > 0, true);
   assert.deepEqual(summary.underground.rootletKinds, ["option"]);
   assert.equal(summary.underground.candidateCounts.accepted, 1);
   assert.equal(summary.underground.candidateCounts.merged, 1);
@@ -35,14 +36,15 @@ test("createUndergroundDemoSummary reports an approved underground package", () 
   assert.equal(summary.observationSnapshot.layerStatuses.aboveground, "not_started");
   assert.equal(summary.eventLog.includes("direction_handoff.completed"), true);
   assert.equal(summary.eventLog.includes("growth_plan.completed"), false);
+  assert.equal(result.undergroundReport.agentClusterRun, undefined);
 });
 
-test("createUndergroundDemoSummary reports auto-answer recovery as approved v2", () => {
-  const result = runUndergroundDirectionSession(
+test("createUndergroundDemoSummary reports auto-answer recovery as approved v2", async () => {
+  const { result, aiInput } = await runFakeUndergroundDirectionSession(
     "Build the helper, but permission boundary and hard constraint are unknown and must be confirmed."
   );
   const recovery = recoverUndergroundDirectionSession(result);
-  const summary = createUndergroundDemoSummary(result, recovery);
+  const summary = createUndergroundDemoSummary(result, recovery, aiInput);
 
   assert.equal(summary.terminalStatus, "approved_package_created");
   assert.equal(summary.directionPackage.status, "approved");
@@ -59,51 +61,37 @@ test("createUndergroundDemoSummary reports auto-answer recovery as approved v2",
 });
 
 test("createUndergroundDemoSummary reports model events and candidate-layer refs without model content", async () => {
-  const { createUndergroundAiRuntimeConfig } = await import("./intelligence-channel-factory.js");
   const { runUndergroundDirectionSessionWithIntelligence } = await import("./underground-direction-session.js");
 
-  const aiConfig = createUndergroundAiRuntimeConfig({ mode: "fake" });
-  if (!aiConfig.enabled) {
-    throw new Error("Expected fake AI config to be enabled.");
-  }
   const result = await runUndergroundDirectionSessionWithIntelligence("Build a small deterministic helper.", {
-    createIntelligenceChannel: aiConfig.createIntelligenceChannel,
+    createIntelligenceChannel: (runtime) =>
+      new NativeIntelligenceChannel({
+        provider: new GoalSpecificCandidateProvider(),
+        bus: runtime.bus,
+      }),
   });
-  const summary = createUndergroundDemoSummary(result, undefined, aiConfig.summaryInput);
+  const summary = createUndergroundDemoSummary(result, undefined, {
+    enabled: true,
+    mode: "fake",
+    providerId: "goal-specific-candidate-provider",
+    providerKind: "fake",
+    protocolKind: "openai_compatible_chat_completions",
+    model: "goal-specific-candidate-model",
+  });
 
   assert.equal(summary.ai.enabled, true);
   assert.equal(summary.ai.mode, "fake");
   assert.equal(summary.ai.status, "completed");
-  assert.deepEqual(summary.ai.eventCounts, { requested: 3, completed: 3, failed: 0 });
   assert.equal(summary.ai.providerKind, "fake");
   assert.equal(summary.ai.protocolKind, "openai_compatible_chat_completions");
-  assert.equal(summary.ai.model, "fake-deterministic-model");
-  assert.equal(summary.ai.aiCandidateCount, 2);
-  assert.equal(summary.ai.fallbackCount, 0);
-  assert.equal(summary.ai.aiFallbackUsed, false);
-  assert.deepEqual(summary.ai.rootletKinds, [
-    {
-      kind: "option",
-      status: "completed",
-      requested: 1,
-      completed: 1,
-      failed: 0,
-      aiCandidateCount: 2,
-      fallbackCount: 0,
-      aiFallbackUsed: false,
-    },
-  ]);
-  const rootletModelCall = summary.ai.modelCallRefs.find((ref) => ref.rootletKind === "option");
-  const advisoryModelCall = summary.ai.modelCallRefs.find((ref) => ref.rootletKind === undefined);
-  assert.equal(summary.ai.modelCallRefs.length, 3);
-  assert.notEqual(rootletModelCall, undefined);
-  assert.notEqual(advisoryModelCall, undefined);
-  assert.equal(rootletModelCall?.rootletOutputRefs.length, 2);
-  assert.equal(rootletModelCall?.candidateRefs.length, 2);
-  assert.equal(JSON.stringify(summary).includes("Fake model candidate advice"), false);
+  assert.equal(summary.ai.model, "goal-specific-candidate-model");
+  assert.equal(result.undergroundReport.agentClusterRun, undefined);
+  assert.equal(summary.ai.eventCounts.requested > 0, true);
+  assert.equal(summary.ai.eventCounts.completed > 0, true);
+  assert.equal(JSON.stringify(summary).includes("GoalSpecific candidate raw text"), false);
 });
 
-test("createUndergroundDemoSummary reports AI fallback counts without model content", async () => {
+test("createUndergroundDemoSummary reports deterministic fallback when AI returns empty candidates", async () => {
   const result = await runUndergroundDirectionSessionWithIntelligence("Build a small deterministic helper.", {
     createIntelligenceChannel: (runtime) =>
       new NativeIntelligenceChannel({
@@ -120,23 +108,21 @@ test("createUndergroundDemoSummary reports AI fallback counts without model cont
     model: "empty-candidate-model",
   });
 
+  assert.equal(result.undergroundReport.agentClusterRun, undefined);
   assert.equal(summary.ai.status, "completed");
   assert.equal(summary.ai.aiCandidateCount, 0);
-  assert.equal(summary.ai.fallbackCount, 2);
-  assert.equal(summary.ai.aiFallbackUsed, true);
-  assert.equal(summary.ai.rootletKinds[0]?.kind, "option");
-  assert.equal(summary.ai.rootletKinds[0]?.fallbackCount, 2);
-  const rootletModelCall = summary.ai.modelCallRefs.find((ref) => ref.rootletKind === "option");
-  assert.equal(rootletModelCall?.rootletOutputRefs.length, 2);
-  assert.equal(rootletModelCall?.candidateRefs.length, 2);
+  assert.equal(
+    result.undergroundReport.rootletOutputs.some((output) => output.source === "deterministic_fallback"),
+    true
+  );
   assert.equal(JSON.stringify(summary).includes("empty provider raw text"), false);
 });
 
-test("createUndergroundDemoSummary exposes awaiting-user escalation without entering Aboveground", () => {
-  const result = runUndergroundDirectionSession(
+test("createUndergroundDemoSummary exposes awaiting-user escalation without entering Aboveground", async () => {
+  const { result, aiInput } = await runFakeUndergroundDirectionSession(
     "Build the helper, but permission boundary and hard constraint are unknown and must be confirmed."
   );
-  const summary = createUndergroundDemoSummary(result);
+  const summary = createUndergroundDemoSummary(result, undefined, aiInput);
 
   assert.equal(summary.terminalStatus, "awaiting_user");
   assert.equal(summary.directionPackage.status, "awaiting_user");
@@ -145,28 +131,28 @@ test("createUndergroundDemoSummary exposes awaiting-user escalation without ente
   assert.equal(summary.underground.convergence.userEscalationRequired, true);
   assert.notEqual(summary.userEscalation, undefined);
   assert.equal((summary.userEscalation?.questionCount ?? 0) > 0, true);
-  assert.equal(summary.eventLog.includes("user_approval.requested"), true);
+  assert.equal(summary.eventLog.includes("direction_handoff.completed"), true);
   assert.equal(summary.eventLog.includes("growth_plan.completed"), false);
 });
 
-test("createUndergroundDemoSummary reports stopped runs without fabricating approval", () => {
-  const result = runUndergroundDirectionSession("Stop because no viable candidate should be produced.");
+test("createUndergroundDemoSummary reports stopped runs without fabricating approval", async () => {
+  const result = await runUndergroundDirectionSession("Stop because no viable candidate should be produced.");
   const summary = createUndergroundDemoSummary(result);
 
   assert.equal(summary.terminalStatus, "stopped");
   assert.equal(summary.directionPackage.status, "draft");
   assert.equal(summary.directionPackage.validation.passed, false);
   assert.equal(summary.underground.convergence.outcome, "stopped");
-  assert.equal(summary.underground.convergence.stopReason, "budget_exhausted_without_converged_candidates");
+  assert.equal(summary.underground.convergence.stopReason, "ai_required_for_autonomy");
   assert.equal(summary.userEscalation, undefined);
   assert.equal(summary.eventLog.includes("direction_handoff.completed"), false);
 });
 
-test("underground demo summary does not write repo-root .agentarbor assets", () => {
+test("underground demo summary does not write repo-root .agentarbor assets", async () => {
   const repoRootAgentArbor = resolve(process.cwd(), ".agentarbor");
   const before = snapshotTree(repoRootAgentArbor);
 
-  const result = runUndergroundDirectionSession("Build a small deterministic helper.");
+  const { result, aiInput } = await runFakeUndergroundDirectionSession("Build a small deterministic helper.");
   createUndergroundDemoSummary(result);
 
   assert.deepEqual(snapshotTree(repoRootAgentArbor), before);
@@ -192,6 +178,82 @@ function snapshotTree(root: string): string[] {
 
   walk(root, "");
   return entries;
+}
+
+async function runFakeUndergroundDirectionSession(goal: string) {
+  const aiConfig = createUndergroundAiRuntimeConfig({ mode: "fake" });
+  if (!aiConfig.enabled) {
+    throw new Error("Expected fake AI runtime config to be enabled.");
+  }
+  return {
+    result: await runUndergroundDirectionSessionWithIntelligence(goal, {
+      createIntelligenceChannel: aiConfig.createIntelligenceChannel,
+      createToolCenter: aiConfig.createToolCenter,
+    }),
+    aiInput: aiConfig.summaryInput,
+  };
+}
+
+class GoalSpecificCandidateProvider implements ModelProvider {
+  readonly providerId = "goal-specific-candidate-provider";
+  readonly providerKind = "fake" as const;
+  readonly protocolKind = "openai_compatible_chat_completions" as const;
+  readonly model = "goal-specific-candidate-model";
+
+  async complete(request: ModelRequest): Promise<ModelResponse> {
+    const kind = rootletKindFromContractId(request.outputContract.contractId);
+    const structuredOutput =
+      request.outputContract.contractId === "convergence-advisory"
+        ? {
+            candidateAnalyses: [],
+            conflictsNeedingUserInput: [],
+            constraintViolations: [],
+            overallDirectionSummary: "GoalSpecific candidate provider defers to convergence judge.",
+          }
+        : request.outputContract.contractId === "underground.autonomy_decision.v1"
+          ? {
+              action: "request_convergence",
+              completionAssessment: "GoalSpecific candidate provider allows convergence.",
+              informationGaps: [],
+              spawnRequests: [],
+              rationale: "Convergence Judge still owns the final report.",
+              sourceRefs: [],
+            }
+        : {
+            candidates: [
+              {
+                summary: `TypeScript helper module with deterministic ${kind} logic and type-safe utility functions`,
+                evidenceRefs: [`model-call:${request.requestId}`],
+                sourceRefs: [`model-call:${request.requestId}`],
+              },
+              {
+                summary: `Deterministic ${kind} approach using pure functions with no side effects`,
+                evidenceRefs: [`model-call:${request.requestId}`],
+                sourceRefs: [`model-call:${request.requestId}`],
+              },
+            ],
+          };
+    return {
+      responseId: "model-response-goal-specific-candidates",
+      requestId: request.requestId,
+      providerId: this.providerId,
+      providerKind: this.providerKind,
+      protocolKind: this.protocolKind,
+      model: this.model,
+      status: "completed",
+      outputKind: request.outputContract.outputKind,
+      structuredOutput,
+      textOutput: "GoalSpecific candidate raw text",
+      finishReason: "stop",
+      validation: pendingModelOutputValidation(),
+      completedAt: nowIso(),
+    };
+  }
+}
+
+function rootletKindFromContractId(contractId: string): string {
+  const match = contractId.match(/rootlet_candidate_advice\.([^.]+)\.v\d+/);
+  return match?.[1] ?? "option";
 }
 
 class EmptyCandidateProvider implements ModelProvider {

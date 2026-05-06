@@ -9,20 +9,29 @@ import type {
   UserClarificationResponse,
 } from "../domain/underground/index.js";
 import type { MinimalRuntime } from "./runtime.js";
+import { createUndergroundAiRuntimeConfig } from "./intelligence-channel-factory.js";
 import { recoverUndergroundDirectionSession } from "./underground-direction-recovery.js";
 import {
-  runUndergroundDirectionSession,
+  runUndergroundDirectionSessionWithIntelligence,
   type UndergroundDirectionSessionResult,
 } from "./underground-direction-session.js";
 
+const EXPECTED_FAKE_AI_CLARIFICATION_MODEL_EVENTS: ArborMessageType[] = [
+  "model.requested",
+  "model.completed",
+  "model.requested",
+  "model.completed",
+  "model.requested",
+  "model.completed",
+  "model.requested",
+  "model.completed",
+  "model.requested",
+  "model.completed",
+];
+
 export const EXPECTED_CLARIFICATION_REQUIRED_EVENTS: ArborMessageType[] = [
-  "goal.received",
-  "underground.exploration_planned",
-  "rootlet_cluster.started",
-  "exploration_candidate.produced",
-  "candidate_pool.updated",
-  "convergence_review.completed",
-  "user_approval.requested",
+  ...EXPECTED_FAKE_AI_CLARIFICATION_MODEL_EVENTS,
+  "direction_handoff.completed",
 ];
 
 export const EXPECTED_CLARIFICATION_RECOVERY_EVENTS: ArborMessageType[] = [
@@ -59,10 +68,10 @@ export type ClarificationRecoveryFlowResult = {
   eventTypes: ArborMessageType[];
 };
 
-export function runClarificationRequiredUndergroundFlow(
+export async function runClarificationRequiredUndergroundFlow(
   goal = "Build the helper, but permission boundary and hard constraint are unknown and must be confirmed."
-): ClarificationRequiredUndergroundFlowResult {
-  const session = requireAwaitingUserSession(runUndergroundDirectionSession(goal));
+): Promise<ClarificationRequiredUndergroundFlowResult> {
+  const session = requireAwaitingUserSession(await runFakeClarificationSession(goal));
 
   return {
     runtime: session.runtime,
@@ -76,10 +85,10 @@ export function runClarificationRequiredUndergroundFlow(
   };
 }
 
-export function runClarificationRecoveryFlow(
+export async function runClarificationRecoveryFlow(
   goal = "Build the helper, but permission boundary and hard constraint are unknown and must be confirmed."
-): ClarificationRecoveryFlowResult {
-  const awaitingSession = requireAwaitingUserSession(runUndergroundDirectionSession(goal));
+): Promise<ClarificationRecoveryFlowResult> {
+  const awaitingSession = requireAwaitingUserSession(await runFakeClarificationSession(goal));
   const recovery = recoverUndergroundDirectionSession(awaitingSession);
 
   return {
@@ -96,6 +105,17 @@ export function runClarificationRecoveryFlow(
     observationSnapshot: recovery.observationSnapshot,
     eventTypes: recovery.eventTypes,
   };
+}
+
+async function runFakeClarificationSession(goal: string): Promise<UndergroundDirectionSessionResult> {
+  const aiConfig = createUndergroundAiRuntimeConfig({ mode: "fake" });
+  if (!aiConfig.enabled) {
+    throw new Error("Expected fake AI runtime config to be enabled.");
+  }
+  return runUndergroundDirectionSessionWithIntelligence(goal, {
+    createIntelligenceChannel: aiConfig.createIntelligenceChannel,
+    createToolCenter: aiConfig.createToolCenter,
+  });
 }
 
 function requireAwaitingUserSession(

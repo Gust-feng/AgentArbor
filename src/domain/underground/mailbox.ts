@@ -1,61 +1,65 @@
-export type AgentMessage<TPayload = unknown> = {
+export type AgentMessage = {
   readonly id: string;
   readonly traceId: string;
   readonly fromAgentId: string;
   readonly toAgentId: string;
   readonly type: string;
-  readonly payload: TPayload;
+  readonly payload: unknown;
   readonly createdAt: string;
   readonly sourceRef?: string;
 };
 
-export type Mailbox = {
-  route<TPayload>(message: AgentMessage<TPayload>): void;
-  peek(agentId: string): readonly AgentMessage[];
-  drain(agentId: string): readonly AgentMessage[];
-  drainByType(agentId: string, type: string): readonly AgentMessage[];
+export interface AgentMailbox {
+  route(message: AgentMessage): void;
   pending(agentId: string): number;
-};
+  drain(agentId: string): AgentMessage[];
+  drainByType(agentId: string, type: string): AgentMessage[];
+  peek(agentId: string): AgentMessage[];
+}
 
-export class InMemoryMailbox implements Mailbox {
+export class InMemoryMailbox implements AgentMailbox {
   private readonly queues = new Map<string, AgentMessage[]>();
 
-  route<TPayload>(message: AgentMessage<TPayload>): void {
-    const queue = this.queues.get(message.toAgentId) ?? [];
-    queue.push(cloneAgentMessage(message));
-    this.queues.set(message.toAgentId, queue);
-  }
-
-  peek(agentId: string): readonly AgentMessage[] {
-    return (this.queues.get(agentId) ?? []).map(cloneAgentMessage);
-  }
-
-  drain(agentId: string): readonly AgentMessage[] {
-    const messages = this.peek(agentId);
-    this.queues.set(agentId, []);
-    return messages;
-  }
-
-  drainByType(agentId: string, type: string): readonly AgentMessage[] {
-    const messages = this.queues.get(agentId) ?? [];
-    const matching: AgentMessage[] = [];
-    const remaining: AgentMessage[] = [];
-    for (const message of messages) {
-      if (message.type === type) {
-        matching.push(cloneAgentMessage(message));
-      } else {
-        remaining.push(message);
-      }
+  route(message: AgentMessage): void {
+    const queued = this.queues.get(message.toAgentId);
+    const clone: AgentMessage = {
+      ...message,
+      payload: structuredClone(message.payload),
+    };
+    if (queued) {
+      queued.push(clone);
+    } else {
+      this.queues.set(message.toAgentId, [clone]);
     }
-    this.queues.set(agentId, remaining);
-    return matching;
   }
 
   pending(agentId: string): number {
     return this.queues.get(agentId)?.length ?? 0;
   }
-}
 
-export function cloneAgentMessage<TPayload>(message: AgentMessage<TPayload>): AgentMessage<TPayload> {
-  return globalThis.structuredClone(message);
+  drain(agentId: string): AgentMessage[] {
+    const messages = this.queues.get(agentId) ?? [];
+    this.queues.set(agentId, []);
+    return messages.map((m) => ({ ...m, payload: structuredClone(m.payload) }));
+  }
+
+  drainByType(agentId: string, type: string): AgentMessage[] {
+    const messages = this.queues.get(agentId) ?? [];
+    const matched: AgentMessage[] = [];
+    const remaining: AgentMessage[] = [];
+    for (const m of messages) {
+      if (m.type === type) {
+        matched.push({ ...m, payload: structuredClone(m.payload) });
+      } else {
+        remaining.push(m);
+      }
+    }
+    this.queues.set(agentId, remaining);
+    return matched;
+  }
+
+  peek(agentId: string): AgentMessage[] {
+    const messages = this.queues.get(agentId) ?? [];
+    return messages.map((m) => ({ ...m, payload: structuredClone(m.payload) }));
+  }
 }

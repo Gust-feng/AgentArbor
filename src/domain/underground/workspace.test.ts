@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createWorkspaceView, InMemoryWorkspace, type WorkspaceSnapshot } from "./index.js";
+import { createWorkspaceProjectionView, createWorkspaceView, InMemoryWorkspace, type WorkspaceSnapshot } from "./index.js";
 
 type NestedWorkspaceSnapshot = WorkspaceSnapshot<{
   readonly nested: {
@@ -37,6 +37,22 @@ test("createWorkspaceView only exposes the read-only snapshot surface", () => {
   });
 
   assert.equal(typeof view.snapshot, "function");
+  assert.equal("patch" in view, false);
+  assert.equal("replace" in view, false);
+});
+
+test("workspace projection view returns defensive snapshots", () => {
+  const view = createWorkspaceProjectionView({
+    goalId: "goal-projection",
+    nested: {
+      value: "original",
+    },
+  });
+
+  const firstSnapshot = view.snapshot();
+  firstSnapshot.nested.value = "mutated outside";
+
+  assert.equal(view.snapshot().nested.value, "original");
   assert.equal("patch" in view, false);
   assert.equal("replace" in view, false);
 });

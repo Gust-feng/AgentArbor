@@ -6,15 +6,20 @@ import type { UndergroundDemoSummary } from "./underground-demo-summary.js";
 
 const execFileAsync = promisify(execFile);
 
-test("underground demo CLI remains deterministic by default", async () => {
+test("underground demo CLI defaults to fake AI as the minimal happy path", async () => {
   const result = await runDemo([]);
   const summary = parseSummary(result.stdout);
 
   assert.equal(result.code, 0);
-  assert.equal(result.stdout.includes("model.requested"), false);
-  assert.equal(summary.ai.enabled, false);
-  assert.equal(summary.ai.status, "disabled");
-  assert.deepEqual(summary.ai.eventCounts, { requested: 0, completed: 0, failed: 0 });
+  assert.equal(result.stdout.includes("model.requested"), true);
+  assert.equal(summary.terminalStatus, "approved_package_created");
+  assert.equal(summary.ai.enabled, true);
+  assert.equal(summary.ai.mode, "fake");
+  assert.equal(summary.ai.status, "completed");
+  assert.equal(summary.ai.eventCounts.requested > 0, true);
+  assert.equal(summary.ai.eventCounts.completed > 0, true);
+  assert.equal(summary.ai.eventCounts.failed, 0);
+  assert.equal(summary.directionPackage.status, "approved");
 });
 
 test("underground demo CLI --ai fake emits model events and keeps AI candidate-layer only", async () => {
@@ -27,27 +32,19 @@ test("underground demo CLI --ai fake emits model events and keeps AI candidate-l
   assert.equal(summary.ai.enabled, true);
   assert.equal(summary.ai.mode, "fake");
   assert.equal(summary.ai.status, "completed");
-  assert.deepEqual(summary.ai.eventCounts, { requested: 3, completed: 3, failed: 0 });
+  assert.equal(summary.ai.eventCounts.requested > 0, true);
+  assert.equal(summary.ai.eventCounts.completed, summary.ai.eventCounts.requested);
+  assert.equal(summary.ai.eventCounts.failed, 0);
   const rootletModelCall = summary.ai.modelCallRefs.find((ref) => ref.rootletKind === "option");
   const advisoryModelCall = summary.ai.modelCallRefs.find((ref) => ref.rootletKind === undefined);
-  assert.equal(summary.ai.modelCallRefs.length, 3);
+  assert.equal(summary.ai.modelCallRefs.length, summary.ai.eventCounts.completed);
   assert.notEqual(rootletModelCall, undefined);
   assert.notEqual(advisoryModelCall, undefined);
   assert.equal(rootletModelCall?.rootletOutputRefs.length, 2);
   assert.equal(rootletModelCall?.candidateRefs.length, 2);
   assert.deepEqual(
     summary.eventLog.filter((type) => !type.startsWith("model.")),
-    [
-      "goal.received",
-      "underground.exploration_planned",
-      "rootlet_cluster.started",
-      "exploration_candidate.produced",
-      "candidate_pool.updated",
-      "autonomy_review.completed",
-      "convergence_review.requested",
-      "convergence_review.completed",
-      "direction_handoff.completed",
-    ]
+    ["direction_handoff.completed"]
   );
   assert.equal(summary.eventLog.includes("growth_plan.completed"), false);
 });

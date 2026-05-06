@@ -194,13 +194,13 @@ function rootletKindFromContractId(contractId: string): string {
 
 function rootletGoalAnchor(request: ModelRequest): string {
   const content = request.sanitizedMessages.map((message) => message.content).join("\n");
-  const domainConcepts = matchLineValue(content, "- domainConcepts:");
-  if (domainConcepts !== undefined && domainConcepts !== "none") {
-    return domainConcepts.split(";").map((value) => value.trim()).filter(Boolean).slice(0, 4).join("/");
-  }
   const rawGoal = matchLineValue(content, "Raw goal:");
   if (rawGoal !== undefined && rawGoal.length > 0) {
     return truncate(rawGoal, 80);
+  }
+  const domainConcepts = matchLineValue(content, "- domainConcepts:");
+  if (domainConcepts !== undefined && domainConcepts !== "none") {
+    return domainConcepts.split(";").map((value) => value.trim()).filter(Boolean).slice(0, 4).join("/");
   }
   return "current goal";
 }
@@ -211,7 +211,12 @@ function matchLineValue(content: string, prefix: string): string | undefined {
 }
 
 function fakeCandidateForKind(kind: string, index: number, goalAnchor: string): Record<string, unknown> {
-  const summary = `Fake ${kind} candidate advice ${index}.`;
+  const goalTerms = goalAnchor
+    .split(/[\s.;,，；、/]+/u)
+    .map((term) => term.trim())
+    .filter((term) => term.length > 1);
+  const decomposedGoalTerms = [...goalTerms, ...[...goalTerms].reverse()].join(" ");
+  const summary = `Fake ${kind} candidate advice ${index} with goal-specific ${decomposedGoalTerms || "current goal"} material.`;
   switch (kind) {
     case "risk":
       return {

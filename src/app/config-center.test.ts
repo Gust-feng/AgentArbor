@@ -187,7 +187,7 @@ test("ConfigCenter reads v1 settings and upgrades information source settings to
   }
 });
 
-test("ConfigCenter defaults to no AI and resolves explicit config directory outside tests", async () => {
+test("ConfigCenter resolves explicit config directory outside tests", async () => {
   const directory = path.join(os.tmpdir(), "agentarbor-explicit-config");
   const resolved = resolveAgentArborConfigDirectory({
     env: { AGENTARBOR_CONFIG_DIR: directory },

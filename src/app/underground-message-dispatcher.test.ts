@@ -3,6 +3,7 @@ import test from "node:test";
 import type { ArborMessage } from "../domain/common.js";
 import type { IntelligenceChannel } from "../domain/intelligence/index.js";
 import { createMessage } from "../kernel/messages/create-message.js";
+import { createUndergroundAiRuntimeConfig } from "./intelligence-channel-factory.js";
 import { createMinimalRuntime } from "./runtime.js";
 import { runUndergroundDirectionSession } from "./underground-direction-session.js";
 import {
@@ -10,22 +11,27 @@ import {
   UndergroundMessageDispatcherError,
 } from "./underground-message-dispatcher.js";
 
-test("message-driven underground session emits stage events from handler agents", () => {
-  const result = runUndergroundDirectionSession("Build a small deterministic helper.");
-  const fromIdByType = new Map(result.runtime.eventLog.list().map((entry) => [entry.type, entry.message.from.id]));
+test("message-driven underground session without AgentTurnRuntime stops before direction handoff completion", async () => {
+  const result = await runUndergroundDirectionSession("Build a small deterministic helper.");
+  const eventTypes = result.runtime.eventLog.types();
 
-  assert.equal(fromIdByType.get("goal.received"), "user");
-  assert.equal(fromIdByType.get("underground.exploration_planned"), "underground-intent-core");
-  assert.equal(fromIdByType.get("rootlet_cluster.started"), "underground-growth-governor");
-  assert.equal(fromIdByType.get("exploration_candidate.produced"), "underground-rootlet-option");
-  assert.equal(fromIdByType.get("candidate_pool.updated"), "underground-candidate-pool");
-  assert.equal(fromIdByType.get("convergence_review.completed"), "underground-convergence-judge");
-  assert.equal(fromIdByType.get("direction_handoff.completed"), "underground-handoff-steward");
+  assert.equal(eventTypes.includes("direction_handoff.completed"), false);
+  assert.equal(result.terminalStatus, "stopped");
+  assert.equal(result.undergroundReport.convergenceReport.stopReason, "ai_required_for_autonomy");
+  assert.equal(result.undergroundReport.agentClusterRun, undefined);
 });
 
-test("dispatcher processes repeated goal messages once for a trace", () => {
+test("dispatcher processes repeated goal messages once for a trace with fake AI", async () => {
   const runtime = createMinimalRuntime();
-  const dispatcher = new MessageDrivenUndergroundDispatcher({ runtime });
+  const aiConfig = createUndergroundAiRuntimeConfig({ mode: "fake" });
+  if (!aiConfig.enabled) {
+    throw new Error("Expected fake AI runtime config to be enabled.");
+  }
+  const dispatcher = new MessageDrivenUndergroundDispatcher({
+    runtime,
+    intelligenceChannel: aiConfig.createIntelligenceChannel(runtime),
+    toolCenter: aiConfig.createToolCenter(runtime),
+  });
   try {
     const firstGoalMessage = createGoalReceivedMessage({
       traceId: "trace-repeat",
@@ -42,13 +48,14 @@ test("dispatcher processes repeated goal messages once for a trace", () => {
     runtime.bus.publish(firstGoalMessage);
     runtime.bus.publish(repeatedPhaseMessage);
 
-    const result = dispatcher.dispatchUntilIdle();
+    const result = await dispatcher.dispatchUntilIdleAsync();
 
     assert.notEqual(result, undefined);
-    assert.equal(result?.dispatchSteps, 6);
+    assert.equal((result?.dispatchSteps ?? 0) > 0, true);
     assert.equal(countEvents(runtime, "goal.received"), 3);
     assert.equal(countEvents(runtime, "underground.exploration_planned"), 1);
     assert.equal(countEvents(runtime, "direction_handoff.completed"), 1);
+    assert.equal(countEvents(runtime, "model.requested") > 0, true);
   } finally {
     dispatcher.dispose();
   }

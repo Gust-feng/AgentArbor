@@ -617,7 +617,7 @@ export function createPanelHtml(): string {
           <div class="control-line">
             <span class="hint">模型</span>
             <select id="aiMode" class="compact-select">
-              <option value="none">无 AI</option>
+              <option value="none">AI 禁用</option>
               <option value="fake">Fake AI</option>
               <option value="openai-compatible">OpenAI-compatible</option>
             </select>
@@ -641,7 +641,7 @@ export function createPanelHtml(): string {
           <label>模型名 <input id="modelInput" autocomplete="off"></label>
           <label>默认 AI 模式
             <select id="defaultAiModeInput">
-              <option value="none">无 AI</option>
+              <option value="none">AI 禁用</option>
               <option value="fake">Fake AI</option>
               <option value="openai-compatible">OpenAI-compatible</option>
             </select>
@@ -773,8 +773,8 @@ export function createPanelHtml(): string {
         state.informationAccess = result.informationAccess;
         dom.baseUrlInput.value = result.config.baseUrl || "";
         dom.modelInput.value = result.config.model || "";
-        dom.defaultAiModeInput.value = result.config.defaultAiMode || "none";
-        dom.aiMode.value = result.config.defaultAiMode || "none";
+        dom.defaultAiModeInput.value = result.config.defaultAiMode || "fake";
+        dom.aiMode.value = result.config.defaultAiMode || "fake";
         renderProviderStatus();
       } catch (error) {
         dom.configStatus.textContent = "模型配置读取失败。";
@@ -1098,10 +1098,12 @@ export function createPanelHtml(): string {
       if (!config) {
         return;
       }
-      const ready = config.defaultAiMode === "none" || config.defaultAiMode === "fake" || (config.model && config.secretConfigured);
-      dom.providerHint.textContent = ready ? "模型配置可用" : "OpenAI-compatible 需要模型名和密钥";
+      const ready = config.defaultAiMode === "fake" || (config.defaultAiMode === "openai-compatible" && config.model && config.secretConfigured);
+      dom.providerHint.textContent = config.defaultAiMode === "none"
+        ? "AI 已禁用，地下运行会停止"
+        : ready ? "模型配置可用" : "OpenAI-compatible 需要模型名和密钥";
       dom.workspaceStatus.textContent = "配置中心已连接";
-      dom.configStatus.textContent = "当前默认模式：" + (config.defaultAiMode || "none") + "；密钥：" + (config.secretConfigured ? "已配置" : "未配置");
+      dom.configStatus.textContent = "当前默认模式：" + (config.defaultAiMode || "fake") + "；密钥：" + (config.secretConfigured ? "已配置" : "未配置");
       dom.configStatus.className = "hint";
     }
 

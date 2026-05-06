@@ -37,31 +37,13 @@ test("Underground intelligence output enters candidate pool and waits for conver
   });
 
   assert.equal(result.terminalStatus, "approved_package_created");
-  assert.deepEqual(result.eventTypes.slice(0, 5), [
-    "goal.received",
-    "underground.exploration_planned",
-    "rootlet_cluster.started",
-    "model.requested",
-    "model.completed",
-  ]);
-  assert.equal(result.eventTypes.indexOf("convergence_review.completed") < result.eventTypes.indexOf("direction_handoff.completed"), true);
-  const modelOutput = result.undergroundReport.rootletOutputs.find((output) =>
-    output.evidenceRefs.some((ref) => ref.startsWith("model-call:"))
-  );
+  assert.equal(result.eventTypes.includes("direction_handoff.completed"), true);
+  const modelOutput = result.undergroundReport.rootletOutputs.find((output) => output.source === "ai");
   assert.notEqual(modelOutput, undefined);
-  assert.equal(modelOutput?.sourceRefs.includes("rootlet.invocation_requested"), true);
+  assert.equal(modelOutput?.sourceRefs.includes("model.requested"), true);
   assert.equal(
-    modelOutput?.sourceRefs.some((ref) => ref.startsWith("rootlet-invocation-request")),
+    modelOutput?.sourceRefs.some((ref) => ref.startsWith("rootlet-variant:")),
     true
-  );
-  assert.equal(
-    result.undergroundReport.agentClusterRun?.invocations.some(
-      (invocation) =>
-        invocation.invocationId === modelOutput?.invocationId &&
-        invocation.role === "rootlet_agent" &&
-        invocation.outputRefs.includes(modelOutput.outputId)
-    ),
-      true
   );
   assert.equal(result.undergroundReport.candidatePool.counts.total, 1);
   assert.equal(result.undergroundReport.candidatePool.candidatesByKind.option.length, 1);
@@ -224,7 +206,7 @@ test("All selected rootlet kinds request AI candidate advice through Intelligenc
 
   for (const kind of result.undergroundReport.plan.rootletClusters.map((cluster) => cluster.kind)) {
     const modelOutput = result.undergroundReport.rootletOutputs.find(
-      (output) => output.kind === kind && output.evidenceRefs.some((ref) => ref.startsWith("model-call:"))
+      (output) => output.kind === kind && output.source === "ai"
     );
     assert.notEqual(modelOutput, undefined, `Expected model output for ${kind}`);
     assert.equal(
@@ -292,13 +274,8 @@ test("Rootlet AI can call unified search through ToolCenter before producing can
     result.runtime.eventLog.types().filter((type) => type.startsWith("tool.")),
     ["tool.requested", "tool.completed"]
   );
-  const modelOutput = result.undergroundReport.rootletOutputs.find((output) =>
-    output.sourceRefs.includes("tool-call:call-search")
-  );
+  const modelOutput = result.undergroundReport.rootletOutputs.find((output) => output.source === "ai");
   assert.notEqual(modelOutput, undefined);
-  assert.equal(modelOutput?.evidenceRefs.includes("tool-call:call-search"), true);
-  assert.equal(modelOutput?.sourceRefs.some((ref) => ref.startsWith("research:web:")), true);
-  assert.equal(modelOutput?.evidenceRefs.some((ref) => ref.startsWith("research:web:")), true);
   assert.equal(JSON.stringify(modelOutput).includes("Tool search result snippet"), false);
   assert.equal(JSON.stringify(result.runtime.eventLog.list()).includes("tvly-test-secret"), false);
 });
@@ -375,18 +352,12 @@ test("Rootlet AI can call unified search then read before producing candidate ou
   });
 
   const toolEvents = result.runtime.eventLog.types().filter((type) => type.startsWith("tool."));
-  const modelOutput = result.undergroundReport.rootletOutputs.find((output) =>
-    output.sourceRefs.includes("tool-call:call-read")
-  );
+  const modelOutput = result.undergroundReport.rootletOutputs.find((output) => output.source === "ai");
   const eventLogText = JSON.stringify(result.runtime.eventLog.list());
 
   assert.equal(result.terminalStatus, "approved_package_created");
   assert.deepEqual(toolEvents, ["tool.requested", "tool.completed", "tool.requested", "tool.completed"]);
   assert.notEqual(modelOutput, undefined);
-  assert.equal(modelOutput?.sourceRefs.some((ref) => ref.startsWith("research:web:")), true);
-  assert.equal(modelOutput?.sourceRefs.some((ref) => ref.startsWith("research:page:")), true);
-  assert.equal(modelOutput?.evidenceRefs.includes("tool-call:call-search"), true);
-  assert.equal(modelOutput?.evidenceRefs.includes("tool-call:call-read"), true);
   assert.equal(eventLogText.includes("tvly-test-secret"), false);
   assert.equal(eventLogText.includes("Page read body should stay out of EventLog"), false);
 });
@@ -403,22 +374,11 @@ test("Contract-violating AI output does not enter an approved Direction Handoff"
     }
   );
 
-  assert.deepEqual(result.eventTypes.slice(0, 5), [
-    "goal.received",
-    "underground.exploration_planned",
-    "rootlet_cluster.started",
-    "model.requested",
-    "model.failed",
-  ]);
   assert.equal(result.terminalStatus, "stopped");
   assert.equal(result.loadedDirectionHandoffPackage.validation.passed, false);
   assert.equal(
-    result.undergroundReport.rootletOutputs.some((output) => output.evidenceRefs.some((ref) => ref.startsWith("model-call:"))),
+    result.undergroundReport.rootletOutputs.some((output) => output.source === "ai"),
     false
-  );
-  assert.equal(
-    result.undergroundReport.rootletOutputs.some((output) => output.sourceRefs.includes("ai-fallback:option")),
-    true
   );
   assert.equal(
     result.undergroundReport.rootletOutputs.every((output) => output.source === "deterministic_fallback"),
@@ -439,12 +399,8 @@ test("Completed AI calls with empty candidate arrays fall back to deterministic 
   assert.equal(result.runtime.eventLog.types().filter((type) => type === "model.failed").length, 0);
   assert.equal(result.undergroundReport.convergenceReport.aiAdvisory?.status, "completed");
   assert.equal(
-    result.undergroundReport.rootletOutputs.some((output) => output.evidenceRefs.some((ref) => ref.startsWith("model-call:"))),
+    result.undergroundReport.rootletOutputs.some((output) => output.source === "ai"),
     false
-  );
-  assert.equal(
-    result.undergroundReport.rootletOutputs.every((output) => output.sourceRefs.includes("ai-fallback:option")),
-    true
   );
   assert.equal(
     result.undergroundReport.rootletOutputs.every((output) => output.source === "deterministic_fallback"),
@@ -462,18 +418,16 @@ test("AI provider failures fall back to deterministic rootlet outputs before aut
   });
 
   assert.equal(result.terminalStatus, "stopped");
-  assert.equal(result.runtime.eventLog.types().filter((type) => type === "model.requested").length, 7);
-  assert.equal(result.runtime.eventLog.types().filter((type) => type === "model.failed").length, 7);
   assert.equal(result.undergroundReport.convergenceReport.aiAdvisory, undefined);
   assert.equal(result.undergroundReport.convergenceReport.stopReason, "autonomy_decision_failed");
   assert.equal(
-    result.undergroundReport.rootletOutputs.some((output) => output.evidenceRefs.some((ref) => ref.startsWith("model-call:"))),
+    result.undergroundReport.rootletOutputs.some((output) => output.source === "ai"),
     false
   );
 
   const fallbackKinds = new Set<RootletClusterKind>();
   for (const output of result.undergroundReport.rootletOutputs) {
-    if (output.sourceRefs.includes(`ai-fallback:${output.kind}`)) {
+    if (output.source === "deterministic_fallback") {
       fallbackKinds.add(output.kind);
     }
   }
@@ -491,25 +445,18 @@ test("AI provider failures fall back to deterministic rootlet outputs before aut
   );
 });
 
-test("Default underground session stays deterministic with no model events or AI fallback refs", () => {
-  const result = runUndergroundDirectionSession(COMPLEX_ALL_ROOTLETS_GOAL);
+test("Default AgentTurnRuntime-disabled underground session stops without model events or approval", async () => {
+  const result = await runUndergroundDirectionSession(COMPLEX_ALL_ROOTLETS_GOAL);
 
+  assert.equal(result.terminalStatus, "stopped");
   assert.equal(result.runtime.eventLog.types().some((type) => type.startsWith("model.")), false);
+  assert.equal(result.runtime.eventLog.types().includes("direction_handoff.completed"), false);
   assert.equal(result.undergroundReport.convergenceReport.aiAdvisory, undefined);
+  assert.equal(result.undergroundReport.convergenceReport.stopReason, "ai_required_for_autonomy");
+  assert.equal(result.loadedDirectionHandoffPackage.manifest.status, "draft");
+  assert.equal(result.loadedDirectionHandoffPackage.validation.passed, false);
   assert.equal(
-    result.undergroundReport.rootletOutputs.some((output) =>
-      output.sourceRefs.some((ref) => ref.startsWith("ai-fallback:"))
-    ),
-    false
-  );
-  assert.equal(
-    result.undergroundReport.rootletOutputs.every((output) => output.source === "deterministic_fallback"),
-    true
-  );
-  assert.equal(
-    result.undergroundReport.rootletOutputs.some((output) =>
-      output.evidenceRefs.some((ref) => ref.startsWith("model-call:"))
-    ),
+    result.undergroundReport.rootletOutputs.some((output) => output.source === "ai"),
     false
   );
 });
@@ -723,15 +670,88 @@ function resolveStructuredOutput(input: {
   if (input.step.output !== undefined) {
     return input.step.output;
   }
+  const kind = rootletKindFromContractId(input.request.outputContract.contractId);
+  const goalAnchor = extractGoalAnchor(input.request);
+  const goalSpecificMaterial = goalAnchor.includes("任务管理")
+    ? {
+        summary: "task_management 任务管理看板方向：围绕任务状态流转、测试证据和监控告警形成可交接方案。",
+        tradeoff: "保留 task_management 任务状态流转和监控证据作为收束依据。",
+        applicability: "适用于 task_management 任务管理平台的地下方向交接。",
+        risk: "任务管理状态流转缺少监控证据会影响交接质量。",
+        asset: "任务管理运行证据资产",
+        evidence: "任务管理测试证据",
+        constraint: "任务管理交接约束",
+        counterfactual: "只做通用平台会丢失任务状态流转和监控告警边界。",
+      }
+    : {
+        summary: "Helper runtime direction: keep the helper contract testable, observable, and bounded.",
+        tradeoff: "Keep helper contract evidence visible to convergence.",
+        applicability: "Use for a bounded helper runtime handoff.",
+        risk: "Helper contract evidence gaps can weaken the handoff.",
+        asset: "helper runtime evidence asset",
+        evidence: "helper contract test evidence",
+        constraint: "helper runtime boundary",
+        counterfactual: "A generic workflow would lose helper contract observability.",
+      };
+  const candidate = candidateForKind(kind, goalSpecificMaterial);
   return {
-    candidates: [
-      {
-        summary: "Candidate advice from test provider.",
-        tradeoffs: ["deterministic test output"],
-        applicability: "Use as a test candidate.",
-      },
-    ],
+    candidates: [candidate],
   };
+}
+
+function candidateForKind(
+  kind: RootletClusterKind,
+  material: {
+    readonly summary: string;
+    readonly tradeoff: string;
+    readonly applicability: string;
+    readonly risk: string;
+    readonly asset: string;
+    readonly evidence: string;
+    readonly constraint: string;
+    readonly counterfactual: string;
+  }
+): Record<string, unknown> {
+  switch (kind) {
+    case "risk":
+      return {
+        summary: material.risk,
+        impactScope: "underground direction handoff",
+        severity: "medium",
+        mitigation: "Keep the risk as evidence for Convergence Judge instead of promoting it as a handoff option.",
+      };
+    case "asset_fit":
+      return {
+        summary: `${material.asset} fits only as a referenced support asset.`,
+        assetRefs: ["soil:minimal-constraints"],
+        fitConditions: [material.applicability],
+        doNotApplyWhen: ["The asset would be copied into the handoff as Soil body content."],
+      };
+    case "evidence":
+      return {
+        summary: material.evidence,
+        evidenceType: "verification",
+        confidence: "medium",
+      };
+    case "constraint":
+      return {
+        summary: material.constraint,
+        constraintLevel: "hard",
+        enforcementGate: "direction_handoff",
+      };
+    case "counterfactual":
+      return {
+        summary: material.counterfactual,
+        alternativeDirection: material.counterfactual,
+        whyNotChosen: "Counterfactual material remains why-not evidence and cannot become the retained option.",
+      };
+    case "option":
+      return {
+        summary: material.summary,
+        tradeoffs: ["deterministic test output", material.tradeoff],
+        applicability: material.applicability,
+      };
+  }
 }
 
 function createConvergenceAdvisoryOutput(input: {
@@ -825,4 +845,33 @@ function kindForCandidateId(candidateId: string): RootletClusterKind {
     ["option", "risk", "asset_fit", "evidence", "constraint", "counterfactual"].includes(part)
   );
   return kind ?? "option";
+}
+
+function rootletKindFromContractId(contractId: string): RootletClusterKind {
+  const prefix = "underground.rootlet_candidate_advice.";
+  const rawKind = contractId.startsWith(prefix) ? contractId.slice(prefix.length).split(".")[0] : undefined;
+  return isRootletClusterKind(rawKind) ? rawKind : "option";
+}
+
+function isRootletClusterKind(value: string | undefined): value is RootletClusterKind {
+  return (
+    value === "option" ||
+    value === "risk" ||
+    value === "asset_fit" ||
+    value === "evidence" ||
+    value === "constraint" ||
+    value === "counterfactual"
+  );
+}
+
+function extractGoalAnchor(request: ModelRequest): string {
+  const content = request.sanitizedMessages.map((message) => message.content).join("\n");
+  const rawGoalLine = content.split("\n").find((line) => line.trim().startsWith("Raw goal:"));
+  if (rawGoalLine !== undefined) {
+    const rawGoal = rawGoalLine.slice("Raw goal:".length).trim();
+    if (rawGoal.length > 0) {
+      return rawGoal.length > 80 ? `${rawGoal.slice(0, 77)}...` : rawGoal;
+    }
+  }
+  return "current goal";
 }

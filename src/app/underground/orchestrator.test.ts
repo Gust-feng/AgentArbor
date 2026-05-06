@@ -3,15 +3,16 @@ import test from "node:test";
 import { createId } from "../../kernel/id.js";
 import { createMessage } from "../../kernel/messages/create-message.js";
 import { createMinimalRuntime } from "../runtime.js";
-import { runUndergroundDirectionSession } from "../underground-direction-session.js";
+import { createUndergroundAiRuntimeConfig } from "../intelligence-channel-factory.js";
+import { runUndergroundDirectionSessionWithIntelligence } from "../underground-direction-session.js";
 import { UndergroundAgentOrchestrator } from "./orchestrator.js";
 
-test("UndergroundAgentOrchestrator routes a representative direction flow through the AgentLoop adapter", () => {
+test("UndergroundAgentOrchestrator stops instead of approving when no AgentTurnRuntime is available", async () => {
   const runtime = createMinimalRuntime();
   const traceId = createId("trace");
   const goalId = createId("goal");
   const orchestrator = new UndergroundAgentOrchestrator({ runtime });
-  const result = orchestrator.run(
+  const result = await orchestrator.run(
     createMessage({
       traceId,
       from: { id: "user", role: "user" },
@@ -22,29 +23,29 @@ test("UndergroundAgentOrchestrator routes a representative direction flow throug
     })
   );
 
-  assert.equal(result.terminalStatus, "approved_package_created");
-  assert.equal(result.orchestratorRun.route, "agent_loop_compatibility_adapter");
-  assert.equal(result.orchestratorRun.compatibilityPathUsed, true);
-  assert.deepEqual(result.orchestratorRun.agentLoopIds, ["underground-direction-session-compatibility-adapter"]);
-  assert.equal(result.orchestratorRun.guardedStatus, "accepted");
-  assert.equal(runtime.eventLog.types().includes("direction_handoff.completed"), true);
+  assert.equal(result.terminalStatus, "stopped");
+  assert.equal(result.orchestratorRun.route, "cognitive_manager");
+  assert.equal(result.orchestratorRun.managerDecisions.includes("stop"), true);
+  assert.equal(result.orchestratorRun.agentLoopIds.length >= 6, true);
+  assert.equal(result.orchestratorRun.agentLoopIds[0], "underground-intent-core");
+  assert.equal(typeof result.orchestratorRun.guardedStatuses["underground-intent-core"], "string");
+  assert.equal(runtime.eventLog.types().includes("direction_handoff.completed"), false);
 });
 
-test("runUndergroundDirectionSession exposes the ADR-0021 orchestrator trace while preserving compatibility output", () => {
-  const result = runUndergroundDirectionSession("Build a small deterministic helper.");
+test("runUndergroundDirectionSession exposes the ADR-0021 orchestrator trace while preserving compatibility output", async () => {
+  const result = await runFakeUndergroundDirectionSession("Build a small deterministic helper.");
 
   assert.equal(result.terminalStatus, "approved_package_created");
-  assert.equal(result.undergroundOrchestratorRun.route, "agent_loop_compatibility_adapter");
-  assert.equal(result.undergroundOrchestratorRun.compatibilityPathUsed, true);
+  assert.equal(result.undergroundOrchestratorRun.route, "cognitive_manager");
   assert.equal(result.loadedDirectionHandoffPackage.validation.passed, true);
 });
 
-test("UndergroundAgentOrchestrator creates a distinct run trace for each invocation", () => {
+test("UndergroundAgentOrchestrator creates a distinct run trace for each invocation", async () => {
   const orchestrator = new UndergroundAgentOrchestrator({ runtime: createMinimalRuntime() });
   const firstTraceId = createId("trace");
   const secondTraceId = createId("trace");
 
-  const first = orchestrator.run(
+  const first = await orchestrator.run(
     createMessage({
       traceId: firstTraceId,
       from: { id: "user", role: "user" },
@@ -54,7 +55,7 @@ test("UndergroundAgentOrchestrator creates a distinct run trace for each invocat
       payload: { goalId: createId("goal"), goal: "First direction." },
     })
   );
-  const second = orchestrator.run(
+  const second = await orchestrator.run(
     createMessage({
       traceId: secondTraceId,
       from: { id: "user", role: "user" },
@@ -67,3 +68,14 @@ test("UndergroundAgentOrchestrator creates a distinct run trace for each invocat
 
   assert.notEqual(first.orchestratorRun.orchestratorRunId, second.orchestratorRun.orchestratorRunId);
 });
+
+async function runFakeUndergroundDirectionSession(goal: string) {
+  const aiConfig = createUndergroundAiRuntimeConfig({ mode: "fake" });
+  if (!aiConfig.enabled) {
+    throw new Error("Expected fake AI runtime config to be enabled.");
+  }
+  return runUndergroundDirectionSessionWithIntelligence(goal, {
+    createIntelligenceChannel: aiConfig.createIntelligenceChannel,
+    createToolCenter: aiConfig.createToolCenter,
+  });
+}

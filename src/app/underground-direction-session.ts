@@ -64,19 +64,19 @@ export type UndergroundDirectionSessionResult = {
   outputDirectory?: string;
 };
 
-export function runUndergroundDirectionSession(
+export async function runUndergroundDirectionSession(
   goal: string,
   options: RunUndergroundDirectionSessionOptions = {}
-): UndergroundDirectionSessionResult {
+): Promise<UndergroundDirectionSessionResult> {
   const { runtime, storage } = createUndergroundSessionRuntime(options);
   const { traceId, goalId, message } = createUndergroundGoalMessage(goal);
   const orchestrator = new UndergroundAgentOrchestrator({
     runtime,
-    enableAutonomy: options.requireAutonomy,
+    enableAutonomy: true,
     maxAutonomyCycles: options.maxAutonomyCycles,
   });
   options.onRuntimeReady?.({ runtime, traceId, goalId });
-  const dispatchResult = orchestrator.run(message);
+  const dispatchResult = await orchestrator.run(message);
   return completeUndergroundDirectionSession({ runtime, storage, traceId, goalId, dispatchResult });
 }
 

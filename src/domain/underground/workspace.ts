@@ -1,55 +1,53 @@
-export type WorkspaceSnapshot<TData extends object = Readonly<Record<string, unknown>>> = {
+export type WorkspaceSnapshot<T> = {
   readonly traceId: string;
-  readonly goalId?: string;
-  readonly goal?: string;
-  readonly data: Readonly<TData>;
+  readonly goalId: string;
+  readonly goal: string;
+  readonly data: T;
 };
 
-export type WorkspaceView<TSnapshot extends WorkspaceSnapshot = WorkspaceSnapshot> = {
-  snapshot(): TSnapshot;
-};
+export interface WorkspaceView<T> {
+  snapshot(): T;
+}
 
-export type WritableWorkspace<TSnapshot extends WorkspaceSnapshot = WorkspaceSnapshot> =
-  WorkspaceView<TSnapshot> & {
-    replace(agentId: string, snapshot: TSnapshot): void;
-    patch(agentId: string, patch: Partial<TSnapshot>): void;
-  };
+export interface WritableWorkspace<T> extends WorkspaceView<T> {
+  patch(agentId: string, update: Partial<T>): void;
+  replace(agentId: string, snapshot: T): void;
+}
 
-export class InMemoryWorkspace<TSnapshot extends WorkspaceSnapshot = WorkspaceSnapshot>
-  implements WritableWorkspace<TSnapshot>
-{
-  private current: TSnapshot;
+export class InMemoryWorkspace<T> implements WritableWorkspace<T> {
+  private state: T;
 
-  constructor(initialSnapshot: TSnapshot) {
-    this.current = cloneWorkspaceSnapshot(initialSnapshot);
+  constructor(init: T) {
+    this.state = globalThis.structuredClone(init);
   }
 
-  snapshot(): TSnapshot {
-    return cloneWorkspaceSnapshot(this.current);
+  snapshot(): T {
+    return globalThis.structuredClone(this.state);
   }
 
-  replace(_agentId: string, snapshot: TSnapshot): void {
-    this.current = cloneWorkspaceSnapshot(snapshot);
+  patch(agentId: string, update: Partial<T>): void {
+    this.state = { ...this.state, ...update };
   }
 
-  patch(_agentId: string, patch: Partial<TSnapshot>): void {
-    this.current = cloneWorkspaceSnapshot({
-      ...this.current,
-      ...patch,
-      data: patch.data ?? this.current.data,
-    } as TSnapshot);
+  replace(agentId: string, snapshot: T): void {
+    this.state = globalThis.structuredClone(snapshot);
   }
 }
 
-export function createWorkspaceView<TSnapshot extends WorkspaceSnapshot>(
-  snapshot: TSnapshot
-): WorkspaceView<TSnapshot> {
-  const workspace = new InMemoryWorkspace(snapshot);
+export function createWorkspaceView<T extends WorkspaceSnapshot<unknown>>(
+  init: Omit<T, "goalId" | "goal"> & { goalId?: string; goal?: string }
+): WorkspaceView<T> {
+  const workspace = new InMemoryWorkspace<T>({
+    ...init,
+    goalId: init.goalId ?? "",
+    goal: init.goal ?? "",
+  } as T);
+  return { snapshot: workspace.snapshot.bind(workspace) };
+}
+
+export function createWorkspaceProjectionView<T>(snapshot: T): WorkspaceView<T> {
+  const base = globalThis.structuredClone(snapshot);
   return {
-    snapshot: () => workspace.snapshot(),
+    snapshot: () => globalThis.structuredClone(base),
   };
-}
-
-export function cloneWorkspaceSnapshot<TSnapshot extends WorkspaceSnapshot>(snapshot: TSnapshot): TSnapshot {
-  return globalThis.structuredClone(snapshot);
 }

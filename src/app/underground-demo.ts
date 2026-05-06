@@ -1,11 +1,9 @@
-import {
-  runUndergroundDirectionSession,
-  runUndergroundDirectionSessionWithIntelligence,
-} from "./underground-direction-session.js";
+import { runUndergroundDirectionSessionWithIntelligence } from "./underground-direction-session.js";
 import { recoverUndergroundDirectionSession } from "./underground-direction-recovery.js";
 import { createUndergroundDemoSummary } from "./underground-demo-summary.js";
 import {
   createUndergroundAiRuntimeConfig,
+  createUndergroundAiDisabledConfigurationError,
   UndergroundAiConfigurationError,
   type UndergroundAiMode,
 } from "./intelligence-channel-factory.js";
@@ -18,13 +16,14 @@ async function main(): Promise<void> {
   try {
     const args = parseUndergroundDemoArgs(process.argv.slice(2));
     const aiConfig = createUndergroundAiRuntimeConfig({ mode: args.aiMode });
-    const result = aiConfig.enabled
-        ? await runUndergroundDirectionSessionWithIntelligence(args.goal, {
-            outputDirectory: args.outputDirectory,
-            createIntelligenceChannel: aiConfig.createIntelligenceChannel,
-            createToolCenter: aiConfig.createToolCenter,
-          })
-      : runUndergroundDirectionSession(args.goal, { outputDirectory: args.outputDirectory });
+    if (!aiConfig.enabled) {
+      throw createUndergroundAiDisabledConfigurationError(aiConfig.summaryInput);
+    }
+    const result = await runUndergroundDirectionSessionWithIntelligence(args.goal, {
+      outputDirectory: args.outputDirectory,
+      createIntelligenceChannel: aiConfig.createIntelligenceChannel,
+      createToolCenter: aiConfig.createToolCenter,
+    });
     const recovery =
       args.autoAnswer && result.terminalStatus === "awaiting_user"
         ? recoverUndergroundDirectionSession(result)
@@ -90,7 +89,7 @@ function parseUndergroundDemoArgs(argv: readonly string[]): {
   const goalParts: string[] = [];
   let autoAnswer = false;
   let outputDirectory: string | undefined;
-  let aiMode: UndergroundAiMode = "none";
+  let aiMode: UndergroundAiMode = "fake";
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];

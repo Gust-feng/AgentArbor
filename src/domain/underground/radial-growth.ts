@@ -34,7 +34,7 @@ export const ROOTLET_CLUSTER_KINDS = [
   "counterfactual",
 ] as const;
 
-const MAX_AI_ADVISORY_TEXT_LENGTH = 600;
+const MAX_AI_ADVISORY_TEXT_LENGTH = 180;
 
 export type RootletClusterKind = (typeof ROOTLET_CLUSTER_KINDS)[number];
 

@@ -17,7 +17,7 @@ test("panel HTML defaults to Simplified Chinese labels and status text", () => {
   assert.equal(html.includes("Agent transcript 为空"), true);
   assert.equal(html.includes("模型可见工作笔记、输出增量、工具摘要和最终结果"), true);
   assert.equal(html.includes("描述你的目标。地下组织会先理解、探索、收束，再形成可交给下一阶段的方向结果。"), true);
-  assert.equal(html.includes('<option value="none">无 AI</option>'), true);
+  assert.equal(html.includes('<option value="none">AI 禁用</option>'), true);
   assert.equal(html.includes('<option value="fake">Fake AI</option>'), true);
   assert.equal(html.includes('<option value="openai-compatible">OpenAI-compatible</option>'), true);
   assert.equal(html.includes("运行状态"), true);
@@ -210,9 +210,9 @@ test("panel tools route can disable web search without using the stored Tavily k
   }
 });
 
-test("panel can run no-AI underground session without writing a package path or leaking secrets", async () => {
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-noai-"));
-  const secret = "sk-noai-secret";
+test("panel rejects disabled AI mode without starting an approved underground run or leaking secrets", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-ai-disabled-"));
+  const secret = "sk-ai-disabled-secret";
   const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
   try {
     await requestJson(server.url, "/api/config/model-provider", {
@@ -224,21 +224,15 @@ test("panel can run no-AI underground session without writing a package path or 
       body: { goal: "Build a small deterministic helper.", aiMode: "none" },
     });
 
-    assert.equal(run.status, 200);
+    assert.equal(run.status, 400);
     assert.equal(run.text.includes(secret), false);
+    assert.equal(run.body.ok, false);
+    assert.equal(run.body.error.code, "ai_disabled");
     assert.equal(run.body.summary.ai.enabled, false);
+    assert.equal(run.body.summary.ai.status, "configuration_failed");
     assert.equal(run.body.summary.ai.eventCounts.requested, 0);
-    assert.equal(run.body.summary.writtenPackagePath, undefined);
-    assert.equal(run.body.summary.eventLog.includes("growth_plan.completed"), false);
-    assert.equal(run.body.observation.aboveground.status, "not_started");
-    assert.equal(run.body.observation.events.some((event: { type: string }) => event.type === "model.requested"), false);
-    assert.equal(run.body.tracking.run.phase, "handoff");
-    assert.equal(run.body.tracking.run.stage, "direction_handoff_completed");
-    assert.equal(run.body.tracking.run.abovegroundStatus, "not_started");
-    assert.equal(run.body.tracking.provider.status, "network_disabled");
-    assert.equal(run.body.tracking.modelTotals.requested, 0);
-    assert.equal(run.body.tracking.candidates.byKind.option.total > 0, true);
-    assert.equal(run.body.tracking.package.validationPassed, true);
+    assert.equal(run.body.summary.ai.modelCallRefs.length, 0);
+    assert.equal(run.body.observation, undefined);
   } finally {
     await server.close();
     await fs.rm(directory, { recursive: true, force: true });
@@ -305,7 +299,13 @@ test("panel fake AI run exposes model and candidate summaries without model prom
     assert.equal(optionCall.visibleOutput.rootletKind, "option");
     assert.equal(optionCall.visibleOutput.truncated, false);
     const optionFields = optionCall.visibleOutput.items[0]?.fields ?? [];
-    assert.equal(optionFields.some((field: { name: string; value: string }) => field.name === "summary" && field.value === "Fake option candidate advice 1."), true);
+    assert.equal(
+      optionFields.some(
+        (field: { name: string; value: string }) =>
+          field.name === "summary" && field.value.includes("Fake option candidate advice 1")
+      ),
+      true
+    );
     assert.equal(optionFields.some((field: { name: string; value: string }) => field.name === "tradeoffs" && field.value.includes("goal-specific")), true);
     assert.equal(optionFields.some((field: { name: string; truncated: boolean }) => field.name === "applicability" && field.truncated === false), true);
     assert.equal(
@@ -425,38 +425,6 @@ test("panel run stream disconnect does not stop the background run", async () =>
   }
 });
 
-test("panel async no-AI run returns initial job state before deterministic session executes", async () => {
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-async-noai-"));
-  const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
-  try {
-    const start = await requestJson(server.url, "/api/underground/runs", {
-      method: "POST",
-      body: { goal: "Build a deterministic helper through the async panel route.", aiMode: "none" },
-    });
-
-    assert.equal(start.status, 202);
-    assert.equal(start.body.status, "pending");
-    assert.equal(start.body.trace.eventCursor.eventCount, 0);
-    assert.equal(start.body.transcript.events[0].type, "run.started");
-    assert.equal(start.body.tracking.run.waitingPoint, "等待后台地下运行启动。");
-    assert.equal(start.body.summary, undefined);
-    assert.equal(start.body.observation, undefined);
-
-    const completed = await waitForRun(server.url, start.body.runId, (body) => body.status === "completed");
-    assert.equal(completed.body.status, "completed");
-    assert.equal(
-      completed.body.transcript.events.some((event: { type: string }) => event.type === "final.result"),
-      true
-    );
-    assert.equal(completed.body.summary.ai.enabled, false);
-    assert.equal(completed.body.observation.aboveground.status, "not_started");
-    assert.equal(completed.body.trace.eventCursor.eventCount, completed.body.observation.eventCursor.eventCount);
-  } finally {
-    await server.close();
-    await fs.rm(directory, { recursive: true, force: true });
-  }
-});
-
 test("panel run stream returns safe SSE events with fake model output deltas", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-sse-fake-"));
   const secret = "sk-sse-fake-secret";
@@ -515,7 +483,7 @@ test("panel run stream cursor resumes without repeating older events", async () 
   try {
     const start = await requestJson(server.url, "/api/underground/runs", {
       method: "POST",
-      body: { goal: "Build a deterministic helper through a resumable stream.", aiMode: "none" },
+      body: { goal: "Build a deterministic helper through a resumable stream.", aiMode: "fake" },
     });
     const completed = await waitForRun(server.url, start.body.runId, (body) => body.status === "completed");
     const cursor = completed.body.transcript.events[1].sequence;
@@ -948,7 +916,7 @@ function createStubOpenAiResponse(
                   confidence: "medium",
                   constraintLevel: "soft",
                   enforcementGate: "direction_handoff",
-                  alternativeDirection: "Use no AI.",
+                  alternativeDirection: "Use a reduced fake AI pass.",
                   whyNotChosen: "This test needs model.requested visibility.",
                   ...candidateOverrides,
                 },

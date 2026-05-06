@@ -5,7 +5,7 @@ import {
   UndergroundAiConfigurationError,
 } from "./intelligence-channel-factory.js";
 
-test("underground AI factory keeps default demo deterministic and provider-free", () => {
+test("underground AI factory exposes a disabled boundary without runtime factories", () => {
   const config = createUndergroundAiRuntimeConfig({});
 
   assert.equal(config.enabled, false);

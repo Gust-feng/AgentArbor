@@ -435,10 +435,10 @@ function summarizeRootletKindAi(
 
   return [...counts.values()].map((item) => {
     const aiCandidateCount = undergroundReport.rootletOutputs.filter(
-      (output) => output.kind === item.kind && output.evidenceRefs.some((ref) => ref.startsWith("model-call:"))
+      (output) => output.kind === item.kind && output.source === "ai"
     ).length;
     const fallbackCount = undergroundReport.rootletOutputs.filter(
-      (output) => output.kind === item.kind && output.sourceRefs.some((ref) => ref === `ai-fallback:${item.kind}`)
+      (output) => output.kind === item.kind && output.source === "deterministic_fallback"
     ).length;
     return {
       ...item,

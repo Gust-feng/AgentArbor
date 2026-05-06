@@ -3,11 +3,11 @@ import type { AddressInfo } from "node:net";
 import {
   createConfiguredToolCenterFactory,
   createUndergroundAiRuntimeConfig,
+  createUndergroundAiDisabledConfigurationError,
   UndergroundAiConfigurationError,
   type UndergroundAiMode,
 } from "./intelligence-channel-factory.js";
 import {
-  runUndergroundDirectionSession,
   runUndergroundDirectionSessionWithIntelligence,
   type UndergroundDirectionSessionRuntimeContext,
 } from "./underground-direction-session.js";
@@ -668,13 +668,7 @@ async function runUndergroundForPanel(
   } = {}
 ): Promise<{ summary: UndergroundDemoSummary; observation: PanelObservationReadModel; eventEntries: readonly EventLogEntry[] }> {
   if (aiMode === "none") {
-    const result = runUndergroundDirectionSession(goal, { onRuntimeReady: options.onRuntimeReady });
-    const summary = createUndergroundDemoSummary(result, undefined, { enabled: false, mode: "none" });
-    return {
-      summary,
-      observation: toPanelObservation(result.observationSnapshot),
-      eventEntries: result.runtime.eventLog.list(),
-    };
+    throw createUndergroundAiDisabledConfigurationError();
   }
 
   const aiEnvironment = await runtime.configCenter.createUndergroundAiEnvironment();
@@ -689,7 +683,7 @@ async function runUndergroundForPanel(
         });
 
   if (!aiConfig.enabled) {
-    throw new Error("Panel AI runtime config unexpectedly disabled for an enabled AI mode.");
+    throw createUndergroundAiDisabledConfigurationError(aiConfig.summaryInput);
   }
 
   const createToolCenter = await createConfiguredToolCenterFactory(runtime.configCenter, {
@@ -869,6 +863,9 @@ function parseAiMode(value: unknown): UndergroundAiMode | undefined {
 }
 
 function panelConfigurationErrorMessage(code: UndergroundAiConfigurationError["issue"]["code"]): string {
+  if (code === "ai_disabled") {
+    return "地下 Cognitive Runtime 需要 AI；AI 禁用模式只作为边界检查，未启动地下运行。";
+  }
   if (code === "missing_api_key") {
     return "OpenAI-compatible 模式缺少 API key，已在发起网络请求前停止。";
   }

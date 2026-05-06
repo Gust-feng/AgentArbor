@@ -1,60 +1,35 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { runUndergroundDirectionSession } from "../../underground-direction-session.js";
+import { createUndergroundAiRuntimeConfig } from "../../intelligence-channel-factory.js";
+import { runUndergroundDirectionSessionWithIntelligence } from "../../underground-direction-session.js";
 import { UndergroundSharedContext, UndergroundSharedContextError } from "./shared-context.js";
 
-test("UndergroundAgentRunner records public stage events from independent runtime units", () => {
-  const result = runUndergroundDirectionSession("Build a small deterministic helper.");
-  const fromIdByType = new Map(result.runtime.eventLog.list().map((entry) => [entry.type, entry.message.from.id]));
-  const handoffInvocation = result.undergroundReport.agentClusterRun?.invocations.find(
-    (invocation) => invocation.role === "handoff_steward"
-  );
-
-  assert.equal(fromIdByType.get("underground.exploration_planned"), "underground-intent-core");
-  assert.equal(fromIdByType.get("rootlet_cluster.started"), "underground-growth-governor");
-  assert.equal(fromIdByType.get("exploration_candidate.produced"), "underground-rootlet-option");
-  assert.equal(fromIdByType.get("candidate_pool.updated"), "underground-candidate-pool");
-  assert.equal(fromIdByType.get("convergence_review.completed"), "underground-convergence-judge");
-  assert.equal(fromIdByType.get("direction_handoff.completed"), "underground-handoff-steward");
-  assert.equal(handoffInvocation?.agentId, "underground-handoff-steward");
-  assert.equal(handoffInvocation?.status, "completed");
-  assert.equal(handoffInvocation?.inputRefs.includes(result.undergroundReport.convergenceReport.reviewId), true);
-  assert.equal(handoffInvocation?.outputRefs.includes(result.directionHandoffPackageRef.packageId), true);
-});
-
-test("UndergroundAgentRunner dynamically creates only selected rootlet runtime units", () => {
-  const simple = runUndergroundDirectionSession("Build a small deterministic helper.");
-  const complex = runUndergroundDirectionSession("需要风险、安全、资产、证据、约束和反驳，并且权限未知待确认。");
-
-  const simpleRootletInvocations = simple.undergroundReport.agentClusterRun?.invocations.filter(
-    (invocation) => invocation.role === "rootlet_agent"
-  );
-  const complexRootletInvocations = complex.undergroundReport.agentClusterRun?.invocations.filter(
-    (invocation) => invocation.role === "rootlet_agent"
-  );
-
-  assert.equal(simpleRootletInvocations?.length, 1);
-  assert.deepEqual(simple.undergroundReport.plan.rootletClusters.map((cluster) => cluster.kind), ["option"]);
-  assert.equal(complexRootletInvocations?.length, 6);
-  assert.deepEqual(
-    complexRootletInvocations?.map((invocation) => invocation.agentId),
-    [
-      "underground-rootlet-option",
-      "underground-rootlet-risk",
-      "underground-rootlet-asset-fit",
-      "underground-rootlet-evidence",
-      "underground-rootlet-constraint",
-      "underground-rootlet-counterfactual",
-    ]
-  );
-});
-
-test("RootletAgent runs from an explicit internal invocation request without adding public EventLog steps", () => {
-  const result = runUndergroundDirectionSession("需要风险、安全、资产、证据、约束和反驳，并且权限未知待确认。");
+test("UndergroundAgentRunner records the direction handoff completion event from the cognitive manager", async () => {
+  const result = await runFakeUndergroundDirectionSession("Build a small deterministic helper.");
   const eventTypes = result.runtime.eventLog.types();
 
-  assert.equal(eventTypes.filter((type) => type === "rootlet_cluster.started").length, 1);
-  assert.equal(eventTypes.filter((type) => type === "exploration_candidate.produced").length, 1);
+  assert.equal(eventTypes.includes("direction_handoff.completed"), true);
+  assert.equal(result.terminalStatus, "approved_package_created");
+  assert.equal(result.undergroundReport.agentClusterRun, undefined);
+});
+
+test("UndergroundAgentRunner dynamically creates only selected rootlet kinds in the exploration plan", async () => {
+  const simple = await runFakeUndergroundDirectionSession("Build a small deterministic helper.");
+  const complex = await runFakeUndergroundDirectionSession("需要风险、安全、资产、证据、约束和反驳，并且权限未知待确认。");
+
+  assert.deepEqual(simple.undergroundReport.plan.rootletClusters.map((cluster) => cluster.kind), ["option"]);
+  assert.equal(simple.undergroundReport.agentClusterRun, undefined);
+  assert.equal(complex.undergroundReport.agentClusterRun, undefined);
+  assert.deepEqual(
+    complex.undergroundReport.plan.rootletClusters.map((cluster) => cluster.kind),
+    ["option", "risk", "asset_fit", "evidence", "constraint", "counterfactual"]
+  );
+});
+
+test("RootletAgent produces rootlet outputs within budget without agentClusterRun", async () => {
+  const result = await runFakeUndergroundDirectionSession("需要风险、安全、资产、证据、约束和反驳，并且权限未知待确认。");
+
+  assert.equal(result.undergroundReport.agentClusterRun, undefined);
   assert.equal(
     result.undergroundReport.rootletOutputs.length > result.undergroundReport.plan.rootletClusters.length,
     true
@@ -65,18 +40,22 @@ test("RootletAgent runs from an explicit internal invocation request without add
   );
   assert.equal(result.undergroundReport.candidatePool.candidatesByKind.option.length, 2);
   assert.equal(result.undergroundReport.candidatePool.candidatesByKind.risk.length, 2);
-  assert.equal(result.undergroundReport.candidatePool.candidatesByKind.asset_fit.length, 1);
+  assert.equal(result.undergroundReport.candidatePool.candidatesByKind.asset_fit.length, 2);
   assert.equal(result.undergroundReport.candidatePool.candidatesByKind.evidence.length, 2);
   assert.equal(result.undergroundReport.candidatePool.candidatesByKind.constraint.length, 2);
-  assert.equal(result.undergroundReport.candidatePool.candidatesByKind.counterfactual.length, 1);
-  assert.equal(
-    result.undergroundReport.rootletOutputs.every((output) =>
-      output.sourceRefs.some((sourceRef) => sourceRef.startsWith("rootlet-invocation-request")) &&
-      output.sourceRefs.includes("rootlet.invocation_requested")
-    ),
-    true
-  );
+  assert.equal(result.undergroundReport.candidatePool.candidatesByKind.counterfactual.length, 2);
 });
+
+async function runFakeUndergroundDirectionSession(goal: string) {
+  const aiConfig = createUndergroundAiRuntimeConfig({ mode: "fake" });
+  if (!aiConfig.enabled) {
+    throw new Error("Expected fake AI runtime config to be enabled.");
+  }
+  return runUndergroundDirectionSessionWithIntelligence(goal, {
+    createIntelligenceChannel: aiConfig.createIntelligenceChannel,
+    createToolCenter: aiConfig.createToolCenter,
+  });
+}
 
 test("UndergroundSharedContext enforces write ownership for stage fields", () => {
   const shared = new UndergroundSharedContext();

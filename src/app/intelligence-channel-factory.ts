@@ -36,7 +36,7 @@ export type UndergroundAiRuntimeConfig =
       createToolCenter(runtime: MinimalRuntime): ToolExecutionBroker;
     };
 
-export type UndergroundAiConfigurationIssueCode = "missing_api_key" | "missing_model_name";
+export type UndergroundAiConfigurationIssueCode = "ai_disabled" | "missing_api_key" | "missing_model_name";
 
 export class UndergroundAiConfigurationError extends Error {
   constructor(
@@ -49,6 +49,16 @@ export class UndergroundAiConfigurationError extends Error {
     super(issue.message);
     this.name = "UndergroundAiConfigurationError";
   }
+}
+
+export function createUndergroundAiDisabledConfigurationError(
+  summaryInput: UndergroundDemoAiInput = { enabled: false, mode: "none" }
+): UndergroundAiConfigurationError {
+  return new UndergroundAiConfigurationError({
+    code: "ai_disabled",
+    message: "Underground Cognitive Runtime requires an AgentTurnRuntime-backed AI mode.",
+    summaryInput,
+  });
 }
 
 const OPENAI_COMPATIBLE_PROVIDER_ID = "openai-compatible-chat-completions";

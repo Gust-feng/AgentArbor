@@ -1,114 +1,88 @@
-export type UndergroundGuardSeverity = "warning" | "error";
-
-export type UndergroundGuardViolation = {
+export type GuardViolation = {
   readonly code: string;
   readonly message: string;
-  readonly severity: UndergroundGuardSeverity;
+  readonly severity?: "error" | "warning";
   readonly sourceRef?: string;
-};
-
-export type UndergroundGuardResult = {
-  readonly passed: boolean;
-  readonly violations: readonly UndergroundGuardViolation[];
-  readonly fallbackReason?: string;
   readonly checkedAt?: string;
 };
 
-export type GuardedActionOutput<TOutput> =
-  | {
-      readonly status: "accepted";
-      readonly output: TOutput;
-      readonly guard: UndergroundGuardResult;
-    }
-  | {
-      readonly status: "fallback";
-      readonly output: TOutput;
-      readonly guard: UndergroundGuardResult;
-      readonly fallbackSourceRefs: readonly string[];
-    }
-  | {
-      readonly status: "rejected";
-      readonly guard: UndergroundGuardResult;
-      readonly rejectedOutput?: TOutput;
-    };
+export type GuardResult = {
+  readonly passed: boolean;
+  readonly violations: readonly GuardViolation[];
+  readonly checkedAt: string;
+  readonly fallbackReason?: string;
+  readonly fallbackSourceRefs?: readonly string[];
+};
+
+export type GuardedActionOutput<T> =
+  | { readonly status: "accepted"; readonly output: T; readonly guard: GuardResult & { readonly passed: true } }
+  | { readonly status: "rejected"; readonly output: T; readonly guard: GuardResult & { readonly passed: false }; readonly violations: readonly GuardViolation[] }
+  | { readonly status: "fallback"; readonly output: T; readonly guard: GuardResult; readonly fallbackSourceRefs: readonly string[]; readonly fallbackReason: string };
 
 export function createGuardViolation(input: {
   readonly code: string;
   readonly message: string;
-  readonly severity?: UndergroundGuardSeverity;
+  readonly severity?: "error" | "warning";
   readonly sourceRef?: string;
-}): UndergroundGuardViolation {
+}): GuardViolation {
   return {
     code: input.code,
     message: input.message,
-    severity: input.severity ?? "error",
-    sourceRef: input.sourceRef,
+    ...(input.severity !== undefined ? { severity: input.severity } : {}),
+    ...(input.sourceRef !== undefined ? { sourceRef: input.sourceRef } : {}),
+    checkedAt: new Date().toISOString(),
   };
 }
 
-export function createGuardResult(input: {
-  readonly violations?: readonly UndergroundGuardViolation[];
-  readonly fallbackReason?: string;
-  readonly checkedAt?: string;
-} = {}): UndergroundGuardResult {
-  const violations = input.violations ?? [];
-  return {
-    passed: violations.every((violation) => violation.severity !== "error"),
-    violations: [...violations],
-    fallbackReason: input.fallbackReason,
-    checkedAt: input.checkedAt,
-  };
+export function createGuardResult(input: { readonly violations: readonly GuardViolation[] }): GuardResult {
+  const violations = normalizeViolations(input.violations);
+  const passed = !violations.some(isErrorViolation);
+  return { passed, violations, checkedAt: new Date().toISOString() };
 }
 
-export function acceptGuardedAction<TOutput>(
-  output: TOutput,
-  guard: UndergroundGuardResult = createGuardResult()
-): GuardedActionOutput<TOutput> {
-  if (!guard.passed) {
-    return {
-      status: "rejected",
-      guard,
-      rejectedOutput: output,
-    };
-  }
+export function acceptGuardedAction<T>(output: T): GuardedActionOutput<T> {
   return {
     status: "accepted",
     output,
-    guard,
+    guard: { passed: true as const, violations: [], checkedAt: new Date().toISOString() },
   };
 }
 
-export function fallbackGuardedAction<TOutput>(input: {
-  readonly output: TOutput;
-  readonly reason: string;
-  readonly sourceRefs: readonly string[];
-  readonly violations?: readonly UndergroundGuardViolation[];
-  readonly checkedAt?: string;
-}): GuardedActionOutput<TOutput> {
+export function rejectGuardedAction<T>(input: { readonly output: T; readonly violations: readonly GuardViolation[] }): GuardedActionOutput<T> {
+  const violations = normalizeViolations(input.violations);
+  return {
+    status: "rejected",
+    output: input.output,
+    guard: { passed: false as const, violations, checkedAt: new Date().toISOString() },
+    violations,
+  };
+}
+
+export function fallbackGuardedAction<T>(input: { readonly output: T; readonly reason: string; readonly sourceRefs: readonly string[]; readonly violations?: readonly GuardViolation[] }): GuardedActionOutput<T> {
+  const violations = normalizeViolations(input.violations ?? []);
+  const fallbackSourceRefs = [...input.sourceRefs];
   return {
     status: "fallback",
     output: input.output,
-    fallbackSourceRefs: [...input.sourceRefs],
-    guard: createGuardResult({
-      violations: input.violations,
+    guard: {
+      passed: !violations.some(isErrorViolation),
+      violations,
+      checkedAt: new Date().toISOString(),
       fallbackReason: input.reason,
-      checkedAt: input.checkedAt,
-    }),
+      fallbackSourceRefs,
+    },
+    fallbackSourceRefs,
+    fallbackReason: input.reason,
   };
 }
 
-export function rejectGuardedAction<TOutput>(input: {
-  readonly output?: TOutput;
-  readonly violations: readonly UndergroundGuardViolation[];
-  readonly checkedAt?: string;
-}): GuardedActionOutput<TOutput> {
-  return {
-    status: "rejected",
-    rejectedOutput: input.output,
-    guard: createGuardResult({
-      violations: input.violations,
-      checkedAt: input.checkedAt,
-    }),
-  };
+function normalizeViolations(violations: readonly GuardViolation[]): GuardViolation[] {
+  return violations.map((violation) => ({
+    ...violation,
+    checkedAt: violation.checkedAt ?? new Date().toISOString(),
+  }));
 }
 
+function isErrorViolation(violation: GuardViolation): boolean {
+  return violation.severity !== "warning";
+}

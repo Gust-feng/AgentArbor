@@ -16,9 +16,17 @@ import {
 } from "../../../domain/underground/index.js";
 import type { GuardedActionOutput } from "../../../domain/underground/index.js";
 import type { Constraint } from "../../../domain/contracts.js";
+import type { ModelMessage, ModelOutputContract } from "../../../domain/intelligence/index.js";
 import type { WorkspaceSnapshot } from "../../../domain/underground/index.js";
+import type { AgentTurnRuntime } from "../../../kernel/intelligence/index.js";
 import { createGoalIntentProfileForMinimalUnderground } from "../../underground-goal-profile.js";
 import { createMinimalUndergroundExplorationPlan } from "../../underground-rootlets.js";
+import {
+  fallbackReasoningTrace,
+  reasonWithAgentTurn,
+  reasoningTraceRefs,
+  type UndergroundReasoningTraceEntry,
+} from "./reasoning.js";
 
 export type IntentCorePercept = AgentPercept & {
   readonly goalId: string;
@@ -29,11 +37,22 @@ export type IntentCorePercept = AgentPercept & {
 export type IntentCoreDecision = AgentDecision & {
   readonly goalIntentProfile: GoalIntentProfile;
   readonly explorationPlan: UndergroundExplorationPlan;
+  readonly source: "ai" | "deterministic_fallback";
+  readonly confidence: number;
+  readonly reasoningTrace: readonly UndergroundReasoningTraceEntry[];
 };
 
 export type IntentCoreActionOutput = AgentActionOutput & {
   readonly goalIntentProfile: GoalIntentProfile;
   readonly explorationPlan: UndergroundExplorationPlan;
+  readonly source: "ai" | "deterministic_fallback";
+  readonly confidence: number;
+  readonly reasoningTrace: readonly UndergroundReasoningTraceEntry[];
+};
+
+type IntentCoreCapabilities = {
+  readonly constraints: readonly Constraint[];
+  readonly agentTurnRuntime?: AgentTurnRuntime;
 };
 
 const INTENT_CORE_PROTOCOL: AgentProtocol = {
@@ -53,7 +72,7 @@ export class IntentCoreAgent implements
     IntentCoreDecision,
     IntentCoreActionOutput,
     WorkspaceSnapshot<unknown>,
-    { readonly constraints: readonly Constraint[] }
+    IntentCoreCapabilities
   > {
   readonly agentId = "underground-intent-core";
   readonly protocol = INTENT_CORE_PROTOCOL;
@@ -61,7 +80,7 @@ export class IntentCoreAgent implements
   observe(
     ctx: AgentRunContext<
       WorkspaceSnapshot<unknown>,
-      { readonly constraints: readonly Constraint[] }
+      IntentCoreCapabilities
     >,
   ): IntentCorePercept {
     const messages = ctx.mailbox.drainByType(this.agentId, "goal.received");
@@ -81,37 +100,67 @@ export class IntentCoreAgent implements
     };
   }
 
-  reason(
-    _ctx: AgentRunContext<
+  async reason(
+    ctx: AgentRunContext<
       WorkspaceSnapshot<unknown>,
-      { readonly constraints: readonly Constraint[] }
+      IntentCoreCapabilities
     >,
     percept: IntentCorePercept,
-  ): IntentCoreDecision {
-    const goalIntentProfile = createGoalIntentProfileForMinimalUnderground({
+  ): Promise<IntentCoreDecision> {
+    const fallbackProfile = createGoalIntentProfileForMinimalUnderground({
       goalId: percept.goalId,
       rawGoal: percept.rawGoal,
       constraints: percept.constraints,
     });
-    const explorationPlan = createMinimalUndergroundExplorationPlan(
+    const fallbackPlan = createMinimalUndergroundExplorationPlan(
       percept.goalId,
-      goalIntentProfile,
+      fallbackProfile,
     );
+    const ai = await reasonWithAgentTurn({
+      agentId: this.agentId,
+      agentTurnRuntime: ctx.capabilities?.agentTurnRuntime,
+      traceId: ctx.workspace.snapshot().traceId,
+      goalId: percept.goalId,
+      purpose: "intent_profile",
+      outputContract: INTENT_PROFILE_CONTRACT,
+      callerRef: { kind: "goal", id: percept.goalId, label: "intent_profile" },
+      inputRefs: [{ kind: "goal", id: percept.goalId }],
+      inputRefIds: percept.inputRefs,
+      messages: buildIntentProfileMessages(percept),
+      constraints: percept.constraints,
+      parse: (output) => parseIntentProfileOutput(output, fallbackProfile),
+    });
+
+    const goalIntentProfile = ai.value ?? fallbackProfile;
+    const explorationPlan = createMinimalUndergroundExplorationPlan(percept.goalId, goalIntentProfile);
+    const reasoningTrace =
+      ai.reasoningTrace.length > 0
+        ? ai.reasoningTrace
+        : fallbackReasoningTrace({
+            agentId: this.agentId,
+            decisionSummary: "Intent Core used deterministic fallback goal profiling.",
+            inputRefs: percept.inputRefs,
+            fallbackRefs: ["deterministic_fallback"],
+          });
     return {
       rationaleRefs: [
         evidenceId(percept.goalId, "goal-intent"),
         "goal.received",
+        ...reasoningTraceRefs(reasoningTrace),
       ],
       decidedAt: new Date().toISOString(),
       goalIntentProfile,
       explorationPlan,
+      source: ai.source,
+      confidence: ai.confidence,
+      reasoningTrace,
     };
   }
 
   act(
     _ctx: AgentRunContext<
       WorkspaceSnapshot<unknown>,
-      { readonly constraints: readonly Constraint[] }
+      IntentCoreCapabilities
     >,
     decision: IntentCoreDecision,
   ): IntentCoreActionOutput {
@@ -122,13 +171,16 @@ export class IntentCoreAgent implements
       ],
       goalIntentProfile: decision.goalIntentProfile,
       explorationPlan: decision.explorationPlan,
+      source: decision.source,
+      confidence: decision.confidence,
+      reasoningTrace: decision.reasoningTrace,
     };
   }
 
   guard(
     ctx: AgentRunContext<
       WorkspaceSnapshot<unknown>,
-      { readonly constraints: readonly Constraint[] }
+      IntentCoreCapabilities
     >,
     output: IntentCoreActionOutput,
   ): GuardedActionOutput<IntentCoreActionOutput> {
@@ -178,6 +230,85 @@ export class IntentCoreAgent implements
   }
 }
 
+const INTENT_PROFILE_CONTRACT: ModelOutputContract = {
+  contractId: "underground.intent_profile.v1",
+  outputKind: "explanation",
+  format: "json_object",
+  requiredFields: [
+    "goalStatement",
+    "keyConcepts",
+    "domainConcepts",
+    "nonGoals",
+    "acceptanceCriteria",
+    "assumptions",
+    "riskHints",
+    "constraintHints",
+    "unknowns",
+    "decisionSummary",
+    "uncertainty",
+    "confidence",
+  ],
+  requiredStringFields: ["goalStatement", "decisionSummary", "uncertainty"],
+  visibleOutput: {
+    fields: ["goalStatement", "decisionSummary", "uncertainty"],
+    fieldTypes: {
+      goalStatement: "string",
+      decisionSummary: "string",
+      uncertainty: "string",
+    },
+    maxFieldLength: 240,
+  },
+};
+
+function buildIntentProfileMessages(percept: IntentCorePercept): readonly ModelMessage[] {
+  return [
+    {
+      role: "system",
+      content: [
+        "You are AgentArbor Underground Intent Core.",
+        "Shape the user goal into a GoalIntentProfile candidate for parent agents.",
+        "Return JSON only. Do not include chain-of-thought. Use decisionSummary for a short displayable decision summary and uncertainty for open concerns.",
+        "Engineering guards will validate schema, hard constraints, and package boundaries; do not claim final approval.",
+      ].join("\n"),
+    },
+    {
+      role: "user",
+      content: [
+        `Goal id: ${percept.goalId}`,
+        `Raw goal: ${percept.rawGoal}`,
+        "Hard constraints:",
+        ...percept.constraints
+          .filter((constraint) => constraint.level === "hard")
+          .map((constraint) => `- ${constraint.id}: ${constraint.statement}`),
+        "Return fields: goalStatement, keyConcepts, domainConcepts, nonGoals, acceptanceCriteria, assumptions, riskHints, constraintHints, unknowns, decisionSummary, uncertainty, confidence.",
+      ].join("\n"),
+    },
+  ];
+}
+
+function parseIntentProfileOutput(output: unknown, fallback: GoalIntentProfile) {
+  const record = asRecord(output);
+  const goalStatement = stringOrUndefined(record.goalStatement) ?? fallback.goalStatement;
+  return {
+    ok: true as const,
+    value: {
+      ...fallback,
+      goalStatement,
+      keyConcepts: nonEmptyStringArray(record.keyConcepts, fallback.keyConcepts),
+      domainConcepts: nonEmptyStringArray(record.domainConcepts, fallback.domainConcepts),
+      nonGoals: stringArray(record.nonGoals, fallback.nonGoals),
+      acceptanceCriteria: nonEmptyStringArray(record.acceptanceCriteria, fallback.acceptanceCriteria),
+      assumptions: nonEmptyStringArray(record.assumptions, fallback.assumptions),
+      riskHints: stringArray(record.riskHints, fallback.riskHints),
+      constraintHints: stringArray(record.constraintHints, fallback.constraintHints),
+      unknowns: stringArray(record.unknowns, fallback.unknowns),
+    },
+    decisionSummary: stringOrUndefined(record.decisionSummary) ?? `Intent profile shaped for ${goalStatement}.`,
+    uncertainty: stringOrUndefined(record.uncertainty),
+    confidence: numberOrUndefined(record.confidence),
+  };
+}
+
 function findConflictingHardConstraints(
   constraints: readonly Constraint[],
 ): string[] {
@@ -205,4 +336,34 @@ function findConflictingHardConstraints(
     }
   }
   return [...new Set(conflicting)];
+}
+
+function asRecord(value: unknown): Readonly<Record<string, unknown>> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Readonly<Record<string, unknown>>)
+    : {};
+}
+
+function stringOrUndefined(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function numberOrUndefined(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function stringArray(value: unknown, fallback: readonly string[]): string[] {
+  if (!Array.isArray(value)) {
+    return [...fallback];
+  }
+  return uniqueStrings(value.filter((item): item is string => typeof item === "string"));
+}
+
+function nonEmptyStringArray(value: unknown, fallback: readonly string[]): string[] {
+  const parsed = stringArray(value, []);
+  return parsed.length > 0 ? parsed : [...fallback];
+}
+
+function uniqueStrings(values: readonly string[]): string[] {
+  return [...new Set(values.map((value) => value.trim()).filter((value) => value.length > 0))];
 }

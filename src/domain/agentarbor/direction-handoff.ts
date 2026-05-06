@@ -61,6 +61,9 @@ export function assertDirectionHandoffConverged(
       budgetExhausted: report.budgetExhausted ?? false,
       stopReason: report.stopReason,
       handoffCandidateRefs,
+      source: report.source ?? "deterministic_fallback",
+      confidence: report.confidence ?? 0.18,
+      reasoningTrace: report.reasoningTrace ?? [],
     });
   } catch (error) {
     throw new DirectionHandoffConvergenceError(

@@ -129,6 +129,20 @@ export type RejectedCandidateRefWithReason = {
 
 export type UndergroundConvergenceOutcome = ConvergenceReviewOutcome;
 
+export type UndergroundConvergenceSource = "ai" | "deterministic_fallback" | "terminal_autonomy";
+
+export type UndergroundConvergenceReasoningTraceEntry = {
+  readonly agentId: string;
+  readonly decisionSummary: string;
+  readonly inputRefs: readonly string[];
+  readonly modelCallRefs: readonly string[];
+  readonly toolCallRefs: readonly string[];
+  readonly fallbackRefs: readonly string[];
+  readonly uncertainty: string;
+  readonly confidence: number;
+  readonly createdAt: string;
+};
+
 export type UndergroundConvergenceReport = {
   reviewId: string;
   reviewedByAgentIds: string[];
@@ -157,6 +171,9 @@ export type UndergroundConvergenceReport = {
   stopReason?: ConvergenceStopReason;
   handoffCandidateRefs: string[];
   aiAdvisory?: UndergroundConvergenceAiAdvisory;
+  source: UndergroundConvergenceSource;
+  confidence: number;
+  reasoningTrace: readonly UndergroundConvergenceReasoningTraceEntry[];
 };
 
 export type UndergroundConvergenceAiAdvisory = {
@@ -300,6 +317,9 @@ export function createUndergroundConvergenceReport(input: {
   userClarificationRequestId?: string;
   aiAdvisory?: UndergroundConvergenceAiAdvisory;
   forcedStopReason?: ConvergenceStopReason;
+  source?: UndergroundConvergenceSource;
+  confidence?: number;
+  reasoningTrace?: readonly UndergroundConvergenceReasoningTraceEntry[];
   createdAt?: string;
 }): UndergroundConvergenceReport {
   assertDecisionRefs(input.candidatePool, input.decisions);
@@ -389,6 +409,9 @@ export function createUndergroundConvergenceReport(input: {
     stopReason: outcome.outcome === "stopped" ? input.forcedStopReason ?? outcome.stopReason : outcome.stopReason,
     handoffCandidateRefs,
     aiAdvisory,
+    source: input.source ?? (aiAdvisory?.status === "completed" ? "ai" : "deterministic_fallback"),
+    confidence: normalizeConfidence(input.confidence ?? (aiAdvisory?.status === "completed" ? 0.72 : 0.18)),
+    reasoningTrace: (input.reasoningTrace ?? []).map(cloneUndergroundConvergenceReasoningTraceEntry),
   };
 }
 
@@ -650,6 +673,25 @@ function cloneCandidateConvergenceDecision(decision: CandidateConvergenceDecisio
     provenanceRefs: [...decision.provenanceRefs],
     evidenceRefs: [...decision.evidenceRefs],
   };
+}
+
+function cloneUndergroundConvergenceReasoningTraceEntry(
+  entry: UndergroundConvergenceReasoningTraceEntry
+): UndergroundConvergenceReasoningTraceEntry {
+  return {
+    ...entry,
+    inputRefs: [...entry.inputRefs],
+    modelCallRefs: [...entry.modelCallRefs],
+    toolCallRefs: [...entry.toolCallRefs],
+    fallbackRefs: [...entry.fallbackRefs],
+  };
+}
+
+function normalizeConfidence(value: number): number {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+  return Math.max(0, Math.min(1, value));
 }
 
 function cloneCandidateComparison(comparison: CandidateComparison): CandidateComparison {

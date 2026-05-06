@@ -489,5 +489,8 @@ function createReport(accepted: string[], merged: string[]) {
     openQuestions: [],
     budgetExhausted: false,
     handoffCandidateRefs: [...accepted, ...merged],
+    source: "deterministic_fallback" as const,
+    confidence: 0.18,
+    reasoningTrace: [],
   };
 }

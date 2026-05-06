@@ -55,6 +55,178 @@ test("FakeModelProvider can emit a deterministic tool call fixture", async () =>
   assert.deepEqual(eventLog.types(), ["model.requested", "model.completed"]);
 });
 
+test("FakeModelProvider default output satisfies underground intent profile contract", async () => {
+  const { channel } = createFakeProviderChannel();
+
+  const response = await channel.request(
+    createValidModelRequest({
+      purpose: "intent_profile",
+      sanitizedMessages: [{ role: "user", content: "Raw goal: Build a governed research agent." }],
+      outputContract: {
+        contractId: "underground.intent_profile.v1",
+        outputKind: "explanation",
+        format: "json_object",
+        requiredFields: [
+          "goalStatement",
+          "keyConcepts",
+          "domainConcepts",
+          "nonGoals",
+          "acceptanceCriteria",
+          "assumptions",
+          "riskHints",
+          "constraintHints",
+          "unknowns",
+          "decisionSummary",
+          "uncertainty",
+          "confidence",
+        ],
+        requiredStringFields: ["goalStatement", "decisionSummary", "uncertainty"],
+      },
+    })
+  );
+
+  assert.equal(response.status, "completed");
+  assert.equal(response.validation.status, "passed");
+  assert.match((response.structuredOutput as { goalStatement: string }).goalStatement, /governed research agent/);
+});
+
+test("FakeModelProvider default output satisfies underground growth governor contract", async () => {
+  const { channel } = createFakeProviderChannel();
+
+  const response = await channel.request(
+    createValidModelRequest({
+      purpose: "growth_governance",
+      sanitizedMessages: [
+        {
+          role: "user",
+          content: [
+            "Raw goal: Build a governed research agent.",
+            "Available rootlet kinds: option, risk, evidence",
+          ].join("\n"),
+        },
+      ],
+      outputContract: {
+        contractId: "underground.growth_governor.v1",
+        outputKind: "explanation",
+        format: "json_object",
+        requiredFields: [
+          "rootletKinds",
+          "budget",
+          "dispatchDecision",
+          "decisionSummary",
+          "uncertainty",
+          "confidence",
+        ],
+        requiredStringFields: ["dispatchDecision", "decisionSummary", "uncertainty"],
+      },
+    })
+  );
+
+  assert.equal(response.status, "completed");
+  assert.equal(response.validation.status, "passed");
+  assert.deepEqual((response.structuredOutput as { rootletKinds: string[] }).rootletKinds, [
+    "option",
+    "risk",
+    "evidence",
+  ]);
+});
+
+test("FakeModelProvider default output satisfies underground convergence judgment contract", async () => {
+  const { channel } = createFakeProviderChannel();
+
+  const response = await channel.request(
+    createValidModelRequest({
+      purpose: "convergence_judgment",
+      sanitizedMessages: [
+        {
+          role: "user",
+          content: [
+            "Raw goal: Build a governed research agent.",
+            "Candidates:",
+            "- [option] candidateId=candidate-option-1 outputId=rootlet-output-option-1",
+            "  summary: governed research agent option",
+          ].join("\n"),
+        },
+      ],
+      outputContract: {
+        contractId: "underground.convergence_judgment.v1",
+        outputKind: "explanation",
+        format: "json_object",
+        requiredFields: [
+          "candidateDecisions",
+          "nextAction",
+          "overallDirectionSummary",
+          "decisionSummary",
+          "uncertainty",
+          "confidence",
+        ],
+        requiredStringFields: ["nextAction", "overallDirectionSummary", "decisionSummary", "uncertainty"],
+      },
+    })
+  );
+
+  assert.equal(response.status, "completed");
+  assert.equal(response.validation.status, "passed");
+  assert.equal((response.structuredOutput as { nextAction: string }).nextAction, "approve_handoff");
+  assert.deepEqual(
+    (response.structuredOutput as { candidateDecisions: { candidateId: string; status: string }[] }).candidateDecisions,
+    [{ candidateId: "candidate-option-1", status: "accepted", reason: "Candidate candidate-option-1 is the retained option direction for Build a governed research agent.", evidenceRefs: ["rootlet-output-option-1"], contentDifference: "Fake Convergence Judge differentiated option candidate candidate-option-1.", whyPreferred: "Fake Convergence Judge selected candidate-option-1 as the retained option.", conflictWith: [] }]
+  );
+});
+
+test("FakeModelProvider default output satisfies underground handoff narrative contract", async () => {
+  const { channel } = createFakeProviderChannel();
+
+  const response = await channel.request(
+    createValidModelRequest({
+      purpose: "handoff_narrative",
+      sanitizedMessages: [
+        {
+          role: "user",
+          content: [
+            "Raw goal: Build a governed research agent.",
+            "Convergence outcome: approved",
+            "Handoff candidate refs:",
+            "- candidateId=candidate-option-1",
+            "  status=accepted",
+            "  summary=governed research agent option",
+          ].join("\n"),
+        },
+      ],
+      outputContract: {
+        contractId: "underground.handoff_narrative.v1",
+        outputKind: "draft",
+        format: "json_object",
+        requiredFields: [
+          "status",
+          "clarifiedGoal",
+          "optionNarratives",
+          "nonGoals",
+          "assumptions",
+          "missingInformation",
+          "risks",
+          "evidenceBoundary",
+          "growthEntry",
+          "decisionSummary",
+          "uncertainty",
+          "confidence",
+        ],
+        requiredStringFields: ["status", "clarifiedGoal", "evidenceBoundary", "decisionSummary", "uncertainty"],
+      },
+    })
+  );
+
+  assert.equal(response.status, "completed");
+  assert.equal(response.validation.status, "passed");
+  assert.equal((response.structuredOutput as { status: string }).status, "approved");
+  assert.deepEqual(
+    (response.structuredOutput as { optionNarratives: { candidateId: string }[] }).optionNarratives.map(
+      (narrative) => narrative.candidateId
+    ),
+    ["candidate-option-1"]
+  );
+});
+
 function createFakeProviderChannel(options: ConstructorParameters<typeof FakeModelProvider>[0] = {}) {
   const eventLog = new InMemoryEventLog();
   const bus = new InMemoryMessageBus(eventLog);

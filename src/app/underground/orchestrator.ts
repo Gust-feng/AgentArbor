@@ -131,7 +131,10 @@ export class UndergroundAgentOrchestrator {
     const maxAutonomyCycles = this.options.maxAutonomyCycles ?? 3;
     let currentCycleIndex = 0;
 
-    const intentCoreCapabilities = { constraints };
+    const intentCoreCapabilities = {
+      constraints,
+      agentTurnRuntime: this.options.agentTurnRuntime,
+    };
     const intentCoreCtx = this.createIntentCoreContext(workspace, mailbox, intentCoreCapabilities);
     const intentCoreResult = await this.runAgentLoop(this.intentCore, intentCoreCtx);
     agentLoopIds.push(this.intentCore.agentId);
@@ -149,7 +152,10 @@ export class UndergroundAgentOrchestrator {
 
     let autonomyLoopActive = true;
     while (autonomyLoopActive) {
-      const growthCapabilities = { constraints };
+      const growthCapabilities = {
+        constraints,
+        agentTurnRuntime: this.options.agentTurnRuntime,
+      };
       const growthCtx = this.createGrowthGovernorContext(workspace, mailbox, growthCapabilities);
       const growthResult = await this.runAgentLoop(this.growthGovernor, growthCtx);
       agentLoopIds.push(this.growthGovernor.agentId);
@@ -358,16 +364,16 @@ export class UndergroundAgentOrchestrator {
   private createIntentCoreContext(
     workspace: InMemoryWorkspace<UndergroundWorkspaceSnapshot>,
     mailbox: InMemoryMailbox,
-    capabilities: { readonly constraints: readonly Constraint[] },
-  ): AgentRunContext<WorkspaceSnapshot<unknown>, { readonly constraints: readonly Constraint[] }> {
+    capabilities: { readonly constraints: readonly Constraint[]; readonly agentTurnRuntime?: AgentTurnRuntime },
+  ): AgentRunContext<WorkspaceSnapshot<unknown>, { readonly constraints: readonly Constraint[]; readonly agentTurnRuntime?: AgentTurnRuntime }> {
     return { workspace, mailbox, capabilities };
   }
 
   private createGrowthGovernorContext(
     workspace: InMemoryWorkspace<UndergroundWorkspaceSnapshot>,
     mailbox: InMemoryMailbox,
-    capabilities: { readonly constraints: readonly Constraint[] },
-  ): AgentRunContext<WorkspaceSnapshot<unknown>, { readonly constraints: readonly Constraint[] }> {
+    capabilities: { readonly constraints: readonly Constraint[]; readonly agentTurnRuntime?: AgentTurnRuntime },
+  ): AgentRunContext<WorkspaceSnapshot<unknown>, { readonly constraints: readonly Constraint[]; readonly agentTurnRuntime?: AgentTurnRuntime }> {
     return { workspace, mailbox, capabilities };
   }
 
@@ -457,6 +463,7 @@ export class UndergroundAgentOrchestrator {
   ): AgentRunContext<HandoffStewardWorkspace, { readonly agentTurnRuntime?: AgentTurnRuntime; readonly directionHandoffPackageStore: import("../../domain/agentarbor/direction-handoff-package.js").DirectionHandoffPackageStore }> {
     const snap = workspace.snapshot();
     const projected: HandoffStewardWorkspace = {
+      traceId: snap.traceId,
       goalId: snap.data.goalId,
       rawGoal: snap.data.rawGoal,
       goalIntentProfile: snap.data.goalIntentProfile,

@@ -48,7 +48,8 @@ test("Underground intelligence output enters candidate pool and waits for conver
   assert.equal(result.undergroundReport.candidatePool.counts.total, 1);
   assert.equal(result.undergroundReport.candidatePool.candidatesByKind.option.length, 1);
   assert.equal(modelOutput?.source, "ai");
-  assert.equal(result.runtime.eventLog.types().filter((type) => type === "model.requested").length, 3);
+  assert.equal(result.runtime.eventLog.types().filter((type) => type === "model.requested").length, 6);
+  assert.equal(result.undergroundReport.convergenceReport.source, "ai");
   assert.equal(result.undergroundReport.convergenceReport.aiAdvisory?.status, "completed");
   assert.equal(
     result.undergroundReport.convergenceReport.aiAdvisory?.recommendedOptionId,
@@ -66,7 +67,7 @@ test("Underground intelligence output enters candidate pool and waits for conver
   );
 });
 
-test("Convergence AI advisory cannot recommend a missing candidate into handoff", async () => {
+test("Convergence AI judgment cannot recommend a missing candidate into handoff", async () => {
   const result = await runUndergroundDirectionSessionWithIntelligence("Build a small deterministic helper.", {
     createIntelligenceChannel: (runtime) =>
       new NativeIntelligenceChannel({
@@ -83,14 +84,13 @@ test("Convergence AI advisory cannot recommend a missing candidate into handoff"
                 ],
               },
             },
-            {
-              output: createConvergenceAdvisoryOutput({
+          ],
+          convergenceOutput: (request) =>
+            createConvergenceJudgmentOutput({
                 recommendedOptionId: "candidate-does-not-exist",
                 summary: "Pick candidate-does-not-exist directly.",
-                candidateIds: ["candidate-does-not-exist"],
-              }),
-            },
-          ],
+                candidateIdsByKind: candidateIdsByKindFromConvergenceRequest(request),
+            }),
         }),
         bus: runtime.bus,
       }),
@@ -113,17 +113,17 @@ test("Convergence AI advisory cannot recommend a missing candidate into handoff"
   assert.equal(JSON.stringify(result.directionHandoff).includes("candidate-does-not-exist"), false);
 });
 
-test("Convergence AI advisory cannot recommend a non-handoff candidate into handoff", async () => {
+test("Convergence AI judgment cannot recommend a non-handoff candidate into handoff", async () => {
   const result = await runUndergroundDirectionSessionWithIntelligence(COMPLEX_ALL_ROOTLETS_GOAL, {
     createIntelligenceChannel: (runtime) =>
       new NativeIntelligenceChannel({
         provider: new TestModelProvider({
           convergenceOutput: (request) => {
             const riskCandidateId = firstAdvisoryCandidateIdForKind(request, "risk") ?? "candidate-risk-missing";
-            return createConvergenceAdvisoryOutput({
+            return createConvergenceJudgmentOutput({
               recommendedOptionId: riskCandidateId,
               summary: `Prefer non-handoff risk candidate ${riskCandidateId}.`,
-              candidateIdsByKind: new Map([["risk", [riskCandidateId]]]),
+              candidateIdsByKind: candidateIdsByKindFromConvergenceRequest(request),
             });
           },
         }),
@@ -146,7 +146,7 @@ test("Convergence AI advisory cannot recommend a non-handoff candidate into hand
   );
 });
 
-test("Convergence AI advisory failure keeps deterministic flow auditable", async () => {
+test("Convergence AI judgment failure stops instead of approving deterministic convergence", async () => {
   const result = await runUndergroundDirectionSessionWithIntelligence("Build a small deterministic helper.", {
     createIntelligenceChannel: (runtime) =>
       new NativeIntelligenceChannel({
@@ -170,13 +170,13 @@ test("Convergence AI advisory failure keeps deterministic flow auditable", async
       }),
   });
 
-  assert.equal(result.terminalStatus, "approved_package_created");
+  assert.equal(result.terminalStatus, "stopped");
+  assert.equal(result.undergroundReport.convergenceReport.source, "deterministic_fallback");
+  assert.equal(result.undergroundReport.convergenceReport.confidence < 0.3, true);
   assert.equal(result.undergroundReport.convergenceReport.aiAdvisory?.status, "failed");
   assert.equal(result.runtime.eventLog.types().filter((type) => type === "model.failed").length, 1);
   assert.equal(
-    result.directionHandoff?.assumptions.includes(
-      "AI-assisted convergence advisory enriched candidate analysis and direction recommendation."
-    ),
+    result.loadedDirectionHandoffPackage.validation.passed,
     false
   );
 });
@@ -199,9 +199,10 @@ test("All selected rootlet kinds request AI candidate advice through Intelligenc
     "constraint",
     "counterfactual",
   ]);
-  assert.equal(result.runtime.eventLog.types().filter((type) => type === "model.requested").length, 8);
-  assert.equal(result.runtime.eventLog.types().filter((type) => type === "model.completed").length, 8);
+  assert.equal(result.runtime.eventLog.types().filter((type) => type === "model.requested").length, 11);
+  assert.equal(result.runtime.eventLog.types().filter((type) => type === "model.completed").length, 11);
   assert.equal(result.runtime.eventLog.types().filter((type) => type === "model.failed").length, 0);
+  assert.equal(result.undergroundReport.convergenceReport.source, "ai");
   assert.equal(result.undergroundReport.convergenceReport.aiAdvisory?.status, "completed");
 
   for (const kind of result.undergroundReport.plan.rootletClusters.map((cluster) => cluster.kind)) {
@@ -362,7 +363,7 @@ test("Rootlet AI can call unified search then read before producing candidate ou
   assert.equal(eventLogText.includes("Page read body should stay out of EventLog"), false);
 });
 
-test("Contract-violating AI output does not enter an approved Direction Handoff", async () => {
+test("Contract-violating AI rootlet output falls back before convergence and handoff", async () => {
   const result = await runUndergroundDirectionSessionWithIntelligence(
     "Stop because no viable candidate should be produced.",
     {
@@ -374,8 +375,6 @@ test("Contract-violating AI output does not enter an approved Direction Handoff"
     }
   );
 
-  assert.equal(result.terminalStatus, "stopped");
-  assert.equal(result.loadedDirectionHandoffPackage.validation.passed, false);
   assert.equal(
     result.undergroundReport.rootletOutputs.some((output) => output.source === "ai"),
     false
@@ -384,6 +383,7 @@ test("Contract-violating AI output does not enter an approved Direction Handoff"
     result.undergroundReport.rootletOutputs.every((output) => output.source === "deterministic_fallback"),
     true
   );
+  assert.equal(JSON.stringify(result.directionHandoff).includes("Missing summary field."), false);
 });
 
 test("Completed AI calls with empty candidate arrays fall back to deterministic rootlet output", async () => {
@@ -395,7 +395,7 @@ test("Completed AI calls with empty candidate arrays fall back to deterministic 
       }),
   });
 
-  assert.equal(result.runtime.eventLog.types().filter((type) => type === "model.completed").length, 3);
+  assert.equal(result.runtime.eventLog.types().filter((type) => type === "model.completed").length, 6);
   assert.equal(result.runtime.eventLog.types().filter((type) => type === "model.failed").length, 0);
   assert.equal(result.undergroundReport.convergenceReport.aiAdvisory?.status, "completed");
   assert.equal(
@@ -472,7 +472,7 @@ test("EventLog and Observation Snapshot do not expose provider secret values", a
           output: {
             candidates: [
               {
-                summary: "Secret-safe model advice.",
+                summary: "Helper runtime direction keeps secret material out of EventLog and Observation Snapshot.",
                 tradeoffs: ["keeps secret material out of EventLog"],
                 applicability: "Use only as candidate advice.",
               },
@@ -498,21 +498,26 @@ test("Convergence AI advisory text is sanitized before public projections", asyn
       new NativeIntelligenceChannel({
         provider: new TestModelProvider({
           convergenceOutput: (request) => {
-            const candidateId = firstAdvisoryCandidateIdForKind(request, "option");
-            return {
+            const candidateIdsByKind = candidateIdsByKindFromConvergenceRequest(request);
+            const candidateId = candidateIdsByKind.get("option")?.[0];
+            const output = createConvergenceJudgmentOutput({
               recommendedOptionId: candidateId,
-              candidateAnalyses: [
-                {
-                  candidateId,
-                  kind: "option",
-                  contentDifference: `This advisory difference includes ${secret}.`,
-                  whyPreferred: `This advisory rationale includes ${bearer}.`,
-                  conflictWith: [`api key: ${secret}`],
-                },
-              ],
+              summary: `Advisory summary mentions ${secret} and ${bearer}.`,
+              candidateIdsByKind,
+            });
+            const candidateDecisions = Array.isArray(output.candidateDecisions)
+              ? output.candidateDecisions
+              : [];
+            return {
+              ...output,
+              candidateDecisions: candidateDecisions.map((decision) => ({
+                ...(decision as Record<string, unknown>),
+                contentDifference: `This advisory difference includes ${secret}.`,
+                whyPreferred: `This advisory rationale includes ${bearer}.`,
+                conflictWith: [`api key: ${secret}`],
+              })),
               conflictsNeedingUserInput: [`Confirm no prompt or ${secret} is exposed.`],
               constraintViolations: [`Do not leak ${bearer}.`],
-              overallDirectionSummary: `Advisory summary mentions ${secret} and ${bearer}.`,
             };
           },
         }),
@@ -565,6 +570,22 @@ class TestModelProvider implements ModelProvider {
   constructor(private readonly options: TestModelProviderOptions = {}) {}
 
   async complete(request: ModelRequest): Promise<ModelResponse> {
+    if (!this.options.fail && request.outputContract.contractId === "underground.intent_profile.v1") {
+      return completedTestResponse({
+        request,
+        provider: this,
+        structuredOutput: createLegalIntentProfileOutput(request),
+      });
+    }
+
+    if (!this.options.fail && request.outputContract.contractId === "underground.growth_governor.v1") {
+      return completedTestResponse({
+        request,
+        provider: this,
+        structuredOutput: createLegalGrowthGovernorOutput(request),
+      });
+    }
+
     if (!this.options.fail && request.outputContract.contractId === "underground.autonomy_decision.v1") {
       return completedTestResponse({
         request,
@@ -649,6 +670,47 @@ function createLegalAutonomyDecisionOutput(): Record<string, unknown> {
   };
 }
 
+function createLegalIntentProfileOutput(request: ModelRequest): Record<string, unknown> {
+  const goal = extractGoalAnchor(request);
+  const concepts = conceptsForGoal(goal);
+  return {
+    goalStatement: goal,
+    keyConcepts: concepts,
+    domainConcepts: concepts,
+    nonGoals: [],
+    acceptanceCriteria: ["Parent underground agents can review the profile before handoff."],
+    assumptions: ["The test provider only returns safe structured fixture data."],
+    riskHints: goal.includes("风险") || goal.toLowerCase().includes("risk") ? ["risk"] : [],
+    constraintHints: goal.includes("约束") || goal.toLowerCase().includes("constraint") ? ["goal:constraint"] : [],
+    unknowns: [],
+    decisionSummary: `Intent Core shaped ${goal} as a candidate profile.`,
+    uncertainty: "This test fixture contains only safe summary text and no raw provider state.",
+    confidence: 0.79,
+  };
+}
+
+function conceptsForGoal(goal: string): string[] {
+  if (goal.includes("任务管理")) {
+    return ["task_management", "testing", "monitoring", "handoff"];
+  }
+  return ["helper", "runtime", "handoff"];
+}
+
+function createLegalGrowthGovernorOutput(request: ModelRequest): Record<string, unknown> {
+  const rootletKinds = availableRootletKindsFromGrowthRequest(request);
+  return {
+    rootletKinds,
+    budget: {
+      maxRootletClusters: rootletKinds.length,
+      maxCandidateOutputs: rootletKinds.length,
+    },
+    dispatchDecision: "Start selected rootlet clusters as lower-layer material for parent convergence.",
+    decisionSummary: "Growth Governor selected bounded rootlet clusters.",
+    uncertainty: "This test fixture cannot approve handoff or bypass Convergence Judge.",
+    confidence: 0.77,
+  };
+}
+
 function resolveStructuredOutput(input: {
   readonly request: ModelRequest;
   readonly step: TestModelProviderResponse;
@@ -657,15 +719,26 @@ function resolveStructuredOutput(input: {
   if (input.step.toolCalls !== undefined && input.step.toolCalls.length > 0) {
     return undefined;
   }
-  if (input.request.outputContract.contractId === "convergence-advisory") {
-    if (isConvergenceAdvisoryOutput(input.step.output)) {
+  if (input.request.outputContract.contractId === "underground.convergence_judgment.v1") {
+    if (isConvergenceJudgmentOutput(input.step.output)) {
       return input.step.output;
     }
-    return input.convergenceOutput?.(input.request) ?? createConvergenceAdvisoryOutput({
+    return input.convergenceOutput?.(input.request) ?? createConvergenceJudgmentOutput({
       recommendedOptionId: firstAdvisoryCandidateIdForKind(input.request, "option"),
-      summary: "Convergence advisory confirms the candidate pool as the source of truth.",
+      summary: "Convergence Judge confirms the candidate pool as the source of truth.",
       candidateIdsByKind: candidateIdsByKindFromConvergenceRequest(input.request),
     });
+  }
+  if (input.request.outputContract.contractId === "underground.handoff_narrative.v1") {
+    return createLegalHandoffNarrativeOutput(input.request);
+  }
+  if (input.request.outputContract.contractId === "convergence-advisory") {
+    return {
+      candidateAnalyses: [],
+      conflictsNeedingUserInput: [],
+      constraintViolations: [],
+      overallDirectionSummary: "Legacy convergence advisory fixture remains bounded by package validation.",
+    };
   }
   if (input.step.output !== undefined) {
     return input.step.output;
@@ -754,50 +827,106 @@ function candidateForKind(
   }
 }
 
-function createConvergenceAdvisoryOutput(input: {
+function createConvergenceJudgmentOutput(input: {
   readonly recommendedOptionId?: string;
   readonly summary: string;
-  readonly candidateIds?: readonly string[];
   readonly candidateIdsByKind?: ReadonlyMap<RootletClusterKind, readonly string[]>;
 }): Record<string, unknown> {
-  const candidateAnalyses =
-    input.candidateIdsByKind === undefined
-      ? (input.candidateIds ?? []).map((candidateId) => ({
-          candidateId,
-          kind: kindForCandidateId(candidateId),
-          contentDifference: `AI differentiator for ${candidateId}.`,
-          whyPreferred: `AI rationale for ${candidateId}.`,
-          conflictWith: [],
-        }))
-      : [...input.candidateIdsByKind.entries()].flatMap(([kind, candidateIds]) =>
-          candidateIds.map((candidateId) => ({
-            candidateId,
-            kind,
-            contentDifference: `AI differentiator for ${candidateId}.`,
-            whyPreferred: `AI rationale for ${candidateId}.`,
-            conflictWith: [],
-          }))
-        );
+  const candidateIdsByKind = input.candidateIdsByKind ?? new Map<RootletClusterKind, readonly string[]>();
+  const firstOptionId = candidateIdsByKind.get("option")?.[0];
+  const candidateDecisions = [...candidateIdsByKind.entries()].flatMap(([kind, candidateIds]) =>
+    candidateIds.map((candidateId) => {
+      const status = convergenceStatusForKind(kind, candidateId, firstOptionId);
+      return {
+        candidateId,
+        status,
+        reason: `AI Convergence Judge marked ${candidateId} as ${status}.`,
+        evidenceRefs: [],
+        contentDifference: `AI differentiator for ${candidateId}.`,
+        whyPreferred: `AI rationale for ${candidateId}.`,
+        conflictWith: [],
+      };
+    })
+  );
   return {
     recommendedOptionId: input.recommendedOptionId,
-    candidateAnalyses,
+    candidateDecisions,
+    nextAction: "approve_handoff",
     conflictsNeedingUserInput: [],
     constraintViolations: [],
     overallDirectionSummary: input.summary,
+    decisionSummary: "Convergence Judge made candidate-level convergence decisions.",
+    uncertainty: "This test fixture exposes only safe summary text.",
+    confidence: 0.82,
   };
 }
 
-function isConvergenceAdvisoryOutput(value: unknown): boolean {
+function isConvergenceJudgmentOutput(value: unknown): boolean {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return false;
   }
   const record = value as Record<string, unknown>;
   return (
-    Array.isArray(record.candidateAnalyses) &&
+    Array.isArray(record.candidateDecisions) &&
+    typeof record.nextAction === "string" &&
     Array.isArray(record.conflictsNeedingUserInput) &&
     Array.isArray(record.constraintViolations) &&
-    typeof record.overallDirectionSummary === "string"
+    typeof record.overallDirectionSummary === "string" &&
+    typeof record.decisionSummary === "string"
   );
+}
+
+function createLegalHandoffNarrativeOutput(request: ModelRequest): Record<string, unknown> {
+  const candidateIds = candidateIdsFromHandoffRequest(request);
+  const convergenceOutcome = lineValueFromRequest(request, "Convergence outcome:") ?? "approved";
+  const status =
+    convergenceOutcome === "approved" && candidateIds.length > 0
+      ? "approved"
+      : convergenceOutcome === "awaiting_user"
+        ? "awaiting_user"
+        : "stopped";
+  return {
+    status,
+    clarifiedGoal: `Handoff Steward packages ${extractGoalAnchor(request)} with source candidate lineage.`,
+    optionNarratives:
+      status === "approved"
+        ? candidateIds.map((candidateId) => ({
+            candidateId,
+            directionSummary: `Handoff narrative for ${candidateId}: preserve the candidate lineage, evidence refs, and package validation boundary.`,
+            whyPreferred: "The candidate is accepted or merged by Convergence Judge.",
+            whyNot: [],
+            doNotChooseWhen: ["When package validation fails."],
+            evidenceRefs: [`handoff-narrative:${candidateId}`],
+          }))
+        : [],
+    nonGoals: ["Do not bypass DirectionHandoffPackage validation."],
+    assumptions: ["Convergence Judge remains the candidate promotion owner."],
+    missingInformation: status === "approved" ? [] : ["Approved handoff narrative is unavailable."],
+    risks: ["Aboveground must preserve handoff evidence refs."],
+    evidenceBoundary: "Use source candidates, convergence refs, model refs and package validation only.",
+    growthEntry: {
+      allowedRuntimeShapes: ["single_agent", "sub_agent_tree"],
+      suggestedFirstWorkflowNodes: ["confirm_direction_handoff", "derive_execution_plan", "preserve_evidence_refs"],
+      escalationRules: ["Stop if package validation fails."],
+    },
+    decisionSummary: "Handoff Steward test fixture organized safe handoff material.",
+    uncertainty: "No private reasoning trace or raw provider response is exposed.",
+    confidence: status === "approved" ? 0.8 : 0.2,
+  };
+}
+
+function convergenceStatusForKind(
+  kind: RootletClusterKind,
+  candidateId: string,
+  firstOptionId: string | undefined
+): "accepted" | "merged" | "rejected" | "unknown" {
+  if (kind === "option") {
+    return candidateId === firstOptionId ? "accepted" : "merged";
+  }
+  if (kind === "risk" || kind === "counterfactual") {
+    return "rejected";
+  }
+  return "merged";
 }
 
 function firstAdvisoryCandidateIdForKind(request: ModelRequest, kind: RootletClusterKind): string | undefined {
@@ -817,11 +946,30 @@ function candidateIdsFromConvergenceRequest(request: ModelRequest): string[] {
   return [...candidateIdsByKindFromConvergenceRequest(request).values()].flat();
 }
 
+function candidateIdsFromHandoffRequest(request: ModelRequest): string[] {
+  const content = request.sanitizedMessages.map((message) => message.content).join("\n");
+  return [...content.matchAll(/candidateId=([^\s\n]+)/g)]
+    .map((match) => match[1])
+    .filter((candidateId): candidateId is string => candidateId !== undefined && candidateId.length > 0);
+}
+
 function candidateIdsByKindFromConvergenceRequest(request: ModelRequest): Map<RootletClusterKind, string[]> {
   const content = request.sanitizedMessages.map((message) => message.content).join("\n");
   const result = new Map<RootletClusterKind, string[]>();
-  const pattern = /- \[(option|risk|asset_fit|evidence|constraint|counterfactual)\] outputId=.*?\n\s+candidates: ([^\n]+)/g;
-  for (const match of content.matchAll(pattern)) {
+  const currentPattern = /- \[(option|risk|asset_fit|evidence|constraint|counterfactual)\]\s+candidateId=([^\s]+)\s+outputId=[^\s\n]+/g;
+  for (const match of content.matchAll(currentPattern)) {
+    const kind = match[1] as RootletClusterKind;
+    const candidateId = match[2]?.trim();
+    if (candidateId !== undefined && candidateId.length > 0) {
+      result.set(kind, [...(result.get(kind) ?? []), candidateId]);
+    }
+  }
+  if (result.size > 0) {
+    return result;
+  }
+
+  const legacyPattern = /- \[(option|risk|asset_fit|evidence|constraint|counterfactual)\] outputId=.*?\n\s+candidates: ([^\n]+)/g;
+  for (const match of content.matchAll(legacyPattern)) {
     const kind = match[1] as RootletClusterKind;
     const rawCandidateIds = match[2] ?? "";
     if (rawCandidateIds === "none") {
@@ -874,4 +1022,20 @@ function extractGoalAnchor(request: ModelRequest): string {
     }
   }
   return "current goal";
+}
+
+function lineValueFromRequest(request: ModelRequest, prefix: string): string | undefined {
+  const content = request.sanitizedMessages.map((message) => message.content).join("\n");
+  const line = content.split("\n").find((candidate) => candidate.trim().startsWith(prefix));
+  return line?.slice(line.indexOf(prefix) + prefix.length).trim();
+}
+
+function availableRootletKindsFromGrowthRequest(request: ModelRequest): RootletClusterKind[] {
+  const content = request.sanitizedMessages.map((message) => message.content).join("\n");
+  const line = content.split("\n").find((candidate) => candidate.trim().startsWith("Available rootlet kinds:"));
+  const rawKinds = line?.slice(line.indexOf(":") + 1).trim() ?? "option";
+  return rawKinds
+    .split(",")
+    .map((kind) => kind.trim())
+    .filter(isRootletClusterKind);
 }

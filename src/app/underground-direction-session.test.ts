@@ -21,7 +21,7 @@ test("fake AI underground session creates an approved package without entering A
   assert.equal(result.terminalStatus, "approved_package_created");
   assert.equal(result.loadedDirectionHandoffPackage.manifest.status, "approved");
   assert.equal(result.loadedDirectionHandoffPackage.validation.passed, true);
-  assert.equal(result.directionHandoff?.clarifiedGoal, "Build a small deterministic helper");
+  assert.equal(result.directionHandoff?.clarifiedGoal.includes("Build a small deterministic helper"), true);
   assert.equal(
     result.undergroundReport.plan.rootletClusters.map((cluster) => cluster.kind).includes("option"),
     true

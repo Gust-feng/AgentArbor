@@ -57,6 +57,13 @@ export function createUndergroundExplorationReport(input: {
         whyNot: [...comparison.whyNot],
         evidenceRefs: [...comparison.evidenceRefs],
       })),
+      reasoningTrace: (input.convergenceReport.reasoningTrace ?? []).map((entry) => ({
+        ...entry,
+        inputRefs: [...entry.inputRefs],
+        modelCallRefs: [...entry.modelCallRefs],
+        toolCallRefs: [...entry.toolCallRefs],
+        fallbackRefs: [...entry.fallbackRefs],
+      })),
     },
   };
 }

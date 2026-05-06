@@ -38,6 +38,13 @@ test("runUndergroundDirectionSession exposes the ADR-0021 orchestrator trace whi
   assert.equal(result.terminalStatus, "approved_package_created");
   assert.equal(result.undergroundOrchestratorRun.route, "cognitive_manager");
   assert.equal(result.loadedDirectionHandoffPackage.validation.passed, true);
+  assert.equal(result.runtime.eventLog.types().filter((type) => type === "model.requested").length >= 5, true);
+  const purposes = modelRequestPurposes(result.runtime.eventLog.list());
+  assert.deepEqual(purposes.slice(0, 2), [
+    "intent_profile",
+    "growth_governance",
+  ]);
+  assert.equal(purposes.includes("handoff_narrative"), true);
 });
 
 test("UndergroundAgentOrchestrator creates a distinct run trace for each invocation", async () => {
@@ -78,4 +85,15 @@ async function runFakeUndergroundDirectionSession(goal: string) {
     createIntelligenceChannel: aiConfig.createIntelligenceChannel,
     createToolCenter: aiConfig.createToolCenter,
   });
+}
+
+function modelRequestPurposes(
+  entries: ReturnType<ReturnType<typeof createMinimalRuntime>["eventLog"]["list"]>
+): string[] {
+  return entries
+    .filter((entry) => entry.type === "model.requested")
+    .map((entry) => {
+      const payload = entry.message.payload as { purpose?: string };
+      return payload.purpose ?? "unknown";
+    });
 }

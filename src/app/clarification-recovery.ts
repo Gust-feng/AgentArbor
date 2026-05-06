@@ -183,6 +183,9 @@ function createApprovedConvergenceReviewFromClarification(input: {
     ),
     budgetExhausted: previousReview.budgetExhausted ?? true,
     handoffCandidateRefs: sourceCandidateRefs.map((candidate) => candidate.id),
+    source: previousReview.source ?? "deterministic_fallback",
+    confidence: previousReview.confidence ?? 0.24,
+    reasoningTrace: previousReview.reasoningTrace ?? [],
   };
 }
 

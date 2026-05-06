@@ -18,11 +18,14 @@ export type ModelPurpose =
   | "intent_profile"
   | "rootlet_candidate"
   | "counterfactual"
+  | "growth_governance"
   | "plan_draft"
   | "verification_advice"
   | "governance_advice"
   | "autonomy_decision"
-  | "convergence_advisory";
+  | "convergence_advisory"
+  | "convergence_judgment"
+  | "handoff_narrative";
 
 export type ModelOutputKind = "candidate" | "draft" | "explanation" | "evidence_suggestion";
 

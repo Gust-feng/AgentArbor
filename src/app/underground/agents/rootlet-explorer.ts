@@ -18,19 +18,28 @@ import type {
 } from "../../../domain/underground/index.js";
 import {
   acceptGuardedAction,
+  evidenceId,
   fallbackGuardedAction,
   rejectGuardedAction,
 } from "../../../domain/underground/index.js";
 import { sanitizeUndergroundConvergenceAiAdvisoryText } from "../../../domain/underground/radial-growth.js";
 import type { AgentTurnRuntime } from "../../../kernel/intelligence/index.js";
-import { createRootletOutputsForInvocation } from "../../underground-rootlets.js";
+import { createGoalIntentProfileForMinimalUnderground } from "../../underground-goal-profile.js";
+import { createRootletOutputForInvocation } from "../../underground-rootlets.js";
 import { createDeterministicFallbackRootletOutputs } from "../fallback.js";
 import {
   getRootletKindStrategy,
   getUndergroundRootletCandidateAdviceContract,
   buildUndergroundRootletCandidateAdviceMessages,
   parseUndergroundRootletCandidateAdviceOutput,
+  formatUndergroundRootletCandidateAdviceSummary,
 } from "./rootlet-strategies.js";
+import {
+  reasonWithAgentTurn,
+  reasoningTraceRefs,
+  type UndergroundReasoningResult,
+  type UndergroundReasoningTraceEntry,
+} from "./reasoning.js";
 
 type RootletExplorerWorkspaceData = Readonly<{
   startedPlan?: UndergroundExplorationPlan;
@@ -53,19 +62,36 @@ type RootletExplorerPercept = AgentPercept & {
   readonly invocation: UndergroundAgentInvocation;
   readonly goalId: string;
   readonly rawGoal: string;
+  readonly goalIntentProfile?: GoalIntentProfile;
+  readonly constraints: readonly Constraint[];
 };
 
 type RootletExplorerDecision = AgentDecision & {
-  readonly useAi: boolean;
   readonly cluster: RootletClusterPlan;
   readonly invocation: UndergroundAgentInvocation;
   readonly goalId: string;
   readonly rawGoal: string;
+  readonly goalIntentProfile?: GoalIntentProfile;
+  readonly candidateMaterials: readonly RootletExplorerCandidateMaterial[];
+  readonly source: "ai" | "deterministic_fallback";
+  readonly confidence: number;
+  readonly reasoningTrace: readonly UndergroundReasoningTraceEntry[];
+  readonly sourceRefs: readonly string[];
+  readonly fallbackRefs: readonly string[];
 };
 
 type RootletExplorerActionOutput = AgentActionOutput & {
   readonly rootletOutputs: RootletOutput[];
   readonly source: "ai" | "deterministic_fallback";
+  readonly confidence: number;
+  readonly reasoningTrace: readonly UndergroundReasoningTraceEntry[];
+};
+
+type RootletExplorerCandidateMaterial = {
+  readonly summary: string;
+  readonly sourceIndex: number;
+  readonly sourceRefs: readonly string[];
+  readonly evidenceRefs: readonly string[];
 };
 
 export class RootletExplorerAgent
@@ -113,6 +139,8 @@ export class RootletExplorerAgent
         invocation: { invocationId: "", agentId: this.agentId, role: "rootlet_agent", inputRefs: [], outputRefs: [], status: "running", startedAt: "" },
         goalId,
         rawGoal,
+        goalIntentProfile: snapshot.data.goalIntentProfile,
+        constraints: ctx.capabilities?.constraints ?? [],
       };
     }
     return {
@@ -122,22 +150,117 @@ export class RootletExplorerAgent
       invocation,
       goalId,
       rawGoal,
+      goalIntentProfile: snapshot.data.goalIntentProfile,
+      constraints: ctx.capabilities?.constraints ?? [],
     };
   }
 
-  reason(
+  async reason(
     ctx: AgentRunContext<RootletExplorerWorkspaceSnapshot, RootletExplorerCapabilities>,
     percept: RootletExplorerPercept
-  ): RootletExplorerDecision {
-    const useAi = ctx.capabilities?.agentTurnRuntime !== undefined;
+  ): Promise<RootletExplorerDecision> {
+    const goalIntentProfile = percept.goalIntentProfile ?? createGoalIntentProfileForMinimalUnderground({
+      goalId: percept.goalId,
+      rawGoal: percept.rawGoal,
+      constraints: percept.constraints,
+    });
+    const strategy = getRootletKindStrategy(percept.cluster.kind);
+    const adviceContract = getUndergroundRootletCandidateAdviceContract(percept.cluster.kind);
+    const ai = await reasonWithAgentTurn<readonly RootletExplorerCandidateMaterial[]>({
+      agentId: this.agentId,
+      agentTurnRuntime: ctx.capabilities?.agentTurnRuntime,
+      traceId: ctx.workspace.snapshot().traceId,
+      goalId: percept.goalId,
+      purpose: "rootlet_candidate",
+      outputContract: adviceContract.modelOutputContract,
+      callerRef: { kind: "rootlet", id: percept.cluster.clusterId, label: percept.cluster.kind },
+      inputRefs: [
+        { kind: "goal", id: percept.goalId },
+        { kind: "rootlet", id: percept.cluster.clusterId, label: percept.cluster.kind },
+      ],
+      inputRefIds: percept.inputRefs,
+      messages: buildUndergroundRootletCandidateAdviceMessages({
+        goal: percept.rawGoal,
+        goalIntentProfile,
+        cluster: percept.cluster,
+        constraints: percept.constraints,
+      }),
+      constraints: percept.constraints,
+      allowedTools: strategy.availableTools,
+      maxModelRounds: 3,
+      maxToolRounds: 2,
+      fallback: "deterministic",
+      budget: { maxOutputTokens: 256, maxLatencyMs: 30_000 },
+      parse: (output, response) => {
+        const parsed = parseUndergroundRootletCandidateAdviceOutput({
+          kind: percept.cluster.kind,
+          output,
+          maxCandidates: percept.cluster.budget.maxCandidateOutputs,
+        });
+        if (parsed.candidates.length === 0) {
+          return {
+            ok: false,
+            reason: parsed.issues.length > 0 ? "rootlet_candidate:parser_rejected_all_candidates" : "rootlet_candidate:no_candidates",
+            decisionSummary: "Rootlet model output did not produce any parser-accepted candidate material.",
+            uncertainty: "Rootlet Explorer will materialize deterministic fallback output with explicit fallback refs.",
+            confidence: 0.18,
+          };
+        }
+        return {
+          ok: true,
+          value: parsed.candidates.map((candidate) => ({
+            summary: formatUndergroundRootletCandidateAdviceSummary(candidate),
+            sourceIndex: candidate.sourceIndex,
+            sourceRefs: [
+              adviceContract.modelOutputContract.contractId,
+              `rootlet-variant:${percept.cluster.kind}:${candidate.sourceIndex + 1}`,
+              `model-candidate:${percept.cluster.kind}:${candidate.sourceIndex + 1}`,
+              response.requestId,
+              response.responseId,
+            ],
+            evidenceRefs: [
+              evidenceId(percept.goalId, `rootlet:${percept.cluster.kind}:${candidate.sourceIndex + 1}`),
+              `model-call:${response.responseId}`,
+            ],
+          })),
+          decisionSummary: `Rootlet Explorer accepted ${parsed.candidates.length} ${percept.cluster.kind} candidate material item(s) from parser-validated model output.`,
+          uncertainty: parsed.discardedCount > 0
+            ? `${parsed.discardedCount} rootlet candidate item(s) were discarded by the app parser before act.`
+            : "Rootlet candidate material remains lower-layer evidence for parent convergence.",
+          confidence: confidenceFromRootletOutput(response.structuredOutput) ?? 0.72,
+        };
+      },
+    });
+    const reasoningRefs = reasoningTraceRefs(ai.reasoningTrace);
+    const fallbackRefs = rootletFallbackRefs(percept.cluster.kind, ai);
+    const baseSourceRefs = rootletReasoningSourceRefs(ai);
+    const candidateMaterials =
+      ai.source === "ai" && ai.value !== undefined
+        ? ai.value.map((material) => ({
+            ...material,
+            sourceRefs: unique([...baseSourceRefs, ...material.sourceRefs]),
+            evidenceRefs: unique([...material.evidenceRefs, ...ai.toolCallRefs]),
+          }))
+        : [];
     return {
       decidedAt: new Date().toISOString(),
-      rationaleRefs: useAi ? ["rootlet-explorer:ai-path"] : ["rootlet-explorer:deterministic-fallback"],
-      useAi,
+      rationaleRefs: [
+        percept.cluster.clusterId,
+        percept.invocation.invocationId,
+        ...reasoningRefs,
+        ...(candidateMaterials.length > 0 ? ["rootlet-explorer:ai-parser-accepted"] : fallbackRefs),
+      ],
       cluster: percept.cluster,
       invocation: percept.invocation,
       goalId: percept.goalId,
       rawGoal: percept.rawGoal,
+      goalIntentProfile,
+      candidateMaterials,
+      source: candidateMaterials.length > 0 ? "ai" : "deterministic_fallback",
+      confidence: ai.confidence,
+      reasoningTrace: ai.reasoningTrace,
+      sourceRefs: candidateMaterials.length > 0 ? baseSourceRefs : unique([...baseSourceRefs, ...fallbackRefs]),
+      fallbackRefs,
     };
   }
 
@@ -145,8 +268,28 @@ export class RootletExplorerAgent
     ctx: AgentRunContext<RootletExplorerWorkspaceSnapshot, RootletExplorerCapabilities>,
     decision: RootletExplorerDecision
   ): Promise<RootletExplorerActionOutput> {
-    if (decision.useAi && ctx.capabilities?.agentTurnRuntime !== undefined) {
-      return this.actWithAi(ctx, decision);
+    if (decision.source === "ai" && decision.candidateMaterials.length > 0) {
+      const constraints = [...(ctx.capabilities?.constraints ?? [])];
+      const rootletOutputs = decision.candidateMaterials.map((material) =>
+        createRootletOutputForInvocation({
+          goalId: decision.goalId,
+          cluster: decision.cluster,
+          invocation: decision.invocation,
+          constraints,
+          goalIntentProfile: decision.goalIntentProfile,
+          summary: material.summary,
+          source: "ai",
+          sourceRefs: unique([...decision.sourceRefs, ...material.sourceRefs]),
+          evidenceRefs: material.evidenceRefs,
+        })
+      );
+      return {
+        outputRefs: rootletOutputs.map((o: RootletOutput) => o.outputId),
+        rootletOutputs,
+        source: "ai",
+        confidence: decision.confidence,
+        reasoningTrace: decision.reasoningTrace,
+      };
     }
     return this.actDeterministic(ctx, decision);
   }
@@ -199,117 +342,69 @@ export class RootletExplorerAgent
     return acceptGuardedAction(sanitizedOutput);
   }
 
-  private async actWithAi(
-    ctx: AgentRunContext<RootletExplorerWorkspaceSnapshot, RootletExplorerCapabilities>,
-    decision: RootletExplorerDecision
-  ): Promise<RootletExplorerActionOutput> {
-    const agentTurnRuntime = ctx.capabilities!.agentTurnRuntime!;
-    const strategy = getRootletKindStrategy(decision.cluster.kind);
-    const adviceContract = getUndergroundRootletCandidateAdviceContract(decision.cluster.kind);
-    const goalIntentProfile = ctx.workspace.snapshot().data.goalIntentProfile;
-    const constraints = [...(ctx.capabilities?.constraints ?? [])];
-    const messages = buildUndergroundRootletCandidateAdviceMessages({
-      goal: decision.rawGoal,
-      goalIntentProfile: goalIntentProfile!,
-      cluster: decision.cluster,
-      constraints,
-    });
-    const turn = await agentTurnRuntime.execute({
-      policy: {
-        allowModel: true,
-        allowedTools: strategy.availableTools,
-        maxModelRounds: 3,
-        maxToolRounds: 2,
-        fallback: "deterministic",
-        callerAgentId: this.agentId,
-        traceId: ctx.workspace.snapshot().traceId,
-        goalId: decision.goalId,
-        purpose: "rootlet_candidate",
-        outputContract: adviceContract.modelOutputContract,
-        budget: { maxOutputTokens: 256, maxLatencyMs: 30_000 },
-        sensitivity: "internal",
-      },
-      callerRef: { kind: "rootlet", id: decision.cluster.clusterId, label: decision.cluster.kind },
-      inputRefs: [
-        { kind: "goal", id: decision.goalId },
-        { kind: "rootlet", id: decision.cluster.clusterId, label: decision.cluster.kind },
-      ],
-      sanitizedMessages: messages,
-      constraintRefs: constraints.map((c) => ({
-        constraintId: c.id,
-        requiredLevel: c.level,
-        enforcementGate: c.enforcementGate,
-      })),
-    });
-    const response = turn.finalOutput;
-    if (
-      response === undefined ||
-      turn.status !== "completed" ||
-      turn.stoppedReason === "max_tool_rounds" ||
-      turn.stoppedReason === "max_model_rounds"
-    ) {
-      return this.actDeterministic(ctx, decision);
-    }
-    if (response.status !== "completed" || response.validation.status !== "passed") {
-      return this.actDeterministic(ctx, decision);
-    }
-    const parsed = parseUndergroundRootletCandidateAdviceOutput({
-      kind: decision.cluster.kind,
-      output: response.structuredOutput,
-      maxCandidates: decision.cluster.budget.maxCandidateOutputs,
-    });
-    if (parsed.candidates.length === 0) {
-      return this.actDeterministic(ctx, decision);
-    }
-    const aiOutputs = parsed.candidates.map((candidate) => {
-      const base = createRootletOutputsForInvocation({
-        goalId: decision.goalId,
-        cluster: decision.cluster,
-        invocation: decision.invocation,
-        constraints,
-        goalIntentProfile,
-        sourceRefs: [response.requestId, response.responseId],
-      });
-      const matching = base[candidate.sourceIndex] ?? base[0];
-      return {
-        ...matching,
-        summary: sanitizeUndergroundConvergenceAiAdvisoryText(
-          candidate.summary + (candidate.details ? ` ${Object.values(candidate.details).flat().join("; ")}` : "")
-        ),
-        source: "ai" as const,
-        sourceRefs: [
-          ...matching.sourceRefs,
-          "model.requested",
-          "model.completed",
-          response.requestId,
-          response.responseId,
-        ],
-      };
-    });
-    return {
-      outputRefs: aiOutputs.map((o: RootletOutput) => o.outputId),
-      rootletOutputs: aiOutputs,
-      source: "ai",
-    };
-  }
-
   private actDeterministic(
     ctx: AgentRunContext<RootletExplorerWorkspaceSnapshot, RootletExplorerCapabilities>,
     decision: RootletExplorerDecision
   ): RootletExplorerActionOutput {
     const constraints = [...(ctx.capabilities?.constraints ?? [])];
-    const goalIntentProfile = ctx.workspace.snapshot().data.goalIntentProfile;
     const rootletOutputs = createDeterministicFallbackRootletOutputs({
       goalId: decision.goalId,
       cluster: decision.cluster,
       invocation: decision.invocation,
       constraints,
-      goalIntentProfile,
+      sourceRefs: unique([...decision.sourceRefs, ...decision.fallbackRefs]),
+      goalIntentProfile: decision.goalIntentProfile,
     });
     return {
       outputRefs: rootletOutputs.map((o: RootletOutput) => o.outputId),
       rootletOutputs,
       source: "deterministic_fallback",
+      confidence: decision.confidence,
+      reasoningTrace: decision.reasoningTrace,
     };
   }
+}
+
+function rootletReasoningSourceRefs(ai: UndergroundReasoningResult<unknown>): string[] {
+  return unique([
+    ...ai.modelCallRefs.flatMap((ref) => [
+      "model.requested",
+      ref.validationStatus === "passed" ? "model.completed" : "model.failed",
+      ref.requestId,
+      ref.responseId,
+    ]),
+    ...ai.toolCallRefs,
+    ...ai.fallbackRefs,
+  ].filter((value): value is string => typeof value === "string" && value.length > 0));
+}
+
+function rootletFallbackRefs(
+  kind: RootletClusterKind,
+  ai: UndergroundReasoningResult<unknown>
+): string[] {
+  return unique([
+    `ai-fallback:${kind}`,
+    ...ai.fallbackRefs,
+    ai.failureReason === undefined ? undefined : `ai-fallback-reason:${fallbackReasonRef(ai.failureReason)}`,
+  ].filter((value): value is string => typeof value === "string" && value.length > 0));
+}
+
+function fallbackReasonRef(value: string): string {
+  const sanitized = sanitizeUndergroundConvergenceAiAdvisoryText(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9:._-]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  return sanitized.length > 0 ? sanitized : "unknown";
+}
+
+function confidenceFromRootletOutput(output: unknown): number | undefined {
+  const record = typeof output === "object" && output !== null && !Array.isArray(output)
+    ? (output as Readonly<Record<string, unknown>>)
+    : {};
+  const value = record.confidence;
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function unique(values: readonly string[]): string[] {
+  return [...new Set(values.filter((value) => value.trim().length > 0))];
 }

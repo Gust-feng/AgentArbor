@@ -203,7 +203,15 @@ class GoalSpecificCandidateProvider implements ModelProvider {
   async complete(request: ModelRequest): Promise<ModelResponse> {
     const kind = rootletKindFromContractId(request.outputContract.contractId);
     const structuredOutput =
-      request.outputContract.contractId === "convergence-advisory"
+      request.outputContract.contractId === "underground.intent_profile.v1"
+        ? createLegalIntentProfileOutput(request)
+        : request.outputContract.contractId === "underground.growth_governor.v1"
+          ? createLegalGrowthGovernorOutput(request)
+      : request.outputContract.contractId === "underground.convergence_judgment.v1"
+        ? createLegalConvergenceJudgmentOutput(request)
+      : request.outputContract.contractId === "underground.handoff_narrative.v1"
+        ? createLegalHandoffNarrativeOutput(request)
+      : request.outputContract.contractId === "convergence-advisory"
         ? {
             candidateAnalyses: [],
             conflictsNeedingUserInput: [],
@@ -264,7 +272,15 @@ class EmptyCandidateProvider implements ModelProvider {
 
   async complete(request: ModelRequest): Promise<ModelResponse> {
     const structuredOutput =
-      request.outputContract.contractId === "convergence-advisory"
+      request.outputContract.contractId === "underground.intent_profile.v1"
+        ? createLegalIntentProfileOutput(request)
+        : request.outputContract.contractId === "underground.growth_governor.v1"
+          ? createLegalGrowthGovernorOutput(request)
+      : request.outputContract.contractId === "underground.convergence_judgment.v1"
+        ? createLegalConvergenceJudgmentOutput(request)
+      : request.outputContract.contractId === "underground.handoff_narrative.v1"
+        ? createLegalHandoffNarrativeOutput(request)
+      : request.outputContract.contractId === "convergence-advisory"
         ? {
             candidateAnalyses: [],
             conflictsNeedingUserInput: [],
@@ -297,4 +313,137 @@ class EmptyCandidateProvider implements ModelProvider {
       completedAt: nowIso(),
     };
   }
+}
+
+function createLegalIntentProfileOutput(request: ModelRequest): Record<string, unknown> {
+  const goal = extractGoalAnchor(request);
+  return {
+    goalStatement: goal,
+    keyConcepts: ["helper", "runtime"],
+    domainConcepts: ["helper", "runtime"],
+    nonGoals: [],
+    acceptanceCriteria: ["The helper direction remains candidate-layer material before handoff."],
+    assumptions: ["The test provider only emits safe structured fixture data."],
+    riskHints: [],
+    constraintHints: [],
+    unknowns: [],
+    decisionSummary: `Intent Core shaped ${goal} as a test profile.`,
+    uncertainty: "No raw provider response or private reasoning trace is exposed.",
+    confidence: 0.78,
+  };
+}
+
+function createLegalGrowthGovernorOutput(request: ModelRequest): Record<string, unknown> {
+  const rootletKinds = availableRootletKindsFromGrowthRequest(request);
+  return {
+    rootletKinds,
+    budget: {
+      maxRootletClusters: rootletKinds.length,
+      maxCandidateOutputs: rootletKinds.length,
+    },
+    dispatchDecision: "Start selected rootlet clusters as lower-layer material for parent convergence.",
+    decisionSummary: "Growth Governor selected bounded rootlet clusters.",
+    uncertainty: "This fixture cannot approve handoff.",
+    confidence: 0.76,
+  };
+}
+
+function createLegalHandoffNarrativeOutput(request: ModelRequest): Record<string, unknown> {
+  const candidateIds = candidateIdsFromHandoffRequest(request);
+  return {
+    status: candidateIds.length > 0 ? "approved" : "stopped",
+    clarifiedGoal: "Handoff Steward packages the helper runtime direction with evidence refs.",
+    optionNarratives: candidateIds.map((candidateId) => ({
+      candidateId,
+      directionSummary: `Handoff narrative for ${candidateId}: preserve helper runtime evidence, lineage, and validation boundaries.`,
+      whyPreferred: "Convergence Judge accepted or merged this candidate.",
+      whyNot: [],
+      doNotChooseWhen: ["When package validation fails."],
+      evidenceRefs: [`handoff-narrative:${candidateId}`],
+    })),
+    nonGoals: ["Do not bypass DirectionHandoffPackage validation."],
+    assumptions: ["Convergence Judge is the promotion owner."],
+    missingInformation: [],
+    risks: ["Aboveground must preserve source candidate refs."],
+    evidenceBoundary: "Use source candidate, convergence, model and package validation refs only.",
+    growthEntry: {
+      allowedRuntimeShapes: ["single_agent", "sub_agent_tree"],
+      suggestedFirstWorkflowNodes: ["confirm_direction_handoff", "derive_execution_plan", "preserve_evidence_refs"],
+      escalationRules: ["Stop if package validation fails."],
+    },
+    decisionSummary: "Handoff Steward demo-summary fixture organized safe handoff material.",
+    uncertainty: "No raw provider response or private reasoning trace is exposed.",
+    confidence: candidateIds.length > 0 ? 0.8 : 0.2,
+  };
+}
+
+function createLegalConvergenceJudgmentOutput(request: ModelRequest): Record<string, unknown> {
+  const candidates = parseConvergenceCandidates(request);
+  const firstOption = candidates.find((candidate) => candidate.kind === "option");
+  return {
+    candidateDecisions: candidates.map((candidate) => {
+      const status =
+        candidate.kind === "option"
+          ? candidate.candidateId === firstOption?.candidateId ? "accepted" : "merged"
+          : candidate.kind === "risk" || candidate.kind === "counterfactual"
+            ? "rejected"
+            : "merged";
+      return {
+        candidateId: candidate.candidateId,
+        status,
+        reason: `Summary fixture Convergence Judge marked ${candidate.candidateId} as ${status}.`,
+        evidenceRefs: [candidate.outputId],
+        contentDifference: `Candidate ${candidate.candidateId} is handled by parent convergence.`,
+        whyPreferred: status === "accepted"
+          ? "The first option candidate is retained for handoff."
+          : "The candidate remains supporting or rejected material.",
+        conflictWith: [],
+      };
+    }),
+    recommendedOptionId: firstOption?.candidateId,
+    nextAction: firstOption === undefined ? "stop" : "approve_handoff",
+    conflictsNeedingUserInput: [],
+    constraintViolations: [],
+    overallDirectionSummary: "Summary fixture Convergence Judge approved handoff-ready candidate material.",
+    decisionSummary: "Convergence Judge returned the new convergence_judgment fixture output.",
+    uncertainty: "The fixture contains no raw provider response or private reasoning trace.",
+    confidence: 0.8,
+  };
+}
+
+function parseConvergenceCandidates(request: ModelRequest): {
+  readonly kind: string;
+  readonly candidateId: string;
+  readonly outputId: string;
+}[] {
+  const content = request.sanitizedMessages.map((message) => message.content).join("\n");
+  return [...content.matchAll(/- \[(option|risk|asset_fit|evidence|constraint|counterfactual)\]\s+candidateId=([^\s]+)\s+outputId=([^\s\n]+)/g)]
+    .map((match) => ({
+      kind: match[1] ?? "option",
+      candidateId: match[2] ?? "candidate-unknown",
+      outputId: match[3] ?? "unknown",
+    }));
+}
+
+function candidateIdsFromHandoffRequest(request: ModelRequest): string[] {
+  const content = request.sanitizedMessages.map((message) => message.content).join("\n");
+  return [...content.matchAll(/candidateId=([^\s\n]+)/g)]
+    .map((match) => match[1])
+    .filter((candidateId): candidateId is string => candidateId !== undefined && candidateId.length > 0);
+}
+
+function extractGoalAnchor(request: ModelRequest): string {
+  const content = request.sanitizedMessages.map((message) => message.content).join("\n");
+  const rawGoalLine = content.split("\n").find((line) => line.trim().startsWith("Raw goal:"));
+  return rawGoalLine?.slice("Raw goal:".length).trim() || "current goal";
+}
+
+function availableRootletKindsFromGrowthRequest(request: ModelRequest): string[] {
+  const content = request.sanitizedMessages.map((message) => message.content).join("\n");
+  const line = content.split("\n").find((candidate) => candidate.trim().startsWith("Available rootlet kinds:"));
+  const rawKinds = line?.slice(line.indexOf(":") + 1).trim() ?? "option";
+  return rawKinds
+    .split(",")
+    .map((kind) => kind.trim())
+    .filter((kind) => kind.length > 0);
 }

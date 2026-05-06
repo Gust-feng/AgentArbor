@@ -21,6 +21,22 @@
 
 ## Requirements
 
+- 当前阶段的新增执行口径固定为“上层 Agent 语义判断主线 + 确定性边界守卫”：
+  - 默认测试不触发真实网络，但必须通过 fake/stub `AgentTurnRuntime` 验证 AI 路径。
+  - 无 `AgentTurnRuntime` 只能 stopped / awaiting configuration / 低置信材料，不能产出 approved package。
+  - 每个 agent 的语义判断必须进入 `reason()`；`act()` 只负责落地动作、写出材料或保存交接包；`guard()` 只做 schema、预算、权限、hard constraint、脱敏和包结构边界。
+  - Fallback 只能作为 AI 失败后的显式低置信材料，标记 `source: "deterministic_fallback"`，不能重新成为默认成功主线。
+- 在 `src/app/underground/agents/` 建立 Underground 专属 reasoning helper：
+  - 统一调用现有 `AgentTurnRuntime`，不放入 `kernel`，不新增 SDK。
+  - 统一记录模型 refs、工具 refs、fallback refs、confidence 和可见 `reasoningTrace`。
+  - `reasoningTrace` 只保存可展示的决策摘要、输入引用、模型/工具引用和不确定性；不得保存或要求原始 chain-of-thought。
+- Agent 迁移顺序固定为：`IntentCore -> GrowthGovernor -> AutonomyReviewer -> ConvergenceJudge -> RootletExplorer -> HandoffSteward -> CandidateCollector/Panel`。
+- `ConvergenceJudge` 必须从 `ai_advisory` 旁路升级为 AI 主裁决路径：
+  - 模型决定保留、合并、淘汰、继续探索、询问用户或停止。
+  - 确定性逻辑只阻断 hard constraint、非法状态和非法包结构。
+  - `convergeMinimalCandidatePool` 只能作为 fallback / 落地辅助，不能继续包住 AI 主判断。
+- `HandoffSteward` 的 `.agentarbor` 方向叙事必须由 AI reasoning 组织；确定性序列化和 package validation 保留为边界。
+- Panel / read model 需要展示安全 `reasoningTrace` 和 fallback 标记，仍不得回显 raw prompt、raw provider response、hidden reasoning、API key 或 token。
 - 引入新的地下运行协议：
   - `AgentLoop` 需要显式包含 observe / reason / act / guard。
   - `WorkspaceView` 必须是只读视图，不能让 agent 直接写共享状态。
@@ -36,6 +52,10 @@
 ## Acceptance Criteria
 
 - 代表性的地下用户目标可以经由 `UndergroundAgentOrchestrator`、`AgentLoop`、`WorkspaceView` 和 `Mailbox` 跑通，并产出受 guard 约束的地下结果或方向交接草案。
+- fake AI cognitive manager 可以完成稳定运行；no-AI 只能进入 stopped / configuration boundary，不得 approved。
+- 已迁移 agent 的 `reason()` 必须能通过 fake `AgentTurnRuntime` 触发模型路径并产出安全 `reasoningTrace`；`act()` 不再承担目标理解、候选排序、继续探索或方向综合。
+- Rootlet 输出不能绕过 CandidatePool / ConvergenceJudge / HandoffSteward 父层收束直接进入 handoff。
+- Guard 相关测试必须证明 guard 不包含目标理解、候选排序、继续探索或方向综合语义职责。
 - 地下主线不再把 shared context 当作唯一协调源；如仍存在兼容层，必须是显式迁移层而不是新主线。
 - 至少一个测试覆盖 mailbox 路由，至少一个测试覆盖 guard / fallback，至少一个测试覆盖 agent loop 的 observe / reason / act / guard round。
 - 现有地下输出仍满足安全边界和相关性要求，不出现明显无关、模板化或只回显 goal 的主线输出。

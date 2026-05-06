@@ -22,7 +22,10 @@
 - `PanelRunStreamEvent.model.output.delta`：panel 专用安全输出增量，只能从模型可见输出安全投影或 provider adapter 的脱敏流式 chunk 派生；它不是 raw provider stream，也不是正式事实源。
 - `AgentTurnRuntime.execute(...)`：所有 agent 多轮模型 + 工具回合的统一运行入口；它在 IntelligenceChannel 外层统一承载 tool call loop、tool result 回填、权限、预算、轮次和 fallback。kernel 只依赖 `ToolExecutionBroker` 接口，不依赖 app `ToolCenter` concrete class。
 - `executeToolUseLoop(...)`：低层兼容 helper，可被 AgentTurnRuntime 复用；rootlet 等业务 agent 不应继续把它当私有入口。
-- `ModelPurpose` 覆盖 `autonomy_decision`：地下自治核心使用该 purpose 请求结构化 `UndergroundAutonomyDecision`，模型输出只能决定继续探索、请求收束、询问用户或停止，不能直接批准 handoff。
+- `ModelPurpose` 覆盖地下 AI 主线 purpose：`intent_profile`、`growth_governance`、`rootlet_candidate`、`autonomy_decision`、`convergence_judgment`、`handoff_narrative`。这些 purpose 均必须经 `AgentTurnRuntime.execute(...)` 进入模型回合；模型输出只能形成对应 agent 的 `reason()` 决策材料，不能直接写 Direction Handoff Package。
+- `underground.convergence_judgment.v1`：Convergence Judge 主裁决输出契约，必须返回 JSON object，字段至少包含 `candidateDecisions`、`nextAction`、`overallDirectionSummary`、`decisionSummary`、`uncertainty` 和 `confidence`；`candidateDecisions[*].status` 只能是 `accepted`、`merged`、`rejected` 或 `unknown`，`nextAction` 只能是 `approve_handoff`、`continue_exploration`、`request_user_clarification` 或 `stop`。
+- `underground.handoff_narrative.v1`：Handoff Steward 主交接叙事输出契约，必须返回 JSON object，字段至少包含 `status`、`clarifiedGoal`、`optionNarratives`、`nonGoals`、`assumptions`、`missingInformation`、`risks`、`evidenceBoundary`、`growthEntry`、`decisionSummary`、`uncertainty` 和 `confidence`；`status` 只能是 `approved`、`awaiting_user` 或 `stopped`。`approved` 必须至少给出一个与 Convergence `handoffCandidateRefs` 对齐的 `optionNarratives[*].candidateId`，不得凭模型输出新增 source candidate。
+- `UndergroundReasoningTraceEntry`：地下 agent 可展示 reasoning trace 投影，字段只能包含 `agentId`、`decisionSummary`、`inputRefs`、`modelCallRefs`、`toolCallRefs`、`fallbackRefs`、`uncertainty`、`confidence` 和 `createdAt`；不得包含 raw prompt、raw provider response、hidden reasoning、chain-of-thought、secret 或 token。
 
 ## Contracts
 
@@ -36,6 +39,9 @@
 - `src/domain/config/` 保存 provider profile、默认 AI mode、secret ref 和脱敏视图；`src/adapters/config/` 只负责普通 settings 文件与 local-dev secret 文件读写。普通 settings store 不得保存 raw secret。
 - 地下 rootlet AI 建议的 app 层契约拆分为 `src/app/underground/intelligence-contracts.ts`、`intelligence-prompts.ts` 和 `intelligence-output.ts`；6 种 rootlet kind 都必须使用 kind 专属 prompt 和 output contract，请求仍经 `IntelligenceChannel`，响应采用顶层 `candidates` 数组。数组项的 kind 专属字段由 app parser 校验、归一化、丢弃非法项并按 rootlet budget 截断；不要把完整数组 schema 推入当前 `ModelOutputContract` 内核。`ModelOutputContract.visibleOutput.fieldTypes` 只服务安全展示投影，必须与 app parser 的字段类型保持一致；parser 会丢弃的候选不得生成 approved visible output。
 - 地下自治 AI 建议的 app 层契约位于 `src/app/underground/autonomy-intelligence.ts`；`underground.autonomy_decision.v1` 必须返回 JSON object，字段至少包含 `action`、`completionAssessment`、`informationGaps`、`spawnRequests`、`rationale` 和可选 `sourceRefs`。app parser 必须校验 action 枚举、spawn rootlet kind、candidate refs、长度和 secret/token 脱敏。
+- 地下 Intent Core、Growth Governor、Rootlet Explorer、Convergence Judge 和 Handoff Steward 的 AI 主线契约位于 `src/app/underground/agents/` 相邻代码中，复用地下专属 reasoning helper 调用 `AgentTurnRuntime`、解析结构化 JSON、生成安全 `reasoningTrace`。这些契约不得上移到 `kernel`，也不得直接导入 provider adapter。
+- 地下 agent 调用 `AgentTurnRuntime` 时必须传递当前 run 的真实 `traceId`；投影视图若会发起模型请求，必须显式携带 `traceId`。不得用 `goalId`、candidate id、package id 或 agent id 顶替 trace id，否则 `model.*` 事件会脱离运行链路。
+- Convergence Judge 的 `underground.convergence_judgment.v1` parser 必须证明模型覆盖每个 candidate id；`request_user_clarification` 必须至少有一个 `unknown` candidate；`approve_handoff` 必须至少有一个 `accepted` 或 `merged` candidate；`stop` / `continue_exploration` 不得同时携带 `accepted` / `merged` handoff candidate。
 - `src/domain/underground/**`、`src/domain/aboveground/**`、`src/domain/governance/**` 和 `src/kernel/**` 不得直接导入 provider adapter。
 
 ## 生效规则
@@ -52,6 +58,8 @@
 - Provider 输出不符合 `outputContract` 时必须形成 validation failed，不得被调用方当作成功响应继续收束。
 - rootlet AI 调用成功但 app parser 得不到合法候选、provider 失败或输出契约 validation failed 时，rootlet invocation 必须不中断，回退 deterministic output；fallback 必须能从 `model.failed` / `model.completed` 事件、demo summary 和 deterministic output 的 `ai-fallback:*` source refs 观测。
 - 自治主线与 rootlet fallback 不同：启用 autonomy 时，缺少 `AgentTurnRuntime`、模型失败、输出 validation failed 或 app parser 拒绝时，不能回退为 deterministic 成功；必须产生 failed/stopped autonomy decision，并经 Convergence Judge 形成 `ai_required_for_autonomy`、`autonomy_decision_failed`、`autonomy_cycle_guard_exceeded` 或 `autonomy_stopped` 等可审计终态。
+- Convergence Judge 与自治主线同属 AI-required 上层语义判断：缺少 `AgentTurnRuntime`、模型失败、输出 validation failed 或 app parser 拒绝时，不能回退为 approved deterministic convergence；必须形成 `deterministic_fallback` 低置信 stopped / awaiting boundary，并保留 `fallbackRefs`。
+- Handoff Steward 与 Convergence Judge 同属 AI-required 上层语义判断：缺少 `AgentTurnRuntime`、模型失败、输出 validation failed 或 app parser 拒绝时，不能回退为 approved handoff；只能形成低置信 `deterministic_fallback` handoff material，并落到 `stopped` / `awaiting_user` 非 approved package 边界。`act()` 只能消费 `reason()` 形成的 handoff material 调用 direction material / package builder / store，不得重新组织方向叙事、候选取舍或发起模型调用。
 - hard constraint、Direction Handoff Package validation、状态机守卫和 Governance gate 不得因为模型建议而被跳过。
 - 工程边界不得替 agent 思考：`ModelOutputContract`、parser、visible output projection、validation、budget、permission 和 fallback 只负责裁剪、校验、脱敏、失败归一和引用边界；不得把这些机制写成目标理解、候选排序、工具选择、继续探索或收束裁决的主逻辑。
 - `pnpm demo:underground` 默认使用 fake AI 作为最小 happy path，经 `IntelligenceChannel` / `AgentTurnRuntime` 发布 `model.requested -> model.completed`；不得触发真实网络。只有显式 `--ai openai-compatible` 且配置完整时才允许真实 provider 路径。`aiMode=none` 只作为禁用边界，必须 stopped/failed 且不得 approved。
@@ -71,8 +79,12 @@
 | `visibleOutput.fieldTypes` 与 rootlet parser 字段类型不一致，导致 parser 丢弃的候选仍可见 | 测试失败；visible output 必须被抑制或只展示 parser 可接受字段 |
 | 模型建议违反 hard constraint | 保留为 rejected candidate 或失败说明，不得放行 |
 | 自治模型输出非法 action / rootlet kind / candidate ref | 返回 failed autonomy decision，Convergence Judge 生成 stopped terminal report，不进入 approved handoff |
+| Convergence Judgment 缺少 candidate 覆盖、非法 nextAction、澄清但无 unknown、批准但无 handoff candidate、或停止/继续仍带 handoff candidate | app parser 拒绝，Convergence Judge 进入低置信 fallback / stopped，不进入 approved handoff |
 | 自治模型请求 `search` / `read` | AgentTurnRuntime 执行工具回合并回填 tool message；工具结果只作为 safe refs/摘要影响自治 decision |
 | 自治主线无 AgentTurnRuntime | 返回 disabled/stopped，不发布伪造 `model.completed` |
+| Convergence Judge 无 AgentTurnRuntime | 返回 `deterministic_fallback` 低置信 convergence report，terminal status 不得是 `approved_package_created` |
+| 地下 agent 的模型请求 `traceId` 不是当前 orchestrator / session trace | 测试失败；必须修正投影视图和 percept，不得用 goal id 顶替 |
+| `reasoningTrace` 出现 raw prompt、role message marker、raw provider response、hidden reasoning、chain-of-thought、API key 或 token | 测试失败；trace 必须脱敏或替换为安全占位 |
 | EventLog 出现 API key 或 token 字段 | 安全边界失败 |
 | 普通 settings store、panel HTTP JSON、Observation Snapshot 或 demo summary 出现 API key / token | 安全边界失败 |
 | global fetch 缺失且未注入 fetch | 返回 provider config failed response，不添加 polyfill |
@@ -104,6 +116,9 @@
 - OpenAI-compatible Chat Completions adapter 使用 stubbed fetch 验证 `tools`、`tool_choice`、assistant `tool_calls`、tool result message 和 provider `tool_calls` 归一化映射。
 - fake provider 支持 deterministic tool call fixture，以便测试工具循环而不引入真实网络。
 - AgentTurnRuntime 覆盖模型禁用、未授权工具、工具回填继续模型、模型/工具轮次上限和边界导入规则。
+- Intent Core / Growth Governor / Rootlet Explorer / Convergence Judge / Handoff Steward focused tests 必须用 fake `AgentTurnRuntime` 证明 `reason()` 触发模型路径，并在无 runtime 时进入低置信 fallback / stopped 边界，不产生 approved package。
+- 会从 workspace projection 发起模型请求的地下 agent focused tests 必须断言 `ModelRequest.traceId` 使用当前 run trace，而不是 `goalId` 或其他业务 id。
+- Convergence Judgment parser 测试必须覆盖完整 candidate 覆盖、非法 nextAction、澄清无 unknown、批准无 accepted/merged、停止/继续仍带 accepted/merged、澄清 reason 传递和 `reasoningTrace` 脱敏。
 - 自治 decision 覆盖 `request_convergence`、`continue_exploration`、`aiMode=none` / 无 `AgentTurnRuntime` disabled、provider failure、非法输出、工具 `search` / `read` 回合和 secret/token 脱敏；断言模型/工具输出只影响候选与收束边界，不直接进入 Direction Handoff。
 - provider adapter 失败映射：鉴权失败、超时、rate limit、输出不合约、fetch 缺失。
 - 事件顺序：`model.requested -> model.completed` 或 `model.requested -> model.failed`。

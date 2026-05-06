@@ -28,6 +28,10 @@
 - `CandidateComparison`：记录 candidate 的 `goalMatch`、`goalMatchBasis`、`evidenceSupport`、`evidenceSupportBasis`、`evidenceGaps`、`constraintImpact`、`constraintImpactBasis`、`hardConstraintConflictRefs`、`riskLevel`、`riskCoverage`、`unknowns`、`whyNot`、`conclusion` 和 `evidenceRefs`。
 - `compareCandidatesForGoal(...)`：基于目标画像、候选和 rootlet output 生成比较、收束决策和 evidence entries；不得按 `clusterId` 硬编码 accepted / merged / rejected。
 - `UndergroundEvidenceLedger`：地下证据账本，收纳 goal intent、Soil constraint、rootlet output、candidate comparison、convergence decision、user clarification 和 stop reason evidence。
+- `ConvergenceJudgment`：Convergence Judge `reason()` 阶段的 AI 主裁决材料，包含 `judgmentId`、`nextAction`、可选 `recommendedOptionId`、覆盖每个 candidate 的 `candidateDecisions`、`conflictsNeedingUserInput`、`constraintViolations`、`overallDirectionSummary`、`decisionSummary` 和 `uncertainty`。
+- `ConvergenceJudgmentCandidateDecision`：模型对单个 candidate 的裁决，必须包含 `candidateId`、`status`、`reason`、`evidenceRefs`，可选 `clarificationReason`、`contentDifference`、`whyPreferred`、`conflictWith`、`openQuestion` 和 `blockingLevel`；`clarificationReason` 必须能传入 `UserClarificationRequest`，不能落地为无意义通用原因。
+- `convergeCandidatePoolFromJudgment(...)`：只负责把 `ConvergenceJudgeAgent.reason()` 已形成的 `ConvergenceJudgment` 落地为 `CandidatePool`、`UndergroundConvergenceReport`、`UndergroundEvidenceLedger` 和 `CandidateComparison`；它不得重新决定 candidate 排序或 nextAction。
+- `UndergroundConvergenceReport.source/confidence/reasoningTrace`：记录 convergence 来源和可展示推理投影。`source` 只能是 `ai`、`deterministic_fallback` 或 `terminal_autonomy`；approved report 必须来自 `ai`；fallback confidence 必须保持低置信。
 - `createRootletOutputsForInvocation(...)`：单个 rootlet invocation 可以按 rootlet kind 和预算产出多个 `RootletOutput`；输出仍只是候选材料，必须进入 `CandidatePool`。
 - `RootletOutput.source`：标记材料来源，当前覆盖 `ai` 与 `deterministic_fallback`；AI 成功输出必须标记为 `ai`，模型失败、空候选或显式禁用/配置失败边界的 fallback 输出必须标记为 `deterministic_fallback`，并通过 source refs 保留 fallback / model / tool 归因。
 - `CandidatePool.candidatesByKind`：按 `RootletClusterKind` 分组的候选视图，必须与扁平 `candidates` 和 `counts` 同步。
@@ -51,15 +55,19 @@
 - 当地下 session 显式注入 `IntelligenceChannel` 时，所有被动态选中的 rootlet kind 都可以各自最多发起一次 AI 候选建议调用；prompt 必须包含 raw goal、`GoalIntentProfile`、ConstraintRef/约束摘要、rootlet kind、cluster budget、exit criteria 和“rootlet 只提供下层候选、不绕过父层收束”的约束。
 - rootlet AI 响应必须采用顶层 `candidates` 数组；`option`、`risk`、`asset_fit`、`evidence`、`constraint` 和 `counterfactual` 的数组项字段各自独立。非法项由 app parser 丢弃，合法项按 budget 截断，再包装为 `RootletOutput` 后进入 CandidatePool。
 - AI 失败、输出契约 validation failed 或合法候选为空时，rootlet invocation 必须继续 deterministic fallback；fallback output 的 source refs 必须包含可审计的 `ai-fallback:*` 标记和对应 model request / response refs，不能静默吞掉模型失败。
+- Rootlet Explorer 的模型调用和 parser 语义决策必须发生在 `reason()`；`act()` 只能把 `reason()` 形成的候选材料落地为 `RootletOutput` 或 deterministic fallback output，不能重新调用模型、重新解析 provider 输出或重新选择候选。`guard()` 只能校验结构、预算、hard constraint 和脱敏，不能判断候选优劣、目标理解或继续探索。
 - rootlet 工具调用必须由 agent manifest / turn policy 裁剪；工具结果只能追加为模型 tool message，并在最终 rootlet output 中以 `tool-call:<id>` source/evidence refs 表达，不得跳过 CandidatePool 或 Convergence Judge。
 - 固定地下核心 agent 默认禁止私接模型和工具；需要 AI 的核心角色必须经统一 `AgentTurnRuntime`、agent manifest / turn policy 和任务契约显式启用。不得在各 agent 内私接 `IntelligenceChannel` 或 ToolCenter，也不得用确定性 helper 替代已声明的 AI 主线。
 - 工程边界不得替 Agent 思考：`GoalIntentProfile` fallback、rootlet kind selection、CandidateComparison、validation、状态机、budget、permission、fallback 和文件契约只能作为 agent 主线的结构化输入、边界守卫或失败机制；不得把它们写成目标理解、候选优劣、工具选择、继续探索/停止或方向综合的唯一主逻辑。
 - CandidatePool 必须同时提供扁平候选列表和按 rootlet kind 分组的 `candidatesByKind`；二者都是同一候选事实的视图，不得成为两套事实源。
 - Convergence Judge 必须基于 `CandidateComparison.conclusion` 生成 `accepted/merged/rejected/unknown`，并记录 source candidate refs、evidence refs、推荐主方向、合并项、淘汰原因、需要用户确认的冲突和地上参考方向；每个 `CandidateConvergenceDecision` 必须带可追溯的 `evidenceRefs`，并能回到对应 comparison 和 evidence ledger entry。
-- Convergence 的长期主线是 AI 驱动父层收束：`ConvergenceJudgeAgent` 在 `candidate_pool.updated` 后通过注入的 `AgentTurnRuntime` 请求收束判断，模型判断必须作为 `convergeDefaultUndergroundCandidatePool` 输入参与 accepted / merged / rejected / unknown、继续探索、询问用户或停止的决策，不能停留在旁路 advisory 文案。
+- Convergence 的长期主线是 AI 驱动父层收束：`ConvergenceJudgeAgent.reason()` 在 `candidate_pool.updated` 后通过注入的 `AgentTurnRuntime` 请求 `underground.convergence_judgment.v1`，模型判断必须先形成 `ConvergenceJudgment`，再由 `act()` 调用 `convergeCandidatePoolFromJudgment(...)` 落地 accepted / merged / rejected / unknown、继续探索、询问用户或停止。`ai_advisory` 文案只能作为迁移兼容材料，不能成为主裁决。
+- Convergence Judge 的 `act()` 不得重新做目标理解、候选排序、nextAction 选择或方向综合；它只能消费 `reason()` 形成的 judgment，补齐 evidence ledger、comparison、report 和 candidate pool 状态。若 `reason()` 没有 judgment，`act()` 必须失败，而不是调用确定性收束伪造 approved。
+- Convergence Judge 的 `guard()` 只能校验 hard constraint、approved report 是否来自 AI、fallback confidence、空 summary、空 decisions、decision evidence refs、AI 文本脱敏和 report/package 结构；不得在 guard 中重排候选、推断用户目标、决定是否继续探索或替换模型 nextAction。
+- Convergence Judgment parser 必须保证输出结构与状态一致：每个 candidate 必须被恰好裁决一次；`request_user_clarification` 必须有 blocking `unknown` 或能生成 open question；`approve_handoff` 必须有 accepted / merged handoff candidate；`stop` / `continue_exploration` 不得同时携带 accepted / merged handoff candidate。
 - Convergence AI 推荐的 `recommendedOptionId` 只有同时存在于 CandidatePool 且进入 `handoffCandidateRefs` 时才能保留；不存在、rejected、unknown、risk、counterfactual 或其他非 handoff candidate 的推荐必须被忽略，且不得进入 Direction Handoff `recommendedOptionId`、`retainedOptionId` 或 `sourceCandidateRefs`。
 - Convergence AI 可以 enrich 与已有 candidate 绑定的 comparison / report / handoff 说明字段；`overallDirectionSummary` 不得替代 `DirectionHandoff.clarifiedGoal`，正式 clarified goal 必须继续来自经收束的 GoalIntentProfile 或 raw user goal。
-- Convergence AI 内容进入 `candidateComparisons`、`convergenceReport`、EventLog、Observation Snapshot、demo summary 或 Direction Handoff 视图前，所有 AI 可见文本必须做 secret/token 脱敏和长度裁剪；不得暴露 raw prompt、raw provider response、API key、token 或 provider 原始敏感错误。
+- Convergence AI 内容进入 `candidateComparisons`、`convergenceReport`、EventLog、Observation Snapshot、demo summary、`reasoningTrace` 或 Direction Handoff 视图前，所有 AI 可见文本必须做 secret/token、raw prompt、role marker、raw provider response、hidden reasoning 和 chain-of-thought 脱敏，并按展示边界裁剪长度。
 - 自治主线启用时，`candidate_pool.updated` 不再直接触发最终收束；必须先由固定 `underground-autonomy-core` 经 `AgentTurnRuntime` 产生 `UndergroundAutonomyDecision`，发布 `autonomy_review.completed`，再根据 action 决定继续探索、请求收束、请求用户澄清或停止。
 - `UndergroundAutonomyDecision` 只能决定路由：`continue_exploration`、`request_convergence`、`request_user_clarification` 或 `stop`。它不能批准 Direction Handoff，不能直接写 Growth Plan / Fruit / Run Memory / Experience Candidate / Capability Asset / Soil，也不能绕过 CandidatePool、Convergence Judge 和 Handoff Steward validation。
 - `underground-autonomy-core` 是固定地下核心 agent 的明确 AI 例外：manifest / turn policy 必须 `allowModel=true`，并只允许统一 `search` / `read` 工具；其他固定核心 agent 默认仍禁用模型和工具。自治核心的工具结果只作为 tool message 回填给模型或作为 safe refs 进入自治决策，不得直接进入 handoff 正式材料。
@@ -75,7 +83,9 @@
 - `recoverUndergroundDirectionSession` 必须复用 awaiting session 的 runtime 和 package store，保存 v1 awaiting_user 与 v2 approved，并让 `listVersions(directionId)` 返回 `[1, 2]`。
 - deterministic auto-answer 只属于地下-only demo/test 边界，不代表真实用户交互设计，也不得进入 Soil、RunMemory、Experience Candidate 或 Capability Asset。
 - 恢复成功后的 demo summary 以 approved v2 作为当前 `directionPackage`，并暴露 `recoveredPackage`、`lineage`、`versions` 和可选 `writtenPackagePath`；无恢复时 `recoveredPackage` 必须为空。
-- Direction Handoff 的 `clarifiedGoal`、`nonGoals`、`assumptions`、`risks`、`options` 和 `missingInformation` 必须由 `GoalIntentProfile + CandidatePool + ConvergenceReport` 派生，不得回退到固定 minimal 文案。
+- Direction Handoff 的 `clarifiedGoal`、`nonGoals`、`assumptions`、`risks`、`options` 和 `missingInformation` 必须由 `GoalIntentProfile + CandidatePool + ConvergenceReport + HandoffSteward.reason()` 形成的 handoff material 派生，不得回退到固定 minimal 文案作为 approved package 的叙事主线。
+- Handoff Steward 的长期主线是 AI 驱动交接叙事：`HandoffStewardAgent.reason()` 在 Convergence Judge 已形成 report 后通过注入的 `AgentTurnRuntime` 请求 `underground.handoff_narrative.v1`，产出结构化 handoff material、`source`、`confidence` 和安全 `reasoningTrace`；`act()` 只能消费该 material，调用现有 direction material / package builder / store 保存，不得重新做方向叙事、目标理解、候选取舍或模型调用。
+- Handoff Steward 无 `AgentTurnRuntime`、模型失败或 handoff parser 拒绝时，只能产生低置信 `deterministic_fallback` handoff material，并落到 `stopped` / `awaiting_user` 非 approved package 边界；不得把 `createMinimalDirectionMaterial(...)` 的模板输出提升为 approved handoff。
 - `domainConcepts` 必须参与 rootlet 选择、候选相关性判断和 handoff 字段派生；目标相关性不能只靠在 summary 前拼接原始目标文本通过，候选自身必须保留至少一个目标关键概念或领域概念。
 - Direction Handoff 的 `options` 必须保留所有 option 候选方向的取舍记录，不得只写推荐方向；`decisionRecord` 必须记录 retained / merged / rejected / userDecisionRequired / abovegroundReference；`riskRegister` 必须保留风险候选与淘汰候选的来源归因。
 - 地下约束交接链当前只在 `direction_handoff` 阶段执行阻断校验；其他 6 个 gate 作为 `candidateConstraintRefs` 可追踪交接，不实现后续层执行。
@@ -106,6 +116,12 @@
 | 模型请求未授权工具或工具失败 | 发布 `tool.failed`，rootlet 继续模型回合或 fallback，不静默吞错 |
 | 固定地下核心 agent 的 turn policy 禁用模型/工具 | 不产生 `model.*` / `tool.*` 事件，不进入 provider 或 ToolCenter |
 | 自治主线无 AgentTurnRuntime | 发布 failed autonomy decision，经 Convergence Judge 收束为 `stopped` / `ai_required_for_autonomy`，不伪造模型完成 |
+| Convergence Judge 无 AgentTurnRuntime | 生成 `source = deterministic_fallback`、低置信 `stopped` convergence report，地下终态不得 approved |
+| Convergence Judgment 输出未覆盖全部 candidate、重复 candidate 或包含非法 candidate id | parser 拒绝，Convergence Judge 走低置信 fallback，不进入 handoff |
+| Convergence Judgment `nextAction = request_user_clarification` 但无 unknown / clarification reason | parser 拒绝或收束为 stopped，不生成无问题 awaiting_user |
+| Convergence Judgment `nextAction = approve_handoff` 但无 accepted / merged candidate | parser 拒绝，不生成 approved package |
+| Convergence Judgment `nextAction = stop` 或 `continue_exploration` 但仍携带 accepted / merged candidate | parser 拒绝，避免 nextAction 与 handoff 状态不一致 |
+| approved convergence report 的 `source !== "ai"` 或 fallback confidence 过高 | guard 拒绝，不保存 approved handoff |
 | 自治 decision 为 `continue_exploration` | 产生新的 `explorationCycleId` / `cycleIndex`，再次启动 rootlet、产出候选并更新 CandidatePool |
 | 自治 decision 为 `request_convergence` | 先发布 `convergence_review.requested`，再由 Convergence Judge 生成 `convergence_review.completed` |
 | 自治 decision 为 `request_user_clarification`、`stop` 或 failed | Convergence Judge 生成 awaiting-user 或 stopped terminal report；Handoff Steward 不写 convergence report |
@@ -115,10 +131,11 @@
 
 ### 5. Good / Base / Bad Cases
 
-- Good：`runUndergroundDirectionSession("Build a small deterministic helper.")` 只启动 `option` rootlet，保存 approved in-memory package，不进入 Aboveground。
+- Good：fake AI session 经 Intent Core、Growth Governor、Rootlet、Autonomy Reviewer 和 Convergence Judge 模型路径后，由 Convergence Judgment 主裁决 accepted / merged candidate，再保存 approved in-memory package，不进入 Aboveground。
+- Good：无 `AgentTurnRuntime` 时同一目标只形成 stopped / configuration boundary 和低置信 fallback material，不保存 approved package。
 - Good：`pnpm demo:underground -- "构建任务管理平台，包含测试和监控，不接数据库"` 输出动态 rootlet kinds、package validation 和 observation layer statuses。
 - Base：默认 full-loop demo 仍可在 approved package 后显式进入地上、验证和治理，保持 18 步 EventLog。
-- Bad：rootlet 全量启动、按 `clusterId` 直接决定收束、或把固定 `real_llm/ui/database` 文案写死进所有 handoff。
+- Bad：rootlet 全量启动、按 `clusterId` 直接决定收束、把 `ai_advisory` 当主裁决、或把固定 `real_llm/ui/database` 文案写死进所有 handoff。
 - Bad：CLI 入口直接组装 package、绕过 `runUndergroundDirectionSession`，或把 console 输出对象当成 Soil / RunMemory。
 
 ### 6. Tests Required
@@ -129,7 +146,11 @@
 - CandidateComparison 必须暴露目标匹配依据、证据支持/不足、约束影响、硬约束冲突、风险覆盖、unknown / why-not 和最终 conclusion 的 evidence refs。
 - 单个 rootlet invocation 产出多个候选并受预算限制。
 - CandidatePool 按 `RootletClusterKind` 分组，且分组与扁平候选列表一致。
+- Rootlet Explorer focused tests 必须证明 `reason()` 使用 fake `AgentTurnRuntime` 和 app parser 形成候选材料、`act()` 不发起第二次模型请求、fallback 标记 `deterministic_fallback`，并保留每个 AI 候选的 `rootlet-variant:*`、model refs、tool refs 和 evidence refs。
 - Convergence Judge 覆盖 AI 驱动收束、option 合并、option 与 hard boundary 冲突淘汰、风险候选作为 non-selectable open risk 的裁决，并证明确定性守卫只阻断越界而不替代语义选择。
+- Convergence Judge focused tests 必须证明 `reason()` 使用 fake `AgentTurnRuntime` 触发 `purpose = "convergence_judgment"` / `contractId = "underground.convergence_judgment.v1"`，`act()` 只落地 judgment，`guard()` 不做语义判断。
+- Convergence Judgment parser tests 必须覆盖全部 candidate 覆盖、重复/非法 candidate、非法 `nextAction`、澄清无 unknown、批准无 handoff candidate、停止/继续仍带 handoff candidate、`clarificationReason` 传递和 `reasoningTrace` 脱敏。
+- no-AI convergence integration 必须断言 `source = deterministic_fallback`、低置信、`terminalStatus = "stopped"` 或配置边界，且不会生成 approved package。
 - Evidence Ledger 覆盖 goal intent、rootlet output、candidate comparison、convergence decision、user clarification / stop reason，并保证 rootlet output、comparison、decision、report 和 Direction Handoff 之间的 evidence refs 可串联。
 - Direction Handoff 字段从 goal profile、候选和收束报告派生，且不回退固定 minimal 文案。
 - blocking unknown / stopped / approved 三类地下-only 终态均有测试。
@@ -263,6 +284,7 @@ createMinimalCandidatePool({ goalId, rootletOutputs: [rootletOutput], agentInvoc
 - `Mailbox`：agent 间消息路由边界；消息必须按 `toAgentId` 入队，读取侧只能看到自己的队列。
 - `UndergroundAgentOrchestrator`：地下主入口 owner；当前 route 必须是 `cognitive_manager`，按 Intent Core、Growth Governor、Rootlet Explorer、Candidate Collector、Autonomy Reviewer、Convergence Judge 和 Handoff Steward 推进受控循环。
 - `undergroundOrchestratorRun`：地下 session 的安全运行 trace，只暴露 orchestrator run id、route、agent loop ids、manager decisions、guarded statuses 和 output refs，不暴露 raw prompt、provider raw response、tool raw output 或 secret。
+- `WorkspaceView` / projection 若供 agent 发起模型请求，必须携带当前 run `traceId`；agent `percept` 必须把该 `traceId` 传给 `AgentTurnRuntime`，不得用 `goalId`、candidate id、package id 或 agent id 顶替。
 
 ### 3. Contracts
 
@@ -271,6 +293,7 @@ createMinimalCandidatePool({ goalId, rootletOutputs: [rootletOutput], agentInvoc
 - fake AI 是最小 happy path；`aiMode=none`、缺少 `AgentTurnRuntime`、配置失败、模型失败或 contract validation failed 均不得伪造模型成功或 approved package。
 - `AgentRunContext.workspace` 面向 agent 暴露 `WorkspaceView`，不能让 agent 直接写共享状态；可写 workspace 只能留在 orchestrator 内部。
 - `Mailbox` 与 `WorkspaceView` 返回值必须是防御性快照；调用方不能通过嵌套对象 mutation 改写队列或工作空间内部状态。
+- 所有地下核心 agent 模型请求必须沿用 orchestrator / session trace id，让 `model.requested -> model.completed/failed` 能回到同一运行；trace 错配是运行观测回归，不允许通过测试。
 - 确定性 guard 只能表达 accepted / fallback / rejected、违规和 fallback 来源；不得在 guard 中编码目标理解、候选排序、工具选择、是否继续探索或方向综合。
 - rootlet / subagent / tool / model 输出只能作为未收束材料进入 CandidatePool、Convergence Judge 和 Handoff Steward validation；不得绕过父层收束进入 Direction Handoff Package。
 
@@ -278,6 +301,7 @@ createMinimalCandidatePool({ goalId, rootletOutputs: [rootletOutput], agentInvoc
 
 - `AgentLoop` round 测试必须断言 observe、reason、act、guard、reflect、decide_next 的执行顺序和 guarded output。
 - `WorkspaceView` 测试必须证明 snapshot / projection snapshot 都是只读防御性副本，且只读 view 不暴露 `patch` / `replace`。
+- 通过 projection 发起模型请求的 agent 测试必须覆盖 trace id 传递；Handoff Steward、Convergence Judge 等不能在模型请求中使用 goal id 顶替 run trace。
 - `Mailbox` 测试必须覆盖按 agent 路由、按 type drain 和 payload 防御性快照。
 - `Guard` 测试必须覆盖 hard violation reject 和 explicit fallback source refs。
 - `UndergroundAgentOrchestrator` 测试必须覆盖缺少 `AgentTurnRuntime` 不批准、代表性地下方向流经 `cognitive_manager`、session 结果暴露安全运行 trace、复用 orchestrator 时每次 run 有独立 run id。
@@ -530,3 +554,4 @@ user_approval.received
 - Observation Kernel exposes `underground.userEscalation` details and `user_clarification` refs。
 - Observation Kernel exposes clarification response details and recovery event refs。
 - Handoff Steward packages only accepted / merged converged candidates。
+- Handoff Steward focused tests must cover fake `AgentTurnRuntime` handoff narrative, no-runtime fallback not approved, invalid model output not approved, `act()` no model call, and guard limited to package/schema/hard constraint/source candidate boundaries。

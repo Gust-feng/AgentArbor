@@ -3,6 +3,7 @@
 {"file": ".trellis/spec/backend/direction-handoff-package.md", "reason": "Defines the `.agentarbor` direction handoff contract that the new underground mainline must keep feeding."}
 {"file": ".trellis/spec/backend/underground-radial-growth.md", "reason": "Defines rootlet / radial growth output contracts that the AI-first mainline must preserve and extend."}
 {"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Provides build, test, and validation expectations for runtime and panel changes."}
+{"file": ".trellis/spec/backend/observation-read-model.md", "reason": "Defines safe panel/read-model projection boundaries for reasoning traces, model output, fallback markers, and secret redaction."}
 {"file": "docs/架构设计/产品架构/ADR-0021-地下Agent集群AI优先架构重构.md", "reason": "This task implements the accepted AI-first underground architecture decision."}
 {"file": "docs/开发指南/06-工程实现/03-人工智能与确定性边界.md", "reason": "Clarifies the guard-only role of deterministic code and the AI mainline boundary."}
 {"file": "docs/开发指南/03-系统架构/01-系统总览.md", "reason": "Summarizes the current product mainline and system direction."}

@@ -18,7 +18,7 @@
 
 ## 一句话定位
 
-AgentArbor 是目标驱动的智能体 / 智能体应用（AgentApp）孕育与演化平台。它以 `Soil -> Underground Center -> .agentarbor -> Aboveground Center -> Fruits -> Governance -> Soil` 为原生概念树：土壤保存长期事实和能力资产，地下中枢完成需求成形、约束提取、证据探索和方向综合，`.agentarbor` 承担方向交接，地上中枢制定 Growth Plan、Workflow IR、执行组织、验证门和修订机制，果实经过治理后才允许回流土壤。
+AgentArbor 是目标驱动的问题解决与经验积累平台。它以 `Soil -> Underground Center -> .agentarbor -> Aboveground Center -> Fruits -> Governance -> Soil` 为原生概念树：土壤保存长期事实和能力资产，地下中枢完成问题的理解、探索、交叉裁决和方向综合，`.agentarbor` 承担方向交接，地上中枢制定 Growth Plan、Workflow IR、执行组织、验证门和修订机制，每次解决后的经验经过治理才允许回流土壤。AgentApp 是极少数需要长期独立调度运行场景下的可选产出形态，不是产品主线。
 
 ## 架构原则
 
@@ -29,7 +29,7 @@ AgentArbor 是目标驱动的智能体 / 智能体应用（AgentApp）孕育与�
 - 地下中枢承担需求成形、用户确认、约束提取、证据探索和养料供给职责；它不能制定地上执行计划。
 - `.agentarbor` 只承担方向交接；它引用 Soil，不复制 Soil，也不保存最终资产。
 - 地上中枢承担计划、调度、执行控制、验证和修订职责；地上生长组织不能绕过 Growth Plan 和 Workflow IR。
-- 子 agent 可以成为果实，但必须由真实任务、评估、权限收敛和谱系记录共同证明，不能从角色命名直接出生。
+- 子 agent 果实是能力积累到一定程度的自然产物。它必须由多次真实任务、治理评估、权限收敛和谱系记录共同证明，不从角色命名直接出生，也不是每轮任务的目标。
 - Fruits 不是 Soil；候选能力、经验和交付物必须经过 Governance 才能入土。
 - 智能通道是所有模型能力的统一接入边界；单次模型/rootlet/tool 输出只能成为未收束材料，上层 agent 的综合、裁决和交接判断是语义主线，工程边界只负责约束门、状态机、脱敏、证据和治理守卫，不能替 agent 思考。
 - Codex、OpenCode、Agent Skills 等平台格式是适配层，不是 AgentArbor 产品语义的事实源。

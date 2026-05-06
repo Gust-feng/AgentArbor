@@ -16,7 +16,7 @@
 当前文档目标是让新开发者在进入实现前能快速回答这些问题：
 
 1. AgentArbor 是什么，解决什么问题。
-2. 为什么它不是一次性 Agent 生成器，而是 Agent / AgentApp 孕育与演化平台。
+2. 为什么它不是一次性 Agent 生成器，而是目标驱动的问题解决与经验积累平台。
 3. Soil、Underground Center、`.agentarbor`、Aboveground Center、Fruits、Governance 如何构成原生概念树。
 4. 地下中枢如何完成需求成形、约束提取、证据探索、方向交接和运行期养料供给。
 5. 地上中枢如何制定 Growth Plan、Workflow IR、执行组织、验证门和修订机制。

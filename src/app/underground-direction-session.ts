@@ -14,7 +14,11 @@ import { createRunObservationSnapshot } from "../domain/observation/index.js";
 import { createId } from "../kernel/id.js";
 import { AgentTurnRuntime } from "../kernel/intelligence/index.js";
 import { createMessage } from "../kernel/messages/create-message.js";
-import { UndergroundAgentRunner, type UndergroundAgentRunnerResult } from "./underground/cluster/agent-runner.js";
+import {
+  UndergroundAgentOrchestrator,
+  type UndergroundAgentOrchestratorResult,
+  type UndergroundAgentOrchestratorRunTrace,
+} from "./underground/orchestrator.js";
 import { createMinimalRuntime, type MinimalRuntime } from "./runtime.js";
 
 export type UndergroundDirectionSessionTerminalStatus =
@@ -53,6 +57,7 @@ export type UndergroundDirectionSessionResult = {
   directionHandoffPackageRef: DirectionHandoffPackageRef;
   loadedDirectionHandoffPackage: DirectionHandoffPackage;
   observationSnapshot: RunObservationSnapshot;
+  undergroundOrchestratorRun: UndergroundAgentOrchestratorRunTrace;
   eventTypes: ArborMessageType[];
   packageVersions: number[];
   writtenPackagePath?: string;
@@ -65,19 +70,14 @@ export function runUndergroundDirectionSession(
 ): UndergroundDirectionSessionResult {
   const { runtime, storage } = createUndergroundSessionRuntime(options);
   const { traceId, goalId, message } = createUndergroundGoalMessage(goal);
-  const runner = new UndergroundAgentRunner({
+  const orchestrator = new UndergroundAgentOrchestrator({
     runtime,
     enableAutonomy: options.requireAutonomy,
     maxAutonomyCycles: options.maxAutonomyCycles,
   });
-  try {
-    options.onRuntimeReady?.({ runtime, traceId, goalId });
-    runtime.bus.publish(message);
-    const dispatchResult = requireDispatchResult(runner.dispatchUntilIdle());
-    return completeUndergroundDirectionSession({ runtime, storage, traceId, goalId, dispatchResult });
-  } finally {
-    runner.dispose();
-  }
+  options.onRuntimeReady?.({ runtime, traceId, goalId });
+  const dispatchResult = orchestrator.run(message);
+  return completeUndergroundDirectionSession({ runtime, storage, traceId, goalId, dispatchResult });
 }
 
 export async function runUndergroundDirectionSessionWithIntelligence(
@@ -94,7 +94,7 @@ export async function runUndergroundDirectionSessionWithIntelligence(
     toolCenter,
     publishToolEvent: (event) => runtime.bus.publish(event),
   });
-  const runner = new UndergroundAgentRunner({
+  const orchestrator = new UndergroundAgentOrchestrator({
     runtime,
     intelligenceChannel,
     toolCenter,
@@ -102,14 +102,9 @@ export async function runUndergroundDirectionSessionWithIntelligence(
     enableAutonomy: true,
     maxAutonomyCycles: options.maxAutonomyCycles,
   });
-  try {
-    options.onRuntimeReady?.({ runtime, traceId, goalId });
-    runtime.bus.publish(message);
-    const dispatchResult = requireDispatchResult(await runner.dispatchUntilIdleAsync());
-    return completeUndergroundDirectionSession({ runtime, storage, traceId, goalId, dispatchResult });
-  } finally {
-    runner.dispose();
-  }
+  options.onRuntimeReady?.({ runtime, traceId, goalId });
+  const dispatchResult = await orchestrator.runAsync(message);
+  return completeUndergroundDirectionSession({ runtime, storage, traceId, goalId, dispatchResult });
 }
 
 function createUndergroundSessionRuntime(options: RunUndergroundDirectionSessionOptions): {
@@ -154,7 +149,7 @@ function completeUndergroundDirectionSession(input: {
   storage: { packageStore?: DirectionHandoffPackageStore; outputDirectory?: string };
   traceId: string;
   goalId: string;
-  dispatchResult: UndergroundAgentRunnerResult;
+  dispatchResult: UndergroundAgentOrchestratorResult;
 }): UndergroundDirectionSessionResult {
   const observationSnapshot = createRunObservationSnapshot({
     traceId: input.traceId,
@@ -175,6 +170,7 @@ function completeUndergroundDirectionSession(input: {
     directionHandoffPackageRef: input.dispatchResult.directionHandoffPackageRef,
     loadedDirectionHandoffPackage: input.dispatchResult.loadedDirectionHandoffPackage,
     observationSnapshot,
+    undergroundOrchestratorRun: input.dispatchResult.orchestratorRun,
     eventTypes: input.runtime.eventLog.types(),
     packageVersions: input.runtime.directionHandoffPackageStore.listVersions(
       input.dispatchResult.loadedDirectionHandoffPackage.manifest.directionId
@@ -208,13 +204,4 @@ function resolveDirectionHandoffSessionStorage(
   return {
     packageStore: options.packageStore,
   };
-}
-
-function requireDispatchResult(
-  result: UndergroundAgentRunnerResult | undefined
-): UndergroundAgentRunnerResult {
-  if (result === undefined) {
-    throw new Error("Underground dispatcher reached idle state without a terminal handoff result.");
-  }
-  return result;
 }

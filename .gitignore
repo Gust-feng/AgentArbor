@@ -26,6 +26,7 @@ coverage/
 .claude
 .agents
 .agentarbor
+.trae
 .trellis/*
 !.trellis/.gitignore
 !.trellis/.version

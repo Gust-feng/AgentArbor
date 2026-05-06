@@ -1,0 +1,9 @@
+{"file": ".trellis/spec/backend/intelligence-channel.md", "reason": "Check AI turn boundary, tool loop safety, and no provider leakage in the new mainline."}
+{"file": ".trellis/spec/backend/tool-runtime.md", "reason": "Check tool loop, AgentTurnRuntime, and safe tool event handling."}
+{"file": ".trellis/spec/backend/direction-handoff-package.md", "reason": "Check `.agentarbor` handoff package relevance, integrity, and validation rules."}
+{"file": ".trellis/spec/backend/underground-radial-growth.md", "reason": "Check rootlet output sources, fallback handling, and growth contract adherence."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Check build/test/smoke expectations and regression safety."}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Check guard/fallback failure modes and ensure errors are not swallowed."}
+{"file": "docs/架构设计/产品架构/ADR-0021-地下Agent集群AI优先架构重构.md", "reason": "Check implementation against the accepted AI-first architecture decision."}
+{"file": "docs/开发指南/06-工程实现/03-人工智能与确定性边界.md", "reason": "Check that deterministic code stays in guard-only roles."}
+{"file": "docs/任务看板/看板.md", "reason": "Check that the task board reflects the new mainline and not the old deterministic path."}

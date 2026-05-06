@@ -248,6 +248,38 @@ createMinimalCandidatePool({ goalId, rootletOutputs: [rootletOutput], agentInvoc
 
 正式候选池只接受能回溯到 agent invocation 的 rootlet output；这保证地下组织是调度出来的，而不是 session helper 拼出来的。
 
+## Scenario: ADR-0021 first-slice AgentLoop / Workspace / Mailbox / Orchestrator 迁移
+
+### 1. Scope / Trigger
+
+- Trigger：修改 `src/domain/underground/agent-loop.ts`、`workspace.ts`、`mailbox.ts`、`guard.ts`、`src/app/underground/orchestrator.ts`、`src/app/underground-direction-session.ts` 或地下主入口迁移测试。
+- Scope：只覆盖 ADR-0021 第一片运行骨架和迁移兼容桥；不声称 Intent Core、Growth Governor、Rootlet、CandidatePool、Autonomy、Convergence Judge 和 Handoff Steward 已全部改写为 AI-first AgentLoop。
+
+### 2. Signatures
+
+- `AgentLoop`：显式 `observe -> reason -> act -> guard` 四阶段；`reason` 是后续统一接入 `AgentTurnRuntime` 的语义阶段。
+- `WorkspaceView`：agent 侧只读工作空间快照；`WritableWorkspace` 只能由 orchestrator / 受协议约束的迁移层持有。
+- `Mailbox`：agent 间消息路由边界；消息必须按 `toAgentId` 入队，读取侧只能看到自己的队列。
+- `UndergroundAgentOrchestrator`：新的地下主入口 owner；当前 first slice 使用 `agent_loop_compatibility_adapter` 调用既有 `UndergroundAgentRunner`，并在结果中暴露 `compatibilityPathUsed = true`。
+- `undergroundOrchestratorRun`：地下 session 的安全迁移 trace，只暴露 orchestrator run id、route、agent loop ids、guarded status 和 output refs，不暴露 raw prompt、provider raw response、tool raw output 或 secret。
+
+### 3. Contracts
+
+- `runUndergroundDirectionSession` 和 `runUndergroundDirectionSessionWithIntelligence` 必须经 `UndergroundAgentOrchestrator` 进入地下运行；不得在 session 层继续直接 publish goal 后调用 `UndergroundAgentRunner`。
+- 兼容桥必须显式命名为迁移层，例如 `agent_loop_compatibility_adapter`；文档、trace 和看板不得把这一片描述成旧 runner 已经完全删除或所有 agent 已完成 AgentLoop 重写。
+- `AgentRunContext.workspace` 面向 agent 暴露 `WorkspaceView`，不能让 agent 直接写共享状态；可写 workspace 只能留在 orchestrator 内部。
+- `Mailbox` 与 `WorkspaceView` 返回值必须是防御性快照；调用方不能通过嵌套对象 mutation 改写队列或工作空间内部状态。
+- 确定性 guard 只能表达 accepted / fallback / rejected、违规和 fallback 来源；不得在 guard 中编码目标理解、候选排序、工具选择、是否继续探索或方向综合。
+- 兼容桥内复用旧 runner 时，旧 runner 输出仍必须通过 CandidatePool、Convergence Judge 和 Handoff Steward validation；rootlet / tool / model 输出不得绕过父层收束进入 Direction Handoff Package。
+
+### 4. Tests Required
+
+- `AgentLoop` round 测试必须断言 observe、reason、act、guard 的执行顺序和 guarded output。
+- `WorkspaceView` 测试必须证明 snapshot 是只读防御性副本，且只读 view 不暴露 `patch` / `replace`。
+- `Mailbox` 测试必须覆盖按 agent 路由、按 type drain 和 payload 防御性快照。
+- `Guard` 测试必须覆盖 hard violation reject 和 explicit fallback source refs。
+- `UndergroundAgentOrchestrator` 测试必须覆盖代表性地下方向流经 `agent_loop_compatibility_adapter`、session 结果暴露安全迁移 trace、复用 orchestrator 时每次 run 有独立 run id。
+
 ## Scenario: 地下消息驱动调度内核
 
 ### 1. Scope / Trigger

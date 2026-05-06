@@ -89,7 +89,7 @@
 - Event views expose `tool_call` refs for `tool.requested` / `tool.completed` / `tool.failed` and do not expose false model / user clarification refs from tool payload fields。
 - Underground demo summary exposes secret-free AI event counts, per-rootlet-kind model call status, AI candidate / fallback counts and candidate-related model call refs for explicit AI runs, and reports disabled AI with zero model events for the default run。
 - Underground demo summary and panel tracking expose secret-free tool event counts and tool call refs for tool-enabled AI runs。
-- 本地 panel response 覆盖 no-AI、fake AI、openai-compatible 配置失败、sync run 兼容、async run job、partial / final event cursor、SSE stream、cursor 续传、stream 断开后后台 run 完成、tracking read model、transcript 和 model visible output，并证明 HTTP JSON / SSE 不包含 raw secret、token、完整模型 prompt、provider raw response、hidden reasoning、raw tool output、app parser 会丢弃的候选字段或未校验模型输出。
+- 本地 panel response 覆盖 AI 禁用模式拒绝、fake AI、openai-compatible 配置失败、sync run 兼容、async run job、partial / final event cursor、SSE stream、cursor 续传、stream 断开后后台 run 完成、tracking read model、transcript 和 model visible output，并证明 HTTP JSON / SSE 不包含 raw secret、token、完整模型 prompt、provider raw response、hidden reasoning、raw tool output、app parser 会丢弃的候选字段或未校验模型输出。
 - Recovery path event views expose direction package refs for `user_approval.received`、`direction_handoff.revision_requested` 和最终 `direction_handoff.completed`。
 - Snapshot exposes clarification responses and handoff lineage while staying JSON-safe。
 - Direction Handoff Package、Aboveground store load 和固定 18 步 main EventLog sequence 不回归。

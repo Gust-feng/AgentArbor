@@ -54,7 +54,7 @@
 - 自治主线与 rootlet fallback 不同：启用 autonomy 时，缺少 `AgentTurnRuntime`、模型失败、输出 validation failed 或 app parser 拒绝时，不能回退为 deterministic 成功；必须产生 failed/stopped autonomy decision，并经 Convergence Judge 形成 `ai_required_for_autonomy`、`autonomy_decision_failed`、`autonomy_cycle_guard_exceeded` 或 `autonomy_stopped` 等可审计终态。
 - hard constraint、Direction Handoff Package validation、状态机守卫和 Governance gate 不得因为模型建议而被跳过。
 - 工程边界不得替 agent 思考：`ModelOutputContract`、parser、visible output projection、validation、budget、permission 和 fallback 只负责裁剪、校验、脱敏、失败归一和引用边界；不得把这些机制写成目标理解、候选排序、工具选择、继续探索或收束裁决的主逻辑。
-- `pnpm demo:underground` 默认不得创建 provider、不得触发真实网络、不得发布 `model.*` 事件；只有显式 `--ai fake` 或 `--ai openai-compatible` 才能启用地下 rootlet 智能通道。
+- `pnpm demo:underground` 默认使用 fake AI 作为最小 happy path，经 `IntelligenceChannel` / `AgentTurnRuntime` 发布 `model.requested -> model.completed`；不得触发真实网络。只有显式 `--ai openai-compatible` 且配置完整时才允许真实 provider 路径。`aiMode=none` 只作为禁用边界，必须 stopped/failed 且不得 approved。
 - `--ai openai-compatible` 必须先完成环境配置校验：`AGENTARBOR_MODEL_API_KEY` 或 `OPENAI_API_KEY` 必须存在，`AGENTARBOR_MODEL_NAME` 必须存在；缺失时必须返回配置失败并确认未尝试网络调用。`AGENTARBOR_MODEL_BASE_URL` 可选，配置和 summary 不得泄漏 API key / token。
 - `pnpm panel` 的 OpenAI-compatible 配置来源是本地配置中心，不直接读取用户 shell 环境；panel 只返回 base URL、model、默认 AI mode、secret ref、`secretConfigured` 和由脱敏状态派生的 provider readiness，永不返回 secret value。
 
@@ -104,7 +104,7 @@
 - OpenAI-compatible Chat Completions adapter 使用 stubbed fetch 验证 `tools`、`tool_choice`、assistant `tool_calls`、tool result message 和 provider `tool_calls` 归一化映射。
 - fake provider 支持 deterministic tool call fixture，以便测试工具循环而不引入真实网络。
 - AgentTurnRuntime 覆盖模型禁用、未授权工具、工具回填继续模型、模型/工具轮次上限和边界导入规则。
-- 自治 decision 覆盖 `request_convergence`、`continue_exploration`、无 AI disabled、provider failure、非法输出、工具 `search` / `read` 回合和 secret/token 脱敏；断言模型/工具输出只影响候选与收束边界，不直接进入 Direction Handoff。
+- 自治 decision 覆盖 `request_convergence`、`continue_exploration`、`aiMode=none` / 无 `AgentTurnRuntime` disabled、provider failure、非法输出、工具 `search` / `read` 回合和 secret/token 脱敏；断言模型/工具输出只影响候选与收束边界，不直接进入 Direction Handoff。
 - provider adapter 失败映射：鉴权失败、超时、rate limit、输出不合约、fetch 缺失。
 - 事件顺序：`model.requested -> model.completed` 或 `model.requested -> model.failed`。
 - 导入边界：不引入外部 LLM SDK；`domain/**`、`kernel/**`、app 运行流程不直接导入 provider SDK 或 provider adapter；组合根只允许装配 adapter factory。
@@ -112,7 +112,7 @@
 - 配置中心：raw secret 只进入 local-dev secret store 和 provider adapter 构造参数；settings store、panel HTTP JSON、summary、Snapshot 和测试快照不包含 raw secret。
 - Observation ref 边界：`model.completed` 的 `requestId` / `responseId` 生成 `model_call` ref，不能生成 `user_clarification` ref。
 - Underground 接入：下层模型/rootlet/tool 输出只能进入候选池或收束输入，不能绕过上层 agent 收束和 handoff validation 直接进入 package。
-- Underground demo CLI：默认 no-AI、`--ai fake`、`--ai openai-compatible` 配置失败和密钥不泄漏都必须有测试或边界检查。
+- Underground demo CLI：默认 fake AI、`--ai openai-compatible` 配置失败、AI 禁用边界和密钥不泄漏都必须有测试或边界检查；禁用边界不得成为 approved happy path。
 
 ## Wrong vs Correct
 

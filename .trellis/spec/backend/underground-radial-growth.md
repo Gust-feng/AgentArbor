@@ -29,7 +29,7 @@
 - `compareCandidatesForGoal(...)`：基于目标画像、候选和 rootlet output 生成比较、收束决策和 evidence entries；不得按 `clusterId` 硬编码 accepted / merged / rejected。
 - `UndergroundEvidenceLedger`：地下证据账本，收纳 goal intent、Soil constraint、rootlet output、candidate comparison、convergence decision、user clarification 和 stop reason evidence。
 - `createRootletOutputsForInvocation(...)`：单个 rootlet invocation 可以按 rootlet kind 和预算产出多个 `RootletOutput`；输出仍只是候选材料，必须进入 `CandidatePool`。
-- `RootletOutput.source`：标记材料来源，当前覆盖 `ai` 与 `deterministic_fallback`；AI 成功输出必须标记为 `ai`，模型失败、空候选或默认 no-AI 路径的 fallback 输出必须标记为 `deterministic_fallback`，并通过 source refs 保留 fallback / model / tool 归因。
+- `RootletOutput.source`：标记材料来源，当前覆盖 `ai` 与 `deterministic_fallback`；AI 成功输出必须标记为 `ai`，模型失败、空候选或显式禁用/配置失败边界的 fallback 输出必须标记为 `deterministic_fallback`，并通过 source refs 保留 fallback / model / tool 归因。
 - `CandidatePool.candidatesByKind`：按 `RootletClusterKind` 分组的候选视图，必须与扁平 `candidates` 和 `counts` 同步。
 - `runUndergroundDirectionSession(goal, options?)`：地下-only 入口，返回 `approved_package_created`、`awaiting_user` 或 `stopped`，并生成 JSON-safe observation snapshot。`options` 可包含 `constraints`、显式 `packageStore` 或显式 `outputDirectory`；不传 store / output directory 时只能使用 in-memory package store。
 - `recoverUndergroundDirectionSession(awaitingSession, clarificationResponse?)`：地下-only 恢复入口，接收 awaiting-user session 与可选澄清回答；未传回答时创建 deterministic demo/test response，保存同一 direction 的 approved v2 package。
@@ -44,7 +44,7 @@
 
 ### 3. Contracts
 
-- Intent Core 的长期主线是 AI 驱动目标成形：模型输出作为目标画像候选，经父层 agent 收束和确定性守卫后形成 `GoalIntentProfile`。当前 `createGoalIntentProfile` 是 no-AI / fallback / baseline 路径；不得把它重新提升为地下语义判断的唯一主线。
+- Intent Core 的长期主线是 AI 驱动目标成形：模型输出作为目标画像候选，经父层 agent 收束和确定性守卫后形成 `GoalIntentProfile`。当前 `createGoalIntentProfile` 是 fallback / baseline / 禁用边界路径；不得把它重新提升为地下语义判断的唯一主线。
 - Rootlet 选择由 `GoalIntentProfile` 驱动；简单目标默认只启动 `option`，风险/资产/证据/约束/反驳明显时才启动对应 cluster。
 - 单个 `RootletOutput` 只能进入 `CandidatePool`，不能直接进入 Direction Handoff Package。
 - 单个 rootlet invocation 可以产出多个 `RootletOutput`，但数量必须受该 rootlet cluster 的 `budget.maxCandidateOutputs` 限制；公共 EventLog 仍只记录一次 `exploration_candidate.produced` 阶段事件，payload 可携带多个输出。
@@ -138,11 +138,11 @@
 - `createUndergroundDemoSummary` 对 approved / awaiting_user / stopped / recovered approved v2 终态均有测试，且 awaiting_user / recovered 都不包含 `growth_plan.completed`。
 - `runUndergroundDirectionSession` 覆盖 injected package store、显式 `outputDirectory` round-trip 和未传 `--out` 不写 repo-root `.agentarbor/`。
 - 默认 demo 和地下-only session 都不写 repo-root `.agentarbor/`。
-- `pnpm demo:underground` 可运行默认目标和自定义目标，并保持 7 步地下-only EventLog。
+- `pnpm demo:underground` 可运行默认目标和自定义目标；默认 happy path 必须走 fake AI，经 `AgentTurnRuntime` 发布模型事件，并停在地下-only 边界。
 - `pnpm demo:underground -- --ai fake "<goal>"` 覆盖模型事件、按 rootlet kind 的 AI summary、候选层接入和 Direction Handoff 边界；复杂目标必须覆盖 6 种 rootlet kind。
 - rootlet AI 工具循环覆盖统一 `search` / `read` 成功、no-provider / stub、未授权和 max rounds，且 rootlet output refs 能回到 tool call / research refs。
 - 至少一个非 rootlet 地下核心 agent 通过统一 turn policy 证明模型 / 工具不可用时不会私自调用。
-- 自治主线覆盖：无 AI stopped/disabled；`continue_exploration` 产生第二个 cycle；`request_convergence` 后才触发 Convergence Judge / Handoff；同 cycle 去重不同 cycle 不误删；非法 action、非法 rootlet kind、未知 candidate ref、超长文本和 secret/token 脱敏/拒绝。
+- 自治主线覆盖：`aiMode=none` 或缺少 `AgentTurnRuntime` 时 stopped/disabled 且不得 approved；`continue_exploration` 产生第二个 cycle；`request_convergence` 后才触发 Convergence Judge / Handoff；同 cycle 去重不同 cycle 不误删；非法 action、非法 rootlet kind、未知 candidate ref、超长文本和 secret/token 脱敏/拒绝。
 - 自治核心工具权限覆盖：`underground-autonomy-core` 只能通过统一 `AgentTurnRuntime` 使用 `search` / `read`，工具事件进入 safe summary，工具输出不得绕过 CandidatePool / Convergence / Handoff。
 - `pnpm demo:underground -- --ai openai-compatible "<goal>"` 覆盖缺配置失败、无网络调用和密钥不泄漏。
 
@@ -168,8 +168,8 @@ Rootlet 是否启动和候选如何收束都必须从目标画像和比较结果
 
 ### 1. Scope / Trigger
 
-- Trigger：修改 `src/domain/underground/agent-cluster.ts`、`src/app/underground-agent-cluster-runtime.ts`、地下 session、rootlet output、candidate pool、智能通道地下接入或 Observation underground view。
-- Scope：覆盖内存地下 agent 集群调度、AI rootlet / autonomy / convergence 主线和确定性边界守卫；不引入 UI、HTTP、SSE、WebSocket、数据库、MCP、A2A、AG-UI、外部 LLM SDK 或 repo-root `.agentarbor/` 运行资产。
+- Trigger：修改 `src/domain/underground/agent-cluster.ts`、`src/domain/underground/agent-loop.ts`、`src/app/underground-agent-cluster-runtime.ts`、`src/app/underground/orchestrator.ts`、地下 session、rootlet output、candidate pool、智能通道地下接入或 Observation underground view。
+- Scope：覆盖内存地下 agent 集群调度、Cognitive Runtime 主入口、AI rootlet / autonomy / convergence 主线和确定性边界守卫；不引入 UI、HTTP、SSE、WebSocket、数据库、MCP、A2A、AG-UI、外部 LLM SDK 或 repo-root `.agentarbor/` 运行资产。
 
 ### 2. Signatures
 
@@ -181,12 +181,12 @@ Rootlet 是否启动和候选如何收束都必须从目标画像和比较结果
 
 ### 3. Contracts
 
-- 地下 session 默认必须走 agent cluster runtime；不能回退到 app helper 直接把 rootlet output 塞进 candidate pool。
+- 地下 session 默认必须经 `UndergroundAgentOrchestrator` 的 `cognitive_manager` 路由进入地下运行；旧 agent cluster runtime 只能作为显式迁移 / 兼容 helper，不能重新成为 session 主入口，也不能回退到 app helper 直接把 rootlet output 塞进 candidate pool。
 - 调度器必须先注册地下 agent manifests，再按 `GoalIntentProfile` 和动态 rootlet 选择结果启动 rootlet agent invocations。
 - rootlet output 进入正式 candidate pool 前，必须能追溯到 completed `rootlet_agent` invocation，且 `output.producedByAgentId === invocation.agentId`、`invocation.outputRefs` 包含 `output.outputId`。
 - `IntelligenceChannel` 只能作为 rootlet agent 的能力来源；所有 rootlet kind 的 AI output 都只有被 rootlet invocation 包装成 `RootletOutput` 后，才能进入 candidate pool。
 - Convergence Judge 与 Handoff Steward 是上层 agent 收束与交接职责 owner，可以使用 AI 进行语义裁决和叙事组织；确定性守门只负责 candidate pool、convergence report、Direction Handoff Package validation、hard constraint、权限和谱系边界，模型输出不能绕过这些边界。
-- 不新增事件类型时，复用的地下事件 payload 必须包含 `agentCluster` / `invocation` 信息，证明 plan、run 和 invocations 被调度；Observation Snapshot 必须投影 `underground.agentCluster`。
+- 不新增事件类型时，地下运行必须暴露安全的 `undergroundOrchestratorRun` / manager trace，证明 plan、rootlet、candidate、autonomy、convergence 和 handoff 均经 orchestrator route 推进；旧 `agentCluster` payload 只能作为迁移兼容投影，不再是唯一验收证据。
 
 ### 4. Runtime Unitization Contract
 
@@ -221,11 +221,11 @@ Rootlet 是否启动和候选如何收束都必须从目标画像和比较结果
 
 ### 7. Tests Required
 
-- 地下-only happy path 通过 agent cluster runtime 产出 approved package，且 EventLog payload 包含 `agentCluster`。
+- 地下-only fake AI happy path 通过 `cognitive_manager` 产出 approved package，且结果暴露 `undergroundOrchestratorRun.route === "cognitive_manager"`、agent loop ids、manager decisions 和 guarded statuses。
 - Rootlet output 没有关联 completed rootlet invocation 时不能进入 candidate pool。
-- AI output 必须通过 rootlet invocation 才能进入 candidate pool，且 6 种 rootlet kind 的 fake AI 成功、失败 / validation failed 和默认 no-AI deterministic 路径都要有测试。
+- AI output 必须通过 rootlet invocation 才能进入 candidate pool，且 6 种 rootlet kind 的 fake AI 成功、失败 / validation failed、`aiMode=none` 禁用边界和缺少 `AgentTurnRuntime` stopped 边界都要有测试；禁用边界不得作为 approved happy path。
 - 动态 rootlet selection 形成对应数量的 rootlet agent invocations。
-- awaiting_user / stopped 仍暴露 agent cluster run，且不进入 Aboveground。
+- awaiting_user / stopped 仍暴露 orchestrator run trace，且不进入 Aboveground。
 - Observation Snapshot 展示 cluster plan、invocations、candidate refs 和 package refs。
 - EventLog / Snapshot 不包含 API key / token。
 
@@ -248,37 +248,39 @@ createMinimalCandidatePool({ goalId, rootletOutputs: [rootletOutput], agentInvoc
 
 正式候选池只接受能回溯到 agent invocation 的 rootlet output；这保证地下组织是调度出来的，而不是 session helper 拼出来的。
 
-## Scenario: ADR-0021 first-slice AgentLoop / Workspace / Mailbox / Orchestrator 迁移
+## Scenario: ADR-0021 Cognitive Runtime / AgentLoop / Workspace / Mailbox / Orchestrator 迁移
 
 ### 1. Scope / Trigger
 
 - Trigger：修改 `src/domain/underground/agent-loop.ts`、`workspace.ts`、`mailbox.ts`、`guard.ts`、`src/app/underground/orchestrator.ts`、`src/app/underground-direction-session.ts` 或地下主入口迁移测试。
-- Scope：只覆盖 ADR-0021 第一片运行骨架和迁移兼容桥；不声称 Intent Core、Growth Governor、Rootlet、CandidatePool、Autonomy、Convergence Judge 和 Handoff Steward 已全部改写为 AI-first AgentLoop。
+- Scope：覆盖 ADR-0021 当前 Cognitive Runtime 骨架：`AgentLoop`、`AgentRunContext`、`WorkspaceView`、`Mailbox`、Guard 和 `UndergroundAgentOrchestrator` 的 `cognitive_manager` 主路由；旧 runner 只能作为迁移期兼容实现细节，不得重新成为主入口。
 
 ### 2. Signatures
 
-- `AgentLoop`：显式 `observe -> reason -> act -> guard` 四阶段；`reason` 是后续统一接入 `AgentTurnRuntime` 的语义阶段。
+- `AgentLoop`：显式 `observe -> reason -> act -> guard -> reflect -> decide_next` 阶段；`reason` 是统一接入 `AgentTurnRuntime` 的语义阶段，`reflect` / `decide_next` 记录守卫结果后的反思和继续/停止/等待输入判断。
+- `AgentRunContext`：强类型上下文，包含 `WorkspaceView`、`Mailbox`、可选 `AgentTurnRuntime`、工具 surface、memory view、trace writer、budget view 和 constraint view；agent 只能通过上下文契约读取能力。
 - `WorkspaceView`：agent 侧只读工作空间快照；`WritableWorkspace` 只能由 orchestrator / 受协议约束的迁移层持有。
 - `Mailbox`：agent 间消息路由边界；消息必须按 `toAgentId` 入队，读取侧只能看到自己的队列。
-- `UndergroundAgentOrchestrator`：新的地下主入口 owner；当前 first slice 使用 `agent_loop_compatibility_adapter` 调用既有 `UndergroundAgentRunner`，并在结果中暴露 `compatibilityPathUsed = true`。
-- `undergroundOrchestratorRun`：地下 session 的安全迁移 trace，只暴露 orchestrator run id、route、agent loop ids、guarded status 和 output refs，不暴露 raw prompt、provider raw response、tool raw output 或 secret。
+- `UndergroundAgentOrchestrator`：地下主入口 owner；当前 route 必须是 `cognitive_manager`，按 Intent Core、Growth Governor、Rootlet Explorer、Candidate Collector、Autonomy Reviewer、Convergence Judge 和 Handoff Steward 推进受控循环。
+- `undergroundOrchestratorRun`：地下 session 的安全运行 trace，只暴露 orchestrator run id、route、agent loop ids、manager decisions、guarded statuses 和 output refs，不暴露 raw prompt、provider raw response、tool raw output 或 secret。
 
 ### 3. Contracts
 
 - `runUndergroundDirectionSession` 和 `runUndergroundDirectionSessionWithIntelligence` 必须经 `UndergroundAgentOrchestrator` 进入地下运行；不得在 session 层继续直接 publish goal 后调用 `UndergroundAgentRunner`。
-- 兼容桥必须显式命名为迁移层，例如 `agent_loop_compatibility_adapter`；文档、trace 和看板不得把这一片描述成旧 runner 已经完全删除或所有 agent 已完成 AgentLoop 重写。
+- Orchestrator trace、看板和文档必须把当前主路由标记为 `cognitive_manager`；不得残留 `agent_loop_compatibility_adapter` 作为当前主路由，也不得使用 DEBUG console 输出 route 状态。
+- fake AI 是最小 happy path；`aiMode=none`、缺少 `AgentTurnRuntime`、配置失败、模型失败或 contract validation failed 均不得伪造模型成功或 approved package。
 - `AgentRunContext.workspace` 面向 agent 暴露 `WorkspaceView`，不能让 agent 直接写共享状态；可写 workspace 只能留在 orchestrator 内部。
 - `Mailbox` 与 `WorkspaceView` 返回值必须是防御性快照；调用方不能通过嵌套对象 mutation 改写队列或工作空间内部状态。
 - 确定性 guard 只能表达 accepted / fallback / rejected、违规和 fallback 来源；不得在 guard 中编码目标理解、候选排序、工具选择、是否继续探索或方向综合。
-- 兼容桥内复用旧 runner 时，旧 runner 输出仍必须通过 CandidatePool、Convergence Judge 和 Handoff Steward validation；rootlet / tool / model 输出不得绕过父层收束进入 Direction Handoff Package。
+- rootlet / subagent / tool / model 输出只能作为未收束材料进入 CandidatePool、Convergence Judge 和 Handoff Steward validation；不得绕过父层收束进入 Direction Handoff Package。
 
 ### 4. Tests Required
 
-- `AgentLoop` round 测试必须断言 observe、reason、act、guard 的执行顺序和 guarded output。
-- `WorkspaceView` 测试必须证明 snapshot 是只读防御性副本，且只读 view 不暴露 `patch` / `replace`。
+- `AgentLoop` round 测试必须断言 observe、reason、act、guard、reflect、decide_next 的执行顺序和 guarded output。
+- `WorkspaceView` 测试必须证明 snapshot / projection snapshot 都是只读防御性副本，且只读 view 不暴露 `patch` / `replace`。
 - `Mailbox` 测试必须覆盖按 agent 路由、按 type drain 和 payload 防御性快照。
 - `Guard` 测试必须覆盖 hard violation reject 和 explicit fallback source refs。
-- `UndergroundAgentOrchestrator` 测试必须覆盖代表性地下方向流经 `agent_loop_compatibility_adapter`、session 结果暴露安全迁移 trace、复用 orchestrator 时每次 run 有独立 run id。
+- `UndergroundAgentOrchestrator` 测试必须覆盖缺少 `AgentTurnRuntime` 不批准、代表性地下方向流经 `cognitive_manager`、session 结果暴露安全运行 trace、复用 orchestrator 时每次 run 有独立 run id。
 
 ## Scenario: 地下消息驱动调度内核
 

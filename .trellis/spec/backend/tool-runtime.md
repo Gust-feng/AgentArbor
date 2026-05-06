@@ -92,7 +92,7 @@
 - Good：未授权 rootlet 请求 `search` 或 `read` 时得到 failed tool result，模型仍可用失败结果继续，EventLog 有 `tool.failed`。
 - Good：`underground-intent-core` 的 turn policy 禁用模型和工具，同步调度不会产生 `model.*` 或 `tool.*` 事件。
 - Good：`underground-autonomy-core` 通过同一个 AgentTurnRuntime 调用 `search` / `read` 后再输出 autonomy decision；Convergence Judge 仍是唯一收敛报告 owner，并可用 AI 主线综合这些工具证据。
-- Base：fake provider 默认不返回 tool calls；`--ai fake` 和 no-AI 路径保持原有 deterministic / 单轮行为。
+- Base：fake provider 默认不返回 tool calls；`--ai fake` 是最小 AI happy path，`aiMode=none` 只作为禁用边界，必须 skipped/stopped 且不得 approved。
 - Base：无 Tavily key 时 `search` 的 web source 返回 `no-provider`，不触发真实网络；docs/packages/github 返回 stub。
 - Base：面板保留 `/api/config/information-sources` 兼容路由，但新的搜索工具表单走 `/api/config/tools` 和 `/api/config/tools/web-search`。
 - Bad：kernel tool loop 直接 import app `ToolCenter`。

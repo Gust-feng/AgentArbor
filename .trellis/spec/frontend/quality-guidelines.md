@@ -5,7 +5,7 @@
 ## 生效规则
 
 - `pnpm build` 必须通过，保证 `panel-assets.ts`、`panel-server.ts` 和 `panel.ts` 可编译。
-- `pnpm test` 必须覆盖 panel config API、no-AI run、fake AI run、openai-compatible 缺 key / 缺 model、async run job、running/completed polling、SSE stream、cursor 续传、stream 断开不影响后台 run、HTTP JSON / SSE 脱敏、provider fetch 未调用、默认中文 UI、左侧产品导航、空 Agent transcript、目标输入、运行中 transcript 追加、完成态最终结果、设置 / 调试详情折叠、模型输出增量、同一 model request 的 live delta 不被完成后派生 delta 重复展示，以及运行追踪投影。
+- `pnpm test` 必须覆盖 panel config API、AI 禁用模式拒绝、fake AI run、openai-compatible 缺 key / 缺 model、async run job、running/completed polling、SSE stream、cursor 续传、stream 断开不影响后台 run、HTTP JSON / SSE 脱敏、provider fetch 未调用、默认中文 UI、左侧产品导航、空 Agent transcript、目标输入、运行中 transcript 追加、完成态最终结果、设置 / 调试详情折叠、模型输出增量、同一 model request 的 live delta 不被完成后派生 delta 重复展示，以及运行追踪投影。
 - `pnpm panel:smoke` 必须能启动本地服务、打印 URL 并退出。
 - `pnpm panel:desktop:smoke` 必须能启动 Electron 桌面宿主的 smoke 路径、关闭本地服务并退出，不创建真实窗口，不要求 CI 具备可交互桌面会话。
 - 本地 panel 默认不得发起真实网络；只有用户显式选择 `openai-compatible` 且配置中心完整时才允许进入真实 provider 路径。

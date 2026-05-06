@@ -46,7 +46,7 @@
 | EventLog 顺序变化 | `pnpm test` 失败，必要时同步更新 PRD/文档 |
 | demo 无法打印完整链路 | `pnpm demo` 失败或人工检查失败 |
 | 地下-only demo 进入 Aboveground 或写入 repo-root `.agentarbor/` | `pnpm test` 或 `pnpm demo:underground` 验收失败 |
-| 默认地下-only demo 发布 `model.*` 事件或创建 provider | `pnpm test` 或 `pnpm demo:underground` 验收失败 |
+| 默认地下-only demo 未经 fake AI / AgentTurnRuntime 发布 `model.*` 事件，或 `aiMode=none` 禁用边界产出 approved package | `pnpm test` 或 `pnpm demo:underground` 验收失败 |
 | `--ai openai-compatible` 缺少 key / model 时仍尝试网络或泄漏密钥 | `pnpm test` 或边界检查失败 |
 | panel `openai-compatible` 缺少 key 时仍调用 provider fetch | `pnpm test` 失败 |
 | settings store、EventLog、Snapshot、summary、trace、transcript、SSE、HTTP JSON 或测试快照出现 raw API key / token / 完整 prompt / provider raw response / hidden reasoning / raw tool output / 未校验模型输出 / rootlet parser 会拒绝的候选字段 | `pnpm test` 或安全检查失败 |
@@ -57,9 +57,9 @@
 
 - Good：新守卫加失败测试，新事件改动更新顺序断言。
 - Good：新增 demo 命令时同步测试 summary 纯函数，并运行对应 demo 命令。
-- Good：新增 AI demo 开关时同时覆盖默认 no-AI、fake AI、OpenAI-compatible 配置失败和密钥不泄漏。
-- Good：新增 rootlet AI 输出契约时同时覆盖 6 种 kind 的 contract / prompt / parser、fake AI 复杂目标、AI 失败 fallback 和默认 deterministic no-AI。
-- Good：新增本地 panel 时同时覆盖配置更新、no-AI run、fake AI run、openai-compatible 缺 key / 缺 model、async run job、partial / final polling、SSE stream、cursor 续传、stream 断开不影响后台 run、HTTP / SSE 响应脱敏、中文 UI、tracking / transcript / model visible output read model 和 panel command smoke。
+- Good：新增 AI demo 开关时同时覆盖默认 fake AI、OpenAI-compatible 配置失败、AI 禁用边界和密钥不泄漏。
+- Good：新增 rootlet AI 输出契约时同时覆盖 6 种 kind 的 contract / prompt / parser、fake AI 复杂目标、AI 失败 fallback、AI 禁用边界和缺少 `AgentTurnRuntime` stopped 边界。
+- Good：新增本地 panel 时同时覆盖配置更新、AI 禁用模式拒绝、fake AI run、openai-compatible 缺 key / 缺 model、async run job、partial / final polling、SSE stream、cursor 续传、stream 断开不影响后台 run、HTTP / SSE 响应脱敏、中文 UI、tracking / transcript / model visible output read model 和 panel command smoke。
 - Good：新增桌面宿主时复用现有 panel server，单元测试注入 window/server 依赖覆盖安全默认值、smoke 不创建窗口、关闭幂等和启动失败清理。
 - Base：纯类型补充仍运行 `pnpm build` 和 `pnpm test`。
 - Bad：只运行 `pnpm demo` 或 `pnpm demo:underground` 后宣称测试通过。

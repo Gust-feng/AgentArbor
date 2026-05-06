@@ -77,7 +77,7 @@
 - hard constraint 阻断或要求确认。
 - 内部 agent 私聊被 MessageBus 阻断。
 - 配置中心 raw secret 不进入普通 settings store、EventLog、Observation Snapshot、demo summary、panel HTTP JSON 响应或测试快照。
-- panel no-AI / fake AI / openai-compatible 缺配置失败路径均有测试，且缺 key 时不调用 provider fetch。
+- panel AI 禁用 / fake AI / openai-compatible 缺配置失败路径均有测试，且缺 key 时不调用 provider fetch；AI 禁用路径不得启动 approved 地下 happy path。
 
 ## Wrong vs Correct
 

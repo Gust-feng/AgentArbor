@@ -1,6 +1,6 @@
 # 工具运行时
 
-本规范记录 ToolCenter、ResearchRuntime、工具契约、AgentTurnRuntime、IntelligenceChannel 多轮工具循环和地下 agent 工具接入的可执行边界。工具能力是运行期能力，不是长期 Capability Asset；单次工具输出、搜索结果和模型输出都是未收束材料，必须经过父层 agent 汇总/交叉验证以及既有候选池、收束和方向交接校验。
+本规范记录 ToolCenter、ResearchRuntime、工具契约、AgentTurnRuntime、IntelligenceChannel 多轮工具循环和地下 agent 工具接入的可执行边界。工具能力是运行期能力，不是长期 Capability Asset；单次工具输出、搜索结果和模型输出都是未收束材料，必须经过父层 agent 汇总/交叉验证以及既有候选池、收束和 Plan Package 校验。
 
 ## Scenario: AgentTurnRuntime + ToolCenter 多轮工具循环
 
@@ -39,11 +39,11 @@
 
 - `domain/tools` 只保存产品级工具契约；不能依赖 app、adapter、fetch 或 provider-specific shape。
 - `domain/research` 只保存信息获取领域契约；不能依赖 fetch、ToolCenter、provider adapter、filesystem 或地下业务模块。
-- `app/research` 负责 ResearchRuntime、source adapter、source preference、search/read trace 和 safe preview；它可以依赖 Node filesystem / fetch-like 注入和只读 Soil Store，但不能写 Soil、RunMemory、Direction Handoff、Fruit 或 Capability Asset。
+- `app/research` 负责 ResearchRuntime、source adapter、source preference、search/read trace 和 safe preview；它可以依赖 Node filesystem / fetch-like 注入和只读 Soil Store，但不能写 Soil、RunMemory、Plan material、Fruit 或 Capability Asset。
 - `kernel/intelligence/agent-turn-runtime.ts` 是模型 + 工具多轮 agent turn 的统一入口；它只能依赖 `IntelligenceChannel`、`ToolExecutionBroker`、领域契约和事件发布接口，不能导入 app `ToolCenter` concrete class 或地下模块。
 - `kernel/intelligence/tool-use-loop.ts` 只能依赖 `IntelligenceChannel` 和 `ToolExecutionBroker` 接口，不能导入 `src/app/tool-center` concrete class；它可以作为 `AgentTurnRuntime` 的低层 helper，但不能成为 rootlet 私有能力。
 - `ToolCenter` 负责注册、查询、执行、权限检查、预算检查和失败归一化；工具不存在、未授权、预算耗尽或 executor 抛错都返回 `status: "failed"`，不把 provider 原始异常向上抛。
-- `allowedTools` 必须来自 agent manifest / runtime policy；rootlet agent 当前通过 `turnPolicy.allowedTools` / `permissions.execute` 获得工具，固定地下核心 agent 默认 `allowModel = false` 且无工具执行权限。`underground-autonomy-core` 是明确例外：它允许模型并只允许 `search` / `read`，用于判断继续探索或请求收束；工具结果不得直接进入 Direction Handoff。
+- `allowedTools` 必须来自 agent manifest / runtime policy；rootlet agent 当前通过 `turnPolicy.allowedTools` / `permissions.execute` 获得工具，固定地下核心 agent 默认 `allowModel = false` 且无工具执行权限。`underground-autonomy-core` 是明确例外：它允许模型并只允许 `search` / `read`，用于判断继续探索或请求收束；工具结果不得直接进入 Plan material。
 - `allowModel = false` 的 agent turn 必须由 `AgentTurnRuntime` 返回明确 disabled / skipped 状态，不能偷偷调用 `IntelligenceChannel`。
 - 默认 ToolCenter 只能把 `search` / `read` 暴露给地下 rootlet prompt；`web_search` / `page_reader` 不得作为地下 prompt 主入口或 rootlet manifest 默认工具名。
 - `web` source 默认不联网；没有 Tavily key 或 fetch 时返回 deterministic `no-provider` / `no_search_provider` 降级，不得为了演示成功访问未知公共搜索 API。
@@ -59,7 +59,7 @@
 - `tool.*` EventLog payload 只记录 call id、tool name、caller agent、duration、safe input/output summary 或 error；不得记录 raw provider response、API key、token、完整 prompt、完整页面正文或 live对象。
 - panel SSE / transcript 可以展示 `tool.requested`、`tool.completed`、`tool.failed` 的安全摘要、tool name、duration 和 tool call refs；不得展示 raw tool output、Tavily raw response、完整页面正文、完整 prompt、API key 或 token。
 - `ResearchTrace` 只能记录 query、source、ref、status、短摘要和调用链；不得保存 raw provider response、完整页面正文、完整 prompt、API key 或 token。
-- rootlet 工具结果只能以 `tool-call:*` 和 `research:*` refs 进入 rootlet output `sourceRefs` / `evidenceRefs`，再进入 CandidatePool 和 Convergence Judge；不得把 tool raw output、Tavily raw response、完整 page preview 或搜索 snippet 直接写入候选、Direction Handoff、Growth Plan、Fruit、Run Memory、Experience Candidate、Capability Asset 或 Soil。
+- rootlet 工具结果只能以 `tool-call:*` 和 `research:*` refs 进入 rootlet output `sourceRefs` / `evidenceRefs`，再进入 CandidatePool 和 Convergence Judge；不得把 tool raw output、Tavily raw response、完整 page preview 或搜索 snippet 直接写入候选、Plan material、Aboveground 执行计划、Fruit、Run Memory、Experience Candidate、Capability Asset 或 Soil。
 - `maxModelRounds` 和 `maxToolRounds` 是单次 agent turn 的工程级 runaway guard；达到上限时调用方走声明的 fallback / failed advice 路径，不能无限继续请求模型或工具，也不能把 guard reached 当作任务完成。
 
 ### 4. Validation & Error Matrix
@@ -96,7 +96,7 @@
 - Base：无 Tavily key 时 `search` 的 web source 返回 `no-provider`，不触发真实网络；docs/packages/github 返回 stub。
 - Base：面板保留 `/api/config/information-sources` 兼容路由，但新的搜索工具表单走 `/api/config/tools` 和 `/api/config/tools/web-search`。
 - Bad：kernel tool loop 直接 import app `ToolCenter`。
-- Bad：把工具 raw output、Tavily raw response、完整页面正文或完整 prompt 直接塞进 Direction Handoff options、panel transcript 或 EventLog payload。
+- Bad：把工具 raw output、Tavily raw response、完整页面正文或完整 prompt 直接塞进 Plan options、panel transcript 或 EventLog payload。
 - Bad：给自治核心新增私有搜索 helper、直接读 ConfigCenter secret，或让它管理 ToolCenter / provider 生命周期。
 - Bad：把 search API key 写入普通 settings 或测试快照。
 

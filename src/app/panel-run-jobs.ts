@@ -1,15 +1,19 @@
 import type { SanitizedInformationAccessConfig, SanitizedModelProviderConfig } from "../domain/config/index.js";
 import { createId, nowIso } from "../kernel/id.js";
 import type { UndergroundAiMode } from "./intelligence-channel-factory.js";
+import type { PanelRunCanvasReadModel } from "./panel-canvas-read-model.js";
 import type { PanelObservationReadModel, PanelRunStatus, PanelRunStreamEvent } from "./panel-run-read-model.js";
 import type { MinimalRuntime } from "./runtime.js";
 import type { UndergroundDemoSummary } from "./underground-demo-summary.js";
 
+export type PanelRunKind = "desktop" | "underground";
+
 export type PanelRunCompletedPayload = {
   readonly config: SanitizedModelProviderConfig;
   readonly informationAccess: SanitizedInformationAccessConfig;
-  readonly summary: UndergroundDemoSummary;
+  readonly summary?: UndergroundDemoSummary;
   readonly observation: PanelObservationReadModel;
+  readonly canvas?: PanelRunCanvasReadModel;
 };
 
 export type PanelRunFailedPayload = {
@@ -26,6 +30,7 @@ export type PanelRunFailedPayload = {
 
 export type PanelRunJob = {
   readonly runId: string;
+  readonly runKind: PanelRunKind;
   readonly goal: string;
   readonly aiMode: UndergroundAiMode;
   readonly createdAt: string;
@@ -47,6 +52,7 @@ export class PanelRunJobStore {
   private readonly jobs = new Map<string, PanelRunJob>();
 
   create(input: {
+    readonly runKind: PanelRunKind;
     readonly goal: string;
     readonly aiMode: UndergroundAiMode;
     readonly config: SanitizedModelProviderConfig;
@@ -55,6 +61,7 @@ export class PanelRunJobStore {
     const now = nowIso();
     const job: PanelRunJob = {
       runId: createId("panel-run"),
+      runKind: input.runKind,
       goal: input.goal,
       aiMode: input.aiMode,
       config: input.config,

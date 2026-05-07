@@ -256,6 +256,7 @@ export function createPanelRunTracking(input: {
 }): PanelRunTrackingReadModel {
   const trace = createPanelRunTrace({ status: input.status, eventEntries: input.eventEntries });
   const rootletsByKind = createRootletTracking(input);
+  const observedCandidateCounts = countCandidateViews(input.observation?.underground.candidatePool.candidates ?? []);
   return {
     run: {
       status: input.status,
@@ -291,7 +292,7 @@ export function createPanelRunTracking(input: {
     modelTotals: input.summary?.ai.eventCounts ?? countModelEvents(input.eventEntries),
     toolTotals: input.summary?.tools.eventCounts ?? countToolEvents(input.eventEntries),
     candidates: {
-      total: input.summary?.underground.candidateCounts ?? zeroCandidateCounts(),
+      total: input.summary?.underground.candidateCounts ?? observedCandidateCounts,
       byKind: ROOTLET_CLUSTER_KINDS.reduce((result, kind) => {
         result[kind] = rootletsByKind[kind].candidates;
         return result;
@@ -314,17 +315,35 @@ export function createPanelRunTracking(input: {
     },
     agentRunTree: input.observation?.underground.agentRunTree,
     convergence: input.summary?.underground.convergence,
-    package:
-      input.summary === undefined
-        ? undefined
-        : {
-            id: input.summary.directionPackage.id,
-            version: input.summary.directionPackage.version,
-            status: input.summary.directionPackage.status,
-            validationPassed: input.summary.directionPackage.validation.passed,
-            validationErrorCount: input.summary.directionPackage.validation.errors.length,
-            validationWarningCount: input.summary.directionPackage.validation.warnings.length,
-          },
+    package: packageTrackingFrom(input),
+  };
+}
+
+function packageTrackingFrom(input: {
+  readonly summary?: UndergroundDemoSummary;
+  readonly observation?: PanelObservationReadModel;
+}): PanelRunTrackingReadModel["package"] {
+  if (input.summary !== undefined) {
+    return {
+      id: input.summary.directionPackage.id,
+      version: input.summary.directionPackage.version,
+      status: input.summary.directionPackage.status,
+      validationPassed: input.summary.directionPackage.validation.passed,
+      validationErrorCount: input.summary.directionPackage.validation.errors.length,
+      validationWarningCount: input.summary.directionPackage.validation.warnings.length,
+    };
+  }
+  const handoff = input.observation?.handoff;
+  if (handoff === undefined || handoff.packageId.length === 0) {
+    return undefined;
+  }
+  return {
+    id: handoff.packageId,
+    version: handoff.version,
+    status: handoff.directionStatus,
+    validationPassed: handoff.validationPassed,
+    validationErrorCount: 0,
+    validationWarningCount: 0,
   };
 }
 
@@ -390,8 +409,8 @@ export function createPanelRunStreamEvents(input: {
     runId: input.runId,
     type: "run.started",
     createdAt: input.createdAt,
-    agentLabel: "地下组织",
-    summary: "目标已提交，地下组织准备开始工作。",
+    agentLabel: "AgentArbor",
+    summary: "任务已提交，Desktop Shell 正在形成 Task Soil 并启动运行时。",
     status: input.status === "pending" ? "pending" : "running",
     sourceRefs: [],
     modelCallRefs: [],
@@ -415,7 +434,7 @@ export function createPanelRunStreamEvents(input: {
       runId: input.runId,
       type: "final.result",
       createdAt: input.updatedAt,
-      agentLabel: "地下组织",
+      agentLabel: "AgentArbor",
       summary: finalSummary,
       status: "completed",
       sourceRefs: finalSourceRefs(input),
@@ -430,8 +449,8 @@ export function createPanelRunStreamEvents(input: {
       runId: input.runId,
       type: "run.failed",
       createdAt: input.updatedAt,
-      agentLabel: "地下组织",
-      summary: input.error?.message ?? "地下运行失败。",
+      agentLabel: "AgentArbor",
+      summary: input.error?.message ?? "运行失败。",
       status: "failed",
       sourceRefs: [],
       modelCallRefs: [],
@@ -578,7 +597,7 @@ function agentFabricLabel(type: PanelRunStreamEventType): string {
     case "agent.parent_synthesis.completed":
       return "父层综合";
     default:
-      return "地下组织";
+      return "方向智能";
   }
 }
 
@@ -606,7 +625,7 @@ function agentFabricSummary(type: PanelRunStreamEventType, payload: Readonly<Rec
     const synthesis = asRecord(payload.parentSynthesis);
     return `父层综合完成：${stringOrUndefined(synthesis.decisionSummary) ?? "child material synthesized"}。`;
   }
-  return "地下组织事件已更新。";
+  return "方向智能事件已更新。";
 }
 
 function sourceRefsForView(view: RunObservationEventView | undefined): readonly string[] {
@@ -667,7 +686,7 @@ function agentNoteForEvent(
 ): { readonly agentLabel: string; readonly summary: string; readonly status: PanelRunStreamEvent["status"] } | undefined {
   switch (entry.type) {
     case "goal.received":
-      return { agentLabel: "用户", summary: "目标已进入地下组织，原文不会在调试区外展开。", status: "completed" };
+      return { agentLabel: "用户", summary: "目标已进入 Underground Cognitive Runtime，原文不会在调试区外展开。", status: "completed" };
     case "underground.exploration_planned":
       return { agentLabel: "地下认知运行时", summary: "目标画像和探索计划已形成。", status: "completed" };
     case "rootlet_cluster.started":
@@ -693,9 +712,9 @@ function agentNoteForEvent(
     case "direction_handoff.revision_requested":
       return { agentLabel: "Plan Steward", summary: "Plan Package 需要修订或补充。", status: "running" };
     case "user_approval.requested":
-      return { agentLabel: "用户确认", summary: "地下组织需要用户澄清后继续。", status: "running" };
+      return { agentLabel: "用户确认", summary: "方向智能阶段需要用户澄清后继续。", status: "running" };
     case "user_approval.received":
-      return { agentLabel: "用户确认", summary: "用户澄清已收到，地下组织继续推进。", status: "completed" };
+      return { agentLabel: "用户确认", summary: "用户澄清已收到，方向智能阶段继续推进。", status: "completed" };
     default:
       return undefined;
   }
@@ -742,10 +761,16 @@ function finalResultSummary(input: {
 }): string {
   const summary = fullSummaryOrUndefined(input.summary);
   if (summary !== undefined) {
-    return `地下运行完成，Plan Package ${summary.directionPackage.id} v${summary.directionPackage.version}，状态 ${summary.directionPackage.status}。`;
+    return `地下兼容运行完成，Plan Package ${summary.directionPackage.id} v${summary.directionPackage.version}，状态 ${summary.directionPackage.status}。`;
+  }
+  if (input.observation?.aboveground.status === "completed") {
+    const handoff = input.observation.handoff;
+    return handoff.packageId.length === 0
+      ? "Desktop Shell 运行完成，Plan 已交给 Aboveground Execution Runtime 并产出结果。"
+      : `Desktop Shell 运行完成，Plan Package ${handoff.packageId} v${handoff.version} 已交给 Aboveground Execution Runtime。`;
   }
   const stage = input.observation?.currentStage;
-  return stage === undefined ? "地下运行完成。" : `地下运行完成，当前阶段 ${stage}。`;
+  return stage === undefined ? "运行完成。" : `运行完成，当前阶段 ${stage}。`;
 }
 
 function finalSourceRefs(input: {
@@ -1271,13 +1296,13 @@ function modelStatus(
 
 function waitingPointFor(status: PanelRunStatus, lastEventType: ArborMessageType | undefined): string {
   if (status === "pending") {
-    return "等待后台地下运行启动。";
+    return "等待后台运行启动。";
   }
   if (status === "failed") {
     return "运行失败，查看错误摘要。";
   }
   if (status === "completed") {
-    return "地下运行完成，Plan Package 已形成或进入地下终态。";
+    return "运行完成，Plan、Aboveground 执行结果或终态摘要已形成。";
   }
   switch (lastEventType) {
     case undefined:
@@ -1312,13 +1337,13 @@ function waitingPointFor(status: PanelRunStatus, lastEventType: ArborMessageType
     case "candidate_pool.updated":
       return "候选池已更新，等待 Autonomy Core 自治评审或 Convergence Judge 收束。";
     case "autonomy_review.completed":
-      return "自治评审已完成，等待继续探索、请求收束或进入地下终态。";
+      return "自治评审已完成，等待继续探索、请求收束或进入方向智能终态。";
     case "convergence_review.requested":
       return "自治核心已请求收束，等待 Convergence Judge 生成收束报告。";
     case "convergence_review.completed":
       return "收束评审已完成，等待 Plan Steward 组装 Plan Package。";
     default:
-      return "地下运行正在推进。";
+      return "运行正在推进。";
   }
 }
 

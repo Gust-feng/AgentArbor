@@ -1,29 +1,29 @@
 # 地下辐射生长
 
-本文件记录 V0.3 已出生的 Underground Center 最小辐射生长运行时契约，并补充 V0.5 用户澄清升级、澄清回答后恢复和当前 AI 驱动地下集群主线契约。确定性内存 runtime 是状态、验证、审计和 fallback 基础；地下目标成形、探索、自治、收束和交接叙事必须逐步转向经 `AgentTurnRuntime` / `IntelligenceChannel` 驱动的分层 agent 协作。
+本文件记录已出生的 Underground Cognitive Runtime 辐射生长运行时契约，并补充用户澄清升级、澄清回答后恢复和当前 AI 驱动主线契约。确定性内存 runtime 是状态、验证、审计和 fallback 基础；地下目标成形、探索、自治、收束和 Plan 叙事必须经 `AgentTurnRuntime` / `IntelligenceChannel` 驱动的分层 agent 协作逐步承接。
 
 ## Scope / Trigger
 
-- Trigger：修改 `src/domain/underground/**`、`src/app/minimal-underground.ts`、`src/app/agents/underground-analyzer.ts` 或 DirectionHandoff source candidate 选择逻辑。
-- Scope：最小 Underground Center radial growth、rootlet cluster、RootletOutput、CandidatePool、ConvergenceReport、用户澄清升级/恢复和 DirectionHandoffPackage 输入守卫。
+- Trigger：修改 `src/domain/underground/**`、`src/app/minimal-underground.ts`、`src/app/agents/underground-analyzer.ts` 或 Plan source candidate 选择逻辑。
+- Scope：最小 Underground Cognitive Runtime radial growth、rootlet cluster、RootletOutput、CandidatePool、ConvergenceReport、用户澄清升级/恢复和 Plan Package 输入守卫。
 
 ## Development Priority / Phase Boundary
 
-- 当前下一阶段优先把 Underground Center 做成独立闭环：用户输入需求 -> 地下探索 / 反驳 / 收束 -> 必要用户澄清与恢复 -> 产出 approved `.agentarbor` Direction Handoff Package。
+- 当前优先级是把 Desktop Shell 单入口闭环跑稳：用户任务 -> Task Soil -> Underground 探索 / 反驳 / 收束 -> 必要用户澄清或停止 -> approved Plan Package -> Aboveground 最小执行。
 - 地下单环的终态只允许 `approved_package_created`、`awaiting_user`、`stopped`：前者表示 approved package 已创建并可被后续地上环接管；`awaiting_user` 表示存在阻塞澄清请求；`stopped` 表示没有足够候选或权限继续。
-- Nutrient Request、Nutrient Patch 和 Growth Plan Revision 属于后续地下-地上跨环节协同，不是当前地下单环的主线；在地下单环和地上单环稳定前，不以地上回调地下作为优先实现路径。
+- Nutrient Request、Nutrient Patch 和 Plan Revision 属于后续 Underground / Aboveground 跨环节协同，不是当前 Desktop Shell 最小闭环的主线。
 
 ## Scenario: 地下独立闭环 2A-2D
 
 ### 1. Scope / Trigger
 
-- Trigger：修改 `GoalIntentProfile`、Intent Core、rootlet 动态选择、CandidateComparison、Evidence Ledger、地下-only session 或 Direction Handoff 字段派生。
-- Scope：覆盖用户需求进入 Underground Center 后产出三类终态之一，以及 AI rootlet / autonomy / convergence 主线与确定性边界守卫的交接；不实现地上回调、Nutrient Request、Verification/Governance 执行链路、UI、HTTP、SSE、WebSocket、数据库、MCP、A2A 或 AG-UI adapter。
+- Trigger：修改 `GoalIntentProfile`、Intent Core、rootlet 动态选择、CandidateComparison、Evidence Ledger、地下-only session 或 Plan material 字段派生。
+- Scope：覆盖用户任务进入 Underground Cognitive Runtime 后产出三类终态之一，以及 AI rootlet / autonomy / convergence 主线与确定性边界守卫的交接；不实现地上回调、Nutrient Request、完整 Verification/Governance 执行链路、UI、HTTP、SSE、WebSocket、数据库、MCP、A2A 或 AG-UI adapter。
 
 ### 2. Signatures
 
 - `GoalIntentProfile`：包含 `goalId`、`rawGoal`、`goalStatement`、`keyConcepts`、`domainConcepts`、`nonGoals`、`acceptanceCriteria`、`assumptions`、`riskHints`、`constraintHints`、`unknowns`、`createdAt`。
-- `createGoalIntentProfile({ goalId, rawGoal, constraints, createdAt? })`：当前确定性 GoalIntentProfile fallback / baseline 解析器；AI 目标画像候选必须通过统一智能通道进入父层收束，不能由 provider response 直接写正式 handoff。
+- `createGoalIntentProfile({ goalId, rawGoal, constraints, createdAt? })`：当前确定性 GoalIntentProfile fallback / baseline 解析器；AI 目标画像候选必须通过统一智能通道进入父层收束，不能由 provider response 直接写正式 Plan。
 - `selectRootletClusterKindsForGoalIntent(profile)`：根据目标画像选择 `option/risk/asset_fit/evidence/constraint/counterfactual`，简单目标不得全量启动 rootlet。
 - `CandidateComparison`：记录 candidate 的 `goalMatch`、`goalMatchBasis`、`evidenceSupport`、`evidenceSupportBasis`、`evidenceGaps`、`constraintImpact`、`constraintImpactBasis`、`hardConstraintConflictRefs`、`riskLevel`、`riskCoverage`、`unknowns`、`whyNot`、`conclusion` 和 `evidenceRefs`。
 - `compareCandidatesForGoal(...)`：基于目标画像、候选和 rootlet output 生成比较、收束决策和 evidence entries；不得按 `clusterId` 硬编码 accepted / merged / rejected。
@@ -38,9 +38,9 @@
 - `runUndergroundDirectionSession(goal, options?)`：地下-only 入口，返回 `approved_package_created`、`awaiting_user` 或 `stopped`，并生成 JSON-safe observation snapshot。`options` 可包含 `constraints`、显式 `packageStore` 或显式 `outputDirectory`；不传 store / output directory 时只能使用 in-memory package store。
 - `recoverUndergroundDirectionSession(awaitingSession, clarificationResponse?)`：地下-only 恢复入口，接收 awaiting-user session 与可选澄清回答；未传回答时创建 deterministic demo/test response，保存同一 direction 的 approved v2 package。
 - `createUndergroundDemoSummary(result, recovery?)`：地下-only demo 的纯投影函数，输入 `UndergroundDirectionSessionResult` 和可选恢复结果，输出 JSON-safe summary；不得读取 CLI、写文件或访问 store。
-- `pnpm demo:underground -- "<goal>"`：地下-only CLI 命令，只运行 Underground Center 到 Direction Handoff Package 边界，不进入 Aboveground。
+- `pnpm demo:underground -- "<goal>"`：地下-only CLI 命令，只运行 Underground Cognitive Runtime 到 Plan Package 边界，不进入 Aboveground。
 - `pnpm demo:underground -- --auto-answer "<goal>"`：仅当地下 session 停在 `awaiting_user` 时自动发布 deterministic 澄清回答并恢复为 approved v2；`approved` / `stopped` 不得伪造恢复。
-- `pnpm demo:underground -- --out <dir> "<goal>"`：只在调用方显式提供 `<dir>` 时写出 Direction Handoff Package；不得默认选择 repo-root `.agentarbor/`。
+- `pnpm demo:underground -- --out <dir> "<goal>"`：只在调用方显式提供 `<dir>` 时写出 Plan Package 兼容文件；不得默认选择 repo-root `.agentarbor/`。
 - `pnpm demo:underground -- --ai fake "<goal>"`：显式启用 deterministic fake provider，经 `IntelligenceChannel` 触发 `model.requested -> model.completed`，模型输出只能被 rootlet invocation 包装为 `RootletOutput` 后进入 CandidatePool。
 - `pnpm demo:underground -- --ai openai-compatible "<goal>"`：显式启用 OpenAI-compatible Chat Completions provider；配置缺失时必须在 app 组合根失败，不能发起网络调用，不能泄漏 API key / token。
 - `requestUndergroundRootletCandidateAdvice(...)`：app 层地下 AI rootlet 调用边界；接收 `GoalIntentProfile`、rootlet cluster、invocation、constraints 和注入的 `AgentTurnRuntime` / turn policy，按 rootlet kind 构造 prompt / output contract，解析顶层 `candidates` 数组，并把合法候选转换为 `RootletOutput`。
@@ -50,7 +50,7 @@
 
 - Intent Core 的长期主线是 AI 驱动目标成形：模型输出作为目标画像候选，经父层 agent 收束和确定性守卫后形成 `GoalIntentProfile`。当前 `createGoalIntentProfile` 是 fallback / baseline / 禁用边界路径；不得把它重新提升为地下语义判断的唯一主线。
 - Rootlet 选择由 `GoalIntentProfile` 驱动；简单目标默认只启动 `option`，风险/资产/证据/约束/反驳明显时才启动对应 cluster。
-- 单个 `RootletOutput` 只能进入 `CandidatePool`，不能直接进入 Direction Handoff Package。
+- 单个 `RootletOutput` 只能进入 `CandidatePool`，不能直接进入 Plan Package。
 - 单个 rootlet invocation 可以产出多个 `RootletOutput`，但数量必须受该 rootlet cluster 的 `budget.maxCandidateOutputs` 限制；公共 EventLog 仍只记录一次 `exploration_candidate.produced` 阶段事件，payload 可携带多个输出。
 - 当地下 session 显式注入 `IntelligenceChannel` 时，所有被动态选中的 rootlet kind 都可以各自最多发起一次 AI 候选建议调用；prompt 必须包含 raw goal、`GoalIntentProfile`、ConstraintRef/约束摘要、rootlet kind、cluster budget、exit criteria 和“rootlet 只提供下层候选、不绕过父层收束”的约束。
 - rootlet AI 响应必须采用顶层 `candidates` 数组；`option`、`risk`、`asset_fit`、`evidence`、`constraint` 和 `counterfactual` 的数组项字段各自独立。非法项由 app parser 丢弃，合法项按 budget 截断，再包装为 `RootletOutput` 后进入 CandidatePool。
@@ -65,11 +65,11 @@
 - Convergence Judge 的 `act()` 不得重新做目标理解、候选排序、nextAction 选择或方向综合；它只能消费 `reason()` 形成的 judgment，补齐 evidence ledger、comparison、report 和 candidate pool 状态。若 `reason()` 没有 judgment，`act()` 必须失败，而不是调用确定性收束伪造 approved。
 - Convergence Judge 的 `guard()` 只能校验 hard constraint、approved report 是否来自 AI、fallback confidence、空 summary、空 decisions、decision evidence refs、AI 文本脱敏和 report/package 结构；不得在 guard 中重排候选、推断用户目标、决定是否继续探索或替换模型 nextAction。
 - Convergence Judgment parser 必须保证输出结构与状态一致：每个 candidate 必须被恰好裁决一次；`request_user_clarification` 必须有 blocking `unknown` 或能生成 open question；`approve_handoff` 必须有 accepted / merged handoff candidate；`stop` / `continue_exploration` 不得同时携带 accepted / merged handoff candidate。
-- Convergence AI 推荐的 `recommendedOptionId` 只有同时存在于 CandidatePool 且进入 `handoffCandidateRefs` 时才能保留；不存在、rejected、unknown、risk、counterfactual 或其他非 handoff candidate 的推荐必须被忽略，且不得进入 Direction Handoff `recommendedOptionId`、`retainedOptionId` 或 `sourceCandidateRefs`。
-- Convergence AI 可以 enrich 与已有 candidate 绑定的 comparison / report / handoff 说明字段；`overallDirectionSummary` 不得替代 `DirectionHandoff.clarifiedGoal`，正式 clarified goal 必须继续来自经收束的 GoalIntentProfile 或 raw user goal。
-- Convergence AI 内容进入 `candidateComparisons`、`convergenceReport`、EventLog、Observation Snapshot、demo summary、`reasoningTrace` 或 Direction Handoff 视图前，所有 AI 可见文本必须做 secret/token、raw prompt、role marker、raw provider response、hidden reasoning 和 chain-of-thought 脱敏，并按展示边界裁剪长度。
+- Convergence AI 推荐的 `recommendedOptionId` 只有同时存在于 CandidatePool 且进入 `handoffCandidateRefs` 时才能保留；不存在、rejected、unknown、risk、counterfactual 或其他非 handoff candidate 的推荐必须被忽略，且不得进入 Plan material 的 `recommendedOptionId`、`retainedOptionId` 或 `sourceCandidateRefs`。
+- Convergence AI 可以 enrich 与已有 candidate 绑定的 comparison / report / Plan 说明字段；`overallDirectionSummary` 不得替代 Plan material 的 `clarifiedGoal`，正式 clarified goal 必须继续来自经收束的 GoalIntentProfile 或 raw user goal。
+- Convergence AI 内容进入 `candidateComparisons`、`convergenceReport`、EventLog、Observation Snapshot、demo summary、`reasoningTrace` 或 Plan 视图前，所有 AI 可见文本必须做 secret/token、raw prompt、role marker、raw provider response、hidden reasoning 和 chain-of-thought 脱敏，并按展示边界裁剪长度。
 - 自治主线启用时，`candidate_pool.updated` 不再直接触发最终收束；必须先由固定 `underground-autonomy-core` 经 `AgentTurnRuntime` 产生 `UndergroundAutonomyDecision`，发布 `autonomy_review.completed`，再根据 action 决定继续探索、请求收束、请求用户澄清或停止。
-- `UndergroundAutonomyDecision` 只能决定路由：`continue_exploration`、`request_convergence`、`request_user_clarification` 或 `stop`。它不能批准 Direction Handoff，不能直接写 Growth Plan / Fruit / Run Memory / Experience Candidate / Capability Asset / Soil，也不能绕过 CandidatePool、Convergence Judge 和 Handoff Steward validation。
+- `UndergroundAutonomyDecision` 只能决定路由：`continue_exploration`、`request_convergence`、`request_user_clarification` 或 `stop`。它不能批准 Plan，不能直接写 Aboveground 执行计划 / Fruit / Run Memory / Experience Candidate / Capability Asset / Soil，也不能绕过 CandidatePool、Convergence Judge 和 Handoff Steward validation。
 - `underground-autonomy-core` 是固定地下核心 agent 的明确 AI 例外：manifest / turn policy 必须 `allowModel=true`，并只允许统一 `search` / `read` 工具；其他固定核心 agent 默认仍禁用模型和工具。自治核心的工具结果只作为 tool message 回填给模型或作为 safe refs 进入自治决策，不得直接进入 handoff 正式材料。
 - 自治主线无 `AgentTurnRuntime`、模型失败、输出 contract 不合法、非法 action、非法 rootlet kind、未知 candidate ref、cycle guard 触发或敏感/超长文本无法安全投影时，必须形成 `status=failed` 或 stopped 的 `UndergroundAutonomyDecision`，再由 Convergence Judge 生成可审计 terminal convergence report；不得伪造成功自治或 approved package。
 - `continue_exploration` 只能出生本轮运行期临时 rootlet invocation：AI 可给出 objective、information needs、source hints、expected evidence 和 specialist label，但必须映射到既有 `RootletClusterKind`，并重新发布带新 `explorationCycleId` / `cycleIndex` 的 `rootlet_cluster.started`。动态 rootlet output 仍必须先进入 CandidatePool。
@@ -83,11 +83,11 @@
 - `recoverUndergroundDirectionSession` 必须复用 awaiting session 的 runtime 和 package store，保存 v1 awaiting_user 与 v2 approved，并让 `listVersions(directionId)` 返回 `[1, 2]`。
 - deterministic auto-answer 只属于地下-only demo/test 边界，不代表真实用户交互设计，也不得进入 Soil、RunMemory、Experience Candidate 或 Capability Asset。
 - 恢复成功后的 demo summary 以 approved v2 作为当前 `directionPackage`，并暴露 `recoveredPackage`、`lineage`、`versions` 和可选 `writtenPackagePath`；无恢复时 `recoveredPackage` 必须为空。
-- Direction Handoff 的 `clarifiedGoal`、`nonGoals`、`assumptions`、`risks`、`options` 和 `missingInformation` 必须由 `GoalIntentProfile + CandidatePool + ConvergenceReport + HandoffSteward.reason()` 形成的 handoff material 派生，不得回退到固定 minimal 文案作为 approved package 的叙事主线。
+- Plan material 的 `clarifiedGoal`、`nonGoals`、`assumptions`、`risks`、`options` 和 `missingInformation` 必须由 `GoalIntentProfile + CandidatePool + ConvergenceReport + HandoffSteward.reason()` 形成，不得回退到固定 minimal 文案作为 approved package 的叙事主线。
 - Handoff Steward 的长期主线是 AI 驱动交接叙事：`HandoffStewardAgent.reason()` 在 Convergence Judge 已形成 report 后通过注入的 `AgentTurnRuntime` 请求 `underground.handoff_narrative.v1`，产出结构化 handoff material、`source`、`confidence` 和安全 `reasoningTrace`；`act()` 只能消费该 material，调用现有 direction material / package builder / store 保存，不得重新做方向叙事、目标理解、候选取舍或模型调用。
 - Handoff Steward 无 `AgentTurnRuntime`、模型失败或 handoff parser 拒绝时，只能产生低置信 `deterministic_fallback` handoff material，并落到 `stopped` / `awaiting_user` 非 approved package 边界；不得把 `createMinimalDirectionMaterial(...)` 的模板输出提升为 approved handoff。
 - `domainConcepts` 必须参与 rootlet 选择、候选相关性判断和 handoff 字段派生；目标相关性不能只靠在 summary 前拼接原始目标文本通过，候选自身必须保留至少一个目标关键概念或领域概念。
-- Direction Handoff 的 `options` 必须保留所有 option 候选方向的取舍记录，不得只写推荐方向；`decisionRecord` 必须记录 retained / merged / rejected / userDecisionRequired / abovegroundReference；`riskRegister` 必须保留风险候选与淘汰候选的来源归因。
+- Plan material 的 `options` 必须保留所有 option 候选方向的取舍记录，不得只写推荐方向；`decisionRecord` 必须记录 retained / merged / rejected / userDecisionRequired / abovegroundReference；`riskRegister` 必须保留风险候选与淘汰候选的来源归因。
 - 地下约束交接链当前只在 `direction_handoff` 阶段执行阻断校验；其他 6 个 gate 作为 `candidateConstraintRefs` 可追踪交接，不实现后续层执行。
 - Evidence Ledger 是运行期证据索引，不是 Soil、RunMemory 或长期资产库；它必须由 EventLog / 地下运行结果派生并随 report 暴露。每个 `RootletOutput` 至少引用一条 ledger entry；`UndergroundConvergenceReport.evidenceLedgerRef` 必须指向同一运行的 ledger；user clarification 和 stopped outcome 必须留下对应 evidence entry。
 - 地下-only demo summary 是可读投影，不是 EventLog、RunMemory、Soil 或长期资产；它不得成为新的事实源。
@@ -104,7 +104,7 @@
 | awaiting-user session 收到澄清回答 | 发布 `user_approval.received -> direction_handoff.revision_requested -> convergence_review.completed -> direction_handoff.completed`，保存 approved v2 |
 | non-blocking unknown 且无 handoff candidates | 收束为 `stopped`，不得生成无问题的 awaiting_user |
 | accepted / merged candidate 存在且无 blocking unknown | 收束为 `approved`，地下-only 终态为 `approved_package_created` |
-| Direction Handoff source candidates 包含 unknown / rejected / candidate | package validation 失败 |
+| Plan source candidates 包含 unknown / rejected / candidate | package validation 失败 |
 | package 中 hard constraint 被 nonGoal / assumption / option / Path Bias 文案弱化 | package validation 失败，错误码 `HARD_CONSTRAINT_WEAKENED_IN_HANDOFF_TEXT` |
 | 地下-only demo 被调用 | EventLog 正常路径停在 `direction_handoff.completed`，不得包含 `growth_plan.completed` |
 | 地下-only demo 带 `--auto-answer` 且 v1 为 `awaiting_user` | 终态映射回 `approved_package_created`，package version 为 2，Aboveground 仍为 `not_started` |
@@ -151,8 +151,8 @@
 - Convergence Judge focused tests 必须证明 `reason()` 使用 fake `AgentTurnRuntime` 触发 `purpose = "convergence_judgment"` / `contractId = "underground.convergence_judgment.v1"`，`act()` 只落地 judgment，`guard()` 不做语义判断。
 - Convergence Judgment parser tests 必须覆盖全部 candidate 覆盖、重复/非法 candidate、非法 `nextAction`、澄清无 unknown、批准无 handoff candidate、停止/继续仍带 handoff candidate、`clarificationReason` 传递和 `reasoningTrace` 脱敏。
 - no-AI convergence integration 必须断言 `source = deterministic_fallback`、低置信、`terminalStatus = "stopped"` 或配置边界，且不会生成 approved package。
-- Evidence Ledger 覆盖 goal intent、rootlet output、candidate comparison、convergence decision、user clarification / stop reason，并保证 rootlet output、comparison、decision、report 和 Direction Handoff 之间的 evidence refs 可串联。
-- Direction Handoff 字段从 goal profile、候选和收束报告派生，且不回退固定 minimal 文案。
+- Evidence Ledger 覆盖 goal intent、rootlet output、candidate comparison、convergence decision、user clarification / stop reason，并保证 rootlet output、comparison、decision、report 和 Plan material 之间的 evidence refs 可串联。
+- Plan material 字段从 goal profile、候选和收束报告派生，且不回退固定 minimal 文案。
 - blocking unknown / stopped / approved 三类地下-only 终态均有测试。
 - awaiting_user 通过 `recoverUndergroundDirectionSession` 或 `--auto-answer` 恢复为 approved v2，保持同一 direction id，store versions 为 `[1, 2]`。
 - 恢复 EventLog 包含 `user_approval.received`、`direction_handoff.revision_requested`、第二次 `convergence_review.completed` 和最终 `direction_handoff.completed`。
@@ -160,7 +160,7 @@
 - `runUndergroundDirectionSession` 覆盖 injected package store、显式 `outputDirectory` round-trip 和未传 `--out` 不写 repo-root `.agentarbor/`。
 - 默认 demo 和地下-only session 都不写 repo-root `.agentarbor/`。
 - `pnpm demo:underground` 可运行默认目标和自定义目标；默认 happy path 必须走 fake AI，经 `AgentTurnRuntime` 发布模型事件，并停在地下-only 边界。
-- `pnpm demo:underground -- --ai fake "<goal>"` 覆盖模型事件、按 rootlet kind 的 AI summary、候选层接入和 Direction Handoff 边界；复杂目标必须覆盖 6 种 rootlet kind。
+- `pnpm demo:underground -- --ai fake "<goal>"` 覆盖模型事件、按 rootlet kind 的 AI summary、候选层接入和 Plan Package 边界；复杂目标必须覆盖 6 种 rootlet kind。
 - rootlet AI 工具循环覆盖统一 `search` / `read` 成功、no-provider / stub、未授权和 max rounds，且 rootlet output refs 能回到 tool call / research refs。
 - 至少一个非 rootlet 地下核心 agent 通过统一 turn policy 证明模型 / 工具不可用时不会私自调用。
 - 自治主线覆盖：`aiMode=none` 或缺少 `AgentTurnRuntime` 时 stopped/disabled 且不得 approved；`continue_exploration` 产生第二个 cycle；`request_convergence` 后才触发 Convergence Judge / Handoff；同 cycle 去重不同 cycle 不误删；非法 action、非法 rootlet kind、未知 candidate ref、超长文本和 secret/token 脱敏/拒绝。
@@ -206,7 +206,7 @@ Rootlet 是否启动和候选如何收束都必须从目标画像和比较结果
 - 调度器必须先注册地下 agent manifests，再按 `GoalIntentProfile` 和动态 rootlet 选择结果启动 rootlet agent invocations。
 - rootlet output 进入正式 candidate pool 前，必须能追溯到 completed `rootlet_agent` invocation，且 `output.producedByAgentId === invocation.agentId`、`invocation.outputRefs` 包含 `output.outputId`。
 - 地下 agent 只能通过 `AgentTurnRuntime / IntelligenceChannel` 获取模型能力；所有 rootlet kind 的 AI output 都只有被 Rootlet Explorer 包装成 `RootletOutput` 后，才能进入 candidate pool。
-- Convergence Judge 与 Handoff Steward 是上层 agent 收束与交接职责 owner，可以使用 AI 进行语义裁决和叙事组织；确定性守门只负责 candidate pool、convergence report、Direction Handoff Package validation、hard constraint、权限和谱系边界，模型输出不能绕过这些边界。
+- Convergence Judge 与 Handoff Steward 是上层 agent 收束与 Plan 叙事职责 owner，可以使用 AI 进行语义裁决和叙事组织；确定性守门只负责 candidate pool、convergence report、Plan Package validation、hard constraint、权限和谱系边界，模型输出不能绕过这些边界。
 - 不新增事件类型时，地下运行必须暴露安全的 `undergroundOrchestratorRun` / manager trace，证明 plan、rootlet、candidate、autonomy、convergence 和 handoff 均经 orchestrator route 推进；旧 `agentCluster` payload 只能作为迁移兼容投影，不再是唯一验收证据。
 
 ### 4. Cognitive Runtime Unitization Contract
@@ -216,7 +216,7 @@ Rootlet 是否启动和候选如何收束都必须从目标画像和比较结果
 - `UndergroundAgentOrchestrator` 只负责 cognitive manager 路由、workspace/mailbox/context 注入、rootlet 动态实例化、run trace、processed message / phase guard、max step / max autonomy cycle hard guard 和终态汇总。
 - Orchestrator 不得承载 Intent Core、Growth Governor、Rootlet Explorer、Candidate Collector、Autonomy Reviewer、Convergence Judge 或 Handoff Steward 的语义阶段逻辑；目标理解、候选聚合、继续探索、候选裁决和交接叙事必须落在对应 agent 的 `reason()`。
 - `MessageDrivenUndergroundDispatcher` 只能作为兼容 wrapper 消费 `goal.received` 并委托 `UndergroundAgentOrchestrator`；不得重新积累地下业务阶段 handler，也不得恢复旧 `UndergroundAgentRunner`。
-- `WorkspaceView` / `Mailbox` 是单次 run 内 agent 协作介质，不能替代 EventLog、DirectionHandoffPackageStore、Observation Snapshot 或 Direction Handoff Package 的事实源；关键产物仍必须由对应 agent action 和 guard 后写入。
+- `WorkspaceView` / `Mailbox` 是单次 run 内 agent 协作介质，不能替代 EventLog、Plan Package Store 兼容实现、Observation Snapshot 或 Plan Package 的事实源；关键产物仍必须由对应 agent action 和 guard 后写入。
 - Rootlet Explorer 可以读取已经完成的 sibling rootlet summaries 作为反驳、补充和交叉材料输入，但这些材料仍只能作为新的 `RootletOutput` 进入 CandidatePool，不能绕过 Candidate Collector、Convergence Judge 或 Handoff Steward。
 - `HandoffStewardAgent` 必须拥有自己的 handoff action 生命周期；其他 agent 不得预创建、改写或完成 Handoff Steward 的 package 输出。
 
@@ -266,7 +266,7 @@ const rootletOutput = createRootletOutputForInvocation({ invocation, ... });
 createMinimalCandidatePool({ goalId, rootletOutputs: [rootletOutput], agentInvocations: [completedInvocation] });
 ```
 
-正式候选池只接受能回溯到 agent invocation 的 rootlet output；这保证地下组织是调度出来的，而不是 session helper 拼出来的。
+正式候选池只接受能回溯到 agent invocation 的 rootlet output；这保证 Underground Cognitive Runtime 的方向智能是调度出来的，而不是 session helper 拼出来的。
 
 ## Scenario: ADR-0021 Cognitive Runtime / AgentLoop / Workspace / Mailbox / Orchestrator 迁移
 
@@ -294,7 +294,7 @@ createMinimalCandidatePool({ goalId, rootletOutputs: [rootletOutput], agentInvoc
 - `Mailbox` 与 `WorkspaceView` 返回值必须是防御性快照；调用方不能通过嵌套对象 mutation 改写队列或工作空间内部状态。
 - 所有地下核心 agent 模型请求必须沿用 orchestrator / session trace id，让 `model.requested -> model.completed/failed` 能回到同一运行；trace 错配是运行观测回归，不允许通过测试。
 - 确定性 guard 只能表达 accepted / fallback / rejected、违规和 fallback 来源；不得在 guard 中编码目标理解、候选排序、工具选择、是否继续探索或方向综合。
-- rootlet / subagent / tool / model 输出只能作为未收束材料进入 CandidatePool、Convergence Judge 和 Handoff Steward validation；不得绕过父层收束进入 Direction Handoff Package。
+- rootlet / subagent / tool / model 输出只能作为未收束材料进入 CandidatePool、Convergence Judge 和 Handoff Steward validation；不得绕过父层收束进入 Plan Package。
 
 ### 4. Tests Required
 
@@ -324,8 +324,8 @@ createMinimalCandidatePool({ goalId, rootletOutputs: [rootletOutput], agentInvoc
 ### 3. Contracts
 
 - 固定核心 agent 可以作为第一批内置 spec，但动态 rootlet / child agent 必须由父层 `DelegationDecision` 产生运行记录，不能靠临时类名或隐式数组表达。
-- child/rootlet 输出是局部材料；`.agentarbor` 只能消费 `ParentSynthesisResult` 后进入 `ConvergenceReport` / `HandoffSteward` 的父层收束结果。
-- `ChildAgentRun.outputRefs` 不得作为 handoff input refs 直接进入 Direction Handoff。候选可以保留 rootlet output refs 作为证据来源，但正式 handoff source 必须是收束后的 candidate / convergence / handoff material。
+- child/rootlet 输出是局部材料；Plan Package 只能消费 `ParentSynthesisResult` 后进入 `ConvergenceReport` / `HandoffSteward` 的父层收束结果。
+- `ChildAgentRun.outputRefs` 不得作为 Plan input refs 直接进入 Plan material。候选可以保留 rootlet output refs 作为证据来源，但正式 Plan source 必须是收束后的 candidate / convergence / handoff material。
 - `AgentSpec.permissions` 和 `budget` 只声明模型/工具/预算边界；不能在 spec、guard、schema 或状态机里替 agent 决定目标理解、候选排序、是否继续探索或方向综合。
 - `UndergroundAgentOrchestrator` 在直接运行时负责发布缺失的 `goal.received`；若 Dispatcher 已发布同一消息，不得重复发布同一 message id。
 - Dispatcher 必须按 message id 和 trace id 跳过已处理 goal，避免重复 goal message 导致同一地下 trace 重复 handoff。
@@ -348,7 +348,7 @@ createMinimalCandidatePool({ goalId, rootletOutputs: [rootletOutput], agentInvoc
 - Good：Growth Governor 通过 AI reasoning 形成 rootlet 派生计划，Orchestrator 创建 child runs，等待 child 完成，Candidate Collector / parent synthesis 回收材料，再交给 Autonomy Reviewer / Convergence Judge。
 - Good：Convergence Report 的 provenance refs 能追溯到 parent synthesis；Handoff Steward 只消费 convergence/handoff material。
 - Base：no `AgentTurnRuntime` 时仍可形成低置信 fallback / stopped 运行树，但不得 approved。
-- Bad：把 `RootletOutput` 或工具搜索结果直接塞进 Direction Handoff source candidates。
+- Bad：把 `RootletOutput` 或工具搜索结果直接塞进 Plan source candidates。
 - Bad：为了面板展示把 raw EventLog payload、provider response、完整 prompt 或工具 raw output 暴露给前端。
 
 ### 6. Tests Required
@@ -378,7 +378,7 @@ const synthesis = appendParentSynthesisToTree(tree, parentSynthesis, now);
 const convergence = await convergenceJudge.reason({ parentSynthesis: synthesis.parentSyntheses.at(-1) });
 ```
 
-child/rootlet 只交付局部材料；父层 synthesis 和 convergence 才能决定哪些材料进入 `.agentarbor`。
+child/rootlet 只交付局部材料；父层 synthesis 和 convergence 才能决定哪些材料进入 Plan Package。
 
 ## Scenario: 地下消息驱动调度内核
 
@@ -393,7 +393,7 @@ child/rootlet 只交付局部材料；父层 synthesis 和 convergence 才能决
 - `MessageDrivenUndergroundDispatcher({ runtime, intelligenceChannel?, toolCenter?, maxDispatchSteps?, maxAutonomyCycles? })`：兼容 wrapper，只消费待处理的 `goal.received` 并委托 `UndergroundAgentOrchestrator`，不得继续保存地下业务阶段 handler。
 - `dispatchUntilIdle()`：同步 idle / 边界检查入口；当前完整地下运行进入 async AgentLoop 主线，配置智能通道或需要完整推进时必须使用 `dispatchUntilIdleAsync()`。
 - `dispatchUntilIdleAsync()`：消费下一个未处理的合法 `goal.received` message，调用 Orchestrator async 主线，并返回终态结果。
-- `UndergroundMessageDrivenDispatchResult`：返回终态、地下报告、方向交接包、loaded package ref、processed message ids、dispatch step count 和 orchestrator run trace。
+- `UndergroundMessageDrivenDispatchResult`：返回终态、地下报告、Plan Package 兼容材料、loaded package ref、processed message ids、dispatch step count 和 orchestrator run trace。
 
 ### 3. Contracts
 
@@ -403,7 +403,7 @@ child/rootlet 只交付局部材料；父层 synthesis 和 convergence 才能决
 - Orchestrator 可以维护 run-scoped workspace view，但写入必须来自对应 agent action；workspace 不能替代 EventLog、DirectionHandoffPackageStore 或 Observation Snapshot 的事实源。
 - Dispatcher / Orchestrator 必须记录 processed message id、phase guard 和 max dispatch steps / max autonomy cycles；重复消息不能重复产出地下结果。
 - 直接发布后续阶段事件、但没有同 run 的 `goal.received` context 时，Dispatcher / Orchestrator 必须失败，不得跳阶段产出 convergence、handoff package 或用户澄清请求。
-- 智能通道允许服务 Intent Core、Growth Governor、Rootlet Explorer、Candidate Collector、Autonomy Reviewer、Convergence Judge 和 Handoff Steward 的 `reason()`；模型输出仍必须进入对应 agent 决策材料，并经过 candidate pool、convergence、handoff 和 package validation。
+- 智能通道允许服务 Intent Core、Growth Governor、Rootlet Explorer、Candidate Collector、Autonomy Reviewer、Convergence Judge 和 Handoff Steward 的 `reason()`；模型输出仍必须进入对应 agent 决策材料，并经过 candidate pool、convergence、Plan material 和 package validation。
 
 ### 4. Validation & Error Matrix
 
@@ -471,19 +471,19 @@ const result = dispatcher.dispatchUntilIdle();
 
 ## Contracts
 
-- RootletOutput 不得直接进入 DirectionHandoffPackage 输入。
-- DirectionHandoffPackage 输入只能来自 CandidatePool 中被 convergence 标记为 `accepted` 或 `merged` 的 `ExplorationCandidateRef`。
-- rejected / unknown / candidate 状态的候选可以保留为收束证据，但不得进入 `DirectionHandoff.sourceCandidateRefs`。
+- RootletOutput 不得直接进入 Plan Package 输入。
+- Plan Package 输入只能来自 CandidatePool 中被 convergence 标记为 `accepted` 或 `merged` 的 `ExplorationCandidateRef`。
+- rejected / unknown / candidate 状态的候选可以保留为收束证据，但不得进入 Plan material 的 `sourceCandidateRefs`。
 - budget exhausted 后必须给出 deterministic outcome：无阻塞澄清且已有 accepted/merged 候选时为 `approved`；存在 blocking unknown 时为 `awaiting_user` 并带 `UserClarificationRequest`；没有可用候选时为 `stopped` 并记录 stop reason。
-- 地下独立闭环的完成条件不是进入 Aboveground planning，而是 approved DirectionHandoffPackage 已创建 / 保存，并能被 package validation 证明可接管；该状态在计划和看板中记为 `approved_package_created`。
+- 地下独立闭环的完成条件不是进入 Aboveground planning，而是 approved Plan Package 已创建 / 保存，并能被 package validation 证明可接管；该状态在计划和看板中记为 `approved_package_created`。
 - `awaiting_user` 必须保留为地下单环内的阻塞状态，等待用户澄清回答后重新收束；恢复流程完成前不得把等待用户的 package 视为可接管。
 - `stopped` 必须带有可审计停止理由，例如预算耗尽、无收束候选、权限边界不允许继续或用户明确停止。
-- non-blocking unknown 可以保留为 open question，但不得进入 `DirectionHandoff.sourceCandidateRefs`，也不得阻断已有 accepted/merged 候选的 approved 收束。
+- non-blocking unknown 可以保留为 open question，但不得进入 Plan material 的 `sourceCandidateRefs`，也不得阻断已有 accepted/merged 候选的 approved 收束。
 - non-blocking unknown 不能单独制造 `awaiting_user`；没有 accepted/merged handoff candidates 且预算耗尽时，必须以 `stopped` / `budget_exhausted_without_converged_candidates` 收束，而不是生成没有 `UserClarificationRequest` 的等待用户状态。
 - blocking unknown 不能被 accepted/merged 候选掩盖；它必须让收束结果保持 `awaiting_user`，等待用户澄清后才能批准 handoff。
 - 用户澄清回答后，Underground 必须把 `UserClarificationResponse` 与原请求匹配后重新收束；恢复流程不得跳过 convergence review，也不得直接把 v1 awaiting-user package 改成 approved。
-- Handoff Steward 只负责把已收束候选组装为方向交接包输入，不能把 rootlet output、Growth Plan、Soil 副本或最终资产写入 `.agentarbor`。
-- Handoff Steward 在当前阶段不负责响应 Nutrient Request，也不负责产出 Growth Plan Revision；这些职责必须等地下单环和地上单环稳定后再作为跨环节协同扩展。
+- Handoff Steward 只负责把已收束候选组装为 Plan Package 输入，不能把 rootlet output、Aboveground 执行计划、Soil 副本或最终资产写入 `.agentarbor`。
+- Handoff Steward 在当前阶段不负责响应 Nutrient Request，也不负责产出 Plan Revision；这些职责必须等 Desktop Shell 最小闭环稳定后再作为跨环节协同扩展。
 
 ## Scenario: V0.5 用户澄清升级
 
@@ -497,9 +497,9 @@ const result = dispatcher.dispatchUntilIdle();
 - `UserClarificationReason` 固定覆盖 `goal_conflict`、`permission_boundary_unclear`、`critical_fact_missing`、`value_tradeoff_required`、`hard_constraint_unclear`。
 - `createOpenQuestionDisposition(...)` 用于声明 unknown 候选是 blocking clarification 还是 non-blocking open question。
 - `createUndergroundConvergenceReport(...)` 接收 `openQuestionDispositions`、`userClarificationRequestId` 和 `createdAt`，并输出 `openQuestions` 与可选 `userClarificationRequest`。
-- `createAwaitingUserDirectionMaterial(...)` 只能创建 `status = "awaiting_user"` 的 Direction Handoff Package；不得复用或改变 `createMinimalDirectionMaterial(...)` 的 approved happy path。
+- `createAwaitingUserDirectionMaterial(...)` 只能创建 `status = "awaiting_user"` 的 Plan Package 兼容材料；不得复用或改变 `createMinimalDirectionMaterial(...)` 的 approved happy path。
 - `runClarificationRequiredUndergroundFlow(...)` 是地下-only 场景 helper，输出 awaiting-user report、clarification request、awaiting-user package、Observation Snapshot 和包含 `user_approval.requested` 的 EventLog。
-- `createClarificationRecoveryDirectionMaterial(...)` 接收 awaiting-user package、`UserClarificationRequest` 和 `UserClarificationResponse`，输出 approved convergence report、同一 direction 的下一版本 approved DirectionHandoffPackage。
+- `createClarificationRecoveryDirectionMaterial(...)` 接收 awaiting-user package、`UserClarificationRequest` 和 `UserClarificationResponse`，输出 approved convergence report、同一 direction 的下一版本 approved Plan Package。
 - `runClarificationRecoveryFlow(...)` 是确定性内存恢复场景 helper，必须在 `user_approval.requested` 后继续发布 `user_approval.received`、`direction_handoff.revision_requested`、第二次 `convergence_review.completed` 和最终 `direction_handoff.completed`。
 
 ### 3. Contracts
@@ -507,7 +507,7 @@ const result = dispatcher.dispatchUntilIdle();
 - `UserClarificationRequest` 必须包含 `goalId`、`relatedCandidateRefs`、`questions`、`blockingLevel`、`createdAt` 和 `status`。
 - blocking unknown 必须生成 `UserClarificationRequest`，并令 convergence outcome 为 `awaiting_user`。
 - non-blocking unknown 只能进入 `openQuestions`，不得进入 handoff candidates，不得强制用户升级。
-- Direction Handoff Package 可以被保存为 `awaiting_user`，但 validation 必须失败于 `DIRECTION_HANDOFF_NOT_APPROVED`，Aboveground planning 必须拒绝。
+- Plan Package 可以被保存为 `awaiting_user`，但 validation 必须失败于 `DIRECTION_HANDOFF_NOT_APPROVED`，Aboveground planning 必须拒绝。
 - Observation Kernel 的 `underground.userEscalation` 必须暴露 request id、reason、blocking level、status、related candidate refs、questions 和 request plain data。
 - Event view 遇到 payload 中的 `clarificationRequest.requestId` 时，应输出 `ObservationRef.kind = "user_clarification"`。
 - Event view 遇到 payload 中的 `clarificationResponse.requestId` 或 `requestId` 时，也应输出 `ObservationRef.kind = "user_clarification"`。
@@ -531,7 +531,7 @@ const result = dispatcher.dispatchUntilIdle();
 
 ### 5. Good / Base / Bad Cases
 
-- Good：阻塞权限边界未知时，地下中枢生成 `UserClarificationRequest` 和 `user_approval.requested`，并阻止 Aboveground planning。
+- Good：阻塞权限边界未知时，Underground Cognitive Runtime 生成 `UserClarificationRequest` 和 `user_approval.requested`，并阻止 Aboveground planning。
 - Base：happy path 无 unknown，仍走 `createMinimalDirectionMaterial` approved package 和 18 步 EventLog。
 - Bad：把 `awaiting_user` package 当作 approved handoff 继续规划，或让 Aboveground 自己补齐地下澄清问题。
 

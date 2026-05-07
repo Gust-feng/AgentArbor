@@ -12,7 +12,7 @@ test("panel desktop window options keep secure defaults", () => {
   const options = createPanelDesktopWindowOptions();
 
   assert.deepEqual(options, {
-    title: "AgentArbor 地下运行面板",
+    title: "AgentArbor Desktop Shell",
     width: 1440,
     height: 960,
     minWidth: 1200,

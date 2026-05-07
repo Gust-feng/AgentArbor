@@ -16,7 +16,7 @@
 - `AgentRegistryError(message: string)`：agent 注册/查询失败。
 - `RoutingError(message: string)`：能力路由失败。
 - `ArtifactStoreError(message: string)`：artifact 读取失败。
-- `DirectionHandoffConvergenceError(message: string)`：方向交接包未完成收束。
+- `DirectionHandoffConvergenceError(message: string)`：Plan Package 兼容材料未完成收束。
 - Panel JSON error envelope：`{ ok: false, status: "failed", error: { code, message } }`；只能用于本地 panel API，不能替代 runtime/domain 错误类型。
 
 ## Contracts
@@ -42,9 +42,9 @@
 
 | 条件 | 错误 |
 | --- | --- |
-| Planning 前 DirectionHandoff 未 approved | `StateGuardError` |
-| Assigned 前没有 GrowthPlan | `StateGuardError` |
-| DirectionHandoff 保存 candidate/unknown/rejected 候选 | `DirectionHandoffConvergenceError` |
+| Planning 前 Plan Package 未 approved | `StateGuardError` |
+| Assigned 前没有 Aboveground 执行计划 | `StateGuardError` |
+| Plan material 保存 candidate/unknown/rejected 候选 | `DirectionHandoffConvergenceError` |
 | hard constraint 为 violated 或不可执行 | `ConstraintBlockedError` |
 | hard constraint 需要人工确认 | `UserConfirmationRequiredError` |
 | hard constraint 为 proposed 且 conflictPolicy 为 governance_review / verification_reviews / aboveground_center_decides | `ConstraintBlockedError` |

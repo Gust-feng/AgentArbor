@@ -1,6 +1,6 @@
 # 前端规范索引
 
-AgentArbor 当前出生了第一版本地 Underground panel 原型。它是未来工作台的最小可用读写面，不是正式前端工作台，也不引入 React、Vite、Next、Tailwind、组件库、状态管理框架或前端测试框架。面板默认使用简体中文，并以 summary / Observation Snapshot / sanitized config 派生运行追踪展示。
+AgentArbor 当前出生了本地 Desktop Shell / Observation Panel 原型。它是未来工作台的最小可用读写面，不是正式前端工作台，也不引入 React、Vite、Next、Tailwind、组件库、状态管理框架或前端测试框架。面板默认使用简体中文，并以 canvas / summary / Observation Snapshot / sanitized config 派生主画布和运行追踪展示。
 
 当前 UI 代码以 Node 内置 HTTP server + 静态 HTML/CSS/JS 字符串存在于 `src/app/`。未来只有在正式前端代码、目录边界和工具链出生后，才能把 hook、状态管理、类型安全等延后规范改写为可执行规范。
 

@@ -119,7 +119,7 @@ function showPanelDesktopWindow(window: PanelDesktopWindowHandle): void {
 
 export function createPanelDesktopWindowOptions(): PanelDesktopWindowOptions {
   return {
-    title: "AgentArbor 地下运行面板",
+    title: "AgentArbor Desktop Shell",
     width: 1440,
     height: 960,
     minWidth: 1200,

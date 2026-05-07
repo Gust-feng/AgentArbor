@@ -7,32 +7,34 @@ Use this guide whenever work touches AgentArbor repository structure, docs, skil
 - `AGENTS.md` is the hard execution rule for AI contributors.
 - `docs/README.md` is the human-readable documentation entry.
 - `docs/开发指南/` is the formal chaptered product and development guide.
-- `docs/架构设计/产品架构/ADR-0018-AgentArbor原生概念树架构.md` is the current product architecture fact source.
-- `docs/架构设计/产品架构/ADR-0019-地下辐射生长模型.md` defines the accepted Underground Center radial-growth model.
+- `docs/架构设计/产品架构/ADR-0022-AgentArbor桌面通用Agent与双运行时架构.md` is the current product architecture fact source.
+- `docs/架构设计/产品架构/ADR-0018-AgentArbor原生概念树架构.md` is historical context only; it is partially superseded by ADR-0022.
+- `docs/架构设计/产品架构/ADR-0019-地下辐射生长模型.md` defines the historical radial-growth basis now framed as Underground Cognitive Runtime.
 - `docs/架构设计/产品架构/ADR-0020-智能通道与模型接入边界.md` defines the accepted model access boundary.
 - `.trellis/` is the current workflow harness and contextual spec layer.
 - `.agents/skills/` is the shared Agent Skills layer.
 - `.codex/` is Codex development adapter configuration.
 - `.opencode/` is OpenCode development adapter configuration.
-- `.agentarbor/` is the future AgentArbor-native direction handoff package from Underground Center to Aboveground Center, not the final asset store, not a Soil copy, and not the current documentation workspace.
+- `.agentarbor/` is the future Plan Package storage form, not a product concept-tree node, not the final asset store, not a Soil copy, and not the current documentation workspace.
 
-## Native Concept Tree Rule
+## Current Product Architecture Rule
 
 The active architecture is:
 
 ```text
-Soil -> Underground Center -> .agentarbor -> Aboveground Center -> Fruits -> Governance -> Soil
+Desktop Shell -> Task Soil -> Underground Cognitive Runtime -> Plan -> Aboveground Execution Runtime -> Fruits -> Governance Pipeline -> Global Soil
 ```
 
-- Soil owns governed long-term assets, constraints, capability assets, path bias, evidence, and lineage.
-- Underground Center turns user imagination into a judged direction through requirement shaping, contradiction, evidence, asset fit, necessary user clarification, and runtime nutrient supply.
-- `.agentarbor` carries task authorization, direction basis, constraint references, evidence references, asset references, risks, and Growth Entry fields from Underground Center to Aboveground Center.
-- Aboveground Center turns the handoff package into Growth Plan, Workflow IR, context topology, execution organization, validation gates, and revision control.
-- Current implementation priority is the independent Underground loop: user need -> underground exploration / contradiction / convergence -> necessary user clarification and recovery -> approved `.agentarbor` Direction Handoff Package. Its terminal states are `approved_package_created`, `awaiting_user`, and `stopped`.
+- Desktop Shell is the single user-facing entry.
+- Task Soil holds the current task goal, refs, temporary constraints and permission boundaries.
+- Underground Cognitive Runtime turns task intent into a judged Plan through exploration, parent synthesis, convergence, necessary user clarification, or stopped state.
+- Plan / Plan Package carries direction basis, constraint refs, evidence refs, risks and execution entry from Underground to Aboveground. `.agentarbor` is only an implementation/storage form for Plan Package.
+- Aboveground Execution Runtime consumes approved Plan and produces execution artifacts, verification and Fruits.
+- Current implementation priority is the Desktop Shell single loop: task input -> Task Soil -> Underground exploration / convergence -> approved Plan Package -> lightweight Aboveground execution -> Fruit.
 - Intelligence Channel is the only model access route. AI output remains candidate, draft, explanation, or advice until deterministic convergence, validation, verification, or governance promotes it.
-- Aboveground organizations eventually grow along the approved direction. When evidence, Soil asset fit, external facts, constraint detail, context, capability hints, or key-assumption validation are missing, they send a Nutrient Request to Underground Center instead of creating their own direction-exploration cluster. This is a later cross-stage collaboration route and must not become the immediate next mainline before the Underground single loop and Aboveground single loop are stable.
+- Aboveground organizations consume Plan by default. When evidence, Global Soil fit, external facts, constraint detail, context, capability hints, or key-assumption validation are missing, they send a Nutrient Request to Underground Cognitive Runtime instead of creating their own direction-exploration cluster.
 - Fruits are deliverables, AgentApps, capability packages, run memories, or experience candidates; they are not Soil until Governance validates, attributes, versions, permissions, and retirement policy.
-- Governance is the only route from Fruits back into Soil.
+- Governance Pipeline is the only route from Fruits / Run Memory / Experience Candidate back into Global Soil.
 
 ## Collaboration Rule
 
@@ -44,14 +46,14 @@ Discussion becomes project fact only after it lands in an ADR, development guide
 
 ## Underground Radial Growth Rule
 
-Underground Center is not a linear pipeline. It uses a fixed center with temporary radial exploration clusters: stable center, dynamic rootlets, divergent exploration, convergent direction decision.
+Underground Cognitive Runtime is not a linear pipeline. It uses a fixed parent layer with temporary radial exploration clusters: stable center, dynamic rootlets, divergent exploration, convergent direction decision.
 
 - The stable center owns intent, growth budget, constraints, evidence ledger, convergence, and handoff assembly.
 - Temporary rootlet clusters can explore options, risks, asset fit, evidence, constraints, and counterfactuals.
 - Rootlet clusters must have bounded input, budget, output, and exit criteria.
-- In the current Underground single-loop priority, the result must converge into an approved `.agentarbor` Direction Handoff Package, a user escalation, or a recorded stop reason.
-- Nutrient Patch output belongs to later Nutrient Request / Growth Plan Revision collaboration after the single Underground loop and single Aboveground loop are stable.
-- `.agentarbor` may include `options.json`, `decision-record.md`, and `risk-register.md`, but it must not become a Growth Plan, final asset store, or Soil copy.
+- In the current Desktop Shell priority, the result must converge into an approved Plan Package, a user escalation, or a recorded stop reason before Aboveground execution.
+- Nutrient Patch output belongs to later Nutrient Request / Plan Revision collaboration after the single Desktop Shell loop is stable.
+- `.agentarbor` may eventually store Plan Package files, but it must not become an execution plan, final asset store, or Soil copy.
 
 ## Documentation Rule
 
@@ -81,7 +83,7 @@ Underground Center is not a linear pipeline. It uses a fixed center with tempora
 
 - Trellis owns task lifecycle, contextual specs, workflow state, and multi-platform adapters.
 - `docs/` owns stable human-readable product and development guidance.
-- `.agentarbor/` owns future native direction handoff package material only after its contracts are stable and a real task birth reason exists.
+- `.agentarbor/` owns future Plan Package material only after its contracts are stable and a real task birth reason exists.
 - `.codex/` and `.opencode/` are platform adapters, not AgentArbor-native product source data.
 - `docs/任务看板/` projects `.trellis/tasks/` for humans and must be rebuildable from Trellis state.
 
@@ -93,7 +95,7 @@ Underground Center is not a linear pipeline. It uses a fixed center with tempora
 - Codex adapter agents belong in `.codex/agents/`.
 - OpenCode adapter agents belong in `.opencode/agents/`.
 - Agent Skills belong in `.agents/skills/`.
-- Future AgentArbor-native direction handoff package material belongs in `.agentarbor/` only when it has task authorization, contract coverage, and real evidence references.
+- Future AgentArbor-native Plan Package material belongs in `.agentarbor/` only when it has task authorization, contract coverage, and real evidence references.
 
 Do not store current documentation history, progress records, or workflow handoffs in `.agentarbor/`.
 
@@ -106,11 +108,11 @@ Do not store current documentation history, progress records, or workflow handof
 - `.agents/skills/` skill folder names match `SKILL.md` frontmatter names.
 - `.codex/agents/*.toml` is Codex development tooling, not AgentArbor product source.
 - `.opencode/agents/*.md` is OpenCode development tooling, not AgentArbor product source.
-- `.agentarbor/` contains only native direction handoff package material with real birth reasons; it must not contain final assets, Soil asset copies, placeholder agents, placeholder workflows, or undocumented schemas.
+- `.agentarbor/` contains only native Plan Package material with real birth reasons; it must not contain final assets, Soil asset copies, placeholder agents, placeholder workflows, or undocumented schemas.
 
 ## Child-Agent Fruit Boundary
 
-Mature child agents are fruit-layer capability assets. Apply this rule whenever work discusses generated agents, detachable agents, agent export packages, or direction handoff material that references future generated agents.
+Mature child agents are fruit-layer capability assets. Apply this rule whenever work discusses generated agents, detachable agents, agent export packages, or Plan material that references future generated agents.
 
 - A child agent starts as a temporary execution ability; it does not automatically have long-term identity.
 - A child agent can become fruit only after evaluation, human confirmation, permission review, versioning, and registry governance.

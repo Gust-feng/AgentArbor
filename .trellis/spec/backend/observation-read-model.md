@@ -30,7 +30,7 @@
 - `underground.evidenceLedger` 必须是 JSON-safe 派生视图，暴露 ledger id、证据总数、按 evidence kind 计数、推荐方向相关 evidence refs、冲突 evidence refs、不足 evidence refs、`hasConflicts`、`hasInsufficientEvidence` 和状态；它不能保存 live ledger/store 引用，也不能成为新的事实源。
 - `underground.userEscalation` 必须在 blocking unknown 存在时暴露 request id、reason、blocking level、status、related candidate refs、questions 和 JSON-safe request 数据；non-blocking unknown 只应出现在 `convergence.openQuestions`。
 - `underground.clarificationResponses` 必须从 EventLog 中的 `user_approval.received` payload 派生，暴露 request id、answers、answeredAt 和 evidence refs；不得把 response 作为 EventLog 之外的第二事实源。
-- Handoff view 必须暴露 package ref、direction id/version/status、validation 状态、source candidate refs、convergence review ref 和 package lineage；不能内联 Growth Plan 或 Soil asset content。
+- Handoff / Plan Package view 必须暴露 package ref、direction id/version/status、validation 状态、source candidate refs、convergence review ref 和 package lineage；不能内联 Aboveground execution plan 或 Soil asset content。
 - 地下 demo summary 的 AI 观测摘要必须从 EventLog 与地下运行结果派生，允许暴露经过 `outputContract` validation 与 `visibleOutput.fieldTypes` 展示策略的 model visible output 安全投影：只能来自 `ModelResponse.structuredOutput` / `textOutput` 的合约字段摘要，或来自其生成的 rootlet outputs / candidates；字段过长必须截断并标注 `truncated`。rootlet app parser 会丢弃的候选不得作为 approved visible output 展示。它仍不得保存 provider raw response、完整 prompt、hidden reasoning、API key、token、provider 原始敏感错误或 live provider 对象。
 - 地下 demo summary 和 panel tracking 可以展示工具调用 requested / completed / failed 计数、tool call id、tool name、caller agent、duration 和 event refs；不得展示工具 raw output、search provider raw response、API key、token 或未清洗错误。
 - 本地 panel HTTP 响应和 SSE stream 只能返回地下 demo summary、Observation Snapshot 的 JSON-safe 子集、脱敏配置状态，以及由这些输入派生的 panel tracking / transcript / stream read model；不得返回 EventLog 原始 payload、runtime/store 引用、API key、token、完整模型 prompt、provider raw response、hidden reasoning 或 provider 原始错误。
@@ -65,7 +65,7 @@
 | app parser 会丢弃的 rootlet candidate 字段类型仍出现在 model visible output | 测试失败；必须通过 `visibleOutput.fieldTypes` 抑制该输出 |
 | recovery 事件 payload 携带 direction package ref 但 event refs 缺少 `direction_package` / `direction_handoff` | 测试失败；事件 ref 必须从 payload 派生 |
 | blocking unknown 的 Observation view 未暴露 request details | 测试失败；不得只保留 `userEscalationRequired: true` |
-| Direction package view 内联 Growth Plan 或 Soil asset content | 设计违规；只能暴露 refs、status、validation 和 source candidate refs |
+| Plan Package view 内联 Aboveground execution plan 或 Soil asset content | 设计违规；只能暴露 refs、status、validation 和 source candidate refs |
 | panel HTTP JSON 响应包含 raw EventLog payload、API key、token、完整 prompt、provider raw response 或 hidden reasoning | 测试失败；必须改为 summary / event view / safe visible output / refs |
 | async panel run 启动接口阻塞到地下运行完成 | 测试失败；`POST /api/underground/runs` 必须先返回 `runId` 和初始 trace/transcript |
 | stream / transcript 包含完整 prompt、provider raw response、hidden reasoning、API key、token 或 raw tool output | 测试失败；只能展示脱敏目的、rootlet kind、状态、模型名、safe summary、candidate refs、event/model/tool call refs 和通过 validation 的 visible output 安全投影 |
@@ -97,7 +97,7 @@
 - 本地 panel response 覆盖 AI 禁用模式拒绝、fake AI、openai-compatible 配置失败、sync run 兼容、async run job、partial / final event cursor、SSE stream、cursor 续传、stream 断开后后台 run 完成、tracking read model、transcript 和 model visible output，并证明 HTTP JSON / SSE 不包含 raw secret、token、完整模型 prompt、provider raw response、hidden reasoning、raw tool output、app parser 会丢弃的候选字段或未校验模型输出。
 - Recovery path event views expose direction package refs for `user_approval.received`、`direction_handoff.revision_requested` 和最终 `direction_handoff.completed`。
 - Snapshot exposes clarification responses and handoff lineage while staying JSON-safe。
-- Direction Handoff Package、Aboveground store load 和固定 18 步 main EventLog sequence 不回归。
+- Plan Package 兼容存储、Aboveground store load 和固定 18 步 main EventLog sequence 不回归。
 - Snapshot event cursor matches EventLog length and last event。
 - Snapshot does not expose mutable store references。
 - EventLog `list()` / `replay()` returned messages are cloned or otherwise immutable from callers.

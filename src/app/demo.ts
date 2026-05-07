@@ -4,13 +4,29 @@ const result = await runMinimalLoop("Design a daily AI model trend monitoring pl
 
 console.log("AgentArbor desktop agent minimal demo");
 console.log("");
-console.log("EventLog replay:");
+console.log("EventLog replay (legacy compatibility keys):");
 for (const entry of result.runtime.eventLog.list()) {
   console.log(`${String(entry.sequence).padStart(2, "0")}. ${entry.type}`);
 }
 
 console.log("");
-console.log("Required product path:");
+console.log("Desktop product path:");
+console.log(
+  [
+    "Desktop Shell",
+    "Task Soil",
+    "Underground Cognitive Runtime",
+    "Plan Package",
+    "Aboveground Execution Runtime",
+    "Fruits",
+    "Run Memory",
+    "Experience Candidate",
+    "Path Bias",
+  ].join(" -> ")
+);
+
+console.log("");
+console.log("Compatibility EventLog checkpoints:");
 console.log(EXPECTED_DEMO_EVENTS.join(" -> "));
 
 console.log("");

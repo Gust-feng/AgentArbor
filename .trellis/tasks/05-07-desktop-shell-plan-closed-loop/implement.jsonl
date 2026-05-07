@@ -1,0 +1,10 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend spec index for panel server API, read-model, and runtime contracts"}
+{"file": ".trellis/spec/backend/observation-read-model.md", "reason": "Panel observation, tracking, transcript, and safe read-model rules"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Backend quality and leakage-prevention checks"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Panel component and layout rules for Desktop Shell UI"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Frontend quality and UI verification rules"}
+{"file": "src/app/panel-server.ts", "reason": "Desktop Shell preferred API and runKind job orchestration"}
+{"file": "src/app/panel-canvas-read-model.ts", "reason": "Main Canvas read model derived from MinimalLoopResult and safe observation projections"}
+{"file": "src/app/panel-assets.ts", "reason": "Desktop Shell UI wiring for Main Canvas, transcript, and Observation Panel"}
+{"file": "src/app/minimal-loop.ts", "reason": "Fake-AI Desktop product loop options and callback injection"}
+{"file": "src/app/panel-server.test.ts", "reason": "Desktop API, no-AI boundary, missing config, no-leak, and compatibility tests"}

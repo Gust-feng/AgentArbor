@@ -12,18 +12,22 @@ test("panel HTML defaults to Simplified Chinese labels and status text", () => {
   const html = createPanelHtml();
 
   assert.equal(html.includes("AgentArbor 面板"), true);
-  assert.equal(html.includes("地下 Agent 工作流"), true);
-  assert.equal(html.includes("把想法交给地下组织"), true);
+  assert.equal(html.includes("Desktop Shell 工作台"), true);
+  assert.equal(html.includes("Plan / Fruit 主画布"), true);
+  assert.equal(html.includes("Task Soil"), true);
+  assert.equal(html.includes("Aboveground Execution Runtime"), true);
+  assert.equal(html.includes("Fruits"), true);
   assert.equal(html.includes("Agent transcript 为空"), true);
-  assert.equal(html.includes("模型可见工作笔记、输出增量、工具摘要和最终结果"), true);
-  assert.equal(html.includes("描述你的目标。地下组织会先理解、探索、收束，再形成可交给下一阶段的方向结果。"), true);
+  assert.equal(html.includes("Main Canvas 展示 Plan / Fruit"), true);
+  assert.equal(html.includes("描述你的任务。Desktop Shell 会先形成 Task Soil，再展示 Plan 和 Fruits。"), true);
   assert.equal(html.includes('<option value="none">AI 禁用</option>'), true);
   assert.equal(html.includes('<option value="fake">Fake AI</option>'), true);
   assert.equal(html.includes('<option value="openai-compatible">OpenAI-compatible</option>'), true);
   assert.equal(html.includes("运行状态"), true);
+  assert.equal(html.includes("Agent Run Tree inspector"), true);
   assert.equal(html.includes("折叠调试区"), true);
-  assert.equal(html.includes("地上组织"), true);
-  assert.equal(html.includes("暂无方向任务"), true);
+  assert.equal(html.includes("执行智能"), true);
+  assert.equal(html.includes("暂无 Desktop Shell 任务"), true);
   assert.equal(html.includes("模型配置"), true);
   assert.equal(html.includes("工具配置"), true);
   assert.equal(html.includes("启动"), true);
@@ -320,6 +324,203 @@ test("panel fake AI run exposes model and candidate summaries without model prom
   }
 });
 
+test("desktop async fake run returns main canvas with Task Soil, approved Plan, Aboveground artifact, and Fruit", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-desktop-fake-"));
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+  try {
+    const start = await requestJson(server.url, "/api/desktop/runs", {
+      method: "POST",
+      body: { goal: "Build a Desktop Shell visible Plan and Fruit result." },
+    });
+    const completed = await waitForRun(
+      server.url,
+      start.body.runId,
+      (body) => body.status === "completed",
+      4_000,
+      "/api/desktop/runs"
+    );
+
+    assert.equal(start.status, 202);
+    assert.equal(start.body.runKind, "desktop");
+    assert.equal(completed.body.runKind, "desktop");
+    assert.equal(completed.body.canvas.taskSoil.goalSummary.includes("Desktop Shell visible Plan"), true);
+    assert.equal(completed.body.canvas.taskSoil.contextRefs.length > 0, true);
+    assert.equal(completed.body.canvas.taskSoil.permissionBoundaryRefs.length > 0, true);
+    assert.equal(completed.body.canvas.plan.status, "approved");
+    assert.equal(completed.body.canvas.plan.validationPassed, true);
+    assert.equal(completed.body.canvas.plan.packageRef.packageId.length > 0, true);
+    assert.equal(completed.body.canvas.plan.recommendedDirection.summary.length > 0, true);
+    assert.equal(completed.body.canvas.plan.keyEvidenceRefs.length > 0, true);
+    assert.equal(completed.body.canvas.aboveground.consumer, "Aboveground Execution Runtime");
+    assert.equal(completed.body.canvas.aboveground.artifact.artifactId.length > 0, true);
+    assert.equal(completed.body.canvas.aboveground.verification.status, "passed");
+    assert.equal(completed.body.canvas.fruits.fruit.fruitId.length > 0, true);
+    assert.equal(completed.body.canvas.fruits.runMemory.runMemoryId.length > 0, true);
+    assert.equal(completed.body.canvas.fruits.experienceCandidate.candidateId.length > 0, true);
+    assert.equal(completed.body.canvas.fruits.pathBias.pathBiasId.length > 0, true);
+    assert.equal(completed.body.tracking.run.abovegroundStatus, "completed");
+    assert.equal(completed.body.tracking.candidates.total.total > 0, true);
+    assert.equal(completed.body.tracking.package.validationPassed, true);
+    assert.equal(completed.body.tracking.agentRunTree.childRuns.length > 0, true);
+    assert.equal(completed.body.transcript.events.some((event: { type: string }) => event.type === "final.result"), true);
+  } finally {
+    await server.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("desktop aiMode none fails at boundary and does not approve a Plan", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-desktop-none-"));
+  const secret = "sk-desktop-none-secret";
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+  try {
+    await requestJson(server.url, "/api/config/model-provider", {
+      method: "POST",
+      body: { apiKey: secret, model: "unused-desktop-model" },
+    });
+    const start = await requestJson(server.url, "/api/desktop/runs", {
+      method: "POST",
+      body: { goal: "Attempt a disabled Desktop Shell run.", aiMode: "none" },
+    });
+    const failed = await waitForRun(
+      server.url,
+      start.body.runId,
+      (body) => body.status === "failed",
+      4_000,
+      "/api/desktop/runs"
+    );
+
+    assert.equal(start.status, 202);
+    assert.equal(failed.body.runKind, "desktop");
+    assert.equal(failed.body.status, "failed");
+    assert.equal(failed.body.error.code, "ai_disabled");
+    assert.equal(failed.body.canvas, undefined);
+    assert.equal(failed.text.includes(secret), false);
+    assert.equal(failed.text.includes('"status":"approved"'), false);
+  } finally {
+    await server.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("desktop openai-compatible missing config fails before provider fetch", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-desktop-missing-key-"));
+  let fetchCalls = 0;
+  const providerFetch: PanelProviderFetch = async () => {
+    fetchCalls += 1;
+    throw new Error("provider fetch must not be called for missing desktop config");
+  };
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory, providerFetch });
+  try {
+    await requestJson(server.url, "/api/config/model-provider", {
+      method: "POST",
+      body: { model: "desktop-openai-model" },
+    });
+    const start = await requestJson(server.url, "/api/desktop/runs", {
+      method: "POST",
+      body: { goal: "Build a Desktop Shell run with missing key.", aiMode: "openai-compatible" },
+    });
+    const failed = await waitForRun(
+      server.url,
+      start.body.runId,
+      (body) => body.status === "failed",
+      4_000,
+      "/api/desktop/runs"
+    );
+
+    assert.equal(fetchCalls, 0);
+    assert.equal(failed.body.error.code, "missing_api_key");
+    assert.equal(failed.body.canvas, undefined);
+    assert.equal(failed.body.summary.ai.eventCounts.requested, 0);
+  } finally {
+    await server.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("desktop openai-compatible missing model fails before provider fetch and redacts key", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-desktop-missing-model-"));
+  const secret = "sk-desktop-missing-model-secret";
+  let fetchCalls = 0;
+  const providerFetch: PanelProviderFetch = async () => {
+    fetchCalls += 1;
+    throw new Error("provider fetch must not be called for missing desktop model");
+  };
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory, providerFetch });
+  try {
+    await requestJson(server.url, "/api/config/model-provider", {
+      method: "POST",
+      body: { apiKey: secret },
+    });
+    const start = await requestJson(server.url, "/api/desktop/runs", {
+      method: "POST",
+      body: { goal: "Build a Desktop Shell run with missing model.", aiMode: "openai-compatible" },
+    });
+    const failed = await waitForRun(
+      server.url,
+      start.body.runId,
+      (body) => body.status === "failed",
+      4_000,
+      "/api/desktop/runs"
+    );
+
+    assert.equal(fetchCalls, 0);
+    assert.equal(failed.body.error.code, "missing_model_name");
+    assert.equal(failed.body.canvas, undefined);
+    assert.equal(failed.text.includes(secret), false);
+  } finally {
+    await server.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("desktop canvas, tracking, transcript, and SSE keep model and tool internals redacted", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-desktop-safe-"));
+  const secret = "sk-desktop-safe-secret";
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+  try {
+    await requestJson(server.url, "/api/config/model-provider", {
+      method: "POST",
+      body: {
+        model: "unused-desktop-safe-model",
+        apiKey: secret,
+      },
+    });
+    const start = await requestJson(server.url, "/api/desktop/runs", {
+      method: "POST",
+      body: { goal: "需要 Plan 和 Fruit，但不要泄漏模型内部材料。", aiMode: "fake" },
+    });
+    const stream = await requestSse(server.url, `/api/desktop/runs/${encodeURIComponent(start.body.runId)}/stream?cursor=0`);
+    const completed = await waitForRun(
+      server.url,
+      start.body.runId,
+      (body) => body.status === "completed",
+      4_000,
+      "/api/desktop/runs"
+    );
+    const safeText = `${JSON.stringify({
+      canvas: completed.body.canvas,
+      tracking: completed.body.tracking,
+      transcript: completed.body.transcript,
+    })}\n${stream.text}`;
+
+    assert.equal(stream.status, 200);
+    assert.equal(stream.events.some((event) => event.type === "final.result"), true);
+    assert.equal(safeText.includes(secret), false);
+    assert.equal(safeText.includes("rawPrompt"), false);
+    assert.equal(safeText.includes("raw_prompt"), false);
+    assert.equal(safeText.includes("sanitizedMessages"), false);
+    assert.equal(safeText.includes("Return JSON only"), false);
+    assert.equal(safeText.includes("raw provider response"), false);
+    assert.equal(safeText.includes("hidden reasoning"), false);
+    assert.equal(safeText.includes("raw tool output"), false);
+    assertSafePanelJsonText(safeText);
+  } finally {
+    await server.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("panel async underground run starts without waiting for provider completion and exposes partial cursor", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-async-"));
   const secret = "sk-async-secret";
@@ -356,6 +557,7 @@ test("panel async underground run starts without waiting for provider completion
 
     assert.equal(start.status, 202);
     assert.equal(typeof start.body.runId, "string");
+    assert.equal(start.body.runKind, "underground");
     assert.equal(start.body.config.secretConfigured, true);
     assert.equal(start.text.includes(secret), false);
     assert.equal(elapsedMs < 1_000, true);
@@ -364,6 +566,7 @@ test("panel async underground run starts without waiting for provider completion
       body.status === "running" && body.trace.events.some((event: { type: string }) => event.type === "model.requested")
     );
     assert.equal(running.body.status, "running");
+    assert.equal(running.body.runKind, "underground");
     assert.equal(running.body.trace.eventCursor.eventCount > 0, true);
     assert.equal(running.body.tracking.modelTotals.requested > 0, true);
     assert.equal(running.body.transcript.modelCalls.some((call: { status: string }) => call.status === "requested"), true);
@@ -883,12 +1086,13 @@ async function waitForRun(
   baseUrl: string,
   runId: string,
   predicate: (body: any) => boolean,
-  timeoutMs = 4_000
+  timeoutMs = 4_000,
+  runsPath = "/api/underground/runs"
 ): Promise<RequestJsonResult> {
   const startedAt = Date.now();
   let last: RequestJsonResult | undefined;
   while (Date.now() - startedAt < timeoutMs) {
-    last = await requestJson(baseUrl, `/api/underground/runs/${encodeURIComponent(runId)}`);
+    last = await requestJson(baseUrl, `${runsPath}/${encodeURIComponent(runId)}`);
     if (predicate(last.body)) {
       return last;
     }

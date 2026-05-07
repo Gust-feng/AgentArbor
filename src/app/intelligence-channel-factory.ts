@@ -21,6 +21,7 @@ import type { UndergroundDemoAiInput } from "./underground-demo-summary.js";
 export type UndergroundAiMode = "none" | "fake" | "openai-compatible";
 
 export type UndergroundAiEnvironment = Readonly<Record<string, string | undefined>>;
+export type UndergroundAiProviderFetch = FetchLike;
 
 export type UndergroundAiRuntimeConfig =
   | {

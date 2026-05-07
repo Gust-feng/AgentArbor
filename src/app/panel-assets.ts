@@ -311,6 +311,48 @@ export function createPanelHtml(): string {
       margin: 0 auto;
     }
 
+    .canvas-summary {
+      display: grid;
+      gap: 14px;
+      max-width: 880px;
+      margin: 0 auto 18px;
+      border: 1px solid #cfe0d8;
+      border-radius: 8px;
+      background: #fbfffd;
+      padding: 16px;
+    }
+
+    .canvas-summary h2 {
+      margin: 0;
+      font-size: 16px;
+    }
+
+    .canvas-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .canvas-item {
+      border: 1px solid var(--line-soft);
+      border-radius: 8px;
+      background: #fff;
+      padding: 11px;
+      min-width: 0;
+    }
+
+    .canvas-item strong {
+      display: block;
+      margin-bottom: 5px;
+      color: var(--accent-strong);
+    }
+
+    .canvas-item span {
+      display: block;
+      color: var(--muted);
+      overflow-wrap: anywhere;
+    }
+
     .empty-transcript {
       border: 1px dashed #cbd6d1;
       border-radius: 8px;
@@ -601,6 +643,7 @@ export function createPanelHtml(): string {
       }
 
       .composer-controls,
+      .canvas-grid,
       .split {
         grid-template-columns: 1fr;
       }
@@ -615,20 +658,20 @@ export function createPanelHtml(): string {
   <div class="app">
     <aside class="sidebar">
       <div class="brand"><span class="mark" aria-hidden="true"></span><span>AgentArbor</span></div>
-      <button class="new-run secondary" id="newRunButton">新建方向</button>
+      <button class="new-run secondary" id="newRunButton">新建任务</button>
       <nav>
         <ul class="nav">
           <li><span class="glyph">S</span><span>土壤</span></li>
-          <li class="active"><span class="glyph">U</span><span>地下组织</span></li>
-          <li><span class="glyph">A</span><span>地上组织</span></li>
+          <li class="active"><span class="glyph">U</span><span>方向智能</span></li>
+          <li><span class="glyph">A</span><span>执行智能</span></li>
           <li><span class="glyph">R</span><span>自动化</span></li>
         </ul>
       </nav>
       <section>
-        <div class="side-title"><span>方向记录</span><span id="runCount">0</span></div>
+        <div class="side-title"><span>任务记录</span><span id="runCount">0</span></div>
         <ul class="runs" id="runHistory">
           <li class="run-item">
-            <div class="run-title">暂无方向任务</div>
+            <div class="run-title">暂无 Desktop Shell 任务</div>
             <div class="run-meta">提交目标后会出现在这里。</div>
           </li>
         </ul>
@@ -645,8 +688,8 @@ export function createPanelHtml(): string {
     <main class="main">
       <header class="topbar">
         <div>
-          <div class="topbar-title">地下 Agent 工作流</div>
-          <div class="hint">只展示模型可见工作笔记、输出增量、工具摘要和最终结果。</div>
+          <div class="topbar-title">Desktop Shell 工作台</div>
+          <div class="hint">Main Canvas 展示 Plan / Fruit；Observation Panel 展示 agent 集群如何形成结果。</div>
         </div>
         <div class="status-pill" id="runStatus">待启动 (pending)</div>
       </header>
@@ -654,16 +697,20 @@ export function createPanelHtml(): string {
       <section class="transcript-wrap">
         <div class="intro" id="introBlock">
           <span class="mark" aria-hidden="true"></span>
-          <h1>把想法交给地下组织</h1>
-          <p>提交目标后，AgentArbor 会实时显示 agent 在做什么、模型输出了什么、工具调用了什么，以及最终形成的方向结果。</p>
+          <h1>Desktop Shell 工作台</h1>
+          <p>提交任务后，AgentArbor 会形成 Task Soil，经 Underground Cognitive Runtime 收束 Plan，再由 Aboveground Execution Runtime 产出 Fruits。</p>
+        </div>
+        <div class="canvas-summary" id="mainCanvas">
+          <h2>Plan / Fruit 主画布</h2>
+          <p class="hint">当前没有运行结果。提交任务后，这里展示 Plan Package、Aboveground artifact、Fruit、Run Memory、Experience Candidate 和 Path Bias 候选。</p>
         </div>
         <div class="transcript" id="transcript">
-          <div class="empty-transcript">Agent transcript 为空。输入目标后，这里会开始流式追加工作过程。</div>
+          <div class="empty-transcript">Agent transcript 为空。输入任务后，这里会开始流式追加工作过程。</div>
         </div>
       </section>
 
-      <section class="composer" aria-label="目标输入">
-        <textarea id="goalInput" placeholder="描述你的目标。地下组织会先理解、探索、收束，再形成可交给下一阶段的方向结果。"></textarea>
+      <section class="composer" aria-label="任务输入">
+        <textarea id="goalInput" placeholder="描述你的任务。Desktop Shell 会先形成 Task Soil，再展示 Plan 和 Fruits。"></textarea>
         <div class="composer-controls">
           <div class="control-line">
             <span class="hint">模型</span>
@@ -686,7 +733,7 @@ export function createPanelHtml(): string {
       </section>
 
       <section class="panel-box">
-        <h2>Agent 运行树</h2>
+        <h2>Agent Run Tree inspector</h2>
         <div class="agent-tree" id="agentTree">
           <div class="node-meta">暂无派生 agent。</div>
         </div>
@@ -799,6 +846,7 @@ export function createPanelHtml(): string {
     const dom = {
       runStatus: document.getElementById("runStatus"),
       runMetrics: document.getElementById("runMetrics"),
+      mainCanvas: document.getElementById("mainCanvas"),
       transcript: document.getElementById("transcript"),
       introBlock: document.getElementById("introBlock"),
       goalInput: document.getElementById("goalInput"),
@@ -847,7 +895,7 @@ export function createPanelHtml(): string {
         dom.baseUrlInput.value = result.config.baseUrl || "";
         dom.modelInput.value = result.config.model || "";
         dom.defaultAiModeInput.value = result.config.defaultAiMode || "fake";
-        dom.aiMode.value = result.config.defaultAiMode || "fake";
+        dom.aiMode.value = "fake";
         renderProviderStatus();
       } catch (error) {
         dom.configStatus.textContent = "模型配置读取失败。";
@@ -938,7 +986,7 @@ export function createPanelHtml(): string {
       setButtons(false);
 
       try {
-        const response = await requestJson("/api/underground/runs", {
+        const response = await requestJson("/api/desktop/runs", {
           method: "POST",
           body: { goal: goal, aiMode: dom.aiMode.value }
         });
@@ -960,7 +1008,7 @@ export function createPanelHtml(): string {
         return;
       }
       const startCursor = Math.max(0, Number(cursor || 0) - 1);
-      const source = new EventSource("/api/underground/runs/" + encodeURIComponent(runId) + "/stream?cursor=" + startCursor);
+      const source = new EventSource("/api/desktop/runs/" + encodeURIComponent(runId) + "/stream?cursor=" + startCursor);
       state.eventSource = source;
       STREAM_TYPES.forEach((type) => {
         source.addEventListener(type, (message) => {
@@ -983,7 +1031,7 @@ export function createPanelHtml(): string {
       clearInterval(state.pollingTimer);
       state.pollingTimer = setInterval(async () => {
         try {
-          const response = await requestJson("/api/underground/runs/" + encodeURIComponent(runId));
+          const response = await requestJson("/api/desktop/runs/" + encodeURIComponent(runId));
           renderPollingResponse(response);
           if (response.status === "completed" || response.status === "failed") {
             finishLiveRun(runId);
@@ -999,7 +1047,7 @@ export function createPanelHtml(): string {
     async function finishLiveRun(runId) {
       stopLiveUpdates();
       try {
-        const response = await requestJson("/api/underground/runs/" + encodeURIComponent(runId));
+        const response = await requestJson("/api/desktop/runs/" + encodeURIComponent(runId));
         renderPollingResponse(response);
       } catch {
         // The stream already delivered the terminal event. Polling refresh is best-effort only.
@@ -1009,6 +1057,7 @@ export function createPanelHtml(): string {
     function renderPollingResponse(response) {
       setRunStatus(response.status || "running");
       renderMetrics(response.status || "running", response);
+      renderCanvas(response.canvas, response.status || "running");
       renderAgentTree(response);
       if (response.transcript && Array.isArray(response.transcript.events)) {
         response.transcript.events.forEach(appendStreamEvent);
@@ -1221,6 +1270,51 @@ export function createPanelHtml(): string {
       }));
     }
 
+    function renderCanvas(canvas, status) {
+      if (!canvas) {
+        dom.mainCanvas.replaceChildren();
+        const title = document.createElement("h2");
+        title.textContent = "Plan / Fruit 主画布";
+        const hint = document.createElement("p");
+        hint.className = "hint";
+        hint.textContent = status === "failed"
+          ? "运行未形成 approved Plan。请查看错误摘要和 Observation Panel。"
+          : "Desktop Shell 正在形成 Task Soil、Plan Package、Aboveground artifact 和 Fruits。";
+        dom.mainCanvas.append(title, hint);
+        return;
+      }
+      const title = document.createElement("h2");
+      title.textContent = "Plan / Fruit 主画布";
+      const intro = document.createElement("p");
+      intro.className = "hint";
+      intro.textContent = canvas.explanation.resultWhyReasonable;
+      const grid = document.createElement("div");
+      grid.className = "canvas-grid";
+      grid.append(
+        canvasItem("Task Soil", canvas.taskSoil.goalSummary + "；context refs " + canvas.taskSoil.contextRefs.length + "；permission refs " + canvas.taskSoil.permissionBoundaryRefs.length),
+        canvasItem("Plan Package", canvas.plan.packageRef.packageId + " v" + canvas.plan.packageRef.version + "；status " + canvas.plan.status + "；" + canvas.plan.recommendedDirection.reason),
+        canvasItem("Aboveground Execution Runtime", (canvas.aboveground.task ? canvas.aboveground.task.title : "task pending") + "；artifact " + (canvas.aboveground.artifact ? canvas.aboveground.artifact.summary : "pending") + "；verification " + (canvas.aboveground.verification.status || "pending")),
+        canvasItem("Fruits", [
+          canvas.fruits.fruit ? "fruit " + canvas.fruits.fruit.fruitId : "fruit pending",
+          canvas.fruits.runMemory ? "run memory " + canvas.fruits.runMemory.runMemoryId : "run memory pending",
+          canvas.fruits.experienceCandidate ? "experience candidate " + canvas.fruits.experienceCandidate.candidateId : "candidate pending",
+          canvas.fruits.pathBias ? "path bias " + canvas.fruits.pathBias.pathBiasId : "path bias pending"
+        ].join("；"))
+      );
+      dom.mainCanvas.replaceChildren(title, intro, grid);
+    }
+
+    function canvasItem(label, text) {
+      const item = document.createElement("div");
+      item.className = "canvas-item";
+      const strong = document.createElement("strong");
+      strong.textContent = label;
+      const span = document.createElement("span");
+      span.textContent = compact(text, 420);
+      item.append(strong, span);
+      return item;
+    }
+
     function renderAgentTree(response) {
       const tree = response && response.tracking && response.tracking.agentRunTree;
       if (!tree) {
@@ -1315,7 +1409,9 @@ export function createPanelHtml(): string {
       }));
       dom.debugJson.textContent = JSON.stringify({
         runId: response.runId,
+        runKind: response.runKind,
         status: response.status,
+        canvas: response.canvas,
         tracking: response.tracking,
         summary: response.summary,
         observation: response.observation,
@@ -1333,9 +1429,9 @@ export function createPanelHtml(): string {
         return;
       }
       const ready = config.defaultAiMode === "fake" || (config.defaultAiMode === "openai-compatible" && config.model && config.secretConfigured);
-      dom.providerHint.textContent = config.defaultAiMode === "none"
-        ? "AI 已禁用，地下运行会停止"
-        : ready ? "模型配置可用" : "OpenAI-compatible 需要模型名和密钥";
+      dom.providerHint.textContent = ready
+        ? "Desktop Shell 默认 Fake AI；可显式切换模型"
+        : "Desktop Shell 默认 Fake AI；OpenAI-compatible 需要模型名和密钥";
       dom.workspaceStatus.textContent = "配置中心已连接";
       dom.configStatus.textContent = "当前默认模式：" + (config.defaultAiMode || "fake") + "；密钥：" + (config.secretConfigured ? "已配置" : "未配置");
       dom.configStatus.className = "hint";
@@ -1376,6 +1472,7 @@ export function createPanelHtml(): string {
       dom.goalInput.value = "";
       dom.introBlock.style.display = "";
       dom.transcript.replaceChildren(emptyTranscriptNode());
+      renderCanvas(undefined, "pending");
       setRunStatus("pending");
       renderMetrics("pending", undefined);
       renderAgentTree(undefined);
@@ -1385,7 +1482,7 @@ export function createPanelHtml(): string {
     function emptyTranscriptNode() {
       const node = document.createElement("div");
       node.className = "empty-transcript";
-      node.textContent = "Agent transcript 为空。输入目标后，这里会开始流式追加工作过程。";
+      node.textContent = "Agent transcript 为空。输入任务后，这里会开始流式追加工作过程。";
       return node;
     }
 

@@ -7,6 +7,7 @@ import {
   UndergroundAiConfigurationError,
   type UndergroundAiMode,
 } from "./intelligence-channel-factory.js";
+import { runMinimalLoop } from "./minimal-loop.js";
 import {
   runUndergroundDirectionSessionWithIntelligence,
   type UndergroundDirectionSessionRuntimeContext,
@@ -37,7 +38,8 @@ import {
   type PanelRunTrackingReadModel,
   type PanelRunTranscript,
 } from "./panel-run-read-model.js";
-import { PanelRunJobStore, type PanelRunJob } from "./panel-run-jobs.js";
+import { createPanelRunCanvas, type PanelRunCanvasReadModel } from "./panel-canvas-read-model.js";
+import { PanelRunJobStore, type PanelRunJob, type PanelRunKind } from "./panel-run-jobs.js";
 import type { EventLogEntry } from "../kernel/events/in-memory-event-log.js";
 
 export type PanelServerOptions = {
@@ -77,16 +79,25 @@ type PanelRuntime = {
 
 type PanelRunResponse = {
   readonly ok: true;
+  readonly runKind: PanelRunKind;
   readonly status: "completed";
   readonly config: SanitizedModelProviderConfig;
   readonly informationAccess: SanitizedInformationAccessConfig;
-  readonly summary: UndergroundDemoSummary;
+  readonly summary?: UndergroundDemoSummary;
   readonly observation: PanelObservationReadModel;
   readonly tracking: PanelRunTrackingReadModel;
   readonly trace: PanelRunTraceReadModel;
   readonly transcript: PanelRunTranscript;
   readonly workNotes: PanelRunTranscript["workNotes"];
   readonly streamCursor: PanelRunStreamCursor;
+  readonly canvas?: PanelRunCanvasReadModel;
+};
+
+type PanelRunExecutionResult = {
+  readonly summary?: UndergroundDemoSummary;
+  readonly observation: PanelObservationReadModel;
+  readonly eventEntries: readonly EventLogEntry[];
+  readonly canvas?: PanelRunCanvasReadModel;
 };
 
 type PanelToolsConfig = {
@@ -239,24 +250,41 @@ async function handlePanelRequest(
   }
 
   if (request.method === "POST" && url.pathname === "/api/underground/run") {
-    await handleRunRequest(runtime, request, response);
+    await handleRunRequest(runtime, request, response, "underground");
     return;
   }
 
   if (request.method === "POST" && url.pathname === "/api/underground/runs") {
-    await handleStartRunRequest(runtime, request, response);
+    await handleStartRunRequest(runtime, request, response, "underground");
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/desktop/runs") {
+    await handleStartRunRequest(runtime, request, response, "desktop");
     return;
   }
 
   const runMatch = /^\/api\/underground\/runs\/([^/]+)$/.exec(url.pathname);
   if (request.method === "GET" && runMatch !== null) {
-    handleGetRunRequest(runtime, decodeURIComponent(runMatch[1] ?? ""), response);
+    handleGetRunRequest(runtime, decodeURIComponent(runMatch[1] ?? ""), "underground", response);
+    return;
+  }
+
+  const desktopRunMatch = /^\/api\/desktop\/runs\/([^/]+)$/.exec(url.pathname);
+  if (request.method === "GET" && desktopRunMatch !== null) {
+    handleGetRunRequest(runtime, decodeURIComponent(desktopRunMatch[1] ?? ""), "desktop", response);
     return;
   }
 
   const runStreamMatch = /^\/api\/underground\/runs\/([^/]+)\/stream$/.exec(url.pathname);
   if (request.method === "GET" && runStreamMatch !== null) {
-    handleGetRunStreamRequest(runtime, decodeURIComponent(runStreamMatch[1] ?? ""), url, request, response);
+    handleGetRunStreamRequest(runtime, decodeURIComponent(runStreamMatch[1] ?? ""), "underground", url, request, response);
+    return;
+  }
+
+  const desktopRunStreamMatch = /^\/api\/desktop\/runs\/([^/]+)\/stream$/.exec(url.pathname);
+  if (request.method === "GET" && desktopRunStreamMatch !== null) {
+    handleGetRunStreamRequest(runtime, decodeURIComponent(desktopRunStreamMatch[1] ?? ""), "desktop", url, request, response);
     return;
   }
 
@@ -273,15 +301,16 @@ async function handlePanelRequest(
 async function handleRunRequest(
   runtime: PanelRuntime,
   request: IncomingMessage,
-  response: ServerResponse
+  response: ServerResponse,
+  runKind: PanelRunKind
 ): Promise<void> {
   const body = await readJsonBody(request);
   const config = await runtime.configCenter.getModelProviderConfig();
   const informationAccess = await runtime.configCenter.getInformationAccessConfig();
-  const runInput = parseRunInput(body, config.defaultAiMode);
+  const runInput = parseRunInput(body, runKind === "desktop" ? "fake" : config.defaultAiMode);
 
   try {
-    const run = await runUndergroundForPanel(runtime, runInput.goal, runInput.aiMode);
+    const run = await runForPanel(runtime, runKind, runInput.goal, runInput.aiMode);
     const currentConfig = await runtime.configCenter.getModelProviderConfig();
     const currentInformationAccess = await runtime.configCenter.getInformationAccessConfig();
     const trace = createPanelRunTrace({ status: "completed", eventEntries: run.eventEntries });
@@ -305,6 +334,7 @@ async function handleRunRequest(
     });
     writeJson(response, 200, {
       ok: true,
+      runKind,
       status: "completed",
       config: currentConfig,
       informationAccess: currentInformationAccess,
@@ -318,6 +348,7 @@ async function handleRunRequest(
         runId: run.observation.traceId,
         lastSequence: transcript.events.at(-1)?.sequence ?? 0,
       },
+      canvas: run.canvas,
     } satisfies PanelRunResponse);
   } catch (error) {
     if (error instanceof UndergroundAiConfigurationError) {
@@ -347,13 +378,15 @@ async function handleRunRequest(
 async function handleStartRunRequest(
   runtime: PanelRuntime,
   request: IncomingMessage,
-  response: ServerResponse
+  response: ServerResponse,
+  runKind: PanelRunKind
 ): Promise<void> {
   const body = await readJsonBody(request);
   const config = await runtime.configCenter.getModelProviderConfig();
   const informationAccess = await runtime.configCenter.getInformationAccessConfig();
-  const runInput = parseRunInput(body, config.defaultAiMode);
+  const runInput = parseRunInput(body, runKind === "desktop" ? "fake" : config.defaultAiMode);
   const job = runtime.runJobs.create({
+    runKind,
     goal: runInput.goal,
     aiMode: runInput.aiMode,
     config,
@@ -364,10 +397,15 @@ async function handleStartRunRequest(
   schedulePanelRunJob(runtime, job.runId);
 }
 
-function handleGetRunRequest(runtime: PanelRuntime, runId: string, response: ServerResponse): void {
+function handleGetRunRequest(
+  runtime: PanelRuntime,
+  runId: string,
+  expectedRunKind: PanelRunKind,
+  response: ServerResponse
+): void {
   const job = runtime.runJobs.get(runId);
-  if (job === undefined) {
-    throw new PanelHttpError(404, "run_not_found", "未找到地下运行 job。");
+  if (job === undefined || job.runKind !== expectedRunKind) {
+    throw new PanelHttpError(404, "run_not_found", runNotFoundMessage(expectedRunKind));
   }
   writeJson(response, 200, createPanelRunJobResponse(job));
 }
@@ -375,13 +413,14 @@ function handleGetRunRequest(runtime: PanelRuntime, runId: string, response: Ser
 function handleGetRunStreamRequest(
   runtime: PanelRuntime,
   runId: string,
+  expectedRunKind: PanelRunKind,
   url: URL,
   request: IncomingMessage,
   response: ServerResponse
 ): void {
   const job = runtime.runJobs.get(runId);
-  if (job === undefined) {
-    throw new PanelHttpError(404, "run_not_found", "未找到地下运行 job。");
+  if (job === undefined || job.runKind !== expectedRunKind) {
+    throw new PanelHttpError(404, "run_not_found", runNotFoundMessage(expectedRunKind));
   }
 
   let lastSequence = parseStreamCursor(url.searchParams.get("cursor"), request.headers["last-event-id"]);
@@ -406,7 +445,7 @@ function handleGetRunStreamRequest(
         sequence: lastSequence + 1,
         type: "run.failed",
         createdAt: new Date().toISOString(),
-        agentLabel: "地下组织",
+        agentLabel: "AgentArbor Runtime",
         summary: "运行已不存在。",
         status: "failed",
         sourceRefs: [],
@@ -450,7 +489,7 @@ async function executePanelRunJob(runtime: PanelRuntime, runId: string): Promise
   }
   runtime.runJobs.markRunning(runId);
   try {
-    const run = await runUndergroundForPanel(runtime, job.goal, job.aiMode, {
+    const run = await runForPanel(runtime, job.runKind, job.goal, job.aiMode, {
       onRuntimeReady: (context) => {
         runtime.runJobs.attachRuntime({
           runId,
@@ -470,6 +509,7 @@ async function executePanelRunJob(runtime: PanelRuntime, runId: string): Promise
       informationAccess: currentInformationAccess,
       summary: run.summary,
       observation: run.observation,
+      canvas: run.canvas,
     });
   } catch (error) {
     const config = await runtime.configCenter.getModelProviderConfig().catch(() => job.config);
@@ -505,7 +545,7 @@ async function executePanelRunJob(runtime: PanelRuntime, runId: string): Promise
       informationAccess,
       error: {
         code: "panel_internal_error",
-        message: "地下运行 job 失败。",
+        message: job.runKind === "desktop" ? "Desktop Shell 运行 job 失败。" : "地下兼容运行 job 失败。",
       },
     });
   }
@@ -520,6 +560,7 @@ function schedulePanelRunJob(runtime: PanelRuntime, runId: string): void {
 function createPanelRunJobResponse(job: PanelRunJob): {
   readonly ok: true;
   readonly runId: string;
+  readonly runKind: PanelRunKind;
   readonly status: PanelRunStatus;
   readonly config: SanitizedModelProviderConfig;
   readonly informationAccess: SanitizedInformationAccessConfig;
@@ -530,6 +571,7 @@ function createPanelRunJobResponse(job: PanelRunJob): {
   readonly streamCursor: PanelRunStreamCursor;
   readonly summary?: UndergroundDemoSummary | { readonly ai: UndergroundDemoSummary["ai"] };
   readonly observation?: PanelObservationReadModel;
+  readonly canvas?: PanelRunCanvasReadModel;
   readonly error?: {
     readonly code: string;
     readonly message: string;
@@ -567,6 +609,7 @@ function createPanelRunJobResponse(job: PanelRunJob): {
   return {
     ok: true,
     runId: job.runId,
+    runKind: job.runKind,
     status: job.status,
     config,
     informationAccess,
@@ -580,6 +623,7 @@ function createPanelRunJobResponse(job: PanelRunJob): {
     },
     summary: job.completed?.summary ?? job.failed?.summary,
     observation: job.completed?.observation,
+    canvas: job.completed?.canvas,
     error: job.failed?.error,
   };
 }
@@ -658,6 +702,79 @@ function appendLiveModelOutputDelta(runtime: PanelRuntime, runId: string, delta:
   });
 }
 
+async function runForPanel(
+  runtime: PanelRuntime,
+  runKind: PanelRunKind,
+  goal: string,
+  aiMode: UndergroundAiMode,
+  options: {
+    readonly onRuntimeReady?: (context: UndergroundDirectionSessionRuntimeContext) => void;
+    readonly onModelOutputDelta?: (delta: ModelOutputDelta) => void;
+  } = {}
+): Promise<PanelRunExecutionResult> {
+  return runKind === "desktop"
+    ? runDesktopForPanel(runtime, goal, aiMode, options)
+    : runUndergroundForPanel(runtime, goal, aiMode, options);
+}
+
+async function runDesktopForPanel(
+  runtime: PanelRuntime,
+  goal: string,
+  aiMode: UndergroundAiMode,
+  options: {
+    readonly onRuntimeReady?: (context: UndergroundDirectionSessionRuntimeContext) => void;
+    readonly onModelOutputDelta?: (delta: ModelOutputDelta) => void;
+  } = {}
+): Promise<PanelRunExecutionResult> {
+  if (aiMode === "none") {
+    throw createUndergroundAiDisabledConfigurationError();
+  }
+
+  const aiEnvironment = await runtime.configCenter.createUndergroundAiEnvironment();
+  const createToolCenter = await createConfiguredToolCenterFactory(runtime.configCenter, {
+    fetch: runtime.providerFetch,
+  });
+  const result = await runMinimalLoop(goal, {
+    aiMode,
+    aiEnvironment,
+    providerFetch: runtime.providerFetch,
+    createToolCenter,
+    onRuntimeReady: options.onRuntimeReady,
+    onModelOutputDelta: options.onModelOutputDelta,
+  });
+  const observation = toPanelObservation(result.observationSnapshot);
+  const eventEntries = result.runtime.eventLog.list();
+  const config = await runtime.configCenter.getModelProviderConfig();
+  const informationAccess = await runtime.configCenter.getInformationAccessConfig();
+  const tracking = createPanelRunTracking({
+    status: "completed",
+    config,
+    informationAccess,
+    requestedMode: aiMode,
+    observation,
+    eventEntries,
+  });
+  const transcript = createPanelRunTranscript({
+    runId: result.observationSnapshot.traceId,
+    status: "completed",
+    eventEntries,
+    observation,
+    createdAt: eventEntries[0]?.recordedAt ?? new Date(0).toISOString(),
+    updatedAt: eventEntries.at(-1)?.recordedAt ?? new Date(0).toISOString(),
+  });
+
+  return {
+    observation,
+    eventEntries,
+    canvas: createPanelRunCanvas({
+      result,
+      observation,
+      tracking,
+      transcript,
+    }),
+  };
+}
+
 async function runUndergroundForPanel(
   runtime: PanelRuntime,
   goal: string,
@@ -666,7 +783,7 @@ async function runUndergroundForPanel(
     readonly onRuntimeReady?: (context: UndergroundDirectionSessionRuntimeContext) => void;
     readonly onModelOutputDelta?: (delta: ModelOutputDelta) => void;
   } = {}
-): Promise<{ summary: UndergroundDemoSummary; observation: PanelObservationReadModel; eventEntries: readonly EventLogEntry[] }> {
+): Promise<PanelRunExecutionResult> {
   if (aiMode === "none") {
     throw createUndergroundAiDisabledConfigurationError();
   }
@@ -864,12 +981,16 @@ function parseAiMode(value: unknown): UndergroundAiMode | undefined {
 
 function panelConfigurationErrorMessage(code: UndergroundAiConfigurationError["issue"]["code"]): string {
   if (code === "ai_disabled") {
-    return "地下 Cognitive Runtime 需要 AI；AI 禁用模式只作为边界检查，未启动地下运行。";
+    return "Underground Cognitive Runtime 方向智能阶段需要 AI；AI 禁用模式只作为边界检查，未启动运行。";
   }
   if (code === "missing_api_key") {
     return "OpenAI-compatible 模式缺少 API key，已在发起网络请求前停止。";
   }
   return "OpenAI-compatible 模式缺少模型名，已在发起网络请求前停止。";
+}
+
+function runNotFoundMessage(runKind: PanelRunKind): string {
+  return runKind === "desktop" ? "未找到 Desktop Shell 运行 job。" : "未找到地下兼容运行 job。";
 }
 
 function optionalString(value: unknown): string | undefined {

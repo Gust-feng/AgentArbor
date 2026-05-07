@@ -4,7 +4,7 @@
 
 ## Scope / Trigger
 
-- Trigger：修改 `src/domain/soil/**`、地下目标理解、rootlet 选择、Evidence Ledger 或 Direction Handoff 的 Soil 引用来源。
+- Trigger：修改 `src/domain/soil/**`、地下目标理解、rootlet 选择、Evidence Ledger 或 Plan material 的 Soil 引用来源。
 - Scope：确定性内存只读 Soil Store；不包含 repo-root `.agentarbor/` 写入、数据库、HTTP、UI、真实 LLM 或 Governance 入土写路径。
 
 ## Signatures
@@ -18,7 +18,7 @@
 
 - Soil Store 当前只能返回引用和约束对象，不能返回 Capability Asset 正文、复制内容或可写句柄。
 - 地下 rootlet 可以读取 Soil Store 中的约束和资产引用，用于目标画像、证据账本和 handoff refs。
-- `.agentarbor` Direction Handoff Package 只能保存 Soil 引用，不得内联 Soil asset content、body、copy 或等价字段。
+- `.agentarbor` 作为 Plan Package 存储形态时只能保存 Soil 引用，不得内联 Soil asset content、body、copy 或等价字段。
 - `PathBias` 只能影响 preference 或方案排序，不得覆盖 hard constraint。
 - Soil Store 只读接口不是 Governance 入土流程；任何长期资产沉淀必须等 Governance 路径实现后再增加写接口。
 
@@ -26,7 +26,7 @@
 
 | 条件 | 结果 |
 | --- | --- |
-| Direction Handoff Package 中出现 inline Soil content/body/copy | validation 失败，错误码 `INLINE_SOIL_ASSET_CONTENT` |
+| Plan Package 中出现 inline Soil content/body/copy | validation 失败，错误码 `INLINE_SOIL_ASSET_CONTENT` |
 | 地下方向包只引用 Soil refs | validation 可通过，后续地上环可按 ref 接管 |
 | 需要把候选资产沉淀到 Soil | 当前超出接口范围，应走后续 Governance / Soil promotion 任务 |
 | Path Bias 与 hard constraint 冲突 | hard constraint 优先，Path Bias 不得放行 |
@@ -41,7 +41,7 @@
 
 - Soil 引用只能是引用，inline Soil asset content 被 package validation 拒绝。
 - 地下-only session 和默认 demo 不写 repo-root `.agentarbor/`。
-- Direction Handoff 的 hard constraint 不能被 nonGoal、assumption、option 或 Path Bias 文案弱化。
+- Plan material 的 hard constraint 不能被 nonGoal、assumption、option 或 Path Bias 文案弱化。
 
 ## Wrong vs Correct
 

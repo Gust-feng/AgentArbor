@@ -1,0 +1,21 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend spec index for review context"}
+{"file": ".trellis/spec/backend/observation-read-model.md", "reason": "Verify panel read-model safety and compatibility"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Verify backend test and leakage boundaries"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Verify panel component behavior"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Verify frontend quality and smoke expectations"}
+{"command": "pnpm build", "result": "passed"}
+{"command": "node --test \"dist/app/panel-server.test.js\"", "result": "passed"}
+{"command": "pnpm test", "result": "passed: 254/254"}
+{"command": "pnpm demo", "result": "passed"}
+{"command": "pnpm panel:smoke", "result": "passed"}
+{"command": "pnpm panel:desktop:smoke", "result": "passed"}
+{"command": "git diff --check", "result": "passed with CRLF normalization warning for previous task.json"}
+{"file": "AGENTS.md", "reason": "Post-review terminology alignment to ADR-0022 for runtime direction wording"}
+{"file": "src/app/panel-desktop-launcher.ts", "reason": "Post-review Desktop Shell window title alignment"}
+{"file": "src/app/panel-run-read-model.ts", "reason": "Post-review transcript wording alignment without changing runtime behavior"}
+{"command": "pnpm build", "result": "passed after post-review wording fix"}
+{"command": "pnpm test", "result": "passed: 254/254 after post-review wording fix"}
+{"command": "pnpm demo", "result": "passed after post-review wording fix"}
+{"command": "pnpm panel:smoke", "result": "passed after post-review wording fix"}
+{"command": "pnpm panel:desktop:smoke", "result": "passed after post-review wording fix"}
+{"command": "git diff --check", "result": "passed after post-review wording fix with CRLF normalization warning for previous task.json"}

@@ -20,9 +20,18 @@ import { createRunObservationSnapshot } from "../domain/observation/index.js";
 import { createGlobalSoilView, createTaskSoil } from "../domain/soil/index.js";
 import type { ArtifactRecord } from "../kernel/artifacts/in-memory-artifact-store.js";
 import { AbovegroundPlanner, GovernanceReview, Verifier, WorkerAgent } from "./agents.js";
-import { createUndergroundAiRuntimeConfig } from "./intelligence-channel-factory.js";
+import {
+  createUndergroundAiDisabledConfigurationError,
+  createUndergroundAiRuntimeConfig,
+  type UndergroundAiEnvironment,
+  type UndergroundAiMode,
+  type UndergroundAiProviderFetch,
+} from "./intelligence-channel-factory.js";
 import type { MinimalRuntime } from "./runtime.js";
 import { runUndergroundDirectionSessionWithIntelligence } from "./underground-direction-session.js";
+import type { ModelOutputDelta } from "../domain/intelligence/index.js";
+import type { ToolExecutionBroker } from "../domain/tools/index.js";
+import type { UndergroundDirectionSessionRuntimeContext } from "./underground-direction-session.js";
 
 export const EXPECTED_DEMO_EVENTS: ArborMessageType[] = [
   "goal.received",
@@ -68,21 +77,34 @@ export type MinimalLoopResult = {
 
 export type RunMinimalLoopOptions = {
   constraints?: Constraint[];
+  aiMode?: UndergroundAiMode;
+  aiEnvironment?: UndergroundAiEnvironment;
+  providerFetch?: UndergroundAiProviderFetch;
+  createToolCenter?: (runtime: MinimalRuntime) => ToolExecutionBroker;
+  onRuntimeReady?: (context: UndergroundDirectionSessionRuntimeContext) => void;
+  onModelOutputDelta?: (delta: ModelOutputDelta) => void;
 };
 
 export async function runMinimalLoop(
   goal = "Build the first local AI-driven AgentArbor desktop runtime loop.",
   options: RunMinimalLoopOptions = {}
 ): Promise<MinimalLoopResult> {
-  const aiConfig = createUndergroundAiRuntimeConfig({ mode: "fake" });
+  const aiMode = options.aiMode ?? "fake";
+  const aiConfig = createUndergroundAiRuntimeConfig({
+    mode: aiMode,
+    env: options.aiEnvironment,
+    fetch: options.providerFetch,
+    onModelOutputDelta: options.onModelOutputDelta,
+  });
   if (!aiConfig.enabled) {
-    throw new Error("Expected fake AI runtime config to be enabled for the minimal AgentArbor loop.");
+    throw createUndergroundAiDisabledConfigurationError(aiConfig.summaryInput);
   }
 
   const underground = await runUndergroundDirectionSessionWithIntelligence(goal, {
     constraints: options.constraints,
     createIntelligenceChannel: aiConfig.createIntelligenceChannel,
-    createToolCenter: aiConfig.createToolCenter,
+    createToolCenter: options.createToolCenter ?? aiConfig.createToolCenter,
+    onRuntimeReady: options.onRuntimeReady,
   });
   const runtime = underground.runtime;
   const taskSoil = createTaskSoil({
@@ -97,7 +119,11 @@ export async function runMinimalLoop(
       },
     ],
     constraints: runtime.constraints,
-    permissionBoundaryRefs: ["read:workspace:current-task", "write:memory://artifacts", "execute:fake-ai"],
+    permissionBoundaryRefs: [
+      "read:workspace:current-task",
+      "write:memory://artifacts",
+      aiMode === "openai-compatible" ? "execute:openai-compatible-ai" : "execute:fake-ai",
+    ],
     globalSoilRefs: [
       ...runtime.soilStore.listCapabilityAssetRefs().map((ref) => ref.id),
       ...runtime.soilStore.listPathBiasRefs().map((ref) => ref.id),

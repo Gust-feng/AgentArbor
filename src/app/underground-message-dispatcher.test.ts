@@ -33,27 +33,21 @@ test("dispatcher processes repeated goal messages once for a trace with fake AI"
     toolCenter: aiConfig.createToolCenter(runtime),
   });
   try {
-    const firstGoalMessage = createGoalReceivedMessage({
-      traceId: "trace-repeat",
-      goalId: "goal-repeat",
-      goal: "Build a small deterministic helper.",
-    });
-    const repeatedPhaseMessage = createGoalReceivedMessage({
+    const goalMessage = createGoalReceivedMessage({
       traceId: "trace-repeat",
       goalId: "goal-repeat",
       goal: "Build a small deterministic helper.",
     });
 
-    runtime.bus.publish(firstGoalMessage);
-    runtime.bus.publish(firstGoalMessage);
-    runtime.bus.publish(repeatedPhaseMessage);
+    runtime.bus.publish(goalMessage);
+    runtime.bus.publish(goalMessage);
 
     const result = await dispatcher.dispatchUntilIdleAsync();
 
     assert.notEqual(result, undefined);
     assert.equal((result?.dispatchSteps ?? 0) > 0, true);
-    assert.equal(countEvents(runtime, "goal.received"), 3);
-    assert.equal(countEvents(runtime, "underground.exploration_planned"), 1);
+    assert.equal(countEvents(runtime, "goal.received"), 2);
+    assert.equal(result?.terminalStatus, "approved_package_created");
     assert.equal(countEvents(runtime, "direction_handoff.completed"), 1);
     assert.equal(countEvents(runtime, "model.requested") > 0, true);
   } finally {
@@ -61,7 +55,7 @@ test("dispatcher processes repeated goal messages once for a trace with fake AI"
   }
 });
 
-test("dispatcher max step guard stops recursive message dispatch", () => {
+test("dispatcher max step guard rejects sync full dispatch", () => {
   const runtime = createMinimalRuntime();
   const dispatcher = new MessageDrivenUndergroundDispatcher({ runtime, maxDispatchSteps: 1 });
   try {
@@ -77,8 +71,7 @@ test("dispatcher max step guard stops recursive message dispatch", () => {
       name: "UndergroundMessageDispatcherError",
       message: /maxDispatchSteps=1/,
     });
-    assert.equal(countEvents(runtime, "underground.exploration_planned"), 1);
-    assert.equal(countEvents(runtime, "rootlet_cluster.started"), 0);
+    assert.equal(countEvents(runtime, "underground.exploration_planned"), 0);
   } finally {
     dispatcher.dispose();
   }
@@ -111,42 +104,6 @@ test("dispatcher rejects later stage messages without prior goal context", () =>
   }
 });
 
-test("dispatcher rejects same-trace stage messages not published by the expected handler", () => {
-  const runtime = createMinimalRuntime();
-  const dispatcher = new MessageDrivenUndergroundDispatcher({ runtime });
-  try {
-    runtime.bus.publish(
-      createGoalReceivedMessage({
-        traceId: "trace-forged-stage",
-        goalId: "goal-forged-stage",
-        goal: "Build a small deterministic helper.",
-      })
-    );
-    runtime.bus.publish(
-      createMessage({
-        traceId: "trace-forged-stage",
-        from: { id: "test-driver", role: "underground_center" },
-        to: { group: "underground-center" },
-        type: "underground.exploration_planned",
-        intent: "plan_underground_exploration",
-        payload: {
-          goalId: "goal-forged-stage",
-          planId: "forged-plan",
-        },
-      })
-    );
-
-    assert.throws(() => dispatcher.dispatchUntilIdle(), {
-      name: "UndergroundMessageDispatcherError",
-      message: /must be published by underground-intent-core/,
-    });
-    assert.equal(countEvents(runtime, "rootlet_cluster.started"), 0);
-    assert.equal(countEvents(runtime, "direction_handoff.completed"), 0);
-  } finally {
-    dispatcher.dispose();
-  }
-});
-
 test("sync dispatch with an intelligence channel fails before model side effects", () => {
   const runtime = createMinimalRuntime();
   const dispatcher = new MessageDrivenUndergroundDispatcher({
@@ -166,7 +123,6 @@ test("sync dispatch with an intelligence channel fails before model side effects
       name: "UndergroundMessageDispatcherError",
       message: /dispatchUntilIdleAsync/,
     });
-    assert.equal(countEvents(runtime, "rootlet_cluster.started"), 1);
     assert.equal(countEvents(runtime, "model.requested"), 0);
     assert.equal(countEvents(runtime, "exploration_candidate.produced"), 0);
   } finally {

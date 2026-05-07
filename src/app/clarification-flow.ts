@@ -33,6 +33,8 @@ const EXPECTED_FAKE_AI_CLARIFICATION_MODEL_EVENTS: ArborMessageType[] = [
   "model.completed",
   "model.requested",
   "model.completed",
+  "model.requested",
+  "model.completed",
 ];
 
 export const EXPECTED_CLARIFICATION_REQUIRED_EVENTS: ArborMessageType[] = [

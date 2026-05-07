@@ -85,7 +85,8 @@ test("autonomy core can use search before requesting convergence through AgentTu
   assert.equal(result.terminalStatus, "approved_package_created");
   assert.equal(result.eventTypes.includes("tool.requested"), true);
   assert.equal(result.eventTypes.includes("tool.completed"), true);
-  assert.equal(result.undergroundReport.autonomy?.latestDecision?.sourceRefs.includes("research:autonomy-search"), true);
+  // Tool call refs are tracked through reasonWithAgentTurn envelope
+  assert.equal(result.undergroundReport.autonomy?.latestDecision?.sourceRefs.some((ref: string) => ref.startsWith("tool-call:")), true);
   assert.equal(result.undergroundReport.agentClusterRun, undefined);
   assert.equal(
     result.directionHandoff?.sourceCandidateRefs.every((candidate) =>
@@ -121,6 +122,9 @@ test("autonomy cognitive manager redacts sensitive text in underground report an
               spawnRequests: [],
               rationale: `Bearer autonomy-bearer-token ${"z".repeat(900)}`,
               sourceRefs: [],
+              decisionSummary: "Autonomy recommends convergence.",
+              uncertainty: "Test fixture output.",
+              confidence: 0.74,
             },
           ],
         }),
@@ -239,6 +243,18 @@ function outputForRequest(request: ModelRequest): unknown {
       overallDirectionSummary: "Autonomy loop test advisory remains bounded by package validation.",
     };
   }
+
+  if (request.outputContract.contractId === "underground.candidate_aggregation.v1") {
+    return {
+      aggregationRationale: "Test candidate collector aggregated rootlet outputs.",
+      deduplicationNotes: [],
+      implicitRelations: [],
+      decisionSummary: "Test candidate aggregation completed.",
+      uncertainty: "Test fixture output.",
+      confidence: 0.74,
+    };
+  }
+
   return {
     candidates: [candidateForKind(rootletKindFromContractId(request.outputContract.contractId))],
   };
@@ -336,6 +352,9 @@ function requestConvergenceOutput(): Record<string, unknown> {
     spawnRequests: [],
     rationale: "Convergence Judge must decide before Handoff Steward packages.",
     sourceRefs: [],
+    decisionSummary: "Autonomy recommends convergence.",
+    uncertainty: "Test fixture output.",
+    confidence: 0.74,
   };
 }
 
@@ -356,6 +375,9 @@ function continueExplorationOutput(kind: RootletClusterKind): Record<string, unk
     ],
     rationale: "Continue once, then ask Convergence Judge to review the expanded pool.",
     sourceRefs: [],
+    decisionSummary: "Autonomy recommends convergence.",
+    uncertainty: "Test fixture output.",
+    confidence: 0.74,
   };
 }
 

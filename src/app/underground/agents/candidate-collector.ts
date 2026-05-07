@@ -1,4 +1,5 @@
 import type { AgentTurnRuntime } from "../../../kernel/intelligence/index.js";
+import type { ModelMessage, ModelOutputContract } from "../../../domain/intelligence/index.js";
 import {
   type AgentActionOutput,
   type AgentDecision,
@@ -15,6 +16,12 @@ import {
   rejectGuardedAction,
 } from "../../../domain/underground/index.js";
 import { createMinimalCandidatePool } from "../../underground-candidates.js";
+import {
+  fallbackReasoningTrace,
+  reasonWithAgentTurn,
+  reasoningTraceRefs,
+  type UndergroundReasoningTraceEntry,
+} from "./reasoning.js";
 
 export type CandidateCollectorWorkspace = {
   readonly goalId: string;
@@ -37,10 +44,18 @@ export type CandidateCollectorPercept = AgentPercept & {
 export type CandidateCollectorDecision = AgentDecision & {
   readonly aggregationRationale: string;
   readonly candidateCount: number;
+  readonly deduplicationNotes: readonly string[];
+  readonly implicitRelations: readonly string[];
+  readonly source: "ai" | "deterministic_fallback";
+  readonly confidence: number;
+  readonly reasoningTrace: readonly UndergroundReasoningTraceEntry[];
 };
 
 export type CandidateCollectorAction = AgentActionOutput & {
   readonly candidatePool: CandidatePool;
+  readonly source: "ai" | "deterministic_fallback";
+  readonly confidence: number;
+  readonly reasoningTrace: readonly UndergroundReasoningTraceEntry[];
 };
 
 const CANDIDATE_COLLECTOR_PROTOCOL: AgentProtocol = {
@@ -79,15 +94,50 @@ export class CandidateCollectorAgent
     };
   }
 
-  reason(
-    _ctx: AgentRunContext<CandidateCollectorWorkspace, CandidateCollectorCapabilities>,
+  async reason(
+    ctx: AgentRunContext<CandidateCollectorWorkspace, CandidateCollectorCapabilities>,
     percept: CandidateCollectorPercept
-  ): CandidateCollectorDecision {
+  ): Promise<CandidateCollectorDecision> {
     const candidateCount = percept.rootletOutputs.length;
+    const fallbackRationale = `Aggregated ${candidateCount} rootlet outputs into candidate pool for goal ${percept.goalId}.`;
+
+    const ai = await reasonWithAgentTurn<CandidateAggregationParsed>({
+      agentId: this.agentId,
+      agentTurnRuntime: ctx.capabilities?.agentTurnRuntime,
+      traceId: percept.inputRefs[0],
+      goalId: percept.goalId,
+      purpose: "candidate_aggregation",
+      outputContract: CANDIDATE_AGGREGATION_CONTRACT,
+      callerRef: { kind: "candidate_pool", id: this.agentId, label: "candidate_aggregation" },
+      inputRefs: [{ kind: "goal", id: percept.goalId }],
+      inputRefIds: percept.inputRefs,
+      messages: buildCandidateAggregationMessages(percept),
+      constraints: [],
+      parse: (output) => parseCandidateAggregationOutput(output, candidateCount),
+    });
+
+    const rationale = ai.value?.aggregationRationale ?? fallbackRationale;
+    const deduplicationNotes = ai.value?.deduplicationNotes ?? [];
+    const implicitRelations = ai.value?.implicitRelations ?? [];
+    const reasoningTrace =
+      ai.reasoningTrace.length > 0
+        ? ai.reasoningTrace
+        : fallbackReasoningTrace({
+            agentId: this.agentId,
+            decisionSummary: fallbackRationale,
+            inputRefs: percept.inputRefs,
+            fallbackRefs: ["deterministic_fallback"],
+          });
+
     return {
-      rationaleRefs: percept.rootletOutputs.map((o: RootletOutput) => o.outputId),
-      aggregationRationale: `Aggregated ${candidateCount} rootlet outputs into candidate pool for goal ${percept.goalId}.`,
+      rationaleRefs: [...percept.rootletOutputs.map((o: RootletOutput) => o.outputId), ...reasoningTraceRefs(reasoningTrace)],
+      aggregationRationale: rationale,
       candidateCount,
+      deduplicationNotes,
+      implicitRelations,
+      source: ai.source,
+      confidence: ai.confidence,
+      reasoningTrace,
     };
   }
 
@@ -104,6 +154,9 @@ export class CandidateCollectorAgent
     return {
       outputRefs: [candidatePool.poolId],
       candidatePool,
+      source: _decision.source,
+      confidence: _decision.confidence,
+      reasoningTrace: _decision.reasoningTrace,
     };
   }
 
@@ -163,4 +216,106 @@ export class CandidateCollectorAgent
 
     return acceptGuardedAction(output);
   }
+}
+
+const CANDIDATE_AGGREGATION_CONTRACT: ModelOutputContract = {
+  contractId: "underground.candidate_aggregation.v1",
+  outputKind: "explanation",
+  format: "json_object",
+  requiredFields: ["aggregationRationale", "deduplicationNotes", "implicitRelations", "decisionSummary", "uncertainty", "confidence"],
+  requiredStringFields: ["aggregationRationale", "decisionSummary", "uncertainty"],
+  visibleOutput: {
+    fields: ["aggregationRationale", "decisionSummary", "uncertainty"],
+    fieldTypes: {
+      aggregationRationale: "string",
+      decisionSummary: "string",
+      uncertainty: "string",
+    },
+    maxFieldLength: 240,
+  },
+};
+
+function buildCandidateAggregationMessages(percept: CandidateCollectorPercept): readonly ModelMessage[] {
+  const outputLines = percept.rootletOutputs.map((output) =>
+    `- [${output.kind}] outputId=${output.outputId} summary=${truncate(output.summary, 180)} evidenceRefs=${output.evidenceRefs.length} source=${output.source}`
+  );
+  return [
+    {
+      role: "system",
+      content: [
+        "You are AgentArbor Underground Candidate Collector.",
+        "Analyze the rootlet outputs and provide aggregation insights: deduplication notes, implicit relations between candidates, and confidence annotations.",
+        "Return JSON only. Do not include chain-of-thought. Use decisionSummary for a short displayable decision summary and uncertainty for open concerns.",
+      ].join("\n"),
+    },
+    {
+      role: "user",
+      content: [
+        `Goal id: ${percept.goalId}`,
+        `Rootlet outputs (${percept.rootletOutputs.length}):`,
+        ...outputLines,
+        "",
+        "Return fields: aggregationRationale, deduplicationNotes [string[]], implicitRelations [string[]], decisionSummary, uncertainty, confidence.",
+      ].join("\n"),
+    },
+  ];
+}
+
+type CandidateAggregationParsed = {
+  readonly aggregationRationale: string;
+  readonly deduplicationNotes: readonly string[];
+  readonly implicitRelations: readonly string[];
+};
+
+function parseCandidateAggregationOutput(
+  output: unknown,
+  candidateCount: number,
+): import("./reasoning.js").UndergroundReasoningParseResult<CandidateAggregationParsed> {
+  const record = asRecord(output);
+  const aggregationRationale = stringOrUndefined(record.aggregationRationale)
+    ?? `Aggregated ${candidateCount} rootlet outputs into candidate pool.`;
+  return {
+    ok: true,
+    value: {
+      aggregationRationale,
+      deduplicationNotes: stringArray(record.deduplicationNotes),
+      implicitRelations: stringArray(record.implicitRelations),
+    },
+    decisionSummary: stringOrUndefined(record.decisionSummary) ?? aggregationRationale,
+    uncertainty: stringOrUndefined(record.uncertainty),
+    confidence: numberOrUndefined(record.confidence),
+  };
+}
+
+function truncate(value: string, maxLength: number): string {
+  if (value.length <= maxLength) {
+    return value;
+  }
+  return `${value.slice(0, Math.max(0, maxLength - 3))}...`;
+}
+
+function asRecord(value: unknown): Readonly<Record<string, unknown>> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Readonly<Record<string, unknown>>)
+    : {};
+}
+
+function stringOrUndefined(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function numberOrUndefined(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function stringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return [...new Set(
+    value
+      .filter((item): item is string => typeof item === "string")
+      .map((item) => item.trim())
+      .filter((item) => item.length > 0)
+  )];
 }

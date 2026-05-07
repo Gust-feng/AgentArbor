@@ -165,6 +165,17 @@ function defaultFakeOutput(request: ModelRequest): unknown {
     return fakeHandoffNarrativeOutput(request);
   }
 
+  if (request.outputContract.contractId === "underground.candidate_aggregation.v1") {
+    return {
+      aggregationRationale: "Fake Candidate Collector aggregated rootlet outputs into a unified candidate pool.",
+      deduplicationNotes: ["No duplicates detected in fake output."],
+      implicitRelations: [],
+      decisionSummary: "Fake candidate aggregation completed.",
+      uncertainty: "Fake aggregation is deterministic fixture output.",
+      confidence: 0.74,
+    };
+  }
+
   if (request.outputContract.contractId === "convergence-advisory") {
     return {
       candidateAnalyses: [],
@@ -183,6 +194,9 @@ function defaultFakeOutput(request: ModelRequest): unknown {
       spawnRequests: [],
       rationale: "Fake provider asks Convergence Judge to review candidate material before handoff.",
       sourceRefs: [],
+      decisionSummary: "Fake autonomy recommends convergence after reviewing candidate pool.",
+      uncertainty: "Fake autonomy output is deterministic fixture, not real judgment.",
+      confidence: 0.74,
     };
   }
 

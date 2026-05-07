@@ -1,5 +1,6 @@
 import type { AgentTurnRuntime } from "../../../kernel/intelligence/index.js";
 import type { Constraint } from "../../../domain/contracts.js";
+import type { ModelOutputContract } from "../../../domain/intelligence/index.js";
 import {
   type AgentActionOutput,
   type AgentDecision,
@@ -17,8 +18,19 @@ import {
   type GuardedActionOutput,
   rejectGuardedAction,
 } from "../../../domain/underground/index.js";
+import { createId } from "../../../kernel/id.js";
 import {
-  requestUndergroundAutonomyDecision,
+  fallbackReasoningTrace,
+  reasonWithAgentTurn,
+  reasoningTraceRefs,
+  type UndergroundReasoningTraceEntry,
+} from "./reasoning.js";
+import {
+  AUTONOMY_DECISION_CONTRACT,
+  buildAutonomyDecisionMessages,
+  failedAutonomyDecision,
+  parseAutonomyDecisionAsReasoningResult,
+  researchRefsFromValue,
 } from "../autonomy-intelligence.js";
 
 export type AutonomyReviewerWorkspace = {
@@ -51,10 +63,16 @@ export type AutonomyReviewerPercept = AgentPercept & {
 
 export type AutonomyReviewerDecision = AgentDecision & {
   readonly decision: UndergroundAutonomyDecision;
+  readonly source: "ai" | "deterministic_fallback";
+  readonly confidence: number;
+  readonly reasoningTrace: readonly UndergroundReasoningTraceEntry[];
 };
 
 export type AutonomyReviewerAction = AgentActionOutput & {
   readonly decision: UndergroundAutonomyDecision;
+  readonly source: "ai" | "deterministic_fallback";
+  readonly confidence: number;
+  readonly reasoningTrace: readonly UndergroundReasoningTraceEntry[];
 };
 
 const AUTONOMY_REVIEWER_PROTOCOL: AgentProtocol = {
@@ -111,32 +129,110 @@ export class AutonomyReviewerAgent
     ctx: AgentRunContext<AutonomyReviewerWorkspace, AutonomyReviewerCapabilities>,
     percept: AutonomyReviewerPercept
   ): Promise<AutonomyReviewerDecision> {
-    const decision = await requestUndergroundAutonomyDecision({
+    const decisionId = createId("autonomy-decision");
+    const cycles = percept.autonomyCycles.length === 0 ? [percept.currentCycle] : percept.autonomyCycles;
+
+    const fallbackReason = ctx.capabilities?.agentTurnRuntime === undefined
+      ? "ai_required_for_autonomy" as const
+      : "autonomy_decision_failed" as const;
+    const fallbackDecision = failedAutonomyDecision({
+      decisionId,
+      cycleId: percept.currentCycle.explorationCycleId,
+      candidatePoolId: percept.candidatePool.poolId,
+      reason: fallbackReason,
+      rationale: ctx.capabilities?.agentTurnRuntime === undefined
+        ? "Autonomy review is AI-required and no AgentTurnRuntime was provided."
+        : "Autonomy model call failed or did not pass output validation.",
+    });
+
+    const ai = await reasonWithAgentTurn({
+      agentId: this.agentId,
       agentTurnRuntime: ctx.capabilities?.agentTurnRuntime,
       traceId: percept.inputRefs[0],
       goalId: percept.goalId,
-      goal: percept.rawGoal,
-      goalIntentProfile: percept.goalIntentProfile,
-      candidatePool: percept.candidatePool,
-      rootletOutputs: percept.rootletOutputs,
+      purpose: "autonomy_decision",
+      outputContract: AUTONOMY_DECISION_CONTRACT as ModelOutputContract,
+      callerRef: { kind: "convergence_review", id: this.agentId, label: "autonomy_review" },
+      inputRefs: [
+        { kind: "goal", id: percept.goalId },
+        { kind: "candidate_pool", id: percept.candidatePool.poolId },
+      ],
+      inputRefIds: percept.inputRefs,
+      messages: buildAutonomyDecisionMessages({
+        agentTurnRuntime: ctx.capabilities?.agentTurnRuntime,
+        traceId: percept.inputRefs[0],
+        goalId: percept.goalId,
+        goal: percept.rawGoal,
+        goalIntentProfile: percept.goalIntentProfile,
+        candidatePool: percept.candidatePool,
+        rootletOutputs: percept.rootletOutputs,
+        constraints: percept.constraints,
+        cycle: percept.currentCycle,
+        cycles,
+        maxCycles: percept.maxAutonomyCycles,
+      }),
       constraints: percept.constraints,
-      cycle: percept.currentCycle,
-      cycles: percept.autonomyCycles.length === 0 ? [percept.currentCycle] : percept.autonomyCycles,
-      maxCycles: percept.maxAutonomyCycles,
+      allowedTools: ["search", "read"],
+      maxModelRounds: 3,
+      maxToolRounds: 2,
+      fallback: "disabled",
+      parse: (output, response) => parseAutonomyDecisionAsReasoningResult(output, {
+        decisionId,
+        cycleId: percept.currentCycle.explorationCycleId,
+        candidatePool: percept.candidatePool,
+        modelCallRefs: [{
+          requestId: response.requestId,
+          responseId: response.responseId,
+          providerId: response.providerId,
+          model: response.model,
+          outputKind: response.outputKind,
+          eventRefs: ["model.requested", response.status === "completed" ? "model.completed" : "model.failed"],
+          validationStatus: response.validation.status,
+        }],
+        toolSourceRefs: [],
+      }),
     });
+
+    const decision = ai.value ?? fallbackDecision;
+    // Merge tool call refs and research refs from tool outputs into the decision's sourceRefs
+    const researchRefs = ai.toolCallOutputs
+      .filter((output): output is unknown => output !== null && output !== undefined)
+      .flatMap((output) => researchRefsFromValue(output));
+    const extraRefs = [...ai.toolCallRefs, ...researchRefs];
+    const mergedDecision = extraRefs.length > 0 && decision.status === "completed"
+      ? { ...decision, sourceRefs: [...new Set([...decision.sourceRefs, ...extraRefs])] }
+      : decision;
+    const reasoningTrace =
+      ai.reasoningTrace.length > 0
+        ? ai.reasoningTrace
+        : fallbackReasoningTrace({
+            agentId: this.agentId,
+            decisionSummary: `Autonomy review used deterministic fallback: ${decision.stopReason ?? "ai_required_for_autonomy"}.`,
+            inputRefs: percept.inputRefs,
+            fallbackRefs: ["deterministic_fallback"],
+            uncertainty: "Autonomy review requires AgentTurnRuntime for AI judgment.",
+            confidence: 0.18,
+          });
+
     return {
-      rationaleRefs: [decision.decisionId, ...decision.sourceRefs],
-      decision,
+      rationaleRefs: [mergedDecision.decisionId, ...mergedDecision.sourceRefs, ...reasoningTraceRefs(reasoningTrace)],
+      decision: mergedDecision,
+      source: ai.source,
+      confidence: ai.confidence,
+      reasoningTrace,
     };
   }
 
   act(
-    ctx: AgentRunContext<AutonomyReviewerWorkspace, AutonomyReviewerCapabilities>,
+    _ctx: AgentRunContext<AutonomyReviewerWorkspace, AutonomyReviewerCapabilities>,
     decision: AutonomyReviewerDecision
   ): AutonomyReviewerAction {
     return {
       outputRefs: [decision.decision.decisionId],
       decision: decision.decision,
+      source: decision.source,
+      confidence: decision.confidence,
+      reasoningTrace: decision.reasoningTrace,
     };
   }
 

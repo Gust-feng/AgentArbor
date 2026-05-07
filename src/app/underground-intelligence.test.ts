@@ -48,7 +48,7 @@ test("Underground intelligence output enters candidate pool and waits for conver
   assert.equal(result.undergroundReport.candidatePool.counts.total, 1);
   assert.equal(result.undergroundReport.candidatePool.candidatesByKind.option.length, 1);
   assert.equal(modelOutput?.source, "ai");
-  assert.equal(result.runtime.eventLog.types().filter((type) => type === "model.requested").length, 6);
+  assert.equal(result.runtime.eventLog.types().filter((type) => type === "model.requested").length, 7);
   assert.equal(result.undergroundReport.convergenceReport.source, "ai");
   assert.equal(result.undergroundReport.convergenceReport.aiAdvisory?.status, "completed");
   assert.equal(
@@ -199,8 +199,8 @@ test("All selected rootlet kinds request AI candidate advice through Intelligenc
     "constraint",
     "counterfactual",
   ]);
-  assert.equal(result.runtime.eventLog.types().filter((type) => type === "model.requested").length, 11);
-  assert.equal(result.runtime.eventLog.types().filter((type) => type === "model.completed").length, 11);
+  assert.equal(result.runtime.eventLog.types().filter((type) => type === "model.requested").length, 12);
+  assert.equal(result.runtime.eventLog.types().filter((type) => type === "model.completed").length, 12);
   assert.equal(result.runtime.eventLog.types().filter((type) => type === "model.failed").length, 0);
   assert.equal(result.undergroundReport.convergenceReport.source, "ai");
   assert.equal(result.undergroundReport.convergenceReport.aiAdvisory?.status, "completed");
@@ -395,7 +395,7 @@ test("Completed AI calls with empty candidate arrays fall back to deterministic 
       }),
   });
 
-  assert.equal(result.runtime.eventLog.types().filter((type) => type === "model.completed").length, 6);
+  assert.equal(result.runtime.eventLog.types().filter((type) => type === "model.completed").length, 7);
   assert.equal(result.runtime.eventLog.types().filter((type) => type === "model.failed").length, 0);
   assert.equal(result.undergroundReport.convergenceReport.aiAdvisory?.status, "completed");
   assert.equal(
@@ -594,6 +594,14 @@ class TestModelProvider implements ModelProvider {
       });
     }
 
+    if (!this.options.fail && request.outputContract.contractId === "underground.candidate_aggregation.v1") {
+      return completedTestResponse({
+        request,
+        provider: this,
+        structuredOutput: createLegalCandidateAggregationOutput(),
+      });
+    }
+
     const step = this.nextStep();
     if (step.fail) {
       return createFailedModelResponse({
@@ -659,6 +667,17 @@ function completedTestResponse(input: {
   };
 }
 
+function createLegalCandidateAggregationOutput(): Record<string, unknown> {
+  return {
+    aggregationRationale: "Test Candidate Collector aggregated rootlet outputs into candidate pool.",
+    deduplicationNotes: [],
+    implicitRelations: [],
+    decisionSummary: "Test candidate aggregation completed.",
+    uncertainty: "Test output, not real judgment.",
+    confidence: 0.74,
+  };
+}
+
 function createLegalAutonomyDecisionOutput(): Record<string, unknown> {
   return {
     action: "request_convergence",
@@ -667,6 +686,9 @@ function createLegalAutonomyDecisionOutput(): Record<string, unknown> {
     spawnRequests: [],
     rationale: "Convergence Judge remains the only promotion path.",
     sourceRefs: [],
+    decisionSummary: "Autonomy recommends convergence.",
+    uncertainty: "Test output, not real judgment.",
+    confidence: 0.74,
   };
 }
 

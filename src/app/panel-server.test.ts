@@ -676,7 +676,13 @@ test("panel openai-compatible run uses configured ToolCenter search from tools r
     }
 
     modelFetchCalls += 1;
-    const body = JSON.parse(init.body) as { messages?: readonly { role?: string }[] };
+    const body = JSON.parse(init.body) as { messages?: readonly { role?: string; content?: string }[] };
+    const isCandidateAggregation = body.messages?.some(
+      (message) => typeof message.content === "string" && message.content.includes("Underground Candidate Collector")
+    ) ?? false;
+    if (isCandidateAggregation) {
+      return createStubOpenAiAggregationResponse("configured-tools-model");
+    }
     const hasToolMessage = body.messages?.some((message) => message.role === "tool") ?? false;
     return hasToolMessage ? createStubOpenAiResponse("configured-tools-model") : createOpenAiSearchToolCallResponse();
   };
@@ -921,6 +927,39 @@ function createStubOpenAiResponse(
                   ...candidateOverrides,
                 },
               ],
+            }),
+          },
+        },
+      ],
+      usage: {
+        prompt_tokens: 10,
+        completion_tokens: 12,
+        total_tokens: 22,
+      },
+    }),
+  };
+}
+
+function createStubOpenAiAggregationResponse(
+  model: string
+): Awaited<ReturnType<PanelProviderFetch>> {
+  return {
+    ok: true,
+    status: 200,
+    json: async () => ({
+      model,
+      choices: [
+        {
+          finish_reason: "stop",
+          message: {
+            role: "assistant",
+            content: JSON.stringify({
+              aggregationRationale: "Stub aggregation: merged rootlet outputs into unified candidate pool.",
+              deduplicationNotes: ["No duplicates detected."],
+              implicitRelations: [],
+              decisionSummary: "Aggregated candidates from rootlet agents.",
+              uncertainty: "None for stub.",
+              confidence: 0.9,
             }),
           },
         },

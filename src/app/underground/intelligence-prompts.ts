@@ -9,6 +9,11 @@ export type SoilRefSummary = {
   readonly summary: string;
 };
 
+export type SiblingRootletSummary = {
+  readonly kind: string;
+  readonly summary: string;
+};
+
 export type BuildUndergroundRootletCandidateAdviceMessagesInput = {
   readonly goal: string;
   readonly goalIntentProfile: GoalIntentProfile;
@@ -16,6 +21,7 @@ export type BuildUndergroundRootletCandidateAdviceMessagesInput = {
   readonly constraints: readonly Constraint[];
   readonly soilRefs?: readonly SoilRefSummary[];
   readonly historicalPathBias?: string;
+  readonly siblingRootletSummaries?: readonly SiblingRootletSummary[];
 };
 
 export function buildUndergroundRootletCandidateAdviceMessages(
@@ -122,6 +128,14 @@ function buildUserPromptContent(input: BuildUndergroundRootletCandidateAdviceMes
     sections.push(
       "",
       `Historical path bias: ${input.historicalPathBias}`,
+    );
+  }
+
+  if (input.siblingRootletSummaries !== undefined && input.siblingRootletSummaries.length > 0) {
+    sections.push(
+      "",
+      "Sibling rootlet summaries (other completed rootlet outputs for this goal — use to generate counterpoints, rebuttals, or complementary analysis):",
+      ...input.siblingRootletSummaries.map((sibling) => `  - [${sibling.kind}] ${truncate(sibling.summary, 200)}`),
     );
   }
 

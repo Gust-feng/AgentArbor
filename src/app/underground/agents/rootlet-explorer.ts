@@ -48,6 +48,7 @@ type RootletExplorerWorkspaceData = Readonly<{
   rootletClusters?: RootletClusterPlan[];
   runningRootletInvocations?: UndergroundAgentInvocation[];
   goalIntentProfile?: GoalIntentProfile;
+  rootletOutputs?: readonly RootletOutput[];
 }>;
 
 type RootletExplorerWorkspaceSnapshot = WorkspaceSnapshot<RootletExplorerWorkspaceData>;
@@ -64,6 +65,7 @@ type RootletExplorerPercept = AgentPercept & {
   readonly rawGoal: string;
   readonly goalIntentProfile?: GoalIntentProfile;
   readonly constraints: readonly Constraint[];
+  readonly siblingRootletSummaries: readonly { readonly kind: string; readonly summary: string }[];
 };
 
 type RootletExplorerDecision = AgentDecision & {
@@ -131,6 +133,9 @@ export class RootletExplorerAgent
     const invocations = snapshot.data.runningRootletInvocations ?? [];
     const cluster = clusters.find((c: RootletClusterPlan) => c.kind === this.kind);
     const invocation = invocations.find((inv: UndergroundAgentInvocation) => inv.agentId === this.agentId);
+    const siblingRootletSummaries = (snapshot.data.rootletOutputs ?? [])
+      .filter((output: RootletOutput) => output.kind !== this.kind)
+      .map((output: RootletOutput) => ({ kind: output.kind, summary: output.summary }));
     if (cluster === undefined || invocation === undefined) {
       return {
         observedAt: new Date().toISOString(),
@@ -141,6 +146,7 @@ export class RootletExplorerAgent
         rawGoal,
         goalIntentProfile: snapshot.data.goalIntentProfile,
         constraints: ctx.capabilities?.constraints ?? [],
+        siblingRootletSummaries,
       };
     }
     return {
@@ -152,6 +158,7 @@ export class RootletExplorerAgent
       rawGoal,
       goalIntentProfile: snapshot.data.goalIntentProfile,
       constraints: ctx.capabilities?.constraints ?? [],
+      siblingRootletSummaries,
     };
   }
 
@@ -184,6 +191,7 @@ export class RootletExplorerAgent
         goalIntentProfile,
         cluster: percept.cluster,
         constraints: percept.constraints,
+        siblingRootletSummaries: percept.siblingRootletSummaries.length > 0 ? percept.siblingRootletSummaries : undefined,
       }),
       constraints: percept.constraints,
       allowedTools: strategy.availableTools,

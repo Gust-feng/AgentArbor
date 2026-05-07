@@ -25,7 +25,8 @@ export type ModelPurpose =
   | "autonomy_decision"
   | "convergence_advisory"
   | "convergence_judgment"
-  | "handoff_narrative";
+  | "handoff_narrative"
+  | "candidate_aggregation";
 
 export type ModelOutputKind = "candidate" | "draft" | "explanation" | "evidence_suggestion";
 

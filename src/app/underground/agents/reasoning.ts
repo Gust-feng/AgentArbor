@@ -52,6 +52,7 @@ export type UndergroundReasoningResult<T> = {
   readonly confidence: number;
   readonly modelCallRefs: readonly ModelCallRef[];
   readonly toolCallRefs: readonly string[];
+  readonly toolCallOutputs: readonly unknown[];
   readonly fallbackRefs: readonly string[];
   readonly reasoningTrace: readonly UndergroundReasoningTraceEntry[];
   readonly finalOutput?: ModelResponse;
@@ -149,6 +150,7 @@ export async function reasonWithAgentTurn<T>(input: {
 
   const modelCallRefs = [modelCallRefFromTurn(turn)];
   const toolCallRefs = toolCallRefsFromTurn(turn);
+  const toolCallOutputs = turn.toolCalls.map((tc) => tc.output);
   const confidence = normalizeConfidence(parsed.confidence ?? confidenceFromOutput(turn.finalOutput.structuredOutput) ?? 0.72);
   return {
     status: "completed",
@@ -157,6 +159,7 @@ export async function reasonWithAgentTurn<T>(input: {
     confidence,
     modelCallRefs,
     toolCallRefs,
+    toolCallOutputs,
     fallbackRefs: [],
     reasoningTrace: [
       createReasoningTrace({
@@ -228,6 +231,7 @@ function failedReasoning(input: {
     confidence,
     modelCallRefs,
     toolCallRefs,
+    toolCallOutputs: [],
     fallbackRefs: input.fallbackRefs,
     reasoningTrace: [
       createReasoningTrace({

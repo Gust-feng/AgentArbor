@@ -226,6 +226,18 @@ class GoalSpecificCandidateProvider implements ModelProvider {
               spawnRequests: [],
               rationale: "Convergence Judge still owns the final report.",
               sourceRefs: [],
+              decisionSummary: "GoalSpecific autonomy recommends convergence.",
+              uncertainty: "Deterministic test output.",
+              confidence: 0.74,
+            }
+        : request.outputContract.contractId === "underground.candidate_aggregation.v1"
+          ? {
+              aggregationRationale: "GoalSpecific candidate collector aggregated rootlet outputs.",
+              deduplicationNotes: [],
+              implicitRelations: [],
+              decisionSummary: "GoalSpecific candidate aggregation completed.",
+              uncertainty: "Deterministic test output.",
+              confidence: 0.74,
             }
         : {
             candidates: [
@@ -295,6 +307,18 @@ class EmptyCandidateProvider implements ModelProvider {
               spawnRequests: [],
               rationale: "Convergence Judge still owns the final report.",
               sourceRefs: [],
+              decisionSummary: "Empty autonomy recommends convergence.",
+              uncertainty: "Deterministic test output.",
+              confidence: 0.74,
+            }
+        : request.outputContract.contractId === "underground.candidate_aggregation.v1"
+          ? {
+              aggregationRationale: "Empty candidate collector aggregated zero rootlet outputs.",
+              deduplicationNotes: [],
+              implicitRelations: [],
+              decisionSummary: "Empty candidate aggregation completed.",
+              uncertainty: "Deterministic test output.",
+              confidence: 0.74,
             }
         : { candidates: [] };
     return {

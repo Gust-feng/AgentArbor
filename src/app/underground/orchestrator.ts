@@ -2,7 +2,8 @@ import type { ArborMessage } from "../../domain/common.js";
 import type { IntelligenceChannel } from "../../domain/intelligence/index.js";
 import type { ToolExecutionBroker } from "../../domain/tools/index.js";
 import type { Constraint } from "../../domain/constraints.js";
-import type { DirectionHandoffPackage } from "../../domain/agentarbor/direction-handoff-package.js";
+import type { DirectionHandoffPackage, DirectionHandoffPackageRef } from "../../domain/agentarbor/direction-handoff-package.js";
+import type { DirectionHandoff, UndergroundExplorationReport } from "../../domain/underground/index.js";
 import {
   InMemoryMailbox,
   InMemoryWorkspace,
@@ -27,7 +28,6 @@ import {
 import { createId } from "../../kernel/id.js";
 import type { AgentTurnRuntime } from "../../kernel/intelligence/index.js";
 import type { MinimalRuntime } from "../runtime.js";
-import { type UndergroundAgentRunnerResult } from "./cluster/agent-runner.js";
 import { IntentCoreAgent } from "./agents/intent-core.js";
 import { GrowthGovernorAgent } from "./agents/growth-governor.js";
 import { RootletExplorerAgent } from "./agents/rootlet-explorer.js";
@@ -85,7 +85,18 @@ export type UndergroundAgentOrchestratorRunTrace = {
   readonly outputRefs: readonly string[];
 };
 
-export type UndergroundAgentOrchestratorResult = UndergroundAgentRunnerResult & {
+export type UndergroundAgentOrchestratorBaseResult = {
+  readonly terminalStatus: "approved_package_created" | "awaiting_user" | "stopped";
+  readonly undergroundReport: UndergroundExplorationReport;
+  readonly directionHandoff?: DirectionHandoff;
+  readonly directionHandoffPackage: DirectionHandoffPackage;
+  readonly directionHandoffPackageRef: DirectionHandoffPackageRef;
+  readonly loadedDirectionHandoffPackage: DirectionHandoffPackage;
+  readonly processedMessageIds: readonly string[];
+  readonly dispatchSteps: number;
+};
+
+export type UndergroundAgentOrchestratorResult = UndergroundAgentOrchestratorBaseResult & {
   readonly orchestratorRun: UndergroundAgentOrchestratorRunTrace;
 };
 
@@ -191,6 +202,13 @@ export class UndergroundAgentOrchestrator {
         allOutputRefs.push(...rootletResult.output.outputRefs);
         accumulatedRootletOutputs.push(...rootletResult.output.rootletOutputs);
         cycleRootletOutputs.push(...rootletResult.output.rootletOutputs);
+        // Patch workspace so subsequent rootlet explorers can see sibling outputs
+        workspace.patch(rootletAgent.agentId, {
+          data: {
+            ...workspace.snapshot().data,
+            rootletOutputs: [...accumulatedRootletOutputs],
+          },
+        });
       }
 
       const completedRootletInvocations = [

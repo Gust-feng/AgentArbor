@@ -32,6 +32,14 @@ export type RequestUndergroundAutonomyDecisionInput = {
   readonly maxCycles: number;
 };
 
+export type AutonomyDecisionParseInput = {
+  readonly decisionId: string;
+  readonly cycleId: string;
+  readonly candidatePool: CandidatePool;
+  readonly modelCallRefs: readonly ModelCallRef[];
+  readonly toolSourceRefs: readonly string[];
+};
+
 export function createUndergroundAutonomyTurnPolicy(input: {
   readonly callerAgentId: string;
   readonly traceId: string;
@@ -65,6 +73,42 @@ export function createUndergroundAutonomyTurnPolicy(input: {
     },
     sensitivity: "internal",
     budget: { maxOutputTokens: 512, maxLatencyMs: 15_000 },
+  };
+}
+
+export const AUTONOMY_DECISION_CONTRACT = createUndergroundAutonomyTurnPolicy({
+  callerAgentId: "underground-autonomy-reviewer",
+  traceId: "placeholder",
+  goalId: "placeholder",
+}).outputContract!;
+
+export function parseAutonomyDecisionAsReasoningResult(
+  output: unknown,
+  input: AutonomyDecisionParseInput,
+): import("./agents/reasoning.js").UndergroundReasoningParseResult<UndergroundAutonomyDecision> {
+  const parsed = parseAutonomyDecisionOutput({
+    decisionId: input.decisionId,
+    cycleId: input.cycleId,
+    output,
+    candidatePool: input.candidatePool,
+    modelCallRefs: input.modelCallRefs,
+    toolSourceRefs: input.toolSourceRefs,
+  });
+  if (parsed.status === "failed") {
+    return {
+      ok: false,
+      reason: parsed.stopReason ?? "autonomy_decision_failed",
+      decisionSummary: parsed.rationale,
+      uncertainty: parsed.rationale,
+      confidence: 0.18,
+    };
+  }
+  return {
+    ok: true,
+    value: parsed,
+    decisionSummary: parsed.rationale,
+    uncertainty: parsed.informationGaps.join("; ") || "Autonomy review completed.",
+    confidence: parsed.status === "completed" ? 0.72 : 0.18,
   };
 }
 
@@ -148,7 +192,7 @@ export async function requestUndergroundAutonomyDecision(
   return parsed;
 }
 
-function buildAutonomyDecisionMessages(input: RequestUndergroundAutonomyDecisionInput): readonly ModelMessage[] {
+export function buildAutonomyDecisionMessages(input: RequestUndergroundAutonomyDecisionInput): readonly ModelMessage[] {
   const candidateLines = input.candidatePool.candidates.map((candidate) =>
     [
       `- candidateId=${candidate.id}`,
@@ -344,7 +388,7 @@ function toolSourceRefsFromTurn(turn: AgentTurnRuntimeResult): string[] {
   );
 }
 
-function researchRefsFromValue(value: unknown, depth = 0): string[] {
+export function researchRefsFromValue(value: unknown, depth = 0): string[] {
   if (depth > 4 || value === undefined || value === null) {
     return [];
   }

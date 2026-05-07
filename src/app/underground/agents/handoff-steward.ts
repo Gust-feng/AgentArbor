@@ -364,6 +364,17 @@ export class HandoffStewardAgent
       );
     }
 
+    // Confidence lower bound warning for approved packages
+    if (output.terminalStatus === "approved_package_created" && output.confidence < 0.5) {
+      violations.push(
+        createGuardViolation({
+          code: "HANDOFF_LOW_CONFIDENCE",
+          message: `Handoff confidence ${output.confidence.toFixed(2)} is below 0.5; approved packages should have higher confidence.`,
+          severity: "warning",
+        })
+      );
+    }
+
     if (violations.some((v) => v.severity === "error")) {
       return rejectGuardedAction({ output, violations });
     }
@@ -425,6 +436,7 @@ function buildHandoffNarrativeMessages(percept: HandoffStewardPercept): readonly
         "You are AgentArbor Underground Handoff Steward.",
         "You organize the final .agentarbor direction handoff narrative from already converged materials.",
         "Do not approve candidates that Convergence Judge did not accept or merge. Do not weaken hard constraints.",
+        "The clarifiedGoal must add explicit direction-shaping context from convergence and evidence; if the materials only support echoing the raw goal, lower confidence or choose a non-approved status.",
         "Return JSON only. Do not include chain-of-thought, raw prompt, hidden reasoning, provider response text, secrets, or tokens.",
       ].join("\n"),
     },

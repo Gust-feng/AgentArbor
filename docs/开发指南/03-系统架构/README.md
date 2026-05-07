@@ -1,6 +1,8 @@
 # 系统架构
 
-本章定义 AgentArbor 的主要系统层和边界。架构必须支持 `Soil -> Underground Center -> .agentarbor -> Aboveground Center -> Fruits -> Governance -> Soil` 的原生概念树，保证目标驱动、方向交接、执行验证、能力生长和子 agent 脱离都能被治理。
+本章定义 AgentArbor 的主要系统层和边界。当前架构必须支持 `Desktop Shell -> Task Soil -> Underground Cognitive Runtime -> Plan -> Aboveground Execution Runtime -> Fruits -> Governance Pipeline -> Global Soil` 的桌面任务闭环。
+
+架构重点不是堆更多角色，而是保证用户有统一桌面入口、agent 语义判断走 AI-first 主线、Plan 能被执行 runtime 消费、运行过程可监督、候选经验经治理后才进入长期土壤。
 
 ## 文档列表
 

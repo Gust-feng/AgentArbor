@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted, amended by [ADR-0004](../工作区结构/ADR-0004-AgentArbor原生工作区.md), [ADR-0010](ADR-0010-产品层与开发工具层.md), and [ADR-0018](../产品架构/ADR-0018-AgentArbor原生概念树架构.md)
+Accepted, amended by [ADR-0004](../工作区结构/ADR-0004-AgentArbor原生工作区.md), [ADR-0010](ADR-0010-产品层与开发工具层.md), [ADR-0018](../产品架构/ADR-0018-AgentArbor原生概念树架构.md), and [ADR-0022](../产品架构/ADR-0022-AgentArbor桌面通用Agent与双运行时架构.md)
 
 ## Context
 
@@ -19,11 +19,11 @@ AgentArbor 原生 agent 不存放在 `.codex/agents/`。成熟可脱离 agent �
 - 开发 AgentArbor 仓库时使用的 Codex custom subagent 标准。
 - 从 AgentArbor 原生 agent 导出的 Codex TOML。
 
-`.codex/agents/*.toml` 即使被当前仓库维护，也不能成为 AgentArbor 产品 agent 的 source-of-truth。`.agentarbor/` 只承载地下中枢交给地上中枢的方向交接包材料，不能被当作最终 agent 资产仓库。
+`.codex/agents/*.toml` 即使被当前仓库维护，也不能成为 AgentArbor 产品 agent 的 source-of-truth。`.agentarbor/` 只承载 Plan Package 材料，不能被当作最终 agent 资产仓库。
 
 ## Consequences
 
 - AgentArbor 原生协议和 Codex 工具适配格式分离。
-- `.agentarbor/` 是 AgentArbor 原生方向交接包目录，不是当前开发工作区、最终资产仓库、Soil 副本或 Codex 官方发现路径，必须在 README 中明确。
+- `.agentarbor/` 是 AgentArbor 原生 Plan Package 存储目录，不是当前开发工作区、最终资产仓库、Soil 副本或 Codex 官方发现路径，必须在 README 中明确。
 - AgentArbor 未来可以导出 Codex、Copilot、Claude、Gemini 等适配格式，而不牺牲自己的原生 agent 模型。
 - 参见 [ADR-0010](ADR-0010-产品层与开发工具层.md)：开发工具层可以预演产品能力，但不能压缩产品层。

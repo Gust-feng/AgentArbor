@@ -2,9 +2,9 @@
 
 ## Status
 
-Accepted. Current architecture source: [ADR-0018](ADR-0018-AgentArbor原生概念树架构.md).
+Accepted as historical architecture material, amended by [ADR-0022](ADR-0022-AgentArbor桌面通用Agent与双运行时架构.md).
 
-本 ADR 记录 Agent 集群、动态发育、分层通信和能力治理的结构原则；完整产品全景以 ADR-0018 的原生概念树架构为准。
+本 ADR 记录 Agent 集群、动态发育、分层通信和能力治理的结构原则；当前产品全景以 ADR-0022 的桌面通用 Agent 与双运行时架构为准。
 
 ## Context
 

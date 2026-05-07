@@ -2,7 +2,9 @@
 
 ## 状态
 
-已采纳。当前原生概念树事实源为 [ADR-0018](ADR-0018-AgentArbor原生概念树架构.md)，本 ADR 保留为植物学语义来源材料。
+已采纳为历史语义材料，当前产品事实源为 [ADR-0022](ADR-0022-AgentArbor桌面通用Agent与双运行时架构.md)。本 ADR 保留为植物学语义来源材料。
+
+以下正文保留历史语义原貌。进入当前开发口径时，应以 ADR-0022 的 Desktop Shell、Task Soil、Underground Cognitive Runtime、Plan、Aboveground Execution Runtime、Fruits、Governance Pipeline 和 Global Soil 为准。
 
 本 ADR 的树形语义由 [ADR-0018](ADR-0018-AgentArbor原生概念树架构.md) 统一为 Soil、Underground Center、`.agentarbor`、Aboveground Center、Fruits、Governance 的原生概念树；约束工程由 [ADR-0017](ADR-0017-约束工程与可执行约束模型.md) 补充。
 
@@ -57,4 +59,5 @@ Soil -> Underground Center -> .agentarbor -> Aboveground Center
 
 - [植物学融合架构](植物学融合架构/)
 - [开发指南总览](../../开发指南/00-总览.md)
-- [方向交接包与 GrowthPlan](../../开发指南/04-模型与契约/05-方向交接包与GrowthPlan.md)
+- [Plan Package 与执行计划](../../开发指南/04-模型与契约/05-PlanPackage与执行计划.md)
+- [ADR-0022: AgentArbor 桌面通用 Agent 与双运行时架构](ADR-0022-AgentArbor桌面通用Agent与双运行时架构.md)

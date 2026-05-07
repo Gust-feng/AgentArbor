@@ -2,86 +2,118 @@
 
 ## 总结构
 
-AgentArbor 的 Agent 集群依附于原生概念树，而不是独立漂浮的一组角色。
+AgentArbor 的 agent 集群依附于 Desktop 任务闭环，而不是独立漂浮的一组角色。
 
 ```text
-Soil
-  -> Underground Center
-      -> Intent Core
+Desktop Shell
+  -> Task Soil
+  -> Underground Cognitive Runtime
+      -> Center Manager
       -> Growth Governor
-      -> Constraint Sentinel
-      -> Evidence Ledger
-      -> Convergence Judge
-      -> Handoff Steward
-      -> Radial Exploration Clusters
-  -> .agentarbor
-  -> Aboveground Center
-      -> Growth Planner
-      -> Plan Critic
-      -> Risk Governor
-      -> Context Topology Builder
-      -> Revision Controller
-  -> Aboveground Growth
-      -> single agent
-      -> sub-agent tree
-      -> shared team cluster
-      -> competitive team cluster
+      -> Agent Fabric
+          -> rootlet / child agents
+      -> Parent Synthesis
+      -> Convergence
+      -> Handoff / Plan Steward
+  -> Plan
+  -> Aboveground Execution Runtime
+      -> execution agents / tool actions / verification
   -> Fruits
-  -> Governance
-  -> Soil
+  -> Governance Pipeline
+  -> Global Soil
 ```
 
-约束工程贯穿这条结构。每个集群只接收自己需要的约束切片，但所有切片都必须能回溯到统一的 `Constraint`。
+约束工程贯穿这条结构。每个 agent 只接收自己需要的上下文和约束切片，但所有切片都必须能回溯到统一的 Task Soil、Plan 或 Global Soil 引用。
 
-## 固定核心集群与动态任务集群
+## Shared Agent Kernel
 
-| 类型 | 位置 | 自由度 | 目的 |
-| --- | --- | --- | --- |
-| 固定核心集群 | Underground Center、Aboveground Center、Governance | 低 | 抵抗单点认知失败，保证方向、计划、验证和入土裁决稳定 |
-| 临时探索根须集群 | Underground Center | 中 | 围绕方向成形发散探索、反驳、补证据和评估资产适配 |
-| 动态任务集群 | Aboveground Growth | 高 | 扩展执行、协作、竞争验证和局部问题解决能力 |
+所有 agent 共享同一套能力内核：
 
-原则是：中枢能力必须稳定，临时集群必须有预算和退场条件；越靠近执行，集群越动态；越靠近方向、计划和治理，集群越固定、低自由度、强验证。
+- `AgentLoop`。
+- `AgentTurnRuntime`。
+- `ToolCenter`。
+- `WorkspaceView`。
+- `Mailbox`。
+- `Guard`。
+- `Trace`。
+- Budget / Permission boundary。
 
-## Underground Center
+新增 agent 不应靠复制固定 class 堆角色，而应先定义 `AgentSpec`、输入切片、输出契约、预算、权限和可观察投影。
 
-地下中枢负责需求成形、证据探索、方向综合、反驳和养料供给。它可以生成临时探索根须集群，但交付物必须收敛为 `.agentarbor` 方向交接包、Nutrient Patch、用户升级确认或停止依据。
+## 权限模型
 
-单个探索 agent、单个根须 agent 或单个临时根须集群只产出候选材料。它们的输出只能作为 `Observation`、`Evidence Candidate` 或 `Claim Candidate`，不能直接成为 Direction Handoff、Nutrient Patch、ConstraintRef、风险裁决或其他正式交接材料。对应 cluster lead、Convergence Judge 或 Handoff Steward 必须先完成交叉校验、去重、来源归因和冲突裁决。
+本轮实际能力由四层相交决定：
 
-地下中枢不调度地上执行，不创建长期资产，不让候选约束自动变成 hard constraint。
+```text
+AgentSpec 静态能力上限
+  ∩ Parent DelegationDecision 动态授权
+  ∩ AgentRunContext 当前阶段 / 任务 / 预算 / 用户授权裁剪
+  ∩ ToolCenter / Guard 强制执行
+  = 本轮实际能力
+```
 
-## Aboveground Center
+关键规则：
 
-地上中枢负责制定和修订 Growth Plan 与 Workflow IR。它也是约束裁决点，必须判断哪些 hard constraint 阻断行动，哪些 soft constraint 可以带解释偏离，哪些 preference 只用于方案排序或 Path Bias。
+- `AgentSpec` 只定义上限。
+- 父层只能在上限内授予能力。
+- 当前运行阶段、任务权限、预算和 hard constraint 继续缩小权限。
+- `ToolCenter` 是最终执行边界，不信任 prompt，也不信任模型自称权限。
+- `ToolCenter` 最终应读取 `AgentRunContext` 中的有效权限，而不是只看 agent role。
 
-## Aboveground Growth
+## Underground Cognitive Runtime
 
-地上生长组织根据 Growth Plan 动态选择运行形态：
+地下运行时负责目标成形、证据探索、方向综合、追问、停止和 Plan 成形。它可以派生临时 child/rootlet agent，但所有局部产物必须回到父层综合。
 
-- single agent：目标简单、风险低、验证清楚。
-- sub-agent tree：任务可自然分解为父子上下文。
-- shared team cluster：多个 agent 需要共享同一事实池和协作状态。
-- competitive team cluster：需要并行方案、反审查或高风险验证。
+### 父层职责
 
-地上生长组织不需要掌握完整全局，但必须掌握任务相关约束切片、验收标准、权限边界和证据提交要求。它们发现约束前提不成立或养料不足时，应报告偏离或发起 Nutrient Request，而不是自行豁免或自建方向探索集群。
+| 角色 | 职责 |
+| --- | --- |
+| Center Manager | 决定是否派生、等待、打断、继续探索、追问用户或停止 |
+| Growth Governor | 建议探索预算、并行度、rootlet 类型和停止条件 |
+| Agent Fabric | 按 `AgentSpec` 创建 child agent，执行权限、预算和上下文隔离 |
+| Parent Synthesis / Convergence | 消费 child outputs，综合冲突材料，决定方向是否足够成立 |
+| Handoff / Plan Steward | 组织 Plan，但不能绕过父层 convergence |
+
+父层中枢默认不直接使用外部探索工具。父层可以读取内部观察材料，如 run tree、mailbox、trace 和 workspace summary。证据不足时应派 child 继续探索，而不是父层自己搜索。
+
+### Child / Rootlet
+
+child/rootlet 是最小探索单元，输出默认不可信。它们可以使用被授权的 search、read、workspace read 或其他工具做局部调研，但不能直接决定目标、约束、方向、风险裁决或 Plan 内容。
+
+MVP 阶段：
+
+- 只允许一层 child agent。
+- `depth = 1`。
+- Center Manager 可以派生 rootlet child。
+- child 不可再派生孙 agent。
+- descendant output 不能直接进入 Plan，必须经过父层 synthesis / convergence。
+
+长期可扩展：
+
+- `depth = 2+`。
+- 只有被授予 delegate 权限的 child 可以继续派生。
+- 必须有 `maxDepth`、`maxChildrenPerAgent`、`maxTotalChildren`、`maxBudgetPerSubtree`、`allowedDelegationKinds`、`parentSynthesisRequired` 和 `noDirectHandoffFromDescendant` 等硬约束。
+
+## Aboveground Execution Runtime
+
+地上执行运行时消费 Plan，组织执行和验证。它可以使用执行 agent、工具动作和验证节点，但不应自建方向探索集群。
+
+当地上发现证据、约束、上下文或资产适配不足时，应发起 Nutrient Request。地下补充探索后产出 Nutrient Patch 或 Plan vNext，地上再决定继续、回退、分叉或停止。
 
 ## Verification And Fruits
 
-验证组织负责检查 hard constraint、soft constraint 和 preference 的满足或偏离情况。它可以建议 Nutrient Request 或计划修订，但不能替代用户确认，也不能自行让候选果实入土。
+验证组织负责检查 hard constraint、soft constraint 和 preference 的满足或偏离情况。它可以建议 Nutrient Request、执行修订或停止，但不能自行让候选果实入土。
 
-Fruits 是交付和候选沉淀区。子 agent、能力包或 AgentApp 只有在经过 Governance 后，才可以成为 Soil 中的 Capability Asset 或 Path Bias 来源。
+Fruits 是交付和候选沉淀区。Run Memory、Experience Candidate、能力候选或可脱离 agent 只有在经过 Governance Pipeline 后，才可以成为 Global Soil 中的 Capability Asset 或 Path Bias 来源。
 
 ## 第一阶段边界
 
-第一阶段不需要实现完整多集群自治网络，但必须保留结构边界：
+第一阶段不实现完整多集群自治网络。当前代码基础已经具备地下 AI-first cognitive runtime、动态派生 Agent Fabric 和监督面板。下一阶段应围绕：
 
-- `UndergroundAnalyzer`：模拟地下中枢的需求成形和证据探索。
-- `HandoffBuilder`：模拟 `.agentarbor` 方向交接包生成。
-- `GrowthPlanner`：模拟地上中枢。
-- `WorkerAgent`：模拟地上生长执行。
-- `Verifier`：模拟验证组织。
-- `MemoryWriter`：形成 Run Memory 和 Experience Candidate。
-- `GovernanceReview`：判断候选果实是否能进入 Soil。
+- Desktop Shell 产品骨架。
+- Task Soil 契约。
+- Plan Package 的产品化收缩。
+- 轻量 Aboveground Execution Runtime。
+- Main Canvas 与 Observation Panel 的信息分工。
 
-这样第一阶段仍然很小，但不会把 AgentArbor 错做成线性脚手架。
+这些能力形成可演示闭环后，再讨论多层递归 agent、完整治理资产系统和更广泛平台适配。

@@ -1,6 +1,6 @@
 # 工作区结构
 
-本目录保存根目录、`docs/` 当前开发工作区、`.agentarbor` 方向交接包目录和长期项目布局相关 ADR。
+本目录保存根目录、`docs/` 当前开发工作区、`.agentarbor` Plan Package 存储目录和长期项目布局相关 ADR。
 
 ## 决策记录
 

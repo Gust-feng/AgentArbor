@@ -2,7 +2,7 @@
 
 ## Status
 
-Superseded by the current repository structure and amended by [ADR-0002](../协议边界/ADR-0002-Codex官方兼容.md), [ADR-0004](ADR-0004-AgentArbor原生工作区.md), and [ADR-0010](../协议边界/ADR-0010-产品层与开发工具层.md).
+Superseded by the current repository structure and amended by [ADR-0002](../协议边界/ADR-0002-Codex官方兼容.md), [ADR-0004](ADR-0004-AgentArbor原生工作区.md), [ADR-0010](../协议边界/ADR-0010-产品层与开发工具层.md), and [ADR-0022](../产品架构/ADR-0022-AgentArbor桌面通用Agent与双运行时架构.md).
 
 ## Context
 
@@ -38,7 +38,7 @@ AgentArbor 后续开发任务复杂且长期，不能依赖一次性对话和临
 
 `.codex/` 和 `.opencode/` 是开发工具适配层。
 
-`.agentarbor/` 是未来 AgentArbor 原生方向交接包目录，用于从地下中枢向地上中枢传递方向、约束、证据和 Growth Entry；它不是当前文档工作区，也不是最终资产仓库。
+`.agentarbor/` 是未来 AgentArbor 原生 Plan Package 存储目录，用于保存 Plan、约束、证据和执行入口；它不是当前文档工作区，也不是最终资产仓库。
 
 ## Consequences
 

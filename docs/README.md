@@ -6,23 +6,23 @@
 
 - 当前开发入口：稳定、可执行、面向实现的开发指南。
 - 研究资料：深度研究报告、工程研究、外部参考研究和有长期参考价值的材料。
-- 架构设计：长期架构决策、协议边界、工作区结构和原生概念树架构。
+- 架构设计：长期架构决策、协议边界、工作区结构和产品架构资料。
 - 任务看板：从 Trellis 任务状态生成的人类态势看板资产，不是计划源数据。
 
-当前产品架构事实源是 [ADR-0018-AgentArbor原生概念树架构](架构设计/产品架构/ADR-0018-AgentArbor原生概念树架构.md)。活跃开发指南吸收该 ADR 的稳定结论，不把研究输入或阶段路线写成当前规则。
+当前产品架构事实源是 [ADR-0022-AgentArbor桌面通用Agent与双运行时架构](架构设计/产品架构/ADR-0022-AgentArbor桌面通用Agent与双运行时架构.md)。[ADR-0018-AgentArbor原生概念树架构](架构设计/产品架构/ADR-0018-AgentArbor原生概念树架构.md) 保留为历史架构基线和术语来源，但不再单独决定当前产品主线。
 
 历史经验、推进记录、阶段计划、会话沉淀、草案包和准备包不再保留在 `docs/` 活跃知识面中。对未来开发没有直接架构或研究价值的材料应删除，避免干扰。
 
 当前文档目标是让新开发者在进入实现前能快速回答这些问题：
 
-1. AgentArbor 是什么，解决什么问题。
-2. 为什么它不是一次性 Agent 生成器，而是目标驱动的问题解决与经验积累平台。
-3. Soil、Underground Center、`.agentarbor`、Aboveground Center、Fruits、Governance 如何构成原生概念树。
-4. 地下中枢如何完成需求成形、约束提取、证据探索、方向交接和运行期养料供给。
-5. 地上中枢如何制定 Growth Plan、Workflow IR、执行组织、验证门和修订机制。
-6. 约束工程如何把目标、非目标、权限、成本、技术边界和验收门转化为可执行契约。
-7. Run Memory、Experience Candidate、Capability Asset 和 Path Bias 如何经过治理回流土壤。
-8. 系统由哪些核心边界组成，哪些东西不能混放。
+1. AgentArbor 为什么是桌面通用 Agent，而不是聊天框、IDE 替代品或一次性脚手架。
+2. Desktop Shell 如何接收任务、文件、项目和网页上下文，并形成 Task Soil。
+3. Underground Cognitive Runtime 如何用 AI-first agent 协作完成目标成形、动态派生、父层综合、裁决、追问或停止。
+4. Plan / Plan Package 如何承接地下收束结果，并作为 Aboveground Execution Runtime 的可持久化输入。
+5. Aboveground Execution Runtime 如何按 Plan 进行文件修改、文档生成、原型制作、工具调用和验证。
+6. Observation Panel 如何展示安全投影，而不泄漏 raw prompt、raw provider response、raw tool output 或 hidden reasoning。
+7. Run Memory、Experience Candidate、Capability Asset 和 Path Bias 如何经过 Governance Pipeline 才能回流 Global Soil。
+8. Shared Agent Kernel、权限模型、工具边界和模型运行时如何共同防止工程边界替 agent 思考。
 9. 开发时必须遵守哪些工程规则。
 10. 哪些架构设计和研究资料可以作为后续设计输入。
 
@@ -80,8 +80,8 @@ docs/
 - `.codex/` 保存 Codex 开发适配文件。
 - `.opencode/` 保存 OpenCode 开发适配文件。
 - `.claude/` 保存 Claude Code 开发适配文件。
-- `.agentarbor/` 保存未来 AgentArbor 运行时自己的方向交接包，只在契约稳定后增量创建；它不保存最终资产，也不替代 Soil。
-- `src/` 保存 AgentArbor TypeScript 实现代码；当前第一阶段只包含确定性最小运行内核。
+- `.agentarbor/` 是未来 Plan Package 的默认存储目录名，只在 Plan 契约、读写规则、权限边界和真实出生依据稳定后增量创建；它不是产品概念树节点，不保存最终资产，也不替代 Global Soil。
+- `src/` 保存 AgentArbor TypeScript 实现代码；当前已有地下 AI-first cognitive runtime、Agent Fabric 和监督面板基础，下一阶段应围绕 Desktop Shell、Task Soil 和轻量 Aboveground 执行闭环推进。
 
 `docs/开发指南/` 负责当前开发规则。
 

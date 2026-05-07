@@ -4,6 +4,8 @@
 
 状态：Proposed
 
+补充说明：本 ADR 的地下 AI-first 主线继续有效，但被 [ADR-0022-AgentArbor桌面通用Agent与双运行时架构](ADR-0022-AgentArbor桌面通用Agent与双运行时架构.md) 重新框定为 Underground Cognitive Runtime。文中“`.agentarbor` 方向交接包”在当前产品口径下统一解释为 Plan / Plan Package；`.agentarbor` 只是 Plan Package 的实现/存储形态或目录名。
+
 ## 决策
 
 地下 Agent 集群从"确定性中心流程 + AI 旁路增强"架构，重构为"分层 Agent 智能协作 + 确定性边界守卫"架构。

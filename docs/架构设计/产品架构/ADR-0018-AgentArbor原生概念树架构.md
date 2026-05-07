@@ -2,11 +2,28 @@
 
 日期：2026-05-01
 
-状态：Accepted
+状态：Superseded by [ADR-0022-AgentArbor桌面通用Agent与双运行时架构](ADR-0022-AgentArbor桌面通用Agent与双运行时架构.md)
 
-## 决策
+## 现状说明
 
-AgentArbor 采用原生概念树作为当前产品架构事实源：
+本 ADR 保留 AgentArbor 早期原生概念树、植物学职责边界和历史术语来源，但不再作为当前产品架构事实源。当前事实源是 ADR-0022：
+
+```text
+Desktop Shell
+  -> Task Soil
+  -> Underground Cognitive Runtime
+  -> Plan
+  -> Aboveground Execution Runtime
+  -> Fruits
+  -> Governance Pipeline
+  -> Global Soil
+```
+
+后续文档和实现应优先使用 Task Soil、Global Soil、Plan、Shared Agent Kernel、Underground Cognitive Runtime、Aboveground Execution Runtime 和 Governance Pipeline。`.agentarbor` 只作为 Plan Package 的实现/存储形态或目录名保留。
+
+## 原始决策
+
+AgentArbor 当时采用原生概念树作为产品架构事实源：
 
 ```text
 Soil
@@ -126,7 +143,7 @@ Fruit 不是 Soil。Fruit 可以是用户交付物、AgentApp、能力包、可�
 
 ## 后果
 
-- 活跃文档入口必须直接讲原生概念树，不再把 Seed、Root、Core、Branch、Leaf、Flower 写成并列主层。
+- 历史文档入口曾直接讲原生概念树，不再把 Seed、Root、Core、Branch、Leaf、Flower 写成并列主层。
 - Seed 语义归入地下中枢的需求成形职责。
 - Root 语义归入地下中枢的证据探索、方向综合和养料供给职责。
 - Core、Branch、Leaf、Flower 语义归入地上中枢和地上生长职责。

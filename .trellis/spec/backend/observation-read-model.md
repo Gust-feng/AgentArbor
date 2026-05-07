@@ -13,7 +13,7 @@
 - `RunObservationEventView`：EventLog entry 的 JSON-safe 视图；除 sequence、type、traceId、taskId、intent、from、to、createdAt、recordedAt 外，必须提供 `summary`、`scope`、`severity`、`progress` 和 `refs`。
 - `RunPhase`：稳定运行相位，不再使用无约束 string。当前相位覆盖 `not_started`、`underground`、`handoff`、`aboveground`、`verification`、`fruits`、`governance`、`soil_return`、`completed`。
 - `RunStage`：由最后一个 EventLog event 派生的细粒度阶段，用于未来前端定位当前事件游标。
-- `ObservationScope`、`ObservationSeverity`、`ObservationProgress`、`ObservationRef`、`ObservationStatus`：事件视图和层视图共享的前端可读元数据。V0.5 起 `ObservationRef.kind` 包含 `user_clarification`，用于引用 `UserClarificationRequest` 和 `UserClarificationResponse`。智能通道事件起 `ObservationRef.kind` 包含 `model_call`，用于引用 `ModelRequest` 和 `ModelResponse`；工具事件起包含 `tool_call`，用于引用 `ToolCallRequest` / `ToolCallResult`。
+- `ObservationScope`、`ObservationSeverity`、`ObservationProgress`、`ObservationRef`、`ObservationStatus`：事件视图和层视图共享的前端可读元数据。V0.5 起 `ObservationRef.kind` 包含 `user_clarification`，用于引用 `UserClarificationRequest` 和 `UserClarificationResponse`。智能通道事件起 `ObservationRef.kind` 包含 `model_call`，用于引用 `ModelRequest` 和 `ModelResponse`；工具事件起包含 `tool_call`，用于引用 `ToolCallRequest` / `ToolCallResult`；Agent Fabric 事件起包含 `agent_spec`、`agent_run`、`agent_delegation` 和 `parent_synthesis`，用于引用动态派生运行树。
 
 ## Contracts
 
@@ -26,6 +26,7 @@
 - Event ref 提取必须按事件类型区分同名字段。`model.requested`、`model.completed`、`model.failed` 中的 `requestId` / `responseId` 只能生成 `model_call` refs；`tool.requested`、`tool.completed`、`tool.failed` 中的 `callId` 只能生成 `tool_call` refs；`user_approval.requested`、`user_approval.received` 和 `direction_handoff.revision_requested` 中的 clarification id 才能生成 `user_clarification` refs。
 - `currentPhase` 和 `currentStage` 必须由 EventLog cursor 派生；没有事件时为 `not_started`。
 - Underground view 必须展示预算、rootlet clusters、rootlet outputs、candidate pool counts、`candidatesByKind`、每个 candidate、每个 convergence decision、candidate comparison、推荐 option、淘汰原因、需要用户确认的冲突、地上参考 option、收束摘要、handoff candidate refs、open questions、用户升级状态和 evidence ledger 摘要。
+- Underground view 必须展示 `agentRunTree` 安全投影：root spec、child runs、delegation decisions 和 parent syntheses。该投影只能包含 spec ids、agent ids、角色、权限/预算摘要、input/output/evidence refs、状态、confidence 和 uncertainty；不得包含 raw prompt、raw provider response、hidden reasoning、API key、token、工具 raw output、runtime/store 引用或 provider 私有对象。
 - `underground.evidenceLedger` 必须是 JSON-safe 派生视图，暴露 ledger id、证据总数、按 evidence kind 计数、推荐方向相关 evidence refs、冲突 evidence refs、不足 evidence refs、`hasConflicts`、`hasInsufficientEvidence` 和状态；它不能保存 live ledger/store 引用，也不能成为新的事实源。
 - `underground.userEscalation` 必须在 blocking unknown 存在时暴露 request id、reason、blocking level、status、related candidate refs、questions 和 JSON-safe request 数据；non-blocking unknown 只应出现在 `convergence.openQuestions`。
 - `underground.clarificationResponses` 必须从 EventLog 中的 `user_approval.received` payload 派生，暴露 request id、answers、answeredAt 和 evidence refs；不得把 response 作为 EventLog 之外的第二事实源。
@@ -35,7 +36,7 @@
 - 本地 panel HTTP 响应和 SSE stream 只能返回地下 demo summary、Observation Snapshot 的 JSON-safe 子集、脱敏配置状态，以及由这些输入派生的 panel tracking / transcript / stream read model；不得返回 EventLog 原始 payload、runtime/store 引用、API key、token、完整模型 prompt、provider raw response、hidden reasoning 或 provider 原始错误。
 - Panel tracking read model 只服务本地面板展示，必须从 summary / Observation Snapshot / sanitized config 派生，覆盖 phase / stage / status、rootlet kind 集群状态、按 kind 的模型 requested / completed / failed 计数、按 kind 的候选计数、AI candidate / fallback、收束结果、方向包校验和 provider 配置状态；它不能成为 EventLog、Observation Snapshot 或 demo summary 之外的事实源。
 - Panel async run job 只允许是进程内生命周期的本地工作台状态，用于把 `POST /api/underground/runs` 的立即返回和 `GET /api/underground/runs/:runId` 的 polling 连接起来；它可以临时持有 runtime / EventLog 引用以派生 partial trace，但不得持久化、不得暴露 runtime/store 引用、不得替代 EventLog 或地下运行结果。
-- `PanelRunStreamEvent` / `AgentWorkNote` / `PanelRunTranscript` 是 panel 专用派生读模型，必须从 EventLog、demo summary、Observation Snapshot 和 sanitized config 派生；stream event 类型覆盖 `run.started`、`agent.note.delta`、`agent.note.completed`、`model.output.delta`、`model.output.completed`、`tool.requested`、`tool.completed`、`tool.failed`、`final.result` 和 `run.failed`。它可以展示 `model.completed` 的 `visibleOutput` 安全投影和 rootlet candidate 字段摘要；当 provider 已为同一 model request 推送 live `model.output.delta` 时，job stream cache 必须跳过同一 request 的完成后派生 delta，只保留 completed 标记，避免 transcript 重复输出。它不得展示隐藏思维链、完整 prompt、provider raw response、API key、token、未清洗错误、raw tool output 或 runtime/store 引用。
+- `PanelRunStreamEvent` / `AgentWorkNote` / `PanelRunTranscript` 是 panel 专用派生读模型，必须从 EventLog、demo summary、Observation Snapshot 和 sanitized config 派生；stream event 类型覆盖 `run.started`、`agent.note.delta`、`agent.note.completed`、`model.output.delta`、`model.output.completed`、`tool.requested`、`tool.completed`、`tool.failed`、`agent.delegation.planned`、`agent.child.started`、`agent.child.completed`、`agent.child.waiting`、`agent.parent_synthesis.completed`、`final.result` 和 `run.failed`。它可以展示 `model.completed` 的 `visibleOutput` 安全投影、rootlet candidate 字段摘要、delegation / child / synthesis 安全摘要；当 provider 已为同一 model request 推送 live `model.output.delta` 时，job stream cache 必须跳过同一 request 的完成后派生 delta，只保留 completed 标记，避免 transcript 重复输出。它不得展示隐藏思维链、完整 prompt、provider raw response、API key、token、未清洗错误、raw tool output 或 runtime/store 引用。
 - Aboveground、Fruits、Governance 和 Soil return 当前可以是 summary/stub，但字段必须稳定、JSON-safe、未来可扩展。
 - V0.3 兼容字段如 `directionPackageRef`、`artifactRefs`、`verification` 可以保留给现有调用方；新代码应优先读取 `handoff` 和分层 view。
 - Future frontend 应消费 snapshot / event view，不应绕过 EventLog 直接读取内存 store。
@@ -57,6 +58,8 @@
 | `model.completed` payload 携带 model request id / response id 但 event refs 缺少 `model_call` | 测试失败；事件 ref 必须从 payload 派生 |
 | `model.*` payload 的 `requestId` 被误识别成 `user_clarification` | 测试失败；同名字段必须按 event type 分流 |
 | `tool.*` payload 的 `callId` 没有生成 `tool_call` ref，或 `requestId` 被误识别成 model/user ref | 测试失败；工具 refs 必须按 event type 分流 |
+| `agent.*` payload 缺少 `agent_spec` / `agent_run` / `agent_delegation` / `parent_synthesis` refs | 测试失败；Agent Fabric refs 必须从事件 payload 派生 |
+| `agentRunTree` 投影暴露 raw prompt、provider raw response、hidden reasoning、secret、raw tool output 或 runtime/store 引用 | 测试失败；必须降级为 safe refs 和摘要 |
 | demo summary AI 观测摘要出现 API key、token、完整 prompt、provider raw response、hidden reasoning 或未校验模型正文 | 测试失败 |
 | demo summary / panel tracking 工具摘要出现 API key、token、raw tool output 或 provider raw search response | 测试失败 |
 | app parser 会丢弃的 rootlet candidate 字段类型仍出现在 model visible output | 测试失败；必须通过 `visibleOutput.fieldTypes` 抑制该输出 |
@@ -87,6 +90,8 @@
 - Event views expose `user_clarification` refs when `user_approval.received` carries a clarification response payload。
 - Event views expose `model_call` refs for `model.requested` / `model.completed` / `model.failed` and do not expose false `user_clarification` refs from model `requestId` fields。
 - Event views expose `tool_call` refs for `tool.requested` / `tool.completed` / `tool.failed` and do not expose false model / user clarification refs from tool payload fields。
+- Event views expose `agent_spec`、`agent_run`、`agent_delegation` 和 `parent_synthesis` refs for Agent Fabric events。
+- Underground Observation view exposes `agentRunTree` with child runs and parent syntheses while staying JSON-safe。
 - Underground demo summary exposes secret-free AI event counts, per-rootlet-kind model call status, AI candidate / fallback counts and candidate-related model call refs for explicit AI runs, and reports disabled AI with zero model events for the default run。
 - Underground demo summary and panel tracking expose secret-free tool event counts and tool call refs for tool-enabled AI runs。
 - 本地 panel response 覆盖 AI 禁用模式拒绝、fake AI、openai-compatible 配置失败、sync run 兼容、async run job、partial / final event cursor、SSE stream、cursor 续传、stream 断开后后台 run 完成、tracking read model、transcript 和 model visible output，并证明 HTTP JSON / SSE 不包含 raw secret、token、完整模型 prompt、provider raw response、hidden reasoning、raw tool output、app parser 会丢弃的候选字段或未校验模型输出。

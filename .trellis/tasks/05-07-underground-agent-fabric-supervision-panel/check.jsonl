@@ -1,0 +1,7 @@
+{"file": ".trellis/spec/backend/underground-radial-growth.md", "reason": "Verify child/rootlet output remains untrusted and parent synthesis/convergence owns handoff eligibility."}
+{"file": ".trellis/spec/backend/intelligence-channel.md", "reason": "Verify every dynamic agent model turn uses AgentTurnRuntime and safe reasoningTrace without raw prompt/provider output."}
+{"file": ".trellis/spec/backend/tool-runtime.md", "reason": "Verify child agent tool permissions, budgets, and tool refs remain safe and scoped."}
+{"file": ".trellis/spec/backend/observation-read-model.md", "reason": "Verify delegation/synthesis panel projections remain JSON-safe and derived from EventLog/runtime result."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Verify build, test, panel smoke, desktop smoke, no-AI boundary, and secret/raw-output safety gates."}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Verify panel remains transcript/workflow first and does not introduce fake Codex worktree/diff/terminal surfaces."}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Verify panel stream/read-model tests and UI smoke expectations are met."}

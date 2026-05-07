@@ -15,9 +15,11 @@
 - API key 不得以任何形式读回页面；只允许显示“密钥已配置 / 密钥未配置”这类脱敏状态。
 - 运行状态固定映射为 `pending / running / completed / failed`，页面显示必须是中文标签加技术 id；错误摘要必须能展示 provider config failure 的中文说明。
 - 运行跟踪必须来自 panel HTTP 的 trace / summary / Observation Snapshot / sanitized config 派生投影，展示当前 phase / stage / status、等待点、工作流阶段状态、rootlet kind 集群状态、按 kind 的模型 requested / completed / failed 计数、按 kind 的候选计数、AI candidate / fallback 计数、模型事件序列、通过 validation 的 model visible output、收束结果、方向包校验和配置 / provider 状态；不得让前端维护第二套运行事实。
+- 右侧 inspector 必须展示 Agent Run Tree 的安全视图：root manager、派生 child/rootlet runs、状态、spec id、agent id、role、rootlet kind、允许工具、预算、输入 refs、输出 refs、confidence、uncertainty 和最新父层 synthesis 摘要。该区域只消费 `tracking.agentRunTree`，不得读取 raw EventLog payload、完整 prompt、provider raw response、hidden reasoning 或 raw tool output。
 - EventLog 展示使用 trace / summary / event type / observation event view，并放在辅助位置；不得把纯 EventLog 或 JSON dump 当成用户理解工作流的主要信息架构，不得展示 raw EventLog payload 或完整模型 prompt。
 - 点击启动后必须先渲染运行中 transcript，然后调用 async run API 创建 job，并优先连接 `GET /api/underground/runs/:runId/stream` SSE；SSE 不可用时每 1-2 秒 polling 当前 run。SSE 和 polling 都必须消费同一个 `PanelRunStreamEvent` 安全投影，避免前端维护第二套运行事实。
-- Agent Transcript 只能展示可审计工作笔记，例如观察、动作、产出、依据、下一步和引用；模型输出增量只能来自通过 `outputContract` validation 和 `visibleOutput.fieldTypes` 展示策略的 visible output 安全投影或等价安全摘要。它不得展示 provider hidden reasoning、完整 prompt、provider raw response、API key、token、未清洗错误、未校验模型输出或 rootlet parser 会拒绝的候选字段。
+- Agent Transcript 只能展示可审计工作笔记，例如观察、动作、产出、依据、下一步和引用；模型输出增量只能来自通过 `outputContract` validation 和 `visibleOutput.fieldTypes` 展示策略的 visible output 安全投影或等价安全摘要；派生、等待和父层综合只能展示 `agent.delegation.*`、`agent.child.*` 和 `agent.parent_synthesis.*` 的安全摘要。它不得展示 provider hidden reasoning、完整 prompt、provider raw response、API key、token、未清洗错误、未校验模型输出或 rootlet parser 会拒绝的候选字段。
+- 面板目标是 Codex 式 agent 工作流监督台，而不是复制 Codex 的 Git worktree、diff、终端或 PR 功能；本阶段不得在 panel 中加入未出生的工程工作区功能。
 - 组件化目录未出生前，不编造 props、hook、store 或组件库规则；`panel-assets.ts` 内的 DOM 更新逻辑保持简单、可替换。
 - 不把产品架构中的 agent 组织模型误写成 UI 组件规范。
 

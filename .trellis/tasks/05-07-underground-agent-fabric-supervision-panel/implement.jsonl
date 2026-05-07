@@ -1,0 +1,8 @@
+{"file": ".trellis/spec/backend/underground-radial-growth.md", "reason": "Primary contract for Underground Center, dynamic rootlet/child materials, convergence, handoff, and no-bypass trust boundaries."}
+{"file": ".trellis/spec/backend/intelligence-channel.md", "reason": "Model/AgentTurnRuntime boundary, reasoning trace safety, AI-required upper-agent behavior, and no provider leakage."}
+{"file": ".trellis/spec/backend/tool-runtime.md", "reason": "Shared AgentTurnRuntime + ToolCenter capabilities, tool permission/budget boundaries, and safe tool event projection."}
+{"file": ".trellis/spec/backend/observation-read-model.md", "reason": "Panel-safe EventLog, transcript, stream event, and JSON-safe observation projection contracts."}
+{"file": ".trellis/spec/backend/direction-handoff-package.md", "reason": "Direction package validation and source candidate boundaries after parent synthesis/convergence."}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Local panel workflow UI, transcript-first main canvas, inspector, and safe visible output rules."}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Panel smoke, SSE/polling, Chinese UI, and secret/raw-output safety tests."}
+{"file": ".trellis/spec/guides/agentarbor-governance-guide.md", "reason": "Trellis/docs/AgentArbor native boundary and child-agent fruit boundary."}

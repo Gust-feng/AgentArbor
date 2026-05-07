@@ -89,6 +89,36 @@ interface AgentProtocol {
 }
 ```
 
+### 动态派生 Agent Fabric
+
+地下中枢的下一阶段主线不是继续堆固定 agent class，而是在同一套 `AgentLoop + AgentTurnRuntime + ToolCenter + WorkspaceView + Mailbox + Guard + Trace` 能力内核上，按任务动态派生临时 child agent。
+
+Agent Fabric 的运行级契约包括：
+
+- `AgentSpec`：声明派生 agent 的身份、角色、rootlet kind、输入输出协议、prompt ref、output contract、模型/工具权限和预算。
+- `DelegationDecision`：父层 agent 的派生决策，记录 spawn / wait / interrupt / resume / stop / request convergence / request user clarification 等动作、输入 refs、置信度和可展示 reasoning refs。
+- `ChildAgentRun`：单个 child/rootlet 的运行记录，只保存局部输入、输出 refs、证据 refs、状态、失败原因、不确定性和 confidence。
+- `AgentRunTree`：一次地下运行的父子 agent 运行树，记录 root manager、child runs、delegation decisions 和 parent syntheses。
+- `ParentSynthesisResult`：父层对 child 材料的综合结果；它是进入 Convergence Judge / Handoff Steward 前的父层收束材料。
+
+子 agent 输出仍默认不可信。`ChildAgentRun.outputRefs` 只能作为局部材料进入父层 synthesis；`.agentarbor` 交接包不能直接消费单个 child/rootlet output。正式交接只能消费父层 synthesis 后的 `CandidatePool`、`ConvergenceReport` 和 Handoff Steward 组织出的方向材料。
+
+Agent Fabric 的可观测事件为：
+
+```text
+agent.delegation.planned
+agent.child.started
+agent.child.waiting
+agent.child.interrupted
+agent.child.resumed
+agent.child.completed
+agent.parent_synthesis.completed
+```
+
+这些事件只展示安全摘要、spec refs、agent run refs、model/tool refs、不确定性和输出引用，不展示 raw prompt、raw provider response、hidden reasoning、API key、token 或 raw tool output。
+
+本阶段只实现 AgentArbor 自己的动态派生运行时，不调用 Codex、Claude Code 或其他外部子代理能力。Codex / Claude 的价值只作为工作流形态参考：主 agent 保持上下文清晰，父层动态分派同能力子 agent，随后回收、质疑、综合和裁决。
+
 ### WorkspaceView + Mailbox
 
 替代 SharedContext：

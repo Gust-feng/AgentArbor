@@ -305,6 +305,81 @@ createMinimalCandidatePool({ goalId, rootletOutputs: [rootletOutput], agentInvoc
 - `Guard` 测试必须覆盖 hard violation reject 和 explicit fallback source refs。
 - `UndergroundAgentOrchestrator` 测试必须覆盖缺少 `AgentTurnRuntime` 不批准、代表性地下方向流经 `cognitive_manager`、session 结果暴露安全运行 trace、复用 orchestrator 时每次 run 有独立 run id。
 
+## Scenario: 地下动态派生 Agent Fabric
+
+### 1. Scope / Trigger
+
+- Trigger：修改 `src/domain/underground/agent-fabric.ts`、`src/app/underground/orchestrator.ts`、地下 agent spec / child run / parent synthesis、Agent Fabric 事件、地下 report 或 panel 监督投影。
+- Scope：只覆盖 AgentArbor 自己的地下动态派生运行时；不调用 Codex / Claude 外部子代理，不创建长期 Capability Asset，不新增 Git worktree、diff、终端或 PR 工作流。
+
+### 2. Signatures
+
+- `AgentSpec`：包含 `specId`、`agentId`、`displayName`、`agentKind`、`role`、可选 `rootletKind`、`protocol`、`promptRef`、`outputContractRef`、`permissions`、`budget`、`inputRefs`、`createdAt`。
+- `DelegationDecision`：包含 `decisionId`、`parentAgentId`、`action`、`childSpecIds`、`childRunIds`、`inputRefs`、`rationale`、`uncertainty`、`source`、`confidence`、`reasoningTraceRefs`、`createdAt`。
+- `ChildAgentRun`：包含 `childRunId`、`parentAgentId`、`spec`、`status`、`inputRefs`、`outputRefs`、`evidenceRefs`、可选失败/不确定性/置信度和时间戳。
+- `AgentRunTree`：包含 `treeId`、`rootRunId`、`rootAgentId`、`rootSpec`、`childRuns`、`delegationDecisions`、`parentSyntheses`、`status`、`createdAt`、`updatedAt`。
+- `ParentSynthesisResult`：包含 `synthesisId`、`parentAgentId`、`childRunIds`、`inputRefs`、`retainedMaterialRefs`、`rejectedMaterialRefs`、`conflictRefs`、`outputRefs`、`nextAction`、`decisionSummary`、`uncertainty`、`source`、`confidence`、`reasoningTraceRefs`、`createdAt`。
+- Agent Fabric 事件：`agent.delegation.planned`、`agent.child.started`、`agent.child.completed`、`agent.child.interrupted`、`agent.child.resumed`、`agent.child.waiting`、`agent.parent_synthesis.completed`。
+
+### 3. Contracts
+
+- 固定核心 agent 可以作为第一批内置 spec，但动态 rootlet / child agent 必须由父层 `DelegationDecision` 产生运行记录，不能靠临时类名或隐式数组表达。
+- child/rootlet 输出是局部材料；`.agentarbor` 只能消费 `ParentSynthesisResult` 后进入 `ConvergenceReport` / `HandoffSteward` 的父层收束结果。
+- `ChildAgentRun.outputRefs` 不得作为 handoff input refs 直接进入 Direction Handoff。候选可以保留 rootlet output refs 作为证据来源，但正式 handoff source 必须是收束后的 candidate / convergence / handoff material。
+- `AgentSpec.permissions` 和 `budget` 只声明模型/工具/预算边界；不能在 spec、guard、schema 或状态机里替 agent 决定目标理解、候选排序、是否继续探索或方向综合。
+- `UndergroundAgentOrchestrator` 在直接运行时负责发布缺失的 `goal.received`；若 Dispatcher 已发布同一消息，不得重复发布同一 message id。
+- Dispatcher 必须按 message id 和 trace id 跳过已处理 goal，避免重复 goal message 导致同一地下 trace 重复 handoff。
+- `AgentRunTree` 必须进入 `UndergroundExplorationReport` 和 Observation underground view；面板只展示安全投影，不暴露 raw prompt、raw provider response、hidden reasoning、API key、token 或 raw tool output。
+
+### 4. Validation & Error Matrix
+
+| 条件 | 结果 |
+| --- | --- |
+| rootlet spec 缺少 `rootletKind` | `validateAgentSpec().ok === false` |
+| 非 rootlet spec 携带 `rootletKind` | `validateAgentSpec().ok === false` |
+| `allowModel = false` 但暴露工具 | `validateAgentSpec().ok === false` |
+| handoff input refs 包含 child output refs | `AgentFabricContractError` |
+| Workspace fork 后修改 parent 或 child 快照 | 双方互不污染 |
+| Dispatcher 再次遇到同 trace goal | 返回 idle，不重复产出 handoff |
+| Agent Fabric 事件 payload 需要展示运行树 | 只展示 safe ref / summary，不内联 raw runtime/store |
+
+### 5. Good / Base / Bad Cases
+
+- Good：Growth Governor 通过 AI reasoning 形成 rootlet 派生计划，Orchestrator 创建 child runs，等待 child 完成，Candidate Collector / parent synthesis 回收材料，再交给 Autonomy Reviewer / Convergence Judge。
+- Good：Convergence Report 的 provenance refs 能追溯到 parent synthesis；Handoff Steward 只消费 convergence/handoff material。
+- Base：no `AgentTurnRuntime` 时仍可形成低置信 fallback / stopped 运行树，但不得 approved。
+- Bad：把 `RootletOutput` 或工具搜索结果直接塞进 Direction Handoff source candidates。
+- Bad：为了面板展示把 raw EventLog payload、provider response、完整 prompt 或工具 raw output 暴露给前端。
+
+### 6. Tests Required
+
+- `AgentSpec` 校验覆盖 rootlet kind、permissions、budget 和 protocol。
+- workspace projection / fork 隔离测试。
+- child run clone、start、complete、interrupt、resume、fail 的状态与引用快照测试。
+- `assertNoDirectChildOutputHandoff` 阻断 child output 直接进入 handoff。
+- Orchestrator 集成测试覆盖多个 child/rootlet run、delegation event、waiting event、completed event、parent synthesis event 和 no-runtime stopped。
+- Dispatcher 测试覆盖重复 message id / 同 trace goal 不重复推进。
+- Observation / panel 测试覆盖 `agentRunTree`、delegation / child / synthesis refs 和安全 transcript 投影。
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```ts
+directionHandoff.sourceCandidateRefs = childRun.outputRefs;
+```
+
+这会把单个 child 输出当成父层判断，绕过 CandidatePool、ParentSynthesis、Convergence Judge 和 Handoff Steward。
+
+#### Correct
+
+```ts
+const synthesis = appendParentSynthesisToTree(tree, parentSynthesis, now);
+const convergence = await convergenceJudge.reason({ parentSynthesis: synthesis.parentSyntheses.at(-1) });
+```
+
+child/rootlet 只交付局部材料；父层 synthesis 和 convergence 才能决定哪些材料进入 `.agentarbor`。
+
 ## Scenario: 地下消息驱动调度内核
 
 ### 1. Scope / Trigger

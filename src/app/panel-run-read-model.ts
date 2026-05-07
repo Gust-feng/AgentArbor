@@ -136,6 +136,12 @@ export type AgentWorkNote = {
   readonly eventRefs: readonly string[];
   readonly candidateRefs: readonly string[];
   readonly modelCallRefs: readonly string[];
+  readonly reasoningTrace?: {
+    readonly decisionSummary?: string;
+    readonly uncertainty?: string;
+    readonly confidence?: number;
+    readonly source: "ai" | "deterministic_fallback" | "unknown";
+  };
   readonly createdAt: string;
 };
 
@@ -144,6 +150,7 @@ export type PanelTranscriptModelCall = {
   readonly responseId?: string;
   readonly status: "requested" | "completed" | "failed";
   readonly purpose?: string;
+  readonly outputContractId?: string;
   readonly rootletKind?: RootletClusterKind;
   readonly providerKind?: string;
   readonly protocolKind?: string;
@@ -757,6 +764,10 @@ function createPanelTranscriptModelCalls(
       responseId: stringOrUndefined(payload.responseId) ?? existing?.responseId ?? summaryCall?.responseId,
       status: entry.type === "model.failed" ? "failed" : entry.type === "model.completed" ? "completed" : existing?.status ?? "requested",
       purpose: stringOrUndefined(payload.purpose) ?? existing?.purpose,
+      outputContractId:
+        stringOrUndefined(outputContract.contractId) ??
+        existing?.outputContractId ??
+        summaryCall?.visibleOutput?.contractId,
       rootletKind:
         summaryCall?.rootletKind ??
         existing?.rootletKind ??
@@ -781,6 +792,7 @@ function createIntentCoreNote(input: NoteFactoryInput): AgentWorkNote {
   const eventRefs = eventRefsFor(input.eventEntries, ["goal.received", "underground.exploration_planned"]);
   const planned = hasEvent(input.eventEntries, "underground.exploration_planned");
   const received = hasEvent(input.eventEntries, "goal.received");
+  const trace = extractReasoningTraceFromModelCalls(input.modelCalls, "underground.intent_profile.v1");
   return note({
     input,
     noteId: "intent-core",
@@ -791,6 +803,7 @@ function createIntentCoreNote(input: NoteFactoryInput): AgentWorkNote {
     summary: planned ? "目标画像已成形，地下探索计划已发布。" : received ? "目标已进入地下中枢，正在形成目标画像。" : "等待目标进入地下中枢。",
     detail: "工作笔记只记录目标接收和画像成形状态，不展示隐藏推理链或完整用户输入。",
     eventRefs,
+    reasoningTrace: trace,
   });
 }
 
@@ -943,6 +956,7 @@ function createConvergenceJudgeNote(input: NoteFactoryInput): AgentWorkNote {
   const completed = hasEvent(input.eventEntries, "convergence_review.completed");
   const requested = hasEvent(input.eventEntries, "convergence_review.requested");
   const convergence = input.summary?.underground.convergence;
+  const trace = extractReasoningTraceFromModelCalls(input.modelCalls, "underground.convergence_judgment.v1");
   return note({
     input,
     noteId: "convergence-judge",
@@ -957,6 +971,7 @@ function createConvergenceJudgeNote(input: NoteFactoryInput): AgentWorkNote {
         : `accepted/merged/rejected/unknown = ${convergence.accepted}/${convergence.merged}/${convergence.rejected}/${convergence.unknown}。`,
     eventRefs,
     candidateRefs: input.candidateRefs,
+    reasoningTrace: trace,
   });
 }
 
@@ -969,6 +984,7 @@ function createHandoffStewardNote(input: NoteFactoryInput): AgentWorkNote {
   const completed = hasEvent(input.eventEntries, "direction_handoff.completed") || hasEvent(input.eventEntries, "user_approval.requested");
   const convergenceReady = hasEvent(input.eventEntries, "convergence_review.completed");
   const pkg = input.summary?.directionPackage;
+  const trace = extractReasoningTraceFromModelCalls(input.modelCalls, "underground.handoff_narrative.v1");
   return note({
     input,
     noteId: "handoff-steward",
@@ -980,6 +996,7 @@ function createHandoffStewardNote(input: NoteFactoryInput): AgentWorkNote {
     detail: "Handoff Steward 只组装已收束候选；本面板不进入 Aboveground、Fruits 或 Governance。",
     eventRefs,
     candidateRefs: input.candidateRefs,
+    reasoningTrace: trace,
   });
 }
 
@@ -1008,6 +1025,7 @@ function note(input: {
   readonly evidenceRefs?: readonly string[];
   readonly candidateRefs?: readonly string[];
   readonly modelCallRefs?: readonly string[];
+  readonly reasoningTrace?: AgentWorkNote["reasoningTrace"];
 }): AgentWorkNote {
   return {
     noteId: `${input.input.runId}:${input.noteId}`,
@@ -1021,6 +1039,7 @@ function note(input: {
     eventRefs: input.eventRefs,
     candidateRefs: input.candidateRefs ?? [],
     modelCallRefs: input.modelCallRefs ?? [],
+    reasoningTrace: input.reasoningTrace,
     createdAt: lastRecordedAt(input.input.eventEntries, input.eventRefs) ?? input.input.createdAt,
   };
 }
@@ -1278,4 +1297,35 @@ function modelVisibleOutputOrUndefined(value: unknown): ModelVisibleOutputProjec
 
 function unique<T>(values: readonly T[]): T[] {
   return [...new Set(values)];
+}
+
+function extractReasoningTraceFromModelCalls(
+  modelCalls: readonly PanelTranscriptModelCall[],
+  contractId: string,
+): AgentWorkNote["reasoningTrace"] {
+  const matchingCall = modelCalls.find((call) =>
+    call.outputContractId === contractId || call.visibleOutput?.contractId === contractId
+  );
+  if (matchingCall === undefined) {
+    return undefined;
+  }
+  const visibleOutput = matchingCall.visibleOutput;
+  if (visibleOutput === undefined) {
+    return {
+      source: matchingCall.status === "completed" ? "ai" : "deterministic_fallback",
+    };
+  }
+  const fields = visibleOutput.items?.[0]?.fields ?? [];
+  const getField = (name: string): string | undefined =>
+    fields.find((f) => f.name === name)?.value?.trim() || undefined;
+  const decisionSummary = getField("decisionSummary");
+  const uncertainty = getField("uncertainty");
+  const confidenceStr = getField("confidence");
+  const confidence = confidenceStr !== undefined ? parseFloat(confidenceStr) : undefined;
+  return {
+    decisionSummary,
+    uncertainty,
+    confidence: confidence !== undefined && Number.isFinite(confidence) ? confidence : undefined,
+    source: matchingCall.status === "completed" ? "ai" : "deterministic_fallback",
+  };
 }

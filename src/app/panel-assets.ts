@@ -723,7 +723,8 @@ export function createPanelHtml(): string {
       pollingTimer: undefined,
       seenSequences: new Set(),
       lastSequence: 0,
-      runHistory: []
+      runHistory: [],
+      modelOutputEntries: new Map()
     };
 
     const dom = {
@@ -952,6 +953,15 @@ export function createPanelHtml(): string {
       state.seenSequences.add(event.sequence);
       state.lastSequence = Math.max(state.lastSequence, event.sequence);
 
+      if (event.type === "model.output.delta") {
+        appendModelOutputDelta(event);
+        return;
+      }
+      if (event.type === "model.output.completed") {
+        completeModelOutput(event);
+        return;
+      }
+
       const label = event.agentLabel || EVENT_LABELS[event.type] || event.type;
       const content = event.delta || event.summary || EVENT_LABELS[event.type] || event.type;
       const status = event.status || (event.type === "run.failed" ? "failed" : event.type === "final.result" ? "completed" : "running");
@@ -963,6 +973,77 @@ export function createPanelHtml(): string {
         type: event.type,
         refs: refsText(event)
       });
+    }
+
+    function appendModelOutputDelta(event) {
+      const key = modelOutputKey(event);
+      const chunk = event.delta || "";
+      if (chunk.length === 0) {
+        return;
+      }
+      const existing = state.modelOutputEntries.get(key);
+      if (existing) {
+        existing.text += chunk;
+        existing.body.textContent = existing.text;
+        updateEntryStatus(existing.row, "running");
+        existing.row.scrollIntoView({ block: "nearest" });
+        return;
+      }
+      const entry = appendEntry({
+        label: event.agentLabel || "模型",
+        title: "模型输出",
+        body: chunk,
+        status: event.status || "running",
+        type: event.type,
+        refs: refsText(event),
+        returnParts: true
+      });
+      state.modelOutputEntries.set(key, {
+        row: entry.row,
+        body: entry.body,
+        text: chunk
+      });
+    }
+
+    function completeModelOutput(event) {
+      const key = modelOutputKey(event);
+      const existing = state.modelOutputEntries.get(key);
+      if (existing) {
+        updateEntryStatus(existing.row, event.status || "completed");
+        if (event.summary) {
+          const refs = existing.row.querySelector(".refs");
+          if (refs) {
+            refs.textContent = [refs.textContent, event.summary].filter(Boolean).join("；");
+          }
+        }
+        return;
+      }
+      appendEntry({
+        label: event.agentLabel || "模型",
+        title: "模型完成",
+        body: event.summary || "模型调用完成。",
+        status: event.status || "completed",
+        type: event.type,
+        refs: refsText(event)
+      });
+    }
+
+    function modelOutputKey(event) {
+      if (event.modelCallRefs && event.modelCallRefs.length > 0) {
+        return event.modelCallRefs[0];
+      }
+      return event.eventId || String(event.sequence);
+    }
+
+    function updateEntryStatus(row, statusValue) {
+      const bubble = row.querySelector(".bubble");
+      const meta = row.querySelector(".entry-title .meta");
+      if (bubble) {
+        bubble.className = "bubble " + bubbleClass("model.output.delta", statusValue);
+      }
+      if (meta) {
+        meta.textContent = STATUS_LABELS[statusValue] || statusValue || "";
+      }
     }
 
     function appendLocalEntry(label, body, status) {
@@ -1000,6 +1081,9 @@ export function createPanelHtml(): string {
       row.append(label, bubble);
       dom.transcript.append(row);
       row.scrollIntoView({ block: "nearest" });
+      if (input.returnParts) {
+        return { row, body };
+      }
     }
 
     function bubbleClass(type, status) {

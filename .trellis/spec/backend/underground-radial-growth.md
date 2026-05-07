@@ -202,24 +202,23 @@ Rootlet 是否启动和候选如何收束都必须从目标画像和比较结果
 
 ### 3. Contracts
 
-- 地下 session 默认必须经 `UndergroundAgentOrchestrator` 的 `cognitive_manager` 路由进入地下运行；旧 agent cluster runtime 只能作为显式迁移 / 兼容 helper，不能重新成为 session 主入口，也不能回退到 app helper 直接把 rootlet output 塞进 candidate pool。
+- 地下 session 默认必须经 `UndergroundAgentOrchestrator` 的 `cognitive_manager` 路由进入地下运行；旧 agent cluster runtime 只能作为历史迁移材料被阅读，不能重新成为 session 主入口，也不能回退到 app helper 直接把 rootlet output 塞进 candidate pool。
 - 调度器必须先注册地下 agent manifests，再按 `GoalIntentProfile` 和动态 rootlet 选择结果启动 rootlet agent invocations。
 - rootlet output 进入正式 candidate pool 前，必须能追溯到 completed `rootlet_agent` invocation，且 `output.producedByAgentId === invocation.agentId`、`invocation.outputRefs` 包含 `output.outputId`。
-- `IntelligenceChannel` 只能作为 rootlet agent 的能力来源；所有 rootlet kind 的 AI output 都只有被 rootlet invocation 包装成 `RootletOutput` 后，才能进入 candidate pool。
+- 地下 agent 只能通过 `AgentTurnRuntime / IntelligenceChannel` 获取模型能力；所有 rootlet kind 的 AI output 都只有被 Rootlet Explorer 包装成 `RootletOutput` 后，才能进入 candidate pool。
 - Convergence Judge 与 Handoff Steward 是上层 agent 收束与交接职责 owner，可以使用 AI 进行语义裁决和叙事组织；确定性守门只负责 candidate pool、convergence report、Direction Handoff Package validation、hard constraint、权限和谱系边界，模型输出不能绕过这些边界。
 - 不新增事件类型时，地下运行必须暴露安全的 `undergroundOrchestratorRun` / manager trace，证明 plan、rootlet、candidate、autonomy、convergence 和 handoff 均经 orchestrator route 推进；旧 `agentCluster` payload 只能作为迁移兼容投影，不再是唯一验收证据。
 
-### 4. Runtime Unitization Contract
+### 4. Cognitive Runtime Unitization Contract
 
-- `src/app/underground/cluster/` 是当前消息驱动地下运行单元实现位置；固定核心 agent 必须按职责拆为 `IntentCoreAgent`、`GrowthGovernorAgent`、`CandidatePoolAgent`、`ConvergenceJudgeAgent` 和 `HandoffStewardAgent`。
-- `UndergroundAgentRunner` 只负责固定 agent 生命周期、MessageBus 订阅队列、processed message / phase guard、max step guard、handler failure boundary、动态 `RootletAgent(kind)` 创建、内部 rootlet invocation request 和终态等待。
-- Runner 不得承载 Intent Core、Growth Governor、Rootlet、Candidate Pool、Convergence Judge 或 Handoff Steward 的业务阶段逻辑；业务阶段逻辑必须落在对应 runtime unit。
-- `MessageDrivenUndergroundDispatcher` 当前只允许作为兼容 wrapper 委托 `UndergroundAgentRunner`；不得重新积累地下业务阶段 handler。
-- `UndergroundSharedContext` 是单次 run 内固定核心 agent 的协作介质，不能替代 EventLog、DirectionHandoffPackageStore 或 Observation Snapshot；关键字段必须按 owner 写入规则守卫。
-- SharedContext owner 规则：Intent Core 写 goal/profile/plan/cluster plan/初始 center invocation；Growth Governor 写 started plan、running rootlet invocations、expected rootlet kinds 和 growth invocation；Rootlet Agent 写自己的 rootlet outputs 和 completed rootlet invocations；Candidate Pool Agent 写 candidate pool；Convergence Judge 写 convergence report、evidence ledger、pending agent cluster run 和 underground report；Handoff Steward 写 direction handoff、package、terminal status 和 finalized agent cluster run。
-- `GrowthGovernorAgent` 发布 `rootlet_cluster.started` 后，Runner 根据 `startedPlan.rootletClusters` 动态创建对应 `RootletAgent(kind)`，并通过 run-internal `rootlet.invocation_requested` 触发该 rootlet；RootletAgent 不得依赖监听已经错过的 `rootlet_cluster.started`。
-- `rootlet.invocation_requested` 是 run-internal trigger，不进入 `ARBOR_MESSAGE_TYPES` 或 EventLog；对应 `RootletOutput.sourceRefs` 必须记录内部 request id 和 `rootlet.invocation_requested`，用于证明 rootlet 由明确消息触发。
-- `HandoffStewardAgent` 必须拥有自己的 `handoff_steward` invocation 生命周期；其他 agent 不得预创建或完成 Handoff Steward 的 invocation。
+- `src/app/underground/agents/` 是当前 AI-first 地下运行单元实现位置；旧 `src/app/underground/cluster/` 已被 `UndergroundAgentOrchestrator` 与 `AgentLoop / Workspace / Mailbox` 运行骨架替代，不得作为新代码或新 spec 的实现事实源。
+- 固定地下 agent 必须按职责拆为 `IntentCoreAgent`、`GrowthGovernorAgent`、`CandidateCollectorAgent`、`AutonomyReviewerAgent`、`ConvergenceJudgeAgent` 和 `HandoffStewardAgent`；动态根须由 `RootletExplorerAgent(kind)` 表达。
+- `UndergroundAgentOrchestrator` 只负责 cognitive manager 路由、workspace/mailbox/context 注入、rootlet 动态实例化、run trace、processed message / phase guard、max step / max autonomy cycle hard guard 和终态汇总。
+- Orchestrator 不得承载 Intent Core、Growth Governor、Rootlet Explorer、Candidate Collector、Autonomy Reviewer、Convergence Judge 或 Handoff Steward 的语义阶段逻辑；目标理解、候选聚合、继续探索、候选裁决和交接叙事必须落在对应 agent 的 `reason()`。
+- `MessageDrivenUndergroundDispatcher` 只能作为兼容 wrapper 消费 `goal.received` 并委托 `UndergroundAgentOrchestrator`；不得重新积累地下业务阶段 handler，也不得恢复旧 `UndergroundAgentRunner`。
+- `WorkspaceView` / `Mailbox` 是单次 run 内 agent 协作介质，不能替代 EventLog、DirectionHandoffPackageStore、Observation Snapshot 或 Direction Handoff Package 的事实源；关键产物仍必须由对应 agent action 和 guard 后写入。
+- Rootlet Explorer 可以读取已经完成的 sibling rootlet summaries 作为反驳、补充和交叉材料输入，但这些材料仍只能作为新的 `RootletOutput` 进入 CandidatePool，不能绕过 Candidate Collector、Convergence Judge 或 Handoff Steward。
+- `HandoffStewardAgent` 必须拥有自己的 handoff action 生命周期；其他 agent 不得预创建、改写或完成 Handoff Steward 的 package 输出。
 
 ### 5. Validation & Error Matrix
 
@@ -288,7 +287,7 @@ createMinimalCandidatePool({ goalId, rootletOutputs: [rootletOutput], agentInvoc
 
 ### 3. Contracts
 
-- `runUndergroundDirectionSession` 和 `runUndergroundDirectionSessionWithIntelligence` 必须经 `UndergroundAgentOrchestrator` 进入地下运行；不得在 session 层继续直接 publish goal 后调用 `UndergroundAgentRunner`。
+- `runUndergroundDirectionSession` 和 `runUndergroundDirectionSessionWithIntelligence` 必须经 `UndergroundAgentOrchestrator` 进入地下运行；不得在 session 层继续直接 publish goal 后调用旧 runner 或 loose helper。
 - Orchestrator trace、看板和文档必须把当前主路由标记为 `cognitive_manager`；不得残留 `agent_loop_compatibility_adapter` 作为当前主路由，也不得使用 DEBUG console 输出 route 状态。
 - fake AI 是最小 happy path；`aiMode=none`、缺少 `AgentTurnRuntime`、配置失败、模型失败或 contract validation failed 均不得伪造模型成功或 approved package。
 - `AgentRunContext.workspace` 面向 agent 暴露 `WorkspaceView`，不能让 agent 直接写共享状态；可写 workspace 只能留在 orchestrator 内部。
@@ -315,41 +314,41 @@ createMinimalCandidatePool({ goalId, rootletOutputs: [rootletOutput], agentInvoc
 
 ### 2. Signatures
 
-- `UndergroundAgentRunner({ runtime, intelligenceChannel?, maxDispatchSteps? })`：管理固定地下 agent 生命周期、MessageBus 队列、动态 rootlet agent 创建和终态等待。
-- `MessageDrivenUndergroundDispatcher({ runtime, intelligenceChannel?, maxDispatchSteps? })`：兼容 wrapper，必须委托 `UndergroundAgentRunner`，不得继续保存地下业务阶段大 handler。
-- `dispatchUntilIdle()`：同步推进确定性地下 handler；若遇到需要异步智能通道的 handler，必须失败并要求调用异步入口。
-- `dispatchUntilIdleAsync()`：推进可能调用 `IntelligenceChannel` 的 rootlet handler。
-- `UndergroundMessageDrivenDispatchResult`：返回终态、地下报告、方向交接包、loaded package ref、processed message ids 和 dispatch step count。
+- `UndergroundAgentOrchestrator({ runtime, intelligenceChannel?, agentTurnRuntime?, toolCenter?, maxAutonomyCycles? })`：管理地下 cognitive manager 路由、AgentLoop 上下文、动态 `RootletExplorerAgent(kind)`、run trace 和终态汇总。
+- `MessageDrivenUndergroundDispatcher({ runtime, intelligenceChannel?, toolCenter?, maxDispatchSteps?, maxAutonomyCycles? })`：兼容 wrapper，只消费待处理的 `goal.received` 并委托 `UndergroundAgentOrchestrator`，不得继续保存地下业务阶段 handler。
+- `dispatchUntilIdle()`：同步 idle / 边界检查入口；当前完整地下运行进入 async AgentLoop 主线，配置智能通道或需要完整推进时必须使用 `dispatchUntilIdleAsync()`。
+- `dispatchUntilIdleAsync()`：消费下一个未处理的合法 `goal.received` message，调用 Orchestrator async 主线，并返回终态结果。
+- `UndergroundMessageDrivenDispatchResult`：返回终态、地下报告、方向交接包、loaded package ref、processed message ids、dispatch step count 和 orchestrator run trace。
 
 ### 3. Contracts
 
-- `runUndergroundDirectionSession` 默认只能创建并发布 `goal.received`，地下阶段推进必须由 `UndergroundAgentRunner` 的 MessageBus 队列触发；session 不得重新串行调用 prepare / rootlet / candidate pool / convergence / handoff helper。
-- handler 之间的跨阶段推进必须通过正式 `ArborMessage`：`goal.received -> underground.exploration_planned -> rootlet_cluster.started -> exploration_candidate.produced -> candidate_pool.updated -> convergence_review.completed -> direction_handoff.completed | user_approval.requested`。
-- 每个 handler 输出事件必须带对应 agent `from.id`：Intent Core、Growth Governor、Rootlet Agent、Candidate Pool、Convergence Judge、Handoff Steward；EventLog 必须能直接读出推进者。
-- Runner 可以维护 run-scoped typed shared context，但写入和读取必须由消息触发；SharedContext 不能替代 EventLog、DirectionHandoffPackageStore 或 Observation Snapshot 的事实源。
-- Runner 必须记录 processed message id、phase guard 和 max dispatch steps；重复消息不能重复产出地下结果。
-- 直接发布后续阶段事件、但没有同 run 的 `goal.received` context 时，Runner / wrapper 必须失败，不得跳阶段产出 convergence、handoff package 或用户澄清请求。
-- 智能通道只允许在 rootlet handler 内把模型输出包装为 `RootletOutput`；模型输出仍必须经过 candidate pool、convergence 和 handoff validation。
+- `runUndergroundDirectionSession` 默认创建 `goal.received` 后必须经 `UndergroundAgentOrchestrator` 推进；session 不得重新串行调用 prepare / rootlet / candidate pool / convergence / handoff helper。
+- 地下阶段公开事件仍必须保持可观测链路：`goal.received -> underground.exploration_planned -> rootlet_cluster.started -> exploration_candidate.produced -> candidate_pool.updated -> autonomy_review.completed? -> convergence_review.completed -> direction_handoff.completed | user_approval.requested`。
+- 每个阶段输出事件必须带对应 agent `from.id`：Intent Core、Growth Governor、Rootlet Explorer、Candidate Collector、Autonomy Reviewer、Convergence Judge、Handoff Steward；EventLog 必须能直接读出推进者。
+- Orchestrator 可以维护 run-scoped workspace view，但写入必须来自对应 agent action；workspace 不能替代 EventLog、DirectionHandoffPackageStore 或 Observation Snapshot 的事实源。
+- Dispatcher / Orchestrator 必须记录 processed message id、phase guard 和 max dispatch steps / max autonomy cycles；重复消息不能重复产出地下结果。
+- 直接发布后续阶段事件、但没有同 run 的 `goal.received` context 时，Dispatcher / Orchestrator 必须失败，不得跳阶段产出 convergence、handoff package 或用户澄清请求。
+- 智能通道允许服务 Intent Core、Growth Governor、Rootlet Explorer、Candidate Collector、Autonomy Reviewer、Convergence Judge 和 Handoff Steward 的 `reason()`；模型输出仍必须进入对应 agent 决策材料，并经过 candidate pool、convergence、handoff 和 package validation。
 
 ### 4. Validation & Error Matrix
 
 | 条件 | 结果 |
 | --- | --- |
-| `goal.received` 经 MessageBus 发布 | Runner 逐步发布地下阶段事件并返回终态结果 |
+| `goal.received` 经 MessageBus 发布 | Orchestrator 逐步发布地下阶段事件并返回终态结果 |
 | 未发布任何消息即调用 dispatch | 返回 `undefined`，EventLog 不新增地下结果 |
 | 重复发布同一 message id 或同 trace 同阶段消息 | 只处理首个阶段推进，地下结果只产出一次 |
-| dispatch step 超过 `maxDispatchSteps` | Runner 抛地下调度错误；wrapper 映射为 `UndergroundMessageDispatcherError`，不得继续推进后续阶段 |
-| 直接发布 `candidate_pool.updated` 等后续阶段且缺少 context | Runner / wrapper 抛地下调度错误，不得产出 `convergence_review.completed` 或 handoff 事件 |
-| session 重新直接调用旧 cluster 串行 runtime | 设计违规，测试应通过消息驱动断言暴露回归 |
+| dispatch step 超过 `maxDispatchSteps` 或 autonomy cycle 超过 `maxAutonomyCycles` | Dispatcher / Orchestrator 抛地下调度错误或形成可审计 stopped 决策，不得继续推进后续阶段 |
+| 直接发布 `candidate_pool.updated` 等后续阶段且缺少 context | Dispatcher / Orchestrator 抛地下调度错误，不得产出 `convergence_review.completed` 或 handoff 事件 |
+| session 重新直接调用旧 cluster 串行 runtime | 设计违规，测试应通过 orchestrator route / import boundary 断言暴露回归 |
 | rootlet handler 绕过智能通道或 candidate pool 直接写 approved handoff | 智能通道和 handoff validation 测试失败 |
 
 ### 5. Good / Base / Bad Cases
 
-- Good：地下-only session 发布一个 `goal.received` 后，由 Runner 队列逐步推进，并在 EventLog 中看到每个 runtime unit 的 `from.id`。
+- Good：地下-only session 创建一个 `goal.received` 后，由 Orchestrator 逐步推进，并在 EventLog 中看到每个 runtime unit 的 `from.id`。
 - Good：重复 goal message 不会生成第二个 `underground.exploration_planned` 或第二个 handoff package。
-- Base：旧的 agent cluster runtime helper 可以继续作为 handler 内部纯计算/兼容入口存在，但 session 默认路径不再直接调用它。
+- Base：`MessageDrivenUndergroundDispatcher` 可以作为兼容外壳保留，但内部只能委托 Orchestrator，不保留旧 cluster runner 或阶段 handler。
 - Bad：session 在发布 `goal.received` 后继续手动调用 rootlet、candidate pool、convergence 和 handoff helper。
-- Bad：测试直接构造 SharedContext 或 package 结果来证明成功，而不是通过 MessageBus 发布消息驱动 Runner / wrapper。
+- Bad：测试直接构造 workspace/package 结果来证明成功，而不是通过 goal message / Orchestrator route 推进。
 
 ### 6. Tests Required
 
@@ -357,8 +356,8 @@ createMinimalCandidatePool({ goalId, rootletOutputs: [rootletOutput], agentInvoc
 - 重复 message id / 同 trace 同阶段消息不会重复推进。
 - `maxDispatchSteps` 能阻断递归或失控 dispatch。
 - 没有 `goal.received` context 的后续阶段消息不能跳阶段产出地下结果。
-- 动态 RootletAgent 创建后由明确内部 request 触发，rootlet output source refs 能证明该触发。
-- SharedContext 关键字段 owner 规则有守卫测试，Handoff Steward 的 invocation 由 Handoff Steward 自己完成并引用 package。
+- 动态 `RootletExplorerAgent(kind)` 由 Orchestrator 根据 Growth Governor 的计划创建，rootlet output source refs 能证明对应 agent action。
+- Workspace 关键产物由对应 agent action 写入，Handoff Steward 的 package 输出由 Handoff Steward 自己完成并引用 package。
 - `runUndergroundDirectionSessionWithIntelligence` 仍只让模型输出进入 rootlet output / candidate pool，不绕过 convergence 和 handoff validation。
 - Observation Snapshot 仍从 EventLog + runtime result 派生，并保持 JSON-safe。
 
@@ -379,7 +378,7 @@ runtime.bus.publish(goalMessage);
 const result = dispatcher.dispatchUntilIdle();
 ```
 
-跨 agent / 跨阶段推进只能由 Runner / wrapper 消费 MessageBus 事件完成；纯函数 helper 只能保留为 runtime unit 内部实现细节。
+跨 agent / 跨阶段推进只能由 Orchestrator / 兼容 wrapper 消费 goal message 后完成；纯函数 helper 只能保留为 runtime unit 内部实现细节。
 
 ## Signatures
 

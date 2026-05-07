@@ -221,11 +221,25 @@ test("aboveground rejects awaiting-user v1 and accepts recovered approved v2", a
   assert.equal(planned.growthPlan.directionHandoffVersion, 2);
 });
 
-test("main minimal loop keeps the fixed 18-event happy path", () => {
-  const result = runMinimalLoop();
+test("main minimal loop uses fake AI and keeps the desktop product path", async () => {
+  const result = await runMinimalLoop();
 
-  assert.equal(EXPECTED_DEMO_EVENTS.length, 18);
-  assert.deepEqual(result.eventTypes, EXPECTED_DEMO_EVENTS);
+  assert.equal(result.eventTypes.includes("model.requested"), true);
+  assert.equal(result.eventTypes.includes("agent.delegation.planned"), true);
+  assertIncludesInOrder(result.eventTypes, EXPECTED_DEMO_EVENTS);
   assert.equal(result.undergroundReport.convergenceReport.outcome, "approved");
   assert.equal(result.undergroundReport.convergenceReport.userEscalationRequired, false);
 });
+
+function assertIncludesInOrder(actual: readonly string[], expected: readonly string[]): void {
+  let cursor = 0;
+  for (const item of actual) {
+    if (item === expected[cursor]) {
+      cursor += 1;
+    }
+    if (cursor === expected.length) {
+      return;
+    }
+  }
+  assert.fail(`Expected sequence ${expected.join(" -> ")} inside ${actual.join(" -> ")}`);
+}

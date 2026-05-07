@@ -13,14 +13,17 @@ import { createMinimalGrowthPlanMaterial } from "../minimal-growth-plan.js";
 import type { MinimalRuntime } from "../runtime.js";
 import type { PlanOutput } from "./types.js";
 
+// Aboveground Execution Runtime minimal consumer. It still loads the legacy
+// DirectionHandoffPackage wire shape, but product-facing semantics are Plan /
+// Plan Package per ADR-0022.
 export class AbovegroundPlanner {
   readonly agentId = "aboveground-planner";
 
   plan(directionId: string, version: number, traceId: string, runtime: MinimalRuntime): PlanOutput {
     if (typeof directionId !== "string" || !Number.isInteger(version)) {
       throw new StateGuardError(
-        "PLANNING_REQUIRES_DIRECTION_HANDOFF_PACKAGE_REF",
-        "AbovegroundPlanner must load a validated DirectionHandoffPackage by direction id and version."
+        "PLANNING_REQUIRES_PLAN_PACKAGE_REF",
+        "AbovegroundPlanner must load a validated Plan Package by direction id and version."
       );
     }
 
@@ -34,7 +37,7 @@ export class AbovegroundPlanner {
       throw new DirectionHandoffPackageValidationError(validation);
     }
 
-    // Aboveground consumes direction id/version refs so package validation and lineage cannot be bypassed.
+    // Aboveground consumes Plan refs so validation and lineage cannot be bypassed.
     assertDirectionHandoffPackageValidForPlanning(directionHandoffPackage);
     const { directionHandoff } = directionHandoffPackage;
     enterPlanning(directionHandoff);

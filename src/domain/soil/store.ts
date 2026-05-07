@@ -70,9 +70,9 @@ export function createMinimalReadonlySoilStore(constraints: readonly Constraint[
     constraints,
     capabilityAssetRefs: [
       {
-        id: "soil:capability:minimal-deterministic-runtime",
+        id: "soil:capability:minimal-ai-driven-runtime",
         kind: "capability_asset",
-        summary: "Minimal deterministic runtime capability reference; not inline asset content.",
+        summary: "Minimal local fake-AI runtime capability reference; not inline asset content.",
         evidenceRefs: ["docs/开发指南/06-工程实现/06-最小实现边界.md"],
       },
     ],
@@ -80,7 +80,7 @@ export function createMinimalReadonlySoilStore(constraints: readonly Constraint[
       {
         id: "soil:path-bias:prefer-verified-minimal-path",
         kind: "path_bias",
-        summary: "Prefer previously verified deterministic paths when hard constraints allow it.",
+        summary: "Prefer previously verified local fake-AI paths when hard constraints allow it.",
         evidenceRefs: ["docs/开发指南/02-核心闭环/06-路径倾向机制.md"],
       },
     ],

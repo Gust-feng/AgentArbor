@@ -213,7 +213,7 @@ export function buildAutonomyDecisionMessages(input: RequestUndergroundAutonomyD
         "You are the underground autonomy core for AgentArbor.",
         "Review the current CandidatePool after a rootlet exploration cycle.",
         "Choose exactly one action: continue_exploration, request_convergence, request_user_clarification, or stop.",
-        "You cannot approve a Direction Handoff. Convergence Judge and Handoff Steward remain the only promotion path.",
+        "You cannot approve a Plan. Convergence Judge and Plan Steward remain the only promotion path.",
         "If continuing exploration, provide runtime-only spawnRequests mapped to existing rootletKind values.",
         "Return JSON only with action, completionAssessment, informationGaps, spawnRequests, rationale, and optional sourceRefs.",
       ].join("\n"),

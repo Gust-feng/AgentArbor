@@ -1,8 +1,8 @@
 import { EXPECTED_DEMO_EVENTS, runMinimalLoop } from "./minimal-loop.js";
 
-const result = runMinimalLoop();
+const result = await runMinimalLoop("Design a daily AI model trend monitoring plan.");
 
-console.log("AgentArbor minimal runtime demo");
+console.log("AgentArbor desktop agent minimal demo");
 console.log("");
 console.log("EventLog replay:");
 for (const entry of result.runtime.eventLog.list()) {
@@ -10,7 +10,7 @@ for (const entry of result.runtime.eventLog.list()) {
 }
 
 console.log("");
-console.log("Expected order:");
+console.log("Required product path:");
 console.log(EXPECTED_DEMO_EVENTS.join(" -> "));
 
 console.log("");
@@ -18,7 +18,13 @@ console.log("Summary:");
 console.log(
   JSON.stringify(
     {
-      loadedDirectionPackage: {
+      taskSoil: {
+        id: result.taskSoil.taskSoilId,
+        goalId: result.taskSoil.goalId,
+        contextRefs: result.taskSoil.contextRefs.map((ref) => ref.ref),
+        globalSoilRefs: result.taskSoil.globalSoilRefs,
+      },
+      planPackage: {
         id: result.loadedDirectionHandoffPackage.manifest.directionId,
         version: result.loadedDirectionHandoffPackage.manifest.directionVersion,
         status: result.loadedDirectionHandoffPackage.manifest.status,
@@ -36,6 +42,11 @@ console.log(
           unknown: result.undergroundReport.convergenceReport.unknownCandidateRefs.length,
           userEscalationRequired: result.undergroundReport.convergenceReport.userEscalationRequired,
         },
+        agentRunTree: {
+          rootAgentId: result.undergroundReport.agentRunTree?.rootAgentId,
+          childRuns: result.undergroundReport.agentRunTree?.childRuns.length,
+          parentSyntheses: result.undergroundReport.agentRunTree?.parentSyntheses.length,
+        },
       },
       observationSnapshot: {
         traceId: result.observationSnapshot.traceId,
@@ -45,7 +56,7 @@ console.log(
         eventCursor: result.observationSnapshot.eventCursor,
         layerStatuses: {
           underground: result.observationSnapshot.underground.status,
-          handoff: result.observationSnapshot.handoff.status,
+          plan: result.observationSnapshot.handoff.status,
           aboveground: result.observationSnapshot.aboveground.status,
           fruits: result.observationSnapshot.fruits.status,
           governance: result.observationSnapshot.governance.status,
@@ -72,7 +83,7 @@ console.log(
             userEscalationRequired: result.observationSnapshot.underground.userEscalationRequired,
           },
         },
-        handoff: result.observationSnapshot.handoff,
+        planPackage: result.observationSnapshot.handoff,
       },
       fruit: result.fruit,
       runMemory: {

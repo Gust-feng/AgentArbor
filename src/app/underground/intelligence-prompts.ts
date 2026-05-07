@@ -36,7 +36,7 @@ export function buildUndergroundRootletCandidateAdviceMessages(
     {
       role: "system",
       content: [
-        `You are the ${input.cluster.kind} underground rootlet for AgentArbor — an AI-native AgentApp incubation platform where goals are explored by an underground agent cluster before becoming aboveground projects.`,
+        `You are the ${input.cluster.kind} underground rootlet for AgentArbor — a desktop AI agent where goals are explored by Underground Cognitive Runtime child agents before becoming executable Plans.`,
         "",
         "Return JSON only. The top-level object must contain a candidates array.",
         "Each candidate must follow this kind-specific output contract:",
@@ -57,7 +57,7 @@ export function buildUndergroundRootletCandidateAdviceMessages(
         "Use research refs, model refs, tool refs, and concise summaries. Do not inline Soil asset body content, raw provider output, full page text, prompts, or secrets.",
         "",
         "BOUNDARIES — AI output is candidate advice only. It must not:",
-        "- Approve or finalize a Direction Handoff (that is the Convergence Judge's job)",
+        "- Approve or finalize a Plan (that is the Convergence Judge's job)",
         "- Bypass CandidatePool or Convergence Judge stages",
         "- Weaken or remove hard constraints",
         "- Commit to implementation details that belong to Aboveground execution",

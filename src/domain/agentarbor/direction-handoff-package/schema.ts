@@ -2,7 +2,7 @@ import type { DirectionHandoffPackageFile } from "./contracts.js";
 
 export const DIRECTION_HANDOFF_PACKAGE_SCHEMA_VERSION = "direction-handoff-package/v0.2" as const;
 
-// The handoff package references Soil; it is not a Soil copy or final asset store.
+// The Plan Package compatibility payload references Soil; it is not a Soil copy or final asset store.
 export const DIRECTION_HANDOFF_PACKAGE_FILES: readonly DirectionHandoffPackageFile[] = [
   { path: "handoff.meta.json", role: "package_metadata", contentType: "application/json", required: true },
   { path: "direction.md", role: "direction_brief", contentType: "text/markdown", required: true },

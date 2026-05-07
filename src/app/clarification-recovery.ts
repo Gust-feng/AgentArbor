@@ -172,7 +172,7 @@ function createApprovedConvergenceReviewFromClarification(input: {
     ]),
     userDecisionRequired: [],
     abovegroundReferenceOptionIds: [...(previousReview.abovegroundReferenceOptionIds ?? [])],
-    summary: "User clarification was answered; blocking unknowns no longer block the direction handoff.",
+    summary: "User clarification was answered; blocking unknowns no longer block the Plan.",
     outcome: "approved",
     userEscalationRequired: false,
     openQuestions: (previousReview.openQuestions ?? []).filter(
@@ -216,7 +216,7 @@ function createRecoveredDecisions(input: {
     sourceCandidateRefs: [candidate.id],
     status: candidate.status === "merged" ? "merged" : "accepted",
     decidedByRole: "convergence_judge" as const,
-    reason: `${candidate.clusterId} remains selected for the recovered direction handoff.`,
+    reason: `${candidate.clusterId} remains selected for the recovered Plan.`,
     provenanceRefs: [...candidate.sourceRefs],
     evidenceRefs: [`recovered-decision:${candidate.id}`],
   }));

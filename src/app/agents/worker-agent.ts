@@ -29,8 +29,8 @@ export class WorkerAgent {
       producedBy: this.agentId,
       type: "document",
       uri: `memory://artifacts/${task.id}`,
-      content: "Minimal AgentApp artifact produced by deterministic WorkerAgent.",
-      summary: "Minimal deterministic AgentApp artifact.",
+      content: "Minimal desktop-agent artifact produced by the local WorkerAgent.",
+      summary: "Minimal desktop-agent artifact.",
     });
     runtime.bus.publish(
       createMessage({

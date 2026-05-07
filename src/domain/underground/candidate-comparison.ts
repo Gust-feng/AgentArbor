@@ -217,9 +217,9 @@ export function compareCandidateForGoal(input: {
       constraintImpact: "partial",
       riskLevel: "blocking",
       goalMatchBasis: `The candidate does not share task concepts with the original goal. Expected one of ${relevance.expectedTerms.join(", ")}; matched none.`,
-      evidenceSupportBasis: "Unrelated or template-only material cannot support the Direction Handoff.",
+      evidenceSupportBasis: "Unrelated or template-only material cannot support the Plan.",
       evidenceGaps: ["Goal relevance evidence is missing for this candidate."],
-      riskCoverage: ["Unrelated candidate material would produce an invalid or misleading handoff package."],
+      riskCoverage: ["Unrelated candidate material would produce an invalid or misleading Plan Package."],
       whyNot: ["Rejected because the candidate is not meaningfully related to the user's original goal."],
     });
   }

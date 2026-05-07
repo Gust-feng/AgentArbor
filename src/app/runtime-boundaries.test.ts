@@ -11,8 +11,8 @@ import { StateGuardError } from "../kernel/state-machine/task-state-machine.js";
 import { AbovegroundPlanner } from "./agents.js";
 import { runMinimalLoop } from "./minimal-loop.js";
 
-test("aboveground planner blocks draft and awaiting_user DirectionHandoffPackages", () => {
-  const result = runMinimalLoop();
+test("aboveground planner blocks draft and awaiting_user Plan Packages", async () => {
+  const result = await runMinimalLoop();
   const planner = new AbovegroundPlanner();
 
   for (const status of ["draft", "awaiting_user"] as const) {
@@ -34,8 +34,8 @@ test("aboveground planner blocks draft and awaiting_user DirectionHandoffPackage
   }
 });
 
-test("aboveground planner rejects awaiting_user package tampered into approved status", () => {
-  const result = runMinimalLoop();
+test("aboveground planner rejects awaiting_user package tampered into approved status", async () => {
+  const result = await runMinimalLoop();
   const planner = new AbovegroundPlanner();
   const { directionHandoffPackage } = createAwaitingUserDirectionHandoffPackageFixture();
   const tamperedPackage = tamperAwaitingUserPackageToApprovedShape(directionHandoffPackage);
@@ -53,8 +53,8 @@ test("aboveground planner rejects awaiting_user package tampered into approved s
   );
 });
 
-test("aboveground planner rejects ad-hoc DirectionHandoff material", () => {
-  const result = runMinimalLoop();
+test("aboveground planner rejects ad-hoc Plan material", async () => {
+  const result = await runMinimalLoop();
   const planner = new AbovegroundPlanner();
 
   assert.throws(

@@ -669,13 +669,13 @@ function agentNoteForEvent(
     case "goal.received":
       return { agentLabel: "用户", summary: "目标已进入地下组织，原文不会在调试区外展开。", status: "completed" };
     case "underground.exploration_planned":
-      return { agentLabel: "地下中枢", summary: "目标画像和探索计划已形成。", status: "completed" };
+      return { agentLabel: "地下认知运行时", summary: "目标画像和探索计划已形成。", status: "completed" };
     case "rootlet_cluster.started":
       return { agentLabel: "Rootlet 集群", summary: "动态 rootlet 已启动，开始探索候选方向。", status: "running" };
     case "exploration_candidate.produced":
       return { agentLabel: "Rootlet 集群", summary: "Rootlet 已产出候选材料，等待进入候选池。", status: "completed" };
     case "candidate_pool.updated":
-      return { agentLabel: "候选池", summary: "候选池已更新，正式事实边界仍由收束和方向交接校验掌握。", status: "completed" };
+      return { agentLabel: "候选池", summary: "候选池已更新，正式事实边界仍由父层收束和 Plan Package 校验掌握。", status: "completed" };
     case "autonomy_review.completed":
       return {
         agentLabel: "自治中枢",
@@ -687,11 +687,11 @@ function agentNoteForEvent(
     case "convergence_review.completed":
       return { agentLabel: "收束判断", summary: "候选材料已由 Convergence Judge 完成正式收束。", status: "completed" };
     case "direction_handoff.requested":
-      return { agentLabel: "方向交接", summary: "方向交接包开始组装。", status: "running" };
+      return { agentLabel: "Plan Steward", summary: "Plan Package 开始组装。", status: "running" };
     case "direction_handoff.completed":
-      return { agentLabel: "方向交接", summary: "方向交接包已通过现有校验链生成。", status: "completed" };
+      return { agentLabel: "Plan Steward", summary: "Plan Package 已通过现有校验链生成。", status: "completed" };
     case "direction_handoff.revision_requested":
-      return { agentLabel: "方向交接", summary: "方向交接包需要修订或补充。", status: "running" };
+      return { agentLabel: "Plan Steward", summary: "Plan Package 需要修订或补充。", status: "running" };
     case "user_approval.requested":
       return { agentLabel: "用户确认", summary: "地下组织需要用户澄清后继续。", status: "running" };
     case "user_approval.received":
@@ -742,7 +742,7 @@ function finalResultSummary(input: {
 }): string {
   const summary = fullSummaryOrUndefined(input.summary);
   if (summary !== undefined) {
-    return `地下运行完成，方向包 ${summary.directionPackage.id} v${summary.directionPackage.version}，状态 ${summary.directionPackage.status}。`;
+    return `地下运行完成，Plan Package ${summary.directionPackage.id} v${summary.directionPackage.version}，状态 ${summary.directionPackage.status}。`;
   }
   const stage = input.observation?.currentStage;
   return stage === undefined ? "地下运行完成。" : `地下运行完成，当前阶段 ${stage}。`;
@@ -875,7 +875,7 @@ function createIntentCoreNote(input: NoteFactoryInput): AgentWorkNote {
     agentLabel: "Intent Core",
     stage: "intent_profile",
     status: planned ? "completed" : received ? "running" : "pending",
-    summary: planned ? "目标画像已成形，地下探索计划已发布。" : received ? "目标已进入地下中枢，正在形成目标画像。" : "等待目标进入地下中枢。",
+    summary: planned ? "目标画像已成形，地下探索计划已发布。" : received ? "目标已进入地下认知运行时，正在形成目标画像。" : "等待目标进入地下认知运行时。",
     detail: "工作笔记只记录目标接收和画像成形状态，不展示隐藏推理链或完整用户输入。",
     eventRefs,
     reasoningTrace: trace,
@@ -894,7 +894,7 @@ function createGrowthGovernorNote(input: NoteFactoryInput): AgentWorkNote {
     stage: "rootlet_planning",
     status: started ? "completed" : planned ? "running" : "pending",
     summary: started ? "Rootlet 集群已按地下探索计划启动。" : planned ? "已接收探索计划，正在准备 rootlet 集群。" : "等待 Intent Core 输出探索计划。",
-    detail: "该笔记只展示调度状态和 rootlet kind 计划，不写入 Growth Plan 或地上执行计划。",
+    detail: "该笔记只展示调度状态和 rootlet kind 计划，不写入 Plan 或地上执行计划。",
     eventRefs,
   });
 }
@@ -925,7 +925,7 @@ function createAgentRunTreeNote(input: NoteFactoryInput): AgentWorkNote {
     detail:
       tree === undefined
         ? "派生、等待、继续和父层综合会作为安全事件进入 transcript。"
-        : `delegation ${tree.delegationDecisions.length} 次，parent synthesis ${tree.parentSyntheses.length} 次；child 输出不会直接进入 handoff。`,
+        : `delegation ${tree.delegationDecisions.length} 次，parent synthesis ${tree.parentSyntheses.length} 次；child 输出不会直接进入 Plan。`,
     eventRefs,
     evidenceRefs: tree?.parentSyntheses.flatMap((synthesis) => synthesis.outputRefs) ?? [],
     candidateRefs: tree?.parentSyntheses.flatMap((synthesis) => synthesis.retainedMaterialRefs) ?? [],
@@ -1022,7 +1022,7 @@ function createAutonomyCoreNote(input: NoteFactoryInput): AgentWorkNote {
         : `自治动作 ${autonomy.latestAction}，cycle 数 ${autonomy.cycleCount}。`,
     detail:
       autonomy?.stopReason === undefined
-        ? "自治核心只决定继续探索、请求收束、请求用户澄清或停止，不直接批准方向包。"
+        ? "自治核心只决定继续探索、请求收束、请求用户澄清或停止，不直接批准 Plan。"
         : `停止原因 ${autonomy.stopReason}；模型调用和候选引用仅保留安全摘要。`,
     eventRefs,
     evidenceRefs: autonomy?.sourceRefs ?? [],
@@ -1075,7 +1075,7 @@ function createConvergenceJudgeNote(input: NoteFactoryInput): AgentWorkNote {
     summary: convergence === undefined ? "等待候选池进入收束评审。" : `收束结果 ${convergence.outcome}，review ${convergence.reviewId}。`,
     detail:
       convergence === undefined
-        ? "收束前不会把 rootlet output 直接交给方向包。"
+        ? "收束前不会把 rootlet output 直接交给 Plan。"
         : `accepted/merged/rejected/unknown = ${convergence.accepted}/${convergence.merged}/${convergence.rejected}/${convergence.unknown}。`,
     eventRefs,
     candidateRefs: input.candidateRefs,
@@ -1097,11 +1097,11 @@ function createHandoffStewardNote(input: NoteFactoryInput): AgentWorkNote {
     input,
     noteId: "handoff-steward",
     agentId: "underground-handoff-steward",
-    agentLabel: "Handoff Steward",
+    agentLabel: "Plan Steward",
     stage: "direction_handoff",
     status: completed ? "completed" : convergenceReady ? "running" : "pending",
-    summary: pkg === undefined ? "等待收束评审完成后组装方向交接包。" : `方向包 ${pkg.id} v${pkg.version}，状态 ${pkg.status}。`,
-    detail: "Handoff Steward 只组装已收束候选；本面板不进入 Aboveground、Fruits 或 Governance。",
+    summary: pkg === undefined ? "等待收束评审完成后组装 Plan Package。" : `Plan Package ${pkg.id} v${pkg.version}，状态 ${pkg.status}。`,
+    detail: "Plan Steward 只组装已收束候选；本面板不进入 Aboveground、Fruits 或 Governance。",
     eventRefs,
     candidateRefs: input.candidateRefs,
     reasoningTrace: trace,
@@ -1277,7 +1277,7 @@ function waitingPointFor(status: PanelRunStatus, lastEventType: ArborMessageType
     return "运行失败，查看错误摘要。";
   }
   if (status === "completed") {
-    return "地下运行完成，方向交接包已形成或进入地下终态。";
+    return "地下运行完成，Plan Package 已形成或进入地下终态。";
   }
   switch (lastEventType) {
     case undefined:
@@ -1316,7 +1316,7 @@ function waitingPointFor(status: PanelRunStatus, lastEventType: ArborMessageType
     case "convergence_review.requested":
       return "自治核心已请求收束，等待 Convergence Judge 生成收束报告。";
     case "convergence_review.completed":
-      return "收束评审已完成，等待 Handoff Steward 组装方向包。";
+      return "收束评审已完成，等待 Plan Steward 组装 Plan Package。";
     default:
       return "地下运行正在推进。";
   }

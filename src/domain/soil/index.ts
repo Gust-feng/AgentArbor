@@ -1,5 +1,6 @@
 import type { Constraint } from "../constraints.js";
 export * from "./store.js";
+export * from "./task-soil.js";
 
 export function createMinimalSoilConstraints(): Constraint[] {
   return [
@@ -8,7 +9,7 @@ export function createMinimalSoilConstraints(): Constraint[] {
       source: "user",
       type: "scope",
       level: "hard",
-      statement: "First-phase runtime must remain deterministic, in-memory, and adapter-free.",
+      statement: "First-phase demo must remain local, in-memory, and free of real network calls by default.",
       owner: "user",
       appliesTo: ["minimal-runtime-kernel"],
       evidenceRefs: ["docs/开发指南/06-工程实现/06-最小实现边界.md"],

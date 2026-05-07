@@ -2,7 +2,11 @@ import type { ArborMessage } from "../../domain/common.js";
 import type { IntelligenceChannel } from "../../domain/intelligence/index.js";
 import type { ToolExecutionBroker } from "../../domain/tools/index.js";
 import type { Constraint } from "../../domain/constraints.js";
-import type { DirectionHandoffPackage, DirectionHandoffPackageRef } from "../../domain/agentarbor/direction-handoff-package.js";
+import {
+  createDirectionHandoffPackageRef,
+  type DirectionHandoffPackage,
+  type DirectionHandoffPackageRef,
+} from "../../domain/agentarbor/direction-handoff-package.js";
 import type { DirectionHandoff, UndergroundExplorationReport } from "../../domain/underground/index.js";
 import {
   InMemoryMailbox,
@@ -108,7 +112,7 @@ type UndergroundWorkspaceSnapshot = WorkspaceSnapshot<UndergroundWorkspaceData>;
 
 export type UndergroundAgentOrchestratorRunTrace = {
   readonly orchestratorRunId: string;
-  readonly route: "cognitive_manager";
+  readonly route: "underground_cognitive_runtime";
   readonly agentLoopIds: readonly string[];
   readonly agentRunTree: AgentRunTree;
   readonly parentSynthesisRefs: readonly string[];
@@ -139,6 +143,8 @@ export class UndergroundAgentOrchestratorError extends Error {
   }
 }
 
+// Compatibility class name retained; this is the Underground Cognitive Runtime scheduler for
+// directional intelligence, child delegation, parent synthesis, convergence, and Plan Package creation.
 export class UndergroundAgentOrchestrator {
   private readonly intentCore: IntentCoreAgent;
   private readonly growthGovernor: GrowthGovernorAgent;
@@ -566,7 +572,7 @@ export class UndergroundAgentOrchestrator {
     this.assertGuardAccepted(handoffResult.guarded, this.handoffSteward.agentId);
     managerDecisions.push(
       handoffResult.output.terminalStatus === "approved_package_created"
-        ? "package_handoff"
+        ? "plan_package_ready"
         : handoffResult.output.terminalStatus,
     );
     agentRunTree = completeAgentRunTree(
@@ -617,7 +623,7 @@ export class UndergroundAgentOrchestrator {
       dispatchSteps: agentLoopIds.length,
       orchestratorRun: {
         orchestratorRunId,
-        route: "cognitive_manager",
+        route: "underground_cognitive_runtime",
         agentLoopIds,
         agentRunTree,
         parentSynthesisRefs,
@@ -809,6 +815,7 @@ export class UndergroundAgentOrchestrator {
           payload: {
             directionId: handoffOutput.directionHandoffPackage.manifest.directionId,
             packageId: handoffOutput.directionHandoffPackage.manifest.packageId,
+            directionPackage: createDirectionHandoffPackageRef(handoffOutput.directionHandoffPackage),
             terminalStatus: handoffOutput.terminalStatus,
           },
         }),
@@ -832,7 +839,7 @@ function createManagerAgentSpec(createdAt: string): AgentSpec {
   return {
     specId: "underground-center-manager",
     agentId: UNDERGROUND_CENTER_MANAGER_AGENT_ID,
-    displayName: "Underground Center Manager",
+    displayName: "Underground Cognitive Runtime Manager",
     agentKind: "manager",
     role: "underground_center_manager",
     protocol: {
@@ -991,7 +998,7 @@ function createParentSynthesisFromCandidatePool(input: {
     decisionSummary:
       `Parent synthesis collected ${candidateRefs.length} candidate material item(s) from ${input.childRuns.length} child agent run(s).`,
     uncertainty:
-      "Child outputs remain local material; Convergence Judge must still decide retain, merge, reject, clarify, continue, or stop.",
+      "Child outputs remain local material; Convergence Judge must still decide retain, merge, reject, clarify, continue, or stop before Plan creation.",
     source: input.source,
     confidence: input.confidence,
     reasoningTraceRefs: [...input.reasoningTraceRefs],
@@ -1029,7 +1036,7 @@ function createExplorationPlanFromAutonomyDecision(input: {
       exitCriteria:
         request.expectedEvidence.length > 0
           ? [...request.expectedEvidence]
-          : ["Produce local material for parent synthesis; do not approve handoff."],
+          : ["Produce local material for parent synthesis; do not approve Plan."],
       status: "planned",
       budget: { maxCandidateOutputs },
     })),

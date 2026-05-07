@@ -7,6 +7,10 @@ import { createWorkspaceProjectionView } from "./workspace.js";
 export const AGENT_FABRIC_AGENT_KINDS = ["manager", "core", "rootlet"] as const;
 export type AgentFabricAgentKind = (typeof AGENT_FABRIC_AGENT_KINDS)[number];
 
+// ADR-0022 MVP boundary: parent agents may spawn one child/rootlet layer,
+// but child agents cannot delegate again until subtree guards are born.
+export const AGENT_FABRIC_MVP_MAX_DEPTH = 1 as const;
+
 export const DELEGATION_DECISION_ACTIONS = [
   "spawn_children",
   "wait_for_children",
@@ -331,11 +335,13 @@ export function assertNoDirectChildOutputHandoff(input: {
   readonly handoffInputRefs: readonly string[];
   readonly childRuns: readonly ChildAgentRun[];
 }): void {
+  // Compatibility name: the invariant now protects Plan creation. MVP depth=1 means child/rootlet
+  // runs cannot spawn descendants, and their output must pass through parent synthesis first.
   const childOutputRefs = new Set(input.childRuns.flatMap((run) => run.outputRefs));
   const directRefs = input.handoffInputRefs.filter((ref) => childOutputRefs.has(ref));
   if (directRefs.length > 0) {
     throw new AgentFabricContractError(
-      `Child agent output cannot bypass parent synthesis into handoff: ${directRefs.join(", ")}`
+      `Child agent output cannot bypass parent synthesis into Plan Package input: ${directRefs.join(", ")}`
     );
   }
 }

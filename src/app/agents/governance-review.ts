@@ -12,6 +12,13 @@ import type { GovernanceOutput } from "./types.js";
 
 export class GovernanceReview {
   readonly agentId = "governance-review";
+  private readonly eventTypes: ArborMessageType[] = [
+    "fruit.proposed",
+    "governance.review.completed",
+    "run_memory.captured",
+    "experience_candidate.proposed",
+    "path_bias.suggested",
+  ];
 
   review(
     directionHandoff: DirectionHandoff,
@@ -30,7 +37,7 @@ export class GovernanceReview {
       artifactIds,
       verification,
       reviewingAgentId: this.agentId,
-      finalEventTypes: finalEventTypes ?? runtime.eventLog.types(),
+      finalEventTypes: finalEventTypes ?? [...runtime.eventLog.types(), ...this.eventTypes],
     });
 
     runtime.bus.publish(

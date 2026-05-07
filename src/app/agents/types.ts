@@ -2,11 +2,11 @@ import type {
   ArborMessageType,
   ConvergenceReview,
   DirectionHandoff,
-  DirectionHandoffPackage,
   ExperienceCandidate,
   ExplorationCandidateRef,
   FruitCandidate,
   GrowthPlan,
+  PlanPackage,
   PathBias,
   RunMemory,
   TaskSpec,
@@ -18,12 +18,12 @@ export type DirectionOutput = {
   sourceCandidates: ExplorationCandidateRef[];
   convergenceReview: ConvergenceReview;
   directionHandoff: DirectionHandoff;
-  directionHandoffPackage: DirectionHandoffPackage;
+  directionHandoffPackage: PlanPackage;
   undergroundReport: UndergroundExplorationReport;
 };
 
 export type PlanOutput = {
-  directionHandoffPackage: DirectionHandoffPackage;
+  directionHandoffPackage: PlanPackage;
   growthPlan: GrowthPlan;
   workflow: WorkflowIR;
   task: TaskSpec;

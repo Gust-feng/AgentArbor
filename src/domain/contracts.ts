@@ -1,6 +1,7 @@
 export * from "./common.js";
 export * from "./constraints.js";
 export * from "./soil/store.js";
+export * from "./soil/task-soil.js";
 export * from "./underground/agent-cluster.js";
 export * from "./underground/candidate-comparison.js";
 export * from "./underground/clarification.js";
@@ -9,6 +10,7 @@ export * from "./underground/evidence-ledger.js";
 export * from "./underground/intent-core.js";
 export * from "./underground/radial-growth.js";
 export * from "./agentarbor/direction-handoff-package/contracts.js";
+export * from "./agentarbor/plan-package.js";
 export * from "./aboveground/contracts.js";
 export * from "./governance/contracts.js";
 export * from "./fruits/contracts.js";

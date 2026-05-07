@@ -176,7 +176,7 @@ export class HandoffStewardAgent
   ): Promise<HandoffStewardDecision> {
     const fallback = createFallbackHandoffMaterial(
       percept,
-      "AgentTurnRuntime is not configured for Handoff Steward narrative."
+      "AgentTurnRuntime is not configured for Plan Steward narrative."
     );
     const ai = await reasonWithAgentTurn({
       agentId: this.agentId,
@@ -328,7 +328,7 @@ export class HandoffStewardAgent
           violations.push(
             createGuardViolation({
               code: "HANDOFF_CONSTRAINT_WEAKENED",
-              message: `Hard constraint ${hardConstraint.id} is missing from the handoff package; constraints must not be weakened.`,
+              message: `Hard constraint ${hardConstraint.id} is missing from the Plan Package; constraints must not be weakened.`,
               severity: "error",
             })
           );
@@ -341,7 +341,7 @@ export class HandoffStewardAgent
         violations.push(
           createGuardViolation({
             code: "HANDOFF_CANDIDATE_NO_EVIDENCE_REFS",
-            message: `Source candidate ${candidate.id} in handoff package has no evidence sourceRefs.`,
+            message: `Source candidate ${candidate.id} in Plan Package has no evidence sourceRefs.`,
             severity: "error",
           })
         );
@@ -352,7 +352,7 @@ export class HandoffStewardAgent
       violations.push(
         createGuardViolation({
           code: "HANDOFF_PACKAGE_STRUCTURE_ILLEGAL",
-          message: "DirectionHandoffPackage manifest directionId does not match handoff id.",
+          message: "Plan Package manifest directionId does not match compatibility handoff id.",
           severity: "error",
         })
       );
@@ -362,7 +362,7 @@ export class HandoffStewardAgent
       violations.push(
         createGuardViolation({
           code: "HANDOFF_CONVERGENCE_REF_MISMATCH",
-          message: "DirectionHandoffPackage convergence review does not match workspace convergence report.",
+          message: "Plan Package convergence review does not match workspace convergence report.",
           severity: "error",
         })
       );
@@ -437,8 +437,8 @@ function buildHandoffNarrativeMessages(percept: HandoffStewardPercept): readonly
     {
       role: "system",
       content: [
-        "You are AgentArbor Underground Handoff Steward.",
-        "You organize the final .agentarbor direction handoff narrative from already converged materials.",
+        "You are AgentArbor Underground Plan Steward.",
+        "You organize the final .agentarbor Plan Package narrative from already converged materials.",
         "Do not approve candidates that Convergence Judge did not accept or merge. Do not weaken hard constraints.",
         "The clarifiedGoal must add explicit direction-shaping context from convergence and evidence; if the materials only support echoing the raw goal, lower confidence or choose a non-approved status.",
         "Return JSON only. Do not include chain-of-thought, raw prompt, hidden reasoning, provider response text, secrets, or tokens.",
@@ -483,24 +483,24 @@ function parseHandoffNarrativeOutput(
   const record = asRecord(output);
   const status = parseHandoffStatus(record.status);
   if (status === undefined) {
-    return failedParse("handoff_narrative:invalid_status", "Handoff Steward model output did not choose a legal status.");
+    return failedParse("handoff_narrative:invalid_status", "Plan Steward model output did not choose a legal status.");
   }
   if (status === "approved" && percept.convergenceReport.outcome !== "approved") {
     return failedParse(
       "handoff_narrative:approval_without_approved_convergence",
-      "Handoff Steward cannot approve when Convergence Judge did not approve."
+      "Plan Steward cannot approve when Convergence Judge did not approve."
     );
   }
   if (status === "approved" && percept.convergenceReport.handoffCandidateRefs.length === 0) {
     return failedParse(
       "handoff_narrative:approval_without_source_candidates",
-      "Handoff Steward cannot approve without handoff candidate refs."
+      "Plan Steward cannot approve without converged Plan candidate refs."
     );
   }
   if (status === "awaiting_user" && percept.convergenceReport.userClarificationRequest === undefined) {
     return failedParse(
       "handoff_narrative:awaiting_user_without_clarification_request",
-      "Handoff Steward cannot create awaiting_user material without an existing clarification request."
+      "Plan Steward cannot create awaiting_user material without an existing clarification request."
     );
   }
 
@@ -510,7 +510,7 @@ function parseHandoffNarrativeOutput(
   if (clarifiedGoal === undefined || evidenceBoundary === undefined || decisionSummary === undefined) {
     return failedParse(
       "handoff_narrative:missing_safe_summary",
-      "Handoff Steward model output requires safe clarifiedGoal, evidenceBoundary and decisionSummary fields."
+      "Plan Steward model output requires safe clarifiedGoal, evidenceBoundary and decisionSummary fields."
     );
   }
 
@@ -518,7 +518,7 @@ function parseHandoffNarrativeOutput(
   if (status === "approved" && optionNarratives.length === 0) {
     return failedParse(
       "handoff_narrative:approved_without_option_narrative",
-      "Approved Handoff Steward output must include model-authored narrative for at least one handoff candidate."
+      "Approved Plan Steward output must include model-authored narrative for at least one converged Plan candidate."
     );
   }
 
@@ -566,20 +566,20 @@ function createFallbackHandoffMaterial(
     clarifiedGoal: percept.goalIntentProfile?.goalStatement ?? percept.rawGoal,
     optionNarratives: [],
     nonGoals: [],
-    assumptions: ["Handoff Steward narrative is unavailable; this material is low-confidence fallback only."],
+    assumptions: ["Plan Steward narrative is unavailable; this material is low-confidence fallback only."],
     missingInformation:
       fallbackStatus === "awaiting_user"
         ? percept.convergenceReport.openQuestions.map((question) => question.question)
-        : ["Handoff Steward AI narrative is required before approved package creation."],
-    risks: [safeReason || "Handoff Steward AI narrative path is unavailable."],
-    evidenceBoundary: "No approved handoff narrative was produced; source candidates are not promoted by fallback.",
+        : ["Plan Steward AI narrative is required before approved package creation."],
+    risks: [safeReason || "Plan Steward AI narrative path is unavailable."],
+    evidenceBoundary: "No approved Plan narrative was produced; source candidates are not promoted by fallback.",
     growthEntry: {
       allowedRuntimeShapes: [],
       suggestedFirstWorkflowNodes: [],
       escalationRules: ["Stop or configure AgentTurnRuntime before Aboveground planning."],
     },
-    decisionSummary: "Deterministic fallback did not approve Direction Handoff.",
-    uncertainty: "AgentTurnRuntime is required before Handoff Steward can organize an approved handoff narrative.",
+    decisionSummary: "Deterministic fallback did not approve the Plan.",
+    uncertainty: "AgentTurnRuntime is required before Plan Steward can organize an approved Plan narrative.",
     confidence: 0.16,
     evidenceRefs: [percept.convergenceReport.reviewId],
     sourceRefs: [],
@@ -631,7 +631,7 @@ function applyHandoffNarrativeMaterial(
     nonGoals: unique([...handoffMaterial.nonGoals, ...handoff.nonGoals]),
     assumptions: unique([
       ...handoffMaterial.assumptions,
-      `Handoff Steward source: ${handoffMaterial.source}; confidence=${formatConfidenceForHandoff(handoffMaterial)}.`,
+      `Plan Steward source: ${handoffMaterial.source}; confidence=${formatConfidenceForHandoff(handoffMaterial)}.`,
       ...handoff.assumptions,
     ]),
     missingInformation: unique([...handoffMaterial.missingInformation]),
@@ -764,7 +764,7 @@ function failedParse(
     ok: false,
     reason,
     decisionSummary,
-    uncertainty: "The model response passed the generic contract but failed Handoff Steward structural parsing.",
+    uncertainty: "The model response passed the generic contract but failed Plan Steward structural parsing.",
     confidence: 0.16,
   };
 }

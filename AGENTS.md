@@ -10,7 +10,7 @@
 
 AgentArbor 的模块化首先是按功能闭环模块化，其次才是按技术层分层。`domain`、`app`、`kernel`、`adapters` 等横向层只能作为实现手段，不能取代功能所有权；每个长期功能模块都应尽量拥有自己的输入输出契约、运行过程、证据链、验证门、可观察投影和测试边界。
 
-横向基础设施负责提供可复用能力，例如事件、消息、状态机、工具运行、模型运行、外部协议适配、配置和审计；纵向功能模块负责完成业务闭环，例如 Soil、Underground Direction、Direction Handoff、Aboveground Planning、Growth Runtime、Verification / Governance、Fruits 和 Observation Panel。开发时必须优先判断当前变更属于哪个功能闭环，避免为了追随横向分层而把同一功能拆散到多个无主文件中。
+横向基础设施负责提供可复用能力，例如事件、消息、状态机、工具运行、模型运行、外部协议适配、配置和审计；纵向功能模块负责完成业务闭环，例如 Desktop Shell、Task Soil、Underground Cognitive Runtime、Plan、Aboveground Execution Runtime、Fruits、Governance Pipeline、Global Soil 和 Observation Panel。开发时必须优先判断当前变更属于哪个功能闭环，避免为了追随横向分层而把同一功能拆散到多个无主文件中。
 
 大模型接入层必须作为独立功能模块演进，而不是被视为普通 provider adapter 的附属实现。模型运行时应独立承担模型接入、provider 选择、配置边界、流式输出、模型-工具-模型多轮运行、输出脱敏、结构化校验、可见输出投影、模型事件和失败归一化等职责。Underground、Aboveground、Verification、Governance、Panel 等模块只能通过模型运行时契约使用模型能力，不能直接绑定外部 LLM SDK、provider 私有字段或临时流式协议。
 
@@ -28,15 +28,15 @@ AgentArbor 的模块化首先是按功能闭环模块化，其次才是按技术
 
 ## 项目定位
 
-AgentArbor 是目标驱动的 Agent / AgentApp 孕育与演化平台。它围绕用户想象、受治理土壤、地下中枢、`.agentarbor` 方向交接包、地上中枢、地上生长、果实、治理回流、验证证据、Run Memory、Path Bias、Capability Asset、谱系记录和可控导出构建，不是聊天机器人、提示词集合、外部平台配置仓库、一次性脚手架或短期演示工程。
+AgentArbor 是桌面通用 Agent / 桌面任务工作台。用户从统一 Desktop Shell 输入任务和工作区上下文，系统形成 Task Soil，由 Underground Cognitive Runtime 做目标成形、动态派生 child/rootlet agent、多路探索、父层综合和裁决，形成 Plan；Aboveground Execution Runtime 消费 Plan 执行交付，产出 Fruits；运行结果经过 Governance Pipeline 后，只有通过治理的经验才回流 Global Soil。
 
-当前正式树形语义是：
+当前正式产品主线是：
 
 ```text
-Soil -> Underground Center -> .agentarbor -> Aboveground Center -> Fruits -> Governance -> Soil
+Desktop Shell -> Task Soil -> Underground Cognitive Runtime -> Plan -> Aboveground Execution Runtime -> Fruits -> Governance Pipeline -> Global Soil
 ```
 
-当前产品架构事实源是 `docs/架构设计/产品架构/ADR-0018-AgentArbor原生概念树架构.md`；活跃开发指南必须承接该 ADR 的稳定结论。
+当前产品架构事实源是 `docs/架构设计/产品架构/ADR-0022-AgentArbor桌面通用Agent与双运行时架构.md`；ADR-0018 只保留为历史概念树和植物语义来源。活跃开发指南必须承接 ADR-0022 的稳定结论。
 
 开发前必须先读：
 
@@ -74,7 +74,7 @@ Soil -> Underground Center -> .agentarbor -> Aboveground Center -> Fruits -> Gov
 - `.codex/`：Codex 开发适配层。
 - `.opencode/`：OpenCode 开发适配层。
 - `.claude/`：Claude Code 开发适配层。
-- `.agentarbor/`：未来 AgentArbor 原生方向交接包目录，负责从地下中枢向地上中枢传递方向、约束、证据和 Growth Entry；不保存最终资产，不替代 Soil。只有契约稳定、有真实出生依据时才增量创建。
+- `.agentarbor/`：未来 Plan Package 的实现/存储形态或目录名，用于保存可持久化 Plan、引用、谱系、validation 和审计材料；不保存最终资产，不替代 Task Soil 或 Global Soil。只有契约稳定、有真实出生依据和显式写入授权时才增量创建。
 - `src/`：AgentArbor TypeScript 实现代码。当前已有确定性最小运行内核作为状态、验证、审计和兜底基础；地下集群重构必须在该基础上推进 AI 驱动的 agent 协作主线。
 
 禁止把这些层混用。平台适配文件不是 AgentArbor 原生产品事实源，未来运行时资产也不能替代当前开发文档。
@@ -99,11 +99,11 @@ Soil -> Underground Center -> .agentarbor -> Aboveground Center -> Fruits -> Gov
 
 ## 开发边界
 
-- 当前仓库已进入运行时代码实现。根目录工具链使用 `pnpm + TypeScript + tsc + node:test`；确定性最小内核是工程守卫和 fallback，不是地下集群长期智能主线。
+- 当前仓库已进入运行时代码实现。根目录工具链使用 `pnpm + TypeScript + tsc + node:test`；确定性最小内核是工程守卫和 fallback，不是 agent 智能主线。
 - 不引入新的包管理器、构建系统、运行时代码框架或测试框架，除非用户明确要求扩展实现阶段。
 - 实现以 TypeScript 自研架构为主。
 - 外部模型、工具、协议和平台通过 adapter 接入，不能反向污染核心领域模型。
-- `.agentarbor/` 不提前填充占位 agent、workflow、memory 或 schema；方向交接包也必须等契约稳定和真实任务出生后再增量创建。
+- `.agentarbor/` 不提前填充占位 agent、workflow、memory 或 schema；Plan Package 也必须等契约稳定、真实任务出生和显式写入授权后再增量创建。
 - 新增或修改 Codex skill 时，只改 `.agents/skills/`，并遵守 Agent Skills 标准。
 - 新增 Codex custom subagent 使用 `.codex/agents/*.toml`。
 - 新增 OpenCode 适配内容使用 `.opencode/`。
@@ -118,9 +118,9 @@ Soil -> Underground Center -> .agentarbor -> Aboveground Center -> Fruits -> Gov
 - Path Bias 只能牵引下一次相似任务，不得机械复刻历史流程。
 - Path Bias 不能覆盖 hard constraint；soft constraint 的偏离必须记录理由和证据，preference 只能影响默认选择或方案排序。
 - Ring Memory 只能作为 EventLog、Run Memory 和 Experience Candidate 的聚合视图，不能成为新的平行事实源。
-- 地下中枢方向材料不是长期资产，也不是 Growth Plan。
-- Nutrient Request 是地上组织向地下中枢请求养料的运行期机制，不是推倒重来，也不是地上自建方向探索集群；它必须产出 Nutrient Patch、新的方向交接包版本或明确无需补充的证据。
-- Growth Plan Revision 必须引用具体方向交接包版本或 Nutrient Patch，并记录继续、回退、分叉或停止的依据。
+- 地下认知阶段材料不是长期资产，也不是 Aboveground 执行计划。
+- Nutrient Request 是 Aboveground Execution Runtime 向 Underground Cognitive Runtime 请求补充养料的运行期机制，不是推倒重来，也不是地上自建方向探索集群；它必须产出 Nutrient Patch、Plan vNext 或明确无需补充的证据。
+- 执行计划修订必须引用具体 Plan 版本或 Nutrient Patch，并记录继续、回退、分叉或停止的依据。
 - 成熟子 agent 是能力资产的一种，可以成为果实，但脱离母体运行时必须经过显式治理。
 - 脱离子 agent 默认不继承母体运行时权限、密钥、资产图、历史任务或注册表写权限。
 - Codex、OpenCode 或其他平台 agent 文件只是适配输出，不是 AgentArbor 原生 agent 事实源。

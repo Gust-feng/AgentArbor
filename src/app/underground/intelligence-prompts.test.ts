@@ -38,7 +38,7 @@ test("rootlet AI prompts include goal profile, constraints, budget, and kind-spe
     assert.match(content, /cluster budget maxCandidateOutputs: 3/);
     assert.match(content, /exitCriteria: Rootlet must return bounded candidates/);
     assert.match(content, /candidate advice only/i);
-    assert.match(content, /Approve or finalize a Direction Handoff/);
+    assert.match(content, /Approve or finalize a Plan/);
     assert.match(content, /search.*read.*gather real evidence/);
     assert.match(content, /Research workflow:/);
     assert.match(content, /always search before speculating/i);

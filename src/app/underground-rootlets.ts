@@ -285,7 +285,7 @@ function rootletSummaries(kind: RootletClusterKind, goalIntentProfile?: GoalInte
   switch (kind) {
     case "option":
       return [
-        `Direction option for ${goal}: shape the ${domain} AgentApp around explicit input intake, structured output, evidence refs, and Aboveground handoff assumptions.`,
+        `Direction option for ${goal}: shape the ${domain} desktop agent around explicit input intake, structured output, evidence refs, and Plan assumptions.`,
         `Verification-first option for ${goal}: keep the first growth path narrow, prove ${acceptance}, and defer unresolved integration choices to open questions.`,
         `Scoped handoff option for ${goal}: document target users, accepted inputs, generated outputs, validation gates, and Nutrient Request triggers before execution planning.`,
       ].slice(0, targetCount);

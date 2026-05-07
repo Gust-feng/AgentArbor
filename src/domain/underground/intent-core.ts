@@ -377,7 +377,7 @@ function deriveAcceptanceCriteria(rawGoal: string, domainConcepts: readonly stri
     criteria.push("The system must be built and functional.");
   }
   if (includesAnyIgnoreCase(rawGoal, ["做一个", "做个", "智能体", "助手"]) || hasAgentAppMarkerInText(rawGoal)) {
-    criteria.push("The Direction Handoff must describe the target AgentApp role, inputs, outputs, evidence boundary, and handoff assumptions.");
+    criteria.push("The Plan must describe the target agent role, inputs, outputs, evidence boundary, and assumptions.");
   }
   if (includesAnyIgnoreCase(rawGoal, ["支持", "support", "包含", "include"])) {
     criteria.push("All specified features must be supported.");
@@ -418,7 +418,7 @@ function deriveAssumptions(rawGoal: string, unknowns: readonly string[]): string
     assumptions.push("Unspecified details remain non-blocking assumptions unless Convergence Judge marks them as requiring user clarification.");
   }
   if (includesAnyIgnoreCase(rawGoal, ["智能体", "助手"]) || hasAgentAppMarkerInText(rawGoal)) {
-    assumptions.push("The requested agent is a future AgentApp direction, not an already governed Capability Asset.");
+    assumptions.push("The requested agent is a future desktop-agent direction, not an already governed Capability Asset.");
   }
   return assumptions;
 }

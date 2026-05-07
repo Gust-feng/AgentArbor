@@ -217,7 +217,7 @@ function createRiskRegister(input: {
       impactScope: ["underground_center", "agentarbor_handoff"],
       blockingLevel: "watch",
       evidenceRefs: [evidenceId(input.goalIntentProfile?.goalId ?? "goal", "goal-intent")],
-      mitigation: ["Keep the risk visible in Direction Handoff and convergence evidence."],
+      mitigation: ["Keep the risk visible in the Plan Package and convergence evidence."],
     })) ?? [];
 
   for (const [index, reason] of input.rejectedDecisionReasons.entries()) {
@@ -387,7 +387,7 @@ function createGrowthEntryEscalationRules(input: {
   return unique([
     "Do not let Aboveground create a parallel direction exploration path.",
     "Trigger Nutrient Request when source evidence, Soil asset fit, permission boundary, or validation criteria are insufficient.",
-    "Stop or ask the user before executing if the generated Growth Plan would weaken hard constraints or evidence retention.",
+    "Stop or ask the user before executing if the generated execution plan would weaken hard constraints or evidence retention.",
     ...(input.goalIntentProfile?.unknowns.map((unknown) => `Treat unresolved question as a planning assumption until verified: ${unknown}`) ?? []),
     ...(input.convergenceReport.openQuestions ?? []).map(
       (question) => `Carry open question ${question.candidateId} into planning review: ${question.question}`

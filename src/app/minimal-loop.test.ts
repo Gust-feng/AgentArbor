@@ -5,19 +5,25 @@ import test from "node:test";
 import { createRunObservationEventViews, resolveRunObservationPosition } from "../domain/observation/index.js";
 import { EXPECTED_DEMO_EVENTS, runMinimalLoop } from "./minimal-loop.js";
 
-test("runs the fixed minimal event sequence in order", () => {
-  const result = runMinimalLoop();
+test("runs the fake-AI desktop agent event sequence in product order", async () => {
+  const result = await runMinimalLoop();
 
-  assert.deepEqual(result.eventTypes, EXPECTED_DEMO_EVENTS);
-  assert.deepEqual(
+  assertIncludesInOrder(result.eventTypes, EXPECTED_DEMO_EVENTS);
+  assertIncludesInOrder(
     result.runtime.eventLog.replay().map((message) => message.type),
     EXPECTED_DEMO_EVENTS
   );
+  assert.equal(result.eventTypes.includes("model.requested"), true);
+  assert.equal(result.eventTypes.includes("agent.delegation.planned"), true);
+  assert.equal(result.eventTypes.includes("agent.parent_synthesis.completed"), true);
 });
 
-test("returns the minimal loop result with package, artifact, verification, and governed memory", () => {
-  const result = runMinimalLoop();
+test("returns the minimal loop result with task soil, plan package, artifact, verification, and governed memory", async () => {
+  const result = await runMinimalLoop();
 
+  assert.equal(result.taskSoil.goalId, result.observationSnapshot.goalId);
+  assert.equal(result.taskSoil.contextRefs.length >= 1, true);
+  assert.equal(result.globalSoilView.constraints.length >= 1, true);
   assert.equal(result.loadedDirectionHandoffPackage.manifest.directionId, result.directionHandoff.id);
   assert.equal(result.loadedDirectionHandoffPackage.manifest.directionVersion, result.directionHandoff.version);
   assert.equal(result.loadedDirectionHandoffPackage.manifest.status, "approved");
@@ -52,19 +58,21 @@ test("returns the minimal loop result with package, artifact, verification, and 
     result.undergroundReport.convergenceReport.handoffCandidateRefs
   );
   assert.equal(result.artifact.ref.type, "document");
-  assert.equal(result.runtime.artifactStore.get(result.artifact.ref.id).content.includes("Minimal AgentApp"), true);
+  assert.equal(result.runtime.artifactStore.get(result.artifact.ref.id).content.includes("Minimal desktop-agent artifact"), true);
   assert.equal(result.verification.status, "passed");
   assert.equal(result.verification.checks.every((check) => check.status === "passed"), true);
+  assert.equal((result.undergroundReport.agentRunTree?.childRuns.length ?? 0) >= 1, true);
+  assert.equal((result.undergroundReport.agentRunTree?.parentSyntheses.length ?? 0) >= 1, true);
   assert.equal(result.runMemory.sourceGoalId, result.directionHandoff.sourceGoalId);
   assert.deepEqual(result.runMemory.artifactIds, [result.artifact.ref.id]);
-  assert.deepEqual(result.runMemory.actualPath, EXPECTED_DEMO_EVENTS);
+  assertIncludesInOrder(result.runMemory.actualPath as typeof result.eventTypes, EXPECTED_DEMO_EVENTS);
   assert.equal(result.experienceCandidate.sourceRunMemoryId, result.runMemory.id);
   assert.equal(result.pathBias.sourceExperienceCandidateId, result.experienceCandidate.id);
   assert.deepEqual(result.pathBias.requiredVerificationGates, result.growthPlan.verificationGates);
 });
 
-test("RunObservationSnapshot is serializable and reflects underground state", () => {
-  const result = runMinimalLoop();
+test("RunObservationSnapshot is serializable and reflects underground state", async () => {
+  const result = await runMinimalLoop();
 
   const parsed = JSON.parse(JSON.stringify(result.observationSnapshot)) as typeof result.observationSnapshot;
 
@@ -72,7 +80,7 @@ test("RunObservationSnapshot is serializable and reflects underground state", ()
   assert.equal(parsed.traceId, result.runtime.eventLog.list()[0]?.message.traceId);
   assert.equal(parsed.currentPhase, "completed");
   assert.equal(parsed.currentStage, "path_bias_suggested");
-  assert.equal(parsed.eventCursor.eventCount, EXPECTED_DEMO_EVENTS.length);
+  assert.equal(parsed.eventCursor.eventCount, result.eventTypes.length);
   assert.equal(parsed.handoff.status, "completed");
   assert.equal(parsed.handoff.packageId, result.loadedDirectionHandoffPackage.manifest.packageId);
   assert.equal(parsed.handoff.validationPassed, true);
@@ -87,9 +95,8 @@ test("RunObservationSnapshot is serializable and reflects underground state", ()
   assert.equal(parsed.underground.evidenceLedger.countsByKind.candidate_comparison, 2);
   assert.equal(parsed.underground.evidenceLedger.countsByKind.convergence_decision, 2);
   assert.equal(parsed.underground.evidenceLedger.recommendedEvidenceRefs.length > 0, true);
-  assert.equal(parsed.underground.agentCluster?.terminalStatus, "approved_package_created");
-  assert.deepEqual(parsed.underground.agentCluster?.plan.rootletKinds, ["option"]);
-  assert.equal(parsed.underground.agentCluster?.candidateRefs.length, 2);
+  assert.equal(parsed.underground.agentRunTree?.childRuns.length, result.undergroundReport.plan.rootletClusters.length);
+  assert.equal((parsed.underground.agentRunTree?.parentSyntheses.length ?? 0) >= 1, true);
   assert.equal(parsed.underground.convergence.outcome, "approved");
   assert.equal(parsed.underground.convergence.candidateComparisons.length, 2);
   assert.notEqual(parsed.underground.convergence.recommendedOptionId, undefined);
@@ -102,15 +109,17 @@ test("RunObservationSnapshot is serializable and reflects underground state", ()
   assert.equal(parsed.soilReturnStub.pathBiasId, result.pathBias.id);
 });
 
-test("RunObservationSnapshot phase and stage are derived from the EventLog cursor", () => {
-  const result = runMinimalLoop();
+test("RunObservationSnapshot phase and stage are derived from the EventLog cursor", async () => {
+  const result = await runMinimalLoop();
   const entries = result.runtime.eventLog.list();
 
   assert.deepEqual(resolveRunObservationPosition([]), {
     currentPhase: "not_started",
     currentStage: "not_started",
   });
-  assert.deepEqual(resolveRunObservationPosition(entries.slice(0, 7)), {
+  const planCompletedIndex = entries.findIndex((entry) => entry.type === "direction_handoff.completed");
+  assert.equal(planCompletedIndex >= 0, true);
+  assert.deepEqual(resolveRunObservationPosition(entries.slice(0, planCompletedIndex + 1)), {
     currentPhase: "handoff",
     currentStage: "direction_handoff_completed",
   });
@@ -120,20 +129,20 @@ test("RunObservationSnapshot phase and stage are derived from the EventLog curso
   });
 });
 
-test("RunObservationEventView adds frontend-readable metadata from EventLog entries only", () => {
-  const result = runMinimalLoop();
+test("RunObservationEventView adds frontend-readable metadata from EventLog entries only", async () => {
+  const result = await runMinimalLoop();
   const eventViews = createRunObservationEventViews(result.runtime.eventLog.list());
   const firstEvent = eventViews[0];
   const handoffEvent = eventViews.find((event) => event.type === "direction_handoff.completed");
   const artifactEvent = eventViews.find((event) => event.type === "artifact.produced");
 
-  assert.equal(eventViews.length, EXPECTED_DEMO_EVENTS.length);
+  assert.equal(eventViews.length, result.eventTypes.length);
   assert.equal(firstEvent?.summary, "User goal entered the runtime.");
   assert.equal(firstEvent?.scope, "soil");
   assert.equal(firstEvent?.severity, "info");
   assert.equal(firstEvent?.progress.status, "completed");
   assert.equal(firstEvent?.progress.step, 1);
-  assert.equal(firstEvent?.progress.total, EXPECTED_DEMO_EVENTS.length);
+  assert.equal(firstEvent?.progress.total, result.eventTypes.length);
   assert.equal(firstEvent?.refs.some((ref) => ref.kind === "goal" && ref.id === result.observationSnapshot.goalId), true);
   assert.equal(handoffEvent?.scope, "handoff");
   assert.equal(
@@ -151,8 +160,8 @@ test("RunObservationEventView adds frontend-readable metadata from EventLog entr
   );
 });
 
-test("RunObservationSnapshot exposes every underground rootlet, candidate, and convergence decision", () => {
-  const result = runMinimalLoop();
+test("RunObservationSnapshot exposes every underground rootlet, candidate, and convergence decision", async () => {
+  const result = await runMinimalLoop();
   const underground = result.observationSnapshot.underground;
 
   assert.equal(underground.rootletClusters.length, result.undergroundReport.plan.rootletClusters.length);
@@ -180,17 +189,14 @@ test("RunObservationSnapshot exposes every underground rootlet, candidate, and c
     underground.convergence.handoffCandidateRefs,
     result.undergroundReport.convergenceReport.handoffCandidateRefs
   );
-  assert.deepEqual(
-    underground.agentCluster?.candidateRefs,
-    result.undergroundReport.convergenceReport.handoffCandidateRefs
-  );
+  assert.equal((underground.agentRunTree?.parentSyntheses.length ?? 0) >= 1, true);
 });
 
-test("Observation Kernel preserves handoff, aboveground load, and fixed EventLog regressions", () => {
-  const result = runMinimalLoop();
+test("Observation Kernel preserves Plan Package, aboveground load, and EventLog regressions", async () => {
+  const result = await runMinimalLoop();
   const snapshot = result.observationSnapshot;
 
-  assert.deepEqual(result.eventTypes, EXPECTED_DEMO_EVENTS);
+  assertIncludesInOrder(result.eventTypes, EXPECTED_DEMO_EVENTS);
   assert.equal(snapshot.handoff.directionId, result.loadedDirectionHandoffPackage.manifest.directionId);
   assert.equal(snapshot.handoff.version, result.loadedDirectionHandoffPackage.manifest.directionVersion);
   assert.deepEqual(
@@ -205,11 +211,11 @@ test("Observation Kernel preserves handoff, aboveground load, and fixed EventLog
   assert.equal(snapshot.governance.status, "completed");
 });
 
-test("default demo path keeps DirectionHandoffPackage in memory and does not create repo-root .agentarbor assets", () => {
+test("default demo path keeps Plan Package in memory and does not create repo-root .agentarbor assets", async () => {
   const repoRootAgentArbor = resolve(process.cwd(), ".agentarbor");
   const before = snapshotTree(repoRootAgentArbor);
 
-  const result = runMinimalLoop();
+  const result = await runMinimalLoop();
 
   assert.equal(result.runtime.directionHandoffPackageStore.constructor.name, "InMemoryDirectionHandoffPackageStore");
   assert.deepEqual(snapshotTree(repoRootAgentArbor), before);
@@ -235,4 +241,17 @@ function snapshotTree(root: string): string[] {
 
   walk(root, "");
   return entries;
+}
+
+function assertIncludesInOrder(actual: readonly string[], expected: readonly string[]): void {
+  let cursor = 0;
+  for (const item of actual) {
+    if (item === expected[cursor]) {
+      cursor += 1;
+    }
+    if (cursor === expected.length) {
+      return;
+    }
+  }
+  assert.fail(`Expected sequence ${expected.join(" -> ")} inside ${actual.join(" -> ")}`);
 }

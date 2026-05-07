@@ -29,7 +29,7 @@ export function validateFileContract(
       addIssue(
         "DIRECTION_EVIDENCE_FILE_ROLE_INVALID",
         `files.${filePath}`,
-        `${filePath} must remain direction evidence and must not become GrowthPlan material.`
+        `${filePath} must remain Plan evidence and must not become execution plan material.`
       );
     }
   }
@@ -74,7 +74,7 @@ export function validateDirectionEvidenceBoundary(
     addIssue(
       "GROWTH_PLAN_INLINE_IN_HANDOFF_PACKAGE",
       "growthPlan",
-      "DirectionHandoffPackage must not embed GrowthPlan; Aboveground Center creates it after validation."
+      "Plan Package must not embed the execution plan; Aboveground Execution Runtime creates it after validation."
     );
   }
 }

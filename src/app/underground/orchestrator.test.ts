@@ -24,7 +24,7 @@ test("UndergroundAgentOrchestrator stops instead of approving when no AgentTurnR
   );
 
   assert.equal(result.terminalStatus, "stopped");
-  assert.equal(result.orchestratorRun.route, "cognitive_manager");
+  assert.equal(result.orchestratorRun.route, "underground_cognitive_runtime");
   assert.equal(result.orchestratorRun.managerDecisions.includes("stop"), true);
   assert.equal(result.orchestratorRun.agentLoopIds.length >= 6, true);
   assert.equal(result.orchestratorRun.agentLoopIds[0], "underground-intent-core");
@@ -38,7 +38,7 @@ test("runUndergroundDirectionSession exposes the ADR-0021 orchestrator trace whi
   const result = await runFakeUndergroundDirectionSession("Build a small deterministic helper.");
 
   assert.equal(result.terminalStatus, "approved_package_created");
-  assert.equal(result.undergroundOrchestratorRun.route, "cognitive_manager");
+  assert.equal(result.undergroundOrchestratorRun.route, "underground_cognitive_runtime");
   assert.equal(result.loadedDirectionHandoffPackage.validation.passed, true);
   assert.equal(result.undergroundReport.agentRunTree?.rootAgentId, "underground-center-manager");
   assert.equal(

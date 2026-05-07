@@ -30,7 +30,7 @@ export function serializeDirectionHandoffPackageFiles(
 
 function renderDirection(handoff: DirectionHandoff): string {
   const retainedOption = handoff.options.find((option) => option.optionId === handoff.decisionRecord.retainedOptionId);
-  return `# Direction Handoff
+  return `# Plan
 
 ## Source Goal
 - sourceGoalId: ${handoff.sourceGoalId}

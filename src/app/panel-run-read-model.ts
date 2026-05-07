@@ -96,6 +96,7 @@ export type PanelRunTrackingReadModel = {
     readonly sourceRefs: readonly string[];
     readonly modelCallRefs: readonly string[];
   };
+  readonly agentRunTree?: NonNullable<PanelObservationReadModel["underground"]["agentRunTree"]>;
   readonly convergence?: UndergroundDemoSummary["underground"]["convergence"];
   readonly package?: {
     readonly id: string;
@@ -171,6 +172,11 @@ export type PanelRunStreamEventType =
   | "tool.requested"
   | "tool.completed"
   | "tool.failed"
+  | "agent.delegation.planned"
+  | "agent.child.started"
+  | "agent.child.completed"
+  | "agent.child.waiting"
+  | "agent.parent_synthesis.completed"
   | "final.result"
   | "run.failed";
 
@@ -306,6 +312,7 @@ export function createPanelRunTracking(input: {
       sourceRefs: input.observation?.underground.autonomy.latestDecision?.sourceRefs ?? [],
       modelCallRefs: input.observation?.underground.autonomy.latestDecision?.modelCallRefs ?? [],
     },
+    agentRunTree: input.observation?.underground.agentRunTree,
     convergence: input.summary?.underground.convergence,
     package:
       input.summary === undefined
@@ -350,6 +357,7 @@ export function createPanelRunTranscript(input: {
     workNotes: [
       createIntentCoreNote(noteInput),
       createGrowthGovernorNote(noteInput),
+      createAgentRunTreeNote(noteInput),
       createRootletAgentsNote(noteInput),
       createModelCallsNote(noteInput),
       createAutonomyCoreNote(noteInput),
@@ -521,6 +529,18 @@ function appendStreamEventsForEvent(input: {
     return;
   }
 
+  if (isAgentFabricStreamType(input.entry.type)) {
+    input.push({
+      ...base,
+      eventId: `${input.runId}:event:${input.entry.sequence}:${input.entry.type}`,
+      type: input.entry.type,
+      agentLabel: agentFabricLabel(input.entry.type),
+      summary: agentFabricSummary(input.entry.type, payload),
+      status: input.entry.type === "agent.child.started" || input.entry.type === "agent.child.waiting" ? "running" : "completed",
+    });
+    return;
+  }
+
   const note = agentNoteForEvent(input.entry, payload);
   if (note !== undefined) {
     input.push({
@@ -532,6 +552,61 @@ function appendStreamEventsForEvent(input: {
       status: note.status,
     });
   }
+}
+
+function isAgentFabricStreamType(type: ArborMessageType): type is Extract<
+  PanelRunStreamEventType,
+  "agent.delegation.planned" | "agent.child.started" | "agent.child.completed" | "agent.child.waiting" | "agent.parent_synthesis.completed"
+> {
+  return (
+    type === "agent.delegation.planned" ||
+    type === "agent.child.started" ||
+    type === "agent.child.completed" ||
+    type === "agent.child.waiting" ||
+    type === "agent.parent_synthesis.completed"
+  );
+}
+
+function agentFabricLabel(type: PanelRunStreamEventType): string {
+  switch (type) {
+    case "agent.delegation.planned":
+      return "中枢调度";
+    case "agent.child.started":
+    case "agent.child.completed":
+    case "agent.child.waiting":
+      return "派生 Agent";
+    case "agent.parent_synthesis.completed":
+      return "父层综合";
+    default:
+      return "地下组织";
+  }
+}
+
+function agentFabricSummary(type: PanelRunStreamEventType, payload: Readonly<Record<string, unknown>>): string {
+  if (type === "agent.delegation.planned") {
+    const decision = asRecord(payload.delegationDecision);
+    const childSpecIds = Array.isArray(payload.childSpecIds) ? payload.childSpecIds.filter(isString) : [];
+    return `中枢形成派生计划：${stringOrUndefined(decision.action) ?? "spawn_children"}，child specs ${childSpecIds.length} 个。`;
+  }
+  if (type === "agent.child.started") {
+    const childRun = asRecord(payload.childRun);
+    const spec = asRecord(payload.agentSpec);
+    return `派生 agent ${stringOrUndefined(spec.displayName) ?? stringOrUndefined(spec.agentId) ?? "unknown"} 已启动，run ${stringOrUndefined(childRun.childRunId) ?? "unknown"}。`;
+  }
+  if (type === "agent.child.completed") {
+    const childRun = asRecord(payload.childRun);
+    const outputRefs = Array.isArray(payload.outputRefs) ? payload.outputRefs.filter(isString) : [];
+    return `派生 agent run ${stringOrUndefined(childRun.childRunId) ?? "unknown"} 已完成，产出 ${outputRefs.length} 个 material ref。`;
+  }
+  if (type === "agent.child.waiting") {
+    const childRunIds = Array.isArray(payload.childRunIds) ? payload.childRunIds.filter(isString) : [];
+    return `父层正在等待 ${childRunIds.length} 个派生 agent 返回局部材料。`;
+  }
+  if (type === "agent.parent_synthesis.completed") {
+    const synthesis = asRecord(payload.parentSynthesis);
+    return `父层综合完成：${stringOrUndefined(synthesis.decisionSummary) ?? "child material synthesized"}。`;
+  }
+  return "地下组织事件已更新。";
 }
 
 function sourceRefsForView(view: RunObservationEventView | undefined): readonly string[] {
@@ -821,6 +896,39 @@ function createGrowthGovernorNote(input: NoteFactoryInput): AgentWorkNote {
     summary: started ? "Rootlet 集群已按地下探索计划启动。" : planned ? "已接收探索计划，正在准备 rootlet 集群。" : "等待 Intent Core 输出探索计划。",
     detail: "该笔记只展示调度状态和 rootlet kind 计划，不写入 Growth Plan 或地上执行计划。",
     eventRefs,
+  });
+}
+
+function createAgentRunTreeNote(input: NoteFactoryInput): AgentWorkNote {
+  const eventRefs = eventRefsFor(input.eventEntries, [
+    "agent.delegation.planned",
+    "agent.child.started",
+    "agent.child.completed",
+    "agent.child.waiting",
+    "agent.parent_synthesis.completed",
+  ]);
+  const tree = input.observation?.underground.agentRunTree;
+  const completedChildren = tree?.childRuns.filter((run) => run.status === "completed").length ?? 0;
+  const runningChildren = tree?.childRuns.filter((run) => run.status === "running" || run.status === "resumed").length ?? 0;
+  const hasSynthesis = (tree?.parentSyntheses.length ?? 0) > 0;
+  return note({
+    input,
+    noteId: "agent-run-tree",
+    agentId: "underground-center-manager",
+    agentLabel: "Agent Run Tree",
+    stage: "delegation",
+    status: hasSynthesis ? "completed" : runningChildren > 0 || eventRefs.length > 0 ? "running" : "pending",
+    summary:
+      tree === undefined
+        ? "等待中枢生成派生运行树。"
+        : `运行树 ${tree.status}，child agents ${completedChildren}/${tree.childRuns.length} 已完成。`,
+    detail:
+      tree === undefined
+        ? "派生、等待、继续和父层综合会作为安全事件进入 transcript。"
+        : `delegation ${tree.delegationDecisions.length} 次，parent synthesis ${tree.parentSyntheses.length} 次；child 输出不会直接进入 handoff。`,
+    eventRefs,
+    evidenceRefs: tree?.parentSyntheses.flatMap((synthesis) => synthesis.outputRefs) ?? [],
+    candidateRefs: tree?.parentSyntheses.flatMap((synthesis) => synthesis.retainedMaterialRefs) ?? [],
   });
 }
 
@@ -1190,6 +1298,15 @@ function waitingPointFor(status: PanelRunStatus, lastEventType: ArborMessageType
     case "tool.completed":
     case "tool.failed":
       return "工具调用已返回，模型将基于工具结果继续生成候选。";
+    case "agent.delegation.planned":
+      return "中枢已形成派生计划，等待 child agent 启动。";
+    case "agent.child.started":
+    case "agent.child.waiting":
+      return "父层正在等待派生 agent 返回局部探索材料。";
+    case "agent.child.completed":
+      return "派生 agent 已返回材料，等待父层综合。";
+    case "agent.parent_synthesis.completed":
+      return "父层已综合 child 材料，等待自治评审或收束。";
     case "exploration_candidate.produced":
       return "候选已产出，等待候选池更新。";
     case "candidate_pool.updated":

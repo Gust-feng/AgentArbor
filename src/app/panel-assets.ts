@@ -465,6 +465,57 @@ export function createPanelHtml(): string {
     .metric span:first-child { color: var(--muted); }
     .metric span:last-child { font-weight: 700; overflow-wrap: anywhere; }
 
+    .agent-tree {
+      display: grid;
+      gap: 8px;
+      margin-top: 8px;
+    }
+
+    .agent-node {
+      border: 1px solid var(--line-soft);
+      border-radius: 8px;
+      padding: 9px 10px;
+      background: #fbfcfc;
+    }
+
+    .agent-node.child {
+      margin-left: 12px;
+      border-left: 3px solid #9cc7b5;
+    }
+
+    .agent-node.selected {
+      border-color: #8ccab1;
+      background: #f3fbf7;
+    }
+
+    .node-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      font-weight: 760;
+    }
+
+    .node-meta {
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 12px;
+      overflow-wrap: anywhere;
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      min-height: 20px;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: var(--accent-strong);
+      padding: 2px 8px;
+      font-size: 11px;
+      font-weight: 780;
+      white-space: nowrap;
+    }
+
     details {
       border: 1px solid var(--line);
       border-radius: 8px;
@@ -634,6 +685,14 @@ export function createPanelHtml(): string {
         <div class="metrics" id="runMetrics"></div>
       </section>
 
+      <section class="panel-box">
+        <h2>Agent 运行树</h2>
+        <div class="agent-tree" id="agentTree">
+          <div class="node-meta">暂无派生 agent。</div>
+        </div>
+        <div class="node-meta" id="agentInspector">选中运行后显示 spec、权限、预算和输出引用。</div>
+      </section>
+
       <details>
         <summary>模型配置</summary>
         <div class="fields">
@@ -690,6 +749,11 @@ export function createPanelHtml(): string {
       "tool.requested",
       "tool.completed",
       "tool.failed",
+      "agent.delegation.planned",
+      "agent.child.started",
+      "agent.child.completed",
+      "agent.child.waiting",
+      "agent.parent_synthesis.completed",
       "final.result",
       "run.failed"
     ];
@@ -710,6 +774,11 @@ export function createPanelHtml(): string {
       "tool.requested": "工具请求",
       "tool.completed": "工具完成",
       "tool.failed": "工具失败",
+      "agent.delegation.planned": "派生计划",
+      "agent.child.started": "派生启动",
+      "agent.child.completed": "派生完成",
+      "agent.child.waiting": "等待派生",
+      "agent.parent_synthesis.completed": "父层综合",
       "final.result": "最终结果",
       "run.failed": "运行失败"
     };
@@ -751,6 +820,8 @@ export function createPanelHtml(): string {
       tavilyMaxResultsInput: document.getElementById("tavilyMaxResultsInput"),
       saveToolConfigButton: document.getElementById("saveToolConfigButton"),
       toolConfigStatus: document.getElementById("toolConfigStatus"),
+      agentTree: document.getElementById("agentTree"),
+      agentInspector: document.getElementById("agentInspector"),
       debugList: document.getElementById("debugList"),
       debugJson: document.getElementById("debugJson")
     };
@@ -764,6 +835,7 @@ export function createPanelHtml(): string {
 
     async function init() {
       renderMetrics("pending", undefined);
+      renderAgentTree(undefined);
       await Promise.all([loadConfig(), loadToolsConfig()]);
     }
 
@@ -937,6 +1009,7 @@ export function createPanelHtml(): string {
     function renderPollingResponse(response) {
       setRunStatus(response.status || "running");
       renderMetrics(response.status || "running", response);
+      renderAgentTree(response);
       if (response.transcript && Array.isArray(response.transcript.events)) {
         response.transcript.events.forEach(appendStreamEvent);
       }
@@ -1148,6 +1221,83 @@ export function createPanelHtml(): string {
       }));
     }
 
+    function renderAgentTree(response) {
+      const tree = response && response.tracking && response.tracking.agentRunTree;
+      if (!tree) {
+        dom.agentTree.replaceChildren(emptyAgentTreeNode());
+        dom.agentInspector.textContent = "选中运行后显示 spec、权限、预算和输出引用。";
+        return;
+      }
+      const nodes = [];
+      nodes.push(agentNode({
+        title: tree.rootSpec.displayName || tree.rootAgentId,
+        status: tree.status,
+        meta: "root " + tree.rootAgentId + "；delegation " + tree.delegationDecisions.length + "；synthesis " + tree.parentSyntheses.length,
+        selected: true
+      }));
+      tree.childRuns.forEach((run) => {
+        nodes.push(agentNode({
+          title: run.displayName || run.agentId,
+          status: run.status,
+          meta: [
+            run.rootletKind ? "kind " + run.rootletKind : run.role,
+            "outputs " + run.outputRefs.length,
+            run.confidence !== undefined ? "confidence " + String(run.confidence) : ""
+          ].filter(Boolean).join("；"),
+          child: true,
+          onClick: () => renderAgentInspector(run, tree)
+        }));
+      });
+      dom.agentTree.replaceChildren(...nodes);
+      if (tree.parentSyntheses.length > 0) {
+        const latest = tree.parentSyntheses[tree.parentSyntheses.length - 1];
+        dom.agentInspector.textContent = "父层综合：" + compact(latest.decisionSummary, 260);
+      } else {
+        dom.agentInspector.textContent = "中枢已建立运行树，等待 child agent 材料回收。";
+      }
+    }
+
+    function agentNode(input) {
+      const node = document.createElement("button");
+      node.type = "button";
+      node.className = "agent-node secondary" + (input.child ? " child" : "") + (input.selected ? " selected" : "");
+      node.style.textAlign = "left";
+      node.style.width = "100%";
+      node.addEventListener("click", input.onClick || (() => {}));
+      const head = document.createElement("div");
+      head.className = "node-head";
+      const title = document.createElement("span");
+      title.textContent = input.title;
+      const tag = document.createElement("span");
+      tag.className = "tag";
+      tag.textContent = input.status;
+      head.append(title, tag);
+      const meta = document.createElement("div");
+      meta.className = "node-meta";
+      meta.textContent = input.meta || "";
+      node.append(head, meta);
+      return node;
+    }
+
+    function renderAgentInspector(run, tree) {
+      dom.agentInspector.textContent = [
+        "spec " + run.specId,
+        "agent " + run.agentId,
+        "权限 " + (run.allowModel ? "model" : "no-model") + (run.allowedTools && run.allowedTools.length ? " + " + run.allowedTools.join("/") : ""),
+        "预算 M" + run.budget.maxModelRounds + "/T" + run.budget.maxToolRounds,
+        "输入 " + run.inputRefs.slice(0, 3).join("，"),
+        "输出 " + run.outputRefs.slice(0, 4).join("，"),
+        run.uncertainty ? "不确定性 " + compact(run.uncertainty, 160) : ""
+      ].filter(Boolean).join("；");
+    }
+
+    function emptyAgentTreeNode() {
+      const node = document.createElement("div");
+      node.className = "node-meta";
+      node.textContent = "暂无派生 agent。";
+      return node;
+    }
+
     function renderDebug(response) {
       const items = [];
       if (response.tracking) {
@@ -1228,6 +1378,7 @@ export function createPanelHtml(): string {
       dom.transcript.replaceChildren(emptyTranscriptNode());
       setRunStatus("pending");
       renderMetrics("pending", undefined);
+      renderAgentTree(undefined);
       dom.debugJson.textContent = "{}";
     }
 

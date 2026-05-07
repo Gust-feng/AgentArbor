@@ -36,6 +36,67 @@ test("panel reasoning trace is matched by exact model output contract", () => {
   assert.equal(handoffNote?.reasoningTrace, undefined);
 });
 
+test("panel transcript exposes delegation and parent synthesis as semantic stream events", () => {
+  const transcript = createPanelRunTranscript({
+    runId: "run-panel-fabric",
+    status: "running",
+    eventEntries: [
+      eventEntry({
+        sequence: 1,
+        type: "agent.delegation.planned",
+        payload: {
+          decisionId: "delegation-1",
+          delegationDecision: {
+            decisionId: "delegation-1",
+            action: "spawn_children",
+          },
+          childSpecIds: ["spec-rootlet-option"],
+        },
+      }),
+      eventEntry({
+        sequence: 2,
+        type: "agent.child.started",
+        payload: {
+          childRunId: "child-run-option",
+          agentSpec: {
+            specId: "spec-rootlet-option",
+            agentId: "rootlet-explorer-option",
+            displayName: "Rootlet option",
+          },
+          childRun: {
+            childRunId: "child-run-option",
+            status: "running",
+          },
+        },
+      }),
+      eventEntry({
+        sequence: 3,
+        type: "agent.parent_synthesis.completed",
+        payload: {
+          synthesisId: "parent-synthesis-1",
+          parentSynthesis: {
+            synthesisId: "parent-synthesis-1",
+            decisionSummary: "Parent synthesized child material without raw provider output.",
+            nextAction: "request_convergence",
+          },
+        },
+      }),
+    ],
+    createdAt: "2026-05-07T00:00:00.000Z",
+    updatedAt: "2026-05-07T00:00:03.000Z",
+  });
+
+  assert.deepEqual(
+    transcript.events.map((event) => event.type).filter((type) => type.startsWith("agent.")),
+    ["agent.delegation.planned", "agent.child.started", "agent.parent_synthesis.completed"],
+  );
+  assert.equal(
+    transcript.events.some((event) => event.sourceRefs.includes("agent_delegation:delegation-1")),
+    true,
+  );
+  assert.equal(JSON.stringify(transcript).includes("raw provider response"), false);
+});
+
 function modelCompletedEntry(input: {
   readonly sequence: number;
   readonly requestId: string;
@@ -67,6 +128,29 @@ function modelCompletedEntry(input: {
   return {
     sequence: input.sequence,
     type,
+    message,
+    recordedAt: "2026-05-07T00:00:00.000Z",
+  };
+}
+
+function eventEntry(input: {
+  readonly sequence: number;
+  readonly type: ArborMessageType;
+  readonly payload: Record<string, unknown>;
+}): EventLogEntry {
+  const message: ArborMessage = {
+    id: `message-${input.sequence}`,
+    traceId: "trace-panel-fabric",
+    from: { id: "underground-center-manager", role: "underground_center" },
+    to: { group: "underground-center" },
+    type: input.type,
+    intent: input.type.replaceAll(".", "_"),
+    payload: input.payload,
+    createdAt: "2026-05-07T00:00:00.000Z",
+  };
+  return {
+    sequence: input.sequence,
+    type: input.type,
     message,
     recordedAt: "2026-05-07T00:00:00.000Z",
   };

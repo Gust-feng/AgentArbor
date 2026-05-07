@@ -28,6 +28,8 @@ test("UndergroundAgentOrchestrator stops instead of approving when no AgentTurnR
   assert.equal(result.orchestratorRun.managerDecisions.includes("stop"), true);
   assert.equal(result.orchestratorRun.agentLoopIds.length >= 6, true);
   assert.equal(result.orchestratorRun.agentLoopIds[0], "underground-intent-core");
+  assert.equal(result.orchestratorRun.agentRunTree.rootAgentId, "underground-center-manager");
+  assert.equal(result.orchestratorRun.parentSynthesisRefs.length >= 1, true);
   assert.equal(typeof result.orchestratorRun.guardedStatuses["underground-intent-core"], "string");
   assert.equal(runtime.eventLog.types().includes("direction_handoff.completed"), false);
 });
@@ -38,6 +40,17 @@ test("runUndergroundDirectionSession exposes the ADR-0021 orchestrator trace whi
   assert.equal(result.terminalStatus, "approved_package_created");
   assert.equal(result.undergroundOrchestratorRun.route, "cognitive_manager");
   assert.equal(result.loadedDirectionHandoffPackage.validation.passed, true);
+  assert.equal(result.undergroundReport.agentRunTree?.rootAgentId, "underground-center-manager");
+  assert.equal(
+    result.undergroundReport.agentRunTree?.childRuns.length,
+    result.undergroundReport.plan.rootletClusters.length
+  );
+  assert.equal(result.undergroundReport.agentRunTree?.parentSyntheses.length, 1);
+  assert.equal(result.observationSnapshot.underground.agentRunTree?.childRuns.length, result.undergroundReport.plan.rootletClusters.length);
+  assert.equal(result.eventTypes.includes("agent.delegation.planned"), true);
+  assert.equal(result.eventTypes.includes("agent.child.started"), true);
+  assert.equal(result.eventTypes.includes("agent.child.completed"), true);
+  assert.equal(result.eventTypes.includes("agent.parent_synthesis.completed"), true);
   assert.equal(result.runtime.eventLog.types().filter((type) => type === "model.requested").length >= 5, true);
   const purposes = modelRequestPurposes(result.runtime.eventLog.list());
   assert.deepEqual(purposes.slice(0, 2), [

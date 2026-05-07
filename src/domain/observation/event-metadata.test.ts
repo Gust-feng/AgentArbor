@@ -78,6 +78,47 @@ test("tool event refs do not collide with model or clarification refs", () => {
   assert.equal(view.refs.some((ref) => ref.kind === "user_clarification"), false);
 });
 
+test("agent fabric events expose only semantic refs for delegation and parent synthesis", () => {
+  const delegationView = createRunObservationEventView(
+    minimalEventEntry("agent.delegation.planned", 1, {
+      decisionId: "delegation-test",
+      delegationDecision: {
+        decisionId: "delegation-test",
+        action: "spawn_children",
+      },
+      agentSpec: {
+        specId: "spec-rootlet-option",
+        displayName: "Rootlet option",
+      },
+      agentRunTree: {
+        treeId: "agent-run-tree-test",
+      },
+    })
+  );
+  const synthesisView = createRunObservationEventView(
+    minimalEventEntry("agent.parent_synthesis.completed", 2, {
+      synthesisId: "parent-synthesis-test",
+      parentSynthesis: {
+        synthesisId: "parent-synthesis-test",
+        nextAction: "request_convergence",
+      },
+      childRuns: [
+        {
+          childRunId: "child-run-option",
+          status: "completed",
+        },
+      ],
+    })
+  );
+
+  assert.equal(delegationView.refs.some((ref) => ref.kind === "agent_delegation" && ref.id === "delegation-test"), true);
+  assert.equal(delegationView.refs.some((ref) => ref.kind === "agent_spec" && ref.id === "spec-rootlet-option"), true);
+  assert.equal(delegationView.refs.some((ref) => ref.kind === "agent_run" && ref.id === "agent-run-tree-test"), true);
+  assert.equal(synthesisView.refs.some((ref) => ref.kind === "parent_synthesis" && ref.id === "parent-synthesis-test"), true);
+  assert.equal(synthesisView.refs.some((ref) => ref.kind === "agent_run" && ref.id === "child-run-option"), true);
+  assert.equal(JSON.stringify([delegationView, synthesisView]).includes("raw provider response"), false);
+});
+
 function minimalEventEntry(
   type: (typeof ARBOR_MESSAGE_TYPES)[number],
   sequence: number,

@@ -20,6 +20,7 @@ import {
   type DirectionHandoff,
   type DirectionOption,
   type GoalIntentProfile,
+  type ParentSynthesisResult,
   type UndergroundConvergenceOutcome,
   type UndergroundConvergenceReport,
   acceptGuardedAction,
@@ -50,6 +51,7 @@ export type HandoffStewardWorkspace = {
   readonly goalIntentProfile?: GoalIntentProfile;
   readonly convergenceReport?: UndergroundConvergenceReport;
   readonly candidatePool?: CandidatePool;
+  readonly parentSynthesis?: ParentSynthesisResult;
   readonly constraints: readonly Constraint[];
 };
 
@@ -65,6 +67,7 @@ export type HandoffStewardPercept = AgentPercept & {
   readonly goalIntentProfile?: GoalIntentProfile;
   readonly convergenceReport: UndergroundConvergenceReport;
   readonly candidatePool: CandidatePool;
+  readonly parentSynthesis?: ParentSynthesisResult;
   readonly constraints: readonly Constraint[];
 };
 
@@ -162,6 +165,7 @@ export class HandoffStewardAgent
       goalIntentProfile: snapshot.goalIntentProfile,
       convergenceReport,
       candidatePool,
+      parentSynthesis: snapshot.parentSynthesis,
       constraints: snapshot.constraints,
     };
   }

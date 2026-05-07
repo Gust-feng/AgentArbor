@@ -135,6 +135,7 @@ function createAutonomyContext(input: {
     source: "ai",
   }];
   const projected: AutonomyReviewerWorkspace = {
+    traceId: "trace-autonomy-reviewer-test",
     goalId,
     rawGoal: "Build a test agent.",
     goalIntentProfile: {

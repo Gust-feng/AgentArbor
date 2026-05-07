@@ -24,6 +24,7 @@ import {
 } from "./reasoning.js";
 
 export type CandidateCollectorWorkspace = {
+  readonly traceId: string;
   readonly goalId: string;
   readonly rootletOutputs: readonly RootletOutput[];
   readonly completedRootletInvocations: readonly UndergroundAgentInvocation[];
@@ -104,7 +105,7 @@ export class CandidateCollectorAgent
     const ai = await reasonWithAgentTurn<CandidateAggregationParsed>({
       agentId: this.agentId,
       agentTurnRuntime: ctx.capabilities?.agentTurnRuntime,
-      traceId: percept.inputRefs[0],
+      traceId: ctx.workspace.snapshot().traceId,
       goalId: percept.goalId,
       purpose: "candidate_aggregation",
       outputContract: CANDIDATE_AGGREGATION_CONTRACT,

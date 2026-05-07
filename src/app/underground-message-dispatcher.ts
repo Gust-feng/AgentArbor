@@ -29,6 +29,7 @@ export type UndergroundMessageDrivenDispatchResult = UndergroundAgentOrchestrato
 
 export class MessageDrivenUndergroundDispatcher {
   private readonly processedMessageIds = new Set<string>();
+  private readonly processedTraceIds = new Set<string>();
 
   constructor(private readonly options: MessageDrivenUndergroundDispatcherOptions) {}
 
@@ -56,6 +57,7 @@ export class MessageDrivenUndergroundDispatcher {
     try {
       const result = await this.createOrchestrator().runAsync(message);
       this.processedMessageIds.add(message.id);
+      this.processedTraceIds.add(message.traceId);
       return { ...result, processedMessageIds: [message.id] };
     } catch (error) {
       throw asDispatcherError(error);
@@ -63,12 +65,20 @@ export class MessageDrivenUndergroundDispatcher {
   }
 
   private nextGoalMessage(): ArborMessage<{ readonly goalId: string; readonly goal: string }> | undefined {
-    const messages = this.options.runtime.bus
+    const goalMessages = this.options.runtime.bus
       .getMessages("goal.received")
       .filter((message): message is ArborMessage<{ readonly goalId: string; readonly goal: string }> =>
-        !this.processedMessageIds.has(message.id) && isGoalPayload(message.payload)
+        isGoalPayload(message.payload)
+      );
+    const messages = goalMessages
+      .filter((message) =>
+        !this.processedMessageIds.has(message.id) &&
+        !this.processedTraceIds.has(message.traceId)
       );
     if (messages.length === 0) {
+      if (goalMessages.length > 0) {
+        return undefined;
+      }
       const laterStage = this.options.runtime.bus.getMessages().find((message) => message.type !== "goal.received");
       if (laterStage !== undefined) {
         throw new UndergroundMessageDispatcherError("Cannot dispatch underground stage message without a prior goal.received context.");

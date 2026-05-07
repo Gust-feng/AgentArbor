@@ -119,6 +119,7 @@ function createConvergenceJudgeContext(input: {
   });
   return {
     workspace: new InMemoryWorkspace<ConvergenceJudgeWorkspace>({
+      traceId: "trace-convergence-test",
       goalId,
       rawGoal,
       goalIntentProfile,

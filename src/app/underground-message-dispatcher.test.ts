@@ -50,6 +50,8 @@ test("dispatcher processes repeated goal messages once for a trace with fake AI"
     assert.equal(result?.terminalStatus, "approved_package_created");
     assert.equal(countEvents(runtime, "direction_handoff.completed"), 1);
     assert.equal(countEvents(runtime, "model.requested") > 0, true);
+    assert.equal(await dispatcher.dispatchUntilIdleAsync(), undefined);
+    assert.equal(countEvents(runtime, "direction_handoff.completed"), 1);
   } finally {
     dispatcher.dispose();
   }

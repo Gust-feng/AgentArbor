@@ -9,6 +9,11 @@ import type {
   UndergroundExplorationCycle,
   UndergroundExplorationPlan,
   UndergroundExplorationReport,
+  AgentRunTree,
+  AgentSpec,
+  ChildAgentRun,
+  DelegationDecision,
+  ParentSynthesisResult,
 } from "../domain/underground/index.js";
 import { createMessage } from "../kernel/messages/create-message.js";
 import type { MinimalRuntime } from "./runtime.js";
@@ -225,6 +230,130 @@ export function publishConvergenceReviewCompleted(input: {
   );
 }
 
+export function publishAgentDelegationPlanned(input: {
+  runtime: MinimalRuntime;
+  traceId: string;
+  parentAgentId: string;
+  delegationDecision: DelegationDecision;
+  childSpecs: readonly AgentSpec[];
+  agentRunTree: AgentRunTree;
+}): void {
+  input.runtime.bus.publish(
+    createMessage({
+      traceId: input.traceId,
+      from: { id: input.parentAgentId, role: "underground_center" },
+      to: { group: "underground-center" },
+      type: "agent.delegation.planned",
+      intent: "plan_agent_delegation",
+      payload: {
+        decisionId: input.delegationDecision.decisionId,
+        delegationDecision: input.delegationDecision,
+        childSpecs: input.childSpecs,
+        childSpecIds: input.childSpecs.map((spec) => spec.specId),
+        agentRunTree: safeAgentRunTreeRef(input.agentRunTree),
+      },
+    }),
+  );
+}
+
+export function publishChildAgentRunStarted(input: {
+  runtime: MinimalRuntime;
+  traceId: string;
+  parentAgentId: string;
+  childRun: ChildAgentRun;
+  agentRunTree: AgentRunTree;
+}): void {
+  input.runtime.bus.publish(
+    createMessage({
+      traceId: input.traceId,
+      from: { id: input.parentAgentId, role: "underground_center" },
+      to: { group: "underground-center" },
+      type: "agent.child.started",
+      intent: "start_child_agent_run",
+      payload: {
+        childRunId: input.childRun.childRunId,
+        specId: input.childRun.spec.specId,
+        agentSpec: input.childRun.spec,
+        childRun: input.childRun,
+        agentRunTree: safeAgentRunTreeRef(input.agentRunTree),
+      },
+    }),
+  );
+}
+
+export function publishChildAgentRunCompleted(input: {
+  runtime: MinimalRuntime;
+  traceId: string;
+  parentAgentId: string;
+  childRun: ChildAgentRun;
+  agentRunTree: AgentRunTree;
+}): void {
+  input.runtime.bus.publish(
+    createMessage({
+      traceId: input.traceId,
+      from: { id: input.childRun.spec.agentId, role: input.childRun.spec.role },
+      to: { group: "underground-center" },
+      type: "agent.child.completed",
+      intent: "complete_child_agent_run",
+      payload: {
+        childRunId: input.childRun.childRunId,
+        specId: input.childRun.spec.specId,
+        childRun: input.childRun,
+        outputRefs: input.childRun.outputRefs,
+        evidenceRefs: input.childRun.evidenceRefs,
+        agentRunTree: safeAgentRunTreeRef(input.agentRunTree),
+      },
+    }),
+  );
+}
+
+export function publishChildAgentRunWaiting(input: {
+  runtime: MinimalRuntime;
+  traceId: string;
+  parentAgentId: string;
+  childRunIds: readonly string[];
+  agentRunTree: AgentRunTree;
+}): void {
+  input.runtime.bus.publish(
+    createMessage({
+      traceId: input.traceId,
+      from: { id: input.parentAgentId, role: "underground_center" },
+      to: { group: "underground-center" },
+      type: "agent.child.waiting",
+      intent: "wait_for_child_agent_runs",
+      payload: {
+        childRunIds: [...input.childRunIds],
+        agentRunTree: safeAgentRunTreeRef(input.agentRunTree),
+      },
+    }),
+  );
+}
+
+export function publishParentSynthesisCompleted(input: {
+  runtime: MinimalRuntime;
+  traceId: string;
+  parentAgentId: string;
+  parentSynthesis: ParentSynthesisResult;
+  childRuns: readonly ChildAgentRun[];
+  agentRunTree: AgentRunTree;
+}): void {
+  input.runtime.bus.publish(
+    createMessage({
+      traceId: input.traceId,
+      from: { id: input.parentAgentId, role: "underground_center" },
+      to: { group: "underground-center" },
+      type: "agent.parent_synthesis.completed",
+      intent: "complete_parent_synthesis",
+      payload: {
+        synthesisId: input.parentSynthesis.synthesisId,
+        parentSynthesis: input.parentSynthesis,
+        childRuns: input.childRuns,
+        agentRunTree: safeAgentRunTreeRef(input.agentRunTree),
+      },
+    }),
+  );
+}
+
 export type UndergroundEventAgentClusterPayload = {
   readonly plan: UndergroundAgentClusterPlan;
   readonly run?: UndergroundAgentClusterRun;
@@ -240,4 +369,24 @@ function cyclePayload(cycle: UndergroundEventCyclePayload | undefined): Undergro
         explorationCycleId: cycle.explorationCycleId,
         cycleIndex: cycle.cycleIndex,
       };
+}
+
+function safeAgentRunTreeRef(tree: AgentRunTree): {
+  readonly treeId: string;
+  readonly rootRunId: string;
+  readonly rootAgentId: string;
+  readonly status: AgentRunTree["status"];
+  readonly childRunCount: number;
+  readonly delegationDecisionCount: number;
+  readonly parentSynthesisCount: number;
+} {
+  return {
+    treeId: tree.treeId,
+    rootRunId: tree.rootRunId,
+    rootAgentId: tree.rootAgentId,
+    status: tree.status,
+    childRunCount: tree.childRuns.length,
+    delegationDecisionCount: tree.delegationDecisions.length,
+    parentSynthesisCount: tree.parentSyntheses.length,
+  };
 }

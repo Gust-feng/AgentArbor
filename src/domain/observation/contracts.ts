@@ -15,6 +15,7 @@ import type {
   RejectedCandidateRefWithReason,
   UndergroundAgentClusterRun,
   UndergroundAgentInvocationStatus,
+  AgentRunTree,
   UndergroundAutonomyAction,
   UndergroundAutonomyStopReason,
   UndergroundEvidenceKind,
@@ -55,6 +56,13 @@ export type RunStage =
   | "tool_requested"
   | "tool_completed"
   | "tool_failed"
+  | "agent_delegation_planned"
+  | "agent_child_started"
+  | "agent_child_completed"
+  | "agent_child_interrupted"
+  | "agent_child_resumed"
+  | "agent_child_waiting"
+  | "agent_parent_synthesis_completed"
   | "autonomy_review_completed"
   | "convergence_review_requested"
   | "convergence_review_completed"
@@ -140,6 +148,10 @@ export type ObservationRef = {
     | "convergence_review"
     | "model_call"
     | "tool_call"
+    | "agent_spec"
+    | "agent_run"
+    | "agent_delegation"
+    | "parent_synthesis"
     | "user_clarification"
     | "verification"
     | "fruit"
@@ -240,6 +252,87 @@ export type RunObservationUndergroundView = {
       readonly startedAt: string;
       readonly completedAt?: string;
       readonly failureReason?: string;
+    }[];
+  };
+  readonly agentRunTree?: {
+    readonly treeId: string;
+    readonly rootRunId: string;
+    readonly rootAgentId: string;
+    readonly status: AgentRunTree["status"];
+    readonly rootSpec: {
+      readonly specId: string;
+      readonly agentId: string;
+      readonly displayName: string;
+      readonly agentKind: string;
+      readonly role: string;
+      readonly promptRef: string;
+      readonly outputContractRef: string;
+      readonly allowedTools: readonly string[];
+      readonly allowModel: boolean;
+      readonly budget: {
+        readonly maxModelRounds: number;
+        readonly maxToolRounds: number;
+        readonly maxChildRuns?: number;
+        readonly maxOutputRefs?: number;
+      };
+    };
+    readonly childRuns: readonly {
+      readonly childRunId: string;
+      readonly parentAgentId: string;
+      readonly status: string;
+      readonly specId: string;
+      readonly agentId: string;
+      readonly displayName: string;
+      readonly agentKind: string;
+      readonly role: string;
+      readonly rootletKind?: RootletClusterKind;
+      readonly promptRef: string;
+      readonly outputContractRef: string;
+      readonly allowModel: boolean;
+      readonly allowedTools: readonly string[];
+      readonly budget: {
+        readonly maxModelRounds: number;
+        readonly maxToolRounds: number;
+        readonly maxChildRuns?: number;
+        readonly maxOutputRefs?: number;
+      };
+      readonly inputRefs: readonly string[];
+      readonly outputRefs: readonly string[];
+      readonly evidenceRefs: readonly string[];
+      readonly uncertainty?: string;
+      readonly confidence?: number;
+      readonly startedAt: string;
+      readonly completedAt?: string;
+      readonly failureReason?: string;
+    }[];
+    readonly delegationDecisions: readonly {
+      readonly decisionId: string;
+      readonly parentAgentId: string;
+      readonly action: string;
+      readonly childSpecIds: readonly string[];
+      readonly childRunIds: readonly string[];
+      readonly rationale: string;
+      readonly uncertainty: string;
+      readonly source: string;
+      readonly confidence: number;
+      readonly reasoningTraceRefs: readonly string[];
+      readonly createdAt: string;
+    }[];
+    readonly parentSyntheses: readonly {
+      readonly synthesisId: string;
+      readonly parentAgentId: string;
+      readonly childRunIds: readonly string[];
+      readonly retainedMaterialRefs: readonly string[];
+      readonly rejectedMaterialRefs: readonly string[];
+      readonly conflictRefs: readonly string[];
+      readonly outputRefs: readonly string[];
+      readonly nextAction: string;
+      readonly decisionSummary: string;
+      readonly uncertainty: string;
+      readonly source: string;
+      readonly confidence: number;
+      readonly reasoningTraceRefs: readonly string[];
+      readonly createdAt: string;
     }[];
   };
   readonly planId: string;

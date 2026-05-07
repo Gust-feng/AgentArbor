@@ -34,6 +34,7 @@ import {
 } from "../autonomy-intelligence.js";
 
 export type AutonomyReviewerWorkspace = {
+  readonly traceId: string;
   readonly goalId: string;
   readonly rawGoal: string;
   readonly goalIntentProfile?: GoalIntentProfile;
@@ -51,6 +52,7 @@ export type AutonomyReviewerCapabilities = {
 
 export type AutonomyReviewerPercept = AgentPercept & {
   readonly goalId: string;
+  readonly traceId: string;
   readonly rawGoal: string;
   readonly goalIntentProfile?: GoalIntentProfile;
   readonly candidatePool: CandidatePool;
@@ -114,6 +116,7 @@ export class AutonomyReviewerAgent
     return {
       inputRefs: [snapshot.goalId, candidatePool.poolId, currentCycle.explorationCycleId],
       goalId: snapshot.goalId,
+      traceId: snapshot.traceId,
       rawGoal: snapshot.rawGoal,
       goalIntentProfile: snapshot.goalIntentProfile,
       candidatePool,
@@ -148,7 +151,7 @@ export class AutonomyReviewerAgent
     const ai = await reasonWithAgentTurn({
       agentId: this.agentId,
       agentTurnRuntime: ctx.capabilities?.agentTurnRuntime,
-      traceId: percept.inputRefs[0],
+      traceId: percept.traceId,
       goalId: percept.goalId,
       purpose: "autonomy_decision",
       outputContract: AUTONOMY_DECISION_CONTRACT as ModelOutputContract,
@@ -160,7 +163,7 @@ export class AutonomyReviewerAgent
       inputRefIds: percept.inputRefs,
       messages: buildAutonomyDecisionMessages({
         agentTurnRuntime: ctx.capabilities?.agentTurnRuntime,
-        traceId: percept.inputRefs[0],
+        traceId: percept.traceId,
         goalId: percept.goalId,
         goal: percept.rawGoal,
         goalIntentProfile: percept.goalIntentProfile,

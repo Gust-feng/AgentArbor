@@ -16,6 +16,7 @@ import {
   type UndergroundConvergenceReport,
   type UndergroundEvidenceLedger,
   type UndergroundExplorationPlan,
+  type ParentSynthesisResult,
   type UserClarificationReason,
   acceptGuardedAction,
   createGuardViolation,
@@ -39,6 +40,7 @@ import {
 } from "./reasoning.js";
 
 export type ConvergenceJudgeWorkspace = {
+  readonly traceId: string;
   readonly goalId: string;
   readonly rawGoal: string;
   readonly goalIntentProfile?: GoalIntentProfile;
@@ -48,6 +50,7 @@ export type ConvergenceJudgeWorkspace = {
   readonly startedPlan?: UndergroundExplorationPlan;
   readonly evidenceLedger?: UndergroundEvidenceLedger;
   readonly autonomyDecision?: UndergroundAutonomyDecision;
+  readonly parentSynthesis?: ParentSynthesisResult;
 };
 
 export type ConvergenceJudgeCapabilities = {
@@ -56,6 +59,7 @@ export type ConvergenceJudgeCapabilities = {
 
 export type ConvergenceJudgePercept = AgentPercept & {
   readonly goalId: string;
+  readonly traceId: string;
   readonly rawGoal: string;
   readonly goalIntentProfile?: GoalIntentProfile;
   readonly candidatePool: CandidatePool;
@@ -64,6 +68,7 @@ export type ConvergenceJudgePercept = AgentPercept & {
   readonly startedPlan: UndergroundExplorationPlan;
   readonly evidenceLedger?: UndergroundEvidenceLedger;
   readonly autonomyDecision?: UndergroundAutonomyDecision;
+  readonly parentSynthesis?: ParentSynthesisResult;
 };
 
 export type ConvergenceJudgeDecision = AgentDecision & {
@@ -124,6 +129,7 @@ export class ConvergenceJudgeAgent
     return {
       inputRefs: [snapshot.goalId, candidatePool.poolId],
       goalId: snapshot.goalId,
+      traceId: snapshot.traceId,
       rawGoal: snapshot.rawGoal,
       goalIntentProfile: snapshot.goalIntentProfile,
       candidatePool,
@@ -132,6 +138,7 @@ export class ConvergenceJudgeAgent
       startedPlan,
       evidenceLedger: snapshot.evidenceLedger,
       autonomyDecision: snapshot.autonomyDecision,
+      parentSynthesis: snapshot.parentSynthesis,
     };
   }
 
@@ -165,7 +172,7 @@ export class ConvergenceJudgeAgent
     const ai = await reasonWithAgentTurn({
       agentId: this.agentId,
       agentTurnRuntime: ctx.capabilities?.agentTurnRuntime,
-      traceId: percept.inputRefs[0],
+      traceId: percept.traceId,
       goalId: percept.goalId,
       purpose: "convergence_judgment",
       outputContract: CONVERGENCE_JUDGMENT_CONTRACT,
@@ -251,9 +258,19 @@ export class ConvergenceJudgeAgent
       reasoningTrace: decision.reasoningTrace,
       forcedStopReason: decision.source === "deterministic_fallback" ? "ai_required_for_autonomy" : undefined,
     });
+    const convergenceReport =
+      percept.parentSynthesis === undefined
+        ? result.convergenceReport
+        : {
+            ...result.convergenceReport,
+            provenanceRefs: [
+              ...result.convergenceReport.provenanceRefs,
+              percept.parentSynthesis.synthesisId,
+            ],
+          };
     return {
-      outputRefs: [result.convergenceReport.reviewId],
-      convergenceReport: result.convergenceReport,
+      outputRefs: [convergenceReport.reviewId],
+      convergenceReport,
       evidenceLedger: result.evidenceLedger,
       candidatePool: result.candidatePool,
       source: decision.source,

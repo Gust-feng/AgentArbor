@@ -41,6 +41,7 @@ function createUndergroundView(input: RunObservationSnapshotInput): RunObservati
   );
   return {
     agentCluster: createAgentClusterView(report.agentClusterRun),
+    agentRunTree: createAgentRunTreeView(report.agentRunTree),
     planId: report.plan.planId,
     status: statusForUnderground(report),
     budget: { ...report.plan.budget },
@@ -344,6 +345,91 @@ function createAgentClusterView(
       completedAt: invocation.completedAt,
       failureReason: invocation.failureReason,
     })),
+  };
+}
+
+function createAgentRunTreeView(
+  tree: RunObservationSnapshotInput["undergroundReport"]["agentRunTree"]
+): RunObservationUndergroundView["agentRunTree"] {
+  if (tree === undefined) {
+    return undefined;
+  }
+  return {
+    treeId: tree.treeId,
+    rootRunId: tree.rootRunId,
+    rootAgentId: tree.rootAgentId,
+    status: tree.status,
+    rootSpec: createAgentSpecView(tree.rootSpec),
+    childRuns: tree.childRuns.map((run) => ({
+      childRunId: run.childRunId,
+      parentAgentId: run.parentAgentId,
+      status: run.status,
+      specId: run.spec.specId,
+      agentId: run.spec.agentId,
+      displayName: run.spec.displayName,
+      agentKind: run.spec.agentKind,
+      role: run.spec.role,
+      rootletKind: run.spec.rootletKind,
+      promptRef: run.spec.promptRef,
+      outputContractRef: run.spec.outputContractRef,
+      allowModel: run.spec.permissions.allowModel,
+      allowedTools: [...run.spec.permissions.allowedTools],
+      budget: { ...run.spec.budget },
+      inputRefs: [...run.inputRefs],
+      outputRefs: [...run.outputRefs],
+      evidenceRefs: [...run.evidenceRefs],
+      uncertainty: run.uncertainty,
+      confidence: run.confidence,
+      startedAt: run.startedAt,
+      completedAt: run.completedAt,
+      failureReason: run.failureReason,
+    })),
+    delegationDecisions: tree.delegationDecisions.map((decision) => ({
+      decisionId: decision.decisionId,
+      parentAgentId: decision.parentAgentId,
+      action: decision.action,
+      childSpecIds: [...decision.childSpecIds],
+      childRunIds: [...decision.childRunIds],
+      rationale: decision.rationale,
+      uncertainty: decision.uncertainty,
+      source: decision.source,
+      confidence: decision.confidence,
+      reasoningTraceRefs: [...decision.reasoningTraceRefs],
+      createdAt: decision.createdAt,
+    })),
+    parentSyntheses: tree.parentSyntheses.map((synthesis) => ({
+      synthesisId: synthesis.synthesisId,
+      parentAgentId: synthesis.parentAgentId,
+      childRunIds: [...synthesis.childRunIds],
+      retainedMaterialRefs: [...synthesis.retainedMaterialRefs],
+      rejectedMaterialRefs: [...synthesis.rejectedMaterialRefs],
+      conflictRefs: [...synthesis.conflictRefs],
+      outputRefs: [...synthesis.outputRefs],
+      nextAction: synthesis.nextAction,
+      decisionSummary: synthesis.decisionSummary,
+      uncertainty: synthesis.uncertainty,
+      source: synthesis.source,
+      confidence: synthesis.confidence,
+      reasoningTraceRefs: [...synthesis.reasoningTraceRefs],
+      createdAt: synthesis.createdAt,
+    })),
+  };
+}
+
+function createAgentSpecView(
+  spec: NonNullable<RunObservationSnapshotInput["undergroundReport"]["agentRunTree"]>["rootSpec"]
+): NonNullable<RunObservationUndergroundView["agentRunTree"]>["rootSpec"] {
+  return {
+    specId: spec.specId,
+    agentId: spec.agentId,
+    displayName: spec.displayName,
+    agentKind: spec.agentKind,
+    role: spec.role,
+    promptRef: spec.promptRef,
+    outputContractRef: spec.outputContractRef,
+    allowedTools: [...spec.permissions.allowedTools],
+    allowModel: spec.permissions.allowModel,
+    budget: { ...spec.budget },
   };
 }
 

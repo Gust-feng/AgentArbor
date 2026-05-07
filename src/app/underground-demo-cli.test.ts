@@ -44,7 +44,23 @@ test("underground demo CLI --ai fake emits model events and keeps AI candidate-l
   assert.equal(rootletModelCall?.candidateRefs.length, 2);
   assert.deepEqual(
     summary.eventLog.filter((type) => !type.startsWith("model.")),
-    ["direction_handoff.completed"]
+    [
+      "goal.received",
+      "underground.exploration_planned",
+      "agent.delegation.planned",
+      "rootlet_cluster.started",
+      "agent.child.waiting",
+      "agent.child.started",
+      "agent.child.completed",
+      "exploration_candidate.produced",
+      "candidate_pool.updated",
+      "agent.parent_synthesis.completed",
+      "autonomy_review.completed",
+      "convergence_review.requested",
+      "convergence_review.completed",
+      "direction_handoff.requested",
+      "direction_handoff.completed",
+    ]
   );
   assert.equal(summary.eventLog.includes("growth_plan.completed"), false);
 });

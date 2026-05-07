@@ -138,6 +138,7 @@ function createCollectorContext(input: {
     },
   ];
   const projected: CandidateCollectorWorkspace = {
+    traceId: "trace-candidate-collector-test",
     goalId,
     rootletOutputs,
     completedRootletInvocations: invocations,

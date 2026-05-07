@@ -77,6 +77,7 @@ function refsForEvent(entry: RunObservationEventEntry): ObservationRef[] {
   pushConvergenceRef(refs, payload);
   pushModelCallRefs(refs, entry.type, payload);
   pushToolCallRefs(refs, entry.type, payload);
+  pushAgentFabricRefs(refs, payload);
   pushClarificationRequestRef(refs, entry.type, payload);
   pushCandidatePoolRef(refs, payload);
   pushRootletRefs(refs, payload);
@@ -140,6 +141,44 @@ function pushToolCallRefs(
     return;
   }
   pushStringRef(refs, payload, "callId", "tool_call");
+}
+
+function pushAgentFabricRefs(refs: ObservationRef[], payload: Readonly<Record<string, unknown>>): void {
+  pushStringRef(refs, payload, "specId", "agent_spec");
+  pushStringRef(refs, payload, "childRunId", "agent_run");
+  pushStringRef(refs, payload, "decisionId", "agent_delegation");
+  pushStringRef(refs, payload, "synthesisId", "parent_synthesis");
+
+  const agentSpec = asRecord(payload.agentSpec);
+  if (typeof agentSpec.specId === "string") {
+    refs.push({ kind: "agent_spec", id: agentSpec.specId, label: stringLabel(agentSpec.displayName) });
+  }
+  const childRun = asRecord(payload.childRun);
+  if (typeof childRun.childRunId === "string") {
+    refs.push({ kind: "agent_run", id: childRun.childRunId, label: stringLabel(childRun.status) });
+  }
+  const delegationDecision = asRecord(payload.delegationDecision);
+  if (typeof delegationDecision.decisionId === "string") {
+    refs.push({ kind: "agent_delegation", id: delegationDecision.decisionId, label: stringLabel(delegationDecision.action) });
+  }
+  const parentSynthesis = asRecord(payload.parentSynthesis);
+  if (typeof parentSynthesis.synthesisId === "string") {
+    refs.push({ kind: "parent_synthesis", id: parentSynthesis.synthesisId, label: stringLabel(parentSynthesis.nextAction) });
+  }
+  const agentRunTree = asRecord(payload.agentRunTree);
+  if (typeof agentRunTree.treeId === "string") {
+    refs.push({ kind: "agent_run", id: agentRunTree.treeId, label: "run_tree" });
+  }
+
+  const childRuns = payload.childRuns;
+  if (Array.isArray(childRuns)) {
+    for (const value of childRuns) {
+      const run = asRecord(value);
+      if (typeof run.childRunId === "string") {
+        refs.push({ kind: "agent_run", id: run.childRunId, label: stringLabel(run.status) });
+      }
+    }
+  }
 }
 
 function pushPackageRef(refs: ObservationRef[], payload: Readonly<Record<string, unknown>>): void {
@@ -227,4 +266,8 @@ function asRecord(value: unknown): Readonly<Record<string, unknown>> {
     return value as Readonly<Record<string, unknown>>;
   }
   return {};
+}
+
+function stringLabel(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
 }

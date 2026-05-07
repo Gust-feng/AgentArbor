@@ -81,7 +81,7 @@ test("clarification recovery records user approval and creates approved v2 hando
   const entries = result.runtime.eventLog.list();
 
   assert.deepEqual(result.eventTypes, EXPECTED_CLARIFICATION_RECOVERY_EVENTS);
-  assert.equal(convergenceEvents.length, 1);
+  assert.equal(convergenceEvents.length, 2);
   assert.equal(result.awaitingUserDirectionHandoffPackage.manifest.status, "awaiting_user");
   assert.equal(result.loadedApprovedDirectionHandoffPackage.manifest.status, "approved");
   assert.equal(
@@ -108,7 +108,10 @@ test("clarification recovery records user approval and creates approved v2 hando
   assert.equal(result.clarificationResponse.requestId, result.clarificationRequest.requestId);
   const approvalIndex = entries.findIndex((entry) => entry.type === "user_approval.received");
   const revisionIndex = entries.findIndex((entry) => entry.type === "direction_handoff.revision_requested");
-  const convergenceIndex = entries.findIndex((entry) => entry.type === "convergence_review.completed");
+  const convergenceIndex = entries.reduce(
+    (latest, entry, index) => entry.type === "convergence_review.completed" ? index : latest,
+    -1,
+  );
   assert.equal(approvalIndex >= 0, true);
   assert.equal(revisionIndex >= 0, true);
   assert.equal(convergenceIndex >= 0, true);
@@ -153,8 +156,8 @@ test("clarification recovery records user approval and creates approved v2 hando
   );
   assert.equal(revisionRequestedEvent?.progress.status, "in_progress");
   assert.equal(revisionRequestedEvent?.refs.some((ref) => ref.kind === "direction_handoff"), true);
-  assert.equal(convergenceEvents[0]?.scope, "underground");
-  assert.equal(convergenceEvents[0]?.refs.some((ref) => ref.kind === "convergence_review"), true);
+  assert.equal(convergenceEvents.at(-1)?.scope, "underground");
+  assert.equal(convergenceEvents.at(-1)?.refs.some((ref) => ref.kind === "convergence_review"), true);
   assert.equal(finalHandoffEvent?.type, "direction_handoff.completed");
   assert.equal(
     finalHandoffEvent?.refs.some(

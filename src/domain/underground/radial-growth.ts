@@ -1,4 +1,5 @@
 import type { ConstraintRef } from "../constraints.js";
+import type { AgentRunTree } from "./agent-fabric.js";
 import type { UndergroundAgentClusterRun, UndergroundAgentInvocation } from "./agent-cluster.js";
 import type { CandidateComparison } from "./candidate-comparison.js";
 import type { ConvergenceReviewOutcome, ConvergenceStopReason } from "./contracts.js";
@@ -195,6 +196,7 @@ export type UndergroundConvergenceAiAdvisory = {
 export type UndergroundExplorationReport = {
   plan: UndergroundExplorationPlan;
   agentClusterRun?: UndergroundAgentClusterRun;
+  agentRunTree?: AgentRunTree;
   goalIntentProfile?: GoalIntentProfile;
   autonomy?: import("./autonomy.js").UndergroundAutonomyReview;
   evidenceLedger?: UndergroundEvidenceLedger;

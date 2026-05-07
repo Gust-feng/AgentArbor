@@ -13,6 +13,7 @@ import type {
 export function createUndergroundExplorationReport(input: {
   plan: UndergroundExplorationPlan;
   agentClusterRun?: UndergroundAgentClusterRun;
+  agentRunTree?: UndergroundExplorationReport["agentRunTree"];
   goalIntentProfile?: GoalIntentProfile;
   autonomy?: UndergroundAutonomyReview;
   evidenceLedger?: UndergroundEvidenceLedger;
@@ -23,6 +24,7 @@ export function createUndergroundExplorationReport(input: {
   return {
     plan: input.plan,
     agentClusterRun: input.agentClusterRun === undefined ? undefined : cloneAgentClusterRun(input.agentClusterRun),
+    agentRunTree: input.agentRunTree === undefined ? undefined : cloneAgentRunTree(input.agentRunTree),
     goalIntentProfile: input.goalIntentProfile === undefined ? undefined : cloneGoalIntentProfile(input.goalIntentProfile),
     autonomy: input.autonomy === undefined ? undefined : cloneAutonomyReview(input.autonomy),
     evidenceLedger: input.evidenceLedger === undefined ? undefined : cloneEvidenceLedger(input.evidenceLedger),
@@ -65,6 +67,63 @@ export function createUndergroundExplorationReport(input: {
         fallbackRefs: [...entry.fallbackRefs],
       })),
     },
+  };
+}
+
+function cloneAgentRunTree(
+  tree: NonNullable<UndergroundExplorationReport["agentRunTree"]>
+): NonNullable<UndergroundExplorationReport["agentRunTree"]> {
+  return {
+    ...tree,
+    rootSpec: {
+      ...tree.rootSpec,
+      protocol: {
+        inputs: tree.rootSpec.protocol.inputs.map((input) => ({ ...input })),
+        outputs: tree.rootSpec.protocol.outputs.map((output) => ({ ...output })),
+      },
+      permissions: {
+        ...tree.rootSpec.permissions,
+        allowedTools: [...tree.rootSpec.permissions.allowedTools],
+      },
+      budget: { ...tree.rootSpec.budget },
+      inputRefs: [...tree.rootSpec.inputRefs],
+    },
+    childRuns: tree.childRuns.map((run) => ({
+      ...run,
+      spec: {
+        ...run.spec,
+        protocol: {
+          inputs: run.spec.protocol.inputs.map((input) => ({ ...input })),
+          outputs: run.spec.protocol.outputs.map((output) => ({ ...output })),
+        },
+        permissions: {
+          ...run.spec.permissions,
+          allowedTools: [...run.spec.permissions.allowedTools],
+        },
+        budget: { ...run.spec.budget },
+        inputRefs: [...run.spec.inputRefs],
+      },
+      inputRefs: [...run.inputRefs],
+      outputRefs: [...run.outputRefs],
+      evidenceRefs: [...run.evidenceRefs],
+    })),
+    delegationDecisions: tree.delegationDecisions.map((decision) => ({
+      ...decision,
+      childSpecIds: [...decision.childSpecIds],
+      childRunIds: [...decision.childRunIds],
+      inputRefs: [...decision.inputRefs],
+      reasoningTraceRefs: [...decision.reasoningTraceRefs],
+    })),
+    parentSyntheses: tree.parentSyntheses.map((synthesis) => ({
+      ...synthesis,
+      childRunIds: [...synthesis.childRunIds],
+      inputRefs: [...synthesis.inputRefs],
+      retainedMaterialRefs: [...synthesis.retainedMaterialRefs],
+      rejectedMaterialRefs: [...synthesis.rejectedMaterialRefs],
+      conflictRefs: [...synthesis.conflictRefs],
+      outputRefs: [...synthesis.outputRefs],
+      reasoningTraceRefs: [...synthesis.reasoningTraceRefs],
+    })),
   };
 }
 

@@ -4,7 +4,7 @@ import type { RootletClusterKind } from "./radial-growth.js";
 import type { WorkspaceView } from "./workspace.js";
 import { createWorkspaceProjectionView } from "./workspace.js";
 
-export const AGENT_FABRIC_AGENT_KINDS = ["manager", "core", "rootlet"] as const;
+export const AGENT_FABRIC_AGENT_KINDS = ["manager", "core", "rootlet", "child"] as const;
 export type AgentFabricAgentKind = (typeof AGENT_FABRIC_AGENT_KINDS)[number];
 
 // ADR-0022 MVP boundary: parent agents may spawn one child/rootlet layer,

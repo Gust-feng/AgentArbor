@@ -29,6 +29,12 @@ export type FakeModelProviderResponse = {
   readonly failureMessage?: string;
 };
 
+type FakeModelProviderStep = {
+  readonly output?: unknown;
+  readonly textOutput?: string;
+  readonly toolCalls?: readonly ModelToolCall[];
+};
+
 export class FakeModelProvider implements ModelProvider {
   readonly providerId: string;
   readonly providerKind = "fake" as const;
@@ -56,14 +62,26 @@ export class FakeModelProvider implements ModelProvider {
       });
     }
 
-    const output =
-      step.output ?? (step.toolCalls === undefined || step.toolCalls.length === 0 ? defaultFakeOutput(request) : undefined);
+    const defaultStep =
+      step.output === undefined && step.textOutput === undefined && step.toolCalls === undefined
+        ? defaultFakeStep(request)
+        : {};
+    const toolCalls = step.toolCalls ?? defaultStep.toolCalls;
+    const rawOutput =
+      step.output ??
+      defaultStep.output ??
+      (toolCalls === undefined || toolCalls.length === 0 ? defaultFakeOutput(request) : undefined);
+    const textOutput =
+      step.textOutput ??
+      defaultStep.textOutput ??
+      (request.outputContract.format === "text" && typeof rawOutput === "string" ? rawOutput : undefined);
+    const output = request.outputContract.format === "text" && textOutput !== undefined ? undefined : rawOutput;
     emitFakeOutputDeltas({
       request,
       providerId: this.providerId,
       model: this.model,
       output,
-      textOutput: step.textOutput,
+      textOutput,
       emit: this.options.onOutputDelta,
     });
 
@@ -77,13 +95,13 @@ export class FakeModelProvider implements ModelProvider {
       status: "completed",
       outputKind: request.outputContract.outputKind,
       structuredOutput: output,
-      textOutput: step.textOutput,
-      toolCalls: step.toolCalls?.map((toolCall) => ({
+      textOutput,
+      toolCalls: toolCalls?.map((toolCall) => ({
         callId: toolCall.callId,
         toolName: toolCall.toolName,
         input: globalThis.structuredClone(toolCall.input),
       })),
-      finishReason: step.toolCalls === undefined || step.toolCalls.length === 0 ? "stop" : "tool_call",
+      finishReason: toolCalls === undefined || toolCalls.length === 0 ? "stop" : "tool_call",
       validation: pendingModelOutputValidation(),
       completedAt: nowIso(),
     };
@@ -148,6 +166,13 @@ function chunkText(value: string, maxLength: number): readonly string[] {
   return chunks;
 }
 
+function defaultFakeStep(request: ModelRequest): FakeModelProviderStep {
+  if (request.outputContract.contractId === "desktop.chat_response.v1") {
+    return fakeDesktopChatStep(request);
+  }
+  return {};
+}
+
 function defaultFakeOutput(request: ModelRequest): unknown {
   if (request.outputContract.contractId === "underground.intent_profile.v1") {
     return fakeIntentProfileOutput(request);
@@ -174,6 +199,22 @@ function defaultFakeOutput(request: ModelRequest): unknown {
       uncertainty: "Fake aggregation is deterministic fixture output.",
       confidence: 0.74,
     };
+  }
+
+  if (request.outputContract.contractId === "work_session.decision.v1") {
+    return fakeWorkSessionDecisionOutput(request);
+  }
+
+  if (request.outputContract.contractId === "work_session.direct_answer.v1") {
+    return fakeWorkSessionDirectAnswerOutput(request);
+  }
+
+  if (request.outputContract.contractId === "work_session.child_material.v1") {
+    return fakeWorkSessionChildMaterialOutput(request);
+  }
+
+  if (request.outputContract.contractId === "work_session.synthesis.v1") {
+    return fakeWorkSessionSynthesisOutput(request);
   }
 
   if (request.outputContract.contractId === "convergence-advisory") {
@@ -211,6 +252,27 @@ function defaultFakeOutput(request: ModelRequest): unknown {
   return {
     summary: "Fake model candidate advice.",
     rationale: "Deterministic fake provider output for tests and demos.",
+  };
+}
+
+function fakeDesktopChatStep(request: ModelRequest): FakeModelProviderStep {
+  const goalAnchor = stripTrailingSentencePunctuation(rootletGoalAnchor(request));
+  if (isLightweightQuestion(goalAnchor)) {
+    return {
+      textOutput: fakeWorkSessionDirectAnswerOutput(request),
+    };
+  }
+  return {
+    toolCalls: [
+      {
+        callId: "call-start-work-session",
+        toolName: "start_work_session",
+        input: {
+          reason: "任务需要读取上下文、组织材料或产出可审阅结果，升级为工作会话。",
+          goal: goalAnchor,
+        },
+      },
+    ],
   };
 }
 
@@ -391,6 +453,161 @@ function fakeHandoffNarrativeOutput(request: ModelRequest): Record<string, unkno
   };
 }
 
+function fakeWorkSessionDecisionOutput(request: ModelRequest): Record<string, unknown> {
+  const goalAnchor = stripTrailingSentencePunctuation(rootletGoalAnchor(request));
+  const content = request.sanitizedMessages.map((message) => message.content).join("\n");
+  if (isLightweightQuestion(goalAnchor)) {
+    return {
+      action: "direct_answer",
+      childSpecs: [],
+      decisionSummary:
+        "这是一个可以直接回答的普通问题，不需要读取工作区、派生子 Agent 或生成报告。",
+      uncertainty:
+        "如果用户后续要求分析文件、项目或网页，再进入工作会话。",
+      confidence: 0.82,
+    };
+  }
+  if (content.includes("Parent synthesis status: ready")) {
+    return {
+      action: "produce_artifact",
+      childSpecs: [],
+      decisionSummary:
+        "父层综合已经完成，可以生成可审阅报告。",
+      uncertainty:
+        "这是测试模型的稳定决策；真实运行仍需要检查综合质量。",
+      confidence: 0.76,
+    };
+  }
+  if (content.includes("Completed child runs:") && !content.includes("Completed child runs: none")) {
+    return {
+      action: "synthesize",
+      childSpecs: [],
+      decisionSummary:
+        "局部材料已经返回，需要先综合冲突和证据。",
+      uncertainty:
+        "这是测试模型的稳定决策；真实运行应比较证据和冲突后再综合。",
+      confidence: 0.75,
+    };
+  }
+  if (content.includes("Tool call refs:") && !content.includes("Tool call refs: none")) {
+    return {
+      action: "spawn_children",
+      childSpecs: fakeWorkSessionChildSpecs(goalAnchor),
+      decisionSummary:
+        "已取得上下文引用，接下来分成几路检查关键问题。",
+      uncertainty:
+        "这是测试模型的稳定决策；真实运行应判断证据是否足够再分工。",
+      confidence: 0.75,
+    };
+  }
+  return {
+    action: "spawn_children",
+    childSpecs: fakeWorkSessionChildSpecs(goalAnchor),
+    decisionSummary:
+      "先进行几路局部检查，再生成项目分析报告。",
+    uncertainty:
+      "这是测试模型的稳定决策；真实运行应根据任务和工作区材料调整分工。",
+    confidence: 0.76,
+  };
+}
+
+function fakeWorkSessionDirectAnswerOutput(request: ModelRequest): string {
+  const goalAnchor = stripTrailingSentencePunctuation(rootletGoalAnchor(request));
+  const normalized = goalAnchor.toLowerCase();
+  const asksModelIdentity = includesAny(normalized, [
+    "你是什么模型",
+    "你是哪个模型",
+    "你是谁",
+    "what model",
+    "which model",
+    "who are you",
+  ]);
+  return asksModelIdentity
+    ? "我是 AgentArbor 桌面助手。具体底层模型取决于你在设置中配置的模型运行时；如果当前使用测试模式，我会走本地 fake AI 路径，只用于验证工作流。"
+    : `可以。对于“${goalAnchor}”，我会先直接回答；只有当问题需要读取项目、网页、文件或长期执行时，才会进入更完整的工作会话。`;
+}
+
+function fakeWorkSessionChildSpecs(goalAnchor: string): readonly Record<string, unknown>[] {
+  return [
+    {
+      specId: "work-session-child-codebase-reader",
+      displayName: "代码阅读",
+      role: "codebase_reader",
+      objective: `Read the current project structure and identify concrete weak points for ${goalAnchor}.`,
+      allowedTools: ["search", "read"],
+      inputRefs: ["task-soil:current", "workspace:current"],
+    },
+    {
+      specId: "work-session-child-architecture-reviewer",
+      displayName: "架构评审",
+      role: "architecture_reviewer",
+      objective: `Review whether the runtime architecture can produce useful work for ${goalAnchor}.`,
+      allowedTools: ["search", "read"],
+      inputRefs: ["task-soil:current", "docs:architecture"],
+    },
+  ];
+}
+
+function fakeWorkSessionChildMaterialOutput(request: ModelRequest): Record<string, unknown> {
+  const content = request.sanitizedMessages.map((message) => message.content).join("\n");
+  const role = matchLineValue(content, "Child role:") ?? "child_agent";
+  const objective = matchLineValue(content, "Objective:") ?? "review current work session material";
+  const goalAnchor = stripTrailingSentencePunctuation(rootletGoalAnchor(request));
+  const roleLabel = role.replace(/_/g, " ");
+  return {
+    summary: `${roleLabel} 认为 AgentArbor 需要围绕 ${goalAnchor} 建立真实工作会话路径。`,
+    findings: [
+      `当前桌面路径不应继续把固定地下流水线包装成 ${goalAnchor} 的产品主线。`,
+      "面板应展示最终报告、证据引用、不确定性和下一步，而不是强制展示内部方案包成功态。",
+      "任何局部材料进入最终结果前，都必须先经过父层综合。",
+    ],
+    evidenceRefs: [
+      "code:src/app/panel-server.ts",
+      "code:src/app/minimal-loop.ts",
+      "docs:ADR-0022",
+      `objective:${truncate(objective, 48)}`,
+    ],
+    uncertainty:
+      "这是测试模型的局部材料，必须经过父层综合后才可成为最终报告。",
+    confidence: 0.73,
+  };
+}
+
+function fakeWorkSessionSynthesisOutput(request: ModelRequest): Record<string, unknown> {
+  const goalAnchor = stripTrailingSentencePunctuation(rootletGoalAnchor(request));
+  return {
+    reportTitle: "AgentArbor 项目分析与下一步优化报告",
+    keyFindings: [
+      "桌面主线必须直接承载真实工作会话，而不是把固定流程包装成产品结果。",
+      "当前实现已经具备分工检查和父层综合基础，下一步应让模型按任务决定阅读、分工、综合和产出。",
+      "面板应优先展示任务理解、关键发现、证据、不确定性和下一步，而不是强制展示内部方案包成功态。",
+    ],
+    recommendations: [
+      "把默认入口稳定为工作会话，让模型根据任务选择读取、分工、综合、追问或产出。",
+      "保持局部材料不直接成为最终结果，必须经过父层综合后再展示给用户。",
+      "先用真实模型完成当前仓库分析报告，再继续接执行修改预览和验证。",
+    ],
+    evidenceRefs: [
+      "code:src/app/panel-server.ts",
+      "code:src/app/minimal-loop.ts",
+      "code:src/domain/underground/agent-fabric.ts",
+      "docs:ADR-0022",
+    ],
+    uncertainty: [
+      "真实模型输出质量仍取决于工作会话契约和工具材料质量。",
+      "当前示例材料只能证明链路和边界，不能代表真实项目分析深度。",
+    ],
+    nextActions: [
+      "配置真实模型并跑一次当前仓库项目分析。",
+      "把工具读取策略从安全引用扩展到更真实的代码搜索和只读文件阅读。",
+      "继续压缩右侧诊断噪音，突出结论、证据和待确认事项。",
+    ],
+    decisionSummary:
+      `父层综合已为 ${goalAnchor} 形成可审阅的项目分析报告。`,
+    confidence: 0.78,
+  };
+}
+
 function parseHandoffCandidateIds(content: string): string[] {
   return [...content.matchAll(/candidateId=([^\s\n]+)/g)]
     .map((match) => match[1])
@@ -460,7 +677,10 @@ function rootletKindFromContractId(contractId: string): string {
 
 function rootletGoalAnchor(request: ModelRequest): string {
   const content = request.sanitizedMessages.map((message) => message.content).join("\n");
-  const rawGoal = matchLineValue(content, "Raw goal:");
+  const rawGoal =
+    matchLineValue(content, "Raw goal:") ??
+    matchLineValue(content, "Raw user question:") ??
+    matchLineValue(content, "User message:");
   if (rawGoal !== undefined && rawGoal.length > 0) {
     return truncate(rawGoal, 80);
   }
@@ -535,6 +755,27 @@ function goalSegments(goalAnchor: string): string[] {
     .split(/[。.!！?？;；,，]/u)
     .map((segment) => segment.trim())
     .filter((segment) => segment.length > 0);
+}
+
+function isLightweightQuestion(goalAnchor: string): boolean {
+  const normalized = goalAnchor.toLowerCase().trim();
+  if (["hi", "hello", "你好"].includes(normalized)) {
+    return true;
+  }
+  if (includesAny(normalized, [
+    "你是什么模型",
+    "你是哪个模型",
+    "你是谁",
+    "what model",
+    "which model",
+    "who are you",
+  ])) {
+    return true;
+  }
+  if (normalized.length <= 48 && /[?？]$/u.test(normalized)) {
+    return !includesAny(normalized, ["分析", "调研", "生成报告", "项目", "仓库", "代码", "优化方向", "方案"]);
+  }
+  return false;
 }
 
 function includesAny(value: string, needles: readonly string[]): boolean {

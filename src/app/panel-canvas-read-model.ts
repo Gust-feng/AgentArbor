@@ -1,12 +1,17 @@
 import type { MinimalLoopResult } from "./minimal-loop.js";
+import type { CognitiveWorkSessionResult } from "./cognitive-work-session.js";
+import type { DesktopChatSessionResult } from "./desktop-chat-session.js";
 import type {
   PanelObservationReadModel,
   PanelRunTrackingReadModel,
   PanelRunTranscript,
 } from "./panel-run-read-model.js";
+import type { AgentRunTree, RootletClusterKind } from "../domain/underground/index.js";
 import { redactSensitiveText } from "../kernel/redaction.js";
 
-export type PanelRunCanvasReadModel = {
+export type PanelRunCanvasReadModel = LegacyPanelRunCanvasReadModel | WorkSessionCanvasReadModel | DesktopChatCanvasReadModel;
+
+export type LegacyPanelRunCanvasReadModel = {
   readonly kind: "desktop_shell_canvas";
   readonly taskSoil: {
     readonly taskSoilId: string;
@@ -94,12 +99,182 @@ export type PanelRunCanvasReadModel = {
   };
 };
 
+export type WorkSessionCanvasReadModel = {
+  readonly kind: "work_session_canvas";
+  readonly taskSoil: {
+    readonly taskSoilId: string;
+    readonly goalId?: string;
+    readonly traceId?: string;
+    readonly goalSummary: string;
+    readonly contextRefs: readonly {
+      readonly ref: string;
+      readonly kind: string;
+      readonly summary?: string;
+      readonly readonlyPreview?: {
+        readonly title?: string;
+        readonly text: string;
+        readonly truncated: boolean;
+      };
+    }[];
+    readonly permissionBoundaryRefs: readonly string[];
+  };
+  readonly workSession: {
+    readonly status: CognitiveWorkSessionResult["status"];
+    readonly artifact?: {
+      readonly artifactId: string;
+      readonly type: string;
+      readonly summary: string;
+    };
+    readonly directAnswer?: {
+      readonly answer: string;
+      readonly evidenceRefs: readonly string[];
+      readonly uncertainty: readonly string[];
+      readonly followUpSuggestions: readonly string[];
+      readonly decisionSummary: string;
+      readonly confidence: number;
+    };
+    readonly report?: {
+      readonly title: string;
+      readonly keyFindings: readonly string[];
+      readonly recommendations: readonly string[];
+      readonly evidenceRefs: readonly string[];
+      readonly uncertainty: readonly string[];
+      readonly nextActions: readonly string[];
+      readonly decisionSummary: string;
+      readonly confidence: number;
+    };
+    readonly openQuestions: readonly string[];
+    readonly modelCallRefs: readonly string[];
+    readonly toolCallRefs: readonly string[];
+    readonly steps: readonly {
+      readonly stepIndex: number;
+      readonly action: string;
+      readonly status: string;
+      readonly summary: string;
+      readonly evidenceRefs: readonly string[];
+      readonly toolCallRefs: readonly string[];
+      readonly childRunIds: readonly string[];
+      readonly synthesisId?: string;
+    }[];
+  };
+  readonly agentRunTree?: SafeAgentRunTreeView;
+  readonly explanation: {
+    readonly resultWhyReasonable: string;
+    readonly observationPanelRole: string;
+  };
+};
+
+export type DesktopChatCanvasReadModel = {
+  readonly kind: "desktop_chat_canvas";
+  readonly taskSoil: WorkSessionCanvasReadModel["taskSoil"];
+  readonly chat: {
+    readonly status: DesktopChatSessionResult["status"];
+    readonly answer?: {
+      readonly answer: string;
+      readonly modelCallRefs: readonly string[];
+    };
+    readonly upgradeRequest?: {
+      readonly goal: string;
+      readonly reason: string;
+      readonly modelCallRefs: readonly string[];
+    };
+    readonly failureMessage?: string;
+    readonly modelCallRefs: readonly string[];
+  };
+  readonly explanation: {
+    readonly resultWhyReasonable: string;
+    readonly observationPanelRole: string;
+  };
+};
+
+export type SafeAgentRunTreeView = {
+  readonly treeId: string;
+  readonly rootRunId: string;
+  readonly rootAgentId: string;
+  readonly status: AgentRunTree["status"];
+  readonly rootSpec: {
+    readonly specId: string;
+    readonly agentId: string;
+    readonly displayName: string;
+    readonly agentKind: string;
+    readonly role: string;
+    readonly promptRef: string;
+    readonly outputContractRef: string;
+    readonly allowedTools: readonly string[];
+    readonly allowModel: boolean;
+    readonly budget: {
+      readonly maxModelRounds: number;
+      readonly maxToolRounds: number;
+      readonly maxChildRuns?: number;
+      readonly maxOutputRefs?: number;
+    };
+  };
+  readonly childRuns: readonly {
+    readonly childRunId: string;
+    readonly parentAgentId: string;
+    readonly status: string;
+    readonly specId: string;
+    readonly agentId: string;
+    readonly displayName: string;
+    readonly agentKind: string;
+    readonly role: string;
+    readonly rootletKind?: RootletClusterKind;
+    readonly promptRef: string;
+    readonly outputContractRef: string;
+    readonly allowModel: boolean;
+    readonly allowedTools: readonly string[];
+    readonly budget: {
+      readonly maxModelRounds: number;
+      readonly maxToolRounds: number;
+      readonly maxChildRuns?: number;
+      readonly maxOutputRefs?: number;
+    };
+    readonly inputRefs: readonly string[];
+    readonly outputRefs: readonly string[];
+    readonly evidenceRefs: readonly string[];
+    readonly uncertainty?: string;
+    readonly confidence?: number;
+    readonly startedAt: string;
+    readonly completedAt?: string;
+    readonly failureReason?: string;
+  }[];
+  readonly delegationDecisions: readonly {
+    readonly decisionId: string;
+    readonly parentAgentId: string;
+    readonly action: string;
+    readonly childSpecIds: readonly string[];
+    readonly childRunIds: readonly string[];
+    readonly rationale: string;
+    readonly uncertainty: string;
+    readonly source: string;
+    readonly confidence: number;
+    readonly reasoningTraceRefs: readonly string[];
+    readonly createdAt: string;
+  }[];
+  readonly parentSyntheses: readonly {
+    readonly synthesisId: string;
+    readonly parentAgentId: string;
+    readonly childRunIds: readonly string[];
+    readonly retainedMaterialRefs: readonly string[];
+    readonly rejectedMaterialRefs: readonly string[];
+    readonly conflictRefs: readonly string[];
+    readonly outputRefs: readonly string[];
+    readonly nextAction: string;
+    readonly decisionSummary: string;
+    readonly uncertainty: string;
+    readonly source: string;
+    readonly confidence: number;
+    readonly reasoningTraceRefs: readonly string[];
+    readonly createdAt: string;
+  }[];
+};
+
 export function createPanelRunCanvas(input: {
   readonly result: MinimalLoopResult;
   readonly observation: PanelObservationReadModel;
   readonly tracking: PanelRunTrackingReadModel;
   readonly transcript: PanelRunTranscript;
-}): PanelRunCanvasReadModel {
+}): LegacyPanelRunCanvasReadModel {
   const handoff = input.result.directionHandoff;
   const retainedOption = handoff.options.find((option) => option.optionId === handoff.decisionRecord.retainedOptionId);
   const recommendedOption =
@@ -204,10 +379,217 @@ export function createPanelRunCanvas(input: {
     },
     explanation: {
       resultWhyReasonable:
-        "Plan 来自父层 synthesis 和 Convergence Judge 收束后的候选，并通过 Plan Package validation 后才交给 Aboveground Execution Runtime。",
+        "方案来自父层 synthesis 和 Convergence Judge 收束后的候选，并通过校验后才进入执行阶段。",
       observationPanelRole:
-        `Observation Panel 保留 Agent Run Tree、delegation、parent synthesis、模型/工具 refs 和 trace；当前 transcript 安全事件 ${input.transcript.events.length} 条。`,
+        `开发者详情保留运行树、delegation、parent synthesis、模型/工具 refs 和 trace；当前活动流安全事件 ${input.transcript.events.length} 条。`,
     },
+  };
+}
+
+export function createWorkSessionCanvas(input: {
+  readonly result: CognitiveWorkSessionResult;
+  readonly transcript: PanelRunTranscript;
+}): WorkSessionCanvasReadModel {
+  return {
+    kind: "work_session_canvas",
+    taskSoil: taskSoilCanvas(input.result),
+    workSession: {
+      status: input.result.status,
+      artifact:
+        input.result.finalArtifact === undefined
+          ? undefined
+          : {
+              artifactId: input.result.finalArtifact.ref.id,
+              type: input.result.finalArtifact.ref.type,
+              summary: safeText(input.result.finalArtifact.summary, 260),
+            },
+      directAnswer:
+        input.result.directAnswer === undefined
+          ? undefined
+          : {
+              answer: safeText(input.result.directAnswer.answer, 1200),
+              evidenceRefs: input.result.directAnswer.evidenceRefs.map((value) => safeText(value, 180)),
+              uncertainty: input.result.directAnswer.uncertainty.map((value) => safeText(value, 320)),
+              followUpSuggestions: input.result.directAnswer.followUpSuggestions.map((value) => safeText(value, 320)),
+              decisionSummary: safeText(input.result.directAnswer.decisionSummary, 420),
+              confidence: input.result.directAnswer.confidence,
+            },
+      report:
+        input.result.report === undefined
+          ? undefined
+          : {
+              title: safeText(input.result.report.title, 220),
+              keyFindings: input.result.report.keyFindings.map((value) => safeText(value, 420)),
+              recommendations: input.result.report.recommendations.map((value) => safeText(value, 420)),
+              evidenceRefs: input.result.report.evidenceRefs.map((value) => safeText(value, 180)),
+              uncertainty: input.result.report.uncertainty.map((value) => safeText(value, 320)),
+              nextActions: input.result.report.nextActions.map((value) => safeText(value, 320)),
+              decisionSummary: safeText(input.result.report.decisionSummary, 420),
+              confidence: input.result.report.confidence,
+            },
+      openQuestions: input.result.openQuestions.map((value) => safeText(value, 320)),
+      modelCallRefs: [...input.result.modelCallRefs],
+      toolCallRefs: [...input.result.toolCallRefs],
+      steps: input.result.steps.map((step) => ({
+        stepIndex: step.stepIndex,
+        action: step.action,
+        status: step.status,
+        summary: safeText(step.summary, 360),
+        evidenceRefs: step.evidenceRefs.map((value) => safeText(value, 180)),
+        toolCallRefs: [...step.toolCallRefs],
+        childRunIds: [...step.childRunIds],
+        synthesisId: step.synthesisId,
+      })),
+    },
+    agentRunTree: createSafeAgentRunTreeView(input.result.agentRunTree),
+    explanation: {
+      resultWhyReasonable:
+        input.result.directAnswer !== undefined
+          ? "这是一条直接回答：任务不需要读取工作区、派生子 Agent 或生成报告。"
+          : input.result.status === "completed"
+          ? "报告来自主会话分工检查后的父层 synthesis；局部材料没有绕过父层进入最终结果。"
+          : "工作会话没有完成结果，当前只展示停止原因、开放问题和安全运行证据。",
+      observationPanelRole:
+        `开发者详情展示主 Agent / child run tree、父层 synthesis、模型/工具 refs 和活动流；当前安全事件 ${input.transcript.events.length} 条。`,
+    },
+  };
+}
+
+export function createDesktopChatCanvas(input: {
+  readonly result: DesktopChatSessionResult;
+  readonly transcript: PanelRunTranscript;
+}): DesktopChatCanvasReadModel {
+  return {
+    kind: "desktop_chat_canvas",
+    taskSoil: taskSoilCanvas(input.result),
+    chat: {
+      status: input.result.status,
+      answer:
+        input.result.answer === undefined
+          ? undefined
+          : {
+              answer: safeText(input.result.answer.answer, 1200),
+              modelCallRefs: [...input.result.answer.modelCallRefs],
+            },
+      upgradeRequest:
+        input.result.upgradeRequest === undefined
+          ? undefined
+          : {
+              goal: safeText(input.result.upgradeRequest.goal, 600),
+              reason: safeText(input.result.upgradeRequest.reason, 420),
+              modelCallRefs: [...input.result.upgradeRequest.modelCallRefs],
+            },
+      failureMessage:
+        input.result.failureMessage === undefined ? undefined : safeText(input.result.failureMessage, 420),
+      modelCallRefs: [...input.result.modelCallRefs],
+    },
+    explanation: {
+      resultWhyReasonable:
+        input.result.answer !== undefined
+          ? "这是普通助手对话：模型直接回答，没有启动项目分析、派生子 Agent 或生成报告。"
+          : input.result.upgradeRequest !== undefined
+            ? "模型判断这条消息需要进入工作会话；后续会读取上下文、组织材料或产出可审阅结果。"
+            : "这轮对话没有形成可展示回答。",
+      observationPanelRole:
+        `开发者详情只展示模型调用 refs、配置状态和安全事件；当前安全事件 ${input.transcript.events.length} 条。`,
+    },
+  };
+}
+
+export function createSafeAgentRunTreeView(tree: AgentRunTree): SafeAgentRunTreeView {
+  return {
+    treeId: tree.treeId,
+    rootRunId: tree.rootRunId,
+    rootAgentId: tree.rootAgentId,
+    status: tree.status,
+    rootSpec: {
+      specId: tree.rootSpec.specId,
+      agentId: tree.rootSpec.agentId,
+      displayName: tree.rootSpec.displayName,
+      agentKind: tree.rootSpec.agentKind,
+      role: tree.rootSpec.role,
+      promptRef: tree.rootSpec.promptRef,
+      outputContractRef: tree.rootSpec.outputContractRef,
+      allowedTools: [...tree.rootSpec.permissions.allowedTools],
+      allowModel: tree.rootSpec.permissions.allowModel,
+      budget: { ...tree.rootSpec.budget },
+    },
+    childRuns: tree.childRuns.map((run) => ({
+      childRunId: run.childRunId,
+      parentAgentId: run.parentAgentId,
+      status: run.status,
+      specId: run.spec.specId,
+      agentId: run.spec.agentId,
+      displayName: run.spec.displayName,
+      agentKind: run.spec.agentKind,
+      role: run.spec.role,
+      rootletKind: run.spec.rootletKind,
+      promptRef: run.spec.promptRef,
+      outputContractRef: run.spec.outputContractRef,
+      allowModel: run.spec.permissions.allowModel,
+      allowedTools: [...run.spec.permissions.allowedTools],
+      budget: { ...run.spec.budget },
+      inputRefs: [...run.inputRefs],
+      outputRefs: [...run.outputRefs],
+      evidenceRefs: [...run.evidenceRefs],
+      uncertainty: run.uncertainty,
+      confidence: run.confidence,
+      startedAt: run.startedAt,
+      completedAt: run.completedAt,
+      failureReason: run.failureReason,
+    })),
+    delegationDecisions: tree.delegationDecisions.map((decision) => ({
+      decisionId: decision.decisionId,
+      parentAgentId: decision.parentAgentId,
+      action: decision.action,
+      childSpecIds: [...decision.childSpecIds],
+      childRunIds: [...decision.childRunIds],
+      rationale: decision.rationale,
+      uncertainty: decision.uncertainty,
+      source: decision.source,
+      confidence: decision.confidence,
+      reasoningTraceRefs: [...decision.reasoningTraceRefs],
+      createdAt: decision.createdAt,
+    })),
+    parentSyntheses: tree.parentSyntheses.map((synthesis) => ({
+      synthesisId: synthesis.synthesisId,
+      parentAgentId: synthesis.parentAgentId,
+      childRunIds: [...synthesis.childRunIds],
+      retainedMaterialRefs: [...synthesis.retainedMaterialRefs],
+      rejectedMaterialRefs: [...synthesis.rejectedMaterialRefs],
+      conflictRefs: [...synthesis.conflictRefs],
+      outputRefs: [...synthesis.outputRefs],
+      nextAction: synthesis.nextAction,
+      decisionSummary: synthesis.decisionSummary,
+      uncertainty: synthesis.uncertainty,
+      source: synthesis.source,
+      confidence: synthesis.confidence,
+      reasoningTraceRefs: [...synthesis.reasoningTraceRefs],
+      createdAt: synthesis.createdAt,
+    })),
+  };
+}
+
+function taskSoilCanvas(result: Pick<CognitiveWorkSessionResult, "taskSoil">): WorkSessionCanvasReadModel["taskSoil"] {
+  return {
+    taskSoilId: result.taskSoil.taskSoilId,
+    goalId: result.taskSoil.goalId,
+    traceId: result.taskSoil.traceId,
+    goalSummary: safeText(result.taskSoil.rawGoal, 600),
+    contextRefs: result.taskSoil.contextRefs.map((ref) => ({
+      ref: ref.ref,
+      kind: ref.kind,
+      summary: ref.summary === undefined ? undefined : safeText(ref.summary, 240),
+      readonlyPreview:
+        ref.readonlyPreview === undefined
+          ? undefined
+          : {
+              title: ref.readonlyPreview.title === undefined ? undefined : safeText(ref.readonlyPreview.title, 120),
+              text: safeText(ref.readonlyPreview.text, 360),
+              truncated: ref.readonlyPreview.truncated || ref.readonlyPreview.text.length > 360,
+            },
+    })),
+    permissionBoundaryRefs: [...result.taskSoil.permissionBoundaryRefs],
   };
 }
 
@@ -218,7 +600,7 @@ function planReason(
   evidenceCount: number
 ): string {
   const childCount = input.tracking.agentRunTree?.childRuns.length ?? 0;
-  return `推荐方向已由 ${childCount} 个 child/rootlet run 和 ${evidenceCount} 个关键 evidence ref 支撑，并进入 approved Plan Package。`;
+  return `推荐方向已由 ${childCount} 路局部材料和 ${evidenceCount} 个关键证据引用支撑，并通过父层收束。`;
 }
 
 function safeText(value: string, maxLength: number): string {

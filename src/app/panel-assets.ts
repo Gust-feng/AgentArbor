@@ -8,52 +8,71 @@ export function createPanelHtml(): string {
   <style>
     :root {
       color-scheme: light;
-      --bg: #f7f8fa;
-      --side: #f0f3f5;
-      --canvas: #ffffff;
-      --panel: #f8fafc;
-      --line: #dfe6ec;
-      --line-soft: #edf2f6;
-      --text: #111827;
-      --muted: #64707d;
-      --accent: #0f766e;
-      --accent-strong: #0f5f59;
-      --accent-soft: #e8f5f2;
+      --bg: #dfe4ec;
+      --shell: #f7f8fb;
+      --paper: #ffffff;
+      --surface: #f7f8fa;
+      --line: #e3e8ef;
+      --line-strong: #cbd5e1;
+      --text: #161a22;
+      --muted: #5d6675;
+      --muted-2: #8b95a5;
+      --accent: #2ec4a6;
+      --accent-strong: #11967d;
+      --accent-soft: #e6faf4;
+      --blue: #3157d5;
+      --blue-soft: #eef3ff;
+      --nav: #171c25;
+      --nav-soft: #222a36;
+      --nav-line: #303948;
+      --nav-text: #d7deea;
+      --nav-muted: #8f9aaa;
       --danger: #b42318;
+      --danger-soft: #fff3f1;
       --warn: #9a6700;
-      --info: #2563eb;
-      --shadow: 0 18px 42px rgba(15, 23, 42, 0.08);
+      --warn-soft: #fff8e6;
+      --ok: #0f766e;
+      --ok-soft: #ecfdf5;
+      --shadow: 0 18px 45px rgba(15, 23, 42, 0.12);
     }
 
     * { box-sizing: border-box; }
 
+    html, body { min-height: 100%; }
+
     body {
       margin: 0;
-      min-height: 100vh;
-      overflow-x: hidden;
+      overflow: hidden;
       background: var(--bg);
       color: var(--text);
-      font: 14px/1.48 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font: 14px/1.54 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       letter-spacing: 0;
     }
 
     button, input, select, textarea { font: inherit; }
 
     button {
-      min-height: 36px;
-      border: 1px solid var(--accent-strong);
-      border-radius: 7px;
-      background: var(--accent);
-      color: #fff;
-      padding: 0 14px;
+      min-height: 34px;
+      border: 1px solid var(--line-strong);
+      border-radius: 8px;
+      background: #fff;
+      color: var(--text);
+      padding: 0 12px;
       cursor: pointer;
-      white-space: nowrap;
       font-weight: 720;
+      white-space: nowrap;
     }
 
-    button.secondary {
-      background: #fff;
-      color: var(--accent-strong);
+    button.primary {
+      border-color: #b7f0dd;
+      background: #bdf8df;
+      color: #0c513e;
+    }
+
+    button.ghost {
+      border-color: transparent;
+      background: transparent;
+      color: var(--muted);
     }
 
     button:disabled {
@@ -64,14 +83,14 @@ export function createPanelHtml(): string {
     input, select, textarea {
       width: 100%;
       border: 1px solid var(--line);
-      border-radius: 7px;
+      border-radius: 8px;
       background: #fff;
       color: var(--text);
       padding: 9px 10px;
     }
 
     textarea {
-      min-height: 86px;
+      min-height: 88px;
       resize: vertical;
     }
 
@@ -87,1148 +106,1115 @@ export function createPanelHtml(): string {
 
     h1 {
       margin-bottom: 8px;
-      font-size: 26px;
-      line-height: 1.16;
+      font-size: 20px;
+      line-height: 1.2;
       letter-spacing: 0;
     }
 
     h2 {
-      margin-bottom: 10px;
-      font-size: 15px;
+      margin-bottom: 8px;
+      font-size: 16px;
+      letter-spacing: 0;
     }
 
     h3 {
       margin: 0;
       font-size: 13px;
+      letter-spacing: 0;
     }
 
     .app {
       display: grid;
-      grid-template-columns: 236px minmax(0, 1fr) 384px;
+      grid-template-rows: 42px minmax(0, 1fr);
       width: 100vw;
       height: 100vh;
+      overflow: hidden;
+      background: var(--bg);
+    }
+
+    .titlebar {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 0;
+      padding: 6px 14px;
+      background: #121722;
+      color: #c4ccd8;
+    }
+
+    .mode-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 34px;
+      border: 1px solid #2a3443;
+      border-radius: 7px;
+      background: #1b2330;
+      color: #eef4ff;
+      padding: 0 10px;
+      font-weight: 800;
+    }
+
+    .menu-link {
+      color: #95a1b2;
+      font-size: 13px;
+    }
+
+    .window-actions {
+      margin-left: auto;
+      display: flex;
+      gap: 16px;
+      color: #aab3c2;
+      font-weight: 760;
+    }
+
+    .shell {
+      display: grid;
+      grid-template-columns: 286px minmax(0, 1fr);
+      min-height: 0;
       overflow: hidden;
     }
 
     .sidebar {
       min-width: 0;
       display: grid;
-      grid-template-rows: auto auto auto minmax(0, 1fr) auto;
-      gap: 18px;
-      height: 100vh;
-      padding: 16px;
-      overflow-y: auto;
-      overflow-x: hidden;
-      border-right: 1px solid var(--line);
-      background: var(--side);
+      grid-template-rows: auto auto minmax(0, 1fr) auto;
+      gap: 16px;
+      padding: 12px 12px 14px;
+      overflow: hidden;
+      background: var(--nav);
+      color: var(--nav-text);
     }
 
-    .brand {
-      display: flex;
+    .side-nav {
+      display: grid;
+      gap: 6px;
+    }
+
+    .side-action {
+      display: grid;
+      grid-template-columns: 20px minmax(0, 1fr);
       align-items: center;
-      gap: 10px;
-      color: var(--accent-strong);
-      font-size: 17px;
-      font-weight: 800;
+      gap: 8px;
+      min-height: 36px;
+      border-radius: 8px;
+      padding: 0 8px;
+      color: var(--nav-text);
+      text-decoration: none;
+      border: 1px solid transparent;
     }
 
-    .mark {
-      position: relative;
+    .side-action:hover,
+    .side-action.active {
+      border-color: var(--nav-line);
+      background: var(--nav-soft);
+    }
+
+    .nav-mark {
       display: inline-grid;
       place-items: center;
-      width: 32px;
-      height: 32px;
-      border: 1px solid #a9c9bb;
-      border-radius: 50%;
-      background: #fff;
-      color: var(--accent);
-      font-weight: 800;
+      width: 16px;
+      height: 16px;
+      border: 1px solid #435065;
+      border-radius: 5px;
+      position: relative;
     }
 
-    .mark::before {
-      content: "A";
-      font-size: 18px;
-    }
-
-    .mark::after {
+    .nav-mark.plus::before,
+    .nav-mark.plus::after {
       content: "";
       position: absolute;
-      width: 13px;
-      height: 11px;
-      border-top: 2px solid currentColor;
-      border-right: 2px solid currentColor;
-      border-radius: 0 8px 0 0;
-      opacity: 0.58;
-      transform: translate(8px, -7px) rotate(-18deg);
+      background: var(--accent);
     }
 
-    .new-run {
-      width: 100%;
-      background: #fff;
-      color: var(--accent-strong);
+    .nav-mark.plus::before {
+      width: 8px;
+      height: 2px;
     }
 
-    .nav, .runs {
-      display: grid;
-      gap: 7px;
-      list-style: none;
-      margin: 0;
-      padding: 0;
+    .nav-mark.plus::after {
+      width: 2px;
+      height: 8px;
     }
 
-    .nav li, .run-item {
-      border-radius: 8px;
-      padding: 9px 10px;
-      color: var(--muted);
-      overflow: hidden;
+    .nav-mark.skill::before,
+    .nav-mark.auto::before {
+      content: "";
+      width: 7px;
+      height: 7px;
+      border-radius: 2px;
+      background: #7dd3fc;
     }
 
-    .nav li {
-      display: grid;
-      grid-template-columns: 22px minmax(0, 1fr);
-      gap: 8px;
-      align-items: center;
-    }
-
-    .nav li.active, .run-item.active {
-      background: #e4ebe7;
-      color: var(--accent-strong);
-      font-weight: 760;
-    }
-
-    .glyph {
-      display: inline-grid;
-      place-items: center;
-      width: 22px;
-      height: 22px;
-      border-radius: 6px;
-      background: rgba(255, 255, 255, 0.72);
-      font-size: 12px;
-      font-weight: 800;
+    .nav-mark.auto::before {
+      border-radius: 999px;
+      background: #f7c948;
     }
 
     .side-title {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      margin-bottom: 8px;
-      color: var(--muted);
+      margin: 12px 0 8px;
+      color: var(--nav-muted);
       font-size: 12px;
-      font-weight: 750;
+      font-weight: 720;
     }
 
-    .run-title {
+    .task-list {
+      min-height: 0;
+      overflow: auto;
+    }
+
+    .workspace-group {
+      margin-bottom: 14px;
+    }
+
+    .workspace-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      min-height: 34px;
+      color: var(--nav-text);
+      font-weight: 760;
+    }
+
+    .mini-plus {
+      min-width: 28px;
+      min-height: 28px;
+      padding: 0;
+      border-radius: 8px;
+      color: var(--nav-muted);
+      font-weight: 850;
+    }
+
+    .runs {
+      display: grid;
+      gap: 4px;
+      list-style: none;
+      margin: 0;
+      padding: 0;
+    }
+
+    .run-item {
+      min-width: 0;
+      border-radius: 8px;
+      padding: 8px 10px 8px 36px;
+      color: #475467;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .run-item::before {
+      content: "";
+      position: absolute;
+      left: 16px;
+      top: 17px;
+      width: 6px;
+      height: 6px;
+      border-radius: 999px;
+      background: #a7b0c0;
+    }
+
+    .run-item.active {
+      background: #232c39;
+      color: #f7fafc;
+      font-weight: 760;
+    }
+
+    .run-item.active::before {
+      background: var(--accent);
+    }
+
+    .run-title,
+    .workspace-name {
+      min-width: 0;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+      color: inherit;
+      font-weight: 720;
     }
 
-    .run-meta, .hint, .meta {
-      color: var(--muted);
+    .run-meta {
+      min-width: 0;
+      margin-top: 2px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: var(--nav-muted);
       font-size: 12px;
-      overflow-wrap: anywhere;
     }
 
     .profile {
       display: flex;
       align-items: center;
       gap: 10px;
-      padding-top: 16px;
-      border-top: 1px solid var(--line);
-    }
-
-    .profile .mark::before {
-      content: "AA";
-      font-size: 12px;
-    }
-
-    .main {
-      display: grid;
-      grid-template-rows: auto minmax(0, 1fr) auto;
       min-width: 0;
-      height: 100vh;
-      background: linear-gradient(180deg, #ffffff 0%, #fbfcfd 100%);
+      padding: 10px 4px 0;
+      border-top: 1px solid var(--nav-line);
     }
 
-    .topbar {
+    .avatar {
+      display: inline-grid;
+      place-items: center;
+      width: 28px;
+      height: 28px;
+      border-radius: 8px;
+      background: #202938;
+      color: #bdf8df;
+      font-weight: 850;
+    }
+
+    .avatar::before {
+      content: "";
+      width: 9px;
+      height: 9px;
+      border-radius: 999px;
+      background: var(--accent);
+      box-shadow: 0 0 0 4px rgba(46, 196, 166, 0.12);
+    }
+
+    .workspace {
+      min-width: 0;
+      padding: 8px 8px 10px 0;
+      overflow: hidden;
+    }
+
+    .session-card {
+      display: grid;
+      grid-template-columns: minmax(560px, 1fr) 328px;
+      grid-template-rows: auto minmax(0, 1fr);
+      min-width: 0;
+      height: calc(100vh - 54px);
+      margin: 8px 8px 10px 0;
+      overflow: hidden;
+      border: 1px solid #d9e0ea;
+      border-radius: 8px;
+      background: #fff;
+      box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+    }
+
+    .session-header {
+      grid-column: 1 / -1;
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 14px;
-      min-height: 54px;
-      padding: 0 20px;
+      gap: 12px;
+      min-height: 56px;
+      padding: 0 18px;
       border-bottom: 1px solid var(--line);
-      background: rgba(255, 255, 255, 0.94);
     }
 
-    .topbar-title {
-      font-weight: 780;
+    .session-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+      font-weight: 820;
     }
 
-    .status-pill {
-      min-width: 118px;
-      border: 1px solid var(--line);
-      border-radius: 999px;
-      background: var(--panel);
-      color: var(--muted);
-      padding: 5px 10px;
-      text-align: center;
-      font-size: 12px;
+    .session-title span {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
       white-space: nowrap;
     }
 
-    .status-pill.running { color: var(--warn); border-color: #f8d77a; }
-    .status-pill.completed { color: var(--accent-strong); border-color: #8ccab1; }
-    .status-pill.failed { color: var(--danger); border-color: #ffc9c2; }
+    .session-meta {
+      color: var(--muted-2);
+      font-size: 13px;
+      font-weight: 600;
+    }
 
-    .transcript-wrap {
+    .header-tools {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .tool-button {
+      min-width: 54px;
+      min-height: 30px;
+      padding: 0 10px;
+      color: #475467;
+      font-size: 12px;
+    }
+
+    .thread {
+      min-width: 0;
+      min-height: 0;
+      display: grid;
+      grid-template-rows: minmax(0, 1fr) auto;
+      border-right: 1px solid var(--line);
+    }
+
+    .thread-scroll {
       min-height: 0;
       overflow: auto;
-      padding: 26px clamp(18px, 5vw, 58px);
+      padding: 28px clamp(28px, 5vw, 68px) 18px clamp(32px, 6vw, 88px);
     }
 
-    .intro {
-      display: none;
-      max-width: 780px;
-      margin: 0 auto 18px;
-      text-align: left;
+    .welcome {
+      max-width: 760px;
+      margin-bottom: 24px;
     }
 
-    .intro .mark {
-      display: none;
-    }
-
-    .intro .mark::before {
-      font-size: 26px;
-    }
-
-    .intro p {
-      margin: 0;
+    .welcome p {
+      margin-bottom: 0;
       color: var(--muted);
-      font-size: 15px;
+    }
+
+    .status-pill,
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      min-height: 25px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #fff;
+      color: var(--muted);
+      padding: 2px 9px;
+      font-size: 12px;
+      font-weight: 720;
     }
 
     .transcript {
       display: grid;
-      gap: 12px;
-      max-width: 880px;
-      margin: 0 auto;
-    }
-
-    .canvas-summary {
-      display: grid;
-      gap: 14px;
-      max-width: 880px;
-      margin: 0 auto 18px;
-      border: 1px solid var(--line);
-      border-radius: 10px;
-      background: #fff;
-      box-shadow: 0 18px 48px rgba(15, 23, 42, 0.04);
-      padding: 18px;
-    }
-
-    .canvas-summary h2 {
-      margin: 0;
-      font-size: 16px;
-    }
-
-    .canvas-grid {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 10px;
-    }
-
-    .canvas-item {
-      border: 1px solid var(--line-soft);
-      border-radius: 9px;
-      background: #fbfcfd;
-      padding: 11px;
-      min-width: 0;
-    }
-
-    .canvas-item strong {
-      display: block;
-      margin-bottom: 5px;
-      color: var(--accent-strong);
-    }
-
-    .canvas-item span {
-      display: block;
-      color: var(--muted);
-      overflow-wrap: anywhere;
+      gap: 16px;
     }
 
     .empty-transcript {
-      border: 1px dashed #cbd6d1;
-      border-radius: 8px;
-      background: #fbfcfc;
-      padding: 18px;
       color: var(--muted);
-      text-align: center;
     }
 
     .entry {
       display: grid;
-      grid-template-columns: 116px minmax(0, 1fr);
-      gap: 12px;
-      align-items: start;
+      grid-template-columns: 58px minmax(0, 1fr);
+      gap: 14px;
+      min-width: 0;
     }
 
     .entry-label {
       color: var(--muted);
-      font-size: 12px;
-      font-weight: 750;
-      padding-top: 10px;
+      font-size: 13px;
+      font-weight: 720;
       text-align: right;
+      padding-top: 7px;
     }
 
     .bubble {
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      background: #fff;
-      padding: 12px 14px;
-      box-shadow: 0 6px 20px rgba(30, 43, 36, 0.04);
+      min-width: 0;
+      color: #273142;
     }
 
-    .bubble.model {
-      border-color: #bfd9cf;
-      background: #fbfffd;
+    .bubble-inner {
+      display: grid;
+      gap: 8px;
+      border-radius: 7px;
+      padding: 9px 11px;
     }
 
-    .bubble.tool {
-      border-color: #cbdaf6;
-      background: #fbfdff;
+    .entry.user .bubble-inner {
+      border: 1px solid #c8dcff;
+      background: #f1f5ff;
     }
 
-    .bubble.final {
-      border-color: #8ccab1;
-      background: #f3fbf7;
+    .entry:not(.user) .bubble-inner {
+      border: 1px solid transparent;
+      background: transparent;
+      padding-left: 0;
     }
 
-    .bubble.failed {
+    .bubble.failed .bubble-inner {
       border-color: #ffc9c2;
-      background: #fff8f7;
+      background: var(--danger-soft);
     }
 
     .entry-title {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 10px;
-      margin-bottom: 5px;
+      gap: 8px;
       font-weight: 760;
+    }
+
+    .meta,
+    .hint,
+    .node-meta,
+    .section-note {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .hint.error,
+    .error {
+      color: var(--danger);
     }
 
     .entry-body {
       white-space: pre-wrap;
       overflow-wrap: anywhere;
+      color: #303a4b;
     }
 
-    .refs {
-      margin-top: 8px;
+    .result-block {
+      display: grid;
+      gap: 14px;
+      max-width: 820px;
+      margin: 22px 0 0;
+      padding: 18px 0 0;
+      border-top: 1px solid var(--line);
+    }
+
+    .result-head {
+      display: grid;
+      gap: 8px;
+    }
+
+    .report-kicker {
+      color: var(--blue);
+      font-size: 12px;
+      font-weight: 820;
+    }
+
+    .summary-box {
+      border-left: 3px solid var(--blue);
+      background: #f8fbff;
+      padding: 11px 13px;
+      color: #344054;
+    }
+
+    .artifact-preview {
+      display: grid;
+      gap: 14px;
+      border: 1px solid #d9e3f2;
+      border-radius: 8px;
+      background: #fff;
+      padding: 18px 20px;
+      box-shadow: 0 12px 28px rgba(49, 87, 213, 0.08);
+    }
+
+    .artifact-topline {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
       color: var(--muted);
       font-size: 12px;
+      font-weight: 720;
+    }
+
+    .artifact-title {
+      margin: 0;
+      font-size: 22px;
+      line-height: 1.28;
+    }
+
+    .artifact-summary {
+      border-left: 3px solid var(--accent);
+      padding-left: 12px;
+      color: #344054;
+    }
+
+    .artifact-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .result-section {
+      display: grid;
+      gap: 8px;
+    }
+
+    .result-section ul {
+      display: grid;
+      gap: 8px;
+      margin: 0;
+      padding-left: 20px;
     }
 
     .composer {
-      margin: 0 clamp(18px, 5vw, 64px) 18px;
-      border: 1px solid #c9d4cf;
-      border-radius: 10px;
-      background: #fff;
-      box-shadow: var(--shadow);
-      padding: 12px;
+      padding: 14px clamp(28px, 5vw, 68px) 18px clamp(32px, 6vw, 88px);
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0), #fff 20%);
+    }
+
+    .composer-box {
       display: grid;
       gap: 8px;
-    }
-
-    .composer textarea {
-      min-height: 70px;
-      border: 0;
-      padding: 4px;
-    }
-
-    .composer textarea:focus { outline: 0; }
-
-    .soil-inputs {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) 240px;
-      gap: 10px;
-      border-top: 1px solid var(--line-soft);
-      padding-top: 8px;
-    }
-
-    .soil-inputs textarea,
-    .soil-inputs input {
-      border: 1px solid var(--line-soft);
-      background: #fbfcfc;
-    }
-
-    .soil-inputs textarea {
-      min-height: 48px;
-      max-height: 110px;
-      padding: 8px 9px;
-      font-size: 12px;
-    }
-
-    .composer-controls {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) auto;
-      gap: 10px;
-      align-items: center;
-      border-top: 1px solid var(--line-soft);
-      padding-top: 8px;
-    }
-
-    .control-line {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      flex-wrap: wrap;
-      min-width: 0;
-    }
-
-    .compact-select {
-      width: 190px;
-      max-width: 100%;
-      height: 34px;
-      padding: 6px 28px 6px 9px;
-    }
-
-    .inspector {
-      min-width: 0;
-      height: 100vh;
-      overflow: hidden;
-      border-left: 1px solid var(--line);
-      background: #f8fafc;
-      display: grid;
-      grid-template-rows: auto auto minmax(0, 1fr);
-      align-content: start;
-    }
-
-    .panel-box {
-      min-width: 0;
-      border: 1px solid var(--line);
-      border-radius: 10px;
-      background: #fff;
-      padding: 12px;
-    }
-
-    .rail-header {
-      margin: 12px 12px 8px;
-      display: grid;
-      gap: 8px;
-      background: #ffffff;
-      color: var(--text);
-      border-color: var(--line);
-      box-shadow: 0 16px 36px rgba(15, 23, 42, 0.05);
-    }
-
-    .rail-title-row {
-      display: flex;
-      align-items: start;
-      justify-content: space-between;
-      gap: 12px;
-      min-width: 0;
-    }
-
-    .inspector-tabs {
-      position: sticky;
-      top: 0;
-      z-index: 4;
-      display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 4px;
-      margin: 0 12px;
-      padding: 4px;
-      border-bottom: 1px solid var(--line);
-      border: 1px solid var(--line);
-      border-radius: 10px;
-      background: #eef3f6;
-      backdrop-filter: blur(10px);
-    }
-
-    .inspector-tab {
-      min-width: 0;
-      min-height: 34px;
-      border: 1px solid transparent;
+      max-width: 880px;
+      border: 1px solid #c8d3e3;
       border-radius: 8px;
-      background: transparent;
-      color: var(--muted);
-      padding: 0 8px;
-      font-size: 12px;
-      font-weight: 760;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-
-    .inspector-tab.active {
-      border-color: #d6e0e7;
       background: #fff;
-      color: var(--accent-strong);
-      box-shadow: 0 8px 20px rgba(15, 23, 42, 0.06);
-    }
-
-    .inspector-panels {
-      min-height: 0;
-      overflow-y: auto;
-      overflow-x: hidden;
-    }
-
-    .inspector-panel {
-      display: none;
-      gap: 10px;
+      box-shadow: 0 16px 34px rgba(43, 88, 150, 0.08);
       padding: 12px;
     }
 
-    .inspector-panel.active {
-      display: grid;
+    .composer-box textarea {
+      min-height: 82px;
+      border: 0;
+      border-radius: 0;
+      padding: 4px 6px;
+      resize: none;
+      outline: none;
     }
 
-    .rail-header h2 {
-      margin: 0;
-      font-size: 17px;
-    }
-
-    .rail-header p {
-      margin: 0;
-      color: var(--muted);
-      font-size: 12px;
-    }
-
-    .section-kicker {
-      color: var(--accent-strong);
-      font-size: 11px;
-      font-weight: 820;
-      letter-spacing: 0;
-      text-transform: uppercase;
-    }
-
-    .section-title {
+    .composer-actions {
       display: flex;
       align-items: center;
-      justify-content: space-between;
-      gap: 10px;
-      margin-bottom: 10px;
-    }
-
-    .section-title h2 {
-      margin: 0;
-    }
-
-    .rail-card {
-      box-shadow: 0 12px 30px rgba(15, 23, 42, 0.04);
-    }
-
-    .run-path {
-      display: grid;
-      gap: 7px;
-    }
-
-    .path-step {
-      display: grid;
-      grid-template-columns: 18px minmax(0, 1fr) auto;
       gap: 8px;
-      align-items: start;
-      padding: 8px 0;
-      border-top: 1px solid var(--line-soft);
     }
 
-    .path-step:first-child {
-      border-top: 0;
-      padding-top: 0;
+    .composer-actions .spacer {
+      flex: 1;
     }
 
-    .path-dot {
+    .icon-button {
       display: inline-grid;
       place-items: center;
-      width: 18px;
-      height: 18px;
-      border: 1px solid var(--line);
-      border-radius: 50%;
-      background: #fff;
-      color: var(--muted);
-      font-size: 10px;
-      font-weight: 800;
-    }
-
-    .path-step.done .path-dot {
-      border-color: #8ccab1;
-      background: var(--accent-soft);
-      color: var(--accent-strong);
-    }
-
-    .path-step.failed .path-dot {
-      border-color: #ffc9c2;
-      background: #fff2ef;
-      color: var(--danger);
-    }
-
-    .path-main {
-      min-width: 0;
-      display: grid;
-      gap: 2px;
-    }
-
-    .path-main strong {
+      min-width: 44px;
+      min-height: 30px;
+      padding: 0 8px;
+      border-radius: 7px;
       font-size: 12px;
     }
 
-    .path-main span {
+    .send-button {
+      min-width: 40px;
+      min-height: 40px;
+      border-radius: 8px;
+      font-size: 18px;
+    }
+
+    .composer-extra {
+      margin-top: 4px;
+      border-top: 1px solid var(--line);
+      padding-top: 8px;
+    }
+
+    .composer-extra summary {
+      cursor: pointer;
       color: var(--muted);
       font-size: 12px;
-      overflow-wrap: anywhere;
-    }
-
-    .inspector-summary {
-      display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 8px;
-    }
-
-    .panel-stack {
-      display: grid;
-      gap: 8px;
-    }
-
-    .status-line {
-      min-width: 0;
-      display: grid;
-      gap: 4px;
-      border: 1px solid var(--line-soft);
-      border-radius: 9px;
-      background: #fbfcfd;
-      padding: 9px 10px;
-      overflow-wrap: anywhere;
-    }
-
-    .status-line strong {
-      color: var(--accent-strong);
-    }
-
-    .status-line.warn strong { color: var(--warn); }
-    .status-line.error strong { color: var(--danger); }
-
-    .status-line.good strong { color: var(--accent-strong); }
-
-    .metrics {
-      display: grid;
-      gap: 0;
-      border: 1px solid var(--line-soft);
-      border-radius: 9px;
-      overflow: hidden;
-    }
-
-    .metric {
-      display: grid;
-      grid-template-columns: 84px minmax(0, 1fr);
-      gap: 8px;
-      padding: 9px 10px;
-      border-top: 1px solid var(--line-soft);
-      font-size: 13px;
-    }
-
-    .metric:first-child { border-top: 0; }
-    .metric span:first-child { color: var(--muted); }
-    .metric span:last-child { font-weight: 700; overflow-wrap: anywhere; }
-
-    .inspector .metrics {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-
-    .inspector .metric {
-      display: grid;
-      grid-template-columns: 1fr;
-      gap: 2px;
-      min-height: 52px;
-      border-top: 0;
-      border-left: 1px solid var(--line-soft);
-      padding: 7px 8px;
-    }
-
-    .inspector .metric:nth-child(odd) {
-      border-left: 0;
-    }
-
-    .inspector .metric:nth-child(n + 3) {
-      border-top: 1px solid var(--line-soft);
-    }
-
-    .inspector .status-line {
-      padding: 7px 8px;
-    }
-
-    .inspector .status-line strong {
-      font-size: 12px;
-    }
-
-    .rail-kpis {
-      display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 8px;
-      margin-bottom: 8px;
-    }
-
-    .rail-kpi {
-      border: 1px solid var(--line-soft);
-      border-radius: 9px;
-      background: #fbfcfc;
-      padding: 8px;
-      min-width: 0;
-    }
-
-    .rail-kpi strong {
-      display: block;
-      margin-bottom: 2px;
-      color: var(--accent-strong);
-      font-size: 16px;
-    }
-
-    .rail-kpi span {
-      display: block;
-      color: var(--muted);
-      font-size: 11px;
-      overflow-wrap: anywhere;
-    }
-
-    .call-list {
-      display: grid;
-      gap: 7px;
-    }
-
-    .section-note {
-      color: var(--muted);
-      font-size: 12px;
-      line-height: 1.45;
-    }
-
-    .call-row {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) auto;
-      gap: 8px;
-      align-items: start;
-      border: 1px solid var(--line-soft);
-      border-radius: 9px;
-      background: #fbfcfd;
-      padding: 8px 9px;
-      min-width: 0;
-    }
-
-    .call-row.failed {
-      border-color: #ffc9c2;
-      background: #fff8f7;
-    }
-
-    .call-row.completed {
-      border-color: #cfe0d8;
-      background: #fbfffd;
-    }
-
-    .call-title {
       font-weight: 760;
-      overflow-wrap: anywhere;
     }
 
-    .call-meta {
-      margin-top: 3px;
-      color: var(--muted);
-      font-size: 12px;
-      overflow-wrap: anywhere;
-    }
-
-    .agent-tree {
+    .context-inputs {
       display: grid;
       gap: 8px;
       margin-top: 8px;
     }
 
+    .context-pane {
+      min-width: 0;
+      min-height: 0;
+      overflow: auto;
+      background: #fbfcfe;
+      padding: 18px 18px;
+    }
+
+    .context-section {
+      display: grid;
+      gap: 8px;
+      padding: 0 0 18px;
+      margin-bottom: 18px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .context-section:last-child {
+      border-bottom: 0;
+    }
+
+    .context-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      font-size: 14px;
+      font-weight: 780;
+    }
+
+    .panel-stack,
+    .metrics,
+    .run-path,
+    .agent-tree,
+    .detail-grid,
+    .fields,
+    .call-list {
+      display: grid;
+      gap: 8px;
+    }
+
+    .status-line,
+    .metric,
+    .detail-item,
+    .call-row,
     .agent-node {
-      border: 1px solid var(--line-soft);
-      border-radius: 9px;
+      min-width: 0;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface);
       padding: 9px 10px;
-      background: #fbfcfd;
+    }
+
+    .rail-list {
+      display: grid;
+      gap: 6px;
+    }
+
+    .rail-row {
+      display: grid;
+      grid-template-columns: 66px minmax(0, 1fr);
+      gap: 8px;
+      min-width: 0;
+      padding: 6px 0;
+      border-bottom: 1px solid #eef2f6;
+    }
+
+    .rail-row:last-child {
+      border-bottom: 0;
+    }
+
+    .rail-key {
+      color: var(--muted-2);
+      font-size: 12px;
+      font-weight: 720;
+    }
+
+    .rail-value {
+      min-width: 0;
+      color: #344054;
+      font-size: 13px;
+      overflow-wrap: anywhere;
+    }
+
+    .rail-row.warn .rail-key,
+    .rail-row.warn .rail-value {
+      color: var(--warn);
+    }
+
+    .rail-row.error .rail-key,
+    .rail-row.error .rail-value {
+      color: var(--danger);
+    }
+
+    .rail-row.good .rail-key {
+      color: var(--ok);
+    }
+
+    .status-line {
+      display: grid;
+      gap: 3px;
+    }
+
+    .status-line.good {
+      border-color: #b7ead9;
+      background: var(--ok-soft);
+    }
+
+    .status-line.warn {
+      border-color: #f5dfa8;
+      background: var(--warn-soft);
+    }
+
+    .status-line.error {
+      border-color: #ffc9c2;
+      background: var(--danger-soft);
+    }
+
+    .metric,
+    .detail-item,
+    .call-row,
+    .agent-node {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .agent-node {
+      width: 100%;
+      text-align: left;
     }
 
     .agent-node.child {
       margin-left: 12px;
-      width: calc(100% - 12px) !important;
-      border-left: 3px solid #9cc7b5;
+      width: calc(100% - 12px);
     }
 
-    .agent-node.selected {
-      border-color: #8ccab1;
-      background: #f3fbf7;
+    .node-head,
+    .call-title {
+      font-weight: 760;
     }
 
-    .node-head {
+    .drawer-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 40;
+      display: none;
+      background: rgba(15, 23, 42, 0.2);
+    }
+
+    .drawer-backdrop.open {
+      display: block;
+    }
+
+    .developer-drawer {
+      position: fixed;
+      top: 0;
+      right: 0;
+      z-index: 50;
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
+      width: min(430px, 100vw);
+      height: 100vh;
+      transform: translateX(105%);
+      transition: transform 160ms ease;
+      border-left: 1px solid var(--line);
+      background: #fff;
+      box-shadow: var(--shadow);
+    }
+
+    .developer-drawer.open {
+      transform: translateX(0);
+    }
+
+    .drawer-head {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 8px;
-      min-width: 0;
-      font-weight: 760;
+      gap: 12px;
+      min-height: 58px;
+      padding: 14px;
+      border-bottom: 1px solid var(--line);
     }
 
-    .node-head span:first-child {
-      min-width: 0;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      overflow-wrap: anywhere;
+    .drawer-body {
+      min-height: 0;
+      overflow: auto;
+      padding: 14px;
     }
 
-    .node-meta {
-      margin-top: 4px;
+    .inspector-tabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-bottom: 12px;
+    }
+
+    .inspector-tab {
+      min-height: 30px;
       color: var(--muted);
-      font-size: 12px;
-      overflow-wrap: anywhere;
+      padding: 0 10px;
     }
 
-    .detail-grid {
-      display: grid;
-      gap: 7px;
-      margin-top: 8px;
+    .inspector-tab.active {
+      border-color: #bfdbfe;
+      background: var(--blue-soft);
+      color: var(--blue);
     }
 
-    .detail-item {
-      display: grid;
-      grid-template-columns: 74px minmax(0, 1fr);
-      gap: 8px;
-      border-top: 1px solid var(--line-soft);
-      padding-top: 7px;
-      font-size: 12px;
+    .inspector-panel {
+      display: none;
     }
 
-    .detail-item:first-child {
-      border-top: 0;
-      padding-top: 0;
-    }
-
-    .detail-item span:first-child {
-      color: var(--muted);
-    }
-
-    .detail-item span:last-child {
-      font-weight: 650;
-      overflow-wrap: anywhere;
-    }
-
-    .tag {
-      display: inline-flex;
-      align-items: center;
-      min-height: 20px;
-      max-width: 100%;
-      border-radius: 999px;
-      background: var(--accent-soft);
-      color: var(--accent-strong);
-      padding: 2px 8px;
-      font-size: 11px;
-      font-weight: 780;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-
-    details {
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      background: #fff;
-      padding: 10px 12px;
-    }
-
-    details summary {
-      cursor: pointer;
-      font-weight: 760;
-    }
-
-    .fields {
-      display: grid;
-      gap: 10px;
-      margin-top: 12px;
-    }
-
-    .split {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 10px;
-    }
-
-    .debug-list {
-      display: grid;
-      gap: 7px;
-      padding-left: 17px;
-      margin: 10px 0 0;
-      color: var(--muted);
-      font-size: 12px;
+    .inspector-panel.active {
+      display: block;
     }
 
     pre {
-      max-height: 320px;
+      margin: 0;
       overflow: auto;
-      margin: 12px 0 0;
-      border-radius: 7px;
-      background: #202938;
-      color: #f8fafc;
-      padding: 12px;
-      white-space: pre-wrap;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #0f172a;
+      color: #dbeafe;
+      padding: 10px;
       font-size: 12px;
+      line-height: 1.5;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
     }
 
-    .error { color: var(--danger); }
-
-    @media (max-width: 1080px) {
-      .app {
-        grid-template-columns: 216px minmax(0, 1fr);
+    @media (max-width: 1180px) {
+      .session-card {
+        grid-template-columns: minmax(0, 1fr);
       }
 
-      .inspector {
+      .context-pane {
         display: none;
       }
+
+      .thread {
+        border-right: 0;
+      }
     }
 
-    @media (max-width: 760px) {
+    @media (max-width: 820px) {
+      body { overflow: auto; }
+
       .app {
         display: block;
         height: auto;
         overflow: visible;
       }
 
-      .sidebar, .main {
+      .titlebar,
+      .sidebar,
+      .workspace,
+      .session-card {
         height: auto;
-        min-height: 0;
       }
 
-      .sidebar {
-        border-right: 0;
-        border-bottom: 1px solid var(--line);
+      .shell {
+        display: block;
+      }
+
+      .session-card {
+        margin: 0;
+        border-radius: 0;
+      }
+
+      .thread-scroll,
+      .composer {
+        padding: 16px;
+      }
+
+      .artifact-grid {
+        grid-template-columns: 1fr;
       }
 
       .entry {
         grid-template-columns: 1fr;
-        gap: 4px;
       }
 
       .entry-label {
         text-align: left;
         padding-top: 0;
       }
-
-      .composer-controls,
-      .soil-inputs,
-      .canvas-grid,
-      .split {
-        grid-template-columns: 1fr;
-      }
-
-      .compact-select {
-        width: 100%;
-      }
     }
   </style>
 </head>
 <body>
+  <!-- ordinary-screen-start -->
   <div class="app">
-    <aside class="sidebar">
-      <div class="brand"><span class="mark" aria-hidden="true"></span><span>AgentArbor</span></div>
-      <button class="new-run secondary" id="newRunButton">新建任务</button>
-      <nav>
-        <ul class="nav">
-          <li><span class="glyph">S</span><span>土壤</span></li>
-          <li class="active"><span class="glyph">U</span><span>方向智能</span></li>
-          <li><span class="glyph">A</span><span>执行智能</span></li>
-          <li><span class="glyph">R</span><span>自动化</span></li>
-        </ul>
+    <header class="titlebar">
+      <div class="mode-pill">AgentArbor</div>
+      <span class="menu-link">任务</span>
+      <span class="menu-link">材料</span>
+      <span class="menu-link">帮助</span>
+      <div class="window-actions" aria-hidden="true"><span>一</span><span>□</span><span>×</span></div>
+    </header>
+
+    <div class="shell">
+      <aside class="sidebar">
+        <nav class="side-nav" aria-label="工作入口">
+          <button class="side-action active" id="newRunButton" type="button"><span class="nav-mark plus"></span><span>新建任务</span></button>
+          <a class="side-action" href="#"><span class="nav-mark skill"></span><span>技能</span></a>
+          <a class="side-action" href="#"><span class="nav-mark auto"></span><span>自动化</span></a>
+        </nav>
+
+        <section class="task-list" aria-label="任务列表">
+          <div class="side-title"><span>任务列表</span><span id="runCount">0</span></div>
+          <div class="workspace-group">
+            <div class="workspace-row">
+              <span class="workspace-name">当前工作区</span>
+              <button class="mini-plus" type="button">+</button>
+            </div>
+            <ul class="runs" id="runHistory">
+              <li class="run-item active">
+                <div class="run-title">暂无最近任务</div>
+                <div class="run-meta">开始任务后会显示在这里。</div>
+              </li>
+            </ul>
+          </div>
+        </section>
+
+        <div class="profile">
+          <span class="avatar" aria-hidden="true"></span>
+          <div>
+            <div><strong>本地工作</strong></div>
+            <div class="run-meta">只使用你授权的材料。</div>
+          </div>
+        </div>
+      </aside>
+
+      <main class="workspace">
+        <section class="session-card" aria-label="任务工作会话">
+          <header class="session-header">
+            <div class="session-title">
+              <span id="sessionTitle">新任务</span>
+              <span class="session-meta">本地工作区 · 写入前确认</span>
+            </div>
+            <div class="header-tools">
+              <span class="status-pill" id="runStatus">待开始</span>
+              <button class="tool-button" id="diagnosticDrawerButton" type="button" aria-label="打开详情">详情</button>
+            </div>
+          </header>
+
+          <section class="thread">
+            <div class="thread-scroll" id="transcriptWrap">
+              <div class="welcome" id="introBlock">
+                <h1>要完成什么？</h1>
+                <p>输入一个真实任务，必要时补充文件、网页或限制条件。我会在会话里展示正在看的材料、形成的判断、结果、证据和下一步。</p>
+              </div>
+              <section class="transcript" id="transcript" aria-label="工作过程">
+                <div class="empty-transcript">暂无活动。开始任务后，这里会显示正在读取、比较、整理和生成的过程。</div>
+              </section>
+              <section class="result-block" id="mainCanvas" aria-label="结果">
+                <div class="result-head">
+                  <span class="report-kicker">结果</span>
+                  <h2>等待任务开始</h2>
+                  <div class="summary-box">任务完成后，结论、依据、风险、不确定性和下一步会显示在这条会话里。</div>
+                </div>
+              </section>
+            </div>
+
+            <section class="composer" aria-label="任务输入">
+              <div class="composer-box">
+                <textarea id="goalInput" placeholder="例如：分析当前项目的主要问题，并给出下一轮可执行优化建议。"></textarea>
+                <details class="composer-extra">
+                  <summary>补充材料和权限</summary>
+                  <div class="context-inputs">
+                    <label>材料引用
+                      <textarea id="contextRefsInput" placeholder="可选，每行：file:src/app/panel-assets.ts | file | 只读摘要 | 短预览"></textarea>
+                    </label>
+                    <label>权限说明
+                      <input id="permissionRefsInput" autocomplete="off" placeholder="例如：只读；写入前询问">
+                    </label>
+                  </div>
+                </details>
+                <div class="composer-actions">
+                  <button class="icon-button" type="button" title="添加文件">文件</button>
+                  <button class="icon-button" type="button" title="添加图片">图片</button>
+                  <span class="spacer"></span>
+                  <span class="hint" id="modelHint">未配置真实模型时会要求先配置。</span>
+                  <button class="icon-button" type="button" title="语音">语音</button>
+                  <button class="send-button primary" id="runButton" title="开始处理">↑</button>
+                </div>
+              </div>
+            </section>
+          </section>
+
+          <aside class="context-pane" aria-label="任务上下文">
+            <section class="context-section">
+              <div class="context-title"><span>待办</span></div>
+              <div class="panel-stack" id="riskPanel"></div>
+            </section>
+            <section class="context-section">
+              <div class="context-title"><span>上下文</span><span class="tag" id="railStatusBadge">待开始</span></div>
+              <div class="metrics" id="runMetrics"></div>
+            </section>
+            <section class="context-section">
+              <div class="context-title"><span>证据</span></div>
+              <div class="panel-stack" id="supervisionStatus"></div>
+            </section>
+            <section class="context-section">
+              <div class="context-title"><span>近期活动</span></div>
+              <div class="run-path" id="runPath"></div>
+            </section>
+          </aside>
+        </section>
+      </main>
+    </div>
+  </div>
+  <!-- ordinary-screen-end -->
+
+  <div class="drawer-backdrop" id="drawerBackdrop"></div>
+
+  <aside class="developer-drawer" id="developerDrawer" aria-hidden="true" aria-label="开发者详情">
+    <div class="drawer-head">
+      <div>
+        <div class="context-title">详情与诊断</div>
+        <div class="hint">会话细节、设置和安全调试投影。</div>
+      </div>
+      <button class="ghost drawer-close" type="button" data-close-drawer>关闭</button>
+    </div>
+    <div class="drawer-body">
+      <nav class="inspector-tabs" aria-label="详情分区">
+        <button class="inspector-tab active" type="button" data-tab="overview">概览</button>
+        <button class="inspector-tab" type="button" data-tab="ai">诊断</button>
+        <button class="inspector-tab" type="button" data-tab="agents">Agents</button>
+        <button class="inspector-tab" type="button" data-tab="settings">设置</button>
       </nav>
-      <section>
-        <div class="side-title"><span>任务记录</span><span id="runCount">0</span></div>
-        <ul class="runs" id="runHistory">
-          <li class="run-item">
-            <div class="run-title">暂无 Desktop Shell 任务</div>
-            <div class="run-meta">提交目标后会出现在这里。</div>
-          </li>
-        </ul>
-      </section>
-      <div class="profile">
-        <span class="mark" aria-hidden="true"></span>
-        <div>
-          <div><strong>本地工作区</strong></div>
-          <div class="run-meta" id="workspaceStatus">配置读取中</div>
+
+      <div class="inspector-panel active" id="tabOverview" data-panel="overview">
+        <div class="panel-stack">
+          <div class="status-line">
+            <strong>当前会话详情</strong>
+            <span class="node-meta">运行树、模型工具引用和调试 JSON 只在这里查看。</span>
+          </div>
         </div>
       </div>
-    </aside>
 
-    <main class="main">
-      <header class="topbar">
-        <div>
-          <div class="topbar-title">Desktop Shell 工作台</div>
-          <div class="hint">Main Canvas 展示 Plan / Fruit；Observation Panel 展示 agent 集群如何形成结果。</div>
-        </div>
-        <div class="status-pill" id="runStatus">待启动 (pending)</div>
-      </header>
+      <div class="inspector-panel" id="tabAi" data-panel="ai">
+        <section class="panel-stack">
+          <h2>真实 AI 诊断</h2>
+          <div class="panel-stack" id="failurePanel">
+            <div class="status-line"><strong>暂无阻断</strong><span class="node-meta">模型服务失败、输出契约失败或配置边界会显示在这里。</span></div>
+          </div>
+          <h2>模型 / 工具流</h2>
+          <div class="section-note">只显示 purpose、contract、状态、模型 / 工具 refs 和安全摘要。</div>
+          <div class="panel-stack" id="flowList"></div>
+        </section>
+      </div>
 
-      <section class="transcript-wrap" id="transcriptWrap">
-        <div class="intro" id="introBlock">
-          <span class="mark" aria-hidden="true"></span>
-          <h1>Desktop Shell 工作台</h1>
-          <p>提交任务后，AgentArbor 会把目标、上下文 refs、只读短预览和权限边界形成 Task Soil，再进入真实 AI 优先的运行闭环。</p>
-        </div>
-        <div class="canvas-summary" id="mainCanvas">
-          <h2>Plan / Fruit 主画布</h2>
-          <p class="hint">当前没有运行结果。提交任务后，这里展示 Plan Package、Aboveground artifact、Fruit、Run Memory、Experience Candidate 和 Path Bias 候选。</p>
-        </div>
-        <div class="transcript" id="transcript">
-          <div class="empty-transcript">Agent transcript 为空。输入任务后，这里会开始流式追加工作过程。</div>
-        </div>
-      </section>
+      <div class="inspector-panel" id="tabAgents" data-panel="agents">
+        <section class="panel-stack">
+          <h2>运行树 / 父层综合</h2>
+          <div class="agent-tree" id="agentTree"><div class="node-meta">暂无派生 agent。</div></div>
+          <h2>选中 Agent</h2>
+          <div class="node-meta" id="agentInspector">运行后显示 spec、权限、预算和输出引用。</div>
+          <h2>父层 synthesis</h2>
+          <div class="status-line" id="parentSynthesis">
+            <strong>父层 synthesis</strong>
+            <span class="node-meta">等待 child/rootlet 安全摘要。</span>
+          </div>
+        </section>
+      </div>
 
-      <section class="composer" aria-label="任务输入">
-        <textarea id="goalInput" placeholder="描述你的任务。Desktop Shell 会先形成 Task Soil，再展示 Plan 和 Fruits。"></textarea>
-        <div class="soil-inputs">
-          <label>Task Soil context refs
-            <textarea id="contextRefsInput" placeholder="可选，每行：file:src/app/panel-assets.ts | file | 只读摘要 | 短预览"></textarea>
-          </label>
-          <label>权限 refs
-            <input id="permissionRefsInput" autocomplete="off" placeholder="read:file:src/app/panel-assets.ts">
-          </label>
-        </div>
-        <div class="composer-controls">
-          <div class="control-line">
-            <span class="hint">模型</span>
-            <select id="aiMode" class="compact-select">
+      <div class="inspector-panel" id="tabSettings" data-panel="settings">
+        <div class="fields">
+          <label>Base URL <input id="baseUrlInput" autocomplete="off"></label>
+          <label>模型名 <input id="modelInput" autocomplete="off"></label>
+          <label>默认 AI 模式
+            <select id="defaultAiModeInput">
               <option value="none">AI 禁用</option>
               <option value="openai-compatible">OpenAI-compatible 推荐</option>
               <option value="fake">Fake AI 测试模式</option>
             </select>
-            <span class="hint" id="providerHint">配置读取中</span>
-          </div>
-          <button id="runButton">启动</button>
+          </label>
+          <label>本次运行模式
+            <select id="aiMode">
+              <option value="none">AI 禁用</option>
+              <option value="openai-compatible">OpenAI-compatible 推荐</option>
+              <option value="fake">Fake AI 测试模式</option>
+            </select>
+          </label>
+          <label>API Key <input id="apiKeyInput" type="password" autocomplete="off" placeholder="保存后不会回显"></label>
+          <button id="saveConfigButton">保存模型配置</button>
+          <div class="hint" id="configStatus">模型配置未加载。</div>
+          <label>搜索服务
+            <select id="webSearchProviderInput">
+              <option value="tavily">Tavily</option>
+              <option value="none">无</option>
+            </select>
+          </label>
+          <label>Tavily API Key <input id="tavilyKeyInput" type="password" autocomplete="off" placeholder="保存后不会回显"></label>
+          <label>结果数 <input id="tavilyMaxResultsInput" type="number" min="1" max="10" step="1"></label>
+          <button id="saveToolConfigButton">保存工具配置</button>
+          <div class="hint" id="toolConfigStatus">工具配置未加载。</div>
+          <h2>折叠调试区</h2>
+          <ul class="debug-list" id="debugList">
+            <li>EventLog、Observation、CandidatePool、Convergence 和 rootlet 细节默认折叠。</li>
+          </ul>
+          <pre id="debugJson">{}</pre>
         </div>
-      </section>
-    </main>
-
-    <aside class="inspector" aria-label="运行监督工作台">
-      <section class="panel-box rail-header">
-        <div class="rail-title-row">
-          <div>
-            <div class="section-kicker">Observation Panel</div>
-            <h2>Agent 运行监督</h2>
-          </div>
-          <span class="tag" id="railStatusBadge">待启动</span>
-        </div>
-        <p>安全投影：模型调用、派生 agent、父层综合和阻断原因。</p>
-      </section>
-
-      <nav class="inspector-tabs" aria-label="运行监督分区">
-        <button class="inspector-tab active" type="button" data-tab="overview">监督</button>
-        <button class="inspector-tab" type="button" data-tab="ai">真实 AI</button>
-        <button class="inspector-tab" type="button" data-tab="agents">Agent 树</button>
-        <button class="inspector-tab" type="button" data-tab="settings">设置</button>
-      </nav>
-
-      <div class="inspector-panels">
-        <section class="inspector-panel active" id="tabOverview" data-panel="overview">
-          <section class="panel-box rail-card">
-            <div class="section-title">
-              <h2>运行路径</h2>
-            </div>
-            <div class="run-path" id="runPath"></div>
-          </section>
-
-          <section class="panel-box rail-card">
-            <div class="section-title"><h2>运行健康</h2></div>
-            <div class="metrics" id="runMetrics"></div>
-            <div class="panel-stack" id="supervisionStatus"></div>
-          </section>
-
-          <section class="panel-box rail-card">
-            <div class="section-title"><h2>风险 / 不确定性 / 下一步</h2></div>
-            <div class="panel-stack" id="riskPanel"></div>
-          </section>
-        </section>
-
-        <section class="inspector-panel" id="tabAi" data-panel="ai">
-          <section class="panel-box rail-card">
-            <div class="section-title"><h2>真实 AI 诊断</h2></div>
-            <div class="panel-stack" id="failurePanel">
-              <div class="status-line"><strong>暂无阻断</strong><span class="node-meta">真实 provider 失败、输出契约失败或配置边界会显示在这里。</span></div>
-            </div>
-          </section>
-
-          <section class="panel-box rail-card">
-            <div class="section-title"><h2>模型 / 工具流</h2></div>
-            <div class="section-note">只显示 purpose、contract、状态、模型/工具 refs 和安全摘要；不展示 raw prompt、raw provider response 或 raw tool output。</div>
-            <div class="panel-stack" id="flowList">
-              <div class="status-line"><strong>等待运行</strong><span class="node-meta">模型和工具调用会以安全 refs 展示。</span></div>
-            </div>
-          </section>
-        </section>
-
-        <section class="inspector-panel" id="tabAgents" data-panel="agents">
-          <section class="panel-box rail-card">
-            <div class="section-title"><h2>Agent Run Tree / 父层综合</h2></div>
-            <div class="agent-tree" id="agentTree">
-              <div class="node-meta">暂无派生 agent。</div>
-            </div>
-          </section>
-          <section class="panel-box rail-card">
-            <div class="section-title"><h2>选中 Agent</h2></div>
-            <div class="node-meta" id="agentInspector">运行后显示 spec、权限、预算和输出引用。</div>
-          </section>
-          <section class="panel-box rail-card">
-            <div class="section-title"><h2>父层 synthesis</h2></div>
-            <div class="status-line" id="parentSynthesis">
-              <strong>父层 synthesis</strong>
-              <span class="node-meta">等待 child/rootlet 安全摘要。</span>
-            </div>
-          </section>
-        </section>
-
-        <section class="inspector-panel" id="tabSettings" data-panel="settings">
-          <details open>
-            <summary>模型配置</summary>
-            <div class="fields">
-              <label>Base URL <input id="baseUrlInput" autocomplete="off"></label>
-              <label>模型名 <input id="modelInput" autocomplete="off"></label>
-              <label>默认 AI 模式
-                <select id="defaultAiModeInput">
-                  <option value="none">AI 禁用</option>
-                  <option value="openai-compatible">OpenAI-compatible 推荐</option>
-                  <option value="fake">Fake AI 测试模式</option>
-                </select>
-              </label>
-              <label>API Key <input id="apiKeyInput" type="password" autocomplete="off" placeholder="保存后不会回显"></label>
-              <button id="saveConfigButton" class="secondary">保存模型配置</button>
-              <div class="hint" id="configStatus">模型配置未加载。</div>
-            </div>
-          </details>
-
-          <details>
-            <summary>工具配置</summary>
-            <div class="fields">
-              <label>搜索 Provider
-                <select id="webSearchProviderInput">
-                  <option value="tavily">Tavily</option>
-                  <option value="none">无</option>
-                </select>
-              </label>
-              <div class="split">
-                <label>Tavily API Key <input id="tavilyKeyInput" type="password" autocomplete="off" placeholder="保存后不会回显"></label>
-                <label>结果数 <input id="tavilyMaxResultsInput" type="number" min="1" max="10" step="1"></label>
-              </div>
-              <button id="saveToolConfigButton" class="secondary">保存工具配置</button>
-              <div class="hint" id="toolConfigStatus">工具配置未加载。</div>
-            </div>
-          </details>
-
-          <details>
-            <summary>折叠调试区</summary>
-            <ul class="debug-list" id="debugList">
-              <li>EventLog、Observation、CandidatePool、Convergence 和 rootlet 细节默认折叠。</li>
-            </ul>
-            <pre id="debugJson">{}</pre>
-          </details>
-        </section>
       </div>
-    </aside>
-  </div>
+    </div>
+  </aside>
 
   <script>
     const STREAM_TYPES = [
@@ -1250,26 +1236,27 @@ export function createPanelHtml(): string {
     ];
 
     const STATUS_LABELS = {
-      pending: "待启动 (pending)",
-      running: "运行中 (running)",
-      completed: "已完成 (completed)",
-      failed: "失败 (failed)"
+      pending: "待开始",
+      running: "正在工作",
+      completed: "已完成",
+      failed: "未完成",
+      sent: "已发送"
     };
 
     const EVENT_LABELS = {
-      "run.started": "运行开始",
+      "run.started": "开始工作",
       "agent.note.delta": "工作笔记",
       "agent.note.completed": "工作笔记",
-      "model.output.delta": "模型输出",
-      "model.output.completed": "模型完成",
-      "tool.requested": "工具请求",
-      "tool.completed": "工具完成",
-      "tool.failed": "工具失败",
-      "agent.delegation.planned": "派生计划",
-      "agent.child.started": "派生启动",
-      "agent.child.completed": "派生完成",
-      "agent.child.waiting": "等待派生",
-      "agent.parent_synthesis.completed": "父层综合",
+      "model.output.delta": "正在生成内容",
+      "model.output.completed": "内容已整理",
+      "tool.requested": "正在读取材料",
+      "tool.completed": "材料已读取",
+      "tool.failed": "材料读取失败",
+      "agent.delegation.planned": "正在安排检查",
+      "agent.child.started": "检查开始",
+      "agent.child.completed": "检查完成",
+      "agent.child.waiting": "等待材料",
+      "agent.parent_synthesis.completed": "正在整理判断",
       "final.result": "最终结果",
       "run.failed": "运行失败"
     };
@@ -1286,6 +1273,7 @@ export function createPanelHtml(): string {
       lastFocusedTerminalRunId: undefined,
       runHistory: [],
       modelOutputEntries: new Map(),
+      assistantEntry: undefined,
       inspectorTab: "overview",
       inspectorPinned: false
     };
@@ -1301,12 +1289,15 @@ export function createPanelHtml(): string {
       contextRefsInput: document.getElementById("contextRefsInput"),
       permissionRefsInput: document.getElementById("permissionRefsInput"),
       aiMode: document.getElementById("aiMode"),
-      providerHint: document.getElementById("providerHint"),
+      providerHint: document.getElementById("modelHint"),
       runButton: document.getElementById("runButton"),
       newRunButton: document.getElementById("newRunButton"),
       runHistory: document.getElementById("runHistory"),
       runCount: document.getElementById("runCount"),
-      workspaceStatus: document.getElementById("workspaceStatus"),
+      sessionTitle: document.getElementById("sessionTitle"),
+      diagnosticDrawerButton: document.getElementById("diagnosticDrawerButton"),
+      drawerBackdrop: document.getElementById("drawerBackdrop"),
+      developerDrawer: document.getElementById("developerDrawer"),
       baseUrlInput: document.getElementById("baseUrlInput"),
       modelInput: document.getElementById("modelInput"),
       defaultAiModeInput: document.getElementById("defaultAiModeInput"),
@@ -1337,16 +1328,16 @@ export function createPanelHtml(): string {
     dom.newRunButton.addEventListener("click", resetComposer);
     dom.saveConfigButton.addEventListener("click", saveModelConfig);
     dom.saveToolConfigButton.addEventListener("click", saveToolConfig);
+    dom.diagnosticDrawerButton.addEventListener("click", openDeveloperDrawer);
+    dom.drawerBackdrop.addEventListener("click", closeDeveloperDrawer);
+    document.querySelectorAll("[data-close-drawer]").forEach((button) => button.addEventListener("click", closeDeveloperDrawer));
     dom.inspectorTabs.forEach((button) => {
       button.addEventListener("click", () => setInspectorTab(button.dataset.tab || "overview", true));
     });
     dom.aiMode.addEventListener("change", () => {
       if (state.config) {
         renderProviderStatus();
-      } else {
-        renderSupervision(undefined);
       }
-      renderRiskPanel(undefined);
     });
 
     init();
@@ -1356,11 +1347,22 @@ export function createPanelHtml(): string {
       renderMetrics("pending", undefined);
       renderRunPath(undefined);
       renderAgentTree(undefined);
-      renderSupervision(undefined);
+      renderRightPanels(undefined);
       renderFailurePanel(undefined);
       renderFlow(undefined);
-      renderRiskPanel(undefined);
       await Promise.all([loadConfig(), loadToolsConfig()]);
+    }
+
+    function openDeveloperDrawer() {
+      dom.drawerBackdrop.classList.add("open");
+      dom.developerDrawer.classList.add("open");
+      dom.developerDrawer.setAttribute("aria-hidden", "false");
+    }
+
+    function closeDeveloperDrawer() {
+      dom.drawerBackdrop.classList.remove("open");
+      dom.developerDrawer.classList.remove("open");
+      dom.developerDrawer.setAttribute("aria-hidden", "true");
     }
 
     function setInspectorTab(tab, pinned) {
@@ -1384,10 +1386,6 @@ export function createPanelHtml(): string {
       }
       if (response && (response.error || hasFailedModelCall(response))) {
         setInspectorTab("ai", false);
-        return;
-      }
-      if (response && response.tracking && response.tracking.agentRunTree && response.status === "running") {
-        setInspectorTab("agents", false);
         return;
       }
       setInspectorTab("overview", false);
@@ -1476,7 +1474,7 @@ export function createPanelHtml(): string {
     async function startRun() {
       const goal = dom.goalInput.value.trim();
       if (goal.length === 0) {
-        appendLocalEntry("用户目标", "请先输入目标。", "failed");
+        appendLocalEntry("提示", "请先输入任务。", "failed");
         return;
       }
 
@@ -1485,14 +1483,20 @@ export function createPanelHtml(): string {
       state.lastSequence = 0;
       state.currentRunId = undefined;
       state.lastFocusedTerminalRunId = undefined;
+      state.modelOutputEntries = new Map();
+      state.assistantEntry = undefined;
       dom.transcript.replaceChildren();
-      dom.introBlock.style.display = "none";
-      appendLocalEntry("用户目标", compact(goal, 1200), "running");
+      dom.introBlock.hidden = true;
+      dom.sessionTitle.textContent = compact(goal, 42);
+      appendLocalEntry("你", compact(goal, 1200), "sent", true);
+      updateAssistantTurn("正在处理", "我先整理上下文，然后给出可审阅的回答或结果。", "running");
       setRunStatus("running");
       state.inspectorPinned = false;
       setInspectorTab("overview", false);
+      renderCanvas(undefined, "running");
       renderRunPath(undefined);
       renderMetrics("running", undefined);
+      renderRightPanels({ status: "running" });
       setButtons(false);
 
       try {
@@ -1505,12 +1509,15 @@ export function createPanelHtml(): string {
           }
         });
         state.currentRunId = response.runId;
+        dom.goalInput.value = "";
         rememberRun(goal, response.runId);
         renderPollingResponse(response);
         openRunStream(response.runId, response.streamCursor ? response.streamCursor.lastSequence : 0);
       } catch (error) {
-        appendLocalEntry("运行失败", error.message, "failed");
+        updateAssistantTurn("这次没有完成", friendlyFailureText(error.message), "failed");
         setRunStatus("failed");
+        renderRightPanels({ status: "failed", error: { message: error.message } });
+        openDeveloperDrawer();
       } finally {
         setButtons(true);
       }
@@ -1606,24 +1613,24 @@ export function createPanelHtml(): string {
         const response = await requestJson("/api/desktop/runs/" + encodeURIComponent(runId));
         renderPollingResponse(response);
       } catch {
-        // The stream already delivered the terminal event. Polling refresh is best-effort only.
       }
     }
 
     function renderPollingResponse(response) {
       autoInspectorTab(response);
       setRunStatus(response.status || "running");
+      renderCanvas(response.canvas, response.status || "running", response);
+      renderRightPanels(response);
       renderRunPath(response);
       renderMetrics(response.status || "running", response);
-      renderCanvas(response.canvas, response.status || "running");
-      renderAgentTree(response);
       renderSupervision(response);
+      renderAgentTree(response);
       renderFailurePanel(response);
       renderFlow(response);
-      renderRiskPanel(response);
       if (response.transcript && Array.isArray(response.transcript.events)) {
         response.transcript.events.forEach(appendStreamEvent);
       }
+      syncAssistantTurnFromResponse(response);
       renderDebug(response);
       focusCanvasOnTerminal(response);
     }
@@ -1638,16 +1645,14 @@ export function createPanelHtml(): string {
     }
 
     function focusCanvasOnTerminal(response) {
-      if (!response || (response.status !== "completed" && response.status !== "failed")) {
+      if (!response || response.status !== "completed" || !response.canvas) {
         return;
       }
       if (state.lastFocusedTerminalRunId === response.runId) {
         return;
       }
       state.lastFocusedTerminalRunId = response.runId;
-      if (dom.transcriptWrap) {
-        dom.transcriptWrap.scrollTo({ top: 0, behavior: "smooth" });
-      }
+      dom.mainCanvas.scrollIntoView({ block: "start", behavior: "smooth" });
     }
 
     function appendStreamEvent(event) {
@@ -1660,26 +1665,131 @@ export function createPanelHtml(): string {
       state.seenSequences.add(event.sequence);
       state.lastSequence = Math.max(state.lastSequence, event.sequence);
 
-      if (event.type === "model.output.delta") {
-        appendModelOutputDelta(event);
-        return;
-      }
-      if (event.type === "model.output.completed") {
-        completeModelOutput(event);
+      if (event.type === "model.output.delta" || event.type === "model.output.completed") {
         return;
       }
 
-      const label = event.agentLabel || EVENT_LABELS[event.type] || event.type;
-      const content = event.delta || event.summary || EVENT_LABELS[event.type] || event.type;
+      const content = activityBody(event);
       const status = event.status || (event.type === "run.failed" ? "failed" : event.type === "final.result" ? "completed" : "running");
-      appendEntry({
-        label: label,
-        title: EVENT_LABELS[event.type] || event.type,
-        body: content,
-        status: status,
-        type: event.type,
-        refs: refsText(event)
-      });
+      if (event.type === "run.failed") {
+        updateAssistantTurn("这次没有完成", friendlyFailureText(content), "failed");
+        return;
+      }
+      if (event.type === "final.result") {
+        updateAssistantTurn("结果已生成", "我已经把结果整理在下方，证据和不确定性也保留在右侧。", "completed");
+        return;
+      }
+      updateAssistantTurn(EVENT_LABELS[event.type] || "正在工作", content, status);
+    }
+
+    function syncAssistantTurnFromResponse(response) {
+      if (!response) {
+        return;
+      }
+      if (response.status === "failed") {
+        updateAssistantTurn("这次没有完成", friendlyFailureText(response.error && response.error.message), "failed");
+        return;
+      }
+      if (response.status === "completed") {
+        const directAnswer =
+          response.canvas && response.canvas.kind === "desktop_chat_canvas" && response.canvas.chat.answer
+            ? response.canvas.chat.answer
+            : response.canvas && response.canvas.kind === "work_session_canvas" && response.canvas.workSession.directAnswer
+              ? response.canvas.workSession.directAnswer
+              : undefined;
+        if (directAnswer) {
+          updateAssistantTurn("已回答", directAnswer.answer, "completed");
+          return;
+        }
+        const reportTitle = response.canvas && response.canvas.kind === "work_session_canvas" && response.canvas.workSession.report
+          ? response.canvas.workSession.report.title
+          : undefined;
+        updateAssistantTurn("结果已生成", reportTitle ? "已生成：" + reportTitle : "结果已经整理完成。", "completed");
+        return;
+      }
+      if (response.status === "running") {
+        updateAssistantTurn("正在工作", "我正在处理任务，细节进展会在右侧近期活动里更新。", "running");
+      }
+    }
+
+    function activityActorLabel(event) {
+      if (event.type === "run.started") return "任务";
+      if (event.type === "tool.requested" || event.type === "tool.completed" || event.type === "tool.failed") return "材料";
+      if (event.type === "agent.delegation.planned" || event.type === "agent.child.started" || event.type === "agent.child.completed" || event.type === "agent.child.waiting") return "检查";
+      if (event.type === "agent.parent_synthesis.completed") return "判断";
+      if (event.type === "final.result") return "结果";
+      if (event.type === "run.failed") return "诊断";
+      if (event.type === "model.output.delta" || event.type === "model.output.completed") return "工作中";
+      return "活动";
+    }
+
+    function activityBody(event) {
+      const summary = event.delta || event.summary;
+      if (summary) {
+        if (event.type === "run.failed") {
+          return friendlyFailureText(summary);
+        }
+        return productActivityText(event.type, summary);
+      }
+      if (event.type === "tool.requested") return "正在读取你提供的上下文。";
+      if (event.type === "tool.completed") return "已取得可引用的材料。";
+      if (event.type === "agent.delegation.planned") return "正在安排几路检查。";
+      if (event.type === "agent.child.started") return "检查已经开始。";
+      if (event.type === "agent.child.completed") return "检查已返回局部材料。";
+      if (event.type === "agent.child.waiting") return "正在等待材料回收。";
+      if (event.type === "agent.parent_synthesis.completed") return "正在合并材料、处理冲突并形成判断。";
+      return EVENT_LABELS[event.type] || "工作状态已更新。";
+    }
+
+    function productActivityText(type, value) {
+      const text = String(value || "").trim();
+      if (text.length === 0) {
+        return EVENT_LABELS[type] || "工作状态已更新。";
+      }
+      const lower = text.toLowerCase();
+      if (
+        lower.includes("fake ") ||
+        lower.includes("work_session") ||
+        lower.includes("validation failed") ||
+        lower.includes("output_validation") ||
+        lower.includes("model-request") ||
+        lower.includes("model-response") ||
+        lower.includes("contract ") ||
+        lower.includes("rootlet") ||
+        lower.includes("provider") ||
+        lower.includes("parent synthesis") ||
+        lower.includes("direction_handoff") ||
+        lower.includes("model.requested") ||
+        lower.includes("model.completed")
+      ) {
+        if (type === "model.output.completed") return "已整理一段可展示材料，完整技术引用保留在详情里。";
+        if (type === "agent.parent_synthesis.completed") return "已汇总多路检查结果，正在形成最终判断。";
+        if (type === "agent.child.completed") return "一路局部检查已完成，返回了可审阅材料。";
+        if (type === "agent.delegation.planned") return "已把任务拆成几路局部检查。";
+        return EVENT_LABELS[type] || "工作状态已更新。";
+      }
+      return compact(text, 520);
+    }
+
+    function friendlyFailureText(value) {
+      const text = String(value || "");
+      const lower = text.toLowerCase();
+      if (lower.includes("output_validation") || lower.includes("validation failed") || lower.includes("contract")) {
+        return "模型返回的内容没有通过本轮工作会话格式检查。这不是你的输入问题；技术引用已放在详情里，可以调整模型或重试。";
+      }
+      if (lower.includes("api key") || lower.includes("missing_api_key")) {
+        return "还没有配置可用的模型密钥。请打开详情里的设置，保存密钥后重试。";
+      }
+      if (lower.includes("missing_model") || lower.includes("模型名")) {
+        return "还没有配置模型名。请打开详情里的设置，填写模型名后重试。";
+      }
+      if (lower.includes("ai 禁用") || lower.includes("ai_disabled")) {
+        return "当前禁用了 AI，所以不能完成工作会话。请在详情里切换到真实模型或测试模式。";
+      }
+      if (lower.includes("network") || lower.includes("timeout")) {
+        return "模型服务暂时不可用或请求超时。请检查网络和模型配置后重试。";
+      }
+      return compact(text || "运行被配置、权限或模型边界阻断。", 220);
     }
 
     function appendModelOutputDelta(event) {
@@ -1697,12 +1807,11 @@ export function createPanelHtml(): string {
         return;
       }
       const entry = appendEntry({
-        label: event.agentLabel || "模型",
-        title: "模型输出",
+        label: "工作中",
+        title: "正在生成内容",
         body: visibleModelOutputText(chunk),
         status: event.status || "running",
         type: event.type,
-        refs: refsText(event),
         returnParts: true
       });
       state.modelOutputEntries.set(key, {
@@ -1717,21 +1826,15 @@ export function createPanelHtml(): string {
       const existing = state.modelOutputEntries.get(key);
       if (existing) {
         updateEntryStatus(existing.row, event.status || "completed");
-        if (event.summary) {
-          const refs = existing.row.querySelector(".refs");
-          if (refs) {
-            refs.textContent = [refs.textContent, event.summary].filter(Boolean).join("；");
-          }
-        }
+        existing.body.textContent = event.summary || "内容已整理，已进入结果或详情。";
         return;
       }
       appendEntry({
-        label: event.agentLabel || "模型",
-        title: "模型完成",
-        body: event.summary || "模型调用完成。",
+        label: "工作中",
+        title: "内容已整理",
+        body: event.summary || "内容整理完成。",
         status: event.status || "completed",
-        type: event.type,
-        refs: refsText(event)
+        type: event.type
       });
     }
 
@@ -1744,6 +1847,9 @@ export function createPanelHtml(): string {
 
     function visibleModelOutputText(value) {
       const text = String(value || "");
+      if (text.trim().startsWith("{") || text.trim().startsWith("[")) {
+        return "正在生成结构化内容，完成后会整理进结果或详情。";
+      }
       if (text.length <= 680) {
         return text;
       }
@@ -1754,27 +1860,48 @@ export function createPanelHtml(): string {
       const bubble = row.querySelector(".bubble");
       const meta = row.querySelector(".entry-title .meta");
       if (bubble) {
-        bubble.className = "bubble " + bubbleClass("model.output.delta", statusValue);
+        bubble.className = "bubble " + bubbleClass(statusValue === "failed" ? "run.failed" : "assistant", statusValue);
       }
       if (meta) {
         meta.textContent = STATUS_LABELS[statusValue] || statusValue || "";
       }
     }
 
-    function appendLocalEntry(label, body, status) {
-      dom.introBlock.style.display = "none";
-      appendEntry({ label: label, title: label, body: body, status: status, type: "local", refs: "" });
+    function appendLocalEntry(label, body, status, isUser) {
+      appendEntry({ label: label, title: isUser ? "你的消息" : label, body: body, status: status, type: isUser ? "user" : "local" });
+    }
+
+    function updateAssistantTurn(title, body, status) {
+      const safeTitle = title || "正在工作";
+      const safeBody = body || "正在处理任务。";
+      const safeStatus = status || "running";
+      if (!state.assistantEntry) {
+        state.assistantEntry = appendEntry({
+          label: "助手",
+          title: safeTitle,
+          body: safeBody,
+          status: safeStatus,
+          type: safeStatus === "failed" ? "run.failed" : "assistant",
+          returnParts: true
+        });
+        return;
+      }
+      state.assistantEntry.titleText.textContent = safeTitle;
+      state.assistantEntry.body.textContent = safeBody;
+      updateEntryStatus(state.assistantEntry.row, safeStatus);
     }
 
     function appendEntry(input) {
       removeEmptyTranscript();
       const row = document.createElement("div");
-      row.className = "entry";
+      row.className = "entry" + (input.type === "user" ? " user" : "");
       const label = document.createElement("div");
       label.className = "entry-label";
       label.textContent = input.label;
       const bubble = document.createElement("div");
       bubble.className = "bubble " + bubbleClass(input.type, input.status);
+      const inner = document.createElement("div");
+      inner.className = "bubble-inner";
       const title = document.createElement("div");
       title.className = "entry-title";
       const titleText = document.createElement("span");
@@ -1786,19 +1913,15 @@ export function createPanelHtml(): string {
       const body = document.createElement("div");
       body.className = "entry-body";
       body.textContent = input.body;
-      bubble.append(title, body);
-      if (input.refs) {
-        const refs = document.createElement("div");
-        refs.className = "refs";
-        refs.textContent = input.refs;
-        bubble.append(refs);
-      }
+      inner.append(title, body);
+      bubble.append(inner);
       row.append(label, bubble);
       dom.transcript.append(row);
       row.scrollIntoView({ block: "nearest" });
       if (input.returnParts) {
-        return { row, body };
+        return { row, body, titleText, status };
       }
+      return undefined;
     }
 
     function bubbleClass(type, status) {
@@ -1824,132 +1947,327 @@ export function createPanelHtml(): string {
       }
     }
 
-    function refsText(event) {
-      const parts = [];
-      if (event.toolName) {
-        parts.push("工具 " + event.toolName);
+    function renderCanvas(canvas, status, response) {
+      if (!canvas) {
+        if (status === "running" || status === "failed") {
+          dom.mainCanvas.hidden = true;
+          dom.mainCanvas.replaceChildren();
+          return;
+        }
+        dom.mainCanvas.hidden = false;
+        dom.mainCanvas.replaceChildren(emptyResult(status, response));
+        return;
       }
-      if (event.sourceRefs && event.sourceRefs.length > 0) {
-        parts.push("来源 " + event.sourceRefs.slice(0, 4).join("，"));
+      dom.mainCanvas.hidden = false;
+      if (canvas.kind === "desktop_chat_canvas") {
+        renderDesktopChatCanvas(canvas);
+      } else if (canvas.kind === "work_session_canvas") {
+        renderWorkSessionCanvas(canvas);
+      } else {
+        renderLegacyPlanCanvas(canvas);
       }
-      if (event.modelCallRefs && event.modelCallRefs.length > 0) {
-        parts.push("模型调用 " + event.modelCallRefs.slice(0, 3).join("，"));
+    }
+
+    function emptyResult(status, response) {
+      const wrap = document.createElement("div");
+      wrap.className = "result-head";
+      const kicker = document.createElement("span");
+      kicker.className = "report-kicker";
+      kicker.textContent = "结果";
+      const title = document.createElement("h2");
+      const summary = document.createElement("div");
+      summary.className = "summary-box";
+      if (status === "running") {
+        title.textContent = "正在准备结果";
+        summary.textContent = "正在读取材料、比较方案并整理可审阅内容。";
+      } else if (status === "failed" && response && response.error) {
+        title.textContent = "这次没有完成";
+        summary.textContent = friendlyFailureText(response.error.message);
+      } else {
+        title.textContent = "等待任务开始";
+        summary.textContent = "任务完成后，结论、依据、风险、不确定性和下一步会显示在这条会话里。";
       }
-      if (event.toolCallRefs && event.toolCallRefs.length > 0) {
-        parts.push("工具调用 " + event.toolCallRefs.slice(0, 3).join("，"));
+      wrap.append(kicker, title, summary);
+      return wrap;
+    }
+
+    function renderWorkSessionCanvas(canvas) {
+      const directAnswer = canvas.workSession.directAnswer;
+      const report = canvas.workSession.report;
+      const artifact = canvas.workSession.artifact;
+      const blocks = [];
+      if (directAnswer) {
+        blocks.push(directAnswerPreview(directAnswer));
+      } else if (report) {
+        blocks.push(artifactPreview(report, artifact));
+      } else {
+        blocks.push(resultHead("工作尚未形成结果", canvas.explanation.resultWhyReasonable));
+        blocks.push(resultSection("待补充", canvas.workSession.openQuestions.length > 0 ? canvas.workSession.openQuestions : ["等待更多材料或配置。"]));
       }
-      return parts.join("；");
+      dom.mainCanvas.replaceChildren(...blocks);
+    }
+
+    function renderDesktopChatCanvas(canvas) {
+      const answer = canvas.chat.answer;
+      const blocks = [];
+      if (answer) {
+        dom.mainCanvas.hidden = true;
+        dom.mainCanvas.replaceChildren();
+        return;
+      } else if (canvas.chat.upgradeRequest) {
+        blocks.push(resultHead("正在进入工作会话", canvas.chat.upgradeRequest.reason));
+      } else {
+        blocks.push(resultHead("这次没有完成", canvas.chat.failureMessage || canvas.explanation.resultWhyReasonable));
+      }
+      dom.mainCanvas.hidden = false;
+      dom.mainCanvas.replaceChildren(...blocks);
+    }
+
+    function renderLegacyPlanCanvas(canvas) {
+      dom.mainCanvas.replaceChildren(
+        resultHead(canvas.plan.recommendedDirection.summary, canvas.plan.recommendedDirection.reason),
+        resultSection("依据", canvas.plan.keyEvidenceRefs),
+        resultSection("不确定性", canvas.plan.uncertainty),
+        resultSection("下一步", [canvas.aboveground.artifact ? canvas.aboveground.artifact.summary : "等待执行结果。"])
+      );
+    }
+
+    function resultHead(title, summary) {
+      const head = document.createElement("div");
+      head.className = "result-head";
+      const kicker = document.createElement("span");
+      kicker.className = "report-kicker";
+      kicker.textContent = "结果";
+      const h = document.createElement("h2");
+      h.textContent = title || "工作结果";
+      const body = document.createElement("div");
+      body.className = "summary-box";
+      body.textContent = summary || "结果已生成。";
+      head.append(kicker, h, body);
+      return head;
+    }
+
+    function artifactPreview(report, artifact) {
+      const preview = document.createElement("article");
+      preview.className = "artifact-preview";
+      const topline = document.createElement("div");
+      topline.className = "artifact-topline";
+      const type = document.createElement("span");
+      type.textContent = artifact ? "报告 · " + artifact.type : "报告";
+      const confidence = document.createElement("span");
+      confidence.textContent = typeof report.confidence === "number" ? "可信度 " + Math.round(report.confidence * 100) + "%" : "等待审阅";
+      topline.append(type, confidence);
+
+      const title = document.createElement("h2");
+      title.className = "artifact-title";
+      title.textContent = report.title || "工作结果";
+
+      const summary = document.createElement("div");
+      summary.className = "artifact-summary";
+      summary.textContent = report.decisionSummary || "结果已生成，等待审阅。";
+
+      const grid = document.createElement("div");
+      grid.className = "artifact-grid";
+      grid.append(
+        artifactSection("关键发现", report.keyFindings),
+        artifactSection("建议", report.recommendations),
+        artifactSection("证据", report.evidenceRefs),
+        artifactSection("不确定性", report.uncertainty)
+      );
+
+      preview.append(topline, title, summary);
+      if (artifact) {
+        preview.append(artifactSection("产物", [artifact.summary]));
+      }
+      preview.append(grid, artifactSection("下一步", report.nextActions));
+      return preview;
+    }
+
+    function directAnswerPreview(answer) {
+      const preview = document.createElement("article");
+      preview.className = "artifact-preview";
+      const topline = document.createElement("div");
+      topline.className = "artifact-topline";
+      const type = document.createElement("span");
+      type.textContent = "回答";
+      const confidence = document.createElement("span");
+      confidence.textContent = typeof answer.confidence === "number" ? "可信度 " + Math.round(answer.confidence * 100) + "%" : "已完成";
+      topline.append(type, confidence);
+
+      const title = document.createElement("h2");
+      title.className = "artifact-title";
+      title.textContent = "回答";
+
+      const summary = document.createElement("div");
+      summary.className = "artifact-summary";
+      summary.textContent = answer.answer || "已回答。";
+
+      preview.append(topline, title, summary);
+      const evidence = Array.isArray(answer.evidenceRefs) ? answer.evidenceRefs : [];
+      if (evidence.length > 0) {
+        preview.append(artifactSection("依据", evidence));
+      }
+      const uncertainty = Array.isArray(answer.uncertainty) ? answer.uncertainty : [];
+      if (uncertainty.length > 0) {
+        preview.append(artifactSection("不确定性", uncertainty));
+      }
+      const followUps = Array.isArray(answer.followUpSuggestions) ? answer.followUpSuggestions : [];
+      if (followUps.length > 0) {
+        preview.append(artifactSection("可以继续", followUps));
+      }
+      return preview;
+    }
+
+    function artifactSection(title, items) {
+      const section = document.createElement("section");
+      section.className = "result-section";
+      const h = document.createElement("h2");
+      h.textContent = title;
+      section.append(h);
+      const values = Array.isArray(items) ? items.filter(Boolean) : [];
+      if (values.length === 0) {
+        const p = document.createElement("p");
+        p.className = "hint";
+        p.textContent = "暂无。";
+        section.append(p);
+        return section;
+      }
+      const list = document.createElement("ul");
+      values.slice(0, 8).forEach((value) => {
+        const item = document.createElement("li");
+        item.textContent = compact(String(value), 360);
+        list.append(item);
+      });
+      section.append(list);
+      return section;
+    }
+
+    function resultSection(title, items) {
+      const section = document.createElement("section");
+      section.className = "result-section";
+      const h = document.createElement("h2");
+      h.textContent = title;
+      section.append(h);
+      const values = Array.isArray(items) ? items.filter(Boolean) : [];
+      if (values.length === 0) {
+        const p = document.createElement("p");
+        p.className = "hint";
+        p.textContent = "暂无。";
+        section.append(p);
+        return section;
+      }
+      const list = document.createElement("ul");
+      values.slice(0, 8).forEach((value) => {
+        const item = document.createElement("li");
+        item.textContent = String(value);
+        list.append(item);
+      });
+      section.append(list);
+      return section;
+    }
+
+    function renderRightPanels(response) {
+      const status = response && response.status ? response.status : "pending";
+      dom.railStatusBadge.textContent = STATUS_LABELS[status] || status;
+      if (!response) {
+        dom.riskPanel.replaceChildren(railItem("待确认", "任务开始后，需要你授权或补充的信息会出现在这里。", "good"));
+        return;
+      }
+      const canvas = response.canvas;
+      const questions = canvas && canvas.kind === "work_session_canvas" ? canvas.workSession.openQuestions : [];
+      if (response.error) {
+        dom.riskPanel.replaceChildren(railItem("需要处理", friendlyFailureText(response.error.message), "error"));
+        return;
+      }
+      if (questions && questions.length > 0) {
+        dom.riskPanel.replaceChildren(...questions.slice(0, 5).map((question) => railItem("需要确认", question, "warn")));
+        return;
+      }
+      dom.riskPanel.replaceChildren(railItem("暂无待办", "当前没有阻塞问题。", "good"));
     }
 
     function renderRunPath(response) {
-      const tracking = response && response.tracking;
-      const canvas = response && response.canvas;
-      const failed = response && response.status === "failed";
-      const steps = [
-        {
-          label: "Task Soil",
-          state: canvas && canvas.taskSoil ? "done" : tracking ? "done" : failed ? "failed" : "pending",
-          detail: canvas && canvas.taskSoil
-            ? "context refs " + canvas.taskSoil.contextRefs.length + "；permission refs " + canvas.taskSoil.permissionBoundaryRefs.length
-            : tracking
-              ? "任务输入已进入运行上下文。"
-              : "等待用户任务和上下文 refs。"
-        },
-        {
-          label: "Underground",
-          state: tracking && tracking.run.phase !== "not_started" ? (failed ? "failed" : "done") : "pending",
-          detail: tracking
-            ? tracking.run.phase + " / " + tracking.run.stage
-            : "等待方向智能启动。"
-        },
-        {
-          label: "Plan",
-          state: canvas && canvas.plan ? "done" : failed ? "failed" : "pending",
-          detail: canvas && canvas.plan
-            ? canvas.plan.packageRef.packageId + " v" + canvas.plan.packageRef.version + "；" + canvas.plan.status
-            : failed
-              ? "未形成 approved Plan。"
-              : "等待父层 synthesis / convergence。"
-        },
-        {
-          label: "Aboveground",
-          state: canvas && canvas.aboveground && canvas.aboveground.artifact ? "done" : failed ? "pending" : "pending",
-          detail: canvas && canvas.aboveground && canvas.aboveground.artifact
-            ? canvas.aboveground.artifact.summary
-            : "等待 Plan consumer。"
-        },
-        {
-          label: "Fruits",
-          state: canvas && canvas.fruits && canvas.fruits.fruit ? "done" : failed ? "pending" : "pending",
-          detail: canvas && canvas.fruits && canvas.fruits.fruit
-            ? canvas.fruits.fruit.summary
-            : "等待可见成果和候选经验。"
+      if (!response || !response.transcript || !Array.isArray(response.transcript.events) || response.transcript.events.length === 0) {
+        dom.runPath.replaceChildren(railItem("等待", "任务开始后会显示正在读取、比较和整理的过程。"));
+        return;
+      }
+      const canvas = response.canvas;
+      if (canvas && canvas.kind === "desktop_chat_canvas") {
+        if (canvas.chat.answer) {
+          dom.runPath.replaceChildren(railItem("已回复", "这是一条普通对话，没有启动报告或项目分析流程。", "good"));
+          return;
         }
-      ];
-      dom.runPath.replaceChildren(...steps.map((step, index) => {
-        const row = document.createElement("div");
-        row.className = "path-step " + step.state;
-        const dot = document.createElement("span");
-        dot.className = "path-dot";
-        dot.textContent = step.state === "done" ? "✓" : step.state === "failed" ? "!" : String(index + 1);
-        const main = document.createElement("div");
-        main.className = "path-main";
-        const strong = document.createElement("strong");
-        strong.textContent = step.label;
-        const span = document.createElement("span");
-        span.textContent = step.detail;
-        main.append(strong, span);
-        const tag = document.createElement("span");
-        tag.className = "tag";
-        tag.textContent = step.state === "done" ? "完成" : step.state === "failed" ? "阻断" : "等待";
-        row.append(dot, main, tag);
-        return row;
-      }));
+        if (canvas.chat.upgradeRequest) {
+          dom.runPath.replaceChildren(railItem("正在展开任务", canvas.chat.upgradeRequest.reason, "warn"));
+          return;
+        }
+      }
+      const visibleEvents = response.transcript.events
+        .filter((event) => event.type !== "model.output.delta" && event.type !== "model.output.completed")
+        .slice(-5)
+        .reverse();
+      const rows = visibleEvents.map((event) =>
+        railItem(EVENT_LABELS[event.type] || "工作更新", event.type === "run.failed"
+          ? friendlyFailureText(event.summary || event.delta)
+          : productActivityText(event.type, event.summary || event.delta || "状态已更新。"))
+      );
+      dom.runPath.replaceChildren(...rows);
     }
 
     function renderMetrics(status, response) {
-      const tracking = response && response.tracking;
-      if (dom.railStatusBadge) {
-        dom.railStatusBadge.textContent = STATUS_LABELS[status] || status;
-        dom.railStatusBadge.className = "tag";
+      const canvas = response && response.canvas;
+      if (canvas && canvas.kind === "desktop_chat_canvas") {
+        const goalRef = canvas.taskSoil.contextRefs.find((ref) => ref.kind === "user_goal");
+        dom.runMetrics.replaceChildren(
+          railItem("本次消息", goalRef ? humanContextSummary(goalRef) : "普通对话。"),
+          railItem("上下文", canvas.chat.answer ? "未请求额外文件或网页。" : "等待判断是否需要更多材料。")
+        );
+        return;
       }
-      const rows = [
-        ["状态", STATUS_LABELS[status] || status],
-        ["阶段", tracking ? tracking.run.stage : "未启动"],
-        ["模型事件", tracking ? counts(tracking.modelTotals) : "0 / 0 / 0"],
-        ["候选", tracking ? String(tracking.candidates.total.total) : "0"]
-      ];
-      dom.runMetrics.replaceChildren(...rows.map((row) => {
-        const item = document.createElement("div");
-        item.className = "metric";
-        const key = document.createElement("span");
-        key.textContent = row[0];
-        const value = document.createElement("span");
-        value.textContent = row[1];
-        item.append(key, value);
-        return item;
-      }));
+      const refs = canvas ? canvas.taskSoil.contextRefs : [];
+      if (!refs || refs.length === 0) {
+        dom.runMetrics.replaceChildren(railItem("材料", "可以在输入框里补充文件、网页或项目引用。"));
+        return;
+      }
+      const rows = refs.slice(0, 8).map((ref) => railItem(contextKindLabel(ref.kind), humanContextSummary(ref)));
+      dom.runMetrics.replaceChildren(...rows);
     }
 
     function renderSupervision(response) {
-      const tracking = response && response.tracking;
-      const provider = tracking && tracking.provider;
-      const config = state.config;
-      const status = provider ? provider.status : config ? providerStatusFromConfig(config, dom.aiMode.value) : "missing_model_and_secret";
-      const todos = providerTodos(status, config || {});
-      const rows = [
-        statusLine(
-          "真实 AI",
-          provider
-            ? modeLabel(provider.requestedMode) + "；provider " + provider.providerKind + "；model " + (provider.model || "未填写") + "；secret " + (provider.secretConfigured ? "已配置" : "未配置")
-            : config
-              ? modeLabel(dom.aiMode.value) + "；provider " + config.providerKind + "；model " + (config.model || "未填写") + "；secret " + (config.secretConfigured ? "已配置" : "未配置")
-              : "配置读取后展示 provider、model 和 secret 状态。",
-          status === "ready" ? "" : status === "fake_provider" ? "warn" : "error"
-        ),
-        statusLine("配置待办", todos.length === 0 ? "可以发起真实 provider 调用。" : todos.join("；"), todos.length === 0 ? "" : "warn")
-      ];
-      dom.supervisionStatus.replaceChildren(...rows);
+      const canvas = response && response.canvas;
+      if (!canvas) {
+        dom.supervisionStatus.replaceChildren(railItem("等待", "任务开始后，相关引用会显示在这里。"));
+        return;
+      }
+      if (canvas.kind === "work_session_canvas") {
+        const directAnswer = canvas.workSession.directAnswer;
+        const report = canvas.workSession.report;
+        const artifact = canvas.workSession.artifact;
+        const rows = [];
+        if (directAnswer) rows.push(railItem("回答", directAnswer.decisionSummary || "已直接回答。", "good"));
+        if (directAnswer && directAnswer.evidenceRefs.length > 0) {
+          directAnswer.evidenceRefs.slice(0, 6).forEach((ref) => rows.push(railItem("依据", ref)));
+        }
+        if (artifact) rows.push(railItem("产物", artifact.summary, "good"));
+        if (report && report.evidenceRefs.length > 0) {
+          report.evidenceRefs.slice(0, 6).forEach((ref) => rows.push(railItem("依据", ref)));
+        }
+        if (rows.length === 0) rows.push(railItem("等待", "报告尚未形成引用。"));
+        dom.supervisionStatus.replaceChildren(...rows);
+        return;
+      }
+      if (canvas.kind === "desktop_chat_canvas") {
+        const rows = [];
+        if (canvas.chat.answer) rows.push(railItem("回答", "已直接回复。", "good"));
+        if (canvas.chat.upgradeRequest) rows.push(railItem("任务", canvas.chat.upgradeRequest.reason, "warn"));
+        if (rows.length === 0) rows.push(railItem("等待", "尚未形成回复。"));
+        dom.supervisionStatus.replaceChildren(...rows);
+        return;
+      }
+      dom.supervisionStatus.replaceChildren(
+        railItem("产物", canvas.aboveground.artifact ? canvas.aboveground.artifact.summary : "等待执行成果。", canvas.aboveground.artifact ? "good" : ""),
+        ...canvas.plan.keyEvidenceRefs.slice(0, 5).map((ref) => railItem("依据", ref))
+      );
     }
 
     function renderFlow(response) {
@@ -1958,26 +2276,20 @@ export function createPanelHtml(): string {
         dom.flowList.replaceChildren(statusLine("模型 / 工具流", "等待运行。模型和工具调用只展示安全 refs、状态和摘要。"));
         return;
       }
-      const model = counts(tracking.modelTotals);
-      const tool = counts(tracking.toolTotals);
-      const source = tracking.informationSources && tracking.informationSources.web
-        ? "web " + tracking.informationSources.web.provider + " / " + tracking.informationSources.web.status
-        : "information source pending";
       const calls = response.transcript && Array.isArray(response.transcript.modelCalls)
-        ? response.transcript.modelCalls.slice(-3).reverse()
+        ? response.transcript.modelCalls.slice(-4).reverse()
         : [];
       const list = document.createElement("div");
       list.className = "call-list";
       if (calls.length === 0) {
-        list.append(statusLine("模型调用明细", "暂无模型调用。真实运行开始后会显示 purpose、contract、状态和失败原因。"));
+        list.append(statusLine("模型调用明细", "暂无模型调用。"));
       } else {
         calls.forEach((call) => list.append(modelCallRow(call)));
       }
       dom.flowList.replaceChildren(
-        statusLine("模型调用", "请求 / 完成 / 失败 = " + model + "；provider " + tracking.provider.status, tracking.modelTotals.failed > 0 ? "error" : tracking.provider.status === "ready" || tracking.provider.status === "fake_provider" ? "" : "warn"),
+        statusLine("模型调用", "请求 / 完成 / 失败 = " + counts(tracking.modelTotals) + "；状态 " + tracking.provider.status, tracking.modelTotals.failed > 0 ? "error" : ""),
         list,
-        statusLine("工具调用", "请求 / 完成 / 失败 = " + tool + "；信息源 " + source, tracking.toolTotals.failed > 0 ? "warn" : ""),
-        statusLine("候选池", "候选总数 " + tracking.candidates.total.total + "；AI candidates " + tracking.aiCandidates.total + "；fallback " + tracking.aiCandidates.fallbackTotal)
+        statusLine("工具调用", "请求 / 完成 / 失败 = " + counts(tracking.toolTotals), tracking.toolTotals.failed > 0 ? "warn" : "")
       );
     }
 
@@ -1988,7 +2300,7 @@ export function createPanelHtml(): string {
       const latestFailed = failedCalls[failedCalls.length - 1];
       if (!response || (!response.error && failedCalls.length === 0)) {
         dom.failurePanel.replaceChildren(
-          statusLine("暂无阻断", "真实 provider 失败、输出契约失败或配置边界会显示在这里。", "good")
+          statusLine("暂无阻断", "模型服务失败、输出契约失败或配置边界会显示在这里。", "good")
         );
         return;
       }
@@ -2013,7 +2325,7 @@ export function createPanelHtml(): string {
       title.className = "call-title";
       title.textContent = (call.purpose || "unknown purpose") + (call.rootletKind ? " / " + call.rootletKind : "");
       const meta = document.createElement("div");
-      meta.className = "call-meta";
+      meta.className = "node-meta";
       meta.textContent = [
         call.outputContractId ? "contract " + call.outputContractId : "",
         call.model ? "model " + call.model : "",
@@ -2030,144 +2342,10 @@ export function createPanelHtml(): string {
     }
 
     function callStatusLabel(status) {
-      if (status === "requested") {
-        return "请求中";
-      }
-      if (status === "completed") {
-        return "完成";
-      }
-      if (status === "failed") {
-        return "失败";
-      }
+      if (status === "requested") return "请求中";
+      if (status === "completed") return "完成";
+      if (status === "failed") return "失败";
       return String(status || "");
-    }
-
-    function remediationForModelFailure(call) {
-      if (call.failureKind === "output_validation") {
-        return "模型返回已到达，但没有通过输出契约；下一步应收紧该 agent 的 JSON 协议、增加修复/重试回合，不能把失败输出当 Plan。";
-      }
-      if (call.failureKind === "provider_auth") {
-        return "检查 API Key、账号权限和 provider base URL。";
-      }
-      if (call.failureKind === "provider_rate_limit") {
-        return "降低并发或稍后重试；预算边界不能绕过。";
-      }
-      if (call.failureKind === "provider_network" || call.failureKind === "provider_timeout") {
-        return "检查网络、provider 可用性和超时设置。";
-      }
-      return "保留失败 refs，先定位 provider / contract / agent purpose，再决定是否重试。";
-    }
-
-    function remediationForError(error) {
-      if (error.code === "missing_api_key") {
-        return "保存 API Key 后重新运行；当前没有发起 provider 网络请求。";
-      }
-      if (error.code === "missing_model_name") {
-        return "填写模型名后重新运行；当前没有发起 provider 网络请求。";
-      }
-      if (error.code === "ai_disabled") {
-        return "切回 OpenAI-compatible；AI 禁用只用于边界检查，不会形成 approved Plan。";
-      }
-      return "查看模型/工具流和 Agent Run Tree，失败只展示安全摘要和 refs。";
-    }
-
-    function renderRiskPanel(response) {
-      const tracking = response && response.tracking;
-      const canvas = response && response.canvas;
-      if (!tracking && !canvas && !(response && response.error)) {
-        const configStatus = state.config ? providerStatusFromConfig(state.config, dom.aiMode.value) : "missing_model_and_secret";
-        const nextStep = configStatus === "ready"
-          ? "输入任务后可直接启动真实 provider 调用。"
-          : configStatus === "fake_provider"
-            ? "当前选择 Fake AI 测试模式；真实验证请切回 OpenAI-compatible。"
-            : "补齐 openai-compatible 的模型名和 API Key，或显式选择 Fake AI 测试模式。";
-        dom.riskPanel.replaceChildren(
-          statusLine("下一步", nextStep, configStatus === "ready" ? "" : "warn"),
-          statusLine("安全边界", "不会展示 raw prompt、raw provider response、hidden reasoning、raw tool output、secret 或未授权正文。")
-        );
-        return;
-      }
-      const uncertainty = canvas && canvas.plan && canvas.plan.uncertainty && canvas.plan.uncertainty.length > 0
-        ? canvas.plan.uncertainty.slice(0, 3).join("；")
-        : "未发现需要用户立即处理的不确定性。";
-      const nextStep = response.error
-        ? response.error.message
-        : tracking && tracking.run.status === "completed"
-          ? "查看 Plan、Aboveground artifact 和 Fruits；需要补充事实时后续进入 Nutrient Request。"
-          : tracking
-            ? tracking.run.waitingPoint
-            : "等待运行结果。";
-      dom.riskPanel.replaceChildren(
-        statusLine("风险 / 不确定性", uncertainty, response.error ? "error" : ""),
-        statusLine("下一步", nextStep, response.error ? "error" : ""),
-        statusLine("安全投影", "面板只显示安全投影、refs、短摘要和配置状态。")
-      );
-    }
-
-    function statusLine(title, body, tone) {
-      const item = document.createElement("div");
-      item.className = "status-line" + (tone ? " " + tone : "");
-      const strong = document.createElement("strong");
-      strong.textContent = title;
-      const span = document.createElement("span");
-      span.className = "node-meta";
-      span.textContent = body;
-      item.append(strong, span);
-      return item;
-    }
-
-    function renderCanvas(canvas, status) {
-      if (!canvas) {
-        dom.mainCanvas.replaceChildren();
-        const title = document.createElement("h2");
-        title.textContent = "Plan / Fruit 主画布";
-        const hint = document.createElement("p");
-        hint.className = "hint";
-        hint.textContent = status === "failed"
-          ? "运行未形成 approved Plan。请查看错误摘要和 Observation Panel。"
-          : "Desktop Shell 正在形成 Task Soil、Plan Package、Aboveground artifact 和 Fruits。";
-        dom.mainCanvas.append(title, hint);
-        return;
-      }
-      const title = document.createElement("h2");
-      title.textContent = "Plan / Fruit 主画布";
-      const intro = document.createElement("p");
-      intro.className = "hint";
-      intro.textContent = canvas.explanation.resultWhyReasonable;
-      const grid = document.createElement("div");
-      grid.className = "canvas-grid";
-      const contextLines = canvas.taskSoil.contextRefs.slice(0, 5).map((ref) => {
-        const preview = ref.readonlyPreview ? "；preview " + compact(ref.readonlyPreview.text, 90) + (ref.readonlyPreview.truncated ? "…" : "") : "";
-        return ref.kind + " " + ref.ref + (ref.summary ? "：" + ref.summary : "") + preview;
-      });
-      grid.append(
-        canvasItem("Task Soil", [
-          canvas.taskSoil.goalSummary,
-          "context refs " + canvas.taskSoil.contextRefs.length,
-          contextLines.join(" / "),
-          "permission refs " + canvas.taskSoil.permissionBoundaryRefs.join("，")
-        ].filter(Boolean).join("；")),
-        canvasItem("Plan Package", canvas.plan.packageRef.packageId + " v" + canvas.plan.packageRef.version + "；status " + canvas.plan.status + "；" + canvas.plan.recommendedDirection.reason),
-        canvasItem("Aboveground Execution Runtime", (canvas.aboveground.task ? canvas.aboveground.task.title : "task pending") + "；artifact " + (canvas.aboveground.artifact ? canvas.aboveground.artifact.summary : "pending") + "；verification " + (canvas.aboveground.verification.status || "pending")),
-        canvasItem("Fruits", [
-          canvas.fruits.fruit ? "fruit " + canvas.fruits.fruit.fruitId : "fruit pending",
-          canvas.fruits.runMemory ? "run memory " + canvas.fruits.runMemory.runMemoryId : "run memory pending",
-          canvas.fruits.experienceCandidate ? "experience candidate " + canvas.fruits.experienceCandidate.candidateId : "candidate pending",
-          canvas.fruits.pathBias ? "path bias " + canvas.fruits.pathBias.pathBiasId : "path bias pending"
-        ].join("；"))
-      );
-      dom.mainCanvas.replaceChildren(title, intro, grid);
-    }
-
-    function canvasItem(label, text) {
-      const item = document.createElement("div");
-      item.className = "canvas-item";
-      const strong = document.createElement("strong");
-      strong.textContent = label;
-      const span = document.createElement("span");
-      span.textContent = compact(text, 420);
-      item.append(strong, span);
-      return item;
     }
 
     function renderAgentTree(response) {
@@ -2183,7 +2361,6 @@ export function createPanelHtml(): string {
         title: tree.rootSpec.displayName || tree.rootAgentId,
         status: tree.status,
         meta: "root " + tree.rootAgentId + "；delegation " + tree.delegationDecisions.length + "；synthesis " + tree.parentSyntheses.length,
-        selected: true,
         onClick: () => renderRootInspector(tree)
       }));
       tree.childRuns.forEach((run) => {
@@ -2196,7 +2373,7 @@ export function createPanelHtml(): string {
             run.confidence !== undefined ? "confidence " + String(run.confidence) : ""
           ].filter(Boolean).join("；"),
           child: true,
-          onClick: () => renderAgentInspector(run, tree)
+          onClick: () => renderAgentInspector(run)
         }));
       });
       dom.agentTree.replaceChildren(...nodes);
@@ -2204,65 +2381,48 @@ export function createPanelHtml(): string {
         const latest = tree.parentSyntheses[tree.parentSyntheses.length - 1];
         renderSynthesisInspector(latest);
         dom.parentSynthesis.replaceChildren(
-          statusLine(
-            "父层 synthesis",
-            compact(latest.decisionSummary, 240) + "；material refs " + latest.retainedMaterialRefs.slice(0, 4).join("，")
-          )
+          statusLine("父层 synthesis", compact(latest.decisionSummary, 240) + "；material refs " + latest.retainedMaterialRefs.slice(0, 4).join("，"))
         );
       } else {
         renderRootInspector(tree);
-        dom.parentSynthesis.replaceChildren(statusLine("父层 synthesis", "中枢已建立运行树，等待 child/rootlet 材料回收。"));
+        dom.parentSynthesis.replaceChildren(statusLine("父层 synthesis", "等待 child/rootlet 材料回收。"));
       }
     }
 
     function agentNode(input) {
       const node = document.createElement("button");
       node.type = "button";
-      node.className = "agent-node secondary" + (input.child ? " child" : "") + (input.selected ? " selected" : "");
-      node.style.textAlign = "left";
-      node.style.width = "100%";
+      node.className = "agent-node" + (input.child ? " child" : "");
       node.addEventListener("click", input.onClick || (() => {}));
+      const body = document.createElement("div");
       const head = document.createElement("div");
       head.className = "node-head";
       const title = document.createElement("span");
       title.textContent = input.title;
-      const tag = document.createElement("span");
-      tag.className = "tag";
-      tag.textContent = agentStatusLabel(input.status);
-      head.append(title, tag);
+      head.append(title);
       const meta = document.createElement("div");
       meta.className = "node-meta";
       meta.textContent = input.meta || "";
-      node.append(head, meta);
+      body.append(head, meta);
+      const tag = document.createElement("span");
+      tag.className = "tag";
+      tag.textContent = agentStatusLabel(input.status);
+      node.append(body, tag);
       return node;
     }
 
     function agentStatusLabel(status) {
-      if (status === "completed") {
-        return "完成";
-      }
-      if (status === "running") {
-        return "运行中";
-      }
-      if (status === "failed") {
-        return "失败";
-      }
-      if (status === "stopped") {
-        return "停止";
-      }
-      if (status === "planned") {
-        return "计划";
-      }
-      if (status === "interrupted") {
-        return "打断";
-      }
-      if (status === "resumed") {
-        return "恢复";
-      }
+      if (status === "completed") return "完成";
+      if (status === "running") return "运行中";
+      if (status === "failed") return "失败";
+      if (status === "stopped") return "停止";
+      if (status === "planned") return "计划";
+      if (status === "interrupted") return "打断";
+      if (status === "resumed") return "恢复";
       return String(status || "");
     }
 
-    function renderAgentInspector(run, tree) {
+    function renderAgentInspector(run) {
       dom.agentInspector.replaceChildren(detailGrid([
         ["身份", run.displayName + " / " + run.agentId],
         ["spec", run.specId],
@@ -2286,7 +2446,7 @@ export function createPanelHtml(): string {
         ["权限", (spec.allowModel ? "model" : "no-model") + (spec.allowedTools.length ? " + " + spec.allowedTools.join("/") : "")],
         ["预算", "model rounds " + spec.budget.maxModelRounds + "；tool rounds " + spec.budget.maxToolRounds + (spec.budget.maxChildRuns ? "；children " + spec.budget.maxChildRuns : "")],
         ["派生", tree.childRuns.length + " child runs；" + tree.delegationDecisions.length + " delegation decisions"],
-        ["综合", tree.parentSyntheses.length + " parent syntheses；child output 不直通 Plan"]
+        ["综合", tree.parentSyntheses.length + " parent syntheses；child output 不直通结果"]
       ]));
     }
 
@@ -2327,12 +2487,12 @@ export function createPanelHtml(): string {
 
     function renderDebug(response) {
       const items = [];
-      if (response.tracking) {
+      if (response && response.tracking) {
         items.push("phase: " + response.tracking.run.phase + " / stage: " + response.tracking.run.stage);
         items.push("model requested/completed/failed: " + counts(response.tracking.modelTotals));
         items.push("tool requested/completed/failed: " + counts(response.tracking.toolTotals));
       }
-      if (response.error) {
+      if (response && response.error) {
         items.push("error: " + response.error.code);
       }
       dom.debugList.replaceChildren(...items.map((text) => {
@@ -2341,14 +2501,14 @@ export function createPanelHtml(): string {
         return li;
       }));
       dom.debugJson.textContent = JSON.stringify({
-        runId: response.runId,
-        runKind: response.runKind,
-        status: response.status,
-        canvas: response.canvas,
-        tracking: response.tracking,
-        summary: response.summary,
-        observation: response.observation,
-        error: response.error
+        runId: response && response.runId,
+        runKind: response && response.runKind,
+        status: response && response.status,
+        canvas: response && response.canvas,
+        tracking: response && response.tracking,
+        summary: response && response.summary,
+        observation: response && response.observation,
+        error: response && response.error
       }, null, 2);
     }
 
@@ -2365,16 +2525,15 @@ export function createPanelHtml(): string {
       const status = providerStatusFromConfig(config, selectedMode);
       const todos = providerTodos(status, config);
       dom.providerHint.textContent = status === "ready"
-        ? "推荐入口已就绪：OpenAI-compatible"
+        ? "真实模型已就绪"
         : status === "fake_provider"
-          ? "当前是 Fake AI 测试模式；真实工作流建议切换 OpenAI-compatible"
-          : "OpenAI-compatible 待配置：" + todos.join("；");
-      dom.workspaceStatus.textContent = "配置中心已连接";
-      dom.configStatus.textContent = "当前运行入口：" + modeLabel(selectedMode) + "；设置默认：" + modeLabel(config.defaultAiMode || "openai-compatible") + "；模型：" + (config.model || "未填写") + "；密钥：" + (config.secretConfigured ? "已配置" : "未配置");
+          ? "测试模式已启用"
+          : "待配置：" + todos.join("；");
+      dom.configStatus.textContent = "当前入口：" + modeLabel(selectedMode) + "；默认：" + modeLabel(config.defaultAiMode || "openai-compatible") + "；模型：" + (config.model || "未填写") + "；密钥：" + (config.secretConfigured ? "已配置" : "未配置");
       dom.configStatus.className = "hint" + (status === "missing_model" || status === "missing_secret" || status === "missing_model_and_secret" ? " error" : "");
       renderSupervision(undefined);
+      renderRightPanels(undefined);
       renderFailurePanel(undefined);
-      renderRiskPanel(undefined);
     }
 
     function preferredRunMode() {
@@ -2382,59 +2541,31 @@ export function createPanelHtml(): string {
     }
 
     function providerStatusFromConfig(config, requestedMode) {
-      if (requestedMode === "none") {
-        return "network_disabled";
-      }
-      if (requestedMode === "fake") {
-        return "fake_provider";
-      }
+      if (requestedMode === "none") return "network_disabled";
+      if (requestedMode === "fake") return "fake_provider";
       const missingModel = !config.model;
       const missingSecret = !config.secretConfigured;
-      if (missingModel && missingSecret) {
-        return "missing_model_and_secret";
-      }
-      if (missingModel) {
-        return "missing_model";
-      }
-      if (missingSecret) {
-        return "missing_secret";
-      }
+      if (missingModel && missingSecret) return "missing_model_and_secret";
+      if (missingModel) return "missing_model";
+      if (missingSecret) return "missing_secret";
       return "ready";
     }
 
     function providerTodos(status, config) {
-      if (status === "ready") {
-        return [];
-      }
-      if (status === "fake_provider") {
-        return ["Fake AI 只用于测试和 CI，不代表真实产品验证"];
-      }
-      if (status === "network_disabled") {
-        return ["AI 禁用只用于边界检查，不能形成 approved Plan"];
-      }
+      if (status === "ready") return [];
+      if (status === "fake_provider") return ["Fake AI 只用于测试和 CI，不代表真实产品验证"];
+      if (status === "network_disabled") return ["AI 禁用只用于边界检查，不能形成 completed artifact"];
       const todos = [];
-      if (status === "missing_model" || status === "missing_model_and_secret") {
-        todos.push("填写模型名");
-      }
-      if (status === "missing_secret" || status === "missing_model_and_secret") {
-        todos.push("保存 API Key");
-      }
-      if (!config.baseUrl) {
-        todos.push("确认 Base URL");
-      }
+      if (status === "missing_model" || status === "missing_model_and_secret") todos.push("填写模型名");
+      if (status === "missing_secret" || status === "missing_model_and_secret") todos.push("保存 API Key");
+      if (!config.baseUrl) todos.push("确认 Base URL");
       return todos;
     }
 
     function modeLabel(mode) {
-      if (mode === "openai-compatible") {
-        return "OpenAI-compatible 推荐";
-      }
-      if (mode === "fake") {
-        return "Fake AI 测试模式";
-      }
-      if (mode === "none") {
-        return "AI 禁用";
-      }
+      if (mode === "openai-compatible") return "OpenAI-compatible 推荐";
+      if (mode === "fake") return "Fake AI 测试模式";
+      if (mode === "none") return "AI 禁用";
       return String(mode || "");
     }
 
@@ -2443,7 +2574,7 @@ export function createPanelHtml(): string {
       if (!webSearch) {
         return;
       }
-      dom.toolConfigStatus.textContent = "搜索 provider：" + webSearch.provider + "；状态：" + webSearch.status + "；密钥：" + (webSearch.secretConfigured ? "已配置" : "未配置");
+      dom.toolConfigStatus.textContent = "搜索服务：" + webSearch.provider + "；状态：" + webSearch.status + "；密钥：" + (webSearch.secretConfigured ? "已配置" : "未配置");
       dom.toolConfigStatus.className = "hint";
     }
 
@@ -2456,10 +2587,10 @@ export function createPanelHtml(): string {
         li.className = "run-item" + (index === 0 ? " active" : "");
         const title = document.createElement("div");
         title.className = "run-title";
-        title.textContent = compact(item.goal, 34);
+        title.textContent = compact(item.goal, 28);
         const meta = document.createElement("div");
         meta.className = "run-meta";
-        meta.textContent = item.runId;
+        meta.textContent = index === 0 ? "刚刚运行" : "历史任务";
         li.append(title, meta);
         return li;
       }));
@@ -2471,12 +2602,16 @@ export function createPanelHtml(): string {
       state.lastSequence = 0;
       state.currentRunId = undefined;
       state.lastFocusedTerminalRunId = undefined;
+      state.modelOutputEntries = new Map();
+      state.assistantEntry = undefined;
       state.inspectorPinned = false;
       setInspectorTab("overview", false);
+      closeDeveloperDrawer();
       dom.goalInput.value = "";
       dom.contextRefsInput.value = "";
       dom.permissionRefsInput.value = "";
-      dom.introBlock.style.display = "";
+      dom.sessionTitle.textContent = "新任务";
+      dom.introBlock.hidden = false;
       dom.transcript.replaceChildren(emptyTranscriptNode());
       renderCanvas(undefined, "pending");
       setRunStatus("pending");
@@ -2484,17 +2619,95 @@ export function createPanelHtml(): string {
       renderMetrics("pending", undefined);
       renderAgentTree(undefined);
       renderSupervision(undefined);
+      renderRightPanels(undefined);
       renderFailurePanel(undefined);
       renderFlow(undefined);
-      renderRiskPanel(undefined);
       dom.debugJson.textContent = "{}";
     }
 
     function emptyTranscriptNode() {
       const node = document.createElement("div");
       node.className = "empty-transcript";
-      node.textContent = "Agent transcript 为空。输入任务后，这里会开始流式追加工作过程。";
+      node.textContent = "暂无活动。开始任务后，这里会显示正在读取、比较、整理和生成的过程。";
       return node;
+    }
+
+    function statusLine(title, body, tone) {
+      const item = document.createElement("div");
+      item.className = "status-line" + (tone ? " " + tone : "");
+      const strong = document.createElement("strong");
+      strong.textContent = title;
+      const span = document.createElement("span");
+      span.className = "node-meta";
+      span.textContent = body;
+      item.append(strong, span);
+      return item;
+    }
+
+    function railItem(title, body, tone) {
+      const row = document.createElement("div");
+      row.className = "rail-row" + (tone ? " " + tone : "");
+      const key = document.createElement("div");
+      key.className = "rail-key";
+      key.textContent = title;
+      const value = document.createElement("div");
+      value.className = "rail-value";
+      value.textContent = compact(body || "暂无。", 220);
+      row.append(key, value);
+      return row;
+    }
+
+    function contextKindLabel(kind) {
+      if (kind === "file") return "文件";
+      if (kind === "web") return "网页";
+      if (kind === "project") return "项目";
+      if (kind === "user_goal") return "任务";
+      return "工作区";
+    }
+
+    function humanContextSummary(ref) {
+      if (ref.readonlyPreview && ref.readonlyPreview.text) {
+        return (ref.readonlyPreview.title || "材料预览") + "：" + compact(ref.readonlyPreview.text, 120);
+      }
+      if (ref.summary && ref.summary.indexOf("Desktop Shell provided") < 0) {
+        return compact(ref.summary, 140);
+      }
+      if (ref.kind === "workspace") {
+        return "当前工作区以引用方式提供。";
+      }
+      if (ref.kind === "user_goal") {
+        return "用户任务已记录。";
+      }
+      return compact(ref.ref || ref.kind || "引用", 120);
+    }
+
+    function remediationForModelFailure(call) {
+      if (call.failureKind === "output_validation") {
+        return "模型返回已到达，但没有通过输出契约；下一步应收紧该 agent 的 JSON 协议、增加修复 / 重试回合，不能把失败输出当结果。";
+      }
+      if (call.failureKind === "provider_auth") return "检查 API Key、账号权限和 Base URL。";
+      if (call.failureKind === "provider_rate_limit") return "降低并发或稍后重试；预算边界不能绕过。";
+      if (call.failureKind === "provider_network" || call.failureKind === "provider_timeout") return "检查网络、模型服务可用性和超时设置。";
+      return "保留失败 refs，先定位模型服务 / contract / agent purpose，再决定是否重试。";
+    }
+
+    function remediationForError(error) {
+      if (!error) return "检查输入和配置后重试。";
+      if (error.code === "missing_api_key") return "打开诊断里的设置，保存 API Key 后重试。";
+      if (error.code === "missing_model") return "打开诊断里的设置，填写模型名后重试。";
+      if (error.code === "missing_model_and_secret") return "打开诊断里的设置，填写模型名并保存 API Key 后重试。";
+      if (error.code === "ai_disabled") return "AI 禁用只能验证边界，不能产出完成结果；请切换到真实模型或测试模式。";
+      return "检查诊断详情，处理配置、权限或模型服务问题后重试。";
+    }
+
+    function setRunStatus(status) {
+      dom.runStatus.textContent = STATUS_LABELS[status] || status || "待开始";
+    }
+
+    function setButtons(enabled) {
+      dom.runButton.disabled = !enabled;
+      dom.saveConfigButton.disabled = !enabled;
+      dom.saveToolConfigButton.disabled = !enabled;
     }
 
     function stopLiveUpdates() {
@@ -2506,45 +2719,29 @@ export function createPanelHtml(): string {
       state.pollingTimer = undefined;
     }
 
-    function setRunStatus(status) {
-      dom.runStatus.textContent = STATUS_LABELS[status] || status;
-      dom.runStatus.className = "status-pill " + status;
-    }
-
-    function setButtons(enabled) {
-      dom.runButton.disabled = !enabled;
-      dom.saveConfigButton.disabled = !enabled;
-      dom.saveToolConfigButton.disabled = !enabled;
-    }
-
-    async function requestJson(path, options) {
+    async function requestJson(url, options) {
       const init = options || {};
-      const response = await fetch(path, {
+      const response = await fetch(url, {
         method: init.method || "GET",
-        headers: init.body === undefined ? undefined : { "content-type": "application/json" },
-        body: init.body === undefined ? undefined : JSON.stringify(init.body)
+        headers: init.body ? { "content-type": "application/json" } : undefined,
+        body: init.body ? JSON.stringify(init.body) : undefined
       });
       const text = await response.text();
       let body;
       try {
-        body = text.trim().length === 0 ? {} : JSON.parse(text);
+        body = text ? JSON.parse(text) : {};
       } catch {
-        throw new Error("面板返回了无效 JSON。");
+        body = { message: text || "响应解析失败。" };
       }
-      if (!response.ok || body.ok === false) {
-        const error = new Error(body.error && body.error.message ? body.error.message : "面板请求失败。");
-        error.details = body;
-        throw error;
+      if (!response.ok) {
+        throw new Error(body.error && body.error.message ? body.error.message : body.message || "请求失败。");
       }
       return body;
     }
 
     function compact(value, maxLength) {
-      const text = String(value || "").trim();
-      if (text.length <= maxLength) {
-        return text;
-      }
-      return text.slice(0, maxLength - 1) + "…";
+      const text = String(value || "");
+      return text.length <= maxLength ? text : text.slice(0, Math.max(0, maxLength - 1)) + "…";
     }
   </script>
 </body>

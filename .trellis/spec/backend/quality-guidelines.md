@@ -17,7 +17,7 @@
 - `pnpm panel:smoke`：先 build，再执行 `node dist/app/panel.js --port 0 --smoke`，证明 panel 命令可启动并退出。
 - `pnpm panel:desktop`：先 build，再执行 Electron 桌面入口 `dist/app/panel-desktop.js`，默认请求动态端口 `0` 后创建桌面窗口并加载本地 panel server URL；只有用户显式传入 `--port` 时才使用固定端口。
 - `pnpm panel:desktop:smoke`：先 build，再执行 Electron 桌面入口的 smoke 模式，证明桌面宿主能启动本地 server、关闭 server 并退出，且不创建窗口。
-- 真实 AI smoke：先执行 `pnpm build`，再显式执行 `node dist/app/real-ai-smoke.js "<goal>"`；该命令不属于默认 `pnpm test`，只在用户明确要验证真实 provider 时运行。
+- 真实 AI smoke：显式执行 `pnpm smoke:real-ai -- "<goal>"`，等价于先 `pnpm build` 再运行 `node dist/app/real-ai-smoke.js "<goal>"`；该命令不属于默认 `pnpm test`，只在用户明确要验证真实 provider 时运行。
 
 ## Contracts
 
@@ -54,7 +54,7 @@
 | `--ai openai-compatible` 缺少 key / model 时仍尝试网络或泄漏密钥 | `pnpm test` 或边界检查失败 |
 | panel `openai-compatible` 缺少 key 时仍调用 provider fetch | `pnpm test` 失败 |
 | Desktop Shell 真实 provider 返回不合约输出时只暴露通用内部错误，缺少 purpose / contract id / failure kind / call ref | `pnpm test` 失败 |
-| `node dist/app/real-ai-smoke.js` 缺少 API key 或模型名 | 输出 `status: "skipped"` 和 configuration boundary，退出码为 0，不触发 provider fetch |
+| `pnpm smoke:real-ai` / `node dist/app/real-ai-smoke.js` 缺少 API key 或模型名 | 输出 `status: "skipped"` 和 configuration boundary，退出码为 0，不触发 provider fetch |
 | settings store、EventLog、Snapshot、summary、trace、transcript、SSE、HTTP JSON 或测试快照出现 raw API key / token / 完整 prompt / provider raw response / hidden reasoning / raw tool output / 未校验模型输出 / rootlet parser 会拒绝的候选字段 | `pnpm test` 或安全检查失败 |
 | `pnpm panel` 不能启动并打印 URL | panel smoke 失败 |
 | `pnpm panel:desktop:smoke` 不能启动后退出，或 smoke 创建真实窗口 | desktop smoke 失败 |

@@ -26,7 +26,12 @@ export type ModelPurpose =
   | "convergence_advisory"
   | "convergence_judgment"
   | "handoff_narrative"
-  | "candidate_aggregation";
+  | "candidate_aggregation"
+  | "desktop_chat"
+  | "work_session_decision"
+  | "work_session_child_material"
+  | "work_session_synthesis"
+  | "work_session_direct_answer";
 
 export type ModelOutputKind = "candidate" | "draft" | "explanation" | "evidence_suggestion";
 

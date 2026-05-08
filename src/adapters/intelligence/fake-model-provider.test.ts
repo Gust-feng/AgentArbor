@@ -227,6 +227,91 @@ test("FakeModelProvider default output satisfies underground handoff narrative c
   );
 });
 
+test("FakeModelProvider default output satisfies work session direct answer text contract", async () => {
+  const { channel } = createFakeProviderChannel();
+
+  const response = await channel.request(
+    createValidModelRequest({
+      purpose: "work_session_direct_answer",
+      sanitizedMessages: [
+        {
+          role: "user",
+          content: "Raw user question: 你是什么模型？",
+        },
+      ],
+      outputContract: {
+        contractId: "work_session.direct_answer.v1",
+        outputKind: "explanation",
+        format: "text",
+        minTextLength: 1,
+        maxTextLength: 12000,
+        visibleOutput: {
+          fields: ["text"],
+          maxFieldLength: 1200,
+        },
+      },
+    })
+  );
+
+  assert.equal(response.status, "completed");
+  assert.equal(response.validation.status, "passed");
+  assert.equal(response.structuredOutput, undefined);
+  assert.equal(response.textOutput?.includes("AgentArbor 桌面助手"), true);
+});
+
+test("FakeModelProvider desktop chat either answers text or requests Work Session upgrade", async () => {
+  const { channel } = createFakeProviderChannel();
+
+  const answer = await channel.request(
+    createValidModelRequest({
+      purpose: "desktop_chat",
+      sanitizedMessages: [{ role: "user", content: "User message: 你是什么模型？" }],
+      outputContract: {
+        contractId: "desktop.chat_response.v1",
+        outputKind: "explanation",
+        format: "text",
+        minTextLength: 1,
+        maxTextLength: 12000,
+      },
+      tools: [
+        {
+          name: "start_work_session",
+          description: "Upgrade into Work Session.",
+          inputSchema: { type: "object", properties: { reason: { type: "string" } }, required: ["reason"] },
+        },
+      ],
+      toolChoice: "auto",
+    })
+  );
+  const upgrade = await channel.request(
+    createValidModelRequest({
+      purpose: "desktop_chat",
+      sanitizedMessages: [{ role: "user", content: "User message: 分析当前仓库的问题并给出优化建议" }],
+      outputContract: {
+        contractId: "desktop.chat_response.v1",
+        outputKind: "explanation",
+        format: "text",
+        minTextLength: 1,
+        maxTextLength: 12000,
+      },
+      tools: [
+        {
+          name: "start_work_session",
+          description: "Upgrade into Work Session.",
+          inputSchema: { type: "object", properties: { reason: { type: "string" } }, required: ["reason"] },
+        },
+      ],
+      toolChoice: "auto",
+    })
+  );
+
+  assert.equal(answer.status, "completed");
+  assert.equal(answer.textOutput?.includes("AgentArbor 桌面助手"), true);
+  assert.equal(upgrade.status, "completed");
+  assert.equal(upgrade.finishReason, "tool_call");
+  assert.equal(upgrade.toolCalls?.[0]?.toolName, "start_work_session");
+});
+
 function createFakeProviderChannel(options: ConstructorParameters<typeof FakeModelProvider>[0] = {}) {
   const eventLog = new InMemoryEventLog();
   const bus = new InMemoryMessageBus(eventLog);

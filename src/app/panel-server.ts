@@ -7,7 +7,14 @@ import {
   UndergroundAiConfigurationError,
   type UndergroundAiMode,
 } from "./intelligence-channel-factory.js";
-import { runMinimalLoop } from "./minimal-loop.js";
+import {
+  runCognitiveWorkSession,
+  type CognitiveWorkSessionRuntimeContext,
+} from "./cognitive-work-session.js";
+import {
+  runDesktopChatSession,
+  type DesktopChatSessionRuntimeContext,
+} from "./desktop-chat-session.js";
 import {
   runUndergroundDirectionSessionWithIntelligence,
   type UndergroundDirectionSessionRuntimeContext,
@@ -38,9 +45,15 @@ import {
   type PanelRunTrackingReadModel,
   type PanelRunTranscript,
 } from "./panel-run-read-model.js";
-import { createPanelRunCanvas, type PanelRunCanvasReadModel } from "./panel-canvas-read-model.js";
+import {
+  createDesktopChatCanvas,
+  createPanelRunCanvas,
+  createWorkSessionCanvas,
+  type PanelRunCanvasReadModel,
+} from "./panel-canvas-read-model.js";
 import { PanelRunJobStore, type PanelRunJob, type PanelRunKind } from "./panel-run-jobs.js";
 import type { EventLogEntry } from "../kernel/events/in-memory-event-log.js";
+import type { AgentRunTree } from "../domain/underground/index.js";
 import {
   parseDesktopTaskSoilInput,
   TaskSoilInputValidationError,
@@ -89,7 +102,7 @@ type PanelRunResponse = {
   readonly config: SanitizedModelProviderConfig;
   readonly informationAccess: SanitizedInformationAccessConfig;
   readonly summary?: UndergroundDemoSummary;
-  readonly observation: PanelObservationReadModel;
+  readonly observation?: PanelObservationReadModel;
   readonly tracking: PanelRunTrackingReadModel;
   readonly trace: PanelRunTraceReadModel;
   readonly transcript: PanelRunTranscript;
@@ -100,14 +113,20 @@ type PanelRunResponse = {
 
 type PanelRunExecutionResult = {
   readonly summary?: UndergroundDemoSummary;
-  readonly observation: PanelObservationReadModel;
+  readonly observation?: PanelObservationReadModel;
   readonly eventEntries: readonly EventLogEntry[];
+  readonly agentRunTree?: AgentRunTree;
   readonly canvas?: PanelRunCanvasReadModel;
 };
 
 type PanelToolsConfig = {
   readonly webSearch: SanitizedWebSearchConfig;
 };
+
+type PanelRuntimeReadyContext =
+  | UndergroundDirectionSessionRuntimeContext
+  | CognitiveWorkSessionRuntimeContext
+  | DesktopChatSessionRuntimeContext;
 
 class PanelHttpError extends Error {
   constructor(
@@ -326,17 +345,20 @@ async function handleRunRequest(
       requestedMode: runInput.aiMode,
       summary: run.summary,
       observation: run.observation,
+      agentRunTree: run.agentRunTree,
       eventEntries: run.eventEntries,
     });
     const transcript = createPanelRunTranscript({
-      runId: run.observation.traceId,
+      runId: run.observation?.traceId ?? run.canvas?.taskSoil.traceId ?? "panel-sync-run",
       status: "completed",
       eventEntries: run.eventEntries,
       summary: run.summary,
       observation: run.observation,
+      agentRunTree: run.agentRunTree,
       createdAt: run.eventEntries[0]?.recordedAt ?? new Date(0).toISOString(),
       updatedAt: run.eventEntries.at(-1)?.recordedAt ?? new Date(0).toISOString(),
     });
+    const responseRunId = run.observation?.traceId ?? run.canvas?.taskSoil.traceId ?? "panel-sync-run";
     writeJson(response, 200, {
       ok: true,
       runKind,
@@ -350,7 +372,7 @@ async function handleRunRequest(
       transcript,
       workNotes: transcript.workNotes,
       streamCursor: {
-        runId: run.observation.traceId,
+        runId: responseRunId,
         lastSequence: transcript.events.at(-1)?.sequence ?? 0,
       },
       canvas: run.canvas,
@@ -515,6 +537,7 @@ async function executePanelRunJob(runtime: PanelRuntime, runId: string): Promise
       informationAccess: currentInformationAccess,
       summary: run.summary,
       observation: run.observation,
+      agentRunTree: run.agentRunTree,
       canvas: run.canvas,
     });
   } catch (error) {
@@ -592,6 +615,7 @@ function createPanelRunJobResponse(job: PanelRunJob): {
   const informationAccess = job.completed?.informationAccess ?? job.failed?.informationAccess ?? job.informationAccess;
   const summary = job.completed?.summary;
   const observation = job.completed?.observation;
+  const agentRunTree = job.completed?.agentRunTree;
   const trace = createPanelRunTrace({ status: job.status, eventEntries });
   const tracking = createPanelRunTracking({
     status: job.status,
@@ -600,6 +624,7 @@ function createPanelRunJobResponse(job: PanelRunJob): {
     requestedMode: job.aiMode,
     summary,
     observation,
+    agentRunTree,
     eventEntries,
   });
   const streamEvents = syncPanelRunStreamEventsForJob(job);
@@ -610,6 +635,7 @@ function createPanelRunJobResponse(job: PanelRunJob): {
       eventEntries,
       summary,
       observation,
+      agentRunTree,
       createdAt: job.createdAt,
       updatedAt: job.updatedAt,
     }),
@@ -719,7 +745,7 @@ async function runForPanel(
   aiMode: UndergroundAiMode,
   taskSoilInput: DesktopTaskSoilInput | undefined,
   options: {
-    readonly onRuntimeReady?: (context: UndergroundDirectionSessionRuntimeContext) => void;
+    readonly onRuntimeReady?: (context: PanelRuntimeReadyContext) => void;
     readonly onModelOutputDelta?: (delta: ModelOutputDelta) => void;
   } = {}
 ): Promise<PanelRunExecutionResult> {
@@ -734,7 +760,7 @@ async function runDesktopForPanel(
   aiMode: UndergroundAiMode,
   taskSoilInput: DesktopTaskSoilInput | undefined,
   options: {
-    readonly onRuntimeReady?: (context: UndergroundDirectionSessionRuntimeContext) => void;
+    readonly onRuntimeReady?: (context: PanelRuntimeReadyContext) => void;
     readonly onModelOutputDelta?: (delta: ModelOutputDelta) => void;
   } = {}
 ): Promise<PanelRunExecutionResult> {
@@ -743,46 +769,74 @@ async function runDesktopForPanel(
   }
 
   const aiEnvironment = await runtime.configCenter.createUndergroundAiEnvironment();
+  const aiConfig =
+    aiMode === "fake"
+      ? createUndergroundAiRuntimeConfig({ mode: "fake", env: aiEnvironment, onModelOutputDelta: options.onModelOutputDelta })
+      : createUndergroundAiRuntimeConfig({
+          mode: "openai-compatible",
+          env: aiEnvironment,
+          fetch: runtime.providerFetch,
+          onModelOutputDelta: options.onModelOutputDelta,
+        });
+
+  if (!aiConfig.enabled) {
+    throw createUndergroundAiDisabledConfigurationError(aiConfig.summaryInput);
+  }
+
   const createToolCenter = await createConfiguredToolCenterFactory(runtime.configCenter, {
     fetch: runtime.providerFetch,
   });
-  const result = await runMinimalLoop(goal, {
+  const chat = await runDesktopChatSession(goal, {
     aiMode,
-    aiEnvironment,
-    providerFetch: runtime.providerFetch,
+    createIntelligenceChannel: aiConfig.createIntelligenceChannel,
     taskSoilInput,
-    createToolCenter,
     onRuntimeReady: options.onRuntimeReady,
     onModelOutputDelta: options.onModelOutputDelta,
   });
-  const observation = toPanelObservation(result.observationSnapshot);
-  const eventEntries = result.runtime.eventLog.list();
-  const config = await runtime.configCenter.getModelProviderConfig();
-  const informationAccess = await runtime.configCenter.getInformationAccessConfig();
-  const tracking = createPanelRunTracking({
-    status: "completed",
-    config,
-    informationAccess,
-    requestedMode: aiMode,
-    observation,
-    eventEntries,
+  if (chat.status === "answered") {
+    const eventEntries = chat.runtime.eventLog.list();
+    const transcript = createPanelRunTranscript({
+      runId: chat.traceId,
+      status: "completed",
+      eventEntries,
+      createdAt: eventEntries[0]?.recordedAt ?? new Date(0).toISOString(),
+      updatedAt: eventEntries.at(-1)?.recordedAt ?? new Date(0).toISOString(),
+    });
+    return {
+      eventEntries,
+      canvas: createDesktopChatCanvas({
+        result: chat,
+        transcript,
+      }),
+    };
+  }
+  if (chat.status === "failed" || chat.status === "stopped") {
+    throw new PanelHttpError(500, "desktop_chat_failed", chat.failureMessage ?? "桌面助手没有形成回答。");
+  }
+
+  const workSessionGoal = chat.upgradeRequest?.goal ?? goal;
+  const result = await runCognitiveWorkSession(workSessionGoal, {
+    aiMode,
+    createIntelligenceChannel: aiConfig.createIntelligenceChannel,
+    taskSoilInput,
+    createToolCenter,
+    onRuntimeReady: options.onRuntimeReady,
   });
+  const eventEntries = result.runtime.eventLog.list();
   const transcript = createPanelRunTranscript({
-    runId: result.observationSnapshot.traceId,
-    status: "completed",
+    runId: result.traceId,
+    status: result.status === "completed" ? "completed" : "failed",
     eventEntries,
-    observation,
+    agentRunTree: result.agentRunTree,
     createdAt: eventEntries[0]?.recordedAt ?? new Date(0).toISOString(),
     updatedAt: eventEntries.at(-1)?.recordedAt ?? new Date(0).toISOString(),
   });
 
   return {
-    observation,
     eventEntries,
-    canvas: createPanelRunCanvas({
+    agentRunTree: result.agentRunTree,
+    canvas: createWorkSessionCanvas({
       result,
-      observation,
-      tracking,
       transcript,
     }),
   };
@@ -793,7 +847,7 @@ async function runUndergroundForPanel(
   goal: string,
   aiMode: UndergroundAiMode,
   options: {
-    readonly onRuntimeReady?: (context: UndergroundDirectionSessionRuntimeContext) => void;
+    readonly onRuntimeReady?: (context: PanelRuntimeReadyContext) => void;
     readonly onModelOutputDelta?: (delta: ModelOutputDelta) => void;
   } = {}
 ): Promise<PanelRunExecutionResult> {
@@ -1039,9 +1093,9 @@ function latestModelFailureMessage(eventEntries: readonly EventLogEntry[]): stri
   const location = callRef.length > 0 ? `；调用 ${callRef}` : "";
 
   if (failureKind === "output_validation") {
-    return `真实 AI 输出未通过契约校验：${purpose} / ${contractId}；validation ${validationStatus}，${retryable}${location}。运行已停止，没有生成 approved Plan。`;
+    return `真实 AI 输出未通过契约校验：${purpose} / ${contractId}；validation ${validationStatus}，${retryable}${location}。运行已停止，没有生成 completed artifact。`;
   }
-  return `真实 AI 调用失败：${purpose} / ${contractId}；原因 ${failureKind}，validation ${validationStatus}，${retryable}${location}。运行已停止，没有生成 approved Plan。`;
+  return `真实 AI 调用失败：${purpose} / ${contractId}；原因 ${failureKind}，validation ${validationStatus}，${retryable}${location}。运行已停止，没有生成 completed artifact。`;
 }
 
 function modelRequestedPayloadFor(eventEntries: readonly EventLogEntry[], requestId: string): Record<string, unknown> {

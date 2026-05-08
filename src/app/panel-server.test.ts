@@ -10,40 +10,54 @@ import { startLocalPanelServer, type PanelProviderFetch } from "./panel-server.j
 
 test("panel HTML defaults to Simplified Chinese labels and status text", () => {
   const html = createPanelHtml();
+  const firstScreenHtml = html.slice(
+    html.indexOf("<!-- ordinary-screen-start -->"),
+    html.indexOf("<!-- ordinary-screen-end -->")
+  );
 
   assert.equal(html.includes("AgentArbor 面板"), true);
-  assert.equal(html.includes("Desktop Shell 工作台"), true);
-  assert.equal(html.includes("Plan / Fruit 主画布"), true);
-  assert.equal(html.includes("Task Soil"), true);
-  assert.equal(html.includes("Task Soil context refs"), true);
-  assert.equal(html.includes("Aboveground Execution Runtime"), true);
-  assert.equal(html.includes("Fruits"), true);
-  assert.equal(html.includes("Agent transcript 为空"), true);
-  assert.equal(html.includes("Main Canvas 展示 Plan / Fruit"), true);
-  assert.equal(html.includes("描述你的任务。Desktop Shell 会先形成 Task Soil，再展示 Plan 和 Fruits。"), true);
+  assert.equal(firstScreenHtml.includes("新建任务"), true);
+  assert.equal(firstScreenHtml.includes("要完成什么？"), true);
+  assert.equal(firstScreenHtml.includes("技能"), true);
+  assert.equal(firstScreenHtml.includes("自动化"), true);
+  assert.equal(firstScreenHtml.includes("任务列表"), true);
+  assert.equal(firstScreenHtml.includes("补充材料和权限"), true);
+  assert.equal(firstScreenHtml.includes("材料引用"), true);
+  assert.equal(firstScreenHtml.includes("权限说明"), true);
+  assert.equal(firstScreenHtml.includes("工作会话"), true);
+  assert.equal(firstScreenHtml.includes("分析当前项目的主要问题"), true);
+  assert.equal(firstScreenHtml.includes("待办"), true);
+  assert.equal(firstScreenHtml.includes("上下文"), true);
+  assert.equal(firstScreenHtml.includes("近期活动"), true);
+  assert.equal(firstScreenHtml.includes("等待任务开始"), true);
+  assert.equal(firstScreenHtml.includes("暂无活动。开始任务后，这里会显示正在读取、比较、整理和生成的过程。"), true);
+  assert.equal(firstScreenHtml.includes("输入一个真实任务，必要时补充文件、网页或限制条件。"), true);
+  assert.equal(firstScreenHtml.includes("Code"), false);
+  assert.equal(html.includes('<aside class="context-pane"'), true);
+  assert.equal(html.includes('<aside class="developer-drawer"'), true);
+  assert.equal(html.includes("需要确认"), true);
+  assert.equal(html.includes("证据"), true);
   assert.equal(html.includes('<option value="none">AI 禁用</option>'), true);
   assert.equal(html.includes('<option value="fake">Fake AI 测试模式</option>'), true);
   assert.equal(html.includes('<option value="openai-compatible">OpenAI-compatible 推荐</option>'), true);
-  assert.equal(html.includes("运行监督工作台"), true);
-  assert.equal(html.includes("运行监督分区"), true);
-  assert.equal(html.includes("运行路径"), true);
-  assert.equal(html.includes("运行健康"), true);
   assert.equal(html.includes("真实 AI 诊断"), true);
   assert.equal(html.includes("模型 / 工具流"), true);
-  assert.equal(html.includes("Agent 树"), true);
-  assert.equal(html.includes("Agent Run Tree / 父层综合"), true);
-  assert.equal(html.includes("风险 / 不确定性 / 下一步"), true);
-  assert.equal(html.includes("真实 provider 失败、输出契约失败或配置边界会显示在这里。"), true);
+  assert.equal(html.includes("运行树 / 父层综合"), true);
+  assert.equal(html.includes("模型服务失败、输出契约失败或配置边界会显示在这里。"), true);
   assert.equal(html.includes("折叠调试区"), true);
-  assert.equal(html.includes("执行智能"), true);
-  assert.equal(html.includes("暂无 Desktop Shell 任务"), true);
+  assert.equal(html.includes("暂无最近任务"), true);
   assert.equal(html.includes("模型配置"), true);
   assert.equal(html.includes("工具配置"), true);
-  assert.equal(html.includes("启动"), true);
-  assert.equal(html.includes("搜索 Provider"), true);
+  assert.equal(html.includes("开始任务后会显示在这里。"), true);
+  assert.equal(html.includes("搜索 Provider"), false);
+  assert.equal(html.includes("搜索服务"), true);
   assert.equal(html.includes("保存工具配置"), true);
   assert.equal(html.includes("Tavily API Key"), true);
-  assert.equal(html.includes("待启动 (pending)"), true);
+  assert.equal(firstScreenHtml.includes("待启动 (pending)"), false);
+  assert.equal(firstScreenHtml.includes("pending"), false);
+  assert.equal(firstScreenHtml.includes("running"), false);
+  assert.equal(firstScreenHtml.includes("completed"), false);
+  assert.equal(firstScreenHtml.includes("failed"), false);
   assert.equal(html.includes("run.started"), true);
   assert.equal(html.includes("model.output.delta"), true);
   assert.equal(html.includes("tool.completed"), true);
@@ -73,6 +87,24 @@ test("panel HTML defaults to Simplified Chinese labels and status text", () => {
   assert.equal(html.includes("<h2>配置中心</h2>"), false);
   assert.equal(html.includes("<h2>Provider 状态</h2>"), false);
   assert.equal(html.includes("Agent Run Tree inspector"), false);
+  assert.equal(firstScreenHtml.includes("Task Soil"), false);
+  assert.equal(firstScreenHtml.includes("Plan Package"), false);
+  assert.equal(firstScreenHtml.includes("Observation Panel"), false);
+  assert.equal(firstScreenHtml.includes("Agent Run Tree"), false);
+  assert.equal(firstScreenHtml.includes("provider"), false);
+  assert.equal(firstScreenHtml.includes("Desktop Shell 工作台"), false);
+  assert.equal(firstScreenHtml.includes("方向智能"), false);
+  assert.equal(firstScreenHtml.includes("执行智能"), false);
+  assert.equal(firstScreenHtml.includes("OpenAI-compatible"), false);
+  assert.equal(firstScreenHtml.includes("Fake AI"), false);
+  assert.equal(firstScreenHtml.includes("AI 禁用"), false);
+  assert.equal(firstScreenHtml.includes("运行模式"), false);
+  assert.equal(firstScreenHtml.includes("模型配置"), false);
+  assert.equal(firstScreenHtml.includes("工具配置"), false);
+  assert.equal(firstScreenHtml.includes("运行树"), false);
+  assert.equal(firstScreenHtml.includes("父层 synthesis"), false);
+  assert.equal(firstScreenHtml.includes("rootlet"), false);
+  assert.equal(firstScreenHtml.includes("EventLog"), false);
   assert.equal(html.includes("<summary>调试视图：Observation Snapshot</summary>"), false);
   assert.equal(html.includes(">芽<"), false);
   assert.equal(html.includes(">木<"), false);
@@ -334,13 +366,13 @@ test("panel fake AI run exposes model and candidate summaries without model prom
   }
 });
 
-test("desktop async fake run returns main canvas with Task Soil, approved Plan, Aboveground artifact, and Fruit", async () => {
+test("desktop async fake run returns Work Session report canvas with child agents and parent synthesis", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-desktop-fake-"));
   const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
   try {
     const start = await requestJson(server.url, "/api/desktop/runs", {
       method: "POST",
-      body: { goal: "Build a Desktop Shell visible Plan and Fruit result.", aiMode: "fake" },
+      body: { goal: "Build a Desktop Shell visible Work Session report.", aiMode: "fake" },
     });
     const completed = await waitForRun(
       server.url,
@@ -353,26 +385,116 @@ test("desktop async fake run returns main canvas with Task Soil, approved Plan, 
     assert.equal(start.status, 202);
     assert.equal(start.body.runKind, "desktop");
     assert.equal(completed.body.runKind, "desktop");
-    assert.equal(completed.body.canvas.taskSoil.goalSummary.includes("Desktop Shell visible Plan"), true);
+    assert.equal(completed.body.canvas.kind, "work_session_canvas");
+    assert.equal(completed.body.canvas.taskSoil.goalSummary.includes("Desktop Shell visible Work Session report"), true);
     assert.equal(completed.body.canvas.taskSoil.contextRefs.length > 0, true);
     assert.equal(completed.body.canvas.taskSoil.permissionBoundaryRefs.length > 0, true);
-    assert.equal(completed.body.canvas.plan.status, "approved");
-    assert.equal(completed.body.canvas.plan.validationPassed, true);
-    assert.equal(completed.body.canvas.plan.packageRef.packageId.length > 0, true);
-    assert.equal(completed.body.canvas.plan.recommendedDirection.summary.length > 0, true);
-    assert.equal(completed.body.canvas.plan.keyEvidenceRefs.length > 0, true);
-    assert.equal(completed.body.canvas.aboveground.consumer, "Aboveground Execution Runtime");
-    assert.equal(completed.body.canvas.aboveground.artifact.artifactId.length > 0, true);
-    assert.equal(completed.body.canvas.aboveground.verification.status, "passed");
-    assert.equal(completed.body.canvas.fruits.fruit.fruitId.length > 0, true);
-    assert.equal(completed.body.canvas.fruits.runMemory.runMemoryId.length > 0, true);
-    assert.equal(completed.body.canvas.fruits.experienceCandidate.candidateId.length > 0, true);
-    assert.equal(completed.body.canvas.fruits.pathBias.pathBiasId.length > 0, true);
-    assert.equal(completed.body.tracking.run.abovegroundStatus, "completed");
-    assert.equal(completed.body.tracking.candidates.total.total > 0, true);
-    assert.equal(completed.body.tracking.package.validationPassed, true);
+    assert.equal(completed.body.canvas.workSession.status, "completed");
+    assert.equal(completed.body.canvas.workSession.artifact.artifactId.length > 0, true);
+    assert.equal(completed.body.canvas.workSession.report.title.length > 0, true);
+    assert.equal(completed.body.canvas.workSession.report.keyFindings.length > 0, true);
+    assert.equal(completed.body.canvas.workSession.report.recommendations.length > 0, true);
+    assert.equal(completed.body.canvas.workSession.report.evidenceRefs.length > 0, true);
+    assert.equal(completed.body.canvas.workSession.report.keyFindings.some((finding: string) => finding.includes("桌面主线")), true);
+    assert.equal(completed.body.canvas.workSession.report.decisionSummary.includes("父层综合"), true);
+    assert.equal(completed.body.transcript.events.some((event: { summary: string }) => event.summary.includes("正在整理上下文")), true);
+    assert.equal(JSON.stringify(completed.body.canvas).includes("Fake parent synthesis"), false);
+    assert.equal(JSON.stringify(completed.body.canvas).includes("Fake Work Session"), false);
+    assert.deepEqual(completed.body.canvas.workSession.steps.map((step: { action: string }) => step.action), [
+      "spawn_children",
+      "synthesize",
+      "produce_artifact",
+    ]);
+    assert.equal(completed.body.tracking.run.abovegroundStatus, "not_started");
+    assert.equal(completed.body.tracking.package, undefined);
     assert.equal(completed.body.tracking.agentRunTree.childRuns.length > 0, true);
+    assert.equal(completed.body.tracking.agentRunTree.parentSyntheses.length, 1);
+    assert.equal(completed.body.trace.events.some((event: { type: string }) => event.type === "direction_handoff.completed"), false);
+    assert.equal(completed.body.trace.events.some((event: { type: string }) => event.type === "underground.exploration_planned"), false);
+    assert.equal(completed.body.trace.events.some((event: { type: string }) => event.type === "artifact.produced"), true);
     assert.equal(completed.body.transcript.events.some((event: { type: string }) => event.type === "final.result"), true);
+  } finally {
+    await server.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("desktop async fake run answers arbitrary lightweight question without report workflow", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-desktop-direct-answer-"));
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+  try {
+    const start = await requestJson(server.url, "/api/desktop/runs", {
+      method: "POST",
+      body: { goal: "你是什么模型？", aiMode: "fake" },
+    });
+    const completed = await waitForRun(
+      server.url,
+      start.body.runId,
+      (body) => body.status === "completed",
+      4_000,
+      "/api/desktop/runs"
+    );
+
+    assert.equal(start.status, 202);
+    assert.equal(completed.body.canvas.kind, "desktop_chat_canvas");
+    assert.equal(completed.body.canvas.chat.answer.answer.includes("AgentArbor 桌面助手"), true);
+    assert.equal(completed.body.canvas.chat.upgradeRequest, undefined);
+    assert.equal(completed.body.tracking.agentRunTree, undefined);
+    assert.equal(completed.body.trace.events.some((event: { type: string }) => event.type === "artifact.produced"), false);
+    assert.equal(completed.body.transcript.events.some((event: { summary?: string }) => String(event.summary ?? "").includes("项目分析")), false);
+    assertSafePanelJsonText(completed.text);
+  } finally {
+    await server.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("desktop openai-compatible direct answer accepts plain text model output", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-desktop-direct-answer-text-"));
+  const secret = "sk-desktop-direct-answer-text-secret";
+  const bodies: Record<string, unknown>[] = [];
+  const providerFetch: PanelProviderFetch = async (_url, init) => {
+    const body = JSON.parse(init.body) as Record<string, unknown>;
+    bodies.push(body);
+    return createOpenAiTextResponse(
+      "desktop-direct-answer-text-model",
+      "我是 AgentArbor 桌面助手。底层模型取决于你在设置中配置的模型运行时；普通问题会直接回答，不会被强行包装成项目分析。"
+    );
+  };
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory, providerFetch });
+  try {
+    await requestJson(server.url, "/api/config/model-provider", {
+      method: "POST",
+      body: {
+        baseUrl: "https://provider.example",
+        model: "desktop-direct-answer-text-model",
+        apiKey: secret,
+      },
+    });
+    const start = await requestJson(server.url, "/api/desktop/runs", {
+      method: "POST",
+      body: { goal: "你是什么模型？", aiMode: "openai-compatible" },
+    });
+    const completed = await waitForRun(
+      server.url,
+      start.body.runId,
+      (body) => body.status === "completed",
+      4_000,
+      "/api/desktop/runs"
+    );
+
+    assert.equal(start.status, 202);
+    assert.equal(bodies.length, 1);
+    assert.deepEqual(bodies.map((body) => body.response_format !== undefined), [false]);
+    assert.equal(completed.body.canvas.kind, "desktop_chat_canvas");
+    assert.equal(completed.body.canvas.chat.answer.answer.includes("普通问题会直接回答"), true);
+    assert.equal(completed.body.canvas.chat.upgradeRequest, undefined);
+    assert.equal(completed.body.tracking.agentRunTree, undefined);
+    assert.equal(completed.body.transcript.modelCalls.some((call: { visibleOutput?: { source?: string; items?: readonly { fields?: readonly { name?: string; value?: string }[] }[] } }) =>
+      call.visibleOutput?.source === "text_output" &&
+      call.visibleOutput.items?.some((item) => item.fields?.some((field) => field.name === "text" && String(field.value ?? "").includes("普通问题会直接回答")))
+    ), true);
+    assertSafePanelJsonText(completed.text);
   } finally {
     await server.close();
     await fs.rm(directory, { recursive: true, force: true });
@@ -727,7 +849,12 @@ test("desktop canvas, tracking, transcript, and SSE keep model and tool internal
 test("desktop real AI contract failure surfaces a useful safe diagnostic", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-desktop-contract-failure-"));
   const secret = "sk-desktop-contract-failure-secret";
-  const providerFetch: PanelProviderFetch = async () => createInvalidOpenAiResponse("desktop-contract-failure-model");
+  const providerFetch: PanelProviderFetch = async (_url, init) => {
+    const body = JSON.parse(init.body) as { tools?: readonly { function?: { name?: string } }[] };
+    return body.tools?.some((tool) => tool.function?.name === "start_work_session")
+      ? createOpenAiStartWorkSessionToolCallResponse("desktop-contract-failure-model")
+      : createInvalidOpenAiResponse("desktop-contract-failure-model");
+  };
   const server = await startLocalPanelServer({ port: 0, configDirectory: directory, providerFetch });
   try {
     await requestJson(server.url, "/api/config/model-provider", {
@@ -763,6 +890,146 @@ test("desktop real AI contract failure surfaces a useful safe diagnostic", async
     assert.equal(failed.text.includes("bad raw output"), false);
     assert.equal(failed.text.includes("hidden_reasoning"), false);
     assertSafePanelJsonText(failed.text);
+  } finally {
+    await server.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("desktop openai-compatible Work Session uses configured search tool before synthesis", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-desktop-configured-tools-"));
+  const modelSecret = "sk-desktop-configured-tools-secret";
+  const tavilySecret = "tvly-desktop-configured-tools-secret";
+  let modelFetchCalls = 0;
+  let tavilyFetchCalls = 0;
+  const modelOutputs = [
+    "__upgrade_tool_call__",
+    "__search_tool_call__",
+    {
+      action: "use_tools",
+      childSpecs: [],
+      decisionSummary: "Use configured search evidence before delegation.",
+      uncertainty: "Tool refs still require parent synthesis.",
+      confidence: 0.72,
+    },
+    {
+      action: "spawn_children",
+      childSpecs: [
+        {
+          specId: "desktop-evidence-child",
+          displayName: "Desktop Evidence Child",
+          role: "desktop_evidence_child",
+          objective: "Review Work Session evidence refs gathered by configured tools.",
+          allowedTools: ["read"],
+          inputRefs: ["research:web:desktop"],
+        },
+      ],
+      decisionSummary: "Spawn child after tool-backed evidence.",
+      uncertainty: "Stub uncertainty.",
+      confidence: 0.74,
+    },
+    {
+      summary: "Desktop child reviewed configured tool evidence.",
+      findings: ["The desktop Work Session can use configured search before synthesis."],
+      evidenceRefs: ["research:web:desktop"],
+      uncertainty: "Stub child uncertainty.",
+      confidence: 0.73,
+    },
+    {
+      action: "synthesize",
+      childSpecs: [],
+      decisionSummary: "Synthesize child and tool material.",
+      uncertainty: "Stub uncertainty.",
+      confidence: 0.75,
+    },
+    {
+      reportTitle: "Desktop tool-backed Work Session report",
+      keyFindings: ["Configured search ran before parent synthesis."],
+      recommendations: ["Keep tool outputs behind safe refs in canvas and transcript."],
+      evidenceRefs: ["research:web:desktop", "tool-call:call-panel-search"],
+      uncertainty: ["Tool output remains untrusted until parent synthesis."],
+      nextActions: ["Run a real project-analysis smoke when provider env is configured."],
+      decisionSummary: "Parent synthesis consumed child material and safe tool refs.",
+      confidence: 0.76,
+    },
+    {
+      action: "produce_artifact",
+      childSpecs: [],
+      decisionSummary: "Produce artifact after parent synthesis.",
+      uncertainty: "Stub uncertainty.",
+      confidence: 0.77,
+    },
+  ];
+  const providerFetch: PanelProviderFetch = async (url, init) => {
+    if (url === "https://api.tavily.com/search") {
+      tavilyFetchCalls += 1;
+      const body = JSON.parse(init.body) as { api_key?: string; max_results?: number };
+      assert.equal(body.api_key, tavilySecret);
+      assert.equal(body.max_results, 1);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          results: [
+            {
+              title: "Desktop Work Session tool evidence",
+              url: "https://example.test/desktop-work-session",
+              content: "Desktop Work Session configured search evidence.",
+            },
+          ],
+        }),
+      };
+    }
+
+    const output = modelOutputs[modelFetchCalls];
+    modelFetchCalls += 1;
+    if (output === "__upgrade_tool_call__") {
+      return createOpenAiStartWorkSessionToolCallResponse("desktop-configured-tools-model");
+    }
+    if (output === "__search_tool_call__") {
+      return createOpenAiSearchToolCallResponse();
+    }
+    return createOpenAiJsonResponse("desktop-configured-tools-model", output);
+  };
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory, providerFetch });
+  try {
+    await requestJson(server.url, "/api/config/model-provider", {
+      method: "POST",
+      body: {
+        baseUrl: "https://provider.example",
+        model: "desktop-configured-tools-model",
+        apiKey: modelSecret,
+      },
+    });
+    await requestJson(server.url, "/api/config/tools/web-search", {
+      method: "POST",
+      body: {
+        provider: "tavily",
+        apiKey: tavilySecret,
+        maxResults: 1,
+      },
+    });
+
+    const start = await requestJson(server.url, "/api/desktop/runs", {
+      method: "POST",
+      body: { goal: "Use configured tools in a Desktop Work Session.", aiMode: "openai-compatible" },
+    });
+    const completed = await waitForRun(
+      server.url,
+      start.body.runId,
+      (body) => body.status === "completed",
+      4_000,
+      "/api/desktop/runs"
+    );
+
+    assert.equal(completed.body.canvas.kind, "work_session_canvas");
+    assert.equal(modelFetchCalls, modelOutputs.length);
+    assert.equal(tavilyFetchCalls, 1);
+    assert.equal(completed.body.canvas.workSession.steps[0].action, "use_tools");
+    assert.equal(completed.body.canvas.workSession.toolCallRefs.includes("call-panel-search"), true);
+    assert.equal(completed.body.trace.events.some((event: { type: string }) => event.type === "tool.completed"), true);
+    assert.equal(JSON.stringify(completed.body).includes(modelSecret), false);
+    assert.equal(JSON.stringify(completed.body).includes(tavilySecret), false);
   } finally {
     await server.close();
     await fs.rm(directory, { recursive: true, force: true });
@@ -1454,6 +1721,86 @@ function createOpenAiSearchToolCallResponse(): Awaited<ReturnType<PanelProviderF
           },
         },
       ],
+    }),
+  };
+}
+
+function createOpenAiStartWorkSessionToolCallResponse(model = "desktop-chat-router-model"): Awaited<ReturnType<PanelProviderFetch>> {
+  return {
+    ok: true,
+    status: 200,
+    json: async () => ({
+      model,
+      choices: [
+        {
+          finish_reason: "tool_calls",
+          message: {
+            role: "assistant",
+            content: "",
+            tool_calls: [
+              {
+                id: "call-start-work-session",
+                type: "function",
+                function: {
+                  name: "start_work_session",
+                  arguments: JSON.stringify({
+                    reason: "这条任务需要进入工作会话。",
+                    goal: "Use configured tools in a Desktop Work Session.",
+                  }),
+                },
+              },
+            ],
+          },
+        },
+      ],
+    }),
+  };
+}
+
+function createOpenAiJsonResponse(model: string, output: unknown): Awaited<ReturnType<PanelProviderFetch>> {
+  return {
+    ok: true,
+    status: 200,
+    json: async () => ({
+      model,
+      choices: [
+        {
+          finish_reason: "stop",
+          message: {
+            role: "assistant",
+            content: JSON.stringify(output),
+          },
+        },
+      ],
+      usage: {
+        prompt_tokens: 10,
+        completion_tokens: 12,
+        total_tokens: 22,
+      },
+    }),
+  };
+}
+
+function createOpenAiTextResponse(model: string, text: string): Awaited<ReturnType<PanelProviderFetch>> {
+  return {
+    ok: true,
+    status: 200,
+    json: async () => ({
+      model,
+      choices: [
+        {
+          finish_reason: "stop",
+          message: {
+            role: "assistant",
+            content: text,
+          },
+        },
+      ],
+      usage: {
+        prompt_tokens: 10,
+        completion_tokens: 12,
+        total_tokens: 22,
+      },
     }),
   };
 }

@@ -6,6 +6,7 @@ import type { PanelObservationReadModel, PanelRunStatus, PanelRunStreamEvent } f
 import type { MinimalRuntime } from "./runtime.js";
 import type { DesktopTaskSoilInput } from "./task-soil-workspace.js";
 import type { UndergroundDemoSummary } from "./underground-demo-summary.js";
+import type { AgentRunTree } from "../domain/underground/index.js";
 
 export type PanelRunKind = "desktop" | "underground";
 
@@ -13,7 +14,8 @@ export type PanelRunCompletedPayload = {
   readonly config: SanitizedModelProviderConfig;
   readonly informationAccess: SanitizedInformationAccessConfig;
   readonly summary?: UndergroundDemoSummary;
-  readonly observation: PanelObservationReadModel;
+  readonly observation?: PanelObservationReadModel;
+  readonly agentRunTree?: AgentRunTree;
   readonly canvas?: PanelRunCanvasReadModel;
 };
 

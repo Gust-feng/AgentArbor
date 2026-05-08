@@ -1,6 +1,7 @@
 import type { ArborMessageType } from "../domain/common.js";
 import type { SanitizedInformationAccessConfig, SanitizedModelProviderConfig } from "../domain/config/index.js";
 import type { ModelVisibleOutputProjection } from "../domain/intelligence/index.js";
+import type { AgentRunTree } from "../domain/underground/index.js";
 import {
   createRunObservationEventViews,
   resolveRunObservationPosition,
@@ -11,6 +12,7 @@ import {
 import { ROOTLET_CLUSTER_KINDS, type CandidatePoolCounts, type RootletClusterKind } from "../domain/underground/index.js";
 import type { EventLogEntry } from "../kernel/events/in-memory-event-log.js";
 import type { UndergroundAiMode } from "./intelligence-channel-factory.js";
+import { createSafeAgentRunTreeView, type SafeAgentRunTreeView } from "./panel-canvas-read-model.js";
 import type { UndergroundDemoSummary } from "./underground-demo-summary.js";
 
 export type PanelRunStatus = "pending" | "running" | "completed" | "failed";
@@ -255,6 +257,7 @@ export function createPanelRunTracking(input: {
   readonly requestedMode: UndergroundAiMode;
   readonly summary?: UndergroundDemoSummary;
   readonly observation?: PanelObservationReadModel;
+  readonly agentRunTree?: AgentRunTree;
   readonly eventEntries: readonly EventLogEntry[];
 }): PanelRunTrackingReadModel {
   const trace = createPanelRunTrace({ status: input.status, eventEntries: input.eventEntries });
@@ -316,7 +319,7 @@ export function createPanelRunTracking(input: {
       sourceRefs: input.observation?.underground.autonomy.latestDecision?.sourceRefs ?? [],
       modelCallRefs: input.observation?.underground.autonomy.latestDecision?.modelCallRefs ?? [],
     },
-    agentRunTree: input.observation?.underground.agentRunTree,
+    agentRunTree: input.observation?.underground.agentRunTree ?? agentRunTreeViewOrUndefined(input.agentRunTree),
     convergence: input.summary?.underground.convergence,
     package: packageTrackingFrom(input),
   };
@@ -356,6 +359,7 @@ export function createPanelRunTranscript(input: {
   readonly eventEntries: readonly EventLogEntry[];
   readonly summary?: UndergroundDemoSummary;
   readonly observation?: PanelObservationReadModel;
+  readonly agentRunTree?: AgentRunTree;
   readonly createdAt: string;
   readonly updatedAt: string;
 }): PanelRunTranscript {
@@ -370,22 +374,57 @@ export function createPanelRunTranscript(input: {
     updatedAt: input.updatedAt,
   });
   const candidateRefs = candidateRefsFromObservation(input.observation);
-  const noteInput = { ...input, modelCalls, candidateRefs };
+  const isDesktopChatOnly =
+    input.summary === undefined &&
+    input.observation === undefined &&
+    input.agentRunTree === undefined &&
+    modelCalls.length > 0 &&
+    modelCalls.every((call) => call.outputContractId === "desktop.chat_response.v1" || call.purpose === "desktop_chat");
+  const noteInput = {
+    ...input,
+    modelCalls,
+    candidateRefs,
+    agentRunTree: agentRunTreeViewOrUndefined(input.agentRunTree),
+  };
+  const workNotes =
+    input.summary === undefined && input.observation === undefined
+      ? isDesktopChatOnly
+        ? [
+            createDesktopChatNote(noteInput),
+            createModelCallsNote(noteInput),
+          ]
+        : input.agentRunTree !== undefined
+        ? [
+            createWorkSessionManagerNote(noteInput),
+            createAgentRunTreeNote(noteInput),
+            createModelCallsNote(noteInput),
+          ]
+        : [
+            createIntentCoreNote(noteInput),
+            createGrowthGovernorNote(noteInput),
+            createAgentRunTreeNote(noteInput),
+            createRootletAgentsNote(noteInput),
+            createModelCallsNote(noteInput),
+            createAutonomyCoreNote(noteInput),
+            createConvergenceJudgeNote(noteInput),
+            createHandoffStewardNote(noteInput),
+          ]
+      : [
+          createIntentCoreNote(noteInput),
+          createGrowthGovernorNote(noteInput),
+          createAgentRunTreeNote(noteInput),
+          createRootletAgentsNote(noteInput),
+          createModelCallsNote(noteInput),
+          createAutonomyCoreNote(noteInput),
+          createConvergenceJudgeNote(noteInput),
+          createHandoffStewardNote(noteInput),
+        ];
   return {
     runId: input.runId,
     status: input.status,
     updatedAt: input.updatedAt,
     events: streamEvents,
-    workNotes: [
-      createIntentCoreNote(noteInput),
-      createGrowthGovernorNote(noteInput),
-      createAgentRunTreeNote(noteInput),
-      createRootletAgentsNote(noteInput),
-      createModelCallsNote(noteInput),
-      createAutonomyCoreNote(noteInput),
-      createConvergenceJudgeNote(noteInput),
-      createHandoffStewardNote(noteInput),
-    ],
+    workNotes,
     modelCalls,
   };
 }
@@ -413,7 +452,7 @@ export function createPanelRunStreamEvents(input: {
     type: "run.started",
     createdAt: input.createdAt,
     agentLabel: "AgentArbor",
-    summary: "任务已提交，Desktop Shell 正在形成 Task Soil 并启动运行时。",
+    summary: "消息已提交，正在整理上下文并准备回复。",
     status: input.status === "pending" ? "pending" : "running",
     sourceRefs: [],
     modelCallRefs: [],
@@ -596,11 +635,11 @@ function agentFabricLabel(type: PanelRunStreamEventType): string {
     case "agent.child.started":
     case "agent.child.completed":
     case "agent.child.waiting":
-      return "派生 Agent";
+      return "并行检查";
     case "agent.parent_synthesis.completed":
       return "父层综合";
     default:
-      return "方向智能";
+      return "工作会话";
   }
 }
 
@@ -608,27 +647,27 @@ function agentFabricSummary(type: PanelRunStreamEventType, payload: Readonly<Rec
   if (type === "agent.delegation.planned") {
     const decision = asRecord(payload.delegationDecision);
     const childSpecIds = Array.isArray(payload.childSpecIds) ? payload.childSpecIds.filter(isString) : [];
-    return `中枢形成派生计划：${stringOrUndefined(decision.action) ?? "spawn_children"}，child specs ${childSpecIds.length} 个。`;
+    return `已形成分工计划，准备 ${childSpecIds.length} 路局部检查。`;
   }
   if (type === "agent.child.started") {
     const childRun = asRecord(payload.childRun);
     const spec = asRecord(payload.agentSpec);
-    return `派生 agent ${stringOrUndefined(spec.displayName) ?? stringOrUndefined(spec.agentId) ?? "unknown"} 已启动，run ${stringOrUndefined(childRun.childRunId) ?? "unknown"}。`;
+    return `局部检查 ${stringOrUndefined(spec.displayName) ?? "一路检查"} 已启动。`;
   }
   if (type === "agent.child.completed") {
     const childRun = asRecord(payload.childRun);
     const outputRefs = Array.isArray(payload.outputRefs) ? payload.outputRefs.filter(isString) : [];
-    return `派生 agent run ${stringOrUndefined(childRun.childRunId) ?? "unknown"} 已完成，产出 ${outputRefs.length} 个 material ref。`;
+    return `一路局部检查已完成，产出 ${outputRefs.length} 个材料引用。`;
   }
   if (type === "agent.child.waiting") {
     const childRunIds = Array.isArray(payload.childRunIds) ? payload.childRunIds.filter(isString) : [];
-    return `父层正在等待 ${childRunIds.length} 个派生 agent 返回局部材料。`;
+    return `正在等待 ${childRunIds.length} 路局部材料返回。`;
   }
   if (type === "agent.parent_synthesis.completed") {
     const synthesis = asRecord(payload.parentSynthesis);
-    return `父层综合完成：${stringOrUndefined(synthesis.decisionSummary) ?? "child material synthesized"}。`;
+    return `综合判断完成：${stringOrUndefined(synthesis.decisionSummary) ?? "局部材料已合并"}。`;
   }
-  return "方向智能事件已更新。";
+  return "工作状态已更新。";
 }
 
 function sourceRefsForView(view: RunObservationEventView | undefined): readonly string[] {
@@ -655,14 +694,29 @@ function toolCallRefsFor(entry: EventLogEntry, payload: Readonly<Record<string, 
 
 function modelRequestedSummary(payload: Readonly<Record<string, unknown>>): string {
   const purpose = stringOrUndefined(payload.purpose) ?? "unknown";
-  const model = stringOrUndefined(payload.model) ?? "unknown model";
-  return `模型开始处理 ${purpose}，使用 ${model}。`;
+  return purposeProgressLabel(purpose);
 }
 
 function modelCompletedSummary(payload: Readonly<Record<string, unknown>>, chunkCount: number): string {
   const validation = stringOrUndefined(payload.validationStatus) ?? "unknown";
-  const model = stringOrUndefined(payload.model) ?? "unknown model";
-  return `模型输出完成，${chunkCount} 个可见增量已进入 transcript；校验 ${validation}，模型 ${model}。`;
+  return validation === "passed" ? "内容已整理，并已进入报告或详情。" : `内容已整理，校验 ${validation}。`;
+}
+
+function purposeProgressLabel(purpose: string): string {
+  switch (purpose) {
+    case "work_session_decision":
+      return "正在判断下一步。";
+    case "work_session_child_material":
+      return "正在整理局部材料。";
+    case "work_session_synthesis":
+      return "正在综合证据和冲突。";
+    case "work_session_direct_answer":
+      return "正在组织直接回答。";
+    case "desktop_chat":
+      return "正在回复。";
+    default:
+      return "正在生成安全摘要。";
+  }
 }
 
 function modelFailedSummary(payload: Readonly<Record<string, unknown>>): string {
@@ -689,7 +743,7 @@ function agentNoteForEvent(
 ): { readonly agentLabel: string; readonly summary: string; readonly status: PanelRunStreamEvent["status"] } | undefined {
   switch (entry.type) {
     case "goal.received":
-      return { agentLabel: "用户", summary: "目标已进入 Underground Cognitive Runtime，原文不会在调试区外展开。", status: "completed" };
+      return { agentLabel: "用户", summary: "目标已进入工作会话，原文不会在调试区外展开。", status: "completed" };
     case "underground.exploration_planned":
       return { agentLabel: "地下认知运行时", summary: "目标画像和探索计划已形成。", status: "completed" };
     case "rootlet_cluster.started":
@@ -697,7 +751,7 @@ function agentNoteForEvent(
     case "exploration_candidate.produced":
       return { agentLabel: "Rootlet 集群", summary: "Rootlet 已产出候选材料，等待进入候选池。", status: "completed" };
     case "candidate_pool.updated":
-      return { agentLabel: "候选池", summary: "候选池已更新，正式事实边界仍由父层收束和 Plan Package 校验掌握。", status: "completed" };
+      return { agentLabel: "候选池", summary: "候选池已更新，正式事实边界仍由父层收束和校验掌握。", status: "completed" };
     case "autonomy_review.completed":
       return {
         agentLabel: "自治中枢",
@@ -709,15 +763,15 @@ function agentNoteForEvent(
     case "convergence_review.completed":
       return { agentLabel: "收束判断", summary: "候选材料已由 Convergence Judge 完成正式收束。", status: "completed" };
     case "direction_handoff.requested":
-      return { agentLabel: "Plan Steward", summary: "Plan Package 开始组装。", status: "running" };
+      return { agentLabel: "结果整理", summary: "已收束的方案开始整理为可交付材料。", status: "running" };
     case "direction_handoff.completed":
-      return { agentLabel: "Plan Steward", summary: "Plan Package 已通过现有校验链生成。", status: "completed" };
+      return { agentLabel: "结果整理", summary: "可交付材料已通过现有校验链生成。", status: "completed" };
     case "direction_handoff.revision_requested":
-      return { agentLabel: "Plan Steward", summary: "Plan Package 需要修订或补充。", status: "running" };
+      return { agentLabel: "结果整理", summary: "结果材料需要修订或补充。", status: "running" };
     case "user_approval.requested":
-      return { agentLabel: "用户确认", summary: "方向智能阶段需要用户澄清后继续。", status: "running" };
+      return { agentLabel: "用户确认", summary: "继续前需要用户澄清。", status: "running" };
     case "user_approval.received":
-      return { agentLabel: "用户确认", summary: "用户澄清已收到，方向智能阶段继续推进。", status: "completed" };
+      return { agentLabel: "用户确认", summary: "用户澄清已收到，工作继续推进。", status: "completed" };
     default:
       return undefined;
   }
@@ -761,16 +815,25 @@ function chunkText(value: string, maxLength: number): readonly string[] {
 function finalResultSummary(input: {
   readonly summary?: UndergroundDemoSummary | { readonly ai: UndergroundDemoSummary["ai"] };
   readonly observation?: PanelObservationReadModel;
+  readonly eventEntries: readonly EventLogEntry[];
 }): string {
   const summary = fullSummaryOrUndefined(input.summary);
   if (summary !== undefined) {
-    return `地下兼容运行完成，Plan Package ${summary.directionPackage.id} v${summary.directionPackage.version}，状态 ${summary.directionPackage.status}。`;
+    return `兼容运行完成，已形成可执行方案，状态 ${summary.directionPackage.status}。`;
+  }
+  const artifact = latestArtifactProducedPayload(input.eventEntries);
+  if (artifact !== undefined) {
+    return `工作会话运行完成，已生成报告：${artifact.summary ?? artifact.artifactId ?? "artifact"}。`;
+  }
+  const directAnswer = latestDirectAnswerPayload(input.eventEntries);
+  if (directAnswer !== undefined) {
+    return `已回答：${directAnswer.answer}`;
   }
   if (input.observation?.aboveground.status === "completed") {
     const handoff = input.observation.handoff;
     return handoff.packageId.length === 0
-      ? "Desktop Shell 运行完成，Plan 已交给 Aboveground Execution Runtime 并产出结果。"
-      : `Desktop Shell 运行完成，Plan Package ${handoff.packageId} v${handoff.version} 已交给 Aboveground Execution Runtime。`;
+      ? "工作会话运行完成，已产出结果。"
+      : `工作会话运行完成，方案 ${handoff.packageId} v${handoff.version} 已产出结果。`;
   }
   const stage = input.observation?.currentStage;
   return stage === undefined ? "运行完成。" : `运行完成，当前阶段 ${stage}。`;
@@ -779,6 +842,7 @@ function finalResultSummary(input: {
 function finalSourceRefs(input: {
   readonly summary?: UndergroundDemoSummary | { readonly ai: UndergroundDemoSummary["ai"] };
   readonly observation?: PanelObservationReadModel;
+  readonly eventEntries: readonly EventLogEntry[];
 }): readonly string[] {
   const summary = fullSummaryOrUndefined(input.summary);
   if (summary !== undefined) {
@@ -788,13 +852,63 @@ function finalSourceRefs(input: {
     ];
   }
   const handoff = input.observation?.handoff;
-  return handoff === undefined || handoff.packageId.length === 0
-    ? []
-    : [`direction_package:${handoff.packageId}`, `direction_handoff:${handoff.directionId}`];
+  if (handoff !== undefined && handoff.packageId.length > 0) {
+    return [`direction_package:${handoff.packageId}`, `direction_handoff:${handoff.directionId}`];
+  }
+  const artifact = latestArtifactProducedPayload(input.eventEntries);
+  if (artifact?.artifactId !== undefined) {
+    return [`artifact:${artifact.artifactId}`];
+  }
+  const directAnswer = latestDirectAnswerPayload(input.eventEntries);
+  return directAnswer?.requestId === undefined ? [] : [`model_call:${directAnswer.requestId}`];
+}
+
+function latestArtifactProducedPayload(eventEntries: readonly EventLogEntry[]): { readonly artifactId?: string; readonly summary?: string } | undefined {
+  const artifactEvent = [...eventEntries].reverse().find((entry) => entry.type === "artifact.produced");
+  if (artifactEvent === undefined) {
+    return undefined;
+  }
+  const payload = asRecord(artifactEvent.message.payload);
+  return {
+    artifactId: stringOrUndefined(payload.artifactId),
+    summary: stringOrUndefined(payload.summary),
+  };
+}
+
+function latestDirectAnswerPayload(eventEntries: readonly EventLogEntry[]): { readonly requestId?: string; readonly answer: string } | undefined {
+  for (const entry of [...eventEntries].reverse()) {
+    if (entry.type !== "model.completed") {
+      continue;
+    }
+    const payload = asRecord(entry.message.payload);
+    const visibleOutput = modelVisibleOutputOrUndefined(payload.visibleOutput);
+    if (
+      visibleOutput?.contractId !== "work_session.direct_answer.v1" &&
+      visibleOutput?.contractId !== "desktop.chat_response.v1"
+    ) {
+      continue;
+    }
+    const answer = visibleOutput.items
+      .flatMap((item) => item.fields)
+      .find((field) => field.name === "text" || field.name === "answer")
+      ?.value
+      .trim();
+    if (answer !== undefined && answer.length > 0) {
+      return {
+        requestId: stringOrUndefined(payload.requestId),
+        answer,
+      };
+    }
+  }
+  return undefined;
 }
 
 function fullSummaryOrUndefined(value: UndergroundDemoSummary | { readonly ai: UndergroundDemoSummary["ai"] } | undefined): UndergroundDemoSummary | undefined {
   return value !== undefined && "directionPackage" in value ? value : undefined;
+}
+
+function agentRunTreeViewOrUndefined(tree: AgentRunTree | undefined): SafeAgentRunTreeView | undefined {
+  return tree === undefined ? undefined : createSafeAgentRunTreeView(tree);
 }
 
 function createRootletTracking(input: {
@@ -913,6 +1027,67 @@ function createIntentCoreNote(input: NoteFactoryInput): AgentWorkNote {
   });
 }
 
+function createDesktopChatNote(input: NoteFactoryInput): AgentWorkNote {
+  const eventRefs = eventRefsFor(input.eventEntries, ["goal.received", "model.requested", "model.completed", "model.failed"]);
+  const failed = input.modelCalls.some((call) => call.status === "failed");
+  const completed = input.modelCalls.some((call) => call.status === "completed");
+  const requested = input.modelCalls.some((call) => call.status === "requested");
+  return note({
+    input,
+    noteId: "desktop-chat",
+    agentId: "desktop-chat-session",
+    agentLabel: "桌面助手",
+    stage: "desktop_chat",
+    status: failed ? "failed" : completed ? "completed" : requested ? "running" : "pending",
+    summary: completed
+      ? "桌面助手已完成本轮回复；普通问题没有进入项目分析或报告流程。"
+      : requested
+        ? "桌面助手正在判断是直接回复还是进入工作会话。"
+        : "等待用户消息。",
+    detail: "Desktop Chat Session 是首选入口；只有模型请求升级时才进入 Work Session。",
+    eventRefs,
+    modelCallRefs: input.modelCalls.map((call) => call.requestId),
+  });
+}
+
+function createWorkSessionManagerNote(input: NoteFactoryInput): AgentWorkNote {
+  const eventRefs = eventRefsFor(input.eventEntries, [
+    "goal.received",
+    "agent.delegation.planned",
+    "agent.child.started",
+    "agent.child.completed",
+    "agent.child.waiting",
+    "agent.parent_synthesis.completed",
+    "artifact.produced",
+  ]);
+  const tree = input.agentRunTree;
+  const producedArtifact = hasEvent(input.eventEntries, "artifact.produced");
+  const producedDirectAnswer = input.modelCalls.some((call) => call.outputContractId === "work_session.direct_answer.v1" && call.status === "completed");
+  const hasSynthesis = (tree?.parentSyntheses.length ?? 0) > 0;
+  return note({
+    input,
+    noteId: "work-session-manager",
+    agentId: "cognitive-work-session-manager",
+    agentLabel: "Work Session Manager",
+    stage: "cognitive_work_session",
+    status: producedArtifact || producedDirectAnswer ? "completed" : hasSynthesis ? "running" : eventRefs.length > 0 ? "running" : "pending",
+    summary: producedDirectAnswer
+      ? "Cognitive Work Session 已直接回答当前问题。"
+      : producedArtifact
+      ? "Cognitive Work Session 已生成最终项目分析报告。"
+      : hasSynthesis
+        ? "父层综合已形成，正在准备最终报告。"
+        : "主 Agent 正在决定读取、派生、综合或停止。",
+    detail:
+      tree === undefined
+        ? "Work Session 直接服务 Desktop Shell，不再把旧地下流水线包装成成功主线。"
+        : `root ${tree.rootAgentId}；child ${tree.childRuns.length} 个；parent synthesis ${tree.parentSyntheses.length} 次。`,
+    eventRefs,
+    evidenceRefs: tree?.parentSyntheses.flatMap((synthesis) => synthesis.outputRefs) ?? [],
+    modelCallRefs: input.modelCalls.map((call) => call.requestId),
+  });
+}
+
 function createGrowthGovernorNote(input: NoteFactoryInput): AgentWorkNote {
   const eventRefs = eventRefsFor(input.eventEntries, ["underground.exploration_planned", "rootlet_cluster.started"]);
   const started = hasEvent(input.eventEntries, "rootlet_cluster.started");
@@ -938,7 +1113,7 @@ function createAgentRunTreeNote(input: NoteFactoryInput): AgentWorkNote {
     "agent.child.waiting",
     "agent.parent_synthesis.completed",
   ]);
-  const tree = input.observation?.underground.agentRunTree;
+  const tree = input.observation?.underground.agentRunTree ?? input.agentRunTree;
   const completedChildren = tree?.childRuns.filter((run) => run.status === "completed").length ?? 0;
   const runningChildren = tree?.childRuns.filter((run) => run.status === "running" || run.status === "resumed").length ?? 0;
   const hasSynthesis = (tree?.parentSyntheses.length ?? 0) > 0;
@@ -946,17 +1121,17 @@ function createAgentRunTreeNote(input: NoteFactoryInput): AgentWorkNote {
     input,
     noteId: "agent-run-tree",
     agentId: "underground-center-manager",
-    agentLabel: "Agent Run Tree",
+    agentLabel: "运行树",
     stage: "delegation",
     status: hasSynthesis ? "completed" : runningChildren > 0 || eventRefs.length > 0 ? "running" : "pending",
     summary:
       tree === undefined
-        ? "等待中枢生成派生运行树。"
-        : `运行树 ${tree.status}，child agents ${completedChildren}/${tree.childRuns.length} 已完成。`,
+        ? "等待生成分工运行树。"
+        : `运行树 ${tree.status}，局部检查 ${completedChildren}/${tree.childRuns.length} 已完成。`,
     detail:
       tree === undefined
-        ? "派生、等待、继续和父层综合会作为安全事件进入 transcript。"
-        : `delegation ${tree.delegationDecisions.length} 次，parent synthesis ${tree.parentSyntheses.length} 次；child 输出不会直接进入 Plan。`,
+        ? "分工、等待、继续和父层综合会作为安全事件进入活动流。"
+        : `delegation ${tree.delegationDecisions.length} 次，parent synthesis ${tree.parentSyntheses.length} 次；child 输出不会直接进入最终 artifact / Plan。`,
     eventRefs,
     evidenceRefs: tree?.parentSyntheses.flatMap((synthesis) => synthesis.outputRefs) ?? [],
     candidateRefs: tree?.parentSyntheses.flatMap((synthesis) => synthesis.retainedMaterialRefs) ?? [],
@@ -1131,7 +1306,7 @@ function createHandoffStewardNote(input: NoteFactoryInput): AgentWorkNote {
     agentLabel: "Plan Steward",
     stage: "direction_handoff",
     status: completed ? "completed" : convergenceReady ? "running" : "pending",
-    summary: pkg === undefined ? "等待收束评审完成后组装 Plan Package。" : `Plan Package ${pkg.id} v${pkg.version}，状态 ${pkg.status}。`,
+    summary: pkg === undefined ? "等待收束评审完成后整理结果材料。" : `方案材料 ${pkg.id} v${pkg.version}，状态 ${pkg.status}。`,
     detail: "Plan Steward 只组装已收束候选；本面板不进入 Aboveground、Fruits 或 Governance。",
     eventRefs,
     candidateRefs: input.candidateRefs,
@@ -1145,6 +1320,7 @@ type NoteFactoryInput = {
   readonly eventEntries: readonly EventLogEntry[];
   readonly summary?: UndergroundDemoSummary;
   readonly observation?: PanelObservationReadModel;
+  readonly agentRunTree?: SafeAgentRunTreeView;
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly modelCalls: readonly PanelTranscriptModelCall[];
@@ -1308,19 +1484,19 @@ function waitingPointFor(status: PanelRunStatus, lastEventType: ArborMessageType
     return "运行失败，查看错误摘要。";
   }
   if (status === "completed") {
-    return "运行完成，Plan、Aboveground 执行结果或终态摘要已形成。";
+    return "运行完成，报告或终态摘要已形成。";
   }
   switch (lastEventType) {
     case undefined:
       return "后台 job 已启动，等待目标进入 EventLog。";
     case "goal.received":
-      return "Intent Core 正在形成目标画像和探索计划。";
+      return "任务上下文已形成，等待工作会话开始模型决策。";
     case "underground.exploration_planned":
       return "Growth Governor 正在启动 rootlet 集群。";
     case "rootlet_cluster.started":
       return "Rootlet Agents 正在产出候选；AI 模式下可能正在等待模型。";
     case "model.requested":
-      return "已发出模型请求，等待 provider 返回脱敏结果引用。";
+      return "已发出模型请求，等待返回脱敏结果引用。";
     case "model.completed":
     case "model.failed":
       return "模型调用已返回，Rootlet Agents 正在整理候选或 fallback。";
@@ -1330,24 +1506,24 @@ function waitingPointFor(status: PanelRunStatus, lastEventType: ArborMessageType
     case "tool.failed":
       return "工具调用已返回，模型将基于工具结果继续生成候选。";
     case "agent.delegation.planned":
-      return "中枢已形成派生计划，等待 child agent 启动。";
+      return "已形成分工计划，等待局部检查启动。";
     case "agent.child.started":
     case "agent.child.waiting":
-      return "父层正在等待派生 agent 返回局部探索材料。";
+      return "正在等待局部检查返回材料。";
     case "agent.child.completed":
-      return "派生 agent 已返回材料，等待父层综合。";
+      return "局部材料已返回，等待综合判断。";
     case "agent.parent_synthesis.completed":
-      return "父层已综合 child 材料，等待自治评审或收束。";
+      return "局部材料已综合，等待最终报告或下一步决策。";
     case "exploration_candidate.produced":
       return "候选已产出，等待候选池更新。";
     case "candidate_pool.updated":
       return "候选池已更新，等待 Autonomy Core 自治评审或 Convergence Judge 收束。";
     case "autonomy_review.completed":
-      return "自治评审已完成，等待继续探索、请求收束或进入方向智能终态。";
+      return "自治评审已完成，等待继续探索、请求收束或进入终态。";
     case "convergence_review.requested":
       return "自治核心已请求收束，等待 Convergence Judge 生成收束报告。";
     case "convergence_review.completed":
-      return "收束评审已完成，等待 Plan Steward 组装 Plan Package。";
+      return "收束评审已完成，等待整理结果材料。";
     default:
       return "运行正在推进。";
   }

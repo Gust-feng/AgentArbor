@@ -19,6 +19,9 @@ test("AgentSpec validation keeps permissions, protocol, and rootlet kind explici
   const valid = validateAgentSpec(validRootlet);
   assert.equal(valid.ok, true);
 
+  const validChild = validateAgentSpec(createSpec({ agentKind: "child" }));
+  assert.equal(validChild.ok, true);
+
   const invalid = validateAgentSpec({
     ...validRootlet,
     rootletKind: undefined,

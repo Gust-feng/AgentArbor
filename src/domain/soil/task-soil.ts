@@ -10,6 +10,11 @@ export type TaskSoilContextRef = {
   readonly ref: string;
   readonly kind: "user_goal" | "workspace" | "file" | "project" | "web" | "runtime";
   readonly summary?: string;
+  readonly readonlyPreview?: {
+    readonly title?: string;
+    readonly text: string;
+    readonly truncated: boolean;
+  };
 };
 
 export type TaskSoil = {

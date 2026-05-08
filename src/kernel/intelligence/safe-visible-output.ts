@@ -6,6 +6,7 @@ import type {
   ModelVisibleOutputItem,
   ModelVisibleOutputProjection,
 } from "../../domain/intelligence/index.js";
+import { redactSensitiveText } from "../redaction.js";
 
 const DEFAULT_MAX_ITEMS = 3;
 const DEFAULT_MAX_FIELD_LENGTH = 180;
@@ -145,15 +146,6 @@ function formatVisibleValue(value: unknown, fieldType?: ModelVisibleOutputFieldT
     return String(value);
   }
   return "";
-}
-
-function redactSensitiveText(value: string): string {
-  return value
-    .replace(/sk-[A-Za-z0-9_-]{6,}/g, "[redacted-secret]")
-    .replace(/tvly-[A-Za-z0-9_-]{6,}/g, "[redacted-secret]")
-    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [redacted-token]")
-    .replace(/api[_ -]?key\s*[:=]\s*[^;\s]+/gi, "api key=[redacted-secret]")
-    .replace(/token\s*[:=]\s*[^;\s]+/gi, "token=[redacted-token]");
 }
 
 function arrayItems(value: unknown): readonly unknown[] {

@@ -43,6 +43,7 @@
 - `kernel/intelligence/agent-turn-runtime.ts` 是模型 + 工具多轮 agent turn 的统一入口；它只能依赖 `IntelligenceChannel`、`ToolExecutionBroker`、领域契约和事件发布接口，不能导入 app `ToolCenter` concrete class 或地下模块。
 - `kernel/intelligence/tool-use-loop.ts` 只能依赖 `IntelligenceChannel` 和 `ToolExecutionBroker` 接口，不能导入 `src/app/tool-center` concrete class；它可以作为 `AgentTurnRuntime` 的低层 helper，但不能成为 rootlet 私有能力。
 - `ToolCenter` 负责注册、查询、执行、权限检查、预算检查和失败归一化；工具不存在、未授权、预算耗尽或 executor 抛错都返回 `status: "failed"`，不把 provider 原始异常向上抛。
+- ToolCenter / Guard 必须把 AgentRunContext 当前有效权限作为最终执行边界；Desktop Task Soil 的 `permissionBoundaryRefs` 只是用户输入和运行边界声明，不能直接赋予工具或文件写权限。
 - `allowedTools` 必须来自 agent manifest / runtime policy；rootlet agent 当前通过 `turnPolicy.allowedTools` / `permissions.execute` 获得工具，固定地下核心 agent 默认 `allowModel = false` 且无工具执行权限。`underground-autonomy-core` 是明确例外：它允许模型并只允许 `search` / `read`，用于判断继续探索或请求收束；工具结果不得直接进入 Plan material。
 - `allowModel = false` 的 agent turn 必须由 `AgentTurnRuntime` 返回明确 disabled / skipped 状态，不能偷偷调用 `IntelligenceChannel`。
 - 默认 ToolCenter 只能把 `search` / `read` 暴露给地下 rootlet prompt；`web_search` / `page_reader` 不得作为地下 prompt 主入口或 rootlet manifest 默认工具名。
@@ -81,6 +82,7 @@
 | tool loop 超过 `maxToolRounds` | AgentTurnRuntime 返回 `stoppedReason = "max_tool_rounds"`，调用方使用声明 fallback |
 | model loop 超过 `maxModelRounds` | AgentTurnRuntime 返回 `stoppedReason = "max_model_rounds"`，不得继续请求模型 |
 | `allowModel = false` | AgentTurnRuntime 返回 disabled / skipped 状态，`model.*` 事件计数保持 0 |
+| Desktop Task Soil 声明 `permissionBoundaryRefs` | 只能作为上下文边界进入 Task Soil / canvas；实际工具执行仍按 AgentTurnPolicy、ToolCenter 和 Guard 裁剪 |
 | `underground-autonomy-core` 请求 `search` / `read` | 工具通过统一 ToolCenter 执行，EventLog 只记录 safe tool summary，结果只回填模型或成为 autonomy decision refs |
 | `underground-autonomy-core` 请求未授权工具 | ToolCenter 返回 failed，EventLog 发布 `tool.failed`，自治决策失败或停止，不绕过收束 |
 | EventLog / Snapshot / summary / panel JSON 出现 API key、token、raw provider response、完整 prompt 或完整页面正文 | 安全边界失败 |

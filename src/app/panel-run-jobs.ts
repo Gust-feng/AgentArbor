@@ -4,6 +4,7 @@ import type { UndergroundAiMode } from "./intelligence-channel-factory.js";
 import type { PanelRunCanvasReadModel } from "./panel-canvas-read-model.js";
 import type { PanelObservationReadModel, PanelRunStatus, PanelRunStreamEvent } from "./panel-run-read-model.js";
 import type { MinimalRuntime } from "./runtime.js";
+import type { DesktopTaskSoilInput } from "./task-soil-workspace.js";
 import type { UndergroundDemoSummary } from "./underground-demo-summary.js";
 
 export type PanelRunKind = "desktop" | "underground";
@@ -33,6 +34,7 @@ export type PanelRunJob = {
   readonly runKind: PanelRunKind;
   readonly goal: string;
   readonly aiMode: UndergroundAiMode;
+  readonly taskSoilInput?: DesktopTaskSoilInput;
   readonly createdAt: string;
   status: PanelRunStatus;
   updatedAt: string;
@@ -55,6 +57,7 @@ export class PanelRunJobStore {
     readonly runKind: PanelRunKind;
     readonly goal: string;
     readonly aiMode: UndergroundAiMode;
+    readonly taskSoilInput?: DesktopTaskSoilInput;
     readonly config: SanitizedModelProviderConfig;
     readonly informationAccess: SanitizedInformationAccessConfig;
   }): PanelRunJob {
@@ -64,6 +67,7 @@ export class PanelRunJobStore {
       runKind: input.runKind,
       goal: input.goal,
       aiMode: input.aiMode,
+      taskSoilInput: input.taskSoilInput,
       config: input.config,
       informationAccess: input.informationAccess,
       status: "pending",

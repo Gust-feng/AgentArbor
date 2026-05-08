@@ -41,6 +41,11 @@ import {
 import { createPanelRunCanvas, type PanelRunCanvasReadModel } from "./panel-canvas-read-model.js";
 import { PanelRunJobStore, type PanelRunJob, type PanelRunKind } from "./panel-run-jobs.js";
 import type { EventLogEntry } from "../kernel/events/in-memory-event-log.js";
+import {
+  parseDesktopTaskSoilInput,
+  TaskSoilInputValidationError,
+  type DesktopTaskSoilInput,
+} from "./task-soil-workspace.js";
 
 export type PanelServerOptions = {
   readonly host?: string;
@@ -307,10 +312,10 @@ async function handleRunRequest(
   const body = await readJsonBody(request);
   const config = await runtime.configCenter.getModelProviderConfig();
   const informationAccess = await runtime.configCenter.getInformationAccessConfig();
-  const runInput = parseRunInput(body, runKind === "desktop" ? "fake" : config.defaultAiMode);
+  const runInput = parseRunInput(body, defaultAiModeForRunKind(runKind, config.defaultAiMode));
 
   try {
-    const run = await runForPanel(runtime, runKind, runInput.goal, runInput.aiMode);
+    const run = await runForPanel(runtime, runKind, runInput.goal, runInput.aiMode, runInput.taskSoilInput);
     const currentConfig = await runtime.configCenter.getModelProviderConfig();
     const currentInformationAccess = await runtime.configCenter.getInformationAccessConfig();
     const trace = createPanelRunTrace({ status: "completed", eventEntries: run.eventEntries });
@@ -384,11 +389,12 @@ async function handleStartRunRequest(
   const body = await readJsonBody(request);
   const config = await runtime.configCenter.getModelProviderConfig();
   const informationAccess = await runtime.configCenter.getInformationAccessConfig();
-  const runInput = parseRunInput(body, runKind === "desktop" ? "fake" : config.defaultAiMode);
+  const runInput = parseRunInput(body, defaultAiModeForRunKind(runKind, config.defaultAiMode));
   const job = runtime.runJobs.create({
     runKind,
     goal: runInput.goal,
     aiMode: runInput.aiMode,
+    taskSoilInput: runInput.taskSoilInput,
     config,
     informationAccess,
   });
@@ -489,7 +495,7 @@ async function executePanelRunJob(runtime: PanelRuntime, runId: string): Promise
   }
   runtime.runJobs.markRunning(runId);
   try {
-    const run = await runForPanel(runtime, job.runKind, job.goal, job.aiMode, {
+    const run = await runForPanel(runtime, job.runKind, job.goal, job.aiMode, job.taskSoilInput, {
       onRuntimeReady: (context) => {
         runtime.runJobs.attachRuntime({
           runId,
@@ -540,12 +546,16 @@ async function executePanelRunJob(runtime: PanelRuntime, runId: string): Promise
       });
       return;
     }
+    const eventEntries = job.runtime?.eventLog.list() ?? [];
+    const modelFailureMessage = latestModelFailureMessage(eventEntries);
     runtime.runJobs.fail(runId, {
       config,
       informationAccess,
       error: {
         code: "panel_internal_error",
-        message: job.runKind === "desktop" ? "Desktop Shell 运行 job 失败。" : "地下兼容运行 job 失败。",
+        message:
+          modelFailureMessage ??
+          (job.runKind === "desktop" ? "Desktop Shell 运行 job 失败。" : "地下兼容运行 job 失败。"),
       },
     });
   }
@@ -707,13 +717,14 @@ async function runForPanel(
   runKind: PanelRunKind,
   goal: string,
   aiMode: UndergroundAiMode,
+  taskSoilInput: DesktopTaskSoilInput | undefined,
   options: {
     readonly onRuntimeReady?: (context: UndergroundDirectionSessionRuntimeContext) => void;
     readonly onModelOutputDelta?: (delta: ModelOutputDelta) => void;
   } = {}
 ): Promise<PanelRunExecutionResult> {
   return runKind === "desktop"
-    ? runDesktopForPanel(runtime, goal, aiMode, options)
+    ? runDesktopForPanel(runtime, goal, aiMode, taskSoilInput, options)
     : runUndergroundForPanel(runtime, goal, aiMode, options);
 }
 
@@ -721,6 +732,7 @@ async function runDesktopForPanel(
   runtime: PanelRuntime,
   goal: string,
   aiMode: UndergroundAiMode,
+  taskSoilInput: DesktopTaskSoilInput | undefined,
   options: {
     readonly onRuntimeReady?: (context: UndergroundDirectionSessionRuntimeContext) => void;
     readonly onModelOutputDelta?: (delta: ModelOutputDelta) => void;
@@ -738,6 +750,7 @@ async function runDesktopForPanel(
     aiMode,
     aiEnvironment,
     providerFetch: runtime.providerFetch,
+    taskSoilInput,
     createToolCenter,
     onRuntimeReady: options.onRuntimeReady,
     onModelOutputDelta: options.onModelOutputDelta,
@@ -890,16 +903,34 @@ function informationSourcePreferenceOrUndefined(
   return sources.length === 0 ? undefined : [...new Set(sources)];
 }
 
-function parseRunInput(raw: unknown, defaultAiMode: UndergroundAiMode): { goal: string; aiMode: UndergroundAiMode } {
+function parseRunInput(raw: unknown, defaultAiMode: UndergroundAiMode): {
+  readonly goal: string;
+  readonly aiMode: UndergroundAiMode;
+  readonly taskSoilInput?: DesktopTaskSoilInput;
+} {
   const record = asRecord(raw);
   const goal = optionalString(record.goal);
   if (goal === undefined) {
     throw new PanelHttpError(400, "missing_goal", "运行需要填写目标。");
   }
+  let taskSoilInput: DesktopTaskSoilInput;
+  try {
+    taskSoilInput = parseDesktopTaskSoilInput(raw);
+  } catch (error) {
+    if (error instanceof TaskSoilInputValidationError) {
+      throw new PanelHttpError(400, error.code, error.message);
+    }
+    throw error;
+  }
   return {
     goal,
     aiMode: parseOptionalAiMode(record.aiMode, "AI 模式无效。") ?? defaultAiMode,
+    taskSoilInput,
   };
+}
+
+function defaultAiModeForRunKind(runKind: PanelRunKind, configuredDefault: UndergroundAiMode): UndergroundAiMode {
+  return runKind === "desktop" ? "openai-compatible" : configuredDefault;
 }
 
 async function readJsonBody(request: IncomingMessage): Promise<unknown> {
@@ -987,6 +1018,40 @@ function panelConfigurationErrorMessage(code: UndergroundAiConfigurationError["i
     return "OpenAI-compatible 模式缺少 API key，已在发起网络请求前停止。";
   }
   return "OpenAI-compatible 模式缺少模型名，已在发起网络请求前停止。";
+}
+
+function latestModelFailureMessage(eventEntries: readonly EventLogEntry[]): string | undefined {
+  const latestFailure = [...eventEntries].reverse().find((entry) => entry.type === "model.failed");
+  if (latestFailure === undefined) {
+    return undefined;
+  }
+  const failurePayload = asRecord(latestFailure.message.payload);
+  const requestId = optionalString(failurePayload.requestId);
+  const responseId = optionalString(failurePayload.responseId);
+  const requestedPayload = requestId === undefined ? {} : modelRequestedPayloadFor(eventEntries, requestId);
+  const purpose = optionalString(requestedPayload.purpose) ?? "unknown purpose";
+  const outputContract = asRecord(requestedPayload.outputContract);
+  const contractId = optionalString(outputContract.contractId) ?? "unknown contract";
+  const failureKind = optionalString(failurePayload.failureKind) ?? "model_failed";
+  const validationStatus = optionalString(failurePayload.validationStatus) ?? "unknown";
+  const retryable = failurePayload.retryable === true ? "可重试" : "不可重试";
+  const callRef = [requestId, responseId].filter((value): value is string => value !== undefined).join(" / ");
+  const location = callRef.length > 0 ? `；调用 ${callRef}` : "";
+
+  if (failureKind === "output_validation") {
+    return `真实 AI 输出未通过契约校验：${purpose} / ${contractId}；validation ${validationStatus}，${retryable}${location}。运行已停止，没有生成 approved Plan。`;
+  }
+  return `真实 AI 调用失败：${purpose} / ${contractId}；原因 ${failureKind}，validation ${validationStatus}，${retryable}${location}。运行已停止，没有生成 approved Plan。`;
+}
+
+function modelRequestedPayloadFor(eventEntries: readonly EventLogEntry[], requestId: string): Record<string, unknown> {
+  const requested = eventEntries.find((entry) => {
+    if (entry.type !== "model.requested") {
+      return false;
+    }
+    return optionalString(asRecord(entry.message.payload).requestId) === requestId;
+  });
+  return requested === undefined ? {} : asRecord(requested.message.payload);
 }
 
 function runNotFoundMessage(runKind: PanelRunKind): string {

@@ -17,6 +17,7 @@
 - `pnpm panel:smoke`：先 build，再执行 `node dist/app/panel.js --port 0 --smoke`，证明 panel 命令可启动并退出。
 - `pnpm panel:desktop`：先 build，再执行 Electron 桌面入口 `dist/app/panel-desktop.js`，默认请求动态端口 `0` 后创建桌面窗口并加载本地 panel server URL；只有用户显式传入 `--port` 时才使用固定端口。
 - `pnpm panel:desktop:smoke`：先 build，再执行 Electron 桌面入口的 smoke 模式，证明桌面宿主能启动本地 server、关闭 server 并退出，且不创建窗口。
+- 真实 AI smoke：先执行 `pnpm build`，再显式执行 `node dist/app/real-ai-smoke.js "<goal>"`；该命令不属于默认 `pnpm test`，只在用户明确要验证真实 provider 时运行。
 
 ## Contracts
 
@@ -52,6 +53,8 @@
 | Convergence Judge 无 AI / fallback 路径产出 approved package，或 fallback confidence 不是低置信 | `pnpm test` 验收失败 |
 | `--ai openai-compatible` 缺少 key / model 时仍尝试网络或泄漏密钥 | `pnpm test` 或边界检查失败 |
 | panel `openai-compatible` 缺少 key 时仍调用 provider fetch | `pnpm test` 失败 |
+| Desktop Shell 真实 provider 返回不合约输出时只暴露通用内部错误，缺少 purpose / contract id / failure kind / call ref | `pnpm test` 失败 |
+| `node dist/app/real-ai-smoke.js` 缺少 API key 或模型名 | 输出 `status: "skipped"` 和 configuration boundary，退出码为 0，不触发 provider fetch |
 | settings store、EventLog、Snapshot、summary、trace、transcript、SSE、HTTP JSON 或测试快照出现 raw API key / token / 完整 prompt / provider raw response / hidden reasoning / raw tool output / 未校验模型输出 / rootlet parser 会拒绝的候选字段 | `pnpm test` 或安全检查失败 |
 | `pnpm panel` 不能启动并打印 URL | panel smoke 失败 |
 | `pnpm panel:desktop:smoke` 不能启动后退出，或 smoke 创建真实窗口 | desktop smoke 失败 |
@@ -65,6 +68,7 @@
 - Good：新增上层地下 agent AI 主线时同时覆盖 focused agent `reason()` fake runtime、no-runtime fallback、integration model purpose 顺序、fallback 不 approved 和 safe reasoning trace 脱敏。
 - Good：新增本地 panel 时同时覆盖配置更新、AI 禁用模式拒绝、fake AI run、openai-compatible 缺 key / 缺 model、Desktop Shell canvas、async run job、partial / final polling、SSE stream、cursor 续传、stream 断开不影响后台 run、HTTP / SSE 响应脱敏、中文 UI、tracking / transcript / model visible output read model 和 panel command smoke。
 - Good：新增桌面宿主时复用现有 panel server，单元测试注入 window/server 依赖覆盖安全默认值、smoke 不创建窗口、关闭幂等和启动失败清理。
+- Good：真实 provider smoke 使用独立命令，默认测试仍走 fake/stub；环境缺失时报告 skip/config boundary，不把 fake fallback 当作真实 AI 成功。
 - Base：纯类型补充仍运行 `pnpm build` 和 `pnpm test`。
 - Bad：只运行 `pnpm demo` 或 `pnpm demo:underground` 后宣称测试通过。
 

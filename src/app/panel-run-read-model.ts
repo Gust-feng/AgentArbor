@@ -158,6 +158,9 @@ export type PanelTranscriptModelCall = {
   readonly model?: string;
   readonly outputKind?: string;
   readonly validationStatus?: string;
+  readonly failureKind?: string;
+  readonly retryable?: boolean;
+  readonly sanitizedErrorRef?: string;
   readonly visibleOutput?: ModelVisibleOutputProjection;
   readonly candidateRefs: readonly string[];
   readonly eventRefs: readonly string[];
@@ -877,6 +880,9 @@ function createPanelTranscriptModelCalls(
       model: stringOrUndefined(payload.model) ?? existing?.model ?? summaryCall?.model,
       outputKind: stringOrUndefined(payload.outputKind) ?? existing?.outputKind ?? summaryCall?.outputKind,
       validationStatus: stringOrUndefined(payload.validationStatus) ?? existing?.validationStatus ?? summaryCall?.validationStatus,
+      failureKind: stringOrUndefined(payload.failureKind) ?? existing?.failureKind,
+      retryable: typeof payload.retryable === "boolean" ? payload.retryable : existing?.retryable,
+      sanitizedErrorRef: stringOrUndefined(payload.sanitizedErrorRef) ?? existing?.sanitizedErrorRef,
       visibleOutput:
         modelVisibleOutputOrUndefined(payload.visibleOutput) ?? existing?.visibleOutput ?? summaryCall?.visibleOutput,
       candidateRefs: summaryCall?.candidateRefs ?? existing?.candidateRefs ?? [],

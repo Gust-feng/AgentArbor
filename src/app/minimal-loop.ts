@@ -17,7 +17,7 @@ import type {
   WorkflowIR,
 } from "../domain/contracts.js";
 import { createRunObservationSnapshot } from "../domain/observation/index.js";
-import { createGlobalSoilView, createTaskSoil } from "../domain/soil/index.js";
+import { createGlobalSoilView } from "../domain/soil/index.js";
 import type { ArtifactRecord } from "../kernel/artifacts/in-memory-artifact-store.js";
 import { AbovegroundPlanner, GovernanceReview, Verifier, WorkerAgent } from "./agents.js";
 import {
@@ -32,6 +32,7 @@ import { runUndergroundDirectionSessionWithIntelligence } from "./underground-di
 import type { ModelOutputDelta } from "../domain/intelligence/index.js";
 import type { ToolExecutionBroker } from "../domain/tools/index.js";
 import type { UndergroundDirectionSessionRuntimeContext } from "./underground-direction-session.js";
+import { createTaskSoilFromDesktopInput, type DesktopTaskSoilInput } from "./task-soil-workspace.js";
 
 export const EXPECTED_DEMO_EVENTS: ArborMessageType[] = [
   "goal.received",
@@ -80,6 +81,7 @@ export type RunMinimalLoopOptions = {
   aiMode?: UndergroundAiMode;
   aiEnvironment?: UndergroundAiEnvironment;
   providerFetch?: UndergroundAiProviderFetch;
+  taskSoilInput?: DesktopTaskSoilInput;
   createToolCenter?: (runtime: MinimalRuntime) => ToolExecutionBroker;
   onRuntimeReady?: (context: UndergroundDirectionSessionRuntimeContext) => void;
   onModelOutputDelta?: (delta: ModelOutputDelta) => void;
@@ -107,28 +109,14 @@ export async function runMinimalLoop(
     onRuntimeReady: options.onRuntimeReady,
   });
   const runtime = underground.runtime;
-  const taskSoil = createTaskSoil({
-    rawGoal: goal,
+  const taskSoil = createTaskSoilFromDesktopInput({
+    goal,
     goalId: underground.goalId,
     traceId: underground.traceId,
-    contextRefs: [
-      {
-        ref: `workspace:${underground.goalId}`,
-        kind: "workspace",
-        summary: "Desktop Shell provided the current task workspace context as refs only.",
-      },
-    ],
+    aiMode,
     constraints: runtime.constraints,
-    permissionBoundaryRefs: [
-      "read:workspace:current-task",
-      "write:memory://artifacts",
-      aiMode === "openai-compatible" ? "execute:openai-compatible-ai" : "execute:fake-ai",
-    ],
-    globalSoilRefs: [
-      ...runtime.soilStore.listCapabilityAssetRefs().map((ref) => ref.id),
-      ...runtime.soilStore.listPathBiasRefs().map((ref) => ref.id),
-    ],
-    runMaterialRefs: [underground.traceId],
+    soilStore: runtime.soilStore,
+    taskSoilInput: options.taskSoilInput,
     createdAt: new Date().toISOString(),
   });
   const globalSoilView = createGlobalSoilView(runtime.soilStore);

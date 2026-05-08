@@ -1,0 +1,8 @@
+{"file": "docs/架构设计/产品架构/ADR-0022-AgentArbor桌面通用Agent与双运行时架构.md", "reason": "Product architecture fact source for Desktop Shell, Task Soil, Plan, and dual runtimes"}
+{"file": ".trellis/spec/backend/soil-store.md", "reason": "Task Soil and Global Soil boundary constraints"}
+{"file": ".trellis/spec/backend/intelligence-channel.md", "reason": "OpenAI-compatible real model configuration, no-leak, and provider boundary"}
+{"file": ".trellis/spec/backend/tool-runtime.md", "reason": "ToolCenter and read-only context/tool permission boundaries"}
+{"file": ".trellis/spec/backend/observation-read-model.md", "reason": "Safe canvas/tracking/transcript/SSE projection boundaries"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Build/test/no-leak quality gates"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Desktop Shell Main Canvas and Observation Panel UI rules"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Panel smoke and frontend safety checks"}

@@ -15,16 +15,25 @@ test("panel HTML defaults to Simplified Chinese labels and status text", () => {
   assert.equal(html.includes("Desktop Shell 工作台"), true);
   assert.equal(html.includes("Plan / Fruit 主画布"), true);
   assert.equal(html.includes("Task Soil"), true);
+  assert.equal(html.includes("Task Soil context refs"), true);
   assert.equal(html.includes("Aboveground Execution Runtime"), true);
   assert.equal(html.includes("Fruits"), true);
   assert.equal(html.includes("Agent transcript 为空"), true);
   assert.equal(html.includes("Main Canvas 展示 Plan / Fruit"), true);
   assert.equal(html.includes("描述你的任务。Desktop Shell 会先形成 Task Soil，再展示 Plan 和 Fruits。"), true);
   assert.equal(html.includes('<option value="none">AI 禁用</option>'), true);
-  assert.equal(html.includes('<option value="fake">Fake AI</option>'), true);
-  assert.equal(html.includes('<option value="openai-compatible">OpenAI-compatible</option>'), true);
-  assert.equal(html.includes("运行状态"), true);
-  assert.equal(html.includes("Agent Run Tree inspector"), true);
+  assert.equal(html.includes('<option value="fake">Fake AI 测试模式</option>'), true);
+  assert.equal(html.includes('<option value="openai-compatible">OpenAI-compatible 推荐</option>'), true);
+  assert.equal(html.includes("运行监督工作台"), true);
+  assert.equal(html.includes("运行监督分区"), true);
+  assert.equal(html.includes("运行路径"), true);
+  assert.equal(html.includes("运行健康"), true);
+  assert.equal(html.includes("真实 AI 诊断"), true);
+  assert.equal(html.includes("模型 / 工具流"), true);
+  assert.equal(html.includes("Agent 树"), true);
+  assert.equal(html.includes("Agent Run Tree / 父层综合"), true);
+  assert.equal(html.includes("风险 / 不确定性 / 下一步"), true);
+  assert.equal(html.includes("真实 provider 失败、输出契约失败或配置边界会显示在这里。"), true);
   assert.equal(html.includes("折叠调试区"), true);
   assert.equal(html.includes("执行智能"), true);
   assert.equal(html.includes("暂无 Desktop Shell 任务"), true);
@@ -63,6 +72,7 @@ test("panel HTML defaults to Simplified Chinese labels and status text", () => {
   assert.equal(html.includes("<h2>模型调用追踪</h2>"), false);
   assert.equal(html.includes("<h2>配置中心</h2>"), false);
   assert.equal(html.includes("<h2>Provider 状态</h2>"), false);
+  assert.equal(html.includes("Agent Run Tree inspector"), false);
   assert.equal(html.includes("<summary>调试视图：Observation Snapshot</summary>"), false);
   assert.equal(html.includes(">芽<"), false);
   assert.equal(html.includes(">木<"), false);
@@ -330,7 +340,7 @@ test("desktop async fake run returns main canvas with Task Soil, approved Plan, 
   try {
     const start = await requestJson(server.url, "/api/desktop/runs", {
       method: "POST",
-      body: { goal: "Build a Desktop Shell visible Plan and Fruit result." },
+      body: { goal: "Build a Desktop Shell visible Plan and Fruit result.", aiMode: "fake" },
     });
     const completed = await waitForRun(
       server.url,
@@ -363,6 +373,199 @@ test("desktop async fake run returns main canvas with Task Soil, approved Plan, 
     assert.equal(completed.body.tracking.package.validationPassed, true);
     assert.equal(completed.body.tracking.agentRunTree.childRuns.length > 0, true);
     assert.equal(completed.body.transcript.events.some((event: { type: string }) => event.type === "final.result"), true);
+  } finally {
+    await server.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("desktop default run uses openai-compatible and fails at config boundary instead of fake fallback", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-desktop-default-openai-"));
+  let fetchCalls = 0;
+  const providerFetch: PanelProviderFetch = async () => {
+    fetchCalls += 1;
+    throw new Error("provider fetch must not be called before desktop config is complete");
+  };
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory, providerFetch });
+  try {
+    const start = await requestJson(server.url, "/api/desktop/runs", {
+      method: "POST",
+      body: { goal: "Start with the recommended real AI entry." },
+    });
+    const failed = await waitForRun(
+      server.url,
+      start.body.runId,
+      (body) => body.status === "failed",
+      4_000,
+      "/api/desktop/runs"
+    );
+
+    assert.equal(start.status, 202);
+    assert.equal(fetchCalls, 0);
+    assert.equal(failed.body.tracking.provider.requestedMode, "openai-compatible");
+    assert.equal(failed.body.error.code, "missing_api_key");
+    assert.equal(failed.body.canvas, undefined);
+    assert.equal(failed.body.summary.ai.eventCounts.requested, 0);
+    assert.equal(failed.text.includes("fake_provider"), false);
+    assert.equal(failed.text.includes('"status":"approved"'), false);
+  } finally {
+    await server.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("desktop default ignores legacy fake setting and still recommends real AI boundary", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-desktop-legacy-fake-default-"));
+  let fetchCalls = 0;
+  const providerFetch: PanelProviderFetch = async () => {
+    fetchCalls += 1;
+    throw new Error("provider fetch must not be called before desktop config is complete");
+  };
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory, providerFetch });
+  try {
+    await requestJson(server.url, "/api/config/model-provider", {
+      method: "POST",
+      body: { defaultAiMode: "fake" },
+    });
+    const start = await requestJson(server.url, "/api/desktop/runs", {
+      method: "POST",
+      body: { goal: "Legacy fake settings should not become the Desktop product default." },
+    });
+    const failed = await waitForRun(
+      server.url,
+      start.body.runId,
+      (body) => body.status === "failed",
+      4_000,
+      "/api/desktop/runs"
+    );
+
+    assert.equal(fetchCalls, 0);
+    assert.equal(failed.body.tracking.provider.defaultAiMode, "fake");
+    assert.equal(failed.body.tracking.provider.requestedMode, "openai-compatible");
+    assert.equal(failed.text.includes("fake_provider"), false);
+  } finally {
+    await server.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("desktop run accepts context refs, permission refs, and readonly previews in Task Soil canvas", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-desktop-context-refs-"));
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+  try {
+    const start = await requestJson(server.url, "/api/desktop/runs", {
+      method: "POST",
+      body: {
+        goal: "Use explicit Task Soil refs.",
+        aiMode: "fake",
+        taskSoil: {
+          contextRefs: [
+            {
+              ref: "file:src/app/panel-assets.ts",
+              kind: "file",
+              summary: "Panel source ref only.",
+              readonlyPreview: {
+                title: "panel-assets",
+                text: "Short readonly preview from the user-selected file.",
+              },
+            },
+            {
+              ref: "https://example.test/spec",
+              kind: "web",
+              summary: "External spec URL ref.",
+            },
+          ],
+          permissionBoundaryRefs: ["read:file:src/app/panel-assets.ts", "ask:before-write"],
+        },
+      },
+    });
+    const completed = await waitForRun(
+      server.url,
+      start.body.runId,
+      (body) => body.status === "completed",
+      4_000,
+      "/api/desktop/runs"
+    );
+    const refs = completed.body.canvas.taskSoil.contextRefs;
+    const fileRef = refs.find((ref: { ref: string }) => ref.ref === "file:src/app/panel-assets.ts");
+
+    assert.equal(completed.body.status, "completed");
+    assert.equal(refs.some((ref: { kind: string }) => ref.kind === "user_goal"), true);
+    assert.notEqual(fileRef, undefined);
+    assert.equal(fileRef.readonlyPreview.text, "Short readonly preview from the user-selected file.");
+    assert.equal(completed.body.canvas.taskSoil.permissionBoundaryRefs.includes("read:file:src/app/panel-assets.ts"), true);
+    assert.equal(completed.body.canvas.taskSoil.permissionBoundaryRefs.includes("ask:before-write"), true);
+    assertSafePanelJsonText(JSON.stringify(completed.body.canvas));
+  } finally {
+    await server.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("desktop canvas redacts Task Soil preview secret shapes", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-desktop-context-redaction-"));
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+  try {
+    const start = await requestJson(server.url, "/api/desktop/runs", {
+      method: "POST",
+      body: {
+        goal: "Redact preview material.",
+        aiMode: "fake",
+        taskSoil: {
+          contextRefs: [
+            {
+              ref: "file:notes/redaction.md",
+              kind: "file",
+              summary: "summary api_key=panel-api-value",
+              readonlyPreview: {
+                title: "token: title-token-value",
+                text: "Authorization: Bearer preview-token-value and password=panel-password-value",
+              },
+            },
+          ],
+          permissionBoundaryRefs: ["read:file:notes/redaction.md"],
+        },
+      },
+    });
+    const completed = await waitForRun(
+      server.url,
+      start.body.runId,
+      (body) => body.status === "completed",
+      4_000,
+      "/api/desktop/runs"
+    );
+    const canvasText = JSON.stringify(completed.body.canvas);
+
+    assert.equal(canvasText.includes("panel-api-value"), false);
+    assert.equal(canvasText.includes("title-token-value"), false);
+    assert.equal(canvasText.includes("preview-token-value"), false);
+    assert.equal(canvasText.includes("panel-password-value"), false);
+    assert.equal(canvasText.includes("[redacted-secret]"), true);
+    assert.equal(canvasText.includes("[redacted-token]"), true);
+    assertSafePanelJsonText(canvasText);
+  } finally {
+    await server.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("desktop run rejects unauthorized context refs before creating a run job", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-desktop-invalid-context-"));
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+  try {
+    const rejected = await requestJson(server.url, "/api/desktop/runs", {
+      method: "POST",
+      body: {
+        goal: "Try to pass runtime refs.",
+        aiMode: "fake",
+        contextRefs: [{ ref: "runtime:store/live", kind: "workspace" }],
+      },
+    });
+
+    assert.equal(rejected.status, 400);
+    assert.equal(rejected.body.ok, false);
+    assert.equal(rejected.body.error.code, "unauthorized_context_ref");
+    assert.equal(rejected.text.includes('"status":"approved"'), false);
   } finally {
     await server.close();
     await fs.rm(directory, { recursive: true, force: true });
@@ -515,6 +718,51 @@ test("desktop canvas, tracking, transcript, and SSE keep model and tool internal
     assert.equal(safeText.includes("hidden reasoning"), false);
     assert.equal(safeText.includes("raw tool output"), false);
     assertSafePanelJsonText(safeText);
+  } finally {
+    await server.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("desktop real AI contract failure surfaces a useful safe diagnostic", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-desktop-contract-failure-"));
+  const secret = "sk-desktop-contract-failure-secret";
+  const providerFetch: PanelProviderFetch = async () => createInvalidOpenAiResponse("desktop-contract-failure-model");
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory, providerFetch });
+  try {
+    await requestJson(server.url, "/api/config/model-provider", {
+      method: "POST",
+      body: {
+        baseUrl: "https://provider.example",
+        model: "desktop-contract-failure-model",
+        apiKey: secret,
+      },
+    });
+    const start = await requestJson(server.url, "/api/desktop/runs", {
+      method: "POST",
+      body: { goal: "Use a real model path with invalid structured output.", aiMode: "openai-compatible" },
+    });
+    const failed = await waitForRun(
+      server.url,
+      start.body.runId,
+      (body) => body.status === "failed",
+      4_000,
+      "/api/desktop/runs"
+    );
+    const failedCalls = failed.body.transcript.modelCalls.filter((call: { status: string }) => call.status === "failed");
+    const failedCall = failedCalls.at(-1);
+
+    assert.equal(failed.body.status, "failed");
+    assert.equal(failed.body.error.code, "panel_internal_error");
+    assert.equal(failed.body.error.message.includes("真实 AI 输出未通过契约校验"), true);
+    assert.equal(failedCall?.failureKind, "output_validation");
+    assert.equal(typeof failedCall?.outputContractId, "string");
+    assert.equal(failed.body.error.message.includes(failedCall.outputContractId), true);
+    assert.equal(failed.body.canvas, undefined);
+    assert.equal(failed.text.includes(secret), false);
+    assert.equal(failed.text.includes("bad raw output"), false);
+    assert.equal(failed.text.includes("hidden_reasoning"), false);
+    assertSafePanelJsonText(failed.text);
   } finally {
     await server.close();
     await fs.rm(directory, { recursive: true, force: true });
@@ -808,6 +1056,7 @@ test("panel validation failed model output falls back without approved visible o
 
     assert.equal(run.status, 200);
     assert.equal(failedCall?.validationStatus, "failed");
+    assert.equal(failedCall?.failureKind, "output_validation");
     assert.equal(failedCall?.visibleOutput, undefined);
     assert.equal(run.body.summary.ai.fallbackCount > 0, true);
     assert.equal(run.text.includes("bad raw output"), false);
@@ -1234,7 +1483,10 @@ function createInvalidOpenAiResponse(model: string): Awaited<ReturnType<PanelPro
 function assertSafePanelJsonText(text: string): void {
   const lower = text.toLowerCase();
   assert.equal(/\bsk-[A-Za-z0-9_-]{6,}/.test(text), false);
-  assert.equal(text.includes("Bearer "), false);
+  assert.equal(/\bBearer\s+[A-Za-z0-9._~+/=-]+/i.test(text), false);
+  assert.equal(/\bAuthorization\s*[:=]\s*(?:Bearer\s+)?[A-Za-z0-9._~+/=-]+/i.test(text), false);
+  assert.equal(/\b(?:api[_ -]?key|apikey)\s*[:=]\s*[^;\s"'}\]]+/i.test(text), false);
+  assert.equal(/\btoken\s*[:=]\s*[^;\s"'}\]]+/i.test(text), false);
   assert.equal(lower.includes("system prompt"), false);
   assert.equal(text.includes("完整 prompt"), false);
   assert.equal(text.includes("sanitizedMessages"), false);

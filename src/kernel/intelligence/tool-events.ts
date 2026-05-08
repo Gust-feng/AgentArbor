@@ -1,6 +1,7 @@
 import type { ArborMessage } from "../../domain/common.js";
 import type { ToolCallRequest, ToolCallResult, ToolExecutionContext } from "../../domain/tools/index.js";
 import { createMessage } from "../messages/create-message.js";
+import { redactSensitiveText } from "../redaction.js";
 
 export type ToolRequestedEventPayload = {
   readonly traceId: string;
@@ -160,15 +161,6 @@ function truncateDeep(
 
 function sanitizeError(value: string): string {
   return redactSensitiveText(value).slice(0, 500);
-}
-
-function redactSensitiveText(value: string): string {
-  return value
-    .replace(/sk-[A-Za-z0-9_-]{6,}/g, "[redacted-secret]")
-    .replace(/tvly-[A-Za-z0-9_-]{6,}/g, "[redacted-secret]")
-    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [redacted-token]")
-    .replace(/api[_ -]?key\s*[:=]\s*[^;\s]+/gi, "api key=[redacted-secret]")
-    .replace(/token\s*[:=]\s*[^;\s]+/gi, "token=[redacted-token]");
 }
 
 function isSecretLikeKey(key: string): boolean {

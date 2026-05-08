@@ -4,6 +4,7 @@ import type {
   PanelRunTrackingReadModel,
   PanelRunTranscript,
 } from "./panel-run-read-model.js";
+import { redactSensitiveText } from "../kernel/redaction.js";
 
 export type PanelRunCanvasReadModel = {
   readonly kind: "desktop_shell_canvas";
@@ -16,6 +17,11 @@ export type PanelRunCanvasReadModel = {
       readonly ref: string;
       readonly kind: string;
       readonly summary?: string;
+      readonly readonlyPreview?: {
+        readonly title?: string;
+        readonly text: string;
+        readonly truncated: boolean;
+      };
     }[];
     readonly permissionBoundaryRefs: readonly string[];
   };
@@ -121,6 +127,15 @@ export function createPanelRunCanvas(input: {
         ref: ref.ref,
         kind: ref.kind,
         summary: ref.summary === undefined ? undefined : safeText(ref.summary, 240),
+        readonlyPreview:
+          ref.readonlyPreview === undefined
+            ? undefined
+            : {
+                title:
+                  ref.readonlyPreview.title === undefined ? undefined : safeText(ref.readonlyPreview.title, 120),
+                text: safeText(ref.readonlyPreview.text, 360),
+                truncated: ref.readonlyPreview.truncated || ref.readonlyPreview.text.length > 360,
+              },
       })),
       permissionBoundaryRefs: [...input.result.taskSoil.permissionBoundaryRefs],
     },
@@ -207,9 +222,7 @@ function planReason(
 }
 
 function safeText(value: string, maxLength: number): string {
-  const redacted = value
-    .replace(/\bsk-[A-Za-z0-9_-]{6,}\b/g, "[redacted-secret]")
-    .replace(/\bBearer\s+[A-Za-z0-9._-]+\b/g, "Bearer [redacted-token]");
+  const redacted = redactSensitiveText(value);
   return redacted.length <= maxLength ? redacted : `${redacted.slice(0, maxLength - 1)}…`;
 }
 

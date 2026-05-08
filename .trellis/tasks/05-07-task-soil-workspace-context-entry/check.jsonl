@@ -1,0 +1,7 @@
+{"file": ".trellis/spec/backend/soil-store.md", "reason": "Verify Task Soil and Global Soil boundaries remain separated"}
+{"file": ".trellis/spec/backend/intelligence-channel.md", "reason": "Verify real AI mode remains explicit, configured, and redacted"}
+{"file": ".trellis/spec/backend/tool-runtime.md", "reason": "Verify context preview and tool permissions are enforced by runtime boundaries"}
+{"file": ".trellis/spec/backend/observation-read-model.md", "reason": "Verify panel read models do not leak raw internals"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Verify runtime test and safety expectations"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Verify Desktop Shell UI continues to use Main Canvas and Observation Panel split"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Verify panel smoke and UI safety expectations"}

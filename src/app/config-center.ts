@@ -270,7 +270,7 @@ export function createDefaultLocalSettings(now: string = new Date().toISOString(
       providerKind: "openai_compatible",
       protocolKind: "openai_compatible_chat_completions",
       baseUrl: DEFAULT_MODEL_PROVIDER_BASE_URL,
-      defaultAiMode: "fake",
+      defaultAiMode: "openai-compatible",
       secretRef: MODEL_PROVIDER_SECRET_REF,
       updatedAt: now,
     },

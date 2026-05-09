@@ -8,35 +8,37 @@ export function createPanelHtml(): string {
   <style>
     :root {
       color-scheme: light;
-      --bg: #dfe4ec;
-      --shell: #f7f8fb;
+      --bg: #fafafa;
+      --shell: #ffffff;
       --paper: #ffffff;
-      --surface: #f7f8fa;
-      --line: #e3e8ef;
-      --line-strong: #cbd5e1;
-      --text: #161a22;
-      --muted: #5d6675;
-      --muted-2: #8b95a5;
-      --accent: #2ec4a6;
-      --accent-strong: #11967d;
-      --accent-soft: #e6faf4;
-      --blue: #3157d5;
-      --blue-soft: #eef3ff;
-      --nav: #171c25;
-      --nav-soft: #222a36;
-      --nav-line: #303948;
-      --nav-text: #d7deea;
-      --nav-muted: #8f9aaa;
+      --surface: #f5f5f5;
+      --line: #f0f0f0;
+      --line-strong: #e5e5e5;
+      --text: #1a1a1a;
+      --muted: #525252;
+      --muted-2: #a3a3a3;
+      --accent: #1a1a1a;
+      --accent-strong: #404040;
+      --accent-soft: #f5f5f5;
+      --blue: #3867d6;
+      --blue-soft: #eef4ff;
+      --nav: #f8f8f8;
+      --nav-soft: #ffffff;
+      --nav-line: #eceef1;
+      --nav-text: #1b1f27;
+      --nav-muted: #7a828e;
       --danger: #b42318;
       --danger-soft: #fff3f1;
       --warn: #9a6700;
       --warn-soft: #fff8e6;
       --ok: #0f766e;
       --ok-soft: #ecfdf5;
-      --shadow: 0 18px 45px rgba(15, 23, 42, 0.12);
+      --shadow: 0 2px 6px rgba(0, 0, 0, 0.08), 0 8px 24px rgba(0, 0, 0, 0.06);
     }
 
     * { box-sizing: border-box; }
+
+    [hidden] { display: none !important; }
 
     html, body { min-height: 100%; }
 
@@ -45,7 +47,7 @@ export function createPanelHtml(): string {
       overflow: hidden;
       background: var(--bg);
       color: var(--text);
-      font: 14px/1.54 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font: 14px/1.55 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       letter-spacing: 0;
     }
 
@@ -59,14 +61,14 @@ export function createPanelHtml(): string {
       color: var(--text);
       padding: 0 12px;
       cursor: pointer;
-      font-weight: 720;
+      font-weight: 500;
       white-space: nowrap;
     }
 
     button.primary {
-      border-color: #b7f0dd;
-      background: #bdf8df;
-      color: #0c513e;
+      border-color: var(--accent);
+      background: var(--accent);
+      color: #fff;
     }
 
     button.ghost {
@@ -124,90 +126,180 @@ export function createPanelHtml(): string {
     }
 
     .app {
-      display: grid;
-      grid-template-rows: 42px minmax(0, 1fr);
+      position: relative;
+      display: flex;
       width: 100vw;
       height: 100vh;
+      height: 100dvh;
       overflow: hidden;
       background: var(--bg);
     }
 
+    .shell {
+      display: flex;
+      width: 100%;
+      height: 100%;
+      min-height: 0;
+      overflow: hidden;
+      background: var(--shell);
+    }
+
+    .app-container {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      min-width: 0;
+      background: #fff;
+    }
+
     .titlebar {
+      flex-shrink: 0;
       display: flex;
       align-items: center;
       gap: 12px;
       min-width: 0;
-      padding: 6px 14px;
-      background: #121722;
-      color: #c4ccd8;
+      min-height: 61px;
+      padding: 12px 20px;
+      border-bottom: 1px solid var(--line);
+      background: #fff;
+      color: #1d2430;
+    }
+
+    .collapse-button {
+      display: inline-grid;
+      place-items: center;
+      width: 34px;
+      min-width: 34px;
+      min-height: 34px;
+      padding: 0;
+      border-color: transparent;
+      background: transparent;
+    }
+
+    .collapse-icon {
+      display: block;
+      width: 18px;
+      height: 18px;
+      border: 2px solid #6b7280;
+      border-radius: 4px;
+      position: relative;
+    }
+
+    .collapse-icon::before {
+      content: "";
+      position: absolute;
+      top: 2px;
+      bottom: 2px;
+      left: 5px;
+      border-left: 2px solid #6b7280;
     }
 
     .mode-pill {
       display: inline-flex;
       align-items: center;
       gap: 8px;
-      min-height: 34px;
-      border: 1px solid #2a3443;
-      border-radius: 7px;
-      background: #1b2330;
-      color: #eef4ff;
-      padding: 0 10px;
-      font-weight: 800;
+      min-height: 36px;
+      border: 0;
+      border-radius: 0;
+      background: transparent;
+      color: #111827;
+      padding: 0;
+      font-weight: 600;
+      font-size: 18px;
+    }
+
+    .brand-dot {
+      width: 18px;
+      height: 18px;
+      border-radius: 5px;
+      background:
+        radial-gradient(circle at 62% 38%, #fff 0 17%, transparent 18%),
+        linear-gradient(145deg, #ff4d5f 0%, #f59e0b 50%, #22c55e 100%);
+      transform: rotate(-12deg);
+      box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08);
     }
 
     .menu-link {
-      color: #95a1b2;
-      font-size: 13px;
+      display: none;
     }
 
     .window-actions {
       margin-left: auto;
       display: flex;
-      gap: 16px;
-      color: #aab3c2;
-      font-weight: 760;
-    }
-
-    .shell {
-      display: grid;
-      grid-template-columns: 286px minmax(0, 1fr);
-      min-height: 0;
-      overflow: hidden;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+      font-weight: 500;
     }
 
     .sidebar {
-      min-width: 0;
+      width: 260px;
+      min-width: 260px;
+      height: 100%;
+      min-height: 0;
       display: grid;
-      grid-template-rows: auto auto minmax(0, 1fr) auto;
-      gap: 16px;
-      padding: 12px 12px 14px;
+      grid-template-rows: auto minmax(0, 1fr);
+      gap: 8px;
+      padding: 12px;
       overflow: hidden;
       background: var(--nav);
       color: var(--nav-text);
+      border-right: 1px solid var(--nav-line);
+      transition: width 150ms ease, min-width 150ms ease, transform 150ms ease, padding 150ms ease;
+    }
+
+    .shell.sidebar-closed .sidebar {
+      width: 0;
+      min-width: 0;
+      padding-right: 0;
+      padding-left: 0;
+      transform: translateX(-100%);
+      border-right-color: transparent;
     }
 
     .side-nav {
       display: grid;
-      gap: 6px;
+      gap: 4px;
     }
 
     .side-action {
       display: grid;
       grid-template-columns: 20px minmax(0, 1fr);
       align-items: center;
-      gap: 8px;
+      gap: 10px;
+      width: 100%;
       min-height: 36px;
       border-radius: 8px;
-      padding: 0 8px;
+      padding: 0 12px;
       color: var(--nav-text);
       text-decoration: none;
       border: 1px solid transparent;
+      background: transparent;
+      font-size: 14px;
+      font-weight: 500;
+      text-align: left;
+      transition: background 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
     }
 
     .side-action:hover,
     .side-action.active {
-      border-color: var(--nav-line);
-      background: var(--nav-soft);
+      border-color: transparent;
+      background: #f5f5f5;
+      box-shadow: none;
+    }
+
+    .side-nav .side-action:first-child {
+      margin-bottom: 8px;
+      border-color: var(--line-strong);
+      background: #fff;
+      font-weight: 500;
+    }
+
+    .side-nav .side-action:first-child:hover,
+    .side-nav .side-action:first-child.active {
+      border-color: #d4d4d4;
+      background: #fff;
     }
 
     .nav-mark {
@@ -215,9 +307,10 @@ export function createPanelHtml(): string {
       place-items: center;
       width: 16px;
       height: 16px;
-      border: 1px solid #435065;
+      border: 1px solid #b9c1cc;
       border-radius: 5px;
       position: relative;
+      background: #fff;
     }
 
     .nav-mark.plus::before,
@@ -238,7 +331,9 @@ export function createPanelHtml(): string {
     }
 
     .nav-mark.skill::before,
-    .nav-mark.auto::before {
+    .nav-mark.auto::before,
+    .nav-mark.tool::before,
+    .nav-mark.settings::before {
       content: "";
       width: 7px;
       height: 7px;
@@ -251,6 +346,22 @@ export function createPanelHtml(): string {
       background: #f7c948;
     }
 
+    .nav-mark.tool::before {
+      width: 9px;
+      height: 3px;
+      border-radius: 999px;
+      background: #8b8f98;
+      transform: rotate(-32deg);
+    }
+
+    .nav-mark.settings::before {
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      border: 2px solid #8b8f98;
+      background: transparent;
+    }
+
     .side-title {
       display: flex;
       align-items: center;
@@ -258,7 +369,8 @@ export function createPanelHtml(): string {
       margin: 12px 0 8px;
       color: var(--nav-muted);
       font-size: 12px;
-      font-weight: 720;
+      font-weight: 600;
+      letter-spacing: 0.01em;
     }
 
     .task-list {
@@ -277,7 +389,7 @@ export function createPanelHtml(): string {
       gap: 8px;
       min-height: 34px;
       color: var(--nav-text);
-      font-weight: 760;
+      font-weight: 600;
     }
 
     .mini-plus {
@@ -304,6 +416,7 @@ export function createPanelHtml(): string {
       color: #475467;
       overflow: hidden;
       position: relative;
+      border: 1px solid transparent;
     }
 
     .run-item::before {
@@ -318,9 +431,11 @@ export function createPanelHtml(): string {
     }
 
     .run-item.active {
-      background: #232c39;
-      color: #f7fafc;
+      background: #fff;
+      border-color: var(--line);
+      color: #18202d;
       font-weight: 760;
+      box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
     }
 
     .run-item.active::before {
@@ -334,7 +449,7 @@ export function createPanelHtml(): string {
       text-overflow: ellipsis;
       white-space: nowrap;
       color: inherit;
-      font-weight: 720;
+      font-weight: 500;
     }
 
     .run-meta {
@@ -347,58 +462,29 @@ export function createPanelHtml(): string {
       font-size: 12px;
     }
 
-    .profile {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      min-width: 0;
-      padding: 10px 4px 0;
-      border-top: 1px solid var(--nav-line);
-    }
-
-    .avatar {
-      display: inline-grid;
-      place-items: center;
-      width: 28px;
-      height: 28px;
-      border-radius: 8px;
-      background: #202938;
-      color: #bdf8df;
-      font-weight: 850;
-    }
-
-    .avatar::before {
-      content: "";
-      width: 9px;
-      height: 9px;
-      border-radius: 999px;
-      background: var(--accent);
-      box-shadow: 0 0 0 4px rgba(46, 196, 166, 0.12);
-    }
-
     .workspace {
       min-width: 0;
-      padding: 8px 8px 10px 0;
+      flex: 1;
       overflow: hidden;
+      background: #fff;
     }
 
     .session-card {
       display: grid;
-      grid-template-columns: minmax(560px, 1fr) 328px;
-      grid-template-rows: auto minmax(0, 1fr);
+      grid-template-columns: minmax(0, 1fr);
+      grid-template-rows: minmax(0, 1fr);
       min-width: 0;
-      height: calc(100vh - 54px);
-      margin: 8px 8px 10px 0;
+      height: 100%;
+      margin: 0;
       overflow: hidden;
-      border: 1px solid #d9e0ea;
-      border-radius: 8px;
+      border: 0;
+      border-radius: 0;
       background: #fff;
-      box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+      box-shadow: none;
     }
 
     .session-header {
-      grid-column: 1 / -1;
-      display: flex;
+      display: none;
       align-items: center;
       justify-content: space-between;
       gap: 12px;
@@ -447,21 +533,36 @@ export function createPanelHtml(): string {
       min-height: 0;
       display: grid;
       grid-template-rows: minmax(0, 1fr) auto;
-      border-right: 1px solid var(--line);
+      border-right: 0;
     }
 
     .thread-scroll {
       min-height: 0;
       overflow: auto;
-      padding: 28px clamp(28px, 5vw, 68px) 18px clamp(32px, 6vw, 88px);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 24px clamp(24px, 7vw, 120px) 18px;
     }
 
     .welcome {
+      display: grid;
+      justify-items: center;
+      gap: 14px;
       max-width: 760px;
-      margin-bottom: 24px;
+      margin: auto 0;
+      text-align: center;
+    }
+
+    .welcome h1 {
+      margin: 0;
+      font-size: 24px;
+      line-height: 1.2;
+      font-weight: 500;
     }
 
     .welcome p {
+      display: none;
       margin-bottom: 0;
       color: var(--muted);
     }
@@ -481,50 +582,60 @@ export function createPanelHtml(): string {
     }
 
     .transcript {
-      display: grid;
-      gap: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 32px;
+      width: min(800px, 100%);
+      padding: 24px;
     }
 
     .empty-transcript {
+      display: none;
       color: var(--muted);
     }
 
     .entry {
-      display: grid;
-      grid-template-columns: 58px minmax(0, 1fr);
-      gap: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
       min-width: 0;
+      position: relative;
     }
 
     .entry-label {
-      color: var(--muted);
-      font-size: 13px;
-      font-weight: 720;
-      text-align: right;
-      padding-top: 7px;
+      display: none;
     }
 
     .bubble {
       min-width: 0;
-      color: #273142;
+      color: var(--text);
     }
 
     .bubble-inner {
       display: grid;
       gap: 8px;
-      border-radius: 7px;
-      padding: 9px 11px;
+      border-radius: 12px;
+      padding: 0;
+    }
+
+    .entry.user {
+      align-items: flex-end;
+    }
+
+    .entry.user .bubble {
+      max-width: 85%;
     }
 
     .entry.user .bubble-inner {
-      border: 1px solid #c8dcff;
-      background: #f1f5ff;
+      border: 0;
+      background: var(--surface);
+      padding: 12px 16px;
     }
 
     .entry:not(.user) .bubble-inner {
       border: 1px solid transparent;
       background: transparent;
-      padding-left: 0;
+      padding: 0;
     }
 
     .bubble.failed .bubble-inner {
@@ -533,7 +644,7 @@ export function createPanelHtml(): string {
     }
 
     .entry-title {
-      display: flex;
+      display: none;
       align-items: center;
       justify-content: space-between;
       gap: 8px;
@@ -556,13 +667,76 @@ export function createPanelHtml(): string {
     .entry-body {
       white-space: pre-wrap;
       overflow-wrap: anywhere;
-      color: #303a4b;
+      color: var(--text);
+      font-size: 15px;
+      line-height: 1.65;
+    }
+
+    .assistant-pending {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      min-height: 25px;
+      padding: 4px 0;
+      vertical-align: middle;
+    }
+
+    .assistant-pending span {
+      width: 6px;
+      height: 6px;
+      border-radius: 999px;
+      background: #98a2b3;
+      animation: assistant-pulse 1.05s ease-in-out infinite;
+    }
+
+    .assistant-pending span:nth-child(2) {
+      animation-delay: 140ms;
+    }
+
+    .assistant-pending span:nth-child(3) {
+      animation-delay: 280ms;
+    }
+
+    .assistant-control-strip {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+
+    .assistant-control-chip {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      border: 1px solid #d9e3f2;
+      border-radius: 999px;
+      background: #f8fbff;
+      color: #344054;
+      padding: 2px 9px;
+      font-size: 12px;
+      font-weight: 680;
+    }
+
+    .assistant-stream-text {
+      white-space: pre-wrap;
+    }
+
+    @keyframes assistant-pulse {
+      0%, 80%, 100% {
+        transform: scale(0.72);
+        opacity: 0.34;
+      }
+      40% {
+        transform: scale(1);
+        opacity: 1;
+      }
     }
 
     .result-block {
       display: grid;
       gap: 14px;
-      max-width: 820px;
+      width: min(800px, 100%);
+      max-width: 800px;
       margin: 22px 0 0;
       padding: 18px 0 0;
       border-top: 1px solid var(--line);
@@ -637,82 +811,175 @@ export function createPanelHtml(): string {
     }
 
     .composer {
-      padding: 14px clamp(28px, 5vw, 68px) 18px clamp(32px, 6vw, 88px);
-      background: linear-gradient(180deg, rgba(255, 255, 255, 0), #fff 20%);
+      display: flex;
+      justify-content: center;
+      padding: 12px 24px 24px;
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0), #fff 30%);
     }
 
     .composer-box {
       display: grid;
-      gap: 8px;
-      max-width: 880px;
-      border: 1px solid #c8d3e3;
-      border-radius: 8px;
+      gap: 7px;
+      width: min(800px, 100%);
+      border: 1px solid var(--line-strong);
+      border-radius: 14px;
       background: #fff;
-      box-shadow: 0 16px 34px rgba(43, 88, 150, 0.08);
-      padding: 12px;
+      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
+      padding: 12px 14px 10px;
+      transition: border-color 150ms ease, box-shadow 150ms ease, background 150ms ease;
+    }
+
+    .composer-box:focus-within {
+      border-color: #b8bdc7;
+      box-shadow: 0 0 0 3px rgba(26, 26, 26, 0.05), 0 8px 24px rgba(15, 23, 42, 0.06);
     }
 
     .composer-box textarea {
-      min-height: 82px;
+      min-height: 24px;
+      max-height: 200px;
       border: 0;
       border-radius: 0;
-      padding: 4px 6px;
+      background: transparent;
+      padding: 0 4px;
       resize: none;
       outline: none;
+      font-size: 15px;
+      line-height: 1.5;
+    }
+
+    .composer-box textarea::placeholder {
+      color: #a2a9b3;
     }
 
     .composer-actions {
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 6px;
+      position: relative;
+      min-height: 31px;
+      border-top: 1px solid var(--line);
+      padding-top: 7px;
+    }
+
+    .input-status-dot {
+      width: 8px;
+      height: 8px;
+      margin: 0 4px 0 2px;
+      border-radius: 999px;
+      background: #22c55e;
+      box-shadow: 0 0 0 3px #ecfdf5;
+      flex-shrink: 0;
+    }
+
+    .input-status-dot.warning {
+      background: var(--warn);
+      box-shadow: 0 0 0 3px var(--warn-soft);
+    }
+
+    .input-status-dot.error {
+      background: var(--danger);
+      box-shadow: 0 0 0 3px var(--danger-soft);
     }
 
     .composer-actions .spacer {
       flex: 1;
     }
 
+    .run-mode-select {
+      min-height: 32px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      color: var(--text);
+      padding: 0 28px 0 10px;
+      font-size: 13px;
+      font-weight: 600;
+      outline: none;
+    }
+
+    .run-mode-select:focus {
+      border-color: #a8b0ff;
+      box-shadow: 0 0 0 3px rgba(91, 92, 226, 0.12);
+    }
+
     .icon-button {
       display: inline-grid;
       place-items: center;
-      min-width: 44px;
+      min-width: 34px;
       min-height: 30px;
       padding: 0 8px;
       border-radius: 7px;
       font-size: 12px;
+      border: 0;
+      color: var(--muted);
+      background: transparent;
     }
 
     .send-button {
-      min-width: 40px;
-      min-height: 40px;
-      border-radius: 8px;
+      min-width: 34px;
+      width: 34px;
+      min-height: 34px;
+      height: 34px;
+      border-radius: 10px;
       font-size: 18px;
+      border: 0;
+      padding: 0;
     }
 
     .composer-extra {
-      margin-top: 4px;
-      border-top: 1px solid var(--line);
-      padding-top: 8px;
+      margin: 0;
+      padding: 0;
+      position: relative;
     }
 
     .composer-extra summary {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      min-height: 30px;
+      padding: 0 8px;
+      border: 0;
+      border-radius: 7px;
+      background: transparent;
       cursor: pointer;
       color: var(--muted);
       font-size: 12px;
-      font-weight: 760;
+      font-weight: 500;
+      list-style: none;
+    }
+
+    .composer-extra summary::before {
+      content: "";
+      display: inline-block;
+      width: 13px;
+      height: 13px;
+      border: 1.5px solid currentColor;
+      border-radius: 4px;
+      opacity: 0.72;
+    }
+
+    .composer-extra summary::-webkit-details-marker {
+      display: none;
     }
 
     .context-inputs {
       display: grid;
       gap: 8px;
-      margin-top: 8px;
+      position: absolute;
+      left: 0;
+      bottom: 38px;
+      z-index: 5;
+      width: min(520px, calc(100vw - 360px));
+      margin-top: 0;
+      border: 1px solid var(--line-strong);
+      border-radius: 12px;
+      background: #fff;
+      box-shadow: 0 18px 38px rgba(15, 23, 42, 0.12);
+      padding: 12px;
     }
 
     .context-pane {
-      min-width: 0;
-      min-height: 0;
-      overflow: auto;
-      background: #fbfcfe;
-      padding: 18px 18px;
+      display: none;
     }
 
     .context-section {
@@ -1000,124 +1267,89 @@ export function createPanelHtml(): string {
 <body>
   <!-- ordinary-screen-start -->
   <div class="app">
-    <header class="titlebar">
-      <div class="mode-pill">AgentArbor</div>
-      <span class="menu-link">任务</span>
-      <span class="menu-link">材料</span>
-      <span class="menu-link">帮助</span>
-      <div class="window-actions" aria-hidden="true"><span>一</span><span>□</span><span>×</span></div>
-    </header>
-
-    <div class="shell">
-      <aside class="sidebar">
+    <div class="shell" id="shell">
+      <aside class="sidebar" id="sidebar">
         <nav class="side-nav" aria-label="工作入口">
-          <button class="side-action active" id="newRunButton" type="button"><span class="nav-mark plus"></span><span>新建任务</span></button>
+          <button class="side-action active" id="newRunButton" type="button"><span class="nav-mark plus"></span><span>新对话</span></button>
           <a class="side-action" href="#"><span class="nav-mark skill"></span><span>技能</span></a>
-          <a class="side-action" href="#"><span class="nav-mark auto"></span><span>自动化</span></a>
+          <a class="side-action" href="#"><span class="nav-mark auto"></span><span>例行任务</span></a>
+          <a class="side-action" href="#"><span class="nav-mark tool"></span><span>工具</span></a>
+          <button class="side-action" id="diagnosticDrawerButton" type="button"><span class="nav-mark settings"></span><span>设置</span></button>
         </nav>
 
-        <section class="task-list" aria-label="任务列表">
-          <div class="side-title"><span>任务列表</span><span id="runCount">0</span></div>
-          <div class="workspace-group">
-            <div class="workspace-row">
-              <span class="workspace-name">当前工作区</span>
-              <button class="mini-plus" type="button">+</button>
-            </div>
-            <ul class="runs" id="runHistory">
-              <li class="run-item active">
-                <div class="run-title">暂无最近任务</div>
-                <div class="run-meta">开始任务后会显示在这里。</div>
-              </li>
-            </ul>
-          </div>
+        <section class="task-list" aria-label="最近对话">
+          <div class="side-title"><span>最近对话</span><span id="runCount">0</span></div>
+          <ul class="runs" id="runHistory">
+            <li class="run-item active">
+              <div class="run-title">暂无对话</div>
+              <div class="run-meta">开始后会显示在这里。</div>
+            </li>
+          </ul>
         </section>
 
-        <div class="profile">
-          <span class="avatar" aria-hidden="true"></span>
-          <div>
-            <div><strong>本地工作</strong></div>
-            <div class="run-meta">只使用你授权的材料。</div>
-          </div>
-        </div>
       </aside>
 
-      <main class="workspace">
-        <section class="session-card" aria-label="任务工作会话">
-          <header class="session-header">
-            <div class="session-title">
-              <span id="sessionTitle">新任务</span>
-              <span class="session-meta">本地工作区 · 写入前确认</span>
-            </div>
-            <div class="header-tools">
-              <span class="status-pill" id="runStatus">待开始</span>
-              <button class="tool-button" id="diagnosticDrawerButton" type="button" aria-label="打开详情">详情</button>
-            </div>
-          </header>
+      <div class="app-container">
+        <header class="titlebar">
+          <button class="ghost collapse-button" id="sidebarToggleButton" type="button" title="折叠侧边栏" aria-label="折叠侧边栏"><span class="collapse-icon" aria-hidden="true"></span></button>
+          <div class="mode-pill"><span class="brand-dot" aria-hidden="true"></span><span>AgentArbor</span></div>
+          <span class="menu-link">通用助手</span>
+        </header>
 
-          <section class="thread">
-            <div class="thread-scroll" id="transcriptWrap">
-              <div class="welcome" id="introBlock">
-                <h1>要完成什么？</h1>
-                <p>输入一个真实任务，必要时补充文件、网页或限制条件。我会在会话里展示正在看的材料、形成的判断、结果、证据和下一步。</p>
+        <main class="workspace">
+          <section class="session-card" aria-label="对话">
+            <header class="session-header">
+              <div class="session-title">
+                    <span id="sessionTitle">新任务</span>
+                    <span class="session-meta">按需确认写入</span>
               </div>
-              <section class="transcript" id="transcript" aria-label="工作过程">
-                <div class="empty-transcript">暂无活动。开始任务后，这里会显示正在读取、比较、整理和生成的过程。</div>
-              </section>
-              <section class="result-block" id="mainCanvas" aria-label="结果">
-                <div class="result-head">
-                  <span class="report-kicker">结果</span>
-                  <h2>等待任务开始</h2>
-                  <div class="summary-box">任务完成后，结论、依据、风险、不确定性和下一步会显示在这条会话里。</div>
-                </div>
-              </section>
-            </div>
+              <div class="header-tools">
+                <span class="status-pill" id="runStatus">待开始</span>
+              </div>
+            </header>
 
-            <section class="composer" aria-label="任务输入">
-              <div class="composer-box">
-                <textarea id="goalInput" placeholder="例如：分析当前项目的主要问题，并给出下一轮可执行优化建议。"></textarea>
-                <details class="composer-extra">
-                  <summary>补充材料和权限</summary>
-                  <div class="context-inputs">
-                    <label>材料引用
-                      <textarea id="contextRefsInput" placeholder="可选，每行：file:src/app/panel-assets.ts | file | 只读摘要 | 短预览"></textarea>
-                    </label>
-                    <label>权限说明
-                      <input id="permissionRefsInput" autocomplete="off" placeholder="例如：只读；写入前询问">
-                    </label>
+            <section class="thread">
+              <div class="thread-scroll" id="transcriptWrap">
+                <div class="welcome" id="introBlock">
+                  <h1>在忙什么呢？</h1>
+                  <p>随便问一个问题，或者交给我一个需要文件、网页和工具协作完成的任务。</p>
+                </div>
+                <section class="transcript" id="transcript" aria-label="对话内容">
+                  <div class="empty-transcript"></div>
+                </section>
+                <section class="result-block" id="mainCanvas" aria-label="结果" hidden></section>
+              </div>
+
+              <section class="composer" aria-label="任务输入">
+                <div class="composer-box">
+                  <textarea id="goalInput" placeholder="问任何问题，或交给我一个任务" rows="1"></textarea>
+                  <div class="composer-actions">
+                    <span class="input-status-dot" aria-hidden="true"></span>
+                    <details class="composer-extra">
+                      <summary>附件</summary>
+                      <div class="context-inputs">
+                        <label>文件或网页
+                          <textarea id="contextRefsInput" placeholder="可选，每行一个文件、网页或项目引用；只保存引用和短摘要。"></textarea>
+                        </label>
+                        <label>使用范围
+                          <input id="permissionRefsInput" autocomplete="off" placeholder="例如：只读；写入前询问">
+                        </label>
+                      </div>
+                    </details>
+                    <select class="run-mode-select" id="runModeInput" title="处理方式" aria-label="处理方式">
+                      <option value="agent">助手</option>
+                      <option value="deep">深度模式</option>
+                    </select>
+                    <span class="spacer"></span>
+                    <span class="hint" id="modelHint">Enter 发送，Shift+Enter 换行。</span>
+                    <button class="send-button primary" id="runButton" title="发送" aria-label="发送消息">↑</button>
                   </div>
-                </details>
-                <div class="composer-actions">
-                  <button class="icon-button" type="button" title="添加文件">文件</button>
-                  <button class="icon-button" type="button" title="添加图片">图片</button>
-                  <span class="spacer"></span>
-                  <span class="hint" id="modelHint">未配置真实模型时会要求先配置。</span>
-                  <button class="icon-button" type="button" title="语音">语音</button>
-                  <button class="send-button primary" id="runButton" title="开始处理">↑</button>
                 </div>
-              </div>
+              </section>
             </section>
           </section>
-
-          <aside class="context-pane" aria-label="任务上下文">
-            <section class="context-section">
-              <div class="context-title"><span>待办</span></div>
-              <div class="panel-stack" id="riskPanel"></div>
-            </section>
-            <section class="context-section">
-              <div class="context-title"><span>上下文</span><span class="tag" id="railStatusBadge">待开始</span></div>
-              <div class="metrics" id="runMetrics"></div>
-            </section>
-            <section class="context-section">
-              <div class="context-title"><span>证据</span></div>
-              <div class="panel-stack" id="supervisionStatus"></div>
-            </section>
-            <section class="context-section">
-              <div class="context-title"><span>近期活动</span></div>
-              <div class="run-path" id="runPath"></div>
-            </section>
-          </aside>
-        </section>
-      </main>
+        </main>
+      </div>
     </div>
   </div>
   <!-- ordinary-screen-end -->
@@ -1146,6 +1378,22 @@ export function createPanelHtml(): string {
             <strong>当前会话详情</strong>
             <span class="node-meta">运行树、模型工具引用和调试 JSON 只在这里查看。</span>
           </div>
+          <section class="context-section">
+            <div class="context-title"><span>待办</span></div>
+            <div class="panel-stack" id="riskPanel"></div>
+          </section>
+          <section class="context-section">
+            <div class="context-title"><span>上下文</span><span class="tag" id="railStatusBadge">待开始</span></div>
+            <div class="metrics" id="runMetrics"></div>
+          </section>
+          <section class="context-section">
+            <div class="context-title"><span>证据</span></div>
+            <div class="panel-stack" id="supervisionStatus"></div>
+          </section>
+          <section class="context-section">
+            <div class="context-title"><span>近期活动</span></div>
+            <div class="run-path" id="runPath"></div>
+          </section>
         </div>
       </div>
 
@@ -1265,17 +1513,23 @@ export function createPanelHtml(): string {
       config: undefined,
       informationAccess: undefined,
       tools: undefined,
+      currentConversationId: undefined,
       currentRunId: undefined,
+      queuedRunIds: new Set(),
       eventSource: undefined,
       pollingTimer: undefined,
       seenSequences: new Set(),
       lastSequence: 0,
       lastFocusedTerminalRunId: undefined,
-      runHistory: [],
-      modelOutputEntries: new Map(),
+      conversations: [],
       assistantEntry: undefined,
+      assistantStageKey: undefined,
+      assistantStreamBuffer: "",
+      assistantStreamTimer: undefined,
+      assistantControlBuffer: "",
       inspectorTab: "overview",
-      inspectorPinned: false
+      inspectorPinned: false,
+      isSubmitting: false
     };
 
     const dom = {
@@ -1288,10 +1542,14 @@ export function createPanelHtml(): string {
       goalInput: document.getElementById("goalInput"),
       contextRefsInput: document.getElementById("contextRefsInput"),
       permissionRefsInput: document.getElementById("permissionRefsInput"),
+      runModeInput: document.getElementById("runModeInput"),
       aiMode: document.getElementById("aiMode"),
       providerHint: document.getElementById("modelHint"),
+      inputStatusDot: document.querySelector(".input-status-dot"),
       runButton: document.getElementById("runButton"),
       newRunButton: document.getElementById("newRunButton"),
+      sidebarToggleButton: document.getElementById("sidebarToggleButton"),
+      shell: document.getElementById("shell"),
       runHistory: document.getElementById("runHistory"),
       runCount: document.getElementById("runCount"),
       sessionTitle: document.getElementById("sessionTitle"),
@@ -1325,7 +1583,13 @@ export function createPanelHtml(): string {
     };
 
     dom.runButton.addEventListener("click", startRun);
+    dom.goalInput.addEventListener("keydown", handleComposerKeydown);
+    dom.goalInput.addEventListener("input", () => {
+      autoResizeGoalInput();
+      updateComposerControls();
+    });
     dom.newRunButton.addEventListener("click", resetComposer);
+    dom.sidebarToggleButton.addEventListener("click", toggleSidebar);
     dom.saveConfigButton.addEventListener("click", saveModelConfig);
     dom.saveToolConfigButton.addEventListener("click", saveToolConfig);
     dom.diagnosticDrawerButton.addEventListener("click", openDeveloperDrawer);
@@ -1339,6 +1603,7 @@ export function createPanelHtml(): string {
         renderProviderStatus();
       }
     });
+    dom.runModeInput.addEventListener("change", renderProviderStatus);
 
     init();
 
@@ -1350,7 +1615,121 @@ export function createPanelHtml(): string {
       renderRightPanels(undefined);
       renderFailurePanel(undefined);
       renderFlow(undefined);
-      await Promise.all([loadConfig(), loadToolsConfig()]);
+      await Promise.all([loadConfig(), loadToolsConfig(), loadConversations()]);
+      autoResizeGoalInput();
+      updateComposerControls();
+    }
+
+    async function loadConversations() {
+      try {
+        const result = await requestJson("/api/conversations");
+        state.conversations = Array.isArray(result.conversations) ? result.conversations : [];
+        renderConversationList();
+      } catch (error) {
+        state.conversations = [];
+        renderConversationList();
+      }
+    }
+
+    async function openConversation(conversationId) {
+      try {
+        const result = await requestJson("/api/conversations/" + encodeURIComponent(conversationId));
+        const conversation = result.conversation;
+        if (!conversation) {
+          return;
+        }
+        let latestRun = undefined;
+        if (conversation.latestRunId) {
+          try {
+            latestRun = await requestJson("/api/desktop/runs/" + encodeURIComponent(conversation.latestRunId));
+          } catch {
+            latestRun = undefined;
+          }
+        }
+        hydrateConversation(conversation, latestRun);
+        renderConversationList();
+        if (conversation.activeRunId) {
+          state.currentRunId = conversation.activeRunId;
+          openRunStream(
+            conversation.activeRunId,
+            latestRun && latestRun.streamCursor ? latestRun.streamCursor.lastSequence : 0
+          );
+        }
+      } catch (error) {
+        appendLocalEntry("提示", "打开对话失败。", "failed");
+      }
+    }
+
+    function hydrateConversation(conversation, latestRun) {
+      stopLiveUpdates();
+      state.currentConversationId = conversation.conversationId;
+      state.currentRunId = conversation.activeRunId;
+      state.queuedRunIds = new Set(Array.isArray(conversation.queuedRunIds) ? conversation.queuedRunIds : []);
+      state.assistantEntry = undefined;
+      state.assistantStageKey = undefined;
+      resetAssistantStreamState();
+      state.seenSequences = new Set();
+      state.lastSequence = 0;
+      dom.introBlock.hidden = conversation.turns && conversation.turns.length > 0;
+      dom.sessionTitle.textContent = compact(conversation.title || "新对话", 42);
+      dom.transcript.replaceChildren(emptyTranscriptNode());
+      const turns = Array.isArray(conversation.turns) ? conversation.turns : [];
+      const lastAssistantIndex = findLastAssistantTurnIndex(turns);
+      turns.forEach((turn, index) => {
+        if (turn.role === "user") {
+          appendLocalEntry("你", turn.content || "", turn.status || "completed", true);
+          return;
+        }
+        const entry = appendEntry({
+          label: "助手",
+          title: turn.title || "助手",
+        body: turn.content || "",
+        status: turn.status || "completed",
+        type: (turn.status || "completed") === "failed" ? "run.failed" : "assistant",
+        runId: turn.runId,
+        returnParts: true
+      });
+        if (index === lastAssistantIndex) {
+          state.assistantEntry = entry;
+        }
+      });
+      if (turns.length === 0) {
+        dom.introBlock.hidden = false;
+      }
+      if (latestRun) {
+        renderPollingResponse(latestRun);
+        return;
+      }
+      renderCanvas(undefined, conversation.activeRunId ? "running" : "pending");
+      setRunStatus(conversation.activeRunId ? "running" : "pending");
+      renderRunPath(undefined);
+      renderMetrics(conversation.activeRunId ? "running" : "pending", undefined);
+      renderAgentTree(undefined);
+      renderSupervision(undefined);
+      renderRightPanels(undefined);
+      renderFailurePanel(undefined);
+      renderFlow(undefined);
+      dom.debugJson.textContent = "{}";
+    }
+
+    function handleComposerKeydown(event) {
+      if (event.key !== "Enter" || event.shiftKey || event.isComposing) {
+        return;
+      }
+      event.preventDefault();
+      if (!state.isSubmitting && dom.goalInput.value.trim().length > 0) {
+        startRun();
+      }
+    }
+
+    function autoResizeGoalInput() {
+      dom.goalInput.style.height = "auto";
+      dom.goalInput.style.height = Math.min(dom.goalInput.scrollHeight, 200) + "px";
+    }
+
+    function updateComposerControls() {
+      const hasText = dom.goalInput.value.trim().length > 0;
+      dom.runButton.disabled = state.isSubmitting || !hasText;
     }
 
     function openDeveloperDrawer() {
@@ -1363,6 +1742,13 @@ export function createPanelHtml(): string {
       dom.drawerBackdrop.classList.remove("open");
       dom.developerDrawer.classList.remove("open");
       dom.developerDrawer.setAttribute("aria-hidden", "true");
+    }
+
+    function toggleSidebar() {
+      dom.shell.classList.toggle("sidebar-closed");
+      const closed = dom.shell.classList.contains("sidebar-closed");
+      dom.sidebarToggleButton.setAttribute("aria-label", closed ? "展开侧边栏" : "折叠侧边栏");
+      dom.sidebarToggleButton.setAttribute("title", closed ? "展开侧边栏" : "折叠侧边栏");
     }
 
     function setInspectorTab(tab, pinned) {
@@ -1472,24 +1858,48 @@ export function createPanelHtml(): string {
     }
 
     async function startRun() {
+      if (state.isSubmitting) {
+        return;
+      }
       const goal = dom.goalInput.value.trim();
       if (goal.length === 0) {
         appendLocalEntry("提示", "请先输入任务。", "failed");
         return;
       }
 
-      stopLiveUpdates();
-      state.seenSequences = new Set();
-      state.lastSequence = 0;
-      state.currentRunId = undefined;
-      state.lastFocusedTerminalRunId = undefined;
-      state.modelOutputEntries = new Map();
-      state.assistantEntry = undefined;
-      dom.transcript.replaceChildren();
+      const hadActiveRun = state.currentRunId !== undefined;
+      const activeAssistantEntry = state.assistantEntry;
+      state.isSubmitting = true;
+      if (!hadActiveRun) {
+        stopLiveUpdates();
+        state.seenSequences = new Set();
+        state.lastSequence = 0;
+      }
+      if (!hadActiveRun) {
+        state.currentRunId = undefined;
+        state.lastFocusedTerminalRunId = undefined;
+        state.assistantEntry = undefined;
+        state.assistantStageKey = undefined;
+        resetAssistantStreamState();
+      }
+      const taskSoilInput = collectTaskSoilInput();
       dom.introBlock.hidden = true;
       dom.sessionTitle.textContent = compact(goal, 42);
       appendLocalEntry("你", compact(goal, 1200), "sent", true);
-      updateAssistantTurn("正在处理", "我先整理上下文，然后给出可审阅的回答或结果。", "running");
+      let queuedAssistantEntry;
+      if (hadActiveRun) {
+        queuedAssistantEntry = appendEntry({
+          label: "助手",
+          title: "等待回复",
+          body: "",
+          status: "pending",
+          type: "assistant",
+          returnParts: true
+        });
+        state.assistantEntry = activeAssistantEntry;
+      } else {
+        showAssistantPending();
+      }
       setRunStatus("running");
       state.inspectorPinned = false;
       setInspectorTab("overview", false);
@@ -1500,25 +1910,50 @@ export function createPanelHtml(): string {
       setButtons(false);
 
       try {
-        const response = await requestJson("/api/desktop/runs", {
+        const endpoint = state.currentConversationId
+          ? "/api/conversations/" + encodeURIComponent(state.currentConversationId) + "/messages"
+          : "/api/conversations";
+        const response = await requestJson(endpoint, {
           method: "POST",
           body: {
             goal: goal,
             aiMode: dom.aiMode.value,
-            taskSoil: collectTaskSoilInput()
+            runMode: dom.runModeInput.value,
+            taskSoil: taskSoilInput
           }
         });
-        state.currentRunId = response.runId;
+        const run = response.run || response;
+        const conversation = response.conversation;
+        if (conversation && conversation.conversationId) {
+          state.currentConversationId = conversation.conversationId;
+          syncConversationState(conversation);
+        }
+        const queuedBehindActiveRun = run.status === "pending" && state.currentRunId && run.runId !== state.currentRunId;
+        if (queuedBehindActiveRun) {
+          state.queuedRunIds.add(run.runId);
+          if (queuedAssistantEntry) {
+            queuedAssistantEntry.row.dataset.runId = run.runId;
+          }
+        } else {
+          state.currentRunId = run.runId;
+          setAssistantEntryRunId(state.assistantEntry, run.runId);
+        }
         dom.goalInput.value = "";
-        rememberRun(goal, response.runId);
-        renderPollingResponse(response);
-        openRunStream(response.runId, response.streamCursor ? response.streamCursor.lastSequence : 0);
+        autoResizeGoalInput();
+        updateComposerControls();
+        if (!queuedBehindActiveRun) {
+          renderPollingResponse(run);
+        }
+        renderConversationList();
+        if (!queuedBehindActiveRun) {
+          openRunStream(run.runId, run.streamCursor ? run.streamCursor.lastSequence : 0);
+        }
       } catch (error) {
         updateAssistantTurn("这次没有完成", friendlyFailureText(error.message), "failed");
         setRunStatus("failed");
         renderRightPanels({ status: "failed", error: { message: error.message } });
-        openDeveloperDrawer();
       } finally {
+        state.isSubmitting = false;
         setButtons(true);
       }
     }
@@ -1541,13 +1976,39 @@ export function createPanelHtml(): string {
             readonlyPreview: previewText ? { title: summary || ref, text: previewText } : undefined
           };
         });
+      const conversationRef = collectConversationContextRef();
+      const mergedContextRefs = conversationRef ? [...contextRefs, conversationRef] : contextRefs;
       const permissionBoundaryRefs = dom.permissionRefsInput.value
         .split(/[\\n,]+/g)
         .map((line) => line.trim())
         .filter(Boolean);
       return {
-        contextRefs: contextRefs.length > 0 ? contextRefs : undefined,
+        contextRefs: mergedContextRefs.length > 0 ? mergedContextRefs : undefined,
         permissionBoundaryRefs: permissionBoundaryRefs.length > 0 ? permissionBoundaryRefs : undefined
+      };
+    }
+
+    function collectConversationContextRef() {
+      const entries = Array.from(dom.transcript.querySelectorAll(".entry"))
+        .map((entry) => {
+          const role = entry.classList.contains("user") ? "你" : "助手";
+          const body = entry.querySelector(".entry-body");
+          const text = body ? body.textContent.trim() : "";
+          return text.length > 0 ? role + "：" + text : "";
+        })
+        .filter(Boolean)
+        .slice(-8);
+      if (entries.length === 0) {
+        return undefined;
+      }
+      return {
+        ref: "workspace:conversation-history",
+        kind: "workspace",
+        summary: "当前对话上下文",
+        readonlyPreview: {
+          title: "当前对话",
+          text: compact(entries.join("\\n"), 1200)
+        }
       };
     }
 
@@ -1612,11 +2073,49 @@ export function createPanelHtml(): string {
       try {
         const response = await requestJson("/api/desktop/runs/" + encodeURIComponent(runId));
         renderPollingResponse(response);
+        followNextQueuedRun(response);
       } catch {
       }
     }
 
+    function followNextQueuedRun(response) {
+      const conversation = response && response.conversation;
+      if (!conversation) {
+        return;
+      }
+      const queuedRunIds = Array.isArray(conversation.queuedRunIds) ? conversation.queuedRunIds : [];
+      const nextRunId = conversation.activeRunId || queuedRunIds[0];
+      if (!nextRunId || nextRunId === response.runId) {
+        return;
+      }
+      window.setTimeout(async () => {
+        try {
+          const next = await requestJson("/api/desktop/runs/" + encodeURIComponent(nextRunId));
+          renderPollingResponse(next);
+          if (next.status === "pending") {
+            state.currentRunId = nextRunId;
+            startPolling(nextRunId);
+            return;
+          }
+          state.currentRunId = nextRunId;
+          openRunStream(nextRunId, next.streamCursor ? next.streamCursor.lastSequence : 0);
+        } catch {
+          startPolling(nextRunId);
+        }
+      }, 150);
+    }
+
     function renderPollingResponse(response) {
+      if (response && response.conversation && response.conversation.conversationId) {
+        syncConversationState(response.conversation);
+        renderConversationList();
+      }
+      if (response && response.runId && state.queuedRunIds.has(response.runId) && response.status === "running") {
+        state.queuedRunIds.delete(response.runId);
+      }
+      if (response && response.runId && state.currentRunId !== response.runId && response.status === "pending") {
+        return;
+      }
       autoInspectorTab(response);
       setRunStatus(response.status || "running");
       renderCanvas(response.canvas, response.status || "running", response);
@@ -1665,32 +2164,53 @@ export function createPanelHtml(): string {
       state.seenSequences.add(event.sequence);
       state.lastSequence = Math.max(state.lastSequence, event.sequence);
 
-      if (event.type === "model.output.delta" || event.type === "model.output.completed") {
+      if (event.type === "model.output.delta") {
+        if (event.agentLabel === "助手") {
+          appendAssistantDelta(event.delta || "");
+        }
         return;
       }
 
-      const content = activityBody(event);
-      const status = event.status || (event.type === "run.failed" ? "failed" : event.type === "final.result" ? "completed" : "running");
+      if (event.type === "model.output.completed") {
+        return;
+      }
+
       if (event.type === "run.failed") {
-        updateAssistantTurn("这次没有完成", friendlyFailureText(content), "failed");
+        state.assistantStageKey = undefined;
+        flushAssistantStreamNow();
+        updateAssistantTurn("这次没有完成", friendlyFailureText(activityBody(event)), "failed");
         return;
       }
       if (event.type === "final.result") {
-        updateAssistantTurn("结果已生成", "我已经把结果整理在下方，证据和不确定性也保留在右侧。", "completed");
+        state.assistantStageKey = "completed";
+        flushAssistantStreamNow();
         return;
       }
-      updateAssistantTurn(EVENT_LABELS[event.type] || "正在工作", content, status);
+      const progress = assistantProgressFromEvent(event);
+      if (progress === undefined) {
+        return;
+      }
+      if (state.assistantStageKey === progress.stageKey) {
+        return;
+      }
+      state.assistantStageKey = progress.stageKey;
+      showAssistantPending();
     }
 
     function syncAssistantTurnFromResponse(response) {
       if (!response) {
         return;
       }
+      bindAssistantEntryToResponseRun(response);
       if (response.status === "failed") {
+        state.assistantStageKey = undefined;
+        flushAssistantStreamNow();
         updateAssistantTurn("这次没有完成", friendlyFailureText(response.error && response.error.message), "failed");
         return;
       }
       if (response.status === "completed") {
+        state.assistantStageKey = undefined;
+        flushAssistantStreamNow();
         const directAnswer =
           response.canvas && response.canvas.kind === "desktop_chat_canvas" && response.canvas.chat.answer
             ? response.canvas.chat.answer
@@ -1701,26 +2221,125 @@ export function createPanelHtml(): string {
           updateAssistantTurn("已回答", directAnswer.answer, "completed");
           return;
         }
-        const reportTitle = response.canvas && response.canvas.kind === "work_session_canvas" && response.canvas.workSession.report
-          ? response.canvas.workSession.report.title
+        const upgradeRequest =
+          response.canvas && response.canvas.kind === "desktop_chat_canvas" && response.canvas.chat.upgradeRequest
+            ? response.canvas.chat.upgradeRequest
+            : undefined;
+        if (upgradeRequest) {
+          updateAssistantTurn("建议使用深度模式", "这条消息适合进入深度模式：" + upgradeRequest.reason, "completed");
+          return;
+        }
+        const report = response.canvas && response.canvas.kind === "work_session_canvas" && response.canvas.workSession.report
+          ? response.canvas.workSession.report
           : undefined;
-        updateAssistantTurn("结果已生成", reportTitle ? "已生成：" + reportTitle : "结果已经整理完成。", "completed");
+        if (report) {
+          updateAssistantTurn("结果已生成", reportAssistantSummary(report), "completed");
+          return;
+        }
+        const deep = response.canvas && response.canvas.kind === "underground_deep_canvas"
+          ? response.canvas.underground
+          : undefined;
+        if (deep) {
+          updateAssistantTurn(
+            deep.status === "approved_package_created" ? "方向已形成" : "深度模式已停止",
+            deep.recommendedDirection.reason || deep.convergenceSummary || "深度模式已完成本轮地下组织。",
+            "completed"
+          );
+          return;
+        }
+        updateAssistantTurn("结果已生成", "结果已经整理完成。", "completed");
         return;
       }
       if (response.status === "running") {
-        updateAssistantTurn("正在工作", "我正在处理任务，细节进展会在右侧近期活动里更新。", "running");
+        if (!state.assistantStageKey) {
+          const route = routeDisplay(response);
+          state.assistantStageKey = route.stageKey;
+          showAssistantPending();
+        }
       }
     }
 
-    function activityActorLabel(event) {
-      if (event.type === "run.started") return "任务";
-      if (event.type === "tool.requested" || event.type === "tool.completed" || event.type === "tool.failed") return "材料";
-      if (event.type === "agent.delegation.planned" || event.type === "agent.child.started" || event.type === "agent.child.completed" || event.type === "agent.child.waiting") return "检查";
-      if (event.type === "agent.parent_synthesis.completed") return "判断";
-      if (event.type === "final.result") return "结果";
-      if (event.type === "run.failed") return "诊断";
-      if (event.type === "model.output.delta" || event.type === "model.output.completed") return "工作中";
-      return "活动";
+    function bindAssistantEntryToResponseRun(response) {
+      if (!response || !response.runId) {
+        return;
+      }
+      if (state.assistantEntry && state.assistantEntry.row.dataset.runId === response.runId) {
+        return;
+      }
+      const row = dom.transcript.querySelector('.entry.assistant[data-run-id="' + cssEscape(response.runId) + '"]');
+      if (!row) {
+        return;
+      }
+      state.assistantEntry = entryPartsFromRow(row);
+      state.assistantStageKey = undefined;
+      resetAssistantStreamState();
+    }
+
+    function entryPartsFromRow(row) {
+      return {
+        row: row,
+        titleText: row.querySelector(".entry-title strong, .entry-title span:first-child"),
+        body: row.querySelector(".entry-body")
+      };
+    }
+
+    function cssEscape(value) {
+      if (window.CSS && typeof window.CSS.escape === "function") {
+        return window.CSS.escape(String(value));
+      }
+      return String(value).replace(/["\\\\]/g, "\\\\$&");
+    }
+
+    function assistantProgressFromEvent(event) {
+      const type = event.type;
+      const summary = activityBody(event);
+      if (type === "run.started") {
+        const routeTitle = String(summary || "").includes("深度") ? "深度模式" : "回复";
+        return {
+          stageKey: "started",
+          title: routeTitle,
+          body: summary || "等待模型返回。"
+        };
+      }
+      if (type === "tool.requested" || type === "tool.completed") {
+        return {
+          stageKey: "context",
+          title: "整理材料",
+          body: summary || "正在读取你授权的材料和上下文。"
+        };
+      }
+      if (
+        type === "agent.delegation.planned" ||
+        type === "agent.child.started" ||
+        type === "agent.child.completed" ||
+        type === "agent.child.waiting"
+      ) {
+        return {
+          stageKey: "explore",
+          title: "并行检查",
+          body: summary || "我在并行检查关键问题，避免只走单一路径。"
+        };
+      }
+      if (type === "agent.parent_synthesis.completed") {
+        return {
+          stageKey: "synthesis",
+          title: "汇总判断",
+          body: summary || "我在汇总检查结果，处理冲突并形成最终判断。"
+        };
+      }
+      return {
+        stageKey: "processing",
+        title: "继续处理中",
+        body: summary || "我在继续处理这条消息。"
+      };
+    }
+
+    function reportAssistantSummary(report) {
+      const headline = report.decisionSummary && report.decisionSummary.trim().length > 0
+        ? report.decisionSummary
+        : "已生成可审阅结果。";
+      const next = Array.isArray(report.nextActions) && report.nextActions.length > 0 ? report.nextActions[0] : undefined;
+      return next ? headline + "\\n下一步：" + next : headline;
     }
 
     function activityBody(event) {
@@ -1774,17 +2393,23 @@ export function createPanelHtml(): string {
     function friendlyFailureText(value) {
       const text = String(value || "");
       const lower = text.toLowerCase();
+      if (text.includes("模型服务这次没有返回可用结果") || text.includes("模型返回的内容没有通过")) {
+        return text;
+      }
       if (lower.includes("output_validation") || lower.includes("validation failed") || lower.includes("contract")) {
-        return "模型返回的内容没有通过本轮工作会话格式检查。这不是你的输入问题；技术引用已放在详情里，可以调整模型或重试。";
+        return "模型返回的内容没有通过本轮格式检查。这不是你的输入问题；技术引用已放在详情里，可以调整模型或重试。";
+      }
+      if (lower.includes("openai-compatible provider returned http") || lower.includes("provider_response") || lower.includes("model_failed") || lower.includes("desktop_chat_failed")) {
+        return "模型服务这次没有返回可用结果。请检查设置里的 Base URL、模型名和密钥，或稍后重试。详情已放在诊断里。";
       }
       if (lower.includes("api key") || lower.includes("missing_api_key")) {
         return "还没有配置可用的模型密钥。请打开详情里的设置，保存密钥后重试。";
       }
-      if (lower.includes("missing_model") || lower.includes("模型名")) {
+      if (lower.includes("missing_model") || text.includes("缺少模型名") || text.includes("没有可用的模型名") || text.includes("还没有配置模型名")) {
         return "还没有配置模型名。请打开详情里的设置，填写模型名后重试。";
       }
       if (lower.includes("ai 禁用") || lower.includes("ai_disabled")) {
-        return "当前禁用了 AI，所以不能完成工作会话。请在详情里切换到真实模型或测试模式。";
+        return "当前禁用了 AI，所以不能完成这次处理。请在详情里切换到真实模型或测试模式。";
       }
       if (lower.includes("network") || lower.includes("timeout")) {
         return "模型服务暂时不可用或请求超时。请检查网络和模型配置后重试。";
@@ -1792,68 +2417,44 @@ export function createPanelHtml(): string {
       return compact(text || "运行被配置、权限或模型边界阻断。", 220);
     }
 
-    function appendModelOutputDelta(event) {
-      const key = modelOutputKey(event);
-      const chunk = event.delta || "";
-      if (chunk.length === 0) {
-        return;
+    function sanitizeVisibleAssistantText(value) {
+      const text = String(value || "")
+        .replace(/<\\s*start_work_session\\b[^>]*>[\\s\\S]*?<\\s*\\/\\s*start_work_session\\s*>/gi, "")
+        .replace(/<\\s*start_work_session\\b[^>]*\\/\\s*>/gi, "")
+        .replace(/<\\s*\\/?\\s*(start_work_session|tool_call|function_call|use_tool|internal_action|internal_control|query|arguments)\\b[^>]*>/gi, "")
+        .replace(/OpenAI-compatible provider returned HTTP\\s+\\d+\\.?/gi, "模型服务这次没有返回可用结果。")
+        .replace(/OpenAI-compatible provider network request failed\.?/gi, "模型服务暂时不可用或请求超时。");
+      const lines = text.replace(/\\r\\n/g, "\\n").split("\\n");
+      const kept = [];
+      let skippingInternalSection = false;
+      for (const line of lines) {
+        const trimmed = line.trim();
+        const isHeading = /^#{1,6}\\s+/.test(trimmed);
+        if (/^#{1,6}\\s*(当前任务|任务状态|运行诊断|内部诊断|系统诊断|调试信息|debug|diagnostics|internal)\\b/i.test(trimmed)) {
+          skippingInternalSection = true;
+          continue;
+        }
+        if (skippingInternalSection) {
+          if (!isHeading) continue;
+          skippingInternalSection = false;
+        }
+        if (shouldDropVisibleLine(trimmed)) continue;
+        kept.push(line);
       }
-      const existing = state.modelOutputEntries.get(key);
-      if (existing) {
-        existing.text += chunk;
-        existing.body.textContent = visibleModelOutputText(existing.text);
-        updateEntryStatus(existing.row, "running");
-        existing.row.scrollIntoView({ block: "nearest" });
-        return;
-      }
-      const entry = appendEntry({
-        label: "工作中",
-        title: "正在生成内容",
-        body: visibleModelOutputText(chunk),
-        status: event.status || "running",
-        type: event.type,
-        returnParts: true
-      });
-      state.modelOutputEntries.set(key, {
-        row: entry.row,
-        body: entry.body,
-        text: chunk
-      });
+      return kept
+        .join("\\n")
+        .replace(/\\b(goal|trace|run|model-request|model-response|tool-call|conversation)-[A-Za-z0-9_-]+\\b/gi, "[内部引用]")
+        .replace(/\\n{3,}/g, "\\n\\n")
+        .trim();
     }
 
-    function completeModelOutput(event) {
-      const key = modelOutputKey(event);
-      const existing = state.modelOutputEntries.get(key);
-      if (existing) {
-        updateEntryStatus(existing.row, event.status || "completed");
-        existing.body.textContent = event.summary || "内容已整理，已进入结果或详情。";
-        return;
-      }
-      appendEntry({
-        label: "工作中",
-        title: "内容已整理",
-        body: event.summary || "内容整理完成。",
-        status: event.status || "completed",
-        type: event.type
-      });
-    }
-
-    function modelOutputKey(event) {
-      if (event.modelCallRefs && event.modelCallRefs.length > 0) {
-        return event.modelCallRefs[0];
-      }
-      return event.eventId || String(event.sequence);
-    }
-
-    function visibleModelOutputText(value) {
-      const text = String(value || "");
-      if (text.trim().startsWith("{") || text.trim().startsWith("[")) {
-        return "正在生成结构化内容，完成后会整理进结果或详情。";
-      }
-      if (text.length <= 680) {
-        return text;
-      }
-      return compact(text, 680) + "\\n\\n（安全投影已截断，完整结构以 refs 和调试投影为准。）";
+    function shouldDropVisibleLine(trimmed) {
+      if (!trimmed) return false;
+      if (/^\\s*[-*]?\\s*(goalId|traceId|runId|requestId|responseId|contractId|providerId|outputContract|validationStatus|failureKind|currentPhase|currentStage)\\s*[:：=]/i.test(trimmed)) return true;
+      if (/\\b(sanitizedMessages|raw prompt|hidden reasoning|raw provider response|raw tool output)\\b/i.test(trimmed)) return true;
+      if (/\\b(goal|trace|model-request|model-response|tool-call|conversation)-[A-Za-z0-9_-]+\\b.*(当前任务|运行|诊断|contract|provider|validation|failure|模型调用|工具调用|任务)/i.test(trimmed)) return true;
+      if (/(当前任务|运行诊断|内部诊断|系统诊断)\\s*[\\(:：-].*\\b(goal|trace|run|model-request|model-response)-[A-Za-z0-9_-]+\\b/i.test(trimmed)) return true;
+      return false;
     }
 
     function updateEntryStatus(row, statusValue) {
@@ -1867,13 +2468,22 @@ export function createPanelHtml(): string {
       }
     }
 
+    function setAssistantEntryRunId(entry, runId) {
+      if (entry && entry.row && runId) {
+        entry.row.dataset.runId = runId;
+      }
+    }
+
     function appendLocalEntry(label, body, status, isUser) {
       appendEntry({ label: label, title: isUser ? "你的消息" : label, body: body, status: status, type: isUser ? "user" : "local" });
     }
 
     function updateAssistantTurn(title, body, status) {
-      const safeTitle = title || "正在工作";
-      const safeBody = body || "正在处理任务。";
+      clearAssistantStreamTimer();
+      state.assistantStreamBuffer = "";
+      state.assistantControlBuffer = "";
+      const safeTitle = title || "助手";
+      const safeBody = sanitizeVisibleAssistantText(body || "正在处理。") || "正在处理。";
       const safeStatus = status || "running";
       if (!state.assistantEntry) {
         state.assistantEntry = appendEntry({
@@ -1887,14 +2497,258 @@ export function createPanelHtml(): string {
         return;
       }
       state.assistantEntry.titleText.textContent = safeTitle;
+      state.assistantEntry.body.replaceChildren();
       state.assistantEntry.body.textContent = safeBody;
       updateEntryStatus(state.assistantEntry.row, safeStatus);
+    }
+
+    function appendAssistantDelta(delta) {
+      const parsed = consumeAssistantDelta(delta);
+      if (parsed.text.length === 0) {
+        if (!assistantHasVisibleText()) {
+          showAssistantPending();
+        }
+        return;
+      }
+      enqueueAssistantText(parsed.text);
+    }
+
+    function showAssistantPending() {
+      if (!state.assistantEntry) {
+        state.assistantEntry = appendEntry({
+          label: "助手",
+          title: "助手",
+          body: "",
+          status: "running",
+          type: "assistant",
+          returnParts: true
+        });
+      }
+      if (assistantHasVisibleText()) {
+        updateEntryStatus(state.assistantEntry.row, "running");
+        return;
+      }
+      if (!state.assistantEntry.body.querySelector(".assistant-pending")) {
+        state.assistantEntry.body.append(createAssistantPendingNode());
+      }
+      updateEntryStatus(state.assistantEntry.row, "running");
+    }
+
+    function createAssistantPendingNode() {
+      const node = document.createElement("span");
+      node.className = "assistant-pending";
+      node.setAttribute("aria-label", "等待回复");
+      node.setAttribute("role", "status");
+      node.append(document.createElement("span"), document.createElement("span"), document.createElement("span"));
+      return node;
+    }
+
+    function enqueueAssistantText(text) {
+      const safeText = sanitizeVisibleAssistantText(String(text || ""));
+      if (safeText.length === 0) {
+        return;
+      }
+      prepareAssistantStreamText();
+      state.assistantStreamBuffer += safeText;
+      scheduleAssistantStreamDrain();
+    }
+
+    function prepareAssistantStreamText() {
+      if (!state.assistantEntry) {
+        state.assistantEntry = appendEntry({
+          label: "助手",
+          title: "助手",
+          body: "",
+          status: "running",
+          type: "assistant",
+          returnParts: true
+        });
+      }
+      if (state.assistantStageKey !== "streaming") {
+        const controls = state.assistantEntry.body.querySelector(".assistant-control-strip");
+        state.assistantEntry.body.replaceChildren();
+        if (controls) {
+          state.assistantEntry.body.append(controls);
+        }
+      }
+      state.assistantStageKey = "streaming";
+      state.assistantEntry.titleText.textContent = "助手";
+      updateEntryStatus(state.assistantEntry.row, "running");
+    }
+
+    function scheduleAssistantStreamDrain() {
+      if (state.assistantStreamTimer) {
+        return;
+      }
+      const delay = assistantStreamDelay(state.assistantStreamBuffer.length);
+      state.assistantStreamTimer = window.setTimeout(() => {
+        state.assistantStreamTimer = undefined;
+        drainAssistantStreamFrame(false);
+      }, delay);
+    }
+
+    function drainAssistantStreamFrame(force) {
+      if (!state.assistantEntry) {
+        state.assistantStreamBuffer = "";
+        return;
+      }
+      const textNode = assistantStreamTextNode();
+      if (force) {
+        textNode.textContent += state.assistantStreamBuffer;
+        state.assistantStreamBuffer = "";
+        return;
+      }
+      const size = assistantStreamChunkSize(state.assistantStreamBuffer.length);
+      textNode.textContent += state.assistantStreamBuffer.slice(0, size);
+      state.assistantStreamBuffer = state.assistantStreamBuffer.slice(size);
+      if (state.assistantStreamBuffer.length > 0) {
+        scheduleAssistantStreamDrain();
+      }
+    }
+
+    function assistantStreamTextNode() {
+      let node = state.assistantEntry.body.querySelector(".assistant-stream-text");
+      if (!node) {
+        node = document.createElement("div");
+        node.className = "assistant-stream-text";
+        state.assistantEntry.body.append(node);
+      }
+      return node;
+    }
+
+    function assistantStreamChunkSize(length) {
+      if (length > 360) return 28;
+      if (length > 180) return 18;
+      if (length > 80) return 10;
+      if (length > 28) return 5;
+      return 2;
+    }
+
+    function assistantStreamDelay(length) {
+      if (length > 360) return 10;
+      if (length > 160) return 14;
+      if (length > 60) return 20;
+      return 30;
+    }
+
+    function flushAssistantStreamNow() {
+      const parsed = consumeAssistantDelta("");
+      if (parsed.text.length > 0) {
+        prepareAssistantStreamText();
+        state.assistantStreamBuffer += parsed.text;
+      }
+      clearAssistantStreamTimer();
+      if (state.assistantStreamBuffer.length > 0) {
+        prepareAssistantStreamText();
+        drainAssistantStreamFrame(true);
+      }
+    }
+
+    function clearAssistantStreamTimer() {
+      if (state.assistantStreamTimer) {
+        clearTimeout(state.assistantStreamTimer);
+        state.assistantStreamTimer = undefined;
+      }
+    }
+
+    function resetAssistantStreamState() {
+      clearAssistantStreamTimer();
+      state.assistantStreamBuffer = "";
+      state.assistantControlBuffer = "";
+    }
+
+    const ASSISTANT_CONTROL_TAGS = [
+      "start_work_session",
+      "tool_call",
+      "function_call",
+      "use_tool",
+      "internal_action",
+      "internal_control",
+      "query",
+      "arguments"
+    ];
+
+    function consumeAssistantDelta(delta) {
+      state.assistantControlBuffer += String(delta || "");
+      let buffer = state.assistantControlBuffer;
+      let visible = "";
+      const controls = [];
+      while (buffer.length > 0) {
+        const match = buffer.match(/<\\s*\\/?\\s*(start_work_session|tool_call|function_call|use_tool|internal_action|internal_control|query|arguments)\\b/i);
+        if (!match || match.index === undefined) {
+          const partial = controlPartialSuffix(buffer);
+          visible += buffer.slice(0, buffer.length - partial.length);
+          state.assistantControlBuffer = partial;
+          return { text: visible, controls };
+        }
+        visible += buffer.slice(0, match.index);
+        const tagName = String(match[1] || "").toLowerCase();
+        const tail = buffer.slice(match.index);
+        const openEnd = tail.indexOf(">");
+        if (openEnd === -1) {
+          state.assistantControlBuffer = tail;
+          return { text: visible, controls };
+        }
+        const opening = tail.slice(0, openEnd + 1);
+        if (/^<\\s*\\//.test(opening) || /\\/\\s*>$/.test(opening)) {
+            buffer = tail.slice(openEnd + 1);
+            continue;
+        }
+        const closePattern = new RegExp("<\\\\s*\\/\\\\s*" + tagName + "\\\\s*>", "i");
+        const closeMatch = closePattern.exec(tail.slice(openEnd + 1));
+        if (!closeMatch) {
+          if (tail.length > 2000) {
+            buffer = "";
+            state.assistantControlBuffer = "";
+            return { text: visible, controls };
+          }
+          state.assistantControlBuffer = tail;
+          return { text: visible, controls };
+        }
+        const endIndex = openEnd + 1 + closeMatch.index + closeMatch[0].length;
+        buffer = tail.slice(endIndex);
+      }
+      state.assistantControlBuffer = "";
+      return { text: visible, controls };
+    }
+
+    function controlPartialSuffix(buffer) {
+      const tail = buffer.slice(Math.max(0, buffer.length - 80)).toLowerCase();
+      const candidates = [];
+      ASSISTANT_CONTROL_TAGS.forEach((name) => {
+        candidates.push("<" + name);
+        candidates.push("</" + name);
+        candidates.push("< " + name);
+        candidates.push("</ " + name);
+      });
+      for (const candidate of candidates) {
+        const max = Math.min(candidate.length - 1, tail.length);
+        for (let size = max; size > 0; size -= 1) {
+          if (tail.endsWith(candidate.slice(0, size))) {
+            return buffer.slice(buffer.length - size);
+          }
+        }
+      }
+      return "";
+    }
+
+    function assistantHasVisibleText() {
+      if (!state.assistantEntry) {
+        return false;
+      }
+      const textNode = state.assistantEntry.body.querySelector(".assistant-stream-text");
+      if (textNode && textNode.textContent.trim().length > 0) {
+        return true;
+      }
+      const clone = state.assistantEntry.body.cloneNode(true);
+      clone.querySelectorAll(".assistant-pending, .assistant-control-strip").forEach((node) => node.remove());
+      return clone.textContent.trim().length > 0;
     }
 
     function appendEntry(input) {
       removeEmptyTranscript();
       const row = document.createElement("div");
-      row.className = "entry" + (input.type === "user" ? " user" : "");
+      row.className = "entry" + (input.type === "user" ? " user" : " assistant");
       const label = document.createElement("div");
       label.className = "entry-label";
       label.textContent = input.label;
@@ -1904,7 +2758,7 @@ export function createPanelHtml(): string {
       inner.className = "bubble-inner";
       const title = document.createElement("div");
       title.className = "entry-title";
-      const titleText = document.createElement("span");
+      const titleText = document.createElement("strong");
       titleText.textContent = input.title;
       const status = document.createElement("span");
       status.className = "meta";
@@ -1913,6 +2767,9 @@ export function createPanelHtml(): string {
       const body = document.createElement("div");
       body.className = "entry-body";
       body.textContent = input.body;
+      if (input.runId) {
+        row.dataset.runId = input.runId;
+      }
       inner.append(title, body);
       bubble.append(inner);
       row.append(label, bubble);
@@ -1947,11 +2804,24 @@ export function createPanelHtml(): string {
       }
     }
 
+    function findLastAssistantTurnIndex(turns) {
+      for (let index = turns.length - 1; index >= 0; index -= 1) {
+        if (turns[index] && turns[index].role === "assistant") {
+          return index;
+        }
+      }
+      return -1;
+    }
+
     function renderCanvas(canvas, status, response) {
       if (!canvas) {
-        if (status === "running" || status === "failed") {
+        if (status === "pending" || status === "running" || status === "failed") {
           dom.mainCanvas.hidden = true;
           dom.mainCanvas.replaceChildren();
+          if (status === "failed" && response && response.error) {
+            dom.mainCanvas.hidden = false;
+            dom.mainCanvas.replaceChildren(emptyResult(status, response));
+          }
           return;
         }
         dom.mainCanvas.hidden = false;
@@ -1963,6 +2833,8 @@ export function createPanelHtml(): string {
         renderDesktopChatCanvas(canvas);
       } else if (canvas.kind === "work_session_canvas") {
         renderWorkSessionCanvas(canvas);
+      } else if (canvas.kind === "underground_deep_canvas") {
+        renderUndergroundDeepCanvas(canvas);
       } else {
         renderLegacyPlanCanvas(canvas);
       }
@@ -1995,15 +2867,19 @@ export function createPanelHtml(): string {
       const directAnswer = canvas.workSession.directAnswer;
       const report = canvas.workSession.report;
       const artifact = canvas.workSession.artifact;
-      const blocks = [];
       if (directAnswer) {
-        blocks.push(directAnswerPreview(directAnswer));
-      } else if (report) {
+        dom.mainCanvas.hidden = true;
+        dom.mainCanvas.replaceChildren();
+        return;
+      }
+      const blocks = [];
+      if (report) {
         blocks.push(artifactPreview(report, artifact));
       } else {
         blocks.push(resultHead("工作尚未形成结果", canvas.explanation.resultWhyReasonable));
         blocks.push(resultSection("待补充", canvas.workSession.openQuestions.length > 0 ? canvas.workSession.openQuestions : ["等待更多材料或配置。"]));
       }
+      dom.mainCanvas.hidden = false;
       dom.mainCanvas.replaceChildren(...blocks);
     }
 
@@ -2015,10 +2891,28 @@ export function createPanelHtml(): string {
         dom.mainCanvas.replaceChildren();
         return;
       } else if (canvas.chat.upgradeRequest) {
-        blocks.push(resultHead("正在进入工作会话", canvas.chat.upgradeRequest.reason));
+        blocks.push(resultHead("任务处理", canvas.chat.upgradeRequest.reason));
       } else {
         blocks.push(resultHead("这次没有完成", canvas.chat.failureMessage || canvas.explanation.resultWhyReasonable));
       }
+      dom.mainCanvas.hidden = false;
+      dom.mainCanvas.replaceChildren(...blocks);
+    }
+
+    function renderUndergroundDeepCanvas(canvas) {
+      const underground = canvas.underground;
+      const blocks = [
+        resultHead(underground.recommendedDirection.summary || "地下组织结果", underground.recommendedDirection.reason || canvas.explanation.resultWhyReasonable),
+        resultSection("依据", underground.keyEvidenceRefs),
+        resultSection("不确定性", underground.uncertainty),
+        resultSection("待确认", underground.openQuestions),
+        resultSection("组织概况", [
+          "rootlet " + underground.rootletCount + " 路",
+          "child run " + underground.childRunCount + " 个",
+          "父层综合 " + underground.parentSynthesisCount + " 次",
+          underground.convergenceSummary
+        ])
+      ];
       dom.mainCanvas.hidden = false;
       dom.mainCanvas.replaceChildren(...blocks);
     }
@@ -2083,41 +2977,6 @@ export function createPanelHtml(): string {
       return preview;
     }
 
-    function directAnswerPreview(answer) {
-      const preview = document.createElement("article");
-      preview.className = "artifact-preview";
-      const topline = document.createElement("div");
-      topline.className = "artifact-topline";
-      const type = document.createElement("span");
-      type.textContent = "回答";
-      const confidence = document.createElement("span");
-      confidence.textContent = typeof answer.confidence === "number" ? "可信度 " + Math.round(answer.confidence * 100) + "%" : "已完成";
-      topline.append(type, confidence);
-
-      const title = document.createElement("h2");
-      title.className = "artifact-title";
-      title.textContent = "回答";
-
-      const summary = document.createElement("div");
-      summary.className = "artifact-summary";
-      summary.textContent = answer.answer || "已回答。";
-
-      preview.append(topline, title, summary);
-      const evidence = Array.isArray(answer.evidenceRefs) ? answer.evidenceRefs : [];
-      if (evidence.length > 0) {
-        preview.append(artifactSection("依据", evidence));
-      }
-      const uncertainty = Array.isArray(answer.uncertainty) ? answer.uncertainty : [];
-      if (uncertainty.length > 0) {
-        preview.append(artifactSection("不确定性", uncertainty));
-      }
-      const followUps = Array.isArray(answer.followUpSuggestions) ? answer.followUpSuggestions : [];
-      if (followUps.length > 0) {
-        preview.append(artifactSection("可以继续", followUps));
-      }
-      return preview;
-    }
-
     function artifactSection(title, items) {
       const section = document.createElement("section");
       section.className = "result-section";
@@ -2174,7 +3033,11 @@ export function createPanelHtml(): string {
         return;
       }
       const canvas = response.canvas;
-      const questions = canvas && canvas.kind === "work_session_canvas" ? canvas.workSession.openQuestions : [];
+      const questions = canvas && canvas.kind === "work_session_canvas"
+        ? canvas.workSession.openQuestions
+        : canvas && canvas.kind === "underground_deep_canvas"
+          ? canvas.underground.openQuestions
+          : [];
       if (response.error) {
         dom.riskPanel.replaceChildren(railItem("需要处理", friendlyFailureText(response.error.message), "error"));
         return;
@@ -2188,19 +3051,28 @@ export function createPanelHtml(): string {
 
     function renderRunPath(response) {
       if (!response || !response.transcript || !Array.isArray(response.transcript.events) || response.transcript.events.length === 0) {
-        dom.runPath.replaceChildren(railItem("等待", "任务开始后会显示正在读取、比较和整理的过程。"));
+        const route = routeDisplay(response);
+        dom.runPath.replaceChildren(railItem(route.title, route.summary));
         return;
       }
       const canvas = response.canvas;
       if (canvas && canvas.kind === "desktop_chat_canvas") {
         if (canvas.chat.answer) {
-          dom.runPath.replaceChildren(railItem("已回复", "这是一条普通对话，没有启动报告或项目分析流程。", "good"));
+          const toolCount = Array.isArray(canvas.chat.toolCallRefs) ? canvas.chat.toolCallRefs.length : 0;
+          dom.runPath.replaceChildren(railItem("已回复", toolCount > 0 ? "普通助手已在授权范围内调用工具并回复。" : "普通助手已直接回复。", "good"));
           return;
         }
         if (canvas.chat.upgradeRequest) {
-          dom.runPath.replaceChildren(railItem("正在展开任务", canvas.chat.upgradeRequest.reason, "warn"));
+          dom.runPath.replaceChildren(railItem("任务处理", canvas.chat.upgradeRequest.reason, "warn"));
           return;
         }
+      }
+      if (canvas && canvas.kind === "underground_deep_canvas") {
+        dom.runPath.replaceChildren(
+          railItem("深度模式", "已完成地下组织、父层综合和收束。", "good"),
+          railItem("组织概况", "rootlet " + canvas.underground.rootletCount + " 路；父层综合 " + canvas.underground.parentSynthesisCount + " 次")
+        );
+        return;
       }
       const visibleEvents = response.transcript.events
         .filter((event) => event.type !== "model.output.delta" && event.type !== "model.output.completed")
@@ -2219,8 +3091,15 @@ export function createPanelHtml(): string {
       if (canvas && canvas.kind === "desktop_chat_canvas") {
         const goalRef = canvas.taskSoil.contextRefs.find((ref) => ref.kind === "user_goal");
         dom.runMetrics.replaceChildren(
-          railItem("本次消息", goalRef ? humanContextSummary(goalRef) : "普通对话。"),
-          railItem("上下文", canvas.chat.answer ? "未请求额外文件或网页。" : "等待判断是否需要更多材料。")
+          railItem("本次消息", goalRef ? humanContextSummary(goalRef) : "普通助手。"),
+          railItem("上下文", canvas.chat.answer ? "按模型判断使用了可用上下文和授权工具。" : "等待判断是否需要更多材料。")
+        );
+        return;
+      }
+      if (canvas && canvas.kind === "underground_deep_canvas") {
+        dom.runMetrics.replaceChildren(
+          railItem("本次任务", canvas.task.goalSummary),
+          railItem("深度模式", "仅运行地下组织；当前不进入执行修改。")
         );
         return;
       }
@@ -2253,6 +3132,14 @@ export function createPanelHtml(): string {
           report.evidenceRefs.slice(0, 6).forEach((ref) => rows.push(railItem("依据", ref)));
         }
         if (rows.length === 0) rows.push(railItem("等待", "报告尚未形成引用。"));
+        dom.supervisionStatus.replaceChildren(...rows);
+        return;
+      }
+      if (canvas.kind === "underground_deep_canvas") {
+        const rows = [];
+        rows.push(railItem("状态", canvas.underground.status, canvas.underground.status === "approved_package_created" ? "good" : "warn"));
+        canvas.underground.keyEvidenceRefs.slice(0, 6).forEach((ref) => rows.push(railItem("依据", ref)));
+        if (rows.length === 1) rows.push(railItem("依据", "暂无关键引用。"));
         dom.supervisionStatus.replaceChildren(...rows);
         return;
       }
@@ -2492,6 +3379,9 @@ export function createPanelHtml(): string {
         items.push("model requested/completed/failed: " + counts(response.tracking.modelTotals));
         items.push("tool requested/completed/failed: " + counts(response.tracking.toolTotals));
       }
+      if (response && response.route) {
+        items.push("route: " + response.route.route + " / " + response.route.reason);
+      }
       if (response && response.error) {
         items.push("error: " + response.error.code);
       }
@@ -2503,6 +3393,7 @@ export function createPanelHtml(): string {
       dom.debugJson.textContent = JSON.stringify({
         runId: response && response.runId,
         runKind: response && response.runKind,
+        runMode: response && response.runMode,
         status: response && response.status,
         canvas: response && response.canvas,
         tracking: response && response.tracking,
@@ -2516,6 +3407,36 @@ export function createPanelHtml(): string {
       return (value.requested || 0) + " / " + (value.completed || 0) + " / " + (value.failed || 0);
     }
 
+    function routeDisplay(response) {
+      const route = response && response.route;
+      if (route && route.route === "task_work_session") {
+        return {
+          stageKey: "route-task",
+          title: route.title || "任务处理",
+          summary: route.summary || "这条请求需要展开成可审阅的任务处理。"
+        };
+      }
+      if (route) {
+        return {
+          stageKey: "route-chat",
+          title: route.title || "回复",
+          summary: route.summary || "这条消息会先作为普通助手回合处理。"
+        };
+      }
+      if (response && response.runMode === "deep") {
+        return {
+          stageKey: "route-task",
+          title: "深度模式",
+          summary: "这条消息将运行地下组织，完成方向探索、父层综合和收束。"
+        };
+      }
+      return {
+        stageKey: "running-default",
+        title: "回复",
+        summary: "等待模型返回。"
+      };
+    }
+
     function renderProviderStatus() {
       const config = state.config;
       if (!config) {
@@ -2523,13 +3444,10 @@ export function createPanelHtml(): string {
       }
       const selectedMode = dom.aiMode.value || preferredRunMode();
       const status = providerStatusFromConfig(config, selectedMode);
-      const todos = providerTodos(status, config);
-      dom.providerHint.textContent = status === "ready"
-        ? "真实模型已就绪"
-        : status === "fake_provider"
-          ? "测试模式已启用"
-          : "待配置：" + todos.join("；");
-      dom.configStatus.textContent = "当前入口：" + modeLabel(selectedMode) + "；默认：" + modeLabel(config.defaultAiMode || "openai-compatible") + "；模型：" + (config.model || "未填写") + "；密钥：" + (config.secretConfigured ? "已配置" : "未配置");
+      const workMode = dom.runModeInput.value === "deep" ? "深度模式" : "助手";
+      dom.providerHint.textContent = composerHint(status, workMode);
+      dom.inputStatusDot.className = "input-status-dot" + composerStatusTone(status);
+      dom.configStatus.textContent = "处理方式：" + workMode + "；模型入口：" + modeLabel(selectedMode) + "；默认：" + modeLabel(config.defaultAiMode || "openai-compatible") + "；模型：" + (config.model || "未填写") + "；密钥：" + (config.secretConfigured ? "已配置" : "未配置");
       dom.configStatus.className = "hint" + (status === "missing_model" || status === "missing_secret" || status === "missing_model_and_secret" ? " error" : "");
       renderSupervision(undefined);
       renderRightPanels(undefined);
@@ -2549,6 +3467,22 @@ export function createPanelHtml(): string {
       if (missingModel) return "missing_model";
       if (missingSecret) return "missing_secret";
       return "ready";
+    }
+
+    function composerHint(status, workMode) {
+      if (status === "fake_provider") return "测试模式：回答来自固定样例，不代表真实模型。";
+      if (status === "network_disabled") return "AI 已禁用：本轮只会验证边界。";
+      if (status === "missing_model" || status === "missing_secret" || status === "missing_model_and_secret") {
+        return "真实模型未配置完整，发送后会停在配置边界。";
+      }
+      if (workMode === "深度模式") return "深度模式会运行地下组织。";
+      return "Enter 发送，Shift+Enter 换行。";
+    }
+
+    function composerStatusTone(status) {
+      if (status === "fake_provider") return " warning";
+      if (status === "network_disabled" || status === "missing_model" || status === "missing_secret" || status === "missing_model_and_secret") return " error";
+      return "";
     }
 
     function providerTodos(status, config) {
@@ -2578,39 +3512,87 @@ export function createPanelHtml(): string {
       dom.toolConfigStatus.className = "hint";
     }
 
-    function rememberRun(goal, runId) {
-      state.runHistory.unshift({ goal: goal, runId: runId });
-      state.runHistory = state.runHistory.slice(0, 8);
-      dom.runCount.textContent = String(state.runHistory.length);
-      dom.runHistory.replaceChildren(...state.runHistory.map((item, index) => {
+    function renderConversationList() {
+      const conversations = Array.isArray(state.conversations) ? state.conversations.slice(0, 8) : [];
+      dom.runCount.textContent = String(conversations.length);
+      if (conversations.length === 0) {
         const li = document.createElement("li");
-        li.className = "run-item" + (index === 0 ? " active" : "");
+        li.className = "run-item active";
         const title = document.createElement("div");
         title.className = "run-title";
-        title.textContent = compact(item.goal, 28);
+        title.textContent = "暂无对话";
         const meta = document.createElement("div");
         meta.className = "run-meta";
-        meta.textContent = index === 0 ? "刚刚运行" : "历史任务";
+        meta.textContent = "开始后会显示在这里。";
         li.append(title, meta);
+        dom.runHistory.replaceChildren(li);
+        return;
+      }
+      dom.runHistory.replaceChildren(...conversations.map((item) => {
+        const li = document.createElement("li");
+        li.className = "run-item" + (item.conversationId === state.currentConversationId ? " active" : "");
+        const title = document.createElement("div");
+        title.className = "run-title";
+        title.textContent = compact(item.title || item.preview || "新对话", 28);
+        const meta = document.createElement("div");
+        meta.className = "run-meta";
+        meta.textContent = compact(item.preview || "等待消息。", 42);
+        li.append(title, meta);
+        li.addEventListener("click", () => {
+          void openConversation(item.conversationId);
+        });
         return li;
       }));
+    }
+
+    function syncConversationState(conversation) {
+      state.currentConversationId = conversation.conversationId;
+      state.currentRunId = conversation.activeRunId;
+      state.queuedRunIds = new Set(Array.isArray(conversation.queuedRunIds) ? conversation.queuedRunIds : []);
+      if (!Array.isArray(state.conversations)) {
+        state.conversations = [];
+      }
+      const existingIndex = state.conversations.findIndex((item) => item.conversationId === conversation.conversationId);
+      const summary = {
+        conversationId: conversation.conversationId,
+        title: conversation.title,
+        preview: conversation.preview,
+        createdAt: conversation.createdAt,
+        updatedAt: conversation.updatedAt,
+        status: conversation.status,
+        activeRunId: conversation.activeRunId,
+        latestRunId: conversation.latestRunId,
+        queuedRunIds: conversation.queuedRunIds,
+        queuedRunCount: conversation.queuedRunCount
+      };
+      if (existingIndex === -1) {
+        state.conversations.unshift(summary);
+      } else {
+        state.conversations.splice(existingIndex, 1);
+        state.conversations.unshift(summary);
+      }
     }
 
     function resetComposer() {
       stopLiveUpdates();
       state.seenSequences = new Set();
       state.lastSequence = 0;
+      state.currentConversationId = undefined;
       state.currentRunId = undefined;
+      state.queuedRunIds = new Set();
       state.lastFocusedTerminalRunId = undefined;
-      state.modelOutputEntries = new Map();
       state.assistantEntry = undefined;
+      state.assistantStageKey = undefined;
+      resetAssistantStreamState();
       state.inspectorPinned = false;
       setInspectorTab("overview", false);
       closeDeveloperDrawer();
       dom.goalInput.value = "";
+      autoResizeGoalInput();
+      updateComposerControls();
       dom.contextRefsInput.value = "";
       dom.permissionRefsInput.value = "";
-      dom.sessionTitle.textContent = "新任务";
+      dom.sessionTitle.textContent = "新对话";
       dom.introBlock.hidden = false;
       dom.transcript.replaceChildren(emptyTranscriptNode());
       renderCanvas(undefined, "pending");
@@ -2623,12 +3605,13 @@ export function createPanelHtml(): string {
       renderFailurePanel(undefined);
       renderFlow(undefined);
       dom.debugJson.textContent = "{}";
+      renderConversationList();
     }
 
     function emptyTranscriptNode() {
       const node = document.createElement("div");
       node.className = "empty-transcript";
-      node.textContent = "暂无活动。开始任务后，这里会显示正在读取、比较、整理和生成的过程。";
+      node.textContent = "";
       return node;
     }
 
@@ -2688,6 +3671,7 @@ export function createPanelHtml(): string {
       if (call.failureKind === "provider_auth") return "检查 API Key、账号权限和 Base URL。";
       if (call.failureKind === "provider_rate_limit") return "降低并发或稍后重试；预算边界不能绕过。";
       if (call.failureKind === "provider_network" || call.failureKind === "provider_timeout") return "检查网络、模型服务可用性和超时设置。";
+      if (call.failureKind === "provider_response") return "模型服务返回了无法消费的响应。优先检查 Base URL 是否指向 OpenAI-compatible chat completions 端点、模型名是否可用，以及服务是否支持当前请求格式。";
       return "保留失败 refs，先定位模型服务 / contract / agent purpose，再决定是否重试。";
     }
 
@@ -2705,7 +3689,7 @@ export function createPanelHtml(): string {
     }
 
     function setButtons(enabled) {
-      dom.runButton.disabled = !enabled;
+      dom.runButton.disabled = !enabled || state.isSubmitting || dom.goalInput.value.trim().length === 0;
       dom.saveConfigButton.disabled = !enabled;
       dom.saveToolConfigButton.disabled = !enabled;
     }

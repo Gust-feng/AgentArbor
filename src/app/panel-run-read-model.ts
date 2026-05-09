@@ -12,8 +12,10 @@ import {
 import { ROOTLET_CLUSTER_KINDS, type CandidatePoolCounts, type RootletClusterKind } from "../domain/underground/index.js";
 import type { EventLogEntry } from "../kernel/events/in-memory-event-log.js";
 import type { UndergroundAiMode } from "./intelligence-channel-factory.js";
+import { explainDesktopIntentDecision, type DesktopIntentDecision } from "./desktop-intent-router.js";
 import { createSafeAgentRunTreeView, type SafeAgentRunTreeView } from "./panel-canvas-read-model.js";
 import type { UndergroundDemoSummary } from "./underground-demo-summary.js";
+import { friendlyUserFacingFailureText } from "./visible-text-safety.js";
 
 export type PanelRunStatus = "pending" | "running" | "completed" | "failed";
 
@@ -360,6 +362,8 @@ export function createPanelRunTranscript(input: {
   readonly summary?: UndergroundDemoSummary;
   readonly observation?: PanelObservationReadModel;
   readonly agentRunTree?: AgentRunTree;
+  readonly routeDecision?: DesktopIntentDecision;
+  readonly desktopMode?: "agent" | "deep";
   readonly createdAt: string;
   readonly updatedAt: string;
 }): PanelRunTranscript {
@@ -370,6 +374,8 @@ export function createPanelRunTranscript(input: {
     eventEntries: input.eventEntries,
     summary: input.summary,
     observation: input.observation,
+    routeDecision: input.routeDecision,
+    desktopMode: input.desktopMode,
     createdAt: input.createdAt,
     updatedAt: input.updatedAt,
   });
@@ -379,7 +385,12 @@ export function createPanelRunTranscript(input: {
     input.observation === undefined &&
     input.agentRunTree === undefined &&
     modelCalls.length > 0 &&
-    modelCalls.every((call) => call.outputContractId === "desktop.chat_response.v1" || call.purpose === "desktop_chat");
+    modelCalls.every((call) =>
+      call.outputContractId === "desktop.chat_response.v1" ||
+      call.outputContractId === "desktop.intent_gate.v1" ||
+      call.purpose === "desktop_chat" ||
+      call.purpose === "desktop_intent_gate"
+    );
   const noteInput = {
     ...input,
     modelCalls,
@@ -435,6 +446,8 @@ export function createPanelRunStreamEvents(input: {
   readonly eventEntries: readonly EventLogEntry[];
   readonly summary?: UndergroundDemoSummary | { readonly ai: UndergroundDemoSummary["ai"] };
   readonly observation?: PanelObservationReadModel;
+  readonly routeDecision?: DesktopIntentDecision;
+  readonly desktopMode?: "agent" | "deep";
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly error?: { readonly code: string; readonly message: string };
@@ -442,6 +455,7 @@ export function createPanelRunStreamEvents(input: {
   const events: PanelRunStreamEvent[] = [];
   const observationViews = createRunObservationEventViews(input.eventEntries);
   const viewBySequence = new Map(observationViews.map((view) => [view.sequence, view]));
+  const suppressOrdinaryChatProgress = input.desktopMode === "agent" || isOrdinaryChatRoute(input.routeDecision);
   const push = (event: Omit<PanelRunStreamEvent, "sequence">): void => {
     events.push({ ...event, sequence: events.length + 1 });
   };
@@ -452,7 +466,7 @@ export function createPanelRunStreamEvents(input: {
     type: "run.started",
     createdAt: input.createdAt,
     agentLabel: "AgentArbor",
-    summary: "消息已提交，正在整理上下文并准备回复。",
+    summary: runStartedSummary(input.routeDecision, input.desktopMode),
     status: input.status === "pending" ? "pending" : "running",
     sourceRefs: [],
     modelCallRefs: [],
@@ -460,6 +474,9 @@ export function createPanelRunStreamEvents(input: {
   });
 
   for (const entry of input.eventEntries) {
+    if (suppressOrdinaryChatProgress && shouldSuppressOrdinaryChatEvent(entry.type)) {
+      continue;
+    }
     const view = viewBySequence.get(entry.sequence);
     appendStreamEventsForEvent({
       runId: input.runId,
@@ -492,7 +509,7 @@ export function createPanelRunStreamEvents(input: {
       type: "run.failed",
       createdAt: input.updatedAt,
       agentLabel: "AgentArbor",
-      summary: input.error?.message ?? "运行失败。",
+      summary: friendlyUserFacingFailureText(input.error?.message),
       status: "failed",
       sourceRefs: [],
       modelCallRefs: [],
@@ -501,6 +518,26 @@ export function createPanelRunStreamEvents(input: {
   }
 
   return events;
+}
+
+function runStartedSummary(
+  routeDecision: DesktopIntentDecision | undefined,
+  desktopMode: "agent" | "deep" | undefined
+): string {
+  if (routeDecision === undefined) {
+    return desktopMode === "deep"
+      ? "已进入深度模式，会运行地下组织做多路探索、父层综合和方向收束。"
+      : "消息已发送，等待回复。";
+  }
+  return explainDesktopIntentDecision(routeDecision).summary;
+}
+
+function isOrdinaryChatRoute(routeDecision: DesktopIntentDecision | undefined): boolean {
+  return routeDecision !== undefined && routeDecision.route !== "task_work_session";
+}
+
+function shouldSuppressOrdinaryChatEvent(type: ArborMessageType): boolean {
+  return type === "goal.received" || type === "model.requested" || type === "model.completed";
 }
 
 function appendStreamEventsForEvent(input: {
@@ -639,7 +676,7 @@ function agentFabricLabel(type: PanelRunStreamEventType): string {
     case "agent.parent_synthesis.completed":
       return "父层综合";
     default:
-      return "工作会话";
+      return "工作更新";
   }
 }
 
@@ -704,6 +741,8 @@ function modelCompletedSummary(payload: Readonly<Record<string, unknown>>, chunk
 
 function purposeProgressLabel(purpose: string): string {
   switch (purpose) {
+    case "desktop_intent_gate":
+      return "等待模型路由结果。";
     case "work_session_decision":
       return "正在判断下一步。";
     case "work_session_child_material":
@@ -713,7 +752,7 @@ function purposeProgressLabel(purpose: string): string {
     case "work_session_direct_answer":
       return "正在组织直接回答。";
     case "desktop_chat":
-      return "正在回复。";
+      return "等待模型输出。";
     default:
       return "正在生成安全摘要。";
   }
@@ -721,8 +760,7 @@ function purposeProgressLabel(purpose: string): string {
 
 function modelFailedSummary(payload: Readonly<Record<string, unknown>>): string {
   const failureKind = stringOrUndefined(payload.failureKind) ?? "model_failed";
-  const retryable = payload.retryable === true ? "可重试" : "不可重试";
-  return `模型调用失败：${failureKind}，${retryable}。`;
+  return friendlyUserFacingFailureText(failureKind);
 }
 
 function toolSummary(type: "tool.requested" | "tool.completed" | "tool.failed", payload: Readonly<Record<string, unknown>>): string {
@@ -743,7 +781,7 @@ function agentNoteForEvent(
 ): { readonly agentLabel: string; readonly summary: string; readonly status: PanelRunStreamEvent["status"] } | undefined {
   switch (entry.type) {
     case "goal.received":
-      return { agentLabel: "用户", summary: "目标已进入工作会话，原文不会在调试区外展开。", status: "completed" };
+      return { agentLabel: "用户", summary: "消息已收到，原文不会在调试区外展开。", status: "completed" };
     case "underground.exploration_planned":
       return { agentLabel: "地下认知运行时", summary: "目标画像和探索计划已形成。", status: "completed" };
     case "rootlet_cluster.started":
@@ -823,7 +861,7 @@ function finalResultSummary(input: {
   }
   const artifact = latestArtifactProducedPayload(input.eventEntries);
   if (artifact !== undefined) {
-    return `工作会话运行完成，已生成报告：${artifact.summary ?? artifact.artifactId ?? "artifact"}。`;
+    return `任务运行完成，已生成报告：${artifact.summary ?? artifact.artifactId ?? "artifact"}。`;
   }
   const directAnswer = latestDirectAnswerPayload(input.eventEntries);
   if (directAnswer !== undefined) {
@@ -832,8 +870,8 @@ function finalResultSummary(input: {
   if (input.observation?.aboveground.status === "completed") {
     const handoff = input.observation.handoff;
     return handoff.packageId.length === 0
-      ? "工作会话运行完成，已产出结果。"
-      : `工作会话运行完成，方案 ${handoff.packageId} v${handoff.version} 已产出结果。`;
+      ? "任务运行完成，已产出结果。"
+      : `任务运行完成，方案 ${handoff.packageId} v${handoff.version} 已产出结果。`;
   }
   const stage = input.observation?.currentStage;
   return stage === undefined ? "运行完成。" : `运行完成，当前阶段 ${stage}。`;
@@ -1028,7 +1066,15 @@ function createIntentCoreNote(input: NoteFactoryInput): AgentWorkNote {
 }
 
 function createDesktopChatNote(input: NoteFactoryInput): AgentWorkNote {
-  const eventRefs = eventRefsFor(input.eventEntries, ["goal.received", "model.requested", "model.completed", "model.failed"]);
+  const eventRefs = eventRefsFor(input.eventEntries, [
+    "goal.received",
+    "model.requested",
+    "model.completed",
+    "model.failed",
+    "tool.requested",
+    "tool.completed",
+    "tool.failed",
+  ]);
   const failed = input.modelCalls.some((call) => call.status === "failed");
   const completed = input.modelCalls.some((call) => call.status === "completed");
   const requested = input.modelCalls.some((call) => call.status === "requested");
@@ -1042,9 +1088,9 @@ function createDesktopChatNote(input: NoteFactoryInput): AgentWorkNote {
     summary: completed
       ? "桌面助手已完成本轮回复；普通问题没有进入项目分析或报告流程。"
       : requested
-        ? "桌面助手正在判断是直接回复还是进入工作会话。"
+        ? "桌面助手等待模型返回本轮处理方式。"
         : "等待用户消息。",
-    detail: "Desktop Chat Session 是首选入口；只有模型请求升级时才进入 Work Session。",
+    detail: "普通模式由桌面 Root Agent 直接处理，可在授权范围内调用工具；深度模式必须由用户显式切换。",
     eventRefs,
     modelCallRefs: input.modelCalls.map((call) => call.requestId),
   });
@@ -1068,19 +1114,19 @@ function createWorkSessionManagerNote(input: NoteFactoryInput): AgentWorkNote {
     input,
     noteId: "work-session-manager",
     agentId: "cognitive-work-session-manager",
-    agentLabel: "Work Session Manager",
+    agentLabel: "Legacy Work Session Manager",
     stage: "cognitive_work_session",
     status: producedArtifact || producedDirectAnswer ? "completed" : hasSynthesis ? "running" : eventRefs.length > 0 ? "running" : "pending",
     summary: producedDirectAnswer
-      ? "Cognitive Work Session 已直接回答当前问题。"
+      ? "Legacy Work Session 已直接回答当前问题。"
       : producedArtifact
-      ? "Cognitive Work Session 已生成最终项目分析报告。"
+      ? "Legacy Work Session 已生成最终项目分析报告。"
       : hasSynthesis
         ? "父层综合已形成，正在准备最终报告。"
         : "主 Agent 正在决定读取、派生、综合或停止。",
     detail:
       tree === undefined
-        ? "Work Session 直接服务 Desktop Shell，不再把旧地下流水线包装成成功主线。"
+        ? "Legacy Work Session 仅保留兼容，不作为当前 Desktop 深度模式主线。"
         : `root ${tree.rootAgentId}；child ${tree.childRuns.length} 个；parent synthesis ${tree.parentSyntheses.length} 次。`,
     eventRefs,
     evidenceRefs: tree?.parentSyntheses.flatMap((synthesis) => synthesis.outputRefs) ?? [],
@@ -1490,7 +1536,7 @@ function waitingPointFor(status: PanelRunStatus, lastEventType: ArborMessageType
     case undefined:
       return "后台 job 已启动，等待目标进入 EventLog。";
     case "goal.received":
-      return "任务上下文已形成，等待工作会话开始模型决策。";
+      return "消息和上下文已形成，等待助手继续处理。";
     case "underground.exploration_planned":
       return "Growth Governor 正在启动 rootlet 集群。";
     case "rootlet_cluster.started":

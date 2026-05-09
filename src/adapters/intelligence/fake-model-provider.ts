@@ -145,6 +145,7 @@ function emitFakeOutputDeltas(input: {
   chunks.forEach((delta, index) => {
     input.emit?.({
       requestId: input.request.requestId,
+      purpose: input.request.purpose,
       providerId: input.providerId,
       model: input.model,
       delta,
@@ -174,6 +175,10 @@ function defaultFakeStep(request: ModelRequest): FakeModelProviderStep {
 }
 
 function defaultFakeOutput(request: ModelRequest): unknown {
+  if (request.outputContract.contractId === "desktop.intent_gate.v1") {
+    return fakeDesktopIntentGateOutput(request);
+  }
+
   if (request.outputContract.contractId === "underground.intent_profile.v1") {
     return fakeIntentProfileOutput(request);
   }
@@ -255,11 +260,79 @@ function defaultFakeOutput(request: ModelRequest): unknown {
   };
 }
 
-function fakeDesktopChatStep(request: ModelRequest): FakeModelProviderStep {
+function fakeDesktopIntentGateOutput(request: ModelRequest): Record<string, unknown> {
   const goalAnchor = stripTrailingSentencePunctuation(rootletGoalAnchor(request));
+  if (needsLightToolAnswer(goalAnchor)) {
+    return {
+      route: "chat_plus_tools",
+      reason: "测试模型判断需要少量授权材料或工具辅助，但不需要完整报告。",
+      confidence: 0.76,
+    };
+  }
   if (isLightweightQuestion(goalAnchor)) {
     return {
+      route: "chat_direct",
+      reason: "测试模型判断这是一条普通助手消息，可以直接回答。",
+      confidence: 0.82,
+    };
+  }
+  if (shouldUpgradeToWorkSession(goalAnchor)) {
+    return {
+      route: "task_work_session",
+      reason: "测试模型判断这需要多步处理、上下文检查或可审阅成果。",
+      confidence: 0.78,
+    };
+  }
+  return {
+    route: "chat_direct",
+    reason: "测试模型判断这条消息可以先由普通助手承接。",
+    confidence: 0.7,
+  };
+}
+
+function fakeDesktopChatStep(request: ModelRequest): FakeModelProviderStep {
+  const goalAnchor = stripTrailingSentencePunctuation(rootletGoalAnchor(request));
+  const normalized = goalAnchor.toLowerCase();
+  const hasToolMessage = request.sanitizedMessages.some((message) => message.role === "tool");
+  const canUseSearch = request.toolChoice !== "none" && request.tools?.some((tool) => tool.name === "search") === true;
+  if (needsDesktopFileAuthorization(goalAnchor) && !hasAuthorizedFilePreview(request)) {
+    return {
+      textOutput:
+        "我现在还不能直接看到你的桌面文件。请先通过附件选择具体文件或文件夹，或给出只读文件引用；拿到授权材料后，我可以继续帮你梳理、总结或分析。",
+    };
+  }
+  if (canUseSearch && !hasToolMessage && shouldUseOrdinaryAgentTools(goalAnchor)) {
+    return {
+      toolCalls: [
+        {
+          callId: "call-desktop-agent-search",
+          toolName: "search",
+          input: {
+            query: goalAnchor,
+            sources: includesAny(normalized, ["网页", "web", "搜索", "搜一下", "查一下"]) ? ["web", "codebase"] : ["codebase"],
+            limit: 3,
+          },
+        },
+      ],
+    };
+  }
+  if (hasToolMessage) {
+    return {
+      textOutput:
+        `我已经基于当前授权工具检查了“${goalAnchor}”。可用材料只作为本轮回答依据，不会写入长期记忆；如果需要更系统的方向组织，可以切到深度模式让地下组织做多路探索和父层收束。`,
+    };
+  }
+  if (!shouldUpgradeToWorkSession(goalAnchor)) {
+    return {
       textOutput: fakeWorkSessionDirectAnswerOutput(request),
+    };
+  }
+  const canRequestWorkSession =
+    request.toolChoice !== "none" && request.tools?.some((tool) => tool.name === "start_work_session") === true;
+  if (!canRequestWorkSession) {
+    return {
+      textOutput:
+        `这更像一个需要读取上下文、组织材料或产出可审阅结果的任务。我可以先在普通助手模式给出初步回答；如果你要做方向成形和多路探索，请显式切到“深度模式”：${goalAnchor}`,
     };
   }
   return {
@@ -274,6 +347,44 @@ function fakeDesktopChatStep(request: ModelRequest): FakeModelProviderStep {
       },
     ],
   };
+}
+
+function shouldUseOrdinaryAgentTools(goalAnchor: string): boolean {
+  const normalized = goalAnchor.toLowerCase().trim();
+  return includesAny(normalized, [
+    "分析当前仓库",
+    "看看当前项目",
+    "项目",
+    "仓库",
+    "代码",
+    "codebase",
+    "repo",
+    "repository",
+    "网页",
+    "搜索",
+    "搜一下",
+    "查一下",
+    "read this page",
+    "search",
+  ]);
+}
+
+function needsDesktopFileAuthorization(goalAnchor: string): boolean {
+  const normalized = goalAnchor.toLowerCase().trim();
+  return includesAny(normalized, [
+    "桌面文件",
+    "电脑文件",
+    "本地文件",
+    "我的文件",
+    "desktop file",
+    "local file",
+    "my files",
+  ]);
+}
+
+function hasAuthorizedFilePreview(request: ModelRequest): boolean {
+  const content = request.sanitizedMessages.map((message) => message.content).join("\n").toLowerCase();
+  return content.includes("file:") || content.includes("workspace:file") || content.includes("preview=");
 }
 
 function fakeIntentProfileOutput(request: ModelRequest): Record<string, unknown> {
@@ -522,9 +633,34 @@ function fakeWorkSessionDirectAnswerOutput(request: ModelRequest): string {
     "which model",
     "who are you",
   ]);
-  return asksModelIdentity
-    ? "我是 AgentArbor 桌面助手。具体底层模型取决于你在设置中配置的模型运行时；如果当前使用测试模式，我会走本地 fake AI 路径，只用于验证工作流。"
-    : `可以。对于“${goalAnchor}”，我会先直接回答；只有当问题需要读取项目、网页、文件或长期执行时，才会进入更完整的工作会话。`;
+  const asksCapability = includesAny(normalized, [
+    "能做什么",
+    "可以做什么",
+    "会做什么",
+    "你能干什么",
+    "你能帮我",
+    "what can you do",
+    "how can you help",
+  ]);
+  const asksFollowUp = isFollowUpQuestion(normalized);
+  if (asksModelIdentity) {
+    return "我是 AgentArbor 桌面助手。具体底层模型取决于你在设置中配置的模型运行时；普通问题会直接回答，真正需要文件、网页、工具或多步处理时才会展开成工作会话。";
+  }
+  if (asksCapability) {
+    return "我可以直接回答问题，也可以在你授权的上下文里整理材料、分析文件和网页、生成报告或草稿，并在需要写入、调用工具或确认风险时先停下来问你。你可以继续随便问，也可以直接交给我一个要完成的任务。";
+  }
+  if (asksFollowUp) {
+    return "可以继续。你可以把我当作一个桌面任务助手：普通问题我直接回答；当你给出需要上下文、文件、网页、工具或多步判断的任务时，我会把过程展开为可审阅的工作会话，并在高风险动作前请求确认。";
+  }
+  if (includesAny(normalized, ["效率", "高效", "建议", "productivity", "efficient"])) {
+    return [
+      "给你三条可马上执行的效率建议：",
+      "1) 先定义今天唯一最重要的一件事，先做完它再切换任务。",
+      "2) 用 25-45 分钟专注块处理深度工作，期间关闭通知和无关窗口。",
+      "3) 每个专注块结束后写一句“下一步动作”，降低下一次启动成本。",
+    ].join("\n");
+  }
+  return `可以。对于“${goalAnchor}”，我会先直接回答；只有当问题需要读取项目、网页、文件或长期执行时，才会进入更完整的工作会话。`;
 }
 
 function fakeWorkSessionChildSpecs(goalAnchor: string): readonly Record<string, unknown>[] {
@@ -575,17 +711,19 @@ function fakeWorkSessionChildMaterialOutput(request: ModelRequest): Record<strin
 
 function fakeWorkSessionSynthesisOutput(request: ModelRequest): Record<string, unknown> {
   const goalAnchor = stripTrailingSentencePunctuation(rootletGoalAnchor(request));
+  const reportTitle = buildFakeReportTitle(goalAnchor);
+  const summary = `父层综合已为“${goalAnchor}”形成可审阅结果。`;
   return {
-    reportTitle: "AgentArbor 项目分析与下一步优化报告",
+    reportTitle,
     keyFindings: [
-      "桌面主线必须直接承载真实工作会话，而不是把固定流程包装成产品结果。",
-      "当前实现已经具备分工检查和父层综合基础，下一步应让模型按任务决定阅读、分工、综合和产出。",
-      "面板应优先展示任务理解、关键发现、证据、不确定性和下一步，而不是强制展示内部方案包成功态。",
+      `任务目标“${goalAnchor}”已经拆成可检查的子问题并完成父层综合。`,
+      "桌面主线已经把局部材料与父层判断分离，避免局部结论直接冒充最终结果。",
+      "结果输出已包含结论、证据和不确定性，适合继续进入执行或追问。",
     ],
     recommendations: [
-      "把默认入口稳定为工作会话，让模型根据任务选择读取、分工、综合、追问或产出。",
-      "保持局部材料不直接成为最终结果，必须经过父层综合后再展示给用户。",
-      "先用真实模型完成当前仓库分析报告，再继续接执行修改预览和验证。",
+      "优先确认结果是否满足当前任务验收口径，再决定继续扩展还是收敛执行。",
+      "保持“局部材料 -> 父层综合 -> 最终结果”链路，不让子路径绕过收敛门。",
+      "对关键结论补一轮真实模型或真实工具验证，避免测试模式偏差。",
     ],
     evidenceRefs: [
       "code:src/app/panel-server.ts",
@@ -598,12 +736,11 @@ function fakeWorkSessionSynthesisOutput(request: ModelRequest): Record<string, u
       "当前示例材料只能证明链路和边界，不能代表真实项目分析深度。",
     ],
     nextActions: [
-      "配置真实模型并跑一次当前仓库项目分析。",
-      "把工具读取策略从安全引用扩展到更真实的代码搜索和只读文件阅读。",
-      "继续压缩右侧诊断噪音，突出结论、证据和待确认事项。",
+      "确认是否要把这份结果转为执行清单并开始落地。",
+      "若需要更高置信度，补充目标相关的文件或网页引用后再运行一轮。",
+      "对关键风险点增加验证步骤，避免仅凭一次综合直接定案。",
     ],
-    decisionSummary:
-      `父层综合已为 ${goalAnchor} 形成可审阅的项目分析报告。`,
+    decisionSummary: summary,
     confidence: 0.78,
   };
 }
@@ -759,23 +896,135 @@ function goalSegments(goalAnchor: string): string[] {
 
 function isLightweightQuestion(goalAnchor: string): boolean {
   const normalized = goalAnchor.toLowerCase().trim();
-  if (["hi", "hello", "你好"].includes(normalized)) {
+  const withoutPunctuation = normalized.replace(/[。.!！?？]+$/u, "").trim();
+  if (["hi", "hello", "你好"].includes(withoutPunctuation)) {
     return true;
   }
-  if (includesAny(normalized, [
+  if (includesAny(withoutPunctuation, [
     "你是什么模型",
     "你是哪个模型",
     "你是谁",
+    "能做什么",
+    "可以做什么",
+    "会做什么",
+    "你能干什么",
+    "你能帮我",
     "what model",
     "which model",
     "who are you",
+    "what can you do",
+    "how can you help",
   ])) {
+    return true;
+  }
+  if (isFollowUpQuestion(withoutPunctuation)) {
     return true;
   }
   if (normalized.length <= 48 && /[?？]$/u.test(normalized)) {
     return !includesAny(normalized, ["分析", "调研", "生成报告", "项目", "仓库", "代码", "优化方向", "方案"]);
   }
   return false;
+}
+
+function shouldUpgradeToWorkSession(goalAnchor: string): boolean {
+  const normalized = goalAnchor.toLowerCase().trim();
+  if (isLightweightQuestion(goalAnchor)) {
+    return false;
+  }
+  if (includesAny(normalized, [
+    "分析",
+    "调研",
+    "仓库",
+    "repo",
+    "repository",
+    "项目",
+    "project",
+    "代码",
+    "codebase",
+    "重构",
+    "refactor",
+    "实现",
+    "implement",
+    "修复",
+    "fix",
+    "优化",
+    "optimiz",
+    "报告",
+    "report",
+    "文档",
+    "document",
+    "方案",
+    "plan",
+    "工作流",
+    "workflow",
+    "文件",
+    "网页",
+    "tool",
+    "工具",
+    "验证",
+    "verify",
+  ])) {
+    return true;
+  }
+  if (includesAny(normalized, ["写", "生成", "create", "build", "draft", "整理"])) {
+    return normalized.length > 28;
+  }
+  return false;
+}
+
+function needsLightToolAnswer(goalAnchor: string): boolean {
+  const normalized = goalAnchor.toLowerCase().trim();
+  return includesAny(normalized, [
+    "读这个网页",
+    "读取这个网页",
+    "总结这个网页",
+    "看这个网页",
+    "读取文件",
+    "读文件",
+    "总结文件",
+    "搜一下",
+    "查一下",
+    "read this page",
+    "summarize this page",
+    "read this file",
+    "summarize this file",
+    "search this topic",
+  ]);
+}
+
+function buildFakeReportTitle(goalAnchor: string): string {
+  const text = goalAnchor.trim();
+  if (text.length === 0) {
+    return "AgentArbor 工作会话结果报告";
+  }
+  if (includesAny(text.toLowerCase(), ["仓库", "项目", "project", "repo", "代码", "codebase"])) {
+    return `${truncate(text, 24)}：项目分析与优化建议`;
+  }
+  return `${truncate(text, 28)}：任务结果报告`;
+}
+
+function isFollowUpQuestion(value: string): boolean {
+  if (value.length > 80) {
+    return false;
+  }
+  return includesAny(value, [
+    "继续解释",
+    "继续说",
+    "展开说",
+    "详细说",
+    "再说说",
+    "解释一下",
+    "什么意思",
+    "为什么",
+    "那你",
+    "这个",
+    "上面",
+    "刚才",
+    "继续",
+    "more detail",
+    "explain more",
+    "go on",
+  ]);
 }
 
 function includesAny(value: string, needles: readonly string[]): boolean {

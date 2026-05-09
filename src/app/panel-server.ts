@@ -8,13 +8,14 @@ import {
   type UndergroundAiMode,
 } from "./intelligence-channel-factory.js";
 import {
-  runCognitiveWorkSession,
-  type CognitiveWorkSessionRuntimeContext,
-} from "./cognitive-work-session.js";
-import {
   runDesktopChatSession,
   type DesktopChatSessionRuntimeContext,
 } from "./desktop-chat-session.js";
+import {
+  explainDesktopIntentDecision,
+  type DesktopIntentDecision,
+  type DesktopIntentRoute,
+} from "./desktop-intent-router.js";
 import {
   runUndergroundDirectionSessionWithIntelligence,
   type UndergroundDirectionSessionRuntimeContext,
@@ -47,11 +48,15 @@ import {
 } from "./panel-run-read-model.js";
 import {
   createDesktopChatCanvas,
+  createUndergroundDeepCanvas,
   createPanelRunCanvas,
-  createWorkSessionCanvas,
   type PanelRunCanvasReadModel,
 } from "./panel-canvas-read-model.js";
-import { PanelRunJobStore, type PanelRunJob, type PanelRunKind } from "./panel-run-jobs.js";
+import { PanelRunJobStore, type PanelDesktopRunMode, type PanelRunJob, type PanelRunKind } from "./panel-run-jobs.js";
+import {
+  PanelConversationStore,
+  type PanelConversationReadModel,
+} from "./panel-conversations.js";
 import type { EventLogEntry } from "../kernel/events/in-memory-event-log.js";
 import type { AgentRunTree } from "../domain/underground/index.js";
 import {
@@ -59,6 +64,12 @@ import {
   TaskSoilInputValidationError,
   type DesktopTaskSoilInput,
 } from "./task-soil-workspace.js";
+import { createMinimalRuntime } from "./runtime.js";
+import {
+  friendlyUserFacingFailureText,
+  sanitizeAssistantVisibleText,
+  sanitizeConversationHistoryText,
+} from "./visible-text-safety.js";
 
 export type PanelServerOptions = {
   readonly host?: string;
@@ -78,6 +89,7 @@ export type PanelProviderFetch = (
 ) => Promise<{
   readonly ok: boolean;
   readonly status: number;
+  readonly body?: unknown;
   readonly json: () => Promise<unknown>;
   readonly text?: () => Promise<string>;
 }>;
@@ -93,11 +105,13 @@ type PanelRuntime = {
   readonly configDirectory?: string;
   readonly providerFetch?: PanelProviderFetch;
   readonly runJobs: PanelRunJobStore;
+  readonly conversations: PanelConversationStore;
 };
 
 type PanelRunResponse = {
   readonly ok: true;
   readonly runKind: PanelRunKind;
+  readonly runMode: PanelDesktopRunMode;
   readonly status: "completed";
   readonly config: SanitizedModelProviderConfig;
   readonly informationAccess: SanitizedInformationAccessConfig;
@@ -111,6 +125,30 @@ type PanelRunResponse = {
   readonly canvas?: PanelRunCanvasReadModel;
 };
 
+type PanelRunJobResponse = {
+  readonly ok: true;
+  readonly runId: string;
+  readonly runKind: PanelRunKind;
+  readonly runMode: PanelDesktopRunMode;
+  readonly status: PanelRunStatus;
+  readonly config: SanitizedModelProviderConfig;
+  readonly informationAccess: SanitizedInformationAccessConfig;
+  readonly trace: PanelRunTraceReadModel;
+  readonly tracking: PanelRunTrackingReadModel;
+  readonly transcript: PanelRunTranscript;
+  readonly workNotes: PanelRunTranscript["workNotes"];
+  readonly streamCursor: PanelRunStreamCursor;
+  readonly summary?: UndergroundDemoSummary | { readonly ai: UndergroundDemoSummary["ai"] };
+  readonly observation?: PanelObservationReadModel;
+  readonly canvas?: PanelRunCanvasReadModel;
+  readonly route?: PanelDesktopRouteReadModel;
+  readonly error?: {
+    readonly code: string;
+    readonly message: string;
+  };
+  readonly conversation?: PanelConversationReadModel;
+};
+
 type PanelRunExecutionResult = {
   readonly summary?: UndergroundDemoSummary;
   readonly observation?: PanelObservationReadModel;
@@ -119,13 +157,19 @@ type PanelRunExecutionResult = {
   readonly canvas?: PanelRunCanvasReadModel;
 };
 
+type PanelDesktopRouteReadModel = {
+  readonly route: DesktopIntentRoute;
+  readonly reason: string;
+  readonly title: string;
+  readonly summary: string;
+};
+
 type PanelToolsConfig = {
   readonly webSearch: SanitizedWebSearchConfig;
 };
 
 type PanelRuntimeReadyContext =
   | UndergroundDirectionSessionRuntimeContext
-  | CognitiveWorkSessionRuntimeContext
   | DesktopChatSessionRuntimeContext;
 
 class PanelHttpError extends Error {
@@ -175,6 +219,7 @@ function createPanelRuntime(options: PanelServerOptions): PanelRuntime {
       configDirectory: options.configDirectory,
       providerFetch: options.providerFetch,
       runJobs: new PanelRunJobStore(),
+      conversations: new PanelConversationStore(),
     };
   }
   const local = createLocalConfigCenter({ configDirectory: options.configDirectory });
@@ -183,6 +228,7 @@ function createPanelRuntime(options: PanelServerOptions): PanelRuntime {
     configDirectory: local.configDirectory,
     providerFetch: options.providerFetch,
     runJobs: new PanelRunJobStore(),
+    conversations: new PanelConversationStore(),
   };
 }
 
@@ -288,6 +334,44 @@ async function handlePanelRequest(
     return;
   }
 
+  if (request.method === "GET" && url.pathname === "/api/conversations") {
+    writeJson(response, 200, {
+      ok: true,
+      conversations: runtime.conversations.list(),
+    });
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/conversations") {
+    await handleConversationMessageRequest(runtime, request, response, undefined);
+    return;
+  }
+
+  const conversationMatch = /^\/api\/conversations\/([^/]+)$/.exec(url.pathname);
+  if (request.method === "GET" && conversationMatch !== null) {
+    const conversationId = decodeURIComponent(conversationMatch[1] ?? "");
+    const conversation = runtime.conversations.getReadModel(conversationId);
+    if (conversation === undefined) {
+      throw new PanelHttpError(404, "conversation_not_found", "未找到对话。");
+    }
+    writeJson(response, 200, {
+      ok: true,
+      conversation,
+    });
+    return;
+  }
+
+  const conversationMessagesMatch = /^\/api\/conversations\/([^/]+)\/messages$/.exec(url.pathname);
+  if (request.method === "POST" && conversationMessagesMatch !== null) {
+    await handleConversationMessageRequest(
+      runtime,
+      request,
+      response,
+      decodeURIComponent(conversationMessagesMatch[1] ?? "")
+    );
+    return;
+  }
+
   const runMatch = /^\/api\/underground\/runs\/([^/]+)$/.exec(url.pathname);
   if (request.method === "GET" && runMatch !== null) {
     handleGetRunRequest(runtime, decodeURIComponent(runMatch[1] ?? ""), "underground", response);
@@ -334,7 +418,7 @@ async function handleRunRequest(
   const runInput = parseRunInput(body, defaultAiModeForRunKind(runKind, config.defaultAiMode));
 
   try {
-    const run = await runForPanel(runtime, runKind, runInput.goal, runInput.aiMode, runInput.taskSoilInput);
+    const run = await runForPanel(runtime, runKind, runInput.goal, runInput.aiMode, runInput.taskSoilInput, runInput.runMode);
     const currentConfig = await runtime.configCenter.getModelProviderConfig();
     const currentInformationAccess = await runtime.configCenter.getInformationAccessConfig();
     const trace = createPanelRunTrace({ status: "completed", eventEntries: run.eventEntries });
@@ -348,20 +432,22 @@ async function handleRunRequest(
       agentRunTree: run.agentRunTree,
       eventEntries: run.eventEntries,
     });
+    const responseRunId = run.observation?.traceId ?? canvasTraceId(run.canvas) ?? "panel-sync-run";
     const transcript = createPanelRunTranscript({
-      runId: run.observation?.traceId ?? run.canvas?.taskSoil.traceId ?? "panel-sync-run",
+      runId: responseRunId,
       status: "completed",
       eventEntries: run.eventEntries,
       summary: run.summary,
       observation: run.observation,
       agentRunTree: run.agentRunTree,
+      desktopMode: runKind === "desktop" ? runInput.runMode : undefined,
       createdAt: run.eventEntries[0]?.recordedAt ?? new Date(0).toISOString(),
       updatedAt: run.eventEntries.at(-1)?.recordedAt ?? new Date(0).toISOString(),
     });
-    const responseRunId = run.observation?.traceId ?? run.canvas?.taskSoil.traceId ?? "panel-sync-run";
     writeJson(response, 200, {
       ok: true,
       runKind,
+      runMode: runInput.runMode,
       status: "completed",
       config: currentConfig,
       informationAccess: currentInformationAccess,
@@ -414,15 +500,83 @@ async function handleStartRunRequest(
   const runInput = parseRunInput(body, defaultAiModeForRunKind(runKind, config.defaultAiMode));
   const job = runtime.runJobs.create({
     runKind,
+    runMode: runInput.runMode,
     goal: runInput.goal,
     aiMode: runInput.aiMode,
+    routeDecision: undefined,
     taskSoilInput: runInput.taskSoilInput,
     config,
     informationAccess,
   });
 
-  writeJson(response, 202, createPanelRunJobResponse(job));
+  writeJson(response, 202, createPanelRunJobResponse(runtime, job));
   schedulePanelRunJob(runtime, job.runId);
+}
+
+async function handleConversationMessageRequest(
+  runtime: PanelRuntime,
+  request: IncomingMessage,
+  response: ServerResponse,
+  conversationId: string | undefined
+): Promise<void> {
+  const body = await readJsonBody(request);
+  const config = await runtime.configCenter.getModelProviderConfig();
+  const informationAccess = await runtime.configCenter.getInformationAccessConfig();
+  const runInput = parseRunInput(body, defaultAiModeForRunKind("desktop", config.defaultAiMode));
+  const runAfterRunId = runtime.conversations.nextQueuePredecessor(conversationId);
+  const shouldQueue = runAfterRunId !== undefined;
+  const mergedTaskSoilInput = shouldQueue
+    ? runInput.taskSoilInput
+    : buildConversationTaskSoilInput(runtime, conversationId, runInput.taskSoilInput);
+
+  let started;
+  try {
+    started = runtime.conversations.startDesktopMessage({
+      goal: runInput.goal,
+      taskSoilInput: mergedTaskSoilInput,
+      conversationId,
+      queueBehindRunId: runAfterRunId,
+    });
+  } catch (error) {
+    const message = "无法创建对话消息。";
+    throw new PanelHttpError(409, "conversation_busy", message);
+  }
+
+  const job = runtime.runJobs.create({
+    runKind: "desktop",
+    runMode: runInput.runMode,
+    goal: runInput.goal,
+    aiMode: runInput.aiMode,
+    conversationId: started.conversation.conversationId,
+    assistantTurnId: started.assistantTurn.turnId,
+    runAfterRunId,
+    routeDecision: undefined,
+    taskSoilInput: mergedTaskSoilInput,
+    config,
+    informationAccess,
+  });
+  if (shouldQueue) {
+    runtime.conversations.queueRun({
+      conversationId: started.conversation.conversationId,
+      assistantTurnId: started.assistantTurn.turnId,
+      runId: job.runId,
+    });
+  } else {
+    runtime.conversations.attachRun({
+      conversationId: started.conversation.conversationId,
+      assistantTurnId: started.assistantTurn.turnId,
+      runId: job.runId,
+    });
+  }
+
+  writeJson(response, 202, {
+    ok: true,
+    conversation: runtime.conversations.getReadModel(started.conversation.conversationId),
+    run: createPanelRunJobResponse(runtime, job),
+  });
+  if (!shouldQueue) {
+    schedulePanelRunJob(runtime, job.runId);
+  }
 }
 
 function handleGetRunRequest(
@@ -435,7 +589,7 @@ function handleGetRunRequest(
   if (job === undefined || job.runKind !== expectedRunKind) {
     throw new PanelHttpError(404, "run_not_found", runNotFoundMessage(expectedRunKind));
   }
-  writeJson(response, 200, createPanelRunJobResponse(job));
+  writeJson(response, 200, createPanelRunJobResponse(runtime, job));
 }
 
 function handleGetRunStreamRequest(
@@ -515,9 +669,16 @@ async function executePanelRunJob(runtime: PanelRuntime, runId: string): Promise
   if (job === undefined) {
     return;
   }
+  if (job.conversationId !== undefined && job.runAfterRunId !== undefined) {
+    runtime.conversations.activateQueuedRun(job.conversationId, runId);
+  }
   runtime.runJobs.markRunning(runId);
   try {
-    const run = await runForPanel(runtime, job.runKind, job.goal, job.aiMode, job.taskSoilInput, {
+    const taskSoilInput =
+      job.conversationId !== undefined && job.runAfterRunId !== undefined
+        ? buildConversationTaskSoilInput(runtime, job.conversationId, job.taskSoilInput)
+        : job.taskSoilInput;
+    const run = await runForPanel(runtime, job.runKind, job.goal, job.aiMode, taskSoilInput, job.runMode, {
       onRuntimeReady: (context) => {
         runtime.runJobs.attachRuntime({
           runId,
@@ -540,6 +701,11 @@ async function executePanelRunJob(runtime: PanelRuntime, runId: string): Promise
       agentRunTree: run.agentRunTree,
       canvas: run.canvas,
     });
+    const completedJob = runtime.runJobs.get(runId);
+    if (completedJob !== undefined) {
+      syncConversationTurnForJob(runtime, completedJob);
+      scheduleNextQueuedConversationRun(runtime, completedJob);
+    }
   } catch (error) {
     const config = await runtime.configCenter.getModelProviderConfig().catch(() => job.config);
     const informationAccess = await runtime.configCenter.getInformationAccessConfig().catch(() => job.informationAccess);
@@ -556,6 +722,11 @@ async function executePanelRunJob(runtime: PanelRuntime, runId: string): Promise
           ai: createConfigurationFailedAiSummary(error.issue.summaryInput, error, message),
         },
       });
+      const failedJob = runtime.runJobs.get(runId);
+      if (failedJob !== undefined) {
+        syncConversationTurnForJob(runtime, failedJob);
+        scheduleNextQueuedConversationRun(runtime, failedJob);
+      }
       return;
     }
     if (error instanceof PanelHttpError) {
@@ -564,9 +735,14 @@ async function executePanelRunJob(runtime: PanelRuntime, runId: string): Promise
         informationAccess,
         error: {
           code: error.code,
-          message: error.message,
+          message: panelJobErrorMessage(error),
         },
       });
+      const failedJob = runtime.runJobs.get(runId);
+      if (failedJob !== undefined) {
+        syncConversationTurnForJob(runtime, failedJob);
+        scheduleNextQueuedConversationRun(runtime, failedJob);
+      }
       return;
     }
     const eventEntries = job.runtime?.eventLog.list() ?? [];
@@ -576,11 +752,17 @@ async function executePanelRunJob(runtime: PanelRuntime, runId: string): Promise
       informationAccess,
       error: {
         code: "panel_internal_error",
-        message:
+        message: friendlyUserFacingFailureText(
           modelFailureMessage ??
-          (job.runKind === "desktop" ? "Desktop Shell 运行 job 失败。" : "地下兼容运行 job 失败。"),
+            (job.runKind === "desktop" ? "Desktop Shell 运行 job 失败。" : "地下兼容运行 job 失败。")
+        ),
       },
     });
+    const failedJob = runtime.runJobs.get(runId);
+    if (failedJob !== undefined) {
+      syncConversationTurnForJob(runtime, failedJob);
+      scheduleNextQueuedConversationRun(runtime, failedJob);
+    }
   }
 }
 
@@ -590,26 +772,22 @@ function schedulePanelRunJob(runtime: PanelRuntime, runId: string): void {
   });
 }
 
-function createPanelRunJobResponse(job: PanelRunJob): {
-  readonly ok: true;
-  readonly runId: string;
-  readonly runKind: PanelRunKind;
-  readonly status: PanelRunStatus;
-  readonly config: SanitizedModelProviderConfig;
-  readonly informationAccess: SanitizedInformationAccessConfig;
-  readonly trace: PanelRunTraceReadModel;
-  readonly tracking: PanelRunTrackingReadModel;
-  readonly transcript: PanelRunTranscript;
-  readonly workNotes: PanelRunTranscript["workNotes"];
-  readonly streamCursor: PanelRunStreamCursor;
-  readonly summary?: UndergroundDemoSummary | { readonly ai: UndergroundDemoSummary["ai"] };
-  readonly observation?: PanelObservationReadModel;
-  readonly canvas?: PanelRunCanvasReadModel;
-  readonly error?: {
-    readonly code: string;
-    readonly message: string;
-  };
-} {
+function scheduleNextQueuedConversationRun(runtime: PanelRuntime, completedJob: PanelRunJob): void {
+  if (completedJob.conversationId === undefined) {
+    return;
+  }
+  const nextRunId = runtime.conversations.peekNextQueuedRunId(completedJob.conversationId);
+  if (nextRunId === undefined) {
+    return;
+  }
+  const nextJob = runtime.runJobs.get(nextRunId);
+  if (nextJob === undefined || nextJob.status !== "pending") {
+    return;
+  }
+  schedulePanelRunJob(runtime, nextRunId);
+}
+
+function createPanelRunJobResponse(runtime: PanelRuntime, job: PanelRunJob): PanelRunJobResponse {
   const eventEntries = job.runtime?.eventLog.list() ?? [];
   const config = job.completed?.config ?? job.failed?.config ?? job.config;
   const informationAccess = job.completed?.informationAccess ?? job.failed?.informationAccess ?? job.informationAccess;
@@ -636,6 +814,8 @@ function createPanelRunJobResponse(job: PanelRunJob): {
       summary,
       observation,
       agentRunTree,
+      routeDecision: job.routeDecision,
+      desktopMode: job.runKind === "desktop" ? job.runMode : undefined,
       createdAt: job.createdAt,
       updatedAt: job.updatedAt,
     }),
@@ -646,6 +826,7 @@ function createPanelRunJobResponse(job: PanelRunJob): {
     ok: true,
     runId: job.runId,
     runKind: job.runKind,
+    runMode: job.runMode,
     status: job.status,
     config,
     informationAccess,
@@ -660,7 +841,86 @@ function createPanelRunJobResponse(job: PanelRunJob): {
     summary: job.completed?.summary ?? job.failed?.summary,
     observation: job.completed?.observation,
     canvas: job.completed?.canvas,
+    route: routeReadModel(job.routeDecision),
     error: job.failed?.error,
+    conversation:
+      job.conversationId === undefined
+        ? undefined
+        : runtime.conversations.getReadModel(job.conversationId),
+  };
+}
+
+function syncConversationTurnForJob(runtime: PanelRuntime, job: PanelRunJob): void {
+  if (job.conversationId === undefined || job.assistantTurnId === undefined) {
+    return;
+  }
+  const response = createPanelRunJobResponse(runtime, job);
+  if (response.status === "failed") {
+    runtime.conversations.completeAssistantTurn({
+      conversationId: job.conversationId,
+      assistantTurnId: job.assistantTurnId,
+      runId: job.runId,
+      title: "这次没有完成",
+      content: friendlyAssistantFailureText(response.error?.message),
+      status: "failed",
+    });
+    return;
+  }
+  const turn = assistantTurnFromResponse(response);
+  runtime.conversations.completeAssistantTurn({
+    conversationId: job.conversationId,
+    assistantTurnId: job.assistantTurnId,
+    runId: job.runId,
+    title: turn.title,
+    content: turn.content,
+    status: "completed",
+  });
+}
+
+function assistantTurnFromResponse(
+  response: PanelRunJobResponse
+): { readonly title: string; readonly content: string } {
+  const canvas = response.canvas;
+  if (canvas?.kind === "desktop_chat_canvas" && canvas.chat.answer !== undefined) {
+    return {
+      title: "已回答",
+      content: sanitizeAssistantVisibleText(canvas.chat.answer.answer),
+    };
+  }
+  if (canvas?.kind === "desktop_chat_canvas" && canvas.chat.upgradeRequest !== undefined) {
+    return {
+      title: "建议使用深度模式",
+      content: sanitizeAssistantVisibleText(`这条消息适合进入深度模式：${canvas.chat.upgradeRequest.reason}`),
+    };
+  }
+  if (canvas?.kind === "work_session_canvas" && canvas.workSession.directAnswer !== undefined) {
+    return {
+      title: "已回答",
+      content: sanitizeAssistantVisibleText(canvas.workSession.directAnswer.answer),
+    };
+  }
+  if (canvas?.kind === "work_session_canvas" && canvas.workSession.report !== undefined) {
+    const report = canvas.workSession.report;
+    const summary = report.decisionSummary.trim().length > 0 ? report.decisionSummary : `已生成：${report.title}`;
+    const nextAction = report.nextActions[0];
+    return {
+      title: "结果已生成",
+      content: sanitizeAssistantVisibleText(nextAction === undefined ? summary : `${summary}\n下一步：${nextAction}`),
+    };
+  }
+  if (canvas?.kind === "underground_deep_canvas") {
+    const summary = canvas.underground.recommendedDirection.reason.trim().length > 0
+      ? canvas.underground.recommendedDirection.reason
+      : canvas.underground.convergenceSummary;
+    const uncertainty = canvas.underground.uncertainty[0];
+    return {
+      title: canvas.underground.status === "approved_package_created" ? "方向已形成" : "深度模式已停止",
+      content: sanitizeAssistantVisibleText(uncertainty === undefined ? summary : `${summary}\n不确定性：${uncertainty}`),
+    };
+  }
+  return {
+    title: "结果已生成",
+    content: "结果已经整理完成。",
   };
 }
 
@@ -671,6 +931,8 @@ function syncPanelRunStreamEventsForJob(job: PanelRunJob): readonly PanelRunStre
     eventEntries: job.runtime?.eventLog.list() ?? [],
     summary: job.completed?.summary ?? job.failed?.summary,
     observation: job.completed?.observation,
+    routeDecision: job.routeDecision,
+    desktopMode: job.runKind === "desktop" ? job.runMode : undefined,
     createdAt: job.createdAt,
     updatedAt: job.updatedAt,
     error: job.failed?.error,
@@ -686,6 +948,13 @@ function appendPanelRunStreamEvent(job: PanelRunJob, event: Omit<PanelRunStreamE
     ? job.streamEvents.find((item) => item.eventId === event.eventId)
     : undefined;
   if (existing !== undefined) {
+    if (event.type === "run.started") {
+      Object.assign(existing as { summary?: string; agentLabel?: string; status?: PanelRunStreamEvent["status"] }, {
+        summary: event.summary,
+        agentLabel: event.agentLabel,
+        status: event.status,
+      });
+    }
     return existing;
   }
   if (event.type === "model.output.delta") {
@@ -724,12 +993,20 @@ function appendLiveModelOutputDelta(runtime: PanelRuntime, runId: string, delta:
   if (delta.delta.length === 0) {
     return;
   }
+  const job = runtime.runJobs.get(runId);
+  if (job === undefined) {
+    return;
+  }
+  const purpose = delta.purpose ?? modelPurposeForRequest(job, delta.requestId);
+  if (!isUserFacingStreamingPurpose(purpose)) {
+    return;
+  }
   runtime.runJobs.appendStreamEvent(runId, {
     eventId: `${runId}:live:model.output.delta:${delta.requestId}:${delta.index}`,
     runId,
     type: "model.output.delta",
     createdAt: delta.createdAt,
-    agentLabel: "模型",
+    agentLabel: "助手",
     delta: delta.delta,
     status: "running",
     sourceRefs: [],
@@ -738,19 +1015,34 @@ function appendLiveModelOutputDelta(runtime: PanelRuntime, runId: string, delta:
   });
 }
 
+function modelPurposeForRequest(job: PanelRunJob, requestId: string): string | undefined {
+  const requested = job.runtime?.eventLog.list().find((entry) => {
+    if (entry.type !== "model.requested") {
+      return false;
+    }
+    return optionalString(asRecord(entry.message.payload).requestId) === requestId;
+  });
+  return requested === undefined ? undefined : optionalString(asRecord(requested.message.payload).purpose);
+}
+
+function isUserFacingStreamingPurpose(purpose: string | undefined): boolean {
+  return purpose === "desktop_chat" || purpose === "work_session_direct_answer";
+}
+
 async function runForPanel(
   runtime: PanelRuntime,
   runKind: PanelRunKind,
   goal: string,
   aiMode: UndergroundAiMode,
   taskSoilInput: DesktopTaskSoilInput | undefined,
+  runMode: PanelDesktopRunMode = "agent",
   options: {
     readonly onRuntimeReady?: (context: PanelRuntimeReadyContext) => void;
     readonly onModelOutputDelta?: (delta: ModelOutputDelta) => void;
   } = {}
 ): Promise<PanelRunExecutionResult> {
   return runKind === "desktop"
-    ? runDesktopForPanel(runtime, goal, aiMode, taskSoilInput, options)
+    ? runDesktopForPanel(runtime, goal, aiMode, taskSoilInput, runMode, options)
     : runUndergroundForPanel(runtime, goal, aiMode, options);
 }
 
@@ -759,6 +1051,7 @@ async function runDesktopForPanel(
   goal: string,
   aiMode: UndergroundAiMode,
   taskSoilInput: DesktopTaskSoilInput | undefined,
+  runMode: PanelDesktopRunMode,
   options: {
     readonly onRuntimeReady?: (context: PanelRuntimeReadyContext) => void;
     readonly onModelOutputDelta?: (delta: ModelOutputDelta) => void;
@@ -783,15 +1076,52 @@ async function runDesktopForPanel(
     throw createUndergroundAiDisabledConfigurationError(aiConfig.summaryInput);
   }
 
-  const createToolCenter = await createConfiguredToolCenterFactory(runtime.configCenter, {
-    fetch: runtime.providerFetch,
-  });
+  if (runMode === "deep") {
+    const createToolCenter = await createConfiguredToolCenterFactory(runtime.configCenter, {
+      fetch: runtime.providerFetch,
+    });
+    const result = await runUndergroundDirectionSessionWithIntelligence(goal, {
+      createIntelligenceChannel: aiConfig.createIntelligenceChannel,
+      createToolCenter,
+      onRuntimeReady: options.onRuntimeReady,
+    });
+    const summary = createUndergroundDemoSummary(result, undefined, aiConfig.summaryInput);
+    const observation = toPanelObservation(result.observationSnapshot);
+    const eventEntries = result.runtime.eventLog.list();
+    const transcript = createPanelRunTranscript({
+      runId: result.traceId,
+      status: "completed",
+      eventEntries,
+      summary,
+      observation,
+      agentRunTree: result.undergroundOrchestratorRun.agentRunTree,
+      desktopMode: "deep",
+      createdAt: eventEntries[0]?.recordedAt ?? new Date(0).toISOString(),
+      updatedAt: eventEntries.at(-1)?.recordedAt ?? new Date(0).toISOString(),
+    });
+
+    return {
+      summary,
+      observation,
+      eventEntries,
+      agentRunTree: result.undergroundOrchestratorRun.agentRunTree,
+      canvas: createUndergroundDeepCanvas({
+        result,
+        transcript,
+      }),
+    };
+  }
+
   const chat = await runDesktopChatSession(goal, {
     aiMode,
     createIntelligenceChannel: aiConfig.createIntelligenceChannel,
+    createToolCenter: await createConfiguredToolCenterFactory(runtime.configCenter, {
+      fetch: runtime.providerFetch,
+    }),
     taskSoilInput,
     onRuntimeReady: options.onRuntimeReady,
     onModelOutputDelta: options.onModelOutputDelta,
+    allowWorkSessionUpgrade: false,
   });
   if (chat.status === "answered") {
     const eventEntries = chat.runtime.eventLog.list();
@@ -799,6 +1129,7 @@ async function runDesktopForPanel(
       runId: chat.traceId,
       status: "completed",
       eventEntries,
+      desktopMode: "agent",
       createdAt: eventEntries[0]?.recordedAt ?? new Date(0).toISOString(),
       updatedAt: eventEntries.at(-1)?.recordedAt ?? new Date(0).toISOString(),
     });
@@ -810,36 +1141,27 @@ async function runDesktopForPanel(
       }),
     };
   }
-  if (chat.status === "failed" || chat.status === "stopped") {
-    throw new PanelHttpError(500, "desktop_chat_failed", chat.failureMessage ?? "桌面助手没有形成回答。");
+
+  if (chat.status === "upgrade_requested") {
+    const eventEntries = chat.runtime.eventLog.list();
+    const transcript = createPanelRunTranscript({
+      runId: chat.traceId,
+      status: "completed",
+      eventEntries,
+      desktopMode: "agent",
+      createdAt: eventEntries[0]?.recordedAt ?? new Date(0).toISOString(),
+      updatedAt: eventEntries.at(-1)?.recordedAt ?? new Date(0).toISOString(),
+    });
+    return {
+      eventEntries,
+      canvas: createDesktopChatCanvas({
+        result: chat,
+        transcript,
+      }),
+    };
   }
 
-  const workSessionGoal = chat.upgradeRequest?.goal ?? goal;
-  const result = await runCognitiveWorkSession(workSessionGoal, {
-    aiMode,
-    createIntelligenceChannel: aiConfig.createIntelligenceChannel,
-    taskSoilInput,
-    createToolCenter,
-    onRuntimeReady: options.onRuntimeReady,
-  });
-  const eventEntries = result.runtime.eventLog.list();
-  const transcript = createPanelRunTranscript({
-    runId: result.traceId,
-    status: result.status === "completed" ? "completed" : "failed",
-    eventEntries,
-    agentRunTree: result.agentRunTree,
-    createdAt: eventEntries[0]?.recordedAt ?? new Date(0).toISOString(),
-    updatedAt: eventEntries.at(-1)?.recordedAt ?? new Date(0).toISOString(),
-  });
-
-  return {
-    eventEntries,
-    agentRunTree: result.agentRunTree,
-    canvas: createWorkSessionCanvas({
-      result,
-      transcript,
-    }),
-  };
+  throw new PanelHttpError(500, "desktop_chat_failed", chat.failureMessage ?? "桌面助手没有形成回答。");
 }
 
 async function runUndergroundForPanel(
@@ -960,6 +1282,7 @@ function informationSourcePreferenceOrUndefined(
 function parseRunInput(raw: unknown, defaultAiMode: UndergroundAiMode): {
   readonly goal: string;
   readonly aiMode: UndergroundAiMode;
+  readonly runMode: PanelDesktopRunMode;
   readonly taskSoilInput?: DesktopTaskSoilInput;
 } {
   const record = asRecord(raw);
@@ -979,8 +1302,22 @@ function parseRunInput(raw: unknown, defaultAiMode: UndergroundAiMode): {
   return {
     goal,
     aiMode: parseOptionalAiMode(record.aiMode, "AI 模式无效。") ?? defaultAiMode,
+    runMode: parseOptionalDesktopRunMode(record.runMode) ?? "agent",
     taskSoilInput,
   };
+}
+
+function parseOptionalDesktopRunMode(value: unknown): PanelDesktopRunMode | undefined {
+  if (value === undefined || value === null || value === "") {
+    return undefined;
+  }
+  if (value === "agent" || value === "deep") {
+    return value;
+  }
+  if (value === "work_session") {
+    return "deep";
+  }
+  throw new PanelHttpError(400, "invalid_run_mode", "运行模式无效。");
 }
 
 function defaultAiModeForRunKind(runKind: PanelRunKind, configuredDefault: UndergroundAiMode): UndergroundAiMode {
@@ -1110,6 +1447,82 @@ function modelRequestedPayloadFor(eventEntries: readonly EventLogEntry[], reques
 
 function runNotFoundMessage(runKind: PanelRunKind): string {
   return runKind === "desktop" ? "未找到 Desktop Shell 运行 job。" : "未找到地下兼容运行 job。";
+}
+
+function routeReadModel(decision: DesktopIntentDecision | undefined): PanelDesktopRouteReadModel | undefined {
+  if (decision === undefined) {
+    return undefined;
+  }
+  const explanation = explainDesktopIntentDecision(decision);
+  return {
+    route: decision.route,
+    reason: decision.reason,
+    title: explanation.title,
+    summary: explanation.summary,
+  };
+}
+
+function canvasTraceId(canvas: PanelRunCanvasReadModel | undefined): string | undefined {
+  if (canvas === undefined) {
+    return undefined;
+  }
+  if (canvas.kind === "underground_deep_canvas") {
+    return canvas.task.traceId;
+  }
+  return canvas.taskSoil.traceId;
+}
+
+function buildConversationTaskSoilInput(
+  runtime: PanelRuntime,
+  conversationId: string | undefined,
+  taskSoilInput: DesktopTaskSoilInput | undefined
+): DesktopTaskSoilInput | undefined {
+  if (conversationId === undefined) {
+    return taskSoilInput;
+  }
+  const conversation = runtime.conversations.getReadModel(conversationId);
+  if (conversation === undefined) {
+    return taskSoilInput;
+  }
+  const historyPreview = conversation.turns
+    .slice(-8)
+    .map((turn) => {
+      const content = sanitizeConversationHistoryText(turn.content);
+      return content.length > 0 ? `${turn.role === "user" ? "你" : "助手"}：${content}` : "";
+    })
+    .filter((value) => value.length > 0)
+    .join("\n");
+  if (historyPreview.length === 0) {
+    return taskSoilInput;
+  }
+  const historyRef = {
+    ref: "workspace:conversation-history",
+    kind: "workspace" as const,
+    summary: "当前对话上下文",
+    readonlyPreview: {
+      title: "当前对话",
+      text: historyPreview,
+    },
+  };
+  const contextRefs = [
+    ...(taskSoilInput?.contextRefs ?? []).filter((ref) => ref.ref !== historyRef.ref),
+    historyRef,
+  ];
+  return {
+    contextRefs,
+    permissionBoundaryRefs: taskSoilInput?.permissionBoundaryRefs,
+  };
+}
+
+function friendlyAssistantFailureText(message: string | undefined): string {
+  return friendlyUserFacingFailureText(message);
+}
+
+function panelJobErrorMessage(error: PanelHttpError): string {
+  if (error.code === "desktop_chat_failed" || error.statusCode >= 500) {
+    return friendlyUserFacingFailureText(error.message);
+  }
+  return error.message;
 }
 
 function optionalString(value: unknown): string | undefined {

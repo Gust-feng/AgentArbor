@@ -1,6 +1,7 @@
 import type { SanitizedInformationAccessConfig, SanitizedModelProviderConfig } from "../domain/config/index.js";
 import { createId, nowIso } from "../kernel/id.js";
 import type { UndergroundAiMode } from "./intelligence-channel-factory.js";
+import type { DesktopIntentDecision } from "./desktop-intent-router.js";
 import type { PanelRunCanvasReadModel } from "./panel-canvas-read-model.js";
 import type { PanelObservationReadModel, PanelRunStatus, PanelRunStreamEvent } from "./panel-run-read-model.js";
 import type { MinimalRuntime } from "./runtime.js";
@@ -9,6 +10,7 @@ import type { UndergroundDemoSummary } from "./underground-demo-summary.js";
 import type { AgentRunTree } from "../domain/underground/index.js";
 
 export type PanelRunKind = "desktop" | "underground";
+export type PanelDesktopRunMode = "agent" | "deep";
 
 export type PanelRunCompletedPayload = {
   readonly config: SanitizedModelProviderConfig;
@@ -34,8 +36,13 @@ export type PanelRunFailedPayload = {
 export type PanelRunJob = {
   readonly runId: string;
   readonly runKind: PanelRunKind;
+  readonly runMode: PanelDesktopRunMode;
   readonly goal: string;
   readonly aiMode: UndergroundAiMode;
+  readonly conversationId?: string;
+  readonly assistantTurnId?: string;
+  readonly runAfterRunId?: string;
+  routeDecision?: DesktopIntentDecision;
   readonly taskSoilInput?: DesktopTaskSoilInput;
   readonly createdAt: string;
   status: PanelRunStatus;
@@ -57,8 +64,13 @@ export class PanelRunJobStore {
 
   create(input: {
     readonly runKind: PanelRunKind;
+    readonly runMode?: PanelDesktopRunMode;
     readonly goal: string;
     readonly aiMode: UndergroundAiMode;
+    readonly conversationId?: string;
+    readonly assistantTurnId?: string;
+    readonly runAfterRunId?: string;
+    readonly routeDecision?: DesktopIntentDecision;
     readonly taskSoilInput?: DesktopTaskSoilInput;
     readonly config: SanitizedModelProviderConfig;
     readonly informationAccess: SanitizedInformationAccessConfig;
@@ -67,8 +79,13 @@ export class PanelRunJobStore {
     const job: PanelRunJob = {
       runId: createId("panel-run"),
       runKind: input.runKind,
+      runMode: input.runMode ?? "agent",
       goal: input.goal,
       aiMode: input.aiMode,
+      conversationId: input.conversationId,
+      assistantTurnId: input.assistantTurnId,
+      runAfterRunId: input.runAfterRunId,
+      routeDecision: input.routeDecision,
       taskSoilInput: input.taskSoilInput,
       config: input.config,
       informationAccess: input.informationAccess,
@@ -108,6 +125,12 @@ export class PanelRunJobStore {
     if (job.status === "pending") {
       job.status = "running";
     }
+    job.updatedAt = nowIso();
+  }
+
+  setRouteDecision(runId: string, decision: DesktopIntentDecision): void {
+    const job = this.requireJob(runId);
+    job.routeDecision = decision;
     job.updatedAt = nowIso();
   }
 

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { request } from "node:http";
+import vm from "node:vm";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -16,24 +17,40 @@ test("panel HTML defaults to Simplified Chinese labels and status text", () => {
   );
 
   assert.equal(html.includes("AgentArbor 面板"), true);
-  assert.equal(firstScreenHtml.includes("新建任务"), true);
-  assert.equal(firstScreenHtml.includes("要完成什么？"), true);
+  assert.equal(html.includes("assistant-pending"), true);
+  assert.equal(html.includes("assistant-control-chip"), true);
+  assert.equal(html.includes("我先快速判断"), false);
+  assert.equal(html.includes("正在理解这条消息"), false);
+  assert.equal(html.includes("正在准备回复"), false);
+  assert.equal(html.includes("正在回复"), false);
+  assert.equal(firstScreenHtml.includes("新对话"), true);
+  assert.equal(firstScreenHtml.includes("在忙什么呢？"), true);
   assert.equal(firstScreenHtml.includes("技能"), true);
-  assert.equal(firstScreenHtml.includes("自动化"), true);
-  assert.equal(firstScreenHtml.includes("任务列表"), true);
-  assert.equal(firstScreenHtml.includes("补充材料和权限"), true);
-  assert.equal(firstScreenHtml.includes("材料引用"), true);
-  assert.equal(firstScreenHtml.includes("权限说明"), true);
-  assert.equal(firstScreenHtml.includes("工作会话"), true);
-  assert.equal(firstScreenHtml.includes("分析当前项目的主要问题"), true);
-  assert.equal(firstScreenHtml.includes("待办"), true);
-  assert.equal(firstScreenHtml.includes("上下文"), true);
-  assert.equal(firstScreenHtml.includes("近期活动"), true);
-  assert.equal(firstScreenHtml.includes("等待任务开始"), true);
-  assert.equal(firstScreenHtml.includes("暂无活动。开始任务后，这里会显示正在读取、比较、整理和生成的过程。"), true);
-  assert.equal(firstScreenHtml.includes("输入一个真实任务，必要时补充文件、网页或限制条件。"), true);
+  assert.equal(firstScreenHtml.includes("例行任务"), true);
+  assert.equal(firstScreenHtml.includes("工具"), true);
+  assert.equal(firstScreenHtml.includes("设置"), true);
+  assert.equal(firstScreenHtml.includes("最近对话"), true);
+  assert.equal(firstScreenHtml.includes("附件"), true);
+  assert.equal(firstScreenHtml.includes("文件或网页"), true);
+  assert.equal(firstScreenHtml.includes("使用范围"), true);
+  assert.equal(firstScreenHtml.includes("本地工作"), false);
+  assert.equal(firstScreenHtml.includes("只使用你授权的材料"), false);
+  assert.equal(firstScreenHtml.includes("任务列表"), false);
+  assert.equal(firstScreenHtml.includes("材料和权限"), false);
+  assert.equal(firstScreenHtml.includes("材料引用"), false);
+  assert.equal(firstScreenHtml.includes("权限说明"), false);
+  assert.equal(firstScreenHtml.includes("工作会话"), false);
+  assert.equal(firstScreenHtml.includes("问任何问题，或交给我一个任务"), true);
+  assert.equal(firstScreenHtml.includes("开始对话后，这里会显示你的问题和我的回答。"), false);
+  assert.equal(firstScreenHtml.includes("待办"), false);
+  assert.equal(firstScreenHtml.includes("上下文"), false);
+  assert.equal(firstScreenHtml.includes("证据"), false);
+  assert.equal(firstScreenHtml.includes("近期活动"), false);
+  assert.equal(firstScreenHtml.includes("等待任务开始"), false);
+  assert.equal(firstScreenHtml.includes("暂无活动。开始任务后，这里会显示正在读取、比较、整理和生成的过程。"), false);
+  assert.equal(firstScreenHtml.includes("输入一个真实任务，必要时补充文件、网页或限制条件。"), false);
   assert.equal(firstScreenHtml.includes("Code"), false);
-  assert.equal(html.includes('<aside class="context-pane"'), true);
+  assert.equal(html.includes('<aside class="context-pane"'), false);
   assert.equal(html.includes('<aside class="developer-drawer"'), true);
   assert.equal(html.includes("需要确认"), true);
   assert.equal(html.includes("证据"), true);
@@ -45,10 +62,10 @@ test("panel HTML defaults to Simplified Chinese labels and status text", () => {
   assert.equal(html.includes("运行树 / 父层综合"), true);
   assert.equal(html.includes("模型服务失败、输出契约失败或配置边界会显示在这里。"), true);
   assert.equal(html.includes("折叠调试区"), true);
-  assert.equal(html.includes("暂无最近任务"), true);
+  assert.equal(html.includes("暂无对话"), true);
   assert.equal(html.includes("模型配置"), true);
   assert.equal(html.includes("工具配置"), true);
-  assert.equal(html.includes("开始任务后会显示在这里。"), true);
+  assert.equal(html.includes("开始后会显示在这里。"), true);
   assert.equal(html.includes("搜索 Provider"), false);
   assert.equal(html.includes("搜索服务"), true);
   assert.equal(html.includes("保存工具配置"), true);
@@ -111,6 +128,26 @@ test("panel HTML defaults to Simplified Chinese labels and status text", () => {
   assert.equal(html.includes("Run Underground"), false);
   assert.equal(html.includes("Save Config"), false);
   assert.equal(html.includes("key configured"), false);
+  assert.equal(html.includes("workspace:conversation-history"), true);
+});
+
+test("panel inline script remains syntactically valid in generated HTML", () => {
+  const html = createPanelHtml();
+  const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1];
+  assert.ok(script);
+  assert.doesNotThrow(() => new vm.Script(script));
+});
+
+test("panel inline failure text does not remap provider failures to missing model config", () => {
+  const html = createPanelHtml();
+  const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1] ?? "";
+  const providerFailureGuard = script.indexOf('text.includes("模型服务这次没有返回可用结果")');
+  const missingModelGuard = script.indexOf('lower.includes("missing_model")');
+
+  assert.notEqual(providerFailureGuard, -1);
+  assert.notEqual(missingModelGuard, -1);
+  assert.equal(providerFailureGuard < missingModelGuard, true);
+  assert.equal(script.includes('lower.includes("模型名")'), false);
 });
 
 test("panel config API returns sanitized provider config and never echoes raw API key", async () => {
@@ -366,13 +403,13 @@ test("panel fake AI run exposes model and candidate summaries without model prom
   }
 });
 
-test("desktop async fake run returns Work Session report canvas with child agents and parent synthesis", async () => {
+test("desktop explicit deep mode runs Underground organization and stops at Plan boundary", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-desktop-fake-"));
   const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
   try {
     const start = await requestJson(server.url, "/api/desktop/runs", {
       method: "POST",
-      body: { goal: "Build a Desktop Shell visible Work Session report.", aiMode: "fake" },
+      body: { goal: "Build a Desktop Shell visible deep mode direction.", aiMode: "fake", runMode: "deep" },
     });
     const completed = await waitForRun(
       server.url,
@@ -384,34 +421,41 @@ test("desktop async fake run returns Work Session report canvas with child agent
 
     assert.equal(start.status, 202);
     assert.equal(start.body.runKind, "desktop");
+    assert.equal(start.body.runMode, "deep");
+    assert.equal(start.body.route, undefined);
     assert.equal(completed.body.runKind, "desktop");
-    assert.equal(completed.body.canvas.kind, "work_session_canvas");
-    assert.equal(completed.body.canvas.taskSoil.goalSummary.includes("Desktop Shell visible Work Session report"), true);
-    assert.equal(completed.body.canvas.taskSoil.contextRefs.length > 0, true);
-    assert.equal(completed.body.canvas.taskSoil.permissionBoundaryRefs.length > 0, true);
-    assert.equal(completed.body.canvas.workSession.status, "completed");
-    assert.equal(completed.body.canvas.workSession.artifact.artifactId.length > 0, true);
-    assert.equal(completed.body.canvas.workSession.report.title.length > 0, true);
-    assert.equal(completed.body.canvas.workSession.report.keyFindings.length > 0, true);
-    assert.equal(completed.body.canvas.workSession.report.recommendations.length > 0, true);
-    assert.equal(completed.body.canvas.workSession.report.evidenceRefs.length > 0, true);
-    assert.equal(completed.body.canvas.workSession.report.keyFindings.some((finding: string) => finding.includes("桌面主线")), true);
-    assert.equal(completed.body.canvas.workSession.report.decisionSummary.includes("父层综合"), true);
-    assert.equal(completed.body.transcript.events.some((event: { summary: string }) => event.summary.includes("正在整理上下文")), true);
+    assert.equal(completed.body.runMode, "deep");
+    assert.equal(completed.body.route, undefined);
+    assert.equal(
+      completed.body.transcript.events.some((event: { type: string; summary?: string }) =>
+        event.type === "run.started" && String(event.summary ?? "").includes("深度模式")
+      ),
+      true
+    );
+    assert.equal(completed.body.canvas.kind, "underground_deep_canvas");
+    assert.equal(completed.body.canvas.task.goalSummary.includes("Desktop Shell visible deep mode direction"), true);
+    assert.equal(completed.body.canvas.underground.status, "approved_package_created");
+    assert.equal(completed.body.canvas.underground.packageRef.validationPassed, true);
+    assert.equal(completed.body.canvas.underground.recommendedDirection.summary.length > 0, true);
+    assert.equal(completed.body.canvas.underground.recommendedDirection.reason.includes("地下组织"), true);
+    assert.equal(completed.body.canvas.underground.keyEvidenceRefs.length > 0, true);
+    assert.equal(completed.body.canvas.underground.childRunCount > 0, true);
+    assert.equal(completed.body.canvas.underground.parentSynthesisCount > 0, true);
+    assert.equal(
+      completed.body.transcript.events.some((event: { summary?: string }) =>
+        String(event.summary ?? "").includes("深度模式")
+      ),
+      true
+    );
     assert.equal(JSON.stringify(completed.body.canvas).includes("Fake parent synthesis"), false);
     assert.equal(JSON.stringify(completed.body.canvas).includes("Fake Work Session"), false);
-    assert.deepEqual(completed.body.canvas.workSession.steps.map((step: { action: string }) => step.action), [
-      "spawn_children",
-      "synthesize",
-      "produce_artifact",
-    ]);
     assert.equal(completed.body.tracking.run.abovegroundStatus, "not_started");
-    assert.equal(completed.body.tracking.package, undefined);
+    assert.notEqual(completed.body.tracking.package, undefined);
     assert.equal(completed.body.tracking.agentRunTree.childRuns.length > 0, true);
-    assert.equal(completed.body.tracking.agentRunTree.parentSyntheses.length, 1);
-    assert.equal(completed.body.trace.events.some((event: { type: string }) => event.type === "direction_handoff.completed"), false);
-    assert.equal(completed.body.trace.events.some((event: { type: string }) => event.type === "underground.exploration_planned"), false);
-    assert.equal(completed.body.trace.events.some((event: { type: string }) => event.type === "artifact.produced"), true);
+    assert.equal(completed.body.tracking.agentRunTree.parentSyntheses.length > 0, true);
+    assert.equal(completed.body.trace.events.some((event: { type: string }) => event.type === "direction_handoff.completed"), true);
+    assert.equal(completed.body.trace.events.some((event: { type: string }) => event.type === "underground.exploration_planned"), true);
+    assert.equal(completed.body.trace.events.some((event: { type: string }) => event.type === "artifact.produced"), false);
     assert.equal(completed.body.transcript.events.some((event: { type: string }) => event.type === "final.result"), true);
   } finally {
     await server.close();
@@ -436,13 +480,275 @@ test("desktop async fake run answers arbitrary lightweight question without repo
     );
 
     assert.equal(start.status, 202);
+    assert.equal(start.body.route, undefined);
     assert.equal(completed.body.canvas.kind, "desktop_chat_canvas");
+    assert.equal(completed.body.runMode, "agent");
+    assert.equal(completed.body.route, undefined);
     assert.equal(completed.body.canvas.chat.answer.answer.includes("AgentArbor 桌面助手"), true);
     assert.equal(completed.body.canvas.chat.upgradeRequest, undefined);
     assert.equal(completed.body.tracking.agentRunTree, undefined);
+    assert.deepEqual(
+      completed.body.transcript.events.map((event: { type: string }) => event.type),
+      ["run.started", "model.output.delta", "final.result"]
+    );
+    assert.equal(completed.body.transcript.modelCalls.length, 1);
     assert.equal(completed.body.trace.events.some((event: { type: string }) => event.type === "artifact.produced"), false);
     assert.equal(completed.body.transcript.events.some((event: { summary?: string }) => String(event.summary ?? "").includes("项目分析")), false);
     assertSafePanelJsonText(completed.text);
+  } finally {
+    await server.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("desktop default fake run does not auto-upgrade complex requests into deep mode", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-desktop-default-agent-mode-"));
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+  try {
+    const start = await requestJson(server.url, "/api/desktop/runs", {
+      method: "POST",
+      body: { goal: "分析当前仓库的问题并给我优化建议", aiMode: "fake" },
+    });
+    const completed = await waitForRun(
+      server.url,
+      start.body.runId,
+      (body) => body.status === "completed",
+      4_000,
+      "/api/desktop/runs"
+    );
+
+    assert.equal(completed.body.runMode, "agent");
+    assert.equal(completed.body.canvas.kind, "desktop_chat_canvas");
+    assert.equal(completed.body.canvas.chat.answer.answer.includes("授权工具检查"), true);
+    assert.equal(completed.body.canvas.chat.answer.answer.includes("深度模式"), true);
+    assert.equal(completed.body.canvas.chat.toolCallRefs.includes("call-desktop-agent-search"), true);
+    assert.equal(completed.body.tracking.agentRunTree, undefined);
+    assert.equal(completed.body.trace.events.some((event: { type: string }) => event.type === "agent.delegation.planned"), false);
+    assert.equal(completed.body.trace.events.some((event: { type: string }) => event.type === "artifact.produced"), false);
+    assert.equal(completed.body.trace.events.some((event: { type: string }) => event.type === "tool.completed"), true);
+    assert.equal(completed.body.route, undefined);
+    assert.equal(completed.body.transcript.modelCalls.length, 2);
+  } finally {
+    await server.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("desktop async fake run answers capability questions without upgrading into project analysis", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-desktop-capability-answer-"));
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+  try {
+    const start = await requestJson(server.url, "/api/desktop/runs", {
+      method: "POST",
+      body: { goal: "你好，你能做什么？", aiMode: "fake" },
+    });
+    const completed = await waitForRun(
+      server.url,
+      start.body.runId,
+      (body) => body.status === "completed",
+      4_000,
+      "/api/desktop/runs"
+    );
+
+    assert.equal(start.status, 202);
+    assert.equal(completed.body.canvas.kind, "desktop_chat_canvas");
+    assert.equal(completed.body.canvas.chat.answer.answer.includes("我可以直接回答问题"), true);
+    assert.equal(completed.body.canvas.chat.upgradeRequest, undefined);
+    assert.equal(completed.body.tracking.agentRunTree, undefined);
+    assert.equal(completed.text.includes("AgentArbor 项目分析与下一步优化报告"), false);
+    assert.equal(completed.text.includes("项目分析报告"), false);
+    assert.equal(completed.body.trace.events.some((event: { type: string }) => event.type === "artifact.produced"), false);
+    assertSafePanelJsonText(completed.text);
+  } finally {
+    await server.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("desktop async fake run keeps efficiency tips request in direct-answer path", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-desktop-efficiency-answer-"));
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+  try {
+    const start = await requestJson(server.url, "/api/desktop/runs", {
+      method: "POST",
+      body: { goal: "请给我三条今天提高效率的建议", aiMode: "fake" },
+    });
+    const completed = await waitForRun(
+      server.url,
+      start.body.runId,
+      (body) => body.status === "completed",
+      4_000,
+      "/api/desktop/runs"
+    );
+
+    assert.equal(start.status, 202);
+    assert.equal(completed.body.canvas.kind, "desktop_chat_canvas");
+    assert.equal(completed.body.canvas.chat.answer.answer.includes("效率建议"), true);
+    assert.equal(completed.body.canvas.chat.upgradeRequest, undefined);
+    assert.equal(completed.body.tracking.agentRunTree, undefined);
+    assert.equal(completed.body.trace.events.some((event: { type: string }) => event.type === "artifact.produced"), false);
+    assertSafePanelJsonText(completed.text);
+  } finally {
+    await server.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("conversation API creates a conversation and attaches the desktop run to assistant turn", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-conversation-create-"));
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+  try {
+    const start = await requestJson(server.url, "/api/conversations", {
+      method: "POST",
+      body: { goal: "你好，你能做什么？", aiMode: "fake" },
+    });
+    const runId = start.body.run.runId;
+    const conversationId = start.body.conversation.conversationId;
+    const completed = await waitForRun(
+      server.url,
+      runId,
+      (body) => body.status === "completed",
+      4_000,
+      "/api/desktop/runs"
+    );
+    const conversation = await requestJson(server.url, `/api/conversations/${encodeURIComponent(conversationId)}`);
+
+    assert.equal(start.status, 202);
+    assert.equal(start.body.conversation.turns.length, 2);
+    assert.equal(start.body.conversation.turns[0].role, "user");
+    assert.equal(start.body.conversation.turns[1].role, "assistant");
+    assert.equal(start.body.run.runKind, "desktop");
+    assert.equal(completed.body.conversation.conversationId, conversationId);
+    assert.equal(conversation.body.conversation.turns.length, 2);
+    assert.equal(conversation.body.conversation.turns[1].runId, runId);
+    assert.equal(conversation.body.conversation.turns[1].content.includes("我可以直接回答问题"), true);
+  } finally {
+    await server.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("conversation API keeps follow-up messages in the same conversation", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-conversation-follow-up-"));
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+  try {
+    const first = await requestJson(server.url, "/api/conversations", {
+      method: "POST",
+      body: { goal: "你好，你能做什么？", aiMode: "fake" },
+    });
+    await waitForRun(server.url, first.body.run.runId, (body) => body.status === "completed", 4_000, "/api/desktop/runs");
+
+    const second = await requestJson(
+      server.url,
+      `/api/conversations/${encodeURIComponent(first.body.conversation.conversationId)}/messages`,
+      {
+        method: "POST",
+        body: { goal: "那你能继续解释一下吗？", aiMode: "fake" },
+      }
+    );
+    await waitForRun(server.url, second.body.run.runId, (body) => body.status === "completed", 4_000, "/api/desktop/runs");
+    const conversation = await requestJson(
+      server.url,
+      `/api/conversations/${encodeURIComponent(first.body.conversation.conversationId)}`
+    );
+
+    assert.equal(second.status, 202);
+    assert.equal(second.body.conversation.conversationId, first.body.conversation.conversationId);
+    assert.equal(conversation.body.conversation.turns.length, 4);
+    assert.equal(conversation.body.conversation.turns[2].role, "user");
+    assert.equal(conversation.body.conversation.turns[2].content.includes("继续解释"), true);
+    assert.equal(conversation.body.conversation.turns[3].role, "assistant");
+    assert.equal(conversation.body.conversation.turns[3].content.includes("继续"), true);
+  } finally {
+    await server.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("conversation API exposes latest desktop run so completed result can be restored on reopen", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-conversation-latest-run-"));
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+  try {
+    const started = await requestJson(server.url, "/api/conversations", {
+      method: "POST",
+      body: { goal: "分析当前仓库的问题并给我优化建议", aiMode: "fake", runMode: "deep" },
+    });
+    const conversationId = started.body.conversation.conversationId;
+    const runId = started.body.run.runId;
+    const completed = await waitForRun(server.url, runId, (body) => body.status === "completed", 4_000, "/api/desktop/runs");
+    const conversation = await requestJson(
+      server.url,
+      `/api/conversations/${encodeURIComponent(conversationId)}`
+    );
+    const latestRun = await requestJson(
+      server.url,
+      `/api/desktop/runs/${encodeURIComponent(conversation.body.conversation.latestRunId)}`
+    );
+
+    assert.equal(conversation.status, 200);
+    assert.equal(conversation.body.conversation.latestRunId, runId);
+    assert.equal(conversation.body.conversation.activeRunId, undefined);
+    assert.equal(latestRun.status, 200);
+    assert.equal(latestRun.body.runId, runId);
+    assert.equal(latestRun.body.runMode, "deep");
+    assert.equal(latestRun.body.canvas.kind, "underground_deep_canvas");
+    assert.equal(typeof latestRun.body.canvas.underground.recommendedDirection.summary, "string");
+    assert.equal(latestRun.body.canvas.underground.recommendedDirection.summary.length > 0, true);
+    assert.equal(completed.body.canvas.kind, "underground_deep_canvas");
+  } finally {
+    await server.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("conversation API queues follow-up while the same conversation is still running", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-conversation-queue-"));
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+  try {
+    const first = await requestJson(server.url, "/api/conversations", {
+      method: "POST",
+      body: { goal: "分析当前仓库的问题并给我优化建议", aiMode: "fake", runMode: "deep" },
+    });
+    const queued = await requestJson(
+      server.url,
+      `/api/conversations/${encodeURIComponent(first.body.conversation.conversationId)}/messages`,
+      {
+        method: "POST",
+        body: { goal: "继续", aiMode: "fake" },
+      }
+    );
+    const duringFirst = await requestJson(
+      server.url,
+      `/api/conversations/${encodeURIComponent(first.body.conversation.conversationId)}`
+    );
+
+    assert.equal(first.status, 202);
+    assert.equal(queued.status, 202);
+    assert.equal(queued.body.run.status, "pending");
+    assert.equal(queued.body.conversation.queuedRunIds.includes(queued.body.run.runId), true);
+    assert.equal(duringFirst.body.conversation.turns.length, 4);
+    assert.equal(duringFirst.body.conversation.turns[2].status, "pending");
+    assert.equal(duringFirst.body.conversation.turns[3].status, "pending");
+
+    await waitForRun(server.url, first.body.run.runId, (body) => body.status === "completed", 4_000, "/api/desktop/runs");
+    const completedQueued = await waitForRun(
+      server.url,
+      queued.body.run.runId,
+      (body) => body.status === "completed",
+      4_000,
+      "/api/desktop/runs"
+    );
+    const conversation = await requestJson(
+      server.url,
+      `/api/conversations/${encodeURIComponent(first.body.conversation.conversationId)}`
+    );
+
+    assert.equal(completedQueued.body.status, "completed");
+    assert.equal(conversation.body.conversation.activeRunId, undefined);
+    assert.equal(conversation.body.conversation.queuedRunCount, 0);
+    assert.equal(conversation.body.conversation.turns.length, 4);
+    assert.equal(conversation.body.conversation.turns[2].status, "completed");
+    assert.equal(conversation.body.conversation.turns[3].status, "completed");
   } finally {
     await server.close();
     await fs.rm(directory, { recursive: true, force: true });
@@ -487,6 +793,7 @@ test("desktop openai-compatible direct answer accepts plain text model output", 
     assert.equal(bodies.length, 1);
     assert.deepEqual(bodies.map((body) => body.response_format !== undefined), [false]);
     assert.equal(completed.body.canvas.kind, "desktop_chat_canvas");
+    assert.equal(completed.body.route, undefined);
     assert.equal(completed.body.canvas.chat.answer.answer.includes("普通问题会直接回答"), true);
     assert.equal(completed.body.canvas.chat.upgradeRequest, undefined);
     assert.equal(completed.body.tracking.agentRunTree, undefined);
@@ -565,6 +872,130 @@ test("desktop default ignores legacy fake setting and still recommends real AI b
     assert.equal(failed.body.tracking.provider.defaultAiMode, "fake");
     assert.equal(failed.body.tracking.provider.requestedMode, "openai-compatible");
     assert.equal(failed.text.includes("fake_provider"), false);
+  } finally {
+    await server.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("desktop openai-compatible provider HTTP 400 stays out of main conversation text", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-desktop-http400-friendly-"));
+  const secret = "sk-desktop-http400-friendly-secret";
+  const providerFetch: PanelProviderFetch = async () => ({
+    ok: false,
+    status: 400,
+    json: async () => ({ error: { message: "raw provider response marker" } }),
+  });
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory, providerFetch });
+  try {
+    await requestJson(server.url, "/api/config/model-provider", {
+      method: "POST",
+      body: {
+        baseUrl: "https://provider.example",
+        model: "desktop-http400-model",
+        apiKey: secret,
+      },
+    });
+
+    const start = await requestJson(server.url, "/api/conversations", {
+      method: "POST",
+      body: { goal: "桌面文件，你看看", aiMode: "openai-compatible" },
+    });
+    const failed = await waitForRun(
+      server.url,
+      start.body.run.runId,
+      (body) => body.status === "failed",
+      4_000,
+      "/api/desktop/runs"
+    );
+    const conversation = await requestJson(
+      server.url,
+      `/api/conversations/${encodeURIComponent(start.body.conversation.conversationId)}`
+    );
+    const assistantTurn = conversation.body.conversation.turns.at(-1);
+
+    assert.equal(failed.body.status, "failed");
+    assert.equal(failed.body.error.message.includes("模型服务这次没有返回可用结果"), true);
+    assert.equal(assistantTurn.content.includes("模型服务这次没有返回可用结果"), true);
+    assert.equal(failed.body.error.message.includes("还没有配置模型名"), false);
+    assert.equal(assistantTurn.content.includes("还没有配置模型名"), false);
+    assert.equal(JSON.stringify(failed.body.conversation).includes("OpenAI-compatible provider returned HTTP 400"), false);
+    assert.equal(JSON.stringify(failed.body.conversation).includes("HTTP 400"), false);
+    assert.equal(JSON.stringify(failed.body.conversation).includes("raw provider response marker"), false);
+    assert.equal(JSON.stringify(failed.body.conversation).includes(secret), false);
+  } finally {
+    await server.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("conversation follow-up after a provider failure does not feed internal ids back to the model", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-conversation-failure-followup-"));
+  const secret = "sk-failure-followup-secret";
+  const prompts: string[] = [];
+  let callIndex = 0;
+  const providerFetch: PanelProviderFetch = async (_url, init) => {
+    callIndex += 1;
+    const body = JSON.parse(init.body) as { messages?: readonly { content?: string }[] };
+    prompts.push(body.messages?.map((message) => message.content ?? "").join("\n") ?? "");
+    if (callIndex === 1) {
+      return {
+        ok: false,
+        status: 400,
+        json: async () => ({ error: { message: "bad request" } }),
+      };
+    }
+    return createOpenAiTextResponse(
+      "failure-followup-model",
+      "刚才模型服务没有返回可用结果。对于桌面文件，我需要你选择具体文件或给出只读引用，然后我才能继续看。"
+    );
+  };
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory, providerFetch });
+  try {
+    await requestJson(server.url, "/api/config/model-provider", {
+      method: "POST",
+      body: {
+        baseUrl: "https://provider.example",
+        model: "failure-followup-model",
+        apiKey: secret,
+      },
+    });
+
+    const first = await requestJson(server.url, "/api/conversations", {
+      method: "POST",
+      body: { goal: "桌面文件，你看看", aiMode: "openai-compatible" },
+    });
+    await waitForRun(server.url, first.body.run.runId, (body) => body.status === "failed", 4_000, "/api/desktop/runs");
+
+    const second = await requestJson(
+      server.url,
+      `/api/conversations/${encodeURIComponent(first.body.conversation.conversationId)}/messages`,
+      {
+        method: "POST",
+        body: { goal: "?", aiMode: "openai-compatible" },
+      }
+    );
+    const completed = await waitForRun(
+      server.url,
+      second.body.run.runId,
+      (body) => body.status === "completed",
+      4_000,
+      "/api/desktop/runs"
+    );
+    const followupPrompt = prompts.at(-1) ?? "";
+    const conversation = completed.body.conversation;
+    const visibleConversation = JSON.stringify(conversation);
+
+    assert.equal(completed.body.status, "completed");
+    assert.equal(completed.body.canvas.chat.answer.answer.includes("桌面文件"), true);
+    assert.equal(followupPrompt.includes("OpenAI-compatible provider returned HTTP 400"), false);
+    assert.equal(followupPrompt.includes("HTTP 400"), false);
+    assert.equal(/\bgoal-\d+\b/.test(followupPrompt), false);
+    assert.equal(/\bmodel-request-\d+\b/.test(followupPrompt), false);
+    assert.equal(followupPrompt.includes("当前任务"), false);
+    assert.equal(visibleConversation.includes("OpenAI-compatible provider returned HTTP 400"), false);
+    assert.equal(/\bgoal-\d+\b/.test(visibleConversation), false);
+    assert.equal(visibleConversation.includes(secret), false);
   } finally {
     await server.close();
     await fs.rm(directory, { recursive: true, force: true });
@@ -846,14 +1277,13 @@ test("desktop canvas, tracking, transcript, and SSE keep model and tool internal
   }
 });
 
-test("desktop real AI contract failure surfaces a useful safe diagnostic", async () => {
+test("desktop deep mode real AI contract failure surfaces a stopped diagnostic", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-desktop-contract-failure-"));
   const secret = "sk-desktop-contract-failure-secret";
-  const providerFetch: PanelProviderFetch = async (_url, init) => {
-    const body = JSON.parse(init.body) as { tools?: readonly { function?: { name?: string } }[] };
-    return body.tools?.some((tool) => tool.function?.name === "start_work_session")
-      ? createOpenAiStartWorkSessionToolCallResponse("desktop-contract-failure-model")
-      : createInvalidOpenAiResponse("desktop-contract-failure-model");
+  let modelCallCount = 0;
+  const providerFetch: PanelProviderFetch = async () => {
+    modelCallCount += 1;
+    return createInvalidOpenAiResponse("desktop-contract-failure-model");
   };
   const server = await startLocalPanelServer({ port: 0, configDirectory: directory, providerFetch });
   try {
@@ -867,99 +1297,102 @@ test("desktop real AI contract failure surfaces a useful safe diagnostic", async
     });
     const start = await requestJson(server.url, "/api/desktop/runs", {
       method: "POST",
-      body: { goal: "Use a real model path with invalid structured output.", aiMode: "openai-compatible" },
+      body: {
+        goal: "分析当前仓库并输出报告，Use a real model path with invalid structured output.",
+        aiMode: "openai-compatible",
+        runMode: "deep",
+      },
     });
-    const failed = await waitForRun(
+    const completed = await waitForRun(
       server.url,
       start.body.runId,
-      (body) => body.status === "failed",
+      (body) => body.status === "completed",
       4_000,
       "/api/desktop/runs"
     );
-    const failedCalls = failed.body.transcript.modelCalls.filter((call: { status: string }) => call.status === "failed");
+    const failedCalls = completed.body.transcript.modelCalls.filter((call: { status: string }) => call.status === "failed");
     const failedCall = failedCalls.at(-1);
 
-    assert.equal(failed.body.status, "failed");
-    assert.equal(failed.body.error.code, "panel_internal_error");
-    assert.equal(failed.body.error.message.includes("真实 AI 输出未通过契约校验"), true);
+    assert.equal(completed.body.status, "completed");
+    assert.equal(completed.body.runMode, "deep");
+    assert.equal(completed.body.error, undefined);
+    assert.equal(completed.body.canvas.kind, "underground_deep_canvas");
+    assert.equal(completed.body.canvas.underground.status, "stopped");
+    assert.equal(completed.body.canvas.underground.packageRef.validationPassed, false);
+    assert.equal(completed.body.trace.events.some((event: { type: string }) => event.type === "model.failed"), true);
+    assert.equal(modelCallCount >= 1, true);
     assert.equal(failedCall?.failureKind, "output_validation");
     assert.equal(typeof failedCall?.outputContractId, "string");
-    assert.equal(failed.body.error.message.includes(failedCall.outputContractId), true);
-    assert.equal(failed.body.canvas, undefined);
-    assert.equal(failed.text.includes(secret), false);
-    assert.equal(failed.text.includes("bad raw output"), false);
-    assert.equal(failed.text.includes("hidden_reasoning"), false);
-    assertSafePanelJsonText(failed.text);
+    assert.equal(completed.text.includes(secret), false);
+    assert.equal(completed.text.includes("bad raw output"), false);
+    assert.equal(completed.text.includes("hidden_reasoning"), false);
+    assertSafePanelJsonText(completed.text);
   } finally {
     await server.close();
     await fs.rm(directory, { recursive: true, force: true });
   }
 });
 
-test("desktop openai-compatible Work Session uses configured search tool before synthesis", async () => {
+test("desktop deep mode internal decision stream is not rendered as assistant answer on contract failure", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-desktop-internal-stream-filter-"));
+  const secret = "sk-desktop-internal-stream-filter-secret";
+  const leakedInternalDecision = "我是内部决策流，不应该进入主对话。";
+  let modelCallCount = 0;
+  const providerFetch: PanelProviderFetch = async () => {
+    modelCallCount += 1;
+    return createOpenAiStreamTextResponse("desktop-internal-stream-filter-model", [
+      leakedInternalDecision.slice(0, 8),
+      leakedInternalDecision.slice(8),
+    ]);
+  };
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory, providerFetch });
+  try {
+    await requestJson(server.url, "/api/config/model-provider", {
+      method: "POST",
+      body: {
+        baseUrl: "https://provider.example",
+        model: "desktop-internal-stream-filter-model",
+        apiKey: secret,
+      },
+    });
+    const start = await requestJson(server.url, "/api/desktop/runs", {
+      method: "POST",
+      body: { goal: "分析当前仓库并输出报告。", aiMode: "openai-compatible", runMode: "deep" },
+    });
+    const stream = await requestSse(server.url, `/api/desktop/runs/${encodeURIComponent(start.body.runId)}/stream?cursor=0`);
+    const completed = await waitForRun(
+      server.url,
+      start.body.runId,
+      (body) => body.status === "completed",
+      4_000,
+      "/api/desktop/runs"
+    );
+    const liveAssistantDeltas = stream.events.filter(
+      (event) => event.type === "model.output.delta" && event.agentLabel === "助手"
+    );
+
+    assert.equal(modelCallCount >= 1, true);
+    assert.equal(completed.body.status, "completed");
+    assert.equal(completed.body.canvas.kind, "underground_deep_canvas");
+    assert.equal(completed.body.canvas.underground.status, "stopped");
+    assert.equal(liveAssistantDeltas.length, 0);
+    assert.equal(stream.text.includes(leakedInternalDecision), false);
+    assert.equal(completed.text.includes(leakedInternalDecision), false);
+    assert.equal(stream.text.includes(secret), false);
+    assert.equal(completed.text.includes(secret), false);
+    assertSafePanelJsonText(`${stream.text}\n${completed.text}`);
+  } finally {
+    await server.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("desktop openai-compatible ordinary agent uses configured search tool before answering", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-desktop-configured-tools-"));
   const modelSecret = "sk-desktop-configured-tools-secret";
   const tavilySecret = "tvly-desktop-configured-tools-secret";
   let modelFetchCalls = 0;
   let tavilyFetchCalls = 0;
-  const modelOutputs = [
-    "__upgrade_tool_call__",
-    "__search_tool_call__",
-    {
-      action: "use_tools",
-      childSpecs: [],
-      decisionSummary: "Use configured search evidence before delegation.",
-      uncertainty: "Tool refs still require parent synthesis.",
-      confidence: 0.72,
-    },
-    {
-      action: "spawn_children",
-      childSpecs: [
-        {
-          specId: "desktop-evidence-child",
-          displayName: "Desktop Evidence Child",
-          role: "desktop_evidence_child",
-          objective: "Review Work Session evidence refs gathered by configured tools.",
-          allowedTools: ["read"],
-          inputRefs: ["research:web:desktop"],
-        },
-      ],
-      decisionSummary: "Spawn child after tool-backed evidence.",
-      uncertainty: "Stub uncertainty.",
-      confidence: 0.74,
-    },
-    {
-      summary: "Desktop child reviewed configured tool evidence.",
-      findings: ["The desktop Work Session can use configured search before synthesis."],
-      evidenceRefs: ["research:web:desktop"],
-      uncertainty: "Stub child uncertainty.",
-      confidence: 0.73,
-    },
-    {
-      action: "synthesize",
-      childSpecs: [],
-      decisionSummary: "Synthesize child and tool material.",
-      uncertainty: "Stub uncertainty.",
-      confidence: 0.75,
-    },
-    {
-      reportTitle: "Desktop tool-backed Work Session report",
-      keyFindings: ["Configured search ran before parent synthesis."],
-      recommendations: ["Keep tool outputs behind safe refs in canvas and transcript."],
-      evidenceRefs: ["research:web:desktop", "tool-call:call-panel-search"],
-      uncertainty: ["Tool output remains untrusted until parent synthesis."],
-      nextActions: ["Run a real project-analysis smoke when provider env is configured."],
-      decisionSummary: "Parent synthesis consumed child material and safe tool refs.",
-      confidence: 0.76,
-    },
-    {
-      action: "produce_artifact",
-      childSpecs: [],
-      decisionSummary: "Produce artifact after parent synthesis.",
-      uncertainty: "Stub uncertainty.",
-      confidence: 0.77,
-    },
-  ];
   const providerFetch: PanelProviderFetch = async (url, init) => {
     if (url === "https://api.tavily.com/search") {
       tavilyFetchCalls += 1;
@@ -972,24 +1405,24 @@ test("desktop openai-compatible Work Session uses configured search tool before 
         json: async () => ({
           results: [
             {
-              title: "Desktop Work Session tool evidence",
-              url: "https://example.test/desktop-work-session",
-              content: "Desktop Work Session configured search evidence.",
+              title: "Desktop assistant tool evidence",
+              url: "https://example.test/desktop-agent",
+              content: "Desktop ordinary agent configured search evidence.",
             },
           ],
         }),
       };
     }
 
-    const output = modelOutputs[modelFetchCalls];
     modelFetchCalls += 1;
-    if (output === "__upgrade_tool_call__") {
-      return createOpenAiStartWorkSessionToolCallResponse("desktop-configured-tools-model");
-    }
-    if (output === "__search_tool_call__") {
-      return createOpenAiSearchToolCallResponse();
-    }
-    return createOpenAiJsonResponse("desktop-configured-tools-model", output);
+    const body = JSON.parse(init.body) as { messages?: readonly { role?: string }[] };
+    const hasToolMessage = body.messages?.some((message) => message.role === "tool") ?? false;
+    return hasToolMessage
+      ? createOpenAiTextResponse(
+          "desktop-configured-tools-model",
+          "我已经结合授权搜索结果完成回答；工具输出只以安全摘要和引用进入本轮对话。"
+        )
+      : createOpenAiSearchToolCallResponse();
   };
   const server = await startLocalPanelServer({ port: 0, configDirectory: directory, providerFetch });
   try {
@@ -1012,7 +1445,7 @@ test("desktop openai-compatible Work Session uses configured search tool before 
 
     const start = await requestJson(server.url, "/api/desktop/runs", {
       method: "POST",
-      body: { goal: "Use configured tools in a Desktop Work Session.", aiMode: "openai-compatible" },
+      body: { goal: "Use configured tools in the Desktop assistant.", aiMode: "openai-compatible", runMode: "agent" },
     });
     const completed = await waitForRun(
       server.url,
@@ -1022,11 +1455,11 @@ test("desktop openai-compatible Work Session uses configured search tool before 
       "/api/desktop/runs"
     );
 
-    assert.equal(completed.body.canvas.kind, "work_session_canvas");
-    assert.equal(modelFetchCalls, modelOutputs.length);
+    assert.equal(completed.body.canvas.kind, "desktop_chat_canvas");
+    assert.equal(modelFetchCalls, 2);
     assert.equal(tavilyFetchCalls, 1);
-    assert.equal(completed.body.canvas.workSession.steps[0].action, "use_tools");
-    assert.equal(completed.body.canvas.workSession.toolCallRefs.includes("call-panel-search"), true);
+    assert.equal(completed.body.canvas.chat.answer.answer.includes("授权搜索结果"), true);
+    assert.equal(completed.body.canvas.chat.toolCallRefs.includes("call-panel-search"), true);
     assert.equal(completed.body.trace.events.some((event: { type: string }) => event.type === "tool.completed"), true);
     assert.equal(JSON.stringify(completed.body).includes(modelSecret), false);
     assert.equal(JSON.stringify(completed.body).includes(tavilySecret), false);
@@ -1725,38 +2158,6 @@ function createOpenAiSearchToolCallResponse(): Awaited<ReturnType<PanelProviderF
   };
 }
 
-function createOpenAiStartWorkSessionToolCallResponse(model = "desktop-chat-router-model"): Awaited<ReturnType<PanelProviderFetch>> {
-  return {
-    ok: true,
-    status: 200,
-    json: async () => ({
-      model,
-      choices: [
-        {
-          finish_reason: "tool_calls",
-          message: {
-            role: "assistant",
-            content: "",
-            tool_calls: [
-              {
-                id: "call-start-work-session",
-                type: "function",
-                function: {
-                  name: "start_work_session",
-                  arguments: JSON.stringify({
-                    reason: "这条任务需要进入工作会话。",
-                    goal: "Use configured tools in a Desktop Work Session.",
-                  }),
-                },
-              },
-            ],
-          },
-        },
-      ],
-    }),
-  };
-}
-
 function createOpenAiJsonResponse(model: string, output: unknown): Awaited<ReturnType<PanelProviderFetch>> {
   return {
     ok: true,
@@ -1805,6 +2206,30 @@ function createOpenAiTextResponse(model: string, text: string): Awaited<ReturnTy
   };
 }
 
+function createOpenAiStreamTextResponse(
+  model: string,
+  chunks: readonly string[]
+): Awaited<ReturnType<PanelProviderFetch>> {
+  return {
+    ok: true,
+    status: 200,
+    body: sseChunks(
+      chunks.map((chunk, index) => ({
+        model,
+        choices: [
+          {
+            delta: { content: chunk },
+            finish_reason: index === chunks.length - 1 ? "stop" : null,
+          },
+        ],
+      }))
+    ),
+    json: async () => {
+      throw new Error("Streaming response should not be read through json().");
+    },
+  };
+}
+
 function createInvalidOpenAiResponse(model: string): Awaited<ReturnType<PanelProviderFetch>> {
   return {
     ok: true,
@@ -1825,6 +2250,13 @@ function createInvalidOpenAiResponse(model: string): Awaited<ReturnType<PanelPro
       ],
     }),
   };
+}
+
+async function* sseChunks(chunks: readonly unknown[]): AsyncGenerator<string> {
+  for (const chunk of chunks) {
+    yield `data: ${JSON.stringify(chunk)}\n\n`;
+  }
+  yield "data: [DONE]\n\n";
 }
 
 function assertSafePanelJsonText(text: string): void {

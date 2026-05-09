@@ -259,7 +259,7 @@ test("FakeModelProvider default output satisfies work session direct answer text
   assert.equal(response.textOutput?.includes("AgentArbor 桌面助手"), true);
 });
 
-test("FakeModelProvider desktop chat either answers text or requests Work Session upgrade", async () => {
+test("FakeModelProvider desktop chat answers directly, can request tools, and keeps legacy upgrade explicit", async () => {
   const { channel } = createFakeProviderChannel();
 
   const answer = await channel.request(
@@ -276,14 +276,35 @@ test("FakeModelProvider desktop chat either answers text or requests Work Sessio
       tools: [
         {
           name: "start_work_session",
-          description: "Upgrade into Work Session.",
+          description: "Legacy explicit deep-mode upgrade.",
           inputSchema: { type: "object", properties: { reason: { type: "string" } }, required: ["reason"] },
         },
       ],
       toolChoice: "auto",
     })
   );
-  const upgrade = await channel.request(
+  const ordinaryComplex = await channel.request(
+    createValidModelRequest({
+      purpose: "desktop_chat",
+      sanitizedMessages: [{ role: "user", content: "User message: 分析当前仓库的问题并给出优化建议" }],
+      outputContract: {
+        contractId: "desktop.chat_response.v1",
+        outputKind: "explanation",
+        format: "text",
+        minTextLength: 1,
+        maxTextLength: 12000,
+      },
+      tools: [
+        {
+          name: "search",
+          description: "Search authorized sources.",
+          inputSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] },
+        },
+      ],
+      toolChoice: "auto",
+    })
+  );
+  const legacyUpgrade = await channel.request(
     createValidModelRequest({
       purpose: "desktop_chat",
       sanitizedMessages: [{ role: "user", content: "User message: 分析当前仓库的问题并给出优化建议" }],
@@ -297,7 +318,7 @@ test("FakeModelProvider desktop chat either answers text or requests Work Sessio
       tools: [
         {
           name: "start_work_session",
-          description: "Upgrade into Work Session.",
+          description: "Legacy explicit deep-mode upgrade.",
           inputSchema: { type: "object", properties: { reason: { type: "string" } }, required: ["reason"] },
         },
       ],
@@ -307,9 +328,38 @@ test("FakeModelProvider desktop chat either answers text or requests Work Sessio
 
   assert.equal(answer.status, "completed");
   assert.equal(answer.textOutput?.includes("AgentArbor 桌面助手"), true);
-  assert.equal(upgrade.status, "completed");
-  assert.equal(upgrade.finishReason, "tool_call");
-  assert.equal(upgrade.toolCalls?.[0]?.toolName, "start_work_session");
+  assert.equal(ordinaryComplex.status, "completed");
+  assert.equal(ordinaryComplex.finishReason, "tool_call");
+  assert.equal(ordinaryComplex.toolCalls?.[0]?.toolName, "search");
+  assert.equal(legacyUpgrade.status, "completed");
+  assert.equal(legacyUpgrade.finishReason, "tool_call");
+  assert.equal(legacyUpgrade.toolCalls?.[0]?.toolName, "start_work_session");
+});
+
+test("FakeModelProvider output deltas carry request purpose", async () => {
+  const deltas: Array<{ purpose: string | undefined; delta: string }> = [];
+  const { channel } = createFakeProviderChannel({
+    textOutput: "Visible desktop answer.",
+    onOutputDelta: (delta) => {
+      deltas.push({ purpose: delta.purpose, delta: delta.delta });
+    },
+  });
+
+  const response = await channel.request(
+    createValidModelRequest({
+      purpose: "desktop_chat",
+      outputContract: {
+        contractId: "desktop.chat_response.v1",
+        outputKind: "explanation",
+        format: "text",
+        minTextLength: 1,
+        maxTextLength: 12000,
+      },
+    })
+  );
+
+  assert.equal(response.status, "completed");
+  assert.deepEqual(deltas, [{ purpose: "desktop_chat", delta: "Visible desktop answer." }]);
 });
 
 function createFakeProviderChannel(options: ConstructorParameters<typeof FakeModelProvider>[0] = {}) {

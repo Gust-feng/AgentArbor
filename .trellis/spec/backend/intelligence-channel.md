@@ -23,10 +23,12 @@
 - `AgentTurnRuntime.execute(...)`：所有 agent 多轮模型 + 工具回合的统一运行入口；它在 IntelligenceChannel 外层统一承载 tool call loop、tool result 回填、权限、预算、轮次和 fallback。kernel 只依赖 `ToolExecutionBroker` 接口，不依赖 app `ToolCenter` concrete class。
 - `executeToolUseLoop(...)`：低层兼容 helper，可被 AgentTurnRuntime 复用；rootlet 等业务 agent 不应继续把它当私有入口。
 - `ModelPurpose` 覆盖地下 AI 主线 purpose：`intent_profile`、`growth_governance`、`rootlet_candidate`、`autonomy_decision`、`convergence_judgment`、`handoff_narrative`。这些 purpose 均必须经 `AgentTurnRuntime.execute(...)` 进入模型回合；模型输出只能形成对应 agent 的 `reason()` 决策材料，不能直接写 Plan Package。
-- Desktop 首选入口 purpose 为 `desktop_chat`。它必须先像普通桌面助手一样返回自然语言 text；如果模型判断需要读取上下文、调用工具、派生 child、生成报告或产出 artifact，则通过 `start_work_session` tool call 显式升级，而不是默认进入 Work Session。
-- `desktop.chat_response.v1`：Desktop Chat Session 输出契约，必须允许自然语言 text，也允许模型返回 `start_work_session` tool call。text 回答只生成用户可见回复，不写 Plan、Fruits、Run Memory 或长期 Soil；tool call 只表示升级请求，实际执行仍由 Work Session runtime 和权限/预算边界接管。
-- Desktop Work Session purpose 覆盖 `work_session_decision`、`work_session_child_material`、`work_session_synthesis` 和 `work_session_direct_answer`。`work_session_decision` 可以选择 `direct_answer` 作为 Work Session 内部兜底，但 Desktop 产品入口不得依赖它处理普通聊天。
-- `work_session.direct_answer.v1`：Desktop 直接回答输出契约，必须返回自然语言 text。它只生成用户可见回答，不要求 JSON object，不写 Plan、Fruits、Run Memory 或长期 Soil。调度层的 `work_session.decision.v1` 可以继续使用 JSON 决定是否进入 `direct_answer`，但面向用户的回答不能被工程 schema 写死。
+- Desktop 首选入口默认进入 `desktop_chat`。普通问题、随意提问和连续追问都先按桌面助手 Root Agent 处理；模型可以在授权范围内通过 AgentTurnRuntime 调用 `search` / `read` 工具。复杂方向成形任务必须由用户显式选择 `runMode = "deep"` 后进入 Underground Cognitive Runtime；当前深度模式只开发到地下组织 / Plan 边界，不进入 Aboveground 执行。
+- `desktop.intent_gate.v1` 是历史兼容契约，不再是 Desktop 产品主线前置门。若保留测试或兼容路径，它只能返回 `chat_direct`、`chat_plus_tools` 或 `task_work_session` 的安全 JSON 决策，且不得写 Plan、Fruits、Run Memory 或长期 Soil。
+- `desktop_chat` 是默认对话 purpose。它必须像普通桌面助手一样返回自然语言 text；若模型需要当前信息或授权上下文，应通过 AgentTurnRuntime 的工具循环调用 `search` / `read`，而不是用自然语言假装已经读取。`start_work_session` 仅保留为历史兼容 tool call，Desktop 默认对话不得据此自动执行深度模式。
+- `desktop.chat_response.v1`：Desktop Chat Session 输出契约，必须允许自然语言 text 和模型 tool calls。text 回答只生成用户可见回复，不写 Plan、Fruits、Run Memory 或长期 Soil；工具输出只能作为本轮安全摘要 / refs 回填给模型，不直接成为事实源。
+- Desktop Work Session purpose 覆盖 `work_session_decision`、`work_session_child_material`、`work_session_synthesis` 和 `work_session_direct_answer`。它们是历史兼容 / 实验路径，不是当前 Desktop 产品主线。当前显式深度模式应走 Underground Cognitive Runtime 的 intent / growth / rootlet / convergence / handoff_narrative contracts，并停在 Plan 边界。
+- `work_session.direct_answer.v1`：历史 Work Session 直接回答输出契约，必须返回自然语言 text。它只生成用户可见回答，不要求 JSON object，不写 Plan、Fruits、Run Memory 或长期 Soil。
 - `underground.convergence_judgment.v1`：Convergence Judge 主裁决输出契约，必须返回 JSON object，字段至少包含 `candidateDecisions`、`nextAction`、`overallDirectionSummary`、`decisionSummary`、`uncertainty` 和 `confidence`；`candidateDecisions[*].status` 只能是 `accepted`、`merged`、`rejected` 或 `unknown`，`nextAction` 只能是 `approve_handoff`、`continue_exploration`、`request_user_clarification` 或 `stop`。
 - `underground.handoff_narrative.v1`：Handoff Steward 主交接叙事输出契约，必须返回 JSON object，字段至少包含 `status`、`clarifiedGoal`、`optionNarratives`、`nonGoals`、`assumptions`、`missingInformation`、`risks`、`evidenceBoundary`、`growthEntry`、`decisionSummary`、`uncertainty` 和 `confidence`；`status` 只能是 `approved`、`awaiting_user` 或 `stopped`。`approved` 必须至少给出一个与 Convergence `handoffCandidateRefs` 对齐的 `optionNarratives[*].candidateId`，不得凭模型输出新增 source candidate。
 - `UndergroundReasoningTraceEntry`：地下 agent 可展示 reasoning trace 投影，字段只能包含 `agentId`、`decisionSummary`、`inputRefs`、`modelCallRefs`、`toolCallRefs`、`fallbackRefs`、`uncertainty`、`confidence` 和 `createdAt`；不得包含 raw prompt、raw provider response、hidden reasoning、chain-of-thought、secret 或 token。
@@ -53,7 +55,7 @@
 - 任何直接在领域层、kernel 业务边界、app demo 运行流程或测试 fixture 中调用 provider SDK、外部 LLM SDK 或 provider adapter 的实现都违规。
 - 单次模型输出、单个 rootlet/subagent 输出、工具结果和搜索结果默认是未收束材料；不能直接写入 Plan material、Aboveground 执行计划、Verification Result、Run Memory、Experience Candidate、Capability Asset 或 Soil。上层 agent 收束后的判断可以成为正式材料输入，但必须经过协议、权限、预算、hard constraint、谱系、脱敏和 package validation。
 - 模型返回 `toolCalls` 时只能由 AgentTurnRuntime 触发受权限裁剪的工具循环；工具结果也是未收束材料，必须作为 tool message 回到模型或作为 source/evidence refs 进入候选层，不能直接变成事实源。
-- Desktop 入口不得把所有输入强行升级为复杂 Work Session。普通问题应先走 `desktop_chat` 并通过 `desktop.chat_response.v1` 返回自然语言回答；只有模型通过 `start_work_session` 显式请求升级时，才进入 Work Session 的 `use_tools` / `spawn_children` / `synthesize` / `produce_artifact` 路径。
+- Desktop 入口不得把所有输入强行升级为复杂任务，也不得用工程关键词替模型判断。`runMode = "agent"` 是默认路径，经 AgentTurnRuntime 调用 `desktop_chat`，允许模型在授权范围内使用 `search` / `read` 后返回自然语言回答或建议用户切换深度模式；`runMode = "deep"` 是用户显式入口，只运行 Underground Cognitive Runtime 的地下组织、父层综合和收束，当前不进入 Aboveground 执行。
 - `model.requested`、`model.completed`、`model.failed` 事件必须由智能通道统一发布；调用方不得手写伪造模型调用事件。
 - 面板的 `model.output.delta` / `model.output.completed` 只能作为 `PanelRunStreamEvent` 安全读模型出现；它们不得携带 provider hidden reasoning、完整 prompt、raw response、未校验输出或 secret，也不能替代 `model.completed` 的 validation 结果。
 - `tool.requested`、`tool.completed`、`tool.failed` 事件必须由工具循环 / ToolCenter 集成统一发布；payload 只允许 safe input/output summary、refs、duration 和错误摘要。
@@ -114,8 +116,8 @@
 ## Tests Required
 
 - `IntelligenceChannel` 请求校验：缺少 purpose、output contract、budget 时失败。
-- Desktop Chat 直接回答：fake/stub AI 对 `你是什么模型？` 这类普通问题应直接返回 text，断言没有 Work Session、child run、parent synthesis、artifact produced，canvas 只展示回答。
-- Desktop Chat 升级：fake/stub AI 对项目分析、文件阅读或报告任务应通过 `start_work_session` tool call 请求升级，随后才进入 Work Session。
+- Desktop 默认 Agent：fake/stub AI 对 `你是什么模型？` 这类普通问题只发起一次 `desktop_chat` 调用并返回 text；复杂普通模式请求可以由模型调用授权工具后回答。断言没有 intent gate、Underground child run、parent synthesis、artifact produced，canvas 只展示回答和安全工具 refs。
+- Desktop 显式深度模式：fake/stub AI 只有在请求体携带 `runMode = "deep"` 时才进入 Underground Cognitive Runtime；项目分析、文件阅读或报告任务不得由工程关键词自动升级。
 - fake provider completed / failed 路径事件顺序：`model.requested -> model.completed` 或 `model.requested -> model.failed`。
 - 6 种 underground rootlet kind 的候选数组 output contract、kind prompt 和 app parser 必须有 focused 测试；fake AI 复杂目标必须证明每种被选中的 rootlet kind 都经过 `IntelligenceChannel` 发布 `model.requested -> model.completed`。
 - visible output field type policy 必须覆盖 rootlet candidate 字段，并证明 app parser 会拒绝的字段类型不会生成 approved visible output。

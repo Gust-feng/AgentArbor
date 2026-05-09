@@ -1,6 +1,7 @@
 import type { MinimalLoopResult } from "./minimal-loop.js";
 import type { CognitiveWorkSessionResult } from "./cognitive-work-session.js";
 import type { DesktopChatSessionResult } from "./desktop-chat-session.js";
+import type { UndergroundDirectionSessionResult } from "./underground-direction-session.js";
 import type {
   PanelObservationReadModel,
   PanelRunTrackingReadModel,
@@ -9,7 +10,11 @@ import type {
 import type { AgentRunTree, RootletClusterKind } from "../domain/underground/index.js";
 import { redactSensitiveText } from "../kernel/redaction.js";
 
-export type PanelRunCanvasReadModel = LegacyPanelRunCanvasReadModel | WorkSessionCanvasReadModel | DesktopChatCanvasReadModel;
+export type PanelRunCanvasReadModel =
+  | LegacyPanelRunCanvasReadModel
+  | WorkSessionCanvasReadModel
+  | DesktopChatCanvasReadModel
+  | UndergroundDeepCanvasReadModel;
 
 export type LegacyPanelRunCanvasReadModel = {
   readonly kind: "desktop_shell_canvas";
@@ -180,7 +185,44 @@ export type DesktopChatCanvasReadModel = {
     };
     readonly failureMessage?: string;
     readonly modelCallRefs: readonly string[];
+    readonly toolCallRefs: readonly string[];
   };
+  readonly explanation: {
+    readonly resultWhyReasonable: string;
+    readonly observationPanelRole: string;
+  };
+};
+
+export type UndergroundDeepCanvasReadModel = {
+  readonly kind: "underground_deep_canvas";
+  readonly task: {
+    readonly goalId: string;
+    readonly traceId: string;
+    readonly goalSummary: string;
+  };
+  readonly underground: {
+    readonly status: UndergroundDirectionSessionResult["terminalStatus"];
+    readonly packageRef: {
+      readonly packageId: string;
+      readonly directionId: string;
+      readonly version: number;
+      readonly status: string;
+      readonly validationPassed: boolean;
+    };
+    readonly recommendedDirection: {
+      readonly optionId?: string;
+      readonly summary: string;
+      readonly reason: string;
+    };
+    readonly keyEvidenceRefs: readonly string[];
+    readonly uncertainty: readonly string[];
+    readonly openQuestions: readonly string[];
+    readonly rootletCount: number;
+    readonly childRunCount: number;
+    readonly parentSynthesisCount: number;
+    readonly convergenceSummary: string;
+  };
+  readonly agentRunTree?: SafeAgentRunTreeView;
   readonly explanation: {
     readonly resultWhyReasonable: string;
     readonly observationPanelRole: string;
@@ -482,16 +524,81 @@ export function createDesktopChatCanvas(input: {
       failureMessage:
         input.result.failureMessage === undefined ? undefined : safeText(input.result.failureMessage, 420),
       modelCallRefs: [...input.result.modelCallRefs],
+      toolCallRefs: [...input.result.toolCallRefs],
     },
     explanation: {
       resultWhyReasonable:
         input.result.answer !== undefined
-          ? "这是普通助手对话：模型直接回答，没有启动项目分析、派生子 Agent 或生成报告。"
+          ? "这是普通桌面 Agent 回合：模型可以直接回答，也可以在授权范围内调用工具；没有启动地下组织或生成方向包。"
           : input.result.upgradeRequest !== undefined
-            ? "模型判断这条消息需要进入工作会话；后续会读取上下文、组织材料或产出可审阅结果。"
+            ? "模型建议进入更完整的任务组织；实际深度处理仍必须由用户显式切换。"
             : "这轮对话没有形成可展示回答。",
       observationPanelRole:
         `开发者详情只展示模型调用 refs、配置状态和安全事件；当前安全事件 ${input.transcript.events.length} 条。`,
+    },
+  };
+}
+
+export function createUndergroundDeepCanvas(input: {
+  readonly result: UndergroundDirectionSessionResult;
+  readonly transcript: PanelRunTranscript;
+}): UndergroundDeepCanvasReadModel {
+  const pkg = input.result.loadedDirectionHandoffPackage;
+  const handoff = pkg.directionHandoff;
+  const retainedOption = handoff.options.find((option) => option.optionId === handoff.decisionRecord.retainedOptionId);
+  const recommendedOption =
+    handoff.options.find((option) => option.optionId === handoff.recommendedOptionId) ?? retainedOption;
+  const convergence = input.result.undergroundReport.convergenceReport;
+  const keyEvidenceRefs = unique([
+    ...handoff.evidenceRefs,
+    ...(recommendedOption?.supportingEvidenceRefs ?? []),
+    ...handoff.decisionRecord.rationaleEvidenceRefs,
+    ...convergence.provenanceRefs,
+    ...convergence.conflictResolutionRefs,
+  ]).slice(0, 12);
+  const uncertainty = unique([
+    ...handoff.missingInformation,
+    ...(recommendedOption?.unknowns ?? []),
+    ...convergence.openQuestions.map((question) => question.question),
+  ]).slice(0, 8);
+  return {
+    kind: "underground_deep_canvas",
+    task: {
+      goalId: input.result.goalId,
+      traceId: input.result.traceId,
+      goalSummary: safeText(input.result.undergroundReport.goalIntentProfile?.rawGoal ?? handoff.clarifiedGoal, 600),
+    },
+    underground: {
+      status: input.result.terminalStatus,
+      packageRef: {
+        packageId: pkg.manifest.packageId,
+        directionId: pkg.manifest.directionId,
+        version: pkg.manifest.directionVersion,
+        status: pkg.manifest.status,
+        validationPassed: pkg.validation.passed,
+      },
+      recommendedDirection: {
+        optionId: recommendedOption?.optionId,
+        summary: safeText(recommendedOption?.directionSummary ?? handoff.clarifiedGoal, 520),
+        reason:
+          input.result.terminalStatus === "approved_package_created"
+            ? `地下组织已完成父层综合和收束，保留 ${keyEvidenceRefs.length} 个关键依据引用。`
+            : "地下组织没有批准进入执行，当前只展示停止、等待或不确定材料。",
+      },
+      keyEvidenceRefs,
+      uncertainty,
+      openQuestions: convergence.openQuestions.map((question) => safeText(question.question, 320)),
+      rootletCount: input.result.undergroundReport.plan.rootletClusters.length,
+      childRunCount: input.result.undergroundOrchestratorRun.agentRunTree.childRuns.length,
+      parentSynthesisCount: input.result.undergroundOrchestratorRun.agentRunTree.parentSyntheses.length,
+      convergenceSummary: safeText(convergence.summary, 420),
+    },
+    agentRunTree: createSafeAgentRunTreeView(input.result.undergroundOrchestratorRun.agentRunTree),
+    explanation: {
+      resultWhyReasonable:
+        "这是显式深度模式：只运行 Underground Cognitive Runtime 做方向组织、child/rootlet 探索、父层 synthesis 和收束；当前不进入 Aboveground 执行。",
+      observationPanelRole:
+        `详情里展示地下组织的 agent tree、父层 synthesis、模型/工具 refs 和安全事件；当前安全事件 ${input.transcript.events.length} 条。`,
     },
   };
 }

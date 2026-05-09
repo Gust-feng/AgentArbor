@@ -91,11 +91,7 @@ export async function executeToolUseLoop(
     rounds += 1;
     messages = [
       ...messages,
-      {
-        role: "assistant",
-        content: "",
-        toolCalls: requestedToolCalls.map(cloneToolCallRequest),
-      },
+      assistantToolCallMessage(response, requestedToolCalls),
       ...roundResults.map(toolResultMessage),
     ];
     requestId = createId("model-request");
@@ -152,6 +148,24 @@ async function executeToolCallSafely(
   }
 }
 
+function assistantToolCallMessage(
+  response: ModelResponse,
+  requestedToolCalls: readonly ToolCallRequest[]
+): ModelMessage {
+  if (response.assistantMessage?.role === "assistant") {
+    return cloneModelMessage({
+      ...response.assistantMessage,
+      content: response.assistantMessage.content ?? response.textOutput ?? "",
+      toolCalls: requestedToolCalls.map(cloneToolCallRequest),
+    });
+  }
+  return {
+    role: "assistant",
+    content: response.textOutput ?? "",
+    toolCalls: requestedToolCalls.map(cloneToolCallRequest),
+  };
+}
+
 function toolResultMessage(result: ToolCallResult): ModelMessage {
   return {
     role: "tool",
@@ -169,10 +183,16 @@ function toolResultMessage(result: ToolCallResult): ModelMessage {
 }
 
 function cloneMessages(messages: readonly ModelMessage[]): ModelMessage[] {
-  return messages.map((message) => ({
+  return messages.map(cloneModelMessage);
+}
+
+function cloneModelMessage(message: ModelMessage): ModelMessage {
+  return {
     ...message,
+    protocolExtensions:
+      message.protocolExtensions === undefined ? undefined : globalThis.structuredClone(message.protocolExtensions),
     toolCalls: message.toolCalls?.map(cloneToolCallRequest),
-  }));
+  };
 }
 
 function cloneToolCallRequest(request: ToolCallRequest): ToolCallRequest {

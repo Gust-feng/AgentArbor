@@ -68,7 +68,7 @@ test("OpenAI-compatible Chat Completions adapter maps request and response throu
 
 test("OpenAI-compatible Chat Completions adapter streams safe output deltas", async () => {
   const calls: { body: Record<string, unknown> }[] = [];
-  const deltas: string[] = [];
+  const deltas: Array<{ purpose: string | undefined; delta: string }> = [];
   const fetch: FetchLike = async (_url, init) => {
     calls.push({ body: JSON.parse(init.body) as Record<string, unknown> });
     return {
@@ -100,7 +100,7 @@ test("OpenAI-compatible Chat Completions adapter streams safe output deltas", as
     fetch,
     stream: true,
     onOutputDelta: (delta) => {
-      deltas.push(delta.delta);
+      deltas.push({ purpose: delta.purpose, delta: delta.delta });
     },
   });
 
@@ -110,7 +110,11 @@ test("OpenAI-compatible Chat Completions adapter streams safe output deltas", as
   assert.deepEqual(response.structuredOutput, { summary: "Streamed provider response." });
   assert.equal(response.textOutput, "{\"summary\":\"Streamed provider response.\"}");
   assert.equal(response.finishReason, "stop");
-  assert.deepEqual(deltas, ["{\"summary\":\"", "Streamed provider response.", "\"}"]);
+  assert.deepEqual(deltas, [
+    { purpose: "rootlet_candidate", delta: "{\"summary\":\"" },
+    { purpose: "rootlet_candidate", delta: "Streamed provider response." },
+    { purpose: "rootlet_candidate", delta: "\"}" },
+  ]);
   assert.equal(calls.length, 1);
   assert.equal(calls[0]?.body.stream, true);
   assert.equal(JSON.stringify(deltas).includes("sk-test-secret-token"), false);
@@ -131,6 +135,7 @@ test("OpenAI-compatible adapter maps tools, tool results, and provider tool call
             message: {
               role: "assistant",
               content: "",
+              reasoning_content: "Provider-private reasoning continuation.",
               tool_calls: [
                 {
                   id: "call-search",
@@ -170,6 +175,10 @@ test("OpenAI-compatible adapter maps tools, tool results, and provider tool call
         {
           role: "assistant",
           content: "",
+          protocolExtensions: {
+            reasoning_content: "Previous private continuation.",
+            tool_calls: "ignored standard key",
+          },
           toolCalls: [{ callId: "call-old", toolName: "web_search", input: { query: "old" } }],
         },
         {
@@ -185,6 +194,9 @@ test("OpenAI-compatible adapter maps tools, tool results, and provider tool call
   assert.deepEqual(response.toolCalls, [
     { callId: "call-search", toolName: "web_search", input: { query: "AgentArbor tools" } },
   ]);
+  assert.deepEqual(response.assistantMessage?.protocolExtensions, {
+    reasoning_content: "Provider-private reasoning continuation.",
+  });
   assert.equal(response.finishReason, "tool_call");
   assert.deepEqual(calls[0]?.body.tools, [
     {
@@ -201,6 +213,7 @@ test("OpenAI-compatible adapter maps tools, tool results, and provider tool call
     { role: "user", content: "Search first." },
     {
       role: "assistant",
+      reasoning_content: "Previous private continuation.",
       content: "",
       tool_calls: [
         {
@@ -213,7 +226,6 @@ test("OpenAI-compatible adapter maps tools, tool results, and provider tool call
     {
       role: "tool",
       tool_call_id: "call-old",
-      name: "web_search",
       content: JSON.stringify({ status: "completed", output: { results: [] } }),
     },
   ]);

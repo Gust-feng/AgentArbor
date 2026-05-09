@@ -130,6 +130,47 @@ test("executeToolUseLoop appends failed tool results without throwing", async ()
   assert.equal(channel.requests[1]?.sanitizedMessages.at(-1)?.role, "tool");
 });
 
+test("executeToolUseLoop preserves assistant protocol continuation fields across tool rounds", async () => {
+  const channel = new SequenceIntelligenceChannel([
+    {
+      ...toolCallResponse("model-request-test", "call-search", "web_search"),
+      assistantMessage: {
+        role: "assistant",
+        content: "",
+        toolCalls: [{ callId: "call-search", toolName: "web_search", input: { query: "AgentArbor tools" } }],
+        protocolExtensions: {
+          reasoning_content: "provider-private continuation field",
+        },
+      },
+    },
+    completedResponse("model-request-final", { summary: "Final answer with continuation." }),
+  ]);
+  const center = new TestToolBroker();
+  center.register("web_search", async () => ({ ok: true }));
+
+  const result = await executeToolUseLoop(
+    {
+      intelligenceChannel: channel,
+      toolCenter: center,
+      callerAgentId: "agent-test",
+      traceId: "trace-test",
+      goalId: "goal-test",
+      allowedTools: ["web_search"],
+    },
+    createValidModelRequest()
+  );
+
+  const assistantMessage = channel.requests[1]?.sanitizedMessages.at(-2);
+  assert.equal(result.stoppedReason, "completed");
+  assert.equal(assistantMessage?.role, "assistant");
+  assert.deepEqual(assistantMessage?.protocolExtensions, {
+    reasoning_content: "provider-private continuation field",
+  });
+  assert.deepEqual(assistantMessage?.toolCalls, [
+    { callId: "call-search", toolName: "web_search", input: { query: "AgentArbor tools" } },
+  ]);
+});
+
 test("executeToolUseLoop keeps verbose tool output out of EventLog and redacts tool messages", async () => {
   const eventLog = new InMemoryEventLog();
   const channel = new SequenceIntelligenceChannel([

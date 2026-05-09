@@ -27,6 +27,7 @@ export type ModelPurpose =
   | "convergence_judgment"
   | "handoff_narrative"
   | "candidate_aggregation"
+  | "desktop_intent_gate"
   | "desktop_chat"
   | "work_session_decision"
   | "work_session_child_material"
@@ -42,6 +43,12 @@ export type ModelMessage = {
   readonly toolCallId?: string;
   readonly toolName?: string;
   readonly toolCalls?: readonly ToolCallRequest[];
+  /**
+   * Opaque protocol continuation fields returned by an adapter and replayed only
+   * to that adapter during a tool-use loop. These fields are never projected to
+   * EventLog, panel read models, Plan material, or user-visible output.
+   */
+  readonly protocolExtensions?: Readonly<Record<string, unknown>>;
 };
 
 export type ModelBudget = {
@@ -137,6 +144,7 @@ export type ModelUsage = {
 
 export type ModelOutputDelta = {
   readonly requestId: string;
+  readonly purpose?: ModelPurpose;
   readonly providerId: string;
   readonly model: string;
   readonly delta: string;
@@ -173,6 +181,7 @@ export type ModelResponse = {
   readonly structuredOutput?: unknown;
   readonly textOutput?: string;
   readonly textOutputRef?: ArtifactRef;
+  readonly assistantMessage?: ModelMessage;
   readonly toolCalls?: readonly ToolCallRequest[];
   readonly usage?: ModelUsage;
   readonly finishReason?: "stop" | "length" | "tool_call" | "content_filter" | "error";

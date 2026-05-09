@@ -165,6 +165,7 @@ function normalizeOpenAICompatibleResponse(input: {
   const content = typeof message.content === "string" ? message.content : "";
   const parsedOutput = parseStructuredOutput(content);
   const toolCalls = parseToolCalls(message.tool_calls);
+  const assistantMessage = assistantContinuationMessage({ message, content, toolCalls });
   const usage = asRecord(raw.usage);
 
   return {
@@ -179,6 +180,7 @@ function normalizeOpenAICompatibleResponse(input: {
     structuredOutput:
       toolCalls.length > 0 ? undefined : input.request.outputContract.format === "json_object" ? parsedOutput : undefined,
     textOutput: content,
+    assistantMessage,
     toolCalls: toolCalls.length === 0 ? undefined : toolCalls,
     usage: {
       inputTokens: numberOrUndefined(usage.prompt_tokens),
@@ -211,6 +213,7 @@ async function normalizeOpenAICompatibleStreamResponse(input: {
   let finishReason: ModelResponse["finishReason"];
   let deltaIndex = 0;
   const toolCalls = new Map<number, { id?: string; name?: string; arguments: string }>();
+  const protocolExtensions = new Map<string, unknown>();
 
   try {
     for await (const data of iterateSseData(input.body)) {
@@ -230,6 +233,7 @@ async function normalizeOpenAICompatibleStreamResponse(input: {
         deltaIndex += 1;
         input.emitDelta?.({
           requestId: input.request.requestId,
+          purpose: input.request.purpose,
           providerId: input.providerId,
           model,
           delta: contentDelta,
@@ -238,6 +242,7 @@ async function normalizeOpenAICompatibleStreamResponse(input: {
         });
       }
       accumulateStreamingToolCalls(toolCalls, delta.tool_calls);
+      accumulateStreamingProtocolExtensions(protocolExtensions, delta);
       finishReason = finishReasonForOpenAI(firstChoice.finish_reason) ?? finishReason;
     }
   } catch {
@@ -269,6 +274,15 @@ async function normalizeOpenAICompatibleStreamResponse(input: {
         },
       ];
     });
+  const assistantMessage =
+    completedToolCalls.length === 0
+      ? undefined
+      : {
+          role: "assistant" as const,
+          content,
+          toolCalls: completedToolCalls,
+          protocolExtensions: protocolExtensionsFromMap(protocolExtensions),
+        };
 
   return {
     responseId: createId("model-response"),
@@ -282,6 +296,7 @@ async function normalizeOpenAICompatibleStreamResponse(input: {
     structuredOutput:
       completedToolCalls.length > 0 ? undefined : input.request.outputContract.format === "json_object" ? parsedOutput : undefined,
     textOutput: content,
+    assistantMessage,
     toolCalls: completedToolCalls.length === 0 ? undefined : completedToolCalls,
     usage: {
       latencyMs: input.latencyMs,
@@ -310,6 +325,27 @@ function accumulateStreamingToolCalls(
       arguments: current.arguments + (typeof fn.arguments === "string" ? fn.arguments : ""),
     });
   }
+}
+
+function accumulateStreamingProtocolExtensions(extensions: Map<string, unknown>, delta: Record<string, unknown>): void {
+  for (const [key, value] of Object.entries(delta)) {
+    if (isStandardOpenAIMessageField(key) || !isProtocolExtensionValue(value)) {
+      continue;
+    }
+    const current = extensions.get(key);
+    if (typeof current === "string" && typeof value === "string") {
+      extensions.set(key, current + value);
+    } else if (current === undefined) {
+      extensions.set(key, value);
+    }
+  }
+}
+
+function protocolExtensionsFromMap(extensions: ReadonlyMap<string, unknown>): Readonly<Record<string, unknown>> | undefined {
+  if (extensions.size === 0) {
+    return undefined;
+  }
+  return Object.fromEntries(extensions.entries());
 }
 
 async function* iterateSseData(body: unknown): AsyncGenerator<string> {
@@ -439,13 +475,13 @@ function toOpenAIMessage(message: ModelMessage): Record<string, unknown> {
     return {
       role: "tool",
       tool_call_id: message.toolCallId,
-      name: message.toolName,
       content: message.content,
     };
   }
 
   if (message.role === "assistant" && message.toolCalls !== undefined && message.toolCalls.length > 0) {
     return {
+      ...protocolExtensionsForRequest(message.protocolExtensions),
       role: "assistant",
       content: message.content,
       tool_calls: message.toolCalls.map(toOpenAIToolCall),
@@ -514,6 +550,68 @@ function parseToolCalls(value: unknown): ToolCallRequest[] {
     });
   }
   return calls;
+}
+
+function assistantContinuationMessage(input: {
+  readonly message: Record<string, unknown>;
+  readonly content: string;
+  readonly toolCalls: readonly ToolCallRequest[];
+}): ModelMessage | undefined {
+  if (input.toolCalls.length === 0) {
+    return undefined;
+  }
+  return {
+    role: "assistant",
+    content: input.content,
+    toolCalls: input.toolCalls,
+    protocolExtensions: protocolExtensionsForResponse(input.message),
+  };
+}
+
+function protocolExtensionsForResponse(message: Record<string, unknown>): Readonly<Record<string, unknown>> | undefined {
+  const entries = Object.entries(message).filter(
+    ([key, value]) => !isStandardOpenAIMessageField(key) && isProtocolExtensionValue(value)
+  );
+  return entries.length === 0 ? undefined : Object.fromEntries(entries);
+}
+
+function protocolExtensionsForRequest(
+  extensions: Readonly<Record<string, unknown>> | undefined
+): Record<string, unknown> {
+  if (extensions === undefined) {
+    return {};
+  }
+  return Object.fromEntries(
+    Object.entries(extensions).filter(
+      ([key, value]) => !isStandardOpenAIMessageField(key) && isProtocolExtensionValue(value)
+    )
+  );
+}
+
+function isStandardOpenAIMessageField(key: string): boolean {
+  return (
+    key === "role" ||
+    key === "content" ||
+    key === "refusal" ||
+    key === "tool_calls" ||
+    key === "function_call" ||
+    key === "tool_call_id" ||
+    key === "name"
+  );
+}
+
+function isProtocolExtensionValue(value: unknown): boolean {
+  if (value === null) {
+    return true;
+  }
+  switch (typeof value) {
+    case "string":
+    case "number":
+    case "boolean":
+      return true;
+    default:
+      return false;
+  }
 }
 
 function parseToolArguments(value: unknown): unknown {

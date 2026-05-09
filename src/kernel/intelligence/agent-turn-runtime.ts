@@ -197,6 +197,8 @@ function normalizePolicy(policy: AgentTurnPolicy): AgentTurnPolicy {
 function cloneModelMessage(message: ModelMessage): ModelMessage {
   return {
     ...message,
+    protocolExtensions:
+      message.protocolExtensions === undefined ? undefined : globalThis.structuredClone(message.protocolExtensions),
     toolCalls: message.toolCalls?.map((toolCall) => ({
       callId: toolCall.callId,
       toolName: toolCall.toolName,

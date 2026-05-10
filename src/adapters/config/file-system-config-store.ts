@@ -168,6 +168,7 @@ function parseSettingsFile(raw: unknown): AgentArborLocalSettings {
               updatedAt: optionalString(tavily.updatedAt) ?? requiredString(record.updatedAt, "settings.updatedAt"),
             },
           },
+    workspaceDirectory: optionalString(record.workspaceDirectory),
     updatedAt: requiredString(record.updatedAt, "settings.updatedAt"),
   };
 }

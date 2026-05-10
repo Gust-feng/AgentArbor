@@ -16,9 +16,13 @@ import {
   type PageFetchLike,
 } from "./research/index.js";
 import {
+  createLocalEditFileTool,
   createLocalGrepFilesTool,
   createLocalListDirTool,
   createLocalReadFileTool,
+  createLocalRunCommandTool,
+  createLocalWriteFileTool,
+  createLocalWorkspaceSandboxPolicy,
   ToolCenter,
 } from "./tool-center/index.js";
 import type { UndergroundDemoAiInput } from "./underground-demo-summary.js";
@@ -180,6 +184,7 @@ export function createDefaultToolCenter(input: {
   readonly fetch?: FetchLike;
   readonly sourcePreference?: readonly InformationSourceKind[];
   readonly tavilyMaxResults?: number;
+  readonly workspaceRoot?: string;
 } = {}): ToolExecutionBroker {
   return createToolCenterFromEnvironment(input);
 }
@@ -191,6 +196,7 @@ export async function createConfiguredToolCenter(
     readonly fetch?: FetchLike;
     readonly sourcePreference?: readonly InformationSourceKind[];
     readonly tavilyMaxResults?: number;
+    readonly workspaceRoot?: string;
   } = {}
 ): Promise<ToolExecutionBroker> {
   return createToolCenterFromEnvironment({
@@ -205,6 +211,7 @@ export async function createConfiguredToolCenterFactory(
     readonly fetch?: FetchLike;
     readonly sourcePreference?: readonly InformationSourceKind[];
     readonly tavilyMaxResults?: number;
+    readonly workspaceRoot?: string;
   } = {}
 ): Promise<(runtime: MinimalRuntime) => ToolExecutionBroker> {
   const env = await configCenter.createUndergroundAiEnvironment();
@@ -217,6 +224,7 @@ function createToolCenterFromEnvironment(input: {
   readonly fetch?: FetchLike;
   readonly sourcePreference?: readonly InformationSourceKind[];
   readonly tavilyMaxResults?: number;
+  readonly workspaceRoot?: string;
 }): ToolExecutionBroker {
   const env = input.env ?? process.env;
   const center = new ToolCenter();
@@ -230,9 +238,14 @@ function createToolCenterFromEnvironment(input: {
   });
   center.register(createResearchSearchTool(researchRuntime));
   center.register(createResearchReadTool(researchRuntime));
-  center.register(createLocalReadFileTool(process.cwd()));
-  center.register(createLocalListDirTool(process.cwd()));
-  center.register(createLocalGrepFilesTool(process.cwd()));
+  const workspaceRoot = input.workspaceRoot ?? process.cwd();
+  const sandboxPolicy = createLocalWorkspaceSandboxPolicy();
+  center.register(createLocalReadFileTool(workspaceRoot, { sandboxPolicy }));
+  center.register(createLocalListDirTool(workspaceRoot, { sandboxPolicy }));
+  center.register(createLocalGrepFilesTool(workspaceRoot, { sandboxPolicy }));
+  center.register(createLocalWriteFileTool(workspaceRoot, { sandboxPolicy }));
+  center.register(createLocalEditFileTool(workspaceRoot, { sandboxPolicy }));
+  center.register(createLocalRunCommandTool(workspaceRoot, { sandboxPolicy }));
   return center;
 }
 

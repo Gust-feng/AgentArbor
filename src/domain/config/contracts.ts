@@ -27,6 +27,7 @@ export type AgentArborLocalSettings = {
   readonly version: 1 | 2;
   readonly modelProvider: ModelProviderProfileSettings;
   readonly informationAccess?: InformationAccessSettings;
+  readonly workspaceDirectory?: string;
   readonly updatedAt: string;
 };
 
@@ -101,6 +102,15 @@ export type UpdateWebSearchConfigInput = {
   readonly tavilyApiKey?: string;
   readonly maxResults?: number;
   readonly tavilyMaxResults?: number;
+};
+
+export type SanitizedWorkspaceConfig = {
+  readonly workspaceDirectory: string;
+  readonly updatedAt: string;
+};
+
+export type UpdateWorkspaceConfigInput = {
+  readonly workspaceDirectory: string;
 };
 
 export type NormalSettingsStore = {

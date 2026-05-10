@@ -12,7 +12,7 @@ test("default ToolCenter exposes model-visible search and read tools", async () 
   const center = createDefaultToolCenter({ env: {} });
   const names = center.list().map((tool) => tool.name);
 
-  assert.deepEqual(names, ["search", "read", "read_file", "list_dir", "grep_files"]);
+  assert.deepEqual(names, ["search", "read", "read_file", "list_dir", "grep_files", "write_file", "edit_file", "run_command"]);
   assert.equal(center.has("web_search"), false);
 
   const search = await center.execute(
@@ -94,7 +94,7 @@ test("configured ToolCenter reads Tavily config, registers search/read, and reda
       { callerAgentId: "agent-test", allowedTools: ["search", "read"] }
     );
 
-    assert.deepEqual(names, ["search", "read", "read_file", "list_dir", "grep_files"]);
+    assert.deepEqual(names, ["search", "read", "read_file", "list_dir", "grep_files", "write_file", "edit_file", "run_command"]);
     assert.equal(search.status, "completed");
     assert.equal(bodies[0]?.max_results, 1);
     assert.equal(JSON.stringify(search.output).includes("tvly-configured-tool-secret"), false);
@@ -118,11 +118,36 @@ test("configured ToolCenter still registers search/read and degrades web search 
       { callerAgentId: "agent-test", allowedTools: ["search", "read"] }
     );
 
-    assert.deepEqual(names, ["search", "read", "read_file", "list_dir", "grep_files"]);
+    assert.deepEqual(names, ["search", "read", "read_file", "list_dir", "grep_files", "write_file", "edit_file", "run_command"]);
     assert.equal(search.status, "completed");
     assert.equal((search.output as { status?: string }).status, "no-provider");
   } finally {
     await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("configured ToolCenter uses workspaceRoot for local tools", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-tool-center-workspace-config-"));
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-tool-center-workspace-"));
+  try {
+    await fs.writeFile(path.join(workspace, "note.txt"), "workspace note", "utf8");
+    const configCenter = new ConfigCenter({
+      settingsStore: new FileSystemNormalSettingsStore(directory),
+      secretStore: new FileSystemLocalDevSecretStore(directory),
+    });
+    const center = await createConfiguredToolCenter(configCenter, { workspaceRoot: workspace });
+    const read = await center.execute(
+      { callId: "call-read-file", toolName: "read_file", input: { path: "note.txt" } },
+      { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
+      { callerAgentId: "agent-test", allowedTools: ["read_file"] }
+    );
+
+    assert.equal(read.status, "completed");
+    assert.equal((read.output as { refId?: string }).refId, "workspace:file:note.txt");
+    assert.equal(JSON.stringify(read.output).includes("workspace note"), true);
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+    await fs.rm(workspace, { recursive: true, force: true });
   }
 });
 

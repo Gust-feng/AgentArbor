@@ -172,7 +172,7 @@ export async function runDesktopAgentSession(
   const turn = await turnRuntime.execute({
     policy: {
       allowModel: true,
-      allowedTools: toolCenter === undefined ? [] : ["search", "read", "read_file", "list_dir", "grep_files"],
+      allowedTools: toolCenter === undefined ? [] : ["search", "read", "read_file", "list_dir", "grep_files", "write_file", "edit_file", "run_command"],
       maxModelRounds: 4,
       maxToolRounds: 3,
       fallback: "disabled",
@@ -559,7 +559,7 @@ function activityFromEventEntry(entry: EventLogEntry): readonly DesktopAgentActi
         activity(
           entry,
           type,
-          entry.type === "tool.requested" ? "正在读取材料" : entry.type === "tool.completed" ? "材料已读取" : "材料读取失败",
+          entry.type === "tool.requested" ? toolActivityTitle(toolName, "start") : entry.type === "tool.completed" ? toolActivityTitle(toolName, "completed") : toolActivityTitle(toolName, "failed"),
           entry.type === "tool.completed"
             ? completedToolActivitySummary(toolName, payload)
             : entry.type === "tool.failed"
@@ -587,6 +587,18 @@ function activityFromEventEntry(entry: EventLogEntry): readonly DesktopAgentActi
     default:
       return [];
   }
+}
+
+function toolActivityTitle(toolName: string, phase: "start" | "completed" | "failed"): string {
+  if (toolName === "read_file") return phase === "start" ? "正在读取文件" : phase === "completed" ? "文件已读取" : "文件读取失败";
+  if (toolName === "list_dir") return phase === "start" ? "正在列出目录" : phase === "completed" ? "目录已列出" : "目录列出失败";
+  if (toolName === "grep_files") return phase === "start" ? "正在搜索文件" : phase === "completed" ? "搜索已完成" : "搜索失败";
+  if (toolName === "write_file") return phase === "start" ? "正在写入文件" : phase === "completed" ? "文件已写入" : "文件写入失败";
+  if (toolName === "edit_file") return phase === "start" ? "正在编辑文件" : phase === "completed" ? "文件已编辑" : "文件编辑失败";
+  if (toolName === "run_command") return phase === "start" ? "正在执行命令" : phase === "completed" ? "命令已执行" : "命令执行失败";
+  if (toolName === "search") return phase === "start" ? "正在搜索材料" : phase === "completed" ? "搜索已完成" : "搜索失败";
+  if (toolName === "read") return phase === "start" ? "正在读取材料" : phase === "completed" ? "材料已读取" : "材料读取失败";
+  return phase === "start" ? "正在执行工具" : phase === "completed" ? "工具已完成" : "工具执行失败";
 }
 
 function completedToolActivitySummary(toolName: string, payload: Readonly<Record<string, unknown>>): string {

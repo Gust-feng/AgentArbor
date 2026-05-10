@@ -1,0 +1,113 @@
+import type { ArborMessageType, ArtifactRef } from "../common.js";
+import type {
+  ObservationProgress,
+  ObservationRef,
+  ObservationScope,
+  ObservationSeverity,
+} from "../observation/index.js";
+
+export type RuntimeProfile = "lite" | "full";
+
+export type RuntimeRunStatus = "pending" | "running" | "completed" | "failed" | "stopped";
+
+export type RuntimeWorkspaceRecord = {
+  readonly workspaceId: string;
+  readonly kind: "local_directory";
+  readonly path: string;
+  readonly label: string;
+  readonly selectedAt: string;
+  readonly updatedAt: string;
+};
+
+export type RuntimeRunRecord = {
+  readonly runId: string;
+  readonly profile: RuntimeProfile;
+  readonly runKind: "desktop" | "underground";
+  readonly runMode: "agent" | "deep";
+  readonly status: RuntimeRunStatus;
+  readonly goalSummary: string;
+  readonly aiMode: "none" | "fake" | "openai-compatible";
+  readonly workspaceId?: string;
+  readonly workspacePath?: string;
+  readonly conversationId?: string;
+  readonly traceId?: string;
+  readonly goalId?: string;
+  readonly appHome: string;
+  readonly runHome: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly completedAt?: string;
+  readonly error?: {
+    readonly code: string;
+    readonly message: string;
+  };
+};
+
+export type RuntimeEventRecord = {
+  readonly eventId: string;
+  readonly runId: string;
+  readonly sequence: number;
+  readonly type: ArborMessageType;
+  readonly summary: string;
+  readonly scope: ObservationScope;
+  readonly severity: ObservationSeverity;
+  readonly progress: ObservationProgress;
+  readonly refs: readonly ObservationRef[];
+  readonly traceId: string;
+  readonly taskId?: string;
+  readonly intent: string;
+  readonly createdAt: string;
+  readonly recordedAt: string;
+};
+
+export type RuntimeModelCallRecord = {
+  readonly requestId: string;
+  readonly runId: string;
+  readonly responseId?: string;
+  readonly status: "requested" | "completed" | "failed";
+  readonly purpose?: string;
+  readonly outputContractId?: string;
+  readonly providerKind?: string;
+  readonly protocolKind?: string;
+  readonly model?: string;
+  readonly outputKind?: string;
+  readonly validationStatus?: string;
+  readonly failureKind?: string;
+  readonly retryable?: boolean;
+  readonly eventRefs: readonly string[];
+};
+
+export type RuntimeToolCallRecord = {
+  readonly callId: string;
+  readonly runId: string;
+  readonly toolName?: string;
+  readonly status: "requested" | "completed" | "failed";
+  readonly eventRefs: readonly string[];
+  readonly createdAt?: string;
+};
+
+export type RuntimeArtifactRecord = {
+  readonly runId: string;
+  readonly ref: ArtifactRef;
+  readonly summary: string;
+};
+
+export type RuntimeRunSnapshot = {
+  readonly run: RuntimeRunRecord;
+  readonly workspace?: RuntimeWorkspaceRecord;
+  readonly events: readonly RuntimeEventRecord[];
+  readonly modelCalls: readonly RuntimeModelCallRecord[];
+  readonly toolCalls: readonly RuntimeToolCallRecord[];
+  readonly artifacts: readonly RuntimeArtifactRecord[];
+};
+
+export interface RuntimeDatabase {
+  upsertWorkspace(record: RuntimeWorkspaceRecord): Promise<RuntimeWorkspaceRecord>;
+  upsertRun(record: RuntimeRunRecord): Promise<RuntimeRunRecord>;
+  replaceRunEvents(runId: string, events: readonly RuntimeEventRecord[]): Promise<readonly RuntimeEventRecord[]>;
+  replaceModelCalls(runId: string, calls: readonly RuntimeModelCallRecord[]): Promise<readonly RuntimeModelCallRecord[]>;
+  replaceToolCalls(runId: string, calls: readonly RuntimeToolCallRecord[]): Promise<readonly RuntimeToolCallRecord[]>;
+  replaceArtifacts(runId: string, artifacts: readonly RuntimeArtifactRecord[]): Promise<readonly RuntimeArtifactRecord[]>;
+  getRun(runId: string): Promise<RuntimeRunSnapshot | undefined>;
+  listRuns(limit?: number): Promise<readonly RuntimeRunRecord[]>;
+}

@@ -29,4 +29,5 @@
 - [ADR-0019-地下辐射生长模型.md](ADR-0019-地下辐射生长模型.md)：作为 Underground Cognitive Runtime 的背景细化，规定中枢固定、根须动态、探索发散、方向收束。
 - [ADR-0020-智能通道与模型接入边界.md](ADR-0020-智能通道与模型接入边界.md)：规定所有模型调用必须通过智能通道，provider adapter 不能污染核心领域模型，模型与工具输出必须经过安全投影、契约校验和运行边界守卫。
 - [ADR-0021-地下Agent集群AI优先架构重构.md](ADR-0021-地下Agent集群AI优先架构重构.md)：规定 Underground Cognitive Runtime 的 AI-first 主线，明确 rootlet/subagent/tool/search 输出是未收束材料，上层中枢 agent / ConvergenceJudge / Handoff / Plan Steward 是语义判断主路径。
+- [ADR-0023-LocalRuntimeLiteProfile与未来FullProfile演进边界.md](ADR-0023-LocalRuntimeLiteProfile与未来FullProfile演进边界.md)：定义当前 Lite Profile 与未来 Full Profile 的演进关系，说明当前阶段如何以轻量桌面 Agent 工作流承接 ADR-0022，并规定 Lite 和 Full 共用运行时契约，避免形成两套架构。
 - [植物学融合架构/](植物学融合架构/)：历史详细架构资料，保留参考价值；与 ADR-0022 冲突时，以 ADR-0022 和当前开发指南为准。

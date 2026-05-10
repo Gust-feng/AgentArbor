@@ -37,6 +37,37 @@ export type ToolPermissionCheck = {
   readonly allowedTools?: readonly string[];
 };
 
+export type SandboxOperation =
+  | "read"
+  | "list"
+  | "search"
+  | "write"
+  | "edit"
+  | "execute";
+
+export type SandboxPolicyRequest = {
+  readonly operation: SandboxOperation;
+  readonly workspaceRoot: string;
+  readonly relativePath?: string;
+  readonly bytes?: number;
+  readonly command?: string;
+  readonly args?: readonly string[];
+};
+
+export type SandboxPolicyDecision =
+  | {
+      readonly allowed: true;
+    }
+  | {
+      readonly allowed: false;
+      readonly code: string;
+      readonly reason: string;
+    };
+
+export interface SandboxPolicy {
+  check(request: SandboxPolicyRequest): SandboxPolicyDecision;
+}
+
 export interface ToolExecutor {
   readonly definition: ToolDefinition;
   execute(input: unknown, context: ToolExecutionContext): Promise<unknown>;

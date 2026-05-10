@@ -6,6 +6,10 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { FileSystemNormalSettingsStore } from "../adapters/config/index.js";
+import {
+  FileSystemRuntimeDatabase,
+  resolveAgentArborRuntimeDatabasePaths,
+} from "../adapters/runtime-database/index.js";
 import { createPanelHtml } from "./panel-assets.js";
 import { startLocalPanelServer, type PanelProviderFetch } from "./panel-server.js";
 
@@ -255,6 +259,19 @@ test("panel inline script remains syntactically valid in generated HTML", () => 
   assert.doesNotThrow(() => new vm.Script(script));
 });
 
+test("panel assistant markdown renderer builds safe DOM nodes", () => {
+  const html = createPanelHtml();
+  const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1] ?? "";
+
+  assert.equal(script.includes("function renderAssistantMarkdown(text)"), true);
+  assert.equal(script.includes("function appendInlineMarkdown(parent, text)"), true);
+  assert.equal(script.includes('document.createElement("pre")'), true);
+  assert.equal(script.includes('document.createElement("ul")'), true);
+  assert.equal(script.includes('document.createElement("a")'), true);
+  assert.equal(script.includes("innerHTML"), false);
+  assert.equal(script.includes("container.textContent = String(text || \"\")"), false);
+});
+
 test("panel inline failure text does not remap provider failures to missing model config", () => {
   const html = createPanelHtml();
   const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1] ?? "";
@@ -345,6 +362,36 @@ test("panel tools config routes return sanitized web search config and never ech
   } finally {
     await server.close();
     await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("panel workspace config route stores and returns the workspace directory", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-workspace-config-"));
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-workspace-root-"));
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+  try {
+    const initial = await requestJson(server.url, "/api/config");
+    const update = await requestJson(server.url, "/api/config/workspace", {
+      method: "POST",
+      body: { workspaceDirectory: workspace },
+    });
+    const after = await requestJson(server.url, "/api/config");
+    const created = await requestJson(server.url, "/api/config/workspace", {
+      method: "POST",
+      body: { workspaceDirectory: path.join(workspace, "created", "child") },
+    });
+
+    assert.equal(initial.status, 200);
+    assert.equal(typeof initial.body.workspace.workspaceDirectory, "string");
+    assert.equal(update.status, 200);
+    assert.equal(update.body.workspace.workspaceDirectory, path.resolve(workspace));
+    assert.equal(after.body.workspace.workspaceDirectory, path.resolve(workspace));
+    assert.equal(created.status, 200);
+    assert.equal(created.body.workspace.workspaceDirectory, path.resolve(workspace, "created", "child"));
+  } finally {
+    await server.close();
+    await fs.rm(directory, { recursive: true, force: true });
+    await fs.rm(workspace, { recursive: true, force: true });
   }
 });
 
@@ -1701,6 +1748,74 @@ test("panel async underground run starts without waiting for provider completion
     releaseFirstFetch?.();
     await server.close();
     await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("panel persists completed Desktop Agent runs to the local RuntimeDatabase safe projection", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-runtime-db-"));
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-runtime-workspace-"));
+  const secret = "sk-runtime-db-secret";
+  const bearer = "runtime-db-token-value";
+  const password = "runtime-db-password-value";
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+  try {
+    await requestJson(server.url, "/api/config/model-provider", {
+      method: "POST",
+      body: {
+        model: "runtime-db-model",
+        defaultAiMode: "fake",
+        apiKey: secret,
+      },
+    });
+    await requestJson(server.url, "/api/config/workspace", {
+      method: "POST",
+      body: { workspaceDirectory: workspace },
+    });
+
+    const start = await requestJson(server.url, "/api/desktop/runs", {
+      method: "POST",
+      body: {
+        goal: `总结当前工作区。Authorization: Bearer ${bearer} password=${password} ${secret}`,
+        aiMode: "fake",
+        runMode: "agent",
+      },
+    });
+    const completed = await waitForRun(
+      server.url,
+      start.body.runId,
+      (body) => body.status === "completed",
+      4_000,
+      "/api/desktop/runs"
+    );
+    const paths = resolveAgentArborRuntimeDatabasePaths(directory);
+    const database = new FileSystemRuntimeDatabase(paths);
+    const snapshot = await database.getRun(start.body.runId);
+    const persistedText = JSON.stringify(snapshot);
+
+    assert.equal(start.status, 202);
+    assert.equal(completed.body.status, "completed");
+    assert.equal(server.runtimeDirectory, paths.runtimeHome);
+    assert.equal(snapshot?.run.runKind, "desktop");
+    assert.equal(snapshot?.run.runMode, "agent");
+    assert.equal(snapshot?.run.status, "completed");
+    assert.equal(snapshot?.run.workspacePath, path.resolve(workspace));
+    assert.equal(snapshot?.workspace?.path, path.resolve(workspace));
+    assert.equal(path.resolve(snapshot?.run.runHome ?? "").startsWith(path.resolve(paths.runtimeHome)), true);
+    assert.equal(path.resolve(snapshot?.run.runHome ?? "").startsWith(path.resolve(workspace)), false);
+    assert.equal(snapshot?.events.some((event) => event.type === "goal.received"), true);
+    assert.equal(snapshot?.events.some((event) => event.type === "model.requested"), true);
+    assert.equal((snapshot?.modelCalls.length ?? 0) > 0, true);
+    assert.equal(persistedText.includes(secret), false);
+    assert.equal(persistedText.includes(bearer), false);
+    assert.equal(persistedText.includes(password), false);
+    assert.equal(persistedText.includes("sanitizedMessages"), false);
+    assert.equal(persistedText.includes("raw provider response"), false);
+    assert.equal(persistedText.includes("raw tool output"), false);
+    assertSafePanelJsonText(persistedText);
+  } finally {
+    await server.close();
+    await fs.rm(directory, { recursive: true, force: true });
+    await fs.rm(workspace, { recursive: true, force: true });
   }
 });
 

@@ -1,5 +1,11 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
+import path from "node:path";
+import {
+  FileSystemRuntimeDatabase,
+  resolveAgentArborRuntimeDatabasePaths,
+  type FileSystemRuntimeDatabasePaths,
+} from "../adapters/runtime-database/index.js";
 import {
   createConfiguredToolCenterFactory,
   createUndergroundAiRuntimeConfig,
@@ -22,17 +28,28 @@ import {
   type UndergroundDirectionSessionRuntimeContext,
 } from "./underground-direction-session.js";
 import { createUndergroundDemoSummary, type UndergroundDemoAiInput, type UndergroundDemoSummary } from "./underground-demo-summary.js";
-import { ConfigCenter, createLocalConfigCenter } from "./config-center.js";
+import { ConfigCenter, WorkspaceDirectoryValidationError, createLocalConfigCenter } from "./config-center.js";
 import { createPanelHtml } from "./panel-assets.js";
 import type {
   SanitizedInformationAccessConfig,
   SanitizedModelProviderConfig,
+  SanitizedWorkspaceConfig,
   SanitizedWebSearchConfig,
   UpdateInformationAccessConfigInput,
   UpdateModelProviderConfigInput,
+  UpdateWorkspaceConfigInput,
   UpdateWebSearchConfigInput,
 } from "../domain/config/index.js";
 import type { ModelOutputDelta } from "../domain/intelligence/index.js";
+import type {
+  RuntimeArtifactRecord,
+  RuntimeDatabase,
+  RuntimeEventRecord,
+  RuntimeModelCallRecord,
+  RuntimeRunRecord,
+  RuntimeToolCallRecord,
+  RuntimeWorkspaceRecord,
+} from "../domain/runtime-database/index.js";
 import {
   createPanelRunTrace,
   createPanelRunStreamEvents,
@@ -71,12 +88,14 @@ import {
   sanitizeAssistantVisibleText,
   sanitizeConversationHistoryText,
 } from "./visible-text-safety.js";
+import { redactSensitiveText } from "../kernel/redaction.js";
 
 export type PanelServerOptions = {
   readonly host?: string;
   readonly port?: number;
   readonly configDirectory?: string;
   readonly configCenter?: ConfigCenter;
+  readonly runtimeDatabase?: RuntimeDatabase;
   readonly providerFetch?: PanelProviderFetch;
 };
 
@@ -98,6 +117,7 @@ export type PanelProviderFetch = (
 export type StartedPanelServer = {
   readonly url: string;
   readonly configDirectory?: string;
+  readonly runtimeDirectory?: string;
   close(): Promise<void>;
 };
 
@@ -106,7 +126,10 @@ type PanelRuntime = {
   readonly configDirectory?: string;
   readonly providerFetch?: PanelProviderFetch;
   readonly runJobs: PanelRunJobStore;
+  readonly activeRunJobs: Set<Promise<void>>;
   readonly conversations: PanelConversationStore;
+  readonly runtimeDatabase?: RuntimeDatabase;
+  readonly runtimePaths?: FileSystemRuntimeDatabasePaths;
 };
 
 type PanelRunResponse = {
@@ -195,7 +218,8 @@ export async function startLocalPanelServer(options: PanelServerOptions = {}): P
   return {
     url: `http://${host}:${address.port}/`,
     configDirectory: runtime.configDirectory,
-    close: () => close(server),
+    runtimeDirectory: runtime.runtimePaths?.runtimeHome,
+    close: () => closePanelServer(server, runtime),
   };
 }
 
@@ -215,21 +239,41 @@ export function createPanelRequestHandler(options: PanelServerOptions | PanelRun
 
 function createPanelRuntime(options: PanelServerOptions): PanelRuntime {
   if (options.configCenter !== undefined) {
+    const runtimePersistence = createPanelRuntimePersistence(options.configDirectory, options.runtimeDatabase);
     return {
       configCenter: options.configCenter,
       configDirectory: options.configDirectory,
       providerFetch: options.providerFetch,
       runJobs: new PanelRunJobStore(),
+      activeRunJobs: new Set<Promise<void>>(),
       conversations: new PanelConversationStore(),
+      ...runtimePersistence,
     };
   }
   const local = createLocalConfigCenter({ configDirectory: options.configDirectory });
+  const runtimePersistence = createPanelRuntimePersistence(local.configDirectory, options.runtimeDatabase);
   return {
     configCenter: local.configCenter,
     configDirectory: local.configDirectory,
     providerFetch: options.providerFetch,
     runJobs: new PanelRunJobStore(),
+    activeRunJobs: new Set<Promise<void>>(),
     conversations: new PanelConversationStore(),
+    ...runtimePersistence,
+  };
+}
+
+function createPanelRuntimePersistence(
+  configDirectory: string | undefined,
+  runtimeDatabase: RuntimeDatabase | undefined
+): Pick<PanelRuntime, "runtimeDatabase" | "runtimePaths"> {
+  if (configDirectory === undefined) {
+    return runtimeDatabase === undefined ? {} : { runtimeDatabase };
+  }
+  const runtimePaths = resolveAgentArborRuntimeDatabasePaths(configDirectory);
+  return {
+    runtimeDatabase: runtimeDatabase ?? new FileSystemRuntimeDatabase(runtimePaths),
+    runtimePaths,
   };
 }
 
@@ -268,6 +312,7 @@ async function handlePanelRequest(
       status: "completed",
       config: await runtime.configCenter.getModelProviderConfig(),
       informationAccess: await runtime.configCenter.getInformationAccessConfig(),
+      workspace: await runtime.configCenter.getWorkspaceConfig(),
     });
     return;
   }
@@ -316,6 +361,25 @@ async function handlePanelRequest(
       status: "completed",
       tools: { webSearch },
       informationAccess: await runtime.configCenter.getInformationAccessConfig(),
+    });
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/config/workspace") {
+    const body = await readJsonBody(request);
+    let workspace;
+    try {
+      workspace = await runtime.configCenter.updateWorkspaceConfig(parseWorkspaceUpdate(body));
+    } catch (error) {
+      if (error instanceof WorkspaceDirectoryValidationError) {
+        throw new PanelHttpError(400, "invalid_workspace_directory", "工作目录必须是已存在的文件夹。");
+      }
+      throw error;
+    }
+    writeJson(response, 200, {
+      ok: true,
+      status: "completed",
+      workspace,
     });
     return;
   }
@@ -509,6 +573,7 @@ async function handleStartRunRequest(
     config,
     informationAccess,
   });
+  await persistPanelRun(runtime, job);
 
   writeJson(response, 202, createPanelRunJobResponse(runtime, job));
   schedulePanelRunJob(runtime, job.runId);
@@ -567,6 +632,7 @@ async function handleConversationMessageRequest(
       runId: job.runId,
     });
   }
+  await persistPanelRun(runtime, job);
 
   writeJson(response, 202, {
     ok: true,
@@ -672,6 +738,10 @@ async function executePanelRunJob(runtime: PanelRuntime, runId: string): Promise
     runtime.conversations.activateQueuedRun(job.conversationId, runId);
   }
   runtime.runJobs.markRunning(runId);
+  const runningJob = runtime.runJobs.get(runId);
+  if (runningJob !== undefined) {
+    await persistPanelRun(runtime, runningJob);
+  }
   try {
     const taskSoilInput = job.taskSoilInput;
     const conversationHistory = buildConversationHistoryMessages(
@@ -707,6 +777,7 @@ async function executePanelRunJob(runtime: PanelRuntime, runId: string): Promise
     if (completedJob !== undefined) {
       syncConversationTurnForJob(runtime, completedJob);
       scheduleNextQueuedConversationRun(runtime, completedJob);
+      await persistPanelRun(runtime, completedJob);
     }
   } catch (error) {
     const config = await runtime.configCenter.getModelProviderConfig().catch(() => job.config);
@@ -728,6 +799,7 @@ async function executePanelRunJob(runtime: PanelRuntime, runId: string): Promise
       if (failedJob !== undefined) {
         syncConversationTurnForJob(runtime, failedJob);
         scheduleNextQueuedConversationRun(runtime, failedJob);
+        await persistPanelRun(runtime, failedJob);
       }
       return;
     }
@@ -744,6 +816,7 @@ async function executePanelRunJob(runtime: PanelRuntime, runId: string): Promise
       if (failedJob !== undefined) {
         syncConversationTurnForJob(runtime, failedJob);
         scheduleNextQueuedConversationRun(runtime, failedJob);
+        await persistPanelRun(runtime, failedJob);
       }
       return;
     }
@@ -764,13 +837,22 @@ async function executePanelRunJob(runtime: PanelRuntime, runId: string): Promise
     if (failedJob !== undefined) {
       syncConversationTurnForJob(runtime, failedJob);
       scheduleNextQueuedConversationRun(runtime, failedJob);
+      await persistPanelRun(runtime, failedJob);
     }
   }
 }
 
 function schedulePanelRunJob(runtime: PanelRuntime, runId: string): void {
-  setImmediate(() => {
-    void executePanelRunJob(runtime, runId);
+  const activeRunJob = new Promise<void>((resolve) => {
+    setImmediate(() => {
+      executePanelRunJob(runtime, runId)
+        .catch(() => undefined)
+        .finally(resolve);
+    });
+  });
+  runtime.activeRunJobs.add(activeRunJob);
+  void activeRunJob.then(() => {
+    runtime.activeRunJobs.delete(activeRunJob);
   });
 }
 
@@ -850,6 +932,176 @@ function createPanelRunJobResponse(runtime: PanelRuntime, job: PanelRunJob): Pan
         ? undefined
         : runtime.conversations.getReadModel(job.conversationId),
   };
+}
+
+async function persistPanelRun(runtime: PanelRuntime, job: PanelRunJob): Promise<void> {
+  if (runtime.runtimeDatabase === undefined || runtime.runtimePaths === undefined) {
+    return;
+  }
+  const workspace = await runtime.configCenter.getWorkspaceConfig().catch(() => undefined);
+  const workspaceRecord = workspace === undefined ? undefined : createRuntimeWorkspaceRecord(workspace, job.updatedAt);
+  if (workspaceRecord !== undefined) {
+    await runtime.runtimeDatabase.upsertWorkspace(workspaceRecord);
+  }
+  await runtime.runtimeDatabase.upsertRun(createRuntimeRunRecord(runtime, job, workspaceRecord));
+
+  const eventEntries = job.runtime?.eventLog.list() ?? [];
+  const trace = createPanelRunTrace({ status: job.status, eventEntries });
+  const streamEvents = syncPanelRunStreamEventsForJob(job);
+  const transcript = createPanelRunTranscript({
+    runId: job.runId,
+    status: job.status,
+    eventEntries,
+    summary: job.completed?.summary,
+    observation: job.completed?.observation,
+    agentRunTree: job.completed?.agentRunTree,
+    routeDecision: job.routeDecision,
+    desktopMode: job.runKind === "desktop" ? job.runMode : undefined,
+    createdAt: job.createdAt,
+    updatedAt: job.updatedAt,
+  });
+  await runtime.runtimeDatabase.replaceRunEvents(job.runId, trace.events.map((event) => toRuntimeEventRecord(job.runId, event)));
+  await runtime.runtimeDatabase.replaceModelCalls(
+    job.runId,
+    transcript.modelCalls.map((call) => toRuntimeModelCallRecord(job.runId, call))
+  );
+  await runtime.runtimeDatabase.replaceToolCalls(job.runId, toRuntimeToolCallRecords(job.runId, streamEvents));
+  await runtime.runtimeDatabase.replaceArtifacts(job.runId, toRuntimeArtifactRecords(job));
+}
+
+function createRuntimeWorkspaceRecord(
+  workspace: SanitizedWorkspaceConfig,
+  selectedAt: string
+): RuntimeWorkspaceRecord {
+  return {
+    workspaceId: "workspace:current",
+    kind: "local_directory",
+    path: workspace.workspaceDirectory,
+    label: path.basename(workspace.workspaceDirectory) || workspace.workspaceDirectory,
+    selectedAt,
+    updatedAt: workspace.updatedAt,
+  };
+}
+
+function createRuntimeRunRecord(
+  runtime: PanelRuntime,
+  job: PanelRunJob,
+  workspace: RuntimeWorkspaceRecord | undefined
+): RuntimeRunRecord {
+  const appHome = runtime.runtimePaths?.appHome ?? "";
+  const runHome =
+    runtime.runtimePaths === undefined
+      ? ""
+      : path.join(runtime.runtimePaths.runtimeHome, "runs", encodeURIComponent(job.runId));
+  return {
+    runId: job.runId,
+    profile: "lite",
+    runKind: job.runKind,
+    runMode: job.runMode,
+    status: job.status,
+    goalSummary: compactRuntimeText(job.goal, 300),
+    aiMode: job.aiMode,
+    workspaceId: workspace?.workspaceId,
+    workspacePath: workspace?.path,
+    conversationId: job.conversationId,
+    traceId: job.traceId ?? job.completed?.observation?.traceId ?? canvasTraceId(job.completed?.canvas),
+    goalId: job.goalId ?? job.completed?.observation?.goalId,
+    appHome,
+    runHome,
+    createdAt: job.createdAt,
+    updatedAt: job.updatedAt,
+    completedAt: job.status === "completed" || job.status === "failed" ? job.updatedAt : undefined,
+    error: job.failed?.error,
+  };
+}
+
+function toRuntimeEventRecord(
+  runId: string,
+  event: PanelRunTraceReadModel["events"][number]
+): RuntimeEventRecord {
+  return {
+    eventId: `${runId}:event:${event.sequence}`,
+    runId,
+    sequence: event.sequence,
+    type: event.type,
+    summary: compactRuntimeText(event.summary, 800),
+    scope: event.scope,
+    severity: event.severity,
+    progress: event.progress,
+    refs: event.refs,
+    traceId: event.traceId,
+    taskId: event.taskId,
+    intent: event.intent,
+    createdAt: event.createdAt,
+    recordedAt: event.recordedAt,
+  };
+}
+
+function toRuntimeModelCallRecord(
+  runId: string,
+  call: PanelRunTranscript["modelCalls"][number]
+): RuntimeModelCallRecord {
+  return {
+    requestId: call.requestId,
+    runId,
+    responseId: call.responseId,
+    status: call.status,
+    purpose: call.purpose,
+    outputContractId: call.outputContractId,
+    providerKind: call.providerKind,
+    protocolKind: call.protocolKind,
+    model: call.model,
+    outputKind: call.outputKind,
+    validationStatus: call.validationStatus,
+    failureKind: call.failureKind,
+    retryable: call.retryable,
+    eventRefs: call.eventRefs,
+  };
+}
+
+function toRuntimeToolCallRecords(
+  runId: string,
+  events: readonly PanelRunStreamEvent[]
+): readonly RuntimeToolCallRecord[] {
+  const calls = new Map<string, RuntimeToolCallRecord>();
+  for (const event of events) {
+    if (!event.type.startsWith("tool.")) {
+      continue;
+    }
+    for (const callId of event.toolCallRefs) {
+      const previous = calls.get(callId);
+      calls.set(callId, {
+        callId,
+        runId,
+        toolName: event.toolName ?? previous?.toolName,
+        status: mergeToolStatus(previous?.status, event.type),
+        eventRefs: unique([...(previous?.eventRefs ?? []), ...event.sourceRefs]),
+        createdAt: previous?.createdAt ?? event.createdAt,
+      });
+    }
+  }
+  return [...calls.values()];
+}
+
+function toRuntimeArtifactRecords(job: PanelRunJob): readonly RuntimeArtifactRecord[] {
+  return (job.runtime?.artifactStore.list() ?? []).map((artifact) => ({
+    runId: job.runId,
+    ref: artifact.ref,
+    summary: compactRuntimeText(artifact.summary, 800),
+  }));
+}
+
+function mergeToolStatus(
+  previous: RuntimeToolCallRecord["status"] | undefined,
+  eventType: PanelRunStreamEvent["type"]
+): RuntimeToolCallRecord["status"] {
+  if (previous === "failed" || eventType === "tool.failed") {
+    return "failed";
+  }
+  if (previous === "completed" || eventType === "tool.completed") {
+    return "completed";
+  }
+  return "requested";
 }
 
 function syncConversationTurnForJob(runtime: PanelRuntime, job: PanelRunJob): void {
@@ -1080,9 +1332,11 @@ async function runDesktopForPanel(
     throw createUndergroundAiDisabledConfigurationError(aiConfig.summaryInput);
   }
 
+  const workspaceRoot = (await runtime.configCenter.getWorkspaceConfig()).workspaceDirectory;
   if (runMode === "deep") {
     const createToolCenter = await createConfiguredToolCenterFactory(runtime.configCenter, {
       fetch: runtime.providerFetch,
+      workspaceRoot,
     });
     const result = await runUndergroundDirectionSessionWithIntelligence(goal, {
       createIntelligenceChannel: aiConfig.createIntelligenceChannel,
@@ -1121,6 +1375,7 @@ async function runDesktopForPanel(
     createIntelligenceChannel: aiConfig.createIntelligenceChannel,
     createToolCenter: await createConfiguredToolCenterFactory(runtime.configCenter, {
       fetch: runtime.providerFetch,
+      workspaceRoot,
     }),
     taskSoilInput,
     conversationHistory: options.conversationHistory,
@@ -1178,8 +1433,10 @@ async function runUndergroundForPanel(
     throw createUndergroundAiDisabledConfigurationError(aiConfig.summaryInput);
   }
 
+  const workspaceRoot = (await runtime.configCenter.getWorkspaceConfig()).workspaceDirectory;
   const createToolCenter = await createConfiguredToolCenterFactory(runtime.configCenter, {
     fetch: runtime.providerFetch,
+    workspaceRoot,
   });
   const result = await runUndergroundDirectionSessionWithIntelligence(goal, {
     createIntelligenceChannel: aiConfig.createIntelligenceChannel,
@@ -1223,6 +1480,15 @@ function parseConfigUpdate(raw: unknown): UpdateModelProviderConfigInput {
     defaultAiMode: parseOptionalAiMode(record.defaultAiMode, "默认 AI 模式无效。"),
     apiKey: optionalString(record.apiKey),
   };
+}
+
+function parseWorkspaceUpdate(raw: unknown): UpdateWorkspaceConfigInput {
+  const record = asRecord(raw);
+  const workspaceDirectory = optionalString(record.workspaceDirectory);
+  if (workspaceDirectory === undefined) {
+    throw new PanelHttpError(400, "missing_workspace_directory", "工作目录不能为空。");
+  }
+  return { workspaceDirectory };
 }
 
 function parseInformationAccessUpdate(raw: unknown): UpdateInformationAccessConfigInput {
@@ -1458,6 +1724,16 @@ function canvasTraceId(canvas: PanelRunCanvasReadModel | undefined): string | un
   return canvas.taskSoil.traceId;
 }
 
+function compactRuntimeText(value: string, maxLength: number): string {
+  const normalized = redactSensitiveText(sanitizeAssistantVisibleText(value))
+    .replace(/\s+/g, " ")
+    .trim();
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+  return `${normalized.slice(0, Math.max(0, maxLength - 1))}…`;
+}
+
 function buildConversationHistoryMessages(
   runtime: PanelRuntime,
   conversationId: string | undefined,
@@ -1522,6 +1798,10 @@ function compactConversationHistoryText(value: string, maxLength: number): strin
   return `${normalized.slice(0, maxLength - 1)}…`;
 }
 
+function unique(values: readonly string[]): string[] {
+  return [...new Set(values.filter((value) => value.trim().length > 0))];
+}
+
 function numberOrUndefined(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
@@ -1552,7 +1832,9 @@ function isPanelRuntime(value: PanelServerOptions | PanelRuntime): value is Pane
   return (
     value.configCenter instanceof ConfigCenter &&
     "runJobs" in value &&
-    value.runJobs instanceof PanelRunJobStore
+    value.runJobs instanceof PanelRunJobStore &&
+    "activeRunJobs" in value &&
+    value.activeRunJobs instanceof Set
   );
 }
 
@@ -1564,6 +1846,17 @@ function listen(server: Server, port: number, host: string): Promise<void> {
       resolve();
     });
   });
+}
+
+async function closePanelServer(server: Server, runtime: PanelRuntime): Promise<void> {
+  await close(server);
+  await waitForPanelRuntimeIdle(runtime);
+}
+
+async function waitForPanelRuntimeIdle(runtime: PanelRuntime): Promise<void> {
+  while (runtime.activeRunJobs.size > 0) {
+    await Promise.allSettled([...runtime.activeRunJobs]);
+  }
 }
 
 function close(server: Server): Promise<void> {

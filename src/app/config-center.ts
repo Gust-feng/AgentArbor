@@ -1,3 +1,6 @@
+import { mkdir, stat } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import {
   FileSystemLocalDevSecretStore,
   FileSystemNormalSettingsStore,
@@ -12,9 +15,11 @@ import type {
   NormalSettingsStore,
   SanitizedInformationAccessConfig,
   SanitizedModelProviderConfig,
+  SanitizedWorkspaceConfig,
   SanitizedWebSearchConfig,
   UpdateInformationAccessConfigInput,
   UpdateModelProviderConfigInput,
+  UpdateWorkspaceConfigInput,
   UpdateWebSearchConfigInput,
 } from "../domain/config/index.js";
 import type { ConfiguredInformationSourceKind, InformationAccessSettings } from "../domain/config/index.js";
@@ -32,6 +37,7 @@ const DEFAULT_INFORMATION_SOURCE_PREFERENCE: readonly ConfiguredInformationSourc
   "github",
 ];
 const DEFAULT_TAVILY_MAX_RESULTS = 5;
+const FALLBACK_WORKSPACE_DIRECTORY = process.cwd();
 
 export type ConfigCenterOptions = {
   readonly settingsStore: NormalSettingsStore;
@@ -44,6 +50,13 @@ export type CreateLocalConfigCenterOptions = {
 };
 
 export type UndergroundAiConfigEnvironment = Readonly<Record<string, string | undefined>>;
+
+export class WorkspaceDirectoryValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "WorkspaceDirectoryValidationError";
+  }
+}
 
 export class ConfigCenter {
   constructor(private readonly options: ConfigCenterOptions) {}
@@ -159,6 +172,25 @@ export class ConfigCenter {
     return this.toSanitizedWebSearchConfig({ ...current, informationAccess: nextInformation, updatedAt: now });
   }
 
+  async getWorkspaceConfig(): Promise<SanitizedWorkspaceConfig> {
+    const settings = await this.readOrCreateSettings();
+    return this.toSanitizedWorkspaceConfig(settings);
+  }
+
+  async updateWorkspaceConfig(input: UpdateWorkspaceConfigInput): Promise<SanitizedWorkspaceConfig> {
+    const current = await this.readOrCreateSettings();
+    const now = new Date().toISOString();
+    const workspaceDirectory = await normalizeWorkspaceDirectory(input.workspaceDirectory);
+    const next: AgentArborLocalSettings = {
+      ...current,
+      version: 2,
+      workspaceDirectory,
+      updatedAt: now,
+    };
+    await this.options.settingsStore.writeSettings(next);
+    return this.toSanitizedWorkspaceConfig(next);
+  }
+
   async createUndergroundAiEnvironment(): Promise<UndergroundAiConfigEnvironment> {
     const settings = await this.readOrCreateSettings();
     const apiKey = await this.options.secretStore.readSecret(settings.modelProvider.secretRef);
@@ -231,6 +263,7 @@ export class ConfigCenter {
     };
   }
 
+
   private async toSanitizedWebSearchConfig(settings: AgentArborLocalSettings): Promise<SanitizedWebSearchConfig> {
     const informationAccess = normalizeInformationAccessSettings(settings.informationAccess, settings.updatedAt);
     const secret = await this.options.secretStore.getMetadata(informationAccess.tavily.secretRef);
@@ -243,6 +276,13 @@ export class ConfigCenter {
       secretUpdatedAt: secret.updatedAt,
       status: provider === "none" ? "disabled" : secret.configured ? "ready" : "no-provider",
       updatedAt: informationAccess.webSearch.updatedAt,
+    };
+  }
+
+  private toSanitizedWorkspaceConfig(settings: AgentArborLocalSettings): SanitizedWorkspaceConfig {
+    return {
+      workspaceDirectory: normalizeConfiguredWorkspaceDirectory(settings.workspaceDirectory),
+      updatedAt: settings.updatedAt,
     };
   }
 }
@@ -355,6 +395,40 @@ function isConfiguredInformationSourceKind(value: string): value is ConfiguredIn
     value === "packages" ||
     value === "github"
   );
+}
+
+async function normalizeWorkspaceDirectory(value: string): Promise<string> {
+  const normalized = path.resolve(normalizeRequiredString(value, "workspaceDirectory"));
+  await ensureWorkspaceReady(normalized);
+  return normalized;
+}
+
+async function ensureWorkspaceReady(directory: string): Promise<void> {
+  try {
+    await mkdir(directory, { recursive: true });
+  } catch {
+    throw new WorkspaceDirectoryValidationError("Workspace directory could not be created.");
+  }
+  const info = await stat(directory).catch(() => undefined);
+  if (info === undefined || !info.isDirectory()) {
+    throw new WorkspaceDirectoryValidationError("Workspace directory must be a directory.");
+  }
+}
+
+function normalizeConfiguredWorkspaceDirectory(value: string | undefined): string {
+  return path.resolve(normalizeOptionalString(value) ?? resolveDefaultWorkspaceDirectory());
+}
+
+function resolveDefaultWorkspaceDirectory(): string {
+  return path.join(os.homedir(), ".agentarbor", "workspace");
+}
+
+function normalizeRequiredString(value: string | undefined, fieldName: string): string {
+  const normalized = normalizeOptionalString(value);
+  if (normalized === undefined) {
+    throw new WorkspaceDirectoryValidationError(`${fieldName} must be a non-empty string.`);
+  }
+  return normalized;
 }
 
 function normalizePositiveInteger(value: number | undefined): number | undefined {

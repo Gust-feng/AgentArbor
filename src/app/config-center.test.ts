@@ -187,6 +187,34 @@ test("ConfigCenter reads v1 settings and upgrades information source settings to
   }
 });
 
+test("ConfigCenter stores and validates workspace directory", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-workspace-config-"));
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-workspace-root-"));
+  try {
+    const settingsStore = new FileSystemNormalSettingsStore(directory);
+    const secretStore = new FileSystemLocalDevSecretStore(directory);
+    const configCenter = new ConfigCenter({ settingsStore, secretStore });
+
+    const defaultWorkspace = await configCenter.getWorkspaceConfig();
+    const updated = await configCenter.updateWorkspaceConfig({ workspaceDirectory: workspace });
+    const missing = path.join(workspace, "child", "missing");
+    await assert.rejects(
+      () => configCenter.updateWorkspaceConfig({ workspaceDirectory: "   " }),
+      /workspaceDirectory must be a non-empty string\./
+    );
+    const autoCreated = await configCenter.updateWorkspaceConfig({ workspaceDirectory: missing });
+    const settingsRaw = JSON.parse(await fs.readFile(settingsStore.settingsPath, "utf8")) as { workspaceDirectory?: string };
+
+    assert.equal(defaultWorkspace.workspaceDirectory, path.join(os.homedir(), ".agentarbor", "workspace"));
+    assert.equal(updated.workspaceDirectory, path.resolve(workspace));
+    assert.equal(autoCreated.workspaceDirectory, path.resolve(missing));
+    assert.equal(settingsRaw.workspaceDirectory, path.resolve(missing));
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+    await fs.rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("ConfigCenter resolves explicit config directory outside tests", async () => {
   const directory = path.join(os.tmpdir(), "agentarbor-explicit-config");
   const resolved = resolveAgentArborConfigDirectory({

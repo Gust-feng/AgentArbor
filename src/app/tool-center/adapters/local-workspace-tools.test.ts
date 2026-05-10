@@ -1,12 +1,16 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import {
+  createLocalEditFileTool,
   createLocalGrepFilesTool,
   createLocalListDirTool,
   createLocalReadFileTool,
+  createLocalRunCommandTool,
+  createLocalWorkspaceSandboxPolicy,
+  createLocalWriteFileTool,
 } from "./local-workspace-tools.js";
 
 const context = { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" };
@@ -48,6 +52,89 @@ test("local read_file rejects paths outside workspace", async () => {
     await assert.rejects(
       () => readFile.execute({ path: "../outside.txt" }, context),
       /outside the workspace boundary/
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("local write_file and edit_file stay inside the local strategy sandbox", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tools-"));
+  try {
+    const writeFileTool = createLocalWriteFileTool(root);
+    const editFile = createLocalEditFileTool(root);
+
+    const written = await writeFileTool.execute({ path: "notes/result.md", content: "# Title\n\nbody\n" }, context);
+    const edited = await editFile.execute({ path: "notes/result.md", oldText: "body", newText: "updated body" }, context);
+
+    assert.equal(asRecord(written).action, "write_file");
+    assert.equal(asRecord(written).refId, "workspace:file:notes/result.md");
+    assert.equal(asRecord(edited).action, "edit_file");
+    assert.equal(await readFile(path.join(root, "notes", "result.md"), "utf8"), "# Title\n\nupdated body\n");
+
+    await assert.rejects(
+      () => writeFileTool.execute({ path: "../outside.md", content: "nope" }, context),
+      /outside the workspace boundary/
+    );
+    await assert.rejects(
+      () => writeFileTool.execute({ path: ".trellis/local.md", content: "nope" }, context),
+      /blocked workspace path/
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("local run_command uses policy allowlists and internal workspace commands", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tools-"));
+  try {
+    await mkdir(path.join(root, "src"));
+    await writeFile(path.join(root, "src", "note.txt"), "alpha", "utf8");
+    const runCommand = createLocalRunCommandTool(root);
+
+    const echoed = await runCommand.execute({ command: "echo", args: ["hello", "workspace"] }, context);
+    const listed = await runCommand.execute({ command: "dir", args: ["src"] }, context);
+    const typed = await runCommand.execute({ command: "type", args: ["src/note.txt"] }, context);
+
+    assert.equal(asRecord(echoed).action, "run_command");
+    assert.match(String(asRecord(asRecord(echoed).result).stdout), /hello workspace/);
+    assert.match(String(asRecord(asRecord(listed).result).stdout), /note\.txt/);
+    assert.match(String(asRecord(asRecord(typed).result).stdout), /alpha/);
+    await assert.rejects(
+      () => runCommand.execute({ command: "git", args: ["checkout", "--", "."] }, context),
+      /read-only git commands/
+    );
+    await assert.rejects(
+      () => runCommand.execute({ command: "powershell", args: ["-Command", "Get-ChildItem"] }, context),
+      /rejected command/
+    );
+    await assert.rejects(
+      () => runCommand.execute({ command: path.join(root, "git"), args: ["status"] }, context),
+      /bare command name/
+    );
+    await assert.rejects(
+      () => runCommand.execute({ command: "git", args: ["--git-dir=../other/.git", "status"] }, context),
+      /outside the local workspace boundary/
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("local strategy sandbox can disable writes and command execution", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tools-"));
+  try {
+    const sandboxPolicy = createLocalWorkspaceSandboxPolicy({ allowWrite: false, allowExecute: false });
+    const writeFileTool = createLocalWriteFileTool(root, { sandboxPolicy });
+    const runCommand = createLocalRunCommandTool(root, { sandboxPolicy });
+
+    await assert.rejects(
+      () => writeFileTool.execute({ path: "note.txt", content: "nope" }, context),
+      /does not allow local file writes/
+    );
+    await assert.rejects(
+      () => runCommand.execute({ command: "echo", args: ["nope"] }, context),
+      /does not allow local command execution/
     );
   } finally {
     await rm(root, { recursive: true, force: true });

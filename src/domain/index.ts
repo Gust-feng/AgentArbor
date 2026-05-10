@@ -4,6 +4,7 @@ export * from "./config/index.js";
 export * from "./intelligence/index.js";
 export * from "./observation/index.js";
 export * from "./research/index.js";
+export * from "./runtime-database/index.js";
 export * from "./soil/index.js";
 export * from "./tools/index.js";
 export * from "./underground/index.js";

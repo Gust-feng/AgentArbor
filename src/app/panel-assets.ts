@@ -1288,6 +1288,41 @@ export function createPanelHtml(): string {
       white-space: pre-wrap;
     }
 
+    .assistant-markdown p,
+    .assistant-markdown ul,
+    .assistant-markdown pre,
+    .assistant-markdown h3,
+    .assistant-markdown h4,
+    .assistant-markdown h5,
+    .assistant-markdown h6 {
+      margin: 6px 0;
+    }
+
+    .assistant-markdown pre {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #f8fafc;
+      padding: 10px 12px;
+      overflow-x: auto;
+    }
+
+    .assistant-markdown .inline-code {
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #f8fafc;
+      padding: 1px 5px;
+    }
+
+    .assistant-markdown .assistant-link {
+      color: var(--blue);
+      text-decoration: underline;
+      text-underline-offset: 2px;
+    }
+
+    .assistant-markdown ul {
+      padding-left: 18px;
+    }
+
     .tool-detail-list {
       display: grid;
       gap: 8px;
@@ -2228,6 +2263,9 @@ export function createPanelHtml(): string {
                 <label>结果数 <input id="tavilyMaxResultsInput" type="number" min="1" max="10" step="1"></label>
                 <button id="saveToolConfigButton">保存工具配置</button>
                 <div class="hint" id="toolConfigStatus">工具配置未加载。</div>
+                <label class="wide-field">AgentArbor 工作目录 <input id="workspaceDirectoryInput" type="text" autocomplete="off" placeholder="例如：Z:\\AgentArbor"></label>
+                <button id="saveWorkspaceConfigButton">保存工作目录</button>
+                <div class="hint" id="workspaceConfigStatus">工作目录未加载。</div>
               </div>
             </div>
           </section>
@@ -2303,6 +2341,7 @@ export function createPanelHtml(): string {
       config: undefined,
       informationAccess: undefined,
       tools: undefined,
+      workspace: undefined,
       currentConversationId: undefined,
       currentRunId: undefined,
       queuedRunIds: new Set(),
@@ -2368,6 +2407,9 @@ export function createPanelHtml(): string {
       webSearchProviderInput: document.getElementById("webSearchProviderInput"),
       tavilyKeyInput: document.getElementById("tavilyKeyInput"),
       tavilyMaxResultsInput: document.getElementById("tavilyMaxResultsInput"),
+      workspaceDirectoryInput: document.getElementById("workspaceDirectoryInput"),
+      saveWorkspaceConfigButton: document.getElementById("saveWorkspaceConfigButton"),
+      workspaceConfigStatus: document.getElementById("workspaceConfigStatus"),
       saveToolConfigButton: document.getElementById("saveToolConfigButton"),
       toolConfigStatus: document.getElementById("toolConfigStatus"),
       inspectorTabs: Array.from(document.querySelectorAll(".inspector-tab")),
@@ -2398,6 +2440,7 @@ export function createPanelHtml(): string {
     dom.sidebarToggleButton.addEventListener("click", toggleSidebar);
     dom.saveConfigButton.addEventListener("click", saveModelConfig);
     dom.saveToolConfigButton.addEventListener("click", saveToolConfig);
+    dom.saveWorkspaceConfigButton.addEventListener("click", saveWorkspaceConfig);
     dom.profileMenuButton.addEventListener("click", toggleAccountMenu);
     dom.accountProfileButton.addEventListener("click", showAccountProfilePlaceholder);
     dom.accountSettingsButton.addEventListener("click", openSettingsPanel);
@@ -2777,11 +2820,14 @@ export function createPanelHtml(): string {
         const result = await requestJson("/api/config");
         state.config = result.config;
         state.informationAccess = result.informationAccess;
+        state.workspace = result.workspace;
         dom.baseUrlInput.value = result.config.baseUrl || "";
         dom.modelInput.value = result.config.model || "";
         dom.defaultAiModeInput.value = result.config.defaultAiMode || "openai-compatible";
+        dom.workspaceDirectoryInput.value = result.workspace && result.workspace.workspaceDirectory ? result.workspace.workspaceDirectory : "";
         dom.aiMode.value = preferredRunMode();
         renderProviderStatus();
+        renderWorkspaceStatus();
       } catch (error) {
         dom.configStatus.textContent = "模型配置读取失败。";
         dom.configStatus.className = "hint error";
@@ -2847,6 +2893,26 @@ export function createPanelHtml(): string {
       } catch (error) {
         dom.toolConfigStatus.textContent = error.message;
         dom.toolConfigStatus.className = "hint error";
+      } finally {
+        setButtons(true);
+      }
+    }
+
+    async function saveWorkspaceConfig() {
+      setButtons(false);
+      try {
+        const result = await requestJson("/api/config/workspace", {
+          method: "POST",
+          body: {
+            workspaceDirectory: dom.workspaceDirectoryInput.value
+          }
+        });
+        state.workspace = result.workspace;
+        dom.workspaceDirectoryInput.value = result.workspace.workspaceDirectory || "";
+        renderWorkspaceStatus();
+      } catch (error) {
+        dom.workspaceConfigStatus.textContent = error.message;
+        dom.workspaceConfigStatus.className = "hint error";
       } finally {
         setButtons(true);
       }
@@ -3684,7 +3750,7 @@ export function createPanelHtml(): string {
           return { text: visible, controls };
         }
         const opening = tail.slice(0, openEnd + 1);
-        if (/^<\\s*\\//.test(opening) || /\\/\\s*>$/.test(opening)) {
+        if (new RegExp("^<\\\\s*\\\\/").test(opening) || new RegExp("\\\\\\\\s*>$").test(opening)) {
             buffer = tail.slice(openEnd + 1);
             continue;
         }
@@ -3889,7 +3955,7 @@ export function createPanelHtml(): string {
           return;
         }
         visibleBlocks.slice(0, 4).forEach((block) => {
-          blocks.push(resultHead(block.title || "结果", block.summary || answer.answer));
+          blocks.push(resultHead(block.title || "结果", block.summary || answer.answer, true));
           if (block.kind === "tool_summary") {
             const toolDetails = localToolDetailsFromActivity(canvas.agent.activity || []);
             if (toolDetails.length > 0) {
@@ -3945,13 +4011,23 @@ export function createPanelHtml(): string {
       if (!Array.isArray(activity)) return [];
       return activity
         .filter((item) => item && (item.type === "tool_completed" || item.type === "tool_failed"))
-        .filter((item) => ["read_file", "list_dir", "grep_files"].includes(item.toolName))
+        .filter((item) => ["read_file", "list_dir", "grep_files", "write_file", "edit_file", "run_command"].includes(item.toolName))
         .map((item) => ({
-          title: item.toolName === "read_file" ? "读取文件" : item.toolName === "list_dir" ? "列出目录" : "搜索文件",
+          title: localToolNameLabel(item.toolName),
           summary: item.summary || "工具已执行。",
           status: item.status || "completed",
         }))
         .slice(0, 6);
+    }
+
+    function localToolNameLabel(toolName) {
+      if (toolName === "read_file") return "读取文件";
+      if (toolName === "list_dir") return "列出目录";
+      if (toolName === "grep_files") return "搜索文件";
+      if (toolName === "write_file") return "写入文件";
+      if (toolName === "edit_file") return "编辑文件";
+      if (toolName === "run_command") return "执行命令";
+      return toolName || "本地工具";
     }
 
     function toolDetailSection(details) {
@@ -3977,7 +4053,7 @@ export function createPanelHtml(): string {
       return section;
     }
 
-    function resultHead(title, summary) {
+    function resultHead(title, summary, markdown) {
       const head = document.createElement("div");
       head.className = "result-head";
       const kicker = document.createElement("span");
@@ -3987,7 +4063,11 @@ export function createPanelHtml(): string {
       h.textContent = title || "工作结果";
       const body = document.createElement("div");
       body.className = "summary-box";
-      body.textContent = summary || "结果已生成。";
+      if (markdown) {
+        body.replaceChildren(renderAssistantMarkdown(summary || "结果已生成。"));
+      } else {
+        body.textContent = summary || "结果已生成。";
+      }
       head.append(kicker, h, body);
       return head;
     }
@@ -4568,6 +4648,17 @@ export function createPanelHtml(): string {
       dom.toolConfigStatus.className = "hint";
     }
 
+    function renderWorkspaceStatus() {
+      const workspace = state.workspace;
+      if (!workspace) {
+        dom.workspaceConfigStatus.textContent = "工作目录未加载。";
+        dom.workspaceConfigStatus.className = "hint";
+        return;
+      }
+      dom.workspaceConfigStatus.textContent = "当前工作目录：" + workspace.workspaceDirectory;
+      dom.workspaceConfigStatus.className = "hint";
+    }
+
     function renderConversationList() {
       const conversations = Array.isArray(state.conversations) ? state.conversations.slice(0, 8) : [];
       if (conversations.length === 0) {
@@ -4807,6 +4898,233 @@ export function createPanelHtml(): string {
         throw new Error(body.error && body.error.message ? body.error.message : body.message || "请求失败。");
       }
       return body;
+    }
+
+    function isMarkdownCodeFence(line) {
+      const value = typeof line === "string" ? line : "";
+      if (value.length < 3) return false;
+      return value.charCodeAt(0) === 96 && value.charCodeAt(1) === 96 && value.charCodeAt(2) === 96;
+    }
+
+    function isMarkdownListLine(line) {
+      const trimmed = typeof line === "string" ? line.trimStart() : "";
+      if (trimmed.length < 2) return false;
+      const code = trimmed.charCodeAt(0);
+      return (code === 45 || code === 42 || code === 43) && trimmed.charCodeAt(1) === 32;
+    }
+
+    function trimMarkdownListPrefix(line) {
+      const trimmed = (typeof line === "string" ? line : "").trimStart();
+      if (trimmed.length >= 2 && (trimmed.charCodeAt(0) === 45 || trimmed.charCodeAt(0) === 42 || trimmed.charCodeAt(0) === 43) && trimmed.charCodeAt(1) === 32) {
+        return trimmed.slice(2);
+      }
+      return line;
+    }
+
+    function isMarkdownHeadingLine(line) {
+      const text = typeof line === "string" ? line : "";
+      if (text.length < 3 || text[0] !== "#") return false;
+      let level = 0;
+      while (level < text.length && text[level] === "#") {
+        level += 1;
+      }
+      if (level < 1 || level > 3) return false;
+      return level < text.length && text[level] === " ";
+    }
+
+    function parseMarkdownHeadingLine(line) {
+      const text = typeof line === "string" ? line : "";
+      let level = 0;
+      while (level < text.length && text.charCodeAt(level) === 35) {
+        level += 1;
+      }
+      return {
+        level: Math.min(3, Math.max(1, level)) + 2,
+        text: trimLeadingSpaces(text.slice(level)),
+      };
+    }
+
+    function trimLeadingSpaces(value) {
+      let i = 0;
+      while (i < value.length && value.charCodeAt(i) === 32) {
+        i += 1;
+      }
+      return value.slice(i);
+    }
+
+    function renderAssistantMarkdown(text) {
+      const container = document.createElement("div");
+      container.className = "assistant-markdown";
+      const lines = String(text || "").replace(/\\r\\n/g, "\\n").split("\\n");
+      let paragraph = [];
+      let list = undefined;
+      let codeLines = undefined;
+
+      function flushParagraph() {
+        if (paragraph.length === 0) return;
+        const p = document.createElement("p");
+        appendInlineMarkdown(p, paragraph.join(" "));
+        container.append(p);
+        paragraph = [];
+      }
+
+      function flushList() {
+        if (!list) return;
+        container.append(list);
+        list = undefined;
+      }
+
+      function flushCodeBlock() {
+        if (!codeLines) return;
+        const pre = document.createElement("pre");
+        const code = document.createElement("code");
+        code.textContent = codeLines.join("\\n");
+        pre.append(code);
+        container.append(pre);
+        codeLines = undefined;
+      }
+
+      lines.forEach((line) => {
+        if (codeLines) {
+          if (isMarkdownCodeFence(line)) {
+            flushCodeBlock();
+          } else {
+            codeLines.push(line);
+          }
+          return;
+        }
+        if (isMarkdownCodeFence(line)) {
+          flushParagraph();
+          flushList();
+          codeLines = [];
+          return;
+        }
+        if (line.trim().length === 0) {
+          flushParagraph();
+          flushList();
+          return;
+        }
+        if (isMarkdownHeadingLine(line)) {
+          flushParagraph();
+          flushList();
+          const heading = parseMarkdownHeadingLine(line);
+          const element = document.createElement("h" + heading.level);
+          appendInlineMarkdown(element, heading.text);
+          container.append(element);
+          return;
+        }
+        if (isMarkdownListLine(line)) {
+          flushParagraph();
+          if (!list) {
+            list = document.createElement("ul");
+          }
+          const item = document.createElement("li");
+          appendInlineMarkdown(item, trimMarkdownListPrefix(line));
+          list.append(item);
+          return;
+        }
+        flushList();
+        paragraph.push(line.trim());
+      });
+
+      flushParagraph();
+      flushList();
+      flushCodeBlock();
+      if (container.childNodes.length === 0) {
+        const p = document.createElement("p");
+        p.textContent = "结果已生成。";
+        container.append(p);
+      }
+      return container;
+    }
+
+    function appendInlineMarkdown(parent, text) {
+      const input = typeof text === "string" ? text : "";
+      let index = 0;
+      while (index < input.length) {
+        const next = findNextInlineMarker(input, index);
+        if (next === -1) {
+          appendText(parent, input.slice(index));
+          return;
+        }
+        appendText(parent, input.slice(index, next));
+        if (input[next] === "\`") {
+          const end = input.indexOf("\`", next + 1);
+          if (end === -1) {
+            appendText(parent, input.slice(next));
+            return;
+          }
+          const code = document.createElement("code");
+          code.className = "inline-code";
+          code.textContent = input.slice(next + 1, end);
+          parent.append(code);
+          index = end + 1;
+          continue;
+        }
+        if (input.slice(next, next + 2) === "**") {
+          const end = input.indexOf("**", next + 2);
+          if (end === -1) {
+            appendText(parent, input.slice(next));
+            return;
+          }
+          const strong = document.createElement("strong");
+          strong.textContent = input.slice(next + 2, end);
+          parent.append(strong);
+          index = end + 2;
+          continue;
+        }
+        if (input[next] === "[") {
+          const parsed = parseMarkdownLink(input, next);
+          if (!parsed) {
+            appendText(parent, input[next]);
+            index = next + 1;
+            continue;
+          }
+          if (isSafeAssistantLink(parsed.url)) {
+            const link = document.createElement("a");
+            link.className = "assistant-link";
+            link.href = parsed.url;
+            link.target = "_blank";
+            link.rel = "noreferrer noopener";
+            link.textContent = parsed.label || parsed.url;
+            parent.append(link);
+          } else {
+            appendText(parent, parsed.label || parsed.url);
+          }
+          index = parsed.end;
+          continue;
+        }
+        appendText(parent, input[next]);
+        index = next + 1;
+      }
+    }
+
+    function appendText(parent, value) {
+      if (!value) return;
+      parent.append(document.createTextNode(value));
+    }
+
+    function findNextInlineMarker(input, start) {
+      const markers = ["\`", "**", "["]
+        .map((marker) => input.indexOf(marker, start))
+        .filter((position) => position >= 0);
+      return markers.length === 0 ? -1 : Math.min.apply(Math, markers);
+    }
+
+    function parseMarkdownLink(input, start) {
+      const labelEnd = input.indexOf("]", start + 1);
+      if (labelEnd === -1 || input[labelEnd + 1] !== "(") return undefined;
+      const urlEnd = input.indexOf(")", labelEnd + 2);
+      if (urlEnd === -1) return undefined;
+      return {
+        label: input.slice(start + 1, labelEnd),
+        url: input.slice(labelEnd + 2, urlEnd),
+        end: urlEnd + 1,
+      };
+    }
+
+    function isSafeAssistantLink(url) {
+      return /^https?:\/\//i.test(String(url || ""));
     }
 
     function compact(value, maxLength) {

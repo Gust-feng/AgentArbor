@@ -513,6 +513,27 @@ export function createPanelHtml(): string {
       font-weight: 600;
     }
 
+    .workspace-prompt {
+      display: none;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      margin-top: 18px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .workspace-prompt.open {
+      display: flex;
+    }
+
+    .workspace-prompt button {
+      min-height: 28px;
+      padding: 0 10px;
+      border-radius: 8px;
+      font-size: 12px;
+    }
+
     .mini-plus {
       min-width: 28px;
       min-height: 28px;
@@ -609,6 +630,35 @@ export function createPanelHtml(): string {
       white-space: nowrap;
       color: var(--nav-muted);
       font-size: 12px;
+    }
+
+    .run-submeta {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-top: 5px;
+      color: var(--nav-muted);
+      font-size: 11px;
+      white-space: nowrap;
+    }
+
+    .run-status-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 999px;
+      background: #98a2b3;
+    }
+
+    .run-status-dot.running {
+      background: #0ea5e9;
+    }
+
+    .run-status-dot.completed {
+      background: #16a34a;
+    }
+
+    .run-status-dot.failed {
+      background: #ef4444;
     }
 
     .sidebar-bottom {
@@ -1352,6 +1402,21 @@ export function createPanelHtml(): string {
       white-space: pre-wrap;
     }
 
+    .tool-detail-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .tool-detail-tag {
+      border: 1px solid #e4e8f0;
+      border-radius: 999px;
+      background: #f8fafc;
+      padding: 2px 7px;
+    }
+
     .artifact-preview {
       display: grid;
       gap: 14px;
@@ -2088,6 +2153,10 @@ export function createPanelHtml(): string {
                       <span>在忙什么呢？</span>
                     </div>
                   </div>
+                  <div class="workspace-prompt" id="workspaceEmptyPrompt">
+                    <span id="workspaceEmptyText">先选择一个工作文件夹，后续读取和写入都在这个范围内。</span>
+                    <button class="ghost" type="button" id="workspaceEmptySelectButton">选择文件夹</button>
+                  </div>
                 </div>
                 <section class="transcript" id="transcript" aria-label="对话内容">
                   <div class="empty-transcript"></div>
@@ -2264,6 +2333,7 @@ export function createPanelHtml(): string {
                 <button id="saveToolConfigButton">保存工具配置</button>
                 <div class="hint" id="toolConfigStatus">工具配置未加载。</div>
                 <label class="wide-field">AgentArbor 工作目录 <input id="workspaceDirectoryInput" type="text" autocomplete="off" placeholder="例如：Z:\\AgentArbor"></label>
+                <button id="selectWorkspaceDirectoryButton" type="button">选择文件夹</button>
                 <button id="saveWorkspaceConfigButton">保存工作目录</button>
                 <div class="hint" id="workspaceConfigStatus">工作目录未加载。</div>
               </div>
@@ -2371,6 +2441,9 @@ export function createPanelHtml(): string {
       mainCanvas: document.getElementById("mainCanvas"),
       transcript: document.getElementById("transcript"),
       introBlock: document.getElementById("introBlock"),
+      workspaceEmptyPrompt: document.getElementById("workspaceEmptyPrompt"),
+      workspaceEmptyText: document.getElementById("workspaceEmptyText"),
+      workspaceEmptySelectButton: document.getElementById("workspaceEmptySelectButton"),
       intentField: document.getElementById("intentField"),
       backstageHandoff: document.getElementById("backstageHandoff"),
       composerBox: document.querySelector(".composer-box"),
@@ -2408,6 +2481,7 @@ export function createPanelHtml(): string {
       tavilyKeyInput: document.getElementById("tavilyKeyInput"),
       tavilyMaxResultsInput: document.getElementById("tavilyMaxResultsInput"),
       workspaceDirectoryInput: document.getElementById("workspaceDirectoryInput"),
+      selectWorkspaceDirectoryButton: document.getElementById("selectWorkspaceDirectoryButton"),
       saveWorkspaceConfigButton: document.getElementById("saveWorkspaceConfigButton"),
       workspaceConfigStatus: document.getElementById("workspaceConfigStatus"),
       saveToolConfigButton: document.getElementById("saveToolConfigButton"),
@@ -2440,6 +2514,12 @@ export function createPanelHtml(): string {
     dom.sidebarToggleButton.addEventListener("click", toggleSidebar);
     dom.saveConfigButton.addEventListener("click", saveModelConfig);
     dom.saveToolConfigButton.addEventListener("click", saveToolConfig);
+    dom.selectWorkspaceDirectoryButton.addEventListener("click", selectWorkspaceDirectory);
+    dom.workspaceEmptySelectButton.addEventListener("click", () => {
+      openSettingsPanel();
+      setSettingsTab("tools");
+      void selectWorkspaceDirectory();
+    });
     dom.saveWorkspaceConfigButton.addEventListener("click", saveWorkspaceConfig);
     dom.profileMenuButton.addEventListener("click", toggleAccountMenu);
     dom.accountProfileButton.addEventListener("click", showAccountProfilePlaceholder);
@@ -2918,6 +2998,28 @@ export function createPanelHtml(): string {
       }
     }
 
+    async function selectWorkspaceDirectory() {
+      setButtons(false);
+      try {
+        const result = await requestJson("/api/config/workspace/select-directory", {
+          method: "POST"
+        });
+        if (result.status === "cancelled") {
+          dom.workspaceConfigStatus.textContent = result.message || "已取消选择文件夹。";
+          dom.workspaceConfigStatus.className = "hint";
+          return;
+        }
+        state.workspace = result.workspace;
+        dom.workspaceDirectoryInput.value = result.workspace && result.workspace.workspaceDirectory ? result.workspace.workspaceDirectory : "";
+        renderWorkspaceStatus();
+      } catch (error) {
+        dom.workspaceConfigStatus.textContent = error.message || "当前环境不支持系统选择器，请手动输入路径。";
+        dom.workspaceConfigStatus.className = "hint error";
+      } finally {
+        setButtons(true);
+      }
+    }
+
     async function startRun(requestedRunMode) {
       if (state.isSubmitting) {
         return;
@@ -3250,6 +3352,9 @@ export function createPanelHtml(): string {
         return;
       }
       bindAssistantEntryToResponseRun(response);
+      if (response.restoredFromSnapshot && !response.canvas) {
+        return;
+      }
       if (response.status === "failed") {
         state.assistantStageKey = undefined;
         flushAssistantStreamNow();
@@ -3875,6 +3980,16 @@ export function createPanelHtml(): string {
 
     function renderCanvas(canvas, status, response) {
       if (!canvas) {
+        if (response && response.restoredResult) {
+          dom.mainCanvas.hidden = false;
+          const blocks = [resultHead(response.restoredResult.title, response.restoredResult.summary, true)];
+          const restoredToolDetails = localToolDetailsFromSnapshot(response.snapshot && response.snapshot.toolCalls);
+          if (restoredToolDetails.length > 0) {
+            blocks.push(toolDetailSection(restoredToolDetails));
+          }
+          dom.mainCanvas.replaceChildren(...blocks);
+          return;
+        }
         if (status === "pending" || status === "running" || status === "failed") {
           dom.mainCanvas.hidden = true;
           dom.mainCanvas.replaceChildren();
@@ -3987,10 +4102,9 @@ export function createPanelHtml(): string {
         resultSection("依据", underground.keyEvidenceRefs),
         resultSection("不确定性", underground.uncertainty),
         resultSection("待确认", underground.openQuestions),
-        resultSection("组织概况", [
-          "rootlet " + underground.rootletCount + " 路",
-          "child run " + underground.childRunCount + " 个",
-          "父层综合 " + underground.parentSynthesisCount + " 次",
+        resultSection("处理概况", [
+          "已完成多路检查。",
+          "已汇总关键材料并整理判断。",
           underground.convergenceSummary
         ])
       ];
@@ -4014,8 +4128,28 @@ export function createPanelHtml(): string {
         .filter((item) => ["read_file", "list_dir", "grep_files", "write_file", "edit_file", "run_command"].includes(item.toolName))
         .map((item) => ({
           title: localToolNameLabel(item.toolName),
+          action: item.action || item.toolName,
+          path: item.path,
           summary: item.summary || "工具已执行。",
           status: item.status || "completed",
+          truncated: item.truncated === true,
+          error: item.error,
+        }))
+        .slice(0, 6);
+    }
+
+    function localToolDetailsFromSnapshot(toolCalls) {
+      if (!Array.isArray(toolCalls)) return [];
+      return toolCalls
+        .filter((call) => call && ["read_file", "list_dir", "grep_files", "write_file", "edit_file", "run_command"].includes(call.toolName))
+        .map((call) => ({
+          title: localToolNameLabel(call.toolName),
+          action: call.action || call.toolName,
+          path: call.path,
+          summary: call.summary || "工具已执行。",
+          status: call.status || "completed",
+          truncated: call.truncated === true,
+          error: call.error,
         }))
         .slice(0, 6);
     }
@@ -4034,7 +4168,9 @@ export function createPanelHtml(): string {
       const section = document.createElement("section");
       section.className = "result-section";
       const h = document.createElement("h2");
-      h.textContent = "本地工具";
+      h.textContent = details.some((detail) => detail.action === "write_file" || detail.action === "edit_file")
+        ? "文件变更"
+        : "本地工具";
       const list = document.createElement("ul");
       list.className = "tool-detail-list";
       details.forEach((detail) => {
@@ -4043,14 +4179,32 @@ export function createPanelHtml(): string {
         const title = document.createElement("div");
         title.className = "tool-detail-title";
         title.textContent = detail.title;
+        const meta = document.createElement("div");
+        meta.className = "tool-detail-meta";
+        [
+          detail.path ? "路径：" + detail.path : undefined,
+          "状态：" + localToolStatusLabel(detail.status),
+          detail.truncated ? "输出已截断" : undefined
+        ].filter(Boolean).forEach((value) => {
+          const tag = document.createElement("span");
+          tag.className = "tool-detail-tag";
+          tag.textContent = value;
+          meta.append(tag);
+        });
         const preview = document.createElement("div");
         preview.className = "tool-detail-preview";
-        preview.textContent = compact(detail.summary, 420);
-        item.append(title, preview);
+        preview.textContent = compact(detail.error || detail.summary, 420);
+        item.append(title, meta, preview);
         list.append(item);
       });
       section.append(h, list);
       return section;
+    }
+
+    function localToolStatusLabel(status) {
+      if (status === "failed") return "失败";
+      if (status === "running") return "执行中";
+      return "完成";
     }
 
     function resultHead(title, summary, markdown) {
@@ -4653,10 +4807,14 @@ export function createPanelHtml(): string {
       if (!workspace) {
         dom.workspaceConfigStatus.textContent = "工作目录未加载。";
         dom.workspaceConfigStatus.className = "hint";
+        dom.workspaceEmptyPrompt.classList.add("open");
+        dom.workspaceEmptyText.textContent = "先选择一个工作文件夹，后续读取和写入都在这个范围内。";
         return;
       }
       dom.workspaceConfigStatus.textContent = "当前工作目录：" + workspace.workspaceDirectory;
       dom.workspaceConfigStatus.className = "hint";
+      dom.workspaceEmptyPrompt.classList.add("open");
+      dom.workspaceEmptyText.textContent = "当前工作文件夹：" + compact(workspace.workspaceDirectory, 72);
     }
 
     function renderConversationList() {
@@ -4688,9 +4846,17 @@ export function createPanelHtml(): string {
         const meta = document.createElement("div");
         meta.className = "run-meta";
         meta.textContent = compact(item.preview || "等待消息。", 42);
+        const submeta = document.createElement("div");
+        submeta.className = "run-submeta";
+        const dot = document.createElement("span");
+        dot.className = "run-status-dot " + (item.status || "idle");
+        dot.setAttribute("aria-hidden", "true");
+        const status = document.createElement("span");
+        status.textContent = conversationStatusLabel(item.status) + " · " + relativeTimeLabel(item.updatedAt);
         const body = document.createElement("div");
         body.className = "run-body";
-        body.append(title, meta);
+        submeta.append(dot, status);
+        body.append(title, meta, submeta);
         li.append(createRunSketch(), body);
         li.addEventListener("click", () => {
           void openConversation(item.conversationId);
@@ -4703,6 +4869,25 @@ export function createPanelHtml(): string {
         });
         return li;
       }));
+    }
+
+    function conversationStatusLabel(status) {
+      if (status === "running") return "正在工作";
+      if (status === "completed") return "已完成";
+      if (status === "failed") return "未完成";
+      return "可继续";
+    }
+
+    function relativeTimeLabel(value) {
+      const time = Date.parse(value || "");
+      if (!Number.isFinite(time)) {
+        return "刚刚";
+      }
+      const diff = Date.now() - time;
+      if (diff < 60_000) return "刚刚";
+      if (diff < 3_600_000) return Math.max(1, Math.round(diff / 60_000)) + " 分钟前";
+      if (diff < 86_400_000) return Math.max(1, Math.round(diff / 3_600_000)) + " 小时前";
+      return new Date(time).toLocaleDateString("zh-CN", { month: "2-digit", day: "2-digit" });
     }
 
     function createRunSketch() {
@@ -4869,6 +5054,9 @@ export function createPanelHtml(): string {
       dom.deepRunButton.disabled = !enabled || state.isSubmitting || dom.goalInput.value.trim().length === 0;
       dom.saveConfigButton.disabled = !enabled;
       dom.saveToolConfigButton.disabled = !enabled;
+      dom.selectWorkspaceDirectoryButton.disabled = !enabled;
+      dom.workspaceEmptySelectButton.disabled = !enabled;
+      dom.saveWorkspaceConfigButton.disabled = !enabled;
     }
 
     function stopLiveUpdates() {

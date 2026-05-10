@@ -47,6 +47,7 @@ import type {
   RuntimeEventRecord,
   RuntimeModelCallRecord,
   RuntimeRunRecord,
+  RuntimeRunSnapshot,
   RuntimeToolCallRecord,
   RuntimeWorkspaceRecord,
 } from "../domain/runtime-database/index.js";
@@ -73,7 +74,9 @@ import {
 import { PanelRunJobStore, type PanelDesktopRunMode, type PanelRunJob, type PanelRunKind } from "./panel-run-jobs.js";
 import {
   PanelConversationStore,
+  toRuntimeConversationRecord,
   type PanelConversationReadModel,
+  type PanelConversationSummaryReadModel,
 } from "./panel-conversations.js";
 import type { EventLogEntry } from "../kernel/events/in-memory-event-log.js";
 import type { AgentRunTree } from "../domain/underground/index.js";
@@ -97,6 +100,7 @@ export type PanelServerOptions = {
   readonly configCenter?: ConfigCenter;
   readonly runtimeDatabase?: RuntimeDatabase;
   readonly providerFetch?: PanelProviderFetch;
+  readonly workspaceDirectoryPicker?: () => Promise<string | undefined>;
 };
 
 export type PanelProviderFetch = (
@@ -125,6 +129,7 @@ type PanelRuntime = {
   readonly configCenter: ConfigCenter;
   readonly configDirectory?: string;
   readonly providerFetch?: PanelProviderFetch;
+  readonly workspaceDirectoryPicker?: () => Promise<string | undefined>;
   readonly runJobs: PanelRunJobStore;
   readonly activeRunJobs: Set<Promise<void>>;
   readonly conversations: PanelConversationStore;
@@ -171,6 +176,17 @@ type PanelRunJobResponse = {
     readonly message: string;
   };
   readonly conversation?: PanelConversationReadModel;
+  readonly restoredFromSnapshot?: true;
+  readonly restoredResult?: {
+    readonly title: string;
+    readonly summary: string;
+  };
+  readonly snapshot?: {
+    readonly run: RuntimeRunRecord;
+    readonly workspace?: RuntimeWorkspaceRecord;
+    readonly toolCalls: readonly RuntimeToolCallRecord[];
+    readonly artifacts: readonly RuntimeArtifactRecord[];
+  };
 };
 
 type PanelRunExecutionResult = {
@@ -244,6 +260,7 @@ function createPanelRuntime(options: PanelServerOptions): PanelRuntime {
       configCenter: options.configCenter,
       configDirectory: options.configDirectory,
       providerFetch: options.providerFetch,
+      workspaceDirectoryPicker: options.workspaceDirectoryPicker,
       runJobs: new PanelRunJobStore(),
       activeRunJobs: new Set<Promise<void>>(),
       conversations: new PanelConversationStore(),
@@ -256,6 +273,7 @@ function createPanelRuntime(options: PanelServerOptions): PanelRuntime {
     configCenter: local.configCenter,
     configDirectory: local.configDirectory,
     providerFetch: options.providerFetch,
+    workspaceDirectoryPicker: options.workspaceDirectoryPicker,
     runJobs: new PanelRunJobStore(),
     activeRunJobs: new Set<Promise<void>>(),
     conversations: new PanelConversationStore(),
@@ -384,6 +402,37 @@ async function handlePanelRequest(
     return;
   }
 
+  if (request.method === "POST" && url.pathname === "/api/config/workspace/select-directory") {
+    if (runtime.workspaceDirectoryPicker === undefined) {
+      throw new PanelHttpError(501, "workspace_picker_unavailable", "当前环境不支持系统文件夹选择器，请手动输入工作文件夹路径。");
+    }
+    const selectedDirectory = await runtime.workspaceDirectoryPicker();
+    if (selectedDirectory === undefined) {
+      writeJson(response, 200, {
+        ok: true,
+        status: "cancelled",
+        message: "已取消选择文件夹。",
+        workspace: await runtime.configCenter.getWorkspaceConfig(),
+      });
+      return;
+    }
+    let workspace;
+    try {
+      workspace = await runtime.configCenter.updateWorkspaceConfig({ workspaceDirectory: selectedDirectory });
+    } catch (error) {
+      if (error instanceof WorkspaceDirectoryValidationError) {
+        throw new PanelHttpError(400, "invalid_workspace_directory", "工作目录必须是已存在的文件夹。");
+      }
+      throw error;
+    }
+    writeJson(response, 200, {
+      ok: true,
+      status: "completed",
+      workspace,
+    });
+    return;
+  }
+
   if (request.method === "POST" && url.pathname === "/api/underground/run") {
     await handleRunRequest(runtime, request, response, "underground");
     return;
@@ -402,7 +451,7 @@ async function handlePanelRequest(
   if (request.method === "GET" && url.pathname === "/api/conversations") {
     writeJson(response, 200, {
       ok: true,
-      conversations: runtime.conversations.list(),
+      conversations: await listPanelConversations(runtime),
     });
     return;
   }
@@ -415,7 +464,7 @@ async function handlePanelRequest(
   const conversationMatch = /^\/api\/conversations\/([^/]+)$/.exec(url.pathname);
   if (request.method === "GET" && conversationMatch !== null) {
     const conversationId = decodeURIComponent(conversationMatch[1] ?? "");
-    const conversation = runtime.conversations.getReadModel(conversationId);
+    const conversation = await getPanelConversation(runtime, conversationId);
     if (conversation === undefined) {
       throw new PanelHttpError(404, "conversation_not_found", "未找到对话。");
     }
@@ -439,13 +488,33 @@ async function handlePanelRequest(
 
   const runMatch = /^\/api\/underground\/runs\/([^/]+)$/.exec(url.pathname);
   if (request.method === "GET" && runMatch !== null) {
-    handleGetRunRequest(runtime, decodeURIComponent(runMatch[1] ?? ""), "underground", response);
+    await handleGetRunRequest(runtime, decodeURIComponent(runMatch[1] ?? ""), "underground", response);
     return;
   }
 
   const desktopRunMatch = /^\/api\/desktop\/runs\/([^/]+)$/.exec(url.pathname);
   if (request.method === "GET" && desktopRunMatch !== null) {
-    handleGetRunRequest(runtime, decodeURIComponent(desktopRunMatch[1] ?? ""), "desktop", response);
+    await handleGetRunRequest(runtime, decodeURIComponent(desktopRunMatch[1] ?? ""), "desktop", response);
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/runtime/runs") {
+    const limit = Number(url.searchParams.get("limit") ?? 50);
+    writeJson(response, 200, {
+      ok: true,
+      runs: (await runtime.runtimeDatabase?.listRuns(Number.isFinite(limit) ? limit : 50)) ?? [],
+    });
+    return;
+  }
+
+  const runtimeRunMatch = /^\/api\/runtime\/runs\/([^/]+)$/.exec(url.pathname);
+  if (request.method === "GET" && runtimeRunMatch !== null) {
+    const runId = decodeURIComponent(runtimeRunMatch[1] ?? "");
+    const snapshot = await runtime.runtimeDatabase?.getRun(runId);
+    if (snapshot === undefined) {
+      throw new PanelHttpError(404, "run_not_found", "未找到持久化运行记录。");
+    }
+    writeJson(response, 200, await createPersistedRunResponse(runtime, snapshot));
     return;
   }
 
@@ -644,17 +713,22 @@ async function handleConversationMessageRequest(
   }
 }
 
-function handleGetRunRequest(
+async function handleGetRunRequest(
   runtime: PanelRuntime,
   runId: string,
   expectedRunKind: PanelRunKind,
   response: ServerResponse
-): void {
+): Promise<void> {
   const job = runtime.runJobs.get(runId);
-  if (job === undefined || job.runKind !== expectedRunKind) {
+  if (job !== undefined && job.runKind === expectedRunKind) {
+    writeJson(response, 200, createPanelRunJobResponse(runtime, job));
+    return;
+  }
+  const snapshot = await runtime.runtimeDatabase?.getRun(runId);
+  if (snapshot === undefined || snapshot.run.runKind !== expectedRunKind) {
     throw new PanelHttpError(404, "run_not_found", runNotFoundMessage(expectedRunKind));
   }
-  writeJson(response, 200, createPanelRunJobResponse(runtime, job));
+  writeJson(response, 200, await createPersistedRunResponse(runtime, snapshot));
 }
 
 function handleGetRunStreamRequest(
@@ -727,6 +801,29 @@ function handleGetRunStreamRequest(
   const interval = setInterval(flush, 100);
   request.on("close", cleanup);
   flush();
+}
+
+async function listPanelConversations(
+  runtime: PanelRuntime,
+  limit = 50
+): Promise<readonly PanelConversationSummaryReadModel[]> {
+  const persisted = (await runtime.runtimeDatabase?.listConversations(limit)) ?? [];
+  for (const record of persisted) {
+    runtime.conversations.restore(record);
+  }
+  return runtime.conversations.list().slice(0, Math.max(0, Math.floor(limit)));
+}
+
+async function getPanelConversation(
+  runtime: PanelRuntime,
+  conversationId: string
+): Promise<PanelConversationReadModel | undefined> {
+  const memory = runtime.conversations.getReadModel(conversationId);
+  if (memory !== undefined) {
+    return memory;
+  }
+  const persisted = await runtime.runtimeDatabase?.getConversation(conversationId);
+  return persisted === undefined ? undefined : runtime.conversations.restore(persisted);
 }
 
 async function executePanelRunJob(runtime: PanelRuntime, runId: string): Promise<void> {
@@ -934,9 +1031,374 @@ function createPanelRunJobResponse(runtime: PanelRuntime, job: PanelRunJob): Pan
   };
 }
 
+async function createPersistedRunResponse(
+  runtime: PanelRuntime,
+  snapshot: RuntimeRunSnapshot
+): Promise<PanelRunJobResponse> {
+  const status = panelStatusFromRuntimeStatus(snapshot.run.status);
+  const config = await runtime.configCenter.getModelProviderConfig();
+  const informationAccess = await runtime.configCenter.getInformationAccessConfig();
+  const trace = createPersistedRunTrace(snapshot, status);
+  const trackingBase = createPanelRunTracking({
+    status,
+    config,
+    informationAccess,
+    requestedMode: snapshot.run.aiMode,
+    eventEntries: [],
+  });
+  const streamEvents = createPersistedStreamEvents(snapshot, status);
+  const conversation =
+    snapshot.run.conversationId === undefined
+      ? undefined
+      : await getPanelConversation(runtime, snapshot.run.conversationId);
+  return {
+    ok: true,
+    runId: snapshot.run.runId,
+    runKind: snapshot.run.runKind,
+    runMode: snapshot.run.runMode,
+    status,
+    config,
+    informationAccess,
+    trace,
+    tracking: {
+      ...trackingBase,
+      run: {
+        ...trackingBase.run,
+        status,
+        phase: trace.currentPhase,
+        stage: trace.currentStage,
+        eventCount: trace.eventCursor.eventCount,
+        lastEventType: trace.eventCursor.lastEventType,
+        waitingPoint: trace.waitingPoint,
+      },
+      modelTotals: countPersistedModelCalls(snapshot.modelCalls),
+      toolTotals: countPersistedToolCalls(snapshot.toolCalls),
+    },
+    transcript: {
+      runId: snapshot.run.runId,
+      status,
+      updatedAt: snapshot.run.updatedAt,
+      events: streamEvents,
+      workNotes: [],
+      modelCalls: snapshot.modelCalls.map((call) => ({
+        requestId: call.requestId,
+        responseId: call.responseId,
+        status: call.status,
+        purpose: call.purpose,
+        outputContractId: call.outputContractId,
+        providerKind: call.providerKind,
+        protocolKind: call.protocolKind,
+        model: call.model,
+        outputKind: call.outputKind,
+        validationStatus: call.validationStatus,
+        failureKind: call.failureKind,
+        retryable: call.retryable,
+        candidateRefs: [],
+        eventRefs: [...call.eventRefs],
+      })),
+    },
+    workNotes: [],
+    streamCursor: {
+      runId: snapshot.run.runId,
+      lastSequence: streamEvents.at(-1)?.sequence ?? 0,
+    },
+    error: snapshot.run.error,
+    conversation,
+    restoredFromSnapshot: true,
+    restoredResult:
+      snapshot.run.resultTitle === undefined && snapshot.run.resultSummary === undefined
+        ? undefined
+        : {
+            title: snapshot.run.resultTitle ?? "上次结果",
+            summary: snapshot.run.resultSummary ?? "结果已经整理完成。",
+          },
+    snapshot: {
+      run: snapshot.run,
+      workspace: snapshot.workspace,
+      toolCalls: snapshot.toolCalls,
+      artifacts: snapshot.artifacts,
+    },
+  };
+}
+
+function createPersistedRunTrace(
+  snapshot: RuntimeRunSnapshot,
+  status: PanelRunStatus
+): PanelRunTraceReadModel {
+  const events = snapshot.events.map((event) => ({
+    sequence: event.sequence,
+    type: event.type,
+    summary: event.summary,
+    scope: event.scope,
+    severity: event.severity,
+    progress: event.progress,
+    refs: event.refs,
+    traceId: event.traceId,
+    taskId: event.taskId,
+    intent: event.intent,
+    from: { id: "runtime-database", role: "runtime" },
+    createdAt: event.createdAt,
+    recordedAt: event.recordedAt,
+  }));
+  const lastEvent = snapshot.events.at(-1);
+  return {
+    status,
+    currentPhase: persistedPhaseFor(lastEvent?.type, status),
+    currentStage: persistedStageFor(lastEvent?.type, status),
+    eventCursor: {
+      eventCount: events.length,
+      lastSequence: lastEvent?.sequence ?? 0,
+      lastEventType: lastEvent?.type,
+    },
+    waitingPoint: persistedWaitingPoint(status),
+    events,
+  };
+}
+
+function createPersistedStreamEvents(
+  snapshot: RuntimeRunSnapshot,
+  status: PanelRunStatus
+): readonly PanelRunStreamEvent[] {
+  const events: PanelRunStreamEvent[] = [
+    {
+      eventId: `${snapshot.run.runId}:restored:run.started`,
+      runId: snapshot.run.runId,
+      sequence: 1,
+      type: "run.started",
+      createdAt: snapshot.run.createdAt,
+      agentLabel: "AgentArbor",
+      summary: "已从本地记录恢复这次运行。",
+      status,
+      sourceRefs: [],
+      modelCallRefs: [],
+      toolCallRefs: [],
+    },
+  ];
+  for (const record of snapshot.events) {
+    const streamType = streamTypeForRuntimeEvent(record.type);
+    if (streamType === undefined) {
+      continue;
+    }
+    events.push({
+      eventId: `${snapshot.run.runId}:restored:event:${record.sequence}:${streamType}`,
+      runId: snapshot.run.runId,
+      sequence: events.length + 1,
+      type: streamType,
+      createdAt: record.recordedAt,
+      agentLabel: streamType.startsWith("tool.") ? "工具" : "AgentArbor",
+      summary: record.summary,
+      status: streamStatusFor(streamType),
+      toolName: toolNameForPersistedEvent(record, snapshot.toolCalls),
+      sourceRefs: record.refs
+        .filter((ref) => ref.kind !== "model_call" && ref.kind !== "tool_call")
+        .map((ref) => `${ref.kind}:${ref.id}`),
+      modelCallRefs: record.refs.filter((ref) => ref.kind === "model_call").map((ref) => ref.id),
+      toolCallRefs: record.refs.filter((ref) => ref.kind === "tool_call").map((ref) => ref.id),
+    });
+  }
+  if (status === "completed") {
+    events.push({
+      eventId: `${snapshot.run.runId}:restored:final.result`,
+      runId: snapshot.run.runId,
+      sequence: events.length + 1,
+      type: "final.result",
+      createdAt: snapshot.run.updatedAt,
+      agentLabel: "AgentArbor",
+      summary: snapshot.run.resultSummary ?? "结果已经整理完成。",
+      status: "completed",
+      sourceRefs: [],
+      modelCallRefs: [],
+      toolCallRefs: snapshot.toolCalls.map((call) => call.callId),
+    });
+  }
+  if (status === "failed") {
+    events.push({
+      eventId: `${snapshot.run.runId}:restored:run.failed`,
+      runId: snapshot.run.runId,
+      sequence: events.length + 1,
+      type: "run.failed",
+      createdAt: snapshot.run.updatedAt,
+      agentLabel: "AgentArbor",
+      summary: friendlyUserFacingFailureText(snapshot.run.error?.message ?? snapshot.run.resultSummary),
+      status: "failed",
+      sourceRefs: [],
+      modelCallRefs: [],
+      toolCallRefs: snapshot.toolCalls.map((call) => call.callId),
+    });
+  }
+  return events;
+}
+
+function panelStatusFromRuntimeStatus(status: RuntimeRunRecord["status"]): PanelRunStatus {
+  if (status === "pending" || status === "running" || status === "completed" || status === "failed") {
+    return status;
+  }
+  return "failed";
+}
+
+function persistedPhaseFor(
+  type: RuntimeEventRecord["type"] | undefined,
+  status: PanelRunStatus
+): PanelRunTraceReadModel["currentPhase"] {
+  if (type === undefined) {
+    return status === "completed" ? "completed" : "not_started";
+  }
+  if (status === "completed") {
+    return "completed";
+  }
+  if (type.startsWith("direction_handoff.")) {
+    return "handoff";
+  }
+  if (
+    type.startsWith("artifact.") ||
+    type.startsWith("task.") ||
+    type.startsWith("workflow.") ||
+    type.startsWith("growth_plan.")
+  ) {
+    return "aboveground";
+  }
+  if (type.startsWith("verification.") || type.startsWith("acceptance.")) {
+    return "verification";
+  }
+  if (type.startsWith("fruit.") || type.startsWith("run_memory.") || type.startsWith("experience_candidate.") || type.startsWith("path_bias.")) {
+    return "fruits";
+  }
+  if (type.startsWith("governance.")) {
+    return "governance";
+  }
+  return type === "goal.received" ? "not_started" : "underground";
+}
+
+function persistedStageFor(
+  type: RuntimeEventRecord["type"] | undefined,
+  status: PanelRunStatus
+): PanelRunTraceReadModel["currentStage"] {
+  if (type === undefined) {
+    return status === "running" ? "running" : "not_started";
+  }
+  const normalized = type.replaceAll(".", "_");
+  if (isPersistedRunStage(normalized)) {
+    return normalized;
+  }
+  return status === "running" ? "running" : "not_started";
+}
+
+function isPersistedRunStage(value: string): value is PanelRunTraceReadModel["currentStage"] {
+  return [
+    "not_started",
+    "goal_received",
+    "model_requested",
+    "model_completed",
+    "model_failed",
+    "tool_requested",
+    "tool_completed",
+    "tool_failed",
+    "agent_delegation_planned",
+    "agent_child_started",
+    "agent_child_completed",
+    "agent_child_interrupted",
+    "agent_child_resumed",
+    "agent_child_waiting",
+    "agent_parent_synthesis_completed",
+    "direction_handoff_completed",
+    "user_approval_requested",
+    "user_approval_received",
+    "artifact_produced",
+    "task_completed",
+    "task_failed",
+    "path_bias_suggested",
+    "running",
+  ].includes(value);
+}
+
+function persistedWaitingPoint(status: PanelRunStatus): string {
+  if (status === "pending") {
+    return "等待开始。";
+  }
+  if (status === "running") {
+    return "运行记录显示仍在进行；如这是重启后的历史记录，需要重新发起后续任务。";
+  }
+  if (status === "failed") {
+    return "运行失败，详情保存在安全摘要中。";
+  }
+  return "运行已完成。";
+}
+
+function streamTypeForRuntimeEvent(type: RuntimeEventRecord["type"]): PanelRunStreamEvent["type"] | undefined {
+  if (type === "model.requested") {
+    return "agent.note.delta";
+  }
+  if (type === "model.completed") {
+    return "model.output.completed";
+  }
+  if (type === "model.failed") {
+    return "agent.note.completed";
+  }
+  if (type === "tool.requested" || type === "tool.completed" || type === "tool.failed") {
+    return type;
+  }
+  if (
+    type === "agent.delegation.planned" ||
+    type === "agent.child.started" ||
+    type === "agent.child.completed" ||
+    type === "agent.child.waiting" ||
+    type === "agent.parent_synthesis.completed"
+  ) {
+    return type;
+  }
+  if (type === "user_approval.requested") {
+    return "confirmation.needed";
+  }
+  if (type === "user_approval.received") {
+    return "user.guidance";
+  }
+  return "agent.note.completed";
+}
+
+function streamStatusFor(type: PanelRunStreamEvent["type"]): NonNullable<PanelRunStreamEvent["status"]> {
+  if (type === "tool.requested" || type === "agent.note.delta" || type === "agent.child.started" || type === "agent.child.waiting") {
+    return "running";
+  }
+  if (type === "tool.failed" || type === "run.failed") {
+    return "failed";
+  }
+  return "completed";
+}
+
+function toolNameForPersistedEvent(
+  event: RuntimeEventRecord,
+  toolCalls: readonly RuntimeToolCallRecord[]
+): string | undefined {
+  const toolRef = event.refs.find((ref) => ref.kind === "tool_call");
+  return toolRef === undefined ? undefined : toolCalls.find((call) => call.callId === toolRef.id)?.toolName;
+}
+
+function countPersistedModelCalls(
+  calls: readonly RuntimeModelCallRecord[]
+): PanelRunTrackingReadModel["modelTotals"] {
+  return {
+    requested: calls.length,
+    completed: calls.filter((call) => call.status === "completed").length,
+    failed: calls.filter((call) => call.status === "failed").length,
+  };
+}
+
+function countPersistedToolCalls(
+  calls: readonly RuntimeToolCallRecord[]
+): PanelRunTrackingReadModel["toolTotals"] {
+  return {
+    requested: calls.length,
+    completed: calls.filter((call) => call.status === "completed").length,
+    failed: calls.filter((call) => call.status === "failed").length,
+  };
+}
+
 async function persistPanelRun(runtime: PanelRuntime, job: PanelRunJob): Promise<void> {
   if (runtime.runtimeDatabase === undefined || runtime.runtimePaths === undefined) {
     return;
+  }
+  if (job.conversationId !== undefined) {
+    await persistPanelConversation(runtime, job.conversationId);
   }
   const workspace = await runtime.configCenter.getWorkspaceConfig().catch(() => undefined);
   const workspaceRecord = workspace === undefined ? undefined : createRuntimeWorkspaceRecord(workspace, job.updatedAt);
@@ -965,8 +1427,16 @@ async function persistPanelRun(runtime: PanelRuntime, job: PanelRunJob): Promise
     job.runId,
     transcript.modelCalls.map((call) => toRuntimeModelCallRecord(job.runId, call))
   );
-  await runtime.runtimeDatabase.replaceToolCalls(job.runId, toRuntimeToolCallRecords(job.runId, streamEvents));
+  await runtime.runtimeDatabase.replaceToolCalls(job.runId, toRuntimeToolCallRecords(job.runId, streamEvents, eventEntries));
   await runtime.runtimeDatabase.replaceArtifacts(job.runId, toRuntimeArtifactRecords(job));
+}
+
+async function persistPanelConversation(runtime: PanelRuntime, conversationId: string): Promise<void> {
+  const conversation = runtime.conversations.getReadModel(conversationId);
+  if (conversation === undefined || runtime.runtimeDatabase === undefined) {
+    return;
+  }
+  await runtime.runtimeDatabase.upsertConversation(toRuntimeConversationRecord(conversation));
 }
 
 function createRuntimeWorkspaceRecord(
@@ -993,6 +1463,7 @@ function createRuntimeRunRecord(
     runtime.runtimePaths === undefined
       ? ""
       : path.join(runtime.runtimePaths.runtimeHome, "runs", encodeURIComponent(job.runId));
+  const restoredResult = resultSummaryForJob(job);
   return {
     runId: job.runId,
     profile: "lite",
@@ -1011,8 +1482,63 @@ function createRuntimeRunRecord(
     createdAt: job.createdAt,
     updatedAt: job.updatedAt,
     completedAt: job.status === "completed" || job.status === "failed" ? job.updatedAt : undefined,
+    resultTitle: restoredResult?.title,
+    resultSummary: restoredResult?.summary,
     error: job.failed?.error,
   };
+}
+
+function resultSummaryForJob(job: PanelRunJob): { readonly title: string; readonly summary: string } | undefined {
+  if (job.failed !== undefined) {
+    return {
+      title: "这次没有完成",
+      summary: compactRuntimeText(job.failed.error.message, 900),
+    };
+  }
+  const canvas = job.completed?.canvas;
+  if (canvas?.kind === "desktop_agent_canvas" && canvas.agent.answer !== undefined) {
+    return {
+      title: canvas.agent.pendingConfirmation === undefined ? "已完成" : "需要确认",
+      summary: compactRuntimeText(canvas.agent.answer.answer, 900),
+    };
+  }
+  if (canvas?.kind === "desktop_agent_canvas" && canvas.agent.pendingConfirmation !== undefined) {
+    return {
+      title: "需要确认",
+      summary: compactRuntimeText(
+        `${canvas.agent.pendingConfirmation.question} ${canvas.agent.pendingConfirmation.consequence}`,
+        900
+      ),
+    };
+  }
+  if (canvas?.kind === "work_session_canvas" && canvas.workSession.directAnswer !== undefined) {
+    return {
+      title: "已回答",
+      summary: compactRuntimeText(canvas.workSession.directAnswer.answer, 900),
+    };
+  }
+  if (canvas?.kind === "work_session_canvas" && canvas.workSession.report !== undefined) {
+    return {
+      title: canvas.workSession.report.title,
+      summary: compactRuntimeText(canvas.workSession.report.decisionSummary, 900),
+    };
+  }
+  if (canvas?.kind === "underground_deep_canvas") {
+    return {
+      title: canvas.underground.status === "approved_package_created" ? "方向已形成" : "深度模式已停止",
+      summary: compactRuntimeText(
+        canvas.underground.recommendedDirection.reason || canvas.underground.convergenceSummary,
+        900
+      ),
+    };
+  }
+  if (job.status === "completed") {
+    return {
+      title: "结果已生成",
+      summary: "结果已经整理完成。",
+    };
+  }
+  return undefined;
 }
 
 function toRuntimeEventRecord(
@@ -1061,8 +1587,10 @@ function toRuntimeModelCallRecord(
 
 function toRuntimeToolCallRecords(
   runId: string,
-  events: readonly PanelRunStreamEvent[]
+  events: readonly PanelRunStreamEvent[],
+  eventEntries: readonly EventLogEntry[]
 ): readonly RuntimeToolCallRecord[] {
+  const detailsByCallId = localToolDetailsByCallId(eventEntries);
   const calls = new Map<string, RuntimeToolCallRecord>();
   for (const event of events) {
     if (!event.type.startsWith("tool.")) {
@@ -1070,17 +1598,51 @@ function toRuntimeToolCallRecords(
     }
     for (const callId of event.toolCallRefs) {
       const previous = calls.get(callId);
+      const detail = detailsByCallId.get(callId);
       calls.set(callId, {
         callId,
         runId,
         toolName: event.toolName ?? previous?.toolName,
         status: mergeToolStatus(previous?.status, event.type),
-        eventRefs: unique([...(previous?.eventRefs ?? []), ...event.sourceRefs]),
+        action: detail?.action ?? previous?.action,
+        path: detail?.path ?? previous?.path,
+        summary: detail?.summary ?? previous?.summary,
+        truncated: detail?.truncated ?? previous?.truncated,
+        error: detail?.error ?? previous?.error,
+        eventRefs: unique([...(previous?.eventRefs ?? []), event.eventId]),
         createdAt: previous?.createdAt ?? event.createdAt,
       });
     }
   }
   return [...calls.values()];
+}
+
+function localToolDetailsByCallId(
+  eventEntries: readonly EventLogEntry[]
+): Map<string, Pick<RuntimeToolCallRecord, "action" | "path" | "summary" | "truncated" | "error">> {
+  const details = new Map<string, Pick<RuntimeToolCallRecord, "action" | "path" | "summary" | "truncated" | "error">>();
+  for (const entry of eventEntries) {
+    if (entry.type !== "tool.completed" && entry.type !== "tool.failed") {
+      continue;
+    }
+    const payload = asRecord(entry.message.payload);
+    const callId = optionalString(payload.callId);
+    if (callId === undefined) {
+      continue;
+    }
+    const output = asRecord(payload.output);
+    const input = asRecord(payload.input);
+    const result = asRecord(output.result);
+    const pathValue = optionalString(result.path) ?? optionalString(input.path);
+    details.set(callId, {
+      action: optionalString(output.action) ?? optionalString(payload.toolName),
+      path: pathValue,
+      summary: optionalString(output.summary),
+      truncated: output.truncated === true,
+      error: optionalString(payload.error),
+    });
+  }
+  return details;
 }
 
 function toRuntimeArtifactRecords(job: PanelRunJob): readonly RuntimeArtifactRecord[] {

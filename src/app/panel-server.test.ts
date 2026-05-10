@@ -186,6 +186,9 @@ test("panel HTML defaults to Simplified Chinese labels and status text", () => {
   assert.equal(html.includes("暂无对话"), true);
   assert.equal(html.includes("模型配置"), true);
   assert.equal(html.includes("工具配置"), true);
+  assert.equal(html.includes("选择文件夹"), true);
+  assert.equal(html.includes('id="selectWorkspaceDirectoryButton"'), true);
+  assert.equal(html.includes('id="workspaceEmptySelectButton"'), true);
   assert.equal(html.includes("开始后会显示在这里。"), true);
   assert.equal(html.includes("搜索 Provider"), false);
   assert.equal(html.includes("搜索服务"), true);
@@ -391,6 +394,50 @@ test("panel workspace config route stores and returns the workspace directory", 
   } finally {
     await server.close();
     await fs.rm(directory, { recursive: true, force: true });
+    await fs.rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("panel workspace picker route handles success cancellation and unavailable desktop picker", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-workspace-picker-"));
+  const cancelDirectory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-workspace-picker-cancel-"));
+  const browserDirectory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-workspace-picker-browser-"));
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-picked-workspace-"));
+  const server = await startLocalPanelServer({
+    port: 0,
+    configDirectory: directory,
+    workspaceDirectoryPicker: async () => workspace,
+  });
+  const cancelServer = await startLocalPanelServer({
+    port: 0,
+    configDirectory: cancelDirectory,
+    workspaceDirectoryPicker: async () => undefined,
+  });
+  const browserServer = await startLocalPanelServer({
+    port: 0,
+    configDirectory: browserDirectory,
+  });
+  try {
+    const selected = await requestJson(server.url, "/api/config/workspace/select-directory", { method: "POST" });
+    const cancelled = await requestJson(cancelServer.url, "/api/config/workspace/select-directory", { method: "POST" });
+    const unavailable = await requestJson(browserServer.url, "/api/config/workspace/select-directory", { method: "POST" });
+
+    assert.equal(selected.status, 200);
+    assert.equal(selected.body.status, "completed");
+    assert.equal(selected.body.workspace.workspaceDirectory, path.resolve(workspace));
+    assert.equal(cancelled.status, 200);
+    assert.equal(cancelled.body.status, "cancelled");
+    assert.equal(typeof cancelled.body.workspace.workspaceDirectory, "string");
+    assert.equal(unavailable.status, 501);
+    assert.equal(unavailable.body.error.code, "workspace_picker_unavailable");
+    assert.equal(unavailable.body.error.message.includes("手动输入工作文件夹路径"), true);
+  } finally {
+    await server.close();
+    await cancelServer.close();
+    await browserServer.close();
+    await fs.rm(directory, { recursive: true, force: true });
+    await fs.rm(cancelDirectory, { recursive: true, force: true });
+    await fs.rm(browserDirectory, { recursive: true, force: true });
     await fs.rm(workspace, { recursive: true, force: true });
   }
 });
@@ -680,6 +727,16 @@ test("desktop default fake run does not auto-upgrade complex requests into deep 
       4_000,
       "/api/desktop/runs"
     );
+    const runtimeRun = await waitForRun(
+      server.url,
+      start.body.runId,
+      (body) =>
+        body.status === "completed" &&
+        Array.isArray(body.snapshot?.toolCalls) &&
+        body.snapshot.toolCalls.some((call: { callId: string }) => call.callId === "call-desktop-agent-search"),
+      4_000,
+      "/api/runtime/runs"
+    );
 
     assert.equal(completed.body.runMode, "agent");
     assert.equal(completed.body.canvas.kind, "desktop_agent_canvas");
@@ -692,6 +749,11 @@ test("desktop default fake run does not auto-upgrade complex requests into deep 
     assert.equal(completed.body.trace.events.some((event: { type: string }) => event.type === "tool.completed"), true);
     assert.equal(completed.body.route, undefined);
     assert.equal(completed.body.transcript.modelCalls.length, 2);
+    assert.equal(
+      runtimeRun.body.snapshot.toolCalls.some((call: { callId: string }) => call.callId === "call-desktop-agent-search"),
+      true
+    );
+    assertSafePanelJsonText(runtimeRun.text);
   } finally {
     await server.close();
     await fs.rm(directory, { recursive: true, force: true });
@@ -915,6 +977,44 @@ test("conversation API exposes latest desktop run so completed result can be res
     assert.equal(typeof latestRun.body.canvas.underground.recommendedDirection.summary, "string");
     assert.equal(latestRun.body.canvas.underground.recommendedDirection.summary.length > 0, true);
     assert.equal(completed.body.canvas.kind, "underground_deep_canvas");
+  } finally {
+    await server.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("conversation and desktop run APIs recover safe history from RuntimeDatabase after restart", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-conversation-runtime-recover-"));
+  let server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+  try {
+    const started = await requestJson(server.url, "/api/conversations", {
+      method: "POST",
+      body: { goal: "你好，你能做什么？", aiMode: "fake" },
+    });
+    const conversationId = started.body.conversation.conversationId;
+    const runId = started.body.run.runId;
+    await waitForRun(server.url, runId, (body) => body.status === "completed", 4_000, "/api/desktop/runs");
+    await server.close();
+
+    server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+    const conversations = await requestJson(server.url, "/api/conversations");
+    const conversation = await requestJson(server.url, `/api/conversations/${encodeURIComponent(conversationId)}`);
+    const run = await requestJson(server.url, `/api/desktop/runs/${encodeURIComponent(runId)}`);
+    const runtimeRun = await requestJson(server.url, `/api/runtime/runs/${encodeURIComponent(runId)}`);
+
+    assert.equal(conversations.status, 200);
+    assert.equal(conversations.body.conversations.some((item: { conversationId: string }) => item.conversationId === conversationId), true);
+    assert.equal(conversation.status, 200);
+    assert.equal(conversation.body.conversation.latestRunId, runId);
+    assert.equal(conversation.body.conversation.turns.length, 2);
+    assert.equal(conversation.body.conversation.turns[1].content.includes("我可以直接回答问题"), true);
+    assert.equal(run.status, 200);
+    assert.equal(run.body.restoredFromSnapshot, true);
+    assert.equal(run.body.restoredResult.summary.includes("我可以直接回答问题"), true);
+    assert.equal(run.body.conversation.conversationId, conversationId);
+    assert.equal(runtimeRun.body.snapshot.run.runId, runId);
+    assertSafePanelJsonText(run.text);
+    assertSafePanelJsonText(conversation.text);
   } finally {
     await server.close();
     await fs.rm(directory, { recursive: true, force: true });

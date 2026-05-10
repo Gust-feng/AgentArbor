@@ -39,6 +39,10 @@ export type DesktopAgentActivity = {
   readonly summary: string;
   readonly status: "pending" | "running" | "completed" | "failed";
   readonly createdAt: string;
+  readonly action?: string;
+  readonly path?: string;
+  readonly truncated?: boolean;
+  readonly error?: string;
   readonly toolName?: string;
   readonly sourceRefs: readonly string[];
   readonly modelCallRefs: readonly string[];
@@ -549,6 +553,9 @@ function activityFromEventEntry(entry: EventLogEntry): readonly DesktopAgentActi
     case "tool.completed":
     case "tool.failed": {
       const toolName = stringOrUndefined(payload.toolName) ?? "tool";
+      const output = asRecord(payload.output);
+      const input = asRecord(payload.input);
+      const result = asRecord(output.result);
       const type =
         entry.type === "tool.requested"
           ? "tool_requested"
@@ -570,6 +577,12 @@ function activityFromEventEntry(entry: EventLogEntry): readonly DesktopAgentActi
           [],
           stringOrUndefined(payload.callId) === undefined ? [] : [stringOrUndefined(payload.callId) as string],
           toolName,
+          {
+            action: stringOrUndefined(output.action) ?? toolName,
+            path: stringOrUndefined(result.path) ?? stringOrUndefined(input.path),
+            truncated: output.truncated === true,
+            error: stringOrUndefined(payload.error),
+          },
         ),
       ];
     }
@@ -677,7 +690,8 @@ function activity(
   sourceRefs: readonly string[],
   modelCallRefs: readonly string[] = [],
   toolCallRefs: readonly string[] = [],
-  toolName?: string
+  toolName?: string,
+  toolDetail: Pick<DesktopAgentActivity, "action" | "path" | "truncated" | "error"> = {}
 ): DesktopAgentActivity {
   return {
     activityId: `${entry.message.id}:${type}`,
@@ -686,6 +700,10 @@ function activity(
     summary,
     status,
     createdAt: entry.recordedAt,
+    action: toolDetail.action,
+    path: toolDetail.path,
+    truncated: toolDetail.truncated,
+    error: toolDetail.error,
     toolName,
     sourceRefs,
     modelCallRefs,

@@ -1,4 +1,5 @@
 import { createId, nowIso } from "../kernel/id.js";
+import type { RuntimeConversationRecord } from "../domain/runtime-database/index.js";
 import type { DesktopTaskSoilInput } from "./task-soil-workspace.js";
 import { sanitizeAssistantVisibleText } from "./visible-text-safety.js";
 
@@ -71,6 +72,37 @@ export class PanelConversationStore {
   getReadModel(conversationId: string): PanelConversationReadModel | undefined {
     const conversation = this.get(conversationId);
     return conversation === undefined ? undefined : toConversationReadModel(conversation);
+  }
+
+  restore(record: RuntimeConversationRecord): PanelConversationReadModel {
+    const existing = this.conversations.get(record.conversationId);
+    if (existing !== undefined && existing.updatedAt.localeCompare(record.updatedAt) >= 0) {
+      return toConversationReadModel(existing);
+    }
+    const conversation: PanelConversation = {
+      conversationId: record.conversationId,
+      createdAt: record.createdAt,
+      title: compact(record.title, 80),
+      updatedAt: record.updatedAt,
+      currentRunId: record.activeRunId,
+      latestRunId: record.latestRunId,
+      queuedRunIds: [...record.queuedRunIds],
+      turns: record.turns.map((turn) => ({
+        turnId: turn.turnId,
+        role: turn.role,
+        title: compact(turn.title, 120),
+        content: compact(
+          turn.role === "assistant" ? sanitizeAssistantVisibleText(turn.content) : turn.content,
+          8_000
+        ),
+        status: turn.status,
+        createdAt: turn.createdAt,
+        updatedAt: turn.updatedAt,
+        runId: turn.runId,
+      })),
+    };
+    this.conversations.set(conversation.conversationId, conversation);
+    return toConversationReadModel(conversation);
   }
 
   createConversation(input?: {
@@ -292,6 +324,36 @@ function toConversationReadModel(conversation: PanelConversation): PanelConversa
       createdAt: turn.createdAt,
       updatedAt: turn.updatedAt,
       runId: turn.runId,
+    })),
+  };
+}
+
+export function toRuntimeConversationRecord(
+  conversation: PanelConversationReadModel
+): RuntimeConversationRecord {
+  return {
+    conversationId: conversation.conversationId,
+    title: compact(conversation.title, 80),
+    preview: compact(conversation.preview, 180),
+    status: conversation.status,
+    activeRunId: conversation.activeRunId,
+    latestRunId: conversation.latestRunId,
+    queuedRunIds: [...conversation.queuedRunIds],
+    queuedRunCount: conversation.queuedRunCount,
+    createdAt: conversation.createdAt,
+    updatedAt: conversation.updatedAt,
+    turns: conversation.turns.map((turn) => ({
+      turnId: turn.turnId,
+      role: turn.role,
+      title: compact(turn.title, 120),
+      content: compact(
+        turn.role === "assistant" ? sanitizeAssistantVisibleText(turn.content) : turn.content,
+        8_000
+      ),
+      status: turn.status,
+      runId: turn.runId,
+      createdAt: turn.createdAt,
+      updatedAt: turn.updatedAt,
     })),
   };
 }

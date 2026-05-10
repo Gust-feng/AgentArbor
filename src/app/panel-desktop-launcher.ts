@@ -36,6 +36,7 @@ export type PanelDesktopSession = {
 export type PanelDesktopDependencies = {
   readonly startPanelServer: (options: PanelServerOptions) => Promise<StartedPanelServer>;
   readonly createWindow: (options: PanelDesktopWindowOptions) => PanelDesktopWindowHandle;
+  readonly selectWorkspaceDirectory?: () => Promise<string | undefined>;
   readonly whenReady: Promise<void>;
   readonly onWindowAllClosed: (handler: () => void) => void;
   readonly onBeforeQuit: (handler: () => void) => void;
@@ -51,6 +52,7 @@ export async function startPanelDesktopSession(
     host: args.host,
     port: args.port,
     configDirectory: args.configDirectory,
+    workspaceDirectoryPicker: args.smoke ? undefined : dependencies.selectWorkspaceDirectory,
   });
   let closed = false;
 

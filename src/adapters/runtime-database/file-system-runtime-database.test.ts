@@ -22,6 +22,38 @@ test("FileSystemRuntimeDatabase persists a safe Lite Profile run snapshot", asyn
       selectedAt: "2026-05-10T00:00:00.000Z",
       updatedAt: "2026-05-10T00:00:00.000Z",
     });
+    await database.upsertConversation({
+      conversationId: "conversation-0001",
+      title: "safe goal summary",
+      preview: "Safe assistant result.",
+      status: "completed",
+      latestRunId: "panel-run-0001",
+      queuedRunIds: [],
+      queuedRunCount: 0,
+      createdAt: "2026-05-10T00:00:00.000Z",
+      updatedAt: "2026-05-10T00:00:01.000Z",
+      turns: [
+        {
+          turnId: "turn-user-0001",
+          role: "user",
+          title: "你的消息",
+          content: "safe goal summary",
+          status: "completed",
+          createdAt: "2026-05-10T00:00:00.000Z",
+          updatedAt: "2026-05-10T00:00:00.000Z",
+        },
+        {
+          turnId: "turn-assistant-0001",
+          role: "assistant",
+          title: "已完成",
+          content: "Safe assistant result.",
+          status: "completed",
+          runId: "panel-run-0001",
+          createdAt: "2026-05-10T00:00:01.000Z",
+          updatedAt: "2026-05-10T00:00:01.000Z",
+        },
+      ],
+    });
     await database.upsertRun({
       runId: "panel-run-0001",
       profile: "lite",
@@ -39,6 +71,8 @@ test("FileSystemRuntimeDatabase persists a safe Lite Profile run snapshot", asyn
       createdAt: "2026-05-10T00:00:00.000Z",
       updatedAt: "2026-05-10T00:00:01.000Z",
       completedAt: "2026-05-10T00:00:01.000Z",
+      resultTitle: "已完成",
+      resultSummary: "Safe assistant result.",
     });
     await database.replaceRunEvents("panel-run-0001", [
       {
@@ -75,6 +109,10 @@ test("FileSystemRuntimeDatabase persists a safe Lite Profile run snapshot", asyn
         runId: "panel-run-0001",
         toolName: "read_file",
         status: "completed",
+        action: "read_file",
+        path: "README.md",
+        summary: "README.md · 12 bytes",
+        truncated: false,
         eventRefs: ["event:msg-0002"],
         createdAt: "2026-05-10T00:00:01.000Z",
       },
@@ -95,14 +133,20 @@ test("FileSystemRuntimeDatabase persists a safe Lite Profile run snapshot", asyn
 
     const snapshot = await database.getRun("panel-run-0001");
     const runs = await database.listRuns();
+    const conversation = await database.getConversation("conversation-0001");
+    const conversations = await database.listConversations();
 
     assert.equal(snapshot?.run.runId, "panel-run-0001");
+    assert.equal(snapshot?.run.resultSummary, "Safe assistant result.");
     assert.equal(snapshot?.workspace?.workspaceId, "workspace:current");
     assert.equal(snapshot?.events[0]?.type, "goal.received");
     assert.equal(snapshot?.modelCalls[0]?.requestId, "model-request-0001");
     assert.equal(snapshot?.toolCalls[0]?.toolName, "read_file");
+    assert.equal(snapshot?.toolCalls[0]?.path, "README.md");
     assert.equal(snapshot?.artifacts[0]?.ref.id, "artifact-0001");
     assert.deepEqual(runs.map((run) => run.runId), ["panel-run-0001"]);
+    assert.equal(conversation?.turns[1]?.content, "Safe assistant result.");
+    assert.deepEqual(conversations.map((item) => item.conversationId), ["conversation-0001"]);
     assert.equal(path.resolve(snapshot?.run.runHome ?? "").startsWith(path.resolve(paths.runtimeHome)), true);
   } finally {
     await fs.rm(root, { recursive: true, force: true });

@@ -216,6 +216,53 @@ test("panel desktop session loads the panel url and closes on quit", async () =>
   assert.equal(calls.sessionClosed, 1);
 });
 
+test("panel desktop session injects workspace picker only outside smoke mode", async () => {
+  const calls: Array<{ readonly hasPicker: boolean }> = [];
+  let pickerCalls = 0;
+  const dependencies: PanelDesktopDependencies = {
+    startPanelServer: async (options) => {
+      calls.push({ hasPicker: options.workspaceDirectoryPicker !== undefined });
+      if (options.workspaceDirectoryPicker !== undefined) {
+        const selected = await options.workspaceDirectoryPicker();
+        assert.equal(selected, "C:/picked-workspace");
+      }
+      return {
+        url: "http://127.0.0.1:54326/",
+        close: async () => undefined,
+      };
+    },
+    createWindow: () => createFakePanelDesktopWindow(),
+    selectWorkspaceDirectory: async () => {
+      pickerCalls += 1;
+      return "C:/picked-workspace";
+    },
+    whenReady: Promise.resolve(),
+    onBeforeQuit: () => undefined,
+    onWindowAllClosed: () => undefined,
+    quit: () => undefined,
+  };
+
+  await startPanelDesktopSession(
+    {
+      host: "127.0.0.1",
+      port: 0,
+      smoke: true,
+    },
+    dependencies
+  );
+  await startPanelDesktopSession(
+    {
+      host: "127.0.0.1",
+      port: 0,
+      smoke: false,
+    },
+    dependencies
+  );
+
+  assert.deepEqual(calls, [{ hasPicker: false }, { hasPicker: true }]);
+  assert.equal(pickerCalls, 1);
+});
+
 test("panel desktop session keeps ready-to-show and load fallback display idempotent", async () => {
   let createdWindow: FakePanelDesktopWindow | undefined;
   const dependencies: PanelDesktopDependencies = {

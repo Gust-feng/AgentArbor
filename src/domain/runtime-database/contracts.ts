@@ -19,6 +19,31 @@ export type RuntimeWorkspaceRecord = {
   readonly updatedAt: string;
 };
 
+export type RuntimeConversationTurnRecord = {
+  readonly turnId: string;
+  readonly role: "user" | "assistant";
+  readonly title: string;
+  readonly content: string;
+  readonly status: "pending" | "running" | "completed" | "failed";
+  readonly runId?: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+};
+
+export type RuntimeConversationRecord = {
+  readonly conversationId: string;
+  readonly title: string;
+  readonly preview: string;
+  readonly status: "idle" | "running" | "completed" | "failed";
+  readonly activeRunId?: string;
+  readonly latestRunId?: string;
+  readonly queuedRunIds: readonly string[];
+  readonly queuedRunCount: number;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly turns: readonly RuntimeConversationTurnRecord[];
+};
+
 export type RuntimeRunRecord = {
   readonly runId: string;
   readonly profile: RuntimeProfile;
@@ -37,6 +62,8 @@ export type RuntimeRunRecord = {
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly completedAt?: string;
+  readonly resultTitle?: string;
+  readonly resultSummary?: string;
   readonly error?: {
     readonly code: string;
     readonly message: string;
@@ -82,6 +109,11 @@ export type RuntimeToolCallRecord = {
   readonly runId: string;
   readonly toolName?: string;
   readonly status: "requested" | "completed" | "failed";
+  readonly action?: string;
+  readonly path?: string;
+  readonly summary?: string;
+  readonly truncated?: boolean;
+  readonly error?: string;
   readonly eventRefs: readonly string[];
   readonly createdAt?: string;
 };
@@ -103,6 +135,9 @@ export type RuntimeRunSnapshot = {
 
 export interface RuntimeDatabase {
   upsertWorkspace(record: RuntimeWorkspaceRecord): Promise<RuntimeWorkspaceRecord>;
+  upsertConversation(record: RuntimeConversationRecord): Promise<RuntimeConversationRecord>;
+  getConversation(conversationId: string): Promise<RuntimeConversationRecord | undefined>;
+  listConversations(limit?: number): Promise<readonly RuntimeConversationRecord[]>;
   upsertRun(record: RuntimeRunRecord): Promise<RuntimeRunRecord>;
   replaceRunEvents(runId: string, events: readonly RuntimeEventRecord[]): Promise<readonly RuntimeEventRecord[]>;
   replaceModelCalls(runId: string, calls: readonly RuntimeModelCallRecord[]): Promise<readonly RuntimeModelCallRecord[]>;

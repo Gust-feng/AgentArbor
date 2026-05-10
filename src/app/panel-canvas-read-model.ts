@@ -208,6 +208,10 @@ export type DesktopAgentCanvasReadModel = {
       readonly summary: string;
       readonly status: string;
       readonly createdAt: string;
+      readonly action?: string;
+      readonly path?: string;
+      readonly truncated?: boolean;
+      readonly error?: string;
       readonly toolName?: string;
       readonly sourceRefs: readonly string[];
       readonly modelCallRefs: readonly string[];
@@ -574,6 +578,10 @@ export function createDesktopAgentCanvas(input: {
         summary: safeText(item.summary, 360),
         status: item.status,
         createdAt: item.createdAt,
+        action: item.action === undefined ? undefined : safeText(item.action, 80),
+        path: item.path === undefined ? undefined : safeText(item.path, 260),
+        truncated: item.truncated,
+        error: item.error === undefined ? undefined : safeText(item.error, 260),
         toolName: item.toolName === undefined ? undefined : safeText(item.toolName, 80),
         sourceRefs: item.sourceRefs.map((value) => safeText(value, 180)),
         modelCallRefs: [...item.modelCallRefs],

@@ -794,14 +794,31 @@ function modelFailedSummary(payload: Readonly<Record<string, unknown>>): string 
 
 function toolSummary(type: "tool.requested" | "tool.completed" | "tool.failed", payload: Readonly<Record<string, unknown>>): string {
   const toolName = stringOrUndefined(payload.toolName) ?? "unknown";
+  const label = localToolLabel(toolName);
   if (type === "tool.requested") {
-    return `工具 ${toolName} 开始执行。`;
+    return `${label}正在执行。`;
   }
   const duration = typeof payload.durationMs === "number" ? `，耗时 ${Math.round(payload.durationMs)}ms` : "";
+  const output = asRecord(payload.output);
+  const summary = stringOrUndefined(output.summary);
   if (type === "tool.completed") {
-    return `工具 ${toolName} 已完成${duration}；结果只展示安全摘要和引用。`;
+    return summary === undefined
+      ? `${label}已完成${duration}；结果只展示安全摘要和引用。`
+      : `${label}已完成${duration}：${summary}`;
   }
-  return `工具 ${toolName} 调用失败${duration}；错误已脱敏。`;
+  return `${label}失败${duration}；错误已脱敏。`;
+}
+
+function localToolLabel(toolName: string): string {
+  if (toolName === "read_file") return "读取文件";
+  if (toolName === "list_dir") return "列出目录";
+  if (toolName === "grep_files") return "搜索文件";
+  if (toolName === "write_file") return "写入文件";
+  if (toolName === "edit_file") return "编辑文件";
+  if (toolName === "run_command") return "执行命令";
+  if (toolName === "search") return "搜索材料";
+  if (toolName === "read") return "读取材料";
+  return `工具 ${toolName}`;
 }
 
 function confirmationSummary(payload: Readonly<Record<string, unknown>>): string {

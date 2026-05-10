@@ -1,4 +1,4 @@
-import { BrowserWindow, app } from "electron";
+import { BrowserWindow, app, dialog } from "electron";
 import { parsePanelDesktopArgs } from "./panel-args.js";
 import {
   createPanelDesktopWindowOptions,
@@ -24,6 +24,7 @@ async function main(): Promise<void> {
     const session = await startPanelDesktopSession(args, {
       startPanelServer: startLocalPanelServer,
       createWindow: createElectronPanelWindow,
+      selectWorkspaceDirectory: selectWorkspaceDirectory,
       whenReady: app.whenReady(),
       onWindowAllClosed: (handler) => {
         app.on("window-all-closed", () => {
@@ -56,6 +57,14 @@ async function main(): Promise<void> {
     console.error(error);
     app.exit(1);
   }
+}
+
+async function selectWorkspaceDirectory(): Promise<string | undefined> {
+  await app.whenReady();
+  const result = await dialog.showOpenDialog({
+    properties: ["openDirectory"],
+  });
+  return result.canceled ? undefined : result.filePaths[0];
 }
 
 function createElectronPanelWindow(

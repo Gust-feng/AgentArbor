@@ -2,6 +2,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import type {
   RuntimeArtifactRecord,
+  RuntimeConversationRecord,
   RuntimeDatabase,
   RuntimeEventRecord,
   RuntimeModelCallRecord,
@@ -42,6 +43,35 @@ export class FileSystemRuntimeDatabase implements RuntimeDatabase {
     const stored = cloneJson(record);
     await writeJsonFile(this.workspacePath(record.workspaceId), stored);
     return stored;
+  }
+
+  async upsertConversation(record: RuntimeConversationRecord): Promise<RuntimeConversationRecord> {
+    const stored = cloneJson(record);
+    await writeJsonFile(this.conversationPath(record.conversationId), stored);
+    return stored;
+  }
+
+  async getConversation(conversationId: string): Promise<RuntimeConversationRecord | undefined> {
+    return readJsonFile<RuntimeConversationRecord>(this.conversationPath(conversationId));
+  }
+
+  async listConversations(limit = 50): Promise<readonly RuntimeConversationRecord[]> {
+    const root = path.join(this.runtimeHome, "conversations");
+    const entries = await fs.readdir(root, { withFileTypes: true }).catch((error: unknown) => {
+      if (isFileNotFound(error)) {
+        return [];
+      }
+      throw error;
+    });
+    const conversations = await Promise.all(
+      entries
+        .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
+        .map((entry) => readJsonFile<RuntimeConversationRecord>(path.join(root, entry.name)))
+    );
+    return conversations
+      .filter((conversation): conversation is RuntimeConversationRecord => conversation !== undefined)
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+      .slice(0, Math.max(0, Math.floor(limit)));
   }
 
   async upsertRun(record: RuntimeRunRecord): Promise<RuntimeRunRecord> {
@@ -118,6 +148,10 @@ export class FileSystemRuntimeDatabase implements RuntimeDatabase {
 
   private workspacePath(workspaceId: string): string {
     return path.join(this.runtimeHome, "workspaces", `${safeFileName(workspaceId)}.json`);
+  }
+
+  private conversationPath(conversationId: string): string {
+    return path.join(this.runtimeHome, "conversations", `${safeFileName(conversationId)}.json`);
   }
 
   private runPath(runId: string): string {

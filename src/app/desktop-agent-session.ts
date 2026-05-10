@@ -1,0 +1,742 @@
+import type { IntelligenceChannel, ModelOutputContract, ModelOutputDelta, ModelResponse } from "../domain/intelligence/index.js";
+import type { ObservationRef } from "../domain/observation/index.js";
+import type { TaskSoil } from "../domain/soil/index.js";
+import type { ToolCallResult, ToolExecutionBroker } from "../domain/tools/index.js";
+import type { EventLogEntry } from "../kernel/events/in-memory-event-log.js";
+import { createId, nowIso } from "../kernel/id.js";
+import { AgentTurnRuntime } from "../kernel/intelligence/index.js";
+import { createMessage } from "../kernel/messages/create-message.js";
+import {
+  createUndergroundAiDisabledConfigurationError,
+  createUndergroundAiRuntimeConfig,
+  type UndergroundAiEnvironment,
+  type UndergroundAiMode,
+  type UndergroundAiProviderFetch,
+} from "./intelligence-channel-factory.js";
+import type { MinimalRuntime } from "./runtime.js";
+import { createMinimalRuntime } from "./runtime.js";
+import { desktopAgentMessages } from "./desktop-agent-prompts.js";
+import { createTaskSoilFromDesktopInput, type DesktopTaskSoilInput } from "./task-soil-workspace.js";
+import { sanitizeAssistantVisibleText } from "./visible-text-safety.js";
+
+export type DesktopAgentSessionStatus = "completed" | "confirmation_needed" | "stopped" | "failed";
+
+export type DesktopAgentActivity = {
+  readonly activityId: string;
+  readonly type:
+    | "task_received"
+    | "model_requested"
+    | "model_completed"
+    | "model_failed"
+    | "tool_requested"
+    | "tool_completed"
+    | "tool_failed"
+    | "confirmation_needed"
+    | "completed"
+    | "stopped"
+    | "failed";
+  readonly title: string;
+  readonly summary: string;
+  readonly status: "pending" | "running" | "completed" | "failed";
+  readonly createdAt: string;
+  readonly toolName?: string;
+  readonly sourceRefs: readonly string[];
+  readonly modelCallRefs: readonly string[];
+  readonly toolCallRefs: readonly string[];
+};
+
+export type DesktopAgentResultBlock = {
+  readonly blockId: string;
+  readonly kind: "answer" | "tool_summary" | "pending_confirmation" | "failure";
+  readonly title: string;
+  readonly summary: string;
+  readonly evidenceRefs: readonly string[];
+  readonly toolCallRefs: readonly string[];
+};
+
+export type DesktopAgentPendingConfirmation = {
+  readonly confirmationId: string;
+  readonly title: string;
+  readonly question: string;
+  readonly consequence: string;
+  readonly riskLevel: "low" | "medium" | "high";
+  readonly requestedAt: string;
+  readonly modelCallRefs: readonly string[];
+  readonly toolCallRefs: readonly string[];
+  readonly sourceRefs: readonly string[];
+};
+
+export type DesktopAgentAnswer = {
+  readonly answer: string;
+  readonly modelCallRefs: readonly string[];
+  readonly toolCallRefs: readonly string[];
+  readonly evidenceRefs: readonly string[];
+  readonly resultBlocks: readonly DesktopAgentResultBlock[];
+};
+
+export type DesktopAgentSessionResult = {
+  readonly status: DesktopAgentSessionStatus;
+  readonly runtime: MinimalRuntime;
+  readonly traceId: string;
+  readonly goalId: string;
+  readonly taskSoil: TaskSoil;
+  readonly answer?: DesktopAgentAnswer;
+  readonly pendingConfirmation?: DesktopAgentPendingConfirmation;
+  readonly failureMessage?: string;
+  readonly modelCallRefs: readonly string[];
+  readonly toolCallRefs: readonly string[];
+  readonly activity: readonly DesktopAgentActivity[];
+  readonly eventTypes: readonly string[];
+};
+
+export type DesktopAgentSessionRuntimeContext = {
+  readonly runtime: MinimalRuntime;
+  readonly traceId: string;
+  readonly goalId: string;
+};
+
+export type RunDesktopAgentSessionOptions = {
+  readonly aiMode?: UndergroundAiMode;
+  readonly aiEnvironment?: UndergroundAiEnvironment;
+  readonly providerFetch?: UndergroundAiProviderFetch;
+  readonly taskSoilInput?: DesktopTaskSoilInput;
+  readonly conversationHistory?: readonly DesktopAgentConversationMessage[];
+  readonly runtime?: MinimalRuntime;
+  readonly createIntelligenceChannel?: (runtime: MinimalRuntime) => IntelligenceChannel;
+  readonly createToolCenter?: (runtime: MinimalRuntime) => ToolExecutionBroker;
+  readonly onRuntimeReady?: (context: DesktopAgentSessionRuntimeContext) => void;
+  readonly onModelOutputDelta?: (delta: ModelOutputDelta) => void;
+  /**
+   * Legacy compatibility only. Ordinary Desktop Agent no longer requests a
+   * work-session upgrade; explicit deep mode owns Underground organization.
+   */
+  readonly allowWorkSessionUpgrade?: boolean;
+};
+
+export type DesktopAgentConversationMessage = {
+  readonly role: "user" | "assistant";
+  readonly content: string;
+  readonly ref?: string;
+};
+
+const DESKTOP_AGENT_ID = "desktop-agent-session";
+
+export async function runDesktopAgentSession(
+  goal: string,
+  options: RunDesktopAgentSessionOptions = {}
+): Promise<DesktopAgentSessionResult> {
+  const aiMode = options.aiMode ?? "openai-compatible";
+  const runtime = options.runtime ?? createMinimalRuntime();
+  const traceId = createId("trace");
+  const goalId = createId("goal");
+  const createdAt = nowIso();
+  const taskSoil = createTaskSoilFromDesktopInput({
+    goal,
+    goalId,
+    traceId,
+    aiMode,
+    constraints: runtime.constraints,
+    soilStore: runtime.soilStore,
+    taskSoilInput: options.taskSoilInput,
+    createdAt,
+  });
+
+  publishGoalReceived({ runtime, traceId, goalId, goal, taskSoil });
+  options.onRuntimeReady?.({ runtime, traceId, goalId });
+
+  const intelligenceChannel =
+    options.createIntelligenceChannel ?? createIntelligenceChannelFromOptions(aiMode, options);
+  if (aiMode === "none" || intelligenceChannel === undefined) {
+    return {
+      status: "stopped",
+      runtime,
+      traceId,
+      goalId,
+      taskSoil,
+      failureMessage: "AI runtime is not configured; Desktop Agent stopped before working.",
+      modelCallRefs: [],
+      toolCallRefs: [],
+      activity: activityFromEventEntries(runtime.eventLog.list(), "stopped"),
+      eventTypes: runtime.eventLog.types(),
+    };
+  }
+
+  const channel = intelligenceChannel(runtime);
+  const toolCenter = options.createToolCenter?.(runtime);
+  toolCenter?.resetCallCount();
+  const turnRuntime = new AgentTurnRuntime({
+    intelligenceChannel: channel,
+    toolCenter,
+    publishToolEvent: (message) => runtime.bus.publish(message),
+  });
+  const turn = await turnRuntime.execute({
+    policy: {
+      allowModel: true,
+      allowedTools: toolCenter === undefined ? [] : ["search", "read", "read_file", "list_dir", "grep_files"],
+      maxModelRounds: 4,
+      maxToolRounds: 3,
+      fallback: "disabled",
+      callerAgentId: DESKTOP_AGENT_ID,
+      traceId,
+      goalId,
+      purpose: "desktop_agent",
+      outputContract: desktopAgentOutputContract(),
+      sensitivity: "internal",
+      budget: {
+        maxOutputTokens: 3200,
+        maxLatencyMs: 60_000,
+      },
+    },
+    requestId: createId("model-request"),
+    callerRef: { kind: "goal", id: goalId, label: "desktop_agent" },
+    inputRefs: baseInputRefs(traceId, goalId),
+    sanitizedMessages: desktopAgentMessages({
+      goal,
+      taskSoil,
+      conversationHistory: options.conversationHistory ?? [],
+    }),
+    constraintRefs: [],
+    toolChoice: toolCenter === undefined ? "none" : "auto",
+    requestedAt: nowIso(),
+  });
+
+  const modelCallRefs = refsFromResponse(turn.finalOutput, turn.modelRequestId, turn.modelResponseId);
+  const toolCallRefs = refsFromToolCalls(turn.toolCalls);
+  if (turn.status !== "completed" || turn.finalOutput === undefined || turn.finalOutput.status !== "completed") {
+    return {
+      status: "failed",
+      runtime,
+      traceId,
+      goalId,
+      taskSoil,
+      failureMessage: turn.finalOutput?.failure?.message ?? "Desktop Agent model/tool turn failed.",
+      modelCallRefs,
+      toolCallRefs,
+      activity: activityFromEventEntries(runtime.eventLog.list(), "failed"),
+      eventTypes: runtime.eventLog.types(),
+    };
+  }
+
+  const answer = parseAnswer(turn.finalOutput, turn.toolCalls);
+  const evidenceRefs = evidenceRefsFromToolCalls(turn.toolCalls);
+  const pendingConfirmation = pendingConfirmationFrom({
+    goal,
+    taskSoil,
+    answer,
+    traceId,
+    goalId,
+    modelCallRefs,
+    toolCallRefs,
+  });
+  if (pendingConfirmation !== undefined) {
+    publishConfirmationRequested({ runtime, traceId, goalId, pendingConfirmation });
+  }
+  const resultBlocks = resultBlocksFrom({
+    answer,
+    toolCalls: turn.toolCalls,
+    evidenceRefs,
+    pendingConfirmation,
+  });
+  const status = pendingConfirmation === undefined ? "completed" : "confirmation_needed";
+  return {
+    status,
+    runtime,
+    traceId,
+    goalId,
+    taskSoil,
+    answer: {
+      answer,
+      modelCallRefs,
+      toolCallRefs,
+      evidenceRefs,
+      resultBlocks,
+    },
+    pendingConfirmation,
+    modelCallRefs,
+    toolCallRefs,
+    activity: activityFromEventEntries(runtime.eventLog.list(), status),
+    eventTypes: runtime.eventLog.types(),
+  };
+}
+
+function createIntelligenceChannelFromOptions(
+  aiMode: UndergroundAiMode,
+  options: RunDesktopAgentSessionOptions
+): ((runtime: MinimalRuntime) => IntelligenceChannel) | undefined {
+  if (aiMode === "none") {
+    return undefined;
+  }
+  const config = createUndergroundAiRuntimeConfig({
+    mode: aiMode,
+    env: options.aiEnvironment,
+    fetch: options.providerFetch,
+    onModelOutputDelta: options.onModelOutputDelta,
+  });
+  if (!config.enabled) {
+    throw createUndergroundAiDisabledConfigurationError(config.summaryInput);
+  }
+  return config.createIntelligenceChannel;
+}
+
+function desktopAgentOutputContract(): ModelOutputContract {
+  return {
+    contractId: "desktop.agent_response.v1",
+    outputKind: "explanation",
+    format: "text",
+    minTextLength: 1,
+    maxTextLength: 12000,
+    visibleOutput: {
+      fields: ["text"],
+      maxFieldLength: 1200,
+    },
+  };
+}
+
+function parseAnswer(response: ModelResponse, toolCalls: readonly ToolCallResult[]): string {
+  const text =
+    typeof response.textOutput === "string" && response.textOutput.trim().length > 0
+      ? response.textOutput.trim()
+      : typeof response.structuredOutput === "string" && response.structuredOutput.trim().length > 0
+        ? response.structuredOutput.trim()
+      : undefined;
+  if (text === undefined) {
+    if (toolCalls.length > 0) {
+      return "我已经调用了可用工具，但这轮没有形成可展示正文。你可以补充目标或打开详情查看工具调用状态。";
+    }
+    return "我现在没有形成可展示的回答。";
+  }
+  const visible = sanitizeVisibleAssistantAnswer(text);
+  return visible.length > 0
+    ? safeText(visible, 12000)
+    : "我识别到这条消息需要更多上下文或授权，但当前回合没有形成可展示正文。";
+}
+
+function sanitizeVisibleAssistantAnswer(value: string): string {
+  return sanitizeAssistantVisibleText(value);
+}
+
+function publishGoalReceived(input: {
+  readonly runtime: MinimalRuntime;
+  readonly traceId: string;
+  readonly goalId: string;
+  readonly goal: string;
+  readonly taskSoil: TaskSoil;
+}): void {
+  input.runtime.bus.publish(
+    createMessage({
+      traceId: input.traceId,
+      from: { id: "desktop-shell", role: "user" },
+      to: { group: "desktop-shell" },
+      type: "goal.received",
+      intent: "start_desktop_agent_session",
+      payload: {
+        goalId: input.goalId,
+        taskSoilId: input.taskSoil.taskSoilId,
+        goalSummary: safeText(input.goal, 300),
+        contextRefCount: input.taskSoil.contextRefs.length,
+        permissionBoundaryRefs: input.taskSoil.permissionBoundaryRefs,
+      },
+    })
+  );
+}
+
+function publishConfirmationRequested(input: {
+  readonly runtime: MinimalRuntime;
+  readonly traceId: string;
+  readonly goalId: string;
+  readonly pendingConfirmation: DesktopAgentPendingConfirmation;
+}): void {
+  input.runtime.bus.publish(
+    createMessage({
+      traceId: input.traceId,
+      from: { id: DESKTOP_AGENT_ID, role: "agent" },
+      to: { group: "desktop-shell" },
+      type: "user_approval.requested",
+      intent: "request_user_confirmation",
+      payload: {
+        confirmationId: input.pendingConfirmation.confirmationId,
+        goalId: input.goalId,
+        title: input.pendingConfirmation.title,
+        question: input.pendingConfirmation.question,
+        consequence: input.pendingConfirmation.consequence,
+        riskLevel: input.pendingConfirmation.riskLevel,
+        sourceRefs: input.pendingConfirmation.sourceRefs,
+      },
+    })
+  );
+}
+
+function baseInputRefs(traceId: string, goalId: string): readonly ObservationRef[] {
+  return [
+    { kind: "trace", id: traceId },
+    { kind: "goal", id: goalId },
+  ];
+}
+
+function refsFromResponse(
+  response: ModelResponse | undefined,
+  requestId: string | undefined,
+  responseId: string | undefined,
+): readonly string[] {
+  return [
+    requestId,
+    response?.requestId,
+    responseId,
+    response?.responseId,
+  ].filter((value, index, values): value is string => typeof value === "string" && values.indexOf(value) === index);
+}
+
+function refsFromToolCalls(toolCalls: readonly ToolCallResult[]): readonly string[] {
+  return toolCalls.map((call) => call.callId);
+}
+
+function pendingConfirmationFrom(input: {
+  readonly goal: string;
+  readonly taskSoil: TaskSoil;
+  readonly answer: string;
+  readonly traceId: string;
+  readonly goalId: string;
+  readonly modelCallRefs: readonly string[];
+  readonly toolCallRefs: readonly string[];
+}): DesktopAgentPendingConfirmation | undefined {
+  if (!needsLocalFileAuthorization(input.goal) || hasAuthorizedReadableContext(input.taskSoil)) {
+    return undefined;
+  }
+  return {
+    confirmationId: createId("confirmation"),
+    title: "需要文件授权",
+    question: "请选择要读取的文件或文件夹，或提供只读文件引用。",
+    consequence: "获得明确引用前，我只能说明需要哪些材料，不能声称已经读取你的本地文件。",
+    riskLevel: "medium",
+    requestedAt: nowIso(),
+    modelCallRefs: input.modelCallRefs,
+    toolCallRefs: input.toolCallRefs,
+    sourceRefs: [`trace:${input.traceId}`, `goal:${input.goalId}`],
+  };
+}
+
+function resultBlocksFrom(input: {
+  readonly answer: string;
+  readonly toolCalls: readonly ToolCallResult[];
+  readonly evidenceRefs: readonly string[];
+  readonly pendingConfirmation?: DesktopAgentPendingConfirmation;
+}): readonly DesktopAgentResultBlock[] {
+  const blocks: DesktopAgentResultBlock[] = [
+    {
+      blockId: createId("result-block"),
+      kind: "answer",
+      title: "结果",
+      summary: safeText(input.answer, 1200),
+      evidenceRefs: input.evidenceRefs.slice(0, 8),
+      toolCallRefs: input.toolCalls.map((call) => call.callId),
+    },
+  ];
+  if (input.toolCalls.length > 0) {
+    const completed = input.toolCalls.filter((call) => call.status === "completed").length;
+    const failed = input.toolCalls.filter((call) => call.status === "failed").length;
+    blocks.push({
+      blockId: createId("result-block"),
+      kind: failed > 0 ? "failure" : "tool_summary",
+      title: "工具摘要",
+      summary: toolSummaryText(input.toolCalls, completed, failed),
+      evidenceRefs: input.evidenceRefs.slice(0, 8),
+      toolCallRefs: input.toolCalls.map((call) => call.callId),
+    });
+  }
+  if (input.pendingConfirmation !== undefined) {
+    blocks.push({
+      blockId: createId("result-block"),
+      kind: "pending_confirmation",
+      title: input.pendingConfirmation.title,
+      summary: `${input.pendingConfirmation.question} ${input.pendingConfirmation.consequence}`,
+      evidenceRefs: input.pendingConfirmation.sourceRefs,
+      toolCallRefs: input.pendingConfirmation.toolCallRefs,
+    });
+  }
+  return blocks;
+}
+
+function toolSummaryText(toolCalls: readonly ToolCallResult[], completed: number, failed: number): string {
+  const localSummaries = toolCalls
+    .map((call) => {
+      const output = asRecord(call.output);
+      const action = stringOrUndefined(output.action);
+      const summary = stringOrUndefined(output.summary);
+      return action !== undefined && summary !== undefined ? `${action}: ${summary}` : undefined;
+    })
+    .filter((value): value is string => value !== undefined)
+    .slice(0, 4);
+  const base = `本轮工具调用 ${toolCalls.length} 次；完成 ${completed} 次，失败 ${failed} 次。工具输出只作为安全摘要和引用进入回答。`;
+  return localSummaries.length === 0 ? base : `${base}\n${localSummaries.join("\n")}`;
+}
+
+function evidenceRefsFromToolCalls(toolCalls: readonly ToolCallResult[]): readonly string[] {
+  const refs: string[] = [];
+  for (const call of toolCalls) {
+    if (call.status !== "completed") {
+      continue;
+    }
+    refs.push(`tool:${call.callId}`);
+    const output = asRecord(call.output);
+    const outputRef = stringOrUndefined(output.refId);
+    if (outputRef !== undefined) {
+      refs.push(safeText(outputRef, 180));
+    }
+    const results = Array.isArray(output.results) ? output.results : [];
+    for (const result of results) {
+      const item = asRecord(result);
+      const ref = stringOrUndefined(item.refId) ?? stringOrUndefined(item.uri) ?? stringOrUndefined(item.title);
+      if (ref !== undefined) {
+        refs.push(safeText(ref, 180));
+      }
+    }
+  }
+  return unique(refs).slice(0, 12);
+}
+
+function activityFromEventEntries(
+  entries: readonly EventLogEntry[],
+  terminalStatus: DesktopAgentSessionStatus
+): readonly DesktopAgentActivity[] {
+  const activities = entries.flatMap(activityFromEventEntry);
+  const terminal = terminalActivity(entries.at(-1), terminalStatus);
+  return terminal === undefined ? activities : [...activities, terminal];
+}
+
+function activityFromEventEntry(entry: EventLogEntry): readonly DesktopAgentActivity[] {
+  const payload = asRecord(entry.message.payload);
+  const sourceRefs = [`event:${entry.message.id}`];
+  switch (entry.type) {
+    case "goal.received":
+      return [activity(entry, "task_received", "任务已接收", "已形成本轮任务和授权上下文边界。", "completed", sourceRefs)];
+    case "model.requested":
+      return [
+        activity(
+          entry,
+          "model_requested",
+          "正在判断",
+          "桌面 Agent 正在判断直接回答、读取材料或请求确认。",
+          "running",
+          sourceRefs,
+          refsFromPayload(payload),
+        ),
+      ];
+    case "model.completed":
+      return [
+        activity(
+          entry,
+          "model_completed",
+          "内容已形成",
+          "模型输出已通过安全可见投影进入本轮结果。",
+          "completed",
+          sourceRefs,
+          refsFromPayload(payload),
+        ),
+      ];
+    case "model.failed":
+      return [
+        activity(
+          entry,
+          "model_failed",
+          "模型调用失败",
+          "模型服务没有返回可用结果；错误已脱敏。",
+          "failed",
+          sourceRefs,
+          refsFromPayload(payload),
+        ),
+      ];
+    case "tool.requested":
+    case "tool.completed":
+    case "tool.failed": {
+      const toolName = stringOrUndefined(payload.toolName) ?? "tool";
+      const type =
+        entry.type === "tool.requested"
+          ? "tool_requested"
+          : entry.type === "tool.completed"
+            ? "tool_completed"
+            : "tool_failed";
+      return [
+        activity(
+          entry,
+          type,
+          entry.type === "tool.requested" ? "正在读取材料" : entry.type === "tool.completed" ? "材料已读取" : "材料读取失败",
+          entry.type === "tool.completed"
+            ? completedToolActivitySummary(toolName, payload)
+            : entry.type === "tool.failed"
+              ? `工具 ${toolName} 失败，错误已脱敏。`
+              : `工具 ${toolName} 开始执行。`,
+          entry.type === "tool.requested" ? "running" : entry.type === "tool.completed" ? "completed" : "failed",
+          sourceRefs,
+          [],
+          stringOrUndefined(payload.callId) === undefined ? [] : [stringOrUndefined(payload.callId) as string],
+          toolName,
+        ),
+      ];
+    }
+    case "user_approval.requested":
+      return [
+        activity(
+          entry,
+          "confirmation_needed",
+          "需要确认",
+          stringOrUndefined(payload.question) ?? "继续前需要你补充授权或澄清。",
+          "running",
+          sourceRefs,
+        ),
+      ];
+    default:
+      return [];
+  }
+}
+
+function completedToolActivitySummary(toolName: string, payload: Readonly<Record<string, unknown>>): string {
+  const output = asRecord(payload.output);
+  const summary = stringOrUndefined(output.summary);
+  if (summary !== undefined) {
+    return summary;
+  }
+  return `工具 ${toolName} 已返回安全摘要。`;
+}
+
+function terminalActivity(
+  lastEntry: EventLogEntry | undefined,
+  status: DesktopAgentSessionStatus
+): DesktopAgentActivity | undefined {
+  const createdAt = lastEntry?.recordedAt ?? nowIso();
+  const activityId = lastEntry === undefined ? createId("activity") : `${lastEntry.message.id}:terminal:${status}`;
+  if (status === "completed") {
+    return {
+      activityId,
+      type: "completed",
+      title: "运行完成",
+      summary: "本轮桌面 Agent 结果已形成。",
+      status: "completed",
+      createdAt,
+      sourceRefs: lastEntry === undefined ? [] : [`event:${lastEntry.message.id}`],
+      modelCallRefs: [],
+      toolCallRefs: [],
+    };
+  }
+  if (status === "confirmation_needed") {
+    return {
+      activityId,
+      type: "confirmation_needed",
+      title: "等待确认",
+      summary: "需要用户补充授权或具体材料后再继续。",
+      status: "running",
+      createdAt,
+      sourceRefs: lastEntry === undefined ? [] : [`event:${lastEntry.message.id}`],
+      modelCallRefs: [],
+      toolCallRefs: [],
+    };
+  }
+  if (status === "stopped") {
+    return {
+      activityId,
+      type: "stopped",
+      title: "运行已停止",
+      summary: "AI 运行时未配置，本轮没有开始模型工作。",
+      status: "failed",
+      createdAt,
+      sourceRefs: lastEntry === undefined ? [] : [`event:${lastEntry.message.id}`],
+      modelCallRefs: [],
+      toolCallRefs: [],
+    };
+  }
+  return {
+    activityId,
+    type: "failed",
+    title: "运行失败",
+    summary: "本轮没有形成可展示结果。",
+    status: "failed",
+    createdAt,
+    sourceRefs: lastEntry === undefined ? [] : [`event:${lastEntry.message.id}`],
+    modelCallRefs: [],
+    toolCallRefs: [],
+  };
+}
+
+function activity(
+  entry: EventLogEntry,
+  type: DesktopAgentActivity["type"],
+  title: string,
+  summary: string,
+  status: DesktopAgentActivity["status"],
+  sourceRefs: readonly string[],
+  modelCallRefs: readonly string[] = [],
+  toolCallRefs: readonly string[] = [],
+  toolName?: string
+): DesktopAgentActivity {
+  return {
+    activityId: `${entry.message.id}:${type}`,
+    type,
+    title,
+    summary,
+    status,
+    createdAt: entry.recordedAt,
+    toolName,
+    sourceRefs,
+    modelCallRefs,
+    toolCallRefs,
+  };
+}
+
+function refsFromPayload(payload: Readonly<Record<string, unknown>>): readonly string[] {
+  return unique([stringOrUndefined(payload.requestId), stringOrUndefined(payload.responseId)].filter(isString));
+}
+
+function needsLocalFileAuthorization(goal: string): boolean {
+  const normalized = goal.toLowerCase();
+  return includesAny(normalized, [
+    "桌面文件",
+    "电脑文件",
+    "本地文件",
+    "我的文件",
+    "读取文件",
+    "读文件",
+    "看看文件",
+    "file",
+    "folder",
+    "local path",
+  ]);
+}
+
+function hasAuthorizedReadableContext(taskSoil: TaskSoil): boolean {
+  return taskSoil.contextRefs.some((ref) => {
+    const normalizedRef = ref.ref.toLowerCase();
+    return (
+      ref.readonlyPreview !== undefined ||
+      normalizedRef.startsWith("file:") ||
+      normalizedRef.startsWith("workspace:file") ||
+      normalizedRef.includes(":file:")
+    );
+  });
+}
+
+function asRecord(value: unknown): Readonly<Record<string, unknown>> {
+  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+    return value as Readonly<Record<string, unknown>>;
+  }
+  return {};
+}
+
+function stringOrUndefined(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value : undefined;
+}
+
+function isString(value: unknown): value is string {
+  return typeof value === "string";
+}
+
+function includesAny(value: string, needles: readonly string[]): boolean {
+  return needles.some((needle) => value.includes(needle.toLowerCase()));
+}
+
+function unique(values: readonly string[]): string[] {
+  return [...new Set(values.filter((value) => value.trim().length > 0))];
+}
+
+function safeText(value: string, maxLength: number): string {
+  const text = value.trim();
+  return text.length > maxLength ? `${text.slice(0, Math.max(0, maxLength - 3))}...` : text;
+}

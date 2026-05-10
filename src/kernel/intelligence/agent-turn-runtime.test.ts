@@ -78,7 +78,8 @@ test("AgentTurnRuntime executes one tool round and returns final model output", 
   assert.equal(result.modelRounds, 2);
   assert.equal(result.toolRounds, 1);
   assert.equal(result.toolCalls[0]?.status, "completed");
-  assert.equal(channel.requests[1]?.sanitizedMessages.at(-1)?.role, "tool");
+  assert.equal(channel.requests[1]?.sanitizedMessages.some((message) => message.role === "tool"), true);
+  assert.equal(channel.requests[1]?.sanitizedMessages.at(-1)?.ref, "prompt:tool_use.iteration_warning.v1");
   assert.deepEqual(eventLog.types(), ["tool.requested", "tool.completed"]);
 });
 

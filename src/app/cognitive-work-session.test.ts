@@ -37,7 +37,7 @@ test("Cognitive Work Session answers lightweight questions directly without chil
   const eventTypes = result.runtime.eventLog.types();
 
   assert.equal(result.status, "completed");
-  assert.equal(result.directAnswer?.answer.includes("AgentArbor 桌面助手"), true);
+  assert.equal(result.directAnswer?.answer.includes("AgentArbor 桌面 Root Agent"), true);
   assert.equal(result.finalArtifact, undefined);
   assert.equal(result.report, undefined);
   assert.equal(result.agentRunTree.childRuns.length, 0);
@@ -65,7 +65,7 @@ test("Cognitive Work Session accepts natural language text for direct answers", 
           },
           {
             textOutput:
-              "我是 AgentArbor 桌面助手。底层模型取决于你在设置中配置的模型运行时；我不会把普通问题强行包装成项目分析报告。",
+              "我是 AgentArbor 桌面 Root Agent。底层模型取决于你在设置中配置的模型运行时；我不会把普通问题强行包装成项目分析报告。",
           },
         ]),
       }),

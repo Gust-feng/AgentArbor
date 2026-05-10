@@ -168,8 +168,8 @@ function chunkText(value: string, maxLength: number): readonly string[] {
 }
 
 function defaultFakeStep(request: ModelRequest): FakeModelProviderStep {
-  if (request.outputContract.contractId === "desktop.chat_response.v1") {
-    return fakeDesktopChatStep(request);
+  if (request.outputContract.contractId === "desktop.agent_response.v1" || request.outputContract.contractId === "desktop.chat_response.v1") {
+    return fakeDesktopAgentStep(request);
   }
   return {};
 }
@@ -290,7 +290,7 @@ function fakeDesktopIntentGateOutput(request: ModelRequest): Record<string, unkn
   };
 }
 
-function fakeDesktopChatStep(request: ModelRequest): FakeModelProviderStep {
+function fakeDesktopAgentStep(request: ModelRequest): FakeModelProviderStep {
   const goalAnchor = stripTrailingSentencePunctuation(rootletGoalAnchor(request));
   const normalized = goalAnchor.toLowerCase();
   const hasToolMessage = request.sanitizedMessages.some((message) => message.role === "tool");
@@ -319,7 +319,7 @@ function fakeDesktopChatStep(request: ModelRequest): FakeModelProviderStep {
   if (hasToolMessage) {
     return {
       textOutput:
-        `我已经基于当前授权工具检查了“${goalAnchor}”。可用材料只作为本轮回答依据，不会写入长期记忆；如果需要更系统的方向组织，可以切到深度模式让地下组织做多路探索和父层收束。`,
+        `我已经基于当前授权工具检查了“${goalAnchor}”。可用材料只作为本轮回答依据，不会写入长期记忆；接下来可以继续补充范围、让我读取更多授权材料，或让我把结论整理成更正式的结果。`,
     };
   }
   if (!shouldUpgradeToWorkSession(goalAnchor)) {
@@ -332,7 +332,7 @@ function fakeDesktopChatStep(request: ModelRequest): FakeModelProviderStep {
   if (!canRequestWorkSession) {
     return {
       textOutput:
-        `这更像一个需要读取上下文、组织材料或产出可审阅结果的任务。我可以先在普通助手模式给出初步回答；如果你要做方向成形和多路探索，请显式切到“深度模式”：${goalAnchor}`,
+        `我会把“${goalAnchor}”作为桌面任务处理：先说明当前可判断的结论，再基于你授权的文件、网页或搜索材料继续补证据；涉及写入、发送、删除或读取未授权材料时会先请求确认。`,
     };
   }
   return {
@@ -644,13 +644,13 @@ function fakeWorkSessionDirectAnswerOutput(request: ModelRequest): string {
   ]);
   const asksFollowUp = isFollowUpQuestion(normalized);
   if (asksModelIdentity) {
-    return "我是 AgentArbor 桌面助手。具体底层模型取决于你在设置中配置的模型运行时；普通问题会直接回答，真正需要文件、网页、工具或多步处理时才会展开成工作会话。";
+    return "我是 AgentArbor 桌面 Root Agent。具体底层模型取决于你在设置中配置的模型运行时；我会直接回答普通问题，也会在授权范围内读取文件、网页或工具材料来完成桌面任务。";
   }
   if (asksCapability) {
     return "我可以直接回答问题，也可以在你授权的上下文里整理材料、分析文件和网页、生成报告或草稿，并在需要写入、调用工具或确认风险时先停下来问你。你可以继续随便问，也可以直接交给我一个要完成的任务。";
   }
   if (asksFollowUp) {
-    return "可以继续。你可以把我当作一个桌面任务助手：普通问题我直接回答；当你给出需要上下文、文件、网页、工具或多步判断的任务时，我会把过程展开为可审阅的工作会话，并在高风险动作前请求确认。";
+    return "可以继续。你可以把我当作一个桌面任务助手：普通问题我直接回答；当你给出需要上下文、文件、网页、工具或多步判断的任务时，我会展示正在做的事、引用的材料和需要你确认的边界。";
   }
   if (includesAny(normalized, ["效率", "高效", "建议", "productivity", "efficient"])) {
     return [
@@ -660,7 +660,7 @@ function fakeWorkSessionDirectAnswerOutput(request: ModelRequest): string {
       "3) 每个专注块结束后写一句“下一步动作”，降低下一次启动成本。",
     ].join("\n");
   }
-  return `可以。对于“${goalAnchor}”，我会先直接回答；只有当问题需要读取项目、网页、文件或长期执行时，才会进入更完整的工作会话。`;
+  return `可以。对于“${goalAnchor}”，我会先给出当前可判断的回答；如果需要读取项目、网页或文件，我会只使用你授权的材料，并在缺少权限或边界不清时先请求确认。`;
 }
 
 function fakeWorkSessionChildSpecs(goalAnchor: string): readonly Record<string, unknown>[] {
@@ -817,6 +817,7 @@ function rootletGoalAnchor(request: ModelRequest): string {
   const rawGoal =
     matchLineValue(content, "Raw goal:") ??
     matchLineValue(content, "Raw user question:") ??
+    matchLineValue(content, "Current user message:") ??
     matchLineValue(content, "User message:");
   if (rawGoal !== undefined && rawGoal.length > 0) {
     return truncate(rawGoal, 80);

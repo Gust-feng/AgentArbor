@@ -1,0 +1,455 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import type { IntelligenceChannel, ModelRequest } from "../domain/intelligence/index.js";
+import type {
+  ToolCallRequest,
+  ToolCallResult,
+  ToolDefinition,
+  ToolExecutionBroker,
+  ToolExecutionContext,
+  ToolPermissionCheck,
+} from "../domain/tools/index.js";
+import { runDesktopAgentSession } from "./desktop-agent-session.js";
+
+test("Desktop Agent Session answers ordinary questions without entering deep mode", async () => {
+  const result = await runDesktopAgentSession("你是什么模型？", { aiMode: "fake" });
+
+  assert.equal(result.status, "completed");
+  assert.equal(result.answer?.answer.includes("AgentArbor 桌面 Root Agent"), true);
+  assert.equal(result.pendingConfirmation, undefined);
+  assert.deepEqual(result.eventTypes, ["goal.received", "model.requested", "model.completed"]);
+  assert.equal(result.runtime.eventLog.types().includes("agent.delegation.planned"), false);
+  assert.equal(result.runtime.eventLog.types().includes("artifact.produced"), false);
+});
+
+test("Desktop Agent Session keeps complex requests in ordinary Root Agent mode by default", async () => {
+  const result = await runDesktopAgentSession("分析当前仓库的问题并给我优化建议", { aiMode: "fake" });
+
+  assert.equal(result.status, "completed");
+  assert.equal(result.answer?.answer.includes("桌面任务处理"), true);
+  assert.equal(result.answer?.answer.includes("深度模式"), false);
+  assert.equal(result.pendingConfirmation, undefined);
+  assert.deepEqual(result.eventTypes, ["goal.received", "model.requested", "model.completed"]);
+  assert.equal(result.runtime.eventLog.types().includes("agent.delegation.planned"), false);
+  assert.equal(result.runtime.eventLog.types().includes("artifact.produced"), false);
+});
+
+test("Desktop Agent Session can use authorized tools before answering", async () => {
+  const toolCenter = new FixtureToolCenter();
+  const result = await runDesktopAgentSession("分析当前仓库的问题并给我优化建议", {
+    aiMode: "fake",
+    createToolCenter: () => toolCenter,
+  });
+
+  assert.equal(result.status, "completed");
+  assert.equal(result.answer?.answer.includes("授权工具检查"), true);
+  assert.equal(result.answer?.answer.includes("深度模式"), false);
+  assert.equal(result.answer?.toolCallRefs.includes("call-desktop-agent-search"), true);
+  assert.equal(result.answer?.evidenceRefs.some((ref) => ref.includes("research:codebase:desktop-agent")), true);
+  assert.equal(result.toolCallRefs.includes("call-desktop-agent-search"), true);
+  assert.equal(result.answer?.resultBlocks.some((block) => block.kind === "tool_summary"), true);
+  assert.equal(toolCenter.getCallCount(), 1);
+  assert.equal(result.eventTypes.includes("tool.requested"), true);
+  assert.equal(result.eventTypes.includes("tool.completed"), true);
+  assert.equal(result.runtime.eventLog.types().includes("agent.delegation.planned"), false);
+  assert.equal(result.runtime.eventLog.types().includes("artifact.produced"), false);
+});
+
+test("Desktop Agent Session projects local tool summaries and refs", async () => {
+  const toolCenter = new LocalToolCenter();
+  const channel = new LocalToolChannel();
+  const result = await runDesktopAgentSession("读取 README 并总结", {
+    aiMode: "fake",
+    createIntelligenceChannel: () => channel,
+    createToolCenter: () => toolCenter,
+  });
+
+  assert.equal(result.status, "completed");
+  assert.equal(result.answer?.evidenceRefs.includes("workspace:file:README.md"), true);
+  const toolBlock = result.answer?.resultBlocks.find((block) => block.kind === "tool_summary");
+  assert.notEqual(toolBlock, undefined);
+  assert.equal(toolBlock?.summary.includes("read_file: README.md · 12 bytes"), true);
+  assert.equal(result.activity.some((item) => item.toolName === "read_file" && item.summary.includes("README.md")), true);
+  assert.equal(channel.requests[0]?.tools?.some((tool) => tool.name === "read_file"), true);
+});
+
+test("Desktop Agent Session projects tool failures without leaking raw output", async () => {
+  const toolCenter = new FailingToolCenter();
+  const result = await runDesktopAgentSession("分析当前仓库的问题并给我优化建议", {
+    aiMode: "fake",
+    createToolCenter: () => toolCenter,
+  });
+
+  assert.equal(result.status, "completed");
+  assert.equal(result.eventTypes.includes("tool.failed"), true);
+  assert.equal(result.answer?.resultBlocks.some((block) => block.kind === "failure"), true);
+  assert.equal(JSON.stringify({ answer: result.answer, activity: result.activity }).includes("raw provider payload"), false);
+  assert.equal(result.runtime.eventLog.types().includes("agent.delegation.planned"), false);
+});
+
+test("Desktop Agent Session stops cleanly when AI is disabled", async () => {
+  const result = await runDesktopAgentSession("你是什么模型？", { aiMode: "none" });
+
+  assert.equal(result.status, "stopped");
+  assert.equal(result.answer, undefined);
+  assert.equal(result.modelCallRefs.length, 0);
+  assert.equal(result.toolCallRefs.length, 0);
+  assert.deepEqual(result.eventTypes, ["goal.received"]);
+  assert.equal(result.activity.some((item) => item.type === "stopped"), true);
+});
+
+test("Desktop Agent Session projects confirmation before claiming desktop file access", async () => {
+  const result = await runDesktopAgentSession("帮我看看桌面文件", { aiMode: "fake" });
+
+  assert.equal(result.status, "confirmation_needed");
+  assert.equal(result.answer?.answer.includes("不能直接看到你的桌面文件"), true);
+  assert.equal(result.answer?.answer.includes("附件选择具体文件或文件夹"), true);
+  assert.equal(result.pendingConfirmation?.question.includes("请选择要读取的文件或文件夹"), true);
+  assert.equal(result.toolCallRefs.length, 0);
+  assert.equal(result.eventTypes.includes("user_approval.requested"), true);
+  assert.equal(result.answer?.resultBlocks.some((block) => block.kind === "pending_confirmation"), true);
+});
+
+test("Desktop Agent Session keeps daily efficiency advice as direct answer", async () => {
+  const result = await runDesktopAgentSession("请给我三条今天提高效率的建议", { aiMode: "fake" });
+
+  assert.equal(result.status, "completed");
+  assert.equal(result.answer?.answer.includes("效率建议"), true);
+  assert.equal(result.pendingConfirmation, undefined);
+  assert.deepEqual(result.eventTypes, ["goal.received", "model.requested", "model.completed"]);
+  assert.equal(result.runtime.eventLog.types().includes("agent.delegation.planned"), false);
+  assert.equal(result.runtime.eventLog.types().includes("artifact.produced"), false);
+});
+
+test("Desktop Agent Session injects safe conversation history as separate messages", async () => {
+  let capturedRequest: ModelRequest | undefined;
+  const channel: IntelligenceChannel = {
+    async request(request) {
+      capturedRequest = request;
+      return {
+        responseId: "model-response-follow-up",
+        requestId: request.requestId,
+        providerId: "test-provider",
+        providerKind: "fake",
+        protocolKind: "openai_compatible_chat_completions",
+        model: "test-model",
+        status: "completed",
+        outputKind: "explanation",
+        textOutput: "可以继续。我会基于前文解释，不把这轮追问升级成报告。",
+        validation: { status: "passed", checkedAt: new Date(0).toISOString(), issues: [] },
+        completedAt: new Date(0).toISOString(),
+      };
+    },
+    validateResponse() {
+      return { status: "passed", checkedAt: new Date(0).toISOString(), issues: [] };
+    },
+  };
+
+  const result = await runDesktopAgentSession("那你能继续解释一下吗？", {
+    aiMode: "fake",
+    createIntelligenceChannel: () => channel,
+    conversationHistory: [
+      {
+        role: "user",
+        content: "你好，你能做什么？",
+        ref: "conversation:test:turn:0",
+      },
+      {
+        role: "assistant",
+        content: "我可以直接回答问题，也可以处理文件、网页和任务。",
+        ref: "conversation:test:turn:1",
+      },
+    ],
+  });
+
+  const messages = capturedRequest?.sanitizedMessages ?? [];
+  assert.equal(result.status, "completed");
+  assert.deepEqual(messages.map((message) => message.role), ["system", "user", "assistant", "user"]);
+  assert.equal(messages[1]?.content.includes("你好，你能做什么"), true);
+  assert.equal(messages[2]?.content.includes("我可以直接回答问题"), true);
+  assert.equal(messages[3]?.content.includes("Current user message: 那你能继续解释一下吗？"), true);
+  assert.equal(JSON.stringify(messages).includes("workspace:conversation-history"), false);
+  assert.equal(capturedRequest?.budget.maxOutputTokens, 3200);
+  assert.equal(capturedRequest?.budget.maxLatencyMs, 60_000);
+  assert.equal(result.pendingConfirmation, undefined);
+});
+
+test("Desktop Agent Session removes internal control fragments from visible answers", async () => {
+  const channel: IntelligenceChannel = {
+    async request(request) {
+      return {
+        responseId: "model-response-control-text",
+        requestId: request.requestId,
+        providerId: "test-provider",
+        providerKind: "fake",
+        protocolKind: "openai_compatible_chat_completions",
+        model: "test-model",
+        status: "completed",
+        outputKind: "explanation",
+        textOutput:
+          "先处理这个动作。<start_work_session><query>分析当前项目</query></start_work_session>\n可见结论：这更适合作为任务处理。",
+        validation: { status: "passed", checkedAt: new Date(0).toISOString(), issues: [] },
+        completedAt: new Date(0).toISOString(),
+      };
+    },
+    validateResponse() {
+      return { status: "passed", checkedAt: new Date(0).toISOString(), issues: [] };
+    },
+  };
+
+  const result = await runDesktopAgentSession("分析当前项目", {
+    aiMode: "fake",
+    createIntelligenceChannel: () => channel,
+    allowWorkSessionUpgrade: false,
+  });
+
+  assert.equal(result.status, "completed");
+  assert.equal(result.answer?.answer.includes("<start_work_session>"), false);
+  assert.equal(result.answer?.answer.includes("<query>"), false);
+  assert.equal(result.answer?.answer.includes("可见结论"), true);
+});
+
+test("Desktop Agent Session removes internal task diagnostics from visible answers", async () => {
+  const channel: IntelligenceChannel = {
+    async request(request) {
+      return {
+        responseId: "model-response-internal-diagnostics",
+        requestId: request.requestId,
+        providerId: "test-provider",
+        providerKind: "fake",
+        protocolKind: "openai_compatible_chat_completions",
+        model: "test-model",
+        status: "completed",
+        outputKind: "explanation",
+        textOutput:
+          "## 当前任务 (goal-0003)\nrequestId: model-request-abc\n这里是内部任务状态。\n\n可以继续。刚才的问题需要你选择文件或给出只读引用，我再帮你分析。",
+        validation: { status: "passed", checkedAt: new Date(0).toISOString(), issues: [] },
+        completedAt: new Date(0).toISOString(),
+      };
+    },
+    validateResponse() {
+      return { status: "passed", checkedAt: new Date(0).toISOString(), issues: [] };
+    },
+  };
+
+  const result = await runDesktopAgentSession("?", {
+    aiMode: "fake",
+    createIntelligenceChannel: () => channel,
+  });
+
+  assert.equal(result.status, "completed");
+  assert.equal(result.answer?.answer.includes("当前任务"), false);
+  assert.equal(result.answer?.answer.includes("goal-0003"), false);
+  assert.equal(result.answer?.answer.includes("model-request-abc"), false);
+  assert.equal(result.answer?.answer.includes("可以继续"), true);
+});
+
+test("Desktop Agent Session drops provider control markup instead of rendering fake tool activity", async () => {
+  const channel: IntelligenceChannel = {
+    async request(request) {
+      return {
+        responseId: "model-response-tool-markup",
+        requestId: request.requestId,
+        providerId: "test-provider",
+        providerKind: "fake",
+        protocolKind: "openai_compatible_chat_completions",
+        model: "test-model",
+        status: "completed",
+        outputKind: "explanation",
+        textOutput:
+          "<tool_call>{\"name\":\"read\",\"arguments\":{\"ref\":\"file:/tmp/a.md\"}}</tool_call>\n我需要你先提供文件引用或授权，才能读取具体文件。",
+        validation: { status: "passed", checkedAt: new Date(0).toISOString(), issues: [] },
+        completedAt: new Date(0).toISOString(),
+      };
+    },
+    validateResponse() {
+      return { status: "passed", checkedAt: new Date(0).toISOString(), issues: [] };
+    },
+  };
+
+  const result = await runDesktopAgentSession("你能读取文件吗？", {
+    aiMode: "fake",
+    createIntelligenceChannel: () => channel,
+  });
+
+  assert.equal(result.status, "confirmation_needed");
+  assert.equal(result.answer?.answer.includes("<tool_call>"), false);
+  assert.equal(result.answer?.answer.includes("准备调用工具"), false);
+  assert.equal(result.answer?.answer.includes("我需要你先提供文件引用"), true);
+});
+
+class LocalToolChannel implements IntelligenceChannel {
+  readonly requests: ModelRequest[] = [];
+
+  async request(request: ModelRequest) {
+    this.requests.push(request);
+    if (this.requests.length === 1) {
+      return {
+        responseId: "model-response-local-tool-call",
+        requestId: request.requestId,
+        providerId: "test-provider",
+        providerKind: "fake" as const,
+        protocolKind: "openai_compatible_chat_completions" as const,
+        model: "test-model",
+        status: "completed" as const,
+        outputKind: "explanation" as const,
+        toolCalls: [{ callId: "call-read-file", toolName: "read_file", input: { path: "README.md" } }],
+        finishReason: "tool_call" as const,
+        validation: { status: "passed" as const, checkedAt: new Date(0).toISOString(), issues: [] },
+        completedAt: new Date(0).toISOString(),
+      };
+    }
+    return {
+      responseId: "model-response-local-final",
+      requestId: request.requestId,
+      providerId: "test-provider",
+      providerKind: "fake" as const,
+      protocolKind: "openai_compatible_chat_completions" as const,
+      model: "test-model",
+      status: "completed" as const,
+      outputKind: "explanation" as const,
+      textOutput: "已读取 README 并形成摘要。",
+      validation: { status: "passed" as const, checkedAt: new Date(0).toISOString(), issues: [] },
+      completedAt: new Date(0).toISOString(),
+    };
+  }
+
+  validateResponse() {
+    return { status: "passed" as const, checkedAt: new Date(0).toISOString(), issues: [] };
+  }
+}
+
+class LocalToolCenter implements ToolExecutionBroker {
+  private calls = 0;
+
+  list(): ToolDefinition[] {
+    return [
+      {
+        name: "read_file",
+        description: "Fixture local read tool.",
+        inputSchema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
+      },
+    ];
+  }
+
+  has(name: string): boolean {
+    return name === "read_file";
+  }
+
+  async execute(request: ToolCallRequest): Promise<ToolCallResult> {
+    this.calls += 1;
+    return {
+      callId: request.callId,
+      toolName: request.toolName,
+      input: request.input,
+      output: {
+        action: "read_file",
+        status: "completed",
+        refId: "workspace:file:README.md",
+        summary: "README.md · 12 bytes",
+        result: { path: "README.md", bytes: 12, content: "hello world" },
+        truncated: false,
+      },
+      status: "completed",
+      durationMs: 0,
+    };
+  }
+
+  resetCallCount(): void {
+    this.calls = 0;
+  }
+
+  getCallCount(): number {
+    return this.calls;
+  }
+}
+
+class FixtureToolCenter implements ToolExecutionBroker {
+  private calls = 0;
+
+  list(): ToolDefinition[] {
+    return [
+      {
+        name: "search",
+        description: "Fixture search tool.",
+        inputSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] },
+      },
+      {
+        name: "read",
+        description: "Fixture read tool.",
+        inputSchema: { type: "object", properties: { ref: { type: "string" } }, required: ["ref"] },
+      },
+    ];
+  }
+
+  has(name: string): boolean {
+    return name === "search" || name === "read";
+  }
+
+  async execute(
+    request: ToolCallRequest,
+    _context: ToolExecutionContext,
+    permission?: ToolPermissionCheck
+  ): Promise<ToolCallResult> {
+    if (permission?.allowedTools !== undefined && !permission.allowedTools.includes(request.toolName)) {
+      return {
+        callId: request.callId,
+        toolName: request.toolName,
+        input: request.input,
+        output: undefined,
+        status: "failed",
+        error: "Tool is not authorized.",
+        durationMs: 0,
+      };
+    }
+    this.calls += 1;
+    return {
+      callId: request.callId,
+      toolName: request.toolName,
+      input: request.input,
+      output: {
+        status: "completed",
+        results: [
+          {
+            refId: "research:codebase:desktop-agent",
+            source: "codebase",
+            title: "src/app/desktop-agent-session.ts",
+            uri: "repo://src/app/desktop-agent-session.ts",
+            snippet: "Desktop Root Agent tool evidence.",
+            status: "available",
+          },
+        ],
+      },
+      status: "completed",
+      durationMs: 0,
+    };
+  }
+
+  resetCallCount(): void {
+    this.calls = 0;
+  }
+
+  getCallCount(): number {
+    return this.calls;
+  }
+}
+
+class FailingToolCenter extends FixtureToolCenter {
+  override async execute(
+    request: ToolCallRequest,
+    _context: ToolExecutionContext,
+    _permission?: ToolPermissionCheck
+  ): Promise<ToolCallResult> {
+    return {
+      callId: request.callId,
+      toolName: request.toolName,
+      input: request.input,
+      output: {
+        raw: "raw provider payload must not be projected",
+      },
+      status: "failed",
+      error: "search provider unavailable with sk-hidden-secret",
+      durationMs: 0,
+    };
+  }
+}

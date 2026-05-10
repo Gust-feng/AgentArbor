@@ -15,7 +15,12 @@ import {
   createResearchSearchTool,
   type PageFetchLike,
 } from "./research/index.js";
-import { ToolCenter } from "./tool-center/index.js";
+import {
+  createLocalGrepFilesTool,
+  createLocalListDirTool,
+  createLocalReadFileTool,
+  ToolCenter,
+} from "./tool-center/index.js";
 import type { UndergroundDemoAiInput } from "./underground-demo-summary.js";
 
 export type UndergroundAiMode = "none" | "fake" | "openai-compatible";
@@ -225,6 +230,9 @@ function createToolCenterFromEnvironment(input: {
   });
   center.register(createResearchSearchTool(researchRuntime));
   center.register(createResearchReadTool(researchRuntime));
+  center.register(createLocalReadFileTool(process.cwd()));
+  center.register(createLocalListDirTool(process.cwd()));
+  center.register(createLocalGrepFilesTool(process.cwd()));
   return center;
 }
 

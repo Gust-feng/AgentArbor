@@ -49,6 +49,11 @@ export function createPanelHtml(): string {
       color: var(--text);
       font: 14px/1.55 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       letter-spacing: 0;
+      transition: background 180ms ease;
+    }
+
+    body.mode-deep {
+      background: #111827;
     }
 
     button, input, select, textarea { font: inherit; }
@@ -128,7 +133,9 @@ export function createPanelHtml(): string {
     .app {
       position: relative;
       display: flex;
-      width: 100vw;
+      width: 100%;
+      min-width: 980px;
+      min-height: 620px;
       height: 100vh;
       height: 100dvh;
       overflow: hidden;
@@ -142,6 +149,7 @@ export function createPanelHtml(): string {
       min-height: 0;
       overflow: hidden;
       background: var(--shell);
+      transition: background 180ms ease;
     }
 
     .app-container {
@@ -151,6 +159,7 @@ export function createPanelHtml(): string {
       height: 100%;
       min-width: 0;
       background: #fff;
+      transition: background 180ms ease;
     }
 
     .titlebar {
@@ -164,6 +173,7 @@ export function createPanelHtml(): string {
       border-bottom: 1px solid var(--line);
       background: #fff;
       color: #1d2430;
+      transition: background 180ms ease, border-color 180ms ease, color 180ms ease;
     }
 
     .collapse-button {
@@ -224,6 +234,49 @@ export function createPanelHtml(): string {
       display: none;
     }
 
+    .titlebar-actions {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .detail-button {
+      min-height: 32px;
+      border-color: var(--line);
+      background: #fff;
+      color: var(--muted);
+      padding: 0 10px;
+      font-size: 12px;
+    }
+
+    .shell.mode-deep .app-container {
+      background: #f6f8fc;
+    }
+
+    .shell.mode-deep .titlebar {
+      border-bottom-color: #243047;
+      background: linear-gradient(90deg, #111827 0%, #172033 58%, #1f2a44 100%);
+      color: #f8fafc;
+    }
+
+    .shell.mode-deep .mode-pill {
+      color: #f8fafc;
+    }
+
+    .shell.mode-deep .brand-dot {
+      background:
+        radial-gradient(circle at 62% 38%, #fff 0 17%, transparent 18%),
+        linear-gradient(145deg, #60a5fa 0%, #a78bfa 50%, #34d399 100%);
+      box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.16), 0 8px 24px rgba(96, 165, 250, 0.24);
+    }
+
+    .shell.mode-deep .detail-button {
+      border-color: rgba(148, 163, 184, 0.28);
+      background: rgba(255, 255, 255, 0.08);
+      color: #dbeafe;
+    }
+
     .window-actions {
       margin-left: auto;
       display: flex;
@@ -239,7 +292,7 @@ export function createPanelHtml(): string {
       height: 100%;
       min-height: 0;
       display: grid;
-      grid-template-rows: auto minmax(0, 1fr);
+      grid-template-rows: auto minmax(0, 1fr) auto;
       gap: 8px;
       padding: 12px;
       overflow: hidden;
@@ -247,6 +300,93 @@ export function createPanelHtml(): string {
       color: var(--nav-text);
       border-right: 1px solid var(--nav-line);
       transition: width 150ms ease, min-width 150ms ease, transform 150ms ease, padding 150ms ease;
+    }
+
+    .shell.mode-deep .sidebar {
+      border-right-color: #243047;
+      background: #111827;
+      color: #e5e7eb;
+    }
+
+    .shell.mode-deep .side-action {
+      color: #dbe4f0;
+    }
+
+    .shell.mode-deep .side-action:hover,
+    .shell.mode-deep .side-action.active,
+    .shell.mode-deep .side-nav .side-action:first-child {
+      border-color: rgba(148, 163, 184, 0.18);
+      background: rgba(255, 255, 255, 0.07);
+      color: #f8fafc;
+    }
+
+    .shell.mode-deep .run-meta {
+      color: #94a3b8;
+    }
+
+    .shell.mode-deep .run-item {
+      color: #cbd5e1;
+    }
+
+    .shell.mode-deep .run-item.active {
+      border-color: rgba(129, 140, 248, 0.28);
+      background: rgba(99, 102, 241, 0.16);
+      color: #f8fafc;
+    }
+
+    .shell.mode-deep .run-sketch,
+    .shell.mode-deep .profile-avatar {
+      border-color: rgba(148, 163, 184, 0.32);
+      background: rgba(255, 255, 255, 0.06);
+    }
+
+    .shell.mode-deep .run-sketch span {
+      background: #94a3b8;
+    }
+
+    .shell.mode-deep .nav-mark {
+      border-color: rgba(148, 163, 184, 0.36);
+      background: rgba(255, 255, 255, 0.08);
+    }
+
+    .shell.mode-deep .sidebar-bottom {
+      border-top-color: #243047;
+    }
+
+    .shell.mode-deep .profile-menu-button {
+      color: #e5e7eb;
+    }
+
+    .shell.mode-deep .profile-menu-button:hover,
+    .shell.mode-deep .profile-menu-button[aria-expanded="true"] {
+      border-color: rgba(148, 163, 184, 0.22);
+      background: rgba(255, 255, 255, 0.07);
+    }
+
+    .shell.mode-deep .profile-caption {
+      color: #94a3b8;
+    }
+
+    .shell.mode-deep .profile-avatar::before,
+    .shell.mode-deep .profile-avatar::after {
+      border-color: #cbd5e1;
+    }
+
+    .shell.mode-deep .account-menu {
+      border-color: rgba(148, 163, 184, 0.28);
+      background: #111827;
+      box-shadow: 0 16px 34px rgba(0, 0, 0, 0.28);
+    }
+
+    .shell.mode-deep .account-menu button,
+    .shell.mode-deep .account-menu .account-menu-note {
+      color: #dbe4f0;
+    }
+
+    .shell.mode-deep .account-menu button:hover,
+    .shell.mode-deep .account-menu button:focus-visible {
+      border-color: rgba(148, 163, 184, 0.22);
+      background: rgba(255, 255, 255, 0.07);
     }
 
     .shell.sidebar-closed .sidebar {
@@ -332,8 +472,7 @@ export function createPanelHtml(): string {
 
     .nav-mark.skill::before,
     .nav-mark.auto::before,
-    .nav-mark.tool::before,
-    .nav-mark.settings::before {
+    .nav-mark.tool::before {
       content: "";
       width: 7px;
       height: 7px;
@@ -354,28 +493,10 @@ export function createPanelHtml(): string {
       transform: rotate(-32deg);
     }
 
-    .nav-mark.settings::before {
-      width: 8px;
-      height: 8px;
-      border-radius: 999px;
-      border: 2px solid #8b8f98;
-      background: transparent;
-    }
-
-    .side-title {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin: 12px 0 8px;
-      color: var(--nav-muted);
-      font-size: 12px;
-      font-weight: 600;
-      letter-spacing: 0.01em;
-    }
-
     .task-list {
       min-height: 0;
       overflow: auto;
+      padding-top: 6px;
     }
 
     .workspace-group {
@@ -403,7 +524,7 @@ export function createPanelHtml(): string {
 
     .runs {
       display: grid;
-      gap: 4px;
+      gap: 7px;
       list-style: none;
       margin: 0;
       padding: 0;
@@ -411,23 +532,46 @@ export function createPanelHtml(): string {
 
     .run-item {
       min-width: 0;
+      display: grid;
+      grid-template-columns: 32px minmax(0, 1fr);
+      align-items: center;
+      gap: 10px;
       border-radius: 8px;
-      padding: 8px 10px 8px 36px;
-      color: #475467;
+      padding: 9px 10px;
+      color: #3f4652;
       overflow: hidden;
       position: relative;
       border: 1px solid transparent;
+      background: transparent;
+      cursor: pointer;
+      transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
     }
 
-    .run-item::before {
-      content: "";
-      position: absolute;
-      left: 16px;
-      top: 17px;
-      width: 6px;
-      height: 6px;
+    .run-item.empty {
+      cursor: default;
+    }
+
+    .run-sketch {
+      width: 28px;
+      height: 28px;
+      border: 1px solid #cfd5de;
+      border-radius: 7px;
+      display: grid;
+      gap: 4px;
+      align-content: center;
+      padding: 0 6px;
+      background: rgba(255, 255, 255, 0.62);
+    }
+
+    .run-sketch span {
+      display: block;
+      height: 1px;
       border-radius: 999px;
-      background: #a7b0c0;
+      background: #98a2b3;
+    }
+
+    .run-sketch span:nth-child(2) {
+      width: 62%;
     }
 
     .run-item.active {
@@ -438,8 +582,13 @@ export function createPanelHtml(): string {
       box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
     }
 
-    .run-item.active::before {
-      background: var(--accent);
+    .run-item.active .run-sketch {
+      border-color: #aeb7c5;
+      background: #fff;
+    }
+
+    .run-body {
+      min-width: 0;
     }
 
     .run-title,
@@ -462,11 +611,153 @@ export function createPanelHtml(): string {
       font-size: 12px;
     }
 
+    .sidebar-bottom {
+      position: relative;
+      padding-top: 10px;
+      border-top: 1px solid var(--nav-line);
+    }
+
+    .profile-menu-button {
+      width: 100%;
+      min-height: 42px;
+      display: grid;
+      grid-template-columns: 30px minmax(0, 1fr) 14px;
+      align-items: center;
+      gap: 10px;
+      padding: 0 10px;
+      border-color: transparent;
+      background: transparent;
+      color: var(--nav-text);
+      text-align: left;
+    }
+
+    .profile-menu-button:hover,
+    .profile-menu-button[aria-expanded="true"] {
+      border-color: var(--line);
+      background: #fff;
+    }
+
+    .profile-avatar {
+      width: 28px;
+      height: 28px;
+      border: 1px solid #c4cbd6;
+      border-radius: 999px;
+      position: relative;
+      background: #fff;
+    }
+
+    .profile-avatar::before,
+    .profile-avatar::after {
+      content: "";
+      position: absolute;
+      left: 50%;
+      transform: translateX(-50%);
+      border: 1px solid #7b8492;
+    }
+
+    .profile-avatar::before {
+      top: 7px;
+      width: 6px;
+      height: 6px;
+      border-radius: 999px;
+    }
+
+    .profile-avatar::after {
+      bottom: 6px;
+      width: 13px;
+      height: 6px;
+      border-radius: 999px 999px 3px 3px;
+      border-bottom: 0;
+    }
+
+    .profile-main {
+      min-width: 0;
+      display: grid;
+      gap: 1px;
+    }
+
+    .profile-name,
+    .profile-caption {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .profile-name {
+      font-size: 13px;
+      font-weight: 650;
+    }
+
+    .profile-caption {
+      color: var(--nav-muted);
+      font-size: 12px;
+      font-weight: 500;
+    }
+
+    .profile-caret {
+      width: 8px;
+      height: 8px;
+      border-right: 1.5px solid currentColor;
+      border-bottom: 1.5px solid currentColor;
+      transform: rotate(45deg) translateY(-2px);
+      opacity: 0.58;
+    }
+
+    .account-menu {
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 52px;
+      z-index: 8;
+      display: none;
+      gap: 5px;
+      border: 1px solid var(--line-strong);
+      border-radius: 10px;
+      background: #fff;
+      box-shadow: 0 16px 34px rgba(15, 23, 42, 0.13);
+      padding: 7px;
+    }
+
+    .account-menu.open {
+      display: grid;
+    }
+
+    .account-menu button,
+    .account-menu .account-menu-note {
+      justify-content: flex-start;
+      min-height: 32px;
+      border-color: transparent;
+      background: transparent;
+      color: #344054;
+      text-align: left;
+      font-size: 13px;
+    }
+
+    .account-menu button:hover,
+    .account-menu button:focus-visible {
+      border-color: var(--line);
+      background: #f8fafc;
+    }
+
+    .account-menu-note {
+      display: grid;
+      align-content: center;
+      padding: 4px 10px;
+      color: var(--nav-muted);
+      font-size: 12px;
+    }
+
     .workspace {
       min-width: 0;
       flex: 1;
       overflow: hidden;
       background: #fff;
+      transition: background 180ms ease;
+    }
+
+    .shell.mode-deep .workspace,
+    .shell.mode-deep .session-card {
+      background: #f6f8fc;
     }
 
     .session-card {
@@ -549,22 +840,269 @@ export function createPanelHtml(): string {
       display: grid;
       justify-items: center;
       gap: 14px;
-      max-width: 760px;
+      max-width: 520px;
       margin: auto 0;
       text-align: center;
     }
 
-    .welcome h1 {
-      margin: 0;
-      font-size: 24px;
-      line-height: 1.2;
-      font-weight: 500;
+    .intent-field {
+      position: relative;
+      display: grid;
+      justify-items: center;
+      align-items: center;
+      width: 360px;
+      height: 76px;
+      min-width: 0;
+      overflow: visible;
+      text-align: center;
+      isolation: isolate;
+      color: #263241;
     }
 
-    .welcome p {
-      display: none;
-      margin-bottom: 0;
-      color: var(--muted);
+    .shell.mode-deep .intent-field {
+      color: #f8fafc;
+    }
+
+    .backstage-handoff {
+      --input-weight: 0;
+      --input-visible: 0;
+      --primary-dash: 1;
+      --branch-a-dash: 1;
+      --branch-b-dash: 1;
+      --knot-dash: 1;
+      position: relative;
+      width: min(640px, calc(100% - 40px));
+      height: 68px;
+      margin: 0 auto -4px;
+      color: #273241;
+      pointer-events: none;
+      user-select: none;
+      opacity: 0.68;
+      transition: opacity 180ms ease, transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
+      isolation: isolate;
+    }
+
+    .backstage-handoff[data-state="idle"] {
+      opacity: 0.34;
+    }
+
+    .backstage-handoff[data-state="typing"] {
+      opacity: calc(0.5 + var(--input-visible) * 0.48);
+      transform: translateY(calc(var(--input-visible) * -2px));
+    }
+
+    .backstage-handoff[data-state="submit"] {
+      opacity: 0.88;
+      transform: translateY(7px) scaleY(0.72);
+      transition: transform 260ms cubic-bezier(0.18, 0.86, 0.22, 1), opacity 180ms ease;
+    }
+
+    .backstage-handoff[data-state="handoff"] {
+      opacity: 0.78;
+      transform: translateY(1px);
+    }
+
+    .backstage-stage,
+    .backstage-surface {
+      position: absolute;
+      inset: 0;
+    }
+
+    .backstage-surface::before {
+      content: "";
+      position: absolute;
+      left: 92px;
+      right: 92px;
+      bottom: 9px;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(71, 85, 105, 0.28), transparent);
+      opacity: calc(0.04 + var(--input-visible) * 0.26);
+      transform: scaleX(calc(0.34 + var(--input-visible) * 0.56));
+      transform-origin: center;
+      transition: opacity 220ms ease, transform 260ms cubic-bezier(0.22, 1, 0.36, 1);
+    }
+
+    .backstage-thread {
+      position: absolute;
+      inset: 0;
+      z-index: 1;
+      width: 100%;
+      height: 100%;
+      overflow: visible;
+      filter: drop-shadow(0 8px 12px rgba(15, 23, 42, calc(var(--input-visible) * 0.08)));
+      transition: filter 220ms ease;
+    }
+
+    .backstage-thread path {
+      fill: none;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      vector-effect: non-scaling-stroke;
+    }
+
+    .thread-base {
+      stroke: rgba(71, 85, 105, 0.06);
+      stroke-width: 1;
+    }
+
+    .thread-primary,
+    .thread-branch-a,
+    .thread-branch-b,
+    .thread-knot {
+      stroke: rgba(13, 20, 33, 0.9);
+      stroke-width: calc(0.9px + var(--input-visible) * 0.9px);
+      stroke-dasharray: 1;
+      stroke-dashoffset: var(--primary-dash);
+      opacity: calc(0.03 + var(--input-visible) * 0.86);
+      transition:
+        opacity 220ms ease,
+        stroke-dashoffset 320ms cubic-bezier(0.22, 1, 0.36, 1),
+        stroke-width 220ms ease;
+    }
+
+    .thread-branch-a {
+      stroke: rgba(34, 103, 87, 0.82);
+      stroke-dasharray: 1;
+      stroke-dashoffset: var(--branch-a-dash);
+      opacity: calc(var(--input-visible) * 0.72);
+    }
+
+    .thread-branch-b {
+      stroke: rgba(55, 65, 81, 0.76);
+      stroke-dasharray: 1;
+      stroke-dashoffset: var(--branch-b-dash);
+      opacity: calc(var(--input-visible) * 0.58);
+    }
+
+    .thread-knot {
+      stroke: rgba(13, 20, 33, 0.84);
+      stroke-dasharray: 1;
+      stroke-dashoffset: var(--knot-dash);
+      opacity: calc(var(--input-visible) * 0.78);
+    }
+
+    .backstage-handoff[data-state="typing"] .thread-primary {
+      stroke-width: calc(1px + var(--input-visible) * 0.9px);
+    }
+
+    .backstage-handoff[data-state="typing"] .thread-branch-a,
+    .backstage-handoff[data-state="typing"] .thread-branch-b,
+    .backstage-handoff[data-state="typing"] .thread-knot {
+      stroke-width: calc(0.86px + var(--input-visible) * 0.62px);
+    }
+
+    .backstage-handoff[data-state="submit"] .thread-primary,
+    .backstage-handoff[data-state="submit"] .thread-branch-a,
+    .backstage-handoff[data-state="submit"] .thread-branch-b,
+    .backstage-handoff[data-state="submit"] .thread-knot {
+      animation: backstage-thread-gather 320ms cubic-bezier(0.18, 0.86, 0.22, 1) both;
+    }
+
+    .backstage-handoff[data-state="handoff"] .thread-primary,
+    .backstage-handoff[data-state="handoff"] .thread-branch-a,
+    .backstage-handoff[data-state="handoff"] .thread-branch-b,
+    .backstage-handoff[data-state="handoff"] .thread-knot {
+      animation: backstage-thread-settle 700ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    }
+
+    .backstage-handoff[data-state="handoff"] .thread-branch-a { animation-delay: 90ms; }
+    .backstage-handoff[data-state="handoff"] .thread-branch-b { animation-delay: 170ms; }
+    .backstage-handoff[data-state="handoff"] .thread-knot { animation-delay: 230ms; }
+
+    .backstage-handoff[data-state="running"] .thread-primary,
+    .backstage-handoff[data-state="running"] .thread-branch-a,
+    .backstage-handoff[data-state="running"] .thread-branch-b,
+    .backstage-handoff[data-state="running"] .thread-knot {
+      stroke-dashoffset: 0;
+      opacity: 0.18;
+      transition: opacity 240ms ease, stroke-dashoffset 240ms ease;
+    }
+
+    .composer-box.backstage-receive {
+      animation: composer-backstage-receive 760ms cubic-bezier(0.18, 0.86, 0.22, 1) both;
+    }
+
+    .composer-box.backstage-receive::after {
+      animation: composer-backstage-receive-line 760ms cubic-bezier(0.18, 0.86, 0.22, 1) both;
+    }
+
+    @keyframes backstage-thread-gather {
+      0% {
+        opacity: 0.28;
+        stroke-dashoffset: 0;
+      }
+      100% {
+        opacity: 0.1;
+        stroke-dashoffset: 1;
+      }
+    }
+
+    @keyframes backstage-thread-settle {
+      0% {
+        opacity: 0;
+        stroke-dashoffset: 1;
+      }
+      18% {
+        opacity: 0.34;
+      }
+      100% {
+        opacity: 0.16;
+        stroke-dashoffset: 0;
+      }
+    }
+
+    @keyframes composer-backstage-receive {
+      0% {
+        border-color: var(--line-strong);
+        box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
+      }
+      34% {
+        border-color: rgba(47, 111, 94, 0.46);
+        box-shadow: 0 0 0 1px rgba(47, 111, 94, 0.12), 0 8px 26px rgba(15, 23, 42, 0.07);
+      }
+      100% {
+        border-color: var(--line-strong);
+        box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
+      }
+    }
+
+    @keyframes composer-backstage-receive-line {
+      0% {
+        opacity: 0;
+        transform: scaleX(0.78);
+      }
+      30% {
+        opacity: 1;
+        transform: scaleX(1);
+      }
+      100% {
+        opacity: 0;
+        transform: scaleX(1.01);
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .backstage-handoff *,
+      .backstage-handoff *::before,
+      .backstage-handoff *::after,
+      .composer-box {
+        animation: none !important;
+        transition: none !important;
+      }
+    }
+
+    .intent-meta {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: max-content;
+      font-size: 24px;
+      font-weight: 520;
+      white-space: nowrap;
+    }
+
+    .shell.mode-deep .intent-meta {
+      color: #dbeafe;
     }
 
     .status-pill,
@@ -686,15 +1224,15 @@ export function createPanelHtml(): string {
       height: 6px;
       border-radius: 999px;
       background: #98a2b3;
-      animation: assistant-pulse 1.05s ease-in-out infinite;
+      opacity: 0.56;
     }
 
     .assistant-pending span:nth-child(2) {
-      animation-delay: 140ms;
+      opacity: 0.48;
     }
 
     .assistant-pending span:nth-child(3) {
-      animation-delay: 280ms;
+      opacity: 0.40;
     }
 
     .assistant-control-strip {
@@ -719,17 +1257,6 @@ export function createPanelHtml(): string {
 
     .assistant-stream-text {
       white-space: pre-wrap;
-    }
-
-    @keyframes assistant-pulse {
-      0%, 80%, 100% {
-        transform: scale(0.72);
-        opacity: 0.34;
-      }
-      40% {
-        transform: scale(1);
-        opacity: 1;
-      }
     }
 
     .result-block {
@@ -758,6 +1285,36 @@ export function createPanelHtml(): string {
       background: #f8fbff;
       padding: 11px 13px;
       color: #344054;
+      white-space: pre-wrap;
+    }
+
+    .tool-detail-list {
+      display: grid;
+      gap: 8px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .tool-detail-item {
+      display: grid;
+      gap: 4px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      padding: 10px 12px;
+    }
+
+    .tool-detail-title {
+      color: var(--text);
+      font-weight: 760;
+    }
+
+    .tool-detail-preview {
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+      white-space: pre-wrap;
     }
 
     .artifact-preview {
@@ -812,21 +1369,48 @@ export function createPanelHtml(): string {
 
     .composer {
       display: flex;
+      flex-direction: column;
+      align-items: center;
       justify-content: center;
-      padding: 12px 24px 24px;
+      padding: 12px 24px 26px;
       background: linear-gradient(180deg, rgba(255, 255, 255, 0), #fff 30%);
+      transition: background 180ms ease;
+    }
+
+    .shell.mode-deep .composer {
+      background: linear-gradient(180deg, rgba(246, 248, 252, 0), #f6f8fc 34%);
     }
 
     .composer-box {
+      position: relative;
       display: grid;
-      gap: 7px;
+      gap: 10px;
       width: min(800px, 100%);
       border: 1px solid var(--line-strong);
-      border-radius: 14px;
+      border-radius: 16px;
       background: #fff;
       box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
-      padding: 12px 14px 10px;
+      padding: 14px;
+      overflow: hidden;
       transition: border-color 150ms ease, box-shadow 150ms ease, background 150ms ease;
+    }
+
+    .composer-box::after {
+      content: "";
+      position: absolute;
+      inset: -1px;
+      border: 1px solid rgba(47, 111, 94, 0.34);
+      border-radius: 16px;
+      opacity: 0;
+      transform: scaleX(0.9);
+      pointer-events: none;
+      transform-origin: center;
+    }
+
+    .shell.mode-deep .composer-box {
+      border-color: #c7d2fe;
+      background: #ffffff;
+      box-shadow: 0 10px 32px rgba(15, 23, 42, 0.08), 0 0 0 1px rgba(99, 102, 241, 0.06);
     }
 
     .composer-box:focus-within {
@@ -854,11 +1438,11 @@ export function createPanelHtml(): string {
     .composer-actions {
       display: flex;
       align-items: center;
-      gap: 6px;
+      gap: 10px;
       position: relative;
       min-height: 31px;
       border-top: 1px solid var(--line);
-      padding-top: 7px;
+      padding-top: 9px;
     }
 
     .input-status-dot {
@@ -869,6 +1453,11 @@ export function createPanelHtml(): string {
       background: #22c55e;
       box-shadow: 0 0 0 3px #ecfdf5;
       flex-shrink: 0;
+    }
+
+    .shell.mode-deep .input-status-dot {
+      background: #6366f1;
+      box-shadow: 0 0 0 3px #e0e7ff;
     }
 
     .input-status-dot.warning {
@@ -885,21 +1474,8 @@ export function createPanelHtml(): string {
       flex: 1;
     }
 
-    .run-mode-select {
-      min-height: 32px;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      background: #fff;
-      color: var(--text);
-      padding: 0 28px 0 10px;
-      font-size: 13px;
-      font-weight: 600;
-      outline: none;
-    }
-
-    .run-mode-select:focus {
-      border-color: #a8b0ff;
-      box-shadow: 0 0 0 3px rgba(91, 92, 226, 0.12);
+    .hidden-context-inputs {
+      display: none;
     }
 
     .icon-button {
@@ -926,56 +1502,37 @@ export function createPanelHtml(): string {
       padding: 0;
     }
 
-    .composer-extra {
-      margin: 0;
-      padding: 0;
-      position: relative;
-    }
-
-    .composer-extra summary {
-      display: inline-flex;
-      align-items: center;
-      gap: 5px;
-      min-height: 30px;
-      padding: 0 8px;
-      border: 0;
-      border-radius: 7px;
-      background: transparent;
-      cursor: pointer;
-      color: var(--muted);
+    .deep-run-button {
+      min-width: 0;
+      min-height: 32px;
+      border-color: rgba(99, 102, 241, 0.22);
+      border-radius: 10px;
+      background: #f8fafc;
+      color: #334155;
+      padding: 0 11px;
       font-size: 12px;
-      font-weight: 500;
-      list-style: none;
+      font-weight: 700;
+      white-space: nowrap;
+      opacity: 0.94;
+      transition: background 150ms ease, border-color 150ms ease, color 150ms ease, transform 150ms ease;
     }
 
-    .composer-extra summary::before {
-      content: "";
-      display: inline-block;
-      width: 13px;
-      height: 13px;
-      border: 1.5px solid currentColor;
-      border-radius: 4px;
-      opacity: 0.72;
+    .deep-run-button:hover,
+    .deep-run-button:focus-visible {
+      border-color: rgba(79, 70, 229, 0.38);
+      background: #eef2ff;
+      color: #3730a3;
+      transform: translateY(-1px);
     }
 
-    .composer-extra summary::-webkit-details-marker {
+    .shell.mode-deep .deep-run-button {
+      border-color: rgba(99, 102, 241, 0.42);
+      background: #eef2ff;
+      color: #3730a3;
+    }
+
+    .deep-run-button[hidden] {
       display: none;
-    }
-
-    .context-inputs {
-      display: grid;
-      gap: 8px;
-      position: absolute;
-      left: 0;
-      bottom: 38px;
-      z-index: 5;
-      width: min(520px, calc(100vw - 360px));
-      margin-top: 0;
-      border: 1px solid var(--line-strong);
-      border-radius: 12px;
-      background: #fff;
-      box-shadow: 0 18px 38px rgba(15, 23, 42, 0.12);
-      padding: 12px;
     }
 
     .context-pane {
@@ -1133,7 +1690,7 @@ export function createPanelHtml(): string {
       top: 0;
       right: 0;
       z-index: 50;
-      display: grid;
+      display: none;
       grid-template-rows: auto minmax(0, 1fr);
       width: min(430px, 100vw);
       height: 100vh;
@@ -1145,7 +1702,179 @@ export function createPanelHtml(): string {
     }
 
     .developer-drawer.open {
+      display: grid;
       transform: translateX(0);
+    }
+
+    .settings-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 70;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      background: rgba(15, 23, 42, 0.26);
+      backdrop-filter: blur(6px);
+    }
+
+    .settings-backdrop.open {
+      display: flex;
+    }
+
+    .settings-panel {
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
+      width: 820px;
+      height: 620px;
+      border: 1px solid #e4e8f0;
+      border-radius: 10px;
+      background: #fff;
+      box-shadow: 0 24px 64px rgba(15, 23, 42, 0.2);
+      overflow: hidden;
+      transition: background 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+    }
+
+    body.mode-deep .settings-backdrop {
+      background: rgba(15, 23, 42, 0.44);
+    }
+
+    body.mode-deep .settings-panel {
+      border-color: rgba(148, 163, 184, 0.32);
+      background: #111827;
+      color: #f8fafc;
+      box-shadow: 0 28px 76px rgba(15, 23, 42, 0.38);
+    }
+
+    .settings-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 18px 22px 12px;
+    }
+
+    .settings-title {
+      display: grid;
+      gap: 2px;
+    }
+
+    .settings-title strong {
+      font-size: 18px;
+    }
+
+    .settings-body {
+      min-height: 0;
+      display: grid;
+      grid-template-columns: 190px minmax(0, 1fr);
+      overflow: hidden;
+    }
+
+    .settings-nav {
+      display: grid;
+      align-content: start;
+      gap: 6px;
+      padding: 16px;
+      border-right: 1px solid var(--line);
+      background: #fafafa;
+    }
+
+    body.mode-deep .settings-nav {
+      border-right-color: rgba(148, 163, 184, 0.18);
+      background: #0f172a;
+    }
+
+    .settings-nav button {
+      justify-content: flex-start;
+      min-height: 34px;
+      border-color: transparent;
+      background: transparent;
+      color: var(--muted);
+      text-align: left;
+    }
+
+    .settings-nav button.active {
+      border-color: #dbeafe;
+      background: #eef4ff;
+      color: var(--blue);
+    }
+
+    body.mode-deep .settings-nav button {
+      color: #cbd5e1;
+    }
+
+    body.mode-deep .settings-nav button.active {
+      border-color: rgba(129, 140, 248, 0.36);
+      background: rgba(99, 102, 241, 0.2);
+      color: #f8fafc;
+    }
+
+    .settings-content {
+      min-width: 0;
+      padding: 18px 22px 22px;
+      overflow: auto;
+      background: #fbfcfe;
+    }
+
+    body.mode-deep .settings-content {
+      background: #151f32;
+    }
+
+    .settings-section {
+      display: none;
+      gap: 14px;
+    }
+
+    .settings-section.active {
+      display: grid;
+    }
+
+    .settings-card {
+      display: grid;
+      gap: 14px;
+      max-width: 520px;
+    }
+
+    .settings-card.wide {
+      max-width: 620px;
+    }
+
+    .settings-card h2 {
+      margin: 0;
+    }
+
+    .settings-card .fields {
+      gap: 12px;
+    }
+
+    .settings-fields {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .settings-fields .wide-field,
+    .settings-fields button,
+    .settings-fields .hint {
+      grid-column: 1 / -1;
+    }
+
+    body.mode-deep .settings-panel label,
+    body.mode-deep .settings-panel .section-note,
+    body.mode-deep .settings-panel .hint:not(.error) {
+      color: #cbd5e1;
+    }
+
+    body.mode-deep .settings-panel .ghost {
+      border-color: rgba(148, 163, 184, 0.22);
+      background: rgba(255, 255, 255, 0.08);
+      color: #fff;
+    }
+
+    body.mode-deep .settings-panel input,
+    body.mode-deep .settings-panel select,
+    body.mode-deep .settings-panel textarea {
+      border-color: rgba(148, 163, 184, 0.3);
+      background: #0f172a;
+      color: #f8fafc;
     }
 
     .drawer-head {
@@ -1219,34 +1948,28 @@ export function createPanelHtml(): string {
       }
     }
 
-    @media (max-width: 820px) {
-      body { overflow: auto; }
-
-      .app {
-        display: block;
-        height: auto;
-        overflow: visible;
+    @media (max-width: 1040px) {
+      .sidebar {
+        width: 220px;
+        min-width: 220px;
       }
 
-      .titlebar,
-      .sidebar,
-      .workspace,
-      .session-card {
-        height: auto;
+      .titlebar {
+        padding-right: 16px;
+        padding-left: 16px;
       }
 
-      .shell {
-        display: block;
+      .thread-scroll {
+        padding: 22px 34px 18px;
       }
 
-      .session-card {
-        margin: 0;
-        border-radius: 0;
-      }
-
-      .thread-scroll,
       .composer {
-        padding: 16px;
+        padding: 12px 34px 24px;
+      }
+
+      .intent-field {
+        width: 340px;
+        height: 76px;
       }
 
       .artifact-grid {
@@ -1274,26 +1997,40 @@ export function createPanelHtml(): string {
           <a class="side-action" href="#"><span class="nav-mark skill"></span><span>技能</span></a>
           <a class="side-action" href="#"><span class="nav-mark auto"></span><span>例行任务</span></a>
           <a class="side-action" href="#"><span class="nav-mark tool"></span><span>工具</span></a>
-          <button class="side-action" id="diagnosticDrawerButton" type="button"><span class="nav-mark settings"></span><span>设置</span></button>
         </nav>
 
-        <section class="task-list" aria-label="最近对话">
-          <div class="side-title"><span>最近对话</span><span id="runCount">0</span></div>
+        <section class="task-list" aria-label="会话列表">
           <ul class="runs" id="runHistory">
-            <li class="run-item active">
-              <div class="run-title">暂无对话</div>
-              <div class="run-meta">开始后会显示在这里。</div>
+            <li class="run-item empty active">
+              <span class="run-sketch" aria-hidden="true"><span></span><span></span><span></span></span>
+              <div class="run-body">
+                <div class="run-title">暂无对话</div>
+                <div class="run-meta">开始后会显示在这里。</div>
+              </div>
             </li>
           </ul>
         </section>
 
+        <div class="sidebar-bottom">
+          <button class="profile-menu-button" id="profileMenuButton" type="button" aria-haspopup="menu" aria-controls="accountMenu" aria-expanded="false">
+            <span class="profile-avatar" aria-hidden="true"></span>
+            <span class="profile-main"><span class="profile-name">个人空间</span><span class="profile-caption">设置与账户</span></span>
+            <span class="profile-caret" aria-hidden="true"></span>
+          </button>
+          <div class="account-menu" id="accountMenu" role="menu" aria-hidden="true">
+            <button id="accountProfileButton" type="button" role="menuitem">个人信息</button>
+            <button id="accountSettingsButton" type="button" role="menuitem">设置</button>
+            <button id="accountDiagnosticsButton" type="button" role="menuitem">诊断</button>
+            <div class="account-menu-note" id="accountMenuNote" aria-live="polite">个人信息暂未连接。</div>
+          </div>
+        </div>
       </aside>
 
       <div class="app-container">
         <header class="titlebar">
           <button class="ghost collapse-button" id="sidebarToggleButton" type="button" title="折叠侧边栏" aria-label="折叠侧边栏"><span class="collapse-icon" aria-hidden="true"></span></button>
           <div class="mode-pill"><span class="brand-dot" aria-hidden="true"></span><span>AgentArbor</span></div>
-          <span class="menu-link">通用助手</span>
+          <span class="menu-link">会话</span>
         </header>
 
         <main class="workspace">
@@ -1311,8 +2048,11 @@ export function createPanelHtml(): string {
             <section class="thread">
               <div class="thread-scroll" id="transcriptWrap">
                 <div class="welcome" id="introBlock">
-                  <h1>在忙什么呢？</h1>
-                  <p>随便问一个问题，或者交给我一个需要文件、网页和工具协作完成的任务。</p>
+                  <div class="intent-field" id="intentField" aria-label="首页空态">
+                    <div class="intent-meta">
+                      <span>在忙什么呢？</span>
+                    </div>
+                  </div>
                 </div>
                 <section class="transcript" id="transcript" aria-label="对话内容">
                   <div class="empty-transcript"></div>
@@ -1321,28 +2061,32 @@ export function createPanelHtml(): string {
               </div>
 
               <section class="composer" aria-label="任务输入">
+                <div class="backstage-handoff" id="backstageHandoff" data-state="idle" aria-hidden="true">
+                  <div class="backstage-stage">
+                    <div class="backstage-surface" aria-hidden="true">
+                      <svg class="backstage-thread" viewBox="0 0 520 74" focusable="false">
+                        <path class="thread-base" pathLength="1" d="M320 52 C318 42 318 32 320 22"></path>
+                        <path class="thread-primary" pathLength="1" d="M320 52 C318 42 318 32 320 22"></path>
+                        <path class="thread-branch-a" pathLength="1" d="M320 35 C285 20 246 19 208 31 C181 39 153 39 126 31"></path>
+                        <path class="thread-branch-b" pathLength="1" d="M320 35 C356 19 398 20 437 33 C466 43 495 42 522 31"></path>
+                        <path class="thread-knot" pathLength="1" d="M287 42 C306 30 334 30 353 42 C334 53 306 53 287 42"></path>
+                      </svg>
+                    </div>
+                  </div>
+                </div>
                 <div class="composer-box">
                   <textarea id="goalInput" placeholder="问任何问题，或交给我一个任务" rows="1"></textarea>
                   <div class="composer-actions">
                     <span class="input-status-dot" aria-hidden="true"></span>
-                    <details class="composer-extra">
-                      <summary>附件</summary>
-                      <div class="context-inputs">
-                        <label>文件或网页
-                          <textarea id="contextRefsInput" placeholder="可选，每行一个文件、网页或项目引用；只保存引用和短摘要。"></textarea>
-                        </label>
-                        <label>使用范围
-                          <input id="permissionRefsInput" autocomplete="off" placeholder="例如：只读；写入前询问">
-                        </label>
-                      </div>
-                    </details>
-                    <select class="run-mode-select" id="runModeInput" title="处理方式" aria-label="处理方式">
-                      <option value="agent">助手</option>
-                      <option value="deep">深度模式</option>
-                    </select>
-                    <span class="spacer"></span>
                     <span class="hint" id="modelHint">Enter 发送，Shift+Enter 换行。</span>
+                    <span class="spacer"></span>
+                    <button class="deep-run-button" id="deepRunButton" type="button" hidden></button>
                     <button class="send-button primary" id="runButton" title="发送" aria-label="发送消息">↑</button>
+                    <input id="runModeInput" type="hidden" value="agent" autocomplete="off">
+                    <div class="hidden-context-inputs" aria-hidden="true">
+                      <textarea id="contextRefsInput" tabindex="-1"></textarea>
+                      <input id="permissionRefsInput" tabindex="-1">
+                    </div>
                   </div>
                 </div>
               </section>
@@ -1369,7 +2113,6 @@ export function createPanelHtml(): string {
         <button class="inspector-tab active" type="button" data-tab="overview">概览</button>
         <button class="inspector-tab" type="button" data-tab="ai">诊断</button>
         <button class="inspector-tab" type="button" data-tab="agents">Agents</button>
-        <button class="inspector-tab" type="button" data-tab="settings">设置</button>
       </nav>
 
       <div class="inspector-panel active" id="tabOverview" data-panel="overview">
@@ -1423,46 +2166,86 @@ export function createPanelHtml(): string {
         </section>
       </div>
 
-      <div class="inspector-panel" id="tabSettings" data-panel="settings">
-        <div class="fields">
-          <label>Base URL <input id="baseUrlInput" autocomplete="off"></label>
-          <label>模型名 <input id="modelInput" autocomplete="off"></label>
-          <label>默认 AI 模式
-            <select id="defaultAiModeInput">
-              <option value="none">AI 禁用</option>
-              <option value="openai-compatible">OpenAI-compatible 推荐</option>
-              <option value="fake">Fake AI 测试模式</option>
-            </select>
-          </label>
-          <label>本次运行模式
-            <select id="aiMode">
-              <option value="none">AI 禁用</option>
-              <option value="openai-compatible">OpenAI-compatible 推荐</option>
-              <option value="fake">Fake AI 测试模式</option>
-            </select>
-          </label>
-          <label>API Key <input id="apiKeyInput" type="password" autocomplete="off" placeholder="保存后不会回显"></label>
-          <button id="saveConfigButton">保存模型配置</button>
-          <div class="hint" id="configStatus">模型配置未加载。</div>
-          <label>搜索服务
-            <select id="webSearchProviderInput">
-              <option value="tavily">Tavily</option>
-              <option value="none">无</option>
-            </select>
-          </label>
-          <label>Tavily API Key <input id="tavilyKeyInput" type="password" autocomplete="off" placeholder="保存后不会回显"></label>
-          <label>结果数 <input id="tavilyMaxResultsInput" type="number" min="1" max="10" step="1"></label>
-          <button id="saveToolConfigButton">保存工具配置</button>
-          <div class="hint" id="toolConfigStatus">工具配置未加载。</div>
-          <h2>折叠调试区</h2>
-          <ul class="debug-list" id="debugList">
-            <li>EventLog、Observation、CandidatePool、Convergence 和 rootlet 细节默认折叠。</li>
-          </ul>
-          <pre id="debugJson">{}</pre>
-        </div>
-      </div>
     </div>
   </aside>
+
+  <div class="settings-backdrop" id="settingsBackdrop" aria-hidden="true">
+    <section class="settings-panel" id="settingsPanel" aria-label="设置面板" role="dialog" aria-modal="true">
+      <div class="settings-head">
+        <div class="settings-title">
+          <strong>设置</strong>
+          <span class="hint">按需调整模型、搜索和诊断，不打断当前会话。</span>
+        </div>
+        <button class="ghost" type="button" data-close-settings>关闭</button>
+      </div>
+      <div class="settings-body">
+        <nav class="settings-nav" aria-label="设置分区">
+          <button class="active" type="button" data-settings-tab="model">模型</button>
+          <button type="button" data-settings-tab="tools">工具</button>
+          <button type="button" data-settings-tab="safety">安全与调试</button>
+        </nav>
+        <div class="settings-content">
+          <section class="settings-section active" data-settings-panel="model">
+            <div class="settings-card">
+              <h2>模型配置</h2>
+              <p class="section-note">用于真实 AI 回合。密钥只写入本地密钥存储，页面不会回显。</p>
+              <div class="fields settings-fields">
+                <label class="wide-field">Base URL <input id="baseUrlInput" autocomplete="off"></label>
+                <label>模型名 <input id="modelInput" autocomplete="off"></label>
+                <label>默认 AI 模式
+                  <select id="defaultAiModeInput">
+                    <option value="none">AI 禁用</option>
+                    <option value="openai-compatible">OpenAI-compatible 推荐</option>
+                    <option value="fake">Fake AI 测试模式</option>
+                  </select>
+                </label>
+                <label>本次运行模式
+                  <select id="aiMode">
+                    <option value="none">AI 禁用</option>
+                    <option value="openai-compatible">OpenAI-compatible 推荐</option>
+                    <option value="fake">Fake AI 测试模式</option>
+                  </select>
+                </label>
+                <label class="wide-field">API Key <input id="apiKeyInput" type="password" autocomplete="off" placeholder="保存后不会回显"></label>
+                <button id="saveConfigButton">保存模型配置</button>
+                <div class="hint" id="configStatus">模型配置未加载。</div>
+              </div>
+            </div>
+          </section>
+
+          <section class="settings-section" data-settings-panel="tools">
+            <div class="settings-card">
+              <h2>工具配置</h2>
+              <p class="section-note">当前只整理搜索工具的本地配置。后续工具市场或文件入口不会在本任务中出生。</p>
+              <div class="fields settings-fields">
+                <label>搜索服务
+                  <select id="webSearchProviderInput">
+                    <option value="tavily">Tavily</option>
+                    <option value="none">无</option>
+                  </select>
+                </label>
+                <label class="wide-field">Tavily API Key <input id="tavilyKeyInput" type="password" autocomplete="off" placeholder="保存后不会回显"></label>
+                <label>结果数 <input id="tavilyMaxResultsInput" type="number" min="1" max="10" step="1"></label>
+                <button id="saveToolConfigButton">保存工具配置</button>
+                <div class="hint" id="toolConfigStatus">工具配置未加载。</div>
+              </div>
+            </div>
+          </section>
+
+          <section class="settings-section" data-settings-panel="safety">
+            <div class="settings-card">
+              <h2>安全与调试</h2>
+              <p class="section-note">只展示安全投影。完整模型输入、原始工具结果、密钥和运行时引用不会显示。</p>
+              <ul class="debug-list" id="debugList">
+                <li>运行日志、模型引用、工具引用和收束细节默认折叠到详情与诊断。</li>
+              </ul>
+              <pre id="debugJson">{}</pre>
+            </div>
+          </section>
+        </div>
+      </div>
+    </section>
+  </div>
 
   <script>
     const STREAM_TYPES = [
@@ -1474,6 +2257,8 @@ export function createPanelHtml(): string {
       "tool.requested",
       "tool.completed",
       "tool.failed",
+      "confirmation.needed",
+      "user.guidance",
       "agent.delegation.planned",
       "agent.child.started",
       "agent.child.completed",
@@ -1500,6 +2285,8 @@ export function createPanelHtml(): string {
       "tool.requested": "正在读取材料",
       "tool.completed": "材料已读取",
       "tool.failed": "材料读取失败",
+      "confirmation.needed": "需要确认",
+      "user.guidance": "用户指导",
       "agent.delegation.planned": "正在安排检查",
       "agent.child.started": "检查开始",
       "agent.child.completed": "检查完成",
@@ -1508,6 +2295,9 @@ export function createPanelHtml(): string {
       "final.result": "最终结果",
       "run.failed": "运行失败"
     };
+
+    const BACKSTAGE_SUBMIT_MS = 120;
+    const BACKSTAGE_HANDOFF_MS = 840;
 
     const state = {
       config: undefined,
@@ -1528,8 +2318,11 @@ export function createPanelHtml(): string {
       assistantStreamTimer: undefined,
       assistantControlBuffer: "",
       inspectorTab: "overview",
+      settingsTab: "model",
       inspectorPinned: false,
-      isSubmitting: false
+      isSubmitting: false,
+      backstageState: "idle",
+      backstageInputWeight: 0
     };
 
     const dom = {
@@ -1539,6 +2332,9 @@ export function createPanelHtml(): string {
       mainCanvas: document.getElementById("mainCanvas"),
       transcript: document.getElementById("transcript"),
       introBlock: document.getElementById("introBlock"),
+      intentField: document.getElementById("intentField"),
+      backstageHandoff: document.getElementById("backstageHandoff"),
+      composerBox: document.querySelector(".composer-box"),
       goalInput: document.getElementById("goalInput"),
       contextRefsInput: document.getElementById("contextRefsInput"),
       permissionRefsInput: document.getElementById("permissionRefsInput"),
@@ -1547,15 +2343,22 @@ export function createPanelHtml(): string {
       providerHint: document.getElementById("modelHint"),
       inputStatusDot: document.querySelector(".input-status-dot"),
       runButton: document.getElementById("runButton"),
+      deepRunButton: document.getElementById("deepRunButton"),
       newRunButton: document.getElementById("newRunButton"),
       sidebarToggleButton: document.getElementById("sidebarToggleButton"),
       shell: document.getElementById("shell"),
       runHistory: document.getElementById("runHistory"),
-      runCount: document.getElementById("runCount"),
       sessionTitle: document.getElementById("sessionTitle"),
-      diagnosticDrawerButton: document.getElementById("diagnosticDrawerButton"),
+      profileMenuButton: document.getElementById("profileMenuButton"),
+      accountMenu: document.getElementById("accountMenu"),
+      accountProfileButton: document.getElementById("accountProfileButton"),
+      accountSettingsButton: document.getElementById("accountSettingsButton"),
+      accountDiagnosticsButton: document.getElementById("accountDiagnosticsButton"),
+      accountMenuNote: document.getElementById("accountMenuNote"),
       drawerBackdrop: document.getElementById("drawerBackdrop"),
       developerDrawer: document.getElementById("developerDrawer"),
+      settingsBackdrop: document.getElementById("settingsBackdrop"),
+      settingsPanel: document.getElementById("settingsPanel"),
       baseUrlInput: document.getElementById("baseUrlInput"),
       modelInput: document.getElementById("modelInput"),
       defaultAiModeInput: document.getElementById("defaultAiModeInput"),
@@ -1569,6 +2372,8 @@ export function createPanelHtml(): string {
       toolConfigStatus: document.getElementById("toolConfigStatus"),
       inspectorTabs: Array.from(document.querySelectorAll(".inspector-tab")),
       inspectorPanels: Array.from(document.querySelectorAll(".inspector-panel")),
+      settingsTabs: Array.from(document.querySelectorAll("[data-settings-tab]")),
+      settingsPanels: Array.from(document.querySelectorAll("[data-settings-panel]")),
       railStatusBadge: document.getElementById("railStatusBadge"),
       runPath: document.getElementById("runPath"),
       supervisionStatus: document.getElementById("supervisionStatus"),
@@ -1582,7 +2387,8 @@ export function createPanelHtml(): string {
       debugJson: document.getElementById("debugJson")
     };
 
-    dom.runButton.addEventListener("click", startRun);
+    dom.runButton.addEventListener("click", () => startRun("agent"));
+    dom.deepRunButton.addEventListener("click", () => startRun("deep"));
     dom.goalInput.addEventListener("keydown", handleComposerKeydown);
     dom.goalInput.addEventListener("input", () => {
       autoResizeGoalInput();
@@ -1592,23 +2398,60 @@ export function createPanelHtml(): string {
     dom.sidebarToggleButton.addEventListener("click", toggleSidebar);
     dom.saveConfigButton.addEventListener("click", saveModelConfig);
     dom.saveToolConfigButton.addEventListener("click", saveToolConfig);
-    dom.diagnosticDrawerButton.addEventListener("click", openDeveloperDrawer);
+    dom.profileMenuButton.addEventListener("click", toggleAccountMenu);
+    dom.accountProfileButton.addEventListener("click", showAccountProfilePlaceholder);
+    dom.accountSettingsButton.addEventListener("click", openSettingsPanel);
+    dom.accountDiagnosticsButton.addEventListener("click", () => openDeveloperDrawer("ai"));
     dom.drawerBackdrop.addEventListener("click", closeDeveloperDrawer);
+    document.addEventListener("click", (event) => {
+      if (!dom.accountMenu.classList.contains("open")) {
+        return;
+      }
+      const target = event.target;
+      if (dom.profileMenuButton.contains(target) || dom.accountMenu.contains(target)) {
+        return;
+      }
+      closeAccountMenu();
+    });
     document.querySelectorAll("[data-close-drawer]").forEach((button) => button.addEventListener("click", closeDeveloperDrawer));
+    dom.settingsBackdrop.addEventListener("click", (event) => {
+      if (event.target === dom.settingsBackdrop) {
+        closeSettingsPanel();
+      }
+    });
+    document.querySelectorAll("[data-close-settings]").forEach((button) => button.addEventListener("click", closeSettingsPanel));
     dom.inspectorTabs.forEach((button) => {
       button.addEventListener("click", () => setInspectorTab(button.dataset.tab || "overview", true));
+    });
+    dom.settingsTabs.forEach((button) => {
+      button.addEventListener("click", () => setSettingsTab(button.dataset.settingsTab || "model"));
     });
     dom.aiMode.addEventListener("change", () => {
       if (state.config) {
         renderProviderStatus();
       }
     });
-    dom.runModeInput.addEventListener("change", renderProviderStatus);
+    dom.runModeInput.addEventListener("change", () => {
+      applyTaskRunMode(dom.runModeInput.value);
+      renderProviderStatus();
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && dom.settingsBackdrop.classList.contains("open")) {
+        closeSettingsPanel();
+        return;
+      }
+      if (event.key === "Escape" && dom.accountMenu.classList.contains("open")) {
+        closeAccountMenu(true);
+      }
+    });
 
     init();
 
     async function init() {
       setInspectorTab("overview", false);
+      setSettingsTab("model");
+      applyTaskRunMode("agent");
+      initBackstageHandoffAnimation();
       renderMetrics("pending", undefined);
       renderRunPath(undefined);
       renderAgentTree(undefined);
@@ -1718,7 +2561,7 @@ export function createPanelHtml(): string {
       }
       event.preventDefault();
       if (!state.isSubmitting && dom.goalInput.value.trim().length > 0) {
-        startRun();
+        startRun("agent");
       }
     }
 
@@ -1730,9 +2573,122 @@ export function createPanelHtml(): string {
     function updateComposerControls() {
       const hasText = dom.goalInput.value.trim().length > 0;
       dom.runButton.disabled = state.isSubmitting || !hasText;
+      dom.deepRunButton.hidden = !hasText;
+      dom.deepRunButton.disabled = state.isSubmitting || !hasText;
+      dom.deepRunButton.textContent = hasText ? "深入处理" : "";
+      if (hasText) {
+        dom.deepRunButton.setAttribute("aria-label", "深入处理本次任务");
+        dom.deepRunButton.setAttribute("title", "深入处理本次任务");
+      } else {
+        dom.deepRunButton.removeAttribute("aria-label");
+        dom.deepRunButton.removeAttribute("title");
+      }
+      if (!state.isSubmitting) {
+        updateBackstageHandoffAnimation(hasText ? "typing" : (state.currentRunId ? "running" : "idle"));
+      }
+      updateBackstageInputWeight();
     }
 
-    function openDeveloperDrawer() {
+    function initBackstageHandoffAnimation() {
+      updateBackstageHandoffAnimation(dom.goalInput.value.trim().length > 0 ? "typing" : "idle", true);
+      updateBackstageInputWeight(true);
+    }
+
+    function updateBackstageHandoffAnimation(nextState, force = false) {
+      if (!dom.backstageHandoff || (!force && state.backstageState === nextState)) {
+        return;
+      }
+      state.backstageState = nextState;
+      dom.backstageHandoff.dataset.state = nextState;
+    }
+
+    function updateBackstageInputWeight(force = false) {
+      if (!dom.backstageHandoff) {
+        return;
+      }
+      const text = dom.goalInput.value.trim();
+      const nextWeight = text.length === 0 ? 0 : Math.min(1, 0.12 + Math.log2(text.length + 1) / 5);
+      const easedWeight = force ? nextWeight : Math.max(nextWeight, state.backstageInputWeight * 0.94);
+      state.backstageInputWeight = Math.abs(easedWeight - nextWeight) < 0.015 ? nextWeight : easedWeight;
+      const visibleWeight = Math.min(1, state.backstageInputWeight * 1.2);
+      const primaryDash = Math.max(0, 1 - visibleWeight * 1.12);
+      const branchADash = Math.max(0, 1 - Math.max(0, visibleWeight - 0.1) * 1.18);
+      const branchBDash = Math.max(0, 1 - Math.max(0, visibleWeight - 0.2) * 1.3);
+      const knotDash = Math.max(0, 1 - Math.max(0, visibleWeight - 0.34) * 1.55);
+      dom.backstageHandoff.style.setProperty("--input-weight", state.backstageInputWeight.toFixed(3));
+      dom.backstageHandoff.style.setProperty("--input-visible", visibleWeight.toFixed(3));
+      dom.backstageHandoff.style.setProperty("--primary-dash", primaryDash.toFixed(3));
+      dom.backstageHandoff.style.setProperty("--branch-a-dash", branchADash.toFixed(3));
+      dom.backstageHandoff.style.setProperty("--branch-b-dash", branchBDash.toFixed(3));
+      dom.backstageHandoff.style.setProperty("--knot-dash", knotDash.toFixed(3));
+      if (state.backstageInputWeight > nextWeight && !force) {
+        window.setTimeout(() => updateBackstageInputWeight(true), 160);
+      }
+    }
+
+    async function playBackstageHandoffSubmit() {
+      if (!dom.backstageHandoff || !dom.composerBox) {
+        return;
+      }
+      dom.composerBox.classList.remove("backstage-receive");
+      dom.backstageHandoff.style.setProperty("--input-weight", "1");
+      dom.backstageHandoff.style.setProperty("--input-visible", "1");
+      dom.backstageHandoff.style.setProperty("--primary-dash", "0");
+      dom.backstageHandoff.style.setProperty("--branch-a-dash", "0");
+      dom.backstageHandoff.style.setProperty("--branch-b-dash", "0");
+      dom.backstageHandoff.style.setProperty("--knot-dash", "0");
+      updateBackstageHandoffAnimation("submit", true);
+      void dom.backstageHandoff.offsetWidth;
+      dom.composerBox.classList.add("backstage-receive");
+      await delay(BACKSTAGE_SUBMIT_MS);
+      updateBackstageHandoffAnimation("handoff", true);
+      await delay(BACKSTAGE_HANDOFF_MS);
+      updateBackstageHandoffAnimation("running", true);
+      window.setTimeout(() => {
+        dom.composerBox.classList.remove("backstage-receive");
+      }, 160);
+    }
+
+    function delay(ms) {
+      return new Promise((resolve) => window.setTimeout(resolve, ms));
+    }
+
+    function toggleAccountMenu(event) {
+      if (event) {
+        event.stopPropagation();
+      }
+      if (dom.accountMenu.classList.contains("open")) {
+        closeAccountMenu();
+        return;
+      }
+      openAccountMenu();
+    }
+
+    function openAccountMenu() {
+      dom.accountMenu.classList.add("open");
+      dom.accountMenu.setAttribute("aria-hidden", "false");
+      dom.profileMenuButton.setAttribute("aria-expanded", "true");
+    }
+
+    function closeAccountMenu(restoreFocus) {
+      const focusWasInsideMenu = dom.accountMenu.contains(document.activeElement);
+      if (restoreFocus || focusWasInsideMenu) {
+        dom.profileMenuButton.focus({ preventScroll: true });
+      }
+      dom.accountMenu.classList.remove("open");
+      dom.accountMenu.setAttribute("aria-hidden", "true");
+      dom.profileMenuButton.setAttribute("aria-expanded", "false");
+    }
+
+    function showAccountProfilePlaceholder() {
+      dom.accountMenuNote.textContent = "个人信息暂未连接，后续接入账户资料。";
+    }
+
+    function openDeveloperDrawer(tab) {
+      closeAccountMenu();
+      if (tab) {
+        setInspectorTab(tab, true);
+      }
       dom.drawerBackdrop.classList.add("open");
       dom.developerDrawer.classList.add("open");
       dom.developerDrawer.setAttribute("aria-hidden", "false");
@@ -1742,6 +2698,25 @@ export function createPanelHtml(): string {
       dom.drawerBackdrop.classList.remove("open");
       dom.developerDrawer.classList.remove("open");
       dom.developerDrawer.setAttribute("aria-hidden", "true");
+    }
+
+    function openSettingsPanel() {
+      closeAccountMenu();
+      dom.settingsBackdrop.classList.add("open");
+      dom.settingsBackdrop.setAttribute("aria-hidden", "false");
+      setSettingsTab(state.settingsTab || "model");
+      const activeTab = dom.settingsTabs.find((button) => button.classList.contains("active"));
+      if (activeTab) {
+        activeTab.focus({ preventScroll: true });
+      }
+    }
+
+    function closeSettingsPanel() {
+      if (dom.settingsBackdrop.contains(document.activeElement)) {
+        dom.profileMenuButton.focus({ preventScroll: true });
+      }
+      dom.settingsBackdrop.classList.remove("open");
+      dom.settingsBackdrop.setAttribute("aria-hidden", "true");
     }
 
     function toggleSidebar() {
@@ -1764,6 +2739,26 @@ export function createPanelHtml(): string {
       dom.inspectorPanels.forEach((panel) => {
         panel.classList.toggle("active", panel.dataset.panel === tab);
       });
+    }
+
+    function setSettingsTab(tab) {
+      state.settingsTab = tab;
+      dom.settingsTabs.forEach((button) => {
+        const active = button.dataset.settingsTab === tab;
+        button.classList.toggle("active", active);
+        button.setAttribute("aria-selected", active ? "true" : "false");
+      });
+      dom.settingsPanels.forEach((panel) => {
+        panel.classList.toggle("active", panel.dataset.settingsPanel === tab);
+      });
+    }
+
+    function applyTaskRunMode(mode) {
+      const selectedMode = mode === "deep" ? "deep" : "agent";
+      dom.runModeInput.value = selectedMode;
+      dom.shell.classList.toggle("mode-deep", selectedMode === "deep");
+      document.body.classList.toggle("mode-deep", selectedMode === "deep");
+      dom.intentField.dataset.runMode = selectedMode;
     }
 
     function autoInspectorTab(response) {
@@ -1857,7 +2852,7 @@ export function createPanelHtml(): string {
       }
     }
 
-    async function startRun() {
+    async function startRun(requestedRunMode) {
       if (state.isSubmitting) {
         return;
       }
@@ -1866,10 +2861,14 @@ export function createPanelHtml(): string {
         appendLocalEntry("提示", "请先输入任务。", "failed");
         return;
       }
+      const runMode = requestedRunMode === "deep" ? "deep" : "agent";
+      applyTaskRunMode(runMode);
+      renderProviderStatus();
 
       const hadActiveRun = state.currentRunId !== undefined;
       const activeAssistantEntry = state.assistantEntry;
       state.isSubmitting = true;
+      setButtons(false);
       if (!hadActiveRun) {
         stopLiveUpdates();
         state.seenSequences = new Set();
@@ -1883,6 +2882,7 @@ export function createPanelHtml(): string {
         resetAssistantStreamState();
       }
       const taskSoilInput = collectTaskSoilInput();
+      await playBackstageHandoffSubmit();
       dom.introBlock.hidden = true;
       dom.sessionTitle.textContent = compact(goal, 42);
       appendLocalEntry("你", compact(goal, 1200), "sent", true);
@@ -1907,7 +2907,6 @@ export function createPanelHtml(): string {
       renderRunPath(undefined);
       renderMetrics("running", undefined);
       renderRightPanels({ status: "running" });
-      setButtons(false);
 
       try {
         const endpoint = state.currentConversationId
@@ -1918,7 +2917,7 @@ export function createPanelHtml(): string {
           body: {
             goal: goal,
             aiMode: dom.aiMode.value,
-            runMode: dom.runModeInput.value,
+            runMode: runMode,
             taskSoil: taskSoilInput
           }
         });
@@ -1955,6 +2954,9 @@ export function createPanelHtml(): string {
       } finally {
         state.isSubmitting = false;
         setButtons(true);
+        if (!state.currentRunId) {
+          updateComposerControls();
+        }
       }
     }
 
@@ -1976,39 +2978,13 @@ export function createPanelHtml(): string {
             readonlyPreview: previewText ? { title: summary || ref, text: previewText } : undefined
           };
         });
-      const conversationRef = collectConversationContextRef();
-      const mergedContextRefs = conversationRef ? [...contextRefs, conversationRef] : contextRefs;
       const permissionBoundaryRefs = dom.permissionRefsInput.value
         .split(/[\\n,]+/g)
         .map((line) => line.trim())
         .filter(Boolean);
       return {
-        contextRefs: mergedContextRefs.length > 0 ? mergedContextRefs : undefined,
+        contextRefs: contextRefs.length > 0 ? contextRefs : undefined,
         permissionBoundaryRefs: permissionBoundaryRefs.length > 0 ? permissionBoundaryRefs : undefined
-      };
-    }
-
-    function collectConversationContextRef() {
-      const entries = Array.from(dom.transcript.querySelectorAll(".entry"))
-        .map((entry) => {
-          const role = entry.classList.contains("user") ? "你" : "助手";
-          const body = entry.querySelector(".entry-body");
-          const text = body ? body.textContent.trim() : "";
-          return text.length > 0 ? role + "：" + text : "";
-        })
-        .filter(Boolean)
-        .slice(-8);
-      if (entries.length === 0) {
-        return undefined;
-      }
-      return {
-        ref: "workspace:conversation-history",
-        kind: "workspace",
-        summary: "当前对话上下文",
-        readonlyPreview: {
-          title: "当前对话",
-          text: compact(entries.join("\\n"), 1200)
-        }
       };
     }
 
@@ -2186,6 +3162,12 @@ export function createPanelHtml(): string {
         flushAssistantStreamNow();
         return;
       }
+      if (event.type === "confirmation.needed") {
+        state.assistantStageKey = "confirmation";
+        flushAssistantStreamNow();
+        updateAssistantTurn("需要确认", activityBody(event), "running");
+        return;
+      }
       const progress = assistantProgressFromEvent(event);
       if (progress === undefined) {
         return;
@@ -2212,21 +3194,23 @@ export function createPanelHtml(): string {
         state.assistantStageKey = undefined;
         flushAssistantStreamNow();
         const directAnswer =
-          response.canvas && response.canvas.kind === "desktop_chat_canvas" && response.canvas.chat.answer
-            ? response.canvas.chat.answer
+          response.canvas && response.canvas.kind === "desktop_agent_canvas" && response.canvas.agent.answer
+            ? response.canvas.agent.answer
             : response.canvas && response.canvas.kind === "work_session_canvas" && response.canvas.workSession.directAnswer
               ? response.canvas.workSession.directAnswer
               : undefined;
         if (directAnswer) {
-          updateAssistantTurn("已回答", directAnswer.answer, "completed");
+          const needsConfirmation =
+            response.canvas && response.canvas.kind === "desktop_agent_canvas" && response.canvas.agent.pendingConfirmation;
+          updateAssistantTurn(needsConfirmation ? "需要确认" : "已完成", directAnswer.answer, needsConfirmation ? "running" : "completed");
           return;
         }
-        const upgradeRequest =
-          response.canvas && response.canvas.kind === "desktop_chat_canvas" && response.canvas.chat.upgradeRequest
-            ? response.canvas.chat.upgradeRequest
+        const pendingConfirmation =
+          response.canvas && response.canvas.kind === "desktop_agent_canvas" && response.canvas.agent.pendingConfirmation
+            ? response.canvas.agent.pendingConfirmation
             : undefined;
-        if (upgradeRequest) {
-          updateAssistantTurn("建议使用深度模式", "这条消息适合进入深度模式：" + upgradeRequest.reason, "completed");
+        if (pendingConfirmation) {
+          updateAssistantTurn("需要确认", pendingConfirmation.question + "\\n" + pendingConfirmation.consequence, "running");
           return;
         }
         const report = response.canvas && response.canvas.kind === "work_session_canvas" && response.canvas.workSession.report
@@ -2297,8 +3281,15 @@ export function createPanelHtml(): string {
         const routeTitle = String(summary || "").includes("深度") ? "深度模式" : "回复";
         return {
           stageKey: "started",
-          title: routeTitle,
+          title: routeTitle === "回复" ? "桌面 Agent" : routeTitle,
           body: summary || "等待模型返回。"
+        };
+      }
+      if (type === "confirmation.needed") {
+        return {
+          stageKey: "confirmation",
+          title: "需要确认",
+          body: summary || "继续前需要你补充授权或材料。"
         };
       }
       if (type === "tool.requested" || type === "tool.completed") {
@@ -2352,6 +3343,8 @@ export function createPanelHtml(): string {
       }
       if (event.type === "tool.requested") return "正在读取你提供的上下文。";
       if (event.type === "tool.completed") return "已取得可引用的材料。";
+      if (event.type === "confirmation.needed") return "继续前需要你补充授权或材料。";
+      if (event.type === "user.guidance") return "已收到你的补充指导。";
       if (event.type === "agent.delegation.planned") return "正在安排几路检查。";
       if (event.type === "agent.child.started") return "检查已经开始。";
       if (event.type === "agent.child.completed") return "检查已返回局部材料。";
@@ -2369,6 +3362,7 @@ export function createPanelHtml(): string {
       if (
         lower.includes("fake ") ||
         lower.includes("work_session") ||
+        lower.includes("desktop_agent") ||
         lower.includes("validation failed") ||
         lower.includes("output_validation") ||
         lower.includes("model-request") ||
@@ -2399,14 +3393,14 @@ export function createPanelHtml(): string {
       if (lower.includes("output_validation") || lower.includes("validation failed") || lower.includes("contract")) {
         return "模型返回的内容没有通过本轮格式检查。这不是你的输入问题；技术引用已放在详情里，可以调整模型或重试。";
       }
-      if (lower.includes("openai-compatible provider returned http") || lower.includes("provider_response") || lower.includes("model_failed") || lower.includes("desktop_chat_failed")) {
+      if (lower.includes("openai-compatible provider returned http") || lower.includes("provider_response") || lower.includes("model_failed") || lower.includes("desktop_chat_failed") || lower.includes("desktop_agent_failed")) {
         return "模型服务这次没有返回可用结果。请检查设置里的 Base URL、模型名和密钥，或稍后重试。详情已放在诊断里。";
       }
       if (lower.includes("api key") || lower.includes("missing_api_key")) {
-        return "还没有配置可用的模型密钥。请打开详情里的设置，保存密钥后重试。";
+        return "还没有配置可用的模型密钥。请打开设置，保存密钥后重试。";
       }
       if (lower.includes("missing_model") || text.includes("缺少模型名") || text.includes("没有可用的模型名") || text.includes("还没有配置模型名")) {
-        return "还没有配置模型名。请打开详情里的设置，填写模型名后重试。";
+        return "还没有配置模型名。请打开设置，填写模型名后重试。";
       }
       if (lower.includes("ai 禁用") || lower.includes("ai_disabled")) {
         return "当前禁用了 AI，所以不能完成这次处理。请在详情里切换到真实模型或测试模式。";
@@ -2829,8 +3823,8 @@ export function createPanelHtml(): string {
         return;
       }
       dom.mainCanvas.hidden = false;
-      if (canvas.kind === "desktop_chat_canvas") {
-        renderDesktopChatCanvas(canvas);
+      if (canvas.kind === "desktop_agent_canvas") {
+        renderDesktopAgentCanvas(canvas);
       } else if (canvas.kind === "work_session_canvas") {
         renderWorkSessionCanvas(canvas);
       } else if (canvas.kind === "underground_deep_canvas") {
@@ -2883,17 +3877,38 @@ export function createPanelHtml(): string {
       dom.mainCanvas.replaceChildren(...blocks);
     }
 
-    function renderDesktopChatCanvas(canvas) {
-      const answer = canvas.chat.answer;
+    function renderDesktopAgentCanvas(canvas) {
+      const answer = canvas.agent.answer;
       const blocks = [];
       if (answer) {
+        const resultBlocks = Array.isArray(answer.resultBlocks) ? answer.resultBlocks : [];
+        const visibleBlocks = resultBlocks.filter((block) => block.kind !== "answer" || canvas.agent.pendingConfirmation || (block.toolCallRefs && block.toolCallRefs.length > 0));
+        if (visibleBlocks.length === 0) {
+          dom.mainCanvas.hidden = true;
+          dom.mainCanvas.replaceChildren();
+          return;
+        }
+        visibleBlocks.slice(0, 4).forEach((block) => {
+          blocks.push(resultHead(block.title || "结果", block.summary || answer.answer));
+          if (block.kind === "tool_summary") {
+            const toolDetails = localToolDetailsFromActivity(canvas.agent.activity || []);
+            if (toolDetails.length > 0) {
+              blocks.push(toolDetailSection(toolDetails));
+            }
+          }
+          if (Array.isArray(block.evidenceRefs) && block.evidenceRefs.length > 0) {
+            blocks.push(resultSection("证据", block.evidenceRefs));
+          }
+        });
+      } else if (canvas.agent.pendingConfirmation) {
+        blocks.push(resultHead(canvas.agent.pendingConfirmation.title, canvas.agent.pendingConfirmation.question + " " + canvas.agent.pendingConfirmation.consequence));
+      } else {
+        blocks.push(resultHead("这次没有完成", canvas.agent.failureMessage || canvas.explanation.resultWhyReasonable));
+      }
+      if (blocks.length === 0) {
         dom.mainCanvas.hidden = true;
         dom.mainCanvas.replaceChildren();
         return;
-      } else if (canvas.chat.upgradeRequest) {
-        blocks.push(resultHead("任务处理", canvas.chat.upgradeRequest.reason));
-      } else {
-        blocks.push(resultHead("这次没有完成", canvas.chat.failureMessage || canvas.explanation.resultWhyReasonable));
       }
       dom.mainCanvas.hidden = false;
       dom.mainCanvas.replaceChildren(...blocks);
@@ -2924,6 +3939,42 @@ export function createPanelHtml(): string {
         resultSection("不确定性", canvas.plan.uncertainty),
         resultSection("下一步", [canvas.aboveground.artifact ? canvas.aboveground.artifact.summary : "等待执行结果。"])
       );
+    }
+
+    function localToolDetailsFromActivity(activity) {
+      if (!Array.isArray(activity)) return [];
+      return activity
+        .filter((item) => item && (item.type === "tool_completed" || item.type === "tool_failed"))
+        .filter((item) => ["read_file", "list_dir", "grep_files"].includes(item.toolName))
+        .map((item) => ({
+          title: item.toolName === "read_file" ? "读取文件" : item.toolName === "list_dir" ? "列出目录" : "搜索文件",
+          summary: item.summary || "工具已执行。",
+          status: item.status || "completed",
+        }))
+        .slice(0, 6);
+    }
+
+    function toolDetailSection(details) {
+      const section = document.createElement("section");
+      section.className = "result-section";
+      const h = document.createElement("h2");
+      h.textContent = "本地工具";
+      const list = document.createElement("ul");
+      list.className = "tool-detail-list";
+      details.forEach((detail) => {
+        const item = document.createElement("li");
+        item.className = "tool-detail-item";
+        const title = document.createElement("div");
+        title.className = "tool-detail-title";
+        title.textContent = detail.title;
+        const preview = document.createElement("div");
+        preview.className = "tool-detail-preview";
+        preview.textContent = compact(detail.summary, 420);
+        item.append(title, preview);
+        list.append(item);
+      });
+      section.append(h, list);
+      return section;
     }
 
     function resultHead(title, summary) {
@@ -3037,7 +4088,9 @@ export function createPanelHtml(): string {
         ? canvas.workSession.openQuestions
         : canvas && canvas.kind === "underground_deep_canvas"
           ? canvas.underground.openQuestions
-          : [];
+          : canvas && canvas.kind === "desktop_agent_canvas" && canvas.agent.pendingConfirmation
+            ? [canvas.agent.pendingConfirmation.question + " " + canvas.agent.pendingConfirmation.consequence]
+            : [];
       if (response.error) {
         dom.riskPanel.replaceChildren(railItem("需要处理", friendlyFailureText(response.error.message), "error"));
         return;
@@ -3056,14 +4109,14 @@ export function createPanelHtml(): string {
         return;
       }
       const canvas = response.canvas;
-      if (canvas && canvas.kind === "desktop_chat_canvas") {
-        if (canvas.chat.answer) {
-          const toolCount = Array.isArray(canvas.chat.toolCallRefs) ? canvas.chat.toolCallRefs.length : 0;
-          dom.runPath.replaceChildren(railItem("已回复", toolCount > 0 ? "普通助手已在授权范围内调用工具并回复。" : "普通助手已直接回复。", "good"));
+      if (canvas && canvas.kind === "desktop_agent_canvas") {
+        if (canvas.agent.pendingConfirmation) {
+          dom.runPath.replaceChildren(railItem("需要确认", canvas.agent.pendingConfirmation.question, "warn"));
           return;
         }
-        if (canvas.chat.upgradeRequest) {
-          dom.runPath.replaceChildren(railItem("任务处理", canvas.chat.upgradeRequest.reason, "warn"));
+        if (canvas.agent.answer) {
+          const toolCount = Array.isArray(canvas.agent.toolCallRefs) ? canvas.agent.toolCallRefs.length : 0;
+          dom.runPath.replaceChildren(railItem("已完成", toolCount > 0 ? "桌面 Agent 已在授权范围内读取材料并形成结果。" : "桌面 Agent 已直接完成本轮回答。", "good"));
           return;
         }
       }
@@ -3088,11 +4141,11 @@ export function createPanelHtml(): string {
 
     function renderMetrics(status, response) {
       const canvas = response && response.canvas;
-      if (canvas && canvas.kind === "desktop_chat_canvas") {
+      if (canvas && canvas.kind === "desktop_agent_canvas") {
         const goalRef = canvas.taskSoil.contextRefs.find((ref) => ref.kind === "user_goal");
         dom.runMetrics.replaceChildren(
-          railItem("本次消息", goalRef ? humanContextSummary(goalRef) : "普通助手。"),
-          railItem("上下文", canvas.chat.answer ? "按模型判断使用了可用上下文和授权工具。" : "等待判断是否需要更多材料。")
+          railItem("本次消息", goalRef ? humanContextSummary(goalRef) : "桌面 Agent。"),
+          railItem("上下文", canvas.agent.answer ? "按模型判断使用了可用上下文和授权工具。" : "等待判断是否需要更多材料。")
         );
         return;
       }
@@ -3143,10 +4196,13 @@ export function createPanelHtml(): string {
         dom.supervisionStatus.replaceChildren(...rows);
         return;
       }
-      if (canvas.kind === "desktop_chat_canvas") {
+      if (canvas.kind === "desktop_agent_canvas") {
         const rows = [];
-        if (canvas.chat.answer) rows.push(railItem("回答", "已直接回复。", "good"));
-        if (canvas.chat.upgradeRequest) rows.push(railItem("任务", canvas.chat.upgradeRequest.reason, "warn"));
+        if (canvas.agent.answer) rows.push(railItem("结果", "已形成可见结果。", "good"));
+        if (canvas.agent.pendingConfirmation) rows.push(railItem("需要确认", canvas.agent.pendingConfirmation.question, "warn"));
+        if (canvas.agent.answer && Array.isArray(canvas.agent.answer.evidenceRefs)) {
+          canvas.agent.answer.evidenceRefs.slice(0, 6).forEach((ref) => rows.push(railItem("证据", ref)));
+        }
         if (rows.length === 0) rows.push(railItem("等待", "尚未形成回复。"));
         dom.supervisionStatus.replaceChildren(...rows);
         return;
@@ -3419,8 +4475,8 @@ export function createPanelHtml(): string {
       if (route) {
         return {
           stageKey: "route-chat",
-          title: route.title || "回复",
-          summary: route.summary || "这条消息会先作为普通助手回合处理。"
+          title: route.title || "桌面 Agent",
+          summary: route.summary || "这条消息会先由桌面 Root Agent 处理。"
         };
       }
       if (response && response.runMode === "deep") {
@@ -3432,8 +4488,8 @@ export function createPanelHtml(): string {
       }
       return {
         stageKey: "running-default",
-        title: "回复",
-        summary: "等待模型返回。"
+        title: "桌面 Agent",
+        summary: "正在判断直接回答、读取授权上下文或请求确认。"
       };
     }
 
@@ -3444,10 +4500,10 @@ export function createPanelHtml(): string {
       }
       const selectedMode = dom.aiMode.value || preferredRunMode();
       const status = providerStatusFromConfig(config, selectedMode);
-      const workMode = dom.runModeInput.value === "deep" ? "深度模式" : "助手";
-      dom.providerHint.textContent = composerHint(status, workMode);
+      const deepTask = dom.runModeInput.value === "deep";
+      dom.providerHint.textContent = composerHint(status, deepTask);
       dom.inputStatusDot.className = "input-status-dot" + composerStatusTone(status);
-      dom.configStatus.textContent = "处理方式：" + workMode + "；模型入口：" + modeLabel(selectedMode) + "；默认：" + modeLabel(config.defaultAiMode || "openai-compatible") + "；模型：" + (config.model || "未填写") + "；密钥：" + (config.secretConfigured ? "已配置" : "未配置");
+      dom.configStatus.textContent = "模型入口：" + modeLabel(selectedMode) + "；默认：" + modeLabel(config.defaultAiMode || "openai-compatible") + "；模型：" + (config.model || "未填写") + "；密钥：" + (config.secretConfigured ? "已配置" : "未配置");
       dom.configStatus.className = "hint" + (status === "missing_model" || status === "missing_secret" || status === "missing_model_and_secret" ? " error" : "");
       renderSupervision(undefined);
       renderRightPanels(undefined);
@@ -3469,13 +4525,13 @@ export function createPanelHtml(): string {
       return "ready";
     }
 
-    function composerHint(status, workMode) {
+    function composerHint(status, deepTask) {
       if (status === "fake_provider") return "测试模式：回答来自固定样例，不代表真实模型。";
       if (status === "network_disabled") return "AI 已禁用：本轮只会验证边界。";
       if (status === "missing_model" || status === "missing_secret" || status === "missing_model_and_secret") {
         return "真实模型未配置完整，发送后会停在配置边界。";
       }
-      if (workMode === "深度模式") return "深度模式会运行地下组织。";
+      if (deepTask) return "会按更严谨的方式整理依据、风险和待确认事项。";
       return "Enter 发送，Shift+Enter 换行。";
     }
 
@@ -3514,35 +4570,56 @@ export function createPanelHtml(): string {
 
     function renderConversationList() {
       const conversations = Array.isArray(state.conversations) ? state.conversations.slice(0, 8) : [];
-      dom.runCount.textContent = String(conversations.length);
       if (conversations.length === 0) {
         const li = document.createElement("li");
-        li.className = "run-item active";
+        li.className = "run-item empty active";
         const title = document.createElement("div");
         title.className = "run-title";
         title.textContent = "暂无对话";
         const meta = document.createElement("div");
         meta.className = "run-meta";
         meta.textContent = "开始后会显示在这里。";
-        li.append(title, meta);
+        const body = document.createElement("div");
+        body.className = "run-body";
+        body.append(title, meta);
+        li.append(createRunSketch(), body);
         dom.runHistory.replaceChildren(li);
         return;
       }
       dom.runHistory.replaceChildren(...conversations.map((item) => {
         const li = document.createElement("li");
         li.className = "run-item" + (item.conversationId === state.currentConversationId ? " active" : "");
+        li.tabIndex = 0;
+        li.setAttribute("role", "button");
         const title = document.createElement("div");
         title.className = "run-title";
         title.textContent = compact(item.title || item.preview || "新对话", 28);
         const meta = document.createElement("div");
         meta.className = "run-meta";
         meta.textContent = compact(item.preview || "等待消息。", 42);
-        li.append(title, meta);
+        const body = document.createElement("div");
+        body.className = "run-body";
+        body.append(title, meta);
+        li.append(createRunSketch(), body);
         li.addEventListener("click", () => {
           void openConversation(item.conversationId);
         });
+        li.addEventListener("keydown", (event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            void openConversation(item.conversationId);
+          }
+        });
         return li;
       }));
+    }
+
+    function createRunSketch() {
+      const sketch = document.createElement("span");
+      sketch.className = "run-sketch";
+      sketch.setAttribute("aria-hidden", "true");
+      sketch.append(document.createElement("span"), document.createElement("span"), document.createElement("span"));
+      return sketch;
     }
 
     function syncConversationState(conversation) {
@@ -3588,6 +4665,7 @@ export function createPanelHtml(): string {
       setInspectorTab("overview", false);
       closeDeveloperDrawer();
       dom.goalInput.value = "";
+      applyTaskRunMode("agent");
       autoResizeGoalInput();
       updateComposerControls();
       dom.contextRefsInput.value = "";
@@ -3677,19 +4755,27 @@ export function createPanelHtml(): string {
 
     function remediationForError(error) {
       if (!error) return "检查输入和配置后重试。";
-      if (error.code === "missing_api_key") return "打开诊断里的设置，保存 API Key 后重试。";
-      if (error.code === "missing_model") return "打开诊断里的设置，填写模型名后重试。";
-      if (error.code === "missing_model_and_secret") return "打开诊断里的设置，填写模型名并保存 API Key 后重试。";
+      if (error.code === "missing_api_key") return "打开设置，保存 API Key 后重试。";
+      if (error.code === "missing_model") return "打开设置，填写模型名后重试。";
+      if (error.code === "missing_model_and_secret") return "打开设置，填写模型名并保存 API Key 后重试。";
       if (error.code === "ai_disabled") return "AI 禁用只能验证边界，不能产出完成结果；请切换到真实模型或测试模式。";
       return "检查诊断详情，处理配置、权限或模型服务问题后重试。";
     }
 
     function setRunStatus(status) {
       dom.runStatus.textContent = STATUS_LABELS[status] || status || "待开始";
+      if (status === "running") {
+        updateBackstageHandoffAnimation("running");
+        return;
+      }
+      if (!state.isSubmitting) {
+        updateBackstageHandoffAnimation(dom.goalInput.value.trim().length > 0 ? "typing" : "idle");
+      }
     }
 
     function setButtons(enabled) {
       dom.runButton.disabled = !enabled || state.isSubmitting || dom.goalInput.value.trim().length === 0;
+      dom.deepRunButton.disabled = !enabled || state.isSubmitting || dom.goalInput.value.trim().length === 0;
       dom.saveConfigButton.disabled = !enabled;
       dom.saveToolConfigButton.disabled = !enabled;
     }

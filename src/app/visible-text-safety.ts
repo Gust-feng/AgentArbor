@@ -104,7 +104,8 @@ export function friendlyUserFacingFailureText(message: string | undefined): stri
     lower.includes("openai-compatible provider returned http") ||
     lower.includes("provider_response") ||
     lower.includes("model_failed") ||
-    lower.includes("desktop_chat_failed")
+    lower.includes("desktop_chat_failed") ||
+    lower.includes("desktop_agent_failed")
   ) {
     return "模型服务这次没有返回可用结果。请检查设置里的 Base URL、模型名和密钥，或稍后重试。详情已放在诊断里。";
   }

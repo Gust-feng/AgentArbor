@@ -179,6 +179,8 @@ export type PanelRunStreamEventType =
   | "tool.requested"
   | "tool.completed"
   | "tool.failed"
+  | "confirmation.needed"
+  | "user.guidance"
   | "agent.delegation.planned"
   | "agent.child.started"
   | "agent.child.completed"
@@ -386,8 +388,10 @@ export function createPanelRunTranscript(input: {
     input.agentRunTree === undefined &&
     modelCalls.length > 0 &&
     modelCalls.every((call) =>
+      call.outputContractId === "desktop.agent_response.v1" ||
       call.outputContractId === "desktop.chat_response.v1" ||
       call.outputContractId === "desktop.intent_gate.v1" ||
+      call.purpose === "desktop_agent" ||
       call.purpose === "desktop_chat" ||
       call.purpose === "desktop_intent_gate"
     );
@@ -527,7 +531,7 @@ function runStartedSummary(
   if (routeDecision === undefined) {
     return desktopMode === "deep"
       ? "已进入深度模式，会运行地下组织做多路探索、父层综合和方向收束。"
-      : "消息已发送，等待回复。";
+      : "桌面 Root Agent 已接手，会判断直接回答、读取授权上下文或请求确认。";
   }
   return explainDesktopIntentDecision(routeDecision).summary;
 }
@@ -623,6 +627,30 @@ function appendStreamEventsForEvent(input: {
       toolName: stringOrUndefined(payload.toolName),
       summary: toolSummary(input.entry.type, payload),
       status: input.entry.type === "tool.requested" ? "running" : input.entry.type === "tool.completed" ? "completed" : "failed",
+    });
+    return;
+  }
+
+  if (input.entry.type === "user_approval.requested") {
+    input.push({
+      ...base,
+      eventId: `${input.runId}:event:${input.entry.sequence}:confirmation.needed`,
+      type: "confirmation.needed",
+      agentLabel: "待确认",
+      summary: confirmationSummary(payload),
+      status: "running",
+    });
+    return;
+  }
+
+  if (input.entry.type === "user_approval.received") {
+    input.push({
+      ...base,
+      eventId: `${input.runId}:event:${input.entry.sequence}:user.guidance`,
+      type: "user.guidance",
+      agentLabel: "用户指导",
+      summary: userGuidanceSummary(payload),
+      status: "completed",
     });
     return;
   }
@@ -752,6 +780,7 @@ function purposeProgressLabel(purpose: string): string {
     case "work_session_direct_answer":
       return "正在组织直接回答。";
     case "desktop_chat":
+    case "desktop_agent":
       return "等待模型输出。";
     default:
       return "正在生成安全摘要。";
@@ -773,6 +802,24 @@ function toolSummary(type: "tool.requested" | "tool.completed" | "tool.failed", 
     return `工具 ${toolName} 已完成${duration}；结果只展示安全摘要和引用。`;
   }
   return `工具 ${toolName} 调用失败${duration}；错误已脱敏。`;
+}
+
+function confirmationSummary(payload: Readonly<Record<string, unknown>>): string {
+  const question = stringOrUndefined(payload.question);
+  const consequence = stringOrUndefined(payload.consequence);
+  if (question !== undefined && consequence !== undefined) {
+    return `${question} ${consequence}`;
+  }
+  return question ?? "继续前需要用户补充授权或澄清。";
+}
+
+function userGuidanceSummary(payload: Readonly<Record<string, unknown>>): string {
+  const decision = stringOrUndefined(payload.decision) ?? stringOrUndefined(payload.status);
+  const note = stringOrUndefined(payload.note) ?? stringOrUndefined(payload.guidance);
+  if (decision !== undefined && note !== undefined) {
+    return `用户已${decision}：${note}`;
+  }
+  return note ?? "用户已补充指导，工作可以继续。";
 }
 
 function agentNoteForEvent(
@@ -922,6 +969,7 @@ function latestDirectAnswerPayload(eventEntries: readonly EventLogEntry[]): { re
     const visibleOutput = modelVisibleOutputOrUndefined(payload.visibleOutput);
     if (
       visibleOutput?.contractId !== "work_session.direct_answer.v1" &&
+      visibleOutput?.contractId !== "desktop.agent_response.v1" &&
       visibleOutput?.contractId !== "desktop.chat_response.v1"
     ) {
       continue;
@@ -1074,23 +1122,27 @@ function createDesktopChatNote(input: NoteFactoryInput): AgentWorkNote {
     "tool.requested",
     "tool.completed",
     "tool.failed",
+    "user_approval.requested",
   ]);
   const failed = input.modelCalls.some((call) => call.status === "failed");
   const completed = input.modelCalls.some((call) => call.status === "completed");
   const requested = input.modelCalls.some((call) => call.status === "requested");
+  const needsConfirmation = hasEvent(input.eventEntries, "user_approval.requested");
   return note({
     input,
-    noteId: "desktop-chat",
-    agentId: "desktop-chat-session",
-    agentLabel: "桌面助手",
-    stage: "desktop_chat",
-    status: failed ? "failed" : completed ? "completed" : requested ? "running" : "pending",
-    summary: completed
-      ? "桌面助手已完成本轮回复；普通问题没有进入项目分析或报告流程。"
+    noteId: "desktop-agent",
+    agentId: "desktop-agent-session",
+    agentLabel: "桌面 Root Agent",
+    stage: "desktop_agent",
+    status: failed ? "failed" : needsConfirmation ? "running" : completed ? "completed" : requested ? "running" : "pending",
+    summary: needsConfirmation
+      ? "桌面 Root Agent 已暂停在确认边界，等待用户补充授权或材料。"
+      : completed
+        ? "桌面 Root Agent 已完成本轮结果；没有启动地下组织或方向包。"
       : requested
-        ? "桌面助手等待模型返回本轮处理方式。"
+        ? "桌面 Root Agent 正在判断本轮处理方式。"
         : "等待用户消息。",
-    detail: "普通模式由桌面 Root Agent 直接处理，可在授权范围内调用工具；深度模式必须由用户显式切换。",
+    detail: "普通模式由桌面 Root Agent 直接处理，可在授权范围内调用工具；缺少权限时请求确认，深入模式只由用户显式选择。",
     eventRefs,
     modelCallRefs: input.modelCalls.map((call) => call.requestId),
   });

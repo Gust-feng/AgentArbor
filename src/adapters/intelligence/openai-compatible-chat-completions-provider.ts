@@ -85,6 +85,7 @@ export class OpenAICompatibleChatCompletionsProvider implements ModelProvider {
         tool_choice: toOpenAIToolChoice(request.toolChoice),
         response_format:
           request.outputContract.format === "json_object" ? { type: "json_object" } : undefined,
+        max_tokens: request.budget.maxOutputTokens,
         stream: this.stream ? true : undefined,
       };
       const response = await fetchImpl(`${this.baseUrl}/v1/chat/completions`, {

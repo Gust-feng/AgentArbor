@@ -8,9 +8,10 @@ import {
   type UndergroundAiMode,
 } from "./intelligence-channel-factory.js";
 import {
-  runDesktopChatSession,
-  type DesktopChatSessionRuntimeContext,
-} from "./desktop-chat-session.js";
+  runDesktopAgentSession,
+  type DesktopAgentConversationMessage,
+  type DesktopAgentSessionRuntimeContext,
+} from "./desktop-agent-session.js";
 import {
   explainDesktopIntentDecision,
   type DesktopIntentDecision,
@@ -47,7 +48,7 @@ import {
   type PanelRunTranscript,
 } from "./panel-run-read-model.js";
 import {
-  createDesktopChatCanvas,
+  createDesktopAgentCanvas,
   createUndergroundDeepCanvas,
   createPanelRunCanvas,
   type PanelRunCanvasReadModel,
@@ -170,7 +171,7 @@ type PanelToolsConfig = {
 
 type PanelRuntimeReadyContext =
   | UndergroundDirectionSessionRuntimeContext
-  | DesktopChatSessionRuntimeContext;
+  | DesktopAgentSessionRuntimeContext;
 
 class PanelHttpError extends Error {
   constructor(
@@ -525,9 +526,7 @@ async function handleConversationMessageRequest(
   const runInput = parseRunInput(body, defaultAiModeForRunKind("desktop", config.defaultAiMode));
   const runAfterRunId = runtime.conversations.nextQueuePredecessor(conversationId);
   const shouldQueue = runAfterRunId !== undefined;
-  const mergedTaskSoilInput = shouldQueue
-    ? runInput.taskSoilInput
-    : buildConversationTaskSoilInput(runtime, conversationId, runInput.taskSoilInput);
+  const mergedTaskSoilInput = runInput.taskSoilInput;
 
   let started;
   try {
@@ -674,11 +673,14 @@ async function executePanelRunJob(runtime: PanelRuntime, runId: string): Promise
   }
   runtime.runJobs.markRunning(runId);
   try {
-    const taskSoilInput =
-      job.conversationId !== undefined && job.runAfterRunId !== undefined
-        ? buildConversationTaskSoilInput(runtime, job.conversationId, job.taskSoilInput)
-        : job.taskSoilInput;
+    const taskSoilInput = job.taskSoilInput;
+    const conversationHistory = buildConversationHistoryMessages(
+      runtime,
+      job.conversationId,
+      job.assistantTurnId
+    );
     const run = await runForPanel(runtime, job.runKind, job.goal, job.aiMode, taskSoilInput, job.runMode, {
+      conversationHistory,
       onRuntimeReady: (context) => {
         runtime.runJobs.attachRuntime({
           runId,
@@ -881,16 +883,16 @@ function assistantTurnFromResponse(
   response: PanelRunJobResponse
 ): { readonly title: string; readonly content: string } {
   const canvas = response.canvas;
-  if (canvas?.kind === "desktop_chat_canvas" && canvas.chat.answer !== undefined) {
+  if (canvas?.kind === "desktop_agent_canvas" && canvas.agent.answer !== undefined) {
     return {
-      title: "已回答",
-      content: sanitizeAssistantVisibleText(canvas.chat.answer.answer),
+      title: canvas.agent.pendingConfirmation === undefined ? "已完成" : "需要确认",
+      content: sanitizeAssistantVisibleText(canvas.agent.answer.answer),
     };
   }
-  if (canvas?.kind === "desktop_chat_canvas" && canvas.chat.upgradeRequest !== undefined) {
+  if (canvas?.kind === "desktop_agent_canvas" && canvas.agent.pendingConfirmation !== undefined) {
     return {
-      title: "建议使用深度模式",
-      content: sanitizeAssistantVisibleText(`这条消息适合进入深度模式：${canvas.chat.upgradeRequest.reason}`),
+      title: "需要确认",
+      content: sanitizeAssistantVisibleText(`${canvas.agent.pendingConfirmation.question}\n${canvas.agent.pendingConfirmation.consequence}`),
     };
   }
   if (canvas?.kind === "work_session_canvas" && canvas.workSession.directAnswer !== undefined) {
@@ -1026,7 +1028,7 @@ function modelPurposeForRequest(job: PanelRunJob, requestId: string): string | u
 }
 
 function isUserFacingStreamingPurpose(purpose: string | undefined): boolean {
-  return purpose === "desktop_chat" || purpose === "work_session_direct_answer";
+  return purpose === "desktop_agent" || purpose === "desktop_chat" || purpose === "work_session_direct_answer";
 }
 
 async function runForPanel(
@@ -1037,6 +1039,7 @@ async function runForPanel(
   taskSoilInput: DesktopTaskSoilInput | undefined,
   runMode: PanelDesktopRunMode = "agent",
   options: {
+    readonly conversationHistory?: readonly DesktopAgentConversationMessage[];
     readonly onRuntimeReady?: (context: PanelRuntimeReadyContext) => void;
     readonly onModelOutputDelta?: (delta: ModelOutputDelta) => void;
   } = {}
@@ -1053,6 +1056,7 @@ async function runDesktopForPanel(
   taskSoilInput: DesktopTaskSoilInput | undefined,
   runMode: PanelDesktopRunMode,
   options: {
+    readonly conversationHistory?: readonly DesktopAgentConversationMessage[];
     readonly onRuntimeReady?: (context: PanelRuntimeReadyContext) => void;
     readonly onModelOutputDelta?: (delta: ModelOutputDelta) => void;
   } = {}
@@ -1112,21 +1116,22 @@ async function runDesktopForPanel(
     };
   }
 
-  const chat = await runDesktopChatSession(goal, {
+  const agent = await runDesktopAgentSession(goal, {
     aiMode,
     createIntelligenceChannel: aiConfig.createIntelligenceChannel,
     createToolCenter: await createConfiguredToolCenterFactory(runtime.configCenter, {
       fetch: runtime.providerFetch,
     }),
     taskSoilInput,
+    conversationHistory: options.conversationHistory,
     onRuntimeReady: options.onRuntimeReady,
     onModelOutputDelta: options.onModelOutputDelta,
     allowWorkSessionUpgrade: false,
   });
-  if (chat.status === "answered") {
-    const eventEntries = chat.runtime.eventLog.list();
+  if (agent.status === "completed" || agent.status === "confirmation_needed") {
+    const eventEntries = agent.runtime.eventLog.list();
     const transcript = createPanelRunTranscript({
-      runId: chat.traceId,
+      runId: agent.traceId,
       status: "completed",
       eventEntries,
       desktopMode: "agent",
@@ -1135,33 +1140,14 @@ async function runDesktopForPanel(
     });
     return {
       eventEntries,
-      canvas: createDesktopChatCanvas({
-        result: chat,
+      canvas: createDesktopAgentCanvas({
+        result: agent,
         transcript,
       }),
     };
   }
 
-  if (chat.status === "upgrade_requested") {
-    const eventEntries = chat.runtime.eventLog.list();
-    const transcript = createPanelRunTranscript({
-      runId: chat.traceId,
-      status: "completed",
-      eventEntries,
-      desktopMode: "agent",
-      createdAt: eventEntries[0]?.recordedAt ?? new Date(0).toISOString(),
-      updatedAt: eventEntries.at(-1)?.recordedAt ?? new Date(0).toISOString(),
-    });
-    return {
-      eventEntries,
-      canvas: createDesktopChatCanvas({
-        result: chat,
-        transcript,
-      }),
-    };
-  }
-
-  throw new PanelHttpError(500, "desktop_chat_failed", chat.failureMessage ?? "桌面助手没有形成回答。");
+  throw new PanelHttpError(500, "desktop_agent_failed", agent.failureMessage ?? "桌面 Agent 没有形成结果。");
 }
 
 async function runUndergroundForPanel(
@@ -1472,46 +1458,45 @@ function canvasTraceId(canvas: PanelRunCanvasReadModel | undefined): string | un
   return canvas.taskSoil.traceId;
 }
 
-function buildConversationTaskSoilInput(
+function buildConversationHistoryMessages(
   runtime: PanelRuntime,
   conversationId: string | undefined,
-  taskSoilInput: DesktopTaskSoilInput | undefined
-): DesktopTaskSoilInput | undefined {
+  assistantTurnId: string | undefined
+): readonly DesktopAgentConversationMessage[] {
   if (conversationId === undefined) {
-    return taskSoilInput;
+    return [];
   }
-  const conversation = runtime.conversations.getReadModel(conversationId);
+  const conversation = runtime.conversations.get(conversationId);
   if (conversation === undefined) {
-    return taskSoilInput;
+    return [];
   }
-  const historyPreview = conversation.turns
-    .slice(-8)
-    .map((turn) => {
-      const content = sanitizeConversationHistoryText(turn.content);
-      return content.length > 0 ? `${turn.role === "user" ? "你" : "助手"}：${content}` : "";
+  const assistantIndex =
+    assistantTurnId === undefined
+      ? conversation.turns.length
+      : conversation.turns.findIndex((turn) => turn.turnId === assistantTurnId);
+  if (assistantTurnId !== undefined && assistantIndex < 0) {
+    return [];
+  }
+  const currentUserIndex =
+    assistantIndex > 0 && conversation.turns[assistantIndex - 1]?.role === "user"
+      ? assistantIndex - 1
+      : assistantIndex;
+  const historyTurns = conversation.turns
+    .slice(0, currentUserIndex)
+    .filter((turn) => turn.status !== "pending" && turn.status !== "running")
+    .map((turn): DesktopAgentConversationMessage | undefined => {
+      const content = compactConversationHistoryText(sanitizeConversationHistoryText(turn.content), 1_200);
+      if (content.length === 0) {
+        return undefined;
+      }
+      return {
+        role: turn.role,
+        content,
+        ref: `conversation:${conversation.conversationId}:turn:${turn.turnId}`,
+      };
     })
-    .filter((value) => value.length > 0)
-    .join("\n");
-  if (historyPreview.length === 0) {
-    return taskSoilInput;
-  }
-  const historyRef = {
-    ref: "workspace:conversation-history",
-    kind: "workspace" as const,
-    summary: "当前对话上下文",
-    readonlyPreview: {
-      title: "当前对话",
-      text: historyPreview,
-    },
-  };
-  const contextRefs = [
-    ...(taskSoilInput?.contextRefs ?? []).filter((ref) => ref.ref !== historyRef.ref),
-    historyRef,
-  ];
-  return {
-    contextRefs,
-    permissionBoundaryRefs: taskSoilInput?.permissionBoundaryRefs,
-  };
+    .filter((message): message is DesktopAgentConversationMessage => message !== undefined);
+  return historyTurns.slice(-8);
 }
 
 function friendlyAssistantFailureText(message: string | undefined): string {
@@ -1519,7 +1504,7 @@ function friendlyAssistantFailureText(message: string | undefined): string {
 }
 
 function panelJobErrorMessage(error: PanelHttpError): string {
-  if (error.code === "desktop_chat_failed" || error.statusCode >= 500) {
+  if (error.code === "desktop_agent_failed" || error.code === "desktop_chat_failed" || error.statusCode >= 500) {
     return friendlyUserFacingFailureText(error.message);
   }
   return error.message;
@@ -1527,6 +1512,14 @@ function panelJobErrorMessage(error: PanelHttpError): string {
 
 function optionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function compactConversationHistoryText(value: string, maxLength: number): string {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+  return `${normalized.slice(0, maxLength - 1)}…`;
 }
 
 function numberOrUndefined(value: unknown): number | undefined {

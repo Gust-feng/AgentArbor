@@ -28,6 +28,7 @@ export type ModelPurpose =
   | "handoff_narrative"
   | "candidate_aggregation"
   | "desktop_intent_gate"
+  | "desktop_agent"
   | "desktop_chat"
   | "work_session_decision"
   | "work_session_child_material"

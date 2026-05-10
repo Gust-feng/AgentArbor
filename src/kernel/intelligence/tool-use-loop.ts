@@ -61,7 +61,12 @@ export async function executeToolUseLoop(
     const response = await options.intelligenceChannel.request({
       ...initialRequest,
       requestId,
-      sanitizedMessages: messages,
+      sanitizedMessages: withIterationWarning(messages, {
+        modelRounds,
+        maxModelRounds,
+        toolRounds: rounds,
+        maxToolRounds,
+      }),
       tools: toolDefinitions,
       toolChoice: initialRequest.toolChoice ?? (toolDefinitions.length > 0 ? "auto" : "none"),
     });
@@ -169,17 +174,49 @@ function assistantToolCallMessage(
 function toolResultMessage(result: ToolCallResult): ModelMessage {
   return {
     role: "tool",
-    content: JSON.stringify({
+    content: truncateToolMessageContent(JSON.stringify({
       callId: result.callId,
       toolName: result.toolName,
       status: result.status,
       output: toSafeToolEventValue(result.output),
       error: result.error,
       durationMs: result.durationMs,
-    }),
+    })),
     toolCallId: result.callId,
     toolName: result.toolName,
   };
+}
+
+const MAX_TOOL_MESSAGE_CHARS = 40_000;
+
+function withIterationWarning(messages: readonly ModelMessage[], input: {
+  readonly modelRounds: number;
+  readonly maxModelRounds: number;
+  readonly toolRounds: number;
+  readonly maxToolRounds: number;
+}): readonly ModelMessage[] {
+  const nextModelRound = input.modelRounds + 1;
+  const finalModelRound = input.modelRounds > 0 && nextModelRound >= input.maxModelRounds;
+  const finalToolRound = input.maxToolRounds > 0 && input.toolRounds >= input.maxToolRounds;
+  if (!finalModelRound && !finalToolRound) {
+    return messages;
+  }
+  return [
+    ...messages,
+    {
+      role: "system",
+      content:
+        "Iteration warning: this turn is close to its model/tool round limit. Do not start broad new exploration unless essential; synthesize the available evidence, mention uncertainty, and produce a useful final answer if possible.",
+      ref: "prompt:tool_use.iteration_warning.v1",
+    },
+  ];
+}
+
+function truncateToolMessageContent(value: string): string {
+  if (value.length <= MAX_TOOL_MESSAGE_CHARS) {
+    return value;
+  }
+  return `${value.slice(0, MAX_TOOL_MESSAGE_CHARS - 80)}... [tool message truncated to ${MAX_TOOL_MESSAGE_CHARS} chars]`;
 }
 
 function cloneMessages(messages: readonly ModelMessage[]): ModelMessage[] {

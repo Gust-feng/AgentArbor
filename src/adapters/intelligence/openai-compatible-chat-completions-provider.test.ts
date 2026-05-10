@@ -60,6 +60,7 @@ test("OpenAI-compatible Chat Completions adapter maps request and response throu
     model: "gpt-compatible-test",
     messages: [{ role: "user", content: "Build a helper." }],
     response_format: { type: "json_object" },
+    max_tokens: 128,
   });
   assert.deepEqual(eventLog.types(), ["model.requested", "model.completed"]);
   assert.equal(JSON.stringify(eventLog.list()).includes("sk-test-secret-token"), false);

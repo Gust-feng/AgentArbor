@@ -1,6 +1,6 @@
 import type { MinimalLoopResult } from "./minimal-loop.js";
 import type { CognitiveWorkSessionResult } from "./cognitive-work-session.js";
-import type { DesktopChatSessionResult } from "./desktop-chat-session.js";
+import type { DesktopAgentSessionResult } from "./desktop-agent-session.js";
 import type { UndergroundDirectionSessionResult } from "./underground-direction-session.js";
 import type {
   PanelObservationReadModel,
@@ -13,7 +13,7 @@ import { redactSensitiveText } from "../kernel/redaction.js";
 export type PanelRunCanvasReadModel =
   | LegacyPanelRunCanvasReadModel
   | WorkSessionCanvasReadModel
-  | DesktopChatCanvasReadModel
+  | DesktopAgentCanvasReadModel
   | UndergroundDeepCanvasReadModel;
 
 export type LegacyPanelRunCanvasReadModel = {
@@ -169,23 +169,50 @@ export type WorkSessionCanvasReadModel = {
   };
 };
 
-export type DesktopChatCanvasReadModel = {
-  readonly kind: "desktop_chat_canvas";
+export type DesktopAgentCanvasReadModel = {
+  readonly kind: "desktop_agent_canvas";
   readonly taskSoil: WorkSessionCanvasReadModel["taskSoil"];
-  readonly chat: {
-    readonly status: DesktopChatSessionResult["status"];
+  readonly agent: {
+    readonly status: DesktopAgentSessionResult["status"];
     readonly answer?: {
       readonly answer: string;
       readonly modelCallRefs: readonly string[];
+      readonly toolCallRefs: readonly string[];
+      readonly evidenceRefs: readonly string[];
+      readonly resultBlocks: readonly {
+        readonly blockId: string;
+        readonly kind: string;
+        readonly title: string;
+        readonly summary: string;
+        readonly evidenceRefs: readonly string[];
+        readonly toolCallRefs: readonly string[];
+      }[];
     };
-    readonly upgradeRequest?: {
-      readonly goal: string;
-      readonly reason: string;
+    readonly pendingConfirmation?: {
+      readonly confirmationId: string;
+      readonly title: string;
+      readonly question: string;
+      readonly consequence: string;
+      readonly riskLevel: string;
       readonly modelCallRefs: readonly string[];
+      readonly toolCallRefs: readonly string[];
+      readonly sourceRefs: readonly string[];
     };
     readonly failureMessage?: string;
     readonly modelCallRefs: readonly string[];
     readonly toolCallRefs: readonly string[];
+    readonly activity: readonly {
+      readonly activityId: string;
+      readonly type: string;
+      readonly title: string;
+      readonly summary: string;
+      readonly status: string;
+      readonly createdAt: string;
+      readonly toolName?: string;
+      readonly sourceRefs: readonly string[];
+      readonly modelCallRefs: readonly string[];
+      readonly toolCallRefs: readonly string[];
+    }[];
   };
   readonly explanation: {
     readonly resultWhyReasonable: string;
@@ -497,14 +524,14 @@ export function createWorkSessionCanvas(input: {
   };
 }
 
-export function createDesktopChatCanvas(input: {
-  readonly result: DesktopChatSessionResult;
+export function createDesktopAgentCanvas(input: {
+  readonly result: DesktopAgentSessionResult;
   readonly transcript: PanelRunTranscript;
-}): DesktopChatCanvasReadModel {
+}): DesktopAgentCanvasReadModel {
   return {
-    kind: "desktop_chat_canvas",
+    kind: "desktop_agent_canvas",
     taskSoil: taskSoilCanvas(input.result),
-    chat: {
+    agent: {
       status: input.result.status,
       answer:
         input.result.answer === undefined
@@ -512,32 +539,61 @@ export function createDesktopChatCanvas(input: {
           : {
               answer: safeText(input.result.answer.answer, 1200),
               modelCallRefs: [...input.result.answer.modelCallRefs],
+              toolCallRefs: [...input.result.answer.toolCallRefs],
+              evidenceRefs: input.result.answer.evidenceRefs.map((value) => safeText(value, 180)),
+              resultBlocks: input.result.answer.resultBlocks.map((block) => ({
+                blockId: block.blockId,
+                kind: block.kind,
+                title: safeText(block.title, 120),
+                summary: safeText(block.summary, 900),
+                evidenceRefs: block.evidenceRefs.map((value) => safeText(value, 180)),
+                toolCallRefs: [...block.toolCallRefs],
+              })),
             },
-      upgradeRequest:
-        input.result.upgradeRequest === undefined
+      pendingConfirmation:
+        input.result.pendingConfirmation === undefined
           ? undefined
           : {
-              goal: safeText(input.result.upgradeRequest.goal, 600),
-              reason: safeText(input.result.upgradeRequest.reason, 420),
-              modelCallRefs: [...input.result.upgradeRequest.modelCallRefs],
+              confirmationId: input.result.pendingConfirmation.confirmationId,
+              title: safeText(input.result.pendingConfirmation.title, 120),
+              question: safeText(input.result.pendingConfirmation.question, 420),
+              consequence: safeText(input.result.pendingConfirmation.consequence, 420),
+              riskLevel: input.result.pendingConfirmation.riskLevel,
+              modelCallRefs: [...input.result.pendingConfirmation.modelCallRefs],
+              toolCallRefs: [...input.result.pendingConfirmation.toolCallRefs],
+              sourceRefs: input.result.pendingConfirmation.sourceRefs.map((value) => safeText(value, 180)),
             },
       failureMessage:
         input.result.failureMessage === undefined ? undefined : safeText(input.result.failureMessage, 420),
       modelCallRefs: [...input.result.modelCallRefs],
       toolCallRefs: [...input.result.toolCallRefs],
+      activity: input.result.activity.map((item) => ({
+        activityId: item.activityId,
+        type: item.type,
+        title: safeText(item.title, 120),
+        summary: safeText(item.summary, 360),
+        status: item.status,
+        createdAt: item.createdAt,
+        toolName: item.toolName === undefined ? undefined : safeText(item.toolName, 80),
+        sourceRefs: item.sourceRefs.map((value) => safeText(value, 180)),
+        modelCallRefs: [...item.modelCallRefs],
+        toolCallRefs: [...item.toolCallRefs],
+      })),
     },
     explanation: {
       resultWhyReasonable:
         input.result.answer !== undefined
-          ? "这是普通桌面 Agent 回合：模型可以直接回答，也可以在授权范围内调用工具；没有启动地下组织或生成方向包。"
-          : input.result.upgradeRequest !== undefined
-            ? "模型建议进入更完整的任务组织；实际深度处理仍必须由用户显式切换。"
+          ? "这是桌面 Root Agent 回合：模型可以直接回答，也可以在授权范围内调用工具，并在缺少权限时请求确认；没有启动地下组织或生成方向包。"
+          : input.result.pendingConfirmation !== undefined
+            ? "桌面 Root Agent 需要用户补充授权或材料后继续；不会绕过确认边界。"
             : "这轮对话没有形成可展示回答。",
       observationPanelRole:
         `开发者详情只展示模型调用 refs、配置状态和安全事件；当前安全事件 ${input.transcript.events.length} 条。`,
     },
   };
 }
+
+export const createDesktopChatCanvas = createDesktopAgentCanvas;
 
 export function createUndergroundDeepCanvas(input: {
   readonly result: UndergroundDirectionSessionResult;

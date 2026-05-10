@@ -171,6 +171,61 @@ test("executeToolUseLoop preserves assistant protocol continuation fields across
   ]);
 });
 
+test("executeToolUseLoop injects iteration warning near round limits", async () => {
+  const channel = new SequenceIntelligenceChannel([
+    toolCallResponse("model-request-test", "call-1", "web_search"),
+    completedResponse("model-request-final", { summary: "Final answer after warning." }),
+  ]);
+  const center = new TestToolBroker();
+  center.register("web_search", async () => ({ ok: true }));
+
+  const result = await executeToolUseLoop(
+    {
+      intelligenceChannel: channel,
+      toolCenter: center,
+      callerAgentId: "agent-test",
+      traceId: "trace-test",
+      goalId: "goal-test",
+      maxToolRounds: 1,
+      allowedTools: ["web_search"],
+    },
+    createValidModelRequest()
+  );
+
+  assert.equal(result.stoppedReason, "completed");
+  assert.equal(channel.requests[1]?.sanitizedMessages.at(-1)?.ref, "prompt:tool_use.iteration_warning.v1");
+});
+
+test("executeToolUseLoop truncates verbose tool messages before model continuation", async () => {
+  const channel = new SequenceIntelligenceChannel([
+    toolCallResponse("model-request-test", "call-1", "read"),
+    completedResponse("model-request-final", { summary: "Final answer after truncation." }),
+  ]);
+  const center = new TestToolBroker();
+  center.register("read", async () => Object.fromEntries(
+    Array.from({ length: 16 }, (_, fieldIndex) => [
+      `field${fieldIndex}`,
+      Array.from({ length: 8 }, (_, itemIndex) => `${fieldIndex}-${itemIndex}-` + Array.from({ length: 700 }, (__, index) => String(index % 10)).join("")),
+    ])
+  ));
+
+  await executeToolUseLoop(
+    {
+      intelligenceChannel: channel,
+      toolCenter: center,
+      callerAgentId: "agent-test",
+      traceId: "trace-test",
+      goalId: "goal-test",
+      allowedTools: ["read"],
+    },
+    createValidModelRequest()
+  );
+
+  const toolMessage = channel.requests[1]?.sanitizedMessages.find((message) => message.role === "tool");
+  assert.equal(toolMessage?.content.includes("tool message truncated"), true);
+  assert.ok(toolMessage?.content.length !== undefined && toolMessage.content.length < 41_000);
+});
+
 test("executeToolUseLoop keeps verbose tool output out of EventLog and redacts tool messages", async () => {
   const eventLog = new InMemoryEventLog();
   const channel = new SequenceIntelligenceChannel([

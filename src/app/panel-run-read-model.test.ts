@@ -97,6 +97,49 @@ test("panel transcript exposes delegation and parent synthesis as semantic strea
   assert.equal(JSON.stringify(transcript).includes("raw provider response"), false);
 });
 
+test("panel transcript projects confirmation and user guidance as safe ordinary-agent events", () => {
+  const transcript = createPanelRunTranscript({
+    runId: "run-panel-confirmation",
+    status: "completed",
+    desktopMode: "agent",
+    eventEntries: [
+      eventEntry({
+        sequence: 1,
+        type: "goal.received",
+        payload: { goalId: "goal-confirmation" },
+      }),
+      eventEntry({
+        sequence: 2,
+        type: "user_approval.requested",
+        payload: {
+          confirmationId: "confirmation-1",
+          question: "请选择要读取的文件。",
+          consequence: "未授权前不会读取本地文件。",
+        },
+      }),
+      eventEntry({
+        sequence: 3,
+        type: "user_approval.received",
+        payload: {
+          confirmationId: "confirmation-1",
+          decision: "拒绝",
+          note: "先不要读取，直接说明需要哪些材料。",
+        },
+      }),
+    ],
+    createdAt: "2026-05-07T00:00:00.000Z",
+    updatedAt: "2026-05-07T00:00:03.000Z",
+  });
+
+  assert.deepEqual(
+    transcript.events.map((event) => event.type),
+    ["run.started", "confirmation.needed", "user.guidance", "final.result"],
+  );
+  assert.equal(transcript.events[1]?.summary?.includes("请选择要读取的文件"), true);
+  assert.equal(transcript.events[2]?.summary?.includes("先不要读取"), true);
+  assert.equal(JSON.stringify(transcript).includes("raw prompt"), false);
+});
+
 function modelCompletedEntry(input: {
   readonly sequence: number;
   readonly requestId: string;

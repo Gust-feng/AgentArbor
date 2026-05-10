@@ -29,10 +29,68 @@ test("panel HTML defaults to Simplified Chinese labels and status text", () => {
   assert.equal(firstScreenHtml.includes("例行任务"), true);
   assert.equal(firstScreenHtml.includes("工具"), true);
   assert.equal(firstScreenHtml.includes("设置"), true);
-  assert.equal(firstScreenHtml.includes("最近对话"), true);
-  assert.equal(firstScreenHtml.includes("附件"), true);
-  assert.equal(firstScreenHtml.includes("文件或网页"), true);
-  assert.equal(firstScreenHtml.includes("使用范围"), true);
+  assert.equal(firstScreenHtml.includes("最近对话"), false);
+  assert.equal(firstScreenHtml.includes("个人信息"), true);
+  assert.equal(firstScreenHtml.includes("诊断"), true);
+  assert.equal(firstScreenHtml.includes('id="profileMenuButton"'), true);
+  assert.equal(firstScreenHtml.includes('id="accountMenu"'), true);
+  assert.equal(firstScreenHtml.includes('id="diagnosticDrawerButton"'), false);
+  assert.equal(firstScreenHtml.includes(">详情</button>"), false);
+  assert.equal(firstScreenHtml.includes("附件"), false);
+  assert.equal(firstScreenHtml.includes("助手"), false);
+  assert.equal(firstScreenHtml.includes("文件或网页"), false);
+  assert.equal(firstScreenHtml.includes("使用范围"), false);
+  assert.equal(firstScreenHtml.includes("工作台"), false);
+  assert.equal(firstScreenHtml.includes("动态工作场"), false);
+  assert.equal(firstScreenHtml.includes("首页空态"), true);
+  assert.equal(firstScreenHtml.includes('class="intent-field"'), true);
+  assert.equal(firstScreenHtml.includes('id="backstageHandoff"'), true);
+  assert.equal(firstScreenHtml.includes('class="backstage-handoff"'), true);
+  assert.equal(firstScreenHtml.includes('class="backstage-surface"'), true);
+  assert.equal(firstScreenHtml.includes('class="backstage-thread"'), true);
+  assert.equal(firstScreenHtml.includes('class="thread-primary"'), true);
+  assert.equal(firstScreenHtml.includes('class="thread-branch-a"'), true);
+  assert.equal(firstScreenHtml.includes('class="thread-branch-b"'), true);
+  assert.equal(firstScreenHtml.includes('class="thread-knot"'), true);
+  assert.equal(firstScreenHtml.includes('class="backstage-cell'), false);
+  assert.equal(firstScreenHtml.includes('class="cell-glyph'), false);
+  assert.equal(firstScreenHtml.includes('class="backstage-note"'), false);
+  assert.equal(firstScreenHtml.includes('class="backstage-note-line"'), false);
+  assert.equal(firstScreenHtml.includes('class="backstage-line"'), false);
+  assert.equal(firstScreenHtml.includes('id="arborTaskLattice"'), false);
+  assert.equal(firstScreenHtml.includes('class="arbor-lattice-stage"'), false);
+  assert.equal(firstScreenHtml.includes('class="arbor-canvas"'), false);
+  assert.equal(firstScreenHtml.includes('id="arborCanvas"'), false);
+  assert.equal(firstScreenHtml.includes('class="arbor-signature"'), false);
+  assert.equal(firstScreenHtml.includes('class="arbor-focus-dot"'), false);
+  assert.equal(firstScreenHtml.includes('class="field-thread one"'), false);
+  assert.equal(firstScreenHtml.includes('class="field-focus"'), false);
+  assert.equal(firstScreenHtml.includes('class="field-node left"'), false);
+  assert.equal(firstScreenHtml.includes('class="intent-stream one"'), false);
+  assert.equal(firstScreenHtml.includes('class="intent-core"'), false);
+  assert.equal(firstScreenHtml.includes("任务进入"), false);
+  assert.equal(firstScreenHtml.includes("信息聚合"), false);
+  assert.equal(firstScreenHtml.includes("结果成形"), false);
+  assert.equal(firstScreenHtml.includes("就绪"), false);
+  assert.equal(firstScreenHtml.includes("自动"), false);
+  assert.equal(firstScreenHtml.includes("深入"), false);
+  assert.equal(firstScreenHtml.includes("工作方式"), false);
+  assert.equal(firstScreenHtml.includes("stage-mode"), false);
+  assert.equal(firstScreenHtml.includes("data-work-mode"), false);
+  assert.equal(firstScreenHtml.includes("mode-card"), false);
+  assert.equal(firstScreenHtml.includes("工作强度"), false);
+  assert.equal(firstScreenHtml.includes("把任务交给我"), false);
+  assert.equal(firstScreenHtml.includes("把问题、想法或目标交给我"), false);
+  assert.equal(firstScreenHtml.includes("自动安排"), false);
+  assert.equal(firstScreenHtml.includes("深入整理"), false);
+  assert.equal(firstScreenHtml.includes("普通问题"), false);
+  assert.equal(firstScreenHtml.includes("深度任务"), false);
+  assert.equal(firstScreenHtml.includes("理解目标"), false);
+  assert.equal(firstScreenHtml.includes("整理证据"), false);
+  assert.equal(firstScreenHtml.includes("形成结果"), false);
+  assert.equal(firstScreenHtml.includes("说出目标"), false);
+  assert.equal(firstScreenHtml.includes("处理任务"), false);
+  assert.equal(firstScreenHtml.includes("交付结果"), false);
   assert.equal(firstScreenHtml.includes("本地工作"), false);
   assert.equal(firstScreenHtml.includes("只使用你授权的材料"), false);
   assert.equal(firstScreenHtml.includes("任务列表"), false);
@@ -44,7 +102,7 @@ test("panel HTML defaults to Simplified Chinese labels and status text", () => {
   assert.equal(firstScreenHtml.includes("开始对话后，这里会显示你的问题和我的回答。"), false);
   assert.equal(firstScreenHtml.includes("待办"), false);
   assert.equal(firstScreenHtml.includes("上下文"), false);
-  assert.equal(firstScreenHtml.includes("证据"), false);
+  assert.equal(firstScreenHtml.includes('<div class="context-title"><span>证据</span></div>'), false);
   assert.equal(firstScreenHtml.includes("近期活动"), false);
   assert.equal(firstScreenHtml.includes("等待任务开始"), false);
   assert.equal(firstScreenHtml.includes("暂无活动。开始任务后，这里会显示正在读取、比较、整理和生成的过程。"), false);
@@ -52,6 +110,65 @@ test("panel HTML defaults to Simplified Chinese labels and status text", () => {
   assert.equal(firstScreenHtml.includes("Code"), false);
   assert.equal(html.includes('<aside class="context-pane"'), false);
   assert.equal(html.includes('<aside class="developer-drawer"'), true);
+  assert.equal(html.includes('class="settings-backdrop"'), true);
+  assert.equal(html.includes('id="settingsPanelButton"'), false);
+  assert.equal(html.includes('id="accountSettingsButton"'), true);
+  assert.equal(html.includes('startIntentFieldDrift()'), false);
+  assert.equal(html.includes('window.setTimeout(scheduleMotion'), false);
+  assert.equal(html.includes('window.requestAnimationFrame(drawArborFrame)'), false);
+  assert.equal(html.includes('function helixPoint'), false);
+  assert.equal(html.includes('function growthPoint'), false);
+  assert.equal(html.includes('function drawAnnualRing'), false);
+  assert.equal(html.includes('function ribbonPoint'), false);
+  assert.equal(html.includes('function drawSeedShell'), false);
+  assert.equal(html.includes('function drawRoot'), false);
+  assert.equal(html.includes('function drawBough'), false);
+  assert.equal(html.includes('function drawLeafNodes'), false);
+  assert.equal(html.includes("@keyframes intent-flow"), false);
+  assert.equal(html.includes("@keyframes assistant-pulse"), false);
+  assert.equal(html.includes("--input-weight"), true);
+  assert.equal(html.includes("--input-visible"), true);
+  assert.equal(html.includes("--primary-dash"), true);
+  assert.equal(html.includes("--branch-a-dash"), true);
+  assert.equal(html.includes("--branch-b-dash"), true);
+  assert.equal(html.includes("--knot-dash"), true);
+  assert.equal(html.includes("function updateBackstageInputWeight"), true);
+  assert.equal(html.includes("@keyframes backstage-note-submit"), false);
+  assert.equal(html.includes("@keyframes backstage-cell-wake"), false);
+  assert.equal(html.includes("@keyframes backstage-thread-gather"), true);
+  assert.equal(html.includes("@keyframes backstage-thread-settle"), true);
+  assert.equal(html.includes("@keyframes composer-backstage-receive"), true);
+  assert.equal(html.includes("@keyframes composer-backstage-receive-line"), true);
+  assert.equal(html.includes("function updateBackstageHandoffAnimation"), true);
+  assert.equal(html.includes("function playBackstageHandoffSubmit"), true);
+  assert.equal(html.includes("@keyframes arbor-lattice-commit"), false);
+  assert.equal(html.includes("@keyframes composer-lattice-receive"), false);
+  assert.equal(html.includes("function updateArborTaskLattice"), false);
+  assert.equal(html.includes("function playArborLatticeCommit"), false);
+  assert.equal(html.includes("function promptIntentWeight"), false);
+  assert.equal(html.includes("function resolveLatticeIntentWeight"), false);
+  assert.equal(html.includes("handleGoalCompositionStart"), false);
+  assert.equal(html.includes("handleGoalCompositionEnd"), false);
+  assert.equal(html.includes('addEventListener("compositionstart"'), false);
+  assert.equal(html.includes('addEventListener("compositionend"'), false);
+  assert.equal(html.includes("arbor-lattice-canopy"), false);
+  assert.equal(html.includes("arbor-lattice-branch"), false);
+  assert.equal(html.includes("scheduleArborMarkDrift"), false);
+  assert.equal(html.includes("animation-duration"), false);
+  assert.equal(html.includes("animation-iteration-count"), false);
+  assert.equal(html.includes("width: 820px;"), true);
+  assert.equal(html.includes("height: 620px;"), true);
+  assert.equal(html.includes("@media (max-width: 820px)"), false);
+  assert.equal(html.includes("width: calc(100vw - 24px)"), false);
+  assert.equal(html.includes("按需调整模型、搜索和诊断，不打断当前会话。"), true);
+  assert.equal(html.includes("工作方式"), false);
+  assert.equal(html.includes('class="mode-card-grid"'), false);
+  assert.equal(html.includes("mode-card"), false);
+  assert.equal(html.includes("data-work-mode"), false);
+  assert.equal(html.includes("深入处理"), true);
+  assert.equal(html.includes('dom.runButton.addEventListener("click", () => startRun("agent"))'), true);
+  assert.equal(html.includes('dom.deepRunButton.addEventListener("click", () => startRun("deep"))'), true);
+  assert.equal(html.includes("mode-deep"), true);
   assert.equal(html.includes("需要确认"), true);
   assert.equal(html.includes("证据"), true);
   assert.equal(html.includes('<option value="none">AI 禁用</option>'), true);
@@ -61,7 +178,7 @@ test("panel HTML defaults to Simplified Chinese labels and status text", () => {
   assert.equal(html.includes("模型 / 工具流"), true);
   assert.equal(html.includes("运行树 / 父层综合"), true);
   assert.equal(html.includes("模型服务失败、输出契约失败或配置边界会显示在这里。"), true);
-  assert.equal(html.includes("折叠调试区"), true);
+  assert.equal(html.includes("安全与调试"), true);
   assert.equal(html.includes("暂无对话"), true);
   assert.equal(html.includes("模型配置"), true);
   assert.equal(html.includes("工具配置"), true);
@@ -128,7 +245,7 @@ test("panel HTML defaults to Simplified Chinese labels and status text", () => {
   assert.equal(html.includes("Run Underground"), false);
   assert.equal(html.includes("Save Config"), false);
   assert.equal(html.includes("key configured"), false);
-  assert.equal(html.includes("workspace:conversation-history"), true);
+  assert.equal(html.includes("workspace:conversation-history"), false);
 });
 
 test("panel inline script remains syntactically valid in generated HTML", () => {
@@ -481,16 +598,16 @@ test("desktop async fake run answers arbitrary lightweight question without repo
 
     assert.equal(start.status, 202);
     assert.equal(start.body.route, undefined);
-    assert.equal(completed.body.canvas.kind, "desktop_chat_canvas");
+    assert.equal(completed.body.canvas.kind, "desktop_agent_canvas");
     assert.equal(completed.body.runMode, "agent");
     assert.equal(completed.body.route, undefined);
-    assert.equal(completed.body.canvas.chat.answer.answer.includes("AgentArbor 桌面助手"), true);
-    assert.equal(completed.body.canvas.chat.upgradeRequest, undefined);
+    assert.equal(completed.body.canvas.agent.answer.answer.includes("AgentArbor 桌面 Root Agent"), true);
+    assert.equal(completed.body.canvas.agent.pendingConfirmation, undefined);
     assert.equal(completed.body.tracking.agentRunTree, undefined);
-    assert.deepEqual(
-      completed.body.transcript.events.map((event: { type: string }) => event.type),
-      ["run.started", "model.output.delta", "final.result"]
-    );
+    const eventTypes = completed.body.transcript.events.map((event: { type: string }) => event.type);
+    assert.equal(eventTypes[0], "run.started");
+    assert.equal(eventTypes.at(-1), "final.result");
+    assert.equal(eventTypes.filter((type: string) => type === "model.output.delta").length >= 1, true);
     assert.equal(completed.body.transcript.modelCalls.length, 1);
     assert.equal(completed.body.trace.events.some((event: { type: string }) => event.type === "artifact.produced"), false);
     assert.equal(completed.body.transcript.events.some((event: { summary?: string }) => String(event.summary ?? "").includes("项目分析")), false);
@@ -518,10 +635,10 @@ test("desktop default fake run does not auto-upgrade complex requests into deep 
     );
 
     assert.equal(completed.body.runMode, "agent");
-    assert.equal(completed.body.canvas.kind, "desktop_chat_canvas");
-    assert.equal(completed.body.canvas.chat.answer.answer.includes("授权工具检查"), true);
-    assert.equal(completed.body.canvas.chat.answer.answer.includes("深度模式"), true);
-    assert.equal(completed.body.canvas.chat.toolCallRefs.includes("call-desktop-agent-search"), true);
+    assert.equal(completed.body.canvas.kind, "desktop_agent_canvas");
+    assert.equal(completed.body.canvas.agent.answer.answer.includes("授权工具检查"), true);
+    assert.equal(completed.body.canvas.agent.answer.answer.includes("深度模式"), false);
+    assert.equal(completed.body.canvas.agent.toolCallRefs.includes("call-desktop-agent-search"), true);
     assert.equal(completed.body.tracking.agentRunTree, undefined);
     assert.equal(completed.body.trace.events.some((event: { type: string }) => event.type === "agent.delegation.planned"), false);
     assert.equal(completed.body.trace.events.some((event: { type: string }) => event.type === "artifact.produced"), false);
@@ -551,9 +668,9 @@ test("desktop async fake run answers capability questions without upgrading into
     );
 
     assert.equal(start.status, 202);
-    assert.equal(completed.body.canvas.kind, "desktop_chat_canvas");
-    assert.equal(completed.body.canvas.chat.answer.answer.includes("我可以直接回答问题"), true);
-    assert.equal(completed.body.canvas.chat.upgradeRequest, undefined);
+    assert.equal(completed.body.canvas.kind, "desktop_agent_canvas");
+    assert.equal(completed.body.canvas.agent.answer.answer.includes("我可以直接回答问题"), true);
+    assert.equal(completed.body.canvas.agent.pendingConfirmation, undefined);
     assert.equal(completed.body.tracking.agentRunTree, undefined);
     assert.equal(completed.text.includes("AgentArbor 项目分析与下一步优化报告"), false);
     assert.equal(completed.text.includes("项目分析报告"), false);
@@ -582,9 +699,9 @@ test("desktop async fake run keeps efficiency tips request in direct-answer path
     );
 
     assert.equal(start.status, 202);
-    assert.equal(completed.body.canvas.kind, "desktop_chat_canvas");
-    assert.equal(completed.body.canvas.chat.answer.answer.includes("效率建议"), true);
-    assert.equal(completed.body.canvas.chat.upgradeRequest, undefined);
+    assert.equal(completed.body.canvas.kind, "desktop_agent_canvas");
+    assert.equal(completed.body.canvas.agent.answer.answer.includes("效率建议"), true);
+    assert.equal(completed.body.canvas.agent.pendingConfirmation, undefined);
     assert.equal(completed.body.tracking.agentRunTree, undefined);
     assert.equal(completed.body.trace.events.some((event: { type: string }) => event.type === "artifact.produced"), false);
     assertSafePanelJsonText(completed.text);
@@ -659,6 +776,62 @@ test("conversation API keeps follow-up messages in the same conversation", async
     assert.equal(conversation.body.conversation.turns[2].content.includes("继续解释"), true);
     assert.equal(conversation.body.conversation.turns[3].role, "assistant");
     assert.equal(conversation.body.conversation.turns[3].content.includes("继续"), true);
+  } finally {
+    await server.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("conversation API sends follow-up history as role-separated model messages", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-conversation-structured-history-"));
+  const secret = "sk-conversation-structured-history-secret";
+  const requests: Array<{ messages?: readonly { role?: string; content?: string }[]; max_tokens?: number }> = [];
+  let callIndex = 0;
+  const providerFetch: PanelProviderFetch = async (_url, init) => {
+    callIndex += 1;
+    const body = JSON.parse(init.body) as { messages?: readonly { role?: string; content?: string }[]; max_tokens?: number };
+    requests.push(body);
+    return createOpenAiTextResponse(
+      "conversation-structured-history-model",
+      callIndex === 1
+        ? "我可以直接回答问题，也可以在授权范围内读取文件或网页。"
+        : "可以继续。我会按前文说明继续回答，不把这轮追问包装成深度模式。"
+    );
+  };
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory, providerFetch });
+  try {
+    await requestJson(server.url, "/api/config/model-provider", {
+      method: "POST",
+      body: {
+        baseUrl: "https://provider.example",
+        model: "conversation-structured-history-model",
+        apiKey: secret,
+      },
+    });
+    const first = await requestJson(server.url, "/api/conversations", {
+      method: "POST",
+      body: { goal: "你好，你能做什么？", aiMode: "openai-compatible" },
+    });
+    await waitForRun(server.url, first.body.run.runId, (body) => body.status === "completed", 4_000, "/api/desktop/runs");
+
+    const second = await requestJson(
+      server.url,
+      `/api/conversations/${encodeURIComponent(first.body.conversation.conversationId)}/messages`,
+      {
+        method: "POST",
+        body: { goal: "那你能继续解释一下吗？", aiMode: "openai-compatible" },
+      }
+    );
+    await waitForRun(server.url, second.body.run.runId, (body) => body.status === "completed", 4_000, "/api/desktop/runs");
+
+    const secondMessages = requests.at(-1)?.messages ?? [];
+    assert.deepEqual(secondMessages.map((message) => message.role), ["system", "user", "assistant", "user"]);
+    assert.equal(secondMessages[1]?.content?.includes("你好，你能做什么"), true);
+    assert.equal(secondMessages[2]?.content?.includes("我可以直接回答问题"), true);
+    assert.equal(secondMessages[3]?.content?.includes("Current user message: 那你能继续解释一下吗？"), true);
+    assert.equal(secondMessages[3]?.content?.includes("你好，你能做什么"), false);
+    assert.equal(JSON.stringify(secondMessages).includes("workspace:conversation-history"), false);
+    assert.equal(requests.at(-1)?.max_tokens, 3200);
   } finally {
     await server.close();
     await fs.rm(directory, { recursive: true, force: true });
@@ -764,7 +937,7 @@ test("desktop openai-compatible direct answer accepts plain text model output", 
     bodies.push(body);
     return createOpenAiTextResponse(
       "desktop-direct-answer-text-model",
-      "我是 AgentArbor 桌面助手。底层模型取决于你在设置中配置的模型运行时；普通问题会直接回答，不会被强行包装成项目分析。"
+      "我是 AgentArbor 桌面 Root Agent。底层模型取决于你在设置中配置的模型运行时；普通问题会直接回答，不会被强行包装成项目分析。"
     );
   };
   const server = await startLocalPanelServer({ port: 0, configDirectory: directory, providerFetch });
@@ -792,10 +965,10 @@ test("desktop openai-compatible direct answer accepts plain text model output", 
     assert.equal(start.status, 202);
     assert.equal(bodies.length, 1);
     assert.deepEqual(bodies.map((body) => body.response_format !== undefined), [false]);
-    assert.equal(completed.body.canvas.kind, "desktop_chat_canvas");
+    assert.equal(completed.body.canvas.kind, "desktop_agent_canvas");
     assert.equal(completed.body.route, undefined);
-    assert.equal(completed.body.canvas.chat.answer.answer.includes("普通问题会直接回答"), true);
-    assert.equal(completed.body.canvas.chat.upgradeRequest, undefined);
+    assert.equal(completed.body.canvas.agent.answer.answer.includes("普通问题会直接回答"), true);
+    assert.equal(completed.body.canvas.agent.pendingConfirmation, undefined);
     assert.equal(completed.body.tracking.agentRunTree, undefined);
     assert.equal(completed.body.transcript.modelCalls.some((call: { visibleOutput?: { source?: string; items?: readonly { fields?: readonly { name?: string; value?: string }[] }[] } }) =>
       call.visibleOutput?.source === "text_output" &&
@@ -987,7 +1160,7 @@ test("conversation follow-up after a provider failure does not feed internal ids
     const visibleConversation = JSON.stringify(conversation);
 
     assert.equal(completed.body.status, "completed");
-    assert.equal(completed.body.canvas.chat.answer.answer.includes("桌面文件"), true);
+    assert.equal(completed.body.canvas.agent.answer.answer.includes("桌面文件"), true);
     assert.equal(followupPrompt.includes("OpenAI-compatible provider returned HTTP 400"), false);
     assert.equal(followupPrompt.includes("HTTP 400"), false);
     assert.equal(/\bgoal-\d+\b/.test(followupPrompt), false);
@@ -1455,11 +1628,11 @@ test("desktop openai-compatible ordinary agent uses configured search tool befor
       "/api/desktop/runs"
     );
 
-    assert.equal(completed.body.canvas.kind, "desktop_chat_canvas");
+    assert.equal(completed.body.canvas.kind, "desktop_agent_canvas");
     assert.equal(modelFetchCalls, 2);
     assert.equal(tavilyFetchCalls, 1);
-    assert.equal(completed.body.canvas.chat.answer.answer.includes("授权搜索结果"), true);
-    assert.equal(completed.body.canvas.chat.toolCallRefs.includes("call-panel-search"), true);
+    assert.equal(completed.body.canvas.agent.answer.answer.includes("授权搜索结果"), true);
+    assert.equal(completed.body.canvas.agent.toolCallRefs.includes("call-panel-search"), true);
     assert.equal(completed.body.trace.events.some((event: { type: string }) => event.type === "tool.completed"), true);
     assert.equal(JSON.stringify(completed.body).includes(modelSecret), false);
     assert.equal(JSON.stringify(completed.body).includes(tavilySecret), false);

@@ -3,7 +3,7 @@ import test from "node:test";
 import type { ArborMessage, ArborMessageType } from "../domain/common.js";
 import type { ModelVisibleOutputProjection } from "../domain/intelligence/index.js";
 import type { EventLogEntry } from "../kernel/events/in-memory-event-log.js";
-import { createPanelRunTranscript } from "./panel-run-read-model.js";
+import { createPanelRunStreamEvents, createPanelRunTranscript } from "./panel-run-read-model.js";
 
 test("panel reasoning trace is matched by exact model output contract", () => {
   const transcript = createPanelRunTranscript({
@@ -138,6 +138,83 @@ test("panel transcript projects confirmation and user guidance as safe ordinary-
   assert.equal(transcript.events[1]?.summary?.includes("请选择要读取的文件"), true);
   assert.equal(transcript.events[2]?.summary?.includes("先不要读取"), true);
   assert.equal(JSON.stringify(transcript).includes("raw prompt"), false);
+});
+
+test("ordinary agent stream stays quiet for direct answers but shows safe thinking around tool work", () => {
+  const direct = createPanelRunStreamEvents({
+    runId: "run-direct-answer",
+    status: "completed",
+    desktopMode: "agent",
+    eventEntries: [
+      eventEntry({ sequence: 1, type: "goal.received", payload: { goalId: "goal-direct" } }),
+      eventEntry({
+        sequence: 2,
+        type: "model.requested",
+        payload: { requestId: "request-direct", purpose: "desktop_chat" },
+      }),
+      modelCompletedEntry({
+        sequence: 3,
+        requestId: "request-direct",
+        contractId: "desktop.chat.answer.v1",
+        decisionSummary: "Direct answer text.",
+      }),
+    ],
+    createdAt: "2026-05-07T00:00:00.000Z",
+    updatedAt: "2026-05-07T00:00:03.000Z",
+  });
+  const withTool = createPanelRunStreamEvents({
+    runId: "run-tool-work",
+    status: "completed",
+    desktopMode: "agent",
+    eventEntries: [
+      eventEntry({ sequence: 1, type: "goal.received", payload: { goalId: "goal-tool" } }),
+      eventEntry({
+        sequence: 2,
+        type: "model.requested",
+        payload: { requestId: "request-before-tool", purpose: "desktop_agent" },
+      }),
+      eventEntry({
+        sequence: 3,
+        type: "tool.requested",
+        payload: { callId: "tool-call-read", toolName: "read_file", input: { path: "notes.md" } },
+      }),
+      eventEntry({
+        sequence: 4,
+        type: "tool.completed",
+        payload: {
+          callId: "tool-call-read",
+          toolName: "read_file",
+          input: { path: "notes.md" },
+          output: {
+            action: "read_file",
+            summary: "notes.md · 34 bytes",
+            result: {
+              path: "notes.md",
+              bytes: 34,
+              content: "RAW_TOOL_OUTPUT_SENTINEL must stay out of panel events.",
+            },
+            truncated: false,
+          },
+        },
+      }),
+      modelCompletedEntry({
+        sequence: 5,
+        requestId: "request-after-tool",
+        contractId: "desktop.agent.answer.v1",
+        decisionSummary: "Tool-assisted answer text.",
+      }),
+    ],
+    createdAt: "2026-05-07T00:00:00.000Z",
+    updatedAt: "2026-05-07T00:00:05.000Z",
+  });
+  const completedTool = withTool.find((event) => event.type === "tool.completed");
+
+  assert.deepEqual(direct.map((event) => event.type), ["run.started", "final.result"]);
+  assert.equal(withTool.some((event) => event.type === "agent.note.delta"), true);
+  assert.equal(withTool.some((event) => event.type === "model.output.completed"), true);
+  assert.equal(completedTool?.detail?.kind, "tool");
+  assert.equal(completedTool?.detail?.preview?.includes("notes.md"), true);
+  assert.equal(JSON.stringify(withTool).includes("RAW_TOOL_OUTPUT_SENTINEL"), false);
 });
 
 function modelCompletedEntry(input: {

@@ -37,6 +37,7 @@ export type RuntimeConversationRecord = {
   readonly status: "idle" | "running" | "completed" | "failed";
   readonly activeRunId?: string;
   readonly latestRunId?: string;
+  readonly requiresUserAction?: boolean;
   readonly queuedRunIds: readonly string[];
   readonly queuedRunCount: number;
   readonly createdAt: string;
@@ -111,7 +112,11 @@ export type RuntimeToolCallRecord = {
   readonly status: "requested" | "completed" | "failed";
   readonly action?: string;
   readonly path?: string;
+  readonly query?: string;
+  readonly command?: string;
+  readonly exitCode?: number;
   readonly summary?: string;
+  readonly preview?: string;
   readonly truncated?: boolean;
   readonly error?: string;
   readonly eventRefs: readonly string[];

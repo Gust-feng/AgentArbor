@@ -66,6 +66,11 @@ export class ConfigCenter {
     return this.toSanitizedConfig(settings);
   }
 
+  async getModelProviderApiKey(): Promise<string | undefined> {
+    const settings = await this.readOrCreateSettings();
+    return this.options.secretStore.readSecret(settings.modelProvider.secretRef);
+  }
+
   async updateModelProviderConfig(
     input: UpdateModelProviderConfigInput
   ): Promise<SanitizedModelProviderConfig> {

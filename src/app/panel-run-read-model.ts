@@ -189,6 +189,18 @@ export type PanelRunStreamEventType =
   | "final.result"
   | "run.failed";
 
+export type PanelRunStreamEventDetail = {
+  readonly kind: "thinking" | "tool" | "confirmation" | "work";
+  readonly action?: string;
+  readonly path?: string;
+  readonly query?: string;
+  readonly command?: string;
+  readonly exitCode?: number;
+  readonly preview?: string;
+  readonly truncated?: boolean;
+  readonly error?: string;
+};
+
 export type PanelRunStreamEvent = {
   readonly eventId: string;
   readonly runId: string;
@@ -200,6 +212,7 @@ export type PanelRunStreamEvent = {
   readonly delta?: string;
   readonly status?: "pending" | "running" | "completed" | "failed";
   readonly toolName?: string;
+  readonly detail?: PanelRunStreamEventDetail;
   readonly sourceRefs: readonly string[];
   readonly modelCallRefs: readonly string[];
   readonly toolCallRefs: readonly string[];
@@ -459,7 +472,9 @@ export function createPanelRunStreamEvents(input: {
   const events: PanelRunStreamEvent[] = [];
   const observationViews = createRunObservationEventViews(input.eventEntries);
   const viewBySequence = new Map(observationViews.map((view) => [view.sequence, view]));
-  const suppressOrdinaryChatProgress = input.desktopMode === "agent" || isOrdinaryChatRoute(input.routeDecision);
+  const suppressOrdinaryChatProgress =
+    (input.desktopMode === "agent" || isOrdinaryChatRoute(input.routeDecision)) &&
+    !hasUserVisibleWorkActivity(input.eventEntries);
   const push = (event: Omit<PanelRunStreamEvent, "sequence">): void => {
     events.push({ ...event, sequence: events.length + 1 });
   };
@@ -478,6 +493,9 @@ export function createPanelRunStreamEvents(input: {
   });
 
   for (const entry of input.eventEntries) {
+    if (shouldSuppressOrdinaryGoalEvent(entry.type, input.desktopMode, input.routeDecision)) {
+      continue;
+    }
     if (suppressOrdinaryChatProgress && shouldSuppressOrdinaryChatEvent(entry.type)) {
       continue;
     }
@@ -538,6 +556,26 @@ function runStartedSummary(
 
 function isOrdinaryChatRoute(routeDecision: DesktopIntentDecision | undefined): boolean {
   return routeDecision !== undefined && routeDecision.route !== "task_work_session";
+}
+
+function shouldSuppressOrdinaryGoalEvent(
+  type: ArborMessageType,
+  desktopMode: "agent" | "deep" | undefined,
+  routeDecision: DesktopIntentDecision | undefined
+): boolean {
+  return type === "goal.received" && (desktopMode === "agent" || isOrdinaryChatRoute(routeDecision));
+}
+
+function hasUserVisibleWorkActivity(eventEntries: readonly EventLogEntry[]): boolean {
+  return eventEntries.some((entry) => {
+    if (entry.type === "tool.requested" || entry.type === "tool.completed" || entry.type === "tool.failed") {
+      return true;
+    }
+    if (entry.type === "user_approval.requested" || entry.type === "user_approval.received") {
+      return true;
+    }
+    return isAgentFabricStreamType(entry.type);
+  });
 }
 
 function shouldSuppressOrdinaryChatEvent(type: ArborMessageType): boolean {
@@ -627,6 +665,7 @@ function appendStreamEventsForEvent(input: {
       toolName: stringOrUndefined(payload.toolName),
       summary: toolSummary(input.entry.type, payload),
       status: input.entry.type === "tool.requested" ? "running" : input.entry.type === "tool.completed" ? "completed" : "failed",
+      detail: toolStreamDetail(input.entry.type, payload),
     });
     return;
   }
@@ -794,19 +833,148 @@ function modelFailedSummary(payload: Readonly<Record<string, unknown>>): string 
 
 function toolSummary(type: "tool.requested" | "tool.completed" | "tool.failed", payload: Readonly<Record<string, unknown>>): string {
   const toolName = stringOrUndefined(payload.toolName) ?? "unknown";
+  const input = asRecord(payload.input);
+  const output = asRecord(payload.output);
+  const result = asRecord(output.result);
   const label = localToolLabel(toolName);
+  const target = toolTargetText(toolName, input, result);
+  const targetText = target === undefined ? "" : `：${target}`;
   if (type === "tool.requested") {
-    return `${label}正在执行。`;
+    return `正在${label}${targetText}。`;
   }
   const duration = typeof payload.durationMs === "number" ? `，耗时 ${Math.round(payload.durationMs)}ms` : "";
-  const output = asRecord(payload.output);
   const summary = stringOrUndefined(output.summary);
   if (type === "tool.completed") {
     return summary === undefined
-      ? `${label}已完成${duration}；结果只展示安全摘要和引用。`
-      : `${label}已完成${duration}：${summary}`;
+      ? `${label}完成${targetText}${duration}。`
+      : `${label}完成${targetText}${duration}：${summary}`;
   }
-  return `${label}失败${duration}；错误已脱敏。`;
+  return `${label}失败${targetText}${duration}。`;
+}
+
+function toolStreamDetail(
+  type: "tool.requested" | "tool.completed" | "tool.failed",
+  payload: Readonly<Record<string, unknown>>
+): PanelRunStreamEventDetail {
+  const toolName = stringOrUndefined(payload.toolName) ?? "tool";
+  const input = asRecord(payload.input);
+  const output = asRecord(payload.output);
+  const result = asRecord(output.result);
+  const command = stringOrUndefined(result.command) ?? stringOrUndefined(input.command);
+  const args = stringArray(result.args).length > 0 ? stringArray(result.args) : stringArray(input.args);
+  return {
+    kind: "tool",
+    action: stringOrUndefined(output.action) ?? toolName,
+    path: stringOrUndefined(result.path) ?? stringOrUndefined(input.path),
+    query: stringOrUndefined(result.query) ?? stringOrUndefined(input.query),
+    command: command === undefined ? undefined : [command, ...args].join(" ").trim(),
+    exitCode: typeof result.exitCode === "number" ? result.exitCode : undefined,
+    preview: type === "tool.requested" ? toolRequestPreview(toolName, input) : toolResultPreview(toolName, output, result, payload),
+    truncated: output.truncated === true,
+    error: type === "tool.failed" ? stringOrUndefined(payload.error) : undefined,
+  };
+}
+
+function toolRequestPreview(toolName: string, input: Readonly<Record<string, unknown>>): string | undefined {
+  if (toolName === "read_file" || toolName === "list_dir") {
+    const path = stringOrUndefined(input.path);
+    return path === undefined ? undefined : `目标：${path}`;
+  }
+  if (toolName === "grep_files") {
+    const query = stringOrUndefined(input.query);
+    const path = stringOrUndefined(input.path);
+    return query === undefined ? undefined : `搜索：${query}${path === undefined ? "" : ` · ${path}`}`;
+  }
+  if (toolName === "write_file" || toolName === "edit_file") {
+    const path = stringOrUndefined(input.path);
+    return path === undefined ? "准备修改文件。" : `目标文件：${path}`;
+  }
+  if (toolName === "run_command") {
+    const command = stringOrUndefined(input.command);
+    const args = stringArray(input.args);
+    return command === undefined ? undefined : `命令：${[command, ...args].join(" ").trim()}`;
+  }
+  return undefined;
+}
+
+function toolResultPreview(
+  toolName: string,
+  output: Readonly<Record<string, unknown>>,
+  result: Readonly<Record<string, unknown>>,
+  payload: Readonly<Record<string, unknown>>
+): string | undefined {
+  const error = stringOrUndefined(payload.error);
+  if (error !== undefined) {
+    return compactStreamDetailText(error, 800);
+  }
+  if (toolName === "read_file") {
+    return safeReadFilePreview(output, result);
+  }
+  if (toolName === "list_dir") {
+    const entries = Array.isArray(result.entries) ? result.entries : [];
+    const lines = entries.slice(0, 12).map((entry) => {
+      const record = asRecord(entry);
+      const name = stringOrUndefined(record.name) ?? "unknown";
+      const kind = stringOrUndefined(record.kind) ?? "entry";
+      const bytes = typeof record.bytes === "number" ? ` · ${record.bytes} bytes` : "";
+      return `${kind} ${name}${bytes}`;
+    });
+    return lines.length === 0 ? stringOrUndefined(output.summary) : lines.join("\n");
+  }
+  if (toolName === "grep_files") {
+    const matches = Array.isArray(result.matches) ? result.matches : [];
+    const lines = matches.slice(0, 12).map((match) => {
+      const record = asRecord(match);
+      const path = stringOrUndefined(record.path) ?? "unknown";
+      const line = typeof record.line === "number" ? record.line : "?";
+      const preview = stringOrUndefined(record.preview) ?? "";
+      return `${path}:${line} ${preview}`;
+    });
+    return lines.length === 0 ? stringOrUndefined(output.summary) : lines.join("\n");
+  }
+  if (toolName === "run_command") {
+    return safeCommandPreview(output, result);
+  }
+  return compactStreamDetailText(stringOrUndefined(output.summary), 900);
+}
+
+function safeReadFilePreview(
+  output: Readonly<Record<string, unknown>>,
+  result: Readonly<Record<string, unknown>>
+): string | undefined {
+  const summary = stringOrUndefined(output.summary);
+  const path = stringOrUndefined(result.path);
+  const bytes = typeof result.bytes === "number" ? `${result.bytes} bytes` : undefined;
+  const headline = summary ?? [path, bytes].filter(isString).join(" · ");
+  return compactStreamDetailText(
+    `${headline || "文件已读取。"}\n文件正文已进入本轮授权上下文，普通面板只展示路径、大小和截断状态。`,
+    900
+  );
+}
+
+function safeCommandPreview(
+  output: Readonly<Record<string, unknown>>,
+  result: Readonly<Record<string, unknown>>
+): string | undefined {
+  const summary = stringOrUndefined(output.summary);
+  const command = stringOrUndefined(result.command);
+  const exit = typeof result.exitCode === "number" ? `exit ${result.exitCode}` : undefined;
+  const headline = summary ?? [command, exit].filter(isString).join(" · ");
+  return compactStreamDetailText(
+    `${headline || "命令已执行。"}\n命令输出只进入本轮工具结果上下文；普通面板不展开 stdout / stderr 原文。`,
+    900
+  );
+}
+
+function compactStreamDetailText(value: string | undefined, maxLength: number): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  const text = value.trim();
+  if (text.length === 0) {
+    return undefined;
+  }
+  return text.length <= maxLength ? text : `${text.slice(0, Math.max(0, maxLength - 1))}…`;
 }
 
 function localToolLabel(toolName: string): string {
@@ -816,9 +984,34 @@ function localToolLabel(toolName: string): string {
   if (toolName === "write_file") return "写入文件";
   if (toolName === "edit_file") return "编辑文件";
   if (toolName === "run_command") return "执行命令";
-  if (toolName === "search") return "搜索材料";
-  if (toolName === "read") return "读取材料";
-  return `工具 ${toolName}`;
+  if (toolName === "search") return "搜索网页";
+  if (toolName === "read") return "读取网页";
+  return `执行 ${toolName}`;
+}
+
+function toolTargetText(
+  toolName: string,
+  input: Readonly<Record<string, unknown>>,
+  result: Readonly<Record<string, unknown>>
+): string | undefined {
+  const path = stringOrUndefined(result.path) ?? stringOrUndefined(input.path);
+  if (path !== undefined) {
+    return path;
+  }
+  const query = stringOrUndefined(result.query) ?? stringOrUndefined(input.query);
+  if (query !== undefined) {
+    return query;
+  }
+  const url = stringOrUndefined(result.url) ?? stringOrUndefined(input.url);
+  if (url !== undefined) {
+    return url;
+  }
+  if (toolName === "run_command") {
+    const command = stringOrUndefined(result.command) ?? stringOrUndefined(input.command);
+    const args = stringArray(result.args).length > 0 ? stringArray(result.args) : stringArray(input.args);
+    return command === undefined ? undefined : [command, ...args].join(" ").trim();
+  }
+  return undefined;
 }
 
 function confirmationSummary(payload: Readonly<Record<string, unknown>>): string {
@@ -1714,6 +1907,10 @@ function asRecord(value: unknown): Readonly<Record<string, unknown>> {
 
 function stringOrUndefined(value: unknown): string | undefined {
   return typeof value === "string" && value.trim().length > 0 ? value : undefined;
+}
+
+function stringArray(value: unknown): readonly string[] {
+  return Array.isArray(value) ? value.filter(isString) : [];
 }
 
 function isString(value: unknown): value is string {

@@ -16,6 +16,7 @@ coverage/
 
 # Logs
 *.log
+.playwright-mcp
 
 # Local AI development adapters and runtime state.
 # These directories are development-state by default; promote any shared
@@ -28,16 +29,13 @@ coverage/
 .agentarbor
 .trae
 .trellis/*
-!.trellis/.gitignore
-!.trellis/.version
-!.trellis/config.yaml
-!.trellis/workflow.md
-!.trellis/scripts/
-!.trellis/scripts/**
-!.trellis/spec/
 !.trellis/spec/**
-!.trellis/tasks/
 !.trellis/tasks/**
+!.trellis/scripts/**
+!.trellis/workflow.md
+!.trellis/config.yaml
+!.trellis/.version
+!.trellis/.gitignore
 .trellis/.runtime/
 .trellis/workspace/
 .trellis/.developer

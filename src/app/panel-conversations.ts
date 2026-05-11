@@ -49,6 +49,7 @@ export type PanelConversationReadModel = {
   readonly status: "idle" | "running" | "completed" | "failed";
   readonly activeRunId?: string;
   readonly latestRunId?: string;
+  readonly requiresUserAction: boolean;
   readonly queuedRunIds: readonly string[];
   readonly queuedRunCount: number;
   readonly turns: readonly PanelConversationTurnReadModel[];
@@ -338,6 +339,7 @@ export function toRuntimeConversationRecord(
     status: conversation.status,
     activeRunId: conversation.activeRunId,
     latestRunId: conversation.latestRunId,
+    requiresUserAction: conversation.requiresUserAction === true,
     queuedRunIds: [...conversation.queuedRunIds],
     queuedRunCount: conversation.queuedRunCount,
     createdAt: conversation.createdAt,
@@ -364,6 +366,7 @@ function toConversationSummary(conversation: PanelConversation): PanelConversati
     lastTurn === undefined
       ? "开始后会显示在这里。"
       : compact(lastTurn.content || lastTurn.title, 180);
+  const requiresUserAction = conversationRequiresUserAction(conversation);
   return {
     conversationId: conversation.conversationId,
     title: conversation.title,
@@ -373,9 +376,19 @@ function toConversationSummary(conversation: PanelConversation): PanelConversati
     status: conversationStatus(conversation),
     activeRunId: conversation.currentRunId,
     latestRunId: conversation.latestRunId,
+    requiresUserAction,
     queuedRunIds: [...conversation.queuedRunIds],
     queuedRunCount: conversation.queuedRunIds.length,
   };
+}
+
+function conversationRequiresUserAction(conversation: PanelConversation): boolean {
+  const lastAssistant = [...conversation.turns].reverse().find((turn) => turn.role === "assistant");
+  if (lastAssistant === undefined) {
+    return false;
+  }
+  const text = `${lastAssistant.title}\n${lastAssistant.content}`;
+  return /需要确认|请选择|补充授权|补充材料|待确认/.test(text);
 }
 
 function conversationStatus(conversation: PanelConversation): "idle" | "running" | "completed" | "failed" {

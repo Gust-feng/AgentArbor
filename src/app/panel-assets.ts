@@ -888,23 +888,25 @@ export function createPanelHtml(): string {
 
     .welcome {
       display: grid;
-      justify-items: center;
+      gap: 28px;
+      width: min(900px, 100%);
+      max-width: 900px;
+      margin: 6px 0 auto;
+      text-align: left;
+    }
+
+    .home-hero {
+      display: grid;
       gap: 14px;
-      max-width: 520px;
-      margin: auto 0;
-      text-align: center;
+      padding: 4px 0 0;
     }
 
     .intent-field {
       position: relative;
       display: grid;
-      justify-items: center;
-      align-items: center;
-      width: 360px;
-      height: 76px;
+      gap: 8px;
       min-width: 0;
       overflow: visible;
-      text-align: center;
       isolation: isolate;
       color: #263241;
     }
@@ -913,242 +915,30 @@ export function createPanelHtml(): string {
       color: #f8fafc;
     }
 
-    .backstage-handoff {
-      --input-weight: 0;
-      --input-visible: 0;
-      --primary-dash: 1;
-      --branch-a-dash: 1;
-      --branch-b-dash: 1;
-      --knot-dash: 1;
-      position: relative;
-      width: min(640px, calc(100% - 40px));
-      height: 68px;
-      margin: 0 auto -4px;
-      color: #273241;
-      pointer-events: none;
-      user-select: none;
-      opacity: 0.68;
-      transition: opacity 180ms ease, transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
-      isolation: isolate;
-    }
-
-    .backstage-handoff[data-state="idle"] {
-      opacity: 0.34;
-    }
-
-    .backstage-handoff[data-state="typing"] {
-      opacity: calc(0.5 + var(--input-visible) * 0.48);
-      transform: translateY(calc(var(--input-visible) * -2px));
-    }
-
-    .backstage-handoff[data-state="submit"] {
-      opacity: 0.88;
-      transform: translateY(7px) scaleY(0.72);
-      transition: transform 260ms cubic-bezier(0.18, 0.86, 0.22, 1), opacity 180ms ease;
-    }
-
-    .backstage-handoff[data-state="handoff"] {
-      opacity: 0.78;
-      transform: translateY(1px);
-    }
-
-    .backstage-stage,
-    .backstage-surface {
-      position: absolute;
-      inset: 0;
-    }
-
-    .backstage-surface::before {
-      content: "";
-      position: absolute;
-      left: 92px;
-      right: 92px;
-      bottom: 9px;
-      height: 1px;
-      background: linear-gradient(90deg, transparent, rgba(71, 85, 105, 0.28), transparent);
-      opacity: calc(0.04 + var(--input-visible) * 0.26);
-      transform: scaleX(calc(0.34 + var(--input-visible) * 0.56));
-      transform-origin: center;
-      transition: opacity 220ms ease, transform 260ms cubic-bezier(0.22, 1, 0.36, 1);
-    }
-
-    .backstage-thread {
-      position: absolute;
-      inset: 0;
-      z-index: 1;
-      width: 100%;
-      height: 100%;
-      overflow: visible;
-      filter: drop-shadow(0 8px 12px rgba(15, 23, 42, calc(var(--input-visible) * 0.08)));
-      transition: filter 220ms ease;
-    }
-
-    .backstage-thread path {
-      fill: none;
-      stroke-linecap: round;
-      stroke-linejoin: round;
-      vector-effect: non-scaling-stroke;
-    }
-
-    .thread-base {
-      stroke: rgba(71, 85, 105, 0.06);
-      stroke-width: 1;
-    }
-
-    .thread-primary,
-    .thread-branch-a,
-    .thread-branch-b,
-    .thread-knot {
-      stroke: rgba(13, 20, 33, 0.9);
-      stroke-width: calc(0.9px + var(--input-visible) * 0.9px);
-      stroke-dasharray: 1;
-      stroke-dashoffset: var(--primary-dash);
-      opacity: calc(0.03 + var(--input-visible) * 0.86);
-      transition:
-        opacity 220ms ease,
-        stroke-dashoffset 320ms cubic-bezier(0.22, 1, 0.36, 1),
-        stroke-width 220ms ease;
-    }
-
-    .thread-branch-a {
-      stroke: rgba(34, 103, 87, 0.82);
-      stroke-dasharray: 1;
-      stroke-dashoffset: var(--branch-a-dash);
-      opacity: calc(var(--input-visible) * 0.72);
-    }
-
-    .thread-branch-b {
-      stroke: rgba(55, 65, 81, 0.76);
-      stroke-dasharray: 1;
-      stroke-dashoffset: var(--branch-b-dash);
-      opacity: calc(var(--input-visible) * 0.58);
-    }
-
-    .thread-knot {
-      stroke: rgba(13, 20, 33, 0.84);
-      stroke-dasharray: 1;
-      stroke-dashoffset: var(--knot-dash);
-      opacity: calc(var(--input-visible) * 0.78);
-    }
-
-    .backstage-handoff[data-state="typing"] .thread-primary {
-      stroke-width: calc(1px + var(--input-visible) * 0.9px);
-    }
-
-    .backstage-handoff[data-state="typing"] .thread-branch-a,
-    .backstage-handoff[data-state="typing"] .thread-branch-b,
-    .backstage-handoff[data-state="typing"] .thread-knot {
-      stroke-width: calc(0.86px + var(--input-visible) * 0.62px);
-    }
-
-    .backstage-handoff[data-state="submit"] .thread-primary,
-    .backstage-handoff[data-state="submit"] .thread-branch-a,
-    .backstage-handoff[data-state="submit"] .thread-branch-b,
-    .backstage-handoff[data-state="submit"] .thread-knot {
-      animation: backstage-thread-gather 320ms cubic-bezier(0.18, 0.86, 0.22, 1) both;
-    }
-
-    .backstage-handoff[data-state="handoff"] .thread-primary,
-    .backstage-handoff[data-state="handoff"] .thread-branch-a,
-    .backstage-handoff[data-state="handoff"] .thread-branch-b,
-    .backstage-handoff[data-state="handoff"] .thread-knot {
-      animation: backstage-thread-settle 700ms cubic-bezier(0.22, 1, 0.36, 1) both;
-    }
-
-    .backstage-handoff[data-state="handoff"] .thread-branch-a { animation-delay: 90ms; }
-    .backstage-handoff[data-state="handoff"] .thread-branch-b { animation-delay: 170ms; }
-    .backstage-handoff[data-state="handoff"] .thread-knot { animation-delay: 230ms; }
-
-    .backstage-handoff[data-state="running"] .thread-primary,
-    .backstage-handoff[data-state="running"] .thread-branch-a,
-    .backstage-handoff[data-state="running"] .thread-branch-b,
-    .backstage-handoff[data-state="running"] .thread-knot {
-      stroke-dashoffset: 0;
-      opacity: 0.18;
-      transition: opacity 240ms ease, stroke-dashoffset 240ms ease;
-    }
-
-    .composer-box.backstage-receive {
-      animation: composer-backstage-receive 760ms cubic-bezier(0.18, 0.86, 0.22, 1) both;
-    }
-
-    .composer-box.backstage-receive::after {
-      animation: composer-backstage-receive-line 760ms cubic-bezier(0.18, 0.86, 0.22, 1) both;
-    }
-
-    @keyframes backstage-thread-gather {
-      0% {
-        opacity: 0.28;
-        stroke-dashoffset: 0;
-      }
-      100% {
-        opacity: 0.1;
-        stroke-dashoffset: 1;
-      }
-    }
-
-    @keyframes backstage-thread-settle {
-      0% {
-        opacity: 0;
-        stroke-dashoffset: 1;
-      }
-      18% {
-        opacity: 0.34;
-      }
-      100% {
-        opacity: 0.16;
-        stroke-dashoffset: 0;
-      }
-    }
-
-    @keyframes composer-backstage-receive {
-      0% {
-        border-color: var(--line-strong);
-        box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
-      }
-      34% {
-        border-color: rgba(47, 111, 94, 0.46);
-        box-shadow: 0 0 0 1px rgba(47, 111, 94, 0.12), 0 8px 26px rgba(15, 23, 42, 0.07);
-      }
-      100% {
-        border-color: var(--line-strong);
-        box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
-      }
-    }
-
-    @keyframes composer-backstage-receive-line {
-      0% {
-        opacity: 0;
-        transform: scaleX(0.78);
-      }
-      30% {
-        opacity: 1;
-        transform: scaleX(1);
-      }
-      100% {
-        opacity: 0;
-        transform: scaleX(1.01);
-      }
-    }
-
-    @media (prefers-reduced-motion: reduce) {
-      .backstage-handoff *,
-      .backstage-handoff *::before,
-      .backstage-handoff *::after,
-      .composer-box {
-        animation: none !important;
-        transition: none !important;
-      }
+    .home-kicker {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 760;
     }
 
     .intent-meta {
       display: flex;
       align-items: center;
-      justify-content: center;
+      justify-content: flex-start;
       width: max-content;
-      font-size: 24px;
-      font-weight: 520;
+      max-width: 100%;
+      font-size: 28px;
+      font-weight: 620;
+      line-height: 1.18;
       white-space: nowrap;
+    }
+
+    .home-lead {
+      max-width: 620px;
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.65;
     }
 
     .shell.mode-deep .intent-meta {
@@ -1227,8 +1017,10 @@ export function createPanelHtml(): string {
     }
 
     .bubble.failed .bubble-inner {
-      border-color: #ffc9c2;
-      background: var(--danger-soft);
+      border-left: 3px solid #d92d20;
+      border-radius: 0;
+      background: transparent;
+      padding-left: 14px;
     }
 
     .entry-title {
@@ -1307,6 +1099,259 @@ export function createPanelHtml(): string {
 
     .assistant-stream-text {
       white-space: pre-wrap;
+    }
+
+    .assistant-activity {
+      display: inline-grid;
+      justify-items: start;
+      gap: 6px;
+      width: fit-content;
+      max-width: min(100%, 720px);
+      margin: 2px 0 10px;
+      border: 1px solid #e7edf4;
+      border-radius: 999px;
+      background: #fbfdff;
+      color: #344054;
+      padding: 4px;
+      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
+    }
+
+    .assistant-activity[hidden] {
+      display: none;
+    }
+
+    .assistant-activity[data-level="1"],
+    .assistant-activity[data-level="2"] {
+      width: min(100%, 720px);
+      border-radius: 14px;
+      padding: 6px;
+    }
+
+    .assistant-activity[data-tone="failed"] {
+      border-color: #f2b8b1;
+      background: #fffaf9;
+    }
+
+    .assistant-activity-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      max-width: 100%;
+      min-height: 28px;
+      border: 1px solid #dfe7f0;
+      border-radius: 999px;
+      background: #fff;
+      color: #334155;
+      padding: 0 10px;
+      font-size: 12px;
+      font-weight: 760;
+      cursor: pointer;
+      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+    }
+
+    .assistant-activity-toggle:hover,
+    .assistant-activity-toggle:focus-visible {
+      border-color: #cfd8e3;
+      background: #fff;
+      outline: none;
+    }
+
+    .assistant-activity-trail {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .assistant-activity-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: #98a2b3;
+    }
+
+    .assistant-activity-dot.thought { background: #6366f1; }
+    .assistant-activity-dot.tool { background: #0ea5e9; }
+    .assistant-activity-dot.confirm { background: #f59e0b; }
+    .assistant-activity-dot.failed { background: #ef4444; }
+
+    .assistant-activity-count,
+    .assistant-activity-level {
+      color: var(--muted-2);
+      font-weight: 680;
+    }
+
+    .assistant-activity-preview {
+      display: none;
+      min-width: 0;
+      max-width: 640px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.5;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      padding: 0 8px 2px;
+    }
+
+    .assistant-activity[data-level="1"] .assistant-activity-preview,
+    .assistant-activity[data-level="2"] .assistant-activity-preview {
+      display: block;
+    }
+
+    .assistant-activity-list {
+      display: none;
+      gap: 6px;
+      width: 100%;
+      margin: 0;
+      padding: 2px 4px 4px;
+      border-left: none;
+    }
+
+    .assistant-activity[data-level="1"] .assistant-activity-list,
+    .assistant-activity[data-level="2"] .assistant-activity-list {
+      display: grid;
+    }
+
+    .assistant-activity-item {
+      display: grid;
+      grid-template-columns: 10px minmax(0, 1fr);
+      gap: 9px;
+      min-width: 0;
+      color: #475467;
+      font-size: 12px;
+    }
+
+    .assistant-activity-item.failed {
+      color: #9f1f17;
+    }
+
+    .assistant-activity-title-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+    }
+
+    .assistant-activity-marker {
+      width: 8px;
+      height: 8px;
+      margin-top: 7px;
+      border: none;
+      border-radius: 999px;
+      background: #6b7280;
+      box-shadow: none;
+    }
+
+    .assistant-activity-marker.running { background: #0ea5e9; }
+    .assistant-activity-marker.completed { background: #22c55e; }
+    .assistant-activity-marker.failed { background: #ef4444; }
+    .assistant-activity-marker.pending { background: #f59e0b; }
+
+    .assistant-activity-body {
+      display: grid;
+      gap: 2px;
+      min-width: 0;
+      border-left: 2px solid #d7e3f0;
+      padding-left: 8px;
+    }
+
+    .assistant-activity-item.failed .assistant-activity-body {
+      border-left-color: #d92d20;
+    }
+
+    .assistant-activity-title {
+      min-width: 0;
+      color: inherit;
+      font-size: 12px;
+      font-weight: 760;
+      line-height: 1.42;
+    }
+
+    .assistant-activity-kind {
+      flex-shrink: 0;
+      color: var(--muted-2);
+      font-size: 11px;
+      font-weight: 720;
+    }
+
+    .assistant-activity-summary {
+      min-width: 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+
+    .assistant-activity[data-level="1"] .assistant-activity-summary {
+      display: -webkit-box;
+      -webkit-line-clamp: 1;
+      line-clamp: 1;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+
+    .assistant-tool-detail {
+      display: none;
+      gap: 7px;
+      margin-top: 6px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #fff;
+      padding: 8px 9px;
+    }
+
+    .assistant-activity[data-level="2"] .assistant-tool-detail {
+      display: grid;
+    }
+
+    .assistant-tool-detail summary {
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 760;
+    }
+
+    .assistant-tool-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .assistant-tool-meta span {
+      max-width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #fff;
+      color: var(--muted);
+      padding: 3px 7px;
+      font-size: 11px;
+      font-weight: 680;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .assistant-tool-preview {
+      max-height: 210px;
+      overflow: auto;
+      border: 1px solid #edf0f4;
+      border-radius: 7px;
+      background: #fff;
+      color: #1f2937;
+      margin: 0;
+      padding: 8px 9px;
+      font-family: var(--mono);
+      font-size: 12px;
+      line-height: 1.5;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+
+    .assistant-tool-note {
+      color: var(--muted-2);
+      font-size: 11px;
+      line-height: 1.45;
     }
 
     .result-block {
@@ -1773,39 +1818,6 @@ export function createPanelHtml(): string {
       font-weight: 760;
     }
 
-    .drawer-backdrop {
-      position: fixed;
-      inset: 0;
-      z-index: 40;
-      display: none;
-      background: rgba(15, 23, 42, 0.2);
-    }
-
-    .drawer-backdrop.open {
-      display: block;
-    }
-
-    .developer-drawer {
-      position: fixed;
-      top: 0;
-      right: 0;
-      z-index: 50;
-      display: none;
-      grid-template-rows: auto minmax(0, 1fr);
-      width: min(430px, 100vw);
-      height: 100vh;
-      transform: translateX(105%);
-      transition: transform 160ms ease;
-      border-left: 1px solid var(--line);
-      background: #fff;
-      box-shadow: var(--shadow);
-    }
-
-    .developer-drawer.open {
-      display: grid;
-      transform: translateX(0);
-    }
-
     .settings-backdrop {
       position: fixed;
       inset: 0;
@@ -1947,6 +1959,27 @@ export function createPanelHtml(): string {
       gap: 12px;
     }
 
+    .settings-zone-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-top: -4px;
+    }
+
+    .settings-zone-title span:first-child {
+      color: var(--text);
+      font-size: 13px;
+      font-weight: 780;
+    }
+
+    .readonly-hint {
+      background: #f8fafc;
+      color: var(--muted);
+      font-size: 12px;
+      cursor: default;
+    }
+
     .settings-fields {
       grid-template-columns: repeat(2, minmax(0, 1fr));
     }
@@ -2067,11 +2100,6 @@ export function createPanelHtml(): string {
         padding: 12px 34px 24px;
       }
 
-      .intent-field {
-        width: 340px;
-        height: 76px;
-      }
-
       .artifact-grid {
         grid-template-columns: 1fr;
       }
@@ -2120,7 +2148,7 @@ export function createPanelHtml(): string {
           <div class="account-menu" id="accountMenu" role="menu" aria-hidden="true">
             <button id="accountProfileButton" type="button" role="menuitem">个人信息</button>
             <button id="accountSettingsButton" type="button" role="menuitem">设置</button>
-            <button id="accountDiagnosticsButton" type="button" role="menuitem">诊断</button>
+            <button id="accountDiagnosticsButton" type="button" role="menuitem">安全</button>
             <div class="account-menu-note" id="accountMenuNote" aria-live="polite">个人信息暂未连接。</div>
           </div>
         </div>
@@ -2148,15 +2176,17 @@ export function createPanelHtml(): string {
             <section class="thread">
               <div class="thread-scroll" id="transcriptWrap">
                 <div class="welcome" id="introBlock">
-                  <div class="intent-field" id="intentField" aria-label="首页空态">
-                    <div class="intent-meta">
-                      <span>在忙什么呢？</span>
+                  <section class="home-hero">
+                    <div class="intent-field" id="intentField" aria-label="首页空态">
+                      <div class="intent-meta">
+                        <span>在忙什么呢？</span>
+                      </div>
                     </div>
-                  </div>
-                  <div class="workspace-prompt" id="workspaceEmptyPrompt">
-                    <span id="workspaceEmptyText">先选择一个工作文件夹，后续读取和写入都在这个范围内。</span>
-                    <button class="ghost" type="button" id="workspaceEmptySelectButton">选择文件夹</button>
-                  </div>
+                    <div class="workspace-prompt" id="workspaceEmptyPrompt">
+                      <span id="workspaceEmptyText">选择工作文件夹后，直接交代任务。</span>
+                      <button class="ghost" type="button" id="workspaceEmptySelectButton">选择文件夹</button>
+                    </div>
+                  </section>
                 </div>
                 <section class="transcript" id="transcript" aria-label="对话内容">
                   <div class="empty-transcript"></div>
@@ -2165,19 +2195,6 @@ export function createPanelHtml(): string {
               </div>
 
               <section class="composer" aria-label="任务输入">
-                <div class="backstage-handoff" id="backstageHandoff" data-state="idle" aria-hidden="true">
-                  <div class="backstage-stage">
-                    <div class="backstage-surface" aria-hidden="true">
-                      <svg class="backstage-thread" viewBox="0 0 520 74" focusable="false">
-                        <path class="thread-base" pathLength="1" d="M320 52 C318 42 318 32 320 22"></path>
-                        <path class="thread-primary" pathLength="1" d="M320 52 C318 42 318 32 320 22"></path>
-                        <path class="thread-branch-a" pathLength="1" d="M320 35 C285 20 246 19 208 31 C181 39 153 39 126 31"></path>
-                        <path class="thread-branch-b" pathLength="1" d="M320 35 C356 19 398 20 437 33 C466 43 495 42 522 31"></path>
-                        <path class="thread-knot" pathLength="1" d="M287 42 C306 30 334 30 353 42 C334 53 306 53 287 42"></path>
-                      </svg>
-                    </div>
-                  </div>
-                </div>
                 <div class="composer-box">
                   <textarea id="goalInput" placeholder="问任何问题，或交给我一个任务" rows="1"></textarea>
                   <div class="composer-actions">
@@ -2202,75 +2219,21 @@ export function createPanelHtml(): string {
   </div>
   <!-- ordinary-screen-end -->
 
-  <div class="drawer-backdrop" id="drawerBackdrop"></div>
-
-  <aside class="developer-drawer" id="developerDrawer" aria-hidden="true" aria-label="开发者详情">
-    <div class="drawer-head">
-      <div>
-        <div class="context-title">详情与诊断</div>
-        <div class="hint">会话细节、设置和安全调试投影。</div>
-      </div>
-      <button class="ghost drawer-close" type="button" data-close-drawer>关闭</button>
-    </div>
-    <div class="drawer-body">
-      <nav class="inspector-tabs" aria-label="详情分区">
-        <button class="inspector-tab active" type="button" data-tab="overview">概览</button>
-        <button class="inspector-tab" type="button" data-tab="ai">诊断</button>
-        <button class="inspector-tab" type="button" data-tab="agents">Agents</button>
-      </nav>
-
-      <div class="inspector-panel active" id="tabOverview" data-panel="overview">
-        <div class="panel-stack">
-          <div class="status-line">
-            <strong>当前会话详情</strong>
-            <span class="node-meta">运行树、模型工具引用和调试 JSON 只在这里查看。</span>
-          </div>
-          <section class="context-section">
-            <div class="context-title"><span>待办</span></div>
-            <div class="panel-stack" id="riskPanel"></div>
-          </section>
-          <section class="context-section">
-            <div class="context-title"><span>上下文</span><span class="tag" id="railStatusBadge">待开始</span></div>
-            <div class="metrics" id="runMetrics"></div>
-          </section>
-          <section class="context-section">
-            <div class="context-title"><span>证据</span></div>
-            <div class="panel-stack" id="supervisionStatus"></div>
-          </section>
-          <section class="context-section">
-            <div class="context-title"><span>近期活动</span></div>
-            <div class="run-path" id="runPath"></div>
-          </section>
-        </div>
-      </div>
-
-      <div class="inspector-panel" id="tabAi" data-panel="ai">
-        <section class="panel-stack">
-          <h2>真实 AI 诊断</h2>
-          <div class="panel-stack" id="failurePanel">
-            <div class="status-line"><strong>暂无阻断</strong><span class="node-meta">模型服务失败、输出契约失败或配置边界会显示在这里。</span></div>
-          </div>
-          <h2>模型 / 工具流</h2>
-          <div class="section-note">只显示 purpose、contract、状态、模型 / 工具 refs 和安全摘要。</div>
-          <div class="panel-stack" id="flowList"></div>
-        </section>
-      </div>
-
-      <div class="inspector-panel" id="tabAgents" data-panel="agents">
-        <section class="panel-stack">
-          <h2>运行树 / 父层综合</h2>
-          <div class="agent-tree" id="agentTree"><div class="node-meta">暂无派生 agent。</div></div>
-          <h2>选中 Agent</h2>
-          <div class="node-meta" id="agentInspector">运行后显示 spec、权限、预算和输出引用。</div>
-          <h2>父层 synthesis</h2>
-          <div class="status-line" id="parentSynthesis">
-            <strong>父层 synthesis</strong>
-            <span class="node-meta">等待 child/rootlet 安全摘要。</span>
-          </div>
-        </section>
-      </div>
-
-    </div>
+  <div id="drawerBackdrop" hidden></div>
+  <aside id="developerDrawer" aria-hidden="true" hidden>
+    <div id="tabOverview" data-panel="overview" hidden></div>
+    <div id="tabAi" data-panel="ai" hidden></div>
+    <div id="tabAgents" data-panel="agents" hidden></div>
+    <span id="railStatusBadge" hidden></span>
+    <div id="runMetrics" hidden></div>
+    <div id="riskPanel" hidden></div>
+    <div id="runPath" hidden></div>
+    <div id="supervisionStatus" hidden></div>
+    <div id="failurePanel" hidden></div>
+    <div id="flowList" hidden></div>
+    <div id="agentTree" hidden></div>
+    <div id="agentInspector" hidden></div>
+    <div id="parentSynthesis" hidden></div>
   </aside>
 
   <div class="settings-backdrop" id="settingsBackdrop" aria-hidden="true">
@@ -2278,24 +2241,37 @@ export function createPanelHtml(): string {
       <div class="settings-head">
         <div class="settings-title">
           <strong>设置</strong>
-          <span class="hint">按需调整模型、搜索和诊断，不打断当前会话。</span>
+          <span class="hint">配置模型、工作目录、工具和安全边界。</span>
         </div>
         <button class="ghost" type="button" data-close-settings>关闭</button>
       </div>
       <div class="settings-body">
         <nav class="settings-nav" aria-label="设置分区">
           <button class="active" type="button" data-settings-tab="model">模型</button>
+          <button type="button" data-settings-tab="workspace">工作目录</button>
           <button type="button" data-settings-tab="tools">工具</button>
-          <button type="button" data-settings-tab="safety">安全与调试</button>
+          <button type="button" data-settings-tab="safety">安全</button>
         </nav>
         <div class="settings-content">
           <section class="settings-section active" data-settings-panel="model">
             <div class="settings-card">
-              <h2>模型配置</h2>
-              <p class="section-note">用于真实 AI 回合。密钥只写入本地密钥存储，页面不会回显。</p>
+              <h2>模型</h2>
+              <p class="section-note">选择 OpenAI-compatible 厂商预设，或手动填写 Base URL 与模型名。</p>
               <div class="fields settings-fields">
-                <label class="wide-field">Base URL <input id="baseUrlInput" autocomplete="off"></label>
-                <label>模型名 <input id="modelInput" autocomplete="off"></label>
+                <label class="wide-field">厂商预设
+                  <select id="providerPresetInput">
+                    <option value="">自定义 OpenAI-compatible</option>
+                    <option value="deepseek">DeepSeek · deepseek-v4-flash</option>
+                    <option value="minimax">MiniMax · MiniMax-M1-80k</option>
+                    <option value="kimi">Kimi · kimi-k2.6</option>
+                    <option value="glm">GLM · glm-4.5</option>
+                    <option value="openrouter">OpenRouter · anthropic/claude-sonnet-4</option>
+                    <option value="openai">OpenAI · gpt-4o-mini</option>
+                  </select>
+                </label>
+                <input id="presetModelHint" type="hidden">
+                <label class="wide-field">Base URL <input id="baseUrlInput" autocomplete="off" placeholder="https://api.deepseek.com"></label>
+                <label>模型名 <input id="modelInput" autocomplete="off" placeholder="deepseek-v4-flash"></label>
                 <label>默认 AI 模式
                   <select id="defaultAiModeInput">
                     <option value="none">AI 禁用</option>
@@ -2310,17 +2286,30 @@ export function createPanelHtml(): string {
                     <option value="fake">Fake AI 测试模式</option>
                   </select>
                 </label>
-                <label class="wide-field">API Key <input id="apiKeyInput" type="password" autocomplete="off" placeholder="保存后不会回显"></label>
+                <label class="wide-field">API Key <input id="apiKeyInput" type="text" autocomplete="off" placeholder="sk-..."></label>
                 <button id="saveConfigButton">保存模型配置</button>
                 <div class="hint" id="configStatus">模型配置未加载。</div>
               </div>
             </div>
           </section>
 
+          <section class="settings-section" data-settings-panel="workspace">
+            <div class="settings-card">
+              <h2>工作目录</h2>
+              <p class="section-note">Desktop Agent 的本地读取、搜索、写入和命令执行都限制在这个文件夹内。</p>
+              <div class="fields settings-fields">
+                <label class="wide-field">AgentArbor 工作目录 <input id="workspaceDirectoryInput" type="text" autocomplete="off" placeholder="例如：Z:\\AgentArbor"></label>
+                <button id="selectWorkspaceDirectoryButton" type="button">选择文件夹</button>
+                <button id="saveWorkspaceConfigButton">保存工作目录</button>
+                <div class="hint" id="workspaceConfigStatus">工作目录未加载。</div>
+              </div>
+            </div>
+          </section>
+
           <section class="settings-section" data-settings-panel="tools">
             <div class="settings-card">
-              <h2>工具配置</h2>
-              <p class="section-note">当前只整理搜索工具的本地配置。后续工具市场或文件入口不会在本任务中出生。</p>
+              <h2>工具</h2>
+              <p class="section-note">这里只配置用户可操作的工具入口；本地文件工具跟随工作目录边界。</p>
               <div class="fields settings-fields">
                 <label>搜索服务
                   <select id="webSearchProviderInput">
@@ -2332,20 +2321,16 @@ export function createPanelHtml(): string {
                 <label>结果数 <input id="tavilyMaxResultsInput" type="number" min="1" max="10" step="1"></label>
                 <button id="saveToolConfigButton">保存工具配置</button>
                 <div class="hint" id="toolConfigStatus">工具配置未加载。</div>
-                <label class="wide-field">AgentArbor 工作目录 <input id="workspaceDirectoryInput" type="text" autocomplete="off" placeholder="例如：Z:\\AgentArbor"></label>
-                <button id="selectWorkspaceDirectoryButton" type="button">选择文件夹</button>
-                <button id="saveWorkspaceConfigButton">保存工作目录</button>
-                <div class="hint" id="workspaceConfigStatus">工作目录未加载。</div>
               </div>
             </div>
           </section>
 
           <section class="settings-section" data-settings-panel="safety">
             <div class="settings-card">
-              <h2>安全与调试</h2>
-              <p class="section-note">只展示安全投影。完整模型输入、原始工具结果、密钥和运行时引用不会显示。</p>
+              <h2>安全</h2>
+              <p class="section-note">模型 API Key 按你的要求可见；搜索密钥不回显。本地工具只能在工作目录边界内运行。</p>
               <ul class="debug-list" id="debugList">
-                <li>运行日志、模型引用、工具引用和收束细节默认折叠到详情与诊断。</li>
+                <li>原始提示词、完整工具结果、非模型密钥和内部运行引用不会显示在主界面。</li>
               </ul>
               <pre id="debugJson">{}</pre>
             </div>
@@ -2392,20 +2377,17 @@ export function createPanelHtml(): string {
       "model.output.completed": "内容已整理",
       "tool.requested": "正在读取材料",
       "tool.completed": "材料已读取",
-      "tool.failed": "材料读取失败",
+      "tool.failed": "工具执行失败",
       "confirmation.needed": "需要确认",
       "user.guidance": "用户指导",
-      "agent.delegation.planned": "正在安排检查",
+      "agent.delegation.planned": "安排检查",
       "agent.child.started": "检查开始",
       "agent.child.completed": "检查完成",
-      "agent.child.waiting": "等待材料",
-      "agent.parent_synthesis.completed": "正在整理判断",
+      "agent.child.waiting": "等待结果",
+      "agent.parent_synthesis.completed": "汇总判断",
       "final.result": "最终结果",
       "run.failed": "运行失败"
     };
-
-    const BACKSTAGE_SUBMIT_MS = 120;
-    const BACKSTAGE_HANDOFF_MS = 840;
 
     const state = {
       config: undefined,
@@ -2428,10 +2410,7 @@ export function createPanelHtml(): string {
       assistantControlBuffer: "",
       inspectorTab: "overview",
       settingsTab: "model",
-      inspectorPinned: false,
-      isSubmitting: false,
-      backstageState: "idle",
-      backstageInputWeight: 0
+      isSubmitting: false
     };
 
     const dom = {
@@ -2445,7 +2424,6 @@ export function createPanelHtml(): string {
       workspaceEmptyText: document.getElementById("workspaceEmptyText"),
       workspaceEmptySelectButton: document.getElementById("workspaceEmptySelectButton"),
       intentField: document.getElementById("intentField"),
-      backstageHandoff: document.getElementById("backstageHandoff"),
       composerBox: document.querySelector(".composer-box"),
       goalInput: document.getElementById("goalInput"),
       contextRefsInput: document.getElementById("contextRefsInput"),
@@ -2471,6 +2449,8 @@ export function createPanelHtml(): string {
       developerDrawer: document.getElementById("developerDrawer"),
       settingsBackdrop: document.getElementById("settingsBackdrop"),
       settingsPanel: document.getElementById("settingsPanel"),
+      providerPresetInput: document.getElementById("providerPresetInput"),
+      presetModelHint: document.getElementById("presetModelHint"),
       baseUrlInput: document.getElementById("baseUrlInput"),
       modelInput: document.getElementById("modelInput"),
       defaultAiModeInput: document.getElementById("defaultAiModeInput"),
@@ -2513,11 +2493,14 @@ export function createPanelHtml(): string {
     dom.newRunButton.addEventListener("click", resetComposer);
     dom.sidebarToggleButton.addEventListener("click", toggleSidebar);
     dom.saveConfigButton.addEventListener("click", saveModelConfig);
+    dom.providerPresetInput.addEventListener("change", function() {
+      applyProviderPreset(dom.providerPresetInput.value);
+    });
     dom.saveToolConfigButton.addEventListener("click", saveToolConfig);
     dom.selectWorkspaceDirectoryButton.addEventListener("click", selectWorkspaceDirectory);
     dom.workspaceEmptySelectButton.addEventListener("click", () => {
       openSettingsPanel();
-      setSettingsTab("tools");
+      setSettingsTab("workspace");
       void selectWorkspaceDirectory();
     });
     dom.saveWorkspaceConfigButton.addEventListener("click", saveWorkspaceConfig);
@@ -2574,13 +2557,6 @@ export function createPanelHtml(): string {
       setInspectorTab("overview", false);
       setSettingsTab("model");
       applyTaskRunMode("agent");
-      initBackstageHandoffAnimation();
-      renderMetrics("pending", undefined);
-      renderRunPath(undefined);
-      renderAgentTree(undefined);
-      renderRightPanels(undefined);
-      renderFailurePanel(undefined);
-      renderFlow(undefined);
       await Promise.all([loadConfig(), loadToolsConfig(), loadConversations()]);
       autoResizeGoalInput();
       updateComposerControls();
@@ -2707,73 +2683,8 @@ export function createPanelHtml(): string {
         dom.deepRunButton.removeAttribute("title");
       }
       if (!state.isSubmitting) {
-        updateBackstageHandoffAnimation(hasText ? "typing" : (state.currentRunId ? "running" : "idle"));
+        // No decorative submit animation: keep the composer stable and focused.
       }
-      updateBackstageInputWeight();
-    }
-
-    function initBackstageHandoffAnimation() {
-      updateBackstageHandoffAnimation(dom.goalInput.value.trim().length > 0 ? "typing" : "idle", true);
-      updateBackstageInputWeight(true);
-    }
-
-    function updateBackstageHandoffAnimation(nextState, force = false) {
-      if (!dom.backstageHandoff || (!force && state.backstageState === nextState)) {
-        return;
-      }
-      state.backstageState = nextState;
-      dom.backstageHandoff.dataset.state = nextState;
-    }
-
-    function updateBackstageInputWeight(force = false) {
-      if (!dom.backstageHandoff) {
-        return;
-      }
-      const text = dom.goalInput.value.trim();
-      const nextWeight = text.length === 0 ? 0 : Math.min(1, 0.12 + Math.log2(text.length + 1) / 5);
-      const easedWeight = force ? nextWeight : Math.max(nextWeight, state.backstageInputWeight * 0.94);
-      state.backstageInputWeight = Math.abs(easedWeight - nextWeight) < 0.015 ? nextWeight : easedWeight;
-      const visibleWeight = Math.min(1, state.backstageInputWeight * 1.2);
-      const primaryDash = Math.max(0, 1 - visibleWeight * 1.12);
-      const branchADash = Math.max(0, 1 - Math.max(0, visibleWeight - 0.1) * 1.18);
-      const branchBDash = Math.max(0, 1 - Math.max(0, visibleWeight - 0.2) * 1.3);
-      const knotDash = Math.max(0, 1 - Math.max(0, visibleWeight - 0.34) * 1.55);
-      dom.backstageHandoff.style.setProperty("--input-weight", state.backstageInputWeight.toFixed(3));
-      dom.backstageHandoff.style.setProperty("--input-visible", visibleWeight.toFixed(3));
-      dom.backstageHandoff.style.setProperty("--primary-dash", primaryDash.toFixed(3));
-      dom.backstageHandoff.style.setProperty("--branch-a-dash", branchADash.toFixed(3));
-      dom.backstageHandoff.style.setProperty("--branch-b-dash", branchBDash.toFixed(3));
-      dom.backstageHandoff.style.setProperty("--knot-dash", knotDash.toFixed(3));
-      if (state.backstageInputWeight > nextWeight && !force) {
-        window.setTimeout(() => updateBackstageInputWeight(true), 160);
-      }
-    }
-
-    async function playBackstageHandoffSubmit() {
-      if (!dom.backstageHandoff || !dom.composerBox) {
-        return;
-      }
-      dom.composerBox.classList.remove("backstage-receive");
-      dom.backstageHandoff.style.setProperty("--input-weight", "1");
-      dom.backstageHandoff.style.setProperty("--input-visible", "1");
-      dom.backstageHandoff.style.setProperty("--primary-dash", "0");
-      dom.backstageHandoff.style.setProperty("--branch-a-dash", "0");
-      dom.backstageHandoff.style.setProperty("--branch-b-dash", "0");
-      dom.backstageHandoff.style.setProperty("--knot-dash", "0");
-      updateBackstageHandoffAnimation("submit", true);
-      void dom.backstageHandoff.offsetWidth;
-      dom.composerBox.classList.add("backstage-receive");
-      await delay(BACKSTAGE_SUBMIT_MS);
-      updateBackstageHandoffAnimation("handoff", true);
-      await delay(BACKSTAGE_HANDOFF_MS);
-      updateBackstageHandoffAnimation("running", true);
-      window.setTimeout(() => {
-        dom.composerBox.classList.remove("backstage-receive");
-      }, 160);
-    }
-
-    function delay(ms) {
-      return new Promise((resolve) => window.setTimeout(resolve, ms));
     }
 
     function toggleAccountMenu(event) {
@@ -2812,15 +2723,12 @@ export function createPanelHtml(): string {
       if (tab) {
         setInspectorTab(tab, true);
       }
-      dom.drawerBackdrop.classList.add("open");
-      dom.developerDrawer.classList.add("open");
-      dom.developerDrawer.setAttribute("aria-hidden", "false");
+      openSettingsPanel();
+      setSettingsTab("safety");
     }
 
     function closeDeveloperDrawer() {
-      dom.drawerBackdrop.classList.remove("open");
-      dom.developerDrawer.classList.remove("open");
-      dom.developerDrawer.setAttribute("aria-hidden", "true");
+      // Developer diagnostics are intentionally not a visible product surface.
     }
 
     function openSettingsPanel() {
@@ -2903,9 +2811,13 @@ export function createPanelHtml(): string {
         state.workspace = result.workspace;
         dom.baseUrlInput.value = result.config.baseUrl || "";
         dom.modelInput.value = result.config.model || "";
+        dom.apiKeyInput.value = result.config.apiKey || "";
         dom.defaultAiModeInput.value = result.config.defaultAiMode || "openai-compatible";
         dom.workspaceDirectoryInput.value = result.workspace && result.workspace.workspaceDirectory ? result.workspace.workspaceDirectory : "";
         dom.aiMode.value = preferredRunMode();
+        var detected = detectPresetFromUrl(result.config.baseUrl || "");
+        dom.providerPresetInput.value = detected;
+        updateProviderPresetHint(detected);
         renderProviderStatus();
         renderWorkspaceStatus();
       } catch (error) {
@@ -2941,11 +2853,10 @@ export function createPanelHtml(): string {
             apiKey: dom.apiKeyInput.value
           }
         });
-        dom.apiKeyInput.value = "";
         state.config = result.config;
         state.informationAccess = result.informationAccess;
         dom.aiMode.value = preferredRunMode();
-        renderProviderStatus();
+        await loadConfig();
       } catch (error) {
         dom.configStatus.textContent = error.message;
         dom.configStatus.className = "hint error";
@@ -3050,7 +2961,6 @@ export function createPanelHtml(): string {
         resetAssistantStreamState();
       }
       const taskSoilInput = collectTaskSoilInput();
-      await playBackstageHandoffSubmit();
       dom.introBlock.hidden = true;
       dom.sessionTitle.textContent = compact(goal, 42);
       appendLocalEntry("你", compact(goal, 1200), "sent", true);
@@ -3171,6 +3081,7 @@ export function createPanelHtml(): string {
     }
 
     function openRunStream(runId, cursor) {
+      stopLiveUpdates();
       if (!("EventSource" in window)) {
         startPolling(runId);
         return;
@@ -3183,13 +3094,17 @@ export function createPanelHtml(): string {
           const event = JSON.parse(message.data);
           appendStreamEvent(event);
           if (event.type === "final.result" || event.type === "run.failed") {
-            finishLiveRun(runId);
+            finishLiveRun(runId, event.type);
           }
         });
       });
       source.onerror = () => {
+        const sourceIsActive = state.eventSource === source;
         source.close();
-        if (state.currentRunId === runId) {
+        if (sourceIsActive) {
+          state.eventSource = undefined;
+        }
+        if (sourceIsActive && state.currentRunId === runId) {
           startPolling(runId);
         }
       };
@@ -3202,23 +3117,31 @@ export function createPanelHtml(): string {
           const response = await requestJson("/api/desktop/runs/" + encodeURIComponent(runId));
           renderPollingResponse(response);
           if (response.status === "completed" || response.status === "failed") {
-            finishLiveRun(runId);
+            finishLiveRun(runId, response.status === "failed" ? "run.failed" : "final.result");
           }
         } catch (error) {
           clearInterval(state.pollingTimer);
-          appendLocalEntry("轮询失败", error.message, "failed");
-          setRunStatus("failed");
+          state.pollingTimer = undefined;
+          if (state.currentRunId !== runId) {
+            return;
+          }
+          appendLocalEntry("连接中断", "无法刷新这次运行，请重新打开对话查看最新结果。", "failed");
         }
       }, 1000);
     }
 
-    async function finishLiveRun(runId) {
+    async function finishLiveRun(runId, terminalType) {
       stopLiveUpdates();
       try {
         const response = await requestJson("/api/desktop/runs/" + encodeURIComponent(runId));
         renderPollingResponse(response);
         followNextQueuedRun(response);
       } catch {
+        if (terminalType === "final.result") {
+          setRunStatus("completed");
+        } else if (terminalType === "run.failed") {
+          setRunStatus("failed");
+        }
       }
     }
 
@@ -3270,7 +3193,8 @@ export function createPanelHtml(): string {
       renderAgentTree(response);
       renderFailurePanel(response);
       renderFlow(response);
-      if (response.transcript && Array.isArray(response.transcript.events)) {
+      const shouldReplayTranscriptEvents = !(response.restoredFromSnapshot && !response.canvas);
+      if (shouldReplayTranscriptEvents && response.transcript && Array.isArray(response.transcript.events)) {
         response.transcript.events.forEach(appendStreamEvent);
       }
       syncAssistantTurnFromResponse(response);
@@ -3302,11 +3226,13 @@ export function createPanelHtml(): string {
       if (!event || typeof event.sequence !== "number") {
         return;
       }
-      if (state.seenSequences.has(event.sequence)) {
+      const eventKey = streamEventKey(event);
+      if (state.seenSequences.has(eventKey)) {
         return;
       }
-      state.seenSequences.add(event.sequence);
+      state.seenSequences.add(eventKey);
       state.lastSequence = Math.max(state.lastSequence, event.sequence);
+      appendAssistantActivityEvent(event);
 
       if (event.type === "model.output.delta") {
         if (event.agentLabel === "助手") {
@@ -3345,6 +3271,10 @@ export function createPanelHtml(): string {
       }
       state.assistantStageKey = progress.stageKey;
       showAssistantPending();
+    }
+
+    function streamEventKey(event) {
+      return String(event.runId || state.currentRunId || "unknown") + ":" + String(event.sequence);
     }
 
     function syncAssistantTurnFromResponse(response) {
@@ -3434,7 +3364,8 @@ export function createPanelHtml(): string {
       return {
         row: row,
         titleText: row.querySelector(".entry-title strong, .entry-title span:first-child"),
-        body: row.querySelector(".entry-body")
+        body: row.querySelector(".entry-body"),
+        activity: row.querySelector(".assistant-activity")
       };
     }
 
@@ -3466,8 +3397,8 @@ export function createPanelHtml(): string {
       if (type === "tool.requested" || type === "tool.completed") {
         return {
           stageKey: "context",
-          title: "整理材料",
-          body: summary || "正在读取你授权的材料和上下文。"
+          title: localToolActionTitle(event.toolName, type === "tool.requested" ? "running" : "completed", event.detail),
+          body: summary || "工具状态已更新。"
         };
       }
       if (
@@ -3512,8 +3443,8 @@ export function createPanelHtml(): string {
         }
         return productActivityText(event.type, summary);
       }
-      if (event.type === "tool.requested") return "正在读取你提供的上下文。";
-      if (event.type === "tool.completed") return "已取得可引用的材料。";
+      if (event.type === "tool.requested") return localToolActionTitle(event.toolName, "running", event.detail);
+      if (event.type === "tool.completed") return localToolActionTitle(event.toolName, "completed", event.detail);
       if (event.type === "confirmation.needed") return "继续前需要你补充授权或材料。";
       if (event.type === "user.guidance") return "已收到你的补充指导。";
       if (event.type === "agent.delegation.planned") return "正在安排几路检查。";
@@ -3539,7 +3470,7 @@ export function createPanelHtml(): string {
         lower.includes("model-request") ||
         lower.includes("model-response") ||
         lower.includes("contract ") ||
-        lower.includes("rootlet") ||
+        lower.includes("internal agent") ||
         lower.includes("provider") ||
         lower.includes("parent synthesis") ||
         lower.includes("direction_handoff") ||
@@ -3565,7 +3496,7 @@ export function createPanelHtml(): string {
         return "模型返回的内容没有通过本轮格式检查。这不是你的输入问题；技术引用已放在详情里，可以调整模型或重试。";
       }
       if (lower.includes("openai-compatible provider returned http") || lower.includes("provider_response") || lower.includes("model_failed") || lower.includes("desktop_chat_failed") || lower.includes("desktop_agent_failed")) {
-        return "模型服务这次没有返回可用结果。请检查设置里的 Base URL、模型名和密钥，或稍后重试。详情已放在诊断里。";
+        return "模型服务这次没有返回可用结果。请检查设置里的 Base URL、模型名和密钥，或稍后重试。";
       }
       if (lower.includes("api key") || lower.includes("missing_api_key")) {
         return "还没有配置可用的模型密钥。请打开设置，保存密钥后重试。";
@@ -3706,6 +3637,270 @@ export function createPanelHtml(): string {
       node.setAttribute("role", "status");
       node.append(document.createElement("span"), document.createElement("span"), document.createElement("span"));
       return node;
+    }
+
+    function appendAssistantActivityEvent(event) {
+      const item = assistantActivityItemFromEvent(event);
+      if (!item || !state.assistantEntry) {
+        return;
+      }
+      const activity = ensureAssistantActivity(state.assistantEntry);
+      const list = activity.querySelector(".assistant-activity-list");
+      if (!list || list.querySelector('[data-sequence="' + String(event.sequence) + '"]')) {
+        return;
+      }
+      list.append(createAssistantActivityItemNode(item, event.sequence));
+      while (list.children.length > 12) {
+        list.removeChild(list.firstElementChild);
+      }
+      updateAssistantActivityHeader(activity, item);
+      activity.dataset.tone = item.kind === "failed" || item.status === "failed" ? "failed" : activity.dataset.tone || "normal";
+      activity.hidden = false;
+    }
+
+    function ensureAssistantActivity(entry) {
+      if (entry.activity) {
+        return entry.activity;
+      }
+      const activity = createAssistantActivityNode();
+      const inner = entry.row.querySelector(".bubble-inner");
+      const body = entry.row.querySelector(".entry-body");
+      if (inner && body) {
+        inner.insertBefore(activity, body);
+      }
+      entry.activity = activity;
+      return activity;
+    }
+
+    function createAssistantActivityNode() {
+      const activity = document.createElement("section");
+      activity.className = "assistant-activity";
+      activity.dataset.level = "0";
+      activity.setAttribute("aria-label", "思考与工具");
+      activity.hidden = true;
+      const toggle = document.createElement("button");
+      toggle.type = "button";
+      toggle.className = "assistant-activity-toggle";
+      toggle.setAttribute("aria-expanded", "false");
+      toggle.addEventListener("click", () => {
+        const current = Number(activity.dataset.level || "0");
+        const next = Number.isFinite(current) ? (current + 1) % 3 : 1;
+        setAssistantActivityLevel(activity, next);
+      });
+      const trail = document.createElement("span");
+      trail.className = "assistant-activity-trail";
+      const label = document.createElement("span");
+      label.textContent = "过程";
+      const count = document.createElement("span");
+      count.className = "assistant-activity-count";
+      count.textContent = "0";
+      const level = document.createElement("span");
+      level.className = "assistant-activity-level";
+      level.textContent = "过程";
+      toggle.append(trail, label, count, level);
+      const preview = document.createElement("div");
+      preview.className = "assistant-activity-preview";
+      const list = document.createElement("div");
+      list.className = "assistant-activity-list";
+      activity.append(toggle, preview, list);
+      return activity;
+    }
+
+    function createAssistantActivityItemNode(item, sequence) {
+      const row = document.createElement("div");
+      row.className = "assistant-activity-item " + item.kind;
+      row.dataset.sequence = String(sequence);
+      row.dataset.kind = item.kind;
+      const marker = document.createElement("span");
+      marker.className = "assistant-activity-marker " + item.status;
+      marker.setAttribute("aria-hidden", "true");
+      const body = document.createElement("div");
+      body.className = "assistant-activity-body";
+      const titleRow = document.createElement("div");
+      titleRow.className = "assistant-activity-title-row";
+      const title = document.createElement("div");
+      title.className = "assistant-activity-title";
+      title.textContent = item.title;
+      const kind = document.createElement("span");
+      kind.className = "assistant-activity-kind";
+      kind.textContent = activityKindLabel(item.kind, item.status);
+      titleRow.append(title, kind);
+      const summary = document.createElement("div");
+      summary.className = "assistant-activity-summary";
+      summary.textContent = compact(item.summary || "状态已更新。", 300);
+      body.append(titleRow, summary);
+      const detail = createAssistantToolDetailNode(item);
+      if (detail) {
+        body.append(detail);
+      }
+      row.append(marker, body);
+      return row;
+    }
+
+    function setAssistantActivityLevel(activity, level) {
+      const safeLevel = level === 2 ? 2 : level === 1 ? 1 : 0;
+      activity.dataset.level = String(safeLevel);
+      activity.classList.toggle("expanded", safeLevel > 0);
+      const toggle = activity.querySelector(".assistant-activity-toggle");
+      const label = activity.querySelector(".assistant-activity-level");
+      if (toggle) {
+        toggle.setAttribute("aria-expanded", safeLevel > 0 ? "true" : "false");
+      }
+      if (label) {
+        label.textContent = safeLevel === 0 ? "过程" : safeLevel === 1 ? "概要" : "详情";
+      }
+    }
+
+    function activityKindLabel(kind, status) {
+      if (kind === "tool") return status === "running" ? "工具中" : "工具";
+      if (kind === "confirm") return "确认";
+      if (kind === "failed") return "失败";
+      return status === "running" ? "思考中" : "思考";
+    }
+
+    function createAssistantToolDetailNode(item) {
+      const detail = item.detail;
+      if (!detail || item.kind !== "tool") {
+        return undefined;
+      }
+      const box = document.createElement("details");
+      box.className = "assistant-tool-detail";
+      if (item.status !== "running") {
+        box.open = true;
+      }
+      const summary = document.createElement("summary");
+      summary.textContent = item.status === "failed" ? "失败原因与工具详情" : item.status === "running" ? "正在执行的工具详情" : "工具执行详情";
+      const meta = document.createElement("div");
+      meta.className = "assistant-tool-meta";
+      [
+        detail.action ? "动作：" + localToolNameLabel(detail.action) : undefined,
+        detail.path ? "路径：" + detail.path : undefined,
+        detail.query ? "搜索：" + detail.query : undefined,
+        detail.command ? "命令：" + detail.command : undefined,
+        typeof detail.exitCode === "number" ? "退出码：" + detail.exitCode : undefined,
+        detail.truncated ? "输出已截断" : undefined
+      ].filter(Boolean).forEach((value) => {
+        const tag = document.createElement("span");
+        tag.textContent = value;
+        meta.append(tag);
+      });
+      box.append(summary);
+      if (meta.childNodes.length > 0) {
+        box.append(meta);
+      }
+      if (detail.preview || detail.error) {
+        const preview = document.createElement("pre");
+        preview.className = "assistant-tool-preview";
+        preview.textContent = compact(detail.error || detail.preview, 1600);
+        box.append(preview);
+      }
+      const note = document.createElement("div");
+      note.className = "assistant-tool-note";
+      note.textContent = "这里展示的是运行时安全投影；密钥、提示词和未授权正文不会展开。";
+      box.append(note);
+      return box;
+    }
+
+    function updateAssistantActivityHeader(activity, latestItem) {
+      const count = activity.querySelector(".assistant-activity-count");
+      const list = activity.querySelector(".assistant-activity-list");
+      const trail = activity.querySelector(".assistant-activity-trail");
+      const preview = activity.querySelector(".assistant-activity-preview");
+      if (!list) {
+        return;
+      }
+      if (count) {
+        count.textContent = String(list.children.length);
+      }
+      if (preview) {
+        preview.textContent = latestItem.title + "：" + compact(latestItem.summary || "状态已更新。", 120);
+      }
+      if (trail) {
+        const kinds = Array.from(list.children)
+          .map((node) => node.dataset.kind || "thought")
+          .slice(-8);
+        trail.replaceChildren(...kinds.map((kind) => {
+          const dot = document.createElement("span");
+          dot.className = "assistant-activity-dot " + kind;
+          dot.setAttribute("aria-hidden", "true");
+          return dot;
+        }));
+      }
+    }
+
+    function assistantActivityItemFromEvent(event) {
+      if (!event) {
+        return undefined;
+      }
+      if (event.type === "run.started" || event.type === "final.result") {
+        return undefined;
+      }
+      if (event.type === "model.output.delta") {
+        return undefined;
+      }
+      const status = activityStatus(event);
+      if (event.type === "agent.note.delta" || event.type === "agent.note.completed") {
+        return {
+          kind: status === "failed" ? "failed" : "thought",
+          title: status === "running" ? "思考中" : status === "failed" ? "思考失败" : "思考完成",
+          summary: activityBody(event),
+          status,
+          detail: event.detail
+        };
+      }
+      if (event.type === "model.output.completed") {
+        if (event.agentLabel === "助手") {
+          return undefined;
+        }
+        return {
+          kind: "thought",
+          title: "思考完成",
+          summary: activityBody(event),
+          status,
+          detail: event.detail
+        };
+      }
+      if (event.type === "tool.requested") {
+        return { kind: "tool", title: localToolActionTitle(event.toolName, "running", event.detail), summary: activityBody(event), status, detail: event.detail };
+      }
+      if (event.type === "tool.completed") {
+        return { kind: "tool", title: localToolActionTitle(event.toolName, "completed", event.detail), summary: activityBody(event), status, detail: event.detail };
+      }
+      if (event.type === "tool.failed") {
+        return { kind: "tool", title: localToolActionTitle(event.toolName, "failed", event.detail), summary: activityBody(event), status, detail: event.detail };
+      }
+      if (event.type === "confirmation.needed") {
+        return { kind: "confirm", title: "需要你的确认", summary: activityBody(event), status };
+      }
+      if (event.type === "user.guidance") {
+        return { kind: "confirm", title: "收到补充", summary: activityBody(event), status };
+      }
+      if (event.type === "agent.delegation.planned") {
+        return { kind: "thought", title: "安排检查", summary: activityBody(event), status };
+      }
+      if (event.type === "agent.child.started") {
+        return { kind: "tool", title: "检查开始", summary: activityBody(event), status };
+      }
+      if (event.type === "agent.child.completed") {
+        return { kind: "tool", title: "检查完成", summary: activityBody(event), status };
+      }
+      if (event.type === "agent.child.waiting") {
+        return { kind: "thought", title: "等待材料", summary: activityBody(event), status };
+      }
+      if (event.type === "agent.parent_synthesis.completed") {
+        return { kind: "thought", title: "汇总判断", summary: activityBody(event), status };
+      }
+      if (event.type === "run.failed") {
+        return { kind: "failed", title: "运行失败", summary: activityBody(event), status };
+      }
+      return { kind: "thought", title: EVENT_LABELS[event.type] || "工作更新", summary: activityBody(event), status };
+    }
+
+    function activityStatus(event) {
+      if (event.status === "failed" || event.type === "run.failed" || event.type === "tool.failed") return "failed";
+      if (event.status === "completed" || event.type === "tool.completed" || event.type === "model.output.completed" || event.type === "agent.note.completed" || event.type === "agent.child.completed" || event.type === "agent.parent_synthesis.completed") return "completed";
+      if (event.status === "pending" || event.type === "confirmation.needed") return "pending";
+      return "running";
     }
 
     function enqueueAssistantText(text) {
@@ -3929,19 +4124,24 @@ export function createPanelHtml(): string {
       status.className = "meta";
       status.textContent = STATUS_LABELS[input.status] || input.status || "";
       title.append(titleText, status);
+      const activity = input.type === "user" ? undefined : createAssistantActivityNode();
       const body = document.createElement("div");
       body.className = "entry-body";
       body.textContent = input.body;
       if (input.runId) {
         row.dataset.runId = input.runId;
       }
-      inner.append(title, body);
+      if (activity) {
+        inner.append(title, activity, body);
+      } else {
+        inner.append(title, body);
+      }
       bubble.append(inner);
       row.append(label, bubble);
       dom.transcript.append(row);
       row.scrollIntoView({ block: "nearest" });
       if (input.returnParts) {
-        return { row, body, titleText, status };
+        return { row, body, titleText, status, activity };
       }
       return undefined;
     }
@@ -4101,7 +4301,7 @@ export function createPanelHtml(): string {
         resultHead(underground.recommendedDirection.summary || "地下组织结果", underground.recommendedDirection.reason || canvas.explanation.resultWhyReasonable),
         resultSection("依据", underground.keyEvidenceRefs),
         resultSection("不确定性", underground.uncertainty),
-        resultSection("待确认", underground.openQuestions),
+        resultSection("需要确认", underground.openQuestions),
         resultSection("处理概况", [
           "已完成多路检查。",
           "已汇总关键材料并整理判断。",
@@ -4161,7 +4361,36 @@ export function createPanelHtml(): string {
       if (toolName === "write_file") return "写入文件";
       if (toolName === "edit_file") return "编辑文件";
       if (toolName === "run_command") return "执行命令";
-      return toolName || "本地工具";
+      if (toolName === "search") return "搜索网页";
+      if (toolName === "read") return "读取网页";
+      return toolName || "工具";
+    }
+
+    function localToolActionTitle(toolName, status, detail) {
+      const label = localToolNameLabel(toolName);
+      const target = toolTargetLabel(detail);
+      const suffix = target ? " · " + target : "";
+      if (status === "running") {
+        if (toolName === "read_file" || toolName === "read") return "正在" + label + suffix;
+        if (toolName === "list_dir") return "正在列出目录" + suffix;
+        if (toolName === "grep_files" || toolName === "search") return "正在" + label + suffix;
+        if (toolName === "write_file") return "正在写入文件" + suffix;
+        if (toolName === "edit_file") return "正在编辑文件" + suffix;
+        if (toolName === "run_command") return "正在执行命令" + suffix;
+        return "正在" + label + suffix;
+      }
+      if (status === "failed") {
+        return label + "失败" + suffix;
+      }
+      return label + "完成" + suffix;
+    }
+
+    function toolTargetLabel(detail) {
+      if (!detail) return "";
+      if (detail.path) return compact(detail.path, 72);
+      if (detail.query) return compact(detail.query, 72);
+      if (detail.command) return compact(detail.command, 72);
+      return "";
     }
 
     function toolDetailSection(details) {
@@ -4314,7 +4543,7 @@ export function createPanelHtml(): string {
       const status = response && response.status ? response.status : "pending";
       dom.railStatusBadge.textContent = STATUS_LABELS[status] || status;
       if (!response) {
-        dom.riskPanel.replaceChildren(railItem("待确认", "任务开始后，需要你授权或补充的信息会出现在这里。", "good"));
+        dom.riskPanel.replaceChildren(railItem("需要确认", "任务开始后，需要你授权或补充的信息会出现在这里。", "good"));
         return;
       }
       const canvas = response.canvas;
@@ -4356,8 +4585,8 @@ export function createPanelHtml(): string {
       }
       if (canvas && canvas.kind === "underground_deep_canvas") {
         dom.runPath.replaceChildren(
-          railItem("深度模式", "已完成地下组织、父层综合和收束。", "good"),
-          railItem("组织概况", "rootlet " + canvas.underground.rootletCount + " 路；父层综合 " + canvas.underground.parentSynthesisCount + " 次")
+          railItem("深度模式", "已完成多路检查、综合和收束。", "good"),
+          railItem("组织概况", "检查分支 " + canvas.underground.rootletCount + " 路；综合 " + canvas.underground.parentSynthesisCount + " 次")
         );
         return;
       }
@@ -4448,50 +4677,11 @@ export function createPanelHtml(): string {
     }
 
     function renderFlow(response) {
-      const tracking = response && response.tracking;
-      if (!tracking) {
-        dom.flowList.replaceChildren(statusLine("模型 / 工具流", "等待运行。模型和工具调用只展示安全 refs、状态和摘要。"));
-        return;
-      }
-      const calls = response.transcript && Array.isArray(response.transcript.modelCalls)
-        ? response.transcript.modelCalls.slice(-4).reverse()
-        : [];
-      const list = document.createElement("div");
-      list.className = "call-list";
-      if (calls.length === 0) {
-        list.append(statusLine("模型调用明细", "暂无模型调用。"));
-      } else {
-        calls.forEach((call) => list.append(modelCallRow(call)));
-      }
-      dom.flowList.replaceChildren(
-        statusLine("模型调用", "请求 / 完成 / 失败 = " + counts(tracking.modelTotals) + "；状态 " + tracking.provider.status, tracking.modelTotals.failed > 0 ? "error" : ""),
-        list,
-        statusLine("工具调用", "请求 / 完成 / 失败 = " + counts(tracking.toolTotals), tracking.toolTotals.failed > 0 ? "warn" : "")
-      );
+      dom.flowList.replaceChildren();
     }
 
     function renderFailurePanel(response) {
-      const failedCalls = response && response.transcript && Array.isArray(response.transcript.modelCalls)
-        ? response.transcript.modelCalls.filter((call) => call.status === "failed")
-        : [];
-      const latestFailed = failedCalls[failedCalls.length - 1];
-      if (!response || (!response.error && failedCalls.length === 0)) {
-        dom.failurePanel.replaceChildren(
-          statusLine("暂无阻断", "模型服务失败、输出契约失败或配置边界会显示在这里。", "good")
-        );
-        return;
-      }
-      const rows = [];
-      if (response.error) {
-        rows.push(statusLine("阻断原因", response.error.message, "error"));
-      }
-      if (latestFailed) {
-        rows.push(modelCallRow(latestFailed));
-        rows.push(statusLine("处理建议", remediationForModelFailure(latestFailed), "warn"));
-      } else if (response.error) {
-        rows.push(statusLine("处理建议", remediationForError(response.error), "warn"));
-      }
-      dom.failurePanel.replaceChildren(...rows);
+      dom.failurePanel.replaceChildren();
     }
 
     function modelCallRow(call) {
@@ -4500,7 +4690,7 @@ export function createPanelHtml(): string {
       const body = document.createElement("div");
       const title = document.createElement("div");
       title.className = "call-title";
-      title.textContent = (call.purpose || "unknown purpose") + (call.rootletKind ? " / " + call.rootletKind : "");
+      title.textContent = call.purpose || "model";
       const meta = document.createElement("div");
       meta.className = "node-meta";
       meta.textContent = [
@@ -4526,44 +4716,9 @@ export function createPanelHtml(): string {
     }
 
     function renderAgentTree(response) {
-      const tree = response && response.tracking && response.tracking.agentRunTree;
-      if (!tree) {
-        dom.agentTree.replaceChildren(emptyAgentTreeNode());
-        dom.agentInspector.textContent = "运行后显示 spec、权限、预算和输出引用。";
-        dom.parentSynthesis.replaceChildren(statusLine("父层 synthesis", "等待 child/rootlet 安全摘要。"));
-        return;
-      }
-      const nodes = [];
-      nodes.push(agentNode({
-        title: tree.rootSpec.displayName || tree.rootAgentId,
-        status: tree.status,
-        meta: "root " + tree.rootAgentId + "；delegation " + tree.delegationDecisions.length + "；synthesis " + tree.parentSyntheses.length,
-        onClick: () => renderRootInspector(tree)
-      }));
-      tree.childRuns.forEach((run) => {
-        nodes.push(agentNode({
-          title: run.displayName || run.agentId,
-          status: run.status,
-          meta: [
-            run.rootletKind ? "kind " + run.rootletKind : run.role,
-            "outputs " + run.outputRefs.length,
-            run.confidence !== undefined ? "confidence " + String(run.confidence) : ""
-          ].filter(Boolean).join("；"),
-          child: true,
-          onClick: () => renderAgentInspector(run)
-        }));
-      });
-      dom.agentTree.replaceChildren(...nodes);
-      if (tree.parentSyntheses.length > 0) {
-        const latest = tree.parentSyntheses[tree.parentSyntheses.length - 1];
-        renderSynthesisInspector(latest);
-        dom.parentSynthesis.replaceChildren(
-          statusLine("父层 synthesis", compact(latest.decisionSummary, 240) + "；material refs " + latest.retainedMaterialRefs.slice(0, 4).join("，"))
-        );
-      } else {
-        renderRootInspector(tree);
-        dom.parentSynthesis.replaceChildren(statusLine("父层 synthesis", "等待 child/rootlet 材料回收。"));
-      }
+      dom.agentTree.replaceChildren();
+      dom.agentInspector.textContent = "";
+      dom.parentSynthesis.replaceChildren();
     }
 
     function agentNode(input) {
@@ -4603,7 +4758,7 @@ export function createPanelHtml(): string {
       dom.agentInspector.replaceChildren(detailGrid([
         ["身份", run.displayName + " / " + run.agentId],
         ["spec", run.specId],
-        ["角色", [run.role, run.rootletKind ? "kind " + run.rootletKind : ""].filter(Boolean).join("；")],
+        ["角色", run.role],
         ["权限", (run.allowModel ? "model" : "no-model") + (run.allowedTools && run.allowedTools.length ? " + " + run.allowedTools.join("/") : "")],
         ["预算", "model rounds " + run.budget.maxModelRounds + "；tool rounds " + run.budget.maxToolRounds],
         ["输入", compact(run.inputRefs.slice(0, 4).join("，") || "无", 180)],
@@ -4737,7 +4892,15 @@ export function createPanelHtml(): string {
       const deepTask = dom.runModeInput.value === "deep";
       dom.providerHint.textContent = composerHint(status, deepTask);
       dom.inputStatusDot.className = "input-status-dot" + composerStatusTone(status);
-      dom.configStatus.textContent = "模型入口：" + modeLabel(selectedMode) + "；默认：" + modeLabel(config.defaultAiMode || "openai-compatible") + "；模型：" + (config.model || "未填写") + "；密钥：" + (config.secretConfigured ? "已配置" : "未配置");
+      const baseUrl = config.baseUrl || "";
+      var providerLabel = "";
+      for (var key in PROVIDER_PRESETS) {
+        if (baseUrl.indexOf(PROVIDER_PRESETS[key].url) !== -1) {
+          providerLabel = PROVIDER_PRESETS[key].label;
+          break;
+        }
+      }
+      dom.configStatus.textContent = (providerLabel ? providerLabel + " · " : "") + "模型：" + (config.model || "未填写") + " · 密钥：" + (config.secretConfigured ? "已配置" : "未配置");
       dom.configStatus.className = "hint" + (status === "missing_model" || status === "missing_secret" || status === "missing_model_and_secret" ? " error" : "");
       renderSupervision(undefined);
       renderRightPanels(undefined);
@@ -4746,6 +4909,39 @@ export function createPanelHtml(): string {
 
     function preferredRunMode() {
       return "openai-compatible";
+    }
+
+    var PROVIDER_PRESETS = {
+      deepseek:  { url: "https://api.deepseek.com",       model: "deepseek-v4-flash",                label: "DeepSeek" },
+      minimax:   { url: "https://api.minimaxi.com/v1",    model: "MiniMax-M1-80k",                   label: "MiniMax" },
+      kimi:      { url: "https://api.moonshot.cn/v1",     model: "kimi-k2.6",                        label: "Kimi" },
+      glm:       { url: "https://api.z.ai/api/paas/v4",   model: "glm-4.5",                          label: "GLM (Z.AI)" },
+      openrouter:{ url: "https://openrouter.ai/api/v1",   model: "anthropic/claude-sonnet-4",        label: "OpenRouter" },
+      openai:    { url: "https://api.openai.com",         model: "gpt-4o-mini",                      label: "OpenAI" }
+    };
+
+    function applyProviderPreset(presetKey) {
+      var preset = PROVIDER_PRESETS[presetKey];
+      updateProviderPresetHint(presetKey);
+      if (preset) {
+        dom.baseUrlInput.value = preset.url;
+        dom.modelInput.value = preset.model;
+      }
+    }
+
+    function updateProviderPresetHint(presetKey) {
+      var preset = PROVIDER_PRESETS[presetKey];
+      var hint = document.getElementById("presetModelHint");
+      if (!hint) return;
+      hint.value = preset ? preset.label + " · " + preset.model : "自定义 OpenAI-compatible";
+    }
+
+    function detectPresetFromUrl(url) {
+      if (!url) return "";
+      for (var key in PROVIDER_PRESETS) {
+        if (url.indexOf(PROVIDER_PRESETS[key].url) !== -1) return key;
+      }
+      return "";
     }
 
     function providerStatusFromConfig(config, requestedMode) {
@@ -4765,7 +4961,7 @@ export function createPanelHtml(): string {
       if (status === "missing_model" || status === "missing_secret" || status === "missing_model_and_secret") {
         return "真实模型未配置完整，发送后会停在配置边界。";
       }
-      if (deepTask) return "会按更严谨的方式整理依据、风险和待确认事项。";
+      if (deepTask) return "会按更严谨的方式整理依据、风险和需要确认的事项。";
       return "Enter 发送，Shift+Enter 换行。";
     }
 
@@ -4915,6 +5111,7 @@ export function createPanelHtml(): string {
         status: conversation.status,
         activeRunId: conversation.activeRunId,
         latestRunId: conversation.latestRunId,
+        requiresUserAction: conversation.requiresUserAction === true,
         queuedRunIds: conversation.queuedRunIds,
         queuedRunCount: conversation.queuedRunCount
       };
@@ -5035,18 +5232,11 @@ export function createPanelHtml(): string {
       if (error.code === "missing_model") return "打开设置，填写模型名后重试。";
       if (error.code === "missing_model_and_secret") return "打开设置，填写模型名并保存 API Key 后重试。";
       if (error.code === "ai_disabled") return "AI 禁用只能验证边界，不能产出完成结果；请切换到真实模型或测试模式。";
-      return "检查诊断详情，处理配置、权限或模型服务问题后重试。";
+      return "检查设置里的模型、工具或工作目录配置后重试。";
     }
 
     function setRunStatus(status) {
       dom.runStatus.textContent = STATUS_LABELS[status] || status || "待开始";
-      if (status === "running") {
-        updateBackstageHandoffAnimation("running");
-        return;
-      }
-      if (!state.isSubmitting) {
-        updateBackstageHandoffAnimation(dom.goalInput.value.trim().length > 0 ? "typing" : "idle");
-      }
     }
 
     function setButtons(enabled) {

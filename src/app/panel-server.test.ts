@@ -23,19 +23,45 @@ test("panel HTML defaults to Simplified Chinese labels and status text", () => {
   assert.equal(html.includes("AgentArbor 面板"), true);
   assert.equal(html.includes("assistant-pending"), true);
   assert.equal(html.includes("assistant-control-chip"), true);
+  assert.equal(html.includes("assistant-activity"), true);
+  assert.equal(html.includes("思考与工具"), true);
+  assert.equal(html.includes("assistant-tool-detail"), true);
+  assert.equal(html.includes('id="apiKeyInput" type="text"'), true);
+  assert.equal(html.includes("function createAssistantToolDetailNode"), true);
+  assert.equal(html.includes("function appendAssistantActivityEvent"), true);
+  assert.equal(html.includes("function assistantActivityItemFromEvent"), true);
+  assert.equal(html.includes("function streamEventKey"), true);
+  assert.equal(html.includes("assistant-workflow"), false);
+  assert.equal(html.includes("function appendAssistantWorkflowEvent"), false);
+  assert.equal(html.includes("function assistantWorkflowItemFromEvent"), false);
+  assert.equal(html.includes("接收任务"), false);
+  assert.equal(html.includes("生成结果"), false);
   assert.equal(html.includes("我先快速判断"), false);
   assert.equal(html.includes("正在理解这条消息"), false);
   assert.equal(html.includes("正在准备回复"), false);
   assert.equal(html.includes("正在回复"), false);
   assert.equal(firstScreenHtml.includes("新对话"), true);
   assert.equal(firstScreenHtml.includes("在忙什么呢？"), true);
+  assert.equal(firstScreenHtml.includes("详情与诊断"), false);
+  assert.equal(firstScreenHtml.includes("真实 AI 诊断"), false);
+  assert.equal(firstScreenHtml.includes("模型 / 工具流"), false);
+  assert.equal(firstScreenHtml.includes("运行树 / 父层综合"), false);
+  assert.equal(firstScreenHtml.includes("父层 synthesis"), false);
+  assert.equal(firstScreenHtml.includes("任务中心"), false);
+  assert.equal(firstScreenHtml.includes("正在处理"), false);
+  assert.equal(firstScreenHtml.includes("最近结果"), false);
+  assert.equal(firstScreenHtml.includes("待确认"), false);
+  assert.equal(firstScreenHtml.includes('id="homeActiveTasks"'), false);
+  assert.equal(firstScreenHtml.includes('id="homeRecentResults"'), false);
+  assert.equal(firstScreenHtml.includes('id="homeActionList"'), false);
   assert.equal(firstScreenHtml.includes("技能"), true);
   assert.equal(firstScreenHtml.includes("例行任务"), true);
   assert.equal(firstScreenHtml.includes("工具"), true);
   assert.equal(firstScreenHtml.includes("设置"), true);
   assert.equal(firstScreenHtml.includes("最近对话"), false);
   assert.equal(firstScreenHtml.includes("个人信息"), true);
-  assert.equal(firstScreenHtml.includes("诊断"), true);
+  assert.equal(firstScreenHtml.includes("安全"), true);
+  assert.equal(firstScreenHtml.includes("诊断"), false);
   assert.equal(firstScreenHtml.includes('id="profileMenuButton"'), true);
   assert.equal(firstScreenHtml.includes('id="accountMenu"'), true);
   assert.equal(firstScreenHtml.includes('id="diagnosticDrawerButton"'), false);
@@ -48,14 +74,14 @@ test("panel HTML defaults to Simplified Chinese labels and status text", () => {
   assert.equal(firstScreenHtml.includes("动态工作场"), false);
   assert.equal(firstScreenHtml.includes("首页空态"), true);
   assert.equal(firstScreenHtml.includes('class="intent-field"'), true);
-  assert.equal(firstScreenHtml.includes('id="backstageHandoff"'), true);
-  assert.equal(firstScreenHtml.includes('class="backstage-handoff"'), true);
-  assert.equal(firstScreenHtml.includes('class="backstage-surface"'), true);
-  assert.equal(firstScreenHtml.includes('class="backstage-thread"'), true);
-  assert.equal(firstScreenHtml.includes('class="thread-primary"'), true);
-  assert.equal(firstScreenHtml.includes('class="thread-branch-a"'), true);
-  assert.equal(firstScreenHtml.includes('class="thread-branch-b"'), true);
-  assert.equal(firstScreenHtml.includes('class="thread-knot"'), true);
+  assert.equal(firstScreenHtml.includes('id="backstageHandoff"'), false);
+  assert.equal(firstScreenHtml.includes('class="backstage-handoff"'), false);
+  assert.equal(firstScreenHtml.includes('class="backstage-surface"'), false);
+  assert.equal(firstScreenHtml.includes('class="backstage-thread"'), false);
+  assert.equal(firstScreenHtml.includes('class="thread-primary"'), false);
+  assert.equal(firstScreenHtml.includes('class="thread-branch-a"'), false);
+  assert.equal(firstScreenHtml.includes('class="thread-branch-b"'), false);
+  assert.equal(firstScreenHtml.includes('class="thread-knot"'), false);
   assert.equal(firstScreenHtml.includes('class="backstage-cell'), false);
   assert.equal(firstScreenHtml.includes('class="cell-glyph'), false);
   assert.equal(firstScreenHtml.includes('class="backstage-note"'), false);
@@ -113,7 +139,8 @@ test("panel HTML defaults to Simplified Chinese labels and status text", () => {
   assert.equal(firstScreenHtml.includes("输入一个真实任务，必要时补充文件、网页或限制条件。"), false);
   assert.equal(firstScreenHtml.includes("Code"), false);
   assert.equal(html.includes('<aside class="context-pane"'), false);
-  assert.equal(html.includes('<aside class="developer-drawer"'), true);
+  assert.equal(html.includes('<aside class="developer-drawer"'), false);
+  assert.equal(html.includes('class="drawer-backdrop"'), false);
   assert.equal(html.includes('class="settings-backdrop"'), true);
   assert.equal(html.includes('id="settingsPanelButton"'), false);
   assert.equal(html.includes('id="accountSettingsButton"'), true);
@@ -130,21 +157,21 @@ test("panel HTML defaults to Simplified Chinese labels and status text", () => {
   assert.equal(html.includes('function drawLeafNodes'), false);
   assert.equal(html.includes("@keyframes intent-flow"), false);
   assert.equal(html.includes("@keyframes assistant-pulse"), false);
-  assert.equal(html.includes("--input-weight"), true);
-  assert.equal(html.includes("--input-visible"), true);
-  assert.equal(html.includes("--primary-dash"), true);
-  assert.equal(html.includes("--branch-a-dash"), true);
-  assert.equal(html.includes("--branch-b-dash"), true);
-  assert.equal(html.includes("--knot-dash"), true);
-  assert.equal(html.includes("function updateBackstageInputWeight"), true);
+  assert.equal(html.includes("--input-weight"), false);
+  assert.equal(html.includes("--input-visible"), false);
+  assert.equal(html.includes("--primary-dash"), false);
+  assert.equal(html.includes("--branch-a-dash"), false);
+  assert.equal(html.includes("--branch-b-dash"), false);
+  assert.equal(html.includes("--knot-dash"), false);
+  assert.equal(html.includes("function updateBackstageInputWeight"), false);
   assert.equal(html.includes("@keyframes backstage-note-submit"), false);
   assert.equal(html.includes("@keyframes backstage-cell-wake"), false);
-  assert.equal(html.includes("@keyframes backstage-thread-gather"), true);
-  assert.equal(html.includes("@keyframes backstage-thread-settle"), true);
-  assert.equal(html.includes("@keyframes composer-backstage-receive"), true);
-  assert.equal(html.includes("@keyframes composer-backstage-receive-line"), true);
-  assert.equal(html.includes("function updateBackstageHandoffAnimation"), true);
-  assert.equal(html.includes("function playBackstageHandoffSubmit"), true);
+  assert.equal(html.includes("@keyframes backstage-thread-gather"), false);
+  assert.equal(html.includes("@keyframes backstage-thread-settle"), false);
+  assert.equal(html.includes("@keyframes composer-backstage-receive"), false);
+  assert.equal(html.includes("@keyframes composer-backstage-receive-line"), false);
+  assert.equal(html.includes("function updateBackstageHandoffAnimation"), false);
+  assert.equal(html.includes("function playBackstageHandoffSubmit"), false);
   assert.equal(html.includes("@keyframes arbor-lattice-commit"), false);
   assert.equal(html.includes("@keyframes composer-lattice-receive"), false);
   assert.equal(html.includes("function updateArborTaskLattice"), false);
@@ -164,7 +191,12 @@ test("panel HTML defaults to Simplified Chinese labels and status text", () => {
   assert.equal(html.includes("height: 620px;"), true);
   assert.equal(html.includes("@media (max-width: 820px)"), false);
   assert.equal(html.includes("width: calc(100vw - 24px)"), false);
-  assert.equal(html.includes("按需调整模型、搜索和诊断，不打断当前会话。"), true);
+  assert.equal(html.includes("按需调整模型、搜索和诊断，不打断当前会话。"), false);
+  assert.equal(html.includes("模型</button>"), true);
+  assert.equal(html.includes("工作目录</button>"), true);
+  assert.equal(html.includes("工具</button>"), true);
+  assert.equal(html.includes("安全</button>"), true);
+  assert.equal(html.includes('data-settings-panel="workspace"'), true);
   assert.equal(html.includes("工作方式"), false);
   assert.equal(html.includes('class="mode-card-grid"'), false);
   assert.equal(html.includes("mode-card"), false);
@@ -178,14 +210,18 @@ test("panel HTML defaults to Simplified Chinese labels and status text", () => {
   assert.equal(html.includes('<option value="none">AI 禁用</option>'), true);
   assert.equal(html.includes('<option value="fake">Fake AI 测试模式</option>'), true);
   assert.equal(html.includes('<option value="openai-compatible">OpenAI-compatible 推荐</option>'), true);
-  assert.equal(html.includes("真实 AI 诊断"), true);
-  assert.equal(html.includes("模型 / 工具流"), true);
-  assert.equal(html.includes("运行树 / 父层综合"), true);
-  assert.equal(html.includes("模型服务失败、输出契约失败或配置边界会显示在这里。"), true);
-  assert.equal(html.includes("安全与调试"), true);
+  assert.equal(html.includes("真实 AI 诊断"), false);
+  assert.equal(html.includes("模型 / 工具流"), false);
+  assert.equal(html.includes("运行树 / 父层综合"), false);
+  assert.equal(html.includes("父层 synthesis"), false);
+  assert.equal(html.includes("模型服务失败、输出契约失败或配置边界会显示在这里。"), false);
+  assert.equal(html.includes("详情已放在诊断里"), false);
+  assert.equal(html.includes("检查诊断详情"), false);
+  assert.equal(html.includes("安全</button>"), true);
   assert.equal(html.includes("暂无对话"), true);
-  assert.equal(html.includes("模型配置"), true);
-  assert.equal(html.includes("工具配置"), true);
+  assert.equal(html.includes("模型"), true);
+  assert.equal(html.includes("工具"), true);
+  assert.equal(html.includes("工作目录"), true);
   assert.equal(html.includes("选择文件夹"), true);
   assert.equal(html.includes('id="selectWorkspaceDirectoryButton"'), true);
   assert.equal(html.includes('id="workspaceEmptySelectButton"'), true);
@@ -194,6 +230,11 @@ test("panel HTML defaults to Simplified Chinese labels and status text", () => {
   assert.equal(html.includes("搜索服务"), true);
   assert.equal(html.includes("保存工具配置"), true);
   assert.equal(html.includes("Tavily API Key"), true);
+  assert.equal(html.includes("调用工具"), false);
+  assert.equal(html.includes("搜索材料"), false);
+  assert.equal(html.includes("整理材料"), false);
+  assert.equal(html.includes("工具请求"), false);
+  assert.equal(html.includes("工具输出"), false);
   assert.equal(firstScreenHtml.includes("待启动 (pending)"), false);
   assert.equal(firstScreenHtml.includes("pending"), false);
   assert.equal(firstScreenHtml.includes("running"), false);
@@ -287,7 +328,7 @@ test("panel inline failure text does not remap provider failures to missing mode
   assert.equal(script.includes('lower.includes("模型名")'), false);
 });
 
-test("panel config API returns sanitized provider config and never echoes raw API key", async () => {
+test("panel config API exposes model provider key only in the configuration entry", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-config-"));
   const secret = "sk-panel-secret";
   const tavilySecret = "tvly-panel-secret";
@@ -317,7 +358,8 @@ test("panel config API returns sanitized provider config and never echoes raw AP
     assert.equal(config.status, 200);
     assert.equal(update.text.includes(secret), false);
     assert.equal(informationUpdate.text.includes(tavilySecret), false);
-    assert.equal(config.text.includes(secret), false);
+    assert.equal(config.text.includes(secret), true);
+    assert.equal(config.body.config.apiKey, secret);
     assert.equal(config.text.includes(tavilySecret), false);
     assert.equal(settingsRaw.includes(secret), false);
     assert.equal(settingsRaw.includes(tavilySecret), false);
@@ -760,6 +802,111 @@ test("desktop default fake run does not auto-upgrade complex requests into deep 
   }
 });
 
+test("desktop run stream carries safe tool detail through runtime persistence", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-desktop-tool-detail-"));
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-desktop-tool-detail-workspace-"));
+  const secret = "sk-tool-detail-secret";
+  const rawToolOutput = "RAW_TOOL_OUTPUT_SENTINEL must not reach panel stream or runtime persistence.";
+  await fs.writeFile(path.join(workspace, "notes.md"), rawToolOutput, "utf8");
+  let providerCalls = 0;
+  const providerFetch: PanelProviderFetch = async () => {
+    providerCalls += 1;
+    return providerCalls === 1
+      ? createOpenAiReadFileToolCallResponse("notes.md")
+      : createOpenAiTextResponse("desktop-tool-detail-model", "已读取授权文件并形成摘要。");
+  };
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory, providerFetch });
+  try {
+    await requestJson(server.url, "/api/config/model-provider", {
+      method: "POST",
+      body: {
+        baseUrl: "https://provider.example",
+        model: "desktop-tool-detail-model",
+        apiKey: secret,
+      },
+    });
+    await requestJson(server.url, "/api/config/workspace", {
+      method: "POST",
+      body: { workspaceDirectory: workspace },
+    });
+    const start = await requestJson(server.url, "/api/desktop/runs", {
+      method: "POST",
+      body: { goal: "读取 notes.md 并总结", aiMode: "openai-compatible" },
+    });
+    const completed = await waitForRun(
+      server.url,
+      start.body.runId,
+      (body) => body.status === "completed",
+      4_000,
+      "/api/desktop/runs"
+    );
+    const runtimeRun = await waitForRun(
+      server.url,
+      start.body.runId,
+      (body) =>
+        Array.isArray(body.snapshot?.toolCalls) &&
+        body.snapshot.toolCalls.some((call: { toolName?: string }) => call.toolName === "read_file"),
+      4_000,
+      "/api/runtime/runs"
+    );
+    const readEvent = completed.body.transcript.events.find(
+      (event: { type: string; toolName?: string }) => event.type === "tool.completed" && event.toolName === "read_file"
+    );
+    const persistedCall = runtimeRun.body.snapshot.toolCalls.find(
+      (call: { toolName?: string }) => call.toolName === "read_file"
+    );
+
+    assert.notEqual(readEvent, undefined);
+    assert.notEqual(persistedCall, undefined);
+    assert.equal(readEvent.detail?.kind, "tool");
+    assert.equal(readEvent.detail?.path, "notes.md");
+    assert.equal(typeof readEvent.detail?.preview, "string");
+    assert.equal((readEvent.detail?.preview ?? "").length > 0, true);
+    assert.equal(readEvent.detail?.preview?.includes(rawToolOutput), false);
+    assert.equal(persistedCall.path, "notes.md");
+    assert.equal(typeof persistedCall.preview, "string");
+    assert.equal((persistedCall.preview ?? "").length > 0, true);
+    assert.equal(persistedCall.preview.includes(rawToolOutput), false);
+    assert.equal(JSON.stringify(readEvent).includes("raw provider payload"), false);
+    assert.equal(completed.text.includes(rawToolOutput), false);
+    assert.equal(runtimeRun.text.includes(rawToolOutput), false);
+    assertSafePanelJsonText(completed.text);
+    assertSafePanelJsonText(runtimeRun.text);
+  } finally {
+    await server.close();
+    await fs.rm(directory, { recursive: true, force: true });
+    await fs.rm(workspace, { recursive: true, force: true });
+  }
+});
+
+
+test("panel stream ends completed runs with final result and no run failed event", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-completed-stream-terminal-"));
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+  try {
+    const start = await requestJson(server.url, "/api/desktop/runs", {
+      method: "POST",
+      body: { goal: "你好，你能做什么？", aiMode: "fake" },
+    });
+    const stream = await requestSse(server.url, `/api/desktop/runs/${encodeURIComponent(start.body.runId)}/stream?cursor=0`);
+    const completed = await waitForRun(
+      server.url,
+      start.body.runId,
+      (body) => body.status === "completed",
+      4_000,
+      "/api/desktop/runs"
+    );
+    const eventTypes = stream.events.map((event) => event.type);
+
+    assert.equal(completed.body.status, "completed");
+    assert.equal(eventTypes.at(-1), "final.result");
+    assert.equal(eventTypes.includes("run.failed"), false);
+  } finally {
+    await server.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("desktop async fake run answers capability questions without upgrading into project analysis", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-desktop-capability-answer-"));
   const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
@@ -848,6 +995,33 @@ test("conversation API creates a conversation and attaches the desktop run to as
     assert.equal(conversation.body.conversation.turns.length, 2);
     assert.equal(conversation.body.conversation.turns[1].runId, runId);
     assert.equal(conversation.body.conversation.turns[1].content.includes("我可以直接回答问题"), true);
+  } finally {
+    await server.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("conversation summaries mark confirmation runs as requiring user action", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-conversation-confirmation-"));
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+  try {
+    const start = await requestJson(server.url, "/api/conversations", {
+      method: "POST",
+      body: { goal: "帮我看看桌面文件", aiMode: "fake" },
+    });
+    const runId = start.body.run.runId;
+    const conversationId = start.body.conversation.conversationId;
+    await waitForRun(server.url, runId, (body) => body.status === "completed", 4_000, "/api/desktop/runs");
+    const conversations = await requestJson(server.url, "/api/conversations");
+    const conversation = await requestJson(server.url, `/api/conversations/${encodeURIComponent(conversationId)}`);
+    const summary = conversations.body.conversations.find(
+      (item: { conversationId: string }) => item.conversationId === conversationId
+    );
+
+    assert.equal(conversation.body.conversation.requiresUserAction, true);
+    assert.equal(summary?.requiresUserAction, true);
+    assert.equal(conversation.body.conversation.turns[1].title, "需要确认");
+    assert.equal(conversation.body.conversation.turns[1].content.includes("文件或文件夹"), true);
   } finally {
     await server.close();
     await fs.rm(directory, { recursive: true, force: true });
@@ -1011,6 +1185,8 @@ test("conversation and desktop run APIs recover safe history from RuntimeDatabas
     assert.equal(run.status, 200);
     assert.equal(run.body.restoredFromSnapshot, true);
     assert.equal(run.body.restoredResult.summary.includes("我可以直接回答问题"), true);
+    assert.equal(run.body.transcript.events.some((event: { type: string }) => event.type === "agent.note.delta"), false);
+    assert.equal(run.body.transcript.events.some((event: { type: string }) => event.type === "model.output.completed"), false);
     assert.equal(run.body.conversation.conversationId, conversationId);
     assert.equal(runtimeRun.body.snapshot.run.runId, runId);
     assertSafePanelJsonText(run.text);
@@ -1780,6 +1956,8 @@ test("desktop openai-compatible ordinary agent uses configured search tool befor
     assert.equal(tavilyFetchCalls, 1);
     assert.equal(completed.body.canvas.agent.answer.answer.includes("授权搜索结果"), true);
     assert.equal(completed.body.canvas.agent.toolCallRefs.includes("call-panel-search"), true);
+    assert.equal(completed.body.transcript.events.some((event: { type: string }) => event.type === "agent.note.delta"), true);
+    assert.equal(completed.body.transcript.events.some((event: { type: string }) => event.type === "model.output.completed"), true);
     assert.equal(completed.body.trace.events.some((event: { type: string }) => event.type === "tool.completed"), true);
     assert.equal(JSON.stringify(completed.body).includes(modelSecret), false);
     assert.equal(JSON.stringify(completed.body).includes(tavilySecret), false);
@@ -2536,6 +2714,35 @@ function createOpenAiSearchToolCallResponse(): Awaited<ReturnType<PanelProviderF
                     query: "AgentArbor configured panel search",
                     sources: ["web"],
                   }),
+                },
+              },
+            ],
+          },
+        },
+      ],
+    }),
+  };
+}
+
+function createOpenAiReadFileToolCallResponse(filePath = "README.md"): Awaited<ReturnType<PanelProviderFetch>> {
+  return {
+    ok: true,
+    status: 200,
+    json: async () => ({
+      model: "desktop-tool-detail-model",
+      choices: [
+        {
+          finish_reason: "tool_calls",
+          message: {
+            role: "assistant",
+            content: "",
+            tool_calls: [
+              {
+                id: "call-panel-read-file",
+                type: "function",
+                function: {
+                  name: "read_file",
+                  arguments: JSON.stringify({ path: filePath }),
                 },
               },
             ],

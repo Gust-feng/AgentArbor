@@ -325,10 +325,12 @@ async function handlePanelRequest(
   }
 
   if (request.method === "GET" && url.pathname === "/api/config") {
+    const config = await runtime.configCenter.getModelProviderConfig();
+    const apiKey = await runtime.configCenter.getModelProviderApiKey();
     writeJson(response, 200, {
       ok: true,
       status: "completed",
-      config: await runtime.configCenter.getModelProviderConfig(),
+      config: { ...config, apiKey: apiKey ?? "" },
       informationAccess: await runtime.configCenter.getInformationAccessConfig(),
       workspace: await runtime.configCenter.getWorkspaceConfig(),
     });
@@ -1159,6 +1161,8 @@ function createPersistedStreamEvents(
   snapshot: RuntimeRunSnapshot,
   status: PanelRunStatus
 ): readonly PanelRunStreamEvent[] {
+  const suppressOrdinaryChatProgress =
+    snapshot.run.runMode === "agent" && !hasPersistedUserVisibleWorkActivity(snapshot.events);
   const events: PanelRunStreamEvent[] = [
     {
       eventId: `${snapshot.run.runId}:restored:run.started`,
@@ -1175,20 +1179,28 @@ function createPersistedStreamEvents(
     },
   ];
   for (const record of snapshot.events) {
+    if (snapshot.run.runMode === "agent" && record.type === "goal.received") {
+      continue;
+    }
+    if (suppressOrdinaryChatProgress && shouldSuppressPersistedOrdinaryChatEvent(record.type)) {
+      continue;
+    }
     const streamType = streamTypeForRuntimeEvent(record.type);
     if (streamType === undefined) {
       continue;
     }
+    const toolCall = toolCallForPersistedEvent(record, snapshot.toolCalls);
     events.push({
       eventId: `${snapshot.run.runId}:restored:event:${record.sequence}:${streamType}`,
       runId: snapshot.run.runId,
       sequence: events.length + 1,
       type: streamType,
       createdAt: record.recordedAt,
-      agentLabel: streamType.startsWith("tool.") ? "工具" : "AgentArbor",
+      agentLabel: persistedStreamAgentLabel(streamType),
       summary: record.summary,
       status: streamStatusFor(streamType),
-      toolName: toolNameForPersistedEvent(record, snapshot.toolCalls),
+      toolName: toolCall?.toolName,
+      detail: toolCall === undefined ? undefined : persistedToolStreamDetail(toolCall),
       sourceRefs: record.refs
         .filter((ref) => ref.kind !== "model_call" && ref.kind !== "tool_call")
         .map((ref) => `${ref.kind}:${ref.id}`),
@@ -1227,6 +1239,44 @@ function createPersistedStreamEvents(
     });
   }
   return events;
+}
+
+function hasPersistedUserVisibleWorkActivity(events: readonly RuntimeEventRecord[]): boolean {
+  return events.some((event) => {
+    if (event.type === "tool.requested" || event.type === "tool.completed" || event.type === "tool.failed") {
+      return true;
+    }
+    if (event.type === "user_approval.requested" || event.type === "user_approval.received") {
+      return true;
+    }
+    return (
+      event.type === "agent.delegation.planned" ||
+      event.type === "agent.child.started" ||
+      event.type === "agent.child.completed" ||
+      event.type === "agent.child.waiting" ||
+      event.type === "agent.parent_synthesis.completed"
+    );
+  });
+}
+
+function shouldSuppressPersistedOrdinaryChatEvent(type: RuntimeEventRecord["type"]): boolean {
+  return type === "goal.received" || type === "model.requested" || type === "model.completed";
+}
+
+function persistedStreamAgentLabel(type: PanelRunStreamEvent["type"]): string {
+  if (type.startsWith("tool.")) {
+    return "工具";
+  }
+  if (type === "confirmation.needed") {
+    return "待确认";
+  }
+  if (type === "user.guidance") {
+    return "用户指导";
+  }
+  if (type === "agent.note.delta" || type === "agent.note.completed" || type === "model.output.completed") {
+    return "模型";
+  }
+  return "AgentArbor";
 }
 
 function panelStatusFromRuntimeStatus(status: RuntimeRunRecord["status"]): PanelRunStatus {
@@ -1359,18 +1409,35 @@ function streamStatusFor(type: PanelRunStreamEvent["type"]): NonNullable<PanelRu
   if (type === "tool.requested" || type === "agent.note.delta" || type === "agent.child.started" || type === "agent.child.waiting") {
     return "running";
   }
+  if (type === "confirmation.needed") {
+    return "pending";
+  }
   if (type === "tool.failed" || type === "run.failed") {
     return "failed";
   }
   return "completed";
 }
 
-function toolNameForPersistedEvent(
+function toolCallForPersistedEvent(
   event: RuntimeEventRecord,
   toolCalls: readonly RuntimeToolCallRecord[]
-): string | undefined {
+): RuntimeToolCallRecord | undefined {
   const toolRef = event.refs.find((ref) => ref.kind === "tool_call");
-  return toolRef === undefined ? undefined : toolCalls.find((call) => call.callId === toolRef.id)?.toolName;
+  return toolRef === undefined ? undefined : toolCalls.find((call) => call.callId === toolRef.id);
+}
+
+function persistedToolStreamDetail(call: RuntimeToolCallRecord): PanelRunStreamEvent["detail"] {
+  return {
+    kind: "tool",
+    action: call.action ?? call.toolName,
+    path: call.path,
+    query: call.query,
+    command: call.command,
+    exitCode: call.exitCode,
+    preview: call.error ?? call.preview ?? call.summary,
+    truncated: call.truncated,
+    error: call.error,
+  };
 }
 
 function countPersistedModelCalls(
@@ -1604,11 +1671,15 @@ function toRuntimeToolCallRecords(
         runId,
         toolName: event.toolName ?? previous?.toolName,
         status: mergeToolStatus(previous?.status, event.type),
-        action: detail?.action ?? previous?.action,
-        path: detail?.path ?? previous?.path,
-        summary: detail?.summary ?? previous?.summary,
-        truncated: detail?.truncated ?? previous?.truncated,
-        error: detail?.error ?? previous?.error,
+        action: event.detail?.action ?? detail?.action ?? previous?.action,
+        path: event.detail?.path ?? detail?.path ?? previous?.path,
+        query: event.detail?.query ?? detail?.query ?? previous?.query,
+        command: event.detail?.command ?? detail?.command ?? previous?.command,
+        exitCode: event.detail?.exitCode ?? detail?.exitCode ?? previous?.exitCode,
+        summary: detail?.summary ?? event.summary ?? previous?.summary,
+        preview: event.detail?.preview ?? detail?.preview ?? previous?.preview,
+        truncated: event.detail?.truncated ?? detail?.truncated ?? previous?.truncated,
+        error: event.detail?.error ?? detail?.error ?? previous?.error,
         eventRefs: unique([...(previous?.eventRefs ?? []), event.eventId]),
         createdAt: previous?.createdAt ?? event.createdAt,
       });
@@ -1619,8 +1690,8 @@ function toRuntimeToolCallRecords(
 
 function localToolDetailsByCallId(
   eventEntries: readonly EventLogEntry[]
-): Map<string, Pick<RuntimeToolCallRecord, "action" | "path" | "summary" | "truncated" | "error">> {
-  const details = new Map<string, Pick<RuntimeToolCallRecord, "action" | "path" | "summary" | "truncated" | "error">>();
+): Map<string, Pick<RuntimeToolCallRecord, "action" | "path" | "query" | "command" | "exitCode" | "summary" | "preview" | "truncated" | "error">> {
+  const details = new Map<string, Pick<RuntimeToolCallRecord, "action" | "path" | "query" | "command" | "exitCode" | "summary" | "preview" | "truncated" | "error">>();
   for (const entry of eventEntries) {
     if (entry.type !== "tool.completed" && entry.type !== "tool.failed") {
       continue;
@@ -1634,15 +1705,90 @@ function localToolDetailsByCallId(
     const input = asRecord(payload.input);
     const result = asRecord(output.result);
     const pathValue = optionalString(result.path) ?? optionalString(input.path);
+    const command = optionalString(result.command) ?? optionalString(input.command);
+    const args = Array.isArray(result.args) ? result.args : Array.isArray(input.args) ? input.args : [];
     details.set(callId, {
       action: optionalString(output.action) ?? optionalString(payload.toolName),
       path: pathValue,
+      query: optionalString(result.query) ?? optionalString(input.query),
+      command: command === undefined ? undefined : [command, ...args.filter((value): value is string => typeof value === "string")].join(" ").trim(),
+      exitCode: typeof result.exitCode === "number" ? result.exitCode : undefined,
       summary: optionalString(output.summary),
+      preview: persistedToolPreview(optionalString(payload.toolName), output, result, payload),
       truncated: output.truncated === true,
       error: optionalString(payload.error),
     });
   }
   return details;
+}
+
+function persistedToolPreview(
+  toolName: string | undefined,
+  output: Readonly<Record<string, unknown>>,
+  result: Readonly<Record<string, unknown>>,
+  payload: Readonly<Record<string, unknown>>
+): string | undefined {
+  const error = optionalString(payload.error);
+  if (error !== undefined) {
+    return compactRuntimeText(error, 800);
+  }
+  if (toolName === "read_file") {
+    return persistedReadFilePreview(output, result);
+  }
+  if (toolName === "list_dir") {
+    const entries = Array.isArray(result.entries) ? result.entries : [];
+    const lines = entries.slice(0, 12).map((entry) => {
+      const record = asRecord(entry);
+      const name = optionalString(record.name) ?? "unknown";
+      const kind = optionalString(record.kind) ?? "entry";
+      const bytes = typeof record.bytes === "number" ? ` · ${record.bytes} bytes` : "";
+      return `${kind} ${name}${bytes}`;
+    });
+    return lines.length === 0 ? optionalString(output.summary) : lines.join("\n");
+  }
+  if (toolName === "grep_files") {
+    const matches = Array.isArray(result.matches) ? result.matches : [];
+    const lines = matches.slice(0, 12).map((match) => {
+      const record = asRecord(match);
+      const path = optionalString(record.path) ?? "unknown";
+      const line = typeof record.line === "number" ? record.line : "?";
+      const preview = optionalString(record.preview) ?? "";
+      return `${path}:${line} ${preview}`;
+    });
+    return lines.length === 0 ? optionalString(output.summary) : lines.join("\n");
+  }
+  if (toolName === "run_command") {
+    return persistedCommandPreview(output, result);
+  }
+  return optionalString(output.summary);
+}
+
+function persistedReadFilePreview(
+  output: Readonly<Record<string, unknown>>,
+  result: Readonly<Record<string, unknown>>
+): string | undefined {
+  const summary = optionalString(output.summary);
+  const pathValue = optionalString(result.path);
+  const bytes = typeof result.bytes === "number" ? `${result.bytes} bytes` : undefined;
+  const headline = summary ?? [pathValue, bytes].filter((value): value is string => value !== undefined).join(" · ");
+  return compactRuntimeText(
+    `${headline || "文件已读取。"}\n文件正文已进入本轮授权上下文，普通面板只展示路径、大小和截断状态。`,
+    900
+  );
+}
+
+function persistedCommandPreview(
+  output: Readonly<Record<string, unknown>>,
+  result: Readonly<Record<string, unknown>>
+): string | undefined {
+  const summary = optionalString(output.summary);
+  const command = optionalString(result.command);
+  const exit = typeof result.exitCode === "number" ? `exit ${result.exitCode}` : undefined;
+  const headline = summary ?? [command, exit].filter((value): value is string => value !== undefined).join(" · ");
+  return compactRuntimeText(
+    `${headline || "命令已执行。"}\n命令输出只进入本轮工具结果上下文；普通面板不展开 stdout / stderr 原文。`,
+    900
+  );
 }
 
 function toRuntimeArtifactRecords(job: PanelRunJob): readonly RuntimeArtifactRecord[] {
@@ -1765,10 +1911,18 @@ function appendPanelRunStreamEvent(job: PanelRunJob, event: Omit<PanelRunStreamE
     : undefined;
   if (existing !== undefined) {
     if (event.type === "run.started") {
-      Object.assign(existing as { summary?: string; agentLabel?: string; status?: PanelRunStreamEvent["status"] }, {
+      Object.assign(existing as {
+        summary?: string;
+        agentLabel?: string;
+        status?: PanelRunStreamEvent["status"];
+        toolName?: string;
+        detail?: PanelRunStreamEvent["detail"];
+      }, {
         summary: event.summary,
         agentLabel: event.agentLabel,
         status: event.status,
+        toolName: event.toolName ?? existing.toolName,
+        detail: event.detail ?? existing.detail,
       });
     }
     return existing;

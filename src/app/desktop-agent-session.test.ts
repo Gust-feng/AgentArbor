@@ -87,6 +87,23 @@ test("Desktop Agent Session projects tool failures without leaking raw output", 
   assert.equal(result.runtime.eventLog.types().includes("agent.delegation.planned"), false);
 });
 
+
+test("Desktop Agent Session keeps a final answer when a previous tool failed and the model stops at round limit", async () => {
+  const toolCenter = new MixedToolCenter();
+  const channel = new MixedToolLimitChannel();
+  const result = await runDesktopAgentSession("展示下你的能力", {
+    aiMode: "fake",
+    createIntelligenceChannel: () => channel,
+    createToolCenter: () => toolCenter,
+  });
+
+  assert.equal(result.status, "completed");
+  assert.equal(result.answer?.answer.includes("我已经检查了工作区"), true);
+  assert.equal(result.answer?.answer.includes("轮次上限"), true);
+  assert.equal(result.eventTypes.includes("tool.failed"), true);
+  assert.equal(result.answer?.resultBlocks.some((block) => block.kind === "failure"), true);
+});
+
 test("Desktop Agent Session stops cleanly when AI is disabled", async () => {
   const result = await runDesktopAgentSession("你是什么模型？", { aiMode: "none" });
 
@@ -277,6 +294,113 @@ test("Desktop Agent Session drops provider control markup instead of rendering f
   assert.equal(result.answer?.answer.includes("准备调用工具"), false);
   assert.equal(result.answer?.answer.includes("我需要你先提供文件引用"), true);
 });
+
+class MixedToolLimitChannel implements IntelligenceChannel {
+  readonly requests: ModelRequest[] = [];
+
+  async request(request: ModelRequest) {
+    this.requests.push(request);
+    const responseBase = {
+      requestId: request.requestId,
+      providerId: "test-provider",
+      providerKind: "fake" as const,
+      protocolKind: "openai_compatible_chat_completions" as const,
+      model: "test-model",
+      status: "completed" as const,
+      outputKind: "explanation" as const,
+      validation: { status: "passed" as const, checkedAt: new Date(0).toISOString(), issues: [] },
+      completedAt: new Date(0).toISOString(),
+    };
+    if (this.requests.length === 1) {
+      return {
+        ...responseBase,
+        responseId: "model-response-mixed-1",
+        toolCalls: [
+          { callId: "call-list", toolName: "list_dir", input: { path: "." } },
+          { callId: "call-missing", toolName: "list_dir", input: { path: "memory://artifacts" } },
+        ],
+        finishReason: "tool_call" as const,
+      };
+    }
+    if (this.requests.length === 2) {
+      return {
+        ...responseBase,
+        responseId: "model-response-mixed-2",
+        toolCalls: [{ callId: "call-read", toolName: "read_file", input: { path: "capability_report.md" } }],
+        finishReason: "tool_call" as const,
+      };
+    }
+    if (this.requests.length === 3) {
+      return {
+        ...responseBase,
+        responseId: "model-response-mixed-3",
+        toolCalls: [{ callId: "call-grep", toolName: "grep_files", input: { path: ".", query: "AgentArbor" } }],
+        finishReason: "tool_call" as const,
+      };
+    }
+    return {
+      ...responseBase,
+      responseId: "model-response-mixed-final",
+      textOutput: "我已经检查了工作区并形成能力概览。",
+      toolCalls: [{ callId: "call-extra", toolName: "read_file", input: { path: "extra.md" } }],
+      finishReason: "tool_call" as const,
+    };
+  }
+
+  validateResponse() {
+    return { status: "passed" as const, checkedAt: new Date(0).toISOString(), issues: [] };
+  }
+}
+
+class MixedToolCenter implements ToolExecutionBroker {
+  list(): ToolDefinition[] {
+    return [
+      { name: "list_dir", description: "List files.", inputSchema: { type: "object", properties: { path: { type: "string" } } } },
+      { name: "read_file", description: "Read file.", inputSchema: { type: "object", properties: { path: { type: "string" } } } },
+      { name: "grep_files", description: "Search files.", inputSchema: { type: "object", properties: { path: { type: "string" }, query: { type: "string" } } } },
+    ];
+  }
+
+  has(name: string): boolean {
+    return ["list_dir", "read_file", "grep_files"].includes(name);
+  }
+
+  async execute(request: ToolCallRequest): Promise<ToolCallResult> {
+    const input = request.input as { path?: string; query?: string };
+    if (input.path === "memory://artifacts") {
+      return {
+        callId: request.callId,
+        toolName: request.toolName,
+        input: request.input,
+        output: { action: request.toolName, status: "failed", summary: "memory://artifacts 不存在。" },
+        status: "failed",
+        error: "ENOENT: no such file or directory",
+        durationMs: 0,
+      };
+    }
+    return {
+      callId: request.callId,
+      toolName: request.toolName,
+      input: request.input,
+      output: {
+        action: request.toolName,
+        status: "completed",
+        refId: `workspace:${request.toolName}:${input.path ?? input.query ?? "ok"}`,
+        summary: `${request.toolName}: ${input.path ?? input.query ?? "ok"}`,
+        result: { path: input.path, query: input.query },
+        truncated: false,
+      },
+      status: "completed",
+      durationMs: 0,
+    };
+  }
+
+  resetCallCount(): void {}
+
+  getCallCount(): number {
+    return 0;
+  }
+}
 
 class LocalToolChannel implements IntelligenceChannel {
   readonly requests: ModelRequest[] = [];

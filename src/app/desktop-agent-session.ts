@@ -206,7 +206,8 @@ export async function runDesktopAgentSession(
 
   const modelCallRefs = refsFromResponse(turn.finalOutput, turn.modelRequestId, turn.modelResponseId);
   const toolCallRefs = refsFromToolCalls(turn.toolCalls);
-  if (turn.status !== "completed" || turn.finalOutput === undefined || turn.finalOutput.status !== "completed") {
+  const recoverableBudgetStop = isRecoverableBudgetStop(turn);
+  if ((turn.status !== "completed" && !recoverableBudgetStop) || turn.finalOutput === undefined || turn.finalOutput.status !== "completed") {
     return {
       status: "failed",
       runtime,
@@ -221,7 +222,7 @@ export async function runDesktopAgentSession(
     };
   }
 
-  const answer = parseAnswer(turn.finalOutput, turn.toolCalls);
+  const answer = parseAnswer(turn.finalOutput, turn.toolCalls, turn.stoppedReason);
   const evidenceRefs = evidenceRefsFromToolCalls(turn.toolCalls);
   const pendingConfirmation = pendingConfirmationFrom({
     goal,
@@ -296,7 +297,24 @@ function desktopAgentOutputContract(): ModelOutputContract {
   };
 }
 
-function parseAnswer(response: ModelResponse, toolCalls: readonly ToolCallResult[]): string {
+function isRecoverableBudgetStop(turn: Awaited<ReturnType<AgentTurnRuntime["execute"]>>): boolean {
+  return (
+    (turn.stoppedReason === "max_model_rounds" || turn.stoppedReason === "max_tool_rounds") &&
+    turn.finalOutput !== undefined &&
+    turn.finalOutput.status === "completed" &&
+    (visibleAnswerText(turn.finalOutput).trim().length > 0 || turn.toolCalls.some((call) => call.status === "completed"))
+  );
+}
+
+function visibleAnswerText(response: ModelResponse): string {
+  return typeof response.textOutput === "string" && response.textOutput.trim().length > 0
+    ? response.textOutput.trim()
+    : typeof response.structuredOutput === "string" && response.structuredOutput.trim().length > 0
+      ? response.structuredOutput.trim()
+      : "";
+}
+
+function parseAnswer(response: ModelResponse, toolCalls: readonly ToolCallResult[], stoppedReason?: string): string {
   const text =
     typeof response.textOutput === "string" && response.textOutput.trim().length > 0
       ? response.textOutput.trim()
@@ -310,8 +328,11 @@ function parseAnswer(response: ModelResponse, toolCalls: readonly ToolCallResult
     return "我现在没有形成可展示的回答。";
   }
   const visible = sanitizeVisibleAssistantAnswer(text);
+  const suffix = stoppedReason === "max_model_rounds" || stoppedReason === "max_tool_rounds"
+    ? "\n\n注：本轮已经到达工具/模型轮次上限；我已根据已获得的材料给出当前结果。"
+    : "";
   return visible.length > 0
-    ? safeText(visible, 12000)
+    ? safeText(`${visible}${suffix}`, 12000)
     : "我识别到这条消息需要更多上下文或授权，但当前回合没有形成可展示正文。";
 }
 

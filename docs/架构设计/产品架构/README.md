@@ -6,8 +6,9 @@
 
 此目录保存 AgentArbor 产品的核心架构决策，包括：
 
-- 桌面通用 Agent：Desktop Shell、Task Soil、Main Canvas、Artifact Area 和 Observation Panel。
-- 双运行时：Underground Cognitive Runtime 与 Aboveground Execution Runtime 共享 Shared Agent Kernel，但业务语义不同。
+- 桌面基础 Agent：当前默认实现路线是 Desktop Basic Agent Runtime、工具系统、安全确认、运行事件、持久化和工作台。
+- 桌面通用 Agent 长期愿景：Desktop Shell、Task Soil、Main Canvas、Artifact Area 和 Observation Panel。
+- 双运行时：Underground Cognitive Runtime 与 Aboveground Execution Runtime 共享 Shared Agent Kernel，但当前只作为 deep / advanced / compatibility 路径显式启用。
 - Plan：地下到地上的产品级交接对象；`.agentarbor` 只作为 Plan Package 的实现/存储形态。
 - 智能体体系：Agent Fabric、动态派生 child agent、父层 synthesis / convergence 和权限边界。
 - 治理回流：Run Memory、Experience Candidate、Governance Pipeline、Capability Asset、Path Bias 和 Global Soil。
@@ -19,6 +20,7 @@
 
 ## 当前决策
 
+- [ADR-0024-桌面基础Agent与基础设施优先路线.md](ADR-0024-桌面基础Agent与基础设施优先路线.md)：当前活跃实现路线，规定默认先建设桌面基础 Agent、工具系统、安全确认、事件重放、RuntimeDatabase、Skills 最小闭环和工作台信息架构；ADR-0022 保留长期愿景。
 - [ADR-0022-AgentArbor桌面通用Agent与双运行时架构.md](ADR-0022-AgentArbor桌面通用Agent与双运行时架构.md)：当前产品架构事实源，定义 `Desktop Shell -> Task Soil -> Underground Cognitive Runtime -> Plan -> Aboveground Execution Runtime -> Fruits -> Governance Pipeline -> Global Soil`。
 - [ADR-0018-AgentArbor原生概念树架构.md](ADR-0018-AgentArbor原生概念树架构.md)：历史概念树架构，已被 ADR-0022 部分取代；保留植物学职责边界和术语来源。
 - [ADR-0013-内核自研与协议适配边界.md](ADR-0013-内核自研与协议适配边界.md)：规定 AgentArbor 内部运行时使用自研消息、状态、路由和治理骨架，外部协议只通过 adapter 接入。

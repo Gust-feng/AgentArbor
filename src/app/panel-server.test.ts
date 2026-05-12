@@ -55,7 +55,7 @@ test("panel HTML defaults to Simplified Chinese labels and status text", () => {
   assert.equal(firstScreenHtml.includes('id="homeRecentResults"'), false);
   assert.equal(firstScreenHtml.includes('id="homeActionList"'), false);
   assert.equal(firstScreenHtml.includes("技能"), true);
-  assert.equal(firstScreenHtml.includes("例行任务"), true);
+  assert.equal(firstScreenHtml.includes("例行任务"), false);
   assert.equal(firstScreenHtml.includes("工具"), true);
   assert.equal(firstScreenHtml.includes("设置"), true);
   assert.equal(firstScreenHtml.includes("最近对话"), false);
@@ -204,6 +204,11 @@ test("panel HTML defaults to Simplified Chinese labels and status text", () => {
   assert.equal(html.includes("深入处理"), true);
   assert.equal(html.includes('dom.runButton.addEventListener("click", () => startRun("agent"))'), true);
   assert.equal(html.includes('dom.deepRunButton.addEventListener("click", () => startRun("deep"))'), true);
+  assert.equal(html.includes('id="cancelRunButton"'), true);
+  assert.equal(html.includes('"/api/basic-agent/runs/"'), true);
+  assert.equal(html.includes('"/cancel"'), true);
+  assert.equal(html.includes('"/events?cursor="'), true);
+  assert.equal(html.includes('"/confirmations/"'), true);
   assert.equal(html.includes("mode-deep"), true);
   assert.equal(html.includes("需要确认"), true);
   assert.equal(html.includes("证据"), true);
@@ -316,16 +321,14 @@ test("panel assistant markdown renderer builds safe DOM nodes", () => {
   assert.equal(script.includes("container.textContent = String(text || \"\")"), false);
 });
 
-test("panel inline failure text does not remap provider failures to missing model config", () => {
+test("panel inline failure text keeps provider raw details out of ordinary UI", () => {
   const html = createPanelHtml();
   const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1] ?? "";
-  const providerFailureGuard = script.indexOf('text.includes("模型服务这次没有返回可用结果")');
-  const missingModelGuard = script.indexOf('lower.includes("missing_model")');
 
-  assert.notEqual(providerFailureGuard, -1);
-  assert.notEqual(missingModelGuard, -1);
-  assert.equal(providerFailureGuard < missingModelGuard, true);
-  assert.equal(script.includes('lower.includes("模型名")'), false);
+  assert.equal(script.includes("function friendlyFailureText(value)"), true);
+  assert.equal(script.includes("return compact(cleanFailureDetail(text), 400)"), false);
+  assert.equal(script.includes("模型返回的内容没有通过本轮格式检查"), true);
+  assert.equal(script.includes("原始错误"), false);
 });
 
 test("panel config API exposes model provider key only in the configuration entry", async () => {
@@ -862,14 +865,29 @@ test("desktop run stream carries safe tool detail through runtime persistence", 
     assert.equal(readEvent.detail?.path, "notes.md");
     assert.equal(typeof readEvent.detail?.preview, "string");
     assert.equal((readEvent.detail?.preview ?? "").length > 0, true);
+    assert.equal(readEvent.detail?.preview?.includes("notes.md"), true);
+    assert.equal(readEvent.detail?.preview?.includes("文件正文只进入本轮工具上下文"), true);
     assert.equal(readEvent.detail?.preview?.includes(rawToolOutput), false);
     assert.equal(persistedCall.path, "notes.md");
     assert.equal(typeof persistedCall.preview, "string");
     assert.equal((persistedCall.preview ?? "").length > 0, true);
+    assert.equal(persistedCall.preview.includes("notes.md"), true);
+    assert.equal(persistedCall.preview.includes("文件正文只进入本轮工具上下文"), true);
     assert.equal(persistedCall.preview.includes(rawToolOutput), false);
     assert.equal(JSON.stringify(readEvent).includes("raw provider payload"), false);
     assert.equal(completed.text.includes(rawToolOutput), false);
     assert.equal(runtimeRun.text.includes(rawToolOutput), false);
+    const basicEvents = await requestJson(
+      server.url,
+      `/api/basic-agent/runs/${encodeURIComponent(start.body.runId)}/events?cursor=0`
+    );
+    assert.equal(
+      basicEvents.body.events.some((event: { type: string; summary?: string }) =>
+        event.type === "tool.completed" && (event.summary ?? "").includes("notes.md")
+      ),
+      true
+    );
+    assert.equal(JSON.stringify(basicEvents.body.events).includes(rawToolOutput), false);
     assertSafePanelJsonText(completed.text);
     assertSafePanelJsonText(runtimeRun.text);
   } finally {
@@ -1014,14 +1032,51 @@ test("conversation summaries mark confirmation runs as requiring user action", a
     await waitForRun(server.url, runId, (body) => body.status === "completed", 4_000, "/api/desktop/runs");
     const conversations = await requestJson(server.url, "/api/conversations");
     const conversation = await requestJson(server.url, `/api/conversations/${encodeURIComponent(conversationId)}`);
+    const runtimeRun = await waitForRun(
+      server.url,
+      runId,
+      (body) => Array.isArray(body.snapshot?.confirmations) && body.snapshot.confirmations.length > 0,
+      4_000,
+      "/api/runtime/runs"
+    );
     const summary = conversations.body.conversations.find(
       (item: { conversationId: string }) => item.conversationId === conversationId
     );
+    const confirmation = runtimeRun.body.snapshot.confirmations[0];
 
     assert.equal(conversation.body.conversation.requiresUserAction, true);
     assert.equal(summary?.requiresUserAction, true);
     assert.equal(conversation.body.conversation.turns[1].title, "需要确认");
     assert.equal(conversation.body.conversation.turns[1].content.includes("文件或文件夹"), true);
+    assert.equal(confirmation.status, "pending");
+    assert.equal(confirmation.riskLevel, "medium");
+    assert.equal(confirmation.actionSummary.includes("请选择要读取的文件"), true);
+    assert.equal(JSON.stringify(runtimeRun.body.snapshot.confirmations).includes("sk-"), false);
+  } finally {
+    await server.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("panel skills route returns real discovered SKILL metadata only", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-skills-"));
+  const skillRoot = path.join(directory, "skills");
+  const skillDir = path.join(skillRoot, "safe-skill");
+  await fs.mkdir(skillDir, { recursive: true });
+  await fs.writeFile(
+    path.join(skillDir, "SKILL.md"),
+    "---\nname: Safe Skill\ndescription: Helps with safe summaries.\ntriggers: [summary]\n---\n\n# Safe Skill\n\nBODY_SENTINEL",
+    "utf8"
+  );
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory, skillRoots: [skillRoot] });
+  try {
+    const response = await requestJson(server.url, "/api/skills");
+
+    assert.equal(response.status, 200);
+    assert.equal(response.body.skills.length, 1);
+    assert.equal(response.body.skills[0].name, "Safe Skill");
+    assert.deepEqual(response.body.skills[0].triggers, ["summary"]);
+    assert.equal(JSON.stringify(response.body.skills).includes("BODY_SENTINEL"), false);
   } finally {
     await server.close();
     await fs.rm(directory, { recursive: true, force: true });
@@ -1199,12 +1254,36 @@ test("conversation and desktop run APIs recover safe history from RuntimeDatabas
 
 test("conversation API queues follow-up while the same conversation is still running", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-conversation-queue-"));
-  const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+  const secret = "sk-conversation-queue-secret";
+  let releaseFetch: (() => void) | undefined;
+  const fetchGate = new Promise<void>((resolve) => {
+    releaseFetch = resolve;
+  });
+  const providerFetch: PanelProviderFetch = async () => {
+    await fetchGate;
+    return createOpenAiTextResponse("conversation-queue-model", "第一轮已经完成。");
+  };
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory, providerFetch });
   try {
+    await requestJson(server.url, "/api/config/model-provider", {
+      method: "POST",
+      body: {
+        baseUrl: "https://provider.example",
+        model: "conversation-queue-model",
+        apiKey: secret,
+      },
+    });
     const first = await requestJson(server.url, "/api/conversations", {
       method: "POST",
-      body: { goal: "分析当前仓库的问题并给我优化建议", aiMode: "fake", runMode: "deep" },
+      body: { goal: "先回答第一轮", aiMode: "openai-compatible" },
     });
+    await waitForRun(
+      server.url,
+      first.body.run.runId,
+      (body) => body.status === "running" && body.trace.events.some((event: { type: string }) => event.type === "model.requested"),
+      4_000,
+      "/api/desktop/runs"
+    );
     const queued = await requestJson(
       server.url,
       `/api/conversations/${encodeURIComponent(first.body.conversation.conversationId)}/messages`,
@@ -1226,6 +1305,7 @@ test("conversation API queues follow-up while the same conversation is still run
     assert.equal(duringFirst.body.conversation.turns[2].status, "pending");
     assert.equal(duringFirst.body.conversation.turns[3].status, "pending");
 
+    releaseFetch?.();
     await waitForRun(server.url, first.body.run.runId, (body) => body.status === "completed", 4_000, "/api/desktop/runs");
     const completedQueued = await waitForRun(
       server.url,
@@ -1246,6 +1326,7 @@ test("conversation API queues follow-up while the same conversation is still run
     assert.equal(conversation.body.conversation.turns[2].status, "completed");
     assert.equal(conversation.body.conversation.turns[3].status, "completed");
   } finally {
+    releaseFetch?.();
     await server.close();
     await fs.rm(directory, { recursive: true, force: true });
   }
@@ -1490,6 +1571,7 @@ test("conversation follow-up after a provider failure does not feed internal ids
     assert.equal(/\bmodel-request-\d+\b/.test(followupPrompt), false);
     assert.equal(followupPrompt.includes("当前任务"), false);
     assert.equal(visibleConversation.includes("OpenAI-compatible provider returned HTTP 400"), false);
+    assert.equal(visibleConversation.includes("HTTP 400"), false);
     assert.equal(/\bgoal-\d+\b/.test(visibleConversation), false);
     assert.equal(visibleConversation.includes(secret), false);
   } finally {
@@ -2205,15 +2287,344 @@ test("panel run stream cursor resumes without repeating older events", async () 
     const completed = await waitForRun(server.url, start.body.runId, (body) => body.status === "completed");
     const cursor = completed.body.transcript.events[1].sequence;
     const stream = await requestSse(server.url, `/api/underground/runs/${encodeURIComponent(start.body.runId)}/stream?cursor=${cursor}`);
+    const basicEvents = await requestJson(
+      server.url,
+      `/api/basic-agent/runs/${encodeURIComponent(start.body.runId)}/events?cursor=${cursor}`
+    );
 
     assert.equal(stream.status, 200);
     assert.equal(stream.events.length > 0, true);
     assert.equal(stream.events.some((event) => event.sequence <= cursor), false);
     assert.equal(new Set(stream.events.map((event) => event.sequence)).size, stream.events.length);
     assert.equal(stream.events.some((event) => event.type === "final.result"), true);
+    assert.equal(basicEvents.status, 200);
+    assert.equal(basicEvents.body.cursor.lastSequence >= cursor, true);
+    assert.equal(basicEvents.body.events.length > 0, true);
+    assert.equal(basicEvents.body.events.some((event: { sequence: number }) => event.sequence <= cursor), false);
+    assert.equal(basicEvents.body.events.some((event: { type: string }) => event.type === "final.result"), true);
+    assert.equal(JSON.stringify(basicEvents.body.events).includes("raw provider response"), false);
   } finally {
     await server.close();
     await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("basic agent events endpoint derives completed events without a prior run read", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-basic-events-direct-"));
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+  try {
+    const start = await requestJson(server.url, "/api/desktop/runs", {
+      method: "POST",
+      body: { goal: "直接回答一个普通问题", aiMode: "fake" },
+    });
+    const basicEvents = await waitForBasicEvents(
+      server.url,
+      start.body.runId,
+      (body) => body.events.some((event: { type: string }) => event.type === "final.result")
+    );
+
+    assert.equal(basicEvents.status, 200);
+    assert.equal(basicEvents.body.cursor.lastSequence > 0, true);
+    assert.equal(basicEvents.body.events[0].type, "run.started");
+    assert.equal(basicEvents.body.events.some((event: { type: string }) => event.type === "final.result"), true);
+    assert.equal(JSON.stringify(basicEvents.body.events).includes("raw provider response"), false);
+    assertSafePanelJsonText(basicEvents.text);
+  } finally {
+    await server.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("basic agent run endpoint returns the transport-neutral completed projection", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-basic-run-endpoint-"));
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+  try {
+    const start = await requestJson(server.url, "/api/desktop/runs", {
+      method: "POST",
+      body: { goal: "直接回答一个普通问题", aiMode: "fake" },
+    });
+    await waitForRun(server.url, start.body.runId, (body) => body.status === "completed", 4_000, "/api/desktop/runs");
+    const basicRun = await requestJson(server.url, `/api/basic-agent/runs/${encodeURIComponent(start.body.runId)}`);
+
+    assert.equal(basicRun.status, 200);
+    assert.equal(basicRun.body.run.runId, start.body.runId);
+    assert.equal(basicRun.body.run.status, "completed");
+    assert.equal(basicRun.body.run.runMode, "agent");
+    assert.equal(basicRun.body.run.requiresUserAction, false);
+    assert.equal(basicRun.body.run.eventCursor.lastSequence > 0, true);
+    assert.equal(JSON.stringify(basicRun.body).includes("sanitizedMessages"), false);
+    assertSafePanelJsonText(basicRun.text);
+  } finally {
+    await server.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("basic agent cancel API marks running desktop jobs as cancelled and replays terminal events", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-basic-cancel-"));
+  const secret = "sk-basic-cancel-secret";
+  let releaseFetch: (() => void) | undefined;
+  const fetchGate = new Promise<void>((resolve) => {
+    releaseFetch = resolve;
+  });
+  const providerFetch: PanelProviderFetch = async () => {
+    await fetchGate;
+    return createOpenAiTextResponse("basic-cancel-model", "This response arrived after cancellation.");
+  };
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory, providerFetch });
+  try {
+    await requestJson(server.url, "/api/config/model-provider", {
+      method: "POST",
+      body: {
+        baseUrl: "https://provider.example",
+        model: "basic-cancel-model",
+        apiKey: secret,
+      },
+    });
+    const start = await requestJson(server.url, "/api/desktop/runs", {
+      method: "POST",
+      body: { goal: "保持运行直到我取消", aiMode: "openai-compatible" },
+    });
+    await waitForRun(
+      server.url,
+      start.body.runId,
+      (body) => body.status === "running" && body.trace.events.some((event: { type: string }) => event.type === "model.requested"),
+      4_000,
+      "/api/desktop/runs"
+    );
+    const cancelled = await requestJson(
+      server.url,
+      `/api/basic-agent/runs/${encodeURIComponent(start.body.runId)}/cancel`,
+      { method: "POST" }
+    );
+    const basicEvents = await requestJson(
+      server.url,
+      `/api/basic-agent/runs/${encodeURIComponent(start.body.runId)}/events?cursor=0`
+    );
+    const stream = await requestSse(server.url, `/api/desktop/runs/${encodeURIComponent(start.body.runId)}/stream?cursor=0`);
+    const runtimeRun = await requestJson(server.url, `/api/runtime/runs/${encodeURIComponent(start.body.runId)}`);
+
+    assert.equal(cancelled.status, 200);
+    assert.equal(cancelled.body.run.status, "cancelled");
+    assert.equal(basicEvents.body.events.some((event: { type: string }) => event.type === "run.cancelled"), true);
+    assert.equal(stream.events.some((event) => event.type === "run.cancelled"), true);
+    assert.equal(runtimeRun.body.snapshot.run.status, "cancelled");
+    assert.equal(JSON.stringify(basicEvents.body.events).includes(secret), false);
+    assertSafePanelJsonText(`${cancelled.text}\n${basicEvents.text}\n${stream.text}\n${runtimeRun.text}`);
+  } finally {
+    releaseFetch?.();
+    await server.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("basic agent confirmation decisions persist approve and guidance outcomes safely", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-basic-confirmation-decisions-"));
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-basic-confirmation-workspace-"));
+  let providerFetchCalls = 0;
+  const providerFetch: PanelProviderFetch = async () => {
+    providerFetchCalls += 1;
+    return providerFetchCalls === 1
+      ? createOpenAiWriteFileToolCallResponse("approved.txt", "approved write content")
+      : createOpenAiTextResponse("basic-confirmation-model", "文件写入已完成，结果已整理。");
+  };
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory, providerFetch });
+  try {
+    await requestJson(server.url, "/api/config/model-provider", {
+      method: "POST",
+      body: {
+        baseUrl: "https://provider.example",
+        model: "basic-confirmation-model",
+        apiKey: "sk-basic-confirmation-secret",
+      },
+    });
+    await requestJson(server.url, "/api/config/workspace", {
+      method: "POST",
+      body: { workspaceDirectory: workspace },
+    });
+    const approveStart = await requestJson(server.url, "/api/desktop/runs", {
+      method: "POST",
+      body: { goal: "写入 approved.txt 测试确认续跑", aiMode: "openai-compatible" },
+    });
+    const approveCompleted = await waitForRun(
+      server.url,
+      approveStart.body.runId,
+      (body) => body.status === "completed" && body.canvas?.agent?.pendingConfirmation !== undefined,
+      4_000,
+      "/api/desktop/runs"
+    );
+    const approveConfirmationId = approveCompleted.body.canvas.agent.pendingConfirmation.confirmationId;
+    const approveDecision = await requestJson(
+      server.url,
+      `/api/basic-agent/runs/${encodeURIComponent(approveStart.body.runId)}/confirmations/${encodeURIComponent(approveConfirmationId)}/decision`,
+      { method: "POST", body: { decision: "approve_once" } }
+    );
+    const approveRuntime = await requestJson(server.url, `/api/runtime/runs/${encodeURIComponent(approveStart.body.runId)}`);
+    const approveEvents = await requestJson(
+      server.url,
+      `/api/basic-agent/runs/${encodeURIComponent(approveStart.body.runId)}/events?cursor=0`
+    );
+    const approvedFile = await fs.readFile(path.join(workspace, "approved.txt"), "utf8");
+
+    assert.equal(approveDecision.status, 200);
+    assert.equal(approveDecision.body.run.status, "completed");
+    assert.equal(approveRuntime.body.snapshot.confirmations[0].status, "approved");
+    assert.equal(approveRuntime.body.snapshot.toolCalls.some((call: { status: string }) => call.status === "completed"), true);
+    assert.equal(approveEvents.body.events.some((event: { type: string }) => event.type === "run.resumed"), true);
+    assert.equal(approveEvents.body.events.some((event: { type: string }) => event.type === "tool.completed"), true);
+    assert.equal(approvedFile, "approved write content");
+
+    const guidanceSecret = "sk-guidance-decision-secret";
+    const guidanceStart = await requestJson(server.url, "/api/desktop/runs", {
+      method: "POST",
+      body: { goal: "帮我看看本地文件", aiMode: "fake" },
+    });
+    const guidanceCompleted = await waitForRun(
+      server.url,
+      guidanceStart.body.runId,
+      (body) => body.status === "completed" && body.canvas?.agent?.pendingConfirmation !== undefined,
+      4_000,
+      "/api/desktop/runs"
+    );
+    const guidanceConfirmationId = guidanceCompleted.body.canvas.agent.pendingConfirmation.confirmationId;
+    const guidanceDecision = await requestJson(
+      server.url,
+      `/api/basic-agent/runs/${encodeURIComponent(guidanceStart.body.runId)}/confirmations/${encodeURIComponent(guidanceConfirmationId)}/decision`,
+      { method: "POST", body: { decision: "guidance", guidance: `先不要读取文件，只说明需要什么材料。${guidanceSecret}` } }
+    );
+    const guidanceRuntime = await requestJson(server.url, `/api/runtime/runs/${encodeURIComponent(guidanceStart.body.runId)}`);
+    const guidanceEvents = await requestJson(
+      server.url,
+      `/api/basic-agent/runs/${encodeURIComponent(guidanceStart.body.runId)}/events?cursor=0`
+    );
+
+    assert.equal(guidanceDecision.status, 200);
+    assert.equal(guidanceDecision.body.run.status, "needs_input");
+    assert.equal(guidanceRuntime.body.snapshot.confirmations[0].status, "guidance");
+    assert.equal(guidanceEvents.body.events.some((event: { type: string }) => event.type === "user.guidance"), true);
+    assert.equal(guidanceEvents.text.includes(guidanceSecret), false);
+    assert.equal(guidanceRuntime.text.includes(guidanceSecret), false);
+    assertSafePanelJsonText(`${approveDecision.text}\n${approveRuntime.text}\n${approveEvents.text}\n${guidanceDecision.text}\n${guidanceRuntime.text}\n${guidanceEvents.text}`);
+  } finally {
+    await server.close();
+    await fs.rm(directory, { recursive: true, force: true });
+    await fs.rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("basic agent denied confirmation restores as blocked with safe replay after restart", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-basic-confirmation-deny-"));
+  let server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+  try {
+    const start = await requestJson(server.url, "/api/desktop/runs", {
+      method: "POST",
+      body: { goal: "帮我看看桌面文件", aiMode: "fake" },
+    });
+    const completed = await waitForRun(
+      server.url,
+      start.body.runId,
+      (body) => body.status === "completed" && body.canvas?.agent?.pendingConfirmation !== undefined,
+      4_000,
+      "/api/desktop/runs"
+    );
+    const confirmationId = completed.body.canvas.agent.pendingConfirmation.confirmationId;
+    const denied = await requestJson(
+      server.url,
+      `/api/basic-agent/runs/${encodeURIComponent(start.body.runId)}/confirmations/${encodeURIComponent(confirmationId)}/decision`,
+      { method: "POST", body: { decision: "deny" } }
+    );
+    const runtimeRun = await requestJson(server.url, `/api/runtime/runs/${encodeURIComponent(start.body.runId)}`);
+    const blockedEvents = await requestJson(
+      server.url,
+      `/api/basic-agent/runs/${encodeURIComponent(start.body.runId)}/events?cursor=0`
+    );
+
+    assert.equal(denied.status, 200);
+    assert.equal(denied.body.run.status, "blocked");
+    assert.equal(runtimeRun.body.snapshot.run.status, "blocked");
+    assert.equal(runtimeRun.body.snapshot.confirmations[0].status, "denied");
+    assert.equal(blockedEvents.body.events.some((event: { type: string }) => event.type === "user_approval.received"), true);
+    assert.equal(blockedEvents.body.events.some((event: { type: string }) => event.type === "run.blocked"), true);
+    assertSafePanelJsonText(`${denied.text}\n${runtimeRun.text}\n${blockedEvents.text}`);
+
+    await server.close();
+    server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+    const restoredRun = await requestJson(server.url, `/api/basic-agent/runs/${encodeURIComponent(start.body.runId)}`);
+    const restoredEvents = await requestJson(
+      server.url,
+      `/api/basic-agent/runs/${encodeURIComponent(start.body.runId)}/events?cursor=0`
+    );
+
+    assert.equal(restoredRun.status, 200);
+    assert.equal(restoredRun.body.run.status, "blocked");
+    assert.equal(restoredRun.body.run.requiresUserAction, true);
+    assert.equal(restoredEvents.body.events.some((event: { type: string }) => event.type === "run.blocked"), true);
+    assert.equal(restoredEvents.body.events.some((event: { type: string }) => event.type === "user_approval.received"), true);
+    assertSafePanelJsonText(`${restoredRun.text}\n${restoredEvents.text}`);
+  } finally {
+    await server.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("basic agent approve after restart blocks because executable continuation is not persisted", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-basic-confirmation-approve-restart-"));
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-basic-confirmation-approve-restart-workspace-"));
+  let server = await startLocalPanelServer({
+    port: 0,
+    configDirectory: directory,
+    providerFetch: async () => createOpenAiWriteFileToolCallResponse("restart-approved.txt", "must not be written"),
+  });
+  try {
+    await requestJson(server.url, "/api/config/model-provider", {
+      method: "POST",
+      body: {
+        baseUrl: "https://provider.example",
+        model: "basic-confirmation-model",
+        apiKey: "sk-restart-approval-secret",
+      },
+    });
+    await requestJson(server.url, "/api/config/workspace", {
+      method: "POST",
+      body: { workspaceDirectory: workspace },
+    });
+    const start = await requestJson(server.url, "/api/desktop/runs", {
+      method: "POST",
+      body: { goal: "写入 restart-approved.txt 测试重启后确认", aiMode: "openai-compatible" },
+    });
+    const completed = await waitForRun(
+      server.url,
+      start.body.runId,
+      (body) => body.status === "completed" && body.canvas?.agent?.pendingConfirmation !== undefined,
+      4_000,
+      "/api/desktop/runs"
+    );
+    const confirmationId = completed.body.canvas.agent.pendingConfirmation.confirmationId;
+
+    await server.close();
+    server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+    const approved = await requestJson(
+      server.url,
+      `/api/basic-agent/runs/${encodeURIComponent(start.body.runId)}/confirmations/${encodeURIComponent(confirmationId)}/decision`,
+      { method: "POST", body: { decision: "approve_once" } }
+    );
+    const restoredEvents = await requestJson(
+      server.url,
+      `/api/basic-agent/runs/${encodeURIComponent(start.body.runId)}/events?cursor=0`
+    );
+    const runtimeRun = await requestJson(server.url, `/api/runtime/runs/${encodeURIComponent(start.body.runId)}`);
+
+    assert.equal(approved.status, 200);
+    assert.equal(approved.body.run.status, "blocked");
+    assert.equal(runtimeRun.body.snapshot.run.status, "blocked");
+    assert.equal(runtimeRun.body.snapshot.confirmations[0].status, "approved");
+    assert.equal(restoredEvents.body.events.some((event: { type: string }) => event.type === "run.blocked"), true);
+    await assert.rejects(() => fs.readFile(path.join(workspace, "restart-approved.txt"), "utf8"));
+    assertSafePanelJsonText(`${approved.text}\n${restoredEvents.text}\n${runtimeRun.text}`);
+  } finally {
+    await server.close();
+    await fs.rm(directory, { recursive: true, force: true });
+    await fs.rm(workspace, { recursive: true, force: true });
   }
 });
 
@@ -2616,6 +3027,24 @@ async function waitForRun(
   throw new Error(`Timed out waiting for panel run ${runId}; last=${last?.text}`);
 }
 
+async function waitForBasicEvents(
+  baseUrl: string,
+  runId: string,
+  predicate: (body: any) => boolean,
+  timeoutMs = 4_000
+): Promise<RequestJsonResult> {
+  const startedAt = Date.now();
+  let last: RequestJsonResult | undefined;
+  while (Date.now() - startedAt < timeoutMs) {
+    last = await requestJson(baseUrl, `/api/basic-agent/runs/${encodeURIComponent(runId)}/events?cursor=0`);
+    if (predicate(last.body)) {
+      return last;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error(`Timed out waiting for basic agent events ${runId}; last=${last?.text}`);
+}
+
 function createStubOpenAiResponse(
   model: string,
   candidateOverrides: Record<string, unknown> = {}
@@ -2743,6 +3172,35 @@ function createOpenAiReadFileToolCallResponse(filePath = "README.md"): Awaited<R
                 function: {
                   name: "read_file",
                   arguments: JSON.stringify({ path: filePath }),
+                },
+              },
+            ],
+          },
+        },
+      ],
+    }),
+  };
+}
+
+function createOpenAiWriteFileToolCallResponse(filePath: string, content: string): Awaited<ReturnType<PanelProviderFetch>> {
+  return {
+    ok: true,
+    status: 200,
+    json: async () => ({
+      model: "basic-confirmation-model",
+      choices: [
+        {
+          finish_reason: "tool_calls",
+          message: {
+            role: "assistant",
+            content: "",
+            tool_calls: [
+              {
+                id: "call-panel-write-file",
+                type: "function",
+                function: {
+                  name: "write_file",
+                  arguments: JSON.stringify({ path: filePath, content }),
                 },
               },
             ],

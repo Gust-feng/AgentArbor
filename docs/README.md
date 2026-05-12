@@ -9,7 +9,7 @@
 - 架构设计：长期架构决策、协议边界、工作区结构和产品架构资料。
 - 任务看板：从 Trellis 任务状态生成的人类态势看板资产，不是计划源数据。
 
-当前产品架构事实源是 [ADR-0022-AgentArbor桌面通用Agent与双运行时架构](架构设计/产品架构/ADR-0022-AgentArbor桌面通用Agent与双运行时架构.md)。[ADR-0018-AgentArbor原生概念树架构](架构设计/产品架构/ADR-0018-AgentArbor原生概念树架构.md) 保留为历史架构基线和术语来源，但不再单独决定当前产品主线。
+当前长期产品架构事实源是 [ADR-0022-AgentArbor桌面通用Agent与双运行时架构](架构设计/产品架构/ADR-0022-AgentArbor桌面通用Agent与双运行时架构.md)；当前活跃实现路线是 [ADR-0024-桌面基础Agent与基础设施优先路线](架构设计/产品架构/ADR-0024-桌面基础Agent与基础设施优先路线.md)。[ADR-0018-AgentArbor原生概念树架构](架构设计/产品架构/ADR-0018-AgentArbor原生概念树架构.md) 保留为历史架构基线和术语来源，但不再单独决定当前产品主线。
 
 历史经验、推进记录、阶段计划、会话沉淀、草案包和准备包不再保留在 `docs/` 活跃知识面中。对未来开发没有直接架构或研究价值的材料应删除，避免干扰。
 
@@ -17,14 +17,15 @@
 
 1. AgentArbor 为什么是桌面通用 Agent，而不是聊天框、IDE 替代品或一次性脚手架。
 2. Desktop Shell 如何接收任务、文件、项目和网页上下文，并形成 Task Soil。
-3. Underground Cognitive Runtime 如何用 AI-first agent 协作完成目标成形、动态派生、父层综合、裁决、追问或停止。
-4. Plan / Plan Package 如何承接地下收束结果，并作为 Aboveground Execution Runtime 的可持久化输入。
-5. Aboveground Execution Runtime 如何按 Plan 进行文件修改、文档生成、原型制作、工具调用和验证。
-6. Observation Panel 如何展示安全投影，而不泄漏 raw prompt、raw provider response、raw tool output 或 hidden reasoning。
-7. Run Memory、Experience Candidate、Capability Asset 和 Path Bias 如何经过 Governance Pipeline 才能回流 Global Soil。
-8. Shared Agent Kernel、权限模型、工具边界和模型运行时如何共同防止工程边界替 agent 思考。
-9. 开发时必须遵守哪些工程规则。
-10. 哪些架构设计和研究资料可以作为后续设计输入。
+3. 当前 Desktop Basic Agent Runtime 如何完成直接回答、模型工具循环、确认、事件重放、会话持久化和 Skills 最小闭环。
+4. Underground Cognitive Runtime 如何作为 deep / advanced 路径，用 AI-first agent 协作完成目标成形、动态派生、父层综合、裁决、追问或停止。
+5. Plan / Plan Package 如何在长期架构中承接地下收束结果，并作为 Aboveground Execution Runtime 的可持久化输入。
+6. Aboveground Execution Runtime 如何按 Plan 进行文件修改、文档生成、原型制作、工具调用和验证。
+7. Observation Panel 和普通工作台如何展示安全投影，而不泄漏 raw prompt、raw provider response、raw tool output、stdout/stderr、文件正文或 hidden reasoning。
+8. Run Memory、Experience Candidate、Capability Asset 和 Path Bias 如何经过 Governance Pipeline 才能回流 Global Soil。
+9. Shared Agent Kernel、权限模型、工具边界和模型运行时如何共同防止工程边界替 agent 思考。
+10. 开发时必须遵守哪些工程规则。
+11. 哪些架构设计和研究资料可以作为后续设计输入。
 
 ## 阅读顺序
 

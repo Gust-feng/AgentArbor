@@ -83,6 +83,41 @@ test("AgentTurnRuntime executes one tool round and returns final model output", 
   assert.deepEqual(eventLog.types(), ["tool.requested", "tool.completed"]);
 });
 
+test("AgentTurnRuntime returns approval_required and resumes with a matching confirmation", async () => {
+  const eventLog = new InMemoryEventLog();
+  const channel = new SequenceIntelligenceChannel([
+    toolCallResponse("model-request-test", "call-write", "write_file"),
+    completedResponse("model-request-final", { summary: "Final answer after approval." }),
+  ]);
+  const broker = new PermissionAwareToolBroker(["write_file"], { write_file: "read-write" });
+  const runtime = new AgentTurnRuntime({
+    intelligenceChannel: channel,
+    toolCenter: broker,
+    publishToolEvent: (message) => eventLog.append(message),
+  });
+
+  const paused = await runtime.execute(createTurnInput({
+    allowedTools: ["write_file"],
+    maxModelRounds: 3,
+  }));
+
+  assert.equal(paused.status, "approval_required");
+  assert.equal(paused.stoppedReason, "approval_required");
+  assert.equal(paused.pendingApproval?.confirmationId, "confirmation-call-write");
+  assert.equal(broker.executedCount, 0);
+  assert.deepEqual(eventLog.types(), ["tool.requested", "user_approval.requested"]);
+
+  const resumed = await runtime.resume({
+    pendingApproval: paused.pendingApproval!,
+    approvedConfirmationIds: ["confirmation-call-write"],
+  });
+
+  assert.equal(resumed.status, "completed");
+  assert.equal(resumed.stoppedReason, "completed");
+  assert.equal(resumed.toolCalls[0]?.status, "completed");
+  assert.equal(broker.executedCount, 1);
+});
+
 test("AgentTurnRuntime enforces tool and model round limits", async () => {
   const toolLimitRuntime = new AgentTurnRuntime({
     intelligenceChannel: new SequenceIntelligenceChannel([
@@ -218,13 +253,27 @@ class SequenceIntelligenceChannel implements IntelligenceChannel {
 class PermissionAwareToolBroker implements ToolExecutionBroker {
   executedCount = 0;
 
-  constructor(private readonly toolNames: readonly string[]) {}
+  constructor(
+    private readonly toolNames: readonly string[],
+    private readonly operationTypes: Readonly<Record<string, "read-only" | "read-write" | "execute" | "external-submit">> = {}
+  ) {}
 
   list(): ToolDefinition[] {
     return this.toolNames.map((name) => ({
       name,
       description: `${name} test tool`,
       inputSchema: { type: "object", properties: {} },
+      metadata: {
+        category: "other",
+        riskLevel: this.operationTypes[name] === undefined || this.operationTypes[name] === "read-only" ? "low" : "high",
+        operationType: this.operationTypes[name] ?? "read-only",
+        requiresConfirmation: false,
+        visibleResultPolicy: {
+          userVisible: "summary-only",
+          maxPreviewChars: 800,
+          omitRawOutput: true,
+        },
+      },
     }));
   }
 
@@ -242,6 +291,29 @@ class PermissionAwareToolBroker implements ToolExecutionBroker {
     }
     if (permission?.allowedTools !== undefined && !permission.allowedTools.includes(request.toolName)) {
       return failedToolResult(request, `Tool ${request.toolName} is not allowed.`);
+    }
+    const operationType = this.operationTypes[request.toolName] ?? "read-only";
+    const confirmationId = `confirmation-${request.callId}`;
+    if (operationType !== "read-only" && permission?.approvedConfirmationIds?.includes(confirmationId) !== true) {
+      return {
+        callId: request.callId,
+        toolName: request.toolName,
+        input: request.input,
+        output: undefined,
+        status: "approval_required",
+        error: `Tool ${request.toolName} requires approval.`,
+        durationMs: 0,
+        confirmationRequest: {
+          confirmationId,
+          runId: request.callId,
+          title: "需要确认",
+          actionSummary: `工具 ${request.toolName} 需要确认。`,
+          affectedResources: [],
+          riskLevel: "high",
+          requestedAt: nowIso(),
+          sourceRefs: [`tool:${request.callId}`],
+        },
+      };
     }
     this.executedCount += 1;
     return {

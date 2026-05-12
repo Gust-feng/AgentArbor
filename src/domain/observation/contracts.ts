@@ -56,6 +56,7 @@ export type RunStage =
   | "tool_requested"
   | "tool_completed"
   | "tool_failed"
+  | "skill_triggered"
   | "agent_delegation_planned"
   | "agent_child_started"
   | "agent_child_completed"

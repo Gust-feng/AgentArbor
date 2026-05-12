@@ -96,6 +96,12 @@ export const EVENT_OBSERVATION_METADATA = {
     phase: "underground",
     stage: "tool_failed",
   }),
+  "skill.triggered": metadata({
+    summary: "A desktop agent skill was matched and added as safe context.",
+    scope: "runtime",
+    phase: "underground",
+    stage: "skill_triggered",
+  }),
   "agent.delegation.planned": metadata({
     summary: "Underground parent agent planned child delegation.",
     scope: "underground",

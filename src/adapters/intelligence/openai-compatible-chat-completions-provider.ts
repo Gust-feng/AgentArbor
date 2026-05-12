@@ -4,6 +4,7 @@ import type {
   ModelOutputDelta,
   ModelProvider,
   ModelRequest,
+  ModelRequestOptions,
   ModelResponse,
   ModelToolChoice,
 } from "../../domain/intelligence/index.js";
@@ -18,6 +19,7 @@ export type FetchLike = (
     readonly method: "POST";
     readonly headers: Record<string, string>;
     readonly body: string;
+    readonly signal?: AbortSignal;
   }
 ) => Promise<FetchLikeResponse>;
 
@@ -61,7 +63,7 @@ export class OpenAICompatibleChatCompletionsProvider implements ModelProvider {
     this.onOutputDelta = options.onOutputDelta;
   }
 
-  async complete(request: ModelRequest): Promise<ModelResponse> {
+  async complete(request: ModelRequest, options: ModelRequestOptions = {}): Promise<ModelResponse> {
     const fetchImpl = this.fetchImpl ?? resolveGlobalFetch();
     if (fetchImpl === undefined) {
       return createFailedModelResponse({
@@ -95,6 +97,7 @@ export class OpenAICompatibleChatCompletionsProvider implements ModelProvider {
           authorization: `Bearer ${this.apiKey}`,
         },
         body: JSON.stringify(removeUndefinedValues(requestBody)),
+        signal: options.abortSignal,
       });
 
       if (!response.ok) {
@@ -135,6 +138,27 @@ export class OpenAICompatibleChatCompletionsProvider implements ModelProvider {
         latencyMs: Date.now() - startedAt,
       });
     } catch {
+      if (options.abortSignal?.aborted === true) {
+        return {
+          responseId: createId("model-response"),
+          requestId: request.requestId,
+          providerId: this.providerId,
+          providerKind: this.providerKind,
+          protocolKind: this.protocolKind,
+          model: this.model,
+          status: "cancelled",
+          outputKind: request.outputContract.outputKind,
+          finishReason: "error",
+          validation: pendingModelOutputValidation(),
+          failure: {
+            kind: "provider_network",
+            message: "OpenAI-compatible provider request was cancelled.",
+            retryable: false,
+            sanitizedErrorRef: "model-error:cancelled",
+          },
+          completedAt: nowIso(),
+        };
+      }
       return createFailedModelResponse({
         requestId: request.requestId,
         providerId: this.providerId,

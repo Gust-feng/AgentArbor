@@ -1,11 +1,19 @@
 import type { ModelMessage } from "../domain/intelligence/index.js";
+import type { SkillDefinition } from "../domain/basic-agent/index.js";
 import type { TaskSoil } from "../domain/soil/index.js";
 import type { DesktopAgentConversationMessage } from "./desktop-agent-session.js";
+
+export type DesktopAgentSkillContext = {
+  readonly skill: SkillDefinition;
+  readonly body: string;
+  readonly triggerReason: string;
+};
 
 export function desktopAgentMessages(input: {
   readonly goal: string;
   readonly taskSoil: TaskSoil;
   readonly conversationHistory: readonly DesktopAgentConversationMessage[];
+  readonly skillContexts?: readonly DesktopAgentSkillContext[];
 }): readonly ModelMessage[] {
   const history = input.conversationHistory
     .map((message, index): ModelMessage | undefined => {
@@ -27,6 +35,7 @@ export function desktopAgentMessages(input: {
       content: DESKTOP_AGENT_SYSTEM_PROMPT,
       ref: "prompt:desktop.agent_response.v1",
     },
+    ...skillMessages(input.skillContexts ?? []),
     ...history,
     {
       role: "user",
@@ -41,6 +50,19 @@ export function desktopAgentMessages(input: {
       ref: `goal:${input.taskSoil.goalId}`,
     },
   ];
+}
+
+function skillMessages(skills: readonly DesktopAgentSkillContext[]): readonly ModelMessage[] {
+  return skills.slice(0, 4).map((context) => ({
+    role: "system" as const,
+    content: [
+      `Triggered skill: ${safeText(context.skill.name, 120)}`,
+      `Why: ${safeText(context.triggerReason, 240)}`,
+      "Use these skill instructions when relevant. Do not mention internal skill loading unless the user asks.",
+      safeText(context.body, 4_000),
+    ].join("\n"),
+    ref: `skill:${context.skill.id}`,
+  }));
 }
 
 const DESKTOP_AGENT_SYSTEM_PROMPT = [

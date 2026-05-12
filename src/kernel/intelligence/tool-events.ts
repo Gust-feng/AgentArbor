@@ -60,7 +60,7 @@ export function createToolCompletedMessage(input: {
       callId: input.result.callId,
       toolName: input.result.toolName,
       input: toSafeToolEventSummaryValue(input.result.input),
-      output: toSafeToolEventSummaryValue(input.result.output),
+      output: toSafeToolEventSummaryValue(toProjectedToolEventOutput(input.result)),
       durationMs: input.result.durationMs,
     },
   });
@@ -89,12 +89,92 @@ export function createToolFailedMessage(input: {
   });
 }
 
+export function createToolApprovalRequiredMessage(input: {
+  readonly result: ToolCallResult;
+  readonly context: ToolExecutionContext;
+}): ArborMessage {
+  const confirmation = input.result.confirmationRequest;
+  return createMessage({
+    traceId: input.context.traceId,
+    from: { id: "tool-center", role: "runtime" },
+    to: { role: "runtime" },
+    type: "user_approval.requested",
+    intent: "request_tool_confirmation",
+    payload: {
+      traceId: input.context.traceId,
+      goalId: input.context.goalId,
+      callerAgentId: input.context.callerAgentId,
+      callId: input.result.callId,
+      toolName: input.result.toolName,
+      confirmationId: confirmation?.confirmationId ?? `confirmation-${input.result.callId}`,
+      title: confirmation?.title ?? "需要确认",
+      question: confirmation?.actionSummary ?? `工具 ${input.result.toolName} 需要确认后才能执行。`,
+      consequence: "批准后只允许继续本次对应工具操作；拒绝则不会执行该动作。",
+      riskLevel: confirmation?.riskLevel ?? "medium",
+      affectedResources: confirmation?.affectedResources ?? [],
+      sourceRefs: confirmation?.sourceRefs ?? [`tool:${input.result.callId}`],
+    },
+  });
+}
+
 export function toSafeToolEventValue(value: unknown): unknown {
   return truncateDeep(toJsonSafe(value), 0, { omitVerboseOutput: false });
 }
 
 function toSafeToolEventSummaryValue(value: unknown): unknown {
   return truncateDeep(toJsonSafe(value), 0, { omitVerboseOutput: true });
+}
+
+function toProjectedToolEventOutput(result: ToolCallResult): unknown {
+  if (result.projection === undefined) {
+    return result.output;
+  }
+  return {
+    action: result.toolName,
+    summary: result.projection.uiSummary,
+    diagnosticRef: result.projection.diagnosticRef,
+    result: safeToolResultEnvelope(result.output),
+    truncated: result.projection.truncated === true,
+    redacted: result.projection.redacted !== false,
+  };
+}
+
+function safeToolResultEnvelope(output: unknown): Readonly<Record<string, unknown>> | undefined {
+  const record = asRecord(output);
+  const result = asRecord(record.result);
+  if (Object.keys(result).length === 0) {
+    return undefined;
+  }
+  const entries = Array.isArray(result.entries)
+    ? result.entries.slice(0, 12).map((entry) => {
+        const entryRecord = asRecord(entry);
+        return {
+          name: typeof entryRecord.name === "string" ? entryRecord.name : undefined,
+          kind: typeof entryRecord.kind === "string" ? entryRecord.kind : undefined,
+          bytes: typeof entryRecord.bytes === "number" ? entryRecord.bytes : undefined,
+        };
+      })
+    : undefined;
+  const matches = Array.isArray(result.matches)
+    ? result.matches.slice(0, 12).map((match) => {
+        const matchRecord = asRecord(match);
+        return {
+          path: typeof matchRecord.path === "string" ? matchRecord.path : undefined,
+          line: typeof matchRecord.line === "number" ? matchRecord.line : undefined,
+        };
+      })
+    : undefined;
+  return {
+    path: typeof result.path === "string" ? result.path : undefined,
+    query: typeof result.query === "string" ? result.query : undefined,
+    command: typeof result.command === "string" ? result.command : undefined,
+    args: Array.isArray(result.args) ? result.args.filter((value): value is string => typeof value === "string") : undefined,
+    exitCode: typeof result.exitCode === "number" ? result.exitCode : undefined,
+    bytes: typeof result.bytes === "number" ? result.bytes : undefined,
+    entries,
+    matches,
+    totalEntries: typeof result.totalEntries === "number" ? result.totalEntries : undefined,
+  };
 }
 
 function toJsonSafe(value: unknown): unknown {
@@ -171,7 +251,12 @@ function isSecretLikeKey(key: string): boolean {
 function isVerboseToolOutputKey(key: string): boolean {
   const normalized = key.toLowerCase();
   return (
+    normalized === "content" ||
     normalized === "contentpreview" ||
+    normalized === "stdout" ||
+    normalized === "stderr" ||
+    normalized === "output" ||
+    normalized === "preview" ||
     normalized === "raw" ||
     normalized === "rawoutput" ||
     normalized === "rawresponse" ||
@@ -190,4 +275,8 @@ function isVerboseToolOutputKey(key: string): boolean {
 function isDerivedVerboseSummaryKey(key: string): boolean {
   const normalized = key.toLowerCase();
   return normalized === "summary" || normalized === "title";
+}
+
+function asRecord(value: unknown): Readonly<Record<string, unknown>> {
+  return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Readonly<Record<string, unknown>> : {};
 }

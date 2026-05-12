@@ -7,6 +7,17 @@ export function createResearchSearchTool(researchRuntime: InformationAccess): To
       name: "search",
       description:
         "Search AgentArbor information sources. Use this before read; returns research refs, source, status, and short snippets.",
+      metadata: {
+        category: "research",
+        riskLevel: "low",
+        operationType: "read-only",
+        requiresConfirmation: false,
+        visibleResultPolicy: {
+          userVisible: "summary-only",
+          maxPreviewChars: 800,
+          omitRawOutput: true,
+        },
+      },
       inputSchema: {
         type: "object",
         properties: {
@@ -21,12 +32,13 @@ export function createResearchSearchTool(researchRuntime: InformationAccess): To
         required: ["query"],
       },
     },
-    execute: async (input) => {
+    execute: async (input, context) => {
       const record = asRecord(input);
       return researchRuntime.search({
         query: stringOrFallback(record.query, ""),
         sources: informationSourcesOrUndefined(record.sources),
         limit: numberOrUndefined(record.limit),
+        abortSignal: context.abortSignal,
       });
     },
   };
@@ -38,6 +50,17 @@ export function createResearchReadTool(researchRuntime: InformationAccess): Tool
       name: "read",
       description:
         "Read a research ref, http/https URL, or repo file through ResearchRuntime. Returns safe summaries and truncated previews.",
+      metadata: {
+        category: "research",
+        riskLevel: "low",
+        operationType: "read-only",
+        requiresConfirmation: false,
+        visibleResultPolicy: {
+          userVisible: "safe-preview",
+          maxPreviewChars: 1200,
+          omitRawOutput: true,
+        },
+      },
       inputSchema: {
         type: "object",
         properties: {
@@ -51,12 +74,13 @@ export function createResearchReadTool(researchRuntime: InformationAccess): Tool
         required: ["ref"],
       },
     },
-    execute: async (input) => {
+    execute: async (input, context) => {
       const record = asRecord(input);
       return researchRuntime.read({
         ref: stringOrFallback(record.ref, ""),
         source: informationSourceOrUndefined(record.source),
         maxLength: numberOrUndefined(record.maxLength),
+        abortSignal: context.abortSignal,
       });
     },
   };

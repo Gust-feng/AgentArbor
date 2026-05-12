@@ -60,7 +60,7 @@
   - 不绕过 `IntelligenceChannel`、CandidatePool、Convergence Judge 或 Direction Handoff Package validation。
 - 默认不触发真实网络。
 - 只有用户显式选择 `openai-compatible` 且配置中心中 provider 配置完整时，才允许真实 provider 调用。
-- API key 不得进入 EventLog、Observation Snapshot、demo summary、HTTP 响应 JSON 或测试快照；面板可以提交新 key，但服务端响应只能返回 `secretConfigured: true/false`、secret ref 或更新时间。
+- API key 不得进入 EventLog、Observation Snapshot、demo summary、运行响应 JSON、会话、日志或测试快照；模型配置入口是明确例外，可以读回并展示真实模型 API key，便于用户检查本地配置。
 - 面板允许展示 **model visible output**：即经过 `outputContract` validation 且符合 `visibleOutput.fieldTypes` 展示策略的 `ModelResponse.structuredOutput` / `textOutput` 安全投影，或由这些输出生成的 rootlet outputs / candidates。这里的可见输出必须按 rootlet kind 展示结构化字段摘要，例如 option 的 summary / tradeoffs / applicability，risk 的 impactScope / severity / mitigation，asset_fit / evidence / constraint / counterfactual 的对应契约字段；字段过长必须截断并标注 truncated。
 - 面板仍禁止展示 provider raw response、完整 prompt、hidden reasoning、API key、token、raw sensitive error、runtime/store 引用、未经过 outputContract validation 的模型输出，或 rootlet app parser 会丢弃的候选字段。validation failed、provider failed、parser rejected 或 fallback 时只能展示失败原因、validation 状态、fallback 状态和安全引用，不得当作 approved model output 展示。
 - 面板不得写 repo-root `.agentarbor/` 运行资产；如后续需要导出，必须另开显式输出目录任务。

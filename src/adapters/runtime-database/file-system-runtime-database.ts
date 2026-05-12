@@ -1,9 +1,11 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import type { BasicAgentRun, RunEvent } from "../../domain/basic-agent/index.js";
 import type {
   RuntimeArtifactRecord,
   RuntimeConversationRecord,
   RuntimeDatabase,
+  RuntimeConfirmationRecord,
   RuntimeEventRecord,
   RuntimeModelCallRecord,
   RuntimeRunRecord,
@@ -80,6 +82,18 @@ export class FileSystemRuntimeDatabase implements RuntimeDatabase {
     return stored;
   }
 
+  async upsertBasicRun(record: BasicAgentRun): Promise<BasicAgentRun> {
+    const stored = cloneJson(record);
+    await writeJsonFile(this.basicRunPath(record.runId), stored);
+    return stored;
+  }
+
+  async replaceBasicRunEvents(runId: string, events: readonly RunEvent[]): Promise<readonly RunEvent[]> {
+    const stored = cloneJson(events);
+    await writeJsonlFile(this.runJsonlPath(runId, "basic-events.jsonl"), stored);
+    return stored;
+  }
+
   async replaceRunEvents(runId: string, events: readonly RuntimeEventRecord[]): Promise<readonly RuntimeEventRecord[]> {
     const stored = cloneJson(events);
     await writeJsonlFile(this.runJsonlPath(runId, "events.jsonl"), stored);
@@ -104,6 +118,15 @@ export class FileSystemRuntimeDatabase implements RuntimeDatabase {
     return stored;
   }
 
+  async replaceConfirmations(
+    runId: string,
+    confirmations: readonly RuntimeConfirmationRecord[]
+  ): Promise<readonly RuntimeConfirmationRecord[]> {
+    const stored = cloneJson(confirmations);
+    await writeJsonlFile(this.runJsonlPath(runId, "confirmations.jsonl"), stored);
+    return stored;
+  }
+
   async getRun(runId: string): Promise<RuntimeRunSnapshot | undefined> {
     const run = await readJsonFile<RuntimeRunRecord>(this.runPath(runId));
     if (run === undefined) {
@@ -116,10 +139,13 @@ export class FileSystemRuntimeDatabase implements RuntimeDatabase {
     return {
       run,
       workspace,
+      basicRun: await readJsonFile<BasicAgentRun>(this.basicRunPath(runId)),
+      basicEvents: await readJsonlFile<RunEvent>(this.runJsonlPath(runId, "basic-events.jsonl")),
       events: await readJsonlFile<RuntimeEventRecord>(this.runJsonlPath(runId, "events.jsonl")),
       modelCalls: await readJsonlFile<RuntimeModelCallRecord>(this.runJsonlPath(runId, "model-calls.jsonl")),
       toolCalls: await readJsonlFile<RuntimeToolCallRecord>(this.runJsonlPath(runId, "tool-calls.jsonl")),
       artifacts: await readJsonlFile<RuntimeArtifactRecord>(this.runJsonlPath(runId, "artifacts.jsonl")),
+      confirmations: await readJsonlFile<RuntimeConfirmationRecord>(this.runJsonlPath(runId, "confirmations.jsonl")),
     };
   }
 
@@ -156,6 +182,10 @@ export class FileSystemRuntimeDatabase implements RuntimeDatabase {
 
   private runPath(runId: string): string {
     return path.join(this.runDirectory(runId), "run.json");
+  }
+
+  private basicRunPath(runId: string): string {
+    return path.join(this.runDirectory(runId), "basic-run.json");
   }
 
   private runJsonlPath(runId: string, fileName: string): string {

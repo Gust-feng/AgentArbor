@@ -20,8 +20,8 @@
 - 工作流阶段、rootlet kind、模型调用追踪、EventLog 与 Observation Snapshot 都属于诊断 / Agents / 调试详情。普通 transcript 展示人类可理解活动，例如“正在阅读上下文”“正在整理证据”“正在生成报告”，不得直接显示 event type 或架构阶段。
 - 面板默认语言为简体中文。标题、表单标签、按钮、错误信息和状态标签必须用中文表达；`none`、`fake`、`openai-compatible`、EventLog type、phase / stage id 等稳定技术 id 可以保留，但必须配中文标签或摘要。
 - UI 视觉应偏成熟桌面助手：安静、克制、留白充分、输入框明确，避免深色大块标题、装饰性 hero、固定流程墙和卡片堆叠。宽屏下不重叠、不产生横向滚动，移动窄屏下改为单列。详情抽屉默认关闭，失败时可以提示打开诊断，但 Agents、设置和折叠调试区不得挤占主画布。
-- 目标输入使用 textarea；AI mode 和默认 AI mode 使用 select；API key 使用 password input 且提交后清空。
-- API key 不得以任何形式读回页面；只允许显示“密钥已配置 / 密钥未配置”这类脱敏状态。
+- 目标输入使用 textarea；AI mode 和默认 AI mode 使用 select；模型配置 API key 使用普通文本输入，加载和保存后保留当前真实值，便于用户检查本地配置。
+- 模型配置入口可以读回并展示真实模型 API key，便于用户检查和迁移本地配置；运行响应、会话、日志、工具输出、诊断、持久化记录和非配置入口仍只能展示“密钥已配置 / 密钥未配置”等安全状态。
 - 运行状态固定映射为 `pending / running / completed / failed`，普通首屏显示中文标签；技术 id 只在诊断、调试投影或测试契约中出现。错误摘要必须能展示配置失败、合约失败或模型调用失败的中文说明。
 - 运行跟踪必须来自 panel HTTP 的 canvas / trace / summary / Observation Snapshot / sanitized config 派生投影；前端不得维护第二套运行事实。首屏只消费这些投影中的用户级字段，诊断 / Agents / 调试详情才展示 phase / stage、等待点、模型事件计数、工具事件计数、可见输出、配置状态和安全 refs。
 - 诊断区必须展示模型配置状态、输出契约、模型 / 工具流、失败诊断和安全 refs。模型调用失败必须显示安全的 purpose、contract id、model、validation status、failure kind 和 call ref；不能只显示 `panel_internal_error`。

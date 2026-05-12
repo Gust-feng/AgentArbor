@@ -4,10 +4,43 @@ export type ToolInputSchema = {
   readonly required?: readonly string[];
 };
 
+export type ToolCategory = "research" | "workspace" | "filesystem" | "terminal" | "web" | "mcp" | "other";
+
+export type ToolRiskLevel = "low" | "medium" | "high";
+
+export type ToolOperationType =
+  | "read-only"
+  | "read-write"
+  | "execute"
+  | "external-submit";
+
+export type ToolVisibleResultPolicy = {
+  readonly userVisible: "summary-only" | "safe-preview" | "hidden";
+  readonly maxPreviewChars: number;
+  readonly omitRawOutput: boolean;
+};
+
+export type ToolDefinitionMetadata = {
+  readonly category: ToolCategory;
+  readonly riskLevel: ToolRiskLevel;
+  readonly operationType: ToolOperationType;
+  readonly requiresConfirmation: boolean;
+  readonly visibleResultPolicy: ToolVisibleResultPolicy;
+};
+
+export type ToolSafeProjection = {
+  readonly agentContent?: unknown;
+  readonly uiSummary?: string;
+  readonly diagnosticRef?: string;
+  readonly truncated?: boolean;
+  readonly redacted?: boolean;
+};
+
 export type ToolDefinition = {
   readonly name: string;
   readonly description: string;
   readonly inputSchema: ToolInputSchema;
+  readonly metadata?: ToolDefinitionMetadata;
 };
 
 export type ToolCallRequest = {
@@ -21,20 +54,24 @@ export type ToolCallResult = {
   readonly toolName: string;
   readonly input: unknown;
   readonly output: unknown;
-  readonly status: "completed" | "failed";
+  readonly status: "completed" | "failed" | "approval_required" | "cancelled";
   readonly error?: string;
   readonly durationMs: number;
+  readonly projection?: ToolSafeProjection;
+  readonly confirmationRequest?: ConfirmationRequest;
 };
 
 export type ToolExecutionContext = {
   readonly callerAgentId: string;
   readonly traceId: string;
   readonly goalId: string;
+  readonly abortSignal?: AbortSignal;
 };
 
 export type ToolPermissionCheck = {
   readonly callerAgentId: string;
   readonly allowedTools?: readonly string[];
+  readonly approvedConfirmationIds?: readonly string[];
 };
 
 export type SandboxOperation =
@@ -84,3 +121,4 @@ export interface ToolExecutionBroker {
   resetCallCount(): void;
   getCallCount(): number;
 }
+import type { ConfirmationRequest } from "../basic-agent/index.js";

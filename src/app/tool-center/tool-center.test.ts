@@ -55,11 +55,87 @@ test("ToolCenter enforces maxCallsPerRun", async () => {
   assert.equal(center.getCallCount(), 0);
 });
 
-function testTool(name: string, execute: ToolExecutor["execute"]): ToolExecutor {
+test("ToolCenter requires confirmation for Windows write and execute operations", async () => {
+  let writes = 0;
+  let executes = 0;
+  const center = new ToolCenter({ platform: "win32" });
+  center.register(testTool("write_file", async () => {
+    writes += 1;
+    return { ok: true };
+  }, "read-write"));
+  center.register(testTool("run_command", async () => {
+    executes += 1;
+    return { ok: true };
+  }, "execute"));
+  const context = { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" };
+
+  const write = await center.execute({ callId: "call-write", toolName: "write_file", input: {} }, context);
+  const execute = await center.execute({ callId: "call-exec", toolName: "run_command", input: {} }, context);
+
+  assert.equal(write.status, "approval_required");
+  assert.equal(execute.status, "approval_required");
+  assert.match(write.error ?? "", /requires user confirmation/);
+  assert.match(execute.error ?? "", /requires user confirmation/);
+  assert.equal(write.confirmationRequest?.confirmationId, "confirmation-call-write");
+  assert.equal(execute.confirmationRequest?.confirmationId, "confirmation-call-exec");
+  assert.equal(write.confirmationRequest?.riskLevel, "high");
+  assert.equal(writes, 0);
+  assert.equal(executes, 0);
+  assert.equal(center.getCallCount(), 0);
+  assert.equal(write.projection?.diagnosticRef, "tool:call-write:confirmation-required");
+});
+
+test("ToolCenter lets an approved confirmation id bypass the confirmation gate", async () => {
+  let writes = 0;
+  const center = new ToolCenter({ platform: "win32" });
+  center.register(testTool("write_file", async () => {
+    writes += 1;
+    return { summary: "safe write summary" };
+  }, "read-write"));
+  const context = { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" };
+
+  const result = await center.execute(
+    { callId: "call-write", toolName: "write_file", input: {} },
+    context,
+    { callerAgentId: "agent-test", approvedConfirmationIds: ["confirmation-call-write"] }
+  );
+
+  assert.equal(result.status, "completed");
+  assert.equal(writes, 1);
+  assert.equal(center.getCallCount(), 1);
+  assert.equal(result.projection?.uiSummary, "safe write summary");
+});
+
+test("ToolCenter list returns cloned metadata", () => {
+  const center = new ToolCenter();
+  center.register(testTool("read_file", async () => ({ ok: true }), "read-only"));
+
+  const listed = center.list();
+  (listed[0]!.metadata!.visibleResultPolicy as { maxPreviewChars: number }).maxPreviewChars = 1;
+
+  assert.equal(center.list()[0]?.metadata?.visibleResultPolicy.maxPreviewChars, 800);
+});
+
+function testTool(
+  name: string,
+  execute: ToolExecutor["execute"],
+  operationType: "read-only" | "read-write" | "execute" | "external-submit" = "read-only"
+): ToolExecutor {
   return {
     definition: {
       name,
       description: `${name} test tool`,
+      metadata: {
+        category: "other",
+        riskLevel: operationType === "read-only" ? "low" : "high",
+        operationType,
+        requiresConfirmation: false,
+        visibleResultPolicy: {
+          userVisible: "summary-only",
+          maxPreviewChars: 800,
+          omitRawOutput: true,
+        },
+      },
       inputSchema: {
         type: "object",
         properties: {},

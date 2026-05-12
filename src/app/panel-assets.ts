@@ -653,11 +653,27 @@ export function createPanelHtml(): string {
       background: #0ea5e9;
     }
 
+    .run-status-dot.queued,
+    .run-status-dot.planning,
+    .run-status-dot.paused {
+      background: #98a2b3;
+    }
+
+    .run-status-dot.approval_needed,
+    .run-status-dot.needs_input {
+      background: #f59e0b;
+    }
+
     .run-status-dot.completed {
       background: #16a34a;
     }
 
     .run-status-dot.failed {
+      background: #ef4444;
+    }
+
+    .run-status-dot.cancelled,
+    .run-status-dot.blocked {
       background: #ef4444;
     }
 
@@ -1290,6 +1306,33 @@ export function createPanelHtml(): string {
       -webkit-box-orient: vertical;
       overflow: hidden;
     }
+
+    .assistant-step-tool {
+      display: grid;
+      gap: 4px;
+      min-width: 0;
+      border: 1px solid #eef2f7;
+      border-radius: 10px;
+      background: #fff;
+      padding: 8px 10px;
+    }
+
+    .assistant-step-tool-title {
+      color: var(--text);
+      font-size: 12px;
+      font-weight: 760;
+      line-height: 1.4;
+    }
+
+    .assistant-step-tool-target {
+      color: var(--muted);
+      font-family: var(--mono);
+      font-size: 11px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
 
     .assistant-tool-detail {
       display: none;
@@ -1959,6 +2002,37 @@ export function createPanelHtml(): string {
       gap: 12px;
     }
 
+    .settings-list {
+      display: grid;
+      gap: 10px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .skill-row {
+      display: grid;
+      gap: 6px;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface);
+      color: var(--text);
+    }
+
+    .skill-row-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      font-weight: 760;
+    }
+
+    .skill-row-meta {
+      color: var(--muted);
+      font-size: 12px;
+      overflow-wrap: anywhere;
+    }
+
     .settings-zone-title {
       display: flex;
       align-items: center;
@@ -2122,9 +2196,8 @@ export function createPanelHtml(): string {
       <aside class="sidebar" id="sidebar">
         <nav class="side-nav" aria-label="工作入口">
           <button class="side-action active" id="newRunButton" type="button"><span class="nav-mark plus"></span><span>新对话</span></button>
-          <a class="side-action" href="#"><span class="nav-mark skill"></span><span>技能</span></a>
-          <a class="side-action" href="#"><span class="nav-mark auto"></span><span>例行任务</span></a>
-          <a class="side-action" href="#"><span class="nav-mark tool"></span><span>工具</span></a>
+          <button class="side-action" id="skillsButton" type="button"><span class="nav-mark skill"></span><span>技能</span></button>
+          <button class="side-action" id="toolsButton" type="button"><span class="nav-mark tool"></span><span>工具</span></button>
         </nav>
 
         <section class="task-list" aria-label="会话列表">
@@ -2202,6 +2275,7 @@ export function createPanelHtml(): string {
                     <span class="hint" id="modelHint">Enter 发送，Shift+Enter 换行。</span>
                     <span class="spacer"></span>
                     <button class="deep-run-button" id="deepRunButton" type="button" hidden></button>
+                    <button class="ghost" id="cancelRunButton" type="button" hidden>取消</button>
                     <button class="send-button primary" id="runButton" title="发送" aria-label="发送消息">↑</button>
                     <input id="runModeInput" type="hidden" value="agent" autocomplete="off">
                     <div class="hidden-context-inputs" aria-hidden="true">
@@ -2234,6 +2308,8 @@ export function createPanelHtml(): string {
     <div id="agentTree" hidden></div>
     <div id="agentInspector" hidden></div>
     <div id="parentSynthesis" hidden></div>
+    <ul id="debugList" hidden></ul>
+    <pre id="debugJson" hidden>{}</pre>
   </aside>
 
   <div class="settings-backdrop" id="settingsBackdrop" aria-hidden="true">
@@ -2249,6 +2325,7 @@ export function createPanelHtml(): string {
         <nav class="settings-nav" aria-label="设置分区">
           <button class="active" type="button" data-settings-tab="model">模型</button>
           <button type="button" data-settings-tab="workspace">工作目录</button>
+          <button type="button" data-settings-tab="skills">技能</button>
           <button type="button" data-settings-tab="tools">工具</button>
           <button type="button" data-settings-tab="safety">安全</button>
         </nav>
@@ -2306,6 +2383,14 @@ export function createPanelHtml(): string {
             </div>
           </section>
 
+          <section class="settings-section" data-settings-panel="skills">
+            <div class="settings-card">
+              <h2>技能</h2>
+              <p class="section-note">这里只展示当前工作区真实发现的 SKILL.md；正文和资源会在触发后按需读取。</p>
+              <div id="skillsList" class="settings-list" aria-live="polite">技能列表未加载。</div>
+            </div>
+          </section>
+
           <section class="settings-section" data-settings-panel="tools">
             <div class="settings-card">
               <h2>工具</h2>
@@ -2328,11 +2413,7 @@ export function createPanelHtml(): string {
           <section class="settings-section" data-settings-panel="safety">
             <div class="settings-card">
               <h2>安全</h2>
-              <p class="section-note">模型 API Key 按你的要求可见；搜索密钥不回显。本地工具只能在工作目录边界内运行。</p>
-              <ul class="debug-list" id="debugList">
-                <li>原始提示词、完整工具结果、非模型密钥和内部运行引用不会显示在主界面。</li>
-              </ul>
-              <pre id="debugJson">{}</pre>
+              <p class="section-note">模型 API Key 按你的要求可见；搜索密钥不回显。本地工具只能在工作目录边界内运行。原始提示词和非模型密钥不会显示在主界面。</p>
             </div>
           </section>
         </div>
@@ -2343,6 +2424,9 @@ export function createPanelHtml(): string {
   <script>
     const STREAM_TYPES = [
       "run.started",
+      "run.cancelled",
+      "run.blocked",
+      "run.resumed",
       "agent.note.delta",
       "agent.note.completed",
       "model.output.delta",
@@ -2351,6 +2435,7 @@ export function createPanelHtml(): string {
       "tool.completed",
       "tool.failed",
       "confirmation.needed",
+      "user_approval.received",
       "user.guidance",
       "agent.delegation.planned",
       "agent.child.started",
@@ -2363,14 +2448,24 @@ export function createPanelHtml(): string {
 
     const STATUS_LABELS = {
       pending: "待开始",
+      queued: "排队中",
+      planning: "准备中",
       running: "正在工作",
+      approval_needed: "需要确认",
+      needs_input: "需要补充",
+      paused: "已暂停",
       completed: "已完成",
       failed: "未完成",
+      cancelled: "已取消",
+      blocked: "需要处理",
       sent: "已发送"
     };
 
     const EVENT_LABELS = {
       "run.started": "开始工作",
+      "run.cancelled": "已取消",
+      "run.blocked": "需要处理",
+      "run.resumed": "继续工作",
       "agent.note.delta": "工作笔记",
       "agent.note.completed": "工作笔记",
       "model.output.delta": "正在生成内容",
@@ -2379,6 +2474,7 @@ export function createPanelHtml(): string {
       "tool.completed": "材料已读取",
       "tool.failed": "工具执行失败",
       "confirmation.needed": "需要确认",
+      "user_approval.received": "收到确认结果",
       "user.guidance": "用户指导",
       "agent.delegation.planned": "安排检查",
       "agent.child.started": "检查开始",
@@ -2393,9 +2489,11 @@ export function createPanelHtml(): string {
       config: undefined,
       informationAccess: undefined,
       tools: undefined,
+      skills: [],
       workspace: undefined,
       currentConversationId: undefined,
       currentRunId: undefined,
+      pendingConfirmation: undefined,
       queuedRunIds: new Set(),
       eventSource: undefined,
       pollingTimer: undefined,
@@ -2434,7 +2532,10 @@ export function createPanelHtml(): string {
       inputStatusDot: document.querySelector(".input-status-dot"),
       runButton: document.getElementById("runButton"),
       deepRunButton: document.getElementById("deepRunButton"),
+      cancelRunButton: document.getElementById("cancelRunButton"),
       newRunButton: document.getElementById("newRunButton"),
+      skillsButton: document.getElementById("skillsButton"),
+      toolsButton: document.getElementById("toolsButton"),
       sidebarToggleButton: document.getElementById("sidebarToggleButton"),
       shell: document.getElementById("shell"),
       runHistory: document.getElementById("runHistory"),
@@ -2466,6 +2567,7 @@ export function createPanelHtml(): string {
       workspaceConfigStatus: document.getElementById("workspaceConfigStatus"),
       saveToolConfigButton: document.getElementById("saveToolConfigButton"),
       toolConfigStatus: document.getElementById("toolConfigStatus"),
+      skillsList: document.getElementById("skillsList"),
       inspectorTabs: Array.from(document.querySelectorAll(".inspector-tab")),
       inspectorPanels: Array.from(document.querySelectorAll(".inspector-panel")),
       settingsTabs: Array.from(document.querySelectorAll("[data-settings-tab]")),
@@ -2485,12 +2587,22 @@ export function createPanelHtml(): string {
 
     dom.runButton.addEventListener("click", () => startRun("agent"));
     dom.deepRunButton.addEventListener("click", () => startRun("deep"));
+    dom.cancelRunButton.addEventListener("click", cancelCurrentRun);
     dom.goalInput.addEventListener("keydown", handleComposerKeydown);
     dom.goalInput.addEventListener("input", () => {
       autoResizeGoalInput();
       updateComposerControls();
     });
     dom.newRunButton.addEventListener("click", resetComposer);
+    dom.skillsButton.addEventListener("click", () => {
+      openSettingsPanel();
+      setSettingsTab("skills");
+      void loadSkills();
+    });
+    dom.toolsButton.addEventListener("click", () => {
+      openSettingsPanel();
+      setSettingsTab("tools");
+    });
     dom.sidebarToggleButton.addEventListener("click", toggleSidebar);
     dom.saveConfigButton.addEventListener("click", saveModelConfig);
     dom.providerPresetInput.addEventListener("change", function() {
@@ -2557,7 +2669,7 @@ export function createPanelHtml(): string {
       setInspectorTab("overview", false);
       setSettingsTab("model");
       applyTaskRunMode("agent");
-      await Promise.all([loadConfig(), loadToolsConfig(), loadConversations()]);
+      await Promise.all([loadConfig(), loadToolsConfig(), loadSkills(), loadConversations()]);
       autoResizeGoalInput();
       updateComposerControls();
     }
@@ -2841,6 +2953,72 @@ export function createPanelHtml(): string {
       }
     }
 
+    async function loadSkills() {
+      try {
+        const result = await requestJson("/api/skills");
+        state.skills = Array.isArray(result.skills) ? result.skills : [];
+        renderSkillsList();
+      } catch (error) {
+        state.skills = [];
+        dom.skillsList.textContent = "技能列表读取失败。";
+      }
+    }
+
+    function renderSkillsList() {
+      dom.skillsList.replaceChildren();
+      if (!Array.isArray(state.skills) || state.skills.length === 0) {
+        dom.skillsList.textContent = "当前没有发现可用技能。";
+        return;
+      }
+      state.skills.forEach((skill) => {
+        const row = document.createElement("div");
+        row.className = "skill-row";
+        const title = document.createElement("div");
+        title.className = "skill-row-title";
+        const name = document.createElement("span");
+        name.textContent = skill.name || skill.id || "未命名技能";
+        const enabled = document.createElement("span");
+        enabled.className = "pill";
+        enabled.textContent = skill.enabled === false ? "已停用" : "已启用";
+        const toggle = document.createElement("button");
+        toggle.type = "button";
+        toggle.className = "small-button";
+        toggle.textContent = skill.enabled === false ? "启用" : "停用";
+        toggle.addEventListener("click", () => {
+          void updateSkillState(skill.id, { enabled: skill.enabled === false });
+        });
+        title.append(name, enabled, toggle);
+        const description = document.createElement("div");
+        description.className = "skill-row-meta";
+        description.textContent = skill.description || "没有描述。";
+        const triggers = document.createElement("div");
+        triggers.className = "skill-row-meta";
+        const triggerText = Array.isArray(skill.triggers) && skill.triggers.length > 0 ? skill.triggers.join(" / ") : "未声明触发词";
+        triggers.textContent = "触发：" + triggerText;
+        const source = document.createElement("div");
+        source.className = "skill-row-meta";
+        source.textContent = skill.sourcePath || "";
+        const lastUsed = document.createElement("div");
+        lastUsed.className = "skill-row-meta";
+        lastUsed.textContent = skill.lastUsedAt ? "最近使用：" + relativeTimeLabel(skill.lastUsedAt) : "最近使用：暂无";
+        row.append(title, description, triggers, lastUsed, source);
+        dom.skillsList.append(row);
+      });
+    }
+
+    async function updateSkillState(skillId, statePatch) {
+      try {
+        const result = await requestJson("/api/skills/" + encodeURIComponent(skillId) + "/state", {
+          method: "POST",
+          body: statePatch
+        });
+        state.skills = Array.isArray(result.skills) ? result.skills : [];
+        renderSkillsList();
+      } catch (error) {
+        dom.skillsList.textContent = "技能状态保存失败。";
+      }
+    }
+
     async function saveModelConfig() {
       setButtons(false);
       try {
@@ -3082,42 +3260,21 @@ export function createPanelHtml(): string {
 
     function openRunStream(runId, cursor) {
       stopLiveUpdates();
-      if (!("EventSource" in window)) {
-        startPolling(runId);
-        return;
-      }
-      const startCursor = Math.max(0, Number(cursor || 0) - 1);
-      const source = new EventSource("/api/desktop/runs/" + encodeURIComponent(runId) + "/stream?cursor=" + startCursor);
-      state.eventSource = source;
-      STREAM_TYPES.forEach((type) => {
-        source.addEventListener(type, (message) => {
-          const event = JSON.parse(message.data);
-          appendStreamEvent(event);
-          if (event.type === "final.result" || event.type === "run.failed") {
-            finishLiveRun(runId, event.type);
-          }
-        });
-      });
-      source.onerror = () => {
-        const sourceIsActive = state.eventSource === source;
-        source.close();
-        if (sourceIsActive) {
-          state.eventSource = undefined;
-        }
-        if (sourceIsActive && state.currentRunId === runId) {
-          startPolling(runId);
-        }
-      };
+      state.lastSequence = Math.max(0, Number(cursor || 0) - 1);
+      startPolling(runId);
     }
 
     function startPolling(runId) {
       clearInterval(state.pollingTimer);
-      state.pollingTimer = setInterval(async () => {
+      const tick = async () => {
         try {
-          const response = await requestJson("/api/desktop/runs/" + encodeURIComponent(runId));
-          renderPollingResponse(response);
-          if (response.status === "completed" || response.status === "failed") {
-            finishLiveRun(runId, response.status === "failed" ? "run.failed" : "final.result");
+          const result = await refreshRunProjection(runId);
+          if (isSettledBasicStatus(result.status)) {
+            stopLiveUpdates();
+            const detail = await renderDesktopRunDetail(runId);
+            if (result.status === "completed" || result.status === "failed" || result.status === "cancelled" || result.status === "blocked") {
+              followNextQueuedRun(detail);
+            }
           }
         } catch (error) {
           clearInterval(state.pollingTimer);
@@ -3127,22 +3284,116 @@ export function createPanelHtml(): string {
           }
           appendLocalEntry("连接中断", "无法刷新这次运行，请重新打开对话查看最新结果。", "failed");
         }
-      }, 1000);
+      };
+      void tick();
+      state.pollingTimer = setInterval(tick, 1000);
     }
 
     async function finishLiveRun(runId, terminalType) {
       stopLiveUpdates();
       try {
-        const response = await requestJson("/api/desktop/runs/" + encodeURIComponent(runId));
-        renderPollingResponse(response);
+        const response = await renderDesktopRunDetail(runId);
+        const basicRun = await requestBasicRun(runId).catch(() => undefined);
+        applyBasicRunProjection(basicRun);
         followNextQueuedRun(response);
       } catch {
         if (terminalType === "final.result") {
           setRunStatus("completed");
         } else if (terminalType === "run.failed") {
           setRunStatus("failed");
+        } else if (terminalType === "run.cancelled") {
+          setRunStatus("cancelled");
+        } else if (terminalType === "run.blocked") {
+          setRunStatus("blocked");
         }
       }
+    }
+
+    function terminalEventTypeForStatus(status) {
+      if (status === "failed") return "run.failed";
+      if (status === "cancelled") return "run.cancelled";
+      if (status === "blocked") return "run.blocked";
+      return "final.result";
+    }
+
+    async function refreshRunProjection(runId) {
+      const eventsResult = await requestJson("/api/basic-agent/runs/" + encodeURIComponent(runId) + "/events?cursor=" + Math.max(0, state.lastSequence || 0));
+      const events = Array.isArray(eventsResult.events) ? eventsResult.events : [];
+      events.forEach((event) => appendStreamEvent(panelEventFromBasicEvent(event)));
+      const basicRun = await requestBasicRun(runId);
+      const detail = await renderDesktopRunDetail(runId).catch(() => undefined);
+      applyBasicRunProjection(basicRun);
+      return {
+        status: basicRun && basicRun.status ? basicRun.status : detail && detail.status ? detail.status : "running",
+        detail
+      };
+    }
+
+    async function requestBasicRun(runId) {
+      const response = await requestJson("/api/basic-agent/runs/" + encodeURIComponent(runId));
+      return response && response.run ? response.run : undefined;
+    }
+
+    async function renderDesktopRunDetail(runId) {
+      const response = await requestJson("/api/desktop/runs/" + encodeURIComponent(runId));
+      renderPollingResponse(response);
+      return response;
+    }
+
+    function applyBasicRunProjection(run) {
+      if (!run) {
+        return;
+      }
+      state.currentRunId = run.runId || state.currentRunId;
+      setRunStatus(run.status || "running");
+      if (run.status === "approval_needed" || run.status === "needs_input") {
+        flushAssistantStreamNow();
+        if (!state.pendingConfirmation) {
+          updateAssistantTurn(
+            run.status === "approval_needed" ? "需要确认" : "需要补充",
+            run.currentStep || run.nextStep || "继续前需要你确认或补充指导。",
+            "running"
+          );
+        }
+      }
+    }
+
+    function panelEventFromBasicEvent(event) {
+      const refs = Array.isArray(event.refs) ? event.refs : [];
+      const sourceRefs = refs.map((ref) => {
+        if (!ref || typeof ref !== "object") {
+          return String(ref || "");
+        }
+        const kind = ref.kind || "ref";
+        const id = ref.id || "";
+        return String(kind) + ":" + String(id);
+      }).filter(Boolean);
+      const summary = event.summary || event.title;
+      return {
+        eventId: event.id,
+        runId: event.runId,
+        sequence: event.sequence,
+        type: event.type,
+        summary,
+        delta: event.type === "model.output.delta" ? summary : undefined,
+        status: panelStatusFromBasicStatus(event.status),
+        createdAt: event.timestamp,
+        agentLabel: event.type === "model.output.delta" ? "助手" : event.title,
+        modelCallRefs: [],
+        toolCallRefs: [],
+        sourceRefs,
+        detail: undefined
+      };
+    }
+
+    function panelStatusFromBasicStatus(status) {
+      if (status === "queued" || status === "planning") return "pending";
+      if (status === "approval_needed" || status === "needs_input" || status === "paused") return "pending";
+      return status || "running";
+    }
+
+    function isSettledBasicStatus(status) {
+      return status === "completed" || status === "failed" || status === "cancelled" || status === "blocked" || status === "approval_needed" || status === "needs_input" || status === "paused";
     }
 
     function followNextQueuedRun(response) {
@@ -3165,7 +3416,7 @@ export function createPanelHtml(): string {
             return;
           }
           state.currentRunId = nextRunId;
-          openRunStream(nextRunId, next.streamCursor ? next.streamCursor.lastSequence : 0);
+          openRunStream(nextRunId, 0);
         } catch {
           startPolling(nextRunId);
         }
@@ -3197,6 +3448,7 @@ export function createPanelHtml(): string {
       if (shouldReplayTranscriptEvents && response.transcript && Array.isArray(response.transcript.events)) {
         response.transcript.events.forEach(appendStreamEvent);
       }
+      renderAssistantStepsFromResponse(response);
       syncAssistantTurnFromResponse(response);
       renderDebug(response);
       focusCanvasOnTerminal(response);
@@ -3251,6 +3503,23 @@ export function createPanelHtml(): string {
         updateAssistantTurn("这次没有完成", friendlyFailureText(activityBody(event)), "failed");
         return;
       }
+      if (event.type === "run.cancelled") {
+        state.assistantStageKey = undefined;
+        flushAssistantStreamNow();
+        updateAssistantTurn("已取消", activityBody(event), "failed");
+        return;
+      }
+      if (event.type === "run.blocked") {
+        state.assistantStageKey = "blocked";
+        flushAssistantStreamNow();
+        updateAssistantTurn("需要处理", activityBody(event), "running");
+        return;
+      }
+      if (event.type === "run.resumed") {
+        state.assistantStageKey = "streaming";
+        showAssistantPending();
+        return;
+      }
       if (event.type === "final.result") {
         state.assistantStageKey = "completed";
         flushAssistantStreamNow();
@@ -3286,9 +3555,24 @@ export function createPanelHtml(): string {
         return;
       }
       if (response.status === "failed") {
+        state.pendingConfirmation = undefined;
         state.assistantStageKey = undefined;
         flushAssistantStreamNow();
         updateAssistantTurn("这次没有完成", friendlyFailureText(response.error && response.error.message), "failed");
+        return;
+      }
+      if (response.status === "cancelled") {
+        state.pendingConfirmation = undefined;
+        state.assistantStageKey = undefined;
+        flushAssistantStreamNow();
+        updateAssistantTurn("已取消", "运行已取消。", "failed");
+        return;
+      }
+      if (response.status === "blocked") {
+        state.pendingConfirmation = undefined;
+        state.assistantStageKey = "blocked";
+        flushAssistantStreamNow();
+        updateAssistantTurn("需要处理", response.error && response.error.message ? response.error.message : "运行已中断，需要重新发起或继续处理。", "running");
         return;
       }
       if (response.status === "completed") {
@@ -3303,7 +3587,11 @@ export function createPanelHtml(): string {
         if (directAnswer) {
           const needsConfirmation =
             response.canvas && response.canvas.kind === "desktop_agent_canvas" && response.canvas.agent.pendingConfirmation;
+          state.pendingConfirmation = needsConfirmation || undefined;
           updateAssistantTurn(needsConfirmation ? "需要确认" : "已完成", directAnswer.answer, needsConfirmation ? "running" : "completed");
+          if (needsConfirmation) {
+            renderPendingConfirmationControls(needsConfirmation);
+          }
           return;
         }
         const pendingConfirmation =
@@ -3311,9 +3599,12 @@ export function createPanelHtml(): string {
             ? response.canvas.agent.pendingConfirmation
             : undefined;
         if (pendingConfirmation) {
+          state.pendingConfirmation = pendingConfirmation;
           updateAssistantTurn("需要确认", pendingConfirmation.question + "\\n" + pendingConfirmation.consequence, "running");
+          renderPendingConfirmationControls(pendingConfirmation);
           return;
         }
+        state.pendingConfirmation = undefined;
         const report = response.canvas && response.canvas.kind === "work_session_canvas" && response.canvas.workSession.report
           ? response.canvas.workSession.report
           : undefined;
@@ -3443,9 +3734,13 @@ export function createPanelHtml(): string {
         }
         return productActivityText(event.type, summary);
       }
+      if (event.type === "run.cancelled") return "运行已取消。";
+      if (event.type === "run.blocked") return "运行已中断，需要重新发起或继续处理。";
+      if (event.type === "run.resumed") return "已收到确认，继续处理。";
       if (event.type === "tool.requested") return localToolActionTitle(event.toolName, "running", event.detail);
       if (event.type === "tool.completed") return localToolActionTitle(event.toolName, "completed", event.detail);
       if (event.type === "confirmation.needed") return "继续前需要你补充授权或材料。";
+      if (event.type === "user_approval.received") return "已收到你的确认结果。";
       if (event.type === "user.guidance") return "已收到你的补充指导。";
       if (event.type === "agent.delegation.planned") return "正在安排几路检查。";
       if (event.type === "agent.child.started") return "检查已经开始。";
@@ -3460,97 +3755,64 @@ export function createPanelHtml(): string {
       if (text.length === 0) {
         return EVENT_LABELS[type] || "工作状态已更新。";
       }
-      const lower = text.toLowerCase();
-      if (
-        lower.includes("fake ") ||
-        lower.includes("work_session") ||
-        lower.includes("desktop_agent") ||
-        lower.includes("validation failed") ||
-        lower.includes("output_validation") ||
-        lower.includes("model-request") ||
-        lower.includes("model-response") ||
-        lower.includes("contract ") ||
-        lower.includes("internal agent") ||
-        lower.includes("provider") ||
-        lower.includes("parent synthesis") ||
-        lower.includes("direction_handoff") ||
-        lower.includes("model.requested") ||
-        lower.includes("model.completed")
-      ) {
-        if (type === "model.output.completed") return "已整理一段可展示材料，完整技术引用保留在详情里。";
-        if (type === "agent.parent_synthesis.completed") return "已汇总多路检查结果，正在形成最终判断。";
-        if (type === "agent.child.completed") return "一路局部检查已完成，返回了可审阅材料。";
-        if (type === "agent.delegation.planned") return "已把任务拆成几路局部检查。";
-        return EVENT_LABELS[type] || "工作状态已更新。";
-      }
       return compact(text, 520);
     }
 
     function friendlyFailureText(value) {
       const text = String(value || "");
+      if (text.length === 0) {
+        return "这次没有完成。请检查设置里的模型配置，或稍后重试。";
+      }
       const lower = text.toLowerCase();
-      if (text.includes("模型服务这次没有返回可用结果") || text.includes("模型返回的内容没有通过")) {
+      if (text.indexOf("模型服务这次没有返回可用结果") >= 0) {
         return text;
       }
-      if (lower.includes("output_validation") || lower.includes("validation failed") || lower.includes("contract")) {
-        return "模型返回的内容没有通过本轮格式检查。这不是你的输入问题；技术引用已放在详情里，可以调整模型或重试。";
+      if (lower.indexOf("output_validation") >= 0 || lower.indexOf("validation failed") >= 0 || lower.indexOf("contract") >= 0) {
+        return "模型返回的内容没有通过本轮格式检查。技术引用已放在诊断里，请调整模型配置或重试。";
       }
-      if (lower.includes("openai-compatible provider returned http") || lower.includes("provider_response") || lower.includes("model_failed") || lower.includes("desktop_chat_failed") || lower.includes("desktop_agent_failed")) {
-        return "模型服务这次没有返回可用结果。请检查设置里的 Base URL、模型名和密钥，或稍后重试。";
+      if (lower.indexOf("api key") >= 0 || lower.indexOf("missing_api_key") >= 0) {
+        return "还没有可用的模型密钥。请先在设置里完成配置。";
       }
-      if (lower.includes("api key") || lower.includes("missing_api_key")) {
-        return "还没有配置可用的模型密钥。请打开设置，保存密钥后重试。";
+      if (lower.indexOf("missing_model") >= 0 || text.indexOf("缺少模型名") >= 0 || text.indexOf("没有可用的模型名") >= 0 || text.indexOf("还没有配置模型名") >= 0) {
+        return "还没有可用的模型名。请先在设置里完成配置。";
       }
-      if (lower.includes("missing_model") || text.includes("缺少模型名") || text.includes("没有可用的模型名") || text.includes("还没有配置模型名")) {
-        return "还没有配置模型名。请打开设置，填写模型名后重试。";
+      if (lower.indexOf("ai_disabled") >= 0 || text.indexOf("AI 禁用") >= 0) {
+        return "当前禁用了 AI，无法继续完成这次处理。";
       }
-      if (lower.includes("ai 禁用") || lower.includes("ai_disabled")) {
-        return "当前禁用了 AI，所以不能完成这次处理。请在详情里切换到真实模型或测试模式。";
+      if (lower.indexOf("provider_auth") >= 0 || lower.indexOf("401") >= 0 || lower.indexOf("403") >= 0) {
+        return "模型服务鉴权失败。请检查设置里的密钥、Base URL 和账号权限。";
       }
-      if (lower.includes("network") || lower.includes("timeout")) {
-        return "模型服务暂时不可用或请求超时。请检查网络和模型配置后重试。";
+      if (lower.indexOf("provider_rate_limit") >= 0 || lower.indexOf("429") >= 0) {
+        return "模型服务暂时限流。请稍后重试，或切换到可用模型。";
       }
-      return compact(text || "运行被配置、权限或模型边界阻断。", 220);
+      if (lower.indexOf("provider_network") >= 0 || lower.indexOf("provider_timeout") >= 0 || lower.indexOf("network") >= 0 || lower.indexOf("timeout") >= 0) {
+        return "模型服务暂时不可用。请检查网络和模型配置后重试。";
+      }
+      if (lower.indexOf("openai-compatible provider returned http") >= 0 || lower.indexOf("provider_response") >= 0 || lower.indexOf("model_failed") >= 0 || lower.indexOf("desktop_chat_failed") >= 0 || lower.indexOf("desktop_agent_failed") >= 0) {
+        return "模型服务这次没有返回可用结果。请检查设置里的 Base URL、模型名和密钥，诊断里保留了可定位的技术引用。";
+      }
+      return "这次没有完成。请检查设置里的模型配置、授权范围或诊断详情后重试。";
     }
 
     function sanitizeVisibleAssistantText(value) {
       const text = String(value || "")
         .replace(/<\\s*start_work_session\\b[^>]*>[\\s\\S]*?<\\s*\\/\\s*start_work_session\\s*>/gi, "")
         .replace(/<\\s*start_work_session\\b[^>]*\\/\\s*>/gi, "")
-        .replace(/<\\s*\\/?\\s*(start_work_session|tool_call|function_call|use_tool|internal_action|internal_control|query|arguments)\\b[^>]*>/gi, "")
-        .replace(/OpenAI-compatible provider returned HTTP\\s+\\d+\\.?/gi, "模型服务这次没有返回可用结果。")
-        .replace(/OpenAI-compatible provider network request failed\.?/gi, "模型服务暂时不可用或请求超时。");
+        .replace(/<\\s*\\/?\\s*(start_work_session|tool_call|function_call|use_tool|internal_action|internal_control|query|arguments)\\b[^>]*>/gi, "");
       const lines = text.replace(/\\r\\n/g, "\\n").split("\\n");
       const kept = [];
-      let skippingInternalSection = false;
-      for (const line of lines) {
-        const trimmed = line.trim();
-        const isHeading = /^#{1,6}\\s+/.test(trimmed);
-        if (/^#{1,6}\\s*(当前任务|任务状态|运行诊断|内部诊断|系统诊断|调试信息|debug|diagnostics|internal)\\b/i.test(trimmed)) {
-          skippingInternalSection = true;
-          continue;
-        }
-        if (skippingInternalSection) {
-          if (!isHeading) continue;
-          skippingInternalSection = false;
-        }
-        if (shouldDropVisibleLine(trimmed)) continue;
-        kept.push(line);
+      for (var i = 0; i < lines.length; i++) {
+        const trimmed = lines[i].trim();
+        if (/^#{1,6}\\s*(?:当前任务|任务状态|运行诊断|内部诊断|系统诊断|调试信息|debug|diagnostics|internal)(?:\\s|\\(|\\:|\uff1a|$)/i.test(trimmed)) continue;
+        if (/\\braw prompt\\b|\\braw provider response\\b|\\braw tool output\\b|\\bhidden reasoning\\b|\\bsanitizedMessages\\b/i.test(trimmed)) continue;
+        if (/^\\s*[-*]?\\s*(?:requestId|responseId)\\s*[:：=]/i.test(trimmed)) continue;
+        kept.push(lines[i]);
       }
       return kept
         .join("\\n")
-        .replace(/\\b(goal|trace|run|model-request|model-response|tool-call|conversation)-[A-Za-z0-9_-]+\\b/gi, "[内部引用]")
+        .replace(/\\b(?:goal|trace|run|model-request|model-response|tool-call|conversation)-[A-Za-z0-9_-]+\\b/gi, "[运行引用]")
         .replace(/\\n{3,}/g, "\\n\\n")
         .trim();
-    }
-
-    function shouldDropVisibleLine(trimmed) {
-      if (!trimmed) return false;
-      if (/^\\s*[-*]?\\s*(goalId|traceId|runId|requestId|responseId|contractId|providerId|outputContract|validationStatus|failureKind|currentPhase|currentStage)\\s*[:：=]/i.test(trimmed)) return true;
-      if (/\\b(sanitizedMessages|raw prompt|hidden reasoning|raw provider response|raw tool output)\\b/i.test(trimmed)) return true;
-      if (/\\b(goal|trace|model-request|model-response|tool-call|conversation)-[A-Za-z0-9_-]+\\b.*(当前任务|运行|诊断|contract|provider|validation|failure|模型调用|工具调用|任务)/i.test(trimmed)) return true;
-      if (/(当前任务|运行诊断|内部诊断|系统诊断)\\s*[\\(:：-].*\\b(goal|trace|run|model-request|model-response)-[A-Za-z0-9_-]+\\b/i.test(trimmed)) return true;
-      return false;
     }
 
     function updateEntryStatus(row, statusValue) {
@@ -3596,6 +3858,80 @@ export function createPanelHtml(): string {
       state.assistantEntry.body.replaceChildren();
       state.assistantEntry.body.textContent = safeBody;
       updateEntryStatus(state.assistantEntry.row, safeStatus);
+    }
+
+    function renderPendingConfirmationControls(confirmation) {
+      if (!state.assistantEntry || !confirmation || !confirmation.confirmationId || !state.currentRunId) {
+        return;
+      }
+      const previous = state.assistantEntry.body.querySelector(".assistant-control-strip");
+      if (previous) {
+        previous.remove();
+      }
+      const strip = document.createElement("div");
+      strip.className = "assistant-control-strip";
+      strip.append(
+        confirmationButton("批准一次", () => submitConfirmationDecision("approve_once")),
+        confirmationButton("拒绝", () => submitConfirmationDecision("deny")),
+        confirmationButton("补充指导", () => {
+          const guidance = window.prompt("给 Agent 的补充指导");
+          if (guidance && guidance.trim().length > 0) {
+            void submitConfirmationDecision("guidance", guidance.trim());
+          }
+        })
+      );
+      state.assistantEntry.body.prepend(strip);
+    }
+
+    function confirmationButton(label, onClick) {
+      const button = document.createElement("button");
+      button.className = "assistant-control-chip";
+      button.type = "button";
+      button.textContent = label;
+      button.addEventListener("click", onClick);
+      return button;
+    }
+
+    async function submitConfirmationDecision(decision, guidance) {
+      const confirmation = state.pendingConfirmation;
+      const runId = state.currentRunId;
+      if (!confirmation || !confirmation.confirmationId || !runId) {
+        return;
+      }
+      try {
+        const result = await requestJson(
+          "/api/basic-agent/runs/" + encodeURIComponent(runId) + "/confirmations/" + encodeURIComponent(confirmation.confirmationId) + "/decision",
+          { method: "POST", body: { decision, guidance } }
+        );
+        state.pendingConfirmation = undefined;
+        if (state.assistantEntry) {
+          const controls = state.assistantEntry.body.querySelector(".assistant-control-strip");
+          if (controls) {
+            controls.remove();
+          }
+        }
+        applyBasicRunProjection(result.run);
+        await refreshRunProjection(runId).catch(() => renderDesktopRunDetail(runId));
+      } catch (error) {
+        appendLocalEntry("提示", friendlyFailureText(error.message), "failed");
+      }
+    }
+
+    async function cancelCurrentRun() {
+      const runId = state.currentRunId;
+      if (!runId) {
+        return;
+      }
+      dom.cancelRunButton.disabled = true;
+      try {
+        const result = await requestJson("/api/basic-agent/runs/" + encodeURIComponent(runId) + "/cancel", { method: "POST" });
+        applyBasicRunProjection(result.run);
+        await refreshRunProjection(runId).catch(() => renderDesktopRunDetail(runId));
+      } catch (error) {
+        appendLocalEntry("提示", friendlyFailureText(error.message), "failed");
+      } finally {
+        dom.cancelRunButton.disabled = false;
+      }
     }
 
     function appendAssistantDelta(delta) {
@@ -3801,6 +4137,84 @@ export function createPanelHtml(): string {
       return box;
     }
 
+    function renderAssistantStepsFromResponse(response) {
+      const steps = response && response.transcript && Array.isArray(response.transcript.steps) ? response.transcript.steps : [];
+      if (steps.length === 0 || !state.assistantEntry) return;
+      const activity = ensureAssistantActivity(state.assistantEntry);
+      const list = activity.querySelector(".assistant-activity-list");
+      if (!list) return;
+      list.replaceChildren(...steps.slice(-6).map(createAssistantStepNode));
+      const count = activity.querySelector(".assistant-activity-count");
+      const preview = activity.querySelector(".assistant-activity-preview");
+      const trail = activity.querySelector(".assistant-activity-trail");
+      const toolCount = steps.reduce((sum, step) => sum + (Array.isArray(step.toolCalls) ? step.toolCalls.length : 0), 0);
+      const failedCount = steps.reduce((sum, step) => sum + (Array.isArray(step.toolCalls) ? step.toolCalls.filter((tool) => tool.status === "failed").length : 0), 0);
+      if (count) count.textContent = String(toolCount);
+      if (preview) preview.textContent = "步骤 " + steps.length + " · " + toolCount + " 工具" + (failedCount > 0 ? " · " + failedCount + " 失败" : "");
+      if (trail) {
+        const dots = [];
+        steps.slice(-8).forEach((step) => {
+          (Array.isArray(step.toolCalls) ? step.toolCalls : []).forEach((tool) => {
+            const dot = document.createElement("span");
+            dot.className = "assistant-activity-dot " + (tool.status === "failed" ? "failed" : "tool");
+            dot.setAttribute("aria-hidden", "true");
+            dots.push(dot);
+          });
+        });
+        trail.replaceChildren(...dots);
+      }
+      activity.dataset.tone = failedCount > 0 ? "failed" : "normal";
+      activity.hidden = false;
+    }
+
+    function createAssistantStepNode(step) {
+      const row = document.createElement("div");
+      row.className = "assistant-activity-item" + (step.status === "failed" ? " failed" : " tool");
+      row.dataset.kind = step.status === "failed" ? "failed" : "tool";
+      const marker = document.createElement("span");
+      marker.className = "assistant-activity-marker " + (step.status || "completed");
+      marker.setAttribute("aria-hidden", "true");
+      const body = document.createElement("div");
+      body.className = "assistant-activity-body";
+      const titleRow = document.createElement("div");
+      titleRow.className = "assistant-activity-title-row";
+      const title = document.createElement("div");
+      title.className = "assistant-activity-title";
+      const tools = Array.isArray(step.toolCalls) ? step.toolCalls : [];
+      title.textContent = "步骤 " + step.stepNumber + " · " + tools.length + " 个动作";
+      const kind = document.createElement("span");
+      kind.className = "assistant-activity-kind";
+      kind.textContent = step.status === "failed" ? "失败" : "工作流";
+      titleRow.append(title, kind);
+      body.append(titleRow);
+      tools.forEach((tool) => body.append(createStepToolNode(tool)));
+      row.append(marker, body);
+      return row;
+    }
+
+    function createStepToolNode(tool) {
+      const wrap = document.createElement("div");
+      wrap.className = "assistant-step-tool";
+      const title = document.createElement("div");
+      title.className = "assistant-step-tool-title";
+      title.textContent = tool.title || tool.toolName || "工具调用";
+      wrap.append(title);
+      if (tool.target) {
+        const target = document.createElement("div");
+        target.className = "assistant-step-tool-target";
+        target.textContent = tool.target;
+        wrap.append(target);
+      }
+      if (tool.preview || tool.error) {
+        const preview = document.createElement("pre");
+        preview.className = "assistant-tool-preview";
+        preview.textContent = compact(tool.error || tool.preview, 1800);
+        wrap.append(preview);
+      }
+      return wrap;
+    }
+
+
     function updateAssistantActivityHeader(activity, latestItem) {
       const count = activity.querySelector(".assistant-activity-count");
       const list = activity.querySelector(".assistant-activity-list");
@@ -3872,6 +4286,9 @@ export function createPanelHtml(): string {
       if (event.type === "confirmation.needed") {
         return { kind: "confirm", title: "需要你的确认", summary: activityBody(event), status };
       }
+      if (event.type === "user_approval.received") {
+        return { kind: "confirm", title: "收到确认结果", summary: activityBody(event), status };
+      }
       if (event.type === "user.guidance") {
         return { kind: "confirm", title: "收到补充", summary: activityBody(event), status };
       }
@@ -3893,10 +4310,21 @@ export function createPanelHtml(): string {
       if (event.type === "run.failed") {
         return { kind: "failed", title: "运行失败", summary: activityBody(event), status };
       }
+      if (event.type === "run.cancelled") {
+        return { kind: "failed", title: "已取消", summary: activityBody(event), status };
+      }
+      if (event.type === "run.blocked") {
+        return { kind: "failed", title: "需要处理", summary: activityBody(event), status };
+      }
+      if (event.type === "run.resumed") {
+        return { kind: "thought", title: "继续工作", summary: activityBody(event), status };
+      }
       return { kind: "thought", title: EVENT_LABELS[event.type] || "工作更新", summary: activityBody(event), status };
     }
 
     function activityStatus(event) {
+      if (event.status === "cancelled" || event.type === "run.cancelled") return "failed";
+      if (event.status === "blocked" || event.type === "run.blocked") return "failed";
       if (event.status === "failed" || event.type === "run.failed" || event.type === "tool.failed") return "failed";
       if (event.status === "completed" || event.type === "tool.completed" || event.type === "model.output.completed" || event.type === "agent.note.completed" || event.type === "agent.child.completed" || event.type === "agent.parent_synthesis.completed") return "completed";
       if (event.status === "pending" || event.type === "confirmation.needed") return "pending";
@@ -4147,7 +4575,7 @@ export function createPanelHtml(): string {
     }
 
     function bubbleClass(type, status) {
-      if (status === "failed" || type === "run.failed") {
+      if (status === "failed" || status === "cancelled" || status === "blocked" || type === "run.failed" || type === "run.cancelled" || type === "run.blocked") {
         return "failed";
       }
       if (type === "final.result") {
@@ -4190,10 +4618,10 @@ export function createPanelHtml(): string {
           dom.mainCanvas.replaceChildren(...blocks);
           return;
         }
-        if (status === "pending" || status === "running" || status === "failed") {
+        if (status === "pending" || status === "running" || status === "failed" || status === "cancelled" || status === "blocked") {
           dom.mainCanvas.hidden = true;
           dom.mainCanvas.replaceChildren();
-          if (status === "failed" && response && response.error) {
+          if ((status === "failed" || status === "cancelled" || status === "blocked") && response && response.error) {
             dom.mainCanvas.hidden = false;
             dom.mainCanvas.replaceChildren(emptyResult(status, response));
           }
@@ -4227,6 +4655,12 @@ export function createPanelHtml(): string {
       if (status === "running") {
         title.textContent = "正在准备结果";
         summary.textContent = "正在读取材料、比较方案并整理可审阅内容。";
+      } else if (status === "cancelled") {
+        title.textContent = "已取消";
+        summary.textContent = "运行已取消。";
+      } else if (status === "blocked") {
+        title.textContent = "需要处理";
+        summary.textContent = response && response.error ? response.error.message : "运行已中断，需要重新发起或继续处理。";
       } else if (status === "failed" && response && response.error) {
         title.textContent = "这次没有完成";
         summary.textContent = friendlyFailureText(response.error.message);
@@ -5237,11 +5671,23 @@ export function createPanelHtml(): string {
 
     function setRunStatus(status) {
       dom.runStatus.textContent = STATUS_LABELS[status] || status || "待开始";
+      const cancellable = Boolean(
+        state.currentRunId &&
+          (status === "queued" ||
+            status === "planning" ||
+            status === "pending" ||
+            status === "running" ||
+            status === "approval_needed" ||
+            status === "needs_input" ||
+            status === "paused")
+      );
+      dom.cancelRunButton.hidden = !cancellable;
     }
 
     function setButtons(enabled) {
       dom.runButton.disabled = !enabled || state.isSubmitting || dom.goalInput.value.trim().length === 0;
       dom.deepRunButton.disabled = !enabled || state.isSubmitting || dom.goalInput.value.trim().length === 0;
+      dom.cancelRunButton.disabled = !enabled || !state.currentRunId;
       dom.saveConfigButton.disabled = !enabled;
       dom.saveToolConfigButton.disabled = !enabled;
       dom.selectWorkspaceDirectoryButton.disabled = !enabled;

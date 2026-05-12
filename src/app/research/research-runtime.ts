@@ -116,6 +116,7 @@ export class ResearchRuntime implements InformationAccess {
         limit: limit - results.length,
         traceId: query.traceId,
         goalId: query.goalId,
+        abortSignal: query.abortSignal,
       });
       for (const result of response.results) {
         this.searchResultsByRef.set(result.refId, result);
@@ -194,6 +195,7 @@ export class ResearchRuntime implements InformationAccess {
       title: sourceResult?.title,
       maxLength: Math.max(200, Math.floor(request.maxLength ?? this.defaultReadMaxLength)),
       sourceResult,
+      abortSignal: request.abortSignal,
     });
     const sourceSteps: ResearchTraceSourceStep[] = [
       {

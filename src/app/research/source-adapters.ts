@@ -14,6 +14,7 @@ export type InformationSourceSearchRequest = {
   readonly limit: number;
   readonly traceId?: string;
   readonly goalId?: string;
+  readonly abortSignal?: AbortSignal;
 };
 
 export type InformationSourceReadRequest = {
@@ -23,6 +24,7 @@ export type InformationSourceReadRequest = {
   readonly title?: string;
   readonly maxLength: number;
   readonly sourceResult?: SearchResultRef;
+  readonly abortSignal?: AbortSignal;
 };
 
 export type InformationSourceSearchResponse = {
@@ -48,6 +50,7 @@ export type PageFetchLike = (
   init: {
     readonly method: "GET";
     readonly headers: Record<string, string>;
+    readonly signal?: AbortSignal;
   }
 ) => Promise<{
   readonly ok: boolean;
@@ -71,6 +74,7 @@ export function createWebInformationSourceAdapter(options: {
             callerAgentId: "research-runtime",
             traceId: request.traceId ?? "research-trace",
             goalId: request.goalId ?? "research-goal",
+            abortSignal: request.abortSignal,
           }
         )
       );
@@ -133,6 +137,7 @@ export function createPageInformationSourceAdapter(options: {
           accept: "text/html,text/plain;q=0.9,*/*;q=0.5",
           "user-agent": "AgentArbor-ResearchRuntime/0.1",
         },
+        signal: request.abortSignal,
       });
       if (!response.ok) {
         return {

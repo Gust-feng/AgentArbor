@@ -2,6 +2,7 @@ import type {
   IntelligenceChannel,
   ModelProvider,
   ModelRequest,
+  ModelRequestOptions,
   ModelResponse,
 } from "../../domain/intelligence/index.js";
 import type { InMemoryMessageBus } from "../messages/in-memory-message-bus.js";
@@ -22,7 +23,7 @@ export type NativeIntelligenceChannelOptions = {
 export class NativeIntelligenceChannel implements IntelligenceChannel {
   constructor(private readonly options: NativeIntelligenceChannelOptions) {}
 
-  async request(request: ModelRequest): Promise<ModelResponse> {
+  async request(request: ModelRequest, options: ModelRequestOptions = {}): Promise<ModelResponse> {
     const requestValidation = validateModelRequest(request);
     if (!requestValidation.passed) {
       const response = createFailedModelResponse({
@@ -46,7 +47,7 @@ export class NativeIntelligenceChannel implements IntelligenceChannel {
 
     this.options.bus.publish(createModelRequestedMessage({ request, provider: this.options.provider }));
 
-    const providerResponse = await this.options.provider.complete(request);
+    const providerResponse = await this.options.provider.complete(request, options);
     const validation = this.validateResponse(request, providerResponse);
     const response = normalizeValidatedResponse(providerResponse, validation);
 

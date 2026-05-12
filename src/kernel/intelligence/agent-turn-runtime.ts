@@ -20,7 +20,12 @@ import type {
 } from "../../domain/tools/index.js";
 import type { ConstraintRef } from "../../domain/constraints.js";
 import { createId, nowIso } from "../id.js";
-import { executeToolUseLoop, type ToolUseLoopResult } from "./tool-use-loop.js";
+import {
+  executeToolUseLoop,
+  resumeToolUseLoopFromApproval,
+  type ToolUseLoopPendingApproval,
+  type ToolUseLoopResult,
+} from "./tool-use-loop.js";
 
 export type AgentTurnFallbackBehavior = "deterministic" | "disabled";
 
@@ -48,10 +53,24 @@ export type AgentTurnRuntimeInput = {
   readonly requestId?: string;
   readonly toolChoice?: ModelToolChoice;
   readonly requestedAt?: string;
+  readonly abortSignal?: AbortSignal;
+};
+
+export type AgentTurnPendingApproval = {
+  readonly confirmationId: string;
+  readonly modelRequest: ModelRequest;
+  readonly toolLoop: ToolUseLoopPendingApproval;
+  readonly policy: AgentTurnPolicy;
+};
+
+export type AgentTurnResumeInput = {
+  readonly pendingApproval: AgentTurnPendingApproval;
+  readonly approvedConfirmationIds: readonly string[];
+  readonly abortSignal?: AbortSignal;
 };
 
 export type AgentTurnRuntimeResult = {
-  readonly status: "completed" | "failed" | "disabled";
+  readonly status: "completed" | "failed" | "disabled" | "approval_required" | "cancelled";
   readonly stoppedReason:
     | "completed"
     | "no_tool_calls"
@@ -59,6 +78,8 @@ export type AgentTurnRuntimeResult = {
     | "max_tool_rounds"
     | "max_model_rounds"
     | "model_failed"
+    | "approval_required"
+    | "cancelled"
     | "runtime_error";
   readonly fallback: AgentTurnFallbackBehavior;
   readonly modelRequestId?: string;
@@ -67,6 +88,7 @@ export type AgentTurnRuntimeResult = {
   readonly toolCalls: readonly ToolCallResult[];
   readonly modelRounds: number;
   readonly toolRounds: number;
+  readonly pendingApproval?: AgentTurnPendingApproval;
 };
 
 export type AgentTurnRuntimeOptions = {
@@ -106,6 +128,7 @@ export class AgentTurnRuntime {
     }
 
     try {
+      const modelRequest = createModelRequest({ input, policy, requestId });
       const loop = await executeToolUseLoop(
         {
           intelligenceChannel: this.options.intelligenceChannel,
@@ -117,16 +140,51 @@ export class AgentTurnRuntime {
           maxToolRounds: policy.maxToolRounds,
           allowedTools: policy.allowedTools,
           publishToolEvent: this.options.publishToolEvent,
+          abortSignal: input.abortSignal,
         },
-        createModelRequest({ input, policy, requestId })
+        modelRequest
       );
-      return toAgentTurnRuntimeResult(policy, loop);
+      return toAgentTurnRuntimeResult(policy, loop, modelRequest);
     } catch {
       return {
         status: "failed",
         stoppedReason: "runtime_error",
         fallback: policy.fallback,
         modelRequestId: requestId,
+        toolCalls: [],
+        modelRounds: 0,
+        toolRounds: 0,
+      };
+    }
+  }
+
+  async resume(input: AgentTurnResumeInput): Promise<AgentTurnRuntimeResult> {
+    const policy = normalizePolicy(input.pendingApproval.policy);
+    try {
+      const loop = await resumeToolUseLoopFromApproval(
+        {
+          intelligenceChannel: this.options.intelligenceChannel,
+          toolCenter: this.options.toolCenter ?? NO_TOOL_BROKER,
+          callerAgentId: policy.callerAgentId,
+          traceId: policy.traceId,
+          goalId: policy.goalId,
+          maxModelRounds: policy.maxModelRounds,
+          maxToolRounds: policy.maxToolRounds,
+          allowedTools: policy.allowedTools,
+          approvedConfirmationIds: input.approvedConfirmationIds,
+          publishToolEvent: this.options.publishToolEvent,
+          abortSignal: input.abortSignal,
+        },
+        input.pendingApproval.modelRequest,
+        input.pendingApproval.toolLoop
+      );
+      return toAgentTurnRuntimeResult(policy, loop, input.pendingApproval.modelRequest);
+    } catch {
+      return {
+        status: "failed",
+        stoppedReason: "runtime_error",
+        fallback: policy.fallback,
+        modelRequestId: input.pendingApproval.modelRequest.requestId,
         toolCalls: [],
         modelRounds: 0,
         toolRounds: 0,
@@ -158,11 +216,18 @@ function createModelRequest(input: {
 
 function toAgentTurnRuntimeResult(
   policy: AgentTurnPolicy,
-  loop: ToolUseLoopResult
+  loop: ToolUseLoopResult,
+  modelRequest: ModelRequest
 ): AgentTurnRuntimeResult {
   const stoppedReason = mapStoppedReason(loop);
   return {
-    status: stoppedReason === "completed" || stoppedReason === "no_tool_calls" ? "completed" : "failed",
+    status: stoppedReason === "completed" || stoppedReason === "no_tool_calls"
+      ? "completed"
+      : stoppedReason === "cancelled"
+        ? "cancelled"
+        : stoppedReason === "approval_required"
+          ? "approval_required"
+        : "failed",
     stoppedReason,
     fallback: policy.fallback,
     modelRequestId: loop.finalOutput.requestId,
@@ -171,6 +236,14 @@ function toAgentTurnRuntimeResult(
     toolCalls: loop.toolCalls,
     modelRounds: loop.modelRounds,
     toolRounds: loop.rounds,
+    pendingApproval: loop.pendingApproval === undefined
+      ? undefined
+      : {
+          confirmationId: loop.pendingApproval.confirmationId,
+          modelRequest,
+          toolLoop: loop.pendingApproval,
+          policy,
+        },
   };
 }
 

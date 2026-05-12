@@ -130,6 +130,19 @@ test("FileSystemRuntimeDatabase persists a safe Lite Profile run snapshot", asyn
         summary: "Safe artifact summary.",
       },
     ]);
+    await database.replaceConfirmations("panel-run-0001", [
+      {
+        confirmationId: "confirmation-0001",
+        runId: "panel-run-0001",
+        status: "pending",
+        title: "确认修改文件",
+        actionSummary: "修改 README.md",
+        affectedResources: ["README.md"],
+        riskLevel: "high",
+        requestedAt: "2026-05-10T00:00:01.000Z",
+        eventRefs: ["event:approval-0001"],
+      },
+    ]);
 
     const snapshot = await database.getRun("panel-run-0001");
     const runs = await database.listRuns();
@@ -144,6 +157,8 @@ test("FileSystemRuntimeDatabase persists a safe Lite Profile run snapshot", asyn
     assert.equal(snapshot?.toolCalls[0]?.toolName, "read_file");
     assert.equal(snapshot?.toolCalls[0]?.path, "README.md");
     assert.equal(snapshot?.artifacts[0]?.ref.id, "artifact-0001");
+    assert.equal(snapshot?.confirmations[0]?.confirmationId, "confirmation-0001");
+    assert.equal(snapshot?.confirmations[0]?.status, "pending");
     assert.deepEqual(runs.map((run) => run.runId), ["panel-run-0001"]);
     assert.equal(conversation?.turns[1]?.content, "Safe assistant result.");
     assert.deepEqual(conversations.map((item) => item.conversationId), ["conversation-0001"]);

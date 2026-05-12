@@ -128,6 +128,10 @@ export type ModelRequest = {
   readonly requestedAt: string;
 };
 
+export type ModelRequestOptions = {
+  readonly abortSignal?: AbortSignal;
+};
+
 export type ModelToolChoice =
   | "auto"
   | "none"
@@ -206,10 +210,10 @@ export type ModelProvider = {
   readonly providerKind: ModelProviderKind;
   readonly protocolKind: ModelProtocolKind;
   readonly model: string;
-  complete(request: ModelRequest): Promise<ModelResponse>;
+  complete(request: ModelRequest, options?: ModelRequestOptions): Promise<ModelResponse>;
 };
 
 export type IntelligenceChannel = {
-  request(request: ModelRequest): Promise<ModelResponse>;
+  request(request: ModelRequest, options?: ModelRequestOptions): Promise<ModelResponse>;
   validateResponse(request: ModelRequest, response: ModelResponse): ModelOutputValidationResult;
 };

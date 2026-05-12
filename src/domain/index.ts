@@ -1,5 +1,6 @@
 export * from "./contracts.js";
 export * from "./agentarbor/index.js";
+export * from "./basic-agent/index.js";
 export * from "./config/index.js";
 export * from "./intelligence/index.js";
 export * from "./observation/index.js";

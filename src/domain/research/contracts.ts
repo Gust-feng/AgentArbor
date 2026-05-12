@@ -28,6 +28,7 @@ export type InformationQuery = {
   readonly limit?: number;
   readonly traceId?: string;
   readonly goalId?: string;
+  readonly abortSignal?: AbortSignal;
 };
 
 export type InformationReadRequest = {
@@ -37,6 +38,7 @@ export type InformationReadRequest = {
   readonly maxLength?: number;
   readonly traceId?: string;
   readonly goalId?: string;
+  readonly abortSignal?: AbortSignal;
 };
 
 export type SearchResultRef = {

@@ -14,10 +14,11 @@ import type { EventLogEntry } from "../kernel/events/in-memory-event-log.js";
 import type { UndergroundAiMode } from "./intelligence-channel-factory.js";
 import { explainDesktopIntentDecision, type DesktopIntentDecision } from "./desktop-intent-router.js";
 import { createSafeAgentRunTreeView, type SafeAgentRunTreeView } from "./panel-canvas-read-model.js";
+import { safeCommandToolPreview, safeReadFileToolPreview } from "./safe-tool-preview.js";
 import type { UndergroundDemoSummary } from "./underground-demo-summary.js";
 import { friendlyUserFacingFailureText } from "./visible-text-safety.js";
 
-export type PanelRunStatus = "pending" | "running" | "completed" | "failed";
+export type PanelRunStatus = "pending" | "running" | "completed" | "failed" | "cancelled" | "blocked";
 
 export type PanelObservationReadModel = Pick<
   RunObservationSnapshot,
@@ -172,6 +173,9 @@ export type PanelTranscriptModelCall = {
 
 export type PanelRunStreamEventType =
   | "run.started"
+  | "run.cancelled"
+  | "run.blocked"
+  | "run.resumed"
   | "agent.note.delta"
   | "agent.note.completed"
   | "model.output.delta"
@@ -180,6 +184,7 @@ export type PanelRunStreamEventType =
   | "tool.completed"
   | "tool.failed"
   | "confirmation.needed"
+  | "user_approval.received"
   | "user.guidance"
   | "agent.delegation.planned"
   | "agent.child.started"
@@ -201,6 +206,24 @@ export type PanelRunStreamEventDetail = {
   readonly error?: string;
 };
 
+export type PanelRunStepToolItem = {
+  readonly toolName?: string;
+  readonly title: string;
+  readonly target?: string;
+  readonly preview?: string;
+  readonly exitCode?: number;
+  readonly truncated?: boolean;
+  readonly error?: string;
+  readonly status: "running" | "completed" | "failed";
+};
+
+export type PanelRunStep = {
+  readonly stepId: string;
+  readonly stepNumber: number;
+  readonly toolCalls: readonly PanelRunStepToolItem[];
+  readonly status: "running" | "completed" | "failed";
+};
+
 export type PanelRunStreamEvent = {
   readonly eventId: string;
   readonly runId: string;
@@ -210,7 +233,7 @@ export type PanelRunStreamEvent = {
   readonly agentLabel?: string;
   readonly summary?: string;
   readonly delta?: string;
-  readonly status?: "pending" | "running" | "completed" | "failed";
+  readonly status?: "pending" | "running" | "completed" | "failed" | "cancelled" | "blocked";
   readonly toolName?: string;
   readonly detail?: PanelRunStreamEventDetail;
   readonly sourceRefs: readonly string[];
@@ -228,6 +251,7 @@ export type PanelRunTranscript = {
   readonly status: PanelRunStatus;
   readonly updatedAt: string;
   readonly events: readonly PanelRunStreamEvent[];
+  readonly steps: readonly PanelRunStep[];
   readonly workNotes: readonly AgentWorkNote[];
   readonly modelCalls: readonly PanelTranscriptModelCall[];
 };
@@ -370,6 +394,70 @@ function packageTrackingFrom(input: {
   };
 }
 
+export function deriveRunSteps(
+  streamEvents: readonly PanelRunStreamEvent[]
+): readonly PanelRunStep[] {
+  const steps: PanelRunStep[] = [];
+  let currentToolCalls: PanelRunStepToolItem[] = [];
+  let stepNumber = 0;
+
+  for (const event of streamEvents) {
+    if (
+      event.type === "agent.note.delta" ||
+      event.type === "agent.note.completed" ||
+      event.type === "agent.child.started" ||
+      event.type === "agent.delegation.planned"
+    ) {
+      if (currentToolCalls.length > 0) {
+        stepNumber += 1;
+        steps.push({
+          stepId: `${event.runId}:step:${stepNumber}`,
+          stepNumber,
+          toolCalls: currentToolCalls,
+          status: currentToolCalls.some((tc) => tc.status === "failed") ? "failed" : "completed",
+        });
+        currentToolCalls = [];
+      }
+    }
+
+    if (
+      event.type === "tool.requested" ||
+      event.type === "tool.completed" ||
+      event.type === "tool.failed"
+    ) {
+      const status: "running" | "completed" | "failed" =
+        event.type === "tool.failed" ? "failed" :
+        event.type === "tool.completed" ? "completed" :
+        "running";
+
+      const target = event.detail?.path ?? event.detail?.query ?? event.detail?.command;
+
+      currentToolCalls.push({
+        toolName: event.toolName,
+        title: event.summary ?? event.toolName ?? "工具调用",
+        target,
+        preview: event.detail?.preview,
+        exitCode: event.detail?.exitCode,
+        truncated: event.detail?.truncated,
+        error: event.detail?.error,
+        status,
+      });
+    }
+  }
+
+  if (currentToolCalls.length > 0) {
+    stepNumber += 1;
+    steps.push({
+      stepId: `${streamEvents[0]?.runId ?? "unknown"}:step:${stepNumber}`,
+      stepNumber,
+      toolCalls: currentToolCalls,
+      status: currentToolCalls.some((tc) => tc.status === "failed") ? "failed" : "completed",
+    });
+  }
+
+  return steps;
+}
+
 export function createPanelRunTranscript(input: {
   readonly runId: string;
   readonly status: PanelRunStatus;
@@ -447,11 +535,13 @@ export function createPanelRunTranscript(input: {
           createConvergenceJudgeNote(noteInput),
           createHandoffStewardNote(noteInput),
         ];
+  const steps = deriveRunSteps(streamEvents);
   return {
     runId: input.runId,
     status: input.status,
     updatedAt: input.updatedAt,
     events: streamEvents,
+    steps,
     workNotes,
     modelCalls,
   };
@@ -491,6 +581,37 @@ export function createPanelRunStreamEvents(input: {
     modelCallRefs: [],
     toolCallRefs: [],
   });
+
+  if (input.status === "cancelled") {
+    push({
+      eventId: `${input.runId}:run.cancelled`,
+      runId: input.runId,
+      type: "run.cancelled",
+      createdAt: input.updatedAt,
+      agentLabel: "AgentArbor",
+      summary: "运行已取消。",
+      status: "cancelled",
+      sourceRefs: [],
+      modelCallRefs: [],
+      toolCallRefs: [],
+    });
+    return events;
+  }
+
+  if (input.status === "blocked") {
+    push({
+      eventId: `${input.runId}:run.blocked`,
+      runId: input.runId,
+      type: "run.blocked",
+      createdAt: input.updatedAt,
+      agentLabel: "AgentArbor",
+      summary: friendlyUserFacingFailureText(input.error?.message ?? "运行已暂停，等待用户确认或补充指导。"),
+      status: "blocked",
+      sourceRefs: [],
+      modelCallRefs: [],
+      toolCallRefs: [],
+    });
+  }
 
   for (const entry of input.eventEntries) {
     if (shouldSuppressOrdinaryGoalEvent(entry.type, input.desktopMode, input.routeDecision)) {
@@ -790,7 +911,12 @@ function modelCallRefsFor(entry: EventLogEntry, payload: Readonly<Record<string,
 }
 
 function toolCallRefsFor(entry: EventLogEntry, payload: Readonly<Record<string, unknown>>): readonly string[] {
-  if (entry.type !== "tool.requested" && entry.type !== "tool.completed" && entry.type !== "tool.failed") {
+  if (
+    entry.type !== "tool.requested" &&
+    entry.type !== "tool.completed" &&
+    entry.type !== "tool.failed" &&
+    entry.type !== "user_approval.requested"
+  ) {
     return [];
   }
   return stringOrUndefined(payload.callId) === undefined ? [] : [stringOrUndefined(payload.callId) as string];
@@ -942,28 +1068,22 @@ function safeReadFilePreview(
   output: Readonly<Record<string, unknown>>,
   result: Readonly<Record<string, unknown>>
 ): string | undefined {
-  const summary = stringOrUndefined(output.summary);
-  const path = stringOrUndefined(result.path);
-  const bytes = typeof result.bytes === "number" ? `${result.bytes} bytes` : undefined;
-  const headline = summary ?? [path, bytes].filter(isString).join(" · ");
-  return compactStreamDetailText(
-    `${headline || "文件已读取。"}\n文件正文已进入本轮授权上下文，普通面板只展示路径、大小和截断状态。`,
-    900
-  );
+  return safeReadFileToolPreview({
+    summary: stringOrUndefined(output.summary),
+    path: stringOrUndefined(result.path),
+    bytes: typeof result.bytes === "number" ? result.bytes : undefined,
+  });
 }
 
 function safeCommandPreview(
   output: Readonly<Record<string, unknown>>,
   result: Readonly<Record<string, unknown>>
 ): string | undefined {
-  const summary = stringOrUndefined(output.summary);
-  const command = stringOrUndefined(result.command);
-  const exit = typeof result.exitCode === "number" ? `exit ${result.exitCode}` : undefined;
-  const headline = summary ?? [command, exit].filter(isString).join(" · ");
-  return compactStreamDetailText(
-    `${headline || "命令已执行。"}\n命令输出只进入本轮工具结果上下文；普通面板不展开 stdout / stderr 原文。`,
-    900
-  );
+  return safeCommandToolPreview({
+    summary: stringOrUndefined(output.summary),
+    command: stringOrUndefined(result.command),
+    exitCode: typeof result.exitCode === "number" ? result.exitCode : undefined,
+  });
 }
 
 function compactStreamDetailText(value: string | undefined, maxLength: number): string | undefined {
@@ -1787,6 +1907,12 @@ function modelStatus(
 function waitingPointFor(status: PanelRunStatus, lastEventType: ArborMessageType | undefined): string {
   if (status === "pending") {
     return "等待后台运行启动。";
+  }
+  if (status === "cancelled") {
+    return "运行已取消。";
+  }
+  if (status === "blocked") {
+    return "运行已暂停，等待用户确认或补充指导。";
   }
   if (status === "failed") {
     return "运行失败，查看错误摘要。";

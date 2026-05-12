@@ -18,6 +18,7 @@ import {
   type DesktopAgentConversationMessage,
   type DesktopAgentSessionRuntimeContext,
 } from "./desktop-agent-session.js";
+import type { DesktopAgentSkillContext } from "./desktop-agent-prompts.js";
 import {
   explainDesktopIntentDecision,
   type DesktopIntentDecision,
@@ -30,6 +31,13 @@ import {
 import { createUndergroundDemoSummary, type UndergroundDemoAiInput, type UndergroundDemoSummary } from "./underground-demo-summary.js";
 import { ConfigCenter, WorkspaceDirectoryValidationError, createLocalConfigCenter } from "./config-center.js";
 import { createPanelHtml } from "./panel-assets.js";
+import type { BasicAgentRun, ConfirmationDecision, RunEvent } from "../domain/basic-agent/index.js";
+import {
+  BasicAgentRunExecutor,
+  type BasicAgentPendingToolContinuation,
+  type BasicAgentRunExecutionInput,
+} from "./basic-agent-run-executor.js";
+import type { BasicAgentRunReplay } from "./basic-agent-run-event-hub.js";
 import type {
   SanitizedInformationAccessConfig,
   SanitizedModelProviderConfig,
@@ -43,6 +51,7 @@ import type {
 import type { ModelOutputDelta } from "../domain/intelligence/index.js";
 import type {
   RuntimeArtifactRecord,
+  RuntimeConfirmationRecord,
   RuntimeDatabase,
   RuntimeEventRecord,
   RuntimeModelCallRecord,
@@ -86,11 +95,20 @@ import {
   type DesktopTaskSoilInput,
 } from "./task-soil-workspace.js";
 import { createMinimalRuntime } from "./runtime.js";
+import { safeCommandToolPreview, safeReadFileToolPreview } from "./safe-tool-preview.js";
 import {
   friendlyUserFacingFailureText,
   sanitizeAssistantVisibleText,
   sanitizeConversationHistoryText,
 } from "./visible-text-safety.js";
+import {
+  FileSystemSkillStateStore,
+  discoverSkills,
+  loadSkillBody,
+  resolveSkillStateStorePath,
+  selectTriggeredSkills,
+  type SkillStateStore,
+} from "./skills/index.js";
 import { redactSensitiveText } from "../kernel/redaction.js";
 
 export type PanelServerOptions = {
@@ -101,6 +119,7 @@ export type PanelServerOptions = {
   readonly runtimeDatabase?: RuntimeDatabase;
   readonly providerFetch?: PanelProviderFetch;
   readonly workspaceDirectoryPicker?: () => Promise<string | undefined>;
+  readonly skillRoots?: readonly string[];
 };
 
 export type PanelProviderFetch = (
@@ -109,6 +128,7 @@ export type PanelProviderFetch = (
     readonly method: "POST";
     readonly headers: Record<string, string>;
     readonly body: string;
+    readonly signal?: AbortSignal;
   }
 ) => Promise<{
   readonly ok: boolean;
@@ -132,9 +152,14 @@ type PanelRuntime = {
   readonly workspaceDirectoryPicker?: () => Promise<string | undefined>;
   readonly runJobs: PanelRunJobStore;
   readonly activeRunJobs: Set<Promise<void>>;
+  readonly abortControllers: Map<string, AbortController>;
+  readonly persistenceChains: Map<string, Promise<void>>;
+  readonly runExecutor: BasicAgentRunExecutor;
   readonly conversations: PanelConversationStore;
   readonly runtimeDatabase?: RuntimeDatabase;
   readonly runtimePaths?: FileSystemRuntimeDatabasePaths;
+  readonly skillRoots: readonly string[];
+  readonly skillStateStore?: SkillStateStore;
 };
 
 type PanelRunResponse = {
@@ -150,6 +175,7 @@ type PanelRunResponse = {
   readonly trace: PanelRunTraceReadModel;
   readonly transcript: PanelRunTranscript;
   readonly workNotes: PanelRunTranscript["workNotes"];
+  readonly steps: PanelRunTranscript["steps"];
   readonly streamCursor: PanelRunStreamCursor;
   readonly canvas?: PanelRunCanvasReadModel;
 };
@@ -166,6 +192,7 @@ type PanelRunJobResponse = {
   readonly tracking: PanelRunTrackingReadModel;
   readonly transcript: PanelRunTranscript;
   readonly workNotes: PanelRunTranscript["workNotes"];
+  readonly steps: PanelRunTranscript["steps"];
   readonly streamCursor: PanelRunStreamCursor;
   readonly summary?: UndergroundDemoSummary | { readonly ai: UndergroundDemoSummary["ai"] };
   readonly observation?: PanelObservationReadModel;
@@ -186,6 +213,7 @@ type PanelRunJobResponse = {
     readonly workspace?: RuntimeWorkspaceRecord;
     readonly toolCalls: readonly RuntimeToolCallRecord[];
     readonly artifacts: readonly RuntimeArtifactRecord[];
+    readonly confirmations: readonly RuntimeConfirmationRecord[];
   };
 };
 
@@ -195,6 +223,14 @@ type PanelRunExecutionResult = {
   readonly eventEntries: readonly EventLogEntry[];
   readonly agentRunTree?: AgentRunTree;
   readonly canvas?: PanelRunCanvasReadModel;
+  readonly pendingApproval?: BasicAgentPendingToolContinuation;
+};
+
+type PanelRunExecutionOptions = {
+  readonly conversationHistory?: readonly DesktopAgentConversationMessage[];
+  readonly abortSignal?: AbortSignal;
+  readonly onRuntimeReady?: (context: PanelRuntimeReadyContext) => void;
+  readonly onModelOutputDelta?: (delta: ModelOutputDelta) => void;
 };
 
 type PanelDesktopRouteReadModel = {
@@ -256,29 +292,96 @@ export function createPanelRequestHandler(options: PanelServerOptions | PanelRun
 function createPanelRuntime(options: PanelServerOptions): PanelRuntime {
   if (options.configCenter !== undefined) {
     const runtimePersistence = createPanelRuntimePersistence(options.configDirectory, options.runtimeDatabase);
-    return {
+    return assemblePanelRuntime({
       configCenter: options.configCenter,
       configDirectory: options.configDirectory,
       providerFetch: options.providerFetch,
       workspaceDirectoryPicker: options.workspaceDirectoryPicker,
-      runJobs: new PanelRunJobStore(),
-      activeRunJobs: new Set<Promise<void>>(),
-      conversations: new PanelConversationStore(),
+      skillRoots: resolveSkillRoots(options),
+      skillStateStore: resolveSkillStateStore(options.configDirectory),
       ...runtimePersistence,
-    };
+    });
   }
   const local = createLocalConfigCenter({ configDirectory: options.configDirectory });
   const runtimePersistence = createPanelRuntimePersistence(local.configDirectory, options.runtimeDatabase);
-  return {
+  return assemblePanelRuntime({
     configCenter: local.configCenter,
     configDirectory: local.configDirectory,
     providerFetch: options.providerFetch,
     workspaceDirectoryPicker: options.workspaceDirectoryPicker,
-    runJobs: new PanelRunJobStore(),
-    activeRunJobs: new Set<Promise<void>>(),
-    conversations: new PanelConversationStore(),
+    skillRoots: resolveSkillRoots(options),
+    skillStateStore: resolveSkillStateStore(local.configDirectory),
     ...runtimePersistence,
+  });
+}
+
+function assemblePanelRuntime(input: {
+  readonly configCenter: ConfigCenter;
+  readonly configDirectory?: string;
+  readonly providerFetch?: PanelProviderFetch;
+  readonly workspaceDirectoryPicker?: () => Promise<string | undefined>;
+  readonly runtimeDatabase?: RuntimeDatabase;
+  readonly runtimePaths?: FileSystemRuntimeDatabasePaths;
+  readonly skillRoots: readonly string[];
+  readonly skillStateStore?: SkillStateStore;
+}): PanelRuntime {
+  const runJobs = new PanelRunJobStore();
+  const activeRunJobs = new Set<Promise<void>>();
+  const abortControllers = new Map<string, AbortController>();
+  const persistenceChains = new Map<string, Promise<void>>();
+  const conversations = new PanelConversationStore();
+  const runtime: Omit<PanelRuntime, "runExecutor"> & { runExecutor?: BasicAgentRunExecutor } = {
+    configCenter: input.configCenter,
+    configDirectory: input.configDirectory,
+    providerFetch: input.providerFetch,
+    workspaceDirectoryPicker: input.workspaceDirectoryPicker,
+    runJobs,
+    activeRunJobs,
+    abortControllers,
+    persistenceChains,
+    conversations,
+    runtimeDatabase: input.runtimeDatabase,
+    runtimePaths: input.runtimePaths,
+    skillRoots: input.skillRoots,
+    skillStateStore: input.skillStateStore,
   };
+  runtime.runExecutor = new BasicAgentRunExecutor({
+    getModelProviderConfig: () => runtime.configCenter.getModelProviderConfig(),
+    getInformationAccessConfig: () => runtime.configCenter.getInformationAccessConfig(),
+    runJobs,
+    activeRunJobs,
+    abortControllers,
+    persistRun: (job) => persistPanelRun(runtime as PanelRuntime, job),
+    executionAdapter: {
+      execute: (execution) => executeBasicPanelRun(runtime as PanelRuntime, execution),
+    },
+    failRun: (job, error) => failPanelRunJob(runtime as PanelRuntime, job, error),
+    onRuntimeReady: (runId, context) => {
+      runtime.runJobs.attachRuntime({
+        runId,
+        runtime: context.runtime,
+        traceId: context.traceId,
+        goalId: context.goalId,
+      });
+    },
+    onModelOutputDelta: (runId, delta) => appendLiveModelOutputDelta(runtime as PanelRuntime, runId, delta),
+    onRunFinished: async (job) => {
+      syncConversationTurnForJob(runtime as PanelRuntime, job);
+      scheduleNextQueuedConversationRun(runtime as PanelRuntime, job);
+    },
+    onGuidanceSubmitted: async ({ job, guidance }) => {
+      await startGuidanceFollowUpRun(runtime as PanelRuntime, job, guidance);
+    },
+  });
+  return runtime as PanelRuntime;
+}
+
+function resolveSkillRoots(options: PanelServerOptions): readonly string[] {
+  return options.skillRoots ?? [path.join(process.cwd(), ".agents", "skills")];
+}
+
+function resolveSkillStateStore(configDirectory: string | undefined): SkillStateStore | undefined {
+  return configDirectory === undefined ? undefined : new FileSystemSkillStateStore(resolveSkillStateStorePath(configDirectory));
 }
 
 function createPanelRuntimePersistence(
@@ -520,6 +623,56 @@ async function handlePanelRequest(
     return;
   }
 
+  if (request.method === "GET" && url.pathname === "/api/skills") {
+    writeJson(response, 200, {
+      ok: true,
+      skills: await discoverSkills({ roots: runtime.skillRoots, stateStore: runtime.skillStateStore }),
+    });
+    return;
+  }
+
+  const skillStateMatch = /^\/api\/skills\/([^/]+)\/state$/.exec(url.pathname);
+  if (request.method === "POST" && skillStateMatch !== null) {
+    await handleUpdateSkillStateRequest(runtime, decodeURIComponent(skillStateMatch[1] ?? ""), request, response);
+    return;
+  }
+
+  const basicRunEventsMatch = /^\/api\/basic-agent\/runs\/([^/]+)\/events$/.exec(url.pathname);
+  if (request.method === "GET" && basicRunEventsMatch !== null) {
+    await handleGetBasicRunEventsRequest(
+      runtime,
+      decodeURIComponent(basicRunEventsMatch[1] ?? ""),
+      url,
+      request,
+      response
+    );
+    return;
+  }
+
+  const basicRunMatch = /^\/api\/basic-agent\/runs\/([^/]+)$/.exec(url.pathname);
+  if (request.method === "GET" && basicRunMatch !== null) {
+    await handleGetBasicRunRequest(runtime, decodeURIComponent(basicRunMatch[1] ?? ""), response);
+    return;
+  }
+
+  const basicRunCancelMatch = /^\/api\/basic-agent\/runs\/([^/]+)\/cancel$/.exec(url.pathname);
+  if (request.method === "POST" && basicRunCancelMatch !== null) {
+    await handleCancelBasicRunRequest(runtime, decodeURIComponent(basicRunCancelMatch[1] ?? ""), response);
+    return;
+  }
+
+  const confirmationDecisionMatch = /^\/api\/basic-agent\/runs\/([^/]+)\/confirmations\/([^/]+)\/decision$/.exec(url.pathname);
+  if (request.method === "POST" && confirmationDecisionMatch !== null) {
+    await handleConfirmationDecisionRequest(
+      runtime,
+      decodeURIComponent(confirmationDecisionMatch[1] ?? ""),
+      decodeURIComponent(confirmationDecisionMatch[2] ?? ""),
+      request,
+      response
+    );
+    return;
+  }
+
   const runStreamMatch = /^\/api\/underground\/runs\/([^/]+)\/stream$/.exec(url.pathname);
   if (request.method === "GET" && runStreamMatch !== null) {
     handleGetRunStreamRequest(runtime, decodeURIComponent(runStreamMatch[1] ?? ""), "underground", url, request, response);
@@ -593,6 +746,7 @@ async function handleRunRequest(
       trace,
       transcript,
       workNotes: transcript.workNotes,
+      steps: transcript.steps,
       streamCursor: {
         runId: responseRunId,
         lastSequence: transcript.events.at(-1)?.sequence ?? 0,
@@ -632,22 +786,18 @@ async function handleStartRunRequest(
 ): Promise<void> {
   const body = await readJsonBody(request);
   const config = await runtime.configCenter.getModelProviderConfig();
-  const informationAccess = await runtime.configCenter.getInformationAccessConfig();
   const runInput = parseRunInput(body, defaultAiModeForRunKind(runKind, config.defaultAiMode));
-  const job = runtime.runJobs.create({
+  const basicRun = await runtime.runExecutor.start({
     runKind,
     runMode: runInput.runMode,
     goal: runInput.goal,
     aiMode: runInput.aiMode,
     routeDecision: undefined,
     taskSoilInput: runInput.taskSoilInput,
-    config,
-    informationAccess,
   });
-  await persistPanelRun(runtime, job);
+  const job = requirePanelRunJob(runtime, basicRun.runId);
 
   writeJson(response, 202, createPanelRunJobResponse(runtime, job));
-  schedulePanelRunJob(runtime, job.runId);
 }
 
 async function handleConversationMessageRequest(
@@ -677,7 +827,7 @@ async function handleConversationMessageRequest(
     throw new PanelHttpError(409, "conversation_busy", message);
   }
 
-  const job = runtime.runJobs.create({
+  const basicRun = await runtime.runExecutor.start({
     runKind: "desktop",
     runMode: runInput.runMode,
     goal: runInput.goal,
@@ -687,15 +837,18 @@ async function handleConversationMessageRequest(
     runAfterRunId,
     routeDecision: undefined,
     taskSoilInput: mergedTaskSoilInput,
-    config,
-    informationAccess,
+    startImmediately: !shouldQueue,
   });
+  const job = requirePanelRunJob(runtime, basicRun.runId);
   if (shouldQueue) {
     runtime.conversations.queueRun({
       conversationId: started.conversation.conversationId,
       assistantTurnId: started.assistantTurn.turnId,
       runId: job.runId,
     });
+    if (queuedRunCanStartNow(runtime, runAfterRunId)) {
+      schedulePanelRunJob(runtime, job.runId);
+    }
   } else {
     runtime.conversations.attachRun({
       conversationId: started.conversation.conversationId,
@@ -710,9 +863,64 @@ async function handleConversationMessageRequest(
     conversation: runtime.conversations.getReadModel(started.conversation.conversationId),
     run: createPanelRunJobResponse(runtime, job),
   });
-  if (!shouldQueue) {
-    schedulePanelRunJob(runtime, job.runId);
+}
+
+async function startGuidanceFollowUpRun(
+  runtime: PanelRuntime,
+  job: PanelRunJob,
+  guidance: string
+): Promise<void> {
+  if (job.conversationId === undefined || guidance.trim().length === 0) {
+    return;
   }
+  const started = runtime.conversations.startDesktopMessage({
+    goal: guidance,
+    taskSoilInput: job.taskSoilInput,
+    conversationId: job.conversationId,
+  });
+  const basicRun = await runtime.runExecutor.start({
+    runKind: "desktop",
+    runMode: job.runMode,
+    goal: guidance,
+    aiMode: job.aiMode,
+    conversationId: started.conversation.conversationId,
+    assistantTurnId: started.assistantTurn.turnId,
+    routeDecision: undefined,
+    taskSoilInput: job.taskSoilInput,
+    startImmediately: true,
+  });
+  const followUpJob = requirePanelRunJob(runtime, basicRun.runId);
+  runtime.conversations.attachRun({
+    conversationId: started.conversation.conversationId,
+    assistantTurnId: started.assistantTurn.turnId,
+    runId: followUpJob.runId,
+  });
+  await persistPanelRun(runtime, followUpJob);
+  await persistPanelConversation(runtime, started.conversation.conversationId);
+}
+
+function queuedRunCanStartNow(runtime: PanelRuntime, predecessorRunId: string | undefined): boolean {
+  if (predecessorRunId === undefined) {
+    return true;
+  }
+  const predecessor = runtime.runJobs.get(predecessorRunId);
+  return predecessor === undefined || isTerminalPanelRunStatus(predecessor.status);
+}
+
+function requirePanelRunJob(runtime: PanelRuntime, runId: string): PanelRunJob {
+  const job = runtime.runJobs.get(runId);
+  if (job === undefined) {
+    throw new PanelHttpError(404, "run_not_found", "未找到基础 Agent 运行。");
+  }
+  return job;
+}
+
+function requireBasicRun(runtime: PanelRuntime, runId: string): BasicAgentRun {
+  const run = runtime.runExecutor.get(runId);
+  if (run === undefined) {
+    throw new PanelHttpError(404, "run_not_found", "未找到基础 Agent 运行。");
+  }
+  return run;
 }
 
 async function handleGetRunRequest(
@@ -723,6 +931,9 @@ async function handleGetRunRequest(
 ): Promise<void> {
   const job = runtime.runJobs.get(runId);
   if (job !== undefined && job.runKind === expectedRunKind) {
+    if (isTerminalPanelRunStatus(job.status)) {
+      await persistPanelRun(runtime, job);
+    }
     writeJson(response, 200, createPanelRunJobResponse(runtime, job));
     return;
   }
@@ -778,7 +989,7 @@ function handleGetRunStreamRequest(
       cleanup();
       return;
     }
-    const events = syncPanelRunStreamEventsForJob(current);
+    const events = syncPanelRunStreamEventsForJob(runtime, current);
     for (const event of events) {
       if (event.sequence <= lastSequence) {
         continue;
@@ -786,7 +997,7 @@ function handleGetRunStreamRequest(
       writeSseEvent(response, event);
       lastSequence = event.sequence;
     }
-    if (current.status === "completed" || current.status === "failed") {
+    if (isTerminalPanelRunStatus(current.status)) {
       cleanup();
     }
   };
@@ -803,6 +1014,306 @@ function handleGetRunStreamRequest(
   const interval = setInterval(flush, 100);
   request.on("close", cleanup);
   flush();
+}
+
+function handleGetBasicRunEventsRequest(
+  runtime: PanelRuntime,
+  runId: string,
+  url: URL,
+  request: IncomingMessage,
+  response: ServerResponse
+): Promise<void> | void {
+  const job = runtime.runJobs.get(runId);
+  if (job !== undefined) {
+    syncPanelRunStreamEventsForJob(runtime, job);
+  }
+  const cursor = parseStreamCursor(url.searchParams.get("cursor"), request.headers["last-event-id"]);
+  const replay = runtime.runExecutor.replayEvents(runId, cursor);
+  if (replay === undefined) {
+    return runtime.runtimeDatabase?.getRun(runId).then((snapshot) => {
+      if (snapshot === undefined) {
+        throw new PanelHttpError(404, "run_not_found", "未找到基础 Agent 运行事件。");
+      }
+      const restored = basicRunReplayFromSnapshot(snapshot);
+      writeJson(response, 200, {
+        ok: true,
+        runId,
+        cursor: restored.cursor,
+        events: restored.events.filter((event: RunEvent) => event.sequence > cursor),
+      });
+    }) ?? (() => {
+      throw new PanelHttpError(404, "run_not_found", "未找到基础 Agent 运行事件。");
+    })();
+  }
+  writeJson(response, 200, {
+    ok: true,
+    runId,
+    cursor: replay.cursor,
+    events: replay.events,
+  });
+}
+
+async function handleGetBasicRunRequest(
+  runtime: PanelRuntime,
+  runId: string,
+  response: ServerResponse
+): Promise<void> {
+  const job = runtime.runJobs.get(runId);
+  if (job !== undefined) {
+    syncPanelRunStreamEventsForJob(runtime, job);
+    writeJson(response, 200, {
+      ok: true,
+      run: requireBasicRun(runtime, runId),
+    });
+    return;
+  }
+  const snapshot = await runtime.runtimeDatabase?.getRun(runId);
+  if (snapshot === undefined) {
+    throw new PanelHttpError(404, "run_not_found", "未找到基础 Agent 运行。");
+  }
+  writeJson(response, 200, {
+    ok: true,
+    run: basicRunFromSnapshot(snapshot),
+  });
+}
+
+async function handleCancelBasicRunRequest(
+  runtime: PanelRuntime,
+  runId: string,
+  response: ServerResponse
+): Promise<void> {
+  const run = await runtime.runExecutor.cancel(runId).catch((error: unknown) => {
+    if (error instanceof Error && error.message.includes("not found")) {
+      throw new PanelHttpError(404, "run_not_found", "未找到基础 Agent 运行。");
+    }
+    throw error;
+  });
+  writeJson(response, 200, { ok: true, run });
+}
+
+async function handleConfirmationDecisionRequest(
+  runtime: PanelRuntime,
+  runId: string,
+  confirmationId: string,
+  request: IncomingMessage,
+  response: ServerResponse
+): Promise<void> {
+  const body = await readJsonBody(request);
+  const decision = parseConfirmationDecision(body);
+  const run = await runtime.runExecutor.submitConfirmationDecision({
+    runId,
+    confirmationId,
+    decision: decision.decision,
+    guidance: decision.guidance,
+  }).catch(async (error: unknown) => {
+    if (error instanceof Error && error.message.includes("not found")) {
+      const restored = await submitRestoredConfirmationDecision(runtime, runId, confirmationId, decision);
+      if (restored !== undefined) {
+        return restored;
+      }
+      throw new PanelHttpError(404, "run_not_found", "未找到基础 Agent 运行。");
+    }
+    throw error;
+  });
+  writeJson(response, 200, { ok: true, run });
+}
+
+async function submitRestoredConfirmationDecision(
+  runtime: PanelRuntime,
+  runId: string,
+  confirmationId: string,
+  decision: Pick<ConfirmationDecision, "decision" | "guidance">
+): Promise<BasicAgentRun | undefined> {
+  const snapshot = await runtime.runtimeDatabase?.getRun(runId);
+  if (runtime.runtimeDatabase === undefined || snapshot === undefined) {
+    return undefined;
+  }
+  const decidedAt = new Date().toISOString();
+  const blockedByMissingContinuation = decision.decision === "approve_once";
+  const nextRun: RuntimeRunRecord = {
+    ...snapshot.run,
+    status: decision.decision === "guidance" ? snapshot.run.status : "blocked",
+    updatedAt: decidedAt,
+    completedAt: decision.decision === "guidance" ? snapshot.run.completedAt : decidedAt,
+    error: decision.decision === "guidance"
+      ? snapshot.run.error
+      : {
+          code: blockedByMissingContinuation ? "confirmation_continuation_lost" : "confirmation_denied",
+          message: blockedByMissingContinuation
+            ? "运行已中断，需要重新发起或继续处理。"
+            : "用户已拒绝本次操作，运行已暂停。",
+        },
+  };
+  const nextConfirmations = upsertRestoredConfirmation({
+    snapshot,
+    confirmationId,
+    decision,
+    decidedAt,
+  });
+  const events = [
+    ...snapshot.basicEvents,
+    restoredConfirmationDecisionEvent({
+      runId,
+      confirmationId,
+      decision,
+      decidedAt,
+      sequence: nextBasicEventSequence(snapshot.basicEvents),
+    }),
+  ];
+  const blockedEvents = decision.decision === "guidance"
+    ? events
+    : [
+        ...events,
+        restoredBlockedEvent({
+          runId,
+          decidedAt,
+          sequence: nextBasicEventSequence(events),
+          summary: nextRun.error?.message ?? "运行已中断，需要重新发起或继续处理。",
+        }),
+      ];
+  const nextSnapshot: RuntimeRunSnapshot = {
+    ...snapshot,
+    run: nextRun,
+    basicEvents: blockedEvents,
+    confirmations: nextConfirmations,
+  };
+  const basicRun = basicRunFromSnapshot(nextSnapshot);
+
+  await runtime.runtimeDatabase.upsertRun(nextRun);
+  await runtime.runtimeDatabase.replaceConfirmations(runId, nextConfirmations);
+  await runtime.runtimeDatabase.replaceBasicRunEvents(runId, blockedEvents);
+  await runtime.runtimeDatabase.upsertBasicRun(basicRun);
+  return basicRun;
+}
+
+function upsertRestoredConfirmation(input: {
+  readonly snapshot: RuntimeRunSnapshot;
+  readonly confirmationId: string;
+  readonly decision: Pick<ConfirmationDecision, "decision" | "guidance">;
+  readonly decidedAt: string;
+}): readonly RuntimeConfirmationRecord[] {
+  const status =
+    input.decision.decision === "approve_once"
+      ? "approved"
+      : input.decision.decision === "deny"
+        ? "denied"
+        : "guidance";
+  const previous = input.snapshot.confirmations.find((confirmation) => confirmation.confirmationId === input.confirmationId);
+  const next: RuntimeConfirmationRecord = {
+    confirmationId: input.confirmationId,
+    runId: input.snapshot.run.runId,
+    conversationId: previous?.conversationId ?? input.snapshot.run.conversationId,
+    status,
+    title: previous?.title ?? "用户确认",
+    actionSummary: previous?.actionSummary ?? "用户已补充确认或指导。",
+    affectedResources: previous?.affectedResources ?? [],
+    riskLevel: previous?.riskLevel ?? "medium",
+    requestedAt: previous?.requestedAt ?? input.decidedAt,
+    expiresAt: previous?.expiresAt,
+    decidedAt: input.decidedAt,
+    guidance:
+      input.decision.guidance === undefined
+        ? previous?.guidance
+        : compactRuntimeText(input.decision.guidance, 500),
+    eventRefs: unique([...(previous?.eventRefs ?? []), `confirmation:${input.confirmationId}`]),
+  };
+  return [
+    ...input.snapshot.confirmations.filter((confirmation) => confirmation.confirmationId !== input.confirmationId),
+    next,
+  ];
+}
+
+function restoredConfirmationDecisionEvent(input: {
+  readonly runId: string;
+  readonly confirmationId: string;
+  readonly decision: Pick<ConfirmationDecision, "decision" | "guidance">;
+  readonly decidedAt: string;
+  readonly sequence: number;
+}): RunEvent {
+  const guidance = input.decision.guidance === undefined ? undefined : compactRuntimeText(input.decision.guidance, 240);
+  return {
+    id: `${input.runId}:restored:confirmation:${input.confirmationId}:${input.decision.decision}`,
+    runId: input.runId,
+    sequence: input.sequence,
+    type: input.decision.decision === "guidance" ? "user.guidance" : "user_approval.received",
+    title: input.decision.decision === "guidance" ? "收到用户指导" : "收到确认结果",
+    summary:
+      input.decision.decision === "approve_once"
+        ? "已批准本次操作，但运行已中断，需要重新发起或继续处理。"
+        : input.decision.decision === "deny"
+          ? "已拒绝本次操作，运行不会继续执行该动作。"
+          : guidance === undefined
+            ? "已收到补充指导。"
+            : `已收到补充指导：${guidance}`,
+    status:
+      input.decision.decision === "guidance"
+        ? "needs_input"
+        : "blocked",
+    timestamp: input.decidedAt,
+    refs: [{ kind: "event", id: `confirmation:${input.confirmationId}` }],
+    visibility: "expanded",
+  };
+}
+
+function restoredBlockedEvent(input: {
+  readonly runId: string;
+  readonly decidedAt: string;
+  readonly sequence: number;
+  readonly summary: string;
+}): RunEvent {
+  return {
+    id: `${input.runId}:restored:run.blocked`,
+    runId: input.runId,
+    sequence: input.sequence,
+    type: "run.blocked",
+    title: "任务已暂停",
+    summary: compactRuntimeText(input.summary, 500),
+    status: "blocked",
+    timestamp: input.decidedAt,
+    refs: [],
+    visibility: "compact",
+  };
+}
+
+function nextBasicEventSequence(events: readonly RunEvent[]): number {
+  return (events.at(-1)?.sequence ?? 0) + 1;
+}
+
+async function handleUpdateSkillStateRequest(
+  runtime: PanelRuntime,
+  skillId: string,
+  request: IncomingMessage,
+  response: ServerResponse
+): Promise<void> {
+  if (runtime.skillStateStore === undefined) {
+    throw new PanelHttpError(501, "skill_state_unavailable", "当前环境没有可用的技能状态存储。");
+  }
+  const body = await readJsonBody(request);
+  const record = asRecord(body);
+  if (typeof record.enabled !== "boolean") {
+    throw new PanelHttpError(400, "invalid_skill_state", "技能状态必须包含 enabled 布尔值。");
+  }
+  await runtime.skillStateStore.setEnabled(skillId, record.enabled);
+  writeJson(response, 200, {
+    ok: true,
+    skills: await discoverSkills({ roots: runtime.skillRoots, stateStore: runtime.skillStateStore }),
+  });
+}
+
+function parseConfirmationDecision(raw: unknown): Pick<ConfirmationDecision, "decision" | "guidance"> {
+  const record = asRecord(raw);
+  const decision = optionalString(record.decision);
+  if (decision !== "approve_once" && decision !== "deny" && decision !== "guidance") {
+    throw new PanelHttpError(400, "invalid_confirmation_decision", "确认决定必须是 approve_once、deny 或 guidance。");
+  }
+  const guidance = optionalString(record.guidance);
+  if (decision === "guidance" && guidance === undefined) {
+    throw new PanelHttpError(400, "missing_confirmation_guidance", "补充指导不能为空。");
+  }
+  return {
+    decision,
+    guidance: guidance === undefined ? undefined : compactRuntimeText(guidance, 800),
+  };
 }
 
 async function listPanelConversations(
@@ -828,131 +1339,74 @@ async function getPanelConversation(
   return persisted === undefined ? undefined : runtime.conversations.restore(persisted);
 }
 
-async function executePanelRunJob(runtime: PanelRuntime, runId: string): Promise<void> {
-  const job = runtime.runJobs.get(runId);
-  if (job === undefined) {
-    return;
-  }
+async function executeBasicPanelRun(
+  runtime: PanelRuntime,
+  input: BasicAgentRunExecutionInput
+): Promise<PanelRunExecutionResult> {
+  const job = input.job;
   if (job.conversationId !== undefined && job.runAfterRunId !== undefined) {
-    runtime.conversations.activateQueuedRun(job.conversationId, runId);
+    runtime.conversations.activateQueuedRun(job.conversationId, job.runId);
   }
-  runtime.runJobs.markRunning(runId);
-  const runningJob = runtime.runJobs.get(runId);
-  if (runningJob !== undefined) {
-    await persistPanelRun(runtime, runningJob);
-  }
-  try {
-    const taskSoilInput = job.taskSoilInput;
-    const conversationHistory = buildConversationHistoryMessages(
-      runtime,
-      job.conversationId,
-      job.assistantTurnId
-    );
-    const run = await runForPanel(runtime, job.runKind, job.goal, job.aiMode, taskSoilInput, job.runMode, {
-      conversationHistory,
-      onRuntimeReady: (context) => {
-        runtime.runJobs.attachRuntime({
-          runId,
-          runtime: context.runtime,
-          traceId: context.traceId,
-          goalId: context.goalId,
-        });
-      },
-      onModelOutputDelta: (delta) => {
-        appendLiveModelOutputDelta(runtime, runId, delta);
-      },
-    });
-    const currentConfig = await runtime.configCenter.getModelProviderConfig();
-    const currentInformationAccess = await runtime.configCenter.getInformationAccessConfig();
-    runtime.runJobs.complete(runId, {
-      config: currentConfig,
-      informationAccess: currentInformationAccess,
-      summary: run.summary,
-      observation: run.observation,
-      agentRunTree: run.agentRunTree,
-      canvas: run.canvas,
-    });
-    const completedJob = runtime.runJobs.get(runId);
-    if (completedJob !== undefined) {
-      syncConversationTurnForJob(runtime, completedJob);
-      scheduleNextQueuedConversationRun(runtime, completedJob);
-      await persistPanelRun(runtime, completedJob);
-    }
-  } catch (error) {
-    const config = await runtime.configCenter.getModelProviderConfig().catch(() => job.config);
-    const informationAccess = await runtime.configCenter.getInformationAccessConfig().catch(() => job.informationAccess);
-    if (error instanceof UndergroundAiConfigurationError) {
-      const message = panelConfigurationErrorMessage(error.issue.code);
-      runtime.runJobs.fail(runId, {
-        config,
-        informationAccess,
-        error: {
-          code: error.issue.code,
-          message,
-        },
-        summary: {
-          ai: createConfigurationFailedAiSummary(error.issue.summaryInput, error, message),
-        },
-      });
-      const failedJob = runtime.runJobs.get(runId);
-      if (failedJob !== undefined) {
-        syncConversationTurnForJob(runtime, failedJob);
-        scheduleNextQueuedConversationRun(runtime, failedJob);
-        await persistPanelRun(runtime, failedJob);
-      }
-      return;
-    }
-    if (error instanceof PanelHttpError) {
-      runtime.runJobs.fail(runId, {
-        config,
-        informationAccess,
-        error: {
-          code: error.code,
-          message: panelJobErrorMessage(error),
-        },
-      });
-      const failedJob = runtime.runJobs.get(runId);
-      if (failedJob !== undefined) {
-        syncConversationTurnForJob(runtime, failedJob);
-        scheduleNextQueuedConversationRun(runtime, failedJob);
-        await persistPanelRun(runtime, failedJob);
-      }
-      return;
-    }
-    const eventEntries = job.runtime?.eventLog.list() ?? [];
-    const modelFailureMessage = latestModelFailureMessage(eventEntries);
-    runtime.runJobs.fail(runId, {
+  const taskSoilInput = job.taskSoilInput;
+  const conversationHistory = buildConversationHistoryMessages(
+    runtime,
+    job.conversationId,
+    job.assistantTurnId
+  );
+  return runForPanel(runtime, job.runKind, job.goal, job.aiMode, taskSoilInput, job.runMode, {
+    conversationHistory,
+    abortSignal: input.abortSignal,
+    onRuntimeReady: input.onRuntimeReady,
+    onModelOutputDelta: input.onModelOutputDelta,
+  });
+}
+
+async function failPanelRunJob(runtime: PanelRuntime, job: PanelRunJob, error: unknown): Promise<void> {
+  const config = await runtime.configCenter.getModelProviderConfig().catch(() => job.config);
+  const informationAccess = await runtime.configCenter.getInformationAccessConfig().catch(() => job.informationAccess);
+  if (error instanceof UndergroundAiConfigurationError) {
+    const message = panelConfigurationErrorMessage(error.issue.code);
+    runtime.runJobs.fail(job.runId, {
       config,
       informationAccess,
       error: {
-        code: "panel_internal_error",
-        message: friendlyUserFacingFailureText(
-          modelFailureMessage ??
-            (job.runKind === "desktop" ? "Desktop Shell 运行 job 失败。" : "地下兼容运行 job 失败。")
-        ),
+        code: error.issue.code,
+        message,
+      },
+      summary: {
+        ai: createConfigurationFailedAiSummary(error.issue.summaryInput, error, message),
       },
     });
-    const failedJob = runtime.runJobs.get(runId);
-    if (failedJob !== undefined) {
-      syncConversationTurnForJob(runtime, failedJob);
-      scheduleNextQueuedConversationRun(runtime, failedJob);
-      await persistPanelRun(runtime, failedJob);
-    }
+    return;
   }
+  if (error instanceof PanelHttpError) {
+    runtime.runJobs.fail(job.runId, {
+      config,
+      informationAccess,
+      error: {
+        code: error.code,
+        message: panelJobErrorMessage(error),
+      },
+    });
+    return;
+  }
+  const eventEntries = job.runtime?.eventLog.list() ?? [];
+  const modelFailureMessage = latestModelFailureMessage(eventEntries);
+  runtime.runJobs.fail(job.runId, {
+    config,
+    informationAccess,
+    error: {
+      code: "panel_internal_error",
+      message: friendlyUserFacingFailureText(
+        modelFailureMessage ??
+          (job.runKind === "desktop" ? "Desktop Shell 运行 job 失败。" : "地下兼容运行 job 失败。")
+      ),
+    },
+  });
 }
 
 function schedulePanelRunJob(runtime: PanelRuntime, runId: string): void {
-  const activeRunJob = new Promise<void>((resolve) => {
-    setImmediate(() => {
-      executePanelRunJob(runtime, runId)
-        .catch(() => undefined)
-        .finally(resolve);
-    });
-  });
-  runtime.activeRunJobs.add(activeRunJob);
-  void activeRunJob.then(() => {
-    runtime.activeRunJobs.delete(activeRunJob);
-  });
+  runtime.runExecutor.schedule(runId);
 }
 
 function scheduleNextQueuedConversationRun(runtime: PanelRuntime, completedJob: PanelRunJob): void {
@@ -972,8 +1426,13 @@ function scheduleNextQueuedConversationRun(runtime: PanelRuntime, completedJob: 
 
 function createPanelRunJobResponse(runtime: PanelRuntime, job: PanelRunJob): PanelRunJobResponse {
   const eventEntries = job.runtime?.eventLog.list() ?? [];
-  const config = job.completed?.config ?? job.failed?.config ?? job.config;
-  const informationAccess = job.completed?.informationAccess ?? job.failed?.informationAccess ?? job.informationAccess;
+  const config = job.completed?.config ?? job.failed?.config ?? job.cancelled?.config ?? job.blocked?.config ?? job.config;
+  const informationAccess =
+    job.completed?.informationAccess ??
+    job.failed?.informationAccess ??
+    job.cancelled?.informationAccess ??
+    job.blocked?.informationAccess ??
+    job.informationAccess;
   const summary = job.completed?.summary;
   const observation = job.completed?.observation;
   const agentRunTree = job.completed?.agentRunTree;
@@ -988,7 +1447,7 @@ function createPanelRunJobResponse(runtime: PanelRuntime, job: PanelRunJob): Pan
     agentRunTree,
     eventEntries,
   });
-  const streamEvents = syncPanelRunStreamEventsForJob(job);
+  const streamEvents = syncPanelRunStreamEventsForJob(runtime, job);
   const transcript = {
     ...createPanelRunTranscript({
       runId: job.runId,
@@ -1017,6 +1476,7 @@ function createPanelRunJobResponse(runtime: PanelRuntime, job: PanelRunJob): Pan
     tracking,
     transcript,
     workNotes: transcript.workNotes,
+    steps: transcript.steps,
     streamCursor: {
       runId: job.runId,
       lastSequence: transcript.events.at(-1)?.sequence ?? 0,
@@ -1025,7 +1485,7 @@ function createPanelRunJobResponse(runtime: PanelRuntime, job: PanelRunJob): Pan
     observation: job.completed?.observation,
     canvas: job.completed?.canvas,
     route: routeReadModel(job.routeDecision),
-    error: job.failed?.error,
+    error: job.failed?.error ?? job.cancelled?.reason ?? job.blocked?.reason,
     conversation:
       job.conversationId === undefined
         ? undefined
@@ -1081,6 +1541,7 @@ async function createPersistedRunResponse(
       status,
       updatedAt: snapshot.run.updatedAt,
       events: streamEvents,
+      steps: [],
       workNotes: [],
       modelCalls: snapshot.modelCalls.map((call) => ({
         requestId: call.requestId,
@@ -1100,6 +1561,7 @@ async function createPersistedRunResponse(
       })),
     },
     workNotes: [],
+    steps: [],
     streamCursor: {
       runId: snapshot.run.runId,
       lastSequence: streamEvents.at(-1)?.sequence ?? 0,
@@ -1119,6 +1581,7 @@ async function createPersistedRunResponse(
       workspace: snapshot.workspace,
       toolCalls: snapshot.toolCalls,
       artifacts: snapshot.artifacts,
+      confirmations: snapshot.confirmations,
     },
   };
 }
@@ -1161,6 +1624,12 @@ function createPersistedStreamEvents(
   snapshot: RuntimeRunSnapshot,
   status: PanelRunStatus
 ): readonly PanelRunStreamEvent[] {
+  const startedStatus: NonNullable<PanelRunStreamEvent["status"]> =
+    status === "pending"
+      ? "pending"
+      : status === "completed" || status === "running"
+        ? "running"
+        : status;
   const suppressOrdinaryChatProgress =
     snapshot.run.runMode === "agent" && !hasPersistedUserVisibleWorkActivity(snapshot.events);
   const events: PanelRunStreamEvent[] = [
@@ -1172,7 +1641,7 @@ function createPersistedStreamEvents(
       createdAt: snapshot.run.createdAt,
       agentLabel: "AgentArbor",
       summary: "已从本地记录恢复这次运行。",
-      status,
+      status: startedStatus,
       sourceRefs: [],
       modelCallRefs: [],
       toolCallRefs: [],
@@ -1208,6 +1677,30 @@ function createPersistedStreamEvents(
       toolCallRefs: record.refs.filter((ref) => ref.kind === "tool_call").map((ref) => ref.id),
     });
   }
+  for (const confirmation of snapshot.confirmations) {
+    if (confirmation.decidedAt === undefined) {
+      continue;
+    }
+    const type: PanelRunStreamEvent["type"] =
+      confirmation.status === "approved"
+        ? "run.resumed"
+        : confirmation.status === "denied"
+          ? "user_approval.received"
+          : "user.guidance";
+    events.push({
+      eventId: `${snapshot.run.runId}:restored:confirmation:${confirmation.confirmationId}:${confirmation.status}`,
+      runId: snapshot.run.runId,
+      sequence: events.length + 1,
+      type,
+      createdAt: confirmation.decidedAt,
+      agentLabel: type === "run.resumed" ? "AgentArbor" : type === "user_approval.received" ? "用户确认" : "用户指导",
+      summary: restoredConfirmationDecisionSummary(confirmation),
+      status: confirmation.status === "denied" ? "blocked" : confirmation.status === "guidance" ? "pending" : "completed",
+      sourceRefs: [`confirmation:${confirmation.confirmationId}`],
+      modelCallRefs: [],
+      toolCallRefs: [],
+    });
+  }
   if (status === "completed") {
     events.push({
       eventId: `${snapshot.run.runId}:restored:final.result`,
@@ -1238,7 +1731,155 @@ function createPersistedStreamEvents(
       toolCallRefs: snapshot.toolCalls.map((call) => call.callId),
     });
   }
+  if (status === "cancelled") {
+    events.push({
+      eventId: `${snapshot.run.runId}:restored:run.cancelled`,
+      runId: snapshot.run.runId,
+      sequence: events.length + 1,
+      type: "run.cancelled",
+      createdAt: snapshot.run.updatedAt,
+      agentLabel: "AgentArbor",
+      summary: snapshot.run.resultSummary ?? "运行已取消。",
+      status: "cancelled",
+      sourceRefs: [],
+      modelCallRefs: [],
+      toolCallRefs: snapshot.toolCalls.map((call) => call.callId),
+    });
+  }
+  if (status === "blocked") {
+    events.push({
+      eventId: `${snapshot.run.runId}:restored:run.blocked`,
+      runId: snapshot.run.runId,
+      sequence: events.length + 1,
+      type: "run.blocked",
+      createdAt: snapshot.run.updatedAt,
+      agentLabel: "AgentArbor",
+      summary: snapshot.run.resultSummary ?? snapshot.run.error?.message ?? "运行已中断，需要重新发起或继续处理。",
+      status: "blocked",
+      sourceRefs: [],
+      modelCallRefs: [],
+      toolCallRefs: snapshot.toolCalls.map((call) => call.callId),
+    });
+  }
   return events;
+}
+
+function restoredConfirmationDecisionSummary(confirmation: RuntimeConfirmationRecord): string {
+  if (confirmation.status === "approved") {
+    return "已批准本次操作。";
+  }
+  if (confirmation.status === "denied") {
+    return "已拒绝本次操作，运行不会继续执行该动作。";
+  }
+  return confirmation.guidance === undefined || confirmation.guidance.trim().length === 0
+    ? "已收到补充指导。"
+    : `已收到补充指导：${compactRuntimeText(confirmation.guidance, 240)}`;
+}
+
+function basicRunReplayFromSnapshot(snapshot: RuntimeRunSnapshot): BasicAgentRunReplay {
+  const events = restoredBasicEvents(snapshot);
+  return {
+    cursor: {
+      runId: snapshot.run.runId,
+      lastSequence: events.at(-1)?.sequence ?? 0,
+      eventCount: events.length,
+    },
+    events,
+  };
+}
+
+function restoredBasicEvents(snapshot: RuntimeRunSnapshot): readonly RunEvent[] {
+  const status = agentTaskStatusFromSnapshot(snapshot);
+  const persisted = snapshot.basicEvents.length > 0
+    ? snapshot.basicEvents.filter((event) => event.visibility !== "debug")
+    : createPersistedStreamEvents(snapshot, panelStatusFromRuntimeStatus(snapshot.run.status))
+      .map(toBasicRunEventFromPanelStreamEvent)
+      .filter((event) => event.visibility !== "debug");
+  const terminalType = status === "blocked"
+    ? "run.blocked"
+    : status === "cancelled"
+      ? "run.cancelled"
+      : status === "failed"
+        ? "run.failed"
+        : status === "completed"
+          ? "final.result"
+          : undefined;
+  if (terminalType === undefined || persisted.some((event) => event.type === terminalType)) {
+    return persisted;
+  }
+  const terminal = createRestoredBasicTerminalEvent(snapshot, status, terminalType, persisted.at(-1)?.sequence ?? 0);
+  return [...persisted, terminal];
+}
+
+function createRestoredBasicTerminalEvent(
+  snapshot: RuntimeRunSnapshot,
+  status: BasicAgentRun["status"],
+  type: string,
+  lastSequence: number
+): RunEvent {
+  return {
+    id: `${snapshot.run.runId}:restored:basic:${type}`,
+    runId: snapshot.run.runId,
+    sequence: lastSequence + 1,
+    type,
+    title: basicRunTitleFromStatus(status, undefined),
+    summary:
+      status === "blocked"
+        ? "运行已中断，需要重新发起或继续处理。"
+        : snapshot.run.error?.message ?? snapshot.run.resultSummary,
+    status,
+    timestamp: snapshot.run.updatedAt,
+    refs: [],
+    visibility: "compact",
+  };
+}
+
+function toBasicRunEventFromPanelStreamEvent(event: PanelRunStreamEvent): BasicAgentRunReplay["events"][number] {
+  const summary = event.detail?.preview ?? event.delta ?? event.summary;
+  return {
+    id: event.eventId,
+    runId: event.runId,
+    sequence: event.sequence,
+    type: event.type,
+    title: basicEventTitleFromStreamType(event.type),
+    summary,
+    status: agentTaskStatusFromPanelStreamEvent(event),
+    timestamp: event.createdAt,
+    refs: [
+      { kind: "event", id: event.eventId },
+      ...event.modelCallRefs.map((id) => ({ kind: "model_call" as const, id })),
+      ...event.toolCallRefs.map((id) => ({ kind: "tool_call" as const, id })),
+    ],
+    visibility: event.type.startsWith("tool.") || event.type === "confirmation.needed" ? "expanded" : "compact",
+  };
+}
+
+function basicEventTitleFromStreamType(type: PanelRunStreamEvent["type"]): string {
+  if (type === "run.started") return "任务已开始";
+  if (type === "run.cancelled") return "任务已取消";
+  if (type === "run.blocked") return "任务已暂停";
+  if (type === "run.resumed") return "任务继续";
+  if (type === "tool.requested") return "正在使用工具";
+  if (type === "tool.completed") return "工具已完成";
+  if (type === "tool.failed") return "工具未完成";
+  if (type === "confirmation.needed") return "需要确认";
+  if (type === "user_approval.received") return "收到确认结果";
+  if (type === "user.guidance") return "收到用户指导";
+  if (type === "final.result") return "结果已生成";
+  if (type === "run.failed") return "运行未完成";
+  return "工作状态更新";
+}
+
+function agentTaskStatusFromPanelStreamEvent(event: PanelRunStreamEvent): BasicAgentRun["status"] {
+  if (event.type === "confirmation.needed") return "approval_needed";
+  if (event.type === "user.guidance") return "needs_input";
+  if (event.type === "user_approval.received") return "blocked";
+  if (event.type === "run.cancelled" || event.status === "cancelled") return "cancelled";
+  if (event.type === "run.blocked" || event.status === "blocked") return "blocked";
+  if (event.type === "run.failed" || event.status === "failed") return "failed";
+  if (event.type === "final.result" || event.status === "completed") return "completed";
+  if (event.status === "pending") return "queued";
+  return "running";
 }
 
 function hasPersistedUserVisibleWorkActivity(events: readonly RuntimeEventRecord[]): boolean {
@@ -1270,6 +1911,9 @@ function persistedStreamAgentLabel(type: PanelRunStreamEvent["type"]): string {
   if (type === "confirmation.needed") {
     return "待确认";
   }
+  if (type === "user_approval.received") {
+    return "用户确认";
+  }
   if (type === "user.guidance") {
     return "用户指导";
   }
@@ -1280,8 +1924,11 @@ function persistedStreamAgentLabel(type: PanelRunStreamEvent["type"]): string {
 }
 
 function panelStatusFromRuntimeStatus(status: RuntimeRunRecord["status"]): PanelRunStatus {
-  if (status === "pending" || status === "running" || status === "completed" || status === "failed") {
+  if (status === "pending" || status === "completed" || status === "failed" || status === "cancelled" || status === "blocked") {
     return status;
+  }
+  if (status === "running") {
+    return "blocked";
   }
   return "failed";
 }
@@ -1291,10 +1938,13 @@ function persistedPhaseFor(
   status: PanelRunStatus
 ): PanelRunTraceReadModel["currentPhase"] {
   if (type === undefined) {
-    return status === "completed" ? "completed" : "not_started";
+    return status === "completed" ? "completed" : status === "blocked" || status === "cancelled" || status === "failed" ? "verification" : "not_started";
   }
   if (status === "completed") {
     return "completed";
+  }
+  if (status === "blocked" || status === "cancelled" || status === "failed") {
+    return "verification";
   }
   if (type.startsWith("direction_handoff.")) {
     return "handoff";
@@ -1368,6 +2018,12 @@ function persistedWaitingPoint(status: PanelRunStatus): string {
   if (status === "running") {
     return "运行记录显示仍在进行；如这是重启后的历史记录，需要重新发起后续任务。";
   }
+  if (status === "cancelled") {
+    return "运行已取消。";
+  }
+  if (status === "blocked") {
+    return "运行已中断，需要重新发起或继续处理。";
+  }
   if (status === "failed") {
     return "运行失败，详情保存在安全摘要中。";
   }
@@ -1411,6 +2067,15 @@ function streamStatusFor(type: PanelRunStreamEvent["type"]): NonNullable<PanelRu
   }
   if (type === "confirmation.needed") {
     return "pending";
+  }
+  if (type === "user_approval.received") {
+    return "completed";
+  }
+  if (type === "run.cancelled") {
+    return "cancelled";
+  }
+  if (type === "run.blocked") {
+    return "blocked";
   }
   if (type === "tool.failed" || type === "run.failed") {
     return "failed";
@@ -1464,6 +2129,23 @@ async function persistPanelRun(runtime: PanelRuntime, job: PanelRunJob): Promise
   if (runtime.runtimeDatabase === undefined || runtime.runtimePaths === undefined) {
     return;
   }
+  const previous = runtime.persistenceChains.get(job.runId) ?? Promise.resolve();
+  const current = previous.catch(() => undefined).then(() => persistPanelRunNow(runtime, job));
+  const tracked = current.then(() => undefined, () => undefined);
+  runtime.persistenceChains.set(job.runId, tracked);
+  try {
+    await current;
+  } finally {
+    if (runtime.persistenceChains.get(job.runId) === tracked) {
+      runtime.persistenceChains.delete(job.runId);
+    }
+  }
+}
+
+async function persistPanelRunNow(runtime: PanelRuntime, job: PanelRunJob): Promise<void> {
+  if (runtime.runtimeDatabase === undefined || runtime.runtimePaths === undefined) {
+    return;
+  }
   if (job.conversationId !== undefined) {
     await persistPanelConversation(runtime, job.conversationId);
   }
@@ -1476,7 +2158,9 @@ async function persistPanelRun(runtime: PanelRuntime, job: PanelRunJob): Promise
 
   const eventEntries = job.runtime?.eventLog.list() ?? [];
   const trace = createPanelRunTrace({ status: job.status, eventEntries });
-  const streamEvents = syncPanelRunStreamEventsForJob(job);
+  const streamEvents = syncPanelRunStreamEventsForJob(runtime, job);
+  const basicRun = runtime.runExecutor.get(job.runId);
+  const basicReplay = runtime.runExecutor.replayEvents(job.runId, 0);
   const transcript = createPanelRunTranscript({
     runId: job.runId,
     status: job.status,
@@ -1489,6 +2173,12 @@ async function persistPanelRun(runtime: PanelRuntime, job: PanelRunJob): Promise
     createdAt: job.createdAt,
     updatedAt: job.updatedAt,
   });
+  if (basicRun !== undefined) {
+    await runtime.runtimeDatabase.upsertBasicRun(basicRun);
+  }
+  if (basicReplay !== undefined) {
+    await runtime.runtimeDatabase.replaceBasicRunEvents(job.runId, basicReplay.events);
+  }
   await runtime.runtimeDatabase.replaceRunEvents(job.runId, trace.events.map((event) => toRuntimeEventRecord(job.runId, event)));
   await runtime.runtimeDatabase.replaceModelCalls(
     job.runId,
@@ -1496,6 +2186,7 @@ async function persistPanelRun(runtime: PanelRuntime, job: PanelRunJob): Promise
   );
   await runtime.runtimeDatabase.replaceToolCalls(job.runId, toRuntimeToolCallRecords(job.runId, streamEvents, eventEntries));
   await runtime.runtimeDatabase.replaceArtifacts(job.runId, toRuntimeArtifactRecords(job));
+  await runtime.runtimeDatabase.replaceConfirmations(job.runId, toRuntimeConfirmationRecords(job, eventEntries));
 }
 
 async function persistPanelConversation(runtime: PanelRuntime, conversationId: string): Promise<void> {
@@ -1548,11 +2239,15 @@ function createRuntimeRunRecord(
     runHome,
     createdAt: job.createdAt,
     updatedAt: job.updatedAt,
-    completedAt: job.status === "completed" || job.status === "failed" ? job.updatedAt : undefined,
+    completedAt: isTerminalPanelRunStatus(job.status) ? job.updatedAt : undefined,
     resultTitle: restoredResult?.title,
     resultSummary: restoredResult?.summary,
-    error: job.failed?.error,
+    error: job.failed?.error ?? job.cancelled?.reason ?? job.blocked?.reason,
   };
+}
+
+function isTerminalPanelRunStatus(status: PanelRunStatus): boolean {
+  return status === "completed" || status === "failed" || status === "cancelled" || status === "blocked";
 }
 
 function resultSummaryForJob(job: PanelRunJob): { readonly title: string; readonly summary: string } | undefined {
@@ -1560,6 +2255,18 @@ function resultSummaryForJob(job: PanelRunJob): { readonly title: string; readon
     return {
       title: "这次没有完成",
       summary: compactRuntimeText(job.failed.error.message, 900),
+    };
+  }
+  if (job.cancelled !== undefined) {
+    return {
+      title: "已取消",
+      summary: compactRuntimeText(job.cancelled.reason.message, 900),
+    };
+  }
+  if (job.blocked !== undefined) {
+    return {
+      title: "需要处理",
+      summary: compactRuntimeText(job.blocked.reason.message, 900),
     };
   }
   const canvas = job.completed?.canvas;
@@ -1660,7 +2367,7 @@ function toRuntimeToolCallRecords(
   const detailsByCallId = localToolDetailsByCallId(eventEntries);
   const calls = new Map<string, RuntimeToolCallRecord>();
   for (const event of events) {
-    if (!event.type.startsWith("tool.")) {
+    if (!event.type.startsWith("tool.") && event.type !== "confirmation.needed") {
       continue;
     }
     for (const callId of event.toolCallRefs) {
@@ -1767,28 +2474,22 @@ function persistedReadFilePreview(
   output: Readonly<Record<string, unknown>>,
   result: Readonly<Record<string, unknown>>
 ): string | undefined {
-  const summary = optionalString(output.summary);
-  const pathValue = optionalString(result.path);
-  const bytes = typeof result.bytes === "number" ? `${result.bytes} bytes` : undefined;
-  const headline = summary ?? [pathValue, bytes].filter((value): value is string => value !== undefined).join(" · ");
-  return compactRuntimeText(
-    `${headline || "文件已读取。"}\n文件正文已进入本轮授权上下文，普通面板只展示路径、大小和截断状态。`,
-    900
-  );
+  return safeReadFileToolPreview({
+    summary: optionalString(output.summary),
+    path: optionalString(result.path),
+    bytes: typeof result.bytes === "number" ? result.bytes : undefined,
+  });
 }
 
 function persistedCommandPreview(
   output: Readonly<Record<string, unknown>>,
   result: Readonly<Record<string, unknown>>
 ): string | undefined {
-  const summary = optionalString(output.summary);
-  const command = optionalString(result.command);
-  const exit = typeof result.exitCode === "number" ? `exit ${result.exitCode}` : undefined;
-  const headline = summary ?? [command, exit].filter((value): value is string => value !== undefined).join(" · ");
-  return compactRuntimeText(
-    `${headline || "命令已执行。"}\n命令输出只进入本轮工具结果上下文；普通面板不展开 stdout / stderr 原文。`,
-    900
-  );
+  return safeCommandToolPreview({
+    summary: optionalString(output.summary),
+    command: optionalString(result.command),
+    exitCode: typeof result.exitCode === "number" ? result.exitCode : undefined,
+  });
 }
 
 function toRuntimeArtifactRecords(job: PanelRunJob): readonly RuntimeArtifactRecord[] {
@@ -1797,6 +2498,132 @@ function toRuntimeArtifactRecords(job: PanelRunJob): readonly RuntimeArtifactRec
     ref: artifact.ref,
     summary: compactRuntimeText(artifact.summary, 800),
   }));
+}
+
+function toRuntimeConfirmationRecords(
+  job: PanelRunJob,
+  eventEntries: readonly EventLogEntry[]
+): readonly RuntimeConfirmationRecord[] {
+  const confirmations = new Map<string, RuntimeConfirmationRecord>();
+  for (const entry of eventEntries) {
+    if (entry.type !== "user_approval.requested" && entry.type !== "user_approval.received") {
+      continue;
+    }
+    const payload = asRecord(entry.message.payload);
+    const confirmationId =
+      optionalString(payload.confirmationId) ??
+      optionalString(payload.requestId) ??
+      `confirmation-${entry.sequence}`;
+    const previous = confirmations.get(confirmationId);
+    const eventRef = `${job.runId}:event:${entry.sequence}`;
+    if (entry.type === "user_approval.requested") {
+      const question = optionalString(payload.question);
+      const consequence = optionalString(payload.consequence);
+      confirmations.set(confirmationId, {
+        confirmationId,
+        runId: job.runId,
+        conversationId: job.conversationId,
+        status: previous?.status ?? "pending",
+        title: compactRuntimeText(optionalString(payload.title) ?? "需要确认", 160),
+        actionSummary: compactRuntimeText(
+          [question, consequence].filter((value): value is string => value !== undefined).join(" ") ||
+            "继续前需要用户确认。",
+          500
+        ),
+        affectedResources: affectedResourcesFrom(payload),
+        riskLevel: riskLevelFrom(payload.riskLevel),
+        requestedAt: entry.recordedAt,
+        expiresAt: optionalString(payload.expiresAt),
+        decidedAt: previous?.decidedAt,
+        guidance: previous?.guidance,
+        eventRefs: unique([...(previous?.eventRefs ?? []), eventRef]),
+      });
+      continue;
+    }
+    confirmations.set(confirmationId, {
+      confirmationId,
+      runId: job.runId,
+      conversationId: job.conversationId,
+      status: decisionStatusFrom(payload),
+      title: previous?.title ?? "用户指导",
+      actionSummary: previous?.actionSummary ?? "用户已补充确认或指导。",
+      affectedResources: previous?.affectedResources ?? affectedResourcesFrom(payload),
+      riskLevel: previous?.riskLevel ?? "medium",
+      requestedAt: previous?.requestedAt ?? entry.recordedAt,
+      expiresAt: previous?.expiresAt,
+      decidedAt: optionalString(payload.answeredAt) ?? entry.recordedAt,
+      guidance: guidanceFrom(payload),
+      eventRefs: unique([...(previous?.eventRefs ?? []), eventRef]),
+    });
+  }
+  for (const decision of job.confirmationDecisions) {
+    const previous = confirmations.get(decision.confirmationId);
+    confirmations.set(decision.confirmationId, {
+      confirmationId: decision.confirmationId,
+      runId: job.runId,
+      conversationId: job.conversationId,
+      status:
+        decision.decision === "approve_once"
+          ? "approved"
+          : decision.decision === "deny"
+            ? "denied"
+            : "guidance",
+      title: previous?.title ?? "用户确认",
+      actionSummary: previous?.actionSummary ?? "用户已补充确认或指导。",
+      affectedResources: previous?.affectedResources ?? [],
+      riskLevel: previous?.riskLevel ?? "medium",
+      requestedAt: previous?.requestedAt ?? decision.decidedAt,
+      expiresAt: previous?.expiresAt,
+      decidedAt: decision.decidedAt,
+      guidance: decision.guidance === undefined ? previous?.guidance : compactRuntimeText(decision.guidance, 500),
+      eventRefs: unique([...(previous?.eventRefs ?? []), `confirmation:${decision.confirmationId}`]),
+    });
+  }
+  return [...confirmations.values()];
+}
+
+function affectedResourcesFrom(payload: Readonly<Record<string, unknown>>): readonly string[] {
+  const explicit = stringArrayFrom(payload.affectedResources);
+  if (explicit.length > 0) {
+    return explicit.slice(0, 12).map((value) => compactRuntimeText(value, 240));
+  }
+  const sourceRefs = stringArrayFrom(payload.sourceRefs);
+  if (sourceRefs.length > 0) {
+    return sourceRefs.slice(0, 12).map((value) => compactRuntimeText(value, 240));
+  }
+  const evidenceRefs = stringArrayFrom(payload.evidenceRefs);
+  return evidenceRefs.slice(0, 12).map((value) => compactRuntimeText(value, 240));
+}
+
+function riskLevelFrom(value: unknown): RuntimeConfirmationRecord["riskLevel"] {
+  return value === "low" || value === "medium" || value === "high" ? value : "medium";
+}
+
+function decisionStatusFrom(payload: Readonly<Record<string, unknown>>): RuntimeConfirmationRecord["status"] {
+  const decision = (optionalString(payload.decision) ?? optionalString(payload.status) ?? "").toLowerCase();
+  if (decision.includes("approve") || decision.includes("allow") || decision.includes("同意") || decision.includes("允许")) {
+    return "approved";
+  }
+  if (decision.includes("deny") || decision.includes("reject") || decision.includes("refuse") || decision.includes("拒绝")) {
+    return "denied";
+  }
+  return "guidance";
+}
+
+function guidanceFrom(payload: Readonly<Record<string, unknown>>): string | undefined {
+  const direct = optionalString(payload.guidance) ?? optionalString(payload.note);
+  if (direct !== undefined) {
+    return compactRuntimeText(direct, 500);
+  }
+  const answers = Array.isArray(payload.answers) ? payload.answers : undefined;
+  if (answers !== undefined) {
+    return `用户已补充 ${answers.length} 项说明。`;
+  }
+  return undefined;
+}
+
+function stringArrayFrom(value: unknown): readonly string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0) : [];
 }
 
 function mergeToolStatus(
@@ -1808,6 +2635,12 @@ function mergeToolStatus(
   }
   if (previous === "completed" || eventType === "tool.completed") {
     return "completed";
+  }
+  if (previous === "cancelled") {
+    return "cancelled";
+  }
+  if (eventType === "confirmation.needed" || previous === "approval_required") {
+    return "approval_required";
   }
   return "requested";
 }
@@ -1825,6 +2658,28 @@ function syncConversationTurnForJob(runtime: PanelRuntime, job: PanelRunJob): vo
       title: "这次没有完成",
       content: friendlyAssistantFailureText(response.error?.message),
       status: "failed",
+    });
+    return;
+  }
+  if (response.status === "cancelled") {
+    runtime.conversations.completeAssistantTurn({
+      conversationId: job.conversationId,
+      assistantTurnId: job.assistantTurnId,
+      runId: job.runId,
+      title: "已取消",
+      content: "运行已取消。",
+      status: "failed",
+    });
+    return;
+  }
+  if (response.status === "blocked") {
+    runtime.conversations.completeAssistantTurn({
+      conversationId: job.conversationId,
+      assistantTurnId: job.assistantTurnId,
+      runId: job.runId,
+      title: "需要处理",
+      content: sanitizeAssistantVisibleText(response.error?.message ?? "运行已中断，需要重新发起或继续处理。"),
+      status: "completed",
     });
     return;
   }
@@ -1886,7 +2741,7 @@ function assistantTurnFromResponse(
   };
 }
 
-function syncPanelRunStreamEventsForJob(job: PanelRunJob): readonly PanelRunStreamEvent[] {
+function syncPanelRunStreamEventsForJob(runtime: PanelRuntime, job: PanelRunJob): readonly PanelRunStreamEvent[] {
   const derived = createPanelRunStreamEvents({
     runId: job.runId,
     status: job.status,
@@ -1897,66 +2752,84 @@ function syncPanelRunStreamEventsForJob(job: PanelRunJob): readonly PanelRunStre
     desktopMode: job.runKind === "desktop" ? job.runMode : undefined,
     createdAt: job.createdAt,
     updatedAt: job.updatedAt,
-    error: job.failed?.error,
+    error: job.failed?.error ?? job.cancelled?.reason ?? job.blocked?.reason,
   });
-  for (const event of derived) {
-    appendPanelRunStreamEvent(job, event);
-  }
-  return [...job.streamEvents].sort((left, right) => left.sequence - right.sequence);
+  return runtime.runJobs.syncStreamEvents(job.runId, derived);
 }
 
-function appendPanelRunStreamEvent(job: PanelRunJob, event: Omit<PanelRunStreamEvent, "sequence"> | PanelRunStreamEvent): PanelRunStreamEvent {
-  const existing = job.streamEventIds.has(event.eventId)
-    ? job.streamEvents.find((item) => item.eventId === event.eventId)
-    : undefined;
-  if (existing !== undefined) {
-    if (event.type === "run.started") {
-      Object.assign(existing as {
-        summary?: string;
-        agentLabel?: string;
-        status?: PanelRunStreamEvent["status"];
-        toolName?: string;
-        detail?: PanelRunStreamEvent["detail"];
-      }, {
-        summary: event.summary,
-        agentLabel: event.agentLabel,
-        status: event.status,
-        toolName: event.toolName ?? existing.toolName,
-        detail: event.detail ?? existing.detail,
-      });
-    }
-    return existing;
-  }
-  if (event.type === "model.output.delta") {
-    const liveDelta = liveModelDeltaForSameCall(job, event);
-    if (liveDelta !== undefined) {
-      return liveDelta;
-    }
-  }
-  const next: PanelRunStreamEvent = {
-    ...event,
-    sequence: job.nextStreamSequence,
+function basicRunFromSnapshot(snapshot: RuntimeRunSnapshot): BasicAgentRun {
+  const status = agentTaskStatusFromSnapshot(snapshot);
+  const events = restoredBasicEvents(snapshot);
+  const latestEvent = [...events].reverse().find((event) => event.summary !== undefined);
+  const persisted = snapshot.basicRun;
+  return {
+    runId: persisted?.runId ?? snapshot.run.runId,
+    conversationId: persisted?.conversationId ?? snapshot.run.conversationId,
+    title: basicRunTitleFromStatus(status, snapshot.run.resultTitle),
+    goalSummary: persisted?.goalSummary ?? snapshot.run.goalSummary,
+    status,
+    runMode: persisted?.runMode ?? snapshot.run.runMode,
+    createdAt: persisted?.createdAt ?? snapshot.run.createdAt,
+    updatedAt: persisted?.updatedAt ?? snapshot.run.updatedAt,
+    currentStep: status === "blocked" && snapshot.run.status === "running"
+      ? "运行已中断，需要重新发起或继续处理。"
+      : latestEvent?.summary ?? persisted?.currentStep,
+    nextStep: basicRunNextStepFromStatus(status),
+    requiresUserAction: status === "approval_needed" || status === "blocked" || status === "needs_input",
+    eventCursor: {
+      lastSequence: events.at(-1)?.sequence ?? 0,
+      eventCount: events.length,
+    },
   };
-  job.nextStreamSequence += 1;
-  job.streamEvents.push(next);
-  job.streamEventIds.add(next.eventId);
-  return next;
 }
 
-function liveModelDeltaForSameCall(
-  job: PanelRunJob,
-  event: Omit<PanelRunStreamEvent, "sequence"> | PanelRunStreamEvent
-): PanelRunStreamEvent | undefined {
-  const requestIds = new Set(event.modelCallRefs);
-  if (requestIds.size === 0) {
-    return undefined;
+function agentTaskStatusFromRuntimeStatus(status: RuntimeRunRecord["status"]): BasicAgentRun["status"] {
+  if (status === "pending") return "queued";
+  if (status === "running" || status === "stopped") return "blocked";
+  if (status === "completed") return "completed";
+  if (status === "failed") return "failed";
+  if (status === "cancelled") return "cancelled";
+  if (status === "blocked") return "blocked";
+  return "failed";
+}
+
+function agentTaskStatusFromSnapshot(snapshot: RuntimeRunSnapshot): BasicAgentRun["status"] {
+  const denied = snapshot.confirmations.some((confirmation) => confirmation.status === "denied");
+  if (denied) {
+    return "blocked";
   }
-  return job.streamEvents.find(
-    (item) =>
-      item.type === "model.output.delta" &&
-      item.eventId.startsWith(`${job.runId}:live:model.output.delta:`) &&
-      item.modelCallRefs.some((requestId) => requestIds.has(requestId))
-  );
+  const guidance = snapshot.confirmations.some((confirmation) => confirmation.status === "guidance");
+  if (guidance) {
+    return "needs_input";
+  }
+  const pendingConfirmation = snapshot.confirmations.some((confirmation) => confirmation.status === "pending");
+  if (pendingConfirmation && snapshot.run.status !== "failed" && snapshot.run.status !== "cancelled" && snapshot.run.status !== "blocked") {
+    return "approval_needed";
+  }
+  return agentTaskStatusFromRuntimeStatus(snapshot.run.status);
+}
+
+function basicRunTitleFromStatus(status: BasicAgentRun["status"], resultTitle: string | undefined): string {
+  if (resultTitle !== undefined && resultTitle.trim().length > 0) {
+    return compactRuntimeText(resultTitle, 120);
+  }
+  if (status === "queued") return "等待开始";
+  if (status === "approval_needed") return "需要确认";
+  if (status === "needs_input") return "需要补充";
+  if (status === "blocked") return "需要处理";
+  if (status === "cancelled") return "已取消";
+  if (status === "failed") return "未完成";
+  if (status === "completed") return "已完成";
+  return "正在处理";
+}
+
+function basicRunNextStepFromStatus(status: BasicAgentRun["status"]): string | undefined {
+  if (status === "queued") return "等待前一个任务完成。";
+  if (status === "approval_needed") return "等待你确认或补充材料。";
+  if (status === "needs_input") return "等待你补充指导后继续。";
+  if (status === "blocked") return "运行已中断，需要重新发起或继续处理。";
+  if (status === "running" || status === "planning") return "继续整理结果。";
+  return undefined;
 }
 
 function appendLiveModelOutputDelta(runtime: PanelRuntime, runId: string, delta: ModelOutputDelta): void {
@@ -2006,12 +2879,9 @@ async function runForPanel(
   aiMode: UndergroundAiMode,
   taskSoilInput: DesktopTaskSoilInput | undefined,
   runMode: PanelDesktopRunMode = "agent",
-  options: {
-    readonly conversationHistory?: readonly DesktopAgentConversationMessage[];
-    readonly onRuntimeReady?: (context: PanelRuntimeReadyContext) => void;
-    readonly onModelOutputDelta?: (delta: ModelOutputDelta) => void;
-  } = {}
+  options: PanelRunExecutionOptions = {}
 ): Promise<PanelRunExecutionResult> {
+  throwIfAborted(options.abortSignal);
   return runKind === "desktop"
     ? runDesktopForPanel(runtime, goal, aiMode, taskSoilInput, runMode, options)
     : runUndergroundForPanel(runtime, goal, aiMode, options);
@@ -2023,12 +2893,9 @@ async function runDesktopForPanel(
   aiMode: UndergroundAiMode,
   taskSoilInput: DesktopTaskSoilInput | undefined,
   runMode: PanelDesktopRunMode,
-  options: {
-    readonly conversationHistory?: readonly DesktopAgentConversationMessage[];
-    readonly onRuntimeReady?: (context: PanelRuntimeReadyContext) => void;
-    readonly onModelOutputDelta?: (delta: ModelOutputDelta) => void;
-  } = {}
+  options: PanelRunExecutionOptions = {}
 ): Promise<PanelRunExecutionResult> {
+  throwIfAborted(options.abortSignal);
   if (aiMode === "none") {
     throw createUndergroundAiDisabledConfigurationError();
   }
@@ -2054,11 +2921,13 @@ async function runDesktopForPanel(
       fetch: runtime.providerFetch,
       workspaceRoot,
     });
+    throwIfAborted(options.abortSignal);
     const result = await runUndergroundDirectionSessionWithIntelligence(goal, {
       createIntelligenceChannel: aiConfig.createIntelligenceChannel,
       createToolCenter,
       onRuntimeReady: options.onRuntimeReady,
     });
+    throwIfAborted(options.abortSignal);
     const summary = createUndergroundDemoSummary(result, undefined, aiConfig.summaryInput);
     const observation = toPanelObservation(result.observationSnapshot);
     const eventEntries = result.runtime.eventLog.list();
@@ -2095,10 +2964,18 @@ async function runDesktopForPanel(
     }),
     taskSoilInput,
     conversationHistory: options.conversationHistory,
+    skillContexts: await resolveTriggeredSkillContexts(runtime, goal),
+    abortSignal: options.abortSignal,
     onRuntimeReady: options.onRuntimeReady,
     onModelOutputDelta: options.onModelOutputDelta,
     allowWorkSessionUpgrade: false,
   });
+  return desktopPanelResultFromAgent(agent);
+}
+
+function desktopPanelResultFromAgent(
+  agent: Awaited<ReturnType<typeof runDesktopAgentSession>>
+): PanelRunExecutionResult {
   if (agent.status === "completed" || agent.status === "confirmation_needed") {
     const eventEntries = agent.runtime.eventLog.list();
     const transcript = createPanelRunTranscript({
@@ -2115,21 +2992,49 @@ async function runDesktopForPanel(
         result: agent,
         transcript,
       }),
+      pendingApproval:
+        agent.pendingApproval === undefined
+          ? undefined
+          : {
+              confirmationId: agent.pendingApproval.confirmationId,
+              resume: async (resumeInput) => {
+                const resumed = await agent.pendingApproval!.resume(resumeInput);
+                return desktopPanelResultFromAgent(resumed);
+              },
+            },
     };
   }
 
   throw new PanelHttpError(500, "desktop_agent_failed", agent.failureMessage ?? "桌面 Agent 没有形成结果。");
 }
 
+async function resolveTriggeredSkillContexts(
+  runtime: PanelRuntime,
+  goal: string
+): Promise<readonly DesktopAgentSkillContext[]> {
+  const skills = await discoverSkills({ roots: runtime.skillRoots, stateStore: runtime.skillStateStore });
+  const triggered = selectTriggeredSkills(goal, skills, 4);
+  const contexts = await Promise.all(triggered.map(async (skill): Promise<DesktopAgentSkillContext> => {
+    const body = await loadSkillBody(skill);
+    await runtime.skillStateStore?.markUsed(skill.id);
+    return {
+      skill,
+      body,
+      triggerReason: skill.triggers.length === 0
+        ? "技能名称或描述匹配当前任务。"
+        : `触发词：${skill.triggers.join(" / ")}`,
+    };
+  }));
+  return contexts;
+}
+
 async function runUndergroundForPanel(
   runtime: PanelRuntime,
   goal: string,
   aiMode: UndergroundAiMode,
-  options: {
-    readonly onRuntimeReady?: (context: PanelRuntimeReadyContext) => void;
-    readonly onModelOutputDelta?: (delta: ModelOutputDelta) => void;
-  } = {}
+  options: PanelRunExecutionOptions = {}
 ): Promise<PanelRunExecutionResult> {
+  throwIfAborted(options.abortSignal);
   if (aiMode === "none") {
     throw createUndergroundAiDisabledConfigurationError();
   }
@@ -2154,11 +3059,13 @@ async function runUndergroundForPanel(
     fetch: runtime.providerFetch,
     workspaceRoot,
   });
+  throwIfAborted(options.abortSignal);
   const result = await runUndergroundDirectionSessionWithIntelligence(goal, {
     createIntelligenceChannel: aiConfig.createIntelligenceChannel,
     createToolCenter,
     onRuntimeReady: options.onRuntimeReady,
   });
+  throwIfAborted(options.abortSignal);
   const summary = createUndergroundDemoSummary(result, undefined, aiConfig.summaryInput);
   return {
     summary,
@@ -2196,6 +3103,12 @@ function parseConfigUpdate(raw: unknown): UpdateModelProviderConfigInput {
     defaultAiMode: parseOptionalAiMode(record.defaultAiMode, "默认 AI 模式无效。"),
     apiKey: optionalString(record.apiKey),
   };
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted === true) {
+    throw new PanelHttpError(499, "run_cancelled", "运行已取消。");
+  }
 }
 
 function parseWorkspaceUpdate(raw: unknown): UpdateWorkspaceConfigInput {
@@ -2567,11 +3480,18 @@ function listen(server: Server, port: number, host: string): Promise<void> {
 async function closePanelServer(server: Server, runtime: PanelRuntime): Promise<void> {
   await close(server);
   await waitForPanelRuntimeIdle(runtime);
+  await waitForPanelPersistenceIdle(runtime);
 }
 
 async function waitForPanelRuntimeIdle(runtime: PanelRuntime): Promise<void> {
   while (runtime.activeRunJobs.size > 0) {
     await Promise.allSettled([...runtime.activeRunJobs]);
+  }
+}
+
+async function waitForPanelPersistenceIdle(runtime: PanelRuntime): Promise<void> {
+  while (runtime.persistenceChains.size > 0) {
+    await Promise.allSettled([...runtime.persistenceChains.values()]);
   }
 }
 

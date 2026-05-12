@@ -81,6 +81,17 @@ export function createLocalReadFileTool(rootDirectory = DEFAULT_ROOT, options: L
     definition: {
       name: "read_file",
       description: "Read a UTF-8 text file under the local workspace. Returns truncated content and file metadata.",
+      metadata: {
+        category: "filesystem",
+        riskLevel: "low",
+        operationType: "read-only",
+        requiresConfirmation: false,
+        visibleResultPolicy: {
+          userVisible: "summary-only",
+          maxPreviewChars: 900,
+          omitRawOutput: true,
+        },
+      },
       inputSchema: {
         type: "object",
         properties: {
@@ -90,7 +101,8 @@ export function createLocalReadFileTool(rootDirectory = DEFAULT_ROOT, options: L
         required: ["path"],
       },
     },
-    execute: async (input) => {
+    execute: async (input, context) => {
+      throwIfAborted(context.abortSignal);
       const record = asRecord(input);
       const target = resolveWorkspacePath(rootDirectory, stringOrFallback(record.path, ""));
       assertSandboxAllowed(sandboxPolicy, sandboxRequest("read", rootDirectory, target.relativePath));
@@ -126,6 +138,17 @@ export function createLocalListDirTool(rootDirectory = DEFAULT_ROOT, options: Lo
     definition: {
       name: "list_dir",
       description: "List files and folders under a local workspace directory. Returns names, kinds, and sizes.",
+      metadata: {
+        category: "filesystem",
+        riskLevel: "low",
+        operationType: "read-only",
+        requiresConfirmation: false,
+        visibleResultPolicy: {
+          userVisible: "safe-preview",
+          maxPreviewChars: 1200,
+          omitRawOutput: true,
+        },
+      },
       inputSchema: {
         type: "object",
         properties: {
@@ -134,7 +157,8 @@ export function createLocalListDirTool(rootDirectory = DEFAULT_ROOT, options: Lo
         },
       },
     },
-    execute: async (input) => {
+    execute: async (input, context) => {
+      throwIfAborted(context.abortSignal);
       const record = asRecord(input);
       const target = resolveWorkspacePath(rootDirectory, stringOrFallback(record.path, "."));
       assertSandboxAllowed(sandboxPolicy, sandboxRequest("list", rootDirectory, target.relativePath));
@@ -176,6 +200,17 @@ export function createLocalGrepFilesTool(rootDirectory = DEFAULT_ROOT, options: 
     definition: {
       name: "grep_files",
       description: "Search text files under the local workspace for a plain-text query. Returns matching file paths and line previews.",
+      metadata: {
+        category: "filesystem",
+        riskLevel: "low",
+        operationType: "read-only",
+        requiresConfirmation: false,
+        visibleResultPolicy: {
+          userVisible: "safe-preview",
+          maxPreviewChars: 1600,
+          omitRawOutput: true,
+        },
+      },
       inputSchema: {
         type: "object",
         properties: {
@@ -186,7 +221,8 @@ export function createLocalGrepFilesTool(rootDirectory = DEFAULT_ROOT, options: 
         required: ["query"],
       },
     },
-    execute: async (input) => {
+    execute: async (input, context) => {
+      throwIfAborted(context.abortSignal);
       const record = asRecord(input);
       const query = stringOrFallback(record.query, "");
       if (query.length === 0) {
@@ -220,6 +256,17 @@ export function createLocalWriteFileTool(rootDirectory = DEFAULT_ROOT, options: 
     definition: {
       name: "write_file",
       description: "Create or overwrite a UTF-8 text file under the local workspace. Returns the written path and byte size.",
+      metadata: {
+        category: "filesystem",
+        riskLevel: "high",
+        operationType: "read-write",
+        requiresConfirmation: true,
+        visibleResultPolicy: {
+          userVisible: "summary-only",
+          maxPreviewChars: 600,
+          omitRawOutput: true,
+        },
+      },
       inputSchema: {
         type: "object",
         properties: {
@@ -230,7 +277,8 @@ export function createLocalWriteFileTool(rootDirectory = DEFAULT_ROOT, options: 
         required: ["path", "content"],
       },
     },
-    execute: async (input) => {
+    execute: async (input, context) => {
+      throwIfAborted(context.abortSignal);
       const record = asRecord(input);
       const content = requireText(record.content, "content", { allowEmpty: true });
       const append = record.append === true;
@@ -267,6 +315,17 @@ export function createLocalEditFileTool(rootDirectory = DEFAULT_ROOT, options: L
     definition: {
       name: "edit_file",
       description: "Edit a UTF-8 text file under the local workspace by replacing an exact match. Returns previous and new sizes.",
+      metadata: {
+        category: "filesystem",
+        riskLevel: "high",
+        operationType: "read-write",
+        requiresConfirmation: true,
+        visibleResultPolicy: {
+          userVisible: "summary-only",
+          maxPreviewChars: 600,
+          omitRawOutput: true,
+        },
+      },
       inputSchema: {
         type: "object",
         properties: {
@@ -277,7 +336,8 @@ export function createLocalEditFileTool(rootDirectory = DEFAULT_ROOT, options: L
         required: ["path", "oldText", "newText"],
       },
     },
-    execute: async (input) => {
+    execute: async (input, context) => {
+      throwIfAborted(context.abortSignal);
       const record = asRecord(input);
       const oldText = requireText(record.oldText, "oldText", { allowEmpty: false });
       const newText = requireText(record.newText, "newText", { allowEmpty: true });
@@ -325,6 +385,17 @@ export function createLocalRunCommandTool(rootDirectory = DEFAULT_ROOT, options:
     definition: {
       name: "run_command",
       description: "Run a safe workspace command under the local workspace root. Intended for low-risk verification commands like dir or type.",
+      metadata: {
+        category: "terminal",
+        riskLevel: "high",
+        operationType: "execute",
+        requiresConfirmation: true,
+        visibleResultPolicy: {
+          userVisible: "summary-only",
+          maxPreviewChars: 600,
+          omitRawOutput: true,
+        },
+      },
       inputSchema: {
         type: "object",
         properties: {
@@ -335,7 +406,8 @@ export function createLocalRunCommandTool(rootDirectory = DEFAULT_ROOT, options:
         required: ["command"],
       },
     },
-    execute: async (input) => {
+    execute: async (input, context) => {
+      throwIfAborted(context.abortSignal);
       const record = asRecord(input);
       const command = requireString(record.command, "command");
       const args = toStringArray(record.args);
@@ -352,7 +424,7 @@ export function createLocalRunCommandTool(rootDirectory = DEFAULT_ROOT, options:
         return commandToolOutput(command, args, builtin, false);
       }
       const result = await new Promise<{ readonly stdout: string; readonly stderr: string; readonly exitCode: number }>((resolve, reject) => {
-        execFile(command, args, { cwd: rootDirectory, timeout: timeoutMs, windowsHide: true }, (error, stdout, stderr) => {
+        const child = execFile(command, args, { cwd: rootDirectory, timeout: timeoutMs, windowsHide: true }, (error, stdout, stderr) => {
           if (error && typeof error.code === "number") {
             resolve({ stdout: String(stdout ?? ""), stderr: String(stderr ?? ""), exitCode: error.code });
             return;
@@ -363,6 +435,10 @@ export function createLocalRunCommandTool(rootDirectory = DEFAULT_ROOT, options:
           }
           resolve({ stdout: String(stdout ?? ""), stderr: String(stderr ?? ""), exitCode: 0 });
         });
+        context.abortSignal?.addEventListener("abort", () => {
+          child.kill();
+          resolve({ stdout: "", stderr: "Command execution cancelled.", exitCode: 130 });
+        }, { once: true });
       });
       return commandToolOutput(command, args, result, false);
     },
@@ -387,6 +463,12 @@ function assertSandboxAllowed(policy: SandboxPolicy, request: SandboxPolicyReque
   const decision = policy.check(request);
   if (!decision.allowed) {
     throw new LocalSandboxPolicyViolationError(decision.reason);
+  }
+}
+
+function throwIfAborted(signal: AbortSignal | undefined): void {
+  if (signal?.aborted === true) {
+    throw new Error("Tool execution cancelled.");
   }
 }
 

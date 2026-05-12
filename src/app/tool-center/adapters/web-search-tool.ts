@@ -6,6 +6,7 @@ export type FetchLike = (
     readonly method: "POST";
     readonly headers: Record<string, string>;
     readonly body: string;
+    readonly signal?: AbortSignal;
   }
 ) => Promise<FetchLikeResponse>;
 
@@ -42,6 +43,17 @@ export function createWebSearchTool(options: WebSearchToolOptions = {}): ToolExe
     definition: {
       name: "web_search",
       description: "Search the web for current information. Returns top results with titles, URLs, and snippets.",
+      metadata: {
+        category: "web",
+        riskLevel: "low",
+        operationType: "read-only",
+        requiresConfirmation: false,
+        visibleResultPolicy: {
+          userVisible: "summary-only",
+          maxPreviewChars: 800,
+          omitRawOutput: true,
+        },
+      },
       inputSchema: {
         type: "object",
         properties: {
@@ -60,6 +72,15 @@ async function executeWebSearch(
   options: WebSearchToolOptions
 ): Promise<WebSearchToolOutput> {
   const query = queryFromInput(input);
+  if (_context.abortSignal?.aborted === true) {
+    return {
+      provider: "none",
+      status: "provider_failed",
+      query: "",
+      results: [],
+      message: "web_search was cancelled.",
+    };
+  }
   if (query === undefined) {
     return {
       provider: "none",
@@ -94,6 +115,7 @@ async function executeWebSearch(
       max_results: maxResults,
       search_depth: "basic",
     }),
+    signal: _context.abortSignal,
   });
 
   if (!response.ok) {

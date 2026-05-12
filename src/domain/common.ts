@@ -53,6 +53,7 @@ export const ARBOR_MESSAGE_TYPES = [
   "tool.requested",
   "tool.completed",
   "tool.failed",
+  "skill.triggered",
   "agent.delegation.planned",
   "agent.child.started",
   "agent.child.completed",

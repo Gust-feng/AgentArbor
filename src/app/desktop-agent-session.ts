@@ -4,7 +4,7 @@ import type { TaskSoil } from "../domain/soil/index.js";
 import type { ToolCallResult, ToolExecutionBroker } from "../domain/tools/index.js";
 import type { EventLogEntry } from "../kernel/events/in-memory-event-log.js";
 import { createId, nowIso } from "../kernel/id.js";
-import { AgentTurnRuntime } from "../kernel/intelligence/index.js";
+import { AgentTurnRuntime, type AgentTurnRuntimeResult } from "../kernel/intelligence/index.js";
 import { createMessage } from "../kernel/messages/create-message.js";
 import {
   createUndergroundAiDisabledConfigurationError,
@@ -15,7 +15,7 @@ import {
 } from "./intelligence-channel-factory.js";
 import type { MinimalRuntime } from "./runtime.js";
 import { createMinimalRuntime } from "./runtime.js";
-import { desktopAgentMessages } from "./desktop-agent-prompts.js";
+import { desktopAgentMessages, type DesktopAgentSkillContext } from "./desktop-agent-prompts.js";
 import { createTaskSoilFromDesktopInput, type DesktopTaskSoilInput } from "./task-soil-workspace.js";
 import { sanitizeAssistantVisibleText } from "./visible-text-safety.js";
 
@@ -91,6 +91,15 @@ export type DesktopAgentSessionResult = {
   readonly toolCallRefs: readonly string[];
   readonly activity: readonly DesktopAgentActivity[];
   readonly eventTypes: readonly string[];
+  readonly pendingApproval?: DesktopAgentPendingApprovalContinuation;
+};
+
+export type DesktopAgentPendingApprovalContinuation = {
+  readonly confirmationId: string;
+  resume(input: {
+    readonly approvedConfirmationIds: readonly string[];
+    readonly abortSignal?: AbortSignal;
+  }): Promise<DesktopAgentSessionResult>;
 };
 
 export type DesktopAgentSessionRuntimeContext = {
@@ -105,6 +114,8 @@ export type RunDesktopAgentSessionOptions = {
   readonly providerFetch?: UndergroundAiProviderFetch;
   readonly taskSoilInput?: DesktopTaskSoilInput;
   readonly conversationHistory?: readonly DesktopAgentConversationMessage[];
+  readonly skillContexts?: readonly DesktopAgentSkillContext[];
+  readonly abortSignal?: AbortSignal;
   readonly runtime?: MinimalRuntime;
   readonly createIntelligenceChannel?: (runtime: MinimalRuntime) => IntelligenceChannel;
   readonly createToolCenter?: (runtime: MinimalRuntime) => ToolExecutionBroker;
@@ -146,6 +157,7 @@ export async function runDesktopAgentSession(
   });
 
   publishGoalReceived({ runtime, traceId, goalId, goal, taskSoil });
+  publishTriggeredSkills({ runtime, traceId, goalId, skills: options.skillContexts ?? [] });
   options.onRuntimeReady?.({ runtime, traceId, goalId });
 
   const intelligenceChannel =
@@ -198,57 +210,90 @@ export async function runDesktopAgentSession(
       goal,
       taskSoil,
       conversationHistory: options.conversationHistory ?? [],
+      skillContexts: options.skillContexts ?? [],
     }),
     constraintRefs: [],
     toolChoice: toolCenter === undefined ? "none" : "auto",
     requestedAt: nowIso(),
+    abortSignal: options.abortSignal,
   });
 
-  const modelCallRefs = refsFromResponse(turn.finalOutput, turn.modelRequestId, turn.modelResponseId);
-  const toolCallRefs = refsFromToolCalls(turn.toolCalls);
-  const recoverableBudgetStop = isRecoverableBudgetStop(turn);
-  if ((turn.status !== "completed" && !recoverableBudgetStop) || turn.finalOutput === undefined || turn.finalOutput.status !== "completed") {
+  return desktopAgentResultFromTurn({
+    goal,
+    runtime,
+    traceId,
+    goalId,
+    taskSoil,
+    turnRuntime,
+    turn,
+  });
+}
+
+function desktopAgentResultFromTurn(input: {
+  readonly goal: string;
+  readonly runtime: MinimalRuntime;
+  readonly traceId: string;
+  readonly goalId: string;
+  readonly taskSoil: TaskSoil;
+  readonly turnRuntime: AgentTurnRuntime;
+  readonly turn: AgentTurnRuntimeResult;
+}): DesktopAgentSessionResult {
+  const modelCallRefs = refsFromResponse(input.turn.finalOutput, input.turn.modelRequestId, input.turn.modelResponseId);
+  const toolCallRefs = refsFromToolCalls(input.turn.toolCalls);
+  const recoverableBudgetStop = isRecoverableBudgetStop(input.turn);
+  const waitingForApproval = input.turn.status === "approval_required" && input.turn.pendingApproval !== undefined;
+  if (
+    (input.turn.status !== "completed" && !waitingForApproval && !recoverableBudgetStop) ||
+    input.turn.finalOutput === undefined ||
+    input.turn.finalOutput.status !== "completed"
+  ) {
     return {
       status: "failed",
-      runtime,
-      traceId,
-      goalId,
-      taskSoil,
-      failureMessage: turn.finalOutput?.failure?.message ?? "Desktop Agent model/tool turn failed.",
+      runtime: input.runtime,
+      traceId: input.traceId,
+      goalId: input.goalId,
+      taskSoil: input.taskSoil,
+      failureMessage: input.turn.finalOutput?.failure?.message ?? "Desktop Agent model/tool turn failed.",
       modelCallRefs,
       toolCallRefs,
-      activity: activityFromEventEntries(runtime.eventLog.list(), "failed"),
-      eventTypes: runtime.eventLog.types(),
+      activity: activityFromEventEntries(input.runtime.eventLog.list(), "failed"),
+      eventTypes: input.runtime.eventLog.types(),
     };
   }
 
-  const answer = parseAnswer(turn.finalOutput, turn.toolCalls, turn.stoppedReason);
-  const evidenceRefs = evidenceRefsFromToolCalls(turn.toolCalls);
+  const answer = parseAnswer(input.turn.finalOutput, input.turn.toolCalls, input.turn.stoppedReason);
+  const evidenceRefs = evidenceRefsFromToolCalls(input.turn.toolCalls);
   const pendingConfirmation = pendingConfirmationFrom({
-    goal,
-    taskSoil,
+    goal: input.goal,
+    taskSoil: input.taskSoil,
     answer,
-    traceId,
-    goalId,
+    toolCalls: input.turn.toolCalls,
+    traceId: input.traceId,
+    goalId: input.goalId,
     modelCallRefs,
     toolCallRefs,
   });
-  if (pendingConfirmation !== undefined) {
-    publishConfirmationRequested({ runtime, traceId, goalId, pendingConfirmation });
+  if (pendingConfirmation !== undefined && !hasConfirmationRequested(input.runtime.eventLog.list(), pendingConfirmation.confirmationId)) {
+    publishConfirmationRequested({
+      runtime: input.runtime,
+      traceId: input.traceId,
+      goalId: input.goalId,
+      pendingConfirmation,
+    });
   }
   const resultBlocks = resultBlocksFrom({
     answer,
-    toolCalls: turn.toolCalls,
+    toolCalls: input.turn.toolCalls,
     evidenceRefs,
     pendingConfirmation,
   });
   const status = pendingConfirmation === undefined ? "completed" : "confirmation_needed";
   return {
     status,
-    runtime,
-    traceId,
-    goalId,
-    taskSoil,
+    runtime: input.runtime,
+    traceId: input.traceId,
+    goalId: input.goalId,
+    taskSoil: input.taskSoil,
     answer: {
       answer,
       modelCallRefs,
@@ -259,8 +304,25 @@ export async function runDesktopAgentSession(
     pendingConfirmation,
     modelCallRefs,
     toolCallRefs,
-    activity: activityFromEventEntries(runtime.eventLog.list(), status),
-    eventTypes: runtime.eventLog.types(),
+    activity: activityFromEventEntries(input.runtime.eventLog.list(), status),
+    eventTypes: input.runtime.eventLog.types(),
+    pendingApproval:
+      pendingConfirmation === undefined || input.turn.pendingApproval === undefined
+        ? undefined
+        : {
+            confirmationId: input.turn.pendingApproval.confirmationId,
+            resume: async (resumeInput) => {
+              const resumed = await input.turnRuntime.resume({
+                pendingApproval: input.turn.pendingApproval!,
+                approvedConfirmationIds: resumeInput.approvedConfirmationIds,
+                abortSignal: resumeInput.abortSignal,
+              });
+              return desktopAgentResultFromTurn({
+                ...input,
+                turn: resumed,
+              });
+            },
+          },
   };
 }
 
@@ -391,6 +453,32 @@ function publishConfirmationRequested(input: {
   );
 }
 
+function publishTriggeredSkills(input: {
+  readonly runtime: MinimalRuntime;
+  readonly traceId: string;
+  readonly goalId: string;
+  readonly skills: readonly DesktopAgentSkillContext[];
+}): void {
+  for (const context of input.skills) {
+    input.runtime.bus.publish(
+      createMessage({
+        traceId: input.traceId,
+        from: { id: DESKTOP_AGENT_ID, role: "agent" },
+        to: { group: "desktop-shell" },
+        type: "skill.triggered",
+        intent: "inject_desktop_agent_skill",
+        payload: {
+          goalId: input.goalId,
+          skillId: context.skill.id,
+          name: context.skill.name,
+          triggerReason: safeText(context.triggerReason, 240),
+          sourceRef: `skill:${context.skill.id}`,
+        },
+      })
+    );
+  }
+}
+
 function baseInputRefs(traceId: string, goalId: string): readonly ObservationRef[] {
   return [
     { kind: "trace", id: traceId },
@@ -419,11 +507,27 @@ function pendingConfirmationFrom(input: {
   readonly goal: string;
   readonly taskSoil: TaskSoil;
   readonly answer: string;
+  readonly toolCalls: readonly ToolCallResult[];
   readonly traceId: string;
   readonly goalId: string;
   readonly modelCallRefs: readonly string[];
   readonly toolCallRefs: readonly string[];
 }): DesktopAgentPendingConfirmation | undefined {
+  const approvalRequired = input.toolCalls.find((call) => call.status === "approval_required" && call.confirmationRequest !== undefined);
+  if (approvalRequired?.confirmationRequest !== undefined) {
+    const confirmation = approvalRequired.confirmationRequest;
+    return {
+      confirmationId: confirmation.confirmationId,
+      title: confirmation.title,
+      question: confirmation.actionSummary,
+      consequence: "批准后只允许继续本次对应工具操作；拒绝则不会执行该动作。",
+      riskLevel: confirmation.riskLevel,
+      requestedAt: confirmation.requestedAt,
+      modelCallRefs: input.modelCallRefs,
+      toolCallRefs: [approvalRequired.callId],
+      sourceRefs: confirmation.sourceRefs,
+    };
+  }
   if (!needsLocalFileAuthorization(input.goal) || hasAuthorizedReadableContext(input.taskSoil)) {
     return undefined;
   }
@@ -459,11 +563,12 @@ function resultBlocksFrom(input: {
   if (input.toolCalls.length > 0) {
     const completed = input.toolCalls.filter((call) => call.status === "completed").length;
     const failed = input.toolCalls.filter((call) => call.status === "failed").length;
+    const approvalRequired = input.toolCalls.filter((call) => call.status === "approval_required").length;
     blocks.push({
       blockId: createId("result-block"),
       kind: failed > 0 ? "failure" : "tool_summary",
       title: "工具摘要",
-      summary: toolSummaryText(input.toolCalls, completed, failed),
+      summary: toolSummaryText(input.toolCalls, completed, failed, approvalRequired),
       evidenceRefs: input.evidenceRefs.slice(0, 8),
       toolCallRefs: input.toolCalls.map((call) => call.callId),
     });
@@ -481,7 +586,7 @@ function resultBlocksFrom(input: {
   return blocks;
 }
 
-function toolSummaryText(toolCalls: readonly ToolCallResult[], completed: number, failed: number): string {
+function toolSummaryText(toolCalls: readonly ToolCallResult[], completed: number, failed: number, approvalRequired: number): string {
   const localSummaries = toolCalls
     .map((call) => {
       const output = asRecord(call.output);
@@ -491,8 +596,18 @@ function toolSummaryText(toolCalls: readonly ToolCallResult[], completed: number
     })
     .filter((value): value is string => value !== undefined)
     .slice(0, 4);
-  const base = `本轮工具调用 ${toolCalls.length} 次；完成 ${completed} 次，失败 ${failed} 次。工具输出只作为安全摘要和引用进入回答。`;
+  const base = `本轮工具调用 ${toolCalls.length} 次；完成 ${completed} 次，失败 ${failed} 次，需要确认 ${approvalRequired} 次。工具输出只作为安全摘要和引用进入回答。`;
   return localSummaries.length === 0 ? base : `${base}\n${localSummaries.join("\n")}`;
+}
+
+function hasConfirmationRequested(entries: readonly EventLogEntry[], confirmationId: string): boolean {
+  return entries.some((entry) => {
+    if (entry.type !== "user_approval.requested") {
+      return false;
+    }
+    const payload = asRecord(entry.message.payload);
+    return stringOrUndefined(payload.confirmationId) === confirmationId;
+  });
 }
 
 function evidenceRefsFromToolCalls(toolCalls: readonly ToolCallResult[]): readonly string[] {

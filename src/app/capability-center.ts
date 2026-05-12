@@ -7,8 +7,10 @@ import type {
 import { createId, nowIso } from "../kernel/id.js";
 import type { ConfigCenter } from "./config-center.js";
 import { isKnownModel, resolveModelCapabilities } from "./model-capability-registry.js";
-import { createDesktopBasicToolRegistry } from "./basic-agent-runtime/tool-registry.js";
-import type { ToolRegistryFetchLike } from "./basic-agent-runtime/tool-registry.js";
+import {
+  createDesktopBasicToolRegistry,
+  type ToolRegistryFetchLike,
+} from "./basic-agent-runtime/builtin-tool-runtime.js";
 import { discoverSkills } from "./skills/skill-loader.js";
 import type { SkillStateStore } from "./skills/skill-state-store.js";
 

@@ -2,7 +2,7 @@ import type { BasicAgentCapabilitySnapshot, SanitizedInformationAccessConfig, Sa
 import type { BasicAgentRun, ConfirmationDecision, RunEvent } from "../../domain/basic-agent/index.js";
 import type { ModelOutputDelta } from "../../domain/intelligence/index.js";
 import { nowIso } from "../../kernel/id.js";
-import type { UndergroundAiMode } from "../intelligence-channel-factory.js";
+import type { ModelRuntimeMode } from "../model-runtime/index.js";
 import type { DesktopIntentDecision } from "../desktop-intent-router.js";
 import type { DesktopAgentConversationMessage } from "../desktop-agent-session.js";
 import type { PanelRunCanvasReadModel } from "../panel-canvas-read-model.js";
@@ -41,7 +41,7 @@ export type BasicAgentRunStartInput = {
   readonly runKind: PanelRunKind;
   readonly runMode?: PanelDesktopRunMode;
   readonly goal: string;
-  readonly aiMode: UndergroundAiMode;
+  readonly aiMode: ModelRuntimeMode;
   readonly conversationId?: string;
   readonly assistantTurnId?: string;
   readonly runAfterRunId?: string;

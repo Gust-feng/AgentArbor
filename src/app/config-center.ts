@@ -10,9 +10,6 @@ import {
 import type {
   AgentArborLocalSettings,
   ConfiguredModelProviderKind,
-  ConfiguredModelProtocolKind,
-  ConfiguredUndergroundAiMode,
-  ConfiguredWebSearchProvider,
   CreateModelProviderProfileInput,
   LocalDevSecretStore,
   McpServerSettings,
@@ -32,22 +29,28 @@ import type {
   UpdateWebSearchConfigInput,
   ToolStateSettings,
 } from "../domain/config/index.js";
-import type { ConfiguredInformationSourceKind, InformationAccessSettings } from "../domain/config/index.js";
+import type { InformationAccessSettings } from "../domain/config/index.js";
+import {
+  DEFAULT_MODEL_PROVIDER_BASE_URL,
+  ConfigSchemaValidationError,
+  createDefaultLocalSettings,
+  normalizeBaseUrl,
+  normalizeInformationAccessSettings,
+  normalizeLocalSettings,
+  normalizeModelProfile,
+  normalizeModelProviderKind,
+  normalizeOptionalString,
+  normalizePositiveInteger,
+  normalizeProfileId,
+  normalizeRequiredConfigString,
+  normalizeSourcePreference,
+  normalizeWebSearchProvider,
+  parseLocalSettingsFile,
+  sanitizeCapabilityOverride,
+  sanitizeMcpArgs,
+  shouldRewriteLocalSettingsFile,
+} from "./config-center/settings-schema.js";
 
-export const DEFAULT_MODEL_PROVIDER_BASE_URL = "https://api.openai.com";
-export const MODEL_PROVIDER_SECRET_REF = "secret://local-dev/model-provider/default/api-key";
-export const INFORMATION_TAVILY_SECRET_REF = "secret://local-dev/information-source/tavily/default/api-key";
-const DEFAULT_MODEL_PROFILE_ID = "default";
-const DEFAULT_INFORMATION_SOURCE_PREFERENCE: readonly ConfiguredInformationSourceKind[] = [
-  "web",
-  "codebase",
-  "soil",
-  "run_memory",
-  "docs",
-  "packages",
-  "github",
-];
-const DEFAULT_TAVILY_MAX_RESULTS = 5;
 const FALLBACK_WORKSPACE_DIRECTORY = process.cwd();
 
 export type ConfigCenterOptions = {
@@ -417,8 +420,9 @@ export class ConfigCenter {
   private async readOrCreateSettings(): Promise<AgentArborLocalSettings> {
     const existing = await this.options.settingsStore.readSettings();
     if (existing !== undefined) {
-      const normalized = normalizeLocalSettings(existing);
-      if (existing.version !== 3 || existing.activeModelProfileId !== normalized.activeModelProfileId) {
+      const parsed = parseLocalSettingsFile(existing);
+      const normalized = normalizeLocalSettings(parsed);
+      if (shouldRewriteLocalSettingsFile(existing, normalized)) {
         await this.options.settingsStore.writeSettings(normalized);
       }
       return normalized;
@@ -515,231 +519,6 @@ export function createLocalConfigCenter(options: CreateLocalConfigCenterOptions 
   };
 }
 
-export function createDefaultLocalSettings(now: string = new Date().toISOString()): AgentArborLocalSettings {
-  const defaultProfile: ModelProviderProfileSettings = {
-    profileId: DEFAULT_MODEL_PROFILE_ID,
-    label: "Default",
-    providerKind: "openai_compatible",
-    protocolKind: "openai_compatible_chat_completions",
-    baseUrl: DEFAULT_MODEL_PROVIDER_BASE_URL,
-    defaultAiMode: "openai-compatible",
-    secretRef: MODEL_PROVIDER_SECRET_REF,
-    enabled: true,
-    updatedAt: now,
-  };
-  return {
-    version: 3,
-    modelProvider: defaultProfile,
-    activeModelProfileId: defaultProfile.profileId,
-    modelProfiles: [defaultProfile],
-    modelCapabilityOverrides: [],
-    toolStates: [],
-    mcpServers: [],
-    informationAccess: createDefaultInformationAccessSettings(now),
-    updatedAt: now,
-  };
-}
-
-function createDefaultInformationAccessSettings(now: string): InformationAccessSettings {
-  return {
-    sourcePreference: [...DEFAULT_INFORMATION_SOURCE_PREFERENCE],
-    webSearch: {
-      provider: "tavily",
-      updatedAt: now,
-    },
-    tavily: {
-      providerKind: "tavily",
-      maxResults: DEFAULT_TAVILY_MAX_RESULTS,
-      secretRef: INFORMATION_TAVILY_SECRET_REF,
-      updatedAt: now,
-    },
-  };
-}
-
-function normalizeLocalSettings(settings: AgentArborLocalSettings): AgentArborLocalSettings {
-  const now = settings.updatedAt;
-  const legacyProfile = normalizeModelProfile(settings.modelProvider, createDefaultProfile(now));
-  const profiles = dedupeProfiles((settings.modelProfiles.length === 0 ? [legacyProfile] : settings.modelProfiles)
-    .map((profile) => normalizeModelProfile(profile, legacyProfile)));
-  const activeProfile =
-    profiles.find((profile) => profile.profileId === settings.activeModelProfileId) ??
-    profiles.find((profile) => profile.profileId === legacyProfile.profileId) ??
-    profiles[0] ??
-    legacyProfile;
-  return {
-    ...settings,
-    version: 3,
-    modelProvider: activeProfile,
-    activeModelProfileId: activeProfile.profileId,
-    modelProfiles: profiles.length === 0 ? [activeProfile] : profiles,
-    modelCapabilityOverrides: normalizeModelCapabilityOverrides(settings.modelCapabilityOverrides ?? [], now),
-    toolStates: normalizeToolStates(settings.toolStates ?? [], now),
-    mcpServers: normalizeMcpServers(settings.mcpServers ?? [], now),
-    informationAccess: normalizeInformationAccessSettings(settings.informationAccess, now),
-  };
-}
-
-function createDefaultProfile(now: string): ModelProviderProfileSettings {
-  return {
-    profileId: DEFAULT_MODEL_PROFILE_ID,
-    label: "Default",
-    providerKind: "openai_compatible",
-    protocolKind: "openai_compatible_chat_completions",
-    baseUrl: DEFAULT_MODEL_PROVIDER_BASE_URL,
-    defaultAiMode: "openai-compatible",
-    secretRef: MODEL_PROVIDER_SECRET_REF,
-    enabled: true,
-    updatedAt: now,
-  };
-}
-
-function normalizeModelProfile(
-  input: Partial<ModelProviderProfileSettings> & { readonly profileId?: string },
-  fallback: ModelProviderProfileSettings
-): ModelProviderProfileSettings {
-  const providerKind = normalizeModelProviderKind(input.providerKind) ?? fallback.providerKind;
-  return {
-    profileId: normalizeProfileId(input.profileId ?? fallback.profileId),
-    label: normalizeOptionalString(input.label) ?? fallback.label,
-    providerKind,
-    protocolKind: normalizeModelProtocolKind(input.protocolKind, providerKind) ?? fallback.protocolKind,
-    baseUrl: normalizeBaseUrl(input.baseUrl) ?? fallback.baseUrl,
-    model: normalizeOptionalString(input.model) ?? fallback.model,
-    defaultAiMode: normalizeAiMode(input.defaultAiMode) ?? fallback.defaultAiMode,
-    secretRef: normalizeOptionalString(input.secretRef) ?? secretRefForProfile(input.profileId ?? fallback.profileId),
-    enabled: input.enabled ?? fallback.enabled,
-    updatedAt: normalizeOptionalString(input.updatedAt) ?? fallback.updatedAt,
-  };
-}
-
-function dedupeProfiles(profiles: readonly ModelProviderProfileSettings[]): readonly ModelProviderProfileSettings[] {
-  const map = new Map<string, ModelProviderProfileSettings>();
-  for (const profile of profiles) {
-    map.set(profile.profileId, profile);
-  }
-  return [...map.values()];
-}
-
-function normalizeModelCapabilityOverrides(
-  overrides: readonly ModelCapabilityOverrideSettings[],
-  now: string
-): readonly ModelCapabilityOverrideSettings[] {
-  return overrides.map((override) => ({
-    providerKind: normalizeModelProviderKind(override.providerKind),
-    model: normalizeRequiredConfigString(override.model, "model"),
-    capabilities: sanitizeCapabilityOverride(override.capabilities),
-    updatedAt: normalizeOptionalString(override.updatedAt) ?? now,
-  }));
-}
-
-function normalizeToolStates(states: readonly ToolStateSettings[], now: string): readonly ToolStateSettings[] {
-  return states.map((state) => ({
-    name: normalizeRequiredConfigString(state.name, "tool name"),
-    enabled: state.enabled,
-    updatedAt: normalizeOptionalString(state.updatedAt) ?? now,
-  }));
-}
-
-function normalizeMcpServers(servers: readonly McpServerSettings[], now: string): readonly McpServerSettings[] {
-  return servers.map((server) => ({
-    serverId: normalizeProfileId(server.serverId),
-    label: normalizeOptionalString(server.label) ?? server.serverId,
-    transport: server.transport === "http" ? "http" : "stdio",
-    command: normalizeOptionalString(server.command),
-    args: sanitizeMcpArgs(server.args ?? []),
-    url: normalizeOptionalString(server.url),
-    envSecretRefs: server.envSecretRefs.map((ref) => normalizeOptionalString(ref)).filter((ref): ref is string => ref !== undefined),
-    enabled: server.enabled,
-    updatedAt: normalizeOptionalString(server.updatedAt) ?? now,
-  }));
-}
-
-function normalizeInformationAccessSettings(
-  settings: InformationAccessSettings | undefined,
-  now: string
-): InformationAccessSettings {
-  if (settings === undefined) {
-    return createDefaultInformationAccessSettings(now);
-  }
-  return {
-    sourcePreference: normalizeSourcePreference(settings.sourcePreference),
-    webSearch: {
-      provider: normalizeWebSearchProvider(settings.webSearch?.provider) ?? "tavily",
-      updatedAt: normalizeOptionalString(settings.webSearch?.updatedAt) ?? settings.tavily.updatedAt ?? now,
-    },
-    tavily: {
-      providerKind: "tavily",
-      maxResults: normalizePositiveInteger(settings.tavily.maxResults) ?? DEFAULT_TAVILY_MAX_RESULTS,
-      secretRef: normalizeOptionalString(settings.tavily.secretRef) ?? INFORMATION_TAVILY_SECRET_REF,
-      updatedAt: normalizeOptionalString(settings.tavily.updatedAt) ?? now,
-    },
-  };
-}
-
-function normalizeBaseUrl(value: string | undefined): string | undefined {
-  const normalized = normalizeOptionalString(value);
-  if (normalized === undefined) {
-    return undefined;
-  }
-  return normalized.replace(/\/+$/, "");
-}
-
-function normalizeOptionalString(value: string | undefined): string | undefined {
-  return value !== undefined && value.trim().length > 0 ? value.trim() : undefined;
-}
-
-function normalizeAiMode(value: ConfiguredUndergroundAiMode | undefined): ConfiguredUndergroundAiMode | undefined {
-  return value === "none" || value === "fake" || value === "openai-compatible" ? value : undefined;
-}
-
-function normalizeModelProviderKind(value: ConfiguredModelProviderKind | undefined): ConfiguredModelProviderKind | undefined {
-  return value === "openai_compatible" || value === "anthropic" || value === "gemini" || value === "ollama" || value === "local"
-    ? value
-    : undefined;
-}
-
-function normalizeModelProtocolKind(
-  value: ConfiguredModelProtocolKind | undefined,
-  providerKind: ConfiguredModelProviderKind
-): ConfiguredModelProtocolKind | undefined {
-  if (
-    value === "openai_compatible_chat_completions" ||
-    value === "anthropic_messages" ||
-    value === "gemini_generate_content" ||
-    value === "ollama_generate"
-  ) {
-    return value;
-  }
-  if (providerKind === "anthropic") return "anthropic_messages";
-  if (providerKind === "gemini") return "gemini_generate_content";
-  if (providerKind === "ollama") return "ollama_generate";
-  return "openai_compatible_chat_completions";
-}
-
-function normalizeWebSearchProvider(value: ConfiguredWebSearchProvider | undefined): ConfiguredWebSearchProvider | undefined {
-  return value === "tavily" || value === "none" ? value : undefined;
-}
-
-function normalizeSourcePreference(
-  value: readonly ConfiguredInformationSourceKind[] | undefined
-): readonly ConfiguredInformationSourceKind[] {
-  const normalized = [...new Set((value ?? []).filter(isConfiguredInformationSourceKind))];
-  return normalized.length === 0 ? [...DEFAULT_INFORMATION_SOURCE_PREFERENCE] : normalized;
-}
-
-function isConfiguredInformationSourceKind(value: string): value is ConfiguredInformationSourceKind {
-  return (
-    value === "web" ||
-    value === "page" ||
-    value === "codebase" ||
-    value === "soil" ||
-    value === "run_memory" ||
-    value === "docs" ||
-    value === "packages" ||
-    value === "github"
-  );
-}
-
 async function normalizeWorkspaceDirectory(value: string): Promise<string> {
   const normalized = path.resolve(normalizeRequiredString(value, "workspaceDirectory"));
   await ensureWorkspaceReady(normalized);
@@ -772,95 +551,6 @@ function normalizeRequiredString(value: string | undefined, fieldName: string): 
     throw new WorkspaceDirectoryValidationError(`${fieldName} must be a non-empty string.`);
   }
   return normalized;
-}
-
-function normalizeRequiredConfigString(value: string | undefined, fieldName: string): string {
-  const normalized = normalizeOptionalString(value);
-  if (normalized === undefined) {
-    throw new ConfigCenterValidationError(`${fieldName} must be a non-empty string.`);
-  }
-  return normalized;
-}
-
-function normalizeProfileId(value: string): string {
-  const normalized = value.toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80);
-  if (normalized.length === 0) {
-    throw new ConfigCenterValidationError("Profile id must contain letters, numbers, underscore, or dash.");
-  }
-  return normalized;
-}
-
-function secretRefForProfile(profileId: string): string {
-  return `secret://local-dev/model-provider/${normalizeProfileId(profileId)}/api-key`;
-}
-
-function sanitizeMcpArgs(args: readonly string[]): readonly string[] {
-  const sanitized: string[] = [];
-  let nextArgIsSecret = false;
-  for (const raw of args) {
-    const arg = String(raw).trim();
-    if (arg.length === 0) {
-      continue;
-    }
-    const sensitiveKeyValue = /(?:api[_-]?key|token|secret|password|passwd|bearer)\s*[=:]/i.test(arg);
-    const sensitiveFlag = /^--?(?:api[_-]?key|token|secret|password|passwd|bearer)$/i.test(arg);
-    const likelySecretValue = /^(?:Bearer\s+|sk-[A-Za-z0-9_-]+|tvly-[A-Za-z0-9_-]+|gh[pousr]_[A-Za-z0-9_-]+|eyJ[A-Za-z0-9_-]+\.)/.test(arg);
-    if (nextArgIsSecret || sensitiveKeyValue || sensitiveFlag || likelySecretValue) {
-      sanitized.push("[secret-ref-required]");
-    } else {
-      sanitized.push(arg);
-    }
-    nextArgIsSecret = sensitiveFlag;
-  }
-  return sanitized;
-}
-
-function sanitizeCapabilityOverride(capabilities: Partial<ModelCapabilities>): Partial<ModelCapabilities> {
-  return {
-    contextWindowTokens: normalizePositiveInteger(capabilities.contextWindowTokens),
-    maxOutputTokens: normalizePositiveInteger(capabilities.maxOutputTokens),
-    supportsToolCalling: booleanOrUndefined(capabilities.supportsToolCalling),
-    supportsParallelToolCalls: booleanOrUndefined(capabilities.supportsParallelToolCalls),
-    supportsStructuredOutputs: booleanOrUndefined(capabilities.supportsStructuredOutputs),
-    supportsStreaming: booleanOrUndefined(capabilities.supportsStreaming),
-    supportsVisionInput: booleanOrUndefined(capabilities.supportsVisionInput),
-    supportsReasoningEffort: booleanOrUndefined(capabilities.supportsReasoningEffort),
-    preferredApiStyle: normalizePreferredApiStyle(capabilities.preferredApiStyle),
-    stability: normalizeModelStability(capabilities.stability),
-    lastVerifiedAt: normalizeCapabilityVerifiedAt(capabilities.lastVerifiedAt),
-  };
-}
-
-function normalizePreferredApiStyle(value: ModelCapabilities["preferredApiStyle"] | undefined): ModelCapabilities["preferredApiStyle"] | undefined {
-  return value === "chat_completions" ||
-    value === "responses" ||
-    value === "messages" ||
-    value === "gemini_generate_content" ||
-    value === "openai_compatible"
-    ? value
-    : undefined;
-}
-
-function normalizeModelStability(value: ModelCapabilities["stability"] | undefined): ModelCapabilities["stability"] | undefined {
-  return value === "stable" || value === "preview" || value === "deprecated" || value === "unknown"
-    ? value
-    : undefined;
-}
-
-function normalizeCapabilityVerifiedAt(value: string | undefined): string | undefined {
-  const normalized = normalizeOptionalString(value);
-  return normalized !== undefined && /^\d{4}-\d{2}-\d{2}(?:$|T)/.test(normalized) ? normalized : undefined;
-}
-
-function booleanOrUndefined(value: boolean | undefined): boolean | undefined {
-  return typeof value === "boolean" ? value : undefined;
-}
-
-function normalizePositiveInteger(value: number | undefined): number | undefined {
-  if (value === undefined || !Number.isFinite(value)) {
-    return undefined;
-  }
-  return Math.max(1, Math.floor(value));
 }
 
 function firstNonBlank(...values: readonly (string | undefined)[]): string | undefined {

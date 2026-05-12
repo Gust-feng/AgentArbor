@@ -1,10 +1,10 @@
 export {
   createPanelRequestHandler,
   startLocalPanelServer,
-} from "./panel-server/index.js";
+} from "./request-handler.js";
 
 export type {
   PanelProviderFetch,
   PanelServerOptions,
   StartedPanelServer,
-} from "./panel-server/index.js";
+} from "./request-handler.js";

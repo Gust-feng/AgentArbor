@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ToolExecutor } from "../../domain/tools/index.js";
-import { createDesktopBasicToolRegistry, ToolRegistry } from "./tool-registry.js";
+import { createDesktopBasicToolRegistry } from "./builtin-tool-runtime.js";
+import { ToolRegistry } from "./tool-registry.js";
 
 test("desktop-basic tool registry exposes catalog and allowed tools from scoped metadata", () => {
   const registry = createDesktopBasicToolRegistry({ env: {}, workspaceRoot: process.cwd(), playwrightAvailable: true });

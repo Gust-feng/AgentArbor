@@ -22,7 +22,7 @@ test("panel HTML defaults to Simplified Chinese labels and status text", () => {
   );
 
   assert.equal(staticHtml.includes('<link rel="stylesheet" href="/assets/panel.css">'), true);
-  assert.equal(staticHtml.includes('<script src="/assets/panel.js"></script>'), true);
+  assert.equal(staticHtml.includes('<script type="module" src="/assets/panel.js"></script>'), true);
   assert.equal(html.includes("AgentArbor 面板"), true);
   assert.equal(html.includes("assistant-pending"), true);
   assert.equal(html.includes("assistant-control-chip"), true);
@@ -304,8 +304,13 @@ test("panel HTML defaults to Simplified Chinese labels and status text", () => {
   assert.equal(html.includes("workspace:conversation-history"), false);
 });
 
-test("panel inline script remains syntactically valid in generated HTML", () => {
-  assert.doesNotThrow(() => new vm.Script(createPanelClientScript()));
+test("panel module entry imports split frontend modules", () => {
+  const script = createPanelClientScript();
+
+  assert.equal(script.includes('from "./api-client.js"'), true);
+  assert.equal(script.includes('from "./state.js"'), true);
+  assert.equal(script.includes('from "./tool-display-renderer.js"'), true);
+  assert.doesNotThrow(() => new vm.Script(script.replace(/^import .+$/gm, "")));
 });
 
 test("panel assistant markdown renderer builds safe DOM nodes", () => {
@@ -342,9 +347,12 @@ test("panel server serves split static frontend assets", async () => {
     assert.match(String(css.headers["content-type"]), /text\/css/);
     assert.match(String(js.headers["content-type"]), /text\/javascript/);
     assert.equal(html.text.includes('<link rel="stylesheet" href="/assets/panel.css">'), true);
-    assert.equal(html.text.includes('<script src="/assets/panel.js"></script>'), true);
+    assert.equal(html.text.includes('<script type="module" src="/assets/panel.js"></script>'), true);
     assert.equal(css.text.includes(".app"), true);
     assert.equal(js.text.includes("function createAssistantToolDetailNode"), true);
+    assert.equal((await requestText(server.url, "/assets/state.js")).status, 200);
+    assert.equal((await requestText(server.url, "/assets/api-client.js")).status, 200);
+    assert.equal((await requestText(server.url, "/assets/tool-display-renderer.js")).status, 200);
   } finally {
     await server.close();
   }

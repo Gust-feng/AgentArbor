@@ -271,7 +271,7 @@ export type UpdateWorkspaceConfigInput = {
 };
 
 export type NormalSettingsStore = {
-  readSettings(): Promise<AgentArborLocalSettings | undefined>;
+  readSettings(): Promise<unknown | undefined>;
   writeSettings(settings: AgentArborLocalSettings): Promise<void>;
 };
 

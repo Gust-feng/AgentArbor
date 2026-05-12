@@ -8,12 +8,12 @@ import { createId, nowIso } from "../kernel/id.js";
 import { AgentTurnRuntime, type AgentTurnRuntimeResult } from "../kernel/intelligence/index.js";
 import { createMessage } from "../kernel/messages/create-message.js";
 import {
-  createUndergroundAiDisabledConfigurationError,
-  createUndergroundAiRuntimeConfig,
-  type UndergroundAiEnvironment,
-  type UndergroundAiMode,
-  type UndergroundAiProviderFetch,
-} from "./intelligence-channel-factory.js";
+  createModelRuntimeConfig,
+  createModelRuntimeDisabledConfigurationError,
+  type ModelRuntimeEnvironment,
+  type ModelRuntimeMode,
+  type ModelRuntimeProviderFetch,
+} from "./model-runtime/index.js";
 import type { MinimalRuntime } from "./runtime.js";
 import { createMinimalRuntime } from "./runtime.js";
 import { buildBasicAgentContextPack, type BasicAgentContextPack } from "./basic-agent-runtime/index.js";
@@ -112,9 +112,9 @@ export type DesktopAgentSessionRuntimeContext = {
 };
 
 export type RunDesktopAgentSessionOptions = {
-  readonly aiMode?: UndergroundAiMode;
-  readonly aiEnvironment?: UndergroundAiEnvironment;
-  readonly providerFetch?: UndergroundAiProviderFetch;
+  readonly aiMode?: ModelRuntimeMode;
+  readonly aiEnvironment?: ModelRuntimeEnvironment;
+  readonly providerFetch?: ModelRuntimeProviderFetch;
   readonly taskSoilInput?: DesktopTaskSoilInput;
   readonly conversationHistory?: readonly DesktopAgentConversationMessage[];
   readonly skillContexts?: readonly DesktopAgentSkillContext[];
@@ -356,20 +356,20 @@ function safeContextPack(
 }
 
 function createIntelligenceChannelFromOptions(
-  aiMode: UndergroundAiMode,
+  aiMode: ModelRuntimeMode,
   options: RunDesktopAgentSessionOptions
 ): ((runtime: MinimalRuntime) => IntelligenceChannel) | undefined {
   if (aiMode === "none") {
     return undefined;
   }
-  const config = createUndergroundAiRuntimeConfig({
+  const config = createModelRuntimeConfig({
     mode: aiMode,
     env: options.aiEnvironment,
     fetch: options.providerFetch,
     onModelOutputDelta: options.onModelOutputDelta,
   });
   if (!config.enabled) {
-    throw createUndergroundAiDisabledConfigurationError(config.summaryInput);
+    throw createModelRuntimeDisabledConfigurationError(config.summaryInput);
   }
   return config.createIntelligenceChannel;
 }

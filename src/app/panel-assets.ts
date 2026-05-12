@@ -11,7 +11,17 @@ const PANEL_ASSET_NAMES = {
   html: "index.html",
   css: "panel.css",
   js: "panel.js",
+  apiClient: "api-client.js",
+  state: "state.js",
+  toolDisplayRenderer: "tool-display-renderer.js",
 } as const;
+
+const PANEL_JS_ASSETS = new Set<string>([
+  PANEL_ASSET_NAMES.js,
+  PANEL_ASSET_NAMES.apiClient,
+  PANEL_ASSET_NAMES.state,
+  PANEL_ASSET_NAMES.toolDisplayRenderer,
+]);
 
 export function createPanelHtml(): string {
   return readPanelAsset(PANEL_ASSET_NAMES.html);
@@ -24,10 +34,11 @@ export function readPanelStaticAsset(pathname: string): PanelStaticAsset | undef
       body: readPanelAsset(PANEL_ASSET_NAMES.css),
     };
   }
-  if (pathname === "/assets/panel.js") {
+  const scriptAsset = panelScriptAssetName(pathname);
+  if (scriptAsset !== undefined) {
     return {
       contentType: "text/javascript; charset=utf-8",
-      body: readPanelAsset(PANEL_ASSET_NAMES.js),
+      body: readPanelAsset(scriptAsset),
     };
   }
   return undefined;
@@ -41,7 +52,7 @@ export function createPanelStylesheet(): string {
   return readPanelAsset(PANEL_ASSET_NAMES.css);
 }
 
-function readPanelAsset(assetName: typeof PANEL_ASSET_NAMES[keyof typeof PANEL_ASSET_NAMES]): string {
+function readPanelAsset(assetName: string): string {
   const assetPath = resolvePanelAssetPath(assetName);
   return readFileSync(assetPath, "utf8");
 }
@@ -60,6 +71,15 @@ function resolvePanelAssetPath(assetName: string): string {
     }
   }
   throw new Error(`Panel static asset not found: ${assetName}`);
+}
+
+function panelScriptAssetName(pathname: string): string | undefined {
+  const prefix = "/assets/";
+  if (!pathname.startsWith(prefix)) {
+    return undefined;
+  }
+  const assetName = pathname.slice(prefix.length);
+  return PANEL_JS_ASSETS.has(assetName) ? assetName : undefined;
 }
 
 function panelAssetRoots(): readonly string[] {

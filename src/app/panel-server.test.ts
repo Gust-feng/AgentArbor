@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { request } from "node:http";
-import vm from "node:vm";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -10,349 +9,87 @@ import {
   FileSystemRuntimeDatabase,
   resolveAgentArborRuntimeDatabasePaths,
 } from "../adapters/runtime-database/index.js";
-import { createPanelClientScript, createPanelHtml, createPanelStylesheet } from "./panel-assets.js";
+import { createPanelHtml } from "./panel-assets.js";
 import { startLocalPanelServer, type PanelProviderFetch } from "./panel-server.js";
 
-test("panel HTML defaults to Simplified Chinese labels and status text", () => {
+test("panel HTML serves the React workbench shell without first-screen internals", () => {
   const staticHtml = createPanelHtml();
-  const html = `${staticHtml}\n${createPanelStylesheet()}\n${createPanelClientScript()}`;
-  const firstScreenHtml = html.slice(
-    html.indexOf("<!-- ordinary-screen-start -->"),
-    html.indexOf("<!-- ordinary-screen-end -->")
+  const firstScreenHtml = staticHtml.slice(
+    staticHtml.indexOf("<!-- ordinary-screen-start -->"),
+    staticHtml.indexOf("<!-- ordinary-screen-end -->")
   );
 
-  assert.equal(staticHtml.includes('<link rel="stylesheet" href="/assets/panel.css">'), true);
-  assert.equal(staticHtml.includes('<script type="module" src="/assets/panel.js"></script>'), true);
-  assert.equal(html.includes("AgentArbor 面板"), true);
-  assert.equal(html.includes("assistant-pending"), true);
-  assert.equal(html.includes("assistant-control-chip"), true);
-  assert.equal(html.includes("assistant-activity"), true);
-  assert.equal(html.includes("思考与工具"), true);
-  assert.equal(html.includes("assistant-tool-detail"), true);
-  assert.equal(html.includes('id="apiKeyInput" type="text"'), true);
-  assert.equal(html.includes("function createAssistantToolDetailNode"), true);
-  assert.equal(html.includes("function appendAssistantActivityEvent"), true);
-  assert.equal(html.includes("function assistantActivityItemFromEvent"), true);
-  assert.equal(html.includes("function streamEventKey"), true);
-  assert.equal(html.includes("assistant-workflow"), false);
-  assert.equal(html.includes("function appendAssistantWorkflowEvent"), false);
-  assert.equal(html.includes("function assistantWorkflowItemFromEvent"), false);
-  assert.equal(html.includes("接收任务"), false);
-  assert.equal(html.includes("生成结果"), false);
-  assert.equal(html.includes("我先快速判断"), false);
-  assert.equal(html.includes("正在理解这条消息"), false);
-  assert.equal(html.includes("正在准备回复"), false);
-  assert.equal(html.includes("正在回复"), false);
+  assert.match(staticHtml, /<script type="module"[^>]+src="\/assets\/[^"]+\.js"/);
+  assert.match(staticHtml, /<link rel="stylesheet"[^>]+href="\/assets\/[^"]+\.css"/);
+  assert.equal(staticHtml.includes('<div id="root">'), true);
   assert.equal(firstScreenHtml.includes("新对话"), true);
   assert.equal(firstScreenHtml.includes("在忙什么呢？"), true);
-  assert.equal(firstScreenHtml.includes("详情与诊断"), false);
-  assert.equal(firstScreenHtml.includes("真实 AI 诊断"), false);
-  assert.equal(firstScreenHtml.includes("模型 / 工具流"), false);
-  assert.equal(firstScreenHtml.includes("运行树 / 父层综合"), false);
-  assert.equal(firstScreenHtml.includes("父层 synthesis"), false);
-  assert.equal(firstScreenHtml.includes("任务中心"), false);
-  assert.equal(firstScreenHtml.includes("正在处理"), false);
-  assert.equal(firstScreenHtml.includes("最近结果"), false);
-  assert.equal(firstScreenHtml.includes("待确认"), false);
-  assert.equal(firstScreenHtml.includes('id="homeActiveTasks"'), false);
-  assert.equal(firstScreenHtml.includes('id="homeRecentResults"'), false);
-  assert.equal(firstScreenHtml.includes('id="homeActionList"'), false);
   assert.equal(firstScreenHtml.includes("技能"), true);
-  assert.equal(firstScreenHtml.includes("例行任务"), false);
   assert.equal(firstScreenHtml.includes("工具"), true);
   assert.equal(firstScreenHtml.includes("设置"), true);
-  assert.equal(firstScreenHtml.includes("最近对话"), false);
-  assert.equal(firstScreenHtml.includes("个人信息"), true);
-  assert.equal(firstScreenHtml.includes("安全"), true);
-  assert.equal(firstScreenHtml.includes("诊断"), false);
-  assert.equal(firstScreenHtml.includes('id="profileMenuButton"'), true);
-  assert.equal(firstScreenHtml.includes('id="accountMenu"'), true);
-  assert.equal(firstScreenHtml.includes('id="diagnosticDrawerButton"'), false);
-  assert.equal(firstScreenHtml.includes(">详情</button>"), false);
-  assert.equal(firstScreenHtml.includes("附件"), false);
-  assert.equal(firstScreenHtml.includes("助手"), false);
-  assert.equal(firstScreenHtml.includes("文件或网页"), false);
-  assert.equal(firstScreenHtml.includes("使用范围"), false);
-  assert.equal(firstScreenHtml.includes("工作台"), false);
-  assert.equal(firstScreenHtml.includes("动态工作场"), false);
-  assert.equal(firstScreenHtml.includes("首页空态"), true);
-  assert.equal(firstScreenHtml.includes('class="intent-field"'), true);
-  assert.equal(firstScreenHtml.includes('id="backstageHandoff"'), false);
-  assert.equal(firstScreenHtml.includes('class="backstage-handoff"'), false);
-  assert.equal(firstScreenHtml.includes('class="backstage-surface"'), false);
-  assert.equal(firstScreenHtml.includes('class="backstage-thread"'), false);
-  assert.equal(firstScreenHtml.includes('class="thread-primary"'), false);
-  assert.equal(firstScreenHtml.includes('class="thread-branch-a"'), false);
-  assert.equal(firstScreenHtml.includes('class="thread-branch-b"'), false);
-  assert.equal(firstScreenHtml.includes('class="thread-knot"'), false);
-  assert.equal(firstScreenHtml.includes('class="backstage-cell'), false);
-  assert.equal(firstScreenHtml.includes('class="cell-glyph'), false);
-  assert.equal(firstScreenHtml.includes('class="backstage-note"'), false);
-  assert.equal(firstScreenHtml.includes('class="backstage-note-line"'), false);
-  assert.equal(firstScreenHtml.includes('class="backstage-line"'), false);
-  assert.equal(firstScreenHtml.includes('id="arborTaskLattice"'), false);
-  assert.equal(firstScreenHtml.includes('class="arbor-lattice-stage"'), false);
-  assert.equal(firstScreenHtml.includes('class="arbor-canvas"'), false);
-  assert.equal(firstScreenHtml.includes('id="arborCanvas"'), false);
-  assert.equal(firstScreenHtml.includes('class="arbor-signature"'), false);
-  assert.equal(firstScreenHtml.includes('class="arbor-focus-dot"'), false);
-  assert.equal(firstScreenHtml.includes('class="field-thread one"'), false);
-  assert.equal(firstScreenHtml.includes('class="field-focus"'), false);
-  assert.equal(firstScreenHtml.includes('class="field-node left"'), false);
-  assert.equal(firstScreenHtml.includes('class="intent-stream one"'), false);
-  assert.equal(firstScreenHtml.includes('class="intent-core"'), false);
-  assert.equal(firstScreenHtml.includes("任务进入"), false);
-  assert.equal(firstScreenHtml.includes("信息聚合"), false);
-  assert.equal(firstScreenHtml.includes("结果成形"), false);
-  assert.equal(firstScreenHtml.includes("就绪"), false);
-  assert.equal(firstScreenHtml.includes("自动"), false);
-  assert.equal(firstScreenHtml.includes("深入"), false);
-  assert.equal(firstScreenHtml.includes("工作方式"), false);
-  assert.equal(firstScreenHtml.includes("stage-mode"), false);
-  assert.equal(firstScreenHtml.includes("data-work-mode"), false);
-  assert.equal(firstScreenHtml.includes("mode-card"), false);
-  assert.equal(firstScreenHtml.includes("工作强度"), false);
-  assert.equal(firstScreenHtml.includes("把任务交给我"), false);
-  assert.equal(firstScreenHtml.includes("把问题、想法或目标交给我"), false);
-  assert.equal(firstScreenHtml.includes("自动安排"), false);
-  assert.equal(firstScreenHtml.includes("深入整理"), false);
-  assert.equal(firstScreenHtml.includes("普通问题"), false);
-  assert.equal(firstScreenHtml.includes("深度任务"), false);
-  assert.equal(firstScreenHtml.includes("理解目标"), false);
-  assert.equal(firstScreenHtml.includes("整理证据"), false);
-  assert.equal(firstScreenHtml.includes("形成结果"), false);
-  assert.equal(firstScreenHtml.includes("说出目标"), false);
-  assert.equal(firstScreenHtml.includes("处理任务"), false);
-  assert.equal(firstScreenHtml.includes("交付结果"), false);
-  assert.equal(firstScreenHtml.includes("本地工作"), false);
-  assert.equal(firstScreenHtml.includes("只使用你授权的材料"), false);
-  assert.equal(firstScreenHtml.includes("任务列表"), false);
-  assert.equal(firstScreenHtml.includes("材料和权限"), false);
-  assert.equal(firstScreenHtml.includes("材料引用"), false);
-  assert.equal(firstScreenHtml.includes("权限说明"), false);
-  assert.equal(firstScreenHtml.includes("工作会话"), false);
   assert.equal(firstScreenHtml.includes("问任何问题，或交给我一个任务"), true);
-  assert.equal(firstScreenHtml.includes("开始对话后，这里会显示你的问题和我的回答。"), false);
-  assert.equal(firstScreenHtml.includes("待办"), false);
-  assert.equal(firstScreenHtml.includes("上下文"), false);
-  assert.equal(firstScreenHtml.includes('<div class="context-title"><span>证据</span></div>'), false);
-  assert.equal(firstScreenHtml.includes("近期活动"), false);
-  assert.equal(firstScreenHtml.includes("等待任务开始"), false);
-  assert.equal(firstScreenHtml.includes("暂无活动。开始任务后，这里会显示正在读取、比较、整理和生成的过程。"), false);
-  assert.equal(firstScreenHtml.includes("输入一个真实任务，必要时补充文件、网页或限制条件。"), false);
-  assert.equal(firstScreenHtml.includes("Code"), false);
-  assert.equal(html.includes('<aside class="context-pane"'), false);
-  assert.equal(html.includes('<aside class="developer-drawer"'), false);
-  assert.equal(html.includes('class="drawer-backdrop"'), false);
-  assert.equal(html.includes('class="settings-backdrop"'), true);
-  assert.equal(html.includes('id="settingsPanelButton"'), false);
-  assert.equal(html.includes('id="accountSettingsButton"'), true);
-  assert.equal(html.includes('startIntentFieldDrift()'), false);
-  assert.equal(html.includes('window.setTimeout(scheduleMotion'), false);
-  assert.equal(html.includes('window.requestAnimationFrame(drawArborFrame)'), false);
-  assert.equal(html.includes('function helixPoint'), false);
-  assert.equal(html.includes('function growthPoint'), false);
-  assert.equal(html.includes('function drawAnnualRing'), false);
-  assert.equal(html.includes('function ribbonPoint'), false);
-  assert.equal(html.includes('function drawSeedShell'), false);
-  assert.equal(html.includes('function drawRoot'), false);
-  assert.equal(html.includes('function drawBough'), false);
-  assert.equal(html.includes('function drawLeafNodes'), false);
-  assert.equal(html.includes("@keyframes intent-flow"), false);
-  assert.equal(html.includes("@keyframes assistant-pulse"), false);
-  assert.equal(html.includes("--input-weight"), false);
-  assert.equal(html.includes("--input-visible"), false);
-  assert.equal(html.includes("--primary-dash"), false);
-  assert.equal(html.includes("--branch-a-dash"), false);
-  assert.equal(html.includes("--branch-b-dash"), false);
-  assert.equal(html.includes("--knot-dash"), false);
-  assert.equal(html.includes("function updateBackstageInputWeight"), false);
-  assert.equal(html.includes("@keyframes backstage-note-submit"), false);
-  assert.equal(html.includes("@keyframes backstage-cell-wake"), false);
-  assert.equal(html.includes("@keyframes backstage-thread-gather"), false);
-  assert.equal(html.includes("@keyframes backstage-thread-settle"), false);
-  assert.equal(html.includes("@keyframes composer-backstage-receive"), false);
-  assert.equal(html.includes("@keyframes composer-backstage-receive-line"), false);
-  assert.equal(html.includes("function updateBackstageHandoffAnimation"), false);
-  assert.equal(html.includes("function playBackstageHandoffSubmit"), false);
-  assert.equal(html.includes("@keyframes arbor-lattice-commit"), false);
-  assert.equal(html.includes("@keyframes composer-lattice-receive"), false);
-  assert.equal(html.includes("function updateArborTaskLattice"), false);
-  assert.equal(html.includes("function playArborLatticeCommit"), false);
-  assert.equal(html.includes("function promptIntentWeight"), false);
-  assert.equal(html.includes("function resolveLatticeIntentWeight"), false);
-  assert.equal(html.includes("handleGoalCompositionStart"), false);
-  assert.equal(html.includes("handleGoalCompositionEnd"), false);
-  assert.equal(html.includes('addEventListener("compositionstart"'), false);
-  assert.equal(html.includes('addEventListener("compositionend"'), false);
-  assert.equal(html.includes("arbor-lattice-canopy"), false);
-  assert.equal(html.includes("arbor-lattice-branch"), false);
-  assert.equal(html.includes("scheduleArborMarkDrift"), false);
-  assert.equal(html.includes("animation-duration"), false);
-  assert.equal(html.includes("animation-iteration-count"), false);
-  assert.equal(html.includes("width: 820px;"), true);
-  assert.equal(html.includes("height: 620px;"), true);
-  assert.equal(html.includes("@media (max-width: 820px)"), false);
-  assert.equal(html.includes("width: calc(100vw - 24px)"), false);
-  assert.equal(html.includes("按需调整模型、搜索和诊断，不打断当前会话。"), false);
-  assert.equal(html.includes("模型</button>"), true);
-  assert.equal(html.includes("工作目录</button>"), true);
-  assert.equal(html.includes("工具</button>"), true);
-  assert.equal(html.includes("安全</button>"), true);
-  assert.equal(html.includes('data-settings-panel="workspace"'), true);
-  assert.equal(html.includes("工作方式"), false);
-  assert.equal(html.includes('class="mode-card-grid"'), false);
-  assert.equal(html.includes("mode-card"), false);
-  assert.equal(html.includes("data-work-mode"), false);
-  assert.equal(html.includes("深入处理"), true);
-  assert.equal(html.includes('dom.runButton.addEventListener("click", () => startRun("agent"))'), true);
-  assert.equal(html.includes('dom.deepRunButton.addEventListener("click", () => startRun("deep"))'), true);
-  assert.equal(html.includes('id="cancelRunButton"'), true);
-  assert.equal(html.includes('"/api/basic-agent/runs/"'), true);
-  assert.equal(html.includes('"/cancel"'), true);
-  assert.equal(html.includes('"/events?cursor="'), true);
-  assert.equal(html.includes('"/confirmations/"'), true);
-  assert.equal(html.includes("mode-deep"), true);
-  assert.equal(html.includes("需要确认"), true);
-  assert.equal(html.includes("证据"), true);
-  assert.equal(html.includes('<option value="none">AI 禁用</option>'), true);
-  assert.equal(html.includes('<option value="fake">Fake AI 测试模式</option>'), true);
-  assert.equal(html.includes('<option value="openai-compatible">OpenAI-compatible 推荐</option>'), true);
-  assert.equal(html.includes("真实 AI 诊断"), false);
-  assert.equal(html.includes("模型 / 工具流"), false);
-  assert.equal(html.includes("运行树 / 父层综合"), false);
-  assert.equal(html.includes("父层 synthesis"), false);
-  assert.equal(html.includes("模型服务失败、输出契约失败或配置边界会显示在这里。"), false);
-  assert.equal(html.includes("详情已放在诊断里"), false);
-  assert.equal(html.includes("检查诊断详情"), false);
-  assert.equal(html.includes("安全</button>"), true);
-  assert.equal(html.includes("暂无对话"), true);
-  assert.equal(html.includes("模型"), true);
-  assert.equal(html.includes("工具"), true);
-  assert.equal(html.includes("工作目录"), true);
-  assert.equal(html.includes("选择文件夹"), true);
-  assert.equal(html.includes('id="selectWorkspaceDirectoryButton"'), true);
-  assert.equal(html.includes('id="workspaceEmptySelectButton"'), true);
-  assert.equal(html.includes("开始后会显示在这里。"), true);
-  assert.equal(html.includes("搜索 Provider"), false);
-  assert.equal(html.includes("搜索服务"), true);
-  assert.equal(html.includes("保存工具配置"), true);
-  assert.equal(html.includes("Tavily API Key"), true);
-  assert.equal(html.includes("调用工具"), false);
-  assert.equal(html.includes("搜索材料"), false);
-  assert.equal(html.includes("整理材料"), false);
-  assert.equal(html.includes("工具请求"), false);
-  assert.equal(html.includes("工具输出"), false);
-  assert.equal(firstScreenHtml.includes("待启动 (pending)"), false);
-  assert.equal(firstScreenHtml.includes("pending"), false);
-  assert.equal(firstScreenHtml.includes("running"), false);
-  assert.equal(firstScreenHtml.includes("completed"), false);
-  assert.equal(firstScreenHtml.includes("failed"), false);
-  assert.equal(html.includes("run.started"), true);
-  assert.equal(html.includes("model.output.delta"), true);
-  assert.equal(html.includes("tool.completed"), true);
-  assert.equal(html.includes("final.result"), true);
-  assert.equal(html.includes("网页研究"), false);
-  assert.equal(html.includes("代码理解"), false);
-  assert.equal(html.includes("证据整理"), false);
-  assert.equal(html.includes("方向交接"), false);
-  assert.equal(html.includes("短视频平台差异化优势与发展路径调研"), false);
-  assert.equal(html.includes("产品定位与核心指标体系梳理"), false);
-  assert.equal(html.includes("AI 内容创作工具方向探索"), false);
-  assert.equal(html.includes("个人知识助手产品形态研究"), false);
-  assert.equal(html.includes("开源项目机会扫描"), false);
-  assert.equal(html.includes("需要你确认的 3 项"), false);
-  assert.equal(html.includes("是否允许访问 GitHub 仓库"), false);
-  assert.equal(html.includes("是否需要联网调研竞品"), false);
-  assert.equal(html.includes("是否沉淀为方向模板"), false);
-  assert.equal(html.includes("36%"), false);
-  assert.equal(html.includes("项目文档"), false);
-  assert.equal(html.includes("v0.8.0-beta"), false);
-  assert.equal(html.includes("BETA"), false);
-  assert.equal(html.includes("beta-badge"), false);
-  assert.equal(html.includes("Gust-feng"), false);
-  assert.equal(html.includes("<h2>工作流阶段时间线</h2>"), false);
-  assert.equal(html.includes("<h2>Rootlet 工作区</h2>"), false);
-  assert.equal(html.includes("<h2>模型调用追踪</h2>"), false);
-  assert.equal(html.includes("<h2>配置中心</h2>"), false);
-  assert.equal(html.includes("<h2>Provider 状态</h2>"), false);
-  assert.equal(html.includes("Agent Run Tree inspector"), false);
-  assert.equal(firstScreenHtml.includes("Task Soil"), false);
-  assert.equal(firstScreenHtml.includes("Plan Package"), false);
-  assert.equal(firstScreenHtml.includes("Observation Panel"), false);
-  assert.equal(firstScreenHtml.includes("Agent Run Tree"), false);
-  assert.equal(firstScreenHtml.includes("provider"), false);
-  assert.equal(firstScreenHtml.includes("Desktop Shell 工作台"), false);
-  assert.equal(firstScreenHtml.includes("方向智能"), false);
-  assert.equal(firstScreenHtml.includes("执行智能"), false);
-  assert.equal(firstScreenHtml.includes("OpenAI-compatible"), false);
-  assert.equal(firstScreenHtml.includes("Fake AI"), false);
-  assert.equal(firstScreenHtml.includes("AI 禁用"), false);
-  assert.equal(firstScreenHtml.includes("运行模式"), false);
-  assert.equal(firstScreenHtml.includes("模型配置"), false);
-  assert.equal(firstScreenHtml.includes("工具配置"), false);
-  assert.equal(firstScreenHtml.includes("运行树"), false);
-  assert.equal(firstScreenHtml.includes("父层 synthesis"), false);
-  assert.equal(firstScreenHtml.includes("rootlet"), false);
-  assert.equal(firstScreenHtml.includes("EventLog"), false);
-  assert.equal(html.includes("<summary>调试视图：Observation Snapshot</summary>"), false);
-  assert.equal(html.includes(">芽<"), false);
-  assert.equal(html.includes(">木<"), false);
-  assert.equal(html.includes("Run Underground"), false);
-  assert.equal(html.includes("Save Config"), false);
-  assert.equal(html.includes("key configured"), false);
-  assert.equal(html.includes("workspace:conversation-history"), false);
+  assertFirstScreenHasNoInternalTerms(firstScreenHtml);
 });
 
-test("panel module entry imports split frontend modules", () => {
-  const script = createPanelClientScript();
+test("panel React source is split into typed frontend modules", async () => {
+  const [entry, app, api, types, text, settings] = await Promise.all([
+    readPanelUiSource("main.tsx"),
+    readPanelUiSource("App.tsx"),
+    readPanelUiSource("api.ts"),
+    readPanelUiSource("types.ts"),
+    readPanelUiSource("text.ts"),
+    readPanelUiSource(path.join("components", "settings-panel.tsx")),
+  ]);
 
-  assert.equal(script.includes('from "./api-client.js"'), true);
-  assert.equal(script.includes('from "./state.js"'), true);
-  assert.equal(script.includes('from "./tool-display-renderer.js"'), true);
-  assert.doesNotThrow(() => new vm.Script(script.replace(/^import .+$/gm, "")));
+  assert.equal(entry.includes('import { App } from "./App"'), true);
+  assert.equal(app.includes('import { getJson, postJson } from "./api"'), true);
+  assert.equal(app.includes('from "./components/sidebar"'), true);
+  assert.equal(app.includes('from "./components/settings-panel"'), true);
+  assert.equal(app.includes('from "./ui-state"'), true);
+  assert.equal(api.includes("export async function requestJson"), true);
+  assert.equal(types.includes("export type BasicAgentRun"), true);
+  assert.equal(text.includes("export const STATUS_LABELS"), true);
+  assert.equal(settings.includes("function ToolCatalog"), true);
 });
 
-test("panel assistant markdown renderer builds safe DOM nodes", () => {
-  const script = createPanelClientScript();
+test("panel React workbench consumes Basic Agent projection APIs", async () => {
+  const [app, runtime] = await Promise.all([readPanelUiSource("App.tsx"), readPanelUiSource("runtime.ts")]);
 
-  assert.equal(script.includes("function renderAssistantMarkdown(text)"), true);
-  assert.equal(script.includes("function appendInlineMarkdown(parent, text)"), true);
-  assert.equal(script.includes('document.createElement("pre")'), true);
-  assert.equal(script.includes('document.createElement("ul")'), true);
-  assert.equal(script.includes('document.createElement("a")'), true);
-  assert.equal(script.includes("innerHTML"), false);
-  assert.equal(script.includes("container.textContent = String(text || \"\")"), false);
+  assert.equal(app.includes("/api/basic-agent/runs/"), true);
+  assert.equal(app.includes("/events?cursor="), true);
+  assert.equal(app.includes("/cancel"), true);
+  assert.equal(app.includes("/confirmations/"), true);
+  assert.equal(app.includes("typedToolDisplays"), true);
+  assert.equal(runtime.includes("/api/desktop/runs/"), true);
+  assert.equal(app.includes("innerHTML"), false);
+  assert.equal(app.includes("raw provider"), false);
+  assert.equal(app.includes("raw tool"), false);
+  assert.equal(app.includes("stdout/stderr"), false);
 });
 
-test("panel inline failure text keeps provider raw details out of ordinary UI", () => {
-  const script = createPanelClientScript();
-
-  assert.equal(script.includes("function friendlyFailureText(value)"), true);
-  assert.equal(script.includes("return compact(cleanFailureDetail(text), 400)"), false);
-  assert.equal(script.includes("模型返回的内容没有通过本轮格式检查"), true);
-  assert.equal(script.includes("原始错误"), false);
-});
-
-test("panel server serves split static frontend assets", async () => {
+test("panel server serves Vite React frontend assets", async () => {
   const server = await startLocalPanelServer({ port: 0 });
   try {
     const html = await requestText(server.url, "/");
-    const css = await requestText(server.url, "/assets/panel.css");
-    const js = await requestText(server.url, "/assets/panel.js");
+    const assetPaths = extractPanelAssetPaths(html.text);
+    const cssPath = assetPaths.find((assetPath) => assetPath.endsWith(".css"));
+    const jsPath = assetPaths.find((assetPath) => assetPath.endsWith(".js"));
 
     assert.equal(html.status, 200);
+    assert.notEqual(cssPath, undefined);
+    assert.notEqual(jsPath, undefined);
+
+    const css = await requestText(server.url, cssPath!);
+    const js = await requestText(server.url, jsPath!);
+
     assert.equal(css.status, 200);
     assert.equal(js.status, 200);
     assert.match(String(css.headers["content-type"]), /text\/css/);
     assert.match(String(js.headers["content-type"]), /text\/javascript/);
-    assert.equal(html.text.includes('<link rel="stylesheet" href="/assets/panel.css">'), true);
-    assert.equal(html.text.includes('<script type="module" src="/assets/panel.js"></script>'), true);
-    assert.equal(css.text.includes(".app"), true);
-    assert.equal(js.text.includes("function createAssistantToolDetailNode"), true);
-    assert.equal((await requestText(server.url, "/assets/state.js")).status, 200);
-    assert.equal((await requestText(server.url, "/assets/api-client.js")).status, 200);
-    assert.equal((await requestText(server.url, "/assets/tool-display-renderer.js")).status, 200);
+    assert.equal(html.text.includes("ordinary-screen-start"), true);
+    assert.equal(css.text.includes(".app-shell"), true);
+    assert.equal(js.text.includes("/api/basic-agent/runs/"), true);
+    assert.equal((await requestText(server.url, "/assets/%2e%2e/index.html")).status, 404);
   } finally {
     await server.close();
   }
@@ -2991,6 +2728,41 @@ test("panel openai-compatible missing model does not leak configured API key", a
     await fs.rm(directory, { recursive: true, force: true });
   }
 });
+
+async function readPanelUiSource(fileName: string): Promise<string> {
+  return fs.readFile(path.join(process.cwd(), "src", "app", "panel-ui", "src", fileName), "utf8");
+}
+
+function extractPanelAssetPaths(html: string): readonly string[] {
+  const paths = new Set<string>();
+  for (const match of html.matchAll(/(?:src|href)="(\/assets\/[^"]+)"/g)) {
+    paths.add(match[1] ?? "");
+  }
+  return [...paths].filter((value) => value.length > 0);
+}
+
+function assertFirstScreenHasNoInternalTerms(html: string): void {
+  for (const term of [
+    "Task Soil",
+    "Plan Package",
+    "Observation Panel",
+    "Agent Run Tree",
+    "provider",
+    "rootlet",
+    "EventLog",
+    "Routines",
+    "OpenAI-compatible",
+    "Fake AI",
+    "AI 禁用",
+    "运行树",
+    "父层 synthesis",
+    "详情与诊断",
+    "真实 AI 诊断",
+    "模型 / 工具流",
+  ]) {
+    assert.equal(html.includes(term), false, `first screen should not include ${term}`);
+  }
+}
 
 type RequestJsonOptions = {
   readonly method?: "GET" | "POST" | "DELETE";

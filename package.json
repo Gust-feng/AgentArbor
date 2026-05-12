@@ -5,7 +5,10 @@
   "type": "module",
   "description": "AgentArbor deterministic minimal runtime kernel.",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "pnpm build:node && pnpm typecheck:panel && pnpm build:panel",
+    "build:node": "tsc -p tsconfig.json",
+    "typecheck:panel": "tsc -p tsconfig.panel.json --noEmit",
+    "build:panel": "vite build --config vite.panel.config.ts",
     "test": "pnpm build && node --test \"dist/**/*.test.js\"",
     "demo": "pnpm build && node dist/app/demo.js",
     "demo:underground": "pnpm build && node dist/app/underground-demo.js",
@@ -17,7 +20,15 @@
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.1",
     "electron": "^36.9.5",
-    "typescript": "^5.9.0"
+    "typescript": "^5.9.0",
+    "vite": "^8.0.12"
+  },
+  "dependencies": {
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6"
   }
 }

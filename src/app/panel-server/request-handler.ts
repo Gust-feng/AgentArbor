@@ -55,6 +55,7 @@ import {
   throwIfAborted,
   unique,
 } from "./request-parsers.js";
+import { enqueuePanelPersistence, waitForPanelPersistenceIdle as waitForPanelPersistenceChainsIdle } from "./persistence.js";
 import {
   BasicAgentRunExecutor,
   type BasicAgentPendingToolContinuation,
@@ -1603,17 +1604,7 @@ async function persistPanelRun(runtime: PanelRuntime, job: PanelRunJob): Promise
   if (runtime.runtimeDatabase === undefined || runtime.runtimePaths === undefined) {
     return;
   }
-  const previous = runtime.persistenceChains.get(job.runId) ?? Promise.resolve();
-  const current = previous.catch(() => undefined).then(() => persistPanelRunNow(runtime, job));
-  const tracked = current.then(() => undefined, () => undefined);
-  runtime.persistenceChains.set(job.runId, tracked);
-  try {
-    await current;
-  } finally {
-    if (runtime.persistenceChains.get(job.runId) === tracked) {
-      runtime.persistenceChains.delete(job.runId);
-    }
-  }
+  await enqueuePanelPersistence(runtime.persistenceChains, job.runId, () => persistPanelRunNow(runtime, job));
 }
 
 async function persistPanelRunNow(runtime: PanelRuntime, job: PanelRunJob): Promise<void> {
@@ -2751,9 +2742,7 @@ async function waitForPanelRuntimeIdle(runtime: PanelRuntime): Promise<void> {
 }
 
 async function waitForPanelPersistenceIdle(runtime: PanelRuntime): Promise<void> {
-  while (runtime.persistenceChains.size > 0) {
-    await Promise.allSettled([...runtime.persistenceChains.values()]);
-  }
+  await waitForPanelPersistenceChainsIdle(runtime.persistenceChains);
 }
 
 function close(server: Server): Promise<void> {

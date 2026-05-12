@@ -5,9 +5,6 @@ import { nowIso } from "../../kernel/id.js";
 import type { ModelRuntimeMode } from "../model-runtime/index.js";
 import type { DesktopIntentDecision } from "../desktop-intent-router.js";
 import type { DesktopAgentConversationMessage } from "../desktop-agent-session.js";
-import type { PanelRunCanvasReadModel } from "../panel-canvas-read-model.js";
-import type { PanelObservationReadModel } from "../panel-run-read-model.js";
-import type { PanelDesktopRunMode, PanelRunJob, PanelRunJobStore, PanelRunKind } from "../panel-run-jobs.js";
 import type { MinimalRuntime } from "../runtime.js";
 import type { DesktopTaskSoilInput } from "../task-soil-workspace.js";
 import type { UndergroundDemoSummary } from "../underground-demo-summary.js";
@@ -15,31 +12,38 @@ import type { AgentRunTree } from "../../domain/underground/index.js";
 import type { BasicAgentRunReplay } from "./event-hub.js";
 import type { BasicAgentExecutionAdapter } from "./execution-adapter.js";
 import { BasicAgentRunStore } from "./run-store.js";
-import { projectPanelJobToBasicRun, projectPanelStreamEventToRunEvent } from "./panel-projection.js";
-import type { PanelRunStreamEvent } from "../panel-run-read-model.js";
+import { projectRunJobToBasicRun, projectRunStreamEventToRunEvent } from "./run-projection.js";
+import type {
+  BasicAgentCanvasProjection,
+  BasicAgentRunJob,
+  BasicAgentRunJobStore,
+  BasicAgentRunKind,
+  BasicAgentRunMode,
+  BasicAgentRunStreamEvent,
+} from "./run-job.js";
 
 export type BasicAgentRunExecutorConfig = {
   readonly getModelProviderConfig: () => Promise<SanitizedModelProviderConfig>;
   readonly getInformationAccessConfig: () => Promise<SanitizedInformationAccessConfig>;
   readonly getCapabilitySnapshot?: () => Promise<BasicAgentCapabilitySnapshot>;
-  readonly runJobs: PanelRunJobStore;
+  readonly runJobs: BasicAgentRunJobStore;
   readonly activeRunJobs: Set<Promise<void>>;
   readonly abortControllers: Map<string, AbortController>;
-  readonly persistRun: (job: PanelRunJob) => Promise<void>;
+  readonly persistRun: (job: BasicAgentRunJob) => Promise<void>;
   readonly executionAdapter: BasicAgentExecutionAdapter;
-  readonly failRun: (job: PanelRunJob, error: unknown) => Promise<void>;
+  readonly failRun: (job: BasicAgentRunJob, error: unknown) => Promise<void>;
   readonly onRuntimeReady: (runId: string, context: BasicAgentRuntimeReadyContext) => void;
   readonly onModelOutputDelta: (runId: string, delta: ModelOutputDelta) => void;
-  readonly onRunFinished: (job: PanelRunJob) => Promise<void> | void;
+  readonly onRunFinished: (job: BasicAgentRunJob) => Promise<void> | void;
   readonly onGuidanceSubmitted?: (input: {
-    readonly job: PanelRunJob;
+    readonly job: BasicAgentRunJob;
     readonly guidance: string;
   }) => Promise<void> | void;
 };
 
 export type BasicAgentRunStartInput = {
-  readonly runKind: PanelRunKind;
-  readonly runMode?: PanelDesktopRunMode;
+  readonly runKind: BasicAgentRunKind;
+  readonly runMode?: BasicAgentRunMode;
   readonly goal: string;
   readonly aiMode: ModelRuntimeMode;
   readonly conversationId?: string;
@@ -51,7 +55,7 @@ export type BasicAgentRunStartInput = {
 };
 
 export type BasicAgentRunExecutionInput = {
-  readonly job: PanelRunJob;
+  readonly job: BasicAgentRunJob;
   readonly conversationHistory?: readonly DesktopAgentConversationMessage[];
   readonly abortSignal: AbortSignal;
   readonly onRuntimeReady: (context: BasicAgentRuntimeReadyContext) => void;
@@ -66,9 +70,9 @@ export type BasicAgentRuntimeReadyContext = {
 
 export type BasicAgentRunExecutionResult = {
   readonly summary?: UndergroundDemoSummary;
-  readonly observation?: PanelObservationReadModel;
+  readonly observation?: unknown;
   readonly agentRunTree?: AgentRunTree;
-  readonly canvas?: PanelRunCanvasReadModel;
+  readonly canvas?: BasicAgentCanvasProjection;
   readonly pendingApproval?: BasicAgentPendingToolContinuation;
 };
 
@@ -104,7 +108,7 @@ export class BasicAgentRunExecutor {
       informationAccess,
       capabilitySnapshot,
     });
-    this.syncPanelRun(job);
+    this.syncRun(job);
     await this.config.persistRun(job);
     if (input.startImmediately !== false) {
       this.schedule(job.runId);
@@ -127,17 +131,17 @@ export class BasicAgentRunExecutor {
     return this.basicRuns.restore(input);
   }
 
-  syncPanelRun(job: PanelRunJob): BasicAgentRun {
-    return this.basicRuns.upsert(projectPanelJobToBasicRun(job));
+  syncRun(job: BasicAgentRunJob): BasicAgentRun {
+    return this.basicRuns.upsert(projectRunJobToBasicRun(job));
   }
 
-  syncPanelStreamEvents(job: PanelRunJob, events: readonly PanelRunStreamEvent[] = job.streamEvents): readonly RunEvent[] {
-    this.syncPanelRun(job);
-    const projected = events.map(projectPanelStreamEventToRunEvent);
+  syncRunEvents(job: BasicAgentRunJob, events: readonly BasicAgentRunStreamEvent[] = job.streamEvents): readonly RunEvent[] {
+    this.syncRun(job);
+    const projected = events.map(projectRunStreamEventToRunEvent);
     for (const event of projected) {
       this.basicRuns.replaceEvent(event);
     }
-    this.syncPanelRun(job);
+    this.syncRun(job);
     return projected;
   }
 
@@ -168,7 +172,7 @@ export class BasicAgentRunExecutor {
       },
     });
     const cancelled = this.requireJob(runId);
-    this.syncPanelStreamEvents(cancelled);
+    this.syncRunEvents(cancelled);
     await this.config.onRunFinished(cancelled);
     await this.config.persistRun(cancelled);
     return this.requireBasicRun(runId);
@@ -189,7 +193,7 @@ export class BasicAgentRunExecutor {
       decidedAt,
       guidance: input.guidance,
     });
-    this.syncPanelStreamEvents(this.requireJob(input.runId));
+    this.syncRunEvents(this.requireJob(input.runId));
     if (input.decision === "approve_once") {
       return this.resumeApprovedContinuation({
         runId: input.runId,
@@ -207,7 +211,7 @@ export class BasicAgentRunExecutor {
           message: "用户已拒绝本次操作，运行已暂停。",
         },
       });
-      this.syncPanelStreamEvents(this.requireJob(input.runId));
+      this.syncRunEvents(this.requireJob(input.runId));
     }
     const updated = this.requireJob(input.runId);
     await this.config.onRunFinished(updated);
@@ -231,7 +235,7 @@ export class BasicAgentRunExecutor {
     this.config.runJobs.markRunning(runId);
     const running = this.config.runJobs.get(runId);
     if (running !== undefined) {
-      this.syncPanelRun(running);
+      this.syncRun(running);
       await this.config.persistRun(running);
     }
     try {
@@ -255,7 +259,7 @@ export class BasicAgentRunExecutor {
         canvas: result.canvas,
       });
       const completed = this.requireJob(runId);
-      this.syncPanelStreamEvents(completed);
+      this.syncRunEvents(completed);
       await this.config.onRunFinished(completed);
       await this.config.persistRun(completed);
     } catch (error) {
@@ -267,7 +271,7 @@ export class BasicAgentRunExecutor {
       await this.config.failRun(latestJob, error);
       const failed = this.config.runJobs.get(runId);
       if (failed !== undefined) {
-        this.syncPanelStreamEvents(failed);
+        this.syncRunEvents(failed);
         await this.config.onRunFinished(failed);
         await this.config.persistRun(failed);
       }
@@ -276,7 +280,7 @@ export class BasicAgentRunExecutor {
     }
   }
 
-  private requireJob(runId: string): PanelRunJob {
+  private requireJob(runId: string): BasicAgentRunJob {
     const job = this.config.runJobs.get(runId);
     if (job === undefined) {
       throw new Error(`Basic Agent run not found: ${runId}`);
@@ -295,7 +299,7 @@ export class BasicAgentRunExecutor {
   private async resumeApprovedContinuation(input: {
     readonly runId: string;
     readonly confirmationId: string;
-    readonly job: PanelRunJob;
+    readonly job: BasicAgentRunJob;
   }): Promise<BasicAgentRun> {
     const continuation = this.consumePendingContinuation(input.runId, input.confirmationId);
     if (continuation === undefined) {
@@ -308,7 +312,7 @@ export class BasicAgentRunExecutor {
         },
       });
       const blocked = this.requireJob(input.runId);
-      this.syncPanelStreamEvents(blocked);
+      this.syncRunEvents(blocked);
       await this.config.onRunFinished(blocked);
       await this.config.persistRun(blocked);
       return this.requireBasicRun(input.runId);
@@ -321,7 +325,7 @@ export class BasicAgentRunExecutor {
       confirmationId: input.confirmationId,
       resumedAt: nowIso(),
     });
-    this.syncPanelStreamEvents(this.requireJob(input.runId));
+    this.syncRunEvents(this.requireJob(input.runId));
     try {
       const result = await continuation.resume({
         approvedConfirmationIds: [input.confirmationId],
@@ -341,7 +345,7 @@ export class BasicAgentRunExecutor {
         canvas: result.canvas,
       });
       const completed = this.requireJob(input.runId);
-      this.syncPanelStreamEvents(completed);
+      this.syncRunEvents(completed);
       await this.config.onRunFinished(completed);
       await this.config.persistRun(completed);
       return this.requireBasicRun(input.runId);
@@ -354,7 +358,7 @@ export class BasicAgentRunExecutor {
       await this.config.failRun(latestJob, error);
       const failed = this.config.runJobs.get(input.runId);
       if (failed !== undefined) {
-        this.syncPanelStreamEvents(failed);
+        this.syncRunEvents(failed);
         await this.config.onRunFinished(failed);
         await this.config.persistRun(failed);
       }

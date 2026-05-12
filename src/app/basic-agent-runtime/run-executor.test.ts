@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { PanelRunJobStore } from "../panel-run-jobs.js";
 import { BasicAgentRunExecutor } from "./run-executor.js";
+import { InMemoryBasicAgentRunJobStore } from "./run-job-store.js";
 
 test("BasicAgentRunExecutor owns basic run projection and replay cursor", async () => {
-  const runJobs = new PanelRunJobStore();
+  const runJobs = new InMemoryBasicAgentRunJobStore();
   const executor = new BasicAgentRunExecutor({
     getModelProviderConfig: async () => ({
       profileId: "default",
@@ -74,14 +74,14 @@ test("BasicAgentRunExecutor owns basic run projection and replay cursor", async 
   }]);
   assert.equal(executor.replayEvents(run.runId, 0)?.events.length, 0);
 
-  executor.syncPanelStreamEvents(job);
+  executor.syncRunEvents(job);
   const replay = executor.replayEvents(run.runId, 0);
   assert.equal(replay?.cursor.eventCount, 1);
   assert.equal(replay?.events[0]?.type, "tool.completed");
 });
 
 test("BasicAgentRunExecutor freezes capability snapshot when the run is created", async () => {
-  const runJobs = new PanelRunJobStore();
+  const runJobs = new InMemoryBasicAgentRunJobStore();
   const executor = new BasicAgentRunExecutor({
     getModelProviderConfig: async () => ({
       profileId: "default",

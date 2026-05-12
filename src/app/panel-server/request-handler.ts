@@ -37,6 +37,15 @@ import {
 } from "../config-center.js";
 import { CapabilityCenter } from "../capability-center.js";
 import { createPanelHtml, readPanelStaticAsset } from "../panel-assets.js";
+import {
+  PanelHttpError,
+  parseStreamCursor,
+  readJsonBody,
+  writeHtml,
+  writeJson,
+  writePanelError,
+  writeSseEvent,
+} from "./http-utils.js";
 import type { BasicAgentRun, ConfirmationDecision, RunEvent } from "../../domain/basic-agent/index.js";
 import {
   BasicAgentRunExecutor,
@@ -268,17 +277,6 @@ type PanelRuntimeReadyContext =
   | UndergroundDirectionSessionRuntimeContext
   | DesktopAgentSessionRuntimeContext;
 
-class PanelHttpError extends Error {
-  constructor(
-    readonly statusCode: number,
-    readonly code: string,
-    message: string
-  ) {
-    super(message);
-    this.name = "PanelHttpError";
-  }
-}
-
 export async function startLocalPanelServer(options: PanelServerOptions = {}): Promise<StartedPanelServer> {
   const runtime = createPanelRuntime(options);
   const server = createServer(createPanelRequestHandler(runtime));
@@ -379,11 +377,11 @@ function assemblePanelRuntime(input: {
     runJobs,
     activeRunJobs,
     abortControllers,
-    persistRun: (job) => persistPanelRun(runtime as PanelRuntime, job),
+    persistRun: (job) => persistPanelRun(runtime as PanelRuntime, job as PanelRunJob),
     executionAdapter: {
       execute: (execution) => executeBasicPanelRun(runtime as PanelRuntime, execution),
     },
-    failRun: (job, error) => failPanelRunJob(runtime as PanelRuntime, job, error),
+    failRun: (job, error) => failPanelRunJob(runtime as PanelRuntime, job as PanelRunJob, error),
     onRuntimeReady: (runId, context) => {
       runtime.runJobs.attachRuntime({
         runId,
@@ -393,16 +391,16 @@ function assemblePanelRuntime(input: {
       });
       const job = runtime.runJobs.get(runId);
       if (job !== undefined) {
-        runtime.runExecutor?.syncPanelRun(job);
+        runtime.runExecutor?.syncRun(job);
       }
     },
     onModelOutputDelta: (runId, delta) => appendLiveModelOutputDelta(runtime as PanelRuntime, runId, delta),
     onRunFinished: async (job) => {
-      syncConversationTurnForJob(runtime as PanelRuntime, job);
-      scheduleNextQueuedConversationRun(runtime as PanelRuntime, job);
+      syncConversationTurnForJob(runtime as PanelRuntime, job as PanelRunJob);
+      scheduleNextQueuedConversationRun(runtime as PanelRuntime, job as PanelRunJob);
     },
     onGuidanceSubmitted: async ({ job, guidance }) => {
-      await startGuidanceFollowUpRun(runtime as PanelRuntime, job, guidance);
+      await startGuidanceFollowUpRun(runtime as PanelRuntime, job as PanelRunJob, guidance);
     },
   });
   return runtime as PanelRuntime;
@@ -2766,7 +2764,7 @@ function syncPanelRunStreamEventsForJob(runtime: PanelRuntime, job: PanelRunJob)
     error: job.failed?.error ?? job.cancelled?.reason ?? job.blocked?.reason,
   });
   const events = runtime.runJobs.syncStreamEvents(job.runId, derived);
-  runtime.runExecutor.syncPanelStreamEvents(job, events);
+  runtime.runExecutor.syncRunEvents(job, events);
   return events;
 }
 
@@ -2794,7 +2792,7 @@ function appendLiveModelOutputDelta(runtime: PanelRuntime, runId: string, delta:
     modelCallRefs: [delta.requestId],
     toolCallRefs: [],
   });
-  runtime.runExecutor.syncPanelStreamEvents(job, [event]);
+  runtime.runExecutor.syncRunEvents(job, [event]);
 }
 
 function modelPurposeForRequest(job: PanelRunJob, requestId: string): string | undefined {
@@ -3252,59 +3250,6 @@ function defaultAiModeForRunKind(runKind: PanelRunKind, configuredDefault: Model
   return runKind === "desktop" ? "openai-compatible" : configuredDefault;
 }
 
-async function readJsonBody(request: IncomingMessage): Promise<unknown> {
-  let raw = "";
-  for await (const chunk of request) {
-    raw += Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk);
-    if (raw.length > 128_000) {
-      throw new PanelHttpError(413, "request_body_too_large", "面板请求体过大。");
-    }
-  }
-  if (raw.trim().length === 0) {
-    return {};
-  }
-  try {
-    return JSON.parse(raw) as unknown;
-  } catch {
-    throw new PanelHttpError(400, "invalid_json", "请求 JSON 格式无效。");
-  }
-}
-
-function writeHtml(response: ServerResponse, html: string): void {
-  response.writeHead(200, {
-    "content-type": "text/html; charset=utf-8",
-    "cache-control": "no-store",
-    "content-security-policy": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'self'",
-  });
-  response.end(html);
-}
-
-function writeJson(response: ServerResponse, statusCode: number, body: unknown): void {
-  response.writeHead(statusCode, {
-    "content-type": "application/json; charset=utf-8",
-    "cache-control": "no-store",
-  });
-  response.end(`${JSON.stringify(body)}\n`);
-}
-
-function writeSseEvent(response: ServerResponse, event: PanelRunStreamEvent): void {
-  response.write(`id: ${event.sequence}\n`);
-  response.write(`event: ${event.type}\n`);
-  response.write(`data: ${JSON.stringify(event)}\n\n`);
-}
-
-function writePanelError(response: ServerResponse, error: PanelHttpError, extra?: Record<string, unknown>): void {
-  writeJson(response, error.statusCode, {
-    ok: false,
-    status: "failed",
-    ...extra,
-    error: {
-      code: error.code,
-      message: error.message,
-    },
-  });
-}
-
 function parseOptionalAiMode(value: unknown, invalidMessage: string): ModelRuntimeMode | undefined {
   if (value === undefined || value === null || value === "") {
     return undefined;
@@ -3314,12 +3259,6 @@ function parseOptionalAiMode(value: unknown, invalidMessage: string): ModelRunti
     throw new PanelHttpError(400, "invalid_ai_mode", invalidMessage);
   }
   return parsed;
-}
-
-function parseStreamCursor(queryValue: string | null, lastEventId: string | string[] | undefined): number {
-  const raw = queryValue ?? (Array.isArray(lastEventId) ? lastEventId[0] : lastEventId);
-  const parsed = raw === undefined ? 0 : Number(raw);
-  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 0;
 }
 
 function parseAiMode(value: unknown): ModelRuntimeMode | undefined {

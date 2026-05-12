@@ -31,8 +31,6 @@ import {
 import { createUndergroundDemoSummary, type UndergroundDemoAiInput, type UndergroundDemoSummary } from "../underground-demo-summary.js";
 import {
   ConfigCenter,
-  ConfigCenterValidationError,
-  WorkspaceDirectoryValidationError,
   createLocalConfigCenter,
 } from "../config-center.js";
 import { CapabilityCenter } from "../capability-center.js";
@@ -46,33 +44,28 @@ import {
   writePanelError,
   writeSseEvent,
 } from "./http-utils.js";
-import type { BasicAgentRun, ConfirmationDecision, RunEvent } from "../../domain/basic-agent/index.js";
+import { handlePanelBasicAgentRoute } from "./basic-agent-routes.js";
+import { handlePanelConfigRoute } from "./config-routes.js";
+import type { PanelProviderFetch, PanelServerOptions, StartedPanelServer } from "./types.js";
+import {
+  asRecord,
+  defaultAiModeForRunKind,
+  optionalString,
+  parseRunInput,
+  throwIfAborted,
+  unique,
+} from "./request-parsers.js";
 import {
   BasicAgentRunExecutor,
-  basicRunFromRuntimeSnapshot,
-  basicRunReplayFromRuntimeSnapshot,
-  createDesktopBasicToolRegistry,
-  submitRestoredBasicConfirmationDecision,
   type BasicAgentPendingToolContinuation,
   type BasicAgentRunExecutionInput,
-  type ToolCatalogSnapshot,
 } from "../basic-agent-runtime/index.js";
 import type {
   SanitizedInformationAccessConfig,
   SanitizedModelProviderConfig,
   SanitizedWorkspaceConfig,
-  SanitizedWebSearchConfig,
   BasicAgentCapabilitySnapshot,
-  ConfiguredModelProviderKind,
-  ConfiguredModelProtocolKind,
-  CreateModelProviderProfileInput,
-  McpServerTransportKind,
   ToolStateSettings,
-  UpsertMcpServerInput,
-  UpdateInformationAccessConfigInput,
-  UpdateModelProviderConfigInput,
-  UpdateWorkspaceConfigInput,
-  UpdateWebSearchConfigInput,
 } from "../../domain/config/index.js";
 import type { ModelOutputDelta } from "../../domain/intelligence/index.js";
 import type {
@@ -115,11 +108,7 @@ import {
 } from "../panel-conversations.js";
 import type { EventLogEntry } from "../../kernel/events/in-memory-event-log.js";
 import type { AgentRunTree } from "../../domain/underground/index.js";
-import {
-  parseDesktopTaskSoilInput,
-  TaskSoilInputValidationError,
-  type DesktopTaskSoilInput,
-} from "../task-soil-workspace.js";
+import type { DesktopTaskSoilInput } from "../task-soil-workspace.js";
 import { createMinimalRuntime } from "../runtime.js";
 import { safeCommandToolPreview, safeReadFileToolPreview } from "../safe-tool-preview.js";
 import {
@@ -137,39 +126,7 @@ import {
 } from "../skills/index.js";
 import { redactSensitiveText } from "../../kernel/redaction.js";
 
-export type PanelServerOptions = {
-  readonly host?: string;
-  readonly port?: number;
-  readonly configDirectory?: string;
-  readonly configCenter?: ConfigCenter;
-  readonly runtimeDatabase?: RuntimeDatabase;
-  readonly providerFetch?: PanelProviderFetch;
-  readonly workspaceDirectoryPicker?: () => Promise<string | undefined>;
-  readonly skillRoots?: readonly string[];
-};
-
-export type PanelProviderFetch = (
-  url: string,
-  init: {
-    readonly method: "POST";
-    readonly headers: Record<string, string>;
-    readonly body: string;
-    readonly signal?: AbortSignal;
-  }
-) => Promise<{
-  readonly ok: boolean;
-  readonly status: number;
-  readonly body?: unknown;
-  readonly json: () => Promise<unknown>;
-  readonly text?: () => Promise<string>;
-}>;
-
-export type StartedPanelServer = {
-  readonly url: string;
-  readonly configDirectory?: string;
-  readonly runtimeDirectory?: string;
-  close(): Promise<void>;
-};
+export type { PanelProviderFetch, PanelServerOptions, StartedPanelServer } from "./types.js";
 
 type PanelRuntime = {
   readonly configCenter: ConfigCenter;
@@ -266,11 +223,6 @@ type PanelDesktopRouteReadModel = {
   readonly reason: string;
   readonly title: string;
   readonly summary: string;
-};
-
-type PanelToolsConfig = {
-  readonly webSearch: SanitizedWebSearchConfig;
-  readonly catalog: ToolCatalogSnapshot;
 };
 
 type PanelRuntimeReadyContext =
@@ -469,266 +421,7 @@ async function handlePanelRequest(
     return;
   }
 
-  if (request.method === "GET" && url.pathname === "/api/config") {
-    const config = await runtime.configCenter.getModelProviderConfig();
-    const capabilities = await runtime.capabilityCenter.snapshot();
-    writeJson(response, 200, {
-      ok: true,
-      status: "completed",
-      config,
-      profiles: await runtime.configCenter.listModelProviderProfiles(),
-      capabilities,
-      informationAccess: await runtime.configCenter.getInformationAccessConfig(),
-      workspace: await runtime.configCenter.getWorkspaceConfig(),
-    });
-    return;
-  }
-
-  if (request.method === "GET" && url.pathname === "/api/config/capabilities") {
-    writeJson(response, 200, {
-      ok: true,
-      status: "completed",
-      capabilities: await runtime.capabilityCenter.snapshot(),
-    });
-    return;
-  }
-
-  if (request.method === "GET" && url.pathname === "/api/config/model-profiles") {
-    writeJson(response, 200, {
-      ok: true,
-      status: "completed",
-      profiles: await runtime.configCenter.listModelProviderProfiles(),
-      activeProfile: await runtime.configCenter.getModelProviderConfig(),
-    });
-    return;
-  }
-
-  if (request.method === "POST" && url.pathname === "/api/config/model-profiles") {
-    const body = await readJsonBody(request);
-    try {
-      const profile = await runtime.configCenter.createModelProviderProfile(parseCreateModelProfile(body));
-      writeJson(response, 200, {
-        ok: true,
-        status: "completed",
-        profile,
-        profiles: await runtime.configCenter.listModelProviderProfiles(),
-        capabilities: await runtime.capabilityCenter.snapshot(),
-      });
-      return;
-    } catch (error) {
-      throw configCenterHttpError(error);
-    }
-  }
-
-  const modelProfileMatch = /^\/api\/config\/model-profiles\/([^/]+)$/.exec(url.pathname);
-  if (request.method === "POST" && modelProfileMatch !== null) {
-    const body = await readJsonBody(request);
-    try {
-      const profileId = decodeURIComponent(modelProfileMatch[1] ?? "");
-      const profile = await runtime.configCenter.updateModelProviderConfig({
-        ...parseConfigUpdate(body),
-        profileId,
-      });
-      writeJson(response, 200, {
-        ok: true,
-        status: "completed",
-        profile,
-        profiles: await runtime.configCenter.listModelProviderProfiles(),
-        capabilities: await runtime.capabilityCenter.snapshot(),
-      });
-      return;
-    } catch (error) {
-      throw configCenterHttpError(error);
-    }
-  }
-
-  const activateProfileMatch = /^\/api\/config\/model-profiles\/([^/]+)\/activate$/.exec(url.pathname);
-  if (request.method === "POST" && activateProfileMatch !== null) {
-    try {
-      const profile = await runtime.configCenter.activateModelProviderProfile(
-        decodeURIComponent(activateProfileMatch[1] ?? "")
-      );
-      writeJson(response, 200, {
-        ok: true,
-        status: "completed",
-        profile,
-        config: profile,
-        capabilities: await runtime.capabilityCenter.snapshot(),
-      });
-      return;
-    } catch (error) {
-      throw configCenterHttpError(error);
-    }
-  }
-
-  const deleteProfileMatch = /^\/api\/config\/model-profiles\/([^/]+)$/.exec(url.pathname);
-  if (request.method === "DELETE" && deleteProfileMatch !== null) {
-    try {
-      const profiles = await runtime.configCenter.deleteModelProviderProfile(
-        decodeURIComponent(deleteProfileMatch[1] ?? "")
-      );
-      writeJson(response, 200, {
-        ok: true,
-        status: "completed",
-        profiles,
-        capabilities: await runtime.capabilityCenter.snapshot(),
-      });
-      return;
-    } catch (error) {
-      throw configCenterHttpError(error);
-    }
-  }
-
-  if (request.method === "GET" && url.pathname === "/api/config/tools") {
-    const tools: PanelToolsConfig = {
-      webSearch: await runtime.configCenter.getWebSearchConfig(),
-      catalog: await createPanelToolCatalog(runtime),
-    };
-    writeJson(response, 200, {
-      ok: true,
-      status: "completed",
-      tools,
-      capabilities: await runtime.capabilityCenter.snapshot(),
-      informationAccess: await runtime.configCenter.getInformationAccessConfig(),
-    });
-    return;
-  }
-
-  if (request.method === "POST" && url.pathname === "/api/config/model-provider") {
-    const body = await readJsonBody(request);
-    let config: SanitizedModelProviderConfig;
-    try {
-      config = await runtime.configCenter.updateModelProviderConfig(parseConfigUpdate(body));
-    } catch (error) {
-      throw configCenterHttpError(error);
-    }
-    writeJson(response, 200, {
-      ok: true,
-      status: "completed",
-      config,
-      profiles: await runtime.configCenter.listModelProviderProfiles(),
-      capabilities: await runtime.capabilityCenter.snapshot(),
-      informationAccess: await runtime.configCenter.getInformationAccessConfig(),
-    });
-    return;
-  }
-
-  if (request.method === "POST" && url.pathname === "/api/config/information-sources") {
-    const body = await readJsonBody(request);
-    const informationAccess = await runtime.configCenter.updateInformationAccessConfig(parseInformationAccessUpdate(body));
-    writeJson(response, 200, {
-      ok: true,
-      status: "completed",
-      informationAccess,
-    });
-    return;
-  }
-
-  if (request.method === "POST" && url.pathname === "/api/config/tools/web-search") {
-    const body = await readJsonBody(request);
-    const webSearch = await runtime.configCenter.updateWebSearchConfig(parseWebSearchUpdate(body));
-    writeJson(response, 200, {
-      ok: true,
-      status: "completed",
-      tools: { webSearch, catalog: await createPanelToolCatalog(runtime) },
-      capabilities: await runtime.capabilityCenter.snapshot(),
-      informationAccess: await runtime.configCenter.getInformationAccessConfig(),
-    });
-    return;
-  }
-
-  const toolStateMatch = /^\/api\/config\/tools\/([^/]+)\/state$/.exec(url.pathname);
-  if (request.method === "POST" && toolStateMatch !== null) {
-    const body = await readJsonBody(request);
-    const toolName = decodeURIComponent(toolStateMatch[1] ?? "");
-    await runtime.configCenter.updateToolState(parseToolStateUpdate(toolName, body));
-    const tools: PanelToolsConfig = {
-      webSearch: await runtime.configCenter.getWebSearchConfig(),
-      catalog: await createPanelToolCatalog(runtime),
-    };
-    writeJson(response, 200, {
-      ok: true,
-      status: "completed",
-      tools,
-      capabilities: await runtime.capabilityCenter.snapshot(),
-      informationAccess: await runtime.configCenter.getInformationAccessConfig(),
-    });
-    return;
-  }
-
-  if (request.method === "GET" && url.pathname === "/api/config/mcp") {
-    const capabilitySnapshot = await runtime.capabilityCenter.snapshot();
-    writeJson(response, 200, {
-      ok: true,
-      status: "completed",
-      catalog: capabilitySnapshot.mcpCatalog,
-    });
-    return;
-  }
-
-  if (request.method === "POST" && url.pathname === "/api/config/mcp") {
-    const body = await readJsonBody(request);
-    try {
-      await runtime.configCenter.upsertMcpServer(parseMcpServerUpdate(body));
-      const capabilitySnapshot = await runtime.capabilityCenter.snapshot();
-      writeJson(response, 200, {
-        ok: true,
-        status: "completed",
-        catalog: capabilitySnapshot.mcpCatalog,
-      });
-      return;
-    } catch (error) {
-      throw configCenterHttpError(error);
-    }
-  }
-
-  if (request.method === "POST" && url.pathname === "/api/config/workspace") {
-    const body = await readJsonBody(request);
-    let workspace;
-    try {
-      workspace = await runtime.configCenter.updateWorkspaceConfig(parseWorkspaceUpdate(body));
-    } catch (error) {
-      if (error instanceof WorkspaceDirectoryValidationError) {
-        throw new PanelHttpError(400, "invalid_workspace_directory", "工作目录必须是已存在的文件夹。");
-      }
-      throw error;
-    }
-    writeJson(response, 200, {
-      ok: true,
-      status: "completed",
-      workspace,
-    });
-    return;
-  }
-
-  if (request.method === "POST" && url.pathname === "/api/config/workspace/select-directory") {
-    if (runtime.workspaceDirectoryPicker === undefined) {
-      throw new PanelHttpError(501, "workspace_picker_unavailable", "当前环境不支持系统文件夹选择器，请手动输入工作文件夹路径。");
-    }
-    const selectedDirectory = await runtime.workspaceDirectoryPicker();
-    if (selectedDirectory === undefined) {
-      writeJson(response, 200, {
-        ok: true,
-        status: "cancelled",
-        message: "已取消选择文件夹。",
-        workspace: await runtime.configCenter.getWorkspaceConfig(),
-      });
-      return;
-    }
-    let workspace;
-    try {
-      workspace = await runtime.configCenter.updateWorkspaceConfig({ workspaceDirectory: selectedDirectory });
-    } catch (error) {
-      if (error instanceof WorkspaceDirectoryValidationError) {
-        throw new PanelHttpError(400, "invalid_workspace_directory", "工作目录必须是已存在的文件夹。");
-      }
-      throw error;
-    }
-    writeJson(response, 200, {
-      ok: true,
-      status: "completed",
-      workspace,
-    });
+  if (await handlePanelConfigRoute(runtime, request, response, url)) {
     return;
   }
 
@@ -831,39 +524,9 @@ async function handlePanelRequest(
     return;
   }
 
-  const basicRunEventsMatch = /^\/api\/basic-agent\/runs\/([^/]+)\/events$/.exec(url.pathname);
-  if (request.method === "GET" && basicRunEventsMatch !== null) {
-    await handleGetBasicRunEventsRequest(
-      runtime,
-      decodeURIComponent(basicRunEventsMatch[1] ?? ""),
-      url,
-      request,
-      response
-    );
-    return;
-  }
-
-  const basicRunMatch = /^\/api\/basic-agent\/runs\/([^/]+)$/.exec(url.pathname);
-  if (request.method === "GET" && basicRunMatch !== null) {
-    await handleGetBasicRunRequest(runtime, decodeURIComponent(basicRunMatch[1] ?? ""), response);
-    return;
-  }
-
-  const basicRunCancelMatch = /^\/api\/basic-agent\/runs\/([^/]+)\/cancel$/.exec(url.pathname);
-  if (request.method === "POST" && basicRunCancelMatch !== null) {
-    await handleCancelBasicRunRequest(runtime, decodeURIComponent(basicRunCancelMatch[1] ?? ""), response);
-    return;
-  }
-
-  const confirmationDecisionMatch = /^\/api\/basic-agent\/runs\/([^/]+)\/confirmations\/([^/]+)\/decision$/.exec(url.pathname);
-  if (request.method === "POST" && confirmationDecisionMatch !== null) {
-    await handleConfirmationDecisionRequest(
-      runtime,
-      decodeURIComponent(confirmationDecisionMatch[1] ?? ""),
-      decodeURIComponent(confirmationDecisionMatch[2] ?? ""),
-      request,
-      response
-    );
+  if (await handlePanelBasicAgentRoute(runtime, request, response, url, (job) => {
+    syncPanelRunStreamEventsForJob(runtime, job);
+  })) {
     return;
   }
 
@@ -887,18 +550,6 @@ async function handlePanelRequest(
       message: "未找到面板路由。",
     },
   });
-}
-
-async function createPanelToolCatalog(runtime: PanelRuntime): Promise<ToolCatalogSnapshot> {
-  const env = await runtime.configCenter.createUndergroundAiEnvironment();
-  const workspaceRoot = (await runtime.configCenter.getWorkspaceConfig().catch(() => undefined))?.workspaceDirectory;
-  const toolStates = await runtime.configCenter.listToolStates();
-  return createDesktopBasicToolRegistry({
-    env,
-    fetch: runtime.providerFetch,
-    workspaceRoot,
-    toolStates,
-  }).catalog("desktop-basic");
 }
 
 function toolStatesFromCapabilitySnapshot(snapshot: BasicAgentCapabilitySnapshot): readonly ToolStateSettings[] {
@@ -1129,14 +780,6 @@ function requirePanelRunJob(runtime: PanelRuntime, runId: string): PanelRunJob {
   return job;
 }
 
-function requireBasicRun(runtime: PanelRuntime, runId: string): BasicAgentRun {
-  const run = runtime.runExecutor.get(runId);
-  if (run === undefined) {
-    throw new PanelHttpError(404, "run_not_found", "未找到基础 Agent 运行。");
-  }
-  return run;
-}
-
 async function handleGetRunRequest(
   runtime: PanelRuntime,
   runId: string,
@@ -1230,113 +873,6 @@ function handleGetRunStreamRequest(
   flush();
 }
 
-function handleGetBasicRunEventsRequest(
-  runtime: PanelRuntime,
-  runId: string,
-  url: URL,
-  request: IncomingMessage,
-  response: ServerResponse
-): Promise<void> | void {
-  const job = runtime.runJobs.get(runId);
-  if (job !== undefined) {
-    syncPanelRunStreamEventsForJob(runtime, job);
-  }
-  const cursor = parseStreamCursor(url.searchParams.get("cursor"), request.headers["last-event-id"]);
-  const replay = runtime.runExecutor.replayEvents(runId, cursor);
-  if (replay === undefined) {
-    return runtime.runtimeDatabase?.getRun(runId).then((snapshot) => {
-      if (snapshot === undefined) {
-        throw new PanelHttpError(404, "run_not_found", "未找到基础 Agent 运行事件。");
-      }
-      const restored = basicRunReplayFromRuntimeSnapshot(snapshot);
-      writeJson(response, 200, {
-        ok: true,
-        runId,
-        cursor: restored.cursor,
-        events: restored.events.filter((event: RunEvent) => event.sequence > cursor),
-      });
-    }) ?? (() => {
-      throw new PanelHttpError(404, "run_not_found", "未找到基础 Agent 运行事件。");
-    })();
-  }
-  writeJson(response, 200, {
-    ok: true,
-    runId,
-    cursor: replay.cursor,
-    events: replay.events,
-  });
-}
-
-async function handleGetBasicRunRequest(
-  runtime: PanelRuntime,
-  runId: string,
-  response: ServerResponse
-): Promise<void> {
-  const job = runtime.runJobs.get(runId);
-  if (job !== undefined) {
-    syncPanelRunStreamEventsForJob(runtime, job);
-    writeJson(response, 200, {
-      ok: true,
-      run: requireBasicRun(runtime, runId),
-    });
-    return;
-  }
-  const snapshot = await runtime.runtimeDatabase?.getRun(runId);
-  if (snapshot === undefined) {
-    throw new PanelHttpError(404, "run_not_found", "未找到基础 Agent 运行。");
-  }
-  writeJson(response, 200, {
-    ok: true,
-    run: basicRunFromRuntimeSnapshot(snapshot),
-  });
-}
-
-async function handleCancelBasicRunRequest(
-  runtime: PanelRuntime,
-  runId: string,
-  response: ServerResponse
-): Promise<void> {
-  const run = await runtime.runExecutor.cancel(runId).catch((error: unknown) => {
-    if (error instanceof Error && error.message.includes("not found")) {
-      throw new PanelHttpError(404, "run_not_found", "未找到基础 Agent 运行。");
-    }
-    throw error;
-  });
-  writeJson(response, 200, { ok: true, run });
-}
-
-async function handleConfirmationDecisionRequest(
-  runtime: PanelRuntime,
-  runId: string,
-  confirmationId: string,
-  request: IncomingMessage,
-  response: ServerResponse
-): Promise<void> {
-  const body = await readJsonBody(request);
-  const decision = parseConfirmationDecision(body);
-  const run = await runtime.runExecutor.submitConfirmationDecision({
-    runId,
-    confirmationId,
-    decision: decision.decision,
-    guidance: decision.guidance,
-  }).catch(async (error: unknown) => {
-    if (error instanceof Error && error.message.includes("not found")) {
-      const restored = await submitRestoredBasicConfirmationDecision({
-        runtimeDatabase: runtime.runtimeDatabase,
-        runId,
-        confirmationId,
-        decision,
-      });
-      if (restored !== undefined) {
-        return restored;
-      }
-      throw new PanelHttpError(404, "run_not_found", "未找到基础 Agent 运行。");
-    }
-    throw error;
-  });
-  writeJson(response, 200, { ok: true, run });
-}
-
 async function handleUpdateSkillStateRequest(
   runtime: PanelRuntime,
   skillId: string,
@@ -1356,22 +892,6 @@ async function handleUpdateSkillStateRequest(
     ok: true,
     skills: await discoverSkills({ roots: runtime.skillRoots, stateStore: runtime.skillStateStore }),
   });
-}
-
-function parseConfirmationDecision(raw: unknown): Pick<ConfirmationDecision, "decision" | "guidance"> {
-  const record = asRecord(raw);
-  const decision = optionalString(record.decision);
-  if (decision !== "approve_once" && decision !== "deny" && decision !== "guidance") {
-    throw new PanelHttpError(400, "invalid_confirmation_decision", "确认决定必须是 approve_once、deny 或 guidance。");
-  }
-  const guidance = optionalString(record.guidance);
-  if (decision === "guidance" && guidance === undefined) {
-    throw new PanelHttpError(400, "missing_confirmation_guidance", "补充指导不能为空。");
-  }
-  return {
-    decision,
-    guidance: guidance === undefined ? undefined : compactRuntimeText(guidance, 800),
-  };
 }
 
 async function listPanelConversations(
@@ -3057,217 +2577,6 @@ function createConfigurationFailedAiSummary(
   };
 }
 
-function parseConfigUpdate(raw: unknown): UpdateModelProviderConfigInput {
-  const record = asRecord(raw);
-  return {
-    profileId: optionalString(record.profileId),
-    label: optionalString(record.label),
-    providerKind: parseOptionalModelProviderKind(record.providerKind),
-    protocolKind: parseOptionalModelProtocolKind(record.protocolKind),
-    baseUrl: optionalString(record.baseUrl),
-    model: optionalString(record.model),
-    defaultAiMode: parseOptionalAiMode(record.defaultAiMode, "默认 AI 模式无效。"),
-    enabled: booleanOrUndefined(record.enabled),
-    apiKey: optionalString(record.apiKey),
-  };
-}
-
-function parseCreateModelProfile(raw: unknown): CreateModelProviderProfileInput {
-  const parsed = parseConfigUpdate(raw);
-  const profileId = optionalString(asRecord(raw).profileId);
-  if (profileId === undefined) {
-    throw new PanelHttpError(400, "missing_model_profile_id", "模型 profile id 不能为空。");
-  }
-  return {
-    ...parsed,
-    profileId,
-  };
-}
-
-function parseToolStateUpdate(toolName: string, raw: unknown): ToolStateSettings {
-  const record = asRecord(raw);
-  const enabled = booleanOrUndefined(record.enabled);
-  if (enabled === undefined) {
-    throw new PanelHttpError(400, "invalid_tool_state", "工具状态必须包含 enabled 布尔值。");
-  }
-  return {
-    name: toolName,
-    enabled,
-    updatedAt: new Date().toISOString(),
-  };
-}
-
-function parseMcpServerUpdate(raw: unknown): UpsertMcpServerInput {
-  const record = asRecord(raw);
-  const serverId = optionalString(record.serverId);
-  if (serverId === undefined) {
-    throw new PanelHttpError(400, "missing_mcp_server_id", "MCP server id 不能为空。");
-  }
-  return {
-    serverId,
-    label: optionalString(record.label),
-    transport: parseOptionalMcpTransport(record.transport),
-    command: optionalString(record.command),
-    args: stringArrayOrUndefined(record.args),
-    url: optionalString(record.url),
-    envSecretRefs: stringArrayOrUndefined(record.envSecretRefs),
-    enabled: booleanOrUndefined(record.enabled),
-  };
-}
-
-function parseOptionalModelProviderKind(value: unknown): ConfiguredModelProviderKind | undefined {
-  if (value === undefined || value === null || value === "") {
-    return undefined;
-  }
-  if (value === "openai_compatible" || value === "anthropic" || value === "gemini" || value === "ollama" || value === "local") {
-    return value;
-  }
-  throw new PanelHttpError(400, "invalid_model_provider_kind", "模型厂商类型无效。");
-}
-
-function parseOptionalModelProtocolKind(value: unknown): ConfiguredModelProtocolKind | undefined {
-  if (value === undefined || value === null || value === "") {
-    return undefined;
-  }
-  if (
-    value === "openai_compatible_chat_completions" ||
-    value === "anthropic_messages" ||
-    value === "gemini_generate_content" ||
-    value === "ollama_generate"
-  ) {
-    return value;
-  }
-  throw new PanelHttpError(400, "invalid_model_protocol_kind", "模型协议类型无效。");
-}
-
-function parseOptionalMcpTransport(value: unknown): McpServerTransportKind | undefined {
-  if (value === undefined || value === null || value === "") {
-    return undefined;
-  }
-  if (value === "stdio" || value === "http") {
-    return value;
-  }
-  throw new PanelHttpError(400, "invalid_mcp_transport", "MCP transport 必须是 stdio 或 http。");
-}
-
-function throwIfAborted(signal: AbortSignal | undefined): void {
-  if (signal?.aborted === true) {
-    throw new PanelHttpError(499, "run_cancelled", "运行已取消。");
-  }
-}
-
-function parseWorkspaceUpdate(raw: unknown): UpdateWorkspaceConfigInput {
-  const record = asRecord(raw);
-  const workspaceDirectory = optionalString(record.workspaceDirectory);
-  if (workspaceDirectory === undefined) {
-    throw new PanelHttpError(400, "missing_workspace_directory", "工作目录不能为空。");
-  }
-  return { workspaceDirectory };
-}
-
-function parseInformationAccessUpdate(raw: unknown): UpdateInformationAccessConfigInput {
-  const record = asRecord(raw);
-  return {
-    tavilyApiKey: optionalString(record.tavilyApiKey),
-    tavilyMaxResults: numberOrUndefined(record.tavilyMaxResults),
-    sourcePreference: informationSourcePreferenceOrUndefined(record.sourcePreference),
-  };
-}
-
-function parseWebSearchUpdate(raw: unknown): UpdateWebSearchConfigInput {
-  const record = asRecord(raw);
-  return {
-    provider: parseOptionalWebSearchProvider(record.provider),
-    apiKey: optionalString(record.apiKey),
-    tavilyApiKey: optionalString(record.tavilyApiKey),
-    maxResults: numberOrUndefined(record.maxResults),
-    tavilyMaxResults: numberOrUndefined(record.tavilyMaxResults),
-  };
-}
-
-function parseOptionalWebSearchProvider(value: unknown): UpdateWebSearchConfigInput["provider"] {
-  if (value === undefined || value === null || value === "") {
-    return undefined;
-  }
-  if (value === "tavily" || value === "none") {
-    return value;
-  }
-  throw new PanelHttpError(400, "invalid_web_search_provider", "搜索工具 provider 无效。");
-}
-
-function informationSourcePreferenceOrUndefined(
-  value: unknown
-): UpdateInformationAccessConfigInput["sourcePreference"] {
-  if (!Array.isArray(value)) {
-    return undefined;
-  }
-  const sources = value.filter(isInformationSourceKind);
-  return sources.length === 0 ? undefined : [...new Set(sources)];
-}
-
-function parseRunInput(raw: unknown, defaultAiMode: ModelRuntimeMode): {
-  readonly goal: string;
-  readonly aiMode: ModelRuntimeMode;
-  readonly runMode: PanelDesktopRunMode;
-  readonly taskSoilInput?: DesktopTaskSoilInput;
-} {
-  const record = asRecord(raw);
-  const goal = optionalString(record.goal);
-  if (goal === undefined) {
-    throw new PanelHttpError(400, "missing_goal", "运行需要填写目标。");
-  }
-  let taskSoilInput: DesktopTaskSoilInput;
-  try {
-    taskSoilInput = parseDesktopTaskSoilInput(raw);
-  } catch (error) {
-    if (error instanceof TaskSoilInputValidationError) {
-      throw new PanelHttpError(400, error.code, error.message);
-    }
-    throw error;
-  }
-  return {
-    goal,
-    aiMode: parseOptionalAiMode(record.aiMode, "AI 模式无效。") ?? defaultAiMode,
-    runMode: parseOptionalDesktopRunMode(record.runMode) ?? "agent",
-    taskSoilInput,
-  };
-}
-
-function parseOptionalDesktopRunMode(value: unknown): PanelDesktopRunMode | undefined {
-  if (value === undefined || value === null || value === "") {
-    return undefined;
-  }
-  if (value === "agent" || value === "deep") {
-    return value;
-  }
-  if (value === "work_session") {
-    return "deep";
-  }
-  throw new PanelHttpError(400, "invalid_run_mode", "运行模式无效。");
-}
-
-function defaultAiModeForRunKind(runKind: PanelRunKind, configuredDefault: ModelRuntimeMode): ModelRuntimeMode {
-  return runKind === "desktop" ? "openai-compatible" : configuredDefault;
-}
-
-function parseOptionalAiMode(value: unknown, invalidMessage: string): ModelRuntimeMode | undefined {
-  if (value === undefined || value === null || value === "") {
-    return undefined;
-  }
-  const parsed = parseAiMode(value);
-  if (parsed === undefined) {
-    throw new PanelHttpError(400, "invalid_ai_mode", invalidMessage);
-  }
-  return parsed;
-}
-
-function parseAiMode(value: unknown): ModelRuntimeMode | undefined {
-  if (value === "none" || value === "fake" || value === "openai-compatible") {
-    return value;
-  }
-  return undefined;
-}
-
 function panelConfigurationErrorMessage(code: ModelRuntimeConfigurationError["issue"]["code"]): string {
   if (code === "ai_disabled") {
     return "Underground Cognitive Runtime 方向智能阶段需要 AI；AI 禁用模式只作为边界检查，未启动运行。";
@@ -3401,70 +2710,12 @@ function panelJobErrorMessage(error: PanelHttpError): string {
   return error.message;
 }
 
-function optionalString(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
-}
-
-function booleanOrUndefined(value: unknown): boolean | undefined {
-  return typeof value === "boolean" ? value : undefined;
-}
-
-function stringArrayOrUndefined(value: unknown): readonly string[] | undefined {
-  if (!Array.isArray(value)) {
-    return undefined;
-  }
-  const items = value
-    .map((item) => optionalString(item))
-    .filter((item): item is string => item !== undefined);
-  return items.length === 0 ? undefined : items;
-}
-
-function configCenterHttpError(error: unknown): PanelHttpError {
-  if (error instanceof PanelHttpError) {
-    return error;
-  }
-  if (error instanceof ConfigCenterValidationError) {
-    return new PanelHttpError(400, "invalid_config", error.message);
-  }
-  throw error;
-}
-
 function compactConversationHistoryText(value: string, maxLength: number): string {
   const normalized = value.replace(/\s+/g, " ").trim();
   if (normalized.length <= maxLength) {
     return normalized;
   }
   return `${normalized.slice(0, maxLength - 1)}…`;
-}
-
-function unique(values: readonly string[]): string[] {
-  return [...new Set(values.filter((value) => value.trim().length > 0))];
-}
-
-function numberOrUndefined(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
-}
-
-function isInformationSourceKind(
-  value: unknown
-): value is NonNullable<UpdateInformationAccessConfigInput["sourcePreference"]>[number] {
-  return (
-    value === "web" ||
-    value === "page" ||
-    value === "codebase" ||
-    value === "soil" ||
-    value === "run_memory" ||
-    value === "docs" ||
-    value === "packages" ||
-    value === "github"
-  );
-}
-
-function asRecord(value: unknown): Record<string, unknown> {
-  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
-    return value as Record<string, unknown>;
-  }
-  return {};
 }
 
 function isPanelRuntime(value: PanelServerOptions | PanelRuntime): value is PanelRuntime {

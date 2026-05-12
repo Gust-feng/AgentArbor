@@ -7,4 +7,4 @@ export type {
   PanelProviderFetch,
   PanelServerOptions,
   StartedPanelServer,
-} from "./request-handler.js";
+} from "./types.js";

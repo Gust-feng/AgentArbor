@@ -296,6 +296,68 @@ test("executeToolUseLoop keeps verbose tool output out of EventLog and redacts t
   assert.equal(toolMessageText.includes("contentPreview"), true);
 });
 
+test("executeToolUseLoop uses projected agentContent for model tool continuation", async () => {
+  const channel = new SequenceIntelligenceChannel([
+    toolCallResponse("model-request-test", "call-read", "read"),
+    completedResponse("model-request-final", { summary: "Final answer with projected tool result." }),
+  ]);
+  const broker: ToolExecutionBroker = {
+    list: () => [
+      {
+        name: "read",
+        description: "Projected read tool.",
+        metadata: {
+          category: "research",
+          riskLevel: "low",
+          operationType: "read-only",
+          requiresConfirmation: false,
+          visibleResultPolicy: {
+            userVisible: "summary-only",
+            maxPreviewChars: 800,
+            omitRawOutput: true,
+          },
+        },
+        inputSchema: { type: "object", properties: {} },
+      },
+    ],
+    has: (name) => name === "read",
+    execute: async (request) => ({
+      callId: request.callId,
+      toolName: request.toolName,
+      input: request.input,
+      output: { raw: "raw-secret-output sk-raw-tool-secret" },
+      status: "completed",
+      durationMs: 1,
+      projection: {
+        agentContent: { summary: "projected model-safe content" },
+        uiSummary: "safe UI summary",
+        diagnosticRef: "tool:projected",
+        truncated: false,
+        redacted: true,
+      },
+    }),
+    resetCallCount: () => undefined,
+    getCallCount: () => 1,
+  };
+
+  await executeToolUseLoop(
+    {
+      intelligenceChannel: channel,
+      toolCenter: broker,
+      callerAgentId: "agent-test",
+      traceId: "trace-test",
+      goalId: "goal-test",
+      allowedTools: ["read"],
+    },
+    createValidModelRequest()
+  );
+
+  const toolMessageText = JSON.stringify(channel.requests[1]?.sanitizedMessages.at(-1));
+  assert.equal(toolMessageText.includes("projected model-safe content"), true);
+  assert.equal(toolMessageText.includes("raw-secret-output"), false);
+  assert.equal(toolMessageText.includes("sk-raw-tool-secret"), false);
+});
+
 test("executeToolUseLoop returns a cancelled response when aborted before a model request", async () => {
   const abort = new AbortController();
   abort.abort();

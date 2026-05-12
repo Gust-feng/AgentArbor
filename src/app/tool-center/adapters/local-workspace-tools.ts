@@ -445,6 +445,37 @@ export function createLocalRunCommandTool(rootDirectory = DEFAULT_ROOT, options:
   };
 }
 
+export function createLocalShellCommandTool(rootDirectory = DEFAULT_ROOT, options: LocalWorkspaceToolOptions = {}): ToolExecutor {
+  const base = createLocalRunCommandTool(rootDirectory, options);
+  return {
+    definition: {
+      ...base.definition,
+      name: "shell_command",
+      description: "Run a sandboxed shell-style workspace command. This is an alias of run_command with the same confirmation and allowlist policy.",
+      metadata: {
+        category: "terminal",
+        riskLevel: "high",
+        operationType: "execute",
+        requiresConfirmation: true,
+        visibleResultPolicy: {
+          userVisible: "summary-only",
+          maxPreviewChars: 600,
+          omitRawOutput: true,
+        },
+      },
+    },
+    execute: async (input, context) => {
+      const output = await base.execute(input, context);
+      const record = asRecord(output);
+      return {
+        ...record,
+        action: "shell_command",
+        refId: typeof record.refId === "string" ? record.refId.replace("workspace:command:", "workspace:shell:") : "workspace:shell:command",
+      };
+    },
+  };
+}
+
 function sandboxRequest(
   operation: SandboxPolicyRequest["operation"],
   workspaceRoot: string,

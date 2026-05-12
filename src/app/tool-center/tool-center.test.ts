@@ -106,6 +106,92 @@ test("ToolCenter lets an approved confirmation id bypass the confirmation gate",
   assert.equal(result.projection?.uiSummary, "safe write summary");
 });
 
+test("ToolCenter adds typed safe display projections for command output", async () => {
+  const center = new ToolCenter();
+  center.register(testTool("shell_command", async () => ({
+    action: "shell_command",
+    summary: "pnpm test · exit 0",
+    result: {
+      command: "pnpm",
+      args: ["test"],
+      exitCode: 0,
+      stdout: "ok\nAuthorization: Bearer sk-test-secret-token",
+      stderr: "",
+    },
+  }), "read-only"));
+
+  const result = await center.execute(
+    { callId: "call-shell", toolName: "shell_command", input: { command: "pnpm", args: ["test"] } },
+    { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" }
+  );
+
+  assert.equal(result.status, "completed");
+  assert.equal(result.projection?.display?.kind, "command_summary");
+  assert.equal(JSON.stringify(result.projection?.display).includes("sk-test-secret-token"), false);
+});
+
+test("ToolCenter adds typed safe display projections for search results", async () => {
+  const center = new ToolCenter();
+  center.register(testTool("search", async () => ({
+    action: "search",
+    query: "AgentArbor",
+    status: "completed",
+    results: [
+      {
+        refId: "research:web:one",
+        source: "web",
+        title: "AgentArbor result",
+        uri: "https://example.test/agentarbor",
+        snippet: "short safe snippet",
+      },
+    ],
+  })));
+
+  const result = await center.execute(
+    { callId: "call-search", toolName: "search", input: { query: "AgentArbor" } },
+    { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" }
+  );
+
+  assert.equal(result.status, "completed");
+  assert.equal(result.projection?.display?.kind, "search_results");
+  assert.equal(result.projection?.display?.kind === "search_results" ? result.projection.display.results[0]?.title : "", "AgentArbor result");
+});
+
+test("ToolCenter file diff display does not expose edit input text", async () => {
+  const center = new ToolCenter({ platform: "linux" });
+  center.register(testTool("edit_file", async () => ({
+    action: "edit_file",
+    summary: "notes.md · 32 -> 18 chars · 1 replacement",
+    result: {
+      path: "notes.md",
+      previousLength: 32,
+      nextLength: 18,
+      replacements: 1,
+    },
+  }), "read-write"));
+
+  const result = await center.execute(
+    {
+      callId: "call-edit",
+      toolName: "edit_file",
+      input: {
+        path: "notes.md",
+        oldText: "old file body sk-edit-secret",
+        newText: "new file body sk-edit-secret",
+      },
+    },
+    { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" }
+  );
+
+  const displayJson = JSON.stringify(result.projection?.display);
+  assert.equal(result.status, "completed");
+  assert.equal(result.projection?.display?.kind, "file_diff_preview");
+  assert.equal(displayJson.includes("old file body"), false);
+  assert.equal(displayJson.includes("new file body"), false);
+  assert.equal(displayJson.includes("sk-edit-secret"), false);
+  assert.equal(result.projection?.display?.kind === "file_diff_preview" ? result.projection.display.replacements : 0, 1);
+});
+
 test("ToolCenter list returns cloned metadata", () => {
   const center = new ToolCenter();
   center.register(testTool("read_file", async () => ({ ok: true }), "read-only"));

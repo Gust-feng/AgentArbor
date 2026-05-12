@@ -9,22 +9,7 @@ import type { InformationSourceKind } from "../domain/research/index.js";
 import type { ToolExecutionBroker } from "../domain/tools/index.js";
 import type { ConfigCenter } from "./config-center.js";
 import type { MinimalRuntime } from "./runtime.js";
-import {
-  createDefaultResearchRuntime,
-  createResearchReadTool,
-  createResearchSearchTool,
-  type PageFetchLike,
-} from "./research/index.js";
-import {
-  createLocalEditFileTool,
-  createLocalGrepFilesTool,
-  createLocalListDirTool,
-  createLocalReadFileTool,
-  createLocalRunCommandTool,
-  createLocalWriteFileTool,
-  createLocalWorkspaceSandboxPolicy,
-  ToolCenter,
-} from "./tool-center/index.js";
+import { createDesktopBasicToolRegistry } from "./basic-agent-runtime/index.js";
 import type { UndergroundDemoAiInput } from "./underground-demo-summary.js";
 
 export type UndergroundAiMode = "none" | "fake" | "openai-compatible";
@@ -185,6 +170,7 @@ export function createDefaultToolCenter(input: {
   readonly sourcePreference?: readonly InformationSourceKind[];
   readonly tavilyMaxResults?: number;
   readonly workspaceRoot?: string;
+  readonly playwrightAvailable?: boolean;
 } = {}): ToolExecutionBroker {
   return createToolCenterFromEnvironment(input);
 }
@@ -197,6 +183,7 @@ export async function createConfiguredToolCenter(
     readonly sourcePreference?: readonly InformationSourceKind[];
     readonly tavilyMaxResults?: number;
     readonly workspaceRoot?: string;
+    readonly playwrightAvailable?: boolean;
   } = {}
 ): Promise<ToolExecutionBroker> {
   return createToolCenterFromEnvironment({
@@ -212,6 +199,7 @@ export async function createConfiguredToolCenterFactory(
     readonly sourcePreference?: readonly InformationSourceKind[];
     readonly tavilyMaxResults?: number;
     readonly workspaceRoot?: string;
+    readonly playwrightAvailable?: boolean;
   } = {}
 ): Promise<(runtime: MinimalRuntime) => ToolExecutionBroker> {
   const env = await configCenter.createUndergroundAiEnvironment();
@@ -225,62 +213,9 @@ function createToolCenterFromEnvironment(input: {
   readonly sourcePreference?: readonly InformationSourceKind[];
   readonly tavilyMaxResults?: number;
   readonly workspaceRoot?: string;
+  readonly playwrightAvailable?: boolean;
 }): ToolExecutionBroker {
-  const env = input.env ?? process.env;
-  const center = new ToolCenter();
-  const researchRuntime = createDefaultResearchRuntime({
-    env,
-    tavilyFetch: input.fetch,
-    pageFetch: input.fetch as unknown as PageFetchLike,
-    constraints: input.runtime?.constraints,
-    sourcePreference: input.sourcePreference ?? parseInformationSourcePreference(env.AGENTARBOR_INFORMATION_SOURCE_PREFERENCE),
-    tavilyMaxResults: input.tavilyMaxResults ?? positiveIntegerFromString(env.AGENTARBOR_TAVILY_MAX_RESULTS),
-  });
-  center.register(createResearchSearchTool(researchRuntime));
-  center.register(createResearchReadTool(researchRuntime));
-  const workspaceRoot = input.workspaceRoot ?? process.cwd();
-  const sandboxPolicy = createLocalWorkspaceSandboxPolicy();
-  center.register(createLocalReadFileTool(workspaceRoot, { sandboxPolicy }));
-  center.register(createLocalListDirTool(workspaceRoot, { sandboxPolicy }));
-  center.register(createLocalGrepFilesTool(workspaceRoot, { sandboxPolicy }));
-  center.register(createLocalWriteFileTool(workspaceRoot, { sandboxPolicy }));
-  center.register(createLocalEditFileTool(workspaceRoot, { sandboxPolicy }));
-  center.register(createLocalRunCommandTool(workspaceRoot, { sandboxPolicy }));
-  return center;
-}
-
-function parseInformationSourcePreference(value: string | undefined): readonly InformationSourceKind[] | undefined {
-  if (value === undefined || value.trim().length === 0) {
-    return undefined;
-  }
-  const sources = [...new Set(value.split(",").map((item) => informationSourceOrUndefined(item.trim())))].filter(
-    (source): source is InformationSourceKind => source !== undefined
-  );
-  return sources.length === 0 ? undefined : sources;
-}
-
-function informationSourceOrUndefined(value: string): InformationSourceKind | undefined {
-  if (
-    value === "web" ||
-    value === "page" ||
-    value === "codebase" ||
-    value === "soil" ||
-    value === "run_memory" ||
-    value === "docs" ||
-    value === "packages" ||
-    value === "github"
-  ) {
-    return value;
-  }
-  return undefined;
-}
-
-function positiveIntegerFromString(value: string | undefined): number | undefined {
-  if (value === undefined || value.trim().length === 0) {
-    return undefined;
-  }
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? Math.max(1, Math.floor(parsed)) : undefined;
+  return createDesktopBasicToolRegistry(input).createToolCenter("desktop-basic");
 }
 
 function firstNonBlank(...values: readonly (string | undefined)[]): string | undefined {

@@ -1,5 +1,6 @@
 import type { ArborMessageType, ArtifactRef } from "../common.js";
 import type { BasicAgentRun, RunEvent } from "../basic-agent/index.js";
+import type { ToolDisplayProjection } from "../tools/index.js";
 import type {
   ObservationProgress,
   ObservationRef,
@@ -118,6 +119,7 @@ export type RuntimeToolCallRecord = {
   readonly exitCode?: number;
   readonly summary?: string;
   readonly preview?: string;
+  readonly display?: ToolDisplayProjection;
   readonly truncated?: boolean;
   readonly error?: string;
   readonly eventRefs: readonly string[];

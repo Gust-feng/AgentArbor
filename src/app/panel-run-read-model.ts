@@ -1,6 +1,7 @@
 import type { ArborMessageType } from "../domain/common.js";
 import type { SanitizedInformationAccessConfig, SanitizedModelProviderConfig } from "../domain/config/index.js";
 import type { ModelVisibleOutputProjection } from "../domain/intelligence/index.js";
+import type { ToolDisplayProjection } from "../domain/tools/index.js";
 import type { AgentRunTree } from "../domain/underground/index.js";
 import {
   createRunObservationEventViews,
@@ -11,6 +12,7 @@ import {
 } from "../domain/observation/index.js";
 import { ROOTLET_CLUSTER_KINDS, type CandidatePoolCounts, type RootletClusterKind } from "../domain/underground/index.js";
 import type { EventLogEntry } from "../kernel/events/in-memory-event-log.js";
+import { redactSensitiveText } from "../kernel/redaction.js";
 import type { UndergroundAiMode } from "./intelligence-channel-factory.js";
 import { explainDesktopIntentDecision, type DesktopIntentDecision } from "./desktop-intent-router.js";
 import { createSafeAgentRunTreeView, type SafeAgentRunTreeView } from "./panel-canvas-read-model.js";
@@ -202,6 +204,7 @@ export type PanelRunStreamEventDetail = {
   readonly command?: string;
   readonly exitCode?: number;
   readonly preview?: string;
+  readonly display?: ToolDisplayProjection;
   readonly truncated?: boolean;
   readonly error?: string;
 };
@@ -211,6 +214,7 @@ export type PanelRunStepToolItem = {
   readonly title: string;
   readonly target?: string;
   readonly preview?: string;
+  readonly display?: ToolDisplayProjection;
   readonly exitCode?: number;
   readonly truncated?: boolean;
   readonly error?: string;
@@ -437,6 +441,7 @@ export function deriveRunSteps(
         title: event.summary ?? event.toolName ?? "工具调用",
         target,
         preview: event.detail?.preview,
+        display: event.detail?.display,
         exitCode: event.detail?.exitCode,
         truncated: event.detail?.truncated,
         error: event.detail?.error,
@@ -986,6 +991,7 @@ function toolStreamDetail(
   const input = asRecord(payload.input);
   const output = asRecord(payload.output);
   const result = asRecord(output.result);
+  const display = toolDisplayOrUndefined(output.display);
   const command = stringOrUndefined(result.command) ?? stringOrUndefined(input.command);
   const args = stringArray(result.args).length > 0 ? stringArray(result.args) : stringArray(input.args);
   return {
@@ -996,9 +1002,26 @@ function toolStreamDetail(
     command: command === undefined ? undefined : [command, ...args].join(" ").trim(),
     exitCode: typeof result.exitCode === "number" ? result.exitCode : undefined,
     preview: type === "tool.requested" ? toolRequestPreview(toolName, input) : toolResultPreview(toolName, output, result, payload),
+    display,
     truncated: output.truncated === true,
     error: type === "tool.failed" ? stringOrUndefined(payload.error) : undefined,
   };
+}
+
+function toolDisplayOrUndefined(value: unknown): ToolDisplayProjection | undefined {
+  const record = asRecord(value);
+  const kind = stringOrUndefined(record.kind);
+  if (
+    kind === "search_results" ||
+    kind === "browser_snapshot" ||
+    kind === "file_change_summary" ||
+    kind === "file_diff_preview" ||
+    kind === "command_summary" ||
+    kind === "generic_tool_summary"
+  ) {
+    return value as ToolDisplayProjection;
+  }
+  return undefined;
 }
 
 function toolRequestPreview(toolName: string, input: Readonly<Record<string, unknown>>): string | undefined {
@@ -1015,12 +1038,39 @@ function toolRequestPreview(toolName: string, input: Readonly<Record<string, unk
     const path = stringOrUndefined(input.path);
     return path === undefined ? "准备修改文件。" : `目标文件：${path}`;
   }
-  if (toolName === "run_command") {
+  if (toolName === "run_command" || toolName === "shell_command") {
     const command = stringOrUndefined(input.command);
     const args = stringArray(input.args);
     return command === undefined ? undefined : `命令：${[command, ...args].join(" ").trim()}`;
   }
+  if (toolName === "browser_snapshot") {
+    const url = stringOrUndefined(input.url);
+    return url === undefined ? undefined : `页面：${url}`;
+  }
   return undefined;
+}
+
+function safeFileChangePreview(
+  toolName: string,
+  input: Readonly<Record<string, unknown>>,
+  output: Readonly<Record<string, unknown>>,
+  result: Readonly<Record<string, unknown>>
+): string | undefined {
+  const path = stringOrUndefined(result.path) ?? stringOrUndefined(input.path);
+  const summary = stringOrUndefined(output.summary);
+  if (toolName === "edit_file") {
+    const replacements = typeof result.replacements === "number" ? `替换：${result.replacements} 处` : undefined;
+    const lengthChange =
+      typeof result.previousLength === "number" && typeof result.nextLength === "number"
+        ? `长度：${result.previousLength} -> ${result.nextLength} chars`
+        : undefined;
+    const diffPreview = ["变更预览", replacements, lengthChange]
+      .filter((item): item is string => item !== undefined && item.length > 0)
+      .join("\n");
+    return [summary, path === undefined ? undefined : `文件：${path}`, diffPreview].filter((item): item is string => item !== undefined && item.length > 0).join("\n");
+  }
+  const bytes = typeof result.bytes === "number" ? `${result.bytes} bytes` : undefined;
+  return [summary, path === undefined ? undefined : `文件：${path}`, bytes === undefined ? undefined : `写入大小：${bytes}`].filter((item): item is string => item !== undefined && item.length > 0).join("\n");
 }
 
 function toolResultPreview(
@@ -1058,8 +1108,18 @@ function toolResultPreview(
     });
     return lines.length === 0 ? stringOrUndefined(output.summary) : lines.join("\n");
   }
-  if (toolName === "run_command") {
+  if (toolName === "write_file" || toolName === "edit_file") {
+    return safeFileChangePreview(toolName, asRecord(payload.input), output, result);
+  }
+  if (toolName === "run_command" || toolName === "shell_command") {
     return safeCommandPreview(output, result);
+  }
+  if (toolName === "browser_snapshot") {
+    const title = stringOrUndefined(result.title);
+    const url = stringOrUndefined(result.url);
+    const text = stringOrUndefined(result.text);
+    const headline = [title, url].filter((item): item is string => item !== undefined).join(" · ");
+    return compactStreamDetailText([headline, text].filter((item) => item !== undefined && item.length > 0).join("\n"), 900);
   }
   return compactStreamDetailText(stringOrUndefined(output.summary), 900);
 }
@@ -1097,6 +1157,11 @@ function compactStreamDetailText(value: string | undefined, maxLength: number): 
   return text.length <= maxLength ? text : `${text.slice(0, Math.max(0, maxLength - 1))}…`;
 }
 
+function redactAndCompact(value: string, maxLength: number): string {
+  const redacted = redactSensitiveText(value).replace(/\s+/g, " ").trim();
+  return redacted.length <= maxLength ? redacted : `${redacted.slice(0, Math.max(0, maxLength - 1))}…`;
+}
+
 function localToolLabel(toolName: string): string {
   if (toolName === "read_file") return "读取文件";
   if (toolName === "list_dir") return "列出目录";
@@ -1104,6 +1169,8 @@ function localToolLabel(toolName: string): string {
   if (toolName === "write_file") return "写入文件";
   if (toolName === "edit_file") return "编辑文件";
   if (toolName === "run_command") return "执行命令";
+  if (toolName === "shell_command") return "执行 Shell";
+  if (toolName === "browser_snapshot") return "浏览网页";
   if (toolName === "search") return "搜索网页";
   if (toolName === "read") return "读取网页";
   return `执行 ${toolName}`;
@@ -1126,7 +1193,7 @@ function toolTargetText(
   if (url !== undefined) {
     return url;
   }
-  if (toolName === "run_command") {
+  if (toolName === "run_command" || toolName === "shell_command") {
     const command = stringOrUndefined(result.command) ?? stringOrUndefined(input.command);
     const args = stringArray(result.args).length > 0 ? stringArray(result.args) : stringArray(input.args);
     return command === undefined ? undefined : [command, ...args].join(" ").trim();

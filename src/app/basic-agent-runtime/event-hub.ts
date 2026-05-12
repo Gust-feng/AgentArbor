@@ -1,4 +1,4 @@
-import type { AgentTaskStatus, RunEvent } from "../domain/basic-agent/index.js";
+import type { AgentTaskStatus, RunEvent } from "../../domain/basic-agent/index.js";
 
 export type BasicAgentRunCursor = {
   readonly runId: string;

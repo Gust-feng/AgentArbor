@@ -32,9 +32,62 @@ export type ToolSafeProjection = {
   readonly agentContent?: unknown;
   readonly uiSummary?: string;
   readonly diagnosticRef?: string;
+  readonly display?: ToolDisplayProjection;
   readonly truncated?: boolean;
   readonly redacted?: boolean;
 };
+
+export type ToolDisplayProjection =
+  | {
+      readonly kind: "search_results";
+      readonly query?: string;
+      readonly status?: string;
+      readonly results: readonly {
+        readonly title: string;
+        readonly url?: string;
+        readonly refId?: string;
+        readonly source?: string;
+        readonly snippet?: string;
+      }[];
+      readonly truncated?: boolean;
+    }
+  | {
+      readonly kind: "browser_snapshot";
+      readonly title?: string;
+      readonly url?: string;
+      readonly text?: string;
+      readonly truncated?: boolean;
+    }
+  | {
+      readonly kind: "file_change_summary";
+      readonly path?: string;
+      readonly bytes?: number;
+      readonly append?: boolean;
+      readonly replacements?: number;
+      readonly previousLength?: number;
+      readonly nextLength?: number;
+    }
+  | {
+      readonly kind: "file_diff_preview";
+      readonly path?: string;
+      readonly replacements?: number;
+      readonly previousLength?: number;
+      readonly nextLength?: number;
+    }
+  | {
+      readonly kind: "command_summary";
+      readonly command?: string;
+      readonly args?: readonly string[];
+      readonly exitCode?: number;
+      readonly stdoutSummary?: string;
+      readonly stderrSummary?: string;
+    }
+  | {
+      readonly kind: "generic_tool_summary";
+      readonly action?: string;
+      readonly summary?: string;
+      readonly items?: readonly string[];
+    };
 
 export type ToolDefinition = {
   readonly name: string;

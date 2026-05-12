@@ -9,10 +9,10 @@ import { createConfiguredToolCenter, createDefaultToolCenter } from "../intellig
 import type { FetchLike } from "../tool-center/index.js";
 
 test("default ToolCenter exposes model-visible search and read tools", async () => {
-  const center = createDefaultToolCenter({ env: {} });
+  const center = createDefaultToolCenter({ env: {}, playwrightAvailable: true });
   const names = center.list().map((tool) => tool.name);
 
-  assert.deepEqual(names, ["search", "read", "read_file", "list_dir", "grep_files", "write_file", "edit_file", "run_command"]);
+  assert.deepEqual(names, ["search", "read", "read_file", "list_dir", "grep_files", "write_file", "edit_file", "run_command", "shell_command", "browser_snapshot"]);
   assert.equal(center.has("web_search"), false);
 
   const search = await center.execute(
@@ -47,6 +47,7 @@ test("default ToolCenter passes configured Tavily max results into ResearchRunti
       AGENTARBOR_TAVILY_MAX_RESULTS: "2",
     },
     fetch,
+    playwrightAvailable: true,
   });
 
   const search = await center.execute(
@@ -86,7 +87,7 @@ test("configured ToolCenter reads Tavily config, registers search/read, and reda
       maxResults: 1,
     });
 
-    const center = await createConfiguredToolCenter(configCenter, { fetch });
+    const center = await createConfiguredToolCenter(configCenter, { fetch, playwrightAvailable: true });
     const names = center.list().map((tool) => tool.name);
     const search = await center.execute(
       { callId: "call-search", toolName: "search", input: { query: "AgentArbor", sources: ["web"] } },
@@ -94,7 +95,7 @@ test("configured ToolCenter reads Tavily config, registers search/read, and reda
       { callerAgentId: "agent-test", allowedTools: ["search", "read"] }
     );
 
-    assert.deepEqual(names, ["search", "read", "read_file", "list_dir", "grep_files", "write_file", "edit_file", "run_command"]);
+    assert.deepEqual(names, ["search", "read", "read_file", "list_dir", "grep_files", "write_file", "edit_file", "run_command", "shell_command", "browser_snapshot"]);
     assert.equal(search.status, "completed");
     assert.equal(bodies[0]?.max_results, 1);
     assert.equal(JSON.stringify(search.output).includes("tvly-configured-tool-secret"), false);
@@ -110,7 +111,7 @@ test("configured ToolCenter still registers search/read and degrades web search 
       settingsStore: new FileSystemNormalSettingsStore(directory),
       secretStore: new FileSystemLocalDevSecretStore(directory),
     });
-    const center = await createConfiguredToolCenter(configCenter);
+    const center = await createConfiguredToolCenter(configCenter, { playwrightAvailable: true });
     const names = center.list().map((tool) => tool.name);
     const search = await center.execute(
       { callId: "call-search", toolName: "search", input: { query: "AgentArbor", sources: ["web"] } },
@@ -118,7 +119,7 @@ test("configured ToolCenter still registers search/read and degrades web search 
       { callerAgentId: "agent-test", allowedTools: ["search", "read"] }
     );
 
-    assert.deepEqual(names, ["search", "read", "read_file", "list_dir", "grep_files", "write_file", "edit_file", "run_command"]);
+    assert.deepEqual(names, ["search", "read", "read_file", "list_dir", "grep_files", "write_file", "edit_file", "run_command", "shell_command", "browser_snapshot"]);
     assert.equal(search.status, "completed");
     assert.equal((search.output as { status?: string }).status, "no-provider");
   } finally {
@@ -135,7 +136,7 @@ test("configured ToolCenter uses workspaceRoot for local tools", async () => {
       settingsStore: new FileSystemNormalSettingsStore(directory),
       secretStore: new FileSystemLocalDevSecretStore(directory),
     });
-    const center = await createConfiguredToolCenter(configCenter, { workspaceRoot: workspace });
+    const center = await createConfiguredToolCenter(configCenter, { workspaceRoot: workspace, playwrightAvailable: true });
     const read = await center.execute(
       { callId: "call-read-file", toolName: "read_file", input: { path: "note.txt" } },
       { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
@@ -170,7 +171,7 @@ test("configured ToolCenter keeps web search disabled even when a historical Tav
     });
     await configCenter.updateWebSearchConfig({ provider: "none" });
 
-    const center = await createConfiguredToolCenter(configCenter, { fetch });
+    const center = await createConfiguredToolCenter(configCenter, { fetch, playwrightAvailable: true });
     const search = await center.execute(
       { callId: "call-search", toolName: "search", input: { query: "AgentArbor", sources: ["web"] } },
       { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },

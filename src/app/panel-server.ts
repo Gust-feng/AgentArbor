@@ -30,14 +30,18 @@ import {
 } from "./underground-direction-session.js";
 import { createUndergroundDemoSummary, type UndergroundDemoAiInput, type UndergroundDemoSummary } from "./underground-demo-summary.js";
 import { ConfigCenter, WorkspaceDirectoryValidationError, createLocalConfigCenter } from "./config-center.js";
-import { createPanelHtml } from "./panel-assets.js";
+import { createPanelHtml, readPanelStaticAsset } from "./panel-assets.js";
 import type { BasicAgentRun, ConfirmationDecision, RunEvent } from "../domain/basic-agent/index.js";
 import {
   BasicAgentRunExecutor,
+  basicRunFromRuntimeSnapshot,
+  basicRunReplayFromRuntimeSnapshot,
+  createDesktopBasicToolRegistry,
+  submitRestoredBasicConfirmationDecision,
   type BasicAgentPendingToolContinuation,
   type BasicAgentRunExecutionInput,
-} from "./basic-agent-run-executor.js";
-import type { BasicAgentRunReplay } from "./basic-agent-run-event-hub.js";
+  type ToolCatalogSnapshot,
+} from "./basic-agent-runtime/index.js";
 import type {
   SanitizedInformationAccessConfig,
   SanitizedModelProviderConfig,
@@ -242,6 +246,7 @@ type PanelDesktopRouteReadModel = {
 
 type PanelToolsConfig = {
   readonly webSearch: SanitizedWebSearchConfig;
+  readonly catalog: ToolCatalogSnapshot;
 };
 
 type PanelRuntimeReadyContext =
@@ -363,6 +368,10 @@ function assemblePanelRuntime(input: {
         traceId: context.traceId,
         goalId: context.goalId,
       });
+      const job = runtime.runJobs.get(runId);
+      if (job !== undefined) {
+        runtime.runExecutor?.syncPanelRun(job);
+      }
     },
     onModelOutputDelta: (runId, delta) => appendLiveModelOutputDelta(runtime as PanelRuntime, runId, delta),
     onRunFinished: async (job) => {
@@ -410,6 +419,18 @@ async function handlePanelRequest(
     return;
   }
 
+  if (request.method === "GET") {
+    const asset = readPanelStaticAsset(url.pathname);
+    if (asset !== undefined) {
+      response.writeHead(200, {
+        "content-type": asset.contentType,
+        "cache-control": "no-store",
+      });
+      response.end(asset.body);
+      return;
+    }
+  }
+
   if (request.method === "GET" && url.pathname === "/favicon.ico") {
     response.writeHead(204, { "cache-control": "no-store" });
     response.end();
@@ -443,6 +464,7 @@ async function handlePanelRequest(
   if (request.method === "GET" && url.pathname === "/api/config/tools") {
     const tools: PanelToolsConfig = {
       webSearch: await runtime.configCenter.getWebSearchConfig(),
+      catalog: await createPanelToolCatalog(runtime),
     };
     writeJson(response, 200, {
       ok: true,
@@ -693,6 +715,16 @@ async function handlePanelRequest(
       message: "未找到面板路由。",
     },
   });
+}
+
+async function createPanelToolCatalog(runtime: PanelRuntime): Promise<ToolCatalogSnapshot> {
+  const env = await runtime.configCenter.createUndergroundAiEnvironment();
+  const workspaceRoot = (await runtime.configCenter.getWorkspaceConfig().catch(() => undefined))?.workspaceDirectory;
+  return createDesktopBasicToolRegistry({
+    env,
+    fetch: runtime.providerFetch,
+    workspaceRoot,
+  }).catalog("desktop-basic");
 }
 
 async function handleRunRequest(
@@ -1034,7 +1066,7 @@ function handleGetBasicRunEventsRequest(
       if (snapshot === undefined) {
         throw new PanelHttpError(404, "run_not_found", "未找到基础 Agent 运行事件。");
       }
-      const restored = basicRunReplayFromSnapshot(snapshot);
+      const restored = basicRunReplayFromRuntimeSnapshot(snapshot);
       writeJson(response, 200, {
         ok: true,
         runId,
@@ -1073,7 +1105,7 @@ async function handleGetBasicRunRequest(
   }
   writeJson(response, 200, {
     ok: true,
-    run: basicRunFromSnapshot(snapshot),
+    run: basicRunFromRuntimeSnapshot(snapshot),
   });
 }
 
@@ -1107,7 +1139,12 @@ async function handleConfirmationDecisionRequest(
     guidance: decision.guidance,
   }).catch(async (error: unknown) => {
     if (error instanceof Error && error.message.includes("not found")) {
-      const restored = await submitRestoredConfirmationDecision(runtime, runId, confirmationId, decision);
+      const restored = await submitRestoredBasicConfirmationDecision({
+        runtimeDatabase: runtime.runtimeDatabase,
+        runId,
+        confirmationId,
+        decision,
+      });
       if (restored !== undefined) {
         return restored;
       }
@@ -1116,167 +1153,6 @@ async function handleConfirmationDecisionRequest(
     throw error;
   });
   writeJson(response, 200, { ok: true, run });
-}
-
-async function submitRestoredConfirmationDecision(
-  runtime: PanelRuntime,
-  runId: string,
-  confirmationId: string,
-  decision: Pick<ConfirmationDecision, "decision" | "guidance">
-): Promise<BasicAgentRun | undefined> {
-  const snapshot = await runtime.runtimeDatabase?.getRun(runId);
-  if (runtime.runtimeDatabase === undefined || snapshot === undefined) {
-    return undefined;
-  }
-  const decidedAt = new Date().toISOString();
-  const blockedByMissingContinuation = decision.decision === "approve_once";
-  const nextRun: RuntimeRunRecord = {
-    ...snapshot.run,
-    status: decision.decision === "guidance" ? snapshot.run.status : "blocked",
-    updatedAt: decidedAt,
-    completedAt: decision.decision === "guidance" ? snapshot.run.completedAt : decidedAt,
-    error: decision.decision === "guidance"
-      ? snapshot.run.error
-      : {
-          code: blockedByMissingContinuation ? "confirmation_continuation_lost" : "confirmation_denied",
-          message: blockedByMissingContinuation
-            ? "运行已中断，需要重新发起或继续处理。"
-            : "用户已拒绝本次操作，运行已暂停。",
-        },
-  };
-  const nextConfirmations = upsertRestoredConfirmation({
-    snapshot,
-    confirmationId,
-    decision,
-    decidedAt,
-  });
-  const events = [
-    ...snapshot.basicEvents,
-    restoredConfirmationDecisionEvent({
-      runId,
-      confirmationId,
-      decision,
-      decidedAt,
-      sequence: nextBasicEventSequence(snapshot.basicEvents),
-    }),
-  ];
-  const blockedEvents = decision.decision === "guidance"
-    ? events
-    : [
-        ...events,
-        restoredBlockedEvent({
-          runId,
-          decidedAt,
-          sequence: nextBasicEventSequence(events),
-          summary: nextRun.error?.message ?? "运行已中断，需要重新发起或继续处理。",
-        }),
-      ];
-  const nextSnapshot: RuntimeRunSnapshot = {
-    ...snapshot,
-    run: nextRun,
-    basicEvents: blockedEvents,
-    confirmations: nextConfirmations,
-  };
-  const basicRun = basicRunFromSnapshot(nextSnapshot);
-
-  await runtime.runtimeDatabase.upsertRun(nextRun);
-  await runtime.runtimeDatabase.replaceConfirmations(runId, nextConfirmations);
-  await runtime.runtimeDatabase.replaceBasicRunEvents(runId, blockedEvents);
-  await runtime.runtimeDatabase.upsertBasicRun(basicRun);
-  return basicRun;
-}
-
-function upsertRestoredConfirmation(input: {
-  readonly snapshot: RuntimeRunSnapshot;
-  readonly confirmationId: string;
-  readonly decision: Pick<ConfirmationDecision, "decision" | "guidance">;
-  readonly decidedAt: string;
-}): readonly RuntimeConfirmationRecord[] {
-  const status =
-    input.decision.decision === "approve_once"
-      ? "approved"
-      : input.decision.decision === "deny"
-        ? "denied"
-        : "guidance";
-  const previous = input.snapshot.confirmations.find((confirmation) => confirmation.confirmationId === input.confirmationId);
-  const next: RuntimeConfirmationRecord = {
-    confirmationId: input.confirmationId,
-    runId: input.snapshot.run.runId,
-    conversationId: previous?.conversationId ?? input.snapshot.run.conversationId,
-    status,
-    title: previous?.title ?? "用户确认",
-    actionSummary: previous?.actionSummary ?? "用户已补充确认或指导。",
-    affectedResources: previous?.affectedResources ?? [],
-    riskLevel: previous?.riskLevel ?? "medium",
-    requestedAt: previous?.requestedAt ?? input.decidedAt,
-    expiresAt: previous?.expiresAt,
-    decidedAt: input.decidedAt,
-    guidance:
-      input.decision.guidance === undefined
-        ? previous?.guidance
-        : compactRuntimeText(input.decision.guidance, 500),
-    eventRefs: unique([...(previous?.eventRefs ?? []), `confirmation:${input.confirmationId}`]),
-  };
-  return [
-    ...input.snapshot.confirmations.filter((confirmation) => confirmation.confirmationId !== input.confirmationId),
-    next,
-  ];
-}
-
-function restoredConfirmationDecisionEvent(input: {
-  readonly runId: string;
-  readonly confirmationId: string;
-  readonly decision: Pick<ConfirmationDecision, "decision" | "guidance">;
-  readonly decidedAt: string;
-  readonly sequence: number;
-}): RunEvent {
-  const guidance = input.decision.guidance === undefined ? undefined : compactRuntimeText(input.decision.guidance, 240);
-  return {
-    id: `${input.runId}:restored:confirmation:${input.confirmationId}:${input.decision.decision}`,
-    runId: input.runId,
-    sequence: input.sequence,
-    type: input.decision.decision === "guidance" ? "user.guidance" : "user_approval.received",
-    title: input.decision.decision === "guidance" ? "收到用户指导" : "收到确认结果",
-    summary:
-      input.decision.decision === "approve_once"
-        ? "已批准本次操作，但运行已中断，需要重新发起或继续处理。"
-        : input.decision.decision === "deny"
-          ? "已拒绝本次操作，运行不会继续执行该动作。"
-          : guidance === undefined
-            ? "已收到补充指导。"
-            : `已收到补充指导：${guidance}`,
-    status:
-      input.decision.decision === "guidance"
-        ? "needs_input"
-        : "blocked",
-    timestamp: input.decidedAt,
-    refs: [{ kind: "event", id: `confirmation:${input.confirmationId}` }],
-    visibility: "expanded",
-  };
-}
-
-function restoredBlockedEvent(input: {
-  readonly runId: string;
-  readonly decidedAt: string;
-  readonly sequence: number;
-  readonly summary: string;
-}): RunEvent {
-  return {
-    id: `${input.runId}:restored:run.blocked`,
-    runId: input.runId,
-    sequence: input.sequence,
-    type: "run.blocked",
-    title: "任务已暂停",
-    summary: compactRuntimeText(input.summary, 500),
-    status: "blocked",
-    timestamp: input.decidedAt,
-    refs: [],
-    visibility: "compact",
-  };
-}
-
-function nextBasicEventSequence(events: readonly RunEvent[]): number {
-  return (events.at(-1)?.sequence ?? 0) + 1;
 }
 
 async function handleUpdateSkillStateRequest(
@@ -1776,112 +1652,6 @@ function restoredConfirmationDecisionSummary(confirmation: RuntimeConfirmationRe
     : `已收到补充指导：${compactRuntimeText(confirmation.guidance, 240)}`;
 }
 
-function basicRunReplayFromSnapshot(snapshot: RuntimeRunSnapshot): BasicAgentRunReplay {
-  const events = restoredBasicEvents(snapshot);
-  return {
-    cursor: {
-      runId: snapshot.run.runId,
-      lastSequence: events.at(-1)?.sequence ?? 0,
-      eventCount: events.length,
-    },
-    events,
-  };
-}
-
-function restoredBasicEvents(snapshot: RuntimeRunSnapshot): readonly RunEvent[] {
-  const status = agentTaskStatusFromSnapshot(snapshot);
-  const persisted = snapshot.basicEvents.length > 0
-    ? snapshot.basicEvents.filter((event) => event.visibility !== "debug")
-    : createPersistedStreamEvents(snapshot, panelStatusFromRuntimeStatus(snapshot.run.status))
-      .map(toBasicRunEventFromPanelStreamEvent)
-      .filter((event) => event.visibility !== "debug");
-  const terminalType = status === "blocked"
-    ? "run.blocked"
-    : status === "cancelled"
-      ? "run.cancelled"
-      : status === "failed"
-        ? "run.failed"
-        : status === "completed"
-          ? "final.result"
-          : undefined;
-  if (terminalType === undefined || persisted.some((event) => event.type === terminalType)) {
-    return persisted;
-  }
-  const terminal = createRestoredBasicTerminalEvent(snapshot, status, terminalType, persisted.at(-1)?.sequence ?? 0);
-  return [...persisted, terminal];
-}
-
-function createRestoredBasicTerminalEvent(
-  snapshot: RuntimeRunSnapshot,
-  status: BasicAgentRun["status"],
-  type: string,
-  lastSequence: number
-): RunEvent {
-  return {
-    id: `${snapshot.run.runId}:restored:basic:${type}`,
-    runId: snapshot.run.runId,
-    sequence: lastSequence + 1,
-    type,
-    title: basicRunTitleFromStatus(status, undefined),
-    summary:
-      status === "blocked"
-        ? "运行已中断，需要重新发起或继续处理。"
-        : snapshot.run.error?.message ?? snapshot.run.resultSummary,
-    status,
-    timestamp: snapshot.run.updatedAt,
-    refs: [],
-    visibility: "compact",
-  };
-}
-
-function toBasicRunEventFromPanelStreamEvent(event: PanelRunStreamEvent): BasicAgentRunReplay["events"][number] {
-  const summary = event.detail?.preview ?? event.delta ?? event.summary;
-  return {
-    id: event.eventId,
-    runId: event.runId,
-    sequence: event.sequence,
-    type: event.type,
-    title: basicEventTitleFromStreamType(event.type),
-    summary,
-    status: agentTaskStatusFromPanelStreamEvent(event),
-    timestamp: event.createdAt,
-    refs: [
-      { kind: "event", id: event.eventId },
-      ...event.modelCallRefs.map((id) => ({ kind: "model_call" as const, id })),
-      ...event.toolCallRefs.map((id) => ({ kind: "tool_call" as const, id })),
-    ],
-    visibility: event.type.startsWith("tool.") || event.type === "confirmation.needed" ? "expanded" : "compact",
-  };
-}
-
-function basicEventTitleFromStreamType(type: PanelRunStreamEvent["type"]): string {
-  if (type === "run.started") return "任务已开始";
-  if (type === "run.cancelled") return "任务已取消";
-  if (type === "run.blocked") return "任务已暂停";
-  if (type === "run.resumed") return "任务继续";
-  if (type === "tool.requested") return "正在使用工具";
-  if (type === "tool.completed") return "工具已完成";
-  if (type === "tool.failed") return "工具未完成";
-  if (type === "confirmation.needed") return "需要确认";
-  if (type === "user_approval.received") return "收到确认结果";
-  if (type === "user.guidance") return "收到用户指导";
-  if (type === "final.result") return "结果已生成";
-  if (type === "run.failed") return "运行未完成";
-  return "工作状态更新";
-}
-
-function agentTaskStatusFromPanelStreamEvent(event: PanelRunStreamEvent): BasicAgentRun["status"] {
-  if (event.type === "confirmation.needed") return "approval_needed";
-  if (event.type === "user.guidance") return "needs_input";
-  if (event.type === "user_approval.received") return "blocked";
-  if (event.type === "run.cancelled" || event.status === "cancelled") return "cancelled";
-  if (event.type === "run.blocked" || event.status === "blocked") return "blocked";
-  if (event.type === "run.failed" || event.status === "failed") return "failed";
-  if (event.type === "final.result" || event.status === "completed") return "completed";
-  if (event.status === "pending") return "queued";
-  return "running";
-}
-
 function hasPersistedUserVisibleWorkActivity(events: readonly RuntimeEventRecord[]): boolean {
   return events.some((event) => {
     if (event.type === "tool.requested" || event.type === "tool.completed" || event.type === "tool.failed") {
@@ -2100,6 +1870,7 @@ function persistedToolStreamDetail(call: RuntimeToolCallRecord): PanelRunStreamE
     command: call.command,
     exitCode: call.exitCode,
     preview: call.error ?? call.preview ?? call.summary,
+    display: call.display,
     truncated: call.truncated,
     error: call.error,
   };
@@ -2385,6 +2156,7 @@ function toRuntimeToolCallRecords(
         exitCode: event.detail?.exitCode ?? detail?.exitCode ?? previous?.exitCode,
         summary: detail?.summary ?? event.summary ?? previous?.summary,
         preview: event.detail?.preview ?? detail?.preview ?? previous?.preview,
+        display: event.detail?.display ?? detail?.display ?? previous?.display,
         truncated: event.detail?.truncated ?? detail?.truncated ?? previous?.truncated,
         error: event.detail?.error ?? detail?.error ?? previous?.error,
         eventRefs: unique([...(previous?.eventRefs ?? []), event.eventId]),
@@ -2397,8 +2169,8 @@ function toRuntimeToolCallRecords(
 
 function localToolDetailsByCallId(
   eventEntries: readonly EventLogEntry[]
-): Map<string, Pick<RuntimeToolCallRecord, "action" | "path" | "query" | "command" | "exitCode" | "summary" | "preview" | "truncated" | "error">> {
-  const details = new Map<string, Pick<RuntimeToolCallRecord, "action" | "path" | "query" | "command" | "exitCode" | "summary" | "preview" | "truncated" | "error">>();
+): Map<string, Pick<RuntimeToolCallRecord, "action" | "path" | "query" | "command" | "exitCode" | "summary" | "preview" | "display" | "truncated" | "error">> {
+  const details = new Map<string, Pick<RuntimeToolCallRecord, "action" | "path" | "query" | "command" | "exitCode" | "summary" | "preview" | "display" | "truncated" | "error">>();
   for (const entry of eventEntries) {
     if (entry.type !== "tool.completed" && entry.type !== "tool.failed") {
       continue;
@@ -2422,11 +2194,28 @@ function localToolDetailsByCallId(
       exitCode: typeof result.exitCode === "number" ? result.exitCode : undefined,
       summary: optionalString(output.summary),
       preview: persistedToolPreview(optionalString(payload.toolName), output, result, payload),
+      display: toolDisplayOrUndefined(output.display),
       truncated: output.truncated === true,
       error: optionalString(payload.error),
     });
   }
   return details;
+}
+
+function toolDisplayOrUndefined(value: unknown): RuntimeToolCallRecord["display"] | undefined {
+  const record = asRecord(value);
+  const kind = optionalString(record.kind);
+  if (
+    kind === "search_results" ||
+    kind === "browser_snapshot" ||
+    kind === "file_change_summary" ||
+    kind === "file_diff_preview" ||
+    kind === "command_summary" ||
+    kind === "generic_tool_summary"
+  ) {
+    return value as RuntimeToolCallRecord["display"];
+  }
+  return undefined;
 }
 
 function persistedToolPreview(
@@ -2464,10 +2253,46 @@ function persistedToolPreview(
     });
     return lines.length === 0 ? optionalString(output.summary) : lines.join("\n");
   }
-  if (toolName === "run_command") {
+  if (toolName === "write_file" || toolName === "edit_file") {
+    return persistedFileChangePreview(toolName, asRecord(payload.input), output, result);
+  }
+  if (toolName === "run_command" || toolName === "shell_command") {
     return persistedCommandPreview(output, result);
   }
+  if (toolName === "browser_snapshot") {
+    const title = optionalString(result.title);
+    const url = optionalString(result.url);
+    const text = optionalString(result.text);
+    const headline = [title, url].filter((item): item is string => item !== undefined).join(" · ");
+    return compactRuntimeText(
+      [headline, text].filter((item): item is string => typeof item === "string" && item.length > 0).join("\n"),
+      900
+    );
+  }
   return optionalString(output.summary);
+}
+
+function persistedFileChangePreview(
+  toolName: string,
+  input: Readonly<Record<string, unknown>>,
+  output: Readonly<Record<string, unknown>>,
+  result: Readonly<Record<string, unknown>>
+): string | undefined {
+  const path = optionalString(result.path) ?? optionalString(input.path);
+  const summary = optionalString(output.summary);
+  if (toolName === "edit_file") {
+    const replacements = typeof result.replacements === "number" ? `替换：${result.replacements} 处` : undefined;
+    const lengthChange =
+      typeof result.previousLength === "number" && typeof result.nextLength === "number"
+        ? `长度：${result.previousLength} -> ${result.nextLength} chars`
+        : undefined;
+    const diffPreview = ["变更预览", replacements, lengthChange]
+      .filter((item): item is string => item !== undefined && item.length > 0)
+      .join("\n");
+    return [summary, path === undefined ? undefined : `文件：${path}`, diffPreview].filter((item): item is string => item !== undefined && item.length > 0).join("\n");
+  }
+  const bytes = typeof result.bytes === "number" ? `${result.bytes} bytes` : undefined;
+  return [summary, path === undefined ? undefined : `文件：${path}`, bytes === undefined ? undefined : `写入大小：${bytes}`].filter((item): item is string => item !== undefined && item.length > 0).join("\n");
 }
 
 function persistedReadFilePreview(
@@ -2754,82 +2579,9 @@ function syncPanelRunStreamEventsForJob(runtime: PanelRuntime, job: PanelRunJob)
     updatedAt: job.updatedAt,
     error: job.failed?.error ?? job.cancelled?.reason ?? job.blocked?.reason,
   });
-  return runtime.runJobs.syncStreamEvents(job.runId, derived);
-}
-
-function basicRunFromSnapshot(snapshot: RuntimeRunSnapshot): BasicAgentRun {
-  const status = agentTaskStatusFromSnapshot(snapshot);
-  const events = restoredBasicEvents(snapshot);
-  const latestEvent = [...events].reverse().find((event) => event.summary !== undefined);
-  const persisted = snapshot.basicRun;
-  return {
-    runId: persisted?.runId ?? snapshot.run.runId,
-    conversationId: persisted?.conversationId ?? snapshot.run.conversationId,
-    title: basicRunTitleFromStatus(status, snapshot.run.resultTitle),
-    goalSummary: persisted?.goalSummary ?? snapshot.run.goalSummary,
-    status,
-    runMode: persisted?.runMode ?? snapshot.run.runMode,
-    createdAt: persisted?.createdAt ?? snapshot.run.createdAt,
-    updatedAt: persisted?.updatedAt ?? snapshot.run.updatedAt,
-    currentStep: status === "blocked" && snapshot.run.status === "running"
-      ? "运行已中断，需要重新发起或继续处理。"
-      : latestEvent?.summary ?? persisted?.currentStep,
-    nextStep: basicRunNextStepFromStatus(status),
-    requiresUserAction: status === "approval_needed" || status === "blocked" || status === "needs_input",
-    eventCursor: {
-      lastSequence: events.at(-1)?.sequence ?? 0,
-      eventCount: events.length,
-    },
-  };
-}
-
-function agentTaskStatusFromRuntimeStatus(status: RuntimeRunRecord["status"]): BasicAgentRun["status"] {
-  if (status === "pending") return "queued";
-  if (status === "running" || status === "stopped") return "blocked";
-  if (status === "completed") return "completed";
-  if (status === "failed") return "failed";
-  if (status === "cancelled") return "cancelled";
-  if (status === "blocked") return "blocked";
-  return "failed";
-}
-
-function agentTaskStatusFromSnapshot(snapshot: RuntimeRunSnapshot): BasicAgentRun["status"] {
-  const denied = snapshot.confirmations.some((confirmation) => confirmation.status === "denied");
-  if (denied) {
-    return "blocked";
-  }
-  const guidance = snapshot.confirmations.some((confirmation) => confirmation.status === "guidance");
-  if (guidance) {
-    return "needs_input";
-  }
-  const pendingConfirmation = snapshot.confirmations.some((confirmation) => confirmation.status === "pending");
-  if (pendingConfirmation && snapshot.run.status !== "failed" && snapshot.run.status !== "cancelled" && snapshot.run.status !== "blocked") {
-    return "approval_needed";
-  }
-  return agentTaskStatusFromRuntimeStatus(snapshot.run.status);
-}
-
-function basicRunTitleFromStatus(status: BasicAgentRun["status"], resultTitle: string | undefined): string {
-  if (resultTitle !== undefined && resultTitle.trim().length > 0) {
-    return compactRuntimeText(resultTitle, 120);
-  }
-  if (status === "queued") return "等待开始";
-  if (status === "approval_needed") return "需要确认";
-  if (status === "needs_input") return "需要补充";
-  if (status === "blocked") return "需要处理";
-  if (status === "cancelled") return "已取消";
-  if (status === "failed") return "未完成";
-  if (status === "completed") return "已完成";
-  return "正在处理";
-}
-
-function basicRunNextStepFromStatus(status: BasicAgentRun["status"]): string | undefined {
-  if (status === "queued") return "等待前一个任务完成。";
-  if (status === "approval_needed") return "等待你确认或补充材料。";
-  if (status === "needs_input") return "等待你补充指导后继续。";
-  if (status === "blocked") return "运行已中断，需要重新发起或继续处理。";
-  if (status === "running" || status === "planning") return "继续整理结果。";
-  return undefined;
+  const events = runtime.runJobs.syncStreamEvents(job.runId, derived);
+  runtime.runExecutor.syncPanelStreamEvents(job, events);
+  return events;
 }
 
 function appendLiveModelOutputDelta(runtime: PanelRuntime, runId: string, delta: ModelOutputDelta): void {
@@ -2844,7 +2596,7 @@ function appendLiveModelOutputDelta(runtime: PanelRuntime, runId: string, delta:
   if (!isUserFacingStreamingPurpose(purpose)) {
     return;
   }
-  runtime.runJobs.appendStreamEvent(runId, {
+  const event = runtime.runJobs.appendStreamEvent(runId, {
     eventId: `${runId}:live:model.output.delta:${delta.requestId}:${delta.index}`,
     runId,
     type: "model.output.delta",
@@ -2856,6 +2608,7 @@ function appendLiveModelOutputDelta(runtime: PanelRuntime, runId: string, delta:
     modelCallRefs: [delta.requestId],
     toolCallRefs: [],
   });
+  runtime.runExecutor.syncPanelStreamEvents(job, [event]);
 }
 
 function modelPurposeForRequest(job: PanelRunJob, requestId: string): string | undefined {

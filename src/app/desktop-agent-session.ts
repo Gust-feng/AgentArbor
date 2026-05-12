@@ -15,7 +15,8 @@ import {
 } from "./intelligence-channel-factory.js";
 import type { MinimalRuntime } from "./runtime.js";
 import { createMinimalRuntime } from "./runtime.js";
-import { desktopAgentMessages, type DesktopAgentSkillContext } from "./desktop-agent-prompts.js";
+import { buildBasicAgentContextPack, type BasicAgentContextPack } from "./basic-agent-runtime/index.js";
+import type { DesktopAgentSkillContext } from "./desktop-agent-prompts.js";
 import { createTaskSoilFromDesktopInput, type DesktopTaskSoilInput } from "./task-soil-workspace.js";
 import { sanitizeAssistantVisibleText } from "./visible-text-safety.js";
 
@@ -86,6 +87,7 @@ export type DesktopAgentSessionResult = {
   readonly taskSoil: TaskSoil;
   readonly answer?: DesktopAgentAnswer;
   readonly pendingConfirmation?: DesktopAgentPendingConfirmation;
+  readonly contextPack?: Pick<BasicAgentContextPack, "usageSummary" | "items" | "budget" | "truncationReport" | "truncated">;
   readonly failureMessage?: string;
   readonly modelCallRefs: readonly string[];
   readonly toolCallRefs: readonly string[];
@@ -180,6 +182,12 @@ export async function runDesktopAgentSession(
   const channel = intelligenceChannel(runtime);
   const toolCenter = options.createToolCenter?.(runtime);
   toolCenter?.resetCallCount();
+  const contextPack = buildBasicAgentContextPack({
+    goal,
+    taskSoil,
+    conversationHistory: options.conversationHistory ?? [],
+    skillContexts: options.skillContexts ?? [],
+  });
   const turnRuntime = new AgentTurnRuntime({
     intelligenceChannel: channel,
     toolCenter,
@@ -188,7 +196,7 @@ export async function runDesktopAgentSession(
   const turn = await turnRuntime.execute({
     policy: {
       allowModel: true,
-      allowedTools: toolCenter === undefined ? [] : ["search", "read", "read_file", "list_dir", "grep_files", "write_file", "edit_file", "run_command"],
+      allowedTools: toolCenter === undefined ? [] : allowedToolsForDesktopAgent(toolCenter),
       maxModelRounds: 4,
       maxToolRounds: 3,
       fallback: "disabled",
@@ -205,13 +213,8 @@ export async function runDesktopAgentSession(
     },
     requestId: createId("model-request"),
     callerRef: { kind: "goal", id: goalId, label: "desktop_agent" },
-    inputRefs: baseInputRefs(traceId, goalId),
-    sanitizedMessages: desktopAgentMessages({
-      goal,
-      taskSoil,
-      conversationHistory: options.conversationHistory ?? [],
-      skillContexts: options.skillContexts ?? [],
-    }),
+    inputRefs: contextPack.inputRefs,
+    sanitizedMessages: contextPack.messages,
     constraintRefs: [],
     toolChoice: toolCenter === undefined ? "none" : "auto",
     requestedAt: nowIso(),
@@ -224,6 +227,7 @@ export async function runDesktopAgentSession(
     traceId,
     goalId,
     taskSoil,
+    contextPack,
     turnRuntime,
     turn,
   });
@@ -235,6 +239,7 @@ function desktopAgentResultFromTurn(input: {
   readonly traceId: string;
   readonly goalId: string;
   readonly taskSoil: TaskSoil;
+  readonly contextPack: BasicAgentContextPack;
   readonly turnRuntime: AgentTurnRuntime;
   readonly turn: AgentTurnRuntimeResult;
 }): DesktopAgentSessionResult {
@@ -253,6 +258,7 @@ function desktopAgentResultFromTurn(input: {
       traceId: input.traceId,
       goalId: input.goalId,
       taskSoil: input.taskSoil,
+      contextPack: safeContextPack(input.contextPack),
       failureMessage: input.turn.finalOutput?.failure?.message ?? "Desktop Agent model/tool turn failed.",
       modelCallRefs,
       toolCallRefs,
@@ -302,6 +308,7 @@ function desktopAgentResultFromTurn(input: {
       resultBlocks,
     },
     pendingConfirmation,
+    contextPack: safeContextPack(input.contextPack),
     modelCallRefs,
     toolCallRefs,
     activity: activityFromEventEntries(input.runtime.eventLog.list(), status),
@@ -323,6 +330,21 @@ function desktopAgentResultFromTurn(input: {
               });
             },
           },
+  };
+}
+
+function safeContextPack(
+  pack: BasicAgentContextPack
+): NonNullable<DesktopAgentSessionResult["contextPack"]> {
+  return {
+    usageSummary: pack.usageSummary,
+    items: pack.items.map((item) => ({
+      ...item,
+      summary: safeText(item.sourceKind === "system" ? "桌面基础 Agent 系统边界。" : item.summary, 320),
+    })),
+    budget: pack.budget,
+    truncationReport: pack.truncationReport,
+    truncated: pack.truncated,
   };
 }
 
@@ -479,11 +501,8 @@ function publishTriggeredSkills(input: {
   }
 }
 
-function baseInputRefs(traceId: string, goalId: string): readonly ObservationRef[] {
-  return [
-    { kind: "trace", id: traceId },
-    { kind: "goal", id: goalId },
-  ];
+function allowedToolsForDesktopAgent(toolCenter: ToolExecutionBroker): readonly string[] {
+  return toolCenter.list().map((tool) => tool.name);
 }
 
 function refsFromResponse(
@@ -745,6 +764,8 @@ function toolActivityTitle(toolName: string, phase: "start" | "completed" | "fai
   if (toolName === "write_file") return phase === "start" ? "正在写入文件" : phase === "completed" ? "文件已写入" : "文件写入失败";
   if (toolName === "edit_file") return phase === "start" ? "正在编辑文件" : phase === "completed" ? "文件已编辑" : "文件编辑失败";
   if (toolName === "run_command") return phase === "start" ? "正在执行命令" : phase === "completed" ? "命令已执行" : "命令执行失败";
+  if (toolName === "shell_command") return phase === "start" ? "正在执行 Shell" : phase === "completed" ? "Shell 已执行" : "Shell 执行失败";
+  if (toolName === "browser_snapshot") return phase === "start" ? "正在浏览网页" : phase === "completed" ? "网页已浏览" : "网页浏览失败";
   if (toolName === "search") return phase === "start" ? "正在搜索材料" : phase === "completed" ? "搜索已完成" : "搜索失败";
   if (toolName === "read") return phase === "start" ? "正在读取材料" : phase === "completed" ? "材料已读取" : "材料读取失败";
   return phase === "start" ? "正在执行工具" : phase === "completed" ? "工具已完成" : "工具执行失败";

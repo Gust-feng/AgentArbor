@@ -133,6 +133,7 @@ function toProjectedToolEventOutput(result: ToolCallResult): unknown {
     action: result.toolName,
     summary: result.projection.uiSummary,
     diagnosticRef: result.projection.diagnosticRef,
+    display: result.projection.display,
     result: safeToolResultEnvelope(result.output),
     truncated: result.projection.truncated === true,
     redacted: result.projection.redacted !== false,

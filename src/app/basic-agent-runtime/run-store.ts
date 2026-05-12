@@ -1,7 +1,7 @@
 import type { BasicAgentRun, RunEvent } from "../../domain/basic-agent/index.js";
-import { BasicAgentRunEventHub, type BasicAgentRunReplay } from "../basic-agent-run-event-hub.js";
+import { BasicAgentRunEventHub, type BasicAgentRunReplay } from "./event-hub.js";
 
-export type { BasicAgentRunReplay } from "../basic-agent-run-event-hub.js";
+export type { BasicAgentRunReplay } from "./event-hub.js";
 
 export type BasicAgentRunStoreSnapshot = {
   readonly run: BasicAgentRun;

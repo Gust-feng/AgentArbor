@@ -10,16 +10,19 @@ import {
   FileSystemRuntimeDatabase,
   resolveAgentArborRuntimeDatabasePaths,
 } from "../adapters/runtime-database/index.js";
-import { createPanelHtml } from "./panel-assets.js";
+import { createPanelClientScript, createPanelHtml, createPanelStylesheet } from "./panel-assets.js";
 import { startLocalPanelServer, type PanelProviderFetch } from "./panel-server.js";
 
 test("panel HTML defaults to Simplified Chinese labels and status text", () => {
-  const html = createPanelHtml();
+  const staticHtml = createPanelHtml();
+  const html = `${staticHtml}\n${createPanelStylesheet()}\n${createPanelClientScript()}`;
   const firstScreenHtml = html.slice(
     html.indexOf("<!-- ordinary-screen-start -->"),
     html.indexOf("<!-- ordinary-screen-end -->")
   );
 
+  assert.equal(staticHtml.includes('<link rel="stylesheet" href="/assets/panel.css">'), true);
+  assert.equal(staticHtml.includes('<script src="/assets/panel.js"></script>'), true);
   assert.equal(html.includes("AgentArbor 面板"), true);
   assert.equal(html.includes("assistant-pending"), true);
   assert.equal(html.includes("assistant-control-chip"), true);
@@ -302,15 +305,11 @@ test("panel HTML defaults to Simplified Chinese labels and status text", () => {
 });
 
 test("panel inline script remains syntactically valid in generated HTML", () => {
-  const html = createPanelHtml();
-  const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1];
-  assert.ok(script);
-  assert.doesNotThrow(() => new vm.Script(script));
+  assert.doesNotThrow(() => new vm.Script(createPanelClientScript()));
 });
 
 test("panel assistant markdown renderer builds safe DOM nodes", () => {
-  const html = createPanelHtml();
-  const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1] ?? "";
+  const script = createPanelClientScript();
 
   assert.equal(script.includes("function renderAssistantMarkdown(text)"), true);
   assert.equal(script.includes("function appendInlineMarkdown(parent, text)"), true);
@@ -322,13 +321,33 @@ test("panel assistant markdown renderer builds safe DOM nodes", () => {
 });
 
 test("panel inline failure text keeps provider raw details out of ordinary UI", () => {
-  const html = createPanelHtml();
-  const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1] ?? "";
+  const script = createPanelClientScript();
 
   assert.equal(script.includes("function friendlyFailureText(value)"), true);
   assert.equal(script.includes("return compact(cleanFailureDetail(text), 400)"), false);
   assert.equal(script.includes("模型返回的内容没有通过本轮格式检查"), true);
   assert.equal(script.includes("原始错误"), false);
+});
+
+test("panel server serves split static frontend assets", async () => {
+  const server = await startLocalPanelServer({ port: 0 });
+  try {
+    const html = await requestText(server.url, "/");
+    const css = await requestText(server.url, "/assets/panel.css");
+    const js = await requestText(server.url, "/assets/panel.js");
+
+    assert.equal(html.status, 200);
+    assert.equal(css.status, 200);
+    assert.equal(js.status, 200);
+    assert.match(String(css.headers["content-type"]), /text\/css/);
+    assert.match(String(js.headers["content-type"]), /text\/javascript/);
+    assert.equal(html.text.includes('<link rel="stylesheet" href="/assets/panel.css">'), true);
+    assert.equal(html.text.includes('<script src="/assets/panel.js"></script>'), true);
+    assert.equal(css.text.includes(".app"), true);
+    assert.equal(js.text.includes("function createAssistantToolDetailNode"), true);
+  } finally {
+    await server.close();
+  }
 });
 
 test("panel config API exposes model provider key only in the configuration entry", async () => {
@@ -398,6 +417,11 @@ test("panel tools config routes return sanitized web search config and never ech
     assert.equal(initial.status, 200);
     assert.equal(initial.body.tools.webSearch.provider, "tavily");
     assert.equal(initial.body.tools.webSearch.status, "no-provider");
+    assert.equal(initial.body.tools.catalog.scope, "desktop-basic");
+    assert.equal(
+      initial.body.tools.catalog.tools.some((tool: { name?: string; availability?: string }) => tool.name === "browser_snapshot" && (tool.availability === "available" || tool.availability === "unavailable")),
+      true
+    );
     assert.equal(update.status, 200);
     assert.equal(after.status, 200);
     assert.equal(update.text.includes(tavilySecret), false);
@@ -863,12 +887,14 @@ test("desktop run stream carries safe tool detail through runtime persistence", 
     assert.notEqual(persistedCall, undefined);
     assert.equal(readEvent.detail?.kind, "tool");
     assert.equal(readEvent.detail?.path, "notes.md");
+    assert.equal(readEvent.detail?.display?.kind, "generic_tool_summary");
     assert.equal(typeof readEvent.detail?.preview, "string");
     assert.equal((readEvent.detail?.preview ?? "").length > 0, true);
     assert.equal(readEvent.detail?.preview?.includes("notes.md"), true);
     assert.equal(readEvent.detail?.preview?.includes("文件正文只进入本轮工具上下文"), true);
     assert.equal(readEvent.detail?.preview?.includes(rawToolOutput), false);
     assert.equal(persistedCall.path, "notes.md");
+    assert.equal(persistedCall.display?.kind, "generic_tool_summary");
     assert.equal(typeof persistedCall.preview, "string");
     assert.equal((persistedCall.preview ?? "").length > 0, true);
     assert.equal(persistedCall.preview.includes("notes.md"), true);
@@ -2894,6 +2920,12 @@ type RequestSseResult = {
   readonly events: readonly any[];
 };
 
+type RequestTextResult = {
+  readonly status: number;
+  readonly headers: Record<string, string | string[] | undefined>;
+  readonly text: string;
+};
+
 function requestJson(baseUrl: string, pathname: string, options: RequestJsonOptions = {}): Promise<RequestJsonResult> {
   const url = new URL(pathname, baseUrl);
   const body = options.body === undefined ? undefined : JSON.stringify(options.body);
@@ -2952,6 +2984,28 @@ function requestSse(baseUrl: string, pathname: string, timeoutMs = 5_000): Promi
           headers: response.headers,
           text,
           events: parseSseEvents(text),
+        });
+      });
+    });
+    req.on("error", reject);
+    req.end();
+  });
+}
+
+function requestText(baseUrl: string, pathname: string): Promise<RequestTextResult> {
+  const url = new URL(pathname, baseUrl);
+  return new Promise((resolve, reject) => {
+    const req = request(url, { method: "GET" }, (response) => {
+      let text = "";
+      response.setEncoding("utf8");
+      response.on("data", (chunk) => {
+        text += chunk;
+      });
+      response.on("end", () => {
+        resolve({
+          status: response.statusCode ?? 0,
+          headers: response.headers,
+          text,
         });
       });
     });

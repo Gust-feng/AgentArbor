@@ -217,6 +217,27 @@ export type DesktopAgentCanvasReadModel = {
       readonly modelCallRefs: readonly string[];
       readonly toolCallRefs: readonly string[];
     }[];
+    readonly context?: {
+      readonly usageSummary: string;
+      readonly budget: {
+        readonly maxMessages: number;
+        readonly maxChars: number;
+        readonly usedChars: number;
+      };
+      readonly truncated: boolean;
+      readonly truncationReport: {
+        readonly truncated: boolean;
+        readonly omittedItemCount: number;
+        readonly truncatedItemIds: readonly string[];
+      };
+      readonly items: readonly {
+        readonly itemId: string;
+        readonly sourceKind: string;
+        readonly summary: string;
+        readonly visibility: string;
+        readonly truncated: boolean;
+      }[];
+    };
   };
   readonly explanation: {
     readonly resultWhyReasonable: string;
@@ -587,6 +608,22 @@ export function createDesktopAgentCanvas(input: {
         modelCallRefs: [...item.modelCallRefs],
         toolCallRefs: [...item.toolCallRefs],
       })),
+      context:
+        input.result.contextPack === undefined
+          ? undefined
+          : {
+              usageSummary: safeText(input.result.contextPack.usageSummary, 420),
+              budget: input.result.contextPack.budget,
+              truncated: input.result.contextPack.truncated,
+              truncationReport: input.result.contextPack.truncationReport,
+              items: input.result.contextPack.items.map((item) => ({
+                itemId: safeText(item.itemId, 160),
+                sourceKind: item.sourceKind,
+                summary: safeText(item.summary, 320),
+                visibility: item.visibility,
+                truncated: item.truncated,
+              })),
+            },
     },
     explanation: {
       resultWhyReasonable:

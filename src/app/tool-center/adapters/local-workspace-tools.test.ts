@@ -9,6 +9,7 @@ import {
   createLocalListDirTool,
   createLocalReadFileTool,
   createLocalRunCommandTool,
+  createLocalShellCommandTool,
   createLocalWorkspaceSandboxPolicy,
   createLocalWriteFileTool,
 } from "./local-workspace-tools.js";
@@ -91,12 +92,16 @@ test("local run_command uses policy allowlists and internal workspace commands",
     await mkdir(path.join(root, "src"));
     await writeFile(path.join(root, "src", "note.txt"), "alpha", "utf8");
     const runCommand = createLocalRunCommandTool(root);
+    const shellCommand = createLocalShellCommandTool(root);
 
     const echoed = await runCommand.execute({ command: "echo", args: ["hello", "workspace"] }, context);
+    const shellEchoed = await shellCommand.execute({ command: "echo", args: ["hello", "shell"] }, context);
     const listed = await runCommand.execute({ command: "dir", args: ["src"] }, context);
     const typed = await runCommand.execute({ command: "type", args: ["src/note.txt"] }, context);
 
     assert.equal(asRecord(echoed).action, "run_command");
+    assert.equal(asRecord(shellEchoed).action, "shell_command");
+    assert.match(String(asRecord(shellEchoed).refId), /^workspace:shell:/);
     assert.match(String(asRecord(asRecord(echoed).result).stdout), /hello workspace/);
     assert.match(String(asRecord(asRecord(listed).result).stdout), /note\.txt/);
     assert.match(String(asRecord(asRecord(typed).result).stdout), /alpha/);

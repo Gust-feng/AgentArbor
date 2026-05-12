@@ -188,6 +188,11 @@ test("ordinary agent stream stays quiet for direct answers but shows safe thinki
           output: {
             action: "read_file",
             summary: "notes.md · 34 bytes",
+            display: {
+              kind: "generic_tool_summary",
+              action: "read_file",
+              summary: "notes.md · 34 bytes",
+            },
             result: {
               path: "notes.md",
               bytes: 34,
@@ -213,9 +218,98 @@ test("ordinary agent stream stays quiet for direct answers but shows safe thinki
   assert.equal(withTool.some((event) => event.type === "agent.note.delta"), true);
   assert.equal(withTool.some((event) => event.type === "model.output.completed"), true);
   assert.equal(completedTool?.detail?.kind, "tool");
+  assert.equal(completedTool?.detail?.display?.kind, "generic_tool_summary");
+  assert.equal(withTool.find((event) => event.type === "tool.completed")?.detail?.display?.kind, "generic_tool_summary");
   assert.equal(completedTool?.detail?.preview?.includes("notes.md"), true);
   assert.equal(completedTool?.detail?.preview?.includes("文件正文只进入本轮工具上下文"), true);
   assert.equal(JSON.stringify(withTool).includes("RAW_TOOL_OUTPUT_SENTINEL"), false);
+});
+
+test("panel transcript preserves typed safe tool display without raw command output", () => {
+  const transcript = createPanelRunTranscript({
+    runId: "run-command-display",
+    status: "completed",
+    desktopMode: "agent",
+    eventEntries: [
+      eventEntry({ sequence: 1, type: "goal.received", payload: { goalId: "goal-command" } }),
+      eventEntry({
+        sequence: 2,
+        type: "tool.completed",
+        payload: {
+          callId: "tool-call-shell",
+          toolName: "shell_command",
+          input: { command: "pnpm", args: ["test"] },
+          output: {
+            action: "shell_command",
+            summary: "pnpm test · exit 0",
+            display: {
+              kind: "command_summary",
+              command: "pnpm",
+              args: ["test"],
+              exitCode: 0,
+              stdoutSummary: "tests passed",
+            },
+            result: {
+              command: "pnpm",
+              args: ["test"],
+              exitCode: 0,
+              stdout: "RAW_STDOUT_SENTINEL",
+              stderr: "",
+            },
+          },
+        },
+      }),
+    ],
+    createdAt: "2026-05-07T00:00:00.000Z",
+    updatedAt: "2026-05-07T00:00:02.000Z",
+  });
+  const completedTool = transcript.events.find((event) => event.type === "tool.completed");
+
+  assert.equal(completedTool?.detail?.display?.kind, "command_summary");
+  assert.equal(JSON.stringify(transcript).includes("RAW_STDOUT_SENTINEL"), false);
+});
+
+test("panel transcript edit fallback omits raw replacement text", () => {
+  const transcript = createPanelRunTranscript({
+    runId: "run-edit-display",
+    status: "completed",
+    desktopMode: "agent",
+    eventEntries: [
+      eventEntry({ sequence: 1, type: "goal.received", payload: { goalId: "goal-edit" } }),
+      eventEntry({
+        sequence: 2,
+        type: "tool.completed",
+        payload: {
+          callId: "tool-call-edit",
+          toolName: "edit_file",
+          input: {
+            path: "notes.md",
+            oldText: "RAW_OLD_TEXT_SENTINEL sk-edit-secret",
+            newText: "RAW_NEW_TEXT_SENTINEL sk-edit-secret",
+          },
+          output: {
+            action: "edit_file",
+            summary: "notes.md · 32 -> 18 chars · 1 replacement",
+            result: {
+              path: "notes.md",
+              previousLength: 32,
+              nextLength: 18,
+              replacements: 1,
+            },
+          },
+        },
+      }),
+    ],
+    createdAt: "2026-05-07T00:00:00.000Z",
+    updatedAt: "2026-05-07T00:00:02.000Z",
+  });
+  const serialized = JSON.stringify(transcript);
+  const completedTool = transcript.events.find((event) => event.type === "tool.completed");
+
+  assert.equal(completedTool?.detail?.preview?.includes("长度：32 -> 18 chars"), true);
+  assert.equal(serialized.includes("RAW_OLD_TEXT_SENTINEL"), false);
+  assert.equal(serialized.includes("RAW_NEW_TEXT_SENTINEL"), false);
+  assert.equal(serialized.includes("sk-edit-secret"), false);
 });
 
 function modelCompletedEntry(input: {

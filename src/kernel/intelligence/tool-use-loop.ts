@@ -517,13 +517,16 @@ function assistantToolCallMessage(
 }
 
 function toolResultMessage(result: ToolCallResult): ModelMessage {
+  const modelOutput = result.projection?.agentContent !== undefined
+    ? result.projection.agentContent
+    : toSafeToolEventValue(result.output);
   return {
     role: "tool",
     content: truncateToolMessageContent(JSON.stringify({
       callId: result.callId,
       toolName: result.toolName,
       status: result.status,
-      output: toSafeToolEventValue(result.output),
+      output: modelOutput,
       error: result.error,
       durationMs: result.durationMs,
     })),

@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AgentArbor 面板</title>
+  <link rel="stylesheet" href="/assets/panel.css">
+</head>
+<body>
+  <!-- ordinary-screen-start -->
+  <div class="app">
+    <div class="shell" id="shell">
+      <aside class="sidebar" id="sidebar">
+        <nav class="side-nav" aria-label="工作入口">
+          <button class="side-action active" id="newRunButton" type="button"><span class="nav-mark plus"></span><span>新对话</span></button>
+          <button class="side-action" id="skillsButton" type="button"><span class="nav-mark skill"></span><span>技能</span></button>
+          <button class="side-action" id="toolsButton" type="button"><span class="nav-mark tool"></span><span>工具</span></button>
+        </nav>
+
+        <section class="task-list" aria-label="会话列表">
+          <ul class="runs" id="runHistory">
+            <li class="run-item empty active">
+              <span class="run-sketch" aria-hidden="true"><span></span><span></span><span></span></span>
+              <div class="run-body">
+                <div class="run-title">暂无对话</div>
+                <div class="run-meta">开始后会显示在这里。</div>
+              </div>
+            </li>
+          </ul>
+        </section>
+
+        <div class="sidebar-bottom">
+          <button class="profile-menu-button" id="profileMenuButton" type="button" aria-haspopup="menu" aria-controls="accountMenu" aria-expanded="false">
+            <span class="profile-avatar" aria-hidden="true"></span>
+            <span class="profile-main"><span class="profile-name">个人空间</span><span class="profile-caption">设置与账户</span></span>
+            <span class="profile-caret" aria-hidden="true"></span>
+          </button>
+          <div class="account-menu" id="accountMenu" role="menu" aria-hidden="true">
+            <button id="accountProfileButton" type="button" role="menuitem">个人信息</button>
+            <button id="accountSettingsButton" type="button" role="menuitem">设置</button>
+            <button id="accountDiagnosticsButton" type="button" role="menuitem">安全</button>
+            <div class="account-menu-note" id="accountMenuNote" aria-live="polite">个人信息暂未连接。</div>
+          </div>
+        </div>
+      </aside>
+
+      <div class="app-container">
+        <header class="titlebar">
+          <button class="ghost collapse-button" id="sidebarToggleButton" type="button" title="折叠侧边栏" aria-label="折叠侧边栏"><span class="collapse-icon" aria-hidden="true"></span></button>
+          <div class="mode-pill"><span class="brand-dot" aria-hidden="true"></span><span>AgentArbor</span></div>
+          <span class="menu-link">会话</span>
+        </header>
+
+        <main class="workspace">
+          <section class="session-card" aria-label="对话">
+            <header class="session-header">
+              <div class="session-title">
+                    <span id="sessionTitle">新任务</span>
+                    <span class="session-meta">按需确认写入</span>
+              </div>
+              <div class="header-tools">
+                <span class="status-pill" id="runStatus">待开始</span>
+              </div>
+            </header>
+
+            <section class="thread">
+              <div class="thread-scroll" id="transcriptWrap">
+                <div class="welcome" id="introBlock">
+                  <section class="home-hero">
+                    <div class="intent-field" id="intentField" aria-label="首页空态">
+                      <div class="intent-meta">
+                        <span>在忙什么呢？</span>
+                      </div>
+                    </div>
+                    <div class="workspace-prompt" id="workspaceEmptyPrompt">
+                      <span id="workspaceEmptyText">选择工作文件夹后，直接交代任务。</span>
+                      <button class="ghost" type="button" id="workspaceEmptySelectButton">选择文件夹</button>
+                    </div>
+                  </section>
+                </div>
+                <section class="transcript" id="transcript" aria-label="对话内容">
+                  <div class="empty-transcript"></div>
+                </section>
+                <section class="result-block" id="mainCanvas" aria-label="结果" hidden></section>
+              </div>
+
+              <section class="composer" aria-label="任务输入">
+                <div class="composer-box">
+                  <textarea id="goalInput" placeholder="问任何问题，或交给我一个任务" rows="1"></textarea>
+                  <div class="composer-actions">
+                    <span class="input-status-dot" aria-hidden="true"></span>
+                    <span class="hint" id="modelHint">Enter 发送，Shift+Enter 换行。</span>
+                    <span class="spacer"></span>
+                    <button class="deep-run-button" id="deepRunButton" type="button" hidden></button>
+                    <button class="ghost" id="cancelRunButton" type="button" hidden>取消</button>
+                    <button class="send-button primary" id="runButton" title="发送" aria-label="发送消息">↑</button>
+                    <input id="runModeInput" type="hidden" value="agent" autocomplete="off">
+                    <div class="hidden-context-inputs" aria-hidden="true">
+                      <textarea id="contextRefsInput" tabindex="-1"></textarea>
+                      <input id="permissionRefsInput" tabindex="-1">
+                    </div>
+                  </div>
+                </div>
+              </section>
+            </section>
+          </section>
+        </main>
+      </div>
+    </div>
+  </div>
+  <!-- ordinary-screen-end -->
+
+  <div id="drawerBackdrop" hidden></div>
+  <aside id="developerDrawer" aria-hidden="true" hidden>
+    <div id="tabOverview" data-panel="overview" hidden></div>
+    <div id="tabAi" data-panel="ai" hidden></div>
+    <div id="tabAgents" data-panel="agents" hidden></div>
+    <span id="railStatusBadge" hidden></span>
+    <div id="runMetrics" hidden></div>
+    <div id="riskPanel" hidden></div>
+    <div id="runPath" hidden></div>
+    <div id="supervisionStatus" hidden></div>
+    <div id="failurePanel" hidden></div>
+    <div id="flowList" hidden></div>
+    <div id="agentTree" hidden></div>
+    <div id="agentInspector" hidden></div>
+    <div id="parentSynthesis" hidden></div>
+    <ul id="debugList" hidden></ul>
+    <pre id="debugJson" hidden>{}</pre>
+  </aside>
+
+  <div class="settings-backdrop" id="settingsBackdrop" aria-hidden="true">
+    <section class="settings-panel" id="settingsPanel" aria-label="设置面板" role="dialog" aria-modal="true">
+      <div class="settings-head">
+        <div class="settings-title">
+          <strong>设置</strong>
+          <span class="hint">配置模型、工作目录、工具和安全边界。</span>
+        </div>
+        <button class="ghost" type="button" data-close-settings>关闭</button>
+      </div>
+      <div class="settings-body">
+        <nav class="settings-nav" aria-label="设置分区">
+          <button class="active" type="button" data-settings-tab="model">模型</button>
+          <button type="button" data-settings-tab="workspace">工作目录</button>
+          <button type="button" data-settings-tab="skills">技能</button>
+          <button type="button" data-settings-tab="tools">工具</button>
+          <button type="button" data-settings-tab="safety">安全</button>
+        </nav>
+        <div class="settings-content">
+          <section class="settings-section active" data-settings-panel="model">
+            <div class="settings-card">
+              <h2>模型</h2>
+              <p class="section-note">选择 OpenAI-compatible 厂商预设，或手动填写 Base URL 与模型名。</p>
+              <div class="fields settings-fields">
+                <label class="wide-field">厂商预设
+                  <select id="providerPresetInput">
+                    <option value="">自定义 OpenAI-compatible</option>
+                    <option value="deepseek">DeepSeek · deepseek-v4-flash</option>
+                    <option value="minimax">MiniMax · MiniMax-M1-80k</option>
+                    <option value="kimi">Kimi · kimi-k2.6</option>
+                    <option value="glm">GLM · glm-4.5</option>
+                    <option value="openrouter">OpenRouter · anthropic/claude-sonnet-4</option>
+                    <option value="openai">OpenAI · gpt-4o-mini</option>
+                  </select>
+                </label>
+                <input id="presetModelHint" type="hidden">
+                <label class="wide-field">Base URL <input id="baseUrlInput" autocomplete="off" placeholder="https://api.deepseek.com"></label>
+                <label>模型名 <input id="modelInput" autocomplete="off" placeholder="deepseek-v4-flash"></label>
+                <label>默认 AI 模式
+                  <select id="defaultAiModeInput">
+                    <option value="none">AI 禁用</option>
+                    <option value="openai-compatible">OpenAI-compatible 推荐</option>
+                    <option value="fake">Fake AI 测试模式</option>
+                  </select>
+                </label>
+                <label>本次运行模式
+                  <select id="aiMode">
+                    <option value="none">AI 禁用</option>
+                    <option value="openai-compatible">OpenAI-compatible 推荐</option>
+                    <option value="fake">Fake AI 测试模式</option>
+                  </select>
+                </label>
+                <label class="wide-field">API Key <input id="apiKeyInput" type="text" autocomplete="off" placeholder="sk-..."></label>
+                <button id="saveConfigButton">保存模型配置</button>
+                <div class="hint" id="configStatus">模型配置未加载。</div>
+              </div>
+            </div>
+          </section>
+
+          <section class="settings-section" data-settings-panel="workspace">
+            <div class="settings-card">
+              <h2>工作目录</h2>
+              <p class="section-note">Desktop Agent 的本地读取、搜索、写入和命令执行都限制在这个文件夹内。</p>
+              <div class="fields settings-fields">
+                <label class="wide-field">AgentArbor 工作目录 <input id="workspaceDirectoryInput" type="text" autocomplete="off" placeholder="例如：Z:\AgentArbor"></label>
+                <button id="selectWorkspaceDirectoryButton" type="button">选择文件夹</button>
+                <button id="saveWorkspaceConfigButton">保存工作目录</button>
+                <div class="hint" id="workspaceConfigStatus">工作目录未加载。</div>
+              </div>
+            </div>
+          </section>
+
+          <section class="settings-section" data-settings-panel="skills">
+            <div class="settings-card">
+              <h2>技能</h2>
+              <p class="section-note">这里只展示当前工作区真实发现的 SKILL.md；正文和资源会在触发后按需读取。</p>
+              <div id="skillsList" class="settings-list" aria-live="polite">技能列表未加载。</div>
+            </div>
+          </section>
+
+          <section class="settings-section" data-settings-panel="tools">
+            <div class="settings-card">
+              <h2>工具</h2>
+              <p class="section-note">这里只配置用户可操作的工具入口；本地文件工具跟随工作目录边界。</p>
+              <div class="fields settings-fields">
+                <label>搜索服务
+                  <select id="webSearchProviderInput">
+                    <option value="tavily">Tavily</option>
+                    <option value="none">无</option>
+                  </select>
+                </label>
+                <label class="wide-field">Tavily API Key <input id="tavilyKeyInput" type="password" autocomplete="off" placeholder="保存后不会回显"></label>
+                <label>结果数 <input id="tavilyMaxResultsInput" type="number" min="1" max="10" step="1"></label>
+                <button id="saveToolConfigButton">保存工具配置</button>
+                <div class="hint" id="toolConfigStatus">工具配置未加载。</div>
+              </div>
+            </div>
+          </section>
+
+          <section class="settings-section" data-settings-panel="safety">
+            <div class="settings-card">
+              <h2>安全</h2>
+              <p class="section-note">模型 API Key 按你的要求可见；搜索密钥不回显。本地工具只能在工作目录边界内运行。原始提示词和非模型密钥不会显示在主界面。</p>
+            </div>
+          </section>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <script src="/assets/panel.js"></script>
+</body>
+</html>

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { BasicAgentRunEventHub } from "./basic-agent-run-event-hub.js";
+import { BasicAgentRunEventHub } from "./event-hub.js";
 
 test("BasicAgentRunEventHub publishes deduplicated events with replay cursors", () => {
   const hub = new BasicAgentRunEventHub();

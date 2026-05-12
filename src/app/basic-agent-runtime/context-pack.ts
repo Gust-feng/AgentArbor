@@ -1,4 +1,5 @@
 import type { ModelMessage } from "../../domain/intelligence/index.js";
+import type { ModelCapabilities } from "../../domain/config/index.js";
 import type { ObservationRef } from "../../domain/observation/index.js";
 import type { TaskSoil } from "../../domain/soil/index.js";
 import { redactSensitiveText } from "../../kernel/redaction.js";
@@ -26,6 +27,10 @@ export type BasicAgentContextBudget = {
   readonly maxMessages: number;
   readonly maxChars: number;
   readonly usedChars: number;
+  readonly inputTokenBudget?: number;
+  readonly reservedOutputTokens?: number;
+  readonly estimatedInputTokens?: number;
+  readonly budgetSource: "default" | "model_capabilities" | "override";
 };
 
 export type BasicAgentContextTruncationReport = {
@@ -49,6 +54,7 @@ export type BuildBasicAgentContextPackInput = {
   readonly taskSoil: TaskSoil;
   readonly conversationHistory: readonly DesktopAgentConversationMessage[];
   readonly skillContexts?: readonly DesktopAgentSkillContext[];
+  readonly modelCapabilities?: ModelCapabilities;
   readonly maxMessages?: number;
   readonly maxChars?: number;
 };
@@ -75,7 +81,9 @@ const DESKTOP_AGENT_SYSTEM_PROMPT = [
 
 export function buildBasicAgentContextPack(input: BuildBasicAgentContextPackInput): BasicAgentContextPack {
   const maxMessages = Math.max(4, Math.floor(input.maxMessages ?? DEFAULT_MAX_MESSAGES));
-  const maxChars = Math.max(2_000, Math.floor(input.maxChars ?? DEFAULT_MAX_CHARS));
+  const tokenBudget = tokenBudgetFor(input.modelCapabilities);
+  const modelMaxChars = tokenBudget === undefined ? DEFAULT_MAX_CHARS : tokenBudget.inputTokenBudget * 4;
+  const maxChars = Math.max(2_000, Math.floor(input.maxChars ?? modelMaxChars));
   const draft = [
     systemContextItem(),
     ...skillContextItems(input.skillContexts ?? []),
@@ -106,6 +114,10 @@ export function buildBasicAgentContextPack(input: BuildBasicAgentContextPackInpu
       maxMessages,
       maxChars,
       usedChars,
+      inputTokenBudget: tokenBudget?.inputTokenBudget,
+      reservedOutputTokens: tokenBudget?.reservedOutputTokens,
+      estimatedInputTokens: estimateTokens(usedChars),
+      budgetSource: input.maxChars !== undefined ? "override" : tokenBudget === undefined ? "default" : "model_capabilities",
     },
     usageSummary: contextUsageSummary(selected),
     truncationReport: {
@@ -115,6 +127,25 @@ export function buildBasicAgentContextPack(input: BuildBasicAgentContextPackInpu
     },
     truncated: truncatedByBudget || selected.some((item) => item.truncated),
   };
+}
+
+function tokenBudgetFor(capabilities: ModelCapabilities | undefined): {
+  readonly inputTokenBudget: number;
+  readonly reservedOutputTokens: number;
+} | undefined {
+  if (capabilities === undefined) {
+    return undefined;
+  }
+  const reservedOutputTokens = Math.max(512, Math.min(capabilities.maxOutputTokens, Math.floor(capabilities.contextWindowTokens * 0.25)));
+  const safetyMargin = Math.max(512, Math.floor(capabilities.contextWindowTokens * 0.05));
+  return {
+    inputTokenBudget: Math.max(1_000, capabilities.contextWindowTokens - reservedOutputTokens - safetyMargin),
+    reservedOutputTokens,
+  };
+}
+
+function estimateTokens(chars: number): number {
+  return Math.ceil(chars / 4);
 }
 
 function systemContextItem(): BasicAgentContextItem {

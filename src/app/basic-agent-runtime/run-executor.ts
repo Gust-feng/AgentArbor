@@ -1,4 +1,4 @@
-import type { SanitizedInformationAccessConfig, SanitizedModelProviderConfig } from "../../domain/config/index.js";
+import type { BasicAgentCapabilitySnapshot, SanitizedInformationAccessConfig, SanitizedModelProviderConfig } from "../../domain/config/index.js";
 import type { BasicAgentRun, ConfirmationDecision, RunEvent } from "../../domain/basic-agent/index.js";
 import type { ModelOutputDelta } from "../../domain/intelligence/index.js";
 import { nowIso } from "../../kernel/id.js";
@@ -21,6 +21,7 @@ import type { PanelRunStreamEvent } from "../panel-run-read-model.js";
 export type BasicAgentRunExecutorConfig = {
   readonly getModelProviderConfig: () => Promise<SanitizedModelProviderConfig>;
   readonly getInformationAccessConfig: () => Promise<SanitizedInformationAccessConfig>;
+  readonly getCapabilitySnapshot?: () => Promise<BasicAgentCapabilitySnapshot>;
   readonly runJobs: PanelRunJobStore;
   readonly activeRunJobs: Set<Promise<void>>;
   readonly abortControllers: Map<string, AbortController>;
@@ -88,6 +89,7 @@ export class BasicAgentRunExecutor {
   async start(input: BasicAgentRunStartInput): Promise<BasicAgentRun> {
     const modelConfig = await this.config.getModelProviderConfig();
     const informationAccess = await this.config.getInformationAccessConfig();
+    const capabilitySnapshot = await this.config.getCapabilitySnapshot?.();
     const job = this.config.runJobs.create({
       runKind: input.runKind,
       runMode: input.runMode,
@@ -100,6 +102,7 @@ export class BasicAgentRunExecutor {
       taskSoilInput: input.taskSoilInput,
       config: modelConfig,
       informationAccess,
+      capabilitySnapshot,
     });
     this.syncPanelRun(job);
     await this.config.persistRun(job);
@@ -156,11 +159,9 @@ export class BasicAgentRunExecutor {
     const job = this.requireJob(runId);
     this.deletePendingContinuationsForRun(runId);
     this.config.abortControllers.get(runId)?.abort();
-    const config = await this.config.getModelProviderConfig().catch(() => job.config);
-    const informationAccess = await this.config.getInformationAccessConfig().catch(() => job.informationAccess);
     this.config.runJobs.cancel(runId, {
-      config,
-      informationAccess,
+      config: job.config,
+      informationAccess: job.informationAccess,
       reason: {
         code: "run_cancelled",
         message: "运行已取消。",
@@ -198,11 +199,9 @@ export class BasicAgentRunExecutor {
     }
     this.deletePendingContinuation(input.runId, input.confirmationId);
     if (input.decision === "deny") {
-      const config = await this.config.getModelProviderConfig().catch(() => job.config);
-      const informationAccess = await this.config.getInformationAccessConfig().catch(() => job.informationAccess);
       this.config.runJobs.block(input.runId, {
-        config,
-        informationAccess,
+        config: job.config,
+        informationAccess: job.informationAccess,
         reason: {
           code: "confirmation_denied",
           message: "用户已拒绝本次操作，运行已暂停。",
@@ -247,11 +246,9 @@ export class BasicAgentRunExecutor {
         await this.cancel(runId);
         return;
       }
-      const currentConfig = await this.config.getModelProviderConfig();
-      const currentInformationAccess = await this.config.getInformationAccessConfig();
       this.config.runJobs.complete(runId, {
-        config: currentConfig,
-        informationAccess: currentInformationAccess,
+        config: job.config,
+        informationAccess: job.informationAccess,
         summary: result.summary,
         observation: result.observation,
         agentRunTree: result.agentRunTree,
@@ -302,11 +299,9 @@ export class BasicAgentRunExecutor {
   }): Promise<BasicAgentRun> {
     const continuation = this.consumePendingContinuation(input.runId, input.confirmationId);
     if (continuation === undefined) {
-      const config = await this.config.getModelProviderConfig().catch(() => input.job.config);
-      const informationAccess = await this.config.getInformationAccessConfig().catch(() => input.job.informationAccess);
       this.config.runJobs.block(input.runId, {
-        config,
-        informationAccess,
+        config: input.job.config,
+        informationAccess: input.job.informationAccess,
         reason: {
           code: "confirmation_continuation_lost",
           message: "运行已中断，需要重新发起或继续处理。",
@@ -337,11 +332,9 @@ export class BasicAgentRunExecutor {
         await this.cancel(input.runId);
         return this.requireBasicRun(input.runId);
       }
-      const currentConfig = await this.config.getModelProviderConfig();
-      const currentInformationAccess = await this.config.getInformationAccessConfig();
       this.config.runJobs.complete(input.runId, {
-        config: currentConfig,
-        informationAccess: currentInformationAccess,
+        config: input.job.config,
+        informationAccess: input.job.informationAccess,
         summary: result.summary,
         observation: result.observation,
         agentRunTree: result.agentRunTree,

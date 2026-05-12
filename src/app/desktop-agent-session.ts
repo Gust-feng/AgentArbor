@@ -1,4 +1,5 @@
 import type { IntelligenceChannel, ModelOutputContract, ModelOutputDelta, ModelResponse } from "../domain/intelligence/index.js";
+import type { ModelCapabilities } from "../domain/config/index.js";
 import type { ObservationRef } from "../domain/observation/index.js";
 import type { TaskSoil } from "../domain/soil/index.js";
 import type { ToolCallResult, ToolExecutionBroker } from "../domain/tools/index.js";
@@ -117,6 +118,7 @@ export type RunDesktopAgentSessionOptions = {
   readonly taskSoilInput?: DesktopTaskSoilInput;
   readonly conversationHistory?: readonly DesktopAgentConversationMessage[];
   readonly skillContexts?: readonly DesktopAgentSkillContext[];
+  readonly modelCapabilities?: ModelCapabilities;
   readonly abortSignal?: AbortSignal;
   readonly runtime?: MinimalRuntime;
   readonly createIntelligenceChannel?: (runtime: MinimalRuntime) => IntelligenceChannel;
@@ -180,13 +182,18 @@ export async function runDesktopAgentSession(
   }
 
   const channel = intelligenceChannel(runtime);
-  const toolCenter = options.createToolCenter?.(runtime);
+  const createdToolCenter = options.createToolCenter?.(runtime);
+  const toolCenter =
+    aiMode === "fake" || options.modelCapabilities?.supportsToolCalling !== false
+      ? createdToolCenter
+      : undefined;
   toolCenter?.resetCallCount();
   const contextPack = buildBasicAgentContextPack({
     goal,
     taskSoil,
     conversationHistory: options.conversationHistory ?? [],
     skillContexts: options.skillContexts ?? [],
+    modelCapabilities: options.modelCapabilities,
   });
   const turnRuntime = new AgentTurnRuntime({
     intelligenceChannel: channel,
@@ -207,7 +214,7 @@ export async function runDesktopAgentSession(
       outputContract: desktopAgentOutputContract(),
       sensitivity: "internal",
       budget: {
-        maxOutputTokens: 3200,
+        maxOutputTokens: Math.min(options.modelCapabilities?.maxOutputTokens ?? 3200, 16_000),
         maxLatencyMs: 60_000,
       },
     },

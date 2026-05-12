@@ -82,3 +82,34 @@ test("Basic Agent context pack marks budget truncation instead of overfilling me
   assert.equal(pack.truncated, true);
   assert.equal(pack.truncationReport.omittedItemCount > 0, true);
 });
+
+test("Basic Agent context pack derives token budget from model capabilities", () => {
+  const taskSoil = createTaskSoil({
+    rawGoal: "answer",
+    goalId: "goal-model-budget",
+    traceId: "trace-model-budget",
+  });
+
+  const pack = buildBasicAgentContextPack({
+    goal: "answer",
+    taskSoil,
+    conversationHistory: [],
+    modelCapabilities: {
+      contextWindowTokens: 8_000,
+      maxOutputTokens: 2_000,
+      supportsToolCalling: true,
+      supportsParallelToolCalls: false,
+      supportsStructuredOutputs: false,
+      supportsStreaming: true,
+      supportsVisionInput: false,
+      supportsReasoningEffort: false,
+      preferredApiStyle: "openai_compatible",
+      stability: "unknown",
+    },
+  });
+
+  assert.equal(pack.budget.budgetSource, "model_capabilities");
+  assert.equal(pack.budget.reservedOutputTokens, 2_000);
+  assert.equal(pack.budget.inputTokenBudget, 5_488);
+  assert.equal(typeof pack.budget.estimatedInputTokens, "number");
+});

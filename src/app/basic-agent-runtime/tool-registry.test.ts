@@ -38,6 +38,21 @@ test("desktop-basic tool registry keeps unavailable browser tools out of allowed
   assert.equal(registry.createToolCenter("desktop-basic").has("browser_snapshot"), false);
 });
 
+test("desktop-basic tool registry applies configured tool disabled state", () => {
+  const registry = createDesktopBasicToolRegistry({
+    env: {},
+    workspaceRoot: process.cwd(),
+    playwrightAvailable: true,
+    toolStates: [{ name: "shell_command", enabled: false, updatedAt: "2026-05-12T00:00:00.000Z" }],
+  });
+  const catalog = registry.catalog("desktop-basic");
+
+  assert.equal(catalog.tools.find((tool) => tool.name === "shell_command")?.enabledByDefault, false);
+  assert.equal(catalog.allowedTools.includes("shell_command"), false);
+  assert.equal(registry.createToolCenter("desktop-basic").has("shell_command"), false);
+});
+
+
 test("tool registry rejects tools without complete metadata", () => {
   const registry = new ToolRegistry();
   const executor: ToolExecutor = {

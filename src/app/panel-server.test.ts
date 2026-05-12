@@ -350,7 +350,7 @@ test("panel server serves split static frontend assets", async () => {
   }
 });
 
-test("panel config API exposes model provider key only in the configuration entry", async () => {
+test("panel config API keeps model provider and search keys out of ordinary responses", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-config-"));
   const secret = "sk-panel-secret";
   const tavilySecret = "tvly-panel-secret";
@@ -380,8 +380,8 @@ test("panel config API exposes model provider key only in the configuration entr
     assert.equal(config.status, 200);
     assert.equal(update.text.includes(secret), false);
     assert.equal(informationUpdate.text.includes(tavilySecret), false);
-    assert.equal(config.text.includes(secret), true);
-    assert.equal(config.body.config.apiKey, secret);
+    assert.equal(config.text.includes(secret), false);
+    assert.equal(config.body.config.apiKey, undefined);
     assert.equal(config.text.includes(tavilySecret), false);
     assert.equal(settingsRaw.includes(secret), false);
     assert.equal(settingsRaw.includes(tavilySecret), false);
@@ -389,6 +389,8 @@ test("panel config API exposes model provider key only in the configuration entr
     assert.equal(informationUpdate.body.informationAccess.web.secretConfigured, true);
     assert.equal(informationUpdate.body.informationAccess.web.maxResults, 2);
     assert.equal(config.body.informationAccess.web.secretConfigured, true);
+    assert.equal(config.body.capabilities.activeModel.secretConfigured, true);
+    assert.equal(config.body.profiles.length, 1);
     assert.equal(update.body.config.baseUrl, "https://provider.example");
     assert.equal(update.body.config.defaultAiMode, "fake");
   } finally {
@@ -433,6 +435,86 @@ test("panel tools config routes return sanitized web search config and never ech
     assert.equal(after.body.tools.webSearch.secretConfigured, true);
   } finally {
     await server.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("panel capability and profile APIs expose safe unified capability projections", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-capabilities-"));
+  const secret = "sk-panel-capability-secret";
+  try {
+    const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+    try {
+      const createProfile = await requestJson(server.url, "/api/config/model-profiles", {
+        method: "POST",
+        body: {
+          profileId: "custom",
+          label: "Custom",
+          providerKind: "openai_compatible",
+          protocolKind: "openai_compatible_chat_completions",
+          baseUrl: "https://provider.example/v1",
+          model: "unknown-model",
+          defaultAiMode: "openai-compatible",
+          apiKey: secret,
+        },
+      });
+      const activate = await requestJson(server.url, "/api/config/model-profiles/custom/activate", { method: "POST" });
+      const capabilities = await requestJson(server.url, "/api/config/capabilities");
+      const deleteActive = await requestJson(server.url, "/api/config/model-profiles/custom", { method: "DELETE" });
+
+      assert.equal(createProfile.status, 200);
+      assert.equal(activate.status, 200);
+      assert.equal(capabilities.status, 200);
+      assert.equal(capabilities.body.capabilities.activeModel.profileId, "custom");
+      assert.equal(capabilities.body.capabilities.modelCapabilities.contextWindowTokens, 16_000);
+      assert.equal(capabilities.body.capabilities.modelCapabilities.supportsToolCalling, false);
+      assert.equal(Array.isArray(capabilities.body.capabilities.toolCatalog.allowedTools), true);
+      assert.equal(capabilities.text.includes(secret), false);
+      assert.equal(deleteActive.status, 400);
+      assert.equal(deleteActive.body.error.code, "invalid_config");
+    } finally {
+      await server.close();
+    }
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("panel tool state and MCP config APIs return catalogs without raw MCP secret payloads", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-mcp-tools-"));
+  try {
+    const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+    try {
+      const toolState = await requestJson(server.url, "/api/config/tools/shell_command/state", {
+        method: "POST",
+        body: { enabled: false },
+      });
+      const mcp = await requestJson(server.url, "/api/config/mcp", {
+        method: "POST",
+        body: {
+          serverId: "docs",
+          label: "Docs",
+          transport: "stdio",
+          command: "node",
+          args: ["server.js", "--token=secret-mcp-value"],
+          envSecretRefs: ["secret://local-dev/mcp/docs/token"],
+          enabled: true,
+        },
+      });
+      const mcpList = await requestJson(server.url, "/api/config/mcp");
+
+      assert.equal(toolState.status, 200);
+      assert.equal(toolState.body.tools.catalog.allowedTools.includes("shell_command"), false);
+      assert.equal(mcp.status, 200);
+      assert.equal(mcp.body.catalog[0].serverId, "docs");
+      assert.equal(mcp.body.catalog[0].envSecretRefCount, 1);
+      assert.equal(mcp.text.includes("secret-mcp-value"), false);
+      assert.equal(mcpList.text.includes("secret-mcp-value"), false);
+      assert.equal(mcpList.body.catalog[0].availability, "configured");
+    } finally {
+      await server.close();
+    }
+  } finally {
     await fs.rm(directory, { recursive: true, force: true });
   }
 });
@@ -848,7 +930,7 @@ test("desktop run stream carries safe tool detail through runtime persistence", 
       method: "POST",
       body: {
         baseUrl: "https://provider.example",
-        model: "desktop-tool-detail-model",
+        model: "gpt-4o-mini",
         apiKey: secret,
       },
     });
@@ -1195,7 +1277,7 @@ test("conversation API sends follow-up history as role-separated model messages"
     assert.equal(secondMessages[3]?.content?.includes("Current user message: 那你能继续解释一下吗？"), true);
     assert.equal(secondMessages[3]?.content?.includes("你好，你能做什么"), false);
     assert.equal(JSON.stringify(secondMessages).includes("workspace:conversation-history"), false);
-    assert.equal(requests.at(-1)?.max_tokens, 3200);
+    assert.equal(requests.at(-1)?.max_tokens, 4000);
   } finally {
     await server.close();
     await fs.rm(directory, { recursive: true, force: true });
@@ -2034,7 +2116,7 @@ test("desktop openai-compatible ordinary agent uses configured search tool befor
       method: "POST",
       body: {
         baseUrl: "https://provider.example",
-        model: "desktop-configured-tools-model",
+        model: "gpt-4o-mini",
         apiKey: modelSecret,
       },
     });
@@ -2460,7 +2542,7 @@ test("basic agent confirmation decisions persist approve and guidance outcomes s
       method: "POST",
       body: {
         baseUrl: "https://provider.example",
-        model: "basic-confirmation-model",
+        model: "gpt-4o-mini",
         apiKey: "sk-basic-confirmation-secret",
       },
     });
@@ -2606,7 +2688,7 @@ test("basic agent approve after restart blocks because executable continuation i
       method: "POST",
       body: {
         baseUrl: "https://provider.example",
-        model: "basic-confirmation-model",
+        model: "gpt-4o-mini",
         apiKey: "sk-restart-approval-secret",
       },
     });
@@ -2903,7 +2985,7 @@ test("panel openai-compatible missing model does not leak configured API key", a
 });
 
 type RequestJsonOptions = {
-  readonly method?: "GET" | "POST";
+  readonly method?: "GET" | "POST" | "DELETE";
   readonly body?: unknown;
 };
 

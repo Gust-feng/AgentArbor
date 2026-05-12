@@ -3,8 +3,9 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import type { ModelCapabilities } from "../domain/config/index.js";
 import { FileSystemLocalDevSecretStore, FileSystemNormalSettingsStore, resolveAgentArborConfigDirectory } from "../adapters/config/index.js";
-import { ConfigCenter } from "./config-center.js";
+import { ConfigCenter, ConfigCenterValidationError } from "./config-center.js";
 
 test("ConfigCenter keeps raw API key out of the normal settings store", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-config-center-"));
@@ -122,7 +123,7 @@ test("ConfigCenter web search provider none disables Tavily environment projecti
   }
 });
 
-test("ConfigCenter reads v1 settings and upgrades information source settings to v2", async () => {
+test("ConfigCenter reads v1 settings and upgrades local settings to v3", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-config-v1-"));
   try {
     const settingsStore = new FileSystemNormalSettingsStore(directory);
@@ -159,6 +160,11 @@ test("ConfigCenter reads v1 settings and upgrades information source settings to
     });
     const settingsRaw = JSON.parse(await fs.readFile(settingsStore.settingsPath, "utf8")) as {
       version: number;
+      activeModelProfileId?: string;
+      modelProfiles?: readonly unknown[];
+      modelCapabilityOverrides?: readonly unknown[];
+      toolStates?: readonly unknown[];
+      mcpServers?: readonly unknown[];
       informationAccess?: {
         sourcePreference?: readonly string[];
         tavily?: { maxResults?: number };
@@ -179,9 +185,119 @@ test("ConfigCenter reads v1 settings and upgrades information source settings to
     ]);
     assert.equal(updatedInformation.web.maxResults, 2);
     assert.deepEqual(updatedInformation.sourcePreference, ["codebase", "web"]);
-    assert.equal(settingsRaw.version, 2);
+    assert.equal(settingsRaw.version, 3);
+    assert.equal(settingsRaw.activeModelProfileId, "default");
+    assert.equal(settingsRaw.modelProfiles?.length, 1);
+    assert.deepEqual(settingsRaw.modelCapabilityOverrides, []);
+    assert.deepEqual(settingsRaw.toolStates, []);
+    assert.deepEqual(settingsRaw.mcpServers, []);
     assert.deepEqual(settingsRaw.informationAccess?.sourcePreference, ["codebase", "web"]);
     assert.equal(settingsRaw.informationAccess?.tavily?.maxResults, 2);
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("ConfigCenter manages model profiles and keeps profile secrets scoped", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-config-profiles-"));
+  try {
+    const settingsStore = new FileSystemNormalSettingsStore(directory);
+    const secretStore = new FileSystemLocalDevSecretStore(directory);
+    const configCenter = new ConfigCenter({ settingsStore, secretStore });
+
+    await configCenter.updateModelProviderConfig({
+      model: "gpt-4o-mini",
+      apiKey: "sk-default-profile-secret",
+    });
+    const created = await configCenter.createModelProviderProfile({
+      profileId: "Claude Proxy",
+      label: "Claude Proxy",
+      providerKind: "openai_compatible",
+      protocolKind: "openai_compatible_chat_completions",
+      baseUrl: "https://openrouter.ai/api/v1/",
+      model: "anthropic/claude-sonnet-4",
+      defaultAiMode: "openai-compatible",
+      apiKey: "sk-proxy-secret",
+    });
+    const activated = await configCenter.activateModelProviderProfile("claude-proxy");
+    const env = await configCenter.createUndergroundAiEnvironment({ modelProvider: activated });
+    const profiles = await configCenter.listModelProviderProfiles();
+    const settingsRaw = await fs.readFile(settingsStore.settingsPath, "utf8");
+
+    assert.equal(created.profileId, "claude-proxy");
+    assert.equal(created.secretConfigured, true);
+    assert.equal(activated.profileId, "claude-proxy");
+    assert.equal(activated.baseUrl, "https://openrouter.ai/api/v1");
+    assert.equal(env.AGENTARBOR_MODEL_API_KEY, "sk-proxy-secret");
+    assert.equal(env.AGENTARBOR_MODEL_NAME, "anthropic/claude-sonnet-4");
+    assert.equal(profiles.length, 2);
+    assert.equal(settingsRaw.includes("sk-default-profile-secret"), false);
+    assert.equal(settingsRaw.includes("sk-proxy-secret"), false);
+    await assert.rejects(
+      () => configCenter.deleteModelProviderProfile("claude-proxy"),
+      ConfigCenterValidationError
+    );
+    const remaining = await configCenter.deleteModelProviderProfile("default");
+    assert.equal(remaining.some((profile) => profile.profileId === "default"), false);
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("ConfigCenter stores capability overrides, tool states, and MCP settings without raw secrets", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-config-capabilities-"));
+  try {
+    const settingsStore = new FileSystemNormalSettingsStore(directory);
+    const secretStore = new FileSystemLocalDevSecretStore(directory);
+    const configCenter = new ConfigCenter({ settingsStore, secretStore });
+
+    const overrides = await configCenter.updateModelCapabilityOverride({
+      providerKind: "openai_compatible",
+      model: "custom-model",
+      capabilities: {
+        contextWindowTokens: 64_000,
+        maxOutputTokens: 8_000,
+        supportsToolCalling: true,
+        supportsStructuredOutputs: true,
+        preferredApiStyle: "invalid-style",
+        stability: "secret-stability",
+        lastVerifiedAt: "sk-do-not-store",
+      } as unknown as Partial<ModelCapabilities>,
+    });
+    const safeOverride = await configCenter.updateModelCapabilityOverride({
+      providerKind: "openai_compatible",
+      model: "safe-custom-model",
+      capabilities: {
+        preferredApiStyle: "responses",
+        stability: "preview",
+        lastVerifiedAt: "2026-05-12",
+      },
+    });
+    const toolStates = await configCenter.updateToolState({ name: "shell_command", enabled: false });
+    const mcpServers = await configCenter.upsertMcpServer({
+      serverId: "local-docs",
+      label: "Local Docs",
+      transport: "stdio",
+      command: "node",
+      args: ["server.js", "--token=secret-value", "--api-key", "sk-separated-secret"],
+      envSecretRefs: ["secret://local-dev/mcp/local-docs/token"],
+      enabled: true,
+    });
+    const settingsRaw = await fs.readFile(settingsStore.settingsPath, "utf8");
+
+    assert.equal(overrides[0]?.capabilities.contextWindowTokens, 64_000);
+    assert.equal(overrides[0]?.capabilities.supportsToolCalling, true);
+    assert.equal(overrides[0]?.capabilities.preferredApiStyle, undefined);
+    assert.equal(overrides[0]?.capabilities.stability, undefined);
+    assert.equal(overrides[0]?.capabilities.lastVerifiedAt, undefined);
+    assert.equal(safeOverride.find((override) => override.model === "safe-custom-model")?.capabilities.preferredApiStyle, "responses");
+    assert.equal(safeOverride.find((override) => override.model === "safe-custom-model")?.capabilities.stability, "preview");
+    assert.equal(safeOverride.find((override) => override.model === "safe-custom-model")?.capabilities.lastVerifiedAt, "2026-05-12");
+    assert.equal(toolStates.find((state) => state.name === "shell_command")?.enabled, false);
+    assert.equal(mcpServers.find((server) => server.serverId === "local-docs")?.enabled, true);
+    assert.equal(settingsRaw.includes("secret-value"), false);
+    assert.equal(settingsRaw.includes("sk-separated-secret"), false);
+    assert.equal(settingsRaw.includes("sk-do-not-store"), false);
   } finally {
     await fs.rm(directory, { recursive: true, force: true });
   }

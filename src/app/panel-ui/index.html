@@ -150,7 +150,7 @@
           <section class="settings-section active" data-settings-panel="model">
             <div class="settings-card">
               <h2>模型</h2>
-              <p class="section-note">选择 OpenAI-compatible 厂商预设，或手动填写 Base URL 与模型名。</p>
+              <p class="section-note">选择 OpenAI-compatible 厂商预设，或手动填写 Base URL 与模型名；保存后的密钥不会回显。</p>
               <div class="fields settings-fields">
                 <label class="wide-field">厂商预设
                   <select id="providerPresetInput">
@@ -223,6 +223,7 @@
                 <label>结果数 <input id="tavilyMaxResultsInput" type="number" min="1" max="10" step="1"></label>
                 <button id="saveToolConfigButton">保存工具配置</button>
                 <div class="hint" id="toolConfigStatus">工具配置未加载。</div>
+                <div class="hint" id="mcpConfigStatus">MCP 服务器配置本批只做目录占位，不执行 MCP 工具。</div>
               </div>
             </div>
           </section>
@@ -230,7 +231,7 @@
           <section class="settings-section" data-settings-panel="safety">
             <div class="settings-card">
               <h2>安全</h2>
-              <p class="section-note">模型 API Key 按你的要求可见；搜索密钥不回显。本地工具只能在工作目录边界内运行。原始提示词和非模型密钥不会显示在主界面。</p>
+              <p class="section-note">密钥只保存到本地 secret store，不在普通配置、运行记录或主界面回显。本地工具只能在工作目录边界内运行。</p>
             </div>
           </section>
         </div>

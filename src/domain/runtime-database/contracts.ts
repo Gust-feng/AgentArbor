@@ -1,5 +1,6 @@
 import type { ArborMessageType, ArtifactRef } from "../common.js";
 import type { BasicAgentRun, RunEvent } from "../basic-agent/index.js";
+import type { BasicAgentCapabilitySnapshot } from "../config/index.js";
 import type { ToolDisplayProjection } from "../tools/index.js";
 import type {
   ObservationProgress,
@@ -71,6 +72,7 @@ export type RuntimeRunRecord = {
     readonly code: string;
     readonly message: string;
   };
+  readonly capabilitySnapshot?: BasicAgentCapabilitySnapshot;
 };
 
 export type RuntimeEventRecord = {

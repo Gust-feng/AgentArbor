@@ -1,6 +1,76 @@
+import type {
+  ToolCategory,
+  ToolOperationType,
+  ToolRiskLevel,
+  ToolVisibleResultPolicy,
+} from "../tools/index.js";
+
 export type ConfiguredUndergroundAiMode = "none" | "fake" | "openai-compatible";
 
 export type ConfiguredWebSearchProvider = "tavily" | "none";
+
+export type ConfiguredModelProviderKind =
+  | "openai_compatible"
+  | "anthropic"
+  | "gemini"
+  | "ollama"
+  | "local";
+
+export type ConfiguredModelProtocolKind =
+  | "openai_compatible_chat_completions"
+  | "anthropic_messages"
+  | "gemini_generate_content"
+  | "ollama_generate";
+
+export type ModelPreferredApiStyle =
+  | "chat_completions"
+  | "responses"
+  | "messages"
+  | "gemini_generate_content"
+  | "openai_compatible";
+
+export type ModelStability = "stable" | "preview" | "deprecated" | "unknown";
+
+export type ModelCapabilities = {
+  readonly contextWindowTokens: number;
+  readonly maxOutputTokens: number;
+  readonly supportsToolCalling: boolean;
+  readonly supportsParallelToolCalls: boolean;
+  readonly supportsStructuredOutputs: boolean;
+  readonly supportsStreaming: boolean;
+  readonly supportsVisionInput: boolean;
+  readonly supportsReasoningEffort: boolean;
+  readonly preferredApiStyle: ModelPreferredApiStyle;
+  readonly stability: ModelStability;
+  readonly lastVerifiedAt?: string;
+};
+
+export type ModelCapabilityOverrideSettings = {
+  readonly providerKind?: ConfiguredModelProviderKind;
+  readonly model: string;
+  readonly capabilities: Partial<ModelCapabilities>;
+  readonly updatedAt: string;
+};
+
+export type ToolStateSettings = {
+  readonly name: string;
+  readonly enabled: boolean;
+  readonly updatedAt: string;
+};
+
+export type McpServerTransportKind = "stdio" | "http";
+
+export type McpServerSettings = {
+  readonly serverId: string;
+  readonly label: string;
+  readonly transport: McpServerTransportKind;
+  readonly command?: string;
+  readonly args?: readonly string[];
+  readonly url?: string;
+  readonly envSecretRefs: readonly string[];
+  readonly enabled: boolean;
+  readonly updatedAt: string;
+};
 
 export type ConfiguredInformationSourceKind =
   | "web"
@@ -13,42 +83,129 @@ export type ConfiguredInformationSourceKind =
   | "github";
 
 export type ModelProviderProfileSettings = {
-  readonly profileId: "default";
-  readonly providerKind: "openai_compatible";
-  readonly protocolKind: "openai_compatible_chat_completions";
-  readonly baseUrl: string;
+  readonly profileId: string;
+  readonly label: string;
+  readonly providerKind: ConfiguredModelProviderKind;
+  readonly protocolKind: ConfiguredModelProtocolKind;
+  readonly baseUrl?: string;
   readonly model?: string;
   readonly defaultAiMode: ConfiguredUndergroundAiMode;
   readonly secretRef: string;
+  readonly enabled: boolean;
   readonly updatedAt: string;
 };
 
 export type AgentArborLocalSettings = {
-  readonly version: 1 | 2;
+  readonly version: 1 | 2 | 3;
   readonly modelProvider: ModelProviderProfileSettings;
+  readonly activeModelProfileId: string;
+  readonly modelProfiles: readonly ModelProviderProfileSettings[];
+  readonly modelCapabilityOverrides?: readonly ModelCapabilityOverrideSettings[];
+  readonly toolStates?: readonly ToolStateSettings[];
+  readonly mcpServers?: readonly McpServerSettings[];
   readonly informationAccess?: InformationAccessSettings;
   readonly workspaceDirectory?: string;
   readonly updatedAt: string;
 };
 
 export type SanitizedModelProviderConfig = {
-  readonly profileId: ModelProviderProfileSettings["profileId"];
+  readonly profileId: string;
+  readonly label?: string;
   readonly providerKind: ModelProviderProfileSettings["providerKind"];
   readonly protocolKind: ModelProviderProfileSettings["protocolKind"];
   readonly baseUrl: string;
   readonly model?: string;
   readonly defaultAiMode: ConfiguredUndergroundAiMode;
   readonly secretRef: string;
+  readonly enabled?: boolean;
   readonly secretConfigured: boolean;
   readonly secretUpdatedAt?: string;
   readonly updatedAt: string;
 };
 
 export type UpdateModelProviderConfigInput = {
+  readonly profileId?: string;
+  readonly label?: string;
+  readonly providerKind?: ConfiguredModelProviderKind;
+  readonly protocolKind?: ConfiguredModelProtocolKind;
   readonly baseUrl?: string;
   readonly model?: string;
   readonly defaultAiMode?: ConfiguredUndergroundAiMode;
+  readonly enabled?: boolean;
   readonly apiKey?: string;
+};
+
+export type CreateModelProviderProfileInput = UpdateModelProviderConfigInput & {
+  readonly profileId: string;
+  readonly label?: string;
+};
+
+export type UpdateToolStateInput = {
+  readonly name: string;
+  readonly enabled: boolean;
+};
+
+export type UpsertMcpServerInput = {
+  readonly serverId: string;
+  readonly label?: string;
+  readonly transport?: McpServerTransportKind;
+  readonly command?: string;
+  readonly args?: readonly string[];
+  readonly url?: string;
+  readonly envSecretRefs?: readonly string[];
+  readonly enabled?: boolean;
+};
+
+export type CapabilityToolCatalogItem = {
+  readonly name: string;
+  readonly description: string;
+  readonly category: ToolCategory;
+  readonly riskLevel: ToolRiskLevel;
+  readonly operationType: ToolOperationType;
+  readonly requiresConfirmation: boolean;
+  readonly visibleResultPolicy: ToolVisibleResultPolicy;
+  readonly enabled: boolean;
+  readonly availability: "available" | "unavailable";
+  readonly disabledReason?: string;
+};
+
+export type CapabilitySkillCatalogItem = {
+  readonly id: string;
+  readonly name: string;
+  readonly description: string;
+  readonly enabled: boolean;
+  readonly sourcePath: string;
+  readonly triggers: readonly string[];
+  readonly lastUsedAt?: string;
+};
+
+export type CapabilityMcpCatalogItem = {
+  readonly serverId: string;
+  readonly label: string;
+  readonly transport: McpServerTransportKind;
+  readonly enabled: boolean;
+  readonly availability: "configured" | "disabled" | "unavailable";
+  readonly commandSummary?: string;
+  readonly url?: string;
+  readonly envSecretRefCount: number;
+  readonly updatedAt: string;
+};
+
+export type BasicAgentCapabilitySnapshot = {
+  readonly snapshotId: string;
+  readonly createdAt: string;
+  readonly activeModel: SanitizedModelProviderConfig;
+  readonly modelCapabilities: ModelCapabilities;
+  readonly toolCatalog: {
+    readonly scope: "desktop-basic";
+    readonly tools: readonly CapabilityToolCatalogItem[];
+    readonly allowedTools: readonly string[];
+  };
+  readonly skillCatalog: readonly CapabilitySkillCatalogItem[];
+  readonly mcpCatalog: readonly CapabilityMcpCatalogItem[];
+  readonly workspace: SanitizedWorkspaceConfig;
+  readonly securitySummary: string;
+  readonly warnings: readonly string[];
 };
 
 export type InformationAccessSettings = {

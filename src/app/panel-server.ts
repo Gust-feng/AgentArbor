@@ -29,7 +29,13 @@ import {
   type UndergroundDirectionSessionRuntimeContext,
 } from "./underground-direction-session.js";
 import { createUndergroundDemoSummary, type UndergroundDemoAiInput, type UndergroundDemoSummary } from "./underground-demo-summary.js";
-import { ConfigCenter, WorkspaceDirectoryValidationError, createLocalConfigCenter } from "./config-center.js";
+import {
+  ConfigCenter,
+  ConfigCenterValidationError,
+  WorkspaceDirectoryValidationError,
+  createLocalConfigCenter,
+} from "./config-center.js";
+import { CapabilityCenter } from "./capability-center.js";
 import { createPanelHtml, readPanelStaticAsset } from "./panel-assets.js";
 import type { BasicAgentRun, ConfirmationDecision, RunEvent } from "../domain/basic-agent/index.js";
 import {
@@ -47,6 +53,13 @@ import type {
   SanitizedModelProviderConfig,
   SanitizedWorkspaceConfig,
   SanitizedWebSearchConfig,
+  BasicAgentCapabilitySnapshot,
+  ConfiguredModelProviderKind,
+  ConfiguredModelProtocolKind,
+  CreateModelProviderProfileInput,
+  McpServerTransportKind,
+  ToolStateSettings,
+  UpsertMcpServerInput,
   UpdateInformationAccessConfigInput,
   UpdateModelProviderConfigInput,
   UpdateWorkspaceConfigInput,
@@ -151,6 +164,7 @@ export type StartedPanelServer = {
 
 type PanelRuntime = {
   readonly configCenter: ConfigCenter;
+  readonly capabilityCenter: CapabilityCenter;
   readonly configDirectory?: string;
   readonly providerFetch?: PanelProviderFetch;
   readonly workspaceDirectoryPicker?: () => Promise<string | undefined>;
@@ -232,6 +246,7 @@ type PanelRunExecutionResult = {
 
 type PanelRunExecutionOptions = {
   readonly conversationHistory?: readonly DesktopAgentConversationMessage[];
+  readonly capabilitySnapshot?: BasicAgentCapabilitySnapshot;
   readonly abortSignal?: AbortSignal;
   readonly onRuntimeReady?: (context: PanelRuntimeReadyContext) => void;
   readonly onModelOutputDelta?: (delta: ModelOutputDelta) => void;
@@ -335,8 +350,15 @@ function assemblePanelRuntime(input: {
   const abortControllers = new Map<string, AbortController>();
   const persistenceChains = new Map<string, Promise<void>>();
   const conversations = new PanelConversationStore();
+  const capabilityCenter = new CapabilityCenter({
+    configCenter: input.configCenter,
+    skillRoots: input.skillRoots,
+    skillStateStore: input.skillStateStore,
+    fetch: input.providerFetch,
+  });
   const runtime: Omit<PanelRuntime, "runExecutor"> & { runExecutor?: BasicAgentRunExecutor } = {
     configCenter: input.configCenter,
+    capabilityCenter,
     configDirectory: input.configDirectory,
     providerFetch: input.providerFetch,
     workspaceDirectoryPicker: input.workspaceDirectoryPicker,
@@ -353,6 +375,7 @@ function assemblePanelRuntime(input: {
   runtime.runExecutor = new BasicAgentRunExecutor({
     getModelProviderConfig: () => runtime.configCenter.getModelProviderConfig(),
     getInformationAccessConfig: () => runtime.configCenter.getInformationAccessConfig(),
+    getCapabilitySnapshot: () => runtime.capabilityCenter.snapshot(),
     runJobs,
     activeRunJobs,
     abortControllers,
@@ -450,15 +473,112 @@ async function handlePanelRequest(
 
   if (request.method === "GET" && url.pathname === "/api/config") {
     const config = await runtime.configCenter.getModelProviderConfig();
-    const apiKey = await runtime.configCenter.getModelProviderApiKey();
+    const capabilities = await runtime.capabilityCenter.snapshot();
     writeJson(response, 200, {
       ok: true,
       status: "completed",
-      config: { ...config, apiKey: apiKey ?? "" },
+      config,
+      profiles: await runtime.configCenter.listModelProviderProfiles(),
+      capabilities,
       informationAccess: await runtime.configCenter.getInformationAccessConfig(),
       workspace: await runtime.configCenter.getWorkspaceConfig(),
     });
     return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/config/capabilities") {
+    writeJson(response, 200, {
+      ok: true,
+      status: "completed",
+      capabilities: await runtime.capabilityCenter.snapshot(),
+    });
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/config/model-profiles") {
+    writeJson(response, 200, {
+      ok: true,
+      status: "completed",
+      profiles: await runtime.configCenter.listModelProviderProfiles(),
+      activeProfile: await runtime.configCenter.getModelProviderConfig(),
+    });
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/config/model-profiles") {
+    const body = await readJsonBody(request);
+    try {
+      const profile = await runtime.configCenter.createModelProviderProfile(parseCreateModelProfile(body));
+      writeJson(response, 200, {
+        ok: true,
+        status: "completed",
+        profile,
+        profiles: await runtime.configCenter.listModelProviderProfiles(),
+        capabilities: await runtime.capabilityCenter.snapshot(),
+      });
+      return;
+    } catch (error) {
+      throw configCenterHttpError(error);
+    }
+  }
+
+  const modelProfileMatch = /^\/api\/config\/model-profiles\/([^/]+)$/.exec(url.pathname);
+  if (request.method === "POST" && modelProfileMatch !== null) {
+    const body = await readJsonBody(request);
+    try {
+      const profileId = decodeURIComponent(modelProfileMatch[1] ?? "");
+      const profile = await runtime.configCenter.updateModelProviderConfig({
+        ...parseConfigUpdate(body),
+        profileId,
+      });
+      writeJson(response, 200, {
+        ok: true,
+        status: "completed",
+        profile,
+        profiles: await runtime.configCenter.listModelProviderProfiles(),
+        capabilities: await runtime.capabilityCenter.snapshot(),
+      });
+      return;
+    } catch (error) {
+      throw configCenterHttpError(error);
+    }
+  }
+
+  const activateProfileMatch = /^\/api\/config\/model-profiles\/([^/]+)\/activate$/.exec(url.pathname);
+  if (request.method === "POST" && activateProfileMatch !== null) {
+    try {
+      const profile = await runtime.configCenter.activateModelProviderProfile(
+        decodeURIComponent(activateProfileMatch[1] ?? "")
+      );
+      writeJson(response, 200, {
+        ok: true,
+        status: "completed",
+        profile,
+        config: profile,
+        capabilities: await runtime.capabilityCenter.snapshot(),
+      });
+      return;
+    } catch (error) {
+      throw configCenterHttpError(error);
+    }
+  }
+
+  const deleteProfileMatch = /^\/api\/config\/model-profiles\/([^/]+)$/.exec(url.pathname);
+  if (request.method === "DELETE" && deleteProfileMatch !== null) {
+    try {
+      const profiles = await runtime.configCenter.deleteModelProviderProfile(
+        decodeURIComponent(deleteProfileMatch[1] ?? "")
+      );
+      writeJson(response, 200, {
+        ok: true,
+        status: "completed",
+        profiles,
+        capabilities: await runtime.capabilityCenter.snapshot(),
+      });
+      return;
+    } catch (error) {
+      throw configCenterHttpError(error);
+    }
   }
 
   if (request.method === "GET" && url.pathname === "/api/config/tools") {
@@ -470,6 +590,7 @@ async function handlePanelRequest(
       ok: true,
       status: "completed",
       tools,
+      capabilities: await runtime.capabilityCenter.snapshot(),
       informationAccess: await runtime.configCenter.getInformationAccessConfig(),
     });
     return;
@@ -477,11 +598,18 @@ async function handlePanelRequest(
 
   if (request.method === "POST" && url.pathname === "/api/config/model-provider") {
     const body = await readJsonBody(request);
-    const config = await runtime.configCenter.updateModelProviderConfig(parseConfigUpdate(body));
+    let config: SanitizedModelProviderConfig;
+    try {
+      config = await runtime.configCenter.updateModelProviderConfig(parseConfigUpdate(body));
+    } catch (error) {
+      throw configCenterHttpError(error);
+    }
     writeJson(response, 200, {
       ok: true,
       status: "completed",
       config,
+      profiles: await runtime.configCenter.listModelProviderProfiles(),
+      capabilities: await runtime.capabilityCenter.snapshot(),
       informationAccess: await runtime.configCenter.getInformationAccessConfig(),
     });
     return;
@@ -504,10 +632,56 @@ async function handlePanelRequest(
     writeJson(response, 200, {
       ok: true,
       status: "completed",
-      tools: { webSearch },
+      tools: { webSearch, catalog: await createPanelToolCatalog(runtime) },
+      capabilities: await runtime.capabilityCenter.snapshot(),
       informationAccess: await runtime.configCenter.getInformationAccessConfig(),
     });
     return;
+  }
+
+  const toolStateMatch = /^\/api\/config\/tools\/([^/]+)\/state$/.exec(url.pathname);
+  if (request.method === "POST" && toolStateMatch !== null) {
+    const body = await readJsonBody(request);
+    const toolName = decodeURIComponent(toolStateMatch[1] ?? "");
+    await runtime.configCenter.updateToolState(parseToolStateUpdate(toolName, body));
+    const tools: PanelToolsConfig = {
+      webSearch: await runtime.configCenter.getWebSearchConfig(),
+      catalog: await createPanelToolCatalog(runtime),
+    };
+    writeJson(response, 200, {
+      ok: true,
+      status: "completed",
+      tools,
+      capabilities: await runtime.capabilityCenter.snapshot(),
+      informationAccess: await runtime.configCenter.getInformationAccessConfig(),
+    });
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/config/mcp") {
+    const capabilitySnapshot = await runtime.capabilityCenter.snapshot();
+    writeJson(response, 200, {
+      ok: true,
+      status: "completed",
+      catalog: capabilitySnapshot.mcpCatalog,
+    });
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/config/mcp") {
+    const body = await readJsonBody(request);
+    try {
+      await runtime.configCenter.upsertMcpServer(parseMcpServerUpdate(body));
+      const capabilitySnapshot = await runtime.capabilityCenter.snapshot();
+      writeJson(response, 200, {
+        ok: true,
+        status: "completed",
+        catalog: capabilitySnapshot.mcpCatalog,
+      });
+      return;
+    } catch (error) {
+      throw configCenterHttpError(error);
+    }
   }
 
   if (request.method === "POST" && url.pathname === "/api/config/workspace") {
@@ -720,11 +894,21 @@ async function handlePanelRequest(
 async function createPanelToolCatalog(runtime: PanelRuntime): Promise<ToolCatalogSnapshot> {
   const env = await runtime.configCenter.createUndergroundAiEnvironment();
   const workspaceRoot = (await runtime.configCenter.getWorkspaceConfig().catch(() => undefined))?.workspaceDirectory;
+  const toolStates = await runtime.configCenter.listToolStates();
   return createDesktopBasicToolRegistry({
     env,
     fetch: runtime.providerFetch,
     workspaceRoot,
+    toolStates,
   }).catalog("desktop-basic");
+}
+
+function toolStatesFromCapabilitySnapshot(snapshot: BasicAgentCapabilitySnapshot): readonly ToolStateSettings[] {
+  return snapshot.toolCatalog.tools.map((tool) => ({
+    name: tool.name,
+    enabled: tool.enabled,
+    updatedAt: snapshot.createdAt,
+  }));
 }
 
 async function handleRunRequest(
@@ -1231,6 +1415,7 @@ async function executeBasicPanelRun(
   );
   return runForPanel(runtime, job.runKind, job.goal, job.aiMode, taskSoilInput, job.runMode, {
     conversationHistory,
+    capabilitySnapshot: job.capabilitySnapshot,
     abortSignal: input.abortSignal,
     onRuntimeReady: input.onRuntimeReady,
     onModelOutputDelta: input.onModelOutputDelta,
@@ -1238,8 +1423,8 @@ async function executeBasicPanelRun(
 }
 
 async function failPanelRunJob(runtime: PanelRuntime, job: PanelRunJob, error: unknown): Promise<void> {
-  const config = await runtime.configCenter.getModelProviderConfig().catch(() => job.config);
-  const informationAccess = await runtime.configCenter.getInformationAccessConfig().catch(() => job.informationAccess);
+  const config = job.config;
+  const informationAccess = job.informationAccess;
   if (error instanceof UndergroundAiConfigurationError) {
     const message = panelConfigurationErrorMessage(error.issue.code);
     runtime.runJobs.fail(job.runId, {
@@ -1920,7 +2105,7 @@ async function persistPanelRunNow(runtime: PanelRuntime, job: PanelRunJob): Prom
   if (job.conversationId !== undefined) {
     await persistPanelConversation(runtime, job.conversationId);
   }
-  const workspace = await runtime.configCenter.getWorkspaceConfig().catch(() => undefined);
+  const workspace = job.capabilitySnapshot?.workspace ?? await runtime.configCenter.getWorkspaceConfig().catch(() => undefined);
   const workspaceRecord = workspace === undefined ? undefined : createRuntimeWorkspaceRecord(workspace, job.updatedAt);
   if (workspaceRecord !== undefined) {
     await runtime.runtimeDatabase.upsertWorkspace(workspaceRecord);
@@ -2014,6 +2199,7 @@ function createRuntimeRunRecord(
     resultTitle: restoredResult?.title,
     resultSummary: restoredResult?.summary,
     error: job.failed?.error ?? job.cancelled?.reason ?? job.blocked?.reason,
+    capabilitySnapshot: job.capabilitySnapshot,
   };
 }
 
@@ -2653,7 +2839,21 @@ async function runDesktopForPanel(
     throw createUndergroundAiDisabledConfigurationError();
   }
 
-  const aiEnvironment = await runtime.configCenter.createUndergroundAiEnvironment();
+  const capabilitySnapshot = options.capabilitySnapshot ?? (await runtime.capabilityCenter.snapshot());
+  if (
+    aiMode === "openai-compatible" &&
+    (capabilitySnapshot.activeModel.providerKind !== "openai_compatible" ||
+      capabilitySnapshot.activeModel.protocolKind !== "openai_compatible_chat_completions")
+  ) {
+    throw new PanelHttpError(
+      400,
+      "unsupported_model_provider",
+      "当前运行批次只支持 OpenAI-compatible 模型 profile；Anthropic、Gemini、Ollama 先作为配置边界保留。"
+    );
+  }
+  const aiEnvironment = await runtime.configCenter.createUndergroundAiEnvironment({
+    modelProvider: capabilitySnapshot.activeModel,
+  });
   const aiConfig =
     aiMode === "fake"
       ? createUndergroundAiRuntimeConfig({ mode: "fake", env: aiEnvironment, onModelOutputDelta: options.onModelOutputDelta })
@@ -2668,11 +2868,18 @@ async function runDesktopForPanel(
     throw createUndergroundAiDisabledConfigurationError(aiConfig.summaryInput);
   }
 
-  const workspaceRoot = (await runtime.configCenter.getWorkspaceConfig()).workspaceDirectory;
+  const workspaceRoot = capabilitySnapshot.workspace.workspaceDirectory;
+  const snapshotToolStates = toolStatesFromCapabilitySnapshot(capabilitySnapshot);
+  const snapshotPlaywrightAvailable = capabilitySnapshot.toolCatalog.tools.some(
+    (tool) => tool.name === "browser_snapshot" && tool.availability === "available"
+  );
   if (runMode === "deep") {
     const createToolCenter = await createConfiguredToolCenterFactory(runtime.configCenter, {
+      env: aiEnvironment,
       fetch: runtime.providerFetch,
       workspaceRoot,
+      toolStates: snapshotToolStates,
+      playwrightAvailable: snapshotPlaywrightAvailable,
     });
     throwIfAborted(options.abortSignal);
     const result = await runUndergroundDirectionSessionWithIntelligence(goal, {
@@ -2712,12 +2919,16 @@ async function runDesktopForPanel(
     aiMode,
     createIntelligenceChannel: aiConfig.createIntelligenceChannel,
     createToolCenter: await createConfiguredToolCenterFactory(runtime.configCenter, {
+      env: aiEnvironment,
       fetch: runtime.providerFetch,
       workspaceRoot,
+      toolStates: snapshotToolStates,
+      playwrightAvailable: snapshotPlaywrightAvailable,
     }),
     taskSoilInput,
     conversationHistory: options.conversationHistory,
     skillContexts: await resolveTriggeredSkillContexts(runtime, goal),
+    modelCapabilities: capabilitySnapshot.modelCapabilities,
     abortSignal: options.abortSignal,
     onRuntimeReady: options.onRuntimeReady,
     onModelOutputDelta: options.onModelOutputDelta,
@@ -2851,11 +3062,94 @@ function createConfigurationFailedAiSummary(
 function parseConfigUpdate(raw: unknown): UpdateModelProviderConfigInput {
   const record = asRecord(raw);
   return {
+    profileId: optionalString(record.profileId),
+    label: optionalString(record.label),
+    providerKind: parseOptionalModelProviderKind(record.providerKind),
+    protocolKind: parseOptionalModelProtocolKind(record.protocolKind),
     baseUrl: optionalString(record.baseUrl),
     model: optionalString(record.model),
     defaultAiMode: parseOptionalAiMode(record.defaultAiMode, "默认 AI 模式无效。"),
+    enabled: booleanOrUndefined(record.enabled),
     apiKey: optionalString(record.apiKey),
   };
+}
+
+function parseCreateModelProfile(raw: unknown): CreateModelProviderProfileInput {
+  const parsed = parseConfigUpdate(raw);
+  const profileId = optionalString(asRecord(raw).profileId);
+  if (profileId === undefined) {
+    throw new PanelHttpError(400, "missing_model_profile_id", "模型 profile id 不能为空。");
+  }
+  return {
+    ...parsed,
+    profileId,
+  };
+}
+
+function parseToolStateUpdate(toolName: string, raw: unknown): ToolStateSettings {
+  const record = asRecord(raw);
+  const enabled = booleanOrUndefined(record.enabled);
+  if (enabled === undefined) {
+    throw new PanelHttpError(400, "invalid_tool_state", "工具状态必须包含 enabled 布尔值。");
+  }
+  return {
+    name: toolName,
+    enabled,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+function parseMcpServerUpdate(raw: unknown): UpsertMcpServerInput {
+  const record = asRecord(raw);
+  const serverId = optionalString(record.serverId);
+  if (serverId === undefined) {
+    throw new PanelHttpError(400, "missing_mcp_server_id", "MCP server id 不能为空。");
+  }
+  return {
+    serverId,
+    label: optionalString(record.label),
+    transport: parseOptionalMcpTransport(record.transport),
+    command: optionalString(record.command),
+    args: stringArrayOrUndefined(record.args),
+    url: optionalString(record.url),
+    envSecretRefs: stringArrayOrUndefined(record.envSecretRefs),
+    enabled: booleanOrUndefined(record.enabled),
+  };
+}
+
+function parseOptionalModelProviderKind(value: unknown): ConfiguredModelProviderKind | undefined {
+  if (value === undefined || value === null || value === "") {
+    return undefined;
+  }
+  if (value === "openai_compatible" || value === "anthropic" || value === "gemini" || value === "ollama" || value === "local") {
+    return value;
+  }
+  throw new PanelHttpError(400, "invalid_model_provider_kind", "模型厂商类型无效。");
+}
+
+function parseOptionalModelProtocolKind(value: unknown): ConfiguredModelProtocolKind | undefined {
+  if (value === undefined || value === null || value === "") {
+    return undefined;
+  }
+  if (
+    value === "openai_compatible_chat_completions" ||
+    value === "anthropic_messages" ||
+    value === "gemini_generate_content" ||
+    value === "ollama_generate"
+  ) {
+    return value;
+  }
+  throw new PanelHttpError(400, "invalid_model_protocol_kind", "模型协议类型无效。");
+}
+
+function parseOptionalMcpTransport(value: unknown): McpServerTransportKind | undefined {
+  if (value === undefined || value === null || value === "") {
+    return undefined;
+  }
+  if (value === "stdio" || value === "http") {
+    return value;
+  }
+  throw new PanelHttpError(400, "invalid_mcp_transport", "MCP transport 必须是 stdio 或 http。");
 }
 
 function throwIfAborted(signal: AbortSignal | undefined): void {
@@ -3170,6 +3464,30 @@ function panelJobErrorMessage(error: PanelHttpError): string {
 
 function optionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function booleanOrUndefined(value: unknown): boolean | undefined {
+  return typeof value === "boolean" ? value : undefined;
+}
+
+function stringArrayOrUndefined(value: unknown): readonly string[] | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const items = value
+    .map((item) => optionalString(item))
+    .filter((item): item is string => item !== undefined);
+  return items.length === 0 ? undefined : items;
+}
+
+function configCenterHttpError(error: unknown): PanelHttpError {
+  if (error instanceof PanelHttpError) {
+    return error;
+  }
+  if (error instanceof ConfigCenterValidationError) {
+    return new PanelHttpError(400, "invalid_config", error.message);
+  }
+  throw error;
 }
 
 function compactConversationHistoryText(value: string, maxLength: number): string {

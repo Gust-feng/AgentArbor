@@ -1,4 +1,5 @@
 import type { SanitizedInformationAccessConfig, SanitizedModelProviderConfig } from "../domain/config/index.js";
+import type { BasicAgentCapabilitySnapshot } from "../domain/config/index.js";
 import type { ConfirmationDecision } from "../domain/basic-agent/index.js";
 import { createId, nowIso } from "../kernel/id.js";
 import type { UndergroundAiMode } from "./intelligence-channel-factory.js";
@@ -61,6 +62,7 @@ export type PanelRunJob = {
   updatedAt: string;
   config: SanitizedModelProviderConfig;
   informationAccess: SanitizedInformationAccessConfig;
+  capabilitySnapshot?: BasicAgentCapabilitySnapshot;
   runtime?: MinimalRuntime;
   traceId?: string;
   goalId?: string;
@@ -91,6 +93,7 @@ export class PanelRunJobStore {
     readonly taskSoilInput?: DesktopTaskSoilInput;
     readonly config: SanitizedModelProviderConfig;
     readonly informationAccess: SanitizedInformationAccessConfig;
+    readonly capabilitySnapshot?: BasicAgentCapabilitySnapshot;
   }): PanelRunJob {
     const now = nowIso();
     const job: PanelRunJob = {
@@ -106,6 +109,7 @@ export class PanelRunJobStore {
       taskSoilInput: input.taskSoilInput,
       config: input.config,
       informationAccess: input.informationAccess,
+      capabilitySnapshot: input.capabilitySnapshot,
       status: "pending",
       createdAt: now,
       updatedAt: now,

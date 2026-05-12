@@ -6,6 +6,7 @@ import {
 import { NativeIntelligenceChannel } from "../kernel/intelligence/channel.js";
 import type { IntelligenceChannel, ModelOutputDelta } from "../domain/intelligence/index.js";
 import type { InformationSourceKind } from "../domain/research/index.js";
+import type { ToolStateSettings } from "../domain/config/index.js";
 import type { ToolExecutionBroker } from "../domain/tools/index.js";
 import type { ConfigCenter } from "./config-center.js";
 import type { MinimalRuntime } from "./runtime.js";
@@ -179,30 +180,34 @@ export async function createConfiguredToolCenter(
   configCenter: ConfigCenter,
   input: {
     readonly runtime?: MinimalRuntime;
+    readonly env?: UndergroundAiEnvironment;
     readonly fetch?: FetchLike;
     readonly sourcePreference?: readonly InformationSourceKind[];
     readonly tavilyMaxResults?: number;
     readonly workspaceRoot?: string;
     readonly playwrightAvailable?: boolean;
+    readonly toolStates?: readonly ToolStateSettings[];
   } = {}
 ): Promise<ToolExecutionBroker> {
   return createToolCenterFromEnvironment({
     ...input,
-    env: await configCenter.createUndergroundAiEnvironment(),
+    env: input.env ?? await configCenter.createUndergroundAiEnvironment(),
   });
 }
 
 export async function createConfiguredToolCenterFactory(
   configCenter: ConfigCenter,
   input: {
+    readonly env?: UndergroundAiEnvironment;
     readonly fetch?: FetchLike;
     readonly sourcePreference?: readonly InformationSourceKind[];
     readonly tavilyMaxResults?: number;
     readonly workspaceRoot?: string;
     readonly playwrightAvailable?: boolean;
+    readonly toolStates?: readonly ToolStateSettings[];
   } = {}
 ): Promise<(runtime: MinimalRuntime) => ToolExecutionBroker> {
-  const env = await configCenter.createUndergroundAiEnvironment();
+  const env = input.env ?? await configCenter.createUndergroundAiEnvironment();
   return (runtime) => createToolCenterFromEnvironment({ ...input, runtime, env });
 }
 
@@ -214,6 +219,7 @@ function createToolCenterFromEnvironment(input: {
   readonly tavilyMaxResults?: number;
   readonly workspaceRoot?: string;
   readonly playwrightAvailable?: boolean;
+  readonly toolStates?: readonly ToolStateSettings[];
 }): ToolExecutionBroker {
   return createDesktopBasicToolRegistry(input).createToolCenter("desktop-basic");
 }

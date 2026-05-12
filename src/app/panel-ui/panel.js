@@ -63,6 +63,7 @@ const STREAM_TYPES = [
 
     const state = {
       config: undefined,
+      capabilities: undefined,
       informationAccess: undefined,
       tools: undefined,
       skills: [],
@@ -143,6 +144,7 @@ const STREAM_TYPES = [
       workspaceConfigStatus: document.getElementById("workspaceConfigStatus"),
       saveToolConfigButton: document.getElementById("saveToolConfigButton"),
       toolConfigStatus: document.getElementById("toolConfigStatus"),
+      mcpConfigStatus: document.getElementById("mcpConfigStatus"),
       skillsList: document.getElementById("skillsList"),
       inspectorTabs: Array.from(document.querySelectorAll(".inspector-tab")),
       inspectorPanels: Array.from(document.querySelectorAll(".inspector-panel")),
@@ -495,11 +497,12 @@ const STREAM_TYPES = [
       try {
         const result = await requestJson("/api/config");
         state.config = result.config;
+        state.capabilities = result.capabilities;
         state.informationAccess = result.informationAccess;
         state.workspace = result.workspace;
         dom.baseUrlInput.value = result.config.baseUrl || "";
         dom.modelInput.value = result.config.model || "";
-        dom.apiKeyInput.value = result.config.apiKey || "";
+        dom.apiKeyInput.value = "";
         dom.defaultAiModeInput.value = result.config.defaultAiMode || "openai-compatible";
         dom.workspaceDirectoryInput.value = result.workspace && result.workspace.workspaceDirectory ? result.workspace.workspaceDirectory : "";
         dom.aiMode.value = preferredRunMode();
@@ -518,6 +521,7 @@ const STREAM_TYPES = [
       try {
         const result = await requestJson("/api/config/tools");
         state.tools = result.tools;
+        state.capabilities = result.capabilities || state.capabilities;
         state.informationAccess = result.informationAccess;
         const webSearch = result.tools.webSearch;
         dom.webSearchProviderInput.value = webSearch.provider;
@@ -633,6 +637,7 @@ const STREAM_TYPES = [
         });
         dom.tavilyKeyInput.value = "";
         state.tools = result.tools;
+        state.capabilities = result.capabilities || state.capabilities;
         state.informationAccess = result.informationAccess;
         renderToolStatus();
       } catch (error) {
@@ -3000,7 +3005,11 @@ const STREAM_TYPES = [
           break;
         }
       }
-      dom.configStatus.textContent = (providerLabel ? providerLabel + " · " : "") + "模型：" + (config.model || "未填写") + " · 密钥：" + (config.secretConfigured ? "已配置" : "未配置");
+      var capabilities = state.capabilities && state.capabilities.modelCapabilities;
+      var capabilityText = capabilities
+        ? " · 上下文：" + compactNumber(capabilities.contextWindowTokens) + " tokens · 输出：" + compactNumber(capabilities.maxOutputTokens) + " tokens"
+        : "";
+      dom.configStatus.textContent = (providerLabel ? providerLabel + " · " : "") + "模型：" + (config.model || "未填写") + " · 密钥：" + (config.secretConfigured ? "已配置" : "未配置") + capabilityText;
       dom.configStatus.className = "hint" + (status === "missing_model" || status === "missing_secret" || status === "missing_model_and_secret" ? " error" : "");
       renderSupervision(undefined);
       renderRightPanels(undefined);
@@ -3094,8 +3103,16 @@ const STREAM_TYPES = [
       if (!webSearch) {
         return;
       }
-      dom.toolConfigStatus.textContent = "搜索服务：" + webSearch.provider + "；状态：" + webSearch.status + "；密钥：" + (webSearch.secretConfigured ? "已配置" : "未配置");
+      var catalog = state.tools && state.tools.catalog;
+      var allowedCount = catalog && Array.isArray(catalog.allowedTools) ? catalog.allowedTools.length : 0;
+      var toolCount = catalog && Array.isArray(catalog.tools) ? catalog.tools.length : 0;
+      dom.toolConfigStatus.textContent = "搜索服务：" + webSearch.provider + "；状态：" + webSearch.status + "；密钥：" + (webSearch.secretConfigured ? "已配置" : "未配置") + "；可用工具：" + allowedCount + "/" + toolCount;
       dom.toolConfigStatus.className = "hint";
+      if (dom.mcpConfigStatus && state.capabilities && Array.isArray(state.capabilities.mcpCatalog)) {
+        dom.mcpConfigStatus.textContent = state.capabilities.mcpCatalog.length > 0
+          ? "MCP 服务器：" + state.capabilities.mcpCatalog.length + " 个已配置；本批只做目录展示。"
+          : "MCP 服务器：暂无；本批只做配置契约和目录展示。";
+      }
     }
 
     function renderWorkspaceStatus() {
@@ -3620,4 +3637,12 @@ const STREAM_TYPES = [
     function compact(value, maxLength) {
       const text = String(value || "");
       return text.length <= maxLength ? text : text.slice(0, Math.max(0, maxLength - 1)) + "…";
+    }
+
+    function compactNumber(value) {
+      const numeric = Number(value);
+      if (!Number.isFinite(numeric)) return "未知";
+      if (numeric >= 1000000) return Math.round(numeric / 10000) / 100 + "M";
+      if (numeric >= 1000) return Math.round(numeric / 100) / 10 + "K";
+      return String(Math.floor(numeric));
     }

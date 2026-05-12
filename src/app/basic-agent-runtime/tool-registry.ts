@@ -1,4 +1,5 @@
 import type { InformationSourceKind } from "../../domain/research/index.js";
+import type { ToolStateSettings } from "../../domain/config/index.js";
 import type {
   ToolCategory,
   ToolDefinition,
@@ -70,6 +71,7 @@ export type CreateDesktopBasicToolRegistryOptions = {
   readonly tavilyMaxResults?: number;
   readonly workspaceRoot?: string;
   readonly playwrightAvailable?: boolean;
+  readonly toolStates?: readonly ToolStateSettings[];
 };
 
 export type ToolRegistryFetchLike = (
@@ -179,10 +181,11 @@ export function createDesktopBasicToolRegistry(
     createBrowserSnapshotTool(),
   ];
   for (const executor of executors) {
+    const state = options.toolStates?.find((item) => item.name === executor.definition.name);
     registry.register({
       executor,
       scopes: ["desktop-basic", toolScopeFor(executor.definition.metadata?.category)],
-      enabledByDefault: true,
+      enabledByDefault: state?.enabled ?? true,
       availability:
         executor.definition.name === "browser_snapshot" && !playwrightAvailable
           ? { status: "unavailable", disabledReason: "Playwright is not installed in this workspace." }

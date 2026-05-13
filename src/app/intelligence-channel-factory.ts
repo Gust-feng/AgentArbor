@@ -1,6 +1,7 @@
 import {
   FakeModelProvider,
   OpenAICompatibleChatCompletionsProvider,
+  OpenAIResponsesProvider,
   type FetchLike,
 } from "../adapters/intelligence/index.js";
 import { NativeIntelligenceChannel } from "../kernel/intelligence/channel.js";
@@ -13,7 +14,7 @@ import type { MinimalRuntime } from "./runtime.js";
 import { createDesktopBasicToolRegistry } from "./basic-agent-runtime/builtin-tool-runtime.js";
 import type { UndergroundDemoAiInput } from "./underground-demo-summary.js";
 
-export type ModelRuntimeMode = "none" | "fake" | "openai-compatible";
+export type ModelRuntimeMode = "none" | "fake" | "openai-compatible" | "openai-responses";
 
 export type ModelRuntimeEnvironment = Readonly<Record<string, string | undefined>>;
 export type ModelRuntimeProviderFetch = FetchLike;
@@ -71,6 +72,9 @@ const OPENAI_COMPATIBLE_PROVIDER_ID = "openai-compatible-chat-completions";
 const OPENAI_COMPATIBLE_PROTOCOL = "openai_compatible_chat_completions";
 const OPENAI_COMPATIBLE_DEFAULT_BASE_URL = "https://api.openai.com";
 
+const OPENAI_RESPONSES_PROVIDER_ID = "openai-responses";
+const OPENAI_RESPONSES_PROTOCOL = "openai_responses";
+
 export function createModelRuntimeConfig(input: {
   readonly mode?: ModelRuntimeMode;
   readonly env?: ModelRuntimeEnvironment;
@@ -109,6 +113,14 @@ export function createModelRuntimeConfig(input: {
         }),
       createToolCenter: (runtime) => createDefaultToolCenter({ runtime, env: input.env ?? process.env, fetch: input.fetch }),
     };
+  }
+
+  if (mode === "openai-responses") {
+    return createOpenAIResponsesConfig({
+      env: input.env ?? process.env,
+      fetch: input.fetch,
+      onModelOutputDelta: input.onModelOutputDelta,
+    });
   }
 
   return createOpenAICompatibleConfig({
@@ -163,6 +175,62 @@ function createOpenAICompatibleConfig(input: {
       new NativeIntelligenceChannel({
         provider: new OpenAICompatibleChatCompletionsProvider({
           providerId: OPENAI_COMPATIBLE_PROVIDER_ID,
+          baseUrl,
+          apiKey,
+          model,
+          fetch: input.fetch,
+          stream: input.onModelOutputDelta !== undefined,
+          onOutputDelta: input.onModelOutputDelta,
+        }),
+        bus: runtime.bus,
+      }),
+    createToolCenter: (runtime) => createDefaultToolCenter({ runtime, env: input.env, fetch: input.fetch }),
+  };
+}
+
+function createOpenAIResponsesConfig(input: {
+  readonly env: ModelRuntimeEnvironment;
+  readonly fetch?: FetchLike;
+  readonly onModelOutputDelta?: (delta: ModelOutputDelta) => void;
+}): ModelRuntimeConfig {
+  const apiKey = firstNonBlank(input.env.AGENTARBOR_MODEL_API_KEY, input.env.OPENAI_API_KEY);
+  const model = firstNonBlank(input.env.AGENTARBOR_MODEL_NAME);
+  const baseUrl = firstNonBlank(input.env.AGENTARBOR_MODEL_BASE_URL) ?? OPENAI_COMPATIBLE_DEFAULT_BASE_URL;
+  const summaryInput: UndergroundDemoAiInput = {
+    enabled: true,
+    mode: "openai-responses",
+    providerId: OPENAI_RESPONSES_PROVIDER_ID,
+    providerKind: "openai",
+    protocolKind: OPENAI_RESPONSES_PROTOCOL,
+    model,
+  };
+
+  if (apiKey === undefined) {
+    throw new ModelRuntimeConfigurationError({
+      code: "missing_api_key",
+      message:
+        "--ai openai-responses requires AGENTARBOR_MODEL_API_KEY or OPENAI_API_KEY; no network request was attempted.",
+      summaryInput,
+    });
+  }
+
+  if (model === undefined) {
+    throw new ModelRuntimeConfigurationError({
+      code: "missing_model_name",
+      message:
+        "--ai openai-responses requires AGENTARBOR_MODEL_NAME; no network request was attempted.",
+      summaryInput,
+    });
+  }
+
+  return {
+    enabled: true,
+    mode: "openai-responses",
+    summaryInput,
+    createIntelligenceChannel: (runtime) =>
+      new NativeIntelligenceChannel({
+        provider: new OpenAIResponsesProvider({
+          providerId: OPENAI_RESPONSES_PROVIDER_ID,
           baseUrl,
           apiKey,
           model,

@@ -1,6 +1,7 @@
 import type { ToolStateSettings } from "../../domain/config/index.js";
 import type { InformationSourceKind } from "../../domain/research/index.js";
 import type { ToolCategory, ToolExecutor } from "../../domain/tools/index.js";
+import type { McpManager } from "../../adapters/mcp/index.js";
 import {
   createBrowserSnapshotTool,
   createLocalEditFileTool,
@@ -30,6 +31,7 @@ export type CreateDesktopBasicToolRegistryOptions = {
   readonly workspaceRoot?: string;
   readonly playwrightAvailable?: boolean;
   readonly toolStates?: readonly ToolStateSettings[];
+  readonly mcpManager?: McpManager;
 };
 
 export type ToolRegistryFetchLike = (
@@ -86,6 +88,15 @@ export function createDesktopBasicToolRegistry(
           ? { status: "unavailable", disabledReason: "Playwright is not installed in this workspace." }
           : { status: "available" },
     });
+  }
+  if (options.mcpManager !== undefined) {
+    for (const executor of options.mcpManager.getToolsForRegistry()) {
+      registry.register({
+        executor,
+        scopes: ["mcp", "desktop-basic"],
+        enabledByDefault: true,
+      });
+    }
   }
   return registry;
 }

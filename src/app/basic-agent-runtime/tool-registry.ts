@@ -10,7 +10,7 @@ import type {
 } from "../../domain/tools/index.js";
 import { ToolCenter } from "../tool-center/index.js";
 
-export type ToolRegistryScope = "desktop-basic" | "underground" | "research" | "workspace";
+export type ToolRegistryScope = "desktop-basic" | "underground" | "research" | "workspace" | "mcp";
 
 export type ToolRegistryEntry = {
   readonly executor: ToolExecutor;

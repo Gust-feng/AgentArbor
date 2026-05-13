@@ -78,6 +78,10 @@ export type SkillDefinition = {
   readonly sourcePath: string;
   readonly triggers: readonly string[];
   readonly lastUsedAt?: string;
+  readonly summary?: string;
+  readonly category?: string;
+  readonly scripts?: readonly string[];
+  readonly references?: readonly string[];
 };
 
 export type ContextAttachmentKind = "workspace" | "file" | "project" | "web";

@@ -8,6 +8,10 @@ export type SkillDiscoveryOptions = {
   readonly stateStore?: SkillStateStore;
 };
 
+export type SkillDisclosureLevel = "header" | "summary" | "full";
+
+export type SkillRelevanceStrategy = "keyword" | "llm";
+
 export async function discoverSkills(options: SkillDiscoveryOptions): Promise<readonly SkillDefinition[]> {
   const discovered = await Promise.all(options.roots.map((root) => discoverSkillsUnderRoot(root)));
   const states = await options.stateStore?.readStates();
@@ -22,11 +26,40 @@ export async function loadSkillBody(skill: SkillDefinition): Promise<string> {
   return parseSkillMarkdown(raw).body.trim();
 }
 
+export function getSkillDisclosure(
+  skill: SkillDefinition,
+  level: SkillDisclosureLevel
+): string {
+  switch (level) {
+    case "header":
+      return `${skill.name}: ${skill.description}`;
+    case "summary":
+      return skill.summary ?? skill.description;
+    case "full":
+      // Full body must be loaded via loadSkillBody; return description as a
+      // fallback placeholder when the caller does not await the async load.
+      return skill.summary ?? skill.description;
+  }
+}
+
 export function selectTriggeredSkills(
   goal: string,
   skills: readonly SkillDefinition[],
   limit = 4
 ): readonly SkillDefinition[] {
+  return selectTriggeredSkillsWithStrategy(goal, skills, "keyword", limit);
+}
+
+export function selectTriggeredSkillsWithStrategy(
+  goal: string,
+  skills: readonly SkillDefinition[],
+  strategy: SkillRelevanceStrategy,
+  limit = 4
+): readonly SkillDefinition[] {
+  if (strategy === "llm") {
+    return skills.filter((skill) => skill.enabled);
+  }
+  // "keyword" strategy — existing behaviour
   const normalizedGoal = normalizeForMatch(goal);
   if (normalizedGoal.length === 0) {
     return [];
@@ -68,6 +101,9 @@ async function readSkillDefinition(sourcePath: string, fallbackId: string): Prom
   const parsed = parseSkillMarkdown(raw);
   const name = firstString(parsed.frontmatter.name) ?? fallbackId;
   const id = safeSkillId(firstString(parsed.frontmatter.id) ?? name);
+  const skillDir = path.dirname(path.resolve(sourcePath));
+  const scripts = stringArray(parsed.frontmatter.scripts).map((rel) => path.resolve(skillDir, rel));
+  const references = stringArray(parsed.frontmatter.references).map((rel) => path.resolve(skillDir, rel));
   return {
     id,
     name,
@@ -76,6 +112,10 @@ async function readSkillDefinition(sourcePath: string, fallbackId: string): Prom
     sourcePath: path.resolve(sourcePath),
     triggers: stringArray(parsed.frontmatter.triggers),
     lastUsedAt: firstString(parsed.frontmatter.lastUsedAt),
+    summary: firstString(parsed.frontmatter.summary),
+    category: firstString(parsed.frontmatter.category),
+    scripts: scripts.length > 0 ? scripts : undefined,
+    references: references.length > 0 ? references : undefined,
   };
 }
 

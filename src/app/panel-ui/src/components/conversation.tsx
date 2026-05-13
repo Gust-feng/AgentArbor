@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { eventTitle, statusTone } from "../text";
 import type { AgentDeliverable, BasicAgentRun, Conversation, DesktopRunDetail, DesktopWorkSession, PendingConfirmation, RunEvent } from "../types";
+import { RichText } from "./rich-text";
 
 export function ConversationView(props: {
   readonly conversation?: Conversation;
@@ -40,7 +41,7 @@ export function ConversationView(props: {
           {turns.map((turn) => (
             <article className={`message ${turn.role}`} key={turn.turnId}>
               <header>{turn.role === "user" ? "你" : turn.title || "助手"}</header>
-              <p>{turn.content}</p>
+              <RichText text={turn.content} />
             </article>
           ))}
           {shouldShowWorkSession ? <WorkSessionCard workSession={props.workSession} /> : props.run !== undefined && !plainCompletedAnswer && <RunCard run={props.run} />}
@@ -53,7 +54,7 @@ export function ConversationView(props: {
             <article className="result-card">
               <span className="eyebrow">结果</span>
               <h2>{props.workSession?.answer?.title ?? props.detail?.restoredResult?.title ?? "已整理"}</h2>
-              <p>{answer}</p>
+              <RichText text={answer} />
               {props.workSession?.answer?.nextActions.length ? (
                 <div className="deliverable-meta">
                   {props.workSession.answer.nextActions.slice(0, 3).map((action) => <span key={action}>{action}</span>)}
@@ -84,7 +85,7 @@ function WorkSessionCard({ workSession }: { readonly workSession: DesktopWorkSes
         <span className={`status-dot ${statusTone(workSession.run.status)}`} />
         <strong>{workSession.headline}</strong>
       </div>
-      <p>{workSession.currentAction}</p>
+      <RichText text={workSession.currentAction} />
       {workSession.contextAttachments.length > 0 && (
         <div className="inline-context-list">
           {workSession.contextAttachments.slice(0, 4).map((attachment) => (
@@ -101,11 +102,11 @@ function DeliverableCard({ deliverable }: { readonly deliverable: AgentDeliverab
     <article className="deliverable-card">
       <span className="eyebrow">交付结果</span>
       <h2>{deliverable.title}</h2>
-      <p>{deliverable.summary}</p>
+      <RichText text={deliverable.summary} />
       {deliverable.sections.slice(0, 4).map((section) => (
         <section key={section.sectionId}>
           <h3>{section.title}</h3>
-          <p>{section.content}</p>
+          <RichText text={section.content} />
         </section>
       ))}
       {(deliverable.toolDisplays.length > 0 || deliverable.nextActions.length > 0) && (
@@ -125,7 +126,7 @@ function RunCard({ run }: { readonly run: BasicAgentRun }): React.ReactElement {
         <span className={`status-dot ${statusTone(run.status)}`} />
         <strong>{run.title}</strong>
       </div>
-      <p>{run.currentStep || run.goalSummary}</p>
+      <RichText text={run.currentStep || run.goalSummary} />
       {run.nextStep && <small>{run.nextStep}</small>}
     </article>
   );
@@ -140,7 +141,7 @@ function ActivityTimeline({ events }: { readonly events: readonly RunEvent[] }):
           <span />
           <div>
             <strong>{eventTitle(event)}</strong>
-            {event.summary && <p>{event.summary}</p>}
+            {event.summary && <RichText text={event.summary} />}
           </div>
         </article>
       ))}
@@ -158,7 +159,7 @@ function ConfirmationCard(props: {
     <article className="confirmation-card">
       <span className="eyebrow">待确认 · {props.confirmation.riskLevel}</span>
       <h2>{props.confirmation.title || "需要确认"}</h2>
-      <p>{"actionSummary" in props.confirmation ? props.confirmation.actionSummary : props.confirmation.question}</p>
+      <RichText text={"actionSummary" in props.confirmation ? props.confirmation.actionSummary : props.confirmation.question} />
       {"consequence" in props.confirmation && <p className="muted">{props.confirmation.consequence}</p>}
       {resumeLost && <p className="muted">应用重启后无法继续原危险操作。请补充指导或重新发起后续任务。</p>}
       <textarea value={guidance} onChange={(event) => setGuidance(event.target.value)} placeholder="补充你的要求或限制" rows={3} />

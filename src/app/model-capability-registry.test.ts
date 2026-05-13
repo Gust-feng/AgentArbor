@@ -44,6 +44,18 @@ test("model capability registry matches specific compact families before broad G
   assert.equal(capabilities.supportsReasoningEffort, true);
 });
 
+test("model capability registry enables tools for current DeepSeek V4 OpenAI-compatible models", () => {
+  const capabilities = resolveModelCapabilities({ profile: profile("deepseek-v4-pro") });
+
+  assert.equal(isKnownModel(profile("deepseek-v4-pro")), true);
+  assert.equal(capabilities.contextWindowTokens, 1_000_000);
+  assert.equal(capabilities.maxOutputTokens, 384_000);
+  assert.equal(capabilities.supportsToolCalling, true);
+  assert.equal(capabilities.supportsParallelToolCalls, false);
+  assert.equal(capabilities.supportsStructuredOutputs, true);
+  assert.equal(capabilities.preferredApiStyle, "openai_compatible");
+});
+
 test("unknown models use conservative capabilities until explicitly overridden", () => {
   const unknown = profile("vendor-new-model");
   const fallback = resolveModelCapabilities({ profile: unknown });

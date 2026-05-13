@@ -87,7 +87,7 @@ export type UndergroundDemoSummary = {
 
 export type UndergroundDemoAiInput = {
   readonly enabled: boolean;
-  readonly mode: "none" | "fake" | "openai-compatible";
+  readonly mode: "none" | "fake" | "openai-compatible" | "openai-responses";
   readonly providerId?: string;
   readonly providerKind?: string;
   readonly protocolKind?: string;

@@ -13,6 +13,7 @@ export type ModelDefinition = {
 };
 
 const VERIFIED_AT = "2026-05-12";
+const DEEPSEEK_VERIFIED_AT = "2026-05-13";
 
 export const CONSERVATIVE_MODEL_CAPABILITIES: ModelCapabilities = {
   contextWindowTokens: 16_000,
@@ -243,6 +244,24 @@ const OPENAI_COMPATIBLE_DEFINITIONS: readonly ModelDefinition[] = [
       preferredApiStyle: "openai_compatible",
       stability: "unknown",
       lastVerifiedAt: VERIFIED_AT,
+    },
+  },
+  {
+    providerKind: "openai_compatible",
+    modelPattern: "deepseek-v4",
+    label: "DeepSeek V4 family",
+    capabilities: {
+      contextWindowTokens: 1_000_000,
+      maxOutputTokens: 384_000,
+      supportsToolCalling: true,
+      supportsParallelToolCalls: false,
+      supportsStructuredOutputs: true,
+      supportsStreaming: true,
+      supportsVisionInput: false,
+      supportsReasoningEffort: true,
+      preferredApiStyle: "openai_compatible",
+      stability: "stable",
+      lastVerifiedAt: DEEPSEEK_VERIFIED_AT,
     },
   },
   {

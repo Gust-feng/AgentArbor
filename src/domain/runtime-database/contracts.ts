@@ -64,7 +64,7 @@ export type RuntimeRunRecord = {
   readonly runMode: "agent" | "deep";
   readonly status: RuntimeRunStatus;
   readonly goalSummary: string;
-  readonly aiMode: "none" | "fake" | "openai-compatible";
+  readonly aiMode: "none" | "fake" | "openai-compatible" | "openai-responses";
   readonly workspaceId?: string;
   readonly workspacePath?: string;
   readonly conversationId?: string;

@@ -32,13 +32,15 @@ test("panel HTML serves the React workbench shell without first-screen internals
 });
 
 test("panel React source is split into typed frontend modules", async () => {
-  const [entry, app, api, types, text, settings] = await Promise.all([
+  const [entry, app, api, types, text, settings, conversation, richText] = await Promise.all([
     readPanelUiSource("main.tsx"),
     readPanelUiSource("App.tsx"),
     readPanelUiSource("api.ts"),
     readPanelUiSource("types.ts"),
     readPanelUiSource("text.ts"),
     readPanelUiSource(path.join("components", "settings-panel.tsx")),
+    readPanelUiSource(path.join("components", "conversation.tsx")),
+    readPanelUiSource(path.join("components", "rich-text.tsx")),
   ]);
 
   assert.equal(entry.includes('import { App } from "./App"'), true);
@@ -50,6 +52,11 @@ test("panel React source is split into typed frontend modules", async () => {
   assert.equal(types.includes("export type BasicAgentRun"), true);
   assert.equal(text.includes("export const STATUS_LABELS"), true);
   assert.equal(settings.includes("function ToolCatalog"), true);
+  assert.equal(conversation.includes('import { RichText } from "./rich-text"'), true);
+  assert.equal(richText.includes("parseRichTextBlocks"), true);
+  assert.equal(richText.includes('type: "code"'), true);
+  assert.equal(richText.includes("dangerouslySetInnerHTML"), false);
+  assert.equal(richText.includes("innerHTML"), false);
 });
 
 test("panel React workbench consumes Basic Agent projection APIs", async () => {

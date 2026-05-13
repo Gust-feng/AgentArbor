@@ -53,6 +53,7 @@ test("context ledger records goal, history, attachments, skills, budget, and saf
 
   assert.equal(ledger.runId, "run-ledger");
   assert.equal(ledger.items.some((item) => item.sourceKind === "system"), true);
+  assert.equal(ledger.items.some((item) => item.sourceKind === "system" && item.summary.includes("Do not write shell commands")), true);
   assert.equal(ledger.items.some((item) => item.sourceKind === "conversation"), true);
   assert.equal(ledger.items.some((item) => item.sourceKind === "task_soil_ref"), true);
   assert.equal(ledger.items.some((item) => item.sourceKind === "skill"), true);

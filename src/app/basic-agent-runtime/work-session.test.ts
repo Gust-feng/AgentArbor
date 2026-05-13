@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { BasicAgentRun, RunEvent } from "../../domain/basic-agent/index.js";
+import type { ToolResultEnvelope } from "../../domain/tools/index.js";
 import { createDesktopWorkSessionReadModel } from "./work-session.js";
 
 test("work session read model keeps ordinary completed answers separate from deliverables", () => {
@@ -90,6 +91,70 @@ test("work session read model surfaces approval as the main stage", () => {
   assert.equal(workSession.deliverable, undefined);
 });
 
+test("work session read model carries envelope-safe tool evidence and display", () => {
+  const run = basicRun("completed");
+  const workSession = createDesktopWorkSessionReadModel({
+    run,
+    events: [event(run.runId, "tool.completed", "搜索已完成", "completed")],
+    canvas: {
+      kind: "desktop_agent_canvas",
+      taskSoil: {
+        taskSoilId: "soil-tool-evidence",
+        goalSummary: "查找资料",
+        contextRefs: [],
+        permissionBoundaryRefs: ["read:web"],
+      },
+      agent: {
+        status: "completed",
+        answer: {
+          answer: "已根据搜索证据回答。",
+          modelCallRefs: ["model-call-1"],
+          toolCallRefs: ["call-search"],
+          evidenceRefs: ["tool:call-search"],
+          resultBlocks: [],
+        },
+        modelCallRefs: ["model-call-1"],
+        toolCallRefs: ["call-search"],
+        activity: [],
+      },
+      explanation: {
+        resultWhyReasonable: "safe",
+        observationPanelRole: "safe",
+      },
+    },
+    toolEvidence: [searchEnvelope()],
+  });
+
+  assert.equal(workSession.toolEvidence.length, 1);
+  assert.equal(workSession.toolEvidence[0]?.uiDisplay?.kind, "search_results");
+  assert.equal(workSession.deliverable?.toolDisplays[0]?.kind, "search_results");
+  const toolEntry = workSession.contextLedger.entries.find((entry) => entry.kind === "tool_evidence");
+  assert.equal(toolEntry?.status, "used");
+  assert.equal(toolEntry?.refs.some((ref) => ref.kind === "tool_call" && ref.id === "call-search"), true);
+  const json = JSON.stringify(workSession);
+  assert.equal(json.includes("RAW_TOOL_OUTPUT_SENTINEL"), false);
+  assert.equal(json.includes("sk-tool-secret"), false);
+});
+
+test("work session context ledger distinguishes blocked context refs", () => {
+  const run = basicRun("running");
+  const workSession = createDesktopWorkSessionReadModel({
+    run,
+    events: [],
+    taskSoilInput: {
+      contextRefs: [{
+        kind: "file",
+        ref: "file:notes.md",
+        summary: "Denied file context",
+      }],
+      permissionBoundaryRefs: ["deny:file:notes.md"],
+    },
+  });
+
+  assert.equal(workSession.contextAttachments[0]?.status, "blocked");
+  assert.equal(workSession.contextLedger.entries.some((entry) => entry.status === "blocked"), true);
+});
+
 function basicRun(status: BasicAgentRun["status"]): BasicAgentRun {
   return {
     runId: "basic-run-test",
@@ -116,5 +181,26 @@ function event(runId: string, type: string, summary: string, status: BasicAgentR
     timestamp: "2026-05-12T00:00:01.000Z",
     refs: [],
     visibility: "compact",
+  };
+}
+
+function searchEnvelope(): ToolResultEnvelope {
+  return {
+    agentSummary: "Search found one relevant source. sk-tool-secret",
+    evidenceRefs: ["tool:call-search", "web:https://example.test/agentarbor"],
+    uiDisplay: {
+      kind: "search_results",
+      query: "AgentArbor",
+      results: [{
+        title: "AgentArbor docs",
+        url: "https://example.test/agentarbor",
+        snippet: "safe snippet",
+      }],
+    },
+    tokenEstimate: 16,
+    truncated: false,
+    redacted: true,
+    diagnosticRef: "tool:call-search",
+    rawRetention: "diagnostic_ref_only",
   };
 }

@@ -192,6 +192,7 @@ function parseOptionalModelProtocolKind(value: unknown): ConfiguredModelProtocol
     return undefined;
   }
   if (
+    value === "openai_responses" ||
     value === "openai_compatible_chat_completions" ||
     value === "anthropic_messages" ||
     value === "gemini_generate_content" ||
@@ -247,7 +248,7 @@ function parseOptionalAiMode(value: unknown, invalidMessage: string): ModelRunti
 }
 
 function parseAiMode(value: unknown): ModelRuntimeMode | undefined {
-  if (value === "none" || value === "fake" || value === "openai-compatible") {
+  if (value === "none" || value === "fake" || value === "openai-compatible" || value === "openai-responses") {
     return value;
   }
   return undefined;

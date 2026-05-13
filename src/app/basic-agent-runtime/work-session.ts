@@ -12,7 +12,7 @@ import type {
   RunEvent,
 } from "../../domain/basic-agent/index.js";
 import type { ObservationRef } from "../../domain/observation/index.js";
-import type { ToolDisplayProjection } from "../../domain/tools/index.js";
+import type { ToolDisplayProjection, ToolResultEnvelope } from "../../domain/tools/index.js";
 import type { PanelRunCanvasReadModel } from "../panel-canvas-read-model.js";
 import type { DesktopTaskSoilInput } from "../task-soil-workspace.js";
 import { redactOrdinaryText } from "./safe-projection.js";
@@ -23,6 +23,7 @@ export type CreateDesktopWorkSessionReadModelInput = {
   readonly canvas?: PanelRunCanvasReadModel;
   readonly taskSoilInput?: DesktopTaskSoilInput;
   readonly toolDisplays?: readonly ToolDisplayProjection[];
+  readonly toolEvidence?: readonly ToolResultEnvelope[];
   readonly pendingConfirmation?: ConfirmationRequest;
   readonly restoredResult?: {
     readonly title: string;
@@ -35,8 +36,9 @@ export function createDesktopWorkSessionReadModel(
 ): DesktopWorkSessionReadModel {
   const visibleEvents = input.events.filter((event) => event.visibility !== "debug").slice(-18);
   const contextAttachments = contextAttachmentsFor(input);
-  const toolDisplays = input.toolDisplays ?? [];
-  const contextLedger = contextLedgerFor(input, contextAttachments, toolDisplays);
+  const toolEvidence = envelopeSafeToolEvidence(input.toolEvidence ?? []);
+  const toolDisplays = mergeToolDisplays(toolEvidence.map((envelope) => envelope.uiDisplay).filter(isToolDisplay), input.toolDisplays ?? []);
+  const contextLedger = contextLedgerFor(input, contextAttachments, toolEvidence, toolDisplays);
   const pendingConfirmation = input.pendingConfirmation ?? pendingConfirmationFor(input.run, input.canvas);
   const answer = answerFor(input);
   const deliverable = deliverableFor({
@@ -57,11 +59,12 @@ export function createDesktopWorkSessionReadModel(
     pendingConfirmation,
     answer,
     deliverable,
+    toolEvidence,
     visibleEvents,
     safetySummary: {
       summary: "普通视图只展示上下文引用、工具摘要、证据和交付结果的安全投影。",
       pendingActionCount: pendingConfirmation === undefined ? 0 : 1,
-      toolResultCount: toolDisplays.length,
+      toolResultCount: toolEvidence.length > 0 ? toolEvidence.length : toolDisplays.length,
       contextAttachmentCount: contextAttachments.length,
     },
   };
@@ -70,6 +73,7 @@ export function createDesktopWorkSessionReadModel(
 function contextLedgerFor(
   input: CreateDesktopWorkSessionReadModelInput,
   attachments: readonly ContextAttachment[],
+  toolEvidence: readonly ToolResultEnvelope[],
   toolDisplays: readonly ToolDisplayProjection[]
 ): ContextLedger {
   const context = input.canvas?.kind === "desktop_agent_canvas" ? input.canvas.agent.context : undefined;
@@ -102,27 +106,81 @@ function contextLedgerFor(
         refs: [{ kind: "event", id: item.itemId }],
         status: item.truncated ? "truncated" : "used",
       })),
-    ...toolDisplays.slice(0, 12).map((display, index): ContextLedgerEntry => ({
+    ...toolEvidence.slice(0, 12).map((envelope, index): ContextLedgerEntry => ({
+      entryId: `${input.run.runId}:ledger:tool-evidence:${envelope.diagnosticRef ?? index}`,
+      kind: "tool_evidence",
+      title: envelope.uiDisplay === undefined ? "工具证据" : toolLedgerTitle(envelope.uiDisplay),
+      summary: redactOrdinaryText(envelope.agentSummary, 420),
+      refs: observationRefs(envelope.evidenceRefs),
+      status: envelope.truncated ? "truncated" : "used",
+    })),
+    ...(toolEvidence.length > 0 ? [] : toolDisplays.slice(0, 12).map((display, index): ContextLedgerEntry => ({
       entryId: `${input.run.runId}:ledger:tool:${index}`,
       kind: "tool_evidence",
       title: toolLedgerTitle(display),
       summary: toolLedgerSummary(display),
       refs: [],
       status: "truncated" in display && display.truncated === true ? "truncated" : "used",
-    })),
+    }))),
   ];
   const truncation = context?.truncationReport ?? {
     truncated: entries.some((entry) => entry.status === "truncated"),
     omittedItemCount: 0,
     truncatedItemIds: entries.filter((entry) => entry.status === "truncated").map((entry) => entry.entryId),
   };
+  const budgetEntries = contextBudgetEntries(input.run.runId, context?.budget, truncation);
+  const allEntries = [...entries, ...budgetEntries];
   return {
     runId: input.run.runId,
-    summary: context?.usageSummary ?? `上下文来源 ${entries.length} 项，普通视图只展示引用和安全摘要。`,
-    entries,
+    summary: context?.usageSummary ?? `上下文来源 ${allEntries.length} 项，普通视图只展示引用和安全摘要。`,
+    entries: allEntries,
     budget: context?.budget,
     truncation,
   };
+}
+
+function contextBudgetEntries(
+  runId: string,
+  budget: ContextLedger["budget"] | undefined,
+  truncation: ContextLedger["truncation"]
+): readonly ContextLedgerEntry[] {
+  const entries: ContextLedgerEntry[] = [];
+  if (budget !== undefined) {
+    entries.push({
+      entryId: `${runId}:ledger:budget`,
+      kind: "budget",
+      title: "上下文预算",
+      summary: [
+        budget.maxChars === undefined ? undefined : `maxChars=${budget.maxChars}`,
+        budget.usedChars === undefined ? undefined : `usedChars=${budget.usedChars}`,
+        budget.estimatedInputTokens === undefined ? undefined : `estimatedInputTokens=${budget.estimatedInputTokens}`,
+        budget.budgetSource === undefined ? undefined : `source=${budget.budgetSource}`,
+      ].filter(isString).join("；") || "本轮没有记录上下文预算。",
+      refs: [],
+      status: truncation.truncated ? "truncated" : "used",
+    });
+  }
+  if (truncation.omittedItemCount > 0) {
+    entries.push({
+      entryId: `${runId}:ledger:omitted`,
+      kind: "truncation",
+      title: "未进入模型的上下文",
+      summary: `因上下文预算限制，${truncation.omittedItemCount} 项上下文未进入模型输入。`,
+      refs: [],
+      status: "omitted",
+    });
+  }
+  if (truncation.truncatedItemIds.length > 0) {
+    entries.push({
+      entryId: `${runId}:ledger:truncated`,
+      kind: "truncation",
+      title: "已截断上下文",
+      summary: `已截断上下文项：${truncation.truncatedItemIds.slice(0, 8).join("；")}`,
+      refs: [],
+      status: "truncated",
+    });
+  }
+  return entries;
 }
 
 function toolLedgerTitle(display: ToolDisplayProjection): string {
@@ -309,6 +367,52 @@ function shouldPromoteAnswerToDeliverable(toolDisplays: readonly ToolDisplayProj
   );
 }
 
+function envelopeSafeToolEvidence(envelopes: readonly ToolResultEnvelope[]): readonly ToolResultEnvelope[] {
+  const selected: ToolResultEnvelope[] = [];
+  const seen = new Set<string>();
+  for (const envelope of envelopes) {
+    const key = envelope.diagnosticRef ?? `${envelope.agentSummary}:${envelope.evidenceRefs.join("|")}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    selected.push({
+      agentSummary: redactOrdinaryText(envelope.agentSummary, 1_800),
+      evidenceRefs: envelope.evidenceRefs.map((ref) => redactOrdinaryText(ref, 220)).filter((ref) => ref.length > 0).slice(0, 12),
+      uiDisplay: envelope.uiDisplay,
+      tokenEstimate: Number.isFinite(envelope.tokenEstimate)
+        ? Math.max(1, Math.floor(envelope.tokenEstimate))
+        : Math.max(1, Math.ceil(envelope.agentSummary.length / 4)),
+      truncated: envelope.truncated,
+      redacted: envelope.redacted !== false,
+      diagnosticRef: envelope.diagnosticRef === undefined ? undefined : redactOrdinaryText(envelope.diagnosticRef, 220),
+      rawRetention: envelope.rawRetention,
+    });
+  }
+  return selected.slice(0, 24);
+}
+
+function mergeToolDisplays(
+  primary: readonly ToolDisplayProjection[],
+  fallback: readonly ToolDisplayProjection[]
+): readonly ToolDisplayProjection[] {
+  const displays: ToolDisplayProjection[] = [];
+  const seen = new Set<string>();
+  for (const display of [...primary, ...fallback]) {
+    const key = JSON.stringify(display);
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    displays.push(display);
+  }
+  return displays;
+}
+
+function isToolDisplay(value: ToolDisplayProjection | undefined): value is ToolDisplayProjection {
+  return value !== undefined;
+}
+
 function deliverable(input: {
   readonly run: BasicAgentRun;
   readonly title: string;
@@ -377,13 +481,16 @@ function contextAttachmentsFor(input: CreateDesktopWorkSessionReadModelInput): r
     ref: ref.ref,
     title: contextTitle(ref.kind, ref.ref),
     summary: redactOrdinaryText(ref.summary ?? ref.ref, 280),
-    permissionRefs: [],
+    permissionRefs: (input.taskSoilInput?.permissionBoundaryRefs ?? []).map((permission) => redactOrdinaryText(permission, 220)),
     readonlyPreviewMeta: {
       available: true,
       title: ref.readonlyPreview?.title,
       truncated: ref.readonlyPreview?.text !== undefined ? ref.readonlyPreview.text.length > 0 : undefined,
     },
-    status: "ready",
+    status: contextRefDenied(ref.kind, ref.ref, input.taskSoilInput?.permissionBoundaryRefs ?? []) ? "blocked" : "ready",
+    warning: contextRefDenied(ref.kind, ref.ref, input.taskSoilInput?.permissionBoundaryRefs ?? [])
+      ? "该上下文引用被当前权限边界阻止。"
+      : undefined,
   }));
   if (fromCanvas.length === 0) {
     return fromInput;
@@ -433,8 +540,21 @@ function taskSoilContextAttachments(canvas: PanelRunCanvasReadModel | undefined)
         byteLength: ref.readonlyPreview?.text.length,
         truncated: ref.readonlyPreview?.truncated,
       },
-      status: "ready",
+      status: contextRefDenied(ref.kind, ref.ref, taskSoil.permissionBoundaryRefs) ? "blocked" : "ready",
+      warning: contextRefDenied(ref.kind, ref.ref, taskSoil.permissionBoundaryRefs)
+        ? "该上下文引用被当前权限边界阻止。"
+        : undefined,
     }));
+}
+
+function contextRefDenied(kind: string, ref: string, permissionRefs: readonly string[]): boolean {
+  const cleanRef = ref.includes(":") ? ref.slice(ref.indexOf(":") + 1) : ref;
+  const denied = new Set([
+    `deny:${ref}`,
+    `deny:${kind}:${cleanRef}`,
+    `deny:${kind}`,
+  ].map((value) => value.toLowerCase()));
+  return permissionRefs.some((permission) => denied.has(permission.toLowerCase()));
 }
 
 function contextTitle(kind: string, ref: string): string {
@@ -466,4 +586,8 @@ function observationKind(value: string): ObservationRef["kind"] {
   if (value === "model" || value === "model_call") return "model_call";
   if (value === "artifact") return "artifact";
   return "event";
+}
+
+function isString(value: unknown): value is string {
+  return typeof value === "string";
 }

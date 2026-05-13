@@ -59,6 +59,7 @@ test("context ledger records goal, history, attachments, skills, budget, and saf
   assert.equal(ledger.items.some((item) => item.sourceKind === "skill"), true);
   assert.equal(ledger.budget.budgetSource, "model_capabilities");
   assert.equal(ledger.readModel.entries.some((entry) => entry.kind === "attachment"), true);
+  assert.equal(ledger.readModel.entries.some((entry) => entry.kind === "budget" && entry.status === "used"), true);
   assert.match(ledger.readModel.summary, /历史对话/);
   const json = JSON.stringify(ledger);
   assert.equal(json.includes("sk-context-secret"), false);
@@ -108,6 +109,9 @@ test("context ledger reports truncation when messages or chars exceed budget", (
   assert.equal(ledger.truncationReport.truncated, true);
   assert.equal(ledger.truncationReport.omittedItemCount > 0, true);
   assert.equal(ledger.budget.estimatedInputTokens !== undefined, true);
+  assert.equal(ledger.readModel.entries.some((entry) => entry.status === "omitted"), true);
+  assert.equal(ledger.readModel.entries.some((entry) => entry.kind === "truncation" && entry.status === "omitted"), true);
+  assert.equal(ledger.readModel.entries.some((entry) => entry.kind === "budget" && entry.status === "truncated"), true);
 });
 
 function skillContext(): DesktopAgentSkillContext {

@@ -217,7 +217,7 @@ export function normalizeOptionalString(value: string | undefined): string | und
 }
 
 export function normalizeAiMode(value: ConfiguredUndergroundAiMode | undefined): ConfiguredUndergroundAiMode | undefined {
-  return value === "none" || value === "fake" || value === "openai-compatible" ? value : undefined;
+  return value === "none" || value === "fake" || value === "openai-compatible" || value === "openai-responses" ? value : undefined;
 }
 
 export function normalizeModelProviderKind(value: ConfiguredModelProviderKind | undefined): ConfiguredModelProviderKind | undefined {
@@ -231,6 +231,7 @@ export function normalizeModelProtocolKind(
   providerKind: ConfiguredModelProviderKind
 ): ConfiguredModelProtocolKind | undefined {
   if (
+    value === "openai_responses" ||
     value === "openai_compatible_chat_completions" ||
     value === "anthropic_messages" ||
     value === "gemini_generate_content" ||
@@ -367,6 +368,7 @@ function parseModelProtocolKind(
   providerKind: AgentArborLocalSettings["modelProvider"]["providerKind"]
 ): AgentArborLocalSettings["modelProvider"]["protocolKind"] {
   if (
+    value === "openai_responses" ||
     value === "openai_compatible_chat_completions" ||
     value === "anthropic_messages" ||
     value === "gemini_generate_content" ||
@@ -543,7 +545,7 @@ function booleanFromUnknown(value: unknown): boolean | undefined {
 }
 
 function parseAiMode(value: unknown): AgentArborLocalSettings["modelProvider"]["defaultAiMode"] {
-  if (value === "none" || value === "fake" || value === "openai-compatible") {
+  if (value === "none" || value === "fake" || value === "openai-compatible" || value === "openai-responses") {
     return value;
   }
   return "none";

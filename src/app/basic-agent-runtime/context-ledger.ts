@@ -126,6 +126,7 @@ function buildContextLedgerFromItems(input: {
   readonly extraEvidenceRefs?: readonly string[];
 }): BasicAgentContextLedger {
   const selected: BasicAgentContextItem[] = [];
+  const omitted: BasicAgentContextItem[] = [];
   let omittedItemCount = 0;
   let usedChars = 0;
   let truncatedByBudget = false;
@@ -134,6 +135,7 @@ function buildContextLedgerFromItems(input: {
     if (selected.length >= input.maxMessages || usedChars + itemChars > input.maxChars) {
       truncatedByBudget = true;
       omittedItemCount += 1;
+      omitted.push(item);
       continue;
     }
     selected.push(item);
@@ -164,17 +166,18 @@ function buildContextLedgerFromItems(input: {
     evidenceRefs,
     budget,
     truncationReport,
-    readModel: toContextLedgerReadModel(input.runId, selected, budget, truncationReport),
+    readModel: toContextLedgerReadModel(input.runId, selected, omitted, budget, truncationReport),
   };
 }
 
 function toContextLedgerReadModel(
   runId: string,
   items: readonly BasicAgentContextItem[],
+  omittedItems: readonly BasicAgentContextItem[],
   budget: BasicAgentContextLedger["budget"],
   truncationReport: BasicAgentContextLedger["truncationReport"]
 ): ContextLedger {
-  const entries = items.map((item): ContextLedgerEntry => ({
+  const usedEntries = items.map((item): ContextLedgerEntry => ({
     entryId: item.itemId,
     kind: contextLedgerEntryKind(item.sourceKind),
     title: contextLedgerEntryTitle(item),
@@ -182,13 +185,66 @@ function toContextLedgerReadModel(
     refs: item.refs,
     status: item.truncated ? "truncated" : "used",
   }));
+  const omittedEntries = omittedItems.slice(0, 12).map((item): ContextLedgerEntry => ({
+    entryId: `${item.itemId}:omitted`,
+    kind: contextLedgerEntryKind(item.sourceKind),
+    title: contextLedgerEntryTitle(item),
+    summary: "因上下文预算限制，该项未进入模型输入；普通视图只保留安全引用和状态。",
+    refs: item.refs,
+    status: "omitted",
+  }));
+  const budgetEntries = contextBudgetEntries(runId, budget, truncationReport);
+  const entries = [...usedEntries, ...omittedEntries, ...budgetEntries];
   return {
     runId,
-    summary: contextUsageSummary(items),
+    summary: contextUsageSummary(items, omittedItems),
     entries,
     budget,
     truncation: truncationReport,
   };
+}
+
+function contextBudgetEntries(
+  runId: string,
+  budget: BasicAgentContextLedger["budget"],
+  truncationReport: BasicAgentContextLedger["truncationReport"]
+): readonly ContextLedgerEntry[] {
+  const entries: ContextLedgerEntry[] = [
+    {
+      entryId: `${runId}:context-budget`,
+      kind: "budget",
+      title: "上下文预算",
+      summary: [
+        `maxChars=${budget.maxChars}`,
+        `usedChars=${budget.usedChars}`,
+        `estimatedInputTokens=${budget.estimatedInputTokens ?? 0}`,
+        `source=${budget.budgetSource}`,
+      ].join("；"),
+      refs: [],
+      status: truncationReport.truncated ? "truncated" : "used",
+    },
+  ];
+  if (truncationReport.omittedItemCount > 0) {
+    entries.push({
+      entryId: `${runId}:context-omitted`,
+      kind: "truncation",
+      title: "未进入模型的上下文",
+      summary: `因上下文预算限制，${truncationReport.omittedItemCount} 项上下文未进入模型输入。`,
+      refs: [],
+      status: "omitted",
+    });
+  }
+  if (truncationReport.truncatedItemIds.length > 0) {
+    entries.push({
+      entryId: `${runId}:context-truncated`,
+      kind: "truncation",
+      title: "已截断上下文",
+      summary: `已截断上下文项：${truncationReport.truncatedItemIds.slice(0, 8).join("；")}`,
+      refs: [],
+      status: "truncated",
+    });
+  }
+  return entries;
 }
 
 function contextLedgerEntryKind(kind: BasicAgentContextSourceKind): ContextLedgerEntry["kind"] {
@@ -327,7 +383,10 @@ function toolEvidenceItems(envelopes: readonly ToolResultEnvelope[]): readonly B
   });
 }
 
-function contextUsageSummary(items: readonly BasicAgentContextItem[]): string {
+function contextUsageSummary(
+  items: readonly BasicAgentContextItem[],
+  omittedItems: readonly BasicAgentContextItem[] = []
+): string {
   const counts = new Map<BasicAgentContextSourceKind, number>();
   for (const item of items) {
     counts.set(item.sourceKind, (counts.get(item.sourceKind) ?? 0) + 1);
@@ -340,9 +399,10 @@ function contextUsageSummary(items: readonly BasicAgentContextItem[]): string {
     task_soil_ref: "上下文引用",
     tool_evidence: "工具证据",
   };
-  return [...counts.entries()]
+  const summary = [...counts.entries()]
     .map(([kind, count]) => `${labels[kind]} ${count}`)
     .join("；");
+  return omittedItems.length === 0 ? summary : `${summary}；未进入模型 ${omittedItems.length}`;
 }
 
 function contextRefPromptLine(ref: TaskSoil["contextRefs"][number]): string {

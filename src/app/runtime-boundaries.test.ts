@@ -72,14 +72,14 @@ test("aboveground planner cannot create direction exploration candidates", () =>
   assert.throws(() => planner.createExplorationCandidate(), StateGuardError);
 });
 
-test("runtime has no external LLM SDK dependency or direct provider adapter import outside adapter tests", () => {
+test("runtime keeps external LLM SDKs behind provider adapters", () => {
   const packageJson = JSON.parse(readFileSync("package.json", "utf8")) as {
     dependencies?: Record<string, string>;
     devDependencies?: Record<string, string>;
   };
+  const allowedAdapterOnlyPackages = ["openai"];
   const prohibitedPackages = [
     "ai",
-    "openai",
     "@ai-sdk/openai",
     "@anthropic-ai/sdk",
     "@google/genai",
@@ -90,6 +90,10 @@ test("runtime has no external LLM SDK dependency or direct provider adapter impo
     ...(packageJson.dependencies ?? {}),
     ...(packageJson.devDependencies ?? {}),
   };
+
+  for (const packageName of allowedAdapterOnlyPackages) {
+    assert.equal(packageName in allDependencies, true, `${packageName} SDK should be declared explicitly for provider adapters`);
+  }
 
   for (const packageName of prohibitedPackages) {
     assert.equal(packageName in allDependencies, false, `${packageName} must not be introduced as a dependency`);

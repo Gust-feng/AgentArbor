@@ -1865,7 +1865,7 @@ function toRuntimeToolCallRecords(
         summary: detail?.summary ?? event.summary ?? previous?.summary,
         preview: event.detail?.preview ?? detail?.preview ?? previous?.preview,
         display: event.detail?.display ?? detail?.display ?? previous?.display,
-        envelope: detail?.envelope ?? previous?.envelope,
+        envelope: event.detail?.envelope ?? detail?.envelope ?? previous?.envelope,
         truncated: event.detail?.truncated ?? detail?.truncated ?? previous?.truncated,
         error: event.detail?.error ?? detail?.error ?? previous?.error,
         eventRefs: unique([...(previous?.eventRefs ?? []), event.eventId]),

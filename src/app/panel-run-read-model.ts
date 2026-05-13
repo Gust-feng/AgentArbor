@@ -1,7 +1,7 @@
 import type { ArborMessageType } from "../domain/common.js";
 import type { SanitizedInformationAccessConfig, SanitizedModelProviderConfig } from "../domain/config/index.js";
 import type { ModelVisibleOutputProjection } from "../domain/intelligence/index.js";
-import type { ToolDisplayProjection } from "../domain/tools/index.js";
+import type { ToolDisplayProjection, ToolResultEnvelope } from "../domain/tools/index.js";
 import type { AgentRunTree } from "../domain/underground/index.js";
 import {
   createRunObservationEventViews,
@@ -213,6 +213,7 @@ export type PanelRunStreamEventDetail = {
   readonly exitCode?: number;
   readonly preview?: string;
   readonly display?: ToolDisplayProjection;
+  readonly envelope?: ToolResultEnvelope;
   readonly truncated?: boolean;
   readonly error?: string;
 };
@@ -1000,6 +1001,7 @@ function toolStreamDetail(
   const output = asRecord(payload.output);
   const result = asRecord(output.result);
   const display = toolDisplayOrUndefined(output.display);
+  const envelope = toolResultEnvelopeOrUndefined(output.envelope);
   const command = stringOrUndefined(result.command) ?? stringOrUndefined(input.command);
   const args = stringArray(result.args).length > 0 ? stringArray(result.args) : stringArray(input.args);
   return {
@@ -1011,6 +1013,7 @@ function toolStreamDetail(
     exitCode: typeof result.exitCode === "number" ? result.exitCode : undefined,
     preview: type === "tool.requested" ? toolRequestPreview(toolName, input) : toolResultPreview(toolName, output, result, payload),
     display,
+    envelope,
     truncated: output.truncated === true,
     error: type === "tool.failed" ? stringOrUndefined(payload.error) : undefined,
   };
@@ -1030,6 +1033,27 @@ function toolDisplayOrUndefined(value: unknown): ToolDisplayProjection | undefin
     return value as ToolDisplayProjection;
   }
   return undefined;
+}
+
+function toolResultEnvelopeOrUndefined(value: unknown): ToolResultEnvelope | undefined {
+  const record = asRecord(value);
+  const agentSummary = stringOrUndefined(record.agentSummary);
+  const rawRetention = stringOrUndefined(record.rawRetention);
+  if (agentSummary === undefined || (rawRetention !== "none" && rawRetention !== "diagnostic_ref_only")) {
+    return undefined;
+  }
+  return {
+    agentSummary: redactAndCompact(agentSummary, 1_800),
+    evidenceRefs: stringArray(record.evidenceRefs).map((ref) => redactAndCompact(ref, 220)).slice(0, 12),
+    uiDisplay: toolDisplayOrUndefined(record.uiDisplay),
+    tokenEstimate: typeof record.tokenEstimate === "number" && Number.isFinite(record.tokenEstimate)
+      ? Math.max(1, Math.floor(record.tokenEstimate))
+      : Math.max(1, Math.ceil(agentSummary.length / 4)),
+    truncated: record.truncated === true,
+    redacted: record.redacted !== false,
+    diagnosticRef: stringOrUndefined(record.diagnosticRef),
+    rawRetention,
+  };
 }
 
 function toolRequestPreview(toolName: string, input: Readonly<Record<string, unknown>>): string | undefined {

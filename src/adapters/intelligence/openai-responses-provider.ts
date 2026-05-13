@@ -73,10 +73,10 @@ export class OpenAIResponsesProvider implements ModelProvider {
       const requestBody = buildResponsesRequestBody(request, this.model, this.stream);
 
       if (this.stream) {
-        const stream = client.responses.stream(requestBody, { signal: options.abortSignal });
+        const stream = await client.responses.create(requestBody, { signal: options.abortSignal });
         return await normalizeStreamResponse({
           request,
-          stream,
+          stream: stream as unknown as AsyncIterable<unknown>,
           providerId: this.providerId,
           providerKind: this.providerKind,
           protocolKind: this.protocolKind,
@@ -618,6 +618,10 @@ function resolveGlobalFetch(): FetchLike | undefined {
 
 function trimTrailingSlashes(value: string): string {
   return value.replace(/\/+$/, "");
+}
+
+function responsesBaseUrl(baseUrl: string): string {
+  return baseUrl.endsWith("/v1") ? baseUrl : `${baseUrl}/v1`;
 }
 
 function failureKindForStatus(status: number): ModelFailureKind {

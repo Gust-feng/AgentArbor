@@ -5,7 +5,7 @@ import type {
   ToolVisibleResultPolicy,
 } from "../tools/index.js";
 
-export type ConfiguredUndergroundAiMode = "none" | "fake" | "openai-compatible";
+export type ConfiguredUndergroundAiMode = "none" | "fake" | "openai-compatible" | "openai-responses";
 
 export type ConfiguredWebSearchProvider = "tavily" | "none";
 
@@ -17,6 +17,7 @@ export type ConfiguredModelProviderKind =
   | "local";
 
 export type ConfiguredModelProtocolKind =
+  | "openai_responses"
   | "openai_compatible_chat_completions"
   | "anthropic_messages"
   | "gemini_generate_content"

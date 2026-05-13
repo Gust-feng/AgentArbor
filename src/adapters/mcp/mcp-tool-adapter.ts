@@ -3,9 +3,7 @@ import type {
   ToolExecutionContext,
   ToolExecutor,
   ToolInputSchema,
-  ToolMultimodalContent,
 } from "../../domain/tools/index.js";
-import { inferToolMetadataFromMcpAnnotations } from "../../domain/tools/index.js";
 import type { McpClientWrapper, McpContentPart, McpToolInfo } from "./mcp-client.js";
 
 export function createMcpToolExecutor(
@@ -48,12 +46,42 @@ function extractTextContent(content: readonly McpContentPart[]): string {
 
 type McpToolOutput = {
   readonly text: string;
-  readonly multimodal?: readonly ToolMultimodalContent[];
+  readonly multimodal?: readonly McpToolMultimodalContent[];
 };
+
+type McpToolMultimodalContent =
+  | {
+      readonly type: "image";
+      readonly mimeType: string;
+      readonly data: string;
+    }
+  | {
+      readonly type: "audio";
+      readonly mimeType: string;
+      readonly data: string;
+    };
+
+function inferToolMetadataFromMcpAnnotations(
+  annotations: McpToolInfo["annotations"]
+): ToolDefinitionMetadata {
+  const readOnly = annotations?.readOnlyHint === true;
+  const destructive = annotations?.destructiveHint === true;
+  return {
+    category: "mcp",
+    riskLevel: readOnly ? "low" : destructive ? "high" : "medium",
+    operationType: readOnly ? "read-only" : destructive ? "read-write" : "execute",
+    requiresConfirmation: !readOnly,
+    visibleResultPolicy: {
+      userVisible: "safe-preview",
+      maxPreviewChars: readOnly ? 1_200 : 600,
+      omitRawOutput: true,
+    },
+  };
+}
 
 function buildToolOutput(content: readonly McpContentPart[]): McpToolOutput {
   const textParts: string[] = [];
-  const multimodalParts: ToolMultimodalContent[] = [];
+  const multimodalParts: McpToolMultimodalContent[] = [];
   for (const part of content) {
     if (part.type === "text") {
       textParts.push(part.text);

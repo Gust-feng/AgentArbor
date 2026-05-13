@@ -249,6 +249,22 @@ test("panel transcript preserves typed safe tool display without raw command out
               exitCode: 0,
               outputSummary: "tests passed",
             },
+            envelope: {
+              agentSummary: "Command completed with exit 0.\noutput summary:\ntests passed",
+              evidenceRefs: ["tool:tool-call-shell"],
+              uiDisplay: {
+                kind: "command_summary",
+                command: "pnpm",
+                args: ["test"],
+                exitCode: 0,
+                outputSummary: "tests passed",
+              },
+              tokenEstimate: 12,
+              truncated: false,
+              redacted: true,
+              diagnosticRef: "tool:tool-call-shell",
+              rawRetention: "diagnostic_ref_only",
+            },
             result: {
               command: "pnpm",
               args: ["test"],
@@ -266,6 +282,8 @@ test("panel transcript preserves typed safe tool display without raw command out
   const completedTool = transcript.events.find((event) => event.type === "tool.completed");
 
   assert.equal(completedTool?.detail?.display?.kind, "command_summary");
+  assert.equal(completedTool?.detail?.envelope?.uiDisplay?.kind, "command_summary");
+  assert.equal(completedTool?.detail?.envelope?.evidenceRefs.includes("tool:tool-call-shell"), true);
   assert.equal(JSON.stringify(transcript).includes("RAW_STDOUT_SENTINEL"), false);
 });
 

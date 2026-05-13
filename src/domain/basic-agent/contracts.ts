@@ -1,5 +1,5 @@
 import type { ObservationRef } from "../observation/index.js";
-import type { ToolDisplayProjection } from "../tools/index.js";
+import type { ToolDisplayProjection, ToolResultEnvelope } from "../tools/index.js";
 
 export type AgentTaskStatus =
   | "queued"
@@ -183,6 +183,7 @@ export type DesktopWorkSessionReadModel = {
   readonly pendingConfirmation?: ConfirmationRequest;
   readonly answer?: DesktopWorkSessionAnswer;
   readonly deliverable?: AgentDeliverable;
+  readonly toolEvidence: readonly ToolResultEnvelope[];
   readonly visibleEvents: readonly RunEvent[];
   readonly safetySummary: {
     readonly summary: string;

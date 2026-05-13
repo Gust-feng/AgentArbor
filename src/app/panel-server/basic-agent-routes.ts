@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { BasicAgentRun, DesktopWorkSessionReadModel } from "../../domain/basic-agent/index.js";
-import type { ToolDisplayProjection } from "../../domain/tools/index.js";
+import type { ToolDisplayProjection, ToolResultEnvelope } from "../../domain/tools/index.js";
 import type { RuntimeConfirmationRecord, RuntimeDatabase } from "../../domain/runtime-database/index.js";
 import {
   basicRunFromRuntimeSnapshot,
@@ -121,6 +121,7 @@ async function handleGetBasicWorkSessionRequest(
         events: replay?.events ?? [],
         canvas: job.completed?.canvas,
         taskSoilInput: job.taskSoilInput,
+        toolEvidence: toolEnvelopesFromStreamEvents(job.streamEvents),
         toolDisplays: toolDisplaysFromStreamEvents(job.streamEvents),
       }) satisfies DesktopWorkSessionReadModel,
     });
@@ -138,6 +139,7 @@ async function handleGetBasicWorkSessionRequest(
       run: basicRunFromRuntimeSnapshot(snapshot),
       events: replay.events,
       pendingConfirmation: restoredPendingConfirmation(snapshot.confirmations),
+      toolEvidence: snapshot.toolCalls.map((call) => call.envelope).filter((envelope): envelope is ToolResultEnvelope => envelope !== undefined),
       toolDisplays: snapshot.toolCalls.map((call) => call.display).filter((display): display is ToolDisplayProjection => display !== undefined),
       restoredResult:
         snapshot.run.resultTitle === undefined && snapshot.run.resultSummary === undefined
@@ -390,4 +392,25 @@ function toolDisplaysFromStreamEvents(events: readonly PanelRunJob["streamEvents
     displays.push(display);
   }
   return displays;
+}
+
+function toolEnvelopesFromStreamEvents(events: readonly PanelRunJob["streamEvents"][number][]): readonly ToolResultEnvelope[] {
+  const envelopes: ToolResultEnvelope[] = [];
+  const seen = new Set<string>();
+  for (const event of events) {
+    const envelope = event.detail?.envelope;
+    if (envelope === undefined) {
+      continue;
+    }
+    const key = envelope.diagnosticRef ?? JSON.stringify({
+      summary: envelope.agentSummary,
+      evidenceRefs: envelope.evidenceRefs,
+    });
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    envelopes.push(envelope);
+  }
+  return envelopes;
 }

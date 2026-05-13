@@ -332,6 +332,15 @@ test("executeToolUseLoop uses projected agentContent for model tool continuation
         agentContent: { summary: "projected model-safe content" },
         uiSummary: "safe UI summary",
         diagnosticRef: "tool:projected",
+        envelope: {
+          agentSummary: "envelope model-safe summary",
+          evidenceRefs: ["tool:projected"],
+          tokenEstimate: 8,
+          truncated: false,
+          redacted: true,
+          diagnosticRef: "tool:projected",
+          rawRetention: "diagnostic_ref_only",
+        },
         truncated: false,
         redacted: true,
       },
@@ -353,7 +362,8 @@ test("executeToolUseLoop uses projected agentContent for model tool continuation
   );
 
   const toolMessageText = JSON.stringify(channel.requests[1]?.sanitizedMessages.at(-1));
-  assert.equal(toolMessageText.includes("projected model-safe content"), true);
+  assert.equal(toolMessageText.includes("envelope model-safe summary"), true);
+  assert.equal(toolMessageText.includes("projected model-safe content"), false);
   assert.equal(toolMessageText.includes("raw-secret-output"), false);
   assert.equal(toolMessageText.includes("sk-raw-tool-secret"), false);
 });

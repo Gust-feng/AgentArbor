@@ -3,7 +3,7 @@ import test from "node:test";
 import type { BasicAgentRun, RunEvent } from "../../domain/basic-agent/index.js";
 import { createDesktopWorkSessionReadModel } from "./work-session.js";
 
-test("work session read model promotes completed answers into deliverables", () => {
+test("work session read model keeps ordinary completed answers separate from deliverables", () => {
   const run = basicRun("completed");
   const workSession = createDesktopWorkSessionReadModel({
     run,
@@ -42,9 +42,11 @@ test("work session read model promotes completed answers into deliverables", () 
   });
 
   assert.equal(workSession.stage, "completed");
-  assert.equal(workSession.deliverable?.summary, "这是总结结果。");
-  assert.equal(workSession.deliverable?.toolDisplays.length, 1);
+  assert.equal(workSession.answer?.content, "这是总结结果。");
+  assert.equal(workSession.deliverable, undefined);
   assert.equal(workSession.contextAttachments[0]?.ref, "file:notes.md");
+  assert.equal(workSession.contextLedger.entries.some((entry) => entry.kind === "attachment"), true);
+  assert.equal(workSession.contextLedger.entries.some((entry) => entry.kind === "tool_evidence"), true);
 });
 
 test("work session read model surfaces approval as the main stage", () => {

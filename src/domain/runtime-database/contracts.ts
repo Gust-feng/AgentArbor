@@ -1,7 +1,7 @@
 import type { ArborMessageType, ArtifactRef } from "../common.js";
 import type { BasicAgentRun, RunEvent } from "../basic-agent/index.js";
 import type { BasicAgentCapabilitySnapshot } from "../config/index.js";
-import type { ToolDisplayProjection } from "../tools/index.js";
+import type { ToolDisplayProjection, ToolResultEnvelope } from "../tools/index.js";
 import type {
   ObservationProgress,
   ObservationRef,
@@ -11,7 +11,16 @@ import type {
 
 export type RuntimeProfile = "lite" | "full";
 
-export type RuntimeRunStatus = "pending" | "running" | "completed" | "failed" | "stopped" | "cancelled" | "blocked";
+export type RuntimeRunStatus =
+  | "pending"
+  | "running"
+  | "approval_needed"
+  | "needs_input"
+  | "completed"
+  | "failed"
+  | "stopped"
+  | "cancelled"
+  | "blocked";
 
 export type RuntimeWorkspaceRecord = {
   readonly workspaceId: string;
@@ -122,6 +131,7 @@ export type RuntimeToolCallRecord = {
   readonly summary?: string;
   readonly preview?: string;
   readonly display?: ToolDisplayProjection;
+  readonly envelope?: ToolResultEnvelope;
   readonly truncated?: boolean;
   readonly error?: string;
   readonly eventRefs: readonly string[];

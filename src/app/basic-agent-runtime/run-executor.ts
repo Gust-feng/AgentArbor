@@ -84,6 +84,16 @@ export type BasicAgentPendingToolContinuation = {
   }): Promise<BasicAgentRunExecutionResult>;
 };
 
+export class BasicAgentConfirmationDecisionError extends Error {
+  constructor(
+    readonly code: "invalid_confirmation_state" | "confirmation_not_pending",
+    message: string
+  ) {
+    super(message);
+    this.name = "BasicAgentConfirmationDecisionError";
+  }
+}
+
 export class BasicAgentRunExecutor {
   private readonly pendingToolContinuations = new Map<string, BasicAgentPendingToolContinuation>();
   private readonly basicRuns = new BasicAgentRunStore();
@@ -185,6 +195,7 @@ export class BasicAgentRunExecutor {
     readonly guidance?: string;
   }): Promise<BasicAgentRun> {
     const job = this.requireJob(input.runId);
+    this.assertPendingConfirmation(job, input.confirmationId);
     const decidedAt = nowIso();
     this.config.runJobs.recordConfirmationDecision({
       confirmationId: input.confirmationId,
@@ -202,6 +213,10 @@ export class BasicAgentRunExecutor {
       });
     }
     this.deletePendingContinuation(input.runId, input.confirmationId);
+    if (input.decision === "guidance") {
+      this.config.runJobs.markNeedsInput(input.runId);
+      this.syncRunEvents(this.requireJob(input.runId));
+    }
     if (input.decision === "deny") {
       this.config.runJobs.block(input.runId, {
         config: job.config,
@@ -248,6 +263,20 @@ export class BasicAgentRunExecutor {
       this.rememberPendingContinuation(runId, result.pendingApproval);
       if (abort.signal.aborted) {
         await this.cancel(runId);
+        return;
+      }
+      if (result.pendingApproval !== undefined) {
+        this.config.runJobs.awaitApproval(runId, {
+          config: job.config,
+          informationAccess: job.informationAccess,
+          summary: result.summary,
+          observation: result.observation,
+          agentRunTree: result.agentRunTree,
+          canvas: result.canvas,
+        });
+        const waiting = this.requireJob(runId);
+        this.syncRunEvents(waiting);
+        await this.config.persistRun(waiting);
         return;
       }
       this.config.runJobs.complete(runId, {
@@ -336,6 +365,20 @@ export class BasicAgentRunExecutor {
         await this.cancel(input.runId);
         return this.requireBasicRun(input.runId);
       }
+      if (result.pendingApproval !== undefined) {
+        this.config.runJobs.awaitApproval(input.runId, {
+          config: input.job.config,
+          informationAccess: input.job.informationAccess,
+          summary: result.summary,
+          observation: result.observation,
+          agentRunTree: result.agentRunTree,
+          canvas: result.canvas,
+        });
+        const waiting = this.requireJob(input.runId);
+        this.syncRunEvents(waiting);
+        await this.config.persistRun(waiting);
+        return this.requireBasicRun(input.runId);
+      }
       this.config.runJobs.complete(input.runId, {
         config: input.job.config,
         informationAccess: input.job.informationAccess,
@@ -399,8 +442,46 @@ export class BasicAgentRunExecutor {
       }
     }
   }
+
+  private assertPendingConfirmation(job: BasicAgentRunJob, confirmationId: string): void {
+    if (job.status !== "approval_needed") {
+      throw new BasicAgentConfirmationDecisionError(
+        "invalid_confirmation_state",
+        "这次运行当前没有等待确认的操作。"
+      );
+    }
+    if (job.confirmationDecisions.some((decision) => decision.confirmationId === confirmationId)) {
+      throw new BasicAgentConfirmationDecisionError(
+        "confirmation_not_pending",
+        "这个确认请求已经处理过。"
+      );
+    }
+    if (pendingConfirmationIdFromCanvas(job.completed?.canvas) === confirmationId) {
+      return;
+    }
+    if (this.pendingToolContinuations.has(continuationKey(job.runId, confirmationId))) {
+      return;
+    }
+    throw new BasicAgentConfirmationDecisionError(
+      "confirmation_not_pending",
+      "没有找到仍可处理的确认请求。"
+    );
+  }
 }
 
 function continuationKey(runId: string, confirmationId: string): string {
   return `${runId}:${confirmationId}`;
+}
+
+function pendingConfirmationIdFromCanvas(canvas: BasicAgentCanvasProjection | undefined): string | undefined {
+  const agent = asRecord(canvas?.agent);
+  const pending = asRecord(agent.pendingConfirmation);
+  const confirmationId = pending.confirmationId;
+  return typeof confirmationId === "string" && confirmationId.trim().length > 0
+    ? confirmationId
+    : undefined;
+}
+
+function asRecord(value: unknown): Readonly<Record<string, unknown>> {
+  return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Readonly<Record<string, unknown>> : {};
 }

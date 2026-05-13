@@ -5,6 +5,9 @@ import type { BasicAgentRun, ConfigResponse } from "../types";
 export function TopBar(props: {
   readonly run?: BasicAgentRun;
   readonly config?: ConfigResponse;
+  readonly inspectorOpen: boolean;
+  readonly inspectorAvailable: boolean;
+  readonly onToggleInspector: () => void;
   readonly onOpenSettings: () => void;
 }): React.ReactElement {
   const status = props.run?.status ?? "queued";
@@ -16,6 +19,14 @@ export function TopBar(props: {
       </div>
       <div className="topbar-actions">
         <span className={`status-pill ${statusTone(status)}`}>{props.run === undefined ? "待开始" : STATUS_LABELS[status]}</span>
+        <button
+          type="button"
+          className="ghost"
+          disabled={!props.inspectorAvailable && !props.inspectorOpen}
+          onClick={props.onToggleInspector}
+        >
+          {props.inspectorOpen ? "隐藏上下文" : "查看上下文"}
+        </button>
         <button type="button" className="ghost" onClick={props.onOpenSettings}>
           模型 {props.config?.config?.model ? `· ${compact(props.config.config.model, 24)}` : ""}
         </button>

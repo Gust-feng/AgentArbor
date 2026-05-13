@@ -247,7 +247,7 @@ test("panel transcript preserves typed safe tool display without raw command out
               command: "pnpm",
               args: ["test"],
               exitCode: 0,
-              stdoutSummary: "tests passed",
+              outputSummary: "tests passed",
             },
             result: {
               command: "pnpm",

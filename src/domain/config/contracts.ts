@@ -208,6 +208,38 @@ export type BasicAgentCapabilitySnapshot = {
   readonly warnings: readonly string[];
 };
 
+export type RunToolExposure = {
+  readonly name: string;
+  readonly enabled: boolean;
+  readonly modelVisible: boolean;
+  readonly availability: CapabilityToolCatalogItem["availability"];
+  readonly riskLevel: ToolRiskLevel;
+  readonly operationType: ToolOperationType;
+  readonly requiresConfirmation: boolean;
+  readonly reason: string;
+};
+
+export type CapabilityDraft = {
+  readonly draftId: string;
+  readonly source: "mcp";
+  readonly label: string;
+  readonly availability: CapabilityMcpCatalogItem["availability"];
+  readonly enabled: boolean;
+  readonly reason: string;
+};
+
+export type RunCapabilityResolution = {
+  readonly resolutionId: string;
+  readonly snapshotId: string;
+  readonly runMode: "agent" | "deep";
+  readonly allowedTools: readonly string[];
+  readonly toolExposures: readonly RunToolExposure[];
+  readonly enabledSkills: readonly CapabilitySkillCatalogItem[];
+  readonly mcpDrafts: readonly CapabilityDraft[];
+  readonly warnings: readonly string[];
+  readonly createdAt: string;
+};
+
 export type InformationAccessSettings = {
   readonly sourcePreference: readonly ConfiguredInformationSourceKind[];
   readonly webSearch: {

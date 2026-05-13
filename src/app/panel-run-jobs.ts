@@ -142,6 +142,23 @@ export class PanelRunJobStore {
     job.updatedAt = nowIso();
   }
 
+  awaitApproval(runId: string, completed: PanelRunCompletedPayload): void {
+    const job = this.requireJob(runId);
+    job.status = "approval_needed";
+    job.config = completed.config;
+    job.informationAccess = completed.informationAccess;
+    job.completed = completed;
+    job.updatedAt = nowIso();
+  }
+
+  markNeedsInput(runId: string): void {
+    const job = this.requireJob(runId);
+    if (job.status !== "failed" && job.status !== "cancelled" && job.status !== "blocked") {
+      job.status = "needs_input";
+    }
+    job.updatedAt = nowIso();
+  }
+
   attachRuntime(input: {
     readonly runId: string;
     readonly runtime: MinimalRuntime;
@@ -166,6 +183,9 @@ export class PanelRunJobStore {
 
   complete(runId: string, completed: PanelRunCompletedPayload): void {
     const job = this.requireJob(runId);
+    if (job.status === "failed" || job.status === "cancelled" || job.status === "blocked") {
+      return;
+    }
     job.status = "completed";
     job.config = completed.config;
     job.informationAccess = completed.informationAccess;
@@ -244,7 +264,7 @@ export class PanelRunJobStore {
       createdAt: decision.decidedAt,
       agentLabel: decision.decision === "guidance" ? "用户指导" : "用户确认",
       summary: basicConfirmationDecisionSummary(decision),
-      status: decision.decision === "approve_once" ? "running" : decision.decision === "deny" ? "blocked" : "pending",
+      status: decision.decision === "approve_once" ? "running" : decision.decision === "deny" ? "blocked" : "needs_input",
       sourceRefs: [`confirmation:${decision.confirmationId}`],
       modelCallRefs: [],
       toolCallRefs: [],

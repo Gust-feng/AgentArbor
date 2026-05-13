@@ -99,6 +99,8 @@ export type BasicAgentRunJobStore = {
   get(runId: string): BasicAgentRunJob | undefined;
   markRunning(runId: string): void;
   markResuming(runId: string): void;
+  awaitApproval(runId: string, completed: BasicAgentRunCompletedPayload): void;
+  markNeedsInput(runId: string): void;
   complete(runId: string, completed: BasicAgentRunCompletedPayload): void;
   fail(runId: string, failed: BasicAgentRunFailedPayload): void;
   cancel(runId: string, cancelled: BasicAgentRunTerminalPayload): void;

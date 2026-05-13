@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import type { BasicAgentCapabilitySnapshot, CapabilityToolCatalogItem } from "../domain/config/index.js";
 import type { IntelligenceChannel, ModelRequest } from "../domain/intelligence/index.js";
 import type {
   ToolCallRequest,
@@ -71,6 +72,47 @@ test("Desktop Agent Session projects local tool summaries and refs", async () =>
   assert.equal(toolBlock?.summary.includes("read_file: README.md · 12 bytes"), true);
   assert.equal(result.activity.some((item) => item.toolName === "read_file" && item.summary.includes("README.md")), true);
   assert.equal(channel.requests[0]?.tools?.some((tool) => tool.name === "read_file"), true);
+});
+
+test("Desktop Agent Session derives model-visible tools from capability snapshot and Task Soil permissions", async () => {
+  let capturedRequest: ModelRequest | undefined;
+  const channel: IntelligenceChannel = {
+    async request(request) {
+      capturedRequest = request;
+      return {
+        responseId: "model-response-capability-policy",
+        requestId: request.requestId,
+        providerId: "test-provider",
+        providerKind: "fake",
+        protocolKind: "openai_compatible_chat_completions",
+        model: "test-model",
+        status: "completed",
+        outputKind: "explanation",
+        textOutput: "我会只使用本轮授权的工具。",
+        validation: { status: "passed", checkedAt: new Date(0).toISOString(), issues: [] },
+        completedAt: new Date(0).toISOString(),
+      };
+    },
+    validateResponse() {
+      return { status: "passed", checkedAt: new Date(0).toISOString(), issues: [] };
+    },
+  };
+
+  const result = await runDesktopAgentSession("分析当前仓库的问题并给我优化建议", {
+    aiMode: "fake",
+    createIntelligenceChannel: () => channel,
+    createToolCenter: () => new FixtureToolCenter(),
+    capabilitySnapshot: desktopCapabilitySnapshot([
+      capabilityTool("search", "read-only"),
+      capabilityTool("read", "read-only"),
+    ]),
+    taskSoilInput: {
+      permissionBoundaryRefs: ["deny:tool:search"],
+    },
+  });
+
+  assert.equal(result.status, "completed");
+  assert.deepEqual(capturedRequest?.tools?.map((tool) => tool.name), ["read"]);
 });
 
 test("Desktop Agent Session projects tool failures without leaking raw output", async () => {
@@ -577,4 +619,70 @@ class FailingToolCenter extends FixtureToolCenter {
       durationMs: 0,
     };
   }
+}
+
+function desktopCapabilitySnapshot(tools: readonly CapabilityToolCatalogItem[]): BasicAgentCapabilitySnapshot {
+  return {
+    snapshotId: "desktop-session-snapshot",
+    createdAt: "2026-05-13T00:00:00.000Z",
+    activeModel: {
+      profileId: "default",
+      label: "Default",
+      providerKind: "openai_compatible",
+      protocolKind: "openai_compatible_chat_completions",
+      baseUrl: "https://api.openai.com",
+      model: "gpt-5.5",
+      defaultAiMode: "openai-compatible",
+      secretRef: "secret://local-dev/model-provider/default/api-key",
+      enabled: true,
+      secretConfigured: false,
+      updatedAt: "2026-05-13T00:00:00.000Z",
+    },
+    modelCapabilities: {
+      contextWindowTokens: 128_000,
+      maxOutputTokens: 16_000,
+      supportsToolCalling: true,
+      supportsParallelToolCalls: true,
+      supportsStructuredOutputs: true,
+      supportsStreaming: true,
+      supportsVisionInput: false,
+      supportsReasoningEffort: false,
+      preferredApiStyle: "openai_compatible",
+      stability: "stable",
+    },
+    toolCatalog: {
+      scope: "desktop-basic",
+      tools,
+      allowedTools: tools.filter((tool) => tool.enabled && tool.availability === "available").map((tool) => tool.name),
+    },
+    skillCatalog: [],
+    mcpCatalog: [],
+    workspace: {
+      workspaceDirectory: "Z:/AgentArbor",
+      updatedAt: "2026-05-13T00:00:00.000Z",
+    },
+    securitySummary: "Safe test snapshot.",
+    warnings: [],
+  };
+}
+
+function capabilityTool(
+  name: string,
+  operationType: CapabilityToolCatalogItem["operationType"]
+): CapabilityToolCatalogItem {
+  return {
+    name,
+    description: `${name} tool`,
+    category: "workspace",
+    riskLevel: operationType === "read-only" ? "low" : "high",
+    operationType,
+    requiresConfirmation: operationType !== "read-only",
+    visibleResultPolicy: {
+      userVisible: "safe-preview",
+      maxPreviewChars: 800,
+      omitRawOutput: true,
+    },
+    enabled: true,
+    availability: "available",
+  };
 }

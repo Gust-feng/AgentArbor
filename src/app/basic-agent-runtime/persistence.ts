@@ -65,13 +65,19 @@ export async function submitRestoredBasicConfirmationDecision(input: {
   if (input.runtimeDatabase === undefined || snapshot === undefined) {
     return undefined;
   }
+  const pending = snapshot.confirmations.find(
+    (confirmation) => confirmation.confirmationId === input.confirmationId && confirmation.status === "pending"
+  );
+  if (pending === undefined) {
+    return undefined;
+  }
   const decidedAt = new Date().toISOString();
   const blockedByMissingContinuation = input.decision.decision === "approve_once";
   const nextRun: RuntimeRunRecord = {
     ...snapshot.run,
-    status: input.decision.decision === "guidance" ? snapshot.run.status : "blocked",
+    status: input.decision.decision === "guidance" ? "needs_input" : "blocked",
     updatedAt: decidedAt,
-    completedAt: input.decision.decision === "guidance" ? snapshot.run.completedAt : decidedAt,
+    completedAt: input.decision.decision === "guidance" ? undefined : decidedAt,
     error:
       input.decision.decision === "guidance"
         ? snapshot.run.error
@@ -314,6 +320,8 @@ function restoredBlockedEvent(input: {
 
 function agentTaskStatusFromRuntimeStatus(status: RuntimeRunRecord["status"]): BasicAgentRun["status"] {
   if (status === "pending") return "queued";
+  if (status === "approval_needed") return "approval_needed";
+  if (status === "needs_input") return "needs_input";
   if (status === "running" || status === "stopped") return "blocked";
   if (status === "completed") return "completed";
   if (status === "failed") return "failed";

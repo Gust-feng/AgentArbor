@@ -7,9 +7,14 @@ import type {
   ToolExecutor,
   ToolPermissionCheck,
   ToolSafeProjection,
+  ToolSecurityDecision,
 } from "../../domain/tools/index.js";
 import type { ConfirmationRequest } from "../../domain/basic-agent/index.js";
-import { nowIso } from "../../kernel/id.js";
+import {
+  confirmationRequestFromSecurityDecision,
+  evaluateToolCallSecurity,
+  projectToolStatusEnvelope,
+} from "../../kernel/tools/index.js";
 import {
   projectToolApprovalRequired,
   projectToolFailure,
@@ -78,8 +83,24 @@ export class ToolCenter {
     }
 
     const metadata = normalizeToolMetadata(executor.definition);
-    if (requiresConfirmation(request, metadata, this.platform, permission?.approvedConfirmationIds)) {
-      return approvalRequiredToolResult(request, startedAt, executor.definition, metadata);
+    const securityDecision = evaluateToolCallSecurity({
+      request,
+      definition: executor.definition,
+      metadata,
+      context: {
+        platform: this.platform,
+        approvedConfirmationIds: permission?.approvedConfirmationIds,
+      },
+    });
+    if (securityDecision.decision === "blocked") {
+      return failedToolResult(request, startedAt, securityDecision.reason, projectToolFailure({
+        request,
+        error: securityDecision.reason,
+        diagnosticRef: `tool:${request.callId}:${securityDecision.code}`,
+      }));
+    }
+    if (securityDecision.decision === "approval_required") {
+      return approvalRequiredToolResult(request, startedAt, securityDecision);
     }
 
     this.callCount += 1;
@@ -139,40 +160,28 @@ function failedToolResult(
 function approvalRequiredToolResult(
   request: ToolCallRequest,
   startedAt: number,
-  definition: ToolDefinition,
-  metadata: ToolDefinitionMetadata
+  decision: Extract<ToolSecurityDecision, { readonly decision: "approval_required" }>
 ): ToolCallResult {
-  const confirmationRequest: ConfirmationRequest = {
-    confirmationId: confirmationIdForToolCall(request.callId),
-    runId: request.callId,
-    title: "需要确认",
-    actionSummary: redactOrdinaryText(
-      `工具 ${definition.name} 请求执行 ${metadata.operationType} 操作。${definition.description}`,
-      500
-    ),
-    affectedResources: affectedResourcesFromInput(request.input),
-    riskLevel: metadata.riskLevel,
-    requestedAt: nowIso(),
-    sourceRefs: [`tool:${request.callId}`],
-  };
+  const confirmationRequest: ConfirmationRequest = confirmationRequestFromSecurityDecision({ request, decision });
   return {
     callId: request.callId,
     toolName: request.toolName,
     input: request.input,
     output: undefined,
     status: "approval_required",
-    error: `Tool ${request.toolName} requires user confirmation before ${metadata.operationType} execution.`,
+    error: decision.reason,
     durationMs: Date.now() - startedAt,
     projection: projectToolApprovalRequired({
       request,
       toolName: request.toolName,
-      operationType: metadata.operationType,
+      operationType: "confirmation_required",
     }),
     confirmationRequest,
   };
 }
 
 function cancelledToolResult(request: ToolCallRequest, startedAt: number): ToolCallResult {
+  const diagnosticRef = `tool:${request.callId}:cancelled`;
   return {
     callId: request.callId,
     toolName: request.toolName,
@@ -183,7 +192,13 @@ function cancelledToolResult(request: ToolCallRequest, startedAt: number): ToolC
     durationMs: Date.now() - startedAt,
     projection: {
       uiSummary: "工具执行已取消。",
-      diagnosticRef: `tool:${request.callId}:cancelled`,
+      diagnosticRef,
+      envelope: projectToolStatusEnvelope({
+        request,
+        status: "cancelled",
+        summary: "Tool execution cancelled.",
+        diagnosticRef,
+      }),
       truncated: false,
       redacted: true,
     },
@@ -199,6 +214,7 @@ function cloneToolDefinition(definition: ToolDefinition): ToolDefinition {
       properties: { ...definition.inputSchema.properties },
       required:
         definition.inputSchema.required === undefined ? undefined : [...definition.inputSchema.required],
+      additionalProperties: definition.inputSchema.additionalProperties,
     },
     metadata: normalizeToolMetadata(definition),
   };
@@ -224,49 +240,11 @@ function normalizeToolMetadata(definition: ToolDefinition): ToolDefinitionMetada
   };
 }
 
-function requiresConfirmation(
-  request: ToolCallRequest,
-  metadata: ToolDefinitionMetadata,
-  platform: NodeJS.Platform,
-  approvedConfirmationIds: readonly string[] | undefined
-): boolean {
-  if (approvedConfirmationIds?.includes(confirmationIdForToolCall(request.callId)) === true) {
-    return false;
-  }
-  if (metadata.requiresConfirmation) {
-    return true;
-  }
-  return platform === "win32" && metadata.operationType !== "read-only";
-}
-
 function isAbortSignalAborted(signal: AbortSignal | undefined): boolean {
   return signal?.aborted === true;
-}
-
-function confirmationIdForToolCall(callId: string): string {
-  return `confirmation-${callId}`;
 }
 
 function sanitizeError(error: unknown): string {
   const message = error instanceof Error ? error.message : "Tool execution failed.";
   return redactOrdinaryText(message, 500);
-}
-
-function asRecord(value: unknown): Readonly<Record<string, unknown>> {
-  return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Readonly<Record<string, unknown>> : {};
-}
-
-function stringOrUndefined(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
-}
-
-function affectedResourcesFromInput(input: unknown): readonly string[] {
-  const record = asRecord(input);
-  const values = [
-    stringOrUndefined(record.path),
-    stringOrUndefined(record.command),
-    stringOrUndefined(record.url),
-    stringOrUndefined(record.ref),
-  ];
-  return values.filter((value): value is string => value !== undefined).map((value) => redactOrdinaryText(value, 240)).slice(0, 8);
 }

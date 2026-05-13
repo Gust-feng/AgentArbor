@@ -3,7 +3,15 @@ import type { ObservationRef } from "../../domain/observation/index.js";
 import type { ToolDisplayProjection } from "../../domain/tools/index.js";
 import { redactOrdinaryText } from "./safe-projection.js";
 
-export type BasicAgentCompatRunStatus = "pending" | "running" | "completed" | "failed" | "cancelled" | "blocked";
+export type BasicAgentCompatRunStatus =
+  | "pending"
+  | "running"
+  | "approval_needed"
+  | "needs_input"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "blocked";
 
 export type BasicAgentRunProjectionInput = {
   readonly runId: string;
@@ -57,7 +65,7 @@ export function projectRunJobToBasicRun(job: BasicAgentRunProjectionInput): Basi
     updatedAt: job.updatedAt,
     currentStep: basicRunCurrentStep(job),
     nextStep: basicRunNextStep(status),
-    requiresUserAction: status === "approval_needed" || job.status === "blocked",
+    requiresUserAction: status === "approval_needed" || status === "needs_input" || status === "blocked",
     eventCursor: {
       lastSequence: 0,
       eventCount: 0,
@@ -115,6 +123,9 @@ function basicEventTitle(event: BasicAgentRunStreamEventProjectionInput): string
 function basicStatusForRunEvent(event: BasicAgentRunStreamEventProjectionInput): AgentTaskStatus {
   if (event.type === "confirmation.needed") return "approval_needed";
   if (event.type === "user.guidance") return "needs_input";
+  if (event.status === "approval_needed") return "approval_needed";
+  if (event.status === "needs_input") return "needs_input";
+  if (event.status === "running") return "running";
   if (event.type === "user_approval.received") return "blocked";
   if (event.type === "run.cancelled" || event.status === "cancelled") return "cancelled";
   if (event.type === "run.blocked" || event.status === "blocked") return "blocked";
@@ -126,6 +137,8 @@ function basicStatusForRunEvent(event: BasicAgentRunStreamEventProjectionInput):
 
 function basicStatusForRunJob(job: BasicAgentRunProjectionInput): AgentTaskStatus {
   if (job.status === "pending") return "queued";
+  if (job.status === "approval_needed") return "approval_needed";
+  if (job.status === "needs_input") return "needs_input";
   if (job.status === "cancelled") return "cancelled";
   if (job.status === "blocked") return "blocked";
   if (job.status === "failed") return "failed";
@@ -156,6 +169,8 @@ function basicStatusForRunJob(job: BasicAgentRunProjectionInput): AgentTaskStatu
 function basicRunTitle(job: BasicAgentRunProjectionInput, status: AgentTaskStatus): string {
   if (job.status === "cancelled") return "已取消";
   if (job.status === "blocked") return "需要处理";
+  if (job.status === "approval_needed") return "需要确认";
+  if (job.status === "needs_input") return "需要补充";
   if (status === "needs_input") return "需要补充";
   if (status === "approval_needed") return "需要确认";
   if (job.status === "completed") return "已完成";

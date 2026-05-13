@@ -1,10 +1,11 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { BasicAgentRun, DesktopWorkSessionReadModel } from "../../domain/basic-agent/index.js";
 import type { ToolDisplayProjection } from "../../domain/tools/index.js";
-import type { RuntimeDatabase } from "../../domain/runtime-database/index.js";
+import type { RuntimeConfirmationRecord, RuntimeDatabase } from "../../domain/runtime-database/index.js";
 import {
   basicRunFromRuntimeSnapshot,
   basicRunReplayFromRuntimeSnapshot,
+  BasicAgentConfirmationDecisionError,
   createDesktopWorkSessionReadModel,
   submitRestoredBasicConfirmationDecision,
   type BasicAgentRunExecutor,
@@ -14,6 +15,7 @@ import {
   PanelHttpError,
   parseStreamCursor,
   readJsonBody,
+  writeSseEvent,
   writeJson,
 } from "./http-utils.js";
 import { parseConfirmationDecision } from "./request-parsers.js";
@@ -49,6 +51,19 @@ export async function handlePanelBasicAgentRoute(
     await handleGetBasicRunEventsRequest(
       runtime,
       decodeURIComponent(basicRunEventsMatch[1] ?? ""),
+      url,
+      request,
+      response,
+      syncLiveRunEvents
+    );
+    return true;
+  }
+
+  const basicRunStreamMatch = /^\/api\/basic-agent\/runs\/([^/]+)\/stream$/.exec(url.pathname);
+  if (request.method === "GET" && basicRunStreamMatch !== null) {
+    await handleGetBasicRunStreamRequest(
+      runtime,
+      decodeURIComponent(basicRunStreamMatch[1] ?? ""),
       url,
       request,
       response,
@@ -122,6 +137,7 @@ async function handleGetBasicWorkSessionRequest(
     workSession: createDesktopWorkSessionReadModel({
       run: basicRunFromRuntimeSnapshot(snapshot),
       events: replay.events,
+      pendingConfirmation: restoredPendingConfirmation(snapshot.confirmations),
       toolDisplays: snapshot.toolCalls.map((call) => call.display).filter((display): display is ToolDisplayProjection => display !== undefined),
       restoredResult:
         snapshot.run.resultTitle === undefined && snapshot.run.resultSummary === undefined
@@ -169,6 +185,82 @@ async function handleGetBasicRunEventsRequest(
     cursor: restored.cursor,
     events: restored.events.filter((event) => event.sequence > cursor),
   });
+}
+
+async function handleGetBasicRunStreamRequest(
+  runtime: PanelBasicAgentRouteRuntime,
+  runId: string,
+  url: URL,
+  request: IncomingMessage,
+  response: ServerResponse,
+  syncLiveRunEvents: (job: PanelRunJob) => void
+): Promise<void> {
+  let restoredReplay: ReturnType<typeof basicRunReplayFromRuntimeSnapshot> | undefined;
+  if (runtime.runJobs.get(runId) === undefined) {
+    const snapshot = await runtime.runtimeDatabase?.getRun(runId);
+    if (snapshot === undefined) {
+      throw new PanelHttpError(404, "run_not_found", "未找到基础 Agent 运行事件。");
+    }
+    restoredReplay = basicRunReplayFromRuntimeSnapshot(snapshot);
+  }
+
+  let lastSequence = parseStreamCursor(url.searchParams.get("cursor"), request.headers["last-event-id"]);
+  let closed = false;
+  response.writeHead(200, {
+    "content-type": "text/event-stream; charset=utf-8",
+    "cache-control": "no-store, no-cache",
+    connection: "keep-alive",
+    "x-accel-buffering": "no",
+  });
+  response.write(`: AgentArbor basic agent stream ${runId}\n\n`);
+
+  const flushRestored = (): void => {
+    if (restoredReplay === undefined || closed) {
+      return;
+    }
+    for (const event of restoredReplay.events) {
+      if (event.sequence <= lastSequence) {
+        continue;
+      }
+      writeSseEvent(response, event);
+      lastSequence = event.sequence;
+    }
+    cleanup();
+  };
+
+  const flushLive = (): void => {
+    if (closed) {
+      return;
+    }
+    const job = runtime.runJobs.get(runId);
+    if (job === undefined) {
+      flushRestored();
+      return;
+    }
+    syncLiveRunEvents(job);
+    const replay = runtime.runExecutor.replayEvents(runId, lastSequence);
+    for (const event of replay?.events ?? []) {
+      writeSseEvent(response, event);
+      lastSequence = event.sequence;
+    }
+    const run = runtime.runExecutor.get(runId);
+    if (run !== undefined && shouldCloseBasicRunStream(run.status)) {
+      cleanup();
+    }
+  };
+
+  const cleanup = (): void => {
+    if (closed) {
+      return;
+    }
+    closed = true;
+    clearInterval(interval);
+    response.end();
+  };
+
+  const interval = setInterval(flushLive, 100);
+  request.on("close", cleanup);
+  restoredReplay === undefined ? flushLive() : flushRestored();
 }
 
 async function handleGetBasicRunRequest(
@@ -225,6 +317,9 @@ async function handleConfirmationDecisionRequest(
     decision: decision.decision,
     guidance: decision.guidance,
   }).catch(async (error: unknown) => {
+    if (error instanceof BasicAgentConfirmationDecisionError) {
+      throw new PanelHttpError(409, error.code, error.message);
+    }
     if (error instanceof Error && error.message.includes("not found")) {
       const restored = await submitRestoredBasicConfirmationDecision({
         runtimeDatabase: runtime.runtimeDatabase,
@@ -248,6 +343,35 @@ function requireBasicRun(runtime: PanelBasicAgentRouteRuntime, runId: string): B
     throw new PanelHttpError(404, "run_not_found", "未找到基础 Agent 运行。");
   }
   return run;
+}
+
+function restoredPendingConfirmation(confirmations: readonly RuntimeConfirmationRecord[]): DesktopWorkSessionReadModel["pendingConfirmation"] {
+  const pending = confirmations.find((confirmation) => confirmation.status === "pending");
+  if (pending === undefined) {
+    return undefined;
+  }
+  return {
+    confirmationId: pending.confirmationId,
+    runId: pending.runId,
+    conversationId: pending.conversationId,
+    title: pending.title,
+    actionSummary: pending.actionSummary,
+    affectedResources: pending.affectedResources,
+    riskLevel: pending.riskLevel,
+    resumeAvailability: "lost_after_restart",
+    requestedAt: pending.requestedAt,
+    expiresAt: pending.expiresAt,
+    sourceRefs: pending.eventRefs,
+  };
+}
+
+function shouldCloseBasicRunStream(status: BasicAgentRun["status"]): boolean {
+  return status === "completed" ||
+    status === "failed" ||
+    status === "cancelled" ||
+    status === "blocked" ||
+    status === "approval_needed" ||
+    status === "needs_input";
 }
 
 function toolDisplaysFromStreamEvents(events: readonly PanelRunJob["streamEvents"][number][]): readonly ToolDisplayProjection[] {

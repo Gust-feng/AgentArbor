@@ -1,5 +1,5 @@
 import type { IntelligenceChannel, ModelOutputContract, ModelOutputDelta, ModelResponse } from "../domain/intelligence/index.js";
-import type { ModelCapabilities } from "../domain/config/index.js";
+import type { BasicAgentCapabilitySnapshot, ModelCapabilities } from "../domain/config/index.js";
 import type { ConstraintRef } from "../domain/constraints.js";
 import type { ObservationRef } from "../domain/observation/index.js";
 import type { TaskSoil } from "../domain/soil/index.js";
@@ -18,6 +18,7 @@ import {
 import type { MinimalRuntime } from "./runtime.js";
 import { createMinimalRuntime } from "./runtime.js";
 import { buildBasicAgentContextPack, type BasicAgentContextPack } from "./basic-agent-runtime/index.js";
+import { resolveRunCapabilities } from "./capability-policy.js";
 import type { DesktopAgentSkillContext } from "./desktop-agent-prompts.js";
 import { createTaskSoilFromDesktopInput, type DesktopTaskSoilInput } from "./task-soil-workspace.js";
 import { sanitizeAssistantVisibleText } from "./visible-text-safety.js";
@@ -120,6 +121,9 @@ export type RunDesktopAgentSessionOptions = {
   readonly conversationHistory?: readonly DesktopAgentConversationMessage[];
   readonly skillContexts?: readonly DesktopAgentSkillContext[];
   readonly modelCapabilities?: ModelCapabilities;
+  readonly capabilitySnapshot?: BasicAgentCapabilitySnapshot;
+  readonly allowedTools?: readonly string[];
+  readonly platform?: NodeJS.Platform;
   readonly abortSignal?: AbortSignal;
   readonly runtime?: MinimalRuntime;
   readonly createIntelligenceChannel?: (runtime: MinimalRuntime) => IntelligenceChannel;
@@ -201,10 +205,19 @@ export async function runDesktopAgentSession(
     toolCenter,
     publishToolEvent: (message) => runtime.bus.publish(message),
   });
+  const allowedTools = toolCenter === undefined
+    ? []
+    : options.allowedTools ?? allowedToolsForRun({
+        toolCenter,
+        snapshot: options.capabilitySnapshot,
+        goal,
+        taskSoil,
+        platform: options.platform,
+      });
   const turn = await turnRuntime.execute({
     policy: {
       allowModel: true,
-      allowedTools: toolCenter === undefined ? [] : allowedToolsForDesktopAgent(toolCenter),
+      allowedTools,
       maxModelRounds: 4,
       maxToolRounds: 3,
       fallback: "disabled",
@@ -510,7 +523,26 @@ function publishTriggeredSkills(input: {
 }
 
 function allowedToolsForDesktopAgent(toolCenter: ToolExecutionBroker): readonly string[] {
-  return toolCenter.list().map((tool) => tool.name);
+  return toolCenter.list().map((tool) => tool.name).filter((name) => !name.startsWith("underground_"));
+}
+
+function allowedToolsForRun(input: {
+  readonly toolCenter: ToolExecutionBroker;
+  readonly snapshot?: BasicAgentCapabilitySnapshot;
+  readonly goal: string;
+  readonly taskSoil: TaskSoil;
+  readonly platform?: NodeJS.Platform;
+}): readonly string[] {
+  if (input.snapshot === undefined) {
+    return allowedToolsForDesktopAgent(input.toolCenter);
+  }
+  return resolveRunCapabilities({
+    snapshot: input.snapshot,
+    goal: input.goal,
+    runMode: "agent",
+    taskSoil: input.taskSoil,
+    platform: input.platform,
+  }).allowedTools;
 }
 
 function refsFromResponse(

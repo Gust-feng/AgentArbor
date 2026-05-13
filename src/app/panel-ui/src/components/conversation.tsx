@@ -13,8 +13,20 @@ export function ConversationView(props: {
   readonly onDecision: (decision: "approve_once" | "deny" | "guidance", guidance?: string) => void;
 }): React.ReactElement {
   const turns = props.conversation?.turns ?? [];
-  const answer = props.workSession?.deliverable === undefined ? visibleResultText(props.detail) : undefined;
+  const answer = props.workSession?.deliverable === undefined
+    ? props.workSession?.answer?.content ?? visibleResultText(props.detail)
+    : undefined;
   const pending = props.workSession?.pendingConfirmation ?? props.pendingConfirmation;
+  const hasAssistantTurn = turns.some((turn) => turn.role === "assistant" && turn.content.trim().length > 0);
+  const plainCompletedAnswer =
+    props.run?.status === "completed" &&
+    props.workSession?.deliverable === undefined &&
+    answer !== undefined &&
+    pending === undefined;
+  const visibleEvents = props.workSession?.visibleEvents ?? props.events;
+  const shouldShowActivity = !plainCompletedAnswer || visibleEvents.some(isSubstantiveEvent);
+  const shouldShowWorkSession = props.workSession !== undefined && !plainCompletedAnswer;
+  const shouldShowAnswerCard = answer !== undefined && !hasAssistantTurn;
   return (
     <div className="conversation-pane">
       {turns.length === 0 && props.run === undefined ? (
@@ -31,17 +43,22 @@ export function ConversationView(props: {
               <p>{turn.content}</p>
             </article>
           ))}
-          {props.workSession !== undefined ? <WorkSessionCard workSession={props.workSession} /> : props.run !== undefined && <RunCard run={props.run} />}
+          {shouldShowWorkSession ? <WorkSessionCard workSession={props.workSession} /> : props.run !== undefined && !plainCompletedAnswer && <RunCard run={props.run} />}
           {props.workSession?.deliverable !== undefined && <DeliverableCard deliverable={props.workSession.deliverable} />}
-          {(props.workSession?.visibleEvents ?? props.events).length > 0 && <ActivityTimeline events={props.workSession?.visibleEvents ?? props.events} />}
+          {shouldShowActivity && visibleEvents.length > 0 && <ActivityTimeline events={visibleEvents} />}
           {pending !== undefined && (
             <ConfirmationCard confirmation={pending} onDecision={props.onDecision} />
           )}
-          {answer !== undefined && (
+          {shouldShowAnswerCard && (
             <article className="result-card">
               <span className="eyebrow">结果</span>
-              <h2>{props.detail?.restoredResult?.title ?? "已整理"}</h2>
+              <h2>{props.workSession?.answer?.title ?? props.detail?.restoredResult?.title ?? "已整理"}</h2>
               <p>{answer}</p>
+              {props.workSession?.answer?.nextActions.length ? (
+                <div className="deliverable-meta">
+                  {props.workSession.answer.nextActions.slice(0, 3).map((action) => <span key={action}>{action}</span>)}
+                </div>
+              ) : null}
             </article>
           )}
           {props.error !== undefined && <p className="error-line">{props.error}</p>}
@@ -49,6 +66,15 @@ export function ConversationView(props: {
       )}
     </div>
   );
+}
+
+function isSubstantiveEvent(event: RunEvent): boolean {
+  return event.type.startsWith("tool.") ||
+    event.type === "confirmation.needed" ||
+    event.status === "approval_needed" ||
+    event.status === "failed" ||
+    event.status === "blocked" ||
+    event.status === "cancelled";
 }
 
 function WorkSessionCard({ workSession }: { readonly workSession: DesktopWorkSession }): React.ReactElement {
@@ -127,15 +153,17 @@ function ConfirmationCard(props: {
   readonly onDecision: (decision: "approve_once" | "deny" | "guidance", guidance?: string) => void;
 }): React.ReactElement {
   const [guidance, setGuidance] = useState("");
+  const resumeLost = props.confirmation.resumeAvailability === "lost_after_restart";
   return (
     <article className="confirmation-card">
       <span className="eyebrow">待确认 · {props.confirmation.riskLevel}</span>
       <h2>{props.confirmation.title || "需要确认"}</h2>
       <p>{"actionSummary" in props.confirmation ? props.confirmation.actionSummary : props.confirmation.question}</p>
       {"consequence" in props.confirmation && <p className="muted">{props.confirmation.consequence}</p>}
+      {resumeLost && <p className="muted">应用重启后无法继续原危险操作。请补充指导或重新发起后续任务。</p>}
       <textarea value={guidance} onChange={(event) => setGuidance(event.target.value)} placeholder="补充你的要求或限制" rows={3} />
       <div className="button-row">
-        <button type="button" className="primary" onClick={() => props.onDecision("approve_once")}>批准一次</button>
+        <button type="button" className="primary" disabled={resumeLost} onClick={() => props.onDecision("approve_once")}>批准一次</button>
         <button type="button" onClick={() => props.onDecision("deny")}>拒绝</button>
         <button type="button" onClick={() => props.onDecision("guidance", guidance)}>补充指导</button>
       </div>

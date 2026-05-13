@@ -13,6 +13,7 @@ import type {
   ToolExecutionContext,
 } from "../../domain/tools/index.js";
 import { createId } from "../id.js";
+import { projectToolStatusEnvelope } from "../tools/index.js";
 import {
   createToolCompletedMessage,
   createToolApprovalRequiredMessage,
@@ -360,6 +361,7 @@ function isReadOnlyToolCall(request: ToolCallRequest, definitions: readonly Tool
 }
 
 function cancelledToolResult(request: ToolCallRequest): ToolCallResult {
+  const diagnosticRef = `tool:${request.callId}:cancelled`;
   return {
     callId: request.callId,
     toolName: request.toolName,
@@ -370,7 +372,13 @@ function cancelledToolResult(request: ToolCallRequest): ToolCallResult {
     durationMs: 0,
     projection: {
       uiSummary: "工具执行已取消。",
-      diagnosticRef: `tool:${request.callId}:cancelled`,
+      diagnosticRef,
+      envelope: projectToolStatusEnvelope({
+        request,
+        status: "cancelled",
+        summary: "Tool execution cancelled.",
+        diagnosticRef,
+      }),
       truncated: false,
       redacted: true,
     },
@@ -463,23 +471,37 @@ function modelLimitResponse(initialRequest: ModelRequest, requestId: string): Mo
 }
 
 function approvalRequiredResultFromPending(pendingApproval: ToolUseLoopPendingApproval): ToolCallResult {
+  const request = pendingApproval.pendingToolCall;
+  const diagnosticRef = `tool:${request.callId}:confirmation-required`;
   return {
-    callId: pendingApproval.pendingToolCall.callId,
-    toolName: pendingApproval.pendingToolCall.toolName,
-    input: globalThis.structuredClone(pendingApproval.pendingToolCall.input),
+    callId: request.callId,
+    toolName: request.toolName,
+    input: globalThis.structuredClone(request.input),
     output: undefined,
     status: "approval_required",
-    error: `Tool ${pendingApproval.pendingToolCall.toolName} still requires user confirmation.`,
+    error: `Tool ${request.toolName} still requires user confirmation.`,
     durationMs: 0,
+    projection: {
+      uiSummary: `工具 ${request.toolName} 仍在等待用户确认。`,
+      diagnosticRef,
+      envelope: projectToolStatusEnvelope({
+        request,
+        status: "approval_required",
+        summary: `Tool ${request.toolName} still requires user confirmation.`,
+        diagnosticRef,
+      }),
+      truncated: false,
+      redacted: true,
+    },
     confirmationRequest: {
       confirmationId: pendingApproval.confirmationId,
-      runId: pendingApproval.pendingToolCall.callId,
+      runId: request.callId,
       title: "需要确认",
-      actionSummary: `工具 ${pendingApproval.pendingToolCall.toolName} 需要用户确认后才能执行。`,
+      actionSummary: `工具 ${request.toolName} 需要用户确认后才能执行。`,
       affectedResources: [],
       riskLevel: "medium",
       requestedAt: new Date().toISOString(),
-      sourceRefs: [`tool:${pendingApproval.pendingToolCall.callId}`],
+      sourceRefs: [`tool:${request.callId}`],
     },
   };
 }
@@ -517,9 +539,18 @@ function assistantToolCallMessage(
 }
 
 function toolResultMessage(result: ToolCallResult): ModelMessage {
-  const modelOutput = result.projection?.agentContent !== undefined
-    ? result.projection.agentContent
-    : toSafeToolEventValue(result.output);
+  const envelope = result.projection?.envelope;
+  const modelOutput = envelope !== undefined
+    ? {
+        summary: envelope.agentSummary,
+        evidenceRefs: envelope.evidenceRefs,
+        truncated: envelope.truncated,
+        redacted: envelope.redacted,
+        diagnosticRef: envelope.diagnosticRef,
+      }
+    : result.projection?.agentContent !== undefined
+      ? result.projection.agentContent
+      : toSafeToolEventValue(result.output);
   return {
     role: "tool",
     content: truncateToolMessageContent(JSON.stringify({

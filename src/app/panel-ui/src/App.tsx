@@ -8,6 +8,7 @@ import { Sidebar } from "./components/sidebar";
 import { TopBar } from "./components/topbar";
 import {
   mergeEvents,
+  openBasicRunStream,
   safeBasicEvents,
   safeBasicRun,
   safeConversation,
@@ -61,12 +62,14 @@ export function App(): React.ReactElement {
   const [attachments, setAttachments] = useState<readonly ContextAttachment[]>([]);
   const [attachmentKind, setAttachmentKind] = useState<ContextAttachment["kind"]>("workspace");
   const [attachmentValue, setAttachmentValue] = useState(".");
+  const [inspectorOpen, setInspectorOpen] = useState(false);
   const pollTimer = useRef<number | undefined>(undefined);
+  const streamRef = useRef<EventSource | undefined>(undefined);
   const currentRunId = app.run?.runId;
 
   useEffect(() => {
     void refreshBootstrap();
-    return () => stopPolling(pollTimer);
+    return () => stopLiveUpdates(pollTimer, streamRef);
   }, []);
 
   useEffect(() => {
@@ -112,6 +115,7 @@ export function App(): React.ReactElement {
 
   async function loadConversation(conversationId: string): Promise<void> {
     stopPolling(pollTimer);
+    stopStream(streamRef);
     const response = await getJson<{ readonly conversation: Conversation }>(`/api/conversations/${encodeURIComponent(conversationId)}`);
     const latestRunId = response.conversation.latestRunId ?? response.conversation.activeRunId;
     const detail = latestRunId === undefined ? undefined : await safeDesktopDetail(latestRunId);
@@ -127,8 +131,8 @@ export function App(): React.ReactElement {
       events: replay?.events ?? [],
       error: undefined,
     }));
-    if (run !== undefined && !terminalStatuses.has(run.status)) {
-      startPolling(run.runId, run.eventCursor.lastSequence);
+    if (run !== undefined && shouldKeepRefreshing(run.status)) {
+      startLiveUpdates(run.runId, run.eventCursor.lastSequence);
     }
   }
 
@@ -136,6 +140,7 @@ export function App(): React.ReactElement {
     const trimmed = goal.trim();
     if (trimmed.length === 0 || app.busy) return;
     stopPolling(pollTimer);
+    stopStream(streamRef);
     setApp((previous) => ({ ...previous, busy: true, error: undefined, events: [], detail: undefined, workSession: undefined }));
     try {
       const path =
@@ -165,7 +170,7 @@ export function App(): React.ReactElement {
         events: [],
         detail: undefined,
       }));
-      startPolling(response.run.runId, 0);
+      startLiveUpdates(response.run.runId, 0);
       void refreshConversations();
     } catch (error) {
       setApp((previous) => ({ ...previous, busy: false, error: error instanceof Error ? error.message : "任务启动失败。" }));
@@ -179,6 +184,7 @@ export function App(): React.ReactElement {
 
   function startPolling(runId: string, cursor: number): void {
     stopPolling(pollTimer);
+    stopStream(streamRef);
     let lastSequence = cursor;
     const tick = async (): Promise<void> => {
       try {
@@ -212,6 +218,10 @@ export function App(): React.ReactElement {
             stopPolling(pollTimer);
             void refreshConversations();
           }
+          if (!shouldKeepRefreshing(runResponse.run.status)) {
+            stopPolling(pollTimer);
+            void refreshConversations();
+          }
         }
       } catch (error) {
         setApp((previous) => ({ ...previous, error: error instanceof Error ? error.message : "刷新运行状态失败。" }));
@@ -221,11 +231,59 @@ export function App(): React.ReactElement {
     pollTimer.current = window.setInterval(() => void tick(), 1_200);
   }
 
+  function startLiveUpdates(runId: string, cursor: number): void {
+    stopLiveUpdates(pollTimer, streamRef);
+    let lastSequence = cursor;
+    const refreshAfterEvent = async (event: RunEvent): Promise<void> => {
+      lastSequence = Math.max(lastSequence, event.sequence);
+      const [run, workSession] = await Promise.all([
+        safeBasicRun(runId),
+        safeWorkSession(runId),
+      ]);
+      setApp((previous) => ({
+        ...previous,
+        run: run ?? previous.run,
+        workSession: workSession ?? previous.workSession,
+        events: mergeEvents(previous.events, [event]),
+      }));
+      if (run !== undefined && !shouldKeepRefreshing(run.status)) {
+        stopStream(streamRef);
+        const [detail, conversation] = await Promise.all([
+          safeDesktopDetail(runId),
+          run.conversationId === undefined ? undefined : safeConversation(run.conversationId),
+        ]);
+        setApp((previous) => ({
+          ...previous,
+          detail,
+          conversation: conversation ?? previous.conversation,
+          workSession: workSession ?? previous.workSession,
+        }));
+        void refreshConversations();
+      }
+    };
+    const fallback = (): void => {
+      if (pollTimer.current === undefined) {
+        startPolling(runId, lastSequence);
+      }
+    };
+    const stream = openBasicRunStream({
+      runId,
+      cursor,
+      onEvent: (event) => void refreshAfterEvent(event),
+      onError: fallback,
+    });
+    if (stream === undefined) {
+      startPolling(runId, cursor);
+      return;
+    }
+    streamRef.current = stream;
+  }
+
   async function cancelRun(): Promise<void> {
     if (currentRunId === undefined) return;
     const response = await postJson<{ readonly run: BasicAgentRun }>(`/api/basic-agent/runs/${encodeURIComponent(currentRunId)}/cancel`, {});
     const workSession = await safeWorkSession(currentRunId);
-    stopPolling(pollTimer);
+    stopLiveUpdates(pollTimer, streamRef);
     setApp((previous) => ({ ...previous, run: response.run, workSession: workSession ?? previous.workSession }));
     void refreshConversations();
   }
@@ -233,6 +291,13 @@ export function App(): React.ReactElement {
   async function decideConfirmation(decision: "approve_once" | "deny" | "guidance", guidance?: string): Promise<void> {
     const confirmation = app.workSession?.pendingConfirmation ?? app.detail?.canvas?.agent?.pendingConfirmation;
     if (currentRunId === undefined || confirmation === undefined) return;
+    if (decision === "approve_once" && confirmation.resumeAvailability === "lost_after_restart") {
+      setApp((previous) => ({
+        ...previous,
+        error: "应用重启后无法继续原危险操作。请补充指导或重新发起后续任务。",
+      }));
+      return;
+    }
     const response = await postJson<{ readonly run: BasicAgentRun }>(
       `/api/basic-agent/runs/${encodeURIComponent(currentRunId)}/confirmations/${encodeURIComponent(confirmation.confirmationId)}/decision`,
       { decision, guidance }
@@ -240,7 +305,7 @@ export function App(): React.ReactElement {
     const workSession = await safeWorkSession(currentRunId);
     setApp((previous) => ({ ...previous, run: response.run, workSession: workSession ?? previous.workSession }));
     if (decision === "approve_once") {
-      startPolling(currentRunId, response.run.eventCursor.lastSequence);
+      startLiveUpdates(currentRunId, response.run.eventCursor.lastSequence);
     } else {
       const detail = await safeDesktopDetail(currentRunId);
       setApp((previous) => ({ ...previous, detail }));
@@ -283,16 +348,30 @@ export function App(): React.ReactElement {
   }
 
   async function addAttachment(): Promise<void> {
-    const response = await postJson<{ readonly attachment: ContextAttachment }>("/api/context/attachments/preview", {
-      kind: attachmentKind,
-      value: attachmentValue,
-    });
-    if (response.attachment.status !== "ready") {
-      setApp((previous) => ({ ...previous, error: response.attachment.warning ?? "上下文暂时不可用。" }));
-      return;
+    try {
+      const response = await postJson<{ readonly attachment: ContextAttachment }>("/api/context/attachments/preview", {
+        kind: attachmentKind,
+        value: attachmentValue,
+      });
+      setAttachments((previous) => uniqueAttachments([...previous, response.attachment]));
+      setAttachmentValue(attachmentKind === "workspace" ? "." : "");
+      setApp((previous) => ({ ...previous, error: undefined }));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "上下文暂时不可用。";
+      const blocked: ContextAttachment = {
+        attachmentId: `blocked:${attachmentKind}:${attachmentValue}:${Date.now()}`,
+        kind: attachmentKind,
+        ref: attachmentValue,
+        title: attachmentKind === "web" ? "网页不可用" : "上下文不可用",
+        summary: message,
+        permissionRefs: [],
+        readonlyPreviewMeta: { available: false },
+        status: "blocked",
+        warning: message,
+      };
+      setAttachments((previous) => uniqueAttachments([...previous, blocked]));
+      setApp((previous) => ({ ...previous, error: message }));
     }
-    setAttachments((previous) => uniqueAttachments([...previous, response.attachment]));
-    setAttachmentValue(attachmentKind === "workspace" ? "." : "");
   }
 
   function removeAttachment(attachmentId: string): void {
@@ -301,14 +380,16 @@ export function App(): React.ReactElement {
 
   const pendingConfirmation = app.detail?.canvas?.agent?.pendingConfirmation;
   const visibleToolDisplays = useMemo(() => typedToolDisplays(app.detail), [app.detail]);
+  const inspectorContent = hasInspectorContent(app, visibleToolDisplays);
+  const showInspector = inspectorContent || inspectorOpen;
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${showInspector ? "inspector-open" : "inspector-hidden"}`}>
       <Sidebar
         conversations={app.conversations}
         activeConversationId={app.conversation?.conversationId}
         onNew={() => {
-          stopPolling(pollTimer);
+          stopLiveUpdates(pollTimer, streamRef);
           setAttachments([]);
           setApp((previous) => ({ ...previous, conversation: undefined, run: undefined, workSession: undefined, events: [], detail: undefined, error: undefined }));
         }}
@@ -322,6 +403,9 @@ export function App(): React.ReactElement {
         <TopBar
           run={app.run}
           config={app.config}
+          inspectorOpen={showInspector}
+          inspectorAvailable={inspectorContent}
+          onToggleInspector={() => setInspectorOpen((value) => !value)}
           onOpenSettings={() => {
             setSettingsTab("model");
             setSettingsOpen(true);
@@ -362,7 +446,7 @@ export function App(): React.ReactElement {
           />
         </section>
       </main>
-      <RightInspector run={app.run} workSession={app.workSession} events={app.events} detail={app.detail} toolDisplays={visibleToolDisplays} />
+      {showInspector && <RightInspector run={app.run} workSession={app.workSession} events={app.events} detail={app.detail} toolDisplays={visibleToolDisplays} />}
       {settingsOpen && (
         <SettingsPanel
           tab={settingsTab}
@@ -396,6 +480,23 @@ function stopPolling(ref: React.MutableRefObject<number | undefined>): void {
   }
 }
 
+function stopStream(ref: React.MutableRefObject<EventSource | undefined>): void {
+  ref.current?.close();
+  ref.current = undefined;
+}
+
+function stopLiveUpdates(
+  pollRef: React.MutableRefObject<number | undefined>,
+  streamRef: React.MutableRefObject<EventSource | undefined>
+): void {
+  stopPolling(pollRef);
+  stopStream(streamRef);
+}
+
+function shouldKeepRefreshing(status: BasicAgentRun["status"]): boolean {
+  return status === "queued" || status === "planning" || status === "running" || status === "paused";
+}
+
 function taskSoilInputFromAttachments(attachments: readonly ContextAttachment[]): {
   readonly contextRefs?: readonly {
     readonly ref: string;
@@ -424,4 +525,20 @@ function uniqueAttachments(attachments: readonly ContextAttachment[]): readonly 
     byRef.set(`${attachment.kind}:${attachment.ref}`, attachment);
   }
   return [...byRef.values()];
+}
+
+function hasInspectorContent(
+  app: AppState,
+  toolDisplays: readonly ReturnType<typeof typedToolDisplays>[number][]
+): boolean {
+  const contextAttachments = app.workSession?.contextAttachments ?? [];
+  const hasUserContext = contextAttachments.some((attachment) => attachment.kind !== "workspace" || attachment.status === "blocked");
+  return Boolean(
+    app.workSession?.pendingConfirmation !== undefined ||
+      app.workSession?.deliverable?.toolDisplays.length ||
+      app.workSession?.deliverable?.evidenceRefs.length ||
+      hasUserContext ||
+      toolDisplays.length ||
+      app.events.some((event) => event.visibility !== "debug" && (event.type.startsWith("tool.") || event.type === "confirmation.needed"))
+  );
 }

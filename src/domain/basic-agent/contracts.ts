@@ -56,6 +56,7 @@ export type ConfirmationRequest = {
   readonly actionSummary: string;
   readonly affectedResources: readonly string[];
   readonly riskLevel: ConfirmationRiskLevel;
+  readonly resumeAvailability?: "live" | "lost_after_restart";
   readonly requestedAt: string;
   readonly expiresAt?: string;
   readonly sourceRefs: readonly string[];
@@ -132,13 +133,51 @@ export type AgentDeliverable = {
   readonly createdAt: string;
 };
 
+export type ContextLedgerEntry = {
+  readonly entryId: string;
+  readonly kind: "goal" | "attachment" | "history" | "skill" | "tool_evidence" | "budget" | "truncation";
+  readonly title: string;
+  readonly summary: string;
+  readonly refs: readonly ObservationRef[];
+  readonly status: "used" | "truncated" | "omitted" | "blocked";
+};
+
+export type ContextLedger = {
+  readonly runId: string;
+  readonly summary: string;
+  readonly entries: readonly ContextLedgerEntry[];
+  readonly budget?: {
+    readonly maxMessages?: number;
+    readonly maxChars?: number;
+    readonly usedChars?: number;
+    readonly inputTokenBudget?: number;
+    readonly reservedOutputTokens?: number;
+    readonly estimatedInputTokens?: number;
+    readonly budgetSource?: string;
+  };
+  readonly truncation: {
+    readonly truncated: boolean;
+    readonly omittedItemCount: number;
+    readonly truncatedItemIds: readonly string[];
+  };
+};
+
+export type DesktopWorkSessionAnswer = {
+  readonly title: string;
+  readonly content: string;
+  readonly evidenceRefs: readonly ObservationRef[];
+  readonly nextActions: readonly string[];
+};
+
 export type DesktopWorkSessionReadModel = {
   readonly run: BasicAgentRun;
   readonly stage: DesktopWorkSessionStage;
   readonly headline: string;
   readonly currentAction: string;
   readonly contextAttachments: readonly ContextAttachment[];
+  readonly contextLedger: ContextLedger;
   readonly pendingConfirmation?: ConfirmationRequest;
+  readonly answer?: DesktopWorkSessionAnswer;
   readonly deliverable?: AgentDeliverable;
   readonly visibleEvents: readonly RunEvent[];
   readonly safetySummary: {

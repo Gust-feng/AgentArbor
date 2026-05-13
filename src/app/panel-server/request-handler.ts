@@ -1403,7 +1403,15 @@ function persistedStreamAgentLabel(type: PanelRunStreamEvent["type"]): string {
 }
 
 function panelStatusFromRuntimeStatus(status: RuntimeRunRecord["status"]): PanelRunStatus {
-  if (status === "pending" || status === "completed" || status === "failed" || status === "cancelled" || status === "blocked") {
+  if (
+    status === "pending" ||
+    status === "approval_needed" ||
+    status === "needs_input" ||
+    status === "completed" ||
+    status === "failed" ||
+    status === "cancelled" ||
+    status === "blocked"
+  ) {
     return status;
   }
   if (status === "running") {
@@ -1857,6 +1865,7 @@ function toRuntimeToolCallRecords(
         summary: detail?.summary ?? event.summary ?? previous?.summary,
         preview: event.detail?.preview ?? detail?.preview ?? previous?.preview,
         display: event.detail?.display ?? detail?.display ?? previous?.display,
+        envelope: detail?.envelope ?? previous?.envelope,
         truncated: event.detail?.truncated ?? detail?.truncated ?? previous?.truncated,
         error: event.detail?.error ?? detail?.error ?? previous?.error,
         eventRefs: unique([...(previous?.eventRefs ?? []), event.eventId]),
@@ -1869,8 +1878,8 @@ function toRuntimeToolCallRecords(
 
 function localToolDetailsByCallId(
   eventEntries: readonly EventLogEntry[]
-): Map<string, Pick<RuntimeToolCallRecord, "action" | "path" | "query" | "command" | "exitCode" | "summary" | "preview" | "display" | "truncated" | "error">> {
-  const details = new Map<string, Pick<RuntimeToolCallRecord, "action" | "path" | "query" | "command" | "exitCode" | "summary" | "preview" | "display" | "truncated" | "error">>();
+): Map<string, Pick<RuntimeToolCallRecord, "action" | "path" | "query" | "command" | "exitCode" | "summary" | "preview" | "display" | "envelope" | "truncated" | "error">> {
+  const details = new Map<string, Pick<RuntimeToolCallRecord, "action" | "path" | "query" | "command" | "exitCode" | "summary" | "preview" | "display" | "envelope" | "truncated" | "error">>();
   for (const entry of eventEntries) {
     if (entry.type !== "tool.completed" && entry.type !== "tool.failed") {
       continue;
@@ -1895,6 +1904,7 @@ function localToolDetailsByCallId(
       summary: optionalString(output.summary),
       preview: persistedToolPreview(optionalString(payload.toolName), output, result, payload),
       display: toolDisplayOrUndefined(output.display),
+      envelope: toolResultEnvelopeOrUndefined(output.envelope),
       truncated: output.truncated === true,
       error: optionalString(payload.error),
     });
@@ -1916,6 +1926,27 @@ function toolDisplayOrUndefined(value: unknown): RuntimeToolCallRecord["display"
     return value as RuntimeToolCallRecord["display"];
   }
   return undefined;
+}
+
+function toolResultEnvelopeOrUndefined(value: unknown): RuntimeToolCallRecord["envelope"] | undefined {
+  const record = asRecord(value);
+  const agentSummary = optionalString(record.agentSummary);
+  const rawRetention = optionalString(record.rawRetention);
+  if (agentSummary === undefined || (rawRetention !== "none" && rawRetention !== "diagnostic_ref_only")) {
+    return undefined;
+  }
+  return {
+    agentSummary: compactRuntimeText(agentSummary, 1_800),
+    evidenceRefs: stringArrayFrom(record.evidenceRefs).map((ref) => compactRuntimeText(ref, 220)).slice(0, 12),
+    uiDisplay: toolDisplayOrUndefined(record.uiDisplay),
+    tokenEstimate: typeof record.tokenEstimate === "number" && Number.isFinite(record.tokenEstimate)
+      ? Math.max(1, Math.floor(record.tokenEstimate))
+      : Math.max(1, Math.ceil(agentSummary.length / 4)),
+    truncated: record.truncated === true,
+    redacted: record.redacted !== false,
+    diagnosticRef: optionalString(record.diagnosticRef),
+    rawRetention,
+  };
 }
 
 function persistedToolPreview(
@@ -2208,6 +2239,27 @@ function syncConversationTurnForJob(runtime: PanelRuntime, job: PanelRunJob): vo
     });
     return;
   }
+  if (response.status === "approval_needed") {
+    runtime.conversations.updateAssistantPreview({
+      conversationId: job.conversationId,
+      assistantTurnId: job.assistantTurnId,
+      title: "需要确认",
+      content: sanitizeAssistantVisibleText(assistantTurnFromResponse(response).content || "等待你确认后继续。"),
+      status: "running",
+    });
+    return;
+  }
+  if (response.status === "needs_input") {
+    runtime.conversations.completeAssistantTurn({
+      conversationId: job.conversationId,
+      assistantTurnId: job.assistantTurnId,
+      runId: job.runId,
+      title: "需要补充",
+      content: sanitizeAssistantVisibleText("已收到补充指导，将作为后续消息继续处理。"),
+      status: "completed",
+    });
+    return;
+  }
   const turn = assistantTurnFromResponse(response);
   runtime.conversations.completeAssistantTurn({
     conversationId: job.conversationId,
@@ -2444,6 +2496,8 @@ async function runDesktopForPanel(
     conversationHistory: options.conversationHistory,
     skillContexts: await resolveTriggeredSkillContexts(runtime, goal),
     modelCapabilities: capabilitySnapshot.modelCapabilities,
+    capabilitySnapshot,
+    platform: process.platform,
     abortSignal: options.abortSignal,
     onRuntimeReady: options.onRuntimeReady,
     onModelOutputDelta: options.onModelOutputDelta,

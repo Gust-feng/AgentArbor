@@ -107,8 +107,8 @@ export type ToolDisplayProjection =
       readonly command?: string;
       readonly args?: readonly string[];
       readonly exitCode?: number;
-      readonly stdoutSummary?: string;
-      readonly stderrSummary?: string;
+      readonly outputSummary?: string;
+      readonly errorSummary?: string;
     }
   | {
       readonly kind: "generic_tool_summary";
@@ -157,8 +157,9 @@ export type DesktopRunDetail = {
         readonly question: string;
         readonly consequence: string;
         readonly riskLevel: string;
+        readonly resumeAvailability?: "live" | "lost_after_restart";
       };
-      readonly contextPack?: {
+      readonly context?: {
         readonly usageSummary?: string;
         readonly items?: readonly {
           readonly itemId: string;
@@ -228,6 +229,40 @@ export type AgentDeliverable = {
   readonly createdAt: string;
 };
 
+export type DesktopWorkSessionAnswer = {
+  readonly title: string;
+  readonly content: string;
+  readonly evidenceRefs: readonly ObservationRef[];
+  readonly nextActions: readonly string[];
+};
+
+export type ContextLedger = {
+  readonly runId: string;
+  readonly summary: string;
+  readonly entries: readonly {
+    readonly entryId: string;
+    readonly kind: "goal" | "attachment" | "history" | "skill" | "tool_evidence" | "budget" | "truncation";
+    readonly title: string;
+    readonly summary: string;
+    readonly refs: readonly ObservationRef[];
+    readonly status: "used" | "truncated" | "omitted" | "blocked";
+  }[];
+  readonly budget?: {
+    readonly maxMessages?: number;
+    readonly maxChars?: number;
+    readonly usedChars?: number;
+    readonly inputTokenBudget?: number;
+    readonly reservedOutputTokens?: number;
+    readonly estimatedInputTokens?: number;
+    readonly budgetSource?: string;
+  };
+  readonly truncation: {
+    readonly truncated: boolean;
+    readonly omittedItemCount: number;
+    readonly truncatedItemIds: readonly string[];
+  };
+};
+
 export type DesktopWorkSession = {
   readonly run: BasicAgentRun;
   readonly stage:
@@ -245,6 +280,7 @@ export type DesktopWorkSession = {
   readonly headline: string;
   readonly currentAction: string;
   readonly contextAttachments: readonly ContextAttachment[];
+  readonly contextLedger: ContextLedger;
   readonly pendingConfirmation?: {
     readonly confirmationId: string;
     readonly runId: string;
@@ -253,9 +289,11 @@ export type DesktopWorkSession = {
     readonly actionSummary: string;
     readonly affectedResources: readonly string[];
     readonly riskLevel: "low" | "medium" | "high";
+    readonly resumeAvailability?: "live" | "lost_after_restart";
     readonly requestedAt: string;
     readonly sourceRefs: readonly string[];
   };
+  readonly answer?: DesktopWorkSessionAnswer;
   readonly deliverable?: AgentDeliverable;
   readonly visibleEvents: readonly RunEvent[];
   readonly safetySummary: {

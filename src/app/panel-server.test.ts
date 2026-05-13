@@ -57,6 +57,7 @@ test("panel React workbench consumes Basic Agent projection APIs", async () => {
 
   assert.equal(app.includes("/api/basic-agent/runs/"), true);
   assert.equal(app.includes("/events?cursor="), true);
+  assert.equal(runtime.includes("/stream?cursor="), true);
   assert.equal(runtime.includes("/work-session"), true);
   assert.equal(app.includes("/api/context/attachments/preview"), true);
   assert.equal(app.includes("/cancel"), true);
@@ -921,7 +922,8 @@ test("context attachment preview feeds the Basic Agent work session read model s
     assert.equal(workSession.status, 200);
     assert.equal(workSession.body.workSession.stage, "completed");
     assert.equal(workSession.body.workSession.contextAttachments.some((item: { ref?: string }) => item.ref === "file:notes.md"), true);
-    assert.equal(typeof workSession.body.workSession.deliverable?.summary, "string");
+    assert.equal(typeof workSession.body.workSession.answer?.content, "string");
+    assert.equal(workSession.body.workSession.deliverable, undefined);
     assert.equal(workSession.text.includes(fileBody), false);
     assertSafePanelJsonText(workSession.text);
   } finally {
@@ -2225,13 +2227,16 @@ test("basic agent events endpoint derives completed events without a prior run r
       start.body.runId,
       (body) => body.events.some((event: { type: string }) => event.type === "final.result")
     );
+    const basicStream = await requestSse(server.url, `/api/basic-agent/runs/${encodeURIComponent(start.body.runId)}/stream?cursor=0`);
 
     assert.equal(basicEvents.status, 200);
+    assert.equal(basicStream.status, 200);
     assert.equal(basicEvents.body.cursor.lastSequence > 0, true);
     assert.equal(basicEvents.body.events[0].type, "run.started");
     assert.equal(basicEvents.body.events.some((event: { type: string }) => event.type === "final.result"), true);
+    assert.equal(basicStream.events.some((event: { type: string }) => event.type === "final.result"), true);
     assert.equal(JSON.stringify(basicEvents.body.events).includes("raw provider response"), false);
-    assertSafePanelJsonText(basicEvents.text);
+    assertSafePanelJsonText(`${basicEvents.text}\n${basicStream.text}`);
   } finally {
     await server.close();
     await fs.rm(directory, { recursive: true, force: true });
@@ -2257,6 +2262,32 @@ test("basic agent run endpoint returns the transport-neutral completed projectio
     assert.equal(basicRun.body.run.eventCursor.lastSequence > 0, true);
     assert.equal(JSON.stringify(basicRun.body).includes("sanitizedMessages"), false);
     assertSafePanelJsonText(basicRun.text);
+  } finally {
+    await server.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("basic agent rejects stale confirmation decisions for runs without pending approval", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-basic-stale-confirmation-"));
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+  try {
+    const start = await requestJson(server.url, "/api/desktop/runs", {
+      method: "POST",
+      body: { goal: "直接回答一个普通问题", aiMode: "fake" },
+    });
+    await waitForRun(server.url, start.body.runId, (body) => body.status === "completed", 4_000, "/api/desktop/runs");
+    const stale = await requestJson(
+      server.url,
+      `/api/basic-agent/runs/${encodeURIComponent(start.body.runId)}/confirmations/${encodeURIComponent("confirmation-stale")}/decision`,
+      { method: "POST", body: { decision: "deny" } }
+    );
+    const basicRun = await requestJson(server.url, `/api/basic-agent/runs/${encodeURIComponent(start.body.runId)}`);
+
+    assert.equal(stale.status, 409);
+    assert.equal(stale.body.error.code, "invalid_confirmation_state");
+    assert.equal(basicRun.body.run.status, "completed");
+    assertSafePanelJsonText(`${stale.text}\n${basicRun.text}`);
   } finally {
     await server.close();
     await fs.rm(directory, { recursive: true, force: true });
@@ -2313,7 +2344,16 @@ test("basic agent cancel API marks running desktop jobs as cancelled and replays
     assert.equal(stream.events.some((event) => event.type === "run.cancelled"), true);
     assert.equal(runtimeRun.body.snapshot.run.status, "cancelled");
     assert.equal(JSON.stringify(basicEvents.body.events).includes(secret), false);
-    assertSafePanelJsonText(`${cancelled.text}\n${basicEvents.text}\n${stream.text}\n${runtimeRun.text}`);
+    releaseFetch?.();
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    const lateRun = await requestJson(server.url, `/api/basic-agent/runs/${encodeURIComponent(start.body.runId)}`);
+    const lateEvents = await requestJson(
+      server.url,
+      `/api/basic-agent/runs/${encodeURIComponent(start.body.runId)}/events?cursor=0`
+    );
+    assert.equal(lateRun.body.run.status, "cancelled");
+    assert.equal(lateEvents.body.events.some((event: { type: string }) => event.type === "final.result"), false);
+    assertSafePanelJsonText(`${cancelled.text}\n${basicEvents.text}\n${stream.text}\n${runtimeRun.text}\n${lateRun.text}\n${lateEvents.text}`);
   } finally {
     releaseFetch?.();
     await server.close();
@@ -2356,7 +2396,7 @@ test("basic agent confirmation decisions persist approve and guidance outcomes s
     const approveCompleted = await waitForRun(
       server.url,
       approveStart.body.runId,
-      (body) => body.status === "completed" && body.canvas?.agent?.pendingConfirmation !== undefined,
+      (body) => body.status === "approval_needed" && body.canvas?.agent?.pendingConfirmation !== undefined,
       4_000,
       "/api/desktop/runs"
     );
@@ -2378,6 +2418,10 @@ test("basic agent confirmation decisions persist approve and guidance outcomes s
     assert.equal(approveRuntime.body.snapshot.confirmations[0].status, "approved");
     assert.equal(approveRuntime.body.snapshot.toolCalls.some((call: { status: string }) => call.status === "completed"), true);
     assert.equal(approveEvents.body.events.some((event: { type: string }) => event.type === "run.resumed"), true);
+    assert.equal(
+      approveEvents.body.events.some((event: { type: string; status: string }) => event.type === "user_approval.received" && event.status === "running"),
+      true
+    );
     assert.equal(approveEvents.body.events.some((event: { type: string }) => event.type === "tool.completed"), true);
     assert.equal(approvedFile, "approved write content");
 
@@ -2389,7 +2433,7 @@ test("basic agent confirmation decisions persist approve and guidance outcomes s
     const guidanceCompleted = await waitForRun(
       server.url,
       guidanceStart.body.runId,
-      (body) => body.status === "completed" && body.canvas?.agent?.pendingConfirmation !== undefined,
+      (body) => body.status === "approval_needed" && body.canvas?.agent?.pendingConfirmation !== undefined,
       4_000,
       "/api/desktop/runs"
     );
@@ -2444,7 +2488,7 @@ test("basic agent denied confirmation restores as blocked with safe replay after
     const completed = await waitForRun(
       server.url,
       start.body.runId,
-      (body) => body.status === "completed" && body.canvas?.agent?.pendingConfirmation !== undefined,
+      (body) => body.status === "approval_needed" && body.canvas?.agent?.pendingConfirmation !== undefined,
       4_000,
       "/api/desktop/runs"
     );
@@ -2517,7 +2561,7 @@ test("basic agent approve after restart blocks because executable continuation i
     const completed = await waitForRun(
       server.url,
       start.body.runId,
-      (body) => body.status === "completed" && body.canvas?.agent?.pendingConfirmation !== undefined,
+      (body) => body.status === "approval_needed" && body.canvas?.agent?.pendingConfirmation !== undefined,
       4_000,
       "/api/desktop/runs"
     );
@@ -2525,6 +2569,10 @@ test("basic agent approve after restart blocks because executable continuation i
 
     await server.close();
     server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+    const restoredWorkSession = await requestJson(
+      server.url,
+      `/api/basic-agent/runs/${encodeURIComponent(start.body.runId)}/work-session`
+    );
     const approved = await requestJson(
       server.url,
       `/api/basic-agent/runs/${encodeURIComponent(start.body.runId)}/confirmations/${encodeURIComponent(confirmationId)}/decision`,
@@ -2536,6 +2584,7 @@ test("basic agent approve after restart blocks because executable continuation i
     );
     const runtimeRun = await requestJson(server.url, `/api/runtime/runs/${encodeURIComponent(start.body.runId)}`);
 
+    assert.equal(restoredWorkSession.body.workSession.pendingConfirmation.resumeAvailability, "lost_after_restart");
     assert.equal(approved.status, 200);
     assert.equal(approved.body.run.status, "blocked");
     assert.equal(runtimeRun.body.snapshot.run.status, "blocked");

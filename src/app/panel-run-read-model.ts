@@ -20,7 +20,15 @@ import { safeCommandToolPreview, safeReadFileToolPreview } from "./safe-tool-pre
 import type { UndergroundDemoSummary } from "./underground-demo-summary.js";
 import { friendlyUserFacingFailureText } from "./visible-text-safety.js";
 
-export type PanelRunStatus = "pending" | "running" | "completed" | "failed" | "cancelled" | "blocked";
+export type PanelRunStatus =
+  | "pending"
+  | "running"
+  | "approval_needed"
+  | "needs_input"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "blocked";
 
 export type PanelObservationReadModel = Pick<
   RunObservationSnapshot,
@@ -237,7 +245,7 @@ export type PanelRunStreamEvent = {
   readonly agentLabel?: string;
   readonly summary?: string;
   readonly delta?: string;
-  readonly status?: "pending" | "running" | "completed" | "failed" | "cancelled" | "blocked";
+  readonly status?: "pending" | "running" | "approval_needed" | "needs_input" | "completed" | "failed" | "cancelled" | "blocked";
   readonly toolName?: string;
   readonly detail?: PanelRunStreamEventDetail;
   readonly sourceRefs: readonly string[];
@@ -1974,6 +1982,12 @@ function modelStatus(
 function waitingPointFor(status: PanelRunStatus, lastEventType: ArborMessageType | undefined): string {
   if (status === "pending") {
     return "等待后台运行启动。";
+  }
+  if (status === "approval_needed") {
+    return "等待用户确认后继续。";
+  }
+  if (status === "needs_input") {
+    return "等待用户补充指导。";
   }
   if (status === "cancelled") {
     return "运行已取消。";

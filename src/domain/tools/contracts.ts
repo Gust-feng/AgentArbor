@@ -1,7 +1,10 @@
+import type { ConfirmationRequest } from "../basic-agent/index.js";
+
 export type ToolInputSchema = {
   readonly type: "object";
   readonly properties: Record<string, unknown>;
   readonly required?: readonly string[];
+  readonly additionalProperties?: boolean;
 };
 
 export type ToolCategory = "research" | "workspace" | "filesystem" | "terminal" | "web" | "mcp" | "other";
@@ -33,8 +36,20 @@ export type ToolSafeProjection = {
   readonly uiSummary?: string;
   readonly diagnosticRef?: string;
   readonly display?: ToolDisplayProjection;
+  readonly envelope?: ToolResultEnvelope;
   readonly truncated?: boolean;
   readonly redacted?: boolean;
+};
+
+export type ToolResultEnvelope = {
+  readonly agentSummary: string;
+  readonly evidenceRefs: readonly string[];
+  readonly uiDisplay?: ToolDisplayProjection;
+  readonly tokenEstimate: number;
+  readonly truncated: boolean;
+  readonly redacted: boolean;
+  readonly diagnosticRef?: string;
+  readonly rawRetention: "none" | "diagnostic_ref_only";
 };
 
 export type ToolDisplayProjection =
@@ -79,8 +94,8 @@ export type ToolDisplayProjection =
       readonly command?: string;
       readonly args?: readonly string[];
       readonly exitCode?: number;
-      readonly stdoutSummary?: string;
-      readonly stderrSummary?: string;
+      readonly outputSummary?: string;
+      readonly errorSummary?: string;
     }
   | {
       readonly kind: "generic_tool_summary";
@@ -113,6 +128,38 @@ export type ToolCallResult = {
   readonly projection?: ToolSafeProjection;
   readonly confirmationRequest?: ConfirmationRequest;
 };
+
+export type ToolSecurityDecision =
+  | {
+      readonly decision: "allow";
+      readonly reason: string;
+    }
+  | {
+      readonly decision: "approval_required";
+      readonly reason: string;
+      readonly title: string;
+      readonly actionSummary: string;
+      readonly affectedResources: readonly string[];
+      readonly riskLevel: ToolRiskLevel;
+      readonly sourceRefs: readonly string[];
+    }
+  | {
+      readonly decision: "blocked";
+      readonly reason: string;
+      readonly code: string;
+      readonly affectedResources: readonly string[];
+      readonly sourceRefs: readonly string[];
+    };
+
+export type ToolSecurityEvaluationContext = {
+  readonly platform: NodeJS.Platform;
+  readonly approvedConfirmationIds?: readonly string[];
+  readonly workspaceRoot?: string;
+};
+
+export interface ToolSecurityPolicy {
+  evaluateToolCall(request: ToolCallRequest, definition: ToolDefinition, context: ToolSecurityEvaluationContext): ToolSecurityDecision;
+}
 
 export type ToolExecutionContext = {
   readonly callerAgentId: string;
@@ -174,4 +221,3 @@ export interface ToolExecutionBroker {
   resetCallCount(): void;
   getCallCount(): number;
 }
-import type { ConfirmationRequest } from "../basic-agent/index.js";

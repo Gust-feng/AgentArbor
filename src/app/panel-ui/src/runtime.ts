@@ -1,6 +1,23 @@
 import { getJson } from "./api";
 import type { BasicAgentRun, Conversation, DesktopRunDetail, DesktopWorkSession, RunEvent, ToolDisplayProjection } from "./types";
 
+const BASIC_RUN_EVENT_TYPES = [
+  "run.started",
+  "run.resumed",
+  "run.blocked",
+  "run.cancelled",
+  "run.failed",
+  "final.result",
+  "tool.requested",
+  "tool.completed",
+  "tool.failed",
+  "confirmation.needed",
+  "user_approval.received",
+  "user.guidance",
+  "model.output.delta",
+  "model.output.completed",
+] as const;
+
 export function mergeEvents(previous: readonly RunEvent[], incoming: readonly RunEvent[]): readonly RunEvent[] {
   const byId = new Map<string, RunEvent>();
   for (const event of previous) byId.set(event.id, event);
@@ -46,6 +63,33 @@ export async function safeConversation(conversationId: string): Promise<Conversa
   } catch {
     return undefined;
   }
+}
+
+export function openBasicRunStream(input: {
+  readonly runId: string;
+  readonly cursor: number;
+  readonly onEvent: (event: RunEvent) => void;
+  readonly onError: () => void;
+}): EventSource | undefined {
+  if (typeof EventSource === "undefined") {
+    return undefined;
+  }
+  const stream = new EventSource(`/api/basic-agent/runs/${encodeURIComponent(input.runId)}/stream?cursor=${input.cursor}`);
+  const handle = (message: MessageEvent<string>): void => {
+    try {
+      input.onEvent(JSON.parse(message.data) as RunEvent);
+    } catch {
+      input.onError();
+    }
+  };
+  for (const type of BASIC_RUN_EVENT_TYPES) {
+    stream.addEventListener(type, handle as EventListener);
+  }
+  stream.onerror = () => {
+    stream.close();
+    input.onError();
+  };
+  return stream;
 }
 
 export function typedToolDisplays(detail: DesktopRunDetail | undefined): readonly ToolDisplayProjection[] {

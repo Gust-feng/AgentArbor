@@ -58,21 +58,29 @@ export function Composer(props: {
             <option value="deep">深入处理</option>
           </select>
         </label>
-        <select value={props.aiMode} onChange={(event) => props.onAiModeChange(event.target.value as "none" | "fake" | "openai-compatible")}>
-          <option value="openai-compatible">真实模型</option>
-          <option value="fake">测试模型</option>
-          <option value="none">停用模型</option>
-        </select>
         {running && <button type="button" onClick={props.onCancel}>取消</button>}
         <button type="button" className="primary" disabled={props.busy || props.value.trim().length === 0} onClick={() => props.onSubmit(props.runMode)}>
           发送
         </button>
       </div>
-      <p className="mode-hint">
-        普通 Agent 适合问答、阅读上下文和轻量工具任务；深入处理会进入更重的分析流程。
-      </p>
-      <details className="attachment-panel" open>
-        <summary>附件与上下文</summary>
+      <details className="advanced-panel">
+        <summary>高级</summary>
+        <div className="advanced-form">
+          <label>
+            <span>模型模式</span>
+            <select value={props.aiMode} onChange={(event) => props.onAiModeChange(event.target.value as "none" | "fake" | "openai-compatible")}>
+              <option value="openai-compatible">真实模型</option>
+              <option value="fake">测试模型</option>
+              <option value="none">停用模型</option>
+            </select>
+          </label>
+          <p className="mode-hint">
+            普通 Agent 适合问答、阅读上下文和轻量工具任务；深入处理会进入更重的分析流程。
+          </p>
+        </div>
+      </details>
+      <details className="attachment-panel">
+        <summary>附件与上下文{props.attachments.length > 0 ? ` · ${props.attachments.length}` : ""}</summary>
         <div className="attachment-form">
           <select value={props.attachmentKind} onChange={(event) => props.onAttachmentKindChange(event.target.value as ContextAttachment["kind"])}>
             <option value="workspace">当前工作区</option>

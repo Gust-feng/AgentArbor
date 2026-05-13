@@ -3,7 +3,10 @@ import type {
   AgentDeliverableSection,
   BasicAgentRun,
   ConfirmationRequest,
+  ContextLedger,
+  ContextLedgerEntry,
   ContextAttachment,
+  DesktopWorkSessionAnswer,
   DesktopWorkSessionReadModel,
   DesktopWorkSessionStage,
   RunEvent,
@@ -20,6 +23,7 @@ export type CreateDesktopWorkSessionReadModelInput = {
   readonly canvas?: PanelRunCanvasReadModel;
   readonly taskSoilInput?: DesktopTaskSoilInput;
   readonly toolDisplays?: readonly ToolDisplayProjection[];
+  readonly pendingConfirmation?: ConfirmationRequest;
   readonly restoredResult?: {
     readonly title: string;
     readonly summary: string;
@@ -32,21 +36,26 @@ export function createDesktopWorkSessionReadModel(
   const visibleEvents = input.events.filter((event) => event.visibility !== "debug").slice(-18);
   const contextAttachments = contextAttachmentsFor(input);
   const toolDisplays = input.toolDisplays ?? [];
-  const pendingConfirmation = pendingConfirmationFor(input.run, input.canvas);
+  const contextLedger = contextLedgerFor(input, contextAttachments, toolDisplays);
+  const pendingConfirmation = input.pendingConfirmation ?? pendingConfirmationFor(input.run, input.canvas);
+  const answer = answerFor(input);
   const deliverable = deliverableFor({
     run: input.run,
     canvas: input.canvas,
     toolDisplays,
     restoredResult: input.restoredResult,
+    answer,
   });
-  const stage = stageFor(input.run, visibleEvents, pendingConfirmation, deliverable);
+  const stage = stageFor(input.run, visibleEvents, pendingConfirmation, deliverable, answer);
   return {
     run: input.run,
     stage,
-    headline: headlineFor(input.run, stage, deliverable),
+    headline: headlineFor(input.run, stage, deliverable, answer),
     currentAction: currentActionFor(input.run, stage, visibleEvents, pendingConfirmation),
     contextAttachments,
+    contextLedger,
     pendingConfirmation,
+    answer,
     deliverable,
     visibleEvents,
     safetySummary: {
@@ -58,18 +67,94 @@ export function createDesktopWorkSessionReadModel(
   };
 }
 
+function contextLedgerFor(
+  input: CreateDesktopWorkSessionReadModelInput,
+  attachments: readonly ContextAttachment[],
+  toolDisplays: readonly ToolDisplayProjection[]
+): ContextLedger {
+  const context = input.canvas?.kind === "desktop_agent_canvas" ? input.canvas.agent.context : undefined;
+  const contextItems = context?.items ?? [];
+  const entries: ContextLedgerEntry[] = [
+    {
+      entryId: `${input.run.runId}:ledger:goal`,
+      kind: "goal",
+      title: "当前任务",
+      summary: input.run.goalSummary,
+      refs: [{ kind: "goal", id: input.run.runId }],
+      status: "used",
+    },
+    ...attachments.map((attachment): ContextLedgerEntry => ({
+      entryId: `${input.run.runId}:ledger:attachment:${attachment.attachmentId}`,
+      kind: "attachment",
+      title: attachment.title,
+      summary: attachment.summary,
+      refs: [{ kind: attachment.kind === "file" ? "artifact" : "event", id: attachment.ref }],
+      status: attachment.status === "blocked" ? "blocked" : attachment.readonlyPreviewMeta.truncated === true ? "truncated" : "used",
+    })),
+    ...contextItems
+      .filter((item) => item.sourceKind === "conversation" || item.sourceKind === "skill")
+      .slice(0, 8)
+      .map((item): ContextLedgerEntry => ({
+        entryId: `${input.run.runId}:ledger:context:${item.itemId}`,
+        kind: item.sourceKind === "skill" ? "skill" : "history",
+        title: item.sourceKind === "skill" ? "触发技能" : "历史对话",
+        summary: item.summary,
+        refs: [{ kind: "event", id: item.itemId }],
+        status: item.truncated ? "truncated" : "used",
+      })),
+    ...toolDisplays.slice(0, 12).map((display, index): ContextLedgerEntry => ({
+      entryId: `${input.run.runId}:ledger:tool:${index}`,
+      kind: "tool_evidence",
+      title: toolLedgerTitle(display),
+      summary: toolLedgerSummary(display),
+      refs: [],
+      status: "truncated" in display && display.truncated === true ? "truncated" : "used",
+    })),
+  ];
+  const truncation = context?.truncationReport ?? {
+    truncated: entries.some((entry) => entry.status === "truncated"),
+    omittedItemCount: 0,
+    truncatedItemIds: entries.filter((entry) => entry.status === "truncated").map((entry) => entry.entryId),
+  };
+  return {
+    runId: input.run.runId,
+    summary: context?.usageSummary ?? `上下文来源 ${entries.length} 项，普通视图只展示引用和安全摘要。`,
+    entries,
+    budget: context?.budget,
+    truncation,
+  };
+}
+
+function toolLedgerTitle(display: ToolDisplayProjection): string {
+  if (display.kind === "search_results") return "搜索证据";
+  if (display.kind === "browser_snapshot") return "网页摘要";
+  if (display.kind === "file_change_summary") return "文件变更";
+  if (display.kind === "file_diff_preview") return "差异预览";
+  if (display.kind === "command_summary") return "命令摘要";
+  return "工具摘要";
+}
+
+function toolLedgerSummary(display: ToolDisplayProjection): string {
+  if (display.kind === "search_results") return redactOrdinaryText(display.query ?? `搜索结果 ${display.results.length} 条`, 240);
+  if (display.kind === "browser_snapshot") return redactOrdinaryText(display.title ?? display.url ?? "网页已读取。", 240);
+  if (display.kind === "command_summary") return redactOrdinaryText(display.command ?? "命令已执行。", 240);
+  if (display.kind === "file_change_summary" || display.kind === "file_diff_preview") return redactOrdinaryText(display.path ?? "文件变更摘要。", 240);
+  return redactOrdinaryText(display.summary ?? display.action ?? "工具已完成。", 240);
+}
+
 function stageFor(
   run: BasicAgentRun,
   events: readonly RunEvent[],
   pendingConfirmation: ConfirmationRequest | undefined,
-  deliverable: AgentDeliverable | undefined
+  deliverable: AgentDeliverable | undefined,
+  answer: DesktopWorkSessionAnswer | undefined
 ): DesktopWorkSessionStage {
   if (run.status === "queued") return "queued";
   if (run.status === "approval_needed" || pendingConfirmation !== undefined) return "awaiting_approval";
   if (run.status === "blocked" || run.status === "needs_input") return "blocked";
   if (run.status === "failed") return "failed";
   if (run.status === "cancelled") return "cancelled";
-  if (run.status === "completed") return deliverable === undefined ? "completed" : "completed";
+  if (run.status === "completed") return deliverable === undefined && answer === undefined ? "completed" : "completed";
   const latest = events.at(-1);
   if (latest?.type.startsWith("tool.")) return "using_tools";
   if (latest?.type === "model.output.delta" || latest?.type === "model.output.completed") return "composing_result";
@@ -81,9 +166,10 @@ function stageFor(
 function headlineFor(
   run: BasicAgentRun,
   stage: DesktopWorkSessionStage,
-  deliverable: AgentDeliverable | undefined
+  deliverable: AgentDeliverable | undefined,
+  answer: DesktopWorkSessionAnswer | undefined
 ): string {
-  if (stage === "completed") return deliverable?.title ?? "任务已完成";
+  if (stage === "completed") return deliverable?.title ?? answer?.title ?? "任务已完成";
   if (stage === "awaiting_approval") return "需要你确认下一步";
   if (stage === "blocked") return "需要处理后再继续";
   if (stage === "failed") return "这次没有完成";
@@ -126,9 +212,15 @@ function deliverableFor(input: {
     readonly title: string;
     readonly summary: string;
   };
+  readonly answer?: DesktopWorkSessionAnswer;
 }): AgentDeliverable | undefined {
   const canvas = input.canvas;
-  if (canvas?.kind === "desktop_agent_canvas" && canvas.agent.answer !== undefined) {
+  if (
+    canvas?.kind === "desktop_agent_canvas" &&
+    canvas.agent.answer !== undefined &&
+    input.answer !== undefined &&
+    shouldPromoteAnswerToDeliverable(input.toolDisplays)
+  ) {
     const answer = canvas.agent.answer;
     const sections = answer.resultBlocks.length > 0
       ? answer.resultBlocks.map((block): AgentDeliverableSection => ({
@@ -168,16 +260,7 @@ function deliverableFor(input: {
     });
   }
   if (canvas?.kind === "work_session_canvas" && canvas.workSession.directAnswer !== undefined) {
-    const answer = canvas.workSession.directAnswer;
-    return deliverable({
-      run: input.run,
-      title: "已回答",
-      summary: answer.answer,
-      sections: [section(`${input.run.runId}:answer`, "回答", answer.answer, answer.evidenceRefs)],
-      evidenceRefs: observationRefs(answer.evidenceRefs),
-      toolDisplays: input.toolDisplays,
-      nextActions: answer.followUpSuggestions,
-    });
+    return undefined;
   }
   if (input.restoredResult !== undefined && input.run.status === "completed") {
     return deliverable({
@@ -190,6 +273,40 @@ function deliverableFor(input: {
     });
   }
   return undefined;
+}
+
+function answerFor(input: CreateDesktopWorkSessionReadModelInput): DesktopWorkSessionAnswer | undefined {
+  const canvas = input.canvas;
+  if (canvas?.kind === "desktop_agent_canvas" && canvas.agent.answer !== undefined) {
+    return {
+      title: "已回答",
+      content: redactOrdinaryText(canvas.agent.answer.answer, 2_000),
+      evidenceRefs: observationRefs(canvas.agent.answer.evidenceRefs),
+      nextActions: [],
+    };
+  }
+  if (canvas?.kind === "work_session_canvas" && canvas.workSession.directAnswer !== undefined) {
+    return {
+      title: "已回答",
+      content: redactOrdinaryText(canvas.workSession.directAnswer.answer, 2_000),
+      evidenceRefs: observationRefs(canvas.workSession.directAnswer.evidenceRefs),
+      nextActions: canvas.workSession.directAnswer.followUpSuggestions
+        .map((item) => redactOrdinaryText(item, 220))
+        .filter((item) => item.length > 0)
+        .slice(0, 5),
+    };
+  }
+  return undefined;
+}
+
+function shouldPromoteAnswerToDeliverable(toolDisplays: readonly ToolDisplayProjection[]): boolean {
+  return toolDisplays.some((display) =>
+    display.kind === "search_results" ||
+    display.kind === "browser_snapshot" ||
+    display.kind === "file_change_summary" ||
+    display.kind === "file_diff_preview" ||
+    display.kind === "command_summary"
+  );
 }
 
 function deliverable(input: {
@@ -246,6 +363,7 @@ function pendingConfirmationFor(
     actionSummary: redactOrdinaryText(`${pending.question}\n${pending.consequence}`, 600),
     affectedResources: pending.sourceRefs.map((ref) => redactOrdinaryText(ref, 180)),
     riskLevel: pending.riskLevel === "low" || pending.riskLevel === "medium" || pending.riskLevel === "high" ? pending.riskLevel : "medium",
+    resumeAvailability: "live",
     requestedAt: run.updatedAt,
     sourceRefs: pending.sourceRefs,
   };

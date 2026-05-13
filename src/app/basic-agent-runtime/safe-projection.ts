@@ -1,10 +1,13 @@
 import type { ModelFailure } from "../../domain/intelligence/index.js";
 import type {
   ToolCallRequest,
-  ToolCallResult,
   ToolDisplayProjection,
   ToolSafeProjection,
 } from "../../domain/tools/index.js";
+import {
+  projectToolResultEnvelope as projectKernelToolResultEnvelope,
+  projectToolStatusEnvelope,
+} from "../../kernel/tools/index.js";
 import { redactSensitiveText } from "../../kernel/redaction.js";
 import { sanitizeAssistantVisibleText } from "../visible-text-safety.js";
 
@@ -21,11 +24,27 @@ export function projectToolResult(input: {
   const summary = stringOrUndefined(record.summary);
   const refId = stringOrUndefined(record.refId);
   const truncated = record.truncated === true;
+  const display = projectToolDisplay(input.request, input.output);
+  const diagnosticRef = refId ?? `tool:${input.request.callId}`;
+  const envelope = projectKernelToolResultEnvelope({
+    request: input.request,
+    display,
+    summary,
+    diagnosticRef,
+    truncated,
+  });
   return {
-    agentContent: projectAgentToolContent(input.output),
+    agentContent: {
+      summary: envelope.agentSummary,
+      evidenceRefs: envelope.evidenceRefs,
+      truncated: envelope.truncated,
+      redacted: envelope.redacted,
+      diagnosticRef: envelope.diagnosticRef,
+    },
     uiSummary: compactSafeText(summary ?? `${input.request.toolName} completed.`, input.maxPreviewChars ?? 800),
-    diagnosticRef: refId ?? `tool:${input.request.callId}`,
-    display: projectToolDisplay(input.request, input.output),
+    diagnosticRef,
+    display,
+    envelope,
     truncated,
     redacted: true,
   };
@@ -36,9 +55,16 @@ export function projectToolFailure(input: {
   readonly error: string;
   readonly diagnosticRef?: string;
 }): ToolSafeProjection {
+  const diagnosticRef = input.diagnosticRef ?? `tool:${input.request.callId}:failed`;
   return {
     uiSummary: redactOrdinaryText(input.error, 500),
-    diagnosticRef: input.diagnosticRef ?? `tool:${input.request.callId}:failed`,
+    diagnosticRef,
+    envelope: projectToolStatusEnvelope({
+      request: input.request,
+      status: "failed",
+      summary: input.error,
+      diagnosticRef,
+    }),
     truncated: false,
     redacted: true,
   };
@@ -49,9 +75,17 @@ export function projectToolApprovalRequired(input: {
   readonly toolName: string;
   readonly operationType: string;
 }): ToolSafeProjection {
+  const diagnosticRef = `tool:${input.request.callId}:confirmation-required`;
+  const summary = `工具 ${input.toolName} 需要用户确认后才能执行。`;
   return {
-    uiSummary: `工具 ${input.toolName} 需要用户确认后才能执行。`,
-    diagnosticRef: `tool:${input.request.callId}:confirmation-required`,
+    uiSummary: summary,
+    diagnosticRef,
+    envelope: projectToolStatusEnvelope({
+      request: input.request,
+      status: "approval_required",
+      summary,
+      diagnosticRef,
+    }),
     truncated: false,
     redacted: false,
   };
@@ -84,7 +118,7 @@ export function safeCommandToolPreview(input: {
   const exit = typeof input.exitCode === "number" ? `exit ${input.exitCode}` : undefined;
   const headline = input.summary ?? [input.command, exit].filter(isString).join(" · ");
   return compactSafeText(
-    `${headline || "命令已执行。"}\n命令输出只进入本轮工具上下文；普通面板不展开 stdout / stderr 原文。`,
+    `${headline || "命令已执行。"}\n命令输出只进入本轮工具上下文；普通面板只展示安全摘要。`,
     input.maxLength ?? 900
   );
 }
@@ -153,8 +187,8 @@ function projectToolDisplay(request: ToolCallRequest, output: unknown): ToolDisp
       command: stringOrUndefined(result.command) ?? stringOrUndefined(asRecord(request.input).command),
       args: stringArray(result.args).length > 0 ? stringArray(result.args) : stringArray(asRecord(request.input).args),
       exitCode: numberOrUndefined(result.exitCode),
-      stdoutSummary: stdout === undefined ? undefined : summarizeCommandOutput(stdout),
-      stderrSummary: stderr === undefined ? undefined : summarizeCommandOutput(stderr),
+      outputSummary: stdout === undefined ? undefined : summarizeCommandOutput(stdout),
+      errorSummary: stderr === undefined ? undefined : summarizeCommandOutput(stderr),
     };
   }
   if (request.toolName === "list_dir" && Array.isArray(result.entries)) {
@@ -212,7 +246,7 @@ function searchDisplayItem(value: unknown): Extract<ToolDisplayProjection, { rea
   }
   return {
     title: redactOrdinaryText(title, 160),
-    url: stringOrUndefined(item.uri),
+    url: stringOrUndefined(item.url) ?? stringOrUndefined(item.uri),
     refId: stringOrUndefined(item.refId),
     source: stringOrUndefined(item.source),
     snippet: compactSafeText(stringOrUndefined(item.snippet), 260),
@@ -226,55 +260,4 @@ function summarizeCommandOutput(value: string): string | undefined {
     .filter((line) => line.length > 0)
     .slice(0, 4);
   return compactSafeText(lines.join("\n"), 420);
-}
-
-function projectAgentToolContent(value: unknown): unknown {
-  return redactAndTruncateForAgent(value, 0);
-}
-
-function redactAndTruncateForAgent(value: unknown, depth: number): unknown {
-  if (value === undefined || value === null) {
-    return value;
-  }
-  if (typeof value === "string") {
-    return redactSensitiveText(value).length > 20_000
-      ? `${redactSensitiveText(value).slice(0, 19_999)}…`
-      : redactSensitiveText(value);
-  }
-  if (typeof value === "number" || typeof value === "boolean") {
-    return value;
-  }
-  if (Array.isArray(value)) {
-    const items = value.slice(0, 40).map((item) => redactAndTruncateForAgent(item, depth + 1));
-    return value.length > items.length ? [...items, "[truncated]"] : items;
-  }
-  if (typeof value === "object") {
-    if (depth >= 6) {
-      return "[truncated]";
-    }
-    const projected: Record<string, unknown> = {};
-    const entries = Object.entries(value as Record<string, unknown>).slice(0, 40);
-    for (const [key, item] of entries) {
-      if (isSecretLikeKey(key) || isRawProviderKey(key)) {
-        projected[key] = "[redacted]";
-      } else {
-        projected[key] = redactAndTruncateForAgent(item, depth + 1);
-      }
-    }
-    if (Object.keys(value as Record<string, unknown>).length > entries.length) {
-      projected.truncated = true;
-    }
-    return projected;
-  }
-  return String(value);
-}
-
-function isSecretLikeKey(key: string): boolean {
-  const normalized = key.toLowerCase();
-  return normalized.includes("apikey") || normalized.includes("api_key") || normalized.includes("token") || normalized.includes("secret") || normalized === "authorization";
-}
-
-function isRawProviderKey(key: string): boolean {
-  const normalized = key.toLowerCase();
-  return normalized === "raw" || normalized === "rawoutput" || normalized === "rawresponse" || normalized === "providerresponse" || normalized === "prompt" || normalized === "sanitizedmessages";
 }

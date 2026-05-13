@@ -9,14 +9,22 @@ export function RightInspector(props: {
   readonly detail?: DesktopRunDetail;
   readonly toolDisplays: readonly ToolDisplayProjection[];
 }): React.ReactElement {
-  const contextItems = props.detail?.canvas?.agent?.contextPack?.items ?? [];
+  const contextItems = props.detail?.canvas?.agent?.context?.items ?? [];
   const attachments = props.workSession?.contextAttachments ?? [];
+  const ledgerEntries = props.workSession?.contextLedger.entries ?? [];
   const toolDisplays = props.workSession?.deliverable?.toolDisplays ?? props.toolDisplays;
   return (
     <aside className="right-inspector" aria-label="工作上下文">
       <section>
         <h2>上下文</h2>
-        {attachments.length > 0 ? (
+        {ledgerEntries.length > 0 ? (
+          ledgerEntries.slice(0, 8).map((entry) => (
+            <article className={`mini-card ${entry.status}`} key={entry.entryId}>
+              <strong>{entry.title}</strong>
+              <p>{compact(entry.summary, 160)}</p>
+            </article>
+          ))
+        ) : attachments.length > 0 ? (
           attachments.slice(0, 6).map((attachment) => (
             <article className="mini-card" key={attachment.attachmentId}>
               <strong>{attachment.title}</strong>
@@ -72,8 +80,8 @@ function ToolDisplayCard({ display }: { readonly display: ToolDisplayProjection 
       <article className="mini-card">
         <strong>命令摘要</strong>
         {display.command && <p>{display.command}</p>}
-        {display.stdoutSummary && <small>{display.stdoutSummary}</small>}
-        {display.stderrSummary && <small>{display.stderrSummary}</small>}
+        {display.outputSummary && <small>{display.outputSummary}</small>}
+        {display.errorSummary && <small>{display.errorSummary}</small>}
       </article>
     );
   }

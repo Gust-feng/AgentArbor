@@ -28,7 +28,7 @@ test("Desktop Task Soil input keeps goal-only requests compatible", () => {
 
 test("Desktop Task Soil input accepts refs, permission refs, and truncated readonly previews", () => {
   const parsed = parseDesktopTaskSoilInput({
-    taskSoil: {
+    taskSoilInput: {
       contextRefs: [
         {
           ref: "file:src/app/panel-assets.ts",

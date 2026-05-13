@@ -42,8 +42,10 @@ export class TaskSoilInputValidationError extends Error {
 export function parseDesktopTaskSoilInput(raw: unknown): DesktopTaskSoilInput {
   const record = asRecord(raw);
   const taskSoil = asRecord(record.taskSoil);
-  const contextRefsRaw = record.contextRefs ?? taskSoil.contextRefs;
-  const permissionRefsRaw = record.permissionBoundaryRefs ?? taskSoil.permissionBoundaryRefs;
+  const taskSoilInput = asRecord(record.taskSoilInput);
+  const contextRefsRaw = record.contextRefs ?? taskSoilInput.contextRefs ?? taskSoil.contextRefs;
+  const permissionRefsRaw =
+    record.permissionBoundaryRefs ?? taskSoilInput.permissionBoundaryRefs ?? taskSoil.permissionBoundaryRefs;
   return {
     contextRefs: contextRefsRaw === undefined ? undefined : parseContextRefs(contextRefsRaw),
     permissionBoundaryRefs: permissionRefsRaw === undefined ? undefined : parsePermissionRefs(permissionRefsRaw),

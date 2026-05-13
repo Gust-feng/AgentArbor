@@ -1,5 +1,6 @@
 import type { AgentTaskStatus, BasicAgentRun, ConfirmationDecision, RunEvent } from "../../domain/basic-agent/index.js";
 import type { ObservationRef } from "../../domain/observation/index.js";
+import type { ToolDisplayProjection } from "../../domain/tools/index.js";
 import { redactOrdinaryText } from "./safe-projection.js";
 
 export type BasicAgentCompatRunStatus = "pending" | "running" | "completed" | "failed" | "cancelled" | "blocked";
@@ -36,6 +37,7 @@ export type BasicAgentRunStreamEventProjectionInput = {
   readonly status?: BasicAgentCompatRunStatus;
   readonly detail?: {
     readonly preview?: string;
+    readonly display?: ToolDisplayProjection;
   };
   readonly sourceRefs: readonly string[];
   readonly modelCallRefs: readonly string[];

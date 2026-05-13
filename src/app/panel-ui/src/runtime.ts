@@ -1,5 +1,5 @@
 import { getJson } from "./api";
-import type { BasicAgentRun, Conversation, DesktopRunDetail, RunEvent, ToolDisplayProjection } from "./types";
+import type { BasicAgentRun, Conversation, DesktopRunDetail, DesktopWorkSession, RunEvent, ToolDisplayProjection } from "./types";
 
 export function mergeEvents(previous: readonly RunEvent[], incoming: readonly RunEvent[]): readonly RunEvent[] {
   const byId = new Map<string, RunEvent>();
@@ -27,6 +27,14 @@ export async function safeBasicEvents(runId: string, cursor: number): Promise<{ 
 export async function safeDesktopDetail(runId: string): Promise<DesktopRunDetail | undefined> {
   try {
     return await getJson<DesktopRunDetail>(`/api/desktop/runs/${encodeURIComponent(runId)}`);
+  } catch {
+    return undefined;
+  }
+}
+
+export async function safeWorkSession(runId: string): Promise<DesktopWorkSession | undefined> {
+  try {
+    return (await getJson<{ readonly workSession: DesktopWorkSession }>(`/api/basic-agent/runs/${encodeURIComponent(runId)}/work-session`)).workSession;
   } catch {
     return undefined;
   }

@@ -1,5 +1,6 @@
 import type { IntelligenceChannel, ModelOutputContract, ModelOutputDelta, ModelResponse } from "../domain/intelligence/index.js";
 import type { ModelCapabilities } from "../domain/config/index.js";
+import type { ConstraintRef } from "../domain/constraints.js";
 import type { ObservationRef } from "../domain/observation/index.js";
 import type { TaskSoil } from "../domain/soil/index.js";
 import type { ToolCallResult, ToolExecutionBroker } from "../domain/tools/index.js";
@@ -222,7 +223,7 @@ export async function runDesktopAgentSession(
     callerRef: { kind: "goal", id: goalId, label: "desktop_agent" },
     inputRefs: contextPack.inputRefs,
     sanitizedMessages: contextPack.messages,
-    constraintRefs: [],
+    constraintRefs: constraintRefsFromTaskSoil(taskSoil),
     toolChoice: toolCenter === undefined ? "none" : "auto",
     requestedAt: nowIso(),
     abortSignal: options.abortSignal,
@@ -554,20 +555,7 @@ function pendingConfirmationFrom(input: {
       sourceRefs: confirmation.sourceRefs,
     };
   }
-  if (!needsLocalFileAuthorization(input.goal) || hasAuthorizedReadableContext(input.taskSoil)) {
-    return undefined;
-  }
-  return {
-    confirmationId: createId("confirmation"),
-    title: "需要文件授权",
-    question: "请选择要读取的文件或文件夹，或提供只读文件引用。",
-    consequence: "获得明确引用前，我只能说明需要哪些材料，不能声称已经读取你的本地文件。",
-    riskLevel: "medium",
-    requestedAt: nowIso(),
-    modelCallRefs: input.modelCallRefs,
-    toolCallRefs: input.toolCallRefs,
-    sourceRefs: [`trace:${input.traceId}`, `goal:${input.goalId}`],
-  };
+  return undefined;
 }
 
 function resultBlocksFrom(input: {
@@ -879,34 +867,6 @@ function refsFromPayload(payload: Readonly<Record<string, unknown>>): readonly s
   return unique([stringOrUndefined(payload.requestId), stringOrUndefined(payload.responseId)].filter(isString));
 }
 
-function needsLocalFileAuthorization(goal: string): boolean {
-  const normalized = goal.toLowerCase();
-  return includesAny(normalized, [
-    "桌面文件",
-    "电脑文件",
-    "本地文件",
-    "我的文件",
-    "读取文件",
-    "读文件",
-    "看看文件",
-    "file",
-    "folder",
-    "local path",
-  ]);
-}
-
-function hasAuthorizedReadableContext(taskSoil: TaskSoil): boolean {
-  return taskSoil.contextRefs.some((ref) => {
-    const normalizedRef = ref.ref.toLowerCase();
-    return (
-      ref.readonlyPreview !== undefined ||
-      normalizedRef.startsWith("file:") ||
-      normalizedRef.startsWith("workspace:file") ||
-      normalizedRef.includes(":file:")
-    );
-  });
-}
-
 function asRecord(value: unknown): Readonly<Record<string, unknown>> {
   if (typeof value === "object" && value !== null && !Array.isArray(value)) {
     return value as Readonly<Record<string, unknown>>;
@@ -922,12 +882,22 @@ function isString(value: unknown): value is string {
   return typeof value === "string";
 }
 
-function includesAny(value: string, needles: readonly string[]): boolean {
-  return needles.some((needle) => value.includes(needle.toLowerCase()));
-}
-
 function unique(values: readonly string[]): string[] {
   return [...new Set(values.filter((value) => value.trim().length > 0))];
+}
+
+function constraintRefsFromTaskSoil(taskSoil: TaskSoil): readonly ConstraintRef[] {
+  const constraintRefs = taskSoil.constraints.map((constraint): ConstraintRef => ({
+    constraintId: constraint.id,
+    requiredLevel: constraint.level,
+    enforcementGate: constraint.enforcementGate,
+  }));
+  const permissionRefs = taskSoil.permissionBoundaryRefs.map((permission): ConstraintRef => ({
+    constraintId: permission,
+    requiredLevel: "hard",
+    enforcementGate: "tool_execution",
+  }));
+  return [...constraintRefs, ...permissionRefs];
 }
 
 function safeText(value: string, maxLength: number): string {

@@ -12,6 +12,7 @@ import {
   safeBasicRun,
   safeConversation,
   safeDesktopDetail,
+  safeWorkSession,
   typedToolDisplays,
 } from "./runtime";
 import type {
@@ -19,7 +20,9 @@ import type {
   ConfigResponse,
   Conversation,
   ConversationSummary,
+  ContextAttachment,
   DesktopRunDetail,
+  DesktopWorkSession,
   RunEvent,
   SkillDefinition,
   ToolsResponse,
@@ -33,6 +36,7 @@ type AppState = {
   readonly conversations: readonly ConversationSummary[];
   readonly conversation?: Conversation;
   readonly run?: BasicAgentRun;
+  readonly workSession?: DesktopWorkSession;
   readonly events: readonly RunEvent[];
   readonly detail?: DesktopRunDetail;
   readonly busy: boolean;
@@ -54,6 +58,9 @@ export function App(): React.ReactElement {
   const [modelForm, setModelForm] = useState({ baseUrl: "", model: "", apiKey: "" });
   const [workspaceDirectory, setWorkspaceDirectory] = useState("");
   const [toolForm, setToolForm] = useState({ provider: "tavily", tavilyApiKey: "", maxResults: "5" });
+  const [attachments, setAttachments] = useState<readonly ContextAttachment[]>([]);
+  const [attachmentKind, setAttachmentKind] = useState<ContextAttachment["kind"]>("workspace");
+  const [attachmentValue, setAttachmentValue] = useState(".");
   const pollTimer = useRef<number | undefined>(undefined);
   const currentRunId = app.run?.runId;
 
@@ -110,10 +117,12 @@ export function App(): React.ReactElement {
     const detail = latestRunId === undefined ? undefined : await safeDesktopDetail(latestRunId);
     const run = latestRunId === undefined ? undefined : await safeBasicRun(latestRunId);
     const replay = latestRunId === undefined ? undefined : await safeBasicEvents(latestRunId, 0);
+    const workSession = latestRunId === undefined ? undefined : await safeWorkSession(latestRunId);
     setApp((previous) => ({
       ...previous,
       conversation: response.conversation,
       run,
+      workSession,
       detail,
       events: replay?.events ?? [],
       error: undefined,
@@ -127,7 +136,7 @@ export function App(): React.ReactElement {
     const trimmed = goal.trim();
     if (trimmed.length === 0 || app.busy) return;
     stopPolling(pollTimer);
-    setApp((previous) => ({ ...previous, busy: true, error: undefined, events: [], detail: undefined }));
+    setApp((previous) => ({ ...previous, busy: true, error: undefined, events: [], detail: undefined, workSession: undefined }));
     try {
       const path =
         app.conversation?.conversationId === undefined
@@ -140,15 +149,19 @@ export function App(): React.ReactElement {
         goal: trimmed,
         runMode: selectedMode,
         aiMode,
+        taskSoilInput: taskSoilInputFromAttachments(attachments),
       });
       setGoal("");
       setRunMode("agent");
+      setAttachments([]);
       const run = await safeBasicRun(response.run.runId);
+      const workSession = await safeWorkSession(response.run.runId);
       setApp((previous) => ({
         ...previous,
         busy: false,
         conversation: response.conversation,
         run,
+        workSession,
         events: [],
         detail: undefined,
       }));
@@ -169,17 +182,19 @@ export function App(): React.ReactElement {
     let lastSequence = cursor;
     const tick = async (): Promise<void> => {
       try {
-        const [runResponse, eventsResponse] = await Promise.all([
+        const [runResponse, eventsResponse, workSessionResponse] = await Promise.all([
           getJson<{ readonly run: BasicAgentRun }>(`/api/basic-agent/runs/${encodeURIComponent(runId)}`),
           getJson<{
             readonly events: readonly RunEvent[];
             readonly cursor: { readonly lastSequence: number };
           }>(`/api/basic-agent/runs/${encodeURIComponent(runId)}/events?cursor=${lastSequence}`),
+          safeWorkSession(runId),
         ]);
         lastSequence = eventsResponse.cursor.lastSequence;
         setApp((previous) => ({
           ...previous,
           run: runResponse.run,
+          workSession: workSessionResponse ?? previous.workSession,
           events: mergeEvents(previous.events, eventsResponse.events),
         }));
         if (terminalStatuses.has(runResponse.run.status) || runResponse.run.status === "approval_needed" || runResponse.run.status === "needs_input") {
@@ -191,6 +206,7 @@ export function App(): React.ReactElement {
             ...previous,
             detail,
             conversation: conversation ?? previous.conversation,
+            workSession: workSessionResponse ?? previous.workSession,
           }));
           if (terminalStatuses.has(runResponse.run.status)) {
             stopPolling(pollTimer);
@@ -208,19 +224,21 @@ export function App(): React.ReactElement {
   async function cancelRun(): Promise<void> {
     if (currentRunId === undefined) return;
     const response = await postJson<{ readonly run: BasicAgentRun }>(`/api/basic-agent/runs/${encodeURIComponent(currentRunId)}/cancel`, {});
+    const workSession = await safeWorkSession(currentRunId);
     stopPolling(pollTimer);
-    setApp((previous) => ({ ...previous, run: response.run }));
+    setApp((previous) => ({ ...previous, run: response.run, workSession: workSession ?? previous.workSession }));
     void refreshConversations();
   }
 
   async function decideConfirmation(decision: "approve_once" | "deny" | "guidance", guidance?: string): Promise<void> {
-    const confirmation = app.detail?.canvas?.agent?.pendingConfirmation;
+    const confirmation = app.workSession?.pendingConfirmation ?? app.detail?.canvas?.agent?.pendingConfirmation;
     if (currentRunId === undefined || confirmation === undefined) return;
     const response = await postJson<{ readonly run: BasicAgentRun }>(
       `/api/basic-agent/runs/${encodeURIComponent(currentRunId)}/confirmations/${encodeURIComponent(confirmation.confirmationId)}/decision`,
       { decision, guidance }
     );
-    setApp((previous) => ({ ...previous, run: response.run }));
+    const workSession = await safeWorkSession(currentRunId);
+    setApp((previous) => ({ ...previous, run: response.run, workSession: workSession ?? previous.workSession }));
     if (decision === "approve_once") {
       startPolling(currentRunId, response.run.eventCursor.lastSequence);
     } else {
@@ -264,6 +282,23 @@ export function App(): React.ReactElement {
     setApp((previous) => ({ ...previous, skills: response.skills }));
   }
 
+  async function addAttachment(): Promise<void> {
+    const response = await postJson<{ readonly attachment: ContextAttachment }>("/api/context/attachments/preview", {
+      kind: attachmentKind,
+      value: attachmentValue,
+    });
+    if (response.attachment.status !== "ready") {
+      setApp((previous) => ({ ...previous, error: response.attachment.warning ?? "上下文暂时不可用。" }));
+      return;
+    }
+    setAttachments((previous) => uniqueAttachments([...previous, response.attachment]));
+    setAttachmentValue(attachmentKind === "workspace" ? "." : "");
+  }
+
+  function removeAttachment(attachmentId: string): void {
+    setAttachments((previous) => previous.filter((attachment) => attachment.attachmentId !== attachmentId));
+  }
+
   const pendingConfirmation = app.detail?.canvas?.agent?.pendingConfirmation;
   const visibleToolDisplays = useMemo(() => typedToolDisplays(app.detail), [app.detail]);
 
@@ -274,7 +309,8 @@ export function App(): React.ReactElement {
         activeConversationId={app.conversation?.conversationId}
         onNew={() => {
           stopPolling(pollTimer);
-          setApp((previous) => ({ ...previous, conversation: undefined, run: undefined, events: [], detail: undefined, error: undefined }));
+          setAttachments([]);
+          setApp((previous) => ({ ...previous, conversation: undefined, run: undefined, workSession: undefined, events: [], detail: undefined, error: undefined }));
         }}
         onOpen={(id) => void loadConversation(id)}
         onSettings={(tab) => {
@@ -295,6 +331,7 @@ export function App(): React.ReactElement {
           <ConversationView
             conversation={app.conversation}
             run={app.run}
+            workSession={app.workSession}
             events={app.events}
             detail={app.detail}
             error={app.error}
@@ -308,6 +345,16 @@ export function App(): React.ReactElement {
             onRunModeChange={setRunMode}
             aiMode={aiMode}
             onAiModeChange={setAiMode}
+            attachments={attachments}
+            attachmentKind={attachmentKind}
+            attachmentValue={attachmentValue}
+            onAttachmentKindChange={(kind) => {
+              setAttachmentKind(kind);
+              setAttachmentValue(kind === "workspace" ? "." : "");
+            }}
+            onAttachmentValueChange={setAttachmentValue}
+            onAddAttachment={() => void addAttachment()}
+            onRemoveAttachment={removeAttachment}
             busy={app.busy}
             run={app.run}
             onSubmit={(mode) => void startTask(mode)}
@@ -315,7 +362,7 @@ export function App(): React.ReactElement {
           />
         </section>
       </main>
-      <RightInspector run={app.run} events={app.events} detail={app.detail} toolDisplays={visibleToolDisplays} />
+      <RightInspector run={app.run} workSession={app.workSession} events={app.events} detail={app.detail} toolDisplays={visibleToolDisplays} />
       {settingsOpen && (
         <SettingsPanel
           tab={settingsTab}
@@ -347,4 +394,34 @@ function stopPolling(ref: React.MutableRefObject<number | undefined>): void {
     window.clearInterval(ref.current);
     ref.current = undefined;
   }
+}
+
+function taskSoilInputFromAttachments(attachments: readonly ContextAttachment[]): {
+  readonly contextRefs?: readonly {
+    readonly ref: string;
+    readonly kind: ContextAttachment["kind"];
+    readonly summary?: string;
+  }[];
+  readonly permissionBoundaryRefs?: readonly string[];
+} | undefined {
+  const ready = attachments.filter((attachment) => attachment.status === "ready");
+  if (ready.length === 0) {
+    return undefined;
+  }
+  return {
+    contextRefs: ready.map((attachment) => ({
+      ref: attachment.ref,
+      kind: attachment.kind,
+      summary: attachment.summary,
+    })),
+    permissionBoundaryRefs: [...new Set(ready.flatMap((attachment) => attachment.permissionRefs))],
+  };
+}
+
+function uniqueAttachments(attachments: readonly ContextAttachment[]): readonly ContextAttachment[] {
+  const byRef = new Map<string, ContextAttachment>();
+  for (const attachment of attachments) {
+    byRef.set(`${attachment.kind}:${attachment.ref}`, attachment);
+  }
+  return [...byRef.values()];
 }

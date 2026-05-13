@@ -46,6 +46,7 @@ import {
 } from "./http-utils.js";
 import { handlePanelBasicAgentRoute } from "./basic-agent-routes.js";
 import { handlePanelConfigRoute } from "./config-routes.js";
+import { handlePanelContextRoute } from "./context-routes.js";
 import type { PanelProviderFetch, PanelServerOptions, StartedPanelServer } from "./types.js";
 import {
   asRecord,
@@ -423,6 +424,10 @@ async function handlePanelRequest(
   }
 
   if (await handlePanelConfigRoute(runtime, request, response, url)) {
+    return;
+  }
+
+  if (await handlePanelContextRoute(runtime, request, response, url)) {
     return;
   }
 
@@ -2280,7 +2285,8 @@ function syncPanelRunStreamEventsForJob(runtime: PanelRuntime, job: PanelRunJob)
 }
 
 function appendLiveModelOutputDelta(runtime: PanelRuntime, runId: string, delta: ModelOutputDelta): void {
-  if (delta.delta.length === 0) {
+  const safeDelta = compactRuntimeText(sanitizeAssistantVisibleText(redactSensitiveText(delta.delta)), 900);
+  if (safeDelta.length === 0) {
     return;
   }
   const job = runtime.runJobs.get(runId);
@@ -2297,7 +2303,7 @@ function appendLiveModelOutputDelta(runtime: PanelRuntime, runId: string, delta:
     type: "model.output.delta",
     createdAt: delta.createdAt,
     agentLabel: "助手",
-    delta: delta.delta,
+    delta: safeDelta,
     status: "running",
     sourceRefs: [],
     modelCallRefs: [delta.requestId],

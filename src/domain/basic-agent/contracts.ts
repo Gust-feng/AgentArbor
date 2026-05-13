@@ -1,4 +1,5 @@
 import type { ObservationRef } from "../observation/index.js";
+import type { ToolDisplayProjection } from "../tools/index.js";
 
 export type AgentTaskStatus =
   | "queued"
@@ -76,4 +77,74 @@ export type SkillDefinition = {
   readonly sourcePath: string;
   readonly triggers: readonly string[];
   readonly lastUsedAt?: string;
+};
+
+export type ContextAttachmentKind = "workspace" | "file" | "project" | "web";
+
+export type ContextAttachment = {
+  readonly attachmentId: string;
+  readonly kind: ContextAttachmentKind;
+  readonly ref: string;
+  readonly title: string;
+  readonly summary: string;
+  readonly permissionRefs: readonly string[];
+  readonly readonlyPreviewMeta: {
+    readonly available: boolean;
+    readonly title?: string;
+    readonly byteLength?: number;
+    readonly truncated?: boolean;
+  };
+  readonly status: "ready" | "blocked";
+  readonly warning?: string;
+};
+
+export type DesktopWorkSessionStage =
+  | "drafting"
+  | "queued"
+  | "understanding"
+  | "gathering_context"
+  | "using_tools"
+  | "awaiting_approval"
+  | "composing_result"
+  | "completed"
+  | "blocked"
+  | "failed"
+  | "cancelled";
+
+export type AgentDeliverableSection = {
+  readonly sectionId: string;
+  readonly title: string;
+  readonly content: string;
+  readonly evidenceRefs: readonly ObservationRef[];
+};
+
+export type AgentDeliverable = {
+  readonly deliverableId: string;
+  readonly runId: string;
+  readonly title: string;
+  readonly summary: string;
+  readonly sections: readonly AgentDeliverableSection[];
+  readonly evidenceRefs: readonly ObservationRef[];
+  readonly toolDisplays: readonly ToolDisplayProjection[];
+  readonly fileChanges: readonly ToolDisplayProjection[];
+  readonly commands: readonly ToolDisplayProjection[];
+  readonly nextActions: readonly string[];
+  readonly createdAt: string;
+};
+
+export type DesktopWorkSessionReadModel = {
+  readonly run: BasicAgentRun;
+  readonly stage: DesktopWorkSessionStage;
+  readonly headline: string;
+  readonly currentAction: string;
+  readonly contextAttachments: readonly ContextAttachment[];
+  readonly pendingConfirmation?: ConfirmationRequest;
+  readonly deliverable?: AgentDeliverable;
+  readonly visibleEvents: readonly RunEvent[];
+  readonly safetySummary: {
+    readonly summary: string;
+    readonly pendingActionCount: number;
+    readonly toolResultCount: number;
+    readonly contextAttachmentCount: number;
+  };
 };

@@ -79,30 +79,42 @@ export type ToolDisplayProjection =
   | {
       readonly kind: "search_results";
       readonly query?: string;
-      readonly results: readonly { readonly title: string; readonly url?: string; readonly summary?: string }[];
+      readonly status?: string;
+      readonly results: readonly { readonly title: string; readonly url?: string; readonly summary?: string; readonly snippet?: string; readonly refId?: string; readonly source?: string }[];
+      readonly truncated?: boolean;
     }
   | {
       readonly kind: "browser_snapshot";
       readonly title?: string;
       readonly url?: string;
       readonly summary?: string;
+      readonly text?: string;
+      readonly truncated?: boolean;
     }
   | {
       readonly kind: "file_change_summary" | "file_diff_preview";
       readonly path?: string;
       readonly summary?: string;
       readonly preview?: string;
+      readonly bytes?: number;
+      readonly replacements?: number;
+      readonly previousLength?: number;
+      readonly nextLength?: number;
+      readonly append?: boolean;
     }
   | {
       readonly kind: "command_summary";
       readonly command?: string;
+      readonly args?: readonly string[];
       readonly exitCode?: number;
       readonly stdoutSummary?: string;
       readonly stderrSummary?: string;
     }
   | {
       readonly kind: "generic_tool_summary";
+      readonly action?: string;
       readonly summary?: string;
+      readonly items?: readonly string[];
     };
 
 export type PanelStreamEvent = {
@@ -179,6 +191,80 @@ export type DesktopRunDetail = {
 export type PendingConfirmation = NonNullable<
   NonNullable<NonNullable<DesktopRunDetail["canvas"]>["agent"]>["pendingConfirmation"]
 >;
+
+export type ContextAttachment = {
+  readonly attachmentId: string;
+  readonly kind: "workspace" | "file" | "project" | "web";
+  readonly ref: string;
+  readonly title: string;
+  readonly summary: string;
+  readonly permissionRefs: readonly string[];
+  readonly readonlyPreviewMeta: {
+    readonly available: boolean;
+    readonly title?: string;
+    readonly byteLength?: number;
+    readonly truncated?: boolean;
+  };
+  readonly status: "ready" | "blocked";
+  readonly warning?: string;
+};
+
+export type AgentDeliverable = {
+  readonly deliverableId: string;
+  readonly runId: string;
+  readonly title: string;
+  readonly summary: string;
+  readonly sections: readonly {
+    readonly sectionId: string;
+    readonly title: string;
+    readonly content: string;
+    readonly evidenceRefs: readonly ObservationRef[];
+  }[];
+  readonly evidenceRefs: readonly ObservationRef[];
+  readonly toolDisplays: readonly ToolDisplayProjection[];
+  readonly fileChanges: readonly ToolDisplayProjection[];
+  readonly commands: readonly ToolDisplayProjection[];
+  readonly nextActions: readonly string[];
+  readonly createdAt: string;
+};
+
+export type DesktopWorkSession = {
+  readonly run: BasicAgentRun;
+  readonly stage:
+    | "drafting"
+    | "queued"
+    | "understanding"
+    | "gathering_context"
+    | "using_tools"
+    | "awaiting_approval"
+    | "composing_result"
+    | "completed"
+    | "blocked"
+    | "failed"
+    | "cancelled";
+  readonly headline: string;
+  readonly currentAction: string;
+  readonly contextAttachments: readonly ContextAttachment[];
+  readonly pendingConfirmation?: {
+    readonly confirmationId: string;
+    readonly runId: string;
+    readonly conversationId?: string;
+    readonly title: string;
+    readonly actionSummary: string;
+    readonly affectedResources: readonly string[];
+    readonly riskLevel: "low" | "medium" | "high";
+    readonly requestedAt: string;
+    readonly sourceRefs: readonly string[];
+  };
+  readonly deliverable?: AgentDeliverable;
+  readonly visibleEvents: readonly RunEvent[];
+  readonly safetySummary: {
+    readonly summary: string;
+    readonly pendingActionCount: number;
+    readonly toolResultCount: number;
+    readonly contextAttachmentCount: number;
+  };
+};
 
 export type SkillDefinition = {
   readonly id: string;

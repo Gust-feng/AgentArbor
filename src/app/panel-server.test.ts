@@ -57,9 +57,12 @@ test("panel React workbench consumes Basic Agent projection APIs", async () => {
 
   assert.equal(app.includes("/api/basic-agent/runs/"), true);
   assert.equal(app.includes("/events?cursor="), true);
+  assert.equal(runtime.includes("/work-session"), true);
+  assert.equal(app.includes("/api/context/attachments/preview"), true);
   assert.equal(app.includes("/cancel"), true);
   assert.equal(app.includes("/confirmations/"), true);
   assert.equal(app.includes("typedToolDisplays"), true);
+  assert.equal(runtime.includes("safeWorkSession"), true);
   assert.equal(runtime.includes("/api/desktop/runs/"), true);
   assert.equal(app.includes("innerHTML"), false);
   assert.equal(app.includes("raw provider"), false);
@@ -872,7 +875,63 @@ test("conversation API creates a conversation and attaches the desktop run to as
   }
 });
 
-test("conversation summaries mark confirmation runs as requiring user action", async () => {
+test("context attachment preview feeds the Basic Agent work session read model safely", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-context-work-session-"));
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-context-workspace-"));
+  const fileBody = "private body with sk-work-session-secret";
+  await fs.writeFile(path.join(workspace, "notes.md"), fileBody, "utf8");
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+  try {
+    await requestJson(server.url, "/api/config/workspace", {
+      method: "POST",
+      body: { workspaceDirectory: workspace },
+    });
+    const preview = await requestJson(server.url, "/api/context/attachments/preview", {
+      method: "POST",
+      body: { kind: "file", value: "notes.md" },
+    });
+    const invalidKind = await requestJson(server.url, "/api/context/attachments/preview", {
+      method: "POST",
+      body: { kind: "runtime", value: "notes.md" },
+    });
+    const start = await requestJson(server.url, "/api/conversations", {
+      method: "POST",
+      body: {
+        goal: "请基于附件做一个简短总结",
+        aiMode: "fake",
+        taskSoilInput: {
+          contextRefs: [{
+            ref: preview.body.attachment.ref,
+            kind: preview.body.attachment.kind,
+            summary: preview.body.attachment.summary,
+          }],
+          permissionBoundaryRefs: preview.body.attachment.permissionRefs,
+        },
+      },
+    });
+    const runId = start.body.run.runId;
+    await waitForRun(server.url, runId, (body) => body.status === "completed", 4_000, "/api/desktop/runs");
+    const workSession = await requestJson(server.url, `/api/basic-agent/runs/${encodeURIComponent(runId)}/work-session`);
+
+    assert.equal(preview.status, 200);
+    assert.equal(preview.body.attachment.ref, "file:notes.md");
+    assert.equal(preview.text.includes(fileBody), false);
+    assert.equal(invalidKind.status, 400);
+    assert.equal(invalidKind.body.error.code, "invalid_context_attachment_kind");
+    assert.equal(workSession.status, 200);
+    assert.equal(workSession.body.workSession.stage, "completed");
+    assert.equal(workSession.body.workSession.contextAttachments.some((item: { ref?: string }) => item.ref === "file:notes.md"), true);
+    assert.equal(typeof workSession.body.workSession.deliverable?.summary, "string");
+    assert.equal(workSession.text.includes(fileBody), false);
+    assertSafePanelJsonText(workSession.text);
+  } finally {
+    await server.close();
+    await fs.rm(directory, { recursive: true, force: true });
+    await fs.rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("conversation summaries do not turn missing local context into synthetic confirmation", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-conversation-confirmation-"));
   const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
   try {
@@ -885,25 +944,16 @@ test("conversation summaries mark confirmation runs as requiring user action", a
     await waitForRun(server.url, runId, (body) => body.status === "completed", 4_000, "/api/desktop/runs");
     const conversations = await requestJson(server.url, "/api/conversations");
     const conversation = await requestJson(server.url, `/api/conversations/${encodeURIComponent(conversationId)}`);
-    const runtimeRun = await waitForRun(
-      server.url,
-      runId,
-      (body) => Array.isArray(body.snapshot?.confirmations) && body.snapshot.confirmations.length > 0,
-      4_000,
-      "/api/runtime/runs"
-    );
+    const runtimeRun = await requestJson(server.url, `/api/runtime/runs/${encodeURIComponent(runId)}`);
     const summary = conversations.body.conversations.find(
       (item: { conversationId: string }) => item.conversationId === conversationId
     );
-    const confirmation = runtimeRun.body.snapshot.confirmations[0];
 
-    assert.equal(conversation.body.conversation.requiresUserAction, true);
-    assert.equal(summary?.requiresUserAction, true);
-    assert.equal(conversation.body.conversation.turns[1].title, "需要确认");
+    assert.equal(conversation.body.conversation.requiresUserAction, false);
+    assert.equal(summary?.requiresUserAction, false);
+    assert.equal(conversation.body.conversation.turns[1].title, "已完成");
     assert.equal(conversation.body.conversation.turns[1].content.includes("文件或文件夹"), true);
-    assert.equal(confirmation.status, "pending");
-    assert.equal(confirmation.riskLevel, "medium");
-    assert.equal(confirmation.actionSummary.includes("请选择要读取的文件"), true);
+    assert.deepEqual(runtimeRun.body.snapshot.confirmations, []);
     assert.equal(JSON.stringify(runtimeRun.body.snapshot.confirmations).includes("sk-"), false);
   } finally {
     await server.close();
@@ -2277,9 +2327,13 @@ test("basic agent confirmation decisions persist approve and guidance outcomes s
   let providerFetchCalls = 0;
   const providerFetch: PanelProviderFetch = async () => {
     providerFetchCalls += 1;
-    return providerFetchCalls === 1
-      ? createOpenAiWriteFileToolCallResponse("approved.txt", "approved write content")
-      : createOpenAiTextResponse("basic-confirmation-model", "文件写入已完成，结果已整理。");
+    if (providerFetchCalls === 1) {
+      return createOpenAiWriteFileToolCallResponse("approved.txt", "approved write content");
+    }
+    if (providerFetchCalls === 3) {
+      return createOpenAiWriteFileToolCallResponse("guidance.txt", "guidance write content");
+    }
+    return createOpenAiTextResponse("basic-confirmation-model", "文件写入已完成，结果已整理。");
   };
   const server = await startLocalPanelServer({ port: 0, configDirectory: directory, providerFetch });
   try {
@@ -2330,7 +2384,7 @@ test("basic agent confirmation decisions persist approve and guidance outcomes s
     const guidanceSecret = "sk-guidance-decision-secret";
     const guidanceStart = await requestJson(server.url, "/api/desktop/runs", {
       method: "POST",
-      body: { goal: "帮我看看本地文件", aiMode: "fake" },
+      body: { goal: "写入 guidance.txt 前先等我补充指导", aiMode: "openai-compatible" },
     });
     const guidanceCompleted = await waitForRun(
       server.url,
@@ -2367,11 +2421,25 @@ test("basic agent confirmation decisions persist approve and guidance outcomes s
 
 test("basic agent denied confirmation restores as blocked with safe replay after restart", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-basic-confirmation-deny-"));
-  let server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-basic-confirmation-deny-workspace-"));
+  const providerFetch: PanelProviderFetch = async () => createOpenAiWriteFileToolCallResponse("denied.txt", "denied write content");
+  let server = await startLocalPanelServer({ port: 0, configDirectory: directory, providerFetch });
   try {
+    await requestJson(server.url, "/api/config/model-provider", {
+      method: "POST",
+      body: {
+        baseUrl: "https://provider.example",
+        model: "gpt-4o-mini",
+        apiKey: "sk-basic-deny-secret",
+      },
+    });
+    await requestJson(server.url, "/api/config/workspace", {
+      method: "POST",
+      body: { workspaceDirectory: workspace },
+    });
     const start = await requestJson(server.url, "/api/desktop/runs", {
       method: "POST",
-      body: { goal: "帮我看看桌面文件", aiMode: "fake" },
+      body: { goal: "写入 denied.txt 前需要确认", aiMode: "openai-compatible" },
     });
     const completed = await waitForRun(
       server.url,
@@ -2401,7 +2469,7 @@ test("basic agent denied confirmation restores as blocked with safe replay after
     assertSafePanelJsonText(`${denied.text}\n${runtimeRun.text}\n${blockedEvents.text}`);
 
     await server.close();
-    server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+    server = await startLocalPanelServer({ port: 0, configDirectory: directory, providerFetch });
     const restoredRun = await requestJson(server.url, `/api/basic-agent/runs/${encodeURIComponent(start.body.runId)}`);
     const restoredEvents = await requestJson(
       server.url,
@@ -2417,6 +2485,7 @@ test("basic agent denied confirmation restores as blocked with safe replay after
   } finally {
     await server.close();
     await fs.rm(directory, { recursive: true, force: true });
+    await fs.rm(workspace, { recursive: true, force: true });
   }
 });
 

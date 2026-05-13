@@ -115,16 +115,15 @@ test("Desktop Agent Session stops cleanly when AI is disabled", async () => {
   assert.equal(result.activity.some((item) => item.type === "stopped"), true);
 });
 
-test("Desktop Agent Session projects confirmation before claiming desktop file access", async () => {
+test("Desktop Agent Session explains missing file context without synthetic confirmation", async () => {
   const result = await runDesktopAgentSession("帮我看看桌面文件", { aiMode: "fake" });
 
-  assert.equal(result.status, "confirmation_needed");
-  assert.equal(result.answer?.answer.includes("不能直接看到你的桌面文件"), true);
-  assert.equal(result.answer?.answer.includes("附件选择具体文件或文件夹"), true);
-  assert.equal(result.pendingConfirmation?.question.includes("请选择要读取的文件或文件夹"), true);
+  assert.equal(result.status, "completed");
+  assert.equal(result.answer?.answer.includes("文件或文件夹"), true);
+  assert.equal(result.pendingConfirmation, undefined);
   assert.equal(result.toolCallRefs.length, 0);
-  assert.equal(result.eventTypes.includes("user_approval.requested"), true);
-  assert.equal(result.answer?.resultBlocks.some((block) => block.kind === "pending_confirmation"), true);
+  assert.equal(result.eventTypes.includes("user_approval.requested"), false);
+  assert.equal(result.answer?.resultBlocks.some((block) => block.kind === "pending_confirmation"), false);
 });
 
 test("Desktop Agent Session keeps daily efficiency advice as direct answer", async () => {
@@ -261,7 +260,7 @@ test("Desktop Agent Session removes internal task diagnostics from visible answe
   assert.equal(result.answer?.answer.includes("可以继续"), true);
 });
 
-test("Desktop Agent Session drops provider control markup instead of rendering fake tool activity", async () => {
+test("Desktop Agent Session drops provider control markup without synthetic confirmation", async () => {
   const channel: IntelligenceChannel = {
     async request(request) {
       return {
@@ -289,10 +288,12 @@ test("Desktop Agent Session drops provider control markup instead of rendering f
     createIntelligenceChannel: () => channel,
   });
 
-  assert.equal(result.status, "confirmation_needed");
+  assert.equal(result.status, "completed");
   assert.equal(result.answer?.answer.includes("<tool_call>"), false);
   assert.equal(result.answer?.answer.includes("准备调用工具"), false);
   assert.equal(result.answer?.answer.includes("我需要你先提供文件引用"), true);
+  assert.equal(result.pendingConfirmation, undefined);
+  assert.equal(result.eventTypes.includes("user_approval.requested"), false);
 });
 
 class MixedToolLimitChannel implements IntelligenceChannel {

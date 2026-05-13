@@ -13,10 +13,20 @@ export function RightInspector(props: {
   const attachments = props.workSession?.contextAttachments ?? [];
   const ledgerEntries = props.workSession?.contextLedger.entries ?? [];
   const toolDisplays = props.workSession?.deliverable?.toolDisplays ?? props.toolDisplays;
+  const pendingConfirmation = props.workSession?.pendingConfirmation ?? props.detail?.canvas?.agent?.pendingConfirmation;
   return (
     <aside className="right-inspector" aria-label="工作上下文">
+      {pendingConfirmation !== undefined && (
+        <section>
+          <h2>待确认</h2>
+          <article className="mini-card warning">
+            <strong>{pendingConfirmation.title}</strong>
+            <p>{compact("actionSummary" in pendingConfirmation ? pendingConfirmation.actionSummary : pendingConfirmation.question, 180)}</p>
+          </article>
+        </section>
+      )}
       <section>
-        <h2>上下文</h2>
+        <h2>上下文与文件</h2>
         {ledgerEntries.length > 0 ? (
           ledgerEntries.slice(0, 8).map((entry) => (
             <article className={`mini-card ${entry.status}`} key={entry.entryId}>
@@ -43,16 +53,16 @@ export function RightInspector(props: {
         )}
       </section>
       <section>
-        <h2>工具结果</h2>
+        <h2>证据与资料</h2>
         {toolDisplays.length === 0 ? (
-          <p className="muted">工具完成后会在这里显示安全摘要。</p>
+          <p className="muted">读取文件、网页或执行操作后，会在这里显示可引用的摘要。</p>
         ) : (
           toolDisplays.map((display, index) => <ToolDisplayCard display={display} key={`${display.kind}:${index}`} />)
         )}
       </section>
       <section>
-        <h2>安全摘要</h2>
-        <p className="muted">{props.workSession?.safetySummary.summary ?? (props.run?.requiresUserAction ? "这次运行需要你处理确认或补充信息。" : "普通视图只展示安全摘要和引用。")}</p>
+        <h2>权限</h2>
+        <p className="muted">{props.workSession?.safetySummary.summary ?? (props.run?.requiresUserAction ? "这次任务需要你处理确认或补充信息。" : "这里只展示权限说明和引用，不显示原始输出。")}</p>
       </section>
     </aside>
   );
@@ -78,7 +88,7 @@ function ToolDisplayCard({ display }: { readonly display: ToolDisplayProjection 
   if (display.kind === "command_summary") {
     return (
       <article className="mini-card">
-        <strong>命令摘要</strong>
+        <strong>命令结果</strong>
         {display.command && <p>{display.command}</p>}
         {display.outputSummary && <small>{display.outputSummary}</small>}
         {display.errorSummary && <small>{display.errorSummary}</small>}
@@ -99,7 +109,7 @@ function ToolDisplayCard({ display }: { readonly display: ToolDisplayProjection 
 }
 
 function contextItemLabel(kind: string): string {
-  if (kind === "system") return "系统边界";
+  if (kind === "system") return "工作边界";
   if (kind === "skill") return "技能";
   if (kind === "conversation") return "历史对话";
   if (kind === "user_message") return "当前任务";
@@ -110,5 +120,5 @@ function toolDisplayTitle(kind: ToolDisplayProjection["kind"]): string {
   if (kind === "browser_snapshot") return "浏览器摘要";
   if (kind === "file_change_summary") return "文件变更";
   if (kind === "file_diff_preview") return "差异预览";
-  return "工具摘要";
+  return "操作摘要";
 }

@@ -420,6 +420,8 @@ export function App(): React.ReactElement {
             detail={app.detail}
             error={app.error}
             pendingConfirmation={pendingConfirmation}
+            attachments={attachments}
+            onSelectExample={setGoal}
             onDecision={(decision, guidance) => void decideConfirmation(decision, guidance)}
           />
           <Composer

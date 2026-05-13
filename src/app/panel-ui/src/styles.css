@@ -169,16 +169,25 @@ a:hover {
   gap: 8px;
 }
 
+.nav-stack .primary-nav {
+  border-color: var(--primary);
+  background: var(--primary);
+  color: #fff;
+  font-weight: 700;
+}
+
 .nav-stack button {
   justify-content: flex-start;
   text-align: left;
 }
 
+.active-task-list,
 .conversation-list {
   min-height: 0;
   overflow: hidden;
 }
 
+.active-task-list h2,
 .conversation-list h2,
 .right-inspector h2,
 .activity-timeline h2,
@@ -188,14 +197,22 @@ a:hover {
   letter-spacing: 0;
 }
 
+.active-task-list ul,
 .conversation-list ul {
   display: grid;
   gap: 7px;
-  max-height: calc(100vh - 230px);
   margin: 0;
   overflow: auto;
   padding: 0 2px 0 0;
   list-style: none;
+}
+
+.active-task-list ul {
+  max-height: 190px;
+}
+
+.conversation-list ul {
+  max-height: calc(100vh - 410px);
 }
 
 .conversation-item {
@@ -216,6 +233,24 @@ a:hover {
 .conversation-item.selected {
   border-color: var(--primary);
   background: var(--primary-soft);
+}
+
+.inline-status {
+  width: fit-content;
+  border-radius: 999px;
+  padding: 2px 7px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.inline-status.active {
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+
+.inline-status.warning {
+  background: var(--warning-soft);
+  color: var(--warning);
 }
 
 .workbench {
@@ -246,6 +281,15 @@ a:hover {
   white-space: nowrap;
 }
 
+.topbar small {
+  display: block;
+  margin-top: 3px;
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .topbar-actions,
 .composer-controls,
 .button-row {
@@ -265,6 +309,90 @@ a:hover {
   min-height: 0;
   overflow: auto;
   padding: 22px;
+}
+
+.task-canvas {
+  display: grid;
+  gap: 14px;
+  max-width: 980px;
+  margin: 0 auto;
+}
+
+.command-center {
+  display: grid;
+  align-content: center;
+  gap: 22px;
+  min-height: 100%;
+  max-width: 1040px;
+  margin: 0 auto;
+}
+
+.command-center-intro {
+  max-width: 720px;
+}
+
+.command-center h1 {
+  margin: 8px 0 10px;
+  font-size: 34px;
+  line-height: 1.12;
+  letter-spacing: 0;
+}
+
+.command-center p {
+  margin: 0;
+  color: var(--muted-strong);
+  line-height: 1.7;
+}
+
+.command-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+}
+
+.command-panel {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  padding: 15px;
+}
+
+.command-panel.primary-panel {
+  border-color: var(--border-strong);
+}
+
+.command-panel h2 {
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.35;
+  letter-spacing: 0;
+}
+
+.command-example-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.command-example-grid button {
+  height: auto;
+  justify-content: flex-start;
+  min-height: 42px;
+  padding: 9px 10px;
+  text-align: left;
+  line-height: 1.4;
+}
+
+.command-checklist {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding-left: 19px;
+  color: var(--muted-strong);
+  line-height: 1.5;
 }
 
 .empty-state {
@@ -296,6 +424,11 @@ a:hover {
   margin: 0 auto;
 }
 
+.thread.compact-thread {
+  max-width: none;
+  margin: 12px 0 0;
+}
+
 .message,
 .run-card,
 .result-card,
@@ -303,6 +436,9 @@ a:hover {
 .confirmation-card,
 .activity-timeline,
 .mini-card,
+.task-brief,
+.work-progress,
+.conversation-record,
 .settings-card {
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -312,6 +448,10 @@ a:hover {
 .message {
   max-width: 780px;
   padding: 14px 16px;
+}
+
+.compact-thread .message {
+  max-width: none;
 }
 
 .message header {
@@ -328,6 +468,10 @@ a:hover {
 
 .message.assistant {
   margin-right: auto;
+}
+
+.message.subdued {
+  opacity: 0.68;
 }
 
 .message p,
@@ -413,6 +557,9 @@ a:hover {
 .deliverable-card,
 .confirmation-card,
 .activity-timeline,
+.task-brief,
+.work-progress,
+.conversation-record,
 .settings-card {
   padding: 15px;
 }
@@ -431,6 +578,92 @@ a:hover {
 
 .work-stage {
   border-color: var(--border-strong);
+}
+
+.task-brief {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  border-color: var(--border-strong);
+}
+
+.task-brief-main {
+  min-width: 0;
+}
+
+.task-brief h2,
+.work-progress h2,
+.result-card h2,
+.conversation-record summary {
+  margin: 0;
+  letter-spacing: 0;
+}
+
+.task-brief h2,
+.work-progress h2 {
+  font-size: 18px;
+  line-height: 1.35;
+}
+
+.task-brief .rich-text {
+  margin-top: 6px;
+  color: var(--muted-strong);
+}
+
+.task-brief-side {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.mode-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-soft);
+  color: var(--muted-strong);
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.context-strip {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  border-top: 1px solid var(--border);
+  padding-top: 11px;
+  font-size: 13px;
+}
+
+.context-strip strong {
+  color: var(--muted-strong);
+}
+
+.context-token {
+  min-width: 0;
+  max-width: 260px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-soft);
+  padding: 4px 9px;
+  color: var(--muted-strong);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.context-token.blocked {
+  border-color: var(--warning);
+  background: var(--warning-soft);
+  color: var(--warning);
 }
 
 .inline-context-list,
@@ -456,6 +689,14 @@ a:hover {
   gap: 12px;
 }
 
+.deliverable-card header,
+.work-progress header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 .deliverable-card h2,
 .deliverable-card h3 {
   margin: 0;
@@ -475,6 +716,60 @@ a:hover {
   gap: 5px;
   border-top: 1px solid var(--border);
   padding-top: 10px;
+}
+
+.work-progress {
+  display: grid;
+  gap: 12px;
+}
+
+.current-action {
+  display: grid;
+  gap: 5px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-soft);
+  padding: 11px 12px;
+}
+
+.current-action strong {
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.current-action small {
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.result-meta {
+  display: grid;
+  gap: 10px;
+}
+
+.next-actions {
+  display: grid;
+  gap: 7px;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+
+.next-actions ul {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 19px;
+  color: var(--muted-strong);
+}
+
+.conversation-record {
+  background: #fbfcfe;
+}
+
+.conversation-record summary {
+  cursor: pointer;
+  color: var(--muted-strong);
+  font-weight: 700;
 }
 
 .status-dot {
@@ -533,6 +828,11 @@ a:hover {
   gap: 10px;
 }
 
+.activity-timeline.compact {
+  border: 0;
+  padding: 0;
+}
+
 .activity-item {
   position: relative;
   display: grid;
@@ -578,14 +878,102 @@ a:hover {
   background: var(--surface-warm);
 }
 
+.confirmation-card.risk-high {
+  border-color: var(--danger);
+  background: var(--danger-soft);
+}
+
+.confirmation-card.risk-low {
+  border-color: var(--border-strong);
+}
+
 .confirmation-card textarea {
   margin: 10px 0;
+}
+
+.approval-resources {
+  display: grid;
+  gap: 6px;
+  border: 1px solid rgba(178, 106, 5, 0.28);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.55);
+  padding: 10px 12px;
+}
+
+.approval-resources ul {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding-left: 18px;
+  overflow-wrap: anywhere;
 }
 
 .composer {
   border-top: 1px solid var(--border);
   background: rgba(255, 255, 255, 0.94);
   padding: 14px 20px 18px;
+}
+
+.command-composer-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.command-composer-header strong {
+  display: block;
+  margin-top: 2px;
+  line-height: 1.35;
+}
+
+.composer-mode-note {
+  flex: 0 0 auto;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-soft);
+  color: var(--muted-strong);
+  padding: 4px 9px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.context-dock {
+  display: grid;
+  gap: 9px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #fbfcfe;
+  padding: 10px;
+  margin-bottom: 10px;
+}
+
+.context-kind-switch {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.context-kind-switch button {
+  min-height: 30px;
+  border-radius: 999px;
+  padding: 0 10px;
+  color: var(--muted-strong);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.context-kind-switch button.selected {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+
+.context-add-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
 }
 
 .composer textarea {
@@ -675,6 +1063,11 @@ a:hover {
   margin-top: 10px;
 }
 
+.attachment-list.compact {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  margin-top: 0;
+}
+
 .attachment-chip {
   display: flex;
   align-items: center;
@@ -729,6 +1122,17 @@ a:hover {
   display: grid;
   gap: 6px;
   padding: 11px 12px;
+}
+
+.mini-card.warning,
+.mini-card.blocked {
+  border-color: var(--warning);
+  background: var(--warning-soft);
+}
+
+.mini-card.truncated,
+.mini-card.omitted {
+  background: var(--surface-soft);
 }
 
 .mini-card ul {
@@ -907,6 +1311,10 @@ a:hover {
     grid-template-columns: 220px minmax(0, 1fr);
   }
 
+  .command-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
   .right-inspector {
     position: static;
     grid-column: 1 / -1;
@@ -935,7 +1343,14 @@ a:hover {
     max-height: 220px;
   }
 
+  .active-task-list ul {
+    max-height: 180px;
+  }
+
   .topbar,
+  .command-composer-header,
+  .deliverable-card header,
+  .work-progress header,
   .settings-panel > header,
   .settings-row {
     align-items: flex-start;
@@ -954,6 +1369,12 @@ a:hover {
     justify-content: stretch;
   }
 
+  .command-grid,
+  .task-brief,
+  .context-add-row {
+    grid-template-columns: 1fr;
+  }
+
   .composer-controls select,
   .composer-controls label,
   .composer-controls button {
@@ -966,12 +1387,14 @@ a:hover {
   }
 
   .attachment-form,
+  .attachment-list.compact,
   .attachment-chip {
     grid-template-columns: 1fr;
     flex-direction: column;
     align-items: stretch;
   }
 
+  .command-center h1,
   .empty-state h1 {
     font-size: 28px;
   }

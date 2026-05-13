@@ -1,5 +1,12 @@
 import type { RunEvent, TaskStatus } from "./types";
 
+export const TASK_EXAMPLES = [
+  "阅读我添加的文件，整理成一份可执行的待办清单",
+  "检查当前工作区，告诉我下一步最应该处理什么",
+  "根据这个网页和项目上下文，写一份简短决策报告",
+  "帮我核对这项任务的风险，必要时先向我确认",
+] as const;
+
 export const STATUS_LABELS: Record<TaskStatus, string> = {
   queued: "排队中",
   planning: "准备中",

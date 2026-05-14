@@ -644,7 +644,7 @@ function fakeWorkSessionDirectAnswerOutput(request: ModelRequest): string {
   ]);
   const asksFollowUp = isFollowUpQuestion(normalized);
   if (asksModelIdentity) {
-    return "我是 AgentArbor 桌面 Root Agent。具体底层模型取决于你在设置中配置的模型运行时；我会直接回答普通问题，也会在授权范围内读取文件、网页或工具材料来完成桌面任务。";
+    return "我是 AgentArbor 桌面助手。具体底层模型取决于你在设置中配置的模型运行时；我会直接回答普通问题，也会在授权范围内读取文件、网页或工具材料来完成桌面任务。";
   }
   if (asksCapability) {
     return "我可以直接回答问题，也可以在你授权的上下文里整理材料、分析文件和网页、生成报告或草稿，并在需要写入、调用工具或确认风险时先停下来问你。你可以继续随便问，也可以直接交给我一个要完成的任务。";

@@ -273,34 +273,8 @@ function deliverableFor(input: {
   readonly answer?: DesktopWorkSessionAnswer;
 }): AgentDeliverable | undefined {
   const canvas = input.canvas;
-  if (
-    canvas?.kind === "desktop_agent_canvas" &&
-    canvas.agent.answer !== undefined &&
-    input.answer !== undefined &&
-    shouldPromoteAnswerToDeliverable(input.toolDisplays)
-  ) {
-    const answer = canvas.agent.answer;
-    const sections = answer.resultBlocks.length > 0
-      ? answer.resultBlocks.map((block): AgentDeliverableSection => ({
-          sectionId: block.blockId,
-          title: redactOrdinaryText(block.title, 120),
-          content: redactOrdinaryText(block.summary, 900),
-          evidenceRefs: observationRefs(answer.evidenceRefs),
-        }))
-      : [{
-          sectionId: `${input.run.runId}:answer`,
-          title: "回答",
-          content: redactOrdinaryText(answer.answer, 1_200),
-          evidenceRefs: observationRefs(answer.evidenceRefs),
-        }];
-    return deliverable({
-      run: input.run,
-      title: "已整理结果",
-      summary: answer.answer,
-      sections,
-      evidenceRefs: observationRefs(answer.evidenceRefs),
-      toolDisplays: input.toolDisplays,
-    });
+  if (canvas?.kind === "desktop_agent_canvas" && canvas.agent.answer !== undefined) {
+    return undefined;
   }
   if (canvas?.kind === "work_session_canvas" && canvas.workSession.report !== undefined) {
     const report = canvas.workSession.report;
@@ -321,14 +295,7 @@ function deliverableFor(input: {
     return undefined;
   }
   if (input.restoredResult !== undefined && input.run.status === "completed") {
-    return deliverable({
-      run: input.run,
-      title: input.restoredResult.title,
-      summary: input.restoredResult.summary,
-      sections: [section(`${input.run.runId}:restored`, "结果摘要", input.restoredResult.summary, [])],
-      evidenceRefs: [],
-      toolDisplays: input.toolDisplays,
-    });
+    return undefined;
   }
   return undefined;
 }
@@ -355,16 +322,6 @@ function answerFor(input: CreateDesktopWorkSessionReadModelInput): DesktopWorkSe
     };
   }
   return undefined;
-}
-
-function shouldPromoteAnswerToDeliverable(toolDisplays: readonly ToolDisplayProjection[]): boolean {
-  return toolDisplays.some((display) =>
-    display.kind === "search_results" ||
-    display.kind === "browser_snapshot" ||
-    display.kind === "file_change_summary" ||
-    display.kind === "file_diff_preview" ||
-    display.kind === "command_summary"
-  );
 }
 
 function envelopeSafeToolEvidence(envelopes: readonly ToolResultEnvelope[]): readonly ToolResultEnvelope[] {

@@ -23,22 +23,23 @@ test("panel HTML serves the React workbench shell without first-screen internals
   assert.match(staticHtml, /<link rel="stylesheet"[^>]+href="\/assets\/[^"]+\.css"/);
   assert.equal(staticHtml.includes('<div id="root">'), true);
   assert.equal(firstScreenHtml.includes("新对话"), true);
-  assert.equal(firstScreenHtml.includes("在忙什么呢？"), true);
+  assert.equal(firstScreenHtml.includes("有什么可以帮到你？"), false);
+  assert.equal(firstScreenHtml.includes("直接输入问题"), false);
   assert.equal(firstScreenHtml.includes("技能"), true);
   assert.equal(firstScreenHtml.includes("工具"), true);
   assert.equal(firstScreenHtml.includes("设置"), true);
-  assert.equal(firstScreenHtml.includes("问任何问题，或交给我一个任务"), true);
+  assert.equal(firstScreenHtml.includes("发送消息"), true);
   assertFirstScreenHasNoInternalTerms(firstScreenHtml);
 });
 
 test("panel React source is split into typed frontend modules", async () => {
-  const [entry, app, api, types, text, settings, conversation, richText] = await Promise.all([
+  const [entry, app, api, types, text, workspacePages, conversation, richText] = await Promise.all([
     readPanelUiSource("main.tsx"),
     readPanelUiSource("App.tsx"),
     readPanelUiSource("api.ts"),
     readPanelUiSource("types.ts"),
     readPanelUiSource("text.ts"),
-    readPanelUiSource(path.join("components", "settings-panel.tsx")),
+    readPanelUiSource(path.join("components", "workspace-pages.tsx")),
     readPanelUiSource(path.join("components", "conversation.tsx")),
     readPanelUiSource(path.join("components", "rich-text.tsx")),
   ]);
@@ -46,12 +47,12 @@ test("panel React source is split into typed frontend modules", async () => {
   assert.equal(entry.includes('import { App } from "./App"'), true);
   assert.equal(app.includes('import { getJson, postJson } from "./api"'), true);
   assert.equal(app.includes('from "./components/sidebar"'), true);
-  assert.equal(app.includes('from "./components/settings-panel"'), true);
+  assert.equal(app.includes('from "./components/workspace-pages"'), true);
   assert.equal(app.includes('from "./ui-state"'), true);
   assert.equal(api.includes("export async function requestJson"), true);
   assert.equal(types.includes("export type BasicAgentRun"), true);
   assert.equal(text.includes("export const STATUS_LABELS"), true);
-  assert.equal(settings.includes("function ToolCatalog"), true);
+  assert.equal(workspacePages.includes("function ToolCard"), true);
   assert.equal(conversation.includes('import { RichText } from "./rich-text"'), true);
   assert.equal(richText.includes("parseRichTextBlocks"), true);
   assert.equal(richText.includes('type: "code"'), true);
@@ -69,7 +70,8 @@ test("panel React workbench consumes Basic Agent projection APIs", async () => {
   assert.equal(app.includes("/api/context/attachments/preview"), true);
   assert.equal(app.includes("/cancel"), true);
   assert.equal(app.includes("/confirmations/"), true);
-  assert.equal(app.includes("typedToolDisplays"), true);
+  assert.equal(app.includes("safeDesktopDetail"), true);
+  assert.equal(app.includes("safeWorkSession"), true);
   assert.equal(runtime.includes("safeWorkSession"), true);
   assert.equal(runtime.includes("/api/desktop/runs/"), true);
   assert.equal(app.includes("innerHTML"), false);
@@ -602,7 +604,7 @@ test("desktop async fake run answers arbitrary lightweight question without repo
     assert.equal(completed.body.canvas.kind, "desktop_agent_canvas");
     assert.equal(completed.body.runMode, "agent");
     assert.equal(completed.body.route, undefined);
-    assert.equal(completed.body.canvas.agent.answer.answer.includes("AgentArbor 桌面 Root Agent"), true);
+    assert.equal(completed.body.canvas.agent.answer.answer.includes("AgentArbor 桌面助手"), true);
     assert.equal(completed.body.canvas.agent.pendingConfirmation, undefined);
     assert.equal(completed.body.tracking.agentRunTree, undefined);
     const eventTypes = completed.body.transcript.events.map((event: { type: string }) => event.type);
@@ -1253,7 +1255,7 @@ test("desktop openai-compatible direct answer accepts plain text model output", 
     bodies.push(body);
     return createOpenAiTextResponse(
       "desktop-direct-answer-text-model",
-      "我是 AgentArbor 桌面 Root Agent。底层模型取决于你在设置中配置的模型运行时；普通问题会直接回答，不会被强行包装成项目分析。"
+      "我是 AgentArbor 桌面助手。底层模型取决于你在设置中配置的模型运行时；普通问题会直接回答，不会被强行包装成项目分析。"
     );
   };
   const server = await startLocalPanelServer({ port: 0, configDirectory: directory, providerFetch });
@@ -2884,6 +2886,15 @@ function assertFirstScreenHasNoInternalTerms(html: string): void {
     "详情与诊断",
     "真实 AI 诊断",
     "模型 / 工具流",
+    "测试模型",
+    "内容由 AI 生成",
+    "快速提问",
+    "文档分析",
+    "加载更多",
+    "申请授权",
+    "占位",
+    "Skeleton",
+    "Fixture",
   ]) {
     assert.equal(html.includes(term), false, `first screen should not include ${term}`);
   }

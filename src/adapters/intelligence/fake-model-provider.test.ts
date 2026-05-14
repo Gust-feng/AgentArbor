@@ -256,7 +256,7 @@ test("FakeModelProvider default output satisfies work session direct answer text
   assert.equal(response.status, "completed");
   assert.equal(response.validation.status, "passed");
   assert.equal(response.structuredOutput, undefined);
-  assert.equal(response.textOutput?.includes("AgentArbor 桌面 Root Agent"), true);
+  assert.equal(response.textOutput?.includes("AgentArbor 桌面助手"), true);
 });
 
 test("FakeModelProvider desktop agent answers directly and can request authorized tools", async () => {
@@ -315,7 +315,7 @@ test("FakeModelProvider desktop agent answers directly and can request authorize
   );
 
   assert.equal(answer.status, "completed");
-  assert.equal(answer.textOutput?.includes("AgentArbor 桌面 Root Agent"), true);
+  assert.equal(answer.textOutput?.includes("AgentArbor 桌面助手"), true);
   assert.equal(ordinaryComplex.status, "completed");
   assert.equal(ordinaryComplex.finishReason, "tool_call");
   assert.equal(ordinaryComplex.toolCalls?.[0]?.toolName, "search");

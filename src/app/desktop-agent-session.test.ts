@@ -16,14 +16,14 @@ test("Desktop Agent Session answers ordinary questions without entering deep mod
   const result = await runDesktopAgentSession("你是什么模型？", { aiMode: "fake" });
 
   assert.equal(result.status, "completed");
-  assert.equal(result.answer?.answer.includes("AgentArbor 桌面 Root Agent"), true);
+  assert.equal(result.answer?.answer.includes("AgentArbor 桌面助手"), true);
   assert.equal(result.pendingConfirmation, undefined);
   assert.deepEqual(result.eventTypes, ["goal.received", "model.requested", "model.completed"]);
   assert.equal(result.runtime.eventLog.types().includes("agent.delegation.planned"), false);
   assert.equal(result.runtime.eventLog.types().includes("artifact.produced"), false);
 });
 
-test("Desktop Agent Session keeps complex requests in ordinary Root Agent mode by default", async () => {
+test("Desktop Agent Session keeps complex requests in ordinary desktop assistant mode by default", async () => {
   const result = await runDesktopAgentSession("分析当前仓库的问题并给我优化建议", { aiMode: "fake" });
 
   assert.equal(result.status, "completed");

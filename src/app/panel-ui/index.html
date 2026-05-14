@@ -8,16 +8,16 @@
   <body>
     <div id="root">
       <!-- ordinary-screen-start -->
-      <div class="boot-shell">
-        <aside class="boot-sidebar">
+      <div class="w-full h-screen flex overflow-hidden bg-white select-none">
+        <aside class="w-[232px] h-full bg-[#F8F8FA] border-r border-[#EBEBED] p-3">
           <strong>新对话</strong>
           <span>技能</span>
           <span>工具</span>
           <span>设置</span>
         </aside>
-        <main class="boot-main">
-          <h1>在忙什么呢？</h1>
-          <p>问任何问题，或交给我一个任务。</p>
+        <main class="flex-1 flex flex-col">
+          <section class="flex-1" aria-label="对话区"></section>
+          <form aria-label="发送消息"></form>
         </main>
       </div>
       <!-- ordinary-screen-end -->

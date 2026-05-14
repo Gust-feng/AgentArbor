@@ -45,3 +45,10 @@ coverage/
 .trellis/**/*.tmp
 .trellis/**/*.temp
 .cursor
+
+agent-deep-dive
+agent-system-deep-dive-report
+
+# Local analysis artifacts (not product docs)
+desktop-agent-infra-analysis*.md
+figma

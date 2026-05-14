@@ -91,7 +91,7 @@ test("work session read model surfaces approval as the main stage", () => {
   assert.equal(workSession.deliverable, undefined);
 });
 
-test("work session read model carries envelope-safe tool evidence and display", () => {
+test("work session read model keeps tool evidence out of ordinary message deliverables", () => {
   const run = basicRun("completed");
   const workSession = createDesktopWorkSessionReadModel({
     run,
@@ -127,13 +127,29 @@ test("work session read model carries envelope-safe tool evidence and display", 
 
   assert.equal(workSession.toolEvidence.length, 1);
   assert.equal(workSession.toolEvidence[0]?.uiDisplay?.kind, "search_results");
-  assert.equal(workSession.deliverable?.toolDisplays[0]?.kind, "search_results");
+  assert.equal(workSession.answer?.content, "已根据搜索证据回答。");
+  assert.equal(workSession.deliverable, undefined);
   const toolEntry = workSession.contextLedger.entries.find((entry) => entry.kind === "tool_evidence");
   assert.equal(toolEntry?.status, "used");
   assert.equal(toolEntry?.refs.some((ref) => ref.kind === "tool_call" && ref.id === "call-search"), true);
   const json = JSON.stringify(workSession);
   assert.equal(json.includes("RAW_TOOL_OUTPUT_SENTINEL"), false);
   assert.equal(json.includes("sk-tool-secret"), false);
+});
+
+test("work session read model does not promote restored summaries into chat deliverables", () => {
+  const run = basicRun("completed");
+  const workSession = createDesktopWorkSessionReadModel({
+    run,
+    events: [event(run.runId, "final.result", "已恢复结果", "completed")],
+    restoredResult: {
+      title: "恢复结果",
+      summary: "这是恢复后的摘要。",
+    },
+  });
+
+  assert.equal(workSession.stage, "completed");
+  assert.equal(workSession.deliverable, undefined);
 });
 
 test("work session context ledger distinguishes blocked context refs", () => {

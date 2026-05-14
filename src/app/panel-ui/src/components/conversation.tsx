@@ -1,5 +1,5 @@
-import React, { useState } from "react";
-import { eventTitle, STATUS_LABELS, statusTone, TASK_EXAMPLES } from "../text";
+import React, { useMemo, useState } from "react";
+import { Copy, Sparkles } from "lucide-react";
 import type { AgentDeliverable, BasicAgentRun, ContextAttachment, Conversation, ConversationTurn, DesktopRunDetail, DesktopWorkSession, PendingConfirmation, RunEvent } from "../types";
 import { RichText } from "./rich-text";
 
@@ -14,179 +14,191 @@ export function ConversationView(props: {
   readonly error?: string;
   readonly pendingConfirmation?: PendingConfirmation;
   readonly attachments: readonly ContextAttachment[];
-  readonly onSelectExample: (example: string) => void;
   readonly onDecision: (decision: "approve_once" | "deny" | "guidance", guidance?: string) => void;
+  readonly confirmationBusy: boolean;
 }): React.ReactElement {
-  const turns = props.conversation?.turns ?? [];
+  const turns = useMemo(() => visibleTurns(props.conversation?.turns ?? []), [props.conversation?.turns]);
   const latestAssistantTurn = [...turns].reverse().find((turn) => turn.role === "assistant" && turn.content.trim().length > 0);
-  const answer = props.workSession?.deliverable === undefined
-    ? props.workSession?.answer?.content ?? visibleResultText(props.detail) ?? latestAssistantTurn?.content
-    : undefined;
+  const answer = props.workSession?.answer?.content ?? visibleResultText(props.detail) ?? latestAssistantTurn?.content;
   const pending = props.workSession?.pendingConfirmation ?? props.pendingConfirmation;
-  const visibleEvents = props.workSession?.visibleEvents ?? props.events;
-  const deliverable = props.workSession?.deliverable;
+  const deliverable = visibleDeliverable(props.workSession?.deliverable, answer, latestAssistantTurn?.content);
   const completedAnswer =
     props.run?.status === "completed" &&
-    props.workSession?.deliverable === undefined &&
+    deliverable === undefined &&
     answer !== undefined &&
     pending === undefined;
-  const shouldShowProgress =
+  const shouldAppendAnswer = completedAnswer && latestAssistantTurn === undefined;
+  const showStatusBubble =
     props.run !== undefined &&
-    (!completedAnswer || visibleEvents.some(isSubstantiveEvent) || props.workSession !== undefined);
+    pending === undefined &&
+    deliverable === undefined &&
+    isActiveRunStatus(props.run.status);
+
+  if (turns.length === 0 && props.run === undefined && props.error === undefined) {
+    return <EmptyCommandCenter attachments={props.attachments} />;
+  }
 
   return (
-    <div className="conversation-pane">
-      {turns.length === 0 && props.run === undefined ? (
-        <EmptyCommandCenter attachments={props.attachments} onSelectExample={props.onSelectExample} />
-      ) : (
-        <div className="task-canvas">
-          <TaskBrief
-            conversation={props.conversation}
-            run={props.run}
-            workSession={props.workSession}
-          />
-          {pending !== undefined && <ConfirmationCard confirmation={pending} onDecision={props.onDecision} />}
-          {deliverable !== undefined && <DeliverableCard deliverable={deliverable} />}
-          {completedAnswer && (
-            <AnswerCard
-              title={props.workSession?.answer?.title ?? props.detail?.restoredResult?.title ?? "结果已整理"}
-              answer={answer}
-              nextActions={props.workSession?.answer?.nextActions ?? props.detail?.canvas?.workSession?.report?.nextActions ?? []}
-            />
-          )}
-          {shouldShowProgress && <WorkProgress run={props.run} workSession={props.workSession} events={visibleEvents} />}
-          {turns.length > 0 && <ConversationRecord turns={turns} highlightedTurnId={completedAnswer ? latestAssistantTurn?.turnId : undefined} />}
-          {props.error !== undefined && <p className="error-line">{props.error}</p>}
-        </div>
-      )}
+    <div className="chat-scroll">
+      <div className="chat-thread">
+        <ConversationTranscript turns={turns} />
+        {shouldAppendAnswer && <AssistantPlainAnswer answer={answer} />}
+        {pending !== undefined && <ConfirmationCard confirmation={pending} onDecision={props.onDecision} busy={props.confirmationBusy} />}
+        {deliverable !== undefined && <DeliverableCard deliverable={deliverable} />}
+        {showStatusBubble && <AssistantStatusBubble run={props.run} workSession={props.workSession} />}
+        {props.error !== undefined && <p className="error-line">{props.error}</p>}
+      </div>
     </div>
   );
 }
 
 function EmptyCommandCenter(props: {
   readonly attachments: readonly ContextAttachment[];
-  readonly onSelectExample: (example: string) => void;
 }): React.ReactElement {
   return (
-    <section className="command-center" aria-label="任务工作台">
-      <div className="command-center-intro">
-        <span className="eyebrow">Desktop Basic Agent</span>
-        <h1>在忙什么呢？</h1>
-        <p>可以直接提问，也可以把文件、文件夹、网页或当前工作区作为上下文交给我处理。</p>
-      </div>
-      <div className="command-grid">
-        <section className="command-panel primary-panel">
-          <h2>开始一项任务</h2>
-          <p>选择一个例子后，可以在下方补充目标、材料和限制。</p>
-          <div className="command-example-grid">
-            {TASK_EXAMPLES.map((example) => (
-              <button type="button" key={example} onClick={() => props.onSelectExample(example)}>
-                {example}
-              </button>
-            ))}
-          </div>
-        </section>
-        <section className="command-panel">
-          <h2>上下文入口</h2>
-          <ul className="command-checklist">
-            <li>添加当前工作区，让它理解项目边界。</li>
-            <li>添加文件或文件夹，只给出引用和短摘要。</li>
-            <li>添加网页，用作查证和报告证据。</li>
-          </ul>
-          <p className="muted">{props.attachments.length > 0 ? `已添加 ${props.attachments.length} 个上下文。` : "下方输入区可以立即添加上下文。"}</p>
-        </section>
-        <section className="command-panel">
-          <h2>工作状态</h2>
-          <ul className="command-checklist">
-            <li>运行时展示正在做什么和下一步。</li>
-            <li>有风险的动作会先请求确认。</li>
-            <li>完成后优先展示可使用的结果。</li>
-          </ul>
-        </section>
-      </div>
+    <section className="chat-empty-surface" aria-label="对话空状态">
+      {props.attachments.length > 0 && <p>已添加 {props.attachments.length} 个上下文</p>}
     </section>
   );
 }
 
-function TaskBrief(props: {
-  readonly conversation?: Conversation;
-  readonly run?: BasicAgentRun;
-  readonly workSession?: DesktopWorkSession;
-}): React.ReactElement {
-  const run = props.workSession?.run ?? props.run;
-  const title = run?.title ?? props.conversation?.title ?? "当前任务";
-  const summary = props.workSession?.headline ?? run?.goalSummary ?? "会话已开始。";
-  const context = props.workSession?.contextAttachments ?? [];
-  return (
-    <section className="task-brief">
-      <div className="task-brief-main">
-        <span className="eyebrow">任务简报</span>
-        <h2>{title}</h2>
-        <RichText text={summary} />
-      </div>
-      <div className="task-brief-side">
-        {run !== undefined && <span className={`status-pill ${statusTone(run.status)}`}>{STATUS_LABELS[run.status]}</span>}
-        {run?.runMode === "deep" && <span className="mode-badge">深入处理</span>}
-      </div>
-      <ContextStrip attachments={context} />
-    </section>
-  );
+function visibleTurns(turns: readonly ConversationTurn[]): readonly ConversationTurn[] {
+  return turns.filter((turn) => turn.role === "user" || turn.content.trim().length > 0);
 }
 
-function ContextStrip({ attachments }: { readonly attachments: readonly ContextAttachment[] }): React.ReactElement {
+function visibleDeliverable(
+  deliverable: AgentDeliverable | undefined,
+  answer: string | undefined,
+  latestAssistantContent: string | undefined
+): AgentDeliverable | undefined {
+  if (deliverable === undefined) return undefined;
+  if (isDuplicateAnswerDeliverable(deliverable, answer) || isDuplicateAnswerDeliverable(deliverable, latestAssistantContent)) {
+    return undefined;
+  }
+  if (isInternalSummaryTitle(deliverable.title)) {
+    return undefined;
+  }
+  return deliverable;
+}
+
+function isInternalSummaryTitle(title: string): boolean {
+  return ["已", "整理", "结果"].every((part) => title.includes(part)) || ["结果", "摘要"].every((part) => title.includes(part));
+}
+
+function isDuplicateAnswerDeliverable(deliverable: AgentDeliverable, answer: string | undefined): boolean {
+  if (answer === undefined || answer.trim().length === 0) return false;
+  const normalizedAnswer = normalizeComparableText(answer);
+  if (normalizeComparableText(deliverable.summary) === normalizedAnswer) return true;
+  return deliverable.sections.some((section) => normalizeComparableText(section.content) === normalizedAnswer);
+}
+
+function normalizeComparableText(value: string): string {
+  return userVisibleAnswer(value).replace(/\s+/g, " ").trim();
+}
+
+function ConversationTranscript(props: {
+  readonly turns: readonly ConversationTurn[];
+}): React.ReactElement | null {
+  if (props.turns.length === 0) return null;
   return (
-    <div className="context-strip" aria-label="已使用上下文">
-      <strong>上下文</strong>
-      {attachments.length === 0 ? (
-        <span className="muted">未添加额外上下文。</span>
-      ) : (
-        attachments.slice(0, 6).map((attachment) => (
-          <span className={`context-token ${attachment.status}`} key={attachment.attachmentId}>
-            {attachment.title}
-          </span>
-        ))
-      )}
+    <div className="flex flex-col gap-5" aria-label="对话记录">
+      {props.turns.map((turn) => turn.role === "user"
+        ? <UserTurnBubble key={turn.turnId} turn={turn} />
+        : <AssistantTurnBubble key={turn.turnId} turn={turn} />)}
     </div>
   );
 }
 
-function WorkProgress(props: {
-  readonly run?: BasicAgentRun;
-  readonly workSession?: DesktopWorkSession;
-  readonly events: readonly RunEvent[];
-}): React.ReactElement {
-  const currentAction = props.workSession?.currentAction ?? props.run?.currentStep ?? props.run?.goalSummary ?? "正在准备任务。";
-  const nextStep = props.run?.nextStep;
-  const visibleEvents = props.events.filter((event) => event.visibility !== "debug").slice(-8);
+function userVisibleAnswer(text: string): string {
+  return text
+    .replace(/AgentArbor\s*桌面\s*Root Agent/g, "AgentArbor 桌面助手")
+    .replace(/Root Agent/g, "助手");
+}
+
+function UserTurnBubble(props: { readonly turn: ConversationTurn }): React.ReactElement {
   return (
-    <section className="work-progress" aria-label="工作进度">
-      <header>
-        <div>
-          <span className="eyebrow">工作进度</span>
-          <h2>{stageLabel(props.workSession?.stage, props.run?.status)}</h2>
+    <article className="flex justify-end">
+      <div className="max-w-[72%]">
+        <div className="bg-[#F3F4F6] rounded-2xl rounded-tr-md px-4 py-3 inline-flex flex-col gap-2">
+          <div className="text-sm text-[#374151]">
+            <RichText text={props.turn.content} />
+          </div>
         </div>
-        {props.run !== undefined && <span className={`status-pill ${statusTone(props.run.status)}`}>{STATUS_LABELS[props.run.status]}</span>}
-      </header>
-      <div className="current-action">
-        <strong>{currentAction}</strong>
-        {nextStep !== undefined && <small>下一步：{nextStep}</small>}
       </div>
-      {visibleEvents.length > 0 ? (
-        <div className="activity-timeline compact" aria-label="近期活动">
-          {visibleEvents.map((event) => (
-            <article key={event.id} className={`activity-item ${statusTone(event.status)}`}>
-              <span />
-              <div>
-                <strong>{eventTitle(event)}</strong>
-                {event.summary && <RichText text={event.summary} />}
-              </div>
-            </article>
-          ))}
+    </article>
+  );
+}
+
+function AssistantTurnBubble(props: { readonly turn: ConversationTurn }): React.ReactElement {
+  const content = userVisibleAnswer(props.turn.content);
+  return (
+    <article className="flex gap-3 group">
+      <AssistantAvatar />
+      <div className="flex-1 min-w-0 max-w-[80%]">
+        <div className="text-sm text-[#374151] py-1">
+          <RichText text={content} />
         </div>
-      ) : (
-        <p className="muted">任务启动后，会在这里显示可读的工作笔记。</p>
-      )}
-    </section>
+        <div className="flex items-center gap-0.5 mt-2.5 opacity-0 group-hover:opacity-100 transition-opacity">
+          <TurnActionButton icon={<Copy size={13} />} label="复制" onClick={() => copyToClipboard(content)} />
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function AssistantStatusBubble(props: {
+  readonly run: BasicAgentRun;
+  readonly workSession?: DesktopWorkSession;
+}): React.ReactElement {
+  const currentAction = props.run.runMode === "deep" ? "正在处理任务…" : "正在回复…";
+  return (
+    <article className="flex gap-3 group">
+      <AssistantAvatar />
+      <div className="flex-1 min-w-0 max-w-[80%] py-1">
+        <div className="text-sm text-[#6B7280] leading-relaxed">
+          <RichText text={currentAction} />
+        </div>
+        <TypingDots />
+      </div>
+    </article>
+  );
+}
+
+function AssistantPlainAnswer({ answer }: { readonly answer: string }): React.ReactElement {
+  return (
+    <article className="flex gap-3 group">
+      <AssistantAvatar />
+      <div className="flex-1 min-w-0 max-w-[80%]">
+        <div className="text-sm text-[#374151] py-1">
+          <RichText text={userVisibleAnswer(answer)} />
+        </div>
+        <div className="flex items-center gap-0.5 mt-2.5 opacity-0 group-hover:opacity-100 transition-opacity">
+          <TurnActionButton icon={<Copy size={13} />} label="复制" onClick={() => copyToClipboard(userVisibleAnswer(answer))} />
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function AssistantAvatar(): React.ReactElement {
+  return (
+    <div className="w-7 h-7 rounded-xl bg-[#111827] flex items-center justify-center shrink-0 mt-0.5 shadow-sm text-white/70">
+      <Sparkles size={12} />
+    </div>
+  );
+}
+
+function TypingDots(): React.ReactElement {
+  return (
+    <div className="flex items-center gap-1 py-2" aria-label="正在整理">
+      {[0, 1, 2].map((index) => (
+        <span
+          key={index}
+          className="w-1.5 h-1.5 rounded-full bg-[#D1D5DB] animate-bounce"
+          style={{ animationDelay: `${index * 120}ms`, animationDuration: "0.9s" }}
+        />
+      ))}
+    </div>
   );
 }
 
@@ -197,144 +209,98 @@ function DeliverableCard({ deliverable }: { readonly deliverable: AgentDeliverab
     ...deliverable.sections.map((section) => `${section.title}\n${section.content}`),
   ].join("\n\n");
   return (
-    <article className="deliverable-card">
-      <header>
+    <article className="rounded-xl border border-[#E5E7EB] bg-white px-4 py-4 flex flex-col gap-3">
+      <header className="flex items-start justify-between gap-3">
         <div>
-          <span className="eyebrow">交付结果</span>
-          <h2>{deliverable.title}</h2>
+          <h2 className="text-[#111827] leading-tight">{deliverable.title}</h2>
         </div>
-        <button type="button" className="ghost" onClick={() => copyToClipboard(copyValue)}>复制结果</button>
+        <button type="button" className="h-7 px-2 rounded-lg text-xs text-[#9CA3AF] hover:text-[#374151] hover:bg-[#F3F4F6]" onClick={() => copyToClipboard(copyValue)}>复制</button>
       </header>
-      <RichText text={deliverable.summary} />
+      <div className="text-sm text-[#374151]">
+        <RichText text={deliverable.summary} />
+      </div>
       {deliverable.sections.slice(0, 4).map((section) => (
-        <section key={section.sectionId}>
-          <h3>{section.title}</h3>
-          <RichText text={section.content} />
+        <section key={section.sectionId} className="border-t border-[#F3F4F6] pt-3 flex flex-col gap-1.5">
+          <h3 className="text-sm text-[#111827]">{section.title}</h3>
+          <div className="text-sm text-[#6B7280]">
+            <RichText text={section.content} />
+          </div>
         </section>
       ))}
-      <ResultMeta evidenceCount={deliverable.evidenceRefs.length} toolCount={deliverable.toolDisplays.length} nextActions={deliverable.nextActions} />
-    </article>
-  );
-}
-
-function AnswerCard(props: {
-  readonly title: string;
-  readonly answer: string;
-  readonly nextActions: readonly string[];
-}): React.ReactElement {
-  return (
-    <article className="result-card deliverable-card direct-answer">
-      <header>
-        <div>
-          <span className="eyebrow">结果</span>
-          <h2>{props.title}</h2>
-        </div>
-        <button type="button" className="ghost" onClick={() => copyToClipboard(props.answer)}>复制回答</button>
-      </header>
-      <RichText text={props.answer} />
-      <ResultMeta evidenceCount={0} toolCount={0} nextActions={props.nextActions} />
+      <ResultMeta nextActions={deliverable.nextActions} />
     </article>
   );
 }
 
 function ResultMeta(props: {
-  readonly evidenceCount: number;
-  readonly toolCount: number;
   readonly nextActions: readonly string[];
 }): React.ReactElement | null {
-  if (props.evidenceCount === 0 && props.toolCount === 0 && props.nextActions.length === 0) {
-    return null;
-  }
+  if (props.nextActions.length === 0) return null;
   return (
-    <div className="result-meta">
-      {(props.evidenceCount > 0 || props.toolCount > 0) && (
-        <div className="deliverable-meta">
-          {props.evidenceCount > 0 && <span>证据 {props.evidenceCount}</span>}
-          {props.toolCount > 0 && <span>工具摘要 {props.toolCount}</span>}
-        </div>
-      )}
-      {props.nextActions.length > 0 && (
-        <section className="next-actions">
-          <h3>下一步</h3>
-          <ul>
-            {props.nextActions.slice(0, 4).map((action) => <li key={action}>{action}</li>)}
-          </ul>
-        </section>
-      )}
+    <div className="flex flex-col gap-3">
+      <section className="border-t border-[#F3F4F6] pt-3 flex flex-col gap-2">
+        <h3 className="text-sm text-[#111827]">下一步</h3>
+        <ul className="m-0 pl-5 text-sm text-[#6B7280] flex flex-col gap-1">
+          {props.nextActions.slice(0, 4).map((action) => <li key={action}>{action}</li>)}
+        </ul>
+      </section>
     </div>
   );
 }
 
-function ConversationRecord(props: {
-  readonly turns: readonly ConversationTurn[];
-  readonly highlightedTurnId?: string;
+function TurnActionButton(props: {
+  readonly icon: React.ReactNode;
+  readonly label?: string;
+  readonly onClick?: () => void;
 }): React.ReactElement {
   return (
-    <details className="conversation-record">
-      <summary>输入与回复记录</summary>
-      <div className="thread compact-thread">
-        {props.turns.map((turn) => (
-          <article className={`message ${turn.role} ${turn.turnId === props.highlightedTurnId ? "subdued" : ""}`} key={turn.turnId}>
-            <header>{turn.role === "user" ? "你" : turn.title || "助手"}</header>
-            <RichText text={turn.content} />
-          </article>
-        ))}
-      </div>
-    </details>
+    <button
+      type="button"
+      className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs text-[#9CA3AF] hover:text-[#374151] hover:bg-[#F3F4F6] transition-colors"
+      onClick={props.onClick}
+    >
+      {props.icon}
+      {props.label && <span>{props.label}</span>}
+    </button>
   );
 }
 
 function ConfirmationCard(props: {
   readonly confirmation: ConfirmationProjection;
   readonly onDecision: (decision: "approve_once" | "deny" | "guidance", guidance?: string) => void;
+  readonly busy: boolean;
 }): React.ReactElement {
   const [guidance, setGuidance] = useState("");
   const resumeLost = props.confirmation.resumeAvailability === "lost_after_restart";
   const affectedResources = confirmationAffectedResources(props.confirmation);
   const risk = confirmationRisk(props.confirmation);
   return (
-    <article className={`confirmation-card risk-${risk}`}>
-      <span className="eyebrow">待确认 · {riskLabel(risk)}</span>
-      <h2>{props.confirmation.title || "需要确认"}</h2>
-      <RichText text={confirmationAction(props.confirmation)} />
+    <article className={`rounded-xl border px-4 py-4 flex flex-col gap-3 ${risk === "high" ? "border-[#FECACA] bg-[#FEF2F2]" : "border-[#FDE68A] bg-[#FFFBEB]"}`}>
+      <span className="text-xs text-[#D97706]">待确认 · {riskLabel(risk)}</span>
+      <h2 className="text-[#111827] leading-tight">{props.confirmation.title || "需要确认"}</h2>
+      <div className="text-sm text-[#374151]">
+        <RichText text={confirmationAction(props.confirmation)} />
+      </div>
       {affectedResources.length > 0 && (
-        <div className="approval-resources">
-          <strong>影响对象</strong>
-          <ul>{affectedResources.slice(0, 6).map((resource) => <li key={resource}>{resource}</li>)}</ul>
+        <div className="rounded-xl border border-[#FDE68A] bg-white/70 px-3 py-2">
+          <strong className="text-sm text-[#111827]">影响对象</strong>
+          <ul className="mt-1 m-0 pl-5 text-sm text-[#6B7280]">{affectedResources.slice(0, 6).map((resource) => <li key={resource}>{resource}</li>)}</ul>
         </div>
       )}
-      {"consequence" in props.confirmation && <p className="muted">{props.confirmation.consequence}</p>}
-      {resumeLost && <p className="muted">应用重启后无法继续原动作。请补充指导或重新发起后续任务。</p>}
-      <textarea value={guidance} onChange={(event) => setGuidance(event.target.value)} placeholder="补充你的要求或限制" rows={3} />
-      <div className="button-row">
-        <button type="button" className="primary" disabled={resumeLost} onClick={() => props.onDecision("approve_once")}>批准一次</button>
-        <button type="button" onClick={() => props.onDecision("deny")}>拒绝</button>
-        <button type="button" onClick={() => props.onDecision("guidance", guidance)}>补充指导</button>
+      {"consequence" in props.confirmation && <p className="text-sm text-[#6B7280]">{props.confirmation.consequence}</p>}
+      {resumeLost && <p className="text-sm text-[#6B7280]">应用重启后无法继续原动作。请补充指导或重新发起后续任务。</p>}
+      <textarea className="rounded-lg border border-[#E5E7EB] bg-white px-3 py-2 text-sm outline-none disabled:opacity-60" value={guidance} onChange={(event) => setGuidance(event.target.value)} placeholder="补充你的要求或限制" rows={3} disabled={props.busy} />
+      <div className="flex items-center flex-wrap gap-2">
+        <button type="button" className="h-8 px-4 rounded-lg bg-[#111827] text-white text-sm disabled:opacity-40" disabled={resumeLost || props.busy} onClick={() => props.onDecision("approve_once")}>{props.busy ? "提交中…" : "批准一次"}</button>
+        <button type="button" className="h-8 px-4 rounded-lg border border-[#E5E7EB] bg-white text-[#374151] text-sm hover:bg-[#F9FAFB] disabled:opacity-40" disabled={props.busy} onClick={() => props.onDecision("deny")}>拒绝</button>
+        <button type="button" className="h-8 px-4 rounded-lg border border-[#E5E7EB] bg-white text-[#374151] text-sm hover:bg-[#F9FAFB] disabled:opacity-40" disabled={props.busy || guidance.trim().length === 0} onClick={() => props.onDecision("guidance", guidance)}>补充指导</button>
       </div>
     </article>
   );
 }
 
-function isSubstantiveEvent(event: RunEvent): boolean {
-  return event.type.startsWith("tool.") ||
-    event.type === "confirmation.needed" ||
-    event.status === "approval_needed" ||
-    event.status === "failed" ||
-    event.status === "blocked" ||
-    event.status === "cancelled";
-}
-
-function stageLabel(stage: DesktopWorkSession["stage"] | undefined, status: BasicAgentRun["status"] | undefined): string {
-  if (stage === "understanding" || status === "planning") return "正在理解任务";
-  if (stage === "gathering_context") return "正在读取上下文";
-  if (stage === "using_tools") return "正在查找资料";
-  if (stage === "awaiting_approval" || status === "approval_needed") return "等待你确认";
-  if (stage === "composing_result") return "正在整理结果";
-  if (stage === "completed" || status === "completed") return "已形成结果";
-  if (stage === "blocked" || status === "blocked") return "需要你处理";
-  if (stage === "failed" || status === "failed") return "未能完成";
-  if (stage === "cancelled" || status === "cancelled") return "已取消";
-  return "正在处理";
+function isActiveRunStatus(status: BasicAgentRun["status"]): boolean {
+  return status === "queued" || status === "planning" || status === "running";
 }
 
 function confirmationAction(confirmation: ConfirmationProjection): string {

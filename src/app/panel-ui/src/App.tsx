@@ -2,10 +2,9 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { getJson, postJson } from "./api";
 import { Composer } from "./components/composer";
 import { ConversationView } from "./components/conversation";
-import { RightInspector } from "./components/right-inspector";
-import { SettingsPanel } from "./components/settings-panel";
 import { Sidebar } from "./components/sidebar";
 import { TopBar } from "./components/topbar";
+import { RoutinesPage, SettingsPage, SkillsPage, ToolsPage } from "./components/workspace-pages";
 import {
   mergeEvents,
   openBasicRunStream,
@@ -14,7 +13,6 @@ import {
   safeConversation,
   safeDesktopDetail,
   safeWorkSession,
-  typedToolDisplays,
 } from "./runtime";
 import type {
   BasicAgentRun,
@@ -28,7 +26,9 @@ import type {
   SkillDefinition,
   ToolsResponse,
 } from "./types";
-import { terminalStatuses, type SettingsTab } from "./ui-state";
+import { terminalStatuses } from "./ui-state";
+
+type PanelScreen = "chat" | "skills" | "routines" | "tools" | "settings";
 
 type AppState = {
   readonly config?: ConfigResponse;
@@ -51,8 +51,8 @@ export function App(): React.ReactElement {
     events: [],
     busy: false,
   });
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [settingsTab, setSettingsTab] = useState<SettingsTab>("model");
+  const [screen, setScreen] = useState<PanelScreen>("chat");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [goal, setGoal] = useState("");
   const [runMode, setRunMode] = useState<"agent" | "deep">("agent");
   const [aiMode, setAiMode] = useState<"none" | "fake" | "openai-compatible">("openai-compatible");
@@ -62,7 +62,7 @@ export function App(): React.ReactElement {
   const [attachments, setAttachments] = useState<readonly ContextAttachment[]>([]);
   const [attachmentKind, setAttachmentKind] = useState<ContextAttachment["kind"]>("workspace");
   const [attachmentValue, setAttachmentValue] = useState(".");
-  const [inspectorOpen, setInspectorOpen] = useState(false);
+  const [confirmationBusy, setConfirmationBusy] = useState(false);
   const pollTimer = useRef<number | undefined>(undefined);
   const streamRef = useRef<EventSource | undefined>(undefined);
   const currentRunId = app.run?.runId;
@@ -74,7 +74,7 @@ export function App(): React.ReactElement {
 
   useEffect(() => {
     if (app.config?.config !== undefined) {
-      setAiMode(app.config.config.defaultAiMode ?? "openai-compatible");
+      setAiMode(normalizeVisibleAiMode(app.config.config.defaultAiMode));
       setModelForm({
         baseUrl: app.config.config.baseUrl ?? "",
         model: app.config.config.model ?? "",
@@ -214,10 +214,6 @@ export function App(): React.ReactElement {
             conversation: conversation ?? previous.conversation,
             workSession: workSessionResponse ?? previous.workSession,
           }));
-          if (terminalStatuses.has(runResponse.run.status)) {
-            stopPolling(pollTimer);
-            void refreshConversations();
-          }
           if (!shouldKeepRefreshing(runResponse.run.status)) {
             stopPolling(pollTimer);
             void refreshConversations();
@@ -290,7 +286,7 @@ export function App(): React.ReactElement {
 
   async function decideConfirmation(decision: "approve_once" | "deny" | "guidance", guidance?: string): Promise<void> {
     const confirmation = app.workSession?.pendingConfirmation ?? app.detail?.canvas?.agent?.pendingConfirmation;
-    if (currentRunId === undefined || confirmation === undefined) return;
+    if (currentRunId === undefined || confirmation === undefined || confirmationBusy) return;
     if (decision === "approve_once" && confirmation.resumeAvailability === "lost_after_restart") {
       setApp((previous) => ({
         ...previous,
@@ -298,17 +294,38 @@ export function App(): React.ReactElement {
       }));
       return;
     }
-    const response = await postJson<{ readonly run: BasicAgentRun }>(
-      `/api/basic-agent/runs/${encodeURIComponent(currentRunId)}/confirmations/${encodeURIComponent(confirmation.confirmationId)}/decision`,
-      { decision, guidance }
-    );
-    const workSession = await safeWorkSession(currentRunId);
-    setApp((previous) => ({ ...previous, run: response.run, workSession: workSession ?? previous.workSession }));
-    if (decision === "approve_once") {
-      startLiveUpdates(currentRunId, response.run.eventCursor.lastSequence);
-    } else {
-      const detail = await safeDesktopDetail(currentRunId);
-      setApp((previous) => ({ ...previous, detail }));
+    if (decision === "guidance" && (guidance ?? "").trim().length === 0) {
+      setApp((previous) => ({ ...previous, error: "请先输入补充指导，再提交。" }));
+      return;
+    }
+    setConfirmationBusy(true);
+    setApp((previous) => ({ ...previous, error: undefined }));
+    try {
+      const response = await postJson<{ readonly run: BasicAgentRun }>(
+        `/api/basic-agent/runs/${encodeURIComponent(currentRunId)}/confirmations/${encodeURIComponent(confirmation.confirmationId)}/decision`,
+        { decision, guidance: guidance?.trim() }
+      );
+      const [workSession, detail] = await Promise.all([
+        safeWorkSession(currentRunId),
+        safeDesktopDetail(currentRunId),
+      ]);
+      setApp((previous) => ({
+        ...previous,
+        run: response.run,
+        workSession,
+        detail,
+        error: decision === "approve_once" ? "已提交确认，正在继续处理。" : undefined,
+      }));
+      if (decision === "approve_once") {
+        startLiveUpdates(currentRunId, response.run.eventCursor.lastSequence);
+      }
+    } catch (error) {
+      setApp((previous) => ({
+        ...previous,
+        error: error instanceof Error ? error.message : "提交确认失败，请重试。",
+      }));
+    } finally {
+      setConfirmationBusy(false);
     }
   }
 
@@ -379,98 +396,86 @@ export function App(): React.ReactElement {
   }
 
   const pendingConfirmation = app.detail?.canvas?.agent?.pendingConfirmation;
-  const visibleToolDisplays = useMemo(() => typedToolDisplays(app.detail), [app.detail]);
-  const inspectorContent = hasInspectorContent(app, visibleToolDisplays);
-  const showInspector = inspectorContent || inspectorOpen;
 
   return (
-    <div className={`app-shell ${showInspector ? "inspector-open" : "inspector-hidden"}`}>
+    <div className="app-shell">
       <Sidebar
+        collapsed={sidebarCollapsed}
         conversations={app.conversations}
         activeConversationId={app.conversation?.conversationId}
         onNew={() => {
           stopLiveUpdates(pollTimer, streamRef);
+          setGoal("");
+          setRunMode("agent");
           setAttachments([]);
           setApp((previous) => ({ ...previous, conversation: undefined, run: undefined, workSession: undefined, events: [], detail: undefined, error: undefined }));
         }}
         onOpen={(id) => void loadConversation(id)}
-        onSettings={(tab) => {
-          setSettingsTab(tab);
-          setSettingsOpen(true);
-        }}
+        activeScreen={screen}
+        onNavigate={setScreen}
       />
-      <main className="workbench">
+      <div className="workbench">
         <TopBar
           run={app.run}
-          config={app.config}
-          inspectorOpen={showInspector}
-          inspectorAvailable={inspectorContent}
-          onToggleInspector={() => setInspectorOpen((value) => !value)}
-          onOpenSettings={() => {
-            setSettingsTab("model");
-            setSettingsOpen(true);
-          }}
+          screen={screen}
+          sidebarCollapsed={sidebarCollapsed}
+          onToggleSidebar={() => setSidebarCollapsed((value) => !value)}
+          onOpenSettings={() => setScreen("settings")}
         />
-        <section className="session-surface" aria-label="工作会话">
-          <ConversationView
-            conversation={app.conversation}
-            run={app.run}
-            workSession={app.workSession}
-            events={app.events}
-            detail={app.detail}
-            error={app.error}
-            pendingConfirmation={pendingConfirmation}
-            attachments={attachments}
-            onSelectExample={setGoal}
-            onDecision={(decision, guidance) => void decideConfirmation(decision, guidance)}
-          />
-          <Composer
-            value={goal}
-            onChange={setGoal}
-            runMode={runMode}
-            onRunModeChange={setRunMode}
-            aiMode={aiMode}
-            onAiModeChange={setAiMode}
-            attachments={attachments}
-            attachmentKind={attachmentKind}
-            attachmentValue={attachmentValue}
-            onAttachmentKindChange={(kind) => {
-              setAttachmentKind(kind);
-              setAttachmentValue(kind === "workspace" ? "." : "");
-            }}
-            onAttachmentValueChange={setAttachmentValue}
-            onAddAttachment={() => void addAttachment()}
-            onRemoveAttachment={removeAttachment}
-            busy={app.busy}
-            run={app.run}
-            onSubmit={(mode) => void startTask(mode)}
-            onCancel={() => void cancelRun()}
-          />
-        </section>
-      </main>
-      {showInspector && <RightInspector run={app.run} workSession={app.workSession} events={app.events} detail={app.detail} toolDisplays={visibleToolDisplays} />}
-      {settingsOpen && (
-        <SettingsPanel
-          tab={settingsTab}
-          setTab={setSettingsTab}
-          config={app.config}
-          tools={app.tools}
-          skills={app.skills}
-          modelForm={modelForm}
-          setModelForm={setModelForm}
-          aiMode={aiMode}
-          setAiMode={setAiMode}
-          workspaceDirectory={workspaceDirectory}
-          setWorkspaceDirectory={setWorkspaceDirectory}
-          toolForm={toolForm}
-          setToolForm={setToolForm}
-          onClose={() => setSettingsOpen(false)}
-          onSaveModel={() => void saveModelConfig()}
-          onSaveWorkspace={() => void saveWorkspace()}
-          onSaveTools={() => void saveTools()}
-          onUpdateSkill={(id, enabled) => void updateSkill(id, enabled)}
-        />
-      )}
+        <main className="workbench-main">
+          {screen === "chat" && (
+            <section className="session-surface" aria-label="工作会话">
+              <ConversationView
+                conversation={app.conversation}
+                run={app.run}
+                workSession={app.workSession}
+                events={app.events}
+                detail={app.detail}
+                error={app.error}
+                pendingConfirmation={pendingConfirmation}
+                attachments={attachments}
+                onDecision={(decision, guidance) => void decideConfirmation(decision, guidance)}
+                confirmationBusy={confirmationBusy}
+              />
+              <Composer
+                value={goal}
+                onChange={setGoal}
+                runMode={runMode}
+                attachments={attachments}
+                attachmentKind={attachmentKind}
+                attachmentValue={attachmentValue}
+                onAttachmentKindChange={(kind) => {
+                  setAttachmentKind(kind);
+                  setAttachmentValue(kind === "workspace" ? "." : "");
+                }}
+                onAttachmentValueChange={setAttachmentValue}
+                onAddAttachment={() => void addAttachment()}
+                onRemoveAttachment={removeAttachment}
+                busy={app.busy}
+                run={app.run}
+                onSubmit={(mode) => void startTask(mode)}
+                onCancel={() => void cancelRun()}
+              />
+            </section>
+          )}
+          {screen === "skills" && <SkillsPage skills={app.skills} onUpdateSkill={(id, enabled) => void updateSkill(id, enabled)} onStartSkill={(skill) => startSkillChat(skill, setScreen, setGoal)} />}
+          {screen === "routines" && <RoutinesPage />}
+          {screen === "tools" && <ToolsPage tools={app.tools} toolForm={toolForm} setToolForm={setToolForm} onSaveTools={() => void saveTools()} />}
+          {screen === "settings" && (
+            <SettingsPage
+              config={app.config}
+              modelForm={modelForm}
+              setModelForm={setModelForm}
+              aiMode={normalizeVisibleAiMode(aiMode)}
+              setAiMode={(mode) => setAiMode(mode)}
+              workspaceDirectory={workspaceDirectory}
+              setWorkspaceDirectory={setWorkspaceDirectory}
+              onSaveModel={() => void saveModelConfig()}
+              onSaveWorkspace={() => void saveWorkspace()}
+            />
+          )}
+        </main>
+      </div>
     </div>
   );
 }
@@ -517,30 +522,31 @@ function taskSoilInputFromAttachments(attachments: readonly ContextAttachment[])
       kind: attachment.kind,
       summary: attachment.summary,
     })),
-    permissionBoundaryRefs: [...new Set(ready.flatMap((attachment) => attachment.permissionRefs))],
+    permissionBoundaryRefs: Array.from(new Set(ready.flatMap((attachment) => attachment.permissionRefs))),
   };
 }
 
 function uniqueAttachments(attachments: readonly ContextAttachment[]): readonly ContextAttachment[] {
-  const byRef = new Map<string, ContextAttachment>();
+  const seen = new Set<string>();
+  const result: ContextAttachment[] = [];
   for (const attachment of attachments) {
-    byRef.set(`${attachment.kind}:${attachment.ref}`, attachment);
+    const key = `${attachment.kind}:${attachment.ref}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(attachment);
   }
-  return [...byRef.values()];
+  return result;
 }
 
-function hasInspectorContent(
-  app: AppState,
-  toolDisplays: readonly ReturnType<typeof typedToolDisplays>[number][]
-): boolean {
-  const contextAttachments = app.workSession?.contextAttachments ?? [];
-  const hasUserContext = contextAttachments.some((attachment) => attachment.kind !== "workspace" || attachment.status === "blocked");
-  return Boolean(
-    app.workSession?.pendingConfirmation !== undefined ||
-      app.workSession?.deliverable?.toolDisplays.length ||
-      app.workSession?.deliverable?.evidenceRefs.length ||
-      hasUserContext ||
-      toolDisplays.length ||
-      app.events.some((event) => event.visibility !== "debug" && (event.type.startsWith("tool.") || event.type === "confirmation.needed"))
-  );
+function startSkillChat(
+  skill: SkillDefinition,
+  setScreen: (screen: PanelScreen) => void,
+  setGoal: (goal: string) => void
+): void {
+  setScreen("chat");
+  setGoal(`使用「${skill.name}」技能：`);
+}
+
+function normalizeVisibleAiMode(mode: "none" | "fake" | "openai-compatible" | undefined): "none" | "openai-compatible" {
+  return mode === "none" ? "none" : "openai-compatible";
 }

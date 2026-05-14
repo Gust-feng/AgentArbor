@@ -1,5 +1,5 @@
-import React from "react";
-import { TASK_EXAMPLES } from "../text";
+import React, { useState } from "react";
+import { ArrowUp, Paperclip } from "lucide-react";
 import type { BasicAgentRun, ContextAttachment } from "../types";
 import { terminalStatuses } from "../ui-state";
 
@@ -16,9 +16,6 @@ export function Composer(props: {
   readonly value: string;
   readonly onChange: (value: string) => void;
   readonly runMode: "agent" | "deep";
-  readonly onRunModeChange: (mode: "agent" | "deep") => void;
-  readonly aiMode: "none" | "fake" | "openai-compatible";
-  readonly onAiModeChange: (mode: "none" | "fake" | "openai-compatible") => void;
   readonly attachments: readonly ContextAttachment[];
   readonly attachmentKind: ContextAttachment["kind"];
   readonly attachmentValue: string;
@@ -31,106 +28,105 @@ export function Composer(props: {
   readonly onSubmit: (mode: "agent" | "deep") => void;
   readonly onCancel: () => void;
 }): React.ReactElement {
+  const [focused, setFocused] = useState(false);
   const running = props.run !== undefined && !terminalStatuses.has(props.run.status);
   const canAddAttachment = props.attachmentValue.trim().length > 0;
   return (
-    <section className="composer" aria-label="任务输入">
-      <div className="command-composer-header">
-        <div>
-          <span className="eyebrow">任务与上下文</span>
-          <strong>先告诉我目标，再指出可以参考的材料。</strong>
-        </div>
-        <span className="composer-mode-note">{props.runMode === "deep" ? "深入处理" : "普通任务"}</span>
-      </div>
-      <div className="context-dock" aria-label="上下文入口">
-        <div className="context-kind-switch" aria-label="上下文类型">
-          {ATTACHMENT_KINDS.map((kind) => (
-            <button
-              type="button"
-              key={kind}
-              className={props.attachmentKind === kind ? "selected" : ""}
-              onClick={() => props.onAttachmentKindChange(kind)}
-            >
-              {ATTACHMENT_KIND_LABELS[kind]}
-            </button>
-          ))}
-        </div>
-        <div className="context-add-row">
-          <input
-            value={props.attachmentValue}
-            onChange={(event) => props.onAttachmentValueChange(event.target.value)}
-            placeholder={attachmentPlaceholder(props.attachmentKind)}
-          />
-          <button type="button" disabled={!canAddAttachment} onClick={props.onAddAttachment}>添加上下文</button>
-        </div>
-        {props.attachments.length > 0 && (
-          <div className="attachment-list compact">
-            {props.attachments.map((attachment) => (
-              <article className={`attachment-chip ${attachment.status}`} key={attachment.attachmentId}>
-                <div>
-                  <strong>{attachment.title}</strong>
-                  <small>{attachment.summary}</small>
-                </div>
-                <button type="button" aria-label={`移除 ${attachment.title}`} onClick={() => props.onRemoveAttachment(attachment.attachmentId)}>移除</button>
-              </article>
-            ))}
+    <section className="chat-composer" aria-label="任务输入">
+      <div className="chat-composer-inner">
+        <div className={focused ? "chat-input-card focused" : "chat-input-card"}>
+          {props.attachments.length > 0 && (
+            <div className="grid grid-cols-1 gap-2 px-3 pt-3">
+              {props.attachments.map((attachment) => (
+                <article
+                  className={`flex items-center justify-between gap-3 rounded-lg border px-3 py-2 ${
+                    attachment.status === "blocked" ? "border-[#FDE68A] bg-[#FFFBEB]" : "border-[#E5E7EB] bg-[#F9FAFB]"
+                  }`}
+                  key={attachment.attachmentId}
+                >
+                  <div className="min-w-0">
+                    <strong className="block truncate text-xs text-[#374151]">{attachment.title}</strong>
+                    <small className="block truncate text-xs text-[#9CA3AF]">{attachment.summary}</small>
+                  </div>
+                  <button
+                    type="button"
+                    className="h-6 px-2 rounded-md text-xs text-[#9CA3AF] hover:bg-[#F3F4F6] hover:text-[#374151] transition-colors"
+                    aria-label={`移除 ${attachment.title}`}
+                    onClick={() => props.onRemoveAttachment(attachment.attachmentId)}
+                  >
+                    移除
+                  </button>
+                </article>
+              ))}
+            </div>
+          )}
+          <div className="px-4 pt-3.5 pb-2">
+            <textarea
+              value={props.value}
+              onChange={(event) => props.onChange(event.target.value)}
+              onFocus={() => setFocused(true)}
+              onBlur={() => setFocused(false)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault();
+                  props.onSubmit(props.runMode);
+                }
+              }}
+              placeholder="随便问点什么…"
+              rows={2}
+              className="chat-input-text"
+            />
           </div>
-        )}
-      </div>
-      <textarea
-        value={props.value}
-        onChange={(event) => props.onChange(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === "Enter" && !event.shiftKey) {
-            event.preventDefault();
-            props.onSubmit(props.runMode);
-          }
-        }}
-        placeholder="问任何问题，或交给我一个任务"
-        rows={3}
-      />
-      <div className="task-examples" aria-label="常见任务示例">
-        {TASK_EXAMPLES.map((example) => (
-          <button type="button" key={example} onClick={() => props.onChange(example)}>
-            {example}
-          </button>
-        ))}
-      </div>
-      <div className="composer-controls">
-        {running && <button type="button" onClick={props.onCancel}>取消</button>}
-        <button type="button" className="primary" disabled={props.busy || props.value.trim().length === 0} onClick={() => props.onSubmit(props.runMode)}>
-          {props.busy ? "启动中" : "开始任务"}
-        </button>
-      </div>
-      <details className="advanced-panel">
-        <summary>高级设置</summary>
-        <div className="advanced-form">
-          <label>
-            <span>处理方式</span>
-            <select value={props.runMode} onChange={(event) => props.onRunModeChange(event.target.value === "deep" ? "deep" : "agent")}>
-              <option value="agent">普通任务</option>
-              <option value="deep">深入处理</option>
-            </select>
-          </label>
-          <label>
-            <span>模型模式</span>
-            <select value={props.aiMode} onChange={(event) => props.onAiModeChange(event.target.value as "none" | "fake" | "openai-compatible")}>
-              <option value="openai-compatible">真实模型</option>
-              <option value="fake">测试模型</option>
-              <option value="none">停用模型</option>
-            </select>
-          </label>
-          <p className="mode-hint">
-            普通任务适合问答、阅读上下文和轻量工具任务；深入处理只在你明确需要多步分析时使用。
-          </p>
+          <div className="flex items-end justify-between px-3 pb-2.5 gap-3">
+            <div className="flex items-center gap-1 min-w-0">
+              <details className="relative">
+                <summary className="list-none w-7 h-7 rounded-lg flex items-center justify-center text-[#C4C4CE] hover:bg-[#F3F4F6] hover:text-[#9CA3AF] transition-colors cursor-pointer">
+                  <Paperclip size={13} />
+                </summary>
+                <div className="absolute left-0 bottom-9 z-30 w-[min(560px,calc(100vw-96px))] rounded-xl border border-[#E5E7EB] bg-white shadow-xl p-3 flex flex-col gap-3">
+                  <div className="flex flex-wrap gap-1.5" aria-label="上下文类型">
+                    {ATTACHMENT_KINDS.map((kind) => (
+                      <button
+                        type="button"
+                        key={kind}
+                        className={`h-7 px-3 rounded-lg text-xs transition-colors ${
+                          props.attachmentKind === kind
+                            ? "bg-[#111827] text-white"
+                            : "border border-[#E5E7EB] text-[#6B7280] hover:bg-[#F3F4F6]"
+                        }`}
+                        onClick={() => props.onAttachmentKindChange(kind)}
+                      >
+                        {ATTACHMENT_KIND_LABELS[kind]}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
+                    <input
+                      value={props.attachmentValue}
+                      onChange={(event) => props.onAttachmentValueChange(event.target.value)}
+                      placeholder={attachmentPlaceholder(props.attachmentKind)}
+                      className="h-8 px-3 rounded-lg border border-[#E5E7EB] bg-[#F9FAFB] text-sm outline-none"
+                    />
+                    <button type="button" className="h-8 px-3 rounded-lg bg-[#111827] text-white text-xs disabled:opacity-40" disabled={!canAddAttachment} onClick={props.onAddAttachment}>添加</button>
+                  </div>
+                </div>
+              </details>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              {running && <button type="button" className="h-8 px-3 rounded-lg text-xs text-[#6B7280] hover:bg-[#F3F4F6]" onClick={props.onCancel}>取消</button>}
+              <button type="button" className="w-8 h-8 rounded-xl bg-[#111827] text-white flex items-center justify-center hover:bg-[#1F2937] active:scale-95 transition-all shadow-sm disabled:opacity-40 disabled:active:scale-100" disabled={props.busy || props.value.trim().length === 0} onClick={() => props.onSubmit(props.runMode)} aria-label="发送">
+                {props.busy ? "..." : <ArrowUp size={15} />}
+              </button>
+            </div>
+          </div>
         </div>
-      </details>
+      </div>
     </section>
   );
 }
 
 function attachmentPlaceholder(kind: ContextAttachment["kind"]): string {
-  if (kind === "web") return "https://example.com/page";
+  if (kind === "web") return "输入网页地址";
   if (kind === "workspace") return ".";
   if (kind === "project") return "相对当前工作区的文件夹路径";
   return "相对当前工作区的文件路径";

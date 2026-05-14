@@ -17,52 +17,52 @@ export function RightInspector(props: {
   return (
     <aside className="right-inspector" aria-label="工作上下文">
       {pendingConfirmation !== undefined && (
-        <section>
+        <section className="flex flex-col gap-2">
           <h2>待确认</h2>
-          <article className="mini-card warning">
-            <strong>{pendingConfirmation.title}</strong>
-            <p>{compact("actionSummary" in pendingConfirmation ? pendingConfirmation.actionSummary : pendingConfirmation.question, 180)}</p>
+          <article className="rounded-xl border border-[#FDE68A] bg-[#FFFBEB] px-3 py-2.5 flex flex-col gap-1.5">
+            <strong className="text-sm text-[#111827]">{pendingConfirmation.title}</strong>
+            <p className="text-sm text-[#6B7280] leading-relaxed">{compact("actionSummary" in pendingConfirmation ? pendingConfirmation.actionSummary : pendingConfirmation.question, 180)}</p>
           </article>
         </section>
       )}
-      <section>
+      <section className="flex flex-col gap-2">
         <h2>上下文与文件</h2>
         {ledgerEntries.length > 0 ? (
           ledgerEntries.slice(0, 8).map((entry) => (
-            <article className={`mini-card ${entry.status}`} key={entry.entryId}>
-              <strong>{entry.title}</strong>
-              <p>{compact(entry.summary, 160)}</p>
+            <article className={`rounded-xl border px-3 py-2.5 flex flex-col gap-1.5 ${entry.status === "blocked" ? "border-[#FDE68A] bg-[#FFFBEB]" : "border-[#E5E7EB] bg-white"}`} key={entry.entryId}>
+              <strong className="text-sm text-[#111827]">{entry.title}</strong>
+              <p className="text-sm text-[#6B7280] leading-relaxed">{compact(entry.summary, 160)}</p>
             </article>
           ))
         ) : attachments.length > 0 ? (
           attachments.slice(0, 6).map((attachment) => (
-            <article className="mini-card" key={attachment.attachmentId}>
-              <strong>{attachment.title}</strong>
-              <p>{compact(attachment.summary, 160)}</p>
+            <article className="rounded-xl border border-[#E5E7EB] bg-white px-3 py-2.5 flex flex-col gap-1.5" key={attachment.attachmentId}>
+              <strong className="text-sm text-[#111827]">{attachment.title}</strong>
+              <p className="text-sm text-[#6B7280] leading-relaxed">{compact(attachment.summary, 160)}</p>
             </article>
           ))
         ) : contextItems.length === 0 ? (
-          <p className="muted">当前没有额外上下文。</p>
+          <p className="text-sm text-[#9CA3AF] px-1">当前没有额外上下文。</p>
         ) : (
           contextItems.slice(0, 6).map((item) => (
-            <article className="mini-card" key={item.itemId}>
-              <strong>{contextItemLabel(item.sourceKind)}</strong>
-              <p>{compact(item.summary, 160)}</p>
+            <article className="rounded-xl border border-[#E5E7EB] bg-white px-3 py-2.5 flex flex-col gap-1.5" key={item.itemId}>
+              <strong className="text-sm text-[#111827]">{contextItemLabel(item.sourceKind)}</strong>
+              <p className="text-sm text-[#6B7280] leading-relaxed">{compact(item.summary, 160)}</p>
             </article>
           ))
         )}
       </section>
-      <section>
+      <section className="flex flex-col gap-2">
         <h2>证据与资料</h2>
         {toolDisplays.length === 0 ? (
-          <p className="muted">读取文件、网页或执行操作后，会在这里显示可引用的摘要。</p>
+          <p className="text-sm text-[#9CA3AF] px-1">读取文件、网页或执行操作后，会在这里显示可引用的摘要。</p>
         ) : (
           toolDisplays.map((display, index) => <ToolDisplayCard display={display} key={`${display.kind}:${index}`} />)
         )}
       </section>
-      <section>
+      <section className="flex flex-col gap-2">
         <h2>权限</h2>
-        <p className="muted">{props.workSession?.safetySummary.summary ?? (props.run?.requiresUserAction ? "这次任务需要你处理确认或补充信息。" : "这里只展示权限说明和引用，不显示原始输出。")}</p>
+        <p className="text-sm text-[#9CA3AF] leading-relaxed px-1">{props.workSession?.safetySummary.summary ?? (props.run?.requiresUserAction ? "这次任务需要你处理确认或补充信息。" : "这里只展示权限说明和引用，不显示原始输出。")}</p>
       </section>
     </aside>
   );
@@ -71,14 +71,14 @@ export function RightInspector(props: {
 function ToolDisplayCard({ display }: { readonly display: ToolDisplayProjection }): React.ReactElement {
   if (display.kind === "search_results") {
     return (
-      <article className="mini-card">
-        <strong>搜索结果</strong>
-        {display.query && <p>{display.query}</p>}
-        <ul>
+      <article className="rounded-xl border border-[#E5E7EB] bg-white px-3 py-2.5 flex flex-col gap-1.5">
+        <strong className="text-sm text-[#111827]">搜索结果</strong>
+        {display.query && <p className="text-sm text-[#6B7280]">{display.query}</p>}
+        <ul className="m-0 pl-5 text-sm text-[#6B7280] flex flex-col gap-2">
           {display.results.slice(0, 3).map((result, index) => (
             <li key={`${result.url ?? result.title}:${index}`}>
               {result.url ? <a href={result.url} target="_blank" rel="noreferrer">{result.title}</a> : result.title}
-              {(result.summary ?? result.snippet) && <small>{result.summary ?? result.snippet}</small>}
+              {(result.summary ?? result.snippet) && <small className="block text-xs text-[#9CA3AF] mt-0.5">{result.summary ?? result.snippet}</small>}
             </li>
           ))}
         </ul>
@@ -87,22 +87,22 @@ function ToolDisplayCard({ display }: { readonly display: ToolDisplayProjection 
   }
   if (display.kind === "command_summary") {
     return (
-      <article className="mini-card">
-        <strong>命令结果</strong>
-        {display.command && <p>{display.command}</p>}
-        {display.outputSummary && <small>{display.outputSummary}</small>}
-        {display.errorSummary && <small>{display.errorSummary}</small>}
+      <article className="rounded-xl border border-[#E5E7EB] bg-white px-3 py-2.5 flex flex-col gap-1.5">
+        <strong className="text-sm text-[#111827]">命令结果</strong>
+        {display.command && <p className="text-sm text-[#6B7280]">{display.command}</p>}
+        {display.outputSummary && <small className="text-xs text-[#9CA3AF]">{display.outputSummary}</small>}
+        {display.errorSummary && <small className="text-xs text-[#9CA3AF]">{display.errorSummary}</small>}
       </article>
     );
   }
   return (
-    <article className="mini-card">
-      <strong>{toolDisplayTitle(display.kind)}</strong>
-      {"summary" in display && display.summary && <p>{display.summary}</p>}
-      {"text" in display && display.text && <p>{display.text}</p>}
-      {"preview" in display && display.preview && <pre>{display.preview}</pre>}
+    <article className="rounded-xl border border-[#E5E7EB] bg-white px-3 py-2.5 flex flex-col gap-1.5">
+      <strong className="text-sm text-[#111827]">{toolDisplayTitle(display.kind)}</strong>
+      {"summary" in display && display.summary && <p className="text-sm text-[#6B7280]">{display.summary}</p>}
+      {"text" in display && display.text && <p className="text-sm text-[#6B7280]">{display.text}</p>}
+      {"preview" in display && display.preview && <pre className="max-h-[220px] overflow-auto rounded-lg bg-[#F9FAFB] p-2 text-xs text-[#374151] whitespace-pre-wrap">{display.preview}</pre>}
       {"items" in display && display.items && (
-        <ul>{display.items.slice(0, 6).map((item, index) => <li key={`${item}:${index}`}>{item}</li>)}</ul>
+        <ul className="m-0 pl-5 text-sm text-[#6B7280]">{display.items.slice(0, 6).map((item, index) => <li key={`${item}:${index}`}>{item}</li>)}</ul>
       )}
     </article>
   );

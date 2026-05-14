@@ -684,7 +684,7 @@ function runStartedSummary(
   if (routeDecision === undefined) {
     return desktopMode === "deep"
       ? "已进入深度模式，会运行地下组织做多路探索、父层综合和方向收束。"
-      : "桌面 Root Agent 已接手，会判断直接回答、读取授权上下文或请求确认。";
+      : "桌面助手已接手，会判断直接回答、读取授权上下文或请求确认。";
   }
   return explainDesktopIntentDecision(routeDecision).summary;
 }
@@ -1561,17 +1561,17 @@ function createDesktopChatNote(input: NoteFactoryInput): AgentWorkNote {
     input,
     noteId: "desktop-agent",
     agentId: "desktop-agent-session",
-    agentLabel: "桌面 Root Agent",
+    agentLabel: "桌面助手",
     stage: "desktop_agent",
     status: failed ? "failed" : needsConfirmation ? "running" : completed ? "completed" : requested ? "running" : "pending",
     summary: needsConfirmation
-      ? "桌面 Root Agent 已暂停在确认边界，等待用户补充授权或材料。"
+      ? "桌面助手已暂停在确认边界，等待用户补充授权或材料。"
       : completed
-        ? "桌面 Root Agent 已完成本轮结果；没有启动地下组织或方向包。"
+        ? "桌面助手已完成本轮结果；没有启动地下组织或方向包。"
       : requested
-        ? "桌面 Root Agent 正在判断本轮处理方式。"
+        ? "桌面助手正在判断本轮处理方式。"
         : "等待用户消息。",
-    detail: "普通模式由桌面 Root Agent 直接处理，可在授权范围内调用工具；缺少权限时请求确认，深入模式只由用户显式选择。",
+    detail: "普通模式由桌面助手直接处理，可在授权范围内调用工具；缺少权限时请求确认，深入模式只由用户显式选择。",
     eventRefs,
     modelCallRefs: input.modelCalls.map((call) => call.requestId),
   });

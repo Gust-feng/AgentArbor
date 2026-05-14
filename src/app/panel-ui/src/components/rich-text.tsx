@@ -10,7 +10,7 @@ type RichTextBlock =
 export function RichText({ text }: { readonly text: string }): React.ReactElement {
   const blocks = parseRichTextBlocks(text);
   return (
-    <div className="rich-text">
+    <div className="flex flex-col gap-2 min-w-0 leading-relaxed break-words">
       {blocks.map((block, index) => renderBlock(block, index))}
     </div>
   );
@@ -169,30 +169,30 @@ function renderBlock(block: RichTextBlock, index: number): React.ReactElement {
   switch (block.type) {
     case "heading":
       return block.level === 2
-        ? <h2 key={key}>{renderInline(block.text, key)}</h2>
+        ? <h2 className="text-lg text-[#111827] leading-snug" key={key}>{renderInline(block.text, key)}</h2>
         : block.level === 3
-          ? <h3 key={key}>{renderInline(block.text, key)}</h3>
-          : <h4 key={key}>{renderInline(block.text, key)}</h4>;
+          ? <h3 className="text-base text-[#111827] leading-snug" key={key}>{renderInline(block.text, key)}</h3>
+          : <h4 className="text-sm text-[#111827] leading-snug" key={key}>{renderInline(block.text, key)}</h4>;
     case "unordered-list":
       return (
-        <ul key={key}>
+        <ul className="m-0 pl-5 flex flex-col gap-1 list-disc" key={key}>
           {block.items.map((item, itemIndex) => <li key={`${key}-${itemIndex}`}>{renderInline(item, `${key}-${itemIndex}`)}</li>)}
         </ul>
       );
     case "ordered-list":
       return (
-        <ol key={key}>
+        <ol className="m-0 pl-5 flex flex-col gap-1 list-decimal" key={key}>
           {block.items.map((item, itemIndex) => <li key={`${key}-${itemIndex}`}>{renderInline(item, `${key}-${itemIndex}`)}</li>)}
         </ol>
       );
     case "code":
       return (
-        <pre key={key} data-language={block.language}>
-          <code>{block.text}</code>
+        <pre className="max-w-full overflow-auto rounded-xl border border-[#E5E7EB] bg-[#F9FAFB] px-4 py-3 text-xs text-[#374151]" key={key} data-language={block.language}>
+          <code className="font-mono whitespace-pre">{block.text}</code>
         </pre>
       );
     case "paragraph":
-      return <p key={key}>{renderInline(block.text, key)}</p>;
+      return <p className="m-0 whitespace-pre-wrap" key={key}>{renderInline(block.text, key)}</p>;
   }
 }
 
@@ -205,7 +205,7 @@ function renderInline(text: string, keyPrefix: string): React.ReactNode[] {
     if (text.startsWith("`", cursor)) {
       const end = text.indexOf("`", cursor + 1);
       if (end > cursor + 1) {
-        nodes.push(<code key={`${keyPrefix}-code-${part}`}>{text.slice(cursor + 1, end)}</code>);
+        nodes.push(<code className="rounded bg-[#F3F4F6] px-1 py-0.5 font-mono text-[0.92em]" key={`${keyPrefix}-code-${part}`}>{text.slice(cursor + 1, end)}</code>);
         part += 1;
         cursor = end + 1;
         continue;

@@ -1,5 +1,7 @@
 import React, { useMemo, useState } from "react";
-import { Copy, Sparkles } from "lucide-react";
+import { Copy, Maximize2, RotateCcw, Sparkles, ThumbsDown, ThumbsUp } from "lucide-react";
+import { motion } from "motion/react";
+import { TASK_SUGGESTIONS } from "../text";
 import type { AgentDeliverable, BasicAgentRun, ContextAttachment, Conversation, ConversationTurn, DesktopRunDetail, DesktopWorkSession, PendingConfirmation, RunEvent } from "../types";
 import { RichText } from "./rich-text";
 
@@ -14,6 +16,8 @@ export function ConversationView(props: {
   readonly error?: string;
   readonly pendingConfirmation?: PendingConfirmation;
   readonly attachments: readonly ContextAttachment[];
+  readonly onSelectSuggestion?: (suggestion: string) => void;
+  readonly onReset?: () => void;
   readonly onDecision: (decision: "approve_once" | "deny" | "guidance", guidance?: string) => void;
   readonly confirmationBusy: boolean;
 }): React.ReactElement {
@@ -35,7 +39,7 @@ export function ConversationView(props: {
     isActiveRunStatus(props.run.status);
 
   if (turns.length === 0 && props.run === undefined && props.error === undefined) {
-    return <EmptyCommandCenter attachments={props.attachments} />;
+    return <EmptyCommandCenter attachments={props.attachments} onSelectSuggestion={props.onSelectSuggestion} />;
   }
 
   return (
@@ -46,7 +50,18 @@ export function ConversationView(props: {
         {pending !== undefined && <ConfirmationCard confirmation={pending} onDecision={props.onDecision} busy={props.confirmationBusy} />}
         {deliverable !== undefined && <DeliverableCard deliverable={deliverable} />}
         {showStatusBubble && <AssistantStatusBubble run={props.run} workSession={props.workSession} />}
-        {props.error !== undefined && <p className="error-line">{props.error}</p>}
+        {props.error !== undefined && (
+          <div className="flex flex-col gap-3">
+            <p className="error-line">{props.error}</p>
+            {props.run === undefined && props.onReset && (
+              <div className="flex gap-2">
+                <button type="button" className="h-8 px-4 rounded-lg bg-[#111827] text-white text-sm hover:bg-[#1F2937] transition-colors" onClick={props.onReset}>
+                  清除错误
+                </button>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -54,11 +69,98 @@ export function ConversationView(props: {
 
 function EmptyCommandCenter(props: {
   readonly attachments: readonly ContextAttachment[];
+  readonly onSelectSuggestion?: (suggestion: string) => void;
 }): React.ReactElement {
   return (
     <section className="chat-empty-surface" aria-label="对话空状态">
-      {props.attachments.length > 0 && <p>已添加 {props.attachments.length} 个上下文</p>}
+      <div className="command-center relative w-full">
+        <SproutPaths />
+        <motion.div
+          className="w-16 h-16 rounded-2xl bg-[#F3F4F6] border border-[#E8E9EE] flex items-center justify-center mb-6 shadow-inner"
+          initial={{ opacity: 0, scale: 0.9 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ duration: 0.45, delay: 0.1, ease: "easeOut" }}
+        >
+          <Sparkles size={24} className="text-[#9CA3AF]" />
+        </motion.div>
+        <motion.h2
+          className="text-[#111827] mb-2.5 text-center"
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5, delay: 0.2, ease: "easeOut" }}
+        >
+          在忙什么呢？
+        </motion.h2>
+        <motion.p
+          className="text-sm text-[#9CA3AF] text-center max-w-[320px] leading-relaxed mb-7"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.5, delay: 0.34 }}
+        >
+          可以随便问，也可以交给它需要查证、整理上下文和等待确认的桌面任务
+        </motion.p>
+        <motion.div
+          className="flex flex-wrap gap-2 justify-center max-w-[680px]"
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.45, delay: 0.48, ease: "easeOut" }}
+        >
+          {TASK_SUGGESTIONS.map((example) => (
+            <button
+              type="button"
+              key={example}
+              onClick={() => props.onSelectSuggestion?.(example)}
+              className="px-4 py-1.5 rounded-full text-sm text-[#6B7280] border border-[#E2E3E8] bg-white hover:bg-[#F9FAFB] hover:border-[#D1D5DB] hover:text-[#374151] transition-all"
+            >
+              {example}
+            </button>
+          ))}
+        </motion.div>
+        {props.attachments.length > 0 && (
+          <p className="mt-5 text-xs text-[#B0B2BC]">已添加 {props.attachments.length} 个上下文</p>
+        )}
+      </div>
     </section>
+  );
+}
+
+function SproutPaths(): React.ReactElement {
+  const paths = [
+    { d: "M 300 158 C 240 120 150 68 75 12", delay: 0 },
+    { d: "M 300 158 C 300 110 298 68 296 12", delay: 0.07 },
+    { d: "M 300 158 C 360 120 450 68 525 12", delay: 0.14 },
+  ];
+
+  return (
+    <div className="absolute pointer-events-none z-0 bottom-[calc(50%+16px)] left-1/2 -translate-x-1/2 w-[600px] h-[170px] max-w-[80vw] overflow-visible opacity-80">
+      <svg width="600" height="170" viewBox="0 0 600 170" overflow="visible">
+        <motion.circle
+          cx="300"
+          cy="158"
+          r="2.5"
+          fill="#F87171"
+          initial={{ scale: 0, opacity: 0 }}
+          animate={{ scale: [0, 1, 1, 0], opacity: [0, 0.55, 0.55, 0] }}
+          transition={{ duration: 1.2, delay: 1.1, times: [0, 0.08, 0.72, 1], ease: "easeInOut" }}
+        />
+        {paths.map(({ d, delay }, index) => (
+          <motion.path
+            key={index}
+            d={d}
+            stroke="#F87171"
+            strokeWidth="1"
+            fill="none"
+            strokeLinecap="round"
+            initial={{ pathLength: 0, opacity: 0 }}
+            animate={{ pathLength: [0, 0.75], opacity: [0, 0.28, 0.28, 0] }}
+            transition={{
+              pathLength: { duration: 0.55, delay: 1.2 + delay, ease: [0.25, 0.46, 0.45, 0.94] },
+              opacity: { duration: 1.1, delay: 1.2 + delay, times: [0, 0.12, 0.62, 1], ease: "easeInOut" },
+            }}
+          />
+        ))}
+      </svg>
+    </div>
   );
 }
 
@@ -102,6 +204,7 @@ function ConversationTranscript(props: {
   if (props.turns.length === 0) return null;
   return (
     <div className="flex flex-col gap-5" aria-label="对话记录">
+      <DateDivider label="当前会话" />
       {props.turns.map((turn) => turn.role === "user"
         ? <UserTurnBubble key={turn.turnId} turn={turn} />
         : <AssistantTurnBubble key={turn.turnId} turn={turn} />)}
@@ -140,9 +243,23 @@ function AssistantTurnBubble(props: { readonly turn: ConversationTurn }): React.
         </div>
         <div className="flex items-center gap-0.5 mt-2.5 opacity-0 group-hover:opacity-100 transition-opacity">
           <TurnActionButton icon={<Copy size={13} />} label="复制" onClick={() => copyToClipboard(content)} />
+          <TurnActionButton icon={<RotateCcw size={13} />} label="重新生成" />
+          <TurnActionButton icon={<Maximize2 size={13} />} label="展开" />
+          <TurnActionButton icon={<ThumbsUp size={13} />} label="有用" />
+          <TurnActionButton icon={<ThumbsDown size={13} />} label="无用" />
         </div>
       </div>
     </article>
+  );
+}
+
+function DateDivider({ label }: { readonly label: string }): React.ReactElement {
+  return (
+    <div className="flex items-center gap-3 my-1">
+      <div className="flex-1 h-px bg-[#F3F4F6]" />
+      <span className="text-[11px] text-[#D1D5DB] select-none">{label}</span>
+      <div className="flex-1 h-px bg-[#F3F4F6]" />
+    </div>
   );
 }
 

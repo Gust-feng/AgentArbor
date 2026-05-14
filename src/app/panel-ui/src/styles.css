@@ -1518,6 +1518,12 @@ a:hover {
   transition: all 0.15s ease;
 }
 
+.workspace-button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
 .workspace-button.primary {
   background: #111827;
   color: #fff;
@@ -1566,6 +1572,23 @@ a:hover {
   background: #f9fafb;
   color: #c4c4ce;
   font-size: 14px;
+}
+
+.workspace-search input {
+  width: 100%;
+  min-width: 0;
+  height: auto;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
+  color: #374151;
+  font-size: 14px;
+  outline: none;
+}
+
+.workspace-search input::placeholder {
+  color: #c4c4ce;
 }
 
 .workspace-filter-tabs {

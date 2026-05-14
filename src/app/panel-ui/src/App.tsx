@@ -1,10 +1,10 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { getJson, postJson } from "./api";
 import { Composer } from "./components/composer";
 import { ConversationView } from "./components/conversation";
 import { Sidebar } from "./components/sidebar";
 import { TopBar } from "./components/topbar";
-import { RoutinesPage, SettingsPage, SkillsPage, ToolsPage } from "./components/workspace-pages";
+import { SettingsPage, SkillsPage, ToolsPage } from "./components/workspace-pages";
 import {
   mergeEvents,
   openBasicRunStream,
@@ -28,7 +28,7 @@ import type {
 } from "./types";
 import { terminalStatuses } from "./ui-state";
 
-type PanelScreen = "chat" | "skills" | "routines" | "tools" | "settings";
+type PanelScreen = "chat" | "skills" | "tools" | "settings";
 
 type AppState = {
   readonly config?: ConfigResponse;
@@ -63,13 +63,21 @@ export function App(): React.ReactElement {
   const [attachmentKind, setAttachmentKind] = useState<ContextAttachment["kind"]>("workspace");
   const [attachmentValue, setAttachmentValue] = useState(".");
   const [confirmationBusy, setConfirmationBusy] = useState(false);
+  const [contextBusy, setContextBusy] = useState(false);
+  const [savingModel, setSavingModel] = useState(false);
+  const [savingWorkspace, setSavingWorkspace] = useState(false);
+  const [savingTools, setSavingTools] = useState(false);
+  const mountedRef = useRef(true);
   const pollTimer = useRef<number | undefined>(undefined);
   const streamRef = useRef<EventSource | undefined>(undefined);
   const currentRunId = app.run?.runId;
 
   useEffect(() => {
     void refreshBootstrap();
-    return () => stopLiveUpdates(pollTimer, streamRef);
+    return () => {
+      mountedRef.current = false;
+      stopLiveUpdates(pollTimer, streamRef);
+    };
   }, []);
 
   useEffect(() => {
@@ -116,6 +124,7 @@ export function App(): React.ReactElement {
   async function loadConversation(conversationId: string): Promise<void> {
     stopPolling(pollTimer);
     stopStream(streamRef);
+    setAttachments([]);
     const response = await getJson<{ readonly conversation: Conversation }>(`/api/conversations/${encodeURIComponent(conversationId)}`);
     const latestRunId = response.conversation.latestRunId ?? response.conversation.activeRunId;
     const detail = latestRunId === undefined ? undefined : await safeDesktopDetail(latestRunId);
@@ -136,8 +145,8 @@ export function App(): React.ReactElement {
     }
   }
 
-  async function startTask(selectedMode: "agent" | "deep"): Promise<void> {
-    const trimmed = goal.trim();
+  async function startTask(selectedMode: "agent" | "deep", explicitGoal?: string): Promise<void> {
+    const trimmed = (explicitGoal ?? goal).trim();
     if (trimmed.length === 0 || app.busy) return;
     stopPolling(pollTimer);
     stopStream(streamRef);
@@ -197,30 +206,32 @@ export function App(): React.ReactElement {
           safeWorkSession(runId),
         ]);
         lastSequence = eventsResponse.cursor.lastSequence;
-        setApp((previous) => ({
-          ...previous,
-          run: runResponse.run,
-          workSession: workSessionResponse ?? previous.workSession,
-          events: mergeEvents(previous.events, eventsResponse.events),
-        }));
+        if (mountedRef.current) {
+          setApp((previous) => ({
+            ...previous,
+            run: runResponse.run,
+            workSession: workSessionResponse ?? previous.workSession,
+            events: mergeEvents(previous.events, eventsResponse.events),
+          }));
+        }
         if (terminalStatuses.has(runResponse.run.status) || runResponse.run.status === "approval_needed" || runResponse.run.status === "needs_input") {
           const [detail, conversation] = await Promise.all([
             safeDesktopDetail(runId),
             runResponse.run.conversationId === undefined ? undefined : safeConversation(runResponse.run.conversationId),
           ]);
-          setApp((previous) => ({
-            ...previous,
-            detail,
-            conversation: conversation ?? previous.conversation,
-            workSession: workSessionResponse ?? previous.workSession,
-          }));
+            mountedRef.current && setApp((previous) => ({
+              ...previous,
+              detail,
+              conversation: conversation ?? previous.conversation,
+              workSession: workSessionResponse ?? previous.workSession,
+            }));
           if (!shouldKeepRefreshing(runResponse.run.status)) {
             stopPolling(pollTimer);
             void refreshConversations();
           }
         }
       } catch (error) {
-        setApp((previous) => ({ ...previous, error: error instanceof Error ? error.message : "刷新运行状态失败。" }));
+        mountedRef.current && setApp((previous) => ({ ...previous, error: error instanceof Error ? error.message : "刷新运行状态失败。" }));
       }
     };
     void tick();
@@ -236,19 +247,21 @@ export function App(): React.ReactElement {
         safeBasicRun(runId),
         safeWorkSession(runId),
       ]);
-      setApp((previous) => ({
-        ...previous,
-        run: run ?? previous.run,
-        workSession: workSession ?? previous.workSession,
-        events: mergeEvents(previous.events, [event]),
-      }));
+      if (mountedRef.current) {
+        setApp((previous) => ({
+          ...previous,
+          run: run ?? previous.run,
+          workSession: workSession ?? previous.workSession,
+          events: mergeEvents(previous.events, [event]),
+        }));
+      }
       if (run !== undefined && !shouldKeepRefreshing(run.status)) {
         stopStream(streamRef);
         const [detail, conversation] = await Promise.all([
           safeDesktopDetail(runId),
           run.conversationId === undefined ? undefined : safeConversation(run.conversationId),
         ]);
-        setApp((previous) => ({
+        mountedRef.current && setApp((previous) => ({
           ...previous,
           detail,
           conversation: conversation ?? previous.conversation,
@@ -330,31 +343,52 @@ export function App(): React.ReactElement {
   }
 
   async function saveModelConfig(): Promise<void> {
-    const response = await postJson<ConfigResponse>("/api/config/model-provider", {
-      baseUrl: modelForm.baseUrl,
-      model: modelForm.model,
-      apiKey: modelForm.apiKey,
-      defaultAiMode: aiMode,
-    });
-    setApp((previous) => ({ ...previous, config: response }));
-    setModelForm((previous) => ({ ...previous, apiKey: "" }));
+    setSavingModel(true);
+    try {
+      const response = await postJson<ConfigResponse>("/api/config/model-provider", {
+        baseUrl: modelForm.baseUrl,
+        model: modelForm.model,
+        apiKey: modelForm.apiKey,
+        defaultAiMode: aiMode,
+      });
+      if (mountedRef.current) {
+        setApp((previous) => ({ ...previous, config: response }));
+        setModelForm((previous) => ({ ...previous, apiKey: "" }));
+      }
+    } finally {
+      if (mountedRef.current) setSavingModel(false);
+    }
   }
 
   async function saveWorkspace(): Promise<void> {
-    const response = await postJson<{ readonly workspace: { readonly workspaceDirectory?: string } }>("/api/config/workspace", {
-      workspaceDirectory,
-    });
-    setApp((previous) => ({ ...previous, config: { ...previous.config, workspace: response.workspace } }));
+    setSavingWorkspace(true);
+    try {
+      const response = await postJson<{ readonly workspace: { readonly workspaceDirectory?: string } }>("/api/config/workspace", {
+        workspaceDirectory,
+      });
+      if (mountedRef.current) {
+        setApp((previous) => ({ ...previous, config: { ...previous.config, workspace: response.workspace } }));
+      }
+    } finally {
+      if (mountedRef.current) setSavingWorkspace(false);
+    }
   }
 
   async function saveTools(): Promise<void> {
-    const response = await postJson<ToolsResponse>("/api/config/tools/web-search", {
-      provider: toolForm.provider,
-      tavilyApiKey: toolForm.tavilyApiKey,
-      maxResults: Number(toolForm.maxResults),
-    });
-    setApp((previous) => ({ ...previous, tools: response }));
-    setToolForm((previous) => ({ ...previous, tavilyApiKey: "" }));
+    setSavingTools(true);
+    try {
+      const response = await postJson<ToolsResponse>("/api/config/tools/web-search", {
+        provider: toolForm.provider,
+        tavilyApiKey: toolForm.tavilyApiKey,
+        maxResults: Number(toolForm.maxResults),
+      });
+      if (mountedRef.current) {
+        setApp((previous) => ({ ...previous, tools: response }));
+        setToolForm((previous) => ({ ...previous, tavilyApiKey: "" }));
+      }
+    } finally {
+      if (mountedRef.current) setSavingTools(false);
+    }
   }
 
   async function updateSkill(skillId: string, enabled: boolean): Promise<void> {
@@ -365,14 +399,18 @@ export function App(): React.ReactElement {
   }
 
   async function addAttachment(): Promise<void> {
+    if (contextBusy) return;
+    setContextBusy(true);
     try {
       const response = await postJson<{ readonly attachment: ContextAttachment }>("/api/context/attachments/preview", {
         kind: attachmentKind,
         value: attachmentValue,
       });
-      setAttachments((previous) => uniqueAttachments([...previous, response.attachment]));
-      setAttachmentValue(attachmentKind === "workspace" ? "." : "");
-      setApp((previous) => ({ ...previous, error: undefined }));
+      if (mountedRef.current) {
+        setAttachments((previous) => uniqueAttachments([...previous, response.attachment]));
+        setAttachmentValue(attachmentKind === "workspace" ? "." : "");
+        setApp((previous) => ({ ...previous, error: undefined }));
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : "上下文暂时不可用。";
       const blocked: ContextAttachment = {
@@ -386,8 +424,12 @@ export function App(): React.ReactElement {
         status: "blocked",
         warning: message,
       };
-      setAttachments((previous) => uniqueAttachments([...previous, blocked]));
-      setApp((previous) => ({ ...previous, error: message }));
+      if (mountedRef.current) {
+        setAttachments((previous) => uniqueAttachments([...previous, blocked]));
+        setApp((previous) => ({ ...previous, error: message }));
+      }
+    } finally {
+      if (mountedRef.current) setContextBusy(false);
     }
   }
 
@@ -420,47 +462,51 @@ export function App(): React.ReactElement {
           screen={screen}
           sidebarCollapsed={sidebarCollapsed}
           onToggleSidebar={() => setSidebarCollapsed((value) => !value)}
-          onOpenSettings={() => setScreen("settings")}
+          conversationTitle={app.conversation?.title}
         />
         <main className="workbench-main">
           {screen === "chat" && (
-            <section className="session-surface" aria-label="工作会话">
-              <ConversationView
-                conversation={app.conversation}
-                run={app.run}
-                workSession={app.workSession}
-                events={app.events}
-                detail={app.detail}
-                error={app.error}
-                pendingConfirmation={pendingConfirmation}
-                attachments={attachments}
-                onDecision={(decision, guidance) => void decideConfirmation(decision, guidance)}
-                confirmationBusy={confirmationBusy}
-              />
-              <Composer
-                value={goal}
-                onChange={setGoal}
-                runMode={runMode}
-                attachments={attachments}
-                attachmentKind={attachmentKind}
-                attachmentValue={attachmentValue}
-                onAttachmentKindChange={(kind) => {
-                  setAttachmentKind(kind);
-                  setAttachmentValue(kind === "workspace" ? "." : "");
-                }}
-                onAttachmentValueChange={setAttachmentValue}
-                onAddAttachment={() => void addAttachment()}
-                onRemoveAttachment={removeAttachment}
-                busy={app.busy}
-                run={app.run}
-                onSubmit={(mode) => void startTask(mode)}
-                onCancel={() => void cancelRun()}
-              />
-            </section>
+            <div className="flex flex-row h-full min-h-0">
+              <section className="session-surface" aria-label="工作会话">
+                <ConversationView
+                  conversation={app.conversation}
+                  run={app.run}
+                  workSession={app.workSession}
+                  events={app.events}
+                  detail={app.detail}
+                  error={app.error}
+                  pendingConfirmation={pendingConfirmation}
+                  attachments={attachments}
+                  onSelectSuggestion={setGoal}
+                  onReset={() => setApp((previous) => ({ ...previous, error: undefined }))}
+                  onDecision={(decision, guidance) => void decideConfirmation(decision, guidance)}
+                  confirmationBusy={confirmationBusy}
+                />
+                <Composer
+                  value={goal}
+                  onChange={setGoal}
+                  runMode={runMode}
+                  attachments={attachments}
+                  attachmentKind={attachmentKind}
+                  attachmentValue={attachmentValue}
+                  onAttachmentKindChange={(kind) => {
+                    setAttachmentKind(kind);
+                    setAttachmentValue(kind === "workspace" ? "." : "");
+                  }}
+                  onAttachmentValueChange={setAttachmentValue}
+                  onAddAttachment={() => void addAttachment()}
+                  onRemoveAttachment={removeAttachment}
+                  busy={app.busy}
+                  contextBusy={contextBusy}
+                  run={app.run}
+                  onSubmit={(mode) => void startTask(mode)}
+                  onCancel={() => void cancelRun()}
+                />
+              </section>
+            </div>
           )}
           {screen === "skills" && <SkillsPage skills={app.skills} onUpdateSkill={(id, enabled) => void updateSkill(id, enabled)} onStartSkill={(skill) => startSkillChat(skill, setScreen, setGoal)} />}
-          {screen === "routines" && <RoutinesPage />}
-          {screen === "tools" && <ToolsPage tools={app.tools} toolForm={toolForm} setToolForm={setToolForm} onSaveTools={() => void saveTools()} />}
+          {screen === "tools" && <ToolsPage tools={app.tools} toolForm={toolForm} setToolForm={setToolForm} saving={savingTools} onSaveTools={() => void saveTools()} />}
           {screen === "settings" && (
             <SettingsPage
               config={app.config}
@@ -470,6 +516,8 @@ export function App(): React.ReactElement {
               setAiMode={(mode) => setAiMode(mode)}
               workspaceDirectory={workspaceDirectory}
               setWorkspaceDirectory={setWorkspaceDirectory}
+              savingModel={savingModel}
+              savingWorkspace={savingWorkspace}
               onSaveModel={() => void saveModelConfig()}
               onSaveWorkspace={() => void saveWorkspace()}
             />
@@ -543,8 +591,11 @@ function startSkillChat(
   setScreen: (screen: PanelScreen) => void,
   setGoal: (goal: string) => void
 ): void {
+  const trigger = skill.triggers?.[0]?.trim();
   setScreen("chat");
-  setGoal(`使用「${skill.name}」技能：`);
+  setGoal(trigger === undefined || trigger.length === 0
+    ? `使用「${skill.name}」处理当前任务：`
+    : `使用「${skill.name}」处理当前任务：${trigger}`);
 }
 
 function normalizeVisibleAiMode(mode: "none" | "fake" | "openai-compatible" | undefined): "none" | "openai-compatible" {

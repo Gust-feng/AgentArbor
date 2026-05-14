@@ -24,6 +24,7 @@ export function Composer(props: {
   readonly onAddAttachment: () => void;
   readonly onRemoveAttachment: (attachmentId: string) => void;
   readonly busy: boolean;
+  readonly contextBusy?: boolean;
   readonly run?: BasicAgentRun;
   readonly onSubmit: (mode: "agent" | "deep") => void;
   readonly onCancel: () => void;
@@ -107,7 +108,7 @@ export function Composer(props: {
                       placeholder={attachmentPlaceholder(props.attachmentKind)}
                       className="h-8 px-3 rounded-lg border border-[#E5E7EB] bg-[#F9FAFB] text-sm outline-none"
                     />
-                    <button type="button" className="h-8 px-3 rounded-lg bg-[#111827] text-white text-xs disabled:opacity-40" disabled={!canAddAttachment} onClick={props.onAddAttachment}>添加</button>
+                    <button type="button" className="h-8 px-3 rounded-lg bg-[#111827] text-white text-xs disabled:opacity-40" disabled={!canAddAttachment || props.contextBusy} onClick={props.onAddAttachment}>{props.contextBusy ? "添加中…" : "添加"}</button>
                   </div>
                 </div>
               </details>
@@ -126,7 +127,7 @@ export function Composer(props: {
 }
 
 function attachmentPlaceholder(kind: ContextAttachment["kind"]): string {
-  if (kind === "web") return "输入网页地址";
+  if (kind === "web") return "粘贴网页链接";
   if (kind === "workspace") return ".";
   if (kind === "project") return "相对当前工作区的文件夹路径";
   return "相对当前工作区的文件路径";

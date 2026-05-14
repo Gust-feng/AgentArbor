@@ -1,6 +1,6 @@
 import type { RunEvent, TaskStatus } from "./types";
 
-export const TASK_EXAMPLES = [
+export const TASK_SUGGESTIONS = [
   "阅读我添加的文件，整理成一份可执行的待办清单",
   "检查当前工作区，告诉我下一步最应该处理什么",
   "根据这个网页和项目上下文，写一份简短决策报告",

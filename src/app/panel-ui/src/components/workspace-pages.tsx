@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import { ChevronRight, Cpu, Database, Globe2, Plus, ShieldCheck, Wrench, Zap } from "lucide-react";
+import { ChevronRight, Cpu, Database, Globe2, Plus, Search, ShieldCheck, Wrench, Zap } from "lucide-react";
 import type { ConfigResponse, SkillDefinition, ToolCatalogItem, ToolsResponse } from "../types";
 
 type ModelForm = { readonly baseUrl: string; readonly model: string; readonly apiKey: string };
@@ -7,6 +7,7 @@ type ToolForm = { readonly provider: string; readonly tavilyApiKey: string; read
 type ButtonVariant = "primary" | "outline";
 
 const TOOL_TABS = ["全部", "已启用", "本地", "需要确认"] as const;
+const SKILL_TABS = ["全部", "已启用", "已停用"] as const;
 
 const TOOL_COPY: Record<string, { readonly title: string; readonly description: string }> = {
   browser_snapshot: {
@@ -48,15 +49,40 @@ export function SkillsPage(props: {
   readonly onUpdateSkill: (skillId: string, enabled: boolean) => void;
   readonly onStartSkill: (skill: SkillDefinition) => void;
 }): React.ReactElement {
+  const [activeTab, setActiveTab] = useState<(typeof SKILL_TABS)[number]>("全部");
+  const [query, setQuery] = useState("");
   const enabledSkills = props.skills.filter((skill) => skill.enabled);
+  const visibleSkills = props.skills.filter((skill) => {
+    if (activeTab === "已启用" && !skill.enabled) return false;
+    if (activeTab === "已停用" && skill.enabled) return false;
+    const normalizedQuery = query.trim().toLowerCase();
+    if (normalizedQuery.length === 0) return true;
+    return `${skill.name} ${skill.description}`.toLowerCase().includes(normalizedQuery);
+  });
   return (
     <section className="workspace-page" aria-label="技能">
       <div className="workspace-shell">
         <PageHeader
           title="技能"
-          subtitle="管理和配置 AI 助手的能力模块"
+          subtitle="选择一个技能，让助手进入对应工作状态"
           actions={undefined}
         />
+        <div className="workspace-filter-row">
+          <label className="workspace-search" aria-label="搜索技能">
+            <Search size={13} className="text-[#BEBFC8] shrink-0" />
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="搜索技能…"
+              className="border-0 bg-transparent p-0 h-auto text-sm outline-none"
+            />
+          </label>
+          <div className="workspace-filter-tabs ml-auto">
+            {SKILL_TABS.map((tab) => (
+              <button type="button" className={activeTab === tab ? "selected" : ""} onClick={() => setActiveTab(tab)} key={tab}>{tab}</button>
+            ))}
+          </div>
+        </div>
         {enabledSkills.length > 0 && (
           <section className="workspace-section">
             <SectionDivider label="常用技能" />
@@ -67,11 +93,11 @@ export function SkillsPage(props: {
         )}
         <section className="workspace-section">
           <SectionDivider label="全部技能" />
-          {props.skills.length === 0 ? (
+          {visibleSkills.length === 0 ? (
             <EmptyBlock>当前工作区没有发现技能。</EmptyBlock>
           ) : (
             <div className="workspace-card-grid">
-              {props.skills.map((skill) => <SkillCard skill={skill} onUpdateSkill={props.onUpdateSkill} onStartSkill={props.onStartSkill} key={skill.id} />)}
+              {visibleSkills.map((skill) => <SkillCard skill={skill} onUpdateSkill={props.onUpdateSkill} onStartSkill={props.onStartSkill} key={skill.id} />)}
             </div>
           )}
         </section>
@@ -84,6 +110,7 @@ export function ToolsPage(props: {
   readonly tools?: ToolsResponse;
   readonly toolForm: ToolForm;
   readonly setToolForm: (form: ToolForm) => void;
+  readonly saving?: boolean;
   readonly onSaveTools: () => void;
 }): React.ReactElement {
   const [activeTab, setActiveTab] = useState<(typeof TOOL_TABS)[number]>("全部");
@@ -110,6 +137,7 @@ export function ToolsPage(props: {
               tools={props.tools}
               toolForm={props.toolForm}
               setToolForm={props.setToolForm}
+              saving={props.saving}
               onSaveTools={props.onSaveTools}
             />
             {connectedTools.slice(0, 2).map((tool) => <ToolCard tool={tool} actionLabel="配置" key={`connected:${tool.name}`} />)}
@@ -131,20 +159,6 @@ export function ToolsPage(props: {
   );
 }
 
-export function RoutinesPage(): React.ReactElement {
-  return (
-    <section className="workspace-page" aria-label="例行任务">
-      <div className="workspace-shell">
-        <PageHeader
-          title="例行任务"
-          subtitle="配置定期自动执行的任务流程"
-        />
-        <EmptyBlock>当前还没有例行任务。</EmptyBlock>
-      </div>
-    </section>
-  );
-}
-
 export function SettingsPage(props: {
   readonly config?: ConfigResponse;
   readonly modelForm: ModelForm;
@@ -153,6 +167,8 @@ export function SettingsPage(props: {
   readonly setAiMode: (mode: "none" | "openai-compatible") => void;
   readonly workspaceDirectory: string;
   readonly setWorkspaceDirectory: (value: string) => void;
+  readonly savingModel?: boolean;
+  readonly savingWorkspace?: boolean;
   readonly onSaveModel: () => void;
   readonly onSaveWorkspace: () => void;
 }): React.ReactElement {
@@ -188,7 +204,7 @@ export function SettingsPage(props: {
                   <SettingRow label="运行模式" description="选择是否启用已配置的模型服务。" control={<select className="settings-input" value={props.aiMode} onChange={(event) => props.setAiMode(event.target.value as "none" | "openai-compatible")}><option value="openai-compatible">启用模型</option><option value="none">停用模型</option></select>} />
                   <SettingRow label="API Key" description="密钥只进入本地 secret store。" control={<input className="settings-input" value={props.modelForm.apiKey} onChange={(event) => props.setModelForm({ ...props.modelForm, apiKey: event.target.value })} placeholder={props.config?.config?.secretConfigured ? "已保存，留空则不修改" : "请输入密钥"} />} last />
                 </section>
-                <Button variant="primary" onClick={props.onSaveModel}>保存模型配置</Button>
+                <Button variant="primary" onClick={props.onSaveModel} disabled={props.savingModel}>{props.savingModel ? "保存中…" : "保存模型配置"}</Button>
               </>
             )}
             {activeTab === "workspace" && (
@@ -196,7 +212,7 @@ export function SettingsPage(props: {
                 <section className="settings-panel-card">
                   <SettingRow label="文件夹" description="Agent 默认使用的工作区根目录。" control={<input className="settings-input" value={props.workspaceDirectory} onChange={(event) => props.setWorkspaceDirectory(event.target.value)} />} last />
                 </section>
-                <Button variant="primary" onClick={props.onSaveWorkspace}>保存工作目录</Button>
+                <Button variant="primary" onClick={props.onSaveWorkspace} disabled={props.savingWorkspace}>{props.savingWorkspace ? "保存中…" : "保存工作目录"}</Button>
               </>
             )}
             {activeTab === "safety" && (
@@ -245,9 +261,9 @@ function SectionDivider({ label }: { readonly label: string }): React.ReactEleme
   );
 }
 
-function Button(props: { readonly variant?: ButtonVariant; readonly icon?: React.ReactNode; readonly children: React.ReactNode; readonly onClick?: () => void }): React.ReactElement {
+function Button(props: { readonly variant?: ButtonVariant; readonly icon?: React.ReactNode; readonly children: React.ReactNode; readonly onClick?: () => void; readonly disabled?: boolean }): React.ReactElement {
   return (
-    <button type="button" className={`workspace-button ${props.variant ?? "outline"}`} onClick={props.onClick}>
+    <button type="button" className={`workspace-button ${props.variant ?? "outline"}`} onClick={props.onClick} disabled={props.disabled}>
       {props.icon && <span>{props.icon}</span>}
       {props.children}
     </button>
@@ -289,7 +305,7 @@ function SkillCard(props: {
       </div>
       <div className="workspace-card-footer">
         <span className="muted-label">{props.skill.enabled ? "已启用" : "已停用"}</span>
-        <span className="muted-label">开始对话</span>
+        <span className="muted-label">用于当前对话</span>
       </div>
     </article>
   );
@@ -301,6 +317,7 @@ function WebSearchConfigCard(props: {
   readonly tools?: ToolsResponse;
   readonly toolForm: ToolForm;
   readonly setToolForm: (form: ToolForm) => void;
+  readonly saving?: boolean;
   readonly onSaveTools: () => void;
 }): React.ReactElement {
   const configured = props.tools?.tools?.webSearch?.secretConfigured === true;
@@ -324,7 +341,7 @@ function WebSearchConfigCard(props: {
       )}
       <div className="workspace-card-footer">
         <button type="button" className="workspace-inline-action" onClick={props.onToggle}>{props.configOpen ? "收起" : "配置"}</button>
-        {props.configOpen && <Button variant="primary" onClick={props.onSaveTools}>保存</Button>}
+        {props.configOpen && <Button variant="primary" onClick={props.onSaveTools} disabled={props.saving}>{props.saving ? "保存中…" : "保存"}</Button>}
       </div>
     </article>
   );

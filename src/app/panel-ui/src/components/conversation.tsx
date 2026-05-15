@@ -55,7 +55,7 @@ export function ConversationView(props: {
             <p className="error-line">{props.error}</p>
             {props.run === undefined && props.onReset && (
               <div className="flex gap-2">
-                <button type="button" className="h-8 px-4 rounded-lg bg-[#111827] text-white text-sm hover:bg-[#1F2937] transition-colors" onClick={props.onReset}>
+                <button type="button" className="h-8 px-4 rounded-lg bg-[var(--accent-strong)] text-white text-sm hover:bg-[var(--accent-hover)] transition-[background-color] duration-[var(--motion-fast-duration)] ease-[var(--motion-ease-standard)]" onClick={props.onReset}>
                   清除错误
                 </button>
               </div>
@@ -76,15 +76,15 @@ function EmptyCommandCenter(props: {
       <div className="command-center relative w-full">
         <SproutPaths />
         <motion.div
-          className="w-16 h-16 rounded-2xl bg-[#F3F4F6] border border-[#E8E9EE] flex items-center justify-center mb-6 shadow-inner"
+          className="w-16 h-16 rounded-2xl bg-[var(--surface-muted)] border border-[var(--border)] flex items-center justify-center mb-6 shadow-inner"
           initial={{ opacity: 0, scale: 0.9 }}
           animate={{ opacity: 1, scale: 1 }}
           transition={{ duration: 0.45, delay: 0.1, ease: "easeOut" }}
         >
-          <Sparkles size={24} className="text-[#9CA3AF]" />
+          <Sparkles size={24} className="text-[var(--muted)]" />
         </motion.div>
         <motion.h2
-          className="text-[#111827] mb-2.5 text-center"
+          className="text-[var(--fg)] mb-2.5 text-center"
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5, delay: 0.2, ease: "easeOut" }}
@@ -92,7 +92,7 @@ function EmptyCommandCenter(props: {
           在忙什么呢？
         </motion.h2>
         <motion.p
-          className="text-sm text-[#9CA3AF] text-center max-w-[320px] leading-relaxed mb-7"
+          className="text-sm text-[var(--muted)] text-center max-w-[320px] leading-relaxed mb-7"
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ duration: 0.5, delay: 0.34 }}
@@ -110,14 +110,14 @@ function EmptyCommandCenter(props: {
               type="button"
               key={example}
               onClick={() => props.onSelectSuggestion?.(example)}
-              className="px-4 py-1.5 rounded-full text-sm text-[#6B7280] border border-[#E2E3E8] bg-white hover:bg-[#F9FAFB] hover:border-[#D1D5DB] hover:text-[#374151] transition-all"
+              className="px-4 py-1.5 rounded-full text-sm text-[var(--muted)] border border-[var(--border)] bg-[var(--surface)] hover:bg-[var(--surface-subtle)] hover:border-[var(--border-strong)] hover:text-[var(--fg)] transition-[background-color,color,border-color] duration-[var(--motion-panel-duration)] ease-[var(--motion-ease-standard)]"
             >
               {example}
             </button>
           ))}
         </motion.div>
         {props.attachments.length > 0 && (
-          <p className="mt-5 text-xs text-[#B0B2BC]">已添加 {props.attachments.length} 个上下文</p>
+          <p className="mt-5 text-xs text-[var(--muted-faint)]">已添加 {props.attachments.length} 个上下文</p>
         )}
       </div>
     </section>

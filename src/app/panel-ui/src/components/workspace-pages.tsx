@@ -69,7 +69,7 @@ export function SkillsPage(props: {
         />
         <div className="workspace-filter-row">
           <label className="workspace-search" aria-label="搜索技能">
-            <Search size={13} className="text-[#BEBFC8] shrink-0" />
+            <Search size={13} className="text-[var(--muted-faint)] shrink-0" />
             <input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
@@ -183,7 +183,7 @@ export function SettingsPage(props: {
       <div className="settings-nav">
         <p className="settings-nav-label">设置</p>
         {tabs.map(({ id, label, icon }) => (
-          <button type="button" className={activeTab === id ? "selected" : ""} key={id} onClick={() => setActiveTab(id)}>
+          <button type="button" className={`sidebar-action ${activeTab === id ? "selected" : ""}`} key={id} onClick={() => setActiveTab(id)}>
             <span className="settings-nav-main">{icon}{label}</span>
             {activeTab === id && <ChevronRight size={13} />}
           </button>

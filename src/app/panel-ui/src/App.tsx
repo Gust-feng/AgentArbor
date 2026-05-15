@@ -459,10 +459,14 @@ export function App(): React.ReactElement {
       <div className="workbench">
         <TopBar
           run={app.run}
+          config={app.config}
           screen={screen}
           sidebarCollapsed={sidebarCollapsed}
+          inspectorOpen={false}
+          inspectorAvailable={false}
           onToggleSidebar={() => setSidebarCollapsed((value) => !value)}
-          conversationTitle={app.conversation?.title}
+          onToggleInspector={() => {}}
+          onOpenSettings={() => setScreen("settings")}
         />
         <main className="workbench-main">
           {screen === "chat" && (

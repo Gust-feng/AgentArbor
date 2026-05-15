@@ -1,93 +1,83 @@
 import React from "react";
-import { PanelLeft, Sparkles } from "lucide-react";
-import type { BasicAgentRun } from "../types";
+import { ChevronDown, PanelLeft, Sparkles } from "lucide-react";
+import { compact, STATUS_LABELS } from "../text";
+import type { BasicAgentRun, ConfigResponse } from "../types";
 
 type PanelScreen = "chat" | "skills" | "tools" | "settings";
 
-const SCREEN_LABELS: Record<PanelScreen, string> = {
-  chat: "对话",
-  skills: "技能",
-  tools: "工具",
-  settings: "设置",
-};
-
 export function TopBar(props: {
   readonly run?: BasicAgentRun;
+  readonly config?: ConfigResponse;
   readonly screen: PanelScreen;
   readonly sidebarCollapsed: boolean;
+  readonly inspectorOpen: boolean;
+  readonly inspectorAvailable: boolean;
   readonly onToggleSidebar: () => void;
-  readonly conversationTitle?: string;
+  readonly onToggleInspector: () => void;
+  readonly onOpenSettings: () => void;
 }): React.ReactElement {
+  const status = props.run?.status ?? "queued";
+  const workspace = props.config?.workspace?.workspaceDirectory;
   const isChat = props.screen === "chat";
-  const showRunStatus = isChat && props.run !== undefined && shouldShowRunStatus(props.run.status);
-
   return (
-    <header className="h-16 bg-white border-b border-[#EAEBF0] flex items-center px-4 gap-4 shrink-0 z-10">
-      {/* Sidebar toggle */}
+    <header className="topbar">
       <button
         type="button"
+        aria-pressed={props.sidebarCollapsed}
+        className={`w-9 h-9 rounded-xl flex items-center justify-center transition-[background-color,color,box-shadow] duration-[var(--motion-fast-duration)] ease-[var(--motion-ease-standard)] ${
+          props.sidebarCollapsed
+            ? "bg-[var(--accent-soft)] text-[var(--accent-strong)] shadow-sm hover:bg-[var(--accent-border-soft)]"
+            : "text-[var(--muted)] hover:bg-[var(--surface-subtle)] hover:text-[var(--fg)]"
+        }`}
+        aria-label={props.sidebarCollapsed ? "展开侧边栏" : "收起侧边栏"}
         onClick={props.onToggleSidebar}
-        className="w-9 h-9 rounded-xl flex items-center justify-center text-[#9CA3AF] hover:bg-[#F3F4F6] hover:text-[#374151] transition-colors"
-        aria-label={props.sidebarCollapsed ? "展开侧栏" : "收起侧栏"}
       >
-        <PanelLeft size={16} />
+        <PanelLeft
+          size={16}
+          className={`topbar-toggle-icon ${props.sidebarCollapsed ? "rotate-180" : "rotate-0"}`}
+        />
       </button>
-
-      {/* Product identity */}
       <div className="flex items-center gap-2.5">
-        <div className="w-7 h-7 rounded-xl bg-[#111827] flex items-center justify-center shadow-sm">
-          <Sparkles size={13} className="text-white/80" />
+        <div className="w-7 h-7 rounded-xl bg-[var(--surface-subtle)] border border-[var(--border)] flex items-center justify-center">
+          <Sparkles size={12} className="text-[var(--muted)]" />
         </div>
-        <span className="text-sm text-[#111827]">AgentArbor</span>
+        <span className="text-sm text-[var(--fg)]">AgentArbor</span>
       </div>
-
-      {/* Separator */}
-      <div className="w-px h-5 bg-[#EAEBF0]" />
-
-      {/* Breadcrumb */}
+      <div className="w-px h-5 bg-[var(--border)]" />
       <div className="flex items-center gap-1.5 text-sm min-w-0">
-        <span className="text-[#374151] truncate">{SCREEN_LABELS[props.screen]}</span>
-        {isChat && props.conversationTitle && (
+        <span className="text-[var(--fg)]">{topbarTitle(props.screen, props.run)}</span>
+        {workspace && (
           <>
-            <span className="text-[#D1D5DB]">/</span>
-            <span className="text-[#6B7280] truncate">{props.conversationTitle}</span>
+            <span className="text-[var(--border)] hidden lg:inline">/</span>
+            <span className="text-[var(--muted)] truncate max-w-[360px] hidden lg:inline">{compact(workspace, 54)}</span>
           </>
         )}
       </div>
-
       <div className="flex-1" />
-
-      {/* Run status */}
-      {showRunStatus && (
-        <div className="flex items-center gap-2 h-8 px-3.5 rounded-xl border border-[#E2E3E8] bg-white text-[#6B7280] text-xs">
-          <div className="w-1.5 h-1.5 rounded-full bg-[#10B981]" />
-          <span>{runStatusLabel(props.run.status)}</span>
+      {isChat && (
+        <div className="flex items-center gap-2 h-8 px-3.5 rounded-xl border border-[var(--border)] bg-[var(--surface)] text-[var(--muted)] text-xs transition-[background-color,color,border-color] duration-[var(--motion-fast-duration)] ease-[var(--motion-ease-standard)]">
+          <div className="w-1.5 h-1.5 rounded-full bg-[var(--status-success)]" />
+          <span>{props.run === undefined ? "待开始" : STATUS_LABELS[status]}</span>
+          <ChevronDown size={11} />
         </div>
       )}
-
+      <div className="flex items-center gap-1">
+        <button
+          type="button"
+          className="w-8 h-8 rounded-full bg-[var(--surface-subtle)] border border-[var(--border)] flex items-center justify-center transition-[background-color,color] duration-[var(--motion-fast-duration)] ease-[var(--motion-ease-standard)]"
+          aria-label="打开设置"
+          onClick={props.onOpenSettings}
+        >
+          <div className="w-4 h-4 rounded-full bg-[var(--surface-muted)]" />
+        </button>
+      </div>
     </header>
   );
 }
 
-function shouldShowRunStatus(status: BasicAgentRun["status"]): boolean {
-  return (
-    status === "queued" ||
-    status === "planning" ||
-    status === "running" ||
-    status === "approval_needed" ||
-    status === "needs_input" ||
-    status === "failed" ||
-    status === "blocked"
-  );
-}
-
-function runStatusLabel(status: BasicAgentRun["status"]): string {
-  if (status === "running") return "处理中";
-  if (status === "planning") return "准备中";
-  if (status === "queued") return "排队中";
-  if (status === "approval_needed") return "待确认";
-  if (status === "needs_input") return "需要补充";
-  if (status === "failed") return "未完成";
-  if (status === "blocked") return "需要处理";
-  return status;
+function topbarTitle(screen: PanelScreen, run: BasicAgentRun | undefined): string {
+  if (screen === "skills") return "技能";
+  if (screen === "tools") return "工具";
+  if (screen === "settings") return "设置";
+  return run?.title ?? "对话";
 }

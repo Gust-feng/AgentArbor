@@ -55,6 +55,10 @@ export type BasicAgentRunTerminalPayload = {
     readonly code: string;
     readonly message: string;
   };
+  readonly summary?: UndergroundDemoSummary;
+  readonly observation?: unknown;
+  readonly agentRunTree?: AgentRunTree;
+  readonly canvas?: BasicAgentCanvasProjection;
 };
 
 export type BasicAgentRunConfirmationDecisionRecord = ConfirmationDecision;

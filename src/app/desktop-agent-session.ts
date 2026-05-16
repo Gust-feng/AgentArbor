@@ -23,7 +23,7 @@ import type { DesktopAgentSkillContext } from "./desktop-agent-prompts.js";
 import { createTaskSoilFromDesktopInput, type DesktopTaskSoilInput } from "./task-soil-workspace.js";
 import { sanitizeAssistantVisibleText } from "./visible-text-safety.js";
 
-export type DesktopAgentSessionStatus = "completed" | "confirmation_needed" | "stopped" | "failed";
+export type DesktopAgentSessionStatus = "completed" | "confirmation_needed" | "stopped" | "failed" | "paused";
 
 export type DesktopAgentActivity = {
   readonly activityId: string;
@@ -219,7 +219,7 @@ export async function runDesktopAgentSession(
         taskSoil,
         platform: options.platform,
       });
-  const turn = await turnRuntime.execute({
+  const turn = await turnRuntime.executeAutonomous({
     policy: {
       allowModel: true,
       allowedTools,
@@ -242,7 +242,7 @@ export async function runDesktopAgentSession(
     inputRefs: contextPack.inputRefs,
     sanitizedMessages: contextPack.messages,
     constraintRefs: constraintRefsFromTaskSoil(taskSoil),
-    toolChoice: toolCenter === undefined ? "none" : "auto",
+    toolChoice: "auto",
     requestedAt: nowIso(),
     abortSignal: options.abortSignal,
   });
@@ -273,6 +273,21 @@ function desktopAgentResultFromTurn(input: {
   const toolCallRefs = refsFromToolCalls(input.turn.toolCalls);
   const recoverableBudgetStop = isRecoverableBudgetStop(input.turn);
   const waitingForApproval = input.turn.status === "approval_required" && input.turn.pendingApproval !== undefined;
+  if (input.turn.status === "paused" && input.turn.stoppedReason === "out_of_fuel") {
+    return {
+      status: "paused",
+      runtime: input.runtime,
+      traceId: input.traceId,
+      goalId: input.goalId,
+      taskSoil: input.taskSoil,
+      contextPack: safeContextPack(input.contextPack),
+      failureMessage: "Desktop Agent paused after exhausting autonomous loop fuel; it did not claim the task was complete.",
+      modelCallRefs,
+      toolCallRefs,
+      activity: activityFromEventEntries(input.runtime.eventLog.list(), "paused"),
+      eventTypes: input.runtime.eventLog.types(),
+    };
+  }
   if (
     (input.turn.status !== "completed" && !waitingForApproval && !recoverableBudgetStop) ||
     input.turn.finalOutput === undefined ||
@@ -293,8 +308,11 @@ function desktopAgentResultFromTurn(input: {
     };
   }
 
-  const answer = parseAnswer(input.turn.finalOutput, input.turn.toolCalls, input.turn.stoppedReason);
-  const evidenceRefs = evidenceRefsFromToolCalls(input.turn.toolCalls);
+  const answer = parseAnswer(input.turn.finalOutput, input.turn.toolCalls, input.turn.finishTask);
+  const evidenceRefs = unique([
+    ...evidenceRefsFromToolCalls(input.turn.toolCalls),
+    ...(input.turn.finishTask?.evidenceRefs ?? []),
+  ]).slice(0, 12);
   const pendingConfirmation = pendingConfirmationFrom({
     goal: input.goal,
     taskSoil: input.taskSoil,
@@ -345,7 +363,7 @@ function desktopAgentResultFromTurn(input: {
         : {
             confirmationId: input.turn.pendingApproval.confirmationId,
             resume: async (resumeInput) => {
-              const resumed = await input.turnRuntime.resume({
+              const resumed = await input.turnRuntime.resumeAutonomous({
                 pendingApproval: input.turn.pendingApproval!,
                 approvedConfirmationIds: resumeInput.approvedConfirmationIds,
                 abortSignal: resumeInput.abortSignal,
@@ -424,7 +442,17 @@ function visibleAnswerText(response: ModelResponse): string {
       : "";
 }
 
-function parseAnswer(response: ModelResponse, toolCalls: readonly ToolCallResult[], stoppedReason?: string): string {
+function parseAnswer(
+  response: ModelResponse,
+  toolCalls: readonly ToolCallResult[],
+  finishTask?: AgentTurnRuntimeResult["finishTask"]
+): string {
+  if (finishTask !== undefined) {
+    const visible = sanitizeVisibleAssistantAnswer(finishTask.answer);
+    return visible.length > 0
+      ? safeText(visible, 12000)
+      : "我识别到这条消息需要更多上下文或授权，但当前回合没有形成可展示正文。";
+  }
   const text =
     typeof response.textOutput === "string" && response.textOutput.trim().length > 0
       ? response.textOutput.trim()
@@ -438,11 +466,8 @@ function parseAnswer(response: ModelResponse, toolCalls: readonly ToolCallResult
     return "我现在没有形成可展示的回答。";
   }
   const visible = sanitizeVisibleAssistantAnswer(text);
-  const suffix = stoppedReason === "max_model_rounds" || stoppedReason === "max_tool_rounds"
-    ? "\n\n注：本轮已经到达工具/模型轮次上限；我已根据已获得的材料给出当前结果。"
-    : "";
   return visible.length > 0
-    ? safeText(`${visible}${suffix}`, 12000)
+    ? safeText(visible, 12000)
     : "我识别到这条消息需要更多上下文或授权，但当前回合没有形成可展示正文。";
 }
 
@@ -852,6 +877,19 @@ function terminalActivity(
       title: "运行已停止",
       summary: "AI 运行时未配置，本轮没有开始模型工作。",
       status: "failed",
+      createdAt,
+      sourceRefs: lastEntry === undefined ? [] : [`event:${lastEntry.message.id}`],
+      modelCallRefs: [],
+      toolCallRefs: [],
+    };
+  }
+  if (status === "paused") {
+    return {
+      activityId,
+      type: "stopped",
+      title: "运行已暂停",
+      summary: "本轮 Agent 已暂停，尚未主动声明任务完成。",
+      status: "pending",
       createdAt,
       sourceRefs: lastEntry === undefined ? [] : [`event:${lastEntry.message.id}`],
       modelCallRefs: [],

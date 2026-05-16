@@ -79,19 +79,7 @@ test("Desktop Agent Session derives model-visible tools from capability snapshot
   const channel: IntelligenceChannel = {
     async request(request) {
       capturedRequest = request;
-      return {
-        responseId: "model-response-capability-policy",
-        requestId: request.requestId,
-        providerId: "test-provider",
-        providerKind: "fake",
-        protocolKind: "openai_compatible_chat_completions",
-        model: "test-model",
-        status: "completed",
-        outputKind: "explanation",
-        textOutput: "我会只使用本轮授权的工具。",
-        validation: { status: "passed", checkedAt: new Date(0).toISOString(), issues: [] },
-        completedAt: new Date(0).toISOString(),
-      };
+      return finishTaskResponse(request, "我会只使用本轮授权的工具。");
     },
     validateResponse() {
       return { status: "passed", checkedAt: new Date(0).toISOString(), issues: [] };
@@ -112,7 +100,7 @@ test("Desktop Agent Session derives model-visible tools from capability snapshot
   });
 
   assert.equal(result.status, "completed");
-  assert.deepEqual(capturedRequest?.tools?.map((tool) => tool.name), ["read"]);
+  assert.deepEqual(capturedRequest?.tools?.map((tool) => tool.name), ["read", "finish_task"]);
 });
 
 test("Desktop Agent Session projects tool failures without leaking raw output", async () => {
@@ -130,7 +118,7 @@ test("Desktop Agent Session projects tool failures without leaking raw output", 
 });
 
 
-test("Desktop Agent Session keeps a final answer when a previous tool failed and the model stops at round limit", async () => {
+test("Desktop Agent Session pauses when tool fuel is exhausted instead of inventing a final answer", async () => {
   const toolCenter = new MixedToolCenter();
   const channel = new MixedToolLimitChannel();
   const result = await runDesktopAgentSession("展示下你的能力", {
@@ -139,11 +127,11 @@ test("Desktop Agent Session keeps a final answer when a previous tool failed and
     createToolCenter: () => toolCenter,
   });
 
-  assert.equal(result.status, "completed");
-  assert.equal(result.answer?.answer.includes("我已经检查了工作区"), true);
-  assert.equal(result.answer?.answer.includes("轮次上限"), true);
+  assert.equal(result.status, "paused");
+  assert.equal(result.answer, undefined);
+  assert.equal(result.failureMessage?.includes("paused"), true);
   assert.equal(result.eventTypes.includes("tool.failed"), true);
-  assert.equal(result.answer?.resultBlocks.some((block) => block.kind === "failure"), true);
+  assert.equal(channel.requests.length, 4);
 });
 
 test("Desktop Agent Session stops cleanly when AI is disabled", async () => {
@@ -184,19 +172,7 @@ test("Desktop Agent Session injects safe conversation history as separate messag
   const channel: IntelligenceChannel = {
     async request(request) {
       capturedRequest = request;
-      return {
-        responseId: "model-response-follow-up",
-        requestId: request.requestId,
-        providerId: "test-provider",
-        providerKind: "fake",
-        protocolKind: "openai_compatible_chat_completions",
-        model: "test-model",
-        status: "completed",
-        outputKind: "explanation",
-        textOutput: "可以继续。我会基于前文解释，不把这轮追问升级成报告。",
-        validation: { status: "passed", checkedAt: new Date(0).toISOString(), issues: [] },
-        completedAt: new Date(0).toISOString(),
-      };
+      return finishTaskResponse(request, "可以继续。我会基于前文解释，不把这轮追问升级成报告。");
     },
     validateResponse() {
       return { status: "passed", checkedAt: new Date(0).toISOString(), issues: [] };
@@ -235,20 +211,10 @@ test("Desktop Agent Session injects safe conversation history as separate messag
 test("Desktop Agent Session removes internal control fragments from visible answers", async () => {
   const channel: IntelligenceChannel = {
     async request(request) {
-      return {
-        responseId: "model-response-control-text",
-        requestId: request.requestId,
-        providerId: "test-provider",
-        providerKind: "fake",
-        protocolKind: "openai_compatible_chat_completions",
-        model: "test-model",
-        status: "completed",
-        outputKind: "explanation",
-        textOutput:
-          "先处理这个动作。<start_work_session><query>分析当前项目</query></start_work_session>\n可见结论：这更适合作为任务处理。",
-        validation: { status: "passed", checkedAt: new Date(0).toISOString(), issues: [] },
-        completedAt: new Date(0).toISOString(),
-      };
+      return finishTaskResponse(
+        request,
+        "先处理这个动作。<start_work_session><query>分析当前项目</query></start_work_session>\n可见结论：这更适合作为任务处理。"
+      );
     },
     validateResponse() {
       return { status: "passed", checkedAt: new Date(0).toISOString(), issues: [] };
@@ -270,20 +236,10 @@ test("Desktop Agent Session removes internal control fragments from visible answ
 test("Desktop Agent Session removes internal task diagnostics from visible answers", async () => {
   const channel: IntelligenceChannel = {
     async request(request) {
-      return {
-        responseId: "model-response-internal-diagnostics",
-        requestId: request.requestId,
-        providerId: "test-provider",
-        providerKind: "fake",
-        protocolKind: "openai_compatible_chat_completions",
-        model: "test-model",
-        status: "completed",
-        outputKind: "explanation",
-        textOutput:
-          "## 当前任务 (goal-0003)\nrequestId: model-request-abc\n这里是内部任务状态。\n\n可以继续。刚才的问题需要你选择文件或给出只读引用，我再帮你分析。",
-        validation: { status: "passed", checkedAt: new Date(0).toISOString(), issues: [] },
-        completedAt: new Date(0).toISOString(),
-      };
+      return finishTaskResponse(
+        request,
+        "## 当前任务 (goal-0003)\nrequestId: model-request-abc\n这里是内部任务状态。\n\n可以继续。刚才的问题需要你选择文件或给出只读引用，我再帮你分析。"
+      );
     },
     validateResponse() {
       return { status: "passed", checkedAt: new Date(0).toISOString(), issues: [] };
@@ -305,20 +261,10 @@ test("Desktop Agent Session removes internal task diagnostics from visible answe
 test("Desktop Agent Session drops provider control markup without synthetic confirmation", async () => {
   const channel: IntelligenceChannel = {
     async request(request) {
-      return {
-        responseId: "model-response-tool-markup",
-        requestId: request.requestId,
-        providerId: "test-provider",
-        providerKind: "fake",
-        protocolKind: "openai_compatible_chat_completions",
-        model: "test-model",
-        status: "completed",
-        outputKind: "explanation",
-        textOutput:
-          "<tool_call>{\"name\":\"read\",\"arguments\":{\"ref\":\"file:/tmp/a.md\"}}</tool_call>\n我需要你先提供文件引用或授权，才能读取具体文件。",
-        validation: { status: "passed", checkedAt: new Date(0).toISOString(), issues: [] },
-        completedAt: new Date(0).toISOString(),
-      };
+      return finishTaskResponse(
+        request,
+        "<tool_call>{\"name\":\"read\",\"arguments\":{\"ref\":\"file:/tmp/a.md\"}}</tool_call>\n我需要你先提供文件引用或授权，才能读取具体文件。"
+      );
     },
     validateResponse() {
       return { status: "passed", checkedAt: new Date(0).toISOString(), issues: [] };
@@ -337,6 +283,36 @@ test("Desktop Agent Session drops provider control markup without synthetic conf
   assert.equal(result.pendingConfirmation, undefined);
   assert.equal(result.eventTypes.includes("user_approval.requested"), false);
 });
+
+function finishTaskResponse(
+  request: ModelRequest,
+  answer: string,
+  evidenceRefs: readonly string[] = []
+) {
+  return {
+    responseId: `${request.requestId}-finish-task-response`,
+    requestId: request.requestId,
+    providerId: "test-provider",
+    providerKind: "fake" as const,
+    protocolKind: "openai_compatible_chat_completions" as const,
+    model: "test-model",
+    status: "completed" as const,
+    outputKind: "explanation" as const,
+    toolCalls: [{
+      callId: `${request.requestId}-finish-task`,
+      toolName: "finish_task",
+      input: {
+        answer,
+        evidenceRefs,
+        uncertainty: "",
+        nextStep: "继续对话或提供更多材料。",
+      },
+    }],
+    finishReason: "tool_call" as const,
+    validation: { status: "passed" as const, checkedAt: new Date(0).toISOString(), issues: [] },
+    completedAt: new Date(0).toISOString(),
+  };
+}
 
 class MixedToolLimitChannel implements IntelligenceChannel {
   readonly requests: ModelRequest[] = [];
@@ -384,7 +360,7 @@ class MixedToolLimitChannel implements IntelligenceChannel {
     return {
       ...responseBase,
       responseId: "model-response-mixed-final",
-      textOutput: "我已经检查了工作区并形成能力概览。",
+      textOutput: "我还没有主动完成，需要继续读取额外材料。",
       toolCalls: [{ callId: "call-extra", toolName: "read_file", input: { path: "extra.md" } }],
       finishReason: "tool_call" as const,
     };
@@ -467,17 +443,8 @@ class LocalToolChannel implements IntelligenceChannel {
       };
     }
     return {
+      ...finishTaskResponse(request, "已读取 README 并形成摘要。", ["workspace:file:README.md"]),
       responseId: "model-response-local-final",
-      requestId: request.requestId,
-      providerId: "test-provider",
-      providerKind: "fake" as const,
-      protocolKind: "openai_compatible_chat_completions" as const,
-      model: "test-model",
-      status: "completed" as const,
-      outputKind: "explanation" as const,
-      textOutput: "已读取 README 并形成摘要。",
-      validation: { status: "passed" as const, checkedAt: new Date(0).toISOString(), issues: [] },
-      completedAt: new Date(0).toISOString(),
     };
   }
 

@@ -12,7 +12,12 @@ import type {
 import { InMemoryEventLog } from "../events/in-memory-event-log.js";
 import { nowIso } from "../id.js";
 import { pendingModelOutputValidation } from "./validation.js";
-import { executeToolUseLoop, resumeToolUseLoopFromApproval } from "./tool-use-loop.js";
+import {
+  executeAutonomousToolUseLoop,
+  executeToolUseLoop,
+  resumeAutonomousToolUseLoopFromApproval,
+  resumeToolUseLoopFromApproval,
+} from "./tool-use-loop.js";
 
 test("executeToolUseLoop executes one tool round and returns final model output", async () => {
   const eventLog = new InMemoryEventLog();
@@ -46,6 +51,108 @@ test("executeToolUseLoop executes one tool round and returns final model output"
   assert.equal(result.finalOutput.structuredOutput, channel.responses.at(-1)?.structuredOutput);
 });
 
+test("executeAutonomousToolUseLoop keeps running after plain model text until the agent finishes", async () => {
+  const channel = new SequenceIntelligenceChannel([
+    textResponse("model-request-text", "I am still thinking."),
+    finishTaskResponse("model-request-finish", "Final answer chosen by the agent."),
+  ]);
+  const center = new TestToolBroker();
+
+  const result = await executeAutonomousToolUseLoop(
+    {
+      intelligenceChannel: channel,
+      toolCenter: center,
+      callerAgentId: "agent-test",
+      traceId: "trace-test",
+      goalId: "goal-test",
+      maxModelRounds: 4,
+    },
+    createValidModelRequest()
+  );
+
+  assert.equal(result.stoppedReason, "completed");
+  assert.equal(result.finishTask?.answer, "Final answer chosen by the agent.");
+  assert.equal(channel.requests.length, 2);
+  assert.equal(channel.requests[0]?.tools?.some((tool) => tool.name === "finish_task"), true);
+  assert.equal(channel.requests[1]?.sanitizedMessages.some((message) => message.ref === "prompt:agent_loop.finish_task_required.v1"), true);
+});
+
+test("executeAutonomousToolUseLoop requires an explicit finish after tool results", async () => {
+  const channel = new SequenceIntelligenceChannel([
+    toolCallResponse("model-request-test", "call-search", "web_search"),
+    finishTaskResponse("model-request-final", "Final answer with tool result.", ["tool:call-search"]),
+  ]);
+  const center = new TestToolBroker();
+  center.register("web_search", async () => ({ results: [{ title: "A" }] }));
+
+  const result = await executeAutonomousToolUseLoop(
+    {
+      intelligenceChannel: channel,
+      toolCenter: center,
+      callerAgentId: "agent-test",
+      traceId: "trace-test",
+      goalId: "goal-test",
+      allowedTools: ["web_search"],
+      maxModelRounds: 4,
+    },
+    createValidModelRequest()
+  );
+
+  assert.equal(result.stoppedReason, "completed");
+  assert.equal(result.toolCalls.length, 1);
+  assert.equal(result.finishTask?.evidenceRefs.includes("tool:call-search"), true);
+  assert.equal(center.getCallCount(), 1);
+});
+
+test("executeAutonomousToolUseLoop pauses out_of_fuel instead of forcing synthesis when tool fuel is exhausted", async () => {
+  const channel = new SequenceIntelligenceChannel([
+    toolCallResponse("model-request-test", "call-search", "web_search"),
+  ]);
+  const center = new TestToolBroker();
+  center.register("web_search", async () => ({ ok: true }));
+
+  const result = await executeAutonomousToolUseLoop(
+    {
+      intelligenceChannel: channel,
+      toolCenter: center,
+      callerAgentId: "agent-test",
+      traceId: "trace-test",
+      goalId: "goal-test",
+      allowedTools: ["web_search"],
+      maxToolRounds: 0,
+    },
+    createValidModelRequest()
+  );
+
+  assert.equal(result.stoppedReason, "out_of_fuel");
+  assert.equal(result.toolCalls.length, 0);
+  assert.equal(center.getCallCount(), 0);
+  assert.equal(channel.requests.length, 1);
+});
+
+test("executeAutonomousToolUseLoop pauses out_of_fuel when model fuel is exhausted without finish_task", async () => {
+  const channel = new SequenceIntelligenceChannel([
+    textResponse("model-request-text", "Still not done."),
+  ]);
+  const center = new TestToolBroker();
+
+  const result = await executeAutonomousToolUseLoop(
+    {
+      intelligenceChannel: channel,
+      toolCenter: center,
+      callerAgentId: "agent-test",
+      traceId: "trace-test",
+      goalId: "goal-test",
+      maxModelRounds: 1,
+    },
+    createValidModelRequest()
+  );
+
+  assert.equal(result.stoppedReason, "out_of_fuel");
+  assert.equal(result.finalOutput.failure?.message.includes("paused"), true);
+  assert.equal(channel.requests.length, 1);
+});
+
 test("executeToolUseLoop allows final model output after the last allowed tool round", async () => {
   const channel = new SequenceIntelligenceChannel([
     toolCallResponse("model-request-test", "call-1", "web_search"),
@@ -72,11 +179,10 @@ test("executeToolUseLoop allows final model output after the last allowed tool r
   assert.equal(channel.requests.length, 2);
 });
 
-test("executeToolUseLoop forces a final synthesis when the model requests another tool after max rounds", async () => {
+test("executeToolUseLoop stops at max_rounds when the model requests another tool after max rounds", async () => {
   const channel = new SequenceIntelligenceChannel([
     toolCallResponse("model-request-test", "call-1", "web_search"),
     toolCallResponse("model-request-next", "call-2", "web_search"),
-    completedResponse("model-request-final", { summary: "Final answer without more tools." }),
   ]);
   const center = new TestToolBroker();
   center.register("web_search", async () => ({ ok: true }));
@@ -94,16 +200,10 @@ test("executeToolUseLoop forces a final synthesis when the model requests anothe
     createValidModelRequest()
   );
 
-  assert.equal(result.stoppedReason, "completed");
+  assert.equal(result.stoppedReason, "max_rounds");
   assert.equal(result.rounds, 1);
   assert.equal(result.toolCalls.length, 1);
-  assert.equal(channel.requests.length, 3);
-  assert.equal(channel.requests[2]?.toolChoice, "none");
-  assert.deepEqual(channel.requests[2]?.tools, []);
-  assert.equal(
-    channel.requests[2]?.sanitizedMessages.some((message) => message.ref === "prompt:tool_use.no_more_tools.v1"),
-    true
-  );
+  assert.equal(channel.requests.length, 2);
 });
 
 test("executeToolUseLoop appends failed tool results without throwing", async () => {
@@ -177,10 +277,10 @@ test("executeToolUseLoop preserves assistant protocol continuation fields across
   ]);
 });
 
-test("executeToolUseLoop injects iteration warning near round limits", async () => {
+test("executeToolUseLoop does not inject iteration warning near round limits", async () => {
   const channel = new SequenceIntelligenceChannel([
     toolCallResponse("model-request-test", "call-1", "web_search"),
-    completedResponse("model-request-final", { summary: "Final answer after warning." }),
+    completedResponse("model-request-final", { summary: "Final answer after tool round." }),
   ]);
   const center = new TestToolBroker();
   center.register("web_search", async () => ({ ok: true }));
@@ -199,7 +299,7 @@ test("executeToolUseLoop injects iteration warning near round limits", async () 
   );
 
   assert.equal(result.stoppedReason, "completed");
-  assert.equal(channel.requests[1]?.sanitizedMessages.at(-1)?.ref, "prompt:tool_use.iteration_warning.v1");
+  assert.equal(channel.requests[1]?.sanitizedMessages.at(-1)?.ref, undefined);
 });
 
 test("executeToolUseLoop truncates verbose tool messages before model continuation", async () => {
@@ -545,6 +645,62 @@ test("resumeToolUseLoopFromApproval rejects the wrong confirmation id without ex
   assert.equal(channel.requests.length, 1);
 });
 
+test("resumeAutonomousToolUseLoopFromApproval requires the matching confirmation before continuing", async () => {
+  const channel = new SequenceIntelligenceChannel([
+    toolCallResponse("model-request-test", "call-write", "write_file"),
+    finishTaskResponse("model-request-final", "Final answer after approved write."),
+  ]);
+  const center = new TestToolBroker();
+  center.register("write_file", async () => ({ ok: true }), "read-write");
+  const request = createValidModelRequest();
+  const paused = await executeAutonomousToolUseLoop(
+    {
+      intelligenceChannel: channel,
+      toolCenter: center,
+      callerAgentId: "agent-test",
+      traceId: "trace-test",
+      goalId: "goal-test",
+      allowedTools: ["write_file"],
+    },
+    request
+  );
+
+  assert.equal(paused.stoppedReason, "approval_required");
+  const wrong = await resumeAutonomousToolUseLoopFromApproval(
+    {
+      intelligenceChannel: channel,
+      toolCenter: center,
+      callerAgentId: "agent-test",
+      traceId: "trace-test",
+      goalId: "goal-test",
+      allowedTools: ["write_file"],
+      approvedConfirmationIds: ["confirmation-other"],
+    },
+    request,
+    paused.pendingApproval!
+  );
+  assert.equal(wrong.stoppedReason, "approval_required");
+  assert.equal(center.getCallCount(), 0);
+
+  const resumed = await resumeAutonomousToolUseLoopFromApproval(
+    {
+      intelligenceChannel: channel,
+      toolCenter: center,
+      callerAgentId: "agent-test",
+      traceId: "trace-test",
+      goalId: "goal-test",
+      allowedTools: ["write_file"],
+      approvedConfirmationIds: ["confirmation-call-write"],
+    },
+    request,
+    paused.pendingApproval!
+  );
+
+  assert.equal(resumed.stoppedReason, "completed");
+  assert.equal(resumed.finishTask?.answer, "Final answer after approved write.");
+  assert.equal(center.getCallCount(), 1);
+});
+
 function createValidModelRequest(overrides: Partial<ModelRequest> = {}): ModelRequest {
   return {
     requestId: "model-request-test",
@@ -582,6 +738,35 @@ function completedResponse(requestId: string, output: unknown): ModelResponse {
     finishReason: "stop",
     validation: pendingModelOutputValidation(),
     completedAt: nowIso(),
+  };
+}
+
+function textResponse(requestId: string, text: string): ModelResponse {
+  return {
+    ...completedResponse(requestId, undefined),
+    textOutput: text,
+    finishReason: "stop",
+  };
+}
+
+function finishTaskResponse(
+  requestId: string,
+  answer: string,
+  evidenceRefs: readonly string[] = []
+): ModelResponse {
+  return {
+    ...completedResponse(requestId, undefined),
+    toolCalls: [{
+      callId: `${requestId}-finish-task`,
+      toolName: "finish_task",
+      input: {
+        answer,
+        evidenceRefs,
+        uncertainty: "",
+        nextStep: "No further action.",
+      },
+    }],
+    finishReason: "tool_call",
   };
 }
 

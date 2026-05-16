@@ -295,11 +295,11 @@ function fakeDesktopAgentStep(request: ModelRequest): FakeModelProviderStep {
   const normalized = goalAnchor.toLowerCase();
   const hasToolMessage = request.sanitizedMessages.some((message) => message.role === "tool");
   const canUseSearch = request.toolChoice !== "none" && request.tools?.some((tool) => tool.name === "search") === true;
+  const canFinishTask = request.toolChoice !== "none" && request.tools?.some((tool) => tool.name === "finish_task") === true;
   if (needsDesktopFileAuthorization(goalAnchor) && !hasAuthorizedFilePreview(request)) {
-    return {
-      textOutput:
-        "我现在还不能直接看到你的桌面文件。请先通过附件选择具体文件或文件夹，或给出只读文件引用；拿到授权材料后，我可以继续帮你梳理、总结或分析。",
-    };
+    const answer =
+      "我现在还不能直接看到你的桌面文件。请先通过附件选择具体文件或文件夹，或给出只读文件引用；拿到授权材料后，我可以继续帮你梳理、总结或分析。";
+    return canFinishTask ? finishTaskStep(answer, [], "缺少已授权的桌面文件或文件夹引用。", "等待用户选择文件、文件夹或提供只读引用。") : { textOutput: answer };
   }
   if (canUseSearch && !hasToolMessage && shouldUseOrdinaryAgentTools(goalAnchor)) {
     return {
@@ -317,23 +317,22 @@ function fakeDesktopAgentStep(request: ModelRequest): FakeModelProviderStep {
     };
   }
   if (hasToolMessage) {
-    return {
-      textOutput:
-        `我已经基于当前授权工具检查了“${goalAnchor}”。可用材料只作为本轮回答依据，不会写入长期记忆；接下来可以继续补充范围、让我读取更多授权材料，或让我把结论整理成更正式的结果。`,
-    };
+    const answer =
+      `我已经基于当前授权工具检查了“${goalAnchor}”。可用材料只作为本轮回答依据，不会写入长期记忆；接下来可以继续补充范围、让我读取更多授权材料，或让我把结论整理成更正式的结果。`;
+    return canFinishTask
+      ? finishTaskStep(answer, ["research:codebase:desktop-agent"], "测试模型只看到了工具安全摘要。", "可以继续扩大授权材料范围。")
+      : { textOutput: answer };
   }
   if (!shouldUpgradeToWorkSession(goalAnchor)) {
-    return {
-      textOutput: fakeWorkSessionDirectAnswerOutput(request),
-    };
+    const answer = fakeWorkSessionDirectAnswerOutput(request);
+    return canFinishTask ? finishTaskStep(answer, [], "", "继续对话或提供需要处理的材料。") : { textOutput: answer };
   }
   const canRequestWorkSession =
     request.toolChoice !== "none" && request.tools?.some((tool) => tool.name === "start_work_session") === true;
   if (!canRequestWorkSession) {
-    return {
-      textOutput:
-        `我会把“${goalAnchor}”作为桌面任务处理：先说明当前可判断的结论，再基于你授权的文件、网页或搜索材料继续补证据；涉及写入、发送、删除或读取未授权材料时会先请求确认。`,
-    };
+    const answer =
+      `我会把“${goalAnchor}”作为桌面任务处理：先说明当前可判断的结论，再基于你授权的文件、网页或搜索材料继续补证据；涉及写入、发送、删除或读取未授权材料时会先请求确认。`;
+    return canFinishTask ? finishTaskStep(answer, [], "没有可用的工作会话升级工具。", "提供授权材料后继续补证据。") : { textOutput: answer };
   }
   return {
     toolCalls: [
@@ -343,6 +342,28 @@ function fakeDesktopAgentStep(request: ModelRequest): FakeModelProviderStep {
         input: {
           reason: "任务需要读取上下文、组织材料或产出可审阅结果，升级为工作会话。",
           goal: goalAnchor,
+        },
+      },
+    ],
+  };
+}
+
+function finishTaskStep(
+  answer: string,
+  evidenceRefs: readonly string[],
+  uncertainty: string,
+  nextStep: string
+): FakeModelProviderStep {
+  return {
+    toolCalls: [
+      {
+        callId: createId("call-finish-task"),
+        toolName: "finish_task",
+        input: {
+          answer,
+          evidenceRefs,
+          uncertainty,
+          nextStep,
         },
       },
     ],

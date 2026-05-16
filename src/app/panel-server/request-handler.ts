@@ -210,6 +210,10 @@ type PanelRunExecutionResult = {
   readonly eventEntries: readonly EventLogEntry[];
   readonly agentRunTree?: AgentRunTree;
   readonly canvas?: PanelRunCanvasReadModel;
+  readonly blocked?: {
+    readonly code: string;
+    readonly message: string;
+  };
   readonly pendingApproval?: BasicAgentPendingToolContinuation;
 };
 
@@ -1019,9 +1023,9 @@ function createPanelRunJobResponse(runtime: PanelRuntime, job: PanelRunJob): Pan
     job.cancelled?.informationAccess ??
     job.blocked?.informationAccess ??
     job.informationAccess;
-  const summary = job.completed?.summary;
-  const observation = job.completed?.observation;
-  const agentRunTree = job.completed?.agentRunTree;
+  const summary = job.completed?.summary ?? job.blocked?.summary;
+  const observation = job.completed?.observation ?? job.blocked?.observation;
+  const agentRunTree = job.completed?.agentRunTree ?? job.blocked?.agentRunTree;
   const trace = createPanelRunTrace({ status: job.status, eventEntries });
   const tracking = createPanelRunTracking({
     status: job.status,
@@ -1067,9 +1071,9 @@ function createPanelRunJobResponse(runtime: PanelRuntime, job: PanelRunJob): Pan
       runId: job.runId,
       lastSequence: transcript.events.at(-1)?.sequence ?? 0,
     },
-    summary: job.completed?.summary ?? job.failed?.summary,
-    observation: job.completed?.observation,
-    canvas: job.completed?.canvas,
+    summary: job.completed?.summary ?? job.blocked?.summary ?? job.failed?.summary,
+    observation: job.completed?.observation ?? job.blocked?.observation,
+    canvas: job.completed?.canvas ?? job.blocked?.canvas,
     route: routeReadModel(job.routeDecision),
     error: job.failed?.error ?? job.cancelled?.reason ?? job.blocked?.reason,
     conversation:
@@ -2324,8 +2328,8 @@ function syncPanelRunStreamEventsForJob(runtime: PanelRuntime, job: PanelRunJob)
     runId: job.runId,
     status: job.status,
     eventEntries: job.runtime?.eventLog.list() ?? [],
-    summary: job.completed?.summary ?? job.failed?.summary,
-    observation: job.completed?.observation,
+    summary: job.completed?.summary ?? job.blocked?.summary ?? job.failed?.summary,
+    observation: job.completed?.observation ?? job.blocked?.observation,
     routeDecision: job.routeDecision,
     desktopMode: job.runKind === "desktop" ? job.runMode : undefined,
     createdAt: job.createdAt,
@@ -2557,11 +2561,11 @@ async function runOrdinaryDesktopForPanel(
 function desktopPanelResultFromAgent(
   agent: Awaited<ReturnType<typeof runDesktopAgentSession>>
 ): PanelRunExecutionResult {
-  if (agent.status === "completed" || agent.status === "confirmation_needed") {
+  if (agent.status === "completed" || agent.status === "confirmation_needed" || agent.status === "paused") {
     const eventEntries = agent.runtime.eventLog.list();
     const transcript = createPanelRunTranscript({
       runId: agent.traceId,
-      status: "completed",
+      status: agent.status === "paused" ? "blocked" : "completed",
       eventEntries,
       desktopMode: "agent",
       createdAt: eventEntries[0]?.recordedAt ?? new Date(0).toISOString(),
@@ -2573,6 +2577,15 @@ function desktopPanelResultFromAgent(
         result: agent,
         transcript,
       }),
+      blocked:
+        agent.status === "paused"
+          ? {
+              code: "out_of_fuel",
+              message:
+                agent.failureMessage ??
+                "Desktop Agent paused after exhausting autonomous loop fuel; it did not claim the task was complete.",
+            }
+          : undefined,
       pendingApproval:
         agent.pendingApproval === undefined
           ? undefined

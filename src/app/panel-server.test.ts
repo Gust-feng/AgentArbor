@@ -610,7 +610,6 @@ test("desktop async fake run answers arbitrary lightweight question without repo
     const eventTypes = completed.body.transcript.events.map((event: { type: string }) => event.type);
     assert.equal(eventTypes[0], "run.started");
     assert.equal(eventTypes.at(-1), "final.result");
-    assert.equal(eventTypes.filter((type: string) => type === "model.output.delta").length >= 1, true);
     assert.equal(completed.body.transcript.modelCalls.length, 1);
     assert.equal(completed.body.trace.events.some((event: { type: string }) => event.type === "artifact.produced"), false);
     assert.equal(completed.body.transcript.events.some((event: { summary?: string }) => String(event.summary ?? "").includes("项目分析")), false);
@@ -680,7 +679,9 @@ test("desktop run stream carries safe tool detail through runtime persistence", 
     providerCalls += 1;
     return providerCalls === 1
       ? createOpenAiReadFileToolCallResponse("notes.md")
-      : createOpenAiTextResponse("desktop-tool-detail-model", "已读取授权文件并形成摘要。");
+      : createOpenAiFinishTaskResponse("desktop-tool-detail-model", "已读取授权文件并形成摘要。", [
+          "tool:call-panel-read-file",
+        ]);
   };
   const server = await startLocalPanelServer({ port: 0, configDirectory: directory, providerFetch });
   try {
@@ -763,6 +764,63 @@ test("desktop run stream carries safe tool detail through runtime persistence", 
   }
 });
 
+test("desktop openai-compatible ordinary agent pauses as blocked when autonomous fuel is exhausted", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-desktop-agent-fuel-"));
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-desktop-agent-fuel-workspace-"));
+  const secret = "sk-desktop-agent-fuel-secret";
+  for (const name of ["fuel-1.md", "fuel-2.md", "fuel-3.md", "fuel-4.md"]) {
+    await fs.writeFile(path.join(workspace, name), `content for ${name}`, "utf8");
+  }
+  let providerCalls = 0;
+  const providerFetch: PanelProviderFetch = async () => {
+    providerCalls += 1;
+    return createOpenAiReadFileToolCallResponse(
+      `fuel-${providerCalls}.md`,
+      `call-panel-read-file-${providerCalls}`
+    );
+  };
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory, providerFetch });
+  try {
+    await requestJson(server.url, "/api/config/model-provider", {
+      method: "POST",
+      body: {
+        baseUrl: "https://provider.example",
+        model: "gpt-4o-mini",
+        apiKey: secret,
+      },
+    });
+    await requestJson(server.url, "/api/config/workspace", {
+      method: "POST",
+      body: { workspaceDirectory: workspace },
+    });
+
+    const start = await requestJson(server.url, "/api/desktop/runs", {
+      method: "POST",
+      body: { goal: "持续读取材料直到燃料耗尽", aiMode: "openai-compatible", runMode: "agent" },
+    });
+    const blocked = await waitForRun(
+      server.url,
+      start.body.runId,
+      (body) => body.status === "blocked",
+      4_000,
+      "/api/desktop/runs"
+    );
+    const eventTypes = blocked.body.transcript.events.map((event: { type: string }) => event.type);
+
+    assert.equal(providerCalls, 4);
+    assert.equal(blocked.body.canvas.kind, "desktop_agent_canvas");
+    assert.equal(blocked.body.canvas.agent.status, "paused");
+    assert.equal(blocked.body.canvas.agent.answer, undefined);
+    assert.equal(String(blocked.body.error?.message ?? "").includes("paused"), true);
+    assert.equal(eventTypes.includes("run.blocked"), true);
+    assert.equal(eventTypes.includes("final.result"), false);
+    assertSafePanelJsonText(blocked.text);
+  } finally {
+    await server.close();
+    await fs.rm(directory, { recursive: true, force: true });
+    await fs.rm(workspace, { recursive: true, force: true });
+  }
+});
 
 test("panel stream ends completed runs with final result and no run failed event", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-completed-stream-terminal-"));
@@ -1043,7 +1101,7 @@ test("conversation API sends follow-up history as role-separated model messages"
     callIndex += 1;
     const body = JSON.parse(init.body) as { messages?: readonly { role?: string; content?: string }[]; max_tokens?: number };
     requests.push(body);
-    return createOpenAiTextResponse(
+    return createOpenAiFinishTaskResponse(
       "conversation-structured-history-model",
       callIndex === 1
         ? "我可以直接回答问题，也可以在授权范围内读取文件或网页。"
@@ -1175,7 +1233,7 @@ test("conversation API queues follow-up while the same conversation is still run
   });
   const providerFetch: PanelProviderFetch = async () => {
     await fetchGate;
-    return createOpenAiTextResponse("conversation-queue-model", "第一轮已经完成。");
+    return createOpenAiFinishTaskResponse("conversation-queue-model", "第一轮已经完成。");
   };
   const server = await startLocalPanelServer({ port: 0, configDirectory: directory, providerFetch });
   try {
@@ -1246,14 +1304,14 @@ test("conversation API queues follow-up while the same conversation is still run
   }
 });
 
-test("desktop openai-compatible direct answer accepts plain text model output", async () => {
+test("desktop openai-compatible direct answer completes through finish_task", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-desktop-direct-answer-text-"));
   const secret = "sk-desktop-direct-answer-text-secret";
   const bodies: Record<string, unknown>[] = [];
   const providerFetch: PanelProviderFetch = async (_url, init) => {
     const body = JSON.parse(init.body) as Record<string, unknown>;
     bodies.push(body);
-    return createOpenAiTextResponse(
+    return createOpenAiFinishTaskResponse(
       "desktop-direct-answer-text-model",
       "我是 AgentArbor 桌面助手。底层模型取决于你在设置中配置的模型运行时；普通问题会直接回答，不会被强行包装成项目分析。"
     );
@@ -1288,10 +1346,10 @@ test("desktop openai-compatible direct answer accepts plain text model output", 
     assert.equal(completed.body.canvas.agent.answer.answer.includes("普通问题会直接回答"), true);
     assert.equal(completed.body.canvas.agent.pendingConfirmation, undefined);
     assert.equal(completed.body.tracking.agentRunTree, undefined);
-    assert.equal(completed.body.transcript.modelCalls.some((call: { visibleOutput?: { source?: string; items?: readonly { fields?: readonly { name?: string; value?: string }[] }[] } }) =>
-      call.visibleOutput?.source === "text_output" &&
-      call.visibleOutput.items?.some((item) => item.fields?.some((field) => field.name === "text" && String(field.value ?? "").includes("普通问题会直接回答")))
-    ), true);
+    const requestedTools = bodies[0]?.tools as
+      | readonly { function?: { name?: string } }[]
+      | undefined;
+    assert.equal(requestedTools?.some((tool) => tool.function?.name === "finish_task"), true);
     assertSafePanelJsonText(completed.text);
   } finally {
     await server.close();
@@ -1436,7 +1494,7 @@ test("conversation follow-up after a provider failure does not feed internal ids
         json: async () => ({ error: { message: "bad request" } }),
       };
     }
-    return createOpenAiTextResponse(
+    return createOpenAiFinishTaskResponse(
       "failure-followup-model",
       "刚才模型服务没有返回可用结果。对于桌面文件，我需要你选择具体文件或给出只读引用，然后我才能继续看。"
     );
@@ -1910,9 +1968,10 @@ test("desktop openai-compatible ordinary agent uses configured search tool befor
     const body = JSON.parse(init.body) as { messages?: readonly { role?: string }[] };
     const hasToolMessage = body.messages?.some((message) => message.role === "tool") ?? false;
     return hasToolMessage
-      ? createOpenAiTextResponse(
+      ? createOpenAiFinishTaskResponse(
           "desktop-configured-tools-model",
-          "我已经结合授权搜索结果完成回答；工具输出只以安全摘要和引用进入本轮对话。"
+          "我已经结合授权搜索结果完成回答；工具输出只以安全摘要和引用进入本轮对话。",
+          ["tool:call-panel-search"]
         )
       : createOpenAiSearchToolCallResponse();
   };
@@ -2382,7 +2441,9 @@ test("basic agent confirmation decisions persist approve and guidance outcomes s
     if (providerFetchCalls === 3) {
       return createOpenAiWriteFileToolCallResponse("guidance.txt", "guidance write content");
     }
-    return createOpenAiTextResponse("basic-confirmation-model", "文件写入已完成，结果已整理。");
+    return createOpenAiFinishTaskResponse("basic-confirmation-model", "文件写入已完成，结果已整理。", [
+      "tool:call-panel-write-file",
+    ]);
   };
   const server = await startLocalPanelServer({ port: 0, configDirectory: directory, providerFetch });
   try {
@@ -3205,7 +3266,10 @@ function createOpenAiSearchToolCallResponse(): Awaited<ReturnType<PanelProviderF
   };
 }
 
-function createOpenAiReadFileToolCallResponse(filePath = "README.md"): Awaited<ReturnType<PanelProviderFetch>> {
+function createOpenAiReadFileToolCallResponse(
+  filePath = "README.md",
+  callId = "call-panel-read-file"
+): Awaited<ReturnType<PanelProviderFetch>> {
   return {
     ok: true,
     status: 200,
@@ -3219,7 +3283,7 @@ function createOpenAiReadFileToolCallResponse(filePath = "README.md"): Awaited<R
             content: "",
             tool_calls: [
               {
-                id: "call-panel-read-file",
+                id: callId,
                 type: "function",
                 function: {
                   name: "read_file",
@@ -3275,6 +3339,51 @@ function createOpenAiJsonResponse(model: string, output: unknown): Awaited<Retur
           message: {
             role: "assistant",
             content: JSON.stringify(output),
+          },
+        },
+      ],
+      usage: {
+        prompt_tokens: 10,
+        completion_tokens: 12,
+        total_tokens: 22,
+      },
+    }),
+  };
+}
+
+function createOpenAiFinishTaskResponse(
+  model: string,
+  answer: string,
+  evidenceRefs: readonly string[] = [],
+  uncertainty = "",
+  nextStep = "等待用户继续提供任务。"
+): Awaited<ReturnType<PanelProviderFetch>> {
+  return {
+    ok: true,
+    status: 200,
+    json: async () => ({
+      model,
+      choices: [
+        {
+          finish_reason: "tool_calls",
+          message: {
+            role: "assistant",
+            content: "",
+            tool_calls: [
+              {
+                id: "call-panel-finish-task",
+                type: "function",
+                function: {
+                  name: "finish_task",
+                  arguments: JSON.stringify({
+                    answer,
+                    evidenceRefs,
+                    uncertainty,
+                    nextStep,
+                  }),
+                },
+              },
+            ],
           },
         },
       ],

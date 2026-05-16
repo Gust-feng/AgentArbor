@@ -79,8 +79,48 @@ test("AgentTurnRuntime executes one tool round and returns final model output", 
   assert.equal(result.toolRounds, 1);
   assert.equal(result.toolCalls[0]?.status, "completed");
   assert.equal(channel.requests[1]?.sanitizedMessages.some((message) => message.role === "tool"), true);
-  assert.equal(channel.requests[1]?.sanitizedMessages.at(-1)?.ref, "prompt:tool_use.iteration_warning.v1");
   assert.deepEqual(eventLog.types(), ["tool.requested", "tool.completed"]);
+});
+
+test("AgentTurnRuntime executeAutonomous completes only when the agent calls the internal control tool", async () => {
+  const channel = new SequenceIntelligenceChannel([
+    finishTaskResponse("model-request-test", "Agent-owned final answer."),
+  ]);
+  const broker = new PermissionAwareToolBroker(["web_search"]);
+  const runtime = new AgentTurnRuntime({
+    intelligenceChannel: channel,
+    toolCenter: broker,
+  });
+
+  const result = await runtime.executeAutonomous(createTurnInput({
+    allowedTools: [],
+    maxModelRounds: 2,
+  }));
+
+  assert.equal(result.status, "completed");
+  assert.equal(result.stoppedReason, "completed");
+  assert.equal(result.finishTask?.answer, "Agent-owned final answer.");
+  assert.equal(broker.executedCount, 0);
+  assert.deepEqual(channel.requests[0]?.tools?.map((tool) => tool.name), ["finish_task"]);
+});
+
+test("AgentTurnRuntime executeAutonomous pauses instead of completing on plain provider stop", async () => {
+  const channel = new SequenceIntelligenceChannel([
+    textResponse("model-request-test", "Plain text is not a finish signal."),
+  ]);
+  const runtime = new AgentTurnRuntime({
+    intelligenceChannel: channel,
+    toolCenter: new PermissionAwareToolBroker([]),
+  });
+
+  const result = await runtime.executeAutonomous(createTurnInput({
+    allowedTools: [],
+    maxModelRounds: 1,
+  }));
+
+  assert.equal(result.status, "paused");
+  assert.equal(result.stoppedReason, "out_of_fuel");
+  assert.equal(result.finishTask, undefined);
 });
 
 test("AgentTurnRuntime returns approval_required and resumes with a matching confirmation", async () => {
@@ -224,6 +264,31 @@ function completedResponse(requestId: string, output: unknown): ModelResponse {
     finishReason: "stop",
     validation: pendingModelOutputValidation(),
     completedAt: nowIso(),
+  };
+}
+
+function textResponse(requestId: string, text: string): ModelResponse {
+  return {
+    ...completedResponse(requestId, undefined),
+    textOutput: text,
+    finishReason: "stop",
+  };
+}
+
+function finishTaskResponse(requestId: string, answer: string): ModelResponse {
+  return {
+    ...completedResponse(requestId, undefined),
+    toolCalls: [{
+      callId: `${requestId}-finish-task`,
+      toolName: "finish_task",
+      input: {
+        answer,
+        evidenceRefs: [],
+        uncertainty: "",
+        nextStep: "No further action.",
+      },
+    }],
+    finishReason: "tool_call",
   };
 }
 

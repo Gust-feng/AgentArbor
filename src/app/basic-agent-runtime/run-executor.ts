@@ -73,6 +73,10 @@ export type BasicAgentRunExecutionResult = {
   readonly observation?: unknown;
   readonly agentRunTree?: AgentRunTree;
   readonly canvas?: BasicAgentCanvasProjection;
+  readonly blocked?: {
+    readonly code: string;
+    readonly message: string;
+  };
   readonly pendingApproval?: BasicAgentPendingToolContinuation;
 };
 
@@ -265,6 +269,10 @@ export class BasicAgentRunExecutor {
         await this.cancel(runId);
         return;
       }
+      if (result.blocked !== undefined) {
+        await this.blockFromExecutionResult(runId, job, result);
+        return;
+      }
       if (result.pendingApproval !== undefined) {
         this.config.runJobs.awaitApproval(runId, {
           config: job.config,
@@ -365,6 +373,10 @@ export class BasicAgentRunExecutor {
         await this.cancel(input.runId);
         return this.requireBasicRun(input.runId);
       }
+      if (result.blocked !== undefined) {
+        await this.blockFromExecutionResult(input.runId, input.job, result);
+        return this.requireBasicRun(input.runId);
+      }
       if (result.pendingApproval !== undefined) {
         this.config.runJobs.awaitApproval(input.runId, {
           config: input.job.config,
@@ -409,6 +421,29 @@ export class BasicAgentRunExecutor {
     } finally {
       this.config.abortControllers.delete(input.runId);
     }
+  }
+
+  private async blockFromExecutionResult(
+    runId: string,
+    job: BasicAgentRunJob,
+    result: BasicAgentRunExecutionResult
+  ): Promise<void> {
+    if (result.blocked === undefined) {
+      return;
+    }
+    this.config.runJobs.block(runId, {
+      config: job.config,
+      informationAccess: job.informationAccess,
+      reason: result.blocked,
+      summary: result.summary,
+      observation: result.observation,
+      agentRunTree: result.agentRunTree,
+      canvas: result.canvas,
+    });
+    const blocked = this.requireJob(runId);
+    this.syncRunEvents(blocked);
+    await this.config.onRunFinished(blocked);
+    await this.config.persistRun(blocked);
   }
 
   private rememberPendingContinuation(

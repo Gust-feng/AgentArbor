@@ -21,8 +21,11 @@ import type {
 import type { ConstraintRef } from "../../domain/constraints.js";
 import { createId, nowIso } from "../id.js";
 import {
+  executeAutonomousToolUseLoop,
   executeToolUseLoop,
+  resumeAutonomousToolUseLoopFromApproval,
   resumeToolUseLoopFromApproval,
+  type FinishTaskPayload,
   type ToolUseLoopPendingApproval,
   type ToolUseLoopResult,
 } from "./tool-use-loop.js";
@@ -70,13 +73,14 @@ export type AgentTurnResumeInput = {
 };
 
 export type AgentTurnRuntimeResult = {
-  readonly status: "completed" | "failed" | "disabled" | "approval_required" | "cancelled";
+  readonly status: "completed" | "failed" | "disabled" | "approval_required" | "cancelled" | "paused";
   readonly stoppedReason:
     | "completed"
     | "no_tool_calls"
     | "model_disabled"
     | "max_tool_rounds"
     | "max_model_rounds"
+    | "out_of_fuel"
     | "model_failed"
     | "approval_required"
     | "cancelled"
@@ -85,6 +89,7 @@ export type AgentTurnRuntimeResult = {
   readonly modelRequestId?: string;
   readonly modelResponseId?: string;
   readonly finalOutput?: ModelResponse;
+  readonly finishTask?: FinishTaskPayload;
   readonly toolCalls: readonly ToolCallResult[];
   readonly modelRounds: number;
   readonly toolRounds: number;
@@ -158,10 +163,102 @@ export class AgentTurnRuntime {
     }
   }
 
+  async executeAutonomous(input: AgentTurnRuntimeInput): Promise<AgentTurnRuntimeResult> {
+    const requestId = input.requestId ?? createId("model-request");
+    const policy = normalizePolicy(input.policy);
+    if (!policy.allowModel) {
+      return {
+        status: "disabled",
+        stoppedReason: "model_disabled",
+        fallback: policy.fallback,
+        modelRequestId: requestId,
+        toolCalls: [],
+        modelRounds: 0,
+        toolRounds: 0,
+      };
+    }
+
+    if (policy.maxModelRounds <= 0) {
+      return {
+        status: "paused",
+        stoppedReason: "out_of_fuel",
+        fallback: policy.fallback,
+        modelRequestId: requestId,
+        toolCalls: [],
+        modelRounds: 0,
+        toolRounds: 0,
+      };
+    }
+
+    try {
+      const modelRequest = createModelRequest({ input, policy, requestId });
+      const loop = await executeAutonomousToolUseLoop(
+        {
+          intelligenceChannel: this.options.intelligenceChannel,
+          toolCenter: this.options.toolCenter ?? NO_TOOL_BROKER,
+          callerAgentId: policy.callerAgentId,
+          traceId: policy.traceId,
+          goalId: policy.goalId,
+          maxModelRounds: policy.maxModelRounds,
+          maxToolRounds: policy.maxToolRounds,
+          allowedTools: policy.allowedTools,
+          publishToolEvent: this.options.publishToolEvent,
+          abortSignal: input.abortSignal,
+        },
+        modelRequest
+      );
+      return toAgentTurnRuntimeResult(policy, loop, modelRequest);
+    } catch {
+      return {
+        status: "failed",
+        stoppedReason: "runtime_error",
+        fallback: policy.fallback,
+        modelRequestId: requestId,
+        toolCalls: [],
+        modelRounds: 0,
+        toolRounds: 0,
+      };
+    }
+  }
+
   async resume(input: AgentTurnResumeInput): Promise<AgentTurnRuntimeResult> {
     const policy = normalizePolicy(input.pendingApproval.policy);
     try {
       const loop = await resumeToolUseLoopFromApproval(
+        {
+          intelligenceChannel: this.options.intelligenceChannel,
+          toolCenter: this.options.toolCenter ?? NO_TOOL_BROKER,
+          callerAgentId: policy.callerAgentId,
+          traceId: policy.traceId,
+          goalId: policy.goalId,
+          maxModelRounds: policy.maxModelRounds,
+          maxToolRounds: policy.maxToolRounds,
+          allowedTools: policy.allowedTools,
+          approvedConfirmationIds: input.approvedConfirmationIds,
+          publishToolEvent: this.options.publishToolEvent,
+          abortSignal: input.abortSignal,
+        },
+        input.pendingApproval.modelRequest,
+        input.pendingApproval.toolLoop
+      );
+      return toAgentTurnRuntimeResult(policy, loop, input.pendingApproval.modelRequest);
+    } catch {
+      return {
+        status: "failed",
+        stoppedReason: "runtime_error",
+        fallback: policy.fallback,
+        modelRequestId: input.pendingApproval.modelRequest.requestId,
+        toolCalls: [],
+        modelRounds: 0,
+        toolRounds: 0,
+      };
+    }
+  }
+
+  async resumeAutonomous(input: AgentTurnResumeInput): Promise<AgentTurnRuntimeResult> {
+    const policy = normalizePolicy(input.pendingApproval.policy);
+    try {
+      const loop = await resumeAutonomousToolUseLoopFromApproval(
         {
           intelligenceChannel: this.options.intelligenceChannel,
           toolCenter: this.options.toolCenter ?? NO_TOOL_BROKER,
@@ -227,12 +324,15 @@ function toAgentTurnRuntimeResult(
         ? "cancelled"
         : stoppedReason === "approval_required"
           ? "approval_required"
-        : "failed",
+          : stoppedReason === "out_of_fuel"
+            ? "paused"
+            : "failed",
     stoppedReason,
     fallback: policy.fallback,
     modelRequestId: loop.finalOutput.requestId,
     modelResponseId: loop.finalOutput.responseId,
     finalOutput: loop.finalOutput,
+    finishTask: loop.finishTask,
     toolCalls: loop.toolCalls,
     modelRounds: loop.modelRounds,
     toolRounds: loop.rounds,
@@ -250,6 +350,9 @@ function toAgentTurnRuntimeResult(
 function mapStoppedReason(loop: ToolUseLoopResult): AgentTurnRuntimeResult["stoppedReason"] {
   if (loop.stoppedReason === "max_rounds") {
     return "max_tool_rounds";
+  }
+  if (loop.stoppedReason === "out_of_fuel") {
+    return "out_of_fuel";
   }
   if (loop.stoppedReason === "error") {
     return "model_failed";

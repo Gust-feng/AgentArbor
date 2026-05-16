@@ -49,6 +49,10 @@ export type PanelRunTerminalPayload = {
     readonly code: string;
     readonly message: string;
   };
+  readonly summary?: UndergroundDemoSummary;
+  readonly observation?: PanelObservationReadModel;
+  readonly agentRunTree?: AgentRunTree;
+  readonly canvas?: PanelRunCanvasReadModel;
 };
 
 export type PanelRunJob = {

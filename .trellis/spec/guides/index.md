@@ -21,7 +21,7 @@ These guides help you **ask the right questions before coding**.
 
 | Guide | Purpose | When to Use |
 |-------|---------|-------------|
-| [AgentArbor Governance Guide](./agentarbor-governance-guide.md) | Preserve AgentArbor structure, Trellis integration boundaries, and closeout rules | Any change to docs, skills, agents, `.trellis/`, `.codex/`, `.agentarbor/`, or root rules |
+| [AgentArbor Governance Guide](./agentarbor-governance-guide.md) | Preserve AgentArbor structure, historical Trellis boundaries, and closeout rules | Any change to docs, skills, agents, `.trellis/`, `.codex/`, `.agentarbor/`, or root rules |
 | [Code Reuse Thinking Guide](./code-reuse-thinking-guide.md) | Identify patterns and reduce duplication | When you notice repeated patterns |
 | [Cross-Layer Thinking Guide](./cross-layer-thinking-guide.md) | Think through data flow across layers | Features spanning multiple layers |
 
@@ -52,7 +52,7 @@ These guides help you **ask the right questions before coding**.
 
 - [ ] The change touches `docs/`, `.trellis/`, `.agents/`, `.codex/`, `.agentarbor/`, or root instructions
 - [ ] A skill, sub-agent, workflow, spec, progress record, experience, or ADR is added or changed
-- [ ] Trellis generated files could overlap with AgentArbor's official-compatible structure
+- [ ] Historical Trellis files could be mistaken for the current AgentArbor workflow
 - [ ] A local convenience change might weaken cross-session inheritance or repository governance
 
 → Read [AgentArbor Governance Guide](./agentarbor-governance-guide.md)

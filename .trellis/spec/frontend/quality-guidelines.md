@@ -5,7 +5,7 @@
 ## 生效规则
 
 - `pnpm build` 必须通过，保证 `panel-assets.ts`、`panel-server.ts` 和 `panel.ts` 可编译。
-- `pnpm test` 必须覆盖 panel config API、桌面运行 API、AI 禁用模式拒绝、fake AI run、openai-compatible 缺 key / 缺 model、真实 AI 输出契约失败的安全诊断、async run job、running/completed polling、SSE stream、cursor 续传、stream 断开不影响后台 run、HTTP JSON / SSE 脱敏、provider fetch 未调用、默认中文 UI、左侧会话导航、空活动流、目标输入、主画布报告 / 成果摘要、运行中轻量活动追加、完成态最终结果、诊断 / Agents / 设置详情、模型输出增量、同一 model request 的 live delta 不被完成后派生 delta 重复展示，以及运行追踪投影。
+- `pnpm test` 必须覆盖 panel config API、桌面运行 API、AI 禁用模式拒绝、fake AI run、openai-compatible 缺 key / 缺 model、真实 AI 输出契约失败的安全诊断、async run job、running/completed polling、SSE stream、cursor 续传、stream 断开不影响后台 run、HTTP JSON / SSE 脱敏、provider fetch 未调用、默认中文 UI、左侧会话导航、空活动流、消息输入、主画布报告 / 成果摘要、运行中轻量活动追加、完成态最终结果、诊断 / Agents / 设置详情、模型输出增量、同一 model request 的 live delta 不被完成后派生 delta 重复展示，以及运行追踪投影。
 - `pnpm panel:smoke` 必须能启动本地服务、打印 URL 并退出。
 - `pnpm panel:desktop:smoke` 必须能启动 Electron 桌面宿主的 smoke 路径、关闭本地服务并退出，不创建真实窗口，不要求 CI 具备可交互桌面会话。
 - 本地 panel 默认推荐 `openai-compatible` 作为真实工作流入口，但配置不完整时必须停在配置边界并显示待办；不得发起真实网络，不得自动 fallback 成 fake 成功。默认 `pnpm test` 仍通过显式 fake/stub 路径保持稳定。

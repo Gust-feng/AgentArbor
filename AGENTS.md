@@ -36,7 +36,7 @@ AgentArbor 是桌面通用 Agent / 桌面任务工作台。用户从统一 Deskt
 Desktop Shell -> Task Soil -> Underground Cognitive Runtime -> Plan -> Aboveground Execution Runtime -> Fruits -> Governance Pipeline -> Global Soil
 ```
 
-当前产品架构事实源是 `docs/架构设计/产品架构/ADR-0022-AgentArbor桌面通用Agent与双运行时架构.md`；ADR-0018 只保留为历史概念树和植物语义来源。活跃开发指南必须承接 ADR-0022 的稳定结论。
+长期产品架构事实源是 `docs/架构设计/产品架构/ADR-0022-AgentArbor桌面通用Agent与双运行时架构.md`；当前活跃实现路线是 `docs/架构设计/产品架构/ADR-0024-桌面基础Agent与基础设施优先路线.md`。当前阶段优先打磨默认普通 `agent`，显式 `deep` 入口和 deep 后端能力冻结为未来工作，除非用户重新明确启动，不主动设计、展示或改动 deep 路径。ADR-0018 只保留为历史概念树和植物语义来源。
 
 开发前必须先读：
 
@@ -47,8 +47,6 @@ Desktop Shell -> Task Soil -> Underground Cognitive Runtime -> Plan -> Abovegrou
 - `docs/开发指南/02-核心闭环/README.md`
 - `docs/开发指南/03-系统架构/README.md`
 - `docs/开发指南/04-模型与契约/README.md`
-- `docs/任务看板/README.md`
-- `docs/任务看板/看板.md`
 
 ## 标准结构
 
@@ -69,7 +67,7 @@ Desktop Shell -> Task Soil -> Underground Cognitive Runtime -> Plan -> Abovegrou
 ## 目录边界
 
 - `docs/`：人类可读的正式开发指南、任务看板、研究资料和架构设计。
-- `.trellis/`：当前 AI 开发工作流、任务上下文和项目规范。
+- `.trellis/`：历史 Trellis 工作流和规范材料。`.trellis/tasks/` 不再作为当前开发约束、任务源或上下文入口；开发者不能依据其中旧 PRD/任务状态覆盖当前产品方向。
 - `.agents/`：官方 Agent Skills 兼容层，只放 `skills/` 和未来可选 `plugins/`。
 - `.codex/`：Codex 开发适配层。
 - `.opencode/`：OpenCode 开发适配层。
@@ -79,7 +77,7 @@ Desktop Shell -> Task Soil -> Underground Cognitive Runtime -> Plan -> Abovegrou
 
 禁止把这些层混用。平台适配文件不是 AgentArbor 原生产品事实源，未来运行时资产也不能替代当前开发文档。
 
-当前 `.trellis/spec/`、`.trellis/tasks/`、`.trellis/scripts/`、`.trellis/workflow.md`、`.trellis/config.yaml`、`.trellis/.version` 和 `.trellis/.gitignore` 是共享 Trellis 事实源；`.trellis/.runtime/`、`.trellis/workspace/`、`.trellis/.developer` 和 `.trellis/.current-task` 继续作为本地运行态忽略。`.agents/`、`.codex/`、`.opencode/`、`.claude/` 和 `.agentarbor/` 默认仍作为本地开发态点目录被忽略，不等于当前产品源码基线的一部分。若其中某类模板、初始化说明或 AgentArbor 原生运行时资产需要成为团队共享契约，必须先明确目录职责、读写规则、验证方式和提交范围，再调整忽略规则并单独提交。
+`.trellis/tasks/` 是历史任务材料，不再参与当前开发流程；`.trellis/spec/` 中仍有价值的工程规则只能作为参考，不能覆盖 `AGENTS.md`、`docs/开发指南/` 和当前用户指令。`.agents/`、`.codex/`、`.opencode/`、`.claude/` 和 `.agentarbor/` 默认仍作为本地开发态点目录被忽略，不等于当前产品源码基线的一部分。若其中某类模板、初始化说明或 AgentArbor 原生运行时资产需要成为团队共享契约，必须先明确目录职责、读写规则、验证方式和提交范围，再调整忽略规则并单独提交。
 
 ## 文档规则
 
@@ -88,11 +86,11 @@ Desktop Shell -> Task Soil -> Underground Cognitive Runtime -> Plan -> Abovegrou
 - 顶级只保留 `README.md` 和必要中文目录。
 - 目录名、文档名和正文默认使用简体中文，`README.md` 作为索引文件例外。
 - `docs/开发指南/` 只保存当前稳定开发口径。
-- `docs/任务看板/` 只保存从 `.trellis/tasks/` 派生的人类态势看板资产，用于展示前置任务、当前任务和未来方向，不保存计划源数据。
+- `docs/任务看板/` 仅保留历史看板说明，不再作为当前开发入口或任务源。
 - `docs/研究资料/` 保存研究报告、工程研究、外部参考研究和有长期参考价值的材料。
 - `docs/架构设计/` 保存长期架构决策、协议边界、工作区结构和植物学融合架构。
 - 历史经验、推进记录、阶段计划、会话沉淀、草案包和准备包不保留在 `docs/` 活跃知识面中。
-- 阶段推进、任务续接、检查点和工作流状态由 `.trellis/` 管理；不新增根目录 `Plan/` 或 `Plans/` 作为第二套计划入口。每次 Trellis 阶段推进、任务切换、完成或归档后，应使用 repo-local skill `trellis-task-board` 刷新 `docs/任务看板/看板.md`，并在看板结构或规则变化时同步检查 `docs/任务看板/README.md` 与 `docs/任务看板/规则.md`。
+- 阶段推进、任务续接、检查点和工作流状态不再由 `.trellis/tasks/` 管理；不新增根目录 `Plan/` 或 `Plans/` 作为第二套计划入口。新的开发计划应进入正式开发指南、ADR、任务契约文档或代码实现边界，而不是恢复 Trellis task 流程。
 - 资料只有在具有明确架构或研究价值时才保留；对未来开发没有用的材料必须删除。
 - 文档索引必须准确指向当前存在的文件。
 - 文档内容必须能指导实现，不能只保留口号、历史过程或无主张材料。

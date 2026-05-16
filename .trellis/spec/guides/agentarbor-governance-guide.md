@@ -7,11 +7,12 @@ Use this guide whenever work touches AgentArbor repository structure, docs, skil
 - `AGENTS.md` is the hard execution rule for AI contributors.
 - `docs/README.md` is the human-readable documentation entry.
 - `docs/开发指南/` is the formal chaptered product and development guide.
-- `docs/架构设计/产品架构/ADR-0022-AgentArbor桌面通用Agent与双运行时架构.md` is the current product architecture fact source.
+- `docs/架构设计/产品架构/ADR-0022-AgentArbor桌面通用Agent与双运行时架构.md` is the long-term product architecture fact source.
+- `docs/架构设计/产品架构/ADR-0024-桌面基础Agent与基础设施优先路线.md` is the current active implementation route.
 - `docs/架构设计/产品架构/ADR-0018-AgentArbor原生概念树架构.md` is historical context only; it is partially superseded by ADR-0022.
 - `docs/架构设计/产品架构/ADR-0019-地下辐射生长模型.md` defines the historical radial-growth basis now framed as Underground Cognitive Runtime.
 - `docs/架构设计/产品架构/ADR-0020-智能通道与模型接入边界.md` defines the accepted model access boundary.
-- `.trellis/` is the current workflow harness and contextual spec layer.
+- `.trellis/` is historical Trellis workflow/spec material. `.trellis/tasks/` is no longer the current task, constraint, or context source.
 - `.agents/skills/` is the shared Agent Skills layer.
 - `.codex/` is Codex development adapter configuration.
 - `.opencode/` is OpenCode development adapter configuration.
@@ -30,7 +31,7 @@ Desktop Shell -> Task Soil -> Underground Cognitive Runtime -> Plan -> Abovegrou
 - Underground Cognitive Runtime turns task intent into a judged Plan through exploration, parent synthesis, convergence, necessary user clarification, or stopped state.
 - Plan / Plan Package carries direction basis, constraint refs, evidence refs, risks and execution entry from Underground to Aboveground. `.agentarbor` is only an implementation/storage form for Plan Package.
 - Aboveground Execution Runtime consumes approved Plan and produces execution artifacts, verification and Fruits.
-- Current implementation priority is the Desktop Shell single loop: task input -> Task Soil -> Underground exploration / convergence -> approved Plan Package -> lightweight Aboveground execution -> Fruit.
+- Current implementation priority is the default Desktop Basic Agent: task input, continuous conversation, model/tool loop, confirmation, safe events, persistence, and workbench result presentation. Visible deep entry and deep backend expansion are frozen for future work unless the user explicitly restarts that project.
 - Intelligence Channel is the only model access route. AI output remains candidate, draft, explanation, or advice until deterministic convergence, validation, verification, or governance promotes it.
 - Aboveground organizations consume Plan by default. When evidence, Global Soil fit, external facts, constraint detail, context, capability hints, or key-assumption validation are missing, they send a Nutrient Request to Underground Cognitive Runtime instead of creating their own direction-exploration cluster.
 - Fruits are deliverables, AgentApps, capability packages, run memories, or experience candidates; they are not Soil until Governance validates, attributes, versions, permissions, and retirement policy.
@@ -60,7 +61,7 @@ Underground Cognitive Runtime is not a linear pipeline. It uses a fixed parent l
 `docs/` must stay clean before implementation. The active docs tree only keeps formal development guidance, architecture design, and research material that can inform future development:
 
 - keep `docs/开发指南/` as the stable current development entry;
-- keep `docs/任务看板/` as the human-readable board asset derived from `.trellis/tasks/`; it is not a source of truth;
+- keep `docs/任务看板/` only as a historical board asset; it is not a current task source and is no longer derived from `.trellis/tasks/`;
 - keep `docs/研究资料/` for research reports, early product material, engineering research, and external reference research;
 - keep `docs/架构设计/` for long-term product architecture, protocol boundaries, workspace structure, and the current native concept-tree architecture;
 - use Simplified Chinese folder names, document names, and prose, except conventional `README.md` index files;
@@ -71,27 +72,23 @@ Underground Cognitive Runtime is not a linear pipeline. It uses a fixed parent l
 ## Required Workflow
 
 1. Read `docs/README.md`, `docs/开发指南/README.md`, and `docs/开发指南/00-总览.md` before structural work.
-2. Use Trellis skills as the default workflow surface:
-   - `trellis-before-dev` before implementation;
-   - `trellis-check` before handoff;
-   - `trellis-update-spec` when a reusable rule belongs in `.trellis/spec/`;
-   - `trellis-finish-work` only when the working tree is ready for a clean task close.
-3. Do not recreate noisy active planning/progress/experience trees in `docs/`. Trellis owns task lifecycle state; docs keeps stable guide, research, and architecture only.
-4. When Trellis task state or next actions change, update `docs/任务看板/看板.md` through the `trellis-task-board` skill, and keep `README.md` / `规则.md` aligned when the asset structure changes.
+2. Do not use `.trellis/tasks/` as the default workflow surface. It is historical material only.
+3. Do not recreate noisy active planning/progress/experience trees in `docs/`. Stable rules belong in the development guide, ADRs, task contract documents, or code/test boundaries.
+4. Keep `docs/任务看板/` frozen as a historical view unless its boundary explanation or links are wrong.
 
 ## Layer Boundaries
 
-- Trellis owns task lifecycle, contextual specs, workflow state, and multi-platform adapters.
+- Trellis no longer owns current task lifecycle or workflow state in this repository. Historical `.trellis/spec/` material may inform implementation only when it does not conflict with `AGENTS.md`, `docs/开发指南/`, ADR-0024, or the latest user instruction.
 - `docs/` owns stable human-readable product and development guidance.
 - `.agentarbor/` owns future Plan Package material only after its contracts are stable and a real task birth reason exists.
 - `.codex/` and `.opencode/` are platform adapters, not AgentArbor-native product source data.
-- `docs/任务看板/` projects `.trellis/tasks/` for humans and must be rebuildable from Trellis state.
+- `docs/任务看板/` is a historical view and must not be rebuilt from `.trellis/tasks/` as current state.
 
 ## Record Placement
 
 - Hard execution rules belong in `AGENTS.md`.
 - Human-readable project guidance belongs in `docs/`.
-- Current workflow state belongs in `.trellis/`.
+- Current workflow state no longer belongs in `.trellis/tasks/`.
 - Codex adapter agents belong in `.codex/agents/`.
 - OpenCode adapter agents belong in `.opencode/agents/`.
 - Agent Skills belong in `.agents/skills/`.
@@ -102,7 +99,7 @@ Do not store current documentation history, progress records, or workflow handof
 ## Structural Checks
 
 - `docs/` top level contains only `README.md` and approved Chinese directories.
-- `docs/任务看板/` contains only human-readable board pages derived from Trellis task state and stable development-guide direction.
+- `docs/任务看板/` contains only historical board pages and boundary notes.
 - `docs/开发指南/` contains the active chaptered product positioning, core loop, architecture, contracts, agent lifecycle, engineering rules, and implementation entry boundary.
 - `.agents/` contains only `skills/` and optional `plugins/`.
 - `.agents/skills/` skill folder names match `SKILL.md` frontmatter names.

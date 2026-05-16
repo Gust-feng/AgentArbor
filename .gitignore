@@ -8,7 +8,7 @@ dist/
 build/
 coverage/
 .turbo/
-
+分析/
 # Local environment
 .env
 .env.*
@@ -29,8 +29,9 @@ coverage/
 .agentarbor
 .trae
 .trellis/*
+!.trellis/spec/
 !.trellis/spec/**
-!.trellis/tasks/**
+!.trellis/scripts/
 !.trellis/scripts/**
 !.trellis/workflow.md
 !.trellis/config.yaml

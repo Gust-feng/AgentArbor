@@ -10,9 +10,9 @@
 
 当前实现默认收敛为 **Desktop Basic Agent Runtime + 基础设施优先**。
 
-用户默认面对的是一个桌面基础 Agent：接收任务、理解上下文、直接回答或调用授权工具、在写入/执行/外部提交前请求确认、持续展示安全进度、持久化会话和运行记录，并在完成后给出可用结果。
+用户默认面对的是一个桌面基础 Agent：接收消息、理解上下文、直接回答或调用授权工具、在写入/执行/外部提交前请求确认、持续展示安全进度、持久化会话和运行记录，并在完成后给出可用结果。
 
-Underground Cognitive Runtime、Aboveground Execution Runtime、Agent Fabric、Plan Package、Governance Pipeline 和 Global Soil 仍是长期架构，但当前默认桌面会话不以“地下/地上组织”作为用户文案或首屏概念。相关能力只能作为 deep / advanced / compatibility 路径显式启用，不能污染普通桌面 Agent 会话、任务卡、面板首屏或基础 API。
+Underground Cognitive Runtime、Aboveground Execution Runtime、Agent Fabric、Plan Package、Governance Pipeline 和 Global Soil 仍是长期架构，但当前默认桌面会话不以“地下/地上组织”作为用户文案或首屏概念。deep / advanced 是未来项目边界：当前不新增可见 deep 入口，不主动改动 deep 后端路径，也不能污染普通桌面 Agent 会话、确认卡、面板首屏或基础 API。
 
 ## 当前活跃主线
 
@@ -28,14 +28,14 @@ Desktop Shell
 
 当前工程目标是把这条主线做稳，而不是提前扩张地下组织、地上组织、Routines、完整 MCP 管理器、多 agent 团队模式或治理回流。
 
-## 双模式边界
+## 普通优先边界
 
-桌面端保留两种运行模式，但它们不是两套产品或两套基础设施：
+桌面端当前只打磨默认普通 Agent。历史实现中已经存在的 deep / advanced / compatibility 路径作为未来能力边界保留，但本路线不要求展示入口、不扩展后端编排，也不把复杂输入自动升级到 deep。
 
 - 普通模式（`agent`）：默认入口。它是单 Agent 的 conversational / tool-assisted turn，复用 Task Soil、Skill Context、AgentTurnRuntime、ToolCenter、Confirmation Gate、RunEvent、RuntimeDatabase 和 Workbench Panel；它不自动升级到 Underground、不派生 child agent、不暴露地下内部工具。
-- 深入模式（`deep`）：显式高级入口。它可以按 ADR-0022 / ADR-0021 / Underground radial growth spec 演进出目标成形、rootlet 探索、候选池、收束、Plan / Handoff 等复杂组织；这些策略只能在 deep adapter 内部出现。
+- 未来深入模式（`deep`）：只能在用户重新明确启动 deep 项目后，按 ADR-0022 / ADR-0021 / Underground radial growth spec 演进目标成形、rootlet 探索、候选池、收束、Plan / Handoff 等复杂组织；这些策略只能在 deep adapter 内部出现。
 
-因此，普通模式和深入模式共享执行平台，不共享思考/编排策略。任何新增 deep 能力都必须先证明不会改变普通模式的工具可见性、事件投影、确认语义和首屏文案。
+因此，普通模式和未来深入模式共享执行平台，不共享思考/编排策略。任何未来 deep 能力都必须先证明不会改变普通模式的工具可见性、事件投影、确认语义和首屏文案。
 
 ## 基础设施边界
 
@@ -56,6 +56,7 @@ Desktop Shell
 - 完整 MCP 管理器。
 - 自动化调度器与 Routines UI。
 - 子 agent 团队模式。
+- 可见 deep 入口和 deep 后端扩展。
 - 完整 Aboveground 执行组织。
 - Governance 回流。
 - `.agentarbor/` Plan Package 的占位资产。
@@ -67,7 +68,7 @@ Desktop Shell
 - 活跃开发指南和面板普通文案必须以基础桌面 Agent 为默认路线。
 - ADR-0022 的地下/地上语义继续作为长期架构事实源，但当前实现默认不展示内部组织术语。
 - 基础设施契约优先于宏大概念扩张；任何新功能必须先落到安全投影、确认、事件、持久化和测试边界。
-- 未来 deep mode 可以复用同一套 AgentTurnRuntime、ToolCenter、RunEvent、RuntimeDatabase 和 Confirmation Gate，不能另起一套平行运行时。
+- 未来 deep mode 若重启，可以复用同一套 AgentTurnRuntime、ToolCenter、RunEvent、RuntimeDatabase 和 Confirmation Gate，不能另起一套平行运行时。
 
 ## 相关文档
 

@@ -145,6 +145,11 @@ export type DesktopAgentConversationMessage = {
 
 const DESKTOP_AGENT_ID = "desktop-agent-session";
 
+/**
+ * Ordinary desktop agent runtime: a single conversational/tool-assisted turn
+ * that shares infrastructure with deep mode but never starts Underground
+ * orchestration by itself.
+ */
 export async function runDesktopAgentSession(
   goal: string,
   options: RunDesktopAgentSessionOptions = {}
@@ -523,6 +528,7 @@ function publishTriggeredSkills(input: {
 }
 
 function allowedToolsForDesktopAgent(toolCenter: ToolExecutionBroker): readonly string[] {
+  // Ordinary desktop mode keeps Underground tools behind the explicit deep-mode boundary.
   return toolCenter.list().map((tool) => tool.name).filter((name) => !name.startsWith("underground_"));
 }
 

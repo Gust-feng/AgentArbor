@@ -11,6 +11,7 @@ import {
   createModelRuntimeConfig,
   createModelRuntimeDisabledConfigurationError,
   ModelRuntimeConfigurationError,
+  type ModelRuntimeConfig,
   type ModelRuntimeMode,
 } from "../model-runtime/index.js";
 import {
@@ -2393,6 +2394,15 @@ async function runForPanel(
     : runUndergroundForPanel(runtime, goal, aiMode, options);
 }
 
+type DesktopRunResources = {
+  readonly capabilitySnapshot: Awaited<ReturnType<PanelRuntime["capabilityCenter"]["snapshot"]>>;
+  readonly aiEnvironment: Awaited<ReturnType<PanelRuntime["configCenter"]["createUndergroundAiEnvironment"]>>;
+  readonly aiConfig: Extract<ModelRuntimeConfig, { readonly enabled: true }>;
+  readonly workspaceRoot: string;
+  readonly toolStates: ReturnType<typeof toolStatesFromCapabilitySnapshot>;
+  readonly playwrightAvailable: boolean;
+};
+
 async function runDesktopForPanel(
   runtime: PanelRuntime,
   goal: string,
@@ -2402,6 +2412,18 @@ async function runDesktopForPanel(
   options: PanelRunExecutionOptions = {}
 ): Promise<PanelRunExecutionResult> {
   throwIfAborted(options.abortSignal);
+  const resources = await prepareDesktopRunResources(runtime, aiMode, options);
+
+  return runMode === "deep"
+    ? runDeepDesktopForPanel(runtime, goal, resources, options)
+    : runOrdinaryDesktopForPanel(runtime, goal, aiMode, taskSoilInput, resources, options);
+}
+
+async function prepareDesktopRunResources(
+  runtime: PanelRuntime,
+  aiMode: ModelRuntimeMode,
+  options: PanelRunExecutionOptions
+): Promise<DesktopRunResources> {
   if (aiMode === "none") {
     throw createModelRuntimeDisabledConfigurationError();
   }
@@ -2418,6 +2440,7 @@ async function runDesktopForPanel(
       "当前运行批次只支持 OpenAI-compatible 模型 profile；Anthropic、Gemini、Ollama 先作为配置边界保留。"
     );
   }
+
   const aiEnvironment = await runtime.configCenter.createUndergroundAiEnvironment({
     modelProvider: capabilitySnapshot.activeModel,
   });
@@ -2435,68 +2458,93 @@ async function runDesktopForPanel(
     throw createModelRuntimeDisabledConfigurationError(aiConfig.summaryInput);
   }
 
-  const workspaceRoot = capabilitySnapshot.workspace.workspaceDirectory;
-  const snapshotToolStates = toolStatesFromCapabilitySnapshot(capabilitySnapshot);
-  const snapshotPlaywrightAvailable = capabilitySnapshot.toolCatalog.tools.some(
-    (tool) => tool.name === "browser_snapshot" && tool.availability === "available"
-  );
-  if (runMode === "deep") {
-    const createToolCenter = await createConfiguredToolCenterFactory(runtime.configCenter, {
-      env: aiEnvironment,
-      fetch: runtime.providerFetch,
-      workspaceRoot,
-      toolStates: snapshotToolStates,
-      playwrightAvailable: snapshotPlaywrightAvailable,
-    });
-    throwIfAborted(options.abortSignal);
-    const result = await runUndergroundDirectionSessionWithIntelligence(goal, {
-      createIntelligenceChannel: aiConfig.createIntelligenceChannel,
-      createToolCenter,
-      onRuntimeReady: options.onRuntimeReady,
-    });
-    throwIfAborted(options.abortSignal);
-    const summary = createUndergroundDemoSummary(result, undefined, aiConfig.summaryInput);
-    const observation = toPanelObservation(result.observationSnapshot);
-    const eventEntries = result.runtime.eventLog.list();
-    const transcript = createPanelRunTranscript({
-      runId: result.traceId,
-      status: "completed",
-      eventEntries,
-      summary,
-      observation,
-      agentRunTree: result.undergroundOrchestratorRun.agentRunTree,
-      desktopMode: "deep",
-      createdAt: eventEntries[0]?.recordedAt ?? new Date(0).toISOString(),
-      updatedAt: eventEntries.at(-1)?.recordedAt ?? new Date(0).toISOString(),
-    });
+  return {
+    capabilitySnapshot,
+    aiEnvironment,
+    aiConfig,
+    workspaceRoot: capabilitySnapshot.workspace.workspaceDirectory,
+    toolStates: toolStatesFromCapabilitySnapshot(capabilitySnapshot),
+    playwrightAvailable: capabilitySnapshot.toolCatalog.tools.some(
+      (tool) => tool.name === "browser_snapshot" && tool.availability === "available"
+    ),
+  };
+}
 
-    return {
-      summary,
-      observation,
-      eventEntries,
-      agentRunTree: result.undergroundOrchestratorRun.agentRunTree,
-      canvas: createUndergroundDeepCanvas({
-        result,
-        transcript,
-      }),
-    };
-  }
+async function createDesktopToolCenterFactory(
+  runtime: PanelRuntime,
+  resources: DesktopRunResources
+) {
+  return createConfiguredToolCenterFactory(runtime.configCenter, {
+    env: resources.aiEnvironment,
+    fetch: runtime.providerFetch,
+    workspaceRoot: resources.workspaceRoot,
+    toolStates: resources.toolStates,
+    playwrightAvailable: resources.playwrightAvailable,
+  });
+}
 
+async function runDeepDesktopForPanel(
+  runtime: PanelRuntime,
+  goal: string,
+  resources: DesktopRunResources,
+  options: PanelRunExecutionOptions
+): Promise<PanelRunExecutionResult> {
+  // Deep mode is explicit: it reuses the desktop infrastructure but owns the
+  // Underground orchestration strategy and its richer canvas/read model.
+  const createToolCenter = await createDesktopToolCenterFactory(runtime, resources);
+  throwIfAborted(options.abortSignal);
+  const result = await runUndergroundDirectionSessionWithIntelligence(goal, {
+    createIntelligenceChannel: resources.aiConfig.createIntelligenceChannel,
+    createToolCenter,
+    onRuntimeReady: options.onRuntimeReady,
+  });
+  throwIfAborted(options.abortSignal);
+  const summary = createUndergroundDemoSummary(result, undefined, resources.aiConfig.summaryInput);
+  const observation = toPanelObservation(result.observationSnapshot);
+  const eventEntries = result.runtime.eventLog.list();
+  const transcript = createPanelRunTranscript({
+    runId: result.traceId,
+    status: "completed",
+    eventEntries,
+    summary,
+    observation,
+    agentRunTree: result.undergroundOrchestratorRun.agentRunTree,
+    desktopMode: "deep",
+    createdAt: eventEntries[0]?.recordedAt ?? new Date(0).toISOString(),
+    updatedAt: eventEntries.at(-1)?.recordedAt ?? new Date(0).toISOString(),
+  });
+
+  return {
+    summary,
+    observation,
+    eventEntries,
+    agentRunTree: result.undergroundOrchestratorRun.agentRunTree,
+    canvas: createUndergroundDeepCanvas({
+      result,
+      transcript,
+    }),
+  };
+}
+
+async function runOrdinaryDesktopForPanel(
+  runtime: PanelRuntime,
+  goal: string,
+  aiMode: ModelRuntimeMode,
+  taskSoilInput: DesktopTaskSoilInput | undefined,
+  resources: DesktopRunResources,
+  options: PanelRunExecutionOptions
+): Promise<PanelRunExecutionResult> {
+  // Ordinary mode is the default desktop assistant path. It shares model/tool
+  // infrastructure with deep mode but does not auto-upgrade into Underground.
   const agent = await runDesktopAgentSession(goal, {
     aiMode,
-    createIntelligenceChannel: aiConfig.createIntelligenceChannel,
-    createToolCenter: await createConfiguredToolCenterFactory(runtime.configCenter, {
-      env: aiEnvironment,
-      fetch: runtime.providerFetch,
-      workspaceRoot,
-      toolStates: snapshotToolStates,
-      playwrightAvailable: snapshotPlaywrightAvailable,
-    }),
+    createIntelligenceChannel: resources.aiConfig.createIntelligenceChannel,
+    createToolCenter: await createDesktopToolCenterFactory(runtime, resources),
     taskSoilInput,
     conversationHistory: options.conversationHistory,
     skillContexts: await resolveTriggeredSkillContexts(runtime, goal),
-    modelCapabilities: capabilitySnapshot.modelCapabilities,
-    capabilitySnapshot,
+    modelCapabilities: resources.capabilitySnapshot.modelCapabilities,
+    capabilitySnapshot: resources.capabilitySnapshot,
     platform: process.platform,
     abortSignal: options.abortSignal,
     onRuntimeReady: options.onRuntimeReady,

@@ -6,9 +6,9 @@
 
 此目录保存 AgentArbor 产品的核心架构决策，包括：
 
-- 桌面基础 Agent：当前默认实现路线是 Desktop Basic Agent Runtime、工具系统、安全确认、运行事件、持久化和工作台。
+- 桌面基础 Agent：当前默认实现路线是普通模式 `agent`，即 Desktop Basic Agent Runtime、工具系统、安全确认、运行事件、持久化和工作台。
 - 桌面通用 Agent 长期愿景：Desktop Shell、Task Soil、Main Canvas、Artifact Area 和 Observation Panel。
-- 双运行时：Underground Cognitive Runtime 与 Aboveground Execution Runtime 共享 Shared Agent Kernel，但当前只作为 deep / advanced / compatibility 路径显式启用。
+- 双运行时：Underground Cognitive Runtime 与 Aboveground Execution Runtime 共享 Shared Agent Kernel，但当前只作为深入模式 `deep` / advanced / compatibility 路径显式启用。
 - Plan：地下到地上的产品级交接对象；`.agentarbor` 只作为 Plan Package 的实现/存储形态。
 - 智能体体系：Agent Fabric、动态派生 child agent、父层 synthesis / convergence 和权限边界。
 - 治理回流：Run Memory、Experience Candidate、Governance Pipeline、Capability Asset、Path Bias 和 Global Soil。

@@ -13,6 +13,11 @@ import type { AgentRunTree } from "../domain/underground/index.js";
 import { basicConfirmationDecisionSummary } from "./basic-agent-runtime/index.js";
 
 export type PanelRunKind = "desktop" | "underground";
+/**
+ * Desktop runs share the same panel/run infrastructure. "agent" is the
+ * ordinary default path; "deep" is an explicit advanced path backed by the
+ * Underground architecture.
+ */
 export type PanelDesktopRunMode = "agent" | "deep";
 type PanelRunStreamEventInput = Omit<PanelRunStreamEvent, "sequence"> | PanelRunStreamEvent;
 

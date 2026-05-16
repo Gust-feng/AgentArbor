@@ -482,6 +482,7 @@ a:hover {
   border-radius: 20px;
   background: var(--surface);
   overflow: visible;
+  isolation: isolate;
   box-shadow: 0 2px 14px rgba(17, 24, 39, 0.04);
   transition: border-color var(--motion-panel-duration) var(--motion-ease-standard),
               box-shadow var(--motion-panel-duration) var(--motion-ease-standard);
@@ -492,53 +493,42 @@ a:hover {
   box-shadow: 0 10px 32px rgba(17, 24, 39, 0.08);
 }
 
-.chat-input-grass-stage {
+.procedural-grass-input.sending {
+  border-color: color-mix(in srgb, var(--accent-border) 78%, transparent);
+}
+
+.procedural-grass-stage {
   position: absolute;
-  left: 28px;
-  right: 28px;
-  bottom: calc(100% - 1px);
-  height: clamp(56px, 8vw, 86px);
+  left: 0;
+  right: 0;
+  bottom: calc(100% - 6px);
+  height: clamp(64px, 7vw, 80px);
   z-index: 2;
   pointer-events: none;
   transform-origin: bottom center;
+  overflow: visible;
+  contain: layout paint;
 }
 
-.chat-input-grass-layer {
+.procedural-grass-mask {
   position: absolute;
   inset: 0;
   overflow: hidden;
-  pointer-events: none;
-  transform-origin: bottom center;
+  transform-origin: center bottom;
 }
 
-.chat-input-grass-image {
+.procedural-grass-line-image {
   position: absolute;
-  left: 0;
-  bottom: 0;
-  display: block;
-  width: 100%;
-  height: auto;
-  max-width: none;
+  inset: -2px 0 0;
+  opacity: 0.92;
+  background-repeat: no-repeat;
+  background-position: center 60%;
+  background-size: 100% auto;
+  transform-origin: center bottom;
   mix-blend-mode: multiply;
+  filter: saturate(1.04) contrast(1.02) drop-shadow(0 4px 5px rgba(88, 127, 51, 0.1));
   pointer-events: none;
   user-select: none;
-  transform-origin: bottom center;
-}
-
-.chat-input-grass-image.ground {
-  object-position: center 59%;
-}
-
-.chat-input-grass-image.blades {
-  object-position: center 58%;
-}
-
-.chat-input-grass-image.flowers {
-  object-position: center 56%;
-}
-
-.chat-input-grass-image.canopy {
-  object-position: center 60%;
 }
 
 .chat-input-text {
@@ -2184,6 +2174,17 @@ a:hover {
     max-width: none;
   }
 
+  .procedural-grass-stage {
+    left: 0;
+    right: 0;
+    height: 58px;
+  }
+
+  .procedural-grass-line-image {
+    background-size: 100% auto;
+    background-position: center 60%;
+  }
+
   .workspace-page-header,
   .workspace-filter-row {
     flex-direction: column;
@@ -2242,7 +2243,13 @@ a:hover {
   .sidebar-expandable,
   .sidebar-recent-row,
   .sidebar-user-card,
-  .topbar-toggle-icon {
+  .topbar-toggle-icon,
+  .procedural-grass-line-image {
     transition: none;
+    animation: none;
+  }
+
+  .procedural-grass-stage {
+    height: 54px;
   }
 }

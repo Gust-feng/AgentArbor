@@ -72,6 +72,7 @@ function isDeniedByPermissionRef(toolName: string, refs: ReadonlySet<string>): b
 }
 
 function isVisibleInRunMode(runMode: "agent" | "deep", toolName: string): boolean {
+  // Mode visibility is the safety boundary: ordinary runs hide Underground internals; deep runs may opt in.
   if (runMode === "deep") {
     return true;
   }

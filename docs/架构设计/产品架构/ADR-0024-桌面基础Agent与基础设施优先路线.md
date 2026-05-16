@@ -28,6 +28,15 @@ Desktop Shell
 
 当前工程目标是把这条主线做稳，而不是提前扩张地下组织、地上组织、Routines、完整 MCP 管理器、多 agent 团队模式或治理回流。
 
+## 双模式边界
+
+桌面端保留两种运行模式，但它们不是两套产品或两套基础设施：
+
+- 普通模式（`agent`）：默认入口。它是单 Agent 的 conversational / tool-assisted turn，复用 Task Soil、Skill Context、AgentTurnRuntime、ToolCenter、Confirmation Gate、RunEvent、RuntimeDatabase 和 Workbench Panel；它不自动升级到 Underground、不派生 child agent、不暴露地下内部工具。
+- 深入模式（`deep`）：显式高级入口。它可以按 ADR-0022 / ADR-0021 / Underground radial growth spec 演进出目标成形、rootlet 探索、候选池、收束、Plan / Handoff 等复杂组织；这些策略只能在 deep adapter 内部出现。
+
+因此，普通模式和深入模式共享执行平台，不共享思考/编排策略。任何新增 deep 能力都必须先证明不会改变普通模式的工具可见性、事件投影、确认语义和首屏文案。
+
 ## 基础设施边界
 
 当前阶段必须优先稳定这些能力：

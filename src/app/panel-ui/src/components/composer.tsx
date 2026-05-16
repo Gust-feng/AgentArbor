@@ -1,40 +1,8 @@
 import React, { useState } from "react";
-import { motion } from "motion/react";
 import { ArrowUp, ChevronDown, Paperclip } from "lucide-react";
+import { ProceduralGrassInput, type ProceduralGrassInputPhase } from "./ProceduralGrassInput";
 import type { BasicAgentRun, ContextAttachment } from "../types";
 import { terminalStatuses } from "../ui-state";
-
-const GRASS_MAX_INPUT_LENGTH = 80;
-const GRASS_IDLE_REVEAL = 0.2;
-const GRASS_FOCUS_REVEAL = 0.4;
-const GRASS_EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
-const GRASS_TRANSITION = { duration: 0.56, ease: GRASS_EASE };
-
-const GRASS_ASSETS = {
-  ground: new URL("../../../../../images/素材图/ChatGPT Image 2026年5月14日 22_07_50 (2).png", import.meta.url)
-    .href,
-  blades: new URL("../../../../../images/素材图/ChatGPT Image 2026年5月14日 22_07_50 (3).png", import.meta.url)
-    .href,
-  flowers: new URL("../../../../../images/素材图/ChatGPT Image 2026年5月14日 22_07_51 (4).png", import.meta.url)
-    .href,
-  canopy: new URL("../../../../../images/素材图/ChatGPT Image 2026年5月14日 22_07_52 (6).png", import.meta.url)
-    .href,
-} as const;
-
-const GRASS_LAYERS: readonly {
-  readonly src: string;
-  readonly className: string;
-  readonly start: number;
-  readonly end: number;
-  readonly maxOpacity: number;
-  readonly rise: number;
-  readonly drift: number;
-}[] = [
-  { src: GRASS_ASSETS.ground, className: "chat-input-grass-image ground", start: 0, end: 0.22, maxOpacity: 1, rise: 5, drift: 0 },
-  { src: GRASS_ASSETS.blades, className: "chat-input-grass-image blades", start: 0.18, end: 0.55, maxOpacity: 0.9, rise: 14, drift: -7 },
-  { src: GRASS_ASSETS.flowers, className: "chat-input-grass-image flowers", start: 0.36, end: 0.78, maxOpacity: 0.72, rise: 18, drift: 6 },
-  { src: GRASS_ASSETS.canopy, className: "chat-input-grass-image canopy", start: 0.56, end: 1, maxOpacity: 0.62, rise: 16, drift: 0 },
-];
 
 const ATTACHMENT_KIND_LABELS: Record<ContextAttachment["kind"], string> = {
   workspace: "工作区",
@@ -44,68 +12,6 @@ const ATTACHMENT_KIND_LABELS: Record<ContextAttachment["kind"], string> = {
 };
 
 const ATTACHMENT_KINDS: readonly ContextAttachment["kind"][] = ["workspace", "file", "project", "web"];
-
-type InputPhase = "idle" | "focused" | "sending";
-
-function clamp01(value: number): number {
-  return Math.max(0, Math.min(value, 1));
-}
-
-function grassRevealRatio(value: string, active: boolean): number {
-  const baseReveal = active ? GRASS_FOCUS_REVEAL : GRASS_IDLE_REVEAL;
-  const progress = Math.min(value.length / GRASS_MAX_INPUT_LENGTH, 1);
-  if (value.length === 0) return baseReveal;
-  return baseReveal + progress * (1 - baseReveal);
-}
-
-function grassLayerReveal(revealRatio: number, start: number, end: number): number {
-  return clamp01((revealRatio - start) / (end - start));
-}
-
-function GrassReveal(props: { readonly value: string; readonly active: boolean }): React.ReactElement {
-  const revealRatio = grassRevealRatio(props.value, props.active);
-
-  return (
-    <div aria-hidden="true" className="chat-input-grass-stage">
-      {GRASS_LAYERS.map((layer, index) => {
-        const layerReveal = grassLayerReveal(revealRatio, layer.start, layer.end);
-        const hiddenFromTop = `${(1 - layerReveal) * 100}%`;
-
-        return (
-          <motion.div
-            className="chat-input-grass-layer"
-            initial={false}
-            animate={{
-              clipPath: `inset(${hiddenFromTop} 0 0 0)`,
-            }}
-            transition={GRASS_TRANSITION}
-            style={{
-              transformOrigin: "bottom center",
-              zIndex: index + 1,
-            }}
-            key={layer.src}
-          >
-            <motion.img
-              src={layer.src}
-              alt=""
-              draggable={false}
-              className={layer.className}
-              initial={false}
-              animate={{
-                opacity: layerReveal * layer.maxOpacity,
-                x: (1 - layerReveal) * layer.drift,
-                y: (1 - layerReveal) * layer.rise,
-                scaleY: 0.82 + layerReveal * 0.18,
-              }}
-              transition={GRASS_TRANSITION}
-              style={{ transformOrigin: "bottom center" }}
-            />
-          </motion.div>
-        );
-      })}
-    </div>
-  );
-}
 
 export function ChatInputBar({
   phase = "idle",
@@ -117,7 +23,7 @@ export function ChatInputBar({
   disabled,
   placeholder = "随便问点什么…",
 }: {
-  phase?: InputPhase;
+  phase?: ProceduralGrassInputPhase;
   value: string;
   onChange: (value: string) => void;
   onSend?: () => void;
@@ -132,14 +38,7 @@ export function ChatInputBar({
   return (
     <div className="px-8 pb-7 shrink-0 bg-[var(--surface)]">
       <div className="max-w-[920px] mx-auto">
-        <div
-          className={`relative overflow-visible bg-[var(--surface)] rounded-[20px] border transition-[border-color,box-shadow] duration-[var(--motion-panel-duration)] ease-[var(--motion-ease-standard)] ${
-            active
-              ? "border-[var(--accent-border)] shadow-[0_10px_32px_rgba(17,24,39,0.08)]"
-              : "border-[var(--border)] shadow-[0_2px_14px_rgba(17,24,39,0.04)]"
-          }`}
-        >
-          <GrassReveal value={value} active={active} />
+        <ProceduralGrassInput value={value} active={active} phase={phase}>
           <div className="px-5 pt-5 pb-3 min-h-[72px]">
             <textarea
               value={value}
@@ -193,7 +92,7 @@ export function ChatInputBar({
               )}
             </button>
           </div>
-        </div>
+        </ProceduralGrassInput>
         <p className="text-center text-[11px] text-[var(--placeholder)] mt-2.5 select-none">
           内容由 AI 生成，仅供参考，请注意核实
         </p>
@@ -222,13 +121,12 @@ export function Composer(props: {
   const [focused, setFocused] = useState(false);
   const running = props.run !== undefined && !terminalStatuses.has(props.run.status);
   const canAddAttachment = props.attachmentValue.trim().length > 0;
-  const phase: InputPhase = props.busy ? "sending" : focused ? "focused" : "idle";
+  const phase: ProceduralGrassInputPhase = props.busy ? "sending" : focused ? "focused" : "idle";
 
   return (
     <section className="chat-composer" aria-label="任务输入">
       <div className="chat-composer-inner">
-        <div className={focused ? "chat-input-card focused" : "chat-input-card"}>
-          <GrassReveal value={props.value} active={phase !== "idle"} />
+        <ProceduralGrassInput value={props.value} active={phase !== "idle"} phase={phase}>
           {props.attachments.length > 0 && (
             <div className="grid grid-cols-1 gap-2 px-3 pt-3">
               {props.attachments.map((attachment) => (
@@ -328,7 +226,7 @@ export function Composer(props: {
               </button>
             </div>
           </div>
-        </div>
+        </ProceduralGrassInput>
       </div>
     </section>
   );

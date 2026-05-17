@@ -74,6 +74,7 @@ import type { ModelOutputDelta } from "../../domain/intelligence/index.js";
 import type {
   RuntimeArtifactRecord,
   RuntimeConfirmationRecord,
+  RuntimeConversationRecord,
   RuntimeDatabase,
   RuntimeEventRecord,
   RuntimeModelCallRecord,
@@ -105,6 +106,7 @@ import {
 import { PanelRunJobStore, type PanelDesktopRunMode, type PanelRunJob, type PanelRunKind } from "../panel-run-jobs.js";
 import {
   PanelConversationStore,
+  trimRuntimeConversationToCompletedPairs,
   toRuntimeConversationRecord,
   type PanelConversationReadModel,
   type PanelConversationSummaryReadModel,
@@ -686,6 +688,9 @@ async function handleConversationMessageRequest(
   const config = await runtime.configCenter.getModelProviderConfig();
   const informationAccess = await runtime.configCenter.getInformationAccessConfig();
   const runInput = parseRunInput(body, defaultAiModeForRunKind("desktop", config.defaultAiMode));
+  if (conversationId !== undefined) {
+    await ensurePanelConversationLoaded(runtime, conversationId);
+  }
   const runAfterRunId = runtime.conversations.nextQueuePredecessor(conversationId);
   const shouldQueue = runAfterRunId !== undefined;
   const mergedTaskSoilInput = runInput.taskSoilInput;
@@ -911,7 +916,9 @@ async function listPanelConversations(
 ): Promise<readonly PanelConversationSummaryReadModel[]> {
   const persisted = (await runtime.runtimeDatabase?.listConversations(limit)) ?? [];
   for (const record of persisted) {
-    runtime.conversations.restore(record);
+    if (runtime.conversations.get(record.conversationId) === undefined) {
+      await restorePersistedPanelConversation(runtime, record);
+    }
   }
   return runtime.conversations.list().slice(0, Math.max(0, Math.floor(limit)));
 }
@@ -925,7 +932,56 @@ async function getPanelConversation(
     return memory;
   }
   const persisted = await runtime.runtimeDatabase?.getConversation(conversationId);
-  return persisted === undefined ? undefined : runtime.conversations.restore(persisted);
+  return persisted === undefined ? undefined : restorePersistedPanelConversation(runtime, persisted);
+}
+
+async function ensurePanelConversationLoaded(
+  runtime: PanelRuntime,
+  conversationId: string
+): Promise<PanelConversationReadModel> {
+  const memory = runtime.conversations.getReadModel(conversationId);
+  if (memory !== undefined) {
+    return memory;
+  }
+  const persisted = await runtime.runtimeDatabase?.getConversation(conversationId);
+  if (persisted === undefined) {
+    throw new PanelHttpError(404, "conversation_not_found", "未找到对话。");
+  }
+  return restorePersistedPanelConversation(runtime, persisted);
+}
+
+async function restorePersistedPanelConversation(
+  runtime: PanelRuntime,
+  record: RuntimeConversationRecord
+): Promise<PanelConversationReadModel> {
+  const completedRunIds = await completedAssistantRunIds(runtime, record);
+  const trimmed = trimRuntimeConversationToCompletedPairs({ record, completedRunIds });
+  const restored = runtime.conversations.restore(trimmed.record);
+  if (trimmed.trimmed && runtime.runtimeDatabase !== undefined) {
+    await runtime.runtimeDatabase.upsertConversation(toRuntimeConversationRecord(restored));
+  }
+  return restored;
+}
+
+async function completedAssistantRunIds(
+  runtime: PanelRuntime,
+  record: RuntimeConversationRecord
+): Promise<ReadonlySet<string> | undefined> {
+  if (runtime.runtimeDatabase === undefined) {
+    return undefined;
+  }
+  const assistantRunIds = unique(
+    record.turns
+      .filter((turn) => turn.role === "assistant" && turn.runId !== undefined)
+      .map((turn) => turn.runId!)
+  );
+  const completed = await Promise.all(
+    assistantRunIds.map(async (runId): Promise<string | undefined> => {
+      const snapshot = await runtime.runtimeDatabase?.getRun(runId);
+      return snapshot?.run.status === "completed" ? runId : undefined;
+    })
+  );
+  return new Set(completed.filter((runId): runId is string => runId !== undefined));
 }
 
 async function executeBasicPanelRun(
@@ -2583,7 +2639,7 @@ function desktopPanelResultFromAgent(
               code: "out_of_fuel",
               message:
                 agent.failureMessage ??
-                "Desktop Agent paused after exhausting autonomous loop fuel; it did not claim the task was complete.",
+                "这轮工具调用或模型轮次已到上限，任务没有完成。你可以继续发送消息让我接着处理。",
             }
           : undefined,
       pendingApproval:
@@ -2793,9 +2849,23 @@ function buildConversationHistoryMessages(
     assistantIndex > 0 && conversation.turns[assistantIndex - 1]?.role === "user"
       ? assistantIndex - 1
       : assistantIndex;
-  const historyTurns = conversation.turns
-    .slice(0, currentUserIndex)
-    .filter((turn) => turn.status !== "pending" && turn.status !== "running")
+  const completedPairTurns: Array<(typeof conversation.turns)[number]> = [];
+  for (let index = 0; index + 1 < currentUserIndex; index += 2) {
+    const userTurn = conversation.turns[index];
+    const assistantTurn = conversation.turns[index + 1];
+    if (
+      userTurn === undefined ||
+      assistantTurn === undefined ||
+      userTurn.role !== "user" ||
+      assistantTurn.role !== "assistant" ||
+      userTurn.status !== "completed" ||
+      assistantTurn.status !== "completed"
+    ) {
+      break;
+    }
+    completedPairTurns.push(userTurn, assistantTurn);
+  }
+  return completedPairTurns
     .map((turn): DesktopAgentConversationMessage | undefined => {
       const content = compactConversationHistoryText(sanitizeConversationHistoryText(turn.content), 1_200);
       if (content.length === 0) {
@@ -2808,7 +2878,6 @@ function buildConversationHistoryMessages(
       };
     })
     .filter((message): message is DesktopAgentConversationMessage => message !== undefined);
-  return historyTurns.slice(-8);
 }
 
 function friendlyAssistantFailureText(message: string | undefined): string {

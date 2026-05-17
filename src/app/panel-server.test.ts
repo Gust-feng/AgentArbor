@@ -679,9 +679,7 @@ test("desktop run stream carries safe tool detail through runtime persistence", 
     providerCalls += 1;
     return providerCalls === 1
       ? createOpenAiReadFileToolCallResponse("notes.md")
-      : createOpenAiFinishTaskResponse("desktop-tool-detail-model", "已读取授权文件并形成摘要。", [
-          "tool:call-panel-read-file",
-        ]);
+      : createOpenAiTextResponse("desktop-tool-detail-model", "已读取授权文件并形成摘要。");
   };
   const server = await startLocalPanelServer({ port: 0, configDirectory: directory, providerFetch });
   try {
@@ -811,7 +809,8 @@ test("desktop openai-compatible ordinary agent pauses as blocked when autonomous
     assert.equal(blocked.body.canvas.kind, "desktop_agent_canvas");
     assert.equal(blocked.body.canvas.agent.status, "paused");
     assert.equal(blocked.body.canvas.agent.answer, undefined);
-    assert.equal(String(blocked.body.error?.message ?? "").includes("paused"), true);
+    assert.equal(String(blocked.body.error?.message ?? "").includes("任务没有完成"), true);
+    assert.equal(String(blocked.body.error?.message ?? "").includes("autonomous loop fuel"), false);
     assert.equal(eventTypes.includes("run.blocked"), true);
     assert.equal(eventTypes.includes("final.result"), false);
     assertSafePanelJsonText(blocked.text);
@@ -1101,7 +1100,7 @@ test("conversation API sends follow-up history as role-separated model messages"
     callIndex += 1;
     const body = JSON.parse(init.body) as { messages?: readonly { role?: string; content?: string }[]; max_tokens?: number };
     requests.push(body);
-    return createOpenAiFinishTaskResponse(
+    return createOpenAiTextResponse(
       "conversation-structured-history-model",
       callIndex === 1
         ? "我可以直接回答问题，也可以在授权范围内读取文件或网页。"
@@ -1224,6 +1223,141 @@ test("conversation and desktop run APIs recover safe history from RuntimeDatabas
   }
 });
 
+test("conversation message POST restores persisted conversation after restart and sends safe prior turn history", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-conversation-post-recover-"));
+  const secret = "sk-conversation-post-recover-secret";
+  const providerRequests: { readonly messages?: readonly { readonly role?: string; readonly content?: string }[] }[] = [];
+  const providerFetch: PanelProviderFetch = async (_url, init) => {
+    const body = JSON.parse(init.body) as { messages?: readonly { role?: string; content?: string }[] };
+    providerRequests.push(body);
+    return providerRequests.length === 1
+      ? createOpenAiTextResponse("conversation-post-recover-model", "第一轮安全回答。")
+      : createOpenAiTextResponse("conversation-post-recover-model", "第二轮安全回答。");
+  };
+  let server = await startLocalPanelServer({ port: 0, configDirectory: directory, providerFetch });
+  try {
+    await requestJson(server.url, "/api/config/model-provider", {
+      method: "POST",
+      body: {
+        baseUrl: "https://provider.example",
+        model: "conversation-post-recover-model",
+        apiKey: secret,
+      },
+    });
+
+    const first = await requestJson(server.url, "/api/conversations", {
+      method: "POST",
+      body: { goal: "第一轮问题", aiMode: "openai-compatible" },
+    });
+    const conversationId = first.body.conversation.conversationId;
+    await waitForRun(server.url, first.body.run.runId, (body) => body.status === "completed", 4_000, "/api/desktop/runs");
+    await server.close();
+
+    server = await startLocalPanelServer({ port: 0, configDirectory: directory, providerFetch });
+    const second = await requestJson(
+      server.url,
+      `/api/conversations/${encodeURIComponent(conversationId)}/messages`,
+      {
+        method: "POST",
+        body: { goal: "第二轮问题", aiMode: "openai-compatible" },
+      }
+    );
+    const completed = await waitForRun(server.url, second.body.run.runId, (body) => body.status === "completed", 4_000, "/api/desktop/runs");
+    const conversation = await requestJson(server.url, `/api/conversations/${encodeURIComponent(conversationId)}`);
+    const secondMessages = providerRequests[1]?.messages ?? [];
+
+    assert.equal(first.status, 202);
+    assert.equal(second.status, 202);
+    assert.equal(completed.body.status, "completed");
+    assert.equal(conversation.body.conversation.turns.length, 4);
+    assert.deepEqual(secondMessages.map((message) => message.role), ["system", "user", "assistant", "user"]);
+    assert.equal(secondMessages[1]?.content?.includes("第一轮问题"), true);
+    assert.equal(secondMessages[2]?.content?.includes("第一轮安全回答"), true);
+    assert.equal(secondMessages[3]?.content?.includes("Current user message: 第二轮问题"), true);
+    assert.equal(JSON.stringify(secondMessages).includes(secret), false);
+  } finally {
+    await server.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("conversation restore trims interrupted tail before appending the next message", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-conversation-tail-trim-"));
+  let server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+  try {
+    const first = await requestJson(server.url, "/api/conversations", {
+      method: "POST",
+      body: { goal: "第一轮完整问题", aiMode: "fake" },
+    });
+    const conversationId = first.body.conversation.conversationId;
+    await waitForRun(server.url, first.body.run.runId, (body) => body.status === "completed", 4_000, "/api/desktop/runs");
+    await server.close();
+
+    const database = new FileSystemRuntimeDatabase(resolveAgentArborRuntimeDatabasePaths(directory));
+    const persisted = await database.getConversation(conversationId);
+    assert.notEqual(persisted, undefined);
+    const interruptedAt = "2026-05-17T00:00:00.000Z";
+    await database.upsertConversation({
+      ...persisted!,
+      status: "running",
+      activeRunId: "run-interrupted-tail",
+      latestRunId: "run-interrupted-tail",
+      queuedRunIds: ["run-queued-after-interrupt"],
+      queuedRunCount: 1,
+      updatedAt: interruptedAt,
+      turns: [
+        ...persisted!.turns,
+        {
+          turnId: "turn-interrupted-user",
+          role: "user",
+          title: "你的消息",
+          content: "断开的用户消息",
+          status: "completed",
+          createdAt: interruptedAt,
+          updatedAt: interruptedAt,
+        },
+        {
+          turnId: "turn-interrupted-assistant",
+          role: "assistant",
+          title: "助手",
+          content: "断开的助手回复",
+          status: "running",
+          runId: "run-interrupted-tail",
+          createdAt: interruptedAt,
+          updatedAt: interruptedAt,
+        },
+      ],
+    });
+
+    server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+    const second = await requestJson(
+      server.url,
+      `/api/conversations/${encodeURIComponent(conversationId)}/messages`,
+      {
+        method: "POST",
+        body: { goal: "恢复后继续", aiMode: "fake" },
+      }
+    );
+    await waitForRun(server.url, second.body.run.runId, (body) => body.status === "completed", 4_000, "/api/desktop/runs");
+    const conversation = await requestJson(server.url, `/api/conversations/${encodeURIComponent(conversationId)}`);
+    const persistedAfter = await database.getConversation(conversationId);
+    const visibleText = JSON.stringify(conversation.body.conversation);
+
+    assert.equal(second.status, 202);
+    assert.equal(conversation.body.conversation.activeRunId, undefined);
+    assert.equal(conversation.body.conversation.queuedRunCount, 0);
+    assert.equal(conversation.body.conversation.turns.length, 4);
+    assert.equal(conversation.body.conversation.turns[2].content, "恢复后继续");
+    assert.equal(visibleText.includes("断开的用户消息"), false);
+    assert.equal(visibleText.includes("断开的助手回复"), false);
+    assert.equal(persistedAfter?.turns.length, 4);
+    assert.equal(JSON.stringify(persistedAfter).includes("断开的助手回复"), false);
+  } finally {
+    await server.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("conversation API queues follow-up while the same conversation is still running", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-conversation-queue-"));
   const secret = "sk-conversation-queue-secret";
@@ -1233,7 +1367,7 @@ test("conversation API queues follow-up while the same conversation is still run
   });
   const providerFetch: PanelProviderFetch = async () => {
     await fetchGate;
-    return createOpenAiFinishTaskResponse("conversation-queue-model", "第一轮已经完成。");
+    return createOpenAiTextResponse("conversation-queue-model", "第一轮已经完成。");
   };
   const server = await startLocalPanelServer({ port: 0, configDirectory: directory, providerFetch });
   try {
@@ -1304,14 +1438,14 @@ test("conversation API queues follow-up while the same conversation is still run
   }
 });
 
-test("desktop openai-compatible direct answer completes through finish_task", async () => {
+test("desktop openai-compatible direct answer completes on natural no-tool stop", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-desktop-direct-answer-text-"));
   const secret = "sk-desktop-direct-answer-text-secret";
   const bodies: Record<string, unknown>[] = [];
   const providerFetch: PanelProviderFetch = async (_url, init) => {
     const body = JSON.parse(init.body) as Record<string, unknown>;
     bodies.push(body);
-    return createOpenAiFinishTaskResponse(
+    return createOpenAiTextResponse(
       "desktop-direct-answer-text-model",
       "我是 AgentArbor 桌面助手。底层模型取决于你在设置中配置的模型运行时；普通问题会直接回答，不会被强行包装成项目分析。"
     );
@@ -1349,7 +1483,7 @@ test("desktop openai-compatible direct answer completes through finish_task", as
     const requestedTools = bodies[0]?.tools as
       | readonly { function?: { name?: string } }[]
       | undefined;
-    assert.equal(requestedTools?.some((tool) => tool.function?.name === "finish_task"), true);
+    assert.equal(requestedTools?.some((tool) => tool.function?.name === "finish_task") ?? false, false);
     assertSafePanelJsonText(completed.text);
   } finally {
     await server.close();
@@ -1494,7 +1628,7 @@ test("conversation follow-up after a provider failure does not feed internal ids
         json: async () => ({ error: { message: "bad request" } }),
       };
     }
-    return createOpenAiFinishTaskResponse(
+    return createOpenAiTextResponse(
       "failure-followup-model",
       "刚才模型服务没有返回可用结果。对于桌面文件，我需要你选择具体文件或给出只读引用，然后我才能继续看。"
     );
@@ -1968,10 +2102,9 @@ test("desktop openai-compatible ordinary agent uses configured search tool befor
     const body = JSON.parse(init.body) as { messages?: readonly { role?: string }[] };
     const hasToolMessage = body.messages?.some((message) => message.role === "tool") ?? false;
     return hasToolMessage
-      ? createOpenAiFinishTaskResponse(
+      ? createOpenAiTextResponse(
           "desktop-configured-tools-model",
-          "我已经结合授权搜索结果完成回答；工具输出只以安全摘要和引用进入本轮对话。",
-          ["tool:call-panel-search"]
+          "我已经结合授权搜索结果完成回答；工具输出只以安全摘要和引用进入本轮对话。"
         )
       : createOpenAiSearchToolCallResponse();
   };
@@ -2441,9 +2574,7 @@ test("basic agent confirmation decisions persist approve and guidance outcomes s
     if (providerFetchCalls === 3) {
       return createOpenAiWriteFileToolCallResponse("guidance.txt", "guidance write content");
     }
-    return createOpenAiFinishTaskResponse("basic-confirmation-model", "文件写入已完成，结果已整理。", [
-      "tool:call-panel-write-file",
-    ]);
+    return createOpenAiTextResponse("basic-confirmation-model", "文件写入已完成，结果已整理。");
   };
   const server = await startLocalPanelServer({ port: 0, configDirectory: directory, providerFetch });
   try {
@@ -3339,51 +3470,6 @@ function createOpenAiJsonResponse(model: string, output: unknown): Awaited<Retur
           message: {
             role: "assistant",
             content: JSON.stringify(output),
-          },
-        },
-      ],
-      usage: {
-        prompt_tokens: 10,
-        completion_tokens: 12,
-        total_tokens: 22,
-      },
-    }),
-  };
-}
-
-function createOpenAiFinishTaskResponse(
-  model: string,
-  answer: string,
-  evidenceRefs: readonly string[] = [],
-  uncertainty = "",
-  nextStep = "等待用户继续提供任务。"
-): Awaited<ReturnType<PanelProviderFetch>> {
-  return {
-    ok: true,
-    status: 200,
-    json: async () => ({
-      model,
-      choices: [
-        {
-          finish_reason: "tool_calls",
-          message: {
-            role: "assistant",
-            content: "",
-            tool_calls: [
-              {
-                id: "call-panel-finish-task",
-                type: "function",
-                function: {
-                  name: "finish_task",
-                  arguments: JSON.stringify({
-                    answer,
-                    evidenceRefs,
-                    uncertainty,
-                    nextStep,
-                  }),
-                },
-              },
-            ],
           },
         },
       ],

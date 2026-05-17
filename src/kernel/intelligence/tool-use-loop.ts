@@ -36,13 +36,6 @@ export type ToolUseLoopOptions = {
   readonly abortSignal?: AbortSignal;
 };
 
-export type FinishTaskPayload = {
-  readonly answer: string;
-  readonly evidenceRefs: readonly string[];
-  readonly uncertainty: string;
-  readonly nextStep: string;
-};
-
 export type ToolUseLoopPendingApproval = {
   readonly confirmationId: string;
   readonly pendingToolCall: ToolCallRequest;
@@ -58,13 +51,10 @@ export type ToolUseLoopPendingApproval = {
 export type ToolUseLoopResult = {
   readonly finalOutput: ModelResponse;
   readonly toolCalls: readonly ToolCallResult[];
-  readonly finishTask?: FinishTaskPayload;
   readonly modelRounds: number;
   readonly rounds: number;
   readonly stoppedReason:
     | "completed"
-    | "max_rounds"
-    | "max_model_rounds"
     | "no_tool_calls"
     | "out_of_fuel"
     | "approval_required"
@@ -88,52 +78,18 @@ export async function executeToolUseLoop(
   });
 }
 
-export async function executeAutonomousToolUseLoop(
-  options: ToolUseLoopOptions,
-  initialRequest: ModelRequest
-): Promise<ToolUseLoopResult> {
-  return continueAutonomousToolUseLoopAfterToolResults({
-    options,
-    initialRequest,
-    messages: initialRequest.sanitizedMessages,
-    toolCalls: [],
-    modelRounds: 0,
-    rounds: 0,
-    requestId: initialRequest.requestId,
-  });
-}
-
 export async function resumeToolUseLoopFromApproval(
   options: ToolUseLoopOptions,
   initialRequest: ModelRequest,
   pendingApproval: ToolUseLoopPendingApproval
 ): Promise<ToolUseLoopResult> {
-  return resumeApprovalCore(options, initialRequest, pendingApproval, continueToolUseLoopAfterToolResults);
+  return resumeApprovalCore(options, initialRequest, pendingApproval);
 }
-
-export async function resumeAutonomousToolUseLoopFromApproval(
-  options: ToolUseLoopOptions,
-  initialRequest: ModelRequest,
-  pendingApproval: ToolUseLoopPendingApproval
-): Promise<ToolUseLoopResult> {
-  return resumeApprovalCore(options, initialRequest, pendingApproval, continueAutonomousToolUseLoopAfterToolResults);
-}
-
-type ContinueLoopFn = (input: {
-  readonly options: ToolUseLoopOptions;
-  readonly initialRequest: ModelRequest;
-  readonly messages: readonly ModelMessage[];
-  readonly toolCalls: readonly ToolCallResult[];
-  readonly modelRounds: number;
-  readonly rounds: number;
-  readonly requestId: string;
-}) => Promise<ToolUseLoopResult>;
 
 async function resumeApprovalCore(
   options: ToolUseLoopOptions,
   initialRequest: ModelRequest,
-  pendingApproval: ToolUseLoopPendingApproval,
-  continueLoop: ContinueLoopFn
+  pendingApproval: ToolUseLoopPendingApproval
 ): Promise<ToolUseLoopResult> {
   if (!options.approvedConfirmationIds?.includes(pendingApproval.confirmationId)) {
     return {
@@ -184,7 +140,7 @@ async function resumeApprovalCore(
   if (approvedResult.status === "cancelled" || Boolean(options.abortSignal?.aborted)) {
     return abortedLoopResult(initialRequest, toolCalls, pendingApproval.modelRounds, rounds);
   }
-  return continueLoop({
+  return continueToolUseLoopAfterToolResults({
     options,
     initialRequest,
     messages: [
@@ -318,20 +274,17 @@ async function continueToolUseLoopAfterToolResults(input: {
       return abortedLoopResult(input.initialRequest, toolCalls, modelRounds, rounds);
     }
     if (modelRounds >= maxModelRounds) {
-      return {
-        finalOutput: modelLimitResponse(input.initialRequest, requestId),
-        toolCalls,
-        modelRounds,
-        rounds,
-        stoppedReason: "max_model_rounds",
-      };
+      return outOfFuelLoopResult(input.initialRequest, toolCalls, modelRounds, rounds);
     }
+
     const response = await input.options.intelligenceChannel.request({
       ...input.initialRequest,
       requestId,
       sanitizedMessages: messages,
       tools: toolDefinitions,
-      toolChoice: input.initialRequest.toolChoice ?? (toolDefinitions.length > 0 ? "auto" : "none"),
+      toolChoice: input.initialRequest.toolChoice === "none"
+        ? "none"
+        : input.initialRequest.toolChoice ?? (toolDefinitions.length > 0 ? "auto" : "none"),
     }, { abortSignal: input.options.abortSignal });
     modelRounds += 1;
 
@@ -351,7 +304,7 @@ async function continueToolUseLoopAfterToolResults(input: {
     }
 
     if (rounds >= maxToolRounds) {
-      return { finalOutput: response, toolCalls, modelRounds, rounds, stoppedReason: "max_rounds" };
+      return outOfFuelLoopResult(input.initialRequest, toolCalls, modelRounds, rounds);
     }
 
     const roundResult = await executeToolCalls({ options: input.options, requests: requestedToolCalls, toolDefinitions });
@@ -390,223 +343,13 @@ async function continueToolUseLoopAfterToolResults(input: {
     requestId = createId("model-request");
 
     if (modelRounds >= maxModelRounds) {
-      return { finalOutput: response, toolCalls, modelRounds, rounds, stoppedReason: "max_model_rounds" };
-    }
-  }
-}
-
-async function continueAutonomousToolUseLoopAfterToolResults(input: {
-  readonly options: ToolUseLoopOptions;
-  readonly initialRequest: ModelRequest;
-  readonly messages: readonly ModelMessage[];
-  readonly toolCalls: readonly ToolCallResult[];
-  readonly modelRounds: number;
-  readonly rounds: number;
-  readonly requestId: string;
-}): Promise<ToolUseLoopResult> {
-  const maxToolRounds = Math.max(0, Math.floor(input.options.maxToolRounds ?? 5));
-  const maxModelRounds = Math.max(1, Math.floor(input.options.maxModelRounds ?? Number.MAX_SAFE_INTEGER));
-  const externalToolDefinitions = input.options.toolCenter
-    .list()
-    .filter((tool) => input.options.allowedTools === undefined || input.options.allowedTools.includes(tool.name));
-  const modelVisibleTools = [...externalToolDefinitions, FINISH_TASK_TOOL];
-  let messages = cloneMessages(input.messages);
-  const toolCalls: ToolCallResult[] = [...input.toolCalls];
-  let modelRounds = input.modelRounds;
-  let rounds = input.rounds;
-  let requestId = input.requestId;
-
-  for (;;) {
-    if (input.options.abortSignal?.aborted === true) {
-      return abortedLoopResult(input.initialRequest, toolCalls, modelRounds, rounds);
-    }
-    if (modelRounds >= maxModelRounds) {
       return outOfFuelLoopResult(input.initialRequest, toolCalls, modelRounds, rounds);
     }
-
-    const response = await input.options.intelligenceChannel.request({
-      ...input.initialRequest,
-      requestId,
-      sanitizedMessages: messages,
-      tools: modelVisibleTools,
-      toolChoice: input.initialRequest.toolChoice === "none"
-        ? "auto"
-        : input.initialRequest.toolChoice ?? "auto",
-    }, { abortSignal: input.options.abortSignal });
-    modelRounds += 1;
-
-    if (response.status !== "completed") {
-      return { finalOutput: response, toolCalls, modelRounds, rounds, stoppedReason: "error" };
-    }
-
-    const requestedToolCalls = response.toolCalls ?? [];
-    const finishTask = extractFinishTask(requestedToolCalls);
-    if (finishTask !== undefined) {
-      if (finishTask.payload !== undefined) {
-        return {
-          finalOutput: response,
-          toolCalls,
-          finishTask: finishTask.payload,
-          modelRounds,
-          rounds,
-          stoppedReason: "completed",
-        };
-      }
-      messages = [
-        ...messages,
-        assistantToolCallMessage(response, requestedToolCalls),
-        invalidFinishTaskMessage(finishTask.error),
-      ];
-      requestId = createId("model-request");
-      continue;
-    }
-
-    if (requestedToolCalls.length === 0) {
-      messages = [
-        ...messages,
-        assistantTextMessage(response),
-        finishTaskRequiredMessage(),
-      ];
-      requestId = createId("model-request");
-      continue;
-    }
-
-    if (rounds >= maxToolRounds) {
-      return outOfFuelLoopResult(input.initialRequest, toolCalls, modelRounds, rounds);
-    }
-
-    const roundResult = await executeToolCalls({
-      options: input.options,
-      requests: requestedToolCalls,
-      toolDefinitions: externalToolDefinitions,
-    });
-    toolCalls.push(...roundResult.results);
-    if (roundResult.pendingApproval !== undefined) {
-      const requestIdForResume = createId("model-request");
-      return {
-        finalOutput: response,
-        toolCalls,
-        modelRounds,
-        rounds,
-        stoppedReason: "approval_required",
-        pendingApproval: {
-          confirmationId: roundResult.pendingApproval.confirmationId,
-          pendingToolCall: cloneToolCallRequest(roundResult.pendingApproval.pendingToolCall),
-          messagesBeforeToolCall: cloneMessages(messages),
-          assistantMessage: assistantToolCallMessage(response, roundResult.pendingApproval.requestsForAssistantMessage),
-          completedToolResults: cloneToolResults(roundResult.pendingApproval.completedToolResults),
-          toolCallsBeforeApproval: cloneToolResults([
-            ...toolCalls.slice(0, Math.max(0, toolCalls.length - roundResult.results.length)),
-            ...roundResult.pendingApproval.completedToolResults,
-          ]),
-          modelRounds,
-          rounds,
-          requestId: requestIdForResume,
-        },
-      };
-    }
-
-    rounds += 1;
-    messages = [
-      ...messages,
-      assistantToolCallMessage(response, requestedToolCalls),
-      ...roundResult.results.map(toolResultMessage),
-    ];
-    requestId = createId("model-request");
   }
 }
 
 function isReadOnlyToolCall(request: ToolCallRequest, definitions: readonly ToolDefinition[]): boolean {
   return definitions.find((definition) => definition.name === request.toolName)?.metadata?.operationType === "read-only";
-}
-
-const FINISH_TASK_TOOL_NAME = "finish_task";
-
-const FINISH_TASK_TOOL: ToolDefinition = {
-  name: FINISH_TASK_TOOL_NAME,
-  description:
-    "Finish the current agent run. Call this only when you, the agent, decide the task should stop and the visible answer is ready.",
-  inputSchema: {
-    type: "object",
-    properties: {
-      answer: { type: "string" },
-      evidenceRefs: { type: "array", items: { type: "string" } },
-      uncertainty: { type: "string" },
-      nextStep: { type: "string" },
-    },
-    required: ["answer", "evidenceRefs", "uncertainty", "nextStep"],
-    additionalProperties: false,
-  },
-  metadata: {
-    category: "other",
-    riskLevel: "low",
-    operationType: "read-only",
-    requiresConfirmation: false,
-    visibleResultPolicy: {
-      userVisible: "hidden",
-      maxPreviewChars: 0,
-      omitRawOutput: true,
-    },
-  },
-};
-
-function extractFinishTask(
-  requests: readonly ToolCallRequest[]
-): { readonly payload?: FinishTaskPayload; readonly error: string } | undefined {
-  const request = requests.find((candidate) => candidate.toolName === FINISH_TASK_TOOL_NAME);
-  if (request === undefined) {
-    return undefined;
-  }
-  const input = asRecord(request.input);
-  const answer = stringOrUndefined(input?.answer)?.trim();
-  if (answer === undefined || answer.length === 0) {
-    return { error: "finish_task.answer must be a non-empty string." };
-  }
-  if (!Array.isArray(input?.evidenceRefs)) {
-    return { error: "finish_task.evidenceRefs must be an array." };
-  }
-  if (typeof input?.uncertainty !== "string") {
-    return { error: "finish_task.uncertainty must be a string." };
-  }
-  if (typeof input?.nextStep !== "string") {
-    return { error: "finish_task.nextStep must be a string." };
-  }
-  return {
-    payload: {
-      answer,
-      evidenceRefs: stringArray(input?.evidenceRefs).slice(0, 24),
-      uncertainty: stringOrUndefined(input?.uncertainty)?.trim() ?? "",
-      nextStep: stringOrUndefined(input?.nextStep)?.trim() ?? "",
-    },
-    error: "",
-  };
-}
-
-function assistantTextMessage(response: ModelResponse): ModelMessage {
-  if (response.assistantMessage?.role === "assistant") {
-    return cloneModelMessage(response.assistantMessage);
-  }
-  return {
-    role: "assistant",
-    content: response.textOutput ?? "",
-  };
-}
-
-function finishTaskRequiredMessage(): ModelMessage {
-  return {
-    role: "system",
-    content:
-      "Autonomous run control: continue working if the task is not done. If you decide the task should stop, call finish_task with answer, evidenceRefs, uncertainty, and nextStep. Do not stop with plain text only.",
-    ref: "prompt:agent_loop.finish_task_required.v1",
-  };
-}
-
-function invalidFinishTaskMessage(error: string): ModelMessage {
-  return {
-    role: "system",
-    content: `Autonomous run control: finish_task was invalid (${error}). Continue working, or call finish_task again with the required fields.`,
-    ref: "prompt:agent_loop.finish_task_invalid.v1",
-  };
 }
 
 function outOfFuelLoopResult(
@@ -709,31 +452,6 @@ function approvalStillRequiredModelResponse(
   };
 }
 
-function modelLimitResponse(initialRequest: ModelRequest, requestId: string): ModelResponse {
-  return {
-    responseId: `${requestId}-max-model-rounds`,
-    requestId,
-    providerId: "agent-turn-runtime",
-    providerKind: "fake",
-    protocolKind: "openai_compatible_chat_completions",
-    model: "max-model-rounds",
-    status: "failed",
-    outputKind: initialRequest.outputContract.outputKind,
-    finishReason: "error",
-    validation: {
-      status: "failed",
-      checkedAt: new Date().toISOString(),
-      issues: [{ code: "max_model_rounds", message: "Agent turn reached the model round limit." }],
-    },
-    failure: {
-      kind: "provider_response",
-      message: "Agent turn reached the model round limit.",
-      retryable: false,
-    },
-    completedAt: new Date().toISOString(),
-  };
-}
-
 function outOfFuelModelResponse(initialRequest: ModelRequest): ModelResponse {
   return {
     responseId: `${initialRequest.requestId}-out-of-fuel`,
@@ -748,11 +466,11 @@ function outOfFuelModelResponse(initialRequest: ModelRequest): ModelResponse {
     validation: {
       status: "failed",
       checkedAt: new Date().toISOString(),
-      issues: [{ code: "out_of_fuel", message: "Agent run paused after exhausting autonomous loop fuel." }],
+      issues: [{ code: "out_of_fuel", message: "Agent run paused before the model returned a final no-tool response." }],
     },
     failure: {
       kind: "provider_response",
-      message: "Agent run paused after exhausting autonomous loop fuel.",
+      message: "Agent run paused before the model returned a final no-tool response.",
       retryable: true,
     },
     completedAt: new Date().toISOString(),
@@ -895,23 +613,4 @@ function cloneToolResults(results: readonly ToolCallResult[]): ToolCallResult[] 
     confirmationRequest:
       result.confirmationRequest === undefined ? undefined : globalThis.structuredClone(result.confirmationRequest),
   }));
-}
-
-function asRecord(value: unknown): Readonly<Record<string, unknown>> | undefined {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? value as Readonly<Record<string, unknown>>
-    : undefined;
-}
-
-function stringOrUndefined(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim().length > 0 ? value : undefined;
-}
-
-function stringArray(value: unknown): readonly string[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  return value
-    .map((item) => typeof item === "string" ? item.trim() : "")
-    .filter((item) => item.length > 0);
 }

@@ -7,6 +7,7 @@ import { createId } from "../../kernel/id.js";
 import { redactSensitiveText } from "../../kernel/redaction.js";
 import type { DesktopAgentConversationMessage } from "../desktop-agent-session.js";
 import type { DesktopAgentSkillContext } from "../desktop-agent-prompts.js";
+import { sanitizeConversationHistoryText } from "../visible-text-safety.js";
 import type { BasicAgentContextItem, BasicAgentContextSourceKind } from "./context-pack.js";
 
 export type BasicAgentContextLedger = {
@@ -46,6 +47,8 @@ export type CreateBasicAgentContextLedgerInput = {
 const DEFAULT_MAX_MESSAGES = 24;
 const DEFAULT_MAX_CHARS = 18_000;
 const MAX_HISTORY_CHARS = 1_200;
+const MAX_HISTORY_SUMMARY_CHARS = 2_400;
+const RECENT_HISTORY_PAIR_COUNT = 4;
 const MAX_SKILL_BODY_CHARS = 4_000;
 const MAX_SKILL_REASON_CHARS = 240;
 const MAX_REF_SUMMARY_CHARS = 240;
@@ -77,9 +80,9 @@ export function createBasicAgentContextLedger(input: CreateBasicAgentContextLedg
     systemContextItem(),
     ...skillContextItems(input.skillContexts ?? []),
     ...historyContextItems(input.conversationHistory),
-    currentUserMessageItem(input.goal, input.taskSoil),
     ...taskSoilRefItems(input.taskSoil),
     ...toolEvidenceItems(input.toolEvidence ?? []),
+    currentUserMessageItem(input.goal, input.taskSoil),
   ];
   return buildContextLedgerFromItems({
     runId: input.runId,
@@ -101,7 +104,7 @@ export function appendToolEnvelopeToContextLedger(
 ): BasicAgentContextLedger {
   return buildContextLedgerFromItems({
     runId: ledger.runId,
-    draft: [...ledger.items, ...toolEvidenceItems([envelope])],
+    draft: insertBeforeCurrentUser(ledger.items, toolEvidenceItems([envelope])),
     maxMessages: ledger.budget.maxMessages,
     maxChars: ledger.budget.maxChars,
     budget: {
@@ -125,22 +128,27 @@ function buildContextLedgerFromItems(input: {
   };
   readonly extraEvidenceRefs?: readonly string[];
 }): BasicAgentContextLedger {
-  const selected: BasicAgentContextItem[] = [];
-  const omitted: BasicAgentContextItem[] = [];
-  let omittedItemCount = 0;
-  let usedChars = 0;
-  let truncatedByBudget = false;
-  for (const item of input.draft) {
-    const itemChars = item.summary.length;
-    if (selected.length >= input.maxMessages || usedChars + itemChars > input.maxChars) {
-      truncatedByBudget = true;
-      omittedItemCount += 1;
-      omitted.push(item);
+  const required = input.draft.filter(isRequiredContextItem);
+  const selectedIds = new Set(required.map((item) => item.itemId));
+  let usedChars = required.reduce((total, item) => total + item.summary.length, 0);
+  let truncatedByBudget = usedChars > input.maxChars || required.length > input.maxMessages;
+
+  for (const item of prioritizedOptionalContextItems(input.draft)) {
+    if (selectedIds.has(item.itemId)) {
       continue;
     }
-    selected.push(item);
+    const itemChars = item.summary.length;
+    if (selectedIds.size >= input.maxMessages || usedChars + itemChars > input.maxChars) {
+      truncatedByBudget = true;
+      continue;
+    }
+    selectedIds.add(item.itemId);
     usedChars += itemChars;
   }
+
+  const selected = input.draft.filter((item) => selectedIds.has(item.itemId));
+  const omitted = input.draft.filter((item) => !selectedIds.has(item.itemId));
+  const omittedItemCount = omitted.length;
   const budget = {
     maxMessages: input.maxMessages,
     maxChars: input.maxChars,
@@ -168,6 +176,54 @@ function buildContextLedgerFromItems(input: {
     truncationReport,
     readModel: toContextLedgerReadModel(input.runId, selected, omitted, budget, truncationReport),
   };
+}
+
+function isRequiredContextItem(item: BasicAgentContextItem): boolean {
+  return item.sourceKind === "system" || item.sourceKind === "user_message";
+}
+
+function prioritizedOptionalContextItems(
+  draft: readonly BasicAgentContextItem[]
+): readonly BasicAgentContextItem[] {
+  return draft
+    .filter((item) => !isRequiredContextItem(item))
+    .map((item, index) => ({ item, index }))
+    .sort((left, right) => {
+      const priority = contextItemRetentionPriority(left.item) - contextItemRetentionPriority(right.item);
+      return priority === 0 ? left.index - right.index : priority;
+    })
+    .map((entry) => entry.item);
+}
+
+function contextItemRetentionPriority(item: BasicAgentContextItem): number {
+  if (item.sourceKind === "skill") return 0;
+  if (item.sourceKind === "tool_evidence") return 1;
+  if (item.sourceKind === "task_soil_ref") return 2;
+  if (item.sourceKind === "conversation_recent_turn") return 3;
+  if (item.sourceKind === "conversation") return 3;
+  if (item.sourceKind === "conversation_summary") return 4;
+  return 5;
+}
+
+function insertBeforeCurrentUser(
+  items: readonly BasicAgentContextItem[],
+  additions: readonly BasicAgentContextItem[]
+): readonly BasicAgentContextItem[] {
+  let currentUserIndex = -1;
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    if (items[index]?.sourceKind === "user_message") {
+      currentUserIndex = index;
+      break;
+    }
+  }
+  if (currentUserIndex < 0) {
+    return [...items, ...additions];
+  }
+  return [
+    ...items.slice(0, currentUserIndex),
+    ...additions,
+    ...items.slice(currentUserIndex),
+  ];
 }
 
 function toContextLedgerReadModel(
@@ -249,7 +305,7 @@ function contextBudgetEntries(
 
 function contextLedgerEntryKind(kind: BasicAgentContextSourceKind): ContextLedgerEntry["kind"] {
   if (kind === "system" || kind === "user_message") return "goal";
-  if (kind === "conversation") return "history";
+  if (kind === "conversation" || kind === "conversation_summary" || kind === "conversation_recent_turn") return "history";
   if (kind === "skill") return "skill";
   if (kind === "task_soil_ref") return "attachment";
   return "tool_evidence";
@@ -260,6 +316,8 @@ function contextLedgerEntryTitle(item: BasicAgentContextItem): string {
     system: "系统边界",
     skill: "技能",
     conversation: "历史对话",
+    conversation_summary: "历史摘要",
+    conversation_recent_turn: "最近对话",
     user_message: "当前任务",
     task_soil_ref: "上下文引用",
     tool_evidence: "工具证据",
@@ -318,18 +376,66 @@ function skillContextItems(skills: readonly DesktopAgentSkillContext[]): readonl
 }
 
 function historyContextItems(history: readonly DesktopAgentConversationMessage[]): readonly BasicAgentContextItem[] {
-  return history.map((message, index) => {
-    const safe = safeText(message.content, MAX_HISTORY_CHARS);
-    return {
-      itemId: message.ref ?? `context:conversation:${index}`,
-      sourceKind: "conversation" as const,
-      role: message.role,
-      summary: safe.text,
-      refs: [{ kind: "event" as const, id: message.ref ?? `conversation:history:${index}` }],
-      visibility: "model" as const,
-      truncated: safe.truncated,
-    };
-  }).filter((item) => item.summary.length > 0);
+  const safeHistory = history
+    .map((message, index) => {
+      const safe = safeConversationText(message.content, MAX_HISTORY_CHARS);
+      return {
+        message,
+        index,
+        safe,
+      };
+    })
+    .filter((entry) => entry.safe.text.length > 0);
+  const recentMessageCount = RECENT_HISTORY_PAIR_COUNT * 2;
+  const earlier = safeHistory.slice(0, Math.max(0, safeHistory.length - recentMessageCount));
+  const recent = safeHistory.slice(Math.max(0, safeHistory.length - recentMessageCount));
+  const summaryItem = earlierHistorySummaryItem(earlier);
+  const recentItems = recent.map((entry): BasicAgentContextItem => ({
+    itemId: entry.message.ref ?? `context:conversation:${entry.index}`,
+    sourceKind: "conversation_recent_turn",
+    role: entry.message.role,
+    summary: entry.safe.text,
+    refs: [{ kind: "event" as const, id: entry.message.ref ?? `conversation:history:${entry.index}` }],
+    visibility: "model" as const,
+    truncated: entry.safe.truncated,
+  }));
+  return summaryItem === undefined ? recentItems : [summaryItem, ...recentItems];
+}
+
+function earlierHistorySummaryItem(
+  entries: readonly {
+    readonly message: DesktopAgentConversationMessage;
+    readonly index: number;
+    readonly safe: { readonly text: string; readonly truncated: boolean };
+  }[]
+): BasicAgentContextItem | undefined {
+  if (entries.length === 0) {
+    return undefined;
+  }
+  const summary = safeText(
+    [
+      "Earlier conversation summary (deterministic, redacted; use only as background):",
+      ...entries.map((entry) => {
+        const role = entry.message.role === "assistant" ? "assistant" : "user";
+        return `- ${role}: ${safeConversationText(entry.safe.text, 360).text}`;
+      }),
+    ].join("\n"),
+    MAX_HISTORY_SUMMARY_CHARS
+  );
+  if (summary.text.length === 0) {
+    return undefined;
+  }
+  return {
+    itemId: "context:conversation-summary",
+    sourceKind: "conversation_summary",
+    summary: summary.text,
+    refs: entries.slice(0, 12).map((entry): ObservationRef => ({
+      kind: "event",
+      id: entry.message.ref ?? `conversation:history:${entry.index}`,
+    })),
+    visibility: "model",
+    truncated: summary.truncated || entries.some((entry) => entry.safe.truncated),
+  };
 }
 
 function currentUserMessageItem(goal: string, taskSoil: TaskSoil): BasicAgentContextItem {
@@ -395,6 +501,8 @@ function contextUsageSummary(
     system: "系统边界",
     skill: "技能",
     conversation: "历史对话",
+    conversation_summary: "历史摘要",
+    conversation_recent_turn: "最近对话",
     user_message: "当前任务",
     task_soil_ref: "上下文引用",
     tool_evidence: "工具证据",
@@ -429,6 +537,14 @@ function safeText(value: string, maxLength: number): { readonly text: string; re
     text: `${redacted.slice(0, Math.max(0, maxLength - 1))}…`,
     truncated: true,
   };
+}
+
+function safeConversationText(value: string, maxLength: number): { readonly text: string; readonly truncated: boolean } {
+  return safeText(
+    sanitizeConversationHistoryText(value)
+      .replace(/\binternal loop\b/gi, "[redacted-internal]"),
+    maxLength
+  );
 }
 
 function safePlain(value: string, maxLength: number): string {

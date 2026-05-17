@@ -219,7 +219,7 @@ export async function runDesktopAgentSession(
         taskSoil,
         platform: options.platform,
       });
-  const turn = await turnRuntime.executeAutonomous({
+  const turn = await turnRuntime.execute({
     policy: {
       allowModel: true,
       allowedTools,
@@ -281,7 +281,7 @@ function desktopAgentResultFromTurn(input: {
       goalId: input.goalId,
       taskSoil: input.taskSoil,
       contextPack: safeContextPack(input.contextPack),
-      failureMessage: "Desktop Agent paused after exhausting autonomous loop fuel; it did not claim the task was complete.",
+      failureMessage: "这轮工具调用或模型轮次已到上限，任务没有完成。你可以继续发送消息让我接着处理。",
       modelCallRefs,
       toolCallRefs,
       activity: activityFromEventEntries(input.runtime.eventLog.list(), "paused"),
@@ -308,11 +308,8 @@ function desktopAgentResultFromTurn(input: {
     };
   }
 
-  const answer = parseAnswer(input.turn.finalOutput, input.turn.toolCalls, input.turn.finishTask);
-  const evidenceRefs = unique([
-    ...evidenceRefsFromToolCalls(input.turn.toolCalls),
-    ...(input.turn.finishTask?.evidenceRefs ?? []),
-  ]).slice(0, 12);
+  const answer = parseAnswer(input.turn.finalOutput, input.turn.toolCalls);
+  const evidenceRefs = unique(evidenceRefsFromToolCalls(input.turn.toolCalls)).slice(0, 12);
   const pendingConfirmation = pendingConfirmationFrom({
     goal: input.goal,
     taskSoil: input.taskSoil,
@@ -363,7 +360,7 @@ function desktopAgentResultFromTurn(input: {
         : {
             confirmationId: input.turn.pendingApproval.confirmationId,
             resume: async (resumeInput) => {
-              const resumed = await input.turnRuntime.resumeAutonomous({
+              const resumed = await input.turnRuntime.resume({
                 pendingApproval: input.turn.pendingApproval!,
                 approvedConfirmationIds: resumeInput.approvedConfirmationIds,
                 abortSignal: resumeInput.abortSignal,
@@ -425,13 +422,8 @@ function desktopAgentOutputContract(): ModelOutputContract {
   };
 }
 
-function isRecoverableBudgetStop(turn: Awaited<ReturnType<AgentTurnRuntime["execute"]>>): boolean {
-  return (
-    (turn.stoppedReason === "max_model_rounds" || turn.stoppedReason === "max_tool_rounds") &&
-    turn.finalOutput !== undefined &&
-    turn.finalOutput.status === "completed" &&
-    (visibleAnswerText(turn.finalOutput).trim().length > 0 || turn.toolCalls.some((call) => call.status === "completed"))
-  );
+function isRecoverableBudgetStop(_turn: Awaited<ReturnType<AgentTurnRuntime["execute"]>>): boolean {
+  return false;
 }
 
 function visibleAnswerText(response: ModelResponse): string {
@@ -444,15 +436,8 @@ function visibleAnswerText(response: ModelResponse): string {
 
 function parseAnswer(
   response: ModelResponse,
-  toolCalls: readonly ToolCallResult[],
-  finishTask?: AgentTurnRuntimeResult["finishTask"]
+  toolCalls: readonly ToolCallResult[]
 ): string {
-  if (finishTask !== undefined) {
-    const visible = sanitizeVisibleAssistantAnswer(finishTask.answer);
-    return visible.length > 0
-      ? safeText(visible, 12000)
-      : "我识别到这条消息需要更多上下文或授权，但当前回合没有形成可展示正文。";
-  }
   const text =
     typeof response.textOutput === "string" && response.textOutput.trim().length > 0
       ? response.textOutput.trim()

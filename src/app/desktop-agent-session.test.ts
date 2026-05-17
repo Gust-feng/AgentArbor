@@ -79,7 +79,7 @@ test("Desktop Agent Session derives model-visible tools from capability snapshot
   const channel: IntelligenceChannel = {
     async request(request) {
       capturedRequest = request;
-      return finishTaskResponse(request, "我会只使用本轮授权的工具。");
+      return textResponse(request, "我会只使用本轮授权的工具。");
     },
     validateResponse() {
       return { status: "passed", checkedAt: new Date(0).toISOString(), issues: [] };
@@ -100,7 +100,7 @@ test("Desktop Agent Session derives model-visible tools from capability snapshot
   });
 
   assert.equal(result.status, "completed");
-  assert.deepEqual(capturedRequest?.tools?.map((tool) => tool.name), ["read", "finish_task"]);
+  assert.deepEqual(capturedRequest?.tools?.map((tool) => tool.name), ["read"]);
 });
 
 test("Desktop Agent Session projects tool failures without leaking raw output", async () => {
@@ -129,7 +129,8 @@ test("Desktop Agent Session pauses when tool fuel is exhausted instead of invent
 
   assert.equal(result.status, "paused");
   assert.equal(result.answer, undefined);
-  assert.equal(result.failureMessage?.includes("paused"), true);
+  assert.equal(result.failureMessage?.includes("任务没有完成"), true);
+  assert.equal(result.failureMessage?.includes("autonomous loop fuel"), false);
   assert.equal(result.eventTypes.includes("tool.failed"), true);
   assert.equal(channel.requests.length, 4);
 });
@@ -172,7 +173,7 @@ test("Desktop Agent Session injects safe conversation history as separate messag
   const channel: IntelligenceChannel = {
     async request(request) {
       capturedRequest = request;
-      return finishTaskResponse(request, "可以继续。我会基于前文解释，不把这轮追问升级成报告。");
+      return textResponse(request, "可以继续。我会基于前文解释，不把这轮追问升级成报告。");
     },
     validateResponse() {
       return { status: "passed", checkedAt: new Date(0).toISOString(), issues: [] };
@@ -211,7 +212,7 @@ test("Desktop Agent Session injects safe conversation history as separate messag
 test("Desktop Agent Session removes internal control fragments from visible answers", async () => {
   const channel: IntelligenceChannel = {
     async request(request) {
-      return finishTaskResponse(
+      return textResponse(
         request,
         "先处理这个动作。<start_work_session><query>分析当前项目</query></start_work_session>\n可见结论：这更适合作为任务处理。"
       );
@@ -236,7 +237,7 @@ test("Desktop Agent Session removes internal control fragments from visible answ
 test("Desktop Agent Session removes internal task diagnostics from visible answers", async () => {
   const channel: IntelligenceChannel = {
     async request(request) {
-      return finishTaskResponse(
+      return textResponse(
         request,
         "## 当前任务 (goal-0003)\nrequestId: model-request-abc\n这里是内部任务状态。\n\n可以继续。刚才的问题需要你选择文件或给出只读引用，我再帮你分析。"
       );
@@ -261,7 +262,7 @@ test("Desktop Agent Session removes internal task diagnostics from visible answe
 test("Desktop Agent Session drops provider control markup without synthetic confirmation", async () => {
   const channel: IntelligenceChannel = {
     async request(request) {
-      return finishTaskResponse(
+      return textResponse(
         request,
         "<tool_call>{\"name\":\"read\",\"arguments\":{\"ref\":\"file:/tmp/a.md\"}}</tool_call>\n我需要你先提供文件引用或授权，才能读取具体文件。"
       );
@@ -284,13 +285,12 @@ test("Desktop Agent Session drops provider control markup without synthetic conf
   assert.equal(result.eventTypes.includes("user_approval.requested"), false);
 });
 
-function finishTaskResponse(
+function textResponse(
   request: ModelRequest,
-  answer: string,
-  evidenceRefs: readonly string[] = []
+  answer: string
 ) {
   return {
-    responseId: `${request.requestId}-finish-task-response`,
+    responseId: `${request.requestId}-text-response`,
     requestId: request.requestId,
     providerId: "test-provider",
     providerKind: "fake" as const,
@@ -298,17 +298,8 @@ function finishTaskResponse(
     model: "test-model",
     status: "completed" as const,
     outputKind: "explanation" as const,
-    toolCalls: [{
-      callId: `${request.requestId}-finish-task`,
-      toolName: "finish_task",
-      input: {
-        answer,
-        evidenceRefs,
-        uncertainty: "",
-        nextStep: "继续对话或提供更多材料。",
-      },
-    }],
-    finishReason: "tool_call" as const,
+    textOutput: answer,
+    finishReason: "stop" as const,
     validation: { status: "passed" as const, checkedAt: new Date(0).toISOString(), issues: [] },
     completedAt: new Date(0).toISOString(),
   };
@@ -443,7 +434,7 @@ class LocalToolChannel implements IntelligenceChannel {
       };
     }
     return {
-      ...finishTaskResponse(request, "已读取 README 并形成摘要。", ["workspace:file:README.md"]),
+      ...textResponse(request, "已读取 README 并形成摘要。"),
       responseId: "model-response-local-final",
     };
   }

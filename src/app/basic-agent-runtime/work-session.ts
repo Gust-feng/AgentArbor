@@ -96,12 +96,17 @@ function contextLedgerFor(
       status: attachment.status === "blocked" ? "blocked" : attachment.readonlyPreviewMeta.truncated === true ? "truncated" : "used",
     })),
     ...contextItems
-      .filter((item) => item.sourceKind === "conversation" || item.sourceKind === "skill")
+      .filter((item) =>
+        item.sourceKind === "conversation" ||
+        item.sourceKind === "conversation_summary" ||
+        item.sourceKind === "conversation_recent_turn" ||
+        item.sourceKind === "skill"
+      )
       .slice(0, 8)
       .map((item): ContextLedgerEntry => ({
         entryId: `${input.run.runId}:ledger:context:${item.itemId}`,
         kind: item.sourceKind === "skill" ? "skill" : "history",
-        title: item.sourceKind === "skill" ? "触发技能" : "历史对话",
+        title: item.sourceKind === "skill" ? "触发技能" : item.sourceKind === "conversation_summary" ? "历史摘要" : "历史对话",
         summary: item.summary,
         refs: [{ kind: "event", id: item.itemId }],
         status: item.truncated ? "truncated" : "used",

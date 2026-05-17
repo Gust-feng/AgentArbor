@@ -82,9 +82,9 @@ test("AgentTurnRuntime executes one tool round and returns final model output", 
   assert.deepEqual(eventLog.types(), ["tool.requested", "tool.completed"]);
 });
 
-test("AgentTurnRuntime executeAutonomous completes only when the agent calls the internal control tool", async () => {
+test("AgentTurnRuntime completes on no-tool provider stop", async () => {
   const channel = new SequenceIntelligenceChannel([
-    finishTaskResponse("model-request-test", "Agent-owned final answer."),
+    textResponse("model-request-test", "Agent-owned final answer."),
   ]);
   const broker = new PermissionAwareToolBroker(["web_search"]);
   const runtime = new AgentTurnRuntime({
@@ -92,35 +92,80 @@ test("AgentTurnRuntime executeAutonomous completes only when the agent calls the
     toolCenter: broker,
   });
 
-  const result = await runtime.executeAutonomous(createTurnInput({
+  const result = await runtime.execute(createTurnInput({
     allowedTools: [],
     maxModelRounds: 2,
   }));
 
   assert.equal(result.status, "completed");
-  assert.equal(result.stoppedReason, "completed");
-  assert.equal(result.finishTask?.answer, "Agent-owned final answer.");
+  assert.equal(result.stoppedReason, "no_tool_calls");
+  assert.equal(result.finalOutput?.textOutput, "Agent-owned final answer.");
   assert.equal(broker.executedCount, 0);
-  assert.deepEqual(channel.requests[0]?.tools?.map((tool) => tool.name), ["finish_task"]);
+  assert.deepEqual(channel.requests[0]?.tools?.map((tool) => tool.name), []);
 });
 
-test("AgentTurnRuntime executeAutonomous pauses instead of completing on plain provider stop", async () => {
+test("AgentTurnRuntime exposes allowed external tools without finish_task", async () => {
   const channel = new SequenceIntelligenceChannel([
-    textResponse("model-request-test", "Plain text is not a finish signal."),
+    textResponse("model-request-test", "Plain text is the natural stop signal."),
   ]);
   const runtime = new AgentTurnRuntime({
     intelligenceChannel: channel,
-    toolCenter: new PermissionAwareToolBroker([]),
+    toolCenter: new PermissionAwareToolBroker(["web_search"]),
   });
 
-  const result = await runtime.executeAutonomous(createTurnInput({
-    allowedTools: [],
+  const result = await runtime.execute(createTurnInput({
+    allowedTools: ["web_search"],
     maxModelRounds: 1,
+  }));
+
+  assert.equal(result.status, "completed");
+  assert.equal(result.stoppedReason, "no_tool_calls");
+  assert.deepEqual(channel.requests[0]?.tools?.map((tool) => tool.name), ["web_search"]);
+});
+
+test("AgentTurnRuntime completes after a tool round when the model stops calling tools", async () => {
+  const channel = new SequenceIntelligenceChannel([
+    toolCallResponse("model-request-test", "call-search", "web_search"),
+    textResponse("model-request-final", "Final answer after tool result."),
+  ]);
+  const broker = new PermissionAwareToolBroker(["web_search"]);
+  const runtime = new AgentTurnRuntime({
+    intelligenceChannel: channel,
+    toolCenter: broker,
+  });
+
+  const result = await runtime.execute(createTurnInput({
+    allowedTools: ["web_search"],
+    maxModelRounds: 3,
+  }));
+
+  assert.equal(result.status, "completed");
+  assert.equal(result.stoppedReason, "completed");
+  assert.equal(result.finalOutput?.textOutput, "Final answer after tool result.");
+  assert.equal(result.toolCalls.length, 1);
+  assert.equal(result.toolCalls[0]?.status, "completed");
+  assert.equal(channel.requests[1]?.sanitizedMessages.some((message) => message.role === "tool"), true);
+});
+
+test("AgentTurnRuntime pauses out_of_fuel when budgets end before provider stop", async () => {
+  const channel = new SequenceIntelligenceChannel([
+    toolCallResponse("model-request-test", "call-search", "web_search"),
+  ]);
+  const runtime = new AgentTurnRuntime({
+    intelligenceChannel: channel,
+    toolCenter: new PermissionAwareToolBroker(["web_search"]),
+  });
+
+  const result = await runtime.execute(createTurnInput({
+    allowedTools: ["web_search"],
+    maxModelRounds: 1,
+    maxToolRounds: 2,
   }));
 
   assert.equal(result.status, "paused");
   assert.equal(result.stoppedReason, "out_of_fuel");
-  assert.equal(result.finishTask, undefined);
+  assert.equal(result.toolCalls.length, 1);
+  assert.equal(channel.requests.length, 1);
 });
 
 test("AgentTurnRuntime returns approval_required and resumes with a matching confirmation", async () => {
@@ -169,8 +214,8 @@ test("AgentTurnRuntime enforces tool and model round limits", async () => {
     createTurnInput({ allowedTools: ["web_search"], maxToolRounds: 0 })
   );
 
-  assert.equal(toolLimited.status, "failed");
-  assert.equal(toolLimited.stoppedReason, "max_tool_rounds");
+  assert.equal(toolLimited.status, "paused");
+  assert.equal(toolLimited.stoppedReason, "out_of_fuel");
   assert.equal(toolLimited.toolCalls.length, 0);
 
   const modelLimitChannel = new SequenceIntelligenceChannel([
@@ -182,8 +227,8 @@ test("AgentTurnRuntime enforces tool and model round limits", async () => {
     toolCenter: new PermissionAwareToolBroker(["web_search"]),
   }).execute(createTurnInput({ allowedTools: ["web_search"], maxModelRounds: 1 }));
 
-  assert.equal(modelLimited.status, "failed");
-  assert.equal(modelLimited.stoppedReason, "max_model_rounds");
+  assert.equal(modelLimited.status, "paused");
+  assert.equal(modelLimited.stoppedReason, "out_of_fuel");
   assert.equal(modelLimited.modelRounds, 1);
   assert.equal(modelLimitChannel.requests.length, 1);
 });
@@ -272,23 +317,6 @@ function textResponse(requestId: string, text: string): ModelResponse {
     ...completedResponse(requestId, undefined),
     textOutput: text,
     finishReason: "stop",
-  };
-}
-
-function finishTaskResponse(requestId: string, answer: string): ModelResponse {
-  return {
-    ...completedResponse(requestId, undefined),
-    toolCalls: [{
-      callId: `${requestId}-finish-task`,
-      toolName: "finish_task",
-      input: {
-        answer,
-        evidenceRefs: [],
-        uncertainty: "",
-        nextStep: "No further action.",
-      },
-    }],
-    finishReason: "tool_call",
   };
 }
 

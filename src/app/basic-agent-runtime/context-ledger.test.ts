@@ -54,13 +54,13 @@ test("context ledger records goal, history, attachments, skills, budget, and saf
   assert.equal(ledger.runId, "run-ledger");
   assert.equal(ledger.items.some((item) => item.sourceKind === "system"), true);
   assert.equal(ledger.items.some((item) => item.sourceKind === "system" && item.summary.includes("Do not write shell commands")), true);
-  assert.equal(ledger.items.some((item) => item.sourceKind === "conversation"), true);
+  assert.equal(ledger.items.some((item) => item.sourceKind === "conversation_recent_turn"), true);
   assert.equal(ledger.items.some((item) => item.sourceKind === "task_soil_ref"), true);
   assert.equal(ledger.items.some((item) => item.sourceKind === "skill"), true);
   assert.equal(ledger.budget.budgetSource, "model_capabilities");
   assert.equal(ledger.readModel.entries.some((entry) => entry.kind === "attachment"), true);
   assert.equal(ledger.readModel.entries.some((entry) => entry.kind === "budget" && entry.status === "used"), true);
-  assert.match(ledger.readModel.summary, /历史对话/);
+  assert.match(ledger.readModel.summary, /最近对话/);
   const json = JSON.stringify(ledger);
   assert.equal(json.includes("sk-context-secret"), false);
   assert.equal(json.includes("sk-user-secret"), false);
@@ -84,7 +84,7 @@ test("context ledger append preserves existing context and adds only safe tool e
   const appended = appendToolEnvelopeToContextLedger(ledger, toolEnvelope());
 
   assert.equal(appended.items.some((item) => item.sourceKind === "user_message"), true);
-  assert.equal(appended.items.some((item) => item.sourceKind === "conversation" && item.summary.includes("history survives")), true);
+  assert.equal(appended.items.some((item) => item.sourceKind === "conversation_recent_turn" && item.summary.includes("history survives")), true);
   assert.equal(appended.items.some((item) => item.sourceKind === "tool_evidence"), true);
   assert.equal(appended.evidenceRefs.includes("web:https://example.test"), true);
   const json = JSON.stringify(appended);
@@ -112,6 +112,95 @@ test("context ledger reports truncation when messages or chars exceed budget", (
   assert.equal(ledger.readModel.entries.some((entry) => entry.status === "omitted"), true);
   assert.equal(ledger.readModel.entries.some((entry) => entry.kind === "truncation" && entry.status === "omitted"), true);
   assert.equal(ledger.readModel.entries.some((entry) => entry.kind === "budget" && entry.status === "truncated"), true);
+});
+
+test("context ledger summarizes older history and keeps the latest four pairs as turns", () => {
+  const taskSoil = createTaskSoil({ rawGoal: "continue", goalId: "goal-history", traceId: "trace-history" });
+  const conversationHistory = Array.from({ length: 6 }, (_, index) => ([
+    {
+      role: "user" as const,
+      content: `older user ${index}`,
+      ref: `conversation:history:user:${index}`,
+    },
+    {
+      role: "assistant" as const,
+      content: `older assistant ${index}`,
+      ref: `conversation:history:assistant:${index}`,
+    },
+  ])).flat();
+
+  const ledger = createBasicAgentContextLedger({
+    runId: "run-history",
+    goal: "continue from previous work",
+    taskSoil,
+    conversationHistory,
+  });
+
+  const summary = ledger.items.find((item) => item.sourceKind === "conversation_summary");
+  const recentTurns = ledger.items.filter((item) => item.sourceKind === "conversation_recent_turn");
+
+  assert.notEqual(summary, undefined);
+  assert.equal(summary?.summary.includes("older user 0"), true);
+  assert.equal(summary?.summary.includes("older assistant 1"), true);
+  assert.equal(summary?.summary.includes("older user 2"), false);
+  assert.equal(recentTurns.length, 8);
+  assert.deepEqual(recentTurns.map((item) => item.role), [
+    "user",
+    "assistant",
+    "user",
+    "assistant",
+    "user",
+    "assistant",
+    "user",
+    "assistant",
+  ]);
+  assert.equal(recentTurns.at(-1)?.summary.includes("older assistant 5"), true);
+});
+
+test("context ledger conversation summary redacts secrets and internal raw fragments", () => {
+  const taskSoil = createTaskSoil({ rawGoal: "continue safely", goalId: "goal-safe-history", traceId: "trace-safe-history" });
+  const ledger = createBasicAgentContextLedger({
+    runId: "run-safe-history",
+    goal: "continue safely",
+    taskSoil,
+    conversationHistory: [
+      {
+        role: "user",
+        content: "safe older request\nraw prompt: do not show\napi_key=sk-history-secret\ninternal loop state",
+        ref: "conversation:history:user:0",
+      },
+      {
+        role: "assistant",
+        content: "safe older answer\nraw provider response: private\nraw tool output: private\nhidden reasoning: private",
+        ref: "conversation:history:assistant:0",
+      },
+      ...Array.from({ length: 4 }, (_, index) => ([
+        {
+          role: "user" as const,
+          content: `recent user ${index}`,
+          ref: `conversation:history:user:${index + 1}`,
+        },
+        {
+          role: "assistant" as const,
+          content: `recent assistant ${index}`,
+          ref: `conversation:history:assistant:${index + 1}`,
+        },
+      ])).flat(),
+    ],
+  });
+
+  const summary = ledger.items.find((item) => item.sourceKind === "conversation_summary");
+  const text = JSON.stringify(summary);
+
+  assert.notEqual(summary, undefined);
+  assert.equal(text.includes("safe older request"), true);
+  assert.equal(text.includes("safe older answer"), true);
+  assert.equal(text.includes("sk-history-secret"), false);
+  assert.equal(text.includes("raw prompt"), false);
+  assert.equal(text.includes("raw provider response"), false);
+  assert.equal(text.includes("raw tool output"), false);
+  assert.equal(text.includes("hidden reasoning"), false);
+  assert.equal(text.includes("internal loop"), false);
 });
 
 function skillContext(): DesktopAgentSkillContext {

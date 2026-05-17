@@ -112,6 +112,8 @@ function contextItemLabel(kind: string): string {
   if (kind === "system") return "工作边界";
   if (kind === "skill") return "技能";
   if (kind === "conversation") return "历史对话";
+  if (kind === "conversation_summary") return "历史摘要";
+  if (kind === "conversation_recent_turn") return "最近对话";
   if (kind === "user_message") return "当前任务";
   return "上下文引用";
 }

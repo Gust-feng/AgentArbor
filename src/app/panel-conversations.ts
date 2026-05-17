@@ -57,6 +57,39 @@ export type PanelConversationReadModel = {
 
 export type PanelConversationSummaryReadModel = Omit<PanelConversationReadModel, "turns">;
 
+export type TrimRuntimeConversationResult = {
+  readonly record: RuntimeConversationRecord;
+  readonly trimmed: boolean;
+};
+
+export function trimRuntimeConversationToCompletedPairs(input: {
+  readonly record: RuntimeConversationRecord;
+  readonly completedRunIds?: ReadonlySet<string>;
+}): TrimRuntimeConversationResult {
+  const turns = completedTurnPrefix(input.record.turns, input.completedRunIds);
+  const lastTurn = turns.at(-1);
+  const lastAssistant = [...turns].reverse().find((turn) => turn.role === "assistant");
+  const next: RuntimeConversationRecord = {
+    ...input.record,
+    turns,
+    preview:
+      lastTurn === undefined
+        ? "开始后会显示在这里。"
+        : compact(lastTurn.content || lastTurn.title, 180),
+    status: turns.length === 0 ? "idle" : "completed",
+    activeRunId: undefined,
+    latestRunId: lastAssistant?.runId,
+    requiresUserAction: false,
+    queuedRunIds: [],
+    queuedRunCount: 0,
+    updatedAt: lastTurn?.updatedAt ?? input.record.updatedAt,
+  };
+  return {
+    record: next,
+    trimmed: JSON.stringify(next) !== JSON.stringify(input.record),
+  };
+}
+
 export class PanelConversationStore {
   private readonly conversations = new Map<string, PanelConversation>();
 
@@ -280,6 +313,36 @@ export class PanelConversationStore {
     }
     return conversation;
   }
+}
+
+function completedTurnPrefix(
+  turns: readonly RuntimeConversationRecord["turns"][number][],
+  completedRunIds: ReadonlySet<string> | undefined
+): readonly RuntimeConversationRecord["turns"][number][] {
+  const selected: RuntimeConversationRecord["turns"][number][] = [];
+  for (let index = 0; index + 1 < turns.length; index += 2) {
+    const userTurn = turns[index];
+    const assistantTurn = turns[index + 1];
+    if (
+      userTurn === undefined ||
+      assistantTurn === undefined ||
+      userTurn.role !== "user" ||
+      assistantTurn.role !== "assistant" ||
+      userTurn.status !== "completed" ||
+      assistantTurn.status !== "completed"
+    ) {
+      break;
+    }
+    if (
+      completedRunIds !== undefined &&
+      assistantTurn.runId !== undefined &&
+      !completedRunIds.has(assistantTurn.runId)
+    ) {
+      break;
+    }
+    selected.push(userTurn, assistantTurn);
+  }
+  return selected;
 }
 
 function createTurn(input: {

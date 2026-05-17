@@ -83,6 +83,73 @@ test("Basic Agent context pack marks budget truncation instead of overfilling me
   assert.equal(pack.truncationReport.omittedItemCount > 0, true);
 });
 
+test("Basic Agent context pack keeps current user message last under tight budget", () => {
+  const taskSoil = createTaskSoil({
+    rawGoal: "this is the current user instruction",
+    goalId: "goal-current-last",
+    traceId: "trace-current-last",
+  });
+
+  const pack = buildBasicAgentContextPack({
+    goal: "this is the current user instruction",
+    taskSoil,
+    conversationHistory: Array.from({ length: 16 }, (_, index) => ({
+      role: index % 2 === 0 ? "user" as const : "assistant" as const,
+      content: `long previous turn ${index} ${"x".repeat(300)}`,
+      ref: `conversation:current-last:${index}`,
+    })),
+    maxMessages: 3,
+    maxChars: 2_000,
+  });
+
+  const lastMessage = pack.messages.at(-1);
+  assert.equal(lastMessage?.role, "user");
+  assert.equal(lastMessage?.content.includes("Current user message: this is the current user instruction"), true);
+  assert.equal(pack.items.some((item) => item.sourceKind === "conversation_summary"), false);
+  assert.equal(pack.truncated, true);
+});
+
+test("Basic Agent context pack emits older history as summary and recent history with original roles", () => {
+  const taskSoil = createTaskSoil({
+    rawGoal: "continue",
+    goalId: "goal-pack-history",
+    traceId: "trace-pack-history",
+  });
+
+  const pack = buildBasicAgentContextPack({
+    goal: "continue",
+    taskSoil,
+    conversationHistory: Array.from({ length: 6 }, (_, index) => ([
+      {
+        role: "user" as const,
+        content: `history user ${index}`,
+        ref: `conversation:pack:user:${index}`,
+      },
+      {
+        role: "assistant" as const,
+        content: `history assistant ${index}`,
+        ref: `conversation:pack:assistant:${index}`,
+      },
+    ])).flat(),
+  });
+
+  assert.equal(pack.items.some((item) => item.sourceKind === "conversation_summary"), true);
+  assert.deepEqual(pack.messages.map((message) => message.role), [
+    "system",
+    "system",
+    "user",
+    "assistant",
+    "user",
+    "assistant",
+    "user",
+    "assistant",
+    "user",
+    "assistant",
+    "user",
+  ]);
+  assert.equal(pack.messages.at(-1)?.content.includes("Current user message: continue"), true);
+});
+
 test("Basic Agent context pack derives token budget from model capabilities", () => {
   const taskSoil = createTaskSoil({
     rawGoal: "answer",

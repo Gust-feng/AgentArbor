@@ -10,6 +10,8 @@ export type BasicAgentContextSourceKind =
   | "system"
   | "skill"
   | "conversation"
+  | "conversation_summary"
+  | "conversation_recent_turn"
   | "user_message"
   | "task_soil_ref"
   | "tool_evidence";
@@ -95,9 +97,16 @@ function contextMessageForItem(item: BasicAgentContextItem): ModelMessage | unde
       ref: item.itemId,
     };
   }
-  if (item.sourceKind === "conversation") {
+  if (item.sourceKind === "conversation" || item.sourceKind === "conversation_recent_turn") {
     return {
       role: item.role ?? "user",
+      content: item.summary,
+      ref: item.itemId,
+    };
+  }
+  if (item.sourceKind === "conversation_summary") {
+    return {
+      role: "system",
       content: item.summary,
       ref: item.itemId,
     };

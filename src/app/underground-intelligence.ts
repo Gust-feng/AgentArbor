@@ -100,9 +100,7 @@ export async function requestUndergroundRootletCandidateAdvice(input: {
 
   if (
     response === undefined ||
-    turn.status !== "completed" ||
-    turn.stoppedReason === "max_tool_rounds" ||
-    turn.stoppedReason === "max_model_rounds"
+    turn.status !== "completed"
   ) {
     return {
       rootletOutputs: [],

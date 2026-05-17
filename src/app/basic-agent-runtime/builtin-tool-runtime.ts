@@ -4,6 +4,8 @@ import type { ToolCategory, ToolExecutor } from "../../domain/tools/index.js";
 import type { McpManager } from "../../adapters/mcp/index.js";
 import {
   createBrowserSnapshotTool,
+  createLocalCreateFileTool,
+  createLocalDeleteFileTool,
   createLocalEditFileTool,
   createLocalGrepFilesTool,
   createLocalListDirTool,
@@ -11,7 +13,6 @@ import {
   createLocalRunCommandTool,
   createLocalShellCommandTool,
   createLocalWorkspaceSandboxPolicy,
-  createLocalWriteFileTool,
 } from "../tool-center/index.js";
 import {
   createDefaultResearchRuntime,
@@ -71,8 +72,9 @@ export function createDesktopBasicToolRegistry(
     createLocalReadFileTool(workspaceRoot, { sandboxPolicy }),
     createLocalListDirTool(workspaceRoot, { sandboxPolicy }),
     createLocalGrepFilesTool(workspaceRoot, { sandboxPolicy }),
-    createLocalWriteFileTool(workspaceRoot, { sandboxPolicy }),
+    createLocalCreateFileTool(workspaceRoot, { sandboxPolicy }),
     createLocalEditFileTool(workspaceRoot, { sandboxPolicy }),
+    createLocalDeleteFileTool(workspaceRoot, { sandboxPolicy }),
     createLocalRunCommandTool(workspaceRoot, { sandboxPolicy }),
     createLocalShellCommandTool(workspaceRoot, { sandboxPolicy }),
     createBrowserSnapshotTool(),

@@ -19,7 +19,6 @@ export type ResolveRunCapabilitiesInput = {
 // run may expose to the model after task permissions, platform gates, and mode
 // boundaries are applied.
 export function resolveRunCapabilities(input: ResolveRunCapabilitiesInput): RunCapabilityResolution {
-  const platform = input.platform ?? process.platform;
   const permissionRefs = new Set(input.taskSoil?.permissionBoundaryRefs ?? []);
   const toolExposures = input.snapshot.toolCatalog.tools.map((tool): RunToolExposure => {
     const availabilityAllowed = tool.enabled && tool.availability === "available";
@@ -32,13 +31,13 @@ export function resolveRunCapabilities(input: ResolveRunCapabilitiesInput): RunC
       availability: tool.availability,
       riskLevel: tool.riskLevel,
       operationType: tool.operationType,
-      requiresConfirmation: tool.requiresConfirmation || (platform === "win32" && tool.operationType !== "read-only"),
+      requiresConfirmation: tool.requiresConfirmation,
       reason: exposureReason({
         enabled: tool.enabled,
         availability: tool.availability,
         denied,
         modelVisible,
-        requiresConfirmation: tool.requiresConfirmation || (platform === "win32" && tool.operationType !== "read-only"),
+        requiresConfirmation: tool.requiresConfirmation,
       }),
     };
   });

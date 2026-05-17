@@ -126,6 +126,73 @@ test("executeToolUseLoop returns tool results to the model before natural comple
   assert.equal(center.getCallCount(), 1);
 });
 
+test("executeToolUseLoop runs context maintenance before continuing after tool results", async () => {
+  const channel = new SequenceIntelligenceChannel([
+    toolCallResponse("model-request-test", "call-search", "web_search"),
+    textResponse("model-request-final", "Final answer with compacted context."),
+  ]);
+  const center = new TestToolBroker();
+  center.register("web_search", async () => ({ results: [{ title: "A" }] }));
+  let maintenanceCalls = 0;
+
+  const result = await executeToolUseLoop(
+    {
+      intelligenceChannel: channel,
+      toolCenter: center,
+      callerAgentId: "agent-test",
+      traceId: "trace-test",
+      goalId: "goal-test",
+      allowedTools: ["web_search"],
+      maintainContext: async (input) => {
+        maintenanceCalls += 1;
+        if (maintenanceCalls === 2) {
+          return {
+            status: "compacted",
+            messages: [
+              { role: "system", content: "## Goal\n- Compacted context", ref: "context:compacted" },
+              ...input.messages.slice(-2),
+            ],
+          };
+        }
+        return { status: "unchanged" };
+      },
+    },
+    createValidModelRequest()
+  );
+
+  assert.equal(result.stoppedReason, "completed");
+  assert.equal(maintenanceCalls, 2);
+  assert.equal(channel.requests[1]?.sanitizedMessages[0]?.ref, "context:compacted");
+  assert.equal(channel.requests[1]?.sanitizedMessages.some((message) => message.role === "tool"), true);
+});
+
+test("executeToolUseLoop pauses when context maintenance fails", async () => {
+  const channel = new SequenceIntelligenceChannel([
+    textResponse("model-request-final", "must not be requested"),
+  ]);
+  const center = new TestToolBroker();
+
+  const result = await executeToolUseLoop(
+    {
+      intelligenceChannel: channel,
+      toolCenter: center,
+      callerAgentId: "agent-test",
+      traceId: "trace-test",
+      goalId: "goal-test",
+      maintainContext: async () => ({
+        status: "failed",
+        message: "Context compaction failed.",
+        requestId: "model-request-compaction",
+      }),
+    },
+    createValidModelRequest()
+  );
+
+  assert.equal(result.stoppedReason, "context_overflow");
+  assert.equal(result.finalOutput.status, "failed");
+  assert.equal(channel.requests.length, 0);
+});
+
 test("executeToolUseLoop pauses out_of_fuel instead of forcing synthesis when tool fuel is exhausted", async () => {
   const channel = new SequenceIntelligenceChannel([
     toolCallResponse("model-request-test", "call-search", "web_search"),
@@ -558,6 +625,102 @@ test("executeToolUseLoop executes explicitly read-only tool calls in parallel", 
   assert.equal(maxActive, 2);
 });
 
+test("executeToolUseLoop keeps read-only URL confirmations on the approval pause path", async () => {
+  const channel = new SequenceIntelligenceChannel([
+    {
+      ...completedResponse("model-request-test", undefined),
+      toolCalls: [
+        { callId: "call-local-url", toolName: "read", input: { url: "http://localhost:3000/debug" } },
+        { callId: "call-read-file", toolName: "read_file", input: { path: "README.md" } },
+      ],
+      finishReason: "tool_call",
+    },
+    textResponse("model-request-final", "Final answer after approved local read."),
+  ]);
+  const center = new TestToolBroker();
+  const order: string[] = [];
+  center.register("read", async () => {
+    order.push("read");
+    return { ok: true };
+  }, "read-only");
+  center.register("read_file", async () => {
+    order.push("read_file");
+    return { ok: true };
+  }, "read-only");
+  const request = createValidModelRequest();
+  const paused = await executeToolUseLoop(
+    {
+      intelligenceChannel: channel,
+      toolCenter: center,
+      callerAgentId: "agent-test",
+      traceId: "trace-test",
+      goalId: "goal-test",
+      allowedTools: ["read", "read_file"],
+    },
+    request
+  );
+
+  assert.equal(paused.stoppedReason, "approval_required");
+  assert.equal(paused.pendingApproval?.confirmationId, "confirmation-call-local-url");
+  assert.equal(paused.pendingApproval?.remainingToolCallsAfterApproval.length, 1);
+  assert.deepEqual(order, []);
+
+  const resumed = await resumeToolUseLoopFromApproval(
+    {
+      intelligenceChannel: channel,
+      toolCenter: center,
+      callerAgentId: "agent-test",
+      traceId: "trace-test",
+      goalId: "goal-test",
+      allowedTools: ["read", "read_file"],
+      approvedConfirmationIds: ["confirmation-call-local-url"],
+    },
+    request,
+    paused.pendingApproval!
+  );
+
+  assert.equal(resumed.stoppedReason, "completed");
+  assert.deepEqual(order, ["read", "read_file"]);
+  assert.equal(channel.requests[1]?.sanitizedMessages.filter((message) => message.role === "tool").length, 2);
+});
+
+test("executeToolUseLoop executes non-read-only tool batches sequentially in model order", async () => {
+  const channel = new SequenceIntelligenceChannel([
+    {
+      ...completedResponse("model-request-test", undefined),
+      toolCalls: [
+        { callId: "call-edit-1", toolName: "edit_file", input: { path: "a.txt" } },
+        { callId: "call-edit-2", toolName: "edit_file", input: { path: "a.txt" } },
+      ],
+      finishReason: "tool_call",
+    },
+    textResponse("model-request-final", "Final answer."),
+  ]);
+  const center = new TestToolBroker();
+  const order: string[] = [];
+  center.register("edit_file", async (input) => {
+    order.push(String((input as { readonly path?: string }).path ?? "missing"));
+    return { ok: true };
+  }, "read-write");
+
+  const result = await executeToolUseLoop(
+    {
+      intelligenceChannel: channel,
+      toolCenter: center,
+      callerAgentId: "agent-test",
+      traceId: "trace-test",
+      goalId: "goal-test",
+      allowedTools: ["edit_file"],
+      approvedConfirmationIds: ["confirmation-call-edit-1", "confirmation-call-edit-2"],
+    },
+    createValidModelRequest()
+  );
+
+  assert.equal(result.stoppedReason, "completed");
+  assert.deepEqual(order, ["a.txt", "a.txt"]);
+  assert.equal(channel.requests[1]?.sanitizedMessages.filter((message) => message.role === "tool").length, 2);
+});
+
 test("executeToolUseLoop pauses on approval_required without final synthesis", async () => {
   const eventLog = new InMemoryEventLog();
   const channel = new SequenceIntelligenceChannel([
@@ -628,6 +791,63 @@ test("resumeToolUseLoopFromApproval executes only a matching approved confirmati
   assert.equal(resumed.toolCalls[0]?.status, "completed");
   assert.equal(center.getCallCount(), 1);
   assert.equal(channel.requests.length, 2);
+});
+
+test("resumeToolUseLoopFromApproval continues the remaining tool calls in the same batch", async () => {
+  const channel = new SequenceIntelligenceChannel([
+    {
+      ...completedResponse("model-request-test", undefined),
+      toolCalls: [
+        { callId: "call-shell", toolName: "shell_command", input: { command: "echo" } },
+        { callId: "call-read", toolName: "read_file", input: { path: "README.md" } },
+      ],
+      finishReason: "tool_call",
+    },
+    textResponse("model-request-final", "Final answer after batch."),
+  ]);
+  const center = new TestToolBroker();
+  const order: string[] = [];
+  center.register("shell_command", async () => {
+    order.push("shell_command");
+    return { ok: true };
+  }, "execute");
+  center.register("read_file", async () => {
+    order.push("read_file");
+    return { ok: true };
+  }, "read-only");
+  const request = createValidModelRequest();
+  const paused = await executeToolUseLoop(
+    {
+      intelligenceChannel: channel,
+      toolCenter: center,
+      callerAgentId: "agent-test",
+      traceId: "trace-test",
+      goalId: "goal-test",
+      allowedTools: ["shell_command", "read_file"],
+    },
+    request
+  );
+
+  assert.equal(paused.stoppedReason, "approval_required");
+  assert.equal(paused.pendingApproval?.remainingToolCallsAfterApproval.length, 1);
+  const resumed = await resumeToolUseLoopFromApproval(
+    {
+      intelligenceChannel: channel,
+      toolCenter: center,
+      callerAgentId: "agent-test",
+      traceId: "trace-test",
+      goalId: "goal-test",
+      allowedTools: ["shell_command", "read_file"],
+      approvedConfirmationIds: ["confirmation-call-shell"],
+    },
+    request,
+    paused.pendingApproval!
+  );
+
+  assert.equal(resumed.stoppedReason, "completed");
+  assert.deepEqual(order, ["shell_command", "read_file"]);
+  assert.equal(resumed.toolCalls.length, 2);
+  assert.equal(channel.requests[1]?.sanitizedMessages.filter((message) => message.role === "tool").length, 2);
 });
 
 test("resumeToolUseLoopFromApproval rejects the wrong confirmation id without executing", async () => {
@@ -847,6 +1067,27 @@ class TestToolBroker implements ToolExecutionBroker {
     }
     const operationType = this.operationTypes.get(request.toolName) ?? "read-only";
     const confirmationId = `confirmation-${request.callId}`;
+    if (privateUrlFromInput(request.input) !== undefined && permission?.approvedConfirmationIds?.includes(confirmationId) !== true) {
+      return {
+        callId: request.callId,
+        toolName: request.toolName,
+        input: request.input,
+        output: undefined,
+        status: "approval_required",
+        error: `Tool ${request.toolName} requires approval for local URL access.`,
+        durationMs: 0,
+        confirmationRequest: {
+          confirmationId,
+          runId: request.callId,
+          title: "需要确认内部网络访问",
+          actionSummary: `工具 ${request.toolName} 需要确认后才能读取本机或内网地址。`,
+          affectedResources: [],
+          riskLevel: "medium",
+          requestedAt: nowIso(),
+          sourceRefs: [`tool:${request.callId}`],
+        },
+      };
+    }
     if (operationType !== "read-only" && permission?.approvedConfirmationIds?.includes(confirmationId) !== true) {
       return {
         callId: request.callId,
@@ -886,6 +1127,19 @@ class TestToolBroker implements ToolExecutionBroker {
   getCallCount(): number {
     return this.callCount;
   }
+}
+
+function privateUrlFromInput(input: unknown): string | undefined {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) {
+    return undefined;
+  }
+  const url = (input as Readonly<Record<string, unknown>>).url;
+  if (typeof url !== "string") {
+    return undefined;
+  }
+  return /^https?:\/\/(?:localhost|127\.|10\.|192\.168\.|172\.(?:1[6-9]|2\d|3[0-1])\.)/i.test(url)
+    ? url
+    : undefined;
 }
 
 function failedToolResult(request: ToolCallRequest, error: string): ToolCallResult {

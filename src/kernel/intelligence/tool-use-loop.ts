@@ -34,12 +34,40 @@ export type ToolUseLoopOptions = {
   readonly blockedToolNames?: readonly string[];
   readonly approvedConfirmationIds?: readonly string[];
   readonly publishToolEvent?: (message: ArborMessage) => void;
+  readonly maintainContext?: ToolUseLoopContextMaintainer;
   readonly abortSignal?: AbortSignal;
 };
+
+export type ToolUseLoopContextMaintainer = (input: {
+  readonly initialRequest: ModelRequest;
+  readonly requestId: string;
+  readonly messages: readonly ModelMessage[];
+  readonly tools: readonly ToolDefinition[];
+  readonly toolCalls: readonly ToolCallResult[];
+  readonly modelRounds: number;
+  readonly rounds: number;
+}) => Promise<ToolUseLoopContextMaintenanceResult>;
+
+export type ToolUseLoopContextMaintenanceResult =
+  | {
+      readonly status: "unchanged";
+    }
+  | {
+      readonly status: "compacted";
+      readonly messages: readonly ModelMessage[];
+    }
+  | {
+      readonly status: "failed";
+      readonly message: string;
+      readonly requestId?: string;
+      readonly responseId?: string;
+      readonly retryable?: boolean;
+    };
 
 export type ToolUseLoopPendingApproval = {
   readonly confirmationId: string;
   readonly pendingToolCall: ToolCallRequest;
+  readonly remainingToolCallsAfterApproval: readonly ToolCallRequest[];
   readonly messagesBeforeToolCall: readonly ModelMessage[];
   readonly assistantMessage: ModelMessage;
   readonly completedToolResults: readonly ToolCallResult[];
@@ -58,6 +86,7 @@ export type ToolUseLoopResult = {
     | "completed"
     | "no_tool_calls"
     | "out_of_fuel"
+    | "context_overflow"
     | "approval_required"
     | "cancelled"
     | "error";
@@ -126,12 +155,12 @@ async function resumeApprovalCore(
   }));
   const approvedResult = await executeToolCallSafely(options, pendingApproval.pendingToolCall, context);
   publishToolResultEvent(options, approvedResult, context);
-  const toolCalls = [...pendingApproval.toolCallsBeforeApproval, approvedResult];
-  const rounds = pendingApproval.rounds + 1;
+  const toolDefinitions = modelVisibleToolDefinitions(options);
+  let toolCalls = [...pendingApproval.toolCallsBeforeApproval, approvedResult];
   if (approvedResult.status === "approval_required") {
     return {
       finalOutput: approvalStillRequiredModelResponse(initialRequest, pendingApproval),
-      toolCalls: [...toolCalls],
+      toolCalls,
       modelRounds: pendingApproval.modelRounds,
       rounds: pendingApproval.rounds,
       stoppedReason: "approval_required",
@@ -139,16 +168,63 @@ async function resumeApprovalCore(
     };
   }
   if (approvedResult.status === "cancelled" || Boolean(options.abortSignal?.aborted)) {
-    return abortedLoopResult(initialRequest, toolCalls, pendingApproval.modelRounds, rounds);
+    return abortedLoopResult(initialRequest, toolCalls, pendingApproval.modelRounds, pendingApproval.rounds);
   }
+  let completedToolResults = [
+    ...cloneToolResults(pendingApproval.completedToolResults),
+    approvedResult,
+  ];
+  if (pendingApproval.remainingToolCallsAfterApproval.length > 0) {
+    const remaining = await executeToolCalls({
+      options,
+      requests: pendingApproval.remainingToolCallsAfterApproval,
+      toolDefinitions,
+    });
+    toolCalls = [...toolCalls, ...remaining.results];
+    if (remaining.pendingApproval !== undefined) {
+      const completedBeforeNextApproval = [
+        ...completedToolResults,
+        ...remaining.pendingApproval.completedToolResults,
+      ];
+      return {
+        finalOutput: approvalStillRequiredModelResponse(initialRequest, {
+          ...pendingApproval,
+          confirmationId: remaining.pendingApproval.confirmationId,
+          pendingToolCall: remaining.pendingApproval.pendingToolCall,
+          remainingToolCallsAfterApproval: remaining.pendingApproval.remainingToolCallsAfterApproval,
+        }),
+        toolCalls,
+        modelRounds: pendingApproval.modelRounds,
+        rounds: pendingApproval.rounds,
+        stoppedReason: "approval_required",
+        pendingApproval: {
+          confirmationId: remaining.pendingApproval.confirmationId,
+          pendingToolCall: cloneToolCallRequest(remaining.pendingApproval.pendingToolCall),
+          remainingToolCallsAfterApproval: remaining.pendingApproval.remainingToolCallsAfterApproval.map(cloneToolCallRequest),
+          messagesBeforeToolCall: cloneMessages(pendingApproval.messagesBeforeToolCall),
+          assistantMessage: cloneModelMessage(pendingApproval.assistantMessage),
+          completedToolResults: cloneToolResults(completedBeforeNextApproval),
+          toolCallsBeforeApproval: cloneToolResults([
+            ...pendingApproval.toolCallsBeforeApproval,
+            approvedResult,
+            ...remaining.pendingApproval.completedToolResults,
+          ]),
+          modelRounds: pendingApproval.modelRounds,
+          rounds: pendingApproval.rounds,
+          requestId: createId("model-request"),
+        },
+      };
+    }
+    completedToolResults = [...completedToolResults, ...remaining.results];
+  }
+  const rounds = pendingApproval.rounds + 1;
   return continueToolUseLoopAfterToolResults({
     options,
     initialRequest,
     messages: [
       ...cloneMessages(pendingApproval.messagesBeforeToolCall),
       cloneModelMessage(pendingApproval.assistantMessage),
-      ...pendingApproval.completedToolResults.map(toolResultMessage),
-      toolResultMessage(approvedResult),
+      ...completedToolResults.map(toolResultMessage),
     ],
     toolCalls,
     modelRounds: pendingApproval.modelRounds,
@@ -166,6 +242,7 @@ async function executeToolCalls(input: {
   readonly pendingApproval?: {
     readonly confirmationId: string;
     readonly pendingToolCall: ToolCallRequest;
+    readonly remainingToolCallsAfterApproval: readonly ToolCallRequest[];
     readonly completedToolResults: readonly ToolCallResult[];
     readonly requestsForAssistantMessage: readonly ToolCallRequest[];
   };
@@ -176,7 +253,7 @@ async function executeToolCalls(input: {
     goalId: input.options.goalId,
     abortSignal: input.options.abortSignal,
   };
-  if (input.requests.every((request) => isReadOnlyToolCall(request, input.toolDefinitions))) {
+  if (canExecuteReadOnlyBatchInParallel(input.requests, input.toolDefinitions)) {
     input.requests.forEach((request) => input.options.publishToolEvent?.(createToolRequestedMessage({ request, context })));
     const results = await Promise.all(
       input.requests.map((request) => executeToolCallSafely(input.options, request, context))
@@ -203,8 +280,9 @@ async function executeToolCalls(input: {
         pendingApproval: {
           confirmationId: result.confirmationRequest?.confirmationId ?? `confirmation-${result.callId}`,
           pendingToolCall: cloneToolCallRequest(request),
+          remainingToolCallsAfterApproval: input.requests.slice(index + 1).map(cloneToolCallRequest),
           completedToolResults: cloneToolResults(results.slice(0, -1)),
-          requestsForAssistantMessage: input.requests.slice(0, index + 1).map(cloneToolCallRequest),
+          requestsForAssistantMessage: input.requests.map(cloneToolCallRequest),
         },
       };
     }
@@ -272,10 +350,7 @@ async function continueToolUseLoopAfterToolResults(input: {
 }): Promise<ToolUseLoopResult> {
   const maxToolRounds = normalizeOptionalRoundLimit(input.options.maxToolRounds);
   const maxModelRounds = normalizeOptionalRoundLimit(input.options.maxModelRounds);
-  const toolDefinitions = input.options.toolCenter
-    .list()
-    .filter((tool) => input.options.allowedTools === undefined || input.options.allowedTools.includes(tool.name))
-    .filter((tool) => !isBlockedToolName(input.options, tool.name));
+  const toolDefinitions = modelVisibleToolDefinitions(input.options);
   let messages = cloneMessages(input.messages);
   const toolCalls: ToolCallResult[] = [...input.toolCalls];
   let modelRounds = input.modelRounds;
@@ -288,6 +363,22 @@ async function continueToolUseLoopAfterToolResults(input: {
     }
     if (maxModelRounds !== undefined && modelRounds >= maxModelRounds) {
       return outOfFuelLoopResult(input.initialRequest, toolCalls, modelRounds, rounds);
+    }
+    const maintenance = await maintainContextIfNeeded({
+      options: input.options,
+      initialRequest: input.initialRequest,
+      requestId,
+      messages,
+      tools: toolDefinitions,
+      toolCalls,
+      modelRounds,
+      rounds,
+    });
+    if (maintenance.status === "failed") {
+      return contextOverflowLoopResult(input.initialRequest, toolCalls, modelRounds, rounds, maintenance);
+    }
+    if (maintenance.status === "compacted") {
+      messages = cloneMessages(maintenance.messages);
     }
 
     const response = await input.options.intelligenceChannel.request({
@@ -333,6 +424,7 @@ async function continueToolUseLoopAfterToolResults(input: {
         pendingApproval: {
           confirmationId: roundResult.pendingApproval.confirmationId,
           pendingToolCall: cloneToolCallRequest(roundResult.pendingApproval.pendingToolCall),
+          remainingToolCallsAfterApproval: roundResult.pendingApproval.remainingToolCallsAfterApproval.map(cloneToolCallRequest),
           messagesBeforeToolCall: cloneMessages(messages),
           assistantMessage: assistantToolCallMessage(response, roundResult.pendingApproval.requestsForAssistantMessage),
           completedToolResults: cloneToolResults(roundResult.pendingApproval.completedToolResults),
@@ -368,8 +460,72 @@ function normalizeOptionalRoundLimit(value: number | undefined): number | undefi
   return Math.max(0, Math.floor(value));
 }
 
+function modelVisibleToolDefinitions(options: ToolUseLoopOptions): readonly ToolDefinition[] {
+  return options.toolCenter
+    .list()
+    .filter((tool) => options.allowedTools === undefined || options.allowedTools.includes(tool.name))
+    .filter((tool) => !isBlockedToolName(options, tool.name));
+}
+
+async function maintainContextIfNeeded(input: {
+  readonly options: ToolUseLoopOptions;
+  readonly initialRequest: ModelRequest;
+  readonly requestId: string;
+  readonly messages: readonly ModelMessage[];
+  readonly tools: readonly ToolDefinition[];
+  readonly toolCalls: readonly ToolCallResult[];
+  readonly modelRounds: number;
+  readonly rounds: number;
+}): Promise<ToolUseLoopContextMaintenanceResult> {
+  if (input.options.maintainContext === undefined) {
+    return { status: "unchanged" };
+  }
+  try {
+    return await input.options.maintainContext({
+      initialRequest: input.initialRequest,
+      requestId: input.requestId,
+      messages: input.messages,
+      tools: input.tools,
+      toolCalls: input.toolCalls,
+      modelRounds: input.modelRounds,
+      rounds: input.rounds,
+    });
+  } catch (error) {
+    return {
+      status: "failed",
+      message: error instanceof Error ? error.message : "Context maintenance failed.",
+      retryable: true,
+    };
+  }
+}
+
 function isReadOnlyToolCall(request: ToolCallRequest, definitions: readonly ToolDefinition[]): boolean {
   return definitions.find((definition) => definition.name === request.toolName)?.metadata?.operationType === "read-only";
+}
+
+function canExecuteReadOnlyBatchInParallel(
+  requests: readonly ToolCallRequest[],
+  definitions: readonly ToolDefinition[]
+): boolean {
+  return requests.every((request) => {
+    const definition = definitions.find((candidate) => candidate.name === request.toolName);
+    return definition?.metadata?.operationType === "read-only" && !mayRequireConfirmationBeforeExecution(request, definition);
+  });
+}
+
+function mayRequireConfirmationBeforeExecution(request: ToolCallRequest, definition: ToolDefinition): boolean {
+  if (definition.metadata?.requiresConfirmation === true) {
+    return true;
+  }
+  return stringFromRecord(request.input, "url") !== undefined;
+}
+
+function stringFromRecord(value: unknown, key: string): string | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return undefined;
+  }
+  const raw = (value as Readonly<Record<string, unknown>>)[key];
+  return typeof raw === "string" && raw.trim().length > 0 ? raw.trim() : undefined;
 }
 
 function isBlockedToolName(options: ToolUseLoopOptions, toolName: string): boolean {
@@ -388,6 +544,22 @@ function outOfFuelLoopResult(
     modelRounds,
     rounds,
     stoppedReason: "out_of_fuel",
+  };
+}
+
+function contextOverflowLoopResult(
+  initialRequest: ModelRequest,
+  toolCalls: readonly ToolCallResult[],
+  modelRounds: number,
+  rounds: number,
+  failure: Extract<ToolUseLoopContextMaintenanceResult, { readonly status: "failed" }>
+): ToolUseLoopResult {
+  return {
+    finalOutput: contextOverflowModelResponse(initialRequest, failure),
+    toolCalls,
+    modelRounds,
+    rounds,
+    stoppedReason: "context_overflow",
   };
 }
 
@@ -501,6 +673,34 @@ function outOfFuelModelResponse(initialRequest: ModelRequest): ModelResponse {
   };
 }
 
+function contextOverflowModelResponse(
+  initialRequest: ModelRequest,
+  failure: Extract<ToolUseLoopContextMaintenanceResult, { readonly status: "failed" }>
+): ModelResponse {
+  return {
+    responseId: failure.responseId ?? `${initialRequest.requestId}-context-overflow`,
+    requestId: failure.requestId ?? initialRequest.requestId,
+    providerId: "agent-turn-runtime",
+    providerKind: "fake",
+    protocolKind: "openai_compatible_chat_completions",
+    model: "context-maintenance",
+    status: "failed",
+    outputKind: initialRequest.outputContract.outputKind,
+    finishReason: "error",
+    validation: {
+      status: "failed",
+      checkedAt: new Date().toISOString(),
+      issues: [{ code: "context_overflow", message: failure.message }],
+    },
+    failure: {
+      kind: "provider_response",
+      message: failure.message,
+      retryable: failure.retryable ?? true,
+    },
+    completedAt: new Date().toISOString(),
+  };
+}
+
 function approvalRequiredResultFromPending(pendingApproval: ToolUseLoopPendingApproval): ToolCallResult {
   const request = pendingApproval.pendingToolCall;
   const diagnosticRef = `tool:${request.callId}:confirmation-required`;
@@ -541,6 +741,7 @@ function clonePendingApproval(pendingApproval: ToolUseLoopPendingApproval): Tool
   return {
     confirmationId: pendingApproval.confirmationId,
     pendingToolCall: cloneToolCallRequest(pendingApproval.pendingToolCall),
+    remainingToolCallsAfterApproval: pendingApproval.remainingToolCallsAfterApproval.map(cloneToolCallRequest),
     messagesBeforeToolCall: cloneMessages(pendingApproval.messagesBeforeToolCall),
     assistantMessage: cloneModelMessage(pendingApproval.assistantMessage),
     completedToolResults: cloneToolResults(pendingApproval.completedToolResults),

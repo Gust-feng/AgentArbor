@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import {
+  createLocalCreateFileTool,
+  createLocalDeleteFileTool,
   createLocalEditFileTool,
   createLocalGrepFilesTool,
   createLocalListDirTool,
@@ -59,27 +61,104 @@ test("local read_file rejects paths outside workspace", async () => {
   }
 });
 
-test("local write_file and edit_file stay inside the local strategy sandbox", async () => {
+test("local create_file and edit_file stay inside the local strategy sandbox", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tools-"));
   try {
-    const writeFileTool = createLocalWriteFileTool(root);
+    const createFile = createLocalCreateFileTool(root);
     const editFile = createLocalEditFileTool(root);
 
-    const written = await writeFileTool.execute({ path: "notes/result.md", content: "# Title\n\nbody\n" }, context);
-    const edited = await editFile.execute({ path: "notes/result.md", oldText: "body", newText: "updated body" }, context);
+    const created = await createFile.execute({ path: "notes/result.md", content: "# Title\n\nbody\n" }, context);
+    const edited = await editFile.execute({
+      path: "notes/result.md",
+      edits: [{ anchor: "body", replacement: "updated body" }],
+    }, context);
 
-    assert.equal(asRecord(written).action, "write_file");
-    assert.equal(asRecord(written).refId, "workspace:file:notes/result.md");
+    assert.equal(asRecord(created).action, "create_file");
+    assert.equal(asRecord(created).refId, "workspace:file:notes/result.md");
     assert.equal(asRecord(edited).action, "edit_file");
+    assert.equal(typeof asRecord(asRecord(edited).result).beforeHash, "string");
+    assert.equal(typeof asRecord(asRecord(edited).result).afterHash, "string");
     assert.equal(await readFile(path.join(root, "notes", "result.md"), "utf8"), "# Title\n\nupdated body\n");
 
     await assert.rejects(
-      () => writeFileTool.execute({ path: "../outside.md", content: "nope" }, context),
+      () => createFile.execute({ path: "notes/result.md", content: "overwrite" }, context),
+      /already exists/
+    );
+    await assert.rejects(
+      () => createFile.execute({ path: "../outside.md", content: "nope" }, context),
       /outside the workspace boundary/
     );
     await assert.rejects(
-      () => writeFileTool.execute({ path: ".trellis/local.md", content: "nope" }, context),
+      () => createFile.execute({ path: ".trellis/local.md", content: "nope" }, context),
       /blocked workspace path/
+    );
+    await mkdir(path.join(root, ".trellis"));
+    await writeFile(path.join(root, ".trellis", "local.md"), "blocked body", "utf8");
+    await assert.rejects(
+      () => editFile.execute({
+        path: ".trellis/local.md",
+        edits: [{ anchor: "blocked body", replacement: "changed" }],
+      }, context),
+      /blocked workspace path/
+    );
+    assert.equal(await readFile(path.join(root, ".trellis", "local.md"), "utf8"), "blocked body");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("local edit_file applies multiple anchors atomically and rejects ambiguous edits", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tools-"));
+  try {
+    const file = path.join(root, "notes.txt");
+    await writeFile(file, "alpha\nbeta\ngamma\n", "utf8");
+    const editFile = createLocalEditFileTool(root);
+
+    await editFile.execute({
+      path: "notes.txt",
+      edits: [
+        { anchor: "alpha", replacement: "ALPHA" },
+        { anchor: "gamma", replacement: "GAMMA" },
+      ],
+    }, context);
+    assert.equal(await readFile(file, "utf8"), "ALPHA\nbeta\nGAMMA\n");
+
+    await writeFile(file, "same\nsame\n", "utf8");
+    await assert.rejects(
+      () => editFile.execute({ path: "notes.txt", edits: [{ anchor: "same", replacement: "once" }] }, context),
+      /matched 2 times/
+    );
+    assert.equal(await readFile(file, "utf8"), "same\nsame\n");
+
+    await assert.rejects(
+      () => editFile.execute({
+        path: "notes.txt",
+        edits: [
+          { anchor: "same\nsame", replacement: "both" },
+          { anchor: "same", replacement: "one" },
+        ],
+      }, context),
+      /matched 2 times|overlap/
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("local delete_file deletes only regular files and declares confirmation", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tools-"));
+  try {
+    await mkdir(path.join(root, "dir"));
+    await writeFile(path.join(root, "dir", "note.txt"), "remove me", "utf8");
+    const deleteFile = createLocalDeleteFileTool(root);
+
+    assert.equal(deleteFile.definition.metadata?.requiresConfirmation, true);
+    const deleted = await deleteFile.execute({ path: "dir/note.txt" }, context);
+    assert.equal(asRecord(deleted).action, "delete_file");
+    await assert.rejects(() => readFile(path.join(root, "dir", "note.txt"), "utf8"), /ENOENT/);
+    await assert.rejects(
+      () => deleteFile.execute({ path: "dir" }, context),
+      /regular file path/
     );
   } finally {
     await rm(root, { recursive: true, force: true });

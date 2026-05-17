@@ -60,13 +60,14 @@ test("tool security policy allows normal external read-only URLs", () => {
   assert.equal(decision.decision, "allow");
 });
 
-test("tool security policy gates Windows write and execute operations unless exact confirmation is approved", () => {
+test("tool security policy gates explicit confirmation tools unless exact confirmation is approved", () => {
   const request = { callId: "call-shell", toolName: "shell_command", input: { command: "pnpm test" } };
   const metadata: ToolDefinitionMetadata = {
     ...readOnlyMetadata(),
     category: "terminal",
     operationType: "execute",
     riskLevel: "high",
+    requiresConfirmation: true,
   };
   const definition = toolDefinition("shell_command", metadata);
   const pending = evaluateToolCallSecurity({
@@ -99,6 +100,26 @@ test("tool security policy gates Windows write and execute operations unless exa
   });
   assert.equal(confirmation.confirmationId, "confirmation-call-shell");
   assert.equal(confirmation.resumeAvailability, "live");
+});
+
+test("tool security policy does not add Windows confirmation for ordinary create and edit tools", () => {
+  for (const toolName of ["create_file", "edit_file"]) {
+    const metadata: ToolDefinitionMetadata = {
+      ...readOnlyMetadata(),
+      category: "filesystem",
+      operationType: "read-write",
+      riskLevel: "medium",
+      requiresConfirmation: false,
+    };
+    const decision = evaluateToolCallSecurity({
+      request: { callId: `call-${toolName}`, toolName, input: { path: "notes.txt" } },
+      definition: toolDefinition(toolName, metadata),
+      metadata,
+      context: { platform: "win32" },
+    });
+
+    assert.equal(decision.decision, "allow", toolName);
+  }
 });
 
 function toolDefinition(name: string, metadata: ToolDefinitionMetadata): ToolDefinition {

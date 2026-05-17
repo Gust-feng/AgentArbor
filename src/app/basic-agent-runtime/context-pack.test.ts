@@ -218,7 +218,7 @@ test("Basic Agent context pack derives token budget from model capabilities", ()
 
   assert.equal(pack.budget.budgetSource, "model_capabilities");
   assert.equal(pack.budget.reservedOutputTokens, 2_000);
-  assert.equal(pack.budget.inputTokenBudget, 5_488);
+  assert.equal(pack.budget.inputTokenBudget, 8_000);
   assert.equal(typeof pack.budget.usedInputTokens, "number");
   assert.equal(pack.budget.tokenCountSource, "openai_tiktoken");
 });

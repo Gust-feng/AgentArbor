@@ -2640,12 +2640,12 @@ test("basic agent confirmation decisions persist approve and guidance outcomes s
   const providerFetch: PanelProviderFetch = async () => {
     providerFetchCalls += 1;
     if (providerFetchCalls === 1) {
-      return createOpenAiWriteFileToolCallResponse("approved.txt", "approved write content");
+      return createOpenAiDeleteFileToolCallResponse("approved.txt");
     }
     if (providerFetchCalls === 3) {
-      return createOpenAiWriteFileToolCallResponse("guidance.txt", "guidance write content");
+      return createOpenAiDeleteFileToolCallResponse("guidance.txt");
     }
-    return createOpenAiTextResponse("basic-confirmation-model", "文件写入已完成，结果已整理。");
+    return createOpenAiTextResponse("basic-confirmation-model", "文件操作已完成，结果已整理。");
   };
   const server = await startLocalPanelServer({ port: 0, configDirectory: directory, providerFetch });
   try {
@@ -2661,9 +2661,11 @@ test("basic agent confirmation decisions persist approve and guidance outcomes s
       method: "POST",
       body: { workspaceDirectory: workspace },
     });
+    await fs.writeFile(path.join(workspace, "approved.txt"), "approved delete content", "utf8");
+    await fs.writeFile(path.join(workspace, "guidance.txt"), "guidance delete content", "utf8");
     const approveStart = await requestJson(server.url, "/api/desktop/runs", {
       method: "POST",
-      body: { goal: "写入 approved.txt 测试确认续跑", aiMode: "openai-compatible" },
+      body: { goal: "删除 approved.txt 测试确认续跑", aiMode: "openai-compatible" },
     });
     const approveCompleted = await waitForRun(
       server.url,
@@ -2683,7 +2685,6 @@ test("basic agent confirmation decisions persist approve and guidance outcomes s
       server.url,
       `/api/basic-agent/runs/${encodeURIComponent(approveStart.body.runId)}/events?cursor=0`
     );
-    const approvedFile = await fs.readFile(path.join(workspace, "approved.txt"), "utf8");
 
     assert.equal(approveDecision.status, 200);
     assert.equal(approveDecision.body.run.status, "completed");
@@ -2695,12 +2696,12 @@ test("basic agent confirmation decisions persist approve and guidance outcomes s
       true
     );
     assert.equal(approveEvents.body.events.some((event: { type: string }) => event.type === "tool.completed"), true);
-    assert.equal(approvedFile, "approved write content");
+    await assert.rejects(() => fs.readFile(path.join(workspace, "approved.txt"), "utf8"));
 
     const guidanceSecret = "sk-guidance-decision-secret";
     const guidanceStart = await requestJson(server.url, "/api/desktop/runs", {
       method: "POST",
-      body: { goal: "写入 guidance.txt 前先等我补充指导", aiMode: "openai-compatible" },
+      body: { goal: "删除 guidance.txt 前先等我补充指导", aiMode: "openai-compatible" },
     });
     const guidanceCompleted = await waitForRun(
       server.url,
@@ -2738,7 +2739,7 @@ test("basic agent confirmation decisions persist approve and guidance outcomes s
 test("basic agent denied confirmation restores as blocked with safe replay after restart", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-basic-confirmation-deny-"));
   const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-basic-confirmation-deny-workspace-"));
-  const providerFetch: PanelProviderFetch = async () => createOpenAiWriteFileToolCallResponse("denied.txt", "denied write content");
+  const providerFetch: PanelProviderFetch = async () => createOpenAiDeleteFileToolCallResponse("denied.txt");
   let server = await startLocalPanelServer({ port: 0, configDirectory: directory, providerFetch });
   try {
     await requestJson(server.url, "/api/config/model-provider", {
@@ -2753,9 +2754,10 @@ test("basic agent denied confirmation restores as blocked with safe replay after
       method: "POST",
       body: { workspaceDirectory: workspace },
     });
+    await fs.writeFile(path.join(workspace, "denied.txt"), "denied delete content", "utf8");
     const start = await requestJson(server.url, "/api/desktop/runs", {
       method: "POST",
-      body: { goal: "写入 denied.txt 前需要确认", aiMode: "openai-compatible" },
+      body: { goal: "删除 denied.txt 前需要确认", aiMode: "openai-compatible" },
     });
     const completed = await waitForRun(
       server.url,
@@ -2811,7 +2813,7 @@ test("basic agent approve after restart blocks because executable continuation i
   let server = await startLocalPanelServer({
     port: 0,
     configDirectory: directory,
-    providerFetch: async () => createOpenAiWriteFileToolCallResponse("restart-approved.txt", "must not be written"),
+    providerFetch: async () => createOpenAiDeleteFileToolCallResponse("restart-approved.txt"),
   });
   try {
     await requestJson(server.url, "/api/config/model-provider", {
@@ -2826,9 +2828,10 @@ test("basic agent approve after restart blocks because executable continuation i
       method: "POST",
       body: { workspaceDirectory: workspace },
     });
+    await fs.writeFile(path.join(workspace, "restart-approved.txt"), "must not be deleted", "utf8");
     const start = await requestJson(server.url, "/api/desktop/runs", {
       method: "POST",
-      body: { goal: "写入 restart-approved.txt 测试重启后确认", aiMode: "openai-compatible" },
+      body: { goal: "删除 restart-approved.txt 测试重启后确认", aiMode: "openai-compatible" },
     });
     const completed = await waitForRun(
       server.url,
@@ -2862,7 +2865,7 @@ test("basic agent approve after restart blocks because executable continuation i
     assert.equal(runtimeRun.body.snapshot.run.status, "blocked");
     assert.equal(runtimeRun.body.snapshot.confirmations[0].status, "approved");
     assert.equal(restoredEvents.body.events.some((event: { type: string }) => event.type === "run.blocked"), true);
-    await assert.rejects(() => fs.readFile(path.join(workspace, "restart-approved.txt"), "utf8"));
+    assert.equal(await fs.readFile(path.join(workspace, "restart-approved.txt"), "utf8"), "must not be deleted");
     assertSafePanelJsonText(`${approved.text}\n${restoredEvents.text}\n${runtimeRun.text}`);
   } finally {
     await server.close();
@@ -3498,7 +3501,7 @@ function createOpenAiReadFileToolCallResponse(
     });
 }
 
-function createOpenAiWriteFileToolCallResponse(filePath: string, content: string): Awaited<ReturnType<PanelProviderFetch>> {
+function createOpenAiDeleteFileToolCallResponse(filePath: string): Awaited<ReturnType<PanelProviderFetch>> {
   return createOpenAiFixtureResponse({
       model: "basic-confirmation-model",
       choices: [
@@ -3512,8 +3515,8 @@ function createOpenAiWriteFileToolCallResponse(filePath: string, content: string
                 id: "call-panel-write-file",
                 type: "function",
                 function: {
-                  name: "write_file",
-                  arguments: JSON.stringify({ path: filePath, content }),
+                  name: "delete_file",
+                  arguments: JSON.stringify({ path: filePath }),
                 },
               },
             ],

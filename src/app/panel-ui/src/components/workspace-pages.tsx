@@ -16,7 +16,15 @@ const TOOL_COPY: Record<string, { readonly title: string; readonly description: 
   },
   edit_file: {
     title: "编辑文件",
-    description: "在当前工作区内按精确匹配修改文本文件，并返回变更摘要。",
+    description: "在当前工作区内按唯一锚点原子修改文本文件，并返回变更摘要。",
+  },
+  create_file: {
+    title: "创建文件",
+    description: "在当前工作区内创建不存在的文本文件，不覆盖已有文件。",
+  },
+  delete_file: {
+    title: "删除文件",
+    description: "删除当前工作区内的普通文件，执行前需要确认。",
   },
   grep_files: {
     title: "搜索文件",
@@ -32,7 +40,7 @@ const TOOL_COPY: Record<string, { readonly title: string; readonly description: 
   },
   write_file: {
     title: "写入文件",
-    description: "在明确授权后创建或覆盖文件，并保留可审阅的操作记录。",
+    description: "兼容工具：创建或覆盖文件，并保留可审阅的操作记录。",
   },
   run_command: {
     title: "运行命令",

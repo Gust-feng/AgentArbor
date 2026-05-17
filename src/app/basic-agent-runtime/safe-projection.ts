@@ -161,7 +161,7 @@ function projectToolDisplay(request: ToolCallRequest, output: unknown): ToolDisp
       truncated: record.truncated === true,
     };
   }
-  if (request.toolName === "write_file") {
+  if (request.toolName === "write_file" || request.toolName === "create_file" || request.toolName === "delete_file") {
     return {
       kind: "file_change_summary",
       path: stringOrUndefined(result.path) ?? stringOrUndefined(asRecord(request.input).path),

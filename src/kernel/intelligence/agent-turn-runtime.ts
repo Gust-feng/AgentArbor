@@ -24,6 +24,7 @@ import {
   executeToolUseLoop,
   resumeToolUseLoopFromApproval,
   type ToolUseLoopPendingApproval,
+  type ToolUseLoopContextMaintainer,
   type ToolUseLoopResult,
 } from "./tool-use-loop.js";
 
@@ -76,6 +77,7 @@ export type AgentTurnRuntimeResult = {
     | "no_tool_calls"
     | "model_disabled"
     | "out_of_fuel"
+    | "context_overflow"
     | "model_failed"
     | "approval_required"
     | "cancelled"
@@ -94,6 +96,7 @@ export type AgentTurnRuntimeOptions = {
   readonly intelligenceChannel: IntelligenceChannel;
   readonly toolCenter?: ToolExecutionBroker;
   readonly publishToolEvent?: (message: ArborMessage) => void;
+  readonly maintainContext?: ToolUseLoopContextMaintainer;
 };
 
 export class AgentTurnRuntime {
@@ -156,6 +159,7 @@ export class AgentTurnRuntime {
           allowedTools: policy.allowedTools,
           blockedToolNames: semantics.blockedToolNames,
           publishToolEvent: this.options.publishToolEvent,
+          maintainContext: this.options.maintainContext,
           abortSignal: input.abortSignal,
         },
         modelRequest
@@ -206,6 +210,7 @@ export class AgentTurnRuntime {
           blockedToolNames: semantics.blockedToolNames,
           approvedConfirmationIds: input.approvedConfirmationIds,
           publishToolEvent: this.options.publishToolEvent,
+          maintainContext: this.options.maintainContext,
           abortSignal: input.abortSignal,
         },
         input.pendingApproval.modelRequest,
@@ -266,7 +271,8 @@ function toAgentTurnRuntimeResult(
       ? "cancelled"
       : stoppedReason === "approval_required"
         ? "approval_required"
-        : stoppedReason === "out_of_fuel"
+      : stoppedReason === "out_of_fuel"
+          || stoppedReason === "context_overflow"
           ? "paused"
           : "failed";
   const shouldExposeOutput = semantics.exposeNonFinalOutput || status === "completed" || status === "failed";
@@ -294,6 +300,9 @@ function toAgentTurnRuntimeResult(
 function mapStoppedReason(loop: ToolUseLoopResult): AgentTurnRuntimeResult["stoppedReason"] {
   if (loop.stoppedReason === "out_of_fuel") {
     return "out_of_fuel";
+  }
+  if (loop.stoppedReason === "context_overflow") {
+    return "context_overflow";
   }
   if (loop.stoppedReason === "error") {
     return "model_failed";

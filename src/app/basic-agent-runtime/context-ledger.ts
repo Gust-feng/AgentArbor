@@ -51,8 +51,8 @@ export type CreateBasicAgentContextLedgerInput = {
   readonly maxInputTokens?: number;
 };
 
-const DEFAULT_MAX_MESSAGES = 24;
-const DEFAULT_MAX_CHARS = 18_000;
+const DEFAULT_MAX_MESSAGES = 200;
+const DEFAULT_MAX_CHARS = 1_000_000;
 const DEFAULT_MAX_INPUT_TOKENS = 4_500;
 const MAX_HISTORY_CHARS = 1_200;
 const MAX_HISTORY_SUMMARY_CHARS = 2_400;
@@ -375,10 +375,12 @@ function tokenBudgetFor(capabilities: ModelCapabilities | undefined): {
   if (capabilities === undefined) {
     return undefined;
   }
+  // Context Pack should assemble safe continuity, not pre-compress the agent's
+  // working memory. The loop-level token gate owns the 0.8-window compaction
+  // boundary immediately before each model call.
   const reservedOutputTokens = Math.max(512, Math.min(capabilities.maxOutputTokens, Math.floor(capabilities.contextWindowTokens * 0.25)));
-  const safetyMargin = Math.max(512, Math.floor(capabilities.contextWindowTokens * 0.05));
   return {
-    inputTokenBudget: Math.max(1_000, capabilities.contextWindowTokens - reservedOutputTokens - safetyMargin),
+    inputTokenBudget: Math.max(1_000, capabilities.contextWindowTokens),
     reservedOutputTokens,
   };
 }

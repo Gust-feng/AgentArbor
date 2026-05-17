@@ -1084,7 +1084,7 @@ function toolRequestPreview(toolName: string, input: Readonly<Record<string, unk
     const path = stringOrUndefined(input.path);
     return query === undefined ? undefined : `搜索：${query}${path === undefined ? "" : ` · ${path}`}`;
   }
-  if (toolName === "write_file" || toolName === "edit_file") {
+  if (toolName === "write_file" || toolName === "create_file" || toolName === "edit_file" || toolName === "delete_file") {
     const path = stringOrUndefined(input.path);
     return path === undefined ? "准备修改文件。" : `目标文件：${path}`;
   }
@@ -1158,7 +1158,7 @@ function toolResultPreview(
     });
     return lines.length === 0 ? stringOrUndefined(output.summary) : lines.join("\n");
   }
-  if (toolName === "write_file" || toolName === "edit_file") {
+  if (toolName === "write_file" || toolName === "create_file" || toolName === "edit_file" || toolName === "delete_file") {
     return safeFileChangePreview(toolName, asRecord(payload.input), output, result);
   }
   if (toolName === "run_command" || toolName === "shell_command") {
@@ -1217,7 +1217,9 @@ function localToolLabel(toolName: string): string {
   if (toolName === "list_dir") return "列出目录";
   if (toolName === "grep_files") return "搜索文件";
   if (toolName === "write_file") return "写入文件";
+  if (toolName === "create_file") return "创建文件";
   if (toolName === "edit_file") return "编辑文件";
+  if (toolName === "delete_file") return "删除文件";
   if (toolName === "run_command") return "执行命令";
   if (toolName === "shell_command") return "执行 Shell";
   if (toolName === "browser_snapshot") return "浏览网页";

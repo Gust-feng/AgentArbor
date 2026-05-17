@@ -19,7 +19,7 @@ import type { MinimalRuntime } from "./runtime.js";
 import { createMinimalRuntime } from "./runtime.js";
 import {
   buildBasicAgentContextPack,
-  compactBasicAgentConversationIfNeeded,
+  compactBasicAgentLoopContextIfNeeded,
   createOpenAITokenCounter,
   type BasicAgentContextPack,
 } from "./basic-agent-runtime/index.js";
@@ -204,34 +204,10 @@ export async function runDesktopAgentSession(
       : undefined;
   toolCenter?.resetCallCount();
   const tokenCounter = createOpenAITokenCounter(resolveActiveModelName(options));
-  const compactedConversation = await compactBasicAgentConversationIfNeeded({
-    goal,
-    traceId,
-    goalId,
-    conversationHistory: options.conversationHistory ?? [],
-    intelligenceChannel: channel,
-    modelCapabilities: options.modelCapabilities,
-    tokenCounter,
-  });
-  if (compactedConversation.failed !== undefined) {
-    return {
-      status: "failed",
-      runtime,
-      traceId,
-      goalId,
-      taskSoil,
-      failureMessage: compactedConversation.failed.message,
-      modelCallRefs: [compactedConversation.failed.requestId, compactedConversation.failed.responseId].filter(isString),
-      toolCallRefs: [],
-      activity: activityFromEventEntries(runtime.eventLog.list(), "failed"),
-      eventTypes: runtime.eventLog.types(),
-    };
-  }
   const contextPack = buildBasicAgentContextPack({
     goal,
     taskSoil,
-    conversationHistory: compactedConversation.conversationHistory,
-    conversationSummary: compactedConversation.conversationSummary,
+    conversationHistory: options.conversationHistory ?? [],
     skillContexts: options.skillContexts ?? [],
     modelCapabilities: options.modelCapabilities,
     tokenCounter,
@@ -240,6 +216,31 @@ export async function runDesktopAgentSession(
     intelligenceChannel: channel,
     toolCenter,
     publishToolEvent: (message) => runtime.bus.publish(message),
+    maintainContext: async (input) => {
+      const result = await compactBasicAgentLoopContextIfNeeded({
+        goal,
+        traceId,
+        goalId,
+        messages: input.messages,
+        tools: input.tools,
+        intelligenceChannel: channel,
+        modelCapabilities: options.modelCapabilities,
+        tokenCounter,
+      });
+      if (result.status === "failed") {
+        return {
+          status: "failed",
+          message: result.message,
+          requestId: result.requestId,
+          responseId: result.responseId,
+          retryable: true,
+        };
+      }
+      if (result.status === "compacted") {
+        return { status: "compacted", messages: result.messages };
+      }
+      return { status: "unchanged" };
+    },
   });
   const allowedTools = toolCenter === undefined
     ? []
@@ -306,7 +307,7 @@ function desktopAgentResultFromTurn(input: {
   const toolCallRefs = refsFromToolCalls(input.turn.toolCalls);
   const recoverableBudgetStop = isRecoverableBudgetStop(input.turn);
   const waitingForApproval = input.turn.status === "approval_required" && input.turn.pendingApproval !== undefined;
-  if (input.turn.status === "paused" && input.turn.stoppedReason === "out_of_fuel") {
+  if (input.turn.status === "paused" && (input.turn.stoppedReason === "out_of_fuel" || input.turn.stoppedReason === "context_overflow")) {
     return {
       status: "paused",
       runtime: input.runtime,
@@ -314,7 +315,9 @@ function desktopAgentResultFromTurn(input: {
       goalId: input.goalId,
       taskSoil: input.taskSoil,
       contextPack: safeContextPack(input.contextPack),
-      failureMessage: "运行被异常保护中断，任务没有完成。你可以补充要求或重新发起，我会继续按模型判断处理。",
+      failureMessage: input.turn.stoppedReason === "context_overflow"
+        ? "上下文压缩没有成功，任务没有完成。你可以继续发送消息，我会在保留现有安全历史的基础上接着处理。"
+        : "运行被异常保护中断，任务没有完成。你可以补充要求或重新发起，我会继续按模型判断处理。",
       modelCallRefs,
       toolCallRefs,
       activity: activityFromEventEntries(input.runtime.eventLog.list(), "paused"),
@@ -903,7 +906,9 @@ function toolActivityTitle(toolName: string, phase: "start" | "completed" | "fai
   if (toolName === "list_dir") return phase === "start" ? "正在列出目录" : phase === "completed" ? "目录已列出" : "目录列出失败";
   if (toolName === "grep_files") return phase === "start" ? "正在搜索文件" : phase === "completed" ? "搜索已完成" : "搜索失败";
   if (toolName === "write_file") return phase === "start" ? "正在写入文件" : phase === "completed" ? "文件已写入" : "文件写入失败";
+  if (toolName === "create_file") return phase === "start" ? "正在创建文件" : phase === "completed" ? "文件已创建" : "文件创建失败";
   if (toolName === "edit_file") return phase === "start" ? "正在编辑文件" : phase === "completed" ? "文件已编辑" : "文件编辑失败";
+  if (toolName === "delete_file") return phase === "start" ? "正在删除文件" : phase === "completed" ? "文件已删除" : "文件删除失败";
   if (toolName === "run_command") return phase === "start" ? "正在执行命令" : phase === "completed" ? "命令已执行" : "命令执行失败";
   if (toolName === "shell_command") return phase === "start" ? "正在执行 Shell" : phase === "completed" ? "Shell 已执行" : "Shell 执行失败";
   if (toolName === "browser_snapshot") return phase === "start" ? "正在浏览网页" : phase === "completed" ? "网页已浏览" : "网页浏览失败";

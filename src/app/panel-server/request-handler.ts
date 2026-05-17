@@ -2085,7 +2085,7 @@ function persistedToolPreview(
     });
     return lines.length === 0 ? optionalString(output.summary) : lines.join("\n");
   }
-  if (toolName === "write_file" || toolName === "edit_file") {
+  if (toolName === "write_file" || toolName === "create_file" || toolName === "edit_file" || toolName === "delete_file") {
     return persistedFileChangePreview(toolName, asRecord(payload.input), output, result);
   }
   if (toolName === "run_command" || toolName === "shell_command") {

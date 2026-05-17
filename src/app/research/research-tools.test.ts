@@ -12,7 +12,7 @@ test("default ToolCenter exposes model-visible search and read tools", async () 
   const center = createDefaultToolCenter({ env: {}, playwrightAvailable: true });
   const names = center.list().map((tool) => tool.name);
 
-  assert.deepEqual(names, ["search", "read", "read_file", "list_dir", "grep_files", "write_file", "edit_file", "run_command", "shell_command", "browser_snapshot"]);
+  assert.deepEqual(names, ["search", "read", "read_file", "list_dir", "grep_files", "create_file", "edit_file", "delete_file", "run_command", "shell_command", "browser_snapshot"]);
   assert.equal(center.has("web_search"), false);
 
   const search = await center.execute(
@@ -95,7 +95,7 @@ test("configured ToolCenter reads Tavily config, registers search/read, and reda
       { callerAgentId: "agent-test", allowedTools: ["search", "read"] }
     );
 
-    assert.deepEqual(names, ["search", "read", "read_file", "list_dir", "grep_files", "write_file", "edit_file", "run_command", "shell_command", "browser_snapshot"]);
+    assert.deepEqual(names, ["search", "read", "read_file", "list_dir", "grep_files", "create_file", "edit_file", "delete_file", "run_command", "shell_command", "browser_snapshot"]);
     assert.equal(search.status, "completed");
     assert.equal(bodies[0]?.max_results, 1);
     assert.equal(JSON.stringify(search.output).includes("tvly-configured-tool-secret"), false);
@@ -119,7 +119,7 @@ test("configured ToolCenter still registers search/read and degrades web search 
       { callerAgentId: "agent-test", allowedTools: ["search", "read"] }
     );
 
-    assert.deepEqual(names, ["search", "read", "read_file", "list_dir", "grep_files", "write_file", "edit_file", "run_command", "shell_command", "browser_snapshot"]);
+    assert.deepEqual(names, ["search", "read", "read_file", "list_dir", "grep_files", "create_file", "edit_file", "delete_file", "run_command", "shell_command", "browser_snapshot"]);
     assert.equal(search.status, "completed");
     assert.equal((search.output as { status?: string }).status, "no-provider");
   } finally {

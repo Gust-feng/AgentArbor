@@ -25,7 +25,7 @@ export function evaluateToolCallSecurity(input: {
     return urlDecision;
   }
 
-  if (input.metadata.requiresConfirmation || requiresPlatformConfirmation(input.metadata, input.context.platform)) {
+  if (input.metadata.requiresConfirmation) {
     return approvalDecision({
       request: input.request,
       definition: input.definition,
@@ -56,10 +56,6 @@ export function confirmationRequestFromSecurityDecision(input: {
 
 export function confirmationIdForToolCall(callId: string): string {
   return `confirmation-${callId}`;
-}
-
-function requiresPlatformConfirmation(metadata: ToolDefinitionMetadata, platform: NodeJS.Platform): boolean {
-  return platform === "win32" && metadata.operationType !== "read-only";
 }
 
 function approvalDecision(input: {

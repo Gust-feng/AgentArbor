@@ -10,6 +10,8 @@ test("desktop-basic tool registry exposes catalog and allowed tools from scoped 
 
   assert.deepEqual(catalog.allowedTools, [
     "browser_snapshot",
+    "create_file",
+    "delete_file",
     "edit_file",
     "grep_files",
     "list_dir",
@@ -18,10 +20,12 @@ test("desktop-basic tool registry exposes catalog and allowed tools from scoped 
     "run_command",
     "search",
     "shell_command",
-    "write_file",
   ]);
   assert.equal(catalog.tools.every((tool) => tool.visibleResultPolicy.omitRawOutput), true);
-  assert.equal(catalog.tools.find((tool) => tool.name === "write_file")?.requiresConfirmation, true);
+  assert.equal(catalog.tools.find((tool) => tool.name === "create_file")?.requiresConfirmation, false);
+  assert.equal(catalog.tools.find((tool) => tool.name === "edit_file")?.requiresConfirmation, false);
+  assert.equal(catalog.tools.find((tool) => tool.name === "delete_file")?.requiresConfirmation, true);
+  assert.equal(catalog.tools.some((tool) => tool.name === "write_file"), false);
   assert.equal(catalog.tools.find((tool) => tool.name === "run_command")?.operationType, "execute");
   assert.equal(catalog.tools.find((tool) => tool.name === "shell_command")?.requiresConfirmation, true);
   assert.equal(catalog.tools.find((tool) => tool.name === "browser_snapshot")?.operationType, "read-only");

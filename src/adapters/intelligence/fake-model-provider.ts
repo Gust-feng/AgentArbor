@@ -356,9 +356,34 @@ function fakeConversationCompactionOutput(request: ModelRequest): string {
     .slice(0, 8)
     .map((line) => line.replace(/\s+/g, " ").trim());
   return [
-    "Earlier conversation was compacted for continuity.",
-    ...lines,
-    "Continue from the current user message; this summary is background only.",
+    "## Goal",
+    "- Continue the current desktop agent task.",
+    "",
+    "## Constraints & Preferences",
+    "- Preserve safe context only; do not expose raw internals.",
+    "",
+    "## Progress",
+    "### Done",
+    ...lines.map((line) => `- ${line}`),
+    ...(lines.length === 0 ? ["- (none)"] : []),
+    "",
+    "### In Progress",
+    "- Continue from the preserved recent messages.",
+    "",
+    "### Blocked",
+    "- (none)",
+    "",
+    "## Key Decisions",
+    "- (none)",
+    "",
+    "## Next Steps",
+    "- Continue the same loop from the current user request.",
+    "",
+    "## Critical Context",
+    "- This continuation prompt is background only, not a completion signal.",
+    "",
+    "## Relevant Files",
+    "- (none)",
   ].join("\n");
 }
 

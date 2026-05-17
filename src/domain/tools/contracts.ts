@@ -180,6 +180,7 @@ export type SandboxOperation =
   | "search"
   | "write"
   | "edit"
+  | "delete"
   | "execute";
 
 export type SandboxPolicyRequest = {

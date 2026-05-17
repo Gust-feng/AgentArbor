@@ -1,5 +1,6 @@
 import type { ArborMessage } from "../../domain/common.js";
 import type { ToolCallRequest, ToolCallResult, ToolExecutionContext } from "../../domain/tools/index.js";
+import { toolDisplayName } from "../../domain/tools/index.js";
 import { createMessage } from "../messages/create-message.js";
 import { redactSensitiveText } from "../redaction.js";
 
@@ -9,6 +10,7 @@ export type ToolRequestedEventPayload = {
   readonly callerAgentId: string;
   readonly callId: string;
   readonly toolName: string;
+  readonly toolDisplayName: string;
   readonly input: unknown;
 };
 
@@ -38,6 +40,7 @@ export function createToolRequestedMessage(input: {
       callerAgentId: input.context.callerAgentId,
       callId: input.request.callId,
       toolName: input.request.toolName,
+      toolDisplayName: toolDisplayName(input.request.toolName),
       input: toSafeToolEventSummaryValue(input.request.input),
     },
   });
@@ -59,6 +62,7 @@ export function createToolCompletedMessage(input: {
       callerAgentId: input.context.callerAgentId,
       callId: input.result.callId,
       toolName: input.result.toolName,
+      toolDisplayName: toolDisplayName(input.result.toolName),
       input: toSafeToolEventSummaryValue(input.result.input),
       output: toSafeToolEventSummaryValue(toProjectedToolEventOutput(input.result)),
       durationMs: input.result.durationMs,
@@ -82,6 +86,7 @@ export function createToolFailedMessage(input: {
       callerAgentId: input.context.callerAgentId,
       callId: input.result.callId,
       toolName: input.result.toolName,
+      toolDisplayName: toolDisplayName(input.result.toolName),
       input: toSafeToolEventSummaryValue(input.result.input),
       error: sanitizeError(input.result.error ?? "Tool execution failed."),
       durationMs: input.result.durationMs,
@@ -106,9 +111,10 @@ export function createToolApprovalRequiredMessage(input: {
       callerAgentId: input.context.callerAgentId,
       callId: input.result.callId,
       toolName: input.result.toolName,
+      toolDisplayName: toolDisplayName(input.result.toolName),
       confirmationId: confirmation?.confirmationId ?? `confirmation-${input.result.callId}`,
       title: confirmation?.title ?? "需要确认",
-      question: confirmation?.actionSummary ?? `工具 ${input.result.toolName} 需要确认后才能执行。`,
+      question: confirmation?.actionSummary ?? `${toolDisplayName(input.result.toolName)}需要确认后才能执行。`,
       consequence: "批准后只允许继续本次对应工具操作；拒绝则不会执行该动作。",
       riskLevel: confirmation?.riskLevel ?? "medium",
       affectedResources: confirmation?.affectedResources ?? [],
@@ -130,7 +136,7 @@ function toProjectedToolEventOutput(result: ToolCallResult): unknown {
     return result.output;
   }
   return {
-    action: result.toolName,
+    action: toolDisplayName(result.toolName),
     summary: result.projection.uiSummary,
     diagnosticRef: result.projection.diagnosticRef,
     display: result.projection.display,

@@ -391,6 +391,20 @@ export function App(): React.ReactElement {
     }
   }
 
+  async function updateTool(toolName: string, enabled: boolean): Promise<void> {
+    setSavingTools(true);
+    try {
+      const response = await postJson<ToolsResponse>(`/api/config/tools/${encodeURIComponent(toolName)}/state`, {
+        enabled,
+      });
+      if (mountedRef.current) {
+        setApp((previous) => ({ ...previous, tools: response }));
+      }
+    } finally {
+      if (mountedRef.current) setSavingTools(false);
+    }
+  }
+
   async function updateSkill(skillId: string, enabled: boolean): Promise<void> {
     const response = await postJson<{ readonly skills: readonly SkillDefinition[] }>(`/api/skills/${encodeURIComponent(skillId)}/state`, {
       enabled,
@@ -515,7 +529,16 @@ export function App(): React.ReactElement {
             </div>
           )}
           {screen === "skills" && <SkillsPage skills={app.skills} onUpdateSkill={(id, enabled) => void updateSkill(id, enabled)} onStartSkill={(skill) => startSkillChat(skill, setScreen, setGoal)} />}
-          {screen === "tools" && <ToolsPage tools={app.tools} toolForm={toolForm} setToolForm={setToolForm} saving={savingTools} onSaveTools={() => void saveTools()} />}
+          {screen === "tools" && (
+            <ToolsPage
+              tools={app.tools}
+              toolForm={toolForm}
+              setToolForm={setToolForm}
+              saving={savingTools}
+              onSaveTools={() => void saveTools()}
+              onUpdateTool={(name, enabled) => void updateTool(name, enabled)}
+            />
+          )}
           {screen === "settings" && (
             <SettingsPage
               config={app.config}

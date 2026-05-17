@@ -12,6 +12,7 @@ import type {
   ToolExecutionBroker,
   ToolExecutionContext,
 } from "../../domain/tools/index.js";
+import { toolDisplayName } from "../../domain/tools/index.js";
 import { createId } from "../id.js";
 import { projectToolStatusEnvelope } from "../tools/index.js";
 import {
@@ -316,7 +317,7 @@ async function executeToolCallSafely(
       input: request.input,
       output: undefined,
       status: "failed",
-      error: `Tool ${request.toolName} is not available in this loop.`,
+      error: `${toolDisplayName(request.toolName)}当前不可用。`,
       durationMs: 0,
     };
   }
@@ -710,15 +711,15 @@ function approvalRequiredResultFromPending(pendingApproval: ToolUseLoopPendingAp
     input: globalThis.structuredClone(request.input),
     output: undefined,
     status: "approval_required",
-    error: `Tool ${request.toolName} still requires user confirmation.`,
+    error: `${toolDisplayName(request.toolName)}仍需要用户确认。`,
     durationMs: 0,
     projection: {
-      uiSummary: `工具 ${request.toolName} 仍在等待用户确认。`,
+      uiSummary: `${toolDisplayName(request.toolName)}仍在等待用户确认。`,
       diagnosticRef,
       envelope: projectToolStatusEnvelope({
         request,
         status: "approval_required",
-        summary: `Tool ${request.toolName} still requires user confirmation.`,
+        summary: `${toolDisplayName(request.toolName)}仍在等待用户确认。`,
         diagnosticRef,
       }),
       truncated: false,
@@ -728,7 +729,7 @@ function approvalRequiredResultFromPending(pendingApproval: ToolUseLoopPendingAp
       confirmationId: pendingApproval.confirmationId,
       runId: request.callId,
       title: "需要确认",
-      actionSummary: `工具 ${request.toolName} 需要用户确认后才能执行。`,
+      actionSummary: `${toolDisplayName(request.toolName)}需要用户确认后才能执行。`,
       affectedResources: [],
       riskLevel: "medium",
       requestedAt: new Date().toISOString(),

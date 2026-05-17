@@ -30,6 +30,10 @@ test("desktop-basic tool registry exposes catalog and allowed tools from scoped 
   assert.equal(catalog.tools.find((tool) => tool.name === "shell_command")?.requiresConfirmation, true);
   assert.equal(catalog.tools.find((tool) => tool.name === "browser_snapshot")?.operationType, "read-only");
   assert.equal(catalog.tools.find((tool) => tool.name === "browser_snapshot")?.availability, "available");
+  assert.equal(catalog.tools.find((tool) => tool.name === "read_file")?.displayName, "读取文件");
+  assert.equal(catalog.tools.find((tool) => tool.name === "shell_command")?.confirmationLabel, "执行前确认");
+  assert.equal(catalog.tools.every((tool) => tool.displayName !== tool.name), true);
+  assert.equal(catalog.tools.every((tool) => tool.categoryLabel.length > 0 && tool.operationLabel.length > 0), true);
   assert.equal(JSON.stringify(catalog).includes("api_key"), false);
 });
 

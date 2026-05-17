@@ -318,14 +318,19 @@ export type SkillDefinition = {
 export type ToolCatalogItem = {
   readonly name: string;
   readonly displayName?: string;
+  readonly displayDescription?: string;
   readonly description?: string;
   readonly category?: string;
+  readonly categoryLabel?: string;
   readonly riskLevel?: string;
+  readonly riskLabel?: string;
   readonly operationType?: string;
+  readonly operationLabel?: string;
   readonly enabled: boolean;
   readonly available?: boolean;
   readonly unavailableReason?: string;
   readonly requiresConfirmation?: boolean;
+  readonly confirmationLabel?: string;
 };
 
 export type ConfigResponse = {

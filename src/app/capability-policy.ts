@@ -26,6 +26,7 @@ export function resolveRunCapabilities(input: ResolveRunCapabilitiesInput): RunC
     const modelVisible = availabilityAllowed && !denied && isVisibleInRunMode(input.runMode, tool.name);
     return {
       name: tool.name,
+      displayName: tool.displayName,
       enabled: tool.enabled,
       modelVisible,
       availability: tool.availability,
@@ -85,12 +86,12 @@ function exposureReason(input: {
   readonly modelVisible: boolean;
   readonly requiresConfirmation: boolean;
 }): string {
-  if (!input.enabled) return "Tool is disabled by configuration.";
-  if (input.availability !== "available") return "Tool runtime is unavailable.";
-  if (input.denied) return "Tool is denied by this run permission boundary.";
-  if (!input.modelVisible) return "Tool is not visible for this run mode.";
-  if (input.requiresConfirmation) return "Tool is visible but dangerous actions are gated by confirmation.";
-  return "Tool is available for this run.";
+  if (!input.enabled) return "工具已在配置中停用。";
+  if (input.availability !== "available") return "工具运行时当前不可用。";
+  if (input.denied) return "本轮权限边界已隐藏该工具。";
+  if (!input.modelVisible) return "该工具不对当前运行模式可见。";
+  if (input.requiresConfirmation) return "工具可见，但敏感操作会先请求确认。";
+  return "工具对本轮模型可用。";
 }
 
 function capabilityResolutionWarnings(input: {

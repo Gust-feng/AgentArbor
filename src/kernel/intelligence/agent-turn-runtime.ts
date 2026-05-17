@@ -18,6 +18,7 @@ import type {
   ToolExecutionContext,
   ToolPermissionCheck,
 } from "../../domain/tools/index.js";
+import { toolDisplayName } from "../../domain/tools/index.js";
 import type { ConstraintRef } from "../../domain/constraints.js";
 import { createId, nowIso } from "../id.js";
 import {
@@ -355,7 +356,7 @@ const NO_TOOL_BROKER: ToolExecutionBroker = {
       input: request.input,
       output: undefined,
       status: "failed",
-      error: `Tool is not registered: ${request.toolName}`,
+      error: `${toolDisplayName(request.toolName)}未注册。`,
       durationMs: 0,
     };
   },

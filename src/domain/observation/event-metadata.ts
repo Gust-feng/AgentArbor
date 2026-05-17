@@ -75,6 +75,20 @@ export const EVENT_OBSERVATION_METADATA = {
     phase: "underground",
     stage: "model_failed",
   }),
+  "context.compaction.completed": metadata({
+    summary: "Desktop Agent compacted earlier safe context into a continuation prompt.",
+    scope: "runtime",
+    phase: "underground",
+    stage: "context_compaction_completed",
+  }),
+  "context.compaction.failed": metadata({
+    summary: "Desktop Agent context compaction failed and the run paused.",
+    scope: "runtime",
+    severity: "warning",
+    progressStatus: "failed",
+    phase: "underground",
+    stage: "context_compaction_failed",
+  }),
   "tool.requested": metadata({
     summary: "ToolCenter requested a tool execution.",
     scope: "runtime",

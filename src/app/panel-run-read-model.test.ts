@@ -224,6 +224,44 @@ test("ordinary agent stream stays quiet for direct answers but shows safe thinki
   assert.equal(completedTool?.detail?.preview?.includes("notes.md"), true);
   assert.equal(completedTool?.detail?.preview?.includes("文件正文只进入本轮工具上下文"), true);
   assert.equal(JSON.stringify(withTool).includes("RAW_TOOL_OUTPUT_SENTINEL"), false);
+  assert.equal(JSON.stringify(withTool).includes("\"action\":\"read_file\""), false);
+});
+
+test("ordinary agent stream exposes context compaction as safe continuation maintenance", () => {
+  const events = createPanelRunStreamEvents({
+    runId: "run-context-compaction",
+    status: "running",
+    desktopMode: "agent",
+    eventEntries: [
+      eventEntry({ sequence: 1, type: "goal.received", payload: { goalId: "goal-context" } }),
+      eventEntry({
+        sequence: 2,
+        type: "context.compaction.completed",
+        payload: {
+          goalId: "goal-context",
+          summaryId: "conversation-summary-1",
+          tokenCount: 92_000,
+          threshold: 80_000,
+          coveredRefCount: 18,
+          messageCountAfter: 12,
+          requestId: "model-request-compaction",
+          responseId: "model-response-compaction",
+          summary: "上下文达到 92000/80000 tokens，已压缩 18 条较早上下文。",
+        },
+      }),
+    ],
+    createdAt: "2026-05-07T00:00:00.000Z",
+    updatedAt: "2026-05-07T00:00:02.000Z",
+  });
+  const compaction = events.find((event) => event.type === "context.compaction.completed");
+  const serialized = JSON.stringify(events);
+
+  assert.equal(compaction?.agentLabel, "上下文");
+  assert.equal(compaction?.summary?.includes("已压缩 18 条"), true);
+  assert.equal(compaction?.detail?.preview?.includes("覆盖较早上下文 18 条"), true);
+  assert.deepEqual(compaction?.modelCallRefs, ["model-request-compaction", "model-response-compaction"]);
+  assert.equal(serialized.includes("raw prompt"), false);
+  assert.equal(serialized.includes("raw tool output"), false);
 });
 
 test("ordinary agent stream treats tool-call model text as status instead of visible answer", () => {

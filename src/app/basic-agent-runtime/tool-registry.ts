@@ -8,6 +8,7 @@ import type {
   ToolRiskLevel,
   ToolVisibleResultPolicy,
 } from "../../domain/tools/index.js";
+import { toolPresentationForDefinition } from "../../domain/tools/index.js";
 import { ToolCenter } from "../tool-center/index.js";
 
 export type ToolRegistryScope = "desktop-basic" | "underground" | "research" | "workspace" | "mcp";
@@ -25,11 +26,17 @@ export type ToolRegistryAvailability =
 
 export type ToolCatalogItem = {
   readonly name: string;
+  readonly displayName: string;
+  readonly displayDescription: string;
   readonly description: string;
   readonly category: ToolCategory;
+  readonly categoryLabel: string;
   readonly riskLevel: ToolRiskLevel;
+  readonly riskLabel: string;
   readonly operationType: ToolOperationType;
+  readonly operationLabel: string;
   readonly requiresConfirmation: boolean;
+  readonly confirmationLabel: string;
   readonly visibleResultPolicy: ToolVisibleResultPolicy;
   readonly scopes: readonly ToolRegistryScope[];
   readonly enabledByDefault: boolean;
@@ -79,13 +86,20 @@ export class ToolRegistry {
         const definition = entry.executor.definition;
         const metadata = requireToolMetadata(definition);
         const availability = entry.availability ?? { status: "available" as const };
+        const presentation = toolPresentationForDefinition(definition);
         return {
           name: definition.name,
+          displayName: presentation.displayName,
+          displayDescription: presentation.displayDescription,
           description: definition.description,
           category: metadata.category,
+          categoryLabel: presentation.categoryLabel,
           riskLevel: metadata.riskLevel,
+          riskLabel: presentation.riskLabel,
           operationType: metadata.operationType,
+          operationLabel: presentation.operationLabel,
           requiresConfirmation: metadata.requiresConfirmation,
+          confirmationLabel: presentation.confirmationLabel,
           visibleResultPolicy: { ...metadata.visibleResultPolicy },
           scopes: [...entry.scopes],
           enabledByDefault: entry.enabledByDefault,

@@ -6,6 +6,7 @@ import type {
   ToolSecurityDecision,
   ToolSecurityEvaluationContext,
 } from "../../domain/tools/index.js";
+import { toolDisplayName, toolOperationLabel, toolPresentationForDefinition } from "../../domain/tools/index.js";
 import { nowIso } from "../id.js";
 import { redactOrdinaryToolText } from "./tool-result-envelope.js";
 
@@ -30,7 +31,7 @@ export function evaluateToolCallSecurity(input: {
       request: input.request,
       definition: input.definition,
       metadata: input.metadata,
-      reason: `${input.definition.name} requires user confirmation for ${input.metadata.operationType}.`,
+      reason: `${toolDisplayName(input.definition.name, input.metadata)}需要用户确认。`,
     });
   }
 
@@ -69,7 +70,7 @@ function approvalDecision(input: {
     reason: input.reason,
     title: "需要确认",
     actionSummary: redactOrdinaryToolText(
-      `工具 ${input.definition.name} 请求执行 ${input.metadata.operationType} 操作。${input.definition.description}`,
+      `${toolDisplayName(input.definition.name, input.metadata)}请求执行${toolOperationLabel(input.metadata.operationType)}操作。${toolPresentationForDefinition(input.definition).displayDescription}`,
       500
     ),
     affectedResources: affectedResourcesFromInput(input.request.input),

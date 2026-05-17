@@ -2,6 +2,7 @@ import type { ArborMessageType } from "../domain/common.js";
 import type { SanitizedInformationAccessConfig, SanitizedModelProviderConfig } from "../domain/config/index.js";
 import type { ModelVisibleOutputProjection } from "../domain/intelligence/index.js";
 import type { ToolDisplayProjection, ToolResultEnvelope } from "../domain/tools/index.js";
+import { toolDisplayName } from "../domain/tools/index.js";
 import type { AgentRunTree } from "../domain/underground/index.js";
 import {
   createRunObservationEventViews,
@@ -91,6 +92,19 @@ export type PanelRunTrackingReadModel = {
     readonly requested: number;
     readonly completed: number;
     readonly failed: number;
+  };
+  readonly context: {
+    readonly compaction: {
+      readonly completed: number;
+      readonly failed: number;
+      readonly latest?: {
+        readonly status: "completed" | "failed";
+        readonly tokenCount?: number;
+        readonly threshold?: number;
+        readonly coveredRefCount?: number;
+        readonly summary?: string;
+      };
+    };
   };
   readonly candidates: {
     readonly total: CandidatePoolCounts;
@@ -190,6 +204,8 @@ export type PanelRunStreamEventType =
   | "agent.note.completed"
   | "model.output.delta"
   | "model.output.completed"
+  | "context.compaction.completed"
+  | "context.compaction.failed"
   | "tool.requested"
   | "tool.completed"
   | "tool.failed"
@@ -351,6 +367,9 @@ export function createPanelRunTracking(input: {
     rootletsByKind,
     modelTotals: input.summary?.ai.eventCounts ?? countModelEvents(input.eventEntries),
     toolTotals: input.summary?.tools.eventCounts ?? countToolEvents(input.eventEntries),
+    context: {
+      compaction: countContextCompactionEvents(input.eventEntries),
+    },
     candidates: {
       total: input.summary?.underground.candidateCounts ?? observedCandidateCounts,
       byKind: ROOTLET_CLUSTER_KINDS.reduce((result, kind) => {
@@ -447,7 +466,7 @@ export function deriveRunSteps(
 
       currentToolCalls.push({
         toolName: event.toolName,
-        title: event.summary ?? event.toolName ?? "工具调用",
+        title: event.summary ?? (event.toolName === undefined ? "工具调用" : toolDisplayName(event.toolName)),
         target,
         preview: event.detail?.preview,
         display: event.detail?.display,
@@ -823,6 +842,24 @@ function appendStreamEventsForEvent(input: {
     return;
   }
 
+  if (input.entry.type === "context.compaction.completed" || input.entry.type === "context.compaction.failed") {
+    input.push({
+      ...base,
+      eventId: `${input.runId}:event:${input.entry.sequence}:${input.entry.type}`,
+      type: input.entry.type,
+      agentLabel: "上下文",
+      summary: contextCompactionStreamSummary(input.entry.type, payload),
+      status: input.entry.type === "context.compaction.completed" ? "completed" : "failed",
+      detail: {
+        kind: "thinking",
+        action: input.entry.type === "context.compaction.completed" ? "压缩上下文" : "上下文压缩失败",
+        preview: contextCompactionPreview(payload),
+        truncated: false,
+      },
+    });
+    return;
+  }
+
   if (input.entry.type === "user_approval.requested") {
     input.push({
       ...base,
@@ -936,7 +973,13 @@ function sourceRefsForView(view: RunObservationEventView | undefined): readonly 
 }
 
 function modelCallRefsFor(entry: EventLogEntry, payload: Readonly<Record<string, unknown>>): readonly string[] {
-  if (entry.type !== "model.requested" && entry.type !== "model.completed" && entry.type !== "model.failed") {
+  if (
+    entry.type !== "model.requested" &&
+    entry.type !== "model.completed" &&
+    entry.type !== "model.failed" &&
+    entry.type !== "context.compaction.completed" &&
+    entry.type !== "context.compaction.failed"
+  ) {
     return [];
   }
   return unique([stringOrUndefined(payload.requestId), stringOrUndefined(payload.responseId)].filter(isString));
@@ -989,12 +1032,40 @@ function modelFailedSummary(payload: Readonly<Record<string, unknown>>): string 
   return friendlyUserFacingFailureText(failureKind);
 }
 
+function contextCompactionStreamSummary(
+  type: "context.compaction.completed" | "context.compaction.failed",
+  payload: Readonly<Record<string, unknown>>
+): string {
+  const summary = stringOrUndefined(payload.summary);
+  if (summary !== undefined) {
+    return summary;
+  }
+  const tokenCount = numberOrUndefined(payload.tokenCount);
+  const threshold = numberOrUndefined(payload.threshold);
+  const tokenText = tokenCount === undefined || threshold === undefined ? "" : `（${tokenCount}/${threshold} tokens）`;
+  return type === "context.compaction.completed"
+    ? `较早上下文已压缩${tokenText}。`
+    : `上下文压缩没有成功${tokenText}。`;
+}
+
+function contextCompactionPreview(payload: Readonly<Record<string, unknown>>): string | undefined {
+  const covered = numberOrUndefined(payload.coveredRefCount);
+  const messageCountAfter = numberOrUndefined(payload.messageCountAfter);
+  const parts = [
+    covered === undefined ? undefined : `覆盖较早上下文 ${covered} 条`,
+    messageCountAfter === undefined ? undefined : `压缩后消息 ${messageCountAfter} 条`,
+    stringOrUndefined(payload.error),
+  ].filter(isString);
+  return parts.length === 0 ? undefined : parts.join("；");
+}
+
 function toolSummary(type: "tool.requested" | "tool.completed" | "tool.failed", payload: Readonly<Record<string, unknown>>): string {
   const toolName = stringOrUndefined(payload.toolName) ?? "unknown";
+  const displayName = stringOrUndefined(payload.toolDisplayName) ?? localToolLabel(toolName);
   const input = asRecord(payload.input);
   const output = asRecord(payload.output);
   const result = asRecord(output.result);
-  const label = localToolLabel(toolName);
+  const label = displayName;
   const target = toolTargetText(toolName, input, result);
   const targetText = target === undefined ? "" : `：${target}`;
   if (type === "tool.requested") {
@@ -1024,7 +1095,7 @@ function toolStreamDetail(
   const args = stringArray(result.args).length > 0 ? stringArray(result.args) : stringArray(input.args);
   return {
     kind: "tool",
-    action: stringOrUndefined(output.action) ?? toolName,
+    action: displayActionLabel(stringOrUndefined(output.action) ?? localToolLabel(toolName)),
     path: stringOrUndefined(result.path) ?? stringOrUndefined(input.path),
     query: stringOrUndefined(result.query) ?? stringOrUndefined(input.query),
     command: command === undefined ? undefined : [command, ...args].join(" ").trim(),
@@ -1048,9 +1119,24 @@ function toolDisplayOrUndefined(value: unknown): ToolDisplayProjection | undefin
     kind === "command_summary" ||
     kind === "generic_tool_summary"
   ) {
-    return value as ToolDisplayProjection;
+    return normalizeToolDisplayForReadModel(value as ToolDisplayProjection);
   }
   return undefined;
+}
+
+function normalizeToolDisplayForReadModel(display: ToolDisplayProjection): ToolDisplayProjection {
+  if (display.kind !== "generic_tool_summary") {
+    return display;
+  }
+  const action = display.action;
+  return {
+    ...display,
+    action: action === undefined ? undefined : displayActionLabel(action),
+  };
+}
+
+function displayActionLabel(value: string): string {
+  return /^[a-z][a-z0-9_:-]*$/i.test(value) ? toolDisplayName(value) : value;
 }
 
 function toolResultEnvelopeOrUndefined(value: unknown): ToolResultEnvelope | undefined {
@@ -1213,19 +1299,7 @@ function redactAndCompact(value: string, maxLength: number): string {
 }
 
 function localToolLabel(toolName: string): string {
-  if (toolName === "read_file") return "读取文件";
-  if (toolName === "list_dir") return "列出目录";
-  if (toolName === "grep_files") return "搜索文件";
-  if (toolName === "write_file") return "写入文件";
-  if (toolName === "create_file") return "创建文件";
-  if (toolName === "edit_file") return "编辑文件";
-  if (toolName === "delete_file") return "删除文件";
-  if (toolName === "run_command") return "执行命令";
-  if (toolName === "shell_command") return "执行 Shell";
-  if (toolName === "browser_snapshot") return "浏览网页";
-  if (toolName === "search") return "搜索网页";
-  if (toolName === "read") return "读取网页";
-  return `执行 ${toolName}`;
+  return toolDisplayName(toolName);
 }
 
 function toolTargetText(
@@ -1570,6 +1644,8 @@ function createDesktopChatNote(input: NoteFactoryInput): AgentWorkNote {
     "model.requested",
     "model.completed",
     "model.failed",
+    "context.compaction.completed",
+    "context.compaction.failed",
     "tool.requested",
     "tool.completed",
     "tool.failed",
@@ -1969,6 +2045,27 @@ function countToolEvents(eventEntries: readonly EventLogEntry[]): PanelRunTracki
   };
 }
 
+function countContextCompactionEvents(
+  eventEntries: readonly EventLogEntry[]
+): PanelRunTrackingReadModel["context"]["compaction"] {
+  const events = eventEntries.filter((entry) =>
+    entry.type === "context.compaction.completed" || entry.type === "context.compaction.failed"
+  );
+  const latest = events.at(-1);
+  const latestPayload = latest === undefined ? undefined : asRecord(latest.message.payload);
+  return {
+    completed: events.filter((entry) => entry.type === "context.compaction.completed").length,
+    failed: events.filter((entry) => entry.type === "context.compaction.failed").length,
+    latest: latest === undefined || latestPayload === undefined ? undefined : {
+      status: latest.type === "context.compaction.completed" ? "completed" : "failed",
+      tokenCount: numberOrUndefined(latestPayload.tokenCount),
+      threshold: numberOrUndefined(latestPayload.threshold),
+      coveredRefCount: numberOrUndefined(latestPayload.coveredRefCount),
+      summary: stringOrUndefined(latestPayload.summary),
+    },
+  };
+}
+
 function countModelEventsByKind(
   eventEntries: readonly EventLogEntry[]
 ): ReadonlyMap<RootletClusterKind, { kind: RootletClusterKind; requested: number; completed: number; failed: number }> {
@@ -2061,6 +2158,10 @@ function waitingPointFor(status: PanelRunStatus, lastEventType: ArborMessageType
     case "model.completed":
     case "model.failed":
       return "模型调用已返回，Rootlet Agents 正在整理候选或 fallback。";
+    case "context.compaction.completed":
+      return "较早上下文已压缩，助手将继续处理当前任务。";
+    case "context.compaction.failed":
+      return "上下文压缩没有成功，运行已暂停等待继续处理。";
     case "tool.requested":
       return "已发出工具调用，等待工具返回脱敏结果引用。";
     case "tool.completed":
@@ -2160,6 +2261,10 @@ function asRecord(value: unknown): Readonly<Record<string, unknown>> {
 
 function stringOrUndefined(value: unknown): string | undefined {
   return typeof value === "string" && value.trim().length > 0 ? value : undefined;
+}
+
+function numberOrUndefined(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 function stringArray(value: unknown): readonly string[] {

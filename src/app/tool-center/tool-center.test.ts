@@ -34,7 +34,7 @@ test("ToolCenter enforces allowedTools permissions", async () => {
   );
 
   assert.equal(result.status, "failed");
-  assert.match(result.error ?? "", /not allowed/);
+  assert.match(result.error ?? "", /未授权/);
   assert.equal(center.getCallCount(), 0);
 });
 
@@ -48,7 +48,7 @@ test("ToolCenter enforces maxCallsPerRun", async () => {
 
   assert.equal(first.status, "completed");
   assert.equal(second.status, "failed");
-  assert.match(second.error ?? "", /budget exhausted/);
+  assert.match(second.error ?? "", /保护上限/);
   assert.equal(center.getCallCount(), 1);
 
   center.resetCallCount();
@@ -93,11 +93,13 @@ test("ToolCenter uses explicit metadata for confirmation instead of platform rea
   assert.equal(create.status, "completed");
   assert.equal(deleteResult.status, "approval_required");
   assert.equal(execute.status, "approval_required");
-  assert.match(deleteResult.error ?? "", /requires user confirmation/);
-  assert.match(execute.error ?? "", /requires user confirmation/);
+  assert.match(deleteResult.error ?? "", /需要用户确认/);
+  assert.match(execute.error ?? "", /需要用户确认/);
   assert.equal(deleteResult.confirmationRequest?.confirmationId, "confirmation-call-delete");
   assert.equal(execute.confirmationRequest?.confirmationId, "confirmation-call-exec");
   assert.equal(deleteResult.confirmationRequest?.riskLevel, "high");
+  assert.equal(deleteResult.confirmationRequest?.actionSummary.includes("删除文件"), true);
+  assert.equal(deleteResult.confirmationRequest?.actionSummary.includes("delete_file"), false);
   assert.equal(creates, 1);
   assert.equal(deletes, 0);
   assert.equal(executes, 0);

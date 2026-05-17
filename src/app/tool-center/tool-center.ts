@@ -9,6 +9,7 @@ import type {
   ToolSafeProjection,
   ToolSecurityDecision,
 } from "../../domain/tools/index.js";
+import { toolDisplayName } from "../../domain/tools/index.js";
 import type { ConfirmationRequest } from "../../domain/basic-agent/index.js";
 import {
   confirmationRequestFromSecurityDecision,
@@ -67,19 +68,19 @@ export class ToolCenter {
     }
     const executor = this.tools.get(request.toolName);
     if (executor === undefined) {
-      return failedToolResult(request, startedAt, `Tool is not registered: ${request.toolName}`);
+      return failedToolResult(request, startedAt, `${toolDisplayName(request.toolName)}未注册。`);
     }
 
     if (permission?.allowedTools !== undefined && !permission.allowedTools.includes(request.toolName)) {
       return failedToolResult(
         request,
         startedAt,
-        `Tool ${request.toolName} is not allowed for agent ${permission.callerAgentId}.`
+        `${toolDisplayName(request.toolName)}未授权给当前 Agent。`
       );
     }
 
     if (this.callCount >= this.maxCallsPerRun) {
-      return failedToolResult(request, startedAt, `Tool call budget exhausted: maxCallsPerRun=${this.maxCallsPerRun}.`);
+      return failedToolResult(request, startedAt, `工具调用保护上限已触发：maxCallsPerRun=${this.maxCallsPerRun}。`);
     }
 
     const metadata = normalizeToolMetadata(executor.definition);

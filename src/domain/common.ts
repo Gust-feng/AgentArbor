@@ -50,6 +50,8 @@ export const ARBOR_MESSAGE_TYPES = [
   "model.requested",
   "model.completed",
   "model.failed",
+  "context.compaction.completed",
+  "context.compaction.failed",
   "tool.requested",
   "tool.completed",
   "tool.failed",

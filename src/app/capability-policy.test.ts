@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { BasicAgentCapabilitySnapshot, CapabilityToolCatalogItem } from "../domain/config/index.js";
+import { toolPresentationForName } from "../domain/tools/index.js";
 import { createTaskSoil } from "../domain/soil/index.js";
 import { resolveRunCapabilities } from "./capability-policy.js";
 
@@ -28,8 +29,8 @@ test("run capability policy hides disabled, unavailable, denied, and mode-intern
   assert.deepEqual(resolution.allowedTools, ["search"]);
   assert.equal(resolution.toolExposures.find((item) => item.name === "shell_command")?.modelVisible, false);
   assert.equal(resolution.toolExposures.find((item) => item.name === "shell_command")?.requiresConfirmation, true);
-  assert.equal(resolution.toolExposures.find((item) => item.name === "browser_snapshot")?.reason, "Tool runtime is unavailable.");
-  assert.equal(resolution.toolExposures.find((item) => item.name === "write_file")?.reason, "Tool is disabled by configuration.");
+  assert.equal(resolution.toolExposures.find((item) => item.name === "browser_snapshot")?.reason, "工具运行时当前不可用。");
+  assert.equal(resolution.toolExposures.find((item) => item.name === "write_file")?.reason, "工具已在配置中停用。");
   assert.equal(resolution.toolExposures.find((item) => item.name === "underground_probe")?.modelVisible, false);
   assert.match(resolution.warnings.join("\n"), /隐藏/);
 });
@@ -136,13 +137,30 @@ function tool(
   operationType: CapabilityToolCatalogItem["operationType"],
   overrides: Partial<CapabilityToolCatalogItem> = {}
 ): CapabilityToolCatalogItem {
-  return {
-    name,
-    description: `${name} tool`,
+  const presentation = toolPresentationForName(name, {
     category: operationType === "execute" ? "terminal" : "workspace",
     riskLevel: operationType === "read-only" ? "low" : "high",
     operationType,
     requiresConfirmation: operationType !== "read-only",
+    visibleResultPolicy: {
+      userVisible: "safe-preview",
+      maxPreviewChars: 800,
+      omitRawOutput: true,
+    },
+  });
+  return {
+    name,
+    displayName: presentation.displayName,
+    displayDescription: presentation.displayDescription,
+    description: `${name} tool`,
+    category: operationType === "execute" ? "terminal" : "workspace",
+    categoryLabel: presentation.categoryLabel,
+    riskLevel: operationType === "read-only" ? "low" : "high",
+    riskLabel: presentation.riskLabel,
+    operationType,
+    operationLabel: presentation.operationLabel,
+    requiresConfirmation: operationType !== "read-only",
+    confirmationLabel: presentation.confirmationLabel,
     visibleResultPolicy: {
       userVisible: "safe-preview",
       maxPreviewChars: 800,

@@ -4,6 +4,7 @@ import type {
   ToolDisplayProjection,
   ToolSafeProjection,
 } from "../../domain/tools/index.js";
+import { toolDisplayName } from "../../domain/tools/index.js";
 import {
   projectToolResultEnvelope as projectKernelToolResultEnvelope,
   projectToolStatusEnvelope,
@@ -41,7 +42,7 @@ export function projectToolResult(input: {
       redacted: envelope.redacted,
       diagnosticRef: envelope.diagnosticRef,
     },
-    uiSummary: compactSafeText(summary ?? `${input.request.toolName} completed.`, input.maxPreviewChars ?? 800),
+    uiSummary: compactSafeText(summary ?? `${toolDisplayName(input.request.toolName)}已完成。`, input.maxPreviewChars ?? 800),
     diagnosticRef,
     display,
     envelope,
@@ -76,7 +77,7 @@ export function projectToolApprovalRequired(input: {
   readonly operationType: string;
 }): ToolSafeProjection {
   const diagnosticRef = `tool:${input.request.callId}:confirmation-required`;
-  const summary = `工具 ${input.toolName} 需要用户确认后才能执行。`;
+  const summary = `${toolDisplayName(input.toolName)}需要用户确认后才能执行。`;
   return {
     uiSummary: summary,
     diagnosticRef,
@@ -141,7 +142,7 @@ function asRecord(value: unknown): Readonly<Record<string, unknown>> {
 function projectToolDisplay(request: ToolCallRequest, output: unknown): ToolDisplayProjection {
   const record = asRecord(output);
   const result = asRecord(record.result);
-  const action = stringOrUndefined(record.action) ?? request.toolName;
+  const action = displayActionForTool(stringOrUndefined(record.action), request.toolName);
   const summary = compactSafeText(stringOrUndefined(record.summary), 500);
   if (request.toolName === "search" && Array.isArray(record.results)) {
     return {
@@ -228,6 +229,13 @@ function stringOrUndefined(value: unknown): string | undefined {
 
 function numberOrUndefined(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function displayActionForTool(action: string | undefined, toolName: string): string {
+  if (action === undefined || action === toolName || /^[a-z][a-z0-9_:-]*$/i.test(action)) {
+    return toolDisplayName(action ?? toolName);
+  }
+  return action;
 }
 
 function stringArray(value: unknown): readonly string[] {

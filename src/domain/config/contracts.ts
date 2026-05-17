@@ -159,11 +159,17 @@ export type UpsertMcpServerInput = {
 
 export type CapabilityToolCatalogItem = {
   readonly name: string;
+  readonly displayName: string;
+  readonly displayDescription: string;
   readonly description: string;
   readonly category: ToolCategory;
+  readonly categoryLabel: string;
   readonly riskLevel: ToolRiskLevel;
+  readonly riskLabel: string;
   readonly operationType: ToolOperationType;
+  readonly operationLabel: string;
   readonly requiresConfirmation: boolean;
+  readonly confirmationLabel: string;
   readonly visibleResultPolicy: ToolVisibleResultPolicy;
   readonly enabled: boolean;
   readonly availability: "available" | "unavailable";
@@ -211,6 +217,7 @@ export type BasicAgentCapabilitySnapshot = {
 
 export type RunToolExposure = {
   readonly name: string;
+  readonly displayName: string;
   readonly enabled: boolean;
   readonly modelVisible: boolean;
   readonly availability: CapabilityToolCatalogItem["availability"];

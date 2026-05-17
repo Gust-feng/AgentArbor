@@ -10,6 +10,7 @@ import type {
   ToolExecutionContext,
   ToolPermissionCheck,
 } from "../domain/tools/index.js";
+import { toolPresentationForName } from "../domain/tools/index.js";
 import { runDesktopAgentSession } from "./desktop-agent-session.js";
 
 test("Desktop Agent Session answers ordinary questions without entering deep mode", async () => {
@@ -634,13 +635,30 @@ function capabilityTool(
   name: string,
   operationType: CapabilityToolCatalogItem["operationType"]
 ): CapabilityToolCatalogItem {
-  return {
-    name,
-    description: `${name} tool`,
+  const presentation = toolPresentationForName(name, {
     category: "workspace",
     riskLevel: operationType === "read-only" ? "low" : "high",
     operationType,
     requiresConfirmation: operationType !== "read-only",
+    visibleResultPolicy: {
+      userVisible: "safe-preview",
+      maxPreviewChars: 800,
+      omitRawOutput: true,
+    },
+  });
+  return {
+    name,
+    displayName: presentation.displayName,
+    displayDescription: presentation.displayDescription,
+    description: `${name} tool`,
+    category: "workspace",
+    categoryLabel: presentation.categoryLabel,
+    riskLevel: operationType === "read-only" ? "low" : "high",
+    riskLabel: presentation.riskLabel,
+    operationType,
+    operationLabel: presentation.operationLabel,
+    requiresConfirmation: operationType !== "read-only",
+    confirmationLabel: presentation.confirmationLabel,
     visibleResultPolicy: {
       userVisible: "safe-preview",
       maxPreviewChars: 800,

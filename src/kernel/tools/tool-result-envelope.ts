@@ -3,6 +3,7 @@ import type {
   ToolDisplayProjection,
   ToolResultEnvelope,
 } from "../../domain/tools/index.js";
+import { toolDisplayName } from "../../domain/tools/index.js";
 import { redactSensitiveText } from "../redaction.js";
 
 export type ProjectToolResultEnvelopeInput = {
@@ -63,7 +64,8 @@ function agentSummaryForToolDisplay(
   summary: string | undefined,
   toolName: string
 ): string {
-  const fallback = summary ?? `${toolName} completed.`;
+  const label = toolDisplayName(toolName);
+  const fallback = summary ?? `${label}已完成。`;
   if (display.kind === "search_results") {
     const results = display.results
       .slice(0, 5)
@@ -74,7 +76,7 @@ function agentSummaryForToolDisplay(
       })
       .join("\n");
     return redactOrdinaryToolText(
-      [`Search completed${display.query === undefined ? "" : ` for: ${display.query}`}.`, results || fallback]
+      [`${label}已完成${display.query === undefined ? "" : `：${display.query}`}。`, results || fallback]
         .filter((item) => item.trim().length > 0)
         .join("\n"),
       1_800
@@ -83,7 +85,7 @@ function agentSummaryForToolDisplay(
   if (display.kind === "browser_snapshot") {
     return redactOrdinaryToolText(
       [
-        "Browser snapshot completed.",
+        `${label}已完成。`,
         display.title,
         display.url,
         compactSafeText(display.text, 1_200),
@@ -95,10 +97,10 @@ function agentSummaryForToolDisplay(
   if (display.kind === "command_summary") {
     return redactOrdinaryToolText(
       [
-        `Command completed${display.exitCode === undefined ? "" : ` with exit ${display.exitCode}`}.`,
+        `${label}已完成${display.exitCode === undefined ? "" : `，退出码 ${display.exitCode}`}。`,
         [display.command, ...(display.args ?? [])].filter(isString).join(" "),
-        display.outputSummary === undefined ? undefined : `output summary:\n${display.outputSummary}`,
-        display.errorSummary === undefined ? undefined : `error summary:\n${display.errorSummary}`,
+        display.outputSummary === undefined ? undefined : `输出摘要：\n${display.outputSummary}`,
+        display.errorSummary === undefined ? undefined : `错误摘要：\n${display.errorSummary}`,
       ].filter(isString).join("\n"),
       1_500
     );
@@ -106,9 +108,9 @@ function agentSummaryForToolDisplay(
   if (display.kind === "file_change_summary") {
     return redactOrdinaryToolText(
       [
-        `File change preview: ${display.path ?? "workspace file"}.`,
-        display.append === true ? "Mode: append." : undefined,
-        display.bytes === undefined ? undefined : `Bytes: ${display.bytes}.`,
+        `${label}：${display.path ?? "工作区文件"}。`,
+        display.append === true ? "模式：追加。" : undefined,
+        display.bytes === undefined ? undefined : `大小：${display.bytes} 字节。`,
         summary,
       ].filter(isString).join("\n"),
       1_200
@@ -117,10 +119,10 @@ function agentSummaryForToolDisplay(
   if (display.kind === "file_diff_preview") {
     return redactOrdinaryToolText(
       [
-        `File edit preview: ${display.path ?? "workspace file"}.`,
-        display.replacements === undefined ? undefined : `Replacements: ${display.replacements}.`,
-        display.previousLength === undefined ? undefined : `Previous length: ${display.previousLength}.`,
-        display.nextLength === undefined ? undefined : `Next length: ${display.nextLength}.`,
+        `${label}：${display.path ?? "工作区文件"}。`,
+        display.replacements === undefined ? undefined : `替换次数：${display.replacements}。`,
+        display.previousLength === undefined ? undefined : `修改前长度：${display.previousLength}。`,
+        display.nextLength === undefined ? undefined : `修改后长度：${display.nextLength}。`,
         summary,
       ].filter(isString).join("\n"),
       1_200

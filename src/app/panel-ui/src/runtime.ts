@@ -16,6 +16,8 @@ const BASIC_RUN_EVENT_TYPES = [
   "user.guidance",
   "model.output.delta",
   "model.output.completed",
+  "context.compaction.completed",
+  "context.compaction.failed",
 ] as const;
 
 export function mergeEvents(previous: readonly RunEvent[], incoming: readonly RunEvent[]): readonly RunEvent[] {

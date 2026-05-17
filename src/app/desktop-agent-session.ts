@@ -4,6 +4,7 @@ import type { ConstraintRef } from "../domain/constraints.js";
 import type { ObservationRef } from "../domain/observation/index.js";
 import type { TaskSoil } from "../domain/soil/index.js";
 import type { ToolCallResult, ToolExecutionBroker } from "../domain/tools/index.js";
+import { toolDisplayName } from "../domain/tools/index.js";
 import type { EventLogEntry } from "../kernel/events/in-memory-event-log.js";
 import { createId, nowIso } from "../kernel/id.js";
 import { AgentTurnRuntime, type AgentTurnRuntimeResult } from "../kernel/intelligence/index.js";
@@ -228,6 +229,16 @@ export async function runDesktopAgentSession(
         tokenCounter,
       });
       if (result.status === "failed") {
+        publishContextCompactionFailed({
+          runtime,
+          traceId,
+          goalId,
+          tokenCount: result.tokenCount,
+          threshold: result.threshold,
+          message: result.message,
+          requestId: result.requestId,
+          responseId: result.responseId,
+        });
         return {
           status: "failed",
           message: result.message,
@@ -237,6 +248,18 @@ export async function runDesktopAgentSession(
         };
       }
       if (result.status === "compacted") {
+        publishContextCompactionCompleted({
+          runtime,
+          traceId,
+          goalId,
+          summaryId: result.conversationSummary.summaryId,
+          tokenCount: result.tokenCount,
+          threshold: result.threshold,
+          coveredRefCount: result.conversationSummary.coveredRefs.length,
+          messageCountAfter: result.messages.length,
+          requestId: result.conversationSummary.modelRequestId,
+          responseId: result.conversationSummary.modelResponseId,
+        });
         return { status: "compacted", messages: result.messages };
       }
       return { status: "unchanged" };
@@ -638,6 +661,70 @@ function publishTriggeredSkills(input: {
   }
 }
 
+function publishContextCompactionCompleted(input: {
+  readonly runtime: MinimalRuntime;
+  readonly traceId: string;
+  readonly goalId: string;
+  readonly summaryId: string;
+  readonly tokenCount: number;
+  readonly threshold: number;
+  readonly coveredRefCount: number;
+  readonly messageCountAfter: number;
+  readonly requestId?: string;
+  readonly responseId?: string;
+}): void {
+  input.runtime.bus.publish(
+    createMessage({
+      traceId: input.traceId,
+      from: { id: DESKTOP_AGENT_ID, role: "runtime" },
+      to: { group: "desktop-shell" },
+      type: "context.compaction.completed",
+      intent: "compact_desktop_agent_context",
+      payload: {
+        goalId: input.goalId,
+        summaryId: input.summaryId,
+        tokenCount: input.tokenCount,
+        threshold: input.threshold,
+        coveredRefCount: input.coveredRefCount,
+        messageCountAfter: input.messageCountAfter,
+        requestId: input.requestId,
+        responseId: input.responseId,
+        summary: `上下文达到 ${input.tokenCount}/${input.threshold} tokens，已压缩 ${input.coveredRefCount} 条较早上下文。`,
+      },
+    })
+  );
+}
+
+function publishContextCompactionFailed(input: {
+  readonly runtime: MinimalRuntime;
+  readonly traceId: string;
+  readonly goalId: string;
+  readonly tokenCount: number;
+  readonly threshold: number;
+  readonly message: string;
+  readonly requestId?: string;
+  readonly responseId?: string;
+}): void {
+  input.runtime.bus.publish(
+    createMessage({
+      traceId: input.traceId,
+      from: { id: DESKTOP_AGENT_ID, role: "runtime" },
+      to: { group: "desktop-shell" },
+      type: "context.compaction.failed",
+      intent: "compact_desktop_agent_context_failed",
+      payload: {
+        goalId: input.goalId,
+        tokenCount: input.tokenCount,
+        threshold: input.threshold,
+        requestId: input.requestId,
+        responseId: input.responseId,
+        summary: `上下文达到 ${input.tokenCount}/${input.threshold} tokens，但压缩没有成功。`,
+        error: safeText(input.message, 500),
+      },
+    })
+  );
+}
+
 function allowedToolsForDesktopAgent(toolCenter: ToolExecutionBroker): readonly string[] {
   // Ordinary desktop mode keeps Underground tools behind the explicit deep-mode boundary.
   return toolCenter.list().map((tool) => tool.name).filter((name) => !name.startsWith("underground_"));
@@ -848,10 +935,35 @@ function activityFromEventEntry(entry: EventLogEntry): readonly DesktopAgentActi
           refsFromPayload(payload),
         ),
       ];
+    case "context.compaction.completed":
+      return [
+        activity(
+          entry,
+          "model_completed",
+          "上下文已压缩",
+          contextCompactionSummary(payload, "completed"),
+          "completed",
+          sourceRefs,
+          refsFromPayload(payload),
+        ),
+      ];
+    case "context.compaction.failed":
+      return [
+        activity(
+          entry,
+          "model_failed",
+          "上下文压缩失败",
+          contextCompactionSummary(payload, "failed"),
+          "failed",
+          sourceRefs,
+          refsFromPayload(payload),
+        ),
+      ];
     case "tool.requested":
     case "tool.completed":
     case "tool.failed": {
       const toolName = stringOrUndefined(payload.toolName) ?? "tool";
+      const toolLabel = toolDisplayName(toolName);
       const output = asRecord(payload.output);
       const input = asRecord(payload.input);
       const result = asRecord(output.result);
@@ -869,15 +981,15 @@ function activityFromEventEntry(entry: EventLogEntry): readonly DesktopAgentActi
           entry.type === "tool.completed"
             ? completedToolActivitySummary(toolName, payload)
             : entry.type === "tool.failed"
-              ? `工具 ${toolName} 失败，错误已脱敏。`
-              : `工具 ${toolName} 开始执行。`,
+              ? `${toolLabel}失败，错误已脱敏。`
+              : `${toolLabel}开始执行。`,
           entry.type === "tool.requested" ? "running" : entry.type === "tool.completed" ? "completed" : "failed",
           sourceRefs,
           [],
           stringOrUndefined(payload.callId) === undefined ? [] : [stringOrUndefined(payload.callId) as string],
           toolName,
           {
-            action: stringOrUndefined(output.action) ?? toolName,
+            action: stringOrUndefined(output.action) ?? toolLabel,
             path: stringOrUndefined(result.path) ?? stringOrUndefined(input.path),
             truncated: output.truncated === true,
             error: stringOrUndefined(payload.error),
@@ -899,6 +1011,22 @@ function activityFromEventEntry(entry: EventLogEntry): readonly DesktopAgentActi
     default:
       return [];
   }
+}
+
+function contextCompactionSummary(
+  payload: Readonly<Record<string, unknown>>,
+  status: "completed" | "failed"
+): string {
+  const summary = stringOrUndefined(payload.summary);
+  if (summary !== undefined) {
+    return summary;
+  }
+  const tokenCount = numberOrUndefined(payload.tokenCount);
+  const threshold = numberOrUndefined(payload.threshold);
+  const tokenText = tokenCount === undefined || threshold === undefined ? "" : `（${tokenCount}/${threshold} tokens）`;
+  return status === "completed"
+    ? `较早上下文已压缩成 continuation prompt${tokenText}。`
+    : `上下文压缩没有成功${tokenText}，本轮已暂停。`;
 }
 
 function toolActivityTitle(toolName: string, phase: "start" | "completed" | "failed"): string {
@@ -923,7 +1051,7 @@ function completedToolActivitySummary(toolName: string, payload: Readonly<Record
   if (summary !== undefined) {
     return summary;
   }
-  return `工具 ${toolName} 已返回安全摘要。`;
+  return `${toolDisplayName(toolName)}已返回安全摘要。`;
 }
 
 function terminalActivity(
@@ -1040,6 +1168,10 @@ function asRecord(value: unknown): Readonly<Record<string, unknown>> {
 
 function stringOrUndefined(value: unknown): string | undefined {
   return typeof value === "string" && value.trim().length > 0 ? value : undefined;
+}
+
+function numberOrUndefined(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 function isString(value: unknown): value is string {

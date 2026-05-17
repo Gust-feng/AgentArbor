@@ -9,49 +9,6 @@ type ButtonVariant = "primary" | "outline";
 const TOOL_TABS = ["全部", "已启用", "本地", "需要确认"] as const;
 const SKILL_TABS = ["全部", "已启用", "已停用"] as const;
 
-const TOOL_COPY: Record<string, { readonly title: string; readonly description: string }> = {
-  browser_snapshot: {
-    title: "浏览器快照",
-    description: "打开网页并返回安全的文本快照，适合网页阅读和事实核对。",
-  },
-  edit_file: {
-    title: "编辑文件",
-    description: "在当前工作区内按唯一锚点原子修改文本文件，并返回变更摘要。",
-  },
-  create_file: {
-    title: "创建文件",
-    description: "在当前工作区内创建不存在的文本文件，不覆盖已有文件。",
-  },
-  delete_file: {
-    title: "删除文件",
-    description: "删除当前工作区内的普通文件，执行前需要确认。",
-  },
-  grep_files: {
-    title: "搜索文件",
-    description: "在本地工作区搜索文本，返回匹配文件、行号和片段。",
-  },
-  read_file: {
-    title: "读取文件",
-    description: "读取授权范围内的文件内容，用于理解项目上下文。",
-  },
-  list_directory: {
-    title: "浏览目录",
-    description: "查看工作区目录结构，帮助定位相关文件。",
-  },
-  write_file: {
-    title: "写入文件",
-    description: "兼容工具：创建或覆盖文件，并保留可审阅的操作记录。",
-  },
-  run_command: {
-    title: "运行命令",
-    description: "在本地工作区执行命令，返回安全摘要和退出状态。",
-  },
-  web_search: {
-    title: "网页搜索",
-    description: "通过已配置的搜索服务获取外部资料摘要。",
-  },
-};
-
 export function SkillsPage(props: {
   readonly skills: readonly SkillDefinition[];
   readonly onUpdateSkill: (skillId: string, enabled: boolean) => void;
@@ -120,6 +77,7 @@ export function ToolsPage(props: {
   readonly setToolForm: (form: ToolForm) => void;
   readonly saving?: boolean;
   readonly onSaveTools: () => void;
+  readonly onUpdateTool: (toolName: string, enabled: boolean) => void;
 }): React.ReactElement {
   const [activeTab, setActiveTab] = useState<(typeof TOOL_TABS)[number]>("全部");
   const [configOpen, setConfigOpen] = useState(false);
@@ -148,7 +106,14 @@ export function ToolsPage(props: {
               saving={props.saving}
               onSaveTools={props.onSaveTools}
             />
-            {connectedTools.slice(0, 2).map((tool) => <ToolCard tool={tool} actionLabel="配置" key={`connected:${tool.name}`} />)}
+            {connectedTools.slice(0, 2).map((tool) => (
+              <ToolCard
+                tool={tool}
+                actionLabel={tool.enabled ? "已启用" : "已停用"}
+                onUpdateTool={props.onUpdateTool}
+                key={`connected:${tool.name}`}
+              />
+            ))}
           </div>
         </section>
 
@@ -158,7 +123,14 @@ export function ToolsPage(props: {
             <EmptyBlock>当前没有可展示的工具。</EmptyBlock>
           ) : (
             <div className="workspace-card-grid">
-              {visibleTools.map((tool) => <ToolCard tool={tool} actionLabel={tool.enabled ? "已接入" : "可配置"} key={tool.name} />)}
+              {visibleTools.map((tool) => (
+                <ToolCard
+                  tool={tool}
+                  actionLabel={tool.enabled ? "已启用" : "已停用"}
+                  onUpdateTool={props.onUpdateTool}
+                  key={tool.name}
+                />
+              ))}
             </div>
           )}
         </section>
@@ -227,7 +199,7 @@ export function SettingsPage(props: {
               <section className="settings-panel-card">
                 <SettingRow label="密钥存储" description="密钥只进入本地 secret store，不会进入普通会话或运行记录。" control={<span className="settings-value">本地隔离</span>} />
                 <SettingRow label="可见输出" description="普通视图只展示安全摘要、证据和结果，不展示原始输出。" control={<span className="settings-value">安全投影</span>} />
-                <SettingRow label="危险操作" description="写入、编辑、命令执行和外部提交类操作会先请求确认。" control={<span className="settings-value">需确认</span>} last />
+                <SettingRow label="确认边界" description="命令执行和删除文件需要确认；创建和编辑文件仍受工作区边界、大小限制和审计约束。" control={<span className="settings-value">按工具策略</span>} last />
               </section>
             )}
           </div>
@@ -355,7 +327,11 @@ function WebSearchConfigCard(props: {
   );
 }
 
-function ToolCard(props: { readonly tool: ToolCatalogItem; readonly actionLabel: string }): React.ReactElement {
+function ToolCard(props: {
+  readonly tool: ToolCatalogItem;
+  readonly actionLabel: string;
+  readonly onUpdateTool: (toolName: string, enabled: boolean) => void;
+}): React.ReactElement {
   const copy = toolCopy(props.tool);
   const enabled = props.tool.enabled && props.tool.available !== false;
   return (
@@ -367,11 +343,18 @@ function ToolCard(props: { readonly tool: ToolCatalogItem; readonly actionLabel:
       <div className="workspace-card-main">
         <h3 className="workspace-card-title">{copy.title}</h3>
         <p className="workspace-card-desc">{copy.description}</p>
-        {copy.idLabel && <small className="workspace-card-id">{copy.idLabel}</small>}
       </div>
       <div className="workspace-card-footer">
         <span className="muted-label">{toolMeta(props.tool)}</span>
         <span className="muted-label">{props.actionLabel}</span>
+        <label className="workspace-switch" aria-label={`${copy.title}开关`}>
+          <input
+            type="checkbox"
+            checked={props.tool.enabled}
+            onChange={(event) => props.onUpdateTool(props.tool.name, event.target.checked)}
+          />
+          <span />
+        </label>
       </div>
     </article>
   );
@@ -404,29 +387,22 @@ function SettingRow(props: {
 
 function filterTools(catalog: readonly ToolCatalogItem[], tab: (typeof TOOL_TABS)[number]): readonly ToolCatalogItem[] {
   if (tab === "已启用") return catalog.filter((tool) => tool.enabled && tool.available !== false);
-  if (tab === "本地") return catalog.filter((tool) => tool.operationType !== "network");
+  if (tab === "本地") return catalog.filter((tool) => tool.category === "filesystem" || tool.category === "terminal" || tool.category === "workspace");
   if (tab === "需要确认") return catalog.filter((tool) => tool.requiresConfirmation === true || tool.riskLevel === "high");
   return catalog;
 }
 
-function toolCopy(tool: ToolCatalogItem): { readonly title: string; readonly description: string; readonly idLabel?: string } {
-  const mapped = TOOL_COPY[tool.name];
-  const title = tool.displayName ?? mapped?.title ?? titleFromId(tool.name);
+function toolCopy(tool: ToolCatalogItem): { readonly title: string; readonly description: string } {
+  const title = tool.displayName ?? "工具能力";
   return {
     title,
-    description: mapped?.description ?? tool.description ?? "可供 Agent 在授权边界内调用的本地能力。",
-    idLabel: title === tool.name ? undefined : tool.name,
+    description: tool.displayDescription ?? tool.description ?? "可供 Agent 在授权边界内调用的本地能力。",
   };
 }
 
-function titleFromId(value: string): string {
-  return value.split(/[-_]/).filter(Boolean).map((part) => `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`).join(" ");
-}
-
 function toolMeta(tool: ToolCatalogItem): string {
-  if (tool.requiresConfirmation === true || tool.riskLevel === "high") return "需确认";
-  if (tool.category !== undefined && tool.category.length > 0) return tool.category;
-  return tool.operationType ?? "工具";
+  if (tool.requiresConfirmation === true || tool.riskLevel === "high") return tool.confirmationLabel ?? "需确认";
+  return [tool.categoryLabel, tool.operationLabel].filter((item): item is string => typeof item === "string" && item.length > 0).join(" · ") || "工具能力";
 }
 
 function providerName(provider: string): string {

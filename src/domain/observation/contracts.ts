@@ -53,6 +53,8 @@ export type RunStage =
   | "model_requested"
   | "model_completed"
   | "model_failed"
+  | "context_compaction_completed"
+  | "context_compaction_failed"
   | "tool_requested"
   | "tool_completed"
   | "tool_failed"

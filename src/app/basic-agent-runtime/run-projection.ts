@@ -112,6 +112,8 @@ function basicEventTitle(event: BasicAgentRunStreamEventProjectionInput): string
   if (event.type === "tool.requested") return "正在使用工具";
   if (event.type === "tool.completed") return "工具已完成";
   if (event.type === "tool.failed") return "工具未完成";
+  if (event.type === "context.compaction.completed") return "上下文已压缩";
+  if (event.type === "context.compaction.failed") return "上下文压缩失败";
   if (event.type === "confirmation.needed") return "需要确认";
   if (event.type === "user_approval.received") return "收到确认结果";
   if (event.type === "user.guidance") return "收到用户指导";
@@ -231,4 +233,3 @@ function sourceRefToObservationRef(ref: string): ObservationRef {
   }
   return { kind: "event", id: ref };
 }
-

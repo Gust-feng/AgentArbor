@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { getJson, postJson } from "./api";
 import { Composer } from "./components/composer";
 import { ConversationView } from "./components/conversation";
+import { RightInspector } from "./components/right-inspector";
 import { Sidebar } from "./components/sidebar";
 import { TopBar } from "./components/topbar";
 import { SettingsPage, SkillsPage, ToolsPage } from "./components/workspace-pages";
@@ -12,6 +13,7 @@ import {
   safeBasicRun,
   safeConversation,
   safeDesktopDetail,
+  typedToolDisplays,
   safeWorkSession,
 } from "./runtime";
 import type {
@@ -54,7 +56,6 @@ export function App(): React.ReactElement {
   const [screen, setScreen] = useState<PanelScreen>("chat");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [goal, setGoal] = useState("");
-  const [runMode, setRunMode] = useState<"agent" | "deep">("agent");
   const [aiMode, setAiMode] = useState<"none" | "fake" | "openai-compatible">("openai-compatible");
   const [modelForm, setModelForm] = useState({ baseUrl: "", model: "", apiKey: "" });
   const [workspaceDirectory, setWorkspaceDirectory] = useState("");
@@ -145,7 +146,7 @@ export function App(): React.ReactElement {
     }
   }
 
-  async function startTask(selectedMode: "agent" | "deep", explicitGoal?: string): Promise<void> {
+  async function startTask(explicitGoal?: string): Promise<void> {
     const trimmed = (explicitGoal ?? goal).trim();
     if (trimmed.length === 0 || app.busy) return;
     stopPolling(pollTimer);
@@ -161,12 +162,11 @@ export function App(): React.ReactElement {
         readonly run: { readonly runId: string };
       }>(path, {
         goal: trimmed,
-        runMode: selectedMode,
+        runMode: "agent",
         aiMode,
         taskSoilInput: taskSoilInputFromAttachments(attachments),
       });
       setGoal("");
-      setRunMode("agent");
       setAttachments([]);
       const run = await safeBasicRun(response.run.runId);
       const workSession = await safeWorkSession(response.run.runId);
@@ -448,7 +448,6 @@ export function App(): React.ReactElement {
         onNew={() => {
           stopLiveUpdates(pollTimer, streamRef);
           setGoal("");
-          setRunMode("agent");
           setAttachments([]);
           setApp((previous) => ({ ...previous, conversation: undefined, run: undefined, workSession: undefined, events: [], detail: undefined, error: undefined }));
         }}
@@ -489,7 +488,6 @@ export function App(): React.ReactElement {
                 <Composer
                   value={goal}
                   onChange={setGoal}
-                  runMode={runMode}
                   attachments={attachments}
                   attachmentKind={attachmentKind}
                   attachmentValue={attachmentValue}
@@ -503,10 +501,17 @@ export function App(): React.ReactElement {
                   busy={app.busy}
                   contextBusy={contextBusy}
                   run={app.run}
-                  onSubmit={(mode) => void startTask(mode)}
+                  onSubmit={() => void startTask()}
                   onCancel={() => void cancelRun()}
                 />
               </section>
+              <RightInspector
+                run={app.run}
+                workSession={app.workSession}
+                events={app.events}
+                detail={app.detail}
+                toolDisplays={typedToolDisplays(app.detail)}
+              />
             </div>
           )}
           {screen === "skills" && <SkillsPage skills={app.skills} onUpdateSkill={(id, enabled) => void updateSkill(id, enabled)} onStartSkill={(skill) => startSkillChat(skill, setScreen, setGoal)} />}
@@ -553,7 +558,7 @@ function stopLiveUpdates(
 }
 
 function shouldKeepRefreshing(status: BasicAgentRun["status"]): boolean {
-  return status === "queued" || status === "planning" || status === "running" || status === "paused";
+  return status === "queued" || status === "planning" || status === "running";
 }
 
 function taskSoilInputFromAttachments(attachments: readonly ContextAttachment[]): {

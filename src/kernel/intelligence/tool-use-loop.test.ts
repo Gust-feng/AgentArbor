@@ -73,6 +73,31 @@ test("executeToolUseLoop completes on plain model text without exposing finish_t
   assert.equal(channel.requests[0]?.tools?.some((tool) => tool.name === "finish_task"), false);
 });
 
+test("executeToolUseLoop can hide blocked internal tools from model-visible tools", async () => {
+  const channel = new SequenceIntelligenceChannel([
+    textResponse("model-request-text", "Final answer chosen by the agent."),
+  ]);
+  const center = new TestToolBroker();
+  center.register("web_search", async () => ({ ok: true }));
+  center.register("finish_task", async () => ({ ok: true }));
+
+  const result = await executeToolUseLoop(
+    {
+      intelligenceChannel: channel,
+      toolCenter: center,
+      callerAgentId: "agent-test",
+      traceId: "trace-test",
+      goalId: "goal-test",
+      maxModelRounds: 4,
+      blockedToolNames: ["finish_task"],
+    },
+    createValidModelRequest()
+  );
+
+  assert.equal(result.stoppedReason, "no_tool_calls");
+  assert.deepEqual(channel.requests[0]?.tools?.map((tool) => tool.name), ["web_search"]);
+});
+
 test("executeToolUseLoop returns tool results to the model before natural completion", async () => {
   const channel = new SequenceIntelligenceChannel([
     toolCallResponse("model-request-test", "call-search", "web_search"),

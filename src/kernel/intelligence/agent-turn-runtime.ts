@@ -32,8 +32,8 @@ export type AgentTurnFallbackBehavior = "deterministic" | "disabled";
 export type AgentTurnPolicy = {
   readonly allowModel: boolean;
   readonly allowedTools?: readonly string[];
-  readonly maxModelRounds: number;
-  readonly maxToolRounds: number;
+  readonly maxModelRounds?: number;
+  readonly maxToolRounds?: number;
   readonly fallback: AgentTurnFallbackBehavior;
   readonly callerAgentId: string;
   readonly traceId: string;
@@ -99,7 +99,23 @@ export type AgentTurnRuntimeOptions = {
 export class AgentTurnRuntime {
   constructor(private readonly options: AgentTurnRuntimeOptions) {}
 
+  async executeAutonomous(input: AgentTurnRuntimeInput): Promise<AgentTurnRuntimeResult> {
+    return this.executeCore(input, {
+      blockedToolNames: ORDINARY_AGENT_INTERNAL_TOOL_NAMES,
+      exposeNonFinalOutput: false,
+      enforceRoundLimits: false,
+    });
+  }
+
   async execute(input: AgentTurnRuntimeInput): Promise<AgentTurnRuntimeResult> {
+    return this.executeCore(input, {
+      blockedToolNames: [],
+      exposeNonFinalOutput: true,
+      enforceRoundLimits: true,
+    });
+  }
+
+  private async executeCore(input: AgentTurnRuntimeInput, semantics: AgentTurnRuntimeSemantics): Promise<AgentTurnRuntimeResult> {
     const requestId = input.requestId ?? createId("model-request");
     const policy = normalizePolicy(input.policy);
     if (!policy.allowModel) {
@@ -114,7 +130,7 @@ export class AgentTurnRuntime {
       };
     }
 
-    if (policy.maxModelRounds <= 0) {
+    if (semantics.enforceRoundLimits && policy.maxModelRounds !== undefined && policy.maxModelRounds <= 0) {
       return {
         status: "paused",
         stoppedReason: "out_of_fuel",
@@ -135,15 +151,16 @@ export class AgentTurnRuntime {
           callerAgentId: policy.callerAgentId,
           traceId: policy.traceId,
           goalId: policy.goalId,
-          maxModelRounds: policy.maxModelRounds,
-          maxToolRounds: policy.maxToolRounds,
+          maxModelRounds: semantics.enforceRoundLimits ? policy.maxModelRounds : undefined,
+          maxToolRounds: semantics.enforceRoundLimits ? policy.maxToolRounds : undefined,
           allowedTools: policy.allowedTools,
+          blockedToolNames: semantics.blockedToolNames,
           publishToolEvent: this.options.publishToolEvent,
           abortSignal: input.abortSignal,
         },
         modelRequest
       );
-      return toAgentTurnRuntimeResult(policy, loop, modelRequest);
+      return toAgentTurnRuntimeResult(policy, loop, modelRequest, semantics);
     } catch {
       return {
         status: "failed",
@@ -157,7 +174,23 @@ export class AgentTurnRuntime {
     }
   }
 
+  async resumeAutonomous(input: AgentTurnResumeInput): Promise<AgentTurnRuntimeResult> {
+    return this.resumeCore(input, {
+      blockedToolNames: ORDINARY_AGENT_INTERNAL_TOOL_NAMES,
+      exposeNonFinalOutput: false,
+      enforceRoundLimits: false,
+    });
+  }
+
   async resume(input: AgentTurnResumeInput): Promise<AgentTurnRuntimeResult> {
+    return this.resumeCore(input, {
+      blockedToolNames: [],
+      exposeNonFinalOutput: true,
+      enforceRoundLimits: true,
+    });
+  }
+
+  private async resumeCore(input: AgentTurnResumeInput, semantics: AgentTurnRuntimeSemantics): Promise<AgentTurnRuntimeResult> {
     const policy = normalizePolicy(input.pendingApproval.policy);
     try {
       const loop = await resumeToolUseLoopFromApproval(
@@ -167,9 +200,10 @@ export class AgentTurnRuntime {
           callerAgentId: policy.callerAgentId,
           traceId: policy.traceId,
           goalId: policy.goalId,
-          maxModelRounds: policy.maxModelRounds,
-          maxToolRounds: policy.maxToolRounds,
+          maxModelRounds: semantics.enforceRoundLimits ? policy.maxModelRounds : undefined,
+          maxToolRounds: semantics.enforceRoundLimits ? policy.maxToolRounds : undefined,
           allowedTools: policy.allowedTools,
+          blockedToolNames: semantics.blockedToolNames,
           approvedConfirmationIds: input.approvedConfirmationIds,
           publishToolEvent: this.options.publishToolEvent,
           abortSignal: input.abortSignal,
@@ -177,7 +211,7 @@ export class AgentTurnRuntime {
         input.pendingApproval.modelRequest,
         input.pendingApproval.toolLoop
       );
-      return toAgentTurnRuntimeResult(policy, loop, input.pendingApproval.modelRequest);
+      return toAgentTurnRuntimeResult(policy, loop, input.pendingApproval.modelRequest, semantics);
     } catch {
       return {
         status: "failed",
@@ -191,6 +225,12 @@ export class AgentTurnRuntime {
     }
   }
 }
+
+type AgentTurnRuntimeSemantics = {
+  readonly blockedToolNames: readonly string[];
+  readonly exposeNonFinalOutput: boolean;
+  readonly enforceRoundLimits: boolean;
+};
 
 function createModelRequest(input: {
   readonly input: AgentTurnRuntimeInput;
@@ -216,24 +256,27 @@ function createModelRequest(input: {
 function toAgentTurnRuntimeResult(
   policy: AgentTurnPolicy,
   loop: ToolUseLoopResult,
-  modelRequest: ModelRequest
+  modelRequest: ModelRequest,
+  semantics: AgentTurnRuntimeSemantics
 ): AgentTurnRuntimeResult {
   const stoppedReason = mapStoppedReason(loop);
+  const status = stoppedReason === "completed" || stoppedReason === "no_tool_calls"
+    ? "completed"
+    : stoppedReason === "cancelled"
+      ? "cancelled"
+      : stoppedReason === "approval_required"
+        ? "approval_required"
+        : stoppedReason === "out_of_fuel"
+          ? "paused"
+          : "failed";
+  const shouldExposeOutput = semantics.exposeNonFinalOutput || status === "completed" || status === "failed";
   return {
-    status: stoppedReason === "completed" || stoppedReason === "no_tool_calls"
-      ? "completed"
-      : stoppedReason === "cancelled"
-        ? "cancelled"
-        : stoppedReason === "approval_required"
-          ? "approval_required"
-          : stoppedReason === "out_of_fuel"
-            ? "paused"
-            : "failed",
+    status,
     stoppedReason,
     fallback: policy.fallback,
-    modelRequestId: loop.finalOutput.requestId,
-    modelResponseId: loop.finalOutput.responseId,
-    finalOutput: loop.finalOutput,
+    modelRequestId: shouldExposeOutput ? loop.finalOutput.requestId : modelRequest.requestId,
+    modelResponseId: shouldExposeOutput ? loop.finalOutput.responseId : undefined,
+    finalOutput: shouldExposeOutput ? loop.finalOutput : undefined,
     toolCalls: loop.toolCalls,
     modelRounds: loop.modelRounds,
     toolRounds: loop.rounds,
@@ -262,10 +305,14 @@ function normalizePolicy(policy: AgentTurnPolicy): AgentTurnPolicy {
   return {
     ...policy,
     allowedTools: [...(policy.allowedTools ?? [])],
-    maxModelRounds: Math.floor(policy.maxModelRounds),
-    maxToolRounds: Math.floor(policy.maxToolRounds),
+    maxModelRounds: normalizeOptionalRoundLimit(policy.maxModelRounds),
+    maxToolRounds: normalizeOptionalRoundLimit(policy.maxToolRounds),
     budget: { ...policy.budget },
   };
+}
+
+function normalizeOptionalRoundLimit(value: number | undefined): number | undefined {
+  return value === undefined || !Number.isFinite(value) ? undefined : Math.floor(value);
 }
 
 function cloneModelMessage(message: ModelMessage): ModelMessage {
@@ -308,3 +355,5 @@ const NO_TOOL_BROKER: ToolExecutionBroker = {
     return 0;
   },
 };
+
+const ORDINARY_AGENT_INTERNAL_TOOL_NAMES = ["finish_task"];

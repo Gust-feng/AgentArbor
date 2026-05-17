@@ -5,6 +5,8 @@ import type { TaskSoil } from "../../domain/soil/index.js";
 import type { DesktopAgentConversationMessage } from "../desktop-agent-session.js";
 import type { DesktopAgentSkillContext } from "../desktop-agent-prompts.js";
 import { createBasicAgentContextLedger } from "./context-ledger.js";
+import type { BasicAgentConversationSummary } from "./conversation-compaction.js";
+import type { BasicAgentTokenCounter } from "./token-counter.js";
 
 export type BasicAgentContextSourceKind =
   | "system"
@@ -28,11 +30,13 @@ export type BasicAgentContextItem = {
 
 export type BasicAgentContextBudget = {
   readonly maxMessages: number;
+  readonly maxInputTokens: number;
+  readonly usedInputTokens: number;
+  readonly tokenCountSource: string;
   readonly maxChars: number;
   readonly usedChars: number;
   readonly inputTokenBudget?: number;
   readonly reservedOutputTokens?: number;
-  readonly estimatedInputTokens?: number;
   readonly budgetSource: "default" | "model_capabilities" | "override";
 };
 
@@ -56,10 +60,13 @@ export type BuildBasicAgentContextPackInput = {
   readonly goal: string;
   readonly taskSoil: TaskSoil;
   readonly conversationHistory: readonly DesktopAgentConversationMessage[];
+  readonly conversationSummary?: BasicAgentConversationSummary;
   readonly skillContexts?: readonly DesktopAgentSkillContext[];
   readonly modelCapabilities?: ModelCapabilities;
+  readonly tokenCounter?: BasicAgentTokenCounter;
   readonly maxMessages?: number;
   readonly maxChars?: number;
+  readonly maxInputTokens?: number;
 };
 
 export function buildBasicAgentContextPack(input: BuildBasicAgentContextPackInput): BasicAgentContextPack {
@@ -68,10 +75,13 @@ export function buildBasicAgentContextPack(input: BuildBasicAgentContextPackInpu
     goal: input.goal,
     taskSoil: input.taskSoil,
     conversationHistory: input.conversationHistory,
+    conversationSummary: input.conversationSummary,
     skillContexts: input.skillContexts,
     modelCapabilities: input.modelCapabilities,
+    tokenCounter: input.tokenCounter,
     maxMessages: input.maxMessages,
     maxChars: input.maxChars,
+    maxInputTokens: input.maxInputTokens,
   });
   const selected = ledger.items;
   const messages = selected.map(contextMessageForItem).filter((message): message is ModelMessage => message !== undefined);

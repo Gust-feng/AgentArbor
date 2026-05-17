@@ -104,7 +104,6 @@ export function ChatInputBar({
 export function Composer(props: {
   readonly value: string;
   readonly onChange: (value: string) => void;
-  readonly runMode: "agent" | "deep";
   readonly attachments: readonly ContextAttachment[];
   readonly attachmentKind: ContextAttachment["kind"];
   readonly attachmentValue: string;
@@ -115,7 +114,7 @@ export function Composer(props: {
   readonly busy: boolean;
   readonly contextBusy?: boolean;
   readonly run?: BasicAgentRun;
-  readonly onSubmit: (mode: "agent" | "deep") => void;
+  readonly onSubmit: () => void;
   readonly onCancel: () => void;
 }): React.ReactElement {
   const [focused, setFocused] = useState(false);
@@ -161,7 +160,7 @@ export function Composer(props: {
               onKeyDown={(event) => {
                 if (event.key === "Enter" && !event.shiftKey) {
                   event.preventDefault();
-                  props.onSubmit(props.runMode);
+                  props.onSubmit();
                 }
               }}
               placeholder="随便问点什么…"
@@ -173,8 +172,7 @@ export function Composer(props: {
             <div className="flex items-center gap-1 min-w-0">
               <button className="flex items-center gap-2 h-8 px-3.5 rounded-xl border border-[var(--border)] text-xs text-[var(--muted)] hover:bg-[var(--surface-subtle)] transition-[background-color,border-color,color] duration-[var(--motion-fast-duration)] ease-[var(--motion-ease-standard)]">
                 <div className="w-1.5 h-1.5 rounded-full bg-[var(--status-success)] shrink-0" />
-                <span>{props.runMode === "deep" ? "深入处理" : "普通任务"}</span>
-                <ChevronDown size={10} />
+                <span>普通任务</span>
               </button>
               <details className="relative">
                 <summary className="list-none w-8 h-8 rounded-xl flex items-center justify-center text-[var(--muted)] hover:bg-[var(--surface-subtle)] transition-[background-color,color] duration-[var(--motion-fast-duration)] ease-[var(--motion-ease-standard)] cursor-pointer">
@@ -213,7 +211,7 @@ export function Composer(props: {
               {running && <button type="button" className="h-8 px-3 rounded-lg text-xs text-[var(--muted)] hover:bg-[var(--surface-subtle)] transition-[background-color,color] duration-[var(--motion-fast-duration)] ease-[var(--motion-ease-standard)]" onClick={props.onCancel}>取消</button>}
               <button
                 type="button"
-                onClick={() => props.onSubmit(props.runMode)}
+                onClick={() => props.onSubmit()}
                 disabled={props.busy || props.value.trim().length === 0}
                 className="w-9 h-9 rounded-xl bg-[var(--accent-strong)] text-white flex items-center justify-center hover:bg-[var(--accent-hover)] active:bg-[var(--accent-active)] transition-[background-color,opacity,box-shadow] duration-[var(--motion-fast-duration)] ease-[var(--motion-ease-standard)] shadow-sm disabled:opacity-40"
                 aria-label="发送"

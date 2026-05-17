@@ -6,7 +6,7 @@ const INTERNAL_SECTION_HEADING_PATTERN =
 
 const RAW_INTERNAL_LINE_PATTERNS = [
   /^\s*[-*]?\s*(?:requestId|responseId)\s*[:：=]/i,
-  /\bsanitizedMessages\b|\braw prompt\b|\bhidden reasoning\b|\braw provider response\b|\braw tool output\b/i,
+  /\bsanitizedMessages\b|\braw prompt\b|\bhidden reasoning\b|\braw provider response\b|\braw tool output\b|\binternal loop\b/i,
 ] as const;
 
 const INTERNAL_ID_PATTERN =

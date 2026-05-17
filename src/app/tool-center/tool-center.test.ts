@@ -55,6 +55,18 @@ test("ToolCenter enforces maxCallsPerRun", async () => {
   assert.equal(center.getCallCount(), 0);
 });
 
+test("ToolCenter default does not add a small tool-call budget", async () => {
+  const center = new ToolCenter();
+  center.register(testTool("echo", async () => ({ ok: true })));
+  const context = { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" };
+
+  for (let index = 0; index < 25; index += 1) {
+    const result = await center.execute({ callId: `call-${index}`, toolName: "echo", input: {} }, context);
+    assert.equal(result.status, "completed");
+  }
+  assert.equal(center.getCallCount(), 25);
+});
+
 test("ToolCenter requires confirmation for Windows write and execute operations", async () => {
   let writes = 0;
   let executes = 0;

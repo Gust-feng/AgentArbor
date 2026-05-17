@@ -156,9 +156,11 @@ function contextBudgetEntries(
       kind: "budget",
       title: "上下文预算",
       summary: [
+        budget.maxInputTokens === undefined ? undefined : `maxInputTokens=${budget.maxInputTokens}`,
+        budget.usedInputTokens === undefined ? undefined : `usedInputTokens=${budget.usedInputTokens}`,
+        budget.tokenCountSource === undefined ? undefined : `tokenCountSource=${budget.tokenCountSource}`,
         budget.maxChars === undefined ? undefined : `maxChars=${budget.maxChars}`,
         budget.usedChars === undefined ? undefined : `usedChars=${budget.usedChars}`,
-        budget.estimatedInputTokens === undefined ? undefined : `estimatedInputTokens=${budget.estimatedInputTokens}`,
         budget.budgetSource === undefined ? undefined : `source=${budget.budgetSource}`,
       ].filter(isString).join("；") || "本轮没有记录上下文预算。",
       refs: [],

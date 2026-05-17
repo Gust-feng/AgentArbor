@@ -619,7 +619,7 @@ export function createPanelRunStreamEvents(input: {
       type: "run.blocked",
       createdAt: input.updatedAt,
       agentLabel: "AgentArbor",
-      summary: friendlyUserFacingFailureText(input.error?.message ?? "运行已暂停，等待用户确认或补充指导。"),
+      summary: blockedRunSummary(input.error),
       status: "blocked",
       sourceRefs: [],
       modelCallRefs: [],
@@ -675,6 +675,13 @@ export function createPanelRunStreamEvents(input: {
   }
 
   return events;
+}
+
+function blockedRunSummary(error: { readonly code: string; readonly message: string } | undefined): string {
+  if (error?.code === "out_of_fuel") {
+    return "运行被异常保护中断，任务没有完成。你可以补充要求或重新发起，我会继续按模型判断处理。";
+  }
+  return friendlyUserFacingFailureText(error?.message ?? "运行中断，等待用户确认或补充指导。");
 }
 
 function runStartedSummary(
@@ -745,6 +752,17 @@ function appendStreamEventsForEvent(input: {
   }
 
   if (input.entry.type === "model.completed") {
+    if (stringOrUndefined(payload.finishReason) === "tool_call") {
+      input.push({
+        ...base,
+        eventId: `${input.runId}:event:${input.entry.sequence}:agent.note.completed`,
+        type: "agent.note.completed",
+        agentLabel: "助手",
+        summary: "助手已选择使用工具，工具结果会作为安全摘要进入后续处理。",
+        status: "completed",
+      });
+      return;
+    }
     const text = visibleOutputText(payload.visibleOutput);
     const chunks = chunkText(text, 90);
     if (chunks.length === 0) {
@@ -1399,7 +1417,9 @@ function latestDirectAnswerPayload(eventEntries: readonly EventLogEntry[]): { re
     if (
       visibleOutput?.contractId !== "work_session.direct_answer.v1" &&
       visibleOutput?.contractId !== "desktop.agent_response.v1" &&
-      visibleOutput?.contractId !== "desktop.chat_response.v1"
+      visibleOutput?.contractId !== "desktop.agent.answer.v1" &&
+      visibleOutput?.contractId !== "desktop.chat_response.v1" &&
+      visibleOutput?.contractId !== "desktop.chat.answer.v1"
     ) {
       continue;
     }
@@ -2017,7 +2037,7 @@ function waitingPointFor(status: PanelRunStatus, lastEventType: ArborMessageType
     return "运行已取消。";
   }
   if (status === "blocked") {
-    return "运行已暂停，等待用户确认或补充指导。";
+    return "运行中断，等待用户确认或补充指导。";
   }
   if (status === "failed") {
     return "运行失败，查看错误摘要。";

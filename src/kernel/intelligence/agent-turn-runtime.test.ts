@@ -123,6 +123,25 @@ test("AgentTurnRuntime exposes allowed external tools without finish_task", asyn
   assert.deepEqual(channel.requests[0]?.tools?.map((tool) => tool.name), ["web_search"]);
 });
 
+test("AgentTurnRuntime executeAutonomous hides internal completion tools from ordinary model-visible tools", async () => {
+  const channel = new SequenceIntelligenceChannel([
+    textResponse("model-request-test", "Plain text is the natural stop signal."),
+  ]);
+  const runtime = new AgentTurnRuntime({
+    intelligenceChannel: channel,
+    toolCenter: new PermissionAwareToolBroker(["web_search", "finish_task"]),
+  });
+
+  const result = await runtime.executeAutonomous(createTurnInput({
+    allowedTools: ["web_search", "finish_task"],
+    maxModelRounds: 1,
+  }));
+
+  assert.equal(result.status, "completed");
+  assert.equal(result.stoppedReason, "no_tool_calls");
+  assert.deepEqual(channel.requests[0]?.tools?.map((tool) => tool.name), ["web_search"]);
+});
+
 test("AgentTurnRuntime completes after a tool round when the model stops calling tools", async () => {
   const channel = new SequenceIntelligenceChannel([
     toolCallResponse("model-request-test", "call-search", "web_search"),
@@ -147,6 +166,29 @@ test("AgentTurnRuntime completes after a tool round when the model stops calling
   assert.equal(channel.requests[1]?.sanitizedMessages.some((message) => message.role === "tool"), true);
 });
 
+test("AgentTurnRuntime executeAutonomous returns natural provider-stop after tool results", async () => {
+  const channel = new SequenceIntelligenceChannel([
+    toolCallResponse("model-request-test", "call-search", "web_search"),
+    textResponse("model-request-final", "Final answer after tool result."),
+  ]);
+  const broker = new PermissionAwareToolBroker(["web_search"]);
+  const runtime = new AgentTurnRuntime({
+    intelligenceChannel: channel,
+    toolCenter: broker,
+  });
+
+  const result = await runtime.executeAutonomous(createTurnInput({
+    allowedTools: ["web_search"],
+    maxModelRounds: 3,
+  }));
+
+  assert.equal(result.status, "completed");
+  assert.equal(result.stoppedReason, "completed");
+  assert.equal(result.finalOutput?.textOutput, "Final answer after tool result.");
+  assert.equal(result.toolCalls[0]?.status, "completed");
+  assert.equal(channel.requests[1]?.sanitizedMessages.at(-1)?.role, "tool");
+});
+
 test("AgentTurnRuntime pauses out_of_fuel when budgets end before provider stop", async () => {
   const channel = new SequenceIntelligenceChannel([
     toolCallResponse("model-request-test", "call-search", "web_search"),
@@ -166,6 +208,30 @@ test("AgentTurnRuntime pauses out_of_fuel when budgets end before provider stop"
   assert.equal(result.stoppedReason, "out_of_fuel");
   assert.equal(result.toolCalls.length, 1);
   assert.equal(channel.requests.length, 1);
+});
+
+test("AgentTurnRuntime executeAutonomous ignores engineering round limits and waits for provider stop", async () => {
+  const channel = new SequenceIntelligenceChannel([
+    toolCallResponse("model-request-test", "call-search", "web_search"),
+    toolCallResponse("model-request-next", "call-search-next", "web_search"),
+    textResponse("model-request-final", "Final answer after the model stops using tools."),
+  ]);
+  const runtime = new AgentTurnRuntime({
+    intelligenceChannel: channel,
+    toolCenter: new PermissionAwareToolBroker(["web_search"]),
+  });
+
+  const result = await runtime.executeAutonomous(createTurnInput({
+    allowedTools: ["web_search"],
+    maxModelRounds: 1,
+    maxToolRounds: 2,
+  }));
+
+  assert.equal(result.status, "completed");
+  assert.equal(result.stoppedReason, "completed");
+  assert.equal(result.finalOutput?.textOutput, "Final answer after the model stops using tools.");
+  assert.equal(result.toolCalls.length, 2);
+  assert.equal(channel.requests.length, 3);
 });
 
 test("AgentTurnRuntime returns approval_required and resumes with a matching confirmation", async () => {
@@ -200,6 +266,36 @@ test("AgentTurnRuntime returns approval_required and resumes with a matching con
   assert.equal(resumed.status, "completed");
   assert.equal(resumed.stoppedReason, "completed");
   assert.equal(resumed.toolCalls[0]?.status, "completed");
+  assert.equal(broker.executedCount, 1);
+});
+
+test("AgentTurnRuntime resumeAutonomous requires matching confirmation and then returns provider-stop output", async () => {
+  const channel = new SequenceIntelligenceChannel([
+    toolCallResponse("model-request-test", "call-write", "write_file"),
+    textResponse("model-request-final", "Final answer after approved write."),
+  ]);
+  const broker = new PermissionAwareToolBroker(["write_file"], { write_file: "read-write" });
+  const runtime = new AgentTurnRuntime({
+    intelligenceChannel: channel,
+    toolCenter: broker,
+  });
+
+  const paused = await runtime.executeAutonomous(createTurnInput({
+    allowedTools: ["write_file"],
+    maxModelRounds: 3,
+  }));
+
+  assert.equal(paused.status, "approval_required");
+  assert.equal(paused.finalOutput, undefined);
+
+  const resumed = await runtime.resumeAutonomous({
+    pendingApproval: paused.pendingApproval!,
+    approvedConfirmationIds: ["confirmation-call-write"],
+  });
+
+  assert.equal(resumed.status, "completed");
+  assert.equal(resumed.stoppedReason, "completed");
+  assert.equal(resumed.finalOutput?.textOutput, "Final answer after approved write.");
   assert.equal(broker.executedCount, 1);
 });
 

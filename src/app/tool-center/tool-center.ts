@@ -27,7 +27,7 @@ export type ToolCenterOptions = {
   readonly platform?: NodeJS.Platform;
 };
 
-const DEFAULT_MAX_CALLS_PER_RUN = 20;
+const DEFAULT_MAX_CALLS_PER_RUN = Number.MAX_SAFE_INTEGER;
 
 export class ToolCenter {
   private readonly tools = new Map<string, ToolExecutor>();

@@ -31,6 +31,7 @@ export type ToolUseLoopOptions = {
   readonly maxModelRounds?: number;
   readonly maxToolRounds?: number;
   readonly allowedTools?: readonly string[];
+  readonly blockedToolNames?: readonly string[];
   readonly approvedConfirmationIds?: readonly string[];
   readonly publishToolEvent?: (message: ArborMessage) => void;
   readonly abortSignal?: AbortSignal;
@@ -230,6 +231,17 @@ async function executeToolCallSafely(
   request: ToolCallRequest,
   context: ToolExecutionContext
 ): Promise<ToolCallResult> {
+  if (isBlockedToolName(options, request.toolName)) {
+    return {
+      callId: request.callId,
+      toolName: request.toolName,
+      input: request.input,
+      output: undefined,
+      status: "failed",
+      error: `Tool ${request.toolName} is not available in this loop.`,
+      durationMs: 0,
+    };
+  }
   try {
     return await options.toolCenter.execute(request, context, {
       callerAgentId: options.callerAgentId,
@@ -258,11 +270,12 @@ async function continueToolUseLoopAfterToolResults(input: {
   readonly rounds: number;
   readonly requestId: string;
 }): Promise<ToolUseLoopResult> {
-  const maxToolRounds = Math.max(0, Math.floor(input.options.maxToolRounds ?? 5));
-  const maxModelRounds = Math.max(1, Math.floor(input.options.maxModelRounds ?? Number.MAX_SAFE_INTEGER));
+  const maxToolRounds = normalizeOptionalRoundLimit(input.options.maxToolRounds);
+  const maxModelRounds = normalizeOptionalRoundLimit(input.options.maxModelRounds);
   const toolDefinitions = input.options.toolCenter
     .list()
-    .filter((tool) => input.options.allowedTools === undefined || input.options.allowedTools.includes(tool.name));
+    .filter((tool) => input.options.allowedTools === undefined || input.options.allowedTools.includes(tool.name))
+    .filter((tool) => !isBlockedToolName(input.options, tool.name));
   let messages = cloneMessages(input.messages);
   const toolCalls: ToolCallResult[] = [...input.toolCalls];
   let modelRounds = input.modelRounds;
@@ -273,7 +286,7 @@ async function continueToolUseLoopAfterToolResults(input: {
     if (input.options.abortSignal?.aborted === true) {
       return abortedLoopResult(input.initialRequest, toolCalls, modelRounds, rounds);
     }
-    if (modelRounds >= maxModelRounds) {
+    if (maxModelRounds !== undefined && modelRounds >= maxModelRounds) {
       return outOfFuelLoopResult(input.initialRequest, toolCalls, modelRounds, rounds);
     }
 
@@ -303,7 +316,7 @@ async function continueToolUseLoopAfterToolResults(input: {
       };
     }
 
-    if (rounds >= maxToolRounds) {
+    if (maxToolRounds !== undefined && rounds >= maxToolRounds) {
       return outOfFuelLoopResult(input.initialRequest, toolCalls, modelRounds, rounds);
     }
 
@@ -342,14 +355,25 @@ async function continueToolUseLoopAfterToolResults(input: {
     ];
     requestId = createId("model-request");
 
-    if (modelRounds >= maxModelRounds) {
+    if (maxModelRounds !== undefined && modelRounds >= maxModelRounds) {
       return outOfFuelLoopResult(input.initialRequest, toolCalls, modelRounds, rounds);
     }
   }
 }
 
+function normalizeOptionalRoundLimit(value: number | undefined): number | undefined {
+  if (value === undefined || !Number.isFinite(value)) {
+    return undefined;
+  }
+  return Math.max(0, Math.floor(value));
+}
+
 function isReadOnlyToolCall(request: ToolCallRequest, definitions: readonly ToolDefinition[]): boolean {
   return definitions.find((definition) => definition.name === request.toolName)?.metadata?.operationType === "read-only";
+}
+
+function isBlockedToolName(options: ToolUseLoopOptions, toolName: string): boolean {
+  return options.blockedToolNames?.includes(toolName) === true;
 }
 
 function outOfFuelLoopResult(

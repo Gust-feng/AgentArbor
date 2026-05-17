@@ -37,6 +37,7 @@ export function ConversationView(props: {
     pending === undefined &&
     deliverable === undefined &&
     isActiveRunStatus(props.run.status);
+  const blockedStatus = blockedStatusMessage(props.run, props.workSession, props.detail);
 
   if (turns.length === 0 && props.run === undefined && props.error === undefined) {
     return <EmptyCommandCenter attachments={props.attachments} onSelectSuggestion={props.onSelectSuggestion} />;
@@ -49,6 +50,7 @@ export function ConversationView(props: {
         {shouldAppendAnswer && <AssistantPlainAnswer answer={answer} />}
         {pending !== undefined && <ConfirmationCard confirmation={pending} onDecision={props.onDecision} busy={props.confirmationBusy} />}
         {deliverable !== undefined && <DeliverableCard deliverable={deliverable} />}
+        {blockedStatus !== undefined && <AssistantNoticeCard title={blockedStatus.title} message={blockedStatus.message} tone={blockedStatus.tone} />}
         {showStatusBubble && <AssistantStatusBubble run={props.run} workSession={props.workSession} />}
         {props.error !== undefined && (
           <div className="flex flex-col gap-3">
@@ -297,6 +299,23 @@ function AssistantPlainAnswer({ answer }: { readonly answer: string }): React.Re
   );
 }
 
+function AssistantNoticeCard(props: {
+  readonly title: string;
+  readonly message: string;
+  readonly tone: "warning" | "error";
+}): React.ReactElement {
+  const border = props.tone === "error" ? "border-[#FECACA] bg-[#FEF2F2]" : "border-[#FDE68A] bg-[#FFFBEB]";
+  return (
+    <article className={`rounded-xl border ${border} px-4 py-4 flex flex-col gap-2`}>
+      <span className="text-xs text-[#9A3412]">运行状态</span>
+      <h2 className="text-[#111827] leading-tight">{props.title}</h2>
+      <div className="text-sm text-[#374151]">
+        <RichText text={props.message} />
+      </div>
+    </article>
+  );
+}
+
 function AssistantAvatar(): React.ReactElement {
   return (
     <div className="w-7 h-7 rounded-xl bg-[#111827] flex items-center justify-center shrink-0 mt-0.5 shadow-sm text-white/70">
@@ -418,6 +437,35 @@ function ConfirmationCard(props: {
 
 function isActiveRunStatus(status: BasicAgentRun["status"]): boolean {
   return status === "queued" || status === "planning" || status === "running";
+}
+
+function blockedStatusMessage(
+  run: BasicAgentRun | undefined,
+  workSession: DesktopWorkSession | undefined,
+  detail: DesktopRunDetail | undefined
+): { readonly title: string; readonly message: string; readonly tone: "warning" | "error" } | undefined {
+  if (run?.status === "blocked" || run?.status === "paused") {
+    return {
+      title: workSession?.headline ?? "运行中断",
+      message: visibleBlockedMessage(detail?.error?.code, detail?.error?.message) ?? workSession?.currentAction ?? "运行被异常保护中断，任务没有完成。你可以补充要求或重新发起。",
+      tone: "warning",
+    };
+  }
+  if (run?.status === "failed") {
+    return {
+      title: "这次没有完成",
+      message: detail?.error?.message ?? workSession?.currentAction ?? "运行失败。你可以补充材料或重新发起。",
+      tone: "error",
+    };
+  }
+  return undefined;
+}
+
+function visibleBlockedMessage(code: string | undefined, message: string | undefined): string | undefined {
+  if (code === "out_of_fuel") {
+    return "运行被异常保护中断，任务没有完成。你可以补充要求或重新发起，我会继续按模型判断处理。";
+  }
+  return message;
 }
 
 function confirmationAction(confirmation: ConfirmationProjection): string {

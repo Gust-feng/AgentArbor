@@ -762,20 +762,22 @@ test("desktop run stream carries safe tool detail through runtime persistence", 
   }
 });
 
-test("desktop openai-compatible ordinary agent pauses as blocked when autonomous fuel is exhausted", async () => {
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-desktop-agent-fuel-"));
-  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-desktop-agent-fuel-workspace-"));
-  const secret = "sk-desktop-agent-fuel-secret";
-  for (const name of ["fuel-1.md", "fuel-2.md", "fuel-3.md", "fuel-4.md"]) {
+test("desktop openai-compatible ordinary agent keeps working until the model stops calling tools", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-desktop-agent-continuous-"));
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-desktop-agent-continuous-workspace-"));
+  const secret = "sk-desktop-agent-continuous-secret";
+  for (const name of ["source-1.md", "source-2.md", "source-3.md", "source-4.md"]) {
     await fs.writeFile(path.join(workspace, name), `content for ${name}`, "utf8");
   }
   let providerCalls = 0;
   const providerFetch: PanelProviderFetch = async () => {
     providerCalls += 1;
-    return createOpenAiReadFileToolCallResponse(
-      `fuel-${providerCalls}.md`,
-      `call-panel-read-file-${providerCalls}`
-    );
+    return providerCalls <= 4
+      ? createOpenAiReadFileToolCallResponse(
+          `source-${providerCalls}.md`,
+          `call-panel-read-file-${providerCalls}`
+        )
+      : createOpenAiTextResponse("desktop-continuous-model", "已连续读取材料，并由模型主动停止工具调用。");
   };
   const server = await startLocalPanelServer({ port: 0, configDirectory: directory, providerFetch });
   try {
@@ -794,26 +796,24 @@ test("desktop openai-compatible ordinary agent pauses as blocked when autonomous
 
     const start = await requestJson(server.url, "/api/desktop/runs", {
       method: "POST",
-      body: { goal: "持续读取材料直到燃料耗尽", aiMode: "openai-compatible", runMode: "agent" },
+      body: { goal: "持续读取材料，直到你认为可以回答", aiMode: "openai-compatible", runMode: "agent" },
     });
-    const blocked = await waitForRun(
+    const completed = await waitForRun(
       server.url,
       start.body.runId,
-      (body) => body.status === "blocked",
+      (body) => body.status === "completed",
       4_000,
       "/api/desktop/runs"
     );
-    const eventTypes = blocked.body.transcript.events.map((event: { type: string }) => event.type);
+    const eventTypes = completed.body.transcript.events.map((event: { type: string }) => event.type);
 
-    assert.equal(providerCalls, 4);
-    assert.equal(blocked.body.canvas.kind, "desktop_agent_canvas");
-    assert.equal(blocked.body.canvas.agent.status, "paused");
-    assert.equal(blocked.body.canvas.agent.answer, undefined);
-    assert.equal(String(blocked.body.error?.message ?? "").includes("任务没有完成"), true);
-    assert.equal(String(blocked.body.error?.message ?? "").includes("autonomous loop fuel"), false);
-    assert.equal(eventTypes.includes("run.blocked"), true);
-    assert.equal(eventTypes.includes("final.result"), false);
-    assertSafePanelJsonText(blocked.text);
+    assert.equal(providerCalls, 5);
+    assert.equal(completed.body.canvas.kind, "desktop_agent_canvas");
+    assert.equal(completed.body.canvas.agent.status, "completed");
+    assert.equal(JSON.stringify(completed.body.canvas.agent.answer).includes("模型主动停止工具调用"), true);
+    assert.equal(eventTypes.includes("run.blocked"), false);
+    assert.equal(eventTypes.includes("final.result"), true);
+    assertSafePanelJsonText(completed.text);
   } finally {
     await server.close();
     await fs.rm(directory, { recursive: true, force: true });
@@ -1091,6 +1091,73 @@ test("conversation API keeps follow-up messages in the same conversation", async
   }
 });
 
+test("conversation API rolls back completed turns before continuing the same conversation", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-conversation-rollback-"));
+  const requests: Array<{ messages?: readonly { role?: string; content?: string }[] }> = [];
+  let callIndex = 0;
+  const providerFetch: PanelProviderFetch = async (_url, init) => {
+    callIndex += 1;
+    const body = JSON.parse(init.body) as { messages?: readonly { role?: string; content?: string }[] };
+    requests.push(body);
+    return createOpenAiTextResponse("conversation-rollback-model", `第 ${callIndex} 轮安全回答。`);
+  };
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory, providerFetch });
+  try {
+    await requestJson(server.url, "/api/config/model-provider", {
+      method: "POST",
+      body: {
+        baseUrl: "https://provider.example",
+        model: "conversation-rollback-model",
+        apiKey: "sk-conversation-rollback-secret",
+      },
+    });
+    const first = await requestJson(server.url, "/api/conversations", {
+      method: "POST",
+      body: { goal: "第一轮", aiMode: "openai-compatible" },
+    });
+    await waitForRun(server.url, first.body.run.runId, (body) => body.status === "completed", 4_000, "/api/desktop/runs");
+    const conversationId = first.body.conversation.conversationId;
+
+    const second = await requestJson(server.url, `/api/conversations/${encodeURIComponent(conversationId)}/messages`, {
+      method: "POST",
+      body: { goal: "第二轮", aiMode: "openai-compatible" },
+    });
+    await waitForRun(server.url, second.body.run.runId, (body) => body.status === "completed", 4_000, "/api/desktop/runs");
+
+    const third = await requestJson(server.url, `/api/conversations/${encodeURIComponent(conversationId)}/messages`, {
+      method: "POST",
+      body: { goal: "第三轮需要回退", aiMode: "openai-compatible" },
+    });
+    await waitForRun(server.url, third.body.run.runId, (body) => body.status === "completed", 4_000, "/api/desktop/runs");
+
+    const rolledBack = await requestJson(server.url, `/api/conversations/${encodeURIComponent(conversationId)}/rollback`, {
+      method: "POST",
+      body: { stepsBack: 1 },
+    });
+    assert.equal(rolledBack.status, 200);
+    assert.equal(rolledBack.body.conversation.turns.length, 4);
+    assert.equal(JSON.stringify(rolledBack.body.conversation).includes("第三轮需要回退"), false);
+
+    const fourth = await requestJson(server.url, `/api/conversations/${encodeURIComponent(conversationId)}/messages`, {
+      method: "POST",
+      body: { goal: "回退后继续", aiMode: "openai-compatible" },
+    });
+    await waitForRun(server.url, fourth.body.run.runId, (body) => body.status === "completed", 4_000, "/api/desktop/runs");
+    const after = await requestJson(server.url, `/api/conversations/${encodeURIComponent(conversationId)}`);
+    const latestMessages = requests.at(-1)?.messages ?? [];
+    const latestText = JSON.stringify(latestMessages);
+
+    assert.equal(after.body.conversation.turns.length, 6);
+    assert.equal(latestText.includes("第一轮"), true);
+    assert.equal(latestText.includes("第二轮"), true);
+    assert.equal(latestText.includes("第三轮需要回退"), false);
+    assert.equal(latestText.includes("Current user message: 回退后继续"), true);
+  } finally {
+    await server.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("conversation API sends follow-up history as role-separated model messages", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-conversation-structured-history-"));
   const secret = "sk-conversation-structured-history-secret";
@@ -1344,6 +1411,10 @@ test("conversation restore trims interrupted tail before appending the next mess
     const visibleText = JSON.stringify(conversation.body.conversation);
 
     assert.equal(second.status, 202);
+    assert.equal(second.body.conversation.turns.length, 4);
+    assert.equal(second.body.conversation.turns[2].content, "恢复后继续");
+    assert.equal(JSON.stringify(second.body.conversation).includes("断开的用户消息"), false);
+    assert.equal(JSON.stringify(second.body.conversation).includes("断开的助手回复"), false);
     assert.equal(conversation.body.conversation.activeRunId, undefined);
     assert.equal(conversation.body.conversation.queuedRunCount, 0);
     assert.equal(conversation.body.conversation.turns.length, 4);
@@ -3297,6 +3368,9 @@ function createStubOpenAiResponse(
     ok: true,
     status: 200,
     json: async () => ({
+      id: "chatcmpl-test-text",
+      object: "chat.completion",
+      created: 1_776_000_000,
       model,
       choices: [
         {
@@ -3339,6 +3413,9 @@ function createStubOpenAiAggregationResponse(
     ok: true,
     status: 200,
     json: async () => ({
+      id: "chatcmpl-test-text",
+      object: "chat.completion",
+      created: 1_776_000_000,
       model,
       choices: [
         {
@@ -3366,10 +3443,7 @@ function createStubOpenAiAggregationResponse(
 }
 
 function createOpenAiSearchToolCallResponse(): Awaited<ReturnType<PanelProviderFetch>> {
-  return {
-    ok: true,
-    status: 200,
-    json: async () => ({
+  return createOpenAiFixtureResponse({
       model: "configured-tools-model",
       choices: [
         {
@@ -3393,18 +3467,14 @@ function createOpenAiSearchToolCallResponse(): Awaited<ReturnType<PanelProviderF
           },
         },
       ],
-    }),
-  };
+    });
 }
 
 function createOpenAiReadFileToolCallResponse(
   filePath = "README.md",
   callId = "call-panel-read-file"
 ): Awaited<ReturnType<PanelProviderFetch>> {
-  return {
-    ok: true,
-    status: 200,
-    json: async () => ({
+  return createOpenAiFixtureResponse({
       model: "desktop-tool-detail-model",
       choices: [
         {
@@ -3425,15 +3495,11 @@ function createOpenAiReadFileToolCallResponse(
           },
         },
       ],
-    }),
-  };
+    });
 }
 
 function createOpenAiWriteFileToolCallResponse(filePath: string, content: string): Awaited<ReturnType<PanelProviderFetch>> {
-  return {
-    ok: true,
-    status: 200,
-    json: async () => ({
+  return createOpenAiFixtureResponse({
       model: "basic-confirmation-model",
       choices: [
         {
@@ -3454,15 +3520,11 @@ function createOpenAiWriteFileToolCallResponse(filePath: string, content: string
           },
         },
       ],
-    }),
-  };
+    });
 }
 
 function createOpenAiJsonResponse(model: string, output: unknown): Awaited<ReturnType<PanelProviderFetch>> {
-  return {
-    ok: true,
-    status: 200,
-    json: async () => ({
+  return createOpenAiFixtureResponse({
       model,
       choices: [
         {
@@ -3478,15 +3540,14 @@ function createOpenAiJsonResponse(model: string, output: unknown): Awaited<Retur
         completion_tokens: 12,
         total_tokens: 22,
       },
-    }),
-  };
+    });
 }
 
 function createOpenAiTextResponse(model: string, text: string): Awaited<ReturnType<PanelProviderFetch>> {
-  return {
-    ok: true,
-    status: 200,
-    json: async () => ({
+  return createOpenAiFixtureResponse({
+      id: "chatcmpl-test-text",
+      object: "chat.completion",
+      created: 1_776_000_000,
       model,
       choices: [
         {
@@ -3502,8 +3563,7 @@ function createOpenAiTextResponse(model: string, text: string): Awaited<ReturnTy
         completion_tokens: 12,
         total_tokens: 22,
       },
-    }),
-  };
+    });
 }
 
 function createOpenAiStreamTextResponse(
@@ -3531,10 +3591,7 @@ function createOpenAiStreamTextResponse(
 }
 
 function createInvalidOpenAiResponse(model: string): Awaited<ReturnType<PanelProviderFetch>> {
-  return {
-    ok: true,
-    status: 200,
-    json: async () => ({
+  return createOpenAiFixtureResponse({
       model,
       choices: [
         {
@@ -3548,8 +3605,61 @@ function createInvalidOpenAiResponse(model: string): Awaited<ReturnType<PanelPro
           },
         },
       ],
-    }),
+    });
+}
+
+function createOpenAiFixtureResponse(payload: Record<string, unknown>): Awaited<ReturnType<PanelProviderFetch>> {
+  return {
+    ok: true,
+    status: 200,
+    body: sseChunks(openAiChatCompletionChunks(payload)),
+    json: async () => payload,
   };
+}
+
+function openAiChatCompletionChunks(payload: Record<string, unknown>): readonly unknown[] {
+  const choices = Array.isArray(payload.choices) ? payload.choices : [];
+  return choices.map((choice, index) => {
+    const choiceRecord = asTestRecord(choice);
+    const message = asTestRecord(choiceRecord.message);
+    const content = typeof message.content === "string" ? message.content : "";
+    const delta: Record<string, unknown> = { role: "assistant" };
+    if (content.length > 0) {
+      delta.content = content;
+    }
+    if (Array.isArray(message.tool_calls)) {
+      delta.tool_calls = message.tool_calls.map((toolCall, toolCallIndex) => {
+        const record = asTestRecord(toolCall);
+        const fn = asTestRecord(record.function);
+        return {
+          index: toolCallIndex,
+          id: record.id,
+          type: record.type ?? "function",
+          function: {
+            name: fn.name,
+            arguments: fn.arguments ?? "",
+          },
+        };
+      });
+    }
+    return {
+      id: payload.id ?? `chatcmpl-test-${index}`,
+      object: "chat.completion.chunk",
+      created: payload.created ?? 1_776_000_000,
+      model: payload.model,
+      choices: [
+        {
+          index,
+          delta,
+          finish_reason: choiceRecord.finish_reason ?? null,
+        },
+      ],
+    };
+  });
+}
+
+function asTestRecord(value: unknown): Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
 async function* sseChunks(chunks: readonly unknown[]): AsyncGenerator<string> {

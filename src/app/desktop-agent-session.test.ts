@@ -118,7 +118,7 @@ test("Desktop Agent Session projects tool failures without leaking raw output", 
 });
 
 
-test("Desktop Agent Session pauses when tool fuel is exhausted instead of inventing a final answer", async () => {
+test("Desktop Agent Session keeps returning tool results until the model stops itself", async () => {
   const toolCenter = new MixedToolCenter();
   const channel = new MixedToolLimitChannel();
   const result = await runDesktopAgentSession("展示下你的能力", {
@@ -127,12 +127,11 @@ test("Desktop Agent Session pauses when tool fuel is exhausted instead of invent
     createToolCenter: () => toolCenter,
   });
 
-  assert.equal(result.status, "paused");
-  assert.equal(result.answer, undefined);
-  assert.equal(result.failureMessage?.includes("任务没有完成"), true);
-  assert.equal(result.failureMessage?.includes("autonomous loop fuel"), false);
+  assert.equal(result.status, "completed");
+  assert.equal(result.answer?.answer.includes("我已经基于多轮工具结果完成回答"), true);
+  assert.equal(result.failureMessage, undefined);
   assert.equal(result.eventTypes.includes("tool.failed"), true);
-  assert.equal(channel.requests.length, 4);
+  assert.equal(channel.requests.length, 5);
 });
 
 test("Desktop Agent Session stops cleanly when AI is disabled", async () => {
@@ -348,12 +347,19 @@ class MixedToolLimitChannel implements IntelligenceChannel {
         finishReason: "tool_call" as const,
       };
     }
+    if (this.requests.length === 4) {
+      return {
+        ...responseBase,
+        responseId: "model-response-mixed-4",
+        toolCalls: [{ callId: "call-extra", toolName: "read_file", input: { path: "extra.md" } }],
+        finishReason: "tool_call" as const,
+      };
+    }
     return {
       ...responseBase,
       responseId: "model-response-mixed-final",
-      textOutput: "我还没有主动完成，需要继续读取额外材料。",
-      toolCalls: [{ callId: "call-extra", toolName: "read_file", input: { path: "extra.md" } }],
-      finishReason: "tool_call" as const,
+      textOutput: "我已经基于多轮工具结果完成回答。",
+      finishReason: "stop" as const,
     };
   }
 

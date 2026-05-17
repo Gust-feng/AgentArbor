@@ -17,7 +17,12 @@ import {
 } from "./model-runtime/index.js";
 import type { MinimalRuntime } from "./runtime.js";
 import { createMinimalRuntime } from "./runtime.js";
-import { buildBasicAgentContextPack, type BasicAgentContextPack } from "./basic-agent-runtime/index.js";
+import {
+  buildBasicAgentContextPack,
+  compactBasicAgentConversationIfNeeded,
+  createOpenAITokenCounter,
+  type BasicAgentContextPack,
+} from "./basic-agent-runtime/index.js";
 import { resolveRunCapabilities } from "./capability-policy.js";
 import type { DesktopAgentSkillContext } from "./desktop-agent-prompts.js";
 import { createTaskSoilFromDesktopInput, type DesktopTaskSoilInput } from "./task-soil-workspace.js";
@@ -198,12 +203,38 @@ export async function runDesktopAgentSession(
       ? createdToolCenter
       : undefined;
   toolCenter?.resetCallCount();
+  const tokenCounter = createOpenAITokenCounter(resolveActiveModelName(options));
+  const compactedConversation = await compactBasicAgentConversationIfNeeded({
+    goal,
+    traceId,
+    goalId,
+    conversationHistory: options.conversationHistory ?? [],
+    intelligenceChannel: channel,
+    modelCapabilities: options.modelCapabilities,
+    tokenCounter,
+  });
+  if (compactedConversation.failed !== undefined) {
+    return {
+      status: "failed",
+      runtime,
+      traceId,
+      goalId,
+      taskSoil,
+      failureMessage: compactedConversation.failed.message,
+      modelCallRefs: [compactedConversation.failed.requestId, compactedConversation.failed.responseId].filter(isString),
+      toolCallRefs: [],
+      activity: activityFromEventEntries(runtime.eventLog.list(), "failed"),
+      eventTypes: runtime.eventLog.types(),
+    };
+  }
   const contextPack = buildBasicAgentContextPack({
     goal,
     taskSoil,
-    conversationHistory: options.conversationHistory ?? [],
+    conversationHistory: compactedConversation.conversationHistory,
+    conversationSummary: compactedConversation.conversationSummary,
     skillContexts: options.skillContexts ?? [],
     modelCapabilities: options.modelCapabilities,
+    tokenCounter,
   });
   const turnRuntime = new AgentTurnRuntime({
     intelligenceChannel: channel,
@@ -219,12 +250,10 @@ export async function runDesktopAgentSession(
         taskSoil,
         platform: options.platform,
       });
-  const turn = await turnRuntime.execute({
+  const turn = await turnRuntime.executeAutonomous({
     policy: {
       allowModel: true,
       allowedTools,
-      maxModelRounds: 4,
-      maxToolRounds: 3,
       fallback: "disabled",
       callerAgentId: DESKTOP_AGENT_ID,
       traceId,
@@ -259,6 +288,10 @@ export async function runDesktopAgentSession(
   });
 }
 
+function resolveActiveModelName(options: RunDesktopAgentSessionOptions): string | undefined {
+  return options.aiEnvironment?.AGENTARBOR_MODEL_NAME ?? process.env.AGENTARBOR_MODEL_NAME;
+}
+
 function desktopAgentResultFromTurn(input: {
   readonly goal: string;
   readonly runtime: MinimalRuntime;
@@ -281,15 +314,80 @@ function desktopAgentResultFromTurn(input: {
       goalId: input.goalId,
       taskSoil: input.taskSoil,
       contextPack: safeContextPack(input.contextPack),
-      failureMessage: "这轮工具调用或模型轮次已到上限，任务没有完成。你可以继续发送消息让我接着处理。",
+      failureMessage: "运行被异常保护中断，任务没有完成。你可以补充要求或重新发起，我会继续按模型判断处理。",
       modelCallRefs,
       toolCallRefs,
       activity: activityFromEventEntries(input.runtime.eventLog.list(), "paused"),
       eventTypes: input.runtime.eventLog.types(),
     };
   }
+  if (waitingForApproval) {
+    const answer = "这个操作需要你确认后才能继续。批准后我会执行对应工具，并把安全结果交回模型继续处理。";
+    const pendingConfirmation = pendingConfirmationFrom({
+      goal: input.goal,
+      taskSoil: input.taskSoil,
+      answer,
+      toolCalls: input.turn.toolCalls,
+      traceId: input.traceId,
+      goalId: input.goalId,
+      modelCallRefs,
+      toolCallRefs,
+    });
+    if (pendingConfirmation !== undefined && !hasConfirmationRequested(input.runtime.eventLog.list(), pendingConfirmation.confirmationId)) {
+      publishConfirmationRequested({
+        runtime: input.runtime,
+        traceId: input.traceId,
+        goalId: input.goalId,
+        pendingConfirmation,
+      });
+    }
+    const evidenceRefs = unique(evidenceRefsFromToolCalls(input.turn.toolCalls)).slice(0, 12);
+    const resultBlocks = resultBlocksFrom({
+      answer,
+      toolCalls: input.turn.toolCalls,
+      evidenceRefs,
+      pendingConfirmation,
+    });
+    return {
+      status: "confirmation_needed",
+      runtime: input.runtime,
+      traceId: input.traceId,
+      goalId: input.goalId,
+      taskSoil: input.taskSoil,
+      answer: {
+        answer,
+        modelCallRefs,
+        toolCallRefs,
+        evidenceRefs,
+        resultBlocks,
+      },
+      pendingConfirmation,
+      contextPack: safeContextPack(input.contextPack),
+      modelCallRefs,
+      toolCallRefs,
+      activity: activityFromEventEntries(input.runtime.eventLog.list(), "confirmation_needed"),
+      eventTypes: input.runtime.eventLog.types(),
+      pendingApproval:
+        pendingConfirmation === undefined || input.turn.pendingApproval === undefined
+          ? undefined
+          : {
+              confirmationId: input.turn.pendingApproval.confirmationId,
+              resume: async (resumeInput) => {
+                const resumed = await input.turnRuntime.resumeAutonomous({
+                  pendingApproval: input.turn.pendingApproval!,
+                  approvedConfirmationIds: resumeInput.approvedConfirmationIds,
+                  abortSignal: resumeInput.abortSignal,
+                });
+                return desktopAgentResultFromTurn({
+                  ...input,
+                  turn: resumed,
+                });
+              },
+            },
+    };
+  }
   if (
-    (input.turn.status !== "completed" && !waitingForApproval && !recoverableBudgetStop) ||
+    (input.turn.status !== "completed" && !recoverableBudgetStop) ||
     input.turn.finalOutput === undefined ||
     input.turn.finalOutput.status !== "completed"
   ) {
@@ -360,7 +458,7 @@ function desktopAgentResultFromTurn(input: {
         : {
             confirmationId: input.turn.pendingApproval.confirmationId,
             resume: async (resumeInput) => {
-              const resumed = await input.turnRuntime.resume({
+              const resumed = await input.turnRuntime.resumeAutonomous({
                 pendingApproval: input.turn.pendingApproval!,
                 approvedConfirmationIds: resumeInput.approvedConfirmationIds,
                 abortSignal: resumeInput.abortSignal,
@@ -872,8 +970,8 @@ function terminalActivity(
     return {
       activityId,
       type: "stopped",
-      title: "运行已暂停",
-      summary: "本轮 Agent 已暂停，尚未主动声明任务完成。",
+      title: "运行中断",
+      summary: "运行被异常保护中断，尚未形成最终回答。",
       status: "pending",
       createdAt,
       sourceRefs: lastEntry === undefined ? [] : [`event:${lastEntry.message.id}`],

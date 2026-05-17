@@ -108,6 +108,30 @@ export class PanelConversationStore {
     return conversation === undefined ? undefined : toConversationReadModel(conversation);
   }
 
+  rollback(input: {
+    readonly conversationId: string;
+    readonly targetTurnId?: string;
+    readonly stepsBack?: number;
+    readonly keepCompletedPairs?: number;
+  }): PanelConversationReadModel {
+    const conversation = this.requireConversation(input.conversationId);
+    const completedPairs = completedConversationPairs(conversation.turns);
+    const keepPairCount = rollbackKeepPairCount({
+      turns: conversation.turns,
+      completedPairCount: completedPairs.length,
+      targetTurnId: input.targetTurnId,
+      stepsBack: input.stepsBack,
+      keepCompletedPairs: input.keepCompletedPairs,
+    });
+    const keptTurns = completedPairs.slice(0, keepPairCount).flatMap((pair) => [pair.userTurn, pair.assistantTurn]);
+    conversation.turns = keptTurns.map((turn) => ({ ...turn }));
+    conversation.currentRunId = undefined;
+    conversation.queuedRunIds = [];
+    conversation.latestRunId = keptTurns.at(-1)?.role === "assistant" ? keptTurns.at(-1)?.runId : undefined;
+    conversation.updatedAt = nowIso();
+    return toConversationReadModel(conversation);
+  }
+
   restore(record: RuntimeConversationRecord): PanelConversationReadModel {
     const existing = this.conversations.get(record.conversationId);
     if (existing !== undefined && existing.updatedAt.localeCompare(record.updatedAt) >= 0) {
@@ -343,6 +367,59 @@ function completedTurnPrefix(
     selected.push(userTurn, assistantTurn);
   }
   return selected;
+}
+
+function completedConversationPairs(turns: readonly PanelConversationTurn[]): readonly {
+  readonly userTurn: PanelConversationTurn;
+  readonly assistantTurn: PanelConversationTurn;
+}[] {
+  const pairs: Array<{ readonly userTurn: PanelConversationTurn; readonly assistantTurn: PanelConversationTurn }> = [];
+  for (let index = 0; index + 1 < turns.length; index += 2) {
+    const userTurn = turns[index];
+    const assistantTurn = turns[index + 1];
+    if (
+      userTurn === undefined ||
+      assistantTurn === undefined ||
+      userTurn.role !== "user" ||
+      assistantTurn.role !== "assistant" ||
+      userTurn.status !== "completed" ||
+      assistantTurn.status !== "completed"
+    ) {
+      break;
+    }
+    pairs.push({ userTurn, assistantTurn });
+  }
+  return pairs;
+}
+
+function rollbackKeepPairCount(input: {
+  readonly turns: readonly PanelConversationTurn[];
+  readonly completedPairCount: number;
+  readonly targetTurnId?: string;
+  readonly stepsBack?: number;
+  readonly keepCompletedPairs?: number;
+}): number {
+  if (input.keepCompletedPairs !== undefined) {
+    return clampInteger(input.keepCompletedPairs, 0, input.completedPairCount);
+  }
+  if (input.stepsBack !== undefined) {
+    return clampInteger(input.completedPairCount - input.stepsBack, 0, input.completedPairCount);
+  }
+  if (input.targetTurnId !== undefined) {
+    const turnIndex = input.turns.findIndex((turn) => turn.turnId === input.targetTurnId);
+    if (turnIndex < 0) {
+      throw new Error(`Panel conversation turn not found: ${input.targetTurnId}`);
+    }
+    return clampInteger(Math.floor((turnIndex + 1) / 2), 0, input.completedPairCount);
+  }
+  return Math.max(0, input.completedPairCount - 1);
+}
+
+function clampInteger(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) {
+    return min;
+  }
+  return Math.max(min, Math.min(max, Math.floor(value)));
 }
 
 function createTurn(input: {

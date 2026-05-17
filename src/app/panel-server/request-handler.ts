@@ -491,6 +491,17 @@ async function handlePanelRequest(
     return;
   }
 
+  const conversationRollbackMatch = /^\/api\/conversations\/([^/]+)\/rollback$/.exec(url.pathname);
+  if (request.method === "POST" && conversationRollbackMatch !== null) {
+    await handleConversationRollbackRequest(
+      runtime,
+      request,
+      response,
+      decodeURIComponent(conversationRollbackMatch[1] ?? "")
+    );
+    return;
+  }
+
   const runMatch = /^\/api\/underground\/runs\/([^/]+)$/.exec(url.pathname);
   if (request.method === "GET" && runMatch !== null) {
     await handleGetRunRequest(runtime, decodeURIComponent(runMatch[1] ?? ""), "underground", response);
@@ -948,6 +959,35 @@ async function ensurePanelConversationLoaded(
     throw new PanelHttpError(404, "conversation_not_found", "未找到对话。");
   }
   return restorePersistedPanelConversation(runtime, persisted);
+}
+
+async function handleConversationRollbackRequest(
+  runtime: PanelRuntime,
+  request: IncomingMessage,
+  response: ServerResponse,
+  conversationId: string
+): Promise<void> {
+  await ensurePanelConversationLoaded(runtime, conversationId);
+  const body = asRecord(await readJsonBody(request));
+  try {
+    const conversation = runtime.conversations.rollback({
+      conversationId,
+      targetTurnId: optionalString(body.targetTurnId),
+      stepsBack: numberOrUndefined(body.stepsBack),
+      keepCompletedPairs: numberOrUndefined(body.keepCompletedPairs),
+    });
+    await persistPanelConversation(runtime, conversationId);
+    writeJson(response, 200, {
+      ok: true,
+      conversation,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    if (message.includes("turn not found")) {
+      throw new PanelHttpError(404, "conversation_turn_not_found", "未找到要回退到的对话轮次。");
+    }
+    throw error;
+  }
 }
 
 async function restorePersistedPanelConversation(
@@ -2639,7 +2679,7 @@ function desktopPanelResultFromAgent(
               code: "out_of_fuel",
               message:
                 agent.failureMessage ??
-                "这轮工具调用或模型轮次已到上限，任务没有完成。你可以继续发送消息让我接着处理。",
+                "运行被外部边界中断，任务没有完成。你可以继续发送消息让我接着处理。",
             }
           : undefined,
       pendingApproval:
@@ -2878,6 +2918,10 @@ function buildConversationHistoryMessages(
       };
     })
     .filter((message): message is DesktopAgentConversationMessage => message !== undefined);
+}
+
+function numberOrUndefined(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 function friendlyAssistantFailureText(message: string | undefined): string {

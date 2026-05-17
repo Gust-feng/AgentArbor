@@ -109,7 +109,7 @@ test("Basic Agent context pack keeps current user message last under tight budge
   assert.equal(pack.truncated, true);
 });
 
-test("Basic Agent context pack emits older history as summary and recent history with original roles", () => {
+test("Basic Agent context pack preserves history roles without pre-threshold deterministic compaction", () => {
   const taskSoil = createTaskSoil({
     rawGoal: "continue",
     goalId: "goal-pack-history",
@@ -133,10 +133,13 @@ test("Basic Agent context pack emits older history as summary and recent history
     ])).flat(),
   });
 
-  assert.equal(pack.items.some((item) => item.sourceKind === "conversation_summary"), true);
+  assert.equal(pack.items.some((item) => item.sourceKind === "conversation_summary"), false);
   assert.deepEqual(pack.messages.map((message) => message.role), [
     "system",
-    "system",
+    "user",
+    "assistant",
+    "user",
+    "assistant",
     "user",
     "assistant",
     "user",
@@ -148,6 +151,44 @@ test("Basic Agent context pack emits older history as summary and recent history
     "user",
   ]);
   assert.equal(pack.messages.at(-1)?.content.includes("Current user message: continue"), true);
+});
+
+test("Basic Agent context pack keeps recent role turns before bulky skill instructions", () => {
+  const taskSoil = createTaskSoil({
+    rawGoal: "continue",
+    goalId: "goal-pack-history-priority",
+    traceId: "trace-pack-history-priority",
+  });
+  const skill: DesktopAgentSkillContext = {
+    skill: {
+      id: "bulky-skill",
+      name: "Bulky Skill",
+      description: "Large optional guidance.",
+      enabled: true,
+      sourcePath: "Z:/AgentArbor/.agents/skills/bulky/SKILL.md",
+      triggers: ["continue"],
+    },
+    body: `Optional skill instructions ${"x".repeat(3_000)}`,
+    triggerReason: "matched goal",
+  };
+
+  const pack = buildBasicAgentContextPack({
+    goal: "continue",
+    taskSoil,
+    skillContexts: [skill],
+    conversationHistory: [
+      { role: "user", content: "recent user context", ref: "conversation:pack-priority:user" },
+      { role: "assistant", content: "recent assistant context", ref: "conversation:pack-priority:assistant" },
+    ],
+    maxMessages: 4,
+    maxChars: 2_000,
+  });
+
+  assert.deepEqual(pack.messages.map((message) => message.role), ["system", "user", "assistant", "user"]);
+  assert.equal(pack.messages[1]?.content.includes("recent user context"), true);
+  assert.equal(pack.messages[2]?.content.includes("recent assistant context"), true);
+  assert.equal(pack.messages.some((message) => message.content.includes("Optional skill instructions")), false);
+  assert.equal(pack.truncated, true);
 });
 
 test("Basic Agent context pack derives token budget from model capabilities", () => {
@@ -178,5 +219,6 @@ test("Basic Agent context pack derives token budget from model capabilities", ()
   assert.equal(pack.budget.budgetSource, "model_capabilities");
   assert.equal(pack.budget.reservedOutputTokens, 2_000);
   assert.equal(pack.budget.inputTokenBudget, 5_488);
-  assert.equal(typeof pack.budget.estimatedInputTokens, "number");
+  assert.equal(typeof pack.budget.usedInputTokens, "number");
+  assert.equal(pack.budget.tokenCountSource, "openai_tiktoken");
 });

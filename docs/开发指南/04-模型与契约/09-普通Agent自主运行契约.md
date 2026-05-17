@@ -4,21 +4,24 @@
 
 普通 Agent 是当前默认桌面会话的执行内核。它负责在一次用户消息中装配安全上下文、调用模型、执行授权工具、把工具结果回传模型，并在模型不再请求工具时形成可见回答。
 
+普通 Agent 的核心形态是自然 provider-stop ReAct 循环：模型在每一轮基于当前安全上下文决定是否行动、调用哪些可见工具、如何解释工具结果，以及何时停止。Runtime / harness 只提供可调用世界、执行工具、记录事件和保护边界，不额外发明内部完成仪式，也不把固定阶段机伪装成 agent 思考。
+
 本契约只约束普通 Desktop Agent。Underground、Work Session、结构化计划生成等未来或专用路径可以有自己的停止语义，但不能反向污染普通 Agent。
 
 ## 根原则
 
 1. **完成权属于模型的行动选择。** 模型响应中没有工具调用，表示模型停止继续行动；Runtime 将该响应作为最终回答。
-2. **工具调用表示继续工作。** 模型响应中有工具调用时，Runtime 执行外部授权工具，把安全工具结果追加回模型上下文，然后继续调用模型。
-3. **Runtime 不替模型判断答案质量。** Runtime 不能根据关键词、证据数量、文本长度或工程规则判断“还没答完”或“应该总结”；它只观察模型是否继续调用工具。
-4. **预算耗尽不是完成。** 如果模型仍在请求工具，但模型轮次或工具轮次到达上限，Runtime 返回 `paused/out_of_fuel`，不能合成最终回答。
-5. **笼子负责边界，不负责思考。** 权限、审批、预算、脱敏、审计、取消和上下文装配属于工程边界；目标理解、是否继续探索、是否调用工具和最终表述属于模型行动选择。
+2. **工具调用表示继续工作。** 模型响应中有工具调用时，Runtime 执行授权工具，把安全工具结果追加回模型上下文，然后继续调用模型。
+3. **工具选择权属于模型。** 在本轮可见工具集合内，模型自由决定调用什么工具、调用顺序和是否继续调用；Runtime 不能用关键词、模板阶段或固定流程替模型选择工具。
+4. **Runtime 不替模型判断答案质量。** Runtime 不能根据关键词、证据数量、文本长度或工程规则判断“还没答完”或“应该总结”；它只观察模型是否继续调用工具。
+5. **普通路径不设置行动轮次上限。** 不考虑用户中止、provider 失败、上下文硬溢出、进程失败等外部硬边界时，模型必须可以一直调用工具并继续工作，直到它自己不再调用工具。工具次数或模型轮次不能成为普通 Agent 的产品能力边界。
+6. **保护网负责边界，不负责思考。** ToolCenter、权限、确认、上下文窗口管理、脱敏、审计、取消和恢复属于工程边界；目标理解、是否继续探索、是否调用工具、工具取舍和最终表述属于模型行动选择。
 
 ## 运行入口
 
 普通 Desktop Agent 通过 `AgentTurnRuntime.executeAutonomous` / `resumeAutonomous` 进入自主工具循环。旧的 `execute` / `resume` 保持通用 provider-stop 工具循环语义，供其他结构化路径继续使用。
 
-`executeAutonomous` 的模型可见工具只包含本轮外部授权工具：
+`executeAutonomous` 的模型可见工具只包含本轮授权后的外部能力工具：
 
 ```text
 ToolCenter.list()
@@ -41,13 +44,13 @@ while not cancelled:
   if response has no tool calls:
     return completed(final assistant output)
 
-  if tool/model fuel is exhausted before executing or continuing:
-    return paused/out_of_fuel
-
   execute requested external tools through ToolCenter
 
   if approval is required:
     return approval_required with pending confirmation
+
+  if context window approaches the model hard limit:
+    compact earlier safe context through the model and continue
 
   append assistant tool calls and safe tool results
   continue
@@ -57,13 +60,16 @@ while not cancelled:
 
 ## 工具边界
 
-外部工具必须始终经过：
+模型在可见工具集合内拥有选择自由，但工具选择自由不等于工具执行无边界。所有外部能力工具必须始终经过：
 
 - `ToolCenter.execute`。
 - `allowedTools` 与 capability policy 裁剪。
 - security policy / confirmation 规则。
+- 参数、路径、网络、命令、密钥和工作区边界检查。
 - 安全投影与 raw output 脱敏。
 - tool event 审计。
+
+ToolCenter 是工具执行的唯一入口。模型可以决定“要不要调用某个已暴露工具”，但不能绕过 ToolCenter 获得未授权工具、未裁剪参数、未确认高风险动作、未脱敏输出或未记录审计事件。工具失败、拒绝、取消和确认等待都应以标准安全结果回传模型，让模型基于受保护的世界继续判断。除用户显式中止或外部系统硬失败外，这些结果不应终止普通 loop。
 
 工具结果回到模型时，只能使用安全摘要、证据引用、截断标记、诊断引用和必要状态。不得把 raw prompt、raw provider response、raw tool output、stdout/stderr、secret、token 或 hidden reasoning 放回普通历史或可见结果。
 
@@ -74,37 +80,41 @@ while not cancelled:
 - `completed/no_tool_calls`：首轮无工具调用，模型直接给出最终文本。
 - `completed/completed`：至少执行过一轮工具，随后模型无工具调用并给出最终文本。
 - `approval_required/approval_required`：工具需要用户确认，等待 matching confirmation id。
-- `paused/out_of_fuel`：模型仍在请求工具，但工具轮次或模型轮次耗尽。
+- `interrupted/external_boundary`：用户中止、provider 失败、上下文硬溢出、进程失败或其他外部硬边界打断 loop。该状态不是完成，也不是普通产品能力边界。
 - `cancelled/cancelled`：用户或系统中止。
 - `failed/model_failed`：provider 失败或响应不可用。
 
-`maxModelRounds` 和 `maxToolRounds` 只是燃料边界，不是语义完成条件。达到边界时，普通 Agent 必须暂停并保留恢复所需上下文；不能执行 final synthesis，也不能把最后一条普通文本或工具摘要伪装为最终答案。
+普通 Agent 不应使用 `maxModelRounds` 或 `maxToolRounds` 作为正常运行边界。旧结构化路径、测试桩或专用 agent 可以有显式预算，但这些预算不能流入普通 Desktop Agent 的自主 loop。若底层仍存在进程级保护阀，它只属于异常防护，不能作为普通验收路径、常规暂停 UX 或模型能力上限。
 
 用户可见暂停文案必须使用产品语言，例如：
 
 ```text
-这轮工具调用或模型轮次已到上限，任务没有完成。你可以继续发送消息让我接着处理。
+运行被外部边界中断，任务没有完成。你可以继续发送消息让我接着处理。
 ```
 
 可见文案不得泄漏 `loop`、`provider`、`raw prompt`、内部 request id、内部 fuel 名称或底层状态机细节。
 
 ## 上下文装配
 
-上下文管理发生在进入 loop 前的 Context Pack 装配面，不进入工具循环内部。
+上下文管理属于 Context Pack 装配面和模型请求前置维护，不能成为普通 loop 的停止条件。模型上下文窗口是物理边界：达到压缩阈值时，应使用模型进行安全压缩，保留目标、最近对话、工具证据和未完成事项，然后继续 loop。
 
 装配规则：
 
 - 当前用户消息必须保留在最后。
 - 最近对话轮次优先保留原始 `user` / `assistant` role。
 - 更早历史可以压缩为安全摘要。
-- 超预算时优先丢弃旧历史或旧摘要，不能丢系统边界、当前用户消息和必要工具安全结果。
+- Token 统计必须来自模型能力目录或专用 tokenizer / provider 计量能力，不能用字符数粗略估算作为最终裁剪依据。
+- 达到模型上下文阈值时优先进行 AI 压缩；只有压缩失败且外部硬边界无法恢复时，才能中断运行。
+- 超预算时优先压缩旧历史或旧摘要，不能丢系统边界、当前用户消息和必要工具安全结果。
 - 摘要不得保存 raw prompt、raw provider response、raw tool output、secret、token 或 hidden reasoning。
 
-普通 Agent loop 内不做压缩、不做总结、不做任务完成判断。
+普通 Agent loop 内不做任务完成判断。上下文压缩服务于 loop 连续运行，而不是替模型总结任务或决定停止。
 
 ## 持久化与恢复
 
 会话持久化由 Panel / Conversation 层负责，`desktop-agent-session` 只消费传入的 `conversationHistory`，不直接读取 RuntimeDatabase。
+
+普通会话必须是长期可恢复时间线：今天、明天或一年后继续同一 conversation，都应从数据库恢复安全历史、当前分支和可见状态。用户可以回退到上一轮、前四轮或前五轮对话；回退生成新的当前分支或显式截断当前分支，但不能破坏原始审计记录。
 
 恢复对话时必须裁剪悬空 turn：
 
@@ -119,7 +129,10 @@ while not cancelled:
 - 在普通 Agent 路径要求模型调用内部完成工具才能结束。
 - 在无工具调用时追加工程提示强迫模型继续。
 - Runtime 根据文本质量、关键词、证据数量或上下文长度判断任务是否完成。
-- 燃料耗尽后合成最终答案或把工具摘要冒充最终回答。
+- Runtime 用固定阶段、模板流程或关键词路由替模型决定下一步工具。
+- 把“模型自由选择工具”解释成工具执行可以绕过权限、审计、确认、脱敏或预算边界。
+- 用工具次数、模型轮次、固定阶段或工程预算限制普通 Agent 的正常行动能力。
+- 外部边界中断后合成最终答案或把工具摘要冒充最终回答。
 - 把上下文压缩、长期记忆治理、deep 派生、Work Session 升级放进普通工具循环内部。
 - 让外部工具绕过 ToolCenter、权限裁剪、确认、安全投影或审计。
 
@@ -127,9 +140,12 @@ while not cancelled:
 
 - 普通问答无工具调用时直接 `completed`，可见结果来自模型文本。
 - 模型可见工具列表不包含内部完成工具。
+- 模型可在可见工具集合内自由选择工具；Runtime 不用固定阶段或关键词路由替模型挑工具。
+- 工具调用必须经过 ToolCenter、权限裁剪、确认、安全投影、脱敏和审计。
 - 工具调用后，安全工具结果必须回到下一轮模型请求。
 - 工具后下一轮无工具调用时 `completed`，答案来自模型最终文本。
-- 连续工具调用耗尽燃料时返回 `paused/out_of_fuel`，不生成最终总结。
+- 普通 Agent 不因工具次数或模型轮次达到工程上限而停止。
+- 上下文达到阈值时触发 AI 安全压缩并继续，而不是停止或丢失关键历史。
 - 审批暂停和恢复仍要求 matching confirmation id。
 - 可见输出不泄漏 raw prompt、raw provider response、raw tool output、内部 loop/fuel/provider 细节。
 

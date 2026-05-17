@@ -9,6 +9,8 @@ import type { DesktopAgentConversationMessage } from "../desktop-agent-session.j
 import type { DesktopAgentSkillContext } from "../desktop-agent-prompts.js";
 import { sanitizeConversationHistoryText } from "../visible-text-safety.js";
 import type { BasicAgentContextItem, BasicAgentContextSourceKind } from "./context-pack.js";
+import type { BasicAgentConversationSummary } from "./conversation-compaction.js";
+import { createOpenAITokenCounter, type BasicAgentTokenCounter } from "./token-counter.js";
 
 export type BasicAgentContextLedger = {
   readonly ledgerId: string;
@@ -17,11 +19,13 @@ export type BasicAgentContextLedger = {
   readonly evidenceRefs: readonly string[];
   readonly budget: {
     readonly maxMessages: number;
+    readonly maxInputTokens: number;
+    readonly usedInputTokens: number;
+    readonly tokenCountSource: string;
     readonly maxChars: number;
     readonly usedChars: number;
     readonly inputTokenBudget?: number;
     readonly reservedOutputTokens?: number;
-    readonly estimatedInputTokens?: number;
     readonly budgetSource: "default" | "model_capabilities" | "override";
   };
   readonly truncationReport: {
@@ -37,15 +41,19 @@ export type CreateBasicAgentContextLedgerInput = {
   readonly goal: string;
   readonly taskSoil: TaskSoil;
   readonly conversationHistory: readonly DesktopAgentConversationMessage[];
+  readonly conversationSummary?: BasicAgentConversationSummary;
   readonly skillContexts?: readonly DesktopAgentSkillContext[];
   readonly toolEvidence?: readonly ToolResultEnvelope[];
   readonly modelCapabilities?: ModelCapabilities;
+  readonly tokenCounter?: BasicAgentTokenCounter;
   readonly maxMessages?: number;
   readonly maxChars?: number;
+  readonly maxInputTokens?: number;
 };
 
 const DEFAULT_MAX_MESSAGES = 24;
 const DEFAULT_MAX_CHARS = 18_000;
+const DEFAULT_MAX_INPUT_TOKENS = 4_500;
 const MAX_HISTORY_CHARS = 1_200;
 const MAX_HISTORY_SUMMARY_CHARS = 2_400;
 const RECENT_HISTORY_PAIR_COUNT = 4;
@@ -53,7 +61,6 @@ const MAX_SKILL_BODY_CHARS = 4_000;
 const MAX_SKILL_REASON_CHARS = 240;
 const MAX_REF_SUMMARY_CHARS = 240;
 const MAX_PREVIEW_CHARS = 700;
-const MAX_GOAL_CHARS = 1_200;
 const MAX_TOOL_EVIDENCE_CHARS = 1_400;
 
 const DESKTOP_AGENT_SYSTEM_PROMPT = [
@@ -73,13 +80,17 @@ const DESKTOP_AGENT_SYSTEM_PROMPT = [
 // reassembling prompts from session, panel, or tool-specific helpers.
 export function createBasicAgentContextLedger(input: CreateBasicAgentContextLedgerInput): BasicAgentContextLedger {
   const maxMessages = Math.max(4, Math.floor(input.maxMessages ?? DEFAULT_MAX_MESSAGES));
+  const tokenCounter = input.tokenCounter ?? createOpenAITokenCounter();
   const tokenBudget = tokenBudgetFor(input.modelCapabilities);
-  const modelMaxChars = tokenBudget === undefined ? DEFAULT_MAX_CHARS : tokenBudget.inputTokenBudget * 4;
-  const maxChars = Math.max(2_000, Math.floor(input.maxChars ?? modelMaxChars));
+  const maxInputTokens = Math.max(
+    1_000,
+    Math.floor(input.maxInputTokens ?? tokenBudget?.inputTokenBudget ?? DEFAULT_MAX_INPUT_TOKENS)
+  );
+  const maxChars = Math.max(2_000, Math.floor(input.maxChars ?? DEFAULT_MAX_CHARS));
   const draft = [
     systemContextItem(),
     ...skillContextItems(input.skillContexts ?? []),
-    ...historyContextItems(input.conversationHistory),
+    ...historyContextItems(input.conversationHistory, input.conversationSummary),
     ...taskSoilRefItems(input.taskSoil),
     ...toolEvidenceItems(input.toolEvidence ?? []),
     currentUserMessageItem(input.goal, input.taskSoil),
@@ -88,11 +99,18 @@ export function createBasicAgentContextLedger(input: CreateBasicAgentContextLedg
     runId: input.runId,
     draft,
     maxMessages,
+    maxInputTokens,
     maxChars,
+    tokenCounter,
     budget: {
       inputTokenBudget: tokenBudget?.inputTokenBudget,
       reservedOutputTokens: tokenBudget?.reservedOutputTokens,
-      budgetSource: input.maxChars !== undefined ? "override" : tokenBudget === undefined ? "default" : "model_capabilities",
+      budgetSource:
+        input.maxChars !== undefined || input.maxInputTokens !== undefined
+          ? "override"
+          : tokenBudget === undefined
+            ? "default"
+            : "model_capabilities",
     },
     extraEvidenceRefs: (input.toolEvidence ?? []).flatMap((envelope) => envelope.evidenceRefs),
   });
@@ -106,7 +124,9 @@ export function appendToolEnvelopeToContextLedger(
     runId: ledger.runId,
     draft: insertBeforeCurrentUser(ledger.items, toolEvidenceItems([envelope])),
     maxMessages: ledger.budget.maxMessages,
+    maxInputTokens: ledger.budget.maxInputTokens,
     maxChars: ledger.budget.maxChars,
+    tokenCounter: createOpenAITokenCounter(),
     budget: {
       inputTokenBudget: ledger.budget.inputTokenBudget,
       reservedOutputTokens: ledger.budget.reservedOutputTokens,
@@ -120,7 +140,9 @@ function buildContextLedgerFromItems(input: {
   readonly runId: string;
   readonly draft: readonly BasicAgentContextItem[];
   readonly maxMessages: number;
+  readonly maxInputTokens: number;
   readonly maxChars: number;
+  readonly tokenCounter: BasicAgentTokenCounter;
   readonly budget: {
     readonly inputTokenBudget?: number;
     readonly reservedOutputTokens?: number;
@@ -131,19 +153,26 @@ function buildContextLedgerFromItems(input: {
   const required = input.draft.filter(isRequiredContextItem);
   const selectedIds = new Set(required.map((item) => item.itemId));
   let usedChars = required.reduce((total, item) => total + item.summary.length, 0);
-  let truncatedByBudget = usedChars > input.maxChars || required.length > input.maxMessages;
+  let usedInputTokens = required.reduce((total, item) => total + contextItemTokenCount(input.tokenCounter, item), 0);
+  let truncatedByBudget = usedInputTokens > input.maxInputTokens || usedChars > input.maxChars || required.length > input.maxMessages;
 
   for (const item of prioritizedOptionalContextItems(input.draft)) {
     if (selectedIds.has(item.itemId)) {
       continue;
     }
     const itemChars = item.summary.length;
-    if (selectedIds.size >= input.maxMessages || usedChars + itemChars > input.maxChars) {
+    const itemTokens = contextItemTokenCount(input.tokenCounter, item);
+    if (
+      selectedIds.size >= input.maxMessages ||
+      usedInputTokens + itemTokens > input.maxInputTokens ||
+      usedChars + itemChars > input.maxChars
+    ) {
       truncatedByBudget = true;
       continue;
     }
     selectedIds.add(item.itemId);
     usedChars += itemChars;
+    usedInputTokens += itemTokens;
   }
 
   const selected = input.draft.filter((item) => selectedIds.has(item.itemId));
@@ -151,11 +180,13 @@ function buildContextLedgerFromItems(input: {
   const omittedItemCount = omitted.length;
   const budget = {
     maxMessages: input.maxMessages,
+    maxInputTokens: input.maxInputTokens,
+    usedInputTokens,
+    tokenCountSource: input.tokenCounter.source,
     maxChars: input.maxChars,
     usedChars,
     inputTokenBudget: input.budget.inputTokenBudget,
     reservedOutputTokens: input.budget.reservedOutputTokens,
-    estimatedInputTokens: estimateTokens(usedChars),
     budgetSource: input.budget.budgetSource,
   };
   const truncationReport = {
@@ -196,13 +227,23 @@ function prioritizedOptionalContextItems(
 }
 
 function contextItemRetentionPriority(item: BasicAgentContextItem): number {
-  if (item.sourceKind === "skill") return 0;
-  if (item.sourceKind === "tool_evidence") return 1;
+  if (item.sourceKind === "tool_evidence") return 0;
+  if (item.sourceKind === "conversation_recent_turn") return 1;
   if (item.sourceKind === "task_soil_ref") return 2;
-  if (item.sourceKind === "conversation_recent_turn") return 3;
+  if (item.sourceKind === "skill") return 3;
   if (item.sourceKind === "conversation") return 3;
   if (item.sourceKind === "conversation_summary") return 4;
   return 5;
+}
+
+function contextItemTokenCount(counter: BasicAgentTokenCounter, item: BasicAgentContextItem): number {
+  const role =
+    item.sourceKind === "system" || item.sourceKind === "skill" || item.sourceKind === "conversation_summary" || item.sourceKind === "tool_evidence"
+      ? "system"
+      : item.sourceKind === "user_message"
+        ? "user"
+        : item.role ?? "user";
+  return counter.countMessage({ role, content: item.summary });
 }
 
 function insertBeforeCurrentUser(
@@ -271,9 +312,11 @@ function contextBudgetEntries(
       kind: "budget",
       title: "上下文预算",
       summary: [
+        `maxInputTokens=${budget.maxInputTokens}`,
+        `usedInputTokens=${budget.usedInputTokens}`,
+        `tokenCountSource=${budget.tokenCountSource}`,
         `maxChars=${budget.maxChars}`,
         `usedChars=${budget.usedChars}`,
-        `estimatedInputTokens=${budget.estimatedInputTokens ?? 0}`,
         `source=${budget.budgetSource}`,
       ].join("；"),
       refs: [],
@@ -340,10 +383,6 @@ function tokenBudgetFor(capabilities: ModelCapabilities | undefined): {
   };
 }
 
-function estimateTokens(chars: number): number {
-  return Math.ceil(chars / 4);
-}
-
 function systemContextItem(): BasicAgentContextItem {
   return {
     itemId: "context:system:desktop-agent",
@@ -375,7 +414,10 @@ function skillContextItems(skills: readonly DesktopAgentSkillContext[]): readonl
   });
 }
 
-function historyContextItems(history: readonly DesktopAgentConversationMessage[]): readonly BasicAgentContextItem[] {
+function historyContextItems(
+  history: readonly DesktopAgentConversationMessage[],
+  conversationSummary: BasicAgentConversationSummary | undefined
+): readonly BasicAgentContextItem[] {
   const safeHistory = history
     .map((message, index) => {
       const safe = safeConversationText(message.content, MAX_HISTORY_CHARS);
@@ -389,7 +431,20 @@ function historyContextItems(history: readonly DesktopAgentConversationMessage[]
   const recentMessageCount = RECENT_HISTORY_PAIR_COUNT * 2;
   const earlier = safeHistory.slice(0, Math.max(0, safeHistory.length - recentMessageCount));
   const recent = safeHistory.slice(Math.max(0, safeHistory.length - recentMessageCount));
-  const summaryItem = earlierHistorySummaryItem(earlier);
+  const earlierItems = conversationSummary === undefined
+    ? earlier.map((entry): BasicAgentContextItem => ({
+        itemId: entry.message.ref ?? `context:conversation:${entry.index}`,
+        sourceKind: "conversation",
+        role: entry.message.role,
+        summary: entry.safe.text,
+        refs: [{ kind: "event" as const, id: entry.message.ref ?? `conversation:history:${entry.index}` }],
+        visibility: "model" as const,
+        truncated: entry.safe.truncated,
+      }))
+    : [];
+  const summaryItem = conversationSummary === undefined
+    ? undefined
+    : aiConversationSummaryItem(conversationSummary, earlier);
   const recentItems = recent.map((entry): BasicAgentContextItem => ({
     itemId: entry.message.ref ?? `context:conversation:${entry.index}`,
     sourceKind: "conversation_recent_turn",
@@ -399,47 +454,44 @@ function historyContextItems(history: readonly DesktopAgentConversationMessage[]
     visibility: "model" as const,
     truncated: entry.safe.truncated,
   }));
-  return summaryItem === undefined ? recentItems : [summaryItem, ...recentItems];
+  return summaryItem === undefined ? [...earlierItems, ...recentItems] : [summaryItem, ...recentItems];
 }
 
-function earlierHistorySummaryItem(
-  entries: readonly {
+function aiConversationSummaryItem(
+  summary: BasicAgentConversationSummary,
+  fallbackEntries: readonly {
     readonly message: DesktopAgentConversationMessage;
     readonly index: number;
     readonly safe: { readonly text: string; readonly truncated: boolean };
   }[]
 ): BasicAgentContextItem | undefined {
-  if (entries.length === 0) {
-    return undefined;
-  }
-  const summary = safeText(
+  const safeSummary = safeText(
     [
-      "Earlier conversation summary (deterministic, redacted; use only as background):",
-      ...entries.map((entry) => {
-        const role = entry.message.role === "assistant" ? "assistant" : "user";
-        return `- ${role}: ${safeConversationText(entry.safe.text, 360).text}`;
-      }),
+      "Earlier conversation summary (model-compacted, redacted; use only as background):",
+      summary.summary,
     ].join("\n"),
     MAX_HISTORY_SUMMARY_CHARS
   );
-  if (summary.text.length === 0) {
+  if (safeSummary.text.length === 0) {
     return undefined;
   }
   return {
-    itemId: "context:conversation-summary",
+    itemId: summary.summaryId,
     sourceKind: "conversation_summary",
-    summary: summary.text,
-    refs: entries.slice(0, 12).map((entry): ObservationRef => ({
-      kind: "event",
-      id: entry.message.ref ?? `conversation:history:${entry.index}`,
-    })),
+    summary: safeSummary.text,
+    refs: summary.coveredRefs.length > 0
+      ? summary.coveredRefs.map((id): ObservationRef => ({ kind: "event", id }))
+      : fallbackEntries.slice(0, 12).map((entry): ObservationRef => ({
+          kind: "event",
+          id: entry.message.ref ?? `conversation:history:${entry.index}`,
+        })),
     visibility: "model",
-    truncated: summary.truncated || entries.some((entry) => entry.safe.truncated),
+    truncated: safeSummary.truncated,
   };
 }
 
 function currentUserMessageItem(goal: string, taskSoil: TaskSoil): BasicAgentContextItem {
-  const safe = safeText(goal, MAX_GOAL_CHARS);
+  const safe = safeUnboundedText(goal);
   return {
     itemId: `context:goal:${taskSoil.goalId}`,
     sourceKind: "user_message",
@@ -536,6 +588,13 @@ function safeText(value: string, maxLength: number): { readonly text: string; re
   return {
     text: `${redacted.slice(0, Math.max(0, maxLength - 1))}…`,
     truncated: true,
+  };
+}
+
+function safeUnboundedText(value: string): { readonly text: string; readonly truncated: false } {
+  return {
+    text: redactSensitiveText(value).replace(/\b(runtime|store|secret):[^\s]+/gi, "[redacted-ref]").trim(),
+    truncated: false,
   };
 }
 

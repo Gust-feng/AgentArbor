@@ -249,11 +249,13 @@ export type ContextLedger = {
   }[];
   readonly budget?: {
     readonly maxMessages?: number;
+    readonly maxInputTokens?: number;
+    readonly usedInputTokens?: number;
+    readonly tokenCountSource?: string;
     readonly maxChars?: number;
     readonly usedChars?: number;
     readonly inputTokenBudget?: number;
     readonly reservedOutputTokens?: number;
-    readonly estimatedInputTokens?: number;
     readonly budgetSource?: string;
   };
   readonly truncation: {

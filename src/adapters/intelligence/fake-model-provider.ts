@@ -171,6 +171,9 @@ function defaultFakeStep(request: ModelRequest): FakeModelProviderStep {
   if (request.outputContract.contractId === "desktop.agent_response.v1" || request.outputContract.contractId === "desktop.chat_response.v1") {
     return fakeDesktopAgentStep(request);
   }
+  if (request.outputContract.contractId === "desktop.context_compaction.v1") {
+    return { textOutput: fakeConversationCompactionOutput(request) };
+  }
   return {};
 }
 
@@ -343,6 +346,20 @@ function fakeDesktopAgentStep(request: ModelRequest): FakeModelProviderStep {
       },
     ],
   };
+}
+
+function fakeConversationCompactionOutput(request: ModelRequest): string {
+  const content = request.sanitizedMessages.map((message) => message.content).join("\n");
+  const lines = content
+    .split(/\r?\n/g)
+    .filter((line) => line.startsWith("- ["))
+    .slice(0, 8)
+    .map((line) => line.replace(/\s+/g, " ").trim());
+  return [
+    "Earlier conversation was compacted for continuity.",
+    ...lines,
+    "Continue from the current user message; this summary is background only.",
+  ].join("\n");
 }
 
 function shouldUseOrdinaryAgentTools(goalAnchor: string): boolean {

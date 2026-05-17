@@ -215,6 +215,7 @@ test("ordinary agent stream stays quiet for direct answers but shows safe thinki
   const completedTool = withTool.find((event) => event.type === "tool.completed");
 
   assert.deepEqual(direct.map((event) => event.type), ["run.started", "final.result"]);
+  assert.equal(direct.at(-1)?.summary?.includes("Direct answer text."), true);
   assert.equal(withTool.some((event) => event.type === "agent.note.delta"), true);
   assert.equal(withTool.some((event) => event.type === "model.output.completed"), true);
   assert.equal(completedTool?.detail?.kind, "tool");
@@ -223,6 +224,49 @@ test("ordinary agent stream stays quiet for direct answers but shows safe thinki
   assert.equal(completedTool?.detail?.preview?.includes("notes.md"), true);
   assert.equal(completedTool?.detail?.preview?.includes("文件正文只进入本轮工具上下文"), true);
   assert.equal(JSON.stringify(withTool).includes("RAW_TOOL_OUTPUT_SENTINEL"), false);
+});
+
+test("ordinary agent stream treats tool-call model text as status instead of visible answer", () => {
+  const events = createPanelRunStreamEvents({
+    runId: "run-tool-call-text",
+    status: "blocked",
+    desktopMode: "agent",
+    error: {
+      code: "out_of_fuel",
+      message: "internal out_of_fuel guard should not be shown as ordinary UX",
+    },
+    eventEntries: [
+      eventEntry({ sequence: 1, type: "goal.received", payload: { goalId: "goal-tool-call-text" } }),
+      modelCompletedEntry({
+        sequence: 2,
+        requestId: "request-tool-call",
+        contractId: "desktop.agent_response.v1",
+        decisionSummary: "我还没有主动完成，需要继续读取额外材料。",
+        finishReason: "tool_call",
+      }),
+      eventEntry({
+        sequence: 3,
+        type: "tool.requested",
+        payload: { callId: "tool-call-read", toolName: "read_file", input: { path: "extra.md" } },
+      }),
+    ],
+    createdAt: "2026-05-07T00:00:00.000Z",
+    updatedAt: "2026-05-07T00:00:03.000Z",
+  });
+  const serialized = JSON.stringify(events);
+
+  assert.equal(events.some((event) => event.type === "model.output.delta"), false);
+  assert.equal(events.some((event) => event.type === "model.output.completed"), false);
+  assert.equal(events.some((event) => event.type === "tool.requested"), true);
+  const blockedSummary = events.find((event) => event.type === "run.blocked")?.summary ?? "";
+  assert.equal(blockedSummary.includes("异常保护中断"), true);
+  assert.equal(blockedSummary.includes("任务没有完成"), true);
+  assert.equal(blockedSummary.includes("轮次"), false);
+  assert.equal(blockedSummary.includes("上限"), false);
+  assert.equal(serialized.includes("loop"), false);
+  assert.equal(serialized.includes("provider"), false);
+  assert.equal(serialized.includes("raw prompt"), false);
+  assert.equal(serialized.includes("fuel"), false);
 });
 
 test("panel transcript preserves typed safe tool display without raw command output", () => {
@@ -335,6 +379,7 @@ function modelCompletedEntry(input: {
   readonly requestId: string;
   readonly contractId: string;
   readonly decisionSummary: string;
+  readonly finishReason?: "stop" | "length" | "tool_call" | "content_filter" | "error";
 }): EventLogEntry {
   const type: ArborMessageType = "model.completed";
   const message: ArborMessage = {
@@ -352,6 +397,7 @@ function modelCompletedEntry(input: {
       providerKind: "fake",
       protocolKind: "openai_compatible_chat_completions",
       model: "fake-model",
+      finishReason: input.finishReason ?? "stop",
       outputKind: "explanation",
       validationStatus: "passed",
       visibleOutput: visibleOutput(input.contractId, input.decisionSummary),
@@ -400,6 +446,7 @@ function visibleOutput(contractId: string, decisionSummary: string): ModelVisibl
         itemId: "item-1",
         fields: [
           { name: "decisionSummary", value: decisionSummary, truncated: false },
+          { name: "text", value: decisionSummary, truncated: false },
           { name: "uncertainty", value: "fixture uncertainty", truncated: false },
           { name: "confidence", value: "0.8", truncated: false },
         ],

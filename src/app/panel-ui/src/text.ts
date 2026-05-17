@@ -13,7 +13,7 @@ export const STATUS_LABELS: Record<TaskStatus, string> = {
   running: "处理中",
   needs_input: "需要补充",
   approval_needed: "待确认",
-  paused: "已暂停",
+  paused: "已中断",
   blocked: "需要处理",
   completed: "已完成",
   failed: "未完成",
@@ -32,7 +32,7 @@ export function eventTitle(event: RunEvent): string {
   if (event.type === "final.result") return "结果已生成";
   if (event.type === "run.failed") return "运行未完成";
   if (event.type === "run.cancelled") return "运行已取消";
-  if (event.type === "run.blocked") return "运行已暂停";
+  if (event.type === "run.blocked") return "运行中断";
   return event.title || "状态更新";
 }
 

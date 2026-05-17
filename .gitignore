@@ -28,23 +28,7 @@ coverage/
 .agents
 .agentarbor
 .trae
-.trellis/*
-!.trellis/spec/
-!.trellis/spec/**
-!.trellis/scripts/
-!.trellis/scripts/**
-!.trellis/workflow.md
-!.trellis/config.yaml
-!.trellis/.version
-!.trellis/.gitignore
-.trellis/.runtime/
-.trellis/workspace/
-.trellis/.developer
-.trellis/.current-task
-.trellis/**/__pycache__/
-.trellis/**/*.pyc
-.trellis/**/*.tmp
-.trellis/**/*.temp
+.trellis/
 .cursor
 
 agent-deep-dive

@@ -1,3 +1,4 @@
+import OpenAI from "openai";
 import type {
   ModelMessage,
   ModelFailureKind,
@@ -80,6 +81,12 @@ export class OpenAICompatibleChatCompletionsProvider implements ModelProvider {
 
     const startedAt = Date.now();
     try {
+      const client = new OpenAI({
+        apiKey: this.apiKey,
+        baseURL: openAIBaseUrl(this.baseUrl),
+        fetch: toOpenAIFetch(fetchImpl),
+        maxRetries: 0,
+      });
       const requestBody: Record<string, unknown> = {
         model: this.model,
         messages: request.sanitizedMessages.map(toOpenAIMessage),
@@ -90,34 +97,12 @@ export class OpenAICompatibleChatCompletionsProvider implements ModelProvider {
         max_tokens: request.budget.maxOutputTokens,
         stream: this.stream ? true : undefined,
       };
-      const response = await fetchImpl(`${this.baseUrl}/v1/chat/completions`, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          authorization: `Bearer ${this.apiKey}`,
-        },
-        body: JSON.stringify(removeUndefinedValues(requestBody)),
-        signal: options.abortSignal,
-      });
 
-      if (!response.ok) {
-        return createFailedModelResponse({
-          requestId: request.requestId,
-          providerId: this.providerId,
-          providerKind: this.providerKind,
-          protocolKind: this.protocolKind,
-          model: this.model,
-          outputKind: request.outputContract.outputKind,
-          failureKind: failureKindForStatus(response.status),
-          retryable: response.status === 429 || response.status >= 500,
-          message: `OpenAI-compatible provider returned HTTP ${response.status}.`,
-        });
-      }
-
-      if (this.stream && response.body !== undefined) {
+      if (this.stream) {
+        const stream = await client.chat.completions.create(removeUndefinedValues(requestBody) as never, { signal: options.abortSignal });
         return await normalizeOpenAICompatibleStreamResponse({
           request,
-          body: response.body,
+          stream: stream as unknown as AsyncIterable<unknown>,
           providerId: this.providerId,
           providerKind: this.providerKind,
           protocolKind: this.protocolKind,
@@ -127,7 +112,7 @@ export class OpenAICompatibleChatCompletionsProvider implements ModelProvider {
         });
       }
 
-      const raw = await response.json();
+      const raw = await client.chat.completions.create(removeUndefinedValues(requestBody) as never, { signal: options.abortSignal });
       return normalizeOpenAICompatibleResponse({
         request,
         raw,
@@ -137,7 +122,7 @@ export class OpenAICompatibleChatCompletionsProvider implements ModelProvider {
         model: this.model,
         latencyMs: Date.now() - startedAt,
       });
-    } catch {
+    } catch (error) {
       if (options.abortSignal?.aborted === true) {
         return {
           responseId: createId("model-response"),
@@ -158,6 +143,20 @@ export class OpenAICompatibleChatCompletionsProvider implements ModelProvider {
           },
           completedAt: nowIso(),
         };
+      }
+      const status = statusFromError(error);
+      if (status !== undefined) {
+        return createFailedModelResponse({
+          requestId: request.requestId,
+          providerId: this.providerId,
+          providerKind: this.providerKind,
+          protocolKind: this.protocolKind,
+          model: this.model,
+          outputKind: request.outputContract.outputKind,
+          failureKind: failureKindForStatus(status),
+          retryable: status === 429 || status >= 500,
+          message: `OpenAI-compatible provider returned HTTP ${status}.`,
+        });
       }
       return createFailedModelResponse({
         requestId: request.requestId,
@@ -225,7 +224,7 @@ function removeUndefinedValues(record: Record<string, unknown>): Record<string, 
 
 async function normalizeOpenAICompatibleStreamResponse(input: {
   request: ModelRequest;
-  body: unknown;
+  stream: AsyncIterable<unknown>;
   providerId: string;
   providerKind: "openai_compatible";
   protocolKind: "openai_compatible_chat_completions";
@@ -241,11 +240,8 @@ async function normalizeOpenAICompatibleStreamResponse(input: {
   const protocolExtensions = new Map<string, unknown>();
 
   try {
-    for await (const data of iterateSseData(input.body)) {
-      if (data === "[DONE]") {
-        break;
-      }
-      const raw = asRecord(JSON.parse(data) as unknown);
+    for await (const rawEvent of input.stream) {
+      const raw = asRecord(rawEvent);
       if (typeof raw.model === "string") {
         model = raw.model;
       }
@@ -373,85 +369,6 @@ function protocolExtensionsFromMap(extensions: ReadonlyMap<string, unknown>): Re
   return Object.fromEntries(extensions.entries());
 }
 
-async function* iterateSseData(body: unknown): AsyncGenerator<string> {
-  let buffer = "";
-  for await (const chunk of iterateTextChunks(body)) {
-    buffer += chunk;
-    let boundary = buffer.indexOf("\n\n");
-    while (boundary >= 0) {
-      const block = buffer.slice(0, boundary);
-      buffer = buffer.slice(boundary + 2);
-      for (const line of block.split(/\r?\n/g)) {
-        if (line.startsWith("data:")) {
-          yield line.slice("data:".length).trim();
-        }
-      }
-      boundary = buffer.indexOf("\n\n");
-    }
-  }
-  if (buffer.trim().length > 0) {
-    for (const line of buffer.split(/\r?\n/g)) {
-      if (line.startsWith("data:")) {
-        yield line.slice("data:".length).trim();
-      }
-    }
-  }
-}
-
-async function* iterateTextChunks(body: unknown): AsyncGenerator<string> {
-  if (isAsyncIterable(body)) {
-    for await (const chunk of body) {
-      yield decodeChunk(chunk);
-    }
-    return;
-  }
-  if (isReadableStreamLike(body)) {
-    const reader = body.getReader();
-    try {
-      while (true) {
-        const result = await reader.read();
-        if (result.done) {
-          break;
-        }
-        yield decodeChunk(result.value);
-      }
-    } finally {
-      reader.releaseLock?.();
-    }
-    return;
-  }
-  throw new Error("Unsupported streaming response body.");
-}
-
-function decodeChunk(value: unknown): string {
-  if (typeof value === "string") {
-    return value;
-  }
-  if (value instanceof Uint8Array) {
-    return new TextDecoder().decode(value);
-  }
-  if (ArrayBuffer.isView(value)) {
-    return new TextDecoder().decode(new Uint8Array(value.buffer, value.byteOffset, value.byteLength));
-  }
-  if (value instanceof ArrayBuffer) {
-    return new TextDecoder().decode(new Uint8Array(value));
-  }
-  return String(value);
-}
-
-function isAsyncIterable(value: unknown): value is AsyncIterable<unknown> {
-  return typeof value === "object" && value !== null && Symbol.asyncIterator in value;
-}
-
-function isReadableStreamLike(value: unknown): value is {
-  getReader(): {
-    read(): Promise<{ done: boolean; value?: unknown }>;
-    releaseLock?: () => void;
-  };
-} {
-  return typeof value === "object" && value !== null && "getReader" in value && typeof (value as { getReader?: unknown }).getReader === "function";
-}
-
 function resolveGlobalFetch(): FetchLike | undefined {
   const fetchImpl = (globalThis as { fetch?: FetchLike }).fetch;
   return typeof fetchImpl === "function" ? fetchImpl : undefined;
@@ -459,6 +376,10 @@ function resolveGlobalFetch(): FetchLike | undefined {
 
 function trimTrailingSlashes(value: string): string {
   return value.replace(/\/+$/, "");
+}
+
+function openAIBaseUrl(baseUrl: string): string {
+  return baseUrl.endsWith("/v1") ? baseUrl : `${baseUrl}/v1`;
 }
 
 function failureKindForStatus(status: number): ModelFailureKind {
@@ -469,6 +390,105 @@ function failureKindForStatus(status: number): ModelFailureKind {
     return "provider_rate_limit";
   }
   return "provider_response";
+}
+
+function statusFromError(error: unknown): number | undefined {
+  const record = asRecord(error);
+  const status = record.status ?? record.statusCode;
+  return typeof status === "number" && Number.isFinite(status) ? status : undefined;
+}
+
+function toOpenAIFetch(fetchImpl: FetchLike): typeof fetch {
+  return async (url, init = {}) => {
+    const method = typeof init.method === "string" ? init.method : "POST";
+    const response = await fetchImpl(String(url), {
+      method: method as "POST",
+      headers: headersToRecord(init.headers),
+      body: typeof init.body === "string" ? init.body : init.body === undefined ? "" : String(init.body),
+      signal: init.signal === null ? undefined : init.signal,
+    });
+
+    if (response.body !== undefined && requestWantsStream(init.body)) {
+      return new Response(toReadableStream(response.body), {
+        status: response.status,
+        headers: { "content-type": "text/event-stream" },
+      });
+    }
+
+    const json = await response.json();
+    return new Response(JSON.stringify(json), {
+      status: response.status,
+      headers: { "content-type": "application/json" },
+    });
+  };
+}
+
+function requestWantsStream(body: BodyInit | null | undefined): boolean {
+  if (typeof body !== "string") {
+    return false;
+  }
+  try {
+    return asRecord(JSON.parse(body)).stream === true;
+  } catch {
+    return false;
+  }
+}
+
+function headersToRecord(headers: HeadersInit | undefined): Record<string, string> {
+  if (headers === undefined) {
+    return {};
+  }
+  if (headers instanceof Headers) {
+    return Object.fromEntries(headers.entries());
+  }
+  if (Array.isArray(headers)) {
+    return Object.fromEntries(headers.map(([key, value]) => [key, value]));
+  }
+  return Object.fromEntries(Object.entries(headers).map(([key, value]) => [key, String(value)]));
+}
+
+function toReadableStream(body: unknown): ReadableStream<Uint8Array> {
+  if (body instanceof ReadableStream) {
+    return body as ReadableStream<Uint8Array>;
+  }
+  const iterator = iterateBytes(body);
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      const next = await iterator.next();
+      if (next.done === true) {
+        controller.close();
+        return;
+      }
+      controller.enqueue(next.value);
+    },
+  });
+}
+
+async function* iterateBytes(body: unknown): AsyncGenerator<Uint8Array> {
+  if (isAsyncIterable(body)) {
+    for await (const chunk of body) {
+      yield encodeChunk(chunk);
+    }
+    return;
+  }
+  yield encodeChunk(body);
+}
+
+function encodeChunk(value: unknown): Uint8Array {
+  if (value instanceof Uint8Array) {
+    return value;
+  }
+  if (ArrayBuffer.isView(value)) {
+    return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+  }
+  if (value instanceof ArrayBuffer) {
+    return new Uint8Array(value);
+  }
+  return new TextEncoder().encode(String(value));
+}
+
+function isAsyncIterable(value: unknown): value is AsyncIterable<unknown> {
+  return typeof value === "object" && value !== null && Symbol.asyncIterator in value;
 }
 
 function parseStructuredOutput(content: string): unknown {

@@ -1,5 +1,7 @@
 export * from "./context-pack.js";
 export * from "./context-ledger.js";
+export * from "./conversation-compaction.js";
+export * from "./token-counter.js";
 export * from "./builtin-tool-runtime.js";
 export * from "./event-hub.js";
 export * from "./execution-adapter.js";

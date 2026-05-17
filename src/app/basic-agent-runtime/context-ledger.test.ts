@@ -108,13 +108,14 @@ test("context ledger reports truncation when messages or chars exceed budget", (
 
   assert.equal(ledger.truncationReport.truncated, true);
   assert.equal(ledger.truncationReport.omittedItemCount > 0, true);
-  assert.equal(ledger.budget.estimatedInputTokens !== undefined, true);
+  assert.equal(ledger.budget.usedInputTokens > 0, true);
+  assert.equal(ledger.budget.tokenCountSource, "openai_tiktoken");
   assert.equal(ledger.readModel.entries.some((entry) => entry.status === "omitted"), true);
   assert.equal(ledger.readModel.entries.some((entry) => entry.kind === "truncation" && entry.status === "omitted"), true);
   assert.equal(ledger.readModel.entries.some((entry) => entry.kind === "budget" && entry.status === "truncated"), true);
 });
 
-test("context ledger summarizes older history and keeps the latest four pairs as turns", () => {
+test("context ledger preserves older history until a model-compacted summary is provided", () => {
   const taskSoil = createTaskSoil({ rawGoal: "continue", goalId: "goal-history", traceId: "trace-history" });
   const conversationHistory = Array.from({ length: 6 }, (_, index) => ([
     {
@@ -136,13 +137,13 @@ test("context ledger summarizes older history and keeps the latest four pairs as
     conversationHistory,
   });
 
-  const summary = ledger.items.find((item) => item.sourceKind === "conversation_summary");
+  const olderTurns = ledger.items.filter((item) => item.sourceKind === "conversation");
   const recentTurns = ledger.items.filter((item) => item.sourceKind === "conversation_recent_turn");
 
-  assert.notEqual(summary, undefined);
-  assert.equal(summary?.summary.includes("older user 0"), true);
-  assert.equal(summary?.summary.includes("older assistant 1"), true);
-  assert.equal(summary?.summary.includes("older user 2"), false);
+  assert.equal(ledger.items.some((item) => item.sourceKind === "conversation_summary"), false);
+  assert.equal(olderTurns.length, 4);
+  assert.equal(olderTurns[0]?.summary.includes("older user 0"), true);
+  assert.equal(olderTurns[3]?.summary.includes("older assistant 1"), true);
   assert.equal(recentTurns.length, 8);
   assert.deepEqual(recentTurns.map((item) => item.role), [
     "user",
@@ -157,7 +158,75 @@ test("context ledger summarizes older history and keeps the latest four pairs as
   assert.equal(recentTurns.at(-1)?.summary.includes("older assistant 5"), true);
 });
 
-test("context ledger conversation summary redacts secrets and internal raw fragments", () => {
+test("context ledger uses model-compacted conversation summary when provided", () => {
+  const taskSoil = createTaskSoil({ rawGoal: "continue", goalId: "goal-ai-history", traceId: "trace-ai-history" });
+  const conversationHistory = Array.from({ length: 6 }, (_, index) => ([
+    {
+      role: "user" as const,
+      content: `older user ${index}`,
+      ref: `conversation:ai-history:user:${index}`,
+    },
+    {
+      role: "assistant" as const,
+      content: `older assistant ${index}`,
+      ref: `conversation:ai-history:assistant:${index}`,
+    },
+  ])).flat();
+
+  const ledger = createBasicAgentContextLedger({
+    runId: "run-ai-history",
+    goal: "continue from previous work",
+    taskSoil,
+    conversationHistory: conversationHistory.slice(-8),
+    conversationSummary: {
+      summaryId: "context:conversation-summary:ai",
+      summary: "AI summary of older user and assistant decisions.",
+      coveredRefs: conversationHistory.slice(0, 4).map((message) => message.ref ?? "missing"),
+      modelRequestId: "model-request-summary",
+      modelResponseId: "model-response-summary",
+    },
+  });
+
+  const summary = ledger.items.find((item) => item.sourceKind === "conversation_summary");
+  const recentTurns = ledger.items.filter((item) => item.sourceKind === "conversation_recent_turn");
+
+  assert.notEqual(summary, undefined);
+  assert.equal(summary?.summary.includes("AI summary"), true);
+  assert.equal(recentTurns.length, 8);
+});
+
+test("context ledger keeps recent role history ahead of bulky skills under budget", () => {
+  const taskSoil = createTaskSoil({ rawGoal: "continue", goalId: "goal-history-priority", traceId: "trace-history-priority" });
+  const conversationHistory = [
+    { role: "user" as const, content: "recent user should stay", ref: "conversation:priority:user" },
+    { role: "assistant" as const, content: "recent assistant should stay", ref: "conversation:priority:assistant" },
+  ];
+
+  const ledger = createBasicAgentContextLedger({
+    runId: "run-history-priority",
+    goal: "current message should stay",
+    taskSoil,
+    conversationHistory,
+    skillContexts: [{
+      ...skillContext(),
+      body: `Bulky skill body ${"x".repeat(3_000)}`,
+    }],
+    maxMessages: 4,
+    maxChars: 2_000,
+  });
+
+  assert.equal(ledger.items.some((item) => item.sourceKind === "user_message"), true);
+  assert.deepEqual(
+    ledger.items
+      .filter((item) => item.sourceKind === "conversation_recent_turn")
+      .map((item) => item.role),
+    ["user", "assistant"]
+  );
+  assert.equal(ledger.items.some((item) => item.sourceKind === "skill"), false);
+  assert.equal(ledger.truncationReport.truncated, true);
+});
+
+test("context ledger conversation history redacts secrets and internal raw fragments", () => {
   const taskSoil = createTaskSoil({ rawGoal: "continue safely", goalId: "goal-safe-history", traceId: "trace-safe-history" });
   const ledger = createBasicAgentContextLedger({
     runId: "run-safe-history",
@@ -189,10 +258,10 @@ test("context ledger conversation summary redacts secrets and internal raw fragm
     ],
   });
 
-  const summary = ledger.items.find((item) => item.sourceKind === "conversation_summary");
-  const text = JSON.stringify(summary);
+  const text = JSON.stringify(
+    ledger.items.filter((item) => item.sourceKind === "conversation" || item.sourceKind === "conversation_recent_turn")
+  );
 
-  assert.notEqual(summary, undefined);
   assert.equal(text.includes("safe older request"), true);
   assert.equal(text.includes("safe older answer"), true);
   assert.equal(text.includes("sk-history-secret"), false);

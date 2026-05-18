@@ -1,8 +1,21 @@
 import React, { useMemo, useState } from "react";
 import { ChevronRight, Cpu, Database, Globe2, Plus, Search, ShieldCheck, Wrench, Zap } from "lucide-react";
-import type { ConfigResponse, SkillDefinition, ToolCatalogItem, ToolsResponse } from "../types";
+import type {
+  ConfigResponse,
+  ModelProviderModelCatalog,
+  ModelProviderPreset,
+  SkillDefinition,
+  ToolCatalogItem,
+  ToolsResponse,
+} from "../types";
 
-type ModelForm = { readonly baseUrl: string; readonly model: string; readonly apiKey: string };
+type ModelForm = {
+  readonly profileId: string;
+  readonly label: string;
+  readonly baseUrl: string;
+  readonly model: string;
+  readonly apiKey: string;
+};
 type ToolForm = { readonly provider: string; readonly tavilyApiKey: string; readonly maxResults: string };
 type ButtonVariant = "primary" | "outline";
 
@@ -150,6 +163,11 @@ export function SettingsPage(props: {
   readonly savingModel?: boolean;
   readonly savingWorkspace?: boolean;
   readonly onSaveModel: () => void;
+  readonly onCreatePresetProfile: (preset: ModelProviderPreset) => void;
+  readonly onCreateCustomProfile: () => void;
+  readonly onActivateProfile: (profileId: string) => void;
+  readonly onFetchModels: () => void;
+  readonly modelCatalog?: ModelProviderModelCatalog;
   readonly onSaveWorkspace: () => void;
 }): React.ReactElement {
   const [activeTab, setActiveTab] = useState<"model" | "workspace" | "safety">("model");
@@ -179,12 +197,20 @@ export function SettingsPage(props: {
             {activeTab === "model" && (
               <>
                 <section className="settings-panel-card">
-                  <SettingRow label="Base URL" description="模型服务地址。" control={<input className="settings-input" value={props.modelForm.baseUrl} onChange={(event) => props.setModelForm({ ...props.modelForm, baseUrl: event.target.value })} />} />
-                  <SettingRow label="模型名" description="默认使用的模型。" control={<input className="settings-input" value={props.modelForm.model} onChange={(event) => props.setModelForm({ ...props.modelForm, model: event.target.value })} />} />
+                  <SettingRow label="当前配置" description="选择已保存的模型厂商配置。" control={<select className="settings-input" value={props.config?.config?.profileId ?? ""} onChange={(event) => props.onActivateProfile(event.target.value)}>{(props.config?.profiles ?? []).length === 0 && <option value="">默认配置</option>}{(props.config?.profiles ?? []).map((profile) => <option value={profile.profileId} key={profile.profileId}>{profile.label ?? profile.profileId}</option>)}</select>} />
+                  <SettingRow label="名称" description="用于区分不同厂商或网关。" control={<input className="settings-input" value={props.modelForm.label} onChange={(event) => props.setModelForm({ ...props.modelForm, label: event.target.value })} />} />
+                  <SettingRow label="Base URL" description="OpenAI SDK baseURL，按厂商要求填写，不自动假设 /v1。" control={<input className="settings-input" value={props.modelForm.baseUrl} onChange={(event) => props.setModelForm({ ...props.modelForm, baseUrl: event.target.value })} />} />
+                  <SettingRow label="模型名" description="默认使用的模型，可从厂商模型列表选择。" control={<input className="settings-input" value={props.modelForm.model} onChange={(event) => props.setModelForm({ ...props.modelForm, model: event.target.value })} />} />
                   <SettingRow label="运行模式" description="选择是否启用已配置的模型服务。" control={<select className="settings-input" value={props.aiMode} onChange={(event) => props.setAiMode(event.target.value as "none" | "openai-compatible")}><option value="openai-compatible">启用模型</option><option value="none">停用模型</option></select>} />
                   <SettingRow label="API Key" description="密钥只进入本地 secret store。" control={<input className="settings-input" value={props.modelForm.apiKey} onChange={(event) => props.setModelForm({ ...props.modelForm, apiKey: event.target.value })} placeholder={props.config?.config?.secretConfigured ? "已保存，留空则不修改" : "请输入密钥"} />} last />
                 </section>
-                <Button variant="primary" onClick={props.onSaveModel} disabled={props.savingModel}>{props.savingModel ? "保存中…" : "保存模型配置"}</Button>
+                <div className="flex flex-wrap gap-2">
+                  <Button variant="primary" onClick={props.onSaveModel} disabled={props.savingModel}>{props.savingModel ? "保存中…" : "保存当前配置"}</Button>
+                  <Button onClick={props.onCreateCustomProfile} disabled={props.savingModel}>保存为自定义厂商</Button>
+                  <Button onClick={props.onFetchModels} disabled={props.savingModel || props.config?.config?.profileId === undefined}>获取模型列表</Button>
+                </div>
+                <ModelMarket presets={props.config?.modelProviderMarket?.presets ?? []} onCreatePresetProfile={props.onCreatePresetProfile} />
+                <ModelCatalogPanel catalog={props.modelCatalog} selectedModel={props.modelForm.model} onSelectModel={(model) => props.setModelForm({ ...props.modelForm, model })} />
               </>
             )}
             {activeTab === "workspace" && (
@@ -324,6 +350,72 @@ function WebSearchConfigCard(props: {
         {props.configOpen && <Button variant="primary" onClick={props.onSaveTools} disabled={props.saving}>{props.saving ? "保存中…" : "保存"}</Button>}
       </div>
     </article>
+  );
+}
+
+function ModelMarket(props: {
+  readonly presets: readonly ModelProviderPreset[];
+  readonly onCreatePresetProfile: (preset: ModelProviderPreset) => void;
+}): React.ReactElement | null {
+  if (props.presets.length === 0) return null;
+  return (
+    <section className="workspace-section">
+      <SectionDivider label="常驻厂商" />
+      <div className="workspace-card-grid">
+        {props.presets.map((preset) => (
+          <article className="workspace-card" key={preset.presetId}>
+            <div className="workspace-card-header">
+              <IconTile icon={<Cpu size={16} />} />
+              <Badge tone="neutral">{preset.regionLabel ?? "OpenAI 兼容"}</Badge>
+            </div>
+            <div className="workspace-card-main">
+              <h3 className="workspace-card-title">{preset.label}</h3>
+              <p className="workspace-card-desc">{preset.description}</p>
+            </div>
+            <div className="workspace-card-footer">
+              <span className="muted-label">{preset.defaultModel ?? "模型可同步"}</span>
+              <button type="button" className="workspace-inline-action" onClick={() => props.onCreatePresetProfile(preset)}>添加</button>
+            </div>
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function ModelCatalogPanel(props: {
+  readonly catalog?: ModelProviderModelCatalog;
+  readonly selectedModel: string;
+  readonly onSelectModel: (model: string) => void;
+}): React.ReactElement | null {
+  const catalog = props.catalog;
+  if (catalog === undefined) return null;
+  return (
+    <section className="workspace-section">
+      <SectionDivider label="模型列表" />
+      {catalog.models.length === 0 ? (
+        <EmptyBlock>该厂商没有返回可展示的模型。</EmptyBlock>
+      ) : (
+        <div className="workspace-card-grid">
+          {catalog.models.slice(0, 12).map((model) => (
+            <article className="workspace-card" key={model.id}>
+              <div className="workspace-card-header">
+                <IconTile icon={<Cpu size={16} />} />
+                <Badge tone={model.id === props.selectedModel ? "success" : "neutral"}>{model.id === props.selectedModel ? "当前" : "可选"}</Badge>
+              </div>
+              <div className="workspace-card-main">
+                <h3 className="workspace-card-title">{model.displayName}</h3>
+                <p className="workspace-card-desc">{model.owner === undefined ? catalog.baseUrl : `归属：${model.owner}`}</p>
+              </div>
+              <div className="workspace-card-footer">
+                <span className="muted-label">{model.createdAt === undefined ? "模型" : model.createdAt.slice(0, 10)}</span>
+                <button type="button" className="workspace-inline-action" onClick={() => props.onSelectModel(model.id)}>选择</button>
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
   );
 }
 

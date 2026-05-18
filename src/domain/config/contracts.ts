@@ -32,6 +32,36 @@ export type ModelPreferredApiStyle =
 
 export type ModelStability = "stable" | "preview" | "deprecated" | "unknown";
 
+export type ModelProviderPreset = {
+  readonly presetId: string;
+  readonly label: string;
+  readonly vendor: string;
+  readonly description: string;
+  readonly providerKind: ConfiguredModelProviderKind;
+  readonly protocolKind: ConfiguredModelProtocolKind;
+  readonly baseUrl: string;
+  readonly modelsPath: string;
+  readonly defaultModel?: string;
+  readonly regionLabel?: string;
+  readonly docsUrl?: string;
+};
+
+export type ModelProviderModelCatalogItem = {
+  readonly id: string;
+  readonly displayName: string;
+  readonly owner?: string;
+  readonly createdAt?: string;
+};
+
+export type ModelProviderModelCatalog = {
+  readonly profileId: string;
+  readonly label?: string;
+  readonly baseUrl: string;
+  readonly modelsPath: string;
+  readonly fetchedAt: string;
+  readonly models: readonly ModelProviderModelCatalogItem[];
+};
+
 export type ModelCapabilities = {
   readonly contextWindowTokens: number;
   readonly maxOutputTokens: number;

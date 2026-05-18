@@ -75,6 +75,7 @@ export function projectRunJobToBasicRun(job: BasicAgentRunProjectionInput): Basi
 
 export function projectRunStreamEventToRunEvent(event: BasicAgentRunStreamEventProjectionInput): RunEvent {
   const summary = safeEventSummary(event.detail?.preview ?? event.delta ?? event.summary);
+  const delta = event.delta === undefined ? undefined : safeEventSummary(event.delta);
   return {
     id: event.eventId,
     runId: event.runId,
@@ -82,6 +83,7 @@ export function projectRunStreamEventToRunEvent(event: BasicAgentRunStreamEventP
     type: event.type,
     title: basicEventTitle(event),
     summary,
+    delta,
     status: basicStatusForRunEvent(event),
     timestamp: event.createdAt,
     refs: basicRefsFor(event),

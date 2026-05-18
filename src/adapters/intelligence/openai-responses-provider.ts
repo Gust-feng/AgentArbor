@@ -14,6 +14,7 @@ import { createId, nowIso } from "../../kernel/id.js";
 import { createFailedModelResponse } from "../../kernel/intelligence/failures.js";
 import { pendingModelOutputValidation } from "../../kernel/intelligence/validation.js";
 import type { FetchLike } from "./openai-compatible-chat-completions-provider.js";
+import { normalizeOpenAICompatibleSdkBaseUrl } from "./openai-compatible-base-url.js";
 
 export type OpenAIResponsesProviderOptions = {
   readonly providerId?: string;
@@ -66,7 +67,7 @@ export class OpenAIResponsesProvider implements ModelProvider {
     try {
       const client = new OpenAI({
         apiKey: this.apiKey,
-        baseURL: responsesBaseUrl(this.baseUrl),
+        baseURL: normalizeOpenAICompatibleSdkBaseUrl(this.baseUrl),
         fetch: toOpenAIFetch(fetchImpl),
         maxRetries: 0,
       });
@@ -618,10 +619,6 @@ function resolveGlobalFetch(): FetchLike | undefined {
 
 function trimTrailingSlashes(value: string): string {
   return value.replace(/\/+$/, "");
-}
-
-function responsesBaseUrl(baseUrl: string): string {
-  return baseUrl.endsWith("/v1") ? baseUrl : `${baseUrl}/v1`;
 }
 
 function failureKindForStatus(status: number): ModelFailureKind {

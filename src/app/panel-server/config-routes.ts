@@ -1,5 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { SanitizedWebSearchConfig } from "../../domain/config/index.js";
+import { listBuiltinModelProviderPresets } from "../../domain/config/index.js";
+import { fetchModelRuntimeModelCatalog } from "../model-runtime/index.js";
 import { CapabilityCenter } from "../capability-center.js";
 import {
   ConfigCenter,
@@ -20,12 +22,13 @@ import {
   parseWebSearchUpdate,
   parseWorkspaceUpdate,
 } from "./request-parsers.js";
-import type { PanelProviderFetch } from "./types.js";
+import type { PanelModelCatalogFetch, PanelProviderFetch } from "./types.js";
 
 export type PanelConfigRouteRuntime = {
   readonly configCenter: ConfigCenter;
   readonly capabilityCenter: CapabilityCenter;
   readonly providerFetch?: PanelProviderFetch;
+  readonly modelCatalogFetch?: PanelModelCatalogFetch;
   readonly workspaceDirectoryPicker?: () => Promise<string | undefined>;
 };
 
@@ -48,6 +51,9 @@ export async function handlePanelConfigRoute(
       status: "completed",
       config,
       profiles: await runtime.configCenter.listModelProviderProfiles(),
+      modelProviderMarket: {
+        presets: listBuiltinModelProviderPresets(),
+      },
       capabilities,
       informationAccess: await runtime.configCenter.getInformationAccessConfig(),
       workspace: await runtime.configCenter.getWorkspaceConfig(),
@@ -70,6 +76,20 @@ export async function handlePanelConfigRoute(
       status: "completed",
       profiles: await runtime.configCenter.listModelProviderProfiles(),
       activeProfile: await runtime.configCenter.getModelProviderConfig(),
+      modelProviderMarket: {
+        presets: listBuiltinModelProviderPresets(),
+      },
+    });
+    return true;
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/config/model-provider-market") {
+    writeJson(response, 200, {
+      ok: true,
+      status: "completed",
+      presets: listBuiltinModelProviderPresets(),
+      profiles: await runtime.configCenter.listModelProviderProfiles(),
+      activeProfile: await runtime.configCenter.getModelProviderConfig(),
     });
     return true;
   }
@@ -83,6 +103,9 @@ export async function handlePanelConfigRoute(
         status: "completed",
         profile,
         profiles: await runtime.configCenter.listModelProviderProfiles(),
+        modelProviderMarket: {
+          presets: listBuiltinModelProviderPresets(),
+        },
         capabilities: await runtime.capabilityCenter.snapshot(),
       });
       return true;
@@ -105,11 +128,48 @@ export async function handlePanelConfigRoute(
         status: "completed",
         profile,
         profiles: await runtime.configCenter.listModelProviderProfiles(),
+        modelProviderMarket: {
+          presets: listBuiltinModelProviderPresets(),
+        },
         capabilities: await runtime.capabilityCenter.snapshot(),
       });
       return true;
     } catch (error) {
       throw configCenterHttpError(error);
+    }
+  }
+
+  const modelProfileModelsMatch = /^\/api\/config\/model-profiles\/([^/]+)\/models$/.exec(url.pathname);
+  if (request.method === "GET" && modelProfileModelsMatch !== null) {
+    try {
+      const profileId = decodeURIComponent(modelProfileModelsMatch[1] ?? "");
+      const profile = (await runtime.configCenter.listModelProviderProfiles()).find((item) => item.profileId === profileId);
+      if (profile === undefined) {
+        throw new PanelHttpError(404, "model_profile_not_found", "未找到模型配置。");
+      }
+      if (profile.providerKind !== "openai_compatible" || profile.protocolKind !== "openai_compatible_chat_completions") {
+        throw new PanelHttpError(400, "unsupported_model_provider", "当前只支持 OpenAI-compatible Chat Completions 模型列表。");
+      }
+      const apiKey = await runtime.configCenter.getModelProviderApiKey(profile.profileId);
+      if (apiKey === undefined) {
+        throw new PanelHttpError(400, "missing_model_provider_key", "获取模型列表前需要先保存该厂商的 API Key。");
+      }
+      const catalog = await fetchModelRuntimeModelCatalog({
+        profile,
+        apiKey,
+        fetch: runtime.modelCatalogFetch,
+      });
+      writeJson(response, 200, {
+        ok: true,
+        status: "completed",
+        catalog,
+      });
+      return true;
+    } catch (error) {
+      if (error instanceof PanelHttpError) {
+        throw error;
+      }
+      throw new PanelHttpError(502, "model_catalog_failed", "模型列表获取失败，请检查厂商地址、密钥和网络。");
     }
   }
 
@@ -124,6 +184,9 @@ export async function handlePanelConfigRoute(
         status: "completed",
         profile,
         config: profile,
+        modelProviderMarket: {
+          presets: listBuiltinModelProviderPresets(),
+        },
         capabilities: await runtime.capabilityCenter.snapshot(),
       });
       return true;
@@ -142,6 +205,9 @@ export async function handlePanelConfigRoute(
         ok: true,
         status: "completed",
         profiles,
+        modelProviderMarket: {
+          presets: listBuiltinModelProviderPresets(),
+        },
         capabilities: await runtime.capabilityCenter.snapshot(),
       });
       return true;
@@ -174,6 +240,9 @@ export async function handlePanelConfigRoute(
         status: "completed",
         config,
         profiles: await runtime.configCenter.listModelProviderProfiles(),
+        modelProviderMarket: {
+          presets: listBuiltinModelProviderPresets(),
+        },
         capabilities: await runtime.capabilityCenter.snapshot(),
         informationAccess: await runtime.configCenter.getInformationAccessConfig(),
       });

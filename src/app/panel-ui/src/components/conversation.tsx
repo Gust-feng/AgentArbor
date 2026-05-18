@@ -26,17 +26,25 @@ export function ConversationView(props: {
   const answer = props.workSession?.answer?.content ?? visibleResultText(props.detail) ?? latestAssistantTurn?.content;
   const pending = props.workSession?.pendingConfirmation ?? props.pendingConfirmation;
   const deliverable = visibleDeliverable(props.workSession?.deliverable, answer, latestAssistantTurn?.content);
+  const liveAnswer = liveStreamingAnswer(props.events);
   const completedAnswer =
     props.run?.status === "completed" &&
     deliverable === undefined &&
     answer !== undefined &&
     pending === undefined;
   const shouldAppendAnswer = completedAnswer && latestAssistantTurn === undefined;
-  const showStatusBubble =
+  const shouldShowLiveAnswer =
+    liveAnswer !== undefined &&
     props.run !== undefined &&
     pending === undefined &&
     deliverable === undefined &&
     isActiveRunStatus(props.run.status);
+  const showStatusBubble =
+    props.run !== undefined &&
+    pending === undefined &&
+    deliverable === undefined &&
+    isActiveRunStatus(props.run.status) &&
+    !shouldShowLiveAnswer;
   const blockedStatus = blockedStatusMessage(props.run, props.workSession, props.detail);
 
   if (turns.length === 0 && props.run === undefined && props.error === undefined) {
@@ -50,6 +58,7 @@ export function ConversationView(props: {
         {shouldAppendAnswer && <AssistantPlainAnswer answer={answer} />}
         {pending !== undefined && <ConfirmationCard confirmation={pending} onDecision={props.onDecision} busy={props.confirmationBusy} />}
         {deliverable !== undefined && <DeliverableCard deliverable={deliverable} />}
+        {shouldShowLiveAnswer && <AssistantLiveAnswer answer={liveAnswer} />}
         {blockedStatus !== undefined && <AssistantNoticeCard title={blockedStatus.title} message={blockedStatus.message} tone={blockedStatus.tone} />}
         {showStatusBubble && <AssistantStatusBubble run={props.run} workSession={props.workSession} />}
         {props.error !== undefined && (
@@ -185,6 +194,20 @@ function visibleDeliverable(
   return deliverable;
 }
 
+function liveStreamingAnswer(events: readonly RunEvent[]): string | undefined {
+  const deltas = events.filter((event) => event.type === "model.output.delta" && event.delta !== undefined && event.delta.trim().length > 0);
+  const latest = deltas.at(-1);
+  if (latest === undefined) {
+    return undefined;
+  }
+  const latestModelRef = latest.refs.find((ref) => ref.kind === "model_call")?.id;
+  const sameLineage = latestModelRef === undefined
+    ? deltas
+    : deltas.filter((event) => event.refs.some((ref) => ref.kind === "model_call" && ref.id === latestModelRef));
+  const text = sameLineage.map((event) => event.delta ?? "").join("").trim();
+  return text.length === 0 ? undefined : text;
+}
+
 function isInternalSummaryTitle(title: string): boolean {
   return ["已", "整理", "结果"].every((part) => title.includes(part)) || ["结果", "摘要"].every((part) => title.includes(part));
 }
@@ -294,6 +317,20 @@ function AssistantPlainAnswer({ answer }: { readonly answer: string }): React.Re
         <div className="flex items-center gap-0.5 mt-2.5 opacity-0 group-hover:opacity-100 transition-opacity">
           <TurnActionButton icon={<Copy size={13} />} label="复制" onClick={() => copyToClipboard(userVisibleAnswer(answer))} />
         </div>
+      </div>
+    </article>
+  );
+}
+
+function AssistantLiveAnswer({ answer }: { readonly answer: string }): React.ReactElement {
+  return (
+    <article className="flex gap-3 group">
+      <AssistantAvatar />
+      <div className="flex-1 min-w-0 max-w-[80%]">
+        <div className="text-sm text-[#374151] py-1">
+          <RichText text={userVisibleAnswer(answer)} />
+        </div>
+        <TypingDots />
       </div>
     </article>
   );

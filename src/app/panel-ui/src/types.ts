@@ -41,6 +41,7 @@ export type RunEvent = {
   readonly type: string;
   readonly title: string;
   readonly summary?: string;
+  readonly delta?: string;
   readonly status: TaskStatus;
   readonly timestamp: string;
   readonly refs: readonly ObservationRef[];
@@ -337,10 +338,17 @@ export type ConfigResponse = {
   readonly config?: {
     readonly profileId?: string;
     readonly label?: string;
+    readonly providerKind?: string;
+    readonly protocolKind?: string;
     readonly baseUrl?: string;
     readonly model?: string;
     readonly defaultAiMode?: "none" | "fake" | "openai-compatible";
     readonly secretConfigured?: boolean;
+  };
+  readonly profile?: ModelProviderProfile;
+  readonly profiles?: readonly ModelProviderProfile[];
+  readonly modelProviderMarket?: {
+    readonly presets?: readonly ModelProviderPreset[];
   };
   readonly workspace?: {
     readonly workspaceDirectory?: string;
@@ -354,6 +362,36 @@ export type ConfigResponse = {
     };
     readonly warnings?: readonly string[];
   };
+};
+
+export type ModelProviderProfile = NonNullable<ConfigResponse["config"]>;
+
+export type ModelProviderPreset = {
+  readonly presetId: string;
+  readonly label: string;
+  readonly vendor: string;
+  readonly description: string;
+  readonly providerKind: string;
+  readonly protocolKind: string;
+  readonly baseUrl: string;
+  readonly modelsPath: string;
+  readonly defaultModel?: string;
+  readonly regionLabel?: string;
+  readonly docsUrl?: string;
+};
+
+export type ModelProviderModelCatalog = {
+  readonly profileId: string;
+  readonly label?: string;
+  readonly baseUrl: string;
+  readonly modelsPath: string;
+  readonly fetchedAt: string;
+  readonly models: readonly {
+    readonly id: string;
+    readonly displayName: string;
+    readonly owner?: string;
+    readonly createdAt?: string;
+  }[];
 };
 
 export type ToolsResponse = {

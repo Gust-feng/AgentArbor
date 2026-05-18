@@ -4,6 +4,7 @@ export {
 } from "./request-handler.js";
 
 export type {
+  PanelModelCatalogFetch,
   PanelProviderFetch,
   PanelServerOptions,
   StartedPanelServer,

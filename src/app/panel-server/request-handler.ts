@@ -48,7 +48,7 @@ import {
 import { handlePanelBasicAgentRoute } from "./basic-agent-routes.js";
 import { handlePanelConfigRoute } from "./config-routes.js";
 import { handlePanelContextRoute } from "./context-routes.js";
-import type { PanelProviderFetch, PanelServerOptions, StartedPanelServer } from "./types.js";
+import type { PanelModelCatalogFetch, PanelProviderFetch, PanelServerOptions, StartedPanelServer } from "./types.js";
 import {
   asRecord,
   defaultAiModeForRunKind,
@@ -106,7 +106,7 @@ import {
 import { PanelRunJobStore, type PanelDesktopRunMode, type PanelRunJob, type PanelRunKind } from "../panel-run-jobs.js";
 import {
   PanelConversationStore,
-  trimRuntimeConversationToCompletedPairs,
+  trimRuntimeConversationToClosedPairs,
   toRuntimeConversationRecord,
   type PanelConversationReadModel,
   type PanelConversationSummaryReadModel,
@@ -131,13 +131,14 @@ import {
 } from "../skills/index.js";
 import { redactSensitiveText } from "../../kernel/redaction.js";
 
-export type { PanelProviderFetch, PanelServerOptions, StartedPanelServer } from "./types.js";
+export type { PanelModelCatalogFetch, PanelProviderFetch, PanelServerOptions, StartedPanelServer } from "./types.js";
 
 type PanelRuntime = {
   readonly configCenter: ConfigCenter;
   readonly capabilityCenter: CapabilityCenter;
   readonly configDirectory?: string;
   readonly providerFetch?: PanelProviderFetch;
+  readonly modelCatalogFetch?: PanelModelCatalogFetch;
   readonly workspaceDirectoryPicker?: () => Promise<string | undefined>;
   readonly runJobs: PanelRunJobStore;
   readonly activeRunJobs: Set<Promise<void>>;
@@ -275,6 +276,7 @@ function createPanelRuntime(options: PanelServerOptions): PanelRuntime {
       configCenter: options.configCenter,
       configDirectory: options.configDirectory,
       providerFetch: options.providerFetch,
+      modelCatalogFetch: options.modelCatalogFetch,
       workspaceDirectoryPicker: options.workspaceDirectoryPicker,
       skillRoots: resolveSkillRoots(options),
       skillStateStore: resolveSkillStateStore(options.configDirectory),
@@ -287,6 +289,7 @@ function createPanelRuntime(options: PanelServerOptions): PanelRuntime {
     configCenter: local.configCenter,
     configDirectory: local.configDirectory,
     providerFetch: options.providerFetch,
+    modelCatalogFetch: options.modelCatalogFetch,
     workspaceDirectoryPicker: options.workspaceDirectoryPicker,
     skillRoots: resolveSkillRoots(options),
     skillStateStore: resolveSkillStateStore(local.configDirectory),
@@ -298,6 +301,7 @@ function assemblePanelRuntime(input: {
   readonly configCenter: ConfigCenter;
   readonly configDirectory?: string;
   readonly providerFetch?: PanelProviderFetch;
+  readonly modelCatalogFetch?: PanelModelCatalogFetch;
   readonly workspaceDirectoryPicker?: () => Promise<string | undefined>;
   readonly runtimeDatabase?: RuntimeDatabase;
   readonly runtimePaths?: FileSystemRuntimeDatabasePaths;
@@ -320,6 +324,7 @@ function assemblePanelRuntime(input: {
     capabilityCenter,
     configDirectory: input.configDirectory,
     providerFetch: input.providerFetch,
+    modelCatalogFetch: input.modelCatalogFetch,
     workspaceDirectoryPicker: input.workspaceDirectoryPicker,
     runJobs,
     activeRunJobs,
@@ -995,7 +1000,7 @@ async function restorePersistedPanelConversation(
   record: RuntimeConversationRecord
 ): Promise<PanelConversationReadModel> {
   const completedRunIds = await completedAssistantRunIds(runtime, record);
-  const trimmed = trimRuntimeConversationToCompletedPairs({ record, completedRunIds });
+  const trimmed = trimRuntimeConversationToClosedPairs({ record, completedRunIds });
   const restored = runtime.conversations.restore(trimmed.record);
   if (trimmed.trimmed && runtime.runtimeDatabase !== undefined) {
     await runtime.runtimeDatabase.upsertConversation(toRuntimeConversationRecord(restored));
@@ -2889,7 +2894,7 @@ function buildConversationHistoryMessages(
     assistantIndex > 0 && conversation.turns[assistantIndex - 1]?.role === "user"
       ? assistantIndex - 1
       : assistantIndex;
-  const completedPairTurns: Array<(typeof conversation.turns)[number]> = [];
+  const closedPairTurns: Array<(typeof conversation.turns)[number]> = [];
   for (let index = 0; index + 1 < currentUserIndex; index += 2) {
     const userTurn = conversation.turns[index];
     const assistantTurn = conversation.turns[index + 1];
@@ -2897,17 +2902,26 @@ function buildConversationHistoryMessages(
       userTurn === undefined ||
       assistantTurn === undefined ||
       userTurn.role !== "user" ||
-      assistantTurn.role !== "assistant" ||
-      userTurn.status !== "completed" ||
-      assistantTurn.status !== "completed"
+      assistantTurn.role !== "assistant"
     ) {
       break;
     }
-    completedPairTurns.push(userTurn, assistantTurn);
+    if (userTurn.status !== "completed") {
+      break;
+    }
+    if (assistantTurn.status === "completed") {
+      closedPairTurns.push(userTurn, assistantTurn);
+      continue;
+    }
+    if (assistantTurn.status === "failed") {
+      closedPairTurns.push(userTurn, assistantTurn);
+      continue;
+    }
+    break;
   }
-  return completedPairTurns
+  return closedPairTurns
     .map((turn): DesktopAgentConversationMessage | undefined => {
-      const content = compactConversationHistoryText(sanitizeConversationHistoryText(turn.content), 1_200);
+      const content = conversationHistoryContentForModel(turn);
       if (content.length === 0) {
         return undefined;
       }
@@ -2918,6 +2932,19 @@ function buildConversationHistoryMessages(
       };
     })
     .filter((message): message is DesktopAgentConversationMessage => message !== undefined);
+}
+
+function conversationHistoryContentForModel(
+  turn: PanelConversationReadModel["turns"][number]
+): string {
+  const safeContent = compactConversationHistoryText(sanitizeConversationHistoryText(turn.content), 1_000);
+  if (turn.role === "assistant" && turn.status === "failed") {
+    return compactConversationHistoryText(
+      `系统错误：${safeContent.length === 0 ? "模型服务这次没有返回可用结果。" : safeContent}`,
+      1_200
+    );
+  }
+  return compactConversationHistoryText(safeContent, 1_200);
 }
 
 function numberOrUndefined(value: unknown): number | undefined {

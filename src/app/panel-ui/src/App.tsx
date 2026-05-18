@@ -24,6 +24,8 @@ import type {
   ContextAttachment,
   DesktopRunDetail,
   DesktopWorkSession,
+  ModelProviderModelCatalog,
+  ModelProviderPreset,
   RunEvent,
   SkillDefinition,
   ToolsResponse,
@@ -57,7 +59,8 @@ export function App(): React.ReactElement {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [goal, setGoal] = useState("");
   const [aiMode, setAiMode] = useState<"none" | "fake" | "openai-compatible">("openai-compatible");
-  const [modelForm, setModelForm] = useState({ baseUrl: "", model: "", apiKey: "" });
+  const [modelForm, setModelForm] = useState({ profileId: "", label: "", baseUrl: "", model: "", apiKey: "" });
+  const [modelCatalog, setModelCatalog] = useState<ModelProviderModelCatalog | undefined>(undefined);
   const [workspaceDirectory, setWorkspaceDirectory] = useState("");
   const [toolForm, setToolForm] = useState({ provider: "tavily", tavilyApiKey: "", maxResults: "5" });
   const [attachments, setAttachments] = useState<readonly ContextAttachment[]>([]);
@@ -85,10 +88,13 @@ export function App(): React.ReactElement {
     if (app.config?.config !== undefined) {
       setAiMode(normalizeVisibleAiMode(app.config.config.defaultAiMode));
       setModelForm({
+        profileId: app.config.config.profileId ?? "",
+        label: app.config.config.label ?? "",
         baseUrl: app.config.config.baseUrl ?? "",
         model: app.config.config.model ?? "",
         apiKey: "",
       });
+      setModelCatalog(undefined);
     }
     if (app.config?.workspace !== undefined) {
       setWorkspaceDirectory(app.config.workspace.workspaceDirectory ?? "");
@@ -346,6 +352,8 @@ export function App(): React.ReactElement {
     setSavingModel(true);
     try {
       const response = await postJson<ConfigResponse>("/api/config/model-provider", {
+        profileId: modelForm.profileId,
+        label: modelForm.label,
         baseUrl: modelForm.baseUrl,
         model: modelForm.model,
         apiKey: modelForm.apiKey,
@@ -354,6 +362,92 @@ export function App(): React.ReactElement {
       if (mountedRef.current) {
         setApp((previous) => ({ ...previous, config: response }));
         setModelForm((previous) => ({ ...previous, apiKey: "" }));
+        setModelCatalog(undefined);
+      }
+    } finally {
+      if (mountedRef.current) setSavingModel(false);
+    }
+  }
+
+  async function createPresetModelProfile(preset: ModelProviderPreset): Promise<void> {
+    setSavingModel(true);
+    try {
+      const response = await postJson<ConfigResponse>("/api/config/model-profiles", {
+        profileId: preset.presetId,
+        label: preset.label,
+        providerKind: preset.providerKind,
+        protocolKind: preset.protocolKind,
+        baseUrl: preset.baseUrl,
+        model: preset.defaultModel,
+        defaultAiMode: aiMode,
+      }).catch(async () => {
+        const activated = await postJson<ConfigResponse>(`/api/config/model-profiles/${encodeURIComponent(preset.presetId)}/activate`, {});
+        return { ...activated, profiles: app.config?.profiles, modelProviderMarket: app.config?.modelProviderMarket };
+      });
+      const activatedOnly =
+        response.config?.profileId === preset.presetId
+          ? response
+          : await postJson<ConfigResponse>(`/api/config/model-profiles/${encodeURIComponent(preset.presetId)}/activate`, {});
+      const activated = mergeConfigResponse(response, activatedOnly);
+      if (mountedRef.current) {
+        setApp((previous) => ({ ...previous, config: mergeConfigResponse(previous.config, activated) }));
+        setModelCatalog(undefined);
+      }
+    } finally {
+      if (mountedRef.current) setSavingModel(false);
+    }
+  }
+
+  async function createCustomModelProfile(): Promise<void> {
+    const label = modelForm.label.trim() || "自定义模型";
+    setSavingModel(true);
+    try {
+      const created = await postJson<ConfigResponse>("/api/config/model-profiles", {
+        profileId: label,
+        label,
+        providerKind: "openai_compatible",
+        protocolKind: "openai_compatible_chat_completions",
+        baseUrl: modelForm.baseUrl,
+        model: modelForm.model,
+        defaultAiMode: aiMode,
+        apiKey: modelForm.apiKey,
+      });
+      const profileId = created.profile?.profileId ?? created.config?.profileId ?? label;
+      const activatedOnly = await postJson<ConfigResponse>(`/api/config/model-profiles/${encodeURIComponent(profileId)}/activate`, {});
+      const activated = mergeConfigResponse(created, activatedOnly);
+      if (mountedRef.current) {
+        setApp((previous) => ({ ...previous, config: mergeConfigResponse(previous.config, activated) }));
+        setModelForm((previous) => ({ ...previous, apiKey: "" }));
+        setModelCatalog(undefined);
+      }
+    } finally {
+      if (mountedRef.current) setSavingModel(false);
+    }
+  }
+
+  async function activateModelProfile(profileId: string): Promise<void> {
+    setSavingModel(true);
+    try {
+      const response = await postJson<ConfigResponse>(`/api/config/model-profiles/${encodeURIComponent(profileId)}/activate`, {});
+      if (mountedRef.current) {
+        setApp((previous) => ({ ...previous, config: mergeConfigResponse(previous.config, response) }));
+        setModelCatalog(undefined);
+      }
+    } finally {
+      if (mountedRef.current) setSavingModel(false);
+    }
+  }
+
+  async function fetchModelsForActiveProfile(): Promise<void> {
+    const profileId = app.config?.config?.profileId;
+    if (profileId === undefined) return;
+    setSavingModel(true);
+    try {
+      const response = await getJson<{ readonly catalog: ModelProviderModelCatalog }>(
+        `/api/config/model-profiles/${encodeURIComponent(profileId)}/models`
+      );
+      if (mountedRef.current) {
+        setModelCatalog(response.catalog);
       }
     } finally {
       if (mountedRef.current) setSavingModel(false);
@@ -551,6 +645,11 @@ export function App(): React.ReactElement {
               savingModel={savingModel}
               savingWorkspace={savingWorkspace}
               onSaveModel={() => void saveModelConfig()}
+              onCreatePresetProfile={(preset) => void createPresetModelProfile(preset)}
+              onCreateCustomProfile={() => void createCustomModelProfile()}
+              onActivateProfile={(profileId) => void activateModelProfile(profileId)}
+              onFetchModels={() => void fetchModelsForActiveProfile()}
+              modelCatalog={modelCatalog}
               onSaveWorkspace={() => void saveWorkspace()}
             />
           )}
@@ -628,6 +727,18 @@ function startSkillChat(
   setGoal(trigger === undefined || trigger.length === 0
     ? `使用「${skill.name}」处理当前任务：`
     : `使用「${skill.name}」处理当前任务：${trigger}`);
+}
+
+function mergeConfigResponse(previous: ConfigResponse | undefined, incoming: ConfigResponse): ConfigResponse {
+  return {
+    ...previous,
+    ...incoming,
+    config: incoming.config ?? incoming.profile ?? previous?.config,
+    profiles: incoming.profiles ?? previous?.profiles,
+    modelProviderMarket: incoming.modelProviderMarket ?? previous?.modelProviderMarket,
+    workspace: incoming.workspace ?? previous?.workspace,
+    capabilities: incoming.capabilities ?? previous?.capabilities,
+  };
 }
 
 function normalizeVisibleAiMode(mode: "none" | "fake" | "openai-compatible" | undefined): "none" | "openai-compatible" {

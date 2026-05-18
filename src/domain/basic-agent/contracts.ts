@@ -40,6 +40,7 @@ export type RunEvent = {
   readonly type: string;
   readonly title: string;
   readonly summary?: string;
+  readonly delta?: string;
   readonly status: AgentTaskStatus;
   readonly timestamp: string;
   readonly refs: readonly ObservationRef[];

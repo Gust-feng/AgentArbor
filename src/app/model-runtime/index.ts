@@ -6,6 +6,7 @@ export {
   createConfiguredToolCenter,
   createConfiguredToolCenterFactory,
   createDefaultToolCenter,
+  fetchModelRuntimeModelCatalog,
   createModelRuntimeConfig,
   createModelRuntimeDisabledConfigurationError,
   ModelRuntimeConfigurationError,
@@ -15,6 +16,7 @@ export type {
   ModelRuntimeConfig,
   ModelRuntimeConfigurationIssueCode,
   ModelRuntimeEnvironment,
+  ModelRuntimeModelCatalogFetch,
   ModelRuntimeMode,
   ModelRuntimeProviderFetch,
 } from "../intelligence-channel-factory.js";

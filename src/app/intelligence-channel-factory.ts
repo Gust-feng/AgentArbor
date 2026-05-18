@@ -2,12 +2,18 @@ import {
   FakeModelProvider,
   OpenAICompatibleChatCompletionsProvider,
   OpenAIResponsesProvider,
+  fetchOpenAICompatibleModelCatalog,
   type FetchLike,
+  type ModelCatalogFetchLike,
 } from "../adapters/intelligence/index.js";
 import { NativeIntelligenceChannel } from "../kernel/intelligence/channel.js";
 import type { IntelligenceChannel, ModelOutputDelta } from "../domain/intelligence/index.js";
 import type { InformationSourceKind } from "../domain/research/index.js";
-import type { ToolStateSettings } from "../domain/config/index.js";
+import type {
+  ModelProviderModelCatalog,
+  SanitizedModelProviderConfig,
+  ToolStateSettings,
+} from "../domain/config/index.js";
 import type { ToolExecutionBroker } from "../domain/tools/index.js";
 import type { ConfigCenter } from "./config-center.js";
 import type { MinimalRuntime } from "./runtime.js";
@@ -18,6 +24,7 @@ export type ModelRuntimeMode = "none" | "fake" | "openai-compatible" | "openai-r
 
 export type ModelRuntimeEnvironment = Readonly<Record<string, string | undefined>>;
 export type ModelRuntimeProviderFetch = FetchLike;
+export type ModelRuntimeModelCatalogFetch = ModelCatalogFetchLike;
 
 export type ModelRuntimeConfig =
   | {
@@ -131,6 +138,15 @@ export function createModelRuntimeConfig(input: {
 }
 
 export const createUndergroundAiRuntimeConfig = createModelRuntimeConfig;
+
+export async function fetchModelRuntimeModelCatalog(input: {
+  readonly profile: Pick<SanitizedModelProviderConfig, "profileId" | "label" | "baseUrl">;
+  readonly apiKey: string;
+  readonly fetch?: ModelRuntimeModelCatalogFetch;
+  readonly abortSignal?: AbortSignal;
+}): Promise<ModelProviderModelCatalog> {
+  return fetchOpenAICompatibleModelCatalog(input);
+}
 
 function createOpenAICompatibleConfig(input: {
   readonly env: ModelRuntimeEnvironment;

@@ -62,11 +62,11 @@ export type TrimRuntimeConversationResult = {
   readonly trimmed: boolean;
 };
 
-export function trimRuntimeConversationToCompletedPairs(input: {
+export function trimRuntimeConversationToClosedPairs(input: {
   readonly record: RuntimeConversationRecord;
   readonly completedRunIds?: ReadonlySet<string>;
 }): TrimRuntimeConversationResult {
-  const turns = completedTurnPrefix(input.record.turns, input.completedRunIds);
+  const turns = closedTurnPrefix(input.record.turns, input.completedRunIds);
   const lastTurn = turns.at(-1);
   const lastAssistant = [...turns].reverse().find((turn) => turn.role === "assistant");
   const next: RuntimeConversationRecord = {
@@ -339,7 +339,7 @@ export class PanelConversationStore {
   }
 }
 
-function completedTurnPrefix(
+function closedTurnPrefix(
   turns: readonly RuntimeConversationRecord["turns"][number][],
   completedRunIds: ReadonlySet<string> | undefined
 ): readonly RuntimeConversationRecord["turns"][number][] {
@@ -353,13 +353,14 @@ function completedTurnPrefix(
       userTurn.role !== "user" ||
       assistantTurn.role !== "assistant" ||
       userTurn.status !== "completed" ||
-      assistantTurn.status !== "completed"
+      !isClosedAssistantTurn(assistantTurn)
     ) {
       break;
     }
     if (
       completedRunIds !== undefined &&
       assistantTurn.runId !== undefined &&
+      assistantTurn.status === "completed" &&
       !completedRunIds.has(assistantTurn.runId)
     ) {
       break;
@@ -367,6 +368,10 @@ function completedTurnPrefix(
     selected.push(userTurn, assistantTurn);
   }
   return selected;
+}
+
+function isClosedAssistantTurn(turn: RuntimeConversationRecord["turns"][number]): boolean {
+  return turn.status === "completed" || turn.status === "failed";
 }
 
 function completedConversationPairs(turns: readonly PanelConversationTurn[]): readonly {

@@ -65,6 +65,27 @@ test("panel stream event projection maps refs and safe summaries into RunEvent",
   ]);
 });
 
+test("panel stream event projection keeps safe model output delta for live assistant rendering", () => {
+  const event = projectPanelStreamEventToRunEvent({
+    eventId: "event-delta-1",
+    runId: "run-1",
+    sequence: 4,
+    type: "model.output.delta",
+    createdAt: "2026-05-12T00:00:04.000Z",
+    agentLabel: "助手",
+    delta: "正在生成结果，token=sk-test-token-1234567890",
+    status: "running",
+    sourceRefs: [],
+    modelCallRefs: ["model-1"],
+    toolCallRefs: [],
+  });
+
+  assert.equal(event.type, "model.output.delta");
+  assert.equal(event.delta?.includes("正在生成结果"), true);
+  assert.equal(event.delta?.includes("sk-test-token"), false);
+  assert.equal(event.summary, event.delta);
+});
+
 test("panel projection summarizes confirmation decisions safely", () => {
   assert.equal(basicConfirmationDecisionSummary({ decision: "approve_once" }), "已批准本次操作。");
   assert.equal(basicConfirmationDecisionSummary({ decision: "deny" }), "已拒绝本次操作，运行不会继续执行该动作。");

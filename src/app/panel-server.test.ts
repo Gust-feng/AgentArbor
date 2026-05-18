@@ -10,7 +10,7 @@ import {
   resolveAgentArborRuntimeDatabasePaths,
 } from "../adapters/runtime-database/index.js";
 import { createPanelHtml } from "./panel-assets.js";
-import { startLocalPanelServer, type PanelProviderFetch } from "./panel-server.js";
+import { startLocalPanelServer, type PanelModelCatalogFetch, type PanelProviderFetch } from "./panel-server.js";
 
 test("panel HTML serves the React workbench shell without first-screen internals", () => {
   const staticHtml = createPanelHtml();
@@ -61,7 +61,12 @@ test("panel React source is split into typed frontend modules", async () => {
 });
 
 test("panel React workbench consumes Basic Agent projection APIs", async () => {
-  const [app, runtime] = await Promise.all([readPanelUiSource("App.tsx"), readPanelUiSource("runtime.ts")]);
+  const [app, runtime, workspacePages, conversation] = await Promise.all([
+    readPanelUiSource("App.tsx"),
+    readPanelUiSource("runtime.ts"),
+    readPanelUiSource(path.join("components", "workspace-pages.tsx")),
+    readPanelUiSource(path.join("components", "conversation.tsx")),
+  ]);
 
   assert.equal(app.includes("/api/basic-agent/runs/"), true);
   assert.equal(app.includes("/events?cursor="), true);
@@ -74,6 +79,9 @@ test("panel React workbench consumes Basic Agent projection APIs", async () => {
   assert.equal(app.includes("safeWorkSession"), true);
   assert.equal(runtime.includes("safeWorkSession"), true);
   assert.equal(runtime.includes("/api/desktop/runs/"), true);
+  assert.equal(app.includes("/api/config/model-profiles"), true);
+  assert.equal(workspacePages.includes("常驻厂商"), true);
+  assert.equal(conversation.includes("model.output.delta"), true);
   assert.equal(app.includes("innerHTML"), false);
   assert.equal(app.includes("raw provider"), false);
   assert.equal(app.includes("raw tool"), false);
@@ -149,6 +157,15 @@ test("panel config API keeps model provider and search keys out of ordinary resp
     assert.equal(config.body.informationAccess.web.secretConfigured, true);
     assert.equal(config.body.capabilities.activeModel.secretConfigured, true);
     assert.equal(config.body.profiles.length, 1);
+    assert.equal(
+      config.body.modelProviderMarket.presets.some((preset: { presetId?: string }) => preset.presetId === "deepseek"),
+      true
+    );
+    assert.equal(
+      config.body.modelProviderMarket.presets.some((preset: { label?: string }) => preset.label === "月之暗面"),
+      true
+    );
+    assert.equal(config.text.includes("sk-panel-secret"), false);
     assert.equal(update.body.config.baseUrl, "https://provider.example");
     assert.equal(update.body.config.defaultAiMode, "fake");
   } finally {
@@ -234,6 +251,57 @@ test("panel capability and profile APIs expose safe unified capability projectio
       await server.close();
     }
   } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("panel model profile catalog route fetches provider models without leaking API keys", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-model-catalog-"));
+  const secret = "sk-panel-catalog-secret";
+  const catalogCalls: Array<{ url: string; authorization?: string }> = [];
+  const modelCatalogFetch: PanelModelCatalogFetch = async (url, init) => {
+    catalogCalls.push({ url, authorization: init.headers.authorization });
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        data: [
+          { id: "deepseek-chat", owned_by: "deepseek" },
+          { id: "deepseek-reasoner", owned_by: "deepseek" },
+        ],
+      }),
+    };
+  };
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory, modelCatalogFetch });
+  try {
+    const createProfile = await requestJson(server.url, "/api/config/model-profiles", {
+      method: "POST",
+      body: {
+        profileId: "deepseek",
+        label: "DeepSeek",
+        providerKind: "openai_compatible",
+        protocolKind: "openai_compatible_chat_completions",
+        baseUrl: "https://api.deepseek.com",
+        model: "deepseek-chat",
+        defaultAiMode: "openai-compatible",
+        apiKey: secret,
+      },
+    });
+    const catalog = await requestJson(server.url, "/api/config/model-profiles/deepseek/models");
+
+    assert.equal(createProfile.status, 200);
+    assert.equal(catalog.status, 200);
+    assert.equal(catalogCalls.length, 1);
+    assert.equal(catalogCalls[0]?.url, "https://api.deepseek.com/models");
+    assert.equal(catalogCalls[0]?.authorization, `Bearer ${secret}`);
+    assert.deepEqual(
+      catalog.body.catalog.models.map((model: { id: string }) => model.id),
+      ["deepseek-chat", "deepseek-reasoner"]
+    );
+    assert.equal(catalog.text.includes(secret), false);
+    assert.equal(createProfile.text.includes(secret), false);
+  } finally {
+    await server.close();
     await fs.rm(directory, { recursive: true, force: true });
   }
 });
@@ -1742,6 +1810,11 @@ test("conversation follow-up after a provider failure does not feed internal ids
 
     assert.equal(completed.body.status, "completed");
     assert.equal(completed.body.canvas.agent.answer.answer.includes("桌面文件"), true);
+    assert.equal(followupPrompt.includes("桌面文件，你看看"), true);
+    assert.equal(followupPrompt.includes("系统错误："), true);
+    assert.equal(followupPrompt.includes("上一轮未生成助手回复"), false);
+    assert.equal(followupPrompt.includes("不是助手输出"), false);
+    assert.equal(followupPrompt.includes("模型服务这次没有返回可用结果"), true);
     assert.equal(followupPrompt.includes("OpenAI-compatible provider returned HTTP 400"), false);
     assert.equal(followupPrompt.includes("HTTP 400"), false);
     assert.equal(/\bgoal-\d+\b/.test(followupPrompt), false);
@@ -1751,6 +1824,129 @@ test("conversation follow-up after a provider failure does not feed internal ids
     assert.equal(visibleConversation.includes("HTTP 400"), false);
     assert.equal(/\bgoal-\d+\b/.test(visibleConversation), false);
     assert.equal(visibleConversation.includes(secret), false);
+  } finally {
+    await server.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("conversation history keeps safe failed turns and later completed turns after restart", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-conversation-failed-history-"));
+  const secret = "sk-failed-history-secret";
+  const providerRequests: Array<{ readonly messages?: readonly { readonly role?: string; readonly content?: string }[] }> = [];
+  let callIndex = 0;
+  const providerFetch: PanelProviderFetch = async (_url, init) => {
+    callIndex += 1;
+    const body = JSON.parse(init.body) as { messages?: readonly { readonly role?: string; readonly content?: string }[] };
+    providerRequests.push(body);
+    if (callIndex === 1) {
+      return {
+        ok: false,
+        status: 400,
+        json: async () => ({ error: { message: "raw provider response marker" } }),
+      };
+    }
+    return createOpenAiTextResponse(
+      "failed-history-model",
+      callIndex === 2 ? "第二轮安全回答。" : "第三轮安全回答。"
+    );
+  };
+  let server = await startLocalPanelServer({ port: 0, configDirectory: directory, providerFetch });
+  try {
+    await requestJson(server.url, "/api/config/model-provider", {
+      method: "POST",
+      body: {
+        baseUrl: "https://provider.example",
+        model: "failed-history-model",
+        apiKey: secret,
+      },
+    });
+
+    const first = await requestJson(server.url, "/api/conversations", {
+      method: "POST",
+      body: { goal: "第一轮会失败", aiMode: "openai-compatible" },
+    });
+    const conversationId = first.body.conversation.conversationId;
+    await waitForRun(server.url, first.body.run.runId, (body) => body.status === "failed", 4_000, "/api/desktop/runs");
+
+    const second = await requestJson(server.url, `/api/conversations/${encodeURIComponent(conversationId)}/messages`, {
+      method: "POST",
+      body: { goal: "第二轮成功", aiMode: "openai-compatible" },
+    });
+    await waitForRun(server.url, second.body.run.runId, (body) => body.status === "completed", 4_000, "/api/desktop/runs");
+    await server.close();
+
+    server = await startLocalPanelServer({ port: 0, configDirectory: directory, providerFetch });
+    const third = await requestJson(server.url, `/api/conversations/${encodeURIComponent(conversationId)}/messages`, {
+      method: "POST",
+      body: { goal: "第三轮应该知道前文", aiMode: "openai-compatible" },
+    });
+    await waitForRun(server.url, third.body.run.runId, (body) => body.status === "completed", 4_000, "/api/desktop/runs");
+    const conversation = await requestJson(server.url, `/api/conversations/${encodeURIComponent(conversationId)}`);
+    const thirdMessages = providerRequests.at(-1)?.messages ?? [];
+    const thirdPrompt = JSON.stringify(thirdMessages);
+
+    assert.equal(conversation.body.conversation.turns.length, 6);
+    assert.equal(conversation.body.conversation.turns[1].status, "failed");
+    assert.deepEqual(thirdMessages.map((message) => message.role), ["system", "user", "assistant", "user", "assistant", "user"]);
+    assert.equal(thirdPrompt.includes("第一轮会失败"), true);
+    assert.equal(thirdPrompt.includes("系统错误："), true);
+    assert.equal(thirdPrompt.includes("上一轮未生成助手回复"), false);
+    assert.equal(thirdPrompt.includes("不是助手输出"), false);
+    assert.equal(thirdPrompt.includes("模型服务这次没有返回可用结果"), true);
+    assert.equal(thirdPrompt.includes("第二轮成功"), true);
+    assert.equal(thirdPrompt.includes("第二轮安全回答"), true);
+    assert.equal(thirdPrompt.includes("raw provider response marker"), false);
+    assert.equal(thirdPrompt.includes(secret), false);
+  } finally {
+    await server.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("conversation follow-up labels missing-key failure history as a system error", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-conversation-missing-key-history-"));
+  const secret = "sk-missing-key-history-secret";
+  const providerRequests: Array<{ readonly messages?: readonly { readonly role?: string; readonly content?: string }[] }> = [];
+  const providerFetch: PanelProviderFetch = async (_url, init) => {
+    const body = JSON.parse(init.body) as { messages?: readonly { readonly role?: string; readonly content?: string }[] };
+    providerRequests.push(body);
+    return createOpenAiTextResponse("missing-key-history-model", "我看到了上一轮是系统侧模型配置失败，不是我之前的回答。");
+  };
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory, providerFetch });
+  try {
+    await requestJson(server.url, "/api/config/model-provider", {
+      method: "POST",
+      body: { model: "missing-key-history-model" },
+    });
+    const first = await requestJson(server.url, "/api/conversations", {
+      method: "POST",
+      body: { goal: "第一轮缺少密钥", aiMode: "openai-compatible" },
+    });
+    await waitForRun(server.url, first.body.run.runId, (body) => body.status === "failed", 4_000, "/api/desktop/runs");
+
+    await requestJson(server.url, "/api/config/model-provider", {
+      method: "POST",
+      body: { apiKey: secret, model: "missing-key-history-model" },
+    });
+    const second = await requestJson(
+      server.url,
+      `/api/conversations/${encodeURIComponent(first.body.conversation.conversationId)}/messages`,
+      {
+        method: "POST",
+        body: { goal: "现在继续", aiMode: "openai-compatible" },
+      }
+    );
+    await waitForRun(server.url, second.body.run.runId, (body) => body.status === "completed", 4_000, "/api/desktop/runs");
+    const prompt = JSON.stringify(providerRequests.at(-1)?.messages ?? []);
+
+    assert.equal(providerRequests.length, 1);
+    assert.equal(prompt.includes("第一轮缺少密钥"), true);
+    assert.equal(prompt.includes("系统错误："), true);
+    assert.equal(prompt.includes("上一轮未生成助手回复"), false);
+    assert.equal(prompt.includes("不是助手输出"), false);
+    assert.equal(prompt.includes("还没有可用的模型密钥"), true);
+    assert.equal(prompt.includes(secret), false);
   } finally {
     await server.close();
     await fs.rm(directory, { recursive: true, force: true });

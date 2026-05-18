@@ -54,7 +54,7 @@ test("OpenAI-compatible Chat Completions adapter maps request and response throu
     latencyMs: response.usage?.latencyMs,
   });
   assert.equal(calls.length, 1);
-  assert.equal(calls[0]?.url, "https://llm.example.test/v1/chat/completions");
+  assert.equal(calls[0]?.url, "https://llm.example.test/chat/completions");
   assert.equal(calls[0]?.authorization, "Bearer sk-test-secret-token");
   assert.deepEqual(calls[0]?.body, {
     model: "gpt-compatible-test",
@@ -65,6 +65,38 @@ test("OpenAI-compatible Chat Completions adapter maps request and response throu
   assert.deepEqual(eventLog.types(), ["model.requested", "model.completed"]);
   assert.equal(JSON.stringify(eventLog.list()).includes("sk-test-secret-token"), false);
   assert.equal(JSON.stringify(eventLog.list()).includes("token"), false);
+});
+
+test("OpenAI-compatible Chat Completions adapter appends /v1 only for bare OpenAI base URL", async () => {
+  const calls: { url: string }[] = [];
+  const fetch: FetchLike = async (url) => {
+    calls.push({ url });
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        id: "chatcmpl-openai-base",
+        model: "gpt-test",
+        choices: [
+          {
+            message: { role: "assistant", content: JSON.stringify({ summary: "OpenAI base URL normalized." }) },
+            finish_reason: "stop",
+          },
+        ],
+      }),
+    };
+  };
+  const provider = new OpenAICompatibleChatCompletionsProvider({
+    baseUrl: "https://api.openai.com/",
+    apiKey: "sk-test-secret-token",
+    model: "gpt-test",
+    fetch,
+  });
+
+  const response = await provider.complete(createValidModelRequest());
+
+  assert.equal(response.status, "completed");
+  assert.equal(calls[0]?.url, "https://api.openai.com/v1/chat/completions");
 });
 
 test("OpenAI-compatible Chat Completions adapter streams safe output deltas", async () => {

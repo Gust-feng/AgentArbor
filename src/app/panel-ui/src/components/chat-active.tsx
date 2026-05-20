@@ -254,7 +254,7 @@ function ConversationTranscript(props: {
         return turn.role === "user"
           ? <UserMessage key={turn.turnId} content={turn.content} />
           : turn.status === "failed"
-            ? <AssistantFailureMessage key={turn.turnId} content={turn.content} model={model} blocks={blocks} />
+            ? <AssistantFailureMessage key={turn.turnId} content={turn.content} model={model} />
             : <AssistantMessage key={turn.turnId} content={turn.content} model={model} blocks={blocks} />;
       })}
     </div>
@@ -309,25 +309,23 @@ function AssistantPendingMessage(props: {
 function AssistantFailureMessage(props: {
   readonly content: string;
   readonly model?: AssistantModelBadge;
-  readonly blocks?: readonly AssistantTurnBlock[];
 }): React.ReactElement {
-  const visible = userVisibleAnswer(props.content);
-  const blocks = normalizeAssistantBlocks(props.blocks, visible);
+  const message = sanitizeFailureCopy(props.content);
   return (
     <article className="assistant-message assistant-message-failed">
       <AssistantAvatar model={props.model} />
       <div className="assistant-message-body">
-        {blocks.length > 0 ? (
-          <AssistantTurnTimeline blocks={blocks} copyText={visible} />
-        ) : (
-          <div className="assistant-failure-line">
-            <AlertTriangle size={14} />
-            <RichText text={visible} />
-          </div>
-        )}
+        <p className="assistant-error-message">{message}</p>
       </div>
     </article>
   );
+}
+
+function sanitizeFailureCopy(value: string): string {
+  const text = userVisibleAnswer(value).trim();
+  const sdkNoBody = /^(\d{3})\s+status code \(no body\)$/i.exec(text);
+  const message = sdkNoBody === null ? text : `HTTP ${sdkNoBody[1]}`;
+  return message.length <= 1_000 ? message : `${message.slice(0, 999)}…`;
 }
 
 function AssistantWorkBlock(props: {
@@ -421,7 +419,7 @@ function groupAssistantTimelineSections(blocks: readonly AssistantTurnBlock[]): 
 }
 
 function visibleWorkflowItems(items: readonly ActivitySummaryItem[]): readonly ActivitySummaryItem[] {
-  return mergeRepeatedActivityItems(dedupeActivityItems(items.filter(isUsefulWorkflowItem))).slice(-8);
+  return mergeRepeatedActivityItems(dedupeActivityItems(items.filter(isUsefulWorkflowItem)));
 }
 
 function AssistantAnswerBlock(props: {
@@ -536,7 +534,8 @@ function workflowFrameTitle(items: readonly ActivitySummaryItem[]): string {
   if (primaryKind === "web") return "查看网页";
   if (primaryKind === "command") return "运行命令";
   if (primaryKind === "edit") return "更新文件";
-  return "过程";
+  const primary = primaryActivityItem(items);
+  return primary === undefined ? "工作记录" : activityStepDescription(primary);
 }
 
 function workflowFrameMeta(items: readonly ActivitySummaryItem[]): string | undefined {
@@ -640,8 +639,7 @@ function activityGroupTitle(
   primary: ActivitySummaryItem | undefined
 ): string {
   if (items.length === 1 && primary !== undefined) return activityStepDescription(primary);
-  if (kind === "tool") return "工具调用";
-  if (kind === "thinking") return "模型判断";
+  if (primary !== undefined && (kind === "tool" || kind === "thinking" || kind === "context")) return activityStepDescription(primary);
   if (kind === "context") return "上下文";
   if (kind === "approval") return "确认";
   return "工作推进";
@@ -723,7 +721,7 @@ function ProcessLine({ item, index }: { readonly item: ActivitySummaryItem; read
 function ActivityResultView({ result, compact: compactView = false }: { readonly result: ActivityResult; readonly compact?: boolean }): React.ReactElement {
   if (result.kind === "items") {
     return (
-      <div className={`activity-result items ${compactView ? "compact" : ""}`}>
+      <div className={`activity-result items ${compactView ? "compact" : ""}`} data-result="items">
         <div className="activity-output-panel">
           <div className="activity-output-label">{result.label}{result.more === true ? " · 等" : ""}</div>
           <div className="activity-output-list">
@@ -744,7 +742,7 @@ function ActivityResultView({ result, compact: compactView = false }: { readonly
   }
   if (result.kind === "search") {
     return (
-      <div className={`activity-result ${compactView ? "compact" : ""}`}>
+      <div className={`activity-result ${compactView ? "compact" : ""}`} data-result="search">
         <div className="activity-result-head">
           <span>{result.label}</span>
           {result.query !== undefined && <span>{compact(result.query, 64)}</span>}
@@ -762,7 +760,7 @@ function ActivityResultView({ result, compact: compactView = false }: { readonly
   }
   if (result.kind === "command") {
     return (
-      <div className={`activity-result command ${compactView ? "compact" : ""}`}>
+      <div className={`activity-result command ${compactView ? "compact" : ""}`} data-result="command">
         {result.command !== undefined && (
           <div className="activity-command-block">
             <div className="activity-command-prompt"><span>~</span><span>$</span></div>
@@ -783,7 +781,7 @@ function ActivityResultView({ result, compact: compactView = false }: { readonly
   }
   if (result.kind === "change") {
     return (
-      <div className={`activity-result ${compactView ? "compact" : ""}`}>
+      <div className={`activity-result ${compactView ? "compact" : ""}`} data-result="change">
         <div className="activity-output-panel">
           <div className="activity-output-label">变更</div>
           <div className="activity-output-list">
@@ -795,7 +793,7 @@ function ActivityResultView({ result, compact: compactView = false }: { readonly
     );
   }
   return (
-    <div className={`activity-result text ${compactView ? "compact" : ""}`}>
+    <div className={`activity-result text ${compactView ? "compact" : ""}`} data-result="text">
       <div className="activity-output-panel">
         <div className="activity-output-label">结果</div>
         <p>{compact(result.text, compactView ? 140 : 220)}</p>
@@ -1221,7 +1219,8 @@ function isTimelineActivityEvent(event: RunEvent, source: readonly RunEvent[]): 
     event.type === "agent.child.started" ||
     event.type === "agent.child.completed" ||
     event.type === "agent.child.waiting" ||
-    event.type === "agent.parent_synthesis.completed"
+    event.type === "agent.parent_synthesis.completed" ||
+    event.type === "run.failed"
   ) {
     return true;
   }
@@ -1304,7 +1303,7 @@ function visibleActivityItems(events: readonly RunEvent[], workSession: DesktopW
       terminalRun,
     }))
     .filter((item): item is ActivitySummaryItem => item !== undefined);
-  return dedupeActivityItems(mergeRepeatedActivityItems(items)).slice(-8);
+  return dedupeActivityItems(mergeRepeatedActivityItems(items));
 }
 
 function lastIndexWhere<T>(items: readonly T[], predicate: (item: T, index: number) => boolean): number {
@@ -1392,6 +1391,18 @@ function activityItemForEvent(
       tone: event.type === "agent.note.delta" && !context.terminalRun ? "active" : activityToneFor(event.status),
       summary,
       kind: "thinking",
+      result: event.status === "failed" ? activityResultFor(event) : undefined,
+    };
+  }
+  if (event.type === "run.failed") {
+    return {
+      id: event.id,
+      type: event.type,
+      title: "运行未完成",
+      tone: "danger",
+      summary: activitySummaryFor(event),
+      kind: "system",
+      result: activityResultFor(event),
     };
   }
   if (event.type === "context.compaction.completed") {

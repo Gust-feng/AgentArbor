@@ -1504,6 +1504,14 @@ function createPersistedStreamEvents(
       agentLabel: "AgentArbor",
       summary: friendlyUserFacingFailureText(snapshot.run.error?.message ?? snapshot.run.resultSummary),
       status: "failed",
+      detail: snapshot.run.error === undefined
+        ? undefined
+        : {
+            kind: "thinking",
+            action: "运行未完成",
+            error: friendlyUserFacingFailureText(snapshot.run.error.message),
+            truncated: false,
+          },
       sourceRefs: [],
       modelCallRefs: [],
       toolCallRefs: snapshot.toolCalls.map((call) => call.callId),
@@ -2406,7 +2414,7 @@ function syncConversationTurnForJob(runtime: PanelRuntime, job: PanelRunJob): vo
       assistantTurnId: job.assistantTurnId,
       runId: job.runId,
       title: "这次没有完成",
-      content: friendlyAssistantFailureText(response.error?.message),
+      content: assistantFailureTextFromResponse(response),
       status: "failed",
       responseModel,
     });
@@ -2648,7 +2656,7 @@ async function prepareDesktopRunResources(
     throw new PanelHttpError(
       400,
       "unsupported_model_provider",
-      "当前运行批次只支持可使用 Responses 请求的 OpenAI-compatible 模型 profile；Anthropic、Gemini、Ollama 先作为配置边界保留。"
+      "当前模型厂商暂不支持运行。"
     );
   }
 
@@ -2908,12 +2916,12 @@ function createConfigurationFailedAiSummary(
 
 function panelConfigurationErrorMessage(code: ModelRuntimeConfigurationError["issue"]["code"]): string {
   if (code === "ai_disabled") {
-    return "Underground Cognitive Runtime 方向智能阶段需要 AI；AI 禁用模式只作为边界检查，未启动运行。";
+    return "AI 已禁用。";
   }
   if (code === "missing_api_key") {
-    return "Responses 模式缺少 API key，已在发起网络请求前停止。";
+    return "模型密钥未配置。";
   }
-  return "Responses 模式缺少模型名，已在发起网络请求前停止。";
+  return "模型未配置。";
 }
 
 function latestModelFailureMessage(eventEntries: readonly EventLogEntry[]): string | undefined {
@@ -3056,7 +3064,7 @@ function conversationHistoryContentForModel(
   const safeContent = compactConversationHistoryText(sanitizeConversationHistoryText(turn.content), 1_000);
   if (turn.role === "assistant" && turn.status === "failed") {
     return compactConversationHistoryText(
-      `系统错误：${safeContent.length === 0 ? "模型服务这次没有返回可用结果。" : safeContent}`,
+      `系统错误：${safeContent.length === 0 ? "这次没有完成。" : safeContent}`,
       1_200
     );
   }
@@ -3067,8 +3075,40 @@ function numberOrUndefined(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
-function friendlyAssistantFailureText(message: string | undefined): string {
-  return friendlyUserFacingFailureText(message);
+function assistantFailureTextFromResponse(response: PanelRunJobResponse): string {
+  const eventError = response.transcript.events
+    .map((event) => event.detail?.error)
+    .filter((error): error is string => typeof error === "string" && error.trim().length > 0)
+    .find((error) => /\bHTTP\s+\d{3}\b/i.test(error)) ??
+    [...response.transcript.events]
+      .reverse()
+      .map((event) => event.detail?.error)
+      .find((error): error is string => typeof error === "string" && error.trim().length > 0);
+  if (eventError !== undefined) {
+    return truncateFailureText(friendlyUserFacingFailureText(eventError), 1_000);
+  }
+  return conciseRunFailureText(response.error);
+}
+
+function conciseRunFailureText(error: { readonly code: string; readonly message: string } | undefined): string {
+  if (error === undefined) {
+    return "这次没有完成。";
+  }
+  switch (error.code) {
+    case "missing_api_key":
+      return "模型密钥未配置。";
+    case "missing_model_name":
+      return "模型未配置。";
+    case "ai_disabled":
+      return "AI 已禁用。";
+    default:
+      return truncateFailureText(friendlyUserFacingFailureText(error.message), 1_000);
+  }
+}
+
+function truncateFailureText(value: string, maxLength: number): string {
+  const text = value.trim();
+  return text.length <= maxLength ? text : `${text.slice(0, Math.max(0, maxLength - 1))}…`;
 }
 
 function panelJobErrorMessage(error: PanelHttpError): string {

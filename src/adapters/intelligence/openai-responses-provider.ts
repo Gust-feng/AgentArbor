@@ -15,6 +15,7 @@ import { createFailedModelResponse } from "../../kernel/intelligence/failures.js
 import { pendingModelOutputValidation } from "../../kernel/intelligence/validation.js";
 import type { FetchLike } from "./openai-compatible-chat-completions-provider.js";
 import { normalizeOpenAICompatibleSdkBaseUrl } from "./openai-compatible-base-url.js";
+import { providerErrorMessage } from "./provider-error-message.js";
 
 export type OpenAIResponsesProviderOptions = {
   readonly providerId?: string;
@@ -113,7 +114,7 @@ export class OpenAIResponsesProvider implements ModelProvider {
           outputKind: request.outputContract.outputKind,
           failureKind: failureKindForStatus(status),
           retryable: status === 429 || status >= 500,
-          message: `OpenAI Responses provider returned HTTP ${status}.`,
+          message: providerErrorMessage(error, `HTTP ${status}`),
         });
       }
 
@@ -126,9 +127,10 @@ export class OpenAIResponsesProvider implements ModelProvider {
         outputKind: request.outputContract.outputKind,
         failureKind: timeoutLikeError(error) ? "provider_timeout" : "provider_network",
         retryable: true,
-        message: timeoutLikeError(error)
-          ? "OpenAI Responses provider request timed out."
-          : "OpenAI Responses provider network request failed.",
+        message: providerErrorMessage(
+          error,
+          timeoutLikeError(error) ? "Request timed out." : "Network request failed."
+        ),
       });
     }
   }
@@ -540,19 +542,42 @@ function toOpenAIFetch(fetchImpl: FetchLike): typeof fetch {
       signal: init.signal === null ? undefined : init.signal,
     });
 
-    if (response.body !== undefined) {
+    if (response.body !== undefined && requestWantsStream(init.body)) {
       return new Response(toReadableStream(response.body), {
         status: response.status,
         headers: { "content-type": "text/event-stream" },
       });
     }
 
-    const json = await response.json();
-    return new Response(JSON.stringify(json), {
+    const body = await fetchLikeResponseText(response);
+    return new Response(body, {
       status: response.status,
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": looksLikeJson(body) ? "application/json" : "text/plain" },
     });
   };
+}
+
+function requestWantsStream(body: BodyInit | null | undefined): boolean {
+  if (typeof body !== "string") {
+    return false;
+  }
+  try {
+    return JSON.parse(body).stream === true;
+  } catch {
+    return false;
+  }
+}
+
+async function fetchLikeResponseText(response: Awaited<ReturnType<FetchLike>>): Promise<string> {
+  if (response.text !== undefined) {
+    return response.text();
+  }
+  return JSON.stringify(await response.json());
+}
+
+function looksLikeJson(value: string): boolean {
+  const trimmed = value.trim();
+  return trimmed.startsWith("{") || trimmed.startsWith("[");
 }
 
 function headersToRecord(headers: HeadersInit | undefined): Record<string, string> {

@@ -51,6 +51,7 @@ export type ModelFailedEventPayload = {
   readonly retryable: boolean;
   readonly fallback: "deterministic_path" | "caller_handles_failure";
   readonly sanitizedErrorRef?: string;
+  readonly failureMessage?: string;
   readonly validationStatus: ModelResponse["validation"]["status"];
 };
 
@@ -131,9 +132,18 @@ export function createModelFailedMessage(input: {
       retryable: input.response.failure?.retryable ?? false,
       fallback: "caller_handles_failure",
       sanitizedErrorRef: input.response.failure?.sanitizedErrorRef,
+      failureMessage: safeModelFailureMessage(input.response.failure?.message),
       validationStatus: input.response.validation.status,
     },
   });
+}
+
+function safeModelFailureMessage(message: string | undefined): string | undefined {
+  const text = String(message ?? "").trim();
+  if (text.length === 0) {
+    return undefined;
+  }
+  return text.length <= 1_000 ? text : `${text.slice(0, 999)}…`;
 }
 
 function cloneOutputContract(contract: ModelOutputContract): ModelOutputContract {

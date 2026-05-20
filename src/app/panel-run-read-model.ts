@@ -687,6 +687,7 @@ export function createPanelRunStreamEvents(input: {
       agentLabel: "AgentArbor",
       summary: friendlyUserFacingFailureText(input.error?.message),
       status: "failed",
+      detail: runFailureStreamDetail(input.error),
       sourceRefs: [],
       modelCallRefs: [],
       toolCallRefs: [],
@@ -824,6 +825,7 @@ function appendStreamEventsForEvent(input: {
       agentLabel: "模型",
       summary: modelFailedSummary(payload),
       status: "failed",
+      detail: modelFailureStreamDetail(payload),
     });
     return;
   }
@@ -1028,8 +1030,80 @@ function purposeProgressLabel(purpose: string): string {
 }
 
 function modelFailedSummary(payload: Readonly<Record<string, unknown>>): string {
-  const failureKind = stringOrUndefined(payload.failureKind) ?? "model_failed";
-  return friendlyUserFacingFailureText(failureKind);
+  return modelFailureErrorText(payload) ?? stringOrUndefined(payload.failureKind) ?? "model_failed";
+}
+
+function modelFailureStreamDetail(payload: Readonly<Record<string, unknown>>): PanelRunStreamEventDetail | undefined {
+  const error = modelFailureErrorText(payload);
+  return error === undefined
+    ? undefined
+    : {
+        kind: "thinking",
+        action: "模型调用失败",
+        error,
+        truncated: false,
+      };
+}
+
+function runFailureStreamDetail(
+  error: { readonly code: string; readonly message: string } | undefined
+): PanelRunStreamEventDetail | undefined {
+  if (error === undefined) {
+    return undefined;
+  }
+  const message = friendlyUserFacingFailureText(error.message);
+  return {
+    kind: "thinking",
+    action: "运行未完成",
+    error: compactFailureText(message, 1_000),
+    truncated: false,
+  };
+}
+
+function modelFailureErrorText(payload: Readonly<Record<string, unknown>>): string | undefined {
+  const message = modelFailureMessageForDisplay(stringOrUndefined(payload.failureMessage));
+  if (message !== undefined) {
+    return message;
+  }
+  return modelFailureKindForDisplay(stringOrUndefined(payload.failureKind));
+}
+
+function modelFailureMessageForDisplay(message: string | undefined): string | undefined {
+  const safe = compactFailureText(message ?? "", 1_000);
+  if (safe.length === 0) {
+    return undefined;
+  }
+  return safe;
+}
+
+function compactFailureText(value: string, maxLength: number): string {
+  const text = value.trim();
+  return text.length <= maxLength ? text : `${text.slice(0, Math.max(0, maxLength - 1))}…`;
+}
+
+function modelFailureKindForDisplay(failureKind: string | undefined): string | undefined {
+  switch (failureKind) {
+    case "provider_auth":
+      return "模型服务鉴权失败。";
+    case "provider_rate_limit":
+      return "模型服务限流。";
+    case "provider_timeout":
+      return "模型服务请求超时。";
+    case "provider_network":
+      return "模型服务连接失败。";
+    case "output_validation":
+      return "模型输出校验失败。";
+    case "request_validation":
+      return "模型请求无效。";
+    case "provider_config":
+      return "模型配置无效。";
+    case "provider_response":
+      return "模型服务响应无效。";
+    case "model_failed":
+      return "模型调用失败。";
+    default:
+      return undefined;
+  }
 }
 
 function contextCompactionStreamSummary(

@@ -14,6 +14,7 @@ import { createId, nowIso } from "../../kernel/id.js";
 import { createFailedModelResponse } from "../../kernel/intelligence/failures.js";
 import { pendingModelOutputValidation } from "../../kernel/intelligence/validation.js";
 import { normalizeOpenAICompatibleSdkBaseUrl } from "./openai-compatible-base-url.js";
+import { providerErrorMessage } from "./provider-error-message.js";
 
 export type FetchLike = (
   url: string,
@@ -156,7 +157,7 @@ export class OpenAICompatibleChatCompletionsProvider implements ModelProvider {
           outputKind: request.outputContract.outputKind,
           failureKind: failureKindForStatus(status),
           retryable: status === 429 || status >= 500,
-          message: `OpenAI-compatible provider returned HTTP ${status}.`,
+          message: providerErrorMessage(error, `HTTP ${status}`),
         });
       }
       return createFailedModelResponse({
@@ -168,7 +169,7 @@ export class OpenAICompatibleChatCompletionsProvider implements ModelProvider {
         outputKind: request.outputContract.outputKind,
         failureKind: "provider_network",
         retryable: true,
-        message: "OpenAI-compatible provider network request failed.",
+        message: providerErrorMessage(error, "Network request failed."),
       });
     }
   }
@@ -412,10 +413,10 @@ function toOpenAIFetch(fetchImpl: FetchLike): typeof fetch {
       });
     }
 
-    const json = await response.json();
-    return new Response(JSON.stringify(json), {
+    const body = await fetchLikeResponseText(response);
+    return new Response(body, {
       status: response.status,
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": looksLikeJson(body) ? "application/json" : "text/plain" },
     });
   };
 }
@@ -429,6 +430,18 @@ function requestWantsStream(body: BodyInit | null | undefined): boolean {
   } catch {
     return false;
   }
+}
+
+async function fetchLikeResponseText(response: Awaited<ReturnType<FetchLike>>): Promise<string> {
+  if (response.text !== undefined) {
+    return response.text();
+  }
+  return JSON.stringify(await response.json());
+}
+
+function looksLikeJson(value: string): boolean {
+  const trimmed = value.trim();
+  return trimmed.startsWith("{") || trimmed.startsWith("[");
 }
 
 function headersToRecord(headers: HeadersInit | undefined): Record<string, string> {

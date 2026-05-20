@@ -44,7 +44,6 @@ export function sanitizeAssistantVisibleText(
 
 export function sanitizeConversationHistoryText(value: string): string {
   return sanitizeAssistantVisibleText(value)
-    .replace(/OpenAI-compatible provider returned HTTP\s+\d+/gi, "模型服务返回 HTTP 错误")
     .replace(/\b(?:goal|trace|run|model-request|model-response|tool-call|conversation)-[A-Za-z0-9_-]+\b/gi, "[运行引用]")
     .replace(/\s{2,}/g, " ")
     .trim();
@@ -52,57 +51,8 @@ export function sanitizeConversationHistoryText(value: string): string {
 
 export function friendlyUserFacingFailureText(message: string | undefined): string {
   const text = String(message ?? "").trim();
-  const lower = text.toLowerCase();
   if (text.length === 0) {
-    return "这次没有完成。请检查设置里的模型配置，或稍后重试。";
+    return "这次没有完成。";
   }
-  if (text.includes("模型服务这次没有返回可用结果")) {
-    return text;
-  }
-  if (
-    lower.includes("output_validation") ||
-    lower.includes("validation failed") ||
-    lower.includes("contract")
-  ) {
-    return "模型返回的内容没有通过本轮格式检查。技术引用已放在诊断里，请调整模型配置或重试。";
-  }
-  if (lower.includes("api key") || lower.includes("missing_api_key")) {
-    return "还没有可用的模型密钥。请先在设置里完成配置。";
-  }
-  if (
-    lower.includes("missing_model") ||
-    text.includes("缺少模型名") ||
-    text.includes("没有可用的模型名") ||
-    text.includes("还没有配置模型名")
-  ) {
-    return "还没有可用的模型名。请先在设置里完成配置。";
-  }
-  if (lower.includes("ai_disabled") || text.includes("AI 禁用")) {
-    return "当前禁用了 AI，无法继续完成这次处理。";
-  }
-  if (lower.includes("provider_auth") || lower.includes("401") || lower.includes("403")) {
-    return "模型服务鉴权失败。请检查设置里的密钥、Base URL 和账号权限。";
-  }
-  if (lower.includes("provider_rate_limit") || lower.includes("429")) {
-    return "模型服务暂时限流。请稍后重试，或切换到可用模型。";
-  }
-  if (
-    lower.includes("provider_network") ||
-    lower.includes("provider_timeout") ||
-    lower.includes("network") ||
-    lower.includes("timeout")
-  ) {
-    return "模型服务暂时不可用。请检查网络和模型配置后重试。";
-  }
-  if (
-    lower.includes("openai-compatible provider returned http") ||
-    lower.includes("openai responses provider returned http") ||
-    lower.includes("provider_response") ||
-    lower.includes("model_failed") ||
-    lower.includes("desktop_chat_failed") ||
-    lower.includes("desktop_agent_failed")
-  ) {
-    return "模型服务这次没有返回可用结果。请检查设置里的 Base URL、模型名和密钥，诊断里保留了可定位的技术引用。";
-  }
-  return "这次没有完成。请检查设置里的模型配置、授权范围或诊断详情后重试。";
+  return text.length <= 1_000 ? text : `${text.slice(0, 999)}…`;
 }

@@ -105,7 +105,7 @@ export function projectToolApprovalRequired(input: {
 }
 
 export function projectModelFailure(failure: ModelFailure | undefined): string {
-  return redactOrdinaryText(failure?.message ?? "模型服务这次没有返回可用结果。", 600);
+  return redactOrdinaryText(failure?.message ?? "模型服务没有返回可用结果。", 600);
 }
 
 export function safeReadFileToolPreview(input: {

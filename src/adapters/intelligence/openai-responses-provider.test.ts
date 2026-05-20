@@ -487,6 +487,7 @@ test("OpenAI Responses adapter returns provider_auth failure on 401", async () =
   assert.equal(response.status, "failed");
   assert.equal(response.failure?.kind, "provider_auth");
   assert.equal(response.failure?.retryable, false);
+  assert.equal(response.failure?.message, "Invalid API key");
 });
 
 test("OpenAI Responses adapter returns provider_rate_limit failure on 429", async () => {
@@ -507,6 +508,53 @@ test("OpenAI Responses adapter returns provider_rate_limit failure on 429", asyn
   assert.equal(response.status, "failed");
   assert.equal(response.failure?.kind, "provider_rate_limit");
   assert.equal(response.failure?.retryable, true);
+  assert.equal(response.failure?.message, "Rate limit exceeded");
+});
+
+test("OpenAI Responses adapter preserves plain text provider errors", async () => {
+  const fetch: FetchLike = async () => ({
+    ok: false,
+    status: 404,
+    text: async () => "Cannot POST /v1/responses",
+    json: async () => {
+      throw new Error("body is not json");
+    },
+  });
+  const provider = new OpenAIResponsesProvider({
+    baseUrl: "https://api.example.test",
+    apiKey: "sk-test-key",
+    model: "gpt-4.1",
+    fetch,
+  });
+
+  const response = await provider.complete(createValidModelRequest());
+
+  assert.equal(response.status, "failed");
+  assert.equal(response.failure?.kind, "provider_response");
+  assert.equal(response.failure?.message, "Cannot POST /v1/responses");
+});
+
+test("OpenAI Responses adapter does not expose SDK no-body wrapper as provider error", async () => {
+  const fetch: FetchLike = async () => ({
+    ok: false,
+    status: 404,
+    text: async () => "",
+    json: async () => {
+      throw new Error("body is empty");
+    },
+  });
+  const provider = new OpenAIResponsesProvider({
+    baseUrl: "https://api.example.test",
+    apiKey: "sk-test-key",
+    model: "gpt-4.1",
+    fetch,
+  });
+
+  const response = await provider.complete(createValidModelRequest());
+
+  assert.equal(response.status, "failed");
+  assert.equal(response.failure?.kind, "provider_response");
+  assert.equal(response.failure?.message, "HTTP 404");
 });
 
 test("OpenAI Responses adapter returns cancelled status on abort signal", async () => {

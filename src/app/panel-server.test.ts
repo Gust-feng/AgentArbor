@@ -70,6 +70,9 @@ test("panel React source is split into typed frontend modules", async () => {
   assert.equal(workspacePages.includes("export function SettingsDialog"), true);
   assert.equal(workspacePages.includes("initialGroup?: SettingsGroup"), true);
   assert.equal(workspacePages.includes("可添加"), true);
+  assert.equal(workspacePages.includes("provider-base-url-field"), true);
+  assert.equal(workspacePages.includes("请求路径"), true);
+  assert.equal(workspacePages.includes("/chat/completions"), true);
   assert.equal(workspacePages.includes("resolveModelProviderLogo"), true);
   assert.equal(workspacePages.includes("providerLogoText"), false);
   assert.equal(modelProviderLogos.includes('from "./assets/providers/openai.svg?raw"'), true);
@@ -90,11 +93,16 @@ test("panel React source is split into typed frontend modules", async () => {
   assert.equal(chatEmpty.includes("export function ChatInputBar"), true);
   assert.equal(chatEmpty.includes("providerLabel"), true);
   assert.equal(chatEmpty.includes("配置模型"), true);
+  assert.equal(chatEmpty.includes("closeSignal"), true);
+  assert.equal(chatEmpty.includes("管理模型厂商"), false);
   assert.equal(chatActive.includes("export function ChatActive"), true);
   assert.equal(chatActive.includes("WorkContextPanel"), false);
   assert.equal(chatActive.includes('import { RichText } from "./rich-text"'), true);
   assert.equal(chatActive.includes("resolveModelIconSvg"), true);
   assert.equal(chatActive.includes("assistantModelForTurn"), true);
+  assert.equal(chatActive.includes(".slice(-8)"), false);
+  assert.equal(chatActive.includes('data-result="command"'), true);
+  assert.equal(chatActive.includes("workflowFrameTitle"), true);
   assert.equal(sidebar.includes("最近会话"), true);
   assert.equal(topbar.includes("topbarStatusText"), true);
   assert.equal(topbar.includes("写入前确认"), false);
@@ -337,7 +345,7 @@ test("panel config API keeps model provider and search keys out of ordinary resp
     );
     assert.equal(config.text.includes("sk-panel-secret"), false);
     assert.equal(update.body.config.baseUrl, "https://provider.example");
-    assert.equal(update.body.config.defaultAiMode, "fake");
+    assert.equal(update.body.config.defaultAiMode, "openai-responses");
   } finally {
     await server.close();
     await fs.rm(directory, { recursive: true, force: true });
@@ -1640,7 +1648,7 @@ test("conversation and desktop run APIs recover safe history from RuntimeDatabas
       label: "OpenAI",
       providerKind: "openai_compatible",
       protocolKind: "openai_responses",
-      baseUrl: "https://api.deepseek.com",
+      baseUrl: "https://api.openai.com/v1",
       model: "fake-deterministic-model",
     });
     assert.equal(run.status, 200);
@@ -1991,7 +1999,7 @@ test("desktop default ignores legacy fake setting and still recommends real AI b
     );
 
     assert.equal(fetchCalls, 0);
-    assert.equal(failed.body.tracking.provider.defaultAiMode, "fake");
+    assert.equal(failed.body.tracking.provider.defaultAiMode, "openai-responses");
     assert.equal(failed.body.tracking.provider.requestedMode, "openai-responses");
     assert.equal(failed.text.includes("fake_provider"), false);
   } finally {
@@ -2000,13 +2008,13 @@ test("desktop default ignores legacy fake setting and still recommends real AI b
   }
 });
 
-test("desktop openai-compatible provider HTTP 400 stays out of main conversation text", async () => {
+test("desktop provider HTTP 400 surfaces provider error message directly", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-desktop-http400-friendly-"));
   const secret = "sk-desktop-http400-friendly-secret";
   const providerFetch: PanelProviderFetch = async () => ({
     ok: false,
     status: 400,
-    json: async () => ({ error: { message: "raw provider response marker" } }),
+    json: async () => ({ error: { message: "model is not available on this endpoint" } }),
   });
   const server = await startLocalPanelServer({ port: 0, configDirectory: directory, providerFetch });
   try {
@@ -2034,17 +2042,82 @@ test("desktop openai-compatible provider HTTP 400 stays out of main conversation
       server.url,
       `/api/conversations/${encodeURIComponent(start.body.conversation.conversationId)}`
     );
+    const events = await requestJson(
+      server.url,
+      `/api/basic-agent/runs/${encodeURIComponent(start.body.run.runId)}/events?cursor=0`
+    );
     const assistantTurn = conversation.body.conversation.turns.at(-1);
+    const eventText = JSON.stringify(events.body.events);
+    const conversationText = JSON.stringify(failed.body.conversation);
 
     assert.equal(failed.body.status, "failed");
-    assert.equal(failed.body.error.message.includes("模型服务这次没有返回可用结果"), true);
-    assert.equal(assistantTurn.content.includes("模型服务这次没有返回可用结果"), true);
+    assert.equal(failed.body.error.message, "model is not available on this endpoint");
+    assert.equal(assistantTurn.content, "model is not available on this endpoint");
     assert.equal(failed.body.error.message.includes("还没有配置模型名"), false);
     assert.equal(assistantTurn.content.includes("还没有配置模型名"), false);
-    assert.equal(JSON.stringify(failed.body.conversation).includes("OpenAI-compatible provider returned HTTP 400"), false);
-    assert.equal(JSON.stringify(failed.body.conversation).includes("HTTP 400"), false);
-    assert.equal(JSON.stringify(failed.body.conversation).includes("raw provider response marker"), false);
-    assert.equal(JSON.stringify(failed.body.conversation).includes(secret), false);
+    assert.equal(eventText.includes("model is not available on this endpoint"), true);
+    assert.equal(eventText.includes("OpenAI-compatible 返回 HTTP 400"), false);
+    assert.equal(eventText.includes("failure="), false);
+    assert.equal(eventText.includes("validation="), false);
+    assert.equal(eventText.includes("protocol="), false);
+    assert.equal(eventText.includes("model=desktop-http400-model"), false);
+    assert.equal(conversationText.includes("OpenAI-compatible provider returned HTTP 400"), false);
+    assert.equal(conversationText.includes("model is not available on this endpoint"), true);
+    assert.equal(conversationText.includes(secret), false);
+    assert.equal(eventText.includes(secret), false);
+  } finally {
+    await server.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("desktop responses provider HTTP failure surfaces provider error message directly", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-desktop-responses-http404-friendly-"));
+  const secret = "sk-desktop-responses-http404-secret";
+  const providerFetch: PanelProviderFetch = async () => ({
+    ok: false,
+    status: 404,
+    json: async () => ({ error: { message: "Cannot POST /v1/responses" } }),
+  });
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory, providerFetch });
+  try {
+    await requestJson(server.url, "/api/config/model-provider", {
+      method: "POST",
+      body: {
+        baseUrl: "https://provider.example",
+        model: "desktop-responses-http404-model",
+        apiKey: secret,
+      },
+    });
+
+    const start = await requestJson(server.url, "/api/conversations", {
+      method: "POST",
+      body: { goal: "测试 responses 错误显示" },
+    });
+    const failed = await waitForRun(
+      server.url,
+      start.body.run.runId,
+      (body) => body.status === "failed",
+      4_000,
+      "/api/desktop/runs"
+    );
+    const events = await requestJson(
+      server.url,
+      `/api/basic-agent/runs/${encodeURIComponent(start.body.run.runId)}/events?cursor=0`
+    );
+    const eventText = JSON.stringify(events.body.events);
+    const conversationText = JSON.stringify(failed.body.conversation);
+
+    assert.equal(failed.body.status, "failed");
+    assert.equal(failed.body.error.message, "Cannot POST /v1/responses");
+    assert.equal(conversationText.includes("Cannot POST /v1/responses"), true);
+    assert.equal(eventText.includes("Cannot POST /v1/responses"), true);
+    assert.equal(eventText.includes("OpenAI Responses 返回 HTTP 404"), false);
+    assert.equal(eventText.includes("OpenAI Responses provider returned HTTP 404"), false);
+    assert.equal(eventText.includes("failure="), false);
+    assert.equal(eventText.includes("validation="), false);
+    assert.equal(eventText.includes("protocol="), false);
+    assert.equal(eventText.includes(secret), false);
   } finally {
     await server.close();
     await fs.rm(directory, { recursive: true, force: true });
@@ -2114,14 +2187,13 @@ test("conversation follow-up after a provider failure does not feed internal ids
     assert.equal(followupPrompt.includes("系统错误："), true);
     assert.equal(followupPrompt.includes("上一轮未生成助手回复"), false);
     assert.equal(followupPrompt.includes("不是助手输出"), false);
-    assert.equal(followupPrompt.includes("模型服务这次没有返回可用结果"), true);
+    assert.equal(followupPrompt.includes("bad request"), true);
     assert.equal(followupPrompt.includes("OpenAI-compatible provider returned HTTP 400"), false);
-    assert.equal(followupPrompt.includes("HTTP 400"), false);
     assert.equal(/\bgoal-\d+\b/.test(followupPrompt), false);
     assert.equal(/\bmodel-request-\d+\b/.test(followupPrompt), false);
     assert.equal(followupPrompt.includes("当前任务"), false);
     assert.equal(visibleConversation.includes("OpenAI-compatible provider returned HTTP 400"), false);
-    assert.equal(visibleConversation.includes("HTTP 400"), false);
+    assert.equal(visibleConversation.includes("bad request"), true);
     assert.equal(/\bgoal-\d+\b/.test(visibleConversation), false);
     assert.equal(visibleConversation.includes(secret), false);
   } finally {
@@ -2143,7 +2215,7 @@ test("conversation history keeps safe failed turns and later completed turns aft
       return {
         ok: false,
         status: 400,
-        json: async () => ({ error: { message: "raw provider response marker" } }),
+        json: async () => ({ error: { message: "first turn provider error" } }),
       };
     }
     return createOpenAiTextResponse(
@@ -2193,10 +2265,10 @@ test("conversation history keeps safe failed turns and later completed turns aft
     assert.equal(thirdPrompt.includes("系统错误："), true);
     assert.equal(thirdPrompt.includes("上一轮未生成助手回复"), false);
     assert.equal(thirdPrompt.includes("不是助手输出"), false);
-    assert.equal(thirdPrompt.includes("模型服务这次没有返回可用结果"), true);
+    assert.equal(thirdPrompt.includes("first turn provider error"), true);
     assert.equal(thirdPrompt.includes("第二轮成功"), true);
     assert.equal(thirdPrompt.includes("第二轮安全回答"), true);
-    assert.equal(thirdPrompt.includes("raw provider response marker"), false);
+    assert.equal(thirdPrompt.includes("OpenAI-compatible provider returned HTTP 400"), false);
     assert.equal(thirdPrompt.includes(secret), false);
   } finally {
     await server.close();
@@ -2245,7 +2317,7 @@ test("conversation follow-up labels missing-key failure history as a system erro
     assert.equal(prompt.includes("系统错误："), true);
     assert.equal(prompt.includes("上一轮未生成助手回复"), false);
     assert.equal(prompt.includes("不是助手输出"), false);
-    assert.equal(prompt.includes("还没有可用的模型密钥"), true);
+    assert.equal(prompt.includes("模型密钥未配置"), true);
     assert.equal(prompt.includes(secret), false);
   } finally {
     await server.close();
@@ -3512,7 +3584,7 @@ test("panel openai-compatible missing key fails before provider fetch", async ()
     assert.equal(fetchCalls, 0);
     assert.equal(run.body.ok, false);
     assert.equal(run.body.error.code, "missing_api_key");
-    assert.equal(run.body.error.message, "Responses 模式缺少 API key，已在发起网络请求前停止。");
+    assert.equal(run.body.error.message, "模型密钥未配置。");
     assert.equal(run.body.summary.ai.status, "configuration_failed");
     assert.equal(run.body.summary.ai.eventCounts.requested, 0);
   } finally {
@@ -3612,7 +3684,7 @@ test("panel openai-compatible missing model does not leak configured API key", a
     assert.equal(run.status, 400);
     assert.equal(run.text.includes(secret), false);
     assert.equal(run.body.error.code, "missing_model_name");
-    assert.equal(run.body.error.message, "Responses 模式缺少模型名，已在发起网络请求前停止。");
+    assert.equal(run.body.error.message, "模型未配置。");
     assert.equal(run.body.summary.ai.eventCounts.requested, 0);
   } finally {
     await server.close();

@@ -97,8 +97,8 @@ test("ConfigCenter clears model names explicitly and does not inherit them into 
     const configCenter = new ConfigCenter({ settingsStore, secretStore });
 
     const saved = await configCenter.updateModelProviderConfig({
-      baseUrl: "https://api.deepseek.com",
-      model: "deepseek-chat",
+      baseUrl: "https://provider.example",
+      model: "custom-chat",
       defaultAiMode: "openai-compatible",
     });
     const created = await configCenter.createModelProviderProfile({
@@ -114,7 +114,7 @@ test("ConfigCenter clears model names explicitly and does not inherit them into 
     });
     const env = await configCenter.createUndergroundAiEnvironment();
 
-    assert.equal(saved.model, "deepseek-chat");
+    assert.equal(saved.model, "custom-chat");
     assert.equal(cleared.model, undefined);
     assert.equal(created.model, undefined);
     assert.equal(env.AGENTARBOR_MODEL_NAME, undefined);
@@ -239,7 +239,7 @@ test("ConfigCenter reads v1 settings and upgrades local settings to v3", async (
     };
 
     assert.equal(modelConfig.baseUrl, "https://legacy.example");
-    assert.equal(modelConfig.defaultAiMode, "fake");
+    assert.equal(modelConfig.defaultAiMode, "openai-responses");
     assert.equal(defaultInformation.web.maxResults, 5);
     assert.deepEqual(defaultInformation.sourcePreference, [
       "web",
@@ -261,6 +261,142 @@ test("ConfigCenter reads v1 settings and upgrades local settings to v3", async (
     assert.deepEqual(settingsRaw.mcpServers, []);
     assert.deepEqual(settingsRaw.informationAccess?.sourcePreference, ["codebase", "web"]);
     assert.equal(settingsRaw.informationAccess?.tavily?.maxResults, 2);
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("ConfigCenter repairs built-in model provider drift without overwriting custom proxy profiles", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-config-builtin-provider-drift-"));
+  try {
+    const settingsStore = new FileSystemNormalSettingsStore(directory);
+    const secretStore = new FileSystemLocalDevSecretStore(directory);
+    const now = new Date("2026-05-19T00:00:00.000Z").toISOString();
+    await fs.mkdir(directory, { recursive: true });
+    await fs.writeFile(
+      settingsStore.settingsPath,
+      `${JSON.stringify(
+        {
+          version: 3,
+          activeModelProfileId: "default",
+          modelProvider: {
+            profileId: "default",
+            label: "OpenAI",
+            providerKind: "openai_compatible",
+            protocolKind: "openai_compatible_chat_completions",
+            baseUrl: "https://api.deepseek.com",
+            model: "deepseek-v4-pro",
+            defaultAiMode: "fake",
+            secretRef: "secret://local-dev/model-provider/default/api-key",
+            enabled: true,
+            updatedAt: now,
+          },
+          modelProfiles: [
+            {
+              profileId: "default",
+              label: "OpenAI",
+              providerKind: "openai_compatible",
+              protocolKind: "openai_compatible_chat_completions",
+              baseUrl: "https://api.deepseek.com",
+              model: "deepseek-v4-pro",
+              defaultAiMode: "fake",
+              secretRef: "secret://local-dev/model-provider/default/api-key",
+              enabled: true,
+              updatedAt: now,
+            },
+            {
+              profileId: "deepseek",
+              label: "DeepSeek",
+              providerKind: "openai_compatible",
+              protocolKind: "openai_compatible_chat_completions",
+              baseUrl: "https://api.deepseek.com",
+              model: "deepseek-v4-pro",
+              defaultAiMode: "openai-compatible",
+              secretRef: "secret://local-dev/model-provider/deepseek/api-key",
+              enabled: true,
+              updatedAt: now,
+            },
+            {
+              profileId: "claude",
+              label: "Claude",
+              providerKind: "openai_compatible",
+              protocolKind: "openai_compatible_chat_completions",
+              baseUrl: "https://api.anthropic.com",
+              model: "deepseek-v4-pro",
+              defaultAiMode: "openai-compatible",
+              secretRef: "secret://local-dev/model-provider/claude/api-key",
+              enabled: true,
+              updatedAt: now,
+            },
+            {
+              profileId: "claude-proxy",
+              label: "Claude Proxy",
+              providerKind: "openai_compatible",
+              protocolKind: "openai_compatible_chat_completions",
+              baseUrl: "https://openrouter.ai/api/v1",
+              model: "anthropic/claude-sonnet-4",
+              defaultAiMode: "openai-compatible",
+              secretRef: "secret://local-dev/model-provider/claude-proxy/api-key",
+              enabled: true,
+              updatedAt: now,
+            },
+            {
+              profileId: "openai",
+              label: "OpenAI Proxy",
+              providerKind: "openai_compatible",
+              protocolKind: "openai_compatible_chat_completions",
+              baseUrl: "https://openrouter.ai/api/v1",
+              model: "deepseek-proxy-model",
+              defaultAiMode: "openai-compatible",
+              secretRef: "secret://local-dev/model-provider/openai/api-key",
+              enabled: true,
+              updatedAt: now,
+            },
+          ],
+          modelCatalogs: [
+            {
+              profileId: "deepseek",
+              label: "DeepSeek",
+              baseUrl: "https://api.deepseek.com",
+              modelsPath: "/models",
+              fetchedAt: now,
+              models: [{ id: "deepseek-v4-pro", displayName: "DeepSeek V4 Pro", owner: "deepseek" }],
+            },
+          ],
+          updatedAt: now,
+        },
+        null,
+        2
+      )}\n`
+    );
+
+    const configCenter = new ConfigCenter({ settingsStore, secretStore });
+    const active = await configCenter.getModelProviderConfig();
+    const profiles = await configCenter.listModelProviderProfiles();
+    const openai = profiles.find((profile) => profile.profileId === "default");
+    const anthropic = profiles.find((profile) => profile.profileId === "claude");
+    const deepseek = profiles.find((profile) => profile.profileId === "deepseek");
+    const proxy = profiles.find((profile) => profile.profileId === "claude-proxy");
+    const openaiProxy = profiles.find((profile) => profile.profileId === "openai");
+
+    assert.equal(active.profileId, "default");
+    assert.equal(openai?.label, "OpenAI");
+    assert.equal(openai?.baseUrl, "https://api.openai.com/v1");
+    assert.equal(openai?.protocolKind, "openai_responses");
+    assert.equal(openai?.defaultAiMode, "openai-responses");
+    assert.equal(openai?.model, undefined);
+    assert.equal(anthropic?.label, "Anthropic");
+    assert.equal(anthropic?.providerKind, "anthropic");
+    assert.equal(anthropic?.protocolKind, "anthropic_messages");
+    assert.equal(anthropic?.baseUrl, "https://api.anthropic.com");
+    assert.equal(anthropic?.model, undefined);
+    assert.equal(deepseek?.model, "deepseek-v4-pro");
+    assert.equal(deepseek?.protocolKind, "openai_compatible_chat_completions");
+    assert.equal(proxy?.baseUrl, "https://openrouter.ai/api/v1");
+    assert.equal(proxy?.model, "anthropic/claude-sonnet-4");
+    assert.equal(openaiProxy?.label, "OpenAI");
+    assert.equal(openaiProxy?.baseUrl, "https://openrouter.ai/api/v1");
+    assert.equal(openaiProxy?.model, "deepseek-proxy-model");
   } finally {
     await fs.rm(directory, { recursive: true, force: true });
   }
@@ -294,6 +430,7 @@ test("ConfigCenter manages model profiles and keeps profile secrets scoped", asy
 
     assert.equal(created.profileId, "claude-proxy");
     assert.equal(created.secretConfigured, true);
+    assert.equal(created.protocolKind, "openai_compatible_chat_completions");
     assert.equal(activated.profileId, "claude-proxy");
     assert.equal(activated.baseUrl, "https://openrouter.ai/api/v1");
     assert.equal(env.AGENTARBOR_MODEL_API_KEY, "sk-proxy-secret");

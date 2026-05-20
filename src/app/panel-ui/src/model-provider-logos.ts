@@ -48,14 +48,14 @@ export function resolveModelProviderIdentity(input: ModelProviderLogoInput): Mod
   const explicitProvider = normalizeProviderSignal([input.presetId, input.vendor].filter(Boolean).join(" "));
   const displayText = normalizeProviderSignal([input.title, input.profileId].filter(Boolean).join(" "));
 
-  const strongSignal = resolveStrongProviderSignal(baseUrl) ?? resolveStrongProviderSignal(model) ?? resolveStrongProviderSignal(explicitProvider);
+  const strongSignal = resolveStrongProviderSignal(baseUrl) ?? resolveStrongProviderSignal(explicitProvider);
   if (strongSignal !== undefined) return strongSignal;
 
   const displaySignal = resolveStrongProviderSignal(displayText);
   if (displaySignal !== undefined) return displaySignal;
   if (displayText.includes("default") || displayText.includes("默认配置")) return "openai";
 
-  return "unknown";
+  return resolveStrongProviderSignal(model) ?? "unknown";
 }
 
 function normalizeProviderSignal(value: string | undefined): string {

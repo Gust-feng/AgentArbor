@@ -14,11 +14,25 @@ import type {
   ModelProviderProfileSettings,
   ToolStateSettings,
 } from "../../domain/config/index.js";
+import { listBuiltinModelProviderPresets } from "../../domain/config/index.js";
 
 export const DEFAULT_MODEL_PROVIDER_BASE_URL = "https://api.openai.com/v1";
 export const MODEL_PROVIDER_SECRET_REF = "secret://local-dev/model-provider/default/api-key";
 export const INFORMATION_TAVILY_SECRET_REF = "secret://local-dev/information-source/tavily/default/api-key";
 const DEFAULT_MODEL_PROFILE_ID = "default";
+const BUILTIN_PROFILE_PRESET_ALIASES = new Map<string, string>([
+  ["default", "openai"],
+  ["openai", "openai"],
+  ["claude", "claude"],
+  ["anthropic", "claude"],
+  ["deepseek", "deepseek"],
+  ["moonshot", "moonshot"],
+  ["kimi", "moonshot"],
+  ["glm", "glm"],
+  ["zhipu", "glm"],
+  ["zai", "glm"],
+  ["minimax", "minimax"],
+]);
 const DEFAULT_INFORMATION_SOURCE_PREFERENCE: readonly ConfiguredInformationSourceKind[] = [
   "web",
   "codebase",
@@ -132,8 +146,11 @@ export function normalizeLocalSettings(settings: AgentArborLocalSettings): Agent
   const now = settings.updatedAt;
   const legacyProfile = normalizeModelProfile(settings.modelProvider, createDefaultProfile(now));
   const profileFallback = { ...legacyProfile, model: undefined };
-  const profiles = dedupeProfiles((settings.modelProfiles.length === 0 ? [legacyProfile] : settings.modelProfiles)
+  const parsedProfiles = dedupeProfiles((settings.modelProfiles.length === 0 ? [legacyProfile] : settings.modelProfiles)
     .map((profile) => normalizeModelProfile(profile, profileFallback)));
+  const parsedCatalogs = normalizeModelCatalogs(settings.modelCatalogs ?? [], parsedProfiles, now);
+  const profiles = normalizeBuiltInModelProviderProfiles(parsedProfiles, parsedCatalogs, now);
+  const modelCatalogs = normalizeModelCatalogs(settings.modelCatalogs ?? [], profiles, now);
   const activeProfile =
     profiles.find((profile) => profile.profileId === settings.activeModelProfileId) ??
     profiles.find((profile) => profile.profileId === legacyProfile.profileId) ??
@@ -145,7 +162,7 @@ export function normalizeLocalSettings(settings: AgentArborLocalSettings): Agent
     modelProvider: activeProfile,
     activeModelProfileId: activeProfile.profileId,
     modelProfiles: profiles.length === 0 ? [activeProfile] : profiles,
-    modelCatalogs: normalizeModelCatalogs(settings.modelCatalogs ?? [], profiles.length === 0 ? [activeProfile] : profiles, now),
+    modelCatalogs,
     modelCapabilityOverrides: normalizeModelCapabilityOverrides(settings.modelCapabilityOverrides ?? [], now),
     toolStates: normalizeToolStates(settings.toolStates ?? [], now),
     mcpServers: normalizeMcpServers(settings.mcpServers ?? [], now),
@@ -178,7 +195,15 @@ function normalizeProfileProtocolForProvider(
   providerKind: ConfiguredModelProviderKind,
   protocolKind: ConfiguredModelProtocolKind
 ): ConfiguredModelProtocolKind {
-  return providerKind === "openai_compatible" ? "openai_responses" : protocolKind;
+  if (providerKind === "openai_compatible") {
+    return protocolKind === "openai_compatible_chat_completions"
+      ? "openai_compatible_chat_completions"
+      : "openai_responses";
+  }
+  if (providerKind === "anthropic") return "anthropic_messages";
+  if (providerKind === "gemini") return "gemini_generate_content";
+  if (providerKind === "ollama") return "ollama_generate";
+  return protocolKind;
 }
 
 function normalizeProfileAiModeForProvider(
@@ -188,7 +213,147 @@ function normalizeProfileAiModeForProvider(
   if (providerKind !== "openai_compatible") {
     return aiMode;
   }
-  return aiMode === "none" || aiMode === "fake" ? aiMode : "openai-responses";
+  return "openai-responses";
+}
+
+function normalizeBuiltInModelProviderProfiles(
+  profiles: readonly ModelProviderProfileSettings[],
+  catalogs: readonly ModelProviderModelCatalog[],
+  now: string
+): readonly ModelProviderProfileSettings[] {
+  const catalogModelOwners = catalogModelOwnerMap(catalogs);
+  return profiles.map((profile) => {
+    const preset = builtInPresetForProfile(profile);
+    if (preset === undefined) {
+      return profile;
+    }
+    const providerKind = preset.providerKind;
+    const protocolKind = normalizeBuiltInProfileProtocol(profile, preset);
+    const defaultAiMode = normalizeProfileAiModeForProvider(providerKind, profile.defaultAiMode);
+    const baseUrl = normalizeBuiltInProfileBaseUrl(profile, preset);
+    const model = shouldClearBuiltInProfileModel(profile, preset.presetId, catalogs, catalogModelOwners)
+      ? undefined
+      : profile.model;
+    const next: ModelProviderProfileSettings = {
+      ...profile,
+      label: preset.label,
+      providerKind,
+      protocolKind,
+      baseUrl,
+      model,
+      defaultAiMode,
+    };
+    return sameModelProfile(profile, next) ? profile : { ...next, updatedAt: now };
+  });
+}
+
+function builtInPresetForProfile(profile: ModelProviderProfileSettings): ReturnType<typeof listBuiltinModelProviderPresets>[number] | undefined {
+  const presetId = BUILTIN_PROFILE_PRESET_ALIASES.get(profile.profileId);
+  if (presetId === undefined) {
+    return undefined;
+  }
+  return listBuiltinModelProviderPresets().find((preset) => preset.presetId === presetId);
+}
+
+function normalizeBuiltInProfileProtocol(
+  profile: ModelProviderProfileSettings,
+  preset: ReturnType<typeof listBuiltinModelProviderPresets>[number]
+): ConfiguredModelProtocolKind {
+  const currentBaseUrl = normalizeBaseUrl(profile.baseUrl);
+  const currentCanonicalOwner =
+    currentBaseUrl === undefined ? undefined : builtInPresetIdForCanonicalBaseUrl(currentBaseUrl);
+  if (currentCanonicalOwner !== undefined && currentCanonicalOwner !== preset.presetId) {
+    return normalizeProfileProtocolForProvider(preset.providerKind, preset.protocolKind);
+  }
+  return normalizeProfileProtocolForProvider(preset.providerKind, profile.protocolKind);
+}
+
+function normalizeBuiltInProfileBaseUrl(
+  profile: ModelProviderProfileSettings,
+  preset: ReturnType<typeof listBuiltinModelProviderPresets>[number]
+): string {
+  const canonicalBaseUrl = normalizeBaseUrl(preset.baseUrl) ?? preset.baseUrl;
+  const currentBaseUrl = normalizeBaseUrl(profile.baseUrl);
+  if (currentBaseUrl === undefined) {
+    return canonicalBaseUrl;
+  }
+  if (preset.presetId === "openai" && currentBaseUrl === "https://api.openai.com") {
+    return canonicalBaseUrl;
+  }
+  const currentCanonicalOwner = builtInPresetIdForCanonicalBaseUrl(currentBaseUrl);
+  if (currentCanonicalOwner !== undefined && currentCanonicalOwner !== preset.presetId) {
+    return canonicalBaseUrl;
+  }
+  return currentBaseUrl;
+}
+
+function shouldClearBuiltInProfileModel(
+  profile: ModelProviderProfileSettings,
+  presetId: string,
+  catalogs: readonly ModelProviderModelCatalog[],
+  catalogModelOwners: ReadonlyMap<string, ReadonlySet<string>>
+): boolean {
+  const model = normalizeOptionalString(profile.model);
+  if (model === undefined) {
+    return false;
+  }
+  const ownCatalog = catalogs.find((catalog) => catalog.profileId === profile.profileId);
+  if (ownCatalog?.models.some((item) => item.id === model) === true) {
+    return false;
+  }
+  const catalogOwners = catalogModelOwners.get(model);
+  if (catalogOwners !== undefined && [...catalogOwners].some((profileId) => profileId !== profile.profileId)) {
+    return true;
+  }
+  const modelSignalOwner = builtInPresetIdForModelSignal(model);
+  if (modelSignalOwner === undefined || modelSignalOwner === presetId) {
+    return false;
+  }
+  const currentBaseUrl = normalizeBaseUrl(profile.baseUrl);
+  return currentBaseUrl === undefined || builtInPresetIdForCanonicalBaseUrl(currentBaseUrl) !== undefined;
+}
+
+function catalogModelOwnerMap(catalogs: readonly ModelProviderModelCatalog[]): ReadonlyMap<string, ReadonlySet<string>> {
+  const owners = new Map<string, Set<string>>();
+  for (const catalog of catalogs) {
+    for (const model of catalog.models) {
+      const existing = owners.get(model.id) ?? new Set<string>();
+      existing.add(catalog.profileId);
+      owners.set(model.id, existing);
+    }
+  }
+  return owners;
+}
+
+function builtInPresetIdForCanonicalBaseUrl(baseUrl: string): string | undefined {
+  if (baseUrl === "https://api.openai.com") {
+    return "openai";
+  }
+  const preset = listBuiltinModelProviderPresets().find((item) => normalizeBaseUrl(item.baseUrl) === baseUrl);
+  return preset?.presetId;
+}
+
+function builtInPresetIdForModelSignal(model: string): string | undefined {
+  const normalized = model.trim().toLowerCase();
+  if (normalized.includes("deepseek")) return "deepseek";
+  if (normalized.includes("claude") || normalized.includes("anthropic")) return "claude";
+  if (normalized.includes("kimi") || normalized.includes("moonshot")) return "moonshot";
+  if (normalized.includes("glm") || normalized.includes("zhipu") || normalized.includes("bigmodel")) return "glm";
+  if (normalized.includes("minimax")) return "minimax";
+  if (normalized.includes("gpt") || normalized.includes("openai")) return "openai";
+  return undefined;
+}
+
+function sameModelProfile(left: ModelProviderProfileSettings, right: ModelProviderProfileSettings): boolean {
+  return left.profileId === right.profileId &&
+    left.label === right.label &&
+    left.providerKind === right.providerKind &&
+    left.protocolKind === right.protocolKind &&
+    left.baseUrl === right.baseUrl &&
+    left.model === right.model &&
+    left.defaultAiMode === right.defaultAiMode &&
+    left.secretRef === right.secretRef &&
+    left.enabled === right.enabled;
 }
 
 export function createDefaultInformationAccessSettings(now: string): InformationAccessSettings {

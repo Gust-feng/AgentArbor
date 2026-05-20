@@ -168,7 +168,9 @@ export class ConfigCenter {
       await this.options.secretStore.writeSecret(profile.secretRef, apiKey);
     }
     await this.options.settingsStore.writeSettings(next);
-    return this.toSanitizedModelProfile(profile);
+    return this.toSanitizedModelProfile(
+      next.modelProfiles.find((candidate) => candidate.profileId === profileId) ?? profile
+    );
   }
 
   async activateModelProviderProfile(profileId: string): Promise<SanitizedModelProviderConfig> {
@@ -255,7 +257,9 @@ export class ConfigCenter {
     }
 
     await this.options.settingsStore.writeSettings(next);
-    return this.toSanitizedModelProfile(updatedProfile);
+    return this.toSanitizedModelProfile(
+      next.modelProfiles.find((profile) => profile.profileId === updatedProfile.profileId) ?? updatedProfile
+    );
   }
 
   async listModelCapabilityOverrides(): Promise<readonly ModelCapabilityOverrideSettings[]> {

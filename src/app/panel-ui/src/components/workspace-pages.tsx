@@ -41,6 +41,7 @@ type ModelForm = {
   readonly profileId: string;
   readonly label: string;
   readonly baseUrl: string;
+  readonly protocolKind: string;
   readonly model: string;
   readonly apiKey: string;
   readonly apiKeyCleared: boolean;
@@ -196,6 +197,18 @@ export function SettingsDialog(props: {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [props.open, props.onClose]);
 
+  useEffect(() => {
+    if (!props.open) return;
+    const previousBodyOverflow = document.body.style.overflow;
+    const previousRootOverflow = document.documentElement.style.overflow;
+    document.body.style.overflow = "hidden";
+    document.documentElement.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previousBodyOverflow;
+      document.documentElement.style.overflow = previousRootOverflow;
+    };
+  }, [props.open]);
+
   if (!props.open) return null;
 
   const activeInfo = SETTINGS_GROUPS.find((group) => group.id === activeGroup) ?? SETTINGS_GROUPS[0]!;
@@ -225,7 +238,7 @@ export function SettingsDialog(props: {
           <header>
             <h2>{activeInfo.label}</h2>
           </header>
-          <div className="settings-content">
+          <div className={`settings-content ${activeGroup === "models" ? "model-settings-content" : ""}`}>
             {activeGroup === "general" && <GeneralSettings config={props.config} />}
             {activeGroup === "models" && (
               <ModelSettings
@@ -438,6 +451,8 @@ function ModelSettings(props: {
   const [modelsFetchBusy, setModelsFetchBusy] = useState(false);
   const [fetchedCatalogs, setFetchedCatalogs] = useState<Record<string, ModelProviderModelCatalog>>({});
   const [modelNameDrafts, setModelNameDrafts] = useState<Record<string, string>>({});
+  const [modelQuery, setModelQuery] = useState("");
+  const [selectedModelRowId, setSelectedModelRowId] = useState<string | undefined>(undefined);
   const saveTimerRef = useRef<number | undefined>(undefined);
   const fetchSeqRef = useRef(0);
   const revealRef = useRef(props.onRevealModelApiKey);
@@ -463,6 +478,12 @@ function ModelSettings(props: {
   const savedModelIds = useMemo(() => new Set(catalogModels.map((model) => model.id)), [catalogModels]);
   const fetchedCatalog = selectedItem?.profileId === undefined ? undefined : fetchedCatalogs[selectedItem.profileId];
   const fetchedCandidates = (fetchedCatalog?.models ?? []).filter((model) => !savedModelIds.has(model.id));
+  const normalizedModelQuery = modelQuery.trim().toLowerCase();
+  const hasModelQuery = normalizedModelQuery.length > 0;
+  const visibleCatalogModels = filterModelCatalogItems(catalogModels, normalizedModelQuery);
+  const visibleFetchedCandidates = filterModelCatalogItems(fetchedCandidates, normalizedModelQuery);
+  const showSavedCount = catalogModels.length > 0 || hasModelQuery;
+  const showModelSearch = catalogModels.length > 0 || fetchedCandidates.length > 0 || hasModelQuery;
   const selectedProfileId = selectedItem?.profileId;
   const selectedModelIconSvg = selectedItem === undefined ? undefined : resolveModelIconSvg(resolveModelProviderIdentity(selectedItem));
   const hasKey = props.modelForm.apiKey.length > 0;
@@ -479,6 +500,8 @@ function ModelSettings(props: {
     const seq = ++fetchSeqRef.current;
     const nextForm = modelFormFromProviderItem(selectedItem);
     setRevealed(false);
+    setModelQuery("");
+    setSelectedModelRowId(undefined);
     props.setModelForm(nextForm);
 
     if (!selectedSecretConfigured || selectedProfileId === undefined) {
@@ -541,11 +564,11 @@ function ModelSettings(props: {
       apiKeyCleared: selectedSecretConfigured || hasKey,
     };
     setRevealed(false);
+    props.setModelForm(nextForm);
     if (selectedItem.profileId !== undefined || selectedSecretConfigured) {
       await saveModelImmediately(nextForm).catch(() => undefined);
       return;
     }
-    props.setModelForm(nextForm);
   }
 
   async function fetchSelectedModels(): Promise<void> {
@@ -619,11 +642,13 @@ function ModelSettings(props: {
     if (props.modelForm.model === modelId) {
       const nextForm = { ...props.modelForm, model: "" };
       props.setModelForm(nextForm);
+      setSelectedModelRowId(undefined);
       await saveModelImmediately(nextForm).catch(() => undefined);
     }
   }
 
   function selectCatalogModel(modelId: string): void {
+    setSelectedModelRowId(modelId);
     if (props.modelForm.model === modelId) return;
     const nextForm = { ...props.modelForm, model: modelId };
     props.setModelForm(nextForm);
@@ -649,14 +674,14 @@ function ModelSettings(props: {
   if (selectedItem === undefined) {
     return (
       <div className="settings-provider-manager empty">
-        <EmptyBlock>暂无模型厂商。请添加一个 OpenAI 兼容厂商。</EmptyBlock>
+        <EmptyBlock>暂无模型服务。请添加一个 OpenAI 兼容服务。</EmptyBlock>
       </div>
     );
   }
 
   return (
     <div className="settings-provider-manager">
-      <aside className="provider-list-pane" aria-label="模型厂商">
+      <aside className="provider-list-pane" aria-label="模型服务">
         <label className="provider-search">
           <Search size={16} />
           <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索" />
@@ -682,7 +707,7 @@ function ModelSettings(props: {
         </button>
       </aside>
 
-      <section className="provider-detail-pane" aria-label="模型厂商详情">
+      <section className="provider-detail-pane" aria-label="模型服务详情">
         <header className="provider-detail-header">
           <ProviderLogo item={selectedItem} large />
           <div>
@@ -697,7 +722,7 @@ function ModelSettings(props: {
             <span>API Key</span>
             <div className="api-key-field">
               <input
-                type="text"
+                type={revealed ? "text" : "password"}
                 className={revealed ? undefined : "api-key-input-masked"}
                 value={props.modelForm.apiKey}
                 autoComplete="off"
@@ -746,101 +771,134 @@ function ModelSettings(props: {
           </label>
           <label>
             <span>Base URL</span>
-            <input
-              value={props.modelForm.baseUrl || selectedItem.baseUrl}
-              onChange={(event) => {
-                const nextForm = { ...props.modelForm, baseUrl: event.target.value };
-                props.setModelForm(nextForm);
-                scheduleModelSave(nextForm);
-              }}
-              placeholder="https://api.example.com/v1"
-            />
+            <div className="provider-base-url-field">
+              <input
+                value={props.modelForm.baseUrl || selectedItem.baseUrl}
+                onChange={(event) => {
+                  const nextForm = { ...props.modelForm, baseUrl: event.target.value };
+                  props.setModelForm(nextForm);
+                  scheduleModelSave(nextForm);
+                }}
+                placeholder="https://api.example.com/v1"
+              />
+              <select
+                value={props.modelForm.protocolKind || selectedItem.protocolKind}
+                aria-label="请求路径"
+                onChange={(event) => {
+                  const nextForm = { ...props.modelForm, protocolKind: event.target.value };
+                  props.setModelForm(nextForm);
+                  scheduleModelSave(nextForm);
+                }}
+              >
+                {requestPathOptionsForProvider(selectedItem).map((option) => (
+                  <option value={option.value} key={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </div>
           </label>
         </div>
 
         <section className="model-list-panel">
-          <header>
-            <div>
+          <div className="model-panel-toolbar">
+            <div className="model-panel-title">
               <strong>模型列表</strong>
-              <span>{catalogModels.length}</span>
+              {showSavedCount && <span>{formatModelCount(visibleCatalogModels.length, catalogModels.length, hasModelQuery)}</span>}
             </div>
-            <div>
+            <div className="model-panel-actions">
+              {showModelSearch && (
+                <label className="model-search-field">
+                  <Search size={14} />
+                  <input
+                    value={modelQuery}
+                    onChange={(event) => setModelQuery(event.target.value)}
+                    placeholder="搜索模型"
+                    spellCheck={false}
+                  />
+                </label>
+              )}
               <button type="button" onClick={() => void fetchSelectedModels()} disabled={props.saving || modelsFetchBusy}>
                 <RefreshCw size={14} />
                 {modelsFetchBusy ? "获取中" : "获取模型"}
               </button>
             </div>
-          </header>
-          {catalogModels.length === 0 ? (
-            <div className="model-empty">未添加模型</div>
-          ) : (
-            <div className="model-list">
-              {catalogModels.slice(0, 20).map((model) => (
-                <div
-                  className={`model-list-row saved ${model.id === props.modelForm.model ? "selected" : ""}`}
-                  key={model.id}
-                  role="option"
-                  aria-selected={model.id === props.modelForm.model}
-                  tabIndex={0}
-                  onClick={() => selectCatalogModel(model.id)}
-                  onKeyDown={(event) => {
-                    if (event.target !== event.currentTarget) return;
-                    if (event.key !== "Enter" && event.key !== " ") return;
-                    event.preventDefault();
-                    selectCatalogModel(model.id);
-                  }}
-                >
-                  <ModelIcon svg={selectedModelIconSvg} />
-                  <div className="model-row-copy">
-                    <input
-                      className="model-name-input"
-                      value={modelNameDrafts[model.id] ?? (model.displayName === model.id ? "" : model.displayName)}
-                      placeholder="名称"
-                      aria-label={`模型名称 ${model.id}`}
-                      onChange={(event) => {
-                        const nextValue = event.target.value;
-                        setModelNameDrafts((previous) => ({ ...previous, [model.id]: nextValue }));
-                      }}
-                      onFocus={() => selectCatalogModel(model.id)}
-                      onBlur={(event) => {
-                        void commitModelDisplayName(model.id, event.target.value);
-                      }}
+          </div>
+          <div className="model-section">
+            {visibleCatalogModels.length === 0 && catalogModels.length > 0 ? (
+              <div className="model-empty compact">无匹配模型</div>
+            ) : (
+              catalogModels.length > 0 && (
+                <div className="model-list">
+                  {visibleCatalogModels.map((model) => (
+                    <div
+                      className={`model-list-row saved ${model.id === selectedModelRowId ? "selected" : ""}`}
+                      key={model.id}
+                      role="option"
+                      aria-selected={model.id === selectedModelRowId}
+                      tabIndex={0}
+                      onClick={() => selectCatalogModel(model.id)}
                       onKeyDown={(event) => {
-                        if (event.key === "Enter") {
-                          event.preventDefault();
-                          event.currentTarget.blur();
-                        }
+                        if (event.target !== event.currentTarget) return;
+                        if (event.key !== "Enter" && event.key !== " ") return;
+                        event.preventDefault();
+                        selectCatalogModel(model.id);
                       }}
-                    />
-                    <small>{model.id}</small>
-                  </div>
-                  <button
-                    type="button"
-                    className="model-row-action"
-                    aria-label={`移除 ${model.displayName}`}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      void removeCatalogModel(model.id);
-                    }}
-                    disabled={props.saving}
-                  >
-                    <Trash2 size={14} />
-                  </button>
+                    >
+                      <ModelIcon svg={selectedModelIconSvg} />
+                      <div className="model-row-copy">
+                        <input
+                          className="model-name-input"
+                          value={modelNameDrafts[model.id] ?? model.displayName ?? model.id}
+                          placeholder={model.id}
+                          aria-label={`模型名称 ${model.id}`}
+                          spellCheck={false}
+                          onChange={(event) => {
+                            const nextValue = event.target.value;
+                            setModelNameDrafts((previous) => ({ ...previous, [model.id]: nextValue }));
+                          }}
+                          onFocus={() => selectCatalogModel(model.id)}
+                          onBlur={(event) => {
+                            void commitModelDisplayName(model.id, event.target.value);
+                          }}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter") {
+                              event.preventDefault();
+                              event.currentTarget.blur();
+                            }
+                          }}
+                        />
+                        <small>{model.id}</small>
+                      </div>
+                      <button
+                        type="button"
+                        className="model-row-action"
+                        aria-label={`移除 ${model.displayName}`}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void removeCatalogModel(model.id);
+                        }}
+                        disabled={props.saving}
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-          )}
+              )
+            )}
+          </div>
           {fetchedCatalog !== undefined && (
-            <div className="model-candidate-section">
+            <div className="model-section model-candidate-section">
               <header>
                 <strong>可添加</strong>
-                <span>{fetchedCandidates.length}</span>
+                <span>{formatModelCount(visibleFetchedCandidates.length, fetchedCandidates.length, hasModelQuery)}</span>
               </header>
               {fetchedCandidates.length === 0 ? (
                 <div className="model-empty compact">没有新的模型</div>
+              ) : visibleFetchedCandidates.length === 0 ? (
+                <div className="model-empty compact">无匹配模型</div>
               ) : (
                 <div className="model-list">
-                  {fetchedCandidates.slice(0, 40).map((model) => (
+                  {visibleFetchedCandidates.map((model) => (
                     <div className="model-list-row" key={model.id}>
                       <ModelIcon svg={selectedModelIconSvg} />
                       <div className="model-candidate-copy">
@@ -885,12 +943,25 @@ function removeRecordKey<T>(record: Readonly<Record<string, T>>, key: string): R
 type ModelProviderProfileItem = NonNullable<ConfigResponse["profiles"]>[number];
 type ModelProviderModelItem = ModelProviderModelCatalog["models"][number];
 
+function filterModelCatalogItems(
+  models: readonly ModelProviderModelItem[],
+  normalizedQuery: string
+): readonly ModelProviderModelItem[] {
+  if (normalizedQuery.length === 0) return models;
+  return models.filter((model) => [model.displayName, model.id, model.owner ?? ""].some((value) => value.toLowerCase().includes(normalizedQuery)));
+}
+
+function formatModelCount(visible: number, total: number, filtered: boolean): string {
+  return filtered ? `${visible}/${total}` : String(total);
+}
+
 type ModelProviderListItem = {
   readonly key: string;
   readonly title: string;
   readonly vendor?: string;
   readonly model: string;
   readonly baseUrl: string;
+  readonly protocolKind: string;
   readonly profileId?: string;
   readonly profile?: ModelProviderProfileItem;
   readonly presetId?: string;
@@ -941,6 +1012,7 @@ function modelProviderItems(
       vendor: preset.vendor,
       model: catalogHasModel ? profile?.model ?? "" : "",
       baseUrl: profile === undefined ? preset.baseUrl : visibleProfileBaseUrl(profile),
+      protocolKind: profile?.protocolKind ?? preset.protocolKind,
       profileId: profile?.profileId,
       profile,
       presetId: preset.presetId,
@@ -957,6 +1029,7 @@ function modelProviderItems(
         title: friendlyProfileTitle(profile, identity),
         model: catalogHasModel ? profile.model ?? "" : "",
         baseUrl: visibleProfileBaseUrl(profile),
+        protocolKind: profile.protocolKind ?? "openai_responses",
         profileId: profile.profileId,
         profile,
       } satisfies ModelProviderListItem;
@@ -979,10 +1052,28 @@ function modelFormFromProviderItem(item: ModelProviderListItem): ModelForm {
     profileId: modelProviderFormId(item),
     label: item.title,
     baseUrl: item.baseUrl,
+    protocolKind: item.protocolKind,
     model: item.model,
     apiKey: "",
     apiKeyCleared: false,
   };
+}
+
+function requestPathOptionsForProvider(item: ModelProviderListItem): readonly { readonly value: string; readonly label: string }[] {
+  const providerKind = item.profile?.providerKind ?? item.preset?.providerKind;
+  if (providerKind === "anthropic") {
+    return [{ value: "anthropic_messages", label: "/v1/messages" }];
+  }
+  if (providerKind === "gemini") {
+    return [{ value: "gemini_generate_content", label: "/generateContent" }];
+  }
+  if (providerKind === "ollama") {
+    return [{ value: "ollama_generate", label: "/api/generate" }];
+  }
+  return [
+    { value: "openai_responses", label: "/responses" },
+    { value: "openai_compatible_chat_completions", label: "/chat/completions" },
+  ];
 }
 
 function friendlyProfileTitle(profile: ModelProviderProfileItem, identity: ModelProviderIdentity): string {
@@ -1217,7 +1308,7 @@ function providerName(value: string): string {
 
 const SETTINGS_GROUPS: readonly { readonly id: SettingsGroup; readonly label: string; readonly icon: React.ReactNode }[] = [
   { id: "general", label: "常规", icon: <SlidersHorizontal size={15} /> },
-  { id: "models", label: "模型厂商", icon: <CloudCog size={15} /> },
+  { id: "models", label: "模型服务", icon: <CloudCog size={15} /> },
   { id: "confirmation", label: "确认", icon: <LockKeyhole size={15} /> },
   { id: "workspace", label: "数据", icon: <Database size={15} /> },
   { id: "appearance", label: "界面", icon: <LayoutList size={15} /> },

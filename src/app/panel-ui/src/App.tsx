@@ -49,6 +49,7 @@ type ModelForm = {
   readonly profileId: string;
   readonly label: string;
   readonly baseUrl: string;
+  readonly protocolKind: string;
   readonly model: string;
   readonly apiKey: string;
   readonly apiKeyCleared: boolean;
@@ -73,12 +74,14 @@ export function App(): React.ReactElement {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsGroup, setSettingsGroup] = useState<SettingsGroup>("general");
+  const [inputCloseSignal, setInputCloseSignal] = useState(0);
   const [goal, setGoal] = useState("");
   const [aiMode, setAiMode] = useState<VisibleAiMode>("openai-responses");
   const [modelForm, setModelForm] = useState<ModelForm>({
     profileId: "",
     label: "",
     baseUrl: "",
+    protocolKind: "openai_responses",
     model: "",
     apiKey: "",
     apiKeyCleared: false,
@@ -122,6 +125,7 @@ export function App(): React.ReactElement {
         profileId: activeProfileId,
         label: visibleConfigLabel(app.config!.config!),
         baseUrl: visibleConfigBaseUrl(app.config!.config!),
+        protocolKind: app.config!.config!.protocolKind ?? "openai_responses",
         model: app.config!.config!.model ?? "",
         apiKey: "",
         apiKeyCleared: false,
@@ -428,7 +432,7 @@ export function App(): React.ReactElement {
           profileId: preset.presetId,
           label: nextModelForm.label.trim() || preset.label,
           providerKind: preset.providerKind,
-          protocolKind: preset.protocolKind,
+          protocolKind: nextModelForm.protocolKind || preset.protocolKind,
           baseUrl: nextModelForm.baseUrl || preset.baseUrl,
           model: nextModelForm.model,
           clearModel: nextModelForm.model.trim().length === 0,
@@ -453,6 +457,7 @@ export function App(): React.ReactElement {
         profileId: nextModelForm.profileId,
         label: nextModelForm.label,
         baseUrl: nextModelForm.baseUrl,
+        protocolKind: nextModelForm.protocolKind,
         model: nextModelForm.model,
         clearModel: nextModelForm.model.trim().length === 0,
         apiKey: nextModelForm.apiKeyCleared ? undefined : nextModelForm.apiKey,
@@ -478,7 +483,7 @@ export function App(): React.ReactElement {
       if (mountedRef.current) {
         setApp((previous) => ({
           ...previous,
-          error: `系统错误：${error instanceof Error ? error.message : "模型厂商保存失败。"}`,
+          error: `系统错误：${error instanceof Error ? error.message : "模型服务保存失败。"}`,
         }));
       }
       throw error;
@@ -495,7 +500,7 @@ export function App(): React.ReactElement {
         profileId: label,
         label,
         providerKind: "openai_compatible",
-        protocolKind: "openai_responses",
+        protocolKind: modelForm.protocolKind || "openai_responses",
         baseUrl: modelForm.baseUrl,
         model: modelForm.model,
         clearModel: modelForm.model.trim().length === 0,
@@ -550,6 +555,7 @@ export function App(): React.ReactElement {
           profileId: parsed.profileId,
           label: profile.label ?? parsed.profileId,
           baseUrl: profile.baseUrl ?? "",
+          protocolKind: profile.protocolKind ?? "openai_responses",
           model: parsed.modelId,
           apiKey: "",
           apiKeyCleared: false,
@@ -736,6 +742,7 @@ export function App(): React.ReactElement {
   }
 
   function openSettings(group: SettingsGroup = "general"): void {
+    setInputCloseSignal((value) => value + 1);
     setSettingsGroup(group);
     setSettingsOpen(true);
   }
@@ -757,6 +764,7 @@ export function App(): React.ReactElement {
     busy: app.busy,
     models: modelOptions,
     selectedModelId,
+    closeSignal: inputCloseSignal,
     onModelSelect: (modelId: string) => void selectComposerModel(modelId),
     onOpenSettings: () => openSettings("models"),
     onSubmit: () => void startTask(),

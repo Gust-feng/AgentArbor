@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   ArrowUp,
   BrainCircuit,
@@ -44,6 +44,7 @@ export type ChatInputProps = AttachmentInputProps & {
   readonly running?: boolean;
   readonly placeholder?: string;
   readonly variant?: "embedded" | "floating";
+  readonly closeSignal?: number;
 };
 
 export function ChatEmpty(props: ChatInputProps & {
@@ -76,6 +77,11 @@ export function ChatInputBar(props: ChatInputProps): React.ReactElement {
   const canSend = props.value.trim().length > 0 && !props.busy;
   const canAddAttachment = props.attachmentValue.trim().length > 0 && !props.contextBusy;
   const modelGroups = useMemo(() => groupModels(props.models), [props.models]);
+
+  useEffect(() => {
+    setModelMenuOpen(false);
+    setContextOpen(false);
+  }, [props.closeSignal]);
 
   const inputCard = (
     <div className={`chat-input-card ${focused ? "focused" : ""}`}>
@@ -115,7 +121,10 @@ export function ChatInputBar(props: ChatInputProps): React.ReactElement {
           <button
             type="button"
             className="composer-tool-button"
-            onClick={() => setContextOpen((value) => !value)}
+            onClick={() => {
+              setModelMenuOpen(false);
+              setContextOpen((value) => !value);
+            }}
             aria-expanded={contextOpen}
           >
             <Paperclip size={14} />
@@ -127,7 +136,10 @@ export function ChatInputBar(props: ChatInputProps): React.ReactElement {
             <button
               type="button"
               className="model-select-button"
-              onClick={() => setModelMenuOpen((value) => !value)}
+              onClick={() => {
+                setContextOpen(false);
+                setModelMenuOpen((value) => !value);
+              }}
               aria-expanded={modelMenuOpen}
             >
               <span>{selectedModel?.name ?? "选择模型"}</span>
@@ -236,7 +248,7 @@ export function ChatInputBar(props: ChatInputProps): React.ReactElement {
 function groupModels(models: readonly ChatModelOption[]): readonly { readonly label: string; readonly items: readonly ChatModelOption[] }[] {
   const groups = new Map<string, ChatModelOption[]>();
   for (const model of models) {
-    const label = model.providerLabel === model.name ? "模型厂商" : model.providerLabel;
+    const label = model.providerLabel === model.name ? "模型服务" : model.providerLabel;
     groups.set(label, [...(groups.get(label) ?? []), model]);
   }
   return [...groups.entries()].map(([label, items]) => ({ label, items }));

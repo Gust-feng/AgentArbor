@@ -10,6 +10,7 @@ import {
   resolveAgentArborRuntimeDatabasePaths,
 } from "../adapters/runtime-database/index.js";
 import { createPanelHtml } from "./panel-assets.js";
+import { PanelConversationStore, toRuntimeConversationRecord } from "./panel-conversations.js";
 import { startLocalPanelServer, type PanelModelCatalogFetch, type PanelProviderFetch } from "./panel-server.js";
 
 test("panel HTML serves the React workbench shell without first-screen internals", () => {
@@ -22,57 +23,193 @@ test("panel HTML serves the React workbench shell without first-screen internals
   assert.match(staticHtml, /<script type="module"[^>]+src="\/assets\/[^"]+\.js"/);
   assert.match(staticHtml, /<link rel="stylesheet"[^>]+href="\/assets\/[^"]+\.css"/);
   assert.equal(staticHtml.includes('<div id="root">'), true);
-  assert.equal(firstScreenHtml.includes("新对话"), true);
+  assert.equal(firstScreenHtml.includes("新任务"), true);
   assert.equal(firstScreenHtml.includes("有什么可以帮到你？"), false);
   assert.equal(firstScreenHtml.includes("直接输入问题"), false);
   assert.equal(firstScreenHtml.includes("技能"), true);
   assert.equal(firstScreenHtml.includes("工具"), true);
   assert.equal(firstScreenHtml.includes("设置"), true);
-  assert.equal(firstScreenHtml.includes("发送消息"), true);
+  assert.equal(firstScreenHtml.includes("待确认"), true);
+  assert.equal(firstScreenHtml.includes("工作上下文"), false);
+  assert.equal(firstScreenHtml.includes("证据"), false);
+  assert.equal(firstScreenHtml.includes("结果"), false);
+  assert.equal(firstScreenHtml.includes("下一步"), false);
+  assert.equal(firstScreenHtml.includes("任务输入"), true);
   assertFirstScreenHasNoInternalTerms(firstScreenHtml);
 });
 
 test("panel React source is split into typed frontend modules", async () => {
-  const [entry, app, api, types, text, workspacePages, conversation, richText] = await Promise.all([
+  const [entry, app, api, types, text, workspacePages, modelProviderLogos, modelIcons, chatEmpty, chatActive, sidebar, topbar, richText] = await Promise.all([
     readPanelUiSource("main.tsx"),
     readPanelUiSource("App.tsx"),
     readPanelUiSource("api.ts"),
     readPanelUiSource("types.ts"),
     readPanelUiSource("text.ts"),
     readPanelUiSource(path.join("components", "workspace-pages.tsx")),
-    readPanelUiSource(path.join("components", "conversation.tsx")),
+    readPanelUiSource("model-provider-logos.ts"),
+    readPanelUiSource("model-icons.ts"),
+    readPanelUiSource(path.join("components", "chat-empty.tsx")),
+    readPanelUiSource(path.join("components", "chat-active.tsx")),
+    readPanelUiSource(path.join("components", "sidebar.tsx")),
+    readPanelUiSource(path.join("components", "topbar.tsx")),
     readPanelUiSource(path.join("components", "rich-text.tsx")),
   ]);
 
   assert.equal(entry.includes('import { App } from "./App"'), true);
   assert.equal(app.includes('import { getJson, postJson } from "./api"'), true);
   assert.equal(app.includes('from "./components/sidebar"'), true);
+  assert.equal(app.includes('from "./components/chat-empty"'), true);
+  assert.equal(app.includes('from "./components/chat-active"'), true);
   assert.equal(app.includes('from "./components/workspace-pages"'), true);
   assert.equal(app.includes('from "./ui-state"'), true);
   assert.equal(api.includes("export async function requestJson"), true);
   assert.equal(types.includes("export type BasicAgentRun"), true);
   assert.equal(text.includes("export const STATUS_LABELS"), true);
-  assert.equal(workspacePages.includes("function ToolCard"), true);
-  assert.equal(conversation.includes('import { RichText } from "./rich-text"'), true);
-  assert.equal(richText.includes("parseRichTextBlocks"), true);
-  assert.equal(richText.includes('type: "code"'), true);
+  assert.equal(workspacePages.includes("export function SkillsPage"), true);
+  assert.equal(workspacePages.includes("export function ToolsPage"), true);
+  assert.equal(workspacePages.includes("export function SettingsDialog"), true);
+  assert.equal(workspacePages.includes("initialGroup?: SettingsGroup"), true);
+  assert.equal(workspacePages.includes("可添加"), true);
+  assert.equal(workspacePages.includes("resolveModelProviderLogo"), true);
+  assert.equal(workspacePages.includes("providerLogoText"), false);
+  assert.equal(modelProviderLogos.includes('from "./assets/providers/openai.svg?raw"'), true);
+  assert.equal(modelProviderLogos.includes('from "./assets/providers/anthropic.svg?raw"'), true);
+  assert.equal(modelProviderLogos.includes('from "./assets/providers/deepseek.svg?raw"'), true);
+  assert.equal(modelProviderLogos.includes('from "./assets/providers/kimi.svg?raw"'), true);
+  assert.equal(modelProviderLogos.includes('from "./assets/providers/zai.svg?raw"'), true);
+  assert.equal(modelProviderLogos.includes('from "./assets/providers/minimax.svg?raw"'), true);
+  assert.equal(modelIcons.includes('from "./assets/model-icons/chatgpt_gpt_model_icon.svg?raw"'), true);
+  assert.equal(modelIcons.includes('from "./assets/model-icons/claude_model_icon.svg?raw"'), true);
+  assert.equal(modelIcons.includes('from "./assets/model-icons/deepseek_model_icon.svg?raw"'), true);
+  assert.equal(modelIcons.includes('from "./assets/model-icons/kimi_model_icon.svg?raw"'), true);
+  assert.equal(modelIcons.includes('from "./assets/model-icons/glm.svg?raw"'), true);
+  assert.equal(modelIcons.includes('from "./assets/model-icons/minimax_model_icon.svg?raw"'), true);
+  assert.equal(types.includes("modelCatalogs?: readonly ModelProviderModelCatalog[]"), true);
+  assert.equal(types.includes("responseModel?:"), true);
+  assert.equal(chatEmpty.includes("今天要处理什么？"), true);
+  assert.equal(chatEmpty.includes("export function ChatInputBar"), true);
+  assert.equal(chatEmpty.includes("providerLabel"), true);
+  assert.equal(chatEmpty.includes("配置模型"), true);
+  assert.equal(chatActive.includes("export function ChatActive"), true);
+  assert.equal(chatActive.includes("WorkContextPanel"), false);
+  assert.equal(chatActive.includes('import { RichText } from "./rich-text"'), true);
+  assert.equal(chatActive.includes("resolveModelIconSvg"), true);
+  assert.equal(chatActive.includes("assistantModelForTurn"), true);
+  assert.equal(sidebar.includes("最近会话"), true);
+  assert.equal(topbar.includes("topbarStatusText"), true);
+  assert.equal(topbar.includes("写入前确认"), false);
+  assert.equal(richText.includes('from "react-markdown"'), true);
+  assert.equal(richText.includes('from "remark-gfm"'), true);
+  assert.equal(richText.includes("normalizeCollapsedMarkdown"), true);
+  assert.equal(richText.includes("skipHtml"), true);
+  assert.equal(richText.includes("(?=\\S)"), true);
+  assert.equal(richText.includes("rich-code-block"), true);
   assert.equal(richText.includes("dangerouslySetInnerHTML"), false);
   assert.equal(richText.includes("innerHTML"), false);
 });
 
+test("panel conversations preserve assistant markdown line breaks", () => {
+  const store = new PanelConversationStore();
+  const started = store.startDesktopMessage({ goal: "给我一个 Markdown 回答" });
+  const markdown = [
+    "可以。",
+    "",
+    "1. **第一项**",
+    "2. **第二项**",
+    "",
+    "- **证据**：已保留列表结构",
+  ].join("\n");
+
+  store.attachRun({
+    conversationId: started.conversation.conversationId,
+    assistantTurnId: started.assistantTurn.turnId,
+    runId: "run-markdown",
+  });
+  store.completeAssistantTurn({
+    conversationId: started.conversation.conversationId,
+    assistantTurnId: started.assistantTurn.turnId,
+    runId: "run-markdown",
+    title: "已完成",
+    content: markdown,
+    status: "completed",
+  });
+
+  const conversation = store.getReadModel(started.conversation.conversationId)!;
+  const assistantTurn = conversation.turns[1]!;
+  const persisted = toRuntimeConversationRecord(conversation);
+
+  assert.equal(assistantTurn.content.includes("\n1. **第一项**\n2. **第二项**"), true);
+  assert.equal(assistantTurn.content.includes("\n- **证据**"), true);
+  assert.equal(persisted.turns[1]?.content.includes("\n- **证据**"), true);
+});
+
+test("desktop live model stream preserves markdown structure", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-markdown-stream-"));
+  const secret = "sk-markdown-stream-secret";
+  const providerFetch: PanelProviderFetch = async () =>
+    createOpenAiStreamTextResponse("markdown-stream-model", [
+      "可以：",
+      "\n\n",
+      "- **第一项**：保留列表",
+      "\n",
+      "- **第二项**：保留加粗",
+    ]);
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory, providerFetch });
+  try {
+    await requestJson(server.url, "/api/config/model-provider", {
+      method: "POST",
+      body: {
+        baseUrl: "https://provider.example",
+        model: "markdown-stream-model",
+        apiKey: secret,
+      },
+    });
+    const start = await requestJson(server.url, "/api/conversations", {
+      method: "POST",
+      body: { goal: "用 Markdown 回答", aiMode: "openai-compatible" },
+    });
+    const runId = start.body.run.runId;
+    const conversationId = start.body.conversation.conversationId;
+    const stream = await requestSse(server.url, `/api/desktop/runs/${encodeURIComponent(runId)}/stream?cursor=0`);
+    await waitForRun(server.url, runId, (body) => body.status === "completed", 4_000, "/api/desktop/runs");
+    const conversation = await requestJson(server.url, `/api/conversations/${encodeURIComponent(conversationId)}`);
+    const joinedDeltas = stream.events
+      .filter((event) => event.type === "model.output.delta" && event.agentLabel === "助手")
+      .map((event) => event.delta ?? "")
+      .join("");
+    const assistantTurn = conversation.body.conversation.turns[1];
+
+    assert.equal(joinedDeltas.includes("\n\n- **第一项**：保留列表\n- **第二项**：保留加粗"), true);
+    assert.equal(assistantTurn.content.includes("\n\n- **第一项**：保留列表\n- **第二项**：保留加粗"), true);
+    assert.equal(stream.text.includes(secret), false);
+    assertSafePanelJsonText(`${stream.text}\n${conversation.text}`);
+  } finally {
+    await server.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("panel React workbench consumes Basic Agent projection APIs", async () => {
-  const [app, runtime, workspacePages, conversation] = await Promise.all([
+  const [app, runtime, workspacePages, chatEmpty, chatActive, sidebar, topbar] = await Promise.all([
     readPanelUiSource("App.tsx"),
     readPanelUiSource("runtime.ts"),
     readPanelUiSource(path.join("components", "workspace-pages.tsx")),
-    readPanelUiSource(path.join("components", "conversation.tsx")),
+    readPanelUiSource(path.join("components", "chat-empty.tsx")),
+    readPanelUiSource(path.join("components", "chat-active.tsx")),
+    readPanelUiSource(path.join("components", "sidebar.tsx")),
+    readPanelUiSource(path.join("components", "topbar.tsx")),
   ]);
 
+  assert.equal(app.includes("/api/conversations"), true);
   assert.equal(app.includes("/api/basic-agent/runs/"), true);
   assert.equal(app.includes("/events?cursor="), true);
   assert.equal(runtime.includes("/stream?cursor="), true);
+  assert.equal(runtime.includes("agent.note.delta"), true);
+  assert.equal(runtime.includes("agent.note.completed"), true);
   assert.equal(runtime.includes("/work-session"), true);
   assert.equal(app.includes("/api/context/attachments/preview"), true);
+  assert.equal(app.includes("/api/skills"), true);
+  assert.equal(app.includes("/api/config/tools"), true);
   assert.equal(app.includes("/cancel"), true);
   assert.equal(app.includes("/confirmations/"), true);
   assert.equal(app.includes("safeDesktopDetail"), true);
@@ -80,12 +217,32 @@ test("panel React workbench consumes Basic Agent projection APIs", async () => {
   assert.equal(runtime.includes("safeWorkSession"), true);
   assert.equal(runtime.includes("/api/desktop/runs/"), true);
   assert.equal(app.includes("/api/config/model-profiles"), true);
-  assert.equal(workspacePages.includes("常驻厂商"), true);
-  assert.equal(conversation.includes("model.output.delta"), true);
+  assert.equal(app.includes("/model-catalog"), true);
+  assert.equal(workspacePages.includes("获取模型"), true);
+  assert.equal(chatActive.includes("model.output.delta"), true);
+  assert.equal(chatActive.includes("ProcessTrace"), true);
+  assert.equal(chatActive.includes("activityItemsForRun"), true);
+  assert.equal(chatEmpty.includes("任务输入"), true);
+  assert.equal(chatEmpty.includes("ChatInputBar"), true);
+  assert.equal(sidebar.includes("新任务"), true);
+  assert.equal(sidebar.includes("技能"), true);
+  assert.equal(sidebar.includes("工具"), true);
+  assert.equal(sidebar.includes("设置"), true);
+  assert.equal(sidebar.includes("待确认"), true);
+  assert.equal(sidebar.includes("最近会话"), true);
+  assert.equal(topbar.includes("topbarStatusText"), true);
+  assert.equal(topbar.includes("写入前确认"), false);
+  assert.equal(chatActive.includes("WorkContextPanel"), false);
+  assert.equal(chatActive.includes("工作上下文"), false);
+  assert.equal(chatActive.includes("待确认"), true);
+  assert.equal(chatActive.includes("证据"), true);
+  assert.equal(chatActive.includes("成果"), false);
+  assert.equal(chatActive.includes("下一步"), true);
   assert.equal(app.includes("innerHTML"), false);
   assert.equal(app.includes("raw provider"), false);
   assert.equal(app.includes("raw tool"), false);
   assert.equal(app.includes("stdout/stderr"), false);
+  assertOrdinaryUiSourceHasNoInternalTerms([sidebar, topbar, chatEmpty, chatActive].join("\n"));
 });
 
 test("panel server serves Vite React frontend assets", async () => {
@@ -108,7 +265,7 @@ test("panel server serves Vite React frontend assets", async () => {
     assert.match(String(css.headers["content-type"]), /text\/css/);
     assert.match(String(js.headers["content-type"]), /text\/javascript/);
     assert.equal(html.text.includes("ordinary-screen-start"), true);
-    assert.equal(css.text.includes(".app-shell"), true);
+    assert.equal(css.text.includes(".app-root"), true);
     assert.equal(js.text.includes("/api/basic-agent/runs/"), true);
     assert.equal((await requestText(server.url, "/assets/%2e%2e/index.html")).status, 404);
   } finally {
@@ -157,6 +314,19 @@ test("panel config API keeps model provider and search keys out of ordinary resp
     assert.equal(config.body.informationAccess.web.secretConfigured, true);
     assert.equal(config.body.capabilities.activeModel.secretConfigured, true);
     assert.equal(config.body.profiles.length, 1);
+    assert.deepEqual(config.body.modelCatalogs, []);
+    assert.equal(
+      config.body.modelProviderMarket.presets.some((preset: { presetId?: string; baseUrl?: string }) =>
+        preset.presetId === "openai" && preset.baseUrl === "https://api.openai.com/v1"
+      ),
+      true
+    );
+    assert.equal(
+      config.body.modelProviderMarket.presets.some((preset: { presetId?: string; baseUrl?: string }) =>
+        preset.presetId === "claude" && preset.baseUrl === "https://api.anthropic.com"
+      ),
+      true
+    );
     assert.equal(
       config.body.modelProviderMarket.presets.some((preset: { presetId?: string }) => preset.presetId === "deepseek"),
       true
@@ -288,20 +458,126 @@ test("panel model profile catalog route fetches provider models without leaking 
       },
     });
     const catalog = await requestJson(server.url, "/api/config/model-profiles/deepseek/models");
+    const configAfterFetch = await requestJson(server.url, "/api/config");
+    const savedCatalog = await requestJson(server.url, "/api/config/model-profiles/deepseek/model-catalog", {
+      method: "POST",
+      body: {
+        label: catalog.body.catalog.label,
+        baseUrl: catalog.body.catalog.baseUrl,
+        modelsPath: catalog.body.catalog.modelsPath,
+        fetchedAt: catalog.body.catalog.fetchedAt,
+        models: [catalog.body.catalog.models[0]],
+      },
+    });
+    const configAfterSave = await requestJson(server.url, "/api/config");
+    const trimmedCatalog = await requestJson(server.url, "/api/config/model-profiles/deepseek/model-catalog", {
+      method: "POST",
+      body: {
+        label: catalog.body.catalog.label,
+        baseUrl: catalog.body.catalog.baseUrl,
+        modelsPath: catalog.body.catalog.modelsPath,
+        fetchedAt: catalog.body.catalog.fetchedAt,
+        models: [catalog.body.catalog.models[1]],
+      },
+    });
+    const configAfterTrim = await requestJson(server.url, "/api/config");
+    const emptyCatalog = await requestJson(server.url, "/api/config/model-profiles/deepseek/model-catalog", {
+      method: "POST",
+      body: {
+        label: catalog.body.catalog.label,
+        baseUrl: catalog.body.catalog.baseUrl,
+        modelsPath: catalog.body.catalog.modelsPath,
+        fetchedAt: catalog.body.catalog.fetchedAt,
+        models: [],
+      },
+    });
+    const configAfterEmpty = await requestJson(server.url, "/api/config");
+    const apiKey = await requestJson(server.url, "/api/config/model-profiles/deepseek/api-key");
 
     assert.equal(createProfile.status, 200);
     assert.equal(catalog.status, 200);
+    assert.equal(configAfterFetch.status, 200);
+    assert.equal(savedCatalog.status, 200);
+    assert.equal(configAfterSave.status, 200);
+    assert.equal(trimmedCatalog.status, 200);
+    assert.equal(configAfterTrim.status, 200);
+    assert.equal(emptyCatalog.status, 200);
+    assert.equal(configAfterEmpty.status, 200);
+    assert.equal(apiKey.status, 200);
     assert.equal(catalogCalls.length, 1);
     assert.equal(catalogCalls[0]?.url, "https://api.deepseek.com/models");
     assert.equal(catalogCalls[0]?.authorization, `Bearer ${secret}`);
+    assert.equal(apiKey.body.apiKey, secret);
     assert.deepEqual(
       catalog.body.catalog.models.map((model: { id: string }) => model.id),
       ["deepseek-chat", "deepseek-reasoner"]
     );
+    assert.deepEqual(configAfterFetch.body.modelCatalogs, []);
+    assert.deepEqual(
+      savedCatalog.body.catalog.models.map((model: { id: string }) => model.id),
+      ["deepseek-chat"]
+    );
+    assert.deepEqual(
+      configAfterSave.body.modelCatalogs[0].models.map((model: { id: string }) => model.id),
+      ["deepseek-chat"]
+    );
+    assert.deepEqual(
+      trimmedCatalog.body.catalog.models.map((model: { id: string }) => model.id),
+      ["deepseek-reasoner"]
+    );
+    assert.equal(configAfterTrim.body.config.model, undefined);
+    assert.deepEqual(emptyCatalog.body.catalog.models, []);
+    assert.deepEqual(configAfterEmpty.body.modelCatalogs, []);
     assert.equal(catalog.text.includes(secret), false);
+    assert.equal(savedCatalog.text.includes(secret), false);
+    assert.equal(configAfterSave.text.includes(secret), false);
     assert.equal(createProfile.text.includes(secret), false);
   } finally {
     await server.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("panel model provider config can clear a saved API key", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-clear-model-key-"));
+  const secret = "sk-panel-clear-secret";
+  try {
+    const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+    try {
+      const saved = await requestJson(server.url, "/api/config/model-provider", {
+        method: "POST",
+        body: {
+          baseUrl: "https://api.openai.com/v1",
+          model: "gpt-4o-mini",
+          defaultAiMode: "openai-compatible",
+          apiKey: secret,
+        },
+      });
+      const cleared = await requestJson(server.url, "/api/config/model-provider", {
+        method: "POST",
+        body: {
+          apiKey: "sk-panel-stale-key-should-not-survive",
+          clearApiKey: true,
+        },
+      });
+      const config = await requestJson(server.url, "/api/config");
+      const apiKey = await requestJson(server.url, "/api/config/model-profiles/default/api-key");
+
+      assert.equal(saved.status, 200);
+      assert.equal(saved.body.config.secretConfigured, true);
+      assert.equal(cleared.status, 200);
+      assert.equal(cleared.body.config.secretConfigured, false);
+      assert.equal(config.body.config.secretConfigured, false);
+      assert.equal(apiKey.status, 404);
+      assert.equal(saved.text.includes(secret), false);
+      assert.equal(cleared.text.includes(secret), false);
+      assert.equal(cleared.text.includes("sk-panel-stale-key-should-not-survive"), false);
+      assert.equal(config.text.includes(secret), false);
+      assert.equal(config.text.includes("sk-panel-stale-key-should-not-survive"), false);
+    } finally {
+      await server.close();
+    }
+  } finally {
     await fs.rm(directory, { recursive: true, force: true });
   }
 });
@@ -432,9 +708,11 @@ test("panel tools route can disable web search without using the stored Tavily k
     }
 
     modelFetchCalls += 1;
-    const body = JSON.parse(init.body) as { messages?: readonly { role?: string }[] };
-    const hasToolMessage = body.messages?.some((message) => message.role === "tool") ?? false;
-    return hasToolMessage ? createStubOpenAiResponse("disabled-tools-model") : createOpenAiSearchToolCallResponse();
+    const body = parseResponsesRequestBody(init.body);
+    const hasToolMessage = hasResponsesToolOutput(body);
+    return hasToolMessage || !hasResponsesToolDefinition(body, "search")
+      ? createStubOpenAiResponse("disabled-tools-model")
+      : createOpenAiSearchToolCallResponse();
   };
   const server = await startLocalPanelServer({ port: 0, configDirectory: directory, providerFetch });
   try {
@@ -470,7 +748,7 @@ test("panel tools route can disable web search without using the stored Tavily k
     assert.equal(disabled.body.tools.webSearch.secretConfigured, true);
     assert.equal(disabled.text.includes(tavilySecret), false);
     assert.equal(run.status, 200);
-    assert.equal(modelFetchCalls >= 2, true);
+    assert.equal(modelFetchCalls >= 1, true);
     assert.equal(tavilyFetchCalls, 0);
     assert.equal(run.body.trace.events.some((event: { type: string }) => event.type === "tool.completed"), true);
     assert.equal(JSON.stringify(run.body).includes(modelSecret), false);
@@ -798,14 +1076,14 @@ test("desktop run stream carries safe tool detail through runtime persistence", 
     assert.equal(typeof readEvent.detail?.preview, "string");
     assert.equal((readEvent.detail?.preview ?? "").length > 0, true);
     assert.equal(readEvent.detail?.preview?.includes("notes.md"), true);
-    assert.equal(readEvent.detail?.preview?.includes("文件正文只进入本轮工具上下文"), true);
+    assert.equal(readEvent.detail?.preview?.includes("文件正文只进入本轮工具上下文"), false);
     assert.equal(readEvent.detail?.preview?.includes(rawToolOutput), false);
     assert.equal(persistedCall.path, "notes.md");
     assert.equal(persistedCall.display?.kind, "generic_tool_summary");
     assert.equal(typeof persistedCall.preview, "string");
     assert.equal((persistedCall.preview ?? "").length > 0, true);
     assert.equal(persistedCall.preview.includes("notes.md"), true);
-    assert.equal(persistedCall.preview.includes("文件正文只进入本轮工具上下文"), true);
+    assert.equal(persistedCall.preview.includes("文件正文只进入本轮工具上下文"), false);
     assert.equal(persistedCall.preview.includes(rawToolOutput), false);
     assert.equal(JSON.stringify(readEvent).includes("raw provider payload"), false);
     assert.equal(completed.text.includes(rawToolOutput), false);
@@ -1161,11 +1439,11 @@ test("conversation API keeps follow-up messages in the same conversation", async
 
 test("conversation API rolls back completed turns before continuing the same conversation", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-conversation-rollback-"));
-  const requests: Array<{ messages?: readonly { role?: string; content?: string }[] }> = [];
+  const requests: ResponsesRequestBody[] = [];
   let callIndex = 0;
   const providerFetch: PanelProviderFetch = async (_url, init) => {
     callIndex += 1;
-    const body = JSON.parse(init.body) as { messages?: readonly { role?: string; content?: string }[] };
+    const body = parseResponsesRequestBody(init.body);
     requests.push(body);
     return createOpenAiTextResponse("conversation-rollback-model", `第 ${callIndex} 轮安全回答。`);
   };
@@ -1212,7 +1490,7 @@ test("conversation API rolls back completed turns before continuing the same con
     });
     await waitForRun(server.url, fourth.body.run.runId, (body) => body.status === "completed", 4_000, "/api/desktop/runs");
     const after = await requestJson(server.url, `/api/conversations/${encodeURIComponent(conversationId)}`);
-    const latestMessages = requests.at(-1)?.messages ?? [];
+    const latestMessages = extractResponsesMessages(requests.at(-1));
     const latestText = JSON.stringify(latestMessages);
 
     assert.equal(after.body.conversation.turns.length, 6);
@@ -1229,11 +1507,11 @@ test("conversation API rolls back completed turns before continuing the same con
 test("conversation API sends follow-up history as role-separated model messages", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-conversation-structured-history-"));
   const secret = "sk-conversation-structured-history-secret";
-  const requests: Array<{ messages?: readonly { role?: string; content?: string }[]; max_tokens?: number }> = [];
+  const requests: ResponsesRequestBody[] = [];
   let callIndex = 0;
   const providerFetch: PanelProviderFetch = async (_url, init) => {
     callIndex += 1;
-    const body = JSON.parse(init.body) as { messages?: readonly { role?: string; content?: string }[]; max_tokens?: number };
+    const body = parseResponsesRequestBody(init.body);
     requests.push(body);
     return createOpenAiTextResponse(
       "conversation-structured-history-model",
@@ -1268,14 +1546,14 @@ test("conversation API sends follow-up history as role-separated model messages"
     );
     await waitForRun(server.url, second.body.run.runId, (body) => body.status === "completed", 4_000, "/api/desktop/runs");
 
-    const secondMessages = requests.at(-1)?.messages ?? [];
+    const secondMessages = extractResponsesMessages(requests.at(-1));
     assert.deepEqual(secondMessages.map((message) => message.role), ["system", "user", "assistant", "user"]);
     assert.equal(secondMessages[1]?.content?.includes("你好，你能做什么"), true);
     assert.equal(secondMessages[2]?.content?.includes("我可以直接回答问题"), true);
     assert.equal(secondMessages[3]?.content?.includes("Current user message: 那你能继续解释一下吗？"), true);
     assert.equal(secondMessages[3]?.content?.includes("你好，你能做什么"), false);
     assert.equal(JSON.stringify(secondMessages).includes("workspace:conversation-history"), false);
-    assert.equal(requests.at(-1)?.max_tokens, 4000);
+    assert.equal(requests.at(-1)?.max_output_tokens ?? requests.at(-1)?.max_tokens, 4000);
   } finally {
     await server.close();
     await fs.rm(directory, { recursive: true, force: true });
@@ -1322,6 +1600,13 @@ test("conversation and desktop run APIs recover safe history from RuntimeDatabas
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-conversation-runtime-recover-"));
   let server = await startLocalPanelServer({ port: 0, configDirectory: directory });
   try {
+    await requestJson(server.url, "/api/config/model-provider", {
+      method: "POST",
+      body: {
+        baseUrl: "https://api.deepseek.com",
+        model: "deepseek-v4-pro",
+      },
+    });
     const started = await requestJson(server.url, "/api/conversations", {
       method: "POST",
       body: { goal: "你好，你能做什么？", aiMode: "fake" },
@@ -1330,6 +1615,13 @@ test("conversation and desktop run APIs recover safe history from RuntimeDatabas
     const runId = started.body.run.runId;
     await waitForRun(server.url, runId, (body) => body.status === "completed", 4_000, "/api/desktop/runs");
     await server.close();
+    const runtimePaths = resolveAgentArborRuntimeDatabasePaths(directory);
+    const conversationPath = path.join(runtimePaths.runtimeHome, "conversations", `${encodeURIComponent(conversationId)}.json`);
+    const legacyConversation = JSON.parse(await fs.readFile(conversationPath, "utf8")) as { turns?: Array<{ responseModel?: unknown }> };
+    for (const turn of legacyConversation.turns ?? []) {
+      delete turn.responseModel;
+    }
+    await fs.writeFile(conversationPath, `${JSON.stringify(legacyConversation, null, 2)}\n`, "utf8");
 
     server = await startLocalPanelServer({ port: 0, configDirectory: directory });
     const conversations = await requestJson(server.url, "/api/conversations");
@@ -1343,6 +1635,14 @@ test("conversation and desktop run APIs recover safe history from RuntimeDatabas
     assert.equal(conversation.body.conversation.latestRunId, runId);
     assert.equal(conversation.body.conversation.turns.length, 2);
     assert.equal(conversation.body.conversation.turns[1].content.includes("我可以直接回答问题"), true);
+    assert.deepEqual(conversation.body.conversation.turns[1].responseModel, {
+      profileId: "default",
+      label: "OpenAI",
+      providerKind: "openai_compatible",
+      protocolKind: "openai_responses",
+      baseUrl: "https://api.deepseek.com",
+      model: "fake-deterministic-model",
+    });
     assert.equal(run.status, 200);
     assert.equal(run.body.restoredFromSnapshot, true);
     assert.equal(run.body.restoredResult.summary.includes("我可以直接回答问题"), true);
@@ -1361,9 +1661,9 @@ test("conversation and desktop run APIs recover safe history from RuntimeDatabas
 test("conversation message POST restores persisted conversation after restart and sends safe prior turn history", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-conversation-post-recover-"));
   const secret = "sk-conversation-post-recover-secret";
-  const providerRequests: { readonly messages?: readonly { readonly role?: string; readonly content?: string }[] }[] = [];
+  const providerRequests: ResponsesRequestBody[] = [];
   const providerFetch: PanelProviderFetch = async (_url, init) => {
-    const body = JSON.parse(init.body) as { messages?: readonly { role?: string; content?: string }[] };
+    const body = parseResponsesRequestBody(init.body);
     providerRequests.push(body);
     return providerRequests.length === 1
       ? createOpenAiTextResponse("conversation-post-recover-model", "第一轮安全回答。")
@@ -1399,7 +1699,7 @@ test("conversation message POST restores persisted conversation after restart an
     );
     const completed = await waitForRun(server.url, second.body.run.runId, (body) => body.status === "completed", 4_000, "/api/desktop/runs");
     const conversation = await requestJson(server.url, `/api/conversations/${encodeURIComponent(conversationId)}`);
-    const secondMessages = providerRequests[1]?.messages ?? [];
+    const secondMessages = extractResponsesMessages(providerRequests[1]);
 
     assert.equal(first.status, 202);
     assert.equal(second.status, 202);
@@ -1630,7 +1930,7 @@ test("desktop openai-compatible direct answer completes on natural no-tool stop"
   }
 });
 
-test("desktop default run uses openai-compatible and fails at config boundary instead of fake fallback", async () => {
+test("desktop default run uses Responses mode and fails at config boundary instead of fake fallback", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-desktop-default-openai-"));
   let fetchCalls = 0;
   const providerFetch: PanelProviderFetch = async () => {
@@ -1653,7 +1953,7 @@ test("desktop default run uses openai-compatible and fails at config boundary in
 
     assert.equal(start.status, 202);
     assert.equal(fetchCalls, 0);
-    assert.equal(failed.body.tracking.provider.requestedMode, "openai-compatible");
+    assert.equal(failed.body.tracking.provider.requestedMode, "openai-responses");
     assert.equal(failed.body.error.code, "missing_api_key");
     assert.equal(failed.body.canvas, undefined);
     assert.equal(failed.body.summary.ai.eventCounts.requested, 0);
@@ -1692,7 +1992,7 @@ test("desktop default ignores legacy fake setting and still recommends real AI b
 
     assert.equal(fetchCalls, 0);
     assert.equal(failed.body.tracking.provider.defaultAiMode, "fake");
-    assert.equal(failed.body.tracking.provider.requestedMode, "openai-compatible");
+    assert.equal(failed.body.tracking.provider.requestedMode, "openai-responses");
     assert.equal(failed.text.includes("fake_provider"), false);
   } finally {
     await server.close();
@@ -1758,8 +2058,8 @@ test("conversation follow-up after a provider failure does not feed internal ids
   let callIndex = 0;
   const providerFetch: PanelProviderFetch = async (_url, init) => {
     callIndex += 1;
-    const body = JSON.parse(init.body) as { messages?: readonly { content?: string }[] };
-    prompts.push(body.messages?.map((message) => message.content ?? "").join("\n") ?? "");
+    const body = parseResponsesRequestBody(init.body);
+    prompts.push(responsesRequestText(body));
     if (callIndex === 1) {
       return {
         ok: false,
@@ -1833,11 +2133,11 @@ test("conversation follow-up after a provider failure does not feed internal ids
 test("conversation history keeps safe failed turns and later completed turns after restart", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-conversation-failed-history-"));
   const secret = "sk-failed-history-secret";
-  const providerRequests: Array<{ readonly messages?: readonly { readonly role?: string; readonly content?: string }[] }> = [];
+  const providerRequests: ResponsesRequestBody[] = [];
   let callIndex = 0;
   const providerFetch: PanelProviderFetch = async (_url, init) => {
     callIndex += 1;
-    const body = JSON.parse(init.body) as { messages?: readonly { readonly role?: string; readonly content?: string }[] };
+    const body = parseResponsesRequestBody(init.body);
     providerRequests.push(body);
     if (callIndex === 1) {
       return {
@@ -1883,7 +2183,7 @@ test("conversation history keeps safe failed turns and later completed turns aft
     });
     await waitForRun(server.url, third.body.run.runId, (body) => body.status === "completed", 4_000, "/api/desktop/runs");
     const conversation = await requestJson(server.url, `/api/conversations/${encodeURIComponent(conversationId)}`);
-    const thirdMessages = providerRequests.at(-1)?.messages ?? [];
+    const thirdMessages = extractResponsesMessages(providerRequests.at(-1));
     const thirdPrompt = JSON.stringify(thirdMessages);
 
     assert.equal(conversation.body.conversation.turns.length, 6);
@@ -1907,9 +2207,9 @@ test("conversation history keeps safe failed turns and later completed turns aft
 test("conversation follow-up labels missing-key failure history as a system error", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-conversation-missing-key-history-"));
   const secret = "sk-missing-key-history-secret";
-  const providerRequests: Array<{ readonly messages?: readonly { readonly role?: string; readonly content?: string }[] }> = [];
+  const providerRequests: ResponsesRequestBody[] = [];
   const providerFetch: PanelProviderFetch = async (_url, init) => {
-    const body = JSON.parse(init.body) as { messages?: readonly { readonly role?: string; readonly content?: string }[] };
+    const body = parseResponsesRequestBody(init.body);
     providerRequests.push(body);
     return createOpenAiTextResponse("missing-key-history-model", "我看到了上一轮是系统侧模型配置失败，不是我之前的回答。");
   };
@@ -1938,7 +2238,7 @@ test("conversation follow-up labels missing-key failure history as a system erro
       }
     );
     await waitForRun(server.url, second.body.run.runId, (body) => body.status === "completed", 4_000, "/api/desktop/runs");
-    const prompt = JSON.stringify(providerRequests.at(-1)?.messages ?? []);
+    const prompt = JSON.stringify(extractResponsesMessages(providerRequests.at(-1)));
 
     assert.equal(providerRequests.length, 1);
     assert.equal(prompt.includes("第一轮缺少密钥"), true);
@@ -2366,14 +2666,16 @@ test("desktop openai-compatible ordinary agent uses configured search tool befor
     }
 
     modelFetchCalls += 1;
-    const body = JSON.parse(init.body) as { messages?: readonly { role?: string }[] };
-    const hasToolMessage = body.messages?.some((message) => message.role === "tool") ?? false;
+    const body = parseResponsesRequestBody(init.body);
+    const hasToolMessage = hasResponsesToolOutput(body);
     return hasToolMessage
       ? createOpenAiTextResponse(
           "desktop-configured-tools-model",
           "我已经结合授权搜索结果完成回答；工具输出只以安全摘要和引用进入本轮对话。"
         )
-      : createOpenAiSearchToolCallResponse();
+      : hasResponsesToolDefinition(body, "search")
+        ? createOpenAiSearchToolCallResponse()
+        : createOpenAiTextResponse("desktop-configured-tools-model", "已完成无工具回答。");
   };
   const server = await startLocalPanelServer({ port: 0, configDirectory: directory, providerFetch });
   try {
@@ -3210,7 +3512,7 @@ test("panel openai-compatible missing key fails before provider fetch", async ()
     assert.equal(fetchCalls, 0);
     assert.equal(run.body.ok, false);
     assert.equal(run.body.error.code, "missing_api_key");
-    assert.equal(run.body.error.message, "OpenAI-compatible 模式缺少 API key，已在发起网络请求前停止。");
+    assert.equal(run.body.error.message, "Responses 模式缺少 API key，已在发起网络请求前停止。");
     assert.equal(run.body.summary.ai.status, "configuration_failed");
     assert.equal(run.body.summary.ai.eventCounts.requested, 0);
   } finally {
@@ -3247,15 +3549,15 @@ test("panel openai-compatible run uses configured ToolCenter search from tools r
     }
 
     modelFetchCalls += 1;
-    const body = JSON.parse(init.body) as { messages?: readonly { role?: string; content?: string }[] };
-    const isCandidateAggregation = body.messages?.some(
-      (message) => typeof message.content === "string" && message.content.includes("Underground Candidate Collector")
-    ) ?? false;
+    const body = parseResponsesRequestBody(init.body);
+    const isCandidateAggregation = responsesRequestText(body).includes("aggregationRationale");
     if (isCandidateAggregation) {
       return createStubOpenAiAggregationResponse("configured-tools-model");
     }
-    const hasToolMessage = body.messages?.some((message) => message.role === "tool") ?? false;
-    return hasToolMessage ? createStubOpenAiResponse("configured-tools-model") : createOpenAiSearchToolCallResponse();
+    const hasToolMessage = hasResponsesToolOutput(body);
+    return hasToolMessage || !hasResponsesToolDefinition(body, "search")
+      ? createStubOpenAiResponse("configured-tools-model")
+      : createOpenAiSearchToolCallResponse();
   };
   const server = await startLocalPanelServer({ port: 0, configDirectory: directory, providerFetch });
   try {
@@ -3310,7 +3612,7 @@ test("panel openai-compatible missing model does not leak configured API key", a
     assert.equal(run.status, 400);
     assert.equal(run.text.includes(secret), false);
     assert.equal(run.body.error.code, "missing_model_name");
-    assert.equal(run.body.error.message, "OpenAI-compatible 模式缺少模型名，已在发起网络请求前停止。");
+    assert.equal(run.body.error.message, "Responses 模式缺少模型名，已在发起网络请求前停止。");
     assert.equal(run.body.summary.ai.eventCounts.requested, 0);
   } finally {
     await server.close();
@@ -3359,6 +3661,23 @@ function assertFirstScreenHasNoInternalTerms(html: string): void {
     "Fixture",
   ]) {
     assert.equal(html.includes(term), false, `first screen should not include ${term}`);
+  }
+}
+
+function assertOrdinaryUiSourceHasNoInternalTerms(source: string): void {
+  for (const term of [
+    "Task Soil",
+    "Plan Package",
+    "Observation Panel",
+    "Agent Run Tree",
+    "rootlet",
+    "raw prompt",
+    "raw provider",
+    "raw tool",
+    "event id",
+    "tool id",
+  ]) {
+    assert.equal(source.includes(term), false, `ordinary UI source should not include ${term}`);
   }
 }
 
@@ -3559,230 +3878,234 @@ async function waitForBasicEvents(
   throw new Error(`Timed out waiting for basic agent events ${runId}; last=${last?.text}`);
 }
 
+type ResponsesRequestBody = {
+  readonly instructions?: string;
+  readonly input?: readonly unknown[];
+  readonly messages?: readonly { readonly role?: string; readonly content?: string }[];
+  readonly tools?: readonly unknown[];
+  readonly max_output_tokens?: number;
+  readonly max_tokens?: number;
+  readonly stream?: boolean;
+};
+
+type CapturedModelMessage = {
+  readonly role: string;
+  readonly content: string;
+};
+
+function parseResponsesRequestBody(raw: string): ResponsesRequestBody {
+  return JSON.parse(raw) as ResponsesRequestBody;
+}
+
+function extractResponsesMessages(body: ResponsesRequestBody | undefined): readonly CapturedModelMessage[] {
+  if (body === undefined) {
+    return [];
+  }
+  const messages: CapturedModelMessage[] = [];
+  if (typeof body.instructions === "string" && body.instructions.length > 0) {
+    messages.push({ role: "system", content: body.instructions });
+  }
+  for (const message of body.messages ?? []) {
+    messages.push({
+      role: typeof message.role === "string" ? message.role : "user",
+      content: typeof message.content === "string" ? message.content : "",
+    });
+  }
+  for (const item of body.input ?? []) {
+    const record = asTestRecord(item);
+    if (record.type === "message") {
+      messages.push({
+        role: typeof record.role === "string" ? record.role : "user",
+        content: responsesMessageContent(record.content),
+      });
+      continue;
+    }
+    if (record.type === "function_call") {
+      messages.push({
+        role: "assistant",
+        content: `${String(record.name ?? "")} ${String(record.arguments ?? "")}`.trim(),
+      });
+      continue;
+    }
+    if (record.type === "function_call_output") {
+      messages.push({
+        role: "tool",
+        content: typeof record.output === "string" ? record.output : JSON.stringify(record.output ?? ""),
+      });
+    }
+  }
+  return messages;
+}
+
+function responsesMessageContent(value: unknown): string {
+  if (!Array.isArray(value)) {
+    return typeof value === "string" ? value : "";
+  }
+  return value
+    .map((part) => {
+      const record = asTestRecord(part);
+      return typeof record.text === "string" ? record.text : "";
+    })
+    .join("");
+}
+
+function responsesRequestText(body: ResponsesRequestBody | undefined): string {
+  return extractResponsesMessages(body).map((message) => message.content).join("\n");
+}
+
+function hasResponsesToolOutput(body: ResponsesRequestBody): boolean {
+  return (
+    (body.messages ?? []).some((message) => message.role === "tool") ||
+    (body.input ?? []).some((item) => asTestRecord(item).type === "function_call_output")
+  );
+}
+
+function hasResponsesToolDefinition(body: ResponsesRequestBody, name: string): boolean {
+  return (body.tools ?? []).some((tool) => {
+    const record = asTestRecord(tool);
+    return record.name === name || asTestRecord(record.function).name === name;
+  });
+}
+
 function createStubOpenAiResponse(
   model: string,
   candidateOverrides: Record<string, unknown> = {}
 ): Awaited<ReturnType<PanelProviderFetch>> {
-  return {
-    ok: true,
-    status: 200,
-    json: async () => ({
-      id: "chatcmpl-test-text",
-      object: "chat.completion",
-      created: 1_776_000_000,
-      model,
-      choices: [
-        {
-          finish_reason: "stop",
-          message: {
-            role: "assistant",
-            content: JSON.stringify({
-              candidates: [
-                {
-                  summary: "Stub candidate advice.",
-                  tradeoffs: ["observable run state", "package validation remains in charge"],
-                  applicability: "Use for panel polling tests.",
-                  mitigation: "Keep provider output as candidate advice only.",
-                  evidenceType: "test",
-                  confidence: "medium",
-                  constraintLevel: "soft",
-                  enforcementGate: "direction_handoff",
-                  alternativeDirection: "Use a reduced fake AI pass.",
-                  whyNotChosen: "This test needs model.requested visibility.",
-                  ...candidateOverrides,
-                },
-              ],
-            }),
-          },
-        },
-      ],
-      usage: {
-        prompt_tokens: 10,
-        completion_tokens: 12,
-        total_tokens: 22,
+  return createOpenAiJsonResponse(model, {
+    candidates: [
+      {
+        summary: "Stub candidate advice.",
+        tradeoffs: ["observable run state", "package validation remains in charge"],
+        applicability: "Use for panel polling tests.",
+        impactScope: "Panel test runtime only.",
+        severity: "low",
+        mitigation: "Keep provider output as candidate advice only.",
+        assetRefs: ["panel:test"],
+        fitConditions: ["When validating model-visible output."],
+        doNotApplyWhen: ["Do not use outside deterministic tests."],
+        evidenceType: "test",
+        confidence: "medium",
+        constraintLevel: "soft",
+        enforcementGate: "direction_handoff",
+        alternativeDirection: "Use a reduced fake AI pass.",
+        whyNotChosen: "This test needs model.requested visibility.",
+        ...candidateOverrides,
       },
-    }),
-  };
+    ],
+  });
 }
 
 function createStubOpenAiAggregationResponse(
   model: string
 ): Awaited<ReturnType<PanelProviderFetch>> {
-  return {
-    ok: true,
-    status: 200,
-    json: async () => ({
-      id: "chatcmpl-test-text",
-      object: "chat.completion",
-      created: 1_776_000_000,
-      model,
-      choices: [
-        {
-          finish_reason: "stop",
-          message: {
-            role: "assistant",
-            content: JSON.stringify({
-              aggregationRationale: "Stub aggregation: merged rootlet outputs into unified candidate pool.",
-              deduplicationNotes: ["No duplicates detected."],
-              implicitRelations: [],
-              decisionSummary: "Aggregated candidates from rootlet agents.",
-              uncertainty: "None for stub.",
-              confidence: 0.9,
-            }),
-          },
-        },
-      ],
-      usage: {
-        prompt_tokens: 10,
-        completion_tokens: 12,
-        total_tokens: 22,
-      },
-    }),
-  };
+  return createOpenAiJsonResponse(model, {
+    aggregationRationale: "Stub aggregation: merged rootlet outputs into unified candidate pool.",
+    deduplicationNotes: ["No duplicates detected."],
+    implicitRelations: [],
+    decisionSummary: "Aggregated candidates from rootlet agents.",
+    uncertainty: "None for stub.",
+    confidence: 0.9,
+  });
 }
 
 function createOpenAiSearchToolCallResponse(): Awaited<ReturnType<PanelProviderFetch>> {
-  return createOpenAiFixtureResponse({
-      model: "configured-tools-model",
-      choices: [
-        {
-          finish_reason: "tool_calls",
-          message: {
-            role: "assistant",
-            content: "",
-            tool_calls: [
-              {
-                id: "call-panel-search",
-                type: "function",
-                function: {
-                  name: "search",
-                  arguments: JSON.stringify({
-                    query: "AgentArbor configured panel search",
-                    sources: ["web"],
-                  }),
-                },
-              },
-            ],
-          },
-        },
-      ],
-    });
+  return createOpenAiToolCallResponse("configured-tools-model", "call-panel-search", "search", {
+    query: "AgentArbor configured panel search",
+    sources: ["web"],
+  });
 }
 
 function createOpenAiReadFileToolCallResponse(
   filePath = "README.md",
   callId = "call-panel-read-file"
 ): Awaited<ReturnType<PanelProviderFetch>> {
-  return createOpenAiFixtureResponse({
-      model: "desktop-tool-detail-model",
-      choices: [
-        {
-          finish_reason: "tool_calls",
-          message: {
-            role: "assistant",
-            content: "",
-            tool_calls: [
-              {
-                id: callId,
-                type: "function",
-                function: {
-                  name: "read_file",
-                  arguments: JSON.stringify({ path: filePath }),
-                },
-              },
-            ],
-          },
-        },
-      ],
-    });
+  return createOpenAiToolCallResponse("desktop-tool-detail-model", callId, "read_file", { path: filePath });
 }
 
 function createOpenAiDeleteFileToolCallResponse(filePath: string): Awaited<ReturnType<PanelProviderFetch>> {
+  return createOpenAiToolCallResponse("basic-confirmation-model", "call-panel-write-file", "delete_file", { path: filePath });
+}
+
+function createOpenAiToolCallResponse(
+  model: string,
+  callId: string,
+  name: string,
+  input: Record<string, unknown>
+): Awaited<ReturnType<PanelProviderFetch>> {
   return createOpenAiFixtureResponse({
-      model: "basic-confirmation-model",
-      choices: [
-        {
-          finish_reason: "tool_calls",
-          message: {
-            role: "assistant",
-            content: "",
-            tool_calls: [
-              {
-                id: "call-panel-write-file",
-                type: "function",
-                function: {
-                  name: "delete_file",
-                  arguments: JSON.stringify({ path: filePath }),
-                },
-              },
-            ],
-          },
-        },
-      ],
-    });
+    id: "resp-test-tool-call",
+    model,
+    status: "completed",
+    output: [
+      {
+        type: "function_call",
+        call_id: callId,
+        name,
+        arguments: JSON.stringify(input),
+      },
+    ],
+  });
 }
 
 function createOpenAiJsonResponse(model: string, output: unknown): Awaited<ReturnType<PanelProviderFetch>> {
-  return createOpenAiFixtureResponse({
-      model,
-      choices: [
-        {
-          finish_reason: "stop",
-          message: {
-            role: "assistant",
-            content: JSON.stringify(output),
-          },
-        },
-      ],
-      usage: {
-        prompt_tokens: 10,
-        completion_tokens: 12,
-        total_tokens: 22,
-      },
-    });
+  return createOpenAiTextResponse(model, JSON.stringify(output));
 }
 
 function createOpenAiTextResponse(model: string, text: string): Awaited<ReturnType<PanelProviderFetch>> {
   return createOpenAiFixtureResponse({
-      id: "chatcmpl-test-text",
-      object: "chat.completion",
-      created: 1_776_000_000,
-      model,
-      choices: [
-        {
-          finish_reason: "stop",
-          message: {
-            role: "assistant",
-            content: text,
-          },
-        },
-      ],
-      usage: {
-        prompt_tokens: 10,
-        completion_tokens: 12,
-        total_tokens: 22,
+    id: "resp-test-text",
+    model,
+    status: "completed",
+    output: [
+      {
+        type: "message",
+        role: "assistant",
+        content: [{ type: "output_text", text }],
       },
-    });
+    ],
+    usage: {
+      input_tokens: 10,
+      output_tokens: 12,
+      total_tokens: 22,
+    },
+  });
 }
 
 function createOpenAiStreamTextResponse(
   model: string,
   chunks: readonly string[]
 ): Awaited<ReturnType<PanelProviderFetch>> {
+  const responseId = "resp-test-stream";
   return {
     ok: true,
     status: 200,
-    body: sseChunks(
-      chunks.map((chunk, index) => ({
+    body: sseChunks([
+      {
+        type: "response.created",
+        response: { id: responseId, model, status: "in_progress" },
+      },
+      ...chunks.map((chunk) => ({
+        type: "response.output_text.delta",
+        delta: chunk,
+      })),
+      {
+        type: "response.completed",
+        response: { id: responseId, model, status: "completed" },
+      },
+      ...chunks.map((chunk, index) => ({
+        id: `chatcmpl-test-stream-${index}`,
+        object: "chat.completion.chunk",
+        created: 1_776_000_000,
         model,
         choices: [
           {
+            index: 0,
             delta: { content: chunk },
             finish_reason: index === chunks.length - 1 ? "stop" : null,
           },
         ],
-      }))
-    ),
+      })),
+    ]),
     json: async () => {
       throw new Error("Streaming response should not be read through json().");
     },
@@ -3790,41 +4113,143 @@ function createOpenAiStreamTextResponse(
 }
 
 function createInvalidOpenAiResponse(model: string): Awaited<ReturnType<PanelProviderFetch>> {
-  return createOpenAiFixtureResponse({
-      model,
-      choices: [
-        {
-          finish_reason: "stop",
-          message: {
-            role: "assistant",
-            content: JSON.stringify({
-              rationale: "bad raw output with provider raw response marker",
-              hidden_reasoning: "must not leave provider normalization with Bearer leaked-token, system prompt, and sk-raw-secret",
-            }),
-          },
-        },
-      ],
-    });
+  return createOpenAiJsonResponse(model, {
+    rationale: "bad raw output with provider raw response marker",
+    hidden_reasoning: "must not leave provider normalization with Bearer leaked-token, system prompt, and sk-raw-secret",
+  });
 }
 
 function createOpenAiFixtureResponse(payload: Record<string, unknown>): Awaited<ReturnType<PanelProviderFetch>> {
+  const compatPayload = withChatCompletionsCompatibility(payload);
   return {
     ok: true,
     status: 200,
-    body: sseChunks(openAiChatCompletionChunks(payload)),
-    json: async () => payload,
+    body: sseChunks([...openAiResponsesChunks(payload), ...openAiChatCompletionChunksFromResponses(payload)]),
+    json: async () => compatPayload,
   };
 }
 
-function openAiChatCompletionChunks(payload: Record<string, unknown>): readonly unknown[] {
-  const choices = Array.isArray(payload.choices) ? payload.choices : [];
-  return choices.map((choice, index) => {
+function openAiResponsesChunks(payload: Record<string, unknown>): readonly unknown[] {
+  const responseId = typeof payload.id === "string" ? payload.id : "resp-test";
+  const model = typeof payload.model === "string" ? payload.model : "test-model";
+  const chunks: unknown[] = [
+    {
+      type: "response.created",
+      response: { id: responseId, model, status: "in_progress" },
+    },
+  ];
+  const output = Array.isArray(payload.output) ? payload.output : [];
+  for (const [outputIndex, item] of output.entries()) {
+    const record = asTestRecord(item);
+    if (record.type === "message") {
+      for (const part of Array.isArray(record.content) ? record.content : []) {
+        const partRecord = asTestRecord(part);
+        if (partRecord.type === "output_text" && typeof partRecord.text === "string" && partRecord.text.length > 0) {
+          chunks.push({
+            type: "response.output_text.delta",
+            output_index: outputIndex,
+            delta: partRecord.text,
+          });
+        }
+      }
+      continue;
+    }
+    if (record.type === "function_call") {
+      const callId = typeof record.call_id === "string" ? record.call_id : `call-test-${outputIndex}`;
+      const name = typeof record.name === "string" ? record.name : "test_tool";
+      const args = typeof record.arguments === "string" ? record.arguments : "";
+      chunks.push({
+        type: "response.output_item.added",
+        output_index: outputIndex,
+        item: { type: "function_call", call_id: callId, name, arguments: "" },
+      });
+      if (args.length > 0) {
+        chunks.push({
+          type: "response.function_call_arguments.delta",
+          output_index: outputIndex,
+          delta: args,
+        });
+      }
+      chunks.push({
+        type: "response.output_item.done",
+        output_index: outputIndex,
+        item: { type: "function_call", call_id: callId, name, arguments: args },
+      });
+    }
+  }
+  chunks.push({
+    type: "response.completed",
+    response: { id: responseId, model, status: payload.status ?? "completed" },
+  });
+  return chunks;
+}
+
+function withChatCompletionsCompatibility(payload: Record<string, unknown>): Record<string, unknown> {
+  return {
+    ...payload,
+    object: "chat.completion",
+    choices: openAiChatCompletionChoicesFromResponses(payload),
+    usage: {
+      prompt_tokens: numberOrZero(asTestRecord(payload.usage).input_tokens),
+      completion_tokens: numberOrZero(asTestRecord(payload.usage).output_tokens),
+      total_tokens: numberOrZero(asTestRecord(payload.usage).total_tokens),
+    },
+  };
+}
+
+function openAiChatCompletionChoicesFromResponses(payload: Record<string, unknown>): readonly unknown[] {
+  const output = Array.isArray(payload.output) ? payload.output : [];
+  const text = output
+    .flatMap((item) => {
+      const record = asTestRecord(item);
+      if (record.type !== "message") {
+        return [];
+      }
+      return (Array.isArray(record.content) ? record.content : [])
+        .map((part) => {
+          const partRecord = asTestRecord(part);
+          return partRecord.type === "output_text" && typeof partRecord.text === "string" ? partRecord.text : "";
+        })
+        .filter(Boolean);
+    })
+    .join("");
+  const toolCalls = output
+    .flatMap((item) => {
+      const record = asTestRecord(item);
+      if (record.type !== "function_call") {
+        return [];
+      }
+      return [
+        {
+          id: record.call_id,
+          type: "function",
+          function: {
+            name: record.name,
+            arguments: record.arguments ?? "",
+          },
+        },
+      ];
+    });
+  return [
+    {
+      finish_reason: toolCalls.length > 0 ? "tool_calls" : "stop",
+      message: {
+        role: "assistant",
+        content: text,
+        tool_calls: toolCalls.length === 0 ? undefined : toolCalls,
+      },
+    },
+  ];
+}
+
+function openAiChatCompletionChunksFromResponses(payload: Record<string, unknown>): readonly unknown[] {
+  const model = typeof payload.model === "string" ? payload.model : "test-model";
+  return openAiChatCompletionChoicesFromResponses(payload).map((choice, index) => {
     const choiceRecord = asTestRecord(choice);
     const message = asTestRecord(choiceRecord.message);
-    const content = typeof message.content === "string" ? message.content : "";
     const delta: Record<string, unknown> = { role: "assistant" };
-    if (content.length > 0) {
-      delta.content = content;
+    if (typeof message.content === "string" && message.content.length > 0) {
+      delta.content = message.content;
     }
     if (Array.isArray(message.tool_calls)) {
       delta.tool_calls = message.tool_calls.map((toolCall, toolCallIndex) => {
@@ -3842,10 +4267,10 @@ function openAiChatCompletionChunks(payload: Record<string, unknown>): readonly 
       });
     }
     return {
-      id: payload.id ?? `chatcmpl-test-${index}`,
+      id: typeof payload.id === "string" ? payload.id : `chatcmpl-test-${index}`,
       object: "chat.completion.chunk",
-      created: payload.created ?? 1_776_000_000,
-      model: payload.model,
+      created: 1_776_000_000,
+      model,
       choices: [
         {
           index,
@@ -3855,6 +4280,10 @@ function openAiChatCompletionChunks(payload: Record<string, unknown>): readonly 
       ],
     };
   });
+}
+
+function numberOrZero(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
 function asTestRecord(value: unknown): Record<string, unknown> {

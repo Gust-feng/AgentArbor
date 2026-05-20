@@ -120,7 +120,11 @@ function createDesktopPermissionRefs(
   return unique([
     "read:workspace:current-task",
     "write:memory://artifacts",
-    aiMode === "openai-compatible" ? "execute:openai-compatible-ai" : aiMode === "fake" ? "execute:fake-ai" : "execute:none",
+    aiMode === "openai-compatible" || aiMode === "openai-responses"
+      ? "execute:responses-ai"
+      : aiMode === "fake"
+        ? "execute:fake-ai"
+        : "execute:none",
     ...(inputPermissionRefs ?? []),
   ]);
 }

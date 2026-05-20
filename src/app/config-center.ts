@@ -15,6 +15,7 @@ import type {
   McpServerSettings,
   ModelCapabilities,
   ModelCapabilityOverrideSettings,
+  ModelProviderModelCatalog,
   ModelProviderProfileSettings,
   NormalSettingsStore,
   SanitizedInformationAccessConfig,
@@ -101,6 +102,48 @@ export class ConfigCenter {
     return Promise.all(settings.modelProfiles.map((profile) => this.toSanitizedModelProfile(profile)));
   }
 
+  async listModelProviderModelCatalogs(): Promise<readonly ModelProviderModelCatalog[]> {
+    const settings = await this.readOrCreateSettings();
+    return settings.modelCatalogs ?? [];
+  }
+
+  async upsertModelProviderModelCatalog(catalog: ModelProviderModelCatalog): Promise<ModelProviderModelCatalog> {
+    const current = await this.readOrCreateSettings();
+    const now = new Date().toISOString();
+    const profileId = normalizeProfileId(catalog.profileId);
+    if (!current.modelProfiles.some((profile) => profile.profileId === profileId)) {
+      throw new ConfigCenterValidationError(`Model profile not found: ${profileId}`);
+    }
+    const normalized = normalizeLocalSettings({
+      ...current,
+      version: 3,
+      modelCatalogs: [
+        ...(current.modelCatalogs ?? []).filter((item) => item.profileId !== profileId),
+        { ...catalog, profileId },
+      ],
+      updatedAt: now,
+    });
+    const saved = normalized.modelCatalogs?.find((item) => item.profileId === profileId);
+    if (saved === undefined) {
+      throw new ConfigCenterValidationError(`Model catalog could not be saved: ${profileId}`);
+    }
+    const withoutEmptyCatalog =
+      saved.models.length === 0
+        ? normalizeLocalSettings({
+            ...normalized,
+            modelCatalogs: (normalized.modelCatalogs ?? []).filter((item) => item.profileId !== profileId),
+            updatedAt: now,
+          })
+        : normalized;
+    const next = normalizeLocalSettings(clearProfileModelOutsideCatalog(withoutEmptyCatalog, saved, now));
+    await this.options.settingsStore.writeSettings(next);
+    const savedAfterCleanup = next.modelCatalogs?.find((item) => item.profileId === profileId);
+    if (savedAfterCleanup === undefined && saved.models.length !== 0) {
+      throw new ConfigCenterValidationError(`Model catalog could not be saved: ${profileId}`);
+    }
+    return savedAfterCleanup ?? saved;
+  }
+
   async createModelProviderProfile(input: CreateModelProviderProfileInput): Promise<SanitizedModelProviderConfig> {
     const current = await this.readOrCreateSettings();
     const now = new Date().toISOString();
@@ -113,7 +156,7 @@ export class ConfigCenter {
       profileId,
       label: normalizeOptionalString(input.label) ?? profileId,
       updatedAt: now,
-    }, current.modelProvider);
+    }, createModelProviderProfileFallback(profileId, normalizeOptionalString(input.label) ?? profileId, current.modelProvider, now));
     const next = normalizeLocalSettings({
       ...current,
       version: 3,
@@ -160,12 +203,17 @@ export class ConfigCenter {
     if (nextProfiles.length === current.modelProfiles.length) {
       throw new ConfigCenterValidationError(`Model profile not found: ${normalized}`);
     }
+    const deletedProfile = current.modelProfiles.find((profile) => profile.profileId === normalized);
     const next = normalizeLocalSettings({
       ...current,
       version: 3,
       modelProfiles: nextProfiles,
+      modelCatalogs: (current.modelCatalogs ?? []).filter((catalog) => catalog.profileId !== normalized),
       updatedAt: new Date().toISOString(),
     });
+    if (deletedProfile !== undefined) {
+      await this.options.secretStore.deleteSecret(deletedProfile.secretRef);
+    }
     await this.options.settingsStore.writeSettings(next);
     return this.listModelProviderProfiles();
   }
@@ -180,12 +228,13 @@ export class ConfigCenter {
     if (existing === undefined) {
       throw new ConfigCenterValidationError(`Model profile not found: ${profileId}`);
     }
-    const updatedProfile = normalizeModelProfile({
+    const normalizedProfile = normalizeModelProfile({
       ...existing,
       ...input,
       profileId,
       updatedAt: now,
     }, existing);
+    const updatedProfile = input.clearModel === true ? { ...normalizedProfile, model: undefined } : normalizedProfile;
     const nextProfiles = current.modelProfiles.map((profile) =>
       profile.profileId === updatedProfile.profileId ? updatedProfile : profile
     );
@@ -198,7 +247,10 @@ export class ConfigCenter {
     });
 
     const apiKey = normalizeOptionalString(input.apiKey);
-    if (apiKey !== undefined) {
+    if (input.clearApiKey === true) {
+      await Promise.all([...new Set([existing.secretRef, updatedProfile.secretRef])]
+        .map((secretRef) => this.options.secretStore.deleteSecret(secretRef)));
+    } else if (apiKey !== undefined) {
       await this.options.secretStore.writeSecret(updatedProfile.secretRef, apiKey);
     }
 
@@ -516,6 +568,51 @@ export function createLocalConfigCenter(options: CreateLocalConfigCenterOptions 
       settingsStore: new FileSystemNormalSettingsStore(configDirectory),
       secretStore: new FileSystemLocalDevSecretStore(configDirectory),
     }),
+  };
+}
+
+function createModelProviderProfileFallback(
+  profileId: string,
+  label: string,
+  current: ModelProviderProfileSettings,
+  now: string
+): ModelProviderProfileSettings {
+  return {
+    profileId,
+    label,
+    providerKind: "openai_compatible",
+    protocolKind: "openai_responses",
+    baseUrl: DEFAULT_MODEL_PROVIDER_BASE_URL,
+    defaultAiMode: current.defaultAiMode === "none" ? "none" : "openai-responses",
+    secretRef: current.secretRef,
+    enabled: true,
+    updatedAt: now,
+  };
+}
+
+function clearProfileModelOutsideCatalog(
+  settings: AgentArborLocalSettings,
+  catalog: ModelProviderModelCatalog,
+  now: string
+): AgentArborLocalSettings {
+  const savedModelIds = new Set(catalog.models.map((model) => model.id));
+  const modelStillSaved = (model: string | undefined): boolean =>
+    model === undefined || savedModelIds.has(model);
+  const modelProfiles = settings.modelProfiles.map((profile) =>
+    profile.profileId === catalog.profileId && !modelStillSaved(profile.model)
+      ? { ...profile, model: undefined, updatedAt: now }
+      : profile
+  );
+  const activeProfile =
+    modelProfiles.find((profile) => profile.profileId === settings.activeModelProfileId) ?? settings.modelProvider;
+  return {
+    ...settings,
+    modelProfiles,
+    modelProvider:
+      settings.modelProvider.profileId === catalog.profileId && !modelStillSaved(settings.modelProvider.model)
+        ? { ...activeProfile, model: undefined, updatedAt: now }
+        : activeProfile,
+    updatedAt: now,
   };
 }
 

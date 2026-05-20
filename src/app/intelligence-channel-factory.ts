@@ -2,6 +2,7 @@ import {
   FakeModelProvider,
   OpenAICompatibleChatCompletionsProvider,
   OpenAIResponsesProvider,
+  fetchAnthropicModelCatalog,
   fetchOpenAICompatibleModelCatalog,
   type FetchLike,
   type ModelCatalogFetchLike,
@@ -77,7 +78,7 @@ export const createUndergroundAiDisabledConfigurationError = createModelRuntimeD
 
 const OPENAI_COMPATIBLE_PROVIDER_ID = "openai-compatible-chat-completions";
 const OPENAI_COMPATIBLE_PROTOCOL = "openai_compatible_chat_completions";
-const OPENAI_COMPATIBLE_DEFAULT_BASE_URL = "https://api.openai.com";
+const OPENAI_COMPATIBLE_DEFAULT_BASE_URL = "https://api.openai.com/v1";
 
 const OPENAI_RESPONSES_PROVIDER_ID = "openai-responses";
 const OPENAI_RESPONSES_PROTOCOL = "openai_responses";
@@ -140,11 +141,14 @@ export function createModelRuntimeConfig(input: {
 export const createUndergroundAiRuntimeConfig = createModelRuntimeConfig;
 
 export async function fetchModelRuntimeModelCatalog(input: {
-  readonly profile: Pick<SanitizedModelProviderConfig, "profileId" | "label" | "baseUrl">;
+  readonly profile: Pick<SanitizedModelProviderConfig, "profileId" | "label" | "baseUrl" | "providerKind" | "protocolKind">;
   readonly apiKey: string;
   readonly fetch?: ModelRuntimeModelCatalogFetch;
   readonly abortSignal?: AbortSignal;
 }): Promise<ModelProviderModelCatalog> {
+  if (input.profile.providerKind === "anthropic" && input.profile.protocolKind === "anthropic_messages") {
+    return fetchAnthropicModelCatalog(input);
+  }
   return fetchOpenAICompatibleModelCatalog(input);
 }
 

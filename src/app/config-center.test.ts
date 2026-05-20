@@ -34,7 +34,7 @@ test("ConfigCenter keeps raw API key out of the normal settings store", async ()
     assert.equal(sanitized.secretConfigured, true);
     assert.equal(sanitized.baseUrl, "https://example.test");
     assert.equal(sanitized.model, "demo-model");
-    assert.equal(sanitized.defaultAiMode, "openai-compatible");
+    assert.equal(sanitized.defaultAiMode, "openai-responses");
     assert.equal(JSON.stringify(sanitized).includes(secret), false);
     assert.equal(settingsRaw.includes(secret), false);
     assert.equal(settingsRaw.includes(tavilySecret), false);
@@ -52,6 +52,72 @@ test("ConfigCenter keeps raw API key out of the normal settings store", async ()
     assert.equal(webSearch.secretConfigured, true);
     assert.equal(webSearch.status, "ready");
     assert.equal(JSON.stringify(webSearch).includes(tavilySecret), false);
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("ConfigCenter clears saved model provider API keys explicitly", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-config-clear-model-key-"));
+  const secret = "sk-clear-model-provider-secret";
+  try {
+    const settingsStore = new FileSystemNormalSettingsStore(directory);
+    const secretStore = new FileSystemLocalDevSecretStore(directory);
+    const configCenter = new ConfigCenter({ settingsStore, secretStore });
+
+    const saved = await configCenter.updateModelProviderConfig({
+      baseUrl: "https://example.test/v1",
+      model: "demo-model",
+      defaultAiMode: "openai-compatible",
+      apiKey: secret,
+    });
+    const staleSecret = "sk-clear-should-not-be-written-back";
+    const cleared = await configCenter.updateModelProviderConfig({
+      apiKey: staleSecret,
+      clearApiKey: true,
+    });
+    const apiKey = await configCenter.getModelProviderApiKey();
+    const secretsRaw = await fs.readFile(secretStore.secretsPath, "utf8");
+
+    assert.equal(saved.secretConfigured, true);
+    assert.equal(cleared.secretConfigured, false);
+    assert.equal(apiKey, undefined);
+    assert.equal(secretsRaw.includes(secret), false);
+    assert.equal(secretsRaw.includes(staleSecret), false);
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("ConfigCenter clears model names explicitly and does not inherit them into new profiles", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-config-clear-model-name-"));
+  try {
+    const settingsStore = new FileSystemNormalSettingsStore(directory);
+    const secretStore = new FileSystemLocalDevSecretStore(directory);
+    const configCenter = new ConfigCenter({ settingsStore, secretStore });
+
+    const saved = await configCenter.updateModelProviderConfig({
+      baseUrl: "https://api.deepseek.com",
+      model: "deepseek-chat",
+      defaultAiMode: "openai-compatible",
+    });
+    const created = await configCenter.createModelProviderProfile({
+      profileId: "anthropic",
+      label: "Anthropic",
+      providerKind: "anthropic",
+      protocolKind: "anthropic_messages",
+      baseUrl: "https://api.anthropic.com",
+      defaultAiMode: "openai-compatible",
+    });
+    const cleared = await configCenter.updateModelProviderConfig({
+      clearModel: true,
+    });
+    const env = await configCenter.createUndergroundAiEnvironment();
+
+    assert.equal(saved.model, "deepseek-chat");
+    assert.equal(cleared.model, undefined);
+    assert.equal(created.model, undefined);
+    assert.equal(env.AGENTARBOR_MODEL_NAME, undefined);
   } finally {
     await fs.rm(directory, { recursive: true, force: true });
   }
@@ -162,6 +228,7 @@ test("ConfigCenter reads v1 settings and upgrades local settings to v3", async (
       version: number;
       activeModelProfileId?: string;
       modelProfiles?: readonly unknown[];
+      modelCatalogs?: readonly unknown[];
       modelCapabilityOverrides?: readonly unknown[];
       toolStates?: readonly unknown[];
       mcpServers?: readonly unknown[];
@@ -188,6 +255,7 @@ test("ConfigCenter reads v1 settings and upgrades local settings to v3", async (
     assert.equal(settingsRaw.version, 3);
     assert.equal(settingsRaw.activeModelProfileId, "default");
     assert.equal(settingsRaw.modelProfiles?.length, 1);
+    assert.deepEqual(settingsRaw.modelCatalogs, []);
     assert.deepEqual(settingsRaw.modelCapabilityOverrides, []);
     assert.deepEqual(settingsRaw.toolStates, []);
     assert.deepEqual(settingsRaw.mcpServers, []);
@@ -239,6 +307,102 @@ test("ConfigCenter manages model profiles and keeps profile secrets scoped", asy
     );
     const remaining = await configCenter.deleteModelProviderProfile("default");
     assert.equal(remaining.some((profile) => profile.profileId === "default"), false);
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("ConfigCenter persists model catalogs and removes them with deleted profiles", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-config-model-catalogs-"));
+  const secret = "sk-catalog-profile-secret";
+  try {
+    const settingsStore = new FileSystemNormalSettingsStore(directory);
+    const secretStore = new FileSystemLocalDevSecretStore(directory);
+    const configCenter = new ConfigCenter({ settingsStore, secretStore });
+
+    await configCenter.createModelProviderProfile({
+      profileId: "deepseek",
+      label: "DeepSeek",
+      providerKind: "openai_compatible",
+      protocolKind: "openai_compatible_chat_completions",
+      baseUrl: "https://api.deepseek.com",
+      model: "deepseek-chat",
+      defaultAiMode: "openai-compatible",
+      apiKey: secret,
+    });
+    const saved = await configCenter.upsertModelProviderModelCatalog({
+      profileId: "deepseek",
+      label: "DeepSeek",
+      baseUrl: "https://api.deepseek.com",
+      modelsPath: "/models",
+      fetchedAt: "2026-05-19T00:00:00.000Z",
+      models: [
+        { id: "deepseek-chat", displayName: "deepseek-chat", owner: "deepseek" },
+        { id: "deepseek-reasoner", displayName: "deepseek-reasoner", owner: "deepseek" },
+      ],
+    });
+    const reloaded = new ConfigCenter({ settingsStore, secretStore });
+    const catalogs = await reloaded.listModelProviderModelCatalogs();
+    const settingsRaw = await fs.readFile(settingsStore.settingsPath, "utf8");
+    await reloaded.upsertModelProviderModelCatalog({
+      ...saved,
+      models: [{ id: "deepseek-reasoner", displayName: "deepseek-reasoner", owner: "deepseek" }],
+    });
+    const clearedProfile = (await reloaded.listModelProviderProfiles()).find((profile) => profile.profileId === "deepseek");
+    const remainingProfiles = await reloaded.deleteModelProviderProfile("deepseek");
+    const remainingCatalogs = await reloaded.listModelProviderModelCatalogs();
+
+    assert.equal(saved.profileId, "deepseek");
+    assert.deepEqual(catalogs.map((catalog) => catalog.profileId), ["deepseek"]);
+    assert.deepEqual(catalogs[0]?.models.map((model) => model.id), ["deepseek-chat", "deepseek-reasoner"]);
+    assert.equal(settingsRaw.includes("deepseek-chat"), true);
+    assert.equal(settingsRaw.includes(secret), false);
+    assert.equal(clearedProfile?.model, undefined);
+    assert.equal(remainingProfiles.some((profile) => profile.profileId === "deepseek"), false);
+    assert.equal(remainingCatalogs.length, 0);
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("ConfigCenter removes a model catalog when its saved model list is empty", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-config-empty-model-catalog-"));
+  try {
+    const settingsStore = new FileSystemNormalSettingsStore(directory);
+    const secretStore = new FileSystemLocalDevSecretStore(directory);
+    const configCenter = new ConfigCenter({ settingsStore, secretStore });
+
+    await configCenter.createModelProviderProfile({
+      profileId: "deepseek",
+      label: "DeepSeek",
+      providerKind: "openai_compatible",
+      protocolKind: "openai_compatible_chat_completions",
+      baseUrl: "https://api.deepseek.com",
+      model: "deepseek-chat",
+      defaultAiMode: "openai-compatible",
+    });
+    await configCenter.upsertModelProviderModelCatalog({
+      profileId: "deepseek",
+      label: "DeepSeek",
+      baseUrl: "https://api.deepseek.com",
+      modelsPath: "/models",
+      fetchedAt: "2026-05-19T00:00:00.000Z",
+      models: [{ id: "deepseek-chat", displayName: "deepseek-chat" }],
+    });
+    const emptyCatalog = await configCenter.upsertModelProviderModelCatalog({
+      profileId: "deepseek",
+      label: "DeepSeek",
+      baseUrl: "https://api.deepseek.com",
+      modelsPath: "/models",
+      fetchedAt: "2026-05-19T00:01:00.000Z",
+      models: [],
+    });
+    const catalogs = await configCenter.listModelProviderModelCatalogs();
+    const profile = (await configCenter.listModelProviderProfiles()).find((item) => item.profileId === "deepseek");
+
+    assert.deepEqual(emptyCatalog.models, []);
+    assert.equal(catalogs.length, 0);
+    assert.equal(profile?.model, undefined);
   } finally {
     await fs.rm(directory, { recursive: true, force: true });
   }

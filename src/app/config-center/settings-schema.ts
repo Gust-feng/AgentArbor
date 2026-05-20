@@ -9,11 +9,13 @@ import type {
   McpServerSettings,
   ModelCapabilities,
   ModelCapabilityOverrideSettings,
+  ModelProviderModelCatalog,
+  ModelProviderModelCatalogItem,
   ModelProviderProfileSettings,
   ToolStateSettings,
 } from "../../domain/config/index.js";
 
-export const DEFAULT_MODEL_PROVIDER_BASE_URL = "https://api.openai.com";
+export const DEFAULT_MODEL_PROVIDER_BASE_URL = "https://api.openai.com/v1";
 export const MODEL_PROVIDER_SECRET_REF = "secret://local-dev/model-provider/default/api-key";
 export const INFORMATION_TAVILY_SECRET_REF = "secret://local-dev/information-source/tavily/default/api-key";
 const DEFAULT_MODEL_PROFILE_ID = "default";
@@ -69,6 +71,7 @@ export function parseLocalSettingsFile(raw: unknown): AgentArborLocalSettings {
     modelProvider: activeProfile,
     activeModelProfileId: activeProfile.profileId,
     modelProfiles,
+    modelCatalogs: parseModelCatalogs(record.modelCatalogs, updatedAt),
     modelCapabilityOverrides: parseModelCapabilityOverrides(record.modelCapabilityOverrides, updatedAt),
     toolStates: parseToolStates(record.toolStates, updatedAt),
     mcpServers: parseMcpServers(record.mcpServers, updatedAt),
@@ -105,6 +108,7 @@ export function createDefaultLocalSettings(now: string = new Date().toISOString(
     modelProvider: defaultProfile,
     activeModelProfileId: defaultProfile.profileId,
     modelProfiles: [defaultProfile],
+    modelCatalogs: [],
     modelCapabilityOverrides: [],
     toolStates: [],
     mcpServers: [],
@@ -127,8 +131,9 @@ export function shouldRewriteLocalSettingsFile(
 export function normalizeLocalSettings(settings: AgentArborLocalSettings): AgentArborLocalSettings {
   const now = settings.updatedAt;
   const legacyProfile = normalizeModelProfile(settings.modelProvider, createDefaultProfile(now));
+  const profileFallback = { ...legacyProfile, model: undefined };
   const profiles = dedupeProfiles((settings.modelProfiles.length === 0 ? [legacyProfile] : settings.modelProfiles)
-    .map((profile) => normalizeModelProfile(profile, legacyProfile)));
+    .map((profile) => normalizeModelProfile(profile, profileFallback)));
   const activeProfile =
     profiles.find((profile) => profile.profileId === settings.activeModelProfileId) ??
     profiles.find((profile) => profile.profileId === legacyProfile.profileId) ??
@@ -140,6 +145,7 @@ export function normalizeLocalSettings(settings: AgentArborLocalSettings): Agent
     modelProvider: activeProfile,
     activeModelProfileId: activeProfile.profileId,
     modelProfiles: profiles.length === 0 ? [activeProfile] : profiles,
+    modelCatalogs: normalizeModelCatalogs(settings.modelCatalogs ?? [], profiles.length === 0 ? [activeProfile] : profiles, now),
     modelCapabilityOverrides: normalizeModelCapabilityOverrides(settings.modelCapabilityOverrides ?? [], now),
     toolStates: normalizeToolStates(settings.toolStates ?? [], now),
     mcpServers: normalizeMcpServers(settings.mcpServers ?? [], now),
@@ -152,18 +158,37 @@ export function normalizeModelProfile(
   fallback: ModelProviderProfileSettings
 ): ModelProviderProfileSettings {
   const providerKind = normalizeModelProviderKind(input.providerKind) ?? fallback.providerKind;
+  const protocolKind = normalizeModelProtocolKind(input.protocolKind, providerKind) ?? fallback.protocolKind;
+  const defaultAiMode = normalizeAiMode(input.defaultAiMode) ?? fallback.defaultAiMode;
   return {
     profileId: normalizeProfileId(input.profileId ?? fallback.profileId),
     label: normalizeOptionalString(input.label) ?? fallback.label,
     providerKind,
-    protocolKind: normalizeModelProtocolKind(input.protocolKind, providerKind) ?? fallback.protocolKind,
+    protocolKind: normalizeProfileProtocolForProvider(providerKind, protocolKind),
     baseUrl: normalizeBaseUrl(input.baseUrl) ?? fallback.baseUrl,
     model: normalizeOptionalString(input.model) ?? fallback.model,
-    defaultAiMode: normalizeAiMode(input.defaultAiMode) ?? fallback.defaultAiMode,
+    defaultAiMode: normalizeProfileAiModeForProvider(providerKind, defaultAiMode),
     secretRef: normalizeOptionalString(input.secretRef) ?? secretRefForProfile(input.profileId ?? fallback.profileId),
     enabled: input.enabled ?? fallback.enabled,
     updatedAt: normalizeOptionalString(input.updatedAt) ?? fallback.updatedAt,
   };
+}
+
+function normalizeProfileProtocolForProvider(
+  providerKind: ConfiguredModelProviderKind,
+  protocolKind: ConfiguredModelProtocolKind
+): ConfiguredModelProtocolKind {
+  return providerKind === "openai_compatible" ? "openai_responses" : protocolKind;
+}
+
+function normalizeProfileAiModeForProvider(
+  providerKind: ConfiguredModelProviderKind,
+  aiMode: ConfiguredUndergroundAiMode
+): ConfiguredUndergroundAiMode {
+  if (providerKind !== "openai_compatible") {
+    return aiMode;
+  }
+  return aiMode === "none" || aiMode === "fake" ? aiMode : "openai-responses";
 }
 
 export function createDefaultInformationAccessSettings(now: string): InformationAccessSettings {
@@ -242,7 +267,7 @@ export function normalizeModelProtocolKind(
   if (providerKind === "anthropic") return "anthropic_messages";
   if (providerKind === "gemini") return "gemini_generate_content";
   if (providerKind === "ollama") return "ollama_generate";
-  return "openai_compatible_chat_completions";
+  return "openai_responses";
 }
 
 export function normalizeWebSearchProvider(value: ConfiguredWebSearchProvider | undefined): ConfiguredWebSearchProvider | undefined {
@@ -319,11 +344,11 @@ export function normalizePositiveInteger(value: number | undefined): number | un
 function createDefaultProfile(now: string): ModelProviderProfileSettings {
   return {
     profileId: DEFAULT_MODEL_PROFILE_ID,
-    label: "Default",
+    label: "OpenAI",
     providerKind: "openai_compatible",
-    protocolKind: "openai_compatible_chat_completions",
+    protocolKind: "openai_responses",
     baseUrl: DEFAULT_MODEL_PROVIDER_BASE_URL,
-    defaultAiMode: "openai-compatible",
+    defaultAiMode: "openai-responses",
     secretRef: MODEL_PROVIDER_SECRET_REF,
     enabled: true,
     updatedAt: now,
@@ -356,6 +381,53 @@ function parseModelProfile(
   };
 }
 
+function parseModelCatalogs(
+  value: unknown,
+  updatedAt: string
+): AgentArborLocalSettings["modelCatalogs"] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const catalogs: ModelProviderModelCatalog[] = [];
+  for (const item of value) {
+    const record = asRecord(item);
+    const profileId = safeConfigId(optionalString(record.profileId) ?? "");
+    if (profileId.length === 0) {
+      continue;
+    }
+    catalogs.push({
+      profileId,
+      label: optionalString(record.label),
+      baseUrl: optionalString(record.baseUrl) ?? "",
+      modelsPath: normalizeModelCatalogPath(optionalString(record.modelsPath)),
+      fetchedAt: optionalString(record.fetchedAt) ?? updatedAt,
+      models: parseModelCatalogItems(record.models),
+    });
+  }
+  return catalogs;
+}
+
+function parseModelCatalogItems(value: unknown): readonly ModelProviderModelCatalogItem[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map((item): ModelProviderModelCatalogItem | undefined => {
+      const record = asRecord(item);
+      const id = optionalString(record.id);
+      if (id === undefined) {
+        return undefined;
+      }
+      return {
+        id,
+        displayName: optionalString(record.displayName) ?? id,
+        owner: optionalString(record.owner),
+        createdAt: optionalString(record.createdAt),
+      };
+    })
+    .filter((item): item is ModelProviderModelCatalogItem => item !== undefined);
+}
+
 function parseModelProviderKind(value: unknown): AgentArborLocalSettings["modelProvider"]["providerKind"] {
   if (value === "anthropic" || value === "gemini" || value === "ollama" || value === "local") {
     return value;
@@ -379,7 +451,7 @@ function parseModelProtocolKind(
   if (providerKind === "anthropic") return "anthropic_messages";
   if (providerKind === "gemini") return "gemini_generate_content";
   if (providerKind === "ollama") return "ollama_generate";
-  return "openai_compatible_chat_completions";
+  return "openai_responses";
 }
 
 function parseModelCapabilityOverrides(
@@ -509,6 +581,77 @@ function normalizeMcpServers(servers: readonly McpServerSettings[], now: string)
     enabled: server.enabled,
     updatedAt: normalizeOptionalString(server.updatedAt) ?? now,
   }));
+}
+
+function normalizeModelCatalogs(
+  catalogs: readonly ModelProviderModelCatalog[],
+  profiles: readonly ModelProviderProfileSettings[],
+  now: string
+): readonly ModelProviderModelCatalog[] {
+  const profileMap = new Map(profiles.map((profile) => [profile.profileId, profile]));
+  const catalogMap = new Map<string, ModelProviderModelCatalog>();
+  for (const catalog of catalogs) {
+    const profileId = normalizeCatalogProfileId(catalog.profileId);
+    if (profileId === undefined) {
+      continue;
+    }
+    const profile = profileMap.get(profileId);
+    if (profile === undefined) {
+      continue;
+    }
+    catalogMap.set(profileId, {
+      profileId,
+      label: normalizeOptionalString(catalog.label) ?? profile.label,
+      baseUrl:
+        normalizeBaseUrl(catalog.baseUrl) ??
+        normalizeBaseUrl(profile.baseUrl) ??
+        DEFAULT_MODEL_PROVIDER_BASE_URL,
+      modelsPath: normalizeModelCatalogPath(catalog.modelsPath),
+      fetchedAt: normalizeCatalogFetchedAt(catalog.fetchedAt) ?? now,
+      models: normalizeModelCatalogItems(catalog.models),
+    });
+  }
+  return [...catalogMap.values()];
+}
+
+function normalizeModelCatalogItems(
+  models: readonly ModelProviderModelCatalogItem[]
+): readonly ModelProviderModelCatalogItem[] {
+  const map = new Map<string, ModelProviderModelCatalogItem>();
+  for (const model of models) {
+    const id = normalizeOptionalString(model.id);
+    if (id === undefined || map.has(id)) {
+      continue;
+    }
+    map.set(id, {
+      id,
+      displayName: normalizeOptionalString(model.displayName) ?? id,
+      owner: normalizeOptionalString(model.owner),
+      createdAt: normalizeCatalogFetchedAt(model.createdAt),
+    });
+  }
+  return [...map.values()];
+}
+
+function normalizeCatalogProfileId(profileId: string): string | undefined {
+  try {
+    return normalizeProfileId(profileId);
+  } catch {
+    return undefined;
+  }
+}
+
+function normalizeModelCatalogPath(value: string | undefined): string {
+  const normalized = normalizeOptionalString(value);
+  if (normalized === undefined) {
+    return "/models";
+  }
+  return normalized.startsWith("/") ? normalized : `/${normalized}`;
+}
+
+function normalizeCatalogFetchedAt(value: string | undefined): string | undefined {
+  const normalized = normalizeOptionalString(value);
+  return normalized !== undefined && /^\d{4}-\d{2}-\d{2}(?:$|T)/.test(normalized) ? normalized : undefined;
 }
 
 function secretRefForProfile(profileId: string): string {

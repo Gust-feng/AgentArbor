@@ -61,7 +61,7 @@ test("Desktop Task Soil input accepts refs, permission refs, and truncated reado
   assert.equal(fileRef?.readonlyPreview?.title, "Panel asset");
   assert.equal(fileRef?.readonlyPreview?.text.length <= 640, true);
   assert.equal(fileRef?.readonlyPreview?.truncated, true);
-  assert.equal(taskSoil.permissionBoundaryRefs.includes("execute:openai-compatible-ai"), true);
+  assert.equal(taskSoil.permissionBoundaryRefs.includes("execute:responses-ai"), true);
   assert.equal(taskSoil.permissionBoundaryRefs.includes("read:file:src/app/panel-assets.ts"), true);
 });
 

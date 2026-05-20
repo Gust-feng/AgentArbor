@@ -79,6 +79,28 @@ export class FileSystemLocalDevSecretStore implements LocalDevSecretStore {
     return { configured: true, updatedAt };
   }
 
+  async deleteSecret(secretRef: string): Promise<SecretMetadata> {
+    const current = await this.readSecretsFile();
+    if (current.secrets[secretRef] === undefined) {
+      return { configured: false };
+    }
+    const updatedAt = new Date().toISOString();
+    const remainingSecrets = Object.fromEntries(
+      Object.entries(current.secrets).filter(([candidateRef]) => candidateRef !== secretRef)
+    );
+    const next: LocalDevSecretsFile = {
+      version: 1,
+      secrets: remainingSecrets,
+      updatedAt,
+    };
+    await fs.mkdir(this.configDirectory, { recursive: true });
+    await fs.writeFile(this.secretsPath, `${JSON.stringify(next, null, 2)}\n`, {
+      encoding: "utf8",
+      mode: 0o600,
+    });
+    return { configured: false };
+  }
+
   private async readSecretsFile(): Promise<LocalDevSecretsFile> {
     const raw = await readJsonFile(this.secretsPath);
     if (raw === undefined) {

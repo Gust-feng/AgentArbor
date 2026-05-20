@@ -131,6 +131,7 @@ export type AgentArborLocalSettings = {
   readonly modelProvider: ModelProviderProfileSettings;
   readonly activeModelProfileId: string;
   readonly modelProfiles: readonly ModelProviderProfileSettings[];
+  readonly modelCatalogs?: readonly ModelProviderModelCatalog[];
   readonly modelCapabilityOverrides?: readonly ModelCapabilityOverrideSettings[];
   readonly toolStates?: readonly ToolStateSettings[];
   readonly mcpServers?: readonly McpServerSettings[];
@@ -161,9 +162,11 @@ export type UpdateModelProviderConfigInput = {
   readonly protocolKind?: ConfiguredModelProtocolKind;
   readonly baseUrl?: string;
   readonly model?: string;
+  readonly clearModel?: boolean;
   readonly defaultAiMode?: ConfiguredUndergroundAiMode;
   readonly enabled?: boolean;
   readonly apiKey?: string;
+  readonly clearApiKey?: boolean;
 };
 
 export type CreateModelProviderProfileInput = UpdateModelProviderConfigInput & {
@@ -354,4 +357,5 @@ export type LocalDevSecretStore = {
   getMetadata(secretRef: string): Promise<SecretMetadata>;
   readSecret(secretRef: string): Promise<string | undefined>;
   writeSecret(secretRef: string, value: string): Promise<SecretMetadata>;
+  deleteSecret(secretRef: string): Promise<SecretMetadata>;
 };

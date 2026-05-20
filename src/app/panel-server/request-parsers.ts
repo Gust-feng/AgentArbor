@@ -3,6 +3,7 @@ import type {
   ConfiguredModelProviderKind,
   CreateModelProviderProfileInput,
   McpServerTransportKind,
+  ModelProviderModelCatalogItem,
   ToolStateSettings,
   UpdateInformationAccessConfigInput,
   UpdateModelProviderConfigInput,
@@ -25,6 +26,14 @@ export type PanelRunInput = {
   readonly taskSoilInput?: DesktopTaskSoilInput;
 };
 
+export type ModelCatalogUpdateInput = {
+  readonly label?: string;
+  readonly baseUrl?: string;
+  readonly modelsPath?: string;
+  readonly fetchedAt?: string;
+  readonly models: readonly ModelProviderModelCatalogItem[];
+};
+
 // Keep request parsing stateless. Route modules decide what to do with validated inputs.
 export function parseConfigUpdate(raw: unknown): UpdateModelProviderConfigInput {
   const record = asRecord(raw);
@@ -35,9 +44,11 @@ export function parseConfigUpdate(raw: unknown): UpdateModelProviderConfigInput 
     protocolKind: parseOptionalModelProtocolKind(record.protocolKind),
     baseUrl: optionalString(record.baseUrl),
     model: optionalString(record.model),
+    clearModel: booleanOrUndefined(record.clearModel),
     defaultAiMode: parseOptionalAiMode(record.defaultAiMode, "默认 AI 模式无效。"),
     enabled: booleanOrUndefined(record.enabled),
     apiKey: optionalString(record.apiKey),
+    clearApiKey: booleanOrUndefined(record.clearApiKey),
   };
 }
 
@@ -50,6 +61,36 @@ export function parseCreateModelProfile(raw: unknown): CreateModelProviderProfil
   return {
     ...parsed,
     profileId,
+  };
+}
+
+export function parseModelCatalogUpdate(raw: unknown): ModelCatalogUpdateInput {
+  const record = asRecord(raw);
+  const modelsRaw = record.models;
+  if (!Array.isArray(modelsRaw)) {
+    throw new PanelHttpError(400, "invalid_model_catalog", "模型列表必须是数组。");
+  }
+  const models = modelsRaw
+    .map((item): ModelProviderModelCatalogItem | undefined => {
+      const model = asRecord(item);
+      const id = optionalString(model.id);
+      if (id === undefined) {
+        return undefined;
+      }
+      return {
+        id,
+        displayName: optionalString(model.displayName) ?? id,
+        owner: optionalString(model.owner),
+        createdAt: optionalString(model.createdAt),
+      };
+    })
+    .filter((item): item is ModelProviderModelCatalogItem => item !== undefined);
+  return {
+    label: optionalString(record.label),
+    baseUrl: optionalString(record.baseUrl),
+    modelsPath: optionalString(record.modelsPath),
+    fetchedAt: optionalString(record.fetchedAt),
+    models,
   };
 }
 
@@ -137,7 +178,7 @@ export function parseRunInput(raw: unknown, defaultAiMode: ModelRuntimeMode): Pa
 }
 
 export function defaultAiModeForRunKind(runKind: PanelRunKind, configuredDefault: ModelRuntimeMode): ModelRuntimeMode {
-  return runKind === "desktop" ? "openai-compatible" : configuredDefault;
+  return runKind === "desktop" ? "openai-responses" : configuredDefault;
 }
 
 export function parseConfirmationDecision(raw: unknown): Pick<ConfirmationDecision, "decision" | "guidance"> {

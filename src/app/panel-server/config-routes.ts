@@ -17,6 +17,7 @@ import {
   parseConfigUpdate,
   parseCreateModelProfile,
   parseInformationAccessUpdate,
+  parseModelCatalogUpdate,
   parseMcpServerUpdate,
   parseToolStateUpdate,
   parseWebSearchUpdate,
@@ -51,6 +52,7 @@ export async function handlePanelConfigRoute(
       status: "completed",
       config,
       profiles: await runtime.configCenter.listModelProviderProfiles(),
+      modelCatalogs: await runtime.configCenter.listModelProviderModelCatalogs(),
       modelProviderMarket: {
         presets: listBuiltinModelProviderPresets(),
       },
@@ -76,6 +78,7 @@ export async function handlePanelConfigRoute(
       status: "completed",
       profiles: await runtime.configCenter.listModelProviderProfiles(),
       activeProfile: await runtime.configCenter.getModelProviderConfig(),
+      modelCatalogs: await runtime.configCenter.listModelProviderModelCatalogs(),
       modelProviderMarket: {
         presets: listBuiltinModelProviderPresets(),
       },
@@ -90,6 +93,7 @@ export async function handlePanelConfigRoute(
       presets: listBuiltinModelProviderPresets(),
       profiles: await runtime.configCenter.listModelProviderProfiles(),
       activeProfile: await runtime.configCenter.getModelProviderConfig(),
+      modelCatalogs: await runtime.configCenter.listModelProviderModelCatalogs(),
     });
     return true;
   }
@@ -103,6 +107,7 @@ export async function handlePanelConfigRoute(
         status: "completed",
         profile,
         profiles: await runtime.configCenter.listModelProviderProfiles(),
+        modelCatalogs: await runtime.configCenter.listModelProviderModelCatalogs(),
         modelProviderMarket: {
           presets: listBuiltinModelProviderPresets(),
         },
@@ -128,6 +133,7 @@ export async function handlePanelConfigRoute(
         status: "completed",
         profile,
         profiles: await runtime.configCenter.listModelProviderProfiles(),
+        modelCatalogs: await runtime.configCenter.listModelProviderModelCatalogs(),
         modelProviderMarket: {
           presets: listBuiltinModelProviderPresets(),
         },
@@ -147,8 +153,12 @@ export async function handlePanelConfigRoute(
       if (profile === undefined) {
         throw new PanelHttpError(404, "model_profile_not_found", "未找到模型配置。");
       }
-      if (profile.providerKind !== "openai_compatible" || profile.protocolKind !== "openai_compatible_chat_completions") {
-        throw new PanelHttpError(400, "unsupported_model_provider", "当前只支持 OpenAI-compatible Chat Completions 模型列表。");
+      const supportedCatalogProvider =
+        (profile.providerKind === "openai_compatible" &&
+          (profile.protocolKind === "openai_compatible_chat_completions" || profile.protocolKind === "openai_responses")) ||
+        (profile.providerKind === "anthropic" && profile.protocolKind === "anthropic_messages");
+      if (!supportedCatalogProvider) {
+        throw new PanelHttpError(400, "unsupported_model_provider", "当前厂商暂不支持直接获取模型列表。");
       }
       const apiKey = await runtime.configCenter.getModelProviderApiKey(profile.profileId);
       if (apiKey === undefined) {
@@ -163,6 +173,7 @@ export async function handlePanelConfigRoute(
         ok: true,
         status: "completed",
         catalog,
+        modelCatalogs: await runtime.configCenter.listModelProviderModelCatalogs(),
       });
       return true;
     } catch (error) {
@@ -171,6 +182,52 @@ export async function handlePanelConfigRoute(
       }
       throw new PanelHttpError(502, "model_catalog_failed", "模型列表获取失败，请检查厂商地址、密钥和网络。");
     }
+  }
+
+  const modelProfileCatalogMatch = /^\/api\/config\/model-profiles\/([^/]+)\/model-catalog$/.exec(url.pathname);
+  if (request.method === "POST" && modelProfileCatalogMatch !== null) {
+    const body = await readJsonBody(request);
+    try {
+      const profileId = decodeURIComponent(modelProfileCatalogMatch[1] ?? "");
+      const profile = (await runtime.configCenter.listModelProviderProfiles()).find((item) => item.profileId === profileId);
+      if (profile === undefined) {
+        throw new PanelHttpError(404, "model_profile_not_found", "未找到模型配置。");
+      }
+      const input = parseModelCatalogUpdate(body);
+      const catalog = await runtime.configCenter.upsertModelProviderModelCatalog({
+        profileId,
+        label: input.label ?? profile.label,
+        baseUrl: input.baseUrl ?? profile.baseUrl,
+        modelsPath: input.modelsPath ?? "/models",
+        fetchedAt: input.fetchedAt ?? new Date().toISOString(),
+        models: input.models,
+      });
+      writeJson(response, 200, {
+        ok: true,
+        status: "completed",
+        catalog,
+        modelCatalogs: await runtime.configCenter.listModelProviderModelCatalogs(),
+      });
+      return true;
+    } catch (error) {
+      throw configCenterHttpError(error);
+    }
+  }
+
+  const modelProfileApiKeyMatch = /^\/api\/config\/model-profiles\/([^/]+)\/api-key$/.exec(url.pathname);
+  if (request.method === "GET" && modelProfileApiKeyMatch !== null) {
+    const profileId = decodeURIComponent(modelProfileApiKeyMatch[1] ?? "");
+    const apiKey = await runtime.configCenter.getModelProviderApiKey(profileId);
+    if (apiKey === undefined) {
+      throw new PanelHttpError(404, "model_provider_key_not_found", "未找到该厂商的 API Key。");
+    }
+    writeJson(response, 200, {
+      ok: true,
+      status: "completed",
+      profileId,
+      apiKey,
+    });
+    return true;
   }
 
   const activateProfileMatch = /^\/api\/config\/model-profiles\/([^/]+)\/activate$/.exec(url.pathname);
@@ -184,6 +241,7 @@ export async function handlePanelConfigRoute(
         status: "completed",
         profile,
         config: profile,
+        modelCatalogs: await runtime.configCenter.listModelProviderModelCatalogs(),
         modelProviderMarket: {
           presets: listBuiltinModelProviderPresets(),
         },
@@ -205,6 +263,7 @@ export async function handlePanelConfigRoute(
         ok: true,
         status: "completed",
         profiles,
+        modelCatalogs: await runtime.configCenter.listModelProviderModelCatalogs(),
         modelProviderMarket: {
           presets: listBuiltinModelProviderPresets(),
         },
@@ -240,6 +299,7 @@ export async function handlePanelConfigRoute(
         status: "completed",
         config,
         profiles: await runtime.configCenter.listModelProviderProfiles(),
+        modelCatalogs: await runtime.configCenter.listModelProviderModelCatalogs(),
         modelProviderMarket: {
           presets: listBuiltinModelProviderPresets(),
         },

@@ -46,6 +46,17 @@ export type RunEvent = {
   readonly timestamp: string;
   readonly refs: readonly ObservationRef[];
   readonly visibility: "compact" | "expanded" | "debug";
+  readonly detail?: {
+    readonly action?: string;
+    readonly path?: string;
+    readonly query?: string;
+    readonly command?: string;
+    readonly exitCode?: number;
+    readonly preview?: string;
+    readonly display?: ToolDisplayProjection;
+    readonly truncated?: boolean;
+    readonly error?: string;
+  };
 };
 
 export type ConversationTurn = {
@@ -55,6 +66,14 @@ export type ConversationTurn = {
   readonly content: string;
   readonly status: string;
   readonly runId?: string;
+  readonly responseModel?: {
+    readonly profileId: string;
+    readonly label?: string;
+    readonly providerKind?: string;
+    readonly protocolKind?: string;
+    readonly baseUrl?: string;
+    readonly model?: string;
+  };
 };
 
 export type Conversation = {
@@ -342,11 +361,12 @@ export type ConfigResponse = {
     readonly protocolKind?: string;
     readonly baseUrl?: string;
     readonly model?: string;
-    readonly defaultAiMode?: "none" | "fake" | "openai-compatible";
+    readonly defaultAiMode?: "none" | "fake" | "openai-compatible" | "openai-responses";
     readonly secretConfigured?: boolean;
   };
   readonly profile?: ModelProviderProfile;
   readonly profiles?: readonly ModelProviderProfile[];
+  readonly modelCatalogs?: readonly ModelProviderModelCatalog[];
   readonly modelProviderMarket?: {
     readonly presets?: readonly ModelProviderPreset[];
   };

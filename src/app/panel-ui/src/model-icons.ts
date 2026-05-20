@@ -1,0 +1,25 @@
+import claudeModelIcon from "./assets/model-icons/claude_model_icon.svg?raw";
+import deepseekModelIcon from "./assets/model-icons/deepseek_model_icon.svg?raw";
+import glmModelIcon from "./assets/model-icons/glm.svg?raw";
+import kimiModelIcon from "./assets/model-icons/kimi_model_icon.svg?raw";
+import minimaxModelIcon from "./assets/model-icons/minimax_model_icon.svg?raw";
+import openaiModelIcon from "./assets/model-icons/chatgpt_gpt_model_icon.svg?raw";
+import { decorativeSvg } from "./icon-svg";
+import type { ModelProviderIdentity } from "./model-provider-logos";
+
+const openaiModelSvg = decorativeSvg(openaiModelIcon);
+const claudeModelSvg = decorativeSvg(claudeModelIcon);
+const deepseekModelSvg = decorativeSvg(deepseekModelIcon);
+const kimiModelSvg = decorativeSvg(kimiModelIcon);
+const glmModelSvg = decorativeSvg(glmModelIcon);
+const minimaxModelSvg = decorativeSvg(minimaxModelIcon);
+
+export function resolveModelIconSvg(identity: ModelProviderIdentity): string | undefined {
+  if (identity === "openai") return openaiModelSvg;
+  if (identity === "claude") return claudeModelSvg;
+  if (identity === "deepseek") return deepseekModelSvg;
+  if (identity === "kimi") return kimiModelSvg;
+  if (identity === "glm") return glmModelSvg;
+  if (identity === "minimax") return minimaxModelSvg;
+  return undefined;
+}

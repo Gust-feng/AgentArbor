@@ -51,10 +51,11 @@ test("panel stream event projection maps refs and safe summaries into RunEvent",
     toolCallRefs: ["tool-1"],
   });
 
-  assert.equal(event.title, "工具已完成");
+  assert.equal(event.title, "动作已完成");
   assert.equal(event.status, "running");
   assert.equal(event.visibility, "expanded");
   assert.equal(event.summary?.includes("sk-test-token"), false);
+  assert.equal(event.detail?.preview?.includes("sk-test-token"), false);
   assert.deepEqual(event.refs, [
     { kind: "event", id: "event-1" },
     { kind: "model_call", id: "model-1" },

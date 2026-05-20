@@ -1,7 +1,7 @@
 import type { AgentTaskStatus, BasicAgentRun, ConfirmationDecision, RunEvent } from "../../domain/basic-agent/index.js";
 import type { ObservationRef } from "../../domain/observation/index.js";
 import type { ToolDisplayProjection } from "../../domain/tools/index.js";
-import { redactOrdinaryText } from "./safe-projection.js";
+import { redactOrdinaryMarkdownFragment, redactOrdinaryText } from "./safe-projection.js";
 
 export type BasicAgentCompatRunStatus =
   | "pending"
@@ -44,8 +44,15 @@ export type BasicAgentRunStreamEventProjectionInput = {
   readonly delta?: string;
   readonly status?: BasicAgentCompatRunStatus;
   readonly detail?: {
+    readonly action?: string;
+    readonly path?: string;
+    readonly query?: string;
+    readonly command?: string;
+    readonly exitCode?: number;
     readonly preview?: string;
     readonly display?: ToolDisplayProjection;
+    readonly truncated?: boolean;
+    readonly error?: string;
   };
   readonly sourceRefs: readonly string[];
   readonly modelCallRefs: readonly string[];
@@ -75,7 +82,7 @@ export function projectRunJobToBasicRun(job: BasicAgentRunProjectionInput): Basi
 
 export function projectRunStreamEventToRunEvent(event: BasicAgentRunStreamEventProjectionInput): RunEvent {
   const summary = safeEventSummary(event.detail?.preview ?? event.delta ?? event.summary);
-  const delta = event.delta === undefined ? undefined : safeEventSummary(event.delta);
+  const delta = event.delta === undefined ? undefined : safeEventDelta(event.delta);
   return {
     id: event.eventId,
     runId: event.runId,
@@ -88,6 +95,7 @@ export function projectRunStreamEventToRunEvent(event: BasicAgentRunStreamEventP
     timestamp: event.createdAt,
     refs: basicRefsFor(event),
     visibility: event.type.startsWith("tool.") || event.type === "confirmation.needed" ? "expanded" : "compact",
+    detail: safeEventDetail(event.detail),
   };
 }
 
@@ -111,9 +119,9 @@ function basicEventTitle(event: BasicAgentRunStreamEventProjectionInput): string
   if (event.type === "run.cancelled") return "任务已取消";
   if (event.type === "run.blocked") return "任务已暂停";
   if (event.type === "run.resumed") return "任务继续";
-  if (event.type === "tool.requested") return "正在使用工具";
-  if (event.type === "tool.completed") return "工具已完成";
-  if (event.type === "tool.failed") return "工具未完成";
+  if (event.type === "tool.requested") return "正在执行动作";
+  if (event.type === "tool.completed") return "动作已完成";
+  if (event.type === "tool.failed") return "动作未完成";
   if (event.type === "context.compaction.completed") return "上下文已压缩";
   if (event.type === "context.compaction.failed") return "上下文压缩失败";
   if (event.type === "confirmation.needed") return "需要确认";
@@ -210,6 +218,29 @@ function safeEventSummary(value: string | undefined): string | undefined {
   }
   const summary = redactOrdinaryText(value, 1_200);
   return summary.length === 0 ? undefined : summary;
+}
+
+function safeEventDetail(detail: BasicAgentRunStreamEventProjectionInput["detail"]): RunEvent["detail"] | undefined {
+  if (detail === undefined) {
+    return undefined;
+  }
+  const projected: NonNullable<RunEvent["detail"]> = {
+    action: safeEventSummary(detail.action),
+    path: safeEventSummary(detail.path),
+    query: safeEventSummary(detail.query),
+    command: safeEventSummary(detail.command),
+    exitCode: detail.exitCode,
+    preview: safeEventSummary(detail.preview),
+    display: detail.display,
+    truncated: detail.truncated,
+    error: safeEventSummary(detail.error),
+  };
+  return Object.values(projected).some((value) => value !== undefined) ? projected : undefined;
+}
+
+function safeEventDelta(value: string): string | undefined {
+  const delta = redactOrdinaryMarkdownFragment(value, 1_200);
+  return delta.length === 0 ? undefined : delta;
 }
 
 function basicRefsFor(event: BasicAgentRunStreamEventProjectionInput): readonly ObservationRef[] {

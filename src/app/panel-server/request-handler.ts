@@ -60,6 +60,7 @@ import {
 import { enqueuePanelPersistence, waitForPanelPersistenceIdle as waitForPanelPersistenceChainsIdle } from "./persistence.js";
 import {
   BasicAgentRunExecutor,
+  redactOrdinaryMarkdownFragment,
   type BasicAgentPendingToolContinuation,
   type BasicAgentRunExecutionInput,
 } from "../basic-agent-runtime/index.js";
@@ -107,7 +108,9 @@ import { PanelRunJobStore, type PanelDesktopRunMode, type PanelRunJob, type Pane
 import {
   PanelConversationStore,
   trimRuntimeConversationToClosedPairs,
+  turnModelFromConfig,
   toRuntimeConversationRecord,
+  type PanelConversationTurnModel,
   type PanelConversationReadModel,
   type PanelConversationSummaryReadModel,
 } from "../panel-conversations.js";
@@ -742,6 +745,7 @@ async function handleConversationMessageRequest(
       conversationId: started.conversation.conversationId,
       assistantTurnId: started.assistantTurn.turnId,
       runId: job.runId,
+      responseModel: turnModelFromConfig(job.config),
     });
     if (queuedRunCanStartNow(runtime, runAfterRunId)) {
       schedulePanelRunJob(runtime, job.runId);
@@ -751,6 +755,7 @@ async function handleConversationMessageRequest(
       conversationId: started.conversation.conversationId,
       assistantTurnId: started.assistantTurn.turnId,
       runId: job.runId,
+      responseModel: turnModelFromConfig(job.config),
     });
   }
   await persistPanelRun(runtime, job);
@@ -791,6 +796,7 @@ async function startGuidanceFollowUpRun(
     conversationId: started.conversation.conversationId,
     assistantTurnId: started.assistantTurn.turnId,
     runId: followUpJob.runId,
+    responseModel: turnModelFromConfig(followUpJob.config),
   });
   await persistPanelRun(runtime, followUpJob);
   await persistPanelConversation(runtime, started.conversation.conversationId);
@@ -999,13 +1005,94 @@ async function restorePersistedPanelConversation(
   runtime: PanelRuntime,
   record: RuntimeConversationRecord
 ): Promise<PanelConversationReadModel> {
-  const completedRunIds = await completedAssistantRunIds(runtime, record);
-  const trimmed = trimRuntimeConversationToClosedPairs({ record, completedRunIds });
+  const withResponseModels = await backfillConversationResponseModels(runtime, record);
+  const completedRunIds = await completedAssistantRunIds(runtime, withResponseModels.record);
+  const trimmed = trimRuntimeConversationToClosedPairs({ record: withResponseModels.record, completedRunIds });
   const restored = runtime.conversations.restore(trimmed.record);
-  if (trimmed.trimmed && runtime.runtimeDatabase !== undefined) {
+  if ((trimmed.trimmed || withResponseModels.changed) && runtime.runtimeDatabase !== undefined) {
     await runtime.runtimeDatabase.upsertConversation(toRuntimeConversationRecord(restored));
   }
   return restored;
+}
+
+async function backfillConversationResponseModels(
+  runtime: PanelRuntime,
+  record: RuntimeConversationRecord
+): Promise<{ readonly record: RuntimeConversationRecord; readonly changed: boolean }> {
+  if (runtime.runtimeDatabase === undefined) {
+    return { record, changed: false };
+  }
+  const missingRunIds = unique(
+    record.turns
+      .filter((turn) => turn.role === "assistant" && turn.responseModel === undefined && turn.runId !== undefined)
+      .map((turn) => turn.runId!)
+  );
+  if (missingRunIds.length === 0) {
+    return { record, changed: false };
+  }
+  const snapshots = await Promise.all(
+    missingRunIds.map(async (runId): Promise<readonly [string, RuntimeRunSnapshot | undefined]> => [
+      runId,
+      await runtime.runtimeDatabase?.getRun(runId),
+    ])
+  );
+  const modelsByRunId = new Map(
+    snapshots.flatMap(([runId, snapshot]) => {
+      const model = snapshot === undefined ? undefined : conversationTurnModelFromRunSnapshot(snapshot);
+      return model === undefined ? [] : [[runId, model] as const];
+    })
+  );
+  if (modelsByRunId.size === 0) {
+    return { record, changed: false };
+  }
+  let changed = false;
+  const turns = record.turns.map((turn) => {
+    if (turn.role !== "assistant" || turn.responseModel !== undefined || turn.runId === undefined) {
+      return turn;
+    }
+    const responseModel = modelsByRunId.get(turn.runId);
+    if (responseModel === undefined) {
+      return turn;
+    }
+    changed = true;
+    return {
+      ...turn,
+      responseModel,
+    };
+  });
+  return {
+    record: changed ? { ...record, turns } : record,
+    changed,
+  };
+}
+
+function conversationTurnModelFromRunSnapshot(
+  snapshot: RuntimeRunSnapshot
+): RuntimeConversationRecord["turns"][number]["responseModel"] | undefined {
+  const activeModel = snapshot.run.capabilitySnapshot?.activeModel;
+  if (activeModel !== undefined) {
+    const latestCallModel = latestRuntimeModelCall(snapshot.modelCalls)?.model;
+    return {
+      ...turnModelFromConfig(activeModel),
+      model: latestCallModel ?? activeModel.model,
+    };
+  }
+  const latestCall = latestRuntimeModelCall(snapshot.modelCalls);
+  if (latestCall === undefined || latestCall.model === undefined) {
+    return undefined;
+  }
+  return {
+    profileId: latestCall.providerKind ?? `run:${snapshot.run.runId}`,
+    providerKind: latestCall.providerKind,
+    protocolKind: latestCall.protocolKind,
+    model: latestCall.model,
+  };
+}
+
+function latestRuntimeModelCall(
+  calls: readonly RuntimeModelCallRecord[]
+): RuntimeModelCallRecord | undefined {
+  return [...calls].reverse().find((call) => call.model !== undefined);
 }
 
 async function completedAssistantRunIds(
@@ -2312,6 +2399,7 @@ function syncConversationTurnForJob(runtime: PanelRuntime, job: PanelRunJob): vo
     return;
   }
   const response = createPanelRunJobResponse(runtime, job);
+  const responseModel = turnModelFromRunJobResponse(response);
   if (response.status === "failed") {
     runtime.conversations.completeAssistantTurn({
       conversationId: job.conversationId,
@@ -2320,6 +2408,7 @@ function syncConversationTurnForJob(runtime: PanelRuntime, job: PanelRunJob): vo
       title: "这次没有完成",
       content: friendlyAssistantFailureText(response.error?.message),
       status: "failed",
+      responseModel,
     });
     return;
   }
@@ -2331,6 +2420,7 @@ function syncConversationTurnForJob(runtime: PanelRuntime, job: PanelRunJob): vo
       title: "已取消",
       content: "运行已取消。",
       status: "failed",
+      responseModel,
     });
     return;
   }
@@ -2342,6 +2432,7 @@ function syncConversationTurnForJob(runtime: PanelRuntime, job: PanelRunJob): vo
       title: "需要处理",
       content: sanitizeAssistantVisibleText(response.error?.message ?? "运行已中断，需要重新发起或继续处理。"),
       status: "completed",
+      responseModel,
     });
     return;
   }
@@ -2363,6 +2454,7 @@ function syncConversationTurnForJob(runtime: PanelRuntime, job: PanelRunJob): vo
       title: "需要补充",
       content: sanitizeAssistantVisibleText("已收到补充指导，将作为后续消息继续处理。"),
       status: "completed",
+      responseModel,
     });
     return;
   }
@@ -2374,7 +2466,22 @@ function syncConversationTurnForJob(runtime: PanelRuntime, job: PanelRunJob): vo
     title: turn.title,
     content: turn.content,
     status: "completed",
+    responseModel,
   });
+}
+
+function turnModelFromRunJobResponse(response: PanelRunJobResponse): PanelConversationTurnModel {
+  const latestCallModel = latestPanelTranscriptModelCall(response.transcript.modelCalls)?.model;
+  return {
+    ...turnModelFromConfig(response.config),
+    model: latestCallModel ?? response.config.model,
+  };
+}
+
+function latestPanelTranscriptModelCall(
+  calls: PanelRunTranscript["modelCalls"]
+): PanelRunTranscript["modelCalls"][number] | undefined {
+  return [...calls].reverse().find((call) => call.model !== undefined);
 }
 
 function assistantTurnFromResponse(
@@ -2443,7 +2550,7 @@ function syncPanelRunStreamEventsForJob(runtime: PanelRuntime, job: PanelRunJob)
 }
 
 function appendLiveModelOutputDelta(runtime: PanelRuntime, runId: string, delta: ModelOutputDelta): void {
-  const safeDelta = compactRuntimeText(sanitizeAssistantVisibleText(redactSensitiveText(delta.delta)), 900);
+  const safeDelta = redactOrdinaryMarkdownFragment(delta.delta, 900);
   if (safeDelta.length === 0) {
     return;
   }
@@ -2535,25 +2642,25 @@ async function prepareDesktopRunResources(
 
   const capabilitySnapshot = options.capabilitySnapshot ?? (await runtime.capabilityCenter.snapshot());
   if (
-    aiMode === "openai-compatible" &&
-    (capabilitySnapshot.activeModel.providerKind !== "openai_compatible" ||
-      capabilitySnapshot.activeModel.protocolKind !== "openai_compatible_chat_completions")
+    isRealDesktopAiMode(aiMode) &&
+    capabilitySnapshot.activeModel.providerKind !== "openai_compatible"
   ) {
     throw new PanelHttpError(
       400,
       "unsupported_model_provider",
-      "当前运行批次只支持 OpenAI-compatible 模型 profile；Anthropic、Gemini、Ollama 先作为配置边界保留。"
+      "当前运行批次只支持可使用 Responses 请求的 OpenAI-compatible 模型 profile；Anthropic、Gemini、Ollama 先作为配置边界保留。"
     );
   }
 
   const aiEnvironment = await runtime.configCenter.createUndergroundAiEnvironment({
     modelProvider: capabilitySnapshot.activeModel,
   });
+  const runtimeMode = desktopRuntimeMode(aiMode);
   const aiConfig =
     aiMode === "fake"
       ? createModelRuntimeConfig({ mode: "fake", env: aiEnvironment, onModelOutputDelta: options.onModelOutputDelta })
       : createModelRuntimeConfig({
-          mode: "openai-compatible",
+          mode: runtimeMode,
           env: aiEnvironment,
           fetch: runtime.providerFetch,
           onModelOutputDelta: options.onModelOutputDelta,
@@ -2573,6 +2680,15 @@ async function prepareDesktopRunResources(
       (tool) => tool.name === "browser_snapshot" && tool.availability === "available"
     ),
   };
+}
+
+function isRealDesktopAiMode(aiMode: ModelRuntimeMode): boolean {
+  return aiMode === "openai-compatible" || aiMode === "openai-responses";
+}
+
+function desktopRuntimeMode(aiMode: ModelRuntimeMode): ModelRuntimeMode {
+  if (aiMode === "fake" || aiMode === "none") return aiMode;
+  return "openai-responses";
 }
 
 async function createDesktopToolCenterFactory(
@@ -2739,7 +2855,7 @@ async function runUndergroundForPanel(
     aiMode === "fake"
       ? createModelRuntimeConfig({ mode: "fake", env: aiEnvironment, onModelOutputDelta: options.onModelOutputDelta })
       : createModelRuntimeConfig({
-          mode: "openai-compatible",
+          mode: aiMode,
           env: aiEnvironment,
           fetch: runtime.providerFetch,
           onModelOutputDelta: options.onModelOutputDelta,
@@ -2795,9 +2911,9 @@ function panelConfigurationErrorMessage(code: ModelRuntimeConfigurationError["is
     return "Underground Cognitive Runtime 方向智能阶段需要 AI；AI 禁用模式只作为边界检查，未启动运行。";
   }
   if (code === "missing_api_key") {
-    return "OpenAI-compatible 模式缺少 API key，已在发起网络请求前停止。";
+    return "Responses 模式缺少 API key，已在发起网络请求前停止。";
   }
-  return "OpenAI-compatible 模式缺少模型名，已在发起网络请求前停止。";
+  return "Responses 模式缺少模型名，已在发起网络请求前停止。";
 }
 
 function latestModelFailureMessage(eventEntries: readonly EventLogEntry[]): string | undefined {

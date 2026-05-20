@@ -335,7 +335,7 @@ function appendStreamEventToJob(
   }
   if (event.type === "model.output.delta") {
     const liveDelta = liveModelDeltaForSameCall(job, event);
-    if (liveDelta !== undefined) {
+    if (liveDelta !== undefined && !isLiveModelDeltaEvent(event)) {
       return liveDelta;
     }
   }
@@ -348,6 +348,10 @@ function appendStreamEventToJob(
   job.streamEventIds.add(next.eventId);
   job.updatedAt = nowIso();
   return next;
+}
+
+function isLiveModelDeltaEvent(event: PanelRunStreamEventInput): boolean {
+  return event.eventId.includes(":live:model.output.delta:");
 }
 
 function updateStartedEvent(existing: PanelRunStreamEvent, event: PanelRunStreamEventInput): void {

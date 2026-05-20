@@ -160,7 +160,7 @@ export async function runDesktopAgentSession(
   goal: string,
   options: RunDesktopAgentSessionOptions = {}
 ): Promise<DesktopAgentSessionResult> {
-  const aiMode = options.aiMode ?? "openai-compatible";
+  const aiMode = options.aiMode ?? "openai-responses";
   const runtime = options.runtime ?? createMinimalRuntime();
   const traceId = createId("trace");
   const goalId = createId("goal");

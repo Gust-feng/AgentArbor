@@ -34,7 +34,7 @@ export type CreateDesktopWorkSessionReadModelInput = {
 export function createDesktopWorkSessionReadModel(
   input: CreateDesktopWorkSessionReadModelInput
 ): DesktopWorkSessionReadModel {
-  const visibleEvents = input.events.filter((event) => event.visibility !== "debug").slice(-18);
+  const visibleEvents = visibleWorkSessionEvents(input.events);
   const contextAttachments = contextAttachmentsFor(input);
   const toolEvidence = envelopeSafeToolEvidence(input.toolEvidence ?? []);
   const toolDisplays = mergeToolDisplays(toolEvidence.map((envelope) => envelope.uiDisplay).filter(isToolDisplay), input.toolDisplays ?? []);
@@ -68,6 +68,32 @@ export function createDesktopWorkSessionReadModel(
       contextAttachmentCount: contextAttachments.length,
     },
   };
+}
+
+function visibleWorkSessionEvents(events: readonly RunEvent[]): readonly RunEvent[] {
+  const productEvents = events
+    .filter((event) => event.visibility !== "debug")
+    .filter(isProductWorkSessionEvent);
+  if (productEvents.length > 0) {
+    return productEvents.slice(-18);
+  }
+  return events.filter((event) => event.visibility !== "debug").slice(-18);
+}
+
+function isProductWorkSessionEvent(event: RunEvent): boolean {
+  if (event.type === "model.output.delta" || event.type === "final.result") {
+    return false;
+  }
+  return (
+    event.type.startsWith("run.") ||
+    event.type.startsWith("tool.") ||
+    event.type.startsWith("agent.") ||
+    event.type.startsWith("context.compaction.") ||
+    event.type === "model.output.completed" ||
+    event.type === "confirmation.needed" ||
+    event.type === "user_approval.received" ||
+    event.type === "user.guidance"
+  );
 }
 
 function contextLedgerFor(
@@ -204,7 +230,7 @@ function toolLedgerSummary(display: ToolDisplayProjection): string {
   if (display.kind === "browser_snapshot") return redactOrdinaryText(display.title ?? display.url ?? "网页已读取。", 240);
   if (display.kind === "command_summary") return redactOrdinaryText(display.command ?? "命令已执行。", 240);
   if (display.kind === "file_change_summary" || display.kind === "file_diff_preview") return redactOrdinaryText(display.path ?? "文件变更摘要。", 240);
-  return redactOrdinaryText(display.summary ?? display.action ?? "工具已完成。", 240);
+  return redactOrdinaryText(display.summary ?? display.action ?? "动作已完成。", 240);
 }
 
 function stageFor(
@@ -240,7 +266,7 @@ function headlineFor(
   if (stage === "failed") return "这次没有完成";
   if (stage === "cancelled") return "任务已取消";
   if (stage === "queued") return "已加入队列";
-  if (stage === "using_tools") return "正在使用工具";
+  if (stage === "using_tools") return "正在执行动作";
   if (stage === "gathering_context") return "正在整理上下文";
   if (stage === "composing_result") return "正在整理结果";
   return run.title || "正在理解任务";

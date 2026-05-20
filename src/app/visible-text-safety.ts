@@ -12,7 +12,10 @@ const RAW_INTERNAL_LINE_PATTERNS = [
 const INTERNAL_ID_PATTERN =
   /\b(?:goal|trace|run|model-request|model-response|tool-call|conversation)-[A-Za-z0-9_-]+\b/gi;
 
-export function sanitizeAssistantVisibleText(value: string): string {
+export function sanitizeAssistantVisibleText(
+  value: string,
+  options?: { readonly preserveOuterWhitespace?: boolean }
+): string {
   const cleaned = String(value)
     .replace(/<\s*start_work_session\b[^>]*>[\s\S]*?<\s*\/\s*start_work_session\s*>/gi, "")
     .replace(/<\s*start_work_session\b[^>]*\/\s*>/gi, "")
@@ -32,11 +35,11 @@ export function sanitizeAssistantVisibleText(value: string): string {
     kept.push(line);
   }
 
-  return kept
+  const result = kept
     .join("\n")
     .replace(INTERNAL_ID_PATTERN, "[运行引用]")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
+    .replace(/\n{3,}/g, "\n\n");
+  return options?.preserveOuterWhitespace === true ? result : result.trim();
 }
 
 export function sanitizeConversationHistoryText(value: string): string {
@@ -93,6 +96,7 @@ export function friendlyUserFacingFailureText(message: string | undefined): stri
   }
   if (
     lower.includes("openai-compatible provider returned http") ||
+    lower.includes("openai responses provider returned http") ||
     lower.includes("provider_response") ||
     lower.includes("model_failed") ||
     lower.includes("desktop_chat_failed") ||

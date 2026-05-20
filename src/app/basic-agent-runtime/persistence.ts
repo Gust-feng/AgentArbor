@@ -380,9 +380,9 @@ function basicEventTitleFromType(type: string): string {
   if (type === "run.cancelled") return "任务已取消";
   if (type === "run.blocked") return "任务已暂停";
   if (type === "run.resumed") return "任务继续";
-  if (type === "tool.requested") return "正在使用工具";
-  if (type === "tool.completed") return "工具已完成";
-  if (type === "tool.failed") return "工具未完成";
+  if (type === "tool.requested") return "正在执行动作";
+  if (type === "tool.completed") return "动作已完成";
+  if (type === "tool.failed") return "动作未完成";
   if (type === "confirmation.needed") return "需要确认";
   if (type === "user_approval.received") return "收到确认结果";
   if (type === "user.guidance") return "收到用户指导";

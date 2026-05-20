@@ -16,6 +16,18 @@ export function redactOrdinaryText(value: string, maxLength = 1_200): string {
   return compactSafeText(sanitizeAssistantVisibleText(redactSensitiveText(value)), maxLength) ?? "";
 }
 
+export function redactOrdinaryMarkdownFragment(value: string, maxLength = 1_200): string {
+  const text = redactSensitiveText(
+    sanitizeAssistantVisibleText(value, { preserveOuterWhitespace: true })
+  )
+    .replace(/\r\n?/g, "\n")
+    .replace(/[^\S\n]+/g, " ");
+  if (text.trim().length === 0 && !text.includes("\n")) {
+    return "";
+  }
+  return text.length <= maxLength ? text : `${text.slice(0, Math.max(0, maxLength - 1)).trimEnd()}...`;
+}
+
 export function projectToolResult(input: {
   readonly request: ToolCallRequest;
   readonly output: unknown;
@@ -104,10 +116,7 @@ export function safeReadFileToolPreview(input: {
 }): string | undefined {
   const bytes = typeof input.bytes === "number" ? `${input.bytes} bytes` : undefined;
   const headline = input.summary ?? [input.path, bytes].filter(isString).join(" · ");
-  return compactSafeText(
-    `${headline || "文件已读取。"}\n文件正文只进入本轮工具上下文；普通面板只展示路径、大小和截断状态。`,
-    input.maxLength ?? 900
-  );
+  return compactSafeText(headline || "文件已读取。", input.maxLength ?? 900);
 }
 
 export function safeCommandToolPreview(input: {
@@ -118,10 +127,7 @@ export function safeCommandToolPreview(input: {
 }): string | undefined {
   const exit = typeof input.exitCode === "number" ? `exit ${input.exitCode}` : undefined;
   const headline = input.summary ?? [input.command, exit].filter(isString).join(" · ");
-  return compactSafeText(
-    `${headline || "命令已执行。"}\n命令输出只进入本轮工具上下文；普通面板只展示安全摘要。`,
-    input.maxLength ?? 900
-  );
+  return compactSafeText(headline || "命令已执行。", input.maxLength ?? 900);
 }
 
 export function compactSafeText(value: string | undefined, maxLength: number): string | undefined {

@@ -137,6 +137,32 @@ test("work session read model keeps tool evidence out of ordinary message delive
   assert.equal(json.includes("sk-tool-secret"), false);
 });
 
+test("work session visible events preserve product activity instead of tail model deltas", () => {
+  const run = basicRun("completed");
+  const events: RunEvent[] = [
+    { ...event(run.runId, "run.started", "开始处理", "running"), sequence: 1 },
+    { ...event(run.runId, "tool.completed", "file notes.md · 12 bytes", "completed"), sequence: 2 },
+    ...Array.from({ length: 24 }, (_, index) => ({
+      ...event(run.runId, "model.output.delta", `片段 ${index}`, "running"),
+      id: `${run.runId}:delta:${index}`,
+      sequence: index + 3,
+      delta: `片段 ${index}`,
+    })),
+    { ...event(run.runId, "model.output.completed", "内容已整理。", "completed"), sequence: 27 },
+    { ...event(run.runId, "final.result", "已回答：很长的最终回答", "completed"), sequence: 28 },
+  ];
+
+  const workSession = createDesktopWorkSessionReadModel({
+    run,
+    events,
+  });
+
+  assert.equal(workSession.visibleEvents.some((item) => item.type === "tool.completed"), true);
+  assert.equal(workSession.visibleEvents.some((item) => item.type === "model.output.delta"), false);
+  assert.equal(workSession.visibleEvents.some((item) => item.type === "final.result"), false);
+  assert.equal(workSession.currentAction, "内容已整理。");
+});
+
 test("work session read model does not promote restored summaries into chat deliverables", () => {
   const run = basicRun("completed");
   const workSession = createDesktopWorkSessionReadModel({

@@ -38,6 +38,14 @@ export type RuntimeConversationTurnRecord = {
   readonly content: string;
   readonly status: "pending" | "running" | "completed" | "failed";
   readonly runId?: string;
+  readonly responseModel?: {
+    readonly profileId: string;
+    readonly label?: string;
+    readonly providerKind?: string;
+    readonly protocolKind?: string;
+    readonly baseUrl?: string;
+    readonly model?: string;
+  };
   readonly createdAt: string;
   readonly updatedAt: string;
 };

@@ -45,6 +45,17 @@ export type RunEvent = {
   readonly timestamp: string;
   readonly refs: readonly ObservationRef[];
   readonly visibility: RunEventVisibility;
+  readonly detail?: {
+    readonly action?: string;
+    readonly path?: string;
+    readonly query?: string;
+    readonly command?: string;
+    readonly exitCode?: number;
+    readonly preview?: string;
+    readonly display?: ToolDisplayProjection;
+    readonly truncated?: boolean;
+    readonly error?: string;
+  };
 };
 
 export type ConfirmationRiskLevel = "low" | "medium" | "high";

@@ -1,4 +1,5 @@
 import { createId, nowIso } from "../kernel/id.js";
+import type { SanitizedModelProviderConfig } from "../domain/config/index.js";
 import type { RuntimeConversationRecord } from "../domain/runtime-database/index.js";
 import type { DesktopTaskSoilInput } from "./task-soil-workspace.js";
 import { sanitizeAssistantVisibleText } from "./visible-text-safety.js";
@@ -15,7 +16,17 @@ export type PanelConversationTurn = {
   status: PanelConversationTurnStatus;
   updatedAt: string;
   runId?: string;
+  responseModel?: PanelConversationTurnModel;
   taskSoilInput?: DesktopTaskSoilInput;
+};
+
+export type PanelConversationTurnModel = {
+  readonly profileId: string;
+  readonly label?: string;
+  readonly providerKind?: string;
+  readonly protocolKind?: string;
+  readonly baseUrl?: string;
+  readonly model?: string;
 };
 
 export type PanelConversation = {
@@ -38,6 +49,7 @@ export type PanelConversationTurnReadModel = {
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly runId?: string;
+  readonly responseModel?: PanelConversationTurnModel;
 };
 
 export type PanelConversationReadModel = {
@@ -149,7 +161,7 @@ export class PanelConversationStore {
         turnId: turn.turnId,
         role: turn.role,
         title: compact(turn.title, 120),
-        content: compact(
+        content: compactMessageContent(
           turn.role === "assistant" ? sanitizeAssistantVisibleText(turn.content) : turn.content,
           8_000
         ),
@@ -157,6 +169,7 @@ export class PanelConversationStore {
         createdAt: turn.createdAt,
         updatedAt: turn.updatedAt,
         runId: turn.runId,
+        responseModel: normalizeTurnModel(turn.responseModel),
       })),
     };
     this.conversations.set(conversation.conversationId, conversation);
@@ -199,7 +212,7 @@ export class PanelConversationStore {
     const userTurn = createTurn({
       role: "user",
       title: "你的消息",
-      content: compact(input.goal, 4_000),
+      content: compactMessageContent(input.goal, 4_000),
       status: queued ? "pending" : "completed",
       taskSoilInput: input.taskSoilInput,
     });
@@ -230,10 +243,12 @@ export class PanelConversationStore {
     readonly conversationId: string;
     readonly assistantTurnId: string;
     readonly runId: string;
+    readonly responseModel?: PanelConversationTurnModel;
   }): void {
     const conversation = this.requireConversation(input.conversationId);
     const assistantTurn = requireTurn(conversation, input.assistantTurnId);
     assistantTurn.runId = input.runId;
+    assistantTurn.responseModel = normalizeTurnModel(input.responseModel);
     assistantTurn.status = "pending";
     assistantTurn.title = "等待回复";
     assistantTurn.updatedAt = nowIso();
@@ -248,10 +263,12 @@ export class PanelConversationStore {
     readonly conversationId: string;
     readonly assistantTurnId: string;
     readonly runId: string;
+    readonly responseModel?: PanelConversationTurnModel;
   }): void {
     const conversation = this.requireConversation(input.conversationId);
     const assistantTurn = requireTurn(conversation, input.assistantTurnId);
     assistantTurn.runId = input.runId;
+    assistantTurn.responseModel = normalizeTurnModel(input.responseModel);
     assistantTurn.status = "running";
     assistantTurn.title = "助手";
     assistantTurn.updatedAt = nowIso();
@@ -291,12 +308,14 @@ export class PanelConversationStore {
     readonly title: string;
     readonly content: string;
     readonly status: "completed" | "failed";
+    readonly responseModel?: PanelConversationTurnModel;
   }): void {
     const conversation = this.requireConversation(input.conversationId);
     const assistantTurn = requireTurn(conversation, input.assistantTurnId);
     assistantTurn.runId = input.runId;
+    assistantTurn.responseModel = normalizeTurnModel(input.responseModel) ?? assistantTurn.responseModel;
     assistantTurn.title = compact(input.title, 120);
-    assistantTurn.content = compact(sanitizeAssistantVisibleText(input.content), 8_000);
+    assistantTurn.content = compactMessageContent(sanitizeAssistantVisibleText(input.content), 8_000);
     assistantTurn.status = input.status;
     assistantTurn.updatedAt = nowIso();
     conversation.latestRunId = input.runId;
@@ -324,7 +343,7 @@ export class PanelConversationStore {
     const conversation = this.requireConversation(input.conversationId);
     const assistantTurn = requireTurn(conversation, input.assistantTurnId);
     assistantTurn.title = compact(input.title, 120);
-    assistantTurn.content = compact(input.content, 8_000);
+    assistantTurn.content = compactMessageContent(sanitizeAssistantVisibleText(input.content), 8_000);
     assistantTurn.status = input.status;
     assistantTurn.updatedAt = nowIso();
     conversation.updatedAt = assistantTurn.updatedAt;
@@ -439,7 +458,7 @@ function createTurn(input: {
     turnId: createId("turn"),
     role: input.role,
     title: compact(input.title, 120),
-    content: compact(
+    content: compactMessageContent(
       input.role === "assistant" ? sanitizeAssistantVisibleText(input.content) : input.content,
       8_000
     ),
@@ -470,6 +489,7 @@ function toConversationReadModel(conversation: PanelConversation): PanelConversa
       createdAt: turn.createdAt,
       updatedAt: turn.updatedAt,
       runId: turn.runId,
+      responseModel: normalizeTurnModel(turn.responseModel),
     })),
   };
 }
@@ -493,15 +513,27 @@ export function toRuntimeConversationRecord(
       turnId: turn.turnId,
       role: turn.role,
       title: compact(turn.title, 120),
-      content: compact(
+      content: compactMessageContent(
         turn.role === "assistant" ? sanitizeAssistantVisibleText(turn.content) : turn.content,
         8_000
       ),
       status: turn.status,
       runId: turn.runId,
+      responseModel: normalizeTurnModel(turn.responseModel),
       createdAt: turn.createdAt,
       updatedAt: turn.updatedAt,
     })),
+  };
+}
+
+export function turnModelFromConfig(config: SanitizedModelProviderConfig): PanelConversationTurnModel {
+  return {
+    profileId: config.profileId,
+    label: config.label,
+    providerKind: config.providerKind,
+    protocolKind: config.protocolKind,
+    baseUrl: config.baseUrl,
+    model: config.model,
   };
 }
 
@@ -570,10 +602,48 @@ function previousUserTurn(
   return candidate?.role === "user" ? candidate : undefined;
 }
 
+function normalizeTurnModel(
+  value: PanelConversationTurnModel | undefined
+): PanelConversationTurnModel | undefined {
+  if (value === undefined || value.profileId.trim().length === 0) {
+    return undefined;
+  }
+  return {
+    profileId: value.profileId,
+    label: emptyToUndefined(value.label),
+    providerKind: emptyToUndefined(value.providerKind),
+    protocolKind: emptyToUndefined(value.protocolKind),
+    baseUrl: emptyToUndefined(value.baseUrl),
+    model: emptyToUndefined(value.model),
+  };
+}
+
+function emptyToUndefined(value: string | undefined): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed.length === 0 ? undefined : trimmed;
+}
+
 function compact(value: string, maxLength: number): string {
   const normalized = String(value || "").replace(/\s+/g, " ").trim();
   if (normalized.length <= maxLength) {
     return normalized;
   }
   return `${normalized.slice(0, maxLength - 1)}…`;
+}
+
+function compactMessageContent(value: string, maxLength: number): string {
+  const normalized = String(value || "")
+    .replace(/\r\n?/g, "\n")
+    .split("\n")
+    .map((line) => line.replace(/[^\S\n]+/g, " ").trimEnd())
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+  return `${normalized.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
 }

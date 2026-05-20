@@ -222,7 +222,7 @@ test("ordinary agent stream stays quiet for direct answers but shows safe thinki
   assert.equal(completedTool?.detail?.display?.kind, "generic_tool_summary");
   assert.equal(withTool.find((event) => event.type === "tool.completed")?.detail?.display?.kind, "generic_tool_summary");
   assert.equal(completedTool?.detail?.preview?.includes("notes.md"), true);
-  assert.equal(completedTool?.detail?.preview?.includes("文件正文只进入本轮工具上下文"), true);
+  assert.equal(completedTool?.detail?.preview?.includes("文件正文只进入本轮工具上下文"), false);
   assert.equal(JSON.stringify(withTool).includes("RAW_TOOL_OUTPUT_SENTINEL"), false);
   assert.equal(JSON.stringify(withTool).includes("\"action\":\"read_file\""), false);
 });

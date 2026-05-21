@@ -347,7 +347,7 @@ function createComparison(
       ...(decision.extraEvidenceRefs ?? []),
     ]),
     createdAt: input.createdAt,
-    contentDifference: deterministicContentDifference(input.rootletOutput, input.goalProfile),
+    contentDifference: deterministicContentDifference(input.rootletOutput),
     whyPreferred: deterministicWhyPreferred(decision.conclusion, input.rootletOutput),
     conflictWith: deterministicConflictWith(input.rootletOutput, input.goalProfile),
   };
@@ -535,7 +535,7 @@ function unique(values: readonly string[]): string[] {
   return [...new Set(values.filter((value) => value.trim().length > 0))];
 }
 
-function deterministicContentDifference(output: RootletOutput, profile: GoalIntentProfile): string {
+function deterministicContentDifference(output: RootletOutput): string {
   const kindLabel = output.kind;
   if (kindLabel === "option") {
     return `This option proposes: ${truncate(output.summary, 100)}`;

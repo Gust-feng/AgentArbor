@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import type { OpenAIModelRequestSettings } from "../../domain/config/index.js";
 import type {
   ModelMessage,
   ModelFailureKind,
@@ -15,6 +16,11 @@ import { createFailedModelResponse } from "../../kernel/intelligence/failures.js
 import { pendingModelOutputValidation } from "../../kernel/intelligence/validation.js";
 import type { FetchLike } from "./openai-compatible-chat-completions-provider.js";
 import { normalizeOpenAICompatibleSdkBaseUrl } from "./openai-compatible-base-url.js";
+import {
+  buildOpenAIResponsesControlFields,
+  configuredOpenAIStream,
+} from "./openai-request-settings.js";
+import { modelReasoningOutputFromText } from "./model-reasoning-output.js";
 import { providerErrorMessage } from "./provider-error-message.js";
 
 export type OpenAIResponsesProviderOptions = {
@@ -24,6 +30,7 @@ export type OpenAIResponsesProviderOptions = {
   readonly model: string;
   readonly fetch?: FetchLike;
   readonly stream?: boolean;
+  readonly requestSettings?: OpenAIModelRequestSettings;
   readonly onOutputDelta?: (delta: ModelOutputDelta) => void;
 };
 
@@ -37,6 +44,7 @@ export class OpenAIResponsesProvider implements ModelProvider {
   private readonly apiKey: string;
   private readonly fetchImpl?: FetchLike;
   private readonly stream: boolean;
+  private readonly requestSettings?: OpenAIModelRequestSettings;
   private readonly onOutputDelta?: (delta: ModelOutputDelta) => void;
 
   constructor(options: OpenAIResponsesProviderOptions) {
@@ -46,6 +54,7 @@ export class OpenAIResponsesProvider implements ModelProvider {
     this.model = options.model;
     this.fetchImpl = options.fetch;
     this.stream = options.stream ?? false;
+    this.requestSettings = options.requestSettings;
     this.onOutputDelta = options.onOutputDelta;
   }
 
@@ -72,9 +81,10 @@ export class OpenAIResponsesProvider implements ModelProvider {
         fetch: toOpenAIFetch(fetchImpl),
         maxRetries: 0,
       });
-      const requestBody = buildResponsesRequestBody(request, this.model, this.stream);
+      const stream = configuredOpenAIStream(this.stream, this.requestSettings);
+      const requestBody = buildResponsesRequestBody(request, this.model, stream, this.requestSettings);
 
-      if (this.stream) {
+      if (stream) {
         const stream = await client.responses.create(requestBody, { signal: options.abortSignal });
         return await normalizeStreamResponse({
           request,
@@ -139,7 +149,8 @@ export class OpenAIResponsesProvider implements ModelProvider {
 function buildResponsesRequestBody(
   request: ModelRequest,
   model: string,
-  stream: boolean
+  stream: boolean,
+  requestSettings: OpenAIModelRequestSettings | undefined
 ): Record<string, unknown> {
   const { instructions, input } = buildInput(request.sanitizedMessages);
   return removeUndefinedValues({
@@ -148,7 +159,12 @@ function buildResponsesRequestBody(
     instructions,
     tools: request.tools === undefined || request.tools.length === 0 ? undefined : request.tools.map(toResponsesTool),
     tool_choice: request.toolChoice === undefined ? undefined : toResponsesToolChoice(request.toolChoice),
-    max_output_tokens: request.budget.maxOutputTokens,
+    ...(
+      buildOpenAIResponsesControlFields({
+        requestBudgetMaxOutputTokens: request.budget.maxOutputTokens,
+        settings: requestSettings,
+      }) ?? {}
+    ),
     stream: stream ? true : undefined,
   });
 }
@@ -237,7 +253,7 @@ function normalizeResponse(input: {
 }): ModelResponse {
   const raw = asRecord(input.raw);
   const output = Array.isArray(raw.output) ? raw.output : [];
-  const { textOutput, toolCalls } = parseOutputItems(output);
+  const { textOutput, toolCalls, reasoningContent } = parseOutputItems(output);
   const parsedOutput = parseStructuredOutput(textOutput);
   const responseId = typeof raw.id === "string" ? raw.id : createId("model-response");
   const usage = asRecord(raw.usage);
@@ -254,6 +270,10 @@ function normalizeResponse(input: {
     structuredOutput:
       toolCalls.length > 0 ? undefined : input.request.outputContract.format === "json_object" ? parsedOutput : undefined,
     textOutput,
+    reasoningOutput: modelReasoningOutputFromText({
+      source: "openai_responses_reasoning_summary",
+      content: reasoningContent,
+    }),
     assistantMessage: assistantMessageFromOutput({ textOutput, toolCalls, responseId }),
     toolCalls: toolCalls.length === 0 ? undefined : toolCalls,
     usage: {
@@ -283,6 +303,8 @@ async function normalizeStreamResponse(input: {
   let responseStatus: string | undefined;
   let model = input.model;
   let deltaIndex = 0;
+  let reasoningContent = "";
+  let reasoningDeltaIndex = 0;
   const toolCallBuilders = new Map<number, { callId?: string; name?: string; arguments: string }>();
 
   try {
@@ -320,12 +342,35 @@ async function normalizeStreamResponse(input: {
           textContent += delta;
           deltaIndex += 1;
           input.emitDelta?.({
+            kind: "output",
             requestId: input.request.requestId,
             purpose: input.request.purpose,
             providerId: input.providerId,
             model,
             delta,
             index: deltaIndex,
+            createdAt: nowIso(),
+          });
+        }
+        continue;
+      }
+
+      if (
+        eventType === "response.reasoning_summary_text.delta" ||
+        eventType === "response.reasoning_text.delta"
+      ) {
+        const delta = typeof event.delta === "string" ? event.delta : "";
+        if (delta.length > 0) {
+          reasoningContent += delta;
+          reasoningDeltaIndex += 1;
+          input.emitDelta?.({
+            kind: "reasoning",
+            requestId: input.request.requestId,
+            purpose: input.request.purpose,
+            providerId: input.providerId,
+            model,
+            delta,
+            index: reasoningDeltaIndex,
             createdAt: nowIso(),
           });
         }
@@ -362,6 +407,10 @@ async function normalizeStreamResponse(input: {
         }
         if (typeof response.model === "string") {
           model = response.model;
+        }
+        if (reasoningContent.length === 0) {
+          const parsed = parseOutputItems(Array.isArray(response.output) ? response.output : []);
+          reasoningContent = parsed.reasoningContent;
         }
         continue;
       }
@@ -427,6 +476,10 @@ async function normalizeStreamResponse(input: {
     structuredOutput:
       toolCalls.length > 0 ? undefined : input.request.outputContract.format === "json_object" ? parsedOutput : undefined,
     textOutput: textContent,
+    reasoningOutput: modelReasoningOutputFromText({
+      source: "openai_responses_reasoning_summary",
+      content: reasoningContent,
+    }),
     assistantMessage: assistantMessageFromOutput({ textOutput: textContent, toolCalls, responseId }),
     toolCalls: toolCalls.length === 0 ? undefined : toolCalls,
     usage: {
@@ -441,12 +494,17 @@ async function normalizeStreamResponse(input: {
 function parseOutputItems(output: unknown[]): {
   textOutput: string;
   toolCalls: ToolCallRequest[];
+  reasoningContent: string;
 } {
   let textOutput = "";
+  let reasoningContent = "";
   const toolCalls: ToolCallRequest[] = [];
 
   for (const item of output) {
     const record = asRecord(item);
+    if (record.type === "reasoning") {
+      reasoningContent += collectReasoningText(record);
+    }
     if (record.type === "message") {
       const content = Array.isArray(record.content) ? record.content : [];
       for (const part of content) {
@@ -469,7 +527,36 @@ function parseOutputItems(output: unknown[]): {
     }
   }
 
-  return { textOutput, toolCalls };
+  return { textOutput, toolCalls, reasoningContent };
+}
+
+function collectReasoningText(record: Record<string, unknown>): string {
+  const parts: string[] = [];
+  const directText = typeof record.text === "string" ? record.text : undefined;
+  if (directText !== undefined) {
+    parts.push(directText);
+  }
+  for (const value of [record.summary, record.content]) {
+    if (!Array.isArray(value)) {
+      continue;
+    }
+    for (const item of value) {
+      if (typeof item === "string") {
+        parts.push(item);
+        continue;
+      }
+      const part = asRecord(item);
+      const text =
+        typeof part.text === "string" ? part.text :
+        typeof part.summary_text === "string" ? part.summary_text :
+        typeof part.content === "string" ? part.content :
+        undefined;
+      if (text !== undefined) {
+        parts.push(text);
+      }
+    }
+  }
+  return parts.length === 0 ? "" : `${parts.join("\n").trim()}\n`;
 }
 
 function assistantMessageFromOutput(input: {

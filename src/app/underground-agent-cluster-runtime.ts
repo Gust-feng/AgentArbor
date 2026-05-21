@@ -5,7 +5,6 @@ import type { ToolExecutionBroker } from "../domain/tools/index.js";
 import type {
   CandidatePool,
   GoalIntentProfile,
-  RootletClusterPlan,
   RootletOutput,
   UndergroundAgentClusterPlan,
   UndergroundAgentClusterRun,

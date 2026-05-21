@@ -149,6 +149,7 @@ export type ModelUsage = {
 };
 
 export type ModelOutputDelta = {
+  readonly kind?: "output" | "reasoning";
   readonly requestId: string;
   readonly purpose?: ModelPurpose;
   readonly providerId: string;
@@ -156,6 +157,15 @@ export type ModelOutputDelta = {
   readonly delta: string;
   readonly index: number;
   readonly createdAt: string;
+};
+
+export type ModelReasoningOutputProjection = {
+  readonly source:
+    | "openai_responses_reasoning_summary"
+    | "openai_chat_reasoning_content"
+    | "provider_reasoning_content";
+  readonly content: string;
+  readonly truncated: boolean;
 };
 
 export type ModelFailureKind =
@@ -187,6 +197,7 @@ export type ModelResponse = {
   readonly structuredOutput?: unknown;
   readonly textOutput?: string;
   readonly textOutputRef?: ArtifactRef;
+  readonly reasoningOutput?: ModelReasoningOutputProjection;
   readonly assistantMessage?: ModelMessage;
   readonly toolCalls?: readonly ToolCallRequest[];
   readonly usage?: ModelUsage;

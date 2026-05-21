@@ -89,6 +89,8 @@ function isProductWorkSessionEvent(event: RunEvent): boolean {
     event.type.startsWith("tool.") ||
     event.type.startsWith("agent.") ||
     event.type.startsWith("context.compaction.") ||
+    event.type === "model.reasoning.delta" ||
+    event.type === "model.reasoning.completed" ||
     event.type === "model.output.completed" ||
     event.type === "confirmation.needed" ||
     event.type === "user_approval.received" ||
@@ -248,6 +250,7 @@ function stageFor(
   if (run.status === "completed") return deliverable === undefined && answer === undefined ? "completed" : "completed";
   const latest = events.at(-1);
   if (latest?.type.startsWith("tool.")) return "using_tools";
+  if (latest?.type === "model.reasoning.delta" || latest?.type === "model.reasoning.completed") return "understanding";
   if (latest?.type === "model.output.delta" || latest?.type === "model.output.completed") return "composing_result";
   if (events.some((event) => event.type.startsWith("tool."))) return "composing_result";
   if (events.length > 0) return "understanding";
@@ -281,7 +284,11 @@ function currentActionFor(
   if (pendingConfirmation !== undefined) {
     return pendingConfirmation.actionSummary;
   }
-  const latest = [...events].reverse().find((event) => event.summary !== undefined);
+  const latest = [...events].reverse().find((event) =>
+    event.type !== "model.reasoning.delta" &&
+    event.type !== "model.reasoning.completed" &&
+    event.summary !== undefined
+  );
   if (latest?.summary !== undefined) {
     return latest.summary;
   }

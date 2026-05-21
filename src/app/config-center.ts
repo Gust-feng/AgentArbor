@@ -33,7 +33,6 @@ import type {
 import type { InformationAccessSettings } from "../domain/config/index.js";
 import {
   DEFAULT_MODEL_PROVIDER_BASE_URL,
-  ConfigSchemaValidationError,
   createDefaultLocalSettings,
   normalizeBaseUrl,
   normalizeInformationAccessSettings,
@@ -51,8 +50,6 @@ import {
   sanitizeMcpArgs,
   shouldRewriteLocalSettingsFile,
 } from "./config-center/settings-schema.js";
-
-const FALLBACK_WORKSPACE_DIRECTORY = process.cwd();
 
 export type ConfigCenterOptions = {
   readonly settingsStore: NormalSettingsStore;
@@ -501,6 +498,7 @@ export class ConfigCenter {
       protocolKind: profile.protocolKind,
       baseUrl: normalizeBaseUrl(profile.baseUrl) ?? DEFAULT_MODEL_PROVIDER_BASE_URL,
       model: profile.model,
+      openAI: profile.openAI,
       defaultAiMode: profile.defaultAiMode,
       secretRef: profile.secretRef,
       enabled: profile.enabled,
@@ -585,9 +583,9 @@ function createModelProviderProfileFallback(
     profileId,
     label,
     providerKind: "openai_compatible",
-    protocolKind: "openai_responses",
+    protocolKind: "openai_compatible_chat_completions",
     baseUrl: DEFAULT_MODEL_PROVIDER_BASE_URL,
-    defaultAiMode: current.defaultAiMode === "none" ? "none" : "openai-responses",
+    defaultAiMode: current.defaultAiMode === "none" ? "none" : "openai-compatible",
     secretRef: current.secretRef,
     enabled: true,
     updatedAt: now,

@@ -46,6 +46,7 @@ export class InMemoryBasicAgentRunJobStore implements BasicAgentRunJobStore {
       runAfterRunId: input.runAfterRunId,
       routeDecision: input.routeDecision,
       taskSoilInput: input.taskSoilInput,
+      reasoningEffort: input.reasoningEffort,
       config: input.config,
       informationAccess: input.informationAccess,
       capabilitySnapshot: input.capabilitySnapshot,

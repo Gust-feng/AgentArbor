@@ -227,6 +227,72 @@ test("ordinary agent stream stays quiet for direct answers but shows safe thinki
   assert.equal(JSON.stringify(withTool).includes("\"action\":\"read_file\""), false);
 });
 
+test("ordinary agent stream shows provider-returned reasoning without effort status copy", () => {
+  const events = createPanelRunStreamEvents({
+    runId: "run-reasoning-answer",
+    status: "completed",
+    desktopMode: "agent",
+    reasoningEffort: "high",
+    eventEntries: [
+      eventEntry({ sequence: 1, type: "goal.received", payload: { goalId: "goal-reasoning" } }),
+      eventEntry({
+        sequence: 2,
+        type: "model.requested",
+        payload: { requestId: "request-reasoning", purpose: "desktop_agent" },
+      }),
+      modelCompletedEntry({
+        sequence: 3,
+        requestId: "request-reasoning",
+        contractId: "desktop.agent_response.v1",
+        decisionSummary: "Final answer text.",
+        reasoningContent: "先拆解用户目标，再确认应该直接给出答案。",
+      }),
+    ],
+    createdAt: "2026-05-07T00:00:00.000Z",
+    updatedAt: "2026-05-07T00:00:03.000Z",
+  });
+  const serialized = JSON.stringify(events);
+
+  assert.equal(events.some((event) => event.type === "agent.note.delta" && event.summary?.includes("深入思考") === true), false);
+  assert.equal(events.some((event) => event.type === "model.reasoning.delta"), true);
+  assert.equal(events.some((event) => event.type === "model.reasoning.completed"), false);
+  assert.equal(serialized.includes("先拆解用户目标"), true);
+  assert.equal(serialized.includes("思考强度"), false);
+  assert.equal(serialized.includes("模型思考内容已展示"), false);
+  assert.equal(serialized.includes("raw provider response"), false);
+});
+
+test("ordinary agent stream does not fake reasoning when only effort is selected", () => {
+  const events = createPanelRunStreamEvents({
+    runId: "run-no-provider-reasoning",
+    status: "completed",
+    desktopMode: "agent",
+    reasoningEffort: "high",
+    eventEntries: [
+      eventEntry({ sequence: 1, type: "goal.received", payload: { goalId: "goal-no-provider-reasoning" } }),
+      eventEntry({
+        sequence: 2,
+        type: "model.requested",
+        payload: { requestId: "request-no-provider-reasoning", purpose: "desktop_agent" },
+      }),
+      modelCompletedEntry({
+        sequence: 3,
+        requestId: "request-no-provider-reasoning",
+        contractId: "desktop.agent_response.v1",
+        decisionSummary: "Final answer text.",
+      }),
+    ],
+    createdAt: "2026-05-07T00:00:00.000Z",
+    updatedAt: "2026-05-07T00:00:03.000Z",
+  });
+  const serialized = JSON.stringify(events);
+
+  assert.deepEqual(events.map((event) => event.type), ["run.started", "final.result"]);
+  assert.equal(serialized.includes("思考强度"), false);
+  assert.equal(serialized.includes("深入思考"), false);
+  assert.equal(serialized.includes("model.reasoning"), false);
+});
+
 test("ordinary agent stream exposes context compaction as safe continuation maintenance", () => {
   const events = createPanelRunStreamEvents({
     runId: "run-context-compaction",
@@ -418,6 +484,7 @@ function modelCompletedEntry(input: {
   readonly contractId: string;
   readonly decisionSummary: string;
   readonly finishReason?: "stop" | "length" | "tool_call" | "content_filter" | "error";
+  readonly reasoningContent?: string;
 }): EventLogEntry {
   const type: ArborMessageType = "model.completed";
   const message: ArborMessage = {
@@ -439,6 +506,13 @@ function modelCompletedEntry(input: {
       outputKind: "explanation",
       validationStatus: "passed",
       visibleOutput: visibleOutput(input.contractId, input.decisionSummary),
+      reasoningOutput: input.reasoningContent === undefined
+        ? undefined
+        : {
+            source: "openai_chat_reasoning_content",
+            content: input.reasoningContent,
+            truncated: false,
+          },
     },
     createdAt: "2026-05-07T00:00:00.000Z",
   };

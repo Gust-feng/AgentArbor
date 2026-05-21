@@ -119,6 +119,8 @@ function basicEventTitle(event: BasicAgentRunStreamEventProjectionInput): string
   if (event.type === "run.cancelled") return "任务已取消";
   if (event.type === "run.blocked") return "任务已暂停";
   if (event.type === "run.resumed") return "任务继续";
+  if (event.type === "model.reasoning.delta") return "正在思考";
+  if (event.type === "model.reasoning.completed") return "思考完成";
   if (event.type === "tool.requested") return "正在执行动作";
   if (event.type === "tool.completed") return "动作已完成";
   if (event.type === "tool.failed") return "动作未完成";
@@ -191,7 +193,11 @@ function basicRunTitle(job: BasicAgentRunProjectionInput, status: AgentTaskStatu
 }
 
 function basicRunCurrentStep(job: BasicAgentRunProjectionInput): string | undefined {
-  const latest = [...job.streamEvents].reverse().find((event) => event.summary !== undefined || event.delta !== undefined);
+  const latest = [...job.streamEvents].reverse().find((event) =>
+    event.type !== "model.reasoning.delta" &&
+    event.type !== "model.reasoning.completed" &&
+    (event.summary !== undefined || event.delta !== undefined)
+  );
   return safeEventSummary(latest?.summary ?? latest?.delta);
 }
 

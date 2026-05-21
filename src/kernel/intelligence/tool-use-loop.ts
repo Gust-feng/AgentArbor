@@ -500,10 +500,6 @@ async function maintainContextIfNeeded(input: {
   }
 }
 
-function isReadOnlyToolCall(request: ToolCallRequest, definitions: readonly ToolDefinition[]): boolean {
-  return definitions.find((definition) => definition.name === request.toolName)?.metadata?.operationType === "read-only";
-}
-
 function canExecuteReadOnlyBatchInParallel(
   requests: readonly ToolCallRequest[],
   definitions: readonly ToolDefinition[]

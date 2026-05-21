@@ -23,6 +23,25 @@ export type ConfiguredModelProtocolKind =
   | "gemini_generate_content"
   | "ollama_generate";
 
+export type ProviderProtocolProfileId =
+  | "openai"
+  | "anthropic"
+  | "deepseek"
+  | "moonshot"
+  | "glm"
+  | "minimax"
+  | "custom_openai_chat";
+
+export type ModelReasoningControlKind =
+  | "none"
+  | "openai_responses_reasoning_effort"
+  | "openai_chat_reasoning_effort"
+  | "deepseek_reasoning_effort"
+  | "thinking_enabled_disabled"
+  | "thinking_disabled"
+  | "reasoning_split"
+  | "vendor_specific";
+
 export type ModelPreferredApiStyle =
   | "chat_completions"
   | "responses"
@@ -31,6 +50,32 @@ export type ModelPreferredApiStyle =
   | "openai_compatible";
 
 export type ModelStability = "stable" | "preview" | "deprecated" | "unknown";
+
+export type OpenAIReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
+
+export type ModelRunReasoningEffort = "low" | "medium" | "high";
+
+export type OpenAIReasoningSummary = "auto" | "concise" | "detailed";
+
+export type OpenAITextVerbosity = "low" | "medium" | "high";
+
+export type OpenAIServiceTier = "auto" | "default" | "flex" | "priority";
+
+export type OpenAITruncationMode = "auto" | "disabled";
+
+export type OpenAIModelRequestSettings = {
+  readonly temperature?: number;
+  readonly topP?: number;
+  readonly maxOutputTokens?: number;
+  readonly reasoningEffort?: OpenAIReasoningEffort;
+  readonly reasoningSummary?: OpenAIReasoningSummary;
+  readonly textVerbosity?: OpenAITextVerbosity;
+  readonly serviceTier?: OpenAIServiceTier;
+  readonly truncation?: OpenAITruncationMode;
+  readonly stream?: boolean;
+  readonly parallelToolCalls?: boolean;
+  readonly store?: boolean;
+};
 
 export type ModelProviderPreset = {
   readonly presetId: string;
@@ -41,6 +86,8 @@ export type ModelProviderPreset = {
   readonly protocolKind: ConfiguredModelProtocolKind;
   readonly baseUrl: string;
   readonly modelsPath: string;
+  readonly protocolProfileId?: ProviderProtocolProfileId;
+  readonly supportedProtocolKinds?: readonly ConfiguredModelProtocolKind[];
   readonly defaultModel?: string;
   readonly regionLabel?: string;
   readonly docsUrl?: string;
@@ -71,9 +118,43 @@ export type ModelCapabilities = {
   readonly supportsStreaming: boolean;
   readonly supportsVisionInput: boolean;
   readonly supportsReasoningEffort: boolean;
+  readonly supportsReasoningOutput?: boolean;
   readonly preferredApiStyle: ModelPreferredApiStyle;
   readonly stability: ModelStability;
+  readonly protocolProfileId?: ProviderProtocolProfileId;
+  readonly reasoningControl?: ModelReasoningControlKind;
   readonly lastVerifiedAt?: string;
+};
+
+export type ProviderProtocolProfile = {
+  readonly profileId: ProviderProtocolProfileId;
+  readonly label: string;
+  readonly providerKind: ConfiguredModelProviderKind;
+  readonly recommendedProtocolKind: ConfiguredModelProtocolKind;
+  readonly supportedProtocolKinds: readonly ConfiguredModelProtocolKind[];
+  readonly defaultBaseUrl: string;
+  readonly modelsPath: string;
+  readonly supportsOpenAIResponses: boolean;
+  readonly supportsOpenAIChatCompletions: boolean;
+  readonly supportsAnthropicMessages: boolean;
+  readonly requiresClientSideHistory: boolean;
+  readonly reasoningControl: ModelReasoningControlKind;
+  readonly unsupportedParams: readonly string[];
+  readonly ignoredParams: readonly string[];
+  readonly dangerousParams: readonly string[];
+};
+
+export type ModelCapabilityProfile = {
+  readonly providerProfileId: ProviderProtocolProfileId;
+  readonly providerKind: ConfiguredModelProviderKind;
+  readonly protocolKind: ConfiguredModelProtocolKind;
+  readonly modelPattern: string;
+  readonly label: string;
+  readonly capabilities: ModelCapabilities;
+  readonly reasoningControl: ModelReasoningControlKind;
+  readonly unsupportedParams: readonly string[];
+  readonly ignoredParams: readonly string[];
+  readonly dangerousParams: readonly string[];
 };
 
 export type ModelCapabilityOverrideSettings = {
@@ -120,6 +201,7 @@ export type ModelProviderProfileSettings = {
   readonly protocolKind: ConfiguredModelProtocolKind;
   readonly baseUrl?: string;
   readonly model?: string;
+  readonly openAI?: OpenAIModelRequestSettings;
   readonly defaultAiMode: ConfiguredUndergroundAiMode;
   readonly secretRef: string;
   readonly enabled: boolean;
@@ -147,6 +229,7 @@ export type SanitizedModelProviderConfig = {
   readonly protocolKind: ModelProviderProfileSettings["protocolKind"];
   readonly baseUrl: string;
   readonly model?: string;
+  readonly openAI?: OpenAIModelRequestSettings;
   readonly defaultAiMode: ConfiguredUndergroundAiMode;
   readonly secretRef: string;
   readonly enabled?: boolean;
@@ -162,6 +245,7 @@ export type UpdateModelProviderConfigInput = {
   readonly protocolKind?: ConfiguredModelProtocolKind;
   readonly baseUrl?: string;
   readonly model?: string;
+  readonly openAI?: OpenAIModelRequestSettings;
   readonly clearModel?: boolean;
   readonly defaultAiMode?: ConfiguredUndergroundAiMode;
   readonly enabled?: boolean;

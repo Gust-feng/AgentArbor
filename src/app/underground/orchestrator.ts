@@ -610,7 +610,7 @@ export class UndergroundAgentOrchestrator {
       handoffOutput.directionHandoffPackage.manifest.directionVersion,
     );
 
-    this.publishCompletionEvent(handoffOutput, finalSnap.data.goalId, finalSnap.traceId);
+    this.publishCompletionEvent(handoffOutput, finalSnap.traceId);
 
     return {
       terminalStatus: handoffOutput.terminalStatus,
@@ -801,7 +801,6 @@ export class UndergroundAgentOrchestrator {
 
   private publishCompletionEvent(
     handoffOutput: { readonly directionHandoffPackage: DirectionHandoffPackage; readonly terminalStatus: string },
-    goalId: string,
     traceId: string,
   ): void {
     if (handoffOutput.terminalStatus === "approved_package_created" || handoffOutput.terminalStatus === "awaiting_user") {

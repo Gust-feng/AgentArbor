@@ -12,6 +12,7 @@ import type {
   ModelProviderModelCatalog,
   ModelProviderModelCatalogItem,
   ModelProviderProfileSettings,
+  OpenAIModelRequestSettings,
   ToolStateSettings,
 } from "../../domain/config/index.js";
 import { listBuiltinModelProviderPresets } from "../../domain/config/index.js";
@@ -145,7 +146,7 @@ export function shouldRewriteLocalSettingsFile(
 export function normalizeLocalSettings(settings: AgentArborLocalSettings): AgentArborLocalSettings {
   const now = settings.updatedAt;
   const legacyProfile = normalizeModelProfile(settings.modelProvider, createDefaultProfile(now));
-  const profileFallback = { ...legacyProfile, model: undefined };
+  const profileFallback = { ...legacyProfile, model: undefined, openAI: undefined };
   const parsedProfiles = dedupeProfiles((settings.modelProfiles.length === 0 ? [legacyProfile] : settings.modelProfiles)
     .map((profile) => normalizeModelProfile(profile, profileFallback)));
   const parsedCatalogs = normalizeModelCatalogs(settings.modelCatalogs ?? [], parsedProfiles, now);
@@ -175,16 +176,22 @@ export function normalizeModelProfile(
   fallback: ModelProviderProfileSettings
 ): ModelProviderProfileSettings {
   const providerKind = normalizeModelProviderKind(input.providerKind) ?? fallback.providerKind;
-  const protocolKind = normalizeModelProtocolKind(input.protocolKind, providerKind) ?? fallback.protocolKind;
+  const protocolKind = input.protocolKind === undefined
+    ? fallback.protocolKind
+    : normalizeModelProtocolKind(input.protocolKind, providerKind) ?? fallback.protocolKind;
+  const normalizedProtocolKind = normalizeProfileProtocolForProvider(providerKind, protocolKind);
   const defaultAiMode = normalizeAiMode(input.defaultAiMode) ?? fallback.defaultAiMode;
+  const openAI =
+    input.openAI === undefined ? fallback.openAI : normalizeOpenAIModelRequestSettings(input.openAI);
   return {
     profileId: normalizeProfileId(input.profileId ?? fallback.profileId),
     label: normalizeOptionalString(input.label) ?? fallback.label,
     providerKind,
-    protocolKind: normalizeProfileProtocolForProvider(providerKind, protocolKind),
+    protocolKind: normalizedProtocolKind,
     baseUrl: normalizeBaseUrl(input.baseUrl) ?? fallback.baseUrl,
     model: normalizeOptionalString(input.model) ?? fallback.model,
-    defaultAiMode: normalizeProfileAiModeForProvider(providerKind, defaultAiMode),
+    openAI,
+    defaultAiMode: normalizeProfileAiModeForProvider(providerKind, normalizedProtocolKind, defaultAiMode),
     secretRef: normalizeOptionalString(input.secretRef) ?? secretRefForProfile(input.profileId ?? fallback.profileId),
     enabled: input.enabled ?? fallback.enabled,
     updatedAt: normalizeOptionalString(input.updatedAt) ?? fallback.updatedAt,
@@ -196,9 +203,9 @@ function normalizeProfileProtocolForProvider(
   protocolKind: ConfiguredModelProtocolKind
 ): ConfiguredModelProtocolKind {
   if (providerKind === "openai_compatible") {
-    return protocolKind === "openai_compatible_chat_completions"
-      ? "openai_compatible_chat_completions"
-      : "openai_responses";
+    return protocolKind === "openai_responses"
+      ? "openai_responses"
+      : "openai_compatible_chat_completions";
   }
   if (providerKind === "anthropic") return "anthropic_messages";
   if (providerKind === "gemini") return "gemini_generate_content";
@@ -208,12 +215,13 @@ function normalizeProfileProtocolForProvider(
 
 function normalizeProfileAiModeForProvider(
   providerKind: ConfiguredModelProviderKind,
+  protocolKind: ConfiguredModelProtocolKind,
   aiMode: ConfiguredUndergroundAiMode
 ): ConfiguredUndergroundAiMode {
   if (providerKind !== "openai_compatible") {
     return aiMode;
   }
-  return "openai-responses";
+  return protocolKind === "openai_compatible_chat_completions" ? "openai-compatible" : "openai-responses";
 }
 
 function normalizeBuiltInModelProviderProfiles(
@@ -229,7 +237,7 @@ function normalizeBuiltInModelProviderProfiles(
     }
     const providerKind = preset.providerKind;
     const protocolKind = normalizeBuiltInProfileProtocol(profile, preset);
-    const defaultAiMode = normalizeProfileAiModeForProvider(providerKind, profile.defaultAiMode);
+    const defaultAiMode = normalizeProfileAiModeForProvider(providerKind, protocolKind, profile.defaultAiMode);
     const baseUrl = normalizeBuiltInProfileBaseUrl(profile, preset);
     const model = shouldClearBuiltInProfileModel(profile, preset.presetId, catalogs, catalogModelOwners)
       ? undefined
@@ -248,11 +256,47 @@ function normalizeBuiltInModelProviderProfiles(
 }
 
 function builtInPresetForProfile(profile: ModelProviderProfileSettings): ReturnType<typeof listBuiltinModelProviderPresets>[number] | undefined {
+  const presets = listBuiltinModelProviderPresets();
   const presetId = BUILTIN_PROFILE_PRESET_ALIASES.get(profile.profileId);
-  if (presetId === undefined) {
-    return undefined;
+  if (presetId !== undefined) {
+    return presets.find((preset) => preset.presetId === presetId);
   }
-  return listBuiltinModelProviderPresets().find((preset) => preset.presetId === presetId);
+  const baseUrl = normalizeBaseUrl(profile.baseUrl);
+  const canonicalOwner = baseUrl === undefined ? undefined : builtInPresetIdForCanonicalBaseUrl(baseUrl);
+  return canonicalOwner === undefined
+    ? undefined
+    : presets.find((preset) => preset.presetId === canonicalOwner);
+}
+
+function defaultProtocolForProviderKind(
+  providerKind: ConfiguredModelProviderKind
+): ConfiguredModelProtocolKind {
+  if (providerKind === "anthropic") return "anthropic_messages";
+  if (providerKind === "gemini") return "gemini_generate_content";
+  if (providerKind === "ollama") return "ollama_generate";
+  return "openai_compatible_chat_completions";
+}
+
+function defaultProtocolForProfile(input: {
+  readonly providerKind: ConfiguredModelProviderKind;
+  readonly profileId: string;
+  readonly baseUrl?: string;
+}): ConfiguredModelProtocolKind {
+  if (input.providerKind !== "openai_compatible") {
+    return defaultProtocolForProviderKind(input.providerKind);
+  }
+  const baseUrl = normalizeBaseUrl(input.baseUrl);
+  if (input.profileId === DEFAULT_MODEL_PROFILE_ID || input.profileId === "openai") {
+    return baseUrl === undefined || isOfficialOpenAIBaseUrl(baseUrl)
+      ? "openai_responses"
+      : "openai_compatible_chat_completions";
+  }
+  const presetId = BUILTIN_PROFILE_PRESET_ALIASES.get(input.profileId);
+  if (presetId !== undefined) {
+    return listBuiltinModelProviderPresets().find((preset) => preset.presetId === presetId)?.protocolKind ??
+      "openai_compatible_chat_completions";
+  }
+  return "openai_compatible_chat_completions";
 }
 
 function normalizeBuiltInProfileProtocol(
@@ -264,6 +308,14 @@ function normalizeBuiltInProfileProtocol(
     currentBaseUrl === undefined ? undefined : builtInPresetIdForCanonicalBaseUrl(currentBaseUrl);
   if (currentCanonicalOwner !== undefined && currentCanonicalOwner !== preset.presetId) {
     return normalizeProfileProtocolForProvider(preset.providerKind, preset.protocolKind);
+  }
+  if (preset.presetId !== "openai") {
+    return normalizeProfileProtocolForProvider(preset.providerKind, preset.protocolKind);
+  }
+  if (currentBaseUrl !== undefined && !isOfficialOpenAIBaseUrl(currentBaseUrl)) {
+    return profile.protocolKind === "openai_responses"
+      ? "openai_compatible_chat_completions"
+      : normalizeProfileProtocolForProvider(preset.providerKind, profile.protocolKind);
   }
   return normalizeProfileProtocolForProvider(preset.providerKind, profile.protocolKind);
 }
@@ -326,11 +378,15 @@ function catalogModelOwnerMap(catalogs: readonly ModelProviderModelCatalog[]): R
 }
 
 function builtInPresetIdForCanonicalBaseUrl(baseUrl: string): string | undefined {
-  if (baseUrl === "https://api.openai.com") {
+  if (isOfficialOpenAIBaseUrl(baseUrl)) {
     return "openai";
   }
   const preset = listBuiltinModelProviderPresets().find((item) => normalizeBaseUrl(item.baseUrl) === baseUrl);
   return preset?.presetId;
+}
+
+function isOfficialOpenAIBaseUrl(baseUrl: string): boolean {
+  return baseUrl === "https://api.openai.com" || baseUrl === "https://api.openai.com/v1";
 }
 
 function builtInPresetIdForModelSignal(model: string): string | undefined {
@@ -351,6 +407,7 @@ function sameModelProfile(left: ModelProviderProfileSettings, right: ModelProvid
     left.protocolKind === right.protocolKind &&
     left.baseUrl === right.baseUrl &&
     left.model === right.model &&
+    JSON.stringify(left.openAI ?? {}) === JSON.stringify(right.openAI ?? {}) &&
     left.defaultAiMode === right.defaultAiMode &&
     left.secretRef === right.secretRef &&
     left.enabled === right.enabled;
@@ -429,10 +486,7 @@ export function normalizeModelProtocolKind(
   ) {
     return value;
   }
-  if (providerKind === "anthropic") return "anthropic_messages";
-  if (providerKind === "gemini") return "gemini_generate_content";
-  if (providerKind === "ollama") return "ollama_generate";
-  return "openai_responses";
+  return defaultProtocolForProviderKind(providerKind);
 }
 
 export function normalizeWebSearchProvider(value: ConfiguredWebSearchProvider | undefined): ConfiguredWebSearchProvider | undefined {
@@ -506,6 +560,28 @@ export function normalizePositiveInteger(value: number | undefined): number | un
   return Math.max(1, Math.floor(value));
 }
 
+export function normalizeOpenAIModelRequestSettings(
+  value: OpenAIModelRequestSettings | undefined
+): OpenAIModelRequestSettings | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  const normalized: OpenAIModelRequestSettings = {
+    temperature: normalizeNumberInRange(value.temperature, 0, 2),
+    topP: normalizeNumberInRange(value.topP, 0, 1),
+    maxOutputTokens: normalizePositiveInteger(value.maxOutputTokens),
+    reasoningEffort: normalizeOpenAIReasoningEffort(value.reasoningEffort),
+    reasoningSummary: normalizeOpenAIReasoningSummary(value.reasoningSummary),
+    textVerbosity: normalizeOpenAITextVerbosity(value.textVerbosity),
+    serviceTier: normalizeOpenAIServiceTier(value.serviceTier),
+    truncation: normalizeOpenAITruncation(value.truncation),
+    stream: booleanOrUndefined(value.stream),
+    parallelToolCalls: booleanOrUndefined(value.parallelToolCalls),
+    store: booleanOrUndefined(value.store),
+  };
+  return compactOpenAIModelRequestSettings(normalized);
+}
+
 function createDefaultProfile(now: string): ModelProviderProfileSettings {
   return {
     profileId: DEFAULT_MODEL_PROFILE_ID,
@@ -520,6 +596,13 @@ function createDefaultProfile(now: string): ModelProviderProfileSettings {
   };
 }
 
+function compactOpenAIModelRequestSettings(
+  value: OpenAIModelRequestSettings
+): OpenAIModelRequestSettings | undefined {
+  const entries = Object.entries(value).filter(([, entry]) => entry !== undefined);
+  return entries.length === 0 ? undefined : Object.fromEntries(entries) as OpenAIModelRequestSettings;
+}
+
 function parseModelProfile(
   record: Record<string, unknown>,
   fallbacks: {
@@ -531,14 +614,20 @@ function parseModelProfile(
 ): AgentArborLocalSettings["modelProfiles"][number] {
   const profileId = safeConfigId(optionalString(record.profileId) ?? fallbacks.fallbackProfileId ?? "");
   const providerKind = parseModelProviderKind(record.providerKind);
-  const protocolKind = parseModelProtocolKind(record.protocolKind, providerKind);
+  const baseUrl = optionalString(record.baseUrl);
+  const protocolKind = parseModelProtocolKind(record.protocolKind, {
+    providerKind,
+    profileId,
+    baseUrl,
+  });
   return {
     profileId,
     label: optionalString(record.label) ?? fallbacks.fallbackLabel ?? profileId,
     providerKind,
     protocolKind,
-    baseUrl: optionalString(record.baseUrl),
+    baseUrl,
     model: optionalString(record.model),
+    openAI: parseOpenAIModelRequestSettings(record.openAI),
     defaultAiMode: parseAiMode(record.defaultAiMode),
     secretRef: optionalString(record.secretRef) ?? fallbacks.fallbackSecretRef,
     enabled: typeof record.enabled === "boolean" ? record.enabled : true,
@@ -602,7 +691,11 @@ function parseModelProviderKind(value: unknown): AgentArborLocalSettings["modelP
 
 function parseModelProtocolKind(
   value: unknown,
-  providerKind: AgentArborLocalSettings["modelProvider"]["providerKind"]
+  input: {
+    readonly providerKind: AgentArborLocalSettings["modelProvider"]["providerKind"];
+    readonly profileId: string;
+    readonly baseUrl?: string;
+  }
 ): AgentArborLocalSettings["modelProvider"]["protocolKind"] {
   if (
     value === "openai_responses" ||
@@ -613,10 +706,27 @@ function parseModelProtocolKind(
   ) {
     return value;
   }
-  if (providerKind === "anthropic") return "anthropic_messages";
-  if (providerKind === "gemini") return "gemini_generate_content";
-  if (providerKind === "ollama") return "ollama_generate";
-  return "openai_responses";
+  return defaultProtocolForProfile(input);
+}
+
+function parseOpenAIModelRequestSettings(value: unknown): OpenAIModelRequestSettings | undefined {
+  const record = asRecord(value);
+  if (Object.keys(record).length === 0) {
+    return undefined;
+  }
+  return normalizeOpenAIModelRequestSettings({
+    temperature: numberFromUnknown(record.temperature),
+    topP: numberFromUnknown(record.topP),
+    maxOutputTokens: positiveIntegerFromUnknown(record.maxOutputTokens),
+    reasoningEffort: parseOpenAIReasoningEffort(record.reasoningEffort),
+    reasoningSummary: parseOpenAIReasoningSummary(record.reasoningSummary),
+    textVerbosity: parseOpenAITextVerbosity(record.textVerbosity),
+    serviceTier: parseOpenAIServiceTier(record.serviceTier),
+    truncation: parseOpenAITruncation(record.truncation),
+    stream: booleanFromUnknown(record.stream),
+    parallelToolCalls: booleanFromUnknown(record.parallelToolCalls),
+    store: booleanFromUnknown(record.store),
+  });
 }
 
 function parseModelCapabilityOverrides(
@@ -885,6 +995,63 @@ function parseModelStability(
     : undefined;
 }
 
+function normalizeOpenAIReasoningEffort(
+  value: OpenAIModelRequestSettings["reasoningEffort"] | undefined
+): OpenAIModelRequestSettings["reasoningEffort"] | undefined {
+  return value === "none" ||
+    value === "minimal" ||
+    value === "low" ||
+    value === "medium" ||
+    value === "high" ||
+    value === "xhigh"
+    ? value
+    : undefined;
+}
+
+function normalizeOpenAIReasoningSummary(
+  value: OpenAIModelRequestSettings["reasoningSummary"] | undefined
+): OpenAIModelRequestSettings["reasoningSummary"] | undefined {
+  return value === "auto" || value === "concise" || value === "detailed" ? value : undefined;
+}
+
+function normalizeOpenAITextVerbosity(
+  value: OpenAIModelRequestSettings["textVerbosity"] | undefined
+): OpenAIModelRequestSettings["textVerbosity"] | undefined {
+  return value === "low" || value === "medium" || value === "high" ? value : undefined;
+}
+
+function normalizeOpenAIServiceTier(
+  value: OpenAIModelRequestSettings["serviceTier"] | undefined
+): OpenAIModelRequestSettings["serviceTier"] | undefined {
+  return value === "auto" || value === "default" || value === "flex" || value === "priority" ? value : undefined;
+}
+
+function normalizeOpenAITruncation(
+  value: OpenAIModelRequestSettings["truncation"] | undefined
+): OpenAIModelRequestSettings["truncation"] | undefined {
+  return value === "auto" || value === "disabled" ? value : undefined;
+}
+
+function parseOpenAIReasoningEffort(value: unknown): OpenAIModelRequestSettings["reasoningEffort"] | undefined {
+  return typeof value === "string" ? normalizeOpenAIReasoningEffort(value as OpenAIModelRequestSettings["reasoningEffort"]) : undefined;
+}
+
+function parseOpenAIReasoningSummary(value: unknown): OpenAIModelRequestSettings["reasoningSummary"] | undefined {
+  return typeof value === "string" ? normalizeOpenAIReasoningSummary(value as OpenAIModelRequestSettings["reasoningSummary"]) : undefined;
+}
+
+function parseOpenAITextVerbosity(value: unknown): OpenAIModelRequestSettings["textVerbosity"] | undefined {
+  return typeof value === "string" ? normalizeOpenAITextVerbosity(value as OpenAIModelRequestSettings["textVerbosity"]) : undefined;
+}
+
+function parseOpenAIServiceTier(value: unknown): OpenAIModelRequestSettings["serviceTier"] | undefined {
+  return typeof value === "string" ? normalizeOpenAIServiceTier(value as OpenAIModelRequestSettings["serviceTier"]) : undefined;
+}
+
+function parseOpenAITruncation(value: unknown): OpenAIModelRequestSettings["truncation"] | undefined {
+  return typeof value === "string" ? normalizeOpenAITruncation(value as OpenAIModelRequestSettings["truncation"]) : undefined;
+}
+
 function parseWebSearchProvider(
   value: unknown
 ): NonNullable<AgentArborLocalSettings["informationAccess"]>["webSearch"]["provider"] {
@@ -914,6 +1081,17 @@ function isConfiguredInformationSourceKind(value: unknown): value is ConfiguredI
 
 function positiveIntegerFromUnknown(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? Math.max(1, Math.floor(value)) : undefined;
+}
+
+function numberFromUnknown(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function normalizeNumberInRange(value: number | undefined, min: number, max: number): number | undefined {
+  if (value === undefined || !Number.isFinite(value) || value < min || value > max) {
+    return undefined;
+  }
+  return value;
 }
 
 function requiredString(value: unknown, fieldName: string): string {

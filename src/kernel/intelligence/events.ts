@@ -5,6 +5,7 @@ import type {
   ModelProvider,
   ModelRequest,
   ModelResponse,
+  ModelReasoningOutputProjection,
   ModelUsage,
   ModelVisibleOutputProjection,
 } from "../../domain/intelligence/index.js";
@@ -38,6 +39,7 @@ export type ModelCompletedEventPayload = {
   readonly outputKind: ModelResponse["outputKind"];
   readonly validationStatus: ModelResponse["validation"]["status"];
   readonly visibleOutput?: ModelVisibleOutputProjection;
+  readonly reasoningOutput?: ModelReasoningOutputProjection;
 };
 
 export type ModelFailedEventPayload = {
@@ -107,8 +109,21 @@ export function createModelCompletedMessage(input: {
         outputContract: input.request.outputContract,
         response: input.response,
       }),
+      reasoningOutput: cloneReasoningOutput(input.response.reasoningOutput),
     },
   });
+}
+
+function cloneReasoningOutput(
+  value: ModelReasoningOutputProjection | undefined
+): ModelReasoningOutputProjection | undefined {
+  return value === undefined
+    ? undefined
+    : {
+        source: value.source,
+        content: value.content,
+        truncated: value.truncated,
+      };
 }
 
 export function createModelFailedMessage(input: {

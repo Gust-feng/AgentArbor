@@ -20,6 +20,19 @@ test("ConfigCenter keeps raw API key out of the normal settings store", async ()
       baseUrl: "https://example.test/",
       model: "demo-model",
       defaultAiMode: "openai-compatible",
+      openAI: {
+        temperature: 0.2,
+        topP: 0.9,
+        maxOutputTokens: 2_000,
+        reasoningEffort: "high",
+        reasoningSummary: "auto",
+        textVerbosity: "medium",
+        serviceTier: "default",
+        truncation: "auto",
+        stream: false,
+        parallelToolCalls: true,
+        store: false,
+      },
       apiKey: secret,
     });
     const informationAccess = await configCenter.updateInformationAccessConfig({
@@ -34,7 +47,20 @@ test("ConfigCenter keeps raw API key out of the normal settings store", async ()
     assert.equal(sanitized.secretConfigured, true);
     assert.equal(sanitized.baseUrl, "https://example.test");
     assert.equal(sanitized.model, "demo-model");
-    assert.equal(sanitized.defaultAiMode, "openai-responses");
+    assert.deepEqual(sanitized.openAI, {
+      temperature: 0.2,
+      topP: 0.9,
+      maxOutputTokens: 2_000,
+      reasoningEffort: "high",
+      reasoningSummary: "auto",
+      textVerbosity: "medium",
+      serviceTier: "default",
+      truncation: "auto",
+      stream: false,
+      parallelToolCalls: true,
+      store: false,
+    });
+    assert.equal(sanitized.defaultAiMode, "openai-compatible");
     assert.equal(JSON.stringify(sanitized).includes(secret), false);
     assert.equal(settingsRaw.includes(secret), false);
     assert.equal(settingsRaw.includes(tavilySecret), false);
@@ -239,7 +265,7 @@ test("ConfigCenter reads v1 settings and upgrades local settings to v3", async (
     };
 
     assert.equal(modelConfig.baseUrl, "https://legacy.example");
-    assert.equal(modelConfig.defaultAiMode, "openai-responses");
+    assert.equal(modelConfig.defaultAiMode, "openai-compatible");
     assert.equal(defaultInformation.web.maxResults, 5);
     assert.deepEqual(defaultInformation.sourcePreference, [
       "web",
@@ -317,6 +343,18 @@ test("ConfigCenter repairs built-in model provider drift without overwriting cus
               updatedAt: now,
             },
             {
+              profileId: "ai",
+              label: "智谱 AI",
+              providerKind: "openai_compatible",
+              protocolKind: "openai_responses",
+              baseUrl: "https://open.bigmodel.cn/api/paas/v4",
+              model: "glm-4.5",
+              defaultAiMode: "openai-responses",
+              secretRef: "secret://local-dev/model-provider/ai/api-key",
+              enabled: true,
+              updatedAt: now,
+            },
+            {
               profileId: "claude",
               label: "Claude",
               providerKind: "openai_compatible",
@@ -376,6 +414,7 @@ test("ConfigCenter repairs built-in model provider drift without overwriting cus
     const openai = profiles.find((profile) => profile.profileId === "default");
     const anthropic = profiles.find((profile) => profile.profileId === "claude");
     const deepseek = profiles.find((profile) => profile.profileId === "deepseek");
+    const glmAlias = profiles.find((profile) => profile.profileId === "ai");
     const proxy = profiles.find((profile) => profile.profileId === "claude-proxy");
     const openaiProxy = profiles.find((profile) => profile.profileId === "openai");
 
@@ -392,6 +431,10 @@ test("ConfigCenter repairs built-in model provider drift without overwriting cus
     assert.equal(anthropic?.model, undefined);
     assert.equal(deepseek?.model, "deepseek-v4-pro");
     assert.equal(deepseek?.protocolKind, "openai_compatible_chat_completions");
+    assert.equal(glmAlias?.label, "智谱 AI");
+    assert.equal(glmAlias?.protocolKind, "openai_compatible_chat_completions");
+    assert.equal(glmAlias?.defaultAiMode, "openai-compatible");
+    assert.equal(glmAlias?.model, "glm-4.5");
     assert.equal(proxy?.baseUrl, "https://openrouter.ai/api/v1");
     assert.equal(proxy?.model, "anthropic/claude-sonnet-4");
     assert.equal(openaiProxy?.label, "OpenAI");

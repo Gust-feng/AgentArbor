@@ -25,7 +25,6 @@ import { createId, nowIso } from "../kernel/id.js";
 import { AgentTurnRuntime, type AgentTurnRuntimeResult } from "../kernel/intelligence/agent-turn-runtime.js";
 import { createMessage } from "../kernel/messages/create-message.js";
 import {
-  createUndergroundAiDisabledConfigurationError,
   createUndergroundAiRuntimeConfig,
   type UndergroundAiEnvironment,
   type UndergroundAiMode,

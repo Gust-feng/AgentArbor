@@ -964,10 +964,6 @@ function firstAdvisoryCandidateIdForKindFromReport(
   )?.candidateId;
 }
 
-function candidateIdsFromConvergenceRequest(request: ModelRequest): string[] {
-  return [...candidateIdsByKindFromConvergenceRequest(request).values()].flat();
-}
-
 function candidateIdsFromHandoffRequest(request: ModelRequest): string[] {
   const content = request.sanitizedMessages.map((message) => message.content).join("\n");
   return [...content.matchAll(/candidateId=([^\s\n]+)/g)]
@@ -1006,15 +1002,6 @@ function candidateIdsByKindFromConvergenceRequest(request: ModelRequest): Map<Ro
     );
   }
   return result;
-}
-
-function kindForCandidateId(candidateId: string): RootletClusterKind {
-  const marker = ":";
-  const parts = candidateId.split(marker);
-  const kind = parts.find((part): part is RootletClusterKind =>
-    ["option", "risk", "asset_fit", "evidence", "constraint", "counterfactual"].includes(part)
-  );
-  return kind ?? "option";
 }
 
 function rootletKindFromContractId(contractId: string): RootletClusterKind {

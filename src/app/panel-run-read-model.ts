@@ -1,13 +1,12 @@
 import type { ArborMessageType } from "../domain/common.js";
-import type { SanitizedInformationAccessConfig, SanitizedModelProviderConfig } from "../domain/config/index.js";
-import type { ModelVisibleOutputProjection } from "../domain/intelligence/index.js";
+import type { ModelRunReasoningEffort, SanitizedInformationAccessConfig, SanitizedModelProviderConfig } from "../domain/config/index.js";
+import type { ModelReasoningOutputProjection, ModelVisibleOutputProjection } from "../domain/intelligence/index.js";
 import type { ToolDisplayProjection, ToolResultEnvelope } from "../domain/tools/index.js";
 import { toolDisplayName } from "../domain/tools/index.js";
 import type { AgentRunTree } from "../domain/underground/index.js";
 import {
   createRunObservationEventViews,
   resolveRunObservationPosition,
-  type RunObservationEventEntry,
   type RunObservationEventView,
   type RunObservationSnapshot,
 } from "../domain/observation/index.js";
@@ -191,6 +190,7 @@ export type PanelTranscriptModelCall = {
   readonly retryable?: boolean;
   readonly sanitizedErrorRef?: string;
   readonly visibleOutput?: ModelVisibleOutputProjection;
+  readonly reasoningOutput?: ModelReasoningOutputProjection;
   readonly candidateRefs: readonly string[];
   readonly eventRefs: readonly string[];
 };
@@ -202,6 +202,8 @@ export type PanelRunStreamEventType =
   | "run.resumed"
   | "agent.note.delta"
   | "agent.note.completed"
+  | "model.reasoning.delta"
+  | "model.reasoning.completed"
   | "model.output.delta"
   | "model.output.completed"
   | "context.compaction.completed"
@@ -500,6 +502,7 @@ export function createPanelRunTranscript(input: {
   readonly agentRunTree?: AgentRunTree;
   readonly routeDecision?: DesktopIntentDecision;
   readonly desktopMode?: "agent" | "deep";
+  readonly reasoningEffort?: ModelRunReasoningEffort;
   readonly createdAt: string;
   readonly updatedAt: string;
 }): PanelRunTranscript {
@@ -512,6 +515,7 @@ export function createPanelRunTranscript(input: {
     observation: input.observation,
     routeDecision: input.routeDecision,
     desktopMode: input.desktopMode,
+    reasoningEffort: input.reasoningEffort,
     createdAt: input.createdAt,
     updatedAt: input.updatedAt,
   });
@@ -588,6 +592,7 @@ export function createPanelRunStreamEvents(input: {
   readonly observation?: PanelObservationReadModel;
   readonly routeDecision?: DesktopIntentDecision;
   readonly desktopMode?: "agent" | "deep";
+  readonly reasoningEffort?: ModelRunReasoningEffort;
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly error?: { readonly code: string; readonly message: string };
@@ -650,7 +655,7 @@ export function createPanelRunStreamEvents(input: {
     if (shouldSuppressOrdinaryGoalEvent(entry.type, input.desktopMode, input.routeDecision)) {
       continue;
     }
-    if (suppressOrdinaryChatProgress && shouldSuppressOrdinaryChatEvent(entry.type)) {
+    if (suppressOrdinaryChatProgress && shouldSuppressOrdinaryChatEvent(entry)) {
       continue;
     }
     const view = viewBySequence.get(entry.sequence);
@@ -740,8 +745,15 @@ function hasUserVisibleWorkActivity(eventEntries: readonly EventLogEntry[]): boo
   });
 }
 
-function shouldSuppressOrdinaryChatEvent(type: ArborMessageType): boolean {
-  return type === "goal.received" || type === "model.requested" || type === "model.completed";
+function shouldSuppressOrdinaryChatEvent(entry: EventLogEntry): boolean {
+  if (entry.type === "goal.received" || entry.type === "model.requested") {
+    return true;
+  }
+  if (entry.type !== "model.completed") {
+    return false;
+  }
+  const payload = asRecord(entry.message.payload);
+  return modelReasoningOutputOrUndefined(payload.reasoningOutput) === undefined;
 }
 
 function appendStreamEventsForEvent(input: {
@@ -772,6 +784,23 @@ function appendStreamEventsForEvent(input: {
   }
 
   if (input.entry.type === "model.completed") {
+    const reasoningOutput = modelReasoningOutputOrUndefined(payload.reasoningOutput);
+    const reasoningChunks = chunkText(reasoningOutput?.content ?? "", 360);
+    reasoningChunks.forEach((chunk, index) => {
+      input.push({
+        ...base,
+        eventId: `${input.runId}:event:${input.entry.sequence}:model.reasoning.delta:${index + 1}`,
+        type: "model.reasoning.delta",
+        agentLabel: "模型",
+        delta: chunk,
+        status: "running",
+        detail: {
+          kind: "thinking",
+          preview: chunk,
+          truncated: index === reasoningChunks.length - 1 ? reasoningOutput?.truncated === true : false,
+        },
+      });
+    });
     if (stringOrUndefined(payload.finishReason) === "tool_call") {
       input.push({
         ...base,
@@ -811,7 +840,7 @@ function appendStreamEventsForEvent(input: {
       eventId: `${input.runId}:event:${input.entry.sequence}:model.output.completed`,
       type: "model.output.completed",
       agentLabel: "模型",
-      summary: modelCompletedSummary(payload, chunks.length),
+      summary: modelCompletedSummary(payload),
       status: "completed",
     });
     return;
@@ -941,17 +970,14 @@ function agentFabricLabel(type: PanelRunStreamEventType): string {
 
 function agentFabricSummary(type: PanelRunStreamEventType, payload: Readonly<Record<string, unknown>>): string {
   if (type === "agent.delegation.planned") {
-    const decision = asRecord(payload.delegationDecision);
     const childSpecIds = Array.isArray(payload.childSpecIds) ? payload.childSpecIds.filter(isString) : [];
     return `已形成分工计划，准备 ${childSpecIds.length} 路局部检查。`;
   }
   if (type === "agent.child.started") {
-    const childRun = asRecord(payload.childRun);
     const spec = asRecord(payload.agentSpec);
     return `局部检查 ${stringOrUndefined(spec.displayName) ?? "一路检查"} 已启动。`;
   }
   if (type === "agent.child.completed") {
-    const childRun = asRecord(payload.childRun);
     const outputRefs = Array.isArray(payload.outputRefs) ? payload.outputRefs.filter(isString) : [];
     return `一路局部检查已完成，产出 ${outputRefs.length} 个材料引用。`;
   }
@@ -999,12 +1025,14 @@ function toolCallRefsFor(entry: EventLogEntry, payload: Readonly<Record<string, 
   return stringOrUndefined(payload.callId) === undefined ? [] : [stringOrUndefined(payload.callId) as string];
 }
 
-function modelRequestedSummary(payload: Readonly<Record<string, unknown>>): string {
+function modelRequestedSummary(
+  payload: Readonly<Record<string, unknown>>
+): string {
   const purpose = stringOrUndefined(payload.purpose) ?? "unknown";
   return purposeProgressLabel(purpose);
 }
 
-function modelCompletedSummary(payload: Readonly<Record<string, unknown>>, chunkCount: number): string {
+function modelCompletedSummary(payload: Readonly<Record<string, unknown>>): string {
   const validation = stringOrUndefined(payload.validationStatus) ?? "unknown";
   return validation === "passed" ? "内容已整理，并已进入报告或详情。" : `内容已整理，校验 ${validation}。`;
 }
@@ -1470,16 +1498,48 @@ function visibleOutputText(value: unknown): string {
   if (output === undefined) {
     return "";
   }
-  const parts: string[] = [];
+  const primaryParts: string[] = [];
+  const secondaryParts: string[] = [];
   for (const item of output.items) {
     for (const field of item.fields) {
       const valueText = field.value.trim();
-      if (valueText.length > 0) {
-        parts.push(`${field.name}: ${valueText}${field.truncated ? " (truncated)" : ""}`);
+      if (valueText.length === 0) continue;
+      const suffix = field.truncated ? " (truncated)" : "";
+      if (isPrimaryVisibleOutputField(field.name)) {
+        primaryParts.push(`${valueText}${suffix}`);
+      } else {
+        secondaryParts.push(`${field.name}: ${valueText}${suffix}`);
       }
     }
   }
-  return parts.join("\n");
+  return uniqueTextParts(primaryParts.length > 0 ? primaryParts : secondaryParts).join("\n");
+}
+
+function uniqueTextParts(parts: readonly string[]): readonly string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const part of parts) {
+    const key = part.replace(/\s+/g, " ").trim();
+    if (key.length === 0 || seen.has(key)) continue;
+    seen.add(key);
+    result.push(part);
+  }
+  return result;
+}
+
+function isPrimaryVisibleOutputField(name: string): boolean {
+  const normalized = name.trim().toLowerCase();
+  return normalized === "answer" ||
+    normalized === "content" ||
+    normalized === "text" ||
+    normalized === "summary" ||
+    normalized === "message" ||
+    normalized === "decisionsummary" ||
+    normalized === "decision_summary" ||
+    normalized === "directanswer" ||
+    normalized === "direct_answer" ||
+    normalized === "finalanswer" ||
+    normalized === "final_answer";
 }
 
 function chunkText(value: string, maxLength: number): readonly string[] {
@@ -1488,10 +1548,41 @@ function chunkText(value: string, maxLength: number): readonly string[] {
     return [];
   }
   const chunks: string[] = [];
-  for (let index = 0; index < text.length; index += maxLength) {
-    chunks.push(text.slice(index, index + maxLength));
+  let index = 0;
+  while (index < text.length) {
+    const remaining = text.length - index;
+    if (remaining <= maxLength) {
+      chunks.push(text.slice(index));
+      break;
+    }
+    const end = preferredChunkEnd(text, index, maxLength);
+    chunks.push(text.slice(index, end));
+    index = end;
   }
   return chunks;
+}
+
+function preferredChunkEnd(text: string, start: number, maxLength: number): number {
+  const hardEnd = Math.min(start + maxLength, text.length);
+  const candidate = text.slice(start, hardEnd);
+  const boundary = Math.max(
+    candidate.lastIndexOf("\n"),
+    candidate.lastIndexOf("。"),
+    candidate.lastIndexOf("！"),
+    candidate.lastIndexOf("？"),
+    candidate.lastIndexOf("."),
+    candidate.lastIndexOf("!"),
+    candidate.lastIndexOf("?"),
+    candidate.lastIndexOf(";"),
+    candidate.lastIndexOf("；"),
+    candidate.lastIndexOf(","),
+    candidate.lastIndexOf("，"),
+    candidate.lastIndexOf(" ")
+  );
+  if (boundary >= Math.floor(maxLength * 0.45)) {
+    return start + boundary + 1;
+  }
+  return hardEnd;
 }
 
 function finalResultSummary(input: {
@@ -1684,6 +1775,8 @@ function createPanelTranscriptModelCalls(
       sanitizedErrorRef: stringOrUndefined(payload.sanitizedErrorRef) ?? existing?.sanitizedErrorRef,
       visibleOutput:
         modelVisibleOutputOrUndefined(payload.visibleOutput) ?? existing?.visibleOutput ?? summaryCall?.visibleOutput,
+      reasoningOutput:
+        modelReasoningOutputOrUndefined(payload.reasoningOutput) ?? existing?.reasoningOutput,
       candidateRefs: summaryCall?.candidateRefs ?? existing?.candidateRefs ?? [],
       eventRefs: unique([...(existing?.eventRefs ?? []), entry.message.id]),
     };
@@ -2361,6 +2454,23 @@ function modelVisibleOutputOrUndefined(value: unknown): ModelVisibleOutputProjec
     return undefined;
   }
   return record as unknown as ModelVisibleOutputProjection;
+}
+
+function modelReasoningOutputOrUndefined(value: unknown): ModelReasoningOutputProjection | undefined {
+  const record = asRecord(value);
+  if (
+    typeof record.content !== "string" ||
+    record.content.trim().length === 0 ||
+    typeof record.truncated !== "boolean" ||
+    (
+      record.source !== "openai_responses_reasoning_summary" &&
+      record.source !== "openai_chat_reasoning_content" &&
+      record.source !== "provider_reasoning_content"
+    )
+  ) {
+    return undefined;
+  }
+  return record as unknown as ModelReasoningOutputProjection;
 }
 
 function unique<T>(values: readonly T[]): T[] {

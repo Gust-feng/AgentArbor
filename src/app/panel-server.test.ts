@@ -71,7 +71,9 @@ test("panel React source is split into typed frontend modules", async () => {
   assert.equal(workspacePages.includes("initialGroup?: SettingsGroup"), true);
   assert.equal(workspacePages.includes("可添加"), true);
   assert.equal(workspacePages.includes("provider-base-url-field"), true);
-  assert.equal(workspacePages.includes("请求路径"), true);
+  assert.equal(workspacePages.includes("请求路径"), false);
+  assert.equal(workspacePages.includes("高级兼容设置"), true);
+  assert.equal(workspacePages.includes("暂无模型服务。请添加一个模型服务。"), true);
   assert.equal(workspacePages.includes("/chat/completions"), true);
   assert.equal(workspacePages.includes("resolveModelProviderLogo"), true);
   assert.equal(workspacePages.includes("providerLogoText"), false);
@@ -94,6 +96,10 @@ test("panel React source is split into typed frontend modules", async () => {
   assert.equal(chatEmpty.includes("providerLabel"), true);
   assert.equal(chatEmpty.includes("配置模型"), true);
   assert.equal(chatEmpty.includes("closeSignal"), true);
+  assert.equal(chatEmpty.includes("composer-reasoning-control"), true);
+  assert.equal(chatEmpty.includes("reasoningEffortEnabled"), true);
+  assert.equal(workspacePages.includes("provider-reasoning-panel"), false);
+  assert.equal(workspacePages.includes("思考强度"), false);
   assert.equal(chatEmpty.includes("管理模型厂商"), false);
   assert.equal(chatActive.includes("export function ChatActive"), true);
   assert.equal(chatActive.includes("WorkContextPanel"), false);
@@ -228,12 +234,15 @@ test("panel React workbench consumes Basic Agent projection APIs", async () => {
   assert.equal(app.includes("/model-catalog"), true);
   assert.equal(workspacePages.includes("获取模型"), true);
   assert.equal(chatActive.includes("model.output.delta"), true);
+  assert.equal(chatActive.includes("model.reasoning.delta"), true);
+  assert.equal(chatActive.includes("activity-output-richtext"), true);
   assert.equal(chatActive.includes("ProcessTrace"), true);
   assert.equal(chatActive.includes("activityItemsForRun"), true);
   assert.equal(chatEmpty.includes("任务输入"), true);
   assert.equal(chatEmpty.includes("ChatInputBar"), true);
   assert.equal(sidebar.includes("新任务"), true);
-  assert.equal(sidebar.includes("技能"), true);
+  assert.equal(sidebar.includes("工作方式"), true);
+  assert.equal(sidebar.includes("技能"), false);
   assert.equal(sidebar.includes("工具"), true);
   assert.equal(sidebar.includes("设置"), true);
   assert.equal(sidebar.includes("待确认"), true);
@@ -345,7 +354,7 @@ test("panel config API keeps model provider and search keys out of ordinary resp
     );
     assert.equal(config.text.includes("sk-panel-secret"), false);
     assert.equal(update.body.config.baseUrl, "https://provider.example");
-    assert.equal(update.body.config.defaultAiMode, "openai-responses");
+    assert.equal(update.body.config.defaultAiMode, "openai-compatible");
   } finally {
     await server.close();
     await fs.rm(directory, { recursive: true, force: true });
@@ -1561,7 +1570,7 @@ test("conversation API sends follow-up history as role-separated model messages"
     assert.equal(secondMessages[3]?.content?.includes("Current user message: 那你能继续解释一下吗？"), true);
     assert.equal(secondMessages[3]?.content?.includes("你好，你能做什么"), false);
     assert.equal(JSON.stringify(secondMessages).includes("workspace:conversation-history"), false);
-    assert.equal(requests.at(-1)?.max_output_tokens ?? requests.at(-1)?.max_tokens, 4000);
+    assert.equal(requests.at(-1)?.max_output_tokens ?? requests.at(-1)?.max_completion_tokens ?? requests.at(-1)?.max_tokens, 3200);
   } finally {
     await server.close();
     await fs.rm(directory, { recursive: true, force: true });
@@ -1938,6 +1947,66 @@ test("desktop openai-compatible direct answer completes on natural no-tool stop"
   }
 });
 
+test("desktop run applies composer reasoning only for reasoning-capable models", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-desktop-composer-reasoning-"));
+  const secret = "sk-desktop-composer-reasoning-secret";
+  const bodies: Record<string, unknown>[] = [];
+  const providerFetch: PanelProviderFetch = async (_url, init) => {
+    const body = JSON.parse(init.body) as Record<string, unknown>;
+    bodies.push(body);
+    return createOpenAiTextResponse("gpt-5", "ok");
+  };
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory, providerFetch });
+  try {
+    await requestJson(server.url, "/api/config/model-provider", {
+      method: "POST",
+      body: {
+        baseUrl: "https://api.openai.com/v1",
+        model: "gpt-5",
+        protocolKind: "openai_responses",
+        apiKey: secret,
+        openAI: { reasoningEffort: "high" },
+      },
+    });
+
+    const defaultStart = await requestJson(server.url, "/api/desktop/runs", {
+      method: "POST",
+      body: { goal: "默认思考强度", aiMode: "openai-responses" },
+    });
+    await waitForRun(server.url, defaultStart.body.runId, (body) => body.status === "completed", 4_000, "/api/desktop/runs");
+    assert.equal((bodies[0]?.reasoning as { readonly effort?: string } | undefined)?.effort, undefined);
+
+    const highStart = await requestJson(server.url, "/api/desktop/runs", {
+      method: "POST",
+      body: { goal: "深入思考", aiMode: "openai-responses", reasoningEffort: "high" },
+    });
+    await waitForRun(server.url, highStart.body.runId, (body) => body.status === "completed", 4_000, "/api/desktop/runs");
+    assert.equal((bodies[1]?.reasoning as { readonly effort?: string } | undefined)?.effort, "high");
+    assert.equal((bodies[1]?.reasoning as { readonly summary?: string } | undefined)?.summary, "auto");
+
+    await requestJson(server.url, "/api/config/model-provider", {
+      method: "POST",
+      body: { model: "gpt-4.1" },
+    });
+    const unsupportedStart = await requestJson(server.url, "/api/desktop/runs", {
+      method: "POST",
+      body: { goal: "不支持 reasoning effort", aiMode: "openai-responses", openAI: { reasoningEffort: "high" } },
+    });
+    const failed = await waitForRun(
+      server.url,
+      unsupportedStart.body.runId,
+      (body) => body.status === "failed",
+      4_000,
+      "/api/desktop/runs"
+    );
+    assert.equal(bodies.length, 2);
+    assert.equal(failed.body.error.code, "unsupported_model_reasoning_effort");
+  } finally {
+    await server.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("desktop default run uses Responses mode and fails at config boundary instead of fake fallback", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-desktop-default-openai-"));
   let fetchCalls = 0;
@@ -2002,6 +2071,57 @@ test("desktop default ignores legacy fake setting and still recommends real AI b
     assert.equal(failed.body.tracking.provider.defaultAiMode, "openai-responses");
     assert.equal(failed.body.tracking.provider.requestedMode, "openai-responses");
     assert.equal(failed.text.includes("fake_provider"), false);
+  } finally {
+    await server.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("desktop default run follows the active chat-compatible profile mode", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-desktop-default-chat-profile-"));
+  const secret = "sk-desktop-default-chat-profile-secret";
+  const urls: string[] = [];
+  const bodies: Record<string, unknown>[] = [];
+  const providerFetch: PanelProviderFetch = async (url, init) => {
+    urls.push(String(url));
+    bodies.push(JSON.parse(init.body) as Record<string, unknown>);
+    return createOpenAiTextResponse("deepseek-v4-pro", "ok");
+  };
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory, providerFetch });
+  try {
+    await requestJson(server.url, "/api/config/model-profiles", {
+      method: "POST",
+      body: {
+        profileId: "deepseek",
+        label: "DeepSeek",
+        providerKind: "openai_compatible",
+        protocolKind: "openai_compatible_chat_completions",
+        baseUrl: "https://api.deepseek.com",
+        model: "deepseek-v4-pro",
+        apiKey: secret,
+      },
+    });
+    await requestJson(server.url, "/api/config/model-profiles/deepseek/activate", { method: "POST" });
+
+    const start = await requestJson(server.url, "/api/desktop/runs", {
+      method: "POST",
+      body: { goal: "Use the active provider default mode." },
+    });
+    const completed = await waitForRun(
+      server.url,
+      start.body.runId,
+      (body) => body.status === "completed",
+      4_000,
+      "/api/desktop/runs"
+    );
+
+    assert.equal(start.body.tracking.provider.requestedMode, "openai-compatible");
+    assert.equal(completed.body.tracking.provider.requestedMode, "openai-compatible");
+    assert.equal(completed.body.tracking.provider.protocolKind, "openai_compatible_chat_completions");
+    assert.equal(urls[0]?.endsWith("/chat/completions"), true);
+    assert.equal(Array.isArray(bodies[0]?.messages), true);
+    assert.equal(bodies[0]?.input, undefined);
+    assert.equal(bodies[0]?.reasoning, undefined);
   } finally {
     await server.close();
     await fs.rm(directory, { recursive: true, force: true });
@@ -3956,6 +4076,7 @@ type ResponsesRequestBody = {
   readonly messages?: readonly { readonly role?: string; readonly content?: string }[];
   readonly tools?: readonly unknown[];
   readonly max_output_tokens?: number;
+  readonly max_completion_tokens?: number;
   readonly max_tokens?: number;
   readonly stream?: boolean;
 };

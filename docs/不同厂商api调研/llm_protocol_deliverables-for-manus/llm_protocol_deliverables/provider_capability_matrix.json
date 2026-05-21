@@ -1,0 +1,240 @@
+{
+  "generated_at": "2026-05-20T16:45:00+08:00",
+  "author": "Manus AI",
+  "scope": ["OpenAI", "Anthropic", "DeepSeek", "Z.AI/GLM", "Kimi/Moonshot", "MiniMax"],
+  "schema_version": "0.1.0",
+  "providers": [
+    {
+      "id": "openai",
+      "display_name": "OpenAI",
+      "recommended_protocol_family": "openai_responses",
+      "base_urls": {"default": "https://api.openai.com/v1"},
+      "primary_endpoints": {"responses": "/responses", "chat_completions": "/chat/completions"},
+      "sdk_compatibility": {"openai_sdk": true, "anthropic_sdk": false},
+      "supports": {
+        "openai_responses": true,
+        "openai_chat_completions": true,
+        "anthropic_messages": false,
+        "server_side_state": true,
+        "previous_response_id": true,
+        "conversation_object": true,
+        "tools": true,
+        "parallel_tool_calls": true,
+        "strict_structured_outputs": true,
+        "json_mode": true,
+        "streaming": true,
+        "reasoning": true,
+        "prompt_cache": true,
+        "multimodal_input": true
+      },
+      "request_mapping": {
+        "messages": "Responses API uses input items; Chat Completions uses messages.",
+        "system_or_developer": "Responses uses instructions or input message roles; Chat uses system/developer where supported.",
+        "structured_output": "Responses uses text.format; Chat uses response_format.",
+        "tool_result": "Responses uses function_call_output item."
+      },
+      "streaming_model": "responses_event_stream",
+      "notable_caveats": [
+        "Responses event types and response object fields may expand; parsers must tolerate unknown events.",
+        "Do not treat Chat Completions and Responses as schema-equivalent."
+      ],
+      "source_refs": [1, 2]
+    },
+    {
+      "id": "anthropic",
+      "display_name": "Anthropic Claude",
+      "recommended_protocol_family": "anthropic_messages",
+      "base_urls": {"default": "https://api.anthropic.com", "openai_compat": "https://api.anthropic.com/v1"},
+      "primary_endpoints": {"messages": "/v1/messages"},
+      "sdk_compatibility": {"openai_sdk": true, "anthropic_sdk": true},
+      "supports": {
+        "openai_responses": false,
+        "openai_chat_completions": "compatibility_layer",
+        "anthropic_messages": true,
+        "server_side_state": false,
+        "previous_response_id": false,
+        "conversation_object": false,
+        "tools": true,
+        "parallel_tool_calls": true,
+        "strict_structured_outputs": "native_only_or_tool_based",
+        "json_mode": "not_openai_compat_response_format",
+        "streaming": true,
+        "reasoning": true,
+        "prompt_cache": true,
+        "multimodal_input": true
+      },
+      "request_mapping": {
+        "messages": "Native Messages API uses role plus content blocks.",
+        "system_or_developer": "Native API has a top-level system field; OpenAI compatibility merges system/developer messages.",
+        "structured_output": "Use native structured strategies or tool schemas; OpenAI response_format is ignored in compatibility layer.",
+        "tool_result": "User message content includes tool_result blocks."
+      },
+      "streaming_model": "anthropic_named_sse_events",
+      "notable_caveats": [
+        "max_tokens is required in native Messages API.",
+        "OpenAI compatibility ignores response_format, reasoning_effort, strict function schema, metadata and multiple sampling/control fields.",
+        "Extended thinking requires native API for full behavior."
+      ],
+      "source_refs": [3, 4, 5, 14]
+    },
+    {
+      "id": "deepseek",
+      "display_name": "DeepSeek",
+      "recommended_protocol_family": "openai_chat_completions",
+      "base_urls": {"openai_compat": "https://api.deepseek.com", "anthropic_compat": "https://api.deepseek.com/anthropic"},
+      "primary_endpoints": {"chat_completions": "/chat/completions"},
+      "sdk_compatibility": {"openai_sdk": true, "anthropic_sdk": true},
+      "supports": {
+        "openai_responses": false,
+        "openai_chat_completions": true,
+        "anthropic_messages": "compatibility_layer",
+        "server_side_state": false,
+        "previous_response_id": false,
+        "conversation_object": false,
+        "tools": true,
+        "parallel_tool_calls": false,
+        "strict_structured_outputs": false,
+        "json_mode": true,
+        "streaming": true,
+        "reasoning": true,
+        "prompt_cache": true,
+        "multimodal_input": false
+      },
+      "request_mapping": {
+        "reasoning": "thinking.type plus reasoning_effort; response reasoning appears in message.reasoning_content.",
+        "structured_output": "response_format.type=json_object; prompt must explicitly ask for JSON.",
+        "tool_result": "OpenAI Chat style role=tool message."
+      },
+      "streaming_model": "chat_completion_sse_chunks",
+      "notable_caveats": [
+        "JSON mode requires prompt-level JSON instruction or may stream whitespace until token limit.",
+        "reasoning_effort low/medium map to high."
+      ],
+      "source_refs": [6, 7]
+    },
+    {
+      "id": "zai_glm",
+      "display_name": "Z.AI / GLM",
+      "recommended_protocol_family": "openai_chat_completions",
+      "base_urls": {"default": "https://api.z.ai/api/paas/v4/"},
+      "primary_endpoints": {"chat_completions": "/chat/completions"},
+      "sdk_compatibility": {"openai_sdk": "likely_with_base_url", "anthropic_sdk": false},
+      "supports": {
+        "openai_responses": false,
+        "openai_chat_completions": true,
+        "anthropic_messages": false,
+        "server_side_state": false,
+        "previous_response_id": false,
+        "conversation_object": false,
+        "tools": true,
+        "parallel_tool_calls": "unknown",
+        "strict_structured_outputs": "unknown",
+        "json_mode": "unknown",
+        "streaming": true,
+        "reasoning": true,
+        "prompt_cache": true,
+        "multimodal_input": true
+      },
+      "request_mapping": {
+        "reasoning": "thinking.type example shown in HTTP guide.",
+        "multimodal": "message content parts include text, image_url, audio, video_url and file_url.",
+        "tool_result": "OpenAI Chat style role=tool message."
+      },
+      "streaming_model": "chat_completion_sse_chunks",
+      "notable_caveats": [
+        "Base URL contains /api/paas/v4 path prefix.",
+        "Official docs are OpenAI-like but provider-specific schema should be followed for multimodal content."
+      ],
+      "source_refs": [8, 9]
+    },
+    {
+      "id": "kimi_moonshot",
+      "display_name": "Kimi / Moonshot",
+      "recommended_protocol_family": "openai_chat_completions",
+      "base_urls": {"openai_compat": "https://api.moonshot.ai/v1", "anthropic_compat": "https://api.moonshot.ai/anthropic"},
+      "primary_endpoints": {"chat_completions": "/chat/completions"},
+      "sdk_compatibility": {"openai_sdk": true, "anthropic_sdk": true},
+      "supports": {
+        "openai_responses": false,
+        "openai_chat_completions": true,
+        "anthropic_messages": "compatibility_layer",
+        "server_side_state": false,
+        "previous_response_id": false,
+        "conversation_object": false,
+        "tools": true,
+        "parallel_tool_calls": "unknown",
+        "strict_structured_outputs": "unknown",
+        "json_mode": true,
+        "streaming": true,
+        "reasoning": true,
+        "prompt_cache": true,
+        "multimodal_input": true
+      },
+      "request_mapping": {
+        "reasoning": "thinking is passed through extra_body when using SDK.",
+        "partial": "partial is a field on assistant messages, not a top-level request field.",
+        "tool_result": "OpenAI Chat style role=tool message."
+      },
+      "streaming_model": "chat_completion_sse_chunks",
+      "notable_caveats": [
+        "API is compatible with OpenAI Chat Completions request/response format, not OpenAI Responses.",
+        "Anthropic-compatible temperature may be remapped by platform behavior."
+      ],
+      "source_refs": [10, 11, 15]
+    },
+    {
+      "id": "minimax",
+      "display_name": "MiniMax",
+      "recommended_protocol_family": "anthropic_messages_or_openai_chat_completions",
+      "base_urls": {"openai_compat": "https://api.minimax.io/v1", "anthropic_compat_global": "https://api.minimax.io/anthropic", "anthropic_compat_cn": "https://api.minimaxi.com/anthropic"},
+      "primary_endpoints": {"chat_completions": "/chat/completions"},
+      "sdk_compatibility": {"openai_sdk": true, "anthropic_sdk": true},
+      "supports": {
+        "openai_responses": false,
+        "openai_chat_completions": true,
+        "anthropic_messages": "compatibility_layer",
+        "server_side_state": false,
+        "previous_response_id": false,
+        "conversation_object": false,
+        "tools": true,
+        "parallel_tool_calls": "unknown",
+        "strict_structured_outputs": "unknown",
+        "json_mode": "unknown",
+        "streaming": true,
+        "reasoning": true,
+        "prompt_cache": "unknown",
+        "multimodal_input": false
+      },
+      "request_mapping": {
+        "reasoning": "OpenAI-compatible extra_body.reasoning_split=true returns reasoning_details; otherwise content may include <think> tags.",
+        "tool_result": "OpenAI Chat style role=tool message in OpenAI-compatible mode.",
+        "history": "Full assistant response including tool_calls and reasoning_details or <think> must be appended for multi-turn function calling."
+      },
+      "streaming_model": "chat_completion_sse_chunks_with_reasoning_details",
+      "notable_caveats": [
+        "temperature range is (0.0, 1.0], recommended 1.0.",
+        "presence_penalty, frequency_penalty, logit_bias and some OpenAI parameters are ignored.",
+        "n only supports 1; image and audio inputs are not supported in OpenAI-compatible text API."
+      ],
+      "source_refs": [12, 13, 16]
+    }
+  ],
+  "references": {
+    "1": "https://developers.openai.com/api/reference/overview/",
+    "2": "https://developers.openai.com/api/docs/guides/migrate-to-responses",
+    "3": "https://platform.claude.com/docs/en/api/messages",
+    "4": "https://platform.claude.com/docs/en/docs/agents-and-tools/tool-use/overview",
+    "5": "https://platform.claude.com/docs/en/docs/build-with-claude/extended-thinking",
+    "6": "https://api-docs.deepseek.com/",
+    "7": "https://api-docs.deepseek.com/api/create-chat-completion",
+    "8": "https://docs.z.ai/api-reference/llm/chat-completion",
+    "9": "https://docs.z.ai/guides/develop/http/introduction",
+    "10": "https://platform.kimi.ai/docs/api/overview",
+    "11": "https://platform.kimi.ai/docs/overview",
+    "12": "https://platform.minimax.io/docs/api-reference/api-overview",
+    "13": "https://platform.minimax.io/docs/api-reference/text-openai-api",
+    "14": "https://platform.claude.com/docs/en/api/openai-sdk",
+    "15": "https://github.com/MoonshotAI/Kimi-K2",
+    "16": "https://platform.minimax.io/docs/token-plan/claude-code"
+  }
+}

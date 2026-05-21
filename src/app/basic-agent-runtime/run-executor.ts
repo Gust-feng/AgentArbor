@@ -1,4 +1,4 @@
-import type { BasicAgentCapabilitySnapshot, SanitizedInformationAccessConfig, SanitizedModelProviderConfig } from "../../domain/config/index.js";
+import type { BasicAgentCapabilitySnapshot, ModelRunReasoningEffort, SanitizedInformationAccessConfig, SanitizedModelProviderConfig } from "../../domain/config/index.js";
 import type { BasicAgentRun, ConfirmationDecision, RunEvent } from "../../domain/basic-agent/index.js";
 import type { ModelOutputDelta } from "../../domain/intelligence/index.js";
 import { nowIso } from "../../kernel/id.js";
@@ -51,6 +51,7 @@ export type BasicAgentRunStartInput = {
   readonly runAfterRunId?: string;
   readonly routeDecision?: DesktopIntentDecision;
   readonly taskSoilInput?: DesktopTaskSoilInput;
+  readonly reasoningEffort?: ModelRunReasoningEffort;
   readonly startImmediately?: boolean;
 };
 
@@ -118,6 +119,7 @@ export class BasicAgentRunExecutor {
       runAfterRunId: input.runAfterRunId,
       routeDecision: input.routeDecision,
       taskSoilInput: input.taskSoilInput,
+      reasoningEffort: input.reasoningEffort,
       config: modelConfig,
       informationAccess,
       capabilitySnapshot,

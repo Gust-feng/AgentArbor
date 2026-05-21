@@ -152,7 +152,7 @@ test("underground demo summary does not write repo-root .agentarbor assets", asy
   const repoRootAgentArbor = resolve(process.cwd(), ".agentarbor");
   const before = snapshotTree(repoRootAgentArbor);
 
-  const { result, aiInput } = await runFakeUndergroundDirectionSession("Build a small deterministic helper.");
+  const { result } = await runFakeUndergroundDirectionSession("Build a small deterministic helper.");
   createUndergroundDemoSummary(result);
 
   assert.deepEqual(snapshotTree(repoRootAgentArbor), before);

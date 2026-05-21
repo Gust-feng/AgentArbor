@@ -22,7 +22,7 @@ type ServerEntry = {
 export class McpManager {
   private readonly entries = new Map<string, ServerEntry>();
 
-  constructor(private readonly config: McpManagerConfig) {
+  constructor(config: McpManagerConfig) {
     for (const server of config.servers) {
       if (!server.enabled) {
         continue;

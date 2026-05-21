@@ -175,13 +175,6 @@ ${markdownList(entries)}
 `;
 }
 
-function renderList(title: string, entries: string[]): string {
-  return `# ${title}
-
-${markdownList(entries)}
-`;
-}
-
 function markdownList(entries: string[]): string {
   return entries.length > 0 ? entries.map((entry) => `- ${entry}`).join("\n") : "- none";
 }

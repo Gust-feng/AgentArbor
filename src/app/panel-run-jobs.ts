@@ -1,4 +1,4 @@
-import type { SanitizedInformationAccessConfig, SanitizedModelProviderConfig } from "../domain/config/index.js";
+import type { ModelRunReasoningEffort, SanitizedInformationAccessConfig, SanitizedModelProviderConfig } from "../domain/config/index.js";
 import type { BasicAgentCapabilitySnapshot } from "../domain/config/index.js";
 import type { ConfirmationDecision } from "../domain/basic-agent/index.js";
 import { createId, nowIso } from "../kernel/id.js";
@@ -66,6 +66,7 @@ export type PanelRunJob = {
   readonly runAfterRunId?: string;
   routeDecision?: DesktopIntentDecision;
   readonly taskSoilInput?: DesktopTaskSoilInput;
+  readonly reasoningEffort?: ModelRunReasoningEffort;
   readonly createdAt: string;
   status: PanelRunStatus;
   updatedAt: string;
@@ -100,6 +101,7 @@ export class PanelRunJobStore {
     readonly runAfterRunId?: string;
     readonly routeDecision?: DesktopIntentDecision;
     readonly taskSoilInput?: DesktopTaskSoilInput;
+    readonly reasoningEffort?: ModelRunReasoningEffort;
     readonly config: SanitizedModelProviderConfig;
     readonly informationAccess: SanitizedInformationAccessConfig;
     readonly capabilitySnapshot?: BasicAgentCapabilitySnapshot;
@@ -116,6 +118,7 @@ export class PanelRunJobStore {
       runAfterRunId: input.runAfterRunId,
       routeDecision: input.routeDecision,
       taskSoilInput: input.taskSoilInput,
+      reasoningEffort: input.reasoningEffort,
       config: input.config,
       informationAccess: input.informationAccess,
       capabilitySnapshot: input.capabilitySnapshot,
@@ -333,7 +336,7 @@ function appendStreamEventToJob(
     }
     return existing;
   }
-  if (event.type === "model.output.delta") {
+  if (event.type === "model.output.delta" || event.type === "model.reasoning.delta") {
     const liveDelta = liveModelDeltaForSameCall(job, event);
     if (liveDelta !== undefined && !isLiveModelDeltaEvent(event)) {
       return liveDelta;
@@ -351,7 +354,7 @@ function appendStreamEventToJob(
 }
 
 function isLiveModelDeltaEvent(event: PanelRunStreamEventInput): boolean {
-  return event.eventId.includes(":live:model.output.delta:");
+  return event.eventId.includes(":live:model.output.delta:") || event.eventId.includes(":live:model.reasoning.delta:");
 }
 
 function updateStartedEvent(existing: PanelRunStreamEvent, event: PanelRunStreamEventInput): void {
@@ -380,8 +383,11 @@ function liveModelDeltaForSameCall(
   }
   return job.streamEvents.find(
     (item) =>
-      item.type === "model.output.delta" &&
-      item.eventId.startsWith(`${job.runId}:live:model.output.delta:`) &&
+      item.type === event.type &&
+      (
+        item.eventId.startsWith(`${job.runId}:live:model.output.delta:`) ||
+        item.eventId.startsWith(`${job.runId}:live:model.reasoning.delta:`)
+      ) &&
       item.modelCallRefs.some((requestId) => requestIds.has(requestId))
   );
 }

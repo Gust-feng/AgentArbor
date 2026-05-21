@@ -8,7 +8,7 @@ import {
 import { startLocalPanelServer } from "./panel-server.js";
 
 const activeWindows = new Set<BrowserWindow>();
-let activeDesktopSession: PanelDesktopSession | undefined;
+const activeDesktopSessions = new Set<PanelDesktopSession>();
 
 // NOTE: 不使用顶层 await，因为 ESM 顶层 await 会阻塞事件循环，
 // 导致 app.whenReady() 永远无法 resolve（死锁）。
@@ -20,6 +20,7 @@ main().catch((error: unknown) => {
 
 async function main(): Promise<void> {
   const args = parsePanelDesktopArgs(process.argv.slice(2));
+  let sessionRef: PanelDesktopSession | undefined;
   try {
     const session = await startPanelDesktopSession(args, {
       startPanelServer: startLocalPanelServer,
@@ -37,15 +38,19 @@ async function main(): Promise<void> {
         });
       },
       onSessionClosed: () => {
-        activeDesktopSession = undefined;
+        if (sessionRef !== undefined) {
+          activeDesktopSessions.delete(sessionRef);
+          sessionRef = undefined;
+        }
       },
       quit: () => {
         app.quit();
       },
     });
+    sessionRef = session;
 
     if (!args.smoke) {
-      activeDesktopSession = session;
+      activeDesktopSessions.add(session);
     }
 
     console.log(`AgentArbor 本地桌面面板：${session.url}`);

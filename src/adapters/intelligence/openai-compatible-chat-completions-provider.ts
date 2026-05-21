@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import type { OpenAIModelRequestSettings, ProviderProtocolProfileId } from "../../domain/config/index.js";
 import type {
   ModelMessage,
   ModelFailureKind,
@@ -14,6 +15,21 @@ import { createId, nowIso } from "../../kernel/id.js";
 import { createFailedModelResponse } from "../../kernel/intelligence/failures.js";
 import { pendingModelOutputValidation } from "../../kernel/intelligence/validation.js";
 import { normalizeOpenAICompatibleSdkBaseUrl } from "./openai-compatible-base-url.js";
+import {
+  buildOpenAIChatCompletionsControlFields,
+  configuredOpenAIStream,
+} from "./openai-request-settings.js";
+import { modelReasoningOutputFromText } from "./model-reasoning-output.js";
+import {
+  applyOpenAICompatibleChatDialectControls,
+  applyOpenAICompatibleChatRequestPolicy,
+  decodeOpenAICompatibleChatMessage,
+  OpenAICompatibleThinkTagStreamSplitter,
+  reasoningTextFromRecord,
+  resolveOpenAICompatibleChatDialect,
+  type OpenAICompatibleChatDecodedContent,
+  type OpenAICompatibleChatDialect,
+} from "./openai-compatible-chat-protocol.js";
 import { providerErrorMessage } from "./provider-error-message.js";
 
 export type FetchLike = (
@@ -39,8 +55,10 @@ export type OpenAICompatibleChatCompletionsProviderOptions = {
   readonly baseUrl: string;
   readonly apiKey: string;
   readonly model: string;
+  readonly providerProfileId?: ProviderProtocolProfileId;
   readonly fetch?: FetchLike;
   readonly stream?: boolean;
+  readonly requestSettings?: OpenAIModelRequestSettings;
   readonly onOutputDelta?: (delta: ModelOutputDelta) => void;
 };
 
@@ -52,8 +70,10 @@ export class OpenAICompatibleChatCompletionsProvider implements ModelProvider {
 
   private readonly baseUrl: string;
   private readonly apiKey: string;
+  private readonly dialect: OpenAICompatibleChatDialect;
   private readonly fetchImpl?: FetchLike;
   private readonly stream: boolean;
+  private readonly requestSettings?: OpenAIModelRequestSettings;
   private readonly onOutputDelta?: (delta: ModelOutputDelta) => void;
 
   constructor(options: OpenAICompatibleChatCompletionsProviderOptions) {
@@ -61,8 +81,14 @@ export class OpenAICompatibleChatCompletionsProvider implements ModelProvider {
     this.baseUrl = trimTrailingSlashes(options.baseUrl);
     this.apiKey = options.apiKey;
     this.model = options.model;
+    this.dialect = resolveOpenAICompatibleChatDialect({
+      providerProfileId: options.providerProfileId,
+      baseUrl: this.baseUrl,
+      model: this.model,
+    });
     this.fetchImpl = options.fetch;
-    this.stream = options.stream ?? false;
+    this.stream = (options.stream ?? false) && this.dialect.supportsStreaming;
+    this.requestSettings = options.requestSettings;
     this.onOutputDelta = options.onOutputDelta;
   }
 
@@ -89,18 +115,30 @@ export class OpenAICompatibleChatCompletionsProvider implements ModelProvider {
         fetch: toOpenAIFetch(fetchImpl),
         maxRetries: 0,
       });
-      const requestBody: Record<string, unknown> = {
-        model: this.model,
-        messages: request.sanitizedMessages.map(toOpenAIMessage),
-        tools: request.tools === undefined || request.tools.length === 0 ? undefined : request.tools.map(toOpenAITool),
-        tool_choice: toOpenAIToolChoice(request.toolChoice),
-        response_format:
-          request.outputContract.format === "json_object" ? { type: "json_object" } : undefined,
-        max_tokens: request.budget.maxOutputTokens,
-        stream: this.stream ? true : undefined,
-      };
+      const stream = configuredOpenAIStream(this.stream, this.requestSettings);
+      const controlFields = applyOpenAICompatibleChatDialectControls({
+        fields: buildOpenAIChatCompletionsControlFields({
+          requestBudgetMaxOutputTokens: request.budget.maxOutputTokens,
+          settings: this.requestSettings,
+        }) ?? {},
+        dialect: this.dialect,
+        settings: this.requestSettings,
+      });
+      const requestBody = applyOpenAICompatibleChatRequestPolicy({
+        dialect: this.dialect,
+        fields: {
+          model: this.model,
+          messages: request.sanitizedMessages.map(toOpenAIMessage),
+          tools: request.tools === undefined || request.tools.length === 0 ? undefined : request.tools.map(toOpenAITool),
+          tool_choice: toOpenAIToolChoice(request.toolChoice),
+          response_format:
+            request.outputContract.format === "json_object" ? { type: "json_object" } : undefined,
+          ...controlFields,
+          stream: stream ? true : undefined,
+        },
+      });
 
-      if (this.stream) {
+      if (stream) {
         const stream = await client.chat.completions.create(removeUndefinedValues(requestBody) as never, { signal: options.abortSignal });
         return await normalizeOpenAICompatibleStreamResponse({
           request,
@@ -109,6 +147,7 @@ export class OpenAICompatibleChatCompletionsProvider implements ModelProvider {
           providerKind: this.providerKind,
           protocolKind: this.protocolKind,
           model: this.model,
+          dialect: this.dialect,
           latencyMs: Date.now() - startedAt,
           emitDelta: this.onOutputDelta,
         });
@@ -122,6 +161,7 @@ export class OpenAICompatibleChatCompletionsProvider implements ModelProvider {
         providerKind: this.providerKind,
         protocolKind: this.protocolKind,
         model: this.model,
+        dialect: this.dialect,
         latencyMs: Date.now() - startedAt,
       });
     } catch (error) {
@@ -182,16 +222,19 @@ function normalizeOpenAICompatibleResponse(input: {
   providerKind: "openai_compatible";
   protocolKind: "openai_compatible_chat_completions";
   model: string;
+  dialect: OpenAICompatibleChatDialect;
   latencyMs: number;
 }): ModelResponse {
   const raw = asRecord(input.raw);
   const choices = Array.isArray(raw.choices) ? raw.choices : [];
   const firstChoice = asRecord(choices[0]);
   const message = asRecord(firstChoice.message);
-  const content = typeof message.content === "string" ? message.content : "";
+  const decoded = decodeOpenAICompatibleChatMessage({ message, dialect: input.dialect });
+  const content = decoded.textContent;
+  const reasoningOutput = reasoningOutputForChatMessage(decoded);
   const parsedOutput = parseStructuredOutput(content);
   const toolCalls = parseToolCalls(message.tool_calls);
-  const assistantMessage = assistantContinuationMessage({ message, content, toolCalls });
+  const assistantMessage = assistantContinuationMessage({ message, content: decoded.rawContent, toolCalls });
   const usage = asRecord(raw.usage);
 
   return {
@@ -206,6 +249,7 @@ function normalizeOpenAICompatibleResponse(input: {
     structuredOutput:
       toolCalls.length > 0 ? undefined : input.request.outputContract.format === "json_object" ? parsedOutput : undefined,
     textOutput: content,
+    reasoningOutput,
     assistantMessage,
     toolCalls: toolCalls.length === 0 ? undefined : toolCalls,
     usage: {
@@ -231,13 +275,20 @@ async function normalizeOpenAICompatibleStreamResponse(input: {
   providerKind: "openai_compatible";
   protocolKind: "openai_compatible_chat_completions";
   model: string;
+  dialect: OpenAICompatibleChatDialect;
   latencyMs: number;
   emitDelta?: (delta: ModelOutputDelta) => void;
 }): Promise<ModelResponse> {
   let content = "";
+  let rawContent = "";
   let model = input.model;
   let finishReason: ModelResponse["finishReason"];
   let deltaIndex = 0;
+  let reasoningContent = "";
+  let reasoningDeltaIndex = 0;
+  let cumulativeReasoning = "";
+  let cumulativeRawContent = "";
+  const thinkTagSplitter = new OpenAICompatibleThinkTagStreamSplitter();
   const toolCalls = new Map<number, { id?: string; name?: string; arguments: string }>();
   const protocolExtensions = new Map<string, unknown>();
 
@@ -250,23 +301,91 @@ async function normalizeOpenAICompatibleStreamResponse(input: {
       const choices = Array.isArray(raw.choices) ? raw.choices : [];
       const firstChoice = asRecord(choices[0]);
       const delta = asRecord(firstChoice.delta);
-      const contentDelta = typeof delta.content === "string" ? delta.content : "";
-      if (contentDelta.length > 0) {
-        content += contentDelta;
-        deltaIndex += 1;
-        input.emitDelta?.({
-          requestId: input.request.requestId,
-          purpose: input.request.purpose,
+      const reasoningChunk = reasoningTextFromRecord(delta);
+      const reasoningUpdate = streamDeltaText({
+        next: reasoningChunk,
+        previous: cumulativeReasoning,
+        mode: input.dialect.streamDeltaMode,
+      });
+      cumulativeReasoning = reasoningUpdate.nextPrevious;
+      const reasoningDelta = reasoningUpdate.delta;
+      if (reasoningDelta.length > 0) {
+        reasoningContent = appendReasoningContent(reasoningContent, reasoningDelta);
+        reasoningDeltaIndex = emitReasoningDelta({
+          emitDelta: input.emitDelta,
+          request: input.request,
           providerId: input.providerId,
           model,
-          delta: contentDelta,
-          index: deltaIndex,
-          createdAt: nowIso(),
+          delta: reasoningDelta,
+          index: reasoningDeltaIndex,
         });
+      }
+      const rawContentChunk = typeof delta.content === "string" ? delta.content : "";
+      const rawContentUpdate = streamDeltaText({
+        next: rawContentChunk,
+        previous: cumulativeRawContent,
+        mode: input.dialect.streamDeltaMode,
+      });
+      cumulativeRawContent = rawContentUpdate.nextPrevious;
+      const rawContentDelta = rawContentUpdate.delta;
+      if (rawContentDelta.length > 0) {
+        rawContent += rawContentDelta;
+        const split = thinkTagSplitter.push(rawContentDelta);
+        if (split.reasoningDelta.length > 0) {
+          reasoningContent = appendReasoningContent(reasoningContent, split.reasoningDelta);
+          reasoningDeltaIndex = emitReasoningDelta({
+            emitDelta: input.emitDelta,
+            request: input.request,
+            providerId: input.providerId,
+            model,
+            delta: split.reasoningDelta,
+            index: reasoningDeltaIndex,
+          });
+        }
+        if (split.textDelta.length > 0) {
+          content += split.textDelta;
+          deltaIndex += 1;
+          input.emitDelta?.({
+            kind: "output",
+            requestId: input.request.requestId,
+            purpose: input.request.purpose,
+            providerId: input.providerId,
+            model,
+            delta: split.textDelta,
+            index: deltaIndex,
+            createdAt: nowIso(),
+          });
+        }
       }
       accumulateStreamingToolCalls(toolCalls, delta.tool_calls);
       accumulateStreamingProtocolExtensions(protocolExtensions, delta);
       finishReason = finishReasonForOpenAI(firstChoice.finish_reason) ?? finishReason;
+    }
+    const flushed = thinkTagSplitter.flush();
+    if (flushed.reasoningDelta.length > 0) {
+      reasoningContent = appendReasoningContent(reasoningContent, flushed.reasoningDelta);
+      reasoningDeltaIndex = emitReasoningDelta({
+        emitDelta: input.emitDelta,
+        request: input.request,
+        providerId: input.providerId,
+        model,
+        delta: flushed.reasoningDelta,
+        index: reasoningDeltaIndex,
+      });
+    }
+    if (flushed.textDelta.length > 0) {
+      content += flushed.textDelta;
+      deltaIndex += 1;
+      input.emitDelta?.({
+        kind: "output",
+        requestId: input.request.requestId,
+        purpose: input.request.purpose,
+        providerId: input.providerId,
+        model,
+        delta: flushed.textDelta,
+        index: deltaIndex,
+        createdAt: nowIso(),
+      });
     }
   } catch {
     return createFailedModelResponse({
@@ -302,7 +421,7 @@ async function normalizeOpenAICompatibleStreamResponse(input: {
       ? undefined
       : {
           role: "assistant" as const,
-          content,
+          content: rawContent,
           toolCalls: completedToolCalls,
           protocolExtensions: protocolExtensionsFromMap(protocolExtensions),
         };
@@ -319,6 +438,10 @@ async function normalizeOpenAICompatibleStreamResponse(input: {
     structuredOutput:
       completedToolCalls.length > 0 ? undefined : input.request.outputContract.format === "json_object" ? parsedOutput : undefined,
     textOutput: content,
+    reasoningOutput: modelReasoningOutputFromText({
+      source: "openai_chat_reasoning_content",
+      content: reasoningContent,
+    }),
     assistantMessage,
     toolCalls: completedToolCalls.length === 0 ? undefined : completedToolCalls,
     usage: {
@@ -328,6 +451,63 @@ async function normalizeOpenAICompatibleStreamResponse(input: {
     validation: pendingModelOutputValidation(),
     completedAt: nowIso(),
   };
+}
+
+function emitReasoningDelta(input: {
+  readonly emitDelta?: (delta: ModelOutputDelta) => void;
+  readonly request: ModelRequest;
+  readonly providerId: string;
+  readonly model: string;
+  readonly delta: string;
+  readonly index: number;
+}): number {
+  const nextIndex = input.index + 1;
+  input.emitDelta?.({
+    kind: "reasoning",
+    requestId: input.request.requestId,
+    purpose: input.request.purpose,
+    providerId: input.providerId,
+    model: input.model,
+    delta: input.delta,
+    index: nextIndex,
+    createdAt: nowIso(),
+  });
+  return nextIndex;
+}
+
+function streamDeltaText(input: {
+  readonly next: string;
+  readonly previous: string;
+  readonly mode: OpenAICompatibleChatDialect["streamDeltaMode"];
+}): { readonly delta: string; readonly nextPrevious: string } {
+  if (input.next.length === 0) {
+    return { delta: "", nextPrevious: input.previous };
+  }
+  if (input.mode === "incremental") {
+    return { delta: input.next, nextPrevious: input.previous };
+  }
+  if (input.next.startsWith(input.previous)) {
+    return { delta: input.next.slice(input.previous.length), nextPrevious: input.next };
+  }
+  const overlap = longestSuffixPrefixOverlap(input.previous, input.next);
+  return { delta: input.next.slice(overlap), nextPrevious: input.next };
+}
+
+function longestSuffixPrefixOverlap(left: string, right: string): number {
+  const max = Math.min(left.length, right.length);
+  for (let length = max; length > 0; length -= 1) {
+    if (left.endsWith(right.slice(0, length))) {
+      return length;
+    }
+  }
+  return 0;
+}
+
+function appendReasoningContent(current: string, next: string): string {
+  if (next.length === 0) {
+    return current;
+  }
+  return `${current}${next}`;
 }
 
 function accumulateStreamingToolCalls(
@@ -358,6 +538,10 @@ function accumulateStreamingProtocolExtensions(extensions: Map<string, unknown>,
     const current = extensions.get(key);
     if (typeof current === "string" && typeof value === "string") {
       extensions.set(key, current + value);
+    } else if (Array.isArray(current) && Array.isArray(value)) {
+      extensions.set(key, [...current, ...value]);
+    } else if (current !== undefined && isPlainRecord(current) && isPlainRecord(value)) {
+      extensions.set(key, { ...current, ...value });
     } else if (current === undefined) {
       extensions.set(key, value);
     }
@@ -623,6 +807,17 @@ function assistantContinuationMessage(input: {
   };
 }
 
+function reasoningOutputForChatMessage(
+  decoded: OpenAICompatibleChatDecodedContent
+): ModelResponse["reasoningOutput"] {
+  return decoded.reasoningContent.length === 0
+    ? undefined
+    : modelReasoningOutputFromText({
+        source: decoded.reasoningSource,
+        content: decoded.reasoningContent,
+      });
+}
+
 function protocolExtensionsForResponse(message: Record<string, unknown>): Readonly<Record<string, unknown>> | undefined {
   const entries = Object.entries(message).filter(
     ([key, value]) => !isStandardOpenAIMessageField(key) && isProtocolExtensionValue(value)
@@ -665,7 +860,35 @@ function isProtocolExtensionValue(value: unknown): boolean {
     case "boolean":
       return true;
     default:
-      return false;
+      return isJsonSafeProtocolExtension(value);
+  }
+}
+
+function isJsonSafeProtocolExtension(value: unknown, depth = 0): boolean {
+  if (depth > 4) {
+    return false;
+  }
+  if (Array.isArray(value)) {
+    return value.length <= 32 && value.every((item) => isProtocolExtensionValueAtDepth(item, depth + 1));
+  }
+  if (!isPlainRecord(value)) {
+    return false;
+  }
+  const entries = Object.entries(value);
+  return entries.length <= 32 && entries.every(([, item]) => isProtocolExtensionValueAtDepth(item, depth + 1));
+}
+
+function isProtocolExtensionValueAtDepth(value: unknown, depth: number): boolean {
+  if (value === null) {
+    return true;
+  }
+  switch (typeof value) {
+    case "string":
+    case "number":
+    case "boolean":
+      return true;
+    default:
+      return isJsonSafeProtocolExtension(value, depth);
   }
 }
 
@@ -685,8 +908,12 @@ function numberOrUndefined(value: unknown): number | undefined {
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
-  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+  if (isPlainRecord(value)) {
     return value as Record<string, unknown>;
   }
   return {};
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

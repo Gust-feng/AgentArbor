@@ -209,6 +209,39 @@ test("Desktop Agent Session injects safe conversation history as separate messag
   assert.equal(result.pendingConfirmation, undefined);
 });
 
+test("Desktop Agent Session caps ordinary turn output budget instead of expanding to model ceiling", async () => {
+  let capturedRequest: ModelRequest | undefined;
+  const channel: IntelligenceChannel = {
+    async request(request) {
+      capturedRequest = request;
+      return textResponse(request, "结果是 1573");
+    },
+    validateResponse() {
+      return { status: "passed", checkedAt: new Date(0).toISOString(), issues: [] };
+    },
+  };
+
+  const result = await runDesktopAgentSession("计算 37*42+19", {
+    aiMode: "fake",
+    createIntelligenceChannel: () => channel,
+    modelCapabilities: {
+      contextWindowTokens: 128_000,
+      maxOutputTokens: 16_000,
+      supportsToolCalling: true,
+      supportsParallelToolCalls: false,
+      supportsStructuredOutputs: false,
+      supportsStreaming: true,
+      supportsVisionInput: false,
+      supportsReasoningEffort: false,
+      preferredApiStyle: "chat_completions",
+      stability: "stable",
+    },
+  });
+
+  assert.equal(result.status, "completed");
+  assert.equal(capturedRequest?.budget.maxOutputTokens, 3200);
+});
+
 test("Desktop Agent Session removes internal control fragments from visible answers", async () => {
   const channel: IntelligenceChannel = {
     async request(request) {

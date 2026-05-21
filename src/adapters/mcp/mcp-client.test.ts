@@ -3,7 +3,7 @@ import test from "node:test";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { z } from "zod";
-import { McpClientWrapper, type McpToolInfo } from "./mcp-client.js";
+import { McpClientWrapper } from "./mcp-client.js";
 import { createMcpToolExecutor } from "./mcp-tool-adapter.js";
 import { McpManager } from "./mcp-manager.js";
 
@@ -78,7 +78,7 @@ test("McpClientWrapper connects and disconnects", async () => {
 });
 
 test("McpClientWrapper listTools returns expected format", async () => {
-  const { client, server } = await createConnectedPair();
+  const { client } = await createConnectedPair();
 
   const tools = await client.listTools();
   assert.equal(tools.length, 3);

@@ -12,6 +12,7 @@ import type { IntelligenceChannel, ModelOutputDelta } from "../domain/intelligen
 import type { InformationSourceKind } from "../domain/research/index.js";
 import type {
   ModelProviderModelCatalog,
+  ProviderProtocolProfileId,
   SanitizedModelProviderConfig,
   ToolStateSettings,
 } from "../domain/config/index.js";
@@ -86,10 +87,11 @@ const OPENAI_RESPONSES_PROTOCOL = "openai_responses";
 export function createModelRuntimeConfig(input: {
   readonly mode?: ModelRuntimeMode;
   readonly env?: ModelRuntimeEnvironment;
+  readonly modelProvider?: Pick<SanitizedModelProviderConfig, "providerKind" | "protocolKind" | "profileId" | "openAI">;
   readonly fetch?: FetchLike;
   readonly onModelOutputDelta?: (delta: ModelOutputDelta) => void;
 }): ModelRuntimeConfig {
-  const mode = input.mode ?? "none";
+  const mode = input.mode ?? modelRuntimeModeForProfile(input.modelProvider) ?? "none";
 
   if (mode === "none") {
     return {
@@ -126,6 +128,7 @@ export function createModelRuntimeConfig(input: {
   if (mode === "openai-responses") {
     return createOpenAIResponsesConfig({
       env: input.env ?? process.env,
+      modelProvider: input.modelProvider,
       fetch: input.fetch,
       onModelOutputDelta: input.onModelOutputDelta,
     });
@@ -133,6 +136,7 @@ export function createModelRuntimeConfig(input: {
 
   return createOpenAICompatibleConfig({
     env: input.env ?? process.env,
+    modelProvider: input.modelProvider,
     fetch: input.fetch,
     onModelOutputDelta: input.onModelOutputDelta,
   });
@@ -154,6 +158,7 @@ export async function fetchModelRuntimeModelCatalog(input: {
 
 function createOpenAICompatibleConfig(input: {
   readonly env: ModelRuntimeEnvironment;
+  readonly modelProvider?: Pick<SanitizedModelProviderConfig, "profileId" | "openAI">;
   readonly fetch?: FetchLike;
   readonly onModelOutputDelta?: (delta: ModelOutputDelta) => void;
 }): ModelRuntimeConfig {
@@ -198,8 +203,10 @@ function createOpenAICompatibleConfig(input: {
           baseUrl,
           apiKey,
           model,
+          providerProfileId: providerProfileIdFromConfig(input.modelProvider?.profileId),
           fetch: input.fetch,
           stream: input.onModelOutputDelta !== undefined,
+          requestSettings: input.modelProvider?.openAI,
           onOutputDelta: input.onModelOutputDelta,
         }),
         bus: runtime.bus,
@@ -210,6 +217,7 @@ function createOpenAICompatibleConfig(input: {
 
 function createOpenAIResponsesConfig(input: {
   readonly env: ModelRuntimeEnvironment;
+  readonly modelProvider?: Pick<SanitizedModelProviderConfig, "openAI">;
   readonly fetch?: FetchLike;
   readonly onModelOutputDelta?: (delta: ModelOutputDelta) => void;
 }): ModelRuntimeConfig {
@@ -256,6 +264,7 @@ function createOpenAIResponsesConfig(input: {
           model,
           fetch: input.fetch,
           stream: input.onModelOutputDelta !== undefined,
+          requestSettings: input.modelProvider?.openAI,
           onOutputDelta: input.onModelOutputDelta,
         }),
         bus: runtime.bus,
@@ -331,4 +340,28 @@ function firstNonBlank(...values: readonly (string | undefined)[]): string | und
     }
   }
   return undefined;
+}
+
+function providerProfileIdFromConfig(value: string | undefined): ProviderProtocolProfileId | undefined {
+  if (
+    value === "openai" ||
+    value === "anthropic" ||
+    value === "deepseek" ||
+    value === "moonshot" ||
+    value === "glm" ||
+    value === "minimax" ||
+    value === "custom_openai_chat"
+  ) {
+    return value;
+  }
+  return undefined;
+}
+
+function modelRuntimeModeForProfile(
+  profile: Pick<SanitizedModelProviderConfig, "providerKind" | "protocolKind"> | undefined
+): ModelRuntimeMode | undefined {
+  if (profile?.providerKind !== "openai_compatible") {
+    return undefined;
+  }
+  return profile.protocolKind === "openai_compatible_chat_completions" ? "openai-compatible" : "openai-responses";
 }

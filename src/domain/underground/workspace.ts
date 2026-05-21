@@ -25,11 +25,11 @@ export class InMemoryWorkspace<T> implements WritableWorkspace<T> {
     return globalThis.structuredClone(this.state);
   }
 
-  patch(agentId: string, update: Partial<T>): void {
+  patch(_agentId: string, update: Partial<T>): void {
     this.state = { ...this.state, ...update };
   }
 
-  replace(agentId: string, snapshot: T): void {
+  replace(_agentId: string, snapshot: T): void {
     this.state = globalThis.structuredClone(snapshot);
   }
 }

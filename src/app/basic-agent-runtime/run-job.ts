@@ -1,4 +1,4 @@
-import type { BasicAgentCapabilitySnapshot, SanitizedInformationAccessConfig, SanitizedModelProviderConfig } from "../../domain/config/index.js";
+import type { BasicAgentCapabilitySnapshot, ModelRunReasoningEffort, SanitizedInformationAccessConfig, SanitizedModelProviderConfig } from "../../domain/config/index.js";
 import type { ConfirmationDecision } from "../../domain/basic-agent/index.js";
 import type { AgentRunTree } from "../../domain/underground/index.js";
 import type { ModelRuntimeMode } from "../model-runtime/index.js";
@@ -70,6 +70,7 @@ export type BasicAgentRunJob = Omit<BasicAgentRunProjectionInput, "confirmationD
   readonly runAfterRunId?: string;
   routeDecision?: DesktopIntentDecision;
   readonly taskSoilInput?: DesktopTaskSoilInput;
+  readonly reasoningEffort?: ModelRunReasoningEffort;
   config: SanitizedModelProviderConfig;
   informationAccess: SanitizedInformationAccessConfig;
   capabilitySnapshot?: BasicAgentCapabilitySnapshot;
@@ -93,6 +94,7 @@ export type BasicAgentRunJobCreateInput = {
   readonly runAfterRunId?: string;
   readonly routeDecision?: DesktopIntentDecision;
   readonly taskSoilInput?: DesktopTaskSoilInput;
+  readonly reasoningEffort?: ModelRunReasoningEffort;
   readonly config: SanitizedModelProviderConfig;
   readonly informationAccess: SanitizedInformationAccessConfig;
   readonly capabilitySnapshot?: BasicAgentCapabilitySnapshot;

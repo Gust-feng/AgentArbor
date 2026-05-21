@@ -38,6 +38,15 @@ test("OpenAI-compatible Chat Completions adapter maps request and response throu
     baseUrl: "https://llm.example.test/",
     apiKey: "sk-test-secret-token",
     model: "gpt-compatible-test",
+    requestSettings: {
+      temperature: 0.3,
+      topP: 0.85,
+      maxOutputTokens: 64,
+      reasoningEffort: "low",
+      serviceTier: "default",
+      parallelToolCalls: true,
+      store: false,
+    },
     fetch,
   });
   const eventLog = new InMemoryEventLog();
@@ -60,7 +69,9 @@ test("OpenAI-compatible Chat Completions adapter maps request and response throu
     model: "gpt-compatible-test",
     messages: [{ role: "user", content: "Build a helper." }],
     response_format: { type: "json_object" },
-    max_tokens: 128,
+    temperature: 0.3,
+    top_p: 0.85,
+    max_completion_tokens: 64,
   });
   assert.deepEqual(eventLog.types(), ["model.requested", "model.completed"]);
   assert.equal(JSON.stringify(eventLog.list()).includes("sk-test-secret-token"), false);
@@ -153,6 +164,332 @@ test("OpenAI-compatible Chat Completions adapter streams safe output deltas", as
   assert.equal(JSON.stringify(deltas).includes("sk-test-secret-token"), false);
 });
 
+test("OpenAI-compatible Chat adapter applies DeepSeek reasoning controls and extracts reasoning_content", async () => {
+  const calls: { body: Record<string, unknown> }[] = [];
+  const fetch: FetchLike = async (_url, init) => {
+    calls.push({ body: JSON.parse(init.body) as Record<string, unknown> });
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        id: "chatcmpl-deepseek-reasoning",
+        model: "deepseek-v4-pro",
+        choices: [
+          {
+            message: {
+              role: "assistant",
+              reasoning_content: "先比较复杂度、稳定性与空间占用。",
+              content: "归并排序稳定，快速排序平均更快但最坏会退化。",
+            },
+            finish_reason: "stop",
+          },
+        ],
+      }),
+    };
+  };
+  const provider = new OpenAICompatibleChatCompletionsProvider({
+    baseUrl: "https://api.deepseek.com",
+    apiKey: "sk-test-secret-token",
+    model: "deepseek-v4-pro",
+    providerProfileId: "deepseek",
+    requestSettings: {
+      temperature: 0.2,
+      topP: 0.8,
+      reasoningEffort: "high",
+    },
+    fetch,
+  });
+
+  const response = await provider.complete(createValidModelRequest({
+    outputContract: {
+      contractId: "test.text.v1",
+      outputKind: "explanation",
+      format: "text",
+    },
+  }));
+
+  assert.equal(response.status, "completed");
+  assert.equal(response.textOutput, "归并排序稳定，快速排序平均更快但最坏会退化。");
+  assert.deepEqual(response.reasoningOutput, {
+    source: "openai_chat_reasoning_content",
+    content: "先比较复杂度、稳定性与空间占用。",
+    truncated: false,
+  });
+  assert.equal(calls[0]?.body.reasoning_effort, "high");
+  assert.deepEqual(calls[0]?.body.thinking, { type: "enabled" });
+  assert.equal(calls[0]?.body.temperature, undefined);
+  assert.equal(calls[0]?.body.top_p, undefined);
+});
+
+test("OpenAI-compatible Chat adapter sends Kimi thinking as a provider extension", async () => {
+  const calls: { body: Record<string, unknown> }[] = [];
+  const fetch: FetchLike = async (_url, init) => {
+    calls.push({ body: JSON.parse(init.body) as Record<string, unknown> });
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        id: "chatcmpl-kimi-thinking",
+        model: "kimi-k2",
+        choices: [
+          {
+            message: { role: "assistant", content: "ok" },
+            finish_reason: "stop",
+          },
+        ],
+      }),
+    };
+  };
+  const provider = new OpenAICompatibleChatCompletionsProvider({
+    baseUrl: "https://api.moonshot.cn/v1",
+    apiKey: "sk-test-secret-token",
+    model: "kimi-k2",
+    providerProfileId: "moonshot",
+    requestSettings: {
+      temperature: 0.2,
+      topP: 0.8,
+      reasoningEffort: "high",
+    },
+    fetch,
+  });
+
+  await provider.complete(createValidModelRequest({
+    tools: [
+      {
+        name: "web_search",
+        description: "Search the web.",
+        inputSchema: { type: "object", properties: {}, required: [] },
+      },
+    ],
+    toolChoice: { type: "function", function: { name: "web_search" } },
+    outputContract: {
+      contractId: "test.text.v1",
+      outputKind: "explanation",
+      format: "text",
+    },
+  }));
+
+  assert.deepEqual(calls[0]?.body.thinking, { type: "enabled" });
+  assert.equal(calls[0]?.body.extra_body, undefined);
+  assert.equal(calls[0]?.body.temperature, undefined);
+  assert.equal(calls[0]?.body.top_p, undefined);
+  assert.equal(calls[0]?.body.tool_choice, "auto");
+  assert.equal("reasoning_effort" in (calls[0]?.body ?? {}), false);
+});
+
+test("OpenAI-compatible Chat adapter disables GLM thinking for stable OpenAI-compatible calls", async () => {
+  const calls: { body: Record<string, unknown> }[] = [];
+  const fetch: FetchLike = async (_url, init) => {
+    calls.push({ body: JSON.parse(init.body) as Record<string, unknown> });
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        id: "chatcmpl-glm-stable",
+        model: "glm-4.5",
+        choices: [
+          {
+            message: { role: "assistant", content: "ok" },
+            finish_reason: "stop",
+          },
+        ],
+      }),
+    };
+  };
+  const provider = new OpenAICompatibleChatCompletionsProvider({
+    baseUrl: "https://open.bigmodel.cn/api/paas/v4",
+    apiKey: "sk-test-secret-token",
+    model: "glm-4.5",
+    providerProfileId: "glm",
+    requestSettings: {
+      reasoningEffort: "high",
+    },
+    fetch,
+    stream: true,
+  });
+
+  await provider.complete(createValidModelRequest({
+    outputContract: {
+      contractId: "test.text.v1",
+      outputKind: "explanation",
+      format: "text",
+    },
+  }));
+
+  assert.deepEqual(calls[0]?.body.thinking, { type: "disabled" });
+  assert.equal(calls[0]?.body.stream, undefined);
+  assert.equal(calls[0]?.body.extra_body, undefined);
+  assert.equal("reasoning_effort" in (calls[0]?.body ?? {}), false);
+});
+
+test("OpenAI-compatible Chat adapter enables modern GLM thinking and streaming", async () => {
+  const calls: { body: Record<string, unknown> }[] = [];
+  const deltas: Array<{ kind: string | undefined; delta: string }> = [];
+  const fetch: FetchLike = async (_url, init) => {
+    calls.push({ body: JSON.parse(init.body) as Record<string, unknown> });
+    return {
+      ok: true,
+      status: 200,
+      body: sseChunks([
+        {
+          model: "glm-5.1",
+          choices: [{ delta: { reasoning_content: "先计算乘法再加法。" }, finish_reason: null }],
+        },
+        {
+          model: "glm-5.1",
+          choices: [{ delta: { content: "结果是 1573。" }, finish_reason: "stop" }],
+        },
+      ]),
+      json: async () => {
+        throw new Error("Streaming response should not be read through json().");
+      },
+    };
+  };
+  const provider = new OpenAICompatibleChatCompletionsProvider({
+    baseUrl: "https://open.bigmodel.cn/api/paas/v4",
+    apiKey: "sk-test-secret-token",
+    model: "glm-5.1",
+    providerProfileId: "glm",
+    fetch,
+    stream: true,
+    onOutputDelta: (delta) => {
+      deltas.push({ kind: delta.kind, delta: delta.delta });
+    },
+  });
+
+  const response = await provider.complete(createValidModelRequest({
+    outputContract: {
+      contractId: "test.text.v1",
+      outputKind: "explanation",
+      format: "text",
+    },
+  }));
+
+  assert.equal(response.status, "completed");
+  assert.deepEqual(calls[0]?.body.thinking, { type: "enabled" });
+  assert.equal(calls[0]?.body.stream, true);
+  assert.deepEqual(deltas, [
+    { kind: "reasoning", delta: "先计算乘法再加法。" },
+    { kind: "output", delta: "结果是 1573。" },
+  ]);
+});
+
+test("OpenAI-compatible Chat adapter extracts MiniMax reasoning_details and strips think tags", async () => {
+  const fetch: FetchLike = async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({
+      id: "chatcmpl-minimax-reasoning",
+      model: "MiniMax-M2.7",
+      choices: [
+        {
+          message: {
+            role: "assistant",
+            reasoning_details: [{ text: "先说明前提，再说明区间收缩。" }],
+            content: "<think>再组织成三步。</think>二分查找要求数组有序。",
+          },
+          finish_reason: "stop",
+        },
+      ],
+    }),
+  });
+  const provider = new OpenAICompatibleChatCompletionsProvider({
+    baseUrl: "https://api.minimaxi.com/v1",
+    apiKey: "sk-test-secret-token",
+    model: "MiniMax-M2.7",
+    providerProfileId: "minimax",
+    fetch,
+  });
+
+  const response = await provider.complete(createValidModelRequest({
+    outputContract: {
+      contractId: "test.text.v1",
+      outputKind: "explanation",
+      format: "text",
+    },
+  }));
+
+  assert.equal(response.textOutput, "二分查找要求数组有序。");
+  assert.deepEqual(response.reasoningOutput, {
+    source: "openai_chat_reasoning_content",
+    content: "先说明前提，再说明区间收缩。\n\n再组织成三步。",
+    truncated: false,
+  });
+});
+
+test("OpenAI-compatible Chat adapter streams MiniMax reasoning_details as reasoning deltas", async () => {
+  const calls: { body: Record<string, unknown> }[] = [];
+  const deltas: Array<{ kind: string | undefined; delta: string }> = [];
+  const fetch: FetchLike = async (_url, init) => {
+    calls.push({ body: JSON.parse(init.body) as Record<string, unknown> });
+    return {
+      ok: true,
+      status: 200,
+      body: sseChunks([
+        {
+          model: "MiniMax-M2.7",
+          choices: [{ delta: { reasoning_details: [{ text: "需要" }] }, finish_reason: null }],
+        },
+        {
+          model: "MiniMax-M2.7",
+          choices: [{ delta: { reasoning_details: [{ text: "需要先说明前提。" }] }, finish_reason: null }],
+        },
+        {
+          model: "MiniMax-M2.7",
+          choices: [{ delta: { content: "二分" }, finish_reason: null }],
+        },
+        {
+          model: "MiniMax-M2.7",
+          choices: [{ delta: { content: "二分查找要求有序数组。" }, finish_reason: "stop" }],
+        },
+      ]),
+      json: async () => {
+        throw new Error("Streaming response should not be read through json().");
+      },
+    };
+  };
+  const provider = new OpenAICompatibleChatCompletionsProvider({
+    baseUrl: "https://api.minimaxi.com/v1",
+    apiKey: "sk-test-secret-token",
+    model: "MiniMax-M2.7",
+    providerProfileId: "minimax",
+    fetch,
+    requestSettings: {
+      reasoningEffort: "high",
+    },
+    stream: true,
+    onOutputDelta: (delta) => {
+      deltas.push({ kind: delta.kind, delta: delta.delta });
+    },
+  });
+
+  const response = await provider.complete(createValidModelRequest({
+    outputContract: {
+      contractId: "test.text.v1",
+      outputKind: "explanation",
+      format: "text",
+    },
+  }));
+
+  assert.equal(response.status, "completed");
+  assert.equal(response.textOutput, "二分查找要求有序数组。");
+  assert.deepEqual(response.reasoningOutput, {
+    source: "openai_chat_reasoning_content",
+    content: "需要先说明前提。",
+    truncated: false,
+  });
+  assert.deepEqual(deltas, [
+    { kind: "reasoning", delta: "需要" },
+    { kind: "reasoning", delta: "先说明前提。" },
+    { kind: "output", delta: "二分" },
+    { kind: "output", delta: "查找要求有序数组。" },
+  ]);
+  assert.equal(calls[0]?.body.reasoning_split, true);
+  assert.equal(calls[0]?.body.extra_body, undefined);
+  assert.equal("reasoning_effort" in (calls[0]?.body ?? {}), false);
+  assert.equal(calls[0]?.body.stream, true);
+});
+
 test("OpenAI-compatible adapter maps tools, tool results, and provider tool calls", async () => {
   const calls: { body: Record<string, unknown> }[] = [];
   const fetch: FetchLike = async (_url, init) => {
@@ -169,6 +506,7 @@ test("OpenAI-compatible adapter maps tools, tool results, and provider tool call
               role: "assistant",
               content: "",
               reasoning_content: "Provider-private reasoning continuation.",
+              reasoning_details: [{ text: "Provider reasoning detail." }],
               tool_calls: [
                 {
                   id: "call-search",
@@ -210,6 +548,7 @@ test("OpenAI-compatible adapter maps tools, tool results, and provider tool call
           content: "",
           protocolExtensions: {
             reasoning_content: "Previous private continuation.",
+            reasoning_details: [{ text: "Previous detail." }],
             tool_calls: "ignored standard key",
           },
           toolCalls: [{ callId: "call-old", toolName: "web_search", input: { query: "old" } }],
@@ -229,6 +568,12 @@ test("OpenAI-compatible adapter maps tools, tool results, and provider tool call
   ]);
   assert.deepEqual(response.assistantMessage?.protocolExtensions, {
     reasoning_content: "Provider-private reasoning continuation.",
+    reasoning_details: [{ text: "Provider reasoning detail." }],
+  });
+  assert.deepEqual(response.reasoningOutput, {
+    source: "openai_chat_reasoning_content",
+    content: "Provider-private reasoning continuation.\n\nProvider reasoning detail.",
+    truncated: false,
   });
   assert.equal(response.finishReason, "tool_call");
   assert.deepEqual(calls[0]?.body.tools, [
@@ -247,6 +592,7 @@ test("OpenAI-compatible adapter maps tools, tool results, and provider tool call
     {
       role: "assistant",
       reasoning_content: "Previous private continuation.",
+      reasoning_details: [{ text: "Previous detail." }],
       content: "",
       tool_calls: [
         {

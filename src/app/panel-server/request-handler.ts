@@ -65,6 +65,7 @@ import {
   type BasicAgentRunExecutionInput,
 } from "../basic-agent-runtime/index.js";
 import type {
+  ModelRunReasoningEffort,
   SanitizedInformationAccessConfig,
   SanitizedModelProviderConfig,
   SanitizedWorkspaceConfig,
@@ -101,7 +102,6 @@ import {
 import {
   createDesktopAgentCanvas,
   createUndergroundDeepCanvas,
-  createPanelRunCanvas,
   type PanelRunCanvasReadModel,
 } from "../panel-canvas-read-model.js";
 import { PanelRunJobStore, type PanelDesktopRunMode, type PanelRunJob, type PanelRunKind } from "../panel-run-jobs.js";
@@ -117,7 +117,6 @@ import {
 import type { EventLogEntry } from "../../kernel/events/in-memory-event-log.js";
 import type { AgentRunTree } from "../../domain/underground/index.js";
 import type { DesktopTaskSoilInput } from "../task-soil-workspace.js";
-import { createMinimalRuntime } from "../runtime.js";
 import { safeCommandToolPreview, safeReadFileToolPreview } from "../safe-tool-preview.js";
 import {
   friendlyUserFacingFailureText,
@@ -226,6 +225,7 @@ type PanelRunExecutionResult = {
 type PanelRunExecutionOptions = {
   readonly conversationHistory?: readonly DesktopAgentConversationMessage[];
   readonly capabilitySnapshot?: BasicAgentCapabilitySnapshot;
+  readonly reasoningEffort?: ModelRunReasoningEffort;
   readonly abortSignal?: AbortSignal;
   readonly onRuntimeReady?: (context: PanelRuntimeReadyContext) => void;
   readonly onModelOutputDelta?: (delta: ModelOutputDelta) => void;
@@ -604,7 +604,9 @@ async function handleRunRequest(
   const runInput = parseRunInput(body, defaultAiModeForRunKind(runKind, config.defaultAiMode));
 
   try {
-    const run = await runForPanel(runtime, runKind, runInput.goal, runInput.aiMode, runInput.taskSoilInput, runInput.runMode);
+    const run = await runForPanel(runtime, runKind, runInput.goal, runInput.aiMode, runInput.taskSoilInput, runInput.runMode, {
+      reasoningEffort: runInput.reasoningEffort,
+    });
     const currentConfig = await runtime.configCenter.getModelProviderConfig();
     const currentInformationAccess = await runtime.configCenter.getInformationAccessConfig();
     const trace = createPanelRunTrace({ status: "completed", eventEntries: run.eventEntries });
@@ -627,6 +629,7 @@ async function handleRunRequest(
       observation: run.observation,
       agentRunTree: run.agentRunTree,
       desktopMode: runKind === "desktop" ? runInput.runMode : undefined,
+      reasoningEffort: runInput.reasoningEffort,
       createdAt: run.eventEntries[0]?.recordedAt ?? new Date(0).toISOString(),
       updatedAt: run.eventEntries.at(-1)?.recordedAt ?? new Date(0).toISOString(),
     });
@@ -691,6 +694,7 @@ async function handleStartRunRequest(
     aiMode: runInput.aiMode,
     routeDecision: undefined,
     taskSoilInput: runInput.taskSoilInput,
+    reasoningEffort: runInput.reasoningEffort,
   });
   const job = requirePanelRunJob(runtime, basicRun.runId);
 
@@ -705,7 +709,6 @@ async function handleConversationMessageRequest(
 ): Promise<void> {
   const body = await readJsonBody(request);
   const config = await runtime.configCenter.getModelProviderConfig();
-  const informationAccess = await runtime.configCenter.getInformationAccessConfig();
   const runInput = parseRunInput(body, defaultAiModeForRunKind("desktop", config.defaultAiMode));
   if (conversationId !== undefined) {
     await ensurePanelConversationLoaded(runtime, conversationId);
@@ -737,6 +740,7 @@ async function handleConversationMessageRequest(
     runAfterRunId,
     routeDecision: undefined,
     taskSoilInput: mergedTaskSoilInput,
+    reasoningEffort: runInput.reasoningEffort,
     startImmediately: !shouldQueue,
   });
   const job = requirePanelRunJob(runtime, basicRun.runId);
@@ -789,6 +793,7 @@ async function startGuidanceFollowUpRun(
     assistantTurnId: started.assistantTurn.turnId,
     routeDecision: undefined,
     taskSoilInput: job.taskSoilInput,
+    reasoningEffort: job.reasoningEffort,
     startImmediately: true,
   });
   const followUpJob = requirePanelRunJob(runtime, basicRun.runId);
@@ -1133,6 +1138,7 @@ async function executeBasicPanelRun(
   return runForPanel(runtime, job.runKind, job.goal, job.aiMode, taskSoilInput, job.runMode, {
     conversationHistory,
     capabilitySnapshot: job.capabilitySnapshot,
+    reasoningEffort: job.reasoningEffort,
     abortSignal: input.abortSignal,
     onRuntimeReady: input.onRuntimeReady,
     onModelOutputDelta: input.onModelOutputDelta,
@@ -1236,6 +1242,7 @@ function createPanelRunJobResponse(runtime: PanelRuntime, job: PanelRunJob): Pan
       agentRunTree,
       routeDecision: job.routeDecision,
       desktopMode: job.runKind === "desktop" ? job.runMode : undefined,
+      reasoningEffort: job.reasoningEffort,
       createdAt: job.createdAt,
       updatedAt: job.updatedAt,
     }),
@@ -1849,6 +1856,7 @@ async function persistPanelRunNow(runtime: PanelRuntime, job: PanelRunJob): Prom
     agentRunTree: job.completed?.agentRunTree,
     routeDecision: job.routeDecision,
     desktopMode: job.runKind === "desktop" ? job.runMode : undefined,
+    reasoningEffort: job.reasoningEffort,
     createdAt: job.createdAt,
     updatedAt: job.updatedAt,
   });
@@ -2548,6 +2556,7 @@ function syncPanelRunStreamEventsForJob(runtime: PanelRuntime, job: PanelRunJob)
     observation: job.completed?.observation ?? job.blocked?.observation,
     routeDecision: job.routeDecision,
     desktopMode: job.runKind === "desktop" ? job.runMode : undefined,
+    reasoningEffort: job.reasoningEffort,
     createdAt: job.createdAt,
     updatedAt: job.updatedAt,
     error: job.failed?.error ?? job.cancelled?.reason ?? job.blocked?.reason,
@@ -2568,6 +2577,27 @@ function appendLiveModelOutputDelta(runtime: PanelRuntime, runId: string, delta:
   }
   const purpose = delta.purpose ?? modelPurposeForRequest(job, delta.requestId);
   if (!isUserFacingStreamingPurpose(purpose)) {
+    return;
+  }
+  if (delta.kind === "reasoning") {
+    const event = runtime.runJobs.appendStreamEvent(runId, {
+      eventId: `${runId}:live:model.reasoning.delta:${delta.requestId}:${delta.index}`,
+      runId,
+      type: "model.reasoning.delta",
+      createdAt: delta.createdAt,
+      agentLabel: "模型",
+      delta: safeDelta,
+      status: "running",
+      detail: {
+        kind: "thinking",
+        preview: safeDelta,
+        truncated: false,
+      },
+      sourceRefs: [],
+      modelCallRefs: [delta.requestId],
+      toolCallRefs: [],
+    });
+    runtime.runExecutor.syncRunEvents(job, [event]);
     return;
   }
   const event = runtime.runJobs.appendStreamEvent(runId, {
@@ -2648,7 +2678,16 @@ async function prepareDesktopRunResources(
     throw createModelRuntimeDisabledConfigurationError();
   }
 
-  const capabilitySnapshot = options.capabilitySnapshot ?? (await runtime.capabilityCenter.snapshot());
+  const baseCapabilitySnapshot = options.capabilitySnapshot ?? (await runtime.capabilityCenter.snapshot());
+  const activeModel = activeModelWithRunOpenAISettings(
+    baseCapabilitySnapshot.activeModel,
+    baseCapabilitySnapshot.modelCapabilities.supportsReasoningEffort,
+    options.reasoningEffort
+  );
+  const capabilitySnapshot =
+    activeModel === baseCapabilitySnapshot.activeModel
+      ? baseCapabilitySnapshot
+      : { ...baseCapabilitySnapshot, activeModel };
   if (
     isRealDesktopAiMode(aiMode) &&
     capabilitySnapshot.activeModel.providerKind !== "openai_compatible"
@@ -2663,13 +2702,14 @@ async function prepareDesktopRunResources(
   const aiEnvironment = await runtime.configCenter.createUndergroundAiEnvironment({
     modelProvider: capabilitySnapshot.activeModel,
   });
-  const runtimeMode = desktopRuntimeMode(aiMode);
+  const runtimeMode = desktopRuntimeMode(aiMode, capabilitySnapshot.activeModel);
   const aiConfig =
     aiMode === "fake"
       ? createModelRuntimeConfig({ mode: "fake", env: aiEnvironment, onModelOutputDelta: options.onModelOutputDelta })
       : createModelRuntimeConfig({
           mode: runtimeMode,
           env: aiEnvironment,
+          modelProvider: capabilitySnapshot.activeModel,
           fetch: runtime.providerFetch,
           onModelOutputDelta: options.onModelOutputDelta,
         });
@@ -2690,12 +2730,41 @@ async function prepareDesktopRunResources(
   };
 }
 
+function activeModelWithRunOpenAISettings(
+  activeModel: SanitizedModelProviderConfig,
+  supportsReasoningEffort: boolean,
+  reasoningEffort: ModelRunReasoningEffort | undefined
+): SanitizedModelProviderConfig {
+  const { reasoningEffort: _profileReasoningEffort, ...baseOpenAI } = activeModel.openAI ?? {};
+  if (reasoningEffort !== undefined && !supportsReasoningEffort) {
+    throw new PanelHttpError(
+      400,
+      "unsupported_model_reasoning_effort",
+      "当前模型不支持调节思考强度。"
+    );
+  }
+  const openAI = {
+    ...baseOpenAI,
+    ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
+  };
+  return {
+    ...activeModel,
+    openAI: Object.keys(openAI).length === 0 ? undefined : openAI,
+  };
+}
+
 function isRealDesktopAiMode(aiMode: ModelRuntimeMode): boolean {
   return aiMode === "openai-compatible" || aiMode === "openai-responses";
 }
 
-function desktopRuntimeMode(aiMode: ModelRuntimeMode): ModelRuntimeMode {
+function desktopRuntimeMode(
+  aiMode: ModelRuntimeMode,
+  activeModel: Pick<SanitizedModelProviderConfig, "providerKind" | "protocolKind">
+): ModelRuntimeMode {
   if (aiMode === "fake" || aiMode === "none") return aiMode;
+  if (activeModel.providerKind === "openai_compatible" && activeModel.protocolKind === "openai_compatible_chat_completions") {
+    return "openai-compatible";
+  }
   return "openai-responses";
 }
 
@@ -2739,6 +2808,7 @@ async function runDeepDesktopForPanel(
     observation,
     agentRunTree: result.undergroundOrchestratorRun.agentRunTree,
     desktopMode: "deep",
+    reasoningEffort: options.reasoningEffort,
     createdAt: eventEntries[0]?.recordedAt ?? new Date(0).toISOString(),
     updatedAt: eventEntries.at(-1)?.recordedAt ?? new Date(0).toISOString(),
   });
@@ -2780,11 +2850,12 @@ async function runOrdinaryDesktopForPanel(
     onModelOutputDelta: options.onModelOutputDelta,
     allowWorkSessionUpgrade: false,
   });
-  return desktopPanelResultFromAgent(agent);
+  return desktopPanelResultFromAgent(agent, options.reasoningEffort);
 }
 
 function desktopPanelResultFromAgent(
-  agent: Awaited<ReturnType<typeof runDesktopAgentSession>>
+  agent: Awaited<ReturnType<typeof runDesktopAgentSession>>,
+  reasoningEffort?: ModelRunReasoningEffort
 ): PanelRunExecutionResult {
   if (agent.status === "completed" || agent.status === "confirmation_needed" || agent.status === "paused") {
     const eventEntries = agent.runtime.eventLog.list();
@@ -2793,6 +2864,7 @@ function desktopPanelResultFromAgent(
       status: agent.status === "paused" ? "blocked" : "completed",
       eventEntries,
       desktopMode: "agent",
+      reasoningEffort,
       createdAt: eventEntries[0]?.recordedAt ?? new Date(0).toISOString(),
       updatedAt: eventEntries.at(-1)?.recordedAt ?? new Date(0).toISOString(),
     });
@@ -2817,8 +2889,8 @@ function desktopPanelResultFromAgent(
           : {
               confirmationId: agent.pendingApproval.confirmationId,
               resume: async (resumeInput) => {
-                const resumed = await agent.pendingApproval!.resume(resumeInput);
-                return desktopPanelResultFromAgent(resumed);
+              const resumed = await agent.pendingApproval!.resume(resumeInput);
+                return desktopPanelResultFromAgent(resumed, reasoningEffort);
               },
             },
     };
@@ -2858,13 +2930,16 @@ async function runUndergroundForPanel(
     throw createModelRuntimeDisabledConfigurationError();
   }
 
-  const aiEnvironment = await runtime.configCenter.createUndergroundAiEnvironment();
+  const activeModel = await runtime.configCenter.getModelProviderConfig();
+  const aiEnvironment = await runtime.configCenter.createUndergroundAiEnvironment({ modelProvider: activeModel });
+  const runtimeMode = desktopRuntimeMode(aiMode, activeModel);
   const aiConfig =
     aiMode === "fake"
       ? createModelRuntimeConfig({ mode: "fake", env: aiEnvironment, onModelOutputDelta: options.onModelOutputDelta })
       : createModelRuntimeConfig({
-          mode: aiMode,
+          mode: runtimeMode,
           env: aiEnvironment,
+          modelProvider: activeModel,
           fetch: runtime.providerFetch,
           onModelOutputDelta: options.onModelOutputDelta,
         });

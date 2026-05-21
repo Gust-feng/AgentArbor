@@ -3,7 +3,9 @@ import type {
   ConfiguredModelProviderKind,
   CreateModelProviderProfileInput,
   McpServerTransportKind,
+  ModelRunReasoningEffort,
   ModelProviderModelCatalogItem,
+  OpenAIModelRequestSettings,
   ToolStateSettings,
   UpdateInformationAccessConfigInput,
   UpdateModelProviderConfigInput,
@@ -23,6 +25,7 @@ export type PanelRunInput = {
   readonly goal: string;
   readonly aiMode: ModelRuntimeMode;
   readonly runMode: PanelDesktopRunMode;
+  readonly reasoningEffort?: ModelRunReasoningEffort;
   readonly taskSoilInput?: DesktopTaskSoilInput;
 };
 
@@ -37,7 +40,7 @@ export type ModelCatalogUpdateInput = {
 // Keep request parsing stateless. Route modules decide what to do with validated inputs.
 export function parseConfigUpdate(raw: unknown): UpdateModelProviderConfigInput {
   const record = asRecord(raw);
-  return {
+  const update: UpdateModelProviderConfigInput = {
     profileId: optionalString(record.profileId),
     label: optionalString(record.label),
     providerKind: parseOptionalModelProviderKind(record.providerKind),
@@ -50,6 +53,12 @@ export function parseConfigUpdate(raw: unknown): UpdateModelProviderConfigInput 
     apiKey: optionalString(record.apiKey),
     clearApiKey: booleanOrUndefined(record.clearApiKey),
   };
+  return "openAI" in record
+    ? {
+        ...update,
+        openAI: parseOpenAIModelRequestSettings(record.openAI),
+      }
+    : update;
 }
 
 export function parseCreateModelProfile(raw: unknown): CreateModelProviderProfileInput {
@@ -173,12 +182,13 @@ export function parseRunInput(raw: unknown, defaultAiMode: ModelRuntimeMode): Pa
     goal,
     aiMode: parseOptionalAiMode(record.aiMode, "AI 模式无效。") ?? defaultAiMode,
     runMode: parseOptionalDesktopRunMode(record.runMode) ?? "agent",
+    reasoningEffort: parseRunReasoningEffort(record.reasoningEffort, record.openAI),
     taskSoilInput,
   };
 }
 
-export function defaultAiModeForRunKind(runKind: PanelRunKind, configuredDefault: ModelRuntimeMode): ModelRuntimeMode {
-  return runKind === "desktop" ? "openai-responses" : configuredDefault;
+export function defaultAiModeForRunKind(_runKind: PanelRunKind, configuredDefault: ModelRuntimeMode): ModelRuntimeMode {
+  return configuredDefault;
 }
 
 export function parseConfirmationDecision(raw: unknown): Pick<ConfirmationDecision, "decision" | "guidance"> {
@@ -311,6 +321,97 @@ function stringArrayOrUndefined(value: unknown): readonly string[] | undefined {
 
 function numberOrUndefined(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function parseOpenAIModelRequestSettings(value: unknown): OpenAIModelRequestSettings {
+  if (value === undefined || value === null) {
+    return {};
+  }
+  const record = asRecord(value);
+  return {
+    temperature: optionalNumberInRange(record.temperature, 0, 2, "temperature 必须在 0 到 2 之间。"),
+    topP: optionalNumberInRange(record.topP, 0, 1, "top_p 必须在 0 到 1 之间。"),
+    maxOutputTokens: optionalPositiveInteger(record.maxOutputTokens, "最大输出 token 必须是正整数。"),
+    reasoningEffort: parseOptionalOpenAIReasoningEffort(record.reasoningEffort),
+    reasoningSummary: parseOptionalOpenAIReasoningSummary(record.reasoningSummary),
+    textVerbosity: parseOptionalOpenAITextVerbosity(record.textVerbosity),
+    serviceTier: parseOptionalOpenAIServiceTier(record.serviceTier),
+    truncation: parseOptionalOpenAITruncation(record.truncation),
+    stream: booleanOrUndefined(record.stream),
+    parallelToolCalls: booleanOrUndefined(record.parallelToolCalls),
+    store: booleanOrUndefined(record.store),
+  };
+}
+
+function parseRunReasoningEffort(
+  value: unknown,
+  legacyOpenAIValue: unknown
+): ModelRunReasoningEffort | undefined {
+  const direct = parseOptionalRunReasoningEffort(value);
+  if (direct !== undefined) {
+    return direct;
+  }
+  return parseOptionalRunReasoningEffort(asRecord(legacyOpenAIValue).reasoningEffort);
+}
+
+function optionalNumberInRange(value: unknown, min: number, max: number, message: string): number | undefined {
+  if (value === undefined || value === null || value === "") {
+    return undefined;
+  }
+  if (typeof value !== "number" || !Number.isFinite(value) || value < min || value > max) {
+    throw new PanelHttpError(400, "invalid_openai_parameter", message);
+  }
+  return value;
+}
+
+function optionalPositiveInteger(value: unknown, message: string): number | undefined {
+  if (value === undefined || value === null || value === "") {
+    return undefined;
+  }
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 1) {
+    throw new PanelHttpError(400, "invalid_openai_parameter", message);
+  }
+  return Math.floor(value);
+}
+
+function parseOptionalOpenAIReasoningEffort(value: unknown): OpenAIModelRequestSettings["reasoningEffort"] {
+  if (value === undefined || value === null || value === "") return undefined;
+  if (value === "none" || value === "minimal" || value === "low" || value === "medium" || value === "high" || value === "xhigh") {
+    return value;
+  }
+  throw new PanelHttpError(400, "invalid_openai_parameter", "reasoning effort 无效。");
+}
+
+function parseOptionalRunReasoningEffort(value: unknown): ModelRunReasoningEffort | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  if (value === "low" || value === "medium" || value === "high") {
+    return value;
+  }
+  throw new PanelHttpError(400, "invalid_openai_parameter", "思考强度只能是 low、medium 或 high。");
+}
+
+function parseOptionalOpenAIReasoningSummary(value: unknown): OpenAIModelRequestSettings["reasoningSummary"] {
+  if (value === undefined || value === null || value === "") return undefined;
+  if (value === "auto" || value === "concise" || value === "detailed") return value;
+  throw new PanelHttpError(400, "invalid_openai_parameter", "reasoning summary 无效。");
+}
+
+function parseOptionalOpenAITextVerbosity(value: unknown): OpenAIModelRequestSettings["textVerbosity"] {
+  if (value === undefined || value === null || value === "") return undefined;
+  if (value === "low" || value === "medium" || value === "high") return value;
+  throw new PanelHttpError(400, "invalid_openai_parameter", "text verbosity 无效。");
+}
+
+function parseOptionalOpenAIServiceTier(value: unknown): OpenAIModelRequestSettings["serviceTier"] {
+  if (value === undefined || value === null || value === "") return undefined;
+  if (value === "auto" || value === "default" || value === "flex" || value === "priority") return value;
+  throw new PanelHttpError(400, "invalid_openai_parameter", "service tier 无效。");
+}
+
+function parseOptionalOpenAITruncation(value: unknown): OpenAIModelRequestSettings["truncation"] {
+  if (value === undefined || value === null || value === "") return undefined;
+  if (value === "auto" || value === "disabled") return value;
+  throw new PanelHttpError(400, "invalid_openai_parameter", "truncation 无效。");
 }
 
 function informationSourcePreferenceOrUndefined(

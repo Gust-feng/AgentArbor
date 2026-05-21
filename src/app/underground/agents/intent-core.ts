@@ -112,10 +112,6 @@ export class IntentCoreAgent implements
       rawGoal: percept.rawGoal,
       constraints: percept.constraints,
     });
-    const fallbackPlan = createMinimalUndergroundExplorationPlan(
-      percept.goalId,
-      fallbackProfile,
-    );
     const ai = await reasonWithAgentTurn({
       agentId: this.agentId,
       agentTurnRuntime: ctx.capabilities?.agentTurnRuntime,

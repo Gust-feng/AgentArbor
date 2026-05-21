@@ -1,0 +1,148 @@
+{
+  "schema_version": "0.1.0",
+  "generated_at": "2026-05-20T16:50:00+08:00",
+  "author": "Manus AI",
+  "fixtures": [
+    {
+      "id": "openai_responses_tool_roundtrip",
+      "provider": "openai",
+      "protocol_family": "openai_responses",
+      "description": "OpenAI Responses style function call item followed by function_call_output item.",
+      "unified_request": {
+        "provider": "openai",
+        "model": "gpt-4.1-mini",
+        "messages": [{"role": "user", "content": "查询北京今天的天气，并用一句话回答。"}],
+        "tools": [{"type": "function", "name": "get_weather", "description": "Get weather by city.", "input_schema": {"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"], "additionalProperties": false}, "strict": true}],
+        "tool_choice": "auto"
+      },
+      "provider_request_shape": {
+        "model": "gpt-4.1-mini",
+        "input": [{"role": "user", "content": "查询北京今天的天气，并用一句话回答。"}],
+        "tools": [{"type": "function", "name": "get_weather", "description": "Get weather by city.", "parameters": {"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"], "additionalProperties": false}, "strict": true}]
+      },
+      "provider_tool_call_response_shape": {
+        "output": [{"type": "function_call", "id": "fc_001", "call_id": "call_001", "name": "get_weather", "arguments": "{\"city\":\"北京\"}"}]
+      },
+      "provider_followup_request_shape": {
+        "previous_response_id": "resp_001",
+        "input": [{"type": "function_call_output", "call_id": "call_001", "output": "{\"city\":\"北京\",\"condition\":\"晴\",\"temperature_c\":26}"}]
+      }
+    },
+    {
+      "id": "openai_chat_tool_roundtrip",
+      "provider": "deepseek",
+      "protocol_family": "openai_chat_completions",
+      "description": "OpenAI Chat-compatible function call and tool result message used by DeepSeek, Z.AI, Kimi and MiniMax OpenAI-compatible mode.",
+      "unified_request": {
+        "provider": "deepseek",
+        "model": "deepseek-chat",
+        "messages": [{"role": "user", "content": "查询北京今天的天气，并用一句话回答。"}],
+        "tools": [{"type": "function", "name": "get_weather", "description": "Get weather by city.", "input_schema": {"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"]}}]
+      },
+      "provider_request_shape": {
+        "model": "deepseek-chat",
+        "messages": [{"role": "user", "content": "查询北京今天的天气，并用一句话回答。"}],
+        "tools": [{"type": "function", "function": {"name": "get_weather", "description": "Get weather by city.", "parameters": {"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"]}}}],
+        "tool_choice": "auto"
+      },
+      "provider_tool_call_response_shape": {
+        "choices": [{"message": {"role": "assistant", "content": null, "tool_calls": [{"id": "call_001", "type": "function", "function": {"name": "get_weather", "arguments": "{\"city\":\"北京\"}"}}]}}]
+      },
+      "provider_followup_messages_shape": [
+        {"role": "user", "content": "查询北京今天的天气，并用一句话回答。"},
+        {"role": "assistant", "content": null, "tool_calls": [{"id": "call_001", "type": "function", "function": {"name": "get_weather", "arguments": "{\"city\":\"北京\"}"}}]},
+        {"role": "tool", "tool_call_id": "call_001", "content": "{\"city\":\"北京\",\"condition\":\"晴\",\"temperature_c\":26}"}
+      ]
+    },
+    {
+      "id": "anthropic_messages_tool_roundtrip",
+      "provider": "anthropic",
+      "protocol_family": "anthropic_messages",
+      "description": "Anthropic Messages native tool_use block followed by tool_result block in user message.",
+      "unified_request": {
+        "provider": "anthropic",
+        "model": "claude-sonnet-4-6",
+        "messages": [{"role": "user", "content": "查询北京今天的天气，并用一句话回答。"}],
+        "tools": [{"type": "function", "name": "get_weather", "description": "Get weather by city.", "input_schema": {"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"]}}],
+        "max_output_tokens": 512
+      },
+      "provider_request_shape": {
+        "model": "claude-sonnet-4-6",
+        "max_tokens": 512,
+        "messages": [{"role": "user", "content": "查询北京今天的天气，并用一句话回答。"}],
+        "tools": [{"name": "get_weather", "description": "Get weather by city.", "input_schema": {"type": "object", "properties": {"city": {"type": "string"}}, "required": ["city"]}}]
+      },
+      "provider_tool_call_response_shape": {
+        "role": "assistant",
+        "content": [{"type": "tool_use", "id": "toolu_001", "name": "get_weather", "input": {"city": "北京"}}],
+        "stop_reason": "tool_use"
+      },
+      "provider_followup_messages_shape": [
+        {"role": "user", "content": "查询北京今天的天气，并用一句话回答。"},
+        {"role": "assistant", "content": [{"type": "tool_use", "id": "toolu_001", "name": "get_weather", "input": {"city": "北京"}}]},
+        {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_001", "content": "{\"city\":\"北京\",\"condition\":\"晴\",\"temperature_c\":26}"}]}
+      ]
+    },
+    {
+      "id": "deepseek_reasoning_chat",
+      "provider": "deepseek",
+      "protocol_family": "openai_chat_completions",
+      "description": "DeepSeek thinking/reasoning request and normalized response fields.",
+      "provider_request_shape": {
+        "model": "deepseek-reasoner",
+        "messages": [{"role": "user", "content": "比较归并排序和快速排序。"}],
+        "thinking": {"type": "enabled"},
+        "reasoning_effort": "high",
+        "stream": false
+      },
+      "provider_response_shape": {
+        "choices": [{"message": {"role": "assistant", "reasoning_content": "先比较复杂度、稳定性与空间占用。", "content": "归并排序稳定且最坏 O(n log n)，快速排序平均 O(n log n) 但最坏 O(n^2)。"}}]
+      },
+      "normalized_response_shape": {
+        "content": [{"type": "text", "text": "归并排序稳定且最坏 O(n log n)，快速排序平均 O(n log n) 但最坏 O(n^2)。"}],
+        "reasoning": [{"type": "reasoning", "text": "先比较复杂度、稳定性与空间占用。", "provider_field": "choices[].message.reasoning_content"}]
+      }
+    },
+    {
+      "id": "minimax_reasoning_split_stream",
+      "provider": "minimax",
+      "protocol_family": "openai_chat_completions",
+      "description": "MiniMax OpenAI-compatible reasoning_split streaming fixture.",
+      "provider_request_shape": {
+        "model": "MiniMax-M2.7",
+        "messages": [{"role": "user", "content": "用三步解释二分查找。"}],
+        "extra_body": {"reasoning_split": true},
+        "stream": true
+      },
+      "provider_stream_chunks_shape": [
+        {"choices": [{"delta": {"reasoning_details": [{"text": "需要先说明前提，再说明区间收缩。"}]}}]},
+        {"choices": [{"delta": {"content": "二分查找要求有序数组。"}}]},
+        {"choices": [{"delta": {"content": "每次比较中点并丢弃一半区间。"}}]}
+      ],
+      "normalized_stream_events_shape": [
+        {"type": "reasoning_delta", "delta": "需要先说明前提，再说明区间收缩。"},
+        {"type": "text_delta", "delta": "二分查找要求有序数组。"},
+        {"type": "text_delta", "delta": "每次比较中点并丢弃一半区间。"}
+      ]
+    },
+    {
+      "id": "structured_output_downgrade",
+      "provider": "multi_provider",
+      "protocol_family": "mixed",
+      "description": "Structured output mapping and downgrade order across providers.",
+      "unified_structured_output": {
+        "mode": "strict_json_schema",
+        "name": "weather_answer",
+        "schema": {"type": "object", "properties": {"city": {"type": "string"}, "summary": {"type": "string"}}, "required": ["city", "summary"], "additionalProperties": false},
+        "strict": true,
+        "allow_downgrade": true
+      },
+      "mappings": {
+        "openai_responses": {"text": {"format": {"type": "json_schema", "name": "weather_answer", "schema": {"type": "object"}, "strict": true}}},
+        "openai_chat_compat": {"response_format": {"type": "json_object"}, "prompt_suffix_required": "Return only valid JSON matching the schema."},
+        "anthropic_messages": {"strategy": "prefer native tool/schema constrained answer; do not rely on OpenAI compatibility response_format"}
+      },
+      "downgrade_order": ["strict_json_schema", "json_schema", "json_object", "prompt_only_with_client_validation"]
+    }
+  ]
+}

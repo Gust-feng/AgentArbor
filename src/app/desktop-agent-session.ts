@@ -1,7 +1,6 @@
 import type { IntelligenceChannel, ModelOutputContract, ModelOutputDelta, ModelResponse } from "../domain/intelligence/index.js";
 import type { BasicAgentCapabilitySnapshot, ModelCapabilities } from "../domain/config/index.js";
 import type { ConstraintRef } from "../domain/constraints.js";
-import type { ObservationRef } from "../domain/observation/index.js";
 import type { TaskSoil } from "../domain/soil/index.js";
 import type { ToolCallResult, ToolExecutionBroker } from "../domain/tools/index.js";
 import { toolDisplayName } from "../domain/tools/index.js";
@@ -150,6 +149,7 @@ export type DesktopAgentConversationMessage = {
 };
 
 const DESKTOP_AGENT_ID = "desktop-agent-session";
+const DESKTOP_AGENT_DEFAULT_MAX_OUTPUT_TOKENS = 3200;
 
 /**
  * Ordinary desktop agent runtime: a single conversational/tool-assisted turn
@@ -286,7 +286,10 @@ export async function runDesktopAgentSession(
       outputContract: desktopAgentOutputContract(),
       sensitivity: "internal",
       budget: {
-        maxOutputTokens: Math.min(options.modelCapabilities?.maxOutputTokens ?? 3200, 16_000),
+        maxOutputTokens: Math.min(
+          options.modelCapabilities?.maxOutputTokens ?? DESKTOP_AGENT_DEFAULT_MAX_OUTPUT_TOKENS,
+          DESKTOP_AGENT_DEFAULT_MAX_OUTPUT_TOKENS
+        ),
         maxLatencyMs: 60_000,
       },
     },
@@ -548,14 +551,6 @@ function desktopAgentOutputContract(): ModelOutputContract {
 
 function isRecoverableBudgetStop(_turn: Awaited<ReturnType<AgentTurnRuntime["execute"]>>): boolean {
   return false;
-}
-
-function visibleAnswerText(response: ModelResponse): string {
-  return typeof response.textOutput === "string" && response.textOutput.trim().length > 0
-    ? response.textOutput.trim()
-    : typeof response.structuredOutput === "string" && response.structuredOutput.trim().length > 0
-      ? response.structuredOutput.trim()
-      : "";
 }
 
 function parseAnswer(

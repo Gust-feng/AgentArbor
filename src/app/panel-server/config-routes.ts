@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { SanitizedWebSearchConfig } from "../../domain/config/index.js";
-import { listBuiltinModelProviderPresets } from "../../domain/config/index.js";
+import { listBuiltinModelProviderPresets, listBuiltinProviderProtocolProfiles } from "../../domain/config/index.js";
 import { fetchModelRuntimeModelCatalog } from "../model-runtime/index.js";
 import { CapabilityCenter } from "../capability-center.js";
 import {
@@ -53,9 +53,7 @@ export async function handlePanelConfigRoute(
       config,
       profiles: await runtime.configCenter.listModelProviderProfiles(),
       modelCatalogs: await runtime.configCenter.listModelProviderModelCatalogs(),
-      modelProviderMarket: {
-        presets: listBuiltinModelProviderPresets(),
-      },
+      modelProviderMarket: modelProviderMarketPayload(),
       capabilities,
       informationAccess: await runtime.configCenter.getInformationAccessConfig(),
       workspace: await runtime.configCenter.getWorkspaceConfig(),
@@ -79,9 +77,7 @@ export async function handlePanelConfigRoute(
       profiles: await runtime.configCenter.listModelProviderProfiles(),
       activeProfile: await runtime.configCenter.getModelProviderConfig(),
       modelCatalogs: await runtime.configCenter.listModelProviderModelCatalogs(),
-      modelProviderMarket: {
-        presets: listBuiltinModelProviderPresets(),
-      },
+      modelProviderMarket: modelProviderMarketPayload(),
     });
     return true;
   }
@@ -91,6 +87,7 @@ export async function handlePanelConfigRoute(
       ok: true,
       status: "completed",
       presets: listBuiltinModelProviderPresets(),
+      providerProtocolProfiles: listBuiltinProviderProtocolProfiles(),
       profiles: await runtime.configCenter.listModelProviderProfiles(),
       activeProfile: await runtime.configCenter.getModelProviderConfig(),
       modelCatalogs: await runtime.configCenter.listModelProviderModelCatalogs(),
@@ -108,9 +105,7 @@ export async function handlePanelConfigRoute(
         profile,
         profiles: await runtime.configCenter.listModelProviderProfiles(),
         modelCatalogs: await runtime.configCenter.listModelProviderModelCatalogs(),
-        modelProviderMarket: {
-          presets: listBuiltinModelProviderPresets(),
-        },
+        modelProviderMarket: modelProviderMarketPayload(),
         capabilities: await runtime.capabilityCenter.snapshot(),
       });
       return true;
@@ -134,9 +129,7 @@ export async function handlePanelConfigRoute(
         profile,
         profiles: await runtime.configCenter.listModelProviderProfiles(),
         modelCatalogs: await runtime.configCenter.listModelProviderModelCatalogs(),
-        modelProviderMarket: {
-          presets: listBuiltinModelProviderPresets(),
-        },
+        modelProviderMarket: modelProviderMarketPayload(),
         capabilities: await runtime.capabilityCenter.snapshot(),
       });
       return true;
@@ -242,9 +235,7 @@ export async function handlePanelConfigRoute(
         profile,
         config: profile,
         modelCatalogs: await runtime.configCenter.listModelProviderModelCatalogs(),
-        modelProviderMarket: {
-          presets: listBuiltinModelProviderPresets(),
-        },
+        modelProviderMarket: modelProviderMarketPayload(),
         capabilities: await runtime.capabilityCenter.snapshot(),
       });
       return true;
@@ -264,9 +255,7 @@ export async function handlePanelConfigRoute(
         status: "completed",
         profiles,
         modelCatalogs: await runtime.configCenter.listModelProviderModelCatalogs(),
-        modelProviderMarket: {
-          presets: listBuiltinModelProviderPresets(),
-        },
+        modelProviderMarket: modelProviderMarketPayload(),
         capabilities: await runtime.capabilityCenter.snapshot(),
       });
       return true;
@@ -300,9 +289,7 @@ export async function handlePanelConfigRoute(
         config,
         profiles: await runtime.configCenter.listModelProviderProfiles(),
         modelCatalogs: await runtime.configCenter.listModelProviderModelCatalogs(),
-        modelProviderMarket: {
-          presets: listBuiltinModelProviderPresets(),
-        },
+        modelProviderMarket: modelProviderMarketPayload(),
         capabilities: await runtime.capabilityCenter.snapshot(),
         informationAccess: await runtime.configCenter.getInformationAccessConfig(),
       });
@@ -430,6 +417,16 @@ export async function handlePanelConfigRoute(
   }
 
   return false;
+}
+
+function modelProviderMarketPayload(): {
+  readonly presets: ReturnType<typeof listBuiltinModelProviderPresets>;
+  readonly providerProtocolProfiles: ReturnType<typeof listBuiltinProviderProtocolProfiles>;
+} {
+  return {
+    presets: listBuiltinModelProviderPresets(),
+    providerProtocolProfiles: listBuiltinProviderProtocolProfiles(),
+  };
 }
 
 async function createPanelToolCatalog(runtime: PanelConfigRouteRuntime): Promise<ToolCatalogSnapshot> {

@@ -21,6 +21,10 @@ test("OpenAI Responses adapter maps messages to input items and returns text out
         status: "completed",
         output: [
           {
+            type: "reasoning",
+            summary: [{ type: "summary_text", text: "Checked the requirement before answering." }],
+          },
+          {
             type: "message",
             role: "assistant",
             content: [{ type: "output_text", text: JSON.stringify({ summary: "Hello from Responses API." }) }],
@@ -38,6 +42,18 @@ test("OpenAI Responses adapter maps messages to input items and returns text out
     baseUrl: "https://api.openai.com/",
     apiKey: "sk-test-key",
     model: "gpt-4.1",
+    requestSettings: {
+      temperature: 0.2,
+      topP: 0.9,
+      maxOutputTokens: 64,
+      reasoningEffort: "medium",
+      reasoningSummary: "auto",
+      textVerbosity: "low",
+      serviceTier: "default",
+      truncation: "auto",
+      parallelToolCalls: false,
+      store: false,
+    },
     fetch,
   });
 
@@ -46,6 +62,11 @@ test("OpenAI Responses adapter maps messages to input items and returns text out
   assert.equal(response.status, "completed");
   assert.deepEqual(response.structuredOutput, { summary: "Hello from Responses API." });
   assert.equal(response.textOutput, JSON.stringify({ summary: "Hello from Responses API." }));
+  assert.deepEqual(response.reasoningOutput, {
+    source: "openai_responses_reasoning_summary",
+    content: "Checked the requirement before answering.",
+    truncated: false,
+  });
   assert.deepEqual(response.usage, {
     inputTokens: 20,
     outputTokens: 10,
@@ -66,7 +87,20 @@ test("OpenAI Responses adapter maps messages to input items and returns text out
         content: [{ type: "input_text", text: "Build a helper." }],
       },
     ],
-    max_output_tokens: 128,
+    temperature: 0.2,
+    top_p: 0.9,
+    max_output_tokens: 64,
+    reasoning: {
+      effort: "medium",
+      summary: "auto",
+    },
+    text: {
+      verbosity: "low",
+    },
+    service_tier: "default",
+    truncation: "auto",
+    parallel_tool_calls: false,
+    store: false,
   });
 });
 

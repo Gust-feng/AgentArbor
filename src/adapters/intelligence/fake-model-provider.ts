@@ -320,7 +320,7 @@ function fakeDesktopAgentStep(request: ModelRequest): FakeModelProviderStep {
   }
   if (hasToolMessage) {
     const answer =
-      `我已经基于当前授权工具检查了“${goalAnchor}”。可用材料只作为本轮回答依据，不会写入长期记忆；接下来可以继续补充范围、让我读取更多授权材料，或让我把结论整理成更正式的结果。`;
+      `我已经基于当前授权工具检查了“${goalAnchor}”。可用材料只作为本轮回答依据；接下来可以继续补充范围、让我读取更多授权材料，或让我把结论整理成更正式的结果。`;
     return { textOutput: answer };
   }
   if (!shouldUpgradeToWorkSession(goalAnchor)) {

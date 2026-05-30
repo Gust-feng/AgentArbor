@@ -93,6 +93,7 @@ export type ConversationSummary = {
   readonly activeRunId?: string;
   readonly latestRunId?: string;
   readonly updatedAt?: string;
+  readonly requiresUserAction?: boolean;
 };
 
 export type ToolDisplayProjection =
@@ -121,6 +122,7 @@ export type ToolDisplayProjection =
       readonly previousLength?: number;
       readonly nextLength?: number;
       readonly append?: boolean;
+      readonly truncated?: boolean;
     }
   | {
       readonly kind: "command_summary";
@@ -160,12 +162,65 @@ export type PanelStreamEvent = {
   };
 };
 
+export type TranscriptNodeKind =
+  | "thinking"
+  | "tool"
+  | "confirmation"
+  | "user_decision"
+  | "answer"
+  | "system";
+
+export type TranscriptNodePhase =
+  | "noted"
+  | "preparing"
+  | "waiting_approval"
+  | "approved"
+  | "denied"
+  | "guidance"
+  | "executing"
+  | "completed"
+  | "failed"
+  | "blocked"
+  | "cancelled";
+
+export type TranscriptConfirmation = {
+  readonly confirmationId: string;
+  readonly runId: string;
+  readonly conversationId?: string;
+  readonly title: string;
+  readonly actionSummary: string;
+  readonly affectedResources: readonly string[];
+  readonly riskLevel: "low" | "medium" | "high";
+  readonly resumeAvailability?: "live" | "lost_after_restart";
+  readonly requestedAt: string;
+  readonly expiresAt?: string;
+  readonly sourceRefs: readonly string[];
+};
+
+export type TranscriptNode = {
+  readonly nodeId: string;
+  readonly runId: string;
+  readonly sequence: number;
+  readonly eventType: string;
+  readonly kind: TranscriptNodeKind;
+  readonly phase: TranscriptNodePhase;
+  readonly title: string;
+  readonly summary?: string;
+  readonly text?: string;
+  readonly timestamp: string;
+  readonly toolName?: string;
+  readonly display?: ToolDisplayProjection;
+  readonly confirmation?: TranscriptConfirmation;
+  readonly refs: readonly ObservationRef[];
+};
+
 export type DesktopRunDetail = {
   readonly runId: string;
   readonly status: string;
   readonly error?: { readonly code: string; readonly message: string };
   readonly transcript?: {
     readonly events?: readonly PanelStreamEvent[];
+    readonly transcriptNodes?: readonly TranscriptNode[];
   };
   readonly canvas?: {
     readonly kind?: string;
@@ -318,6 +373,7 @@ export type DesktopWorkSession = {
   readonly answer?: DesktopWorkSessionAnswer;
   readonly deliverable?: AgentDeliverable;
   readonly visibleEvents: readonly RunEvent[];
+  readonly transcriptNodes?: readonly TranscriptNode[];
   readonly safetySummary: {
     readonly summary: string;
     readonly pendingActionCount: number;
@@ -379,6 +435,7 @@ export type ConfigResponse = {
       readonly contextWindowTokens?: number;
       readonly maxOutputTokens?: number;
       readonly supportsToolCalling?: boolean;
+      readonly supportsReasoningEffort?: boolean;
     };
     readonly warnings?: readonly string[];
   };

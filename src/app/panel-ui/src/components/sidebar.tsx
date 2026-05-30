@@ -13,6 +13,7 @@ import {
   Trash2,
   Wrench,
 } from "lucide-react";
+import { isConversationWaitingForUser } from "../conversation-state";
 import { compact, relativeTime } from "../text";
 import type { ConversationSummary } from "../types";
 
@@ -25,7 +26,7 @@ type NavItem = {
 };
 
 const NAV_ITEMS: readonly NavItem[] = [
-  { screen: "skills", label: "技能", icon: <Sparkles size={15} /> },
+  { screen: "skills", label: "工作方式", icon: <Sparkles size={15} /> },
   { screen: "tools", label: "工具", icon: <Wrench size={15} /> },
 ];
 
@@ -41,7 +42,7 @@ export function Sidebar(props: {
   readonly onOpenSettings: () => void;
 }): React.ReactElement {
   const newTaskActive = props.currentScreen === "chat-empty" && props.activeConversationId === undefined;
-  const pendingConversations = props.conversations.filter((conversation) => isConversationWaitingForUser(conversation.status));
+  const pendingConversations = props.conversations.filter(isConversationWaitingForUser);
   const [conversationOverrides, setConversationOverrides] = React.useState<Record<string, {
     readonly title?: string;
     readonly pinned?: boolean;
@@ -143,7 +144,7 @@ export function Sidebar(props: {
     <aside
       className="app-sidebar"
       data-collapsed={props.collapsed ? "true" : "false"}
-      style={{ "--sidebar-width": props.collapsed ? "64px" : "292px" } as React.CSSProperties}
+      style={{ "--sidebar-width": props.collapsed ? "64px" : "276px" } as React.CSSProperties}
       aria-label="工作入口"
     >
       <div className="sidebar-new-wrap">
@@ -182,29 +183,23 @@ export function Sidebar(props: {
         })}
       </nav>
 
-      {(pendingConversations.length > 0 || props.pendingCount > 0) && (
-        <section className="sidebar-expandable sidebar-confirmation-card" aria-label="待确认">
-          <div className="sidebar-section-title">
-            <ShieldCheck size={14} />
-            待确认
-          </div>
-          <div className="sidebar-confirmation-list">
-            {pendingConversations.slice(0, 3).map((conversation) => (
-              <button
-                type="button"
-                key={conversation.conversationId}
-                className="sidebar-confirmation-row"
-                onClick={() => props.onOpen(conversation.conversationId)}
-              >
-                <span>{compact(conversation.title, 28)}</span>
-                <small>{conversation.status === "approval_needed" ? "等待批准" : "等待补充"}</small>
-              </button>
-            ))}
-          </div>
-          {props.pendingCount > pendingConversations.length && (
-            <small className="sidebar-more">还有 {props.pendingCount - pendingConversations.length} 项待处理</small>
-          )}
-        </section>
+      {props.pendingCount > 0 && (
+        <button
+          type="button"
+          className="sidebar-action sidebar-rail-button sidebar-pending-reminder"
+          onClick={() => {
+            const firstPending = pendingConversations[0];
+            if (firstPending !== undefined) {
+              props.onOpen(firstPending.conversationId);
+            }
+          }}
+          title={props.collapsed ? `${props.pendingCount} 个待确认` : undefined}
+        >
+          <span className="sidebar-icon-slot" aria-hidden="true">
+            <ShieldCheck size={15} />
+          </span>
+          <span className="sidebar-label">{props.pendingCount} 个待确认</span>
+        </button>
       )}
 
       <section className="sidebar-expandable sidebar-recent" aria-label="最近会话">
@@ -321,9 +316,6 @@ export function Sidebar(props: {
   );
 }
 
-function isConversationWaitingForUser(status: string | undefined): boolean {
-  return status === "approval_needed" || status === "needs_input";
-}
 
 function statusLabel(status: string | undefined): string {
   if (status === "completed") return "已完成";

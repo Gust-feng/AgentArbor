@@ -75,14 +75,14 @@ export function SkillsPage(props: {
     return [copy.title, copy.description, skill.name, skill.description, ...copy.chips, ...(skill.triggers ?? [])].some((value) => value.toLowerCase().includes(normalized));
   });
   return (
-    <section className="workspace-page" aria-label="技能">
+    <section className="workspace-page" aria-label="工作方式">
       <div className="workspace-shell">
         <div className="workspace-page-kicker">
           <Sparkles size={13} />
           可复用工作方法
         </div>
         <PageHeader
-          title="技能"
+          title="工作方式"
           subtitle="保存常用的工作方式，让新任务可以直接带上合适的步骤、语气和检查重点。"
           actions={
             <button type="button" className="page-action-button primary" disabled>
@@ -92,11 +92,11 @@ export function SkillsPage(props: {
           }
         />
         <div className="workspace-filter-row">
-          <SearchBox value={query} onChange={setQuery} placeholder="搜索技能" />
+          <SearchBox value={query} onChange={setQuery} placeholder="搜索工作方式" />
           <TabBar tabs={SKILL_TABS} activeTab={activeTab} onChange={setActiveTab} />
         </div>
         {visibleSkills.length === 0 ? (
-          <EmptyBlock>当前工作区没有发现技能。</EmptyBlock>
+          <EmptyBlock>当前工作区没有发现可用工作方式。</EmptyBlock>
         ) : (
           <div className="skill-grid">
             {visibleSkills.map((skill) => (
@@ -318,7 +318,7 @@ function SkillCard(props: {
     <article className="skill-card">
       <header>
         <IconTile icon={copy.icon} />
-        <Toggle checked={props.skill.enabled} onChange={(enabled) => props.onUpdateSkill(props.skill.id, enabled)} label={props.skill.enabled ? "停用技能" : "启用技能"} />
+        <Toggle checked={props.skill.enabled} onChange={(enabled) => props.onUpdateSkill(props.skill.id, enabled)} label={props.skill.enabled ? "停用工作方式" : "启用工作方式"} />
       </header>
       <div>
         <div className="skill-title-row">
@@ -360,7 +360,7 @@ function WebSearchRow(props: {
         <IconTile icon={<Globe2 size={17} />} />
         <div>
           <h2>网页搜索</h2>
-          <p>当前服务：{providerName(current)}。用于搜索网页资料并返回安全摘要。</p>
+          <p>当前服务：{providerName(current)}。用于搜索网页资料并返回资料摘要。</p>
         </div>
       </div>
       <div className="tool-meta">
@@ -460,7 +460,7 @@ function ModelSettings(props: {
   const modelFormRef = useRef(props.modelForm);
   modelFormRef.current = props.modelForm;
   const activeProfileId = props.config?.config?.profileId ?? "";
-  const items = useMemo(() => modelProviderItems(props.config, props.modelCatalogs), [props.config, props.modelCatalogs]);
+  const items = useMemo(() => modelProviderItems(props.config), [props.config]);
   const [selectedKey, setSelectedKey] = useState("");
   const filteredItems = items.filter((item) => {
     const normalized = query.trim().toLowerCase();
@@ -474,7 +474,10 @@ function ModelSettings(props: {
   const selectedActive = selectedItem?.profileId !== undefined && selectedItem.profileId === activeProfileId;
   const selectedSecretConfigured = selectedItem?.profile?.secretConfigured === true || (selectedActive && props.config?.config?.secretConfigured === true);
   const selectedCatalog = selectedItem?.profileId === undefined ? undefined : props.modelCatalogs?.[selectedItem.profileId];
-  const catalogModels = selectedCatalog?.models ?? [];
+  const catalogModels = useMemo(
+    () => modelCatalogItemsWithConfiguredModel(selectedCatalog?.models ?? [], selectedItem?.model, selectedItem?.title ?? selectedCatalog?.label ?? "model"),
+    [selectedCatalog?.models, selectedCatalog?.label, selectedItem?.model, selectedItem?.title]
+  );
   const savedModelIds = useMemo(() => new Set(catalogModels.map((model) => model.id)), [catalogModels]);
   const fetchedCatalog = selectedItem?.profileId === undefined ? undefined : fetchedCatalogs[selectedItem.profileId];
   const fetchedCandidates = (fetchedCatalog?.models ?? []).filter((model) => !savedModelIds.has(model.id));
@@ -501,7 +504,7 @@ function ModelSettings(props: {
     const nextForm = modelFormFromProviderItem(selectedItem);
     setRevealed(false);
     setModelQuery("");
-    setSelectedModelRowId(undefined);
+    setSelectedModelRowId(nextForm.model.trim().length === 0 ? undefined : nextForm.model);
     props.setModelForm(nextForm);
 
     if (!selectedSecretConfigured || selectedProfileId === undefined) {
@@ -552,6 +555,12 @@ function ModelSettings(props: {
 
   function selectItem(item: ModelProviderListItem): void {
     setSelectedKey(item.key);
+  }
+
+  function updateModelForm(patch: Partial<ModelForm>): void {
+    const nextForm = { ...props.modelForm, ...patch };
+    props.setModelForm(nextForm);
+    scheduleModelSave(nextForm);
   }
 
   async function clearApiKey(): Promise<void> {
@@ -674,7 +683,7 @@ function ModelSettings(props: {
   if (selectedItem === undefined) {
     return (
       <div className="settings-provider-manager empty">
-        <EmptyBlock>暂无模型服务。请添加一个 OpenAI 兼容服务。</EmptyBlock>
+        <EmptyBlock>暂无模型服务。请添加一个模型服务。</EmptyBlock>
       </div>
     );
   }
@@ -775,27 +784,29 @@ function ModelSettings(props: {
               <input
                 value={props.modelForm.baseUrl || selectedItem.baseUrl}
                 onChange={(event) => {
-                  const nextForm = { ...props.modelForm, baseUrl: event.target.value };
-                  props.setModelForm(nextForm);
-                  scheduleModelSave(nextForm);
+                  updateModelForm({ baseUrl: event.target.value });
                 }}
                 placeholder="https://api.example.com/v1"
               />
-              <select
-                value={props.modelForm.protocolKind || selectedItem.protocolKind}
-                aria-label="请求路径"
-                onChange={(event) => {
-                  const nextForm = { ...props.modelForm, protocolKind: event.target.value };
-                  props.setModelForm(nextForm);
-                  scheduleModelSave(nextForm);
-                }}
-              >
-                {requestPathOptionsForProvider(selectedItem).map((option) => (
-                  <option value={option.value} key={option.value}>{option.label}</option>
-                ))}
-              </select>
             </div>
           </label>
+          {selectedItem.preset === undefined && (
+            <details className="provider-advanced-options">
+              <summary>高级兼容设置</summary>
+              <label>
+                <span>协议</span>
+                <select
+                  value={props.modelForm.protocolKind || selectedItem.protocolKind}
+                  aria-label="协议"
+                  onChange={(event) => updateModelForm({ protocolKind: event.target.value })}
+                >
+                  {requestPathOptionsForProvider(selectedItem).map((option) => (
+                    <option value={option.value} key={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              </label>
+            </details>
+          )}
         </div>
 
         <section className="model-list-panel">
@@ -969,11 +980,10 @@ type ModelProviderListItem = {
 };
 
 function modelProviderItems(
-  config: ConfigResponse | undefined,
-  catalogs: Readonly<Record<string, ModelProviderModelCatalog>> | undefined
+  config: ConfigResponse | undefined
 ): readonly ModelProviderListItem[] {
-  const profiles = config?.profiles ?? [];
-  const presets = config?.modelProviderMarket?.presets ?? [];
+  const profiles = (config?.profiles ?? []).filter(isOpenAIFormatProfile);
+  const presets = (config?.modelProviderMarket?.presets ?? []).filter(isOpenAIFormatPreset);
   const activeProfileId = config?.config?.profileId;
   const profileBindings = profiles.map((profile) => ({
     profile,
@@ -1004,13 +1014,12 @@ function modelProviderItems(
       boundProfileIds.add(binding.profile.profileId);
     }
     const profile = binding?.profile;
-    const catalog = profile?.profileId === undefined ? undefined : catalogs?.[profile.profileId];
-    const catalogHasModel = catalog?.models.some((model) => model.id === profile?.model) === true;
+    const configuredModel = profile?.model ?? preset.defaultModel ?? "";
     return {
       key: profile?.profileId === undefined ? `preset:${preset.presetId}` : `profile:${profile.profileId}`,
       title: presetIdentity === "unknown" ? preset.label : modelProviderDisplayName(presetIdentity),
       vendor: preset.vendor,
-      model: catalogHasModel ? profile?.model ?? "" : "",
+      model: configuredModel,
       baseUrl: profile === undefined ? preset.baseUrl : visibleProfileBaseUrl(profile),
       protocolKind: profile?.protocolKind ?? preset.protocolKind,
       profileId: profile?.profileId,
@@ -1022,14 +1031,13 @@ function modelProviderItems(
   const customItems = profileBindings
     .filter((item) => item.profile.profileId === undefined || !boundProfileIds.has(item.profile.profileId))
     .map(({ profile, identity }) => {
-      const catalog = profile.profileId === undefined ? undefined : catalogs?.[profile.profileId];
-      const catalogHasModel = catalog?.models.some((model) => model.id === profile.model) === true;
+      const configuredModel = profile.model ?? "";
       return {
         key: `profile:${profile.profileId ?? profile.label ?? profile.baseUrl ?? profile.model ?? "custom"}`,
         title: friendlyProfileTitle(profile, identity),
-        model: catalogHasModel ? profile.model ?? "" : "",
+        model: configuredModel,
         baseUrl: visibleProfileBaseUrl(profile),
-        protocolKind: profile.protocolKind ?? "openai_responses",
+        protocolKind: profile.protocolKind ?? "openai_compatible_chat_completions",
         profileId: profile.profileId,
         profile,
       } satisfies ModelProviderListItem;
@@ -1041,6 +1049,35 @@ function modelProviderItems(
       return rankDelta === 0 ? left.index - right.index : rankDelta;
     })
     .map(({ item }) => item);
+}
+
+function isOpenAIFormatPreset(preset: ModelProviderPreset): boolean {
+  return preset.providerKind === "openai_compatible" &&
+    (preset.protocolKind === "openai_responses" || preset.protocolKind === "openai_compatible_chat_completions");
+}
+
+function modelCatalogItemsWithConfiguredModel(
+  models: readonly ModelProviderModelItem[],
+  configuredModel: string | undefined,
+  owner: string
+): readonly ModelProviderModelItem[] {
+  const modelId = configuredModel?.trim();
+  if (modelId === undefined || modelId.length === 0 || models.some((model) => model.id === modelId)) {
+    return models;
+  }
+  return [
+    {
+      id: modelId,
+      displayName: modelId,
+      owner,
+    },
+    ...models,
+  ];
+}
+
+function isOpenAIFormatProfile(profile: ModelProviderProfileItem): boolean {
+  return profile.providerKind === "openai_compatible" &&
+    (profile.protocolKind === "openai_responses" || profile.protocolKind === "openai_compatible_chat_completions");
 }
 
 function modelProviderFormId(item: ModelProviderListItem): string {
@@ -1106,7 +1143,6 @@ function GeneralSettings({ config }: { readonly config?: ConfigResponse }): Reac
   return (
     <section className="settings-card">
       <h3>常规</h3>
-      <SettingRow label="流式输出"><span className="settings-value">已启用</span></SettingRow>
       <SettingRow label="当前厂商"><span className="settings-value">{visibleConfigProviderTitle(config)}</span></SettingRow>
       <SettingRow label="工具调用"><span className="settings-value">{config?.capabilities?.modelCapabilities?.supportsToolCalling === false ? "当前模型未声明支持" : "按模型能力"}</span></SettingRow>
     </section>
@@ -1261,7 +1297,7 @@ function skillCopy(skill: SkillDefinition): {
     return {
       title: "工作台界面设计",
       description: "用于设计、审查和重建普通 Agent 面板、任务会话与工作上下文。",
-      chips: ["界面结构", "任务会话", "安全投影"],
+      chips: ["界面结构", "任务会话", "工作记录"],
       icon: <LayoutList size={17} />,
     };
   }

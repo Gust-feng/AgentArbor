@@ -18,11 +18,26 @@ export function RichText({ text }: { readonly text: string }): React.ReactElemen
 }
 
 function normalizeCollapsedMarkdown(value: string): string {
-  return value
+  return normalizePlainTextBoundaries(value)
     .replace(/\r\n/g, "\n")
     .replace(/\s+([-*])\s+(?=(?:\*\*|__|`|["'“”‘’]|[\u{1F300}-\u{1FAFF}]))/gu, "\n$1 ")
     .replace(/([:：。.!?？；;])\s+[-*]\s+(?=\S)/gu, "$1\n- ")
     .replace(/([:：。.!?？；;])\s+(\d+[.)])\s+(?=\S)/gu, "$1\n$2 ");
+}
+
+function normalizePlainTextBoundaries(value: string): string {
+  return value
+    .split(/(```[\s\S]*?```|`[^`\n]*`)/g)
+    .map((segment) => segment.startsWith("`") ? segment : normalizeTextBoundarySegment(segment))
+    .join("");
+}
+
+function normalizeTextBoundarySegment(value: string): string {
+  return value
+    .replace(/([A-Za-z0-9][.!?])(?=[A-Z])/g, "$1 ")
+    .replace(/([A-Za-z0-9]),(?=[A-Za-z])/g, "$1, ")
+    .replace(/([A-Za-z0-9]);(?=[A-Za-z])/g, "$1; ")
+    .replace(/([A-Za-z0-9]:)(?=[A-Za-z])/g, "$1 ");
 }
 
 function safeUrlTransform(value: string): string {

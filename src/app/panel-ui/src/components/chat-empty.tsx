@@ -6,7 +6,7 @@ import {
   X,
 } from "lucide-react";
 import { compact } from "../text";
-import type { ContextAttachment } from "../types";
+import type { ContextAttachment, ConversationSummary } from "../types";
 import type { ModelProviderIdentity } from "../model-provider-logos";
 
 export type ChatModelOption = {
@@ -37,6 +37,9 @@ export type ChatInputProps = AttachmentInputProps & {
   readonly busy: boolean;
   readonly models: readonly ChatModelOption[];
   readonly selectedModelId: string;
+  readonly reasoningEffort: "" | "low" | "medium" | "high";
+  readonly reasoningEffortEnabled: boolean;
+  readonly onReasoningEffortChange: (value: "" | "low" | "medium" | "high") => void;
   readonly onModelSelect: (modelId: string) => void;
   readonly onOpenSettings: () => void;
   readonly onSubmit: () => void;
@@ -49,6 +52,10 @@ export type ChatInputProps = AttachmentInputProps & {
 
 export function ChatEmpty(props: ChatInputProps & {
   readonly error?: string;
+  readonly conversations?: readonly ConversationSummary[];
+  readonly workspaceDirectory?: string;
+  readonly pendingCount?: number;
+  readonly onOpenConversation?: (conversationId: string) => void;
 }): React.ReactElement {
   return (
     <div className="chat-empty-screen">
@@ -132,6 +139,21 @@ export function ChatInputBar(props: ChatInputProps): React.ReactElement {
           </button>
         </div>
         <div className="chat-input-right">
+          {props.reasoningEffortEnabled && (
+            <label className="composer-reasoning-control">
+              <BrainCircuit size={14} />
+              <select
+                aria-label="思考强度"
+                value={props.reasoningEffort}
+                onChange={(event) => props.onReasoningEffortChange(event.target.value as "" | "low" | "medium" | "high")}
+              >
+                <option value="">自动</option>
+                <option value="low">轻量</option>
+                <option value="medium">标准</option>
+                <option value="high">深入</option>
+              </select>
+            </label>
+          )}
           <div className="model-menu">
             <button
               type="button"

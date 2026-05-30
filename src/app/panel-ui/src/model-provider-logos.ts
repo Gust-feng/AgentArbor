@@ -53,7 +53,6 @@ export function resolveModelProviderIdentity(input: ModelProviderLogoInput): Mod
 
   const displaySignal = resolveStrongProviderSignal(displayText);
   if (displaySignal !== undefined) return displaySignal;
-  if (displayText.includes("default") || displayText.includes("默认配置")) return "openai";
 
   return resolveStrongProviderSignal(model) ?? "unknown";
 }

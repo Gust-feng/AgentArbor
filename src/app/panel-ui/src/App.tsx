@@ -1,12 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { getJson, postJson } from "./api";
+import { isConversationWaitingForUser } from "./conversation-state";
 import { ChatActive } from "./components/chat-active";
-import { ChatEmpty, type ChatModelOption } from "./components/chat-empty";
+import { ChatEmpty } from "./components/chat-empty";
 import { Sidebar, type Screen } from "./components/sidebar";
 import { TopBar } from "./components/topbar";
 import { SettingsDialog, SkillsPage, ToolsPage, type SettingsGroup } from "./components/workspace-pages";
-import { resolveModelIconSvg } from "./model-icons";
-import { modelProviderDisplayName, modelProviderSortRank, resolveModelProviderIdentity } from "./model-provider-logos";
+import { modelProviderDisplayName, resolveModelProviderIdentity } from "./model-provider-logos";
 import {
   mergeEvents,
   openBasicRunStream,
@@ -25,10 +25,12 @@ import type {
   DesktopRunDetail,
   DesktopWorkSession,
   ModelProviderModelCatalog,
+  TranscriptNode,
   RunEvent,
   SkillDefinition,
   ToolsResponse,
 } from "./types";
+import { modelOptionsFromConfig, parseModelOptionId, selectedModelOptionId } from "./model-options";
 import { terminalStatuses } from "./ui-state";
 
 type AppState = {
@@ -39,6 +41,7 @@ type AppState = {
   readonly conversation?: Conversation;
   readonly run?: BasicAgentRun;
   readonly workSession?: DesktopWorkSession;
+  readonly transcriptNodes: readonly TranscriptNode[];
   readonly events: readonly RunEvent[];
   readonly detail?: DesktopRunDetail;
   readonly busy: boolean;
@@ -55,6 +58,8 @@ type ModelForm = {
   readonly apiKeyCleared: boolean;
 };
 
+type ComposerReasoningEffort = "" | "low" | "medium" | "high";
+
 type ToolForm = {
   readonly provider: string;
   readonly tavilyApiKey: string;
@@ -67,6 +72,7 @@ export function App(): React.ReactElement {
   const [app, setApp] = useState<AppState>({
     skills: [],
     conversations: [],
+    transcriptNodes: [],
     events: [],
     busy: false,
   });
@@ -81,11 +87,12 @@ export function App(): React.ReactElement {
     profileId: "",
     label: "",
     baseUrl: "",
-    protocolKind: "openai_responses",
+    protocolKind: "openai_compatible_chat_completions",
     model: "",
     apiKey: "",
     apiKeyCleared: false,
   });
+  const [composerReasoningEffort, setComposerReasoningEffort] = useState<ComposerReasoningEffort>("");
   const [modelCatalogs, setModelCatalogs] = useState<Record<string, ModelProviderModelCatalog>>({});
   const [workspaceDirectory, setWorkspaceDirectory] = useState("");
   const [toolForm, setToolForm] = useState<ToolForm>({
@@ -125,7 +132,7 @@ export function App(): React.ReactElement {
         profileId: activeProfileId,
         label: visibleConfigLabel(app.config!.config!),
         baseUrl: visibleConfigBaseUrl(app.config!.config!),
-        protocolKind: app.config!.config!.protocolKind ?? "openai_responses",
+        protocolKind: app.config!.config!.protocolKind ?? "openai_compatible_chat_completions",
         model: app.config!.config!.model ?? "",
         apiKey: "",
         apiKeyCleared: false,
@@ -154,11 +161,18 @@ export function App(): React.ReactElement {
   }, [app.config?.modelCatalogs]);
 
   const pendingConfirmation = app.workSession?.pendingConfirmation ?? app.detail?.canvas?.agent?.pendingConfirmation;
-  const pendingConversationCount = app.conversations.filter((conversation) => isConversationWaitingForUser(conversation.status)).length;
+  const pendingConversationCount = app.conversations.filter(isConversationWaitingForUser).length;
   const pendingCount = Math.max(pendingConversationCount, pendingConfirmation === undefined ? 0 : 1);
   const modelOptions = useMemo(() => modelOptionsFromConfig(app.config, modelCatalogs), [app.config, modelCatalogs]);
   const selectedModelId = useMemo(() => selectedModelOptionId(app.config, modelOptions), [app.config, modelOptions]);
+  const selectedModelSupportsReasoningEffort = app.config?.capabilities?.modelCapabilities?.supportsReasoningEffort === true;
   const chatScreen = screen === "chat-empty" && (app.conversation !== undefined || app.run !== undefined) ? "chat-active" : screen;
+
+  useEffect(() => {
+    if (!selectedModelSupportsReasoningEffort && composerReasoningEffort !== "") {
+      setComposerReasoningEffort("");
+    }
+  }, [composerReasoningEffort, selectedModelId, selectedModelSupportsReasoningEffort]);
 
   async function refreshBootstrap(): Promise<void> {
     const [config, tools, skills, conversations] = await Promise.all([
@@ -182,7 +196,7 @@ export function App(): React.ReactElement {
     setScreen("chat-active");
     setAttachments([]);
     const response = await getJson<{ readonly conversation: Conversation }>(`/api/conversations/${encodeURIComponent(conversationId)}`);
-    const latestRunId = response.conversation.latestRunId ?? response.conversation.activeRunId;
+    const latestRunId = response.conversation.activeRunId ?? response.conversation.latestRunId;
     const detail = latestRunId === undefined ? undefined : await safeDesktopDetail(latestRunId);
     const run = latestRunId === undefined ? undefined : await safeBasicRun(latestRunId);
     const replay = latestRunId === undefined ? undefined : await safeBasicEvents(latestRunId, 0);
@@ -193,6 +207,7 @@ export function App(): React.ReactElement {
       run,
       workSession,
       detail,
+      transcriptNodes: transcriptNodesFrom(workSession, detail),
       events: replay?.events ?? [],
       error: undefined,
     }));
@@ -212,6 +227,7 @@ export function App(): React.ReactElement {
       busy: true,
       error: undefined,
       events: [],
+      transcriptNodes: [],
       detail: undefined,
       workSession: undefined,
     }));
@@ -228,6 +244,7 @@ export function App(): React.ReactElement {
         runMode: "agent",
         aiMode,
         taskSoilInput: taskSoilInputFromAttachments(attachments),
+        ...runReasoningSettings(composerReasoningEffort, selectedModelSupportsReasoningEffort),
       });
       setGoal("");
       setAttachments([]);
@@ -239,6 +256,7 @@ export function App(): React.ReactElement {
         conversation: response.conversation,
         run,
         workSession,
+        transcriptNodes: transcriptNodesFrom(workSession, undefined),
         events: [],
         detail: undefined,
       }));
@@ -278,6 +296,7 @@ export function App(): React.ReactElement {
             ...previous,
             run: runResponse.run,
             workSession: workSessionResponse ?? previous.workSession,
+            transcriptNodes: transcriptNodesFrom(workSessionResponse ?? previous.workSession, previous.detail),
             events: mergeEvents(previous.events, eventsResponse.events),
           }));
         }
@@ -291,6 +310,7 @@ export function App(): React.ReactElement {
             detail,
             conversation: conversation ?? previous.conversation,
             workSession: workSessionResponse ?? previous.workSession,
+            transcriptNodes: transcriptNodesFrom(workSessionResponse ?? previous.workSession, detail),
           }));
           if (!shouldKeepRefreshing(runResponse.run.status)) {
             stopPolling(pollTimer);
@@ -322,6 +342,7 @@ export function App(): React.ReactElement {
           ...previous,
           run: run ?? previous.run,
           workSession: workSession ?? previous.workSession,
+          transcriptNodes: transcriptNodesFrom(workSession ?? previous.workSession, previous.detail),
           events: mergeEvents(previous.events, [event]),
         }));
       }
@@ -336,6 +357,7 @@ export function App(): React.ReactElement {
           detail,
           conversation: conversation ?? previous.conversation,
           workSession: workSession ?? previous.workSession,
+          transcriptNodes: transcriptNodesFrom(workSession ?? previous.workSession, detail),
         }));
         void refreshConversations();
       }
@@ -363,7 +385,12 @@ export function App(): React.ReactElement {
     const response = await postJson<{ readonly run: BasicAgentRun }>(`/api/basic-agent/runs/${encodeURIComponent(currentRunId)}/cancel`, {});
     const workSession = await safeWorkSession(currentRunId);
     stopLiveUpdates(pollTimer, streamRef);
-    setApp((previous) => ({ ...previous, run: response.run, workSession: workSession ?? previous.workSession }));
+    setApp((previous) => ({
+      ...previous,
+      run: response.run,
+      workSession: workSession ?? previous.workSession,
+      transcriptNodes: transcriptNodesFrom(workSession ?? previous.workSession, previous.detail),
+    }));
     void refreshConversations();
   }
 
@@ -383,6 +410,7 @@ export function App(): React.ReactElement {
     }
     setConfirmationBusy(true);
     setApp((previous) => ({ ...previous, error: undefined }));
+
     try {
       const response = await postJson<{ readonly run: BasicAgentRun }>(
         `/api/basic-agent/runs/${encodeURIComponent(currentRunId)}/confirmations/${encodeURIComponent(confirmation.confirmationId)}/decision`,
@@ -397,6 +425,7 @@ export function App(): React.ReactElement {
         run: response.run,
         workSession,
         detail,
+        transcriptNodes: transcriptNodesFrom(workSession, detail),
         error: decision === "approve_once" ? "已提交确认，正在继续处理。" : undefined,
       }));
       if (decision === "approve_once") {
@@ -500,7 +529,7 @@ export function App(): React.ReactElement {
         profileId: label,
         label,
         providerKind: "openai_compatible",
-        protocolKind: modelForm.protocolKind || "openai_responses",
+        protocolKind: modelForm.protocolKind || "openai_compatible_chat_completions",
         baseUrl: modelForm.baseUrl,
         model: modelForm.model,
         clearModel: modelForm.model.trim().length === 0,
@@ -555,7 +584,7 @@ export function App(): React.ReactElement {
           profileId: parsed.profileId,
           label: profile.label ?? parsed.profileId,
           baseUrl: profile.baseUrl ?? "",
-          protocolKind: profile.protocolKind ?? "openai_responses",
+          protocolKind: profile.protocolKind ?? "openai_compatible_chat_completions",
           model: parsed.modelId,
           apiKey: "",
           apiKeyCleared: false,
@@ -735,6 +764,7 @@ export function App(): React.ReactElement {
       conversation: undefined,
       run: undefined,
       workSession: undefined,
+      transcriptNodes: [],
       events: [],
       detail: undefined,
       error: undefined,
@@ -764,6 +794,9 @@ export function App(): React.ReactElement {
     busy: app.busy,
     models: modelOptions,
     selectedModelId,
+    reasoningEffort: composerReasoningEffort,
+    reasoningEffortEnabled: selectedModelSupportsReasoningEffort,
+    onReasoningEffortChange: setComposerReasoningEffort,
     closeSignal: inputCloseSignal,
     onModelSelect: (modelId: string) => void selectComposerModel(modelId),
     onOpenSettings: () => openSettings("models"),
@@ -798,6 +831,10 @@ export function App(): React.ReactElement {
           {chatScreen === "chat-empty" && (
             <ChatEmpty
               {...inputProps}
+              conversations={app.conversations}
+              workspaceDirectory={app.config?.workspace?.workspaceDirectory}
+              pendingCount={pendingCount}
+              onOpenConversation={(id) => void loadConversation(id)}
               error={app.error}
             />
           )}
@@ -807,7 +844,7 @@ export function App(): React.ReactElement {
               conversation={app.conversation}
               run={app.run}
               workSession={app.workSession}
-              events={app.events}
+              transcriptNodes={app.transcriptNodes}
               detail={app.detail}
               error={app.error}
               pendingConfirmation={pendingConfirmation}
@@ -923,8 +960,8 @@ function startSkillChat(
   const trigger = skill.triggers?.[0]?.trim();
   setScreen("chat-empty");
   setGoal(trigger === undefined || trigger.length === 0
-    ? `使用「${skill.name}」处理当前任务：`
-    : `使用「${skill.name}」处理当前任务：${trigger}`);
+    ? `按「${skill.name}」处理当前任务：`
+    : `按「${skill.name}」处理当前任务：${trigger}`);
 }
 
 function mergeConfigResponse(previous: ConfigResponse | undefined, incoming: ConfigResponse): ConfigResponse {
@@ -941,7 +978,19 @@ function mergeConfigResponse(previous: ConfigResponse | undefined, incoming: Con
 }
 
 function normalizeVisibleAiMode(mode: VisibleAiMode | undefined): VisibleAiMode {
-  return mode === "none" ? "none" : "openai-responses";
+  return mode === "none" ||
+    mode === "fake" ||
+    mode === "openai-compatible" ||
+    mode === "openai-responses"
+    ? mode
+    : "openai-compatible";
+}
+
+function transcriptNodesFrom(
+  workSession: DesktopWorkSession | undefined,
+  detail: DesktopRunDetail | undefined
+): readonly TranscriptNode[] {
+  return workSession?.transcriptNodes ?? detail?.transcript?.transcriptNodes ?? [];
 }
 
 function visibleConfigLabel(config: NonNullable<ConfigResponse["config"]>): string {
@@ -962,86 +1011,14 @@ function visibleConfigBaseUrl(config: NonNullable<ConfigResponse["config"]>): st
   return baseUrl;
 }
 
-function isConversationWaitingForUser(status: string | undefined): boolean {
-  return status === "approval_needed" || status === "needs_input";
-}
-
-function activeProfileId(config: ConfigResponse | undefined): string | undefined {
-  return config?.config?.profileId;
-}
-
-function modelOptionsFromConfig(
-  config: ConfigResponse | undefined,
-  catalogs: Readonly<Record<string, ModelProviderModelCatalog>>
-): readonly ChatModelOption[] {
-  const profiles = new Map((config?.profiles ?? []).map((profile) => [profile.profileId, profile]));
-  return Object.values(catalogs)
-    .filter((catalog) => profiles.has(catalog.profileId))
-    .map((catalog, index) => ({ catalog, index }))
-    .sort((left, right) => {
-      const leftProfile = profiles.get(left.catalog.profileId);
-      const rightProfile = profiles.get(right.catalog.profileId);
-      const rankDelta = modelProviderSortRank({
-        title: leftProfile?.label ?? left.catalog.label,
-        profileId: left.catalog.profileId,
-        baseUrl: leftProfile?.baseUrl ?? left.catalog.baseUrl,
-        model: leftProfile?.model,
-      }) - modelProviderSortRank({
-        title: rightProfile?.label ?? right.catalog.label,
-        profileId: right.catalog.profileId,
-        baseUrl: rightProfile?.baseUrl ?? right.catalog.baseUrl,
-        model: rightProfile?.model,
-      });
-      return rankDelta === 0 ? left.index - right.index : rankDelta;
-    })
-    .map(({ catalog }) => catalog)
-    .flatMap((catalog) => {
-      const profile = profiles.get(catalog.profileId);
-      const identity = resolveModelProviderIdentity({
-        title: profile?.label ?? catalog.label,
-        profileId: catalog.profileId,
-        baseUrl: profile?.baseUrl ?? catalog.baseUrl,
-        model: profile?.model,
-      });
-      const label = identity === "unknown" ? profile?.label ?? catalog.label ?? catalog.profileId : modelProviderDisplayName(identity);
-      return catalog.models
-        .filter((model) => model.id.trim().length > 0)
-        .map((model) => ({
-          id: modelOptionId(catalog.profileId, model.id),
-          name: model.displayName || model.id,
-          label,
-          providerLabel: label,
-          providerIdentity: identity,
-          profileId: catalog.profileId,
-          modelId: model.id,
-          iconSvg: resolveModelIconSvg(identity),
-        }));
-    });
-}
-
-function selectedModelOptionId(config: ConfigResponse | undefined, options: readonly ChatModelOption[]): string {
-  const profileId = activeProfileId(config);
-  const model = config?.config?.model;
-  if (profileId === undefined || model === undefined) return "";
-  const selectedId = modelOptionId(profileId, model);
-  return options.some((option) => option.id === selectedId) ? selectedId : "";
-}
-
-function modelOptionId(profileId: string, modelId: string): string {
-  return JSON.stringify([profileId, modelId]);
-}
-
-function parseModelOptionId(value: string): { readonly profileId: string; readonly modelId: string } | undefined {
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    if (!Array.isArray(parsed) || parsed.length !== 2) return undefined;
-    const [profileId, modelId] = parsed;
-    if (typeof profileId !== "string" || typeof modelId !== "string") return undefined;
-    if (profileId.trim().length === 0 || modelId.trim().length === 0) return undefined;
-    return { profileId, modelId };
-  } catch {
-    return undefined;
+function runReasoningSettings(
+  reasoningEffort: ComposerReasoningEffort,
+  supportsReasoningEffort: boolean
+): { readonly reasoningEffort?: Exclude<ComposerReasoningEffort, ""> } {
+  if (!supportsReasoningEffort || reasoningEffort.length === 0) {
+    return {};
   }
+  return { reasoningEffort: reasoningEffort as Exclude<ComposerReasoningEffort, ""> };
 }
 
 function catalogRecordFromList(catalogs: readonly ModelProviderModelCatalog[]): Record<string, ModelProviderModelCatalog> {

@@ -313,7 +313,7 @@ export function Drawer({
         </div>
         <div className="flex-1 overflow-y-auto px-6 py-5">{children}</div>
         <div className="shrink-0 border-t border-[var(--border)] px-6 py-4 flex items-center gap-2">
-          <Button variant="primary" className="flex-1">使用技能</Button>
+          <Button variant="primary" className="flex-1">开始使用</Button>
           <Button variant="outline" onClick={onClose}>关闭</Button>
         </div>
       </div>
@@ -339,7 +339,7 @@ export function DrawerSkeleton() {
         <Skeleton className="h-5 w-12 rounded-full" />
       </div>
       <Divider label="参数配置" />
-      {["参数占位", "参数占位", "参数占位"].map((label, i) => (
+      {["参数占位", "参数占位", "参数占位"].map((_, i) => (
         <div key={i} className="flex items-center justify-between py-2">
           <div>
             <Skeleton className="h-2.5 w-20 mb-1" />

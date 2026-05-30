@@ -26,6 +26,8 @@ export function eventTitle(event: RunEvent): string {
   if (event.type === "user.guidance") return "收到补充指导";
   if (event.type === "agent.note.delta") return "正在判断";
   if (event.type === "agent.note.completed") return "判断完成";
+  if (event.type === "model.reasoning.delta") return "正在思考";
+  if (event.type === "model.reasoning.completed") return "思考完成";
   if (event.type === "agent.delegation.planned") return "已拆分检查";
   if (event.type === "agent.child.started") return "局部检查开始";
   if (event.type === "agent.child.completed") return "局部检查完成";

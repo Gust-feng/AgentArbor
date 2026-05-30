@@ -21,6 +21,8 @@ const BASIC_RUN_EVENT_TYPES = [
   "agent.child.completed",
   "agent.child.waiting",
   "agent.parent_synthesis.completed",
+  "model.reasoning.delta",
+  "model.reasoning.completed",
   "model.output.delta",
   "model.output.completed",
   "context.compaction.completed",

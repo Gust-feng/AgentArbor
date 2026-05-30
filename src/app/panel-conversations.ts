@@ -80,7 +80,7 @@ export function trimRuntimeConversationToClosedPairs(input: {
 }): TrimRuntimeConversationResult {
   const turns = closedTurnPrefix(input.record.turns, input.completedRunIds);
   const lastTurn = turns.at(-1);
-  const lastAssistant = [...turns].reverse().find((turn) => turn.role === "assistant");
+  const lastAssistant = lastAssistantTurn(turns);
   const next: RuntimeConversationRecord = {
     ...input.record,
     turns,
@@ -255,7 +255,7 @@ export class PanelConversationStore {
     if (!conversation.queuedRunIds.includes(input.runId)) {
       conversation.queuedRunIds.push(input.runId);
     }
-    conversation.latestRunId = input.runId;
+    conversation.latestRunId = latestAssistantRunId(conversation) ?? input.runId;
     conversation.updatedAt = assistantTurn.updatedAt;
   }
 
@@ -273,7 +273,7 @@ export class PanelConversationStore {
     assistantTurn.title = "助手";
     assistantTurn.updatedAt = nowIso();
     conversation.currentRunId = input.runId;
-    conversation.latestRunId = input.runId;
+    conversation.latestRunId = latestAssistantRunId(conversation) ?? input.runId;
     conversation.updatedAt = assistantTurn.updatedAt;
   }
 
@@ -318,7 +318,7 @@ export class PanelConversationStore {
     assistantTurn.content = compactMessageContent(sanitizeAssistantVisibleText(input.content), 8_000);
     assistantTurn.status = input.status;
     assistantTurn.updatedAt = nowIso();
-    conversation.latestRunId = input.runId;
+    conversation.latestRunId = latestAssistantRunId(conversation) ?? input.runId;
     conversation.currentRunId = conversation.currentRunId === input.runId ? undefined : conversation.currentRunId;
     conversation.queuedRunIds = conversation.queuedRunIds.filter((runId) => runId !== input.runId);
     conversation.updatedAt = assistantTurn.updatedAt;
@@ -559,8 +559,18 @@ function toConversationSummary(conversation: PanelConversation): PanelConversati
   };
 }
 
+function lastAssistantTurn<T extends { readonly role: PanelConversationTurnRole }>(turns: readonly T[]): T | undefined {
+  for (let index = turns.length - 1; index >= 0; index -= 1) {
+    const turn = turns[index];
+    if (turn?.role === "assistant") {
+      return turn;
+    }
+  }
+  return undefined;
+}
+
 function conversationRequiresUserAction(conversation: PanelConversation): boolean {
-  const lastAssistant = [...conversation.turns].reverse().find((turn) => turn.role === "assistant");
+  const lastAssistant = lastAssistantTurn(conversation.turns);
   if (lastAssistant === undefined) {
     return false;
   }
@@ -572,7 +582,7 @@ function conversationStatus(conversation: PanelConversation): "idle" | "running"
   if (conversation.currentRunId !== undefined || conversation.queuedRunIds.length > 0) {
     return "running";
   }
-  const lastAssistant = [...conversation.turns].reverse().find((turn) => turn.role === "assistant");
+  const lastAssistant = lastAssistantTurn(conversation.turns);
   if (lastAssistant === undefined) {
     return "idle";
   }
@@ -600,6 +610,16 @@ function previousUserTurn(
   }
   const candidate = conversation.turns[assistantIndex - 1];
   return candidate?.role === "user" ? candidate : undefined;
+}
+
+function latestAssistantRunId(conversation: PanelConversation): string | undefined {
+  for (let index = conversation.turns.length - 1; index >= 0; index -= 1) {
+    const turn = conversation.turns[index];
+    if (turn?.role === "assistant" && turn.runId !== undefined) {
+      return turn.runId;
+    }
+  }
+  return undefined;
 }
 
 function normalizeTurnModel(

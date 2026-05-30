@@ -8,6 +8,7 @@ dist/
 build/
 coverage/
 .turbo/
+output/
 分析/
 # Local environment
 .env
@@ -17,6 +18,7 @@ coverage/
 # Logs
 *.log
 .playwright-mcp
+.playwright-cli/
 
 # Local AI development adapters and runtime state.
 # These directories are development-state by default; promote any shared

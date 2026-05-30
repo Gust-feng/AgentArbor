@@ -98,6 +98,8 @@ test("panel React source is split into typed frontend modules", async () => {
   assert.equal(chatEmpty.includes("closeSignal"), true);
   assert.equal(chatEmpty.includes("composer-reasoning-control"), true);
   assert.equal(chatEmpty.includes("reasoningEffortEnabled"), true);
+  assert.equal(chatEmpty.includes("当前工作入口"), false);
+  assert.equal(chatEmpty.includes("继续最近任务"), false);
   assert.equal(workspacePages.includes("provider-reasoning-panel"), false);
   assert.equal(workspacePages.includes("思考强度"), false);
   assert.equal(chatEmpty.includes("管理模型厂商"), false);
@@ -107,9 +109,27 @@ test("panel React source is split into typed frontend modules", async () => {
   assert.equal(chatActive.includes("resolveModelIconSvg"), true);
   assert.equal(chatActive.includes("assistantModelForTurn"), true);
   assert.equal(chatActive.includes(".slice(-8)"), false);
-  assert.equal(chatActive.includes('data-result="command"'), true);
-  assert.equal(chatActive.includes("workflowFrameTitle"), true);
+  assert.equal(chatActive.includes('data-display="command"'), true);
+  assert.equal(chatActive.includes("TranscriptChain"), true);
+  assert.equal(chatActive.includes("ConfirmationBanner"), false);
+  assert.equal(chatActive.includes("hasLaterToolResolution"), false);
+  assert.equal(chatActive.includes("showStandaloneRun"), true);
+  assert.equal(chatActive.includes("pendingForTurn"), true);
+  assert.equal(chatActive.includes("visibleTranscriptNodes"), true);
+  assert.equal(chatActive.includes("node.eventType"), true);
+  assert.equal(chatActive.includes("补充要求或限制..."), true);
+  assert.equal(chatActive.includes('props.onDecision("guidance", guidance)'), true);
+  assert.equal(chatActive.includes("允许执行"), true);
+  assert.equal(chatActive.includes("拒绝执行"), true);
+  assert.equal(chatActive.includes("confirmation-guidance-input"), false);
+  assert.equal(chatActive.includes("判断下一步"), false);
+  assert.equal(chatActive.includes('aria-label="思考"'), false);
+  assert.equal(app.includes("isConversationWaitingForUser"), true);
+  assert.equal(app.includes("shouldShowProviderIcon"), false);
+  assert.equal(chatActive.includes("isSyntheticResponseModel"), true);
   assert.equal(sidebar.includes("最近会话"), true);
+  assert.equal(sidebar.includes("sidebar-confirmation-card"), false);
+  assert.equal(sidebar.includes("sidebar-pending-reminder"), true);
   assert.equal(topbar.includes("topbarStatusText"), true);
   assert.equal(topbar.includes("写入前确认"), false);
   assert.equal(richText.includes('from "react-markdown"'), true);
@@ -155,6 +175,39 @@ test("panel conversations preserve assistant markdown line breaks", () => {
   assert.equal(assistantTurn.content.includes("\n1. **第一项**\n2. **第二项**"), true);
   assert.equal(assistantTurn.content.includes("\n- **证据**"), true);
   assert.equal(persisted.turns[1]?.content.includes("\n- **证据**"), true);
+});
+
+test("panel conversations keep the active follow-up run when an older guidance turn completes", () => {
+  const store = new PanelConversationStore();
+  const first = store.startDesktopMessage({ goal: "删除文件前需要确认" });
+  store.attachRun({
+    conversationId: first.conversation.conversationId,
+    assistantTurnId: first.assistantTurn.turnId,
+    runId: "run-original",
+  });
+
+  const followUp = store.startDesktopMessage({
+    conversationId: first.conversation.conversationId,
+    goal: "先不要删除，说明需要我确认什么。",
+  });
+  store.attachRun({
+    conversationId: followUp.conversation.conversationId,
+    assistantTurnId: followUp.assistantTurn.turnId,
+    runId: "run-follow-up",
+  });
+  store.completeAssistantTurn({
+    conversationId: first.conversation.conversationId,
+    assistantTurnId: first.assistantTurn.turnId,
+    runId: "run-original",
+    title: "需要补充",
+    content: "已收到补充指导，将作为后续消息继续处理。",
+    status: "completed",
+  });
+
+  const conversation = store.getReadModel(first.conversation.conversationId)!;
+  assert.equal(conversation.activeRunId, "run-follow-up");
+  assert.equal(conversation.latestRunId, "run-follow-up");
+  assert.equal(conversation.status, "running");
 });
 
 test("desktop live model stream preserves markdown structure", async () => {
@@ -204,7 +257,7 @@ test("desktop live model stream preserves markdown structure", async () => {
 });
 
 test("panel React workbench consumes Basic Agent projection APIs", async () => {
-  const [app, runtime, workspacePages, chatEmpty, chatActive, sidebar, topbar] = await Promise.all([
+  const [app, runtime, workspacePages, chatEmpty, chatActive, sidebar, topbar, modelProviderLogos, modelOptions] = await Promise.all([
     readPanelUiSource("App.tsx"),
     readPanelUiSource("runtime.ts"),
     readPanelUiSource(path.join("components", "workspace-pages.tsx")),
@@ -212,6 +265,8 @@ test("panel React workbench consumes Basic Agent projection APIs", async () => {
     readPanelUiSource(path.join("components", "chat-active.tsx")),
     readPanelUiSource(path.join("components", "sidebar.tsx")),
     readPanelUiSource(path.join("components", "topbar.tsx")),
+    readPanelUiSource("model-provider-logos.ts"),
+    readPanelUiSource("model-options.ts"),
   ]);
 
   assert.equal(app.includes("/api/conversations"), true);
@@ -233,11 +288,22 @@ test("panel React workbench consumes Basic Agent projection APIs", async () => {
   assert.equal(app.includes("/api/config/model-profiles"), true);
   assert.equal(app.includes("/model-catalog"), true);
   assert.equal(workspacePages.includes("获取模型"), true);
-  assert.equal(chatActive.includes("model.output.delta"), true);
-  assert.equal(chatActive.includes("model.reasoning.delta"), true);
-  assert.equal(chatActive.includes("activity-output-richtext"), true);
-  assert.equal(chatActive.includes("ProcessTrace"), true);
-  assert.equal(chatActive.includes("activityItemsForRun"), true);
+  assert.equal(chatActive.includes("model.output.delta"), false);
+  assert.equal(chatActive.includes("model.reasoning.delta"), false);
+  assert.equal(chatActive.includes('kind === "thinking"'), true);
+  assert.equal(chatActive.includes("reasoning-block"), false);
+  assert.equal(chatActive.includes("TimelineStream"), false);
+  assert.equal(chatActive.includes("activityItemsFromTranscriptNodes"), false);
+  assert.equal(chatActive.includes("WorkflowFrame"), false);
+  assert.equal(chatActive.includes("ActivityGroup"), false);
+  assert.equal(chatActive.includes("transcriptNodesFromEvents"), false);
+  assert.equal(chatActive.includes("toolTranscriptTitle"), false);
+  assert.equal(chatActive.includes("resultBlocks"), false);
+  assert.equal(modelOptions.includes("profile.secretConfigured === true"), true);
+  assert.equal(modelOptions.includes("profile.defaultAiMode !== \"fake\""), true);
+  assert.equal(modelOptions.includes("profile.defaultAiMode !== \"none\""), true);
+  assert.equal(modelProviderLogos.includes("默认配置"), false);
+  assert.equal(modelProviderLogos.includes("value.includes(\"default\")"), false);
   assert.equal(chatEmpty.includes("任务输入"), true);
   assert.equal(chatEmpty.includes("ChatInputBar"), true);
   assert.equal(sidebar.includes("新任务"), true);
@@ -246,6 +312,7 @@ test("panel React workbench consumes Basic Agent projection APIs", async () => {
   assert.equal(sidebar.includes("工具"), true);
   assert.equal(sidebar.includes("设置"), true);
   assert.equal(sidebar.includes("待确认"), true);
+  assert.equal(sidebar.includes("sidebar-confirmation-card"), false);
   assert.equal(sidebar.includes("最近会话"), true);
   assert.equal(topbar.includes("topbarStatusText"), true);
   assert.equal(topbar.includes("写入前确认"), false);
@@ -3353,27 +3420,46 @@ test("basic agent confirmation decisions persist approve and guidance outcomes s
     });
     await fs.writeFile(path.join(workspace, "approved.txt"), "approved delete content", "utf8");
     await fs.writeFile(path.join(workspace, "guidance.txt"), "guidance delete content", "utf8");
-    const approveStart = await requestJson(server.url, "/api/desktop/runs", {
+    const approveStart = await requestJson(server.url, "/api/conversations", {
       method: "POST",
       body: { goal: "删除 approved.txt 测试确认续跑", aiMode: "openai-compatible" },
     });
+    const approveRunId = approveStart.body.run.runId;
+    const approveConversationId = approveStart.body.conversation.conversationId;
     const approveCompleted = await waitForRun(
       server.url,
-      approveStart.body.runId,
+      approveRunId,
       (body) => body.status === "approval_needed" && body.canvas?.agent?.pendingConfirmation !== undefined,
       4_000,
       "/api/desktop/runs"
     );
     const approveConfirmationId = approveCompleted.body.canvas.agent.pendingConfirmation.confirmationId;
+    const pendingConversations = await requestJson(server.url, "/api/conversations");
+    const pendingSummary = pendingConversations.body.conversations.find(
+      (item: { conversationId: string }) => item.conversationId === approveConversationId
+    );
+    const pendingEvents = await requestJson(
+      server.url,
+      `/api/basic-agent/runs/${encodeURIComponent(approveRunId)}/events?cursor=0`
+    );
+    const requestedSequence = pendingEvents.body.events.find((event: { type: string }) => event.type === "tool.requested")?.sequence;
+    const confirmationSequence = pendingEvents.body.events.find((event: { type: string }) => event.type === "confirmation.needed")?.sequence;
+
+    assert.equal(pendingSummary?.requiresUserAction, true);
+    assert.equal(typeof requestedSequence, "number");
+    assert.equal(typeof confirmationSequence, "number");
+    assert.equal(Number(confirmationSequence) > Number(requestedSequence), true);
+    assert.equal(pendingEvents.text.includes("请求执行执行操作"), false);
+
     const approveDecision = await requestJson(
       server.url,
-      `/api/basic-agent/runs/${encodeURIComponent(approveStart.body.runId)}/confirmations/${encodeURIComponent(approveConfirmationId)}/decision`,
+      `/api/basic-agent/runs/${encodeURIComponent(approveRunId)}/confirmations/${encodeURIComponent(approveConfirmationId)}/decision`,
       { method: "POST", body: { decision: "approve_once" } }
     );
-    const approveRuntime = await requestJson(server.url, `/api/runtime/runs/${encodeURIComponent(approveStart.body.runId)}`);
+    const approveRuntime = await requestJson(server.url, `/api/runtime/runs/${encodeURIComponent(approveRunId)}`);
     const approveEvents = await requestJson(
       server.url,
-      `/api/basic-agent/runs/${encodeURIComponent(approveStart.body.runId)}/events?cursor=0`
+      `/api/basic-agent/runs/${encodeURIComponent(approveRunId)}/events?cursor=0`
     );
 
     assert.equal(approveDecision.status, 200);
@@ -3386,6 +3472,11 @@ test("basic agent confirmation decisions persist approve and guidance outcomes s
       true
     );
     assert.equal(approveEvents.body.events.some((event: { type: string }) => event.type === "tool.completed"), true);
+    const approvedConfirmationSequence = approveEvents.body.events.find((event: { type: string }) => event.type === "confirmation.needed")?.sequence;
+    const approvedCompletedSequence = approveEvents.body.events.find((event: { type: string }) => event.type === "tool.completed")?.sequence;
+    assert.equal(typeof approvedConfirmationSequence, "number");
+    assert.equal(typeof approvedCompletedSequence, "number");
+    assert.equal(Number(approvedCompletedSequence) > Number(approvedConfirmationSequence), true);
     await assert.rejects(() => fs.readFile(path.join(workspace, "approved.txt"), "utf8"));
 
     const guidanceSecret = "sk-guidance-decision-secret";
@@ -3419,6 +3510,73 @@ test("basic agent confirmation decisions persist approve and guidance outcomes s
     assert.equal(guidanceEvents.text.includes(guidanceSecret), false);
     assert.equal(guidanceRuntime.text.includes(guidanceSecret), false);
     assertSafePanelJsonText(`${approveDecision.text}\n${approveRuntime.text}\n${approveEvents.text}\n${guidanceDecision.text}\n${guidanceRuntime.text}\n${guidanceEvents.text}`);
+  } finally {
+    await server.close();
+    await fs.rm(directory, { recursive: true, force: true });
+    await fs.rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("basic agent approved shell-style run_command resumes without sandbox command-shape failure", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-basic-command-confirmation-"));
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-basic-command-workspace-"));
+  let providerFetchCalls = 0;
+  const providerFetch: PanelProviderFetch = async () => {
+    providerFetchCalls += 1;
+    return providerFetchCalls === 1
+      ? createOpenAiRunCommandToolCallResponse("echo approval-review")
+      : createOpenAiTextResponse("basic-command-confirmation-model", "命令检查完成。");
+  };
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory, providerFetch });
+  try {
+    await requestJson(server.url, "/api/config/model-provider", {
+      method: "POST",
+      body: {
+        baseUrl: "https://provider.example",
+        model: "gpt-4o-mini",
+        apiKey: "sk-basic-command-secret",
+      },
+    });
+    await requestJson(server.url, "/api/config/workspace", {
+      method: "POST",
+      body: { workspaceDirectory: workspace },
+    });
+    const start = await requestJson(server.url, "/api/conversations", {
+      method: "POST",
+      body: { goal: "运行 echo approval-review 测试命令确认续跑", aiMode: "openai-compatible" },
+    });
+    const runId = start.body.run.runId;
+    const pending = await waitForRun(
+      server.url,
+      runId,
+      (body) => body.status === "approval_needed" && body.canvas?.agent?.pendingConfirmation !== undefined,
+      4_000,
+      "/api/desktop/runs"
+    );
+    const confirmationId = pending.body.canvas.agent.pendingConfirmation.confirmationId;
+    const pendingEvents = await requestJson(server.url, `/api/basic-agent/runs/${encodeURIComponent(runId)}/events?cursor=0`);
+
+    assert.equal(pendingEvents.text.includes("Sandbox policy rejected command"), false);
+
+    const approved = await requestJson(
+      server.url,
+      `/api/basic-agent/runs/${encodeURIComponent(runId)}/confirmations/${encodeURIComponent(confirmationId)}/decision`,
+      { method: "POST", body: { decision: "approve_once" } }
+    );
+    const runtimeRun = await requestJson(server.url, `/api/runtime/runs/${encodeURIComponent(runId)}`);
+    const events = await requestJson(server.url, `/api/basic-agent/runs/${encodeURIComponent(runId)}/events?cursor=0`);
+    const commandCall = runtimeRun.body.snapshot.toolCalls.find(
+      (call: { toolName?: string; status: string }) => call.toolName === "run_command"
+    );
+
+    assert.equal(approved.status, 200);
+    assert.equal(approved.body.run.status, "completed");
+    assert.equal(commandCall?.status, "completed");
+    assert.equal(commandCall?.command, "echo approval-review");
+    assert.equal(events.body.events.some((event: { type: string }) => event.type === "tool.completed"), true);
+    assert.equal(events.body.events.some((event: { type: string }) => event.type === "tool.failed"), false);
+    assert.equal(events.text.includes("Sandbox policy rejected command: echo approval-review"), false);
+    assertSafePanelJsonText(`${approved.text}\n${runtimeRun.text}\n${events.text}`);
   } finally {
     await server.close();
     await fs.rm(directory, { recursive: true, force: true });
@@ -4217,6 +4375,10 @@ function createOpenAiReadFileToolCallResponse(
 
 function createOpenAiDeleteFileToolCallResponse(filePath: string): Awaited<ReturnType<PanelProviderFetch>> {
   return createOpenAiToolCallResponse("basic-confirmation-model", "call-panel-write-file", "delete_file", { path: filePath });
+}
+
+function createOpenAiRunCommandToolCallResponse(command: string): Awaited<ReturnType<PanelProviderFetch>> {
+  return createOpenAiToolCallResponse("basic-command-confirmation-model", "call-panel-run-command", "run_command", { command });
 }
 
 function createOpenAiToolCallResponse(

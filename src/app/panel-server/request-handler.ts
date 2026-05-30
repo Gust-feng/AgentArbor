@@ -88,6 +88,7 @@ import type {
 import {
   createPanelRunTrace,
   createPanelRunStreamEvents,
+  createPanelTranscriptNodes,
   createPanelRunTracking,
   createPanelRunTranscript,
   toPanelObservation,
@@ -166,6 +167,7 @@ type PanelRunResponse = {
   readonly tracking: PanelRunTrackingReadModel;
   readonly trace: PanelRunTraceReadModel;
   readonly transcript: PanelRunTranscript;
+  readonly transcriptNodes: PanelRunTranscript["transcriptNodes"];
   readonly workNotes: PanelRunTranscript["workNotes"];
   readonly steps: PanelRunTranscript["steps"];
   readonly streamCursor: PanelRunStreamCursor;
@@ -183,6 +185,7 @@ type PanelRunJobResponse = {
   readonly trace: PanelRunTraceReadModel;
   readonly tracking: PanelRunTrackingReadModel;
   readonly transcript: PanelRunTranscript;
+  readonly transcriptNodes: PanelRunTranscript["transcriptNodes"];
   readonly workNotes: PanelRunTranscript["workNotes"];
   readonly steps: PanelRunTranscript["steps"];
   readonly streamCursor: PanelRunStreamCursor;
@@ -645,6 +648,7 @@ async function handleRunRequest(
       tracking,
       trace,
       transcript,
+      transcriptNodes: transcript.transcriptNodes,
       workNotes: transcript.workNotes,
       steps: transcript.steps,
       streamCursor: {
@@ -834,7 +838,18 @@ async function handleGetRunRequest(
     if (isTerminalPanelRunStatus(job.status)) {
       await persistPanelRun(runtime, job);
     }
-    writeJson(response, 200, createPanelRunJobResponse(runtime, job));
+    let jobResponse = createPanelRunJobResponse(runtime, job);
+    if (job.status === "approval_needed" || job.status === "needs_input") {
+      syncConversationTurnForJob(runtime, job, jobResponse);
+      if (job.conversationId !== undefined) {
+        await persistPanelConversation(runtime, job.conversationId);
+      }
+      jobResponse = {
+        ...jobResponse,
+        conversation: job.conversationId === undefined ? undefined : runtime.conversations.getReadModel(job.conversationId),
+      };
+    }
+    writeJson(response, 200, jobResponse);
     return;
   }
   const snapshot = await runtime.runtimeDatabase?.getRun(runId);
@@ -1247,6 +1262,7 @@ function createPanelRunJobResponse(runtime: PanelRuntime, job: PanelRunJob): Pan
       updatedAt: job.updatedAt,
     }),
     events: streamEvents,
+    transcriptNodes: createPanelTranscriptNodes(streamEvents),
   };
 
   return {
@@ -1260,6 +1276,7 @@ function createPanelRunJobResponse(runtime: PanelRuntime, job: PanelRunJob): Pan
     trace,
     tracking,
     transcript,
+    transcriptNodes: transcript.transcriptNodes,
     workNotes: transcript.workNotes,
     steps: transcript.steps,
     streamCursor: {
@@ -1294,6 +1311,7 @@ async function createPersistedRunResponse(
     eventEntries: [],
   });
   const streamEvents = createPersistedStreamEvents(snapshot, status);
+  const transcriptNodes = createPanelTranscriptNodes(streamEvents);
   const conversation =
     snapshot.run.conversationId === undefined
       ? undefined
@@ -1326,6 +1344,7 @@ async function createPersistedRunResponse(
       status,
       updatedAt: snapshot.run.updatedAt,
       events: streamEvents,
+      transcriptNodes,
       steps: [],
       workNotes: [],
       modelCalls: snapshot.modelCalls.map((call) => ({
@@ -1345,6 +1364,7 @@ async function createPersistedRunResponse(
         eventRefs: [...call.eventRefs],
       })),
     },
+    transcriptNodes,
     workNotes: [],
     steps: [],
     streamCursor: {
@@ -2410,11 +2430,11 @@ function mergeToolStatus(
   return "requested";
 }
 
-function syncConversationTurnForJob(runtime: PanelRuntime, job: PanelRunJob): void {
+function syncConversationTurnForJob(runtime: PanelRuntime, job: PanelRunJob, preparedResponse?: PanelRunJobResponse): void {
   if (job.conversationId === undefined || job.assistantTurnId === undefined) {
     return;
   }
-  const response = createPanelRunJobResponse(runtime, job);
+  const response = preparedResponse ?? createPanelRunJobResponse(runtime, job);
   const responseModel = turnModelFromRunJobResponse(response);
   if (response.status === "failed") {
     runtime.conversations.completeAssistantTurn({

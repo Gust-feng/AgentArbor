@@ -11,6 +11,7 @@ import {
   type BasicAgentRunExecutor,
 } from "../basic-agent-runtime/index.js";
 import type { PanelRunJob } from "../panel-run-jobs.js";
+import { createPanelTranscriptNodes } from "../panel-run-read-model.js";
 import {
   PanelHttpError,
   parseStreamCursor,
@@ -123,6 +124,7 @@ async function handleGetBasicWorkSessionRequest(
         taskSoilInput: job.taskSoilInput,
         toolEvidence: toolEnvelopesFromStreamEvents(job.streamEvents),
         toolDisplays: toolDisplaysFromStreamEvents(job.streamEvents),
+        transcriptNodes: createPanelTranscriptNodes(job.streamEvents),
       }) satisfies DesktopWorkSessionReadModel,
     });
     return;

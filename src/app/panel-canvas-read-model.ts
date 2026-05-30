@@ -566,14 +566,7 @@ export function createDesktopAgentCanvas(input: {
               modelCallRefs: [...input.result.answer.modelCallRefs],
               toolCallRefs: [...input.result.answer.toolCallRefs],
               evidenceRefs: input.result.answer.evidenceRefs.map((value) => safeText(value, 180)),
-              resultBlocks: input.result.answer.resultBlocks.map((block) => ({
-                blockId: block.blockId,
-                kind: block.kind,
-                title: safeText(block.title, 120),
-                summary: safeText(block.summary, 900),
-                evidenceRefs: block.evidenceRefs.map((value) => safeText(value, 180)),
-                toolCallRefs: [...block.toolCallRefs],
-              })),
+              resultBlocks: [],
             },
       pendingConfirmation:
         input.result.pendingConfirmation === undefined
@@ -592,22 +585,7 @@ export function createDesktopAgentCanvas(input: {
         input.result.failureMessage === undefined ? undefined : safeText(input.result.failureMessage, 420),
       modelCallRefs: [...input.result.modelCallRefs],
       toolCallRefs: [...input.result.toolCallRefs],
-      activity: input.result.activity.map((item) => ({
-        activityId: item.activityId,
-        type: item.type,
-        title: safeText(item.title, 120),
-        summary: safeText(item.summary, 360),
-        status: item.status,
-        createdAt: item.createdAt,
-        action: item.action === undefined ? undefined : safeText(item.action, 80),
-        path: item.path === undefined ? undefined : safeText(item.path, 260),
-        truncated: item.truncated,
-        error: item.error === undefined ? undefined : safeText(item.error, 260),
-        toolName: item.toolName === undefined ? undefined : safeText(item.toolName, 80),
-        sourceRefs: item.sourceRefs.map((value) => safeText(value, 180)),
-        modelCallRefs: [...item.modelCallRefs],
-        toolCallRefs: [...item.toolCallRefs],
-      })),
+      activity: [],
       context:
         input.result.contextPack === undefined
           ? undefined

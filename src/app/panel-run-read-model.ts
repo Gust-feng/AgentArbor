@@ -2,6 +2,8 @@ import type { ArborMessageType } from "../domain/common.js";
 import type { ModelRunReasoningEffort, SanitizedInformationAccessConfig, SanitizedModelProviderConfig } from "../domain/config/index.js";
 import type { ModelReasoningOutputProjection, ModelVisibleOutputProjection } from "../domain/intelligence/index.js";
 import type { ToolDisplayProjection, ToolResultEnvelope } from "../domain/tools/index.js";
+import type { TranscriptNode, TranscriptNodePhase } from "../domain/basic-agent/index.js";
+import type { ObservationRef } from "../domain/observation/index.js";
 import { toolDisplayName } from "../domain/tools/index.js";
 import type { AgentRunTree } from "../domain/underground/index.js";
 import {
@@ -272,6 +274,8 @@ export type PanelRunStreamEvent = {
   readonly toolCallRefs: readonly string[];
 };
 
+export type PanelTranscriptNode = TranscriptNode;
+
 export type PanelRunStreamCursor = {
   readonly runId: string;
   readonly lastSequence: number;
@@ -282,6 +286,7 @@ export type PanelRunTranscript = {
   readonly status: PanelRunStatus;
   readonly updatedAt: string;
   readonly events: readonly PanelRunStreamEvent[];
+  readonly transcriptNodes: readonly PanelTranscriptNode[];
   readonly steps: readonly PanelRunStep[];
   readonly workNotes: readonly AgentWorkNote[];
   readonly modelCalls: readonly PanelTranscriptModelCall[];
@@ -578,10 +583,509 @@ export function createPanelRunTranscript(input: {
     status: input.status,
     updatedAt: input.updatedAt,
     events: streamEvents,
+    transcriptNodes: createPanelTranscriptNodes(streamEvents),
     steps,
     workNotes,
     modelCalls,
   };
+}
+
+export function createPanelTranscriptNodes(
+  streamEvents: readonly PanelRunStreamEvent[]
+): readonly PanelTranscriptNode[] {
+  const confirmationToolRefs = new Set(
+    streamEvents
+      .filter((event) => event.type === "confirmation.needed")
+      .flatMap((event) => event.toolCallRefs)
+  );
+  const confirmationRequestSequences = requestSequencesBeforeConfirmations(streamEvents);
+  const requestedByCallId = new Map<string, number>();
+  const nodes: PanelTranscriptNode[] = [];
+  let pendingReasoning: PendingPanelReasoningNode | undefined;
+
+  for (const event of streamEvents) {
+    if (isReasoningTranscriptEvent(event)) {
+      pendingReasoning = updatePendingPanelReasoning(pendingReasoning, event, nodes);
+      continue;
+    }
+    pendingReasoning = flushPendingPanelReasoning(pendingReasoning, nodes);
+    const node = transcriptNodeForEvent(event, {
+      confirmationToolRefs,
+      confirmationRequestSequences,
+      requestedByCallId,
+    });
+    if (node !== undefined) {
+      nodes.push(node);
+    }
+  }
+  flushPendingPanelReasoning(pendingReasoning, nodes);
+
+  return nodes;
+}
+
+type PendingPanelReasoningNode = {
+  readonly firstEvent: PanelRunStreamEvent;
+  readonly events: readonly PanelRunStreamEvent[];
+  readonly text: string;
+  readonly completed: boolean;
+};
+
+function transcriptNodeForEvent(
+  event: PanelRunStreamEvent,
+  context: {
+    readonly confirmationToolRefs: ReadonlySet<string>;
+    readonly confirmationRequestSequences: ReadonlySet<number>;
+    readonly requestedByCallId: Map<string, number>;
+  }
+): PanelTranscriptNode | undefined {
+  if (event.type === "run.started") {
+    return undefined;
+  }
+  if (event.type === "model.output.delta" || event.type === "model.output.completed") {
+    return undefined;
+  }
+  if ((event.type === "agent.note.delta" || event.type === "agent.note.completed") && isLowValueAgentNote(event.summary)) {
+    return undefined;
+  }
+  if (event.type === "agent.note.delta" || event.type === "agent.note.completed") {
+    if (event.summary === undefined || event.summary.trim().length === 0) {
+      return undefined;
+    }
+    return transcriptNode(event, {
+      kind: "thinking",
+      phase: event.type === "agent.note.delta" ? "noted" : "completed",
+      title: event.type === "agent.note.delta" ? "判断" : "判断完成",
+      summary: event.summary,
+    });
+  }
+  if (event.type === "tool.requested") {
+    const callId = event.toolCallRefs[0];
+    const previousCount = callId === undefined ? 0 : context.requestedByCallId.get(callId) ?? 0;
+    if (callId !== undefined) {
+      context.requestedByCallId.set(callId, previousCount + 1);
+    }
+    const phase: TranscriptNodePhase =
+      ((callId !== undefined && context.confirmationToolRefs.has(callId) && previousCount === 0) ||
+        context.confirmationRequestSequences.has(event.sequence))
+        ? "preparing"
+        : "executing";
+    return transcriptNode(event, {
+      kind: "tool",
+      phase,
+      title: toolTranscriptTitle(event, phase),
+      summary: transcriptToolSummary(event),
+      display: event.detail?.display,
+    });
+  }
+  if (event.type === "tool.completed" || event.type === "tool.failed") {
+    const phase: TranscriptNodePhase = event.type === "tool.completed" ? "completed" : "failed";
+    return transcriptNode(event, {
+      kind: "tool",
+      phase,
+      title: toolTranscriptTitle(event, phase),
+      summary: transcriptToolSummary(event),
+      display: event.detail?.display,
+    });
+  }
+  if (event.type === "confirmation.needed") {
+    const summary = userFacingConfirmationSummary(event.summary);
+    return transcriptNode(event, {
+      kind: "confirmation",
+      phase: "waiting_approval",
+      title: "待确认",
+      summary,
+      confirmation: {
+        confirmationId: confirmationIdForTranscriptEvent(event),
+        runId: event.runId,
+        title: "需要确认",
+        actionSummary: summary,
+        affectedResources: [],
+        riskLevel: "medium",
+        requestedAt: event.createdAt,
+        sourceRefs: event.sourceRefs,
+      },
+    });
+  }
+  if (event.type === "user_approval.received" || event.type === "user.guidance") {
+    const phase = userDecisionPhase(event);
+    return transcriptNode(event, {
+      kind: "user_decision",
+      phase,
+      title: userDecisionTitle(phase),
+      summary: event.summary,
+    });
+  }
+  if (event.type === "run.resumed") {
+    return transcriptNode(event, {
+      kind: "user_decision",
+      phase: "approved",
+      title: "继续执行",
+      summary: event.summary,
+    });
+  }
+  if (event.type === "final.result") {
+    return transcriptNode(event, {
+      kind: "answer",
+      phase: "completed",
+      title: "结果",
+      summary: event.summary,
+    });
+  }
+  if (event.type === "run.failed" || event.type === "run.blocked" || event.type === "run.cancelled") {
+    return transcriptNode(event, {
+      kind: "system",
+      phase: event.type === "run.failed" ? "failed" : event.type === "run.cancelled" ? "cancelled" : "blocked",
+      title: event.type === "run.failed" ? "运行未完成" : event.type === "run.cancelled" ? "运行已取消" : "运行中断",
+      summary: event.summary,
+    });
+  }
+  if (event.type === "context.compaction.completed" || event.type === "context.compaction.failed") {
+    return transcriptNode(event, {
+      kind: "system",
+      phase: event.type === "context.compaction.completed" ? "completed" : "failed",
+      title: event.type === "context.compaction.completed" ? "整理上下文" : "上下文整理失败",
+      summary: event.summary,
+    });
+  }
+  if (event.type.startsWith("agent.")) {
+    return transcriptNode(event, {
+      kind: "system",
+      phase: event.status === "failed" ? "failed" : event.status === "running" ? "executing" : "completed",
+      title: event.agentLabel ?? "工作更新",
+      summary: event.summary,
+    });
+  }
+  return undefined;
+}
+
+function requestSequencesBeforeConfirmations(events: readonly PanelRunStreamEvent[]): ReadonlySet<number> {
+  const sequences = new Set<number>();
+  let latestRequested: PanelRunStreamEvent | undefined;
+  for (const event of events) {
+    if (event.type === "tool.requested") {
+      latestRequested = event;
+      continue;
+    }
+    if (event.type === "confirmation.needed" && latestRequested !== undefined) {
+      sequences.add(latestRequested.sequence);
+      latestRequested = undefined;
+      continue;
+    }
+    if (event.type === "tool.completed" || event.type === "tool.failed" || event.type === "final.result") {
+      latestRequested = undefined;
+    }
+  }
+  return sequences;
+}
+
+function isReasoningTranscriptEvent(
+  event: PanelRunStreamEvent
+): event is PanelRunStreamEvent & { readonly type: "model.reasoning.delta" | "model.reasoning.completed" } {
+  return event.type === "model.reasoning.delta" || event.type === "model.reasoning.completed";
+}
+
+function updatePendingPanelReasoning(
+  pending: PendingPanelReasoningNode | undefined,
+  event: PanelRunStreamEvent,
+  nodes: PanelTranscriptNode[]
+): PendingPanelReasoningNode | undefined {
+  const text = event.delta ?? event.detail?.preview ?? event.summary;
+  if (text === undefined || text.trim().length === 0) {
+    return pending;
+  }
+  if (pending === undefined || !sameReasoningModelCall(pending.firstEvent.modelCallRefs, event.modelCallRefs)) {
+    flushPendingPanelReasoning(pending, nodes);
+    return {
+      firstEvent: event,
+      events: [event],
+      text,
+      completed: event.type === "model.reasoning.completed",
+    };
+  }
+  return {
+    firstEvent: pending.firstEvent,
+    events: [...pending.events, event],
+    text: appendReasoningFragment(pending.text, text),
+    completed: pending.completed || event.type === "model.reasoning.completed",
+  };
+}
+
+function flushPendingPanelReasoning(
+  pending: PendingPanelReasoningNode | undefined,
+  nodes: PanelTranscriptNode[]
+): undefined {
+  if (pending === undefined) return undefined;
+  const text = pending.text.trim();
+  if (text.length === 0) return undefined;
+  nodes.push({
+    ...transcriptNode(pending.firstEvent, {
+      kind: "thinking",
+      phase: pending.completed ? "completed" : "noted",
+      title: "思考",
+      summary: compactStreamDetailText(text, 180),
+      text,
+    }),
+    nodeId: `${pending.firstEvent.eventId}:reasoning-node`,
+    eventType: pending.completed ? "model.reasoning.completed" : "model.reasoning.delta",
+    refs: uniqueObservationRefs(pending.events.flatMap(transcriptRefsForEvent)),
+  });
+  return undefined;
+}
+
+function sameReasoningModelCall(left: readonly string[], right: readonly string[]): boolean {
+  if (left.length === 0 || right.length === 0) {
+    return left.length === right.length;
+  }
+  return left.some((id) => right.includes(id));
+}
+
+function appendReasoningFragment(current: string, next: string): string {
+  if (current.length === 0) return next;
+  if (/\s$/.test(current) || /^\s/.test(next)) return `${current}${next}`;
+  if (/^[,.;:!?，。；：！？)\]}”’]/.test(next)) return `${current}${next}`;
+  if (/[(\[{“‘]$/.test(current)) return `${current}${next}`;
+  if (endsWithCjk(current) && startsWithCjk(next)) return `${current}${next}`;
+  return `${current} ${next}`;
+}
+
+function startsWithCjk(value: string): boolean {
+  return /^[\u3400-\u9fff\u3040-\u30ff]/u.test(value);
+}
+
+function endsWithCjk(value: string): boolean {
+  return /[\u3400-\u9fff\u3040-\u30ff]$/u.test(value);
+}
+
+function transcriptNode(
+  event: PanelRunStreamEvent,
+  input: {
+    readonly kind: PanelTranscriptNode["kind"];
+    readonly phase: PanelTranscriptNode["phase"];
+    readonly title: string;
+    readonly summary?: string;
+    readonly text?: string;
+    readonly display?: ToolDisplayProjection;
+    readonly confirmation?: PanelTranscriptNode["confirmation"];
+  }
+): PanelTranscriptNode {
+  return {
+    nodeId: `${event.eventId}:node`,
+    runId: event.runId,
+    sequence: event.sequence,
+    eventType: event.type,
+    kind: input.kind,
+    phase: input.phase,
+    title: input.title,
+    summary: input.summary,
+    text: input.text,
+    timestamp: event.createdAt,
+    toolName: event.toolName,
+    display: input.display,
+    confirmation: input.confirmation,
+    refs: transcriptRefsForEvent(event),
+  };
+}
+
+function transcriptRefsForEvent(event: PanelRunStreamEvent): readonly ObservationRef[] {
+  const refs: ObservationRef[] = [
+    { kind: "event", id: event.eventId },
+    ...event.modelCallRefs.map((id): ObservationRef => ({ kind: "model_call", id })),
+    ...event.toolCallRefs.map((id): ObservationRef => ({ kind: "tool_call", id })),
+    ...event.sourceRefs.map(sourceRefToObservationRef),
+  ];
+  return refs.filter((ref, index, values) =>
+    values.findIndex((candidate) => candidate.kind === ref.kind && candidate.id === ref.id) === index
+  );
+}
+
+function uniqueObservationRefs(refs: readonly ObservationRef[]): readonly ObservationRef[] {
+  return refs.filter((ref, index, values) =>
+    values.findIndex((candidate) => candidate.kind === ref.kind && candidate.id === ref.id) === index
+  );
+}
+
+function sourceRefToObservationRef(value: string): ObservationRef {
+  const separator = value.indexOf(":");
+  if (separator <= 0) {
+    return { kind: "event", id: value };
+  }
+  const kind = value.slice(0, separator);
+  const id = value.slice(separator + 1);
+  if (isObservationRefKind(kind)) {
+    return { kind, id };
+  }
+  return { kind: "event", id: value };
+}
+
+function isObservationRefKind(value: string): value is ObservationRef["kind"] {
+  return value === "trace" ||
+    value === "goal" ||
+    value === "event" ||
+    value === "task" ||
+    value === "artifact" ||
+    value === "direction_handoff" ||
+    value === "direction_package" ||
+    value === "growth_plan" ||
+    value === "workflow" ||
+    value === "rootlet" ||
+    value === "candidate" ||
+    value === "candidate_pool" ||
+    value === "autonomy_decision" ||
+    value === "convergence_review" ||
+    value === "model_call" ||
+    value === "tool_call" ||
+    value === "agent_spec" ||
+    value === "agent_run" ||
+    value === "agent_delegation" ||
+    value === "parent_synthesis" ||
+    value === "user_clarification" ||
+    value === "verification" ||
+    value === "fruit" ||
+    value === "run_memory" ||
+    value === "experience_candidate" ||
+    value === "path_bias";
+}
+
+function transcriptToolSummary(event: PanelRunStreamEvent): string | undefined {
+  const display = event.detail?.display;
+  if (display?.kind === "command_summary") {
+    const command = [display.command, ...(display.args ?? [])]
+      .filter((value): value is string => typeof value === "string" && value.length > 0)
+      .join(" ");
+    const exit = typeof display.exitCode === "number" ? `exit ${display.exitCode}` : undefined;
+    return [command, exit, display.outputSummary, display.errorSummary]
+      .filter((value): value is string => value !== undefined && value.trim().length > 0)
+      .join(" · ");
+  }
+  if (display?.kind === "search_results") {
+    return [display.query, `${display.results.length} 条结果`]
+      .filter((value): value is string => value !== undefined && value.trim().length > 0)
+      .join(" · ");
+  }
+  if (display?.kind === "browser_snapshot") {
+    return display.title ?? display.url ?? event.detail?.preview ?? event.summary;
+  }
+  if (display?.kind === "file_change_summary" || display?.kind === "file_diff_preview") {
+    return fileDisplaySummary(display) ?? event.detail?.preview ?? event.summary;
+  }
+  if (display?.kind === "generic_tool_summary") {
+    return display.summary ?? display.items?.slice(0, 6).join("\n") ?? event.detail?.preview ?? event.summary;
+  }
+  return event.detail?.preview ?? event.summary;
+}
+
+function toolTranscriptTitle(event: PanelRunStreamEvent, phase: TranscriptNodePhase): string {
+  const title = toolTranscriptTitleSet(event);
+  if (phase === "preparing") return `准备${title.action}`;
+  if (phase === "executing") return title.action;
+  if (phase === "completed") return title.completed;
+  if (phase === "failed") return title.failed;
+  return title.action;
+}
+
+function toolTranscriptTitleSet(event: PanelRunStreamEvent): {
+  readonly action: string;
+  readonly completed: string;
+  readonly failed: string;
+} {
+  const display = event.detail?.display;
+  const toolName = event.toolName?.trim().toLowerCase() ?? "";
+  if (display?.kind === "command_summary" || toolName === "run_command") {
+    return { action: "运行命令", completed: "命令完成", failed: "命令未完成" };
+  }
+  if (toolName === "shell_command" || toolName.includes("terminal") || toolName.includes("powershell") || toolName.includes("cmd")) {
+    return { action: "执行 Shell", completed: "Shell 完成", failed: "Shell 未完成" };
+  }
+  if (display?.kind === "search_results" || toolName === "search" || toolName === "web_search") {
+    return { action: "搜索资料", completed: "资料搜索完成", failed: "资料搜索未完成" };
+  }
+  if (display?.kind === "browser_snapshot" || toolName === "browser_snapshot" || toolName.includes("browser")) {
+    return { action: "读取网页", completed: "网页读取完成", failed: "网页读取未完成" };
+  }
+  if (display?.kind === "file_diff_preview" || toolName === "edit_file" || toolName.includes("patch") || toolName.includes("replace")) {
+    return { action: "编辑文件", completed: "编辑完成", failed: "编辑未完成" };
+  }
+  if (display?.kind === "file_change_summary") {
+    if (toolName === "create_file" || toolName.includes("create")) return { action: "创建文件", completed: "创建完成", failed: "创建未完成" };
+    if (toolName === "delete_file" || toolName.includes("delete") || toolName.includes("remove")) return { action: "删除文件", completed: "删除完成", failed: "删除未完成" };
+    return { action: "写入文件", completed: "写入完成", failed: "写入未完成" };
+  }
+  if (toolName === "grep_files" || toolName.includes("grep")) {
+    return { action: "搜索文件", completed: "搜索完成", failed: "搜索未完成" };
+  }
+  if (toolName === "list_dir" || toolName === "list_files" || toolName.includes("list") || toolName.includes("dir")) {
+    return { action: "浏览目录", completed: "目录浏览完成", failed: "目录浏览未完成" };
+  }
+  if (toolName === "read") {
+    return { action: "读取资料", completed: "资料读取完成", failed: "资料读取未完成" };
+  }
+  if (toolName === "read_file" || toolName.startsWith("read_") || toolName.includes("file")) {
+    return { action: "读取文件", completed: "读取完成", failed: "读取未完成" };
+  }
+  const action = event.detail?.action ??
+    (event.detail?.display?.kind === "generic_tool_summary" ? event.detail.display.action : undefined);
+  const fallback = action ?? (event.toolName === undefined ? "使用工具" : toolDisplayName(event.toolName));
+  return { action: fallback, completed: `${fallback}完成`, failed: `${fallback}未完成` };
+}
+
+function fileDisplaySummary(display: Extract<ToolDisplayProjection, { readonly kind: "file_change_summary" | "file_diff_preview" }>): string | undefined {
+  const changes =
+    display.kind === "file_diff_preview"
+      ? [
+          display.replacements === undefined ? undefined : `${display.replacements} 处修改`,
+          display.previousLength === undefined || display.nextLength === undefined
+            ? undefined
+            : `${display.previousLength} -> ${display.nextLength} chars`,
+        ]
+      : [
+          display.bytes === undefined ? undefined : `${display.bytes} bytes`,
+          display.append === true ? "append" : undefined,
+        ];
+  return [display.path, ...changes]
+    .filter((value): value is string => value !== undefined && value.trim().length > 0)
+    .join(" · ") || undefined;
+}
+
+function confirmationIdForTranscriptEvent(event: PanelRunStreamEvent): string {
+  const sourceRef = event.sourceRefs.find((ref) => ref.startsWith("confirmation:"));
+  if (sourceRef !== undefined) {
+    return sourceRef.slice("confirmation:".length);
+  }
+  const fromId = /confirmation[:/][^:]+/.exec(event.eventId)?.[0];
+  if (fromId !== undefined) {
+    return fromId.replace(/^confirmation[:/]/, "");
+  }
+  return `confirmation-${event.sequence}`;
+}
+
+function userDecisionPhase(event: PanelRunStreamEvent): TranscriptNodePhase {
+  const summary = event.summary ?? "";
+  if (event.type === "user.guidance") return "guidance";
+  if (summary.includes("拒绝") || event.status === "blocked") return "denied";
+  if (summary.includes("批准") || event.status === "running") return "approved";
+  return "guidance";
+}
+
+function userDecisionTitle(phase: TranscriptNodePhase): string {
+  if (phase === "approved") return "已确认";
+  if (phase === "denied") return "已拒绝";
+  return "补充要求";
+}
+
+function userFacingConfirmationSummary(value: string | undefined): string {
+  const text = value?.trim() ?? "";
+  if (text.length === 0 || /^User approval was requested\.?$/i.test(text)) {
+    return "继续前需要确认。";
+  }
+  return cleanConfirmationSummary(text) || "继续前需要确认。";
+}
+
+function isLowValueAgentNote(value: string | undefined): boolean {
+  const text = value?.trim() ?? "";
+  return text === "等待模型输出。" ||
+    text === "助手已选择使用工具，工具结果会作为安全摘要进入后续处理。" ||
+    text === "Intelligence Channel requested model output." ||
+    text === "Intelligence Channel completed model output validation.";
 }
 
 export function createPanelRunStreamEvents(input: {
@@ -784,7 +1288,7 @@ function appendStreamEventsForEvent(input: {
   }
 
   if (input.entry.type === "model.completed") {
-    const reasoningOutput = modelReasoningOutputOrUndefined(payload.reasoningOutput);
+    const reasoningOutput = safeReasoningOutputForPanel(payload.reasoningOutput);
     const reasoningChunks = chunkText(reasoningOutput?.content ?? "", 360);
     reasoningChunks.forEach((chunk, index) => {
       input.push({
@@ -801,6 +1305,21 @@ function appendStreamEventsForEvent(input: {
         },
       });
     });
+    if (reasoningChunks.length > 0) {
+      input.push({
+        ...base,
+        eventId: `${input.runId}:event:${input.entry.sequence}:model.reasoning.completed`,
+        type: "model.reasoning.completed",
+        agentLabel: "模型",
+        summary: "思考完成。",
+        status: "completed",
+        detail: {
+          kind: "thinking",
+          preview: reasoningChunks.at(-1),
+          truncated: reasoningOutput?.truncated === true,
+        },
+      });
+    }
     if (stringOrUndefined(payload.finishReason) === "tool_call") {
       input.push({
         ...base,
@@ -1433,9 +1952,21 @@ function confirmationSummary(payload: Readonly<Record<string, unknown>>): string
   const question = stringOrUndefined(payload.question);
   const consequence = stringOrUndefined(payload.consequence);
   if (question !== undefined && consequence !== undefined) {
-    return `${question} ${consequence}`;
+    return compactStreamDetailText(cleanConfirmationSummary(`${question} ${consequence}`), 500) ?? "继续前需要用户补充授权或澄清。";
   }
-  return question ?? "继续前需要用户补充授权或澄清。";
+  return question === undefined
+    ? "继续前需要用户补充授权或澄清。"
+    : compactStreamDetailText(cleanConfirmationSummary(question), 500) ?? "继续前需要用户补充授权或澄清。";
+}
+
+function cleanConfirmationSummary(value: string): string {
+  return value
+    .replace(/批准后只允许继续本次对应工具操作；拒绝则不会执行该动作。?/g, "")
+    .replace(/执行前需要用户确认。?/g, "")
+    .replace(/请求执行执行操作/g, "请求执行操作")
+    .replace(/运行命令请求执行操作[。；]*/g, "运行命令")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function userGuidanceSummary(payload: Readonly<Record<string, unknown>>): string {
@@ -2471,6 +3002,17 @@ function modelReasoningOutputOrUndefined(value: unknown): ModelReasoningOutputPr
     return undefined;
   }
   return record as unknown as ModelReasoningOutputProjection;
+}
+
+function safeReasoningOutputForPanel(value: unknown): ModelReasoningOutputProjection | undefined {
+  const output = modelReasoningOutputOrUndefined(value);
+  if (output === undefined) {
+    return undefined;
+  }
+  if (output.source !== "openai_responses_reasoning_summary") {
+    return undefined;
+  }
+  return output;
 }
 
 function unique<T>(values: readonly T[]): T[] {

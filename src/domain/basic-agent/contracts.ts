@@ -58,6 +58,44 @@ export type RunEvent = {
   };
 };
 
+export type TranscriptNodeKind =
+  | "thinking"
+  | "tool"
+  | "confirmation"
+  | "user_decision"
+  | "answer"
+  | "system";
+
+export type TranscriptNodePhase =
+  | "noted"
+  | "preparing"
+  | "waiting_approval"
+  | "approved"
+  | "denied"
+  | "guidance"
+  | "executing"
+  | "completed"
+  | "failed"
+  | "blocked"
+  | "cancelled";
+
+export type TranscriptNode = {
+  readonly nodeId: string;
+  readonly runId: string;
+  readonly sequence: number;
+  readonly eventType: string;
+  readonly kind: TranscriptNodeKind;
+  readonly phase: TranscriptNodePhase;
+  readonly title: string;
+  readonly summary?: string;
+  readonly text?: string;
+  readonly timestamp: string;
+  readonly toolName?: string;
+  readonly display?: ToolDisplayProjection;
+  readonly confirmation?: ConfirmationRequest;
+  readonly refs: readonly ObservationRef[];
+};
+
 export type ConfirmationRiskLevel = "low" | "medium" | "high";
 
 export type ConfirmationRequest = {
@@ -199,6 +237,7 @@ export type DesktopWorkSessionReadModel = {
   readonly deliverable?: AgentDeliverable;
   readonly toolEvidence: readonly ToolResultEnvelope[];
   readonly visibleEvents: readonly RunEvent[];
+  readonly transcriptNodes: readonly TranscriptNode[];
   readonly safetySummary: {
     readonly summary: string;
     readonly pendingActionCount: number;

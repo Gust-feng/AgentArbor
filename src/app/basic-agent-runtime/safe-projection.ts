@@ -28,6 +28,16 @@ export function redactOrdinaryMarkdownFragment(value: string, maxLength = 1_200)
   return text.length <= maxLength ? text : `${text.slice(0, Math.max(0, maxLength - 1)).trimEnd()}...`;
 }
 
+function redactOrdinaryFileFragment(value: string, maxLength = 1_200): string {
+  const text = redactSensitiveText(value)
+    .replace(/\r\n?/g, "\n")
+    .replace(/[^\S\n]+/g, " ");
+  if (text.trim().length === 0 && !text.includes("\n")) {
+    return "";
+  }
+  return text.length <= maxLength ? text : `${text.slice(0, Math.max(0, maxLength - 1)).trimEnd()}...`;
+}
+
 export function projectToolResult(input: {
   readonly request: ToolCallRequest;
   readonly output: unknown;
@@ -169,21 +179,31 @@ function projectToolDisplay(request: ToolCallRequest, output: unknown): ToolDisp
     };
   }
   if (request.toolName === "write_file" || request.toolName === "create_file" || request.toolName === "delete_file") {
+    const input = asRecord(request.input);
+    const preview = request.toolName === "delete_file" ? undefined : fileWriteDiffPreview({
+      content: stringOrUndefined(input.content),
+      mode: request.toolName === "create_file" ? "create" : result.append === true ? "append" : "write",
+    });
     return {
       kind: "file_change_summary",
       path: stringOrUndefined(result.path) ?? stringOrUndefined(asRecord(request.input).path),
       bytes: numberOrUndefined(result.bytes),
       append: result.append === true,
+      preview: preview?.text,
+      truncated: record.truncated === true || preview?.truncated === true,
     };
   }
   if (request.toolName === "edit_file") {
     const input = asRecord(request.input);
+    const preview = fileEditDiffPreview(input.edits);
     return {
       kind: "file_diff_preview",
       path: stringOrUndefined(result.path) ?? stringOrUndefined(input.path),
       replacements: numberOrUndefined(result.replacements),
       previousLength: numberOrUndefined(result.previousLength),
       nextLength: numberOrUndefined(result.nextLength),
+      preview: preview?.text,
+      truncated: record.truncated === true || preview?.truncated === true,
     };
   }
   if (request.toolName === "run_command" || request.toolName === "shell_command") {
@@ -235,6 +255,73 @@ function stringOrUndefined(value: unknown): string | undefined {
 
 function numberOrUndefined(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+type FilePreviewResult = {
+  readonly text: string;
+  readonly truncated: boolean;
+};
+
+function fileWriteDiffPreview(input: {
+  readonly content: string | undefined;
+  readonly mode: "create" | "write" | "append";
+}): FilePreviewResult | undefined {
+  if (input.content === undefined) return undefined;
+  return boundedDiffPreview(input.content, "+", input.mode === "append" ? "追加内容" : input.mode === "create" ? "新增内容" : "写入内容");
+}
+
+function fileEditDiffPreview(value: unknown): FilePreviewResult | undefined {
+  if (!Array.isArray(value) || value.length === 0) return undefined;
+  const chunks: string[] = [];
+  let truncated = value.length > 6;
+  for (const item of value.slice(0, 6)) {
+    const record = asRecord(item);
+    const anchor = stringOrUndefined(record.anchor);
+    const replacement = typeof record.replacement === "string" ? record.replacement : undefined;
+    if (anchor === undefined && replacement === undefined) continue;
+    const hint = editHintLabel(record);
+    if (hint !== undefined) chunks.push(`@@ ${hint}`);
+    const before = boundedDiffPreview(anchor ?? "", "-", "删除内容");
+    const after = boundedDiffPreview(replacement ?? "", "+", "新增内容");
+    if (before !== undefined) {
+      chunks.push(before.text);
+      truncated = truncated || before.truncated;
+    }
+    if (after !== undefined) {
+      chunks.push(after.text);
+      truncated = truncated || after.truncated;
+    }
+  }
+  const joined = chunks.join("\n");
+  const compacted = compactDiffText(joined, 2_400);
+  if (compacted === undefined) return undefined;
+  return { text: compacted.text, truncated: truncated || compacted.truncated };
+}
+
+function editHintLabel(record: Readonly<Record<string, unknown>>): string | undefined {
+  const start = numberOrUndefined(record.startLineHint);
+  const end = numberOrUndefined(record.endLineHint);
+  if (start === undefined && end === undefined) return undefined;
+  return `line ${start ?? "?"}${end !== undefined && end !== start ? `-${end}` : ""}`;
+}
+
+function boundedDiffPreview(value: string, marker: "+" | "-", fallbackLabel: string): FilePreviewResult | undefined {
+  const safe = redactOrdinaryFileFragment(value, 1_200);
+  if (safe.trim().length === 0 && !safe.includes("\n")) {
+    return { text: `${marker} ${fallbackLabel}`, truncated: false };
+  }
+  const lines = safe.replace(/\r\n?/g, "\n").split("\n");
+  const visibleLines = lines.slice(0, 14);
+  const text = visibleLines.map((line) => `${marker} ${line.length === 0 ? " " : line}`).join("\n");
+  const truncated = lines.length > visibleLines.length || safe.length < value.length;
+  return { text, truncated };
+}
+
+function compactDiffText(value: string, maxLength: number): FilePreviewResult | undefined {
+  const text = value.trimEnd();
+  if (text.trim().length === 0) return undefined;
+  if (text.length <= maxLength) return { text, truncated: false };
+  return { text: `${text.slice(0, Math.max(0, maxLength - 15)).trimEnd()}\n... diff truncated`, truncated: true };
 }
 
 function displayActionForTool(action: string | undefined, toolName: string): string {

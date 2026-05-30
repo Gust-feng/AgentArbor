@@ -286,7 +286,7 @@ function toContextLedgerReadModel(
     entryId: `${item.itemId}:omitted`,
     kind: contextLedgerEntryKind(item.sourceKind),
     title: contextLedgerEntryTitle(item),
-    summary: "因上下文预算限制，该项未进入模型输入；普通视图只保留安全引用和状态。",
+    summary: "因上下文预算限制，该项未进入模型输入；普通视图只保留引用和状态。",
     refs: item.refs,
     status: "omitted",
   }));

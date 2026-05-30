@@ -3,7 +3,7 @@ import test from "node:test";
 import type { ArborMessage, ArborMessageType } from "../domain/common.js";
 import type { ModelVisibleOutputProjection } from "../domain/intelligence/index.js";
 import type { EventLogEntry } from "../kernel/events/in-memory-event-log.js";
-import { createPanelRunStreamEvents, createPanelRunTranscript } from "./panel-run-read-model.js";
+import { createPanelRunStreamEvents, createPanelRunTranscript, createPanelTranscriptNodes } from "./panel-run-read-model.js";
 
 test("panel reasoning trace is matched by exact model output contract", () => {
   const transcript = createPanelRunTranscript({
@@ -140,6 +140,164 @@ test("panel transcript projects confirmation and user guidance as safe ordinary-
   assert.equal(JSON.stringify(transcript).includes("raw prompt"), false);
 });
 
+test("panel transcript nodes preserve ordered ordinary-agent tool lifecycle", () => {
+  const nodes = createPanelTranscriptNodes([
+    streamEvent({ sequence: 1, type: "run.started" }),
+    streamEvent({
+      sequence: 2,
+      type: "tool.requested",
+      toolName: "shell_command",
+      summary: "准备运行 pnpm test",
+      toolCallRefs: ["tool-call-shell"],
+      detail: {
+        kind: "tool",
+        action: "运行命令",
+        display: { kind: "command_summary", command: "pnpm", args: ["test"] },
+      },
+    }),
+    streamEvent({
+      sequence: 3,
+      type: "confirmation.needed",
+      summary: "运行命令需要确认。",
+      toolCallRefs: ["tool-call-shell"],
+      sourceRefs: ["confirmation:confirmation-shell"],
+    }),
+    streamEvent({
+      sequence: 4,
+      type: "run.resumed",
+      summary: "已确认，继续执行。",
+      sourceRefs: ["confirmation:confirmation-shell"],
+    }),
+    streamEvent({
+      sequence: 5,
+      type: "tool.requested",
+      toolName: "shell_command",
+      summary: "开始运行 pnpm test",
+      toolCallRefs: ["tool-call-shell"],
+      detail: {
+        kind: "tool",
+        action: "运行命令",
+        display: { kind: "command_summary", command: "pnpm", args: ["test"] },
+      },
+    }),
+    streamEvent({
+      sequence: 6,
+      type: "tool.completed",
+      toolName: "shell_command",
+      summary: "pnpm test · exit 0",
+      toolCallRefs: ["tool-call-shell"],
+      detail: {
+        kind: "tool",
+        action: "运行命令",
+        display: {
+          kind: "command_summary",
+          command: "pnpm",
+          args: ["test"],
+          exitCode: 0,
+          outputSummary: "tests passed",
+        },
+      },
+    }),
+    streamEvent({
+      sequence: 7,
+      type: "model.reasoning.delta",
+      delta: "工具完成后再次检查结果。",
+      modelCallRefs: ["model-after-tool"],
+    }),
+    streamEvent({ sequence: 8, type: "final.result", summary: "结果已生成。" }),
+  ]);
+
+  assert.deepEqual(
+    nodes.map((node) => `${node.eventType}:${node.phase}`),
+    [
+      "tool.requested:preparing",
+      "confirmation.needed:waiting_approval",
+      "run.resumed:approved",
+      "tool.requested:executing",
+      "tool.completed:completed",
+      "model.reasoning.delta:noted",
+      "final.result:completed",
+    ],
+  );
+  assert.equal(nodes[0]?.title.includes("准备"), true);
+  assert.equal(nodes[3]?.title, "运行命令");
+  assert.equal(nodes[5]?.sequence > nodes[4]!.sequence, true);
+});
+
+test("panel transcript nodes merge contiguous reasoning deltas without moving tool boundaries", () => {
+  const nodes = createPanelTranscriptNodes([
+    streamEvent({ sequence: 1, type: "run.started" }),
+    streamEvent({
+      sequence: 2,
+      type: "model.reasoning.delta",
+      delta: "files",
+      modelCallRefs: ["model-before-tool"],
+    }),
+    streamEvent({
+      sequence: 3,
+      type: "model.reasoning.delta",
+      delta: "to",
+      modelCallRefs: ["model-before-tool"],
+    }),
+    streamEvent({
+      sequence: 4,
+      type: "model.reasoning.delta",
+      delta: "understand",
+      modelCallRefs: ["model-before-tool"],
+    }),
+    streamEvent({
+      sequence: 5,
+      type: "tool.requested",
+      toolName: "list_files",
+      summary: "开始浏览目录",
+      toolCallRefs: ["tool-call-list"],
+      detail: {
+        kind: "tool",
+        action: "浏览目录",
+        display: { kind: "generic_tool_summary", action: "浏览目录", summary: "workspace" },
+      },
+    }),
+    streamEvent({
+      sequence: 6,
+      type: "tool.completed",
+      toolName: "list_files",
+      summary: "目录浏览完成",
+      toolCallRefs: ["tool-call-list"],
+      detail: {
+        kind: "tool",
+        action: "浏览目录",
+        display: { kind: "generic_tool_summary", action: "浏览目录", summary: "3 个文件" },
+      },
+    }),
+    streamEvent({
+      sequence: 7,
+      type: "model.reasoning.delta",
+      delta: "then",
+      modelCallRefs: ["model-after-tool"],
+    }),
+    streamEvent({
+      sequence: 8,
+      type: "model.reasoning.delta",
+      delta: "summarize",
+      modelCallRefs: ["model-after-tool"],
+    }),
+    streamEvent({ sequence: 9, type: "final.result", summary: "结果已生成。" }),
+  ]);
+
+  assert.deepEqual(
+    nodes.map((node) => `${node.kind}:${node.eventType}:${node.phase}:${node.summary}`),
+    [
+      "thinking:model.reasoning.delta:noted:files to understand",
+      "tool:tool.requested:executing:workspace",
+      "tool:tool.completed:completed:3 个文件",
+      "thinking:model.reasoning.delta:noted:then summarize",
+      "answer:final.result:completed:结果已生成。",
+    ],
+  );
+  assert.equal(nodes[0]?.text, "files to understand");
+  assert.equal(nodes[3]?.text, "then summarize");
+});
+
 test("ordinary agent stream stays quiet for direct answers but shows safe thinking around tool work", () => {
   const direct = createPanelRunStreamEvents({
     runId: "run-direct-answer",
@@ -227,9 +385,9 @@ test("ordinary agent stream stays quiet for direct answers but shows safe thinki
   assert.equal(JSON.stringify(withTool).includes("\"action\":\"read_file\""), false);
 });
 
-test("ordinary agent stream shows provider-returned reasoning without effort status copy", () => {
-  const events = createPanelRunStreamEvents({
-    runId: "run-reasoning-answer",
+test("ordinary agent stream only shows provider reasoning summaries", () => {
+  const withChatReasoning = createPanelRunStreamEvents({
+    runId: "run-reasoning-chat",
     status: "completed",
     desktopMode: "agent",
     reasoningEffort: "high",
@@ -251,15 +409,43 @@ test("ordinary agent stream shows provider-returned reasoning without effort sta
     createdAt: "2026-05-07T00:00:00.000Z",
     updatedAt: "2026-05-07T00:00:03.000Z",
   });
-  const serialized = JSON.stringify(events);
 
-  assert.equal(events.some((event) => event.type === "agent.note.delta" && event.summary?.includes("深入思考") === true), false);
-  assert.equal(events.some((event) => event.type === "model.reasoning.delta"), true);
-  assert.equal(events.some((event) => event.type === "model.reasoning.completed"), false);
-  assert.equal(serialized.includes("先拆解用户目标"), true);
-  assert.equal(serialized.includes("思考强度"), false);
-  assert.equal(serialized.includes("模型思考内容已展示"), false);
-  assert.equal(serialized.includes("raw provider response"), false);
+  const withSummaryReasoning = createPanelRunStreamEvents({
+    runId: "run-reasoning-summary",
+    status: "completed",
+    desktopMode: "agent",
+    reasoningEffort: "high",
+    eventEntries: [
+      eventEntry({ sequence: 1, type: "goal.received", payload: { goalId: "goal-summary" } }),
+      eventEntry({
+        sequence: 2,
+        type: "model.requested",
+        payload: { requestId: "request-summary", purpose: "desktop_agent" },
+      }),
+      modelCompletedEntry({
+        sequence: 3,
+        requestId: "request-summary",
+        contractId: "desktop.agent_response.v1",
+        decisionSummary: "Final answer text.",
+        reasoningSummary: "先拆解需求，再说明范围与限制。",
+      }),
+    ],
+    createdAt: "2026-05-07T00:00:00.000Z",
+    updatedAt: "2026-05-07T00:00:03.000Z",
+  });
+
+  const serializedChat = JSON.stringify(withChatReasoning);
+  const serializedSummary = JSON.stringify(withSummaryReasoning);
+
+  assert.equal(withChatReasoning.some((event) => event.type === "agent.note.delta" && event.summary?.includes("深入思考") === true), false);
+  assert.equal(withChatReasoning.some((event) => event.type === "model.reasoning.delta"), false);
+  assert.equal(serializedChat.includes("先拆解用户目标"), false);
+  assert.equal(serializedChat.includes("思考强度"), false);
+  assert.equal(serializedChat.includes("模型思考内容已展示"), false);
+
+  assert.equal(withSummaryReasoning.some((event) => event.type === "model.reasoning.delta"), true);
+  assert.equal(serializedSummary.includes("先拆解需求"), true);
+  assert.equal(serializedSummary.includes("raw provider response"), false);
 });
 
 test("ordinary agent stream does not fake reasoning when only effort is selected", () => {
@@ -428,11 +614,15 @@ test("panel transcript preserves typed safe tool display without raw command out
     updatedAt: "2026-05-07T00:00:02.000Z",
   });
   const completedTool = transcript.events.find((event) => event.type === "tool.completed");
+  const completedNode = transcript.transcriptNodes.find((node) => node.eventType === "tool.completed");
 
   assert.equal(completedTool?.detail?.display?.kind, "command_summary");
   assert.equal(completedTool?.detail?.envelope?.uiDisplay?.kind, "command_summary");
   assert.equal(completedTool?.detail?.envelope?.evidenceRefs.includes("tool:tool-call-shell"), true);
   assert.equal(JSON.stringify(transcript).includes("RAW_STDOUT_SENTINEL"), false);
+  assert.equal(completedNode?.display?.kind, "command_summary");
+  assert.equal(completedNode?.summary?.includes("tests passed"), true);
+  assert.equal(JSON.stringify(transcript.transcriptNodes).includes("RAW_STDOUT_SENTINEL"), false);
 });
 
 test("panel transcript edit fallback omits raw replacement text", () => {
@@ -478,6 +668,77 @@ test("panel transcript edit fallback omits raw replacement text", () => {
   assert.equal(serialized.includes("sk-edit-secret"), false);
 });
 
+test("panel transcript nodes do not invent thinking and keep failed tool results separate", () => {
+  const nodes = createPanelTranscriptNodes([
+    streamEvent({ sequence: 1, type: "run.started" }),
+    streamEvent({ sequence: 2, type: "agent.note.delta", summary: "等待模型输出。" }),
+    streamEvent({ sequence: 3, type: "agent.note.delta", summary: "Intelligence Channel requested model output." }),
+    streamEvent({
+      sequence: 4,
+      type: "tool.requested",
+      toolName: "shell_command",
+      summary: "开始运行 pnpm test",
+      toolCallRefs: ["tool-call-shell"],
+      detail: {
+        kind: "tool",
+        action: "运行命令",
+        display: { kind: "command_summary", command: "pnpm", args: ["test"] },
+      },
+    }),
+    streamEvent({ sequence: 5, type: "agent.note.completed", summary: "助手已选择使用工具，工具结果会作为安全摘要进入后续处理。" }),
+    streamEvent({
+      sequence: 6,
+      type: "tool.failed",
+      toolName: "shell_command",
+      summary: "pnpm test 未完成 · exit 1",
+      toolCallRefs: ["tool-call-shell"],
+      detail: {
+        kind: "tool",
+        action: "运行命令",
+        display: {
+          kind: "command_summary",
+          command: "pnpm",
+          args: ["test"],
+          exitCode: 1,
+          errorSummary: "tests failed",
+        },
+      },
+    }),
+    streamEvent({ sequence: 7, type: "final.result", summary: "根据安全摘要说明失败原因。" }),
+  ]);
+
+  assert.deepEqual(
+    nodes.map((node) => `${node.eventType}:${node.phase}`),
+    ["tool.requested:executing", "tool.failed:failed", "final.result:completed"],
+  );
+  assert.equal(nodes.some((node) => node.kind === "thinking"), false);
+  assert.equal(nodes[1]?.title.includes("未完成"), true);
+  assert.equal(nodes[1]?.display?.kind, "command_summary");
+});
+
+type PanelStreamEventForTest = Parameters<typeof createPanelTranscriptNodes>[0][number];
+
+function streamEvent(
+  input: Pick<PanelStreamEventForTest, "sequence" | "type"> & Partial<Omit<PanelStreamEventForTest, "sequence" | "type">>
+): PanelStreamEventForTest {
+  return {
+    eventId: input.eventId ?? `run-transcript-nodes:event:${input.sequence}:${input.type}`,
+    runId: input.runId ?? "run-transcript-nodes",
+    sequence: input.sequence,
+    type: input.type,
+    createdAt: input.createdAt ?? `2026-05-07T00:00:${String(input.sequence).padStart(2, "0")}.000Z`,
+    agentLabel: input.agentLabel,
+    summary: input.summary,
+    delta: input.delta,
+    status: input.status,
+    toolName: input.toolName,
+    detail: input.detail,
+    sourceRefs: input.sourceRefs ?? [],
+    modelCallRefs: input.modelCallRefs ?? [],
+    toolCallRefs: input.toolCallRefs ?? [],
+  };
+}
+
 function modelCompletedEntry(input: {
   readonly sequence: number;
   readonly requestId: string;
@@ -485,6 +746,7 @@ function modelCompletedEntry(input: {
   readonly decisionSummary: string;
   readonly finishReason?: "stop" | "length" | "tool_call" | "content_filter" | "error";
   readonly reasoningContent?: string;
+  readonly reasoningSummary?: string;
 }): EventLogEntry {
   const type: ArborMessageType = "model.completed";
   const message: ArborMessage = {
@@ -506,13 +768,16 @@ function modelCompletedEntry(input: {
       outputKind: "explanation",
       validationStatus: "passed",
       visibleOutput: visibleOutput(input.contractId, input.decisionSummary),
-      reasoningOutput: input.reasoningContent === undefined
-        ? undefined
-        : {
-            source: "openai_chat_reasoning_content",
-            content: input.reasoningContent,
-            truncated: false,
-          },
+      reasoningOutput:
+        input.reasoningSummary === undefined && input.reasoningContent === undefined
+          ? undefined
+          : {
+              source: input.reasoningSummary === undefined
+                ? "openai_chat_reasoning_content"
+                : "openai_responses_reasoning_summary",
+              content: input.reasoningSummary ?? input.reasoningContent ?? "",
+              truncated: false,
+            },
     },
     createdAt: "2026-05-07T00:00:00.000Z",
   };

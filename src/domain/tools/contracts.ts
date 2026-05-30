@@ -81,6 +81,8 @@ export type ToolDisplayProjection =
       readonly replacements?: number;
       readonly previousLength?: number;
       readonly nextLength?: number;
+      readonly preview?: string;
+      readonly truncated?: boolean;
     }
   | {
       readonly kind: "file_diff_preview";
@@ -88,6 +90,8 @@ export type ToolDisplayProjection =
       readonly replacements?: number;
       readonly previousLength?: number;
       readonly nextLength?: number;
+      readonly preview?: string;
+      readonly truncated?: boolean;
     }
   | {
       readonly kind: "command_summary";

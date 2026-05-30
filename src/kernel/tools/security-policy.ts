@@ -6,7 +6,7 @@ import type {
   ToolSecurityDecision,
   ToolSecurityEvaluationContext,
 } from "../../domain/tools/index.js";
-import { toolDisplayName, toolOperationLabel, toolPresentationForDefinition } from "../../domain/tools/index.js";
+import { toolDisplayName, toolPresentationForDefinition } from "../../domain/tools/index.js";
 import { nowIso } from "../id.js";
 import { redactOrdinaryToolText } from "./tool-result-envelope.js";
 
@@ -65,12 +65,13 @@ function approvalDecision(input: {
   readonly metadata: ToolDefinitionMetadata;
   readonly reason: string;
 }): Extract<ToolSecurityDecision, { readonly decision: "approval_required" }> {
+  const presentation = toolPresentationForDefinition(input.definition);
   return {
     decision: "approval_required",
     reason: input.reason,
     title: "需要确认",
     actionSummary: redactOrdinaryToolText(
-      `${toolDisplayName(input.definition.name, input.metadata)}请求执行${toolOperationLabel(input.metadata.operationType)}操作。${toolPresentationForDefinition(input.definition).displayDescription}`,
+      `${presentation.displayName}需要你确认后继续。${presentation.displayDescription}`,
       500
     ),
     affectedResources: affectedResourcesFromInput(input.request.input),

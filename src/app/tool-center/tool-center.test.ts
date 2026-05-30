@@ -214,6 +214,72 @@ test("ToolCenter file diff display does not expose edit input text", async () =>
   assert.equal(result.projection?.display?.kind === "file_diff_preview" ? result.projection.display.replacements : 0, 1);
 });
 
+test("ToolCenter file diff display exposes bounded redacted edit preview", async () => {
+  const center = new ToolCenter({ platform: "linux" });
+  center.register(testTool("edit_file", async () => ({
+    action: "edit_file",
+    summary: "notes.md · 32 -> 36 chars · 1 replacement",
+    result: {
+      path: "notes.md",
+      previousLength: 32,
+      nextLength: 36,
+      replacements: 1,
+    },
+  }), "read-write"));
+
+  const result = await center.execute(
+    {
+      callId: "call-edit-preview",
+      toolName: "edit_file",
+      input: {
+        path: "notes.md",
+        edits: [{ anchor: "old visible line\napi_key=sk-edit-secret", replacement: "new visible line\napi_key=sk-edit-secret" }],
+      },
+    },
+    { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" }
+  );
+
+  const display = result.projection?.display;
+  const displayJson = JSON.stringify(display);
+  assert.equal(result.status, "completed");
+  assert.equal(display?.kind, "file_diff_preview");
+  assert.equal(display?.kind === "file_diff_preview" ? display.preview?.includes("- old visible line") : false, true);
+  assert.equal(display?.kind === "file_diff_preview" ? display.preview?.includes("+ new visible line") : false, true);
+  assert.equal(displayJson.includes("sk-edit-secret"), false);
+});
+
+test("ToolCenter file change display exposes bounded redacted create preview", async () => {
+  const center = new ToolCenter({ platform: "linux" });
+  center.register(testTool("create_file", async () => ({
+    action: "create_file",
+    summary: "created.md · 42 bytes · created",
+    result: {
+      path: "created.md",
+      bytes: 42,
+    },
+  }), "read-write"));
+
+  const result = await center.execute(
+    {
+      callId: "call-create-preview",
+      toolName: "create_file",
+      input: {
+        path: "created.md",
+        content: "visible created line\npassword=sk-create-secret",
+      },
+    },
+    { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" }
+  );
+
+  const display = result.projection?.display;
+  const displayJson = JSON.stringify(display);
+  assert.equal(result.status, "completed");
+  assert.equal(display?.kind, "file_change_summary");
+  assert.equal(display?.kind === "file_change_summary" ? display.preview?.includes("+ visible created line") : false, true);
+  assert.equal(displayJson.includes("sk-create-secret"), false);
+  assert.equal(displayJson.includes("[redacted-secret]"), true);
+});
+
 test("ToolCenter list returns cloned metadata", () => {
   const center = new ToolCenter();
   center.register(testTool("read_file", async () => ({ ok: true }), "read-only"));

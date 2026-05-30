@@ -23,11 +23,11 @@ type ToolPresentationSeed = {
 const BUILTIN_TOOL_PRESENTATION: Readonly<Record<string, ToolPresentationSeed>> = {
   search: {
     displayName: "资料搜索",
-    displayDescription: "在已配置的信息源中检索资料，返回可引用的安全摘要。",
+    displayDescription: "在已配置的信息源中检索资料，返回可引用的资料摘要。",
   },
   read: {
     displayName: "资料读取",
-    displayDescription: "读取检索结果或资料引用的安全内容，用于补充上下文。",
+    displayDescription: "读取检索结果或资料引用内容，用于补充上下文。",
   },
   web_search: {
     displayName: "网页搜索",
@@ -35,7 +35,7 @@ const BUILTIN_TOOL_PRESENTATION: Readonly<Record<string, ToolPresentationSeed>> 
   },
   browser_snapshot: {
     displayName: "浏览网页",
-    displayDescription: "打开网页并返回安全文本快照，适合网页阅读和事实核对。",
+    displayDescription: "打开网页并返回文本快照，适合网页阅读和事实核对。",
   },
   read_file: {
     displayName: "读取文件",
@@ -55,7 +55,7 @@ const BUILTIN_TOOL_PRESENTATION: Readonly<Record<string, ToolPresentationSeed>> 
   },
   edit_file: {
     displayName: "编辑文件",
-    displayDescription: "按唯一锚点原子修改工作区文本文件，并返回安全变更摘要。",
+    displayDescription: "按唯一锚点原子修改工作区文本文件，并返回变更摘要。",
   },
   delete_file: {
     displayName: "删除文件",
@@ -163,7 +163,7 @@ function fallbackPresentation(metadata: ToolDefinitionMetadata | undefined): Too
   if (metadata?.category === "web" || metadata?.category === "research") {
     return {
       displayName: "资料工具",
-      displayDescription: "读取或检索外部资料，并返回安全摘要。",
+      displayDescription: "读取或检索外部资料，并返回资料摘要。",
     };
   }
   if (metadata?.category === "mcp") {

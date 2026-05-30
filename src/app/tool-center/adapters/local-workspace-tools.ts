@@ -529,7 +529,7 @@ export function createLocalRunCommandTool(rootDirectory = DEFAULT_ROOT, options:
       inputSchema: {
         type: "object",
         properties: {
-          command: { type: "string", description: "Executable name or command to run." },
+          command: { type: "string", description: "Executable name, or a simple shell-style command line without shell operators." },
           args: { type: "array", items: { type: "string" }, description: "Command arguments." },
           timeoutMs: { type: "number", description: "Optional timeout in milliseconds." },
         },
@@ -539,8 +539,7 @@ export function createLocalRunCommandTool(rootDirectory = DEFAULT_ROOT, options:
     execute: async (input, context) => {
       throwIfAborted(context.abortSignal);
       const record = asRecord(input);
-      const command = requireString(record.command, "command");
-      const args = toStringArray(record.args);
+      const { command, args } = normalizeRunCommandInput(record);
       const timeoutMs = Math.min(MAX_COMMAND_TIMEOUT_MS, positiveInteger(record.timeoutMs) ?? 10_000);
       assertSandboxAllowed(sandboxPolicy, {
         operation: "execute",
@@ -625,6 +624,61 @@ function assertSandboxAllowed(policy: SandboxPolicy, request: SandboxPolicyReque
   if (!decision.allowed) {
     throw new LocalSandboxPolicyViolationError(decision.reason);
   }
+}
+
+function normalizeRunCommandInput(record: Readonly<Record<string, unknown>>): {
+  readonly command: string;
+  readonly args: readonly string[];
+} {
+  const rawCommand = requireString(record.command, "command");
+  if (hasShellControlToken(rawCommand)) {
+    throw new LocalSandboxPolicyViolationError("Sandbox policy rejected shell control tokens in command.");
+  }
+  const commandTokens = splitSimpleCommandLine(rawCommand);
+  const command = commandTokens[0];
+  if (command === undefined) {
+    throw new Error("command must be a non-empty string.");
+  }
+  return {
+    command,
+    args: [...commandTokens.slice(1), ...toStringArray(record.args)],
+  };
+}
+
+function splitSimpleCommandLine(value: string): readonly string[] {
+  const tokens: string[] = [];
+  let current = "";
+  let quote: "\"" | "'" | undefined;
+  for (let index = 0; index < value.length; index += 1) {
+    const char = value[index]!;
+    if (quote !== undefined) {
+      if (char === quote) {
+        quote = undefined;
+        continue;
+      }
+      current += char;
+      continue;
+    }
+    if (char === "\"" || char === "'") {
+      quote = char;
+      continue;
+    }
+    if (/\s/.test(char)) {
+      if (current.length > 0) {
+        tokens.push(current);
+        current = "";
+      }
+      continue;
+    }
+    current += char;
+  }
+  if (quote !== undefined) {
+    throw new LocalSandboxPolicyViolationError("Sandbox policy rejected an unterminated quoted command.");
+  }
+  if (current.length > 0) {
+    tokens.push(current);
+  }
+  return tokens;
 }
 
 function throwIfAborted(signal: AbortSignal | undefined): void {

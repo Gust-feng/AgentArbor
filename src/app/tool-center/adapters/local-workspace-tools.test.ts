@@ -174,6 +174,8 @@ test("local run_command uses policy allowlists and internal workspace commands",
     const shellCommand = createLocalShellCommandTool(root);
 
     const echoed = await runCommand.execute({ command: "echo", args: ["hello", "workspace"] }, context);
+    const shellStyleEchoed = await runCommand.execute({ command: "echo approval-review" }, context);
+    const quotedEchoed = await shellCommand.execute({ command: "echo \"hello quoted shell\"" }, context);
     const shellEchoed = await shellCommand.execute({ command: "echo", args: ["hello", "shell"] }, context);
     const listed = await runCommand.execute({ command: "dir", args: ["src"] }, context);
     const typed = await runCommand.execute({ command: "type", args: ["src/note.txt"] }, context);
@@ -182,8 +184,14 @@ test("local run_command uses policy allowlists and internal workspace commands",
     assert.equal(asRecord(shellEchoed).action, "shell_command");
     assert.match(String(asRecord(shellEchoed).refId), /^workspace:shell:/);
     assert.match(String(asRecord(asRecord(echoed).result).stdout), /hello workspace/);
+    assert.match(String(asRecord(asRecord(shellStyleEchoed).result).stdout), /approval-review/);
+    assert.match(String(asRecord(asRecord(quotedEchoed).result).stdout), /hello quoted shell/);
     assert.match(String(asRecord(asRecord(listed).result).stdout), /note\.txt/);
     assert.match(String(asRecord(asRecord(typed).result).stdout), /alpha/);
+    await assert.rejects(
+      () => runCommand.execute({ command: "echo safe && echo unsafe" }, context),
+      /shell control tokens/
+    );
     await assert.rejects(
       () => runCommand.execute({ command: "git", args: ["checkout", "--", "."] }, context),
       /read-only git commands/

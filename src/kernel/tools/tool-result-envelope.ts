@@ -111,6 +111,7 @@ function agentSummaryForToolDisplay(
         `${label}：${display.path ?? "工作区文件"}。`,
         display.append === true ? "模式：追加。" : undefined,
         display.bytes === undefined ? undefined : `大小：${display.bytes} 字节。`,
+        display.preview === undefined ? undefined : `变更片段：\n${display.preview}`,
         summary,
       ].filter(isString).join("\n"),
       1_200
@@ -123,6 +124,7 @@ function agentSummaryForToolDisplay(
         display.replacements === undefined ? undefined : `替换次数：${display.replacements}。`,
         display.previousLength === undefined ? undefined : `修改前长度：${display.previousLength}。`,
         display.nextLength === undefined ? undefined : `修改后长度：${display.nextLength}。`,
+        display.preview === undefined ? undefined : `变更片段：\n${display.preview}`,
         summary,
       ].filter(isString).join("\n"),
       1_200
@@ -208,6 +210,8 @@ function sanitizeToolDisplay(display: ToolDisplayProjection): ToolDisplayProject
       replacements: display.replacements,
       previousLength: display.previousLength,
       nextLength: display.nextLength,
+      preview: compactSafeText(display.preview, 1_800),
+      truncated: display.truncated,
     };
   }
   if (display.kind === "file_diff_preview") {
@@ -217,6 +221,8 @@ function sanitizeToolDisplay(display: ToolDisplayProjection): ToolDisplayProject
       replacements: display.replacements,
       previousLength: display.previousLength,
       nextLength: display.nextLength,
+      preview: compactSafeText(display.preview, 1_800),
+      truncated: display.truncated,
     };
   }
   if (display.kind === "command_summary") {

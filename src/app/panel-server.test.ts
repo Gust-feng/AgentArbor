@@ -119,8 +119,8 @@ test("panel React source is split into typed frontend modules", async () => {
   assert.equal(chatActive.includes("node.eventType"), true);
   assert.equal(chatActive.includes("补充要求或限制..."), true);
   assert.equal(chatActive.includes('props.onDecision("guidance", guidance)'), true);
-  assert.equal(chatActive.includes("允许执行"), true);
-  assert.equal(chatActive.includes("拒绝执行"), true);
+  assert.equal(chatActive.includes('props.busy ? "处理中" : "允许"'), true);
+  assert.equal(chatActive.includes("拒绝"), true);
   assert.equal(chatActive.includes("confirmation-guidance-input"), false);
   assert.equal(chatActive.includes("判断下一步"), false);
   assert.equal(chatActive.includes('aria-label="思考"'), false);
@@ -256,6 +256,75 @@ test("desktop live model stream preserves markdown structure", async () => {
   }
 });
 
+test("desktop work session completes streamed reasoning without replaying it", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-reasoning-stream-"));
+  const secret = "sk-reasoning-stream-secret";
+  const reasoningText = "先确认问题";
+  const answerText = "答案已经整理完成。";
+  const providerFetch: PanelProviderFetch = async () =>
+    createOpenAiStreamReasoningTextResponse("reasoning-stream-model", [
+      { kind: "reasoning", delta: reasoningText },
+      { kind: "output", delta: answerText },
+    ]);
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory, providerFetch });
+  try {
+    await requestJson(server.url, "/api/config/model-provider", {
+      method: "POST",
+      body: {
+        baseUrl: "https://provider.example",
+        model: "reasoning-stream-model",
+        apiKey: secret,
+      },
+    });
+    const start = await requestJson(server.url, "/api/conversations", {
+      method: "POST",
+      body: { goal: "请先思考再回答", aiMode: "openai-compatible" },
+    });
+    const runId = start.body.run.runId;
+    const completed = await waitForRun(server.url, runId, (body) => body.status === "completed", 4_000, "/api/desktop/runs");
+    const workSession = await requestJson(
+      server.url,
+      `/api/basic-agent/runs/${encodeURIComponent(runId)}/work-session`
+    );
+    const events = await requestJson(
+      server.url,
+      `/api/basic-agent/runs/${encodeURIComponent(runId)}/events?cursor=0`
+    );
+    const thinkingNodes = workSession.body.workSession.transcriptNodes.filter(
+      (node: { kind?: string; eventType?: string }) =>
+        node.kind === "thinking" && node.eventType?.startsWith("model.reasoning") === true
+    );
+    const completedTranscriptThinkingNodes = completed.body.transcript.transcriptNodes.filter(
+      (node: { kind?: string; eventType?: string }) =>
+        node.kind === "thinking" && node.eventType?.startsWith("model.reasoning") === true
+    );
+
+    assert.equal(
+      events.body.events.some((event: { type?: string }) => event.type === "model.reasoning.delta"),
+      true
+    );
+    assert.equal(
+      events.body.events.some((event: { type?: string }) => event.type === "model.output.delta"),
+      true
+    );
+    assert.equal(
+      events.body.events.some((event: { type?: string }) => event.type === "model.reasoning.completed"),
+      true
+    );
+    assert.equal(thinkingNodes.length, 1);
+    assert.equal(thinkingNodes[0]?.eventType, "model.reasoning.completed");
+    assert.equal(thinkingNodes[0]?.phase, "completed");
+    assert.equal(thinkingNodes[0]?.text, reasoningText);
+    assert.equal(completedTranscriptThinkingNodes.length, 1);
+    assert.equal(completedTranscriptThinkingNodes[0]?.eventType, "model.reasoning.completed");
+    assert.equal(JSON.stringify(workSession.body.workSession.transcriptNodes).includes(`${reasoningText}${reasoningText}`), false);
+    assertSafePanelJsonText(`${completed.text}\n${workSession.text}\n${events.text}`);
+  } finally {
+    await server.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("panel React workbench consumes Basic Agent projection APIs", async () => {
   const [app, runtime, workspacePages, chatEmpty, chatActive, sidebar, topbar, modelProviderLogos, modelOptions] = await Promise.all([
     readPanelUiSource("App.tsx"),
@@ -289,7 +358,7 @@ test("panel React workbench consumes Basic Agent projection APIs", async () => {
   assert.equal(app.includes("/model-catalog"), true);
   assert.equal(workspacePages.includes("获取模型"), true);
   assert.equal(chatActive.includes("model.output.delta"), false);
-  assert.equal(chatActive.includes("model.reasoning.delta"), false);
+  assert.equal(chatActive.includes("model.reasoning.delta"), true);
   assert.equal(chatActive.includes('kind === "thinking"'), true);
   assert.equal(chatActive.includes("reasoning-block"), false);
   assert.equal(chatActive.includes("TimelineStream"), false);
@@ -2371,10 +2440,10 @@ test("conversation follow-up after a provider failure does not feed internal ids
     assert.equal(completed.body.status, "completed");
     assert.equal(completed.body.canvas.agent.answer.answer.includes("桌面文件"), true);
     assert.equal(followupPrompt.includes("桌面文件，你看看"), true);
-    assert.equal(followupPrompt.includes("系统错误："), true);
+    assert.equal(followupPrompt.includes("系统错误："), false);
     assert.equal(followupPrompt.includes("上一轮未生成助手回复"), false);
     assert.equal(followupPrompt.includes("不是助手输出"), false);
-    assert.equal(followupPrompt.includes("bad request"), true);
+    assert.equal(followupPrompt.includes("bad request"), false);
     assert.equal(followupPrompt.includes("OpenAI-compatible provider returned HTTP 400"), false);
     assert.equal(/\bgoal-\d+\b/.test(followupPrompt), false);
     assert.equal(/\bmodel-request-\d+\b/.test(followupPrompt), false);
@@ -2447,12 +2516,12 @@ test("conversation history keeps safe failed turns and later completed turns aft
 
     assert.equal(conversation.body.conversation.turns.length, 6);
     assert.equal(conversation.body.conversation.turns[1].status, "failed");
-    assert.deepEqual(thirdMessages.map((message) => message.role), ["system", "user", "assistant", "user", "assistant", "user"]);
+    assert.deepEqual(thirdMessages.map((message) => message.role), ["system", "user", "user", "assistant", "user"]);
     assert.equal(thirdPrompt.includes("第一轮会失败"), true);
-    assert.equal(thirdPrompt.includes("系统错误："), true);
+    assert.equal(thirdPrompt.includes("系统错误："), false);
     assert.equal(thirdPrompt.includes("上一轮未生成助手回复"), false);
     assert.equal(thirdPrompt.includes("不是助手输出"), false);
-    assert.equal(thirdPrompt.includes("first turn provider error"), true);
+    assert.equal(thirdPrompt.includes("first turn provider error"), false);
     assert.equal(thirdPrompt.includes("第二轮成功"), true);
     assert.equal(thirdPrompt.includes("第二轮安全回答"), true);
     assert.equal(thirdPrompt.includes("OpenAI-compatible provider returned HTTP 400"), false);
@@ -2501,10 +2570,10 @@ test("conversation follow-up labels missing-key failure history as a system erro
 
     assert.equal(providerRequests.length, 1);
     assert.equal(prompt.includes("第一轮缺少密钥"), true);
-    assert.equal(prompt.includes("系统错误："), true);
+    assert.equal(prompt.includes("系统错误："), false);
     assert.equal(prompt.includes("上一轮未生成助手回复"), false);
     assert.equal(prompt.includes("不是助手输出"), false);
-    assert.equal(prompt.includes("模型密钥未配置"), true);
+    assert.equal(prompt.includes("模型密钥未配置"), false);
     assert.equal(prompt.includes(secret), false);
   } finally {
     await server.close();
@@ -3456,14 +3525,19 @@ test("basic agent confirmation decisions persist approve and guidance outcomes s
       `/api/basic-agent/runs/${encodeURIComponent(approveRunId)}/confirmations/${encodeURIComponent(approveConfirmationId)}/decision`,
       { method: "POST", body: { decision: "approve_once" } }
     );
+    assert.equal(approveDecision.status, 200);
+    await waitForRun(
+      server.url,
+      approveRunId,
+      (body) => body.status === "completed",
+      4_000,
+      "/api/desktop/runs"
+    );
     const approveRuntime = await requestJson(server.url, `/api/runtime/runs/${encodeURIComponent(approveRunId)}`);
     const approveEvents = await requestJson(
       server.url,
       `/api/basic-agent/runs/${encodeURIComponent(approveRunId)}/events?cursor=0`
     );
-
-    assert.equal(approveDecision.status, 200);
-    assert.equal(approveDecision.body.run.status, "completed");
     assert.equal(approveRuntime.body.snapshot.confirmations[0].status, "approved");
     assert.equal(approveRuntime.body.snapshot.toolCalls.some((call: { status: string }) => call.status === "completed"), true);
     assert.equal(approveEvents.body.events.some((event: { type: string }) => event.type === "run.resumed"), true);
@@ -3517,7 +3591,7 @@ test("basic agent confirmation decisions persist approve and guidance outcomes s
   }
 });
 
-test("basic agent approved shell-style run_command resumes without sandbox command-shape failure", async () => {
+test("basic agent shell-style run_command executes without sandbox command-shape failure", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-basic-command-confirmation-"));
   const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-basic-command-workspace-"));
   let providerFetchCalls = 0;
@@ -3546,22 +3620,12 @@ test("basic agent approved shell-style run_command resumes without sandbox comma
       body: { goal: "运行 echo approval-review 测试命令确认续跑", aiMode: "openai-compatible" },
     });
     const runId = start.body.run.runId;
-    const pending = await waitForRun(
+    const completed = await waitForRun(
       server.url,
       runId,
-      (body) => body.status === "approval_needed" && body.canvas?.agent?.pendingConfirmation !== undefined,
+      (body) => body.status === "completed",
       4_000,
       "/api/desktop/runs"
-    );
-    const confirmationId = pending.body.canvas.agent.pendingConfirmation.confirmationId;
-    const pendingEvents = await requestJson(server.url, `/api/basic-agent/runs/${encodeURIComponent(runId)}/events?cursor=0`);
-
-    assert.equal(pendingEvents.text.includes("Sandbox policy rejected command"), false);
-
-    const approved = await requestJson(
-      server.url,
-      `/api/basic-agent/runs/${encodeURIComponent(runId)}/confirmations/${encodeURIComponent(confirmationId)}/decision`,
-      { method: "POST", body: { decision: "approve_once" } }
     );
     const runtimeRun = await requestJson(server.url, `/api/runtime/runs/${encodeURIComponent(runId)}`);
     const events = await requestJson(server.url, `/api/basic-agent/runs/${encodeURIComponent(runId)}/events?cursor=0`);
@@ -3569,14 +3633,14 @@ test("basic agent approved shell-style run_command resumes without sandbox comma
       (call: { toolName?: string; status: string }) => call.toolName === "run_command"
     );
 
-    assert.equal(approved.status, 200);
-    assert.equal(approved.body.run.status, "completed");
+    assert.equal(completed.body.status, "completed");
     assert.equal(commandCall?.status, "completed");
     assert.equal(commandCall?.command, "echo approval-review");
+    assert.equal(events.body.events.some((event: { type: string }) => event.type === "confirmation.needed"), false);
     assert.equal(events.body.events.some((event: { type: string }) => event.type === "tool.completed"), true);
     assert.equal(events.body.events.some((event: { type: string }) => event.type === "tool.failed"), false);
     assert.equal(events.text.includes("Sandbox policy rejected command: echo approval-review"), false);
-    assertSafePanelJsonText(`${approved.text}\n${runtimeRun.text}\n${events.text}`);
+    assertSafePanelJsonText(`${runtimeRun.text}\n${events.text}`);
   } finally {
     await server.close();
     await fs.rm(directory, { recursive: true, force: true });
@@ -4456,6 +4520,49 @@ function createOpenAiStreamTextResponse(
           {
             index: 0,
             delta: { content: chunk },
+            finish_reason: index === chunks.length - 1 ? "stop" : null,
+          },
+        ],
+      })),
+    ]),
+    json: async () => {
+      throw new Error("Streaming response should not be read through json().");
+    },
+  };
+}
+
+function createOpenAiStreamReasoningTextResponse(
+  model: string,
+  chunks: readonly { readonly kind: "reasoning" | "output"; readonly delta: string }[]
+): Awaited<ReturnType<PanelProviderFetch>> {
+  const responseId = "resp-test-reasoning-stream";
+  return {
+    ok: true,
+    status: 200,
+    body: sseChunks([
+      {
+        type: "response.created",
+        response: { id: responseId, model, status: "in_progress" },
+      },
+      ...chunks.map((chunk) => ({
+        type: chunk.kind === "reasoning" ? "response.reasoning_summary_text.delta" : "response.output_text.delta",
+        delta: chunk.delta,
+      })),
+      {
+        type: "response.completed",
+        response: { id: responseId, model, status: "completed" },
+      },
+      ...chunks.map((chunk, index) => ({
+        id: `chatcmpl-test-reasoning-stream-${index}`,
+        object: "chat.completion.chunk",
+        created: 1_776_000_000,
+        model,
+        choices: [
+          {
+            index: 0,
+            delta: chunk.kind === "reasoning"
+              ? { reasoning_content: chunk.delta }
+              : { content: chunk.delta },
             finish_reason: index === chunks.length - 1 ? "stop" : null,
           },
         ],

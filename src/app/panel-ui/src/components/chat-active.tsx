@@ -1,22 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
-  AlertTriangle,
-  Ban,
-  BrainCircuit,
-  CheckCircle2,
   ChevronDown,
   ClipboardList,
   Copy,
   FileText,
-  FolderOpen,
-  Globe2,
-  MessageSquareText,
-  PencilLine,
-  Play,
-  Search,
   Sparkles,
-  Terminal,
-  XCircle,
 } from "lucide-react";
 import { compact } from "../text";
 import { resolveModelIconSvg } from "../model-icons";
@@ -35,6 +23,7 @@ import type {
   TranscriptNode,
 } from "../types";
 import { terminalStatuses } from "../ui-state";
+import { LiveStreamBox } from "./live-stream-text";
 import { RichText } from "./rich-text";
 import { ChatInputBar, type ChatInputProps, type ChatModelOption } from "./chat-empty";
 
@@ -47,22 +36,49 @@ type AssistantModelBadge = {
   readonly iconSvg?: string;
 };
 
+type ChatActiveLiveBuffer = {
+  readonly runId: string;
+  readonly turns: readonly ChatActiveLiveModelTurn[];
+};
+
+type ChatActiveLiveModelTurn = {
+  readonly requestId: string;
+  readonly outputText: string;
+  readonly sideText: string;
+  readonly reasoningText: string;
+  readonly reasoningCompleted: boolean;
+  readonly modelRefs: readonly string[];
+  readonly updatedAtSequence: number;
+};
+
+type LiveAnswerTone = "formal" | "process";
+
+type LiveAnswerProjection = {
+  readonly text: string;
+  readonly tone: LiveAnswerTone;
+  readonly streaming: boolean;
+};
+
 export function ChatActive(props: ChatInputProps & {
   readonly conversation?: Conversation;
   readonly run?: BasicAgentRun;
   readonly workSession?: DesktopWorkSession;
   readonly transcriptNodes: readonly TranscriptNode[];
   readonly detail?: DesktopRunDetail;
+  readonly live?: ChatActiveLiveBuffer;
   readonly error?: string;
   readonly pendingConfirmation?: PendingConfirmation | NonNullable<DesktopWorkSession["pendingConfirmation"]>;
   readonly onDecision: (decision: "approve_once" | "deny" | "guidance", guidance?: string) => void;
   readonly confirmationBusy: boolean;
 }): React.ReactElement {
   const scrollRef = useRef<HTMLDivElement | null>(null);
-  const turns = useMemo(() => visibleTurns(props.conversation?.turns ?? []), [props.conversation?.turns]);
+  const currentRunId = props.run?.runId ?? props.live?.runId ?? props.conversation?.activeRunId;
+  const turns = useMemo(() => visibleTurns(props.conversation?.turns ?? [], currentRunId), [props.conversation?.turns, currentRunId]);
   const transcriptNodes = useMemo(() => visibleTranscriptNodes(props.transcriptNodes), [props.transcriptNodes]);
-  const currentRunId = props.run?.runId;
-  const currentRunTranscriptNodes = useMemo(() => nodesForRun(transcriptNodes, currentRunId), [transcriptNodes, currentRunId]);
+  const currentRunTranscriptNodes = useMemo(
+    () => withLiveTranscriptNodes(nodesForRun(transcriptNodes, currentRunId), props.live),
+    [transcriptNodes, currentRunId, props.live]
+  );
   const currentRunAssistantTurn = currentRunId === undefined
     ? undefined
     : [...turns].reverse().find((turn) => turn.role === "assistant" && turn.runId === currentRunId && turn.content.trim().length > 0);
@@ -72,7 +88,7 @@ export function ChatActive(props: ChatInputProps & {
   const answer = props.workSession?.answer?.content ?? detailAnswer ?? currentRunAssistantTurn?.content;
   const pending = props.workSession?.pendingConfirmation ?? props.pendingConfirmation;
   const deliverable = visibleDeliverable(props.workSession?.deliverable, answer, currentRunAssistantTurn?.content);
-  const liveAnswer = liveStreamingAnswer(currentRunTranscriptNodes);
+  const liveAnswer = liveStreamingAnswer(props.live, currentRunTranscriptNodes);
   const running = props.run !== undefined && !terminalStatuses.has(props.run.status);
   const statusNotice = visibleRunProblem(props.run, props.workSession, props.detail, props.error);
   const standaloneRun = showStandaloneRun({
@@ -89,7 +105,7 @@ export function ChatActive(props: ChatInputProps & {
   const scrollKey = [
     latestTurn?.turnId,
     latestTurn?.content.length,
-    liveAnswer?.length,
+    liveAnswer?.text.length,
     props.run?.status,
     props.run?.eventCursor.lastSequence,
     transcriptNodes.at(-1)?.nodeId,
@@ -129,14 +145,16 @@ export function ChatActive(props: ChatInputProps & {
                   models={props.models}
                   selectedModelId={props.selectedModelId}
                   transcriptNodes={transcriptNodes}
+                  live={props.live}
                   pending={pending}
                   onDecision={props.onDecision}
                   confirmationBusy={props.confirmationBusy}
                 />
                 {standaloneRun && (
                   <AssistantMessage
-                    content={liveAnswer ?? answer ?? ""}
-                    live={running && liveAnswer !== undefined}
+                    content={liveAnswer?.text ?? answer ?? ""}
+                    live={liveAnswer?.streaming === true}
+                    liveTone={liveAnswer?.tone}
                     model={selectedComposerModel(props.models, props.selectedModelId)}
                     transcriptNodes={currentRunTranscriptNodes}
                     pending={pending}
@@ -172,6 +190,7 @@ function TranscriptChain(props: {
   readonly models: readonly ChatModelOption[];
   readonly selectedModelId: string;
   readonly transcriptNodes: readonly TranscriptNode[];
+  readonly live?: ChatActiveLiveBuffer;
   readonly pending?: ConfirmationProjection;
   readonly onDecision: (decision: "approve_once" | "deny" | "guidance", guidance?: string) => void;
   readonly confirmationBusy: boolean;
@@ -184,14 +203,18 @@ function TranscriptChain(props: {
           return <UserMessage key={turn.turnId} content={turn.content} />;
         }
         const model = assistantModelForTurn(turn, props.models, props.selectedModelId);
-        const runNodes = nodesForRun(props.transcriptNodes, turn.runId);
+        const live = props.live?.runId === turn.runId ? props.live : undefined;
+        const runNodes = withLiveTranscriptNodes(nodesForRun(props.transcriptNodes, turn.runId), live);
+        const liveAnswer = liveStreamingAnswer(live, runNodes);
         const pending = pendingForTurn(props.pending, turn.runId);
         return turn.status === "failed"
           ? <AssistantFailureMessage key={turn.turnId} content={turn.content} model={model} />
           : (
             <AssistantMessage
               key={turn.turnId}
-              content={turn.content}
+              content={liveAnswer?.text ?? turn.content}
+              live={liveAnswer?.streaming === true}
+              liveTone={liveAnswer?.tone}
               model={model}
               transcriptNodes={runNodes}
               pending={pending}
@@ -217,6 +240,7 @@ function UserMessage({ content }: { readonly content: string }): React.ReactElem
 function AssistantMessage(props: {
   readonly content: string;
   readonly live?: boolean;
+  readonly liveTone?: LiveAnswerTone;
   readonly model?: AssistantModelBadge;
   readonly transcriptNodes?: readonly TranscriptNode[];
   readonly pending?: ConfirmationProjection;
@@ -227,6 +251,8 @@ function AssistantMessage(props: {
   const visible = userVisibleAnswer(props.content).trim();
   const hasAnswer = visible.length > 0;
   const nodes = props.transcriptNodes ?? [];
+  const live = props.live === true;
+  const showLiveText = live;
   return (
     <article className="assistant-message">
       <AssistantAvatar model={props.model} />
@@ -238,14 +264,21 @@ function AssistantMessage(props: {
           confirmationBusy={props.confirmationBusy === true}
         />
         {hasAnswer && (
-          <AssistantAnswerBlock
-            text={visible}
-            copyText={visible}
-            showActions={!props.live}
-          />
+          showLiveText
+            ? (
+                <LiveStreamBox
+                  text={visible}
+                  live={true}
+                  tone={props.liveTone ?? "formal"}
+                />
+              )
+            : <AssistantAnswerBlock
+                text={visible}
+                copyText={visible}
+                showActions={true}
+              />
         )}
         {props.deliverable !== undefined && <ResultPreview deliverable={props.deliverable} />}
-        {props.live === true && <TypingDots />}
       </div>
     </article>
   );
@@ -274,18 +307,19 @@ function AgentWorkTimeline(props: {
 }): React.ReactElement | null {
   const nodes = timelineVisibleNodes(props.nodes);
   if (nodes.length === 0) return null;
+
   return (
-    <section className="agent-work-timeline" aria-label="Agent 工作进度">
+    <section className="agent-work-timeline" aria-label="工作进度">
       <div className="agent-timeline-track">
         {nodes.map((node, index) => (
           <AgentTimelineRow
-            key={node.nodeId}
+            key={timelineRowIdentity(node)}
             node={node}
             isLast={index === nodes.length - 1}
-          pending={props.pending}
-          onDecision={props.onDecision}
-          confirmationBusy={props.confirmationBusy}
-        />
+            pending={props.pending}
+            onDecision={props.onDecision}
+            confirmationBusy={props.confirmationBusy}
+          />
         ))}
       </div>
     </section>
@@ -301,22 +335,19 @@ function AgentTimelineRow(props: {
 }): React.ReactElement {
   const detail = transcriptNodeDetail(props.node, props.pending, props.onDecision, props.confirmationBusy);
   const expandable = detail !== undefined && timelineRowCanExpand(props.node);
-  const [open, setOpen] = useState(defaultOpenForNode(props.node));
+  const rowIdentity = timelineRowIdentity(props.node);
+  const [manualOpen, setManualOpen] = useState<boolean | undefined>(undefined);
   const eventLayout = timelineRowUsesEventLayout(props.node);
   const category = timelineRowCategory(props.node);
+  const automaticOpen = defaultOpenForNode(props.node);
+  const open = manualOpen ?? automaticOpen;
 
   useEffect(() => {
-    if (props.node.kind === "thinking") {
-      setOpen(props.node.phase !== "completed");
-      return;
-    }
-    if (defaultOpenForNode(props.node)) {
-      setOpen(true);
-    }
-  }, [props.node.nodeId, props.node.phase, props.node.kind, props.node.text, props.node.summary]);
+    setManualOpen(undefined);
+  }, [rowIdentity]);
 
   const header = eventLayout
-    ? renderTimelineEventHeader(props.node, expandable, open, setOpen)
+    ? renderTimelineEventHeader(props.node, expandable, open, () => setManualOpen((value) => !(value ?? automaticOpen)))
     : <p className="agent-timeline-thought">{timelineNarration(props.node)}</p>;
 
   return (
@@ -339,12 +370,33 @@ function AgentTimelineRow(props: {
   );
 }
 
+function timelineRowIdentity(node: TranscriptNode): string {
+  if (node.kind === "thinking") {
+    const modelRefs = node.refs.filter((ref) => ref.kind === "model_call").map((ref) => ref.id).join("|");
+    return `${node.runId}:thinking:${modelRefs || node.nodeId}`;
+  }
+  if (isModelSideOutputNode(node)) {
+    const modelRefs = node.refs.filter((ref) => ref.kind === "model_call").map((ref) => ref.id).join("|");
+    return `${node.runId}:model-output:${modelRefs || node.nodeId}`;
+  }
+  return node.nodeId;
+}
+
 function renderTimelineEventHeader(
   node: TranscriptNode,
   expandable: boolean,
   open: boolean,
-  setOpen: React.Dispatch<React.SetStateAction<boolean>>
+  toggleOpen: () => void
 ): React.ReactElement {
+  if (node.kind === "thinking") {
+    return renderThinkingHeader(node);
+  }
+  if (isModelSideOutputNode(node)) {
+    return renderModelSideOutputHeader(node);
+  }
+  if (node.kind === "tool") {
+    return renderToolHeader(node, expandable, open, toggleOpen);
+  }
   const body = (
     <>
       <span className="agent-timeline-event-main">
@@ -363,7 +415,63 @@ function renderTimelineEventHeader(
       type="button"
       className="agent-timeline-event"
       aria-expanded={open}
-      onClick={() => setOpen((value) => !value)}
+      onClick={toggleOpen}
+    >
+      {body}
+    </button>
+  );
+}
+
+function renderThinkingHeader(node: TranscriptNode): React.ReactElement {
+  const rawText = (node.text ?? node.summary ?? "").trim();
+  const live = node.eventType === "model.reasoning.delta" && node.phase !== "completed";
+  const text = live ? rawText : compact(rawText, 360);
+  return (
+    <div className="agent-thinking-line" data-live={live ? "true" : "false"}>
+      <span className="agent-stream-dot" aria-hidden="true" />
+      <LiveStreamBox text={text} live={live} tone="thinking" />
+    </div>
+  );
+}
+
+function renderModelSideOutputHeader(node: TranscriptNode): React.ReactElement {
+  const rawText = (node.text ?? node.summary ?? "").trim();
+  const live = node.eventType === "model.output.side";
+  const text = live ? rawText : compact(rawText, 260);
+  return (
+    <div className="agent-model-output-line" data-live={live ? "true" : "false"}>
+      <span className="agent-stream-dot" aria-hidden="true" />
+      <LiveStreamBox text={text} live={live} tone="process" />
+    </div>
+  );
+}
+
+function renderToolHeader(
+  node: TranscriptNode,
+  expandable: boolean,
+  open: boolean,
+  toggleOpen: () => void
+): React.ReactElement {
+  const target = timelineToolTarget(node);
+  const body = (
+    <>
+      <span className="agent-tool-line-main">
+        <span className="agent-tool-action">{timelineToolVerb(node)}</span>
+        {target !== undefined && <span className="agent-tool-target">{target}</span>}
+      </span>
+      {timelineRowMeta(node) !== undefined && <small>{timelineRowMeta(node)}</small>}
+      {expandable && <ChevronDown size={14} aria-hidden="true" />}
+    </>
+  );
+  if (!expandable) {
+    return <div className="agent-timeline-event agent-tool-line static">{body}</div>;
+  }
+  return (
+    <button
+      type="button"
+      className="agent-timeline-event agent-tool-line"
+      aria-expanded={open}
+      onClick={toggleOpen}
     >
       {body}
     </button>
@@ -371,7 +479,17 @@ function renderTimelineEventHeader(
 }
 
 function timelineRowUsesEventLayout(node: TranscriptNode): boolean {
+  if (isModelSideOutputNode(node)) return true;
+  if (isInlineSystemNote(node)) return false;
   return node.kind === "tool" || node.kind === "confirmation" || node.kind === "thinking" || node.kind === "user_decision" || node.kind === "system";
+}
+
+function isInlineSystemNote(node: TranscriptNode): boolean {
+  return node.kind === "system" && (node.eventType === "model.side.completed" || node.eventType === "model.output.side");
+}
+
+function isModelSideOutputNode(node: TranscriptNode): boolean {
+  return node.kind === "system" && (node.eventType === "model.side.completed" || node.eventType === "model.output.side");
 }
 
 function timelineRowCategory(node: TranscriptNode): "thought" | "context" | "web" | "change" | "command" | "approval" | "danger" {
@@ -402,7 +520,7 @@ function timelineRowPrimary(node: TranscriptNode): string {
     return confirmationDisplayTitle(node.confirmation, node.summary ?? "");
   }
   if (node.kind === "thinking") {
-    return node.phase === "completed" ? "思考完成" : "思考中";
+    return compact((node.text ?? node.summary ?? "").trim(), 180);
   }
   if (node.kind === "user_decision") {
     return node.phase === "denied" ? "你已拒绝" : node.phase === "guidance" ? "你补充了要求" : "你已确认";
@@ -418,7 +536,8 @@ function timelineRowPrimary(node: TranscriptNode): string {
 
 function timelineRowSecondary(node: TranscriptNode): string | undefined {
   if (node.kind === "confirmation") {
-    return compact(confirmationActionPreview(node.summary ?? node.confirmation?.actionSummary ?? "继续前需要确认。"), 140) || undefined;
+    const action = cleanConfirmationSummary(node.summary ?? node.confirmation?.actionSummary ?? "");
+    return action.length === 0 ? undefined : compact(confirmationActionPreview(action), 140) || undefined;
   }
   if (node.kind === "thinking") {
     return undefined;
@@ -426,34 +545,23 @@ function timelineRowSecondary(node: TranscriptNode): string | undefined {
   if (node.kind === "user_decision" || node.kind === "system") {
     return compact(node.summary ?? "", 160) || undefined;
   }
-  if (node.kind !== "tool") return undefined;
-  return timelineToolTarget(node);
+  return undefined;
 }
 
 function timelineRowMeta(node: TranscriptNode): string | undefined {
-  if (node.kind === "confirmation") {
-    return nodeMeta(node);
-  }
+  if (node.kind === "confirmation") return undefined;
   if (node.kind !== "tool") return undefined;
   const display = node.display;
   if (display?.kind === "command_summary" && display.exitCode !== undefined && display.exitCode !== 0) {
     return `exit ${display.exitCode}`;
   }
-  if (display?.kind === "search_results") {
-    return `${display.results.length}`;
-  }
-  if (display?.kind === "file_change_summary" || display?.kind === "file_diff_preview") {
-    return fileChangeStats(display).join(" · ");
-  }
-  if (display?.kind === "generic_tool_summary" && display.items !== undefined && display.items.length > 1) {
-    return `${display.items.length}`;
-  }
-  return nodeMeta(node);
+  return undefined;
 }
 
 function timelineRowCanExpand(node: TranscriptNode): boolean {
   if (node.kind === "confirmation") return true;
-  if (node.kind === "thinking") return true;
+  if (node.kind === "thinking") return false;
+  if (isInlineSystemNote(node)) return false;
   if (node.kind === "system" || node.kind === "user_decision") return (node.summary?.length ?? 0) > 160;
   if (node.kind !== "tool") return false;
   const display = node.display;
@@ -486,26 +594,24 @@ function timelineToolVerb(node: TranscriptNode): string {
 function timelineToolTarget(node: TranscriptNode): string | undefined {
   const display = node.display;
   if (display?.kind === "command_summary") {
-    return compact(commandText(display) ?? "", 140) || undefined;
+    return compact(commandText(display) ?? node.summary ?? "", 180) || undefined;
   }
   if (display?.kind === "search_results") {
-    return compact(display.query ?? "", 140) || undefined;
+    return compact(display.query ?? node.summary ?? "", 180) || undefined;
   }
   if (display?.kind === "browser_snapshot") {
-    return compact(display.title ?? display.url ?? node.summary ?? "", 140) || undefined;
+    return compact(display.title ?? display.url ?? node.summary ?? "", 180) || undefined;
   }
   if (display?.kind === "file_change_summary" || display?.kind === "file_diff_preview") {
-    return compact(display.path ?? node.summary ?? "", 140) || undefined;
+    return compact(display.path ?? node.summary ?? "", 180) || undefined;
   }
   if (display?.kind === "generic_tool_summary") {
     const items = display.items?.map(genericItemLabel).filter((value) => value.length > 0) ?? [];
-    if (items.length === 1) return compact(items[0], 140) || undefined;
-    if (items.length > 1) {
-      return isFileReadNode(node) ? `${items.length} 个文件` : `${items.length} 项`;
-    }
-    return compact(display.summary ?? node.summary ?? "", 140) || undefined;
+    if (items.length === 1) return compact(items[0], 180) || undefined;
+    if (items.length > 1) return isFileReadNode(node) ? `${items.length} 个文件` : `${items.length} 项`;
+    return compact(display.summary ?? node.summary ?? "", 180) || undefined;
   }
-  return compact(node.summary ?? "", 140) || undefined;
+  return compact(node.summary ?? "", 180) || undefined;
 }
 
 function sentenceCaseLabel(value: string | undefined): string {
@@ -556,13 +662,6 @@ function isWebTool(node: TranscriptNode): boolean {
     toolName.includes("grep");
 }
 
-function canMergeTimelineNode(previous: TranscriptNode | undefined, next: TranscriptNode): boolean {
-  if (previous === undefined) return false;
-  if (previous.kind === "confirmation" || next.kind === "confirmation") return false;
-  if (previous.kind === "user_decision" || next.kind === "user_decision") return false;
-  return false;
-}
-
 function transcriptNodeDetail(
   node: TranscriptNode,
   pending: ConfirmationProjection | undefined,
@@ -570,10 +669,7 @@ function transcriptNodeDetail(
   confirmationBusy: boolean
 ): React.ReactElement | undefined {
   if (node.kind === "thinking") {
-    const text = (node.text ?? node.summary)?.trim();
-    if (text === undefined || text.length === 0) return undefined;
-    if (node.phase === "completed") return undefined;
-    return <pre className="transcript-reasoning-text">{text}</pre>;
+    return undefined;
   }
   if (node.kind === "confirmation") {
     const confirmation = confirmationForNode(node, pending);
@@ -706,12 +802,12 @@ function GenericToolDetail(props: {
 function FileChangeDetail({ display }: { readonly display: Extract<ToolDisplayProjection, { readonly kind: "file_change_summary" | "file_diff_preview" }> }): React.ReactElement {
   const stats = fileChangeStats(display);
   const preview = display.preview?.trim();
+  const label = display.path ?? "文件";
   return (
     <div className="file-change-review" data-display="file-change">
       <div className="file-change-review-header">
         <div>
-          <strong>{display.kind === "file_diff_preview" ? "变更内容" : "文件内容"}</strong>
-          {display.path !== undefined && <em>{display.path}</em>}
+          <strong>{label}</strong>
         </div>
         {stats.length > 0 && (
           <div className="file-change-stats">
@@ -725,12 +821,11 @@ function FileChangeDetail({ display }: { readonly display: Extract<ToolDisplayPr
             <div className={`file-diff-line ${line.kind}`} key={`${index}:${line.text}`}>
               <span>{line.sign}</span>
               <p>{line.text}</p>
-              {index === 0 && display.truncated === true && <small>已截取</small>}
             </div>
           ))}
         </div>
       ) : (
-        <p className="file-diff-preview">{display.summary ?? "文件已更新。"}</p>
+        <p className="file-diff-preview">{display.summary ?? "已更新"}</p>
       )}
     </div>
   );
@@ -742,25 +837,25 @@ function ConfirmationNode(props: {
   readonly onDecision?: (decision: "approve_once" | "deny" | "guidance", guidance?: string) => void;
 }): React.ReactElement {
   const resumeLost = props.confirmation?.resumeAvailability === "lost_after_restart";
-  const action = props.confirmation === undefined ? "继续前需要确认。" : confirmationAction(props.confirmation);
+  const action = props.confirmation === undefined ? "" : confirmationAction(props.confirmation);
   const title = confirmationDisplayTitle(props.confirmation, action);
-  const mode = props.confirmation === undefined ? "confirm" : confirmationModeLabel(props.confirmation);
   const resources = props.confirmation === undefined ? [] : confirmationAffectedResources(props.confirmation);
   return (
     <div className="confirmation-node-body" data-risk={props.confirmation === undefined ? "medium" : confirmationRiskLevel(props.confirmation)}>
       <div className="confirmation-node-header">
         <strong>{title}</strong>
-        <span>{mode}</span>
       </div>
-      <div className="confirmation-command-row">
-        <pre>{confirmationActionPreview(action)}</pre>
-      </div>
+      {action.length > 0 && (
+        <div className="confirmation-command-row">
+          <pre>{confirmationActionPreview(action)}</pre>
+        </div>
+      )}
       {resources.length > 0 && (
         <div className="confirmation-node-meta">
           {resources.slice(0, 6).map((resource) => <span key={resource}>{resource}</span>)}
         </div>
       )}
-      {resumeLost && <p className="transcript-node-summary">应用重启后无法继续原动作。可以补充要求或重新发起。</p>}
+      {resumeLost && <p className="transcript-node-summary">需重新发起。</p>}
       {props.onDecision !== undefined && (
         <div className="confirmation-actions">
           <button
@@ -769,7 +864,7 @@ function ConfirmationNode(props: {
             onClick={() => props.onDecision?.("approve_once")}
             disabled={props.busy || resumeLost}
           >
-            {props.busy ? "提交中" : "允许执行"}
+            {props.busy ? "处理中" : "允许"}
           </button>
           <button
             type="button"
@@ -777,7 +872,7 @@ function ConfirmationNode(props: {
             onClick={() => props.onDecision?.("deny")}
             disabled={props.busy}
           >
-            拒绝执行
+            拒绝
           </button>
         </div>
       )}
@@ -812,7 +907,7 @@ function ResultPreview({ deliverable }: { readonly deliverable: AgentDeliverable
       <article className="result-preview">
         <header>
           <FileText size={16} />
-          <h2>结果预览：{deliverable.title}</h2>
+          <h2>{deliverable.title}</h2>
         </header>
         <div className="result-summary">
           <RichText text={deliverable.summary} />
@@ -890,7 +985,7 @@ function visibleTranscriptNodes(nodes: readonly TranscriptNode[]): readonly Tran
   const sorted = [...nodes]
     .filter((node) => node.kind !== "answer")
     .filter((node) => !isLowValueNode(node))
-    .sort((left, right) => left.sequence - right.sequence);
+    .sort(compareNodeOrder);
   const terminalToolCallIds = new Set(
     sorted
       .filter((node) => node.eventType === "tool.completed" || node.eventType === "tool.failed")
@@ -920,7 +1015,8 @@ function timelineVisibleNodes(nodes: readonly TranscriptNode[]): readonly Transc
   const sorted = [...nodes]
     .filter((node) => node.kind !== "answer")
     .filter((node) => !isLowValueNode(node))
-    .sort((left, right) => left.sequence - right.sequence);
+    .sort(compareNodeOrder);
+  const hasWorkActivity = sorted.some((node) => node.kind !== "thinking");
   const terminalToolCallIds = new Set(
     sorted
       .filter((node) => node.eventType === "tool.completed" || node.eventType === "tool.failed")
@@ -929,7 +1025,12 @@ function timelineVisibleNodes(nodes: readonly TranscriptNode[]): readonly Transc
   const visible = sorted.filter((node) => {
     if (node.kind === "thinking") {
       const text = (node.summary ?? node.text ?? "").trim();
-      return text.length > 0;
+      if (text.length === 0) return false;
+      if (node.eventType === "model.reasoning.delta" || node.eventType === "model.reasoning.completed") return true;
+      return hasWorkActivity || node.phase !== "completed";
+    }
+    if (isModelSideOutputNode(node)) {
+      return (node.text ?? node.summary ?? "").trim().length > 0;
     }
     if (node.eventType !== "tool.requested" || node.phase === "preparing") return true;
     const ids = toolCallIdsForNode(node);
@@ -940,6 +1041,24 @@ function timelineVisibleNodes(nodes: readonly TranscriptNode[]): readonly Transc
 
 function toolCallIdsForNode(node: TranscriptNode): readonly string[] {
   return node.refs.filter((ref) => ref.kind === "tool_call").map((ref) => ref.id);
+}
+
+function compareNodeOrder(left: TranscriptNode, right: TranscriptNode): number {
+  if (left.sequence !== right.sequence) return left.sequence - right.sequence;
+  const rank = transcriptNodeOrderRank(left) - transcriptNodeOrderRank(right);
+  if (rank !== 0) return rank;
+  if (left.nodeId === right.nodeId) return 0;
+  return left.nodeId.localeCompare(right.nodeId);
+}
+
+function transcriptNodeOrderRank(node: TranscriptNode): number {
+  if (node.kind === "thinking") return 0;
+  if (isModelSideOutputNode(node)) return 1;
+  if (node.kind === "tool") return 2;
+  if (node.kind === "confirmation") return 3;
+  if (node.kind === "user_decision") return 4;
+  if (node.kind === "system") return 5;
+  return 6;
 }
 
 function nodesForRun(nodes: readonly TranscriptNode[], runId: string | undefined): readonly TranscriptNode[] {
@@ -958,14 +1077,14 @@ function showStandaloneRun(input: {
   readonly run?: BasicAgentRun;
   readonly transcriptNodes: readonly TranscriptNode[];
   readonly answer?: string;
-  readonly liveAnswer?: string;
+  readonly liveAnswer?: LiveAnswerProjection;
   readonly pending?: ConfirmationProjection;
   readonly deliverable?: AgentDeliverable;
   readonly statusNotice?: { readonly title: string; readonly message: string; readonly tone: "warning" | "error" };
 }): boolean {
   const runId = input.run?.runId;
   if (runId === undefined) return false;
-  const hasAssistantTurnForRun = input.turns.some((turn) => turn.role === "assistant" && turn.runId === runId && turn.content.trim().length > 0);
+  const hasAssistantTurnForRun = input.turns.some((turn) => turn.role === "assistant" && turn.runId === runId);
   if (hasAssistantTurnForRun) return false;
   return nodesForRun(input.transcriptNodes, runId).length > 0 ||
     input.liveAnswer !== undefined ||
@@ -975,12 +1094,120 @@ function showStandaloneRun(input: {
     (input.run !== undefined && !terminalStatuses.has(input.run.status) && input.statusNotice === undefined);
 }
 
-function liveStreamingAnswer(nodes: readonly TranscriptNode[]): string | undefined {
-  const liveText = nodes
-    .filter((node) => node.kind === "answer" && node.text !== undefined)
-    .map((node) => node.text?.trim() ?? "")
-    .filter((text) => text.length > 0);
-  return liveText.at(-1);
+function withLiveTranscriptNodes(
+  nodes: readonly TranscriptNode[],
+  live: ChatActiveLiveBuffer | undefined
+): readonly TranscriptNode[] {
+  if (live === undefined) return nodes;
+  let next = nodes;
+
+  // 只处理最新的 turn（最后一个）
+  const latestTurn = live.turns[live.turns.length - 1];
+  if (latestTurn === undefined) return next;
+
+  if (latestTurn.reasoningText.trim().length > 0) {
+    const existing = findLiveThinkingNode(next, latestTurn);
+    const liveNode = liveThinkingNode(live.runId, latestTurn, existing);
+    next = existing === undefined ? [...next, liveNode] : next.map((node) => node === existing ? liveNode : node);
+  }
+  if (latestTurn.sideText.trim().length > 0) {
+    const existing = next.find((node) =>
+      node.kind === "system" &&
+      (node.eventType === "model.side.completed" || node.eventType === "model.output.side") &&
+      sameModelRefs(node, latestTurn.modelRefs)
+    );
+    const liveNode = liveSideTextNode(live.runId, latestTurn, existing);
+    next = existing === undefined ? [...next, liveNode] : next.map((node) => node === existing ? liveNode : node);
+  }
+
+  return next;
+}
+
+function findLiveThinkingNode(nodes: readonly TranscriptNode[], turn: ChatActiveLiveModelTurn): TranscriptNode | undefined {
+  return nodes.find((node) => node.kind === "thinking" && sameModelRefs(node, turn.modelRefs)) ??
+    nodes.find((node) => node.kind === "thinking" && isModelReasoningNode(node) && sameReasoningText(node, turn));
+}
+
+function sameModelRefs(node: TranscriptNode, modelRefs: readonly string[]): boolean {
+  if (modelRefs.length === 0) return false;
+  const refs = node.refs.filter((ref) => ref.kind === "model_call").map((ref) => ref.id);
+  return refs.some((ref) => modelRefs.includes(ref));
+}
+
+function isModelReasoningNode(node: TranscriptNode): boolean {
+  return node.eventType === "model.reasoning.delta" || node.eventType === "model.reasoning.completed";
+}
+
+function sameReasoningText(node: TranscriptNode, turn: ChatActiveLiveModelTurn): boolean {
+  const nodeText = normalizeComparableText(node.text ?? node.summary ?? "");
+  const liveText = normalizeComparableText(turn.reasoningText);
+  if (nodeText.length === 0 || liveText.length === 0) return false;
+  if (nodeText === liveText) return true;
+  return !turn.reasoningCompleted && (nodeText.startsWith(liveText) || liveText.startsWith(nodeText));
+}
+
+function liveThinkingNode(runId: string, turn: ChatActiveLiveModelTurn, existing: TranscriptNode | undefined): TranscriptNode {
+  const text = turn.reasoningText.trim();
+  const completed = turn.reasoningCompleted || existing?.eventType === "model.reasoning.completed" || existing?.phase === "completed";
+  const modelRefs = turn.modelRefs.map((id): ObservationRef => ({ kind: "model_call", id }));
+  return {
+    nodeId: `${runId}:live:${turn.requestId}:thinking`,
+    runId,
+    sequence: existing?.sequence ?? turn.updatedAtSequence,
+    eventType: completed ? "model.reasoning.completed" : "model.reasoning.delta",
+    kind: "thinking",
+    phase: completed ? "completed" : "noted",
+    title: "思考",
+    summary: compact(text, 180),
+    text,
+    timestamp: existing?.timestamp ?? "",
+    refs: existing === undefined ? modelRefs : mergeRefs(existing.refs, modelRefs),
+  };
+}
+
+function liveSideTextNode(runId: string, turn: ChatActiveLiveModelTurn, existing: TranscriptNode | undefined): TranscriptNode {
+  const text = turn.sideText.trim();
+  const modelRefs = turn.modelRefs.map((id): ObservationRef => ({ kind: "model_call", id }));
+  return {
+    nodeId: `${runId}:live:${turn.requestId}:side-text`,
+    runId,
+    sequence: existing?.sequence ?? Math.max(0, turn.updatedAtSequence - 0.1),
+    eventType: "model.output.side",
+    kind: "system",
+    phase: "completed",
+    title: "",
+    summary: compact(text, 220),
+    text,
+    timestamp: existing?.timestamp ?? "",
+    refs: existing === undefined ? modelRefs : mergeRefs(existing.refs, modelRefs),
+  };
+}
+
+function liveStreamingAnswer(
+  live: ChatActiveLiveBuffer | undefined,
+  nodes: readonly TranscriptNode[]
+): LiveAnswerProjection | undefined {
+  const liveTurn = live === undefined
+    ? undefined
+    : [...live.turns].reverse().find((turn) => turn.outputText.trim().length > 0);
+  if (liveTurn !== undefined) {
+    return {
+      text: liveTurn.outputText,
+      tone: liveOutputFollowsToolResult(liveTurn, nodes) ? "formal" : "process",
+      streaming: true,
+    };
+  }
+  const answerNode = [...nodes].reverse().find((node) => node.kind === "answer" && (node.text?.trim().length ?? 0) > 0);
+  return answerNode?.text === undefined ? undefined : { text: answerNode.text.trim(), tone: "formal", streaming: false };
+}
+
+function liveOutputFollowsToolResult(turn: ChatActiveLiveModelTurn, nodes: readonly TranscriptNode[]): boolean {
+  const latestToolResultSequence = nodes.reduce((latest, node) => (
+    node.kind === "tool" && (node.eventType === "tool.completed" || node.eventType === "tool.failed")
+      ? Math.max(latest, node.sequence)
+      : latest
+  ), 0);
+  return latestToolResultSequence > 0 && turn.updatedAtSequence > latestToolResultSequence;
 }
 
 function nodeTitle(node: TranscriptNode): string {
@@ -998,10 +1225,10 @@ function toolNodeTitle(node: TranscriptNode): string {
   if (node.phase === "preparing") return `准备${action}`;
   if (node.phase === "executing") return action;
   if (node.phase === "failed") return `${action}未完成`;
-  if (display?.kind === "command_summary") return display.outputSummary !== undefined || display.errorSummary !== undefined ? "命令输出" : action;
-  if (display?.kind === "search_results") return "搜索结果";
-  if (display?.kind === "browser_snapshot") return "网页内容";
-  if (display?.kind === "file_change_summary" || display?.kind === "file_diff_preview") return "文件变更";
+  if (display?.kind === "command_summary") return action;
+  if (display?.kind === "search_results") return "搜索资料";
+  if (display?.kind === "browser_snapshot") return "读取网页";
+  if (display?.kind === "file_change_summary" || display?.kind === "file_diff_preview") return action;
   if (isFileReadNode(node)) return "读取文件";
   return action;
 }
@@ -1028,46 +1255,6 @@ function toolActionLabel(node: TranscriptNode): string {
   return node.title || "使用工具";
 }
 
-function nodeSummary(node: TranscriptNode): string | undefined {
-  if (node.kind === "thinking") return compact((node.summary ?? node.text ?? "").trim(), 120) || undefined;
-  if (node.kind === "tool") return toolNodeSummary(node);
-  if (node.kind === "confirmation") {
-    const confirmation = confirmationForNode(node, undefined);
-    return compact(confirmation === undefined ? node.summary ?? "" : confirmationAction(confirmation), 150) || undefined;
-  }
-  return compact(node.summary ?? "", 150) || undefined;
-}
-
-function toolNodeSummary(node: TranscriptNode): string | undefined {
-  const display = node.display;
-  if (display?.kind === "command_summary") {
-    return commandText(display);
-  }
-  if (display?.kind === "search_results") {
-    return [display.query, `${display.results.length} 条结果`].filter(Boolean).join(" · ");
-  }
-  if (display?.kind === "browser_snapshot") {
-    return display.title ?? display.url ?? node.summary;
-  }
-  if (display?.kind === "file_change_summary" || display?.kind === "file_diff_preview") {
-    return display.path ?? node.summary;
-  }
-  if (display?.kind === "generic_tool_summary") {
-    return display.summary ?? (display.items?.length ? `${display.items.length} 项` : node.summary);
-  }
-  return node.summary;
-}
-
-function nodeMeta(node: TranscriptNode): string | undefined {
-  if (node.phase === "preparing" || node.phase === "executing" || node.phase === "noted") return "进行中";
-  if (node.phase === "waiting_approval") return "待确认";
-  if (node.phase === "failed" || node.phase === "blocked" || node.phase === "cancelled") return "未完成";
-  if (node.display?.kind === "command_summary" && node.display.exitCode !== undefined && node.display.exitCode !== 0) {
-    return `exit ${node.display.exitCode}`;
-  }
-  return undefined;
-}
-
 function nodeTone(node: TranscriptNode): "active" | "warning" | "danger" | "done" {
   if (node.phase === "failed" || node.phase === "blocked" || node.phase === "cancelled") return "danger";
   if (node.phase === "waiting_approval") return "warning";
@@ -1075,27 +1262,8 @@ function nodeTone(node: TranscriptNode): "active" | "warning" | "danger" | "done
   return "done";
 }
 
-function transcriptNodeIcon(node: TranscriptNode): React.ReactNode {
-  if (node.kind === "thinking") return <BrainCircuit size={11} />;
-  if (node.kind === "confirmation") return <AlertTriangle size={11} />;
-  if (node.kind === "user_decision") {
-    if (node.phase === "denied") return <Ban size={11} />;
-    if (node.phase === "guidance") return <MessageSquareText size={11} />;
-    return <CheckCircle2 size={11} />;
-  }
-  if (node.kind === "system") {
-    return node.phase === "failed" || node.phase === "blocked" || node.phase === "cancelled" ? <XCircle size={11} /> : <Play size={11} />;
-  }
-  const display = node.display;
-  if (display?.kind === "command_summary") return <Terminal size={11} />;
-  if (display?.kind === "search_results") return <Search size={11} />;
-  if (display?.kind === "browser_snapshot") return <Globe2 size={11} />;
-  if (display?.kind === "file_change_summary" || display?.kind === "file_diff_preview") return <PencilLine size={11} />;
-  if (isDirectoryNode(node)) return <FolderOpen size={11} />;
-  return <FileText size={11} />;
-}
-
 function defaultOpenForNode(node: TranscriptNode): boolean {
+  if (node.kind === "thinking") return node.phase !== "completed";
   if (node.kind === "confirmation") return true;
   if (node.phase === "waiting_approval") return true;
   if (node.phase === "failed" || node.phase === "blocked" || node.phase === "cancelled") return true;
@@ -1114,7 +1282,10 @@ function aggregateFileReadNodes(previous: TranscriptNode, next: TranscriptNode):
   const items = uniqueStrings([...fileReadLabels(previous), ...fileReadLabels(next)]);
   return {
     ...next,
-    nodeId: `${previous.nodeId}:${next.nodeId}`,
+    nodeId: previous.nodeId,
+    sequence: previous.sequence,
+    timestamp: previous.timestamp,
+    refs: mergeRefs(previous.refs, next.refs),
     title: "读取文件",
     summary: `${items.length} 个文件`,
     display: {
@@ -1145,12 +1316,6 @@ function fileReadLabels(node: TranscriptNode): readonly string[] {
   }
   const summary = display?.kind === "generic_tool_summary" ? display.summary : undefined;
   return [summary, node.summary].filter((value): value is string => value !== undefined && value.trim().length > 0);
-}
-
-function isDirectoryNode(node: TranscriptNode): boolean {
-  const toolName = normalizedToolName(node.toolName);
-  const action = node.display?.kind === "generic_tool_summary" ? node.display.action?.toLowerCase() ?? "" : "";
-  return toolName === "list_dir" || toolName === "list_files" || toolName.includes("list") || toolName.includes("dir") || action.includes("目录");
 }
 
 function isBoringSuccessfulToolResult(node: TranscriptNode): boolean {
@@ -1207,16 +1372,18 @@ function confirmationRunId(confirmation: ConfirmationProjection): string | undef
 function confirmationAction(confirmation: ConfirmationProjection): string {
   const raw = "actionSummary" in confirmation ? confirmation.actionSummary : confirmation.question;
   const sanitized = cleanConfirmationSummary(raw);
-  return sanitized.length === 0 ? "继续前需要确认。" : sanitized;
+  return sanitized;
 }
 
 function confirmationDisplayTitle(confirmation: ConfirmationProjection | undefined, action: string): string {
-  const title = confirmation?.title === undefined ? "" : cleanConfirmationSummary(confirmation.title);
-  const combined = `${title} ${action}`;
-  if (/命令|command|shell|powershell|pwsh|cmd\.exe/i.test(combined)) {
-    return "确认执行命令";
-  }
-  return title.length > 0 ? title : "确认继续";
+  const rawTitle = confirmation?.title === undefined ? "" : cleanConfirmationSummary(confirmation.title);
+  const title = isGenericConfirmationTitle(rawTitle) ? "" : rawTitle;
+  const combined = [title, action].filter((value) => value.length > 0).join(" ").trim();
+  return combined.length > 0 ? combined : "确认";
+}
+
+function isGenericConfirmationTitle(value: string): boolean {
+  return /^(?:需要确认|待确认|确认继续|确认执行命令)$/i.test(value.trim());
 }
 
 function confirmationActionPreview(action: string): string {
@@ -1224,13 +1391,6 @@ function confirmationActionPreview(action: string): string {
     .replace(/^(?:运行|执行)?\s*命令[:：]?\s*/i, "")
     .replace(/^command[:：]?\s*/i, "")
     .trim() || action;
-}
-
-function confirmationModeLabel(confirmation: ConfirmationProjection): string {
-  const risk = confirmationRiskLevel(confirmation);
-  if (risk === "low") return "read-only";
-  if (risk === "high") return "high-risk";
-  return "confirm";
 }
 
 function confirmationRiskLevel(confirmation: ConfirmationProjection): "low" | "medium" | "high" {
@@ -1241,7 +1401,9 @@ function confirmationRiskLevel(confirmation: ConfirmationProjection): "low" | "m
 
 function cleanConfirmationSummary(value: string): string {
   return value
+    .replace(/^(?:需要确认|待确认|继续前需要确认)[。.!！?？]?$/g, "")
     .replace(/批准后只允许继续本次对应工具操作；拒绝则不会执行该动作。?/g, "")
+    .replace(/继续前需要确认。?/g, "")
     .replace(/执行前需要用户确认。?/g, "")
     .replace(/运行命令请求执行执行操作[。；]*/g, "")
     .replace(/\btool:call[_:A-Za-z0-9-]+\b/g, "")
@@ -1308,8 +1470,24 @@ function uniqueStrings(values: readonly string[]): readonly string[] {
   return result;
 }
 
-function visibleTurns(turns: readonly ConversationTurn[]): readonly ConversationTurn[] {
-  return turns.filter((turn) => turn.role === "user" || turn.content.trim().length > 0);
+function mergeRefs(left: readonly ObservationRef[], right: readonly ObservationRef[]): readonly ObservationRef[] {
+  const seen = new Set<string>();
+  const result: ObservationRef[] = [];
+  for (const ref of [...left, ...right]) {
+    const key = `${ref.kind}:${ref.id}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(ref);
+  }
+  return result;
+}
+
+function visibleTurns(turns: readonly ConversationTurn[], activeRunId: string | undefined): readonly ConversationTurn[] {
+  return turns.filter((turn) =>
+    turn.role === "user" ||
+    turn.content.trim().length > 0 ||
+    (activeRunId !== undefined && turn.role === "assistant" && turn.runId === activeRunId)
+  );
 }
 
 function assistantModelForTurn(
@@ -1444,9 +1622,15 @@ function sanitizeFailureCopy(value: string): string {
 }
 
 function userVisibleAnswer(text: string): string {
-  return text
+  return stripInternalAssistantText(text)
     .replace(/AgentArbor\s*桌面\s*Root Agent/g, "AgentArbor 桌面助手")
     .replace(/Root Agent/g, "助手");
+}
+
+function stripInternalAssistantText(text: string): string {
+  return text
+    .replace(/<\s*(?:tool_call|function_call|use_tool|internal_action|internal_control|query|arguments)\b[^>]*>[\s\S]*?<\s*\/\s*(?:tool_call|function_call|use_tool|internal_action|internal_control|query|arguments)\s*>/gi, "")
+    .replace(/<\s*\/?\s*(?:tool_call|function_call|use_tool|internal_action|internal_control|query|arguments)\b[^>]*>/gi, "");
 }
 
 function normalizeComparableText(value: string): string {

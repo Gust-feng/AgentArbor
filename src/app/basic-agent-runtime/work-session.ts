@@ -122,7 +122,13 @@ function transcriptNodesFromRunEvents(
       pendingReasoning = updatePendingRunReasoning(pendingReasoning, event, nodes);
       continue;
     }
+    if (isReasoningSettlementRunEvent(event)) {
+      pendingReasoning = settlePendingRunReasoning(pendingReasoning, event);
+    }
     pendingReasoning = flushPendingRunReasoning(pendingReasoning, nodes);
+    if (isReasoningSettlementRunEvent(event)) {
+      completeOpenRunReasoningNodes(nodes, event);
+    }
     const node = transcriptNodeFromRunEvent(event, {
       confirmationToolRefs,
       confirmationRequestSequences,
@@ -302,17 +308,64 @@ function isReasoningRunEvent(
   return event.type === "model.reasoning.delta" || event.type === "model.reasoning.completed";
 }
 
+function isReasoningSettlementRunEvent(event: RunEvent): boolean {
+  return event.type === "model.output.completed" ||
+    event.type === "model.side.completed" ||
+    event.type === "agent.note.completed" ||
+    event.type === "tool.requested" ||
+    event.type === "tool.completed" ||
+    event.type === "tool.failed" ||
+    event.type === "confirmation.needed" ||
+    event.type === "user_approval.received" ||
+    event.type === "user.guidance" ||
+    event.type === "context.compaction.completed" ||
+    event.type === "context.compaction.failed" ||
+    event.type === "final.result" ||
+    event.type === "run.failed" ||
+    event.type === "run.blocked" ||
+    event.type === "run.cancelled";
+}
+
+function settlePendingRunReasoning(
+  pending: PendingRunReasoningNode | undefined,
+  event: RunEvent
+): PendingRunReasoningNode | undefined {
+  if (pending === undefined) return undefined;
+  const eventRefs = modelCallRefsForRunEvent(event);
+  if (eventRefs.length > 0 && !sameReasoningRefs(modelCallRefsForRunEvent(pending.firstEvent), eventRefs)) {
+    return pending;
+  }
+  return {
+    ...pending,
+    completed: true,
+  };
+}
+
 function updatePendingRunReasoning(
   pending: PendingRunReasoningNode | undefined,
   event: RunEvent,
   nodes: TranscriptNode[]
 ): PendingRunReasoningNode | undefined {
   const text = event.delta ?? event.detail?.preview ?? event.summary;
+  if (event.type === "model.reasoning.completed" && pending !== undefined && sameReasoningRefs(modelCallRefsForRunEvent(pending.firstEvent), modelCallRefsForRunEvent(event))) {
+    return {
+      firstEvent: pending.firstEvent,
+      events: [...pending.events, event],
+      text: pending.text,
+      completed: true,
+    };
+  }
+  if (event.type === "model.reasoning.completed" && completeExistingRunReasoningNode(nodes, event, text)) {
+    return pending;
+  }
   if (text === undefined || text.trim().length === 0) {
     return pending;
   }
   if (pending === undefined || !sameReasoningRefs(modelCallRefsForRunEvent(pending.firstEvent), modelCallRefsForRunEvent(event))) {
     flushPendingRunReasoning(pending, nodes);
+    if (event.type === "model.reasoning.delta" && appendExistingRunReasoningNode(nodes, event, text)) {
+      return undefined;
+    }
     return {
       firstEvent: event,
       events: [event],
@@ -350,6 +403,87 @@ function flushPendingRunReasoning(
   return undefined;
 }
 
+function completeExistingRunReasoningNode(
+  nodes: TranscriptNode[],
+  event: RunEvent,
+  text: string | undefined
+): boolean {
+  const index = findExistingRunReasoningNodeIndex(nodes, event);
+  if (index < 0) return false;
+  const existing = nodes[index];
+  if (existing === undefined) return false;
+  const existingText = (existing.text ?? existing.summary ?? "").trim();
+  const nextText = existingText.length > 0 ? existingText : text?.trim() ?? "";
+  if (nextText.length === 0) return false;
+  nodes[index] = {
+    ...existing,
+    eventType: "model.reasoning.completed",
+    phase: "completed",
+    summary: compactSafeLine(nextText, 180),
+    text: nextText,
+    refs: uniqueObservationRefs([...existing.refs, ...event.refs]),
+  };
+  return true;
+}
+
+function appendExistingRunReasoningNode(
+  nodes: TranscriptNode[],
+  event: RunEvent,
+  text: string
+): boolean {
+  const index = findExistingRunReasoningNodeIndex(nodes, event);
+  if (index < 0) return false;
+  const existing = nodes[index];
+  if (existing === undefined || existing.phase === "completed") return false;
+  const existingText = (existing.text ?? existing.summary ?? "").trim();
+  const nextText = appendReasoningFragment(existingText, text).trim();
+  nodes[index] = {
+    ...existing,
+    summary: compactSafeLine(nextText, 180),
+    text: nextText,
+    refs: uniqueObservationRefs([...existing.refs, ...event.refs]),
+  };
+  return true;
+}
+
+function completeOpenRunReasoningNodes(nodes: TranscriptNode[], event: RunEvent): void {
+  const refs = modelCallRefsForRunEvent(event);
+  for (let index = 0; index < nodes.length; index += 1) {
+    const existing = nodes[index];
+    if (
+      existing === undefined ||
+      existing.kind !== "thinking" ||
+      existing.eventType !== "model.reasoning.delta" ||
+      existing.phase === "completed"
+    ) {
+      continue;
+    }
+    if (refs.length > 0 && !sameReasoningRefs(modelCallRefsForTranscriptNode(existing), refs)) {
+      continue;
+    }
+    const text = (existing.text ?? existing.summary ?? "").trim();
+    if (text.length === 0) continue;
+    nodes[index] = {
+      ...existing,
+      eventType: "model.reasoning.completed",
+      phase: "completed",
+      summary: compactSafeLine(text, 180),
+      text,
+      refs: uniqueObservationRefs([...existing.refs, ...event.refs]),
+    };
+  }
+}
+
+function findExistingRunReasoningNodeIndex(nodes: readonly TranscriptNode[], event: RunEvent): number {
+  const refs = modelCallRefsForRunEvent(event);
+  if (refs.length === 0) return -1;
+  return nodes.findIndex((node) =>
+    node.kind === "thinking" &&
+    (node.eventType === "model.reasoning.delta" || node.eventType === "model.reasoning.completed") &&
+    sameReasoningRefs(modelCallRefsForTranscriptNode(node), refs)
+  );
+}
+
 function transcriptNode(
   event: RunEvent,
   input: {
@@ -385,6 +519,10 @@ function toolCallRefsForRunEvent(event: RunEvent): readonly string[] {
 
 function modelCallRefsForRunEvent(event: RunEvent): readonly string[] {
   return event.refs.filter((ref) => ref.kind === "model_call").map((ref) => ref.id);
+}
+
+function modelCallRefsForTranscriptNode(node: TranscriptNode): readonly string[] {
+  return node.refs.filter((ref) => ref.kind === "model_call").map((ref) => ref.id);
 }
 
 function sameReasoningRefs(left: readonly string[], right: readonly string[]): boolean {
@@ -538,7 +676,7 @@ function isLowValueAgentNote(value: string): boolean {
 function userFacingConfirmationSummary(value: string | undefined): string {
   const text = value?.trim() ?? "";
   if (text.length === 0 || /^User approval was requested\.?$/i.test(text)) {
-    return "继续前需要确认。";
+    return "";
   }
   return text;
 }

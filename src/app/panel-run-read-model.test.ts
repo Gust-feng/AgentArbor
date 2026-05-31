@@ -215,7 +215,7 @@ test("panel transcript nodes preserve ordered ordinary-agent tool lifecycle", ()
       "run.resumed:approved",
       "tool.requested:executing",
       "tool.completed:completed",
-      "model.reasoning.delta:noted",
+      "model.reasoning.completed:completed",
       "final.result:completed",
     ],
   );
@@ -287,15 +287,111 @@ test("panel transcript nodes merge contiguous reasoning deltas without moving to
   assert.deepEqual(
     nodes.map((node) => `${node.kind}:${node.eventType}:${node.phase}:${node.summary}`),
     [
-      "thinking:model.reasoning.delta:noted:files to understand",
+      "thinking:model.reasoning.completed:completed:files to understand",
       "tool:tool.requested:executing:workspace",
       "tool:tool.completed:completed:3 个文件",
-      "thinking:model.reasoning.delta:noted:then summarize",
+      "thinking:model.reasoning.completed:completed:then summarize",
       "answer:final.result:completed:结果已生成。",
     ],
   );
   assert.equal(nodes[0]?.text, "files to understand");
   assert.equal(nodes[3]?.text, "then summarize");
+});
+
+test("panel transcript nodes close merged reasoning on completion event", () => {
+  const nodes = createPanelTranscriptNodes([
+    streamEvent({ sequence: 1, type: "run.started" }),
+    streamEvent({
+      sequence: 2,
+      type: "model.reasoning.delta",
+      delta: "first",
+      modelCallRefs: ["model-reasoning"],
+    }),
+    streamEvent({
+      sequence: 3,
+      type: "model.reasoning.delta",
+      delta: "step",
+      modelCallRefs: ["model-reasoning"],
+    }),
+    streamEvent({
+      sequence: 4,
+      type: "model.reasoning.completed",
+      summary: "思考完成。",
+      modelCallRefs: ["model-reasoning"],
+    }),
+    streamEvent({ sequence: 5, type: "final.result", summary: "结果已生成。" }),
+  ]);
+  const thinking = nodes.find((node) => node.kind === "thinking");
+
+  assert.equal(thinking?.phase, "completed");
+  assert.equal(thinking?.eventType, "model.reasoning.completed");
+  assert.equal(thinking?.text, "first step");
+  assert.equal(thinking?.summary, "first step");
+});
+
+test("panel transcript nodes complete live reasoning after interleaved output", () => {
+  const nodes = createPanelTranscriptNodes([
+    streamEvent({
+      sequence: 1,
+      type: "model.reasoning.delta",
+      delta: "first",
+      modelCallRefs: ["model-interleaved"],
+    }),
+    streamEvent({
+      sequence: 2,
+      type: "model.output.delta",
+      delta: "answer",
+      modelCallRefs: ["model-interleaved"],
+    }),
+    streamEvent({
+      sequence: 3,
+      type: "model.reasoning.completed",
+      summary: "思考完成。",
+      modelCallRefs: ["model-interleaved"],
+    }),
+    streamEvent({
+      sequence: 4,
+      type: "model.output.completed",
+      summary: "回答完成。",
+      modelCallRefs: ["model-interleaved"],
+    }),
+  ]);
+  const thinking = nodes.filter((node) => node.kind === "thinking" && node.eventType?.startsWith("model.reasoning"));
+
+  assert.equal(thinking.length, 1);
+  assert.equal(thinking[0]?.phase, "completed");
+  assert.equal(thinking[0]?.eventType, "model.reasoning.completed");
+  assert.equal(thinking[0]?.text, "first");
+});
+
+test("panel transcript nodes settle reasoning when the model turn ends without explicit completion", () => {
+  const nodes = createPanelTranscriptNodes([
+    streamEvent({
+      sequence: 1,
+      type: "model.reasoning.delta",
+      delta: "first",
+      modelCallRefs: ["model-no-completion"],
+    }),
+    streamEvent({
+      sequence: 2,
+      type: "model.output.delta",
+      delta: "answer",
+      modelCallRefs: ["model-no-completion"],
+    }),
+    streamEvent({
+      sequence: 3,
+      type: "model.output.completed",
+      summary: "回答完成。",
+      modelCallRefs: ["model-no-completion"],
+    }),
+    streamEvent({ sequence: 4, type: "final.result", summary: "结果已生成。" }),
+  ]);
+  const thinking = nodes.filter((node) => node.kind === "thinking" && node.eventType?.startsWith("model.reasoning"));
+
+  assert.equal(thinking.length, 1);
+  assert.equal(thinking[0]?.phase, "completed");
+  assert.equal(thinking[0]?.eventType, "model.reasoning.completed");
+  assert.equal(thinking[0]?.text, "first");
 });
 
 test("ordinary agent stream stays quiet for direct answers but shows safe thinking around tool work", () => {
@@ -385,7 +481,7 @@ test("ordinary agent stream stays quiet for direct answers but shows safe thinki
   assert.equal(JSON.stringify(withTool).includes("\"action\":\"read_file\""), false);
 });
 
-test("ordinary agent stream only shows provider reasoning summaries", () => {
+test("ordinary agent stream shows provider-visible reasoning outputs", () => {
   const withChatReasoning = createPanelRunStreamEvents({
     runId: "run-reasoning-chat",
     status: "completed",
@@ -438,12 +534,14 @@ test("ordinary agent stream only shows provider reasoning summaries", () => {
   const serializedSummary = JSON.stringify(withSummaryReasoning);
 
   assert.equal(withChatReasoning.some((event) => event.type === "agent.note.delta" && event.summary?.includes("深入思考") === true), false);
-  assert.equal(withChatReasoning.some((event) => event.type === "model.reasoning.delta"), false);
-  assert.equal(serializedChat.includes("先拆解用户目标"), false);
+  assert.equal(withChatReasoning.some((event) => event.type === "model.reasoning.delta"), true);
+  assert.equal(withChatReasoning.some((event) => event.type === "model.reasoning.completed"), true);
+  assert.equal(serializedChat.includes("先拆解用户目标"), true);
   assert.equal(serializedChat.includes("思考强度"), false);
   assert.equal(serializedChat.includes("模型思考内容已展示"), false);
 
   assert.equal(withSummaryReasoning.some((event) => event.type === "model.reasoning.delta"), true);
+  assert.equal(withSummaryReasoning.some((event) => event.type === "model.reasoning.completed"), true);
   assert.equal(serializedSummary.includes("先拆解需求"), true);
   assert.equal(serializedSummary.includes("raw provider response"), false);
 });
@@ -547,7 +645,10 @@ test("ordinary agent stream treats tool-call model text as status instead of vis
 
   assert.equal(events.some((event) => event.type === "model.output.delta"), false);
   assert.equal(events.some((event) => event.type === "model.output.completed"), false);
+  assert.equal(events.some((event) => event.type === "model.side.completed"), true);
   assert.equal(events.some((event) => event.type === "tool.requested"), true);
+  const sideSummary = events.find((event) => event.type === "model.side.completed")?.summary ?? "";
+  assert.equal(sideSummary.includes("我还没有主动完成"), true);
   const blockedSummary = events.find((event) => event.type === "run.blocked")?.summary ?? "";
   assert.equal(blockedSummary.includes("异常保护中断"), true);
   assert.equal(blockedSummary.includes("任务没有完成"), true);

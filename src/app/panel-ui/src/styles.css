@@ -975,7 +975,6 @@ textarea {
 }
 
 .assistant-message,
-.assistant-run-message,
 .session-placeholder {
   display: flex;
   align-items: flex-start;
@@ -1014,26 +1013,61 @@ textarea {
   max-width: 100%;
 }
 
+.live-stream-box {
+  position: relative;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 1.2em;
+  padding-right: 8px;
+  font-size: 14px;
+  line-height: 1.82;
+  white-space: pre-wrap;
+  text-wrap: pretty;
+  overflow-wrap: break-word;
+  word-break: normal;
+  transition: color var(--motion-fast-duration) var(--motion-ease-standard);
+}
+
+.live-stream-box.process {
+  color: color-mix(in oklch, var(--fg) 72%, var(--muted));
+  font-size: 13px;
+  font-style: normal;
+  line-height: 1.68;
+}
+
+.live-stream-box.formal {
+  color: var(--fg);
+}
+
+.live-stream-box.thinking {
+  color: color-mix(in oklch, var(--fg) 78%, var(--muted));
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.agent-model-output-line {
+  display: grid;
+  width: min(700px, 100%);
+  min-width: 0;
+  grid-template-columns: 12px minmax(0, 1fr);
+  align-items: baseline;
+  gap: 8px;
+  padding: 2px 0;
+  color: color-mix(in oklch, var(--fg) 70%, var(--muted));
+  font-size: 13px;
+  line-height: 1.68;
+}
+
+.agent-model-output-line .live-stream-box {
+  padding-right: 0;
+}
+
 .assistant-answer .rich-text {
   gap: 12px;
 }
 
 .assistant-answer .rich-paragraph {
   line-height: 1.82;
-}
-
-.assistant-turn-timeline {
-  display: grid;
-  min-width: 0;
-  gap: 14px;
-}
-
-.assistant-turn-timeline .assistant-answer {
-  width: min(760px, 100%);
-}
-
-.assistant-turn-activity {
-  margin: 0;
 }
 
 .rich-text {
@@ -1248,33 +1282,12 @@ textarea {
   line-height: 1.35;
 }
 
-.assistant-run-body {
-  display: flex;
-  min-width: 0;
-  max-width: 760px;
-  flex: 1 1 auto;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.judgement-card {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 12px;
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  background: var(--surface-subtle);
-  padding: 16px;
-}
-
-.judgement-card > svg,
 .next-steps svg,
 .result-preview header svg {
   margin-top: 2px;
   color: var(--accent-strong);
 }
 
-.judgement-card h2,
 .next-steps h2,
 .result-preview h2 {
   margin: 0 0 6px;
@@ -1283,7 +1296,6 @@ textarea {
   font-weight: 650;
 }
 
-.judgement-card div,
 .result-preview,
 .next-steps,
 .status-notice {
@@ -1296,14 +1308,14 @@ textarea {
   display: grid;
   width: min(760px, 100%);
   min-width: 0;
-  gap: 10px;
+  gap: 8px;
   color: color-mix(in oklch, var(--muted) 90%, var(--fg));
 }
 
 .agent-timeline-track {
   display: grid;
   min-width: 0;
-  gap: 10px;
+  gap: 6px;
 }
 
 .agent-timeline-row {
@@ -1314,7 +1326,7 @@ textarea {
 .agent-timeline-row-body {
   display: grid;
   min-width: 0;
-  gap: 7px;
+  gap: 5px;
 }
 
 .agent-timeline-thought {
@@ -1332,18 +1344,18 @@ textarea {
   min-width: 0;
   grid-template-columns: minmax(0, 1fr) auto auto;
   align-items: center;
-  gap: 7px;
+  gap: 6px;
   border: 0;
-  border-radius: 10px;
+  border-radius: 8px;
   background: transparent;
-  padding: 4px 6px 4px 0;
+  padding: 3px 6px 3px 0;
   color: inherit;
   font: inherit;
   text-align: left;
 }
 
 button.agent-timeline-event:hover {
-  background: color-mix(in oklch, var(--surface-subtle) 78%, transparent);
+  background: color-mix(in oklch, var(--surface-subtle) 52%, transparent);
 }
 
 
@@ -1361,7 +1373,7 @@ button.agent-timeline-event:hover {
 }
 
 .agent-timeline-event strong,
-.agent-timeline-event span,
+.agent-timeline-event-main > span,
 .agent-timeline-event small {
   min-width: 0;
 }
@@ -1369,11 +1381,11 @@ button.agent-timeline-event:hover {
 .agent-timeline-event strong {
   color: color-mix(in oklch, var(--fg) 94%, var(--muted));
   font-size: 13px;
-  font-weight: 710;
+  font-weight: 650;
   line-height: 1.35;
 }
 
-.agent-timeline-event span {
+.agent-timeline-event-main > span {
   overflow: hidden;
   color: color-mix(in oklch, var(--fg) 86%, var(--muted));
   font-size: 12.5px;
@@ -1405,9 +1417,83 @@ button.agent-timeline-event:hover {
 .agent-timeline-row-detail {
   display: grid;
   min-width: 0;
-  border-left: 1px solid color-mix(in oklch, var(--border) 76%, transparent);
-  margin-left: 11px;
-  padding: 2px 0 0 16px;
+  border-left: 1px solid color-mix(in oklch, var(--border) 52%, transparent);
+  margin-left: 10px;
+  padding: 2px 0 0 14px;
+}
+
+.agent-thinking-line {
+  display: grid;
+  width: min(700px, 100%);
+  min-width: 0;
+  grid-template-columns: 12px minmax(0, 1fr);
+  align-items: baseline;
+  gap: 8px;
+  padding: 2px 0;
+  color: color-mix(in oklch, var(--fg) 72%, var(--muted));
+  font-size: 13px;
+  line-height: 1.68;
+}
+
+.agent-stream-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 999px;
+  margin-top: 0.72em;
+  background: color-mix(in oklch, var(--accent-strong) 50%, var(--muted));
+  opacity: 0.42;
+}
+
+.agent-timeline-row.active .agent-stream-dot,
+.agent-timeline-row[data-open="true"][data-kind="thinking"] .agent-stream-dot,
+.agent-thinking-line[data-live="true"] .agent-stream-dot,
+.agent-model-output-line[data-live="true"] .agent-stream-dot {
+  opacity: 0.85;
+  animation: agent-stream-breathe 1.45s var(--motion-ease-standard) infinite;
+}
+
+.agent-timeline-row.done[data-kind="thinking"] .agent-thinking-line {
+  color: color-mix(in oklch, var(--muted) 80%, var(--fg));
+}
+
+.agent-tool-line {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  min-height: 26px;
+  color: color-mix(in oklch, var(--fg) 72%, var(--muted));
+}
+
+.agent-tool-line-main {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: baseline;
+  gap: 10px;
+}
+
+.agent-tool-action {
+  color: color-mix(in oklch, var(--muted) 74%, var(--fg));
+  font-size: 12px;
+  font-weight: 560;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+
+.agent-tool-target {
+  min-width: 0;
+  overflow: hidden;
+  color: color-mix(in oklch, var(--fg) 76%, var(--muted));
+  font-size: 12.5px;
+  line-height: 1.42;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-timeline-row.done[data-kind="tool"] .agent-tool-line {
+  color: color-mix(in oklch, var(--muted) 82%, var(--fg));
+}
+
+.agent-timeline-row.active[data-kind="tool"] .agent-tool-action {
+  color: var(--accent-active);
 }
 
 .transcript-node-summary,
@@ -1423,34 +1509,11 @@ button.agent-timeline-event:hover {
   color: var(--muted);
 }
 
-.transcript-reasoning-text {
-  width: min(640px, 100%);
-  max-height: 320px;
-  margin: 0;
-  overflow: auto;
-  border-left: 1px solid color-mix(in oklch, var(--accent-strong) 24%, var(--border));
-  padding: 6px 0 6px 12px;
-  color: color-mix(in oklch, var(--fg) 78%, var(--muted));
-  font-family: "SF Mono", Consolas, "Liberation Mono", monospace;
-  font-size: 12px;
-  line-height: 1.65;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
 .transcript-tool-detail {
   display: grid;
   width: min(640px, 100%);
   min-width: 0;
   gap: 8px;
-}
-
-.transcript-detail-label {
-  color: color-mix(in oklch, var(--muted) 84%, var(--fg));
-  font-size: 11px;
-  font-weight: 680;
-  letter-spacing: 0;
-  line-height: 1.2;
 }
 
 .transcript-detail-list {
@@ -1684,10 +1747,6 @@ button.agent-timeline-event:hover {
   white-space: nowrap;
 }
 
-.assistant-run-body > .agent-work-timeline:first-child {
-  margin-top: 0;
-}
-
 .confirmation-node-body {
   display: grid;
   width: min(620px, 100%);
@@ -1771,7 +1830,11 @@ button.agent-timeline-event:hover {
 }
 
 .result-preview {
-  color: color-mix(in oklch, var(--fg) 84%, var(--muted));
+  color: var(--fg);
+}
+
+.result-preview .rich-text {
+  color: color-mix(in oklch, var(--fg) 96%, var(--muted));
 }
 
 .confirmation-actions {
@@ -3223,6 +3286,18 @@ button.agent-timeline-event:hover {
   }
 }
 
+@keyframes agent-stream-breathe {
+  0%,
+  100% {
+    opacity: 0.42;
+    transform: scale(0.82);
+  }
+  45% {
+    opacity: 0.95;
+    transform: scale(1.08);
+  }
+}
+
 @keyframes modal-card-enter {
   from {
     opacity: 0;
@@ -3335,7 +3410,7 @@ button.agent-timeline-event:hover {
   }
 
   .agent-timeline-event-main,
-  .agent-timeline-event span,
+  .agent-timeline-event-main > span,
   .agent-timeline-event small,
   .transcript-detail-row strong,
   .transcript-detail-row em,
@@ -3418,9 +3493,22 @@ button.agent-timeline-event:hover {
 }
 
 @media (max-width: 760px) {
-  .transcript-reasoning-text {
+  .agent-thinking-line {
     width: 100%;
+    grid-template-columns: 10px minmax(0, 1fr);
+    gap: 7px;
   }
+
+  .agent-tool-line-main {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+
+  .agent-tool-target {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
 }
 
 @media (prefers-reduced-motion: reduce) {

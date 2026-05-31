@@ -163,6 +163,106 @@ test("work session visible events preserve product activity instead of tail mode
   assert.equal(workSession.currentAction, "内容已整理。");
 });
 
+test("work session read model closes merged reasoning on completion event", () => {
+  const run = basicRun("completed");
+  const events: RunEvent[] = [
+    {
+      ...event(run.runId, "model.reasoning.delta", "first", "running"),
+      id: `${run.runId}:reasoning:1`,
+      sequence: 1,
+      delta: "first",
+      refs: [{ kind: "model_call", id: "model-reasoning" }],
+    },
+    {
+      ...event(run.runId, "model.reasoning.delta", "step", "running"),
+      id: `${run.runId}:reasoning:2`,
+      sequence: 2,
+      delta: "step",
+      refs: [{ kind: "model_call", id: "model-reasoning" }],
+    },
+    {
+      ...event(run.runId, "model.reasoning.completed", "思考完成。", "completed"),
+      id: `${run.runId}:reasoning:completed`,
+      sequence: 3,
+      refs: [{ kind: "model_call", id: "model-reasoning" }],
+    },
+  ];
+  const workSession = createDesktopWorkSessionReadModel({ run, events });
+  const thinking = workSession.transcriptNodes?.find((node) => node.kind === "thinking");
+
+  assert.equal(thinking?.phase, "completed");
+  assert.equal(thinking?.eventType, "model.reasoning.completed");
+  assert.equal(thinking?.text, "first step");
+});
+
+test("work session read model completes live reasoning after interleaved output", () => {
+  const run = basicRun("completed");
+  const events: RunEvent[] = [
+    {
+      ...event(run.runId, "model.reasoning.delta", "first", "running"),
+      id: `${run.runId}:live:reasoning:1`,
+      sequence: 1,
+      delta: "first",
+      refs: [{ kind: "model_call", id: "model-interleaved" }],
+    },
+    {
+      ...event(run.runId, "model.output.delta", "answer", "running"),
+      id: `${run.runId}:live:output:1`,
+      sequence: 2,
+      delta: "answer",
+      refs: [{ kind: "model_call", id: "model-interleaved" }],
+    },
+    {
+      ...event(run.runId, "model.reasoning.completed", "思考完成。", "completed"),
+      id: `${run.runId}:reasoning:completed`,
+      sequence: 3,
+      refs: [{ kind: "model_call", id: "model-interleaved" }],
+    },
+    { ...event(run.runId, "model.output.completed", "回答完成。", "completed"), sequence: 4 },
+  ];
+  const workSession = createDesktopWorkSessionReadModel({ run, events });
+  const thinking = workSession.transcriptNodes?.filter((node) => node.kind === "thinking" && node.eventType?.startsWith("model.reasoning"));
+
+  assert.equal(thinking?.length, 1);
+  assert.equal(thinking?.[0]?.phase, "completed");
+  assert.equal(thinking?.[0]?.eventType, "model.reasoning.completed");
+  assert.equal(thinking?.[0]?.text, "first");
+});
+
+test("work session read model settles reasoning when the model turn ends without explicit completion", () => {
+  const run = basicRun("completed");
+  const events: RunEvent[] = [
+    {
+      ...event(run.runId, "model.reasoning.delta", "first", "running"),
+      id: `${run.runId}:live:reasoning:no-completion`,
+      sequence: 1,
+      delta: "first",
+      refs: [{ kind: "model_call", id: "model-no-completion" }],
+    },
+    {
+      ...event(run.runId, "model.output.delta", "answer", "running"),
+      id: `${run.runId}:live:output:no-completion`,
+      sequence: 2,
+      delta: "answer",
+      refs: [{ kind: "model_call", id: "model-no-completion" }],
+    },
+    {
+      ...event(run.runId, "model.output.completed", "回答完成。", "completed"),
+      id: `${run.runId}:output:completed:no-completion`,
+      sequence: 3,
+      refs: [{ kind: "model_call", id: "model-no-completion" }],
+    },
+    { ...event(run.runId, "final.result", "结果已生成。", "completed"), sequence: 4 },
+  ];
+  const workSession = createDesktopWorkSessionReadModel({ run, events });
+  const thinking = workSession.transcriptNodes?.filter((node) => node.kind === "thinking" && node.eventType?.startsWith("model.reasoning"));
+
+  assert.equal(thinking?.length, 1);
+  assert.equal(thinking?.[0]?.phase, "completed");
+  assert.equal(thinking?.[0]?.eventType, "model.reasoning.completed");
+  assert.equal(thinking?.[0]?.text, "first");
+});
+
 test("work session read model does not promote restored summaries into chat deliverables", () => {
   const run = basicRun("completed");
   const workSession = createDesktopWorkSessionReadModel({

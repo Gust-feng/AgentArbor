@@ -208,6 +208,7 @@ export type PanelRunStreamEventType =
   | "model.reasoning.completed"
   | "model.output.delta"
   | "model.output.completed"
+  | "model.side.completed"
   | "context.compaction.completed"
   | "context.compaction.failed"
   | "tool.requested"
@@ -608,7 +609,13 @@ export function createPanelTranscriptNodes(
       pendingReasoning = updatePendingPanelReasoning(pendingReasoning, event, nodes);
       continue;
     }
+    if (isReasoningSettlementTranscriptEvent(event)) {
+      pendingReasoning = settlePendingPanelReasoning(pendingReasoning, event);
+    }
     pendingReasoning = flushPendingPanelReasoning(pendingReasoning, nodes);
+    if (isReasoningSettlementTranscriptEvent(event)) {
+      completeOpenPanelReasoningNodes(nodes, event);
+    }
     const node = transcriptNodeForEvent(event, {
       confirmationToolRefs,
       confirmationRequestSequences,
@@ -643,6 +650,18 @@ function transcriptNodeForEvent(
   }
   if (event.type === "model.output.delta" || event.type === "model.output.completed") {
     return undefined;
+  }
+  if (event.type === "model.side.completed") {
+    if (event.summary === undefined || event.summary.trim().length === 0) {
+      return undefined;
+    }
+    return transcriptNode(event, {
+      kind: "system",
+      phase: "completed",
+      title: "",
+      summary: event.summary,
+      text: event.detail?.preview ?? event.summary,
+    });
   }
   if ((event.type === "agent.note.delta" || event.type === "agent.note.completed") && isLowValueAgentNote(event.summary)) {
     return undefined;
@@ -784,17 +803,63 @@ function isReasoningTranscriptEvent(
   return event.type === "model.reasoning.delta" || event.type === "model.reasoning.completed";
 }
 
+function isReasoningSettlementTranscriptEvent(event: PanelRunStreamEvent): boolean {
+  return event.type === "model.output.completed" ||
+    event.type === "model.side.completed" ||
+    event.type === "agent.note.completed" ||
+    event.type === "tool.requested" ||
+    event.type === "tool.completed" ||
+    event.type === "tool.failed" ||
+    event.type === "confirmation.needed" ||
+    event.type === "user_approval.received" ||
+    event.type === "user.guidance" ||
+    event.type === "context.compaction.completed" ||
+    event.type === "context.compaction.failed" ||
+    event.type === "final.result" ||
+    event.type === "run.failed" ||
+    event.type === "run.blocked" ||
+    event.type === "run.cancelled";
+}
+
+function settlePendingPanelReasoning(
+  pending: PendingPanelReasoningNode | undefined,
+  event: PanelRunStreamEvent
+): PendingPanelReasoningNode | undefined {
+  if (pending === undefined) return undefined;
+  if (event.modelCallRefs.length > 0 && !sameReasoningModelCall(pending.firstEvent.modelCallRefs, event.modelCallRefs)) {
+    return pending;
+  }
+  return {
+    ...pending,
+    completed: true,
+  };
+}
+
 function updatePendingPanelReasoning(
   pending: PendingPanelReasoningNode | undefined,
   event: PanelRunStreamEvent,
   nodes: PanelTranscriptNode[]
 ): PendingPanelReasoningNode | undefined {
   const text = event.delta ?? event.detail?.preview ?? event.summary;
+  if (event.type === "model.reasoning.completed" && pending !== undefined && sameReasoningModelCall(pending.firstEvent.modelCallRefs, event.modelCallRefs)) {
+    return {
+      firstEvent: pending.firstEvent,
+      events: [...pending.events, event],
+      text: pending.text,
+      completed: true,
+    };
+  }
+  if (event.type === "model.reasoning.completed" && completeExistingPanelReasoningNode(nodes, event, text)) {
+    return pending;
+  }
   if (text === undefined || text.trim().length === 0) {
     return pending;
   }
   if (pending === undefined || !sameReasoningModelCall(pending.firstEvent.modelCallRefs, event.modelCallRefs)) {
     flushPendingPanelReasoning(pending, nodes);
+    if (event.type === "model.reasoning.delta" && appendExistingPanelReasoningNode(nodes, event, text)) {
+      return undefined;
+    }
     return {
       firstEvent: event,
       events: [event],
@@ -832,11 +897,94 @@ function flushPendingPanelReasoning(
   return undefined;
 }
 
+function completeExistingPanelReasoningNode(
+  nodes: PanelTranscriptNode[],
+  event: PanelRunStreamEvent,
+  text: string | undefined
+): boolean {
+  const index = findExistingPanelReasoningNodeIndex(nodes, event);
+  if (index < 0) return false;
+  const existing = nodes[index];
+  if (existing === undefined) return false;
+  const existingText = (existing.text ?? existing.summary ?? "").trim();
+  const nextText = existingText.length > 0 ? existingText : text?.trim() ?? "";
+  if (nextText.length === 0) return false;
+  nodes[index] = {
+    ...existing,
+    eventType: "model.reasoning.completed",
+    phase: "completed",
+    summary: compactStreamDetailText(nextText, 180),
+    text: nextText,
+    refs: uniqueObservationRefs([...existing.refs, ...transcriptRefsForEvent(event)]),
+  };
+  return true;
+}
+
+function appendExistingPanelReasoningNode(
+  nodes: PanelTranscriptNode[],
+  event: PanelRunStreamEvent,
+  text: string
+): boolean {
+  const index = findExistingPanelReasoningNodeIndex(nodes, event);
+  if (index < 0) return false;
+  const existing = nodes[index];
+  if (existing === undefined || existing.phase === "completed") return false;
+  const existingText = (existing.text ?? existing.summary ?? "").trim();
+  const nextText = appendReasoningFragment(existingText, text).trim();
+  nodes[index] = {
+    ...existing,
+    summary: compactStreamDetailText(nextText, 180),
+    text: nextText,
+    refs: uniqueObservationRefs([...existing.refs, ...transcriptRefsForEvent(event)]),
+  };
+  return true;
+}
+
+function completeOpenPanelReasoningNodes(nodes: PanelTranscriptNode[], event: PanelRunStreamEvent): void {
+  for (let index = 0; index < nodes.length; index += 1) {
+    const existing = nodes[index];
+    if (
+      existing === undefined ||
+      existing.kind !== "thinking" ||
+      existing.eventType !== "model.reasoning.delta" ||
+      existing.phase === "completed"
+    ) {
+      continue;
+    }
+    if (event.modelCallRefs.length > 0 && !sameReasoningModelCall(transcriptModelCallRefsForNode(existing), event.modelCallRefs)) {
+      continue;
+    }
+    const text = (existing.text ?? existing.summary ?? "").trim();
+    if (text.length === 0) continue;
+    nodes[index] = {
+      ...existing,
+      eventType: "model.reasoning.completed",
+      phase: "completed",
+      summary: compactStreamDetailText(text, 180),
+      text,
+      refs: uniqueObservationRefs([...existing.refs, ...transcriptRefsForEvent(event)]),
+    };
+  }
+}
+
+function findExistingPanelReasoningNodeIndex(nodes: readonly PanelTranscriptNode[], event: PanelRunStreamEvent): number {
+  if (event.modelCallRefs.length === 0) return -1;
+  return nodes.findIndex((node) =>
+    node.kind === "thinking" &&
+    (node.eventType === "model.reasoning.delta" || node.eventType === "model.reasoning.completed") &&
+    sameReasoningModelCall(transcriptModelCallRefsForNode(node), event.modelCallRefs)
+  );
+}
+
 function sameReasoningModelCall(left: readonly string[], right: readonly string[]): boolean {
   if (left.length === 0 || right.length === 0) {
     return left.length === right.length;
   }
   return left.some((id) => right.includes(id));
+}
+
+function transcriptModelCallRefsForNode(node: PanelTranscriptNode): readonly string[] {
+  return node.refs.filter((ref) => ref.kind === "model_call").map((ref) => ref.id);
 }
 
 function appendReasoningFragment(current: string, next: string): string {
@@ -1075,9 +1223,9 @@ function userDecisionTitle(phase: TranscriptNodePhase): string {
 function userFacingConfirmationSummary(value: string | undefined): string {
   const text = value?.trim() ?? "";
   if (text.length === 0 || /^User approval was requested\.?$/i.test(text)) {
-    return "继续前需要确认。";
+    return "";
   }
-  return cleanConfirmationSummary(text) || "继续前需要确认。";
+  return cleanConfirmationSummary(text);
 }
 
 function isLowValueAgentNote(value: string | undefined): boolean {
@@ -1321,6 +1469,22 @@ function appendStreamEventsForEvent(input: {
       });
     }
     if (stringOrUndefined(payload.finishReason) === "tool_call") {
+      const sideText = visibleOutputText(payload.visibleOutput);
+      if (sideText.trim().length > 0) {
+        input.push({
+          ...base,
+          eventId: `${input.runId}:event:${input.entry.sequence}:model.side.completed`,
+          type: "model.side.completed",
+          agentLabel: "助手",
+          summary: compactStreamDetailText(sideText, 220) ?? sideText,
+          status: "completed",
+          detail: {
+            kind: "thinking",
+            preview: sideText,
+            truncated: false,
+          },
+        });
+      }
       input.push({
         ...base,
         eventId: `${input.runId}:event:${input.entry.sequence}:agent.note.completed`,
@@ -3009,7 +3173,10 @@ function safeReasoningOutputForPanel(value: unknown): ModelReasoningOutputProjec
   if (output === undefined) {
     return undefined;
   }
-  if (output.source !== "openai_responses_reasoning_summary") {
+  if (
+    output.source !== "openai_responses_reasoning_summary" &&
+    output.source !== "openai_chat_reasoning_content"
+  ) {
     return undefined;
   }
   return output;

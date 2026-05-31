@@ -8,6 +8,13 @@ import { TopBar } from "./components/topbar";
 import { SettingsDialog, SkillsPage, ToolsPage, type SettingsGroup } from "./components/workspace-pages";
 import { modelProviderDisplayName, resolveModelProviderIdentity } from "./model-provider-logos";
 import {
+  appendLiveRunEvent,
+  appendLiveRunEvents,
+  emptyLiveRun,
+  isLiveAppendOnlyEvent,
+  type LiveRunBuffer,
+} from "../../panel-ui-live-run-buffer";
+import {
   mergeEvents,
   openBasicRunStream,
   safeBasicEvents,
@@ -43,9 +50,19 @@ type AppState = {
   readonly workSession?: DesktopWorkSession;
   readonly transcriptNodes: readonly TranscriptNode[];
   readonly events: readonly RunEvent[];
+  readonly live?: LiveRunBuffer;
   readonly detail?: DesktopRunDetail;
   readonly busy: boolean;
   readonly error?: string;
+};
+
+type CurrentRunProjection = {
+  readonly run?: BasicAgentRun;
+  readonly workSession?: DesktopWorkSession;
+  readonly detail?: DesktopRunDetail;
+  readonly live?: LiveRunBuffer;
+  readonly events: readonly RunEvent[];
+  readonly transcriptNodes: readonly TranscriptNode[];
 };
 
 type ModelForm = {
@@ -111,6 +128,8 @@ export function App(): React.ReactElement {
   const mountedRef = useRef(true);
   const pollTimer = useRef<number | undefined>(undefined);
   const streamRef = useRef<EventSource | undefined>(undefined);
+  const activeRunIdRef = useRef<string | undefined>(undefined);
+  const viewEpochRef = useRef(0);
   const lastActiveProfileIdRef = useRef<string | undefined>(undefined);
   const modelSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
   const currentRunId = app.run?.runId;
@@ -160,13 +179,14 @@ export function App(): React.ReactElement {
     }
   }, [app.config?.modelCatalogs]);
 
-  const pendingConfirmation = app.workSession?.pendingConfirmation ?? app.detail?.canvas?.agent?.pendingConfirmation;
-  const pendingConversationCount = app.conversations.filter(isConversationWaitingForUser).length;
-  const pendingCount = Math.max(pendingConversationCount, pendingConfirmation === undefined ? 0 : 1);
   const modelOptions = useMemo(() => modelOptionsFromConfig(app.config, modelCatalogs), [app.config, modelCatalogs]);
   const selectedModelId = useMemo(() => selectedModelOptionId(app.config, modelOptions), [app.config, modelOptions]);
   const selectedModelSupportsReasoningEffort = app.config?.capabilities?.modelCapabilities?.supportsReasoningEffort === true;
   const chatScreen = screen === "chat-empty" && (app.conversation !== undefined || app.run !== undefined) ? "chat-active" : screen;
+  const currentRun = projectCurrentRun(app);
+  const pendingConfirmation = currentRun.workSession?.pendingConfirmation ?? currentRun.detail?.canvas?.agent?.pendingConfirmation;
+  const pendingConversationCount = app.conversations.filter(isConversationWaitingForUser).length;
+  const pendingCount = Math.max(pendingConversationCount, pendingConfirmation === undefined ? 0 : 1);
 
   useEffect(() => {
     if (!selectedModelSupportsReasoningEffort && composerReasoningEffort !== "") {
@@ -191,16 +211,20 @@ export function App(): React.ReactElement {
   }
 
   async function loadConversation(conversationId: string): Promise<void> {
+    const epoch = viewEpochRef.current + 1;
+    viewEpochRef.current = epoch;
     stopPolling(pollTimer);
     stopStream(streamRef);
     setScreen("chat-active");
     setAttachments([]);
     const response = await getJson<{ readonly conversation: Conversation }>(`/api/conversations/${encodeURIComponent(conversationId)}`);
     const latestRunId = response.conversation.activeRunId ?? response.conversation.latestRunId;
+    activeRunIdRef.current = latestRunId;
     const detail = latestRunId === undefined ? undefined : await safeDesktopDetail(latestRunId);
     const run = latestRunId === undefined ? undefined : await safeBasicRun(latestRunId);
     const replay = latestRunId === undefined ? undefined : await safeBasicEvents(latestRunId, 0);
     const workSession = latestRunId === undefined ? undefined : await safeWorkSession(latestRunId);
+    if (!mountedRef.current || viewEpochRef.current !== epoch) return;
     setApp((previous) => ({
       ...previous,
       conversation: response.conversation,
@@ -209,6 +233,7 @@ export function App(): React.ReactElement {
       detail,
       transcriptNodes: transcriptNodesFrom(workSession, detail),
       events: replay?.events ?? [],
+      live: undefined,
       error: undefined,
     }));
     if (run !== undefined && shouldKeepRefreshing(run.status)) {
@@ -219,15 +244,20 @@ export function App(): React.ReactElement {
   async function startTask(explicitGoal?: string): Promise<void> {
     const trimmed = (explicitGoal ?? goal).trim();
     if (trimmed.length === 0 || app.busy) return;
+    const epoch = viewEpochRef.current + 1;
+    viewEpochRef.current = epoch;
     stopPolling(pollTimer);
     stopStream(streamRef);
+    activeRunIdRef.current = undefined;
     setScreen("chat-active");
     setApp((previous) => ({
       ...previous,
       busy: true,
       error: undefined,
+      run: undefined,
       events: [],
       transcriptNodes: [],
+      live: undefined,
       detail: undefined,
       workSession: undefined,
     }));
@@ -250,6 +280,8 @@ export function App(): React.ReactElement {
       setAttachments([]);
       const run = await safeBasicRun(response.run.runId);
       const workSession = await safeWorkSession(response.run.runId);
+      if (!mountedRef.current || viewEpochRef.current !== epoch) return;
+      activeRunIdRef.current = response.run.runId;
       setApp((previous) => ({
         ...previous,
         busy: false,
@@ -258,11 +290,13 @@ export function App(): React.ReactElement {
         workSession,
         transcriptNodes: transcriptNodesFrom(workSession, undefined),
         events: [],
+        live: emptyLiveRun(response.run.runId),
         detail: undefined,
       }));
       startLiveUpdates(response.run.runId, 0);
       void refreshConversations();
     } catch (error) {
+      if (!mountedRef.current || viewEpochRef.current !== epoch) return;
       setApp((previous) => ({
         ...previous,
         busy: false,
@@ -281,6 +315,7 @@ export function App(): React.ReactElement {
     stopStream(streamRef);
     let lastSequence = cursor;
     const tick = async (): Promise<void> => {
+      if (activeRunIdRef.current !== runId) return;
       try {
         const [runResponse, eventsResponse, workSessionResponse] = await Promise.all([
           getJson<{ readonly run: BasicAgentRun }>(`/api/basic-agent/runs/${encodeURIComponent(runId)}`),
@@ -291,12 +326,16 @@ export function App(): React.ReactElement {
           safeWorkSession(runId),
         ]);
         lastSequence = eventsResponse.cursor.lastSequence;
-        if (mountedRef.current) {
+        if (mountedRef.current && activeRunIdRef.current === runId) {
           setApp((previous) => ({
             ...previous,
             run: runResponse.run,
-            workSession: workSessionResponse ?? previous.workSession,
-            transcriptNodes: transcriptNodesFrom(workSessionResponse ?? previous.workSession, previous.detail),
+            workSession: nextWorkSessionForRun(runId, workSessionResponse, previous.workSession),
+            live: appendLiveRunEvents(runId, previous.live, eventsResponse.events),
+            transcriptNodes: transcriptNodesFrom(
+              nextWorkSessionForRun(runId, workSessionResponse, previous.workSession),
+              detailForRun(runId, previous.detail)
+            ),
             events: mergeEvents(previous.events, eventsResponse.events),
           }));
         }
@@ -305,12 +344,13 @@ export function App(): React.ReactElement {
             safeDesktopDetail(runId),
             runResponse.run.conversationId === undefined ? undefined : safeConversation(runResponse.run.conversationId),
           ]);
-          mountedRef.current && setApp((previous) => ({
+          mountedRef.current && activeRunIdRef.current === runId && setApp((previous) => ({
             ...previous,
             detail,
             conversation: conversation ?? previous.conversation,
-            workSession: workSessionResponse ?? previous.workSession,
-            transcriptNodes: transcriptNodesFrom(workSessionResponse ?? previous.workSession, detail),
+            live: undefined,
+            workSession: nextWorkSessionForRun(runId, workSessionResponse, previous.workSession),
+            transcriptNodes: transcriptNodesFrom(nextWorkSessionForRun(runId, workSessionResponse, previous.workSession), detail),
           }));
           if (!shouldKeepRefreshing(runResponse.run.status)) {
             stopPolling(pollTimer);
@@ -318,7 +358,7 @@ export function App(): React.ReactElement {
           }
         }
       } catch (error) {
-        mountedRef.current && setApp((previous) => ({
+        mountedRef.current && activeRunIdRef.current === runId && setApp((previous) => ({
           ...previous,
           error: `系统错误：${error instanceof Error ? error.message : "刷新运行状态失败。"}`,
         }));
@@ -330,19 +370,35 @@ export function App(): React.ReactElement {
 
   function startLiveUpdates(runId: string, cursor: number): void {
     stopLiveUpdates(pollTimer, streamRef);
+    activeRunIdRef.current = runId;
     let lastSequence = cursor;
     const refreshAfterEvent = async (event: RunEvent): Promise<void> => {
+      if (activeRunIdRef.current !== runId) return;
       lastSequence = Math.max(lastSequence, event.sequence);
+      if (isLiveAppendOnlyEvent(event)) {
+        if (mountedRef.current && activeRunIdRef.current === runId) {
+          setApp((previous) => ({
+            ...previous,
+            live: appendLiveRunEvent(runId, previous.live, event),
+            events: mergeEvents(previous.events, [event]),
+          }));
+        }
+        return;
+      }
       const [run, workSession] = await Promise.all([
         safeBasicRun(runId),
         safeWorkSession(runId),
       ]);
-      if (mountedRef.current) {
+      if (mountedRef.current && activeRunIdRef.current === runId) {
         setApp((previous) => ({
           ...previous,
           run: run ?? previous.run,
-          workSession: workSession ?? previous.workSession,
-          transcriptNodes: transcriptNodesFrom(workSession ?? previous.workSession, previous.detail),
+          live: appendLiveRunEvent(runId, previous.live, event),
+          workSession: nextWorkSessionForRun(runId, workSession, previous.workSession),
+          transcriptNodes: transcriptNodesFrom(
+            nextWorkSessionForRun(runId, workSession, previous.workSession),
+            detailForRun(runId, previous.detail)
+          ),
           events: mergeEvents(previous.events, [event]),
         }));
       }
@@ -352,12 +408,13 @@ export function App(): React.ReactElement {
           safeDesktopDetail(runId),
           run.conversationId === undefined ? undefined : safeConversation(run.conversationId),
         ]);
-        mountedRef.current && setApp((previous) => ({
+        mountedRef.current && activeRunIdRef.current === runId && setApp((previous) => ({
           ...previous,
           detail,
           conversation: conversation ?? previous.conversation,
-          workSession: workSession ?? previous.workSession,
-          transcriptNodes: transcriptNodesFrom(workSession ?? previous.workSession, detail),
+          live: undefined,
+          workSession: nextWorkSessionForRun(runId, workSession, previous.workSession),
+          transcriptNodes: transcriptNodesFrom(nextWorkSessionForRun(runId, workSession, previous.workSession), detail),
         }));
         void refreshConversations();
       }
@@ -385,17 +442,20 @@ export function App(): React.ReactElement {
     const response = await postJson<{ readonly run: BasicAgentRun }>(`/api/basic-agent/runs/${encodeURIComponent(currentRunId)}/cancel`, {});
     const workSession = await safeWorkSession(currentRunId);
     stopLiveUpdates(pollTimer, streamRef);
+    activeRunIdRef.current = currentRunId;
     setApp((previous) => ({
       ...previous,
       run: response.run,
-      workSession: workSession ?? previous.workSession,
-      transcriptNodes: transcriptNodesFrom(workSession ?? previous.workSession, previous.detail),
+      live: undefined,
+      workSession: nextWorkSessionForRun(currentRunId, workSession, previous.workSession),
+      transcriptNodes: transcriptNodesFrom(nextWorkSessionForRun(currentRunId, workSession, previous.workSession), detailForRun(currentRunId, previous.detail)),
     }));
     void refreshConversations();
   }
 
   async function decideConfirmation(decision: "approve_once" | "deny" | "guidance", guidance?: string): Promise<void> {
-    const confirmation = app.workSession?.pendingConfirmation ?? app.detail?.canvas?.agent?.pendingConfirmation;
+    const active = projectCurrentRun(app);
+    const confirmation = active.workSession?.pendingConfirmation ?? active.detail?.canvas?.agent?.pendingConfirmation;
     if (currentRunId === undefined || confirmation === undefined || confirmationBusy) return;
     if (decision === "approve_once" && confirmation.resumeAvailability === "lost_after_restart") {
       setApp((previous) => ({
@@ -425,6 +485,7 @@ export function App(): React.ReactElement {
         run: response.run,
         workSession,
         detail,
+        live: decision === "approve_once" ? emptyLiveRun(currentRunId) : previous.live,
         transcriptNodes: transcriptNodesFrom(workSession, detail),
         error: decision === "approve_once" ? "已提交确认，正在继续处理。" : undefined,
       }));
@@ -755,7 +816,9 @@ export function App(): React.ReactElement {
   }
 
   function resetChat(): void {
+    viewEpochRef.current += 1;
     stopLiveUpdates(pollTimer, streamRef);
+    activeRunIdRef.current = undefined;
     setScreen("chat-empty");
     setGoal("");
     setAttachments([]);
@@ -766,6 +829,7 @@ export function App(): React.ReactElement {
       workSession: undefined,
       transcriptNodes: [],
       events: [],
+      live: undefined,
       detail: undefined,
       error: undefined,
     }));
@@ -842,12 +906,13 @@ export function App(): React.ReactElement {
             <ChatActive
               {...inputProps}
               conversation={app.conversation}
-              run={app.run}
-              workSession={app.workSession}
-              transcriptNodes={app.transcriptNodes}
-              detail={app.detail}
+              run={currentRun.run}
+              workSession={currentRun.workSession}
+              transcriptNodes={currentRun.transcriptNodes}
+              detail={currentRun.detail}
+              live={currentRun.live}
               error={app.error}
-              pendingConfirmation={pendingConfirmation}
+              pendingConfirmation={currentRun.workSession?.pendingConfirmation ?? currentRun.detail?.canvas?.agent?.pendingConfirmation}
               onDecision={(decision, guidance) => void decideConfirmation(decision, guidance)}
               confirmationBusy={confirmationBusy}
             />
@@ -991,6 +1056,40 @@ function transcriptNodesFrom(
   detail: DesktopRunDetail | undefined
 ): readonly TranscriptNode[] {
   return workSession?.transcriptNodes ?? detail?.transcript?.transcriptNodes ?? [];
+}
+
+function nextWorkSessionForRun(
+  runId: string,
+  incoming: DesktopWorkSession | undefined,
+  previous: DesktopWorkSession | undefined
+): DesktopWorkSession | undefined {
+  if (incoming?.run.runId === runId) return incoming;
+  if (previous?.run.runId === runId) return previous;
+  return undefined;
+}
+
+function detailForRun(runId: string, detail: DesktopRunDetail | undefined): DesktopRunDetail | undefined {
+  return detail?.runId === runId ? detail : undefined;
+}
+
+function projectCurrentRun(app: AppState): CurrentRunProjection {
+  const runId = app.run?.runId;
+  if (runId === undefined) {
+    return { events: [], transcriptNodes: [] };
+  }
+  const workSession = app.workSession?.run.runId === runId ? app.workSession : undefined;
+  const detail = app.detail?.runId === runId ? app.detail : undefined;
+  const live = app.live?.runId === runId ? app.live : undefined;
+  const events = app.events.filter((event) => event.runId === runId);
+  const transcriptNodes = transcriptNodesFrom(workSession, detail).filter((node) => node.runId === runId);
+  return {
+    run: app.run,
+    workSession,
+    detail,
+    live,
+    events,
+    transcriptNodes,
+  };
 }
 
 function visibleConfigLabel(config: NonNullable<ConfigResponse["config"]>): string {

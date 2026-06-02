@@ -1,6 +1,3 @@
-import { mkdir, stat } from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
 import {
   FileSystemLocalDevSecretStore,
   FileSystemNormalSettingsStore,
@@ -50,6 +47,16 @@ import {
   sanitizeMcpArgs,
   shouldRewriteLocalSettingsFile,
 } from "./config-center/settings-schema.js";
+import {
+  toSanitizedInformationAccessConfig,
+  toSanitizedModelProfile,
+  toSanitizedModelProviderConfig,
+  toSanitizedWebSearchConfig,
+  toSanitizedWorkspaceConfig,
+} from "./config-center/projections.js";
+import { normalizeWorkspaceDirectory } from "./config-center/workspace-settings.js";
+
+export { WorkspaceDirectoryValidationError } from "./config-center/workspace-settings.js";
 
 export type ConfigCenterOptions = {
   readonly settingsStore: NormalSettingsStore;
@@ -63,13 +70,6 @@ export type CreateLocalConfigCenterOptions = {
 
 export type UndergroundAiConfigEnvironment = Readonly<Record<string, string | undefined>>;
 
-export class WorkspaceDirectoryValidationError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "WorkspaceDirectoryValidationError";
-  }
-}
-
 export class ConfigCenterValidationError extends Error {
   constructor(message: string) {
     super(message);
@@ -82,7 +82,7 @@ export class ConfigCenter {
 
   async getModelProviderConfig(): Promise<SanitizedModelProviderConfig> {
     const settings = await this.readOrCreateSettings();
-    return this.toSanitizedConfig(settings);
+    return toSanitizedModelProviderConfig({ settings, secretStore: this.options.secretStore });
   }
 
   async getModelProviderApiKey(profileId?: string): Promise<string | undefined> {
@@ -96,7 +96,9 @@ export class ConfigCenter {
 
   async listModelProviderProfiles(): Promise<readonly SanitizedModelProviderConfig[]> {
     const settings = await this.readOrCreateSettings();
-    return Promise.all(settings.modelProfiles.map((profile) => this.toSanitizedModelProfile(profile)));
+    return Promise.all(settings.modelProfiles.map((profile) =>
+      toSanitizedModelProfile({ profile, secretStore: this.options.secretStore })
+    ));
   }
 
   async listModelProviderModelCatalogs(): Promise<readonly ModelProviderModelCatalog[]> {
@@ -165,9 +167,10 @@ export class ConfigCenter {
       await this.options.secretStore.writeSecret(profile.secretRef, apiKey);
     }
     await this.options.settingsStore.writeSettings(next);
-    return this.toSanitizedModelProfile(
-      next.modelProfiles.find((candidate) => candidate.profileId === profileId) ?? profile
-    );
+    return toSanitizedModelProfile({
+      profile: next.modelProfiles.find((candidate) => candidate.profileId === profileId) ?? profile,
+      secretStore: this.options.secretStore,
+    });
   }
 
   async activateModelProviderProfile(profileId: string): Promise<SanitizedModelProviderConfig> {
@@ -189,7 +192,7 @@ export class ConfigCenter {
       updatedAt: now,
     });
     await this.options.settingsStore.writeSettings(next);
-    return this.toSanitizedModelProfile(next.modelProvider);
+    return toSanitizedModelProfile({ profile: next.modelProvider, secretStore: this.options.secretStore });
   }
 
   async deleteModelProviderProfile(profileId: string): Promise<readonly SanitizedModelProviderConfig[]> {
@@ -254,9 +257,10 @@ export class ConfigCenter {
     }
 
     await this.options.settingsStore.writeSettings(next);
-    return this.toSanitizedModelProfile(
-      next.modelProfiles.find((profile) => profile.profileId === updatedProfile.profileId) ?? updatedProfile
-    );
+    return toSanitizedModelProfile({
+      profile: next.modelProfiles.find((profile) => profile.profileId === updatedProfile.profileId) ?? updatedProfile,
+      secretStore: this.options.secretStore,
+    });
   }
 
   async listModelCapabilityOverrides(): Promise<readonly ModelCapabilityOverrideSettings[]> {
@@ -351,12 +355,12 @@ export class ConfigCenter {
 
   async getInformationAccessConfig(): Promise<SanitizedInformationAccessConfig> {
     const settings = await this.readOrCreateSettings();
-    return this.toSanitizedInformationAccessConfig(settings);
+    return toSanitizedInformationAccessConfig({ settings, secretStore: this.options.secretStore });
   }
 
   async getWebSearchConfig(): Promise<SanitizedWebSearchConfig> {
     const settings = await this.readOrCreateSettings();
-    return this.toSanitizedWebSearchConfig(settings);
+    return toSanitizedWebSearchConfig({ settings, secretStore: this.options.secretStore });
   }
 
   async updateInformationAccessConfig(
@@ -390,7 +394,10 @@ export class ConfigCenter {
       informationAccess: nextInformation,
       updatedAt: now,
     });
-    return this.toSanitizedInformationAccessConfig({ ...current, informationAccess: nextInformation, updatedAt: now });
+    return toSanitizedInformationAccessConfig({
+      settings: { ...current, informationAccess: nextInformation, updatedAt: now },
+      secretStore: this.options.secretStore,
+    });
   }
 
   async updateWebSearchConfig(input: UpdateWebSearchConfigInput): Promise<SanitizedWebSearchConfig> {
@@ -425,12 +432,15 @@ export class ConfigCenter {
       informationAccess: nextInformation,
       updatedAt: now,
     });
-    return this.toSanitizedWebSearchConfig({ ...current, informationAccess: nextInformation, updatedAt: now });
+    return toSanitizedWebSearchConfig({
+      settings: { ...current, informationAccess: nextInformation, updatedAt: now },
+      secretStore: this.options.secretStore,
+    });
   }
 
   async getWorkspaceConfig(): Promise<SanitizedWorkspaceConfig> {
     const settings = await this.readOrCreateSettings();
-    return this.toSanitizedWorkspaceConfig(settings);
+    return toSanitizedWorkspaceConfig(settings);
   }
 
   async updateWorkspaceConfig(input: UpdateWorkspaceConfigInput): Promise<SanitizedWorkspaceConfig> {
@@ -444,7 +454,7 @@ export class ConfigCenter {
       updatedAt: now,
     };
     await this.options.settingsStore.writeSettings(next);
-    return this.toSanitizedWorkspaceConfig(next);
+    return toSanitizedWorkspaceConfig(next);
   }
 
   async createUndergroundAiEnvironment(input: {
@@ -483,78 +493,6 @@ export class ConfigCenter {
     const created = createDefaultLocalSettings();
     await this.options.settingsStore.writeSettings(created);
     return created;
-  }
-
-  private async toSanitizedConfig(settings: AgentArborLocalSettings): Promise<SanitizedModelProviderConfig> {
-    return this.toSanitizedModelProfile(settings.modelProvider);
-  }
-
-  private async toSanitizedModelProfile(profile: ModelProviderProfileSettings): Promise<SanitizedModelProviderConfig> {
-    const secret = await this.options.secretStore.getMetadata(profile.secretRef);
-    return {
-      profileId: profile.profileId,
-      label: profile.label,
-      providerKind: profile.providerKind,
-      protocolKind: profile.protocolKind,
-      baseUrl: normalizeBaseUrl(profile.baseUrl) ?? DEFAULT_MODEL_PROVIDER_BASE_URL,
-      model: profile.model,
-      openAI: profile.openAI,
-      defaultAiMode: profile.defaultAiMode,
-      secretRef: profile.secretRef,
-      enabled: profile.enabled,
-      secretConfigured: secret.configured,
-      secretUpdatedAt: secret.updatedAt,
-      updatedAt: profile.updatedAt,
-    };
-  }
-
-  private async toSanitizedInformationAccessConfig(
-    settings: AgentArborLocalSettings
-  ): Promise<SanitizedInformationAccessConfig> {
-    const informationAccess = normalizeInformationAccessSettings(settings.informationAccess, settings.updatedAt);
-    const webSearch = await this.toSanitizedWebSearchConfig(settings);
-    return {
-      sourcePreference: [...informationAccess.sourcePreference],
-      web: {
-        provider: webSearch.provider,
-        providerKind: informationAccess.tavily.providerKind,
-        maxResults: webSearch.maxResults,
-        secretRef: webSearch.secretRef,
-        secretConfigured: webSearch.secretConfigured,
-        secretUpdatedAt: webSearch.secretUpdatedAt,
-        status: webSearch.status,
-        updatedAt: webSearch.updatedAt,
-      },
-      stubs: {
-        docs: "stub",
-        packages: "stub",
-        github: "stub",
-        run_memory: "readonly_stub",
-      },
-    };
-  }
-
-
-  private async toSanitizedWebSearchConfig(settings: AgentArborLocalSettings): Promise<SanitizedWebSearchConfig> {
-    const informationAccess = normalizeInformationAccessSettings(settings.informationAccess, settings.updatedAt);
-    const secret = await this.options.secretStore.getMetadata(informationAccess.tavily.secretRef);
-    const provider = informationAccess.webSearch.provider;
-    return {
-      provider,
-      maxResults: informationAccess.tavily.maxResults,
-      secretRef: informationAccess.tavily.secretRef,
-      secretConfigured: secret.configured,
-      secretUpdatedAt: secret.updatedAt,
-      status: provider === "none" ? "disabled" : secret.configured ? "ready" : "no-provider",
-      updatedAt: informationAccess.webSearch.updatedAt,
-    };
-  }
-
-  private toSanitizedWorkspaceConfig(settings: AgentArborLocalSettings): SanitizedWorkspaceConfig {
-    return {
-      workspaceDirectory: normalizeConfiguredWorkspaceDirectory(settings.workspaceDirectory),
-      updatedAt: settings.updatedAt,
-    };
   }
 }
 
@@ -616,40 +554,6 @@ function clearProfileModelOutsideCatalog(
         : activeProfile,
     updatedAt: now,
   };
-}
-
-async function normalizeWorkspaceDirectory(value: string): Promise<string> {
-  const normalized = path.resolve(normalizeRequiredString(value, "workspaceDirectory"));
-  await ensureWorkspaceReady(normalized);
-  return normalized;
-}
-
-async function ensureWorkspaceReady(directory: string): Promise<void> {
-  try {
-    await mkdir(directory, { recursive: true });
-  } catch {
-    throw new WorkspaceDirectoryValidationError("Workspace directory could not be created.");
-  }
-  const info = await stat(directory).catch(() => undefined);
-  if (info === undefined || !info.isDirectory()) {
-    throw new WorkspaceDirectoryValidationError("Workspace directory must be a directory.");
-  }
-}
-
-function normalizeConfiguredWorkspaceDirectory(value: string | undefined): string {
-  return path.resolve(normalizeOptionalString(value) ?? resolveDefaultWorkspaceDirectory());
-}
-
-function resolveDefaultWorkspaceDirectory(): string {
-  return path.join(os.homedir(), ".agentarbor", "workspace");
-}
-
-function normalizeRequiredString(value: string | undefined, fieldName: string): string {
-  const normalized = normalizeOptionalString(value);
-  if (normalized === undefined) {
-    throw new WorkspaceDirectoryValidationError(`${fieldName} must be a non-empty string.`);
-  }
-  return normalized;
 }
 
 function firstNonBlank(...values: readonly (string | undefined)[]): string | undefined {

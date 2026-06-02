@@ -1,7 +1,10 @@
 import type { ArtifactRef } from "../common.js";
 import type { ConstraintRef } from "../constraints.js";
 import type { ObservationRef } from "../observation/contracts.js";
-import type { ToolCallRequest, ToolDefinition } from "../tools/index.js";
+import type { ToolCallRequest, ToolDefinition } from "../tools/contracts.js";
+export type { ModelOutputKind } from "./model-output-contracts.js";
+import type { ModelOutputKind } from "./model-output-contracts.js";
+export type { ModelCallRef } from "./model-call-ref.js";
 
 export const MODEL_PROTOCOL_KINDS = [
   "openai_compatible_chat_completions",
@@ -35,8 +38,6 @@ export type ModelPurpose =
   | "work_session_child_material"
   | "work_session_synthesis"
   | "work_session_direct_answer";
-
-export type ModelOutputKind = "candidate" | "draft" | "explanation" | "evidence_suggestion";
 
 export type ModelMessage = {
   readonly role: "system" | "user" | "assistant" | "tool";
@@ -205,16 +206,6 @@ export type ModelResponse = {
   readonly validation: ModelOutputValidationResult;
   readonly failure?: ModelFailure;
   readonly completedAt: string;
-};
-
-export type ModelCallRef = {
-  readonly requestId: string;
-  readonly responseId?: string;
-  readonly providerId?: string;
-  readonly model?: string;
-  readonly outputKind: ModelOutputKind;
-  readonly eventRefs: readonly string[];
-  readonly validationStatus: "pending" | "passed" | "failed";
 };
 
 export type ModelProvider = {

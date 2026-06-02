@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { ModelRequest } from "../../domain/intelligence/index.js";
 import { OpenAIResponsesProvider } from "./openai-responses-provider.js";
-import type { FetchLike } from "./openai-compatible-chat-completions-provider.js";
+import type { FetchLike } from "./openai-fetch-bridge.js";
 
 test("OpenAI Responses adapter maps messages to input items and returns text output", async () => {
   const calls: { url: string; body: unknown; authorization?: string }[] = [];

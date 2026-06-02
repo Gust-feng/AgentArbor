@@ -3,7 +3,7 @@ import type {
   ToolOperationType,
   ToolRiskLevel,
   ToolVisibleResultPolicy,
-} from "../tools/index.js";
+} from "../tools/contracts.js";
 
 export type ConfiguredUndergroundAiMode = "none" | "fake" | "openai-compatible" | "openai-responses";
 

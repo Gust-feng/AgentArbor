@@ -1,0 +1,72 @@
+import type {
+  ConfiguredModelProviderKind,
+  ConfiguredModelProtocolKind,
+  ConfiguredUndergroundAiMode,
+} from "../../domain/config/index.js";
+import { ConfigSchemaValidationError, optionalString } from "./settings-utils.js";
+
+export const DEFAULT_MODEL_PROVIDER_BASE_URL = "https://api.openai.com/v1";
+export const MODEL_PROVIDER_SECRET_REF = "secret://local-dev/model-provider/default/api-key";
+export const DEFAULT_MODEL_PROFILE_ID = "default";
+
+export function normalizeOptionalString(value: string | undefined): string | undefined {
+  return optionalString(value);
+}
+
+export function normalizeBaseUrl(value: string | undefined): string | undefined {
+  const normalized = normalizeOptionalString(value);
+  if (normalized === undefined) {
+    return undefined;
+  }
+  return normalized.replace(/\/+$/, "");
+}
+
+export function normalizeAiMode(value: ConfiguredUndergroundAiMode | undefined): ConfiguredUndergroundAiMode | undefined {
+  return value === "none" || value === "fake" || value === "openai-compatible" || value === "openai-responses" ? value : undefined;
+}
+
+export function normalizeModelProviderKind(value: ConfiguredModelProviderKind | undefined): ConfiguredModelProviderKind | undefined {
+  return value === "openai_compatible" || value === "anthropic" || value === "gemini" || value === "ollama" || value === "local"
+    ? value
+    : undefined;
+}
+
+export function normalizeModelProtocolKind(
+  value: ConfiguredModelProtocolKind | undefined,
+  providerKind: ConfiguredModelProviderKind
+): ConfiguredModelProtocolKind | undefined {
+  if (
+    value === "openai_responses" ||
+    value === "openai_compatible_chat_completions" ||
+    value === "anthropic_messages" ||
+    value === "gemini_generate_content" ||
+    value === "ollama_generate"
+  ) {
+    return value;
+  }
+  return defaultProtocolForProviderKind(providerKind);
+}
+
+export function defaultProtocolForProviderKind(
+  providerKind: ConfiguredModelProviderKind
+): ConfiguredModelProtocolKind {
+  if (providerKind === "anthropic") return "anthropic_messages";
+  if (providerKind === "gemini") return "gemini_generate_content";
+  if (providerKind === "ollama") return "ollama_generate";
+  return "openai_compatible_chat_completions";
+}
+
+export function normalizeProfileId(value: string): string {
+  const normalized = value.toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80);
+  if (normalized.length === 0) {
+    throw new ConfigSchemaValidationError("Profile id must contain letters, numbers, underscore, or dash.");
+  }
+  return normalized;
+}
+
+export function normalizePositiveInteger(value: number | undefined): number | undefined {
+  if (value === undefined || !Number.isFinite(value)) {
+    return undefined;
+  }
+  return Math.max(1, Math.floor(value));
+}

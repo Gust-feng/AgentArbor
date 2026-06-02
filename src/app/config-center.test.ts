@@ -7,6 +7,107 @@ import type { ModelCapabilities } from "../domain/config/index.js";
 import { FileSystemLocalDevSecretStore, FileSystemNormalSettingsStore, resolveAgentArborConfigDirectory } from "../adapters/config/index.js";
 import { ConfigCenter, ConfigCenterValidationError } from "./config-center.js";
 
+test("config settings schema keeps OpenAI request settings split", async () => {
+  const [settingsSchema, openAIRequestSettings] = await Promise.all([
+    fs.readFile(path.join(process.cwd(), "src", "app", "config-center", "settings-schema.ts"), "utf8"),
+    fs.readFile(path.join(process.cwd(), "src", "app", "config-center", "openai-request-settings.ts"), "utf8"),
+  ]);
+
+  assert.equal(settingsSchema.includes('from "./openai-request-settings.js"'), true);
+  assert.equal(settingsSchema.includes("export function normalizeOpenAIModelRequestSettings"), false);
+  assert.equal(settingsSchema.includes("function parseOpenAIModelRequestSettings"), false);
+  assert.equal(settingsSchema.includes("function normalizeOpenAIReasoningEffort"), false);
+  assert.equal(settingsSchema.includes("function parseOpenAIReasoningEffort"), false);
+  assert.equal(openAIRequestSettings.includes("export function normalizeOpenAIModelRequestSettings"), true);
+  assert.equal(openAIRequestSettings.includes("export function parseOpenAIModelRequestSettings"), true);
+  assert.equal(openAIRequestSettings.includes("function normalizeOpenAIReasoningEffort"), true);
+  assert.equal(openAIRequestSettings.includes("function parseOpenAIReasoningEffort"), true);
+});
+
+test("config settings schema keeps model provider settings split", async () => {
+  const [settingsSchema, modelProviderSettings, profileSettings, catalogSettings, capabilitySettings, commonSettings] = await Promise.all([
+    fs.readFile(path.join(process.cwd(), "src", "app", "config-center", "settings-schema.ts"), "utf8"),
+    fs.readFile(path.join(process.cwd(), "src", "app", "config-center", "model-provider-settings.ts"), "utf8"),
+    fs.readFile(path.join(process.cwd(), "src", "app", "config-center", "model-provider-profile-settings.ts"), "utf8"),
+    fs.readFile(path.join(process.cwd(), "src", "app", "config-center", "model-provider-catalog-settings.ts"), "utf8"),
+    fs.readFile(path.join(process.cwd(), "src", "app", "config-center", "model-provider-capability-settings.ts"), "utf8"),
+    fs.readFile(path.join(process.cwd(), "src", "app", "config-center", "model-provider-common.ts"), "utf8"),
+  ]);
+
+  assert.equal(settingsSchema.includes('from "./model-provider-settings.js"'), true);
+  assert.equal(settingsSchema.includes("export function normalizeModelProfile"), false);
+  assert.equal(settingsSchema.includes("function parseModelProfile"), false);
+  assert.equal(settingsSchema.includes("function parseModelCatalogs"), false);
+  assert.equal(settingsSchema.includes("function parseModelCapabilityOverrides"), false);
+  assert.equal(settingsSchema.includes("function normalizeModelCatalogs"), false);
+  assert.equal(settingsSchema.includes("function normalizeModelCapabilityOverrides"), false);
+  assert.equal(settingsSchema.includes("function createDefaultProfile"), false);
+  assert.equal(settingsSchema.includes("function defaultProtocolForProfile"), false);
+  assert.equal(modelProviderSettings.trim().split(/\r?\n/).every((line) => line.startsWith("export * from ")), true);
+  assert.equal(profileSettings.includes("export function normalizeModelProfile"), true);
+  assert.equal(profileSettings.includes("export function parseModelProfile"), true);
+  assert.equal(catalogSettings.includes("export function parseModelCatalogs"), true);
+  assert.equal(catalogSettings.includes("export function normalizeModelCatalogs"), true);
+  assert.equal(capabilitySettings.includes("export function parseModelCapabilityOverrides"), true);
+  assert.equal(capabilitySettings.includes("export function normalizeModelCapabilityOverrides"), true);
+  assert.equal(commonSettings.includes("export const DEFAULT_MODEL_PROVIDER_BASE_URL"), true);
+  assert.equal(commonSettings.includes("export function normalizeProfileId"), true);
+});
+
+test("config settings schema keeps tool and MCP settings split", async () => {
+  const [settingsSchema, toolMcpSettings, settingsUtils] = await Promise.all([
+    fs.readFile(path.join(process.cwd(), "src", "app", "config-center", "settings-schema.ts"), "utf8"),
+    fs.readFile(path.join(process.cwd(), "src", "app", "config-center", "tool-mcp-settings.ts"), "utf8"),
+    fs.readFile(path.join(process.cwd(), "src", "app", "config-center", "settings-utils.ts"), "utf8"),
+  ]);
+
+  assert.equal(settingsSchema.includes('from "./tool-mcp-settings.js"'), true);
+  assert.equal(settingsSchema.includes('from "./settings-utils.js"'), true);
+  assert.equal(settingsSchema.includes("export function sanitizeMcpArgs"), false);
+  assert.equal(settingsSchema.includes("function parseToolStates"), false);
+  assert.equal(settingsSchema.includes("function parseMcpServers"), false);
+  assert.equal(settingsSchema.includes("function normalizeToolStates"), false);
+  assert.equal(settingsSchema.includes("function normalizeMcpServers"), false);
+  assert.equal(settingsSchema.includes("function requiredString"), false);
+  assert.equal(settingsSchema.includes("function asRecord"), false);
+  assert.equal(toolMcpSettings.includes("export function sanitizeMcpArgs"), true);
+  assert.equal(toolMcpSettings.includes("export function parseToolStates"), true);
+  assert.equal(toolMcpSettings.includes("export function parseMcpServers"), true);
+  assert.equal(toolMcpSettings.includes("export function normalizeToolStates"), true);
+  assert.equal(toolMcpSettings.includes("export function normalizeMcpServers"), true);
+  assert.equal(settingsUtils.includes("export function requiredString"), true);
+  assert.equal(settingsUtils.includes("export function asRecord"), true);
+});
+
+test("ConfigCenter keeps projections and workspace validation split from orchestration", async () => {
+  const [configCenter, projections, workspaceSettings] = await Promise.all([
+    fs.readFile(path.join(process.cwd(), "src", "app", "config-center.ts"), "utf8"),
+    fs.readFile(path.join(process.cwd(), "src", "app", "config-center", "projections.ts"), "utf8"),
+    fs.readFile(path.join(process.cwd(), "src", "app", "config-center", "workspace-settings.ts"), "utf8"),
+  ]);
+
+  assert.equal(configCenter.includes('from "./config-center/projections.js"'), true);
+  assert.equal(configCenter.includes('from "./config-center/workspace-settings.js"'), true);
+  assert.equal(configCenter.includes("private async toSanitizedConfig"), false);
+  assert.equal(configCenter.includes("private async toSanitizedModelProfile"), false);
+  assert.equal(configCenter.includes("private async toSanitizedInformationAccessConfig"), false);
+  assert.equal(configCenter.includes("private async toSanitizedWebSearchConfig"), false);
+  assert.equal(configCenter.includes("private toSanitizedWorkspaceConfig"), false);
+  assert.equal(configCenter.includes("async function normalizeWorkspaceDirectory"), false);
+  assert.equal(configCenter.includes("async function ensureWorkspaceReady"), false);
+  assert.equal(configCenter.includes("function normalizeConfiguredWorkspaceDirectory"), false);
+  assert.equal(configCenter.includes("function resolveDefaultWorkspaceDirectory"), false);
+  assert.equal(configCenter.includes("class WorkspaceDirectoryValidationError"), false);
+  assert.equal(projections.includes("export async function toSanitizedModelProviderConfig"), true);
+  assert.equal(projections.includes("export async function toSanitizedModelProfile"), true);
+  assert.equal(projections.includes("export async function toSanitizedInformationAccessConfig"), true);
+  assert.equal(projections.includes("export async function toSanitizedWebSearchConfig"), true);
+  assert.equal(projections.includes("export function toSanitizedWorkspaceConfig"), true);
+  assert.equal(workspaceSettings.includes("export class WorkspaceDirectoryValidationError"), true);
+  assert.equal(workspaceSettings.includes("export async function normalizeWorkspaceDirectory"), true);
+  assert.equal(workspaceSettings.includes("export function normalizeConfiguredWorkspaceDirectory"), true);
+});
+
 test("ConfigCenter keeps raw API key out of the normal settings store", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-config-center-"));
   const secret = "sk-local-dev-secret";

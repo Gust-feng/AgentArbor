@@ -1,0 +1,143 @@
+import type {
+  AgentArborLocalSettings,
+  ModelCapabilities,
+  ModelCapabilityOverrideSettings,
+} from "../../domain/config/index.js";
+import {
+  asRecord,
+  normalizeRequiredConfigString,
+  optionalString,
+} from "./settings-utils.js";
+import {
+  normalizeModelProviderKind,
+  normalizeOptionalString,
+  normalizePositiveInteger,
+} from "./model-provider-common.js";
+
+export function parseModelCapabilityOverrides(
+  value: unknown,
+  updatedAt: string
+): AgentArborLocalSettings["modelCapabilityOverrides"] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const overrides: ModelCapabilityOverrideSettings[] = [];
+  for (const item of value) {
+    const record = asRecord(item);
+    const model = optionalString(record.model);
+    if (model === undefined) {
+      continue;
+    }
+    const providerKind = optionalModelProviderKind(record.providerKind);
+    overrides.push({
+      ...(providerKind === undefined ? {} : { providerKind }),
+      model,
+      capabilities: parsePartialCapabilities(asRecord(record.capabilities)),
+      updatedAt: optionalString(record.updatedAt) ?? updatedAt,
+    });
+  }
+  return overrides;
+}
+
+export function normalizeModelCapabilityOverrides(
+  overrides: readonly ModelCapabilityOverrideSettings[],
+  now: string
+): readonly ModelCapabilityOverrideSettings[] {
+  return overrides.map((override) => ({
+    providerKind: normalizeModelProviderKind(override.providerKind),
+    model: normalizeRequiredConfigString(override.model, "model"),
+    capabilities: sanitizeCapabilityOverride(override.capabilities),
+    updatedAt: normalizeOptionalString(override.updatedAt) ?? now,
+  }));
+}
+
+export function sanitizeCapabilityOverride(capabilities: Partial<ModelCapabilities>): Partial<ModelCapabilities> {
+  return {
+    contextWindowTokens: normalizePositiveInteger(capabilities.contextWindowTokens),
+    maxOutputTokens: normalizePositiveInteger(capabilities.maxOutputTokens),
+    supportsToolCalling: booleanOrUndefined(capabilities.supportsToolCalling),
+    supportsParallelToolCalls: booleanOrUndefined(capabilities.supportsParallelToolCalls),
+    supportsStructuredOutputs: booleanOrUndefined(capabilities.supportsStructuredOutputs),
+    supportsStreaming: booleanOrUndefined(capabilities.supportsStreaming),
+    supportsVisionInput: booleanOrUndefined(capabilities.supportsVisionInput),
+    supportsReasoningEffort: booleanOrUndefined(capabilities.supportsReasoningEffort),
+    preferredApiStyle: normalizePreferredApiStyle(capabilities.preferredApiStyle),
+    stability: normalizeModelStability(capabilities.stability),
+    lastVerifiedAt: normalizeCapabilityVerifiedAt(capabilities.lastVerifiedAt),
+  };
+}
+
+function parsePartialCapabilities(record: Record<string, unknown>): NonNullable<AgentArborLocalSettings["modelCapabilityOverrides"]>[number]["capabilities"] {
+  return sanitizeCapabilityOverride({
+    contextWindowTokens: positiveIntegerFromUnknown(record.contextWindowTokens),
+    maxOutputTokens: positiveIntegerFromUnknown(record.maxOutputTokens),
+    supportsToolCalling: booleanFromUnknown(record.supportsToolCalling),
+    supportsParallelToolCalls: booleanFromUnknown(record.supportsParallelToolCalls),
+    supportsStructuredOutputs: booleanFromUnknown(record.supportsStructuredOutputs),
+    supportsStreaming: booleanFromUnknown(record.supportsStreaming),
+    supportsVisionInput: booleanFromUnknown(record.supportsVisionInput),
+    supportsReasoningEffort: booleanFromUnknown(record.supportsReasoningEffort),
+    preferredApiStyle: parsePreferredApiStyle(record.preferredApiStyle),
+    stability: parseModelStability(record.stability),
+    lastVerifiedAt: optionalString(record.lastVerifiedAt),
+  });
+}
+
+function normalizePreferredApiStyle(value: ModelCapabilities["preferredApiStyle"] | undefined): ModelCapabilities["preferredApiStyle"] | undefined {
+  return value === "chat_completions" ||
+    value === "responses" ||
+    value === "messages" ||
+    value === "gemini_generate_content" ||
+    value === "openai_compatible"
+    ? value
+    : undefined;
+}
+
+function normalizeModelStability(value: ModelCapabilities["stability"] | undefined): ModelCapabilities["stability"] | undefined {
+  return value === "stable" || value === "preview" || value === "deprecated" || value === "unknown"
+    ? value
+    : undefined;
+}
+
+function normalizeCapabilityVerifiedAt(value: string | undefined): string | undefined {
+  const normalized = normalizeOptionalString(value);
+  return normalized !== undefined && /^\d{4}-\d{2}-\d{2}(?:$|T)/.test(normalized) ? normalized : undefined;
+}
+
+function booleanOrUndefined(value: boolean | undefined): boolean | undefined {
+  return typeof value === "boolean" ? value : undefined;
+}
+
+function booleanFromUnknown(value: unknown): boolean | undefined {
+  return typeof value === "boolean" ? value : undefined;
+}
+
+function optionalModelProviderKind(value: unknown): AgentArborLocalSettings["modelProvider"]["providerKind"] | undefined {
+  return value === "openai_compatible" || value === "anthropic" || value === "gemini" || value === "ollama" || value === "local"
+    ? value
+    : undefined;
+}
+
+function parsePreferredApiStyle(
+  value: unknown
+): NonNullable<AgentArborLocalSettings["modelCapabilityOverrides"]>[number]["capabilities"]["preferredApiStyle"] {
+  return value === "chat_completions" ||
+    value === "responses" ||
+    value === "messages" ||
+    value === "gemini_generate_content" ||
+    value === "openai_compatible"
+    ? value
+    : undefined;
+}
+
+function parseModelStability(
+  value: unknown
+): NonNullable<AgentArborLocalSettings["modelCapabilityOverrides"]>[number]["capabilities"]["stability"] {
+  return value === "stable" || value === "preview" || value === "deprecated" || value === "unknown"
+    ? value
+    : undefined;
+}
+
+function positiveIntegerFromUnknown(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? Math.max(1, Math.floor(value)) : undefined;
+}

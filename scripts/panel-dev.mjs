@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { createServer } from "node:net";
 import path from "node:path";
@@ -33,43 +33,56 @@ const apiPort = await resolvePort({
 
 const tscBin = path.join(root, "node_modules", "typescript", "bin", "tsc");
 const viteBin = path.join(root, "node_modules", "vite", "bin", "vite.js");
+const electronBin = path.join(root, "node_modules", "electron", "cli.js");
 const packageJson = path.join(root, "package.json");
 const tsconfig = path.join(root, "tsconfig.json");
 const panelEntry = path.join(root, "dist", "app", "panel.js");
+const panelDesktopEntry = path.join(root, "dist", "app", "panel-desktop.js");
 
 assertLocalFile(packageJson, "package.json");
 assertLocalFile(tsconfig, "tsconfig.json");
 assertLocalTool(tscBin, "typescript");
 assertLocalTool(viteBin, "vite");
+if (args.desktop) {
+  assertLocalTool(electronBin, "electron");
+}
+
+runInitialNodeBuild();
 
 console.log("AgentArbor panel dev server");
 console.log(`  UI:  http://${args.host}:${frontendPort}/`);
 console.log(`  API: http://${args.host}:${apiPort}/`);
+if (args.desktop) {
+  console.log("  Desktop: Electron will load the Vite UI after dev servers are ready.");
+}
 
 const childEnv = {
   ...process.env,
   AGENTARBOR_PANEL_API_HOST: args.host,
   AGENTARBOR_PANEL_API_PORT: String(apiPort),
 };
-const children = [
-  spawnLabeled("tsc-watch", process.execPath, [
+const shouldStartPanelApi = !args.desktop || args.smoke;
+const children = [];
+pushChild(spawnLabeled("tsc-watch", process.execPath, [
     tscBin,
     "-p",
     tsconfig,
     "--watch",
     "--preserveWatchOutput",
     "false",
-  ]),
-  spawnLabeled("panel-api", process.execPath, [
-    "--watch",
-    panelEntry,
-    "--host",
-    args.host,
-    "--port",
-    String(apiPort),
-    ...configDirectoryArgs(args.configDirectory),
-  ], { env: childEnv }),
-  spawnLabeled("vite", process.execPath, [
+  ]));
+if (shouldStartPanelApi) {
+  pushChild(spawnLabeled("panel-api", process.execPath, [
+      "--watch",
+      panelEntry,
+      "--host",
+      args.host,
+      "--port",
+      String(apiPort),
+      ...configDirectoryArgs(args.configDirectory),
+    ], { env: childEnv }));
+}
+pushChild(spawnLabeled("vite", process.execPath, [
     viteBin,
     "--config",
     path.join(root, "vite.panel.config.ts"),
@@ -78,8 +91,7 @@ const children = [
     "--port",
     String(frontendPort),
     "--strictPort",
-  ], { env: childEnv }),
-];
+  ], { env: childEnv }));
 
 let stopping = false;
 for (const signal of ["SIGINT", "SIGTERM"]) {
@@ -88,34 +100,30 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
   });
 }
 
-for (const child of children) {
-  child.on("exit", (code, signal) => {
-    if (stopping) {
-      return;
-    }
-    const reason = signal === null ? `code ${code ?? 1}` : `signal ${signal}`;
-    console.error(`[dev] ${child.label} exited with ${reason}.`);
-    stopAll(code ?? 1);
-  });
-}
-
-if (args.smoke) {
+if (args.smoke || args.desktop) {
   try {
-    await Promise.all([
-      waitForHttp("panel-api", `http://${args.host}:${apiPort}/health`, (response, body) => {
-        return response.status === 200 && body.includes('"ok":true');
-      }),
-      waitForHttp("vite", `http://${args.host}:${frontendPort}/`, (response, body) => {
-        return response.status === 200 && body.includes('<div id="root">') && body.includes("/src/main.tsx");
-      }),
-      waitForHttp("vite-proxy", `http://${args.host}:${frontendPort}/health`, (response, body) => {
-        return response.status === 200 && body.includes('"ok":true');
-      }),
-    ]);
-    console.log("[dev] smoke check passed.");
-    stopAll(0);
+    await waitForDevServers(args.host, frontendPort, apiPort, {
+      waitForApi: shouldStartPanelApi,
+      waitForProxy: shouldStartPanelApi,
+    });
+    if (args.smoke) {
+      console.log("[dev] smoke check passed.");
+      stopAll(0);
+    } else {
+      pushChild(spawnLabeled("electron", process.execPath, [
+        electronBin,
+        panelDesktopEntry,
+        "--host",
+        args.host,
+        "--port",
+        String(apiPort),
+        "--dev-url",
+        `http://${args.host}:${frontendPort}/`,
+        ...configDirectoryArgs(args.configDirectory),
+      ], { env: childEnv }));
+    }
   } catch (error) {
-    console.error(`[dev] smoke check failed: ${errorMessage(error)}`);
+    console.error(`[dev] startup check failed: ${errorMessage(error)}`);
     stopAll(1);
   }
 }
@@ -132,6 +140,7 @@ function parseCliArgs(argv) {
         "api-port": { type: "string" },
         "backend-port": { type: "string" },
         "config-dir": { type: "string" },
+        "desktop": { type: "boolean", default: false },
         "smoke": { type: "boolean", default: false },
         "exact-port": { type: "boolean", default: false },
         "help": { type: "boolean", short: "h", default: false },
@@ -161,6 +170,7 @@ function parseCliArgs(argv) {
     portExplicit,
     apiPortExplicit,
     exactPort: values["exact-port"],
+    desktop: values.desktop,
     help: values.help,
     smoke: values.smoke,
   };
@@ -223,6 +233,32 @@ function assertLocalTool(filePath, packageName) {
   }
 }
 
+function runInitialNodeBuild() {
+  const result = spawnSync(process.execPath, [tscBin, "-p", tsconfig], {
+    cwd: root,
+    stdio: "inherit",
+  });
+  if (result.status !== 0) {
+    throw new Error(`Initial TypeScript build failed with code ${result.status ?? 1}.`);
+  }
+  assertLocalFile(panelEntry, "dist/app/panel.js");
+  if (args.desktop) {
+    assertLocalFile(panelDesktopEntry, "dist/app/panel-desktop.js");
+  }
+}
+
+function pushChild(child) {
+  children.push(child);
+  child.on("exit", (code, signal) => {
+    if (stopping) {
+      return;
+    }
+    const reason = signal === null ? `code ${code ?? 1}` : `signal ${signal}`;
+    console.error(`[dev] ${child.label} exited with ${reason}.`);
+    stopAll(code ?? 1);
+  });
+}
+
 function spawnLabeled(label, command, commandArgs, options = {}) {
   const child = spawn(command, commandArgs, {
     cwd: root,
@@ -281,6 +317,26 @@ async function waitForHttp(label, url, predicate) {
   throw new Error(`${label} at ${url} did not become ready: ${lastError}`);
 }
 
+async function waitForDevServers(host, frontendPort, apiPort, options = {}) {
+  const { waitForApi = true, waitForProxy = true } = options;
+  const checks = [
+    waitForHttp("vite", `http://${host}:${frontendPort}/`, (response, body) => {
+      return response.status === 200 && body.includes('<div id="root">') && body.includes("/src/main.tsx");
+    }),
+  ];
+  if (waitForApi) {
+    checks.push(waitForHttp("panel-api", `http://${host}:${apiPort}/health`, (response, body) => {
+      return response.status === 200 && body.includes('"ok":true');
+    }));
+  }
+  if (waitForProxy) {
+    checks.push(waitForHttp("vite-proxy", `http://${host}:${frontendPort}/health`, (response, body) => {
+      return response.status === 200 && body.includes('"ok":true');
+    }));
+  }
+  await Promise.all(checks);
+}
+
 function errorMessage(error) {
   return error instanceof Error ? error.message : String(error);
 }
@@ -299,11 +355,12 @@ function stopAll(exitCode) {
 }
 
 function printHelp() {
-  console.log(`Usage: pnpm panel:dev [-- --host 127.0.0.1 --port 4305 --api-port 4306 --config-dir <path> --smoke --exact-port]
+  console.log(`Usage: pnpm panel:dev [-- --host 127.0.0.1 --port 4305 --api-port 4306 --config-dir <path> --desktop --smoke --exact-port]
 
 Starts:
   - TypeScript compiler in watch mode
   - Panel API with node --watch
   - Vite panel UI with HMR and API proxy
+  - Electron desktop shell when --desktop is provided
 `);
 }

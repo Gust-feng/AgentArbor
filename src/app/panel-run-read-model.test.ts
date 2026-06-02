@@ -3,7 +3,9 @@ import test from "node:test";
 import type { ArborMessage, ArborMessageType } from "../domain/common.js";
 import type { ModelVisibleOutputProjection } from "../domain/intelligence/index.js";
 import type { EventLogEntry } from "../kernel/events/in-memory-event-log.js";
-import { createPanelRunStreamEvents, createPanelRunTranscript, createPanelTranscriptNodes } from "./panel-run-read-model.js";
+import { createPanelRunStreamEvents } from "./panel-run-stream-events.js";
+import { createPanelRunTranscript } from "./panel-run-transcript.js";
+import { createPanelTranscriptNodes } from "./panel-transcript-nodes.js";
 
 test("panel reasoning trace is matched by exact model output contract", () => {
   const transcript = createPanelRunTranscript({
@@ -95,6 +97,7 @@ test("panel transcript exposes delegation and parent synthesis as semantic strea
     true,
   );
   assert.equal(JSON.stringify(transcript).includes("raw provider response"), false);
+  assertOrdinaryStreamHasNoInternalTerms(transcript.events.map(ordinaryEventVisibleText).join("\n"));
 });
 
 test("panel transcript projects confirmation and user guidance as safe ordinary-agent events", () => {
@@ -287,15 +290,15 @@ test("panel transcript nodes merge contiguous reasoning deltas without moving to
   assert.deepEqual(
     nodes.map((node) => `${node.kind}:${node.eventType}:${node.phase}:${node.summary}`),
     [
-      "thinking:model.reasoning.completed:completed:files to understand",
+      "thinking:model.reasoning.completed:completed:filestounderstand",
       "tool:tool.requested:executing:workspace",
       "tool:tool.completed:completed:3 个文件",
-      "thinking:model.reasoning.completed:completed:then summarize",
+      "thinking:model.reasoning.completed:completed:thensummarize",
       "answer:final.result:completed:结果已生成。",
     ],
   );
-  assert.equal(nodes[0]?.text, "files to understand");
-  assert.equal(nodes[3]?.text, "then summarize");
+  assert.equal(nodes[0]?.text, "filestounderstand");
+  assert.equal(nodes[3]?.text, "thensummarize");
 });
 
 test("panel transcript nodes close merged reasoning on completion event", () => {
@@ -325,8 +328,8 @@ test("panel transcript nodes close merged reasoning on completion event", () => 
 
   assert.equal(thinking?.phase, "completed");
   assert.equal(thinking?.eventType, "model.reasoning.completed");
-  assert.equal(thinking?.text, "first step");
-  assert.equal(thinking?.summary, "first step");
+  assert.equal(thinking?.text, "firststep");
+  assert.equal(thinking?.summary, "firststep");
 });
 
 test("panel transcript nodes complete live reasoning after interleaved output", () => {
@@ -650,14 +653,14 @@ test("ordinary agent stream treats tool-call model text as status instead of vis
   const sideSummary = events.find((event) => event.type === "model.side.completed")?.summary ?? "";
   assert.equal(sideSummary.includes("我还没有主动完成"), true);
   const blockedSummary = events.find((event) => event.type === "run.blocked")?.summary ?? "";
-  assert.equal(blockedSummary.includes("异常保护中断"), true);
   assert.equal(blockedSummary.includes("任务没有完成"), true);
-  assert.equal(blockedSummary.includes("轮次"), false);
-  assert.equal(blockedSummary.includes("上限"), false);
+  assert.equal(blockedSummary.includes("轮次"), true);
+  assert.equal(blockedSummary.includes("上限"), true);
   assert.equal(serialized.includes("loop"), false);
   assert.equal(serialized.includes("provider"), false);
   assert.equal(serialized.includes("raw prompt"), false);
   assert.equal(serialized.includes("fuel"), false);
+  assertOrdinaryStreamHasNoInternalTerms(events.map(ordinaryEventVisibleText).join("\n"));
 });
 
 test("panel transcript preserves typed safe tool display without raw command output", () => {
@@ -932,4 +935,32 @@ function visibleOutput(contractId: string, decisionSummary: string): ModelVisibl
     ],
     truncated: false,
   };
+}
+
+function assertOrdinaryStreamHasNoInternalTerms(text: string): void {
+  for (const term of [
+    "Rootlet",
+    "rootlet",
+    "direction_handoff",
+    "Task Soil",
+    "Plan Package",
+    "Observation Panel",
+    "Agent Run Tree",
+    "Convergence Judge",
+    "地下认知运行时",
+    "父层",
+    "自治中枢",
+    "候选池",
+    "兼容运行",
+    "异常保护",
+  ]) {
+    assert.equal(text.includes(term), false, `ordinary stream should not include ${term}`);
+  }
+}
+
+function ordinaryEventVisibleText(event: { readonly agentLabel?: string; readonly summary?: string; readonly delta?: string; readonly detail?: unknown }): string {
+  const detail = typeof event.detail === "object" && event.detail !== null ? event.detail as { readonly action?: string; readonly preview?: string; readonly error?: string } : {};
+  return [event.agentLabel, event.summary, event.delta, detail.action, detail.preview, detail.error]
+    .filter((value): value is string => typeof value === "string")
+    .join("\n");
 }

@@ -54,6 +54,7 @@ export async function startPanelDesktopSession(
     configDirectory: args.configDirectory,
     workspaceDirectoryPicker: args.smoke ? undefined : dependencies.selectWorkspaceDirectory,
   });
+  const panelUrl = args.devUrl ?? server.url;
   let closed = false;
 
   const closeServer = async (): Promise<void> => {
@@ -86,7 +87,7 @@ export async function startPanelDesktopSession(
     await closeServer();
     dependencies.quit();
     return {
-      url: server.url,
+      url: panelUrl,
       configDirectory: server.configDirectory,
       close: closeServer,
     };
@@ -98,7 +99,7 @@ export async function startPanelDesktopSession(
     window.onReadyToShow(() => {
       showPanelDesktopWindow(window);
     });
-    await window.loadUrl(server.url);
+    await window.loadUrl(panelUrl);
     showPanelDesktopWindow(window);
   } catch (error) {
     await closeServer();
@@ -106,7 +107,7 @@ export async function startPanelDesktopSession(
   }
 
   return {
-    url: server.url,
+    url: panelUrl,
     configDirectory: server.configDirectory,
     close: closeServer,
   };

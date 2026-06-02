@@ -1,0 +1,465 @@
+import type { ArborMessageType } from "../domain/common.js";
+import type { ModelRunReasoningEffort } from "../domain/config/index.js";
+import {
+  createRunObservationEventViews,
+  type RunObservationEventView,
+} from "../domain/observation/index.js";
+import type { DesktopIntentDecision } from "./desktop-intent-router.js";
+import {
+  modelReasoningOutputOrUndefined,
+  safeReasoningOutputForPanel,
+} from "./panel-transcript-model-calls.js";
+import {
+  asRecord,
+  isString,
+  stringOrUndefined,
+  unique,
+} from "./panel-read-model-utils.js";
+import {
+  type PanelRunStreamEventDetail,
+  toolStreamDetail,
+  toolSummary,
+} from "./panel-stream-tool-projection.js";
+import type { PanelObservationReadModel } from "./panel-run-tracking-contracts.js";
+import type { PanelRunStatus } from "./panel-run-status.js";
+import type { EventLogEntry } from "../kernel/events/in-memory-event-log.js";
+import type { UndergroundDemoSummary } from "./underground-demo-summary.js";
+import type { PanelRunStreamEvent, PanelRunStreamEventType } from "./panel-run-stream-contracts.js";
+import {
+  agentFabricLabel,
+  agentFabricSummary,
+  agentNoteForEvent,
+  blockedRunSummary,
+  chunkText,
+  confirmationSummary,
+  contextCompactionPreview,
+  contextCompactionStreamSummary,
+  finalResultSummary,
+  finalSourceRefs,
+  modelCompletedSummary,
+  modelFailedSummary,
+  modelFailureStreamDetail,
+  modelRequestedSummary,
+  runFailedSummary,
+  runFailureStreamDetail,
+  runStartedSummary,
+  userGuidanceSummary,
+  visibleOutputSummary,
+  visibleOutputText,
+} from "./panel-run-stream-copy.js";
+
+export type { PanelRunStreamEvent, PanelRunStreamEventDetail, PanelRunStreamEventType } from "./panel-run-stream-contracts.js";
+
+export function createPanelRunStreamEvents(input: {
+  readonly runId: string;
+  readonly status: PanelRunStatus;
+  readonly eventEntries: readonly EventLogEntry[];
+  readonly summary?: UndergroundDemoSummary | { readonly ai: UndergroundDemoSummary["ai"] };
+  readonly observation?: PanelObservationReadModel;
+  readonly routeDecision?: DesktopIntentDecision;
+  readonly desktopMode?: "agent" | "deep";
+  readonly reasoningEffort?: ModelRunReasoningEffort;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly error?: { readonly code: string; readonly message: string };
+}): readonly PanelRunStreamEvent[] {
+  const events: PanelRunStreamEvent[] = [];
+  const observationViews = createRunObservationEventViews(input.eventEntries);
+  const viewBySequence = new Map(observationViews.map((view) => [view.sequence, view]));
+  const suppressOrdinaryChatProgress =
+    (input.desktopMode === "agent" || isOrdinaryChatRoute(input.routeDecision)) &&
+    !hasUserVisibleWorkActivity(input.eventEntries);
+  const push = (event: Omit<PanelRunStreamEvent, "sequence">): void => {
+    events.push({ ...event, sequence: events.length + 1 });
+  };
+
+  push({
+    eventId: `${input.runId}:run.started`,
+    runId: input.runId,
+    type: "run.started",
+    createdAt: input.createdAt,
+    agentLabel: "AgentArbor",
+    summary: runStartedSummary(input.routeDecision, input.desktopMode),
+    status: input.status === "pending" ? "pending" : "running",
+    sourceRefs: [],
+    modelCallRefs: [],
+    toolCallRefs: [],
+  });
+
+  if (input.status === "cancelled") {
+    push({
+      eventId: `${input.runId}:run.cancelled`,
+      runId: input.runId,
+      type: "run.cancelled",
+      createdAt: input.updatedAt,
+      agentLabel: "AgentArbor",
+      summary: "运行已取消。",
+      status: "cancelled",
+      sourceRefs: [],
+      modelCallRefs: [],
+      toolCallRefs: [],
+    });
+    return events;
+  }
+
+  if (input.status === "blocked") {
+    push({
+      eventId: `${input.runId}:run.blocked`,
+      runId: input.runId,
+      type: "run.blocked",
+      createdAt: input.updatedAt,
+      agentLabel: "AgentArbor",
+      summary: blockedRunSummary(input.error),
+      status: "blocked",
+      sourceRefs: [],
+      modelCallRefs: [],
+      toolCallRefs: [],
+    });
+  }
+
+  for (const entry of input.eventEntries) {
+    if (shouldSuppressOrdinaryGoalEvent(entry.type, input.desktopMode, input.routeDecision)) {
+      continue;
+    }
+    if (suppressOrdinaryChatProgress && shouldSuppressOrdinaryChatEvent(entry)) {
+      continue;
+    }
+    const view = viewBySequence.get(entry.sequence);
+    appendStreamEventsForEvent({
+      runId: input.runId,
+      entry,
+      view,
+      push,
+    });
+  }
+
+  if (input.status === "completed") {
+    const finalSummary = finalResultSummary(input);
+    push({
+      eventId: `${input.runId}:final.result`,
+      runId: input.runId,
+      type: "final.result",
+      createdAt: input.updatedAt,
+      agentLabel: "AgentArbor",
+      summary: finalSummary,
+      status: "completed",
+      sourceRefs: finalSourceRefs(input),
+      modelCallRefs: [],
+      toolCallRefs: [],
+    });
+  }
+
+  if (input.status === "failed") {
+    push({
+      eventId: `${input.runId}:run.failed`,
+      runId: input.runId,
+      type: "run.failed",
+      createdAt: input.updatedAt,
+      agentLabel: "AgentArbor",
+      summary: runFailedSummary(input.error),
+      status: "failed",
+      detail: runFailureStreamDetail(input.error),
+      sourceRefs: [],
+      modelCallRefs: [],
+      toolCallRefs: [],
+    });
+  }
+
+  return events;
+}
+
+function isOrdinaryChatRoute(routeDecision: DesktopIntentDecision | undefined): boolean {
+  return routeDecision !== undefined && routeDecision.route !== "task_work_session";
+}
+
+function shouldSuppressOrdinaryGoalEvent(
+  type: ArborMessageType,
+  desktopMode: "agent" | "deep" | undefined,
+  routeDecision: DesktopIntentDecision | undefined
+): boolean {
+  return type === "goal.received" && (desktopMode === "agent" || isOrdinaryChatRoute(routeDecision));
+}
+
+function hasUserVisibleWorkActivity(eventEntries: readonly EventLogEntry[]): boolean {
+  return eventEntries.some((entry) => {
+    if (entry.type === "tool.requested" || entry.type === "tool.completed" || entry.type === "tool.failed") {
+      return true;
+    }
+    if (entry.type === "user_approval.requested" || entry.type === "user_approval.received") {
+      return true;
+    }
+    return isAgentFabricStreamType(entry.type);
+  });
+}
+
+function shouldSuppressOrdinaryChatEvent(entry: EventLogEntry): boolean {
+  if (entry.type === "goal.received" || entry.type === "model.requested") {
+    return true;
+  }
+  if (entry.type !== "model.completed") {
+    return false;
+  }
+  const payload = asRecord(entry.message.payload);
+  return modelReasoningOutputOrUndefined(payload.reasoningOutput) === undefined;
+}
+
+function appendStreamEventsForEvent(input: {
+  readonly runId: string;
+  readonly entry: EventLogEntry;
+  readonly view?: RunObservationEventView;
+  readonly push: (event: Omit<PanelRunStreamEvent, "sequence">) => void;
+}): void {
+  const payload = asRecord(input.entry.message.payload);
+  const base = {
+    runId: input.runId,
+    createdAt: input.entry.recordedAt,
+    sourceRefs: sourceRefsForView(input.view),
+    modelCallRefs: modelCallRefsFor(input.entry, payload),
+    toolCallRefs: toolCallRefsFor(input.entry, payload),
+  };
+
+  if (input.entry.type === "model.requested") {
+    input.push({
+      ...base,
+      eventId: `${input.runId}:event:${input.entry.sequence}:agent.note.delta`,
+      type: "agent.note.delta",
+      agentLabel: "模型",
+      summary: modelRequestedSummary(payload),
+      status: "running",
+    });
+    return;
+  }
+
+  if (input.entry.type === "model.completed") {
+    const reasoningOutput = safeReasoningOutputForPanel(payload.reasoningOutput);
+    const reasoningChunks = chunkText(reasoningOutput?.content ?? "", 360);
+    reasoningChunks.forEach((chunk, index) => {
+      input.push({
+        ...base,
+        eventId: `${input.runId}:event:${input.entry.sequence}:model.reasoning.delta:${index + 1}`,
+        type: "model.reasoning.delta",
+        agentLabel: "模型",
+        delta: chunk,
+        status: "running",
+        detail: {
+          kind: "thinking",
+          preview: chunk,
+          truncated: index === reasoningChunks.length - 1 ? reasoningOutput?.truncated === true : false,
+        },
+      });
+    });
+    if (reasoningChunks.length > 0) {
+      input.push({
+        ...base,
+        eventId: `${input.runId}:event:${input.entry.sequence}:model.reasoning.completed`,
+        type: "model.reasoning.completed",
+        agentLabel: "模型",
+        summary: "思考完成。",
+        status: "completed",
+        detail: {
+          kind: "thinking",
+          preview: reasoningChunks.at(-1),
+          truncated: reasoningOutput?.truncated === true,
+        },
+      });
+    }
+    if (stringOrUndefined(payload.finishReason) === "tool_call") {
+      const sideText = visibleOutputText(payload.visibleOutput);
+      if (sideText.trim().length > 0) {
+        input.push({
+          ...base,
+          eventId: `${input.runId}:event:${input.entry.sequence}:model.side.completed`,
+          type: "model.side.completed",
+          agentLabel: "助手",
+          summary: visibleOutputSummary(sideText, 220),
+          status: "completed",
+          detail: {
+            kind: "thinking",
+            preview: sideText,
+            truncated: false,
+          },
+        });
+      }
+      input.push({
+        ...base,
+        eventId: `${input.runId}:event:${input.entry.sequence}:agent.note.completed`,
+        type: "agent.note.completed",
+        agentLabel: "助手",
+        summary: "助手已选择使用工具，工具结果会作为安全摘要进入后续处理。",
+        status: "completed",
+      });
+      return;
+    }
+    const text = visibleOutputText(payload.visibleOutput);
+    const chunks = chunkText(text, 90);
+    if (chunks.length === 0) {
+      input.push({
+        ...base,
+        eventId: `${input.runId}:event:${input.entry.sequence}:model.output.completed`,
+        type: "model.output.completed",
+        agentLabel: "模型",
+        summary: "模型调用完成；本次没有通过安全策略展示的可见输出。",
+        status: "completed",
+      });
+      return;
+    }
+    chunks.forEach((chunk, index) => {
+      input.push({
+        ...base,
+        eventId: `${input.runId}:event:${input.entry.sequence}:model.output.delta:${index + 1}`,
+        type: "model.output.delta",
+        agentLabel: "模型",
+        delta: chunk,
+        status: "running",
+      });
+    });
+    input.push({
+      ...base,
+      eventId: `${input.runId}:event:${input.entry.sequence}:model.output.completed`,
+      type: "model.output.completed",
+      agentLabel: "模型",
+      summary: modelCompletedSummary(payload),
+      status: "completed",
+    });
+    return;
+  }
+
+  if (input.entry.type === "model.failed") {
+    input.push({
+      ...base,
+      eventId: `${input.runId}:event:${input.entry.sequence}:agent.note.completed`,
+      type: "agent.note.completed",
+      agentLabel: "模型",
+      summary: modelFailedSummary(payload),
+      status: "failed",
+      detail: modelFailureStreamDetail(payload),
+    });
+    return;
+  }
+
+  if (input.entry.type === "tool.requested" || input.entry.type === "tool.completed" || input.entry.type === "tool.failed") {
+    input.push({
+      ...base,
+      eventId: `${input.runId}:event:${input.entry.sequence}:${input.entry.type}`,
+      type: input.entry.type,
+      agentLabel: "工具",
+      toolName: stringOrUndefined(payload.toolName),
+      summary: toolSummary(input.entry.type, payload),
+      status: input.entry.type === "tool.requested" ? "running" : input.entry.type === "tool.completed" ? "completed" : "failed",
+      detail: toolStreamDetail(input.entry.type, payload),
+    });
+    return;
+  }
+
+  if (input.entry.type === "context.compaction.completed" || input.entry.type === "context.compaction.failed") {
+    input.push({
+      ...base,
+      eventId: `${input.runId}:event:${input.entry.sequence}:${input.entry.type}`,
+      type: input.entry.type,
+      agentLabel: "上下文",
+      summary: contextCompactionStreamSummary(input.entry.type, payload),
+      status: input.entry.type === "context.compaction.completed" ? "completed" : "failed",
+      detail: {
+        kind: "thinking",
+        action: input.entry.type === "context.compaction.completed" ? "压缩上下文" : "上下文压缩失败",
+        preview: contextCompactionPreview(payload),
+        truncated: false,
+      },
+    });
+    return;
+  }
+
+  if (input.entry.type === "user_approval.requested") {
+    input.push({
+      ...base,
+      eventId: `${input.runId}:event:${input.entry.sequence}:confirmation.needed`,
+      type: "confirmation.needed",
+      agentLabel: "待确认",
+      summary: confirmationSummary(payload),
+      status: "running",
+    });
+    return;
+  }
+
+  if (input.entry.type === "user_approval.received") {
+    input.push({
+      ...base,
+      eventId: `${input.runId}:event:${input.entry.sequence}:user.guidance`,
+      type: "user.guidance",
+      agentLabel: "用户指导",
+      summary: userGuidanceSummary(payload),
+      status: "completed",
+    });
+    return;
+  }
+
+  if (isAgentFabricStreamType(input.entry.type)) {
+    input.push({
+      ...base,
+      eventId: `${input.runId}:event:${input.entry.sequence}:${input.entry.type}`,
+      type: input.entry.type,
+      agentLabel: agentFabricLabel(input.entry.type),
+      summary: agentFabricSummary(input.entry.type, payload),
+      status: input.entry.type === "agent.child.started" || input.entry.type === "agent.child.waiting" ? "running" : "completed",
+    });
+    return;
+  }
+
+  const note = agentNoteForEvent(input.entry, payload);
+  if (note !== undefined) {
+    input.push({
+      ...base,
+      eventId: `${input.runId}:event:${input.entry.sequence}:agent.note.completed`,
+      type: "agent.note.completed",
+      agentLabel: note.agentLabel,
+      summary: note.summary,
+      status: note.status,
+    });
+  }
+}
+
+function isAgentFabricStreamType(type: ArborMessageType): type is Extract<
+  PanelRunStreamEventType,
+  "agent.delegation.planned" | "agent.child.started" | "agent.child.completed" | "agent.child.waiting" | "agent.parent_synthesis.completed"
+> {
+  return (
+    type === "agent.delegation.planned" ||
+    type === "agent.child.started" ||
+    type === "agent.child.completed" ||
+    type === "agent.child.waiting" ||
+    type === "agent.parent_synthesis.completed"
+  );
+}
+
+function sourceRefsForView(view: RunObservationEventView | undefined): readonly string[] {
+  return (
+    view?.refs
+      .filter((ref) => ref.kind !== "model_call" && ref.kind !== "tool_call")
+      .map((ref) => `${ref.kind}:${ref.id}`) ?? []
+  );
+}
+
+function modelCallRefsFor(entry: EventLogEntry, payload: Readonly<Record<string, unknown>>): readonly string[] {
+  if (
+    entry.type !== "model.requested" &&
+    entry.type !== "model.completed" &&
+    entry.type !== "model.failed" &&
+    entry.type !== "context.compaction.completed" &&
+    entry.type !== "context.compaction.failed"
+  ) {
+    return [];
+  }
+  return unique([stringOrUndefined(payload.requestId), stringOrUndefined(payload.responseId)].filter(isString));
+}
+
+function toolCallRefsFor(entry: EventLogEntry, payload: Readonly<Record<string, unknown>>): readonly string[] {
+  if (
+    entry.type !== "tool.requested" &&
+    entry.type !== "tool.completed" &&
+    entry.type !== "tool.failed" &&
+    entry.type !== "user_approval.requested"
+  ) {
+    return [];
+  }
+  return stringOrUndefined(payload.callId) === undefined ? [] : [stringOrUndefined(payload.callId) as string];
+}

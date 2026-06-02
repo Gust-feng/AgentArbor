@@ -1,13 +1,13 @@
 import type { ArborMessageType, ArtifactRef } from "../common.js";
-import type { BasicAgentRun, RunEvent } from "../basic-agent/index.js";
-import type { BasicAgentCapabilitySnapshot } from "../config/index.js";
-import type { ToolDisplayProjection, ToolResultEnvelope } from "../tools/index.js";
+import type { BasicAgentRun, RunEvent } from "../basic-agent/contracts.js";
+import type { BasicAgentCapabilitySnapshot } from "../config/contracts.js";
+import type { ToolDisplayProjection, ToolResultEnvelope } from "../tools/contracts.js";
 import type {
   ObservationProgress,
   ObservationRef,
   ObservationScope,
   ObservationSeverity,
-} from "../observation/index.js";
+} from "../observation/contracts.js";
 
 export type RuntimeProfile = "lite" | "full";
 

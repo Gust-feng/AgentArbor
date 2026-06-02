@@ -1,3 +1,8 @@
+import { redactSensitiveText } from "../kernel/redaction.js";
+
+const INTERNAL_CONTROL_BLOCK_PATTERN =
+  /<\s*(start_work_session|tool_call|function_call|use_tool|internal_action|internal_control|query|arguments)\b[^>]*>[\s\S]*?<\s*\/\s*\1\s*>/gi;
+
 const INTERNAL_CONTROL_TAGS_PATTERN =
   /<\s*\/?\s*(start_work_session|tool_call|function_call|use_tool|internal_action|internal_control|query|arguments)\b[^>]*>/gi;
 
@@ -17,7 +22,7 @@ export function sanitizeAssistantVisibleText(
   options?: { readonly preserveOuterWhitespace?: boolean }
 ): string {
   const cleaned = String(value)
-    .replace(/<\s*start_work_session\b[^>]*>[\s\S]*?<\s*\/\s*start_work_session\s*>/gi, "")
+    .replace(INTERNAL_CONTROL_BLOCK_PATTERN, "")
     .replace(/<\s*start_work_session\b[^>]*\/\s*>/gi, "")
     .replace(INTERNAL_CONTROL_TAGS_PATTERN, "");
 
@@ -35,10 +40,10 @@ export function sanitizeAssistantVisibleText(
     kept.push(line);
   }
 
-  const result = kept
+  const result = redactSensitiveText(kept
     .join("\n")
     .replace(INTERNAL_ID_PATTERN, "[运行引用]")
-    .replace(/\n{3,}/g, "\n\n");
+    .replace(/\n{3,}/g, "\n\n"));
   return options?.preserveOuterWhitespace === true ? result : result.trim();
 }
 
@@ -50,7 +55,7 @@ export function sanitizeConversationHistoryText(value: string): string {
 }
 
 export function friendlyUserFacingFailureText(message: string | undefined): string {
-  const text = String(message ?? "").trim();
+  const text = sanitizeAssistantVisibleText(String(message ?? "")).trim();
   if (text.length === 0) {
     return "这次没有完成。";
   }

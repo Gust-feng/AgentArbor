@@ -319,7 +319,7 @@ function stringArrayOrUndefined(value: unknown): readonly string[] | undefined {
   return items.length === 0 ? undefined : items;
 }
 
-function numberOrUndefined(value: unknown): number | undefined {
+export function numberOrUndefined(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 

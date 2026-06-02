@@ -198,20 +198,43 @@ export class FileSystemRuntimeDatabase implements RuntimeDatabase {
 }
 
 async function writeJsonFile(filePath: string, value: unknown): Promise<void> {
-  await fs.mkdir(path.dirname(filePath), { recursive: true });
-  await fs.writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`, {
-    encoding: "utf8",
-    mode: 0o600,
-  });
+  await writeFileAtomically(filePath, `${JSON.stringify(value, null, 2)}\n`);
 }
 
 async function writeJsonlFile(filePath: string, values: readonly unknown[]): Promise<void> {
-  await fs.mkdir(path.dirname(filePath), { recursive: true });
   const lines = values.map((value) => JSON.stringify(value)).join("\n");
-  await fs.writeFile(filePath, lines.length === 0 ? "" : `${lines}\n`, {
+  await writeFileAtomically(filePath, lines.length === 0 ? "" : `${lines}\n`);
+}
+
+async function writeFileAtomically(filePath: string, content: string): Promise<void> {
+  const targetDirectory = path.dirname(filePath);
+  const tempDirectory = path.join(findRuntimeHome(targetDirectory), ".tmp");
+  const tempPath = path.join(
+    tempDirectory,
+    `${path.basename(filePath)}.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}.tmp`
+  );
+  await fs.mkdir(targetDirectory, { recursive: true });
+  await fs.mkdir(tempDirectory, { recursive: true });
+  await fs.writeFile(tempPath, content, {
     encoding: "utf8",
     mode: 0o600,
   });
+  await fs.rename(tempPath, filePath).catch(async (error: unknown) => {
+    await fs.rm(tempPath, { force: true }).catch(() => undefined);
+    throw error;
+  });
+}
+
+function findRuntimeHome(directory: string): string {
+  let current = path.resolve(directory);
+  while (path.basename(current) !== "runtime") {
+    const parent = path.dirname(current);
+    if (parent === current) {
+      return path.resolve(directory);
+    }
+    current = parent;
+  }
+  return current;
 }
 
 async function readJsonFile<T>(filePath: string): Promise<T | undefined> {

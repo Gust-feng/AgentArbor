@@ -9,7 +9,8 @@ import type {
   RunObservationSoilReturnStubView,
   RunObservationUndergroundView,
 } from "./contracts.js";
-import type { UndergroundEvidenceKind, UserClarificationResponse } from "../underground/index.js";
+import type { UserClarificationResponse } from "../underground/clarification.js";
+import type { UndergroundEvidenceKind } from "../underground/evidence-ledger.js";
 
 export type RunObservationLayerViews = {
   readonly underground: RunObservationUndergroundView;

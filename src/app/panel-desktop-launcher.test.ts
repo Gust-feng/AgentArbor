@@ -127,6 +127,46 @@ test("panel desktop smoke starts and closes the local server without creating a 
   assert.equal(calls.quits, 2);
 });
 
+test("panel desktop session can load a Vite dev url while keeping the local API server", async () => {
+  const calls = {
+    start: 0,
+    loads: [] as string[],
+  };
+  const dependencies: PanelDesktopDependencies = {
+    startPanelServer: async () => {
+      calls.start += 1;
+      return {
+        url: "http://127.0.0.1:54329/",
+        close: async () => undefined,
+      };
+    },
+    createWindow: () => ({
+      ...createFakePanelDesktopWindow(),
+      loadUrl: async (url) => {
+        calls.loads.push(url);
+      },
+    }),
+    whenReady: Promise.resolve(),
+    onBeforeQuit: () => undefined,
+    onWindowAllClosed: () => undefined,
+    quit: () => undefined,
+  };
+
+  const session = await startPanelDesktopSession(
+    {
+      host: "127.0.0.1",
+      port: 0,
+      smoke: false,
+      devUrl: "http://127.0.0.1:4305/",
+    },
+    dependencies
+  );
+
+  assert.equal(calls.start, 1);
+  assert.equal(session.url, "http://127.0.0.1:4305/");
+  assert.deepEqual(calls.loads, ["http://127.0.0.1:4305/"]);
+});
+
 test("panel desktop session loads the panel url and closes on quit", async () => {
   const calls = {
     start: 0,

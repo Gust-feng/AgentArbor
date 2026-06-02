@@ -3,6 +3,7 @@ export type PanelLaunchArgs = {
   readonly port: number;
   readonly configDirectory?: string;
   readonly smoke: boolean;
+  readonly devUrl?: string;
 };
 
 export const DEFAULT_PANEL_HOST = "127.0.0.1";
@@ -24,6 +25,7 @@ function parsePanelArgsWithDefaults(
   let host = DEFAULT_PANEL_HOST;
   let port = defaults.port;
   let configDirectory: string | undefined;
+  let devUrl: string | undefined;
   let smoke = false;
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -62,10 +64,19 @@ function parsePanelArgsWithDefaults(
       configDirectory = requireValue(arg.slice("--config-dir=".length), "--config-dir");
       continue;
     }
+    if (arg === "--dev-url") {
+      devUrl = requireNext(argv, index, "--dev-url");
+      index += 1;
+      continue;
+    }
+    if (arg.startsWith("--dev-url=")) {
+      devUrl = requireValue(arg.slice("--dev-url=".length), "--dev-url");
+      continue;
+    }
     throw new Error(`Unknown panel argument: ${arg}`);
   }
 
-  return { host, port, configDirectory, smoke };
+  return { host, port, configDirectory, smoke, devUrl };
 }
 
 function requireNext(argv: readonly string[], index: number, flag: string): string {

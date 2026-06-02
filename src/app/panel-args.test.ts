@@ -8,6 +8,7 @@ test("panel args default to the fixed local browser panel port and smoke off", (
     port: 9090,
     configDirectory: undefined,
     smoke: false,
+    devUrl: undefined,
   });
 });
 
@@ -17,6 +18,7 @@ test("desktop panel args default to a dynamic local panel port", () => {
     port: 0,
     configDirectory: undefined,
     smoke: false,
+    devUrl: undefined,
   });
 });
 
@@ -26,6 +28,7 @@ test("desktop panel smoke keeps the dynamic local panel port when no port is exp
     port: 0,
     configDirectory: undefined,
     smoke: true,
+    devUrl: undefined,
   });
 });
 
@@ -35,6 +38,7 @@ test("desktop panel args honor an explicit fixed port", () => {
     port: 9090,
     configDirectory: undefined,
     smoke: false,
+    devUrl: undefined,
   });
 });
 
@@ -46,8 +50,19 @@ test("panel args support explicit host, port, config directory and smoke flag", 
       port: 0,
       configDirectory: "C:/tmp/agentarbor",
       smoke: true,
+      devUrl: undefined,
     }
   );
+});
+
+test("desktop panel args support a dev url override", () => {
+  assert.deepEqual(parsePanelDesktopArgs(["--dev-url", "http://127.0.0.1:4305/"]), {
+    host: "127.0.0.1",
+    port: 0,
+    configDirectory: undefined,
+    smoke: false,
+    devUrl: "http://127.0.0.1:4305/",
+  });
 });
 
 test("panel args reject unknown switches", () => {

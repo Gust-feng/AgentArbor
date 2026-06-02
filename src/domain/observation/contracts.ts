@@ -7,30 +7,34 @@ import type { DirectionHandoffPackage } from "../agentarbor/direction-handoff-pa
 import type { GrowthPlan, TaskSpec, WorkflowIR } from "../aboveground/contracts.js";
 import type { ExperienceCandidate, FruitCandidate, PathBias, RunMemory } from "../fruits/contracts.js";
 import type { VerificationReport } from "../governance/contracts.js";
+import type { CandidateComparison } from "../underground/candidate-comparison-contracts.js";
 import type {
-  CandidateComparison,
   CandidateConvergenceDecision,
   CandidatePoolCounts,
-  ExplorationBudget,
   RejectedCandidateRefWithReason,
-  UndergroundAgentClusterRun,
-  UndergroundAgentInvocationStatus,
-  AgentRunTree,
-  UndergroundAutonomyAction,
-  UndergroundAutonomyStopReason,
-  UndergroundEvidenceKind,
-  RootletClusterKind,
-  RootletClusterStatus,
-  RootletOutput,
-  UndergroundCenterRole,
-  UndergroundConvergenceOutcome,
-  UndergroundExplorationReport,
+} from "../underground/candidate-convergence-contracts.js";
+import type { UndergroundAgentClusterRun, UndergroundAgentInvocationStatus } from "../underground/agent-cluster.js";
+import type { AgentRunTree } from "../underground/agent-fabric.js";
+import type { UndergroundAutonomyAction, UndergroundAutonomyStopReason } from "../underground/autonomy.js";
+import type {
   UserClarificationQuestion,
   UserClarificationReason,
   UserClarificationRequest,
   UserClarificationResponse,
   UserClarificationStatus,
-} from "../underground/index.js";
+} from "../underground/clarification.js";
+import type { UndergroundEvidenceKind } from "../underground/evidence-ledger.js";
+import type {
+  ExplorationBudget,
+  RootletClusterKind,
+  RootletOutput,
+} from "../underground/rootlet-contracts.js";
+import type {
+  RootletClusterStatus,
+  UndergroundCenterRole,
+  UndergroundConvergenceOutcome,
+  UndergroundExplorationReport,
+} from "../underground/radial-growth.js";
 
 export type RunPhase =
   | "not_started"

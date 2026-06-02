@@ -1,14 +1,19 @@
 import type { MinimalLoopResult } from "./minimal-loop.js";
 import type { CognitiveWorkSessionResult } from "./cognitive-work-session.js";
-import type { DesktopAgentSessionResult } from "./desktop-agent-session.js";
 import type { UndergroundDirectionSessionResult } from "./underground-direction-session.js";
 import type {
   PanelObservationReadModel,
   PanelRunTrackingReadModel,
-  PanelRunTranscript,
-} from "./panel-run-read-model.js";
-import type { AgentRunTree, RootletClusterKind } from "../domain/underground/index.js";
-import { redactSensitiveText } from "../kernel/redaction.js";
+} from "./panel-run-tracking-contracts.js";
+import type { PanelRunTranscript } from "./panel-run-transcript-contracts.js";
+import { safeText, taskSoilCanvas, unique, type PanelTaskSoilCanvasReadModel } from "./panel-canvas-common.js";
+import type { DesktopAgentCanvasReadModel } from "./panel-desktop-agent-canvas.js";
+import { createSafeAgentRunTreeView, type SafeAgentRunTreeView } from "./panel-agent-run-tree-view.js";
+
+export { createDesktopAgentCanvas, createDesktopChatCanvas } from "./panel-desktop-agent-canvas.js";
+export type { DesktopAgentCanvasReadModel } from "./panel-desktop-agent-canvas.js";
+export { createSafeAgentRunTreeView } from "./panel-agent-run-tree-view.js";
+export type { SafeAgentRunTreeView } from "./panel-agent-run-tree-view.js";
 
 export type PanelRunCanvasReadModel =
   | LegacyPanelRunCanvasReadModel
@@ -106,23 +111,7 @@ export type LegacyPanelRunCanvasReadModel = {
 
 export type WorkSessionCanvasReadModel = {
   readonly kind: "work_session_canvas";
-  readonly taskSoil: {
-    readonly taskSoilId: string;
-    readonly goalId?: string;
-    readonly traceId?: string;
-    readonly goalSummary: string;
-    readonly contextRefs: readonly {
-      readonly ref: string;
-      readonly kind: string;
-      readonly summary?: string;
-      readonly readonlyPreview?: {
-        readonly title?: string;
-        readonly text: string;
-        readonly truncated: boolean;
-      };
-    }[];
-    readonly permissionBoundaryRefs: readonly string[];
-  };
+  readonly taskSoil: PanelTaskSoilCanvasReadModel;
   readonly workSession: {
     readonly status: CognitiveWorkSessionResult["status"];
     readonly artifact?: {
@@ -169,82 +158,6 @@ export type WorkSessionCanvasReadModel = {
   };
 };
 
-export type DesktopAgentCanvasReadModel = {
-  readonly kind: "desktop_agent_canvas";
-  readonly taskSoil: WorkSessionCanvasReadModel["taskSoil"];
-  readonly agent: {
-    readonly status: DesktopAgentSessionResult["status"];
-    readonly answer?: {
-      readonly answer: string;
-      readonly modelCallRefs: readonly string[];
-      readonly toolCallRefs: readonly string[];
-      readonly evidenceRefs: readonly string[];
-      readonly resultBlocks: readonly {
-        readonly blockId: string;
-        readonly kind: string;
-        readonly title: string;
-        readonly summary: string;
-        readonly evidenceRefs: readonly string[];
-        readonly toolCallRefs: readonly string[];
-      }[];
-    };
-    readonly pendingConfirmation?: {
-      readonly confirmationId: string;
-      readonly title: string;
-      readonly question: string;
-      readonly consequence: string;
-      readonly riskLevel: string;
-      readonly modelCallRefs: readonly string[];
-      readonly toolCallRefs: readonly string[];
-      readonly sourceRefs: readonly string[];
-    };
-    readonly failureMessage?: string;
-    readonly modelCallRefs: readonly string[];
-    readonly toolCallRefs: readonly string[];
-    readonly activity: readonly {
-      readonly activityId: string;
-      readonly type: string;
-      readonly title: string;
-      readonly summary: string;
-      readonly status: string;
-      readonly createdAt: string;
-      readonly action?: string;
-      readonly path?: string;
-      readonly truncated?: boolean;
-      readonly error?: string;
-      readonly toolName?: string;
-      readonly sourceRefs: readonly string[];
-      readonly modelCallRefs: readonly string[];
-      readonly toolCallRefs: readonly string[];
-    }[];
-    readonly context?: {
-      readonly usageSummary: string;
-      readonly budget: {
-        readonly maxMessages: number;
-        readonly maxChars: number;
-        readonly usedChars: number;
-      };
-      readonly truncated: boolean;
-      readonly truncationReport: {
-        readonly truncated: boolean;
-        readonly omittedItemCount: number;
-        readonly truncatedItemIds: readonly string[];
-      };
-      readonly items: readonly {
-        readonly itemId: string;
-        readonly sourceKind: string;
-        readonly summary: string;
-        readonly visibility: string;
-        readonly truncated: boolean;
-      }[];
-    };
-  };
-  readonly explanation: {
-    readonly resultWhyReasonable: string;
-    readonly observationPanelRole: string;
-  };
-};
-
 export type UndergroundDeepCanvasReadModel = {
   readonly kind: "underground_deep_canvas";
   readonly task: {
@@ -279,88 +192,6 @@ export type UndergroundDeepCanvasReadModel = {
     readonly resultWhyReasonable: string;
     readonly observationPanelRole: string;
   };
-};
-
-export type SafeAgentRunTreeView = {
-  readonly treeId: string;
-  readonly rootRunId: string;
-  readonly rootAgentId: string;
-  readonly status: AgentRunTree["status"];
-  readonly rootSpec: {
-    readonly specId: string;
-    readonly agentId: string;
-    readonly displayName: string;
-    readonly agentKind: string;
-    readonly role: string;
-    readonly promptRef: string;
-    readonly outputContractRef: string;
-    readonly allowedTools: readonly string[];
-    readonly allowModel: boolean;
-    readonly budget: {
-      readonly maxModelRounds: number;
-      readonly maxToolRounds: number;
-      readonly maxChildRuns?: number;
-      readonly maxOutputRefs?: number;
-    };
-  };
-  readonly childRuns: readonly {
-    readonly childRunId: string;
-    readonly parentAgentId: string;
-    readonly status: string;
-    readonly specId: string;
-    readonly agentId: string;
-    readonly displayName: string;
-    readonly agentKind: string;
-    readonly role: string;
-    readonly rootletKind?: RootletClusterKind;
-    readonly promptRef: string;
-    readonly outputContractRef: string;
-    readonly allowModel: boolean;
-    readonly allowedTools: readonly string[];
-    readonly budget: {
-      readonly maxModelRounds: number;
-      readonly maxToolRounds: number;
-      readonly maxChildRuns?: number;
-      readonly maxOutputRefs?: number;
-    };
-    readonly inputRefs: readonly string[];
-    readonly outputRefs: readonly string[];
-    readonly evidenceRefs: readonly string[];
-    readonly uncertainty?: string;
-    readonly confidence?: number;
-    readonly startedAt: string;
-    readonly completedAt?: string;
-    readonly failureReason?: string;
-  }[];
-  readonly delegationDecisions: readonly {
-    readonly decisionId: string;
-    readonly parentAgentId: string;
-    readonly action: string;
-    readonly childSpecIds: readonly string[];
-    readonly childRunIds: readonly string[];
-    readonly rationale: string;
-    readonly uncertainty: string;
-    readonly source: string;
-    readonly confidence: number;
-    readonly reasoningTraceRefs: readonly string[];
-    readonly createdAt: string;
-  }[];
-  readonly parentSyntheses: readonly {
-    readonly synthesisId: string;
-    readonly parentAgentId: string;
-    readonly childRunIds: readonly string[];
-    readonly retainedMaterialRefs: readonly string[];
-    readonly rejectedMaterialRefs: readonly string[];
-    readonly conflictRefs: readonly string[];
-    readonly outputRefs: readonly string[];
-    readonly nextAction: string;
-    readonly decisionSummary: string;
-    readonly uncertainty: string;
-    readonly source: string;
-    readonly confidence: number;
-    readonly reasoningTraceRefs: readonly string[];
-    readonly createdAt: string;
-  }[];
 };
 
 export function createPanelRunCanvas(input: {
@@ -549,75 +380,6 @@ export function createWorkSessionCanvas(input: {
   };
 }
 
-export function createDesktopAgentCanvas(input: {
-  readonly result: DesktopAgentSessionResult;
-  readonly transcript: PanelRunTranscript;
-}): DesktopAgentCanvasReadModel {
-  return {
-    kind: "desktop_agent_canvas",
-    taskSoil: taskSoilCanvas(input.result),
-    agent: {
-      status: input.result.status,
-      answer:
-        input.result.answer === undefined
-          ? undefined
-          : {
-              answer: safeText(input.result.answer.answer, 1200),
-              modelCallRefs: [...input.result.answer.modelCallRefs],
-              toolCallRefs: [...input.result.answer.toolCallRefs],
-              evidenceRefs: input.result.answer.evidenceRefs.map((value) => safeText(value, 180)),
-              resultBlocks: [],
-            },
-      pendingConfirmation:
-        input.result.pendingConfirmation === undefined
-          ? undefined
-          : {
-              confirmationId: input.result.pendingConfirmation.confirmationId,
-              title: safeText(input.result.pendingConfirmation.title, 120),
-              question: safeText(input.result.pendingConfirmation.question, 420),
-              consequence: safeText(input.result.pendingConfirmation.consequence, 420),
-              riskLevel: input.result.pendingConfirmation.riskLevel,
-              modelCallRefs: [...input.result.pendingConfirmation.modelCallRefs],
-              toolCallRefs: [...input.result.pendingConfirmation.toolCallRefs],
-              sourceRefs: input.result.pendingConfirmation.sourceRefs.map((value) => safeText(value, 180)),
-            },
-      failureMessage:
-        input.result.failureMessage === undefined ? undefined : safeText(input.result.failureMessage, 420),
-      modelCallRefs: [...input.result.modelCallRefs],
-      toolCallRefs: [...input.result.toolCallRefs],
-      activity: [],
-      context:
-        input.result.contextPack === undefined
-          ? undefined
-          : {
-              usageSummary: safeText(input.result.contextPack.usageSummary, 420),
-              budget: input.result.contextPack.budget,
-              truncated: input.result.contextPack.truncated,
-              truncationReport: input.result.contextPack.truncationReport,
-              items: input.result.contextPack.items.map((item) => ({
-                itemId: safeText(item.itemId, 160),
-                sourceKind: item.sourceKind,
-                summary: safeText(item.summary, 320),
-                visibility: item.visibility,
-                truncated: item.truncated,
-              })),
-            },
-    },
-    explanation: {
-      resultWhyReasonable:
-        input.result.answer !== undefined
-          ? "这是桌面助手回合：模型可以直接回答，也可以在授权范围内调用工具，并在缺少权限时请求确认；没有启动地下组织或生成方向包。"
-          : input.result.pendingConfirmation !== undefined
-            ? "桌面助手需要用户补充授权或材料后继续；不会绕过确认边界。"
-            : "这轮对话没有形成可展示回答。",
-      observationPanelRole:
-        `开发者详情只展示模型调用 refs、配置状态和安全事件；当前安全事件 ${input.transcript.events.length} 条。`,
-    },
-  };
-}
-
-export const createDesktopChatCanvas = createDesktopAgentCanvas;
-
 export function createUndergroundDeepCanvas(input: {
   readonly result: UndergroundDirectionSessionResult;
   readonly transcript: PanelRunTranscript;
@@ -682,103 +444,6 @@ export function createUndergroundDeepCanvas(input: {
   };
 }
 
-export function createSafeAgentRunTreeView(tree: AgentRunTree): SafeAgentRunTreeView {
-  return {
-    treeId: tree.treeId,
-    rootRunId: tree.rootRunId,
-    rootAgentId: tree.rootAgentId,
-    status: tree.status,
-    rootSpec: {
-      specId: tree.rootSpec.specId,
-      agentId: tree.rootSpec.agentId,
-      displayName: tree.rootSpec.displayName,
-      agentKind: tree.rootSpec.agentKind,
-      role: tree.rootSpec.role,
-      promptRef: tree.rootSpec.promptRef,
-      outputContractRef: tree.rootSpec.outputContractRef,
-      allowedTools: [...tree.rootSpec.permissions.allowedTools],
-      allowModel: tree.rootSpec.permissions.allowModel,
-      budget: { ...tree.rootSpec.budget },
-    },
-    childRuns: tree.childRuns.map((run) => ({
-      childRunId: run.childRunId,
-      parentAgentId: run.parentAgentId,
-      status: run.status,
-      specId: run.spec.specId,
-      agentId: run.spec.agentId,
-      displayName: run.spec.displayName,
-      agentKind: run.spec.agentKind,
-      role: run.spec.role,
-      rootletKind: run.spec.rootletKind,
-      promptRef: run.spec.promptRef,
-      outputContractRef: run.spec.outputContractRef,
-      allowModel: run.spec.permissions.allowModel,
-      allowedTools: [...run.spec.permissions.allowedTools],
-      budget: { ...run.spec.budget },
-      inputRefs: [...run.inputRefs],
-      outputRefs: [...run.outputRefs],
-      evidenceRefs: [...run.evidenceRefs],
-      uncertainty: run.uncertainty,
-      confidence: run.confidence,
-      startedAt: run.startedAt,
-      completedAt: run.completedAt,
-      failureReason: run.failureReason,
-    })),
-    delegationDecisions: tree.delegationDecisions.map((decision) => ({
-      decisionId: decision.decisionId,
-      parentAgentId: decision.parentAgentId,
-      action: decision.action,
-      childSpecIds: [...decision.childSpecIds],
-      childRunIds: [...decision.childRunIds],
-      rationale: decision.rationale,
-      uncertainty: decision.uncertainty,
-      source: decision.source,
-      confidence: decision.confidence,
-      reasoningTraceRefs: [...decision.reasoningTraceRefs],
-      createdAt: decision.createdAt,
-    })),
-    parentSyntheses: tree.parentSyntheses.map((synthesis) => ({
-      synthesisId: synthesis.synthesisId,
-      parentAgentId: synthesis.parentAgentId,
-      childRunIds: [...synthesis.childRunIds],
-      retainedMaterialRefs: [...synthesis.retainedMaterialRefs],
-      rejectedMaterialRefs: [...synthesis.rejectedMaterialRefs],
-      conflictRefs: [...synthesis.conflictRefs],
-      outputRefs: [...synthesis.outputRefs],
-      nextAction: synthesis.nextAction,
-      decisionSummary: synthesis.decisionSummary,
-      uncertainty: synthesis.uncertainty,
-      source: synthesis.source,
-      confidence: synthesis.confidence,
-      reasoningTraceRefs: [...synthesis.reasoningTraceRefs],
-      createdAt: synthesis.createdAt,
-    })),
-  };
-}
-
-function taskSoilCanvas(result: Pick<CognitiveWorkSessionResult, "taskSoil">): WorkSessionCanvasReadModel["taskSoil"] {
-  return {
-    taskSoilId: result.taskSoil.taskSoilId,
-    goalId: result.taskSoil.goalId,
-    traceId: result.taskSoil.traceId,
-    goalSummary: safeText(result.taskSoil.rawGoal, 600),
-    contextRefs: result.taskSoil.contextRefs.map((ref) => ({
-      ref: ref.ref,
-      kind: ref.kind,
-      summary: ref.summary === undefined ? undefined : safeText(ref.summary, 240),
-      readonlyPreview:
-        ref.readonlyPreview === undefined
-          ? undefined
-          : {
-              title: ref.readonlyPreview.title === undefined ? undefined : safeText(ref.readonlyPreview.title, 120),
-              text: safeText(ref.readonlyPreview.text, 360),
-              truncated: ref.readonlyPreview.truncated || ref.readonlyPreview.text.length > 360,
-            },
-    })),
-    permissionBoundaryRefs: [...result.taskSoil.permissionBoundaryRefs],
-  };
-}
-
 function planReason(
   input: {
     readonly tracking: PanelRunTrackingReadModel;
@@ -787,13 +452,4 @@ function planReason(
 ): string {
   const childCount = input.tracking.agentRunTree?.childRuns.length ?? 0;
   return `推荐方向已由 ${childCount} 路局部材料和 ${evidenceCount} 个关键证据引用支撑，并通过父层收束。`;
-}
-
-function safeText(value: string, maxLength: number): string {
-  const redacted = redactSensitiveText(value);
-  return redacted.length <= maxLength ? redacted : `${redacted.slice(0, maxLength - 1)}…`;
-}
-
-function unique(values: readonly string[]): string[] {
-  return [...new Set(values.filter((value) => value.trim().length > 0))];
 }

@@ -152,6 +152,38 @@ test("configured ToolCenter uses workspaceRoot for local tools", async () => {
   }
 });
 
+test("configured ToolCenter uses workspaceRoot for codebase research search", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-tool-center-codebase-config-"));
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-tool-center-codebase-"));
+  try {
+    const query = `workspace-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-sentinel`;
+    await fs.writeFile(path.join(workspace, "research-note.md"), `Only this workspace contains ${query}.`, "utf8");
+    const configCenter = new ConfigCenter({
+      settingsStore: new FileSystemNormalSettingsStore(directory),
+      secretStore: new FileSystemLocalDevSecretStore(directory),
+    });
+    const center = await createConfiguredToolCenter(configCenter, { workspaceRoot: workspace, playwrightAvailable: true });
+    const search = await center.execute(
+      { callId: "call-search-codebase", toolName: "search", input: { query, sources: ["codebase"] } },
+      { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
+      { callerAgentId: "agent-test", allowedTools: ["search"] }
+    );
+    const output = search.output as {
+      readonly results?: readonly {
+        readonly title?: string;
+        readonly uri?: string;
+      }[];
+    };
+
+    assert.equal(search.status, "completed");
+    assert.equal(output.results?.some((result) => result.title === "research-note.md"), true);
+    assert.equal(output.results?.some((result) => result.uri === "repo://research-note.md"), true);
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+    await fs.rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("configured ToolCenter keeps web search disabled even when a historical Tavily key exists", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-configured-tool-center-disabled-"));
   let fetchCalls = 0;

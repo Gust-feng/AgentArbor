@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import test from "node:test";
 import { createTaskSoil } from "../../domain/soil/index.js";
 import type { ToolResultEnvelope } from "../../domain/tools/index.js";
@@ -7,6 +9,52 @@ import {
   appendToolEnvelopeToContextLedger,
   createBasicAgentContextLedger,
 } from "./context-ledger.js";
+
+const sourceDirectory = path.join(process.cwd(), "src", "app", "basic-agent-runtime");
+
+test("context ledger keeps safe text and read model projection split from selection", async () => {
+  const [ledgerSource, itemsSource, safeTextSource, readModelSource] = await Promise.all([
+    readFile(path.join(sourceDirectory, "context-ledger.ts"), "utf8"),
+    readFile(path.join(sourceDirectory, "context-ledger-items.ts"), "utf8"),
+    readFile(path.join(sourceDirectory, "context-ledger-safe-text.ts"), "utf8"),
+    readFile(path.join(sourceDirectory, "context-ledger-read-model.ts"), "utf8"),
+  ]);
+
+  assert.equal(ledgerSource.includes('from "./context-ledger-items.js"'), true);
+  assert.equal(ledgerSource.includes('from "./context-ledger-safe-text.js"'), false);
+  assert.equal(ledgerSource.includes('from "./context-ledger-read-model.js"'), true);
+  assert.equal(ledgerSource.includes("function toContextLedgerReadModel"), false);
+  assert.equal(ledgerSource.includes("function contextBudgetEntries"), false);
+  assert.equal(ledgerSource.includes("function contextLedgerEntryKind"), false);
+  assert.equal(ledgerSource.includes("function contextUsageSummary"), false);
+  assert.equal(ledgerSource.includes("function systemContextItem"), false);
+  assert.equal(ledgerSource.includes("function skillContextItems"), false);
+  assert.equal(ledgerSource.includes("function historyContextItems"), false);
+  assert.equal(ledgerSource.includes("function currentUserMessageItem"), false);
+  assert.equal(ledgerSource.includes("function taskSoilRefItems"), false);
+  assert.equal(ledgerSource.includes("function toolEvidenceItems"), false);
+  assert.equal(ledgerSource.includes("function contextRefPromptLine"), false);
+  assert.equal(ledgerSource.includes("function safeText"), false);
+  assert.equal(ledgerSource.includes("function safeUnboundedText"), false);
+  assert.equal(ledgerSource.includes("function safeConversationText"), false);
+  assert.equal(ledgerSource.includes("function safePlain"), false);
+  assert.equal(itemsSource.includes("export function buildContextLedgerDraftItems"), true);
+  assert.equal(itemsSource.includes("export function toolEvidenceItems"), true);
+  assert.equal(itemsSource.includes("function systemContextItem"), true);
+  assert.equal(itemsSource.includes("function skillContextItems"), true);
+  assert.equal(itemsSource.includes("function historyContextItems"), true);
+  assert.equal(itemsSource.includes("function currentUserMessageItem"), true);
+  assert.equal(itemsSource.includes("function contextRefPromptLine"), true);
+  assert.equal(itemsSource.includes('from "./context-ledger-safe-text.js"'), true);
+  assert.equal(safeTextSource.includes("export function safeContextText"), true);
+  assert.equal(safeTextSource.includes("export function safeUnboundedContextText"), true);
+  assert.equal(safeTextSource.includes("export function safeConversationContextText"), true);
+  assert.equal(safeTextSource.includes("export function safePlainContextText"), true);
+  assert.equal(readModelSource.includes("export function toContextLedgerReadModel"), true);
+  assert.equal(readModelSource.includes("function contextBudgetEntries"), true);
+  assert.equal(readModelSource.includes("function contextLedgerEntryKind"), true);
+  assert.equal(readModelSource.includes("function contextUsageSummary"), true);
+});
 
 test("context ledger records goal, history, attachments, skills, budget, and safe refs", () => {
   const taskSoil = createTaskSoil({

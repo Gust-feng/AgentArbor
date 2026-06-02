@@ -115,7 +115,7 @@ export function createToolApprovalRequiredMessage(input: {
       confirmationId: confirmation?.confirmationId ?? `confirmation-${input.result.callId}`,
       title: confirmation?.title ?? "需要确认",
       question: confirmation?.actionSummary ?? `${toolDisplayName(input.result.toolName)}需要确认后才能执行。`,
-      consequence: "批准后只允许继续本次对应工具操作；拒绝则不会执行该动作。",
+      consequence: "",
       riskLevel: confirmation?.riskLevel ?? "medium",
       affectedResources: confirmation?.affectedResources ?? [],
       sourceRefs: confirmation?.sourceRefs ?? [`tool:${input.result.callId}`],

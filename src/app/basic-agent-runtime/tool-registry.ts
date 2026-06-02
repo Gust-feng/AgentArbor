@@ -9,7 +9,7 @@ import type {
   ToolVisibleResultPolicy,
 } from "../../domain/tools/index.js";
 import { toolPresentationForDefinition } from "../../domain/tools/index.js";
-import { ToolCenter } from "../tool-center/index.js";
+import { ToolCenter } from "../tool-center/tool-center.js";
 
 export type ToolRegistryScope = "desktop-basic" | "underground" | "research" | "workspace" | "mcp";
 

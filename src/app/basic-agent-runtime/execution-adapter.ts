@@ -1,8 +1,5 @@
-import type {
+export type {
+  BasicAgentExecutionAdapter,
   BasicAgentRunExecutionInput,
   BasicAgentRunExecutionResult,
-} from "./run-executor.js";
-
-export interface BasicAgentExecutionAdapter {
-  execute(input: BasicAgentRunExecutionInput): Promise<BasicAgentRunExecutionResult>;
-}
+} from "./contracts.js";

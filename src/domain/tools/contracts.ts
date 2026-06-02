@@ -1,4 +1,4 @@
-import type { ConfirmationRequest } from "../basic-agent/index.js";
+import type { ConfirmationRequest } from "../basic-agent/confirmation-contracts.js";
 
 export type ToolInputSchema = {
   readonly type: "object";

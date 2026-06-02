@@ -21,7 +21,7 @@ import {
   projectToolFailure,
   projectToolResult,
   redactOrdinaryText,
-} from "../basic-agent-runtime/index.js";
+} from "../safe-projection.js";
 
 export type ToolCenterOptions = {
   readonly maxCallsPerRun?: number;

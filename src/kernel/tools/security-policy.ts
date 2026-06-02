@@ -69,9 +69,9 @@ function approvalDecision(input: {
   return {
     decision: "approval_required",
     reason: input.reason,
-    title: "需要确认",
+    title: presentation.displayName,
     actionSummary: redactOrdinaryToolText(
-      `${presentation.displayName}需要你确认后继续。${presentation.displayDescription}`,
+      presentation.displayDescription,
       500
     ),
     affectedResources: affectedResourcesFromInput(input.request.input),

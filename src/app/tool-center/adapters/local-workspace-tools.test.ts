@@ -17,6 +17,65 @@ import {
 } from "./local-workspace-tools.js";
 
 const context = { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" };
+const sourceDirectory = path.join(process.cwd(), "src", "app", "tool-center", "adapters");
+
+test("local workspace adapter keeps sandbox policy and tool families split from compatibility exports", async () => {
+  const [toolsSource, sandboxSource, commandSource, readSource, writeSource, commonSource] = await Promise.all([
+    readFile(path.join(sourceDirectory, "local-workspace-tools.ts"), "utf8"),
+    readFile(path.join(sourceDirectory, "local-workspace-sandbox.ts"), "utf8"),
+    readFile(path.join(sourceDirectory, "local-workspace-command-tools.ts"), "utf8"),
+    readFile(path.join(sourceDirectory, "local-workspace-read-tools.ts"), "utf8"),
+    readFile(path.join(sourceDirectory, "local-workspace-write-tools.ts"), "utf8"),
+    readFile(path.join(sourceDirectory, "local-workspace-common.ts"), "utf8"),
+  ]);
+
+  assert.equal(toolsSource.includes('from "./local-workspace-sandbox.js"'), true);
+  assert.equal(toolsSource.includes('from "./local-workspace-command-tools.js"'), true);
+  assert.equal(toolsSource.includes('from "./local-workspace-read-tools.js"'), true);
+  assert.equal(toolsSource.includes('from "./local-workspace-write-tools.js"'), true);
+  assert.equal(toolsSource.includes('from "./local-workspace-common.js"'), false);
+  assert.equal(toolsSource.includes("export function createLocalWorkspaceSandboxPolicy"), false);
+  assert.equal(toolsSource.includes("export function createLocalReadFileTool"), false);
+  assert.equal(toolsSource.includes("export function createLocalListDirTool"), false);
+  assert.equal(toolsSource.includes("export function createLocalGrepFilesTool"), false);
+  assert.equal(toolsSource.includes("export function createLocalWriteFileTool"), false);
+  assert.equal(toolsSource.includes("export function createLocalCreateFileTool"), false);
+  assert.equal(toolsSource.includes("export function createLocalEditFileTool"), false);
+  assert.equal(toolsSource.includes("export function createLocalDeleteFileTool"), false);
+  assert.equal(toolsSource.includes("export function createLocalRunCommandTool"), false);
+  assert.equal(toolsSource.includes("export function createLocalShellCommandTool"), false);
+  assert.equal(toolsSource.includes("async function grepPath"), false);
+  assert.equal(toolsSource.includes("function parseAnchorEdits"), false);
+  assert.equal(toolsSource.includes("function locateAnchorEdits"), false);
+  assert.equal(toolsSource.includes("async function runInternalWorkspaceCommand"), false);
+  assert.equal(toolsSource.includes("function commandToolOutput"), false);
+  assert.equal(toolsSource.includes("function checkCommandArgs"), false);
+  assert.equal(toolsSource.includes("function checkSandboxPath"), false);
+  assert.equal(toolsSource.includes("function splitSimpleCommandLine"), false);
+  assert.equal(toolsSource.includes("function hasShellControlToken"), false);
+  assert.equal(toolsSource.includes("function resolveWorkspacePath"), false);
+  assert.equal(toolsSource.includes("function asRecord"), false);
+  assert.equal(sandboxSource.includes("export function createLocalWorkspaceSandboxPolicy"), true);
+  assert.equal(sandboxSource.includes("function checkCommandArgs"), true);
+  assert.equal(sandboxSource.includes("function checkSandboxPath"), true);
+  assert.equal(sandboxSource.includes("function splitSimpleCommandLine"), true);
+  assert.equal(commandSource.includes("export function createLocalRunCommandTool"), true);
+  assert.equal(commandSource.includes("export function createLocalShellCommandTool"), true);
+  assert.equal(commandSource.includes("async function runInternalWorkspaceCommand"), true);
+  assert.equal(commandSource.includes("function commandToolOutput"), true);
+  assert.equal(readSource.includes("export function createLocalReadFileTool"), true);
+  assert.equal(readSource.includes("export function createLocalListDirTool"), true);
+  assert.equal(readSource.includes("export function createLocalGrepFilesTool"), true);
+  assert.equal(readSource.includes("async function grepPath"), true);
+  assert.equal(writeSource.includes("export function createLocalWriteFileTool"), true);
+  assert.equal(writeSource.includes("export function createLocalCreateFileTool"), true);
+  assert.equal(writeSource.includes("export function createLocalEditFileTool"), true);
+  assert.equal(writeSource.includes("export function createLocalDeleteFileTool"), true);
+  assert.equal(writeSource.includes("function parseAnchorEdits"), true);
+  assert.equal(writeSource.includes("function locateAnchorEdits"), true);
+  assert.equal(commonSource.includes("export function resolveWorkspacePath"), true);
+  assert.equal(commonSource.includes("export function asRecord"), true);
+});
 
 test("local workspace tools read, list, and grep within workspace boundary", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tools-"));

@@ -1,7 +1,7 @@
 import type { AgentTaskStatus, BasicAgentRun, ConfirmationDecision, RunEvent } from "../../domain/basic-agent/index.js";
 import type { ObservationRef } from "../../domain/observation/index.js";
 import type { ToolDisplayProjection } from "../../domain/tools/index.js";
-import { redactOrdinaryMarkdownFragment, redactOrdinaryText } from "./safe-projection.js";
+import { redactOrdinaryMarkdownFragment, redactOrdinaryText } from "../safe-projection.js";
 
 export type BasicAgentCompatRunStatus =
   | "pending"

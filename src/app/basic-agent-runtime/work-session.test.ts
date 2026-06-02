@@ -3,6 +3,7 @@ import test from "node:test";
 import type { BasicAgentRun, RunEvent } from "../../domain/basic-agent/index.js";
 import type { ToolResultEnvelope } from "../../domain/tools/index.js";
 import { createDesktopWorkSessionReadModel } from "./work-session.js";
+import { transcriptNodesFromRunEvents } from "./work-session-transcript.js";
 
 test("work session read model keeps ordinary completed answers separate from deliverables", () => {
   const run = basicRun("completed");
@@ -192,7 +193,40 @@ test("work session read model closes merged reasoning on completion event", () =
 
   assert.equal(thinking?.phase, "completed");
   assert.equal(thinking?.eventType, "model.reasoning.completed");
-  assert.equal(thinking?.text, "first step");
+  assert.equal(thinking?.text, "firststep");
+});
+
+test("work session transcript projection owns reasoning node merging", () => {
+  const run = basicRun("completed");
+  const events: RunEvent[] = [
+    {
+      ...event(run.runId, "model.reasoning.delta", "first", "running"),
+      id: `${run.runId}:projection:reasoning:1`,
+      sequence: 1,
+      delta: "first",
+      refs: [{ kind: "model_call", id: "model-projection" }],
+    },
+    {
+      ...event(run.runId, "model.reasoning.delta", "second", "running"),
+      id: `${run.runId}:projection:reasoning:2`,
+      sequence: 2,
+      delta: "second",
+      refs: [{ kind: "model_call", id: "model-projection" }],
+    },
+    {
+      ...event(run.runId, "model.output.completed", "回答完成。", "completed"),
+      id: `${run.runId}:projection:output:completed`,
+      sequence: 3,
+      refs: [{ kind: "model_call", id: "model-projection" }],
+    },
+  ];
+
+  const thinking = transcriptNodesFromRunEvents(events, undefined).filter((node) => node.kind === "thinking");
+
+  assert.equal(thinking.length, 1);
+  assert.equal(thinking[0]?.eventType, "model.reasoning.completed");
+  assert.equal(thinking[0]?.phase, "completed");
+  assert.equal(thinking[0]?.text, "firstsecond");
 });
 
 test("work session read model completes live reasoning after interleaved output", () => {

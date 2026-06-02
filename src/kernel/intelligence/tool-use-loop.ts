@@ -1,98 +1,44 @@
-import type { ArborMessage } from "../../domain/common.js";
-import type {
-  IntelligenceChannel,
-  ModelMessage,
-  ModelRequest,
-  ModelResponse,
-} from "../../domain/intelligence/index.js";
-import type {
-  ToolCallRequest,
-  ToolCallResult,
-  ToolDefinition,
-  ToolExecutionBroker,
-  ToolExecutionContext,
-} from "../../domain/tools/index.js";
-import { toolDisplayName } from "../../domain/tools/index.js";
+import type { ModelMessage, ModelRequest } from "../../domain/intelligence/index.js";
+import type { ToolCallResult } from "../../domain/tools/index.js";
 import { createId } from "../id.js";
-import { projectToolStatusEnvelope } from "../tools/index.js";
 import {
-  createToolCompletedMessage,
-  createToolApprovalRequiredMessage,
-  createToolFailedMessage,
-  createToolRequestedMessage,
-  toSafeToolEventValue,
-} from "./tool-events.js";
+  cloneMessages,
+  cloneModelMessage,
+  clonePendingApproval,
+  cloneToolCallRequest,
+  cloneToolResults,
+} from "./tool-use-loop-cloning.js";
+import type {
+  ToolUseLoopContextMaintenanceResult,
+  ToolUseLoopOptions,
+  ToolUseLoopPendingApproval,
+  ToolUseLoopResult,
+} from "./tool-use-loop-contracts.js";
+import {
+  createToolExecutionContext,
+  executeSingleToolCall,
+  executeToolCalls,
+  modelVisibleToolDefinitions,
+} from "./tool-use-loop-execution.js";
+import {
+  assistantToolCallMessage,
+  toolResultMessage,
+} from "./tool-use-loop-messages.js";
+import {
+  abortedLoopResult,
+  approvalRequiredResultFromPending,
+  approvalStillRequiredModelResponse,
+  contextOverflowLoopResult,
+  outOfFuelLoopResult,
+} from "./tool-use-loop-results.js";
 
-export type ToolUseLoopOptions = {
-  readonly intelligenceChannel: IntelligenceChannel;
-  readonly toolCenter: ToolExecutionBroker;
-  readonly callerAgentId: string;
-  readonly traceId: string;
-  readonly goalId: string;
-  readonly maxModelRounds?: number;
-  readonly maxToolRounds?: number;
-  readonly allowedTools?: readonly string[];
-  readonly blockedToolNames?: readonly string[];
-  readonly approvedConfirmationIds?: readonly string[];
-  readonly publishToolEvent?: (message: ArborMessage) => void;
-  readonly maintainContext?: ToolUseLoopContextMaintainer;
-  readonly abortSignal?: AbortSignal;
-};
-
-export type ToolUseLoopContextMaintainer = (input: {
-  readonly initialRequest: ModelRequest;
-  readonly requestId: string;
-  readonly messages: readonly ModelMessage[];
-  readonly tools: readonly ToolDefinition[];
-  readonly toolCalls: readonly ToolCallResult[];
-  readonly modelRounds: number;
-  readonly rounds: number;
-}) => Promise<ToolUseLoopContextMaintenanceResult>;
-
-export type ToolUseLoopContextMaintenanceResult =
-  | {
-      readonly status: "unchanged";
-    }
-  | {
-      readonly status: "compacted";
-      readonly messages: readonly ModelMessage[];
-    }
-  | {
-      readonly status: "failed";
-      readonly message: string;
-      readonly requestId?: string;
-      readonly responseId?: string;
-      readonly retryable?: boolean;
-    };
-
-export type ToolUseLoopPendingApproval = {
-  readonly confirmationId: string;
-  readonly pendingToolCall: ToolCallRequest;
-  readonly remainingToolCallsAfterApproval: readonly ToolCallRequest[];
-  readonly messagesBeforeToolCall: readonly ModelMessage[];
-  readonly assistantMessage: ModelMessage;
-  readonly completedToolResults: readonly ToolCallResult[];
-  readonly toolCallsBeforeApproval: readonly ToolCallResult[];
-  readonly modelRounds: number;
-  readonly rounds: number;
-  readonly requestId: string;
-};
-
-export type ToolUseLoopResult = {
-  readonly finalOutput: ModelResponse;
-  readonly toolCalls: readonly ToolCallResult[];
-  readonly modelRounds: number;
-  readonly rounds: number;
-  readonly stoppedReason:
-    | "completed"
-    | "no_tool_calls"
-    | "out_of_fuel"
-    | "context_overflow"
-    | "approval_required"
-    | "cancelled"
-    | "error";
-  readonly pendingApproval?: ToolUseLoopPendingApproval;
-};
+export type {
+  ToolUseLoopContextMaintainer,
+  ToolUseLoopContextMaintenanceResult,
+  ToolUseLoopOptions,
+  ToolUseLoopPendingApproval,
+  ToolUseLoopResult,
+} from "./tool-use-loop-contracts.js";
 
 export async function executeToolUseLoop(
   options: ToolUseLoopOptions,
@@ -144,18 +90,12 @@ async function resumeApprovalCore(
     );
   }
 
-  const context: ToolExecutionContext = {
-    callerAgentId: options.callerAgentId,
-    traceId: options.traceId,
-    goalId: options.goalId,
-    abortSignal: options.abortSignal,
-  };
-  options.publishToolEvent?.(createToolRequestedMessage({
+  const context = createToolExecutionContext(options);
+  const approvedResult = await executeSingleToolCall({
+    options,
     request: pendingApproval.pendingToolCall,
     context,
-  }));
-  const approvedResult = await executeToolCallSafely(options, pendingApproval.pendingToolCall, context);
-  publishToolResultEvent(options, approvedResult, context);
+  });
   const toolDefinitions = modelVisibleToolDefinitions(options);
   let toolCalls = [...pendingApproval.toolCallsBeforeApproval, approvedResult];
   if (approvedResult.status === "approval_required") {
@@ -232,112 +172,6 @@ async function resumeApprovalCore(
     rounds,
     requestId: pendingApproval.requestId,
   });
-}
-
-async function executeToolCalls(input: {
-  readonly options: ToolUseLoopOptions;
-  readonly requests: readonly ToolCallRequest[];
-  readonly toolDefinitions: readonly ToolDefinition[];
-}): Promise<{
-  readonly results: readonly ToolCallResult[];
-  readonly pendingApproval?: {
-    readonly confirmationId: string;
-    readonly pendingToolCall: ToolCallRequest;
-    readonly remainingToolCallsAfterApproval: readonly ToolCallRequest[];
-    readonly completedToolResults: readonly ToolCallResult[];
-    readonly requestsForAssistantMessage: readonly ToolCallRequest[];
-  };
-}> {
-  const context: ToolExecutionContext = {
-    callerAgentId: input.options.callerAgentId,
-    traceId: input.options.traceId,
-    goalId: input.options.goalId,
-    abortSignal: input.options.abortSignal,
-  };
-  if (canExecuteReadOnlyBatchInParallel(input.requests, input.toolDefinitions)) {
-    input.requests.forEach((request) => input.options.publishToolEvent?.(createToolRequestedMessage({ request, context })));
-    const results = await Promise.all(
-      input.requests.map((request) => executeToolCallSafely(input.options, request, context))
-    );
-    results.forEach((result) => {
-      publishToolResultEvent(input.options, result, context);
-    });
-    return { results };
-  }
-  const results: ToolCallResult[] = [];
-  for (let index = 0; index < input.requests.length; index += 1) {
-    const request = input.requests[index]!;
-    if (input.options.abortSignal?.aborted === true) {
-      results.push(cancelledToolResult(request));
-      continue;
-    }
-    input.options.publishToolEvent?.(createToolRequestedMessage({ request, context }));
-    const result = await executeToolCallSafely(input.options, request, context);
-    publishToolResultEvent(input.options, result, context);
-    results.push(result);
-    if (result.status === "approval_required") {
-      return {
-        results,
-        pendingApproval: {
-          confirmationId: result.confirmationRequest?.confirmationId ?? `confirmation-${result.callId}`,
-          pendingToolCall: cloneToolCallRequest(request),
-          remainingToolCallsAfterApproval: input.requests.slice(index + 1).map(cloneToolCallRequest),
-          completedToolResults: cloneToolResults(results.slice(0, -1)),
-          requestsForAssistantMessage: input.requests.map(cloneToolCallRequest),
-        },
-      };
-    }
-  }
-  return { results };
-}
-
-function publishToolResultEvent(
-  options: ToolUseLoopOptions,
-  result: ToolCallResult,
-  context: ToolExecutionContext
-): void {
-  options.publishToolEvent?.(
-    result.status === "completed"
-      ? createToolCompletedMessage({ result, context })
-      : result.status === "approval_required"
-        ? createToolApprovalRequiredMessage({ result, context })
-        : createToolFailedMessage({ result, context })
-  );
-}
-
-async function executeToolCallSafely(
-  options: ToolUseLoopOptions,
-  request: ToolCallRequest,
-  context: ToolExecutionContext
-): Promise<ToolCallResult> {
-  if (isBlockedToolName(options, request.toolName)) {
-    return {
-      callId: request.callId,
-      toolName: request.toolName,
-      input: request.input,
-      output: undefined,
-      status: "failed",
-      error: `${toolDisplayName(request.toolName)}当前不可用。`,
-      durationMs: 0,
-    };
-  }
-  try {
-    return await options.toolCenter.execute(request, context, {
-      callerAgentId: options.callerAgentId,
-      allowedTools: options.allowedTools,
-      approvedConfirmationIds: options.approvedConfirmationIds,
-    });
-  } catch (error) {
-    return {
-      callId: request.callId,
-      toolName: request.toolName,
-      input: request.input,
-      output: undefined,
-      status: "failed",
-      error: error instanceof Error ? error.message : "Tool execution failed.",
-      durationMs: 0,
-    };
-  }
 }
 
 async function continueToolUseLoopAfterToolResults(input: {
@@ -461,19 +295,12 @@ function normalizeOptionalRoundLimit(value: number | undefined): number | undefi
   return Math.max(0, Math.floor(value));
 }
 
-function modelVisibleToolDefinitions(options: ToolUseLoopOptions): readonly ToolDefinition[] {
-  return options.toolCenter
-    .list()
-    .filter((tool) => options.allowedTools === undefined || options.allowedTools.includes(tool.name))
-    .filter((tool) => !isBlockedToolName(options, tool.name));
-}
-
 async function maintainContextIfNeeded(input: {
   readonly options: ToolUseLoopOptions;
   readonly initialRequest: ModelRequest;
   readonly requestId: string;
   readonly messages: readonly ModelMessage[];
-  readonly tools: readonly ToolDefinition[];
+  readonly tools: ReturnType<typeof modelVisibleToolDefinitions>;
   readonly toolCalls: readonly ToolCallResult[];
   readonly modelRounds: number;
   readonly rounds: number;
@@ -498,341 +325,4 @@ async function maintainContextIfNeeded(input: {
       retryable: true,
     };
   }
-}
-
-function canExecuteReadOnlyBatchInParallel(
-  requests: readonly ToolCallRequest[],
-  definitions: readonly ToolDefinition[]
-): boolean {
-  return requests.every((request) => {
-    const definition = definitions.find((candidate) => candidate.name === request.toolName);
-    return definition?.metadata?.operationType === "read-only" && !mayRequireConfirmationBeforeExecution(request, definition);
-  });
-}
-
-function mayRequireConfirmationBeforeExecution(request: ToolCallRequest, definition: ToolDefinition): boolean {
-  if (definition.metadata?.requiresConfirmation === true) {
-    return true;
-  }
-  return stringFromRecord(request.input, "url") !== undefined;
-}
-
-function stringFromRecord(value: unknown, key: string): string | undefined {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    return undefined;
-  }
-  const raw = (value as Readonly<Record<string, unknown>>)[key];
-  return typeof raw === "string" && raw.trim().length > 0 ? raw.trim() : undefined;
-}
-
-function isBlockedToolName(options: ToolUseLoopOptions, toolName: string): boolean {
-  return options.blockedToolNames?.includes(toolName) === true;
-}
-
-function outOfFuelLoopResult(
-  initialRequest: ModelRequest,
-  toolCalls: readonly ToolCallResult[],
-  modelRounds: number,
-  rounds: number
-): ToolUseLoopResult {
-  return {
-    finalOutput: outOfFuelModelResponse(initialRequest),
-    toolCalls,
-    modelRounds,
-    rounds,
-    stoppedReason: "out_of_fuel",
-  };
-}
-
-function contextOverflowLoopResult(
-  initialRequest: ModelRequest,
-  toolCalls: readonly ToolCallResult[],
-  modelRounds: number,
-  rounds: number,
-  failure: Extract<ToolUseLoopContextMaintenanceResult, { readonly status: "failed" }>
-): ToolUseLoopResult {
-  return {
-    finalOutput: contextOverflowModelResponse(initialRequest, failure),
-    toolCalls,
-    modelRounds,
-    rounds,
-    stoppedReason: "context_overflow",
-  };
-}
-
-function cancelledToolResult(request: ToolCallRequest): ToolCallResult {
-  const diagnosticRef = `tool:${request.callId}:cancelled`;
-  return {
-    callId: request.callId,
-    toolName: request.toolName,
-    input: request.input,
-    output: undefined,
-    status: "cancelled",
-    error: "Tool execution cancelled.",
-    durationMs: 0,
-    projection: {
-      uiSummary: "工具执行已取消。",
-      diagnosticRef,
-      envelope: projectToolStatusEnvelope({
-        request,
-        status: "cancelled",
-        summary: "Tool execution cancelled.",
-        diagnosticRef,
-      }),
-      truncated: false,
-      redacted: true,
-    },
-  };
-}
-
-function abortedLoopResult(
-  initialRequest: ModelRequest,
-  toolCalls: readonly ToolCallResult[],
-  modelRounds: number,
-  rounds: number
-): ToolUseLoopResult {
-  return {
-    finalOutput: {
-      responseId: `${initialRequest.requestId}-cancelled`,
-      requestId: initialRequest.requestId,
-      providerId: "agent-turn-runtime",
-      providerKind: "fake",
-      protocolKind: "openai_compatible_chat_completions",
-      model: "cancelled",
-      status: "failed",
-      outputKind: initialRequest.outputContract.outputKind,
-      finishReason: "error",
-      validation: {
-        status: "failed",
-        checkedAt: new Date().toISOString(),
-        issues: [{ code: "cancelled", message: "Agent turn was cancelled." }],
-      },
-      failure: {
-        kind: "provider_response",
-        message: "Agent turn was cancelled.",
-        retryable: false,
-      },
-      completedAt: new Date().toISOString(),
-    },
-    toolCalls,
-    modelRounds,
-    rounds,
-    stoppedReason: "cancelled",
-  };
-}
-
-function approvalStillRequiredModelResponse(
-  initialRequest: ModelRequest,
-  pendingApproval: ToolUseLoopPendingApproval
-): ModelResponse {
-  return {
-    responseId: `${initialRequest.requestId}-approval-required`,
-    requestId: pendingApproval.requestId,
-    providerId: "agent-turn-runtime",
-    providerKind: "fake",
-    protocolKind: "openai_compatible_chat_completions",
-    model: "approval-required",
-    status: "completed",
-    outputKind: initialRequest.outputContract.outputKind,
-    textOutput: "Tool execution is paused until the matching confirmation is approved.",
-    finishReason: "stop",
-    validation: {
-      status: "passed",
-      checkedAt: new Date().toISOString(),
-      issues: [],
-    },
-    completedAt: new Date().toISOString(),
-  };
-}
-
-function outOfFuelModelResponse(initialRequest: ModelRequest): ModelResponse {
-  return {
-    responseId: `${initialRequest.requestId}-out-of-fuel`,
-    requestId: initialRequest.requestId,
-    providerId: "agent-turn-runtime",
-    providerKind: "fake",
-    protocolKind: "openai_compatible_chat_completions",
-    model: "out-of-fuel",
-    status: "failed",
-    outputKind: initialRequest.outputContract.outputKind,
-    finishReason: "error",
-    validation: {
-      status: "failed",
-      checkedAt: new Date().toISOString(),
-      issues: [{ code: "out_of_fuel", message: "Agent run paused before the model returned a final no-tool response." }],
-    },
-    failure: {
-      kind: "provider_response",
-      message: "Agent run paused before the model returned a final no-tool response.",
-      retryable: true,
-    },
-    completedAt: new Date().toISOString(),
-  };
-}
-
-function contextOverflowModelResponse(
-  initialRequest: ModelRequest,
-  failure: Extract<ToolUseLoopContextMaintenanceResult, { readonly status: "failed" }>
-): ModelResponse {
-  return {
-    responseId: failure.responseId ?? `${initialRequest.requestId}-context-overflow`,
-    requestId: failure.requestId ?? initialRequest.requestId,
-    providerId: "agent-turn-runtime",
-    providerKind: "fake",
-    protocolKind: "openai_compatible_chat_completions",
-    model: "context-maintenance",
-    status: "failed",
-    outputKind: initialRequest.outputContract.outputKind,
-    finishReason: "error",
-    validation: {
-      status: "failed",
-      checkedAt: new Date().toISOString(),
-      issues: [{ code: "context_overflow", message: failure.message }],
-    },
-    failure: {
-      kind: "provider_response",
-      message: failure.message,
-      retryable: failure.retryable ?? true,
-    },
-    completedAt: new Date().toISOString(),
-  };
-}
-
-function approvalRequiredResultFromPending(pendingApproval: ToolUseLoopPendingApproval): ToolCallResult {
-  const request = pendingApproval.pendingToolCall;
-  const diagnosticRef = `tool:${request.callId}:confirmation-required`;
-  return {
-    callId: request.callId,
-    toolName: request.toolName,
-    input: globalThis.structuredClone(request.input),
-    output: undefined,
-    status: "approval_required",
-    error: `${toolDisplayName(request.toolName)}仍需要用户确认。`,
-    durationMs: 0,
-    projection: {
-      uiSummary: `${toolDisplayName(request.toolName)}仍在等待用户确认。`,
-      diagnosticRef,
-      envelope: projectToolStatusEnvelope({
-        request,
-        status: "approval_required",
-        summary: `${toolDisplayName(request.toolName)}仍在等待用户确认。`,
-        diagnosticRef,
-      }),
-      truncated: false,
-      redacted: true,
-    },
-    confirmationRequest: {
-      confirmationId: pendingApproval.confirmationId,
-      runId: request.callId,
-      title: "需要确认",
-      actionSummary: `${toolDisplayName(request.toolName)}需要用户确认后才能执行。`,
-      affectedResources: [],
-      riskLevel: "medium",
-      requestedAt: new Date().toISOString(),
-      sourceRefs: [`tool:${request.callId}`],
-    },
-  };
-}
-
-function clonePendingApproval(pendingApproval: ToolUseLoopPendingApproval): ToolUseLoopPendingApproval {
-  return {
-    confirmationId: pendingApproval.confirmationId,
-    pendingToolCall: cloneToolCallRequest(pendingApproval.pendingToolCall),
-    remainingToolCallsAfterApproval: pendingApproval.remainingToolCallsAfterApproval.map(cloneToolCallRequest),
-    messagesBeforeToolCall: cloneMessages(pendingApproval.messagesBeforeToolCall),
-    assistantMessage: cloneModelMessage(pendingApproval.assistantMessage),
-    completedToolResults: cloneToolResults(pendingApproval.completedToolResults),
-    toolCallsBeforeApproval: cloneToolResults(pendingApproval.toolCallsBeforeApproval),
-    modelRounds: pendingApproval.modelRounds,
-    rounds: pendingApproval.rounds,
-    requestId: pendingApproval.requestId,
-  };
-}
-
-function assistantToolCallMessage(
-  response: ModelResponse,
-  requestedToolCalls: readonly ToolCallRequest[]
-): ModelMessage {
-  if (response.assistantMessage?.role === "assistant") {
-    return cloneModelMessage({
-      ...response.assistantMessage,
-      content: response.assistantMessage.content ?? response.textOutput ?? "",
-      toolCalls: requestedToolCalls.map(cloneToolCallRequest),
-    });
-  }
-  return {
-    role: "assistant",
-    content: response.textOutput ?? "",
-    toolCalls: requestedToolCalls.map(cloneToolCallRequest),
-  };
-}
-
-function toolResultMessage(result: ToolCallResult): ModelMessage {
-  const envelope = result.projection?.envelope;
-  const modelOutput = envelope !== undefined
-    ? {
-        summary: envelope.agentSummary,
-        evidenceRefs: envelope.evidenceRefs,
-        truncated: envelope.truncated,
-        redacted: envelope.redacted,
-        diagnosticRef: envelope.diagnosticRef,
-      }
-    : result.projection?.agentContent !== undefined
-      ? result.projection.agentContent
-      : toSafeToolEventValue(result.output);
-  return {
-    role: "tool",
-    content: truncateToolMessageContent(JSON.stringify({
-      callId: result.callId,
-      toolName: result.toolName,
-      status: result.status,
-      output: modelOutput,
-      error: result.error,
-      durationMs: result.durationMs,
-    })),
-    toolCallId: result.callId,
-    toolName: result.toolName,
-  };
-}
-
-const MAX_TOOL_MESSAGE_CHARS = 40_000;
-
-function truncateToolMessageContent(value: string): string {
-  if (value.length <= MAX_TOOL_MESSAGE_CHARS) {
-    return value;
-  }
-  return `${value.slice(0, MAX_TOOL_MESSAGE_CHARS - 80)}... [tool message truncated to ${MAX_TOOL_MESSAGE_CHARS} chars]`;
-}
-
-function cloneMessages(messages: readonly ModelMessage[]): ModelMessage[] {
-  return messages.map(cloneModelMessage);
-}
-
-function cloneModelMessage(message: ModelMessage): ModelMessage {
-  return {
-    ...message,
-    protocolExtensions:
-      message.protocolExtensions === undefined ? undefined : globalThis.structuredClone(message.protocolExtensions),
-    toolCalls: message.toolCalls?.map(cloneToolCallRequest),
-  };
-}
-
-function cloneToolCallRequest(request: ToolCallRequest): ToolCallRequest {
-  return {
-    callId: request.callId,
-    toolName: request.toolName,
-    input: globalThis.structuredClone(request.input),
-  };
-}
-
-function cloneToolResults(results: readonly ToolCallResult[]): ToolCallResult[] {
-  return results.map((result) => ({
-    ...result,
-    input: globalThis.structuredClone(result.input),
-    output: globalThis.structuredClone(result.output),
-    projection:
-      result.projection === undefined ? undefined : globalThis.structuredClone(result.projection),
-    confirmationRequest:
-      result.confirmationRequest === undefined ? undefined : globalThis.structuredClone(result.confirmationRequest),
-  }));
 }

@@ -2,59 +2,22 @@ import type { ModelMessage } from "../../domain/intelligence/index.js";
 import type { ModelCapabilities } from "../../domain/config/index.js";
 import type { ObservationRef } from "../../domain/observation/index.js";
 import type { TaskSoil } from "../../domain/soil/index.js";
-import type { DesktopAgentConversationMessage } from "../desktop-agent-session.js";
-import type { DesktopAgentSkillContext } from "../desktop-agent-prompts.js";
+import type { DesktopAgentConversationMessage, DesktopAgentSkillContext } from "../desktop-agent-contracts.js";
 import { createBasicAgentContextLedger } from "./context-ledger.js";
 import type { BasicAgentConversationSummary } from "./conversation-compaction.js";
+import type {
+  BasicAgentContextItem,
+  BasicAgentContextPack,
+} from "./contracts.js";
 import type { BasicAgentTokenCounter } from "./token-counter.js";
 
-export type BasicAgentContextSourceKind =
-  | "system"
-  | "skill"
-  | "conversation"
-  | "conversation_summary"
-  | "conversation_recent_turn"
-  | "user_message"
-  | "task_soil_ref"
-  | "tool_evidence";
-
-export type BasicAgentContextItem = {
-  readonly itemId: string;
-  readonly sourceKind: BasicAgentContextSourceKind;
-  readonly role?: "user" | "assistant";
-  readonly summary: string;
-  readonly refs: readonly ObservationRef[];
-  readonly visibility: "model" | "diagnostic";
-  readonly truncated: boolean;
-};
-
-export type BasicAgentContextBudget = {
-  readonly maxMessages: number;
-  readonly maxInputTokens: number;
-  readonly usedInputTokens: number;
-  readonly tokenCountSource: string;
-  readonly maxChars: number;
-  readonly usedChars: number;
-  readonly inputTokenBudget?: number;
-  readonly reservedOutputTokens?: number;
-  readonly budgetSource: "default" | "model_capabilities" | "override";
-};
-
-export type BasicAgentContextTruncationReport = {
-  readonly truncated: boolean;
-  readonly omittedItemCount: number;
-  readonly truncatedItemIds: readonly string[];
-};
-
-export type BasicAgentContextPack = {
-  readonly messages: readonly ModelMessage[];
-  readonly inputRefs: readonly ObservationRef[];
-  readonly items: readonly BasicAgentContextItem[];
-  readonly budget: BasicAgentContextBudget;
-  readonly usageSummary: string;
-  readonly truncationReport: BasicAgentContextTruncationReport;
-  readonly truncated: boolean;
-};
+export type {
+  BasicAgentContextBudget,
+  BasicAgentContextItem,
+  BasicAgentContextPack,
+  BasicAgentContextSourceKind,
+  BasicAgentContextTruncationReport,
+} from "./contracts.js";
 
 export type BuildBasicAgentContextPackInput = {
   readonly goal: string;

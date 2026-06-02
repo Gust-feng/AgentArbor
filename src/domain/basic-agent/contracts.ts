@@ -1,5 +1,7 @@
-import type { ObservationRef } from "../observation/index.js";
-import type { ToolDisplayProjection, ToolResultEnvelope } from "../tools/index.js";
+import type { ObservationRef } from "../observation/contracts.js";
+import type { ToolDisplayProjection, ToolResultEnvelope } from "../tools/contracts.js";
+import type { ConfirmationRequest } from "./confirmation-contracts.js";
+export type { ConfirmationDecision, ConfirmationRequest, ConfirmationRiskLevel } from "./confirmation-contracts.js";
 
 export type AgentTaskStatus =
   | "queued"
@@ -94,30 +96,6 @@ export type TranscriptNode = {
   readonly display?: ToolDisplayProjection;
   readonly confirmation?: ConfirmationRequest;
   readonly refs: readonly ObservationRef[];
-};
-
-export type ConfirmationRiskLevel = "low" | "medium" | "high";
-
-export type ConfirmationRequest = {
-  readonly confirmationId: string;
-  readonly runId: string;
-  readonly conversationId?: string;
-  readonly title: string;
-  readonly actionSummary: string;
-  readonly affectedResources: readonly string[];
-  readonly riskLevel: ConfirmationRiskLevel;
-  readonly resumeAvailability?: "live" | "lost_after_restart";
-  readonly requestedAt: string;
-  readonly expiresAt?: string;
-  readonly sourceRefs: readonly string[];
-};
-
-export type ConfirmationDecision = {
-  readonly confirmationId: string;
-  readonly runId: string;
-  readonly decision: "approve_once" | "deny" | "guidance";
-  readonly decidedAt: string;
-  readonly guidance?: string;
 };
 
 export type SkillDefinition = {

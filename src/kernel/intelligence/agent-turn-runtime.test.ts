@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
-import type { AgentTurnPermissionPolicy } from "../../domain/common.js";
 import type { IntelligenceChannel, ModelRequest, ModelResponse } from "../../domain/intelligence/index.js";
 import type {
   ToolCallRequest,
@@ -12,7 +11,6 @@ import type {
   ToolExecutionContext,
   ToolPermissionCheck,
 } from "../../domain/tools/index.js";
-import { createUndergroundAgentClusterManifests } from "../../app/agents/manifests.js";
 import { InMemoryEventLog } from "../events/in-memory-event-log.js";
 import { nowIso } from "../id.js";
 import { pendingModelOutputValidation } from "./validation.js";
@@ -21,14 +19,15 @@ import { AgentTurnRuntime, type AgentTurnPolicy } from "./agent-turn-runtime.js"
 test("AgentTurnRuntime skips model calls when policy disables model access", async () => {
   const channel = new SequenceIntelligenceChannel([]);
   const runtime = new AgentTurnRuntime({ intelligenceChannel: channel });
-  const manifest = createUndergroundAgentClusterManifests().find(
-    (candidate) => candidate.id === "underground-intent-core"
-  );
 
-  assert.equal(manifest?.turnPolicy.allowModel, false);
-  const result = await runtime.execute(
-    createTurnInput(policyFromManifest(manifest!.turnPolicy, { callerAgentId: manifest!.id }))
-  );
+  const result = await runtime.execute(createTurnInput({
+    allowModel: false,
+    allowedTools: [],
+    maxModelRounds: 0,
+    maxToolRounds: 0,
+    fallback: "disabled",
+    callerAgentId: "disabled-agent",
+  }));
 
   assert.equal(result.status, "disabled");
   assert.equal(result.stoppedReason, "model_disabled");
@@ -373,21 +372,6 @@ function createTurnInput(policyOverrides: Partial<AgentTurnPolicy> = {}) {
     constraintRefs: [],
     requestId: "model-request-test",
     requestedAt: "2026-05-04T00:00:00.000Z",
-  };
-}
-
-function policyFromManifest(
-  manifestPolicy: AgentTurnPermissionPolicy,
-  overrides: Partial<AgentTurnPolicy> = {}
-): AgentTurnPolicy {
-  return {
-    ...createTurnInput().policy,
-    allowModel: manifestPolicy.allowModel,
-    allowedTools: manifestPolicy.allowedTools,
-    maxModelRounds: manifestPolicy.maxModelRounds,
-    maxToolRounds: manifestPolicy.maxToolRounds,
-    fallback: manifestPolicy.fallback,
-    ...overrides,
   };
 }
 

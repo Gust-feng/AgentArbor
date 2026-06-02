@@ -4,16 +4,22 @@ import type { ToolCategory, ToolExecutor } from "../../domain/tools/index.js";
 import type { McpManager } from "../../adapters/mcp/index.js";
 import {
   createBrowserSnapshotTool,
+} from "../tool-center/adapters/browser-tool.js";
+import {
   createLocalCreateFileTool,
   createLocalDeleteFileTool,
   createLocalEditFileTool,
   createLocalGrepFilesTool,
   createLocalListDirTool,
   createLocalReadFileTool,
+} from "../tool-center/adapters/local-workspace-tools.js";
+import {
   createLocalRunCommandTool,
   createLocalShellCommandTool,
+} from "../tool-center/adapters/local-workspace-command-tools.js";
+import {
   createLocalWorkspaceSandboxPolicy,
-} from "../tool-center/index.js";
+} from "../tool-center/adapters/local-workspace-sandbox.js";
 import {
   createDefaultResearchRuntime,
   createResearchReadTool,
@@ -55,15 +61,16 @@ export function createDesktopBasicToolRegistry(
 ): ToolRegistry {
   const env = options.env ?? process.env;
   const registry = new ToolRegistry();
+  const workspaceRoot = options.workspaceRoot ?? process.cwd();
   const researchRuntime = createDefaultResearchRuntime({
     env,
     tavilyFetch: options.fetch,
     pageFetch: options.fetch as unknown as PageFetchLike,
+    codebaseRoot: workspaceRoot,
     constraints: options.runtime?.constraints,
     sourcePreference: options.sourcePreference ?? parseInformationSourcePreference(env.AGENTARBOR_INFORMATION_SOURCE_PREFERENCE),
     tavilyMaxResults: options.tavilyMaxResults ?? positiveIntegerFromString(env.AGENTARBOR_TAVILY_MAX_RESULTS),
   });
-  const workspaceRoot = options.workspaceRoot ?? process.cwd();
   const sandboxPolicy = createLocalWorkspaceSandboxPolicy();
   const playwrightAvailable = options.playwrightAvailable ?? isPackageResolvable("playwright");
   const executors: readonly ToolExecutor[] = [

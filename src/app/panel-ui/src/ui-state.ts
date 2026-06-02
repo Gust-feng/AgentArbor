@@ -1,4 +1,4 @@
-import type { TaskStatus } from "./types";
+import type { TaskStatus } from "./contracts/common";
 
 export type SettingsTab = "model" | "workspace" | "skills" | "tools" | "safety";
 

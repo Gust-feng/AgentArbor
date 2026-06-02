@@ -1,0 +1,197 @@
+import type { LiveModelTurnBuffer, LiveRunBuffer } from "./panel-ui-live-run-buffer.js";
+
+export type LiveTranscriptObservationRef = {
+  readonly kind: string;
+  readonly id: string;
+  readonly label?: string;
+};
+
+export type LiveTranscriptNode = {
+  readonly nodeId: string;
+  readonly runId: string;
+  readonly sequence: number;
+  readonly eventType: string;
+  readonly kind: "thinking" | "tool" | "confirmation" | "user_decision" | "answer" | "system";
+  readonly phase:
+    | "noted"
+    | "preparing"
+    | "waiting_approval"
+    | "approved"
+    | "denied"
+    | "guidance"
+    | "executing"
+    | "completed"
+    | "failed"
+    | "blocked"
+    | "cancelled";
+  readonly title: string;
+  readonly summary?: string;
+  readonly text?: string;
+  readonly timestamp: string;
+  readonly refs: readonly LiveTranscriptObservationRef[];
+};
+
+export type LiveAnswerTone = "formal" | "process";
+
+export type LiveAnswerProjection = {
+  readonly text: string;
+  readonly tone: LiveAnswerTone;
+  readonly streaming: boolean;
+};
+
+export type LiveRunTranscriptProjection = {
+  readonly nodes: readonly LiveTranscriptNode[];
+  readonly answer?: LiveAnswerProjection;
+};
+
+export function projectLiveRunTranscript(
+  nodes: readonly LiveTranscriptNode[],
+  live: LiveRunBuffer | undefined
+): LiveRunTranscriptProjection {
+  const projectedNodes = withLiveTranscriptNodes(nodes, live);
+  return {
+    nodes: projectedNodes,
+    answer: liveStreamingAnswer(live, projectedNodes),
+  };
+}
+
+export function withLiveTranscriptNodes(
+  nodes: readonly LiveTranscriptNode[],
+  live: LiveRunBuffer | undefined
+): readonly LiveTranscriptNode[] {
+  if (live === undefined) return nodes;
+  let next = nodes;
+
+  for (const turn of live.turns) {
+    if (turn.reasoningText.trim().length > 0) {
+      const existing = findLiveThinkingNode(next, turn);
+      const liveNode = liveThinkingNode(live.runId, turn, existing);
+      next = existing === undefined ? [...next, liveNode] : next.map((node) => node === existing ? liveNode : node);
+    }
+    if (turn.sideText.trim().length > 0) {
+      const existing = next.find((node) =>
+        node.kind === "system" &&
+        (node.eventType === "model.side.completed" || node.eventType === "model.output.side") &&
+        sameModelRefs(node, turn.modelRefs)
+      );
+      const liveNode = liveSideTextNode(live.runId, turn, existing);
+      next = existing === undefined ? [...next, liveNode] : next.map((node) => node === existing ? liveNode : node);
+    }
+  }
+
+  return next;
+}
+
+export function liveStreamingAnswer(
+  live: LiveRunBuffer | undefined,
+  nodes: readonly LiveTranscriptNode[]
+): LiveAnswerProjection | undefined {
+  const liveTurn = live === undefined
+    ? undefined
+    : [...live.turns].reverse().find((turn) => turn.outputText.trim().length > 0);
+  if (liveTurn !== undefined) {
+    return {
+      text: liveTurn.outputText,
+      tone: liveOutputFollowsToolResult(liveTurn, nodes) ? "formal" : "process",
+      streaming: true,
+    };
+  }
+  const answerNode = [...nodes].reverse().find((node) => node.kind === "answer" && (node.text?.trim().length ?? 0) > 0);
+  return answerNode?.text === undefined ? undefined : { text: answerNode.text.trim(), tone: "formal", streaming: false };
+}
+
+function findLiveThinkingNode(nodes: readonly LiveTranscriptNode[], turn: LiveModelTurnBuffer): LiveTranscriptNode | undefined {
+  return nodes.find((node) => node.kind === "thinking" && sameModelRefs(node, turn.modelRefs)) ??
+    nodes.find((node) => node.kind === "thinking" && isModelReasoningNode(node) && sameReasoningText(node, turn));
+}
+
+function sameModelRefs(node: LiveTranscriptNode, modelRefs: readonly string[]): boolean {
+  if (modelRefs.length === 0) return false;
+  const refs = node.refs.filter((ref) => ref.kind === "model_call").map((ref) => ref.id);
+  return refs.some((ref) => modelRefs.includes(ref));
+}
+
+function isModelReasoningNode(node: LiveTranscriptNode): boolean {
+  return node.eventType === "model.reasoning.delta" || node.eventType === "model.reasoning.completed";
+}
+
+function sameReasoningText(node: LiveTranscriptNode, turn: LiveModelTurnBuffer): boolean {
+  const nodeText = normalizeComparableText(node.text ?? node.summary ?? "");
+  const liveText = normalizeComparableText(turn.reasoningText);
+  if (nodeText.length === 0 || liveText.length === 0) return false;
+  if (nodeText === liveText) return true;
+  return !turn.reasoningCompleted && (nodeText.startsWith(liveText) || liveText.startsWith(nodeText));
+}
+
+function liveThinkingNode(runId: string, turn: LiveModelTurnBuffer, existing: LiveTranscriptNode | undefined): LiveTranscriptNode {
+  const text = turn.reasoningText.trim();
+  const completed = turn.reasoningCompleted || existing?.eventType === "model.reasoning.completed" || existing?.phase === "completed";
+  const modelRefs = turn.modelRefs.map((id): LiveTranscriptObservationRef => ({ kind: "model_call", id }));
+  return {
+    nodeId: `${runId}:live:${turn.requestId}:thinking`,
+    runId,
+    sequence: existing?.sequence ?? turn.updatedAtSequence,
+    eventType: completed ? "model.reasoning.completed" : "model.reasoning.delta",
+    kind: "thinking",
+    phase: completed ? "completed" : "noted",
+    title: "思考",
+    summary: compact(text, 180),
+    text,
+    timestamp: existing?.timestamp ?? "",
+    refs: existing === undefined ? modelRefs : mergeRefs(existing.refs, modelRefs),
+  };
+}
+
+function liveSideTextNode(runId: string, turn: LiveModelTurnBuffer, existing: LiveTranscriptNode | undefined): LiveTranscriptNode {
+  const text = turn.sideText.trim();
+  const modelRefs = turn.modelRefs.map((id): LiveTranscriptObservationRef => ({ kind: "model_call", id }));
+  return {
+    nodeId: `${runId}:live:${turn.requestId}:side-text`,
+    runId,
+    sequence: existing?.sequence ?? Math.max(0, turn.updatedAtSequence - 0.1),
+    eventType: "model.output.side",
+    kind: "system",
+    phase: "completed",
+    title: "",
+    summary: compact(text, 220),
+    text,
+    timestamp: existing?.timestamp ?? "",
+    refs: existing === undefined ? modelRefs : mergeRefs(existing.refs, modelRefs),
+  };
+}
+
+function liveOutputFollowsToolResult(turn: LiveModelTurnBuffer, nodes: readonly LiveTranscriptNode[]): boolean {
+  const latestToolResultSequence = nodes.reduce((latest, node) => (
+    node.kind === "tool" && (node.eventType === "tool.completed" || node.eventType === "tool.failed")
+      ? Math.max(latest, node.sequence)
+      : latest
+  ), 0);
+  return latestToolResultSequence > 0 && turn.updatedAtSequence > latestToolResultSequence;
+}
+
+function mergeRefs(
+  left: readonly LiveTranscriptObservationRef[],
+  right: readonly LiveTranscriptObservationRef[]
+): readonly LiveTranscriptObservationRef[] {
+  const seen = new Set<string>();
+  const result: LiveTranscriptObservationRef[] = [];
+  for (const ref of [...left, ...right]) {
+    const key = `${ref.kind}:${ref.id}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(ref);
+  }
+  return result;
+}
+
+function normalizeComparableText(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function compact(value: string, maxLength: number): string {
+  const normalized = String(value || "").replace(/\s+/g, " ").trim();
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+  return `${normalized.slice(0, maxLength - 1)}…`;
+}

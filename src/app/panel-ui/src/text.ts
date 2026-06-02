@@ -1,4 +1,5 @@
-import type { RunEvent, TaskStatus } from "./types";
+import type { TaskStatus } from "./contracts/common";
+import type { RunEvent } from "./contracts/run";
 
 export const STATUS_LABELS: Record<TaskStatus, string> = {
   queued: "排队中",

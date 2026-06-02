@@ -1,0 +1,37 @@
+.assistant-error-message {
+  margin: 0;
+  color: var(--status-danger);
+  font-size: 13px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.assistant-message-pending .assistant-message-body {
+  padding-top: 6px;
+}
+
+.turn-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 8px;
+  opacity: 0;
+  transition: opacity var(--motion-fast-duration) var(--motion-ease-standard);
+}
+
+.assistant-message:hover .turn-actions,
+.assistant-message:focus-within .turn-actions {
+  opacity: 1;
+}
+
+.turn-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 8px;
+  padding: 4px 8px;
+  color: var(--placeholder);
+  font-size: 12px;
+  line-height: 1.35;
+}

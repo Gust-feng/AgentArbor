@@ -1,7 +1,8 @@
 import React from "react";
 import { CheckCircle2, FolderOpen, PanelLeft } from "lucide-react";
 import { compact, STATUS_LABELS } from "../text";
-import type { BasicAgentRun, ConfigResponse } from "../types";
+import type { ConfigResponse } from "../contracts/config";
+import type { BasicAgentRun } from "../contracts/run";
 
 export function TopBar(props: {
   readonly sidebarCollapsed: boolean;

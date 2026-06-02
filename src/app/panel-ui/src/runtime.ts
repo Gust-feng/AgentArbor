@@ -1,5 +1,7 @@
 import { getJson } from "./api";
-import type { BasicAgentRun, Conversation, DesktopRunDetail, DesktopWorkSession, RunEvent, ToolDisplayProjection } from "./types";
+import type { Conversation } from "./contracts/conversation";
+import type { BasicAgentRun, DesktopRunDetail, DesktopWorkSession, RunEvent } from "./contracts/run";
+import type { ToolDisplayProjection } from "./contracts/tools";
 
 const BASIC_RUN_EVENT_TYPES = [
   "run.started",
@@ -45,9 +47,14 @@ export async function safeBasicRun(runId: string): Promise<BasicAgentRun | undef
   }
 }
 
-export async function safeBasicEvents(runId: string, cursor: number): Promise<{ readonly events: readonly RunEvent[] } | undefined> {
+export async function safeBasicEvents(
+  runId: string,
+  cursor: number
+): Promise<{ readonly events: readonly RunEvent[]; readonly cursor: { readonly lastSequence: number } } | undefined> {
   try {
-    return await getJson<{ readonly events: readonly RunEvent[] }>(`/api/basic-agent/runs/${encodeURIComponent(runId)}/events?cursor=${cursor}`);
+    return await getJson<{ readonly events: readonly RunEvent[]; readonly cursor: { readonly lastSequence: number } }>(
+      `/api/basic-agent/runs/${encodeURIComponent(runId)}/events?cursor=${cursor}`
+    );
   } catch {
     return undefined;
   }

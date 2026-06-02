@@ -1,7 +1,7 @@
 import type { ChatModelOption } from "./components/chat-empty";
 import { resolveModelIconSvg } from "./model-icons";
 import { modelProviderDisplayName, modelProviderSortRank, resolveModelProviderIdentity } from "./model-provider-logos";
-import type { ConfigResponse, ModelProviderModelCatalog } from "./types";
+import type { ConfigResponse, ModelProviderModelCatalog } from "./contracts/config";
 
 type ConfigModelProfile = NonNullable<ConfigResponse["profiles"]>[number];
 type ConfigModelProfileWithId = ConfigModelProfile & { readonly profileId: string };

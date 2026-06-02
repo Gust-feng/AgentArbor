@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 import { isConversationWaitingForUser } from "../conversation-state";
 import { compact, relativeTime } from "../text";
-import type { ConversationSummary } from "../types";
+import type { ConversationSummary } from "../contracts/conversation";
 
 export type Screen = "chat-empty" | "chat-active" | "skills" | "tools";
 

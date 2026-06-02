@@ -1,0 +1,200 @@
+import type {
+  ConfigResponse,
+  ModelProviderModelCatalog,
+  ModelProviderPreset,
+} from "../contracts/config";
+import {
+  modelProviderDisplayName,
+  modelProviderSortRank,
+  resolveModelProviderIdentity,
+  type ModelProviderIdentity,
+} from "../model-provider-logos";
+
+export type ModelForm = {
+  readonly profileId: string;
+  readonly label: string;
+  readonly baseUrl: string;
+  readonly protocolKind: string;
+  readonly model: string;
+  readonly apiKey: string;
+  readonly apiKeyCleared: boolean;
+};
+
+export type ModelProviderProfileItem = NonNullable<ConfigResponse["profiles"]>[number];
+export type ModelProviderModelItem = ModelProviderModelCatalog["models"][number];
+
+export type ModelProviderListItem = {
+  readonly key: string;
+  readonly title: string;
+  readonly vendor?: string;
+  readonly model: string;
+  readonly baseUrl: string;
+  readonly protocolKind: string;
+  readonly profileId?: string;
+  readonly profile?: ModelProviderProfileItem;
+  readonly presetId?: string;
+  readonly preset?: ModelProviderPreset;
+};
+
+export function filterModelCatalogItems(
+  models: readonly ModelProviderModelItem[],
+  normalizedQuery: string
+): readonly ModelProviderModelItem[] {
+  if (normalizedQuery.length === 0) return models;
+  return models.filter((model) => [model.displayName, model.id, model.owner ?? ""].some((value) => value.toLowerCase().includes(normalizedQuery)));
+}
+
+export function formatModelCount(visible: number, total: number, filtered: boolean): string {
+  return filtered ? `${visible}/${total}` : String(total);
+}
+
+export function modelProviderItems(
+  config: ConfigResponse | undefined
+): readonly ModelProviderListItem[] {
+  const profiles = (config?.profiles ?? []).filter(isOpenAIFormatProfile);
+  const presets = (config?.modelProviderMarket?.presets ?? []).filter(isOpenAIFormatPreset);
+  const activeProfileId = config?.config?.profileId;
+  const profileBindings = profiles.map((profile) => ({
+    profile,
+    identity: resolveModelProviderIdentity({
+      profileId: profile.profileId,
+      title: profile.label,
+      baseUrl: profile.baseUrl,
+      model: profile.model,
+    }),
+  }));
+  const boundProfileIds = new Set<string>();
+  const presetItems = presets.map((preset) => {
+    const presetIdentity = resolveModelProviderIdentity(preset);
+    const bindings = profileBindings.filter((item) => {
+      if (item.profile.profileId === preset.presetId) return true;
+      return presetIdentity !== "unknown" && item.identity === presetIdentity;
+    });
+    for (const item of bindings) {
+      if (item.profile.profileId !== undefined) {
+        boundProfileIds.add(item.profile.profileId);
+      }
+    }
+    const binding =
+      bindings.find((item) => item.profile.profileId === activeProfileId) ??
+      bindings.find((item) => item.profile.profileId === preset.presetId) ??
+      bindings[0];
+    if (binding?.profile.profileId !== undefined) {
+      boundProfileIds.add(binding.profile.profileId);
+    }
+    const profile = binding?.profile;
+    const configuredModel = profile?.model ?? preset.defaultModel ?? "";
+    return {
+      key: profile?.profileId === undefined ? `preset:${preset.presetId}` : `profile:${profile.profileId}`,
+      title: presetIdentity === "unknown" ? preset.label : modelProviderDisplayName(presetIdentity),
+      vendor: preset.vendor,
+      model: configuredModel,
+      baseUrl: profile === undefined ? preset.baseUrl : visibleProfileBaseUrl(profile),
+      protocolKind: profile?.protocolKind ?? preset.protocolKind,
+      profileId: profile?.profileId,
+      profile,
+      presetId: preset.presetId,
+      preset,
+    } satisfies ModelProviderListItem;
+  });
+  const customItems = profileBindings
+    .filter((item) => item.profile.profileId === undefined || !boundProfileIds.has(item.profile.profileId))
+    .map(({ profile, identity }) => {
+      const configuredModel = profile.model ?? "";
+      return {
+        key: `profile:${profile.profileId ?? profile.label ?? profile.baseUrl ?? profile.model ?? "custom"}`,
+        title: friendlyProfileTitle(profile, identity),
+        model: configuredModel,
+        baseUrl: visibleProfileBaseUrl(profile),
+        protocolKind: profile.protocolKind ?? "openai_compatible_chat_completions",
+        profileId: profile.profileId,
+        profile,
+      } satisfies ModelProviderListItem;
+    });
+  return [...presetItems, ...customItems]
+    .map((item, index) => ({ item, index }))
+    .sort((left, right) => {
+      const rankDelta = modelProviderSortRank(left.item) - modelProviderSortRank(right.item);
+      return rankDelta === 0 ? left.index - right.index : rankDelta;
+    })
+    .map(({ item }) => item);
+}
+
+export function modelCatalogItemsWithConfiguredModel(
+  models: readonly ModelProviderModelItem[],
+  configuredModel: string | undefined,
+  owner: string
+): readonly ModelProviderModelItem[] {
+  const modelId = configuredModel?.trim();
+  if (modelId === undefined || modelId.length === 0 || models.some((model) => model.id === modelId)) {
+    return models;
+  }
+  return [
+    {
+      id: modelId,
+      displayName: modelId,
+      owner,
+    },
+    ...models,
+  ];
+}
+
+export function modelProviderFormId(item: ModelProviderListItem): string {
+  return item.profileId ?? item.presetId ?? item.key;
+}
+
+export function modelFormFromProviderItem(item: ModelProviderListItem): ModelForm {
+  return {
+    profileId: modelProviderFormId(item),
+    label: item.title,
+    baseUrl: item.baseUrl,
+    protocolKind: item.protocolKind,
+    model: item.model,
+    apiKey: "",
+    apiKeyCleared: false,
+  };
+}
+
+export function requestPathOptionsForProvider(item: ModelProviderListItem): readonly { readonly value: string; readonly label: string }[] {
+  const providerKind = item.profile?.providerKind ?? item.preset?.providerKind;
+  if (providerKind === "anthropic") {
+    return [{ value: "anthropic_messages", label: "/v1/messages" }];
+  }
+  if (providerKind === "gemini") {
+    return [{ value: "gemini_generate_content", label: "/generateContent" }];
+  }
+  if (providerKind === "ollama") {
+    return [{ value: "ollama_generate", label: "/api/generate" }];
+  }
+  return [
+    { value: "openai_responses", label: "/responses" },
+    { value: "openai_compatible_chat_completions", label: "/chat/completions" },
+  ];
+}
+
+export function visibleProfileBaseUrl(profile: ModelProviderProfileItem): string {
+  const baseUrl = profile.baseUrl ?? "";
+  if (profile.profileId === "default" && (baseUrl.length === 0 || baseUrl === "https://api.openai.com")) {
+    return "https://api.openai.com/v1";
+  }
+  return baseUrl;
+}
+
+function isOpenAIFormatPreset(preset: ModelProviderPreset): boolean {
+  return preset.providerKind === "openai_compatible" &&
+    (preset.protocolKind === "openai_responses" || preset.protocolKind === "openai_compatible_chat_completions");
+}
+
+function isOpenAIFormatProfile(profile: ModelProviderProfileItem): boolean {
+  return profile.providerKind === "openai_compatible" &&
+    (profile.protocolKind === "openai_responses" || profile.protocolKind === "openai_compatible_chat_completions");
+}
+
+function friendlyProfileTitle(profile: ModelProviderProfileItem, identity: ModelProviderIdentity): string {
+  const raw = profile.label ?? profile.profileId ?? "";
+  if (identity !== "unknown") return modelProviderDisplayName(identity);
+  if (raw.trim().length === 0) return "自定义厂商";
+  if (raw.toLowerCase() === "default") return "OpenAI";
+  if (raw.toLowerCase() === "custom") return "自定义厂商";
+  return raw;
+}

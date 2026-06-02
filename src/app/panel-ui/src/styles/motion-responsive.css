@@ -1,0 +1,264 @@
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes bounce {
+  0%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.45;
+  }
+  50% {
+    transform: translateY(-3px);
+    opacity: 1;
+  }
+}
+
+@keyframes agent-stream-breathe {
+  0%,
+  100% {
+    opacity: 0.42;
+    transform: scale(0.82);
+  }
+  45% {
+    opacity: 0.95;
+    transform: scale(1.08);
+  }
+}
+
+@keyframes modal-card-enter {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 8px, 0) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@media (max-width: 1180px) {
+  .chat-empty-grid,
+  .chat-active-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 920px) {
+  .app-sidebar {
+    width: 68px !important;
+  }
+
+  .app-sidebar .sidebar-rail-button {
+    grid-template-columns: var(--sidebar-rail-control) minmax(0, 0fr);
+    column-gap: 0;
+  }
+
+  .app-sidebar .sidebar-label,
+  .app-sidebar .sidebar-expandable {
+    pointer-events: none;
+    opacity: 0;
+  }
+
+  .topbar-chips {
+    display: none;
+  }
+
+  .chat-empty-main,
+  .chat-active-scroll {
+    padding: 24px 20px 38px;
+    scroll-padding-bottom: 38px;
+  }
+
+  .chat-empty-copy h1 {
+    font-size: 26px;
+  }
+
+  .skill-grid,
+  .model-catalog-grid,
+  .settings-model-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .tool-row,
+  .tool-config-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .workspace-filter-row,
+  .workspace-page-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .chat-empty-status-row,
+  .chat-empty-recent-list {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-dialog {
+    grid-template-columns: 72px minmax(0, 1fr);
+  }
+
+  .settings-sidebar nav button {
+    grid-template-columns: 1fr;
+    justify-items: center;
+    padding: 0;
+  }
+
+  .settings-sidebar nav button span,
+  .settings-sidebar nav button svg:last-child {
+    display: none;
+  }
+}
+
+@media (max-width: 760px) {
+  .chat-empty-grid {
+    padding-top: 48px;
+  }
+
+  .chat-input-toolbar,
+  .confirmation-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .chat-input-left,
+  .chat-input-right {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .model-select-button {
+    max-width: 170px;
+  }
+
+  .context-popover {
+    left: 0;
+    width: min(520px, calc(100vw - 112px));
+  }
+
+  .agent-timeline-track {
+    padding-left: 18px;
+  }
+
+  .agent-timeline-marker {
+    left: -16px;
+  }
+
+  .agent-timeline-event {
+    width: 100%;
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .agent-timeline-event-main,
+  .agent-timeline-event-main > span,
+  .agent-timeline-event small,
+  .transcript-detail-row strong,
+  .transcript-detail-row em,
+  .transcript-detail-row span {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .file-change-review-header {
+    display: grid;
+    gap: 8px;
+  }
+
+  .file-change-stats {
+    justify-content: flex-start;
+  }
+
+  .file-diff-line {
+    grid-template-columns: 18px minmax(0, 1fr);
+  }
+
+  .file-diff-line small {
+    grid-column: 2;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .settings-row {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+}
+
+.activity-copy-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: inline-grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border: 1px solid color-mix(in oklch, var(--border) 72%, transparent);
+  border-radius: 6px;
+  background: color-mix(in oklch, var(--surface) 82%, transparent);
+  color: color-mix(in oklch, var(--muted) 82%, var(--fg));
+  opacity: 0;
+  transition:
+    opacity var(--motion-fast-duration) var(--motion-ease-standard),
+    color var(--motion-fast-duration) var(--motion-ease-standard),
+    background var(--motion-fast-duration) var(--motion-ease-standard);
+}
+
+.transcript-command-block:hover .activity-copy-btn,
+.transcript-command-block:focus-within .activity-copy-btn {
+  opacity: 1;
+}
+
+.activity-copy-btn:hover {
+  background: var(--surface);
+  color: var(--fg);
+}
+
+.btn-open-workspace {
+  display: inline-flex;
+  height: 32px;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-subtle);
+  padding: 0 12px;
+  color: var(--fg);
+  font-size: 12px;
+  font-weight: 620;
+}
+
+.btn-open-workspace:hover {
+  border-color: var(--accent-border);
+  color: var(--accent-active);
+}
+
+@media (max-width: 760px) {
+  .agent-thinking-line {
+    width: 100%;
+    padding-inline: 6px;
+  }
+
+  .agent-tool-line-main {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+
+  .agent-tool-target {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    transition-duration: 1ms !important;
+  }
+}

@@ -167,12 +167,7 @@ function liveModelRequestId(event: RunEventLike): string | undefined {
 }
 
 function appendLiveText(current: string, next: string): string {
-  if (current.length === 0 || next.length === 0) return `${current}${next}`;
-  if (/\s$/.test(current) || /^\s/.test(next)) return `${current}${next}`;
-  if (/^[,.;:!?，。；：！？)\]}”’]/.test(next)) return `${current}${next}`;
-  if (/[(\[{“‘]$/.test(current)) return `${current}${next}`;
-  if (/[\u3400-\u9fff\u3040-\u30ff]$/u.test(current) && /^[\u3400-\u9fff\u3040-\u30ff]/u.test(next)) return `${current}${next}`;
-  return `${current} ${next}`;
+  return `${current}${next}`;
 }
 
 function uniqueStrings(values: readonly string[]): readonly string[] {

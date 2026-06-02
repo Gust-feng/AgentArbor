@@ -1,0 +1,241 @@
+.agent-work-timeline {
+  display: grid;
+  width: min(780px, 100%);
+  min-width: 0;
+  gap: 6px;
+  color: color-mix(in oklch, var(--muted) 90%, var(--fg));
+}
+
+.agent-timeline-track {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+  padding-left: 22px;
+}
+
+.agent-timeline-track::before {
+  content: "";
+  position: absolute;
+  top: 10px;
+  bottom: 10px;
+  left: 6px;
+  width: 1px;
+  background: linear-gradient(
+    180deg,
+    transparent,
+    color-mix(in oklch, var(--border) 72%, transparent) 10%,
+    color-mix(in oklch, var(--border) 72%, transparent) 90%,
+    transparent
+  );
+}
+
+.agent-timeline-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+  padding: 2px 0 2px 0;
+}
+
+.agent-timeline-marker {
+  position: absolute;
+  top: 14px;
+  left: -19px;
+  z-index: 1;
+  width: 8px;
+  height: 8px;
+  border: 1px solid color-mix(in oklch, var(--surface) 80%, var(--border));
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--muted) 58%, var(--surface));
+  box-shadow: 0 0 0 3px var(--bg);
+}
+
+.agent-timeline-row.done .agent-timeline-marker {
+  background: color-mix(in oklch, var(--status-success) 64%, var(--muted));
+}
+
+.agent-timeline-row.active .agent-timeline-marker,
+.agent-timeline-row[data-open="true"][data-kind="thinking"] .agent-timeline-marker {
+  border-color: color-mix(in oklch, var(--accent-strong) 48%, var(--surface));
+  background: var(--accent-strong);
+  box-shadow:
+    0 0 0 3px var(--bg),
+    0 0 0 6px color-mix(in oklch, var(--accent-soft) 70%, transparent);
+  animation: agent-stream-breathe 1.45s var(--motion-ease-standard) infinite;
+}
+
+.agent-timeline-row.warning .agent-timeline-marker {
+  background: var(--status-warning);
+}
+
+.agent-timeline-row.danger .agent-timeline-marker {
+  background: var(--status-danger);
+}
+
+.agent-timeline-row-body {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+}
+
+.agent-timeline-thought {
+  margin: 0;
+  min-width: 0;
+  color: color-mix(in oklch, var(--muted) 90%, var(--fg));
+  font-size: 13px;
+  font-style: italic;
+  line-height: 1.62;
+}
+
+.agent-timeline-event {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  padding: 4px 8px;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+button.agent-timeline-event:hover {
+  border-color: color-mix(in oklch, var(--border) 56%, transparent);
+  background: color-mix(in oklch, var(--surface-subtle) 62%, transparent);
+}
+
+
+.agent-timeline-event.static {
+  cursor: default;
+}
+
+.agent-timeline-event-main {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.agent-timeline-event strong,
+.agent-timeline-event-main > span,
+.agent-timeline-event small {
+  min-width: 0;
+}
+
+.agent-timeline-event strong {
+  color: color-mix(in oklch, var(--fg) 94%, var(--muted));
+  font-size: 13px;
+  font-weight: 620;
+  line-height: 1.35;
+}
+
+.agent-timeline-event-main > span {
+  overflow: hidden;
+  color: color-mix(in oklch, var(--fg) 86%, var(--muted));
+  font-size: 12.5px;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-timeline-event small {
+  overflow: hidden;
+  color: color-mix(in oklch, var(--muted) 86%, var(--fg));
+  font-size: 11px;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-timeline-event > svg {
+  flex: 0 0 auto;
+  color: color-mix(in oklch, var(--muted) 82%, var(--fg));
+  transform: rotate(0deg);
+  transition: transform var(--motion-fast-duration) var(--motion-ease-standard);
+}
+
+.agent-timeline-row[data-open="false"] .agent-timeline-event > svg {
+  transform: rotate(-90deg);
+}
+
+.agent-timeline-row-detail {
+  display: grid;
+  min-width: 0;
+  border-left: 1px solid color-mix(in oklch, var(--border) 48%, transparent);
+  margin-left: 8px;
+  padding: 4px 0 4px 14px;
+}
+
+.agent-thinking-line {
+  display: block;
+  width: min(700px, 100%);
+  min-width: 0;
+  padding: 5px 8px;
+  color: color-mix(in oklch, var(--fg) 72%, var(--muted));
+  font-size: 13px;
+  line-height: 1.68;
+}
+
+.agent-timeline-row.done[data-kind="thinking"] .agent-thinking-line {
+  color: color-mix(in oklch, var(--muted) 80%, var(--fg));
+}
+
+.agent-tool-line {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  min-height: 30px;
+  color: color-mix(in oklch, var(--fg) 72%, var(--muted));
+}
+
+.agent-tool-line-main {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: baseline;
+  gap: 10px;
+}
+
+.agent-tool-action {
+  color: color-mix(in oklch, var(--muted) 82%, var(--fg));
+  font-size: 12px;
+  font-weight: 620;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+
+.agent-tool-target {
+  min-width: 0;
+  overflow: hidden;
+  color: color-mix(in oklch, var(--fg) 76%, var(--muted));
+  font-size: 12.5px;
+  line-height: 1.42;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-timeline-row.done[data-kind="tool"] .agent-tool-line {
+  color: color-mix(in oklch, var(--muted) 82%, var(--fg));
+}
+
+.agent-timeline-row.active[data-kind="tool"] .agent-tool-action {
+  color: var(--accent-active);
+}
+
+.agent-timeline-row[data-category="context"] .agent-timeline-marker,
+.agent-timeline-row[data-category="web"] .agent-timeline-marker {
+  background: color-mix(in oklch, var(--status-success) 68%, var(--muted));
+}
+
+.agent-timeline-row[data-category="command"] .agent-timeline-marker {
+  background: color-mix(in oklch, var(--accent-strong) 76%, var(--muted));
+}
+
+.agent-timeline-row[data-category="change"] .agent-timeline-marker {
+  background: color-mix(in oklch, var(--status-warning) 72%, var(--muted));
+}

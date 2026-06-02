@@ -1,0 +1,109 @@
+:root {
+  color-scheme: light;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+  --bg: oklch(97.2% 0.004 255);
+  --surface: oklch(99.4% 0.001 255);
+  --fg: oklch(20% 0.016 255);
+  --muted: oklch(50% 0.016 255);
+  --border: oklch(88.5% 0.008 255);
+  --accent: oklch(52% 0.13 250);
+  --accent-soft: oklch(94.5% 0.026 250);
+  --accent-strong: oklch(48% 0.12 250);
+  --accent-hover: oklch(43% 0.13 250);
+  --accent-active: oklch(38% 0.12 250);
+  --surface-subtle: oklch(96.2% 0.004 255);
+  --surface-muted: oklch(92.8% 0.006 255);
+  --status-success: oklch(56% 0.13 150);
+  --status-warning: oklch(66% 0.13 82);
+  --status-danger: oklch(58% 0.16 27);
+  --sidebar: oklch(95.2% 0.005 255);
+  --sidebar-border: var(--border);
+  --primary-foreground: white;
+  --accent-border: color-mix(in oklch, var(--accent) 40%, var(--border));
+  --accent-border-soft: color-mix(in oklch, var(--accent) 30%, var(--border));
+  --placeholder: color-mix(in oklch, var(--muted) 72%, white);
+  --border-strong: color-mix(in oklch, var(--border) 55%, var(--muted));
+  --cyan-soft: color-mix(in oklch, var(--status-success) 16%, var(--surface));
+  --cyan-text: color-mix(in oklch, var(--status-success) 58%, black);
+  --amber-soft: color-mix(in oklch, var(--status-warning) 18%, var(--surface));
+  --amber-text: color-mix(in oklch, var(--status-warning) 58%, black);
+  --danger-soft: color-mix(in oklch, var(--status-danger) 14%, var(--surface));
+  --danger-border: color-mix(in oklch, var(--status-danger) 32%, var(--border));
+  --shadow-card: 0 12px 32px color-mix(in oklch, black 8%, transparent);
+  --shadow-soft: 0 1px 2px color-mix(in oklch, black 8%, transparent);
+  --motion-sidebar-duration: 260ms;
+  --motion-dialog-duration: 180ms;
+  --motion-panel-duration: 170ms;
+  --motion-fast-duration: 130ms;
+  --motion-ease-standard: cubic-bezier(0.16, 1, 0.3, 1);
+  --sidebar-rail-control: 44px;
+  --sidebar-label-gap: 0.5rem;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  overflow: hidden;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+button:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+input:focus-visible {
+  outline: 1px solid color-mix(in oklch, var(--accent) 58%, transparent);
+  outline-offset: 2px;
+}
+
+input,
+select,
+textarea {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--fg);
+  outline: none;
+}
+
+input,
+select {
+  height: 36px;
+  padding: 0 12px;
+}
+
+textarea {
+  resize: vertical;
+  padding: 10px 12px;
+  line-height: 1.6;
+}

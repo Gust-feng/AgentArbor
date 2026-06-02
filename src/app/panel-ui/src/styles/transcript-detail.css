@@ -1,0 +1,61 @@
+.transcript-node-summary,
+.transcript-node p {
+  margin: 0;
+  max-width: min(560px, 100%);
+  color: color-mix(in oklch, var(--muted) 88%, var(--fg));
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.transcript-node-summary.muted {
+  color: var(--muted);
+}
+
+.transcript-tool-detail {
+  display: grid;
+  width: min(640px, 100%);
+  min-width: 0;
+  gap: 8px;
+}
+
+.transcript-detail-list {
+  display: grid;
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.transcript-detail-row {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+  border-left: 2px solid color-mix(in oklch, var(--border) 82%, var(--surface-muted));
+  padding: 3px 0 3px 8px;
+  color: color-mix(in oklch, var(--fg) 78%, var(--muted));
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.transcript-detail-row + .transcript-detail-row {
+  margin-top: 2px;
+}
+
+.transcript-detail-row strong,
+.transcript-detail-row em,
+.transcript-detail-row span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.transcript-detail-row strong {
+  color: color-mix(in oklch, var(--fg) 84%, var(--muted));
+  font-weight: 650;
+}
+
+.transcript-detail-row em {
+  color: color-mix(in oklch, var(--muted) 86%, var(--fg));
+  font-style: normal;
+  white-space: nowrap;
+}

@@ -2,11 +2,16 @@ import React, { useEffect, useMemo, useState } from "react";
 import {
   ArrowUp,
   BrainCircuit,
+  CheckCircle2,
+  Clock3,
+  FolderOpen,
   Paperclip,
+  ShieldCheck,
   X,
 } from "lucide-react";
-import { compact } from "../text";
-import type { ContextAttachment, ConversationSummary } from "../types";
+import { compact, relativeTime } from "../text";
+import type { ContextAttachment } from "../contracts/context";
+import type { ConversationSummary } from "../contracts/conversation";
 import type { ModelProviderIdentity } from "../model-provider-logos";
 
 export type ChatModelOption = {
@@ -69,11 +74,110 @@ export function ChatEmpty(props: ChatInputProps & {
               variant="embedded"
               placeholder="输入任务..."
             />
+            <EmptyWorkbenchOverview
+              conversations={props.conversations ?? []}
+              workspaceDirectory={props.workspaceDirectory}
+              pendingCount={props.pendingCount ?? 0}
+              onOpenConversation={props.onOpenConversation}
+            />
           </section>
         </div>
       </main>
     </div>
   );
+}
+
+function EmptyWorkbenchOverview(props: {
+  readonly conversations: readonly ConversationSummary[];
+  readonly workspaceDirectory?: string;
+  readonly pendingCount: number;
+  readonly onOpenConversation?: (conversationId: string) => void;
+}): React.ReactElement {
+  const recentConversations = props.conversations.slice(0, 4);
+  return (
+    <div className="chat-empty-overview" aria-label="工作台概览">
+      <div className="chat-empty-status-row">
+        <WorkbenchStatusItem
+          icon={<FolderOpen size={14} />}
+          label="工作区"
+          value={workspaceLabel(props.workspaceDirectory)}
+        />
+        <WorkbenchStatusItem
+          icon={<ShieldCheck size={14} />}
+          label="待确认"
+          value={props.pendingCount > 0 ? `${props.pendingCount} 项` : "无"}
+          tone={props.pendingCount > 0 ? "warning" : "neutral"}
+        />
+        <WorkbenchStatusItem
+          icon={<CheckCircle2 size={14} />}
+          label="会话"
+          value={props.conversations.length > 0 ? `${props.conversations.length} 个记录` : "新会话"}
+        />
+      </div>
+
+      {recentConversations.length > 0 && (
+        <section className="chat-empty-recent" aria-label="最近会话">
+          <div className="chat-empty-recent-heading">
+            <Clock3 size={13} />
+            <span>最近会话</span>
+          </div>
+          <div className="chat-empty-recent-list">
+            {recentConversations.map((conversation) => (
+              <button
+                type="button"
+                key={conversation.conversationId}
+                onClick={() => props.onOpenConversation?.(conversation.conversationId)}
+                disabled={props.onOpenConversation === undefined}
+              >
+                <span>{compact(conversation.title, 38)}</span>
+                <small>{conversationSummaryMeta(conversation)}</small>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+    </div>
+  );
+}
+
+function WorkbenchStatusItem(props: {
+  readonly icon: React.ReactNode;
+  readonly label: string;
+  readonly value: string;
+  readonly tone?: "neutral" | "warning";
+}): React.ReactElement {
+  return (
+    <div className={`chat-empty-status-item ${props.tone ?? "neutral"}`}>
+      <span aria-hidden="true">{props.icon}</span>
+      <div>
+        <small>{props.label}</small>
+        <strong>{props.value}</strong>
+      </div>
+    </div>
+  );
+}
+
+function workspaceLabel(workspaceDirectory: string | undefined): string {
+  const trimmed = workspaceDirectory?.trim();
+  if (trimmed === undefined || trimmed.length === 0) return "未设置";
+  const segments = trimmed.split(/[\\/]+/).filter((segment) => segment.length > 0);
+  return compact(segments.at(-1) ?? trimmed, 24);
+}
+
+function conversationSummaryMeta(conversation: ConversationSummary): string {
+  const time = relativeTime(conversation.updatedAt);
+  const status = statusLabel(conversation.status);
+  return [status, time].filter((item) => item.length > 0).join(" · ") || "最近更新";
+}
+
+function statusLabel(status: string | undefined): string {
+  if (status === "completed") return "已完成";
+  if (status === "running" || status === "planning" || status === "queued") return "进行中";
+  if (status === "approval_needed" || status === "needs_input") return "待确认";
+  if (status === "failed" || status === "blocked") return "未完成";
+  if (status === "paused") return "已暂停";
+  if (status === "cancelled") return "已取消";
+  return "";
 }
 
 export function ChatInputBar(props: ChatInputProps): React.ReactElement {

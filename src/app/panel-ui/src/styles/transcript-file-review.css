@@ -1,0 +1,144 @@
+.file-change-review {
+  display: grid;
+  width: min(640px, 100%);
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid color-mix(in oklch, var(--border) 82%, white);
+  border-radius: 8px;
+  background: color-mix(in oklch, white 74%, var(--surface-subtle));
+}
+
+.file-change-review-header {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 11px;
+  border-bottom: 1px solid color-mix(in oklch, var(--border) 64%, transparent);
+}
+
+.file-change-review-header > div:first-child {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.file-change-review-header strong {
+  color: color-mix(in oklch, var(--fg) 84%, var(--muted));
+  font-size: 12px;
+  font-weight: 720;
+  line-height: 1.25;
+}
+
+.file-change-review-header em {
+  min-width: 0;
+  overflow: hidden;
+  color: color-mix(in oklch, var(--muted) 88%, var(--fg));
+  font-size: 12px;
+  font-style: normal;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-change-stats {
+  display: flex;
+  flex: 0 1 auto;
+  min-width: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 5px;
+}
+
+.file-change-stats span {
+  border: 1px solid color-mix(in oklch, var(--border) 58%, transparent);
+  border-radius: 999px;
+  padding: 3px 7px;
+  background: color-mix(in oklch, white 72%, var(--surface-subtle));
+  color: color-mix(in oklch, var(--muted) 82%, var(--fg));
+  font-size: 11px;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
+.file-diff-panel {
+  display: grid;
+  max-height: 320px;
+  min-width: 0;
+  overflow: auto;
+  background: color-mix(in oklch, white 70%, var(--surface-subtle));
+  font-family: "SF Mono", Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.file-diff-line {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  min-width: 0;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 11px;
+  border-top: 1px solid color-mix(in oklch, var(--border) 42%, transparent);
+}
+
+.file-diff-line:first-child {
+  border-top: 0;
+}
+
+.file-diff-line.add {
+  background: color-mix(in oklch, var(--status-success) 13%, transparent);
+}
+
+.file-diff-line.remove {
+  background: color-mix(in oklch, var(--status-danger) 13%, transparent);
+}
+
+.file-diff-line.neutral {
+  background: color-mix(in oklch, white 70%, var(--surface-subtle));
+}
+
+.file-diff-line > span {
+  color: color-mix(in oklch, var(--muted) 80%, var(--fg));
+  font-weight: 760;
+  text-align: center;
+}
+
+.file-diff-line.add > span {
+  color: var(--status-success);
+}
+
+.file-diff-line.remove > span {
+  color: var(--status-danger);
+}
+
+.file-diff-line p {
+  min-width: 0;
+  margin: 0;
+  color: color-mix(in oklch, var(--fg) 84%, var(--muted));
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.file-diff-line small {
+  min-width: 0;
+  overflow: hidden;
+  color: color-mix(in oklch, var(--muted) 84%, var(--fg));
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-diff-preview {
+  margin: 0;
+  overflow-x: auto;
+  padding: 10px 11px;
+  border-top: 1px solid color-mix(in oklch, var(--border) 58%, transparent);
+  color: color-mix(in oklch, var(--fg) 84%, var(--muted));
+  font-family: "SF Mono", Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

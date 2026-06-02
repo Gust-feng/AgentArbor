@@ -103,6 +103,38 @@ test("model turn settlement stops live reasoning without an explicit completed e
   assert.equal(buffer.turns[0]?.reasoningCompleted, true);
 });
 
+test("live run buffer preserves provider chunk boundaries exactly", () => {
+  const buffer = appendLiveRunEvents("run-1", emptyLiveRun("run-1"), [
+    event({
+      id: "event-1",
+      sequence: 1,
+      type: "model.reasoning.delta",
+      delta: "hello",
+    }),
+    event({
+      id: "event-2",
+      sequence: 2,
+      type: "model.reasoning.delta",
+      delta: "world",
+    }),
+    event({
+      id: "event-3",
+      sequence: 3,
+      type: "model.output.delta",
+      delta: "foo",
+    }),
+    event({
+      id: "event-4",
+      sequence: 4,
+      type: "model.output.delta",
+      delta: "bar",
+    }),
+  ]);
+
+  assert.equal(buffer.turns[0]?.reasoningText, "helloworld");
+  assert.equal(buffer.turns[0]?.outputText, "foobar");
+});
+
 test("tool requests move live output into side text only once", () => {
   const output = event({
     id: "event-1",

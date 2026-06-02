@@ -1,5 +1,5 @@
 import type { Constraint } from "../constraints.js";
-import type { RootletClusterKind } from "./radial-growth.js";
+import type { RootletClusterKind } from "./rootlet-contracts.js";
 
 export type GoalIntentProfile = {
   goalId: string;

@@ -1,4 +1,9 @@
 import type { ExplorationCandidateRef } from "./contracts.js";
+import type {
+  CandidateComparison,
+  CandidateComparisonConclusion,
+  CandidateComparisonLevel,
+} from "./candidate-comparison-contracts.js";
 import type { UndergroundEvidenceEntry } from "./evidence-ledger.js";
 import { createUndergroundEvidenceEntry, evidenceId } from "./evidence-ledger.js";
 import type { GoalIntentProfile } from "./intent-core.js";
@@ -6,39 +11,10 @@ import { hasStopIntent } from "./intent-core.js";
 import type {
   CandidateConvergenceDecision,
   CandidateConvergenceStatus,
-  RootletOutput,
-} from "./radial-growth.js";
+} from "./candidate-convergence-contracts.js";
+import type { RootletOutput } from "./rootlet-contracts.js";
 
-export type CandidateComparisonLevel = "strong" | "partial" | "weak" | "blocking";
-
-export type CandidateComparisonConclusion = "accept" | "merge" | "reject" | "needs_user" | "keep_unknown";
-
-export type CandidateComparison = {
-  comparisonId: string;
-  candidateId: string;
-  goalId: string;
-  rootletOutputRef: string;
-  rootletKind: RootletOutput["kind"];
-  candidateSummary: string;
-  goalMatch: CandidateComparisonLevel;
-  goalMatchBasis: string;
-  evidenceSupport: CandidateComparisonLevel;
-  evidenceSupportBasis: string;
-  evidenceGaps: string[];
-  constraintImpact: CandidateComparisonLevel;
-  constraintImpactBasis: string;
-  hardConstraintConflictRefs: string[];
-  riskLevel: CandidateComparisonLevel;
-  riskCoverage: string[];
-  unknowns: string[];
-  whyNot: string[];
-  conclusion: CandidateComparisonConclusion;
-  evidenceRefs: string[];
-  createdAt: string;
-  contentDifference?: string;
-  whyPreferred?: string;
-  conflictWith?: string[];
-};
+export type { CandidateComparison, CandidateComparisonConclusion, CandidateComparisonLevel } from "./candidate-comparison-contracts.js";
 
 export type CandidateComparisonResult = {
   comparisons: CandidateComparison[];

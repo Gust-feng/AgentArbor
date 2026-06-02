@@ -1,6 +1,6 @@
 import type { AgentTurnPermissionPolicy } from "../common.js";
 import type { AgentProtocol } from "./agent-loop.js";
-import type { RootletClusterKind } from "./radial-growth.js";
+import type { RootletClusterKind } from "./rootlet-contracts.js";
 import type { WorkspaceView } from "./workspace.js";
 import { createWorkspaceProjectionView } from "./workspace.js";
 

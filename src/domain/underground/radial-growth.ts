@@ -1,7 +1,12 @@
-import type { ConstraintRef } from "../constraints.js";
 import type { AgentRunTree } from "./agent-fabric.js";
 import type { UndergroundAgentClusterRun, UndergroundAgentInvocation } from "./agent-cluster.js";
-import type { CandidateComparison } from "./candidate-comparison.js";
+import type { CandidateComparison } from "./candidate-comparison-contracts.js";
+import type {
+  CandidateConvergenceDecision,
+  CandidateConvergenceStatus,
+  CandidatePoolCounts,
+  RejectedCandidateRefWithReason,
+} from "./candidate-convergence-contracts.js";
 import type { ConvergenceReviewOutcome, ConvergenceStopReason } from "./contracts.js";
 import type { UndergroundEvidenceLedger } from "./evidence-ledger.js";
 import type { GoalIntentProfile } from "./intent-core.js";
@@ -13,6 +18,12 @@ import {
   type UserClarificationRequest,
 } from "./clarification.js";
 import type { ExplorationCandidateRef } from "./contracts.js";
+import {
+  ROOTLET_CLUSTER_KINDS,
+  type ExplorationBudget,
+  type RootletClusterKind,
+  type RootletOutput,
+} from "./rootlet-contracts.js";
 
 export const UNDERGROUND_CENTER_ROLES = [
   "intent_core",
@@ -26,28 +37,12 @@ export const UNDERGROUND_CENTER_ROLES = [
 
 export type UndergroundCenterRole = (typeof UNDERGROUND_CENTER_ROLES)[number];
 
-export const ROOTLET_CLUSTER_KINDS = [
-  "option",
-  "risk",
-  "asset_fit",
-  "evidence",
-  "constraint",
-  "counterfactual",
-] as const;
-
 const MAX_AI_ADVISORY_TEXT_LENGTH = 180;
 
-export type RootletClusterKind = (typeof ROOTLET_CLUSTER_KINDS)[number];
+export { ROOTLET_CLUSTER_KINDS };
+export type { ExplorationBudget, RootletClusterKind, RootletOutput };
 
 export type RootletClusterStatus = "planned" | "started" | "completed" | "skipped";
-
-export type ExplorationBudget = {
-  maxRootletClusters: number;
-  maxCandidateOutputs: number;
-  spentRootletClusters: number;
-  spentCandidateOutputs: number;
-  exhausted: boolean;
-};
 
 export type RootletClusterPlan = {
   clusterId: string;
@@ -69,29 +64,11 @@ export type UndergroundExplorationPlan = {
   createdAt: string;
 };
 
-export type RootletOutput = {
-  outputId: string;
-  invocationId: string;
-  clusterId: string;
-  kind: RootletClusterKind;
-  producedByAgentId: string;
-  summary: string;
-  sourceRefs: string[];
-  evidenceRefs: string[];
-  soilAssetFitRefs: string[];
-  constraintRefs: ConstraintRef[];
-  riskRefs: string[];
-  status: "produced";
-  source: "ai" | "deterministic_fallback";
-};
-
-export type CandidatePoolCounts = {
-  total: number;
-  candidate: number;
-  accepted: number;
-  merged: number;
-  rejected: number;
-  unknown: number;
+export type {
+  CandidateConvergenceDecision,
+  CandidateConvergenceStatus,
+  CandidatePoolCounts,
+  RejectedCandidateRefWithReason,
 };
 
 export type CandidatePoolByKind = Record<RootletClusterKind, ExplorationCandidateRef[]>;
@@ -104,28 +81,6 @@ export type CandidatePool = {
   candidatesByKind: CandidatePoolByKind;
   counts: CandidatePoolCounts;
   updatedAt: string;
-};
-
-export type CandidateConvergenceStatus = Extract<
-  ExplorationCandidateRef["status"],
-  "accepted" | "merged" | "rejected" | "unknown"
->;
-
-export type CandidateConvergenceDecision = {
-  decisionId: string;
-  candidateId: string;
-  sourceCandidateRefs: string[];
-  status: CandidateConvergenceStatus;
-  decidedByRole: "convergence_judge";
-  reason: string;
-  provenanceRefs: string[];
-  evidenceRefs: string[];
-};
-
-export type RejectedCandidateRefWithReason = {
-  candidateId: string;
-  reason: string;
-  provenanceRefs: string[];
 };
 
 export type UndergroundConvergenceOutcome = ConvergenceReviewOutcome;

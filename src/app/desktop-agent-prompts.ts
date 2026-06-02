@@ -1,14 +1,8 @@
 import type { ModelMessage } from "../domain/intelligence/index.js";
-import type { SkillDefinition } from "../domain/basic-agent/index.js";
 import type { TaskSoil } from "../domain/soil/index.js";
-import { buildBasicAgentContextPack } from "./basic-agent-runtime/index.js";
-import type { DesktopAgentConversationMessage } from "./desktop-agent-session.js";
-
-export type DesktopAgentSkillContext = {
-  readonly skill: SkillDefinition;
-  readonly body: string;
-  readonly triggerReason: string;
-};
+import { buildBasicAgentContextPack } from "./basic-agent-runtime/context-pack.js";
+import type { DesktopAgentConversationMessage, DesktopAgentSkillContext } from "./desktop-agent-contracts.js";
+export type { DesktopAgentSkillContext } from "./desktop-agent-contracts.js";
 
 export function desktopAgentMessages(input: {
   readonly goal: string;

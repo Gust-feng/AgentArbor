@@ -118,6 +118,25 @@ test("Desktop Agent Session projects tool failures without leaking raw output", 
   assert.equal(result.runtime.eventLog.types().includes("agent.delegation.planned"), false);
 });
 
+test("Desktop Agent Session keeps approval waits out of assistant answers", async () => {
+  const toolCenter = new ApprovalRequiredToolCenter();
+  const channel = new ApprovalRequiredToolChannel();
+  const result = await runDesktopAgentSession("删除 pending.txt", {
+    aiMode: "fake",
+    createIntelligenceChannel: () => channel,
+    createToolCenter: () => toolCenter,
+  });
+
+  assert.equal(result.status, "confirmation_needed");
+  assert.equal(result.answer, undefined);
+  assert.equal(result.pendingConfirmation?.title, "删除文件");
+  assert.equal(result.pendingConfirmation?.question.includes("删除当前工作区内的普通文件"), true);
+  assert.equal(result.pendingConfirmation?.consequence, "");
+  assert.equal(JSON.stringify(result).includes("这个操作需要你确认后才能继续"), false);
+  assert.equal(JSON.stringify(result).includes("批准后"), false);
+  assert.equal(result.eventTypes.includes("user_approval.requested"), true);
+});
+
 
 test("Desktop Agent Session keeps returning tool results until the model stops itself", async () => {
   const toolCenter = new MixedToolCenter();
@@ -312,6 +331,7 @@ test("Desktop Agent Session drops provider control markup without synthetic conf
 
   assert.equal(result.status, "completed");
   assert.equal(result.answer?.answer.includes("<tool_call>"), false);
+  assert.equal(result.answer?.answer.includes("\"name\":\"read\""), false);
   assert.equal(result.answer?.answer.includes("准备调用工具"), false);
   assert.equal(result.answer?.answer.includes("我需要你先提供文件引用"), true);
   assert.equal(result.pendingConfirmation, undefined);
@@ -526,6 +546,84 @@ class LocalToolCenter implements ToolExecutionBroker {
 
   getCallCount(): number {
     return this.calls;
+  }
+}
+
+class ApprovalRequiredToolChannel implements IntelligenceChannel {
+  async request(request: ModelRequest) {
+    return {
+      responseId: "model-response-approval-required",
+      requestId: request.requestId,
+      providerId: "test-provider",
+      providerKind: "fake" as const,
+      protocolKind: "openai_compatible_chat_completions" as const,
+      model: "test-model",
+      status: "completed" as const,
+      outputKind: "explanation" as const,
+      toolCalls: [{ callId: "call-delete-pending", toolName: "delete_file", input: { path: "pending.txt" } }],
+      finishReason: "tool_call" as const,
+      validation: { status: "passed" as const, checkedAt: new Date(0).toISOString(), issues: [] },
+      completedAt: new Date(0).toISOString(),
+    };
+  }
+
+  validateResponse() {
+    return { status: "passed" as const, checkedAt: new Date(0).toISOString(), issues: [] };
+  }
+}
+
+class ApprovalRequiredToolCenter implements ToolExecutionBroker {
+  list(): ToolDefinition[] {
+    return [
+      {
+        name: "delete_file",
+        description: "Delete a workspace file.",
+        inputSchema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
+        metadata: {
+          category: "filesystem",
+          riskLevel: "high",
+          operationType: "read-write",
+          requiresConfirmation: true,
+          visibleResultPolicy: {
+            userVisible: "summary-only",
+            maxPreviewChars: 0,
+            omitRawOutput: true,
+          },
+        },
+      },
+    ];
+  }
+
+  has(name: string): boolean {
+    return name === "delete_file";
+  }
+
+  async execute(request: ToolCallRequest): Promise<ToolCallResult> {
+    return {
+      callId: request.callId,
+      toolName: request.toolName,
+      input: request.input,
+      output: undefined,
+      status: "approval_required",
+      durationMs: 0,
+      confirmationRequest: {
+        confirmationId: `confirmation-${request.callId}`,
+        runId: request.callId,
+        title: "删除文件",
+        actionSummary: "删除当前工作区内的普通文件，执行前需要用户确认。",
+        affectedResources: ["pending.txt"],
+        riskLevel: "high",
+        resumeAvailability: "live",
+        requestedAt: "2026-05-30T00:00:00.000Z",
+        sourceRefs: [`tool:${request.callId}`],
+      },
+    };
+  }
+
+  resetCallCount(): void {}
+
+  getCallCount(): number {
+    return 0;
   }
 }
 

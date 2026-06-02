@@ -1,5 +1,5 @@
 import type { DirectionHandoffPackageRef } from "../agentarbor/direction-handoff-package/contracts.js";
-import type { ExplorationBudget } from "./radial-growth.js";
+import type { ExplorationBudget } from "./rootlet-contracts.js";
 
 export const UNDERGROUND_AGENT_ROLES = [
   "intent_core",

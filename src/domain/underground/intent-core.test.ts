@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createMinimalSoilConstraints } from "../soil/index.js";
+import { createMinimalSoilConstraints } from "../soil/minimal-constraints.js";
 import {
   compareCandidatesForGoal,
   createGoalIntentProfile,

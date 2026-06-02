@@ -1,5 +1,5 @@
-import type { ModelCallRef } from "../intelligence/index.js";
-import type { RootletClusterKind } from "./radial-growth.js";
+import type { ModelCallRef } from "../intelligence/model-call-ref.js";
+import type { RootletClusterKind } from "./rootlet-contracts.js";
 
 export const UNDERGROUND_AUTONOMY_ACTIONS = [
   "continue_exploration",

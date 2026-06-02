@@ -2,7 +2,7 @@ import type { GuardedActionOutput } from "./guard.js";
 import type { AgentMailbox } from "./mailbox.js";
 import type { WorkspaceView } from "./workspace.js";
 import type { Constraint, ConstraintRef } from "../constraints.js";
-import type { ToolDefinition, ToolExecutionBroker } from "../tools/index.js";
+import type { ToolDefinition, ToolExecutionBroker } from "../tools/contracts.js";
 
 export type AgentPercept = {
   readonly observedAt?: string;

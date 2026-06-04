@@ -32,13 +32,6 @@ const BASIC_RUN_EVENT_TYPES = [
   "context.compaction.failed",
 ] as const;
 
-export function mergeEvents(previous: readonly RunEvent[], incoming: readonly RunEvent[]): readonly RunEvent[] {
-  const byId = new Map<string, RunEvent>();
-  for (const event of previous) byId.set(event.id, event);
-  for (const event of incoming) byId.set(event.id, event);
-  return [...byId.values()].sort((left, right) => left.sequence - right.sequence);
-}
-
 export async function safeBasicRun(runId: string): Promise<BasicAgentRun | undefined> {
   try {
     return (await getJson<{ readonly run: BasicAgentRun }>(`/api/basic-agent/runs/${encodeURIComponent(runId)}`)).run;

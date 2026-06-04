@@ -1,23 +1,23 @@
 :root {
   color-scheme: light;
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
-  --bg: oklch(97.2% 0.004 255);
+  --bg: oklch(97.8% 0.002 255);
   --surface: oklch(99.4% 0.001 255);
-  --fg: oklch(20% 0.016 255);
-  --muted: oklch(50% 0.016 255);
-  --border: oklch(88.5% 0.008 255);
-  --accent: oklch(52% 0.13 250);
-  --accent-soft: oklch(94.5% 0.026 250);
-  --accent-strong: oklch(48% 0.12 250);
-  --accent-hover: oklch(43% 0.13 250);
-  --accent-active: oklch(38% 0.12 250);
-  --surface-subtle: oklch(96.2% 0.004 255);
-  --surface-muted: oklch(92.8% 0.006 255);
+  --fg: oklch(19.5% 0.006 255);
+  --muted: oklch(47% 0.008 255);
+  --border: oklch(89.8% 0.004 255);
+  --accent: oklch(34% 0.022 255);
+  --accent-soft: oklch(94.8% 0.003 255);
+  --accent-strong: oklch(27% 0.018 255);
+  --accent-hover: oklch(22% 0.018 255);
+  --accent-active: oklch(18% 0.014 255);
+  --surface-subtle: oklch(96.1% 0.002 255);
+  --surface-muted: oklch(92.8% 0.004 255);
   --status-success: oklch(56% 0.13 150);
   --status-warning: oklch(66% 0.13 82);
   --status-danger: oklch(58% 0.16 27);
-  --sidebar: oklch(95.2% 0.005 255);
-  --sidebar-border: var(--border);
+  --sidebar: oklch(96.4% 0.002 255);
+  --sidebar-border: color-mix(in oklch, var(--border) 70%, transparent);
   --primary-foreground: white;
   --accent-border: color-mix(in oklch, var(--accent) 40%, var(--border));
   --accent-border-soft: color-mix(in oklch, var(--accent) 30%, var(--border));
@@ -29,8 +29,8 @@
   --amber-text: color-mix(in oklch, var(--status-warning) 58%, black);
   --danger-soft: color-mix(in oklch, var(--status-danger) 14%, var(--surface));
   --danger-border: color-mix(in oklch, var(--status-danger) 32%, var(--border));
-  --shadow-card: 0 12px 32px color-mix(in oklch, black 8%, transparent);
-  --shadow-soft: 0 1px 2px color-mix(in oklch, black 8%, transparent);
+  --shadow-card: 0 14px 36px color-mix(in oklch, black 7%, transparent);
+  --shadow-soft: 0 1px 2px color-mix(in oklch, black 6%, transparent);
   --motion-sidebar-duration: 260ms;
   --motion-dialog-duration: 180ms;
   --motion-panel-duration: 170ms;
@@ -42,6 +42,32 @@
 
 * {
   box-sizing: border-box;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklch, var(--muted) 34%, transparent) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--muted) 30%, transparent);
+  background-clip: content-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in oklch, var(--muted) 44%, transparent);
+  background-clip: content-box;
 }
 
 html,

@@ -1,41 +1,74 @@
 import React from "react";
 import type { TranscriptNode } from "../contracts/run";
-import { confirmationRunId, type ConfirmationProjection } from "./transcript-confirmation";
-import { timelineVisibleNodes } from "./transcript-node-visibility";
-import { timelineRowIdentity } from "./transcript-timeline-classification";
-import { AgentTimelineRow } from "./transcript-timeline-row";
+import {
+  ConfirmationNode,
+  type ConfirmationProjection,
+} from "./transcript-confirmation";
+import {
+  type AgentWorkTimelineView,
+} from "../../../panel-agent-work-timeline-view";
+import type { ActivityItem } from "../../../panel-transcript-activity-copy";
 
 export type { ConfirmationProjection } from "./transcript-confirmation";
+export { pendingForTurn } from "../../../panel-transcript-confirmation-projection";
 
 export function AgentWorkTimeline(props: {
-  readonly nodes: readonly TranscriptNode[];
-  readonly pending?: ConfirmationProjection;
+  readonly view: AgentWorkTimelineView<TranscriptNode, ConfirmationProjection>;
   readonly onDecision?: (decision: "approve_once" | "deny" | "guidance", guidance?: string) => void;
   readonly confirmationBusy: boolean;
 }): React.ReactElement | null {
-  const nodes = timelineVisibleNodes(props.nodes);
-  if (nodes.length === 0) return null;
+  const { confirmation, items } = props.view;
+
+  if (!props.view.hasContent) return null;
 
   return (
-    <section className="agent-work-timeline" aria-label="工作进度">
-      <div className="agent-timeline-track">
-        {nodes.map((node, index) => (
-          <AgentTimelineRow
-            key={timelineRowIdentity(node)}
-            node={node}
-            isLast={index === nodes.length - 1}
-            pending={props.pending}
-            onDecision={props.onDecision}
-            confirmationBusy={props.confirmationBusy}
-          />
+    <section className="agent-workline" aria-label="工作进度">
+      <div className="agent-workflow">
+        {items.map((item, index) => (
+          <div
+            className={`agent-workflow-step ${item.tone} ${item.phase}`}
+            data-current={confirmation.current === undefined && index === items.length - 1 ? "true" : undefined}
+            aria-current={confirmation.current === undefined && index === items.length - 1 ? "step" : undefined}
+            key={item.key}
+          >
+            <span className="agent-workflow-marker" aria-hidden="true" />
+            <ActivityLine item={item} />
+          </div>
         ))}
+        {confirmation.current !== undefined && (
+          <div className="agent-workflow-step confirmation waiting_approval" data-current="true" aria-current="step">
+            <span className="agent-workflow-marker" aria-hidden="true" />
+            <ConfirmationNode
+              confirmation={confirmation.current}
+              busy={props.confirmationBusy}
+              onDecision={props.onDecision}
+            />
+          </div>
+        )}
       </div>
     </section>
   );
 }
 
-export function pendingForTurn(pending: ConfirmationProjection | undefined, runId: string | undefined): ConfirmationProjection | undefined {
-  if (pending === undefined || runId === undefined) return undefined;
-  const pendingRunId = confirmationRunId(pending);
-  return pendingRunId === undefined || pendingRunId === runId ? pending : undefined;
+function ActivityLine({ item }: { readonly item: ActivityItem }): React.ReactElement {
+  const label = item.copy.label;
+  const line = (
+    <>
+      {label !== undefined && <span className="agent-workflow-label">{label}</span>}
+      <span className="agent-workflow-detail">{item.copy.detail}</span>
+    </>
+  );
+  if (item.copy.expandedDetail !== undefined) {
+    return (
+      <details className="agent-workflow-disclosure" data-tone={item.tone}>
+        <summary className="agent-workflow-line">{line}</summary>
+        <p className="agent-workflow-expanded-detail">{item.copy.expandedDetail}</p>
+      </details>
+    );
+  }
+  return (
+    <p className="agent-workflow-line">
+      {line}
+    </p>
+  );
 }

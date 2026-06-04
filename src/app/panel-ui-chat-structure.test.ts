@@ -1,24 +1,31 @@
 import assert from "node:assert/strict";
 import path from "node:path";
 import test from "node:test";
-import { readPanelUiSource, readPanelUiStyle } from "./panel-structure-test-utils.js";
+import { readAppSource, readPanelUiSource, readPanelUiStyle } from "./panel-structure-test-utils.js";
 
 test("panel UI chat and transcript modules stay presentation-focused", async () => {
   const [
     chatEmpty,
     chatActive,
+    chatTranscriptChain,
     transcriptTimeline,
-    transcriptTimelineHeader,
-    transcriptTimelineClassification,
+    transcriptConfirmationProjection,
     transcriptTimelineCopy,
-    transcriptTimelineDetail,
-    transcriptTimelineRow,
+    agentWorkTimelineProjection,
     transcriptConfirmation,
-    transcriptToolDetail,
     transcriptToolFormat,
     transcriptNodeVisibility,
     chatSessionProjection,
-    chatVisibleText,
+    chatWorklineProjection,
+    transcriptTurnProjection,
+    chatActiveProjection,
+    chatActiveViewProjection,
+    transcriptStartupNodeProjection,
+    assistantVisibleText,
+    assistantFailureProjection,
+    assistantMessageOutputProjection,
+    assistantMessageViewProjection,
+    assistantRunOutputProjection,
     richText,
     liveStreamText,
     styleEntry,
@@ -28,26 +35,30 @@ test("panel UI chat and transcript modules stay presentation-focused", async () 
     richTextStyles,
     chatFeedbackStyles,
     transcriptStyles,
-    transcriptDetailStyles,
-    transcriptFileReviewStyles,
-    transcriptCommandStyles,
     transcriptConfirmationStyles,
     chatResultStyles,
   ] = await Promise.all([
     readPanelUiSource(path.join("components", "chat-empty.tsx")),
     readPanelUiSource(path.join("components", "chat-active.tsx")),
+    readPanelUiSource(path.join("components", "chat-transcript-chain.tsx")),
     readPanelUiSource(path.join("components", "transcript-timeline.tsx")),
-    readPanelUiSource(path.join("components", "transcript-timeline-header.tsx")),
-    readPanelUiSource(path.join("components", "transcript-timeline-classification.ts")),
-    readPanelUiSource(path.join("components", "transcript-timeline-copy.ts")),
-    readPanelUiSource(path.join("components", "transcript-timeline-detail.tsx")),
-    readPanelUiSource(path.join("components", "transcript-timeline-row.tsx")),
+    readAppSource("panel-transcript-confirmation-projection.ts"),
+    readAppSource("panel-transcript-activity-copy.ts"),
+    readAppSource("panel-agent-work-timeline-view.ts"),
     readPanelUiSource(path.join("components", "transcript-confirmation.tsx")),
-    readPanelUiSource(path.join("components", "transcript-tool-detail.tsx")),
-    readPanelUiSource(path.join("components", "transcript-tool-format.ts")),
-    readPanelUiSource(path.join("components", "transcript-node-visibility.ts")),
+    readAppSource("panel-transcript-tool-format.ts"),
+    readAppSource("panel-transcript-node-projection.ts"),
     readPanelUiSource(path.join("components", "chat-session-projection.ts")),
-    readPanelUiSource(path.join("components", "chat-visible-text.ts")),
+    readAppSource("panel-ui-chat-workline.ts"),
+    readAppSource("panel-transcript-turn-projection.ts"),
+    readAppSource("panel-ui-chat-active-projection.ts"),
+    readAppSource("panel-ui-chat-active-view.ts"),
+    readAppSource("panel-transcript-startup-node.ts"),
+    readAppSource("panel-assistant-visible-text.ts"),
+    readAppSource("panel-assistant-failure.ts"),
+    readAppSource("panel-assistant-message-output.ts"),
+    readAppSource("panel-assistant-message-view.ts"),
+    readAppSource("panel-assistant-run-output.ts"),
     readPanelUiSource(path.join("components", "rich-text.tsx")),
     readPanelUiSource(path.join("components", "live-stream-text.tsx")),
     readPanelUiSource("styles.css"),
@@ -57,93 +68,311 @@ test("panel UI chat and transcript modules stay presentation-focused", async () 
     readPanelUiStyle("rich-text.css"),
     readPanelUiStyle("chat-feedback.css"),
     readPanelUiStyle("transcript.css"),
-    readPanelUiStyle("transcript-detail.css"),
-    readPanelUiStyle("transcript-file-review.css"),
-    readPanelUiStyle("transcript-command.css"),
     readPanelUiStyle("transcript-confirmation.css"),
     readPanelUiStyle("chat-results.css"),
   ]);
 
   assert.equal(chatEmpty.includes("今天要处理什么？"), true);
   assert.equal(chatEmpty.includes("export function ChatInputBar"), true);
+  assert.equal(chatEmpty.includes("任务中心"), false);
+  assert.equal(chatEmpty.includes("workbenchTaskCardsFromConversations"), false);
+  assert.equal(chatEmpty.includes("function TaskCenterCard"), false);
+  assert.equal(chatEmpty.includes("resumeTaskFromConversations"), false);
+  assert.equal(chatEmpty.includes("function EmptyResumePrompt"), false);
+  assert.equal(chatEmpty.includes("chat-empty-resume"), false);
+  assert.equal(chatEmpty.includes("打开可继续任务"), false);
   assert.equal(chatEmpty.includes("providerLabel"), true);
   assert.equal(chatEmpty.includes("配置模型"), true);
   assert.equal(chatEmpty.includes("closeSignal"), true);
+  assert.equal(chatEmpty.includes("composer-options-button"), true);
+  assert.equal(chatEmpty.includes("composer-options-popover"), true);
+  assert.equal(chatEmpty.includes("model-select-button"), false);
   assert.equal(chatEmpty.includes("composer-reasoning-control"), true);
   assert.equal(chatEmpty.includes("reasoningEffortEnabled"), true);
   assert.equal(chatEmpty.includes("当前工作入口"), false);
   assert.equal(chatEmpty.includes("继续最近任务"), false);
   assert.equal(chatEmpty.includes("管理模型厂商"), false);
+  assert.equal(chatEmpty.includes("chat-empty-task-groups"), false);
+  assert.equal(chatEmpty.includes("chat-empty-task-group-heading"), false);
+  assert.equal(chatEmpty.includes("props.task.currentAction"), false);
+  assert.equal(chatEmpty.includes("task.nextStep"), false);
+  assert.equal(chatLayoutStyles.includes(".chat-empty-task-next"), false);
   assert.equal(chatActive.includes("export function ChatActive"), true);
   assert.equal(chatActive.includes("WorkContextPanel"), false);
   assert.equal(chatActive.includes('import { RichText } from "./rich-text"'), true);
   assert.equal(chatActive.includes("resolveModelIconSvg"), false);
   assert.equal(chatSessionProjection.includes("resolveModelIconSvg"), true);
-  assert.equal(chatActive.includes("assistantModelForTurn"), true);
+  assert.equal(chatActive.includes("assistantModelForTurn"), false);
+  assert.equal(chatTranscriptChain.includes("assistantModelForTurn"), true);
   assert.equal(chatActive.includes(".slice(-8)"), false);
-  assert.equal(chatActive.includes('from "./transcript-timeline"'), true);
-  assert.equal(chatActive.includes('from "./transcript-node-visibility"'), true);
-  assert.equal(chatActive.includes('from "./chat-visible-text"'), true);
+  assert.equal(chatActive.includes('from "./transcript-timeline"'), false);
+  assert.equal(chatTranscriptChain.includes('from "./transcript-timeline"'), true);
+  assert.equal(chatActive.includes("panel-transcript-node-projection"), false);
+  assert.equal(chatActive.includes('from "./transcript-node-visibility"'), false);
+  assert.equal(chatActive.includes('from "./workbench-task-situation"'), false);
+  assert.equal(chatActive.includes("projectWorkbenchTaskSituation"), false);
+  assert.equal(chatActive.includes("WorkbenchTaskSituationPanel"), false);
+  assert.equal(chatActive.includes("taskSituation"), false);
+  assert.equal(chatActive.includes("当前任务态势"), false);
+  assert.equal(chatActive.includes('from "./chat-visible-text"'), false);
+  assert.equal(chatTranscriptChain.includes('from "./chat-visible-text"'), false);
+  assert.equal(chatTranscriptChain.includes("panel-assistant-message-output"), false);
+  assert.equal(chatTranscriptChain.includes("panel-assistant-message-view"), true);
+  assert.equal(chatTranscriptChain.includes("panel-transcript-turn-projection"), true);
+  assert.equal(chatTranscriptChain.includes("projectAssistantTranscriptTurn"), true);
+  assert.equal(chatActive.includes('from "./chat-transcript-chain"'), true);
   assert.equal(chatActive.includes('data-display="command"'), false);
+  assert.equal(chatTranscriptChain.includes('data-display="command"'), false);
   assert.equal(transcriptTimeline.includes('data-display="command"'), false);
-  assert.equal(transcriptToolDetail.includes('data-display="command"'), true);
   assert.equal(transcriptTimeline.includes("export function AgentWorkTimeline"), true);
+  assert.equal(transcriptTimeline.includes("export function activityItemsForNodes"), false);
+  assert.equal(transcriptTimeline.includes("export function workflowItemsForNodes"), false);
+  assert.equal(transcriptTimeline.includes("activityItemsForNodes"), false);
+  assert.equal(transcriptTimeline.includes("workflowItemsForNodes"), false);
+  assert.equal(agentWorkTimelineProjection.includes("export function projectAgentWorkTimelineView"), true);
+  assert.equal(agentWorkTimelineProjection.includes("timelineVisibleNodes"), true);
+  assert.equal(agentWorkTimelineProjection.includes("timelineConfirmationProjection"), true);
+  assert.equal(agentWorkTimelineProjection.includes("workflowItemsForNodes"), true);
+  assert.equal(agentWorkTimelineProjection.includes("confirmationNodesForProjection"), true);
+  assert.equal(agentWorkTimelineProjection.includes("hasContent"), true);
+  assert.equal(transcriptTimeline.includes("export function compactWorkflowItemsForDisplay"), false);
+  assert.equal(transcriptTimeline.includes("export function currentActivityItemForNodes"), false);
+  assert.equal(transcriptTimeline.includes("MAX_ACTIVITY_ITEMS"), false);
+  assert.equal(transcriptTimeline.includes("COLLAPSED_WORKFLOW_ITEMS"), false);
+  assert.equal(transcriptTimeline.includes("agent-workline"), true);
+  assert.equal(transcriptTimeline.includes("agent-workflow"), true);
+  assert.equal(transcriptTimeline.includes("agent-workflow-step"), true);
+  assert.equal(transcriptTimeline.includes("agent-workflow-step confirmation"), true);
+  assert.equal(transcriptTimeline.includes("agent-workflow-marker"), true);
+  assert.equal(transcriptTimeline.includes("agent-workflow-toggle"), false);
+  assert.equal(transcriptTimeline.includes("agent-workflow-disclosure"), true);
+  assert.equal(transcriptTimeline.includes("agent-workflow-expanded-detail"), true);
+  assert.equal(transcriptTimeline.includes("expandedDetail"), true);
+  assert.equal(transcriptTimeline.includes("timelineConfirmationProjection"), false);
+  assert.equal(transcriptTimeline.includes("confirmationForNode"), false);
+  assert.equal(transcriptTimeline.includes("currentConfirmationNode"), false);
+  assert.equal(transcriptConfirmationProjection.includes("export function timelineConfirmationProjection"), true);
+  assert.equal(transcriptConfirmationProjection.includes("export function confirmationForNode"), true);
+  assert.equal(transcriptConfirmationProjection.includes("export function pendingForTurn"), true);
+  assert.equal(transcriptTimeline.includes("agent-workline-current"), false);
+  assert.equal(transcriptTimeline.includes("agent-workline-confirmation"), false);
+  assert.equal(transcriptTimeline.includes("agent-activity-rail"), false);
+  assert.equal(transcriptTimeline.includes("allWorkflowItems.map"), false);
+  assert.equal(transcriptTimeline.includes("items.map"), true);
+  assert.equal(transcriptTimeline.includes("visibleItems.map"), false);
+  assert.equal(transcriptTimeline.includes('"thinking" | "narration" | "tool"'), false);
+  assert.equal(transcriptTimeline.includes('"confirmation"'), false);
   assert.equal(transcriptTimeline.includes("export function visibleTranscriptNodes"), false);
   assert.equal(transcriptTimeline.includes("node.eventType"), false);
-  assert.equal(transcriptTimeline.includes("timelineRowIdentity"), true);
-  assert.equal(transcriptTimelineHeader.includes("model.reasoning.delta"), true);
-  assert.equal(transcriptTimelineHeader.includes("LiveStreamBox"), true);
-  assert.equal(transcriptTimelineClassification.includes("node.eventType"), true);
-  assert.equal(transcriptTimelineClassification.includes("export function timelineRowCategory"), true);
-  assert.equal(transcriptTimelineCopy.includes("export function timelineToolVerb"), true);
-  assert.equal(transcriptTimelineCopy.includes("export function toolActionLabel"), true);
-  assert.equal(transcriptTimelineDetail.includes("export function TranscriptTimelineDetail"), true);
-  assert.equal(transcriptTimelineDetail.includes("ConfirmationNode"), true);
-  assert.equal(transcriptTimelineDetail.includes("ToolNodeDetail"), true);
-  assert.equal(transcriptTimelineRow.includes("export function AgentTimelineRow"), true);
-  assert.equal(transcriptTimelineRow.includes("useState"), true);
+  assert.equal(transcriptTimeline.includes("timelineRowIdentity"), false);
+  assert.equal(transcriptTimeline.includes("AgentTimelineRow"), false);
+  assert.equal(transcriptTimeline.includes("TranscriptTimelineDetail"), false);
+  assert.equal(transcriptTimeline.includes("ToolNodeDetail"), false);
+  assert.equal(transcriptTimelineCopy.includes("export function activityLineForNode"), true);
+  assert.equal(transcriptTimelineCopy.includes("export function activityItemsForNodes"), true);
+  assert.equal(transcriptTimelineCopy.includes("export function workflowItemsForNodes"), true);
+  assert.equal(transcriptTimelineCopy.includes("export type ActivityLineCopy"), true);
+  assert.equal(transcriptTimelineCopy.includes("export type ActivityItem"), true);
+  assert.equal(transcriptTimelineCopy.includes("export function readableThinkingText"), true);
+  assert.equal(transcriptTimelineCopy.includes("export function readableThinkingCopy"), true);
+  assert.equal(transcriptTimelineCopy.includes("readableExpandedModelText"), true);
+  assert.equal(transcriptTimelineCopy.includes("restoreReadableEnglishBoundaries"), false);
+  assert.equal(transcriptTimelineCopy.includes("export function readableNarrationText"), true);
+  assert.equal(transcriptTimelineCopy.includes("export function readableNarrationCopy"), true);
+  assert.equal(transcriptTimelineCopy.includes("expandedDetail"), true);
+  assert.equal(transcriptTimelineCopy.includes('"thinking" | "narration" | "tool"'), true);
+  assert.equal(transcriptTimelineCopy.includes('"confirmation"'), true);
+  assert.equal(transcriptTimelineCopy.includes('return "命令"'), true);
+  assert.equal(transcriptTimelineCopy.includes('return "读取"'), true);
+  assert.equal(transcriptTimelineCopy.includes("looksLikeCompressedLatin"), false);
+  assert.equal(transcriptTimelineCopy.includes("commandText(display)"), true);
+  assert.equal(transcriptTimelineCopy.includes("export function timelineToolVerb"), false);
+  assert.equal(transcriptTimelineCopy.includes("export function toolActionLabel"), false);
   assert.equal(transcriptNodeVisibility.includes("export function visibleTranscriptNodes"), true);
   assert.equal(transcriptNodeVisibility.includes("export function timelineVisibleNodes"), true);
+  assert.equal(transcriptNodeVisibility.includes("export function workflowVisibleNodes"), true);
+  assert.equal(transcriptNodeVisibility.includes("hasWorkActivity"), false);
+  assert.equal(transcriptNodeVisibility.includes("return text.length > 0;"), true);
+  assert.equal(transcriptNodeVisibility.includes('node.kind === "tool" || node.kind === "confirmation" || node.kind === "user_decision"'), true);
   assert.equal(transcriptToolFormat.includes("export function commandText"), true);
   assert.equal(transcriptToolFormat.includes("export function genericItemLabel"), true);
   assert.equal(transcriptConfirmation.includes("export function ConfirmationNode"), true);
-  assert.equal(transcriptToolDetail.includes("export function ToolNodeDetail"), true);
-  assert.equal(chatVisibleText.includes("export function userVisibleAnswer"), true);
-  assert.equal(chatSessionProjection.includes("export function visibleTurns"), true);
+  assert.equal(assistantVisibleText.includes("export function userVisibleAnswer"), true);
+  assert.equal(assistantVisibleText.includes("export function sanitizeFailureCopy"), true);
+  assert.equal(chatSessionProjection.includes("export function visibleTurns"), false);
+  assert.equal(chatSessionProjection.includes("export function showStandaloneRun"), false);
+  assert.equal(chatWorklineProjection.includes("export function projectChatWorkline"), true);
+  assert.equal(chatWorklineProjection.includes("latestClaimableAssistantTurnId"), true);
+  assert.equal(chatWorklineProjection.includes("standaloneRun"), true);
+  assert.equal(transcriptTurnProjection.includes("export function projectAssistantTranscriptTurn"), true);
+  assert.equal(transcriptTurnProjection.includes("export function assistantShellSnapshot"), true);
+  assert.equal(transcriptTurnProjection.includes("export function isRefreshingRunStatus"), true);
+  assert.equal(transcriptTurnProjection.includes("answerForWorkSessionTurn"), true);
+  assert.equal(transcriptTurnProjection.includes("deliverableForWorkSessionTurn"), true);
+  assert.equal(transcriptTurnProjection.includes("pendingForTurn"), true);
+  assert.equal(transcriptTurnProjection.includes("run.started:node"), false);
+  assert.equal(transcriptTurnProjection.includes("已开始处理。"), false);
+  assert.equal(chatActiveProjection.includes("export function projectChatActive"), true);
+  assert.equal(chatActiveProjection.includes("projectChatWorkline"), true);
+  assert.equal(chatActiveProjection.includes("run.started:node"), false);
+  assert.equal(chatActiveProjection.includes("已开始处理。"), false);
+  assert.equal(transcriptStartupNodeProjection.includes("export function withStartupWorkflowNode"), true);
+  assert.equal(transcriptStartupNodeProjection.includes("export function isRefreshingTranscriptRun"), true);
+  assert.equal(transcriptStartupNodeProjection.includes("run.started:node"), false);
+  assert.equal(transcriptStartupNodeProjection.includes("已开始处理。"), false);
+  assert.equal(chatActiveProjection.includes("terminalStatuses"), true);
+  assert.equal(chatActiveProjection.includes('"blocked"'), true);
+  assert.equal(chatActiveProjection.includes("statusNotice"), true);
+  assert.equal(chatActiveProjection.includes("standaloneAssistant"), true);
+  assert.equal(chatActiveProjection.includes("scrollKey"), true);
+  assert.equal(chatActiveViewProjection.includes("export function projectChatActiveView"), true);
+  assert.equal(chatActiveViewProjection.includes("workflowVisibleNodes"), true);
+  assert.equal(chatActiveViewProjection.includes("visibleDeliverable"), true);
+  assert.equal(chatActiveViewProjection.includes("visibleResultText"), true);
+  assert.equal(chatActiveViewProjection.includes("visibleRunProblem"), true);
+  assert.equal(chatActive.includes("../../../panel-ui-chat-active-view"), true);
+  assert.equal(chatActive.includes("./chat-active-projection"), false);
   assert.equal(chatSessionProjection.includes("export function assistantModelForTurn"), true);
-  assert.equal(chatSessionProjection.includes("export function visibleDeliverable"), true);
-  assert.equal(chatSessionProjection.includes("export function visibleRunProblem"), true);
+  assert.equal(chatSessionProjection.includes("export function visibleDeliverable"), false);
+  assert.equal(assistantMessageOutputProjection.includes("export function visibleDeliverable"), true);
+  assert.equal(chatSessionProjection.includes("export function visibleRunProblem"), false);
+  assert.equal(chatSessionProjection.includes("export function visibleResultText"), false);
+  assert.equal(assistantRunOutputProjection.includes("export function visibleRunProblem"), true);
+  assert.equal(assistantRunOutputProjection.includes("export function visibleResultText"), true);
   assert.equal(chatActive.includes("TranscriptChain"), true);
+  assert.equal(chatTranscriptChain.includes("export function TranscriptChain"), true);
+  assert.equal(chatTranscriptChain.includes("export function AssistantMessage"), true);
+  assert.equal(chatTranscriptChain.includes("export function AssistantAvatar"), true);
+  assert.equal(chatTranscriptChain.includes("export function TypingDots"), true);
+  assert.equal(chatActive.includes("assistant-workline"), false);
+  assert.equal(chatTranscriptChain.includes("assistant-workline"), true);
+  assert.equal(chatActive.includes("const visible = userVisibleAnswer(props.content);"), false);
+  assert.equal(chatTranscriptChain.includes("const visible = userVisibleAnswer(props.content);"), false);
+  assert.equal(assistantMessageOutputProjection.includes("userVisibleAnswer(input.content)"), true);
+  assert.equal(chatActive.includes("animateOnMount={animateAnswerOnMount}"), false);
+  assert.equal(chatTranscriptChain.includes("animateOnMount={animateAnswerOnMount}"), false);
+  assert.equal(assistantMessageViewProjection.includes("animateAnswerOnMount"), true);
+  assert.equal(assistantMessageViewProjection.includes("projectAgentWorkTimelineView"), true);
+  assert.equal(chatActive.includes("answerFromLiveReplay"), false);
+  assert.equal(chatTranscriptChain.includes("answerFromLiveReplay"), false);
+  assert.equal(transcriptTurnProjection.includes("answerFromLiveReplay"), false);
+  assert.equal(chatActive.includes("turn.content.trim().length === 0"), false);
+  assert.equal(chatTranscriptChain.includes("turn.content.trim().length === 0"), false);
+  assert.equal(transcriptTurnProjection.includes("turn.content.trim().length === 0"), true);
+  assert.equal(chatActive.includes("autoStickToBottomRef"), true);
+  assert.equal(chatActive.includes("isNearBottom(node)"), true);
+  assert.equal(chatActive.includes("node.scrollTop = nextTop"), true);
+  assert.equal(chatActive.includes("isRefreshingRunStatus"), false);
+  assert.equal(chatActive.includes("standaloneRefreshing"), false);
+  assert.equal(chatActive.includes("keepStreamMounted={standaloneRefreshing}"), false);
+  assert.equal(chatActive.includes("standaloneAssistant"), true);
+  assert.equal(chatActive.includes("shouldShowStatusNotice"), false);
+  assert.equal(chatActiveProjection.includes("function shouldShowStatusNotice"), true);
+  assert.equal(chatActive.includes("{hasAnswer && ("), false);
+  assert.equal(chatTranscriptChain.includes("{hasAnswer && ("), false);
+  assert.equal(assistantMessageViewProjection.includes("answer: output.hasAnswer"), true);
+  assert.equal(chatActive.includes("assistantFailureParts"), false);
+  assert.equal(chatTranscriptChain.includes("assistantFailureParts"), true);
+  assert.equal(assistantFailureProjection.includes("export function assistantFailureParts"), true);
+  assert.equal(chatTranscriptChain.includes("transcriptNodes={assistant.runProjection.nodes}"), true);
+  assert.equal(chatTranscriptChain.includes("readonly transcriptNodes?: readonly TranscriptNode[];"), true);
+  assert.equal(chatActive.includes("错误信息："), false);
+  assert.equal(chatTranscriptChain.includes("错误信息："), false);
+  assert.equal(assistantFailureProjection.includes("错误信息："), true);
+  assert.equal(chatActive.includes("deliverableAsLinearText"), false);
+  assert.equal(chatTranscriptChain.includes("deliverableAsLinearText"), false);
+  assert.equal(assistantMessageOutputProjection.includes("export function deliverableAsLinearText"), true);
+  assert.equal(chatActive.includes("deliverableForTurn"), false);
+  assert.equal(chatTranscriptChain.includes("deliverableForTurn"), false);
+  assert.equal(chatTranscriptChain.includes("deliverableForWorkSessionTurn"), false);
+  assert.equal(chatTranscriptChain.includes("answerForWorkSessionTurn"), false);
+  assert.equal(chatTranscriptChain.includes("assistantMessageOutput"), false);
+  assert.equal(assistantMessageViewProjection.includes("assistantMessageOutput"), true);
+  assert.equal(chatActive.includes("AnswerSupport"), false);
+  assert.equal(chatActive.includes("answerResultForTurn"), false);
+  assert.equal(chatActive.includes("contextLedgerForTurn"), false);
+  assert.equal(chatActive.includes("contextLedger={contextLedger}"), false);
+  assert.equal(chatActive.includes("answerResult={props.workSession?.answer}"), false);
+  assert.equal(chatActive.includes("answerResult === undefined && <AssistantAnswerBlock"), false);
+  assert.equal(chatActive.includes('aria-label="结果"'), false);
+  assert.equal(chatActive.includes("复制结果"), false);
+  assert.equal(chatActive.includes("evidenceItemsForRefs"), false);
+  assert.equal(chatActive.includes("findContextLedgerEntry"), false);
+  assert.equal(chatActive.includes("function isUserFacingEvidenceRef"), false);
+  assert.equal(chatActive.includes("fallbackEvidenceSummary"), false);
+  assert.equal(chatActive.includes("模型摘要"), false);
+  assert.equal(chatActive.includes("工具证据"), false);
+  assert.equal(chatActive.includes("运行摘要"), false);
+  assert.equal(chatActive.includes("工具调用的安全摘要已作为依据。"), false);
+  assert.equal(chatActive.includes("模型调用的安全摘要已作为依据。"), false);
+  assert.equal(chatActive.includes("evidenceStatusLabel"), false);
+  assert.equal(chatActive.includes('className="evidence-card"'), false);
+  assert.equal(chatActive.includes("ref.label ?? ref.id"), false);
+  assert.equal(chatActive.includes('status={turn.status}'), false);
+  assert.equal(chatTranscriptChain.includes('status={turn.status}'), true);
+  assert.equal(chatActive.includes('status === "pending"'), false);
+  assert.equal(chatTranscriptChain.includes('status === "pending"'), true);
+  assert.equal(chatActive.includes("user-message-queued"), false);
+  assert.equal(chatTranscriptChain.includes("user-message-queued"), true);
+  assert.equal(chatActive.includes("已排队，当前任务完成后处理"), false);
+  assert.equal(chatTranscriptChain.includes("已排队，当前任务完成后处理"), false);
+  assert.equal(chatTranscriptChain.includes('aria-label="等待当前回复完成"'), true);
   assert.equal(chatActive.includes("hasRunId(turn.runId)"), false);
   assert.equal(chatActive.includes("ConfirmationBanner"), false);
   assert.equal(chatActive.includes("hasLaterToolResolution"), false);
-  assert.equal(chatActive.includes("showStandaloneRun"), true);
-  assert.equal(chatActive.includes("pendingForTurn"), true);
-  assert.equal(chatActive.includes("visibleTranscriptNodes"), true);
+  assert.equal(chatActive.includes("projectChatWorkline"), false);
+  assert.equal(chatActive.includes("showStandaloneRun"), false);
+  assert.equal(chatActive.includes("pendingForTurn"), false);
+  assert.equal(chatTranscriptChain.includes("pendingForTurn"), false);
+  assert.equal(chatActive.includes("visibleTranscriptNodes"), false);
+  assert.equal(chatActive.includes("workflowVisibleNodes"), false);
+  assert.equal(chatActiveViewProjection.includes("workflowVisibleNodes"), true);
   assert.equal(chatActive.includes("node.eventType"), false);
+  assert.equal(chatTranscriptChain.includes("node.eventType"), false);
+  assert.equal(chatSessionProjection.includes("hasRunId(turn.runId)"), false);
+  assert.equal(chatSessionProjection.includes("!terminalStatuses.has(input.run.status)"), false);
   assert.equal(chatActive.includes("补充要求或限制..."), true);
   assert.equal(chatActive.includes('props.onDecision("guidance", guidance)'), true);
   assert.equal(transcriptTimeline.includes('props.busy ? "处理中" : "允许"'), false);
-  assert.equal(transcriptConfirmation.includes('props.busy ? "处理中" : "允许"'), true);
+  assert.equal(transcriptConfirmation.includes('props.busy ? "提交中" : "确认继续"'), true);
   assert.equal(transcriptConfirmation.includes("拒绝"), true);
+  assert.equal(transcriptConfirmation.includes("confirmation-guidance-hint"), false);
+  assert.equal(transcriptConfirmation.includes("确认后继续当前动作；拒绝则停止。也可以直接补充新的要求。"), false);
+  assert.equal(transcriptConfirmation.includes("confirmation-action-summary"), true);
+  assert.equal(transcriptConfirmationStyles.includes(".confirmation-command-row"), false);
   assert.equal(chatActive.includes("confirmation-guidance-input"), false);
   assert.equal(chatActive.includes("判断下一步"), false);
   assert.equal(chatActive.includes('aria-label="思考"'), false);
   assert.equal(chatActive.includes("isSyntheticResponseModel"), false);
   assert.equal(chatSessionProjection.includes("isSyntheticResponseModel"), true);
+  assert.equal(transcriptNodeVisibility.includes("isStaleModelProgressSummary"), true);
+  assert.equal(transcriptNodeVisibility.includes("正在组织直接回答"), false);
+  assert.equal(transcriptNodeVisibility.includes("等待模型路由结果"), false);
   assert.equal(richText.includes('from "react-markdown"'), true);
   assert.equal(richText.includes('from "remark-gfm"'), true);
-  assert.equal(richText.includes("normalizeCollapsedMarkdown"), true);
+  assert.equal(richText.includes("normalizeMarkdownLineEndings"), true);
   assert.equal(richText.includes("skipHtml"), true);
-  assert.equal(richText.includes("(?=\\S)"), true);
+  assert.equal(richText.includes("normalizePlainSegmentWhitespace"), false);
+  assert.equal(richText.includes("\\n{3,}"), false);
+  assert.equal(richText.includes("(?=\\S)"), false);
   assert.equal(richText.includes("rich-code-block"), true);
   assert.equal(richText.includes("dangerouslySetInnerHTML"), false);
   assert.equal(richText.includes("innerHTML"), false);
   assert.equal(liveStreamText.includes("renderText?: (text: string) => React.ReactNode"), true);
+  assert.equal(liveStreamText.includes("animateOnMount"), true);
+  assert.equal(liveStreamText.includes("shouldAnimateSettledText"), true);
+  assert.equal(liveStreamText.includes("setStreamingRender"), true);
+  assert.equal(liveStreamText.includes("streamingRender ? \"streaming\" : \"settled\""), true);
   assert.equal(liveStreamText.includes("updateFrozenMarkdownStreamState"), true);
   assert.equal(liveStreamText.includes("markdownStreamViewport"), true);
   assert.equal(liveStreamText.includes("live-stream-frozen-chunk"), true);
   assert.equal(liveStreamText.includes("live-stream-live-tail"), true);
+  assert.equal(liveStreamText.includes('className="live-stream-live-tail"'), true);
+  assert.equal(liveStreamText.includes("live-stream-live-tail-text"), true);
+  assert.equal(liveStreamText.includes("renderText(viewport.liveTail)"), false);
+  assert.equal(liveStreamText.includes("{viewport.liveTail}</span>"), true);
+  assert.equal(liveStreamText.includes("renderText(displayed)"), true);
+  assert.equal(liveStreamText.includes("consumeStreamingTextFrame(stateRef.current, latestPropsRef.current.tone)"), true);
   assert.equal(liveStreamText.includes("container.textContent"), false);
   assert.equal(styleEntry.includes('@import "./styles/chat-layout.css"'), true);
   assert.equal(styleEntry.includes('@import "./styles/chat-composer.css"'), true);
@@ -151,33 +380,66 @@ test("panel UI chat and transcript modules stay presentation-focused", async () 
   assert.equal(styleEntry.includes('@import "./styles/rich-text.css"'), true);
   assert.equal(styleEntry.includes('@import "./styles/chat-feedback.css"'), true);
   assert.equal(styleEntry.includes('@import "./styles/transcript.css"'), true);
-  assert.equal(styleEntry.includes('@import "./styles/transcript-detail.css"'), true);
-  assert.equal(styleEntry.includes('@import "./styles/transcript-file-review.css"'), true);
-  assert.equal(styleEntry.includes('@import "./styles/transcript-command.css"'), true);
+  assert.equal(styleEntry.includes('@import "./styles/transcript-detail.css"'), false);
+  assert.equal(styleEntry.includes('@import "./styles/transcript-file-review.css"'), false);
+  assert.equal(styleEntry.includes('@import "./styles/transcript-command.css"'), false);
   assert.equal(styleEntry.includes('@import "./styles/transcript-confirmation.css"'), true);
   assert.equal(styleEntry.includes('@import "./styles/chat-results.css"'), true);
   assert.equal(styleEntry.includes(".chat-active-scroll"), false);
   assert.equal(chatLayoutStyles.includes(".chat-empty-screen,"), true);
+  assert.equal(chatLayoutStyles.includes(".chat-empty-task-groups,"), false);
+  assert.equal(chatLayoutStyles.includes(".chat-empty-task-group-heading"), false);
+  assert.equal(chatLayoutStyles.includes(".chat-empty-resume"), false);
   assert.equal(chatLayoutStyles.includes(".chat-input-card"), false);
+  assert.equal(chatLayoutStyles.includes("overflow-anchor: none"), true);
   assert.equal(chatComposerStyles.includes(".chat-input-card"), true);
+  assert.equal(chatComposerStyles.includes(".composer-options-button"), true);
+  assert.equal(chatComposerStyles.includes(".composer-options-popover"), true);
+  assert.equal(chatComposerStyles.includes(".model-select-button"), false);
   assert.equal(chatComposerStyles.includes(".chat-active-grid"), false);
   assert.equal(chatMessageStyles.includes(".chat-active-grid"), true);
+  assert.equal(chatMessageStyles.includes("task-situation"), false);
+  assert.equal(chatMessageStyles.includes(".user-message-queued"), true);
+  assert.equal(chatMessageStyles.includes("queued-dot-breathe"), true);
   assert.equal(chatMessageStyles.includes(".rich-text"), false);
+  assert.equal(chatMessageStyles.includes(".live-stream-frozen-chunk"), true);
+  assert.equal(chatMessageStyles.includes("transition: color"), false);
   assert.equal(richTextStyles.includes(".rich-text"), true);
+  assert.equal(richTextStyles.includes(".live-stream-live-tail-text"), true);
+  assert.equal(richTextStyles.includes("white-space: normal"), true);
+  assert.equal(richTextStyles.includes("min-height: 1.82em"), true);
   assert.equal(richTextStyles.includes("dangerouslySetInnerHTML"), false);
   assert.equal(chatFeedbackStyles.includes(".assistant-error-message"), true);
   assert.equal(chatFeedbackStyles.includes(".agent-work-timeline"), false);
-  assert.equal(transcriptStyles.includes(".agent-timeline-track::before"), true);
-  assert.equal(transcriptStyles.includes(".agent-timeline-marker"), true);
+  assert.equal(transcriptStyles.includes(".agent-workline"), true);
+  assert.equal(transcriptStyles.includes(".agent-workflow"), true);
+  assert.equal(transcriptStyles.includes(".agent-workflow-step"), true);
+  assert.equal(transcriptStyles.includes(".agent-workflow-marker"), true);
+  assert.equal(transcriptStyles.includes(".agent-workflow-toggle"), false);
+  assert.equal(transcriptStyles.includes(".agent-workflow-disclosure"), true);
+  assert.equal(transcriptStyles.includes(".agent-workflow-label"), true);
+  assert.equal(transcriptStyles.includes(".agent-workflow-detail"), true);
+  assert.equal(transcriptStyles.includes(".agent-workflow-expanded-detail"), true);
+  assert.equal(transcriptStyles.includes(".agent-workline-current"), false);
+  assert.equal(transcriptStyles.includes(".agent-workline-label"), false);
+  assert.equal(transcriptStyles.includes(".agent-workline-detail"), false);
+  assert.equal(transcriptStyles.includes(".agent-workline-pulse"), false);
+  assert.equal(transcriptStyles.includes(".agent-activity-rail::before"), false);
+  assert.equal(transcriptStyles.includes(".agent-timeline-track::before"), false);
+  assert.equal(transcriptStyles.includes(".agent-timeline-marker"), false);
   assert.equal(transcriptStyles.includes(".transcript-tool-detail"), false);
-  assert.equal(transcriptDetailStyles.includes(".transcript-tool-detail"), true);
-  assert.equal(transcriptDetailStyles.includes(".file-change-review"), false);
-  assert.equal(transcriptFileReviewStyles.includes(".file-change-review"), true);
-  assert.equal(transcriptFileReviewStyles.includes(".transcript-command-block"), false);
-  assert.equal(transcriptCommandStyles.includes(".transcript-command-block"), true);
-  assert.equal(transcriptCommandStyles.includes(".confirmation-node-body"), false);
   assert.equal(transcriptConfirmationStyles.includes(".confirmation-node-body"), true);
-  assert.equal(chatResultStyles.includes(".result-preview"), true);
+  assert.equal(transcriptConfirmationStyles.includes(".confirmation-guidance-hint"), false);
+  assert.equal(chatResultStyles.includes(".result-preview"), false);
+  assert.equal(chatResultStyles.includes(".answer-result-card"), false);
+  assert.equal(chatResultStyles.includes(".answer-result-content"), false);
+  assert.equal(chatResultStyles.includes(".result-kicker"), false);
+  assert.equal(chatResultStyles.includes(".result-actions"), false);
+  assert.equal(chatResultStyles.includes(".evidence-list"), false);
+  assert.equal(chatResultStyles.includes(".evidence-card"), false);
+  assert.equal(chatResultStyles.includes(".evidence-card-heading"), false);
+  assert.equal(chatResultStyles.includes(".evidence-status-used"), false);
+  assert.equal(chatResultStyles.includes(".next-steps"), false);
   assert.equal([chatMessageStyles, richTextStyles, transcriptStyles].join("\n").includes("text-wrap: pretty"), false);
   assert.equal(chatMessageStyles.includes("contain: layout paint"), true);
 });

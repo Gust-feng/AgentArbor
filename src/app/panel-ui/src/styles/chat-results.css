@@ -1,54 +1,22 @@
-.next-steps svg,
-.result-preview header svg {
-  margin-top: 2px;
-  color: var(--accent-strong);
-}
-
-.next-steps h2,
-.result-preview h2 {
-  margin: 0 0 6px;
-  color: var(--fg);
-  font-size: 14px;
-  font-weight: 650;
-}
-
-.result-preview,
-.next-steps,
 .status-notice {
-  color: var(--muted);
-  font-size: 13px;
-  line-height: 1.7;
-}
-
-.result-preview,
-.next-steps,
-.status-notice {
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  background: var(--surface);
-  padding: 14px;
-  box-shadow: var(--shadow-soft);
-}
-
-.result-preview,
-.next-steps,
-.status-notice {
-  padding: 14px;
-}
-
-.result-preview {
-  color: var(--fg);
-}
-
-.result-preview .rich-text {
-  color: color-mix(in oklch, var(--fg) 96%, var(--muted));
+  width: min(760px, calc(100% - 46px));
+  margin-left: 46px;
+  border: 0;
+  border-left: 2px solid color-mix(in oklch, var(--border) 78%, transparent);
+  border-radius: 0;
+  background: transparent;
+  padding: 4px 0 4px 12px;
+  color: color-mix(in oklch, var(--fg) 62%, var(--muted));
+  font-size: 12.5px;
+  line-height: 1.6;
+  box-shadow: none;
 }
 
 .confirmation-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 8px;
+  gap: 6px;
+  margin-top: 3px;
 }
 
 .confirmation-actions button,
@@ -81,86 +49,51 @@
   color: color-mix(in oklch, var(--fg) 78%, var(--muted));
 }
 
-.result-preview header,
-.next-steps > div {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.result-preview section {
-  border-top: 1px solid var(--border);
-  margin-top: 14px;
-  padding-top: 14px;
-}
-
-.result-preview h3 {
-  margin: 0 0 6px;
-  color: var(--fg);
-  font-size: 13px;
-}
-
-.result-summary {
-  margin-top: 12px;
-}
-
-.evidence-refs {
-  display: grid;
-  gap: 8px;
-  border-top: 1px solid var(--border);
-  margin-top: 12px;
-  padding-top: 12px;
-}
-
-.evidence-refs h3 {
-  margin: 0;
-  color: var(--fg);
-  font-size: 13px;
-  font-weight: 650;
-}
-
-.evidence-refs div {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.evidence-refs span {
-  max-width: 220px;
-  overflow: hidden;
-  border: 1px solid var(--border);
+.confirmation-actions button {
+  height: 28px;
   border-radius: 999px;
-  background: var(--surface);
-  padding: 4px 8px;
-  color: var(--muted);
-  font-size: 11px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  padding: 0 11px;
+  font-size: 12px;
+  font-weight: 560;
+  box-shadow: none;
 }
 
-.next-steps ul {
-  margin: 10px 0 0;
-  padding-left: 20px;
+.confirmation-actions button.primary {
+  border-color: color-mix(in oklch, var(--accent-strong) 60%, var(--border));
+  background: color-mix(in oklch, var(--accent-strong) 10%, transparent);
+  color: color-mix(in oklch, var(--accent-active) 84%, var(--fg));
+}
+
+.confirmation-actions button.primary:hover:not(:disabled) {
+  background: color-mix(in oklch, var(--accent-strong) 15%, transparent);
+}
+
+.confirmation-actions button.secondary {
+  border-color: color-mix(in oklch, var(--border) 82%, transparent);
+  background: transparent;
+  color: color-mix(in oklch, var(--fg) 62%, var(--muted));
 }
 
 .status-notice.warning {
-  border-color: var(--amber-soft);
-  background: var(--amber-soft);
+  border-left-color: color-mix(in oklch, var(--status-warning) 70%, var(--border));
+  background: transparent;
 }
 
 .status-notice.error {
-  border-color: color-mix(in oklch, var(--status-danger) 34%, var(--border));
-  background: color-mix(in oklch, var(--danger-soft) 34%, var(--surface));
+  border-left-color: color-mix(in oklch, var(--status-danger) 68%, var(--border));
+  background: transparent;
 }
 
 .status-notice.error .rich-text {
-  color: color-mix(in oklch, var(--fg) 76%, var(--status-danger));
+  color: color-mix(in oklch, var(--fg) 70%, var(--status-danger));
 }
 
 .status-notice h2 {
-  margin: 0 0 6px;
-  color: var(--fg);
-  font-size: 14px;
+  margin: 0 0 2px;
+  color: color-mix(in oklch, var(--fg) 82%, var(--muted));
+  font-size: 12.5px;
+  font-weight: 680;
+  line-height: 1.35;
 }
 
 .session-placeholder {
@@ -170,15 +103,15 @@
 
 .typing-dots {
   display: flex;
-  gap: 5px;
-  padding: 8px 0;
+  gap: 4px;
+  padding: 7px 0;
 }
 
 .typing-dots span {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
   border-radius: 999px;
-  background: var(--placeholder);
+  background: color-mix(in oklch, var(--placeholder) 86%, var(--muted));
   animation: bounce 0.9s infinite;
 }
 
@@ -192,15 +125,15 @@
 
 .chat-input-floating {
   flex-shrink: 0;
-  background: linear-gradient(180deg, transparent, var(--bg) 28%);
-  padding: 12px 32px 18px;
+  background: linear-gradient(180deg, transparent, color-mix(in oklch, var(--bg) 92%, transparent) 34%, var(--bg) 70%);
+  padding: 12px 32px 20px;
 }
 
 .chat-input-floating-inner {
-  width: min(100%, 860px);
+  width: min(100%, 800px);
   margin: 0 auto;
 }
 
 .chat-input-floating .chat-input-textarea {
-  min-height: 74px;
+  min-height: 66px;
 }

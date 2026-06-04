@@ -1,6 +1,10 @@
-import type { ToolDisplayProjection } from "../contracts/tools";
+export type CommandDisplayProjectionLike = {
+  readonly kind: "command_summary";
+  readonly command?: string;
+  readonly args?: readonly string[];
+};
 
-export function commandText(display: Extract<ToolDisplayProjection, { readonly kind: "command_summary" }>): string | undefined {
+export function commandText(display: CommandDisplayProjectionLike): string | undefined {
   const parts = [display.command, ...(display.args ?? [])].filter((value): value is string => value !== undefined && value.trim().length > 0);
   return parts.length === 0 ? undefined : parts.join(" ");
 }

@@ -2,16 +2,12 @@ import React, { useEffect, useMemo, useState } from "react";
 import {
   ArrowUp,
   BrainCircuit,
-  CheckCircle2,
-  Clock3,
-  FolderOpen,
+  SlidersHorizontal,
   Paperclip,
-  ShieldCheck,
   X,
 } from "lucide-react";
-import { compact, relativeTime } from "../text";
+import { compact } from "../text";
 import type { ContextAttachment } from "../contracts/context";
-import type { ConversationSummary } from "../contracts/conversation";
 import type { ModelProviderIdentity } from "../model-provider-logos";
 
 export type ChatModelOption = {
@@ -57,10 +53,6 @@ export type ChatInputProps = AttachmentInputProps & {
 
 export function ChatEmpty(props: ChatInputProps & {
   readonly error?: string;
-  readonly conversations?: readonly ConversationSummary[];
-  readonly workspaceDirectory?: string;
-  readonly pendingCount?: number;
-  readonly onOpenConversation?: (conversationId: string) => void;
 }): React.ReactElement {
   return (
     <div className="chat-empty-screen">
@@ -74,12 +66,6 @@ export function ChatEmpty(props: ChatInputProps & {
               variant="embedded"
               placeholder="输入任务..."
             />
-            <EmptyWorkbenchOverview
-              conversations={props.conversations ?? []}
-              workspaceDirectory={props.workspaceDirectory}
-              pendingCount={props.pendingCount ?? 0}
-              onOpenConversation={props.onOpenConversation}
-            />
           </section>
         </div>
       </main>
@@ -87,102 +73,10 @@ export function ChatEmpty(props: ChatInputProps & {
   );
 }
 
-function EmptyWorkbenchOverview(props: {
-  readonly conversations: readonly ConversationSummary[];
-  readonly workspaceDirectory?: string;
-  readonly pendingCount: number;
-  readonly onOpenConversation?: (conversationId: string) => void;
-}): React.ReactElement {
-  const recentConversations = props.conversations.slice(0, 4);
-  return (
-    <div className="chat-empty-overview" aria-label="工作台概览">
-      <div className="chat-empty-status-row">
-        <WorkbenchStatusItem
-          icon={<FolderOpen size={14} />}
-          label="工作区"
-          value={workspaceLabel(props.workspaceDirectory)}
-        />
-        <WorkbenchStatusItem
-          icon={<ShieldCheck size={14} />}
-          label="待确认"
-          value={props.pendingCount > 0 ? `${props.pendingCount} 项` : "无"}
-          tone={props.pendingCount > 0 ? "warning" : "neutral"}
-        />
-        <WorkbenchStatusItem
-          icon={<CheckCircle2 size={14} />}
-          label="会话"
-          value={props.conversations.length > 0 ? `${props.conversations.length} 个记录` : "新会话"}
-        />
-      </div>
-
-      {recentConversations.length > 0 && (
-        <section className="chat-empty-recent" aria-label="最近会话">
-          <div className="chat-empty-recent-heading">
-            <Clock3 size={13} />
-            <span>最近会话</span>
-          </div>
-          <div className="chat-empty-recent-list">
-            {recentConversations.map((conversation) => (
-              <button
-                type="button"
-                key={conversation.conversationId}
-                onClick={() => props.onOpenConversation?.(conversation.conversationId)}
-                disabled={props.onOpenConversation === undefined}
-              >
-                <span>{compact(conversation.title, 38)}</span>
-                <small>{conversationSummaryMeta(conversation)}</small>
-              </button>
-            ))}
-          </div>
-        </section>
-      )}
-    </div>
-  );
-}
-
-function WorkbenchStatusItem(props: {
-  readonly icon: React.ReactNode;
-  readonly label: string;
-  readonly value: string;
-  readonly tone?: "neutral" | "warning";
-}): React.ReactElement {
-  return (
-    <div className={`chat-empty-status-item ${props.tone ?? "neutral"}`}>
-      <span aria-hidden="true">{props.icon}</span>
-      <div>
-        <small>{props.label}</small>
-        <strong>{props.value}</strong>
-      </div>
-    </div>
-  );
-}
-
-function workspaceLabel(workspaceDirectory: string | undefined): string {
-  const trimmed = workspaceDirectory?.trim();
-  if (trimmed === undefined || trimmed.length === 0) return "未设置";
-  const segments = trimmed.split(/[\\/]+/).filter((segment) => segment.length > 0);
-  return compact(segments.at(-1) ?? trimmed, 24);
-}
-
-function conversationSummaryMeta(conversation: ConversationSummary): string {
-  const time = relativeTime(conversation.updatedAt);
-  const status = statusLabel(conversation.status);
-  return [status, time].filter((item) => item.length > 0).join(" · ") || "最近更新";
-}
-
-function statusLabel(status: string | undefined): string {
-  if (status === "completed") return "已完成";
-  if (status === "running" || status === "planning" || status === "queued") return "进行中";
-  if (status === "approval_needed" || status === "needs_input") return "待确认";
-  if (status === "failed" || status === "blocked") return "未完成";
-  if (status === "paused") return "已暂停";
-  if (status === "cancelled") return "已取消";
-  return "";
-}
-
 export function ChatInputBar(props: ChatInputProps): React.ReactElement {
   const [focused, setFocused] = useState(false);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
+  const [optionsOpen, setOptionsOpen] = useState(false);
   const [contextOpen, setContextOpen] = useState(false);
   const selectedModel = props.models.find((model) => model.id === props.selectedModelId);
   const canSend = props.value.trim().length > 0 && !props.busy;
@@ -191,6 +85,7 @@ export function ChatInputBar(props: ChatInputProps): React.ReactElement {
 
   useEffect(() => {
     setModelMenuOpen(false);
+    setOptionsOpen(false);
     setContextOpen(false);
   }, [props.closeSignal]);
 
@@ -234,6 +129,7 @@ export function ChatInputBar(props: ChatInputProps): React.ReactElement {
             className="composer-tool-button"
             onClick={() => {
               setModelMenuOpen(false);
+              setOptionsOpen(false);
               setContextOpen((value) => !value);
             }}
             aria-expanded={contextOpen}
@@ -243,75 +139,95 @@ export function ChatInputBar(props: ChatInputProps): React.ReactElement {
           </button>
         </div>
         <div className="chat-input-right">
-          {props.reasoningEffortEnabled && (
-            <label className="composer-reasoning-control">
-              <BrainCircuit size={14} />
-              <select
-                aria-label="思考强度"
-                value={props.reasoningEffort}
-                onChange={(event) => props.onReasoningEffortChange(event.target.value as "" | "low" | "medium" | "high")}
-              >
-                <option value="">自动</option>
-                <option value="low">轻量</option>
-                <option value="medium">标准</option>
-                <option value="high">深入</option>
-              </select>
-            </label>
-          )}
-          <div className="model-menu">
+          <div className="composer-options-menu">
             <button
               type="button"
-              className="model-select-button"
+              className="composer-options-button"
               onClick={() => {
                 setContextOpen(false);
-                setModelMenuOpen((value) => !value);
+                setModelMenuOpen(false);
+                setOptionsOpen((value) => !value);
               }}
-              aria-expanded={modelMenuOpen}
+              aria-expanded={optionsOpen}
             >
-              <span>{selectedModel?.name ?? "选择模型"}</span>
+              <SlidersHorizontal size={14} />
+              <span>选项</span>
             </button>
-            {modelMenuOpen && (
-              <div className="model-menu-popover" role="listbox" aria-label="选择模型">
-                {modelGroups.length === 0 && (
-                  <div className="model-menu-empty">
-                    <span>未配置模型</span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setModelMenuOpen(false);
-                        props.onOpenSettings();
-                      }}
+            {optionsOpen && (
+              <div className="composer-options-popover" aria-label="输入选项">
+                {props.reasoningEffortEnabled && (
+                  <label className="composer-reasoning-control">
+                    <span>
+                      <BrainCircuit size={14} />
+                      思考强度
+                    </span>
+                    <select
+                      aria-label="思考强度"
+                      value={props.reasoningEffort}
+                      onChange={(event) => props.onReasoningEffortChange(event.target.value as "" | "low" | "medium" | "high")}
                     >
-                      配置模型
-                    </button>
+                      <option value="">自动</option>
+                      <option value="low">轻量</option>
+                      <option value="medium">标准</option>
+                      <option value="high">深入</option>
+                    </select>
+                  </label>
+                )}
+                <button
+                  type="button"
+                  className="composer-model-summary"
+                  onClick={() => setModelMenuOpen((value) => !value)}
+                  aria-expanded={modelMenuOpen}
+                >
+                  <span>模型</span>
+                  <strong>{selectedModel?.name ?? "选择模型"}</strong>
+                </button>
+                {modelMenuOpen && (
+                  <div className="model-menu-popover" role="listbox" aria-label="选择模型">
+                    {modelGroups.length === 0 && (
+                      <div className="model-menu-empty">
+                        <span>未配置模型</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setModelMenuOpen(false);
+                            setOptionsOpen(false);
+                            props.onOpenSettings();
+                          }}
+                        >
+                          配置模型
+                        </button>
+                      </div>
+                    )}
+                    {modelGroups.map((group) => (
+                      <section key={group.label}>
+                        <h3>{group.label}</h3>
+                        {group.items.map((model) => (
+                          <button
+                            type="button"
+                            role="option"
+                            aria-selected={model.id === props.selectedModelId}
+                            className={model.id === props.selectedModelId ? "selected" : ""}
+                            key={model.id}
+                            onClick={() => {
+                              props.onModelSelect(model.id);
+                              setModelMenuOpen(false);
+                              setOptionsOpen(false);
+                            }}
+                          >
+                            <span className="model-option-icon" aria-hidden="true">
+                              {model.iconSvg === undefined ? <BrainCircuit size={14} /> : <span dangerouslySetInnerHTML={{ __html: model.iconSvg }} />}
+                            </span>
+                            <span className="model-option-copy">
+                              <strong>{model.name}</strong>
+                              <small>{model.providerLabel}</small>
+                            </span>
+                          </button>
+                        ))}
+                      </section>
+                    ))}
                   </div>
                 )}
-                {modelGroups.map((group) => (
-                  <section key={group.label}>
-                    <h3>{group.label}</h3>
-                    {group.items.map((model) => (
-                      <button
-                        type="button"
-                        role="option"
-                        aria-selected={model.id === props.selectedModelId}
-                        className={model.id === props.selectedModelId ? "selected" : ""}
-                        key={model.id}
-                        onClick={() => {
-                          props.onModelSelect(model.id);
-                          setModelMenuOpen(false);
-                        }}
-                      >
-                        <span className="model-option-icon" aria-hidden="true">
-                          {model.iconSvg === undefined ? <BrainCircuit size={14} /> : <span dangerouslySetInnerHTML={{ __html: model.iconSvg }} />}
-                        </span>
-                        <span className="model-option-copy">
-                          <strong>{model.name}</strong>
-                          <small>{model.providerLabel}</small>
-                        </span>
-                      </button>
-                    ))}
-                  </section>
-                ))}
               </div>
             )}
           </div>

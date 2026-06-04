@@ -8,9 +8,6 @@
 @import "./styles/rich-text.css";
 @import "./styles/chat-feedback.css";
 @import "./styles/transcript.css";
-@import "./styles/transcript-detail.css";
-@import "./styles/transcript-file-review.css";
-@import "./styles/transcript-command.css";
 @import "./styles/transcript-confirmation.css";
 @import "./styles/chat-results.css";
 @import "./styles/workspace.css";

@@ -30,6 +30,7 @@ export type RunEvent = {
   readonly delta?: string;
   readonly status: TaskStatus;
   readonly timestamp: string;
+  readonly toolName?: string;
   readonly refs: readonly ObservationRef[];
   readonly visibility: "compact" | "expanded" | "debug";
   readonly detail?: {

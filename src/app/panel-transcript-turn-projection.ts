@@ -1,0 +1,212 @@
+import {
+  projectLiveRunTranscript,
+  type LiveRunTranscriptProjection,
+} from "./panel-ui-live-transcript.js";
+import type { LiveRunBuffer } from "./panel-ui-live-run-buffer.js";
+import type { WorklineConversationTurn, WorklineProjectedTurn } from "./panel-ui-chat-workline.js";
+import {
+  answerForWorkSessionTurn,
+  deliverableForWorkSessionTurn,
+  type AssistantDeliverableLike,
+  type AssistantWorkSessionOutput,
+} from "./panel-assistant-message-output.js";
+import {
+  pendingForTurn,
+  type ConfirmationIdentity,
+} from "./panel-transcript-confirmation-projection.js";
+import { nodesForRun } from "./panel-transcript-node-projection.js";
+import {
+  isRefreshingTranscriptRun,
+  withStartupWorkflowNode,
+} from "./panel-transcript-startup-node.js";
+
+export type AssistantTranscriptRunLike = {
+  readonly runId: string;
+  readonly status: string;
+};
+
+export type AssistantTranscriptNodeLike = {
+  readonly nodeId: string;
+  readonly runId: string;
+  readonly sequence: number;
+  readonly eventType: string;
+  readonly kind: "thinking" | "tool" | "confirmation" | "user_decision" | "answer" | "system";
+  readonly phase:
+    | "noted"
+    | "preparing"
+    | "waiting_approval"
+    | "approved"
+    | "denied"
+    | "guidance"
+    | "executing"
+    | "completed"
+    | "failed"
+    | "blocked"
+    | "cancelled";
+  readonly title: string;
+  readonly summary?: string;
+  readonly text?: string;
+  readonly timestamp: string;
+  readonly refs: readonly {
+    readonly kind: string;
+    readonly id: string;
+    readonly label?: string;
+  }[];
+};
+
+export type AssistantShellSnapshot = {
+  readonly turnIds: ReadonlySet<string>;
+  readonly slotKeys: ReadonlySet<string>;
+};
+
+export type AssistantTranscriptTurnProjection<
+  TTurn extends WorklineConversationTurn,
+  TDeliverable extends AssistantDeliverableLike,
+  TPending extends ConfirmationIdentity,
+> = {
+  readonly turn: TTurn;
+  readonly displayRunId?: string;
+  readonly runProjection: LiveRunTranscriptProjection;
+  readonly pending?: TPending;
+  readonly content: string;
+  readonly deliverable?: TDeliverable;
+  readonly live: boolean;
+  readonly keepStreamMounted: boolean;
+  readonly animateOnMount: boolean;
+  readonly liveTone?: NonNullable<LiveRunTranscriptProjection["answer"]>["tone"];
+};
+
+export function projectAssistantTranscriptTurn<
+  TTurn extends WorklineConversationTurn,
+  TDeliverable extends AssistantDeliverableLike,
+  TPending extends ConfirmationIdentity,
+  TNode extends AssistantTranscriptNodeLike,
+>(input: {
+  readonly projectedTurn: WorklineProjectedTurn<TTurn>;
+  readonly turnIndex: number;
+  readonly turns: readonly TTurn[];
+  readonly latestAssistantTurnId: string | undefined;
+  readonly previousEmptyShells: AssistantShellSnapshot;
+  readonly run?: AssistantTranscriptRunLike;
+  readonly transcriptNodes: readonly TNode[];
+  readonly live?: LiveRunBuffer;
+  readonly workSession?: AssistantWorkSessionOutput<TDeliverable>;
+  readonly pending?: TPending;
+}): AssistantTranscriptTurnProjection<TTurn, TDeliverable, TPending> {
+  const turn = input.projectedTurn.turn;
+  const displayRunId = input.projectedTurn.displayRunId;
+  const unclaimedRunningTurn = displayRunId === undefined && isPendingAssistantShell(turn);
+  const refreshingRun = input.run?.runId === displayRunId && isRefreshingRunStatus(input.run);
+  const startupRunId = displayRunId ?? (unclaimedRunningTurn ? turn.turnId : undefined);
+  const live = activeLiveForTurn(input.live, input.run, displayRunId, refreshingRun);
+  const runProjection = projectLiveRunTranscript(
+    withStartupWorkflowNode(nodesForRun(input.transcriptNodes, displayRunId), {
+      runId: startupRunId,
+      refreshing: refreshingRun || unclaimedRunningTurn,
+    }),
+    live
+  );
+  const pending = pendingForTurn(input.pending, displayRunId);
+  const liveAnswer = runProjection.answer?.streaming === true ? runProjection.answer : undefined;
+  const settledAnswerFallback = runProjection.answer?.streaming === false ? runProjection.answer.text : "";
+  const turnAnswer = answerForWorkSessionTurn(input.workSession, displayRunId, turn.content);
+  const content = liveAnswer?.text ?? (turnAnswer.trim().length > 0 ? turnAnswer : settledAnswerFallback);
+  const deliverable = deliverableForWorkSessionTurn(input.workSession, displayRunId, content);
+  const keepStreamMounted = live !== undefined || refreshingRun || unclaimedRunningTurn;
+  const shellKey = assistantTurnSlotKey(input.turns, input.turnIndex);
+  const hasVisibleAnswer = content.trim().length > 0;
+  const settledCurrentRunAnswer =
+    input.run !== undefined &&
+    input.run.runId === displayRunId &&
+    input.run.status === "completed" &&
+    hasVisibleAnswer;
+  const animateFromObservedShell =
+    hasVisibleAnswer &&
+    (
+      input.previousEmptyShells.turnIds.has(turn.turnId) ||
+      input.previousEmptyShells.slotKeys.has(shellKey)
+    );
+  const animateLatestSettledAnswer =
+    turn.turnId === input.latestAssistantTurnId &&
+    hasVisibleAnswer &&
+    (
+      turn.content.trim().length === 0 ||
+      input.previousEmptyShells.slotKeys.has(shellKey) ||
+      settledCurrentRunAnswer
+    );
+
+  return {
+    turn,
+    displayRunId,
+    runProjection,
+    pending,
+    content,
+    deliverable,
+    live: liveAnswer !== undefined,
+    keepStreamMounted,
+    animateOnMount: keepStreamMounted || animateFromObservedShell || animateLatestSettledAnswer,
+    liveTone: liveAnswer?.tone ?? runProjection.answer?.tone,
+  };
+}
+
+export function assistantShellSnapshot<TTurn extends WorklineConversationTurn>(
+  turns: readonly TTurn[]
+): AssistantShellSnapshot {
+  const turnIds = new Set<string>();
+  const slotKeys = new Set<string>();
+  turns.forEach((turn, index) => {
+    if (!isEmptyRunningAssistantTurn(turn)) {
+      return;
+    }
+    turnIds.add(turn.turnId);
+    slotKeys.add(assistantTurnSlotKey(turns, index));
+  });
+  return { turnIds, slotKeys };
+}
+
+export function latestAssistantTurnIdForTurns<TTurn extends WorklineConversationTurn>(
+  turns: readonly TTurn[]
+): string | undefined {
+  return [...turns].reverse().find((turn) => turn.role === "assistant")?.turnId;
+}
+
+export function assistantTurnSlotKey<TTurn extends WorklineConversationTurn>(
+  turns: readonly TTurn[],
+  turnIndex: number
+): string {
+  const assistantOrdinal = turns
+    .slice(0, turnIndex + 1)
+    .filter((turn) => turn.role === "assistant")
+    .length;
+  const previousUser = [...turns.slice(0, turnIndex)].reverse().find((turn) => turn.role === "user");
+  return `${assistantOrdinal}:${previousUser?.content ?? ""}`;
+}
+
+export function isRefreshingRunStatus(run: AssistantTranscriptRunLike | undefined): boolean {
+  return isRefreshingTranscriptRun(run);
+}
+
+function activeLiveForTurn(
+  live: LiveRunBuffer | undefined,
+  run: AssistantTranscriptRunLike | undefined,
+  displayRunId: string | undefined,
+  refreshingRun: boolean
+): LiveRunBuffer | undefined {
+  if (live === undefined || displayRunId === undefined || live.runId !== displayRunId) {
+    return undefined;
+  }
+  if (run === undefined) {
+    return live;
+  }
+  return refreshingRun ? live : undefined;
+}
+
+function isEmptyRunningAssistantTurn(turn: WorklineConversationTurn): boolean {
+  return turn.role === "assistant" &&
+    turn.content.trim().length === 0 &&
+    isPendingAssistantShell(turn);
+}
+
+function isPendingAssistantShell(turn: WorklineConversationTurn): boolean {
+  return turn.role === "assistant" && (turn.status === "running" || turn.status === "pending");
+}

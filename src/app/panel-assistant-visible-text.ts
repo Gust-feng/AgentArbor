@@ -11,12 +11,12 @@ export function userVisibleAnswer(text: string): string {
     .replace(/Root Agent/g, "助手");
 }
 
+export function normalizeComparableText(value: string): string {
+  return userVisibleAnswer(value).replace(/\s+/g, " ").trim();
+}
+
 function stripInternalAssistantText(text: string): string {
   return text
     .replace(/<\s*(?:tool_call|function_call|use_tool|internal_action|internal_control|query|arguments)\b[^>]*>[\s\S]*?<\s*\/\s*(?:tool_call|function_call|use_tool|internal_action|internal_control|query|arguments)\s*>/gi, "")
     .replace(/<\s*\/?\s*(?:tool_call|function_call|use_tool|internal_action|internal_control|query|arguments)\b[^>]*>/gi, "");
-}
-
-export function normalizeComparableText(value: string): string {
-  return userVisibleAnswer(value).replace(/\s+/g, " ").trim();
 }

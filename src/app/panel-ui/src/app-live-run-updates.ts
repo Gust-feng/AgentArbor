@@ -1,23 +1,31 @@
 import type React from "react";
-import { createRunReadModelPatch, detailForRun } from "./app-run-projection";
 import { shouldKeepRefreshing, stopLiveUpdates, stopPolling, stopStream } from "./app-runtime-controls";
 import type { AppState } from "./app-state";
 import {
-  appendLiveRunEvent,
-  appendLiveRunEvents,
   isLiveAppendOnlyEvent,
 } from "../../panel-ui-live-run-buffer";
 import {
-  mergeEvents,
+  appStateWithAppendOnlyRunEvent,
+  appStateWithObservedRunEvent,
+  appStateWithObservedRunProjection,
+} from "./app-run-observation-state";
+import {
+  appStateWithSettledRunProjection,
+  loadSettledRunProjection,
+  refreshingFollowUpRun,
+} from "./app-run-observation-settlement";
+import {
   openBasicRunStream,
   safeBasicEvents,
   safeBasicRun,
-  safeConversation,
-  safeDesktopDetail,
   safeWorkSession,
 } from "./runtime";
 import type { BasicAgentRun, RunEvent } from "./contracts/run";
 import { terminalStatuses } from "./ui-state";
+
+const FALLBACK_POLL_INTERVAL_MS = 1_200;
+const STREAM_BOOTSTRAP_POLL_INTERVAL_MS = 160;
+const STREAM_BOOTSTRAP_POLL_LIMIT = 75;
 
 export type LiveRunUpdateController = {
   readonly startLiveUpdates: (runId: string, cursor: number) => void;
@@ -50,36 +58,29 @@ export function createLiveRunUpdateController(
         ]);
         lastSequence = eventsResponse.cursor.lastSequence;
         if (options.mountedRef.current && options.activeRunIdRef.current === runId) {
-          options.setApp((previous) => {
-            const readModel = createRunReadModelPatch(previous, {
+          options.setApp((previous) =>
+            appStateWithObservedRunProjection(previous, {
               runId,
-              workSession: workSessionResponse,
-              detail: detailForRun(runId, previous.detail),
-            });
-            return {
-              ...previous,
               run: runResponse.run,
-              live: appendLiveRunEvents(runId, previous.live, eventsResponse.events),
-              events: mergeEvents(previous.events, eventsResponse.events),
-              ...readModel,
-            };
-          });
+              events: eventsResponse.events,
+              workSession: workSessionResponse,
+            })
+          );
         }
-        if (terminalStatuses.has(runResponse.run.status) || runResponse.run.status === "approval_needed" || runResponse.run.status === "needs_input") {
-          const [detail, conversation] = await Promise.all([
-            safeDesktopDetail(runId),
-            runResponse.run.conversationId === undefined ? undefined : safeConversation(runResponse.run.conversationId),
-          ]);
-          options.mountedRef.current && options.activeRunIdRef.current === runId && options.setApp((previous) => {
-            const readModel = createRunReadModelPatch(previous, { runId, workSession: workSessionResponse, detail });
-            return {
-              ...previous,
-              conversation: conversation ?? previous.conversation,
-              live: undefined,
-              ...readModel,
-            };
+        if (isObservedRunSettled(runResponse.run)) {
+          const settled = await loadSettledRunProjection({
+            runId,
+            run: runResponse.run,
+            workSession: workSessionResponse,
           });
-          if (!shouldKeepRefreshing(runResponse.run.status)) {
+          options.mountedRef.current && options.activeRunIdRef.current === runId && options.setApp((previous) => {
+            return appStateWithSettledRunProjection(previous, settled);
+          });
+          const followUp = refreshingFollowUpRun(settled);
+          if (followUp !== undefined) {
+            options.activeRunIdRef.current = followUp.runId;
+            startLiveUpdates(followUp.runId, followUp.cursor);
+          } else if (!shouldKeepRefreshing(runResponse.run.status)) {
             stopPolling(options.pollTimer);
             void options.refreshConversations();
           }
@@ -92,23 +93,21 @@ export function createLiveRunUpdateController(
       }
     };
     void tick();
-    options.pollTimer.current = window.setInterval(() => void tick(), 1_200);
+    options.pollTimer.current = window.setInterval(() => void tick(), FALLBACK_POLL_INTERVAL_MS);
   }
 
   function startLiveUpdates(runId: string, cursor: number): void {
     stopLiveUpdates(options.pollTimer, options.streamRef);
     options.activeRunIdRef.current = runId;
     let lastSequence = cursor;
+    let streamDeliveredEvent = false;
+    let liveRunSettled = false;
     const refreshAfterEvent = async (event: RunEvent): Promise<void> => {
       if (options.activeRunIdRef.current !== runId) return;
       lastSequence = Math.max(lastSequence, event.sequence);
       if (isLiveAppendOnlyEvent(event)) {
         if (options.mountedRef.current && options.activeRunIdRef.current === runId) {
-          options.setApp((previous) => ({
-            ...previous,
-            live: appendLiveRunEvent(runId, previous.live, event),
-            events: mergeEvents(previous.events, [event]),
-          }));
+          options.setApp((previous) => appStateWithAppendOnlyRunEvent(previous, { runId, event }));
         }
         return;
       }
@@ -117,48 +116,73 @@ export function createLiveRunUpdateController(
         safeWorkSession(runId),
       ]);
       if (options.mountedRef.current && options.activeRunIdRef.current === runId) {
-        options.setApp((previous) => {
-          const readModel = createRunReadModelPatch(previous, {
+        options.setApp((previous) =>
+          appStateWithObservedRunEvent(previous, {
             runId,
+            run,
+            event,
             workSession,
-            detail: detailForRun(runId, previous.detail),
-          });
-          return {
-            ...previous,
-            run: run ?? previous.run,
-            live: appendLiveRunEvent(runId, previous.live, event),
-            events: mergeEvents(previous.events, [event]),
-            ...readModel,
-          };
-        });
+          })
+        );
       }
       if (run !== undefined && !shouldKeepRefreshing(run.status)) {
+        liveRunSettled = true;
+        stopPolling(options.pollTimer);
         stopStream(options.streamRef);
-        const [detail, conversation] = await Promise.all([
-          safeDesktopDetail(runId),
-          run.conversationId === undefined ? undefined : safeConversation(run.conversationId),
-        ]);
+        const settled = await loadSettledRunProjection({ runId, run, workSession });
         options.mountedRef.current && options.activeRunIdRef.current === runId && options.setApp((previous) => {
-          const readModel = createRunReadModelPatch(previous, { runId, workSession, detail });
-          return {
-            ...previous,
-            conversation: conversation ?? previous.conversation,
-            live: undefined,
-            ...readModel,
-          };
+          return appStateWithSettledRunProjection(previous, settled);
         });
-        void options.refreshConversations();
+        const followUp = refreshingFollowUpRun(settled);
+        if (followUp !== undefined) {
+          options.activeRunIdRef.current = followUp.runId;
+          startLiveUpdates(followUp.runId, followUp.cursor);
+        } else {
+          void options.refreshConversations();
+        }
       }
     };
+    const stopBootstrapPolling = (): void => stopPolling(options.pollTimer);
+    const startBootstrapPolling = (): void => {
+      let attempts = 0;
+      let inFlight = false;
+      const poll = async (): Promise<void> => {
+        if (streamDeliveredEvent || inFlight || options.activeRunIdRef.current !== runId) {
+          return;
+        }
+        attempts += 1;
+        inFlight = true;
+        try {
+          const eventsResponse = await safeBasicEvents(runId, lastSequence);
+          const events = eventsResponse?.events ?? [];
+          for (const event of events) {
+            await refreshAfterEvent(event);
+          }
+          if (events.length > 0 && !streamDeliveredEvent) {
+            attempts = 0;
+          }
+        } finally {
+          inFlight = false;
+          if (streamDeliveredEvent || attempts >= STREAM_BOOTSTRAP_POLL_LIMIT) {
+            stopBootstrapPolling();
+          }
+        }
+      };
+      void poll();
+      options.pollTimer.current = window.setInterval(() => void poll(), STREAM_BOOTSTRAP_POLL_INTERVAL_MS);
+    };
     const fallback = (): void => {
-      if (options.pollTimer.current === undefined) {
-        startPolling(runId, lastSequence);
-      }
+      if (liveRunSettled) return;
+      startPolling(runId, lastSequence);
     };
     const stream = openBasicRunStream({
       runId,
       cursor,
-      onEvent: (event) => void refreshAfterEvent(event),
+      onEvent: (event) => {
+        streamDeliveredEvent = true;
+        stopBootstrapPolling();
+        void refreshAfterEvent(event);
+      },
       onError: fallback,
     });
     if (stream === undefined) {
@@ -166,9 +190,14 @@ export function createLiveRunUpdateController(
       return;
     }
     options.streamRef.current = stream;
+    startBootstrapPolling();
   }
 
   return { startLiveUpdates, startPolling };
+}
+
+function isObservedRunSettled(run: BasicAgentRun): boolean {
+  return terminalStatuses.has(run.status) || run.status === "approval_needed" || run.status === "needs_input";
 }
 
 async function fetchBasicRun(runId: string): Promise<{ readonly run: BasicAgentRun }> {

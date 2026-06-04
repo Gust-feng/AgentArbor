@@ -3,8 +3,7 @@ import { isConversationWaitingForUser } from "./conversation-state";
 import { ChatActive } from "./components/chat-active";
 import { ChatEmpty } from "./components/chat-empty";
 import { Sidebar, type Screen } from "./components/sidebar";
-import { TopBar } from "./components/topbar";
-import { SettingsDialog, SkillsPage, ToolsPage, type ModelForm, type SettingsGroup, type ToolForm } from "./components/workspace-pages";
+import { SettingsDialog, type ModelForm, type SettingsGroup, type ToolForm } from "./components/settings-dialog";
 import { blockedContextAttachment, previewContextAttachment, uniqueAttachments } from "./app-attachments";
 import { applyAppBootstrap, loadAppBootstrap } from "./app-bootstrap";
 import {
@@ -15,6 +14,7 @@ import {
   type ComposerReasoningEffort,
   type VisibleAiMode,
 } from "./app-config-projection";
+import { useConversationSummaryRefresh } from "./app-conversation-refresh";
 import { createAppSettingsController } from "./app-settings-controller";
 import {
   projectCurrentRun,
@@ -23,7 +23,6 @@ import { createAppRunController } from "./app-run-controller";
 import {
   stopLiveUpdates,
 } from "./app-runtime-controls";
-import { startSkillChat } from "./app-skill-actions";
 import { createInitialAppState } from "./app-state";
 import type { ModelProviderModelCatalog } from "./contracts/config";
 import type { ContextAttachment } from "./contracts/context";
@@ -32,9 +31,8 @@ import { modelOptionsFromConfig, selectedModelOptionId } from "./model-options";
 export function App(): React.ReactElement {
   const [app, setApp] = useState(createInitialAppState);
   const [screen, setScreen] = useState<Screen>("chat-empty");
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [settingsGroup, setSettingsGroup] = useState<SettingsGroup>("general");
+  const [settingsGroup, setSettingsGroup] = useState<SettingsGroup>("models");
   const [inputCloseSignal, setInputCloseSignal] = useState(0);
   const [goal, setGoal] = useState("");
   const [aiMode, setAiMode] = useState<VisibleAiMode>("openai-responses");
@@ -70,6 +68,12 @@ export function App(): React.ReactElement {
   const viewEpochRef = useRef(0);
   const lastActiveProfileIdRef = useRef<string | undefined>(undefined);
   const modelSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
+
+  useConversationSummaryRefresh({
+    conversations: app.conversations,
+    setApp,
+    mountedRef,
+  });
 
   useEffect(() => {
     void loadAppBootstrap().then((bootstrap) => {
@@ -228,7 +232,7 @@ export function App(): React.ReactElement {
     setAttachments((previous) => previous.filter((attachment) => attachment.attachmentId !== attachmentId));
   }
 
-  function openSettings(group: SettingsGroup = "general"): void {
+  function openSettings(group: SettingsGroup = "models"): void {
     setInputCloseSignal((value) => value + 1);
     setSettingsGroup(group);
     setSettingsOpen(true);
@@ -264,34 +268,20 @@ export function App(): React.ReactElement {
   return (
     <div className="app-root">
       <Sidebar
-        collapsed={sidebarCollapsed}
         currentScreen={chatScreen}
         conversations={app.conversations}
         activeConversationId={app.conversation?.conversationId}
         pendingCount={pendingCount}
         onNew={resetChat}
         onOpen={(id) => void loadConversation(id)}
-        onNavigate={(target) => setScreen(target)}
-        onOpenSettings={() => openSettings("general")}
+        onOpenSettings={() => openSettings("models")}
       />
 
       <div className="app-workbench">
-        <TopBar
-          sidebarCollapsed={sidebarCollapsed}
-          run={app.run}
-          config={app.config}
-          pendingCount={pendingCount}
-          onToggleSidebar={() => setSidebarCollapsed((value) => !value)}
-        />
-
         <main className="app-main">
           {chatScreen === "chat-empty" && (
             <ChatEmpty
               {...inputProps}
-              conversations={app.conversations}
-              workspaceDirectory={app.config?.workspace?.workspaceDirectory}
-              pendingCount={pendingCount}
-              onOpenConversation={(id) => void loadConversation(id)}
               error={app.error}
             />
           )}
@@ -308,23 +298,6 @@ export function App(): React.ReactElement {
               pendingConfirmation={currentRun.workSession?.pendingConfirmation ?? currentRun.detail?.canvas?.agent?.pendingConfirmation}
               onDecision={(decision, guidance) => void decideConfirmation(decision, guidance)}
               confirmationBusy={confirmationBusy}
-            />
-          )}
-          {chatScreen === "skills" && (
-            <SkillsPage
-              skills={app.skills}
-              onUpdateSkill={(id, enabled) => void updateSkill(id, enabled)}
-              onStartSkill={(skill) => startSkillChat(skill, setScreen, setGoal)}
-            />
-          )}
-          {chatScreen === "tools" && (
-            <ToolsPage
-              tools={app.tools}
-              toolForm={toolForm}
-              setToolForm={setToolForm}
-              saving={savingTools}
-              onSaveTools={() => void saveTools()}
-              onUpdateTool={(name, enabled) => void updateTool(name, enabled)}
             />
           )}
         </main>
@@ -346,7 +319,15 @@ export function App(): React.ReactElement {
         onSaveModelCatalog={saveModelCatalog}
         onRevealModelApiKey={revealModelApiKey}
         modelCatalogs={modelCatalogs}
+        skills={app.skills}
         onSaveWorkspace={(nextWorkspaceDirectory) => void saveWorkspace(nextWorkspaceDirectory)}
+        tools={app.tools}
+        toolForm={toolForm}
+        setToolForm={setToolForm}
+        savingTools={savingTools}
+        onSaveTools={() => void saveTools()}
+        onUpdateTool={(toolName, enabled) => void updateTool(toolName, enabled)}
+        onUpdateSkill={(skillId, enabled) => void updateSkill(skillId, enabled)}
       />
     </div>
   );

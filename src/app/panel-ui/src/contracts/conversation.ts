@@ -28,9 +28,14 @@ export type Conversation = {
 export type ConversationSummary = {
   readonly conversationId: string;
   readonly title: string;
+  readonly preview?: string;
+  readonly currentAction?: string;
+  readonly nextStep?: string;
   readonly status?: string;
   readonly activeRunId?: string;
   readonly latestRunId?: string;
+  readonly queuedRunIds?: readonly string[];
+  readonly queuedRunCount?: number;
   readonly updatedAt?: string;
   readonly requiresUserAction?: boolean;
 };

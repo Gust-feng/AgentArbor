@@ -4,8 +4,7 @@ import {
   mergeConfigResponse,
   type VisibleAiMode,
 } from "./app-config-projection";
-import type { ModelForm } from "./components/workspace-pages";
-import type { ToolForm } from "./components/tools-page";
+import type { ModelForm, ToolForm } from "./components/settings-types";
 import type { ConfigResponse, ModelProviderModelCatalog } from "./contracts/config";
 import type { SkillDefinition } from "./contracts/skills";
 import type { ToolsResponse } from "./contracts/tools";

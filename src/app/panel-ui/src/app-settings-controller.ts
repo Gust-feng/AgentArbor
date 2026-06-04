@@ -15,7 +15,7 @@ import {
 } from "./app-config-actions";
 import { mergeConfigResponse, type VisibleAiMode } from "./app-config-projection";
 import type { AppState } from "./app-state";
-import type { ModelForm, ToolForm } from "./components/workspace-pages";
+import type { ModelForm, ToolForm } from "./components/settings-types";
 import type { ModelProviderModelCatalog } from "./contracts/config";
 
 export type AppSettingsController = {
@@ -197,6 +197,13 @@ export function createAppSettingsController(options: AppSettingsControllerOption
       if (options.mountedRef.current) {
         options.setApp((previous) => ({ ...previous, config: { ...previous.config, workspace } }));
       }
+    } catch (error) {
+      if (options.mountedRef.current) {
+        options.setApp((previous) => ({
+          ...previous,
+          error: `系统错误：${error instanceof Error ? error.message : "工作目录保存失败。"}`,
+        }));
+      }
     } finally {
       if (options.mountedRef.current) options.setSavingWorkspace(false);
     }
@@ -210,6 +217,13 @@ export function createAppSettingsController(options: AppSettingsControllerOption
         options.setApp((previous) => ({ ...previous, tools: response }));
         options.setToolForm((previous) => ({ ...previous, tavilyApiKey: "" }));
       }
+    } catch (error) {
+      if (options.mountedRef.current) {
+        options.setApp((previous) => ({
+          ...previous,
+          error: `系统错误：${error instanceof Error ? error.message : "工具配置保存失败。"}`,
+        }));
+      }
     } finally {
       if (options.mountedRef.current) options.setSavingTools(false);
     }
@@ -222,15 +236,34 @@ export function createAppSettingsController(options: AppSettingsControllerOption
       if (options.mountedRef.current) {
         options.setApp((previous) => ({ ...previous, tools: response }));
       }
+    } catch (error) {
+      if (options.mountedRef.current) {
+        options.setApp((previous) => ({
+          ...previous,
+          error: `系统错误：${error instanceof Error ? error.message : "工具状态保存失败。"}`,
+        }));
+      }
     } finally {
       if (options.mountedRef.current) options.setSavingTools(false);
     }
   }
 
   async function updateSkill(skillId: string, enabled: boolean): Promise<void> {
-    const skills = await updateSkillState(skillId, enabled);
-    if (options.mountedRef.current) {
-      options.setApp((previous) => ({ ...previous, skills }));
+    options.setSavingTools(true);
+    try {
+      const skills = await updateSkillState(skillId, enabled);
+      if (options.mountedRef.current) {
+        options.setApp((previous) => ({ ...previous, skills }));
+      }
+    } catch (error) {
+      if (options.mountedRef.current) {
+        options.setApp((previous) => ({
+          ...previous,
+          error: `系统错误：${error instanceof Error ? error.message : "工作方法状态保存失败。"}`,
+        }));
+      }
+    } finally {
+      if (options.mountedRef.current) options.setSavingTools(false);
     }
   }
 

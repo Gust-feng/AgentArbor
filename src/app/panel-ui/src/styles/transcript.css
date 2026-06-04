@@ -1,241 +1,261 @@
-.agent-work-timeline {
+.agent-workline {
   display: grid;
-  width: min(780px, 100%);
+  width: min(720px, 100%);
   min-width: 0;
-  gap: 6px;
-  color: color-mix(in oklch, var(--muted) 90%, var(--fg));
 }
 
-.agent-timeline-track {
+.agent-workflow {
+  display: grid;
+  min-width: 0;
+  gap: 0;
+  padding: 1px 0 3px;
+}
+
+.agent-workflow-step {
   position: relative;
   display: grid;
   min-width: 0;
-  gap: 2px;
-  padding-left: 22px;
+  grid-template-columns: 12px minmax(0, 1fr);
+  align-items: start;
+  column-gap: 9px;
+  padding: 3px 0 4px;
+  color: color-mix(in oklch, var(--fg) 58%, var(--muted));
+  animation: agent-workflow-enter 180ms var(--motion-ease-standard) both;
+  transition: color 180ms var(--motion-ease-standard), opacity 180ms var(--motion-ease-standard);
 }
 
-.agent-timeline-track::before {
+.agent-workflow-step:not(:last-child)::after {
   content: "";
   position: absolute;
-  top: 10px;
-  bottom: 10px;
-  left: 6px;
+  top: 16px;
+  bottom: -8px;
+  left: 5px;
   width: 1px;
-  background: linear-gradient(
-    180deg,
-    transparent,
-    color-mix(in oklch, var(--border) 72%, transparent) 10%,
-    color-mix(in oklch, var(--border) 72%, transparent) 90%,
-    transparent
-  );
-}
-
-.agent-timeline-row {
-  position: relative;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  min-width: 0;
-  padding: 2px 0 2px 0;
-}
-
-.agent-timeline-marker {
-  position: absolute;
-  top: 14px;
-  left: -19px;
-  z-index: 1;
-  width: 8px;
-  height: 8px;
-  border: 1px solid color-mix(in oklch, var(--surface) 80%, var(--border));
   border-radius: 999px;
-  background: color-mix(in oklch, var(--muted) 58%, var(--surface));
-  box-shadow: 0 0 0 3px var(--bg);
+  background: color-mix(in oklch, var(--border) 32%, transparent);
 }
 
-.agent-timeline-row.done .agent-timeline-marker {
-  background: color-mix(in oklch, var(--status-success) 64%, var(--muted));
+.agent-workflow-marker {
+  position: relative;
+  z-index: 1;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  margin: 8px auto 0;
+  border: 1px solid color-mix(in oklch, var(--muted) 34%, transparent);
+  background: var(--bg);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--bg) 96%, transparent);
+  transform: scale(0.72);
+  transition:
+    background-color 180ms var(--motion-ease-standard),
+    border-color 180ms var(--motion-ease-standard),
+    box-shadow 180ms var(--motion-ease-standard),
+    transform 180ms var(--motion-ease-standard);
 }
 
-.agent-timeline-row.active .agent-timeline-marker,
-.agent-timeline-row[data-open="true"][data-kind="thinking"] .agent-timeline-marker {
-  border-color: color-mix(in oklch, var(--accent-strong) 48%, var(--surface));
-  background: var(--accent-strong);
-  box-shadow:
-    0 0 0 3px var(--bg),
-    0 0 0 6px color-mix(in oklch, var(--accent-soft) 70%, transparent);
-  animation: agent-stream-breathe 1.45s var(--motion-ease-standard) infinite;
+.agent-workflow-step[data-current="true"] {
+  color: color-mix(in oklch, var(--fg) 84%, var(--muted));
 }
 
-.agent-timeline-row.warning .agent-timeline-marker {
-  background: var(--status-warning);
-}
-
-.agent-timeline-row.danger .agent-timeline-marker {
-  background: var(--status-danger);
-}
-
-.agent-timeline-row-body {
-  display: grid;
-  min-width: 0;
-  gap: 5px;
-}
-
-.agent-timeline-thought {
-  margin: 0;
-  min-width: 0;
-  color: color-mix(in oklch, var(--muted) 90%, var(--fg));
-  font-size: 13px;
-  font-style: italic;
-  line-height: 1.62;
-}
-
-.agent-timeline-event {
-  display: grid;
-  width: 100%;
-  min-width: 0;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  align-items: center;
-  gap: 8px;
-  border: 1px solid transparent;
-  border-radius: 10px;
+.agent-workflow-step:not([data-current="true"]) .agent-workflow-marker {
+  border-color: color-mix(in oklch, var(--border) 44%, transparent);
   background: transparent;
-  padding: 4px 8px;
-  color: inherit;
-  font: inherit;
-  text-align: left;
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--bg) 96%, transparent);
 }
 
-button.agent-timeline-event:hover {
-  border-color: color-mix(in oklch, var(--border) 56%, transparent);
-  background: color-mix(in oklch, var(--surface-subtle) 62%, transparent);
+.agent-workflow-step[data-current="true"] .agent-workflow-marker {
+  border-color: color-mix(in oklch, var(--accent-strong) 24%, transparent);
+  background: color-mix(in oklch, var(--accent-strong) 46%, var(--muted));
+  box-shadow:
+    0 0 0 5px color-mix(in oklch, var(--accent-soft) 42%, transparent),
+    0 0 16px color-mix(in oklch, var(--accent-strong) 8%, transparent);
+  transform: scale(1);
 }
 
-
-.agent-timeline-event.static {
-  cursor: default;
+.agent-workflow-step.tool[data-current="true"] .agent-workflow-marker {
+  background: color-mix(in oklch, var(--status-success) 68%, var(--accent-strong));
 }
 
-.agent-timeline-event-main {
-  display: inline-flex;
+.agent-workflow-step.failed .agent-workflow-marker,
+.agent-workflow-step.blocked .agent-workflow-marker,
+.agent-workflow-step.waiting_approval .agent-workflow-marker,
+.agent-workflow-step.confirmation .agent-workflow-marker {
+  background: color-mix(in oklch, var(--status-warning) 78%, var(--muted));
+  box-shadow: 0 0 0 4px color-mix(in oklch, var(--bg) 96%, transparent);
+}
+
+.agent-workflow-line {
+  display: flex;
   min-width: 0;
   max-width: 100%;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 8px;
+  flex-wrap: nowrap;
+  align-items: flex-start;
+  column-gap: 7px;
+  row-gap: 2px;
+  margin: 0;
+  font-size: 12.6px;
+  line-height: 1.74;
+  letter-spacing: -0.004em;
+  transition: color 180ms var(--motion-ease-standard), opacity 180ms var(--motion-ease-standard);
 }
 
-.agent-timeline-event strong,
-.agent-timeline-event-main > span,
-.agent-timeline-event small {
+.agent-workflow-disclosure {
+  display: grid;
   min-width: 0;
+  gap: 3px;
 }
 
-.agent-timeline-event strong {
-  color: color-mix(in oklch, var(--fg) 94%, var(--muted));
-  font-size: 13px;
-  font-weight: 620;
-  line-height: 1.35;
+.agent-workflow-disclosure > summary {
+  cursor: pointer;
+  list-style: none;
 }
 
-.agent-timeline-event-main > span {
-  overflow: hidden;
-  color: color-mix(in oklch, var(--fg) 86%, var(--muted));
-  font-size: 12.5px;
-  line-height: 1.45;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.agent-workflow-disclosure > summary::-webkit-details-marker {
+  display: none;
 }
 
-.agent-timeline-event small {
-  overflow: hidden;
-  color: color-mix(in oklch, var(--muted) 86%, var(--fg));
-  font-size: 11px;
-  line-height: 1.4;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.agent-timeline-event > svg {
+.agent-workflow-disclosure > summary.agent-workflow-line::after {
+  content: "›";
   flex: 0 0 auto;
-  color: color-mix(in oklch, var(--muted) 82%, var(--fg));
-  transform: rotate(0deg);
-  transition: transform var(--motion-fast-duration) var(--motion-ease-standard);
+  width: 14px;
+  margin-left: 6px;
+  color: color-mix(in oklch, var(--muted) 76%, var(--fg));
+  font-size: 14px;
+  line-height: 1.62;
+  text-align: center;
+  opacity: 0.34;
+  transform: translateY(-1px);
+  transition: opacity 140ms ease, transform 140ms ease;
 }
 
-.agent-timeline-row[data-open="false"] .agent-timeline-event > svg {
-  transform: rotate(-90deg);
+.agent-workflow-disclosure[open] > summary.agent-workflow-line::after {
+  transform: translateY(-1px) rotate(90deg);
 }
 
-.agent-timeline-row-detail {
-  display: grid;
-  min-width: 0;
-  border-left: 1px solid color-mix(in oklch, var(--border) 48%, transparent);
-  margin-left: 8px;
-  padding: 4px 0 4px 14px;
+.agent-workflow-disclosure:hover > summary.agent-workflow-line::after,
+.agent-workflow-disclosure > summary.agent-workflow-line:focus-visible::after {
+  opacity: 0.72;
 }
 
-.agent-thinking-line {
-  display: block;
-  width: min(700px, 100%);
-  min-width: 0;
-  padding: 5px 8px;
-  color: color-mix(in oklch, var(--fg) 72%, var(--muted));
-  font-size: 13px;
-  line-height: 1.68;
+.agent-workflow-expanded-detail {
+  margin: 4px 0 0;
+  max-width: min(680px, 100%);
+  color: color-mix(in oklch, var(--fg) 70%, var(--muted));
+  font-size: 12.75px;
+  line-height: 1.72;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  animation: agent-workflow-detail-enter 150ms var(--motion-ease-standard) both;
 }
 
-.agent-timeline-row.done[data-kind="thinking"] .agent-thinking-line {
-  color: color-mix(in oklch, var(--muted) 80%, var(--fg));
-}
-
-.agent-tool-line {
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  min-height: 30px;
-  color: color-mix(in oklch, var(--fg) 72%, var(--muted));
-}
-
-.agent-tool-line-main {
-  display: grid;
-  min-width: 0;
-  grid-template-columns: max-content minmax(0, 1fr);
-  align-items: baseline;
-  gap: 10px;
-}
-
-.agent-tool-action {
-  color: color-mix(in oklch, var(--muted) 82%, var(--fg));
+.agent-workflow-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex: 0 0 auto;
+  color: color-mix(in oklch, var(--fg) 58%, var(--muted));
   font-size: 12px;
-  font-weight: 620;
-  line-height: 1.35;
-  white-space: nowrap;
+  font-weight: 560;
+  letter-spacing: -0.01em;
 }
 
-.agent-tool-target {
+.agent-workflow-label::after {
+  content: "";
+  width: 3px;
+  height: 3px;
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--muted) 36%, transparent);
+}
+
+.agent-workflow-step[data-current="true"] .agent-workflow-label {
+  color: color-mix(in oklch, var(--fg) 78%, var(--accent-strong));
+}
+
+.agent-workflow-detail {
+  display: -webkit-box;
+  flex: 1 1 auto;
   min-width: 0;
+  color: inherit;
   overflow: hidden;
-  color: color-mix(in oklch, var(--fg) 76%, var(--muted));
-  font-size: 12.5px;
-  line-height: 1.42;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  white-space: normal;
 }
 
-.agent-timeline-row.done[data-kind="tool"] .agent-tool-line {
+.agent-workflow-step.thinking:not([data-current="true"]) .agent-workflow-detail {
   color: color-mix(in oklch, var(--muted) 82%, var(--fg));
 }
 
-.agent-timeline-row.active[data-kind="tool"] .agent-tool-action {
-  color: var(--accent-active);
+.agent-workflow-disclosure[data-tone="thinking"] > summary.agent-workflow-line::after {
+  opacity: 0.26;
 }
 
-.agent-timeline-row[data-category="context"] .agent-timeline-marker,
-.agent-timeline-row[data-category="web"] .agent-timeline-marker {
-  background: color-mix(in oklch, var(--status-success) 68%, var(--muted));
+.agent-workflow-disclosure[data-tone="thinking"][open] > summary .agent-workflow-detail {
+  color: color-mix(in oklch, var(--muted) 76%, var(--fg));
+  -webkit-line-clamp: 1;
 }
 
-.agent-timeline-row[data-category="command"] .agent-timeline-marker {
-  background: color-mix(in oklch, var(--accent-strong) 76%, var(--muted));
+.agent-workflow-disclosure[data-tone="thinking"] .agent-workflow-expanded-detail {
+  border-left: 1px solid color-mix(in oklch, var(--border) 42%, transparent);
+  margin-left: 1px;
+  padding-left: 12px;
+  color: color-mix(in oklch, var(--fg) 72%, var(--muted));
 }
 
-.agent-timeline-row[data-category="change"] .agent-timeline-marker {
-  background: color-mix(in oklch, var(--status-warning) 72%, var(--muted));
+.agent-workflow-step.narration .agent-workflow-detail,
+.agent-workflow-step.system .agent-workflow-detail {
+  color: color-mix(in oklch, var(--fg) 68%, var(--muted));
+}
+
+.agent-workflow-step.tool:not([data-current="true"]) .agent-workflow-detail,
+.agent-workflow-step.decision:not([data-current="true"]) .agent-workflow-detail {
+  color: color-mix(in oklch, var(--fg) 55%, var(--muted));
+}
+
+.agent-workflow-step.confirmation {
+  padding-top: 6px;
+}
+
+.agent-workflow-step.confirmation .agent-workflow-marker {
+  margin-top: 10px;
+}
+
+.agent-workflow-step.confirmation .confirmation-node-body {
+  width: min(680px, 100%);
+  padding-top: 0;
+}
+
+@keyframes agent-workflow-enter {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes agent-workflow-detail-enter {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (max-width: 720px) {
+  .agent-workflow-step {
+    grid-template-columns: 10px minmax(0, 1fr);
+    column-gap: 8px;
+  }
+
+  .agent-workflow-step:not(:last-child)::after {
+    left: 4px;
+  }
+
+  .agent-workflow-detail {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
 }

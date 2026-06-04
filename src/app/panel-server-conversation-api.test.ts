@@ -7,10 +7,12 @@ import {
   FileSystemRuntimeDatabase,
   resolveAgentArborRuntimeDatabasePaths,
 } from "../adapters/runtime-database/index.js";
+import type { RuntimeDatabase } from "../domain/runtime-database/index.js";
 import { startLocalPanelServer, type PanelProviderFetch } from "./panel-server.js";
 import {
   assertSafePanelJsonText,
   removeTemporaryTree,
+  readSseUntil,
   requestJson,
   waitForRun,
 } from "./panel-server-test-utils.js";
@@ -21,6 +23,103 @@ import {
   responsesRequestText,
   type ResponsesRequestBody,
 } from "./panel-openai-test-fixtures.js";
+
+test("conversation message returns before provider completion so the UI can subscribe before output", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-conversation-early-stream-"));
+  const secret = "sk-conversation-early-stream-secret";
+  let releaseProvider: (() => void) | undefined;
+  const providerGate = new Promise<void>((resolve) => {
+    releaseProvider = resolve;
+  });
+  const providerFetch: PanelProviderFetch = async () => {
+    await providerGate;
+    return createOpenAiTextResponse("conversation-early-stream-model", "稍后返回的完整答案。");
+  };
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory, providerFetch });
+  try {
+    await requestJson(server.url, "/api/config/model-provider", {
+      method: "POST",
+      body: {
+        baseUrl: "https://provider.example",
+        model: "conversation-early-stream-model",
+        apiKey: secret,
+      },
+    });
+
+    const startedAt = Date.now();
+    const start = await requestJson(server.url, "/api/conversations", {
+      method: "POST",
+      body: { goal: "测试对话流式启动", aiMode: "openai-compatible" },
+    });
+    const elapsedMs = Date.now() - startedAt;
+    const runId = start.body.run.runId;
+    const earlyStream = await readSseUntil(
+      server.url,
+      `/api/basic-agent/runs/${encodeURIComponent(runId)}/stream?cursor=0`,
+      (events) => events.some((event) => event.type === "run.started"),
+      2_000
+    );
+
+    assert.equal(start.status, 202);
+    assert.equal(elapsedMs < 1_000, true);
+    assert.equal(start.body.conversation.turns[1].status, "running");
+    assert.equal(start.body.conversation.turns[1].runId, runId);
+    assert.equal(earlyStream.status, 200);
+    assert.equal(earlyStream.events.some((event) => event.type === "run.started"), true);
+
+    releaseProvider?.();
+    const completed = await waitForRun(
+      server.url,
+      runId,
+      (body) => body.status === "completed",
+      4_000,
+      "/api/desktop/runs"
+    );
+    assert.equal(completed.body.status, "completed");
+    assertSafePanelJsonText(`${start.text}\n${earlyStream.text}\n${completed.text}`);
+  } finally {
+    releaseProvider?.();
+    await server.close();
+    await removeTemporaryTree(directory);
+  }
+});
+
+test("conversation message returns before slow initial persistence settles", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-conversation-slow-persistence-"));
+  let releasePersistence: (() => void) | undefined;
+  let upsertRunStarted = false;
+  let upsertRunCompleted = false;
+  const persistenceGate = new Promise<void>((resolve) => {
+    releasePersistence = resolve;
+  });
+  const runtimeDatabase = delayedRuntimeDatabase({
+    async upsertRun(record) {
+      upsertRunStarted = true;
+      await persistenceGate;
+      upsertRunCompleted = true;
+      return record;
+    },
+  });
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory, runtimeDatabase });
+  try {
+    const startedAt = Date.now();
+    const start = await requestJson(server.url, "/api/conversations", {
+      method: "POST",
+      body: { goal: "测试慢持久化不阻塞首字", aiMode: "fake" },
+    });
+    const elapsedMs = Date.now() - startedAt;
+
+    assert.equal(start.status, 202);
+    assert.equal(typeof start.body.run.runId, "string");
+    assert.equal(elapsedMs < 500, true);
+    assert.equal(upsertRunStarted, true);
+    assert.equal(upsertRunCompleted, false);
+  } finally {
+    releasePersistence?.();
+    await server.close();
+    await removeTemporaryTree(directory);
+  }
+});
 
 test("conversation API creates a conversation and attaches the desktop run to assistant turn", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-conversation-create-"));
@@ -296,7 +395,7 @@ test("conversation API sends follow-up history as role-separated model messages"
     assert.equal(secondMessages[3]?.content?.includes("Current user message: 那你能继续解释一下吗？"), true);
     assert.equal(secondMessages[3]?.content?.includes("你好，你能做什么"), false);
     assert.equal(JSON.stringify(secondMessages).includes("workspace:conversation-history"), false);
-    assert.equal(requests.at(-1)?.max_output_tokens ?? requests.at(-1)?.max_completion_tokens ?? requests.at(-1)?.max_tokens, 3200);
+    assert.equal(requests.at(-1)?.max_output_tokens ?? requests.at(-1)?.max_completion_tokens ?? requests.at(-1)?.max_tokens, 4000);
   } finally {
     await server.close();
     await removeTemporaryTree(directory);
@@ -620,6 +719,56 @@ test("conversation API queues follow-up while the same conversation is still run
   }
 });
 
+test("conversation API refreshes active task summaries while a run is still running", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-conversation-running-summary-"));
+  const secret = "sk-conversation-running-summary-secret";
+  let releaseFetch: (() => void) | undefined;
+  const fetchGate = new Promise<void>((resolve) => {
+    releaseFetch = resolve;
+  });
+  const providerFetch: PanelProviderFetch = async () => {
+    await fetchGate;
+    return createOpenAiTextResponse("conversation-running-summary-model", "运行完成后的安全回答。");
+  };
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory, providerFetch });
+  try {
+    await requestJson(server.url, "/api/config/model-provider", {
+      method: "POST",
+      body: {
+        baseUrl: "https://provider.example",
+        model: "conversation-running-summary-model",
+        apiKey: secret,
+      },
+    });
+    const started = await requestJson(server.url, "/api/conversations", {
+      method: "POST",
+      body: { goal: "请先分析一下当前任务", aiMode: "openai-compatible" },
+    });
+    await waitForRun(
+      server.url,
+      started.body.run.runId,
+      (body) => body.status === "running" && body.trace.events.some((event: { type: string }) => event.type === "model.requested"),
+      4_000,
+      "/api/desktop/runs"
+    );
+    const conversations = await requestJson(server.url, "/api/conversations");
+    const summary = conversations.body.conversations.find(
+      (item: { conversationId: string }) => item.conversationId === started.body.conversation.conversationId
+    );
+
+    assert.equal(started.status, 202);
+    assert.equal(summary?.status, "running");
+    assert.equal(summary?.currentAction.includes("桌面助手已接手"), false);
+    assert.equal(summary?.currentAction.includes("等待模型输出"), false);
+    assert.equal(summary?.currentAction.includes(secret), false);
+    assertSafePanelJsonText(conversations.text);
+  } finally {
+    releaseFetch?.();
+    await server.close();
+    await removeTemporaryTree(directory);
+  }
+});
+
 test("conversation follow-up after a provider failure does not feed internal ids back to the model", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-conversation-failure-followup-"));
   const secret = "sk-failure-followup-secret";
@@ -819,3 +968,53 @@ test("conversation follow-up labels missing-key failure history as a system erro
     await removeTemporaryTree(directory);
   }
 });
+
+function delayedRuntimeDatabase(
+  overrides: Partial<RuntimeDatabase>
+): RuntimeDatabase {
+  return {
+    async upsertWorkspace(record) {
+      return record;
+    },
+    async upsertConversation(record) {
+      return record;
+    },
+    async getConversation() {
+      return undefined;
+    },
+    async listConversations() {
+      return [];
+    },
+    async upsertRun(record) {
+      return record;
+    },
+    async upsertBasicRun(record) {
+      return record;
+    },
+    async replaceBasicRunEvents(_runId, events) {
+      return events;
+    },
+    async replaceRunEvents(_runId, events) {
+      return events;
+    },
+    async replaceModelCalls(_runId, calls) {
+      return calls;
+    },
+    async replaceToolCalls(_runId, calls) {
+      return calls;
+    },
+    async replaceArtifacts(_runId, artifacts) {
+      return artifacts;
+    },
+    async replaceConfirmations(_runId, confirmations) {
+      return confirmations;
+    },
+    async getRun() {
+      return undefined;
+    },
+    async listRuns() {
+      return [];
+    },
+    ...overrides,
+  };
+}

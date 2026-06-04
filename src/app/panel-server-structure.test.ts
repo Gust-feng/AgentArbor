@@ -27,6 +27,7 @@ test("panel server source keeps conversation restore and persistence split", asy
     runStreamEvents,
     runStreamCopy,
     runStreamContracts,
+    modelProgressCopy,
   ] = await Promise.all([
     readAppSource(path.join("panel-server", "request-handler.ts")),
     readAppSource(path.join("panel-server", "conversation-history.ts")),
@@ -50,6 +51,7 @@ test("panel server source keeps conversation restore and persistence split", asy
     readAppSource("panel-run-stream-events.ts"),
     readAppSource("panel-run-stream-copy.ts"),
     readAppSource("panel-run-stream-contracts.ts"),
+    readAppSource("panel-model-progress-copy.ts"),
   ]);
 
   assert.equal(requestHandler.includes('from "./conversation-history.js"'), false);
@@ -68,7 +70,7 @@ test("panel server source keeps conversation restore and persistence split", asy
   assert.equal(requestHandler.includes('from "./run-execution.js"'), true);
   assert.equal(conversationHistory.includes("export async function buildConversationHistoryMessages"), true);
   assert.equal(conversationRoutes.includes("export async function handlePanelConversationRoute"), true);
-  assert.equal(conversationRoutes.includes("export async function startGuidanceFollowUpRun"), true);
+  assert.equal(conversationRoutes.includes("startGuidanceFollowUpRun"), false);
   assert.equal(conversationRoutes.includes("export function scheduleNextQueuedConversationRun"), true);
   assert.equal(conversationRoutes.includes("export async function getPanelConversation"), true);
   assert.equal(conversationRoutes.includes("async function handleConversationMessageRequest"), true);
@@ -135,7 +137,12 @@ test("panel server source keeps conversation restore and persistence split", asy
   assert.equal(runStreamCopy.includes("export function agentNoteForEvent"), true);
   assert.equal(runStreamCopy.includes("export function finalResultSummary"), true);
   assert.equal(runStreamCopy.includes("export function modelRequestedSummary"), true);
-  assert.equal(runStreamCopy.includes("function purposeProgressLabel"), true);
+  assert.equal(runStreamCopy.includes("function purposeProgressLabel"), false);
+  assert.equal(runStreamCopy.includes('from "./panel-model-progress-copy.js"'), true);
+  assert.equal(persistedRunResponse.includes('from "../panel-model-progress-copy.js"'), true);
+  assert.equal(modelProgressCopy.includes("export function modelRequestedSummary"), true);
+  assert.equal(modelProgressCopy.includes("export function restoredModelRequestedSummary"), true);
+  assert.equal(modelProgressCopy.includes("function purposeProgressLabel"), true);
   assert.equal(runStreamCopy.includes('from "./panel-run-stream-events.js"'), false);
   assert.equal(runStreamCopy.includes('from "./panel-run-read-model.js"'), false);
   assert.equal(runStreamContracts.includes("export type PanelRunStreamEventType"), true);

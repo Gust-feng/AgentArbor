@@ -6,13 +6,15 @@ import { modelVisibleOutputOrUndefined } from "./panel-transcript-model-calls.js
 import { asRecord, isString, numberOrUndefined, stringOrUndefined } from "./panel-read-model-utils.js";
 import { compactStreamDetailText, type PanelRunStreamEventDetail } from "./panel-stream-tool-projection.js";
 import type { PanelObservationReadModel } from "./panel-run-tracking-contracts.js";
+import { cleanConfirmationSummary } from "./confirmation-copy.js";
 import type { PanelRunStreamEvent, PanelRunStreamEventType } from "./panel-run-stream-contracts.js";
 import type { UndergroundDemoSummary } from "./underground-demo-summary.js";
 import { friendlyUserFacingFailureText } from "./visible-text-safety.js";
+import { modelRequestedSummary as projectedModelRequestedSummary } from "./panel-model-progress-copy.js";
 
 export function blockedRunSummary(error: { readonly code: string; readonly message: string } | undefined): string {
   if (error?.code === "out_of_fuel") {
-    return "任务没有完成，当前轮次已到安全上限。你可以继续发送消息，我会接着处理。";
+    return "任务没有完成，当前轮次已到上限。你可以继续发送消息，我会接着处理。";
   }
   return friendlyUserFacingFailureText(error?.message ?? "运行中断，等待用户确认或补充指导。");
 }
@@ -24,7 +26,7 @@ export function runStartedSummary(
   if (routeDecision === undefined) {
     return desktopMode === "deep"
       ? "已进入深度处理，会并行检查上下文、汇总判断并形成结果。"
-      : "桌面助手已接手，会判断直接回答、读取授权上下文或请求确认。";
+      : "";
   }
   return explainDesktopIntentDecision(routeDecision).summary;
 }
@@ -68,9 +70,8 @@ export function agentFabricSummary(type: PanelRunStreamEventType, payload: Reado
   return "工作状态已更新。";
 }
 
-export function modelRequestedSummary(payload: Readonly<Record<string, unknown>>): string {
-  const purpose = stringOrUndefined(payload.purpose) ?? "unknown";
-  return purposeProgressLabel(purpose);
+export function modelRequestedSummary(payload: Readonly<Record<string, unknown>>): string | undefined {
+  return projectedModelRequestedSummary(payload);
 }
 
 export function modelCompletedSummary(payload: Readonly<Record<string, unknown>>): string {
@@ -209,8 +210,8 @@ export function visibleOutputText(value: unknown): string {
   const secondaryParts: string[] = [];
   for (const item of output.items) {
     for (const field of item.fields) {
-      const valueText = field.value.trim();
-      if (valueText.length === 0) continue;
+      const valueText = field.value;
+      if (valueText.trim().length === 0) continue;
       const suffix = field.truncated ? " (truncated)" : "";
       if (isPrimaryVisibleOutputField(field.name)) {
         primaryParts.push(`${valueText}${suffix}`);
@@ -227,10 +228,10 @@ export function visibleOutputSummary(value: string, maxLength: number): string {
 }
 
 export function chunkText(value: string, maxLength: number): readonly string[] {
-  const text = value.trim();
-  if (text.length === 0) {
+  if (value.trim().length === 0) {
     return [];
   }
+  const text = value;
   const chunks: string[] = [];
   let index = 0;
   while (index < text.length) {
@@ -296,26 +297,6 @@ export function finalSourceRefs(input: {
   return directAnswer?.requestId === undefined ? [] : [`model_call:${directAnswer.requestId}`];
 }
 
-function purposeProgressLabel(purpose: string): string {
-  switch (purpose) {
-    case "desktop_intent_gate":
-      return "正在判断任务处理方式。";
-    case "work_session_decision":
-      return "正在判断下一步。";
-    case "work_session_child_material":
-      return "正在整理局部材料。";
-    case "work_session_synthesis":
-      return "正在综合证据和冲突。";
-    case "work_session_direct_answer":
-      return "正在组织直接回答。";
-    case "desktop_chat":
-    case "desktop_agent":
-      return "等待模型输出。";
-    default:
-      return "正在生成安全摘要。";
-  }
-}
-
 function modelFailureErrorText(payload: Readonly<Record<string, unknown>>): string | undefined {
   const message = modelFailureMessageForDisplay(stringOrUndefined(payload.failureMessage));
   if (message !== undefined) {
@@ -360,16 +341,6 @@ function modelFailureKindForDisplay(failureKind: string | undefined): string | u
     default:
       return undefined;
   }
-}
-
-function cleanConfirmationSummary(value: string): string {
-  return value
-    .replace(/批准后只允许继续本次对应工具操作；拒绝则不会执行该动作。?/g, "")
-    .replace(/执行前需要用户确认。?/g, "")
-    .replace(/请求执行执行操作/g, "请求执行操作")
-    .replace(/运行命令请求执行操作[。；]*/g, "运行命令")
-    .replace(/\s+/g, " ")
-    .trim();
 }
 
 function autonomySummary(payload: Readonly<Record<string, unknown>>): string {

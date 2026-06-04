@@ -2,6 +2,7 @@ import type { TranscriptNode, TranscriptNodePhase } from "../domain/basic-agent/
 import type { ObservationRef } from "../domain/observation/index.js";
 import type { ToolDisplayProjection } from "../domain/tools/index.js";
 import { toolDisplayName } from "../domain/tools/index.js";
+import { cleanConfirmationSummary } from "./confirmation-copy.js";
 import {
   completeOpenReasoningNodes,
   flushPendingReasoningNode,
@@ -11,6 +12,7 @@ import {
   type PendingReasoningNode,
   type ReasoningTranscriptEvent,
 } from "./transcript-reasoning.js";
+import { isStaleModelProgressSummary } from "./panel-model-progress-copy.js";
 
 export type PanelTranscriptStreamEvent = {
   readonly eventId: string;
@@ -523,19 +525,17 @@ function userFacingConfirmationSummary(value: string | undefined): string {
 
 function isLowValueAgentNote(value: string | undefined): boolean {
   const text = value?.trim() ?? "";
-  return text === "等待模型输出。" ||
-    text === "助手已选择使用工具，工具结果会作为安全摘要进入后续处理。" ||
+  return isStaleModelProgressSummary(text) ||
+    staleToolProgressNote(text) ||
     text === "Intelligence Channel requested model output." ||
     text === "Intelligence Channel completed model output validation.";
 }
 
-function cleanConfirmationSummary(value: string): string {
-  return value
-    .replace(/^User approval was requested\.?\s*/i, "")
-    .replace(/^Approval required\.?\s*/i, "")
-    .replace(/^需要确认[:：]?\s*/i, "")
-    .replace(/\s+/g, " ")
-    .trim();
+function staleToolProgressNote(value: string): boolean {
+  const normalized = value.replace(/[。.!！?？；;:：、，,\s]/g, "");
+  return normalized.includes("助手已选择使用工具") &&
+    normalized.includes("工具结果") &&
+    normalized.includes("后续处理");
 }
 
 function compactSafeLine(value: string, maxLength: number): string {

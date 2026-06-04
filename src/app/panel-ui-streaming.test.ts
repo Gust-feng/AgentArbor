@@ -2,10 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   consumeStreamingTextFrame,
+  createInitialStreamingTextState,
   createFrozenMarkdownStreamState,
   createStreamingTextState,
   frozenMarkdownStreamTail,
   markdownStreamViewport,
+  settleFrozenMarkdownStreamState,
   stableMarkdownCommitLength,
   updateFrozenMarkdownStreamState,
   updateStreamingTextTarget,
@@ -79,6 +81,50 @@ test("streaming frame consumes a paced visible burst", () => {
   assert.equal(updated.queue.join(""), "ef");
 });
 
+test("streaming first live target can paint immediately", () => {
+  const updated = updateStreamingTextTarget(createStreamingTextState(""), "你好世界", true);
+  const firstFrame = consumeStreamingTextFrame(updated, "formal");
+
+  assert.equal(firstFrame.displayed, "你好");
+  assert.equal(firstFrame.queue.join(""), "世界");
+});
+
+test("streaming initial state paints the first frame without waiting for effects", () => {
+  const initial = createInitialStreamingTextState("你好世界", true, false, "formal");
+
+  assert.equal(initial.displayed, "你好");
+  assert.equal(initial.queue.join(""), "世界");
+});
+
+test("settled animated initial state also paints the first frame", () => {
+  const initial = createInitialStreamingTextState("等待后返回的完整答案。", false, true, "formal");
+
+  assert.equal(initial.displayed, "等待");
+  assert.equal(initial.queue.join(""), "后返回的完整答案。");
+});
+
+test("streaming first frame can fully settle very short catch-up text", () => {
+  const updated = updateStreamingTextTarget(createStreamingTextState(""), "好", true);
+  const firstFrame = consumeStreamingTextFrame(updated, "formal");
+
+  assert.equal(firstFrame.displayed, "好");
+  assert.equal(firstFrame.queue.length, 0);
+});
+
+test("settled catch-up can animate from an empty displayed shell", () => {
+  const pendingShell: StreamingTextState = {
+    target: "",
+    displayed: "",
+    queue: [],
+  };
+
+  const updated = updateStreamingTextTarget(pendingShell, "等待后返回的完整答案。", true);
+  const firstFrame = consumeStreamingTextFrame(updated, "formal");
+
+  assert.equal(firstFrame.displayed, "等待");
+  assert.equal(firstFrame.queue.join(""), "后返回的完整答案。");
+});
+
 test("frozen markdown stream waits for paragraph boundaries before rich rendering", () => {
   const first = updateFrozenMarkdownStreamState(
     createFrozenMarkdownStreamState(),
@@ -138,4 +184,29 @@ test("frozen markdown stream settles to a single complete markdown render", () =
   assert.equal(frozenMarkdownStreamTail(live), "| A | B |\n| - | - |\n| 1 | 2 |");
   assert.deepEqual(settled.chunks.map((chunk) => chunk.text), ["| A | B |\n| - | - |\n| 1 | 2 |"]);
   assert.equal(frozenMarkdownStreamTail(settled), "");
+});
+
+test("settled markdown stream preserves committed chunk identity and appends tail", () => {
+  const live = updateFrozenMarkdownStreamState(
+    createFrozenMarkdownStreamState(),
+    "已经稳定。\n\n正在继续",
+    true
+  );
+  const settled = settleFrozenMarkdownStreamState(live, "已经稳定。\n\n正在继续输出。");
+
+  assert.equal(settled.chunks[0]?.key, live.chunks[0]?.key);
+  assert.deepEqual(settled.chunks.map((chunk) => chunk.text), ["已经稳定。\n\n", "正在继续输出。"]);
+  assert.equal(frozenMarkdownStreamTail(settled), "");
+});
+
+test("markdown stream keeps the whole text in live tail until a stable boundary exists", () => {
+  const state = updateFrozenMarkdownStreamState(
+    createFrozenMarkdownStreamState(),
+    "第一行\n第二行",
+    true
+  );
+  const viewport = markdownStreamViewport(state);
+
+  assert.deepEqual(viewport.committedBlocks.map((chunk) => chunk.text), []);
+  assert.equal(viewport.liveTail, "第一行\n第二行");
 });

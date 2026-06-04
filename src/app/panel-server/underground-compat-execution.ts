@@ -84,6 +84,7 @@ export async function runUndergroundForPanel(
           modelProvider: activeModel,
           fetch: runtime.providerFetch,
           onModelOutputDelta: options.onModelOutputDelta,
+          streamingMode: "force_live",
         });
 
   if (!aiConfig.enabled) {

@@ -9,8 +9,9 @@ import { isTerminalPanelRunStatus } from "./runtime-records.js";
 import { restorePersistedPanelConversation } from "./conversation-restore.js";
 import { PanelHttpError, readJsonBody, writeJson } from "./http-utils.js";
 import { asRecord, defaultAiModeForRunKind, numberOrUndefined, optionalString, parseRunInput } from "./request-parsers.js";
-import { persistPanelConversation, persistPanelRun } from "./run-persistence.js";
+import { persistPanelConversation } from "./run-persistence.js";
 import { createPanelRunJobResponse } from "./run-job-response.js";
+import { syncConversationPreviewsForRunningJobs } from "./conversation-sync.js";
 import type { PanelRuntime } from "./runtime.js";
 
 export async function handlePanelConversationRoute(
@@ -69,42 +70,6 @@ export async function handlePanelConversationRoute(
   }
 
   return false;
-}
-
-export async function startGuidanceFollowUpRun(
-  runtime: PanelRuntime,
-  job: PanelRunJob,
-  guidance: string
-): Promise<void> {
-  if (job.conversationId === undefined || guidance.trim().length === 0) {
-    return;
-  }
-  const started = runtime.conversations.startDesktopMessage({
-    goal: guidance,
-    taskSoilInput: job.taskSoilInput,
-    conversationId: job.conversationId,
-  });
-  const basicRun = await runtime.runExecutor.start({
-    runKind: "desktop",
-    runMode: job.runMode,
-    goal: guidance,
-    aiMode: job.aiMode,
-    conversationId: started.conversation.conversationId,
-    assistantTurnId: started.assistantTurn.turnId,
-    routeDecision: undefined,
-    taskSoilInput: job.taskSoilInput,
-    reasoningEffort: job.reasoningEffort,
-    startImmediately: true,
-  });
-  const followUpJob = requirePanelRunJob(runtime, basicRun.runId);
-  runtime.conversations.attachRun({
-    conversationId: started.conversation.conversationId,
-    assistantTurnId: started.assistantTurn.turnId,
-    runId: followUpJob.runId,
-    responseModel: turnModelFromConfig(followUpJob.config),
-  });
-  await persistPanelRun(runtime, followUpJob);
-  await persistPanelConversation(runtime, started.conversation.conversationId);
 }
 
 export function schedulePanelRunJob(runtime: PanelRuntime, runId: string): void {
@@ -178,6 +143,7 @@ async function handleConversationMessageRequest(
     taskSoilInput: mergedTaskSoilInput,
     reasoningEffort: runInput.reasoningEffort,
     startImmediately: !shouldQueue,
+    deferSchedule: !shouldQueue,
   });
   const job = requirePanelRunJob(runtime, basicRun.runId);
   if (shouldQueue) {
@@ -198,13 +164,14 @@ async function handleConversationMessageRequest(
       responseModel: turnModelFromConfig(job.config),
     });
   }
-  await persistPanelRun(runtime, job);
-
   writeJson(response, 202, {
     ok: true,
     conversation: runtime.conversations.getReadModel(started.conversation.conversationId),
     run: createPanelRunJobResponse(runtime, job),
   });
+  if (!shouldQueue) {
+    schedulePanelRunJob(runtime, job.runId);
+  }
 }
 
 function queuedRunCanStartNow(runtime: PanelRuntime, predecessorRunId: string | undefined): boolean {
@@ -233,6 +200,11 @@ async function listPanelConversations(
       await restorePersistedPanelConversation(runtime, record);
     }
   }
+  syncConversationPreviewsForRunningJobs({
+    conversations: runtime.conversations,
+    jobs: runtime.runJobs.list(),
+    createResponse: (job) => createPanelRunJobResponse(runtime, job),
+  });
   return runtime.conversations.list().slice(0, Math.max(0, Math.floor(limit)));
 }
 

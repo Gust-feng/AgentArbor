@@ -20,6 +20,7 @@ import {
   type PanelRunTrackingReadModel,
   type PanelRunTranscript,
 } from "../panel-run-read-model.js";
+import { restoredModelRequestedSummary } from "../panel-model-progress-copy.js";
 import { friendlyUserFacingFailureText } from "../visible-text-safety.js";
 import { compactRuntimeText } from "./runtime-records.js";
 import type { PanelConversationReadModel } from "../panel-conversations.js";
@@ -219,6 +220,12 @@ export function createPersistedStreamEvents(
     if (streamType === undefined) {
       continue;
     }
+    const restoredProgressSummary = record.type === "model.requested"
+      ? restoredModelRequestedSummary(record.summary)
+      : undefined;
+    if (streamType === "agent.note.delta" && record.type === "model.requested" && restoredProgressSummary === undefined) {
+      continue;
+    }
     const toolCall = toolCallForPersistedEvent(record, snapshot.toolCalls);
     events.push({
       eventId: `${snapshot.run.runId}:restored:event:${record.sequence}:${streamType}`,
@@ -227,7 +234,7 @@ export function createPersistedStreamEvents(
       type: streamType,
       createdAt: record.recordedAt,
       agentLabel: persistedStreamAgentLabel(streamType),
-      summary: record.summary,
+      summary: restoredProgressSummary ?? record.summary,
       status: streamStatusFor(streamType),
       toolName: toolCall?.toolName,
       detail: toolCall === undefined ? undefined : persistedToolStreamDetail(toolCall),
@@ -496,7 +503,7 @@ function persistedWaitingPoint(status: PanelRunStatus): string {
     return "运行已中断，需要重新发起或继续处理。";
   }
   if (status === "failed") {
-    return "运行失败，详情保存在安全摘要中。";
+    return "运行失败，请查看错误信息。";
   }
   return "运行已完成。";
 }

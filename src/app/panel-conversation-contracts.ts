@@ -1,8 +1,12 @@
-import type { RuntimeConversationRecord } from "../domain/runtime-database/index.js";
+import type { RuntimeConversationRecord, RuntimeRunStatus } from "../domain/runtime-database/index.js";
 import type { DesktopTaskSoilInput } from "./task-soil-workspace.js";
 
 export type PanelConversationTurnRole = "user" | "assistant";
 export type PanelConversationTurnStatus = "pending" | "running" | "completed" | "failed";
+export type PanelConversationStatus = Extract<
+  RuntimeRunStatus,
+  "pending" | "running" | "approval_needed" | "needs_input" | "completed" | "failed" | "cancelled" | "blocked"
+> | "idle";
 
 export type PanelConversationTurnModel = {
   readonly profileId: string;
@@ -53,9 +57,11 @@ export type PanelConversationReadModel = {
   readonly conversationId: string;
   readonly title: string;
   readonly preview: string;
+  readonly currentAction: string;
+  readonly nextStep: string;
   readonly createdAt: string;
   readonly updatedAt: string;
-  readonly status: "idle" | "running" | "completed" | "failed";
+  readonly status: PanelConversationStatus;
   readonly activeRunId?: string;
   readonly latestRunId?: string;
   readonly requiresUserAction: boolean;

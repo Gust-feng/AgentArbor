@@ -6,7 +6,11 @@ import type { PanelConversationReadModel } from "../panel-conversations.js";
 import { toRuntimeConversationRecord } from "../panel-conversations.js";
 import { PanelRunJobStore, type PanelRunJob } from "../panel-run-jobs.js";
 import { createPanelRunTrace, createPanelRunTranscript } from "../panel-run-read-model.js";
-import { enqueuePanelPersistence, type PanelPersistenceChains } from "./persistence.js";
+import {
+  enqueuePanelPersistence,
+  enqueuePanelPersistenceBackground,
+  type PanelPersistenceChains,
+} from "./persistence.js";
 import {
   createRuntimeRunRecord,
   createRuntimeWorkspaceRecord,
@@ -40,6 +44,16 @@ export async function persistPanelRun(
     return;
   }
   await enqueuePanelPersistence(runtime.persistenceChains, job.runId, () => persistPanelRunNow(runtime, job));
+}
+
+export function persistPanelRunInBackground(
+  runtime: PanelRunPersistenceRuntime,
+  job: PanelRunJob
+): void {
+  if (runtime.runtimeDatabase === undefined || runtime.runtimePaths === undefined) {
+    return;
+  }
+  enqueuePanelPersistenceBackground(runtime.persistenceChains, job.runId, () => persistPanelRunNow(runtime, job));
 }
 
 export async function persistPanelConversation(

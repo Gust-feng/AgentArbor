@@ -502,7 +502,7 @@ test("desktop provider HTTP 400 surfaces provider error message directly", async
 
     assert.equal(failed.body.status, "failed");
     assert.equal(failed.body.error.message, "model is not available on this endpoint");
-    assert.equal(assistantTurn.content, "model is not available on this endpoint");
+    assert.equal(assistantTurn.content, "错误信息：model is not available on this endpoint");
     assert.equal(failed.body.error.message.includes("还没有配置模型名"), false);
     assert.equal(assistantTurn.content.includes("还没有配置模型名"), false);
     assert.equal(eventText.includes("model is not available on this endpoint"), true);
@@ -924,7 +924,7 @@ test("desktop openai-compatible ordinary agent uses configured search tool befor
     assert.equal(tavilyFetchCalls, 1);
     assert.equal(completed.body.canvas.agent.answer.answer.includes("授权搜索结果"), true);
     assert.equal(completed.body.canvas.agent.toolCallRefs.includes("call-panel-search"), true);
-    assert.equal(completed.body.transcript.events.some((event: { type: string }) => event.type === "agent.note.delta"), true);
+    assert.equal(completed.body.transcript.events.some((event: { type: string }) => event.type === "tool.requested"), true);
     assert.equal(completed.body.transcript.events.some((event: { type: string }) => event.type === "model.output.completed"), true);
     assert.equal(completed.body.trace.events.some((event: { type: string }) => event.type === "tool.completed"), true);
     assert.equal(JSON.stringify(completed.body).includes(modelSecret), false);

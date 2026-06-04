@@ -167,7 +167,7 @@ test("desktop explicit deep mode runs Underground organization and stops at Plan
     assert.equal(completed.body.canvas.underground.status, "approved_package_created");
     assert.equal(completed.body.canvas.underground.packageRef.validationPassed, true);
     assert.equal(completed.body.canvas.underground.recommendedDirection.summary.length > 0, true);
-    assert.equal(completed.body.canvas.underground.recommendedDirection.reason.includes("地下组织"), true);
+    assert.equal(completed.body.canvas.underground.recommendedDirection.reason.includes("汇总"), true);
     assert.equal(completed.body.canvas.underground.keyEvidenceRefs.length > 0, true);
     assert.equal(completed.body.canvas.underground.childRunCount > 0, true);
     assert.equal(completed.body.canvas.underground.parentSynthesisCount > 0, true);

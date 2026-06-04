@@ -23,7 +23,7 @@ import {
 import type { PanelModelCatalogFetch, PanelProviderFetch, PanelServerOptions } from "./types.js";
 import { syncConversationTurnForJob } from "./conversation-sync.js";
 import { appendLiveModelOutputDelta } from "./live-model-stream.js";
-import { persistPanelRun } from "./run-persistence.js";
+import { persistPanelRun, persistPanelRunInBackground } from "./run-persistence.js";
 import { createPanelRunJobResponse } from "./run-job-response.js";
 
 export type PanelRuntime = {
@@ -49,7 +49,6 @@ export type PanelRuntimeHooks = {
   readonly executeRun: (runtime: PanelRuntime, execution: BasicAgentRunExecutionInput) => Promise<BasicAgentRunExecutionResult>;
   readonly failRun: (runtime: PanelRuntime, job: PanelRunJob, error: unknown) => Promise<void>;
   readonly scheduleNextQueuedConversationRun: (runtime: PanelRuntime, completedJob: PanelRunJob) => void;
-  readonly startGuidanceFollowUpRun: (runtime: PanelRuntime, job: PanelRunJob, guidance: string) => Promise<void>;
 };
 
 export function createPanelRuntime(options: PanelServerOptions, hooks: PanelRuntimeHooks): PanelRuntime {
@@ -140,6 +139,7 @@ function assemblePanelRuntime(input: {
     activeRunJobs,
     abortControllers,
     persistRun: (job) => persistPanelRun(runtime as PanelRuntime, job as PanelRunJob),
+    persistRunInBackground: (job) => persistPanelRunInBackground(runtime as PanelRuntime, job as PanelRunJob),
     executionAdapter: {
       execute: (execution) => input.hooks.executeRun(runtime as PanelRuntime, execution),
     },
@@ -164,9 +164,6 @@ function assemblePanelRuntime(input: {
         response: createPanelRunJobResponse(runtime as PanelRuntime, job as PanelRunJob),
       });
       input.hooks.scheduleNextQueuedConversationRun(runtime as PanelRuntime, job as PanelRunJob);
-    },
-    onGuidanceSubmitted: async ({ job, guidance }) => {
-      await input.hooks.startGuidanceFollowUpRun(runtime as PanelRuntime, job as PanelRunJob, guidance);
     },
   });
   return runtime as PanelRuntime;

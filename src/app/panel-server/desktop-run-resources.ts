@@ -65,6 +65,7 @@ export async function prepareDesktopRunResources(
           modelProvider: capabilitySnapshot.activeModel,
           fetch: runtime.providerFetch,
           onModelOutputDelta: options.onModelOutputDelta,
+          streamingMode: "force_live",
         });
 
   if (!aiConfig.enabled) {

@@ -239,13 +239,13 @@ test("panel transcript nodes merge contiguous reasoning deltas without moving to
     streamEvent({
       sequence: 3,
       type: "model.reasoning.delta",
-      delta: "to",
+      delta: " to",
       modelCallRefs: ["model-before-tool"],
     }),
     streamEvent({
       sequence: 4,
       type: "model.reasoning.delta",
-      delta: "understand",
+      delta: " understand",
       modelCallRefs: ["model-before-tool"],
     }),
     streamEvent({
@@ -281,7 +281,7 @@ test("panel transcript nodes merge contiguous reasoning deltas without moving to
     streamEvent({
       sequence: 8,
       type: "model.reasoning.delta",
-      delta: "summarize",
+      delta: " summarize",
       modelCallRefs: ["model-after-tool"],
     }),
     streamEvent({ sequence: 9, type: "final.result", summary: "结果已生成。" }),
@@ -290,15 +290,15 @@ test("panel transcript nodes merge contiguous reasoning deltas without moving to
   assert.deepEqual(
     nodes.map((node) => `${node.kind}:${node.eventType}:${node.phase}:${node.summary}`),
     [
-      "thinking:model.reasoning.completed:completed:filestounderstand",
+      "thinking:model.reasoning.completed:completed:files to understand",
       "tool:tool.requested:executing:workspace",
       "tool:tool.completed:completed:3 个文件",
-      "thinking:model.reasoning.completed:completed:thensummarize",
+      "thinking:model.reasoning.completed:completed:then summarize",
       "answer:final.result:completed:结果已生成。",
     ],
   );
-  assert.equal(nodes[0]?.text, "filestounderstand");
-  assert.equal(nodes[3]?.text, "thensummarize");
+  assert.equal(nodes[0]?.text, "files to understand");
+  assert.equal(nodes[3]?.text, "then summarize");
 });
 
 test("panel transcript nodes close merged reasoning on completion event", () => {
@@ -313,7 +313,7 @@ test("panel transcript nodes close merged reasoning on completion event", () => 
     streamEvent({
       sequence: 3,
       type: "model.reasoning.delta",
-      delta: "step",
+      delta: " step",
       modelCallRefs: ["model-reasoning"],
     }),
     streamEvent({
@@ -328,8 +328,8 @@ test("panel transcript nodes close merged reasoning on completion event", () => 
 
   assert.equal(thinking?.phase, "completed");
   assert.equal(thinking?.eventType, "model.reasoning.completed");
-  assert.equal(thinking?.text, "firststep");
-  assert.equal(thinking?.summary, "firststep");
+  assert.equal(thinking?.text, "first step");
+  assert.equal(thinking?.summary, "first step");
 });
 
 test("panel transcript nodes complete live reasoning after interleaved output", () => {
@@ -397,7 +397,7 @@ test("panel transcript nodes settle reasoning when the model turn ends without e
   assert.equal(thinking[0]?.text, "first");
 });
 
-test("ordinary agent stream stays quiet for direct answers but shows safe thinking around tool work", () => {
+test("ordinary agent stream stays quiet for direct answers while preserving tool work", () => {
   const direct = createPanelRunStreamEvents({
     runId: "run-direct-answer",
     status: "completed",
@@ -473,7 +473,8 @@ test("ordinary agent stream stays quiet for direct answers but shows safe thinki
 
   assert.deepEqual(direct.map((event) => event.type), ["run.started", "final.result"]);
   assert.equal(direct.at(-1)?.summary?.includes("Direct answer text."), true);
-  assert.equal(withTool.some((event) => event.type === "agent.note.delta"), true);
+  assert.equal(withTool.some((event) => event.type === "agent.note.delta"), false);
+  assert.equal(withTool.some((event) => event.type === "tool.requested"), true);
   assert.equal(withTool.some((event) => event.type === "model.output.completed"), true);
   assert.equal(completedTool?.detail?.kind, "tool");
   assert.equal(completedTool?.detail?.display?.kind, "generic_tool_summary");

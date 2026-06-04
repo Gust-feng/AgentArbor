@@ -190,7 +190,7 @@ export function toRuntimeConfirmationRecords(
         title: compactRuntimeText(optionalString(payload.title) ?? "需要确认", 160),
         actionSummary: compactRuntimeText(
           [question, consequence].filter((value): value is string => value !== undefined).join(" ") ||
-            "继续前需要用户确认。",
+            "等待确认。",
           500
         ),
         affectedResources: affectedResourcesFrom(payload),
@@ -268,7 +268,7 @@ export function canvasTraceId(canvas: PanelRunCanvasReadModel | undefined): stri
 function resultSummaryForJob(job: PanelRunJob): { readonly title: string; readonly summary: string } | undefined {
   if (job.failed !== undefined) {
     return {
-      title: "这次没有完成",
+      title: "运行失败",
       summary: compactRuntimeText(job.failed.error.message, 900),
     };
   }

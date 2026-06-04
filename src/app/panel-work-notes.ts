@@ -121,16 +121,16 @@ function createWorkSessionManagerNote(input: NoteFactoryInput): AgentWorkNote {
     stage: "cognitive_work_session",
     status: producedArtifact || producedDirectAnswer ? "completed" : hasSynthesis ? "running" : eventRefs.length > 0 ? "running" : "pending",
     summary: producedDirectAnswer
-      ? "Legacy Work Session 已直接回答当前问题。"
+      ? "工作会话已直接回答当前问题。"
       : producedArtifact
-        ? "Legacy Work Session 已生成最终项目分析报告。"
+        ? "工作会话已生成最终项目分析报告。"
         : hasSynthesis
-          ? "父层综合已形成，正在准备最终报告。"
+          ? "汇总判断已形成，正在准备最终报告。"
           : "主 Agent 正在决定读取、派生、综合或停止。",
     detail:
       tree === undefined
-        ? "Legacy Work Session 仅保留兼容，不作为当前 Desktop 深度模式主线。"
-        : `root ${tree.rootAgentId}；child ${tree.childRuns.length} 个；parent synthesis ${tree.parentSyntheses.length} 次。`,
+        ? "工作会话仅保留兼容，不作为当前普通会话的默认主线。"
+        : `root ${tree.rootAgentId}；child ${tree.childRuns.length} 个；汇总判断 ${tree.parentSyntheses.length} 次。`,
     eventRefs,
     evidenceRefs: tree?.parentSyntheses.flatMap((synthesis) => synthesis.outputRefs) ?? [],
     modelCallRefs: input.modelCalls.map((call) => call.requestId),
@@ -179,8 +179,8 @@ function createAgentRunTreeNote(input: NoteFactoryInput): AgentWorkNote {
         : `运行树 ${tree.status}，局部检查 ${completedChildren}/${tree.childRuns.length} 已完成。`,
     detail:
       tree === undefined
-        ? "分工、等待、继续和父层综合会作为安全事件进入活动流。"
-        : `delegation ${tree.delegationDecisions.length} 次，parent synthesis ${tree.parentSyntheses.length} 次；child 输出不会直接进入最终 artifact / Plan。`,
+        ? "分工、等待、继续和汇总判断会作为安全事件进入活动流。"
+        : `delegation ${tree.delegationDecisions.length} 次，汇总判断 ${tree.parentSyntheses.length} 次；child 输出不会直接进入最终 artifact / Plan。`,
     eventRefs,
     evidenceRefs: tree?.parentSyntheses.flatMap((synthesis) => synthesis.outputRefs) ?? [],
     candidateRefs: tree?.parentSyntheses.flatMap((synthesis) => synthesis.retainedMaterialRefs) ?? [],
@@ -278,7 +278,7 @@ function createAutonomyCoreNote(input: NoteFactoryInput): AgentWorkNote {
     detail:
       autonomy?.stopReason === undefined
         ? "自治核心只决定继续探索、请求收束、请求用户澄清或停止，不直接批准 Plan。"
-        : `停止原因 ${autonomy.stopReason}；模型调用和候选引用仅保留安全摘要。`,
+        : `停止原因 ${autonomy.stopReason}；模型调用和候选引用只保留可查看摘要。`,
     eventRefs,
     evidenceRefs: autonomy?.sourceRefs ?? [],
     modelCallRefs: autonomy?.modelCallRefs ?? [],

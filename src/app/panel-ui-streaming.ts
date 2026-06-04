@@ -36,6 +36,21 @@ export function createStreamingTextState(text = ""): StreamingTextState {
   };
 }
 
+export function createInitialStreamingTextState(
+  text: string,
+  live: boolean,
+  animateOnMount: boolean,
+  tone: StreamingTextTone
+): StreamingTextState {
+  if (text.length === 0 || (!live && !animateOnMount)) {
+    return createStreamingTextState(text);
+  }
+  return consumeStreamingTextFrame(
+    updateStreamingTextTarget(createStreamingTextState(""), text, true),
+    tone
+  );
+}
+
 export function updateStreamingTextTarget(
   state: StreamingTextState,
   target: string,
@@ -150,6 +165,38 @@ export function updateFrozenMarkdownStreamState(
     committedText: source.slice(0, boundary),
     chunks: [...state.chunks, ...nextChunks],
     nextChunkId: state.nextChunkId + nextChunks.length,
+  };
+}
+
+export function settleFrozenMarkdownStreamState(
+  state: FrozenMarkdownStreamState,
+  source: string
+): FrozenMarkdownStreamState {
+  if (source.length === 0) {
+    return createFrozenMarkdownStreamState("");
+  }
+  if (!source.startsWith(state.committedText)) {
+    return createFrozenMarkdownStreamState(source);
+  }
+  const tail = source.slice(state.committedText.length);
+  if (tail.length === 0) {
+    return {
+      ...state,
+      source,
+      committedText: source,
+    };
+  }
+  return {
+    source,
+    committedText: source,
+    chunks: [
+      ...state.chunks,
+      {
+        key: `frozen-${state.nextChunkId}`,
+        text: tail,
+      },
+    ],
+    nextChunkId: state.nextChunkId + 1,
   };
 }
 

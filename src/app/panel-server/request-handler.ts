@@ -14,7 +14,6 @@ import { handlePanelContextRoute } from "./context-routes.js";
 import {
   handlePanelConversationRoute,
   scheduleNextQueuedConversationRun,
-  startGuidanceFollowUpRun,
 } from "./conversation-routes.js";
 import type { PanelModelCatalogFetch, PanelProviderFetch, PanelServerOptions, StartedPanelServer } from "./types.js";
 import { asRecord } from "./request-parsers.js";
@@ -64,7 +63,6 @@ function createPanelRuntimeHooks(): PanelRuntimeHooks {
     executeRun: executeBasicPanelRun,
     failRun: failPanelRunJob,
     scheduleNextQueuedConversationRun,
-    startGuidanceFollowUpRun,
   };
 }
 

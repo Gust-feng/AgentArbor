@@ -304,9 +304,9 @@ export function createPanelRunCanvas(input: {
     },
     explanation: {
       resultWhyReasonable:
-        "方案来自父层 synthesis 和 Convergence Judge 收束后的候选，并通过校验后才进入执行阶段。",
+        "方案来自分工检查和收束判断后的候选，并通过校验后才进入执行阶段。",
       observationPanelRole:
-        `开发者详情保留运行树、delegation、parent synthesis、模型/工具 refs 和 trace；当前活动流安全事件 ${input.transcript.events.length} 条。`,
+        `开发者详情保留运行树、分工、汇总判断、模型/工具 refs 和 trace；当前活动流安全事件 ${input.transcript.events.length} 条。`,
     },
   };
 }
@@ -372,10 +372,10 @@ export function createWorkSessionCanvas(input: {
         input.result.directAnswer !== undefined
           ? "这是一条直接回答：任务不需要读取工作区、派生子 Agent 或生成报告。"
           : input.result.status === "completed"
-          ? "报告来自主会话分工检查后的父层 synthesis；局部材料没有绕过父层进入最终结果。"
+          ? "报告来自主会话分工检查后的汇总判断；局部材料没有绕过汇总进入最终结果。"
           : "工作会话没有完成结果，当前只展示停止原因、开放问题和安全运行证据。",
       observationPanelRole:
-        `开发者详情展示主 Agent / child run tree、父层 synthesis、模型/工具 refs 和活动流；当前安全事件 ${input.transcript.events.length} 条。`,
+        `开发者详情展示主助手 / 子检查运行树、汇总判断、模型/工具 refs 和活动流；当前安全事件 ${input.transcript.events.length} 条。`,
     },
   };
 }
@@ -423,7 +423,7 @@ export function createUndergroundDeepCanvas(input: {
         summary: safeText(recommendedOption?.directionSummary ?? handoff.clarifiedGoal, 520),
         reason:
           input.result.terminalStatus === "approved_package_created"
-            ? `地下组织已完成父层综合和收束，保留 ${keyEvidenceRefs.length} 个关键依据引用。`
+            ? `深度组织已完成汇总和收束，保留 ${keyEvidenceRefs.length} 个关键依据引用。`
             : "地下组织没有批准进入执行，当前只展示停止、等待或不确定材料。",
       },
       keyEvidenceRefs,
@@ -437,9 +437,9 @@ export function createUndergroundDeepCanvas(input: {
     agentRunTree: createSafeAgentRunTreeView(input.result.undergroundOrchestratorRun.agentRunTree),
     explanation: {
       resultWhyReasonable:
-        "这是显式深度模式：只运行 Underground Cognitive Runtime 做方向组织、child/rootlet 探索、父层 synthesis 和收束；当前不进入 Aboveground 执行。",
+        "这是显式深度模式：只做方向组织、局部探索、汇总判断和收束；当前不进入执行。",
       observationPanelRole:
-        `详情里展示地下组织的 agent tree、父层 synthesis、模型/工具 refs 和安全事件；当前安全事件 ${input.transcript.events.length} 条。`,
+        `详情里展示深度组织的运行树、汇总判断、模型/工具 refs 和安全事件；当前安全事件 ${input.transcript.events.length} 条。`,
     },
   };
 }
@@ -451,5 +451,5 @@ function planReason(
   evidenceCount: number
 ): string {
   const childCount = input.tracking.agentRunTree?.childRuns.length ?? 0;
-  return `推荐方向已由 ${childCount} 路局部材料和 ${evidenceCount} 个关键证据引用支撑，并通过父层收束。`;
+  return `推荐方向已由 ${childCount} 路局部材料和 ${evidenceCount} 个关键依据引用支撑，并通过汇总收束。`;
 }

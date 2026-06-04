@@ -10,9 +10,16 @@ import {
 export type PanelSkillRuntime = {
   readonly skillRoots: readonly string[];
   readonly skillStateStore?: SkillStateStore;
+  readonly capabilityCenter?: {
+    listSkills(): Promise<readonly SkillDefinition[]>;
+    invalidate(): void;
+  };
 };
 
 export async function listPanelSkills(runtime: PanelSkillRuntime): Promise<readonly SkillDefinition[]> {
+  if (runtime.capabilityCenter !== undefined) {
+    return runtime.capabilityCenter.listSkills();
+  }
   return discoverSkills({ roots: runtime.skillRoots, stateStore: runtime.skillStateStore });
 }
 
@@ -25,6 +32,7 @@ export async function setPanelSkillEnabled(
     return false;
   }
   await runtime.skillStateStore.setEnabled(skillId, enabled);
+  runtime.capabilityCenter?.invalidate();
   return true;
 }
 
@@ -36,7 +44,7 @@ export async function resolveTriggeredSkillContexts(
   const triggered = selectTriggeredSkills(goal, skills, 4);
   const contexts = await Promise.all(triggered.map(async (skill): Promise<DesktopAgentSkillContext> => {
     const body = await loadSkillBody(skill);
-    await runtime.skillStateStore?.markUsed(skill.id);
+    void runtime.skillStateStore?.markUsed(skill.id);
     return {
       skill,
       body,

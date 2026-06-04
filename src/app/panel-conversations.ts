@@ -1,4 +1,4 @@
-import { createId, nowIso } from "../kernel/id.js";
+import { createId, nowIso, reserveId } from "../kernel/id.js";
 import type { RuntimeConversationRecord } from "../domain/runtime-database/index.js";
 import type { DesktopTaskSoilInput } from "./task-soil-workspace.js";
 import { sanitizeAssistantVisibleText } from "./visible-text-safety.js";
@@ -106,6 +106,7 @@ export class PanelConversationStore {
         responseModel: normalizeTurnModel(turn.responseModel),
       })),
     };
+    reserveConversationIds(conversation);
     this.conversations.set(conversation.conversationId, conversation);
     return toConversationReadModel(conversation);
   }
@@ -401,4 +402,17 @@ function latestAssistantRunId(conversation: PanelConversation): string | undefin
     }
   }
   return undefined;
+}
+
+function reserveConversationIds(conversation: PanelConversation): void {
+  reserveId(conversation.conversationId);
+  reserveId(conversation.currentRunId);
+  reserveId(conversation.latestRunId);
+  for (const runId of conversation.queuedRunIds) {
+    reserveId(runId);
+  }
+  for (const turn of conversation.turns) {
+    reserveId(turn.turnId);
+    reserveId(turn.runId);
+  }
 }

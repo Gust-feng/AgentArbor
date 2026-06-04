@@ -1,3 +1,12 @@
+import {
+  appendTextStreamAssembly,
+  emptyTextStreamAssembly,
+  appendStreamTextEventFragment,
+  appendSnapshotTextFragment,
+  textStreamFragmentSourceFromEventId,
+  type TextStreamAssembly,
+} from "./readable-text-fragments.js";
+
 export type LiveRunBuffer = {
   readonly runId: string;
   readonly turns: readonly LiveModelTurnBuffer[];
@@ -6,9 +15,9 @@ export type LiveRunBuffer = {
 
 export type LiveModelTurnBuffer = {
   readonly requestId: string;
-  readonly outputText: string;
+  readonly output: TextStreamAssembly;
   readonly sideText: string;
-  readonly reasoningText: string;
+  readonly reasoning: TextStreamAssembly;
   readonly reasoningCompleted: boolean;
   readonly modelRefs: readonly string[];
   readonly updatedAtSequence: number;
@@ -36,6 +45,14 @@ export function emptyLiveRun(runId: string): LiveRunBuffer {
     turns: [],
     appliedEventKeys: [],
   };
+}
+
+export function liveRunHasVisibleText(live: LiveRunBuffer | undefined): boolean {
+  return live?.turns.some((turn) =>
+    turn.output.text.trim().length > 0 ||
+    turn.sideText.trim().length > 0 ||
+    turn.reasoning.text.trim().length > 0
+  ) === true;
 }
 
 export function appendLiveRunEvents(
@@ -69,7 +86,7 @@ export function appendLiveRunEvent(
   if (event.type === "model.output.delta") {
     return withLiveModelTurn(nextRun, {
       ...turn,
-      outputText: `${turn.outputText}${event.delta ?? ""}`,
+      output: appendLiveTextFragment(turn.output, event.delta ?? "", event),
       modelRefs,
       updatedAtSequence: Math.max(turn.updatedAtSequence, event.sequence),
     });
@@ -77,7 +94,7 @@ export function appendLiveRunEvent(
   if (event.type === "model.reasoning.delta") {
     return withLiveModelTurn(nextRun, {
       ...turn,
-      reasoningText: appendLiveText(turn.reasoningText, event.delta ?? event.detail?.preview ?? event.summary ?? ""),
+      reasoning: appendLiveTextFragment(turn.reasoning, event.delta ?? event.detail?.preview ?? event.summary ?? "", event),
       modelRefs,
       updatedAtSequence: Math.max(turn.updatedAtSequence, event.sequence),
     });
@@ -85,6 +102,7 @@ export function appendLiveRunEvent(
   if (event.type === "model.reasoning.completed") {
     return withLiveModelTurn(nextRun, {
       ...turn,
+      reasoning: appendCompletedReasoningSnapshot(turn.reasoning, event),
       reasoningCompleted: true,
       modelRefs,
       updatedAtSequence: Math.max(turn.updatedAtSequence, event.sequence),
@@ -93,9 +111,9 @@ export function appendLiveRunEvent(
   if (event.type === "tool.requested" || event.type === "confirmation.needed") {
     return withLiveModelTurn(nextRun, {
       ...turn,
-      reasoningCompleted: turn.reasoningText.trim().length > 0 ? true : turn.reasoningCompleted,
-      sideText: appendLiveText(turn.sideText, turn.outputText),
-      outputText: "",
+      reasoningCompleted: turn.reasoning.text.trim().length > 0 ? true : turn.reasoningCompleted,
+      sideText: appendLiveText(turn.sideText, turn.output.text),
+      output: emptyTextStreamAssembly(),
       modelRefs,
       updatedAtSequence: Math.max(turn.updatedAtSequence, event.sequence),
     });
@@ -103,7 +121,7 @@ export function appendLiveRunEvent(
   if (isLiveReasoningSettlementEvent(event)) {
     return withLiveModelTurn(nextRun, {
       ...turn,
-      reasoningCompleted: turn.reasoningText.trim().length > 0 ? true : turn.reasoningCompleted,
+      reasoningCompleted: turn.reasoning.text.trim().length > 0 ? true : turn.reasoningCompleted,
       modelRefs,
       updatedAtSequence: Math.max(turn.updatedAtSequence, event.sequence),
     });
@@ -138,9 +156,9 @@ function isLiveReasoningSettlementEvent(event: RunEventLike): boolean {
 function emptyLiveModelTurn(requestId: string): LiveModelTurnBuffer {
   return {
     requestId,
-    outputText: "",
+    output: emptyTextStreamAssembly(),
     sideText: "",
-    reasoningText: "",
+    reasoning: emptyTextStreamAssembly(),
     reasoningCompleted: false,
     modelRefs: [],
     updatedAtSequence: 0,
@@ -167,7 +185,63 @@ function liveModelRequestId(event: RunEventLike): string | undefined {
 }
 
 function appendLiveText(current: string, next: string): string {
-  return `${current}${next}`;
+  return appendStreamTextEventFragment(current, next, undefined);
+}
+
+function appendLiveTextFragment(
+  current: TextStreamAssembly,
+  next: string,
+  event: RunEventLike
+): TextStreamAssembly {
+  return appendTextStreamAssembly(
+    current,
+    next,
+    textStreamFragmentSourceFromEventId(event.id)
+  );
+}
+
+function appendCompletedReasoningSnapshot(
+  current: TextStreamAssembly,
+  event: RunEventLike
+): TextStreamAssembly {
+  const next = event.delta ?? event.detail?.preview ?? event.summary ?? "";
+  if (!shouldUseCompletedReasoningSnapshot(current.text, next)) {
+    return current;
+  }
+  return {
+    text: preferredSnapshotText(current.text, next),
+    replayCatchupText: "",
+    liveSourceObserved: current.liveSourceObserved || textStreamFragmentSourceFromEventId(event.id) === "live",
+  };
+}
+
+function shouldUseCompletedReasoningSnapshot(current: string, next: string): boolean {
+  const normalizedNext = normalizeBoundaryText(next);
+  if (normalizedNext.length === 0) return false;
+  const normalizedCurrent = normalizeBoundaryText(current);
+  return normalizedCurrent.length === 0 ||
+    normalizedNext.startsWith(normalizedCurrent) ||
+    normalizedCurrent.startsWith(normalizedNext);
+}
+
+function preferredSnapshotText(current: string, next: string): string {
+  if (current.length === 0) return next;
+  if (next.startsWith(current)) return next;
+  if (current.startsWith(next)) return current;
+  const normalizedCurrent = normalizeBoundaryText(current);
+  const normalizedNext = normalizeBoundaryText(next);
+  if (
+    normalizedCurrent.length > 0 &&
+    normalizedNext.length > 0 &&
+    (normalizedCurrent === normalizedNext || normalizedCurrent.startsWith(normalizedNext) || normalizedNext.startsWith(normalizedCurrent))
+  ) {
+    return current;
+  }
+  return appendSnapshotTextFragment(current, next);
+}
+
+function normalizeBoundaryText(value: string): string {
+  return value.replace(/\s+/g, "").trim();
 }
 
 function uniqueStrings(values: readonly string[]): readonly string[] {

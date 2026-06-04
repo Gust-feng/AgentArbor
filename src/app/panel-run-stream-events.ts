@@ -219,12 +219,16 @@ function appendStreamEventsForEvent(input: {
   };
 
   if (input.entry.type === "model.requested") {
+    const summary = modelRequestedSummary(payload);
+    if (summary === undefined || summary.trim().length === 0) {
+      return;
+    }
     input.push({
       ...base,
       eventId: `${input.runId}:event:${input.entry.sequence}:agent.note.delta`,
       type: "agent.note.delta",
       agentLabel: "模型",
-      summary: modelRequestedSummary(payload),
+      summary,
       status: "running",
     });
     return;
@@ -280,14 +284,6 @@ function appendStreamEventsForEvent(input: {
           },
         });
       }
-      input.push({
-        ...base,
-        eventId: `${input.runId}:event:${input.entry.sequence}:agent.note.completed`,
-        type: "agent.note.completed",
-        agentLabel: "助手",
-        summary: "助手已选择使用工具，工具结果会作为安全摘要进入后续处理。",
-        status: "completed",
-      });
       return;
     }
     const text = visibleOutputText(payload.visibleOutput);
@@ -298,7 +294,7 @@ function appendStreamEventsForEvent(input: {
         eventId: `${input.runId}:event:${input.entry.sequence}:model.output.completed`,
         type: "model.output.completed",
         agentLabel: "模型",
-        summary: "模型调用完成；本次没有通过安全策略展示的可见输出。",
+        summary: "模型调用完成；本次没有可展示输出。",
         status: "completed",
       });
       return;

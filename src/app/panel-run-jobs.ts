@@ -10,7 +10,7 @@ import type { MinimalRuntime } from "./runtime.js";
 import type { DesktopTaskSoilInput } from "./task-soil-workspace.js";
 import type { UndergroundDemoSummary } from "./underground-demo-summary.js";
 import type { AgentRunTree } from "../domain/underground/index.js";
-import { basicConfirmationDecisionSummary } from "./basic-agent-runtime/index.js";
+import { basicConfirmationDecisionSummary } from "./confirmation-copy.js";
 
 export type PanelRunKind = "desktop" | "underground";
 /**
@@ -136,6 +136,10 @@ export class PanelRunJobStore {
 
   get(runId: string): PanelRunJob | undefined {
     return this.jobs.get(runId);
+  }
+
+  list(): readonly PanelRunJob[] {
+    return [...this.jobs.values()].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
   }
 
   markRunning(runId: string): void {
@@ -276,10 +280,15 @@ export class PanelRunJobStore {
       createdAt: decision.decidedAt,
       agentLabel: decision.decision === "guidance" ? "用户指导" : "用户确认",
       summary: basicConfirmationDecisionSummary(decision),
-      status: decision.decision === "approve_once" ? "running" : decision.decision === "deny" ? "blocked" : "needs_input",
+      status: "running",
       sourceRefs: [`confirmation:${decision.confirmationId}`],
       modelCallRefs: [],
       toolCallRefs: [],
+      detail: {
+        kind: "confirmation",
+        action: decision.decision,
+        preview: decision.guidance,
+      },
     });
   }
 
@@ -336,12 +345,6 @@ function appendStreamEventToJob(
     }
     return existing;
   }
-  if (event.type === "model.output.delta" || event.type === "model.reasoning.delta") {
-    const liveDelta = liveModelDeltaForSameCall(job, event);
-    if (liveDelta !== undefined && !isLiveModelDeltaEvent(event)) {
-      return liveDelta;
-    }
-  }
   const next: PanelRunStreamEvent = {
     ...event,
     sequence: job.nextStreamSequence,
@@ -351,10 +354,6 @@ function appendStreamEventToJob(
   job.streamEventIds.add(next.eventId);
   job.updatedAt = nowIso();
   return next;
-}
-
-function isLiveModelDeltaEvent(event: PanelRunStreamEventInput): boolean {
-  return event.eventId.includes(":live:model.output.delta:") || event.eventId.includes(":live:model.reasoning.delta:");
 }
 
 function updateStartedEvent(existing: PanelRunStreamEvent, event: PanelRunStreamEventInput): void {
@@ -371,25 +370,6 @@ function updateStartedEvent(existing: PanelRunStreamEvent, event: PanelRunStream
     toolName: event.toolName ?? existing.toolName,
     detail: event.detail ?? existing.detail,
   });
-}
-
-function liveModelDeltaForSameCall(
-  job: PanelRunJob,
-  event: PanelRunStreamEventInput
-): PanelRunStreamEvent | undefined {
-  const requestIds = new Set(event.modelCallRefs);
-  if (requestIds.size === 0) {
-    return undefined;
-  }
-  return job.streamEvents.find(
-    (item) =>
-      item.type === event.type &&
-      (
-        item.eventId.startsWith(`${job.runId}:live:model.output.delta:`) ||
-        item.eventId.startsWith(`${job.runId}:live:model.reasoning.delta:`)
-      ) &&
-      item.modelCallRefs.some((requestId) => requestIds.has(requestId))
-  );
 }
 
 function sortedStreamEvents(job: PanelRunJob): readonly PanelRunStreamEvent[] {

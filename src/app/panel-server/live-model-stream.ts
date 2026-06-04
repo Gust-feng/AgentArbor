@@ -18,7 +18,7 @@ export function appendLiveModelOutputDelta(
   runId: string,
   delta: ModelOutputDelta
 ): void {
-  const safeDelta = redactOrdinaryMarkdownFragment(delta.delta, 900);
+  const safeDelta = redactOrdinaryMarkdownFragment(delta.delta, 8_000);
   if (safeDelta.length === 0) {
     return;
   }
@@ -79,5 +79,8 @@ function modelPurposeForRequest(job: PanelRunJob, requestId: string): string | u
 }
 
 function isUserFacingStreamingPurpose(purpose: string | undefined): boolean {
-  return purpose === "desktop_agent" || purpose === "desktop_chat" || purpose === "work_session_direct_answer";
+  return purpose === "desktop_agent" ||
+    purpose === "desktop_chat" ||
+    purpose === "work_session_direct_answer" ||
+    purpose === "work_session_synthesis";
 }

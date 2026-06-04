@@ -126,6 +126,67 @@ export function openAndAbortSse(baseUrl: string, pathname: string, timeoutMs = 2
   });
 }
 
+export function readSseUntil(
+  baseUrl: string,
+  pathname: string,
+  predicate: (events: readonly any[], text: string) => boolean,
+  timeoutMs = PANEL_ASYNC_TEST_TIMEOUT_MS
+): Promise<RequestSseResult> {
+  const url = new URL(pathname, baseUrl);
+  const effectiveTimeoutMs = asyncTestTimeout(timeoutMs);
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let text = "";
+    const req = request(url, { method: "GET" }, (response) => {
+      const timeout = setTimeout(() => {
+        if (!settled) {
+          settled = true;
+          req.destroy();
+          reject(new Error(`Timed out waiting for SSE predicate ${pathname}`));
+        }
+      }, effectiveTimeoutMs);
+      const finish = (): void => {
+        if (settled) return;
+        const events = parseSseEvents(text);
+        if (!predicate(events, text)) return;
+        settled = true;
+        clearTimeout(timeout);
+        req.destroy();
+        resolve({
+          status: response.statusCode ?? 0,
+          headers: response.headers,
+          text,
+          events,
+        });
+      };
+      response.setEncoding("utf8");
+      response.on("data", (chunk) => {
+        text += chunk;
+        finish();
+      });
+      response.on("end", () => {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timeout);
+          resolve({
+            status: response.statusCode ?? 0,
+            headers: response.headers,
+            text,
+            events: parseSseEvents(text),
+          });
+        }
+      });
+    });
+    req.on("error", (error) => {
+      if (!settled) {
+        settled = true;
+        reject(error);
+      }
+    });
+    req.end();
+  });
+}
+
 export async function removeTemporaryTree(directory: string): Promise<void> {
   await fs.rm(directory, {
     recursive: true,

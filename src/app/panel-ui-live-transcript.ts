@@ -63,7 +63,7 @@ export function withLiveTranscriptNodes(
   let next = nodes;
 
   for (const turn of live.turns) {
-    if (turn.reasoningText.trim().length > 0) {
+    if (turn.reasoning.text.trim().length > 0) {
       const existing = findLiveThinkingNode(next, turn);
       const liveNode = liveThinkingNode(live.runId, turn, existing);
       next = existing === undefined ? [...next, liveNode] : next.map((node) => node === existing ? liveNode : node);
@@ -72,7 +72,7 @@ export function withLiveTranscriptNodes(
       const existing = next.find((node) =>
         node.kind === "system" &&
         (node.eventType === "model.side.completed" || node.eventType === "model.output.side") &&
-        sameModelRefs(node, turn.modelRefs)
+        (sameModelRefs(node, turn.modelRefs) || sameSideText(node, turn))
       );
       const liveNode = liveSideTextNode(live.runId, turn, existing);
       next = existing === undefined ? [...next, liveNode] : next.map((node) => node === existing ? liveNode : node);
@@ -88,16 +88,17 @@ export function liveStreamingAnswer(
 ): LiveAnswerProjection | undefined {
   const liveTurn = live === undefined
     ? undefined
-    : [...live.turns].reverse().find((turn) => turn.outputText.trim().length > 0);
+    : [...live.turns].reverse().find((turn) => turn.output.text.trim().length > 0);
   if (liveTurn !== undefined) {
     return {
-      text: liveTurn.outputText,
+      text: liveTurn.output.text,
       tone: liveOutputFollowsToolResult(liveTurn, nodes) ? "formal" : "process",
       streaming: true,
     };
   }
   const answerNode = [...nodes].reverse().find((node) => node.kind === "answer" && (node.text?.trim().length ?? 0) > 0);
-  return answerNode?.text === undefined ? undefined : { text: answerNode.text.trim(), tone: "formal", streaming: false };
+  const answerText = answerNode?.text ?? [...nodes].reverse().find((node) => node.kind === "answer" && (node.summary?.trim().length ?? 0) > 0)?.summary;
+  return answerText === undefined ? undefined : { text: answerFallbackText(answerText), tone: "formal", streaming: false };
 }
 
 function findLiveThinkingNode(nodes: readonly LiveTranscriptNode[], turn: LiveModelTurnBuffer): LiveTranscriptNode | undefined {
@@ -117,18 +118,24 @@ function isModelReasoningNode(node: LiveTranscriptNode): boolean {
 
 function sameReasoningText(node: LiveTranscriptNode, turn: LiveModelTurnBuffer): boolean {
   const nodeText = normalizeComparableText(node.text ?? node.summary ?? "");
-  const liveText = normalizeComparableText(turn.reasoningText);
+  const liveText = normalizeComparableText(turn.reasoning.text);
   if (nodeText.length === 0 || liveText.length === 0) return false;
   if (nodeText === liveText) return true;
   return !turn.reasoningCompleted && (nodeText.startsWith(liveText) || liveText.startsWith(nodeText));
 }
 
+function sameSideText(node: LiveTranscriptNode, turn: LiveModelTurnBuffer): boolean {
+  const nodeText = normalizeComparableText(node.text ?? node.summary ?? "");
+  const liveText = normalizeComparableText(turn.sideText);
+  return nodeText.length > 0 && liveText.length > 0 && (nodeText === liveText || nodeText.startsWith(liveText) || liveText.startsWith(nodeText));
+}
+
 function liveThinkingNode(runId: string, turn: LiveModelTurnBuffer, existing: LiveTranscriptNode | undefined): LiveTranscriptNode {
-  const text = turn.reasoningText.trim();
+  const text = turn.reasoning.text.trim();
   const completed = turn.reasoningCompleted || existing?.eventType === "model.reasoning.completed" || existing?.phase === "completed";
   const modelRefs = turn.modelRefs.map((id): LiveTranscriptObservationRef => ({ kind: "model_call", id }));
   return {
-    nodeId: `${runId}:live:${turn.requestId}:thinking`,
+    nodeId: existing?.nodeId ?? `${runId}:live:${turn.requestId}:thinking`,
     runId,
     sequence: existing?.sequence ?? turn.updatedAtSequence,
     eventType: completed ? "model.reasoning.completed" : "model.reasoning.delta",
@@ -146,7 +153,7 @@ function liveSideTextNode(runId: string, turn: LiveModelTurnBuffer, existing: Li
   const text = turn.sideText.trim();
   const modelRefs = turn.modelRefs.map((id): LiveTranscriptObservationRef => ({ kind: "model_call", id }));
   return {
-    nodeId: `${runId}:live:${turn.requestId}:side-text`,
+    nodeId: existing?.nodeId ?? `${runId}:live:${turn.requestId}:side-text`,
     runId,
     sequence: existing?.sequence ?? Math.max(0, turn.updatedAtSequence - 0.1),
     eventType: "model.output.side",
@@ -186,6 +193,10 @@ function mergeRefs(
 
 function normalizeComparableText(value: string): string {
   return value.replace(/\s+/g, " ").trim();
+}
+
+function answerFallbackText(value: string): string {
+  return value.replace(/^已(?:回答|完成|生成)[:：]\s*/u, "").trim();
 }
 
 function compact(value: string, maxLength: number): string {

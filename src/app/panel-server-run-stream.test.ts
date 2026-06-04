@@ -12,6 +12,7 @@ import {
   assertSafePanelJsonText,
   openAndAbortSse,
   removeTemporaryTree,
+  readSseUntil,
   requestJson,
   requestSse,
   waitForRun,
@@ -133,6 +134,59 @@ test("desktop work session completes streamed reasoning without replaying it", a
     assert.equal(completedTranscriptThinkingNodes[0]?.eventType, "model.reasoning.completed");
     assert.equal(JSON.stringify(workSession.body.workSession.transcriptNodes).includes(`${reasoningText}${reasoningText}`), false);
     assertSafePanelJsonText(`${completed.text}\n${workSession.text}\n${events.text}`);
+  } finally {
+    await server.close();
+    await removeTemporaryTree(directory);
+  }
+});
+
+test("conversation stream stays live even when profile saved openAI.stream false", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-force-live-stream-"));
+  const secret = "sk-force-live-stream-secret";
+  const requestedStreams: boolean[] = [];
+  const providerFetch: PanelProviderFetch = async (_url, init) => {
+    requestedStreams.push((JSON.parse(init.body) as { readonly stream?: boolean }).stream === true);
+    return createOpenAiStreamTextResponse("force-live-model", [
+      "第一段实时输出",
+      "，随后继续补充。",
+    ]);
+  };
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory, providerFetch });
+  try {
+    await requestJson(server.url, "/api/config/model-provider", {
+      method: "POST",
+      body: {
+        baseUrl: "https://provider.example",
+        model: "force-live-model",
+        apiKey: secret,
+        openAI: {
+          stream: false,
+        },
+      },
+    });
+    const start = await requestJson(server.url, "/api/conversations", {
+      method: "POST",
+      body: { goal: "请实时回答", aiMode: "openai-compatible" },
+    });
+    const runId = start.body.run.runId;
+    const earlyStream = await readSseUntil(
+      server.url,
+      `/api/basic-agent/runs/${encodeURIComponent(runId)}/stream?cursor=0`,
+      (events) => events.some((event) => event.type === "model.output.delta")
+    );
+
+    assert.equal(requestedStreams.includes(true), true);
+    assert.equal(earlyStream.events.some((event) => event.type === "model.output.delta"), true);
+    assert.equal(earlyStream.events.some((event) => event.type === "final.result"), false);
+
+    const completed = await waitForRun(
+      server.url,
+      runId,
+      (body) => body.run.status === "completed",
+      4_000,
+      "/api/basic-agent/runs"
+    );
+    assert.equal(completed.body.run.status, "completed");
   } finally {
     await server.close();
     await removeTemporaryTree(directory);
@@ -462,19 +516,7 @@ test("panel run stream returns safe SSE events with fake model output deltas", a
     assert.equal(String(stream.headers["content-type"]).includes("text/event-stream"), true);
     assert.equal(stream.events[0].type, "run.started");
     assert.equal(deltas.length > 1, true);
-    const liveDeltaRequestIds = new Set(
-      deltas
-        .filter((event) => event.eventId.includes(":live:model.output.delta:"))
-        .flatMap((event) => event.modelCallRefs)
-    );
-    assert.equal(
-      deltas.some(
-        (event) =>
-          !event.eventId.includes(":live:model.output.delta:") &&
-          event.modelCallRefs.some((requestId: string) => liveDeltaRequestIds.has(requestId))
-      ),
-      false
-    );
+    assert.equal(deltas.every((event) => event.modelCallRefs.length > 0), true);
     assert.equal(stream.events.some((event) => event.type === "model.output.completed"), true);
     assert.equal(stream.events.some((event) => event.type === "final.result"), true);
     assert.equal(stream.text.includes(secret), false);

@@ -35,7 +35,6 @@ export async function runOrdinaryDesktopForPanel(
     abortSignal: options.abortSignal,
     onRuntimeReady: options.onRuntimeReady,
     onModelOutputDelta: options.onModelOutputDelta,
-    allowWorkSessionUpgrade: false,
   });
   return desktopPanelResultFromAgent(agent, options.reasoningEffort);
 }
@@ -77,6 +76,10 @@ function desktopPanelResultFromAgent(
               confirmationId: agent.pendingApproval.confirmationId,
               resume: async (resumeInput) => {
                 const resumed = await agent.pendingApproval!.resume(resumeInput);
+                return desktopPanelResultFromAgent(resumed, reasoningEffort);
+              },
+              resumeWithDecision: async (resumeInput) => {
+                const resumed = await agent.pendingApproval!.resumeWithDecision(resumeInput);
                 return desktopPanelResultFromAgent(resumed, reasoningEffort);
               },
             },

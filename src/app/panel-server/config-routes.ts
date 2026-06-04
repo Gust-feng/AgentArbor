@@ -99,6 +99,7 @@ export async function handlePanelConfigRoute(
     const body = await readJsonBody(request);
     try {
       const profile = await runtime.configCenter.createModelProviderProfile(parseCreateModelProfile(body));
+      invalidateCapabilityCache(runtime);
       writeJson(response, 200, {
         ok: true,
         status: "completed",
@@ -123,6 +124,7 @@ export async function handlePanelConfigRoute(
         ...parseConfigUpdate(body),
         profileId,
       });
+      invalidateCapabilityCache(runtime);
       writeJson(response, 200, {
         ok: true,
         status: "completed",
@@ -229,6 +231,7 @@ export async function handlePanelConfigRoute(
       const profile = await runtime.configCenter.activateModelProviderProfile(
         decodeURIComponent(activateProfileMatch[1] ?? "")
       );
+      invalidateCapabilityCache(runtime);
       writeJson(response, 200, {
         ok: true,
         status: "completed",
@@ -250,6 +253,7 @@ export async function handlePanelConfigRoute(
       const profiles = await runtime.configCenter.deleteModelProviderProfile(
         decodeURIComponent(deleteProfileMatch[1] ?? "")
       );
+      invalidateCapabilityCache(runtime);
       writeJson(response, 200, {
         ok: true,
         status: "completed",
@@ -283,6 +287,7 @@ export async function handlePanelConfigRoute(
     const body = await readJsonBody(request);
     try {
       const config = await runtime.configCenter.updateModelProviderConfig(parseConfigUpdate(body));
+      invalidateCapabilityCache(runtime);
       writeJson(response, 200, {
         ok: true,
         status: "completed",
@@ -302,6 +307,7 @@ export async function handlePanelConfigRoute(
   if (request.method === "POST" && url.pathname === "/api/config/information-sources") {
     const body = await readJsonBody(request);
     const informationAccess = await runtime.configCenter.updateInformationAccessConfig(parseInformationAccessUpdate(body));
+    invalidateCapabilityCache(runtime);
     writeJson(response, 200, {
       ok: true,
       status: "completed",
@@ -313,6 +319,7 @@ export async function handlePanelConfigRoute(
   if (request.method === "POST" && url.pathname === "/api/config/tools/web-search") {
     const body = await readJsonBody(request);
     const webSearch = await runtime.configCenter.updateWebSearchConfig(parseWebSearchUpdate(body));
+    invalidateCapabilityCache(runtime);
     writeJson(response, 200, {
       ok: true,
       status: "completed",
@@ -328,6 +335,7 @@ export async function handlePanelConfigRoute(
     const body = await readJsonBody(request);
     const toolName = decodeURIComponent(toolStateMatch[1] ?? "");
     await runtime.configCenter.updateToolState(parseToolStateUpdate(toolName, body));
+    invalidateCapabilityCache(runtime);
     const tools: PanelToolsConfig = {
       webSearch: await runtime.configCenter.getWebSearchConfig(),
       catalog: await createPanelToolCatalog(runtime),
@@ -356,6 +364,7 @@ export async function handlePanelConfigRoute(
     const body = await readJsonBody(request);
     try {
       await runtime.configCenter.upsertMcpServer(parseMcpServerUpdate(body));
+      invalidateCapabilityCache(runtime);
       const capabilitySnapshot = await runtime.capabilityCenter.snapshot();
       writeJson(response, 200, {
         ok: true,
@@ -372,6 +381,7 @@ export async function handlePanelConfigRoute(
     const body = await readJsonBody(request);
     try {
       const workspace = await runtime.configCenter.updateWorkspaceConfig(parseWorkspaceUpdate(body));
+      invalidateCapabilityCache(runtime);
       writeJson(response, 200, {
         ok: true,
         status: "completed",
@@ -402,6 +412,7 @@ export async function handlePanelConfigRoute(
     }
     try {
       const workspace = await runtime.configCenter.updateWorkspaceConfig({ workspaceDirectory: selectedDirectory });
+      invalidateCapabilityCache(runtime);
       writeJson(response, 200, {
         ok: true,
         status: "completed",
@@ -449,4 +460,8 @@ function configCenterHttpError(error: unknown): PanelHttpError {
     return new PanelHttpError(400, "invalid_config", error.message);
   }
   throw error;
+}
+
+function invalidateCapabilityCache(runtime: PanelConfigRouteRuntime): void {
+  runtime.capabilityCenter.invalidate();
 }

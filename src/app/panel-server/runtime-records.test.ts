@@ -41,7 +41,7 @@ test("runtime record mapper creates safe run and workspace records", () => {
 
   assert.equal(workspace.label, "AgentArbor");
   assert.equal(run.completedAt, "2026-05-31T00:00:10.000Z");
-  assert.equal(run.resultTitle, "这次没有完成");
+  assert.equal(run.resultTitle, "运行失败");
   assert.equal(run.resultSummary?.includes("[redacted-secret]"), true);
   assert.equal(JSON.stringify(run).includes("sk-hidden-secret"), false);
   assert.equal(isTerminalPanelRunStatus("blocked"), true);

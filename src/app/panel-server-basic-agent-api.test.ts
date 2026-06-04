@@ -277,6 +277,13 @@ test("basic agent confirmation decisions persist approve and guidance outcomes s
       `/api/basic-agent/runs/${encodeURIComponent(guidanceStart.body.runId)}/confirmations/${encodeURIComponent(guidanceConfirmationId)}/decision`,
       { method: "POST", body: { decision: "guidance", guidance: `先不要读取文件，只说明需要什么材料。${guidanceSecret}` } }
     );
+    await waitForRun(
+      server.url,
+      guidanceStart.body.runId,
+      (body) => body.status === "completed",
+      4_000,
+      "/api/desktop/runs"
+    );
     const guidanceRuntime = await requestJson(server.url, `/api/runtime/runs/${encodeURIComponent(guidanceStart.body.runId)}`);
     const guidanceEvents = await requestJson(
       server.url,
@@ -284,9 +291,11 @@ test("basic agent confirmation decisions persist approve and guidance outcomes s
     );
 
     assert.equal(guidanceDecision.status, 200);
-    assert.equal(guidanceDecision.body.run.status, "needs_input");
+    assert.equal(guidanceRuntime.body.snapshot.run.status, "completed");
     assert.equal(guidanceRuntime.body.snapshot.confirmations[0].status, "guidance");
     assert.equal(guidanceEvents.body.events.some((event: { type: string }) => event.type === "user.guidance"), true);
+    assert.equal(guidanceEvents.body.events.some((event: { type: string }) => event.type === "final.result"), true);
+    assert.equal(await fs.readFile(path.join(workspace, "guidance.txt"), "utf8"), "guidance delete content");
     assert.equal(guidanceEvents.text.includes(guidanceSecret), false);
     assert.equal(guidanceRuntime.text.includes(guidanceSecret), false);
     assertSafePanelJsonText(`${approveDecision.text}\n${approveRuntime.text}\n${approveEvents.text}\n${guidanceDecision.text}\n${guidanceRuntime.text}\n${guidanceEvents.text}`);
@@ -354,10 +363,16 @@ test("basic agent shell-style run_command executes without sandbox command-shape
   }
 });
 
-test("basic agent denied confirmation restores as blocked with safe replay after restart", async () => {
+test("basic agent denied confirmation feeds the decision back into the same run", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-basic-confirmation-deny-"));
   const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-basic-confirmation-deny-workspace-"));
-  const providerFetch: PanelProviderFetch = async () => createOpenAiDeleteFileToolCallResponse("denied.txt");
+  let providerFetchCalls = 0;
+  const providerFetch: PanelProviderFetch = async () => {
+    providerFetchCalls += 1;
+    return providerFetchCalls === 1
+      ? createOpenAiDeleteFileToolCallResponse("denied.txt")
+      : createOpenAiTextResponse("basic-deny-model", "已按拒绝结果继续整理，不会删除文件。");
+  };
   let server = await startLocalPanelServer({ port: 0, configDirectory: directory, providerFetch });
   try {
     await requestJson(server.url, "/api/config/model-provider", {
@@ -390,19 +405,28 @@ test("basic agent denied confirmation restores as blocked with safe replay after
       `/api/basic-agent/runs/${encodeURIComponent(start.body.runId)}/confirmations/${encodeURIComponent(confirmationId)}/decision`,
       { method: "POST", body: { decision: "deny" } }
     );
+    await waitForRun(
+      server.url,
+      start.body.runId,
+      (body) => body.status === "completed",
+      4_000,
+      "/api/desktop/runs"
+    );
     const runtimeRun = await requestJson(server.url, `/api/runtime/runs/${encodeURIComponent(start.body.runId)}`);
-    const blockedEvents = await requestJson(
+    const deniedEvents = await requestJson(
       server.url,
       `/api/basic-agent/runs/${encodeURIComponent(start.body.runId)}/events?cursor=0`
     );
 
     assert.equal(denied.status, 200);
-    assert.equal(denied.body.run.status, "blocked");
-    assert.equal(runtimeRun.body.snapshot.run.status, "blocked");
+    assert.equal(runtimeRun.body.snapshot.run.status, "completed");
     assert.equal(runtimeRun.body.snapshot.confirmations[0].status, "denied");
-    assert.equal(blockedEvents.body.events.some((event: { type: string }) => event.type === "user_approval.received"), true);
-    assert.equal(blockedEvents.body.events.some((event: { type: string }) => event.type === "run.blocked"), true);
-    assertSafePanelJsonText(`${denied.text}\n${runtimeRun.text}\n${blockedEvents.text}`);
+    assert.equal(runtimeRun.body.snapshot.toolCalls.some((call: { status: string }) => call.status === "failed"), true);
+    assert.equal(deniedEvents.body.events.some((event: { type: string }) => event.type === "user_approval.received"), true);
+    assert.equal(deniedEvents.body.events.some((event: { type: string }) => event.type === "run.blocked"), false);
+    assert.equal(deniedEvents.body.events.some((event: { type: string }) => event.type === "final.result"), true);
+    assert.equal(await fs.readFile(path.join(workspace, "denied.txt"), "utf8"), "denied delete content");
+    assertSafePanelJsonText(`${denied.text}\n${runtimeRun.text}\n${deniedEvents.text}`);
 
     await server.close();
     server = await startLocalPanelServer({ port: 0, configDirectory: directory, providerFetch });
@@ -413,9 +437,9 @@ test("basic agent denied confirmation restores as blocked with safe replay after
     );
 
     assert.equal(restoredRun.status, 200);
-    assert.equal(restoredRun.body.run.status, "blocked");
-    assert.equal(restoredRun.body.run.requiresUserAction, true);
-    assert.equal(restoredEvents.body.events.some((event: { type: string }) => event.type === "run.blocked"), true);
+    assert.equal(restoredRun.body.run.status, "completed");
+    assert.equal(restoredRun.body.run.requiresUserAction, false);
+    assert.equal(restoredEvents.body.events.some((event: { type: string }) => event.type === "run.blocked"), false);
     assert.equal(restoredEvents.body.events.some((event: { type: string }) => event.type === "user_approval.received"), true);
     assertSafePanelJsonText(`${restoredRun.text}\n${restoredEvents.text}`);
   } finally {

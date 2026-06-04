@@ -162,10 +162,12 @@ async function handleStartRunRequest(
     routeDecision: undefined,
     taskSoilInput: runInput.taskSoilInput,
     reasoningEffort: runInput.reasoningEffort,
+    deferSchedule: true,
   });
   const job = requirePanelRunJob(runtime, basicRun.runId);
 
   writeJson(response, 202, createPanelRunJobResponse(runtime, job));
+  runtime.runExecutor.schedule(job.runId);
 }
 
 function requirePanelRunJob(runtime: PanelRuntime, runId: string): PanelRunJob {

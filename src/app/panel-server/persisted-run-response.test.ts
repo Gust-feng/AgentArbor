@@ -16,6 +16,8 @@ test("persisted run response restores safe transcript and tracking projections",
       conversationId: "conversation-1",
       title: "Safe task",
       preview: "Safe task",
+      currentAction: "结果已生成。",
+      nextStep: "打开查看结果，或继续追问下一步。",
       status: "completed",
       requiresUserAction: false,
       queuedRunIds: [],
@@ -33,12 +35,12 @@ test("persisted run response restores safe transcript and tracking projections",
   assert.equal(response.tracking.toolTotals.completed, 1);
   assert.deepEqual(response.transcript.events.map((event) => event.type), [
     "run.started",
-    "agent.note.delta",
     "tool.requested",
     "tool.completed",
     "user.guidance",
     "final.result",
   ]);
+  assert.equal(JSON.stringify(response.transcript.events).includes("正在判断下一步"), false);
   assert.equal(response.transcriptNodes.some((node) => node.kind === "tool"), true);
   assert.equal(response.streamCursor.lastSequence, response.transcript.events.at(-1)?.sequence);
   assert.equal(JSON.stringify(response).includes("RAW_STDOUT_SENTINEL"), false);

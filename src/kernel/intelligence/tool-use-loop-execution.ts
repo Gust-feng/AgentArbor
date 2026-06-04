@@ -20,6 +20,7 @@ export type ToolUseLoopBatchExecutionResult = {
   readonly pendingApproval?: {
     readonly confirmationId: string;
     readonly pendingToolCall: ToolCallRequest;
+    readonly confirmationRequest?: NonNullable<ToolCallResult["confirmationRequest"]>;
     readonly remainingToolCallsAfterApproval: readonly ToolCallRequest[];
     readonly completedToolResults: readonly ToolCallResult[];
     readonly requestsForAssistantMessage: readonly ToolCallRequest[];
@@ -82,6 +83,8 @@ export async function executeToolCalls(input: {
         pendingApproval: {
           confirmationId: result.confirmationRequest?.confirmationId ?? `confirmation-${result.callId}`,
           pendingToolCall: cloneToolCallRequest(request),
+          confirmationRequest:
+            result.confirmationRequest === undefined ? undefined : globalThis.structuredClone(result.confirmationRequest),
           remainingToolCallsAfterApproval: input.requests.slice(index + 1).map(cloneToolCallRequest),
           completedToolResults: cloneToolResults(results.slice(0, -1)),
           requestsForAssistantMessage: input.requests.map(cloneToolCallRequest),

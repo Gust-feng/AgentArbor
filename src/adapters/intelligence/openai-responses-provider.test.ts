@@ -421,10 +421,10 @@ test("OpenAI Responses adapter streams text deltas and tool call arguments", asy
   assert.deepEqual(response.structuredOutput, { summary: "Streamed response." });
   assert.equal(response.textOutput, "{\"summary\":\"Streamed response.\"}");
   assert.deepEqual(deltas, [
-    { purpose: "rootlet_candidate", delta: "{\"summary\":\"" },
     { purpose: "rootlet_candidate", delta: "Streamed response" },
-    { purpose: "rootlet_candidate", delta: ".\"}" },
+    { purpose: "rootlet_candidate", delta: "." },
   ]);
+  assert.equal(JSON.stringify(deltas).includes("{\"summary\""), false);
 });
 
 test("OpenAI Responses adapter streams tool call arguments", async () => {

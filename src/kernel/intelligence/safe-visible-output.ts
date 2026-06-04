@@ -7,10 +7,14 @@ import type {
   ModelVisibleOutputProjection,
 } from "../../domain/intelligence/index.js";
 import { redactSensitiveText } from "../redaction.js";
+import {
+  DEFAULT_VISIBLE_FIELD_LENGTH,
+  formatVisibleOutputValue,
+  truncateVisibleOutputValue,
+  visibleOutputFieldNames,
+} from "./visible-output-fields.js";
 
 const DEFAULT_MAX_ITEMS = 3;
-const DEFAULT_MAX_FIELD_LENGTH = 180;
-const TRUNCATED_MARKER = "...";
 
 export function createModelVisibleOutputProjection(input: {
   readonly outputContract: ModelOutputContract;
@@ -21,7 +25,7 @@ export function createModelVisibleOutputProjection(input: {
   }
 
   const outputContract = input.outputContract;
-  const maxFieldLength = outputContract.visibleOutput?.maxFieldLength ?? DEFAULT_MAX_FIELD_LENGTH;
+  const maxFieldLength = outputContract.visibleOutput?.maxFieldLength ?? DEFAULT_VISIBLE_FIELD_LENGTH;
   const rootletKind = rootletKindFromAdviceContractId(outputContract.contractId);
 
   if (outputContract.format === "text") {
@@ -46,9 +50,7 @@ export function createModelVisibleOutputProjection(input: {
     return undefined;
   }
 
-  const allowedFields = (outputContract.visibleOutput?.fields ?? outputContract.requiredStringFields ?? []).filter(
-    (field) => !isSensitiveFieldName(field)
-  );
+  const allowedFields = visibleOutputFieldNames(outputContract);
   if (allowedFields.length === 0) {
     return undefined;
   }
@@ -101,7 +103,7 @@ function createVisibleItem(input: {
     if (rawValue === undefined) {
       return { itemId: input.itemId, fields: [] };
     }
-    const formatted = formatVisibleValue(rawValue, input.fieldTypes?.[fieldName]);
+    const formatted = formatVisibleOutputValue(rawValue, input.fieldTypes?.[fieldName]);
     if (formatted === undefined || formatted.trim().length === 0) {
       return { itemId: input.itemId, fields: [] };
     }
@@ -111,59 +113,17 @@ function createVisibleItem(input: {
 }
 
 function createVisibleField(name: string, rawValue: string, maxLength: number): ModelVisibleOutputField {
-  const value = redactSensitiveText(rawValue.trim());
-  const truncated = value.length > maxLength;
+  const value = redactSensitiveText(rawValue);
+  const truncated = truncateVisibleOutputValue(value, maxLength);
   return {
     name,
-    value: truncated
-      ? `${value.slice(0, Math.max(0, maxLength - TRUNCATED_MARKER.length))}${TRUNCATED_MARKER}`
-      : value,
-    truncated,
+    value: truncated.value,
+    truncated: truncated.truncated,
   };
-}
-
-function formatVisibleValue(value: unknown, fieldType?: ModelVisibleOutputFieldType): string | undefined {
-  if (fieldType === "string") {
-    return typeof value === "string" && value.trim().length > 0 ? value : undefined;
-  }
-  if (fieldType === "string_array") {
-    if (!Array.isArray(value)) {
-      return undefined;
-    }
-    const values = value
-      .filter((item): item is string => typeof item === "string")
-      .map((item) => item.trim())
-      .filter(Boolean);
-    return values.length > 0 ? values.join("; ") : undefined;
-  }
-  if (Array.isArray(value)) {
-    return value.map((item) => formatVisibleValue(item)).filter(Boolean).join("; ");
-  }
-  if (typeof value === "string") {
-    return value;
-  }
-  if (typeof value === "number" || typeof value === "boolean") {
-    return String(value);
-  }
-  return "";
 }
 
 function arrayItems(value: unknown): readonly unknown[] {
   return Array.isArray(value) ? value : [];
-}
-
-function isSensitiveFieldName(field: string): boolean {
-  const normalized = field.toLowerCase();
-  return (
-    normalized.includes("secret") ||
-    normalized.includes("apikey") ||
-    normalized.includes("api_key") ||
-    normalized.includes("token") ||
-    normalized.includes("prompt") ||
-    normalized.includes("reasoning") ||
-    normalized.includes("raw") ||
-    normalized.includes("error")
-  );
 }
 
 function rootletKindFromAdviceContractId(contractId: string): string | undefined {

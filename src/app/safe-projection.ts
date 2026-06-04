@@ -20,11 +20,8 @@ export function redactOrdinaryMarkdownFragment(value: string, maxLength = 1_200)
   const text = redactSensitiveText(
     sanitizeAssistantVisibleText(value, { preserveOuterWhitespace: true })
   )
-    .replace(/\r\n?/g, "\n")
-    .replace(/[^\S\n]+/g, " ");
-  if (text.trim().length === 0 && !text.includes("\n")) {
-    return "";
-  }
+    .replace(/\r\n?/g, "\n");
+  if (text.trim().length === 0) return text;
   return text.length <= maxLength ? text : `${text.slice(0, Math.max(0, maxLength - 1)).trimEnd()}...`;
 }
 
@@ -97,9 +94,10 @@ export function projectToolApprovalRequired(input: {
   readonly request: ToolCallRequest;
   readonly toolName: string;
   readonly operationType: string;
+  readonly actionSummary?: string;
 }): ToolSafeProjection {
   const diagnosticRef = `tool:${input.request.callId}:confirmation-required`;
-  const summary = `${toolDisplayName(input.toolName)}需要用户确认后才能执行。`;
+  const summary = input.actionSummary ?? toolDisplayName(input.toolName);
   return {
     uiSummary: summary,
     diagnosticRef,

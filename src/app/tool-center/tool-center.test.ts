@@ -93,14 +93,15 @@ test("ToolCenter uses explicit metadata for confirmation instead of platform rea
   assert.equal(create.status, "completed");
   assert.equal(deleteResult.status, "approval_required");
   assert.equal(execute.status, "approval_required");
-  assert.match(deleteResult.error ?? "", /需要用户确认/);
-  assert.match(execute.error ?? "", /需要用户确认/);
+  assert.equal(deleteResult.error, "等待确认：删除文件");
+  assert.equal(execute.error, "等待确认：运行命令");
   assert.equal(deleteResult.confirmationRequest?.confirmationId, "confirmation-call-delete");
   assert.equal(execute.confirmationRequest?.confirmationId, "confirmation-call-exec");
   assert.equal(deleteResult.confirmationRequest?.riskLevel, "high");
   assert.equal(deleteResult.confirmationRequest?.title, "删除文件");
-  assert.equal(deleteResult.confirmationRequest?.actionSummary.includes("删除当前工作区内的普通文件"), true);
+  assert.equal(deleteResult.confirmationRequest?.actionSummary, "删除文件");
   assert.equal(deleteResult.confirmationRequest?.actionSummary.includes("delete_file"), false);
+  assert.equal(deleteResult.projection?.uiSummary, "删除文件");
   assert.equal(creates, 1);
   assert.equal(deletes, 0);
   assert.equal(executes, 0);

@@ -23,6 +23,7 @@ import { createDesktopBasicToolRegistry } from "./basic-agent-runtime/builtin-to
 import type { UndergroundDemoAiInput } from "./underground-demo-summary.js";
 
 export type ModelRuntimeMode = "none" | "fake" | "openai-compatible" | "openai-responses";
+export type ModelRuntimeStreamingMode = "respect_profile" | "force_live";
 
 export type ModelRuntimeEnvironment = Readonly<Record<string, string | undefined>>;
 export type ModelRuntimeProviderFetch = FetchLike;
@@ -90,6 +91,7 @@ export function createModelRuntimeConfig(input: {
   readonly modelProvider?: Pick<SanitizedModelProviderConfig, "providerKind" | "protocolKind" | "profileId" | "openAI">;
   readonly fetch?: FetchLike;
   readonly onModelOutputDelta?: (delta: ModelOutputDelta) => void;
+  readonly streamingMode?: ModelRuntimeStreamingMode;
 }): ModelRuntimeConfig {
   const mode = input.mode ?? modelRuntimeModeForProfile(input.modelProvider) ?? "none";
 
@@ -131,6 +133,7 @@ export function createModelRuntimeConfig(input: {
       modelProvider: input.modelProvider,
       fetch: input.fetch,
       onModelOutputDelta: input.onModelOutputDelta,
+      streamingMode: input.streamingMode,
     });
   }
 
@@ -139,6 +142,7 @@ export function createModelRuntimeConfig(input: {
     modelProvider: input.modelProvider,
     fetch: input.fetch,
     onModelOutputDelta: input.onModelOutputDelta,
+    streamingMode: input.streamingMode,
   });
 }
 
@@ -161,6 +165,7 @@ function createOpenAICompatibleConfig(input: {
   readonly modelProvider?: Pick<SanitizedModelProviderConfig, "profileId" | "openAI">;
   readonly fetch?: FetchLike;
   readonly onModelOutputDelta?: (delta: ModelOutputDelta) => void;
+  readonly streamingMode?: ModelRuntimeStreamingMode;
 }): ModelRuntimeConfig {
   const apiKey = firstNonBlank(input.env.AGENTARBOR_MODEL_API_KEY, input.env.OPENAI_API_KEY);
   const model = firstNonBlank(input.env.AGENTARBOR_MODEL_NAME);
@@ -206,6 +211,7 @@ function createOpenAICompatibleConfig(input: {
           providerProfileId: providerProfileIdFromConfig(input.modelProvider?.profileId),
           fetch: input.fetch,
           stream: input.onModelOutputDelta !== undefined,
+          forceStreaming: input.streamingMode === "force_live" && input.onModelOutputDelta !== undefined,
           requestSettings: input.modelProvider?.openAI,
           onOutputDelta: input.onModelOutputDelta,
         }),
@@ -220,6 +226,7 @@ function createOpenAIResponsesConfig(input: {
   readonly modelProvider?: Pick<SanitizedModelProviderConfig, "openAI">;
   readonly fetch?: FetchLike;
   readonly onModelOutputDelta?: (delta: ModelOutputDelta) => void;
+  readonly streamingMode?: ModelRuntimeStreamingMode;
 }): ModelRuntimeConfig {
   const apiKey = firstNonBlank(input.env.AGENTARBOR_MODEL_API_KEY, input.env.OPENAI_API_KEY);
   const model = firstNonBlank(input.env.AGENTARBOR_MODEL_NAME);
@@ -264,6 +271,7 @@ function createOpenAIResponsesConfig(input: {
           model,
           fetch: input.fetch,
           stream: input.onModelOutputDelta !== undefined,
+          forceStreaming: input.streamingMode === "force_live" && input.onModelOutputDelta !== undefined,
           requestSettings: input.modelProvider?.openAI,
           onOutputDelta: input.onModelOutputDelta,
         }),

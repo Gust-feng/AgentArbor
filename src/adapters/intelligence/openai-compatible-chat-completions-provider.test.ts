@@ -155,10 +155,9 @@ test("OpenAI-compatible Chat Completions adapter streams safe output deltas", as
   assert.equal(response.textOutput, "{\"summary\":\"Streamed provider response.\"}");
   assert.equal(response.finishReason, "stop");
   assert.deepEqual(deltas, [
-    { purpose: "rootlet_candidate", delta: "{\"summary\":\"" },
     { purpose: "rootlet_candidate", delta: "Streamed provider response." },
-    { purpose: "rootlet_candidate", delta: "\"}" },
   ]);
+  assert.equal(JSON.stringify(deltas).includes("{\"summary\""), false);
   assert.equal(calls.length, 1);
   assert.equal(calls[0]?.body.stream, true);
   assert.equal(JSON.stringify(deltas).includes("sk-test-secret-token"), false);
@@ -277,6 +276,59 @@ test("OpenAI-compatible Chat adapter sends Kimi thinking as a provider extension
   assert.equal("reasoning_effort" in (calls[0]?.body ?? {}), false);
 });
 
+test("OpenAI-compatible Chat adapter streams Kimi reasoning chunks exactly", async () => {
+  const deltas: Array<{ kind: string | undefined; delta: string }> = [];
+  const fetch: FetchLike = async () => ({
+    ok: true,
+    status: 200,
+    body: sseChunks([
+      {
+        model: "kimi-k2.6",
+        choices: [{ delta: { reasoning_content: "The" }, finish_reason: null }],
+      },
+      {
+        model: "kimi-k2.6",
+        choices: [{ delta: { reasoning_content: " user is simply greeting" }, finish_reason: null }],
+      },
+      {
+        model: "kimi-k2.6",
+        choices: [{ delta: { content: "你好！" }, finish_reason: "stop" }],
+      },
+    ]),
+    json: async () => {
+      throw new Error("Streaming response should not be read through json().");
+    },
+  });
+  const provider = new OpenAICompatibleChatCompletionsProvider({
+    baseUrl: "https://api.moonshot.cn/v1",
+    apiKey: "sk-test-secret-token",
+    model: "kimi-k2.6",
+    providerProfileId: "moonshot",
+    fetch,
+    stream: true,
+    onOutputDelta: (delta) => {
+      deltas.push({ kind: delta.kind, delta: delta.delta });
+    },
+  });
+
+  const response = await provider.complete(createValidModelRequest({
+    outputContract: {
+      contractId: "test.text.v1",
+      outputKind: "explanation",
+      format: "text",
+    },
+  }));
+
+  assert.equal(response.status, "completed");
+  assert.equal(response.reasoningOutput?.content, "The user is simply greeting");
+  assert.equal(response.textOutput, "你好！");
+  assert.deepEqual(deltas, [
+    { kind: "reasoning", delta: "The" },
+    { kind: "reasoning", delta: " user is simply greeting" },
+    { kind: "output", delta: "你好！" },
+  ]);
+});
+
 test("OpenAI-compatible Chat adapter disables GLM thinking for stable OpenAI-compatible calls", async () => {
   const calls: { body: Record<string, unknown> }[] = [];
   const fetch: FetchLike = async (_url, init) => {
@@ -320,6 +372,62 @@ test("OpenAI-compatible Chat adapter disables GLM thinking for stable OpenAI-com
   assert.equal(calls[0]?.body.stream, undefined);
   assert.equal(calls[0]?.body.extra_body, undefined);
   assert.equal("reasoning_effort" in (calls[0]?.body ?? {}), false);
+});
+
+test("OpenAI-compatible Chat adapter force streams legacy GLM for live panel output", async () => {
+  const calls: { body: Record<string, unknown> }[] = [];
+  const deltas: Array<{ kind: string | undefined; delta: string }> = [];
+  const fetch: FetchLike = async (_url, init) => {
+    calls.push({ body: JSON.parse(init.body) as Record<string, unknown> });
+    return {
+      ok: true,
+      status: 200,
+      body: sseChunks([
+        {
+          model: "glm-4.5",
+          choices: [{ delta: { content: "第一段" }, finish_reason: null }],
+        },
+        {
+          model: "glm-4.5",
+          choices: [{ delta: { content: "第二段" }, finish_reason: "stop" }],
+        },
+      ]),
+      json: async () => {
+        throw new Error("Forced streaming response should not be read through json().");
+      },
+    };
+  };
+  const provider = new OpenAICompatibleChatCompletionsProvider({
+    baseUrl: "https://open.bigmodel.cn/api/paas/v4",
+    apiKey: "sk-test-secret-token",
+    model: "glm-4.5",
+    providerProfileId: "glm",
+    requestSettings: {
+      reasoningEffort: "high",
+    },
+    fetch,
+    stream: true,
+    forceStreaming: true,
+    onOutputDelta: (delta) => {
+      deltas.push({ kind: delta.kind, delta: delta.delta });
+    },
+  });
+
+  const response = await provider.complete(createValidModelRequest({
+    outputContract: {
+      contractId: "test.text.v1",
+      outputKind: "explanation",
+      format: "text",
+    },
+  }));
+
+  assert.equal(response.status, "completed");
+  assert.deepEqual(calls[0]?.body.thinking, { type: "disabled" });
+  assert.equal(calls[0]?.body.stream, true);
+  assert.deepEqual(deltas, [
+    { kind: "output", delta: "第一段" },
+    { kind: "output", delta: "第二段" },
+  ]);
 });
 
 test("OpenAI-compatible Chat adapter enables modern GLM thinking and streaming", async () => {

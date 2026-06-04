@@ -15,6 +15,7 @@ import { pendingModelOutputValidation } from "./validation.js";
 import {
   executeToolUseLoop,
   resumeToolUseLoopFromApproval,
+  resumeToolUseLoopFromConfirmationDecision,
 } from "./tool-use-loop.js";
 
 test("executeToolUseLoop executes one tool round and returns final model output", async () => {
@@ -870,6 +871,17 @@ test("resumeToolUseLoopFromApproval rejects the wrong confirmation id without ex
     request
   );
 
+  assert.notEqual(paused.pendingApproval?.confirmationRequest, undefined);
+  const richPendingApproval = {
+    ...paused.pendingApproval!,
+    confirmationRequest: {
+      ...paused.pendingApproval!.confirmationRequest!,
+      title: "写入文件",
+      actionSummary: "写入文件：src/app.ts",
+      affectedResources: ["src/app.ts"],
+    },
+  };
+
   const resumed = await resumeToolUseLoopFromApproval(
     {
       intelligenceChannel: channel,
@@ -881,10 +893,14 @@ test("resumeToolUseLoopFromApproval rejects the wrong confirmation id without ex
       approvedConfirmationIds: ["confirmation-other"],
     },
     request,
-    paused.pendingApproval!
+    richPendingApproval
   );
 
   assert.equal(resumed.stoppedReason, "approval_required");
+  const confirmation = resumed.toolCalls.find((call) => call.status === "approval_required")?.confirmationRequest;
+  assert.equal(confirmation?.title, "写入文件");
+  assert.equal(confirmation?.actionSummary, "写入文件：src/app.ts");
+  assert.deepEqual(confirmation?.affectedResources, ["src/app.ts"]);
   assert.equal(center.getCallCount(), 0);
   assert.equal(channel.requests.length, 1);
 });
@@ -943,6 +959,109 @@ test("resumeToolUseLoopFromApproval requires the matching confirmation before co
   assert.equal(resumed.stoppedReason, "completed");
   assert.equal(resumed.finalOutput.textOutput, "Final answer after approved write.");
   assert.equal(center.getCallCount(), 1);
+});
+
+test("resumeToolUseLoopFromConfirmationDecision returns denial as model-visible tool feedback", async () => {
+  const eventLog = new InMemoryEventLog();
+  const channel = new SequenceIntelligenceChannel([
+    toolCallResponse("model-request-test", "call-write", "write_file"),
+    textResponse("model-request-final", "我不会执行写入，改为说明可选方案。"),
+  ]);
+  const center = new TestToolBroker();
+  center.register("write_file", async () => ({ ok: true }), "read-write");
+  const request = createValidModelRequest();
+  const paused = await executeToolUseLoop(
+    {
+      intelligenceChannel: channel,
+      toolCenter: center,
+      callerAgentId: "agent-test",
+      traceId: "trace-test",
+      goalId: "goal-test",
+      allowedTools: ["write_file"],
+      publishToolEvent: (message) => eventLog.append(message),
+    },
+    request
+  );
+
+  const resumed = await resumeToolUseLoopFromConfirmationDecision(
+    {
+      intelligenceChannel: channel,
+      toolCenter: center,
+      callerAgentId: "agent-test",
+      traceId: "trace-test",
+      goalId: "goal-test",
+      allowedTools: ["write_file"],
+      publishToolEvent: (message) => eventLog.append(message),
+    },
+    request,
+    paused.pendingApproval!,
+    { confirmationId: "confirmation-call-write", decision: "deny" }
+  );
+
+  assert.equal(resumed.stoppedReason, "completed");
+  assert.equal(resumed.finalOutput.textOutput, "我不会执行写入，改为说明可选方案。");
+  assert.equal(center.getCallCount(), 0);
+  assert.equal(resumed.toolCalls.at(-1)?.status, "cancelled");
+  assert.equal(channel.requests.length, 2);
+  const toolMessage = channel.requests[1]?.sanitizedMessages.at(-1);
+  assert.equal(toolMessage?.role, "tool");
+  assert.equal(toolMessage?.content.includes("用户拒绝了本次工具执行"), true);
+  assert.deepEqual(eventLog.types(), ["tool.requested", "user_approval.requested", "tool.failed"]);
+});
+
+test("resumeToolUseLoopFromConfirmationDecision returns guidance and skipped batch calls to the model", async () => {
+  const channel = new SequenceIntelligenceChannel([
+    {
+      ...completedResponse("model-request-test", undefined),
+      toolCalls: [
+        { callId: "call-shell", toolName: "shell_command", input: { command: "pnpm test" } },
+        { callId: "call-read", toolName: "read_file", input: { path: "README.md" } },
+      ],
+      finishReason: "tool_call",
+    },
+    textResponse("model-request-final", "收到指导，我会改用安全说明。"),
+  ]);
+  const center = new TestToolBroker();
+  center.register("shell_command", async () => ({ ok: true }), "execute");
+  center.register("read_file", async () => ({ ok: true }), "read-only");
+  const request = createValidModelRequest();
+  const paused = await executeToolUseLoop(
+    {
+      intelligenceChannel: channel,
+      toolCenter: center,
+      callerAgentId: "agent-test",
+      traceId: "trace-test",
+      goalId: "goal-test",
+      allowedTools: ["shell_command", "read_file"],
+    },
+    request
+  );
+
+  const resumed = await resumeToolUseLoopFromConfirmationDecision(
+    {
+      intelligenceChannel: channel,
+      toolCenter: center,
+      callerAgentId: "agent-test",
+      traceId: "trace-test",
+      goalId: "goal-test",
+      allowedTools: ["shell_command", "read_file"],
+    },
+    request,
+    paused.pendingApproval!,
+    {
+      confirmationId: "confirmation-call-shell",
+      decision: "guidance",
+      guidance: "不要执行命令，改为说明需要哪些材料。sk-guidance-secret-token",
+    }
+  );
+
+  assert.equal(resumed.stoppedReason, "completed");
+  assert.equal(center.getCallCount(), 0);
+  assert.deepEqual(resumed.toolCalls.map((call) => call.status), ["failed", "cancelled"]);
+  assert.equal(channel.requests[1]?.sanitizedMessages.filter((message) => message.role === "tool").length, 2);
+  const requestText = JSON.stringify(channel.requests[1]?.sanitizedMessages);
+  assert.equal(requestText.includes("sk-guidance-secret-token"), false);
+  assert.equal(requestText.includes("[redacted-secret]"), true);
 });
 
 function createValidModelRequest(overrides: Partial<ModelRequest> = {}): ModelRequest {

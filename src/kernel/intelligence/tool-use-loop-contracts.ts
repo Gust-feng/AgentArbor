@@ -57,6 +57,7 @@ export type ToolUseLoopContextMaintenanceResult =
 export type ToolUseLoopPendingApproval = {
   readonly confirmationId: string;
   readonly pendingToolCall: ToolCallRequest;
+  readonly confirmationRequest?: NonNullable<ToolCallResult["confirmationRequest"]>;
   readonly remainingToolCallsAfterApproval: readonly ToolCallRequest[];
   readonly messagesBeforeToolCall: readonly ModelMessage[];
   readonly assistantMessage: ModelMessage;
@@ -65,6 +66,12 @@ export type ToolUseLoopPendingApproval = {
   readonly modelRounds: number;
   readonly rounds: number;
   readonly requestId: string;
+};
+
+export type ToolUseLoopConfirmationDecision = {
+  readonly confirmationId: string;
+  readonly decision: "deny" | "guidance";
+  readonly guidance?: string;
 };
 
 export type ToolUseLoopResult = {

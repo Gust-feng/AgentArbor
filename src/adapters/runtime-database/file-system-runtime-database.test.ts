@@ -164,6 +164,6 @@ test("FileSystemRuntimeDatabase persists a safe Lite Profile run snapshot", asyn
     assert.deepEqual(conversations.map((item) => item.conversationId), ["conversation-0001"]);
     assert.equal(path.resolve(snapshot?.run.runHome ?? "").startsWith(path.resolve(paths.runtimeHome)), true);
   } finally {
-    await fs.rm(root, { recursive: true, force: true });
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   }
 });

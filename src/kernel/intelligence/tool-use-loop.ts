@@ -9,6 +9,7 @@ import {
   cloneToolResults,
 } from "./tool-use-loop-cloning.js";
 import type {
+  ToolUseLoopConfirmationDecision,
   ToolUseLoopContextMaintenanceResult,
   ToolUseLoopOptions,
   ToolUseLoopPendingApproval,
@@ -19,6 +20,7 @@ import {
   executeSingleToolCall,
   executeToolCalls,
   modelVisibleToolDefinitions,
+  publishToolResultEvent,
 } from "./tool-use-loop-execution.js";
 import {
   assistantToolCallMessage,
@@ -29,10 +31,13 @@ import {
   approvalRequiredResultFromPending,
   approvalStillRequiredModelResponse,
   contextOverflowLoopResult,
+  confirmationDecisionSkippedToolResult,
+  confirmationDecisionToolResult,
   outOfFuelLoopResult,
 } from "./tool-use-loop-results.js";
 
 export type {
+  ToolUseLoopConfirmationDecision,
   ToolUseLoopContextMaintainer,
   ToolUseLoopContextMaintenanceResult,
   ToolUseLoopOptions,
@@ -61,6 +66,50 @@ export async function resumeToolUseLoopFromApproval(
   pendingApproval: ToolUseLoopPendingApproval
 ): Promise<ToolUseLoopResult> {
   return resumeApprovalCore(options, initialRequest, pendingApproval);
+}
+
+export async function resumeToolUseLoopFromConfirmationDecision(
+  options: ToolUseLoopOptions,
+  initialRequest: ModelRequest,
+  pendingApproval: ToolUseLoopPendingApproval,
+  decision: ToolUseLoopConfirmationDecision
+): Promise<ToolUseLoopResult> {
+  if (decision.confirmationId !== pendingApproval.confirmationId) {
+    return resumeApprovalCore(options, initialRequest, pendingApproval);
+  }
+  if (options.abortSignal?.aborted === true) {
+    return abortedLoopResult(
+      initialRequest,
+      pendingApproval.toolCallsBeforeApproval,
+      pendingApproval.modelRounds,
+      pendingApproval.rounds
+    );
+  }
+
+  const decisionResult = confirmationDecisionToolResult(pendingApproval.pendingToolCall, decision);
+  const skippedResults = pendingApproval.remainingToolCallsAfterApproval.map((request) =>
+    confirmationDecisionSkippedToolResult(request, decision)
+  );
+  const decisionRoundResults = [decisionResult, ...skippedResults];
+  const context = createToolExecutionContext(options);
+  decisionRoundResults.forEach((result) => publishToolResultEvent(options, result, context));
+  const toolCalls = [...pendingApproval.toolCallsBeforeApproval, ...decisionRoundResults];
+  return continueToolUseLoopAfterToolResults({
+    options,
+    initialRequest,
+    messages: [
+      ...cloneMessages(pendingApproval.messagesBeforeToolCall),
+      cloneModelMessage(pendingApproval.assistantMessage),
+      ...cloneToolResults([
+        ...pendingApproval.completedToolResults,
+        ...decisionRoundResults,
+      ]).map(toolResultMessage),
+    ],
+    toolCalls,
+    modelRounds: pendingApproval.modelRounds,
+    rounds: pendingApproval.rounds + 1,
+    requestId: pendingApproval.requestId,
+  });
 }
 
 async function resumeApprovalCore(
@@ -132,6 +181,7 @@ async function resumeApprovalCore(
           ...pendingApproval,
           confirmationId: remaining.pendingApproval.confirmationId,
           pendingToolCall: remaining.pendingApproval.pendingToolCall,
+          confirmationRequest: remaining.pendingApproval.confirmationRequest,
           remainingToolCallsAfterApproval: remaining.pendingApproval.remainingToolCallsAfterApproval,
         }),
         toolCalls,
@@ -141,6 +191,10 @@ async function resumeApprovalCore(
         pendingApproval: {
           confirmationId: remaining.pendingApproval.confirmationId,
           pendingToolCall: cloneToolCallRequest(remaining.pendingApproval.pendingToolCall),
+          confirmationRequest:
+            remaining.pendingApproval.confirmationRequest === undefined
+              ? undefined
+              : globalThis.structuredClone(remaining.pendingApproval.confirmationRequest),
           remainingToolCallsAfterApproval: remaining.pendingApproval.remainingToolCallsAfterApproval.map(cloneToolCallRequest),
           messagesBeforeToolCall: cloneMessages(pendingApproval.messagesBeforeToolCall),
           assistantMessage: cloneModelMessage(pendingApproval.assistantMessage),
@@ -259,6 +313,10 @@ async function continueToolUseLoopAfterToolResults(input: {
         pendingApproval: {
           confirmationId: roundResult.pendingApproval.confirmationId,
           pendingToolCall: cloneToolCallRequest(roundResult.pendingApproval.pendingToolCall),
+          confirmationRequest:
+            roundResult.pendingApproval.confirmationRequest === undefined
+              ? undefined
+              : globalThis.structuredClone(roundResult.pendingApproval.confirmationRequest),
           remainingToolCallsAfterApproval: roundResult.pendingApproval.remainingToolCallsAfterApproval.map(cloneToolCallRequest),
           messagesBeforeToolCall: cloneMessages(messages),
           assistantMessage: assistantToolCallMessage(response, roundResult.pendingApproval.requestsForAssistantMessage),

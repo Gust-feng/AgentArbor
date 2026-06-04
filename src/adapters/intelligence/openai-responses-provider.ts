@@ -33,6 +33,7 @@ export type OpenAIResponsesProviderOptions = {
   readonly model: string;
   readonly fetch?: FetchLike;
   readonly stream?: boolean;
+  readonly forceStreaming?: boolean;
   readonly requestSettings?: OpenAIModelRequestSettings;
   readonly onOutputDelta?: (delta: ModelOutputDelta) => void;
 };
@@ -47,6 +48,7 @@ export class OpenAIResponsesProvider implements ModelProvider {
   private readonly apiKey: string;
   private readonly fetchImpl?: FetchLike;
   private readonly stream: boolean;
+  private readonly forceStreaming: boolean;
   private readonly requestSettings?: OpenAIModelRequestSettings;
   private readonly onOutputDelta?: (delta: ModelOutputDelta) => void;
 
@@ -57,6 +59,7 @@ export class OpenAIResponsesProvider implements ModelProvider {
     this.model = options.model;
     this.fetchImpl = options.fetch;
     this.stream = options.stream ?? false;
+    this.forceStreaming = options.forceStreaming === true;
     this.requestSettings = options.requestSettings;
     this.onOutputDelta = options.onOutputDelta;
   }
@@ -84,7 +87,9 @@ export class OpenAIResponsesProvider implements ModelProvider {
         fetch: toOpenAIFetch(fetchImpl),
         maxRetries: 0,
       });
-      const stream = configuredOpenAIStream(this.stream, this.requestSettings);
+      const stream = configuredOpenAIStream(this.stream, this.requestSettings, {
+        forceStreaming: this.forceStreaming,
+      });
       const requestBody = buildResponsesRequestBody(request, this.model, stream, this.requestSettings);
 
       if (stream) {

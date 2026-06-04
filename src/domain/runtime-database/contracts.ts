@@ -22,6 +22,13 @@ export type RuntimeRunStatus =
   | "cancelled"
   | "blocked";
 
+export type RuntimeConversationStatus =
+  | "idle"
+  | Extract<
+      RuntimeRunStatus,
+      "pending" | "running" | "approval_needed" | "needs_input" | "completed" | "failed" | "cancelled" | "blocked"
+    >;
+
 export type RuntimeWorkspaceRecord = {
   readonly workspaceId: string;
   readonly kind: "local_directory";
@@ -54,7 +61,9 @@ export type RuntimeConversationRecord = {
   readonly conversationId: string;
   readonly title: string;
   readonly preview: string;
-  readonly status: "idle" | "running" | "completed" | "failed";
+  readonly currentAction?: string;
+  readonly nextStep?: string;
+  readonly status: RuntimeConversationStatus;
   readonly activeRunId?: string;
   readonly latestRunId?: string;
   readonly requiresUserAction?: boolean;

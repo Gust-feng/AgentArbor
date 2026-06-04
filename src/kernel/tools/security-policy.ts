@@ -6,7 +6,7 @@ import type {
   ToolSecurityDecision,
   ToolSecurityEvaluationContext,
 } from "../../domain/tools/index.js";
-import { toolDisplayName, toolPresentationForDefinition } from "../../domain/tools/index.js";
+import { toolPresentationForDefinition } from "../../domain/tools/index.js";
 import { nowIso } from "../id.js";
 import { redactOrdinaryToolText } from "./tool-result-envelope.js";
 
@@ -31,7 +31,6 @@ export function evaluateToolCallSecurity(input: {
       request: input.request,
       definition: input.definition,
       metadata: input.metadata,
-      reason: `${toolDisplayName(input.definition.name, input.metadata)}需要用户确认。`,
     });
   }
 
@@ -63,21 +62,28 @@ function approvalDecision(input: {
   readonly request: ToolCallRequest;
   readonly definition: ToolDefinition;
   readonly metadata: ToolDefinitionMetadata;
-  readonly reason: string;
 }): Extract<ToolSecurityDecision, { readonly decision: "approval_required" }> {
   const presentation = toolPresentationForDefinition(input.definition);
+  const affectedResources = affectedResourcesFromInput(input.request.input);
+  const actionSummary = redactOrdinaryToolText(
+    confirmationActionSummary(presentation.displayName, affectedResources),
+    500
+  );
   return {
     decision: "approval_required",
-    reason: input.reason,
+    reason: `等待确认：${actionSummary}`,
     title: presentation.displayName,
-    actionSummary: redactOrdinaryToolText(
-      presentation.displayDescription,
-      500
-    ),
-    affectedResources: affectedResourcesFromInput(input.request.input),
+    actionSummary,
+    affectedResources,
     riskLevel: input.metadata.riskLevel,
     sourceRefs: [`tool:${input.request.callId}`],
   };
+}
+
+function confirmationActionSummary(displayName: string, affectedResources: readonly string[]): string {
+  return affectedResources.length === 0
+    ? displayName
+    : `${displayName}：${affectedResources.join("、")}`;
 }
 
 function evaluateUrlSecurity(request: ToolCallRequest): ToolSecurityDecision | undefined {

@@ -176,6 +176,7 @@ function approvalRequiredToolResult(
       request,
       toolName: request.toolName,
       operationType: "confirmation_required",
+      actionSummary: decision.actionSummary,
     }),
     confirmationRequest,
   };

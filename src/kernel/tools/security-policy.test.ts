@@ -101,9 +101,10 @@ test("tool security policy gates explicit confirmation tools unless exact confir
   assert.equal(confirmation.confirmationId, "confirmation-call-shell");
   assert.equal(confirmation.resumeAvailability, "live");
   assert.equal(confirmation.title, "执行 Shell");
+  assert.equal(confirmation.actionSummary, "执行 Shell：pnpm test");
   assert.equal(confirmation.actionSummary.includes("请求执行执行操作"), false);
   assert.equal(confirmation.actionSummary.includes("需要你确认后继续"), false);
-  assert.equal(confirmation.actionSummary.includes("在工作区内执行 Shell 命令"), true);
+  assert.equal(confirmation.actionSummary.includes("在工作区内执行 Shell 命令"), false);
 });
 
 test("tool security policy does not add Windows confirmation for ordinary create and edit tools", () => {

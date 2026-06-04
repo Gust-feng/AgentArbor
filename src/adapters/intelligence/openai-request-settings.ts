@@ -2,9 +2,18 @@ import type { OpenAIModelRequestSettings } from "../../domain/config/index.js";
 
 export function configuredOpenAIStream(
   requestedStream: boolean,
-  settings: OpenAIModelRequestSettings | undefined
+  settings: OpenAIModelRequestSettings | undefined,
+  options: {
+    readonly forceStreaming?: boolean;
+  } = {}
 ): boolean {
-  return requestedStream && settings?.stream !== false;
+  if (!requestedStream) {
+    return false;
+  }
+  if (options.forceStreaming === true) {
+    return true;
+  }
+  return settings?.stream !== false;
 }
 
 export function configuredOpenAIOutputTokenLimit(

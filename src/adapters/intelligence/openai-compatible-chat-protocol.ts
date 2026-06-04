@@ -160,7 +160,7 @@ export function decodeOpenAICompatibleChatMessage(input: {
     textContent: split.textContent,
     rawContent,
     reasoningContent,
-    reasoningSource: explicitReasoning.length > 0 ? "openai_chat_reasoning_content" : "provider_reasoning_content",
+    reasoningSource: explicitReasoning.trim().length > 0 ? "openai_chat_reasoning_content" : "provider_reasoning_content",
   };
 }
 
@@ -338,8 +338,8 @@ function reasoningDetailItemText(value: unknown): string {
 
 function joinReasoningText(...parts: readonly string[]): string {
   return parts
-    .map((part) => part.replace(/\r\n/g, "\n").trim())
-    .filter((part) => part.length > 0)
+    .map((part) => part.replace(/\r\n/g, "\n"))
+    .filter((part) => part.trim().length > 0)
     .join("\n\n");
 }
 

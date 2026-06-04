@@ -24,6 +24,8 @@ import { createId, nowIso } from "../id.js";
 import {
   executeToolUseLoop,
   resumeToolUseLoopFromApproval,
+  resumeToolUseLoopFromConfirmationDecision,
+  type ToolUseLoopConfirmationDecision,
   type ToolUseLoopPendingApproval,
   type ToolUseLoopContextMaintainer,
   type ToolUseLoopResult,
@@ -68,6 +70,12 @@ export type AgentTurnPendingApproval = {
 export type AgentTurnResumeInput = {
   readonly pendingApproval: AgentTurnPendingApproval;
   readonly approvedConfirmationIds: readonly string[];
+  readonly abortSignal?: AbortSignal;
+};
+
+export type AgentTurnConfirmationDecisionResumeInput = {
+  readonly pendingApproval: AgentTurnPendingApproval;
+  readonly decision: ToolUseLoopConfirmationDecision;
   readonly abortSignal?: AbortSignal;
 };
 
@@ -195,6 +203,26 @@ export class AgentTurnRuntime {
     });
   }
 
+  async resumeAutonomousWithConfirmationDecision(
+    input: AgentTurnConfirmationDecisionResumeInput
+  ): Promise<AgentTurnRuntimeResult> {
+    return this.resumeWithConfirmationDecisionCore(input, {
+      blockedToolNames: ORDINARY_AGENT_INTERNAL_TOOL_NAMES,
+      exposeNonFinalOutput: false,
+      enforceRoundLimits: false,
+    });
+  }
+
+  async resumeWithConfirmationDecision(
+    input: AgentTurnConfirmationDecisionResumeInput
+  ): Promise<AgentTurnRuntimeResult> {
+    return this.resumeWithConfirmationDecisionCore(input, {
+      blockedToolNames: [],
+      exposeNonFinalOutput: true,
+      enforceRoundLimits: true,
+    });
+  }
+
   private async resumeCore(input: AgentTurnResumeInput, semantics: AgentTurnRuntimeSemantics): Promise<AgentTurnRuntimeResult> {
     const policy = normalizePolicy(input.pendingApproval.policy);
     try {
@@ -216,6 +244,45 @@ export class AgentTurnRuntime {
         },
         input.pendingApproval.modelRequest,
         input.pendingApproval.toolLoop
+      );
+      return toAgentTurnRuntimeResult(policy, loop, input.pendingApproval.modelRequest, semantics);
+    } catch {
+      return {
+        status: "failed",
+        stoppedReason: "runtime_error",
+        fallback: policy.fallback,
+        modelRequestId: input.pendingApproval.modelRequest.requestId,
+        toolCalls: [],
+        modelRounds: 0,
+        toolRounds: 0,
+      };
+    }
+  }
+
+  private async resumeWithConfirmationDecisionCore(
+    input: AgentTurnConfirmationDecisionResumeInput,
+    semantics: AgentTurnRuntimeSemantics
+  ): Promise<AgentTurnRuntimeResult> {
+    const policy = normalizePolicy(input.pendingApproval.policy);
+    try {
+      const loop = await resumeToolUseLoopFromConfirmationDecision(
+        {
+          intelligenceChannel: this.options.intelligenceChannel,
+          toolCenter: this.options.toolCenter ?? NO_TOOL_BROKER,
+          callerAgentId: policy.callerAgentId,
+          traceId: policy.traceId,
+          goalId: policy.goalId,
+          maxModelRounds: semantics.enforceRoundLimits ? policy.maxModelRounds : undefined,
+          maxToolRounds: semantics.enforceRoundLimits ? policy.maxToolRounds : undefined,
+          allowedTools: policy.allowedTools,
+          blockedToolNames: semantics.blockedToolNames,
+          publishToolEvent: this.options.publishToolEvent,
+          maintainContext: this.options.maintainContext,
+          abortSignal: input.abortSignal,
+        },
+        input.pendingApproval.modelRequest,
+        input.pendingApproval.toolLoop,
+        input.decision
       );
       return toAgentTurnRuntimeResult(policy, loop, input.pendingApproval.modelRequest, semantics);
     } catch {

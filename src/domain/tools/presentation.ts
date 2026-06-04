@@ -59,7 +59,7 @@ const BUILTIN_TOOL_PRESENTATION: Readonly<Record<string, ToolPresentationSeed>> 
   },
   delete_file: {
     displayName: "删除文件",
-    displayDescription: "删除当前工作区内的普通文件，执行前需要用户确认。",
+    displayDescription: "删除工作区内指定文件。",
   },
   write_file: {
     displayName: "写入文件",
@@ -67,11 +67,11 @@ const BUILTIN_TOOL_PRESENTATION: Readonly<Record<string, ToolPresentationSeed>> 
   },
   run_command: {
     displayName: "运行命令",
-    displayDescription: "在工作区内运行命令，执行前需要用户确认。",
+    displayDescription: "在工作区内运行命令。",
   },
   shell_command: {
     displayName: "执行 Shell",
-    displayDescription: "在工作区内执行 Shell 命令，执行前需要用户确认。",
+    displayDescription: "在工作区内执行 Shell 命令。",
   },
 };
 

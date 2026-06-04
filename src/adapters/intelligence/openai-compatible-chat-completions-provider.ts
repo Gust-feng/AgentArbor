@@ -39,6 +39,7 @@ export type OpenAICompatibleChatCompletionsProviderOptions = {
   readonly providerProfileId?: ProviderProtocolProfileId;
   readonly fetch?: FetchLike;
   readonly stream?: boolean;
+  readonly forceStreaming?: boolean;
   readonly requestSettings?: OpenAIModelRequestSettings;
   readonly onOutputDelta?: (delta: ModelOutputDelta) => void;
 };
@@ -54,6 +55,7 @@ export class OpenAICompatibleChatCompletionsProvider implements ModelProvider {
   private readonly dialect: OpenAICompatibleChatDialect;
   private readonly fetchImpl?: FetchLike;
   private readonly stream: boolean;
+  private readonly forceStreaming: boolean;
   private readonly requestSettings?: OpenAIModelRequestSettings;
   private readonly onOutputDelta?: (delta: ModelOutputDelta) => void;
 
@@ -68,7 +70,8 @@ export class OpenAICompatibleChatCompletionsProvider implements ModelProvider {
       model: this.model,
     });
     this.fetchImpl = options.fetch;
-    this.stream = (options.stream ?? false) && this.dialect.supportsStreaming;
+    this.forceStreaming = options.forceStreaming === true;
+    this.stream = (options.stream ?? false) && (this.dialect.supportsStreaming || this.forceStreaming);
     this.requestSettings = options.requestSettings;
     this.onOutputDelta = options.onOutputDelta;
   }
@@ -96,7 +99,9 @@ export class OpenAICompatibleChatCompletionsProvider implements ModelProvider {
         fetch: toOpenAIFetch(fetchImpl),
         maxRetries: 0,
       });
-      const stream = configuredOpenAIStream(this.stream, this.requestSettings);
+      const stream = configuredOpenAIStream(this.stream, this.requestSettings, {
+        forceStreaming: this.forceStreaming,
+      });
       const requestBody = buildOpenAICompatibleChatRequestBody({
         request,
         model: this.model,

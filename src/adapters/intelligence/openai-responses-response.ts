@@ -8,6 +8,7 @@ import type { ToolCallRequest } from "../../domain/tools/index.js";
 import { createId, nowIso } from "../../kernel/id.js";
 import { createFailedModelResponse } from "../../kernel/intelligence/failures.js";
 import { pendingModelOutputValidation } from "../../kernel/intelligence/validation.js";
+import { createVisibleOutputStreamProjector } from "../../kernel/intelligence/visible-output-stream.js";
 import { modelReasoningOutputFromText } from "./model-reasoning-output.js";
 import {
   asRecord,
@@ -79,6 +80,7 @@ export async function normalizeOpenAIResponsesStreamResponse(input: {
   let deltaIndex = 0;
   let reasoningContent = "";
   let reasoningDeltaIndex = 0;
+  const visibleOutputStream = createVisibleOutputStreamProjector(input.request.outputContract);
   const toolCallBuilders = new Map<number, { callId?: string; name?: string; arguments: string }>();
 
   try {
@@ -114,16 +116,13 @@ export async function normalizeOpenAIResponsesStreamResponse(input: {
         const delta = typeof event.delta === "string" ? event.delta : "";
         if (delta.length > 0) {
           textContent += delta;
-          deltaIndex += 1;
-          input.emitDelta?.({
-            kind: "output",
-            requestId: input.request.requestId,
-            purpose: input.request.purpose,
+          deltaIndex = emitVisibleOutputDelta({
+            emitDelta: input.emitDelta,
+            request: input.request,
             providerId: input.providerId,
             model,
-            delta,
+            delta: visibleOutputStream.push(delta),
             index: deltaIndex,
-            createdAt: nowIso(),
           });
         }
         continue;
@@ -263,6 +262,31 @@ export async function normalizeOpenAIResponsesStreamResponse(input: {
     validation: pendingModelOutputValidation(),
     completedAt: nowIso(),
   };
+}
+
+function emitVisibleOutputDelta(input: {
+  readonly emitDelta?: (delta: ModelOutputDelta) => void;
+  readonly request: ModelRequest;
+  readonly providerId: string;
+  readonly model: string;
+  readonly delta: string;
+  readonly index: number;
+}): number {
+  if (input.delta.length === 0) {
+    return input.index;
+  }
+  const nextIndex = input.index + 1;
+  input.emitDelta?.({
+    kind: "output",
+    requestId: input.request.requestId,
+    purpose: input.request.purpose,
+    providerId: input.providerId,
+    model: input.model,
+    delta: input.delta,
+    index: nextIndex,
+    createdAt: nowIso(),
+  });
+  return nextIndex;
 }
 
 function parseOutputItems(output: unknown[]): {

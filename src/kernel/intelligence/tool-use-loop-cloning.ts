@@ -6,6 +6,8 @@ export function clonePendingApproval(pendingApproval: ToolUseLoopPendingApproval
   return {
     confirmationId: pendingApproval.confirmationId,
     pendingToolCall: cloneToolCallRequest(pendingApproval.pendingToolCall),
+    confirmationRequest:
+      pendingApproval.confirmationRequest === undefined ? undefined : globalThis.structuredClone(pendingApproval.confirmationRequest),
     remainingToolCallsAfterApproval: pendingApproval.remainingToolCallsAfterApproval.map(cloneToolCallRequest),
     messagesBeforeToolCall: cloneMessages(pendingApproval.messagesBeforeToolCall),
     assistantMessage: cloneModelMessage(pendingApproval.assistantMessage),

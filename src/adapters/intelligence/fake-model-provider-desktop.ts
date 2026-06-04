@@ -157,7 +157,7 @@ export function fakeWorkSessionDecisionOutput(request: ModelRequest): Record<str
       action: "produce_artifact",
       childSpecs: [],
       decisionSummary:
-        "父层综合已经完成，可以生成可审阅报告。",
+        "材料已经汇总完成，可以生成可审阅报告。",
       uncertainty:
         "这是测试模型的稳定决策；真实运行仍需要检查综合质量。",
       confidence: 0.76,
@@ -168,7 +168,7 @@ export function fakeWorkSessionDecisionOutput(request: ModelRequest): Record<str
       action: "synthesize",
       childSpecs: [],
       decisionSummary:
-        "局部材料已经返回，需要先综合冲突和证据。",
+        "局部材料已经返回，需要先汇总冲突和依据。",
       uncertainty:
         "这是测试模型的稳定决策；真实运行应比较证据和冲突后再综合。",
       confidence: 0.75,
@@ -246,9 +246,9 @@ export function fakeWorkSessionChildMaterialOutput(request: ModelRequest): Recor
   return {
     summary: `${roleLabel} 认为 AgentArbor 需要围绕 ${goalAnchor} 建立真实工作会话路径。`,
     findings: [
-      `当前桌面路径不应继续把固定地下流水线包装成 ${goalAnchor} 的产品主线。`,
-      "面板应展示最终报告、证据引用、不确定性和下一步，而不是强制展示内部方案包成功态。",
-      "任何局部材料进入最终结果前，都必须先经过父层综合。",
+      `当前桌面路径不应继续把固定流程包装成 ${goalAnchor} 的产品主线。`,
+      "面板应展示可读结果、不确定性和下一步，而不是强制展示内部成功态。",
+      "任何局部材料进入最终结果前，都必须先经过汇总判断。",
     ],
     evidenceRefs: [
       "code:src/app/panel-server.ts",
@@ -257,7 +257,7 @@ export function fakeWorkSessionChildMaterialOutput(request: ModelRequest): Recor
       `objective:${truncate(objective, 48)}`,
     ],
     uncertainty:
-      "这是测试模型的局部材料，必须经过父层综合后才可成为最终报告。",
+      "这是测试模型的局部材料，必须经过汇总判断后才可成为最终报告。",
     confidence: 0.73,
   };
 }
@@ -265,17 +265,17 @@ export function fakeWorkSessionChildMaterialOutput(request: ModelRequest): Recor
 export function fakeWorkSessionSynthesisOutput(request: ModelRequest): Record<string, unknown> {
   const goalAnchor = stripTrailingSentencePunctuation(fakeGoalAnchorFromRequest(request));
   const reportTitle = buildFakeReportTitle(goalAnchor);
-  const summary = `父层综合已为“${goalAnchor}”形成可审阅结果。`;
+  const summary = `已为“${goalAnchor}”形成可审阅结果。`;
   return {
     reportTitle,
     keyFindings: [
-      `任务目标“${goalAnchor}”已经拆成可检查的子问题并完成父层综合。`,
-      "桌面主线已经把局部材料与父层判断分离，避免局部结论直接冒充最终结果。",
-      "结果输出已包含结论、证据和不确定性，适合继续进入执行或追问。",
+      `任务目标“${goalAnchor}”已经拆成可检查的问题并完成汇总。`,
+      "工作链路把局部材料与最终判断分离，避免局部结论直接冒充最终结果。",
+      "结果输出已包含结论、不确定性和后续动作，适合继续进入执行或追问。",
     ],
     recommendations: [
       "优先确认结果是否满足当前任务验收口径，再决定继续扩展还是收敛执行。",
-      "保持“局部材料 -> 父层综合 -> 最终结果”链路，不让子路径绕过收敛门。",
+      "保持“局部材料 -> 汇总判断 -> 最终结果”链路，不让子路径绕过收敛门。",
       "对关键结论补一轮真实模型或真实工具验证，避免测试模式偏差。",
     ],
     evidenceRefs: [

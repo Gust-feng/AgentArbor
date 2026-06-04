@@ -4,6 +4,7 @@ import type {
   CapabilitySkillCatalogItem,
   CapabilityToolCatalogItem,
 } from "../domain/config/index.js";
+import type { SkillDefinition } from "../domain/basic-agent/index.js";
 import { createId, nowIso } from "../kernel/id.js";
 import type { ConfigCenter } from "./config-center.js";
 import { isKnownModel, resolveModelCapabilities } from "./model-capability-registry.js";
@@ -23,9 +24,46 @@ export type CapabilityCenterOptions = {
 };
 
 export class CapabilityCenter {
+  private skillsPromise?: Promise<readonly SkillDefinition[]>;
+  private snapshotPromise?: Promise<BasicAgentCapabilitySnapshot>;
+
   constructor(private readonly options: CapabilityCenterOptions) {}
 
+  invalidate(): void {
+    this.skillsPromise = undefined;
+    this.snapshotPromise = undefined;
+  }
+
+  async listSkills(): Promise<readonly SkillDefinition[]> {
+    if (this.skillsPromise === undefined) {
+      const current = discoverSkills({
+        roots: this.options.skillRoots,
+        stateStore: this.options.skillStateStore,
+      });
+      this.skillsPromise = current.catch((error) => {
+        if (this.skillsPromise === current) {
+          this.skillsPromise = undefined;
+        }
+        throw error;
+      });
+    }
+    return this.skillsPromise;
+  }
+
   async snapshot(): Promise<BasicAgentCapabilitySnapshot> {
+    if (this.snapshotPromise === undefined) {
+      const current = this.buildSnapshot();
+      this.snapshotPromise = current.catch((error) => {
+        if (this.snapshotPromise === current) {
+          this.snapshotPromise = undefined;
+        }
+        throw error;
+      });
+    }
+    return this.snapshotPromise;
+  }
+
+  private async buildSnapshot(): Promise<BasicAgentCapabilitySnapshot> {
     const [activeModel, overrides, toolStates, mcpServers, workspace, env, skills] = await Promise.all([
       this.options.configCenter.getModelProviderConfig(),
       this.options.configCenter.listModelCapabilityOverrides(),
@@ -33,7 +71,7 @@ export class CapabilityCenter {
       this.options.configCenter.listMcpServers(),
       this.options.configCenter.getWorkspaceConfig(),
       this.options.configCenter.createUndergroundAiEnvironment(),
-      discoverSkills({ roots: this.options.skillRoots, stateStore: this.options.skillStateStore }),
+      this.listSkills(),
     ]);
     const toolCatalog = createDesktopBasicToolRegistry({
       env,
@@ -71,17 +109,15 @@ export class CapabilityCenter {
         })),
         allowedTools: toolCatalog.allowedTools,
       },
-      skillCatalog: skills
-        .filter((skill) => skill.enabled)
-        .map((skill): CapabilitySkillCatalogItem => ({
-          id: skill.id,
-          name: skill.name,
-          description: skill.description,
-          enabled: true,
-          sourcePath: skill.sourcePath,
-          triggers: [...skill.triggers],
-          lastUsedAt: skill.lastUsedAt,
-        })),
+      skillCatalog: applyEnabledSkillFilter(skills).map((skill): CapabilitySkillCatalogItem => ({
+        id: skill.id,
+        name: skill.name,
+        description: skill.description,
+        enabled: true,
+        sourcePath: skill.sourcePath,
+        triggers: [...skill.triggers],
+        lastUsedAt: skill.lastUsedAt,
+      })),
       mcpCatalog: mcpServers.map((server): CapabilityMcpCatalogItem => ({
         serverId: server.serverId,
         label: server.label,
@@ -98,6 +134,12 @@ export class CapabilityCenter {
       warnings,
     };
   }
+}
+
+function applyEnabledSkillFilter(
+  skills: readonly SkillDefinition[]
+): readonly SkillDefinition[] {
+  return skills.filter((skill) => skill.enabled);
 }
 
 function capabilityWarnings(input: {

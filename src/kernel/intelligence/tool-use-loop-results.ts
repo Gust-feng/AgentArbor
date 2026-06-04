@@ -1,8 +1,10 @@
 import type { ModelRequest, ModelResponse } from "../../domain/intelligence/index.js";
 import type { ToolCallRequest, ToolCallResult } from "../../domain/tools/index.js";
 import { toolDisplayName } from "../../domain/tools/index.js";
+import { redactSensitiveText } from "../redaction.js";
 import { projectToolStatusEnvelope } from "../tools/index.js";
 import type {
+  ToolUseLoopConfirmationDecision,
   ToolUseLoopContextMaintenanceResult,
   ToolUseLoopPendingApproval,
   ToolUseLoopResult,
@@ -127,35 +129,112 @@ export function approvalStillRequiredModelResponse(
 export function approvalRequiredResultFromPending(pendingApproval: ToolUseLoopPendingApproval): ToolCallResult {
   const request = pendingApproval.pendingToolCall;
   const diagnosticRef = `tool:${request.callId}:confirmation-required`;
+  const confirmationRequest = pendingApproval.confirmationRequest ?? fallbackConfirmationRequest(pendingApproval);
+  const summary = `等待确认：${confirmationRequest.actionSummary}`;
   return {
     callId: request.callId,
     toolName: request.toolName,
     input: globalThis.structuredClone(request.input),
     output: undefined,
     status: "approval_required",
-    error: `${toolDisplayName(request.toolName)}仍需要用户确认。`,
+    error: summary,
     durationMs: 0,
     projection: {
-      uiSummary: `${toolDisplayName(request.toolName)}仍在等待用户确认。`,
+      uiSummary: summary,
       diagnosticRef,
       envelope: projectToolStatusEnvelope({
         request,
         status: "approval_required",
-        summary: `${toolDisplayName(request.toolName)}仍在等待用户确认。`,
+        summary,
         diagnosticRef,
       }),
       truncated: false,
       redacted: true,
     },
-    confirmationRequest: {
-      confirmationId: pendingApproval.confirmationId,
-      runId: request.callId,
-      title: toolDisplayName(request.toolName),
-      actionSummary: `${toolDisplayName(request.toolName)}需要用户确认后才能执行。`,
-      affectedResources: [],
-      riskLevel: "medium",
-      requestedAt: new Date().toISOString(),
-      sourceRefs: [`tool:${request.callId}`],
+    confirmationRequest: globalThis.structuredClone(confirmationRequest),
+  };
+}
+
+function fallbackConfirmationRequest(pendingApproval: ToolUseLoopPendingApproval): NonNullable<ToolCallResult["confirmationRequest"]> {
+  const request = pendingApproval.pendingToolCall;
+  return {
+    confirmationId: pendingApproval.confirmationId,
+    runId: request.callId,
+    title: toolDisplayName(request.toolName),
+    actionSummary: toolDisplayName(request.toolName),
+    affectedResources: [],
+    riskLevel: "medium",
+    requestedAt: new Date().toISOString(),
+    sourceRefs: [`tool:${request.callId}`],
+  };
+}
+
+export function confirmationDecisionToolResult(
+  request: ToolCallRequest,
+  decision: ToolUseLoopConfirmationDecision
+): ToolCallResult {
+  const diagnosticRef = `tool:${request.callId}:confirmation-${decision.decision}`;
+  const summary = confirmationDecisionSummary(decision);
+  return {
+    callId: request.callId,
+    toolName: request.toolName,
+    input: globalThis.structuredClone(request.input),
+    output: {
+      action: "confirmation_decision",
+      status: decision.decision,
+      confirmationId: decision.confirmationId,
+      summary,
+    },
+    status: decision.decision === "deny" ? "cancelled" : "failed",
+    error: summary,
+    durationMs: 0,
+    projection: {
+      uiSummary: summary,
+      diagnosticRef,
+      envelope: projectToolStatusEnvelope({
+        request,
+        status: decision.decision === "deny" ? "cancelled" : "failed",
+        summary,
+        diagnosticRef,
+        evidenceRefs: [`confirmation:${decision.confirmationId}`],
+      }),
+      truncated: false,
+      redacted: true,
+    },
+  };
+}
+
+export function confirmationDecisionSkippedToolResult(
+  request: ToolCallRequest,
+  decision: ToolUseLoopConfirmationDecision
+): ToolCallResult {
+  const diagnosticRef = `tool:${request.callId}:skipped-after-confirmation-${decision.decision}`;
+  const summary = "同一轮中排在被拒绝或改写指导之后的工具没有执行。请基于用户确认结果重新判断下一步。";
+  return {
+    callId: request.callId,
+    toolName: request.toolName,
+    input: globalThis.structuredClone(request.input),
+    output: {
+      action: "confirmation_decision_skip",
+      status: "skipped",
+      confirmationId: decision.confirmationId,
+      summary,
+    },
+    status: "cancelled",
+    error: summary,
+    durationMs: 0,
+    projection: {
+      uiSummary: summary,
+      diagnosticRef,
+      envelope: projectToolStatusEnvelope({
+        request,
+        status: "cancelled",
+        summary,
+        diagnosticRef,
+        evidenceRefs: [`confirmation:${decision.confirmationId}`],
+      }),
+      truncated: false,
+      redacted: true,
     },
   };
 }
@@ -211,4 +290,19 @@ function contextOverflowModelResponse(
     },
     completedAt: new Date().toISOString(),
   };
+}
+
+function confirmationDecisionSummary(decision: ToolUseLoopConfirmationDecision): string {
+  if (decision.decision === "deny") {
+    return "用户拒绝了本次工具执行。不要执行该工具；请基于当前安全上下文判断是否改用其他方式、请求更多信息或直接回答。";
+  }
+  const guidance = decision.guidance === undefined ? undefined : compactConfirmationGuidance(decision.guidance);
+  return guidance === undefined || guidance.length === 0
+    ? "用户没有批准本次工具执行，并补充了指导。不要执行该工具；请基于当前安全上下文继续判断下一步。"
+    : `用户没有批准本次工具执行，并补充了指导：${guidance}。不要执行该工具；请基于该指导继续判断下一步。`;
+}
+
+function compactConfirmationGuidance(value: string): string {
+  const redacted = redactSensitiveText(value).replace(/\s+/g, " ").trim();
+  return redacted.length <= 1_000 ? redacted : `${redacted.slice(0, 999)}…`;
 }

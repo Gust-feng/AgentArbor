@@ -7,6 +7,7 @@ import type { ToolCallRequest } from "../../domain/tools/index.js";
 import { createId, nowIso } from "../../kernel/id.js";
 import { createFailedModelResponse } from "../../kernel/intelligence/failures.js";
 import { pendingModelOutputValidation } from "../../kernel/intelligence/validation.js";
+import { createVisibleOutputStreamProjector } from "../../kernel/intelligence/visible-output-stream.js";
 import { modelReasoningOutputFromText } from "./model-reasoning-output.js";
 import {
   OpenAICompatibleThinkTagStreamSplitter,
@@ -45,6 +46,7 @@ export async function normalizeOpenAICompatibleStreamResponse(input: {
   let cumulativeReasoning = "";
   let cumulativeRawContent = "";
   const thinkTagSplitter = new OpenAICompatibleThinkTagStreamSplitter();
+  const visibleOutputStream = createVisibleOutputStreamProjector(input.request.outputContract);
   const toolCalls = new Map<number, { id?: string; name?: string; arguments: string }>();
   const protocolExtensions = new Map<string, unknown>();
 
@@ -100,16 +102,13 @@ export async function normalizeOpenAICompatibleStreamResponse(input: {
         }
         if (split.textDelta.length > 0) {
           content += split.textDelta;
-          deltaIndex += 1;
-          input.emitDelta?.({
-            kind: "output",
-            requestId: input.request.requestId,
-            purpose: input.request.purpose,
+          deltaIndex = emitVisibleOutputDelta({
+            emitDelta: input.emitDelta,
+            request: input.request,
             providerId: input.providerId,
             model,
-            delta: split.textDelta,
+            delta: visibleOutputStream.push(split.textDelta),
             index: deltaIndex,
-            createdAt: nowIso(),
           });
         }
       }
@@ -131,16 +130,13 @@ export async function normalizeOpenAICompatibleStreamResponse(input: {
     }
     if (flushed.textDelta.length > 0) {
       content += flushed.textDelta;
-      deltaIndex += 1;
-      input.emitDelta?.({
-        kind: "output",
-        requestId: input.request.requestId,
-        purpose: input.request.purpose,
+      deltaIndex = emitVisibleOutputDelta({
+        emitDelta: input.emitDelta,
+        request: input.request,
         providerId: input.providerId,
         model,
-        delta: flushed.textDelta,
+        delta: visibleOutputStream.push(flushed.textDelta),
         index: deltaIndex,
-        createdAt: nowIso(),
       });
     }
   } catch {
@@ -220,6 +216,31 @@ function emitReasoningDelta(input: {
   const nextIndex = input.index + 1;
   input.emitDelta?.({
     kind: "reasoning",
+    requestId: input.request.requestId,
+    purpose: input.request.purpose,
+    providerId: input.providerId,
+    model: input.model,
+    delta: input.delta,
+    index: nextIndex,
+    createdAt: nowIso(),
+  });
+  return nextIndex;
+}
+
+function emitVisibleOutputDelta(input: {
+  readonly emitDelta?: (delta: ModelOutputDelta) => void;
+  readonly request: ModelRequest;
+  readonly providerId: string;
+  readonly model: string;
+  readonly delta: string;
+  readonly index: number;
+}): number {
+  if (input.delta.length === 0) {
+    return input.index;
+  }
+  const nextIndex = input.index + 1;
+  input.emitDelta?.({
+    kind: "output",
     requestId: input.request.requestId,
     purpose: input.request.purpose,
     providerId: input.providerId,

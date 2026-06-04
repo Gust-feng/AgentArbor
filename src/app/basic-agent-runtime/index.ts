@@ -6,7 +6,6 @@ export * from "./token-counter.js";
 export * from "./builtin-tool-runtime.js";
 export * from "./event-hub.js";
 export * from "./execution-adapter.js";
-export * from "./panel-projection.js";
 export * from "./persistence.js";
 export * from "./run-executor.js";
 export * from "./run-job.js";

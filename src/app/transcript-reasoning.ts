@@ -1,5 +1,11 @@
 import type { TranscriptNode } from "../domain/basic-agent/index.js";
 import type { ObservationRef } from "../domain/observation/index.js";
+import {
+  appendTextStreamAssembly,
+  textStreamAssemblyFromText,
+  textStreamFragmentSourceFromEventId,
+  type TextStreamAssembly,
+} from "./readable-text-fragments.js";
 
 export type ReasoningTranscriptEvent = {
   readonly id: string;
@@ -17,7 +23,7 @@ export type ReasoningTranscriptEvent = {
 export type PendingReasoningNode = {
   readonly firstEvent: ReasoningTranscriptEvent;
   readonly events: readonly ReasoningTranscriptEvent[];
-  readonly text: string;
+  readonly stream: TextStreamAssembly;
   readonly completed: boolean;
 };
 
@@ -51,7 +57,7 @@ export function updatePendingReasoningNode(
     return {
       firstEvent: pending.firstEvent,
       events: [...pending.events, event],
-      text: pending.text,
+      stream: pending.stream,
       completed: true,
     };
   }
@@ -69,14 +75,14 @@ export function updatePendingReasoningNode(
     return {
       firstEvent: event,
       events: [event],
-      text,
+      stream: textStreamAssemblyFromText(text, textStreamFragmentSourceFromEventId(event.id)),
       completed: event.type === "model.reasoning.completed",
     };
   }
   return {
     firstEvent: pending.firstEvent,
     events: [...pending.events, event],
-    text: appendReasoningFragment(pending.text, text),
+    stream: appendReasoningFragment(pending.stream, text, event),
     completed: pending.completed || event.type === "model.reasoning.completed",
   };
 }
@@ -102,8 +108,8 @@ export function flushPendingReasoningNode(
   nodeFactory: ReasoningNodeFactory
 ): undefined {
   if (pending === undefined) return undefined;
-  const text = pending.text.trim();
-  if (text.length === 0) return undefined;
+  const text = pending.stream.text;
+  if (text.trim().length === 0) return undefined;
   const eventType = pending.completed ? "model.reasoning.completed" : "model.reasoning.delta";
   nodes.push(nodeFactory({
     firstEvent: pending.firstEvent,
@@ -135,8 +141,8 @@ export function completeOpenReasoningNodes(
     if (event.modelCallRefs.length > 0 && !sameReasoningRefs(modelCallRefsForTranscriptNode(existing), event.modelCallRefs)) {
       continue;
     }
-    const text = (existing.text ?? existing.summary ?? "").trim();
-    if (text.length === 0) continue;
+    const text = existing.text ?? existing.summary ?? "";
+    if (text.trim().length === 0) continue;
     nodes[index] = {
       ...existing,
       eventType: "model.reasoning.completed",
@@ -165,9 +171,9 @@ function completeExistingReasoningNode(
   if (index < 0) return false;
   const existing = nodes[index];
   if (existing === undefined) return false;
-  const existingText = (existing.text ?? existing.summary ?? "").trim();
-  const nextText = existingText.length > 0 ? existingText : text?.trim() ?? "";
-  if (nextText.length === 0) return false;
+  const existingText = existing.text ?? existing.summary ?? "";
+  const nextText = existingText.trim().length > 0 ? existingText : text ?? "";
+  if (nextText.trim().length === 0) return false;
   nodes[index] = {
     ...existing,
     eventType: "model.reasoning.completed",
@@ -189,8 +195,14 @@ function appendExistingReasoningNode(
   if (index < 0) return false;
   const existing = nodes[index];
   if (existing === undefined || existing.phase === "completed") return false;
-  const existingText = (existing.text ?? existing.summary ?? "").trim();
-  const nextText = appendReasoningFragment(existingText, text).trim();
+  const existingText = existing.text ?? existing.summary ?? "";
+  const existingStream = textStreamAssemblyFromText(
+    existingText,
+    existing.eventType === "model.reasoning.delta" && textStreamFragmentSourceFromEventId(event.id) === "replay"
+      ? "live"
+      : "ordinary"
+  );
+  const nextText = appendReasoningFragment(existingStream, text, event).text;
   nodes[index] = {
     ...existing,
     summary: summaryFormatter(nextText),
@@ -213,8 +225,12 @@ function modelCallRefsForTranscriptNode(node: TranscriptNode): readonly string[]
   return node.refs.filter((ref) => ref.kind === "model_call").map((ref) => ref.id);
 }
 
-function appendReasoningFragment(current: string, next: string): string {
-  return `${current}${next}`;
+function appendReasoningFragment(
+  current: TextStreamAssembly,
+  next: string,
+  event: ReasoningTranscriptEvent
+): TextStreamAssembly {
+  return appendTextStreamAssembly(current, next, textStreamFragmentSourceFromEventId(event.id));
 }
 
 function uniqueObservationRefs(refs: readonly ObservationRef[]): readonly ObservationRef[] {

@@ -96,6 +96,11 @@ export type BasicAgentPendingToolContinuation = {
     readonly approvedConfirmationIds: readonly string[];
     readonly abortSignal: AbortSignal;
   }): Promise<BasicAgentRunExecutionResult>;
+  resumeWithDecision(input: {
+    readonly decision: "deny" | "guidance";
+    readonly guidance?: string;
+    readonly abortSignal: AbortSignal;
+  }): Promise<BasicAgentRunExecutionResult>;
 };
 
 export interface BasicAgentExecutionAdapter {
@@ -110,15 +115,12 @@ export type BasicAgentRunExecutorConfig = {
   readonly activeRunJobs: Set<Promise<void>>;
   readonly abortControllers: Map<string, AbortController>;
   readonly persistRun: (job: BasicAgentRunJob) => Promise<void>;
+  readonly persistRunInBackground?: (job: BasicAgentRunJob) => void;
   readonly executionAdapter: BasicAgentExecutionAdapter;
   readonly failRun: (job: BasicAgentRunJob, error: unknown) => Promise<void>;
   readonly onRuntimeReady: (runId: string, context: BasicAgentRuntimeReadyContext) => void;
   readonly onModelOutputDelta: (runId: string, delta: ModelOutputDelta) => void;
   readonly onRunFinished: (job: BasicAgentRunJob) => Promise<void> | void;
-  readonly onGuidanceSubmitted?: (input: {
-    readonly job: BasicAgentRunJob;
-    readonly guidance: string;
-  }) => Promise<void> | void;
 };
 
 export type BasicAgentRunStartInput = {
@@ -133,6 +135,7 @@ export type BasicAgentRunStartInput = {
   readonly taskSoilInput?: DesktopTaskSoilInput;
   readonly reasoningEffort?: ModelRunReasoningEffort;
   readonly startImmediately?: boolean;
+  readonly deferSchedule?: boolean;
 };
 
 export type BasicAgentRunExecutorView = {

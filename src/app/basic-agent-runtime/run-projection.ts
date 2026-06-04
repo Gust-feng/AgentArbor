@@ -1,6 +1,7 @@
 import type { AgentTaskStatus, BasicAgentRun, ConfirmationDecision, RunEvent } from "../../domain/basic-agent/index.js";
 import type { ObservationRef } from "../../domain/observation/index.js";
 import type { ToolDisplayProjection } from "../../domain/tools/index.js";
+export { basicConfirmationDecisionSummary } from "../confirmation-copy.js";
 import { redactOrdinaryMarkdownFragment, redactOrdinaryText } from "../safe-projection.js";
 
 export type BasicAgentCompatRunStatus =
@@ -22,7 +23,7 @@ export type BasicAgentRunProjectionInput = {
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly streamEvents: readonly BasicAgentRunStreamEventProjectionInput[];
-  readonly confirmationDecisions: readonly Pick<ConfirmationDecision, "decision" | "guidance">[];
+  readonly confirmationDecisions: readonly Pick<ConfirmationDecision, "confirmationId" | "decision" | "guidance">[];
   readonly completed?: {
     readonly canvas?: {
       readonly kind?: string;
@@ -43,6 +44,7 @@ export type BasicAgentRunStreamEventProjectionInput = {
   readonly summary?: string;
   readonly delta?: string;
   readonly status?: BasicAgentCompatRunStatus;
+  readonly toolName?: string;
   readonly detail?: {
     readonly action?: string;
     readonly path?: string;
@@ -93,25 +95,11 @@ export function projectRunStreamEventToRunEvent(event: BasicAgentRunStreamEventP
     delta,
     status: basicStatusForRunEvent(event),
     timestamp: event.createdAt,
+    toolName: event.toolName,
     refs: basicRefsFor(event),
     visibility: event.type.startsWith("tool.") || event.type === "confirmation.needed" ? "expanded" : "compact",
     detail: safeEventDetail(event.detail),
   };
-}
-
-export function basicConfirmationDecisionSummary(
-  decision: Pick<ConfirmationDecision, "decision" | "guidance">
-): string {
-  if (decision.decision === "approve_once") {
-    return "已批准本次操作。";
-  }
-  if (decision.decision === "deny") {
-    return "已拒绝本次操作，运行不会继续执行该动作。";
-  }
-  const guidance = decision.guidance === undefined ? undefined : compactSafeText(decision.guidance, 240);
-  return guidance === undefined || guidance.length === 0
-    ? "已收到补充指导。"
-    : `已收到补充指导：${guidance}`;
 }
 
 function basicEventTitle(event: BasicAgentRunStreamEventProjectionInput): string {
@@ -140,7 +128,6 @@ function basicStatusForRunEvent(event: BasicAgentRunStreamEventProjectionInput):
   if (event.status === "approval_needed") return "approval_needed";
   if (event.status === "needs_input") return "needs_input";
   if (event.status === "running") return "running";
-  if (event.type === "user_approval.received") return "blocked";
   if (event.type === "run.cancelled" || event.status === "cancelled") return "cancelled";
   if (event.type === "run.blocked" || event.status === "blocked") return "blocked";
   if (event.type === "run.failed" || event.status === "failed") return "failed";
@@ -156,28 +143,55 @@ function basicStatusForRunJob(job: BasicAgentRunProjectionInput): AgentTaskStatu
   if (job.status === "cancelled") return "cancelled";
   if (job.status === "blocked") return "blocked";
   if (job.status === "failed") return "failed";
-  if (job.confirmationDecisions.some((decision) => decision.decision === "deny")) {
-    return "blocked";
-  }
-  if (job.confirmationDecisions.some((decision) => decision.decision === "guidance")) {
-    return "needs_input";
-  }
   if (
     job.completed?.canvas?.kind === "desktop_agent_canvas" &&
     job.completed.canvas.agent?.pendingConfirmation !== undefined &&
-    !job.confirmationDecisions.some((decision) => decision.decision === "approve_once")
+    !hasDecisionForCurrentPendingConfirmation(job)
   ) {
     return "approval_needed";
   }
   if (
     job.streamEvents.some((event) => event.type === "confirmation.needed") &&
     job.status !== "completed" &&
-    !job.confirmationDecisions.some((decision) => decision.decision === "approve_once")
+    !hasLatestConfirmationDecision(job)
   ) {
     return "approval_needed";
   }
   if (job.status === "completed") return "completed";
   return "running";
+}
+
+function hasDecisionForCurrentPendingConfirmation(job: BasicAgentRunProjectionInput): boolean {
+  const pending = pendingConfirmationIdFromCanvas(job.completed?.canvas);
+  return pending !== undefined && job.confirmationDecisions.some((decision) => decision.confirmationId === pending);
+}
+
+function hasLatestConfirmationDecision(job: BasicAgentRunProjectionInput): boolean {
+  const latestConfirmation = [...job.streamEvents]
+    .reverse()
+    .find((event) => event.type === "confirmation.needed");
+  if (latestConfirmation === undefined) {
+    return false;
+  }
+  const latestDecision = [...job.streamEvents]
+    .reverse()
+    .find((event) => event.type === "user_approval.received" || event.type === "user.guidance");
+  if (latestDecision !== undefined && latestDecision.sequence > latestConfirmation.sequence) {
+    return true;
+  }
+  const confirmationId = latestConfirmation.sourceRefs
+    .map((ref) => ref.startsWith("confirmation:") ? ref.slice("confirmation:".length) : undefined)
+    .find((ref): ref is string => ref !== undefined && ref.length > 0);
+  return confirmationId !== undefined && job.confirmationDecisions.some((decision) => decision.confirmationId === confirmationId);
+}
+
+function pendingConfirmationIdFromCanvas(canvas: NonNullable<BasicAgentRunProjectionInput["completed"]>["canvas"]): string | undefined {
+  const agent = asRecord(canvas?.agent);
+  const pending = asRecord(agent.pendingConfirmation);
+  const confirmationId = pending.confirmationId;
+  return typeof confirmationId === "string" && confirmationId.trim().length > 0
+    ? confirmationId.trim()
+    : undefined;
 }
 
 function basicRunTitle(job: BasicAgentRunProjectionInput, status: AgentTaskStatus): string {
@@ -210,14 +224,6 @@ function basicRunNextStep(status: AgentTaskStatus): string | undefined {
   return undefined;
 }
 
-function compactSafeText(value: string, maxLength: number): string {
-  const normalized = redactOrdinaryText(value, maxLength).replace(/\s+/g, " ").trim();
-  if (normalized.length <= maxLength) {
-    return normalized;
-  }
-  return `${normalized.slice(0, Math.max(0, maxLength - 1))}…`;
-}
-
 function safeEventSummary(value: string | undefined): string | undefined {
   if (value === undefined) {
     return undefined;
@@ -245,7 +251,7 @@ function safeEventDetail(detail: BasicAgentRunStreamEventProjectionInput["detail
 }
 
 function safeEventDelta(value: string): string | undefined {
-  const delta = redactOrdinaryMarkdownFragment(value, 1_200);
+  const delta = redactOrdinaryMarkdownFragment(value, 8_000);
   return delta.length === 0 ? undefined : delta;
 }
 
@@ -271,4 +277,10 @@ function sourceRefToObservationRef(ref: string): ObservationRef {
     if (kind === "artifact") return { kind: "artifact", id };
   }
   return { kind: "event", id: ref };
+}
+
+function asRecord(value: unknown): Readonly<Record<string, unknown>> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as Readonly<Record<string, unknown>>
+    : {};
 }

@@ -94,6 +94,11 @@ export type DesktopAgentPendingApprovalContinuation = {
     readonly approvedConfirmationIds: readonly string[];
     readonly abortSignal?: AbortSignal;
   }): Promise<DesktopAgentSessionResult>;
+  resumeWithDecision(input: {
+    readonly decision: "deny" | "guidance";
+    readonly guidance?: string;
+    readonly abortSignal?: AbortSignal;
+  }): Promise<DesktopAgentSessionResult>;
 };
 
 export type DesktopAgentSessionRuntimeContext = {
@@ -119,11 +124,6 @@ export type RunDesktopAgentSessionOptions = {
   readonly createToolCenter?: (runtime: MinimalRuntime) => ToolExecutionBroker;
   readonly onRuntimeReady?: (context: DesktopAgentSessionRuntimeContext) => void;
   readonly onModelOutputDelta?: (delta: ModelOutputDelta) => void;
-  /**
-   * Legacy compatibility only. Ordinary Desktop Agent no longer requests a
-   * work-session upgrade; explicit deep mode owns Underground organization.
-   */
-  readonly allowWorkSessionUpgrade?: boolean;
 };
 
 export type { DesktopAgentConversationMessage, DesktopAgentSkillContext } from "./desktop-agent-contracts.js";

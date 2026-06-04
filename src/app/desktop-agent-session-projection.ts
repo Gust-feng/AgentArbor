@@ -195,7 +195,7 @@ function activityFromEventEntry(entry: EventLogEntry): readonly DesktopAgentActi
           entry,
           "model_completed",
           "内容已形成",
-          "模型输出已通过安全可见投影进入本轮结果。",
+          "模型已形成可见输出，结果会在当前会话中继续呈现。",
           "completed",
           sourceRefs,
           refsFromPayload(payload),
@@ -259,7 +259,7 @@ function activityFromEventEntry(entry: EventLogEntry): readonly DesktopAgentActi
           entry.type === "tool.completed"
             ? completedToolActivitySummary(toolName, payload)
             : entry.type === "tool.failed"
-              ? `${toolLabel}失败，错误已脱敏。`
+              ? `${toolLabel}失败，错误信息已整理。`
               : `${toolLabel}开始执行。`,
           entry.type === "tool.requested" ? "running" : entry.type === "tool.completed" ? "completed" : "failed",
           sourceRefs,
@@ -305,7 +305,7 @@ function toolSummaryText(toolCalls: readonly ToolCallResult[], completed: number
     })
     .filter((value): value is string => value !== undefined)
     .slice(0, 4);
-  const base = `本轮工具调用 ${toolCalls.length} 次；完成 ${completed} 次，失败 ${failed} 次，需要确认 ${approvalRequired} 次。工具输出只作为安全摘要和引用进入回答。`;
+  const base = `本轮工具调用 ${toolCalls.length} 次；完成 ${completed} 次，失败 ${failed} 次，需要确认 ${approvalRequired} 次。`;
   return localSummaries.length === 0 ? base : `${base}\n${localSummaries.join("\n")}`;
 }
 
@@ -347,7 +347,7 @@ function completedToolActivitySummary(toolName: string, payload: Readonly<Record
   if (summary !== undefined) {
     return summary;
   }
-  return `${toolDisplayName(toolName)}已返回安全摘要。`;
+  return `${toolDisplayName(toolName)}已返回结果摘要。`;
 }
 
 function terminalActivity(

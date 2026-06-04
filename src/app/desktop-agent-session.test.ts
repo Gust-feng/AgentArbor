@@ -12,6 +12,7 @@ import type {
 } from "../domain/tools/index.js";
 import { toolPresentationForName } from "../domain/tools/index.js";
 import { runDesktopAgentSession } from "./desktop-agent-session.js";
+import { createOpenAiStreamTextResponse } from "./panel-openai-test-fixtures.js";
 
 test("Desktop Agent Session answers ordinary questions without entering deep mode", async () => {
   const result = await runDesktopAgentSession("你是什么模型？", { aiMode: "fake" });
@@ -130,7 +131,7 @@ test("Desktop Agent Session keeps approval waits out of assistant answers", asyn
   assert.equal(result.status, "confirmation_needed");
   assert.equal(result.answer, undefined);
   assert.equal(result.pendingConfirmation?.title, "删除文件");
-  assert.equal(result.pendingConfirmation?.question.includes("删除当前工作区内的普通文件"), true);
+  assert.equal(result.pendingConfirmation?.question, "删除文件：pending.txt");
   assert.equal(result.pendingConfirmation?.consequence, "");
   assert.equal(JSON.stringify(result).includes("这个操作需要你确认后才能继续"), false);
   assert.equal(JSON.stringify(result).includes("批准后"), false);
@@ -224,11 +225,11 @@ test("Desktop Agent Session injects safe conversation history as separate messag
   assert.equal(messages[3]?.content.includes("Current user message: 那你能继续解释一下吗？"), true);
   assert.equal(JSON.stringify(messages).includes("workspace:conversation-history"), false);
   assert.equal(capturedRequest?.budget.maxOutputTokens, 3200);
-  assert.equal(capturedRequest?.budget.maxLatencyMs, 60_000);
+  assert.equal(capturedRequest?.budget.maxLatencyMs, undefined);
   assert.equal(result.pendingConfirmation, undefined);
 });
 
-test("Desktop Agent Session caps ordinary turn output budget instead of expanding to model ceiling", async () => {
+test("Desktop Agent Session follows model output capability instead of applying a small ordinary-turn cap", async () => {
   let capturedRequest: ModelRequest | undefined;
   const channel: IntelligenceChannel = {
     async request(request) {
@@ -258,7 +259,34 @@ test("Desktop Agent Session caps ordinary turn output budget instead of expandin
   });
 
   assert.equal(result.status, "completed");
-  assert.equal(capturedRequest?.budget.maxOutputTokens, 3200);
+  assert.equal(capturedRequest?.budget.maxOutputTokens, 16_000);
+});
+
+test("Desktop Agent Session forces live streaming when a delta callback is provided", async () => {
+  const requestBodies: Record<string, unknown>[] = [];
+  const deltas: string[] = [];
+  const result = await runDesktopAgentSession("请流式回答", {
+    aiMode: "openai-compatible",
+    aiEnvironment: {
+      AGENTARBOR_MODEL_API_KEY: "sk-test-secret",
+      AGENTARBOR_MODEL_NAME: "gpt-4o-mini",
+      AGENTARBOR_MODEL_BASE_URL: "https://provider.example",
+    },
+    providerFetch: async (_url, init) => {
+      requestBodies.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+      return createOpenAiStreamTextResponse("gpt-4o-mini", ["第一段", "第二段"]);
+    },
+    onModelOutputDelta: (delta) => {
+      if (delta.kind === "output") {
+        deltas.push(delta.delta);
+      }
+    },
+  });
+
+  assert.equal(result.status, "completed");
+  assert.equal(requestBodies[0]?.stream, true);
+  assert.deepEqual(deltas, ["第一段", "第二段"]);
+  assert.equal(result.answer?.answer, "第一段第二段");
 });
 
 test("Desktop Agent Session removes internal control fragments from visible answers", async () => {
@@ -277,7 +305,6 @@ test("Desktop Agent Session removes internal control fragments from visible answ
   const result = await runDesktopAgentSession("分析当前项目", {
     aiMode: "fake",
     createIntelligenceChannel: () => channel,
-    allowWorkSessionUpgrade: false,
   });
 
   assert.equal(result.status, "completed");
@@ -286,7 +313,7 @@ test("Desktop Agent Session removes internal control fragments from visible answ
   assert.equal(result.answer?.answer.includes("可见结论"), true);
 });
 
-test("Desktop Agent Session removes internal task diagnostics from visible answers", async () => {
+test("Desktop Agent Session redacts raw references without dropping ordinary task headings", async () => {
   const channel: IntelligenceChannel = {
     async request(request) {
       return textResponse(
@@ -305,7 +332,7 @@ test("Desktop Agent Session removes internal task diagnostics from visible answe
   });
 
   assert.equal(result.status, "completed");
-  assert.equal(result.answer?.answer.includes("当前任务"), false);
+  assert.equal(result.answer?.answer.includes("当前任务"), true);
   assert.equal(result.answer?.answer.includes("goal-0003"), false);
   assert.equal(result.answer?.answer.includes("model-request-abc"), false);
   assert.equal(result.answer?.answer.includes("可以继续"), true);
@@ -610,7 +637,7 @@ class ApprovalRequiredToolCenter implements ToolExecutionBroker {
         confirmationId: `confirmation-${request.callId}`,
         runId: request.callId,
         title: "删除文件",
-        actionSummary: "删除当前工作区内的普通文件，执行前需要用户确认。",
+        actionSummary: "删除文件：pending.txt",
         affectedResources: ["pending.txt"],
         riskLevel: "high",
         resumeAvailability: "live",

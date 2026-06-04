@@ -2,12 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   basicConfirmationDecisionSummary,
-  projectPanelJobToBasicRun,
-  projectPanelStreamEventToRunEvent,
-} from "./panel-projection.js";
+  projectRunJobToBasicRun,
+  projectRunStreamEventToRunEvent,
+} from "./run-projection.js";
 
-test("panel projection derives BasicAgentRun state and redacts ordinary goal text", () => {
-  const run = projectPanelJobToBasicRun({
+test("basic run projection derives BasicAgentRun state and redacts ordinary goal text", () => {
+  const run = projectRunJobToBasicRun({
     runId: "run-1",
     goal: "请处理这个任务，api_key=sk-test-secret-value-1234567890",
     status: "running",
@@ -36,8 +36,8 @@ test("panel projection derives BasicAgentRun state and redacts ordinary goal tex
   assert.equal(run.goalSummary.includes("sk-test-secret"), false);
 });
 
-test("panel stream event projection maps refs and safe summaries into RunEvent", () => {
-  const event = projectPanelStreamEventToRunEvent({
+test("basic stream event projection maps refs and safe summaries into RunEvent", () => {
+  const event = projectRunStreamEventToRunEvent({
     eventId: "event-1",
     runId: "run-1",
     sequence: 3,
@@ -66,8 +66,8 @@ test("panel stream event projection maps refs and safe summaries into RunEvent",
   ]);
 });
 
-test("panel stream event projection keeps safe model output delta for live assistant rendering", () => {
-  const event = projectPanelStreamEventToRunEvent({
+test("basic stream event projection keeps safe model output delta for live assistant rendering", () => {
+  const event = projectRunStreamEventToRunEvent({
     eventId: "event-delta-1",
     runId: "run-1",
     sequence: 4,
@@ -87,7 +87,26 @@ test("panel stream event projection keeps safe model output delta for live assis
   assert.equal(event.summary, event.delta);
 });
 
-test("panel projection summarizes confirmation decisions safely", () => {
+test("basic stream event projection keeps long model output deltas for live rendering", () => {
+  const longDelta = `开头\n${"模型输出片段".repeat(220)}\n结尾`;
+  const event = projectRunStreamEventToRunEvent({
+    eventId: "event-delta-long",
+    runId: "run-1",
+    sequence: 5,
+    type: "model.output.delta",
+    createdAt: "2026-05-12T00:00:05.000Z",
+    agentLabel: "助手",
+    delta: longDelta,
+    status: "running",
+    sourceRefs: [],
+    modelCallRefs: ["model-1"],
+    toolCallRefs: [],
+  });
+
+  assert.equal(event.delta, longDelta);
+});
+
+test("basic projection summarizes confirmation decisions safely", () => {
   assert.equal(basicConfirmationDecisionSummary({ decision: "approve_once" }), "已批准本次操作。");
   assert.equal(basicConfirmationDecisionSummary({ decision: "deny" }), "已拒绝本次操作，运行不会继续执行该动作。");
   assert.match(

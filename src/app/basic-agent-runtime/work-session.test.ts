@@ -51,6 +51,43 @@ test("work session read model keeps ordinary completed answers separate from del
   assert.equal(workSession.contextLedger.entries.some((entry) => entry.kind === "tool_evidence"), true);
 });
 
+test("work session read model does not truncate ordinary answers before the chat turn", () => {
+  const run = basicRun("completed");
+  const longAnswer = `开头\n${"模型正文。".repeat(420)}\n结尾`;
+  const workSession = createDesktopWorkSessionReadModel({
+    run,
+    events: [event(run.runId, "final.result", "结果已生成", "completed")],
+    canvas: {
+      kind: "desktop_agent_canvas",
+      taskSoil: {
+        taskSoilId: "soil-long-answer",
+        goalSummary: "输出长回答",
+        contextRefs: [],
+        permissionBoundaryRefs: [],
+      },
+      agent: {
+        status: "completed",
+        answer: {
+          answer: longAnswer,
+          modelCallRefs: ["model-call-1"],
+          toolCallRefs: [],
+          evidenceRefs: [],
+          resultBlocks: [],
+        },
+        modelCallRefs: ["model-call-1"],
+        toolCallRefs: [],
+        activity: [],
+      },
+      explanation: {
+        resultWhyReasonable: "safe",
+        observationPanelRole: "safe",
+      },
+    },
+  });
+
+  assert.equal(workSession.answer?.content, longAnswer);
+});
+
 test("work session read model surfaces approval as the main stage", () => {
   const run = basicRun("approval_needed");
   const workSession = createDesktopWorkSessionReadModel({
@@ -90,6 +127,53 @@ test("work session read model surfaces approval as the main stage", () => {
   assert.equal(workSession.stage, "awaiting_approval");
   assert.equal(workSession.pendingConfirmation?.confirmationId, "confirmation-test");
   assert.equal(workSession.deliverable, undefined);
+});
+
+test("work session read model preserves concrete confirmation action", () => {
+  const run = basicRun("approval_needed");
+  const workSession = createDesktopWorkSessionReadModel({
+    run,
+    events: [
+      event(
+        run.runId,
+        "confirmation.needed",
+        "删除文件：C:\\repo\\old.txt",
+        "approval_needed"
+      ),
+    ],
+    canvas: {
+      kind: "desktop_agent_canvas",
+      taskSoil: {
+        taskSoilId: "soil-confirmation-copy",
+        goalSummary: "删除文件",
+        contextRefs: [],
+        permissionBoundaryRefs: ["ask:before-delete"],
+      },
+      agent: {
+        status: "confirmation_needed",
+        pendingConfirmation: {
+          confirmationId: "confirmation-delete",
+          title: "删除文件",
+          question: "删除文件：C:\\repo\\old.txt",
+          consequence: "",
+          riskLevel: "high",
+          modelCallRefs: ["model-call-1"],
+          toolCallRefs: ["tool-call-1"],
+          sourceRefs: ["tool:tool-call-1"],
+        },
+        modelCallRefs: ["model-call-1"],
+        toolCallRefs: ["tool-call-1"],
+        activity: [],
+      },
+      explanation: {
+        resultWhyReasonable: "safe",
+        observationPanelRole: "safe",
+      },
+    },
+  });
+
+  assert.equal(workSession.pendingConfirmation?.actionSummary, "删除文件：C:\\repo\\old.txt");
+  assert.equal(workSession.transcriptNodes?.some((node) => node.confirmation?.actionSummary === "删除文件：C:\\repo\\old.txt"), true);
 });
 
 test("work session read model keeps tool evidence out of ordinary message deliverables", () => {
@@ -178,7 +262,7 @@ test("work session read model closes merged reasoning on completion event", () =
       ...event(run.runId, "model.reasoning.delta", "step", "running"),
       id: `${run.runId}:reasoning:2`,
       sequence: 2,
-      delta: "step",
+      delta: " step",
       refs: [{ kind: "model_call", id: "model-reasoning" }],
     },
     {
@@ -193,7 +277,70 @@ test("work session read model closes merged reasoning on completion event", () =
 
   assert.equal(thinking?.phase, "completed");
   assert.equal(thinking?.eventType, "model.reasoning.completed");
-  assert.equal(thinking?.text, "firststep");
+  assert.equal(thinking?.title, "");
+  assert.equal(thinking?.text, "first step");
+});
+
+test("work session transcript preserves reasoning whitespace without a visible label", () => {
+  const run = basicRun("completed");
+  const events: RunEvent[] = [
+    {
+      ...event(run.runId, "model.reasoning.delta", " The", "running"),
+      id: `${run.runId}:reasoning:whitespace:1`,
+      sequence: 1,
+      delta: " The",
+      refs: [{ kind: "model_call", id: "model-reasoning-whitespace" }],
+    },
+    {
+      ...event(run.runId, "model.reasoning.delta", " user is simply greeting. ", "running"),
+      id: `${run.runId}:reasoning:whitespace:2`,
+      sequence: 2,
+      delta: " user is simply greeting. ",
+      refs: [{ kind: "model_call", id: "model-reasoning-whitespace" }],
+    },
+    {
+      ...event(run.runId, "model.reasoning.completed", "思考完成。", "completed"),
+      id: `${run.runId}:reasoning:whitespace:completed`,
+      sequence: 3,
+      refs: [{ kind: "model_call", id: "model-reasoning-whitespace" }],
+    },
+  ];
+  const workSession = createDesktopWorkSessionReadModel({ run, events });
+  const thinking = workSession.transcriptNodes?.find((node) => node.kind === "thinking");
+
+  assert.equal(thinking?.title, "");
+  assert.equal(thinking?.text, " The user is simply greeting. ");
+});
+
+test("work session transcript keeps early tool activity beyond visible event window", () => {
+  const run = basicRun("completed");
+  const earlyToolRequest: RunEvent = {
+    ...event(run.runId, "tool.requested", "读取 README.md", "running"),
+    id: `${run.runId}:early-tool-request`,
+    sequence: 1,
+    toolName: "read_file",
+    refs: [{ kind: "tool_call", id: "call-read" }],
+  };
+  const earlyToolResult: RunEvent = {
+    ...event(run.runId, "tool.completed", "README.md · 120 bytes", "completed"),
+    id: `${run.runId}:early-tool-result`,
+    sequence: 2,
+    toolName: "read_file",
+    refs: [{ kind: "tool_call", id: "call-read" }],
+  };
+  const laterNotes: RunEvent[] = Array.from({ length: 22 }, (_, index) => ({
+    ...event(run.runId, "agent.note.completed", `整理第 ${index + 1} 步`, "completed"),
+    id: `${run.runId}:later-note-${index + 1}`,
+    sequence: index + 3,
+  }));
+
+  const workSession = createDesktopWorkSessionReadModel({
+    run,
+    events: [earlyToolRequest, earlyToolResult, ...laterNotes],
+  });
+
+  assert.equal(workSession.visibleEvents.some((item) => item.id === earlyToolResult.id), false);
+  assert.equal(workSession.transcriptNodes?.some((node) => node.eventType === "tool.completed" && node.toolName === "read_file"), true);
 });
 
 test("work session transcript projection owns reasoning node merging", () => {
@@ -210,7 +357,7 @@ test("work session transcript projection owns reasoning node merging", () => {
       ...event(run.runId, "model.reasoning.delta", "second", "running"),
       id: `${run.runId}:projection:reasoning:2`,
       sequence: 2,
-      delta: "second",
+      delta: " second",
       refs: [{ kind: "model_call", id: "model-projection" }],
     },
     {
@@ -226,7 +373,56 @@ test("work session transcript projection owns reasoning node merging", () => {
   assert.equal(thinking.length, 1);
   assert.equal(thinking[0]?.eventType, "model.reasoning.completed");
   assert.equal(thinking[0]?.phase, "completed");
-  assert.equal(thinking[0]?.text, "firstsecond");
+  assert.equal(thinking[0]?.text, "first second");
+});
+
+test("work session transcript preserves model side output before tool calls", () => {
+  const run = basicRun("completed");
+  const events: RunEvent[] = [
+    {
+      ...event(run.runId, "model.side.completed", "我会先读取文件再回答。", "completed"),
+      id: `${run.runId}:model-side-before-tool`,
+      sequence: 1,
+      refs: [{ kind: "model_call", id: "model-side" }],
+      detail: {
+        preview: "我会先读取文件再回答。",
+      },
+    },
+    {
+      ...event(run.runId, "tool.requested", "读取 README.md", "running"),
+      id: `${run.runId}:tool-requested`,
+      sequence: 2,
+      refs: [{ kind: "tool_call", id: "call-read" }],
+    },
+  ];
+
+  const nodes = transcriptNodesFromRunEvents(events, undefined);
+  const side = nodes.find((node) => node.eventType === "model.side.completed");
+
+  assert.equal(side?.kind, "system");
+  assert.equal(side?.text, "我会先读取文件再回答。");
+  assert.equal(nodes.some((node) => node.eventType === "tool.requested"), true);
+});
+
+test("work session transcript carries tool names for readable workflow actions", () => {
+  const run = basicRun("completed");
+  const nodes = transcriptNodesFromRunEvents([
+    {
+      ...event(run.runId, "tool.completed", "文件已删除。", "completed"),
+      id: `${run.runId}:delete-file-completed`,
+      toolName: "delete_file",
+      detail: {
+        display: {
+          kind: "file_change_summary",
+          path: "old.txt",
+        },
+      },
+    },
+  ], undefined);
+  const tool = nodes.find((node) => node.kind === "tool");
+
+  assert.equal(tool?.toolName, "delete_file");
+  assert.equal(tool?.title, "删除完成");
 });
 
 test("work session read model completes live reasoning after interleaved output", () => {

@@ -60,7 +60,6 @@ export async function compactBasicAgentConversationIfNeeded(
     constraintRefs: [],
     budget: {
       maxOutputTokens: Math.min(input.modelCapabilities?.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS, DEFAULT_MAX_OUTPUT_TOKENS),
-      maxLatencyMs: 60_000,
     },
     sensitivity: "internal",
     requestedAt: nowIso(),

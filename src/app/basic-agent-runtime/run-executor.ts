@@ -39,9 +39,12 @@ export class BasicAgentRunExecutor {
   constructor(private readonly config: BasicAgentRunExecutorConfig) {}
 
   async start(input: BasicAgentRunStartInput): Promise<BasicAgentRun> {
-    const modelConfig = await this.config.getModelProviderConfig();
-    const informationAccess = await this.config.getInformationAccessConfig();
-    const capabilitySnapshot = await this.config.getCapabilitySnapshot?.();
+    const startImmediately = input.startImmediately !== false;
+    const [modelConfig, informationAccess, capabilitySnapshot] = await Promise.all([
+      this.config.getModelProviderConfig(),
+      this.config.getInformationAccessConfig(),
+      this.config.getCapabilitySnapshot?.(),
+    ]);
     const job = this.config.runJobs.create({
       runKind: input.runKind,
       runMode: input.runMode,
@@ -58,8 +61,12 @@ export class BasicAgentRunExecutor {
       capabilitySnapshot,
     });
     this.syncRun(job);
-    await this.config.persistRun(job);
-    if (input.startImmediately !== false) {
+    if (this.config.persistRunInBackground !== undefined) {
+      this.config.persistRunInBackground(job);
+    } else {
+      await this.config.persistRun(job);
+    }
+    if (startImmediately && input.deferSchedule !== true) {
       this.schedule(job.runId);
     }
     return this.requireBasicRun(job.runId);
@@ -143,13 +150,16 @@ export class BasicAgentRunExecutor {
       decidedAt,
       guidance: input.guidance,
     });
+    this.config.runJobs.markResuming(input.runId);
     this.syncRunEvents(this.requireJob(input.runId));
+    await this.config.persistRun(this.requireJob(input.runId));
     if (input.decision === "approve_once") {
       const run = this.requireBasicRun(input.runId);
       setImmediate(() => {
-        this.resumeApprovedContinuation({
+        this.resumeConfirmationContinuation({
           runId: input.runId,
           confirmationId: input.confirmationId,
+          decision: input.decision,
           job,
         }).catch((error: unknown) => {
           console.error(`[run-executor] async resume failed for ${input.runId}:`, error);
@@ -157,29 +167,19 @@ export class BasicAgentRunExecutor {
       });
       return run;
     }
-    this.pendingContinuations.delete(input.runId, input.confirmationId);
-    if (input.decision === "guidance") {
-      this.config.runJobs.markNeedsInput(input.runId);
-      this.syncRunEvents(this.requireJob(input.runId));
-    }
-    if (input.decision === "deny") {
-      this.config.runJobs.block(input.runId, {
-        config: job.config,
-        informationAccess: job.informationAccess,
-        reason: {
-          code: "confirmation_denied",
-          message: "用户已拒绝本次操作，运行已暂停。",
-        },
+    const run = this.requireBasicRun(input.runId);
+    setImmediate(() => {
+      this.resumeConfirmationContinuation({
+        runId: input.runId,
+        confirmationId: input.confirmationId,
+        decision: input.decision,
+        guidance: input.guidance,
+        job,
+      }).catch((error: unknown) => {
+        console.error(`[run-executor] async confirmation decision resume failed for ${input.runId}:`, error);
       });
-      this.syncRunEvents(this.requireJob(input.runId));
-    }
-    const updated = this.requireJob(input.runId);
-    await this.config.onRunFinished(updated);
-    await this.config.persistRun(updated);
-    if (input.decision === "guidance" && input.guidance !== undefined) {
-      await this.config.onGuidanceSubmitted?.({ job: updated, guidance: input.guidance });
-    }
-    return this.requireBasicRun(input.runId);
+    });
+    return run;
   }
 
   private async execute(runId: string): Promise<void> {
@@ -274,19 +274,24 @@ export class BasicAgentRunExecutor {
     return run;
   }
 
-  private async resumeApprovedContinuation(input: {
+  private async resumeConfirmationContinuation(input: {
     readonly runId: string;
     readonly confirmationId: string;
+    readonly decision: ConfirmationDecision["decision"];
+    readonly guidance?: string;
     readonly job: BasicAgentRunJob;
   }): Promise<BasicAgentRun> {
     const continuation = this.pendingContinuations.consume(input.runId, input.confirmationId);
     if (continuation === undefined) {
+      const blockedByMissingApproval = input.decision === "approve_once";
       this.config.runJobs.block(input.runId, {
         config: input.job.config,
         informationAccess: input.job.informationAccess,
         reason: {
-          code: "confirmation_continuation_lost",
-          message: "运行已中断，需要重新发起或继续处理。",
+          code: blockedByMissingApproval ? "confirmation_continuation_lost" : "confirmation_decision_continuation_lost",
+          message: blockedByMissingApproval
+            ? "运行已中断，需要重新发起或继续处理。"
+            : "用户确认结果已记录，但运行续接已中断。你可以继续发送消息让我按该决定处理。",
         },
       });
       const blocked = this.requireJob(input.runId);
@@ -305,10 +310,16 @@ export class BasicAgentRunExecutor {
     });
     this.syncRunEvents(this.requireJob(input.runId));
     try {
-      const result = await continuation.resume({
-        approvedConfirmationIds: [input.confirmationId],
-        abortSignal: abort.signal,
-      });
+      const result = input.decision === "approve_once"
+        ? await continuation.resume({
+            approvedConfirmationIds: [input.confirmationId],
+            abortSignal: abort.signal,
+          })
+        : await continuation.resumeWithDecision({
+            decision: input.decision,
+            guidance: input.guidance,
+            abortSignal: abort.signal,
+          });
       this.pendingContinuations.remember(input.runId, result.pendingApproval);
       if (abort.signal.aborted) {
         await this.cancel(input.runId);

@@ -6,13 +6,50 @@ import type {
 } from "../../domain/basic-agent/index.js";
 import type { ObservationRef } from "../../domain/observation/index.js";
 import type { ToolDisplayProjection, ToolResultEnvelope } from "../../domain/tools/index.js";
-import type { PanelRunCanvasReadModel } from "../panel-canvas-read-model.js";
 import type { DesktopTaskSoilInput } from "../task-soil-workspace.js";
 import { redactOrdinaryText } from "../safe-projection.js";
 
+export type WorkSessionTaskSoilCanvasLike = {
+  readonly taskSoilId: string;
+  readonly goalSummary?: string;
+  readonly contextRefs: readonly {
+    readonly ref: string;
+    readonly kind: string;
+    readonly summary?: string;
+    readonly readonlyPreview?: {
+      readonly title?: string;
+      readonly text: string;
+      readonly truncated: boolean;
+    };
+  }[];
+  readonly permissionBoundaryRefs: readonly string[];
+  readonly [key: string]: unknown;
+};
+
+export type WorkSessionCanvasContextLike = {
+  readonly kind: string;
+  readonly taskSoil?: WorkSessionTaskSoilCanvasLike;
+  readonly agent?: {
+    readonly context?: {
+      readonly items?: readonly {
+        readonly itemId: string;
+        readonly sourceKind: string;
+        readonly summary: string;
+        readonly truncated: boolean;
+      }[];
+      readonly truncationReport?: ContextLedger["truncation"];
+      readonly budget?: ContextLedger["budget"];
+      readonly usageSummary?: string;
+      readonly [key: string]: unknown;
+    };
+    readonly [key: string]: unknown;
+  };
+  readonly [key: string]: unknown;
+};
+
 export type WorkSessionContextProjectionInput = {
   readonly run: BasicAgentRun;
-  readonly canvas?: PanelRunCanvasReadModel;
+  readonly canvas?: WorkSessionCanvasContextLike;
   readonly taskSoilInput?: DesktopTaskSoilInput;
   readonly toolDisplays?: readonly ToolDisplayProjection[];
   readonly toolEvidence?: readonly ToolResultEnvelope[];
@@ -52,7 +89,7 @@ export function contextLedgerFor(
   toolEvidence: readonly ToolResultEnvelope[],
   toolDisplays: readonly ToolDisplayProjection[]
 ): ContextLedger {
-  const context = input.canvas?.kind === "desktop_agent_canvas" ? input.canvas.agent.context : undefined;
+  const context = input.canvas?.kind === "desktop_agent_canvas" ? input.canvas.agent?.context : undefined;
   const contextItems = context?.items ?? [];
   const entries: ContextLedgerEntry[] = [
     {
@@ -260,7 +297,7 @@ function mergeContextAttachments(
   return merged;
 }
 
-function taskSoilContextAttachments(canvas: PanelRunCanvasReadModel | undefined): readonly ContextAttachment[] {
+function taskSoilContextAttachments(canvas: WorkSessionCanvasContextLike | undefined): readonly ContextAttachment[] {
   const taskSoil = canvas?.kind === "desktop_agent_canvas" || canvas?.kind === "work_session_canvas" || canvas?.kind === "desktop_shell_canvas"
     ? canvas.taskSoil
     : undefined;

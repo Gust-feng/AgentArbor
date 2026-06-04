@@ -37,6 +37,7 @@ export function createIntelligenceChannelFromOptions(
     env: options.aiEnvironment,
     fetch: options.providerFetch,
     onModelOutputDelta: options.onModelOutputDelta,
+    streamingMode: options.onModelOutputDelta === undefined ? "respect_profile" : "force_live",
   });
   if (!config.enabled) {
     throw createModelRuntimeDisabledConfigurationError(config.summaryInput);

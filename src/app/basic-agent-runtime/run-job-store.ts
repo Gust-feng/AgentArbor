@@ -182,10 +182,14 @@ export class InMemoryBasicAgentRunJobStore implements BasicAgentRunJobStore {
       createdAt: decision.decidedAt,
       agentLabel: decision.decision === "guidance" ? "用户指导" : "用户确认",
       summary: basicConfirmationDecisionSummary(decision),
-      status: decision.decision === "approve_once" ? "running" : decision.decision === "deny" ? "blocked" : "needs_input",
+      status: "running",
       sourceRefs: [`confirmation:${decision.confirmationId}`],
       modelCallRefs: [],
       toolCallRefs: [],
+      detail: {
+        action: decision.decision,
+        preview: decision.guidance,
+      },
     });
   }
 

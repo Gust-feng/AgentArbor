@@ -19,6 +19,7 @@ import {
   type PendingReasoningNode,
   type ReasoningTranscriptEvent,
 } from "../transcript-reasoning.js";
+import { cleanConfirmationSummary } from "../confirmation-copy.js";
 import { redactOrdinaryText } from "../safe-projection.js";
 
 export function transcriptNodesFromRunEvents(
@@ -77,6 +78,19 @@ function transcriptNodeFromRunEvent(
   }
   if (event.type === "model.output.delta" || event.type === "model.output.completed") {
     return undefined;
+  }
+  if (event.type === "model.side.completed") {
+    const text = (event.detail?.preview ?? event.summary ?? "").trim();
+    if (text.length === 0) {
+      return undefined;
+    }
+    return transcriptNode(event, {
+      kind: "system",
+      phase: "completed",
+      title: "",
+      summary: compactSafeLine(text, 220),
+      text,
+    });
   }
   if (event.type === "agent.note.delta" || event.type === "agent.note.completed") {
     const summary = event.summary?.trim();
@@ -255,6 +269,7 @@ function transcriptNode(
     summary: input.summary,
     text: input.text,
     timestamp: event.timestamp,
+    toolName: event.toolName,
     display: input.display,
     confirmation: input.confirmation,
     refs: event.refs,
@@ -306,7 +321,7 @@ function reasoningNodeFromPending(input: {
     ...transcriptNodeFromReasoningEvent(input.firstEvent, {
       kind: "thinking",
       phase: input.completed ? "completed" : "noted",
-      title: "思考",
+      title: "",
       summary: input.summary,
       text: input.text,
     }),
@@ -349,9 +364,16 @@ function compactSafeLine(value: string, maxLength: number): string {
 function isLowValueAgentNote(value: string): boolean {
   const text = value.trim();
   return text === "等待模型输出。" ||
-    text === "助手已选择使用工具，工具结果会作为安全摘要进入后续处理。" ||
+    staleToolProgressNote(text) ||
     text === "Intelligence Channel requested model output." ||
     text === "Intelligence Channel completed model output validation.";
+}
+
+function staleToolProgressNote(value: string): boolean {
+  const normalized = value.replace(/[。.!！?？；;:：、，,\s]/g, "");
+  return normalized.includes("助手已选择使用工具") &&
+    normalized.includes("工具结果") &&
+    normalized.includes("后续处理");
 }
 
 function userFacingConfirmationSummary(value: string | undefined): string {
@@ -359,5 +381,5 @@ function userFacingConfirmationSummary(value: string | undefined): string {
   if (text.length === 0 || /^User approval was requested\.?$/i.test(text)) {
     return "";
   }
-  return text;
+  return cleanConfirmationSummary(text);
 }

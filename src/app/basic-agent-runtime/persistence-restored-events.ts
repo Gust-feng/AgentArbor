@@ -79,7 +79,7 @@ function fallbackBasicEventsFromRuntimeSnapshot(snapshot: RuntimeRunSnapshot): r
       type,
       title: basicEventTitleFromType(type),
       summary: restoredConfirmationDecisionSummary(confirmation),
-      status: confirmation.status === "denied" ? "blocked" : confirmation.status === "guidance" ? "needs_input" : "running",
+      status: "running",
       timestamp: confirmation.decidedAt,
       refs: [{ kind: "event", id: `confirmation:${confirmation.confirmationId}` }],
       visibility: "expanded",
@@ -138,7 +138,6 @@ function basicEventTitleFromType(type: string): string {
 function agentTaskStatusFromBasicEventType(type: string): BasicAgentRun["status"] {
   if (type === "confirmation.needed") return "approval_needed";
   if (type === "user.guidance") return "needs_input";
-  if (type === "user_approval.received") return "blocked";
   if (type === "run.cancelled") return "cancelled";
   if (type === "run.blocked") return "blocked";
   if (type === "run.failed") return "failed";

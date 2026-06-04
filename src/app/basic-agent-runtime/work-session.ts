@@ -11,9 +11,9 @@ import type {
 } from "../../domain/basic-agent/index.js";
 import type { ObservationRef } from "../../domain/observation/index.js";
 import type { ToolDisplayProjection, ToolResultEnvelope } from "../../domain/tools/index.js";
-import type { PanelRunCanvasReadModel } from "../panel-canvas-read-model.js";
 import type { DesktopTaskSoilInput } from "../task-soil-workspace.js";
 import { redactOrdinaryText } from "../safe-projection.js";
+import { cleanConfirmationSummary } from "../confirmation-copy.js";
 import {
   contextAttachmentsFor,
   contextLedgerFor,
@@ -21,13 +21,53 @@ import {
   isToolDisplay,
   mergeToolDisplays,
   observationRefs,
+  type WorkSessionCanvasContextLike,
 } from "./work-session-context.js";
 import { transcriptNodesFromRunEvents } from "./work-session-transcript.js";
+
+export type DesktopWorkSessionCanvasLike = WorkSessionCanvasContextLike & {
+  readonly agent?: WorkSessionCanvasContextLike["agent"] & {
+    readonly answer?: {
+      readonly answer: string;
+      readonly evidenceRefs: readonly string[];
+      readonly [key: string]: unknown;
+    };
+    readonly pendingConfirmation?: {
+      readonly confirmationId: string;
+      readonly title: string;
+      readonly question: string;
+      readonly consequence: string;
+      readonly riskLevel: string;
+      readonly sourceRefs: readonly string[];
+      readonly [key: string]: unknown;
+    };
+    readonly [key: string]: unknown;
+  };
+  readonly workSession?: {
+    readonly directAnswer?: {
+      readonly answer: string;
+      readonly evidenceRefs: readonly string[];
+      readonly followUpSuggestions: readonly string[];
+      readonly [key: string]: unknown;
+    };
+    readonly report?: {
+      readonly title: string;
+      readonly keyFindings: readonly string[];
+      readonly recommendations: readonly string[];
+      readonly evidenceRefs: readonly string[];
+      readonly nextActions: readonly string[];
+      readonly decisionSummary: string;
+      readonly [key: string]: unknown;
+    };
+    readonly [key: string]: unknown;
+  };
+  readonly [key: string]: unknown;
+};
 
 export type CreateDesktopWorkSessionReadModelInput = {
   readonly run: BasicAgentRun;
   readonly events: readonly RunEvent[];
-  readonly canvas?: PanelRunCanvasReadModel;
+  readonly canvas?: DesktopWorkSessionCanvasLike;
   readonly taskSoilInput?: DesktopTaskSoilInput;
   readonly toolDisplays?: readonly ToolDisplayProjection[];
   readonly toolEvidence?: readonly ToolResultEnvelope[];
@@ -49,7 +89,7 @@ export function createDesktopWorkSessionReadModel(
   const contextLedger = contextLedgerFor(input, contextAttachments, toolEvidence, toolDisplays);
   const pendingConfirmation = input.pendingConfirmation ?? pendingConfirmationFor(input.run, input.canvas);
   const answer = answerFor(input);
-  const transcriptNodes = input.transcriptNodes ?? transcriptNodesFromRunEvents(visibleEvents, pendingConfirmation);
+  const transcriptNodes = input.transcriptNodes ?? transcriptNodesFromRunEvents(transcriptSourceEvents(input.events), pendingConfirmation);
   const deliverable = deliverableFor({
     run: input.run,
     canvas: input.canvas,
@@ -80,14 +120,31 @@ export function createDesktopWorkSessionReadModel(
   };
 }
 
+function transcriptSourceEvents(events: readonly RunEvent[]): readonly RunEvent[] {
+  return events.filter((event) => event.visibility !== "debug");
+}
+
 function visibleWorkSessionEvents(events: readonly RunEvent[]): readonly RunEvent[] {
   const productEvents = events
     .filter((event) => event.visibility !== "debug")
     .filter(isProductWorkSessionEvent);
-  if (productEvents.length > 0) {
-    return productEvents.slice(-18);
+  const selected = productEvents.length > 0
+    ? productEvents.slice(-18)
+    : events.filter((event) => event.visibility !== "debug").slice(-18);
+  return selected.map(projectVisibleWorkSessionEvent);
+}
+
+function projectVisibleWorkSessionEvent(event: RunEvent): RunEvent {
+  if (event.type !== "confirmation.needed") {
+    return event;
   }
-  return events.filter((event) => event.visibility !== "debug").slice(-18);
+  const cleanSummary = cleanConfirmationSummary(event.summary ?? "");
+  const cleanTitle = cleanConfirmationTitle(event.title, cleanSummary);
+  return {
+    ...event,
+    title: cleanTitle,
+    summary: cleanSummary.length > 0 ? cleanSummary : undefined,
+  };
 }
 
 function isProductWorkSessionEvent(event: RunEvent): boolean {
@@ -106,6 +163,14 @@ function isProductWorkSessionEvent(event: RunEvent): boolean {
     event.type === "user_approval.received" ||
     event.type === "user.guidance"
   );
+}
+
+function cleanConfirmationTitle(title: string, fallback: string): string {
+  const cleaned = cleanConfirmationSummary(title);
+  if (/^(?:需要确认|待确认|确认继续|确认执行命令)$/i.test(cleaned.trim())) {
+    return fallback.length > 0 ? fallback : "待确认";
+  }
+  return cleaned.length > 0 ? cleaned : fallback.length > 0 ? fallback : "待确认";
 }
 
 function stageFor(
@@ -139,7 +204,7 @@ function headlineFor(
   if (stage === "completed") return deliverable?.title ?? answer?.title ?? "任务已完成";
   if (stage === "awaiting_approval") return "需要你确认下一步";
   if (stage === "blocked") return "需要处理后再继续";
-  if (stage === "failed") return "这次没有完成";
+  if (stage === "failed") return "运行失败";
   if (stage === "cancelled") return "任务已取消";
   if (stage === "queued") return "已加入队列";
   if (stage === "using_tools") return "正在执行动作";
@@ -177,7 +242,7 @@ function currentActionFor(
 
 function deliverableFor(input: {
   readonly run: BasicAgentRun;
-  readonly canvas?: PanelRunCanvasReadModel;
+  readonly canvas?: DesktopWorkSessionCanvasLike;
   readonly toolDisplays: readonly ToolDisplayProjection[];
   readonly restoredResult?: {
     readonly title: string;
@@ -186,10 +251,10 @@ function deliverableFor(input: {
   readonly answer?: DesktopWorkSessionAnswer;
 }): AgentDeliverable | undefined {
   const canvas = input.canvas;
-  if (canvas?.kind === "desktop_agent_canvas" && canvas.agent.answer !== undefined) {
+  if (canvas?.kind === "desktop_agent_canvas" && canvas.agent?.answer !== undefined) {
     return undefined;
   }
-  if (canvas?.kind === "work_session_canvas" && canvas.workSession.report !== undefined) {
+  if (canvas?.kind === "work_session_canvas" && canvas.workSession?.report !== undefined) {
     const report = canvas.workSession.report;
     return deliverable({
       run: input.run,
@@ -204,7 +269,7 @@ function deliverableFor(input: {
       nextActions: report.nextActions,
     });
   }
-  if (canvas?.kind === "work_session_canvas" && canvas.workSession.directAnswer !== undefined) {
+  if (canvas?.kind === "work_session_canvas" && canvas.workSession?.directAnswer !== undefined) {
     return undefined;
   }
   if (input.restoredResult !== undefined && input.run.status === "completed") {
@@ -215,18 +280,18 @@ function deliverableFor(input: {
 
 function answerFor(input: CreateDesktopWorkSessionReadModelInput): DesktopWorkSessionAnswer | undefined {
   const canvas = input.canvas;
-  if (canvas?.kind === "desktop_agent_canvas" && canvas.agent.answer !== undefined) {
+  if (canvas?.kind === "desktop_agent_canvas" && canvas.agent?.answer !== undefined) {
     return {
       title: "已回答",
-      content: redactOrdinaryText(canvas.agent.answer.answer, 2_000),
+      content: redactOrdinaryText(canvas.agent.answer.answer, 8_000),
       evidenceRefs: observationRefs(canvas.agent.answer.evidenceRefs),
       nextActions: [],
     };
   }
-  if (canvas?.kind === "work_session_canvas" && canvas.workSession.directAnswer !== undefined) {
+  if (canvas?.kind === "work_session_canvas" && canvas.workSession?.directAnswer !== undefined) {
     return {
       title: "已回答",
-      content: redactOrdinaryText(canvas.workSession.directAnswer.answer, 2_000),
+      content: redactOrdinaryText(canvas.workSession.directAnswer.answer, 8_000),
       evidenceRefs: observationRefs(canvas.workSession.directAnswer.evidenceRefs),
       nextActions: canvas.workSession.directAnswer.followUpSuggestions
         .map((item) => redactOrdinaryText(item, 220))
@@ -277,9 +342,9 @@ function section(
 
 function pendingConfirmationFor(
   run: BasicAgentRun,
-  canvas: PanelRunCanvasReadModel | undefined
+  canvas: DesktopWorkSessionCanvasLike | undefined
 ): ConfirmationRequest | undefined {
-  if (canvas?.kind !== "desktop_agent_canvas" || canvas.agent.pendingConfirmation === undefined) {
+  if (canvas?.kind !== "desktop_agent_canvas" || canvas.agent?.pendingConfirmation === undefined) {
     return undefined;
   }
   const pending = canvas.agent.pendingConfirmation;
@@ -288,7 +353,7 @@ function pendingConfirmationFor(
     runId: run.runId,
     conversationId: run.conversationId,
     title: redactOrdinaryText(pending.title, 120),
-    actionSummary: redactOrdinaryText(`${pending.question}\n${pending.consequence}`, 600),
+    actionSummary: redactOrdinaryText(cleanConfirmationSummary(`${pending.question}\n${pending.consequence}`), 600),
     affectedResources: pending.sourceRefs.map((ref) => redactOrdinaryText(ref, 180)),
     riskLevel: pending.riskLevel === "low" || pending.riskLevel === "medium" || pending.riskLevel === "high" ? pending.riskLevel : "medium",
     resumeAvailability: "live",

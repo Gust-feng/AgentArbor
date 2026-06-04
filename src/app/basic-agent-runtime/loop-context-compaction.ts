@@ -45,7 +45,6 @@ export async function compactBasicAgentLoopContextIfNeeded(
     constraintRefs: [],
     budget: {
       maxOutputTokens: Math.min(input.modelCapabilities?.maxOutputTokens ?? MAX_COMPACTION_OUTPUT_TOKENS, MAX_COMPACTION_OUTPUT_TOKENS),
-      maxLatencyMs: 60_000,
     },
     sensitivity: "internal",
     requestedAt: nowIso(),

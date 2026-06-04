@@ -15,14 +15,17 @@ export function agentTaskStatusFromRuntimeStatus(status: RuntimeRunRecord["statu
 }
 
 export function agentTaskStatusFromSnapshot(snapshot: RuntimeRunSnapshot): BasicAgentRun["status"] {
-  if (snapshot.confirmations.some((confirmation) => confirmation.status === "denied")) {
-    return "blocked";
-  }
-  if (snapshot.confirmations.some((confirmation) => confirmation.status === "guidance")) {
-    return "needs_input";
+  if (
+    snapshot.run.status === "completed" ||
+    snapshot.run.status === "failed" ||
+    snapshot.run.status === "cancelled" ||
+    snapshot.run.status === "blocked" ||
+    snapshot.run.status === "needs_input"
+  ) {
+    return agentTaskStatusFromRuntimeStatus(snapshot.run.status);
   }
   const pendingConfirmation = snapshot.confirmations.some((confirmation) => confirmation.status === "pending");
-  if (pendingConfirmation && snapshot.run.status !== "failed" && snapshot.run.status !== "cancelled" && snapshot.run.status !== "blocked") {
+  if (pendingConfirmation) {
     return "approval_needed";
   }
   return agentTaskStatusFromRuntimeStatus(snapshot.run.status);

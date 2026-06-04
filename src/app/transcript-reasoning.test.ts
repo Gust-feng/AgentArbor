@@ -34,16 +34,51 @@ test("reasoning transcript helper merges deltas and completes on matching comple
   assert.deepEqual(nodes[0]?.refs.map((ref) => `${ref.kind}:${ref.id}`), ["model_call:model-1", "event:event-1", "event:event-2", "event:event-3"]);
 });
 
-test("reasoning transcript helper strictly concatenates provider deltas", () => {
+test("reasoning transcript helper preserves explicit word boundaries", () => {
   const nodes: TranscriptNode[] = [];
   let pending: PendingReasoningNode | undefined;
 
   pending = updatePendingReasoningNode(pending, reasoningEvent("event-1", "model.reasoning.delta", "Check", ["model-1"]), nodes, summary, nodeFactory);
-  pending = updatePendingReasoningNode(pending, reasoningEvent("event-2", "model.reasoning.delta", "files", ["model-1"]), nodes, summary, nodeFactory);
+  pending = updatePendingReasoningNode(pending, reasoningEvent("event-2", "model.reasoning.delta", " files", ["model-1"]), nodes, summary, nodeFactory);
   pending = updatePendingReasoningNode(pending, reasoningEvent("event-3", "model.reasoning.delta", ".", ["model-1"]), nodes, summary, nodeFactory);
   flushPendingReasoningNode(pending, nodes, summary, nodeFactory);
 
-  assert.equal(nodes[0]?.text, "Checkfiles.");
+  assert.equal(nodes[0]?.text, "Check files.");
+});
+
+test("reasoning transcript helper preserves provider whitespace at fragment boundaries", () => {
+  const nodes: TranscriptNode[] = [];
+  let pending: PendingReasoningNode | undefined;
+
+  pending = updatePendingReasoningNode(pending, reasoningEvent("event-1", "model.reasoning.delta", " The", ["model-1"]), nodes, summary, nodeFactory);
+  pending = updatePendingReasoningNode(pending, reasoningEvent("event-2", "model.reasoning.delta", " user", ["model-1"]), nodes, summary, nodeFactory);
+  pending = updatePendingReasoningNode(pending, reasoningEvent("event-3", "model.reasoning.delta", "\nsaid hello. ", ["model-1"]), nodes, summary, nodeFactory);
+  flushPendingReasoningNode(pending, nodes, summary, nodeFactory);
+
+  assert.equal(nodes[0]?.text, " The user\nsaid hello. ");
+});
+
+test("reasoning transcript helper preserves exact word deltas without inserted spaces", () => {
+  const nodes: TranscriptNode[] = [];
+  let pending: PendingReasoningNode | undefined;
+
+  pending = updatePendingReasoningNode(pending, reasoningEvent("event-1", "model.reasoning.delta", "The", ["model-1"]), nodes, summary, nodeFactory);
+  pending = updatePendingReasoningNode(pending, reasoningEvent("event-2", "model.reasoning.delta", "user", ["model-1"]), nodes, summary, nodeFactory);
+  pending = updatePendingReasoningNode(pending, reasoningEvent("event-3", "model.reasoning.delta", "asked", ["model-1"]), nodes, summary, nodeFactory);
+  flushPendingReasoningNode(pending, nodes, summary, nodeFactory);
+
+  assert.equal(nodes[0]?.text, "Theuserasked");
+});
+
+test("reasoning transcript helper preserves repeated live suffix deltas", () => {
+  const nodes: TranscriptNode[] = [];
+  let pending: PendingReasoningNode | undefined;
+
+  pending = updatePendingReasoningNode(pending, reasoningEvent("run-1:live:model.reasoning.delta:model-1:1", "model.reasoning.delta", "想", ["model-1"]), nodes, summary, nodeFactory);
+  pending = updatePendingReasoningNode(pending, reasoningEvent("run-1:live:model.reasoning.delta:model-1:2", "model.reasoning.delta", "想", ["model-1"]), nodes, summary, nodeFactory);
+  flushPendingReasoningNode(pending, nodes, summary, nodeFactory);
+
+  assert.equal(nodes[0]?.text, "想想");
 });
 
 test("reasoning transcript helper keeps different model calls separate", () => {
@@ -101,6 +136,20 @@ test("reasoning transcript helper completes an existing live node without replay
   assert.equal(nodes.length, 1);
   assert.equal(nodes[0]?.eventType, "model.reasoning.completed");
   assert.equal(nodes[0]?.text, "已有");
+});
+
+test("reasoning transcript helper treats replayed full reasoning as catch-up text", () => {
+  const nodes: TranscriptNode[] = [];
+  let pending: PendingReasoningNode | undefined;
+
+  pending = updatePendingReasoningNode(pending, reasoningEvent("run-1:live:model.reasoning.delta:model-1:1", "model.reasoning.delta", "先确认问题", ["model-1"]), nodes, summary, nodeFactory);
+  pending = updatePendingReasoningNode(pending, reasoningEvent("run-1:event:10:model.reasoning.delta:1", "model.reasoning.delta", "先确认问题", ["model-1"]), nodes, summary, nodeFactory);
+  pending = updatePendingReasoningNode(pending, reasoningEvent("event-3", "model.reasoning.completed", undefined, ["model-1"]), nodes, summary, nodeFactory);
+  flushPendingReasoningNode(pending, nodes, summary, nodeFactory);
+
+  assert.equal(nodes.length, 1);
+  assert.equal(nodes[0]?.eventType, "model.reasoning.completed");
+  assert.equal(nodes[0]?.text, "先确认问题");
 });
 
 test("reasoning transcript helper completes open nodes after output settles", () => {
@@ -173,7 +222,7 @@ function nodeFactory(input: {
     eventType: input.eventType,
     kind: "thinking",
     phase: input.completed ? "completed" : "noted",
-    title: "思考",
+    title: "",
     summary: input.summary,
     text: input.text,
     timestamp: input.firstEvent.timestamp,

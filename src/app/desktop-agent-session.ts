@@ -12,6 +12,7 @@ import {
 import { createTaskSoilFromDesktopInput } from "./task-soil-workspace.js";
 import type {
   DesktopAgentPendingConfirmation,
+  DesktopAgentPendingApprovalContinuation,
   DesktopAgentSessionResult,
   RunDesktopAgentSessionOptions,
 } from "./desktop-agent-session-contracts.js";
@@ -149,11 +150,7 @@ export async function runDesktopAgentSession(
       outputContract: createDesktopAgentOutputContract(),
       sensitivity: "internal",
       budget: {
-        maxOutputTokens: Math.min(
-          options.modelCapabilities?.maxOutputTokens ?? DESKTOP_AGENT_DEFAULT_MAX_OUTPUT_TOKENS,
-          DESKTOP_AGENT_DEFAULT_MAX_OUTPUT_TOKENS
-        ),
-        maxLatencyMs: 60_000,
+        maxOutputTokens: options.modelCapabilities?.maxOutputTokens ?? DESKTOP_AGENT_DEFAULT_MAX_OUTPUT_TOKENS,
       },
     },
     requestId: createId("model-request"),
@@ -190,7 +187,6 @@ function desktopAgentResultFromTurn(input: {
 }): DesktopAgentSessionResult {
   const modelCallRefs = refsFromResponse(input.turn.finalOutput, input.turn.modelRequestId, input.turn.modelResponseId);
   const toolCallRefs = refsFromToolCalls(input.turn.toolCalls);
-  const recoverableBudgetStop = isRecoverableBudgetStop(input.turn);
   const waitingForApproval = input.turn.status === "approval_required" && input.turn.pendingApproval !== undefined;
   if (input.turn.status === "paused" && (input.turn.stoppedReason === "out_of_fuel" || input.turn.stoppedReason === "context_overflow")) {
     return {
@@ -201,7 +197,7 @@ function desktopAgentResultFromTurn(input: {
       taskSoil: input.taskSoil,
       contextPack: safeDesktopAgentContextPack(input.contextPack),
       failureMessage: input.turn.stoppedReason === "context_overflow"
-        ? "上下文压缩没有成功，任务没有完成。你可以继续发送消息，我会在保留现有安全历史的基础上接着处理。"
+        ? "上下文压缩没有成功，任务没有完成。你可以继续发送消息，我会在保留现有上下文的基础上接着处理。"
         : "运行被异常保护中断，任务没有完成。你可以补充要求或重新发起，我会继续按模型判断处理。",
       modelCallRefs,
       toolCallRefs,
@@ -239,27 +235,11 @@ function desktopAgentResultFromTurn(input: {
       toolCallRefs,
       activity: activityFromEventEntries(input.runtime.eventLog.list(), "confirmation_needed"),
       eventTypes: input.runtime.eventLog.types(),
-      pendingApproval:
-        pendingConfirmation === undefined || input.turn.pendingApproval === undefined
-          ? undefined
-          : {
-              confirmationId: input.turn.pendingApproval.confirmationId,
-              resume: async (resumeInput) => {
-                const resumed = await input.turnRuntime.resumeAutonomous({
-                  pendingApproval: input.turn.pendingApproval!,
-                  approvedConfirmationIds: resumeInput.approvedConfirmationIds,
-                  abortSignal: resumeInput.abortSignal,
-                });
-                return desktopAgentResultFromTurn({
-                  ...input,
-                  turn: resumed,
-                });
-              },
-            },
+      pendingApproval: pendingApprovalContinuation(input, pendingConfirmation),
     };
   }
   if (
-    (input.turn.status !== "completed" && !recoverableBudgetStop) ||
+    input.turn.status !== "completed" ||
     input.turn.finalOutput === undefined ||
     input.turn.finalOutput.status !== "completed"
   ) {
@@ -323,28 +303,56 @@ function desktopAgentResultFromTurn(input: {
     toolCallRefs,
     activity: activityFromEventEntries(input.runtime.eventLog.list(), status),
     eventTypes: input.runtime.eventLog.types(),
-    pendingApproval:
-      pendingConfirmation === undefined || input.turn.pendingApproval === undefined
-        ? undefined
-        : {
-            confirmationId: input.turn.pendingApproval.confirmationId,
-            resume: async (resumeInput) => {
-              const resumed = await input.turnRuntime.resumeAutonomous({
-                pendingApproval: input.turn.pendingApproval!,
-                approvedConfirmationIds: resumeInput.approvedConfirmationIds,
-                abortSignal: resumeInput.abortSignal,
-              });
-              return desktopAgentResultFromTurn({
-                ...input,
-                turn: resumed,
-              });
-            },
-          },
+    pendingApproval: pendingApprovalContinuation(input, pendingConfirmation),
   };
 }
 
-function isRecoverableBudgetStop(_turn: Awaited<ReturnType<AgentTurnRuntime["execute"]>>): boolean {
-  return false;
+function pendingApprovalContinuation(
+  input: {
+    readonly goal: string;
+    readonly runtime: MinimalRuntime;
+    readonly traceId: string;
+    readonly goalId: string;
+    readonly taskSoil: TaskSoil;
+    readonly contextPack: BasicAgentContextPack;
+    readonly turnRuntime: AgentTurnRuntime;
+    readonly turn: AgentTurnRuntimeResult;
+  },
+  pendingConfirmation: DesktopAgentPendingConfirmation | undefined
+): DesktopAgentPendingApprovalContinuation | undefined {
+  if (pendingConfirmation === undefined || input.turn.pendingApproval === undefined) {
+    return undefined;
+  }
+  const pendingApproval = input.turn.pendingApproval;
+  return {
+    confirmationId: pendingApproval.confirmationId,
+    resume: async (resumeInput) => {
+      const resumed = await input.turnRuntime.resumeAutonomous({
+        pendingApproval,
+        approvedConfirmationIds: resumeInput.approvedConfirmationIds,
+        abortSignal: resumeInput.abortSignal,
+      });
+      return desktopAgentResultFromTurn({
+        ...input,
+        turn: resumed,
+      });
+    },
+    resumeWithDecision: async (resumeInput) => {
+      const resumed = await input.turnRuntime.resumeAutonomousWithConfirmationDecision({
+        pendingApproval,
+        decision: {
+          confirmationId: pendingApproval.confirmationId,
+          decision: resumeInput.decision,
+          guidance: resumeInput.guidance,
+        },
+        abortSignal: resumeInput.abortSignal,
+      });
+      return desktopAgentResultFromTurn({
+        ...input,
+        turn: resumed,
+      });
+    },
+  };
 }
 
 function hasConfirmationRequested(entries: readonly EventLogEntry[], confirmationId: string): boolean {

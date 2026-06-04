@@ -5,7 +5,8 @@
   "type": "module",
   "description": "AgentArbor deterministic minimal runtime kernel.",
   "scripts": {
-    "build": "pnpm build:node && pnpm typecheck:panel && pnpm build:panel",
+    "clean:dist": "node scripts/clean-dist.mjs",
+    "build": "pnpm clean:dist && pnpm build:node && pnpm typecheck:panel && pnpm build:panel",
     "build:node": "tsc -p tsconfig.json",
     "typecheck:panel": "tsc -p tsconfig.panel.json --noEmit",
     "build:panel": "vite build --config vite.panel.config.ts",

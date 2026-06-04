@@ -588,7 +588,7 @@ export async function runCognitiveWorkSession(
       const finalArtifact = runtime.artifactStore.save({
         producedBy: MANAGER_AGENT_ID,
         type: "report",
-        content: renderReport({ goal, taskSoil, report, synthesis, childMaterials, steps }),
+        content: renderReport({ goal, report }),
         summary: report.title,
       });
       publishFinalArtifact({ runtime, traceId, finalArtifact, report, synthesis });

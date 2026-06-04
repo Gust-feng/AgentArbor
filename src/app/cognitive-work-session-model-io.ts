@@ -218,11 +218,10 @@ export function childMaterialOutputContract(): ModelOutputContract {
     requiredFields: ["summary", "findings", "evidenceRefs", "uncertainty", "confidence"],
     requiredStringFields: ["summary", "uncertainty"],
     visibleOutput: {
-      fields: ["summary", "findings", "evidenceRefs", "uncertainty"],
+      fields: ["summary", "findings", "uncertainty"],
       fieldTypes: {
         summary: "string",
         findings: "string_array",
-        evidenceRefs: "string_array",
         uncertainty: "string",
       },
       maxFieldLength: 220,
@@ -247,12 +246,11 @@ export function synthesisOutputContract(): ModelOutputContract {
     ],
     requiredStringFields: ["reportTitle", "decisionSummary"],
     visibleOutput: {
-      fields: ["reportTitle", "keyFindings", "recommendations", "evidenceRefs", "uncertainty", "nextActions", "decisionSummary"],
+      fields: ["reportTitle", "keyFindings", "recommendations", "uncertainty", "nextActions", "decisionSummary"],
       fieldTypes: {
         reportTitle: "string",
         keyFindings: "string_array",
         recommendations: "string_array",
-        evidenceRefs: "string_array",
         uncertainty: "string_array",
         nextActions: "string_array",
         decisionSummary: "string",

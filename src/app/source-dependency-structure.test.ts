@@ -59,6 +59,53 @@ test("domain and kernel do not depend on app or adapters", async () => {
   assert.deepEqual(violations, [], "domain/kernel layers must not import app or adapters");
 });
 
+test("Basic Agent runtime does not depend on panel-private modules", async () => {
+  const files = await collectSourceFiles(path.join(process.cwd(), "src", "app", "basic-agent-runtime"));
+  const violations: string[] = [];
+
+  for (const file of files) {
+    const source = await fs.readFile(file, "utf8");
+    for (const target of resolveRelativeImports(file, source)) {
+      const targetPath = relativePath(target);
+      const name = path.basename(targetPath);
+      if (name.startsWith("panel-")) {
+        violations.push(`${relativePath(file)} -> ${targetPath}`);
+      }
+    }
+  }
+
+  assert.deepEqual(violations, [], "Basic Agent runtime should consume app-level contracts, not panel-private helpers");
+});
+
+test("Basic Agent run projection does not keep stale panel projection files", () => {
+  const runtimeRoot = path.join(process.cwd(), "src", "app", "basic-agent-runtime");
+
+  assert.equal(fileExistsSync(path.join(runtimeRoot, "run-projection.ts")), true);
+  assert.equal(fileExistsSync(path.join(runtimeRoot, "run-projection.test.ts")), true);
+  assert.equal(fileExistsSync(path.join(runtimeRoot, "panel-projection.ts")), false);
+  assert.equal(fileExistsSync(path.join(runtimeRoot, "panel-projection.test.ts")), false);
+});
+
+test("confirmation copy has a single shared app owner", async () => {
+  const appRoot = path.join(process.cwd(), "src", "app");
+  const transcriptConfirmation = await readSource(path.join(appRoot, "panel-ui", "src", "components", "transcript-confirmation.tsx"));
+
+  assert.equal(fileExistsSync(path.join(appRoot, "confirmation-copy.ts")), true);
+  assert.equal(fileExistsSync(path.join(appRoot, "panel-confirmation-copy.ts")), false);
+  assert.equal(transcriptConfirmation.includes("../../../confirmation-copy"), true);
+  assert.equal(transcriptConfirmation.includes("panel-confirmation-copy"), false);
+});
+
+test("panel UI components do not keep unused projection re-export wrappers", () => {
+  const componentsRoot = path.join(process.cwd(), "src", "app", "panel-ui", "src", "components");
+
+  assert.equal(fileExistsSync(path.join(componentsRoot, "chat-active-projection.ts")), false);
+  assert.equal(fileExistsSync(path.join(componentsRoot, "chat-visible-text.ts")), false);
+  assert.equal(fileExistsSync(path.join(componentsRoot, "transcript-timeline-copy.ts")), false);
+  assert.equal(fileExistsSync(path.join(componentsRoot, "transcript-tool-format.ts")), false);
+  assert.equal(fileExistsSync(path.join(componentsRoot, "transcript-node-visibility.ts")), false);
+});
+
 test("kernel tool use loop keeps execution helpers split", async () => {
   const [loop, contracts, execution, messages, results, cloning] = await Promise.all([
     readSource(path.join(process.cwd(), "src", "kernel", "intelligence", "tool-use-loop.ts")),

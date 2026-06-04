@@ -47,7 +47,7 @@ Desktop Shell
 - `RunEvent`：普通事件只保存安全投影，包括 id、runId、sequence、type、title、summary、status、timestamp、refs 和 visibility；raw prompt、raw provider response、raw tool output、stdout/stderr、文件正文、secret、token 和未经验证模型输出不能进入普通 HTTP/SSE/面板/会话投影。
 - `RuntimeDatabase`：保存会话、运行、事件、模型调用、工具调用、产物和确认请求的安全 read-model，不保存完整 prompt、provider 原始响应或工具原文。
 - `SkillDefinition`：先支持 `SKILL.md` 元数据发现、启用状态、触发说明和按需正文注入；资源文件不默认进入上下文。
-- `Workbench Panel`：默认信息架构是左侧新会话/最近任务/Skills/Tools/Settings，中间基础 Agent 会话和任务运行，右侧或抽屉显示文件、证据、产物、待确认和安全诊断。Routines 必须等真实调度器出生后再作为可见功能。
+- `Workbench Panel`：默认信息架构是左侧新任务、最近会话、待确认提醒和设置，中间基础 Agent 会话和任务运行，详情或抽屉按需显示文件、证据、产物、待确认和安全诊断。Skills / Tools 不作为主导航入口，也不做成能力后台；工作方法和工具选择由普通 Agent 在运行时按任务判断。设置页可以承接已有真实后端支撑的模型服务、工作目录、网页查证、运行时工具启用状态、工作方法启用状态和确认边界说明，但这些配置只表达可用服务和安全边界，不能替代模型的任务理解、工具选择或工作方法取舍。Routines 必须等真实调度器出生后再作为可见功能。
 
 ## 默认不做
 

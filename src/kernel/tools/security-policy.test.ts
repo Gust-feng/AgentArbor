@@ -28,6 +28,31 @@ test("tool security policy blocks unsafe URL protocols and secret query paramete
   assert.equal(JSON.stringify(token).includes("sk-secret"), false);
 });
 
+test("tool security policy never lets confirmation bypass hard URL blocks", () => {
+  const request = { callId: "call-token", toolName: "browser_snapshot", input: { url: "https://example.test/?api_key=sk-secret" } };
+  const decision = evaluateToolCallSecurity({
+    request,
+    definition: toolDefinition("browser_snapshot", readOnlyMetadata()),
+    metadata: readOnlyMetadata(),
+    context: { platform: "linux", approvedConfirmationIds: [confirmationIdForToolCall(request.callId)] },
+  });
+
+  assert.equal(decision.decision, "blocked");
+  assert.equal(decision.decision === "blocked" ? decision.code : "", "url_secret_query_blocked");
+});
+
+test("tool security policy lets confirmation approve URL reads that only need approval", () => {
+  const request = { callId: "call-local", toolName: "browser_snapshot", input: { url: "http://localhost:3000" } };
+  const decision = evaluateToolCallSecurity({
+    request,
+    definition: toolDefinition("browser_snapshot", readOnlyMetadata()),
+    metadata: readOnlyMetadata(),
+    context: { platform: "linux", approvedConfirmationIds: [confirmationIdForToolCall(request.callId)] },
+  });
+
+  assert.equal(decision.decision, "allow");
+});
+
 test("tool security policy requires approval for local, private, and metadata URLs", () => {
   for (const url of [
     "http://localhost:3000",
@@ -100,31 +125,29 @@ test("tool security policy gates explicit confirmation tools unless exact confir
   });
   assert.equal(confirmation.confirmationId, "confirmation-call-shell");
   assert.equal(confirmation.resumeAvailability, "live");
-  assert.equal(confirmation.title, "执行 Shell");
-  assert.equal(confirmation.actionSummary, "执行 Shell：pnpm test");
+  assert.equal(confirmation.title, "运行命令");
+  assert.equal(confirmation.actionSummary, "运行命令：pnpm test");
   assert.equal(confirmation.actionSummary.includes("请求执行执行操作"), false);
   assert.equal(confirmation.actionSummary.includes("需要你确认后继续"), false);
   assert.equal(confirmation.actionSummary.includes("在工作区内执行 Shell 命令"), false);
 });
 
-test("tool security policy does not add Windows confirmation for ordinary create and edit tools", () => {
-  for (const toolName of ["create_file", "edit_file"]) {
-    const metadata: ToolDefinitionMetadata = {
-      ...readOnlyMetadata(),
-      category: "filesystem",
-      operationType: "read-write",
-      riskLevel: "medium",
-      requiresConfirmation: false,
-    };
-    const decision = evaluateToolCallSecurity({
-      request: { callId: `call-${toolName}`, toolName, input: { path: "notes.txt" } },
-      definition: toolDefinition(toolName, metadata),
-      metadata,
-      context: { platform: "win32" },
-    });
+test("tool security policy does not infer confirmation beyond explicit metadata", () => {
+  const metadata: ToolDefinitionMetadata = {
+    ...readOnlyMetadata(),
+    category: "filesystem",
+    operationType: "read-write",
+    riskLevel: "medium",
+    requiresConfirmation: false,
+  };
+  const decision = evaluateToolCallSecurity({
+    request: { callId: "call-custom-write", toolName: "custom_write", input: { path: "notes.txt" } },
+    definition: toolDefinition("custom_write", metadata),
+    metadata,
+    context: { platform: "win32" },
+  });
 
-    assert.equal(decision.decision, "allow", toolName);
-  }
+  assert.equal(decision.decision, "allow");
 });
 
 function toolDefinition(name: string, metadata: ToolDefinitionMetadata): ToolDefinition {

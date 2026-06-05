@@ -32,6 +32,18 @@ export function normalizeOpenAIResponsesResponse(input: {
   const parsedOutput = parseStructuredOutput(textOutput);
   const responseId = typeof raw.id === "string" ? raw.id : createId("model-response");
   const usage = asRecord(raw.usage);
+  const finishReason = finishReasonFromStatus(raw.status, toolCalls);
+  const incompleteResponse = failedResponseForIncompleteResponsesFinish({
+    request: input.request,
+    providerId: input.providerId,
+    providerKind: input.providerKind,
+    protocolKind: input.protocolKind,
+    model: typeof raw.model === "string" ? raw.model : input.model,
+    finishReason,
+  });
+  if (incompleteResponse !== undefined) {
+    return incompleteResponse;
+  }
 
   return {
     responseId,
@@ -57,7 +69,7 @@ export function normalizeOpenAIResponsesResponse(input: {
       totalTokens: numberOrUndefined(usage.total_tokens),
       latencyMs: input.latencyMs,
     },
-    finishReason: finishReasonFromStatus(raw.status, toolCalls),
+    finishReason,
     validation: pendingModelOutputValidation(),
     completedAt: nowIso(),
   };
@@ -236,6 +248,18 @@ export async function normalizeOpenAIResponsesStreamResponse(input: {
       ];
     });
   const parsedOutput = parseStructuredOutput(textContent);
+  const finalFinishReason = toolCalls.length > 0 ? "tool_call" : finishReasonFromStatus(responseStatus, toolCalls);
+  const incompleteResponse = failedResponseForIncompleteResponsesFinish({
+    request: input.request,
+    providerId: input.providerId,
+    providerKind: input.providerKind,
+    protocolKind: input.protocolKind,
+    model,
+    finishReason: finalFinishReason,
+  });
+  if (incompleteResponse !== undefined) {
+    return incompleteResponse;
+  }
 
   return {
     responseId,
@@ -258,7 +282,7 @@ export async function normalizeOpenAIResponsesStreamResponse(input: {
     usage: {
       latencyMs: input.latencyMs,
     },
-    finishReason: toolCalls.length > 0 ? "tool_call" : finishReasonFromStatus(responseStatus, toolCalls),
+    finishReason: finalFinishReason,
     validation: pendingModelOutputValidation(),
     completedAt: nowIso(),
   };
@@ -371,6 +395,35 @@ function assistantMessageFromOutput(input: {
     toolCalls: input.toolCalls,
     protocolExtensions: { response_id: input.responseId },
   };
+}
+
+function failedResponseForIncompleteResponsesFinish(input: {
+  readonly request: ModelRequest;
+  readonly providerId: string;
+  readonly providerKind: "openai";
+  readonly protocolKind: "openai_responses";
+  readonly model: string;
+  readonly finishReason: ModelResponse["finishReason"];
+}): ModelResponse | undefined {
+  if (input.finishReason !== "length" && input.finishReason !== "content_filter" && input.finishReason !== "error") {
+    return undefined;
+  }
+  const message = input.finishReason === "length"
+    ? "OpenAI Responses provider returned an incomplete response."
+    : input.finishReason === "content_filter"
+      ? "OpenAI Responses provider filtered the response content."
+      : "OpenAI Responses provider returned an error finish reason.";
+  return createFailedModelResponse({
+    requestId: input.request.requestId,
+    providerId: input.providerId,
+    providerKind: input.providerKind,
+    protocolKind: input.protocolKind,
+    model: input.model,
+    outputKind: input.request.outputContract.outputKind,
+    failureKind: "provider_response",
+    retryable: input.finishReason === "length",
+    message,
+  });
 }
 
 function finishReasonFromStatus(

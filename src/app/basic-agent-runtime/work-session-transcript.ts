@@ -141,7 +141,7 @@ function transcriptNodeFromRunEvent(
       title: "待确认",
       summary,
       confirmation: context.pendingConfirmation ?? {
-        confirmationId: `confirmation-${event.sequence}`,
+        confirmationId: confirmationIdForRunEvent(event),
         runId: event.runId,
         title: "需要确认",
         actionSummary: summary,
@@ -278,6 +278,11 @@ function transcriptNode(
 
 function toolCallRefsForRunEvent(event: RunEvent): readonly string[] {
   return event.refs.filter((ref) => ref.kind === "tool_call").map((ref) => ref.id);
+}
+
+function confirmationIdForRunEvent(event: RunEvent): string {
+  const toolCallRef = toolCallRefsForRunEvent(event)[0];
+  return toolCallRef === undefined ? `confirmation-${event.sequence}` : `confirmation-${toolCallRef}`;
 }
 
 function modelCallRefsForRunEvent(event: RunEvent): readonly string[] {

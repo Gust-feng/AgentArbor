@@ -67,13 +67,13 @@ test("ToolCenter default does not add a small tool-call budget", async () => {
   assert.equal(center.getCallCount(), 25);
 });
 
-test("ToolCenter uses explicit metadata for confirmation instead of platform read-write defaults", async () => {
-  let creates = 0;
+test("ToolCenter uses explicit metadata for confirmation instead of platform operation defaults", async () => {
+  let writes = 0;
   let deletes = 0;
   let executes = 0;
   const center = new ToolCenter({ platform: "win32" });
-  center.register(testTool("create_file", async () => {
-    creates += 1;
+  center.register(testTool("custom_write", async () => {
+    writes += 1;
     return { ok: true };
   }, "read-write"));
   center.register(testTool("delete_file", async () => {
@@ -86,11 +86,11 @@ test("ToolCenter uses explicit metadata for confirmation instead of platform rea
   }, "execute", { requiresConfirmation: true }));
   const context = { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" };
 
-  const create = await center.execute({ callId: "call-create", toolName: "create_file", input: {} }, context);
+  const write = await center.execute({ callId: "call-write", toolName: "custom_write", input: {} }, context);
   const deleteResult = await center.execute({ callId: "call-delete", toolName: "delete_file", input: {} }, context);
   const execute = await center.execute({ callId: "call-exec", toolName: "run_command", input: {} }, context);
 
-  assert.equal(create.status, "completed");
+  assert.equal(write.status, "completed");
   assert.equal(deleteResult.status, "approval_required");
   assert.equal(execute.status, "approval_required");
   assert.equal(deleteResult.error, "等待确认：删除文件");
@@ -102,7 +102,7 @@ test("ToolCenter uses explicit metadata for confirmation instead of platform rea
   assert.equal(deleteResult.confirmationRequest?.actionSummary, "删除文件");
   assert.equal(deleteResult.confirmationRequest?.actionSummary.includes("delete_file"), false);
   assert.equal(deleteResult.projection?.uiSummary, "删除文件");
-  assert.equal(creates, 1);
+  assert.equal(writes, 1);
   assert.equal(deletes, 0);
   assert.equal(executes, 0);
   assert.equal(center.getCallCount(), 1);

@@ -1,4 +1,5 @@
 import { redactSensitiveText } from "../kernel/redaction.js";
+import { friendlyFailureCopy } from "./failure-copy.js";
 
 const INTERNAL_CONTROL_BLOCK_PATTERN =
   /<\s*(start_work_session|tool_call|function_call|use_tool|internal_action|internal_control|query|arguments)\b[^>]*>[\s\S]*?<\s*\/\s*\1\s*>/gi;
@@ -54,7 +55,7 @@ export function sanitizeConversationHistoryText(value: string): string {
 }
 
 export function friendlyUserFacingFailureText(message: string | undefined): string {
-  const text = sanitizeAssistantVisibleText(String(message ?? "")).trim();
+  const text = friendlyFailureCopy(sanitizeAssistantVisibleText(String(message ?? "")).trim());
   if (text.length === 0) {
     return "运行失败，但没有返回错误详情。";
   }

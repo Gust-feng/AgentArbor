@@ -1,4 +1,4 @@
-import type { ModelMessage, ModelRequest } from "../../domain/intelligence/index.js";
+import type { ModelMessage, ModelRequest, ModelResponse } from "../../domain/intelligence/index.js";
 import type { ToolCallResult } from "../../domain/tools/index.js";
 import { createId } from "../id.js";
 import {
@@ -35,6 +35,7 @@ import {
   confirmationDecisionToolResult,
   outOfFuelLoopResult,
 } from "./tool-use-loop-results.js";
+import { createFailedModelResponse } from "./failures.js";
 
 export type {
   ToolUseLoopConfirmationDecision,
@@ -287,6 +288,10 @@ async function continueToolUseLoopAfterToolResults(input: {
 
     const requestedToolCalls = response.toolCalls ?? [];
     if (requestedToolCalls.length === 0) {
+      const incompleteResponse = incompleteModelResponseForCompletion(response);
+      if (incompleteResponse !== undefined) {
+        return { finalOutput: incompleteResponse, toolCalls, modelRounds, rounds, stoppedReason: "error" };
+      }
       return {
         finalOutput: response,
         toolCalls,
@@ -344,6 +349,30 @@ async function continueToolUseLoopAfterToolResults(input: {
       return outOfFuelLoopResult(input.initialRequest, toolCalls, modelRounds, rounds);
     }
   }
+}
+
+function incompleteModelResponseForCompletion(response: ModelResponse): ModelResponse | undefined {
+  if (response.finishReason !== "length" && response.finishReason !== "content_filter" && response.finishReason !== "error") {
+    return undefined;
+  }
+  const reason = response.finishReason;
+  const message = reason === "length"
+    ? "模型输出被截断，不能作为最终答案。"
+    : reason === "content_filter"
+      ? "模型输出被内容过滤，不能作为最终答案。"
+      : "模型服务返回错误结束，不能作为最终答案。";
+  return createFailedModelResponse({
+    requestId: response.requestId,
+    providerId: response.providerId,
+    providerKind: response.providerKind,
+    protocolKind: response.protocolKind,
+    model: response.model,
+    outputKind: response.outputKind,
+    failureKind: "provider_response",
+    retryable: reason === "length",
+    message,
+    responseId: response.responseId,
+  });
 }
 
 function normalizeOptionalRoundLimit(value: number | undefined): number | undefined {

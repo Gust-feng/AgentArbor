@@ -498,6 +498,10 @@ function confirmationIdForTranscriptEvent(event: PanelTranscriptStreamEvent): st
   if (candidate !== undefined) {
     return candidate;
   }
+  const toolCallRef = event.toolCallRefs[0];
+  if (toolCallRef !== undefined && toolCallRef.trim().length > 0) {
+    return `confirmation-${toolCallRef.trim()}`;
+  }
   return event.eventId.includes(":")
     ? event.eventId.split(":").at(-1) ?? event.eventId
     : event.eventId;

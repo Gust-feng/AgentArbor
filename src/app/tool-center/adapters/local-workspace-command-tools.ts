@@ -28,12 +28,12 @@ export function createLocalRunCommandTool(rootDirectory = DEFAULT_LOCAL_WORKSPAC
   return {
     definition: {
       name: "run_command",
-      description: "Run a safe workspace command under the local workspace root. Intended for low-risk verification commands like dir or type.",
+      description: "Run an allowed workspace command under the local workspace root.",
       metadata: {
         category: "terminal",
         riskLevel: "medium",
         operationType: "execute",
-        requiresConfirmation: false,
+        requiresConfirmation: true,
         visibleResultPolicy: {
           userVisible: "summary-only",
           maxPreviewChars: 600,
@@ -94,12 +94,12 @@ export function createLocalShellCommandTool(rootDirectory = DEFAULT_LOCAL_WORKSP
     definition: {
       ...base.definition,
       name: "shell_command",
-      description: "Run a sandboxed shell-style workspace command. This is an alias of run_command with the same allowlist policy.",
+      description: "Alias of run_command for allowed workspace commands. It does not run arbitrary shell syntax.",
       metadata: {
         category: "terminal",
         riskLevel: "medium",
         operationType: "execute",
-        requiresConfirmation: false,
+        requiresConfirmation: true,
         visibleResultPolicy: {
           userVisible: "summary-only",
           maxPreviewChars: 600,

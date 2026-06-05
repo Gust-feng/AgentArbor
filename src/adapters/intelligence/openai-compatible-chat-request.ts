@@ -24,6 +24,7 @@ export function buildOpenAICompatibleChatRequestBody(input: {
     fields: buildOpenAIChatCompletionsControlFields({
       requestBudgetMaxOutputTokens: input.request.budget.maxOutputTokens,
       settings: input.requestSettings,
+      tools: input.request.tools,
     }) ?? {},
     dialect: input.dialect,
     settings: input.requestSettings,

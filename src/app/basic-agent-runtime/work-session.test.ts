@@ -97,17 +97,17 @@ test("work session read model surfaces approval as the main stage", () => {
       kind: "desktop_agent_canvas",
       taskSoil: {
         taskSoilId: "soil-test",
-        goalSummary: "写文件",
+        goalSummary: "删除文件",
         contextRefs: [],
-        permissionBoundaryRefs: ["ask:before-write"],
+        permissionBoundaryRefs: ["ask:before-delete"],
       },
       agent: {
         status: "confirmation_needed",
         pendingConfirmation: {
           confirmationId: "confirmation-test",
-          title: "写入文件",
-          question: "准备写入文件。",
-          consequence: "批准后只执行本次写入。",
+          title: "删除文件",
+          question: "准备删除文件。",
+          consequence: "批准后只执行本次删除。",
           riskLevel: "high",
           modelCallRefs: ["model-call-1"],
           toolCallRefs: ["tool-call-1"],

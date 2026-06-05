@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { TranscriptNode } from "../domain/basic-agent/index.js";
+import { createPanelTranscriptNodes } from "./panel-transcript-nodes.js";
 import {
   timelineVisibleNodes,
   visibleTranscriptNodes,
@@ -114,7 +115,31 @@ test("visible transcript projection aggregates adjacent completed file reads wit
   assert.deepEqual(projected[1]?.display?.kind === "generic_tool_summary" ? projected[1].display.items : [], ["README.md", "package.json"]);
 });
 
-test("visible transcript projection keeps preparing tool requests that explain a pending confirmation", () => {
+test("workflow projection hides preparing tool requests that are represented by confirmation cards", () => {
+  const projected = workflowVisibleNodes([
+    node({
+      nodeId: "request",
+      kind: "tool",
+      eventType: "tool.requested",
+      phase: "preparing",
+      sequence: 1,
+      toolName: "delete_file",
+      refs: [{ kind: "tool_call", id: "tool-1" }],
+    }),
+    node({
+      nodeId: "confirmation",
+      kind: "confirmation",
+      eventType: "confirmation.needed",
+      phase: "waiting_approval",
+      sequence: 2,
+      refs: [{ kind: "tool_call", id: "tool-1" }],
+    }),
+  ]);
+
+  assert.deepEqual(projected.map((item) => item.nodeId), ["confirmation"]);
+});
+
+test("visible transcript projection keeps preparing tool requests that explain a pending confirmation in details", () => {
   const projected = visibleTranscriptNodes([
     node({
       nodeId: "request",
@@ -136,6 +161,39 @@ test("visible transcript projection keeps preparing tool requests that explain a
   ]);
 
   assert.deepEqual(projected.map((item) => item.nodeId), ["request", "confirmation"]);
+});
+
+test("panel transcript confirmation ids fall back to the owning tool call id", () => {
+  const projected = createPanelTranscriptNodes([
+    {
+      eventId: "run-1:event:1:tool.requested",
+      runId: "run-1",
+      sequence: 1,
+      type: "tool.requested",
+      createdAt: "2026-06-04T00:00:00.000Z",
+      toolName: "shell_command",
+      sourceRefs: [],
+      modelCallRefs: [],
+      toolCallRefs: ["call-shell"],
+    },
+    {
+      eventId: "run-1:event:2:confirmation.needed",
+      runId: "run-1",
+      sequence: 2,
+      type: "confirmation.needed",
+      createdAt: "2026-06-04T00:00:01.000Z",
+      summary: "执行 Shell：pnpm test",
+      sourceRefs: [],
+      modelCallRefs: [],
+      toolCallRefs: ["call-shell"],
+    },
+  ]);
+
+  const confirmation = projected.find((item) => item.kind === "confirmation");
+
+  assert.equal(confirmation?.confirmation?.confirmationId, "confirmation-call-shell");
+  assert.equal(confirmation?.confirmation?.actionSummary, "执行 Shell：pnpm test");
+  assert.deepEqual(workflowVisibleNodes(projected).map((item) => item.kind), ["confirmation"]);
 });
 
 test("startup workflow projection stays silent before real transcript activity", () => {

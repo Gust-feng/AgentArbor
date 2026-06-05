@@ -146,20 +146,6 @@
   overflow-anchor: none;
 }
 
-.live-stream-frozen-chunk {
-  display: block;
-  min-width: 0;
-  contain: layout paint;
-}
-
-.live-stream-frozen-chunk + .live-stream-frozen-chunk {
-  margin-top: 10px;
-}
-
-.live-stream-frozen-chunk:last-child {
-  scroll-margin-bottom: 18px;
-}
-
 @media (max-width: 720px) {
   .user-message > div {
     max-width: min(640px, 90%);

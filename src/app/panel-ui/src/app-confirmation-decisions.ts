@@ -90,7 +90,7 @@ export async function decideRunConfirmation(input: {
 }
 
 function pendingConfirmationFromApp(app: AppState) {
-  return app.workSession?.pendingConfirmation ?? app.detail?.canvas?.agent?.pendingConfirmation;
+  return app.workSession?.pendingConfirmation;
 }
 
 function localConfirmationDecisionError(

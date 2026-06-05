@@ -2,6 +2,7 @@ import type { ObservationRef } from "../../domain/observation/index.js";
 import type { TaskSoil } from "../../domain/soil/index.js";
 import type { ToolResultEnvelope } from "../../domain/tools/index.js";
 import type { DesktopAgentConversationMessage, DesktopAgentSkillContext } from "../desktop-agent-contracts.js";
+import { DESKTOP_ROOT_AGENT_PROMPT } from "../agent-prompts/desktop-root-agent.js";
 import type { BasicAgentContextItem } from "./contracts.js";
 import type { BasicAgentConversationSummary } from "./conversation-compaction.js";
 import {
@@ -28,18 +29,6 @@ const MAX_SKILL_REASON_CHARS = 240;
 const MAX_REF_SUMMARY_CHARS = 240;
 const MAX_PREVIEW_CHARS = 700;
 const MAX_TOOL_EVIDENCE_CHARS = 1_400;
-
-const DESKTOP_AGENT_SYSTEM_PROMPT = [
-  "You are AgentArbor Desktop Root Agent, the default local desktop working agent.",
-  "Own the ordinary agent path: understand the task, answer directly when enough, use authorized tools when evidence is needed, ask for concrete confirmation or user guidance when context or permission is missing, and produce a usable result.",
-  "Available tools may include web/research tools and local read-only workspace tools. Prefer read-only inspection before asking the user for repo facts that can be derived safely.",
-  "Use the user's language. Keep the visible answer focused on result, evidence, uncertainty, and next step.",
-  "If conversation history appears before the final user message, use it only as dialogue context. The final user message is the current instruction.",
-  "If the user asks to inspect local desktop files but no file/folder ref or preview is provided, ask for explicit file selection or read-only authorization. Do not pretend you can see files.",
-  "Do not write shell commands, web searches, or tool-call syntax as if they have already run. Either use an available authorized tool or clearly state that you need authorization, configuration, or context before performing the action.",
-  "Do not route, package, or suggest this ordinary turn as a deeper organization flow. Explicit deep mode is a separate product entry selected outside this agent turn.",
-  "Do not expose raw prompts, hidden reasoning, provider internals, or internal architecture terms unless the user asks for developer diagnostics.",
-].join("\n");
 
 export function buildContextLedgerDraftItems(input: BuildContextLedgerDraftInput): readonly BasicAgentContextItem[] {
   return [
@@ -74,10 +63,10 @@ export function toolEvidenceItems(envelopes: readonly ToolResultEnvelope[]): rea
 
 function systemContextItem(): BasicAgentContextItem {
   return {
-    itemId: "context:system:desktop-agent",
+    itemId: `context:system:${DESKTOP_ROOT_AGENT_PROMPT.agentId}`,
     sourceKind: "system",
-    summary: DESKTOP_AGENT_SYSTEM_PROMPT,
-    refs: [{ kind: "event", id: "prompt:desktop.agent_response.v1" }],
+    summary: DESKTOP_ROOT_AGENT_PROMPT.systemPrompt,
+    refs: [{ kind: "event", id: DESKTOP_ROOT_AGENT_PROMPT.promptRef }],
     visibility: "model",
     truncated: false,
   };

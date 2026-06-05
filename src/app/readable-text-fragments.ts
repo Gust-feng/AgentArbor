@@ -58,8 +58,18 @@ export function appendCatchupTextFragment(
   if (
     compactCurrent.length > 0 &&
     compactCatchup.length > 0 &&
-    (compactCurrent === compactCatchup || compactCurrent.startsWith(compactCatchup) || compactCatchup.startsWith(compactCurrent))
+    (compactCurrent === compactCatchup || compactCurrent.startsWith(compactCatchup))
   ) {
+    return { text: current, catchup: exactCatchup };
+  }
+  if (compactCurrent.length > 0 && compactCatchup.startsWith(compactCurrent)) {
+    if (options?.boundary === "readable") {
+      const remainder = compactCatchup.slice(compactCurrent.length);
+      return {
+        text: appendReadableTextFragment(current, remainder),
+        catchup: exactCatchup,
+      };
+    }
     return { text: current, catchup: exactCatchup };
   }
   const merged = appendSnapshotTextFragment(current, next);

@@ -105,6 +105,26 @@ test("desktop default fake run does not auto-upgrade complex requests into deep 
   }
 });
 
+test("desktop run rejects legacy work_session mode alias instead of upgrading to deep", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-desktop-run-mode-alias-"));
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+  try {
+    const rejected = await requestJson(server.url, "/api/desktop/runs", {
+      method: "POST",
+      body: { goal: "分析当前仓库的问题并给我优化建议", aiMode: "fake", runMode: "work_session" },
+    });
+    const runs = await requestJson(server.url, "/api/runtime/runs");
+
+    assert.equal(rejected.status, 400);
+    assert.equal(rejected.body.ok, false);
+    assert.equal(rejected.body.error.code, "invalid_run_mode");
+    assert.equal(runs.body.runs.length, 0);
+  } finally {
+    await server.close();
+    await removeTemporaryTree(directory);
+  }
+});
+
 test("desktop openai-compatible ordinary agent keeps working until the model stops calling tools", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-desktop-agent-continuous-"));
   const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-desktop-agent-continuous-workspace-"));

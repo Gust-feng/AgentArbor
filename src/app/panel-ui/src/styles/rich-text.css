@@ -2,34 +2,8 @@
   overflow-wrap: anywhere;
 }
 
-.live-stream-live-tail {
-  display: block;
-  min-width: 0;
-  margin: 0;
-  line-height: inherit;
-  white-space: normal;
-  overflow-wrap: break-word;
-  contain: layout paint;
-  overflow-anchor: none;
-}
-
-.live-stream-live-tail-text {
-  display: block;
-  min-width: 0;
-  color: inherit;
-  font: inherit;
-  line-height: inherit;
-  white-space: pre-wrap;
-  overflow-wrap: break-word;
-}
-
-.live-stream-live-tail-text,
 .assistant-answer .rich-paragraph {
   min-height: 1.82em;
-}
-
-.live-stream-frozen-chunk + .live-stream-live-tail {
-  margin-top: 10px;
 }
 
 .live-stream-box.process {

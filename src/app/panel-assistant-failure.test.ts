@@ -22,6 +22,14 @@ test("assistant failure projection strips internal control markup from failures"
   );
 });
 
+test("assistant failure projection presents stream parse failures as compatibility issues", () => {
+  const projected = assistantFailureParts("已输出。\n\n错误信息：OpenAI-compatible provider stream response could not be parsed.");
+
+  assert.equal(projected.previous, "已输出。");
+  assert.equal(projected.error.includes("流式返回格式不兼容"), true);
+  assert.equal(projected.error.includes("OpenAI-compatible provider"), false);
+});
+
 test("assistant failure projection treats plain failed content as the error message", () => {
   assert.deepEqual(
     assistantFailureParts("模型不可用。"),

@@ -306,7 +306,7 @@ test("basic agent confirmation decisions persist approve and guidance outcomes s
   }
 });
 
-test("basic agent shell-style run_command executes without sandbox command-shape failure", async () => {
+test("basic agent shell-style run_command executes after confirmation without sandbox command-shape failure", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-basic-command-confirmation-"));
   const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-basic-command-workspace-"));
   let providerFetchCalls = 0;
@@ -335,6 +335,19 @@ test("basic agent shell-style run_command executes without sandbox command-shape
       body: { goal: "运行 echo approval-review 测试命令确认续跑", aiMode: "openai-compatible" },
     });
     const runId = start.body.run.runId;
+    const pending = await waitForRun(
+      server.url,
+      runId,
+      (body) => body.status === "approval_needed" && body.canvas?.agent?.pendingConfirmation !== undefined,
+      4_000,
+      "/api/desktop/runs"
+    );
+    const confirmationId = pending.body.canvas.agent.pendingConfirmation.confirmationId;
+    const approved = await requestJson(
+      server.url,
+      `/api/basic-agent/runs/${encodeURIComponent(runId)}/confirmations/${encodeURIComponent(confirmationId)}/decision`,
+      { method: "POST", body: { decision: "approve_once" } }
+    );
     const completed = await waitForRun(
       server.url,
       runId,
@@ -348,10 +361,12 @@ test("basic agent shell-style run_command executes without sandbox command-shape
       (call: { toolName?: string; status: string }) => call.toolName === "run_command"
     );
 
+    assert.equal(approved.status, 200);
     assert.equal(completed.body.status, "completed");
     assert.equal(commandCall?.status, "completed");
     assert.equal(commandCall?.command, "echo approval-review");
-    assert.equal(events.body.events.some((event: { type: string }) => event.type === "confirmation.needed"), false);
+    assert.equal(events.body.events.some((event: { type: string }) => event.type === "confirmation.needed"), true);
+    assert.equal(events.body.events.some((event: { type: string }) => event.type === "run.resumed"), true);
     assert.equal(events.body.events.some((event: { type: string }) => event.type === "tool.completed"), true);
     assert.equal(events.body.events.some((event: { type: string }) => event.type === "tool.failed"), false);
     assert.equal(events.text.includes("Sandbox policy rejected command: echo approval-review"), false);

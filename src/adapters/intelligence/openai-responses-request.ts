@@ -25,6 +25,7 @@ export function buildResponsesRequestBody(
       buildOpenAIResponsesControlFields({
         requestBudgetMaxOutputTokens: request.budget.maxOutputTokens,
         settings: requestSettings,
+        tools: request.tools,
       }) ?? {}
     ),
     stream: stream ? true : undefined,

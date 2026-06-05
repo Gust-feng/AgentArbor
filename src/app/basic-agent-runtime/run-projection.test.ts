@@ -21,7 +21,7 @@ test("basic run projection derives BasicAgentRun state and redacts ordinary goal
         sequence: 1,
         type: "confirmation.needed",
         createdAt: "2026-05-12T00:00:01.000Z",
-        summary: "需要确认写入操作。",
+        summary: "需要确认删除操作。",
         sourceRefs: [],
         modelCallRefs: [],
         toolCallRefs: [],
@@ -32,7 +32,7 @@ test("basic run projection derives BasicAgentRun state and redacts ordinary goal
 
   assert.equal(run.status, "approval_needed");
   assert.equal(run.title, "需要确认");
-  assert.equal(run.currentStep, "需要确认写入操作。");
+  assert.equal(run.currentStep, "需要确认删除操作。");
   assert.equal(run.goalSummary.includes("sk-test-secret"), false);
 });
 

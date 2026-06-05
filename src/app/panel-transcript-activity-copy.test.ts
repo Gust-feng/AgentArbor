@@ -7,6 +7,7 @@ import {
   readableThinkingCopy,
   workflowItemsForNodes,
 } from "./panel-transcript-activity-copy.js";
+import { workflowVisibleNodes } from "./panel-transcript-node-projection.js";
 
 test("thinking copy keeps a single readable expandable detail without a label", () => {
   const text = "## 判断\n\n- 先检查工作区\n- 再决定是否需要确认";
@@ -314,27 +315,43 @@ test("workflow items collapse requested and terminal tool phases into one expand
   assert.equal(items[0]?.copy.expandedDetail, "发起：README.md\n结果：README.md · 120 bytes");
 });
 
-test("workflow items keep pending tool requests before confirmation", () => {
-  const items = workflowItemsForNodes([
+test("workflow items show a pending command approval once with the concrete command", () => {
+  const nodes = [
     node({
       kind: "tool",
       eventType: "tool.requested",
       phase: "preparing",
-      toolName: "delete_file",
-      summary: "目标：old.txt",
+      toolName: "shell_command",
+      display: {
+        kind: "command_summary",
+        command: "pnpm",
+        args: ["test"],
+      },
       refs: [{ kind: "tool_call", id: "tool-1" }],
     }),
     node({
       kind: "confirmation",
       eventType: "confirmation.needed",
       phase: "waiting_approval",
-      summary: "删除文件：old.txt",
+      summary: "执行 Shell：pnpm test",
+      confirmation: {
+        confirmationId: "confirmation-tool-1",
+        runId: "run-1",
+        title: "执行 Shell",
+        actionSummary: "执行 Shell：pnpm test",
+        affectedResources: [],
+        riskLevel: "medium",
+        requestedAt: "2026-06-04T00:00:00.000Z",
+        sourceRefs: [],
+      },
       refs: [{ kind: "tool_call", id: "tool-1" }],
     }),
-  ]);
+  ];
+  const items = workflowItemsForNodes(workflowVisibleNodes(nodes));
 
-  assert.deepEqual(items.map((item) => item.tone), ["tool", "confirmation"]);
-  assert.equal(items[0]?.copy.detail, "old.txt");
+  assert.deepEqual(items.map((item) => item.tone), ["confirmation"]);
+  assert.equal(items[0]?.copy.label, "待确认");
+  assert.equal(items[0]?.copy.detail, "执行 Shell：pnpm test");
 });
 
 test("activity item keys stay stable while reasoning settles", () => {

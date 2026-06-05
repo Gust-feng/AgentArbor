@@ -554,11 +554,94 @@ test("executeToolUseLoop uses projected agentContent for model tool continuation
   );
 
   const toolMessageText = JSON.stringify(channel.requests[1]?.sanitizedMessages.at(-1));
-  assert.equal(toolMessageText.includes("envelope model-safe summary"), true);
-  assert.equal(toolMessageText.includes("projected model-safe content"), false);
+  assert.equal(toolMessageText.includes("projected model-safe content"), true);
+  assert.equal(toolMessageText.includes("envelope model-safe summary"), false);
   assert.equal(toolMessageText.includes("raw-secret-output"), false);
   assert.equal(toolMessageText.includes("sk-raw-tool-secret"), false);
 });
+
+test("executeToolUseLoop sends full workspace tool facts to the next model turn", async () => {
+  const channel = new SequenceIntelligenceChannel([
+    {
+      ...completedResponse("model-request-test", undefined),
+      toolCalls: [
+        { callId: "call-read-file", toolName: "read_file", input: { path: "README.md" } },
+        { callId: "call-grep", toolName: "grep_files", input: { query: "AgentArbor" } },
+        { callId: "call-command", toolName: "run_command", input: { command: "pnpm", args: ["test"] } },
+      ],
+      finishReason: "tool_call",
+    },
+    textResponse("model-request-final", "Final answer with tool facts."),
+  ]);
+  const center = new ProjectedToolBroker({
+    read_file: {
+      path: "README.md",
+      bytes: 42,
+      content: "# AgentArbor\nA local desktop agent workspace.",
+      truncated: false,
+    },
+    grep_files: {
+      query: "AgentArbor",
+      path: ".",
+      matches: [{ path: "README.md", line: 1, preview: "# AgentArbor" }],
+      truncated: false,
+    },
+    run_command: {
+      command: "pnpm",
+      args: ["test"],
+      exitCode: 0,
+      stdout: "tests 828\npass 828\n",
+      stderr: "",
+      truncated: false,
+    },
+  });
+
+  await executeToolUseLoop(
+    {
+      intelligenceChannel: channel,
+      toolCenter: center,
+      callerAgentId: "agent-test",
+      traceId: "trace-test",
+      goalId: "goal-test",
+      allowedTools: ["read_file", "grep_files", "run_command"],
+      approvedConfirmationIds: ["confirmation-call-command"],
+    },
+    createValidModelRequest()
+  );
+
+  const nextModelRequestText = JSON.stringify(channel.requests[1]?.sanitizedMessages);
+  assert.equal(nextModelRequestText.includes("A local desktop agent workspace."), true);
+  assert.equal(nextModelRequestText.includes("# AgentArbor"), true);
+  assert.equal(nextModelRequestText.includes("tests 828"), true);
+  assert.equal(nextModelRequestText.includes("exitCode"), true);
+});
+
+
+test("executeToolUseLoop fails instead of completing on incomplete final model finish reasons", async () => {
+  for (const finishReason of ["length", "content_filter", "error"] as const) {
+    const channel = new SequenceIntelligenceChannel([
+      {
+        ...textResponse(`model-request-${finishReason}`, "Incomplete final answer."),
+        finishReason,
+      },
+    ]);
+    const result = await executeToolUseLoop(
+      {
+        intelligenceChannel: channel,
+        toolCenter: new TestToolBroker(),
+        callerAgentId: "agent-test",
+        traceId: "trace-test",
+        goalId: "goal-test",
+      },
+      createValidModelRequest()
+    );
+
+    assert.equal(result.stoppedReason, "error");
+    assert.equal(result.finalOutput.status, "failed");
+    assert.equal(result.finalOutput.failure?.kind, "provider_response");
+  }
+});
+
 
 test("executeToolUseLoop returns a cancelled response when aborted before a model request", async () => {
   const abort = new AbortController();
@@ -725,11 +808,11 @@ test("executeToolUseLoop executes non-read-only tool batches sequentially in mod
 test("executeToolUseLoop pauses on approval_required without final synthesis", async () => {
   const eventLog = new InMemoryEventLog();
   const channel = new SequenceIntelligenceChannel([
-    toolCallResponse("model-request-test", "call-write", "write_file"),
+    toolCallResponse("model-request-test", "call-delete", "delete_file"),
     completedResponse("model-request-final", { summary: "must not be requested before approval" }),
   ]);
   const center = new TestToolBroker();
-  center.register("write_file", async () => ({ ok: true }), "read-write");
+  center.register("delete_file", async () => ({ ok: true }), "read-write");
 
   const result = await executeToolUseLoop(
     {
@@ -738,14 +821,14 @@ test("executeToolUseLoop pauses on approval_required without final synthesis", a
       callerAgentId: "agent-test",
       traceId: "trace-test",
       goalId: "goal-test",
-      allowedTools: ["write_file"],
+      allowedTools: ["delete_file"],
       publishToolEvent: (message) => eventLog.append(message),
     },
     createValidModelRequest()
   );
 
   assert.equal(result.stoppedReason, "approval_required");
-  assert.equal(result.pendingApproval?.confirmationId, "confirmation-call-write");
+  assert.equal(result.pendingApproval?.confirmationId, "confirmation-call-delete");
   assert.equal(result.toolCalls[0]?.status, "approval_required");
   assert.equal(center.getCallCount(), 0);
   assert.equal(channel.requests.length, 1);
@@ -754,11 +837,11 @@ test("executeToolUseLoop pauses on approval_required without final synthesis", a
 
 test("resumeToolUseLoopFromApproval executes only a matching approved confirmation", async () => {
   const channel = new SequenceIntelligenceChannel([
-    toolCallResponse("model-request-test", "call-write", "write_file"),
-    completedResponse("model-request-final", { summary: "Final answer after approved write." }),
+    toolCallResponse("model-request-test", "call-delete", "delete_file"),
+    completedResponse("model-request-final", { summary: "Final answer after approved delete." }),
   ]);
   const center = new TestToolBroker();
-  center.register("write_file", async () => ({ ok: true }), "read-write");
+  center.register("delete_file", async () => ({ ok: true }), "read-write");
   const request = createValidModelRequest();
   const paused = await executeToolUseLoop(
     {
@@ -767,7 +850,7 @@ test("resumeToolUseLoopFromApproval executes only a matching approved confirmati
       callerAgentId: "agent-test",
       traceId: "trace-test",
       goalId: "goal-test",
-      allowedTools: ["write_file"],
+      allowedTools: ["delete_file"],
     },
     request
   );
@@ -780,8 +863,8 @@ test("resumeToolUseLoopFromApproval executes only a matching approved confirmati
       callerAgentId: "agent-test",
       traceId: "trace-test",
       goalId: "goal-test",
-      allowedTools: ["write_file"],
-      approvedConfirmationIds: ["confirmation-call-write"],
+      allowedTools: ["delete_file"],
+      approvedConfirmationIds: ["confirmation-call-delete"],
     },
     request,
     paused.pendingApproval!
@@ -792,6 +875,74 @@ test("resumeToolUseLoopFromApproval executes only a matching approved confirmati
   assert.equal(resumed.toolCalls[0]?.status, "completed");
   assert.equal(center.getCallCount(), 1);
   assert.equal(channel.requests.length, 2);
+});
+
+test("resumeToolUseLoopFromApproval waits for tool completion before requesting the next model turn", async () => {
+  let releaseCommand: (() => void) | undefined;
+  const commandFinished = new Promise<void>((resolve) => {
+    releaseCommand = resolve;
+  });
+  const channel = new SequenceIntelligenceChannel([
+    {
+      ...completedResponse("model-request-test", undefined),
+      toolCalls: [{ callId: "call-shell", toolName: "shell_command", input: { command: "dir" } }],
+      finishReason: "tool_call",
+    },
+    textResponse("model-request-final", "Final answer after command output."),
+  ]);
+  const center = new TestToolBroker();
+  center.register("shell_command", async () => {
+    await commandFinished;
+    return {
+      action: "shell_command",
+      summary: "dir · exit 0",
+      result: {
+        stdout: "README.md\nsrc\n",
+        stderr: "",
+        exitCode: 0,
+      },
+    };
+  }, "execute");
+  const request = createValidModelRequest();
+  const paused = await executeToolUseLoop(
+    {
+      intelligenceChannel: channel,
+      toolCenter: center,
+      callerAgentId: "agent-test",
+      traceId: "trace-test",
+      goalId: "goal-test",
+      allowedTools: ["shell_command"],
+    },
+    request
+  );
+
+  assert.equal(paused.stoppedReason, "approval_required");
+  const resumedPromise = resumeToolUseLoopFromApproval(
+    {
+      intelligenceChannel: channel,
+      toolCenter: center,
+      callerAgentId: "agent-test",
+      traceId: "trace-test",
+      goalId: "goal-test",
+      allowedTools: ["shell_command"],
+      approvedConfirmationIds: ["confirmation-call-shell"],
+    },
+    request,
+    paused.pendingApproval!
+  );
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(center.getCallCount(), 1);
+  assert.equal(channel.requests.length, 1);
+  releaseCommand?.();
+  const resumed = await resumedPromise;
+
+  assert.equal(resumed.stoppedReason, "completed");
+  assert.equal(channel.requests.length, 2);
+  const nextModelRequest = channel.requests[1];
+  const toolMessage = nextModelRequest?.sanitizedMessages.find((message) => message.role === "tool");
+  assert.equal(toolMessage?.content.includes("README.md"), true);
+  assert.equal(toolMessage?.content.includes("exitCode"), true);
 });
 
 test("resumeToolUseLoopFromApproval continues the remaining tool calls in the same batch", async () => {
@@ -851,13 +1002,33 @@ test("resumeToolUseLoopFromApproval continues the remaining tool calls in the sa
   assert.equal(channel.requests[1]?.sanitizedMessages.filter((message) => message.role === "tool").length, 2);
 });
 
-test("resumeToolUseLoopFromApproval rejects the wrong confirmation id without executing", async () => {
+test("resumeToolUseLoopFromApproval waits for every approval in a model-requested batch before model continuation", async () => {
   const channel = new SequenceIntelligenceChannel([
-    toolCallResponse("model-request-test", "call-write", "write_file"),
-    completedResponse("model-request-final", { summary: "must not be requested" }),
+    {
+      ...completedResponse("model-request-test", undefined),
+      toolCalls: [
+        { callId: "call-shell-a", toolName: "shell_command", input: { command: "cat a.txt" } },
+        { callId: "call-shell-b", toolName: "shell_command", input: { command: "cat b.txt" } },
+      ],
+      finishReason: "tool_call",
+    },
+    textResponse("model-request-final", "Final answer after both commands."),
   ]);
   const center = new TestToolBroker();
-  center.register("write_file", async () => ({ ok: true }), "read-write");
+  const executedCommands: string[] = [];
+  center.register("shell_command", async (input) => {
+    const command = String((input as { readonly command?: string }).command ?? "");
+    executedCommands.push(command);
+    return {
+      action: "shell_command",
+      summary: `${command} · exit 0`,
+      result: {
+        stdout: `${command}\n`,
+        stderr: "",
+        exitCode: 0,
+      },
+    };
+  }, "execute");
   const request = createValidModelRequest();
   const paused = await executeToolUseLoop(
     {
@@ -866,7 +1037,78 @@ test("resumeToolUseLoopFromApproval rejects the wrong confirmation id without ex
       callerAgentId: "agent-test",
       traceId: "trace-test",
       goalId: "goal-test",
-      allowedTools: ["write_file"],
+      allowedTools: ["shell_command"],
+    },
+    request
+  );
+
+  assert.equal(paused.stoppedReason, "approval_required");
+  assert.equal(paused.pendingApproval?.confirmationId, "confirmation-call-shell-a");
+  assert.equal(paused.pendingApproval?.remainingToolCallsAfterApproval.length, 1);
+  assert.equal(center.getCallCount(), 0);
+  assert.equal(channel.requests.length, 1);
+
+  const afterFirstApproval = await resumeToolUseLoopFromApproval(
+    {
+      intelligenceChannel: channel,
+      toolCenter: center,
+      callerAgentId: "agent-test",
+      traceId: "trace-test",
+      goalId: "goal-test",
+      allowedTools: ["shell_command"],
+      approvedConfirmationIds: ["confirmation-call-shell-a"],
+    },
+    request,
+    paused.pendingApproval!
+  );
+
+  assert.equal(afterFirstApproval.stoppedReason, "approval_required");
+  assert.equal(afterFirstApproval.pendingApproval?.confirmationId, "confirmation-call-shell-b");
+  assert.equal(afterFirstApproval.pendingApproval?.completedToolResults.length, 1);
+  assert.deepEqual(executedCommands, ["cat a.txt"]);
+  assert.equal(center.getCallCount(), 1);
+  assert.equal(channel.requests.length, 1);
+
+  const afterSecondApproval = await resumeToolUseLoopFromApproval(
+    {
+      intelligenceChannel: channel,
+      toolCenter: center,
+      callerAgentId: "agent-test",
+      traceId: "trace-test",
+      goalId: "goal-test",
+      allowedTools: ["shell_command"],
+      approvedConfirmationIds: ["confirmation-call-shell-b"],
+    },
+    request,
+    afterFirstApproval.pendingApproval!
+  );
+
+  assert.equal(afterSecondApproval.stoppedReason, "completed");
+  assert.deepEqual(executedCommands, ["cat a.txt", "cat b.txt"]);
+  assert.equal(center.getCallCount(), 2);
+  assert.equal(channel.requests.length, 2);
+  assert.equal(channel.requests[1]?.sanitizedMessages.filter((message) => message.role === "tool").length, 2);
+  const nextModelRequestText = JSON.stringify(channel.requests[1]?.sanitizedMessages);
+  assert.equal(nextModelRequestText.includes("cat a.txt"), true);
+  assert.equal(nextModelRequestText.includes("cat b.txt"), true);
+});
+
+test("resumeToolUseLoopFromApproval rejects the wrong confirmation id without executing", async () => {
+  const channel = new SequenceIntelligenceChannel([
+    toolCallResponse("model-request-test", "call-delete", "delete_file"),
+    completedResponse("model-request-final", { summary: "must not be requested" }),
+  ]);
+  const center = new TestToolBroker();
+  center.register("delete_file", async () => ({ ok: true }), "read-write");
+  const request = createValidModelRequest();
+  const paused = await executeToolUseLoop(
+    {
+      intelligenceChannel: channel,
+      toolCenter: center,
+      callerAgentId: "agent-test",
+      traceId: "trace-test",
+      goalId: "goal-test",
+      allowedTools: ["delete_file"],
     },
     request
   );
@@ -876,8 +1118,8 @@ test("resumeToolUseLoopFromApproval rejects the wrong confirmation id without ex
     ...paused.pendingApproval!,
     confirmationRequest: {
       ...paused.pendingApproval!.confirmationRequest!,
-      title: "写入文件",
-      actionSummary: "写入文件：src/app.ts",
+      title: "删除文件",
+      actionSummary: "删除文件：src/app.ts",
       affectedResources: ["src/app.ts"],
     },
   };
@@ -889,7 +1131,7 @@ test("resumeToolUseLoopFromApproval rejects the wrong confirmation id without ex
       callerAgentId: "agent-test",
       traceId: "trace-test",
       goalId: "goal-test",
-      allowedTools: ["write_file"],
+      allowedTools: ["delete_file"],
       approvedConfirmationIds: ["confirmation-other"],
     },
     request,
@@ -898,8 +1140,8 @@ test("resumeToolUseLoopFromApproval rejects the wrong confirmation id without ex
 
   assert.equal(resumed.stoppedReason, "approval_required");
   const confirmation = resumed.toolCalls.find((call) => call.status === "approval_required")?.confirmationRequest;
-  assert.equal(confirmation?.title, "写入文件");
-  assert.equal(confirmation?.actionSummary, "写入文件：src/app.ts");
+  assert.equal(confirmation?.title, "删除文件");
+  assert.equal(confirmation?.actionSummary, "删除文件：src/app.ts");
   assert.deepEqual(confirmation?.affectedResources, ["src/app.ts"]);
   assert.equal(center.getCallCount(), 0);
   assert.equal(channel.requests.length, 1);
@@ -907,11 +1149,11 @@ test("resumeToolUseLoopFromApproval rejects the wrong confirmation id without ex
 
 test("resumeToolUseLoopFromApproval requires the matching confirmation before continuing", async () => {
   const channel = new SequenceIntelligenceChannel([
-    toolCallResponse("model-request-test", "call-write", "write_file"),
-    textResponse("model-request-final", "Final answer after approved write."),
+    toolCallResponse("model-request-test", "call-delete", "delete_file"),
+    textResponse("model-request-final", "Final answer after approved delete."),
   ]);
   const center = new TestToolBroker();
-  center.register("write_file", async () => ({ ok: true }), "read-write");
+  center.register("delete_file", async () => ({ ok: true }), "read-write");
   const request = createValidModelRequest();
   const paused = await executeToolUseLoop(
     {
@@ -920,7 +1162,7 @@ test("resumeToolUseLoopFromApproval requires the matching confirmation before co
       callerAgentId: "agent-test",
       traceId: "trace-test",
       goalId: "goal-test",
-      allowedTools: ["write_file"],
+      allowedTools: ["delete_file"],
     },
     request
   );
@@ -933,7 +1175,7 @@ test("resumeToolUseLoopFromApproval requires the matching confirmation before co
       callerAgentId: "agent-test",
       traceId: "trace-test",
       goalId: "goal-test",
-      allowedTools: ["write_file"],
+      allowedTools: ["delete_file"],
       approvedConfirmationIds: ["confirmation-other"],
     },
     request,
@@ -949,26 +1191,26 @@ test("resumeToolUseLoopFromApproval requires the matching confirmation before co
       callerAgentId: "agent-test",
       traceId: "trace-test",
       goalId: "goal-test",
-      allowedTools: ["write_file"],
-      approvedConfirmationIds: ["confirmation-call-write"],
+      allowedTools: ["delete_file"],
+      approvedConfirmationIds: ["confirmation-call-delete"],
     },
     request,
     paused.pendingApproval!
   );
 
   assert.equal(resumed.stoppedReason, "completed");
-  assert.equal(resumed.finalOutput.textOutput, "Final answer after approved write.");
+  assert.equal(resumed.finalOutput.textOutput, "Final answer after approved delete.");
   assert.equal(center.getCallCount(), 1);
 });
 
 test("resumeToolUseLoopFromConfirmationDecision returns denial as model-visible tool feedback", async () => {
   const eventLog = new InMemoryEventLog();
   const channel = new SequenceIntelligenceChannel([
-    toolCallResponse("model-request-test", "call-write", "write_file"),
-    textResponse("model-request-final", "我不会执行写入，改为说明可选方案。"),
+    toolCallResponse("model-request-test", "call-delete", "delete_file"),
+    textResponse("model-request-final", "我不会执行删除，改为说明可选方案。"),
   ]);
   const center = new TestToolBroker();
-  center.register("write_file", async () => ({ ok: true }), "read-write");
+  center.register("delete_file", async () => ({ ok: true }), "read-write");
   const request = createValidModelRequest();
   const paused = await executeToolUseLoop(
     {
@@ -977,7 +1219,7 @@ test("resumeToolUseLoopFromConfirmationDecision returns denial as model-visible 
       callerAgentId: "agent-test",
       traceId: "trace-test",
       goalId: "goal-test",
-      allowedTools: ["write_file"],
+      allowedTools: ["delete_file"],
       publishToolEvent: (message) => eventLog.append(message),
     },
     request
@@ -990,16 +1232,16 @@ test("resumeToolUseLoopFromConfirmationDecision returns denial as model-visible 
       callerAgentId: "agent-test",
       traceId: "trace-test",
       goalId: "goal-test",
-      allowedTools: ["write_file"],
+      allowedTools: ["delete_file"],
       publishToolEvent: (message) => eventLog.append(message),
     },
     request,
     paused.pendingApproval!,
-    { confirmationId: "confirmation-call-write", decision: "deny" }
+    { confirmationId: "confirmation-call-delete", decision: "deny" }
   );
 
   assert.equal(resumed.stoppedReason, "completed");
-  assert.equal(resumed.finalOutput.textOutput, "我不会执行写入，改为说明可选方案。");
+  assert.equal(resumed.finalOutput.textOutput, "我不会执行删除，改为说明可选方案。");
   assert.equal(center.getCallCount(), 0);
   assert.equal(resumed.toolCalls.at(-1)?.status, "cancelled");
   assert.equal(channel.requests.length, 2);
@@ -1132,6 +1374,72 @@ class SequenceIntelligenceChannel implements IntelligenceChannel {
 
   validateResponse(_request: ModelRequest, response: ModelResponse) {
     return response.validation;
+  }
+}
+
+function testToolDefinition(
+  name: string,
+  operationType: "read-only" | "read-write" | "execute" | "external-submit",
+  requiresConfirmation = false
+): ToolDefinition {
+  return {
+    name,
+    description: `${name} test tool`,
+    metadata: {
+      category: operationType === "execute" ? "terminal" : "filesystem",
+      riskLevel: operationType === "read-only" ? "low" : operationType === "read-write" ? "medium" : "high",
+      operationType,
+      requiresConfirmation,
+      visibleResultPolicy: {
+        userVisible: "summary-only",
+        maxPreviewChars: 800,
+        omitRawOutput: true,
+      },
+    },
+    inputSchema: { type: "object", properties: {} },
+  };
+}
+
+class ProjectedToolBroker implements ToolExecutionBroker {
+  private callCount = 0;
+
+  constructor(private readonly projectedContent: Readonly<Record<string, unknown>>) {}
+
+  list(): ToolDefinition[] {
+    return Object.keys(this.projectedContent).map((name) => testToolDefinition(name, name === "run_command" ? "execute" : "read-only"));
+  }
+
+  has(name: string): boolean {
+    return name in this.projectedContent;
+  }
+
+  async execute(request: ToolCallRequest, _context: ToolExecutionContext, permission?: ToolPermissionCheck): Promise<ToolCallResult> {
+    if (permission?.allowedTools !== undefined && !permission.allowedTools.includes(request.toolName)) {
+      return failedToolResult(request, `Tool ${request.toolName} is not allowed.`);
+    }
+    this.callCount += 1;
+    return {
+      callId: request.callId,
+      toolName: request.toolName,
+      input: request.input,
+      output: { omitted: true },
+      status: "completed",
+      durationMs: 1,
+      projection: {
+        agentContent: this.projectedContent[request.toolName],
+        uiSummary: `${request.toolName} completed`,
+        truncated: false,
+        redacted: true,
+      },
+    };
+  }
+
+  resetCallCount(): void {
+    this.callCount = 0;
+  }
+
+  getCallCount(): number {
+    return this.callCount;
   }
 }
 

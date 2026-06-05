@@ -397,14 +397,14 @@ test("BasicAgentRunExecutor resumes denied or guided confirmations through the s
     runId: run.runId,
     confirmationId: "confirmation-tool",
     decision: "guidance",
-    guidance: "不要执行写入，改为说明。",
+    guidance: "不要执行删除，改为说明。",
   });
   await waitUntil(() => runJobs.get(run.runId)?.status === "completed");
 
   assert.equal(resumedInputs.length, 1);
   const resumedInput = resumedInputs[0] as { readonly decision: string; readonly guidance?: string; readonly abortSignal?: AbortSignal };
   assert.equal(resumedInput.decision, "guidance");
-  assert.equal(resumedInput.guidance, "不要执行写入，改为说明。");
+  assert.equal(resumedInput.guidance, "不要执行删除，改为说明。");
   assert.equal(typeof resumedInput.abortSignal?.aborted, "boolean");
   assert.equal(runJobs.get(run.runId)?.confirmationDecisions[0]?.decision, "guidance");
   assert.equal(executor.get(run.runId)?.status, "completed");

@@ -16,12 +16,16 @@ export function evaluateToolCallSecurity(input: {
   readonly metadata: ToolDefinitionMetadata;
   readonly context: ToolSecurityEvaluationContext;
 }): ToolSecurityDecision {
+  const urlDecision = evaluateUrlSecurity(input.request);
+  if (urlDecision?.decision === "blocked") {
+    return urlDecision;
+  }
+
   const confirmationId = confirmationIdForToolCall(input.request.callId);
   if (input.context.approvedConfirmationIds?.includes(confirmationId) === true) {
     return { decision: "allow", reason: "Matching confirmation id was approved for this tool call." };
   }
 
-  const urlDecision = evaluateUrlSecurity(input.request);
   if (urlDecision !== undefined) {
     return urlDecision;
   }

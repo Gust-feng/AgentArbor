@@ -705,7 +705,7 @@ class FixtureToolCenter implements ToolExecutionBroker {
             source: "codebase",
             title: "src/app/desktop-agent-session.ts",
             uri: "repo://src/app/desktop-agent-session.ts",
-            snippet: "Desktop Root Agent tool evidence.",
+            snippet: "Desktop Agent tool evidence.",
             status: "available",
           },
         ],

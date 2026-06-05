@@ -281,9 +281,6 @@ function parseOptionalDesktopRunMode(value: unknown): PanelDesktopRunMode | unde
   if (value === "agent" || value === "deep") {
     return value;
   }
-  if (value === "work_session") {
-    return "deep";
-  }
   throw new PanelHttpError(400, "invalid_run_mode", "运行模式无效。");
 }
 

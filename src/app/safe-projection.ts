@@ -54,13 +54,7 @@ export function projectToolResult(input: {
     truncated,
   });
   return {
-    agentContent: {
-      summary: envelope.agentSummary,
-      evidenceRefs: envelope.evidenceRefs,
-      truncated: envelope.truncated,
-      redacted: envelope.redacted,
-      diagnosticRef: envelope.diagnosticRef,
-    },
+    agentContent: projectToolAgentContent(input.request, input.output, truncated),
     uiSummary: compactSafeText(summary ?? `${toolDisplayName(input.request.toolName)}已完成。`, input.maxPreviewChars ?? 800),
     diagnosticRef,
     display,
@@ -244,6 +238,84 @@ function projectToolDisplay(request: ToolCallRequest, output: unknown): ToolDisp
     kind: "generic_tool_summary",
     action,
     summary,
+  };
+}
+
+function projectToolAgentContent(request: ToolCallRequest, output: unknown, truncated: boolean): unknown {
+  const record = asRecord(output);
+  const result = asRecord(record.result);
+  const summary = stringOrUndefined(record.summary);
+  if (request.toolName === "read_file") {
+    return {
+      summary,
+      path: stringOrUndefined(result.path),
+      bytes: numberOrUndefined(result.bytes),
+      binary: result.binary === true,
+      content: typeof result.content === "string" ? redactOrdinaryFileFragment(result.content, 20_000) : undefined,
+      truncated,
+    };
+  }
+  if (request.toolName === "list_dir") {
+    return {
+      summary,
+      path: stringOrUndefined(result.path),
+      entries: Array.isArray(result.entries) ? result.entries.slice(0, 200).map(projectDirectoryEntry) : undefined,
+      totalEntries: numberOrUndefined(result.totalEntries),
+      truncated,
+    };
+  }
+  if (request.toolName === "grep_files") {
+    return {
+      summary,
+      query: stringOrUndefined(result.query),
+      path: stringOrUndefined(result.path),
+      matches: Array.isArray(result.matches) ? result.matches.slice(0, 80).map(projectGrepMatch) : undefined,
+      truncated,
+    };
+  }
+  if (request.toolName === "run_command" || request.toolName === "shell_command") {
+    return {
+      summary,
+      command: stringOrUndefined(result.command) ?? stringOrUndefined(asRecord(request.input).command),
+      args: stringArray(result.args).length > 0 ? stringArray(result.args) : stringArray(asRecord(request.input).args),
+      exitCode: numberOrUndefined(result.exitCode),
+      stdout: typeof result.stdout === "string" ? redactOrdinaryFileFragment(result.stdout, 8_000) : undefined,
+      stderr: typeof result.stderr === "string" ? redactOrdinaryFileFragment(result.stderr, 2_000) : undefined,
+      truncated,
+    };
+  }
+  if (request.toolName === "browser_snapshot") {
+    return {
+      summary,
+      url: stringOrUndefined(result.url),
+      title: stringOrUndefined(result.title),
+      text: typeof result.text === "string" ? redactOrdinaryMarkdownFragment(result.text, 6_000) : undefined,
+      truncated,
+    };
+  }
+  const display = projectToolDisplay(request, output);
+  return {
+    summary: compactSafeText(summary ?? `${toolDisplayName(request.toolName)}已完成。`, 1_200),
+    display,
+    truncated,
+  };
+}
+
+function projectDirectoryEntry(value: unknown): { readonly name?: string; readonly kind?: string; readonly bytes?: number } {
+  const record = asRecord(value);
+  return {
+    name: stringOrUndefined(record.name),
+    kind: stringOrUndefined(record.kind),
+    bytes: numberOrUndefined(record.bytes),
+  };
+}
+
+function projectGrepMatch(value: unknown): { readonly path?: string; readonly line?: number; readonly preview?: string } {
+  const record = asRecord(value);
+  return {
+    path: stringOrUndefined(record.path),
+    line: numberOrUndefined(record.line),
+    preview: typeof record.preview === "string" ? redactOrdinaryFileFragment(record.preview, 500) : undefined,
   };
 }
 

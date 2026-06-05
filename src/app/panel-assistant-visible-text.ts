@@ -1,7 +1,8 @@
+import { friendlyFailureCopy } from "./failure-copy.js";
+
 export function sanitizeFailureCopy(value: string): string {
   const text = userVisibleAnswer(value).trim();
-  const sdkNoBody = /^(\d{3})\s+status code \(no body\)$/i.exec(text);
-  const message = sdkNoBody === null ? text : `HTTP ${sdkNoBody[1]}`;
+  const message = friendlyFailureCopy(text);
   return message.length <= 1_000 ? message : `${message.slice(0, 999)}…`;
 }
 

@@ -212,6 +212,84 @@ test("OpenAI Responses adapter maps tools to function format and extracts tool c
   assert.equal(calls[0]?.body.tool_choice, "auto");
 });
 
+test("OpenAI Responses adapter gates parallel tool calls by visible tool risk", async () => {
+  const calls: { body: Record<string, unknown> }[] = [];
+  const fetch: FetchLike = async (_url, init) => {
+    calls.push({ body: JSON.parse(init.body) as Record<string, unknown> });
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        id: "resp-parallel-tools",
+        model: "gpt-4.1",
+        status: "completed",
+        output: [
+          {
+            type: "message",
+            role: "assistant",
+            content: [{ type: "output_text", text: JSON.stringify({ summary: "ok" }) }],
+          },
+        ],
+      }),
+    };
+  };
+  const provider = new OpenAIResponsesProvider({
+    baseUrl: "https://api.openai.com",
+    apiKey: "sk-test-key",
+    model: "gpt-4.1",
+    requestSettings: {
+      parallelToolCalls: true,
+    },
+    fetch,
+  });
+
+  await provider.complete(createValidModelRequest({
+    tools: [
+      {
+        name: "read_file",
+        description: "Read a file.",
+        inputSchema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
+        metadata: {
+          category: "filesystem",
+          riskLevel: "low",
+          operationType: "read-only",
+          requiresConfirmation: false,
+          visibleResultPolicy: {
+            userVisible: "summary-only",
+            maxPreviewChars: 800,
+            omitRawOutput: true,
+          },
+        },
+      },
+    ],
+    toolChoice: "auto",
+  }));
+  await provider.complete(createValidModelRequest({
+    tools: [
+      {
+        name: "shell_command",
+        description: "Run a shell command.",
+        inputSchema: { type: "object", properties: { command: { type: "string" } }, required: ["command"] },
+        metadata: {
+          category: "terminal",
+          riskLevel: "high",
+          operationType: "execute",
+          requiresConfirmation: true,
+          visibleResultPolicy: {
+            userVisible: "summary-only",
+            maxPreviewChars: 800,
+            omitRawOutput: true,
+          },
+        },
+      },
+    ],
+    toolChoice: "auto",
+  }));
+
+  assert.equal(calls[0]?.body.parallel_tool_calls, true);
+  assert.equal(calls[1]?.body.parallel_tool_calls, false);
+});
+
 test("OpenAI Responses adapter converts tool choice to named function format", async () => {
   const calls: { body: Record<string, unknown> }[] = [];
   const fetch: FetchLike = async (_url, init) => {
@@ -681,8 +759,10 @@ test("OpenAI Responses adapter handles response.incomplete status", async () => 
 
   const response = await provider.complete(createValidModelRequest());
 
-  assert.equal(response.status, "completed");
-  assert.equal(response.finishReason, "length");
+  assert.equal(response.status, "failed");
+  assert.equal(response.finishReason, "error");
+  assert.equal(response.failure?.kind, "provider_response");
+  assert.equal(response.failure?.retryable, true);
 });
 
 test("OpenAI Responses adapter handles stream failure event", async () => {

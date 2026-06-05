@@ -166,7 +166,7 @@ test("local create_file and edit_file stay inside the local strategy sandbox", a
   }
 });
 
-test("local edit_file applies multiple anchors atomically and rejects ambiguous edits", async () => {
+test("local edit_file validates all anchors before writing and rejects ambiguous edits", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tools-"));
   try {
     const file = path.join(root, "notes.txt");
@@ -204,14 +204,25 @@ test("local edit_file applies multiple anchors atomically and rejects ambiguous 
   }
 });
 
-test("local delete_file deletes only regular files and declares confirmation", async () => {
+test("local write tools confirm destructive deletion but not routine workspace writes", async () => {
+  const writeFileTool = createLocalWriteFileTool();
+  const createFileTool = createLocalCreateFileTool();
+  const editFileTool = createLocalEditFileTool();
+  const deleteFileTool = createLocalDeleteFileTool();
+
+  assert.equal(writeFileTool.definition.metadata?.requiresConfirmation, false);
+  assert.equal(createFileTool.definition.metadata?.requiresConfirmation, false);
+  assert.equal(editFileTool.definition.metadata?.requiresConfirmation, false);
+  assert.equal(deleteFileTool.definition.metadata?.requiresConfirmation, true);
+});
+
+test("local delete_file deletes only regular files", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tools-"));
   try {
     await mkdir(path.join(root, "dir"));
     await writeFile(path.join(root, "dir", "note.txt"), "remove me", "utf8");
     const deleteFile = createLocalDeleteFileTool(root);
 
-    assert.equal(deleteFile.definition.metadata?.requiresConfirmation, true);
     const deleted = await deleteFile.execute({ path: "dir/note.txt" }, context);
     assert.equal(asRecord(deleted).action, "delete_file");
     await assert.rejects(() => readFile(path.join(root, "dir", "note.txt"), "utf8"), /ENOENT/);
@@ -231,6 +242,9 @@ test("local run_command uses policy allowlists and internal workspace commands",
     await writeFile(path.join(root, "src", "note.txt"), "alpha", "utf8");
     const runCommand = createLocalRunCommandTool(root);
     const shellCommand = createLocalShellCommandTool(root);
+
+    assert.equal(runCommand.definition.metadata?.requiresConfirmation, true);
+    assert.equal(shellCommand.definition.metadata?.requiresConfirmation, true);
 
     const echoed = await runCommand.execute({ command: "echo", args: ["hello", "workspace"] }, context);
     const shellStyleEchoed = await runCommand.execute({ command: "echo approval-review" }, context);

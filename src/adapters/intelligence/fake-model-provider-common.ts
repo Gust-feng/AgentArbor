@@ -112,7 +112,7 @@ export function isLightweightQuestion(goalAnchor: string): boolean {
   return false;
 }
 
-export function shouldUpgradeToWorkSession(goalAnchor: string): boolean {
+export function looksLikeComplexDesktopTask(goalAnchor: string): boolean {
   const normalized = goalAnchor.toLowerCase().trim();
   if (isLightweightQuestion(goalAnchor)) {
     return false;

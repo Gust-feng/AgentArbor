@@ -126,6 +126,81 @@ test("assistant turn projection uses settled replay answer when turn content is 
   assert.equal(projection.animateOnMount, true);
 });
 
+test("assistant turn projection can show direct running reply previews before tool boundaries", () => {
+  const turns = [
+    turn("user-1", "user", "解释一下", "completed"),
+    { ...turn("assistant-1", "assistant", "这是一个普通回答预览。", "running"), title: "正在回复", runId: "run-1" },
+  ];
+  const projection = projectAssistantTranscriptTurn({
+    projectedTurn: projected(turns[1]!, "run-1"),
+    turnIndex: 1,
+    turns,
+    latestAssistantTurnId: latestAssistantTurnIdForTurns(turns),
+    previousEmptyShells: assistantShellSnapshot([]),
+    run: { runId: "run-1", status: "running" },
+    transcriptNodes: [],
+  });
+
+  assert.equal(projection.content, "这是一个普通回答预览。");
+});
+
+test("assistant turn projection does not treat running preview content as an answer", () => {
+  const turns = [
+    turn("user-1", "user", "运行 dir", "completed"),
+    { ...turn("assistant-1", "assistant", "已批准本次操作，运行继续。", "running"), runId: "run-1" },
+  ];
+  const projection = projectAssistantTranscriptTurn({
+    projectedTurn: projected(turns[1]!, "run-1"),
+    turnIndex: 1,
+    turns,
+    latestAssistantTurnId: latestAssistantTurnIdForTurns(turns),
+    previousEmptyShells: assistantShellSnapshot([]),
+    run: { runId: "run-1", status: "running" },
+    transcriptNodes: [
+      node({
+        nodeId: "tool-completed",
+        runId: "run-1",
+        sequence: 5,
+        kind: "tool",
+        eventType: "tool.completed",
+        summary: "dir · exit 0",
+      }),
+    ],
+  });
+
+  assert.equal(projection.content, "");
+  assert.equal(projection.keepStreamMounted, true);
+});
+
+test("assistant turn projection hides stale preview while confirmation is pending", () => {
+  const turns = [
+    turn("user-1", "user", "运行 dir", "completed"),
+    { ...turn("assistant-1", "assistant", "很好，探索已经开始！", "running"), runId: "run-1" },
+  ];
+  const projection = projectAssistantTranscriptTurn({
+    projectedTurn: projected(turns[1]!, "run-1"),
+    turnIndex: 1,
+    turns,
+    latestAssistantTurnId: latestAssistantTurnIdForTurns(turns),
+    previousEmptyShells: assistantShellSnapshot([]),
+    run: { runId: "run-1", status: "running" },
+    transcriptNodes: [
+      node({
+        nodeId: "confirmation",
+        runId: "run-1",
+        sequence: 3,
+        kind: "confirmation",
+        eventType: "confirmation.needed",
+        summary: "运行命令：dir",
+      }),
+    ],
+    pending: { confirmationId: "confirmation-call-dir", runId: "run-1" },
+  });
+
+  assert.equal(projection.content, "");
+  assert.equal(projection.pending?.confirmationId, "confirmation-call-dir");
+});
+
 test("assistant turn projection scopes pending confirmations to the owning run", () => {
   const turns = [
     turn("user-1", "user", "删除文件", "completed"),

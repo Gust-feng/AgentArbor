@@ -225,6 +225,32 @@ export function createOpenAiStreamTextResponse(
   };
 }
 
+export function createOpenAiChatStreamTextResponse(
+  model: string,
+  chunks: readonly string[]
+): Awaited<ReturnType<PanelProviderFetch>> {
+  return {
+    ok: true,
+    status: 200,
+    body: sseChunks(chunks.map((chunk, index) => ({
+      id: `chatcmpl-test-stream-${index}`,
+      object: "chat.completion.chunk",
+      created: 1_776_000_000,
+      model,
+      choices: [
+        {
+          index: 0,
+          delta: { content: chunk },
+          finish_reason: index === chunks.length - 1 ? "stop" : null,
+        },
+      ],
+    }))),
+    json: async () => {
+      throw new Error("Streaming response should not be read through json().");
+    },
+  };
+}
+
 export function createOpenAiStreamReasoningTextResponse(
   model: string,
   chunks: readonly { readonly kind: "reasoning" | "output"; readonly delta: string }[]

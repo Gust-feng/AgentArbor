@@ -66,6 +66,14 @@ test("catchup text fragments do not repair compact replay text", () => {
   assert.equal(state.catchup, "Theuserisasking");
 });
 
+test("catchup text fragments can repair compact replay text in readable mode", () => {
+  let state = appendCatchupTextFragment("The user is", "", "Theuser", { boundary: "readable" });
+  assert.equal(state.text, "The user is");
+  state = appendCatchupTextFragment(state.text, state.catchup, "isasking", { boundary: "readable" });
+  assert.equal(state.text, "The user is asking");
+  assert.equal(state.catchup, "Theuser isasking");
+});
+
 test("snapshot text fragments do not rewrite compact-equivalent text", () => {
   assert.equal(appendSnapshotTextFragment("The user is", "Theuserisasking"), "The user isTheuserisasking");
   assert.equal(appendSnapshotTextFragment("HelloWorld", "Hello World!"), "HelloWorldHello World!");
@@ -83,6 +91,14 @@ test("text stream assembly centralizes live replay catch-up policy", () => {
   replayOnly = appendTextStreamAssembly(replayOnly, "ha", textStreamFragmentSourceFromEventId("run-1:event:10:model.output.delta:1"));
   replayOnly = appendTextStreamAssembly(replayOnly, "ha", textStreamFragmentSourceFromEventId("run-1:event:10:model.output.delta:2"));
   assert.equal(replayOnly.text, "haha");
+});
+
+test("text stream assembly can apply readable live replay catch-up", () => {
+  let stream = emptyTextStreamAssembly();
+  stream = appendTextStreamAssembly(stream, "The user is", textStreamFragmentSourceFromEventId("run-1:live:model.output.delta:model-1:1"), { boundary: "readable" });
+  stream = appendTextStreamAssembly(stream, "Theuser", textStreamFragmentSourceFromEventId("run-1:event:10:model.output.delta:1"), { boundary: "readable" });
+  stream = appendTextStreamAssembly(stream, "isasking", textStreamFragmentSourceFromEventId("run-1:event:10:model.output.delta:2"), { boundary: "readable" });
+  assert.equal(stream.text, "The user is asking");
 });
 
 test("readable boundary mode is explicit and limited to non-raw fragments", () => {

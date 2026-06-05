@@ -89,6 +89,8 @@ import {
   publishParentSynthesisCompleted,
 } from "./underground-events.js";
 
+// Legacy explicit deep prototype. Keep it isolated from the default Desktop Agent path
+// until the deep / Agent cluster product entry is restarted with a fresh contract.
 export async function runCognitiveWorkSession(
   goal = "Analyze the current AgentArbor project and produce an optimization report.",
   options: RunCognitiveWorkSessionOptions = {}

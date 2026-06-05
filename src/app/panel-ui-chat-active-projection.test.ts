@@ -106,6 +106,74 @@ test("active chat projection ignores empty work session answers", () => {
   assert.equal(projection.answer, "详情回答");
 });
 
+test("active chat projection can show direct running reply previews before tool boundaries", () => {
+  const projection = projectChatActive({
+    conversation: {
+      turns: [
+        userTurn("user-1", "解释一下"),
+        { ...assistantTurn("assistant-1", "这是一个普通回答预览。", "running"), title: "正在回复", runId: "run-1" },
+      ],
+      activeRunId: "run-1",
+    },
+    run: run("run-1", "running", 2),
+    transcriptNodes: [],
+  });
+
+  assert.equal(projection.answer, "这是一个普通回答预览。");
+});
+
+test("active chat projection does not use running conversation preview as an answer", () => {
+  const projection = projectChatActive({
+    conversation: {
+      turns: [
+        userTurn("user-1", "运行 dir"),
+        { ...assistantTurn("assistant-1", "已批准本次操作，运行继续。", "running"), runId: "run-1" },
+      ],
+      activeRunId: "run-1",
+    },
+    run: run("run-1", "running", 5),
+    transcriptNodes: [node("run-1", 5, "tool", "tool.completed", "dir · exit 0")],
+  });
+
+  assert.equal(projection.answer, undefined);
+  assert.equal(projection.hasVisibleContent, true);
+});
+
+test("active chat projection accepts running reply after the latest tool boundary", () => {
+  const projection = projectChatActive({
+    conversation: {
+      turns: [
+        userTurn("user-1", "运行 dir"),
+        { ...assistantTurn("assistant-1", "命令结果显示当前目录可以读取。", "running"), title: "正在回复", runId: "run-1" },
+      ],
+      activeRunId: "run-1",
+    },
+    run: run("run-1", "running", 6),
+    transcriptNodes: [node("run-1", 5, "tool", "tool.completed", "dir · exit 0")],
+  });
+
+  assert.equal(projection.answer, "命令结果显示当前目录可以读取。");
+});
+
+test("active chat projection hides stale conversation preview while confirmation is pending", () => {
+  const projection = projectChatActive({
+    conversation: {
+      turns: [
+        userTurn("user-1", "运行 dir"),
+        { ...assistantTurn("assistant-1", "很好，探索已经开始！", "running"), runId: "run-1" },
+      ],
+      activeRunId: "run-1",
+    },
+    run: run("run-1", "running", 3),
+    transcriptNodes: [node("run-1", 3, "confirmation", "confirmation.needed", "运行命令：dir")],
+    pending: { confirmationId: "confirmation-call-dir", runId: "run-1" },
+  });
+
+  assert.equal(projection.answer, undefined);
+  assert.equal(projection.pending?.confirmationId, "confirmation-call-dir");
+  assert.equal(projection.hasVisibleContent, true);
+});
+
 test("active chat projection treats blocked runs as non-running and shows the problem", () => {
   const projection = projectChatActive({
     conversation: {
@@ -168,6 +236,7 @@ function assistantTurn(turnId: string, content: string, status: string): ChatAct
   return {
     turnId,
     role: "assistant",
+    title: "助手",
     content,
     status,
   };

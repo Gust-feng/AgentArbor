@@ -163,6 +163,210 @@ test("OpenAI-compatible Chat Completions adapter streams safe output deltas", as
   assert.equal(JSON.stringify(deltas).includes("sk-test-secret-token"), false);
 });
 
+test("OpenAI-compatible Chat adapter normalizes cumulative content snapshots from incremental profiles", async () => {
+  const deltas: Array<{ kind: string | undefined; delta: string }> = [];
+  const snapshots = [
+    "## 能力演示总结\n\n刚才",
+    "## 能力演示总结\n\n刚才我实时展示",
+    "## 能力演示总结\n\n刚才我实时展示了以下能力。",
+  ];
+  const fetch: FetchLike = async () => ({
+    ok: true,
+    status: 200,
+    body: sseChunks(snapshots.map((content, index) => ({
+      model: "snapshot-stream-model",
+      choices: [{ delta: { content }, finish_reason: index === snapshots.length - 1 ? "stop" : null }],
+    }))),
+    json: async () => {
+      throw new Error("Streaming response should not be read through json().");
+    },
+  });
+  const provider = new OpenAICompatibleChatCompletionsProvider({
+    baseUrl: "https://llm.example.test",
+    apiKey: "sk-test-secret-token",
+    model: "snapshot-stream-model",
+    fetch,
+    stream: true,
+    onOutputDelta: (delta) => {
+      deltas.push({ kind: delta.kind, delta: delta.delta });
+    },
+  });
+
+  const response = await provider.complete(createValidModelRequest({
+    outputContract: {
+      contractId: "test.text.v1",
+      outputKind: "explanation",
+      format: "text",
+    },
+  }));
+
+  assert.equal(response.status, "completed");
+  assert.equal(response.textOutput, snapshots.at(-1));
+  assert.equal(deltas.map((delta) => delta.delta).join(""), snapshots.at(-1));
+  assert.equal(deltas.map((delta) => delta.delta).join("").split("## 能力演示总结").length - 1, 1);
+});
+
+test("OpenAI-compatible Chat adapter retries without streaming when stream parsing fails", async () => {
+  const calls: { body: Record<string, unknown> }[] = [];
+  const fetch: FetchLike = async (_url, init) => {
+    const body = JSON.parse(init.body) as Record<string, unknown>;
+    calls.push({ body });
+    if (body.stream === true) {
+      return {
+        ok: true,
+        status: 200,
+        body: (async function* () {
+          yield `data: ${JSON.stringify({
+            model: "fallback-model",
+            choices: [{ delta: { content: "partial" }, finish_reason: null }],
+          })}\n\n`;
+          throw new Error("stream parser stopped before completion");
+        })(),
+        json: async () => {
+          throw new Error("Streaming response should not be read through json().");
+        },
+      };
+    }
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        id: "chatcmpl-fallback",
+        model: "fallback-model",
+        choices: [
+          {
+            message: { role: "assistant", content: JSON.stringify({ summary: "Fallback completed." }) },
+            finish_reason: "stop",
+          },
+        ],
+      }),
+    };
+  };
+  const provider = new OpenAICompatibleChatCompletionsProvider({
+    baseUrl: "https://llm.example.test",
+    apiKey: "sk-test-secret-token",
+    model: "fallback-model",
+    fetch,
+    stream: true,
+    forceStreaming: true,
+  });
+
+  const response = await provider.complete(createValidModelRequest());
+
+  assert.equal(response.status, "completed");
+  assert.deepEqual(response.structuredOutput, { summary: "Fallback completed." });
+  assert.deepEqual(calls.map((call) => call.body.stream), [true, undefined]);
+});
+
+test("OpenAI-compatible Chat adapter fails incomplete final finish reasons", async () => {
+  for (const finishReason of ["length", "content_filter"] as const) {
+    const fetch: FetchLike = async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        id: `chatcmpl-${finishReason}`,
+        model: "gpt-compatible-test",
+        choices: [
+          {
+            message: { role: "assistant", content: JSON.stringify({ summary: "Incomplete provider response." }) },
+            finish_reason: finishReason,
+          },
+        ],
+      }),
+    });
+    const provider = new OpenAICompatibleChatCompletionsProvider({
+      baseUrl: "https://llm.example.test",
+      apiKey: "sk-test-secret-token",
+      model: "gpt-compatible-test",
+      fetch,
+    });
+
+    const response = await provider.complete(createValidModelRequest());
+
+    assert.equal(response.status, "failed");
+    assert.equal(response.finishReason, "error");
+    assert.equal(response.failure?.kind, "provider_response");
+    assert.equal(response.failure?.retryable, finishReason === "length");
+  }
+});
+
+
+test("OpenAI-compatible Chat adapter gates parallel tool calls by visible tool risk", async () => {
+  const calls: { body: Record<string, unknown> }[] = [];
+  const fetch: FetchLike = async (_url, init) => {
+    calls.push({ body: JSON.parse(init.body) as Record<string, unknown> });
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        id: "chatcmpl-parallel-tools",
+        model: "gpt-compatible-test",
+        choices: [
+          {
+            message: { role: "assistant", content: JSON.stringify({ summary: "ok" }) },
+            finish_reason: "stop",
+          },
+        ],
+      }),
+    };
+  };
+  const provider = new OpenAICompatibleChatCompletionsProvider({
+    baseUrl: "https://llm.example.test",
+    apiKey: "sk-test-secret-token",
+    model: "gpt-compatible-test",
+    requestSettings: {
+      parallelToolCalls: true,
+    },
+    fetch,
+  });
+
+  await provider.complete(createValidModelRequest({
+    tools: [
+      {
+        name: "read_file",
+        description: "Read a file.",
+        inputSchema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
+        metadata: {
+          category: "filesystem",
+          riskLevel: "low",
+          operationType: "read-only",
+          requiresConfirmation: false,
+          visibleResultPolicy: {
+            userVisible: "summary-only",
+            maxPreviewChars: 800,
+            omitRawOutput: true,
+          },
+        },
+      },
+    ],
+    toolChoice: "auto",
+  }));
+  await provider.complete(createValidModelRequest({
+    tools: [
+      {
+        name: "shell_command",
+        description: "Run a shell command.",
+        inputSchema: { type: "object", properties: { command: { type: "string" } }, required: ["command"] },
+        metadata: {
+          category: "terminal",
+          riskLevel: "high",
+          operationType: "execute",
+          requiresConfirmation: true,
+          visibleResultPolicy: {
+            userVisible: "summary-only",
+            maxPreviewChars: 800,
+            omitRawOutput: true,
+          },
+        },
+      },
+    ],
+    toolChoice: "auto",
+  }));
+
+  assert.equal(calls[0]?.body.parallel_tool_calls, true);
+  assert.equal(calls[1]?.body.parallel_tool_calls, false);
+});
+
 test("OpenAI-compatible Chat adapter applies DeepSeek reasoning controls and extracts reasoning_content", async () => {
   const calls: { body: Record<string, unknown> }[] = [];
   const fetch: FetchLike = async (_url, init) => {

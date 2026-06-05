@@ -177,6 +177,18 @@ export async function normalizeOpenAICompatibleStreamResponse(input: {
           toolCalls: completedToolCalls,
           protocolExtensions: protocolExtensionsFromMap(protocolExtensions),
         };
+  const finalFinishReason = completedToolCalls.length > 0 ? "tool_call" : finishReason;
+  const incompleteResponse = failedResponseForIncompleteStreamFinish({
+    request: input.request,
+    providerId: input.providerId,
+    providerKind: input.providerKind,
+    protocolKind: input.protocolKind,
+    model,
+    finishReason: finalFinishReason,
+  });
+  if (incompleteResponse !== undefined) {
+    return incompleteResponse;
+  }
 
   return {
     responseId: createId("model-response"),
@@ -199,10 +211,39 @@ export async function normalizeOpenAICompatibleStreamResponse(input: {
     usage: {
       latencyMs: input.latencyMs,
     },
-    finishReason: completedToolCalls.length > 0 ? "tool_call" : finishReason,
+    finishReason: finalFinishReason,
     validation: pendingModelOutputValidation(),
     completedAt: nowIso(),
   };
+}
+
+function failedResponseForIncompleteStreamFinish(input: {
+  readonly request: ModelRequest;
+  readonly providerId: string;
+  readonly providerKind: "openai_compatible";
+  readonly protocolKind: "openai_compatible_chat_completions";
+  readonly model: string;
+  readonly finishReason: ModelResponse["finishReason"];
+}): ModelResponse | undefined {
+  if (input.finishReason !== "length" && input.finishReason !== "content_filter" && input.finishReason !== "error") {
+    return undefined;
+  }
+  const message = input.finishReason === "length"
+    ? "OpenAI-compatible provider stream returned a truncated response."
+    : input.finishReason === "content_filter"
+      ? "OpenAI-compatible provider stream filtered the response content."
+      : "OpenAI-compatible provider stream returned an error finish reason.";
+  return createFailedModelResponse({
+    requestId: input.request.requestId,
+    providerId: input.providerId,
+    providerKind: input.providerKind,
+    protocolKind: input.protocolKind,
+    model: input.model,
+    outputKind: input.request.outputContract.outputKind,
+    failureKind: "provider_response",
+    retryable: input.finishReason === "length",
+    message,
+  });
 }
 
 function emitReasoningDelta(input: {
@@ -261,13 +302,32 @@ function streamDeltaText(input: {
     return { delta: "", nextPrevious: input.previous };
   }
   if (input.mode === "incremental") {
-    return { delta: input.next, nextPrevious: input.previous };
+    return incrementalStreamDeltaText(input.previous, input.next);
   }
   if (input.next.startsWith(input.previous)) {
     return { delta: input.next.slice(input.previous.length), nextPrevious: input.next };
   }
   const overlap = longestSuffixPrefixOverlap(input.previous, input.next);
   return { delta: input.next.slice(overlap), nextPrevious: input.next };
+}
+
+function incrementalStreamDeltaText(
+  previous: string,
+  next: string
+): { readonly delta: string; readonly nextPrevious: string } {
+  // Some OpenAI-compatible endpoints still emit cumulative snapshots under an
+  // incremental profile. Normalize that at the adapter boundary so the rest of
+  // the app only sees append-only deltas.
+  if (previous.length === 0) {
+    return { delta: next, nextPrevious: next };
+  }
+  if (next.length > previous.length && next.startsWith(previous)) {
+    return { delta: next.slice(previous.length), nextPrevious: next };
+  }
+  if (next.length >= 16 && previous.startsWith(next)) {
+    return { delta: "", nextPrevious: previous };
+  }
+  return { delta: next, nextPrevious: `${previous}${next}` };
 }
 
 function longestSuffixPrefixOverlap(left: string, right: string): number {

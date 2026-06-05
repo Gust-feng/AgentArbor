@@ -112,7 +112,7 @@ export class OpenAICompatibleChatCompletionsProvider implements ModelProvider {
 
       if (stream) {
         const stream = await client.chat.completions.create(requestBody as never, { signal: options.abortSignal });
-        return await normalizeOpenAICompatibleStreamResponse({
+        const streamed = await normalizeOpenAICompatibleStreamResponse({
           request,
           stream: stream as unknown as AsyncIterable<unknown>,
           providerId: this.providerId,
@@ -123,6 +123,27 @@ export class OpenAICompatibleChatCompletionsProvider implements ModelProvider {
           latencyMs: Date.now() - startedAt,
           emitDelta: this.onOutputDelta,
         });
+        if (shouldRetryWithoutStreaming(streamed, options.abortSignal)) {
+          const fallbackBody = buildOpenAICompatibleChatRequestBody({
+            request,
+            model: this.model,
+            dialect: this.dialect,
+            stream: false,
+            requestSettings: this.requestSettings,
+          });
+          const fallback = await client.chat.completions.create(fallbackBody as never, { signal: options.abortSignal });
+          return normalizeOpenAICompatibleResponse({
+            request,
+            raw: fallback,
+            providerId: this.providerId,
+            providerKind: this.providerKind,
+            protocolKind: this.protocolKind,
+            model: this.model,
+            dialect: this.dialect,
+            latencyMs: Date.now() - startedAt,
+          });
+        }
+        return streamed;
       }
 
       const raw = await client.chat.completions.create(requestBody as never, { signal: options.abortSignal });
@@ -199,6 +220,16 @@ function failureKindForStatus(status: number): ModelFailureKind {
     return "provider_rate_limit";
   }
   return "provider_response";
+}
+
+function shouldRetryWithoutStreaming(
+  response: ModelResponse,
+  abortSignal: AbortSignal | undefined
+): boolean {
+  return abortSignal?.aborted !== true &&
+    response.status === "failed" &&
+    response.failure?.kind === "provider_response" &&
+    /stream response could not be parsed/i.test(response.failure.message);
 }
 
 function statusFromError(error: unknown): number | undefined {

@@ -23,16 +23,16 @@ export function assistantToolCallMessage(
 
 export function toolResultMessage(result: ToolCallResult): ModelMessage {
   const envelope = result.projection?.envelope;
-  const modelOutput = envelope !== undefined
-    ? {
-        summary: envelope.agentSummary,
-        evidenceRefs: envelope.evidenceRefs,
-        truncated: envelope.truncated,
-        redacted: envelope.redacted,
-        diagnosticRef: envelope.diagnosticRef,
-      }
-    : result.projection?.agentContent !== undefined
-      ? result.projection.agentContent
+  const modelOutput = result.projection?.agentContent !== undefined
+    ? result.projection.agentContent
+    : envelope !== undefined
+      ? {
+          summary: envelope.agentSummary,
+          evidenceRefs: envelope.evidenceRefs,
+          truncated: envelope.truncated,
+          redacted: envelope.redacted,
+          diagnosticRef: envelope.diagnosticRef,
+        }
       : toSafeToolEventValue(result.output);
   return {
     role: "tool",

@@ -15,6 +15,7 @@ import {
 export type ChatActiveConversationTurn = {
   readonly turnId: string;
   readonly role: "user" | "assistant";
+  readonly title?: string;
   readonly content: string;
   readonly status: string;
   readonly runId?: string;
@@ -98,11 +99,21 @@ export function projectChatActive<TDeliverable, TPending>(
         turn.runId === currentRunId &&
         turn.content.trim().length > 0
       ));
-  const answer = firstNonEmptyText([
+  const pending = input.pending;
+  const turnContentAnswer = canUseConversationTurnAsAnswer({
+    run: input.run,
+    pending,
+    turn: currentRunAssistantTurn,
+    transcriptNodes: currentRunProjection.nodes,
+    currentRunId,
+  })
+    ? currentRunAssistantTurn?.content
+    : undefined;
+  const answer = pending === undefined ? firstNonEmptyText([
     input.workSessionAnswer,
     input.detailAnswer,
-    currentRunAssistantTurn?.content,
-  ]);
+    turnContentAnswer,
+  ]) : undefined;
   const liveAnswer = currentRunProjection.answer;
   const running = input.run !== undefined && !terminalStatuses.has(input.run.status);
   const statusNotice = shouldShowStatusNotice(input.problem, input.appError, input.run, currentRunAssistantTurn)
@@ -115,7 +126,7 @@ export function projectChatActive<TDeliverable, TPending>(
     transcriptNodes: input.transcriptNodes,
     hasAnswer: hasNonEmptyText(answer),
     hasLiveAnswer: liveAnswer !== undefined,
-    hasPendingConfirmation: input.pending !== undefined,
+    hasPendingConfirmation: pending !== undefined,
     hasDeliverable: input.deliverable !== undefined,
   });
   const latestTurn = workline.turns.at(-1);
@@ -136,7 +147,7 @@ export function projectChatActive<TDeliverable, TPending>(
     currentRunProjection,
     transcriptNodes: input.transcriptNodes,
     answer,
-    pending: input.pending,
+    pending,
     deliverable: input.deliverable,
     liveAnswer,
     standaloneAssistant,
@@ -150,6 +161,34 @@ export function projectChatActive<TDeliverable, TPending>(
 
 const terminalStatuses = new Set<WorklineTaskStatus>(["completed", "failed", "cancelled", "blocked"]);
 const refreshingStatuses = new Set<WorklineTaskStatus>(["queued", "planning", "running", "pending"]);
+
+function canUseConversationTurnAsAnswer<TPending>(input: {
+  readonly run: ChatActiveRun | undefined;
+  readonly pending: TPending | undefined;
+  readonly turn: ChatActiveConversationTurn | undefined;
+  readonly transcriptNodes: readonly ChatActiveTranscriptNode[];
+  readonly currentRunId: string | undefined;
+}): boolean {
+  if (input.turn === undefined || input.pending !== undefined) return false;
+  if (input.run === undefined) return true;
+  if (terminalStatuses.has(input.run.status)) return true;
+  if (input.run.status !== "running" || input.turn.title !== "正在回复") {
+    return false;
+  }
+  const currentNodes = input.currentRunId === undefined
+    ? []
+    : input.transcriptNodes.filter((node) => node.runId === input.currentRunId);
+  const latestNodeSequence = currentNodes.reduce((latest, node) => Math.max(latest, node.sequence), 0);
+  return !hasToolOrApprovalBoundary(currentNodes) || input.run.eventCursor.lastSequence > latestNodeSequence;
+}
+
+function hasToolOrApprovalBoundary(nodes: readonly ChatActiveTranscriptNode[]): boolean {
+  return nodes.some((node) =>
+    node.kind === "tool" ||
+    node.kind === "confirmation" ||
+    node.kind === "user_decision"
+  );
+}
 
 function activeLiveForCurrentRun(
   run: ChatActiveRun | undefined,

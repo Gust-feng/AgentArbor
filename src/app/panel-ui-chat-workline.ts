@@ -14,6 +14,7 @@ export type WorklineTaskStatus =
 export type WorklineConversationTurn = {
   readonly turnId: string;
   readonly role: "user" | "assistant";
+  readonly title?: string;
   readonly content: string;
   readonly status: string;
   readonly runId?: string;

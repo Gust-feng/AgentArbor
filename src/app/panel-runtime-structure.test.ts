@@ -13,7 +13,7 @@ test("basic agent work session keeps projection modules split", async () => {
 
   assert.equal(workSession.includes('from "./work-session-transcript.js"'), true);
   assert.equal(workSession.includes('from "./work-session-context.js"'), true);
-  assert.equal(workSession.includes("transcriptNodesFromRunEvents(visibleEvents, pendingConfirmation)"), true);
+  assert.equal(workSession.includes("transcriptNodesFromRunEvents(transcriptSourceEvents(input.events), pendingConfirmation)"), true);
   assert.equal(workSession.includes("function transcriptNodesFromRunEvents"), false);
   assert.equal(workSession.includes("function transcriptNodeFromRunEvent"), false);
   assert.equal(workSession.includes("updatePendingReasoningNode"), false);

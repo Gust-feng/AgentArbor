@@ -111,6 +111,11 @@ export function workflowVisibleNodes<TNode extends ProjectableTranscriptNode>(no
   const sorted = [...nodes]
     .filter((node) => !isLowValueNode(node))
     .sort(compareNodeOrder);
+  const confirmationToolCallIds = new Set(
+    sorted
+      .filter((node) => node.kind === "confirmation")
+      .flatMap(toolCallIdsForNode)
+  );
   const result: TNode[] = [];
   for (const node of sorted) {
     if (node.kind === "thinking") {
@@ -123,7 +128,7 @@ export function workflowVisibleNodes<TNode extends ProjectableTranscriptNode>(no
       result.push(node);
       continue;
     }
-    if (isDuplicatePreparingToolRequest(node, result)) {
+    if (isDuplicatePreparingToolRequest(node, confirmationToolCallIds)) {
       continue;
     }
     result.push(node);
@@ -162,20 +167,13 @@ function toolCallIdsForNode(node: ProjectableTranscriptNode): readonly string[] 
 
 function isDuplicatePreparingToolRequest(
   node: ProjectableTranscriptNode,
-  previousNodes: readonly ProjectableTranscriptNode[]
+  confirmationToolCallIds: ReadonlySet<string>
 ): boolean {
   if (node.kind !== "tool" || node.eventType !== "tool.requested" || node.phase !== "preparing") {
     return false;
   }
   const ids = toolCallIdsForNode(node);
-  if (ids.length === 0) {
-    return false;
-  }
-  const confirmation = previousNodes.find((previous) =>
-    previous.kind === "confirmation" &&
-    toolCallIdsForNode(previous).some((id) => ids.includes(id))
-  );
-  return confirmation !== undefined;
+  return ids.length > 0 && ids.some((id) => confirmationToolCallIds.has(id));
 }
 
 function compareNodeOrder(left: ProjectableTranscriptNode, right: ProjectableTranscriptNode): number {

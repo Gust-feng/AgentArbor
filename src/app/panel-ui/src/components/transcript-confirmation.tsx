@@ -78,7 +78,7 @@ export function confirmationDisplayTitle(confirmation: ConfirmationProjection | 
 }
 
 function isGenericConfirmationTitle(value: string): boolean {
-  return /^(?:需要确认|待确认|确认继续|确认执行命令)$/i.test(value.trim());
+  return /^(?:需要确认|待确认|确认继续|确认执行命令|运行命令|执行 Shell)$/i.test(value.trim());
 }
 
 export function confirmationActionPreview(action: string): string {

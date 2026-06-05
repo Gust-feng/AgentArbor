@@ -11,13 +11,15 @@ import {
 } from "./context-ledger.js";
 
 const sourceDirectory = path.join(process.cwd(), "src", "app", "basic-agent-runtime");
+const promptDirectory = path.join(process.cwd(), "src", "app", "agent-prompts");
 
 test("context ledger keeps safe text and read model projection split from selection", async () => {
-  const [ledgerSource, itemsSource, safeTextSource, readModelSource] = await Promise.all([
+  const [ledgerSource, itemsSource, safeTextSource, readModelSource, promptSource] = await Promise.all([
     readFile(path.join(sourceDirectory, "context-ledger.ts"), "utf8"),
     readFile(path.join(sourceDirectory, "context-ledger-items.ts"), "utf8"),
     readFile(path.join(sourceDirectory, "context-ledger-safe-text.ts"), "utf8"),
     readFile(path.join(sourceDirectory, "context-ledger-read-model.ts"), "utf8"),
+    readFile(path.join(promptDirectory, "desktop-root-agent.ts"), "utf8"),
   ]);
 
   assert.equal(ledgerSource.includes('from "./context-ledger-items.js"'), true);
@@ -40,6 +42,11 @@ test("context ledger keeps safe text and read model projection split from select
   assert.equal(ledgerSource.includes("function safePlain"), false);
   assert.equal(itemsSource.includes("export function buildContextLedgerDraftItems"), true);
   assert.equal(itemsSource.includes("export function toolEvidenceItems"), true);
+  assert.equal(itemsSource.includes("DESKTOP_ROOT_AGENT_PROMPT"), true);
+  assert.equal(itemsSource.includes("You are AgentArbor Desktop Agent"), false);
+  assert.equal(promptSource.includes("DESKTOP_ROOT_AGENT_PROMPT"), true);
+  assert.equal(promptSource.includes("prompt:desktop-root-agent:v1"), true);
+  assert.equal(promptSource.includes("You are AgentArbor Desktop Agent"), true);
   assert.equal(itemsSource.includes("function systemContextItem"), true);
   assert.equal(itemsSource.includes("function skillContextItems"), true);
   assert.equal(itemsSource.includes("function historyContextItems"), true);
@@ -100,8 +107,11 @@ test("context ledger records goal, history, attachments, skills, budget, and saf
   });
 
   assert.equal(ledger.runId, "run-ledger");
-  assert.equal(ledger.items.some((item) => item.sourceKind === "system"), true);
-  assert.equal(ledger.items.some((item) => item.sourceKind === "system" && item.summary.includes("Do not write shell commands")), true);
+  const systemItem = ledger.items.find((item) => item.sourceKind === "system");
+  assert.notEqual(systemItem, undefined);
+  assert.equal(systemItem?.itemId, "context:system:desktop-root-agent");
+  assert.equal(systemItem?.refs.some((ref) => ref.id === "prompt:desktop-root-agent:v1"), true);
+  assert.equal(systemItem?.summary.includes("Do not claim that a command"), true);
   assert.equal(ledger.items.some((item) => item.sourceKind === "conversation_recent_turn"), true);
   assert.equal(ledger.items.some((item) => item.sourceKind === "task_soil_ref"), true);
   assert.equal(ledger.items.some((item) => item.sourceKind === "skill"), true);

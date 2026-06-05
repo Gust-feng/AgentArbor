@@ -88,10 +88,11 @@ export function createDesktopBasicToolRegistry(
   ];
   for (const executor of executors) {
     const state = options.toolStates?.find((item) => item.name === executor.definition.name);
+    const enabledByDefault = state?.enabled ?? executor.definition.name !== "shell_command";
     registry.register({
       executor,
       scopes: ["desktop-basic", toolScopeFor(executor.definition.metadata?.category)],
-      enabledByDefault: state?.enabled ?? true,
+      enabledByDefault,
       availability:
         executor.definition.name === "browser_snapshot" && !playwrightAvailable
           ? { status: "unavailable", disabledReason: "Playwright is not installed in this workspace." }

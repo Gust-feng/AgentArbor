@@ -147,7 +147,7 @@ export function createLocalEditFileTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE_
   return {
     definition: {
       name: "edit_file",
-      description: "Atomically edit a UTF-8 text file under the local workspace with exact anchor replacements. Every anchor must match exactly once.",
+      description: "Edit a UTF-8 text file under the local workspace by replacing exact text anchors.",
       metadata: {
         category: "filesystem",
         riskLevel: "medium",
@@ -165,7 +165,7 @@ export function createLocalEditFileTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE_
           path: { type: "string", description: "Workspace-relative file path." },
           edits: {
             type: "array",
-            description: "Atomic edits. Each anchor is exact text to replace and must match exactly once.",
+            description: "Text edits. Each anchor is exact text to replace and must match exactly once.",
             items: {
               type: "object",
               properties: {

@@ -63,10 +63,10 @@ test("syncConversationTurnForJob keeps approval requests as running previews", (
         agent: {
           status: "confirmation_needed",
           pendingConfirmation: {
-            confirmationId: "confirmation-write",
+            confirmationId: "confirmation-delete",
             title: "需要确认",
-            question: "是否写入文件？",
-            consequence: "会修改工作区文件。",
+            question: "是否删除文件？",
+            consequence: "会移除工作区文件。",
             riskLevel: "medium",
             modelCallRefs: [],
             toolCallRefs: [],
@@ -87,8 +87,8 @@ test("syncConversationTurnForJob keeps approval requests as running previews", (
   const conversation = conversations.getReadModel(job.conversationId ?? "");
   const assistant = conversation?.turns.find((turn) => turn.role === "assistant");
   assert.equal(assistant?.title, "需要确认");
-  assert.equal(assistant?.content.includes("是否写入文件？"), true);
-  assert.equal(assistant?.content.includes("会修改工作区文件。"), true);
+  assert.equal(assistant?.content.includes("是否删除文件？"), true);
+  assert.equal(assistant?.content.includes("会移除工作区文件。"), true);
   assert.equal(assistant?.status, "running");
 });
 
@@ -221,6 +221,183 @@ test("syncConversationTurnForJob accumulates running model output deltas", () =>
   const assistant = conversations.getReadModel(job.conversationId ?? "")?.turns.find((turn) => turn.role === "assistant");
   assert.equal(assistant?.title, "正在回复");
   assert.equal(assistant?.content, "Now let me demonstrate.");
+});
+
+test("syncConversationTurnForJob suppresses pre-tool model output after confirmation resumes", () => {
+  const { conversations, job } = startedConversationJob();
+
+  job.status = "running";
+  syncConversationTurnForJob({
+    conversations,
+    job,
+    response: response({
+      status: "running",
+      transcriptEvents: [
+        streamEvent({
+          sequence: 1,
+          type: "model.output.delta",
+          delta: "很好，探索已经开始！让我继续展示更多能力。",
+          detail: {
+            kind: "thinking",
+            preview: "很好，探索已经开始！让我继续展示更多能力。",
+          },
+          modelCallRefs: ["model-before-tool"],
+        }),
+        streamEvent({
+          sequence: 2,
+          type: "tool.requested",
+          summary: "运行命令：dir",
+          detail: {
+            kind: "tool",
+            action: "运行命令",
+            preview: "运行命令：dir",
+          },
+          toolCallRefs: ["call-dir"],
+        }),
+        streamEvent({
+          sequence: 3,
+          type: "confirmation.needed",
+          summary: "运行命令：dir",
+          detail: {
+            kind: "confirmation",
+            preview: "运行命令：dir",
+          },
+          toolCallRefs: ["call-dir"],
+        }),
+        streamEvent({
+          sequence: 4,
+          type: "user_approval.received",
+          summary: "已确认继续。",
+          detail: {
+            kind: "confirmation",
+            preview: "已确认继续。",
+          },
+        }),
+        streamEvent({
+          sequence: 5,
+          type: "run.resumed",
+          summary: "已批准本次操作，运行继续。",
+          detail: {
+            kind: "work",
+            preview: "已批准本次操作，运行继续。",
+          },
+        }),
+      ],
+    }),
+  });
+
+  const assistant = conversations.getReadModel(job.conversationId ?? "")?.turns.find((turn) => turn.role === "assistant");
+  assert.equal(assistant?.title, "继续执行");
+  assert.equal(assistant?.content.includes("探索已经开始"), false);
+  assert.equal(assistant?.content, "已批准本次操作，运行继续。");
+});
+
+test("syncConversationTurnForJob waits for post-tool model output before showing a new answer", () => {
+  const { conversations, job } = startedConversationJob();
+
+  job.status = "running";
+  syncConversationTurnForJob({
+    conversations,
+    job,
+    response: response({
+      status: "running",
+      transcriptEvents: [
+        streamEvent({
+          sequence: 1,
+          type: "model.output.delta",
+          delta: "我先运行命令看一下。",
+          detail: {
+            kind: "thinking",
+            preview: "我先运行命令看一下。",
+          },
+          modelCallRefs: ["model-before-tool"],
+        }),
+        streamEvent({
+          sequence: 2,
+          type: "tool.requested",
+          summary: "运行命令：dir",
+          detail: {
+            kind: "tool",
+            action: "运行命令",
+            preview: "运行命令：dir",
+          },
+          toolCallRefs: ["call-dir"],
+        }),
+        streamEvent({
+          sequence: 3,
+          type: "tool.completed",
+          summary: "dir · exit 0",
+          detail: {
+            kind: "tool",
+            action: "运行命令",
+            preview: "dir · exit 0",
+          },
+          toolCallRefs: ["call-dir"],
+        }),
+      ],
+    }),
+  });
+
+  const assistant = conversations.getReadModel(job.conversationId ?? "")?.turns.find((turn) => turn.role === "assistant");
+  assert.equal(assistant?.title, "动作已完成");
+  assert.equal(assistant?.content.includes("我先运行命令"), false);
+  assert.equal(assistant?.content, "dir · exit 0");
+
+  syncConversationTurnForJob({
+    conversations,
+    job,
+    response: response({
+      status: "running",
+      transcriptEvents: [
+        streamEvent({
+          sequence: 1,
+          type: "model.output.delta",
+          delta: "我先运行命令看一下。",
+          detail: {
+            kind: "thinking",
+            preview: "我先运行命令看一下。",
+          },
+          modelCallRefs: ["model-before-tool"],
+        }),
+        streamEvent({
+          sequence: 2,
+          type: "tool.requested",
+          summary: "运行命令：dir",
+          detail: {
+            kind: "tool",
+            action: "运行命令",
+            preview: "运行命令：dir",
+          },
+          toolCallRefs: ["call-dir"],
+        }),
+        streamEvent({
+          sequence: 3,
+          type: "tool.completed",
+          summary: "dir · exit 0",
+          detail: {
+            kind: "tool",
+            action: "运行命令",
+            preview: "dir · exit 0",
+          },
+          toolCallRefs: ["call-dir"],
+        }),
+        streamEvent({
+          sequence: 4,
+          type: "model.output.delta",
+          delta: "命令结果显示当前目录可以读取。",
+          detail: {
+            kind: "thinking",
+            preview: "命令结果显示当前目录可以读取。",
+          },
+          modelCallRefs: ["model-after-tool"],
+        }),
+      ],
+    }),
+  });
+
+  const updated = conversations.getReadModel(job.conversationId ?? "")?.turns.find((turn) => turn.role === "assistant");
+  assert.equal(updated?.title, "正在回复");
+  assert.equal(updated?.content, "命令结果显示当前目录可以读取。");
 });
 
 test("syncConversationTurnForJob preserves repeated live output deltas", () => {
@@ -495,7 +672,8 @@ test("syncConversationTurnForJob preserves existing assistant output when failin
   assert.equal(assistant?.title, "运行失败");
   assert.equal(assistant?.status, "failed");
   assert.equal(assistant?.content.includes("已经输出的内容。"), true);
-  assert.equal(assistant?.content.includes("错误信息：OpenAI-compatible provider stream response could not be parsed."), true);
+  assert.equal(assistant?.content.includes("错误信息：模型服务的流式返回格式不兼容"), true);
+  assert.equal(assistant?.content.includes("OpenAI-compatible provider stream response could not be parsed"), false);
 });
 
 test("syncConversationTurnForJob appends failure marker even when previous output mentions the error", () => {
@@ -693,9 +871,12 @@ function streamEvent(input: {
   readonly eventId?: string;
   readonly sequence?: number;
   readonly type?: PanelRunStreamEvent["type"];
+  readonly status?: PanelRunStreamEvent["status"];
   readonly summary?: string;
   readonly delta?: string;
   readonly detail: NonNullable<PanelRunStreamEvent["detail"]>;
+  readonly modelCallRefs?: readonly string[];
+  readonly toolCallRefs?: readonly string[];
 }): PanelRunStreamEvent {
   return {
     eventId: input.eventId ?? `event-sync-${input.sequence ?? 1}`,
@@ -705,9 +886,10 @@ function streamEvent(input: {
     createdAt: "2026-01-01T00:00:01.000Z",
     summary: input.summary,
     delta: input.delta,
+    status: input.status,
     detail: input.detail,
     sourceRefs: [],
-    modelCallRefs: [],
-    toolCallRefs: [],
+    modelCallRefs: input.modelCallRefs ?? [],
+    toolCallRefs: input.toolCallRefs ?? [],
   };
 }

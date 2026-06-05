@@ -236,10 +236,10 @@ test("AgentTurnRuntime executeAutonomous ignores engineering round limits and wa
 test("AgentTurnRuntime returns approval_required and resumes with a matching confirmation", async () => {
   const eventLog = new InMemoryEventLog();
   const channel = new SequenceIntelligenceChannel([
-    toolCallResponse("model-request-test", "call-write", "write_file"),
+    toolCallResponse("model-request-test", "call-delete", "delete_file"),
     completedResponse("model-request-final", { summary: "Final answer after approval." }),
   ]);
-  const broker = new PermissionAwareToolBroker(["write_file"], { write_file: "read-write" });
+  const broker = new PermissionAwareToolBroker(["delete_file"], { delete_file: "read-write" });
   const runtime = new AgentTurnRuntime({
     intelligenceChannel: channel,
     toolCenter: broker,
@@ -247,19 +247,19 @@ test("AgentTurnRuntime returns approval_required and resumes with a matching con
   });
 
   const paused = await runtime.execute(createTurnInput({
-    allowedTools: ["write_file"],
+    allowedTools: ["delete_file"],
     maxModelRounds: 3,
   }));
 
   assert.equal(paused.status, "approval_required");
   assert.equal(paused.stoppedReason, "approval_required");
-  assert.equal(paused.pendingApproval?.confirmationId, "confirmation-call-write");
+  assert.equal(paused.pendingApproval?.confirmationId, "confirmation-call-delete");
   assert.equal(broker.executedCount, 0);
   assert.deepEqual(eventLog.types(), ["tool.requested", "user_approval.requested"]);
 
   const resumed = await runtime.resume({
     pendingApproval: paused.pendingApproval!,
-    approvedConfirmationIds: ["confirmation-call-write"],
+    approvedConfirmationIds: ["confirmation-call-delete"],
   });
 
   assert.equal(resumed.status, "completed");
@@ -270,17 +270,17 @@ test("AgentTurnRuntime returns approval_required and resumes with a matching con
 
 test("AgentTurnRuntime resumeAutonomous requires matching confirmation and then returns provider-stop output", async () => {
   const channel = new SequenceIntelligenceChannel([
-    toolCallResponse("model-request-test", "call-write", "write_file"),
-    textResponse("model-request-final", "Final answer after approved write."),
+    toolCallResponse("model-request-test", "call-delete", "delete_file"),
+    textResponse("model-request-final", "Final answer after approved delete."),
   ]);
-  const broker = new PermissionAwareToolBroker(["write_file"], { write_file: "read-write" });
+  const broker = new PermissionAwareToolBroker(["delete_file"], { delete_file: "read-write" });
   const runtime = new AgentTurnRuntime({
     intelligenceChannel: channel,
     toolCenter: broker,
   });
 
   const paused = await runtime.executeAutonomous(createTurnInput({
-    allowedTools: ["write_file"],
+    allowedTools: ["delete_file"],
     maxModelRounds: 3,
   }));
 
@@ -289,12 +289,12 @@ test("AgentTurnRuntime resumeAutonomous requires matching confirmation and then 
 
   const resumed = await runtime.resumeAutonomous({
     pendingApproval: paused.pendingApproval!,
-    approvedConfirmationIds: ["confirmation-call-write"],
+    approvedConfirmationIds: ["confirmation-call-delete"],
   });
 
   assert.equal(resumed.status, "completed");
   assert.equal(resumed.stoppedReason, "completed");
-  assert.equal(resumed.finalOutput?.textOutput, "Final answer after approved write.");
+  assert.equal(resumed.finalOutput?.textOutput, "Final answer after approved delete.");
   assert.equal(broker.executedCount, 1);
 });
 

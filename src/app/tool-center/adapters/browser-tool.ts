@@ -24,7 +24,7 @@ export function createBrowserSnapshotTool(options: BrowserToolOptions = {}): Too
   return {
     definition: {
       name: "browser_snapshot",
-      description: "Open a web page in a controlled browser and return a safe text snapshot. Requires Playwright at runtime.",
+      description: "Open an HTTP or HTTPS page and return a text snapshot. Requires Playwright at runtime.",
       metadata: {
         category: "web",
         riskLevel: "medium",

@@ -19,6 +19,7 @@ import {
 } from "./panel-server-test-utils.js";
 import {
   createOpenAiReadFileToolCallResponse,
+  createOpenAiChatStreamTextResponse,
   createOpenAiStreamReasoningTextResponse,
   createOpenAiStreamTextResponse,
   createOpenAiTextResponse,
@@ -63,6 +64,53 @@ test("desktop live model stream preserves markdown structure", async () => {
 
     assert.equal(joinedDeltas.includes("\n\n- **第一项**：保留列表\n- **第二项**：保留加粗"), true);
     assert.equal(assistantTurn.content.includes("\n\n- **第一项**：保留列表\n- **第二项**：保留加粗"), true);
+    assert.equal(stream.text.includes(secret), false);
+    assertSafePanelJsonText(`${stream.text}\n${conversation.text}`);
+  } finally {
+    await server.close();
+    await removeTemporaryTree(directory);
+  }
+});
+
+test("desktop live model stream does not repeat markdown blocks from cumulative snapshots", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-cumulative-chat-stream-"));
+  const secret = "sk-cumulative-chat-stream-secret";
+  const snapshots = [
+    "## 能力演示总结\n\n刚才",
+    "## 能力演示总结\n\n刚才我实时展示",
+    "## 能力演示总结\n\n刚才我实时展示了以下 5 项能力：\n\n| # | 能力 | 做了什么 |\n| - | - | - |\n| 1 | 浏览目录 | 查看项目结构 |",
+  ];
+  const providerFetch: PanelProviderFetch = async () =>
+    createOpenAiChatStreamTextResponse("cumulative-chat-stream-model", snapshots);
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory, providerFetch });
+  try {
+    await requestJson(server.url, "/api/config/model-provider", {
+      method: "POST",
+      body: {
+        baseUrl: "https://provider.example",
+        model: "cumulative-chat-stream-model",
+        apiKey: secret,
+      },
+    });
+    const start = await requestJson(server.url, "/api/conversations", {
+      method: "POST",
+      body: { goal: "实时展示能力", aiMode: "openai-compatible" },
+    });
+    const runId = start.body.run.runId;
+    const conversationId = start.body.conversation.conversationId;
+    const stream = await requestSse(server.url, `/api/desktop/runs/${encodeURIComponent(runId)}/stream?cursor=0`);
+    await waitForRun(server.url, runId, (body) => body.status === "completed", 4_000, "/api/desktop/runs");
+    const conversation = await requestJson(server.url, `/api/conversations/${encodeURIComponent(conversationId)}`);
+    const assistantTurn = conversation.body.conversation.turns[1];
+    const joinedDeltas = stream.events
+      .filter((event) => event.type === "model.output.delta" && event.agentLabel === "助手")
+      .map((event) => event.delta ?? "")
+      .join("");
+
+    assert.equal(assistantTurn.content, snapshots.at(-1));
+    assert.equal(joinedDeltas, snapshots.at(-1));
+    assert.equal(assistantTurn.content.split("## 能力演示总结").length - 1, 1);
+    assert.equal(joinedDeltas.split("## 能力演示总结").length - 1, 1);
     assert.equal(stream.text.includes(secret), false);
     assertSafePanelJsonText(`${stream.text}\n${conversation.text}`);
   } finally {

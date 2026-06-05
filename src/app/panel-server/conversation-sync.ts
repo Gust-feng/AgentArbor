@@ -233,26 +233,35 @@ function runningAssistantTurnFromResponse(
 }
 
 function runningOutputTextFromEvents(events: PanelRunTranscript["events"]): string {
+  const latestModelOutputBoundary = latestModelOutputBoundarySequence(events);
   const outputEvents = events
-    .filter((event) => event.type === "model.output.delta")
+    .filter((event) => event.type === "model.output.delta" && event.sequence > latestModelOutputBoundary)
     .sort((left, right) => left.sequence - right.sequence);
   const latestModelCallRef = [...outputEvents].reverse().flatMap((event) => event.modelCallRefs)[0];
   const visibleEvents = latestModelCallRef === undefined
     ? outputEvents
     : outputEvents.filter((event) => event.modelCallRefs.includes(latestModelCallRef));
   return visibleEvents.reduce(
-    (current, event) => appendTextStreamAssembly(
-      current,
-      event.delta ?? event.detail?.preview ?? event.summary ?? "",
-      textStreamFragmentSourceFromEventId(event.eventId)
-    ),
+    (current, event) => {
+      const source = textStreamFragmentSourceFromEventId(event.eventId);
+      return appendTextStreamAssembly(
+        current,
+        event.delta ?? event.detail?.preview ?? event.summary ?? "",
+        source,
+        source === "replay" && current.liveSourceObserved ? { boundary: "readable" } : undefined
+      );
+    },
     emptyTextStreamAssembly()
   ).text;
 }
 
 function latestRunningPreviewEvent(events: PanelRunTranscript["events"]): PanelRunTranscript["events"][number] | undefined {
+  const latestModelOutputBoundary = latestModelOutputBoundarySequence(events);
   const candidates = [...events].reverse().filter((event) => {
     if (event.status === "failed" || event.status === "cancelled" || event.status === "blocked") {
+      return false;
+    }
+    if (event.type === "model.output.delta" && event.sequence <= latestModelOutputBoundary) {
       return false;
     }
     return (
@@ -260,6 +269,9 @@ function latestRunningPreviewEvent(events: PanelRunTranscript["events"]): PanelR
       event.type === "tool.requested" ||
       event.type === "tool.completed" ||
       event.type === "tool.failed" ||
+      event.type === "user_approval.received" ||
+      event.type === "run.resumed" ||
+      event.type === "user.guidance" ||
       event.type === "model.output.delta" ||
       event.type === "model.reasoning.delta" ||
       event.type === "model.side.completed" ||
@@ -274,11 +286,32 @@ function latestRunningPreviewEvent(events: PanelRunTranscript["events"]): PanelR
   );
 }
 
+function latestModelOutputBoundarySequence(events: PanelRunTranscript["events"]): number {
+  return events.reduce(
+    (latest, event) => isModelOutputBoundaryEvent(event) ? Math.max(latest, event.sequence) : latest,
+    0
+  );
+}
+
+function isModelOutputBoundaryEvent(event: PanelRunTranscript["events"][number]): boolean {
+  return event.type === "tool.requested" ||
+    event.type === "confirmation.needed" ||
+    event.type === "user_approval.received" ||
+    event.type === "run.resumed" ||
+    event.type === "tool.completed" ||
+    event.type === "tool.failed" ||
+    event.type === "user.guidance" ||
+    event.type === "context.compaction.completed" ||
+    event.type === "context.compaction.failed";
+}
+
 function runningPreviewTitle(event: PanelRunTranscript["events"][number]): string {
   if (event.type === "confirmation.needed") return "需要确认";
   if (event.type === "tool.requested") return "正在执行动作";
   if (event.type === "tool.completed") return "动作已完成";
   if (event.type === "tool.failed") return "动作未完成";
+  if (event.type === "user_approval.received" || event.type === "run.resumed") return "继续执行";
+  if (event.type === "user.guidance") return "收到补充";
   if (event.type === "model.reasoning.delta" || event.type === "model.side.completed") return "正在思考";
   if (event.type === "model.output.delta") return "正在回复";
   if (event.type === "context.compaction.completed") return "整理上下文";

@@ -109,7 +109,13 @@ export function projectAssistantTranscriptTurn<
   const pending = pendingForTurn(input.pending, displayRunId);
   const liveAnswer = runProjection.answer?.streaming === true ? runProjection.answer : undefined;
   const settledAnswerFallback = runProjection.answer?.streaming === false ? runProjection.answer.text : "";
-  const turnAnswer = answerForWorkSessionTurn(input.workSession, displayRunId, turn.content);
+  const turnContentAnswer = canUseTurnContentAsAnswer({
+    run: input.run,
+    pending,
+    turn,
+    nodes: runProjection.nodes,
+  }) ? turn.content : "";
+  const turnAnswer = answerForWorkSessionTurn(input.workSession, displayRunId, turnContentAnswer);
   const content = liveAnswer?.text ?? (turnAnswer.trim().length > 0 ? turnAnswer : settledAnswerFallback);
   const deliverable = deliverableForWorkSessionTurn(input.workSession, displayRunId, content);
   const keepStreamMounted = live !== undefined || refreshingRun || unclaimedRunningTurn;
@@ -184,6 +190,27 @@ export function assistantTurnSlotKey<TTurn extends WorklineConversationTurn>(
 
 export function isRefreshingRunStatus(run: AssistantTranscriptRunLike | undefined): boolean {
   return isRefreshingTranscriptRun(run);
+}
+
+function canUseTurnContentAsAnswer<TTurn extends WorklineConversationTurn, TPending>(input: {
+  readonly run: AssistantTranscriptRunLike | undefined;
+  readonly pending: TPending | undefined;
+  readonly turn: TTurn;
+  readonly nodes: readonly LiveRunTranscriptProjection["nodes"][number][];
+}): boolean {
+  if (input.pending !== undefined) return false;
+  if (input.run === undefined) return true;
+  if (input.run.status === "completed" || input.run.status === "failed" || input.run.status === "cancelled" || input.run.status === "blocked") {
+    return true;
+  }
+  if (input.run.status !== "running" || input.turn.title !== "正在回复") {
+    return false;
+  }
+  return !input.nodes.some((node) =>
+    node.kind === "tool" ||
+    node.kind === "confirmation" ||
+    node.kind === "user_decision"
+  );
 }
 
 function activeLiveForTurn(

@@ -11,6 +11,7 @@ import type { PanelRunStreamEvent, PanelRunStreamEventType } from "./panel-run-s
 import type { UndergroundDemoSummary } from "./underground-demo-summary.js";
 import { friendlyUserFacingFailureText } from "./visible-text-safety.js";
 import { modelRequestedSummary as projectedModelRequestedSummary } from "./panel-model-progress-copy.js";
+import { friendlyFailureCopy } from "./failure-copy.js";
 
 export function blockedRunSummary(error: { readonly code: string; readonly message: string } | undefined): string {
   if (error?.code === "out_of_fuel") {
@@ -306,7 +307,7 @@ function modelFailureErrorText(payload: Readonly<Record<string, unknown>>): stri
 }
 
 function modelFailureMessageForDisplay(message: string | undefined): string | undefined {
-  const safe = compactFailureText(message ?? "", 1_000);
+  const safe = compactFailureText(friendlyFailureCopy(message ?? ""), 1_000);
   if (safe.length === 0) {
     return undefined;
   }

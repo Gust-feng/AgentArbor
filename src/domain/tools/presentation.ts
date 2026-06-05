@@ -35,7 +35,7 @@ const BUILTIN_TOOL_PRESENTATION: Readonly<Record<string, ToolPresentationSeed>> 
   },
   browser_snapshot: {
     displayName: "浏览网页",
-    displayDescription: "打开网页并返回文本快照，适合网页阅读和事实核对。",
+    displayDescription: "打开网页并返回文本快照。",
   },
   read_file: {
     displayName: "读取文件",
@@ -55,7 +55,7 @@ const BUILTIN_TOOL_PRESENTATION: Readonly<Record<string, ToolPresentationSeed>> 
   },
   edit_file: {
     displayName: "编辑文件",
-    displayDescription: "按唯一锚点原子修改工作区文本文件，并返回变更摘要。",
+    displayDescription: "按唯一锚点修改工作区文本文件，并返回变更摘要。",
   },
   delete_file: {
     displayName: "删除文件",
@@ -70,8 +70,8 @@ const BUILTIN_TOOL_PRESENTATION: Readonly<Record<string, ToolPresentationSeed>> 
     displayDescription: "在工作区内运行命令。",
   },
   shell_command: {
-    displayName: "执行 Shell",
-    displayDescription: "在工作区内执行 Shell 命令。",
+    displayName: "运行命令",
+    displayDescription: "run_command 的兼容别名；不执行任意 Shell 语法。",
   },
 };
 

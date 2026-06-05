@@ -86,6 +86,21 @@ test("Basic Agent run projection does not keep stale panel projection files", ()
   assert.equal(fileExistsSync(path.join(runtimeRoot, "panel-projection.test.ts")), false);
 });
 
+test("ordinary Desktop Agent entry does not depend on the legacy intent gate", async () => {
+  const appRoot = path.join(process.cwd(), "src", "app");
+  const sources = await Promise.all([
+    readSource(path.join(appRoot, "desktop-agent-session.ts")),
+    readSource(path.join(appRoot, "panel-server", "desktop-agent-execution.ts")),
+    readSource(path.join(appRoot, "panel-server", "run-execution.ts")),
+    readSource(path.join(appRoot, "panel-server", "run-routes.ts")),
+    readSource(path.join(appRoot, "panel-server", "conversation-routes.ts")),
+  ]);
+
+  assert.equal(sources.some((source) => source.includes("decideDesktopIntentWithModel")), false);
+  assert.equal(sources.some((source) => source.includes('from "./desktop-intent-router.js"')), false);
+  assert.equal(sources.some((source) => source.includes('from "../desktop-intent-router.js"')), false);
+});
+
 test("confirmation copy has a single shared app owner", async () => {
   const appRoot = path.join(process.cwd(), "src", "app");
   const transcriptConfirmation = await readSource(path.join(appRoot, "panel-ui", "src", "components", "transcript-confirmation.tsx"));
@@ -230,6 +245,7 @@ test("Fake model provider keeps fixture families split", async () => {
   assert.equal(output.includes('from "./fake-model-provider-underground.js"'), true);
   assert.equal(desktop.includes("export function fakeDesktopAgentStep"), true);
   assert.equal(desktop.includes("export function fakeWorkSessionSynthesisOutput"), true);
+  assert.equal(desktop.includes("start_work_session"), false);
   assert.equal(underground.includes("export function fakeIntentProfileOutput"), true);
   assert.equal(underground.includes("export function fakeConvergenceJudgmentOutput"), true);
   assert.equal(stream.includes("export function emitFakeOutputDeltas"), true);

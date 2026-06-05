@@ -1,14 +1,9 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   consumeStreamingTextFrame,
-  createFrozenMarkdownStreamState,
   createInitialStreamingTextState,
   createStreamingTextState,
-  markdownStreamViewport,
-  settleFrozenMarkdownStreamState,
-  updateFrozenMarkdownStreamState,
   updateStreamingTextTarget,
-  type FrozenMarkdownStreamState,
   type StreamingTextState,
   type StreamingTextTone,
 } from "../../../panel-ui-streaming";
@@ -32,7 +27,6 @@ export function LiveStreamBox({
 }): React.ReactElement {
   const initialRef = useRef<{
     readonly stream: StreamingTextState;
-    readonly markdown: FrozenMarkdownStreamState;
     readonly streamingRender: boolean;
   } | undefined>(undefined);
   if (initialRef.current === undefined) {
@@ -40,19 +34,14 @@ export function LiveStreamBox({
     const streaming = live || stream.queue.length > 0;
     initialRef.current = {
       stream,
-      markdown: streaming
-        ? updateFrozenMarkdownStreamState(createFrozenMarkdownStreamState(""), stream.displayed, true)
-        : settleFrozenMarkdownStreamState(createFrozenMarkdownStreamState(""), stream.displayed),
       streamingRender: streaming,
     };
   }
   const stateRef = useRef<StreamingTextState>(initialRef.current.stream);
-  const markdownStateRef = useRef<FrozenMarkdownStreamState>(initialRef.current.markdown);
   const rafRef = useRef<number | undefined>(undefined);
   const wasLiveRef = useRef(live);
   const latestPropsRef = useRef({ live, text, tone });
   const [displayed, setDisplayed] = useState(initialRef.current.stream.displayed);
-  const [markdownState, setMarkdownState] = useState<FrozenMarkdownStreamState>(() => initialRef.current?.markdown ?? createFrozenMarkdownStreamState(""));
   const [streamingRender, setStreamingRender] = useState(initialRef.current.streamingRender);
   latestPropsRef.current = { live, text, tone };
 
@@ -84,6 +73,7 @@ export function LiveStreamBox({
         return;
       }
       cancelTick();
+      stateRef.current = updateStreamingTextTarget(stateRef.current, text, false);
       commitDisplayedText(stateRef.current.displayed, false);
       return;
     }
@@ -120,21 +110,15 @@ export function LiveStreamBox({
     if (stateRef.current.queue.length > 0) {
       rafRef.current = requestAnimationFrame(tick);
     } else if (!latestPropsRef.current.live) {
+      stateRef.current = updateStreamingTextTarget(stateRef.current, latestPropsRef.current.text, false);
       commitDisplayedText(stateRef.current.displayed, false);
     }
   }
 
   function commitDisplayedText(value: string, isLive: boolean): void {
     setDisplayed(value);
-    const nextMarkdownState = isLive
-      ? updateFrozenMarkdownStreamState(markdownStateRef.current, value, true)
-      : settleFrozenMarkdownStreamState(markdownStateRef.current, value);
-    markdownStateRef.current = nextMarkdownState;
-    setMarkdownState(nextMarkdownState);
     setStreamingRender(isLive);
   }
-
-  const viewport = markdownStreamViewport(markdownState);
 
   return (
     <div
@@ -142,26 +126,7 @@ export function LiveStreamBox({
       aria-live={streamingRender ? "polite" : "off"}
       aria-atomic="false"
     >
-      {renderText === undefined
-        ? displayed
-        : (
-            <>
-              {viewport.committedBlocks.map((chunk) => (
-                <div className="live-stream-frozen-chunk" key={chunk.key}>
-                  {renderText(chunk.text)}
-                </div>
-              ))}
-              {streamingRender && viewport.liveTail.length > 0 && (
-                <div className="live-stream-live-tail">
-                  <span className="live-stream-live-tail-text">{viewport.liveTail}</span>
-                </div>
-              )}
-              {viewport.committedBlocks.length === 0 && (!streamingRender || viewport.liveTail.length === 0) && renderText(displayed)}
-              {streamingRender && viewport.committedBlocks.length === 0 && viewport.liveTail.length === 0 && (
-                <span className="live-stream-live-tail-text" aria-hidden="true" />
-              )}
-            </>
-          )}
+      {renderText === undefined ? displayed : renderText(displayed)}
     </div>
   );
 }

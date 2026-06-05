@@ -6,6 +6,7 @@ import type {
 import type { ToolCallRequest } from "../../domain/tools/index.js";
 import { createId, nowIso } from "../../kernel/id.js";
 import { pendingModelOutputValidation } from "../../kernel/intelligence/validation.js";
+import { createFailedModelResponse } from "../../kernel/intelligence/failures.js";
 import { modelReasoningOutputFromText } from "./model-reasoning-output.js";
 import {
   decodeOpenAICompatibleChatMessage,
@@ -40,6 +41,18 @@ export function normalizeOpenAICompatibleResponse(input: {
   const toolCalls = parseToolCalls(message.tool_calls);
   const assistantMessage = assistantContinuationMessage({ message, content: decoded.rawContent, toolCalls });
   const usage = asRecord(raw.usage);
+  const finishReason = finishReasonForOpenAI(firstChoice.finish_reason);
+  const incompleteResponse = failedResponseForIncompleteFinish({
+    request: input.request,
+    providerId: input.providerId,
+    providerKind: input.providerKind,
+    protocolKind: input.protocolKind,
+    model: typeof raw.model === "string" ? raw.model : input.model,
+    finishReason,
+  });
+  if (incompleteResponse !== undefined && toolCalls.length === 0) {
+    return incompleteResponse;
+  }
 
   return {
     responseId: createId("model-response"),
@@ -62,7 +75,7 @@ export function normalizeOpenAICompatibleResponse(input: {
       totalTokens: numberOrUndefined(usage.total_tokens),
       latencyMs: input.latencyMs,
     },
-    finishReason: finishReasonForOpenAI(firstChoice.finish_reason),
+    finishReason,
     validation: pendingModelOutputValidation(),
     completedAt: nowIso(),
   };
@@ -136,6 +149,35 @@ export function isProtocolExtensionValue(value: unknown): boolean {
     default:
       return isJsonSafeProtocolExtension(value);
   }
+}
+
+function failedResponseForIncompleteFinish(input: {
+  readonly request: ModelRequest;
+  readonly providerId: string;
+  readonly providerKind: "openai_compatible";
+  readonly protocolKind: "openai_compatible_chat_completions";
+  readonly model: string;
+  readonly finishReason: ModelResponse["finishReason"];
+}): ModelResponse | undefined {
+  if (input.finishReason !== "length" && input.finishReason !== "content_filter" && input.finishReason !== "error") {
+    return undefined;
+  }
+  const message = input.finishReason === "length"
+    ? "OpenAI-compatible provider returned a truncated response."
+    : input.finishReason === "content_filter"
+      ? "OpenAI-compatible provider filtered the response content."
+      : "OpenAI-compatible provider returned an error finish reason.";
+  return createFailedModelResponse({
+    requestId: input.request.requestId,
+    providerId: input.providerId,
+    providerKind: input.providerKind,
+    protocolKind: input.protocolKind,
+    model: input.model,
+    outputKind: input.request.outputContract.outputKind,
+    failureKind: "provider_response",
+    retryable: input.finishReason === "length",
+    message,
+  });
 }
 
 function assistantContinuationMessage(input: {

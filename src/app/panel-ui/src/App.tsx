@@ -136,7 +136,7 @@ export function App(): React.ReactElement {
   const selectedModelSupportsReasoningEffort = app.config?.capabilities?.modelCapabilities?.supportsReasoningEffort === true;
   const chatScreen = screen === "chat-empty" && (app.conversation !== undefined || app.run !== undefined) ? "chat-active" : screen;
   const currentRun = projectCurrentRun(app);
-  const pendingConfirmation = currentRun.workSession?.pendingConfirmation ?? currentRun.detail?.canvas?.agent?.pendingConfirmation;
+  const pendingConfirmation = currentRun.workSession?.pendingConfirmation;
   const pendingConversationCount = app.conversations.filter(isConversationWaitingForUser).length;
   const pendingCount = Math.max(pendingConversationCount, pendingConfirmation === undefined ? 0 : 1);
   const runController = createAppRunController({
@@ -295,7 +295,7 @@ export function App(): React.ReactElement {
               detail={currentRun.detail}
               live={currentRun.live}
               error={app.error}
-              pendingConfirmation={currentRun.workSession?.pendingConfirmation ?? currentRun.detail?.canvas?.agent?.pendingConfirmation}
+              pendingConfirmation={pendingConfirmation}
               onDecision={(decision, guidance) => void decideConfirmation(decision, guidance)}
               confirmationBusy={confirmationBusy}
             />

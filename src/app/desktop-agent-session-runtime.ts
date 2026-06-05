@@ -9,6 +9,12 @@ import {
 } from "./basic-agent-runtime/index.js";
 import { resolveRunCapabilities } from "./capability-policy.js";
 import {
+  DESKTOP_ROOT_AGENT,
+} from "./agent-prompts/desktop-root-agent.js";
+import {
+  filterToolNamesVisibleToAgentProfile,
+} from "./agent-prompts/contracts.js";
+import {
   createModelRuntimeConfig,
   createModelRuntimeDisabledConfigurationError,
   type ModelRuntimeMode,
@@ -16,10 +22,6 @@ import {
 import type { MinimalRuntime } from "./runtime.js";
 import type { RunDesktopAgentSessionOptions } from "./desktop-agent-session-contracts.js";
 import type { BasicAgentCapabilitySnapshot } from "../domain/config/contracts.js";
-import {
-  DESKTOP_AGENT_DEFAULT_MAX_OUTPUT_TOKENS,
-  DESKTOP_AGENT_ID,
-} from "./desktop-agent-session-ids.js";
 import {
   publishContextCompactionCompleted,
   publishContextCompactionFailed,
@@ -46,17 +48,7 @@ export function createIntelligenceChannelFromOptions(
 }
 
 export function createDesktopAgentOutputContract(): ModelOutputContract {
-  return {
-    contractId: "desktop.agent_response.v1",
-    outputKind: "explanation",
-    format: "text",
-    minTextLength: 1,
-    maxTextLength: 12000,
-    visibleOutput: {
-      fields: ["text"],
-      maxFieldLength: 1200,
-    },
-  };
+  return DESKTOP_ROOT_AGENT.outputContract;
 }
 
 export function createDesktopAgentTurnRuntime(input: {
@@ -128,7 +120,10 @@ export function resolveActiveModelName(options: RunDesktopAgentSessionOptions): 
 }
 
 export function allowedToolsForDesktopAgent(toolCenter: ToolExecutionBroker): readonly string[] {
-  return toolCenter.list().map((tool) => tool.name).filter((name) => !name.startsWith("underground_"));
+  return filterToolNamesVisibleToAgentProfile(
+    DESKTOP_ROOT_AGENT.toolVisibilityProfile,
+    toolCenter.list().map((tool) => tool.name)
+  );
 }
 
 export function allowedToolsForRun(input: {
@@ -144,7 +139,7 @@ export function allowedToolsForRun(input: {
   return resolveRunCapabilities({
     snapshot: input.snapshot,
     goal: input.goal,
-    runMode: "agent",
+    agentDefinition: DESKTOP_ROOT_AGENT,
     taskSoil: input.taskSoil,
     platform: input.platform,
   }).allowedTools;

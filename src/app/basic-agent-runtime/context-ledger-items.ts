@@ -2,7 +2,7 @@ import type { ObservationRef } from "../../domain/observation/index.js";
 import type { TaskSoil } from "../../domain/soil/index.js";
 import type { ToolResultEnvelope } from "../../domain/tools/index.js";
 import type { DesktopAgentConversationMessage, DesktopAgentSkillContext } from "../desktop-agent-contracts.js";
-import { DESKTOP_ROOT_AGENT_PROMPT } from "../agent-prompts/desktop-root-agent.js";
+import { DESKTOP_ROOT_AGENT } from "../agent-prompts/desktop-root-agent.js";
 import type { BasicAgentContextItem } from "./contracts.js";
 import type { BasicAgentConversationSummary } from "./conversation-compaction.js";
 import {
@@ -63,10 +63,10 @@ export function toolEvidenceItems(envelopes: readonly ToolResultEnvelope[]): rea
 
 function systemContextItem(): BasicAgentContextItem {
   return {
-    itemId: `context:system:${DESKTOP_ROOT_AGENT_PROMPT.agentId}`,
+    itemId: `context:system:${DESKTOP_ROOT_AGENT.agentId}`,
     sourceKind: "system",
-    summary: DESKTOP_ROOT_AGENT_PROMPT.systemPrompt,
-    refs: [{ kind: "event", id: DESKTOP_ROOT_AGENT_PROMPT.promptRef }],
+    summary: DESKTOP_ROOT_AGENT.prompt.systemPrompt,
+    refs: [{ kind: "event", id: DESKTOP_ROOT_AGENT.prompt.promptRef }],
     visibility: "model",
     truncated: false,
   };

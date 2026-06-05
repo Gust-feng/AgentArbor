@@ -1,7 +1,9 @@
-import type { AgentSystemPromptSpec } from "./contracts.js";
+import type { AgentDefinition, AgentSystemPromptSpec } from "./contracts.js";
 
-export const DESKTOP_ROOT_AGENT_PROMPT: AgentSystemPromptSpec = {
-  agentId: "desktop-root-agent",
+export const DESKTOP_AGENT_ID = "desktop-agent-session";
+export const DESKTOP_AGENT_DEFAULT_MAX_OUTPUT_TOKENS = 3200;
+
+const DESKTOP_ROOT_AGENT_PROMPT: AgentSystemPromptSpec = {
   promptRef: "prompt:desktop-root-agent:v1",
   version: "1",
   systemPrompt: [
@@ -16,3 +18,34 @@ export const DESKTOP_ROOT_AGENT_PROMPT: AgentSystemPromptSpec = {
     "Do not expose hidden chain-of-thought or provider internals. Do provide concise reasoning, relevant tool evidence, and uncertainty when they help the user trust the result.",
   ].join("\n"),
 };
+
+export const DESKTOP_ROOT_AGENT: AgentDefinition = {
+  agentId: DESKTOP_AGENT_ID,
+  displayName: "Desktop Agent",
+  prompt: DESKTOP_ROOT_AGENT_PROMPT,
+  turnPolicy: {
+    allowModel: true,
+    fallback: "disabled",
+    purpose: "desktop_agent",
+    sensitivity: "internal",
+    defaultMaxOutputTokens: DESKTOP_AGENT_DEFAULT_MAX_OUTPUT_TOKENS,
+  },
+  outputContract: {
+    contractId: "desktop.agent_response.v1",
+    outputKind: "explanation",
+    format: "text",
+    minTextLength: 1,
+    maxTextLength: 12000,
+    visibleOutput: {
+      fields: ["text"],
+      maxFieldLength: 1200,
+    },
+  },
+  toolVisibilityProfile: {
+    profileId: "desktop-root-agent:ordinary-visible-tools:v1",
+    runMode: "agent",
+    hiddenToolNamePrefixes: ["underground_"],
+  },
+};
+
+export { DESKTOP_ROOT_AGENT_PROMPT };

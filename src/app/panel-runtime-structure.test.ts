@@ -38,21 +38,21 @@ test("basic agent work session keeps projection modules split", async () => {
 });
 
 test("desktop agent session keeps projection and contracts split", async () => {
-  const [session, contracts, sharedContracts, projection, runtime, events, ids] = await Promise.all([
+  const [session, contracts, sharedContracts, projection, runtime, events, definition] = await Promise.all([
     readAppSource("desktop-agent-session.ts"),
     readAppSource("desktop-agent-session-contracts.ts"),
     readAppSource("desktop-agent-contracts.ts"),
     readAppSource("desktop-agent-session-projection.ts"),
     readAppSource("desktop-agent-session-runtime.ts"),
     readAppSource("desktop-agent-session-events.ts"),
-    readAppSource("desktop-agent-session-ids.ts"),
+    readAppSource(path.join("agent-prompts", "desktop-root-agent.ts")),
   ]);
 
   assert.equal(session.includes('from "./desktop-agent-session-contracts.js"'), true);
   assert.equal(session.includes('from "./desktop-agent-session-projection.js"'), true);
   assert.equal(session.includes('from "./desktop-agent-session-runtime.js"'), true);
   assert.equal(session.includes('from "./desktop-agent-session-events.js"'), true);
-  assert.equal(session.includes('from "./desktop-agent-session-ids.js"'), true);
+  assert.equal(session.includes('from "./agent-prompts/desktop-root-agent.js"'), true);
   assert.equal(session.includes("export async function runDesktopAgentSession"), true);
   assert.equal(session.includes("function desktopAgentResultFromTurn"), true);
   assert.equal(session.includes("function parseAnswer"), false);
@@ -84,7 +84,8 @@ test("desktop agent session keeps projection and contracts split", async () => {
   assert.equal(projection.includes("function activityFromEventEntry"), true);
   assert.equal(projection.includes("function toolActivityTitle"), true);
   assert.equal(runtime.includes('from "./desktop-agent-session-events.js"'), true);
-  assert.equal(runtime.includes('from "./desktop-agent-session-ids.js"'), true);
+  assert.equal(runtime.includes('from "./agent-prompts/desktop-root-agent.js"'), true);
+  assert.equal(runtime.includes('from "./agent-prompts/contracts.js"'), true);
   assert.equal(runtime.includes("export function createIntelligenceChannelFromOptions"), true);
   assert.equal(runtime.includes("export function createDesktopAgentOutputContract"), true);
   assert.equal(runtime.includes("export function createDesktopAgentTurnRuntime"), true);
@@ -92,13 +93,18 @@ test("desktop agent session keeps projection and contracts split", async () => {
   assert.equal(runtime.includes("export function allowedToolsForRun"), true);
   assert.equal(runtime.includes("export function constraintRefsFromTaskSoil"), true);
   assert.equal(events.includes('from "./desktop-agent-session-runtime.js"'), false);
-  assert.equal(events.includes('from "./desktop-agent-session-ids.js"'), true);
+  assert.equal(events.includes('from "./agent-prompts/desktop-root-agent.js"'), true);
   assert.equal(events.includes("export function publishGoalReceived"), true);
   assert.equal(events.includes("export function publishConfirmationRequested"), true);
   assert.equal(events.includes("export function publishTriggeredSkills"), true);
   assert.equal(events.includes("export function publishContextCompactionCompleted"), true);
   assert.equal(events.includes("export function publishContextCompactionFailed"), true);
-  assert.equal(ids.includes('export const DESKTOP_AGENT_ID = "desktop-agent-session"'), true);
+  assert.equal(definition.includes("export const DESKTOP_ROOT_AGENT: AgentDefinition ="), true);
+  assert.equal(definition.includes('export const DESKTOP_AGENT_ID = "desktop-agent-session"'), true);
+  assert.equal(definition.includes("agentId: DESKTOP_AGENT_ID"), true);
+  assert.equal(definition.includes("toolVisibilityProfile"), true);
+  assert.equal(definition.includes("outputContract"), true);
+  assert.equal(definition.includes("turnPolicy"), true);
 });
 
 test("panel canvas keeps ordinary desktop agent projection split", async () => {

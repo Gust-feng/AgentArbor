@@ -42,9 +42,10 @@ test("context ledger keeps safe text and read model projection split from select
   assert.equal(ledgerSource.includes("function safePlain"), false);
   assert.equal(itemsSource.includes("export function buildContextLedgerDraftItems"), true);
   assert.equal(itemsSource.includes("export function toolEvidenceItems"), true);
-  assert.equal(itemsSource.includes("DESKTOP_ROOT_AGENT_PROMPT"), true);
+  assert.equal(itemsSource.includes("DESKTOP_ROOT_AGENT"), true);
   assert.equal(itemsSource.includes("You are AgentArbor Desktop Agent"), false);
   assert.equal(promptSource.includes("DESKTOP_ROOT_AGENT_PROMPT"), true);
+  assert.equal(promptSource.includes("DESKTOP_ROOT_AGENT"), true);
   assert.equal(promptSource.includes("prompt:desktop-root-agent:v1"), true);
   assert.equal(promptSource.includes("You are AgentArbor Desktop Agent"), true);
   assert.equal(itemsSource.includes("function systemContextItem"), true);
@@ -109,7 +110,7 @@ test("context ledger records goal, history, attachments, skills, budget, and saf
   assert.equal(ledger.runId, "run-ledger");
   const systemItem = ledger.items.find((item) => item.sourceKind === "system");
   assert.notEqual(systemItem, undefined);
-  assert.equal(systemItem?.itemId, "context:system:desktop-root-agent");
+  assert.equal(systemItem?.itemId, "context:system:desktop-agent-session");
   assert.equal(systemItem?.refs.some((ref) => ref.id === "prompt:desktop-root-agent:v1"), true);
   assert.equal(systemItem?.summary.includes("Do not claim that a command"), true);
   assert.equal(ledger.items.some((item) => item.sourceKind === "conversation_recent_turn"), true);

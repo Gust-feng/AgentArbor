@@ -2,6 +2,7 @@ import type { ArborMessageType } from "../domain/common.js";
 import type { RunObservationSnapshot } from "../domain/observation/index.js";
 import type { RootletClusterKind } from "../domain/underground/index.js";
 import { ROOTLET_CLUSTER_KINDS } from "../domain/underground/index.js";
+import { DESKTOP_ROOT_AGENT } from "./agent-prompts/desktop-root-agent.js";
 import type { PanelTranscriptModelCall } from "./panel-transcript-model-calls.js";
 import { eventRefsFor, hasEvent, isString, lastRecordedAt, unique } from "./panel-read-model-utils.js";
 import type { AgentWorkNote, PanelWorkNotesInput } from "./panel-work-note-contracts.js";
@@ -82,7 +83,7 @@ function createDesktopChatNote(input: NoteFactoryInput): AgentWorkNote {
   return note({
     input,
     noteId: "desktop-agent",
-    agentId: "desktop-agent-session",
+    agentId: DESKTOP_ROOT_AGENT.agentId,
     agentLabel: "桌面助手",
     stage: "desktop_agent",
     status: failed ? "failed" : needsConfirmation ? "running" : completed ? "completed" : requested ? "running" : "pending",

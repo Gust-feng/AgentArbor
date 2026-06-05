@@ -3,6 +3,7 @@ import test from "node:test";
 import type { BasicAgentCapabilitySnapshot, CapabilityToolCatalogItem } from "../domain/config/index.js";
 import { toolPresentationForName } from "../domain/tools/index.js";
 import { createTaskSoil } from "../domain/soil/index.js";
+import { DESKTOP_ROOT_AGENT } from "./agent-prompts/desktop-root-agent.js";
 import { resolveRunCapabilities } from "./capability-policy.js";
 
 test("run capability policy hides disabled, unavailable, denied, and mode-internal tools", () => {
@@ -21,7 +22,7 @@ test("run capability policy hides disabled, unavailable, denied, and mode-intern
   const resolution = resolveRunCapabilities({
     snapshot,
     goal: "research safely",
-    runMode: "agent",
+    agentDefinition: DESKTOP_ROOT_AGENT,
     taskSoil,
     platform: "win32",
   });
@@ -60,7 +61,7 @@ test("run capability policy keeps MCP as draft only and filters disabled skills"
   const resolution = resolveRunCapabilities({
     snapshot,
     goal: "use skills",
-    runMode: "agent",
+    agentDefinition: DESKTOP_ROOT_AGENT,
     platform: "linux",
   });
 

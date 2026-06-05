@@ -1,4 +1,5 @@
-import type {
+import type { AgentDefinition } from "./agent-prompts/contracts.js";
+import {
   BasicAgentCapabilitySnapshot,
   CapabilityDraft,
   RunCapabilityResolution,
@@ -6,11 +7,12 @@ import type {
 } from "../domain/config/index.js";
 import type { TaskSoil } from "../domain/soil/index.js";
 import { createId, nowIso } from "../kernel/id.js";
+import { isToolVisibleToAgentProfile as isVisibleToProfile } from "./agent-prompts/contracts.js";
 
 export type ResolveRunCapabilitiesInput = {
   readonly snapshot: BasicAgentCapabilitySnapshot;
   readonly goal: string;
-  readonly runMode: "agent" | "deep";
+  readonly agentDefinition: AgentDefinition;
   readonly taskSoil?: TaskSoil;
   readonly platform?: NodeJS.Platform;
 };
@@ -23,7 +25,10 @@ export function resolveRunCapabilities(input: ResolveRunCapabilitiesInput): RunC
   const toolExposures = input.snapshot.toolCatalog.tools.map((tool): RunToolExposure => {
     const availabilityAllowed = tool.enabled && tool.availability === "available";
     const denied = isDeniedByPermissionRef(tool.name, permissionRefs);
-    const modelVisible = availabilityAllowed && !denied && isVisibleInRunMode(input.runMode, tool.name);
+    const modelVisible =
+      availabilityAllowed &&
+      !denied &&
+      isVisibleToProfile(input.agentDefinition.toolVisibilityProfile, tool.name);
     return {
       name: tool.name,
       displayName: tool.displayName,
@@ -48,7 +53,7 @@ export function resolveRunCapabilities(input: ResolveRunCapabilitiesInput): RunC
   return {
     resolutionId: createId("capability-resolution"),
     snapshotId: input.snapshot.snapshotId,
-    runMode: input.runMode,
+    runMode: input.agentDefinition.toolVisibilityProfile.runMode,
     allowedTools,
     toolExposures,
     enabledSkills: input.snapshot.skillCatalog.filter((skill) => skill.enabled),
@@ -69,14 +74,6 @@ export function resolveRunCapabilities(input: ResolveRunCapabilitiesInput): RunC
 
 function isDeniedByPermissionRef(toolName: string, refs: ReadonlySet<string>): boolean {
   return refs.has(`deny:tool:${toolName}`) || refs.has(`deny:${toolName}`);
-}
-
-function isVisibleInRunMode(runMode: "agent" | "deep", toolName: string): boolean {
-  // Mode visibility is the safety boundary: ordinary runs hide Underground internals; deep runs may opt in.
-  if (runMode === "deep") {
-    return true;
-  }
-  return !toolName.startsWith("underground_");
 }
 
 function exposureReason(input: {

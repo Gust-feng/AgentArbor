@@ -11,6 +11,7 @@ import type {
   ToolPermissionCheck,
 } from "../domain/tools/index.js";
 import { toolPresentationForName } from "../domain/tools/index.js";
+import { DESKTOP_ROOT_AGENT } from "./agent-prompts/desktop-root-agent.js";
 import { runDesktopAgentSession } from "./desktop-agent-session.js";
 import { createOpenAiStreamTextResponse } from "./panel-openai-test-fixtures.js";
 
@@ -103,6 +104,29 @@ test("Desktop Agent Session derives model-visible tools from capability snapshot
 
   assert.equal(result.status, "completed");
   assert.deepEqual(capturedRequest?.tools?.map((tool) => tool.name), ["read"]);
+});
+
+test("Desktop Agent Session derives caller identity and output contract from the desktop agent definition", async () => {
+  let capturedRequest: ModelRequest | undefined;
+  const channel: IntelligenceChannel = {
+    async request(request) {
+      capturedRequest = request;
+      return textResponse(request, "定义层已生效。");
+    },
+    validateResponse() {
+      return { status: "passed", checkedAt: new Date(0).toISOString(), issues: [] };
+    },
+  };
+
+  const result = await runDesktopAgentSession("确认当前普通 Agent 的运行身份", {
+    aiMode: "fake",
+    createIntelligenceChannel: () => channel,
+  });
+
+  assert.equal(result.status, "completed");
+  assert.equal(capturedRequest?.purpose, DESKTOP_ROOT_AGENT.turnPolicy.purpose);
+  assert.equal(capturedRequest?.outputContract.contractId, DESKTOP_ROOT_AGENT.outputContract.contractId);
+  assert.equal(capturedRequest?.sanitizedMessages[0]?.content, DESKTOP_ROOT_AGENT.prompt.systemPrompt);
 });
 
 test("Desktop Agent Session projects tool failures without leaking raw output", async () => {

@@ -22,9 +22,8 @@ import {
   publishTriggeredSkills,
 } from "./desktop-agent-session-events.js";
 import {
-  DESKTOP_AGENT_DEFAULT_MAX_OUTPUT_TOKENS,
-  DESKTOP_AGENT_ID,
-} from "./desktop-agent-session-ids.js";
+  DESKTOP_ROOT_AGENT,
+} from "./agent-prompts/desktop-root-agent.js";
 import {
   activityFromEventEntries,
   evidenceRefsFromToolCalls,
@@ -140,17 +139,19 @@ export async function runDesktopAgentSession(
       });
   const turn = await turnRuntime.executeAutonomous({
     policy: {
-      allowModel: true,
+      allowModel: DESKTOP_ROOT_AGENT.turnPolicy.allowModel,
       allowedTools,
-      fallback: "disabled",
-      callerAgentId: DESKTOP_AGENT_ID,
+      fallback: DESKTOP_ROOT_AGENT.turnPolicy.fallback,
+      callerAgentId: DESKTOP_ROOT_AGENT.agentId,
       traceId,
       goalId,
-      purpose: "desktop_agent",
+      purpose: DESKTOP_ROOT_AGENT.turnPolicy.purpose,
       outputContract: createDesktopAgentOutputContract(),
-      sensitivity: "internal",
+      sensitivity: DESKTOP_ROOT_AGENT.turnPolicy.sensitivity,
       budget: {
-        maxOutputTokens: options.modelCapabilities?.maxOutputTokens ?? DESKTOP_AGENT_DEFAULT_MAX_OUTPUT_TOKENS,
+        maxOutputTokens:
+          options.modelCapabilities?.maxOutputTokens ??
+          DESKTOP_ROOT_AGENT.turnPolicy.defaultMaxOutputTokens,
       },
     },
     requestId: createId("model-request"),

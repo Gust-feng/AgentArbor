@@ -103,6 +103,34 @@ test("Desktop Agent Session keeps complex requests in ordinary desktop assistant
   assert.equal(result.runtime.eventLog.types().includes("artifact.produced"), false);
 });
 
+test("Desktop Agent Session fails when the model stops without a visible answer", async () => {
+  const channel = new EmptyVisibleAnswerChannel("");
+  const result = await runDesktopAgentSession("给出一个可见答案", {
+    aiMode: "fake",
+    createIntelligenceChannel: () => channel,
+  });
+
+  assert.equal(result.status, "failed");
+  assert.equal(result.answer, undefined);
+  assert.equal(result.failureMessage, "Desktop Agent model stopped without a visible answer.");
+  assert.equal(channel.requests.length, 1);
+  assert.deepEqual(result.eventTypes, ["goal.received"]);
+});
+
+test("Desktop Agent Session fails when safety projection removes the whole model answer", async () => {
+  const channel = new EmptyVisibleAnswerChannel("<tool_call>{\"name\":\"read_file\"}</tool_call>");
+  const result = await runDesktopAgentSession("不要把内部控制文本当答案", {
+    aiMode: "fake",
+    createIntelligenceChannel: () => channel,
+  });
+
+  assert.equal(result.status, "failed");
+  assert.equal(result.answer, undefined);
+  assert.equal(result.failureMessage, "Desktop Agent model stopped without a visible answer.");
+  assert.equal(channel.requests.length, 1);
+  assert.equal(JSON.stringify(result).includes("<tool_call>"), false);
+});
+
 test("Desktop Agent Session can use authorized tools before answering", async () => {
   const toolCenter = new FixtureToolCenter();
   const result = await runDesktopAgentSession("分析当前仓库的问题并给我优化建议", {
@@ -1071,6 +1099,21 @@ function textResponse(
     validation: { status: "passed" as const, checkedAt: new Date(0).toISOString(), issues: [] },
     completedAt: new Date(0).toISOString(),
   };
+}
+
+class EmptyVisibleAnswerChannel implements IntelligenceChannel {
+  readonly requests: ModelRequest[] = [];
+
+  constructor(private readonly answer: string) {}
+
+  async request(request: ModelRequest) {
+    this.requests.push(request);
+    return textResponse(request, this.answer);
+  }
+
+  validateResponse() {
+    return { status: "passed" as const, checkedAt: new Date(0).toISOString(), issues: [] };
+  }
 }
 
 class UnauthorizedToolChannel implements IntelligenceChannel {

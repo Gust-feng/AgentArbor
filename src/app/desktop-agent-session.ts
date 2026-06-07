@@ -281,6 +281,22 @@ function desktopAgentResultFromTurn(input: {
   }
 
   const answer = parseAnswer(input.turn.finalOutput, input.turn.toolCalls);
+  if (answer === undefined) {
+    return {
+      status: "failed",
+      runtime: input.runtime,
+      traceId: input.traceId,
+      goalId: input.goalId,
+      taskSoil: input.taskSoil,
+      capabilityResolution: input.capabilityResolution,
+      contextPack: safeDesktopAgentContextPack(input.contextPack),
+      failureMessage: "Desktop Agent model stopped without a visible answer.",
+      modelCallRefs,
+      toolCallRefs,
+      activity: activityFromEventEntries(input.runtime.eventLog.list(), "failed"),
+      eventTypes: input.runtime.eventLog.types(),
+    };
+  }
   const evidenceRefs = evidenceRefsFromToolCalls(input.turn.toolCalls);
   const pendingConfirmation = pendingConfirmationFrom({
     goal: input.goal,

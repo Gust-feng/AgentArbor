@@ -33,7 +33,7 @@ export function safeDesktopAgentContextPack(
 export function parseAnswer(
   response: ModelResponse,
   toolCalls: readonly ToolCallResult[]
-): string {
+): string | undefined {
   const text =
     typeof response.textOutput === "string" && response.textOutput.trim().length > 0
       ? response.textOutput.trim()
@@ -41,15 +41,12 @@ export function parseAnswer(
         ? response.structuredOutput.trim()
       : undefined;
   if (text === undefined) {
-    if (toolCalls.length > 0) {
-      return "我已经调用了可用工具，但这轮没有形成可展示正文。你可以补充目标或打开详情查看工具调用状态。";
-    }
-    return "我现在没有形成可展示的回答。";
+    return undefined;
   }
   const visible = sanitizeAssistantVisibleText(text);
   return visible.length > 0
     ? safeText(visible, 12000)
-    : "我识别到这条消息需要更多上下文或授权，但当前回合没有形成可展示正文。";
+    : undefined;
 }
 
 export function refsFromResponse(

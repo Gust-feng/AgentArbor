@@ -966,6 +966,66 @@ test("conversation provider network failure stays failed across run views and ru
   }
 });
 
+test("conversation model output contract failure stays failed across run views and runtime snapshot", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-conversation-output-validation-"));
+  const secret = "sk-output-validation-secret";
+  const providerFetch: PanelProviderFetch = async () =>
+    createOpenAiTextResponse("output-validation-model", "");
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory, providerFetch });
+  try {
+    await requestJson(server.url, "/api/config/model-provider", {
+      method: "POST",
+      body: {
+        baseUrl: "https://provider.example",
+        model: "output-validation-model",
+        apiKey: secret,
+      },
+    });
+
+    const start = await requestJson(server.url, "/api/conversations", {
+      method: "POST",
+      body: { goal: "测试输出契约失败不能完成", aiMode: "openai-compatible" },
+    });
+    const failed = await waitForRun(
+      server.url,
+      start.body.run.runId,
+      (body) => body.status === "failed",
+      4_000,
+      "/api/desktop/runs"
+    );
+    const conversation = await requestJson(
+      server.url,
+      `/api/conversations/${encodeURIComponent(start.body.conversation.conversationId)}`
+    );
+    const basicView = await requestJson(
+      server.url,
+      `/api/basic-agent/runs/${encodeURIComponent(start.body.run.runId)}/view?cursor=0`
+    );
+    const runtimeRun = await requestJson(server.url, `/api/runtime/runs/${encodeURIComponent(start.body.run.runId)}`);
+    const visibleText = `${failed.text}\n${conversation.text}\n${basicView.text}\n${runtimeRun.text}`;
+
+    assert.equal(start.status, 202);
+    assert.equal(failed.body.status, "failed");
+    assert.equal(failed.body.error.code, "desktop_agent_failed");
+    assert.equal(failed.body.error.message, "Model output failed the requested output contract.");
+    assert.equal(conversation.body.conversation.currentRun.run.status, "failed");
+    assert.equal(conversation.body.conversation.currentRun.workView.stage, "failed");
+    assert.equal(conversation.body.conversation.currentRun.detail.status, "failed");
+    assert.equal(basicView.body.view.run.status, "failed");
+    assert.equal(basicView.body.view.workView.stage, "failed");
+    assert.equal(basicView.body.view.detail.status, "failed");
+    assert.equal(runtimeRun.body.snapshot.run.status, "failed");
+    assert.equal(runtimeRun.body.snapshot.run.error.code, "desktop_agent_failed");
+    assert.equal(runtimeRun.body.snapshot.run.error.message, "Model output failed the requested output contract.");
+    assert.deepEqual(basicView.body.view.capabilityResolution, runtimeRun.body.snapshot.run.capabilityResolution);
+    assert.equal(visibleText.includes(secret), false);
+    assertSafePanelJsonText(visibleText);
+  } finally {
+    await server.close();
+    await removeTemporaryTree(directory);
+  }
+});
+
 test("conversation history keeps safe failed turns and later completed turns after restart", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-conversation-failed-history-"));
   const secret = "sk-failed-history-secret";

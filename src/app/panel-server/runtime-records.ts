@@ -324,12 +324,6 @@ function resultSummaryForJob(job: PanelRunJob): { readonly title: string; readon
       ),
     };
   }
-  if (job.status === "completed") {
-    return {
-      title: "结果已生成",
-      summary: "结果已经整理完成。",
-    };
-  }
   return undefined;
 }
 

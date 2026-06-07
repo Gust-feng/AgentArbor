@@ -54,8 +54,8 @@ export function createPersistedBasicAgentWorkViewReadModel(
       snapshot.run.resultTitle === undefined && snapshot.run.resultSummary === undefined
         ? undefined
         : {
-            title: snapshot.run.resultTitle ?? "结果已生成",
-            summary: snapshot.run.resultSummary ?? "结果已经整理完成。",
+            title: snapshot.run.resultTitle ?? "上次结果",
+            summary: snapshot.run.resultSummary ?? snapshot.run.resultTitle ?? "上次结果",
           },
   }) satisfies DesktopWorkViewReadModel;
 }

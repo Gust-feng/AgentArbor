@@ -191,7 +191,7 @@ test("panel transcript projects confirmation and user guidance as safe ordinary-
 
   assert.deepEqual(
     transcript.events.map((event) => event.type),
-    ["run.started", "confirmation.needed", "user.guidance", "final.result"],
+    ["run.started", "confirmation.needed", "user.guidance"],
   );
   assert.equal(transcript.events[1]?.summary?.includes("请选择要读取的文件"), true);
   assert.equal(transcript.events[2]?.summary?.includes("先不要读取"), true);
@@ -540,7 +540,7 @@ test("ordinary agent stream stays quiet for direct answers while preserving tool
   assert.equal(JSON.stringify(withTool).includes("\"action\":\"read_file\""), false);
 });
 
-test("ordinary agent final result ignores deep summary and artifact compatibility payloads", () => {
+test("ordinary agent completed stream ignores compatibility payloads and does not invent answers", () => {
   const events = createPanelRunStreamEvents({
     runId: "run-ordinary-legacy-output",
     status: "completed",
@@ -560,11 +560,12 @@ test("ordinary agent final result ignores deep summary and artifact compatibilit
     createdAt: "2026-05-07T00:00:00.000Z",
     updatedAt: "2026-05-07T00:00:02.000Z",
   });
-  const final = events.find((event) => event.type === "final.result");
   const serialized = JSON.stringify(events);
 
-  assert.equal(final?.summary, "运行完成。");
-  assert.deepEqual(final?.sourceRefs, []);
+  assert.deepEqual(events.map((event) => event.type), ["run.started"]);
+  assert.equal(serialized.includes("已回答"), false);
+  assert.equal(serialized.includes("运行完成"), false);
+  assert.equal(serialized.includes("final.result"), false);
   assert.equal(serialized.includes("可执行方案"), false);
   assert.equal(serialized.includes("报告"), false);
   assert.equal(serialized.includes("legacy-report-artifact"), false);
@@ -612,7 +613,7 @@ test("ordinary agent stream ignores Agent Fabric events from compatibility paylo
   });
   const serialized = JSON.stringify(events);
 
-  assert.deepEqual(events.map((event) => event.type), ["run.started", "final.result"]);
+  assert.deepEqual(events.map((event) => event.type), ["run.started"]);
   assert.equal(serialized.includes("agent.delegation"), false);
   assert.equal(serialized.includes("agent.child"), false);
   assert.equal(serialized.includes("parent_synthesis"), false);

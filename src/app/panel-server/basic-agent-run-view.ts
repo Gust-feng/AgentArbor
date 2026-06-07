@@ -127,7 +127,7 @@ function createPersistedBasicAgentRunDetailReadModel(
         ? undefined
         : {
             title: snapshot.run.resultTitle ?? "上次结果",
-            summary: snapshot.run.resultSummary ?? "结果已经整理完成。",
+            summary: snapshot.run.resultSummary ?? snapshot.run.resultTitle ?? "上次结果",
           },
   };
 }

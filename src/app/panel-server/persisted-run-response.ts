@@ -145,7 +145,7 @@ export function createPersistedPanelRunResponse(input: {
         ? undefined
         : {
             title: input.snapshot.run.resultTitle ?? "上次结果",
-            summary: input.snapshot.run.resultSummary ?? "结果已经整理完成。",
+            summary: input.snapshot.run.resultSummary ?? input.snapshot.run.resultTitle ?? "上次结果",
           },
     snapshot: {
       run: input.snapshot.run,
@@ -302,7 +302,8 @@ export function createPersistedStreamEvents(
       toolCallRefs: [],
     });
   }
-  if (status === "completed") {
+  const completedSummary = restoredCompletedSummary(snapshot);
+  if (status === "completed" && completedSummary !== undefined) {
     events.push({
       eventId: `${snapshot.run.runId}:restored:final.result`,
       runId: snapshot.run.runId,
@@ -310,7 +311,7 @@ export function createPersistedStreamEvents(
       type: "final.result",
       createdAt: snapshot.run.updatedAt,
       agentLabel,
-      summary: snapshot.run.resultSummary ?? "结果已经整理完成。",
+      summary: completedSummary,
       status: "completed",
       sourceRefs: [],
       modelCallRefs: [],
@@ -376,6 +377,13 @@ export function createPersistedStreamEvents(
 function persistedRunAgentLabel(snapshot: RuntimeRunSnapshot): string {
   const label = snapshot.run.agentDefinitionRef?.agentDisplayName.trim();
   return label === undefined || label.length === 0 ? "AgentArbor" : label;
+}
+
+function restoredCompletedSummary(snapshot: RuntimeRunSnapshot): string | undefined {
+  if (snapshot.run.resultSummary !== undefined) {
+    return snapshot.run.resultSummary;
+  }
+  return snapshot.run.runMode === "agent" ? undefined : "结果已经整理完成。";
 }
 
 export function panelStatusFromRuntimeStatus(status: RuntimeRunRecord["status"]): PanelRunStatus {

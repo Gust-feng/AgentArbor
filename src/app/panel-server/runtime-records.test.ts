@@ -121,6 +121,26 @@ test("runtime record mapper persists safe run capability resolution", () => {
   assert.equal(JSON.stringify(run.capabilityResolution).includes("systemPrompt"), false);
 });
 
+test("runtime record mapper does not invent completed result summaries without visible ordinary answers", () => {
+  const run = createRuntimeRunRecord({
+    job: job({
+      completed: {
+        config: modelConfig(),
+        informationAccess: informationAccess(),
+      },
+    }),
+    workspace: undefined,
+    appHome: "C:\\AgentArbor\\app",
+    runtimeHome: "C:\\AgentArbor\\runtime",
+  });
+
+  assert.equal(run.status, "completed");
+  assert.equal(run.resultTitle, undefined);
+  assert.equal(run.resultSummary, undefined);
+  assert.equal(JSON.stringify(run).includes("结果已生成"), false);
+  assert.equal(JSON.stringify(run).includes("结果已经整理完成"), false);
+});
+
 test("runtime record mapper preserves failed run capability resolution", () => {
   const run = createRuntimeRunRecord({
     job: job({

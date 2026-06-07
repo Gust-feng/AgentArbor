@@ -66,6 +66,50 @@ test("panel conversations preserve assistant markdown line breaks", () => {
   assert.equal(persisted.turns[1]?.content.includes("\n- **证据**"), true);
 });
 
+test("panel conversation summaries do not invent completed results for empty assistant turns", () => {
+  const store = new PanelConversationStore();
+  const conversation = store.restore({
+    conversationId: "conversation-empty-completed",
+    title: "空完成记录",
+    preview: "",
+    currentAction: "",
+    nextStep: "",
+    status: "completed",
+    activeRunId: undefined,
+    latestRunId: "run-empty-completed",
+    requiresUserAction: false,
+    queuedRunIds: [],
+    queuedRunCount: 0,
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:02.000Z",
+    turns: [
+      {
+        turnId: "turn-empty-user",
+        role: "user",
+        title: "你的消息",
+        content: "给出答案",
+        status: "completed",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      },
+      {
+        turnId: "turn-empty-assistant",
+        role: "assistant",
+        title: "",
+        content: "",
+        status: "completed",
+        runId: "run-empty-completed",
+        createdAt: "2026-01-01T00:00:01.000Z",
+        updatedAt: "2026-01-01T00:00:02.000Z",
+      },
+    ],
+  });
+
+  assert.equal(conversation.status, "completed");
+  assert.equal(conversation.currentAction, "");
+  assert.equal(conversation.currentAction.includes("结果已生成"), false);
+});
+
 test("panel conversations keep the active follow-up run when an older guidance turn completes", () => {
   const store = new PanelConversationStore();
   const first = store.startDesktopMessage({ goal: "删除文件前需要确认" });

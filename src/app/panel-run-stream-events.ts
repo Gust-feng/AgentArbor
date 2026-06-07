@@ -107,18 +107,20 @@ export function createPanelRunStreamEvents(input: {
 
   if (input.status === "completed") {
     const finalSummary = finalResultSummary(input);
-    push({
-      eventId: `${input.runId}:final.result`,
-      runId: input.runId,
-      type: "final.result",
-      createdAt: input.updatedAt,
-      agentLabel,
-      summary: finalSummary,
-      status: "completed",
-      sourceRefs: finalSourceRefs(input),
-      modelCallRefs: [],
-      toolCallRefs: [],
-    });
+    if (finalSummary !== undefined) {
+      push({
+        eventId: `${input.runId}:final.result`,
+        runId: input.runId,
+        type: "final.result",
+        createdAt: input.updatedAt,
+        agentLabel,
+        summary: finalSummary,
+        status: "completed",
+        sourceRefs: finalSourceRefs(input),
+        modelCallRefs: [],
+        toolCallRefs: [],
+      });
+    }
   }
 
   if (input.status === "cancelled") {

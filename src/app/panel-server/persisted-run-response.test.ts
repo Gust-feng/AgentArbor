@@ -93,6 +93,23 @@ test("persisted user-action statuses restore explicit waiting points", () => {
   assert.equal(needsInput.transcript.events.some((event) => event.type === "confirmation.needed"), false);
 });
 
+test("persisted completed ordinary runs do not invent result summaries when none were stored", () => {
+  const response = createPersistedPanelRunResponse({
+    snapshot: runtimeSnapshotWithStatus("completed"),
+    config: modelConfig(),
+    informationAccess: informationAccess(),
+  });
+  const final = response.transcript.events.at(-1);
+  const serialized = JSON.stringify(response);
+
+  assert.equal(response.status, "completed");
+  assert.equal(response.restoredResult, undefined);
+  assert.notEqual(final?.type, "final.result");
+  assert.equal(response.transcript.events.some((event) => event.type === "final.result"), false);
+  assert.equal(serialized.includes("结果已经整理完成"), false);
+  assert.equal(serialized.includes("结果已生成"), false);
+});
+
 test("persisted terminal run responses keep frozen run facts instead of current fallback config", () => {
   for (const status of ["failed", "blocked", "cancelled"] as const) {
     const response = createPersistedPanelRunResponse({

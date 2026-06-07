@@ -82,6 +82,9 @@ export function syncConversationTurnForJob(input: {
   }
   if (response.status === "approval_needed") {
     const pendingTurn = assistantTurnFromResponse(response);
+    if (pendingTurn === undefined) {
+      return;
+    }
     conversations.updateAssistantPreview({
       conversationId: job.conversationId,
       assistantTurnId: job.assistantTurnId,
@@ -117,6 +120,18 @@ export function syncConversationTurnForJob(input: {
     return;
   }
   const turn = assistantTurnFromResponse(response);
+  if (turn === undefined) {
+    conversations.completeAssistantTurn({
+      conversationId: job.conversationId,
+      assistantTurnId: job.assistantTurnId,
+      runId: job.runId,
+      title: "",
+      content: "",
+      status: "failed",
+      responseModel,
+    });
+    return;
+  }
   conversations.completeAssistantTurn({
     conversationId: job.conversationId,
     assistantTurnId: job.assistantTurnId,
@@ -161,7 +176,7 @@ function latestPanelTranscriptModelCall(
 
 function assistantTurnFromResponse(
   response: PanelConversationSyncRunResponse
-): { readonly title: string; readonly content: string } {
+): { readonly title: string; readonly content: string } | undefined {
   const canvas = response.canvas;
   if (canvas?.kind === "desktop_agent_canvas" && canvas.agent.answer !== undefined) {
     return {
@@ -202,10 +217,7 @@ function assistantTurnFromResponse(
       content: sanitizeAssistantVisibleText(uncertainty === undefined ? summary : `${summary}\n不确定性：${uncertainty}`),
     };
   }
-  return {
-    title: "结果已生成",
-    content: "结果已经整理完成。",
-  };
+  return undefined;
 }
 
 function runningAssistantTurnFromResponse(

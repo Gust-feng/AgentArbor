@@ -313,7 +313,7 @@ function conversationCurrentAction(conversation: ConversationProjectionSource, s
   if (status === "needs_input") return compact(assistantText ?? "等待你补充信息后继续。", 160);
   if (status === "pending") return "等待前一个任务完成。";
   if (status === "running") return compact(assistantText ?? "正在处理你的任务。", 160);
-  if (status === "completed") return compact(assistantText ?? "结果已生成。", 160);
+  if (status === "completed") return compact(assistantText ?? "", 160);
   if (status === "failed") return compact(assistantText ?? "运行失败。", 160);
   if (status === "blocked") return compact(assistantText ?? "任务已暂停，需要重新处理。", 160);
   if (status === "cancelled") return "任务已取消。";

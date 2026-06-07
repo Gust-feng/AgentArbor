@@ -49,6 +49,26 @@ test("syncConversationTurnForJob completes assistant turn from desktop answer ca
   assert.equal(assistant?.responseModel?.model, "gpt-sync-latest");
 });
 
+test("syncConversationTurnForJob does not complete without visible canvas output", () => {
+  const { conversations, job } = startedConversationJob();
+
+  syncConversationTurnForJob({
+    conversations,
+    job,
+    response: response({
+      status: "completed",
+    }),
+  });
+
+  const conversation = conversations.getReadModel(job.conversationId ?? "");
+  const assistant = conversation?.turns.find((turn) => turn.role === "assistant");
+  assert.equal(assistant?.title, "");
+  assert.equal(assistant?.content, "");
+  assert.equal(assistant?.status, "failed");
+  assert.equal(JSON.stringify(assistant).includes("结果已生成"), false);
+  assert.equal(JSON.stringify(assistant).includes("结果已经整理完成"), false);
+});
+
 test("syncConversationTurnForJob keeps approval requests as running previews", () => {
   const { conversations, job } = startedConversationJob();
 

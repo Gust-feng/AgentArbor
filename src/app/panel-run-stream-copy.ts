@@ -246,13 +246,13 @@ export function finalResultSummary(input: {
   readonly observation?: PanelObservationReadModel;
   readonly eventEntries: readonly EventLogEntry[];
   readonly desktopMode?: "agent" | "deep";
-}): string {
+}): string | undefined {
   if (input.desktopMode === "agent") {
     const directAnswer = latestDirectAnswerPayload(input.eventEntries);
     if (directAnswer !== undefined) {
       return `已回答：${directAnswer.answer}`;
     }
-    return "运行完成。";
+    return undefined;
   }
   const summary = fullSummaryOrUndefined(input.summary);
   if (summary !== undefined) {

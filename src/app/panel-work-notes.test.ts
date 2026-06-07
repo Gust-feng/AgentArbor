@@ -43,6 +43,10 @@ test("panel work notes keep ordinary desktop agent separate from underground wor
   assert.equal(notes.some((note) => note.agentId.includes("underground")), false);
   assert.equal(JSON.stringify(notes).includes("promptRef"), false);
   assert.equal(JSON.stringify(notes).includes("systemPrompt"), false);
+  assert.equal(JSON.stringify(notes).includes("rootlet"), false);
+  assert.equal(JSON.stringify(notes).includes("不展示"), false);
+  assert.equal(JSON.stringify(notes).includes("raw"), false);
+  assert.equal(JSON.stringify(notes).includes("完整用户输入"), false);
 });
 
 test("panel work notes attach reasoning traces only to matching underground contracts", () => {

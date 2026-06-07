@@ -186,6 +186,38 @@ test("panel conversation summaries expose actionable and queued task states", ()
   assert.equal(persisted.nextStep, "确认、拒绝或补充指导。");
 });
 
+test("panel conversation summaries keep running next steps concise", () => {
+  const store = new PanelConversationStore();
+  const active = store.startDesktopMessage({ goal: "整理当前文件" });
+  store.attachRun({
+    conversationId: active.conversation.conversationId,
+    assistantTurnId: active.assistantTurn.turnId,
+    runId: "run-active",
+  });
+
+  let summary = store.list().find((item) => item.conversationId === active.conversation.conversationId)!;
+  assert.equal(summary.status, "running");
+  assert.equal(summary.nextStep, "任务进行中。");
+  assert.equal(summary.nextStep.includes("继续观察进度"), false);
+  assert.equal(summary.nextStep.includes("必要时"), false);
+
+  const queued = store.startDesktopMessage({
+    conversationId: active.conversation.conversationId,
+    goal: "再做一个总结",
+    queueBehindRunId: "run-active",
+  });
+  store.queueRun({
+    conversationId: queued.conversation.conversationId,
+    assistantTurnId: queued.assistantTurn.turnId,
+    runId: "run-queued",
+  });
+
+  summary = store.list().find((item) => item.conversationId === active.conversation.conversationId)!;
+  assert.equal(summary.status, "running");
+  assert.equal(summary.nextStep, "还有 1 个任务排队。");
+  assert.equal(summary.nextStep.includes("继续观察进度"), false);
+});
+
 test("panel conversation restore reserves existing ids before follow-up creation", () => {
   resetIdsForTests();
   const store = new PanelConversationStore();

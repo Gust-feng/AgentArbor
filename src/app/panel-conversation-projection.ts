@@ -324,14 +324,14 @@ function conversationNextStep(conversation: ConversationProjectionSource, status
   const queuedCount = conversation.queuedRunIds.length;
   if (status === "approval_needed") return "确认、拒绝或补充指导。";
   if (status === "needs_input") return "补充材料或说明新的限制。";
-  if (status === "pending") return "等待前序任务完成后自动继续。";
+  if (status === "pending") return "等待前序任务完成。";
   if (status === "running") {
-    return queuedCount > 0 ? `继续观察进度，后面还有 ${queuedCount} 个排队任务。` : "继续观察进度，必要时会请求确认。";
+    return queuedCount > 0 ? `还有 ${queuedCount} 个任务排队。` : "任务进行中。";
   }
-  if (status === "completed") return "打开查看结果，或继续追问下一步。";
+  if (status === "completed") return "查看结果，或继续追问。";
   if (status === "failed" || status === "blocked") return "打开查看原因，补充要求后重试。";
-  if (status === "cancelled") return "可以重新发起或调整任务。";
-  return "输入任务后会显示进度和结果。";
+  if (status === "cancelled") return "可重新发起。";
+  return "输入任务。";
 }
 
 function pendingAssistantTurn(conversation: ConversationProjectionSource): ConversationProjectionTurn | undefined {

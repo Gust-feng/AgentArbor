@@ -56,7 +56,7 @@ function createIntentCoreNote(input: NoteFactoryInput): AgentWorkNote {
     stage: "intent_profile",
     status: planned ? "completed" : received ? "running" : "pending",
     summary: planned ? "目标画像已成形，地下探索计划已发布。" : received ? "目标已进入地下认知运行时，正在形成目标画像。" : "等待目标进入地下认知运行时。",
-    detail: "工作笔记只记录目标接收和画像成形状态，不展示隐藏推理链或完整用户输入。",
+    detail: "记录目标接收和画像成形状态。",
     eventRefs,
     reasoningTrace: trace,
   });
@@ -160,7 +160,7 @@ function createGrowthGovernorNote(input: NoteFactoryInput): AgentWorkNote {
     stage: "rootlet_planning",
     status: started ? "completed" : planned ? "running" : "pending",
     summary: started ? "Rootlet 集群已按地下探索计划启动。" : planned ? "已接收探索计划，正在准备 rootlet 集群。" : "等待 Intent Core 输出探索计划。",
-    detail: "该笔记只展示调度状态和 rootlet kind 计划，不写入 Plan 或地上执行计划。",
+    detail: "记录调度状态和 rootlet kind 计划。",
     eventRefs,
   });
 }
@@ -190,8 +190,8 @@ function createAgentRunTreeNote(input: NoteFactoryInput): AgentWorkNote {
         : `运行树 ${tree.status}，局部检查 ${completedChildren}/${tree.childRuns.length} 已完成。`,
     detail:
       tree === undefined
-        ? "分工、等待、继续和汇总判断会作为安全事件进入活动流。"
-        : `delegation ${tree.delegationDecisions.length} 次，汇总判断 ${tree.parentSyntheses.length} 次；child 输出不会直接进入最终 artifact / Plan。`,
+        ? "分工、等待、继续和汇总判断会进入活动流。"
+        : `delegation ${tree.delegationDecisions.length} 次，汇总判断 ${tree.parentSyntheses.length} 次。`,
     eventRefs,
     evidenceRefs: tree?.parentSyntheses.flatMap((synthesis) => synthesis.outputRefs) ?? [],
     candidateRefs: tree?.parentSyntheses.flatMap((synthesis) => synthesis.retainedMaterialRefs) ?? [],
@@ -225,7 +225,7 @@ function createRootletAgentsNote(input: NoteFactoryInput): AgentWorkNote {
       : rootletsStarted
         ? "Rootlet agents 正在产出候选和模型建议引用。"
         : "等待 Rootlet 集群启动。",
-    detail: `Rootlet kinds: ${rootletKindsFor(input).join(" / ")}。模型和工具只记录调用引用、状态和候选引用，不展示 prompt、raw output 或 secret。`,
+    detail: `Rootlet kinds: ${rootletKindsFor(input).join(" / ")}。记录模型、工具、候选引用和状态。`,
     eventRefs,
     candidateRefs: input.candidateRefs,
     modelCallRefs,
@@ -258,7 +258,7 @@ function createModelCallsNote(input: NoteFactoryInput): AgentWorkNote {
       input.modelCalls.length === 0
         ? "当前没有模型调用事件。"
         : `模型调用 requested/completed/failed = ${requested}/${completed}/${failed}。`,
-    detail: "模型调用笔记只包含脱敏目的、rootlet kind、模型名、候选引用和事件引用。",
+    detail: "记录模型调用状态、模型名、候选引用和事件引用。",
     eventRefs,
     candidateRefs: unique(input.modelCalls.flatMap((call) => call.candidateRefs)),
     modelCallRefs: input.modelCalls.map((call) => call.requestId),
@@ -288,8 +288,8 @@ function createAutonomyCoreNote(input: NoteFactoryInput): AgentWorkNote {
         : `自治动作 ${autonomy.latestAction}，cycle 数 ${autonomy.cycleCount}。`,
     detail:
       autonomy?.stopReason === undefined
-        ? "自治核心只决定继续探索、请求收束、请求用户澄清或停止，不直接批准 Plan。"
-        : `停止原因 ${autonomy.stopReason}；模型调用和候选引用只保留可查看摘要。`,
+        ? "自治核心记录继续探索、请求收束、请求用户澄清或停止。"
+        : `停止原因 ${autonomy.stopReason}；保留模型调用和候选引用。`,
     eventRefs,
     evidenceRefs: autonomy?.sourceRefs ?? [],
     modelCallRefs: autonomy?.modelCallRefs ?? [],
@@ -341,7 +341,7 @@ function createConvergenceJudgeNote(input: NoteFactoryInput): AgentWorkNote {
     summary: convergence === undefined ? "等待候选池进入收束评审。" : `收束结果 ${convergence.outcome}，review ${convergence.reviewId}。`,
     detail:
       convergence === undefined
-        ? "收束前不会把 rootlet output 直接交给 Plan。"
+        ? "收束前 rootlet output 仍保留为候选材料。"
         : `accepted/merged/rejected/unknown = ${convergence.accepted}/${convergence.merged}/${convergence.rejected}/${convergence.unknown}。`,
     eventRefs,
     candidateRefs: input.candidateRefs,
@@ -367,7 +367,7 @@ function createHandoffStewardNote(input: NoteFactoryInput): AgentWorkNote {
     stage: "direction_handoff",
     status: completed ? "completed" : convergenceReady ? "running" : "pending",
     summary: pkg === undefined ? "等待收束评审完成后整理结果材料。" : `方案材料 ${pkg.id} v${pkg.version}，状态 ${pkg.status}。`,
-    detail: "Plan Steward 只组装已收束候选；本面板不进入 Aboveground、Fruits 或 Governance。",
+    detail: "Plan Steward 组装已收束候选。",
     eventRefs,
     candidateRefs: input.candidateRefs,
     reasoningTrace: trace,

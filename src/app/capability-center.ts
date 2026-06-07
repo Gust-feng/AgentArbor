@@ -131,7 +131,7 @@ export class CapabilityCenter {
         updatedAt: server.updatedAt,
       })),
       workspace,
-      securitySummary: "普通运行只使用安全能力投影；密钥、原始 prompt、工具原始输出、stdout/stderr 和 skill 正文不进入配置快照。",
+      securitySummary: "本轮模型、工具、工作方法和工作区能力快照。",
       warnings,
     };
   }

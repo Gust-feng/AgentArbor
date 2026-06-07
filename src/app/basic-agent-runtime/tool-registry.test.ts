@@ -39,6 +39,27 @@ test("desktop-basic tool registry exposes catalog and allowed tools from scoped 
   assert.equal(JSON.stringify(catalog).includes("api_key"), false);
 });
 
+test("desktop-basic tool descriptions stay plain and do not expose deep product terms", () => {
+  const registry = createDesktopBasicToolRegistry({ env: {}, workspaceRoot: process.cwd(), playwrightAvailable: true });
+  const catalog = registry.catalog("desktop-basic");
+  const plainToolCopy = catalog.tools
+    .filter((tool) => tool.enabledByDefault)
+    .map((tool) => [
+      tool.name,
+      tool.displayName,
+      tool.displayDescription,
+      tool.description,
+      tool.operationLabel,
+      tool.riskLabel,
+      tool.confirmationLabel,
+    ].join("\n"))
+    .join("\n\n");
+
+  assert.doesNotMatch(plainToolCopy, /\batomic\b|原子|Plan|Handoff|Underground|rootlet|child agent|高级|智能编辑|变异|mutation/i);
+  assert.match(plainToolCopy, /编辑文件/);
+  assert.match(plainToolCopy, /按唯一锚点修改工作区文本文件/);
+});
+
 test("desktop-basic tool registry keeps unavailable browser tools out of allowed tools", () => {
   const registry = createDesktopBasicToolRegistry({ env: {}, workspaceRoot: process.cwd(), playwrightAvailable: false });
   const catalog = registry.catalog("desktop-basic");

@@ -41,7 +41,8 @@
 - 后端负责：上下文装配、模型调用、工具可见性裁剪、工具执行、确认门控、运行状态、事件投影、持久化与恢复
 - 当前 `GET /api/conversations/:id` 会直接返回当前会话正在查看的 `currentRun` 安全投影，包含当前 run 的基础状态、工作视图、结果详情和安全 replay
 - 当前 `GET /api/basic-agent/runs/:runId/view?cursor=...` 会返回同一套后端拥有的 run view，供前端在 live refresh、结算刷新和历史运行读取时复用
-- 当前后端 run view 的语义字段是 `workView`；`workSession` 只作为面板内部迁移期和历史调用方的兼容别名保留，后续新增代码应优先读取 `workView`
+- 当前后端 run view 的语义字段是 `workView`；`GET /api/basic-agent/runs/:runId/view` 和 `GET /api/conversations/:id` 的 `currentRun` 不再返回顶层 `workSession` alias
+- `GET /api/basic-agent/runs/:runId/work-session` 仍作为历史兼容端点保留，会同时返回 `workView` 与 `workSession`；后续新增普通 UI 和普通后端路径不能继续依赖该端点
 - 前端在打开会话，以及提交消息、确认决策、取消运行、运行结算、历史 transcript 读取后的刷新路径中，都应优先消费这些后端 read-model，而不是自行拼装运行状态、工作视图、结果详情和事件
 - 当前 Panel 前端普通运行主线不再直接依赖 `/api/desktop/runs/:id` 或 `/api/basic-agent/runs/:id/work-session` 来拼装运行视图；这些接口即使保留，也不应继续作为默认普通 Agent 观察主线
 - 历史运行和恢复运行的 read-model 必须优先使用 run 创建时冻结的 `capabilitySnapshot` 和 `informationAccess` 作为模型、工具、工作区和信息访问事实；当前配置只能作为旧记录缺失快照时的兼容回退

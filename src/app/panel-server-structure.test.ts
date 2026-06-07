@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { promises as fs } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { readAppSource } from "./panel-structure-test-utils.js";
@@ -191,7 +192,7 @@ test("panel server source keeps conversation restore and persistence split", asy
   assert.equal(basicAgentRunView.includes("function addLegacyWorkSessionAlias"), false);
   assert.equal(basicAgentRunView.includes("workSession: view.workView"), false);
   assert.equal(basicAgentRunView.includes("workSession: workView"), false);
-  assert.equal(basicAgentRunView.includes("agentDefinitionRef: job.agentDefinitionRef ?? run.agentDefinitionRef"), true);
+  assert.equal(basicAgentRunView.includes("const agentDefinitionRef = job.agentDefinitionRef ?? run.agentDefinitionRef"), true);
   assert.equal(basicAgentRunView.includes("agentDefinitionRef: run.agentDefinitionRef"), true);
   assert.equal(basicAgentRunView.includes("agentDefinitionRef: snapshot.run.agentDefinitionRef"), false);
   assert.equal(basicAgentRunView.includes("createLiveBasicAgentWorkViewReadModel"), true);
@@ -499,6 +500,18 @@ test("panel server source keeps conversation restore and persistence split", asy
   }
 });
 
+test("panel server routes cannot bypass ordinary desktop run creation", async () => {
+  const routeFiles = await listPanelServerRouteFiles();
+  for (const file of routeFiles) {
+    const source = await fs.readFile(file, "utf8");
+    const relative = path.relative(process.cwd(), file);
+    assert.equal(source.includes("runDesktopAgentSession"), false, `${relative} must not call desktop session directly`);
+    assert.equal(source.includes("runOrdinaryDesktopForPanel"), false, `${relative} must not call ordinary desktop execution directly`);
+    assert.equal(source.includes('from "../desktop-agent-session'), false, `${relative} must not import desktop session directly`);
+    assert.equal(source.includes('from "./desktop-agent-execution'), false, `${relative} must not import desktop execution directly`);
+  }
+});
+
 function sourceBetween(source: string, start: string, end: string): string {
   const startIndex = source.indexOf(start);
   const endIndex = source.indexOf(end, startIndex);
@@ -511,4 +524,12 @@ function sourceAfter(source: string, start: string): string {
   const startIndex = source.indexOf(start);
   assert.notEqual(startIndex, -1, `missing source start marker: ${start}`);
   return source.slice(startIndex);
+}
+
+async function listPanelServerRouteFiles(): Promise<readonly string[]> {
+  const root = path.join(process.cwd(), "src", "app", "panel-server");
+  const entries = await fs.readdir(root, { withFileTypes: true });
+  return entries
+    .filter((entry) => entry.isFile() && entry.name.endsWith("routes.ts"))
+    .map((entry) => path.join(root, entry.name));
 }

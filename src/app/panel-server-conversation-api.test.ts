@@ -1026,6 +1026,86 @@ test("conversation model output contract failure stays failed across run views a
   }
 });
 
+test("conversation cancellation stays cancelled across run views and runtime snapshot", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-conversation-cancel-"));
+  const secret = "sk-cancel-secret";
+  let markProviderStarted: (() => void) | undefined;
+  const providerStarted = new Promise<void>((resolve) => {
+    markProviderStarted = resolve;
+  });
+  const providerFetch: PanelProviderFetch = async (_url, init) => {
+    markProviderStarted?.();
+    return await new Promise<Awaited<ReturnType<PanelProviderFetch>>>((_resolve, reject) => {
+      init.signal?.addEventListener(
+        "abort",
+        () => reject(new Error(`provider aborted after user cancellation apiKey=${secret}`)),
+        { once: true }
+      );
+    });
+  };
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory, providerFetch });
+  try {
+    await requestJson(server.url, "/api/config/model-provider", {
+      method: "POST",
+      body: {
+        baseUrl: "https://provider.example",
+        model: "cancel-model",
+        apiKey: secret,
+      },
+    });
+
+    const start = await requestJson(server.url, "/api/conversations", {
+      method: "POST",
+      body: { goal: "测试取消不能变成完成", aiMode: "openai-compatible" },
+    });
+    const runId = start.body.run.runId;
+    await providerStarted;
+
+    const cancel = await requestJson(server.url, `/api/basic-agent/runs/${encodeURIComponent(runId)}/cancel`, {
+      method: "POST",
+      body: {},
+    });
+    const cancelled = await waitForRun(
+      server.url,
+      runId,
+      (body) => body.status === "cancelled",
+      4_000,
+      "/api/desktop/runs"
+    );
+    const conversation = await requestJson(
+      server.url,
+      `/api/conversations/${encodeURIComponent(start.body.conversation.conversationId)}`
+    );
+    const basicView = await requestJson(
+      server.url,
+      `/api/basic-agent/runs/${encodeURIComponent(runId)}/view?cursor=0`
+    );
+    const runtimeRun = await requestJson(server.url, `/api/runtime/runs/${encodeURIComponent(runId)}`);
+    const visibleText = `${cancel.text}\n${cancelled.text}\n${conversation.text}\n${basicView.text}\n${runtimeRun.text}`;
+
+    assert.equal(start.status, 202);
+    assert.equal(cancel.status, 200);
+    assert.equal(cancel.body.run.status, "cancelled");
+    assert.equal(cancelled.body.status, "cancelled");
+    assert.equal(cancelled.body.error.code, "run_cancelled");
+    assert.equal(conversation.body.conversation.currentRun.run.status, "cancelled");
+    assert.equal(conversation.body.conversation.currentRun.workView.stage, "cancelled");
+    assert.equal(conversation.body.conversation.currentRun.detail.status, "cancelled");
+    assert.equal(basicView.body.view.run.status, "cancelled");
+    assert.equal(basicView.body.view.workView.stage, "cancelled");
+    assert.equal(basicView.body.view.detail.status, "cancelled");
+    assert.equal(runtimeRun.body.snapshot.run.status, "cancelled");
+    assert.equal(runtimeRun.body.snapshot.run.error.code, "run_cancelled");
+    assert.deepEqual(basicView.body.view.capabilityResolution, runtimeRun.body.snapshot.run.capabilityResolution);
+    assert.equal(visibleText.includes(secret), false);
+    assert.equal(visibleText.includes("provider aborted after user cancellation"), false);
+    assertSafePanelJsonText(visibleText);
+  } finally {
+    await server.close();
+    await removeTemporaryTree(directory);
+  }
+});
+
 test("conversation history keeps safe failed turns and later completed turns after restart", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-conversation-failed-history-"));
   const secret = "sk-failed-history-secret";

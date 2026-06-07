@@ -543,6 +543,37 @@ test("Desktop Agent Session keeps returning tool results until the model stops i
   assert.equal(channel.requests.length, 5);
 });
 
+test("Desktop Agent Session reports out_of_fuel as an unfinished round boundary", async () => {
+  const toolCenter = new MixedToolCenter();
+  const channel = new MixedToolLimitChannel();
+  const result = await runDesktopAgentSession("持续使用工具直到轮次边界", {
+    aiMode: "fake",
+    agentDefinition: {
+      ...DESKTOP_ROOT_AGENT,
+      agentId: "limited-round-agent",
+      displayName: "Limited Round Agent",
+      turnPolicy: {
+        ...DESKTOP_ROOT_AGENT.turnPolicy,
+        maxModelRounds: 1,
+        maxToolRounds: 2,
+      },
+    },
+    createIntelligenceChannel: () => channel,
+    createToolCenter: () => toolCenter,
+    capabilitySnapshot: desktopCapabilitySnapshot([
+      capabilityTool("list_dir", "read-only"),
+      capabilityTool("read_file", "read-only"),
+      capabilityTool("grep_files", "read-only"),
+    ]),
+  });
+
+  assert.equal(result.status, "paused");
+  assert.equal(result.stopReason, "out_of_fuel");
+  assert.equal(result.answer, undefined);
+  assert.equal(result.failureMessage?.includes("轮次已到边界"), true);
+  assert.equal(result.failureMessage?.includes("异常保护"), false);
+});
+
 test("Desktop Agent Session pauses context_overflow when context maintenance fails before provider stop", async () => {
   const toolCenter = new BulkyToolCenter();
   const channel = new ContextOverflowChannel();

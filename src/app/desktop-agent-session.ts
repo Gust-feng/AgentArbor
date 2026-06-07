@@ -217,7 +217,7 @@ function desktopAgentResultFromTurn(input: {
       contextPack: safeDesktopAgentContextPack(input.contextPack),
       failureMessage: input.turn.stoppedReason === "context_overflow"
         ? "上下文压缩没有成功，任务没有完成。你可以继续发送消息，我会在保留现有上下文的基础上接着处理。"
-        : "运行被异常保护中断，任务没有完成。你可以补充要求或重新发起，我会继续按模型判断处理。",
+        : "本轮模型/工具轮次已到边界，任务没有完成。你可以补充要求或重新发起，我会继续按模型判断处理。",
       modelCallRefs,
       toolCallRefs,
       activity: activityFromEventEntries(input.runtime.eventLog.list(), "paused"),

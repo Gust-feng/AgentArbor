@@ -689,7 +689,7 @@ test("syncConversationTurnForJob prefers HTTP event errors for failed turns", ()
 
   const conversation = conversations.getReadModel(job.conversationId ?? "");
   const assistant = conversation?.turns.find((turn) => turn.role === "assistant");
-  assert.equal(assistant?.title, "运行失败");
+  assert.equal(assistant?.title, "未完成");
   assert.equal(assistant?.status, "failed");
   assert.equal(assistant?.content.includes("错误信息：HTTP 401"), true);
   assert.equal(assistant?.content.includes("HTTP 401"), true);
@@ -734,7 +734,7 @@ test("syncConversationTurnForJob does not complete failed turns with forged answ
 
   const summary = conversations.list().find((item) => item.conversationId === job.conversationId);
   const assistant = conversations.getReadModel(job.conversationId ?? "")?.turns.find((turn) => turn.role === "assistant");
-  assert.equal(assistant?.title, "运行失败");
+  assert.equal(assistant?.title, "未完成");
   assert.equal(assistant?.status, "failed");
   assert.equal(summary?.status, "failed");
   assert.equal(assistant?.content.includes("看起来像最终回答"), false);
@@ -776,7 +776,7 @@ test("syncConversationTurnForJob preserves existing assistant output when failin
   });
 
   const assistant = conversations.getReadModel(job.conversationId ?? "")?.turns.find((turn) => turn.role === "assistant");
-  assert.equal(assistant?.title, "运行失败");
+  assert.equal(assistant?.title, "未完成");
   assert.equal(assistant?.status, "failed");
   assert.equal(assistant?.content.includes("已经输出的内容。"), true);
   assert.equal(assistant?.content.includes("错误信息：模型服务的流式返回格式不兼容"), true);
@@ -857,7 +857,7 @@ test("syncConversationTurnForJob keeps streamed output on failure even before pr
   });
 
   const assistant = conversations.getReadModel(job.conversationId ?? "")?.turns.find((turn) => turn.role === "assistant");
-  assert.equal(assistant?.title, "运行失败");
+  assert.equal(assistant?.title, "未完成");
   assert.equal(assistant?.status, "failed");
   assert.equal(assistant?.content.includes("第一段已经显示。第二段还没来得及同步。"), true);
   assert.equal(assistant?.content.includes("错误信息：上游模型连接中断。"), true);

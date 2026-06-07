@@ -77,8 +77,8 @@ export function visibleRunProblem(
   }
   if (run?.status === "failed") {
     return {
-      title: "运行失败",
-      message: visibleProblemText(detail?.error?.message) ?? visibleProblemText(workView?.currentAction) ?? "模型没有返回可用结果。你可以补充材料或重新发起。",
+      title: "未完成",
+      message: visibleProblemText(detail?.error?.message) ?? visibleProblemText(workView?.currentAction) ?? "没有返回可用结果。你可以补充材料或重新发起。",
       tone: "error",
     };
   }

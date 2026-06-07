@@ -130,7 +130,7 @@ export function createPanelRunStreamEvents(input: {
       type: "run.cancelled",
       createdAt: input.updatedAt,
       agentLabel,
-      summary: "运行已取消。",
+      summary: "已取消。",
       status: "cancelled",
       sourceRefs: [],
       modelCallRefs: [],
@@ -252,7 +252,7 @@ function appendStreamEventsForEvent(input: {
       ...base,
       eventId: `${input.runId}:event:${input.entry.sequence}:agent.note.delta`,
       type: "agent.note.delta",
-      agentLabel: "模型",
+      agentLabel: "助手",
       summary,
       status: "running",
     });
@@ -267,7 +267,7 @@ function appendStreamEventsForEvent(input: {
         ...base,
         eventId: `${input.runId}:event:${input.entry.sequence}:model.reasoning.delta:${index + 1}`,
         type: "model.reasoning.delta",
-        agentLabel: "模型",
+        agentLabel: "助手",
         delta: chunk,
         status: "running",
         detail: {
@@ -282,7 +282,7 @@ function appendStreamEventsForEvent(input: {
         ...base,
         eventId: `${input.runId}:event:${input.entry.sequence}:model.reasoning.completed`,
         type: "model.reasoning.completed",
-        agentLabel: "模型",
+        agentLabel: "助手",
         summary: "思考完成。",
         status: "completed",
         detail: {
@@ -321,7 +321,7 @@ function appendStreamEventsForEvent(input: {
         ...base,
         eventId: `${input.runId}:event:${input.entry.sequence}:model.output.delta:${index + 1}`,
         type: "model.output.delta",
-        agentLabel: "模型",
+        agentLabel: "助手",
         delta: chunk,
         status: "running",
       });
@@ -330,7 +330,7 @@ function appendStreamEventsForEvent(input: {
       ...base,
       eventId: `${input.runId}:event:${input.entry.sequence}:model.output.completed`,
       type: "model.output.completed",
-      agentLabel: "模型",
+      agentLabel: "助手",
       summary: modelCompletedSummary(payload),
       status: "completed",
     });
@@ -342,7 +342,7 @@ function appendStreamEventsForEvent(input: {
       ...base,
       eventId: `${input.runId}:event:${input.entry.sequence}:agent.note.completed`,
       type: "agent.note.completed",
-      agentLabel: "模型",
+      agentLabel: "助手",
       summary: modelFailedSummary(payload),
       status: "failed",
       detail: modelFailureStreamDetail(payload),

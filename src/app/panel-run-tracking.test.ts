@@ -186,7 +186,7 @@ test("panel run tracking reports provider configuration boundaries without secre
   });
 
   assert.equal(tracking.provider.status, "missing_model_and_secret");
-  assert.equal(tracking.run.waitingPoint, "运行失败，查看错误摘要。");
+  assert.equal(tracking.run.waitingPoint, "未完成，请查看错误摘要。");
   assert.equal(JSON.stringify(tracking).includes("apiKey"), false);
 });
 

@@ -30,9 +30,9 @@ export function eventTitle(event: RunEvent): string {
   if (event.type === "model.reasoning.delta") return "正在思考";
   if (event.type === "model.reasoning.completed") return "思考完成";
   if (event.type === "final.result") return "结果已生成";
-  if (event.type === "run.failed") return "运行未完成";
-  if (event.type === "run.cancelled") return "运行已取消";
-  if (event.type === "run.blocked") return "运行中断";
+  if (event.type === "run.failed") return "未完成";
+  if (event.type === "run.cancelled") return "已取消";
+  if (event.type === "run.blocked") return "需要处理";
   return event.title || "状态更新";
 }
 

@@ -49,7 +49,7 @@ export function syncConversationTurnForJob(input: {
       conversationId: job.conversationId,
       assistantTurnId: job.assistantTurnId,
       runId: job.runId,
-      title: "运行失败",
+      title: "未完成",
       content: appendAssistantFailureContent(previousContent, failureText),
       status: "failed",
       responseModel,
@@ -62,7 +62,7 @@ export function syncConversationTurnForJob(input: {
       assistantTurnId: job.assistantTurnId,
       runId: job.runId,
       title: "已取消",
-      content: "运行已取消。",
+      content: "已取消。",
       status: "failed",
       responseModel,
     });
@@ -389,7 +389,7 @@ function appendAssistantFailureContent(previousContent: string, failureText: str
 
 function conciseRunFailureText(error: { readonly code: string; readonly message: string } | undefined): string {
   if (error === undefined) {
-    return "运行失败，但没有返回错误详情。";
+    return "未完成，但没有返回错误详情。";
   }
   switch (error.code) {
     case "missing_api_key":

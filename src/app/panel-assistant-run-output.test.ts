@@ -38,7 +38,7 @@ test("visible run problem surfaces failed run details without inventing a report
       undefined
     ),
     {
-      title: "运行失败",
+      title: "未完成",
       message: "模型连接失败",
       tone: "error",
     }
@@ -54,7 +54,7 @@ test("visible run problem sanitizes failed run detail text", () => {
   );
 
   assert.deepEqual(problem, {
-    title: "运行失败",
+    title: "未完成",
     message: "模型连接失败。",
     tone: "error",
   });

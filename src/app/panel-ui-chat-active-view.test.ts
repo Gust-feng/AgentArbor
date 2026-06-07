@@ -126,7 +126,7 @@ test("chat active view keeps previous assistant output visible when the run fail
 
   assert.equal(view.workline.turns[1]?.turn.content, "已经输出的内容。");
   assert.deepEqual(view.statusNotice, {
-    title: "运行失败",
+    title: "未完成",
     message: "上游模型连接中断。",
     tone: "error",
   });

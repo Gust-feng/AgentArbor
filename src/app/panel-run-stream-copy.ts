@@ -16,7 +16,7 @@ export function blockedRunSummary(error: { readonly code: string; readonly messa
   if (error?.code === "out_of_fuel") {
     return "任务没有完成。你可以继续发送消息，我会接着处理。";
   }
-  return friendlyUserFacingFailureText(error?.message ?? "运行中断，等待用户确认或补充指导。");
+  return friendlyUserFacingFailureText(error?.message ?? "等待你确认或补充指导。");
 }
 
 export function runStartedSummary(desktopMode: "agent" | "deep" | undefined): string {
@@ -74,7 +74,7 @@ export function modelCompletedSummary(payload: Readonly<Record<string, unknown>>
 }
 
 export function modelFailedSummary(payload: Readonly<Record<string, unknown>>): string {
-  return modelFailureErrorText(payload) ?? stringOrUndefined(payload.failureKind) ?? "模型调用失败。";
+  return modelFailureErrorText(payload) ?? stringOrUndefined(payload.failureKind) ?? "没有返回可用结果。";
 }
 
 export function modelFailureStreamDetail(payload: Readonly<Record<string, unknown>>): PanelRunStreamEventDetail | undefined {
@@ -83,7 +83,7 @@ export function modelFailureStreamDetail(payload: Readonly<Record<string, unknow
     ? undefined
     : {
         kind: "thinking",
-        action: "模型调用失败",
+        action: "回复失败",
         error,
         truncated: false,
       };
@@ -98,7 +98,7 @@ export function runFailureStreamDetail(
   const message = friendlyUserFacingFailureText(error.message);
   return {
     kind: "thinking",
-    action: "运行未完成",
+    action: "未完成",
     error: compactFailureText(message, 1_000),
     truncated: false,
   };
@@ -129,7 +129,7 @@ export function contextCompactionPreview(payload: Readonly<Record<string, unknow
   const messageCountAfter = numberOrUndefined(payload.messageCountAfter);
   const parts = [
     covered === undefined ? undefined : `覆盖较早上下文 ${covered} 条`,
-    messageCountAfter === undefined ? undefined : `压缩后消息 ${messageCountAfter} 条`,
+    messageCountAfter === undefined ? undefined : `整理后消息 ${messageCountAfter} 条`,
     stringOrUndefined(payload.error),
   ].filter(isString);
   return parts.length === 0 ? undefined : parts.join("；");
@@ -256,11 +256,11 @@ export function finalResultSummary(input: {
   }
   const summary = fullSummaryOrUndefined(input.summary);
   if (summary !== undefined) {
-    return `任务运行完成，已形成可执行方案，状态 ${summary.directionPackage.status}。`;
+    return `任务已完成，已形成可执行方案，状态 ${summary.directionPackage.status}。`;
   }
   const artifact = latestArtifactProducedPayload(input.eventEntries);
   if (artifact !== undefined) {
-    return `任务运行完成，已生成报告：${artifact.summary ?? artifact.artifactId ?? "artifact"}。`;
+    return `任务已完成，已生成报告：${artifact.summary ?? artifact.artifactId ?? "artifact"}。`;
   }
   const directAnswer = latestDirectAnswerPayload(input.eventEntries);
   if (directAnswer !== undefined) {
@@ -269,10 +269,10 @@ export function finalResultSummary(input: {
   if (input.observation?.aboveground.status === "completed") {
     const handoff = input.observation.handoff;
     return handoff.packageId.length === 0
-      ? "任务运行完成，已产出结果。"
-      : "任务运行完成，已产出结果。";
+      ? "任务已完成，已产出结果。"
+      : "任务已完成，已产出结果。";
   }
-  return "运行完成。";
+  return "已完成。";
 }
 
 export function finalSourceRefs(input: {
@@ -344,7 +344,7 @@ function modelFailureKindForDisplay(failureKind: string | undefined): string | u
     case "provider_response":
       return "模型服务响应无效。";
     case "model_failed":
-      return "模型调用失败。";
+      return "没有返回可用结果。";
     default:
       return undefined;
   }

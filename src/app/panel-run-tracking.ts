@@ -422,16 +422,16 @@ function waitingPointFor(
     return "等待用户补充指导。";
   }
   if (status === "cancelled") {
-    return "运行已取消。";
+    return "已取消。";
   }
   if (status === "blocked") {
-    return "运行中断，等待用户确认或补充指导。";
+    return "等待你确认或补充指导。";
   }
   if (status === "failed") {
-    return "运行失败，查看错误摘要。";
+    return "未完成，请查看错误摘要。";
   }
   if (status === "completed") {
-    return runMode === "agent" ? "运行完成，最终结果已形成。" : "运行完成，报告或终态摘要已形成。";
+    return runMode === "agent" ? "已完成，结果已生成。" : "已完成，报告或终态摘要已形成。";
   }
   if (runMode === "agent") {
     return ordinaryAgentWaitingPoint(lastEventType);
@@ -490,21 +490,21 @@ function ordinaryAgentWaitingPoint(lastEventType: ArborMessageType | undefined):
     case "goal.received":
       return "正在处理。";
     case "model.requested":
-      return "已发出模型请求，等待模型返回。";
+      return "正在处理。";
     case "model.completed":
-      return "模型调用已返回。";
+      return "已更新。";
     case "model.failed":
-      return "模型调用失败。";
+      return "没有返回可用结果。";
     case "context.compaction.completed":
       return "较早上下文已整理。";
     case "context.compaction.failed":
       return "上下文整理失败。";
     case "tool.requested":
-      return "已发出工具调用，等待返回。";
+      return "正在执行动作。";
     case "tool.completed":
-      return "工具调用已返回。";
+      return "动作已完成。";
     case "tool.failed":
-      return "工具调用失败。";
+      return "动作未完成。";
     case "user_approval.requested":
       return "等待用户确认后继续。";
     case "user_approval.received":

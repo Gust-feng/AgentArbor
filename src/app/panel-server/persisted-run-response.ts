@@ -332,7 +332,7 @@ export function createPersistedStreamEvents(
         ? undefined
         : {
             kind: "thinking",
-            action: "运行未完成",
+            action: "未完成",
             error: friendlyUserFacingFailureText(snapshot.run.error.message),
             truncated: false,
           },
@@ -349,7 +349,7 @@ export function createPersistedStreamEvents(
       type: "run.cancelled",
       createdAt: snapshot.run.updatedAt,
       agentLabel,
-      summary: snapshot.run.resultSummary ?? "运行已取消。",
+      summary: snapshot.run.resultSummary ?? "已取消。",
       status: "cancelled",
       sourceRefs: [],
       modelCallRefs: [],
@@ -445,8 +445,15 @@ function persistedStreamAgentLabel(type: PanelRunStreamEvent["type"]): string {
   if (type === "user.guidance") {
     return "用户指导";
   }
-  if (type === "agent.note.delta" || type === "agent.note.completed" || type === "model.output.completed") {
-    return "模型";
+  if (
+    type === "agent.note.delta" ||
+    type === "agent.note.completed" ||
+    type === "model.output.delta" ||
+    type === "model.output.completed" ||
+    type === "model.reasoning.delta" ||
+    type === "model.reasoning.completed"
+  ) {
+    return "助手";
   }
   return "AgentArbor";
 }
@@ -561,18 +568,18 @@ function persistedWaitingPoint(status: PanelRunStatus): string {
     return "需要你补充材料后继续。";
   }
   if (status === "running") {
-    return "运行记录显示仍在进行；如这是重启后的历史记录，需要重新发起后续任务。";
+    return "记录显示仍在进行；如这是重启后的历史记录，需要重新发起后续任务。";
   }
   if (status === "cancelled") {
-    return "运行已取消。";
+    return "已取消。";
   }
   if (status === "blocked") {
     return "无法继续原操作。请重新发起或继续处理。";
   }
   if (status === "failed") {
-    return "运行失败，请查看错误信息。";
+    return "未完成，请查看错误信息。";
   }
-  return "运行已完成。";
+  return "已完成。";
 }
 
 function streamTypeForRuntimeEvent(

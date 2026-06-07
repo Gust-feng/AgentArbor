@@ -149,6 +149,31 @@ test("panel server implementation does not import the default desktop root agent
   );
 });
 
+test("default Desktop Agent definition stays as separate prompt and policy assets", async () => {
+  const promptRoot = path.join(process.cwd(), "src", "app", "agent-prompts");
+  const [definition, prompt, turnPolicy, outputContract, toolVisibility] = await Promise.all([
+    readSource(path.join(promptRoot, "desktop-root-agent.ts")),
+    readSource(path.join(promptRoot, "desktop-root-agent-prompt.ts")),
+    readSource(path.join(promptRoot, "desktop-root-agent-turn-policy.ts")),
+    readSource(path.join(promptRoot, "desktop-root-agent-output-contract.ts")),
+    readSource(path.join(promptRoot, "desktop-root-agent-tool-visibility.ts")),
+  ]);
+
+  assert.equal(definition.includes('from "./desktop-root-agent-prompt.js"'), true);
+  assert.equal(definition.includes('from "./desktop-root-agent-turn-policy.js"'), true);
+  assert.equal(definition.includes('from "./desktop-root-agent-output-contract.js"'), true);
+  assert.equal(definition.includes('from "./desktop-root-agent-tool-visibility.js"'), true);
+  assert.equal(definition.includes("systemPrompt:"), false);
+  assert.equal(definition.includes("allowModel:"), false);
+  assert.equal(definition.includes("outputKind:"), false);
+  assert.equal(definition.includes("visibleToolScopes:"), false);
+  assert.equal(prompt.includes("export const DESKTOP_ROOT_AGENT_PROMPT"), true);
+  assert.equal(prompt.includes("systemPrompt:"), true);
+  assert.equal(turnPolicy.includes("export const DESKTOP_ROOT_AGENT_TURN_POLICY"), true);
+  assert.equal(outputContract.includes("export const DESKTOP_ROOT_AGENT_OUTPUT_CONTRACT"), true);
+  assert.equal(toolVisibility.includes("export const DESKTOP_ROOT_AGENT_TOOL_VISIBILITY"), true);
+});
+
 test("Basic Agent run projection does not keep stale panel projection files", () => {
   const runtimeRoot = path.join(process.cwd(), "src", "app", "basic-agent-runtime");
 

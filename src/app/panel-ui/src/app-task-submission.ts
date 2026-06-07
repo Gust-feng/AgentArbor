@@ -20,6 +20,7 @@ import {
   runIdToObserveAfterStart,
   type StartedConversationRun,
 } from "../../panel-ui-submit-flow";
+import { nextRunCapabilityState } from "../../panel-ui-run-capability-state";
 import { emptyLiveRun } from "../../panel-ui-live-run-buffer";
 import { mergeTranscriptNodesByRunId } from "../../panel-ui-transcript-cache";
 import {
@@ -70,26 +71,24 @@ export async function submitPanelTask(
   options.setScreen("chat-active");
   options.setGoal("");
   options.setAttachments([]);
-  options.setApp((previous) => ({
-    ...previous,
-    busy: true,
-    conversation: optimisticConversationForSubmit(previous.conversation, trimmed),
-    error: undefined,
-    run: likelyQueuesBehindActiveRun ? previous.run : undefined,
-    capabilityResolution:
-      likelyQueuesBehindActiveRun && previous.capabilityResolutionRunId === previous.run?.runId
-        ? previous.capabilityResolution
-        : undefined,
-    capabilityResolutionRunId:
-      likelyQueuesBehindActiveRun && previous.capabilityResolutionRunId === previous.run?.runId
-        ? previous.capabilityResolutionRunId
-        : undefined,
-    events: likelyQueuesBehindActiveRun ? previous.events : [],
-    transcriptNodes: likelyQueuesBehindActiveRun ? previous.transcriptNodes : [],
-    live: likelyQueuesBehindActiveRun ? previous.live : undefined,
-    detail: likelyQueuesBehindActiveRun ? previous.detail : undefined,
-    workView: likelyQueuesBehindActiveRun ? previous.workView : undefined,
-  }));
+  options.setApp((previous) => {
+    const capabilityState = likelyQueuesBehindActiveRun && previous.run !== undefined
+      ? nextRunCapabilityState(previous, { runId: previous.run.runId })
+      : { capabilityResolution: undefined, capabilityResolutionRunId: undefined };
+    return {
+      ...previous,
+      ...capabilityState,
+      busy: true,
+      conversation: optimisticConversationForSubmit(previous.conversation, trimmed),
+      error: undefined,
+      run: likelyQueuesBehindActiveRun ? previous.run : undefined,
+      events: likelyQueuesBehindActiveRun ? previous.events : [],
+      transcriptNodes: likelyQueuesBehindActiveRun ? previous.transcriptNodes : [],
+      live: likelyQueuesBehindActiveRun ? previous.live : undefined,
+      detail: likelyQueuesBehindActiveRun ? previous.detail : undefined,
+      workView: likelyQueuesBehindActiveRun ? previous.workView : undefined,
+    };
+  });
   try {
     const path =
       options.app.conversation?.conversationId === undefined
@@ -124,27 +123,25 @@ export async function submitPanelTask(
       (!likelyQueuesBehindActiveRun || immediateLiveRunId !== previousObservedRunId);
     if (!options.mountedRef.current || options.viewEpochRef.current !== epoch) return;
     options.activeRunIdRef.current = immediateObservedRunId;
-    options.setApp((previous) => ({
-      ...previous,
-      busy: true,
-      conversation: response.conversation,
-      run: immediateRun ?? previous.run,
-      capabilityResolution:
-        immediateRun?.runId === previous.run?.runId
-          ? previous.capabilityResolution
-          : undefined,
-      capabilityResolutionRunId:
-        immediateRun?.runId === previous.run?.runId
-          ? previous.capabilityResolutionRunId
-          : undefined,
-      events: immediateRun?.runId === previous.run?.runId ? previous.events : [],
-      live: immediateLiveRunId === undefined
-        ? previous.live
-        : previous.live?.runId === immediateLiveRunId
+    options.setApp((previous) => {
+      const capabilityState = immediateRun === undefined
+        ? { capabilityResolution: undefined, capabilityResolutionRunId: undefined }
+        : nextRunCapabilityState(previous, { runId: immediateRun.runId });
+      return {
+        ...previous,
+        ...capabilityState,
+        busy: true,
+        conversation: response.conversation,
+        run: immediateRun ?? previous.run,
+        events: immediateRun?.runId === previous.run?.runId ? previous.events : [],
+        live: immediateLiveRunId === undefined
           ? previous.live
-          : emptyLiveRun(immediateLiveRunId),
-      error: undefined,
-    }));
+          : previous.live?.runId === immediateLiveRunId
+            ? previous.live
+            : emptyLiveRun(immediateLiveRunId),
+        error: undefined,
+      };
+    });
     if (shouldSwitchLiveStream) {
       options.startLiveUpdates(immediateLiveRunId, 0);
     }
@@ -180,43 +177,46 @@ export async function submitPanelTask(
     const historicalTranscriptNodesByRunId = await loadConversationTranscriptNodesByRunId(effectiveConversation, observedRunId);
     if (!options.mountedRef.current || options.viewEpochRef.current !== epoch) return;
     options.activeRunIdRef.current = observedRunId;
-    options.setApp((previous) => ({
-      ...previous,
-      busy: false,
-      conversation: observed?.conversation ?? effectiveConversation,
-      run: observedRun ?? previous.run,
-      capabilityResolution: observed?.capabilityResolution ?? (
-        observedRun?.runId === previous.capabilityResolutionRunId ? previous.capabilityResolution : undefined
-      ),
-      capabilityResolutionRunId:
-        observed?.capabilityResolution !== undefined
-          ? observedRunId
-          : observedRun?.runId === previous.capabilityResolutionRunId
-            ? previous.capabilityResolutionRunId
-            : undefined,
-      events: mergeObservedRunEvents({
-        previousRunId: previous.run?.runId,
-        observedRunId,
-        previousEvents: previous.events,
-        replayEvents: replay?.events ?? [],
-      }),
-      live: liveRunForObservedReplay({
-        observedRunId,
-        observedRun,
-        previousLive: previous.live,
-        replayEvents: replay?.events ?? [],
-      }),
-      ...createRunReadModelPatch(previous, {
-        runId: observedRunId ?? response.run.runId,
-        workView,
-        detail,
-      }),
-      transcriptNodesByRunId: mergeTranscriptNodesByRunId(
-        historicalTranscriptNodesByRunId,
-        observedRunId,
-        transcriptNodesFrom(workView, detail)
-      ),
-    }));
+    options.setApp((previous) => {
+      const capabilityState =
+        observed?.capabilityResolution !== undefined && observedRunId !== undefined
+          ? nextRunCapabilityState(previous, {
+              runId: observedRunId,
+              capabilityResolution: observed.capabilityResolution,
+            })
+          : observedRun !== undefined
+            ? nextRunCapabilityState(previous, { runId: observedRun.runId })
+            : { capabilityResolution: undefined, capabilityResolutionRunId: undefined };
+      return {
+        ...previous,
+        ...capabilityState,
+        busy: false,
+        conversation: observed?.conversation ?? effectiveConversation,
+        run: observedRun ?? previous.run,
+        events: mergeObservedRunEvents({
+          previousRunId: previous.run?.runId,
+          observedRunId,
+          previousEvents: previous.events,
+          replayEvents: replay?.events ?? [],
+        }),
+        live: liveRunForObservedReplay({
+          observedRunId,
+          observedRun,
+          previousLive: previous.live,
+          replayEvents: replay?.events ?? [],
+        }),
+        ...createRunReadModelPatch(previous, {
+          runId: observedRunId ?? response.run.runId,
+          workView,
+          detail,
+        }),
+        transcriptNodesByRunId: mergeTranscriptNodesByRunId(
+          historicalTranscriptNodesByRunId,
+          observedRunId,
+          transcriptNodesFrom(workView, detail)
+        ),
+      };
+    });
     if (
       observedRunId !== undefined &&
       observedRun !== undefined &&

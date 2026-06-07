@@ -111,10 +111,10 @@ test("panel React workbench consumes Basic Agent projection APIs", async () => {
   assert.equal(appTaskSubmission.includes("runMode"), false);
   assert.equal(appTaskSubmission.includes("/api/desktop/runs"), false);
   assert.equal(appTaskSubmission.includes("/api/underground"), false);
-  assert.equal(appTaskSubmission.includes("likelyQueuesBehindActiveRun && previous.capabilityResolutionRunId === previous.run?.runId"), true);
-  assert.equal(appTaskSubmission.includes("immediateRun?.runId === previous.run?.runId"), true);
-  assert.equal(appTaskSubmission.includes("observed?.capabilityResolution !== undefined"), true);
-  assert.equal(appTaskSubmission.includes("observedRun?.runId === previous.capabilityResolutionRunId ? previous.capabilityResolution : undefined"), true);
+  assert.equal(appTaskSubmission.includes('from "../../panel-ui-run-capability-state"'), true);
+  assert.equal(appTaskSubmission.match(/nextRunCapabilityState\(/g)?.length, 4);
+  assert.equal(appTaskSubmission.includes("likelyQueuesBehindActiveRun && previous.capabilityResolutionRunId === previous.run?.runId"), false);
+  assert.equal(appTaskSubmission.includes("observedRun?.runId === previous.capabilityResolutionRunId ? previous.capabilityResolution : undefined"), false);
   assert.equal(appLiveRunUpdates.includes("safeBasicEvents"), false);
   assert.equal(appLiveRunUpdates.includes("safeBasicRunView"), true);
   assert.equal(appLiveRunUpdates.includes('from "./ui-state"'), false);

@@ -69,6 +69,28 @@ test("IntelligenceChannel converts thrown provider errors into failed model fact
   assert.equal(failedPayload.failureMessage?.includes("sk-channel-secret"), false);
 });
 
+test("IntelligenceChannel preserves sanitized provider error cause", async () => {
+  const { channel, eventLog } = createTestChannel({
+    throwError: new Error("Connection error.", {
+      cause: new Error("fetch failed ECONNRESET apiKey=sk-channel-cause-secret-123456"),
+    }),
+  });
+
+  const response = await channel.request(createValidModelRequest());
+
+  assert.equal(response.status, "failed");
+  assert.equal(response.failure?.kind, "provider_network");
+  assert.equal(response.failure?.retryable, true);
+  assert.equal(response.failure?.message.includes("Connection error."), true);
+  assert.equal(response.failure?.message.includes("fetch failed ECONNRESET"), true);
+  assert.equal(response.failure?.message.includes("sk-channel-cause-secret"), false);
+  assert.equal(response.failure?.message.includes("[redacted-secret]"), true);
+  const failedPayload = eventLog.list().at(-1)?.message.payload as { failureKind?: string; failureMessage?: string };
+  assert.equal(failedPayload.failureKind, "provider_network");
+  assert.equal(failedPayload.failureMessage?.includes("fetch failed ECONNRESET"), true);
+  assert.equal(failedPayload.failureMessage?.includes("sk-channel-cause-secret"), false);
+});
+
 test("IntelligenceChannel turns contract-violating output into a failed response", async () => {
   const { channel, eventLog } = createTestChannel({ output: { rationale: "Missing required summary." } });
 

@@ -1,5 +1,7 @@
+import { redactSensitiveText } from "../../kernel/redaction.js";
+
 export function providerErrorMessage(error: unknown, fallback: string, maxLength = 1_000): string {
-  const message = extractProviderErrorMessage(error) ?? fallback;
+  const message = redactSensitiveText(extractProviderErrorMessage(error) ?? fallback);
   const trimmed = message.trim();
   if (trimmed.length === 0) {
     return fallback;

@@ -110,6 +110,27 @@ test("OpenAI-compatible Chat Completions adapter appends /v1 only for bare OpenA
   assert.equal(calls[0]?.url, "https://api.openai.com/v1/chat/completions");
 });
 
+test("OpenAI-compatible Chat adapter preserves sanitized transport failure", async () => {
+  const secret = "sk-adapter-network-secret-123456";
+  const fetch: FetchLike = async () => {
+    throw new Error(`fetch failed ECONNRESET apiKey=${secret}`);
+  };
+  const provider = new OpenAICompatibleChatCompletionsProvider({
+    baseUrl: "https://llm.example.test",
+    apiKey: "sk-test-secret-token",
+    model: "gpt-compatible-test",
+    fetch,
+  });
+
+  const response = await provider.complete(createValidModelRequest());
+
+  assert.equal(response.status, "failed");
+  assert.equal(response.failure?.kind, "provider_network");
+  assert.equal(response.failure?.retryable, true);
+  assert.equal(response.failure?.message.includes("fetch failed ECONNRESET"), true);
+  assert.equal(response.failure?.message.includes(secret), false);
+});
+
 test("OpenAI-compatible Chat Completions adapter streams safe output deltas", async () => {
   const calls: { body: Record<string, unknown> }[] = [];
   const deltas: Array<{ purpose: string | undefined; delta: string }> = [];

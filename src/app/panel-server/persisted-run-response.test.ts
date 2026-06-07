@@ -93,6 +93,45 @@ test("persisted user-action statuses restore explicit waiting points", () => {
   assert.equal(needsInput.transcript.events.some((event) => event.type === "confirmation.needed"), false);
 });
 
+test("persisted terminal run responses keep frozen run facts instead of current fallback config", () => {
+  for (const status of ["failed", "blocked", "cancelled"] as const) {
+    const response = createPersistedPanelRunResponse({
+      snapshot: runtimeSnapshotWithStatus(status),
+      config: {
+        ...modelConfig(),
+        profileId: "current-profile",
+        baseUrl: "https://current.example.test",
+        model: "current-model",
+      },
+      informationAccess: {
+        ...informationAccess(),
+        sourcePreference: ["docs"],
+        web: {
+          ...informationAccess().web,
+          maxResults: 99,
+          status: "ready",
+        },
+      },
+    });
+
+    assert.equal(response.status, status);
+    assert.equal(response.config.profileId, "snapshot-profile");
+    assert.equal(response.config.baseUrl, "https://snapshot.example.test");
+    assert.equal(response.config.model, "snapshot-model");
+    assert.equal(response.tracking.provider.model, "snapshot-model");
+    assert.deepEqual(response.informationAccess.sourcePreference, ["web", "codebase"]);
+    assert.equal(response.informationAccess.web.maxResults, 5);
+    assert.equal(response.tracking.informationSources.web.maxResults, 5);
+    assert.deepEqual(response.agentDefinitionRef, response.snapshot.run.agentDefinitionRef);
+    assert.equal(response.agentDefinitionRef?.agentId, "custom-restored-agent");
+    assert.deepEqual(response.capabilityResolution, response.snapshot.run.capabilityResolution);
+    assert.equal(response.capabilityResolution?.snapshotId, "capability-snapshot-1");
+    assert.equal(response.capabilityResolution?.resolutionId, "capability-resolution-1");
+    assert.deepEqual(response.capabilityResolution?.allowedTools, ["shell_command"]);
+    assert.equal(response.transcript.events.at(-1)?.status, status);
+  }
+});
+
 function runtimeSnapshot(): RuntimeRunSnapshot {
   return {
     run: {
@@ -121,6 +160,7 @@ function runtimeSnapshot(): RuntimeRunSnapshot {
         toolVisibilityProfileId: "custom-restored-agent:ordinary-visible-tools:v1",
       },
       capabilitySnapshot: frozenCapabilitySnapshot(),
+      capabilityResolution: frozenCapabilityResolution(),
       informationAccess: frozenInformationAccess(),
     },
     workspace: {
@@ -263,6 +303,36 @@ function frozenCapabilitySnapshot(): NonNullable<RuntimeRunSnapshot["run"]["capa
     },
     securitySummary: "Frozen capability snapshot for the restored run.",
     warnings: [],
+  };
+}
+
+function frozenCapabilityResolution(): NonNullable<RuntimeRunSnapshot["run"]["capabilityResolution"]> {
+  return {
+    resolutionId: "capability-resolution-1",
+    snapshotId: "capability-snapshot-1",
+    agentId: "custom-restored-agent",
+    agentDisplayName: "Custom Restored Agent",
+    runMode: "agent",
+    toolVisibilityProfileId: "custom-restored-agent:ordinary-visible-tools:v1",
+    allowedTools: ["shell_command"],
+    toolExposures: [
+      {
+        name: "shell_command",
+        displayName: "执行 Shell",
+        enabled: true,
+        modelVisible: true,
+        scopes: ["desktop-basic"],
+        availability: "available",
+        operationType: "read-write",
+        requiresConfirmation: false,
+        riskLevel: "medium",
+        reason: "工具对本轮模型可用。",
+      },
+    ],
+    enabledSkills: [],
+    mcpDrafts: [],
+    warnings: [],
+    createdAt: "2026-05-31T00:00:00.000Z",
   };
 }
 

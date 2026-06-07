@@ -13,7 +13,7 @@ import type { PanelRunJob } from "../panel-run-jobs.js";
 import type { PanelRunStreamEvent } from "../panel-run-stream-contracts.js";
 import { createBasicAgentRunViewReadModel } from "./basic-agent-run-view.js";
 
-test("basic agent run view for live runs exposes the job birth agent definition ref", async () => {
+test("basic agent run view for live runs exposes the job birth agent definition ref consistently", async () => {
   const runAgentDefinitionRef = agentRef("run-agent", "Run Agent");
   const jobAgentDefinitionRef = agentRef("job-birth-agent", "Job Birth Agent");
   const run = basicRun(runAgentDefinitionRef);
@@ -32,9 +32,10 @@ test("basic agent run view for live runs exposes the job birth agent definition 
   const view = await createBasicAgentRunViewReadModel(runtime, "run-live", 0);
 
   assert.notEqual(view, undefined);
-  assert.deepEqual(view?.run.agentDefinitionRef, runAgentDefinitionRef);
+  assert.notDeepEqual(runAgentDefinitionRef, jobAgentDefinitionRef);
+  assert.deepEqual(view?.run.agentDefinitionRef, jobAgentDefinitionRef);
   assert.deepEqual(view?.agentDefinitionRef, jobAgentDefinitionRef);
-  assert.notDeepEqual(view?.agentDefinitionRef, view?.run.agentDefinitionRef);
+  assert.deepEqual(view?.agentDefinitionRef, view?.run.agentDefinitionRef);
   assert.equal(view?.capabilityResolution?.snapshotId, "snapshot-live");
   assert.deepEqual(view?.capabilityResolution?.allowedTools, ["search"]);
   assert.equal(view === undefined ? false : "workSession" in view, false);

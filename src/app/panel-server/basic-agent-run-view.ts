@@ -55,9 +55,16 @@ async function createLiveBasicAgentRunViewReadModel(
     streamEvents,
   });
   const statusPayload = panelRunPayloadForStatus(job);
+  const agentDefinitionRef = job.agentDefinitionRef ?? run.agentDefinitionRef;
+  const viewRun = agentDefinitionRef === run.agentDefinitionRef
+    ? run
+    : {
+        ...run,
+        agentDefinitionRef,
+      };
   return {
-    run,
-    agentDefinitionRef: job.agentDefinitionRef ?? run.agentDefinitionRef,
+    run: viewRun,
+    agentDefinitionRef,
     capabilityResolution: statusPayload?.capabilityResolution ?? job.capabilityResolution,
     workView,
     detail: {

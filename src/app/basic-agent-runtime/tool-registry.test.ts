@@ -84,6 +84,24 @@ test("desktop-basic tool registry applies configured tool disabled state", () =>
   assert.equal(registry.createToolCenter("desktop-basic").has("shell_command"), false);
 });
 
+test("desktop-basic tool registry can keep optional executors enabled from frozen tool state", () => {
+  const registry = createDesktopBasicToolRegistry({
+    env: {},
+    workspaceRoot: process.cwd(),
+    playwrightAvailable: true,
+    toolStates: [{ name: "shell_command", enabled: true, updatedAt: "2026-05-12T00:00:00.000Z" }],
+    toolCatalogNames: ["shell_command"],
+  });
+  const catalog = registry.catalog("desktop-basic");
+  const center = registry.createToolCenter("desktop-basic");
+
+  assert.deepEqual(catalog.tools.map((tool) => tool.name), ["shell_command"]);
+  assert.deepEqual(catalog.allowedTools, ["shell_command"]);
+  assert.equal(catalog.tools[0]?.enabledByDefault, true);
+  assert.equal(catalog.tools[0]?.requiresConfirmation, true);
+  assert.equal(center.has("shell_command"), true);
+});
+
 test("desktop-basic tool registry can restrict executors to a frozen tool catalog", () => {
   const registry = createDesktopBasicToolRegistry({
     env: {},

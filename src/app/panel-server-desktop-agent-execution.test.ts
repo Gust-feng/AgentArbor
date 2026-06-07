@@ -150,6 +150,37 @@ test("ordinary desktop execution cannot expose tools outside the frozen capabili
   assert.equal(result.capabilityResolution?.toolExposures.some((tool) => tool.name === "read_file"), false);
 });
 
+test("ordinary desktop execution can expose optional tools enabled in the frozen capability snapshot", async () => {
+  const snapshot = capabilitySnapshot({
+    tools: [
+      capabilityTool("shell_command", "execute"),
+    ],
+  });
+  const resources = desktopRunResources({
+    capabilitySnapshot: snapshot,
+    informationAccess: informationAccess(),
+    channel: textChannel("我会遵守本轮冻结的敏感工具确认边界。"),
+  });
+
+  const result = await runOrdinaryDesktopForPanel(
+    runtime(),
+    "展示本轮冻结的可执行工具边界",
+    "fake",
+    undefined,
+    resources,
+    {
+      agentDefinitionRef: runAgentDefinitionRef(DESKTOP_ROOT_AGENT),
+    }
+  );
+
+  const shellExposure = result.capabilityResolution?.toolExposures.find((tool) => tool.name === "shell_command");
+  assert.equal(result.failed, undefined);
+  assert.deepEqual(result.capabilityResolution?.allowedTools, ["shell_command"]);
+  assert.equal(shellExposure?.modelVisible, true);
+  assert.equal(shellExposure?.requiresConfirmation, true);
+  assert.equal(result.capabilityResolution?.warnings.includes("本轮没有模型可见工具。"), false);
+});
+
 test("ordinary desktop execution projects paused context overflow as blocked", async () => {
   const snapshot = capabilitySnapshot({
     tools: [
@@ -307,7 +338,11 @@ function desktopRunResources(input: {
       createToolCenter: () => input.toolCenter ?? noToolBroker(),
     },
     workspaceRoot: input.capabilitySnapshot.workspace.workspaceDirectory,
-    toolStates: [],
+    toolStates: input.capabilitySnapshot.toolCatalog.tools.map((tool) => ({
+      name: tool.name,
+      enabled: tool.enabled,
+      updatedAt: input.capabilitySnapshot.createdAt,
+    })),
     toolCatalogNames: input.capabilitySnapshot.toolCatalog.tools.map((tool) => tool.name),
     playwrightAvailable: false,
   };

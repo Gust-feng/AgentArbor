@@ -60,8 +60,8 @@ export type {
 
 /**
  * Ordinary desktop agent runtime: a single conversational/tool-assisted turn
- * that shares infrastructure with deep mode but never starts Underground
- * orchestration by itself.
+ * that shares infrastructure with other runtimes but never starts
+ * non-ordinary orchestration by itself.
  */
 export async function runDesktopAgentSession(
   goal: string,

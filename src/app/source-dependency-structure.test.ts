@@ -173,6 +173,22 @@ test("ordinary Desktop Agent entry does not depend on the legacy intent gate", a
   assert.equal(sources.some((source) => source.includes('from "../desktop-intent-router.js"')), false);
 });
 
+test("ordinary Desktop Agent source keeps plain runtime terminology", async () => {
+  const source = await readSource(path.join(process.cwd(), "src", "app", "desktop-agent-session.ts"));
+
+  for (const overloadedTerm of [
+    "deep mode",
+    "Underground",
+    "Plan",
+    "Handoff",
+    "rootlet",
+    "child agent",
+    "atomic mutation",
+  ]) {
+    assert.equal(source.includes(overloadedTerm), false, `ordinary Desktop Agent source should not mention ${overloadedTerm}`);
+  }
+});
+
 test("ordinary Desktop Agent entry does not import legacy desktop chat compatibility wrappers", async () => {
   const appRoot = path.join(process.cwd(), "src", "app");
   const files = await collectSourceFiles(appRoot);

@@ -320,4 +320,4 @@ type BackendBasicAgentRunView = PanelBasicAgentRunView<
   RunCapabilityResolution
 >;
 
-export type BasicAgentRunView = Omit<BackendBasicAgentRunView, "workSession">;
+export type BasicAgentRunView = BackendBasicAgentRunView;

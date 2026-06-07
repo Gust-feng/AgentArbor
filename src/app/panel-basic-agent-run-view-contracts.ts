@@ -47,12 +47,7 @@ export type PanelBasicAgentRunView<
   readonly run: TRun;
   readonly agentDefinitionRef?: RunAgentDefinitionRef;
   readonly capabilityResolution?: TCapabilityResolution;
-  /**
-   * Current ordinary Agent read-model owned by the backend.
-   * `workSession` remains only as a legacy response alias for older callers.
-   */
   readonly workView: TWorkView;
-  readonly workSession: TWorkView;
   readonly detail: PanelBasicAgentRunDetail<TStreamEvent, TTranscriptNode, TCanvas>;
   readonly replay: PanelBasicAgentReplay<TEvent>;
 };

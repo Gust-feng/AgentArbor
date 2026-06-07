@@ -166,8 +166,8 @@ test("conversation API creates a conversation and attaches the desktop run to as
     assert.equal(conversation.body.conversation.turns[1].content.includes("我可以直接回答问题"), true);
     assert.equal(currentRun.run.runId, runId);
     assert.equal(currentRun.workView.run.runId, runId);
-    assert.equal(currentRun.workSession.run.runId, runId);
-    assert.deepEqual(currentRun.workSession, currentRun.workView);
+    assert.equal(currentRun.workView.run.runId, runId);
+    assert.equal("workSession" in currentRun, false);
     assert.equal(currentRun.detail.runId, runId);
     assert.deepEqual(currentRun.agentDefinitionRef, start.body.run.agentDefinitionRef);
     assert.deepEqual(currentRun.capabilityResolution, completed.body.capabilityResolution);
@@ -176,7 +176,8 @@ test("conversation API creates a conversation and attaches the desktop run to as
     assert.deepEqual(basicView.body.view.agentDefinitionRef, start.body.run.agentDefinitionRef);
     assert.deepEqual(basicView.body.view.capabilityResolution, completed.body.capabilityResolution);
     assert.equal(basicView.body.view.workView.run.runId, runId);
-    assert.equal(basicView.body.view.workSession.run.runId, runId);
+    assert.equal(basicView.body.view.workView.run.runId, runId);
+    assert.equal("workSession" in basicView.body.view, false);
     assert.deepEqual(runtimeRun.body.agentDefinitionRef, start.body.run.agentDefinitionRef);
     assert.deepEqual(runtimeRun.body.snapshot.run.agentDefinitionRef, start.body.run.agentDefinitionRef);
     assert.deepEqual(runtimeRun.body.capabilityResolution, runtimeRun.body.snapshot.run.capabilityResolution);

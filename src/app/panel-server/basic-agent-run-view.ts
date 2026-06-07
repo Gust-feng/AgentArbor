@@ -14,8 +14,6 @@ import { createPersistedStreamEvents, panelStatusFromRuntimeStatus } from "./per
 import type { PanelRuntime } from "./runtime.js";
 import { syncPanelRunStreamEventsForJob } from "./run-stream-sync.js";
 
-type BasicAgentRunViewCoreReadModel = Omit<PanelBasicAgentRunViewReadModel, "workSession">;
-
 export type BasicAgentRunViewRuntime = {
   readonly runExecutor: Pick<PanelRuntime["runExecutor"], "get" | "replayEvents" | "syncRunEvents">;
   readonly runJobs: Pick<PanelRuntime["runJobs"], "get" | "syncStreamEvents">;
@@ -29,20 +27,20 @@ export async function createBasicAgentRunViewReadModel(
 ): Promise<PanelBasicAgentRunViewReadModel | undefined> {
   const job = runtime.runJobs.get(runId);
   if (job !== undefined) {
-    return addLegacyWorkSessionAlias(await createLiveBasicAgentRunViewReadModel(runtime, job, afterSequence));
+    return createLiveBasicAgentRunViewReadModel(runtime, job, afterSequence);
   }
   const snapshot = await runtime.runtimeDatabase?.getRun(runId);
   if (snapshot === undefined) {
     return undefined;
   }
-  return addLegacyWorkSessionAlias(await createPersistedBasicAgentRunViewReadModel(snapshot, afterSequence));
+  return createPersistedBasicAgentRunViewReadModel(snapshot, afterSequence);
 }
 
 async function createLiveBasicAgentRunViewReadModel(
   runtime: Pick<BasicAgentRunViewRuntime, "runExecutor" | "runJobs">,
   job: PanelRunJob,
   afterSequence: number
-): Promise<BasicAgentRunViewCoreReadModel | undefined> {
+): Promise<PanelBasicAgentRunViewReadModel | undefined> {
   const streamEvents = syncPanelRunStreamEventsForJob(runtime, job);
   const run = runtime.runExecutor.get(job.runId);
   const fullReplay = runtime.runExecutor.replayEvents(job.runId, 0);
@@ -84,7 +82,7 @@ async function createLiveBasicAgentRunViewReadModel(
 async function createPersistedBasicAgentRunViewReadModel(
   snapshot: RuntimeRunSnapshot,
   afterSequence: number
-): Promise<BasicAgentRunViewCoreReadModel> {
+): Promise<PanelBasicAgentRunViewReadModel> {
   const run = basicRunFromRuntimeSnapshot(snapshot);
   const fullReplay = basicRunReplayFromRuntimeSnapshot(snapshot);
   const workView = createPersistedBasicAgentWorkViewReadModel(snapshot);
@@ -102,17 +100,6 @@ async function createPersistedBasicAgentRunViewReadModel(
       },
     },
   };
-}
-
-function addLegacyWorkSessionAlias(
-  view: BasicAgentRunViewCoreReadModel | undefined
-): PanelBasicAgentRunViewReadModel | undefined {
-  return view === undefined
-    ? undefined
-    : {
-        ...view,
-        workSession: view.workView,
-      };
 }
 
 function createPersistedBasicAgentRunDetailReadModel(

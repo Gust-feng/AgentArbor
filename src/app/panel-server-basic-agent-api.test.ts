@@ -94,7 +94,8 @@ test("basic agent run view endpoint returns the backend-owned run read model and
 
     assert.equal(fullView.status, 200);
     assert.equal(fullView.body.view.run.runId, start.body.runId);
-    assert.equal(fullView.body.view.workSession.run.runId, start.body.runId);
+    assert.equal(fullView.body.view.workView.run.runId, start.body.runId);
+    assert.equal("workSession" in fullView.body.view, false);
     assert.equal(fullView.body.view.detail.runId, start.body.runId);
     assert.equal(replayEvents.length > 0, true);
     assert.equal(replayEvents.some((event: { type: string }) => event.type === "final.result"), true);
@@ -139,8 +140,9 @@ test("basic agent run view endpoint restores the completed backend read model af
     assert.equal(restoredView.status, 200);
     assert.equal(restoredView.body.view.run.runId, start.body.runId);
     assert.equal(restoredView.body.view.run.status, "completed");
-    assert.equal(restoredView.body.view.workSession.run.runId, start.body.runId);
-    assert.equal(restoredView.body.view.workSession.stage, "completed");
+    assert.equal(restoredView.body.view.workView.run.runId, start.body.runId);
+    assert.equal(restoredView.body.view.workView.stage, "completed");
+    assert.equal("workSession" in restoredView.body.view, false);
     assert.equal(restoredView.body.view.detail.runId, start.body.runId);
     assert.equal(restoredView.body.view.detail.status, "completed");
     assert.equal(restoredView.body.view.detail.restoredResult.summary, persistedSummary);

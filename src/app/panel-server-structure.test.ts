@@ -187,9 +187,9 @@ test("panel server source keeps conversation restore and persistence split", asy
   assert.equal(basicAgentRunView.includes("export async function createBasicAgentRunViewReadModel"), true);
   assert.equal(basicAgentRunView.includes("function createLiveBasicAgentRunViewReadModel"), true);
   assert.equal(basicAgentRunView.includes("function createPersistedBasicAgentRunViewReadModel"), true);
-  assert.equal(basicAgentRunView.includes("type BasicAgentRunViewCoreReadModel = Omit<PanelBasicAgentRunViewReadModel, \"workSession\">"), true);
-  assert.equal(basicAgentRunView.includes("function addLegacyWorkSessionAlias"), true);
-  assert.equal(basicAgentRunView.includes("workSession: view.workView"), true);
+  assert.equal(basicAgentRunView.includes("type BasicAgentRunViewCoreReadModel = Omit<PanelBasicAgentRunViewReadModel, \"workSession\">"), false);
+  assert.equal(basicAgentRunView.includes("function addLegacyWorkSessionAlias"), false);
+  assert.equal(basicAgentRunView.includes("workSession: view.workView"), false);
   assert.equal(basicAgentRunView.includes("workSession: workView"), false);
   assert.equal(basicAgentRunView.includes("agentDefinitionRef: job.agentDefinitionRef ?? run.agentDefinitionRef"), true);
   assert.equal(basicAgentRunView.includes("agentDefinitionRef: run.agentDefinitionRef"), true);

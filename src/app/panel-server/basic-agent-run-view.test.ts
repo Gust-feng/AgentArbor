@@ -37,7 +37,7 @@ test("basic agent run view for live runs exposes the job birth agent definition 
   assert.notDeepEqual(view?.agentDefinitionRef, view?.run.agentDefinitionRef);
   assert.equal(view?.capabilityResolution?.snapshotId, "snapshot-live");
   assert.deepEqual(view?.capabilityResolution?.allowedTools, ["search"]);
-  assert.equal(view?.workView, view?.workSession);
+  assert.equal(view === undefined ? false : "workSession" in view, false);
 });
 
 test("basic agent run view prefers completed live run facts over stale job facts", async () => {
@@ -182,7 +182,8 @@ test("basic agent run view exposes failed live desktop canvas from the backend r
   assert.equal(view?.capabilityResolution?.snapshotId, "snapshot-failed");
   assert.deepEqual(view?.capabilityResolution?.allowedTools, ["read"]);
   assert.equal(view?.workView.stage, "failed");
-  assert.equal(view?.workSession.stage, "failed");
+  assert.equal(view?.workView.stage, "failed");
+  assert.equal(view === undefined ? false : "workSession" in view, false);
 });
 
 test("basic agent run view exposes cancelled live desktop canvas from the backend result", async () => {
@@ -379,7 +380,7 @@ test("basic agent run view for persisted runs restores from the run snapshot wit
   assert.equal(view?.detail.restoredResult?.summary, "历史运行安全摘要");
   assert.equal(view?.replay.events.some((event) => event.type === "final.result"), true);
   assert.equal(view?.detail.transcript?.events?.some((event) => event.type === "final.result"), true);
-  assert.equal(view?.workView, view?.workSession);
+  assert.equal(view === undefined ? false : "workSession" in view, false);
   assert.equal(JSON.stringify(view?.agentDefinitionRef).includes("systemPrompt"), false);
 });
 

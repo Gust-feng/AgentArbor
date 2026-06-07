@@ -128,7 +128,7 @@ async function handleGetBasicWorkSessionRequest(
   writeJson(response, 200, {
     ok: true,
     workView: view.workView,
-    workSession: view.workSession,
+    workSession: view.workView,
   });
 }
 

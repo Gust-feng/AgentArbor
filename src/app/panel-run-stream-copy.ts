@@ -161,7 +161,7 @@ export function agentNoteForEvent(
 ): { readonly agentLabel: string; readonly summary: string; readonly status: PanelRunStreamEvent["status"] } | undefined {
   switch (entry.type) {
     case "goal.received":
-      return { agentLabel: "用户", summary: "消息已收到，原文不会在调试区外展开。", status: "completed" };
+      return { agentLabel: "用户", summary: "消息已收到。", status: "completed" };
     case "underground.exploration_planned":
       return { agentLabel: "任务理解", summary: "任务目标和探索计划已形成。", status: "completed" };
     case "rootlet_cluster.started":

@@ -1,7 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ModelVisibleOutputProjection } from "../domain/intelligence/index.js";
-import { chunkText, modelFailedSummary, modelFailureStreamDetail, visibleOutputText } from "./panel-run-stream-copy.js";
+import {
+  agentNoteForEvent,
+  chunkText,
+  modelFailedSummary,
+  modelFailureStreamDetail,
+  visibleOutputText,
+} from "./panel-run-stream-copy.js";
 
 test("panel stream copy preserves visible output whitespace", () => {
   assert.equal(
@@ -23,6 +29,14 @@ test("panel model failure copy treats stream parse failures as compatibility iss
   assert.equal(modelFailedSummary(payload).includes("流式返回格式不兼容"), true);
   assert.equal(modelFailedSummary(payload).includes("OpenAI-compatible provider"), false);
   assert.equal(modelFailureStreamDetail(payload)?.error?.includes("流式返回格式不兼容"), true);
+});
+
+test("panel agent note copy keeps received-goal activity minimal", () => {
+  const note = agentNoteForEvent({ type: "goal.received" } as Parameters<typeof agentNoteForEvent>[0], {});
+
+  assert.equal(note?.agentLabel, "用户");
+  assert.equal(note?.summary, "消息已收到。");
+  assert.equal(note?.summary.includes("调试区"), false);
 });
 
 function visibleTextOutput(value: string): ModelVisibleOutputProjection {

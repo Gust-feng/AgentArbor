@@ -22,10 +22,9 @@ export function CapabilitiesSettings(props: {
   return (
     <div className="capability-settings-stack">
       <section className="settings-card">
-        <h3>能力原则</h3>
-        <p>这里配置可用服务和安全边界，不编排固定流程。助手会根据当前任务自主决定是否读取上下文、查证网页、调用工具或注入工作方法。</p>
+        <h3>基础能力</h3>
         <SettingRow label="工具调用">
-          <span className="settings-value">{props.config?.capabilities?.modelCapabilities?.supportsToolCalling === false ? "当前模型未声明支持" : "由模型按任务判断"}</span>
+          <span className="settings-value">{props.config?.capabilities?.modelCapabilities?.supportsToolCalling === false ? "未声明支持" : "可用"}</span>
         </SettingRow>
         <SettingRow label="外部查证">
           <span className="settings-value">{providerName(props.tools?.tools?.webSearch?.provider ?? props.toolForm.provider)}</span>
@@ -55,8 +54,7 @@ function WebSearchSettings(props: {
   const current = props.tools?.tools?.webSearch?.provider ?? props.toolForm.provider;
   return (
     <section className="settings-card service-settings-card">
-      <h3>网页查证服务</h3>
-      <p>当前服务：{providerName(current)}。这只决定网络查证是否可用，不替助手决定何时搜索或如何判断资料。</p>
+      <h3>网页查证</h3>
       <div className="service-config-grid">
         <label>
           搜索服务
@@ -101,10 +99,9 @@ function ToolCatalogSettings(props: {
   return (
     <section className="settings-card capability-list-card">
       <h3>运行时工具</h3>
-      <p>启用状态是工具可用性的边界，不是任务流程。具体是否调用仍由助手在运行时判断，并受确认门约束。</p>
       <div className="capability-list">
         {catalog.length === 0 ? (
-          <div className="capability-empty">当前没有发现可展示的运行时工具。</div>
+          <div className="capability-empty">暂无工具</div>
         ) : (
           catalog.map((tool) => (
             <CapabilityRow
@@ -131,10 +128,9 @@ function SkillContextSettings(props: {
   return (
     <section className="settings-card capability-list-card">
       <h3>工作方法</h3>
-      <p>工作方法只作为可注入的上下文候选。是否采用、如何组合和何时忽略，仍交给模型按任务判断。</p>
       <div className="capability-list">
         {props.skills.length === 0 ? (
-          <div className="capability-empty">当前没有发现已安装的工作方法。</div>
+          <div className="capability-empty">暂无工作方法</div>
         ) : (
           props.skills.map((skill) => (
             <CapabilityRow

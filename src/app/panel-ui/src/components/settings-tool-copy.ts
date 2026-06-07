@@ -5,12 +5,12 @@ export function toolTitle(tool: ToolCatalogItem): string {
 }
 
 export function toolDescription(tool: ToolCatalogItem): string {
-  return tool.displayDescription ?? tool.description ?? "可供助手在授权边界内调用的运行时工具。";
+  return tool.displayDescription ?? tool.description ?? "运行时工具";
 }
 
 export function toolMeta(tool: ToolCatalogItem): string {
-  if (tool.requiresConfirmation === true || tool.riskLevel === "high") return tool.confirmationLabel ?? "需确认";
-  return [tool.categoryLabel, tool.operationLabel].filter((item): item is string => typeof item === "string" && item.length > 0).join(" · ") || "工具能力";
+  if (tool.requiresConfirmation === true || tool.riskLevel === "high") return tool.confirmationLabel ?? "高影响";
+  return [tool.categoryLabel, tool.operationLabel].filter((item): item is string => typeof item === "string" && item.length > 0).join(" · ") || "可用";
 }
 
 export function confirmationRuleLabel(tool: ToolCatalogItem): string {
@@ -19,7 +19,7 @@ export function confirmationRuleLabel(tool: ToolCatalogItem): string {
   }
   return tool.confirmationLabel ??
     ([tool.riskLabel, tool.operationLabel].filter((item): item is string => typeof item === "string" && item.length > 0).join(" · ") ||
-    "执行前确认");
+    "高影响动作");
 }
 
 export function providerName(value: string): string {

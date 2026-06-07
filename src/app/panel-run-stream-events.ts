@@ -314,14 +314,6 @@ function appendStreamEventsForEvent(input: {
     const text = visibleOutputText(payload.visibleOutput);
     const chunks = chunkText(text, 90);
     if (chunks.length === 0) {
-      input.push({
-        ...base,
-        eventId: `${input.runId}:event:${input.entry.sequence}:model.output.completed`,
-        type: "model.output.completed",
-        agentLabel: "模型",
-        summary: "模型调用完成；本次没有可展示输出。",
-        status: "completed",
-      });
       return;
     }
     chunks.forEach((chunk, index) => {

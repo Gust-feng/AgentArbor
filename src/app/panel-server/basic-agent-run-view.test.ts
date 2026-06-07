@@ -78,7 +78,7 @@ test("basic agent run view prefers completed live run facts over stale job facts
               activity: [],
             },
             explanation: {
-              resultWhyReasonable: "普通 Agent 已停止调用工具并形成最终回答。",
+              resultWhyReasonable: "已回答。",
               observationPanelRole: "开发者详情只展示安全事件。",
             },
           },
@@ -159,7 +159,7 @@ test("basic agent run view exposes failed live desktop canvas from the backend r
               activity: [],
             },
             explanation: {
-              resultWhyReasonable: "这轮对话没有形成可展示回答。",
+              resultWhyReasonable: "",
               observationPanelRole: "开发者详情只展示安全事件。",
             },
           },

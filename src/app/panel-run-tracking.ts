@@ -486,31 +486,31 @@ function waitingPointFor(
 function ordinaryAgentWaitingPoint(lastEventType: ArborMessageType | undefined): string {
   switch (lastEventType) {
     case undefined:
-      return "后台 job 已启动，等待普通 Agent 接收消息。";
+      return "等待处理。";
     case "goal.received":
-      return "消息和上下文已形成，等待普通 Agent 继续处理。";
+      return "正在处理。";
     case "model.requested":
       return "已发出模型请求，等待模型返回。";
     case "model.completed":
-      return "模型调用已返回，等待普通 Agent 决定下一步。";
+      return "模型调用已返回。";
     case "model.failed":
-      return "模型调用失败，运行需要失败或等待后续处理。";
+      return "模型调用失败。";
     case "context.compaction.completed":
-      return "较早上下文已压缩，普通 Agent 将继续处理当前任务。";
+      return "较早上下文已压缩。";
     case "context.compaction.failed":
-      return "上下文压缩没有成功，运行已暂停等待继续处理。";
+      return "上下文压缩失败。";
     case "tool.requested":
-      return "已发出工具调用，等待工具返回安全结果。";
+      return "已发出工具调用，等待返回。";
     case "tool.completed":
-      return "工具调用已返回，普通 Agent 将基于工具结果继续判断。";
+      return "工具调用已返回。";
     case "tool.failed":
-      return "工具调用失败，普通 Agent 将基于失败结果继续判断。";
+      return "工具调用失败。";
     case "user_approval.requested":
       return "等待用户确认后继续。";
     case "user_approval.received":
-      return "用户确认或指导已收到，普通 Agent 将继续处理。";
+      return "已收到确认或指导。";
     default:
-      return "普通 Agent 正在推进。";
+      return "正在处理。";
   }
 }
 

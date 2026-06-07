@@ -135,12 +135,12 @@ export function createDesktopAgentCanvas(input: {
     explanation: {
       resultWhyReasonable:
         input.result.answer !== undefined
-          ? "这是桌面助手回合：模型可以直接回答，也可以在授权范围内调用工具，并在缺少权限时请求确认；没有启动地下组织或生成方向包。"
+          ? "已回答。"
           : input.result.pendingConfirmation !== undefined
-            ? "桌面助手需要用户补充授权或材料后继续；不会绕过确认边界。"
-            : "这轮对话没有形成可展示回答。",
+            ? "等待确认。"
+            : "",
       observationPanelRole:
-        `开发者详情只展示模型调用 refs、配置状态和安全事件；当前安全事件 ${input.transcript.events.length} 条。`,
+        `开发者详情只展示调用引用和安全事件；当前安全事件 ${input.transcript.events.length} 条。`,
     },
   };
 }

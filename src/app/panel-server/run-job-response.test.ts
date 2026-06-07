@@ -104,7 +104,7 @@ test("panel run job response uses the payload matching the current status", () =
           activity: [],
         },
         explanation: {
-          resultWhyReasonable: "这轮对话没有形成可展示回答。",
+          resultWhyReasonable: "",
           observationPanelRole: "开发者详情只展示安全事件。",
         },
       },

@@ -38,7 +38,6 @@ export function WorkspaceSettings(props: {
           }}
         />
       </SettingRow>
-      <p>这是助手可使用的本地上下文边界。模型仍按当前任务自主判断读取哪些授权材料。</p>
     </section>
   );
 }

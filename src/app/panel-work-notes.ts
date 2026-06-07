@@ -88,13 +88,13 @@ function createOrdinaryDesktopAgentNote(input: NoteFactoryInput): AgentWorkNote 
     stage: "desktop_agent",
     status: failed ? "failed" : needsConfirmation ? "running" : completed ? "completed" : requested ? "running" : "pending",
     summary: needsConfirmation
-      ? "桌面助手已暂停在确认边界，等待用户补充授权或材料。"
+      ? "等待确认。"
       : completed
-        ? "桌面助手已完成本轮结果；没有启动地下组织或方向包。"
+        ? "已完成。"
         : requested
-          ? "桌面助手正在判断本轮处理方式。"
+          ? "正在处理。"
           : "等待用户消息。",
-    detail: "普通模式由桌面助手直接处理，可在授权范围内调用工具；缺少权限时请求确认，深入模式只由用户显式选择。",
+    detail: "",
     eventRefs,
     modelCallRefs: input.modelCalls.map((call) => call.requestId),
   });

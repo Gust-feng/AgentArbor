@@ -150,5 +150,5 @@ const SETTINGS_GROUPS: readonly { readonly id: SettingsGroup; readonly label: st
   { id: "models", label: "模型服务", icon: <CloudCog size={15} /> },
   { id: "capabilities", label: "能力与服务", icon: <SlidersHorizontal size={15} /> },
   { id: "workspace", label: "工作区", icon: <Database size={15} /> },
-  { id: "confirmation", label: "确认边界", icon: <LockKeyhole size={15} /> },
+  { id: "confirmation", label: "高影响动作", icon: <LockKeyhole size={15} /> },
 ];

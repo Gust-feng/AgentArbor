@@ -272,8 +272,9 @@ test("panel React workbench consumes Basic Agent projection APIs", async () => {
   assert.equal(appObservedRunReadModel.includes("capabilityResolution: currentRun.capabilityResolution"), true);
   assert.equal(appObservedRunReadModel.includes("capabilityResolution: view?.capabilityResolution"), true);
   assert.equal(appRunObservationState.includes("function nextCapabilityResolution"), true);
-  assert.equal(appRunObservationState.includes("capabilityResolutionRunId: runId"), true);
-  assert.equal(appRunObservationState.includes("previous.capabilityResolutionRunId === runId"), true);
+  assert.equal(appRunObservationState.includes('from "../../panel-ui-run-capability-state"'), true);
+  assert.equal(appRunObservationState.includes("return nextRunCapabilityState(previous, { runId, capabilityResolution: incoming })"), true);
+  assert.equal(appRunObservationState.includes("previous.capabilityResolutionRunId === runId"), false);
   assert.equal(appRunProjection.includes("app.capabilityResolutionRunId === runId ? app.capabilityResolution : undefined"), true);
   assert.equal(appRunObservationSettlement.includes("capabilityResolution: view?.capabilityResolution"), true);
   assert.equal(appConversationSession.includes("const capabilityResolution = currentRun?.capabilityResolution"), true);

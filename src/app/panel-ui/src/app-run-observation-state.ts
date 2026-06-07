@@ -5,6 +5,7 @@ import {
   stateWithObservedRunEvents,
   stateWithObservedRunProjection,
 } from "../../panel-run-observation-state";
+import { nextRunCapabilityState } from "../../panel-ui-run-capability-state";
 import type { AppState } from "./app-state";
 import type {
   BasicAgentRun,
@@ -75,20 +76,5 @@ function nextCapabilityResolutionState(
   runId: string,
   incoming: RunCapabilityResolution | undefined
 ): Pick<AppState, "capabilityResolution" | "capabilityResolutionRunId"> {
-  if (incoming !== undefined) {
-    return {
-      capabilityResolution: incoming,
-      capabilityResolutionRunId: runId,
-    };
-  }
-  if (previous.capabilityResolutionRunId === runId) {
-    return {
-      capabilityResolution: previous.capabilityResolution,
-      capabilityResolutionRunId: previous.capabilityResolutionRunId,
-    };
-  }
-  return {
-    capabilityResolution: undefined,
-    capabilityResolutionRunId: undefined,
-  };
+  return nextRunCapabilityState(previous, { runId, capabilityResolution: incoming });
 }

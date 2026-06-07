@@ -27,7 +27,7 @@ export function appendLiveModelOutputDelta(
     return;
   }
   const purpose = delta.purpose ?? modelPurposeForRequest(job, delta.requestId);
-  if (!isUserFacingStreamingPurpose(purpose)) {
+  if (!isUserFacingStreamingPurpose(job, purpose)) {
     return;
   }
   const event = runtime.runJobs.appendStreamEvent(runId, streamEventFromLiveModelDelta(job, delta, safeDelta));
@@ -78,10 +78,14 @@ function modelPurposeForRequest(job: PanelRunJob, requestId: string): string | u
   return requested === undefined ? undefined : optionalString(asRecord(requested.message.payload).purpose);
 }
 
-function isUserFacingStreamingPurpose(purpose: string | undefined): boolean {
+function isUserFacingStreamingPurpose(job: PanelRunJob, purpose: string | undefined): boolean {
+  if (job.runMode === "agent") {
+    return purpose === "desktop_agent" ||
+      // Historical persisted runs used desktop_chat for the same ordinary
+      // user-facing answer stream. Keep replay compatibility here only.
+      purpose === "desktop_chat";
+  }
   return purpose === "desktop_agent" ||
-    // Historical persisted runs used desktop_chat for the same ordinary
-    // user-facing answer stream. Keep replay compatibility here only.
     purpose === "desktop_chat" ||
     purpose === "work_session_direct_answer" ||
     purpose === "work_session_synthesis";

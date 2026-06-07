@@ -47,6 +47,7 @@
 - 前端在打开会话，以及提交消息、确认决策、取消运行、运行结算、历史 transcript 读取后的刷新路径中，都应优先消费这些后端 read-model，而不是自行拼装运行状态、工作视图、结果详情和事件
 - 当前 Panel 前端普通运行主线不再直接依赖 `/api/desktop/runs/:id` 或 `/api/basic-agent/runs/:id/work-session` 来拼装运行视图；这些接口即使保留，也不应继续作为默认普通 Agent 观察主线
 - 历史运行和恢复运行的 read-model 必须优先使用 run 创建时冻结的 `capabilitySnapshot` 和 `informationAccess` 作为模型、工具、工作区和信息访问事实；当前配置只能作为旧记录缺失快照时的兼容回退
+- 普通 `agent` run 的 live model stream 只接受 `desktop_agent` 和历史 `desktop_chat` 的用户可见模型增量；`work_session_*` 增量只服务显式 `deep` 或历史兼容路径，不能混入默认普通流式输出
 
 前端不是 Agent 引擎，也不负责推导任务状态、补全工具语义或重建运行事实。
 

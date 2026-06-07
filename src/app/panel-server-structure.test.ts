@@ -141,6 +141,23 @@ test("panel server source keeps conversation restore and persistence split", asy
     assert.equal(source.includes("systemPrompt"), false, `${sourceName} must not reference prompt body fields`);
     assert.equal(source.includes("sourcePath"), false, `${sourceName} must not expose agent definition source paths`);
   }
+  for (const [sourceName, source] of [
+    ["conversation-routes", conversationRoutes],
+    ["basic-agent-routes", basicAgentRoutes],
+    ["run-routes", runRoutes],
+    ["run-execution", runExecution],
+    ["desktop-agent-execution", desktopAgentExecution],
+    ["run-job-response", runJobResponse],
+    ["persisted-run-response", persistedRunResponse],
+    ["basic-agent-run-view", basicAgentRunView],
+    ["conversation-current-run", conversationCurrentRun],
+  ] as const) {
+    assert.equal(source.includes("adapters/intelligence"), false, `${sourceName} must not import provider adapters`);
+    assert.equal(source.includes("openai-compatible-chat-completions-provider"), false, `${sourceName} must not bind OpenAI chat provider`);
+    assert.equal(source.includes("openai-responses-provider"), false, `${sourceName} must not bind OpenAI responses provider`);
+    assert.equal(source.includes("normalizeOpenAI"), false, `${sourceName} must not normalize provider responses`);
+    assert.equal(source.includes("toOpenAIFetch"), false, `${sourceName} must not map provider transport`);
+  }
   assert.equal(runtimeRecords.includes("export function createRuntimeRunRecord"), true);
   assert.notEqual(
     runtimeRecords.indexOf('canvas?.kind === "desktop_agent_canvas"'),

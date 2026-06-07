@@ -90,6 +90,28 @@ test("runtime AgentDefinition catalog rejects deep definitions as the desktop de
   );
 });
 
+test("runtime AgentDefinition catalog rejects non-desktop purposes as the desktop default", () => {
+  const workSessionPurposeDefinition: AgentDefinition = {
+    ...DESKTOP_ROOT_AGENT,
+    agentId: "catalog-work-session-purpose-agent",
+    displayName: "Catalog Work Session Purpose Agent",
+    prompt: {
+      promptRef: "prompt:catalog-work-session-purpose-agent:v1",
+      version: "1",
+      systemPrompt: "Work-session purpose must not become the default Desktop Agent.",
+    },
+    turnPolicy: {
+      ...DESKTOP_ROOT_AGENT.turnPolicy,
+      purpose: "work_session_synthesis",
+    },
+  };
+
+  assert.throws(
+    () => createRuntimeAgentDefinitionCatalog({ desktopAgentDefinition: workSessionPurposeDefinition }),
+    /Desktop default AgentDefinition must use desktop_agent purpose/
+  );
+});
+
 test("runtime AgentDefinition catalog can register deep definitions without making them default", () => {
   const deepDefinition: AgentDefinition = {
     ...DESKTOP_ROOT_AGENT,

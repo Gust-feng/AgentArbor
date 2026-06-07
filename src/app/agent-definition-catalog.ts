@@ -41,6 +41,11 @@ function assertOrdinaryDesktopAgentDefinition(definition: AgentDefinition): void
       `Desktop default AgentDefinition must use ordinary agent mode: ${definition.agentId} declares ${definition.toolVisibilityProfile.runMode}.`
     );
   }
+  if (definition.turnPolicy.purpose !== "desktop_agent") {
+    throw new Error(
+      `Desktop default AgentDefinition must use desktop_agent purpose: ${definition.agentId} declares ${definition.turnPolicy.purpose}.`
+    );
+  }
 }
 
 function definitionsNotAlreadyIncluded(

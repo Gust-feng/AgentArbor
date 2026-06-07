@@ -148,6 +148,66 @@ test("AgentDefinitionRegistry rejects turn policy drift for hashed refs", () => 
   assert.equal(registry.resolve(ref), undefined);
 });
 
+test("AgentDefinitionRegistry rejects output contract drift for hashed refs", () => {
+  const customAgent: AgentDefinition = {
+    ...DESKTOP_ROOT_AGENT,
+    agentId: "output-contract-drift-agent",
+    displayName: "Output Contract Drift Agent",
+    prompt: {
+      promptRef: "prompt:output-contract-drift-agent:v1",
+      version: "1",
+      systemPrompt: "Output contract drift registry prompt.",
+    },
+    toolVisibilityProfile: {
+      profileId: "output-contract-drift-agent:ordinary-visible-tools:v1",
+      runMode: "agent",
+      visibleToolScopes: ["desktop-basic"],
+    },
+  };
+  const ref = runAgentDefinitionRef(customAgent);
+  const changedAgent: AgentDefinition = {
+    ...customAgent,
+    outputContract: {
+      ...customAgent.outputContract,
+      requiredFields: [...(customAgent.outputContract.requiredFields ?? []), "extra_field"],
+    },
+  };
+  const registry = new AgentDefinitionRegistry([changedAgent]);
+
+  assert.notEqual(agentDefinitionHash(customAgent), agentDefinitionHash(changedAgent));
+  assert.equal(registry.resolve(ref), undefined);
+});
+
+test("AgentDefinitionRegistry rejects tool visibility drift for hashed refs", () => {
+  const customAgent: AgentDefinition = {
+    ...DESKTOP_ROOT_AGENT,
+    agentId: "tool-visibility-drift-agent",
+    displayName: "Tool Visibility Drift Agent",
+    prompt: {
+      promptRef: "prompt:tool-visibility-drift-agent:v1",
+      version: "1",
+      systemPrompt: "Tool visibility drift registry prompt.",
+    },
+    toolVisibilityProfile: {
+      profileId: "tool-visibility-drift-agent:ordinary-visible-tools:v1",
+      runMode: "agent",
+      visibleToolScopes: ["desktop-basic"],
+    },
+  };
+  const ref = runAgentDefinitionRef(customAgent);
+  const changedAgent: AgentDefinition = {
+    ...customAgent,
+    toolVisibilityProfile: {
+      ...customAgent.toolVisibilityProfile,
+      hiddenToolNames: ["shell_command"],
+    },
+  };
+  const registry = new AgentDefinitionRegistry([changedAgent]);
+
+  assert.notEqual(agentDefinitionHash(customAgent), agentDefinitionHash(changedAgent));
+  assert.equal(registry.resolve(ref), undefined);
+});
+
 test("AgentDefinitionRegistry keeps legacy refs without definition hashes compatible", () => {
   const customAgent: AgentDefinition = {
     ...DESKTOP_ROOT_AGENT,

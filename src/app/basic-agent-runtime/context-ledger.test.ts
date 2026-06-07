@@ -134,6 +134,9 @@ test("context ledger records goal, history, attachments, skills, budget, and saf
   assert.equal(ledger.budget.budgetSource, "model_capabilities");
   assert.equal(ledger.readModel.entries.some((entry) => entry.kind === "attachment"), true);
   assert.equal(ledger.readModel.entries.some((entry) => entry.kind === "budget" && entry.status === "used"), true);
+  const systemReadModelEntry = ledger.readModel.entries.find((entry) => entry.entryId === "context:system:ledger-test-agent");
+  assert.equal(systemReadModelEntry?.summary, "桌面基础 Agent 系统边界。");
+  assert.equal(JSON.stringify(ledger.readModel).includes(LEDGER_TEST_AGENT.prompt.systemPrompt), false);
   assert.match(ledger.readModel.summary, /最近对话/);
   const json = JSON.stringify(ledger);
   assert.equal(json.includes("sk-context-secret"), false);

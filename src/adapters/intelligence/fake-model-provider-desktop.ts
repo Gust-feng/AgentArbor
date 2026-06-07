@@ -14,36 +14,6 @@ import {
 } from "./fake-model-provider-common.js";
 import type { FakeModelProviderStep } from "./fake-model-provider-contracts.js";
 
-export function fakeDesktopIntentGateOutput(request: ModelRequest): Record<string, unknown> {
-  const goalAnchor = stripTrailingSentencePunctuation(fakeGoalAnchorFromRequest(request));
-  if (needsLightToolAnswer(goalAnchor)) {
-    return {
-      route: "chat_plus_tools",
-      reason: "测试模型判断需要少量授权材料或工具辅助，但不需要完整报告。",
-      confidence: 0.76,
-    };
-  }
-  if (isLightweightQuestion(goalAnchor)) {
-    return {
-      route: "chat_direct",
-      reason: "测试模型判断这是一条普通助手消息，可以直接回答。",
-      confidence: 0.82,
-    };
-  }
-  if (looksLikeComplexDesktopTask(goalAnchor)) {
-    return {
-      route: "task_work_session",
-      reason: "测试模型判断这需要多步处理、上下文检查或可审阅成果。",
-      confidence: 0.78,
-    };
-  }
-  return {
-    route: "chat_direct",
-    reason: "测试模型判断这条消息可以先由普通助手承接。",
-    confidence: 0.7,
-  };
-}
-
 export function fakeDesktopAgentStep(request: ModelRequest): FakeModelProviderStep {
   const goalAnchor = stripTrailingSentencePunctuation(fakeGoalAnchorFromRequest(request));
   const normalized = goalAnchor.toLowerCase();

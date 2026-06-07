@@ -2,7 +2,6 @@ import type { ModelRequest } from "../../domain/intelligence/index.js";
 import {
   fakeConversationCompactionOutput,
   fakeDesktopAgentStep,
-  fakeDesktopIntentGateOutput,
   fakeWorkSessionChildMaterialOutput,
   fakeWorkSessionDecisionOutput,
   fakeWorkSessionDirectAnswerOutput,
@@ -30,10 +29,6 @@ export function defaultFakeStep(request: ModelRequest): FakeModelProviderStep {
 }
 
 export function defaultFakeOutput(request: ModelRequest): unknown {
-  if (request.outputContract.contractId === "desktop.intent_gate.v1") {
-    return fakeDesktopIntentGateOutput(request);
-  }
-
   if (request.outputContract.contractId === "underground.intent_profile.v1") {
     return fakeIntentProfileOutput(request);
   }

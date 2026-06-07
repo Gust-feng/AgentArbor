@@ -160,7 +160,8 @@ test("Basic Agent run projection does not keep stale panel projection files", ()
 
 test("ordinary Desktop Agent entry does not depend on the legacy intent gate", async () => {
   const appRoot = path.join(process.cwd(), "src", "app");
-  const sources = await Promise.all([
+  const [legacyIntentRouter, ...sources] = await Promise.all([
+    readSource(path.join(appRoot, "desktop-intent-router.ts")),
     readSource(path.join(appRoot, "desktop-agent-session.ts")),
     readSource(path.join(appRoot, "panel-server", "desktop-agent-execution.ts")),
     readSource(path.join(appRoot, "panel-server", "run-execution.ts")),
@@ -168,6 +169,12 @@ test("ordinary Desktop Agent entry does not depend on the legacy intent gate", a
     readSource(path.join(appRoot, "panel-server", "conversation-routes.ts")),
   ]);
 
+  assert.equal(legacyIntentRouter.includes("decideDesktopIntentWithModel"), false);
+  assert.equal(legacyIntentRouter.includes("desktop_intent_gate"), false);
+  assert.equal(legacyIntentRouter.includes("desktop.intent_gate.v1"), false);
+  assert.equal(legacyIntentRouter.includes("IntelligenceChannel"), false);
+  assert.equal(legacyIntentRouter.includes("ModelOutputContract"), false);
+  assert.equal(legacyIntentRouter.includes("TaskSoil"), false);
   assert.equal(sources.some((source) => source.includes("decideDesktopIntentWithModel")), false);
   assert.equal(sources.some((source) => source.includes('from "./desktop-intent-router.js"')), false);
   assert.equal(sources.some((source) => source.includes('from "../desktop-intent-router.js"')), false);
@@ -404,7 +411,10 @@ test("Fake model provider keeps fixture families split", async () => {
   assert.equal(output.includes("export function defaultFakeOutput"), true);
   assert.equal(output.includes('from "./fake-model-provider-desktop.js"'), true);
   assert.equal(output.includes('from "./fake-model-provider-underground.js"'), true);
+  assert.equal(output.includes("desktop.intent_gate.v1"), false);
+  assert.equal(output.includes("fakeDesktopIntentGateOutput"), false);
   assert.equal(desktop.includes("export function fakeDesktopAgentStep"), true);
+  assert.equal(desktop.includes("fakeDesktopIntentGateOutput"), false);
   assert.equal(desktop.includes("export function fakeWorkSessionSynthesisOutput"), true);
   assert.equal(desktop.includes("start_work_session"), false);
   assert.equal(underground.includes("export function fakeIntentProfileOutput"), true);

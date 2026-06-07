@@ -29,11 +29,6 @@ export function eventTitle(event: RunEvent): string {
   if (event.type === "agent.note.completed") return "判断完成";
   if (event.type === "model.reasoning.delta") return "正在思考";
   if (event.type === "model.reasoning.completed") return "思考完成";
-  if (event.type === "agent.delegation.planned") return "已拆分检查";
-  if (event.type === "agent.child.started") return "局部检查开始";
-  if (event.type === "agent.child.completed") return "局部检查完成";
-  if (event.type === "agent.child.waiting") return "等待局部材料";
-  if (event.type === "agent.parent_synthesis.completed") return "综合完成";
   if (event.type === "final.result") return "结果已生成";
   if (event.type === "run.failed") return "运行未完成";
   if (event.type === "run.cancelled") return "运行已取消";

@@ -199,11 +199,6 @@ export type DesktopRunCanvas = {
       }[];
     };
   };
-  readonly underground?: {
-    readonly status?: string;
-    readonly convergenceSummary?: string;
-    readonly recommendedDirection?: { readonly reason?: string };
-  };
 };
 
 export type DesktopRunDetail = PanelBasicAgentRunDetail<

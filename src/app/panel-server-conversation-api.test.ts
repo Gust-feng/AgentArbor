@@ -23,6 +23,8 @@ import {
   responsesRequestText,
   type ResponsesRequestBody,
 } from "./panel-openai-test-fixtures.js";
+import { runAgentDefinitionRef } from "./agent-definition-runtime.js";
+import { DESKTOP_ROOT_AGENT } from "./agent-prompts/desktop-root-agent.js";
 
 test("conversation message returns before provider completion so the UI can subscribe before output", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-conversation-early-stream-"));
@@ -125,6 +127,7 @@ test("conversation API creates a conversation and attaches the desktop run to as
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-conversation-create-"));
   const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
   try {
+    const defaultAgentRef = runAgentDefinitionRef(DESKTOP_ROOT_AGENT);
     const start = await requestJson(server.url, "/api/conversations", {
       method: "POST",
       body: { goal: "你好，你能做什么？", aiMode: "fake" },
@@ -139,20 +142,48 @@ test("conversation API creates a conversation and attaches the desktop run to as
       "/api/desktop/runs"
     );
     const conversation = await requestJson(server.url, `/api/conversations/${encodeURIComponent(conversationId)}`);
+    const basicView = await requestJson(
+      server.url,
+      `/api/basic-agent/runs/${encodeURIComponent(runId)}/view?cursor=0`
+    );
+    const runtimeRun = await requestJson(server.url, `/api/runtime/runs/${encodeURIComponent(runId)}`);
+    const currentRun = conversation.body.conversation.currentRun;
 
     assert.equal(start.status, 202);
     assert.equal(start.body.conversation.turns.length, 2);
     assert.equal(start.body.conversation.turns[0].role, "user");
     assert.equal(start.body.conversation.turns[1].role, "assistant");
     assert.equal(start.body.run.runKind, "desktop");
+    assert.equal(start.body.run.runMode, "agent");
+    assert.deepEqual(start.body.run.agentDefinitionRef, defaultAgentRef);
     assert.equal(completed.body.conversation.conversationId, conversationId);
+    assert.equal(completed.body.runMode, "agent");
+    assert.deepEqual(completed.body.agentDefinitionRef, start.body.run.agentDefinitionRef);
+    assert.deepEqual(completed.body.capabilityResolution.agentId, defaultAgentRef.agentId);
+    assert.equal(completed.body.capabilityResolution.toolVisibilityProfileId, defaultAgentRef.toolVisibilityProfileId);
     assert.equal(conversation.body.conversation.turns.length, 2);
     assert.equal(conversation.body.conversation.turns[1].runId, runId);
     assert.equal(conversation.body.conversation.turns[1].content.includes("我可以直接回答问题"), true);
-    assert.equal(conversation.body.conversation.currentRun.run.runId, runId);
-    assert.equal(conversation.body.conversation.currentRun.workSession.run.runId, runId);
-    assert.equal(conversation.body.conversation.currentRun.detail.runId, runId);
-    assert.equal(conversation.body.conversation.currentRun.replay.events.some((event: { runId: string }) => event.runId === runId), true);
+    assert.equal(currentRun.run.runId, runId);
+    assert.equal(currentRun.workView.run.runId, runId);
+    assert.equal(currentRun.workSession.run.runId, runId);
+    assert.deepEqual(currentRun.workSession, currentRun.workView);
+    assert.equal(currentRun.detail.runId, runId);
+    assert.deepEqual(currentRun.agentDefinitionRef, start.body.run.agentDefinitionRef);
+    assert.deepEqual(currentRun.capabilityResolution, completed.body.capabilityResolution);
+    assert.equal(currentRun.replay.events.some((event: { runId: string }) => event.runId === runId), true);
+    assert.equal(basicView.body.view.run.runId, runId);
+    assert.deepEqual(basicView.body.view.agentDefinitionRef, start.body.run.agentDefinitionRef);
+    assert.deepEqual(basicView.body.view.capabilityResolution, completed.body.capabilityResolution);
+    assert.equal(basicView.body.view.workView.run.runId, runId);
+    assert.equal(basicView.body.view.workSession.run.runId, runId);
+    assert.deepEqual(runtimeRun.body.agentDefinitionRef, start.body.run.agentDefinitionRef);
+    assert.deepEqual(runtimeRun.body.snapshot.run.agentDefinitionRef, start.body.run.agentDefinitionRef);
+    assert.deepEqual(runtimeRun.body.capabilityResolution, runtimeRun.body.snapshot.run.capabilityResolution);
+    assert.deepEqual(runtimeRun.body.snapshot.run.capabilityResolution, completed.body.capabilityResolution);
+    assert.equal(JSON.stringify(currentRun).includes(DESKTOP_ROOT_AGENT.prompt.systemPrompt), false);
+    assert.equal(JSON.stringify(runtimeRun.body).includes(DESKTOP_ROOT_AGENT.prompt.systemPrompt), false);
+    assertSafePanelJsonText(`${conversation.text}\n${basicView.text}\n${runtimeRun.text}`);
   } finally {
     await server.close();
     await removeTemporaryTree(directory);

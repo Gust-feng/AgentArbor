@@ -49,6 +49,8 @@ test("panel UI contracts stay split by product concern", async () => {
   assert.equal(contractRun.includes('export type BasicAgentRunView = Omit<BackendBasicAgentRunView, "workSession">'), true);
   assert.equal(contractRun.includes("DesktopWorkSession"), false);
   assert.equal(contractRun.includes("readonly workSession?:"), false);
+  assert.equal(contractRun.includes("readonly underground?:"), false);
+  assert.equal(contractRun.includes("convergenceSummary"), false);
   assert.equal(contractConfig.includes("export type ConfigResponse"), true);
   assert.equal(contractContext.includes("export type ContextAttachment"), true);
   assert.equal(contractConversation.includes("export type Conversation"), true);

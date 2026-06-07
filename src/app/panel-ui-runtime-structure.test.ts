@@ -28,6 +28,7 @@ test("panel React workbench consumes Basic Agent projection APIs", async () => {
     appRuntimeControls,
     appSettingsController,
     runtime,
+    text,
     settingsDialog,
     modelSettings,
     modelCatalogPanel,
@@ -64,6 +65,7 @@ test("panel React workbench consumes Basic Agent projection APIs", async () => {
     readPanelUiSource("app-runtime-controls.ts"),
     readPanelUiSource("app-settings-controller.ts"),
     readPanelUiSource("runtime.ts"),
+    readPanelUiSource("text.ts"),
     readPanelUiSource(path.join("components", "settings-dialog.tsx")),
     readPanelUiSource(path.join("components", "model-settings.tsx")),
     readPanelUiSource(path.join("components", "model-catalog-panel.tsx")),
@@ -154,6 +156,11 @@ test("panel React workbench consumes Basic Agent projection APIs", async () => {
   assert.equal(runtime.includes("agent.child.completed"), false);
   assert.equal(runtime.includes("agent.child.waiting"), false);
   assert.equal(runtime.includes("agent.parent_synthesis.completed"), false);
+  assert.equal(text.includes("agent.delegation.planned"), false);
+  assert.equal(text.includes("agent.child.started"), false);
+  assert.equal(text.includes("agent.child.completed"), false);
+  assert.equal(text.includes("agent.child.waiting"), false);
+  assert.equal(text.includes("agent.parent_synthesis.completed"), false);
   assert.equal(runtime.includes("/work-session"), false);
   assert.equal(app.includes("/api/context/attachments/preview"), false);
   assert.equal(appConfigActions.includes("/api/context/attachments/preview"), false);

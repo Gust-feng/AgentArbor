@@ -33,7 +33,7 @@ export type RunToolExposure = {
 export type RunCapabilityResolution = {
   readonly resolutionId: string;
   readonly snapshotId: string;
-  readonly runMode: "agent" | "deep";
+  readonly runMode: "agent";
   readonly agentId: string;
   readonly agentDisplayName: string;
   readonly toolVisibilityProfileId: string;
@@ -63,7 +63,7 @@ export type BasicAgentRun = {
   readonly title: string;
   readonly goalSummary: string;
   readonly status: TaskStatus;
-  readonly runMode: "agent" | "deep";
+  readonly runMode: "agent";
   readonly agentDefinitionRef?: RunAgentDefinitionRef;
   readonly createdAt: string;
   readonly updatedAt: string;

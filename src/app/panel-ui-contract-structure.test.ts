@@ -51,6 +51,8 @@ test("panel UI contracts stay split by product concern", async () => {
   assert.equal(contractRun.includes("readonly workSession?:"), false);
   assert.equal(contractRun.includes("readonly underground?:"), false);
   assert.equal(contractRun.includes("convergenceSummary"), false);
+  assert.equal(contractRun.includes('readonly runMode: "agent";'), true);
+  assert.equal(contractRun.includes('"agent" | "deep"'), false);
   assert.equal(contractConfig.includes("export type ConfigResponse"), true);
   assert.equal(contractContext.includes("export type ContextAttachment"), true);
   assert.equal(contractConversation.includes("export type Conversation"), true);

@@ -24,10 +24,11 @@ export function ConfirmationNode(props: {
   const resources = props.confirmation === undefined ? [] : confirmationAffectedResources(props.confirmation);
   return (
     <div className="confirmation-node-body" data-risk={props.confirmation === undefined ? "medium" : confirmationRiskLevel(props.confirmation)}>
-      <div className="confirmation-node-header">
-        <span>待确认</span>
-        <strong>{title}</strong>
-      </div>
+      {title.length > 0 && (
+        <div className="confirmation-node-header">
+          <strong>{title}</strong>
+        </div>
+      )}
       {showActionPreview && (
         <p className="confirmation-action-summary">{actionPreview}</p>
       )}
@@ -46,7 +47,7 @@ export function ConfirmationNode(props: {
               onClick={() => props.onDecision?.("approve_once")}
               disabled={props.busy || resumeLost}
             >
-              {props.busy ? "提交中" : "确认继续"}
+              {props.busy ? "提交中" : "继续"}
             </button>
             <button
               type="button"
@@ -74,11 +75,11 @@ export function confirmationDisplayTitle(confirmation: ConfirmationProjection | 
   const title = isGenericConfirmationTitle(rawTitle) ? "" : rawTitle;
   if (title.length > 0) return title;
   if (action.length > 0) return action;
-  return "确认";
+  return "";
 }
 
 function isGenericConfirmationTitle(value: string): boolean {
-  return /^(?:需要确认|待确认|确认继续|确认执行命令|运行命令|执行 Shell)$/i.test(value.trim());
+  return /^(?:.*确认.*|运行命令|执行 Shell)$/i.test(value.trim());
 }
 
 export function confirmationActionPreview(action: string): string {

@@ -370,7 +370,8 @@ test("panel React workbench consumes Basic Agent projection APIs", async () => {
   assert.equal(motionResponsiveStyles.includes(".topbar-chip"), false);
   assert.equal(chatActive.includes("WorkContextPanel"), false);
   assert.equal(chatActive.includes("工作上下文"), false);
-  assert.equal(transcriptConfirmation.includes("待确认"), true);
+  assert.equal(transcriptConfirmation.includes("<span>待确认</span>"), false);
+  assert.equal(transcriptConfirmation.includes("确认继续"), false);
   assert.equal(chatActive.includes("assistant-workline"), false);
   assert.equal(chatTranscriptChain.includes("assistant-workline"), true);
   assert.equal(chatActive.includes("deliverableAsLinearText"), false);

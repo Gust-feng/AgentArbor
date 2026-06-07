@@ -66,11 +66,8 @@ test("visible result text follows the product answer priority", () => {
   assert.equal(
     visibleResultText({
       canvas: {
+        kind: "desktop_agent_canvas",
         agent: { answer: { answer: "agent answer" } },
-        workSession: {
-          directAnswer: { answer: "direct answer" },
-          report: { decisionSummary: "report summary" },
-        },
       },
       restoredResult: { summary: "restored" },
     }),
@@ -79,6 +76,7 @@ test("visible result text follows the product answer priority", () => {
   assert.equal(
     visibleResultText({
       canvas: {
+        kind: "work_session_canvas",
         workSession: {
           report: { decisionSummary: "report summary" },
         },
@@ -90,8 +88,37 @@ test("visible result text follows the product answer priority", () => {
   assert.equal(
     visibleResultText({
       canvas: {
+        kind: "work_session_canvas",
         workSession: {
           report: { decisionSummary: " " },
+        },
+      },
+      restoredResult: { summary: "restored" },
+    }),
+    "restored"
+  );
+});
+
+test("visible result text treats work session canvas as explicit legacy compatibility only", () => {
+  assert.equal(
+    visibleResultText({
+      canvas: {
+        kind: "work_session_canvas",
+        workSession: {
+          directAnswer: { answer: "legacy direct answer" },
+          report: { decisionSummary: "legacy report summary" },
+        },
+      },
+      restoredResult: { summary: "restored" },
+    }),
+    "legacy direct answer"
+  );
+  assert.equal(
+    visibleResultText({
+      canvas: {
+        workSession: {
+          directAnswer: { answer: "untyped legacy answer" },
+          report: { decisionSummary: "untyped legacy report" },
         },
       },
       restoredResult: { summary: "restored" },

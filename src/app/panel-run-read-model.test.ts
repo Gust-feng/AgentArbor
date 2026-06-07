@@ -70,6 +70,29 @@ test("panel transcript passes frozen ordinary agent identity into desktop work n
   assert.equal(JSON.stringify(transcript.workNotes).includes("systemPrompt"), false);
 });
 
+test("panel transcript keeps pending ordinary desktop runs out of underground notes", () => {
+  const transcript = createPanelRunTranscript({
+    runId: "run-panel-pending-agent",
+    status: "running",
+    desktopMode: "agent",
+    agentDefinitionRef: {
+      agentId: "pending-ordinary-agent",
+      agentDisplayName: "Pending Ordinary Agent",
+    },
+    eventEntries: [],
+    createdAt: "2026-05-07T00:00:00.000Z",
+    updatedAt: "2026-05-07T00:00:01.000Z",
+  });
+
+  assert.deepEqual(transcript.workNotes.map((note) => note.agentId), [
+    "pending-ordinary-agent",
+    "intelligence-channel",
+  ]);
+  assert.equal(JSON.stringify(transcript.workNotes).includes("underground"), false);
+  assert.equal(JSON.stringify(transcript.workNotes).includes("Legacy Work Session Manager"), false);
+  assert.equal(JSON.stringify(transcript.workNotes).includes("Plan Steward"), false);
+});
+
 test("panel transcript exposes delegation and parent synthesis as semantic stream events", () => {
   const transcript = createPanelRunTranscript({
     runId: "run-panel-fabric",

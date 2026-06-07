@@ -26,20 +26,11 @@ export function createPanelRunTranscript(input: CreatePanelRunTranscriptInput): 
     error: input.error,
   });
   const isOrdinaryDesktopAgentOnly =
+    input.desktopMode === "agent" &&
     input.summary === undefined &&
     input.observation === undefined &&
     input.agentRunTree === undefined &&
-    modelCalls.length > 0 &&
-    modelCalls.every((call) =>
-      call.outputContractId === "desktop.agent_response.v1" ||
-      // Historical persisted runs used the desktop.chat contract/purpose for
-      // ordinary desktop agent output. Treat it as replay compatibility only.
-      call.outputContractId === "desktop.chat_response.v1" ||
-      call.outputContractId === "desktop.intent_gate.v1" ||
-      call.purpose === "desktop_agent" ||
-      call.purpose === "desktop_chat" ||
-      call.purpose === "desktop_intent_gate"
-    );
+    modelCalls.every((call) => isOrdinaryDesktopAgentModelCall(call));
   const workNotes = createPanelWorkNotes({
     ...input,
     modelCalls,
@@ -58,6 +49,19 @@ export function createPanelRunTranscript(input: CreatePanelRunTranscriptInput): 
     workNotes,
     modelCalls,
   };
+}
+
+function isOrdinaryDesktopAgentModelCall(call: ReturnType<typeof createPanelTranscriptModelCalls>[number]): boolean {
+  return (
+    call.outputContractId === "desktop.agent_response.v1" ||
+    // Historical persisted runs used the desktop.chat / intent gate contracts
+    // for ordinary desktop agent output. Treat them as replay compatibility only.
+    call.outputContractId === "desktop.chat_response.v1" ||
+    call.outputContractId === "desktop.intent_gate.v1" ||
+    call.purpose === "desktop_agent" ||
+    call.purpose === "desktop_chat" ||
+    call.purpose === "desktop_intent_gate"
+  );
 }
 
 function agentRunTreeViewOrUndefined(tree: AgentRunTreeAttachment | undefined): SafeAgentRunTreeView | undefined {

@@ -14,25 +14,44 @@ export type AssistantRunDetailLike = {
     readonly code: string;
     readonly message: string;
   };
-  readonly canvas?: {
-    readonly agent?: {
-      readonly answer?: {
-        readonly answer: string;
+  readonly canvas?:
+    | {
+        readonly kind: "desktop_agent_canvas";
+        readonly agent?: {
+          readonly answer?: {
+            readonly answer: string;
+          };
+        };
+      }
+    | {
+        readonly kind: "work_session_canvas";
+        readonly workSession?: {
+          readonly directAnswer?: {
+            readonly answer: string;
+          };
+          readonly report?: {
+            readonly decisionSummary?: string;
+          };
+        };
+      }
+    | {
+        readonly kind?: string;
+        readonly [key: string]: unknown;
       };
-    };
-    readonly workSession?: {
-      readonly directAnswer?: {
-        readonly answer: string;
-      };
-      readonly report?: {
-        readonly decisionSummary?: string;
-      };
-    };
-  };
   readonly restoredResult?: {
     readonly summary: string;
   };
 };
+
+type AssistantDesktopAgentCanvasLike = Extract<
+  NonNullable<AssistantRunDetailLike["canvas"]>,
+  { readonly kind: "desktop_agent_canvas" }
+>;
+
+type AssistantWorkSessionCanvasLike = Extract<
+  NonNullable<AssistantRunDetailLike["canvas"]>,
+  { readonly kind: "work_session_canvas" }
+>;
 
 export type AssistantRunProblem = {
   readonly title: string;
@@ -67,10 +86,13 @@ export function visibleRunProblem(
 }
 
 export function visibleResultText(detail: AssistantRunDetailLike | undefined): string | undefined {
+  const canvas = detail?.canvas;
+  const desktopCanvas = canvas?.kind === "desktop_agent_canvas" ? (canvas as AssistantDesktopAgentCanvasLike) : undefined;
+  const legacyWorkSessionCanvas = canvas?.kind === "work_session_canvas" ? (canvas as AssistantWorkSessionCanvasLike) : undefined;
   return (
-    detail?.canvas?.agent?.answer?.answer ??
-    detail?.canvas?.workSession?.directAnswer?.answer ??
-    nonEmptyText(detail?.canvas?.workSession?.report?.decisionSummary) ??
+    desktopCanvas?.agent?.answer?.answer ??
+    legacyWorkSessionCanvas?.workSession?.directAnswer?.answer ??
+    nonEmptyText(legacyWorkSessionCanvas?.workSession?.report?.decisionSummary) ??
     detail?.restoredResult?.summary
   );
 }

@@ -51,7 +51,7 @@ export type SubmitFlowBasicRun = {
   readonly title: string;
   readonly goalSummary: string;
   readonly status: SubmitFlowTaskStatus;
-  readonly runMode: "agent" | "deep";
+  readonly runMode: "agent";
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly requiresUserAction: boolean;

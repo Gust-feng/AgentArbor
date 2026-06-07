@@ -3,9 +3,9 @@ import type {
   AgentDeliverableSection,
   BasicAgentRun,
   ConfirmationRequest,
-  DesktopWorkSessionAnswer,
-  DesktopWorkSessionStage,
+  DesktopWorkViewAnswer,
   DesktopWorkViewReadModel,
+  DesktopWorkViewStage,
   RunEvent,
   TranscriptNode,
 } from "../../domain/basic-agent/index.js";
@@ -21,12 +21,12 @@ import {
   isToolDisplay,
   mergeToolDisplays,
   observationRefs,
-  type WorkSessionCanvasContextLike,
+  type WorkViewCanvasContextLike,
 } from "./work-session-context.js";
 import { transcriptNodesFromRunEvents } from "./work-session-transcript.js";
 
-export type DesktopWorkSessionCanvasLike = WorkSessionCanvasContextLike & {
-  readonly agent?: WorkSessionCanvasContextLike["agent"] & {
+export type DesktopWorkViewCanvasLike = WorkViewCanvasContextLike & {
+  readonly agent?: WorkViewCanvasContextLike["agent"] & {
     readonly answer?: {
       readonly answer: string;
       readonly evidenceRefs: readonly string[];
@@ -64,10 +64,10 @@ export type DesktopWorkSessionCanvasLike = WorkSessionCanvasContextLike & {
   readonly [key: string]: unknown;
 };
 
-export type CreateDesktopWorkSessionReadModelInput = {
+export type CreateDesktopWorkViewReadModelInput = {
   readonly run: BasicAgentRun;
   readonly events: readonly RunEvent[];
-  readonly canvas?: DesktopWorkSessionCanvasLike;
+  readonly canvas?: DesktopWorkViewCanvasLike;
   readonly taskSoilInput?: DesktopTaskSoilInput;
   readonly toolDisplays?: readonly ToolDisplayProjection[];
   readonly toolEvidence?: readonly ToolResultEnvelope[];
@@ -79,12 +79,10 @@ export type CreateDesktopWorkSessionReadModelInput = {
   };
 };
 
-export type CreateDesktopWorkViewReadModelInput = CreateDesktopWorkSessionReadModelInput;
-
 export function createDesktopWorkViewReadModel(
-  input: CreateDesktopWorkSessionReadModelInput
+  input: CreateDesktopWorkViewReadModelInput
 ): DesktopWorkViewReadModel {
-  const visibleEvents = visibleWorkSessionEvents(input.events);
+  const visibleEvents = visibleWorkViewEvents(input.events);
   const contextAttachments = contextAttachmentsFor(input);
   const toolEvidence = envelopeSafeToolEvidence(input.toolEvidence ?? []);
   const toolDisplays = mergeToolDisplays(toolEvidence.map((envelope) => envelope.uiDisplay).filter(isToolDisplay), input.toolDisplays ?? []);
@@ -128,21 +126,33 @@ export function createDesktopWorkViewReadModel(
  */
 export const createDesktopWorkSessionReadModel = createDesktopWorkViewReadModel;
 
+/**
+ * @deprecated Compatibility input name for older panel code. New backend
+ * read-model composition should use CreateDesktopWorkViewReadModelInput.
+ */
+export type CreateDesktopWorkSessionReadModelInput = CreateDesktopWorkViewReadModelInput;
+
+/**
+ * @deprecated Compatibility canvas name for older panel code. New backend
+ * read-model composition should use DesktopWorkViewCanvasLike.
+ */
+export type DesktopWorkSessionCanvasLike = DesktopWorkViewCanvasLike;
+
 function transcriptSourceEvents(events: readonly RunEvent[]): readonly RunEvent[] {
   return events.filter((event) => event.visibility !== "debug");
 }
 
-function visibleWorkSessionEvents(events: readonly RunEvent[]): readonly RunEvent[] {
+function visibleWorkViewEvents(events: readonly RunEvent[]): readonly RunEvent[] {
   const productEvents = events
     .filter((event) => event.visibility !== "debug")
-    .filter(isProductWorkSessionEvent);
+    .filter(isProductWorkViewEvent);
   const selected = productEvents.length > 0
     ? productEvents.slice(-18)
     : events.filter((event) => event.visibility !== "debug").slice(-18);
-  return selected.map(projectVisibleWorkSessionEvent);
+  return selected.map(projectVisibleWorkViewEvent);
 }
 
-function projectVisibleWorkSessionEvent(event: RunEvent): RunEvent {
+function projectVisibleWorkViewEvent(event: RunEvent): RunEvent {
   if (event.type !== "confirmation.needed") {
     return event;
   }
@@ -155,7 +165,7 @@ function projectVisibleWorkSessionEvent(event: RunEvent): RunEvent {
   };
 }
 
-function isProductWorkSessionEvent(event: RunEvent): boolean {
+function isProductWorkViewEvent(event: RunEvent): boolean {
   if (event.type === "model.output.delta" || event.type === "final.result") {
     return false;
   }
@@ -186,8 +196,8 @@ function stageFor(
   events: readonly RunEvent[],
   pendingConfirmation: ConfirmationRequest | undefined,
   deliverable: AgentDeliverable | undefined,
-  answer: DesktopWorkSessionAnswer | undefined
-): DesktopWorkSessionStage {
+  answer: DesktopWorkViewAnswer | undefined
+): DesktopWorkViewStage {
   if (run.status === "queued") return "queued";
   if (run.status === "approval_needed" || pendingConfirmation !== undefined) return "awaiting_approval";
   if (run.status === "blocked" || run.status === "needs_input") return "blocked";
@@ -205,9 +215,9 @@ function stageFor(
 
 function headlineFor(
   run: BasicAgentRun,
-  stage: DesktopWorkSessionStage,
+  stage: DesktopWorkViewStage,
   deliverable: AgentDeliverable | undefined,
-  answer: DesktopWorkSessionAnswer | undefined
+  answer: DesktopWorkViewAnswer | undefined
 ): string {
   if (stage === "completed") return deliverable?.title ?? answer?.title ?? "任务已完成";
   if (stage === "awaiting_approval") return "需要你确认下一步";
@@ -223,7 +233,7 @@ function headlineFor(
 
 function currentActionFor(
   run: BasicAgentRun,
-  stage: DesktopWorkSessionStage,
+  stage: DesktopWorkViewStage,
   events: readonly RunEvent[],
   pendingConfirmation: ConfirmationRequest | undefined
 ): string {
@@ -250,13 +260,13 @@ function currentActionFor(
 
 function deliverableFor(input: {
   readonly run: BasicAgentRun;
-  readonly canvas?: DesktopWorkSessionCanvasLike;
+  readonly canvas?: DesktopWorkViewCanvasLike;
   readonly toolDisplays: readonly ToolDisplayProjection[];
   readonly restoredResult?: {
     readonly title: string;
     readonly summary: string;
   };
-  readonly answer?: DesktopWorkSessionAnswer;
+  readonly answer?: DesktopWorkViewAnswer;
 }): AgentDeliverable | undefined {
   const canvas = input.canvas;
   if (canvas?.kind === "desktop_agent_canvas" && canvas.agent?.answer !== undefined) {
@@ -286,7 +296,7 @@ function deliverableFor(input: {
   return undefined;
 }
 
-function answerFor(input: CreateDesktopWorkSessionReadModelInput): DesktopWorkSessionAnswer | undefined {
+function answerFor(input: CreateDesktopWorkViewReadModelInput): DesktopWorkViewAnswer | undefined {
   const canvas = input.canvas;
   if (canvas?.kind === "desktop_agent_canvas" && canvas.agent?.answer !== undefined) {
     return {
@@ -350,7 +360,7 @@ function section(
 
 function pendingConfirmationFor(
   run: BasicAgentRun,
-  canvas: DesktopWorkSessionCanvasLike | undefined
+  canvas: DesktopWorkViewCanvasLike | undefined
 ): ConfirmationRequest | undefined {
   if (canvas?.kind !== "desktop_agent_canvas" || canvas.agent?.pendingConfirmation === undefined) {
     return undefined;

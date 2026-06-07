@@ -134,7 +134,7 @@ export type ContextAttachment = {
   readonly warning?: string;
 };
 
-export type DesktopWorkSessionStage =
+export type DesktopWorkViewStage =
   | "drafting"
   | "queued"
   | "understanding"
@@ -199,22 +199,22 @@ export type ContextLedger = {
   };
 };
 
-export type DesktopWorkSessionAnswer = {
+export type DesktopWorkViewAnswer = {
   readonly title: string;
   readonly content: string;
   readonly evidenceRefs: readonly ObservationRef[];
   readonly nextActions: readonly string[];
 };
 
-export type DesktopWorkSessionReadModel = {
+export type DesktopWorkViewReadModel = {
   readonly run: BasicAgentRun;
-  readonly stage: DesktopWorkSessionStage;
+  readonly stage: DesktopWorkViewStage;
   readonly headline: string;
   readonly currentAction: string;
   readonly contextAttachments: readonly ContextAttachment[];
   readonly contextLedger: ContextLedger;
   readonly pendingConfirmation?: ConfirmationRequest;
-  readonly answer?: DesktopWorkSessionAnswer;
+  readonly answer?: DesktopWorkViewAnswer;
   readonly deliverable?: AgentDeliverable;
   readonly toolEvidence: readonly ToolResultEnvelope[];
   readonly visibleEvents: readonly RunEvent[];
@@ -228,7 +228,19 @@ export type DesktopWorkSessionReadModel = {
 };
 
 /**
- * Current ordinary Agent read-model name. DesktopWorkSessionReadModel remains
- * for historical panel state and compatibility while callers migrate.
+ * @deprecated Historical panel state name. New ordinary Agent read-model code
+ * should use DesktopWorkView* names.
  */
-export type DesktopWorkViewReadModel = DesktopWorkSessionReadModel;
+export type DesktopWorkSessionStage = DesktopWorkViewStage;
+
+/**
+ * @deprecated Historical panel state name. New ordinary Agent read-model code
+ * should use DesktopWorkView* names.
+ */
+export type DesktopWorkSessionAnswer = DesktopWorkViewAnswer;
+
+/**
+ * @deprecated Historical panel state name. New ordinary Agent read-model code
+ * should use DesktopWorkView* names.
+ */
+export type DesktopWorkSessionReadModel = DesktopWorkViewReadModel;

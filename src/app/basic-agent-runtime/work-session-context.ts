@@ -9,7 +9,7 @@ import type { ToolDisplayProjection, ToolResultEnvelope } from "../../domain/too
 import type { DesktopTaskSoilInput } from "../task-soil-workspace.js";
 import { redactOrdinaryText } from "../safe-projection.js";
 
-export type WorkSessionTaskSoilCanvasLike = {
+export type WorkViewTaskSoilCanvasLike = {
   readonly taskSoilId: string;
   readonly goalSummary?: string;
   readonly contextRefs: readonly {
@@ -26,9 +26,9 @@ export type WorkSessionTaskSoilCanvasLike = {
   readonly [key: string]: unknown;
 };
 
-export type WorkSessionCanvasContextLike = {
+export type WorkViewCanvasContextLike = {
   readonly kind: string;
-  readonly taskSoil?: WorkSessionTaskSoilCanvasLike;
+  readonly taskSoil?: WorkViewTaskSoilCanvasLike;
   readonly agent?: {
     readonly context?: {
       readonly items?: readonly {
@@ -47,15 +47,33 @@ export type WorkSessionCanvasContextLike = {
   readonly [key: string]: unknown;
 };
 
-export type WorkSessionContextProjectionInput = {
+export type WorkViewContextProjectionInput = {
   readonly run: BasicAgentRun;
-  readonly canvas?: WorkSessionCanvasContextLike;
+  readonly canvas?: WorkViewCanvasContextLike;
   readonly taskSoilInput?: DesktopTaskSoilInput;
   readonly toolDisplays?: readonly ToolDisplayProjection[];
   readonly toolEvidence?: readonly ToolResultEnvelope[];
 };
 
-export function contextAttachmentsFor(input: WorkSessionContextProjectionInput): readonly ContextAttachment[] {
+/**
+ * @deprecated Historical ordinary read-model name. New code should use
+ * WorkViewTaskSoilCanvasLike.
+ */
+export type WorkSessionTaskSoilCanvasLike = WorkViewTaskSoilCanvasLike;
+
+/**
+ * @deprecated Historical ordinary read-model name. New code should use
+ * WorkViewCanvasContextLike.
+ */
+export type WorkSessionCanvasContextLike = WorkViewCanvasContextLike;
+
+/**
+ * @deprecated Historical ordinary read-model name. New code should use
+ * WorkViewContextProjectionInput.
+ */
+export type WorkSessionContextProjectionInput = WorkViewContextProjectionInput;
+
+export function contextAttachmentsFor(input: WorkViewContextProjectionInput): readonly ContextAttachment[] {
   const fromCanvas = taskSoilContextAttachments(input.canvas);
   const fromInput = (input.taskSoilInput?.contextRefs ?? []).map((ref, index): ContextAttachment => ({
     attachmentId: `${input.run.runId}:context:${index}`,
@@ -84,7 +102,7 @@ export function contextAttachmentsFor(input: WorkSessionContextProjectionInput):
 }
 
 export function contextLedgerFor(
-  input: WorkSessionContextProjectionInput,
+  input: WorkViewContextProjectionInput,
   attachments: readonly ContextAttachment[],
   toolEvidence: readonly ToolResultEnvelope[],
   toolDisplays: readonly ToolDisplayProjection[]
@@ -297,7 +315,7 @@ function mergeContextAttachments(
   return merged;
 }
 
-function taskSoilContextAttachments(canvas: WorkSessionCanvasContextLike | undefined): readonly ContextAttachment[] {
+function taskSoilContextAttachments(canvas: WorkViewCanvasContextLike | undefined): readonly ContextAttachment[] {
   const taskSoil = canvas?.kind === "desktop_agent_canvas" || canvas?.kind === "work_session_canvas" || canvas?.kind === "desktop_shell_canvas"
     ? canvas.taskSoil
     : undefined;

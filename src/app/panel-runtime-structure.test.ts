@@ -4,7 +4,7 @@ import path from "node:path";
 import test from "node:test";
 import { readAppSource } from "./panel-structure-test-utils.js";
 
-test("basic agent work session keeps projection modules split", async () => {
+test("basic agent work view keeps projection modules split", async () => {
   const [workSession, transcriptProjection, transcriptTools, contextProjection] = await Promise.all([
     readAppSource(path.join("basic-agent-runtime", "work-session.ts")),
     readAppSource(path.join("basic-agent-runtime", "work-session-transcript.ts")),
@@ -14,6 +14,12 @@ test("basic agent work session keeps projection modules split", async () => {
 
   assert.equal(workSession.includes('from "./work-session-transcript.js"'), true);
   assert.equal(workSession.includes('from "./work-session-context.js"'), true);
+  assert.equal(workSession.includes("export function createDesktopWorkViewReadModel"), true);
+  assert.equal(workSession.includes("export const createDesktopWorkSessionReadModel = createDesktopWorkViewReadModel"), true);
+  assert.equal(workSession.includes("export type CreateDesktopWorkSessionReadModelInput = CreateDesktopWorkViewReadModelInput"), true);
+  assert.equal(workSession.includes("export type DesktopWorkSessionCanvasLike = DesktopWorkViewCanvasLike"), true);
+  assert.equal(workSession.includes("visibleWorkSessionEvents"), false);
+  assert.equal(workSession.includes("isProductWorkSessionEvent"), false);
   assert.equal(workSession.includes("transcriptNodesFromRunEvents(transcriptSourceEvents(input.events), pendingConfirmation)"), true);
   assert.equal(workSession.includes("function transcriptNodesFromRunEvents"), false);
   assert.equal(workSession.includes("function transcriptNodeFromRunEvent"), false);
@@ -35,6 +41,8 @@ test("basic agent work session keeps projection modules split", async () => {
   assert.equal(contextProjection.includes("export function contextAttachmentsFor"), true);
   assert.equal(contextProjection.includes("export function contextLedgerFor"), true);
   assert.equal(contextProjection.includes("export function envelopeSafeToolEvidence"), true);
+  assert.equal(contextProjection.includes("export type WorkViewContextProjectionInput"), true);
+  assert.equal(contextProjection.includes("export type WorkSessionContextProjectionInput = WorkViewContextProjectionInput"), true);
   assert.equal(contextProjection.includes("function taskSoilContextAttachments"), true);
 });
 

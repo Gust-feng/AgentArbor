@@ -118,6 +118,36 @@ test("AgentDefinitionRegistry rejects semantic drift for hashed refs", () => {
   assert.equal(registry.resolve(ref), undefined);
 });
 
+test("AgentDefinitionRegistry rejects turn policy drift for hashed refs", () => {
+  const customAgent: AgentDefinition = {
+    ...DESKTOP_ROOT_AGENT,
+    agentId: "turn-policy-drift-agent",
+    displayName: "Turn Policy Drift Agent",
+    prompt: {
+      promptRef: "prompt:turn-policy-drift-agent:v1",
+      version: "1",
+      systemPrompt: "Turn policy drift registry prompt.",
+    },
+    toolVisibilityProfile: {
+      profileId: "turn-policy-drift-agent:ordinary-visible-tools:v1",
+      runMode: "agent",
+      visibleToolScopes: ["desktop-basic"],
+    },
+  };
+  const ref = runAgentDefinitionRef(customAgent);
+  const changedAgent: AgentDefinition = {
+    ...customAgent,
+    turnPolicy: {
+      ...customAgent.turnPolicy,
+      maxModelRounds: 0,
+    },
+  };
+  const registry = new AgentDefinitionRegistry([changedAgent]);
+
+  assert.notEqual(agentDefinitionHash(customAgent), agentDefinitionHash(changedAgent));
+  assert.equal(registry.resolve(ref), undefined);
+});
+
 test("AgentDefinitionRegistry keeps legacy refs without definition hashes compatible", () => {
   const customAgent: AgentDefinition = {
     ...DESKTOP_ROOT_AGENT,

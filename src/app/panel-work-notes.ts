@@ -17,10 +17,7 @@ export function createPanelWorkNotes(input: PanelWorkNotesInput): readonly Agent
 
   if (input.summary === undefined && input.observation === undefined) {
     if (input.ordinaryDesktopAgentOnly) {
-      return [
-        createOrdinaryDesktopAgentNote(noteInput),
-        createModelCallsNote(noteInput),
-      ];
+      return [createOrdinaryDesktopAgentNote(noteInput)];
     }
     if (input.agentRunTree !== undefined) {
       return [

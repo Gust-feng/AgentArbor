@@ -38,9 +38,13 @@ test("panel work notes keep ordinary desktop agent separate from underground wor
     },
   });
 
-  assert.deepEqual(notes.map((note) => note.agentId), ["custom-ordinary-agent", "intelligence-channel"]);
+  assert.deepEqual(notes.map((note) => note.agentId), ["custom-ordinary-agent"]);
   assert.equal(notes[0]?.agentLabel, "Custom Ordinary Agent");
+  assert.equal(notes.some((note) => note.agentLabel === "Model Calls"), false);
+  assert.equal(notes.some((note) => note.stage === "model_call"), false);
   assert.equal(notes.some((note) => note.agentId.includes("underground")), false);
+  assert.equal(JSON.stringify(notes).includes("模型调用"), false);
+  assert.equal(JSON.stringify(notes).includes("requested/completed/failed"), false);
   assert.equal(JSON.stringify(notes).includes("promptRef"), false);
   assert.equal(JSON.stringify(notes).includes("systemPrompt"), false);
   assert.equal(JSON.stringify(notes).includes("rootlet"), false);

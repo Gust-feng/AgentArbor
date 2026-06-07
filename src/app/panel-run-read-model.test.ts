@@ -84,10 +84,9 @@ test("panel transcript keeps pending ordinary desktop runs out of underground no
     updatedAt: "2026-05-07T00:00:01.000Z",
   });
 
-  assert.deepEqual(transcript.workNotes.map((note) => note.agentId), [
-    "pending-ordinary-agent",
-    "intelligence-channel",
-  ]);
+  assert.deepEqual(transcript.workNotes.map((note) => note.agentId), ["pending-ordinary-agent"]);
+  assert.equal(JSON.stringify(transcript.workNotes).includes("Model Calls"), false);
+  assert.equal(JSON.stringify(transcript.workNotes).includes("模型调用"), false);
   assert.equal(JSON.stringify(transcript.workNotes).includes("underground"), false);
   assert.equal(JSON.stringify(transcript.workNotes).includes("Legacy Work Session Manager"), false);
   assert.equal(JSON.stringify(transcript.workNotes).includes("Plan Steward"), false);

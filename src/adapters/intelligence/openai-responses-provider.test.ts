@@ -151,6 +151,28 @@ test("OpenAI Responses adapter maps system message to instructions", async () =>
   ]);
 });
 
+test("OpenAI Responses adapter preserves sanitized transport failure", async () => {
+  const secret = "sk-responses-network-secret-123456";
+  const fetch: FetchLike = async () => {
+    throw new Error(`fetch failed ECONNRESET apiKey=${secret}`);
+  };
+  const provider = new OpenAIResponsesProvider({
+    baseUrl: "https://api.openai.com",
+    apiKey: "sk-test-key",
+    model: "gpt-4.1",
+    fetch,
+  });
+
+  const response = await provider.complete(createValidModelRequest());
+
+  assert.equal(response.status, "failed");
+  assert.equal(response.failure?.kind, "provider_network");
+  assert.equal(response.failure?.retryable, true);
+  assert.equal(response.failure?.message.includes("fetch failed ECONNRESET"), true);
+  assert.equal(response.failure?.message.includes(secret), false);
+  assert.equal(response.failure?.message.includes("[redacted-secret]"), true);
+});
+
 test("OpenAI Responses adapter maps tools to function format and extracts tool calls from output", async () => {
   const calls: { body: Record<string, unknown> }[] = [];
   const fetch: FetchLike = async (_url, init) => {

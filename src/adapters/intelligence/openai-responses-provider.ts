@@ -80,11 +80,20 @@ export class OpenAIResponsesProvider implements ModelProvider {
     }
 
     const startedAt = Date.now();
+    let lastTransportError: unknown;
+    const openAIFetch = toOpenAIFetch(fetchImpl);
     try {
       const client = new OpenAI({
         apiKey: this.apiKey,
         baseURL: normalizeOpenAICompatibleSdkBaseUrl(this.baseUrl),
-        fetch: toOpenAIFetch(fetchImpl),
+        fetch: async (url, init) => {
+          try {
+            return await openAIFetch(url, init);
+          } catch (error) {
+            lastTransportError = error;
+            throw error;
+          }
+        },
         maxRetries: 0,
       });
       const stream = configuredOpenAIStream(this.stream, this.requestSettings, {
@@ -146,7 +155,7 @@ export class OpenAIResponsesProvider implements ModelProvider {
         failureKind: timeoutLikeError(error) ? "provider_timeout" : "provider_network",
         retryable: true,
         message: providerErrorMessage(
-          error,
+          lastTransportError ?? error,
           timeoutLikeError(error) ? "Request timed out." : "Network request failed."
         ),
       });

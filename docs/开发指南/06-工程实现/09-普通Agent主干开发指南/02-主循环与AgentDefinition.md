@@ -50,6 +50,7 @@ else:
 - `agent` 身份和行为边界必须从上下文装配代码中抽离。
 - 系统提示词应作为独立 prompt 资产文件存在，再由 `AgentDefinition` 引用。
 - `turnPolicy`、`outputContract` 和 `toolVisibilityProfile` 也应作为独立定义资产文件存在；`AgentDefinition` 文件只负责组装身份、名称和这些资产引用，不再长期内联策略正文。
+- 普通主循环只能消费 `toolVisibilityProfile.runMode=agent` 且 `turnPolicy.purpose=desktop_agent` 的定义；`work_session_*` purpose 只能服务历史兼容或显式 deep / work-session 路径，不能混入普通主循环。
 - `turnPolicy` 可以显式声明普通主循环的模型/工具轮次上限；默认普通 Agent 当前不设置固定轮次上限，只有特定 Agent 确实需要运行边界时才应写入定义资产。
 - prompt 文案、输出契约和工具可见性不能分别散落在 session、context pack、UI copy 和测试 fixture 中。
 - 新增 Agent 时先定义它是什么，再接入运行时。

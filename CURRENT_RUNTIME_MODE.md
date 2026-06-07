@@ -33,7 +33,7 @@
 - `provider` 失败、网络失败、上下文维护失败、进程失败都不是正常完成
 - `out_of_fuel` 与 `context_overflow` 必须投影为 `blocked` / `paused`，不能被包装成 `completed`
 - 默认普通 Agent 当前不设置固定模型/工具轮次上限；若未来某个普通 Agent 需要轮次边界，必须由 `AgentDefinition.turnPolicy` 显式冻结并进入 run ref，而不是由前端、route helper 或临时执行参数私自决定
-- 默认 Desktop `AgentDefinition.turnPolicy.purpose` 必须是 `desktop_agent`；历史 `desktop_chat` 与 `work_session_*` 只能作为兼容 purpose 读取，不能成为默认普通 AgentDefinition
+- 普通主循环消费的 `AgentDefinition.turnPolicy.purpose` 必须是 `desktop_agent`；历史 `desktop_chat` 与 `work_session_*` 只能作为兼容 purpose 读取，不能成为默认普通 AgentDefinition 或普通主循环的执行定义
 
 ### 2. 前后端分离
 

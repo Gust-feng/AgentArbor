@@ -418,4 +418,9 @@ function assertOrdinaryDesktopAgentDefinition(
       `Desktop Agent requires an ordinary AgentDefinition; ${definition.agentId} declares ${definition.toolVisibilityProfile.runMode}.`
     );
   }
+  if (definition.turnPolicy.purpose !== "desktop_agent") {
+    throw new Error(
+      `Desktop Agent requires desktop_agent purpose; ${definition.agentId} declares ${definition.turnPolicy.purpose}.`
+    );
+  }
 }

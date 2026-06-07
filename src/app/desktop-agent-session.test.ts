@@ -424,6 +424,41 @@ test("Desktop Agent Session rejects deep AgentDefinitions on the ordinary loop",
   );
 });
 
+test("Desktop Agent Session rejects non-desktop purposes on the ordinary loop", async () => {
+  const workSessionPurposeAgent: AgentDefinition = {
+    ...customOrdinaryAgent(),
+    agentId: "ordinary-work-session-purpose-agent",
+    displayName: "Ordinary Work Session Purpose Agent",
+    prompt: {
+      promptRef: "prompt:ordinary-work-session-purpose-agent:v1",
+      version: "1",
+      systemPrompt: "Work-session purpose must not leak from ordinary Agent checks.",
+    },
+    turnPolicy: {
+      ...DESKTOP_ROOT_AGENT.turnPolicy,
+      purpose: "work_session_synthesis",
+    },
+  };
+
+  await assert.rejects(
+    () =>
+      runDesktopAgentSession("普通 Agent 不能使用 work session 模型 purpose", {
+        aiMode: "fake",
+        agentDefinition: workSessionPurposeAgent,
+      }),
+    (error) => {
+      assert.equal(error instanceof Error, true);
+      const message = error instanceof Error ? error.message : String(error);
+      assert.equal(message.includes("requires desktop_agent purpose"), true);
+      assert.equal(message.includes("ordinary-work-session-purpose-agent"), true);
+      assert.equal(message.includes("work_session_synthesis"), true);
+      assert.equal(message.includes(workSessionPurposeAgent.prompt.systemPrompt), false);
+      assert.equal(message.includes("systemPrompt"), false);
+      return true;
+    }
+  );
+});
+
 test("Desktop Agent Session rejects tool exposure without a capability snapshot", async () => {
   await assert.rejects(
     () =>

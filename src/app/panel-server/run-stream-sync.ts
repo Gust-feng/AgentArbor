@@ -21,7 +21,6 @@ export function syncPanelRunStreamEventsForJob(
     eventEntries: job.runtime?.eventLog.list() ?? [],
     summary: statusPayload?.summary,
     observation: statusPayload === undefined || !("observation" in statusPayload) ? undefined : statusPayload.observation,
-    routeDecision: job.routeDecision,
     desktopMode: job.runKind === "desktop" ? job.runMode : undefined,
     reasoningEffort: job.reasoningEffort,
     agentDefinitionRef: job.agentDefinitionRef,

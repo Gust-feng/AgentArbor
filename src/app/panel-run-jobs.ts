@@ -10,7 +10,6 @@ import type { ConfirmationDecision } from "../domain/basic-agent/index.js";
 import { createId, nowIso } from "../kernel/id.js";
 import type { ModelRuntimeMode } from "./model-runtime/index.js";
 import type { PanelRunConfigurationFailureSummary, PanelRunSummary } from "./panel-run-summary.js";
-import type { DesktopIntentDecision } from "./desktop-intent-router.js";
 import type { PanelRunCanvasReadModel } from "./panel-canvas-read-model.js";
 import type { PanelObservationReadModel, PanelRunStatus, PanelRunStreamEvent } from "./panel-run-read-model.js";
 import type { MinimalRuntime } from "./runtime.js";
@@ -82,7 +81,6 @@ export type PanelRunJob = {
   readonly conversationId?: string;
   readonly assistantTurnId?: string;
   readonly runAfterRunId?: string;
-  routeDecision?: DesktopIntentDecision;
   readonly taskSoilInput?: DesktopTaskSoilInput;
   readonly reasoningEffort?: ModelRunReasoningEffort;
   readonly agentDefinitionRef?: RunAgentDefinitionRef;
@@ -119,7 +117,6 @@ export class PanelRunJobStore {
     readonly conversationId?: string;
     readonly assistantTurnId?: string;
     readonly runAfterRunId?: string;
-    readonly routeDecision?: DesktopIntentDecision;
     readonly taskSoilInput?: DesktopTaskSoilInput;
     readonly reasoningEffort?: ModelRunReasoningEffort;
     readonly agentDefinitionRef?: RunAgentDefinitionRef;
@@ -144,7 +141,6 @@ export class PanelRunJobStore {
       conversationId: input.conversationId,
       assistantTurnId: input.assistantTurnId,
       runAfterRunId: input.runAfterRunId,
-      routeDecision: input.routeDecision,
       taskSoilInput: input.taskSoilInput,
       reasoningEffort: input.reasoningEffort,
       agentDefinitionRef: input.agentDefinitionRef,
@@ -222,12 +218,6 @@ export class PanelRunJobStore {
     if (job.status === "pending") {
       job.status = "running";
     }
-    job.updatedAt = nowIso();
-  }
-
-  setRouteDecision(runId: string, decision: DesktopIntentDecision): void {
-    const job = this.requireJob(runId);
-    job.routeDecision = decision;
     job.updatedAt = nowIso();
   }
 

@@ -11,7 +11,6 @@ import type { ModelMessage, ModelOutputDelta } from "../../domain/intelligence/i
 import type { ObservationRef } from "../../domain/observation/index.js";
 import type { AgentRunTreeAttachment } from "../agent-run-tree-attachment.js";
 import type { MinimalRuntime } from "../runtime.js";
-import type { DesktopIntentDecision } from "../desktop-intent-router.js";
 import type { DesktopAgentConversationMessage } from "../desktop-agent-contracts.js";
 import type { ModelRuntimeMode } from "../model-runtime/index.js";
 import type { RunSummary } from "../run-summary.js";
@@ -149,7 +148,6 @@ export type BasicAgentRunStartInput = {
   readonly conversationId?: string;
   readonly assistantTurnId?: string;
   readonly runAfterRunId?: string;
-  readonly routeDecision?: DesktopIntentDecision;
   readonly taskSoilInput?: DesktopTaskSoilInput;
   readonly reasoningEffort?: ModelRunReasoningEffort;
   readonly startImmediately?: boolean;

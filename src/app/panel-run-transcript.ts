@@ -18,7 +18,6 @@ export function createPanelRunTranscript(input: CreatePanelRunTranscriptInput): 
     eventEntries: input.eventEntries,
     summary: input.summary,
     observation: input.observation,
-    routeDecision: input.routeDecision,
     desktopMode: input.desktopMode,
     reasoningEffort: input.reasoningEffort,
     agentDefinitionRef: input.agentDefinitionRef,

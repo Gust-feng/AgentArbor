@@ -5,11 +5,6 @@ import type {
   SanitizedModelProviderConfig,
 } from "../../domain/config/index.js";
 import type { RuntimeRunSnapshot } from "../../domain/runtime-database/index.js";
-import {
-  explainDesktopIntentDecision,
-  type DesktopIntentDecision,
-  type DesktopIntentRoute,
-} from "../desktop-intent-router.js";
 import type { PanelConversationReadModel, PanelConversationStore } from "../panel-conversations.js";
 import type { PanelObservationReadModel } from "../panel-run-read-model.js";
 import {
@@ -56,7 +51,6 @@ export type PanelRunJobResponse = {
   readonly summary?: PanelRunSummaryPayload;
   readonly observation?: PanelObservationReadModel;
   readonly canvas?: PanelRunCanvasReadModel;
-  readonly route?: PanelDesktopRouteReadModel;
   readonly error?: {
     readonly code: string;
     readonly message: string;
@@ -74,13 +68,6 @@ export type PanelRunJobResponse = {
     readonly artifacts: RuntimeRunSnapshot["artifacts"];
     readonly confirmations: RuntimeRunSnapshot["confirmations"];
   };
-};
-
-type PanelDesktopRouteReadModel = {
-  readonly route: DesktopIntentRoute;
-  readonly reason: string;
-  readonly title: string;
-  readonly summary: string;
 };
 
 export function createPanelRunJobResponse(
@@ -116,7 +103,6 @@ export function createPanelRunJobResponse(
     summary,
     observation,
     agentRunTree,
-    routeDecision: job.routeDecision,
     desktopMode: job.runKind === "desktop" ? job.runMode : undefined,
     reasoningEffort: job.reasoningEffort,
     agentDefinitionRef: job.agentDefinitionRef,
@@ -148,24 +134,10 @@ export function createPanelRunJobResponse(
     summary: responseSummary,
     observation,
     canvas: statusPayload?.canvas,
-    route: routeReadModel(job.routeDecision),
     error: job.failed?.error ?? job.cancelled?.reason ?? job.blocked?.reason,
     conversation:
       job.conversationId === undefined
         ? undefined
         : runtime.conversations.getReadModel(job.conversationId),
-  };
-}
-
-function routeReadModel(decision: DesktopIntentDecision | undefined): PanelDesktopRouteReadModel | undefined {
-  if (decision === undefined) {
-    return undefined;
-  }
-  const explanation = explainDesktopIntentDecision(decision);
-  return {
-    route: decision.route,
-    reason: decision.reason,
-    title: explanation.title,
-    summary: explanation.summary,
   };
 }

@@ -159,7 +159,6 @@ async function handleConversationMessageRequest(
     conversationId: started.conversation.conversationId,
     assistantTurnId: started.assistantTurn.turnId,
     runAfterRunId,
-    routeDecision: undefined,
     taskSoilInput: mergedTaskSoilInput,
     reasoningEffort: runInput.reasoningEffort,
     startImmediately: !shouldQueue,

@@ -279,7 +279,7 @@ test("panel server source keeps conversation restore and persistence split", asy
   assert.equal(conversationRoutes.includes("conversation_run_mode_not_supported"), true);
   assert.equal(liveModelStream.includes("export function appendLiveModelOutputDelta"), true);
   assert.equal(runJobResponse.includes("export function createPanelRunJobResponse"), true);
-  assert.equal(runJobResponse.includes("type PanelDesktopRouteReadModel"), true);
+  assert.equal(runJobResponse.includes("type PanelDesktopRouteReadModel"), false);
   assert.equal(panelRuntime.includes("export type PanelRuntime"), true);
   assert.equal(panelRuntime.includes("export type PanelRuntimeHooks"), true);
   assert.equal(panelRuntime.includes("export function createPanelRuntime"), true);
@@ -450,10 +450,11 @@ test("panel server source keeps conversation restore and persistence split", asy
     assert.equal(requestHandler.includes(privateLiveStreamDetail), false);
     assert.equal(liveModelStream.includes(privateLiveStreamDetail), true);
   }
-  for (const privateRunResponseDetail of ["function routeReadModel", "createPanelRunTranscript"]) {
-    assert.equal(requestHandler.includes(privateRunResponseDetail), false);
-    assert.equal(runJobResponse.includes(privateRunResponseDetail), true);
-  }
+  assert.equal(requestHandler.includes("createPanelRunTranscript"), false);
+  assert.equal(runJobResponse.includes("createPanelRunTranscript"), true);
+  assert.equal(requestHandler.includes("function routeReadModel"), false);
+  assert.equal(runJobResponse.includes("function routeReadModel"), false);
+  assert.equal(runJobResponse.includes("type PanelDesktopRouteReadModel"), false);
   for (const privateRuntimeDetail of [
     "function assemblePanelRuntime",
     "function resolveSkillRoots",

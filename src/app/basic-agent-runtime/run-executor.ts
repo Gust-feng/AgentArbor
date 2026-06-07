@@ -53,7 +53,6 @@ export class BasicAgentRunExecutor {
       conversationId: startInput.conversationId,
       assistantTurnId: startInput.assistantTurnId,
       runAfterRunId: startInput.runAfterRunId,
-      routeDecision: startInput.routeDecision,
       taskSoilInput: startInput.taskSoilInput,
       reasoningEffort: startInput.reasoningEffort,
       agentDefinitionRef: startFacts.agentDefinitionRef,

@@ -1,7 +1,6 @@
 import type { ArborMessageType } from "../domain/common.js";
 import type { ModelVisibleOutputProjection } from "../domain/intelligence/index.js";
 import type { EventLogEntry } from "../kernel/events/in-memory-event-log.js";
-import { explainDesktopIntentDecision, type DesktopIntentDecision } from "./desktop-intent-router.js";
 import { modelVisibleOutputOrUndefined } from "./panel-transcript-model-calls.js";
 import { asRecord, isString, numberOrUndefined, stringOrUndefined } from "./panel-read-model-utils.js";
 import { compactStreamDetailText, type PanelRunStreamEventDetail } from "./panel-stream-tool-projection.js";
@@ -20,16 +19,10 @@ export function blockedRunSummary(error: { readonly code: string; readonly messa
   return friendlyUserFacingFailureText(error?.message ?? "运行中断，等待用户确认或补充指导。");
 }
 
-export function runStartedSummary(
-  routeDecision: DesktopIntentDecision | undefined,
-  desktopMode: "agent" | "deep" | undefined
-): string {
-  if (routeDecision === undefined) {
-    return desktopMode === "deep"
-      ? "已进入深度处理，会并行检查上下文、汇总判断并形成结果。"
-      : "";
-  }
-  return explainDesktopIntentDecision(routeDecision).summary;
+export function runStartedSummary(desktopMode: "agent" | "deep" | undefined): string {
+  return desktopMode === "deep"
+    ? "已进入深度处理，会并行检查上下文、汇总判断并形成结果。"
+    : "";
 }
 
 export function agentFabricLabel(type: PanelRunStreamEventType): string {

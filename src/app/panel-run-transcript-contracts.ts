@@ -3,7 +3,6 @@ import type { ToolDisplayProjection } from "../domain/tools/index.js";
 import type { TranscriptNode } from "../domain/basic-agent/index.js";
 import type { EventLogEntry } from "../kernel/events/in-memory-event-log.js";
 import type { AgentRunTreeAttachment } from "./agent-run-tree-attachment.js";
-import type { DesktopIntentDecision } from "./desktop-intent-router.js";
 import type { PanelTranscriptModelCall } from "./panel-transcript-model-calls.js";
 import type { PanelRunStreamEvent } from "./panel-run-stream-contracts.js";
 import type { PanelRunStatus } from "./panel-run-status.js";
@@ -56,7 +55,6 @@ export type CreatePanelRunTranscriptInput = {
   readonly summary?: PanelRunSummary;
   readonly observation?: PanelObservationReadModel;
   readonly agentRunTree?: AgentRunTreeAttachment;
-  readonly routeDecision?: DesktopIntentDecision;
   readonly desktopMode?: "agent" | "deep";
   readonly reasoningEffort?: ModelRunReasoningEffort;
   readonly agentDefinitionRef?: Pick<RunAgentDefinitionRef, "agentId" | "agentDisplayName">;

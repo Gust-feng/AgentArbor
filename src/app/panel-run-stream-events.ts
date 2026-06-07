@@ -4,7 +4,6 @@ import {
   createRunObservationEventViews,
   type RunObservationEventView,
 } from "../domain/observation/index.js";
-import type { DesktopIntentDecision } from "./desktop-intent-router.js";
 import {
   modelReasoningOutputOrUndefined,
   safeReasoningOutputForPanel,
@@ -56,7 +55,6 @@ export function createPanelRunStreamEvents(input: {
   readonly eventEntries: readonly EventLogEntry[];
   readonly summary?: PanelRunSummaryPayload;
   readonly observation?: PanelObservationReadModel;
-  readonly routeDecision?: DesktopIntentDecision;
   readonly desktopMode?: "agent" | "deep";
   readonly reasoningEffort?: ModelRunReasoningEffort;
   readonly agentDefinitionRef?: Pick<RunAgentDefinitionRef, "agentDisplayName">;
@@ -68,7 +66,7 @@ export function createPanelRunStreamEvents(input: {
   const agentLabel = agentSelfLabel(input.agentDefinitionRef);
   const observationViews = createRunObservationEventViews(input.eventEntries);
   const viewBySequence = new Map(observationViews.map((view) => [view.sequence, view]));
-  const ordinaryAgentProjection = isOrdinaryAgentProjection(input.desktopMode, input.routeDecision);
+  const ordinaryAgentProjection = isOrdinaryAgentProjection(input.desktopMode);
   const suppressOrdinaryChatProgress =
     ordinaryAgentProjection && !hasUserVisibleWorkActivity(input.eventEntries, ordinaryAgentProjection);
   const push = (event: Omit<PanelRunStreamEvent, "sequence">): void => {
@@ -81,7 +79,7 @@ export function createPanelRunStreamEvents(input: {
     type: "run.started",
     createdAt: input.createdAt,
     agentLabel,
-    summary: runStartedSummary(input.routeDecision, input.desktopMode),
+    summary: runStartedSummary(input.desktopMode),
     status: input.status === "pending" ? "pending" : "running",
     sourceRefs: [],
     modelCallRefs: [],
@@ -89,7 +87,7 @@ export function createPanelRunStreamEvents(input: {
   });
 
   for (const entry of input.eventEntries) {
-    if (shouldSuppressOrdinaryGoalEvent(entry.type, input.desktopMode, input.routeDecision)) {
+    if (shouldSuppressOrdinaryGoalEvent(entry.type, input.desktopMode)) {
       continue;
     }
     if (ordinaryAgentProjection && !isOrdinaryAgentStreamEvent(entry.type)) {
@@ -177,23 +175,15 @@ function agentSelfLabel(ref: Pick<RunAgentDefinitionRef, "agentDisplayName"> | u
   return label === undefined || label.length === 0 ? "AgentArbor" : label;
 }
 
-function isOrdinaryChatRoute(routeDecision: DesktopIntentDecision | undefined): boolean {
-  return routeDecision !== undefined && routeDecision.route !== "task_work_session";
-}
-
-function isOrdinaryAgentProjection(
-  desktopMode: "agent" | "deep" | undefined,
-  routeDecision: DesktopIntentDecision | undefined
-): boolean {
-  return desktopMode === "agent" || isOrdinaryChatRoute(routeDecision);
+function isOrdinaryAgentProjection(desktopMode: "agent" | "deep" | undefined): boolean {
+  return desktopMode === "agent";
 }
 
 function shouldSuppressOrdinaryGoalEvent(
   type: ArborMessageType,
-  desktopMode: "agent" | "deep" | undefined,
-  routeDecision: DesktopIntentDecision | undefined
+  desktopMode: "agent" | "deep" | undefined
 ): boolean {
-  return type === "goal.received" && (desktopMode === "agent" || isOrdinaryChatRoute(routeDecision));
+  return type === "goal.received" && desktopMode === "agent";
 }
 
 function hasUserVisibleWorkActivity(

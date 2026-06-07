@@ -171,7 +171,6 @@ async function handleStartRunRequest(
     runMode,
     goal: runInput.goal,
     aiMode: runInput.aiMode,
-    routeDecision: undefined,
     taskSoilInput: runInput.taskSoilInput,
     reasoningEffort: runInput.reasoningEffort,
     deferSchedule: true,

@@ -10,7 +10,6 @@ import type { ConfirmationDecision } from "../../domain/basic-agent/index.js";
 import type { AgentRunTreeAttachment } from "../agent-run-tree-attachment.js";
 import type { ModelRuntimeMode } from "../model-runtime/index.js";
 import type { RunConfigurationFailureSummary, RunSummary } from "../run-summary.js";
-import type { DesktopIntentDecision } from "../desktop-intent-router.js";
 import type { MinimalRuntime } from "../runtime.js";
 import { resolveRunModeForKind } from "../run-mode-policy.js";
 import type { AgentArborRunKind, AgentArborRunMode } from "../run-mode-policy.js";
@@ -82,7 +81,6 @@ export type BasicAgentRunJob = Omit<BasicAgentRunProjectionInput, "confirmationD
   readonly aiMode: ModelRuntimeMode;
   readonly assistantTurnId?: string;
   readonly runAfterRunId?: string;
-  routeDecision?: DesktopIntentDecision;
   readonly taskSoilInput?: DesktopTaskSoilInput;
   readonly reasoningEffort?: ModelRunReasoningEffort;
   readonly agentDefinitionRef?: RunAgentDefinitionRef;
@@ -108,7 +106,6 @@ export type BasicAgentRunJobCreateInput = {
   readonly conversationId?: string;
   readonly assistantTurnId?: string;
   readonly runAfterRunId?: string;
-  readonly routeDecision?: DesktopIntentDecision;
   readonly taskSoilInput?: DesktopTaskSoilInput;
   readonly reasoningEffort?: ModelRunReasoningEffort;
   readonly agentDefinitionRef?: RunAgentDefinitionRef;

@@ -102,7 +102,6 @@ async function persistPanelRunNow(
     summary: transcriptPayload?.summary,
     observation: transcriptPayload?.observation,
     agentRunTree: transcriptPayload?.agentRunTree,
-    routeDecision: job.routeDecision,
     desktopMode: job.runKind === "desktop" ? job.runMode : undefined,
     reasoningEffort: job.reasoningEffort,
     agentDefinitionRef: job.agentDefinitionRef,

@@ -21,6 +21,8 @@ export type AgentTurnPolicySpec = {
   readonly purpose: ModelPurpose;
   readonly sensitivity: ModelRequest["sensitivity"];
   readonly defaultMaxOutputTokens: number;
+  readonly maxModelRounds?: number;
+  readonly maxToolRounds?: number;
 };
 
 export type AgentDefinition = {

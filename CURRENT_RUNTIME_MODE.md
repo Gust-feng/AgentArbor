@@ -32,6 +32,7 @@
 - 工具调用、确认等待、工具失败后继续判断，都是普通运行的一部分
 - `provider` 失败、网络失败、上下文维护失败、进程失败都不是正常完成
 - `out_of_fuel` 与 `context_overflow` 必须投影为 `blocked` / `paused`，不能被包装成 `completed`
+- 默认普通 Agent 当前不设置固定模型/工具轮次上限；若未来某个普通 Agent 需要轮次边界，必须由 `AgentDefinition.turnPolicy` 显式冻结并进入 run ref，而不是由前端、route helper 或临时执行参数私自决定
 
 ### 2. 前后端分离
 

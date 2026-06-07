@@ -51,6 +51,25 @@ test("AgentDefinition runtime prefers model capability output budget over defaul
   assert.equal(Object.hasOwn(policy.budget, "maxLatencyMs"), false);
 });
 
+test("AgentDefinition runtime carries explicit ordinary loop round limits", () => {
+  const policy = createAgentTurnPolicyFromDefinition({
+    agentDefinition: {
+      ...DESKTOP_ROOT_AGENT,
+      turnPolicy: {
+        ...DESKTOP_ROOT_AGENT.turnPolicy,
+        maxModelRounds: 0,
+        maxToolRounds: 2,
+      },
+    },
+    traceId: "trace-round-limits",
+    goalId: "goal-round-limits",
+    allowedTools: ["read_file"],
+  });
+
+  assert.equal(policy.maxModelRounds, 0);
+  assert.equal(policy.maxToolRounds, 2);
+});
+
 test("AgentDefinition safe run ref excludes prompt bodies and turn policy internals", () => {
   const ref = runAgentDefinitionRef(DESKTOP_ROOT_AGENT);
   const serialized = JSON.stringify(ref);

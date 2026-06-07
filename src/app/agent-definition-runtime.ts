@@ -21,6 +21,12 @@ export function createAgentTurnPolicyFromDefinition(
   return {
     allowModel: definition.turnPolicy.allowModel,
     allowedTools: [...input.allowedTools],
+    ...(definition.turnPolicy.maxModelRounds === undefined
+      ? {}
+      : { maxModelRounds: definition.turnPolicy.maxModelRounds }),
+    ...(definition.turnPolicy.maxToolRounds === undefined
+      ? {}
+      : { maxToolRounds: definition.turnPolicy.maxToolRounds }),
     fallback: definition.turnPolicy.fallback,
     callerAgentId: definition.agentId,
     traceId: input.traceId,

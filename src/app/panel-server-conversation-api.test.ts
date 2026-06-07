@@ -25,6 +25,7 @@ import {
 } from "./panel-openai-test-fixtures.js";
 import { runAgentDefinitionRef } from "./agent-definition-runtime.js";
 import { DESKTOP_ROOT_AGENT } from "./agent-prompts/desktop-root-agent.js";
+import type { AgentDefinition } from "./agent-prompts/contracts.js";
 
 test("conversation message returns before provider completion so the UI can subscribe before output", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-conversation-early-stream-"));
@@ -1099,6 +1100,75 @@ test("conversation cancellation stays cancelled across run views and runtime sna
     assert.deepEqual(basicView.body.view.capabilityResolution, runtimeRun.body.snapshot.run.capabilityResolution);
     assert.equal(visibleText.includes(secret), false);
     assert.equal(visibleText.includes("provider aborted after user cancellation"), false);
+    assertSafePanelJsonText(visibleText);
+  } finally {
+    await server.close();
+    await removeTemporaryTree(directory);
+  }
+});
+
+test("conversation AgentDefinition model round limit stays blocked across run views and runtime snapshot", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-conversation-round-limit-"));
+  const agentDefinition: AgentDefinition = {
+    ...DESKTOP_ROOT_AGENT,
+    agentId: "round-limited-desktop-agent",
+    displayName: "Round Limited Desktop Agent",
+    turnPolicy: {
+      ...DESKTOP_ROOT_AGENT.turnPolicy,
+      maxModelRounds: 0,
+    },
+    toolVisibilityProfile: {
+      ...DESKTOP_ROOT_AGENT.toolVisibilityProfile,
+      profileId: "round-limited-desktop-agent:ordinary-visible-tools:v1",
+    },
+  };
+  const expectedAgentRef = runAgentDefinitionRef(agentDefinition);
+  const server = await startLocalPanelServer({
+    port: 0,
+    configDirectory: directory,
+    desktopAgentDefinition: agentDefinition,
+  });
+  try {
+    const start = await requestJson(server.url, "/api/conversations", {
+      method: "POST",
+      body: { goal: "测试 AgentDefinition 轮次限制不能变成完成", aiMode: "fake" },
+    });
+    const blocked = await waitForRun(
+      server.url,
+      start.body.run.runId,
+      (body) => body.status === "blocked",
+      4_000,
+      "/api/desktop/runs"
+    );
+    const conversation = await requestJson(
+      server.url,
+      `/api/conversations/${encodeURIComponent(start.body.conversation.conversationId)}`
+    );
+    const basicView = await requestJson(
+      server.url,
+      `/api/basic-agent/runs/${encodeURIComponent(start.body.run.runId)}/view?cursor=0`
+    );
+    const runtimeRun = await requestJson(server.url, `/api/runtime/runs/${encodeURIComponent(start.body.run.runId)}`);
+    const currentRun = conversation.body.conversation.currentRun;
+    const visibleText = `${blocked.text}\n${conversation.text}\n${basicView.text}\n${runtimeRun.text}`;
+
+    assert.equal(start.status, 202);
+    assert.deepEqual(start.body.run.agentDefinitionRef, expectedAgentRef);
+    assert.equal(blocked.body.status, "blocked");
+    assert.equal(blocked.body.error.code, "out_of_fuel");
+    assert.deepEqual(blocked.body.agentDefinitionRef, expectedAgentRef);
+    assert.equal(currentRun.run.status, "blocked");
+    assert.equal(currentRun.workView.stage, "blocked");
+    assert.equal(currentRun.detail.status, "blocked");
+    assert.deepEqual(currentRun.agentDefinitionRef, expectedAgentRef);
+    assert.equal(basicView.body.view.run.status, "blocked");
+    assert.equal(basicView.body.view.workView.stage, "blocked");
+    assert.equal(basicView.body.view.detail.status, "blocked");
+    assert.deepEqual(basicView.body.view.agentDefinitionRef, expectedAgentRef);
+    assert.equal(runtimeRun.body.snapshot.run.status, "blocked");
+    assert.equal(runtimeRun.body.snapshot.run.error.code, "out_of_fuel");
+    assert.deepEqual(runtimeRun.body.snapshot.run.agentDefinitionRef, expectedAgentRef);
+    assert.equal(visibleText.includes(DESKTOP_ROOT_AGENT.prompt.systemPrompt), false);
     assertSafePanelJsonText(visibleText);
   } finally {
     await server.close();

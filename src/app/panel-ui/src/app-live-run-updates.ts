@@ -55,7 +55,7 @@ export function createLiveRunUpdateController(
       } catch (error) {
         options.mountedRef.current && options.activeRunIdRef.current === runId && options.setApp((previous) => ({
           ...previous,
-          error: `系统错误：${error instanceof Error ? error.message : "刷新运行状态失败。"}`,
+          error: error instanceof Error ? error.message : "刷新运行状态失败。",
         }));
       }
     };

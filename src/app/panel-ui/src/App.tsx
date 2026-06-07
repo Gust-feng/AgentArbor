@@ -84,7 +84,7 @@ export function App(): React.ReactElement {
       if (mountedRef.current) {
         setApp((previous) => ({
           ...previous,
-          error: `系统错误：${error instanceof Error ? error.message : "工作台启动数据加载失败。"}`,
+          error: error instanceof Error ? error.message : "工作台启动数据加载失败。",
         }));
       }
     });

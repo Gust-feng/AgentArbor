@@ -77,7 +77,7 @@ export function createAppSettingsController(options: AppSettingsControllerOption
       if (options.mountedRef.current) {
         options.setApp((previous) => ({
           ...previous,
-          error: `系统错误：${error instanceof Error ? error.message : "模型服务保存失败。"}`,
+          error: error instanceof Error ? error.message : "模型服务保存失败。",
         }));
       }
       throw error;
@@ -109,7 +109,7 @@ export function createAppSettingsController(options: AppSettingsControllerOption
       if (options.mountedRef.current) {
         options.setApp((previous) => ({
           ...previous,
-          error: `系统错误：${error instanceof Error ? error.message : "API Key 读取失败。"}`,
+          error: error instanceof Error ? error.message : "API Key 读取失败。",
         }));
       }
       throw error;
@@ -157,7 +157,7 @@ export function createAppSettingsController(options: AppSettingsControllerOption
       if (options.mountedRef.current) {
         options.setApp((previous) => ({
           ...previous,
-          error: `系统错误：${error instanceof Error ? error.message : "模型列表获取失败。"}`,
+          error: error instanceof Error ? error.message : "模型列表获取失败。",
         }));
       }
       return undefined;
@@ -181,7 +181,7 @@ export function createAppSettingsController(options: AppSettingsControllerOption
       if (options.mountedRef.current) {
         options.setApp((previous) => ({
           ...previous,
-          error: `系统错误：${error instanceof Error ? error.message : "模型保存失败。"}`,
+          error: error instanceof Error ? error.message : "模型保存失败。",
         }));
       }
       throw error;
@@ -201,7 +201,7 @@ export function createAppSettingsController(options: AppSettingsControllerOption
       if (options.mountedRef.current) {
         options.setApp((previous) => ({
           ...previous,
-          error: `系统错误：${error instanceof Error ? error.message : "工作目录保存失败。"}`,
+          error: error instanceof Error ? error.message : "工作目录保存失败。",
         }));
       }
     } finally {
@@ -221,7 +221,7 @@ export function createAppSettingsController(options: AppSettingsControllerOption
       if (options.mountedRef.current) {
         options.setApp((previous) => ({
           ...previous,
-          error: `系统错误：${error instanceof Error ? error.message : "工具配置保存失败。"}`,
+          error: error instanceof Error ? error.message : "工具配置保存失败。",
         }));
       }
     } finally {
@@ -240,7 +240,7 @@ export function createAppSettingsController(options: AppSettingsControllerOption
       if (options.mountedRef.current) {
         options.setApp((previous) => ({
           ...previous,
-          error: `系统错误：${error instanceof Error ? error.message : "工具状态保存失败。"}`,
+          error: error instanceof Error ? error.message : "工具状态保存失败。",
         }));
       }
     } finally {
@@ -259,7 +259,7 @@ export function createAppSettingsController(options: AppSettingsControllerOption
       if (options.mountedRef.current) {
         options.setApp((previous) => ({
           ...previous,
-          error: `系统错误：${error instanceof Error ? error.message : "工作方法状态保存失败。"}`,
+          error: error instanceof Error ? error.message : "工作方法状态保存失败。",
         }));
       }
     } finally {

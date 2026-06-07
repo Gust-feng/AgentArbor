@@ -58,7 +58,7 @@ export function blockedContextAttachment(input: {
     kind: input.kind,
     ref: input.value,
     title: input.kind === "web" ? "网页不可用" : "上下文不可用",
-    summary: `系统错误：${message}`,
+    summary: message,
     permissionRefs: [],
     readonlyPreviewMeta: { available: false },
     status: "blocked",

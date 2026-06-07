@@ -244,7 +244,7 @@ export async function submitPanelTask(
       workView: appBeforeSubmit.workView,
       capabilityResolution: appBeforeSubmit.capabilityResolution,
       capabilityResolutionRunId: appBeforeSubmit.capabilityResolutionRunId,
-      error: `系统错误：${error instanceof Error ? error.message : "任务启动失败。"}`,
+      error: error instanceof Error ? error.message : "任务启动失败。",
     }));
   }
 }

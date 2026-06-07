@@ -19,6 +19,7 @@ import {
 import {
   createOpenAiTextResponse,
   extractResponsesMessages,
+  hasResponsesToolDefinition,
   parseResponsesRequestBody,
   responsesRequestText,
   type ResponsesRequestBody,
@@ -186,6 +187,97 @@ test("conversation API creates a conversation and attaches the desktop run to as
     assert.equal(JSON.stringify(currentRun).includes(DESKTOP_ROOT_AGENT.prompt.systemPrompt), false);
     assert.equal(JSON.stringify(runtimeRun.body).includes(DESKTOP_ROOT_AGENT.prompt.systemPrompt), false);
     assertSafePanelJsonText(`${conversation.text}\n${basicView.text}\n${runtimeRun.text}`);
+  } finally {
+    await server.close();
+    await removeTemporaryTree(directory);
+  }
+});
+
+test("conversation provider tools come from backend AgentDefinition instead of request fields", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-conversation-agent-tools-"));
+  const modelSecret = "sk-conversation-agent-tools-secret";
+  const webSecret = "tvly-conversation-agent-tools-secret";
+  const providerRequests: ResponsesRequestBody[] = [];
+  const agentDefinition: AgentDefinition = {
+    ...DESKTOP_ROOT_AGENT,
+    agentId: "conversation-hidden-search-agent",
+    displayName: "Conversation Hidden Search Agent",
+    toolVisibilityProfile: {
+      ...DESKTOP_ROOT_AGENT.toolVisibilityProfile,
+      profileId: "conversation-hidden-search-agent:ordinary-visible-tools:v1",
+      hiddenToolNames: [
+        ...(DESKTOP_ROOT_AGENT.toolVisibilityProfile.hiddenToolNames ?? []),
+        "search",
+      ],
+    },
+  };
+  const providerFetch: PanelProviderFetch = async (_url, init) => {
+    providerRequests.push(parseResponsesRequestBody(init.body));
+    return createOpenAiTextResponse("conversation-agent-tools-model", "我会只使用后端允许的工具集合。");
+  };
+  const server = await startLocalPanelServer({
+    port: 0,
+    configDirectory: directory,
+    desktopAgentDefinition: agentDefinition,
+    providerFetch,
+  });
+  try {
+    await requestJson(server.url, "/api/config/model-provider", {
+      method: "POST",
+      body: {
+        baseUrl: "https://provider.example",
+        model: "conversation-agent-tools-model",
+        apiKey: modelSecret,
+      },
+    });
+    await requestJson(server.url, "/api/config/tools/web-search", {
+      method: "POST",
+      body: {
+        provider: "tavily",
+        apiKey: webSecret,
+        maxResults: 1,
+      },
+    });
+
+    const start = await requestJson(server.url, "/api/conversations", {
+      method: "POST",
+      body: {
+        goal: "前端请求里夹带 search 工具也不能改变后端工具边界",
+        aiMode: "openai-compatible",
+        requestedTools: ["search"],
+        toolVisibilityProfileId: DESKTOP_ROOT_AGENT.toolVisibilityProfile.profileId,
+      },
+    });
+    const completed = await waitForRun(
+      server.url,
+      start.body.run.runId,
+      (body) => body.status === "completed",
+      4_000,
+      "/api/desktop/runs"
+    );
+    const conversation = await requestJson(
+      server.url,
+      `/api/conversations/${encodeURIComponent(start.body.conversation.conversationId)}`
+    );
+    const runtimeRun = await requestJson(server.url, `/api/runtime/runs/${encodeURIComponent(start.body.run.runId)}`);
+    const visibleText = `${completed.text}\n${conversation.text}\n${runtimeRun.text}`;
+
+    assert.equal(start.status, 202);
+    assert.equal(providerRequests.length, 1);
+    assert.equal(hasResponsesToolDefinition(providerRequests[0], "search"), false);
+    assert.equal(completed.body.capabilityResolution.allowedTools.includes("search"), false);
+    assert.equal(
+      completed.body.capabilityResolution.toolExposures.some(
+        (tool: { readonly name?: string; readonly modelVisible?: boolean }) =>
+          tool.name === "search" && tool.modelVisible === false
+      ),
+      true
+    );
+    assert.deepEqual(conversation.body.conversation.currentRun.capabilityResolution, completed.body.capabilityResolution);
+    assert.deepEqual(runtimeRun.body.snapshot.run.capabilityResolution, completed.body.capabilityResolution);
+    assert.equal(visibleText.includes(modelSecret), false);
+    assert.equal(visibleText.includes(webSecret), false);
+    assertSafePanelJsonText(visibleText);
   } finally {
     await server.close();
     await removeTemporaryTree(directory);

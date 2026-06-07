@@ -522,7 +522,7 @@ function capabilityResolution(snapshotId: string, allowedTools: readonly string[
       riskLevel: "low",
       operationType: "read-only",
       requiresConfirmation: false,
-      reason: "工具对本轮模型可用。",
+      reason: "可用。",
     })),
     enabledSkills: [],
     mcpDrafts: [],

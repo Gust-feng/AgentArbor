@@ -39,7 +39,7 @@ test("run capability policy hides disabled, unavailable, denied, and mode-intern
   assert.deepEqual(resolution.allowedTools, ["search"]);
   assert.equal(resolution.toolExposures.find((item) => item.name === "shell_command")?.modelVisible, false);
   assert.equal(resolution.toolExposures.find((item) => item.name === "shell_command")?.requiresConfirmation, true);
-  assert.equal(resolution.toolExposures.find((item) => item.name === "browser_snapshot")?.reason, "工具运行时当前不可用。");
+  assert.equal(resolution.toolExposures.find((item) => item.name === "browser_snapshot")?.reason, "当前不可用。");
   assert.equal(resolution.toolExposures.find((item) => item.name === "write_file")?.reason, "工具已在配置中停用。");
   assert.equal(resolution.toolExposures.find((item) => item.name === "underground_probe")?.modelVisible, false);
   assert.equal(resolution.toolExposures.find((item) => item.name === "mcp_docs_search")?.modelVisible, false);
@@ -61,7 +61,7 @@ test("run capability policy hides every tool when the model cannot call tools", 
   assert.deepEqual(resolution.allowedTools, []);
   assert.equal(resolution.toolExposures[0]?.modelVisible, false);
   assert.equal(resolution.toolExposures[0]?.reason, "当前模型不支持工具调用。");
-  assert.match(resolution.warnings.join("\n"), /本轮没有模型可见工具/);
+  assert.match(resolution.warnings.join("\n"), /本轮没有可用工具/);
 });
 
 test("run capability policy never expands beyond snapshot allowed tools", () => {
@@ -87,7 +87,7 @@ test("run capability policy never expands beyond snapshot allowed tools", () => 
   assert.equal(resolution.toolExposures.find((item) => item.name === "read_file")?.modelVisible, false);
   assert.equal(
     resolution.toolExposures.find((item) => item.name === "read_file")?.reason,
-    "工具不在本轮能力快照允许集合内。"
+    "不在本轮可用范围内。"
   );
 });
 
@@ -110,7 +110,7 @@ test("executable restriction only counts tools that were model-visible before ex
   assert.equal(restricted.toolExposures.find((item) => item.name === "search")?.reason, "本轮没有可执行的工具运行器。");
   assert.equal(restricted.toolExposures.find((item) => item.name === "read_file")?.reason, "本轮没有可执行的工具运行器。");
   assert.equal(restricted.toolExposures.find((item) => item.name === "write_file")?.reason, "工具已在配置中停用。");
-  assert.equal(restricted.toolExposures.find((item) => item.name === "underground_probe")?.reason, "该工具不对当前运行模式可见。");
+  assert.equal(restricted.toolExposures.find((item) => item.name === "underground_probe")?.reason, "当前模式不可用。");
   assert.equal(
     restricted.warnings.some((warning) => warning === "本轮有 2 个策略可见工具没有对应的工具执行器。"),
     true
@@ -154,7 +154,7 @@ test("run capability policy keeps MCP as draft only and filters disabled skills"
   assert.equal("sourcePath" in (resolution.enabledSkills[0] as Record<string, unknown>), false);
   assert.equal(resolution.mcpDrafts.length, 1);
   assert.equal(resolution.mcpDrafts[0]?.source, "mcp");
-  assert.match(resolution.mcpDrafts[0]?.reason ?? "", /不执行 MCP tool/);
+  assert.match(resolution.mcpDrafts[0]?.reason ?? "", /当前不会执行/);
   const projected = JSON.stringify(resolution);
   assert.equal(projected.includes(DESKTOP_ROOT_AGENT.prompt.systemPrompt), false);
   assert.equal(projected.includes("sk-secret"), false);

@@ -63,7 +63,7 @@ const BUILTIN_TOOL_PRESENTATION: Readonly<Record<string, ToolPresentationSeed>> 
   },
   write_file: {
     displayName: "写入文件",
-    displayDescription: "兼容写入能力；普通 Agent 默认不展示覆盖式写入工具。",
+    displayDescription: "写入工作区文本文件。",
   },
   run_command: {
     displayName: "运行命令",
@@ -71,7 +71,7 @@ const BUILTIN_TOOL_PRESENTATION: Readonly<Record<string, ToolPresentationSeed>> 
   },
   shell_command: {
     displayName: "运行命令",
-    displayDescription: "run_command 的兼容别名；不执行任意 Shell 语法。",
+    displayDescription: "运行工作区命令。",
   },
 };
 
@@ -87,11 +87,11 @@ export function toolPresentationForName(
   const seed = BUILTIN_TOOL_PRESENTATION[name] ?? fallbackPresentation(metadata);
   return {
     displayName: seed.displayName,
-    displayDescription: seed.displayDescription || description || "可供 Agent 在授权边界内调用的工具能力。",
+    displayDescription: seed.displayDescription || description || "运行时工具。",
     categoryLabel: toolCategoryLabel(metadata?.category),
     operationLabel: toolOperationLabel(metadata?.operationType),
     riskLabel: toolRiskLabel(metadata?.riskLevel),
-    confirmationLabel: metadata?.requiresConfirmation === true ? "执行前确认" : "自动执行",
+    confirmationLabel: metadata?.requiresConfirmation === true ? "高影响" : "可用",
   };
 }
 
@@ -174,6 +174,6 @@ function fallbackPresentation(metadata: ToolDefinitionMetadata | undefined): Too
   }
   return {
     displayName: "工具能力",
-    displayDescription: "可供 Agent 在授权边界内调用的工具能力。",
+    displayDescription: "运行时工具。",
   };
 }

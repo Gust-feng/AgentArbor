@@ -284,7 +284,7 @@ test("Desktop Agent Session records executable tool restrictions in run capabili
   assert.equal(result.capabilityResolution?.toolExposures.find((tool) => tool.name === "read")?.modelVisible, false);
   assert.equal(result.capabilityResolution?.toolExposures.find((tool) => tool.name === "read")?.reason, "工具执行器当前未提供该工具。");
   assert.match(result.capabilityResolution?.warnings.join("\n") ?? "", /工具执行器/);
-  assert.equal(result.capabilityResolution?.warnings.includes("本轮没有模型可见工具。"), false);
+  assert.equal(result.capabilityResolution?.warnings.includes("本轮没有可用工具。"), false);
 });
 
 test("Desktop Agent Session hides underground-scoped tools from the ordinary agent", async () => {

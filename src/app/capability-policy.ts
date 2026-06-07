@@ -84,8 +84,8 @@ export function resolveRunCapabilities(input: ResolveRunCapabilitiesInput): RunC
       availability: server.availability,
       enabled: server.enabled,
       reason: server.enabled
-        ? "MCP 当前只作为能力草案登记，本批不执行 MCP tool。"
-        : "MCP server is disabled.",
+        ? "已登记，当前不会执行。"
+        : "已停用。",
     })),
     warnings: capabilityResolutionWarnings({ snapshot: input.snapshot, allowedTools, toolExposures }),
     createdAt: nowIso(),
@@ -107,12 +107,12 @@ function exposureReason(input: {
 }): string {
   if (!input.modelSupportsToolCalling) return "当前模型不支持工具调用。";
   if (!input.enabled) return "工具已在配置中停用。";
-  if (input.availability !== "available") return "工具运行时当前不可用。";
-  if (!input.allowedBySnapshot) return "工具不在本轮能力快照允许集合内。";
-  if (input.denied) return "本轮权限边界已隐藏该工具。";
-  if (!input.modelVisible) return "该工具不对当前运行模式可见。";
-  if (input.requiresConfirmation) return "工具可见，但敏感操作会先请求确认。";
-  return "工具对本轮模型可用。";
+  if (input.availability !== "available") return "当前不可用。";
+  if (!input.allowedBySnapshot) return "不在本轮可用范围内。";
+  if (input.denied) return "本轮已隐藏。";
+  if (!input.modelVisible) return "当前模式不可用。";
+  if (input.requiresConfirmation) return "可用，高影响动作会等待确认。";
+  return "可用。";
 }
 
 function capabilityResolutionWarnings(input: {
@@ -122,14 +122,14 @@ function capabilityResolutionWarnings(input: {
 }): readonly string[] {
   const warnings = [...input.snapshot.warnings];
   if (input.allowedTools.length === 0) {
-    warnings.push("本轮没有模型可见工具。");
+    warnings.push("本轮没有可用工具。");
   }
   const hidden = input.toolExposures.filter((tool) => tool.enabled && !tool.modelVisible);
   if (hidden.length > 0) {
-    warnings.push(`本轮已隐藏 ${hidden.length} 个不可用或未授权工具。`);
+    warnings.push(`已隐藏 ${hidden.length} 个不可用工具。`);
   }
   if (input.snapshot.mcpCatalog.some((server) => server.enabled)) {
-    warnings.push("MCP 当前只进入能力草案目录，本批不执行 MCP tool。");
+    warnings.push("MCP 已登记，当前不会执行。");
   }
   return warnings;
 }

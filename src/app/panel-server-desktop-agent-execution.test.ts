@@ -178,7 +178,7 @@ test("ordinary desktop execution can expose optional tools enabled in the frozen
   assert.deepEqual(result.capabilityResolution?.allowedTools, ["shell_command"]);
   assert.equal(shellExposure?.modelVisible, true);
   assert.equal(shellExposure?.requiresConfirmation, true);
-  assert.equal(result.capabilityResolution?.warnings.includes("本轮没有模型可见工具。"), false);
+  assert.equal(result.capabilityResolution?.warnings.includes("本轮没有可用工具。"), false);
 });
 
 test("ordinary desktop execution projects paused context overflow as blocked", async () => {

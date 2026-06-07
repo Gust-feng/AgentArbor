@@ -135,8 +135,8 @@ function capabilityWarningsAfterExecutableRestriction(input: {
   readonly noModelVisibleTools: boolean;
 }): readonly string[] {
   const next = [...input.warnings];
-  if (input.noModelVisibleTools && !next.includes("本轮没有模型可见工具。")) {
-    next.push("本轮没有模型可见工具。");
+  if (input.noModelVisibleTools && !next.includes("本轮没有可用工具。")) {
+    next.push("本轮没有可用工具。");
   }
   if (input.hiddenCount > 0 && !next.some((warning) => warning.includes("工具执行器"))) {
     next.push(`本轮有 ${input.hiddenCount} 个策略可见工具没有对应的工具执行器。`);

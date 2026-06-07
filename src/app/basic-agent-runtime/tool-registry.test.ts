@@ -33,7 +33,7 @@ test("desktop-basic tool registry exposes catalog and allowed tools from scoped 
   assert.equal(catalog.tools.find((tool) => tool.name === "browser_snapshot")?.operationType, "read-only");
   assert.equal(catalog.tools.find((tool) => tool.name === "browser_snapshot")?.availability, "available");
   assert.equal(catalog.tools.find((tool) => tool.name === "read_file")?.displayName, "读取文件");
-  assert.equal(catalog.tools.find((tool) => tool.name === "shell_command")?.confirmationLabel, "执行前确认");
+  assert.equal(catalog.tools.find((tool) => tool.name === "shell_command")?.confirmationLabel, "高影响");
   assert.equal(catalog.tools.every((tool) => tool.displayName !== tool.name), true);
   assert.equal(catalog.tools.every((tool) => tool.categoryLabel.length > 0 && tool.operationLabel.length > 0), true);
   assert.equal(JSON.stringify(catalog).includes("api_key"), false);
@@ -55,7 +55,7 @@ test("desktop-basic tool descriptions stay plain and do not expose deep product 
     ].join("\n"))
     .join("\n\n");
 
-  assert.doesNotMatch(plainToolCopy, /\batomic\b|原子|Plan|Handoff|Underground|rootlet|child agent|高级|智能编辑|变异|mutation/i);
+  assert.doesNotMatch(plainToolCopy, /\batomic\b|原子|Plan|Handoff|Underground|rootlet|child agent|普通 Agent|自动执行|执行前确认|高级|智能编辑|变异|mutation/i);
   assert.match(plainToolCopy, /编辑文件/);
   assert.match(plainToolCopy, /按唯一锚点修改工作区文本文件/);
 });

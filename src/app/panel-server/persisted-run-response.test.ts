@@ -343,7 +343,7 @@ function frozenCapabilityResolution(): NonNullable<RuntimeRunSnapshot["run"]["ca
         operationType: "read-write",
         requiresConfirmation: false,
         riskLevel: "medium",
-        reason: "工具对本轮模型可用。",
+        reason: "可用。",
       },
     ],
     enabledSkills: [],

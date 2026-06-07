@@ -237,6 +237,6 @@ function toolExposuresFor(snapshot: BasicAgentCapabilitySnapshot): RunCapability
     riskLevel: tool.riskLevel,
     operationType: tool.operationType,
     requiresConfirmation: tool.requiresConfirmation,
-    reason: allowed.has(tool.name) ? "工具对本轮模型可用。" : "该工具不对当前运行模式可见。",
+    reason: allowed.has(tool.name) ? "可用。" : "当前模式不可用。",
   }));
 }

@@ -1201,7 +1201,7 @@ function capabilityResolution(): RunCapabilityResolution {
         riskLevel: "low",
         operationType: "read-only",
         requiresConfirmation: false,
-        reason: "工具对本轮模型可用。",
+        reason: "可用。",
       },
     ],
     enabledSkills: [],
@@ -1229,7 +1229,7 @@ function capabilityResolutionWithSkillAndMcp(): RunCapabilityResolution {
         label: "Context MCP",
         availability: "configured",
         enabled: true,
-        reason: "MCP 当前只作为能力草案登记，本批不执行 MCP tool。",
+        reason: "已登记，当前不会执行。",
       },
     ],
   };
@@ -1254,7 +1254,7 @@ function capabilityResolutionWithReadFile(input: {
         riskLevel: "low",
         operationType: "read-only",
         requiresConfirmation: false,
-        reason: input.readFileModelVisible ? "工具对本轮模型可用。" : "该工具不对当前运行模式可见。",
+        reason: input.readFileModelVisible ? "可用。" : "当前模式不可用。",
       },
     ],
   };

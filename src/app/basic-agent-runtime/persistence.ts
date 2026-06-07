@@ -46,7 +46,7 @@ export function basicRunFromRuntimeSnapshot(snapshot: RuntimeRunSnapshot): Basic
     updatedAt: persisted?.updatedAt ?? snapshot.run.updatedAt,
     currentStep:
       status === "blocked" && snapshot.run.status === "running"
-        ? "运行已中断，需要重新发起或继续处理。"
+        ? "无法继续原操作。请重新发起或继续处理。"
         : latestEvent?.summary ?? persisted?.currentStep,
     nextStep: basicRunNextStepFromStatus(status),
     requiresUserAction: status === "approval_needed" || status === "blocked" || status === "needs_input",
@@ -98,7 +98,7 @@ export async function submitRestoredBasicConfirmationDecision(input: {
         : {
             code: blockedByMissingContinuation ? "confirmation_continuation_lost" : "confirmation_denied",
             message: blockedByMissingContinuation
-              ? "运行已中断，需要重新发起或继续处理。"
+              ? "无法继续原操作。请重新发起或继续处理。"
               : "已拒绝本次操作。",
           },
   };
@@ -127,7 +127,7 @@ export async function submitRestoredBasicConfirmationDecision(input: {
             runId: input.runId,
             decidedAt,
             sequence: nextBasicEventSequence(events),
-            summary: nextRun.error?.message ?? "运行已中断，需要重新发起或继续处理。",
+            summary: nextRun.error?.message ?? "无法继续原操作。请重新发起或继续处理。",
           }),
         ];
   const nextSnapshot: RuntimeRunSnapshot = {

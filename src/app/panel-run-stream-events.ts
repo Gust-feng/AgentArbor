@@ -374,7 +374,7 @@ function appendStreamEventsForEvent(input: {
       status: input.entry.type === "context.compaction.completed" ? "completed" : "failed",
       detail: {
         kind: "thinking",
-        action: input.entry.type === "context.compaction.completed" ? "压缩上下文" : "上下文压缩失败",
+        action: input.entry.type === "context.compaction.completed" ? "整理上下文" : "上下文整理失败",
         preview: contextCompactionPreview(payload),
         truncated: false,
       },

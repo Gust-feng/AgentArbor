@@ -74,7 +74,7 @@ export function syncConversationTurnForJob(input: {
       assistantTurnId: job.assistantTurnId,
       runId: job.runId,
       title: "需要处理",
-      content: sanitizeAssistantVisibleText(response.error?.message ?? "运行已中断，需要重新发起或继续处理。"),
+      content: sanitizeAssistantVisibleText(response.error?.message ?? "无法继续原操作。请重新发起或继续处理。"),
       status: "blocked",
       responseModel,
     });

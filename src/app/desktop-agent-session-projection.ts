@@ -173,14 +173,14 @@ function activityFromEventEntry(entry: EventLogEntry): readonly DesktopAgentActi
   const sourceRefs = [`event:${entry.message.id}`];
   switch (entry.type) {
     case "goal.received":
-      return [activity(entry, "task_received", "任务已接收", "已形成本轮任务和授权上下文边界。", "completed", sourceRefs)];
+      return [activity(entry, "task_received", "消息已收到", "开始处理。", "completed", sourceRefs)];
     case "model.requested":
       return [
         activity(
           entry,
           "model_requested",
-          "正在判断",
-          "正在判断直接回答、读取材料或请求确认。",
+          "正在处理",
+          "正在整理回答或下一步动作。",
           "running",
           sourceRefs,
           refsFromPayload(payload),
@@ -191,8 +191,8 @@ function activityFromEventEntry(entry: EventLogEntry): readonly DesktopAgentActi
         activity(
           entry,
           "model_completed",
-          "内容已形成",
-          "模型已形成可见输出，结果会在当前会话中继续呈现。",
+          "已更新",
+          "继续处理。",
           "completed",
           sourceRefs,
           refsFromPayload(payload),
@@ -203,8 +203,8 @@ function activityFromEventEntry(entry: EventLogEntry): readonly DesktopAgentActi
         activity(
           entry,
           "model_failed",
-          "模型调用失败",
-          "模型服务没有返回可用结果；错误已脱敏。",
+          "回复失败",
+          "没有返回可用结果。",
           "failed",
           sourceRefs,
           refsFromPayload(payload),
@@ -302,7 +302,7 @@ function toolSummaryText(toolCalls: readonly ToolCallResult[], completed: number
     })
     .filter((value): value is string => value !== undefined)
     .slice(0, 4);
-  const base = `本轮工具调用 ${toolCalls.length} 次；完成 ${completed} 次，失败 ${failed} 次，需要确认 ${approvalRequired} 次。`;
+  const base = `工具调用 ${toolCalls.length} 次；完成 ${completed} 次，失败 ${failed} 次，待确认 ${approvalRequired} 次。`;
   return localSummaries.length === 0 ? base : `${base}\n${localSummaries.join("\n")}`;
 }
 
@@ -357,8 +357,8 @@ function terminalActivity(
     return {
       activityId,
       type: "completed",
-      title: "运行完成",
-      summary: "本轮结果已形成。",
+      title: "已完成",
+      summary: "结果已生成。",
       status: "completed",
       createdAt,
       sourceRefs: lastEntry === undefined ? [] : [`event:${lastEntry.message.id}`],
@@ -383,8 +383,8 @@ function terminalActivity(
     return {
       activityId,
       type: "stopped",
-      title: "运行已停止",
-      summary: "AI 运行时未配置，本轮没有开始模型工作。",
+      title: "未开始",
+      summary: "模型服务未配置，暂时无法处理。",
       status: "failed",
       createdAt,
       sourceRefs: lastEntry === undefined ? [] : [`event:${lastEntry.message.id}`],
@@ -396,8 +396,8 @@ function terminalActivity(
     return {
       activityId,
       type: "stopped",
-      title: "运行已暂停",
-      summary: "尚未形成最终回答；你可以补充要求后继续。",
+      title: "已暂停",
+      summary: "可以补充要求后继续。",
       status: "pending",
       createdAt,
       sourceRefs: lastEntry === undefined ? [] : [`event:${lastEntry.message.id}`],
@@ -408,8 +408,8 @@ function terminalActivity(
   return {
     activityId,
     type: "failed",
-    title: "运行失败",
-    summary: "本轮没有形成可展示结果。",
+    title: "未完成",
+    summary: "没有形成可展示结果。",
     status: "failed",
     createdAt,
     sourceRefs: lastEntry === undefined ? [] : [`event:${lastEntry.message.id}`],

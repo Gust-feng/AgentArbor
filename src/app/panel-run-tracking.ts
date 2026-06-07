@@ -451,9 +451,9 @@ function waitingPointFor(
     case "model.failed":
       return "模型调用已返回，Rootlet Agents 正在整理候选或 fallback。";
     case "context.compaction.completed":
-      return "较早上下文已压缩，助手将继续处理当前任务。";
+      return "较早上下文已整理，助手将继续处理当前任务。";
     case "context.compaction.failed":
-      return "上下文压缩没有成功，运行已暂停等待继续处理。";
+      return "上下文整理没有成功，已暂停等待继续处理。";
     case "tool.requested":
       return "已发出工具调用，等待工具返回脱敏结果引用。";
     case "tool.completed":
@@ -496,9 +496,9 @@ function ordinaryAgentWaitingPoint(lastEventType: ArborMessageType | undefined):
     case "model.failed":
       return "模型调用失败。";
     case "context.compaction.completed":
-      return "较早上下文已压缩。";
+      return "较早上下文已整理。";
     case "context.compaction.failed":
-      return "上下文压缩失败。";
+      return "上下文整理失败。";
     case "tool.requested":
       return "已发出工具调用，等待返回。";
     case "tool.completed":

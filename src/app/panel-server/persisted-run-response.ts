@@ -364,7 +364,7 @@ export function createPersistedStreamEvents(
       type: "run.blocked",
       createdAt: snapshot.run.updatedAt,
       agentLabel,
-      summary: snapshot.run.resultSummary ?? snapshot.run.error?.message ?? "运行已中断，需要重新发起或继续处理。",
+      summary: snapshot.run.resultSummary ?? snapshot.run.error?.message ?? "无法继续原操作。请重新发起或继续处理。",
       status: "blocked",
       sourceRefs: [],
       modelCallRefs: [],
@@ -567,7 +567,7 @@ function persistedWaitingPoint(status: PanelRunStatus): string {
     return "运行已取消。";
   }
   if (status === "blocked") {
-    return "运行已中断，需要重新发起或继续处理。";
+    return "无法继续原操作。请重新发起或继续处理。";
   }
   if (status === "failed") {
     return "运行失败，请查看错误信息。";

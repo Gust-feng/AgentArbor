@@ -308,8 +308,8 @@ export class BasicAgentRunExecutor {
         reason: {
           code: blockedByMissingApproval ? "confirmation_continuation_lost" : "confirmation_decision_continuation_lost",
           message: blockedByMissingApproval
-            ? "运行已中断，需要重新发起或继续处理。"
-            : "用户确认结果已记录，但运行续接已中断。你可以继续发送消息让我按该决定处理。",
+            ? "无法继续原操作。请重新发起或继续处理。"
+            : "确认结果已记录。你可以继续发送消息让我按该决定处理。",
         },
       });
       const blocked = this.requireJob(input.runId);

@@ -120,8 +120,8 @@ export function contextCompactionStreamSummary(
   const threshold = numberOrUndefined(payload.threshold);
   const tokenText = tokenCount === undefined || threshold === undefined ? "" : `（${tokenCount}/${threshold} tokens）`;
   return type === "context.compaction.completed"
-    ? `较早上下文已压缩${tokenText}。`
-    : `上下文压缩没有成功${tokenText}。`;
+    ? `较早上下文已整理${tokenText}。`
+    : `上下文整理没有成功${tokenText}。`;
 }
 
 export function contextCompactionPreview(payload: Readonly<Record<string, unknown>>): string | undefined {

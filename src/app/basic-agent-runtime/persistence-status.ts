@@ -49,7 +49,7 @@ export function basicRunNextStepFromStatus(status: BasicAgentRun["status"]): str
   if (status === "queued") return "等待前一个任务完成。";
   if (status === "approval_needed") return "等待你确认或补充材料。";
   if (status === "needs_input") return "等待你补充指导后继续。";
-  if (status === "blocked") return "运行已中断，需要重新发起或继续处理。";
+  if (status === "blocked") return "无法继续原操作。请重新发起或继续处理。";
   if (status === "running" || status === "planning") return "继续整理结果。";
   return undefined;
 }

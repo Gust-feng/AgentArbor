@@ -633,7 +633,8 @@ test("Desktop Agent Session reports out_of_fuel as an unfinished round boundary"
   assert.equal(result.status, "paused");
   assert.equal(result.stopReason, "out_of_fuel");
   assert.equal(result.answer, undefined);
-  assert.equal(result.failureMessage?.includes("轮次已到边界"), true);
+  assert.equal(result.failureMessage?.includes("任务没有完成"), true);
+  assert.equal(result.failureMessage?.includes("轮次"), false);
   assert.equal(result.failureMessage?.includes("异常保护"), false);
 });
 
@@ -666,7 +667,7 @@ test("Desktop Agent Session pauses context_overflow when context maintenance fai
   assert.equal(result.status, "paused");
   assert.equal(result.stopReason, "context_overflow");
   assert.equal(result.answer, undefined);
-  assert.equal(result.failureMessage?.includes("上下文压缩没有成功"), true);
+  assert.equal(result.failureMessage?.includes("上下文整理没有成功"), true);
   assert.equal(result.eventTypes.includes("context.compaction.failed"), true);
   assert.equal(channel.requests.some((request) => request.purpose === "desktop_context_compaction"), true);
 });
@@ -859,7 +860,7 @@ test("Desktop Agent Session surfaces sanitized model request exceptions as faile
   assert.equal(result.failureMessage?.includes("provider network unavailable"), true);
   assert.equal(result.failureMessage?.includes("sk-desktop-runtime-secret"), false);
   assert.equal(result.failureMessage?.includes("[redacted-secret]"), true);
-  assert.notEqual(result.failureMessage, "Desktop Agent model/tool turn failed.");
+  assert.notEqual(result.failureMessage, "任务没有完成。");
   assert.equal(result.modelCallRefs.length >= 2, true);
 });
 

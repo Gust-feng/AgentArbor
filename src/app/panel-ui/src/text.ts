@@ -20,8 +20,8 @@ export function eventTitle(event: RunEvent): string {
   if (event.type === "tool.requested") return "正在执行动作";
   if (event.type === "tool.completed") return "动作完成";
   if (event.type === "tool.failed") return "动作未完成";
-  if (event.type === "context.compaction.completed") return "上下文已压缩";
-  if (event.type === "context.compaction.failed") return "上下文压缩失败";
+  if (event.type === "context.compaction.completed") return "上下文已整理";
+  if (event.type === "context.compaction.failed") return "上下文整理失败";
   if (event.type === "confirmation.needed") return "需要确认";
   if (event.type === "user_approval.received") return "收到确认";
   if (event.type === "user.guidance") return "收到补充指导";

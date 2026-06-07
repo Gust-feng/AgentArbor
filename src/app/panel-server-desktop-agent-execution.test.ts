@@ -219,7 +219,7 @@ test("ordinary desktop execution projects paused context overflow as blocked", a
 
   assert.equal(result.failed, undefined);
   assert.equal(result.blocked?.code, "context_overflow");
-  assert.equal(result.blocked?.message.includes("上下文压缩没有成功"), true);
+  assert.equal(result.blocked?.message.includes("上下文整理没有成功"), true);
   assert.equal(result.canvas?.kind, "desktop_agent_canvas");
   assert.equal(result.canvas.kind === "desktop_agent_canvas" ? result.canvas.agent.status : undefined, "paused");
   assert.equal(result.canvas.kind === "desktop_agent_canvas" ? result.canvas.agent.answer : undefined, undefined);

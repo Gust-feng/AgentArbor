@@ -102,7 +102,7 @@ function createRestoredBasicTerminalEvent(
     title: basicRunTitleFromStatus(status, undefined),
     summary:
       status === "blocked"
-        ? "运行已中断，需要重新发起或继续处理。"
+        ? "无法继续原操作。请重新发起或继续处理。"
         : redactOrdinaryText(snapshot.run.error?.message ?? snapshot.run.resultSummary ?? "", 800),
     status,
     timestamp: snapshot.run.updatedAt,

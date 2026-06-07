@@ -409,7 +409,7 @@ function restoredConfirmationDecisionSummary(confirmation: RuntimeConfirmationRe
     return "已批准本次操作。";
   }
   if (confirmation.status === "denied") {
-    return "已拒绝本次操作，运行不会继续执行该动作。";
+    return "已拒绝本次操作。";
   }
   return confirmation.guidance === undefined || confirmation.guidance.trim().length === 0
     ? "已收到补充指导。"

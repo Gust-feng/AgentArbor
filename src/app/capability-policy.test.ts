@@ -154,7 +154,7 @@ test("run capability policy keeps MCP as draft only and filters disabled skills"
   assert.equal("sourcePath" in (resolution.enabledSkills[0] as Record<string, unknown>), false);
   assert.equal(resolution.mcpDrafts.length, 1);
   assert.equal(resolution.mcpDrafts[0]?.source, "mcp");
-  assert.match(resolution.mcpDrafts[0]?.reason ?? "", /当前不会执行/);
+  assert.equal(resolution.mcpDrafts[0]?.reason, "已登记。");
   const projected = JSON.stringify(resolution);
   assert.equal(projected.includes(DESKTOP_ROOT_AGENT.prompt.systemPrompt), false);
   assert.equal(projected.includes("sk-secret"), false);

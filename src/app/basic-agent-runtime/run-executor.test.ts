@@ -1229,7 +1229,7 @@ function capabilityResolutionWithSkillAndMcp(): RunCapabilityResolution {
         label: "Context MCP",
         availability: "configured",
         enabled: true,
-        reason: "已登记，当前不会执行。",
+        reason: "已登记。",
       },
     ],
   };

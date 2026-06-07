@@ -21,7 +21,7 @@ export function basicConfirmationDecisionSummary(
     return "已批准本次操作。";
   }
   if (decision.decision === "deny") {
-    return "已拒绝本次操作，运行不会继续执行该动作。";
+    return "已拒绝本次操作。";
   }
   const guidance = decision.guidance === undefined ? undefined : compactSafeText(decision.guidance, 240);
   return guidance === undefined || guidance.length === 0

@@ -84,7 +84,7 @@ export function resolveRunCapabilities(input: ResolveRunCapabilitiesInput): RunC
       availability: server.availability,
       enabled: server.enabled,
       reason: server.enabled
-        ? "已登记，当前不会执行。"
+        ? "已登记。"
         : "已停用。",
     })),
     warnings: capabilityResolutionWarnings({ snapshot: input.snapshot, allowedTools, toolExposures }),
@@ -129,7 +129,7 @@ function capabilityResolutionWarnings(input: {
     warnings.push(`已隐藏 ${hidden.length} 个不可用工具。`);
   }
   if (input.snapshot.mcpCatalog.some((server) => server.enabled)) {
-    warnings.push("MCP 已登记，当前不会执行。");
+    warnings.push("MCP 已登记。");
   }
   return warnings;
 }

@@ -3,6 +3,8 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { FileSystemLocalDevSecretStore, FileSystemNormalSettingsStore } from "../adapters/config/index.js";
+import { ConfigCenter } from "./config-center.js";
 import { startLocalPanelServer, type PanelProviderFetch } from "./panel-server.js";
 import {
   assertSafePanelJsonText,
@@ -19,6 +21,9 @@ import {
   hasResponsesToolOutput,
   parseResponsesRequestBody,
 } from "./panel-openai-test-fixtures.js";
+import { runAgentDefinitionRef } from "./agent-definition-runtime.js";
+import type { AgentDefinition } from "./agent-prompts/contracts.js";
+import { DESKTOP_ROOT_AGENT } from "./agent-prompts/desktop-root-agent.js";
 
 test("desktop async fake run answers arbitrary lightweight question without report workflow", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-desktop-direct-answer-"));
@@ -57,10 +62,191 @@ test("desktop async fake run answers arbitrary lightweight question without repo
   }
 });
 
+test("desktop async run can omit aiMode and use the run-created model default", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-desktop-default-ai-mode-"));
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+  try {
+    const start = await requestJson(server.url, "/api/desktop/runs", {
+      method: "POST",
+      body: { goal: "默认模式直接回答" },
+    });
+    const failed = await waitForRun(
+      server.url,
+      start.body.runId,
+      (body) => body.status === "failed",
+      4_000,
+      "/api/desktop/runs"
+    );
+
+    assert.equal(start.status, 202);
+    assert.equal(start.body.tracking.provider.requestedMode, "openai-responses");
+    assert.equal(start.body.config.defaultAiMode, "openai-responses");
+    assert.equal(failed.body.tracking.provider.requestedMode, "openai-responses");
+    assert.equal(failed.body.error.code, "missing_api_key");
+    assert.equal(failed.body.runMode, "agent");
+    const runtimeRun = await waitForRun(
+      server.url,
+      start.body.runId,
+      (body) => body.snapshot?.run?.status === "failed",
+      4_000,
+      "/api/runtime/runs"
+    );
+
+    assert.deepEqual(runtimeRun.body.snapshot.run.agentDefinitionRef, runAgentDefinitionRef(DESKTOP_ROOT_AGENT));
+    assert.equal(runtimeRun.body.snapshot.run.agentDefinitionRef.definitionHash.startsWith("sha256:"), true);
+    assert.deepEqual(runtimeRun.body.agentDefinitionRef, runtimeRun.body.snapshot.run.agentDefinitionRef);
+    assert.equal(runtimeRun.body.snapshot.run.capabilityResolution, undefined);
+    assert.equal(runtimeRun.text.includes("systemPrompt"), false);
+    assertSafePanelJsonText(runtimeRun.text);
+  } finally {
+    await server.close();
+    await removeTemporaryTree(directory);
+  }
+});
+
+test("desktop ordinary run executes with the same AgentDefinition used for its run facts", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-desktop-custom-agent-definition-"));
+  const customAgent: AgentDefinition = {
+    ...DESKTOP_ROOT_AGENT,
+    agentId: "custom-panel-agent",
+    displayName: "Custom Panel Agent",
+    prompt: {
+      promptRef: "prompt:custom-panel-agent:v1",
+      version: "1",
+      systemPrompt: "You are a custom panel ordinary agent for contract tests.",
+    },
+    toolVisibilityProfile: {
+      profileId: "custom-panel-agent:ordinary-visible-tools:v1",
+      runMode: "agent",
+      visibleToolScopes: ["desktop-basic"],
+      hiddenToolNames: ["search"],
+    },
+  };
+  const server = await startLocalPanelServer({
+    port: 0,
+    configDirectory: directory,
+    desktopAgentDefinition: customAgent,
+  });
+  try {
+    const start = await requestJson(server.url, "/api/desktop/runs", {
+      method: "POST",
+      body: { goal: "使用自定义普通 Agent 定义", aiMode: "fake" },
+    });
+    const completed = await waitForRun(
+      server.url,
+      start.body.runId,
+      (body) => body.status === "completed",
+      4_000,
+      "/api/desktop/runs"
+    );
+    const runtimeRun = await waitForRun(
+      server.url,
+      start.body.runId,
+      (body) =>
+        body.snapshot?.run?.status === "completed" &&
+        body.snapshot.run.capabilityResolution?.agentId === customAgent.agentId,
+      4_000,
+      "/api/runtime/runs"
+    );
+
+    assert.deepEqual(start.body.agentDefinitionRef, runAgentDefinitionRef(customAgent));
+    assert.equal(start.body.agentDefinitionRef.definitionHash.startsWith("sha256:"), true);
+    assert.deepEqual(completed.body.agentDefinitionRef, start.body.agentDefinitionRef);
+    assert.equal(completed.body.capabilityResolution.agentId, customAgent.agentId);
+    assert.equal(completed.body.capabilityResolution.toolVisibilityProfileId, customAgent.toolVisibilityProfile.profileId);
+    assert.deepEqual(runtimeRun.body.agentDefinitionRef, runtimeRun.body.snapshot.run.agentDefinitionRef);
+    assert.deepEqual(runtimeRun.body.capabilityResolution, runtimeRun.body.snapshot.run.capabilityResolution);
+    assert.equal(completed.body.transcript.modelCalls[0]?.outputContractId, customAgent.outputContract.contractId);
+    assert.equal(runtimeRun.body.agentDefinitionRef.agentId, customAgent.agentId);
+    assert.equal(runtimeRun.body.snapshot.run.agentDefinitionRef.outputContractId, customAgent.outputContract.contractId);
+    assert.equal(runtimeRun.body.snapshot.run.capabilityResolution.agentId, customAgent.agentId);
+    assert.equal(
+      runtimeRun.body.snapshot.run.capabilityResolution.toolVisibilityProfileId,
+      customAgent.toolVisibilityProfile.profileId
+    );
+    assert.equal(
+      runtimeRun.body.snapshot.run.capabilityResolution.toolExposures.find(
+        (tool: { name: string }) => tool.name === "search"
+      )?.modelVisible,
+      false
+    );
+    assert.equal(JSON.stringify(runtimeRun.body.snapshot.run.agentDefinitionRef).includes(customAgent.prompt.systemPrompt), false);
+    assert.equal(JSON.stringify(completed.body.capabilityResolution).includes(customAgent.prompt.systemPrompt), false);
+    assertSafePanelJsonText(runtimeRun.text);
+  } finally {
+    await server.close();
+    await removeTemporaryTree(directory);
+  }
+});
+
+test("desktop ordinary run persists the execution-effective model settings after capability gating", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-desktop-effective-model-settings-"));
+  const secret = "sk-desktop-effective-model-settings-secret";
+  const model = "glm-effective-model";
+  let requestBody: Record<string, unknown> | undefined;
+  const providerFetch: PanelProviderFetch = async (_url, init) => {
+    requestBody = JSON.parse(init.body) as Record<string, unknown>;
+    return createOpenAiTextResponse(model, "已使用执行期裁剪后的模型设置完成回答。");
+  };
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory, providerFetch });
+  try {
+    await requestJson(server.url, "/api/config/model-provider", {
+      method: "POST",
+      body: {
+        baseUrl: "https://provider.example",
+        model,
+        apiKey: secret,
+        openAI: {
+          stream: true,
+          parallelToolCalls: true,
+          reasoningEffort: "high",
+        },
+        defaultAiMode: "openai-compatible",
+      },
+    });
+
+    const start = await requestJson(server.url, "/api/desktop/runs", {
+      method: "POST",
+      body: { goal: "检查执行期模型设置事实", aiMode: "openai-compatible" },
+    });
+    const completed = await waitForRun(
+      server.url,
+      start.body.runId,
+      (body) => body.status === "completed",
+      4_000,
+      "/api/desktop/runs"
+    );
+    const runtimeRun = await waitForRun(
+      server.url,
+      start.body.runId,
+      (body) => body.snapshot?.run?.status === "completed",
+      4_000,
+      "/api/runtime/runs"
+    );
+
+    assert.equal(completed.body.config.model, model);
+    assert.deepEqual(completed.body.config.openAI, { stream: false });
+    assert.equal(requestBody?.parallel_tool_calls, false);
+    assert.equal(requestBody?.reasoning_effort, undefined);
+    assert.equal(runtimeRun.body.snapshot.run.capabilitySnapshot.activeModel.model, model);
+    assert.deepEqual(runtimeRun.body.snapshot.run.capabilitySnapshot.activeModel.openAI, { stream: false });
+    assert.equal(runtimeRun.text.includes(secret), false);
+    assertSafePanelJsonText(runtimeRun.text);
+  } finally {
+    await server.close();
+    await removeTemporaryTree(directory);
+  }
+});
+
 test("desktop default fake run does not auto-upgrade complex requests into deep mode", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-desktop-default-agent-mode-"));
   const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
   try {
+    await requestJson(server.url, "/api/config/model-provider", {
+      method: "POST",
+      body: { model: "gpt-4o-mini" },
+    });
+
     const start = await requestJson(server.url, "/api/desktop/runs", {
       method: "POST",
       body: { goal: "分析当前仓库的问题并给我优化建议", aiMode: "fake" },
@@ -98,6 +284,23 @@ test("desktop default fake run does not auto-upgrade complex requests into deep 
       runtimeRun.body.snapshot.toolCalls.some((call: { callId: string }) => call.callId === "call-desktop-agent-search"),
       true
     );
+    assert.equal(runtimeRun.body.snapshot.run.capabilityResolution.agentId, "desktop-agent-session");
+    assert.equal(completed.body.capabilityResolution.agentId, "desktop-agent-session");
+    assert.deepEqual(runtimeRun.body.capabilityResolution, runtimeRun.body.snapshot.run.capabilityResolution);
+    assert.equal(runtimeRun.body.snapshot.run.capabilityResolution.agentDisplayName, "Desktop Agent");
+    assert.equal(
+      runtimeRun.body.snapshot.run.capabilityResolution.toolVisibilityProfileId,
+      "desktop-root-agent:ordinary-visible-tools:v1"
+    );
+    assert.deepEqual(runtimeRun.body.snapshot.run.capabilityResolution.allowedTools.includes("search"), true);
+    assert.equal(
+      runtimeRun.body.snapshot.run.capabilityResolution.toolExposures.some(
+        (tool: { name: string; modelVisible: boolean }) => tool.name.includes("mcp") && tool.modelVisible
+      ),
+      false
+    );
+    assert.equal(JSON.stringify(runtimeRun.body.snapshot.run.capabilityResolution).includes("sourcePath"), false);
+    assert.equal(JSON.stringify(runtimeRun.body.snapshot.run.capabilityResolution).includes("systemPrompt"), false);
     assertSafePanelJsonText(runtimeRun.text);
   } finally {
     await server.close();
@@ -118,6 +321,26 @@ test("desktop run rejects legacy work_session mode alias instead of upgrading to
     assert.equal(rejected.status, 400);
     assert.equal(rejected.body.ok, false);
     assert.equal(rejected.body.error.code, "invalid_run_mode");
+    assert.equal(runs.body.runs.length, 0);
+  } finally {
+    await server.close();
+    await removeTemporaryTree(directory);
+  }
+});
+
+test("desktop run rejects explicit deep mode on the default desktop entry", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-desktop-run-mode-deep-"));
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+  try {
+    const rejected = await requestJson(server.url, "/api/desktop/runs", {
+      method: "POST",
+      body: { goal: "分析当前仓库的问题并给我优化建议", aiMode: "fake", runMode: "deep" },
+    });
+    const runs = await requestJson(server.url, "/api/runtime/runs");
+
+    assert.equal(rejected.status, 400);
+    assert.equal(rejected.body.ok, false);
+    assert.equal(rejected.body.error.code, "desktop_run_mode_not_supported");
     assert.equal(runs.body.runs.length, 0);
   } finally {
     await server.close();
@@ -177,6 +400,89 @@ test("desktop openai-compatible ordinary agent keeps working until the model sto
     assert.equal(eventTypes.includes("run.blocked"), false);
     assert.equal(eventTypes.includes("final.result"), true);
     assertSafePanelJsonText(completed.text);
+  } finally {
+    await server.close();
+    await removeTemporaryTree(directory);
+    await removeTemporaryTree(workspace);
+  }
+});
+
+test("desktop context overflow blocks the run instead of completing it", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-desktop-context-overflow-"));
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-desktop-context-overflow-workspace-"));
+  const configCenter = new ConfigCenter({
+    settingsStore: new FileSystemNormalSettingsStore(directory),
+    secretStore: new FileSystemLocalDevSecretStore(directory),
+  });
+  const model = "desktop-context-overflow-model";
+  const secret = "sk-desktop-context-overflow-secret";
+  await fs.writeFile(path.join(workspace, "huge.md"), `${"context ".repeat(5_000)}\n`, "utf8");
+  await configCenter.updateWorkspaceConfig({ workspaceDirectory: workspace });
+  await configCenter.updateModelProviderConfig({
+    baseUrl: "https://provider.example",
+    model,
+    protocolKind: "openai_compatible_chat_completions",
+    apiKey: secret,
+    defaultAiMode: "openai-compatible",
+  });
+  await configCenter.updateModelCapabilityOverride({
+    model,
+    providerKind: "openai_compatible",
+    capabilities: {
+      contextWindowTokens: 1_200,
+      maxOutputTokens: 512,
+      supportsToolCalling: true,
+      supportsParallelToolCalls: false,
+      supportsStructuredOutputs: false,
+      supportsStreaming: false,
+      supportsVisionInput: false,
+      supportsReasoningEffort: false,
+      preferredApiStyle: "chat_completions",
+      stability: "unknown",
+    },
+  });
+
+  let providerCalls = 0;
+  const providerFetch: PanelProviderFetch = async (_url, init) => {
+    providerCalls += 1;
+    const body = JSON.parse(init.body) as { messages?: readonly { role?: string; content?: string }[] };
+    const compactionRequest = body.messages?.some((message) =>
+      String(message.content ?? "").includes("Context to compact:")
+    ) === true;
+    return compactionRequest
+      ? createOpenAiTextResponse(model, "")
+      : createOpenAiReadFileToolCallResponse("huge.md", `call-context-overflow-${providerCalls}`);
+  };
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory, configCenter, providerFetch });
+  try {
+    const start = await requestJson(server.url, "/api/desktop/runs", {
+      method: "POST",
+      body: { goal: "持续读取大量材料直到可以回答", runMode: "agent" },
+    });
+    const blocked = await waitForRun(
+      server.url,
+      start.body.runId,
+      (body) => body.status === "blocked",
+      4_000,
+      "/api/desktop/runs"
+    );
+    const events = await requestJson(
+      server.url,
+      `/api/basic-agent/runs/${encodeURIComponent(start.body.runId)}/events?cursor=0`
+    );
+    const eventTypes = events.body.events.map((event: { type: string }) => event.type);
+
+    assert.equal(start.status, 202);
+    assert.equal(providerCalls >= 2, true);
+    assert.equal(blocked.body.status, "blocked");
+    assert.equal(blocked.body.error.code, "context_overflow");
+    assert.equal(blocked.body.canvas.kind, "desktop_agent_canvas");
+    assert.equal(blocked.body.canvas.agent.status, "paused");
+    assert.equal(blocked.body.canvas.agent.answer, undefined);
+    assert.equal(eventTypes.includes("context.compaction.failed"), true);
+    assert.equal(eventTypes.includes("final.result"), false);
+    assert.equal(blocked.text.includes(secret), false);
+    assertSafePanelJsonText(blocked.text);
   } finally {
     await server.close();
     await removeTemporaryTree(directory);
@@ -516,12 +822,23 @@ test("desktop provider HTTP 400 surfaces provider error message directly", async
       server.url,
       `/api/basic-agent/runs/${encodeURIComponent(start.body.run.runId)}/events?cursor=0`
     );
+    const runtimeRun = await waitForRun(
+      server.url,
+      start.body.run.runId,
+      (body) => body.snapshot?.run?.status === "failed",
+      4_000,
+      "/api/runtime/runs"
+    );
     const assistantTurn = conversation.body.conversation.turns.at(-1);
     const eventText = JSON.stringify(events.body.events);
     const conversationText = JSON.stringify(failed.body.conversation);
 
     assert.equal(failed.body.status, "failed");
     assert.equal(failed.body.error.message, "model is not available on this endpoint");
+    assert.equal(failed.body.capabilityResolution.agentId, "desktop-agent-session");
+    assert.deepEqual(failed.body.capabilityResolution, runtimeRun.body.snapshot.run.capabilityResolution);
+    assert.equal(runtimeRun.body.snapshot.run.capabilityResolution.toolVisibilityProfileId, DESKTOP_ROOT_AGENT.toolVisibilityProfile.profileId);
+    assert.equal(JSON.stringify(runtimeRun.body.snapshot.run.capabilityResolution).includes(DESKTOP_ROOT_AGENT.prompt.systemPrompt), false);
     assert.equal(assistantTurn.content, "错误信息：model is not available on this endpoint");
     assert.equal(failed.body.error.message.includes("还没有配置模型名"), false);
     assert.equal(assistantTurn.content.includes("还没有配置模型名"), false);

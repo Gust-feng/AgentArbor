@@ -1,6 +1,6 @@
 import { getJson } from "./api";
 import type { Conversation } from "./contracts/conversation";
-import type { BasicAgentRun, DesktopRunDetail, DesktopWorkSession, RunEvent } from "./contracts/run";
+import type { BasicAgentRunView, DesktopRunDetail, DesktopWorkView, RunEvent } from "./contracts/run";
 import type { ToolDisplayProjection } from "./contracts/tools";
 
 const BASIC_RUN_EVENT_TYPES = [
@@ -18,11 +18,6 @@ const BASIC_RUN_EVENT_TYPES = [
   "user.guidance",
   "agent.note.delta",
   "agent.note.completed",
-  "agent.delegation.planned",
-  "agent.child.started",
-  "agent.child.completed",
-  "agent.child.waiting",
-  "agent.parent_synthesis.completed",
   "model.reasoning.delta",
   "model.reasoning.completed",
   "model.output.delta",
@@ -32,38 +27,14 @@ const BASIC_RUN_EVENT_TYPES = [
   "context.compaction.failed",
 ] as const;
 
-export async function safeBasicRun(runId: string): Promise<BasicAgentRun | undefined> {
-  try {
-    return (await getJson<{ readonly run: BasicAgentRun }>(`/api/basic-agent/runs/${encodeURIComponent(runId)}`)).run;
-  } catch {
-    return undefined;
-  }
-}
-
-export async function safeBasicEvents(
+export async function safeBasicRunView(
   runId: string,
-  cursor: number
-): Promise<{ readonly events: readonly RunEvent[]; readonly cursor: { readonly lastSequence: number } } | undefined> {
+  cursor = 0
+): Promise<BasicAgentRunView | undefined> {
   try {
-    return await getJson<{ readonly events: readonly RunEvent[]; readonly cursor: { readonly lastSequence: number } }>(
-      `/api/basic-agent/runs/${encodeURIComponent(runId)}/events?cursor=${cursor}`
-    );
-  } catch {
-    return undefined;
-  }
-}
-
-export async function safeDesktopDetail(runId: string): Promise<DesktopRunDetail | undefined> {
-  try {
-    return await getJson<DesktopRunDetail>(`/api/desktop/runs/${encodeURIComponent(runId)}`);
-  } catch {
-    return undefined;
-  }
-}
-
-export async function safeWorkSession(runId: string): Promise<DesktopWorkSession | undefined> {
-  try {
-    return (await getJson<{ readonly workSession: DesktopWorkSession }>(`/api/basic-agent/runs/${encodeURIComponent(runId)}/work-session`)).workSession;
+    return (await getJson<{ readonly view: BasicAgentRunView }>(
+      `/api/basic-agent/runs/${encodeURIComponent(runId)}/view?cursor=${cursor}`
+    )).view;
   } catch {
     return undefined;
   }
@@ -75,6 +46,14 @@ export async function safeConversation(conversationId: string): Promise<Conversa
   } catch {
     return undefined;
   }
+}
+
+export function ordinaryWorkViewFromRunView(
+  view: {
+    readonly workView?: DesktopWorkView;
+  } | undefined
+): DesktopWorkView | undefined {
+  return view?.workView;
 }
 
 export function openBasicRunStream(input: {

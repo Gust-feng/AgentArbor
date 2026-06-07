@@ -1,5 +1,7 @@
 import type { ModelMessage, ModelResponse } from "../../domain/intelligence/index.js";
 import type { ToolCallRequest, ToolCallResult } from "../../domain/tools/index.js";
+import { redactSensitiveText } from "../redaction.js";
+import { redactOrdinaryToolText } from "../tools/index.js";
 import { toSafeToolEventValue } from "./tool-events.js";
 import { cloneModelMessage, cloneToolCallRequest } from "./tool-use-loop-cloning.js";
 
@@ -24,7 +26,7 @@ export function assistantToolCallMessage(
 export function toolResultMessage(result: ToolCallResult): ModelMessage {
   const envelope = result.projection?.envelope;
   const modelOutput = result.projection?.agentContent !== undefined
-    ? result.projection.agentContent
+    ? sanitizeProjectedAgentContent(result.projection.agentContent)
     : envelope !== undefined
       ? {
           summary: envelope.agentSummary,
@@ -41,7 +43,7 @@ export function toolResultMessage(result: ToolCallResult): ModelMessage {
       toolName: result.toolName,
       status: result.status,
       output: modelOutput,
-      error: result.error,
+      error: safeToolErrorForModel(result.error),
       durationMs: result.durationMs,
     })),
     toolCallId: result.callId,
@@ -50,6 +52,42 @@ export function toolResultMessage(result: ToolCallResult): ModelMessage {
 }
 
 const MAX_TOOL_MESSAGE_CHARS = 40_000;
+
+function safeToolErrorForModel(error: string | undefined): string | undefined {
+  return error === undefined ? undefined : redactOrdinaryToolText(error, 1_000);
+}
+
+function sanitizeProjectedAgentContent(value: unknown): unknown {
+  if (value === undefined || value === null) {
+    return value;
+  }
+  if (typeof value === "string") {
+    return redactSensitiveText(value);
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map(sanitizeProjectedAgentContent);
+  }
+  if (typeof value === "object") {
+    const result: Record<string, unknown> = {};
+    for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+      result[key] = isSecretLikeKey(key) ? "[redacted]" : sanitizeProjectedAgentContent(item);
+    }
+    return result;
+  }
+  return String(value);
+}
+
+function isSecretLikeKey(key: string): boolean {
+  const normalized = key.toLowerCase();
+  return normalized.includes("apikey") ||
+    normalized.includes("api_key") ||
+    normalized.includes("token") ||
+    normalized.includes("secret") ||
+    normalized.includes("password");
+}
 
 function truncateToolMessageContent(value: string): string {
   if (value.length <= MAX_TOOL_MESSAGE_CHARS) {

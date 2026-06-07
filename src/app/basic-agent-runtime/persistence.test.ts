@@ -128,6 +128,51 @@ test("restored basic run derives user-action state from pending confirmation", (
   assert.equal(run.nextStep, "等待你确认或补充材料。");
 });
 
+test("restored basic run keeps the frozen runtime agent definition ref", () => {
+  const snapshot = {
+    ...snapshotFixture(),
+    run: {
+      ...runFixture(),
+      agentDefinitionRef: {
+        agentId: "runtime-agent",
+        agentDisplayName: "Runtime Agent",
+        promptRef: "prompt:runtime-agent:v1",
+        promptVersion: "1",
+        outputContractId: "desktop.agent_response.v1",
+        toolVisibilityProfileId: "runtime-agent:ordinary-visible-tools:v1",
+      },
+    },
+    basicRun: {
+      runId: "run-1",
+      conversationId: "conversation-1",
+      title: "正在处理",
+      goalSummary: "safe goal",
+      status: "running",
+      runMode: "agent",
+      agentDefinitionRef: {
+        agentId: "stale-basic-run-agent",
+        agentDisplayName: "Stale Basic Run Agent",
+        promptRef: "prompt:stale-basic-run-agent:v1",
+        promptVersion: "1",
+        outputContractId: "desktop.agent_response.v1",
+        toolVisibilityProfileId: "stale-basic-run-agent:ordinary-visible-tools:v1",
+      },
+      createdAt: "2026-06-02T00:00:00.000Z",
+      updatedAt: "2026-06-02T00:00:05.000Z",
+      eventCursor: {
+        lastSequence: 0,
+        eventCount: 0,
+      },
+    },
+  } satisfies RuntimeRunSnapshot;
+
+  const run = basicRunFromRuntimeSnapshot(snapshot);
+
+  assert.deepEqual(run.agentDefinitionRef, snapshot.run.agentDefinitionRef);
+  assert.notDeepEqual(run.agentDefinitionRef, snapshot.basicRun?.agentDefinitionRef);
+  assert.equal(JSON.stringify(run.agentDefinitionRef).includes("systemPrompt"), false);
+});
+
 class MemoryRuntimeDatabase implements RuntimeDatabase {
   constructor(public snapshot: RuntimeRunSnapshot) {}
 

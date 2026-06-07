@@ -1,3 +1,4 @@
+import type { RunAgentDefinitionRef } from "../config/contracts.js";
 import type { ObservationRef } from "../observation/contracts.js";
 import type { ToolDisplayProjection, ToolResultEnvelope } from "../tools/contracts.js";
 import type { ConfirmationRequest } from "./confirmation-contracts.js";
@@ -22,6 +23,7 @@ export type BasicAgentRun = {
   readonly goalSummary: string;
   readonly status: AgentTaskStatus;
   readonly runMode: "agent" | "deep";
+  readonly agentDefinitionRef?: RunAgentDefinitionRef;
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly currentStep?: string;
@@ -224,3 +226,9 @@ export type DesktopWorkSessionReadModel = {
     readonly contextAttachmentCount: number;
   };
 };
+
+/**
+ * Current ordinary Agent read-model name. DesktopWorkSessionReadModel remains
+ * for historical panel state and compatibility while callers migrate.
+ */
+export type DesktopWorkViewReadModel = DesktopWorkSessionReadModel;

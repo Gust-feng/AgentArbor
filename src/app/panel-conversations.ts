@@ -4,6 +4,7 @@ import type { DesktopTaskSoilInput } from "./task-soil-workspace.js";
 import { sanitizeAssistantVisibleText } from "./visible-text-safety.js";
 import type {
   PanelConversation,
+  PanelConversationCurrentRunReadModel,
   PanelConversationReadModel,
   PanelConversationSummaryReadModel,
   PanelConversationTurn,
@@ -52,6 +53,14 @@ export class PanelConversationStore {
   getReadModel(conversationId: string): PanelConversationReadModel | undefined {
     const conversation = this.get(conversationId);
     return conversation === undefined ? undefined : toConversationReadModel(conversation);
+  }
+
+  getReadModelWithCurrentRun(
+    conversationId: string,
+    currentRun: PanelConversationCurrentRunReadModel | undefined
+  ): PanelConversationReadModel | undefined {
+    const conversation = this.get(conversationId);
+    return conversation === undefined ? undefined : toConversationReadModel(conversation, currentRun);
   }
 
   rollback(input: {
@@ -242,7 +251,7 @@ export class PanelConversationStore {
     readonly runId: string;
     readonly title: string;
     readonly content: string;
-    readonly status: "completed" | "failed";
+    readonly status: "completed" | "failed" | "blocked" | "needs_input";
     readonly responseModel?: PanelConversationTurnModel;
   }): void {
     const conversation = this.requireConversation(input.conversationId);

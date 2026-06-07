@@ -1,4 +1,5 @@
 import type { SkillDefinition } from "../../domain/basic-agent/index.js";
+import type { CapabilitySkillCatalogItem } from "../../domain/config/index.js";
 import type { DesktopAgentSkillContext } from "../desktop-agent-prompts.js";
 import {
   discoverSkills,
@@ -38,9 +39,10 @@ export async function setPanelSkillEnabled(
 
 export async function resolveTriggeredSkillContexts(
   runtime: PanelSkillRuntime,
-  goal: string
+  goal: string,
+  skillsOverride?: readonly SkillDefinition[] | readonly CapabilitySkillCatalogItem[]
 ): Promise<readonly DesktopAgentSkillContext[]> {
-  const skills = await listPanelSkills(runtime);
+  const skills = skillsOverride ?? await listPanelSkills(runtime);
   const triggered = selectTriggeredSkills(goal, skills, 4);
   const contexts = await Promise.all(triggered.map(async (skill): Promise<DesktopAgentSkillContext> => {
     const body = await loadSkillBody(skill);

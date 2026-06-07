@@ -4,11 +4,13 @@ import { createId, nowIso } from "../kernel/id.js";
 import type { AgentTurnRuntime, AgentTurnRuntimeResult } from "../kernel/intelligence/index.js";
 import type { MinimalRuntime } from "./runtime.js";
 import { createMinimalRuntime } from "./runtime.js";
+import type { ModelRuntimeMode } from "./model-runtime/index.js";
 import {
-  buildBasicAgentContextPack,
   createOpenAITokenCounter,
   type BasicAgentContextPack,
 } from "./basic-agent-runtime/index.js";
+import { DESKTOP_ROOT_AGENT } from "./agent-prompts/desktop-root-agent.js";
+import { desktopAgentContextPack } from "./desktop-agent-prompts.js";
 import { createTaskSoilFromDesktopInput } from "./task-soil-workspace.js";
 import type {
   DesktopAgentPendingConfirmation,
@@ -22,9 +24,6 @@ import {
   publishTriggeredSkills,
 } from "./desktop-agent-session-events.js";
 import {
-  DESKTOP_ROOT_AGENT,
-} from "./agent-prompts/desktop-root-agent.js";
-import {
   activityFromEventEntries,
   evidenceRefsFromToolCalls,
   parseAnswer,
@@ -35,12 +34,14 @@ import {
   safeDesktopAgentContextPack,
 } from "./desktop-agent-session-projection.js";
 import {
-  allowedToolsForRun,
   constraintRefsFromTaskSoil,
-  createDesktopAgentOutputContract,
+  createDesktopAgentTurnPolicy,
   createDesktopAgentTurnRuntime,
   createIntelligenceChannelFromOptions,
+  resolveDesktopAgentAiMode,
+  resolveDesktopAgentRunCapabilities,
   resolveActiveModelName,
+  restrictRunCapabilityResolutionToExecutableTools,
 } from "./desktop-agent-session-runtime.js";
 import { asRecord, stringOrUndefined } from "./panel-read-model-utils.js";
 
@@ -66,7 +67,9 @@ export async function runDesktopAgentSession(
   goal: string,
   options: RunDesktopAgentSessionOptions = {}
 ): Promise<DesktopAgentSessionResult> {
-  const aiMode = options.aiMode ?? "openai-responses";
+  const agentDefinition = options.agentDefinition ?? DESKTOP_ROOT_AGENT;
+  assertOrdinaryDesktopAgentDefinition(agentDefinition);
+  const aiMode = resolveDesktopAgentAiMode(options);
   const runtime = options.runtime ?? createMinimalRuntime();
   const traceId = createId("trace");
   const goalId = createId("goal");
@@ -83,7 +86,13 @@ export async function runDesktopAgentSession(
   });
 
   publishGoalReceived({ runtime, traceId, goalId, goal, taskSoil });
-  publishTriggeredSkills({ runtime, traceId, goalId, skills: options.skillContexts ?? [] });
+  publishTriggeredSkills({
+    runtime,
+    agentId: agentDefinition.agentId,
+    traceId,
+    goalId,
+    skills: options.skillContexts ?? [],
+  });
   options.onRuntimeReady?.({ runtime, traceId, goalId });
 
   const intelligenceChannel =
@@ -104,56 +113,59 @@ export async function runDesktopAgentSession(
   }
 
   const channel = intelligenceChannel(runtime);
-  const createdToolCenter = options.createToolCenter?.(runtime);
-  const toolCenter =
-    aiMode === "fake" || options.modelCapabilities?.supportsToolCalling !== false
-      ? createdToolCenter
-      : undefined;
+  const modelCapabilitiesForRun = modelCapabilitiesForDesktopRun(aiMode, options);
+  const mayExposeTools = modelCapabilitiesForRun?.supportsToolCalling !== false && options.createToolCenter !== undefined;
+  if (mayExposeTools && options.capabilitySnapshot === undefined) {
+    throw new Error("Desktop Agent requires a capability snapshot before exposing tools to the model.");
+  }
+  const toolCenter = mayExposeTools ? options.createToolCenter?.(runtime) : undefined;
   toolCenter?.resetCallCount();
   const tokenCounter = createOpenAITokenCounter(resolveActiveModelName(options));
-  const contextPack = buildBasicAgentContextPack({
+  const contextPack = desktopAgentContextPack({
+    agentDefinition,
     goal,
     taskSoil,
     conversationHistory: options.conversationHistory ?? [],
     skillContexts: options.skillContexts ?? [],
-    modelCapabilities: options.modelCapabilities,
+    modelCapabilities: modelCapabilitiesForRun,
     tokenCounter,
   });
   const turnRuntime = createDesktopAgentTurnRuntime({
     runtime,
+    agentId: agentDefinition.agentId,
+    agentDisplayName: agentDefinition.displayName,
     channel,
     goal,
     traceId,
     goalId,
     options,
+    modelCapabilities: modelCapabilitiesForRun,
     toolCenter,
   });
-  const allowedTools = toolCenter === undefined
-    ? []
-    : options.allowedTools ?? allowedToolsForRun({
-        toolCenter,
-        snapshot: options.capabilitySnapshot,
-        goal,
-        taskSoil,
-        platform: options.platform,
-      });
+  const capabilityResolution =
+    options.capabilitySnapshot === undefined
+      ? undefined
+      : restrictRunCapabilityResolutionToExecutableTools(
+          resolveDesktopAgentRunCapabilities({
+            agentDefinition,
+            snapshot: options.capabilitySnapshot,
+            goal,
+            taskSoil,
+            modelCapabilities: modelCapabilitiesForRun,
+            platform: options.platform,
+          }),
+          toolCenter
+        );
+  const allowedTools = capabilityResolution?.allowedTools ?? [];
+  const turnPolicy = createDesktopAgentTurnPolicy({
+    agentDefinition,
+    traceId,
+    goalId,
+    allowedTools,
+    modelCapabilities: modelCapabilitiesForRun,
+  });
   const turn = await turnRuntime.executeAutonomous({
-    policy: {
-      allowModel: DESKTOP_ROOT_AGENT.turnPolicy.allowModel,
-      allowedTools,
-      fallback: DESKTOP_ROOT_AGENT.turnPolicy.fallback,
-      callerAgentId: DESKTOP_ROOT_AGENT.agentId,
-      traceId,
-      goalId,
-      purpose: DESKTOP_ROOT_AGENT.turnPolicy.purpose,
-      outputContract: createDesktopAgentOutputContract(),
-      sensitivity: DESKTOP_ROOT_AGENT.turnPolicy.sensitivity,
-      budget: {
-        maxOutputTokens:
-          options.modelCapabilities?.maxOutputTokens ??
-          DESKTOP_ROOT_AGENT.turnPolicy.defaultMaxOutputTokens,
-      },
-    },
+    policy: turnPolicy,
     requestId: createId("model-request"),
     callerRef: { kind: "goal", id: goalId, label: "desktop_agent" },
     inputRefs: contextPack.inputRefs,
@@ -171,8 +183,10 @@ export async function runDesktopAgentSession(
     goalId,
     taskSoil,
     contextPack,
+    agentId: agentDefinition.agentId,
     turnRuntime,
     turn,
+    capabilityResolution,
   });
 }
 
@@ -183,8 +197,10 @@ function desktopAgentResultFromTurn(input: {
   readonly goalId: string;
   readonly taskSoil: TaskSoil;
   readonly contextPack: BasicAgentContextPack;
+  readonly agentId: string;
   readonly turnRuntime: AgentTurnRuntime;
   readonly turn: AgentTurnRuntimeResult;
+  readonly capabilityResolution: DesktopAgentSessionResult["capabilityResolution"];
 }): DesktopAgentSessionResult {
   const modelCallRefs = refsFromResponse(input.turn.finalOutput, input.turn.modelRequestId, input.turn.modelResponseId);
   const toolCallRefs = refsFromToolCalls(input.turn.toolCalls);
@@ -192,10 +208,12 @@ function desktopAgentResultFromTurn(input: {
   if (input.turn.status === "paused" && (input.turn.stoppedReason === "out_of_fuel" || input.turn.stoppedReason === "context_overflow")) {
     return {
       status: "paused",
+      stopReason: input.turn.stoppedReason,
       runtime: input.runtime,
       traceId: input.traceId,
       goalId: input.goalId,
       taskSoil: input.taskSoil,
+      capabilityResolution: input.capabilityResolution,
       contextPack: safeDesktopAgentContextPack(input.contextPack),
       failureMessage: input.turn.stoppedReason === "context_overflow"
         ? "上下文压缩没有成功，任务没有完成。你可以继续发送消息，我会在保留现有上下文的基础上接着处理。"
@@ -219,6 +237,7 @@ function desktopAgentResultFromTurn(input: {
     if (pendingConfirmation !== undefined && !hasConfirmationRequested(input.runtime.eventLog.list(), pendingConfirmation.confirmationId)) {
         publishConfirmationRequested({
           runtime: input.runtime,
+          agentId: input.agentId,
           traceId: input.traceId,
           goalId: input.goalId,
           pendingConfirmation,
@@ -230,6 +249,7 @@ function desktopAgentResultFromTurn(input: {
       traceId: input.traceId,
       goalId: input.goalId,
       taskSoil: input.taskSoil,
+      capabilityResolution: input.capabilityResolution,
       pendingConfirmation,
       contextPack: safeDesktopAgentContextPack(input.contextPack),
       modelCallRefs,
@@ -250,6 +270,7 @@ function desktopAgentResultFromTurn(input: {
       traceId: input.traceId,
       goalId: input.goalId,
       taskSoil: input.taskSoil,
+      capabilityResolution: input.capabilityResolution,
       contextPack: safeDesktopAgentContextPack(input.contextPack),
       failureMessage: input.turn.finalOutput?.failure?.message ?? "Desktop Agent model/tool turn failed.",
       modelCallRefs,
@@ -273,6 +294,7 @@ function desktopAgentResultFromTurn(input: {
   if (pendingConfirmation !== undefined && !hasConfirmationRequested(input.runtime.eventLog.list(), pendingConfirmation.confirmationId)) {
     publishConfirmationRequested({
       runtime: input.runtime,
+      agentId: input.agentId,
       traceId: input.traceId,
       goalId: input.goalId,
       pendingConfirmation,
@@ -291,6 +313,7 @@ function desktopAgentResultFromTurn(input: {
     traceId: input.traceId,
     goalId: input.goalId,
     taskSoil: input.taskSoil,
+    capabilityResolution: input.capabilityResolution,
     answer: {
       answer,
       modelCallRefs,
@@ -316,8 +339,10 @@ function pendingApprovalContinuation(
     readonly goalId: string;
     readonly taskSoil: TaskSoil;
     readonly contextPack: BasicAgentContextPack;
+    readonly agentId: string;
     readonly turnRuntime: AgentTurnRuntime;
     readonly turn: AgentTurnRuntimeResult;
+    readonly capabilityResolution: DesktopAgentSessionResult["capabilityResolution"];
   },
   pendingConfirmation: DesktopAgentPendingConfirmation | undefined
 ): DesktopAgentPendingApprovalContinuation | undefined {
@@ -364,4 +389,33 @@ function hasConfirmationRequested(entries: readonly EventLogEntry[], confirmatio
     const payload = asRecord(entry.message.payload);
     return stringOrUndefined(payload.confirmationId) === confirmationId;
   });
+}
+
+function modelCapabilitiesForDesktopRun(
+  aiMode: ModelRuntimeMode,
+  options: RunDesktopAgentSessionOptions
+): RunDesktopAgentSessionOptions["modelCapabilities"] {
+  const modelCapabilities = options.capabilitySnapshot?.modelCapabilities ?? options.modelCapabilities;
+  if (
+    options.capabilitySnapshot !== undefined ||
+    aiMode !== "fake" ||
+    modelCapabilities === undefined ||
+    modelCapabilities.supportsToolCalling
+  ) {
+    return modelCapabilities;
+  }
+  return {
+    ...modelCapabilities,
+    supportsToolCalling: true,
+  };
+}
+
+function assertOrdinaryDesktopAgentDefinition(
+  definition: NonNullable<RunDesktopAgentSessionOptions["agentDefinition"]>
+): void {
+  if (definition.toolVisibilityProfile.runMode !== "agent") {
+    throw new Error(
+      `Desktop Agent requires an ordinary AgentDefinition; ${definition.agentId} declares ${definition.toolVisibilityProfile.runMode}.`
+    );
+  }
 }

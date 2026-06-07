@@ -20,6 +20,7 @@ export type BasicAgentRunProjectionInput = {
   readonly goal: string;
   readonly status: BasicAgentCompatRunStatus;
   readonly runMode: BasicAgentRun["runMode"];
+  readonly agentDefinitionRef?: BasicAgentRun["agentDefinitionRef"];
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly streamEvents: readonly BasicAgentRunStreamEventProjectionInput[];
@@ -70,6 +71,7 @@ export function projectRunJobToBasicRun(job: BasicAgentRunProjectionInput): Basi
     goalSummary: redactOrdinaryText(job.goal, 400),
     status,
     runMode: job.runMode,
+    agentDefinitionRef: job.agentDefinitionRef,
     createdAt: job.createdAt,
     updatedAt: job.updatedAt,
     currentStep: basicRunCurrentStep(job),

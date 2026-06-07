@@ -77,6 +77,78 @@ test("Basic Agent runtime does not depend on panel-private modules", async () =>
   assert.deepEqual(violations, [], "Basic Agent runtime should consume app-level contracts, not panel-private helpers");
 });
 
+test("Basic Agent runtime does not depend on underground domain contracts", async () => {
+  const files = await collectSourceFiles(path.join(process.cwd(), "src", "app", "basic-agent-runtime"));
+  const violations: string[] = [];
+
+  for (const file of files) {
+    const source = await fs.readFile(file, "utf8");
+    for (const target of resolveRelativeImports(file, source)) {
+      const targetPath = relativePath(target);
+      if (targetPath.startsWith("src/domain/underground/")) {
+        violations.push(`${relativePath(file)} -> ${targetPath}`);
+      }
+    }
+  }
+
+  assert.deepEqual(violations, [], "Basic Agent runtime should keep deep/underground structures behind app-level attachments");
+});
+
+test("Basic Agent run executor consumes prepared start facts instead of route infrastructure", async () => {
+  const runtimeRoot = path.join(process.cwd(), "src", "app", "basic-agent-runtime");
+  const [executorSource, contractsSource] = await Promise.all([
+    readSource(path.join(runtimeRoot, "run-executor.ts")),
+    readSource(path.join(runtimeRoot, "contracts.ts")),
+  ]);
+
+  assert.equal(contractsSource.includes("readonly prepareRunStart"), true);
+  assert.equal(executorSource.includes("resolveBasicAgentRunMode(input.runKind, input.runMode)"), true);
+  assert.equal(executorSource.includes("this.config.prepareRunStart(startInput)"), true);
+  for (const routeInfrastructureDetail of [
+    "getModelProviderConfig",
+    "getInformationAccessConfig",
+    "getCapabilitySnapshot",
+    "getDefaultAgentDefinitionRef",
+    "capabilityCenter",
+    "configCenter",
+    'input.runKind === "desktop"',
+    'input.runKind !== "desktop"',
+    'input.runMode === "agent"',
+    'input.runMode !== "agent"',
+    "runAgentDefinitionRef",
+  ]) {
+    assert.equal(
+      executorSource.includes(routeInfrastructureDetail),
+      false,
+      `run executor should not own start preparation detail: ${routeInfrastructureDetail}`
+    );
+  }
+});
+
+test("panel server implementation does not import the default desktop root agent directly", async () => {
+  const files = await collectSourceFiles(path.join(process.cwd(), "src", "app", "panel-server"));
+  const violations: string[] = [];
+
+  for (const file of files) {
+    if (file.endsWith(".test.ts")) {
+      continue;
+    }
+    const source = await fs.readFile(file, "utf8");
+    for (const target of resolveRelativeImports(file, source)) {
+      const targetPath = relativePath(target);
+      if (targetPath === "src/app/agent-prompts/desktop-root-agent.ts") {
+        violations.push(`${relativePath(file)} -> ${targetPath}`);
+      }
+    }
+  }
+
+  assert.deepEqual(
+    violations,
+    [],
+    "panel-server should resolve ordinary Agent definitions through the runtime catalog/registry, not direct prompt assets"
+  );
+});
+
 test("Basic Agent run projection does not keep stale panel projection files", () => {
   const runtimeRoot = path.join(process.cwd(), "src", "app", "basic-agent-runtime");
 
@@ -99,6 +171,27 @@ test("ordinary Desktop Agent entry does not depend on the legacy intent gate", a
   assert.equal(sources.some((source) => source.includes("decideDesktopIntentWithModel")), false);
   assert.equal(sources.some((source) => source.includes('from "./desktop-intent-router.js"')), false);
   assert.equal(sources.some((source) => source.includes('from "../desktop-intent-router.js"')), false);
+});
+
+test("ordinary Desktop Agent entry does not import legacy desktop chat compatibility wrappers", async () => {
+  const appRoot = path.join(process.cwd(), "src", "app");
+  const files = await collectSourceFiles(appRoot);
+  const violations: string[] = [];
+
+  for (const file of files) {
+    if (relativePath(file) === "src/app/desktop-chat-session.ts") {
+      continue;
+    }
+
+    const source = await fs.readFile(file, "utf8");
+    for (const specifier of importSpecifiersFrom(source)) {
+      if (specifier.includes("desktop-chat-session")) {
+        violations.push(`${relativePath(file)} -> ${specifier}`);
+      }
+    }
+  }
+
+  assert.deepEqual(violations, [], "new ordinary Agent code should import desktop-agent-session directly");
 });
 
 test("confirmation copy has a single shared app owner", async () => {
@@ -155,6 +248,58 @@ test("kernel tool use loop keeps execution helpers split", async () => {
   assert.equal(results.includes("export function abortedLoopResult"), true);
   assert.equal(results.includes("export function approvalRequiredResultFromPending"), true);
   assert.equal(cloning.includes("export function clonePendingApproval"), true);
+  assert.equal(contracts.includes("readonly allowedTools: readonly string[];"), true);
+  assert.equal(contracts.includes("readonly allowedTools?: readonly string[];"), false);
+  assert.equal(execution.includes("!options.allowedTools.includes(request.toolName)"), true);
+  assert.equal(execution.includes("options.allowedTools === undefined"), false);
+  assert.equal(execution.includes("options.allowedTools !== undefined"), false);
+});
+
+test("AgentTurnPolicy requires explicit allowed tools at the runtime boundary", async () => {
+  const runtimeSource = await readSource(path.join(process.cwd(), "src", "kernel", "intelligence", "agent-turn-runtime.ts"));
+
+  assert.equal(runtimeSource.includes("readonly allowedTools: readonly string[];"), true);
+  assert.equal(runtimeSource.includes("readonly allowedTools?: readonly string[];"), false);
+  assert.equal(runtimeSource.includes("allowedTools: [...policy.allowedTools]"), true);
+  assert.equal(runtimeSource.includes("policy.allowedTools ?? []"), false);
+});
+
+test("ToolCenter execution requires explicit run permissions", async () => {
+  const [domainTools, toolCenter] = await Promise.all([
+    readSource(path.join(process.cwd(), "src", "domain", "tools", "contracts.ts")),
+    readSource(path.join(process.cwd(), "src", "app", "tool-center", "tool-center.ts")),
+  ]);
+
+  assert.equal(domainTools.includes("readonly allowedTools: readonly string[];"), true);
+  assert.equal(domainTools.includes("readonly allowedTools?: readonly string[];"), false);
+  assert.equal(domainTools.includes("permission: ToolPermissionCheck"), true);
+  assert.equal(domainTools.includes("permission?: ToolPermissionCheck"), false);
+  assert.equal(toolCenter.includes("permission: ToolPermissionCheck"), true);
+  assert.equal(toolCenter.includes("permission?: ToolPermissionCheck"), false);
+  assert.equal(toolCenter.includes("permission.callerAgentId !== context.callerAgentId"), true);
+  assert.equal(toolCenter.includes("!permission.allowedTools.includes(request.toolName)"), true);
+  assert.equal(toolCenter.includes("permission?.allowedTools"), false);
+  assert.equal(toolCenter.includes("permission?.approvedConfirmationIds"), false);
+}
+);
+
+test("Basic Agent context pack does not own model-visible tool exposure", async () => {
+  const appRoot = path.join(process.cwd(), "src", "app");
+  const basicRuntimeRoot = path.join(appRoot, "basic-agent-runtime");
+  const promptAndContextSources = await Promise.all([
+    readSource(path.join(appRoot, "desktop-agent-prompts.ts")),
+    readSource(path.join(basicRuntimeRoot, "context-pack.ts")),
+    readSource(path.join(basicRuntimeRoot, "context-ledger.ts")),
+    readSource(path.join(basicRuntimeRoot, "context-ledger-items.ts")),
+  ]);
+
+  for (const source of promptAndContextSources) {
+    assert.equal(source.includes("allowedTools"), false);
+    assert.equal(source.includes("toolCatalog"), false);
+    assert.equal(source.includes("capabilitySnapshot"), false);
+    assert.equal(source.includes("ToolCenter"), false);
+    assert.equal(source.includes("ToolExecutionBroker"), false);
+  }
 });
 
 test("OpenAI Responses provider keeps protocol mapping split", async () => {

@@ -5,6 +5,7 @@ import type { TaskSoil } from "../../domain/soil/index.js";
 import type { DesktopAgentConversationMessage, DesktopAgentSkillContext } from "../desktop-agent-contracts.js";
 import { createBasicAgentContextLedger } from "./context-ledger.js";
 import type { BasicAgentConversationSummary } from "./conversation-compaction.js";
+import type { BasicAgentContextAgentDefinition } from "./context-ledger-items.js";
 import type {
   BasicAgentContextItem,
   BasicAgentContextPack,
@@ -20,6 +21,7 @@ export type {
 } from "./contracts.js";
 
 export type BuildBasicAgentContextPackInput = {
+  readonly agentDefinition: BasicAgentContextAgentDefinition;
   readonly goal: string;
   readonly taskSoil: TaskSoil;
   readonly conversationHistory: readonly DesktopAgentConversationMessage[];
@@ -34,6 +36,7 @@ export type BuildBasicAgentContextPackInput = {
 
 export function buildBasicAgentContextPack(input: BuildBasicAgentContextPackInput): BasicAgentContextPack {
   const ledger = createBasicAgentContextLedger({
+    agentDefinition: input.agentDefinition,
     runId: input.taskSoil.traceId ?? input.taskSoil.taskSoilId,
     goal: input.goal,
     taskSoil: input.taskSoil,

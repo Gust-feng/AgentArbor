@@ -1,4 +1,6 @@
 import type {
+  RunAgentDefinitionRef,
+  RunCapabilityResolution,
   SanitizedInformationAccessConfig,
   SanitizedModelProviderConfig,
 } from "../../domain/config/index.js";
@@ -31,6 +33,8 @@ export type PanelPersistedRunResponse = {
   readonly runKind: RuntimeRunRecord["runKind"];
   readonly runMode: RuntimeRunRecord["runMode"];
   readonly status: PanelRunStatus;
+  readonly agentDefinitionRef?: RunAgentDefinitionRef;
+  readonly capabilityResolution?: RunCapabilityResolution;
   readonly config: SanitizedModelProviderConfig;
   readonly informationAccess: SanitizedInformationAccessConfig;
   readonly trace: PanelRunTraceReadModel;
@@ -64,10 +68,13 @@ export function createPersistedPanelRunResponse(input: {
 }): PanelPersistedRunResponse {
   const status = panelStatusFromRuntimeStatus(input.snapshot.run.status);
   const trace = createPersistedRunTrace(input.snapshot, status);
+  const config = input.snapshot.run.capabilitySnapshot?.activeModel ?? input.config;
+  const informationAccess = input.snapshot.run.informationAccess ?? input.informationAccess;
   const trackingBase = createPanelRunTracking({
     status,
-    config: input.config,
-    informationAccess: input.informationAccess,
+    runMode: input.snapshot.run.runMode,
+    config,
+    informationAccess,
     requestedMode: input.snapshot.run.aiMode,
     eventEntries: [],
   });
@@ -79,8 +86,10 @@ export function createPersistedPanelRunResponse(input: {
     runKind: input.snapshot.run.runKind,
     runMode: input.snapshot.run.runMode,
     status,
-    config: input.config,
-    informationAccess: input.informationAccess,
+    agentDefinitionRef: input.snapshot.run.agentDefinitionRef,
+    capabilityResolution: input.snapshot.run.capabilityResolution,
+    config,
+    informationAccess,
     trace,
     tracking: {
       ...trackingBase,
@@ -167,25 +176,33 @@ export function createPersistedRunTrace(
     createdAt: event.createdAt,
     recordedAt: event.recordedAt,
   }));
-  const lastEvent = snapshot.events.at(-1);
+  const lastEvent = lastPersistedTraceEvent(snapshot);
   return {
     status,
-    currentPhase: persistedPhaseFor(lastEvent?.type, status),
-    currentStage: persistedStageFor(lastEvent?.type, status),
+    currentPhase: persistedPhaseFor(lastEvent?.type, status, snapshot.run.runMode),
+    currentStage: persistedStageFor(lastEvent?.type, status, snapshot.run.runMode),
     eventCursor: {
       eventCount: events.length,
-      lastSequence: lastEvent?.sequence ?? 0,
-      lastEventType: lastEvent?.type,
+      lastSequence: snapshot.events.at(-1)?.sequence ?? 0,
+      lastEventType: snapshot.events.at(-1)?.type,
     },
     waitingPoint: persistedWaitingPoint(status),
     events,
   };
 }
 
+function lastPersistedTraceEvent(snapshot: RuntimeRunSnapshot): RuntimeEventRecord | undefined {
+  if (snapshot.run.runMode !== "agent") {
+    return snapshot.events.at(-1);
+  }
+  return [...snapshot.events].reverse().find((event) => event.type === "goal.received" || isPersistedOrdinaryAgentRuntimeEvent(event.type));
+}
+
 export function createPersistedStreamEvents(
   snapshot: RuntimeRunSnapshot,
   status: PanelRunStatus
 ): readonly PanelRunStreamEvent[] {
+  const agentLabel = persistedRunAgentLabel(snapshot);
   const startedStatus: NonNullable<PanelRunStreamEvent["status"]> =
     status === "pending"
       ? "pending"
@@ -201,7 +218,7 @@ export function createPersistedStreamEvents(
       sequence: 1,
       type: "run.started",
       createdAt: snapshot.run.createdAt,
-      agentLabel: "AgentArbor",
+      agentLabel,
       summary: "已从本地记录恢复这次运行。",
       status: startedStatus,
       sourceRefs: [],
@@ -216,7 +233,7 @@ export function createPersistedStreamEvents(
     if (suppressOrdinaryChatProgress && shouldSuppressPersistedOrdinaryChatEvent(record.type)) {
       continue;
     }
-    const streamType = streamTypeForRuntimeEvent(record.type);
+    const streamType = streamTypeForRuntimeEvent(record.type, snapshot.run.runMode);
     if (streamType === undefined) {
       continue;
     }
@@ -246,6 +263,22 @@ export function createPersistedStreamEvents(
     });
   }
   for (const confirmation of snapshot.confirmations) {
+    if (confirmation.decidedAt === undefined && confirmation.status === "pending") {
+      events.push({
+        eventId: `${snapshot.run.runId}:restored:confirmation:${confirmation.confirmationId}:pending`,
+        runId: snapshot.run.runId,
+        sequence: events.length + 1,
+        type: "confirmation.needed",
+        createdAt: confirmation.requestedAt,
+        agentLabel: "待确认",
+        summary: confirmation.actionSummary,
+        status: "pending",
+        sourceRefs: [`confirmation:${confirmation.confirmationId}`],
+        modelCallRefs: [],
+        toolCallRefs: [],
+      });
+      continue;
+    }
     if (confirmation.decidedAt === undefined) {
       continue;
     }
@@ -261,7 +294,7 @@ export function createPersistedStreamEvents(
       sequence: events.length + 1,
       type,
       createdAt: confirmation.decidedAt,
-      agentLabel: type === "run.resumed" ? "AgentArbor" : type === "user_approval.received" ? "用户确认" : "用户指导",
+      agentLabel: type === "run.resumed" ? agentLabel : type === "user_approval.received" ? "用户确认" : "用户指导",
       summary: restoredConfirmationDecisionSummary(confirmation),
       status: confirmation.status === "denied" ? "blocked" : confirmation.status === "guidance" ? "pending" : "completed",
       sourceRefs: [`confirmation:${confirmation.confirmationId}`],
@@ -276,7 +309,7 @@ export function createPersistedStreamEvents(
       sequence: events.length + 1,
       type: "final.result",
       createdAt: snapshot.run.updatedAt,
-      agentLabel: "AgentArbor",
+      agentLabel,
       summary: snapshot.run.resultSummary ?? "结果已经整理完成。",
       status: "completed",
       sourceRefs: [],
@@ -291,7 +324,7 @@ export function createPersistedStreamEvents(
       sequence: events.length + 1,
       type: "run.failed",
       createdAt: snapshot.run.updatedAt,
-      agentLabel: "AgentArbor",
+      agentLabel,
       summary: friendlyUserFacingFailureText(snapshot.run.error?.message ?? snapshot.run.resultSummary),
       status: "failed",
       detail: snapshot.run.error === undefined
@@ -314,7 +347,7 @@ export function createPersistedStreamEvents(
       sequence: events.length + 1,
       type: "run.cancelled",
       createdAt: snapshot.run.updatedAt,
-      agentLabel: "AgentArbor",
+      agentLabel,
       summary: snapshot.run.resultSummary ?? "运行已取消。",
       status: "cancelled",
       sourceRefs: [],
@@ -329,7 +362,7 @@ export function createPersistedStreamEvents(
       sequence: events.length + 1,
       type: "run.blocked",
       createdAt: snapshot.run.updatedAt,
-      agentLabel: "AgentArbor",
+      agentLabel,
       summary: snapshot.run.resultSummary ?? snapshot.run.error?.message ?? "运行已中断，需要重新发起或继续处理。",
       status: "blocked",
       sourceRefs: [],
@@ -338,6 +371,11 @@ export function createPersistedStreamEvents(
     });
   }
   return events;
+}
+
+function persistedRunAgentLabel(snapshot: RuntimeRunSnapshot): string {
+  const label = snapshot.run.agentDefinitionRef?.agentDisplayName.trim();
+  return label === undefined || label.length === 0 ? "AgentArbor" : label;
 }
 
 export function panelStatusFromRuntimeStatus(status: RuntimeRunRecord["status"]): PanelRunStatus {
@@ -378,13 +416,7 @@ function hasPersistedUserVisibleWorkActivity(events: readonly RuntimeEventRecord
     if (event.type === "user_approval.requested" || event.type === "user_approval.received") {
       return true;
     }
-    return (
-      event.type === "agent.delegation.planned" ||
-      event.type === "agent.child.started" ||
-      event.type === "agent.child.completed" ||
-      event.type === "agent.child.waiting" ||
-      event.type === "agent.parent_synthesis.completed"
-    );
+    return false;
   });
 }
 
@@ -413,7 +445,8 @@ function persistedStreamAgentLabel(type: PanelRunStreamEvent["type"]): string {
 
 function persistedPhaseFor(
   type: RuntimeEventRecord["type"] | undefined,
-  status: PanelRunStatus
+  status: PanelRunStatus,
+  runMode: RuntimeRunRecord["runMode"]
 ): PanelRunTraceReadModel["currentPhase"] {
   if (type === undefined) {
     return status === "completed" ? "completed" : status === "blocked" || status === "cancelled" || status === "failed" ? "verification" : "not_started";
@@ -423,6 +456,9 @@ function persistedPhaseFor(
   }
   if (status === "blocked" || status === "cancelled" || status === "failed") {
     return "verification";
+  }
+  if (runMode === "agent") {
+    return type === "goal.received" ? "not_started" : "agent";
   }
   if (type.startsWith("direction_handoff.")) {
     return "handoff";
@@ -447,11 +483,28 @@ function persistedPhaseFor(
   return type === "goal.received" ? "not_started" : "underground";
 }
 
+function isPersistedOrdinaryAgentRuntimeEvent(type: RuntimeEventRecord["type"]): boolean {
+  return type === "model.requested" ||
+    type === "model.completed" ||
+    type === "model.failed" ||
+    type === "context.compaction.completed" ||
+    type === "context.compaction.failed" ||
+    type === "tool.requested" ||
+    type === "tool.completed" ||
+    type === "tool.failed" ||
+    type === "user_approval.requested" ||
+    type === "user_approval.received";
+}
+
 function persistedStageFor(
   type: RuntimeEventRecord["type"] | undefined,
-  status: PanelRunStatus
+  status: PanelRunStatus,
+  runMode: RuntimeRunRecord["runMode"]
 ): PanelRunTraceReadModel["currentStage"] {
   if (type === undefined) {
+    return status === "running" ? "running" : "not_started";
+  }
+  if (runMode === "agent" && !isPersistedOrdinaryAgentRuntimeEvent(type)) {
     return status === "running" ? "running" : "not_started";
   }
   const normalized = type.replaceAll(".", "_");
@@ -493,6 +546,12 @@ function persistedWaitingPoint(status: PanelRunStatus): string {
   if (status === "pending") {
     return "等待开始。";
   }
+  if (status === "approval_needed") {
+    return "等待你确认下一步。";
+  }
+  if (status === "needs_input") {
+    return "需要你补充材料后继续。";
+  }
   if (status === "running") {
     return "运行记录显示仍在进行；如这是重启后的历史记录，需要重新发起后续任务。";
   }
@@ -508,7 +567,13 @@ function persistedWaitingPoint(status: PanelRunStatus): string {
   return "运行已完成。";
 }
 
-function streamTypeForRuntimeEvent(type: RuntimeEventRecord["type"]): PanelRunStreamEvent["type"] | undefined {
+function streamTypeForRuntimeEvent(
+  type: RuntimeEventRecord["type"],
+  runMode: RuntimeRunRecord["runMode"]
+): PanelRunStreamEvent["type"] | undefined {
+  if (runMode === "agent" && !isPersistedOrdinaryAgentRuntimeEvent(type)) {
+    return undefined;
+  }
   if (type === "model.requested") {
     return "agent.note.delta";
   }
@@ -517,6 +582,9 @@ function streamTypeForRuntimeEvent(type: RuntimeEventRecord["type"]): PanelRunSt
   }
   if (type === "model.failed") {
     return "agent.note.completed";
+  }
+  if (type === "context.compaction.completed" || type === "context.compaction.failed") {
+    return type;
   }
   if (type === "tool.requested" || type === "tool.completed" || type === "tool.failed") {
     return type;
@@ -555,7 +623,7 @@ function streamStatusFor(type: PanelRunStreamEvent["type"]): NonNullable<PanelRu
   if (type === "run.blocked") {
     return "blocked";
   }
-  if (type === "tool.failed" || type === "run.failed") {
+  if (type === "tool.failed" || type === "run.failed" || type === "context.compaction.failed") {
     return "failed";
   }
   return "completed";

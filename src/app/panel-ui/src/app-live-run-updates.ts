@@ -1,5 +1,5 @@
 import type React from "react";
-import { shouldKeepRefreshing, stopLiveUpdates, stopPolling, stopStream } from "./app-runtime-controls";
+import { isObservedRunSettled, shouldKeepRefreshing, stopLiveUpdates, stopPolling, stopStream } from "./app-runtime-controls";
 import type { AppState } from "./app-state";
 import {
   isLiveAppendOnlyEvent,
@@ -16,12 +16,10 @@ import {
 } from "./app-run-observation-settlement";
 import {
   openBasicRunStream,
-  safeBasicEvents,
-  safeBasicRun,
-  safeWorkSession,
+  ordinaryWorkViewFromRunView,
+  safeBasicRunView,
 } from "./runtime";
 import type { BasicAgentRun, RunEvent } from "./contracts/run";
-import { terminalStatuses } from "./ui-state";
 
 const FALLBACK_POLL_INTERVAL_MS = 1_200;
 const STREAM_BOOTSTRAP_POLL_INTERVAL_MS = 160;
@@ -51,40 +49,9 @@ export function createLiveRunUpdateController(
     const tick = async (): Promise<void> => {
       if (options.activeRunIdRef.current !== runId) return;
       try {
-        const [runResponse, eventsResponse, workSessionResponse] = await Promise.all([
-          fetchBasicRun(runId),
-          fetchBasicEvents(runId, lastSequence),
-          safeWorkSession(runId),
-        ]);
-        lastSequence = eventsResponse.cursor.lastSequence;
-        if (options.mountedRef.current && options.activeRunIdRef.current === runId) {
-          options.setApp((previous) =>
-            appStateWithObservedRunProjection(previous, {
-              runId,
-              run: runResponse.run,
-              events: eventsResponse.events,
-              workSession: workSessionResponse,
-            })
-          );
-        }
-        if (isObservedRunSettled(runResponse.run)) {
-          const settled = await loadSettledRunProjection({
-            runId,
-            run: runResponse.run,
-            workSession: workSessionResponse,
-          });
-          options.mountedRef.current && options.activeRunIdRef.current === runId && options.setApp((previous) => {
-            return appStateWithSettledRunProjection(previous, settled);
-          });
-          const followUp = refreshingFollowUpRun(settled);
-          if (followUp !== undefined) {
-            options.activeRunIdRef.current = followUp.runId;
-            startLiveUpdates(followUp.runId, followUp.cursor);
-          } else if (!shouldKeepRefreshing(runResponse.run.status)) {
-            stopPolling(options.pollTimer);
-            void options.refreshConversations();
-          }
-        }
+        const runView = await fetchBasicRunView(runId, lastSequence);
+        lastSequence = runView.replay.cursor.lastSequence;
+        await applyRunViewProjection(runId, runView);
       } catch (error) {
         options.mountedRef.current && options.activeRunIdRef.current === runId && options.setApp((previous) => ({
           ...previous,
@@ -111,17 +78,20 @@ export function createLiveRunUpdateController(
         }
         return;
       }
-      const [run, workSession] = await Promise.all([
-        safeBasicRun(runId),
-        safeWorkSession(runId),
-      ]);
+      const runView = await fetchBasicRunView(runId, 0);
+      const run = runView.run;
+      const workView = ordinaryWorkViewFromRunView(runView);
+      const capabilityResolution = runView.capabilityResolution;
+      const detail = runView.detail;
       if (options.mountedRef.current && options.activeRunIdRef.current === runId) {
         options.setApp((previous) =>
           appStateWithObservedRunEvent(previous, {
             runId,
             run,
             event,
-            workSession,
+            workView,
+            capabilityResolution,
+            detail,
           })
         );
       }
@@ -129,7 +99,7 @@ export function createLiveRunUpdateController(
         liveRunSettled = true;
         stopPolling(options.pollTimer);
         stopStream(options.streamRef);
-        const settled = await loadSettledRunProjection({ runId, run, workSession });
+        const settled = await loadSettledRunProjection({ runId, run, workView, capabilityResolution });
         options.mountedRef.current && options.activeRunIdRef.current === runId && options.setApp((previous) => {
           return appStateWithSettledRunProjection(previous, settled);
         });
@@ -153,17 +123,18 @@ export function createLiveRunUpdateController(
         attempts += 1;
         inFlight = true;
         try {
-          const eventsResponse = await safeBasicEvents(runId, lastSequence);
-          const events = eventsResponse?.events ?? [];
-          for (const event of events) {
-            await refreshAfterEvent(event);
-          }
-          if (events.length > 0 && !streamDeliveredEvent) {
+          const runView = await fetchBasicRunView(runId, lastSequence);
+          lastSequence = runView.replay.cursor.lastSequence;
+          await applyRunViewProjection(runId, runView);
+          if (runView.replay.events.length > 0 && !streamDeliveredEvent) {
             attempts = 0;
           }
         } finally {
           inFlight = false;
-          if (streamDeliveredEvent || attempts >= STREAM_BOOTSTRAP_POLL_LIMIT) {
+          if (
+            options.activeRunIdRef.current === runId &&
+            (streamDeliveredEvent || attempts >= STREAM_BOOTSTRAP_POLL_LIMIT)
+          ) {
             stopBootstrapPolling();
           }
         }
@@ -193,28 +164,60 @@ export function createLiveRunUpdateController(
     startBootstrapPolling();
   }
 
+  async function applyRunViewProjection(
+    runId: string,
+    runView: Awaited<ReturnType<typeof fetchBasicRunView>>
+  ): Promise<void> {
+    if (options.mountedRef.current && options.activeRunIdRef.current === runId) {
+      options.setApp((previous) =>
+        appStateWithObservedRunProjection(previous, {
+          runId,
+          run: runView.run,
+          events: runView.replay.events,
+          workView: ordinaryWorkViewFromRunView(runView),
+          capabilityResolution: runView.capabilityResolution,
+          detail: runView.detail,
+        })
+      );
+    }
+    if (!isObservedRunSettled(runView.run)) {
+      return;
+    }
+    const settled = await loadSettledRunProjection({
+      runId,
+      run: runView.run,
+      workView: ordinaryWorkViewFromRunView(runView),
+      capabilityResolution: runView.capabilityResolution,
+    });
+    if (options.mountedRef.current && options.activeRunIdRef.current === runId) {
+      options.setApp((previous) => appStateWithSettledRunProjection(previous, settled));
+    }
+    const followUp = refreshingFollowUpRun(settled);
+    if (followUp !== undefined) {
+      options.activeRunIdRef.current = followUp.runId;
+      startLiveUpdates(followUp.runId, followUp.cursor);
+    } else if (!shouldKeepRefreshing(runView.run.status)) {
+      stopPolling(options.pollTimer);
+      void options.refreshConversations();
+    }
+  }
+
   return { startLiveUpdates, startPolling };
 }
 
-function isObservedRunSettled(run: BasicAgentRun): boolean {
-  return terminalStatuses.has(run.status) || run.status === "approval_needed" || run.status === "needs_input";
-}
-
-async function fetchBasicRun(runId: string): Promise<{ readonly run: BasicAgentRun }> {
-  const run = await safeBasicRun(runId);
-  if (run === undefined) {
-    throw new Error("读取运行状态失败。");
-  }
-  return { run };
-}
-
-async function fetchBasicEvents(
+async function fetchBasicRunView(
   runId: string,
   cursor: number
-): Promise<{ readonly events: readonly RunEvent[]; readonly cursor: { readonly lastSequence: number } }> {
-  const response = await safeBasicEvents(runId, cursor);
-  if (response === undefined) {
-    throw new Error("读取运行事件失败。");
+): Promise<{
+  readonly run: BasicAgentRun;
+  readonly capabilityResolution?: NonNullable<Awaited<ReturnType<typeof safeBasicRunView>>>["capabilityResolution"];
+  readonly workView: NonNullable<Awaited<ReturnType<typeof safeBasicRunView>>>["workView"];
+  readonly detail: NonNullable<Awaited<ReturnType<typeof safeBasicRunView>>>["detail"];
+  readonly replay: NonNullable<Awaited<ReturnType<typeof safeBasicRunView>>>["replay"];
+}> {
+  const view = await safeBasicRunView(runId, cursor);
+  if (view === undefined) {
+    throw new Error("读取运行视图失败。");
   }
-  return response;
+  return view;
 }

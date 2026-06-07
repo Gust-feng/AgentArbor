@@ -38,6 +38,7 @@ export type CreateDesktopBasicToolRegistryOptions = {
   readonly workspaceRoot?: string;
   readonly playwrightAvailable?: boolean;
   readonly toolStates?: readonly ToolStateSettings[];
+  readonly toolCatalogNames?: readonly string[];
   readonly mcpManager?: McpManager;
 };
 
@@ -86,7 +87,12 @@ export function createDesktopBasicToolRegistry(
     createLocalShellCommandTool(workspaceRoot, { sandboxPolicy }),
     createBrowserSnapshotTool(),
   ];
+  const toolCatalogNames =
+    options.toolCatalogNames === undefined ? undefined : new Set(options.toolCatalogNames);
   for (const executor of executors) {
+    if (toolCatalogNames !== undefined && !toolCatalogNames.has(executor.definition.name)) {
+      continue;
+    }
     const state = options.toolStates?.find((item) => item.name === executor.definition.name);
     const enabledByDefault = state?.enabled ?? executor.definition.name !== "shell_command";
     registry.register({
@@ -103,7 +109,7 @@ export function createDesktopBasicToolRegistry(
     for (const executor of options.mcpManager.getToolsForRegistry()) {
       registry.register({
         executor,
-        scopes: ["mcp", "desktop-basic"],
+        scopes: ["mcp"],
         enabledByDefault: true,
       });
     }

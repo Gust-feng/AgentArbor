@@ -4,14 +4,14 @@
   min-width: 0;
 }
 
-.agent-workflow {
+.agent-activity {
   display: grid;
   min-width: 0;
   gap: 0;
   padding: 1px 0 3px;
 }
 
-.agent-workflow-step {
+.agent-activity-step {
   position: relative;
   display: grid;
   min-width: 0;
@@ -20,11 +20,11 @@
   column-gap: 9px;
   padding: 3px 0 4px;
   color: color-mix(in oklch, var(--fg) 58%, var(--muted));
-  animation: agent-workflow-enter 180ms var(--motion-ease-standard) both;
+  animation: agent-activity-enter 180ms var(--motion-ease-standard) both;
   transition: color 180ms var(--motion-ease-standard), opacity 180ms var(--motion-ease-standard);
 }
 
-.agent-workflow-step:not(:last-child)::after {
+.agent-activity-step:not(:last-child)::after {
   content: "";
   position: absolute;
   top: 16px;
@@ -35,7 +35,7 @@
   background: color-mix(in oklch, var(--border) 32%, transparent);
 }
 
-.agent-workflow-marker {
+.agent-activity-marker {
   position: relative;
   z-index: 1;
   width: 6px;
@@ -53,17 +53,17 @@
     transform 180ms var(--motion-ease-standard);
 }
 
-.agent-workflow-step[data-current="true"] {
+.agent-activity-step[data-current="true"] {
   color: color-mix(in oklch, var(--fg) 84%, var(--muted));
 }
 
-.agent-workflow-step:not([data-current="true"]) .agent-workflow-marker {
+.agent-activity-step:not([data-current="true"]) .agent-activity-marker {
   border-color: color-mix(in oklch, var(--border) 44%, transparent);
   background: transparent;
   box-shadow: 0 0 0 3px color-mix(in oklch, var(--bg) 96%, transparent);
 }
 
-.agent-workflow-step[data-current="true"] .agent-workflow-marker {
+.agent-activity-step[data-current="true"] .agent-activity-marker {
   border-color: color-mix(in oklch, var(--accent-strong) 24%, transparent);
   background: color-mix(in oklch, var(--accent-strong) 46%, var(--muted));
   box-shadow:
@@ -72,19 +72,19 @@
   transform: scale(1);
 }
 
-.agent-workflow-step.tool[data-current="true"] .agent-workflow-marker {
+.agent-activity-step.tool[data-current="true"] .agent-activity-marker {
   background: color-mix(in oklch, var(--status-success) 68%, var(--accent-strong));
 }
 
-.agent-workflow-step.failed .agent-workflow-marker,
-.agent-workflow-step.blocked .agent-workflow-marker,
-.agent-workflow-step.waiting_approval .agent-workflow-marker,
-.agent-workflow-step.confirmation .agent-workflow-marker {
+.agent-activity-step.failed .agent-activity-marker,
+.agent-activity-step.blocked .agent-activity-marker,
+.agent-activity-step.waiting_approval .agent-activity-marker,
+.agent-activity-step.confirmation .agent-activity-marker {
   background: color-mix(in oklch, var(--status-warning) 78%, var(--muted));
   box-shadow: 0 0 0 4px color-mix(in oklch, var(--bg) 96%, transparent);
 }
 
-.agent-workflow-line {
+.agent-activity-line {
   display: flex;
   min-width: 0;
   max-width: 100%;
@@ -99,22 +99,22 @@
   transition: color 180ms var(--motion-ease-standard), opacity 180ms var(--motion-ease-standard);
 }
 
-.agent-workflow-disclosure {
+.agent-activity-disclosure {
   display: grid;
   min-width: 0;
   gap: 3px;
 }
 
-.agent-workflow-disclosure > summary {
+.agent-activity-disclosure > summary {
   cursor: pointer;
   list-style: none;
 }
 
-.agent-workflow-disclosure > summary::-webkit-details-marker {
+.agent-activity-disclosure > summary::-webkit-details-marker {
   display: none;
 }
 
-.agent-workflow-disclosure > summary.agent-workflow-line::after {
+.agent-activity-disclosure > summary.agent-activity-line::after {
   content: "›";
   flex: 0 0 auto;
   width: 14px;
@@ -128,16 +128,16 @@
   transition: opacity 140ms ease, transform 140ms ease;
 }
 
-.agent-workflow-disclosure[open] > summary.agent-workflow-line::after {
+.agent-activity-disclosure[open] > summary.agent-activity-line::after {
   transform: translateY(-1px) rotate(90deg);
 }
 
-.agent-workflow-disclosure:hover > summary.agent-workflow-line::after,
-.agent-workflow-disclosure > summary.agent-workflow-line:focus-visible::after {
+.agent-activity-disclosure:hover > summary.agent-activity-line::after,
+.agent-activity-disclosure > summary.agent-activity-line:focus-visible::after {
   opacity: 0.72;
 }
 
-.agent-workflow-expanded-detail {
+.agent-activity-expanded-detail {
   margin: 4px 0 0;
   max-width: min(680px, 100%);
   color: color-mix(in oklch, var(--fg) 70%, var(--muted));
@@ -145,10 +145,10 @@
   line-height: 1.72;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
-  animation: agent-workflow-detail-enter 150ms var(--motion-ease-standard) both;
+  animation: agent-activity-detail-enter 150ms var(--motion-ease-standard) both;
 }
 
-.agent-workflow-label {
+.agent-activity-label {
   display: inline-flex;
   align-items: center;
   gap: 7px;
@@ -159,7 +159,7 @@
   letter-spacing: -0.01em;
 }
 
-.agent-workflow-label::after {
+.agent-activity-label::after {
   content: "";
   width: 3px;
   height: 3px;
@@ -167,11 +167,11 @@
   background: color-mix(in oklch, var(--muted) 36%, transparent);
 }
 
-.agent-workflow-step[data-current="true"] .agent-workflow-label {
+.agent-activity-step[data-current="true"] .agent-activity-label {
   color: color-mix(in oklch, var(--fg) 78%, var(--accent-strong));
 }
 
-.agent-workflow-detail {
+.agent-activity-detail {
   display: -webkit-box;
   flex: 1 1 auto;
   min-width: 0;
@@ -183,50 +183,50 @@
   white-space: normal;
 }
 
-.agent-workflow-step.thinking:not([data-current="true"]) .agent-workflow-detail {
+.agent-activity-step.thinking:not([data-current="true"]) .agent-activity-detail {
   color: color-mix(in oklch, var(--muted) 82%, var(--fg));
 }
 
-.agent-workflow-disclosure[data-tone="thinking"] > summary.agent-workflow-line::after {
+.agent-activity-disclosure[data-tone="thinking"] > summary.agent-activity-line::after {
   opacity: 0.26;
 }
 
-.agent-workflow-disclosure[data-tone="thinking"][open] > summary .agent-workflow-detail {
+.agent-activity-disclosure[data-tone="thinking"][open] > summary .agent-activity-detail {
   color: color-mix(in oklch, var(--muted) 76%, var(--fg));
   -webkit-line-clamp: 1;
 }
 
-.agent-workflow-disclosure[data-tone="thinking"] .agent-workflow-expanded-detail {
+.agent-activity-disclosure[data-tone="thinking"] .agent-activity-expanded-detail {
   border-left: 1px solid color-mix(in oklch, var(--border) 42%, transparent);
   margin-left: 1px;
   padding-left: 12px;
   color: color-mix(in oklch, var(--fg) 72%, var(--muted));
 }
 
-.agent-workflow-step.narration .agent-workflow-detail,
-.agent-workflow-step.system .agent-workflow-detail {
+.agent-activity-step.narration .agent-activity-detail,
+.agent-activity-step.system .agent-activity-detail {
   color: color-mix(in oklch, var(--fg) 68%, var(--muted));
 }
 
-.agent-workflow-step.tool:not([data-current="true"]) .agent-workflow-detail,
-.agent-workflow-step.decision:not([data-current="true"]) .agent-workflow-detail {
+.agent-activity-step.tool:not([data-current="true"]) .agent-activity-detail,
+.agent-activity-step.decision:not([data-current="true"]) .agent-activity-detail {
   color: color-mix(in oklch, var(--fg) 55%, var(--muted));
 }
 
-.agent-workflow-step.confirmation {
+.agent-activity-step.confirmation {
   padding-top: 6px;
 }
 
-.agent-workflow-step.confirmation .agent-workflow-marker {
+.agent-activity-step.confirmation .agent-activity-marker {
   margin-top: 10px;
 }
 
-.agent-workflow-step.confirmation .confirmation-node-body {
+.agent-activity-step.confirmation .confirmation-node-body {
   width: min(680px, 100%);
   padding-top: 0;
 }
 
-@keyframes agent-workflow-enter {
+@keyframes agent-activity-enter {
   from {
     opacity: 0;
   }
@@ -235,7 +235,7 @@
   }
 }
 
-@keyframes agent-workflow-detail-enter {
+@keyframes agent-activity-detail-enter {
   from {
     opacity: 0;
   }
@@ -245,16 +245,16 @@
 }
 
 @media (max-width: 720px) {
-  .agent-workflow-step {
+  .agent-activity-step {
     grid-template-columns: 10px minmax(0, 1fr);
     column-gap: 8px;
   }
 
-  .agent-workflow-step:not(:last-child)::after {
+  .agent-activity-step:not(:last-child)::after {
     left: 4px;
   }
 
-  .agent-workflow-detail {
+  .agent-activity-detail {
     white-space: normal;
     overflow-wrap: anywhere;
   }

@@ -345,9 +345,9 @@ class FixtureToolCenter implements ToolExecutionBroker {
   async execute(
     request: ToolCallRequest,
     _context: ToolExecutionContext,
-    permission?: ToolPermissionCheck
+    permission: ToolPermissionCheck
   ): Promise<ToolCallResult> {
-    if (permission?.allowedTools !== undefined && !permission.allowedTools.includes(request.toolName)) {
+    if (!permission.allowedTools.includes(request.toolName)) {
       return {
         callId: request.callId,
         toolName: request.toolName,

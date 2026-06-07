@@ -49,6 +49,26 @@ test("IntelligenceChannel failed provider path emits model.requested then model.
   assert.deepEqual(eventLog.types(), ["model.requested", "model.failed"]);
 });
 
+test("IntelligenceChannel converts thrown provider errors into failed model facts", async () => {
+  const { channel, eventLog } = createTestChannel({
+    throwError: new Error("provider network unavailable api_key=sk-channel-secret-123456"),
+  });
+
+  const response = await channel.request(createValidModelRequest());
+
+  assert.equal(response.status, "failed");
+  assert.equal(response.failure?.kind, "provider_network");
+  assert.equal(response.failure?.retryable, true);
+  assert.equal(response.failure?.message.includes("provider network unavailable"), true);
+  assert.equal(response.failure?.message.includes("sk-channel-secret"), false);
+  assert.equal(response.failure?.message.includes("[redacted-secret]"), true);
+  assert.deepEqual(eventLog.types(), ["model.requested", "model.failed"]);
+  const failedPayload = eventLog.list().at(-1)?.message.payload as { failureKind?: string; failureMessage?: string };
+  assert.equal(failedPayload.failureKind, "provider_network");
+  assert.equal(failedPayload.failureMessage?.includes("provider network unavailable"), true);
+  assert.equal(failedPayload.failureMessage?.includes("sk-channel-secret"), false);
+});
+
 test("IntelligenceChannel turns contract-violating output into a failed response", async () => {
   const { channel, eventLog } = createTestChannel({ output: { rationale: "Missing required summary." } });
 
@@ -94,6 +114,7 @@ function createTestChannel(options: TestModelProviderOptions = {}) {
 type TestModelProviderOptions = {
   readonly output?: unknown;
   readonly fail?: boolean;
+  readonly throwError?: unknown;
 };
 
 class TestModelProvider implements ModelProvider {
@@ -105,6 +126,9 @@ class TestModelProvider implements ModelProvider {
   constructor(private readonly options: TestModelProviderOptions = {}) {}
 
   async complete(request: ModelRequest): Promise<ModelResponse> {
+    if (this.options.throwError !== undefined) {
+      throw this.options.throwError;
+    }
     if (this.options.fail) {
       return createFailedModelResponse({
         requestId: request.requestId,

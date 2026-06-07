@@ -1,5 +1,5 @@
 import React from "react";
-import type { DesktopWorkSession, PendingConfirmation, TranscriptConfirmation } from "../contracts/run";
+import type { DesktopWorkView, PendingConfirmation, TranscriptConfirmation } from "../contracts/run";
 import { cleanConfirmationSummary } from "../../../confirmation-copy";
 import {
   confirmationForNode,
@@ -9,7 +9,7 @@ import {
 export { cleanConfirmationSummary };
 export { confirmationForNode, confirmationRunId };
 
-export type ConfirmationProjection = PendingConfirmation | NonNullable<DesktopWorkSession["pendingConfirmation"]> | TranscriptConfirmation;
+export type ConfirmationProjection = PendingConfirmation | NonNullable<DesktopWorkView["pendingConfirmation"]> | TranscriptConfirmation;
 
 export function ConfirmationNode(props: {
   readonly confirmation?: ConfirmationProjection;

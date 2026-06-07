@@ -11,7 +11,7 @@ import {
   UndergroundAiConfigurationError,
   type UndergroundAiEnvironment,
   type UndergroundAiProviderFetch,
-} from "./intelligence-channel-factory.js";
+} from "./underground-ai-runtime.js";
 
 export type RealAiSmokeSummary =
   | {

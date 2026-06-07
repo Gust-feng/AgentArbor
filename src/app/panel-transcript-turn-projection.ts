@@ -5,10 +5,10 @@ import {
 import type { LiveRunBuffer } from "./panel-ui-live-run-buffer.js";
 import type { WorklineConversationTurn, WorklineProjectedTurn } from "./panel-ui-chat-workline.js";
 import {
-  answerForWorkSessionTurn,
-  deliverableForWorkSessionTurn,
+  answerForWorkViewTurn,
+  deliverableForWorkViewTurn,
   type AssistantDeliverableLike,
-  type AssistantWorkSessionOutput,
+  type AssistantWorkViewOutput,
 } from "./panel-assistant-message-output.js";
 import {
   pendingForTurn,
@@ -17,7 +17,7 @@ import {
 import { nodesForRun } from "./panel-transcript-node-projection.js";
 import {
   isRefreshingTranscriptRun,
-  withStartupWorkflowNode,
+  withStartupActivityNode,
 } from "./panel-transcript-startup-node.js";
 
 export type AssistantTranscriptRunLike = {
@@ -90,7 +90,7 @@ export function projectAssistantTranscriptTurn<
   readonly run?: AssistantTranscriptRunLike;
   readonly transcriptNodes: readonly TNode[];
   readonly live?: LiveRunBuffer;
-  readonly workSession?: AssistantWorkSessionOutput<TDeliverable>;
+  readonly workView?: AssistantWorkViewOutput<TDeliverable>;
   readonly pending?: TPending;
 }): AssistantTranscriptTurnProjection<TTurn, TDeliverable, TPending> {
   const turn = input.projectedTurn.turn;
@@ -100,7 +100,7 @@ export function projectAssistantTranscriptTurn<
   const startupRunId = displayRunId ?? (unclaimedRunningTurn ? turn.turnId : undefined);
   const live = activeLiveForTurn(input.live, input.run, displayRunId, refreshingRun);
   const runProjection = projectLiveRunTranscript(
-    withStartupWorkflowNode(nodesForRun(input.transcriptNodes, displayRunId), {
+    withStartupActivityNode(nodesForRun(input.transcriptNodes, displayRunId), {
       runId: startupRunId,
       refreshing: refreshingRun || unclaimedRunningTurn,
     }),
@@ -115,9 +115,9 @@ export function projectAssistantTranscriptTurn<
     turn,
     nodes: runProjection.nodes,
   }) ? turn.content : "";
-  const turnAnswer = answerForWorkSessionTurn(input.workSession, displayRunId, turnContentAnswer);
+  const turnAnswer = answerForWorkViewTurn(input.workView, displayRunId, turnContentAnswer);
   const content = liveAnswer?.text ?? (turnAnswer.trim().length > 0 ? turnAnswer : settledAnswerFallback);
-  const deliverable = deliverableForWorkSessionTurn(input.workSession, displayRunId, content);
+  const deliverable = deliverableForWorkViewTurn(input.workView, displayRunId, content);
   const keepStreamMounted = live !== undefined || refreshingRun || unclaimedRunningTurn;
   const shellKey = assistantTurnSlotKey(input.turns, input.turnIndex);
   const hasVisibleAnswer = content.trim().length > 0;

@@ -141,7 +141,7 @@ test("ConfigCenter keeps raw API key out of the normal settings store", async ()
       tavilyMaxResults: 3,
     });
     const webSearch = await configCenter.getWebSearchConfig();
-    const env = await configCenter.createUndergroundAiEnvironment();
+    const env = await configCenter.createModelRuntimeEnvironment();
     const settingsRaw = await fs.readFile(settingsStore.settingsPath, "utf8");
     const secretsRaw = await fs.readFile(secretStore.secretsPath, "utf8");
 
@@ -239,7 +239,7 @@ test("ConfigCenter clears model names explicitly and does not inherit them into 
     const cleared = await configCenter.updateModelProviderConfig({
       clearModel: true,
     });
-    const env = await configCenter.createUndergroundAiEnvironment();
+    const env = await configCenter.createModelRuntimeEnvironment();
 
     assert.equal(saved.model, "custom-chat");
     assert.equal(cleared.model, undefined);
@@ -264,7 +264,7 @@ test("ConfigCenter web search compatibility API stores key only in secret store"
       maxResults: 2,
     });
     const fromGetter = await configCenter.getWebSearchConfig();
-    const env = await configCenter.createUndergroundAiEnvironment();
+    const env = await configCenter.createModelRuntimeEnvironment();
     const settingsRaw = await fs.readFile(settingsStore.settingsPath, "utf8");
     const secretsRaw = await fs.readFile(secretStore.secretsPath, "utf8");
 
@@ -297,7 +297,7 @@ test("ConfigCenter web search provider none disables Tavily environment projecti
     });
     const disabled = await configCenter.updateWebSearchConfig({ provider: "none" });
     const informationAccess = await configCenter.getInformationAccessConfig();
-    const env = await configCenter.createUndergroundAiEnvironment();
+    const env = await configCenter.createModelRuntimeEnvironment();
     const settingsRaw = await fs.readFile(settingsStore.settingsPath, "utf8");
     const secretsRaw = await fs.readFile(secretStore.secretsPath, "utf8");
 
@@ -311,6 +311,46 @@ test("ConfigCenter web search provider none disables Tavily environment projecti
     assert.equal(env.TAVILY_API_KEY, undefined);
     assert.equal(settingsRaw.includes(tavilySecret), false);
     assert.equal(secretsRaw.includes(tavilySecret), true);
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("ConfigCenter can build a model runtime environment from frozen run information access", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-frozen-information-access-"));
+  const currentSecret = "tvly-current-information-secret";
+  const frozenSecret = "tvly-frozen-information-secret";
+  const frozenSecretRef = "secret://local-dev/information-source/tavily/frozen/api-key";
+  try {
+    const settingsStore = new FileSystemNormalSettingsStore(directory);
+    const secretStore = new FileSystemLocalDevSecretStore(directory);
+    const configCenter = new ConfigCenter({ settingsStore, secretStore });
+
+    await configCenter.updateWebSearchConfig({
+      provider: "tavily",
+      apiKey: currentSecret,
+      maxResults: 9,
+    });
+    await secretStore.writeSecret(frozenSecretRef, frozenSecret);
+    const env = await configCenter.createModelRuntimeEnvironment({
+      informationAccess: {
+        sourcePreference: ["docs", "web"],
+        web: {
+          provider: "tavily",
+          providerKind: "tavily",
+          maxResults: 2,
+          secretRef: frozenSecretRef,
+          secretConfigured: true,
+          status: "ready",
+          updatedAt: "2026-06-06T00:00:00.000Z",
+        },
+      },
+    });
+
+    assert.equal(env.AGENTARBOR_TAVILY_API_KEY, frozenSecret);
+    assert.equal(env.AGENTARBOR_TAVILY_MAX_RESULTS, "2");
+    assert.equal(env.AGENTARBOR_INFORMATION_SOURCE_PREFERENCE, "docs,web");
+    assert.notEqual(env.AGENTARBOR_TAVILY_API_KEY, currentSecret);
   } finally {
     await fs.rm(directory, { recursive: true, force: true });
   }
@@ -568,7 +608,7 @@ test("ConfigCenter manages model profiles and keeps profile secrets scoped", asy
       apiKey: "sk-proxy-secret",
     });
     const activated = await configCenter.activateModelProviderProfile("claude-proxy");
-    const env = await configCenter.createUndergroundAiEnvironment({ modelProvider: activated });
+    const env = await configCenter.createModelRuntimeEnvironment({ modelProvider: activated });
     const profiles = await configCenter.listModelProviderProfiles();
     const settingsRaw = await fs.readFile(settingsStore.settingsPath, "utf8");
 

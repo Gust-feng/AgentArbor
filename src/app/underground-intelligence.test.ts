@@ -6,8 +6,9 @@ import { nowIso } from "../kernel/id.js";
 import { NativeIntelligenceChannel } from "../kernel/intelligence/channel.js";
 import { createFailedModelResponse } from "../kernel/intelligence/failures.js";
 import { pendingModelOutputValidation } from "../kernel/intelligence/validation.js";
-import { createDefaultToolCenter, createUndergroundAiRuntimeConfig } from "./intelligence-channel-factory.js";
+import { createDefaultToolCenter } from "./model-runtime/index.js";
 import type { FetchLike } from "./tool-center/index.js";
+import { createUndergroundAiRuntimeConfig } from "./underground-ai-runtime.js";
 import { createUndergroundDemoSummary } from "./underground-demo-summary.js";
 import {
   runUndergroundDirectionSession,

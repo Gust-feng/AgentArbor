@@ -4,10 +4,10 @@ import type { TranscriptNode } from "../domain/basic-agent/index.js";
 import {
   activityItemsForNodes,
   activityLineForNode,
+  displayActivityItemsForNodes,
   readableThinkingCopy,
-  workflowItemsForNodes,
 } from "./panel-transcript-activity-copy.js";
-import { workflowVisibleNodes } from "./panel-transcript-node-projection.js";
+import { activityVisibleNodes } from "./panel-transcript-node-projection.js";
 
 test("thinking copy keeps a single readable expandable detail without a label", () => {
   const text = "## 判断\n\n- 先检查工作区\n- 再决定是否需要确认";
@@ -289,8 +289,8 @@ test("activity item projection derives stable render metadata outside React comp
   assert.equal(items[1]?.tone, "tool");
 });
 
-test("workflow items collapse requested and terminal tool phases into one expandable action", () => {
-  const items = workflowItemsForNodes([
+test("display activity items collapse requested and terminal tool phases into one expandable action", () => {
+  const items = displayActivityItemsForNodes([
     node({
       kind: "tool",
       eventType: "tool.requested",
@@ -315,7 +315,7 @@ test("workflow items collapse requested and terminal tool phases into one expand
   assert.equal(items[0]?.copy.expandedDetail, "发起：README.md\n结果：README.md · 120 bytes");
 });
 
-test("workflow items show a pending command approval once with the concrete command", () => {
+test("display activity items show a pending command approval once with the concrete command", () => {
   const nodes = [
     node({
       kind: "tool",
@@ -347,7 +347,7 @@ test("workflow items show a pending command approval once with the concrete comm
       refs: [{ kind: "tool_call", id: "tool-1" }],
     }),
   ];
-  const items = workflowItemsForNodes(workflowVisibleNodes(nodes));
+  const items = displayActivityItemsForNodes(activityVisibleNodes(nodes));
 
   assert.deepEqual(items.map((item) => item.tone), ["confirmation"]);
   assert.equal(items[0]?.copy.label, "待确认");

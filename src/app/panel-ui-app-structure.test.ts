@@ -17,6 +17,7 @@ test("panel UI app shell delegates data and control work", async () => {
     appConversationRefresh,
     conversationRefresh,
     submitFlow,
+    appObservedRunReadModel,
     appRunProjection,
     appRunController,
     appConversationSession,
@@ -47,6 +48,7 @@ test("panel UI app shell delegates data and control work", async () => {
     readPanelUiSource("app-conversation-refresh.ts"),
     readAppSource("panel-conversation-refresh.ts"),
     readAppSource("panel-ui-submit-flow.ts"),
+    readPanelUiSource("app-observed-run-read-model.ts"),
     readPanelUiSource("app-run-projection.ts"),
     readPanelUiSource("app-run-controller.ts"),
     readPanelUiSource("app-conversation-session.ts"),
@@ -171,6 +173,9 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(appTaskSubmission.includes("optimisticConversationForSubmit"), true);
   assert.equal(appTaskSubmission.includes("immediateRunForStartedConversation"), true);
   assert.equal(appTaskSubmission.includes("liveRunForObservedReplay"), true);
+  assert.equal(appTaskSubmission.includes("runMode"), false);
+  assert.equal(appTaskSubmission.includes("/api/desktop/runs"), false);
+  assert.equal(appTaskSubmission.includes("/api/underground"), false);
   assert.equal(appConversationSession.includes("liveRunForObservedReplay"), true);
   assert.equal(appConversationSession.includes("observedRunId: latestRunId"), true);
   assert.equal(appConversationSession.includes("replay?.cursor.lastSequence ?? run.eventCursor.lastSequence"), true);
@@ -181,6 +186,8 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(appRunController.includes("appendLiveRunEvents(observedRunId, previous.live"), false);
   assert.equal(appRunController.includes("function startLiveUpdates"), false);
   assert.equal(appRunController.includes("function startPolling"), false);
+  assert.equal(appRunController.includes("safeWorkSession"), false);
+  assert.equal(appRunController.includes("loadObservedRunReadModel"), true);
   assert.equal(appTaskSubmission.includes("options.startLiveUpdates(immediateLiveRunId, 0)"), true);
   assert.equal(appTaskSubmission.includes("replay?.cursor.lastSequence ?? 0"), true);
   assert.equal(appLiveRunUpdates.includes("export function createLiveRunUpdateController"), true);
@@ -197,6 +204,12 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(appConversationSession.includes("loadConversationTranscriptNodesByRunId"), true);
   assert.equal(appConversationSession.includes("transcriptNodesByRunId"), true);
   assert.equal(appTaskSubmission.includes("taskSoilInputFromAttachments"), true);
+  assert.equal(appObservedRunReadModel.includes("conversation.currentRun"), true);
+  assert.equal(appObservedRunReadModel.includes("safeBasicRunView"), true);
+  assert.equal(appObservedRunReadModel.includes("safeBasicRun("), false);
+  assert.equal(appObservedRunReadModel.includes("safeWorkSession"), false);
+  assert.equal(appObservedRunReadModel.includes("safeDesktopDetail"), false);
+  assert.equal(appObservedRunReadModel.includes("safeBasicEvents"), false);
   assert.equal(appSettingsController.includes("export function createAppSettingsController"), true);
   assert.equal(appSettingsController.includes("async function persistModelConfig"), true);
   assert.equal(appSettingsController.includes("async function saveModelConfig"), true);

@@ -5,7 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import { FileSystemLocalDevSecretStore, FileSystemNormalSettingsStore } from "../../adapters/config/index.js";
 import { ConfigCenter } from "../config-center.js";
-import { createConfiguredToolCenter, createDefaultToolCenter } from "../intelligence-channel-factory.js";
+import { createConfiguredToolCenter, createDefaultToolCenter } from "../model-runtime/index.js";
 import type { FetchLike } from "../tool-center/index.js";
 
 test("default ToolCenter exposes model-visible search and read tools", async () => {

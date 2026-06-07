@@ -41,6 +41,7 @@ export function basicRunFromRuntimeSnapshot(snapshot: RuntimeRunSnapshot): Basic
     goalSummary: persisted?.goalSummary ?? redactOrdinaryText(snapshot.run.goalSummary, 400),
     status,
     runMode: persisted?.runMode ?? snapshot.run.runMode,
+    agentDefinitionRef: snapshot.run.agentDefinitionRef ?? persisted?.agentDefinitionRef,
     createdAt: persisted?.createdAt ?? snapshot.run.createdAt,
     updatedAt: persisted?.updatedAt ?? snapshot.run.updatedAt,
     currentStep:

@@ -1,9 +1,9 @@
 import type { SanitizedInformationAccessConfig, SanitizedModelProviderConfig } from "../domain/config/index.js";
 import type { RunObservationEventView, RunObservationSnapshot } from "../domain/observation/index.js";
 import type { CandidatePoolCounts, RootletClusterKind } from "../domain/underground/index.js";
-import type { UndergroundAiMode } from "./intelligence-channel-factory.js";
+import type { ModelRuntimeMode } from "./model-runtime/index.js";
+import type { PanelRunSummary } from "./panel-run-summary.js";
 import type { PanelRunStatus } from "./panel-run-status.js";
-import type { UndergroundDemoSummary } from "./underground-demo-summary.js";
 
 export type PanelObservationReadModel = Pick<
   RunObservationSnapshot,
@@ -30,7 +30,7 @@ export type PanelRunTrackingReadModel = {
     readonly abovegroundStatus: RunObservationSnapshot["aboveground"]["status"];
   };
   readonly provider: {
-    readonly requestedMode: UndergroundAiMode;
+    readonly requestedMode: ModelRuntimeMode;
     readonly defaultAiMode: SanitizedModelProviderConfig["defaultAiMode"];
     readonly providerKind: SanitizedModelProviderConfig["providerKind"];
     readonly protocolKind: SanitizedModelProviderConfig["protocolKind"];
@@ -100,7 +100,7 @@ export type PanelRunTrackingReadModel = {
     readonly modelCallRefs: readonly string[];
   };
   readonly agentRunTree?: NonNullable<PanelObservationReadModel["underground"]["agentRunTree"]>;
-  readonly convergence?: UndergroundDemoSummary["underground"]["convergence"];
+  readonly convergence?: PanelRunSummary["underground"]["convergence"];
   readonly package?: {
     readonly id: string;
     readonly version: number;

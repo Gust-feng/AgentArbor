@@ -15,9 +15,9 @@ import {
   writeSseEvent,
 } from "./http-utils.js";
 import { createPersistedPanelRunResponse } from "./persisted-run-response.js";
-import { defaultAiModeForRunKind, parseRunInput } from "./request-parsers.js";
+import { parseRunInput } from "./request-parsers.js";
 import {
-  createCompletedPanelRunResponse,
+  createPanelRunResponse,
   createConfigurationFailedAiSummary,
   panelConfigurationErrorMessage,
   runForPanel,
@@ -26,6 +26,7 @@ import {
 import { createPanelRunJobResponse, type PanelRunJobResponse } from "./run-job-response.js";
 import { persistPanelConversation, persistPanelRun } from "./run-persistence.js";
 import { syncPanelRunStreamEventsForJob } from "./run-stream-sync.js";
+import { resolvePanelRouteRunMode } from "./run-mode-routing.js";
 import { isTerminalPanelRunStatus } from "./runtime-records.js";
 import type { PanelRuntime } from "./runtime.js";
 
@@ -103,20 +104,31 @@ async function handleRunRequest(
   response: ServerResponse,
   runKind: PanelRunKind
 ): Promise<void> {
+  if (runKind === "desktop") {
+    throw new PanelHttpError(
+      400,
+      "desktop_sync_run_not_supported",
+      "Desktop 默认运行入口必须创建异步普通 agent run。"
+    );
+  }
   const body = await readJsonBody(request);
   const config = await runtime.configCenter.getModelProviderConfig();
   const informationAccess = await runtime.configCenter.getInformationAccessConfig();
-  const runInput = parseRunInput(body, defaultAiModeForRunKind(runKind, config.defaultAiMode));
+  const runInput = parseRunInput(body);
+  const runMode = resolveRunModeForRoute(runKind, runInput.requestedRunMode);
+  const aiMode = runInput.aiMode ?? config.defaultAiMode;
 
   try {
-    const run = await runForPanel(runtime, runKind, runInput.goal, runInput.aiMode, runInput.taskSoilInput, runInput.runMode, {
+    const run = await runForPanel(runtime, runKind, runInput.goal, aiMode, runInput.taskSoilInput, runMode, {
+      config,
+      informationAccess,
       reasoningEffort: runInput.reasoningEffort,
     });
-    writeJson(response, 200, await createCompletedPanelRunResponse({
+    writeJson(response, 200, await createPanelRunResponse({
       runtime,
       runKind,
-      runMode: runInput.runMode,
-      requestedMode: runInput.aiMode,
+      runMode,
+      requestedMode: aiMode,
       reasoningEffort: runInput.reasoningEffort,
       run,
     }) satisfies PanelRunResponse);
@@ -152,11 +164,11 @@ async function handleStartRunRequest(
   runKind: PanelRunKind
 ): Promise<void> {
   const body = await readJsonBody(request);
-  const config = await runtime.configCenter.getModelProviderConfig();
-  const runInput = parseRunInput(body, defaultAiModeForRunKind(runKind, config.defaultAiMode));
+  const runInput = parseRunInput(body);
+  const runMode = resolveRunModeForRoute(runKind, runInput.requestedRunMode);
   const basicRun = await runtime.runExecutor.start({
     runKind,
-    runMode: runInput.runMode,
+    runMode,
     goal: runInput.goal,
     aiMode: runInput.aiMode,
     routeDecision: undefined,
@@ -290,8 +302,12 @@ async function createPersistedRunResponse(
   runtime: PanelRuntime,
   snapshot: RuntimeRunSnapshot
 ): Promise<PanelRunJobResponse> {
-  const config = await runtime.configCenter.getModelProviderConfig();
-  const informationAccess = await runtime.configCenter.getInformationAccessConfig();
+  const config =
+    snapshot.run.capabilitySnapshot?.activeModel ??
+    await runtime.configCenter.getModelProviderConfig();
+  const informationAccess =
+    snapshot.run.informationAccess ??
+    await runtime.configCenter.getInformationAccessConfig();
   const conversation =
     snapshot.run.conversationId === undefined
       ? undefined
@@ -306,4 +322,11 @@ async function createPersistedRunResponse(
 
 function runNotFoundMessage(runKind: PanelRunKind): string {
   return runKind === "desktop" ? "未找到 Desktop Shell 运行 job。" : "未找到地下兼容运行 job。";
+}
+
+function resolveRunModeForRoute(
+  runKind: PanelRunKind,
+  requestedRunMode: PanelRunJobResponse["runMode"] | undefined
+): PanelRunJobResponse["runMode"] {
+  return resolvePanelRouteRunMode({ runKind, requestedRunMode });
 }

@@ -20,7 +20,14 @@ test("chat active view filters transcript nodes before building the workline", (
     run: run("run-1", "running"),
     transcriptNodes: [
       node({
-        nodeId: "low-value",
+        nodeId: "low-value-new",
+        kind: "system",
+        eventType: "agent.note.completed",
+        phase: "completed",
+        summary: "内容已整理。",
+      }),
+      node({
+        nodeId: "low-value-legacy",
         kind: "system",
         eventType: "agent.note.completed",
         phase: "completed",
@@ -79,7 +86,7 @@ test("chat active view keeps an empty assistant shell while a run has no transcr
   assert.equal(view.currentRunProjection.nodes.length, 0);
 });
 
-test("chat active view keeps pending runs in the live workflow", () => {
+test("chat active view keeps pending runs in the live activity view", () => {
   const view = projectChatActiveView({
     conversation: {
       turns: [

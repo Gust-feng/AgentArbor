@@ -5,6 +5,7 @@ import test from "node:test";
 import { createTaskSoil } from "../../domain/soil/index.js";
 import type { ToolResultEnvelope } from "../../domain/tools/index.js";
 import type { DesktopAgentSkillContext } from "../desktop-agent-prompts.js";
+import type { BasicAgentContextAgentDefinition } from "./context-ledger-items.js";
 import {
   appendToolEnvelopeToContextLedger,
   createBasicAgentContextLedger,
@@ -12,13 +13,22 @@ import {
 
 const sourceDirectory = path.join(process.cwd(), "src", "app", "basic-agent-runtime");
 const promptDirectory = path.join(process.cwd(), "src", "app", "agent-prompts");
+const LEDGER_TEST_AGENT: BasicAgentContextAgentDefinition = {
+  agentId: "ledger-test-agent",
+  prompt: {
+    promptRef: "prompt:ledger-test-agent:v1",
+    version: "1",
+    systemPrompt: "Ledger test agent prompt. Do not claim that a command ran without tool evidence.",
+  },
+};
 
 test("context ledger keeps safe text and read model projection split from selection", async () => {
-  const [ledgerSource, itemsSource, safeTextSource, readModelSource, promptSource] = await Promise.all([
+  const [ledgerSource, itemsSource, safeTextSource, readModelSource, promptSource, definitionSource] = await Promise.all([
     readFile(path.join(sourceDirectory, "context-ledger.ts"), "utf8"),
     readFile(path.join(sourceDirectory, "context-ledger-items.ts"), "utf8"),
     readFile(path.join(sourceDirectory, "context-ledger-safe-text.ts"), "utf8"),
     readFile(path.join(sourceDirectory, "context-ledger-read-model.ts"), "utf8"),
+    readFile(path.join(promptDirectory, "desktop-root-agent-prompt.ts"), "utf8"),
     readFile(path.join(promptDirectory, "desktop-root-agent.ts"), "utf8"),
   ]);
 
@@ -42,12 +52,16 @@ test("context ledger keeps safe text and read model projection split from select
   assert.equal(ledgerSource.includes("function safePlain"), false);
   assert.equal(itemsSource.includes("export function buildContextLedgerDraftItems"), true);
   assert.equal(itemsSource.includes("export function toolEvidenceItems"), true);
-  assert.equal(itemsSource.includes("DESKTOP_ROOT_AGENT"), true);
+  assert.equal(itemsSource.includes("DESKTOP_ROOT_AGENT"), false);
+  assert.equal(itemsSource.includes("desktop-root-agent"), false);
+  assert.equal(itemsSource.includes("BasicAgentContextAgentDefinition"), true);
   assert.equal(itemsSource.includes("You are AgentArbor Desktop Agent"), false);
   assert.equal(promptSource.includes("DESKTOP_ROOT_AGENT_PROMPT"), true);
-  assert.equal(promptSource.includes("DESKTOP_ROOT_AGENT"), true);
   assert.equal(promptSource.includes("prompt:desktop-root-agent:v1"), true);
   assert.equal(promptSource.includes("You are AgentArbor Desktop Agent"), true);
+  assert.equal(definitionSource.includes('from "./desktop-root-agent-prompt.js"'), true);
+  assert.equal(definitionSource.includes("You are AgentArbor Desktop Agent"), false);
+  assert.equal(definitionSource.includes("export const DESKTOP_ROOT_AGENT: AgentDefinition ="), true);
   assert.equal(itemsSource.includes("function systemContextItem"), true);
   assert.equal(itemsSource.includes("function skillContextItems"), true);
   assert.equal(itemsSource.includes("function historyContextItems"), true);
@@ -85,6 +99,7 @@ test("context ledger records goal, history, attachments, skills, budget, and saf
   });
 
   const ledger = createBasicAgentContextLedger({
+    agentDefinition: LEDGER_TEST_AGENT,
     runId: "run-ledger",
     goal: "summarize attached project without leaking api_key=sk-user-secret",
     taskSoil,
@@ -110,8 +125,8 @@ test("context ledger records goal, history, attachments, skills, budget, and saf
   assert.equal(ledger.runId, "run-ledger");
   const systemItem = ledger.items.find((item) => item.sourceKind === "system");
   assert.notEqual(systemItem, undefined);
-  assert.equal(systemItem?.itemId, "context:system:desktop-agent-session");
-  assert.equal(systemItem?.refs.some((ref) => ref.id === "prompt:desktop-root-agent:v1"), true);
+  assert.equal(systemItem?.itemId, "context:system:ledger-test-agent");
+  assert.equal(systemItem?.refs.some((ref) => ref.id === "prompt:ledger-test-agent:v1"), true);
   assert.equal(systemItem?.summary.includes("Do not claim that a command"), true);
   assert.equal(ledger.items.some((item) => item.sourceKind === "conversation_recent_turn"), true);
   assert.equal(ledger.items.some((item) => item.sourceKind === "task_soil_ref"), true);
@@ -134,6 +149,7 @@ test("context ledger append preserves existing context and adds only safe tool e
     traceId: "trace-append",
   });
   const ledger = createBasicAgentContextLedger({
+    agentDefinition: LEDGER_TEST_AGENT,
     runId: "run-append",
     goal: "answer with evidence",
     taskSoil,
@@ -154,6 +170,7 @@ test("context ledger append preserves existing context and adds only safe tool e
 test("context ledger reports truncation when messages or chars exceed budget", () => {
   const taskSoil = createTaskSoil({ rawGoal: "trim", goalId: "goal-trim", traceId: "trace-trim" });
   const ledger = createBasicAgentContextLedger({
+    agentDefinition: LEDGER_TEST_AGENT,
     runId: "run-trim",
     goal: "trim",
     taskSoil,
@@ -190,6 +207,7 @@ test("context ledger preserves older history until a model-compacted summary is 
   ])).flat();
 
   const ledger = createBasicAgentContextLedger({
+    agentDefinition: LEDGER_TEST_AGENT,
     runId: "run-history",
     goal: "continue from previous work",
     taskSoil,
@@ -233,6 +251,7 @@ test("context ledger uses model-compacted conversation summary when provided", (
   ])).flat();
 
   const ledger = createBasicAgentContextLedger({
+    agentDefinition: LEDGER_TEST_AGENT,
     runId: "run-ai-history",
     goal: "continue from previous work",
     taskSoil,
@@ -262,6 +281,7 @@ test("context ledger keeps recent role history ahead of bulky skills under budge
   ];
 
   const ledger = createBasicAgentContextLedger({
+    agentDefinition: LEDGER_TEST_AGENT,
     runId: "run-history-priority",
     goal: "current message should stay",
     taskSoil,
@@ -288,6 +308,7 @@ test("context ledger keeps recent role history ahead of bulky skills under budge
 test("context ledger conversation history redacts secrets and internal raw fragments", () => {
   const taskSoil = createTaskSoil({ rawGoal: "continue safely", goalId: "goal-safe-history", traceId: "trace-safe-history" });
   const ledger = createBasicAgentContextLedger({
+    agentDefinition: LEDGER_TEST_AGENT,
     runId: "run-safe-history",
     goal: "continue safely",
     taskSoil,

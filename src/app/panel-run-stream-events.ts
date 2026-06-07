@@ -1,5 +1,5 @@
 import type { ArborMessageType } from "../domain/common.js";
-import type { ModelRunReasoningEffort } from "../domain/config/index.js";
+import type { ModelRunReasoningEffort, RunAgentDefinitionRef } from "../domain/config/index.js";
 import {
   createRunObservationEventViews,
   type RunObservationEventView,
@@ -23,7 +23,7 @@ import {
 import type { PanelObservationReadModel } from "./panel-run-tracking-contracts.js";
 import type { PanelRunStatus } from "./panel-run-status.js";
 import type { EventLogEntry } from "../kernel/events/in-memory-event-log.js";
-import type { UndergroundDemoSummary } from "./underground-demo-summary.js";
+import type { PanelRunSummaryPayload } from "./panel-run-summary.js";
 import type { PanelRunStreamEvent, PanelRunStreamEventType } from "./panel-run-stream-contracts.js";
 import {
   agentFabricLabel,
@@ -54,21 +54,23 @@ export function createPanelRunStreamEvents(input: {
   readonly runId: string;
   readonly status: PanelRunStatus;
   readonly eventEntries: readonly EventLogEntry[];
-  readonly summary?: UndergroundDemoSummary | { readonly ai: UndergroundDemoSummary["ai"] };
+  readonly summary?: PanelRunSummaryPayload;
   readonly observation?: PanelObservationReadModel;
   readonly routeDecision?: DesktopIntentDecision;
   readonly desktopMode?: "agent" | "deep";
   readonly reasoningEffort?: ModelRunReasoningEffort;
+  readonly agentDefinitionRef?: Pick<RunAgentDefinitionRef, "agentDisplayName">;
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly error?: { readonly code: string; readonly message: string };
 }): readonly PanelRunStreamEvent[] {
   const events: PanelRunStreamEvent[] = [];
+  const agentLabel = agentSelfLabel(input.agentDefinitionRef);
   const observationViews = createRunObservationEventViews(input.eventEntries);
   const viewBySequence = new Map(observationViews.map((view) => [view.sequence, view]));
+  const ordinaryAgentProjection = isOrdinaryAgentProjection(input.desktopMode, input.routeDecision);
   const suppressOrdinaryChatProgress =
-    (input.desktopMode === "agent" || isOrdinaryChatRoute(input.routeDecision)) &&
-    !hasUserVisibleWorkActivity(input.eventEntries);
+    ordinaryAgentProjection && !hasUserVisibleWorkActivity(input.eventEntries, ordinaryAgentProjection);
   const push = (event: Omit<PanelRunStreamEvent, "sequence">): void => {
     events.push({ ...event, sequence: events.length + 1 });
   };
@@ -78,7 +80,7 @@ export function createPanelRunStreamEvents(input: {
     runId: input.runId,
     type: "run.started",
     createdAt: input.createdAt,
-    agentLabel: "AgentArbor",
+    agentLabel,
     summary: runStartedSummary(input.routeDecision, input.desktopMode),
     status: input.status === "pending" ? "pending" : "running",
     sourceRefs: [],
@@ -86,39 +88,11 @@ export function createPanelRunStreamEvents(input: {
     toolCallRefs: [],
   });
 
-  if (input.status === "cancelled") {
-    push({
-      eventId: `${input.runId}:run.cancelled`,
-      runId: input.runId,
-      type: "run.cancelled",
-      createdAt: input.updatedAt,
-      agentLabel: "AgentArbor",
-      summary: "运行已取消。",
-      status: "cancelled",
-      sourceRefs: [],
-      modelCallRefs: [],
-      toolCallRefs: [],
-    });
-    return events;
-  }
-
-  if (input.status === "blocked") {
-    push({
-      eventId: `${input.runId}:run.blocked`,
-      runId: input.runId,
-      type: "run.blocked",
-      createdAt: input.updatedAt,
-      agentLabel: "AgentArbor",
-      summary: blockedRunSummary(input.error),
-      status: "blocked",
-      sourceRefs: [],
-      modelCallRefs: [],
-      toolCallRefs: [],
-    });
-  }
-
   for (const entry of input.eventEntries) {
     if (shouldSuppressOrdinaryGoalEvent(entry.type, input.desktopMode, input.routeDecision)) {
+      continue;
+    }
+    if (ordinaryAgentProjection && !isOrdinaryAgentStreamEvent(entry.type)) {
       continue;
     }
     if (suppressOrdinaryChatProgress && shouldSuppressOrdinaryChatEvent(entry)) {
@@ -140,10 +114,40 @@ export function createPanelRunStreamEvents(input: {
       runId: input.runId,
       type: "final.result",
       createdAt: input.updatedAt,
-      agentLabel: "AgentArbor",
+      agentLabel,
       summary: finalSummary,
       status: "completed",
       sourceRefs: finalSourceRefs(input),
+      modelCallRefs: [],
+      toolCallRefs: [],
+    });
+  }
+
+  if (input.status === "cancelled") {
+    push({
+      eventId: `${input.runId}:run.cancelled`,
+      runId: input.runId,
+      type: "run.cancelled",
+      createdAt: input.updatedAt,
+      agentLabel,
+      summary: "运行已取消。",
+      status: "cancelled",
+      sourceRefs: [],
+      modelCallRefs: [],
+      toolCallRefs: [],
+    });
+  }
+
+  if (input.status === "blocked") {
+    push({
+      eventId: `${input.runId}:run.blocked`,
+      runId: input.runId,
+      type: "run.blocked",
+      createdAt: input.updatedAt,
+      agentLabel,
+      summary: blockedRunSummary(input.error),
+      status: "blocked",
+      sourceRefs: [],
       modelCallRefs: [],
       toolCallRefs: [],
     });
@@ -155,7 +159,7 @@ export function createPanelRunStreamEvents(input: {
       runId: input.runId,
       type: "run.failed",
       createdAt: input.updatedAt,
-      agentLabel: "AgentArbor",
+      agentLabel,
       summary: runFailedSummary(input.error),
       status: "failed",
       detail: runFailureStreamDetail(input.error),
@@ -168,8 +172,20 @@ export function createPanelRunStreamEvents(input: {
   return events;
 }
 
+function agentSelfLabel(ref: Pick<RunAgentDefinitionRef, "agentDisplayName"> | undefined): string {
+  const label = ref?.agentDisplayName.trim();
+  return label === undefined || label.length === 0 ? "AgentArbor" : label;
+}
+
 function isOrdinaryChatRoute(routeDecision: DesktopIntentDecision | undefined): boolean {
   return routeDecision !== undefined && routeDecision.route !== "task_work_session";
+}
+
+function isOrdinaryAgentProjection(
+  desktopMode: "agent" | "deep" | undefined,
+  routeDecision: DesktopIntentDecision | undefined
+): boolean {
+  return desktopMode === "agent" || isOrdinaryChatRoute(routeDecision);
 }
 
 function shouldSuppressOrdinaryGoalEvent(
@@ -180,7 +196,10 @@ function shouldSuppressOrdinaryGoalEvent(
   return type === "goal.received" && (desktopMode === "agent" || isOrdinaryChatRoute(routeDecision));
 }
 
-function hasUserVisibleWorkActivity(eventEntries: readonly EventLogEntry[]): boolean {
+function hasUserVisibleWorkActivity(
+  eventEntries: readonly EventLogEntry[],
+  ordinaryAgentProjection: boolean
+): boolean {
   return eventEntries.some((entry) => {
     if (entry.type === "tool.requested" || entry.type === "tool.completed" || entry.type === "tool.failed") {
       return true;
@@ -188,8 +207,22 @@ function hasUserVisibleWorkActivity(eventEntries: readonly EventLogEntry[]): boo
     if (entry.type === "user_approval.requested" || entry.type === "user_approval.received") {
       return true;
     }
-    return isAgentFabricStreamType(entry.type);
+    return !ordinaryAgentProjection && isAgentFabricStreamType(entry.type);
   });
+}
+
+function isOrdinaryAgentStreamEvent(type: ArborMessageType): boolean {
+  return type === "goal.received" ||
+    type === "model.requested" ||
+    type === "model.completed" ||
+    type === "model.failed" ||
+    type === "context.compaction.completed" ||
+    type === "context.compaction.failed" ||
+    type === "tool.requested" ||
+    type === "tool.completed" ||
+    type === "tool.failed" ||
+    type === "user_approval.requested" ||
+    type === "user_approval.received";
 }
 
 function shouldSuppressOrdinaryChatEvent(entry: EventLogEntry): boolean {

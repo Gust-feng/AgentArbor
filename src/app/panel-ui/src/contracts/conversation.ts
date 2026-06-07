@@ -1,3 +1,7 @@
+import type {
+  BasicAgentRunView,
+} from "./run";
+
 export type ConversationTurn = {
   readonly turnId: string;
   readonly role: "user" | "assistant";
@@ -21,6 +25,7 @@ export type Conversation = {
   readonly turns: readonly ConversationTurn[];
   readonly activeRunId?: string;
   readonly latestRunId?: string;
+  readonly currentRun?: BasicAgentRunView;
   readonly queuedRunIds?: readonly string[];
   readonly updatedAt?: string;
 };

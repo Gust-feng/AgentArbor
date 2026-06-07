@@ -66,6 +66,7 @@ export function createConvergenceAiAdvisoryTurnPolicy(input: {
 }): AgentTurnPolicy {
   return {
     allowModel: true,
+    allowedTools: [],
     maxModelRounds: 1,
     maxToolRounds: 0,
     fallback: "deterministic",

@@ -2,15 +2,13 @@ import type React from "react";
 import { getJson, postJson } from "./api";
 import { decideRunConfirmation } from "./app-confirmation-decisions";
 import { type ComposerReasoningEffort, type VisibleAiMode } from "./app-config-projection";
-import { createRunReadModelPatch, detailForRun } from "./app-run-projection";
+import { createRunReadModelPatch } from "./app-run-projection";
 import { createLiveRunUpdateController } from "./app-live-run-updates";
+import { loadObservedRunReadModel } from "./app-observed-run-read-model";
 import { stopLiveUpdates } from "./app-runtime-controls";
 import { loadConversationSession, resetConversationSession } from "./app-conversation-session";
 import { submitPanelTask } from "./app-task-submission";
 import type { AppState } from "./app-state";
-import {
-  safeWorkSession,
-} from "./runtime";
 import type { ContextAttachment } from "./contracts/context";
 import type { ConversationSummary } from "./contracts/conversation";
 import type { BasicAgentRun } from "./contracts/run";
@@ -82,18 +80,28 @@ export function createAppRunController(options: AppRunControllerOptions): AppRun
   async function cancelRun(): Promise<void> {
     if (currentRunId === undefined) return;
     const response = await postJson<{ readonly run: BasicAgentRun }>(`/api/basic-agent/runs/${encodeURIComponent(currentRunId)}/cancel`, {});
-    const workSession = await safeWorkSession(currentRunId);
+    const observed = await loadObservedRunReadModel({
+      runId: currentRunId,
+      conversationId: response.run.conversationId,
+      preferredConversation: options.app.conversation,
+      requireFreshRunView: true,
+    });
+    const observedRun = observed.run ?? response.run;
     stopLiveUpdates(options.pollTimer, options.streamRef);
     options.activeRunIdRef.current = currentRunId;
     options.setApp((previous) => {
       const readModel = createRunReadModelPatch(previous, {
         runId: currentRunId,
-        workSession,
-        detail: detailForRun(currentRunId, previous.detail),
+        workView: observed.workView,
+        detail: observed.detail,
+        reusePreviousWorkView: false,
       });
       return {
         ...previous,
-        run: response.run,
+        conversation: observed.conversation ?? previous.conversation,
+        run: observedRun,
+        capabilityResolution: observed.capabilityResolution,
+        capabilityResolutionRunId: observed.capabilityResolution === undefined ? undefined : currentRunId,
         live: undefined,
         ...readModel,
       };

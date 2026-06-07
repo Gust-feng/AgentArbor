@@ -16,11 +16,16 @@ test("panel React workbench consumes Basic Agent projection APIs", async () => {
     appConfigActions,
     appConfirmationDecisions,
     appConversationRefresh,
+    appObservedRunReadModel,
+    appRunProjection,
+    appRunObservationState,
     appRunController,
+    appState,
     appConversationSession,
     appTaskSubmission,
     appLiveRunUpdates,
     appRunObservationSettlement,
+    appRuntimeControls,
     appSettingsController,
     runtime,
     settingsDialog,
@@ -47,11 +52,16 @@ test("panel React workbench consumes Basic Agent projection APIs", async () => {
     readPanelUiSource("app-config-actions.ts"),
     readPanelUiSource("app-confirmation-decisions.ts"),
     readPanelUiSource("app-conversation-refresh.ts"),
+    readPanelUiSource("app-observed-run-read-model.ts"),
+    readPanelUiSource("app-run-projection.ts"),
+    readPanelUiSource("app-run-observation-state.ts"),
     readPanelUiSource("app-run-controller.ts"),
+    readPanelUiSource("app-state.ts"),
     readPanelUiSource("app-conversation-session.ts"),
     readPanelUiSource("app-task-submission.ts"),
     readPanelUiSource("app-live-run-updates.ts"),
     readPanelUiSource("app-run-observation-settlement.ts"),
+    readPanelUiSource("app-runtime-controls.ts"),
     readPanelUiSource("app-settings-controller.ts"),
     readPanelUiSource("runtime.ts"),
     readPanelUiSource(path.join("components", "settings-dialog.tsx")),
@@ -95,7 +105,18 @@ test("panel React workbench consumes Basic Agent projection APIs", async () => {
   assert.equal(appTaskSubmission.includes("runReasoningSettings"), true);
   assert.equal(appTaskSubmission.includes("mergeObservedRunEvents"), true);
   assert.equal(appTaskSubmission.includes("StartedConversationRun"), true);
-  assert.equal(appLiveRunUpdates.includes("safeBasicEvents"), true);
+  assert.equal(appTaskSubmission.includes("runMode"), false);
+  assert.equal(appTaskSubmission.includes("/api/desktop/runs"), false);
+  assert.equal(appTaskSubmission.includes("/api/underground"), false);
+  assert.equal(appLiveRunUpdates.includes("safeBasicEvents"), false);
+  assert.equal(appLiveRunUpdates.includes("safeBasicRunView"), true);
+  assert.equal(appLiveRunUpdates.includes('from "./ui-state"'), false);
+  assert.equal(appLiveRunUpdates.includes("terminalStatuses"), false);
+  assert.equal(appLiveRunUpdates.includes("function isObservedRunSettled"), false);
+  assert.equal(appLiveRunUpdates.includes("isObservedRunSettled(runView.run)"), true);
+  assert.equal(appRuntimeControls.includes("export function shouldKeepRefreshing"), true);
+  assert.equal(appRuntimeControls.includes("export function isObservedRunSettled"), true);
+  assert.equal(appRuntimeControls.includes("return !shouldKeepRefreshing(run.status);"), true);
   assert.equal(appLiveRunUpdates.includes("loadSettledRunProjection"), true);
   assert.equal(appLiveRunUpdates.includes("appStateWithSettledRunProjection"), true);
   assert.equal(appLiveRunUpdates.includes("appStateWithObservedRunProjection"), true);
@@ -110,7 +131,13 @@ test("panel React workbench consumes Basic Agent projection APIs", async () => {
   assert.equal(appRunObservationSettlement.includes("export async function loadSettledRunProjection"), true);
   assert.equal(appRunObservationSettlement.includes("export function appStateWithSettledRunProjection"), true);
   assert.equal(appRunObservationSettlement.includes("export function refreshingFollowUpRun"), true);
+  assert.equal(appRunObservationSettlement.includes("run: view?.run ?? input.run"), true);
+  assert.equal(appRunObservationSettlement.includes("run: settled.run"), true);
+  assert.equal(appRunObservationSettlement.includes("capabilityResolution: view?.capabilityResolution ?? input.capabilityResolution"), false);
+  assert.equal(appRunObservationSettlement.includes("capabilityResolution: view?.capabilityResolution"), true);
   assert.equal(appRunObservationSettlement.includes("loadFollowUpActiveRunProjection"), true);
+  assert.equal(appRunObservationSettlement.includes("safeBasicRunView"), true);
+  assert.equal(appRunObservationSettlement.includes("safeDesktopDetail"), false);
   assert.equal(appRunObservationSettlement.includes("liveRunHasVisibleText"), false);
   assert.equal(appRunObservationSettlement.includes("appendLiveRunEvents"), true);
   assert.equal(appLiveRunUpdates.includes("STREAM_BOOTSTRAP_POLL_INTERVAL_MS"), true);
@@ -118,9 +145,16 @@ test("panel React workbench consumes Basic Agent projection APIs", async () => {
   assert.equal(appLiveRunUpdates.includes("streamDeliveredEvent"), true);
   assert.equal(appLiveRunUpdates.includes("FALLBACK_POLL_INTERVAL_MS"), true);
   assert.equal(runtime.includes("/stream?cursor="), true);
+  assert.equal(runtime.includes("/view?cursor="), true);
+  assert.equal(runtime.includes("/events?cursor="), false);
   assert.equal(runtime.includes("agent.note.delta"), true);
   assert.equal(runtime.includes("agent.note.completed"), true);
-  assert.equal(runtime.includes("/work-session"), true);
+  assert.equal(runtime.includes("agent.delegation.planned"), false);
+  assert.equal(runtime.includes("agent.child.started"), false);
+  assert.equal(runtime.includes("agent.child.completed"), false);
+  assert.equal(runtime.includes("agent.child.waiting"), false);
+  assert.equal(runtime.includes("agent.parent_synthesis.completed"), false);
+  assert.equal(runtime.includes("/work-session"), false);
   assert.equal(app.includes("/api/context/attachments/preview"), false);
   assert.equal(appConfigActions.includes("/api/context/attachments/preview"), false);
   assert.equal(appAttachments.includes("/api/context/attachments/preview"), true);
@@ -134,23 +168,103 @@ test("panel React workbench consumes Basic Agent projection APIs", async () => {
   assert.equal(appConfirmationDecisions.includes("export async function decideRunConfirmation"), true);
   assert.equal(appConfirmationDecisions.includes("isStaleConfirmationError"), true);
   assert.equal(appConfirmationDecisions.includes("refreshRunAfterConfirmationSettled"), true);
+  assert.equal(appConfirmationDecisions.includes("requireFreshRunView: true"), true);
+  assert.equal(appConfirmationDecisions.includes("reusePreviousWorkView: false"), true);
   assert.equal(app.includes("safeDesktopDetail"), false);
   assert.equal(app.includes("safeWorkSession"), false);
   assert.equal(appRunController.includes("/cancel"), true);
   assert.equal(appRunController.includes("/confirmations/"), false);
   assert.equal(appRunController.includes("decideRunConfirmation"), true);
   assert.equal(appRunController.includes("safeDesktopDetail"), false);
-  assert.equal(appRunController.includes("safeWorkSession"), true);
-  assert.equal(appConversationSession.includes("safeDesktopDetail"), true);
-  assert.equal(appConversationSession.includes("safeWorkSession"), true);
+  assert.equal(appRunController.includes("safeWorkSession"), false);
+  assert.equal(appRunController.includes("loadObservedRunReadModel"), true);
+  assert.equal(appRunController.includes("requireFreshRunView: true"), true);
+  assert.equal(appRunController.includes("reusePreviousWorkView: false"), true);
+  assert.equal(appRunController.includes("const observedRun = observed.run ?? response.run"), true);
+  assert.equal(appRunController.includes("capabilityResolution: observed.capabilityResolution ??"), false);
+  assert.equal(appRunController.includes("capabilityResolution: observed.capabilityResolution"), true);
+  assert.equal(appRunController.includes("capabilityResolutionRunId: observed.capabilityResolution === undefined ? undefined : currentRunId"), true);
+  assert.equal(appRunController.includes("run: response.run"), false);
+  assert.equal(appConfirmationDecisions.includes("const observedRun = observed.run ?? response.run"), true);
+  assert.equal(appConfirmationDecisions.includes("shouldKeepRefreshing(observedRun.status)"), true);
+  assert.equal(appConfirmationDecisions.includes("capabilityResolution: observed.capabilityResolution ??"), false);
+  assert.equal(appConfirmationDecisions.includes("capabilityResolution: observed.capabilityResolution"), true);
+  assert.equal(appConfirmationDecisions.includes("capabilityResolutionRunId: observed.capabilityResolution === undefined ? undefined : currentRunId"), true);
+  assert.equal(appConfirmationDecisions.includes("capabilityResolutionRunId: observed.capabilityResolution === undefined ? undefined : input.runId"), true);
+  assert.equal(appConfirmationDecisions.includes("response.run.status"), false);
+  assert.equal(appConfirmationDecisions.includes("run: response.run"), false);
+  assert.equal(appConfirmationDecisions.includes("response.run.eventCursor.lastSequence"), false);
+  assert.equal(appConversationSession.includes("safeDesktopDetail"), false);
+  assert.equal(appConversationSession.includes("safeWorkSession"), false);
+  assert.equal(appConversationSession.includes("conversation.currentRun"), true);
+  assert.equal(runtime.includes("export function ordinaryWorkViewFromRunView"), true);
+  assert.equal(runtime.includes("readonly workSession?: DesktopWorkView"), false);
+  assert.equal(runtime.includes("return view?.workView;"), true);
+  assert.equal(runtime.includes("view?.workSession"), false);
+  assert.equal(appState.includes("readonly workView?: DesktopWorkView"), true);
+  assert.equal(appState.includes("readonly workSession?"), false);
+  for (const readModelEntrySource of [
+    appObservedRunReadModel,
+    appConversationSession,
+    appRunProjection,
+    appRunObservationSettlement,
+    appLiveRunUpdates,
+  ]) {
+    assert.equal(readModelEntrySource.includes("ordinaryWorkViewFromRunView"), true);
+  }
+  for (const panelUiSource of [
+    app,
+    appObservedRunReadModel,
+    appConversationSession,
+    appRunProjection,
+    appRunObservationSettlement,
+    appLiveRunUpdates,
+    appRunController,
+    appTaskSubmission,
+    chatActive,
+    chatTranscriptChain,
+  ]) {
+    assert.equal(panelUiSource.includes(".workSession"), false);
+    assert.equal(panelUiSource.includes("workSession:"), false);
+    assert.equal(panelUiSource.includes(".canvas"), false);
+    assert.equal(panelUiSource.includes("canvas:"), false);
+  }
+  assert.equal(appObservedRunReadModel.includes("currentRun.workSession"), false);
+  assert.equal(appObservedRunReadModel.includes("view?.workSession"), false);
+  assert.equal(appConversationSession.includes("currentRun?.workSession"), false);
+  assert.equal(appRunProjection.includes("view?.workSession"), false);
+  assert.equal(appRunObservationSettlement.includes("view?.workSession"), false);
+  assert.equal(appRunObservationSettlement.includes("currentRun.workSession"), false);
+  assert.equal(appLiveRunUpdates.includes("runView.workSession"), false);
   assert.equal(appRunController.includes("confirmationDecisionStatusMessage"), false);
   assert.equal(appRunController.includes("已提交确认，正在继续处理。"), false);
   assert.equal(appRunController.includes("已记录拒绝，正在让助手重新判断。"), false);
   assert.equal(appRunController.includes("已收到补充指导，正在让助手继续判断。"), false);
   assert.equal(appRunController.includes("error: undefined"), false);
   assert.equal(appConversationSession.includes("error: undefined"), true);
-  assert.equal(runtime.includes("safeWorkSession"), true);
-  assert.equal(runtime.includes("/api/desktop/runs/"), true);
+  assert.equal(runtime.includes("safeWorkSession"), false);
+  assert.equal(runtime.includes("safeDesktopDetail"), false);
+  assert.equal(runtime.includes("safeBasicRun("), false);
+  assert.equal(runtime.includes("/api/desktop/runs/"), false);
+  assert.equal(appObservedRunReadModel.includes("conversation.currentRun"), true);
+  assert.equal(appObservedRunReadModel.includes("fromFreshFetch"), true);
+  assert.equal(appObservedRunReadModel.includes("canUseConversationRun"), true);
+  assert.equal(appObservedRunReadModel.includes("safeBasicRunView"), true);
+  assert.equal(appObservedRunReadModel.includes("safeBasicRun("), false);
+  assert.equal(appObservedRunReadModel.includes("safeWorkSession"), false);
+  assert.equal(appObservedRunReadModel.includes("safeDesktopDetail"), false);
+  assert.equal(appObservedRunReadModel.includes("safeBasicEvents"), false);
+  assert.equal(appState.includes("readonly capabilityResolution?: RunCapabilityResolution"), true);
+  assert.equal(appState.includes("readonly capabilityResolutionRunId?: string"), true);
+  assert.equal(appObservedRunReadModel.includes("readonly capabilityResolution?: RunCapabilityResolution"), true);
+  assert.equal(appObservedRunReadModel.includes("capabilityResolution: currentRun.capabilityResolution"), true);
+  assert.equal(appObservedRunReadModel.includes("capabilityResolution: view?.capabilityResolution"), true);
+  assert.equal(appRunObservationState.includes("function nextCapabilityResolution"), true);
+  assert.equal(appRunObservationState.includes("capabilityResolutionRunId: runId"), true);
+  assert.equal(appRunObservationState.includes("previous.capabilityResolutionRunId === runId"), true);
+  assert.equal(appRunProjection.includes("app.capabilityResolutionRunId === runId ? app.capabilityResolution : undefined"), true);
+  assert.equal(appRunObservationSettlement.includes("capabilityResolution: view?.capabilityResolution"), true);
+  assert.equal(appConversationSession.includes("const capabilityResolution = currentRun?.capabilityResolution"), true);
   assert.equal(app.includes("/api/config/model-profiles"), false);
   assert.equal(app.includes("/model-catalog"), false);
   assert.equal(appConfigActions.includes("/api/config/model-profiles"), true);
@@ -169,22 +283,25 @@ test("panel React workbench consumes Basic Agent projection APIs", async () => {
   assert.equal(transcriptTimeline.includes("export function activityItemsForNodes"), false);
   assert.equal(transcriptTimeline.includes("export function workflowItemsForNodes"), false);
   assert.equal(transcriptActivityCopy.includes("export function activityItemsForNodes"), true);
-  assert.equal(transcriptActivityCopy.includes("export function workflowItemsForNodes"), true);
+  assert.equal(transcriptActivityCopy.includes("export function displayActivityItemsForNodes"), true);
+  assert.equal(transcriptActivityCopy.includes("export function workflowItemsForNodes"), false);
   assert.equal(agentWorkTimelineProjection.includes("export function projectAgentWorkTimelineView"), true);
   assert.equal(agentWorkTimelineProjection.includes("timelineVisibleNodes"), true);
   assert.equal(agentWorkTimelineProjection.includes("timelineConfirmationProjection"), true);
-  assert.equal(agentWorkTimelineProjection.includes("workflowItemsForNodes"), true);
+  assert.equal(agentWorkTimelineProjection.includes("displayActivityItemsForNodes"), true);
+  assert.equal(agentWorkTimelineProjection.includes("workflowItemsForNodes"), false);
   assert.equal(transcriptTimeline.includes("export function compactWorkflowItemsForDisplay"), false);
   assert.equal(transcriptTimeline.includes("export function currentActivityItemForNodes"), false);
   assert.equal(transcriptTimeline.includes("MAX_ACTIVITY_ITEMS"), false);
   assert.equal(transcriptTimeline.includes("COLLAPSED_WORKFLOW_ITEMS"), false);
-  assert.equal(transcriptTimeline.includes("agent-workflow"), true);
-  assert.equal(transcriptTimeline.includes("agent-workflow-step"), true);
-  assert.equal(transcriptTimeline.includes("agent-workflow-step confirmation"), true);
-  assert.equal(transcriptTimeline.includes("agent-workflow-marker"), true);
-  assert.equal(transcriptTimeline.includes("agent-workflow-toggle"), false);
-  assert.equal(transcriptTimeline.includes("agent-workflow-disclosure"), true);
-  assert.equal(transcriptTimeline.includes("agent-workflow-expanded-detail"), true);
+  assert.equal(transcriptTimeline.includes("agent-workflow"), false);
+  assert.equal(transcriptTimeline.includes("agent-activity"), true);
+  assert.equal(transcriptTimeline.includes("agent-activity-step"), true);
+  assert.equal(transcriptTimeline.includes("agent-activity-step confirmation"), true);
+  assert.equal(transcriptTimeline.includes("agent-activity-marker"), true);
+  assert.equal(transcriptTimeline.includes("agent-activity-toggle"), false);
+  assert.equal(transcriptTimeline.includes("agent-activity-disclosure"), true);
+  assert.equal(transcriptTimeline.includes("agent-activity-expanded-detail"), true);
   assert.equal(transcriptTimeline.includes("expandedDetail"), true);
   assert.equal(transcriptTimeline.includes("timelineConfirmationProjection"), false);
   assert.equal(transcriptTimeline.includes("currentConfirmationNode"), false);
@@ -204,7 +321,8 @@ test("panel React workbench consumes Basic Agent projection APIs", async () => {
   assert.equal(chatActive.includes("resultBlocks"), false);
   assert.equal(chatActive.includes("workflowVisibleNodes"), false);
   assert.equal(chatActive.includes("standaloneRefreshing"), false);
-  assert.equal(chatActiveViewProjection.includes("workflowVisibleNodes"), true);
+  assert.equal(chatActiveViewProjection.includes("activityVisibleNodes"), true);
+  assert.equal(chatActiveViewProjection.includes("workflowVisibleNodes"), false);
   assert.equal(chatActiveViewProjection.includes("projectChatActive"), true);
   assert.equal(chatActiveViewProjection.includes("visibleDeliverable"), true);
   assert.equal(chatActiveViewProjection.includes("visibleRunProblem"), true);
@@ -249,9 +367,9 @@ test("panel React workbench consumes Basic Agent projection APIs", async () => {
   assert.equal(chatTranscriptChain.includes("projectAssistantMessageView"), true);
   assert.equal(assistantMessageViewProjection.includes("assistantMessageOutput"), true);
   assert.equal(chatTranscriptChain.includes("panel-transcript-turn-projection"), true);
-  assert.equal(chatTranscriptChain.includes("deliverableForWorkSessionTurn"), false);
-  assert.equal(transcriptTurnProjection.includes("deliverableForWorkSessionTurn"), true);
-  assert.equal(transcriptTurnProjection.includes("answerForWorkSessionTurn"), true);
+  assert.equal(chatTranscriptChain.includes("deliverableForWorkViewTurn"), false);
+  assert.equal(transcriptTurnProjection.includes("deliverableForWorkViewTurn"), true);
+  assert.equal(transcriptTurnProjection.includes("answerForWorkViewTurn"), true);
   assert.equal(chatActive.includes("EvidenceRefs"), false);
   assert.equal(chatActive.includes("NextSteps"), false);
   assert.equal(chatActive.includes("ResultPreview"), false);

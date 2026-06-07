@@ -1,7 +1,8 @@
-import type { BasicAgentCapabilitySnapshot, ModelCapabilities } from "../domain/config/index.js";
+import type { BasicAgentCapabilitySnapshot, ModelCapabilities, RunCapabilityResolution } from "../domain/config/index.js";
 import type { IntelligenceChannel, ModelOutputDelta } from "../domain/intelligence/index.js";
 import type { TaskSoil } from "../domain/soil/index.js";
 import type { ToolExecutionBroker } from "../domain/tools/index.js";
+import type { AgentDefinition } from "./agent-prompts/contracts.js";
 import type { BasicAgentContextPack } from "./basic-agent-runtime/context-pack.js";
 import type { DesktopAgentConversationMessage, DesktopAgentSkillContext } from "./desktop-agent-contracts.js";
 import type {
@@ -13,6 +14,8 @@ import type { MinimalRuntime } from "./runtime.js";
 import type { DesktopTaskSoilInput } from "./task-soil-workspace.js";
 
 export type DesktopAgentSessionStatus = "completed" | "confirmation_needed" | "stopped" | "failed" | "paused";
+
+export type DesktopAgentStopReason = "out_of_fuel" | "context_overflow";
 
 export type DesktopAgentActivity = {
   readonly activityId: string;
@@ -73,10 +76,12 @@ export type DesktopAgentAnswer = {
 
 export type DesktopAgentSessionResult = {
   readonly status: DesktopAgentSessionStatus;
+  readonly stopReason?: DesktopAgentStopReason;
   readonly runtime: MinimalRuntime;
   readonly traceId: string;
   readonly goalId: string;
   readonly taskSoil: TaskSoil;
+  readonly capabilityResolution?: RunCapabilityResolution;
   readonly answer?: DesktopAgentAnswer;
   readonly pendingConfirmation?: DesktopAgentPendingConfirmation;
   readonly contextPack?: Pick<BasicAgentContextPack, "usageSummary" | "items" | "budget" | "truncationReport" | "truncated">;
@@ -109,6 +114,7 @@ export type DesktopAgentSessionRuntimeContext = {
 
 export type RunDesktopAgentSessionOptions = {
   readonly aiMode?: ModelRuntimeMode;
+  readonly agentDefinition?: AgentDefinition;
   readonly aiEnvironment?: ModelRuntimeEnvironment;
   readonly providerFetch?: ModelRuntimeProviderFetch;
   readonly taskSoilInput?: DesktopTaskSoilInput;
@@ -116,7 +122,6 @@ export type RunDesktopAgentSessionOptions = {
   readonly skillContexts?: readonly DesktopAgentSkillContext[];
   readonly modelCapabilities?: ModelCapabilities;
   readonly capabilitySnapshot?: BasicAgentCapabilitySnapshot;
-  readonly allowedTools?: readonly string[];
   readonly platform?: NodeJS.Platform;
   readonly abortSignal?: AbortSignal;
   readonly runtime?: MinimalRuntime;

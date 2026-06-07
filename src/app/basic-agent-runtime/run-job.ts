@@ -1,20 +1,29 @@
-import type { BasicAgentCapabilitySnapshot, ModelRunReasoningEffort, SanitizedInformationAccessConfig, SanitizedModelProviderConfig } from "../../domain/config/index.js";
+import type {
+  BasicAgentCapabilitySnapshot,
+  ModelRunReasoningEffort,
+  RunAgentDefinitionRef,
+  RunCapabilityResolution,
+  SanitizedInformationAccessConfig,
+  SanitizedModelProviderConfig,
+} from "../../domain/config/index.js";
 import type { ConfirmationDecision } from "../../domain/basic-agent/index.js";
-import type { AgentRunTree } from "../../domain/underground/index.js";
+import type { AgentRunTreeAttachment } from "../agent-run-tree-attachment.js";
 import type { ModelRuntimeMode } from "../model-runtime/index.js";
+import type { RunConfigurationFailureSummary, RunSummary } from "../run-summary.js";
 import type { DesktopIntentDecision } from "../desktop-intent-router.js";
 import type { MinimalRuntime } from "../runtime.js";
+import { resolveRunModeForKind } from "../run-mode-policy.js";
+import type { AgentArborRunKind, AgentArborRunMode } from "../run-mode-policy.js";
 import type { DesktopTaskSoilInput } from "../task-soil-workspace.js";
-import type { UndergroundDemoSummary } from "../underground-demo-summary.js";
 import type {
   BasicAgentCompatRunStatus,
   BasicAgentRunProjectionInput,
   BasicAgentRunStreamEventProjectionInput,
 } from "./run-projection.js";
 
-export type BasicAgentRunKind = "desktop" | "underground";
+export type BasicAgentRunKind = AgentArborRunKind;
 
-export type BasicAgentRunMode = "agent" | "deep";
+export type BasicAgentRunMode = AgentArborRunMode;
 
 export type BasicAgentRunStatus = BasicAgentCompatRunStatus;
 
@@ -30,35 +39,40 @@ export type BasicAgentCanvasProjection = {
 export type BasicAgentRunCompletedPayload = {
   readonly config: SanitizedModelProviderConfig;
   readonly informationAccess: SanitizedInformationAccessConfig;
-  readonly summary?: UndergroundDemoSummary;
+  readonly capabilitySnapshot?: BasicAgentCapabilitySnapshot;
+  readonly summary?: RunSummary;
   readonly observation?: unknown;
-  readonly agentRunTree?: AgentRunTree;
+  readonly agentRunTree?: AgentRunTreeAttachment;
   readonly canvas?: BasicAgentCanvasProjection;
+  readonly capabilityResolution?: RunCapabilityResolution;
 };
 
 export type BasicAgentRunFailedPayload = {
   readonly config: SanitizedModelProviderConfig;
   readonly informationAccess: SanitizedInformationAccessConfig;
+  readonly capabilitySnapshot?: BasicAgentCapabilitySnapshot;
+  readonly capabilityResolution?: RunCapabilityResolution;
+  readonly canvas?: BasicAgentCanvasProjection;
   readonly error: {
     readonly code: string;
     readonly message: string;
   };
-  readonly summary?: {
-    readonly ai: UndergroundDemoSummary["ai"];
-  };
+  readonly summary?: RunConfigurationFailureSummary;
 };
 
 export type BasicAgentRunTerminalPayload = {
   readonly config: SanitizedModelProviderConfig;
   readonly informationAccess: SanitizedInformationAccessConfig;
+  readonly capabilitySnapshot?: BasicAgentCapabilitySnapshot;
   readonly reason: {
     readonly code: string;
     readonly message: string;
   };
-  readonly summary?: UndergroundDemoSummary;
+  readonly summary?: RunSummary;
   readonly observation?: unknown;
-  readonly agentRunTree?: AgentRunTree;
+  readonly agentRunTree?: AgentRunTreeAttachment;
   readonly canvas?: BasicAgentCanvasProjection;
+  readonly capabilityResolution?: RunCapabilityResolution;
 };
 
 export type BasicAgentRunConfirmationDecisionRecord = ConfirmationDecision;
@@ -71,9 +85,11 @@ export type BasicAgentRunJob = Omit<BasicAgentRunProjectionInput, "confirmationD
   routeDecision?: DesktopIntentDecision;
   readonly taskSoilInput?: DesktopTaskSoilInput;
   readonly reasoningEffort?: ModelRunReasoningEffort;
+  readonly agentDefinitionRef?: RunAgentDefinitionRef;
   config: SanitizedModelProviderConfig;
   informationAccess: SanitizedInformationAccessConfig;
   capabilitySnapshot?: BasicAgentCapabilitySnapshot;
+  capabilityResolution?: RunCapabilityResolution;
   runtime?: MinimalRuntime;
   traceId?: string;
   goalId?: string;
@@ -95,6 +111,7 @@ export type BasicAgentRunJobCreateInput = {
   readonly routeDecision?: DesktopIntentDecision;
   readonly taskSoilInput?: DesktopTaskSoilInput;
   readonly reasoningEffort?: ModelRunReasoningEffort;
+  readonly agentDefinitionRef?: RunAgentDefinitionRef;
   readonly config: SanitizedModelProviderConfig;
   readonly informationAccess: SanitizedInformationAccessConfig;
   readonly capabilitySnapshot?: BasicAgentCapabilitySnapshot;
@@ -117,3 +134,10 @@ export type BasicAgentRunJobStore = {
     readonly resumedAt: string;
   }): void;
 };
+
+export function resolveBasicAgentRunMode(
+  runKind: BasicAgentRunKind,
+  runMode: BasicAgentRunMode | undefined
+): BasicAgentRunMode {
+  return resolveRunModeForKind(runKind, runMode);
+}

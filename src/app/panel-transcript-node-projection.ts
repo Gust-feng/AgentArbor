@@ -104,10 +104,10 @@ export function visibleTranscriptNodes<TNode extends ProjectableTranscriptNode>(
 }
 
 export function timelineVisibleNodes<TNode extends ProjectableTranscriptNode>(nodes: readonly TNode[]): readonly TNode[] {
-  return workflowVisibleNodes(nodes).filter((node) => node.kind !== "answer");
+  return activityVisibleNodes(nodes).filter((node) => node.kind !== "answer");
 }
 
-export function workflowVisibleNodes<TNode extends ProjectableTranscriptNode>(nodes: readonly TNode[]): readonly TNode[] {
+export function activityVisibleNodes<TNode extends ProjectableTranscriptNode>(nodes: readonly TNode[]): readonly TNode[] {
   const sorted = [...nodes]
     .filter((node) => !isLowValueNode(node))
     .sort(compareNodeOrder);
@@ -262,6 +262,7 @@ function lowValueCopy(value: string | undefined): boolean {
   return isStaleModelProgressSummary(value) ||
     (normalized.includes("助手已选择使用工具") && normalized.includes("工具结果") && normalized.includes("进入后续处理")) ||
     (normalized.includes("模型调用完成") && normalized.includes("可见输出")) ||
+    normalized === "内容已整理" ||
     normalized === "内容已整理并已进入报告或详情";
 }
 

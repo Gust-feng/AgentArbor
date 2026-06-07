@@ -5,7 +5,7 @@ import {
   type TimelineConfirmationProjection,
 } from "./panel-transcript-confirmation-projection.js";
 import {
-  workflowItemsForNodes,
+  displayActivityItemsForNodes,
   type ActivityItem,
 } from "./panel-transcript-activity-copy.js";
 import {
@@ -32,7 +32,7 @@ export function projectAgentWorkTimelineView<
 }): AgentWorkTimelineView<TNode, TConfirmation> {
   const nodes = timelineVisibleNodes(input.nodes);
   const confirmation = timelineConfirmationProjection(confirmationNodesForProjection<TNode, TConfirmation>(nodes), input.pending);
-  const items = workflowItemsForNodes(nodes)
+  const items = displayActivityItemsForNodes(nodes)
     .filter((item) => item.nodeId !== confirmation.currentNodeId);
   return {
     nodes,

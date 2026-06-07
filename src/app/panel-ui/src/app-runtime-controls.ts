@@ -24,3 +24,7 @@ export function stopLiveUpdates(
 export function shouldKeepRefreshing(status: BasicAgentRun["status"]): boolean {
   return status === "queued" || status === "planning" || status === "running";
 }
+
+export function isObservedRunSettled(run: BasicAgentRun): boolean {
+  return !shouldKeepRefreshing(run.status);
+}

@@ -1,8 +1,37 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createTaskSoil } from "../../domain/soil/index.js";
-import type { DesktopAgentSkillContext } from "../desktop-agent-prompts.js";
+import { desktopAgentContextPack, type DesktopAgentSkillContext } from "../desktop-agent-prompts.js";
+import { DESKTOP_ROOT_AGENT } from "../agent-prompts/desktop-root-agent.js";
 import { buildBasicAgentContextPack } from "./context-pack.js";
+import type { BasicAgentContextAgentDefinition } from "./context-ledger-items.js";
+
+const CONTEXT_PACK_TEST_AGENT: BasicAgentContextAgentDefinition = {
+  agentId: "context-pack-test-agent",
+  prompt: {
+    promptRef: "prompt:context-pack-test-agent:v1",
+    version: "1",
+    systemPrompt: "Context pack test agent prompt.",
+  },
+};
+
+test("Desktop Agent context pack uses the default AgentDefinition when none is injected", () => {
+  const taskSoil = createTaskSoil({
+    rawGoal: "answer with the default ordinary agent",
+    goalId: "goal-default-agent-definition",
+    traceId: "trace-default-agent-definition",
+  });
+
+  const pack = desktopAgentContextPack({
+    goal: "answer with the default ordinary agent",
+    taskSoil,
+    conversationHistory: [],
+  });
+
+  assert.equal(pack.messages[0]?.content, DESKTOP_ROOT_AGENT.prompt.systemPrompt);
+  assert.equal(pack.items[0]?.itemId, `context:system:${DESKTOP_ROOT_AGENT.agentId}`);
+  assert.equal(pack.inputRefs.some((ref) => ref.kind === "event" && ref.id === DESKTOP_ROOT_AGENT.prompt.promptRef), true);
+});
 
 test("Basic Agent context pack includes history, task refs, readonly previews, and skills safely", () => {
   const skill: DesktopAgentSkillContext = {
@@ -37,6 +66,7 @@ test("Basic Agent context pack includes history, task refs, readonly previews, a
   });
 
   const pack = buildBasicAgentContextPack({
+    agentDefinition: CONTEXT_PACK_TEST_AGENT,
     goal: "please review this project without exposing api_key=sk-context-secret",
     taskSoil,
     skillContexts: [skill],
@@ -47,6 +77,7 @@ test("Basic Agent context pack includes history, task refs, readonly previews, a
   });
 
   assert.deepEqual(pack.messages.map((message) => message.role), ["system", "system", "user", "assistant", "user"]);
+  assert.equal(pack.messages[0]?.content, CONTEXT_PACK_TEST_AGENT.prompt.systemPrompt);
   assert.equal(pack.inputRefs.some((ref) => ref.kind === "trace" && ref.id === "trace-test"), true);
   assert.equal(pack.items.some((item) => item.sourceKind === "task_soil_ref" && item.visibility === "diagnostic"), true);
   assert.match(pack.usageSummary, /技能 1/);
@@ -60,6 +91,45 @@ test("Basic Agent context pack includes history, task refs, readonly previews, a
   assert.equal(text.includes("api_key"), false);
 });
 
+test("Basic Agent context pack does not expose run facts or tool visibility metadata", () => {
+  const taskSoil = createTaskSoil({
+    rawGoal: "answer using available context",
+    goalId: "goal-no-run-facts",
+    traceId: "trace-no-run-facts",
+    contextRefs: [
+      {
+        ref: "workspace:README.md",
+        kind: "file",
+        summary: "README context",
+      },
+    ],
+  });
+
+  const pack = buildBasicAgentContextPack({
+    agentDefinition: CONTEXT_PACK_TEST_AGENT,
+    goal: "answer using available context",
+    taskSoil,
+    conversationHistory: [
+      { role: "user", content: "previous question", ref: "conversation:no-facts:user" },
+      { role: "assistant", content: "previous answer", ref: "conversation:no-facts:assistant" },
+    ],
+  });
+  const text = JSON.stringify(pack);
+
+  for (const runFactField of [
+    "allowedTools",
+    "toolExposures",
+    "capabilityResolution",
+    "capabilitySnapshot",
+    "agentDefinitionRef",
+    "toolVisibilityProfile",
+    "outputContractId",
+    "defaultMaxOutputTokens",
+  ]) {
+    assert.equal(text.includes(runFactField), false, `context pack must not expose ${runFactField}`);
+  }
+});
+
 test("Basic Agent context pack marks budget truncation instead of overfilling messages", () => {
   const taskSoil = createTaskSoil({
     rawGoal: "summarize",
@@ -68,6 +138,7 @@ test("Basic Agent context pack marks budget truncation instead of overfilling me
   });
 
   const pack = buildBasicAgentContextPack({
+    agentDefinition: CONTEXT_PACK_TEST_AGENT,
     goal: "summarize",
     taskSoil,
     conversationHistory: Array.from({ length: 10 }, (_, index) => ({
@@ -91,6 +162,7 @@ test("Basic Agent context pack keeps current user message last under tight budge
   });
 
   const pack = buildBasicAgentContextPack({
+    agentDefinition: CONTEXT_PACK_TEST_AGENT,
     goal: "this is the current user instruction",
     taskSoil,
     conversationHistory: Array.from({ length: 16 }, (_, index) => ({
@@ -117,6 +189,7 @@ test("Basic Agent context pack preserves history roles without pre-threshold det
   });
 
   const pack = buildBasicAgentContextPack({
+    agentDefinition: CONTEXT_PACK_TEST_AGENT,
     goal: "continue",
     taskSoil,
     conversationHistory: Array.from({ length: 6 }, (_, index) => ([
@@ -173,6 +246,7 @@ test("Basic Agent context pack keeps recent role turns before bulky skill instru
   };
 
   const pack = buildBasicAgentContextPack({
+    agentDefinition: CONTEXT_PACK_TEST_AGENT,
     goal: "continue",
     taskSoil,
     skillContexts: [skill],
@@ -199,6 +273,7 @@ test("Basic Agent context pack derives token budget from model capabilities", ()
   });
 
   const pack = buildBasicAgentContextPack({
+    agentDefinition: CONTEXT_PACK_TEST_AGENT,
     goal: "answer",
     taskSoil,
     conversationHistory: [],

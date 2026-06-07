@@ -1,19 +1,22 @@
-import type { IntelligenceChannel, ModelOutputContract } from "../domain/intelligence/contracts.js";
+import type { IntelligenceChannel } from "../domain/intelligence/contracts.js";
 import type { ConstraintRef } from "../domain/constraints.js";
 import type { TaskSoil } from "../domain/soil/task-soil.js";
 import type { ToolExecutionBroker } from "../domain/tools/contracts.js";
-import { AgentTurnRuntime } from "../kernel/intelligence/agent-turn-runtime.js";
+import {
+  AgentTurnRuntime,
+  type AgentTurnPolicy,
+} from "../kernel/intelligence/agent-turn-runtime.js";
 import {
   compactBasicAgentLoopContextIfNeeded,
   createOpenAITokenCounter,
 } from "./basic-agent-runtime/index.js";
-import { resolveRunCapabilities } from "./capability-policy.js";
 import {
   DESKTOP_ROOT_AGENT,
 } from "./agent-prompts/desktop-root-agent.js";
 import {
-  filterToolNamesVisibleToAgentProfile,
-} from "./agent-prompts/contracts.js";
+  createAgentTurnPolicyFromDefinition,
+  resolveAgentRunCapabilities,
+} from "./agent-definition-runtime.js";
 import {
   createModelRuntimeConfig,
   createModelRuntimeDisabledConfigurationError,
@@ -22,10 +25,13 @@ import {
 import type { MinimalRuntime } from "./runtime.js";
 import type { RunDesktopAgentSessionOptions } from "./desktop-agent-session-contracts.js";
 import type { BasicAgentCapabilitySnapshot } from "../domain/config/contracts.js";
+import type { RunCapabilityResolution } from "../domain/config/index.js";
 import {
   publishContextCompactionCompleted,
   publishContextCompactionFailed,
 } from "./desktop-agent-session-events.js";
+
+type DesktopAgentDefinition = NonNullable<RunDesktopAgentSessionOptions["agentDefinition"]>;
 
 export function createIntelligenceChannelFromOptions(
   aiMode: ModelRuntimeMode,
@@ -37,6 +43,7 @@ export function createIntelligenceChannelFromOptions(
   const config = createModelRuntimeConfig({
     mode: aiMode,
     env: options.aiEnvironment,
+    modelProvider: options.capabilitySnapshot?.activeModel,
     fetch: options.providerFetch,
     onModelOutputDelta: options.onModelOutputDelta,
     streamingMode: options.onModelOutputDelta === undefined ? "respect_profile" : "force_live",
@@ -47,17 +54,32 @@ export function createIntelligenceChannelFromOptions(
   return config.createIntelligenceChannel;
 }
 
-export function createDesktopAgentOutputContract(): ModelOutputContract {
-  return DESKTOP_ROOT_AGENT.outputContract;
+export function createDesktopAgentTurnPolicy(input: {
+  readonly agentDefinition?: DesktopAgentDefinition;
+  readonly traceId: string;
+  readonly goalId: string;
+  readonly allowedTools: readonly string[];
+  readonly modelCapabilities?: BasicAgentCapabilitySnapshot["modelCapabilities"];
+}): AgentTurnPolicy {
+  return createAgentTurnPolicyFromDefinition({
+    agentDefinition: input.agentDefinition ?? DESKTOP_ROOT_AGENT,
+    traceId: input.traceId,
+    goalId: input.goalId,
+    allowedTools: input.allowedTools,
+    modelCapabilities: input.modelCapabilities,
+  });
 }
 
 export function createDesktopAgentTurnRuntime(input: {
   readonly runtime: MinimalRuntime;
+  readonly agentId: string;
+  readonly agentDisplayName: string;
   readonly channel: IntelligenceChannel;
   readonly goal: string;
   readonly traceId: string;
   readonly goalId: string;
   readonly options: RunDesktopAgentSessionOptions;
+  readonly modelCapabilities?: BasicAgentCapabilitySnapshot["modelCapabilities"];
   readonly toolCenter?: ToolExecutionBroker;
 }): AgentTurnRuntime {
   const tokenCounter = createOpenAITokenCounter(resolveActiveModelName(input.options));
@@ -70,15 +92,20 @@ export function createDesktopAgentTurnRuntime(input: {
         goal: input.goal,
         traceId: input.traceId,
         goalId: input.goalId,
+        agentIdentity: {
+          agentId: input.agentId,
+          displayName: input.agentDisplayName,
+        },
         messages: contextInput.messages,
         tools: contextInput.tools,
         intelligenceChannel: input.channel,
-        modelCapabilities: input.options.modelCapabilities,
+        modelCapabilities: input.modelCapabilities,
         tokenCounter,
       });
       if (result.status === "failed") {
         publishContextCompactionFailed({
           runtime: input.runtime,
+          agentId: input.agentId,
           traceId: input.traceId,
           goalId: input.goalId,
           tokenCount: result.tokenCount,
@@ -98,6 +125,7 @@ export function createDesktopAgentTurnRuntime(input: {
       if (result.status === "compacted") {
         publishContextCompactionCompleted({
           runtime: input.runtime,
+          agentId: input.agentId,
           traceId: input.traceId,
           goalId: input.goalId,
           summaryId: result.conversationSummary.summaryId,
@@ -115,35 +143,37 @@ export function createDesktopAgentTurnRuntime(input: {
   });
 }
 
-export function resolveActiveModelName(options: RunDesktopAgentSessionOptions): string | undefined {
-  return options.aiEnvironment?.AGENTARBOR_MODEL_NAME ?? process.env.AGENTARBOR_MODEL_NAME;
+export function resolveDesktopAgentAiMode(options: RunDesktopAgentSessionOptions): ModelRuntimeMode {
+  return options.aiMode ?? options.capabilitySnapshot?.activeModel.defaultAiMode ?? "openai-responses";
 }
 
-export function allowedToolsForDesktopAgent(toolCenter: ToolExecutionBroker): readonly string[] {
-  return filterToolNamesVisibleToAgentProfile(
-    DESKTOP_ROOT_AGENT.toolVisibilityProfile,
-    toolCenter.list().map((tool) => tool.name)
+export function resolveActiveModelName(options: RunDesktopAgentSessionOptions): string | undefined {
+  return (
+    options.capabilitySnapshot?.activeModel.model ??
+    options.aiEnvironment?.AGENTARBOR_MODEL_NAME ??
+    process.env.AGENTARBOR_MODEL_NAME
   );
 }
 
-export function allowedToolsForRun(input: {
-  readonly toolCenter: ToolExecutionBroker;
-  readonly snapshot?: BasicAgentCapabilitySnapshot;
+export function resolveDesktopAgentRunCapabilities(input: {
+  readonly agentDefinition?: DesktopAgentDefinition;
+  readonly snapshot: BasicAgentCapabilitySnapshot;
   readonly goal: string;
   readonly taskSoil: TaskSoil;
+  readonly modelCapabilities?: BasicAgentCapabilitySnapshot["modelCapabilities"];
   readonly platform?: NodeJS.Platform;
-}): readonly string[] {
-  if (input.snapshot === undefined) {
-    return allowedToolsForDesktopAgent(input.toolCenter);
-  }
-  return resolveRunCapabilities({
+}): RunCapabilityResolution {
+  return resolveAgentRunCapabilities({
+    agentDefinition: input.agentDefinition ?? DESKTOP_ROOT_AGENT,
     snapshot: input.snapshot,
     goal: input.goal,
-    agentDefinition: DESKTOP_ROOT_AGENT,
     taskSoil: input.taskSoil,
     platform: input.platform,
-  }).allowedTools;
+    modelCapabilities: input.modelCapabilities,
+  });
 }
+
+export { restrictRunCapabilityResolutionToExecutableTools } from "./agent-definition-runtime.js";
 
 export function constraintRefsFromTaskSoil(taskSoil: TaskSoil): readonly ConstraintRef[] {
   const constraintRefs = taskSoil.constraints.map((constraint): ConstraintRef => ({

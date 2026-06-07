@@ -133,67 +133,95 @@ test("panel fake AI run exposes model and candidate summaries without model prom
   }
 });
 
-test("desktop explicit deep mode runs Underground organization and stops at Plan boundary", async () => {
+test("underground async run exposes deep organization and stops at Plan boundary", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-desktop-fake-"));
   const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
   try {
-    const start = await requestJson(server.url, "/api/desktop/runs", {
+    const start = await requestJson(server.url, "/api/underground/runs", {
       method: "POST",
-      body: { goal: "Build a Desktop Shell visible deep mode direction.", aiMode: "fake", runMode: "deep" },
+      body: { goal: "Build a Desktop Shell visible deep mode direction.", aiMode: "fake" },
     });
     const completed = await waitForRun(
       server.url,
       start.body.runId,
       (body) => body.status === "completed",
-      4_000,
-      "/api/desktop/runs"
+      4_000
     );
 
     assert.equal(start.status, 202);
-    assert.equal(start.body.runKind, "desktop");
+    assert.equal(start.body.runKind, "underground");
     assert.equal(start.body.runMode, "deep");
     assert.equal(start.body.route, undefined);
-    assert.equal(completed.body.runKind, "desktop");
+    assert.equal(completed.body.runKind, "underground");
     assert.equal(completed.body.runMode, "deep");
     assert.equal(completed.body.route, undefined);
-    assert.equal(
-      completed.body.transcript.events.some((event: { type: string; summary?: string }) =>
-        event.type === "run.started" && String(event.summary ?? "").includes("深度处理")
-      ),
-      true
-    );
-    assert.equal(completed.body.canvas.kind, "underground_deep_canvas");
-    assert.equal(completed.body.canvas.task.goalSummary.includes("Desktop Shell visible deep mode direction"), true);
-    assert.equal(completed.body.canvas.underground.status, "approved_package_created");
-    assert.equal(completed.body.canvas.underground.packageRef.validationPassed, true);
-    assert.equal(completed.body.canvas.underground.recommendedDirection.summary.length > 0, true);
-    assert.equal(completed.body.canvas.underground.recommendedDirection.reason.includes("汇总"), true);
-    assert.equal(completed.body.canvas.underground.keyEvidenceRefs.length > 0, true);
-    assert.equal(completed.body.canvas.underground.childRunCount > 0, true);
-    assert.equal(completed.body.canvas.underground.parentSynthesisCount > 0, true);
-    assert.equal(
-      completed.body.transcript.events.some((event: { summary?: string }) =>
-        String(event.summary ?? "").includes("深度处理")
-      ),
-      true
-    );
-    assert.equal(JSON.stringify(completed.body.canvas).includes("Fake parent synthesis"), false);
-    assert.equal(JSON.stringify(completed.body.canvas).includes("Fake Work Session"), false);
-    assert.equal(completed.body.tracking.run.abovegroundStatus, "not_started");
-    assert.notEqual(completed.body.tracking.package, undefined);
-    assert.equal(completed.body.tracking.agentRunTree.childRuns.length > 0, true);
-    assert.equal(completed.body.tracking.agentRunTree.parentSyntheses.length > 0, true);
     assert.equal(completed.body.trace.events.some((event: { type: string }) => event.type === "direction_handoff.completed"), true);
     assert.equal(completed.body.trace.events.some((event: { type: string }) => event.type === "underground.exploration_planned"), true);
     assert.equal(completed.body.trace.events.some((event: { type: string }) => event.type === "artifact.produced"), false);
     assert.equal(completed.body.transcript.events.some((event: { type: string }) => event.type === "final.result"), true);
+    assert.equal(completed.body.observation.eventCursor.eventCount, completed.body.trace.eventCursor.eventCount);
+    assert.equal(completed.body.tracking.modelTotals.requested > 0, true);
+    assert.equal(completed.body.transcript.modelCalls.length > 0, true);
   } finally {
     await server.close();
     await removeTemporaryTree(directory);
   }
 });
 
-test("desktop deep mode real AI contract failure surfaces a stopped diagnostic", async () => {
+test("underground async run keeps the run-created model facts after config changes", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-underground-frozen-model-facts-"));
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+  try {
+    await requestJson(server.url, "/api/config/model-profiles", {
+      method: "POST",
+      body: {
+        profileId: "frozen-fake-runtime",
+        label: "Frozen Fake Runtime",
+        providerKind: "local",
+        protocolKind: "ollama_generate",
+        baseUrl: "http://localhost:11434",
+        model: "frozen-underground-model",
+        defaultAiMode: "fake",
+      },
+    });
+    await requestJson(server.url, "/api/config/model-profiles/frozen-fake-runtime/activate", {
+      method: "POST",
+      body: {},
+    });
+    const start = await requestJson(server.url, "/api/underground/runs", {
+      method: "POST",
+      body: { goal: "Check frozen underground model facts." },
+    });
+    await requestJson(server.url, "/api/config/model-provider", {
+      method: "POST",
+      body: {
+        model: "current-underground-model",
+        defaultAiMode: "none",
+      },
+    });
+    const completed = await waitForRun(
+      server.url,
+      start.body.runId,
+      (body) => body.status === "completed",
+      4_000
+    );
+
+    assert.equal(start.status, 202);
+    assert.equal(start.body.config.model, "frozen-underground-model");
+    assert.equal(start.body.config.defaultAiMode, "fake");
+    assert.equal(start.body.tracking.provider.requestedMode, "fake");
+    assert.equal(completed.body.config.model, "frozen-underground-model");
+    assert.equal(completed.body.config.defaultAiMode, "fake");
+    assert.equal(completed.body.tracking.provider.requestedMode, "fake");
+    assert.equal(completed.body.tracking.provider.model, "frozen-underground-model");
+    assertSafePanelJsonText(completed.text);
+  } finally {
+    await server.close();
+    await removeTemporaryTree(directory);
+  }
+});
+
+test("underground real AI contract failure surfaces a stopped diagnostic", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-desktop-contract-failure-"));
   const secret = "sk-desktop-contract-failure-secret";
   let modelCallCount = 0;
@@ -211,20 +239,18 @@ test("desktop deep mode real AI contract failure surfaces a stopped diagnostic",
         apiKey: secret,
       },
     });
-    const start = await requestJson(server.url, "/api/desktop/runs", {
+    const start = await requestJson(server.url, "/api/underground/runs", {
       method: "POST",
       body: {
         goal: "分析当前仓库并输出报告，Use a real model path with invalid structured output.",
         aiMode: "openai-compatible",
-        runMode: "deep",
       },
     });
     const completed = await waitForRun(
       server.url,
       start.body.runId,
       (body) => body.status === "completed",
-      4_000,
-      "/api/desktop/runs"
+      4_000
     );
     const failedCalls = completed.body.transcript.modelCalls.filter((call: { status: string }) => call.status === "failed");
     const failedCall = failedCalls.at(-1);
@@ -232,13 +258,12 @@ test("desktop deep mode real AI contract failure surfaces a stopped diagnostic",
     assert.equal(completed.body.status, "completed");
     assert.equal(completed.body.runMode, "deep");
     assert.equal(completed.body.error, undefined);
-    assert.equal(completed.body.canvas.kind, "underground_deep_canvas");
-    assert.equal(completed.body.canvas.underground.status, "stopped");
-    assert.equal(completed.body.canvas.underground.packageRef.validationPassed, false);
     assert.equal(completed.body.trace.events.some((event: { type: string }) => event.type === "model.failed"), true);
+    assert.equal(completed.body.trace.events.some((event: { type: string }) => event.type === "direction_handoff.completed"), false);
     assert.equal(modelCallCount >= 1, true);
     assert.equal(failedCall?.failureKind, "output_validation");
     assert.equal(typeof failedCall?.outputContractId, "string");
+    assert.equal(completed.body.transcript.modelCalls.some((call: { status: string }) => call.status === "failed"), true);
     assert.equal(completed.text.includes(secret), false);
     assert.equal(completed.text.includes("bad raw output"), false);
     assert.equal(completed.text.includes("hidden_reasoning"), false);
@@ -249,7 +274,7 @@ test("desktop deep mode real AI contract failure surfaces a stopped diagnostic",
   }
 });
 
-test("desktop deep mode internal decision stream is not rendered as assistant answer on contract failure", async () => {
+test("underground internal decision stream is not rendered as assistant answer on contract failure", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-desktop-internal-stream-filter-"));
   const secret = "sk-desktop-internal-stream-filter-secret";
   const leakedInternalDecision = "我是内部决策流，不应该进入主对话。";
@@ -271,17 +296,16 @@ test("desktop deep mode internal decision stream is not rendered as assistant an
         apiKey: secret,
       },
     });
-    const start = await requestJson(server.url, "/api/desktop/runs", {
+    const start = await requestJson(server.url, "/api/underground/runs", {
       method: "POST",
-      body: { goal: "分析当前仓库并输出报告。", aiMode: "openai-compatible", runMode: "deep" },
+      body: { goal: "分析当前仓库并输出报告。", aiMode: "openai-compatible" },
     });
-    const stream = await requestSse(server.url, `/api/desktop/runs/${encodeURIComponent(start.body.runId)}/stream?cursor=0`);
+    const stream = await requestSse(server.url, `/api/underground/runs/${encodeURIComponent(start.body.runId)}/stream?cursor=0`);
     const completed = await waitForRun(
       server.url,
       start.body.runId,
       (body) => body.status === "completed",
-      4_000,
-      "/api/desktop/runs"
+      4_000
     );
     const liveAssistantDeltas = stream.events.filter(
       (event) => event.type === "model.output.delta" && event.agentLabel === "助手"
@@ -289,8 +313,7 @@ test("desktop deep mode internal decision stream is not rendered as assistant an
 
     assert.equal(modelCallCount >= 1, true);
     assert.equal(completed.body.status, "completed");
-    assert.equal(completed.body.canvas.kind, "underground_deep_canvas");
-    assert.equal(completed.body.canvas.underground.status, "stopped");
+    assert.equal(completed.body.trace.events.some((event: { type: string }) => event.type === "model.failed"), true);
     assert.equal(liveAssistantDeltas.length, 0);
     assert.equal(stream.text.includes(leakedInternalDecision), false);
     assert.equal(completed.text.includes(leakedInternalDecision), false);

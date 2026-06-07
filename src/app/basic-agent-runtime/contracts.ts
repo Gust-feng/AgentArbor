@@ -2,18 +2,20 @@ import type { BasicAgentRun } from "../../domain/basic-agent/index.js";
 import type {
   BasicAgentCapabilitySnapshot,
   ModelRunReasoningEffort,
+  RunAgentDefinitionRef,
+  RunCapabilityResolution,
   SanitizedInformationAccessConfig,
   SanitizedModelProviderConfig,
 } from "../../domain/config/index.js";
 import type { ModelMessage, ModelOutputDelta } from "../../domain/intelligence/index.js";
 import type { ObservationRef } from "../../domain/observation/index.js";
-import type { AgentRunTree } from "../../domain/underground/index.js";
+import type { AgentRunTreeAttachment } from "../agent-run-tree-attachment.js";
 import type { MinimalRuntime } from "../runtime.js";
 import type { DesktopIntentDecision } from "../desktop-intent-router.js";
 import type { DesktopAgentConversationMessage } from "../desktop-agent-contracts.js";
 import type { ModelRuntimeMode } from "../model-runtime/index.js";
+import type { RunSummary } from "../run-summary.js";
 import type { DesktopTaskSoilInput } from "../task-soil-workspace.js";
-import type { UndergroundDemoSummary } from "../underground-demo-summary.js";
 import type { BasicAgentCanvasProjection, BasicAgentRunJob, BasicAgentRunJobStore, BasicAgentRunKind, BasicAgentRunMode } from "./run-job.js";
 
 export type BasicAgentContextSourceKind =
@@ -79,10 +81,20 @@ export type BasicAgentRunExecutionInput = {
 };
 
 export type BasicAgentRunExecutionResult = {
-  readonly summary?: UndergroundDemoSummary;
+  readonly completed?: true;
+  readonly config?: SanitizedModelProviderConfig;
+  readonly informationAccess?: SanitizedInformationAccessConfig;
+  readonly capabilitySnapshot?: BasicAgentCapabilitySnapshot;
+  readonly agentDefinitionRef?: RunAgentDefinitionRef;
+  readonly summary?: RunSummary;
   readonly observation?: unknown;
-  readonly agentRunTree?: AgentRunTree;
+  readonly agentRunTree?: AgentRunTreeAttachment;
   readonly canvas?: BasicAgentCanvasProjection;
+  readonly capabilityResolution?: RunCapabilityResolution;
+  readonly failed?: {
+    readonly code: string;
+    readonly message: string;
+  };
   readonly blocked?: {
     readonly code: string;
     readonly message: string;
@@ -108,9 +120,7 @@ export interface BasicAgentExecutionAdapter {
 }
 
 export type BasicAgentRunExecutorConfig = {
-  readonly getModelProviderConfig: () => Promise<SanitizedModelProviderConfig>;
-  readonly getInformationAccessConfig: () => Promise<SanitizedInformationAccessConfig>;
-  readonly getCapabilitySnapshot?: () => Promise<BasicAgentCapabilitySnapshot>;
+  readonly prepareRunStart: (input: BasicAgentRunStartInput) => Promise<BasicAgentRunStartFacts>;
   readonly runJobs: BasicAgentRunJobStore;
   readonly activeRunJobs: Set<Promise<void>>;
   readonly abortControllers: Map<string, AbortController>;
@@ -123,11 +133,19 @@ export type BasicAgentRunExecutorConfig = {
   readonly onRunFinished: (job: BasicAgentRunJob) => Promise<void> | void;
 };
 
+export type BasicAgentRunStartFacts = {
+  readonly aiMode: ModelRuntimeMode;
+  readonly config: SanitizedModelProviderConfig;
+  readonly informationAccess: SanitizedInformationAccessConfig;
+  readonly capabilitySnapshot?: BasicAgentCapabilitySnapshot;
+  readonly agentDefinitionRef?: RunAgentDefinitionRef;
+};
+
 export type BasicAgentRunStartInput = {
   readonly runKind: BasicAgentRunKind;
   readonly runMode?: BasicAgentRunMode;
   readonly goal: string;
-  readonly aiMode: ModelRuntimeMode;
+  readonly aiMode?: ModelRuntimeMode;
   readonly conversationId?: string;
   readonly assistantTurnId?: string;
   readonly runAfterRunId?: string;

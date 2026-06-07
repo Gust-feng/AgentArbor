@@ -38,6 +38,7 @@ import type {
 
 export type RunPhase =
   | "not_started"
+  | "agent"
   | "underground"
   | "handoff"
   | "aboveground"

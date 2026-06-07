@@ -68,7 +68,13 @@ export type CreateLocalConfigCenterOptions = {
   readonly env?: AgentArborConfigDirectoryEnvironment;
 };
 
-export type UndergroundAiConfigEnvironment = Readonly<Record<string, string | undefined>>;
+export type ModelRuntimeConfigEnvironment = Readonly<Record<string, string | undefined>>;
+export type UndergroundAiConfigEnvironment = ModelRuntimeConfigEnvironment;
+
+export type CreateModelRuntimeEnvironmentInput = {
+  readonly modelProvider?: Pick<SanitizedModelProviderConfig, "secretRef" | "model" | "baseUrl">;
+  readonly informationAccess?: Pick<SanitizedInformationAccessConfig, "sourcePreference" | "web">;
+};
 
 export class ConfigCenterValidationError extends Error {
   constructor(message: string) {
@@ -457,27 +463,37 @@ export class ConfigCenter {
     return toSanitizedWorkspaceConfig(next);
   }
 
-  async createUndergroundAiEnvironment(input: {
-    readonly modelProvider?: Pick<SanitizedModelProviderConfig, "secretRef" | "model" | "baseUrl">;
-  } = {}): Promise<UndergroundAiConfigEnvironment> {
+  async createModelRuntimeEnvironment(
+    input: CreateModelRuntimeEnvironmentInput = {}
+  ): Promise<ModelRuntimeConfigEnvironment> {
     const settings = await this.readOrCreateSettings();
     const modelProvider = input.modelProvider ?? settings.modelProvider;
     const apiKey = await this.options.secretStore.readSecret(modelProvider.secretRef);
-    const informationAccess = normalizeInformationAccessSettings(settings.informationAccess, settings.updatedAt);
+    const currentInformationAccess = normalizeInformationAccessSettings(settings.informationAccess, settings.updatedAt);
+    const sourcePreference = input.informationAccess?.sourcePreference ?? currentInformationAccess.sourcePreference;
+    const webProvider = input.informationAccess?.web.provider ?? currentInformationAccess.webSearch.provider;
+    const tavilySecretRef = input.informationAccess?.web.secretRef ?? currentInformationAccess.tavily.secretRef;
+    const tavilyMaxResults = input.informationAccess?.web.maxResults ?? currentInformationAccess.tavily.maxResults;
     const tavilyApiKey =
-      informationAccess.webSearch.provider === "none"
+      webProvider === "none"
         ? undefined
-        : await this.options.secretStore.readSecret(informationAccess.tavily.secretRef);
+        : await this.options.secretStore.readSecret(tavilySecretRef);
     return {
       AGENTARBOR_MODEL_API_KEY: apiKey,
       AGENTARBOR_MODEL_NAME: modelProvider.model,
       AGENTARBOR_MODEL_BASE_URL: normalizeBaseUrl(modelProvider.baseUrl) ?? DEFAULT_MODEL_PROVIDER_BASE_URL,
       AGENTARBOR_TAVILY_API_KEY: tavilyApiKey,
-      AGENTARBOR_TAVILY_MAX_RESULTS: String(informationAccess.tavily.maxResults),
-      AGENTARBOR_INFORMATION_SOURCE_PREFERENCE: informationAccess.sourcePreference.join(","),
+      AGENTARBOR_TAVILY_MAX_RESULTS: String(tavilyMaxResults),
+      AGENTARBOR_INFORMATION_SOURCE_PREFERENCE: sourcePreference.join(","),
       TAVILY_API_KEY: undefined,
       OPENAI_API_KEY: undefined,
     };
+  }
+
+  async createUndergroundAiEnvironment(
+    input: CreateModelRuntimeEnvironmentInput = {}
+  ): Promise<UndergroundAiConfigEnvironment> {
+    return this.createModelRuntimeEnvironment(input);
   }
 
   private async readOrCreateSettings(): Promise<AgentArborLocalSettings> {

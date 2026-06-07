@@ -3,7 +3,7 @@ import type { Conversation } from "../contracts/conversation";
 import type {
   BasicAgentRun,
   DesktopRunDetail,
-  DesktopWorkSession,
+  DesktopWorkView,
   PendingConfirmation,
   TranscriptNode,
 } from "../contracts/run";
@@ -24,12 +24,12 @@ import {
 export function ChatActive(props: ChatInputProps & {
   readonly conversation?: Conversation;
   readonly run?: BasicAgentRun;
-  readonly workSession?: DesktopWorkSession;
+  readonly workView?: DesktopWorkView;
   readonly transcriptNodes: readonly TranscriptNode[];
   readonly detail?: DesktopRunDetail;
   readonly live?: LiveRunBuffer;
   readonly error?: string;
-  readonly pendingConfirmation?: PendingConfirmation | NonNullable<DesktopWorkSession["pendingConfirmation"]>;
+  readonly pendingConfirmation?: PendingConfirmation | NonNullable<DesktopWorkView["pendingConfirmation"]>;
   readonly onDecision: (decision: "approve_once" | "deny" | "guidance", guidance?: string) => void;
   readonly confirmationBusy: boolean;
 }): React.ReactElement {
@@ -40,14 +40,14 @@ export function ChatActive(props: ChatInputProps & {
     () => projectChatActiveView({
       conversation: props.conversation,
       run: props.run,
-      workSession: props.workSession,
+      workView: props.workView,
       transcriptNodes: props.transcriptNodes,
       detail: props.detail,
       live: props.live,
       error: props.error,
       pendingConfirmation: props.pendingConfirmation,
     }),
-    [props.conversation, props.run, props.workSession, props.transcriptNodes, props.detail, props.live, props.error, props.pendingConfirmation]
+    [props.conversation, props.run, props.workView, props.transcriptNodes, props.detail, props.live, props.error, props.pendingConfirmation]
   );
 
   useLayoutEffect(() => {
@@ -126,7 +126,7 @@ export function ChatActive(props: ChatInputProps & {
                   run={props.run}
                   transcriptNodes={view.transcriptNodes}
                   live={props.live}
-                  workSession={props.workSession}
+                  workView={props.workView}
                   pending={view.pending}
                   onDecision={props.onDecision}
                   confirmationBusy={props.confirmationBusy}

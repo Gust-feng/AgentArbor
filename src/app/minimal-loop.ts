@@ -26,7 +26,7 @@ import {
   type UndergroundAiEnvironment,
   type UndergroundAiMode,
   type UndergroundAiProviderFetch,
-} from "./intelligence-channel-factory.js";
+} from "./underground-ai-runtime.js";
 import type { MinimalRuntime } from "./runtime.js";
 import { runUndergroundDirectionSessionWithIntelligence } from "./underground-direction-session.js";
 import type { ModelOutputDelta } from "../domain/intelligence/index.js";

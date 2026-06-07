@@ -63,6 +63,7 @@ test("executeToolUseLoop completes on plain model text without exposing finish_t
       callerAgentId: "agent-test",
       traceId: "trace-test",
       goalId: "goal-test",
+      allowedTools: [],
       maxModelRounds: 4,
     },
     createValidModelRequest()
@@ -72,6 +73,32 @@ test("executeToolUseLoop completes on plain model text without exposing finish_t
   assert.equal(result.finalOutput.textOutput, "Final answer chosen by the agent.");
   assert.equal(channel.requests.length, 1);
   assert.equal(channel.requests[0]?.tools?.some((tool) => tool.name === "finish_task"), false);
+});
+
+test("executeToolUseLoop exposes only allowed registered tools to the model", async () => {
+  const channel = new SequenceIntelligenceChannel([
+    textResponse("model-request-text", "Final answer with filtered tool catalog."),
+  ]);
+  const center = new TestToolBroker();
+  center.register("web_search", async () => ({ ok: true }));
+  center.register("read_file", async () => ({ ok: true }));
+  center.register("delete_file", async () => ({ ok: true }), "read-write");
+
+  const result = await executeToolUseLoop(
+    {
+      intelligenceChannel: channel,
+      toolCenter: center,
+      callerAgentId: "agent-test",
+      traceId: "trace-test",
+      goalId: "goal-test",
+      allowedTools: ["web_search"],
+    },
+    createValidModelRequest()
+  );
+
+  assert.equal(result.stoppedReason, "no_tool_calls");
+  assert.deepEqual(channel.requests[0]?.tools?.map((tool) => tool.name), ["web_search"]);
+  assert.equal(center.getCallCount(), 0);
 });
 
 test("executeToolUseLoop can hide blocked internal tools from model-visible tools", async () => {
@@ -90,6 +117,7 @@ test("executeToolUseLoop can hide blocked internal tools from model-visible tool
       traceId: "trace-test",
       goalId: "goal-test",
       maxModelRounds: 4,
+      allowedTools: ["web_search", "finish_task"],
       blockedToolNames: ["finish_task"],
     },
     createValidModelRequest()
@@ -97,6 +125,35 @@ test("executeToolUseLoop can hide blocked internal tools from model-visible tool
 
   assert.equal(result.stoppedReason, "no_tool_calls");
   assert.deepEqual(channel.requests[0]?.tools?.map((tool) => tool.name), ["web_search"]);
+});
+
+test("executeToolUseLoop rejects blocked internal tool calls before broker execution", async () => {
+  const channel = new SequenceIntelligenceChannel([
+    toolCallResponse("model-request-test", "call-finish", "finish_task"),
+    textResponse("model-request-final", "Final answer after blocked internal tool."),
+  ]);
+  const center = new PermissionIgnoringToolBroker();
+  center.register("finish_task", async () => ({ ok: true }));
+
+  const result = await executeToolUseLoop(
+    {
+      intelligenceChannel: channel,
+      toolCenter: center,
+      callerAgentId: "agent-test",
+      traceId: "trace-test",
+      goalId: "goal-test",
+      maxModelRounds: 4,
+      allowedTools: ["finish_task"],
+      blockedToolNames: ["finish_task"],
+    },
+    createValidModelRequest()
+  );
+
+  assert.equal(result.stoppedReason, "completed");
+  assert.equal(result.toolCalls[0]?.status, "failed");
+  assert.match(result.toolCalls[0]?.error ?? "", /当前不可用/);
+  assert.equal(center.getCallCount(), 0);
+  assert.deepEqual(channel.requests[1]?.tools?.map((tool) => tool.name), []);
 });
 
 test("executeToolUseLoop returns tool results to the model before natural completion", async () => {
@@ -180,6 +237,7 @@ test("executeToolUseLoop pauses when context maintenance fails", async () => {
       callerAgentId: "agent-test",
       traceId: "trace-test",
       goalId: "goal-test",
+      allowedTools: [],
       maintainContext: async () => ({
         status: "failed",
         message: "Context compaction failed.",
@@ -234,6 +292,7 @@ test("executeToolUseLoop pauses out_of_fuel when model fuel is exhausted before 
       callerAgentId: "agent-test",
       traceId: "trace-test",
       goalId: "goal-test",
+      allowedTools: ["web_search"],
       maxModelRounds: 1,
     },
     createValidModelRequest()
@@ -298,13 +357,13 @@ test("executeToolUseLoop pauses out_of_fuel when the model requests another tool
   assert.equal(channel.requests.length, 2);
 });
 
-test("executeToolUseLoop appends failed tool results without throwing", async () => {
+test("executeToolUseLoop rejects unauthorized tool calls before broker execution", async () => {
   const eventLog = new InMemoryEventLog();
   const channel = new SequenceIntelligenceChannel([
     toolCallResponse("model-request-test", "call-denied", "web_search"),
     completedResponse("model-request-final", { summary: "Fallback after tool failure." }),
   ]);
-  const center = new TestToolBroker();
+  const center = new PermissionIgnoringToolBroker();
   center.register("web_search", async () => ({ ok: true }));
 
   const result = await executeToolUseLoop(
@@ -324,6 +383,8 @@ test("executeToolUseLoop appends failed tool results without throwing", async ()
 
   assert.equal(result.stoppedReason, "completed");
   assert.equal(result.toolCalls[0]?.status, "failed");
+  assert.match(result.toolCalls[0]?.error ?? "", /未授权/);
+  assert.equal(center.getCallCount(), 0);
   assert.deepEqual(eventLog.types(), ["tool.requested", "tool.failed"]);
   assert.equal(channel.requests[1]?.sanitizedMessages.at(-1)?.role, "tool");
 });
@@ -513,7 +574,7 @@ test("executeToolUseLoop uses projected agentContent for model tool continuation
       },
     ],
     has: (name) => name === "read",
-    execute: async (request) => ({
+    execute: async (request, _context, _permission) => ({
       callId: request.callId,
       toolName: request.toolName,
       input: request.input,
@@ -558,6 +619,92 @@ test("executeToolUseLoop uses projected agentContent for model tool continuation
   assert.equal(toolMessageText.includes("envelope model-safe summary"), false);
   assert.equal(toolMessageText.includes("raw-secret-output"), false);
   assert.equal(toolMessageText.includes("sk-raw-tool-secret"), false);
+});
+
+test("executeToolUseLoop redacts projected agentContent before model continuation", async () => {
+  const channel = new SequenceIntelligenceChannel([
+    toolCallResponse("model-request-test", "call-read", "read"),
+    completedResponse("model-request-final", { summary: "Final answer with sanitized projected content." }),
+  ]);
+  const broker: ToolExecutionBroker = {
+    list: () => [
+      {
+        name: "read",
+        description: "Projected read tool.",
+        inputSchema: { type: "object", properties: {} },
+      },
+    ],
+    has: (name) => name === "read",
+    execute: async (request, _context, _permission) => ({
+      callId: request.callId,
+      toolName: request.toolName,
+      input: request.input,
+      output: { raw: "adapter raw output must not be used" },
+      status: "completed",
+      durationMs: 1,
+      projection: {
+        agentContent: {
+          summary: "safe projected summary api_key=sk-agent-content-secret-123456",
+          nested: {
+            token: "sk-agent-content-token-123456",
+          },
+        },
+        uiSummary: "safe UI summary",
+        truncated: false,
+        redacted: true,
+      },
+    }),
+    resetCallCount: () => undefined,
+    getCallCount: () => 1,
+  };
+
+  await executeToolUseLoop(
+    {
+      intelligenceChannel: channel,
+      toolCenter: broker,
+      callerAgentId: "agent-test",
+      traceId: "trace-test",
+      goalId: "goal-test",
+      allowedTools: ["read"],
+    },
+    createValidModelRequest()
+  );
+
+  const toolMessageText = JSON.stringify(channel.requests[1]?.sanitizedMessages.at(-1));
+  assert.equal(toolMessageText.includes("safe projected summary"), true);
+  assert.equal(toolMessageText.includes("sk-agent-content-secret"), false);
+  assert.equal(toolMessageText.includes("sk-agent-content-token"), false);
+  assert.equal(toolMessageText.includes("[redacted-secret]"), true);
+  assert.equal(toolMessageText.includes("[redacted]"), true);
+});
+
+test("executeToolUseLoop redacts tool failure errors before model continuation", async () => {
+  const channel = new SequenceIntelligenceChannel([
+    toolCallResponse("model-request-test", "call-read", "read"),
+    textResponse("model-request-final", "Final answer after redacted tool failure."),
+  ]);
+  const center = new TestToolBroker();
+  center.register("read", async () => {
+    throw new Error("read failed with raw stderr api_key=sk-tool-error-secret-123456");
+  });
+
+  const result = await executeToolUseLoop(
+    {
+      intelligenceChannel: channel,
+      toolCenter: center,
+      callerAgentId: "agent-test",
+      traceId: "trace-test",
+      goalId: "goal-test",
+      allowedTools: ["read"],
+    },
+    createValidModelRequest()
+  );
+
+  const toolMessageText = JSON.stringify(channel.requests[1]?.sanitizedMessages.at(-1));
+  assert.equal(result.toolCalls[0]?.status, "failed");
+  assert.equal(toolMessageText.includes("read failed with raw stderr"), true);
+  assert.equal(toolMessageText.includes("sk-tool-error-secret"), false);
+  assert.equal(toolMessageText.includes("[redacted-secret]"), true);
 });
 
 test("executeToolUseLoop sends full workspace tool facts to the next model turn", async () => {
@@ -632,6 +779,7 @@ test("executeToolUseLoop fails instead of completing on incomplete final model f
         callerAgentId: "agent-test",
         traceId: "trace-test",
         goalId: "goal-test",
+        allowedTools: [],
       },
       createValidModelRequest()
     );
@@ -656,6 +804,7 @@ test("executeToolUseLoop returns a cancelled response when aborted before a mode
       callerAgentId: "agent-test",
       traceId: "trace-test",
       goalId: "goal-test",
+      allowedTools: [],
       abortSignal: abort.signal,
     },
     createValidModelRequest()
@@ -707,6 +856,49 @@ test("executeToolUseLoop executes explicitly read-only tool calls in parallel", 
   assert.equal(result.stoppedReason, "completed");
   assert.equal(result.toolCalls.length, 2);
   assert.equal(maxActive, 2);
+});
+
+test("executeToolUseLoop does not send unauthorized read-only batch calls to the broker", async () => {
+  const channel = new SequenceIntelligenceChannel([
+    {
+      ...completedResponse("model-request-test", undefined),
+      toolCalls: [
+        { callId: "call-a", toolName: "read_a", input: {} },
+        { callId: "call-b", toolName: "read_b", input: {} },
+      ],
+      finishReason: "tool_call",
+    },
+    completedResponse("model-request-final", { summary: "Final answer after filtered batch." }),
+  ]);
+  const center = new PermissionIgnoringToolBroker();
+  const executedTools: string[] = [];
+  center.register("read_a", async () => {
+    executedTools.push("read_a");
+    return { ok: true };
+  }, "read-only");
+  center.register("read_b", async () => {
+    executedTools.push("read_b");
+    return { ok: true };
+  }, "read-only");
+
+  const result = await executeToolUseLoop(
+    {
+      intelligenceChannel: channel,
+      toolCenter: center,
+      callerAgentId: "agent-test",
+      traceId: "trace-test",
+      goalId: "goal-test",
+      allowedTools: ["read_a"],
+    },
+    createValidModelRequest()
+  );
+
+  assert.equal(result.stoppedReason, "completed");
+  assert.deepEqual(result.toolCalls.map((call) => call.status), ["completed", "failed"]);
+  assert.match(result.toolCalls[1]?.error ?? "", /未授权/);
+  assert.deepEqual(executedTools, ["read_a"]);
+  assert.equal(center.getCallCount(), 1);
+  assert.equal(channel.requests[1]?.sanitizedMessages.filter((message) => message.role === "tool").length, 2);
 });
 
 test("executeToolUseLoop keeps read-only URL confirmations on the approval pause path", async () => {
@@ -833,6 +1025,9 @@ test("executeToolUseLoop pauses on approval_required without final synthesis", a
   assert.equal(center.getCallCount(), 0);
   assert.equal(channel.requests.length, 1);
   assert.deepEqual(eventLog.types(), ["tool.requested", "user_approval.requested"]);
+  const approvalEvent = eventLog.list().find((entry) => entry.type === "user_approval.requested");
+  assert.equal(approvalEvent?.message.from.id, "agent-test");
+  assert.equal(approvalEvent?.message.from.role, "agent");
 });
 
 test("resumeToolUseLoopFromApproval executes only a matching approved confirmation", async () => {
@@ -1203,6 +1398,50 @@ test("resumeToolUseLoopFromApproval requires the matching confirmation before co
   assert.equal(center.getCallCount(), 1);
 });
 
+test("resumeToolUseLoopFromApproval does not execute pending tool if resumed policy no longer allows it", async () => {
+  const channel = new SequenceIntelligenceChannel([
+    toolCallResponse("model-request-test", "call-delete", "delete_file"),
+    textResponse("model-request-final", "Final answer after denied delete."),
+  ]);
+  const center = new PermissionIgnoringToolBroker();
+  center.register("delete_file", async () => ({ ok: true }), "read-write");
+  const request = createValidModelRequest();
+  const paused = await executeToolUseLoop(
+    {
+      intelligenceChannel: channel,
+      toolCenter: center,
+      callerAgentId: "agent-test",
+      traceId: "trace-test",
+      goalId: "goal-test",
+      allowedTools: ["delete_file"],
+    },
+    request
+  );
+
+  assert.equal(paused.stoppedReason, "approval_required");
+
+  const resumed = await resumeToolUseLoopFromApproval(
+    {
+      intelligenceChannel: channel,
+      toolCenter: center,
+      callerAgentId: "agent-test",
+      traceId: "trace-test",
+      goalId: "goal-test",
+      allowedTools: [],
+      approvedConfirmationIds: ["confirmation-call-delete"],
+    },
+    request,
+    paused.pendingApproval!
+  );
+
+  assert.equal(resumed.stoppedReason, "completed");
+  assert.equal(resumed.toolCalls[0]?.status, "failed");
+  assert.match(resumed.toolCalls[0]?.error ?? "", /未授权/);
+  assert.equal(center.getCallCount(), 0);
+  assert.equal(channel.requests.length, 2);
+  assert.equal(channel.requests[1]?.tools?.length, 0);
+});
+
 test("resumeToolUseLoopFromConfirmationDecision returns denial as model-visible tool feedback", async () => {
   const eventLog = new InMemoryEventLog();
   const channel = new SequenceIntelligenceChannel([
@@ -1413,8 +1652,8 @@ class ProjectedToolBroker implements ToolExecutionBroker {
     return name in this.projectedContent;
   }
 
-  async execute(request: ToolCallRequest, _context: ToolExecutionContext, permission?: ToolPermissionCheck): Promise<ToolCallResult> {
-    if (permission?.allowedTools !== undefined && !permission.allowedTools.includes(request.toolName)) {
+  async execute(request: ToolCallRequest, _context: ToolExecutionContext, permission: ToolPermissionCheck): Promise<ToolCallResult> {
+    if (!permission.allowedTools.includes(request.toolName)) {
       return failedToolResult(request, `Tool ${request.toolName} is not allowed.`);
     }
     this.callCount += 1;
@@ -1431,6 +1670,83 @@ class ProjectedToolBroker implements ToolExecutionBroker {
         truncated: false,
         redacted: true,
       },
+    };
+  }
+
+  resetCallCount(): void {
+    this.callCount = 0;
+  }
+
+  getCallCount(): number {
+    return this.callCount;
+  }
+}
+
+class PermissionIgnoringToolBroker implements ToolExecutionBroker {
+  private readonly tools = new Map<string, (input: unknown, context: ToolExecutionContext) => Promise<unknown>>();
+  private readonly operationTypes = new Map<string, "read-only" | "read-write" | "execute" | "external-submit">();
+  private callCount = 0;
+
+  register(
+    name: string,
+    execute: (input: unknown, context: ToolExecutionContext) => Promise<unknown>,
+    operationType: "read-only" | "read-write" | "execute" | "external-submit" = "read-only"
+  ): void {
+    this.tools.set(name, execute);
+    this.operationTypes.set(name, operationType);
+  }
+
+  list(): ToolDefinition[] {
+    return [...this.tools.keys()].map((name) => testToolDefinition(
+      name,
+      this.operationTypes.get(name) ?? "read-only"
+    ));
+  }
+
+  has(name: string): boolean {
+    return this.tools.has(name);
+  }
+
+  async execute(
+    request: ToolCallRequest,
+    context: ToolExecutionContext,
+    permission: ToolPermissionCheck
+  ): Promise<ToolCallResult> {
+    const execute = this.tools.get(request.toolName);
+    if (execute === undefined) {
+      return failedToolResult(request, `Tool is not registered: ${request.toolName}`);
+    }
+    const operationType = this.operationTypes.get(request.toolName) ?? "read-only";
+    const confirmationId = `confirmation-${request.callId}`;
+    if (operationType !== "read-only" && permission.approvedConfirmationIds?.includes(confirmationId) !== true) {
+      return {
+        callId: request.callId,
+        toolName: request.toolName,
+        input: request.input,
+        output: undefined,
+        status: "approval_required",
+        error: `Tool ${request.toolName} requires approval.`,
+        durationMs: 0,
+        confirmationRequest: {
+          confirmationId,
+          runId: request.callId,
+          title: "需要确认",
+          actionSummary: `工具 ${request.toolName} 需要确认。`,
+          affectedResources: [],
+          riskLevel: "high",
+          requestedAt: nowIso(),
+          sourceRefs: [`tool:${request.callId}`],
+        },
+      };
+    }
+    this.callCount += 1;
+    return {
+      callId: request.callId,
+      toolName: request.toolName,
+      input: request.input,
+      output: await execute(request.input, context),
+      status: "completed",
+      durationMs: 1,
     };
   }
 
@@ -1483,18 +1799,18 @@ class TestToolBroker implements ToolExecutionBroker {
   async execute(
     request: ToolCallRequest,
     context: ToolExecutionContext,
-    permission?: ToolPermissionCheck
+    permission: ToolPermissionCheck
   ): Promise<ToolCallResult> {
     const execute = this.tools.get(request.toolName);
     if (execute === undefined) {
       return failedToolResult(request, `Tool is not registered: ${request.toolName}`);
     }
-    if (permission?.allowedTools !== undefined && !permission.allowedTools.includes(request.toolName)) {
+    if (!permission.allowedTools.includes(request.toolName)) {
       return failedToolResult(request, `Tool ${request.toolName} is not allowed.`);
     }
     const operationType = this.operationTypes.get(request.toolName) ?? "read-only";
     const confirmationId = `confirmation-${request.callId}`;
-    if (privateUrlFromInput(request.input) !== undefined && permission?.approvedConfirmationIds?.includes(confirmationId) !== true) {
+    if (privateUrlFromInput(request.input) !== undefined && permission.approvedConfirmationIds?.includes(confirmationId) !== true) {
       return {
         callId: request.callId,
         toolName: request.toolName,
@@ -1515,7 +1831,7 @@ class TestToolBroker implements ToolExecutionBroker {
         },
       };
     }
-    if (operationType !== "read-only" && permission?.approvedConfirmationIds?.includes(confirmationId) !== true) {
+    if (operationType !== "read-only" && permission.approvedConfirmationIds?.includes(confirmationId) !== true) {
       return {
         callId: request.callId,
         toolName: request.toolName,

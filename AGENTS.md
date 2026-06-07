@@ -30,7 +30,7 @@ AgentArbor 的模块化首先是按功能闭环模块化，其次才是按技术
 
 ## 项目定位
 
-AgentArbor 是桌面通用 Agent / 桌面任务工作台。用户从统一 Desktop Shell 输入任务和工作区上下文，系统形成 Task Soil，由 Underground Cognitive Runtime 做目标成形、动态派生 child/rootlet agent、多路探索、父层综合和裁决，形成 Plan；Aboveground Execution Runtime 消费 Plan 执行交付，产出 Fruits；运行结果经过 Governance Pipeline 后，只有通过治理的经验才回流 Global Soil。
+AgentArbor 是桌面通用 Agent / 桌面任务工作台。用户从统一 Desktop Shell 输入任务和工作区上下文；当前默认普通 `agent` 先完成连续会话、模型工具循环、确认、安全投影、持久化和工作台结果展示；长期 deep / Agent 集群能力保留为显式深入模式，由 Underground Cognitive Runtime 做目标成形、动态派生 child/rootlet agent、多路探索、父层综合和裁决，形成 Plan，再由 Aboveground Execution Runtime 消费 Plan 执行交付，产出 Fruits；运行结果经过 Governance Pipeline 后，只有通过治理的经验才回流 Global Soil。
 
 当前正式产品主线是：
 
@@ -38,7 +38,9 @@ AgentArbor 是桌面通用 Agent / 桌面任务工作台。用户从统一 Deskt
 Desktop Shell -> Task Soil -> Underground Cognitive Runtime -> Plan -> Aboveground Execution Runtime -> Fruits -> Governance Pipeline -> Global Soil
 ```
 
-长期产品架构事实源是 `docs/架构设计/产品架构/ADR-0022-AgentArbor桌面通用Agent与双运行时架构.md`；当前活跃实现路线是 `docs/架构设计/产品架构/ADR-0024-桌面基础Agent与基础设施优先路线.md`。当前阶段优先打磨默认普通 `agent`，显式 `deep` 入口和 deep 后端能力冻结为未来工作，除非用户重新明确启动，不主动设计、展示或改动 deep 路径。ADR-0018 只保留为历史概念树和植物语义来源。
+长期产品架构事实源是 `docs/架构设计/产品架构/ADR-0022-AgentArbor桌面通用Agent与双运行时架构.md`；当前活跃实现路线是 `docs/架构设计/产品架构/ADR-0024-桌面基础Agent与基础设施优先路线.md`。当前阶段优先打磨默认普通 `agent`；deep / Agent 集群是长期能力边界，不是废弃方向，但当前不做默认入口、不自动触发、不主动扩展后端，除非用户重新明确启动 deep 工作。ADR-0018 只保留为历史概念树和植物语义来源。
+
+Agent 口径必须区分产品架构和实现命名：保留 deep / Agent 集群长期架构，不等于把普通文件编辑、helper、adapter、状态更新或一次模型工具循环包装成 Underground、Plan、Handoff、atomic mutation 或其他超出实际职责的概念名。`atomic` 只能用于真正有全成功/全失败、回滚或一致性边界的场景；普通用户可见动作优先使用“编辑”“补丁”“变更集”等朴素名称。当前正式口径见 `docs/开发指南/01-基础/05-Agent口径与命名.md`。
 
 开发前必须先读：
 
@@ -46,6 +48,7 @@ Desktop Shell -> Task Soil -> Underground Cognitive Runtime -> Plan -> Abovegrou
 - `docs/开发指南/README.md`
 - `docs/开发指南/00-总览.md`
 - `docs/开发指南/01-基础/README.md`
+- `docs/开发指南/01-基础/05-Agent口径与命名.md`
 - `docs/开发指南/02-核心闭环/README.md`
 - `docs/开发指南/03-系统架构/README.md`
 - `docs/开发指南/04-模型与契约/README.md`
@@ -96,6 +99,8 @@ Desktop Shell -> Task Soil -> Underground Cognitive Runtime -> Plan -> Abovegrou
 - 资料只有在具有明确架构或研究价值时才保留；对未来开发没有用的材料必须删除。
 - 文档索引必须准确指向当前存在的文件。
 - 文档内容必须能指导实现，不能只保留口号、历史过程或无主张材料。
+
+此外，根目录必须长期维护 `CURRENT_RUNTIME_MODE.md`，用于说明“当前软件实际如何运行”。该文件是当前默认运行方式、默认入口、默认主执行引擎、普通 Agent 完成语义、前后端职责和默认产品边界的根级事实说明。未来默认运行方式或运行边界发生稳定变化时，必须先更新该文件，再更新代码与其他开发文档。后续开发者在理解当前软件运行方式时，应先阅读该文件，而不是先翻代码。
 
 ## 开发边界
 

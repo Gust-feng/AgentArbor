@@ -12,6 +12,11 @@ export type BasicAgentConversationSummary = {
   readonly modelResponseId?: string;
 };
 
+export type BasicAgentCompactionAgentIdentity = {
+  readonly agentId: string;
+  readonly displayName: string;
+};
+
 export type BasicAgentLoopContextCompactionResult =
   | {
       readonly status: "unchanged";
@@ -38,6 +43,7 @@ export type CompactBasicAgentLoopContextInput = {
   readonly goal: string;
   readonly traceId: string;
   readonly goalId: string;
+  readonly agentIdentity?: BasicAgentCompactionAgentIdentity;
   readonly messages: readonly ModelMessage[];
   readonly tools: readonly ToolDefinition[];
   readonly intelligenceChannel: IntelligenceChannel;
@@ -62,6 +68,7 @@ export type CompactBasicAgentConversationInput = {
   readonly goal: string;
   readonly traceId: string;
   readonly goalId: string;
+  readonly agentIdentity?: BasicAgentCompactionAgentIdentity;
   readonly conversationHistory: readonly DesktopAgentConversationMessage[];
   readonly intelligenceChannel: IntelligenceChannel;
   readonly modelCapabilities?: ModelCapabilities;

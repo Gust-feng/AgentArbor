@@ -21,6 +21,7 @@ import type {
 import { toolDisplayName } from "../../domain/tools/index.js";
 import type { ConstraintRef } from "../../domain/constraints.js";
 import { createId, nowIso } from "../id.js";
+import { createFailedModelResponseFromError } from "./failures.js";
 import {
   executeToolUseLoop,
   resumeToolUseLoopFromApproval,
@@ -35,7 +36,7 @@ export type AgentTurnFallbackBehavior = "deterministic" | "disabled";
 
 export type AgentTurnPolicy = {
   readonly allowModel: boolean;
-  readonly allowedTools?: readonly string[];
+  readonly allowedTools: readonly string[];
   readonly maxModelRounds?: number;
   readonly maxToolRounds?: number;
   readonly fallback: AgentTurnFallbackBehavior;
@@ -115,7 +116,7 @@ export class AgentTurnRuntime {
     return this.executeCore(input, {
       blockedToolNames: ORDINARY_AGENT_INTERNAL_TOOL_NAMES,
       exposeNonFinalOutput: false,
-      enforceRoundLimits: false,
+      enforceRoundLimits: true,
     });
   }
 
@@ -174,16 +175,13 @@ export class AgentTurnRuntime {
         modelRequest
       );
       return toAgentTurnRuntimeResult(policy, loop, modelRequest, semantics);
-    } catch {
-      return {
-        status: "failed",
-        stoppedReason: "runtime_error",
-        fallback: policy.fallback,
-        modelRequestId: requestId,
-        toolCalls: [],
-        modelRounds: 0,
-        toolRounds: 0,
-      };
+    } catch (error) {
+      return runtimeFailureResult({
+        policy,
+        requestId,
+        outputContract: policy.outputContract,
+        error,
+      });
     }
   }
 
@@ -191,7 +189,7 @@ export class AgentTurnRuntime {
     return this.resumeCore(input, {
       blockedToolNames: ORDINARY_AGENT_INTERNAL_TOOL_NAMES,
       exposeNonFinalOutput: false,
-      enforceRoundLimits: false,
+      enforceRoundLimits: true,
     });
   }
 
@@ -209,7 +207,7 @@ export class AgentTurnRuntime {
     return this.resumeWithConfirmationDecisionCore(input, {
       blockedToolNames: ORDINARY_AGENT_INTERNAL_TOOL_NAMES,
       exposeNonFinalOutput: false,
-      enforceRoundLimits: false,
+      enforceRoundLimits: true,
     });
   }
 
@@ -246,16 +244,13 @@ export class AgentTurnRuntime {
         input.pendingApproval.toolLoop
       );
       return toAgentTurnRuntimeResult(policy, loop, input.pendingApproval.modelRequest, semantics);
-    } catch {
-      return {
-        status: "failed",
-        stoppedReason: "runtime_error",
-        fallback: policy.fallback,
-        modelRequestId: input.pendingApproval.modelRequest.requestId,
-        toolCalls: [],
-        modelRounds: 0,
-        toolRounds: 0,
-      };
+    } catch (error) {
+      return runtimeFailureResult({
+        policy,
+        requestId: input.pendingApproval.modelRequest.requestId,
+        outputContract: input.pendingApproval.modelRequest.outputContract,
+        error,
+      });
     }
   }
 
@@ -285,16 +280,13 @@ export class AgentTurnRuntime {
         input.decision
       );
       return toAgentTurnRuntimeResult(policy, loop, input.pendingApproval.modelRequest, semantics);
-    } catch {
-      return {
-        status: "failed",
-        stoppedReason: "runtime_error",
-        fallback: policy.fallback,
-        modelRequestId: input.pendingApproval.modelRequest.requestId,
-        toolCalls: [],
-        modelRounds: 0,
-        toolRounds: 0,
-      };
+    } catch (error) {
+      return runtimeFailureResult({
+        policy,
+        requestId: input.pendingApproval.modelRequest.requestId,
+        outputContract: input.pendingApproval.modelRequest.outputContract,
+        error,
+      });
     }
   }
 }
@@ -365,6 +357,36 @@ function toAgentTurnRuntimeResult(
   };
 }
 
+function runtimeFailureResult(input: {
+  readonly policy: AgentTurnPolicy;
+  readonly requestId: string;
+  readonly outputContract: ModelOutputContract;
+  readonly error: unknown;
+}): AgentTurnRuntimeResult {
+  const finalOutput = createFailedModelResponseFromError({
+    requestId: input.requestId,
+    providerId: "agent-turn-runtime",
+    providerKind: "fake",
+    protocolKind: "openai_compatible_chat_completions",
+    model: "runtime-error",
+    outputKind: input.outputContract.outputKind,
+    error: input.error,
+    fallbackMessage: "Agent turn runtime failed.",
+  });
+
+  return {
+    status: "failed",
+    stoppedReason: "runtime_error",
+    fallback: input.policy.fallback,
+    modelRequestId: input.requestId,
+    modelResponseId: finalOutput.responseId,
+    finalOutput,
+    toolCalls: [],
+    modelRounds: 0,
+    toolRounds: 0,
+  };
+}
+
 function mapStoppedReason(loop: ToolUseLoopResult): AgentTurnRuntimeResult["stoppedReason"] {
   if (loop.stoppedReason === "out_of_fuel") {
     return "out_of_fuel";
@@ -381,7 +403,7 @@ function mapStoppedReason(loop: ToolUseLoopResult): AgentTurnRuntimeResult["stop
 function normalizePolicy(policy: AgentTurnPolicy): AgentTurnPolicy {
   return {
     ...policy,
-    allowedTools: [...(policy.allowedTools ?? [])],
+    allowedTools: [...policy.allowedTools],
     maxModelRounds: normalizeOptionalRoundLimit(policy.maxModelRounds),
     maxToolRounds: normalizeOptionalRoundLimit(policy.maxToolRounds),
     budget: { ...policy.budget },
@@ -415,7 +437,7 @@ const NO_TOOL_BROKER: ToolExecutionBroker = {
   async execute(
     request: ToolCallRequest,
     _context: ToolExecutionContext,
-    _permission?: ToolPermissionCheck
+    _permission: ToolPermissionCheck
   ): Promise<ToolCallResult> {
     return {
       callId: request.callId,

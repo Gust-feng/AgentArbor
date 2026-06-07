@@ -1,6 +1,61 @@
 import type { ObservationRef, TaskStatus } from "./common";
 import type { ContextAttachment } from "./context";
 import type { ToolDisplayProjection } from "./tools";
+import type {
+  PanelBasicAgentReplay,
+  PanelBasicAgentRunDetail,
+  PanelBasicAgentRunView,
+} from "../../../panel-basic-agent-run-view-contracts";
+
+export type RunAgentDefinitionRef = {
+  readonly agentId: string;
+  readonly agentDisplayName: string;
+  readonly promptRef: string;
+  readonly promptVersion: string;
+  readonly outputContractId: string;
+  readonly toolVisibilityProfileId: string;
+  readonly definitionHash?: string;
+};
+
+export type RunToolExposure = {
+  readonly name: string;
+  readonly displayName: string;
+  readonly enabled: boolean;
+  readonly modelVisible: boolean;
+  readonly scopes: readonly string[];
+  readonly availability: "available" | "unavailable";
+  readonly riskLevel: "low" | "medium" | "high";
+  readonly operationType: "read-only" | "read-write" | "execute" | "external-submit";
+  readonly requiresConfirmation: boolean;
+  readonly reason: string;
+};
+
+export type RunCapabilityResolution = {
+  readonly resolutionId: string;
+  readonly snapshotId: string;
+  readonly runMode: "agent" | "deep";
+  readonly agentId: string;
+  readonly agentDisplayName: string;
+  readonly toolVisibilityProfileId: string;
+  readonly allowedTools: readonly string[];
+  readonly toolExposures: readonly RunToolExposure[];
+  readonly enabledSkills: readonly {
+    readonly id: string;
+    readonly name: string;
+    readonly description: string;
+    readonly triggers: readonly string[];
+  }[];
+  readonly mcpDrafts: readonly {
+    readonly draftId: string;
+    readonly source: "mcp";
+    readonly label: string;
+    readonly availability: "configured" | "disabled" | "unavailable";
+    readonly enabled: boolean;
+    readonly reason: string;
+  }[];
+  readonly warnings: readonly string[];
+  readonly createdAt: string;
+};
 
 export type BasicAgentRun = {
   readonly runId: string;
@@ -9,6 +64,7 @@ export type BasicAgentRun = {
   readonly goalSummary: string;
   readonly status: TaskStatus;
   readonly runMode: "agent" | "deep";
+  readonly agentDefinitionRef?: RunAgentDefinitionRef;
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly currentStep?: string;
@@ -121,59 +177,46 @@ export type TranscriptNode = {
   readonly refs: readonly ObservationRef[];
 };
 
-export type DesktopRunDetail = {
-  readonly runId: string;
-  readonly status: string;
-  readonly error?: { readonly code: string; readonly message: string };
-  readonly transcript?: {
-    readonly events?: readonly PanelStreamEvent[];
-    readonly transcriptNodes?: readonly TranscriptNode[];
-  };
-  readonly canvas?: {
-    readonly kind?: string;
-    readonly agent?: {
-      readonly answer?: { readonly answer: string };
-      readonly pendingConfirmation?: {
-        readonly confirmationId: string;
-        readonly title: string;
-        readonly question: string;
-        readonly consequence: string;
-        readonly riskLevel: string;
-        readonly resumeAvailability?: "live" | "lost_after_restart";
-      };
-      readonly context?: {
-        readonly usageSummary?: string;
-        readonly items?: readonly {
-          readonly itemId: string;
-          readonly sourceKind: string;
-          readonly summary: string;
-          readonly truncated?: boolean;
-        }[];
-      };
+export type DesktopRunCanvas = {
+  readonly kind?: string;
+  readonly agent?: {
+    readonly answer?: { readonly answer: string };
+    readonly pendingConfirmation?: {
+      readonly confirmationId: string;
+      readonly title: string;
+      readonly question: string;
+      readonly consequence: string;
+      readonly riskLevel: string;
+      readonly resumeAvailability?: "live" | "lost_after_restart";
     };
-    readonly workSession?: {
-      readonly directAnswer?: { readonly answer: string };
-      readonly report?: {
-        readonly title?: string;
-        readonly decisionSummary?: string;
-        readonly nextActions?: readonly string[];
-      };
-    };
-    readonly underground?: {
-      readonly status?: string;
-      readonly convergenceSummary?: string;
-      readonly recommendedDirection?: { readonly reason?: string };
+    readonly context?: {
+      readonly usageSummary?: string;
+      readonly items?: readonly {
+        readonly itemId: string;
+        readonly sourceKind: string;
+        readonly summary: string;
+        readonly truncated?: boolean;
+      }[];
     };
   };
-  readonly restoredResult?: {
-    readonly title: string;
-    readonly summary: string;
+  readonly underground?: {
+    readonly status?: string;
+    readonly convergenceSummary?: string;
+    readonly recommendedDirection?: { readonly reason?: string };
   };
 };
+
+export type DesktopRunDetail = PanelBasicAgentRunDetail<
+  PanelStreamEvent,
+  TranscriptNode,
+  DesktopRunCanvas
+>;
 
 export type PendingConfirmation = NonNullable<
   NonNullable<NonNullable<DesktopRunDetail["canvas"]>["agent"]>["pendingConfirmation"]
 >;
+
+export type BasicAgentReplay = PanelBasicAgentReplay<RunEvent>;
 
 export type AgentDeliverable = {
   readonly deliverableId: string;
@@ -194,7 +237,7 @@ export type AgentDeliverable = {
   readonly createdAt: string;
 };
 
-export type DesktopWorkSessionAnswer = {
+export type DesktopWorkViewAnswer = {
   readonly title: string;
   readonly content: string;
   readonly evidenceRefs: readonly ObservationRef[];
@@ -230,7 +273,7 @@ export type ContextLedger = {
   };
 };
 
-export type DesktopWorkSession = {
+export type DesktopWorkView = {
   readonly run: BasicAgentRun;
   readonly stage:
     | "drafting"
@@ -260,7 +303,7 @@ export type DesktopWorkSession = {
     readonly requestedAt: string;
     readonly sourceRefs: readonly string[];
   };
-  readonly answer?: DesktopWorkSessionAnswer;
+  readonly answer?: DesktopWorkViewAnswer;
   readonly deliverable?: AgentDeliverable;
   readonly visibleEvents: readonly RunEvent[];
   readonly transcriptNodes?: readonly TranscriptNode[];
@@ -271,3 +314,15 @@ export type DesktopWorkSession = {
     readonly contextAttachmentCount: number;
   };
 };
+
+type BackendBasicAgentRunView = PanelBasicAgentRunView<
+  BasicAgentRun,
+  DesktopWorkView,
+  RunEvent,
+  PanelStreamEvent,
+  TranscriptNode,
+  DesktopRunCanvas,
+  RunCapabilityResolution
+>;
+
+export type BasicAgentRunView = Omit<BackendBasicAgentRunView, "workSession">;

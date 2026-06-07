@@ -3,6 +3,7 @@ import test from "node:test";
 import type { ArborMessage, ArborMessageType } from "../domain/common.js";
 import type { ModelVisibleOutputProjection } from "../domain/intelligence/index.js";
 import type { EventLogEntry } from "../kernel/events/in-memory-event-log.js";
+import type { PanelRunSummary } from "./panel-run-summary.js";
 import { createPanelRunStreamEvents } from "./panel-run-stream-events.js";
 import { createPanelRunTranscript } from "./panel-run-transcript.js";
 import { createPanelTranscriptNodes } from "./panel-transcript-nodes.js";
@@ -36,6 +37,37 @@ test("panel reasoning trace is matched by exact model output contract", () => {
   assert.equal(intentNote?.reasoningTrace?.decisionSummary, "Intent Core shaped the goal.");
   assert.equal(convergenceNote?.reasoningTrace?.decisionSummary, "Convergence Judge selected the handoff candidate.");
   assert.equal(handoffNote?.reasoningTrace, undefined);
+});
+
+test("panel transcript passes frozen ordinary agent identity into desktop work notes", () => {
+  const transcript = createPanelRunTranscript({
+    runId: "run-panel-custom-agent",
+    status: "completed",
+    desktopMode: "agent",
+    agentDefinitionRef: {
+      agentId: "custom-ordinary-agent",
+      agentDisplayName: "Custom Ordinary Agent",
+    },
+    eventEntries: [
+      modelCompletedEntry({
+        sequence: 1,
+        requestId: "request-custom-agent",
+        contractId: "desktop.agent_response.v1",
+        decisionSummary: "Custom ordinary agent answered.",
+      }),
+    ],
+    createdAt: "2026-05-07T00:00:00.000Z",
+    updatedAt: "2026-05-07T00:00:01.000Z",
+  });
+
+  const desktopNote = transcript.workNotes.find((note) => note.noteId.endsWith(":desktop-agent"));
+
+  assert.equal(desktopNote?.agentId, "custom-ordinary-agent");
+  assert.equal(desktopNote?.agentLabel, "Custom Ordinary Agent");
+  assert.equal(transcript.events[0]?.agentLabel, "Custom Ordinary Agent");
+  assert.equal(transcript.events.at(-1)?.agentLabel, "Custom Ordinary Agent");
+  assert.equal(JSON.stringify(transcript.workNotes).includes("promptRef"), false);
+  assert.equal(JSON.stringify(transcript.workNotes).includes("systemPrompt"), false);
 });
 
 test("panel transcript exposes delegation and parent synthesis as semantic stream events", () => {
@@ -485,6 +517,86 @@ test("ordinary agent stream stays quiet for direct answers while preserving tool
   assert.equal(JSON.stringify(withTool).includes("\"action\":\"read_file\""), false);
 });
 
+test("ordinary agent final result ignores deep summary and artifact compatibility payloads", () => {
+  const events = createPanelRunStreamEvents({
+    runId: "run-ordinary-legacy-output",
+    status: "completed",
+    desktopMode: "agent",
+    summary: panelRunSummaryFixture(),
+    eventEntries: [
+      eventEntry({ sequence: 1, type: "goal.received", payload: { goalId: "goal-ordinary-legacy" } }),
+      eventEntry({
+        sequence: 2,
+        type: "artifact.produced",
+        payload: {
+          artifactId: "legacy-report-artifact",
+          summary: "Legacy deep report should stay out of ordinary completion copy.",
+        },
+      }),
+    ],
+    createdAt: "2026-05-07T00:00:00.000Z",
+    updatedAt: "2026-05-07T00:00:02.000Z",
+  });
+  const final = events.find((event) => event.type === "final.result");
+  const serialized = JSON.stringify(events);
+
+  assert.equal(final?.summary, "运行完成。");
+  assert.deepEqual(final?.sourceRefs, []);
+  assert.equal(serialized.includes("可执行方案"), false);
+  assert.equal(serialized.includes("报告"), false);
+  assert.equal(serialized.includes("legacy-report-artifact"), false);
+  assert.equal(serialized.includes("direction_package"), false);
+  assert.equal(serialized.includes("direction_handoff"), false);
+});
+
+test("ordinary agent stream ignores Agent Fabric events from compatibility payloads", () => {
+  const events = createPanelRunStreamEvents({
+    runId: "run-ordinary-agent-fabric-legacy",
+    status: "completed",
+    desktopMode: "agent",
+    eventEntries: [
+      eventEntry({ sequence: 1, type: "goal.received", payload: { goalId: "goal-ordinary-fabric" } }),
+      eventEntry({
+        sequence: 2,
+        type: "agent.delegation.planned",
+        payload: {
+          decisionId: "delegation-legacy",
+          childSpecIds: ["spec-rootlet-option"],
+        },
+      }),
+      eventEntry({
+        sequence: 3,
+        type: "agent.child.started",
+        payload: {
+          childRunId: "child-run-legacy",
+          agentSpec: {
+            displayName: "Rootlet option",
+          },
+        },
+      }),
+      eventEntry({
+        sequence: 4,
+        type: "agent.parent_synthesis.completed",
+        payload: {
+          parentSynthesis: {
+            decisionSummary: "Parent synthesis should stay out of ordinary stream.",
+          },
+        },
+      }),
+    ],
+    createdAt: "2026-05-07T00:00:00.000Z",
+    updatedAt: "2026-05-07T00:00:04.000Z",
+  });
+  const serialized = JSON.stringify(events);
+
+  assert.deepEqual(events.map((event) => event.type), ["run.started", "final.result"]);
+  assert.equal(serialized.includes("agent.delegation"), false);
+  assert.equal(serialized.includes("agent.child"), false);
+  assert.equal(serialized.includes("parent_synthesis"), false);
+  assert.equal(serialized.includes("Rootlet"), false);
+  assert.equal(serialized.includes("Parent synthesis"), false);
+});
+
 test("ordinary agent stream shows provider-visible reasoning outputs", () => {
   const withChatReasoning = createPanelRunStreamEvents({
     runId: "run-reasoning-chat",
@@ -655,13 +767,69 @@ test("ordinary agent stream treats tool-call model text as status instead of vis
   assert.equal(sideSummary.includes("我还没有主动完成"), true);
   const blockedSummary = events.find((event) => event.type === "run.blocked")?.summary ?? "";
   assert.equal(blockedSummary.includes("任务没有完成"), true);
-  assert.equal(blockedSummary.includes("轮次"), true);
-  assert.equal(blockedSummary.includes("上限"), true);
+  assert.equal(blockedSummary.includes("轮次"), false);
+  assert.equal(blockedSummary.includes("调用次数"), false);
+  assert.equal(blockedSummary.includes("上限"), false);
   assert.equal(serialized.includes("loop"), false);
   assert.equal(serialized.includes("provider"), false);
   assert.equal(serialized.includes("raw prompt"), false);
   assert.equal(serialized.includes("fuel"), false);
   assertOrdinaryStreamHasNoInternalTerms(events.map(ordinaryEventVisibleText).join("\n"));
+});
+
+test("ordinary agent terminal stream events follow recorded runtime facts", () => {
+  const blocked = createPanelRunStreamEvents({
+    runId: "run-terminal-blocked",
+    status: "blocked",
+    desktopMode: "agent",
+    error: {
+      code: "out_of_fuel",
+      message: "当前轮次已到上限，任务没有完成。",
+    },
+    eventEntries: [
+      eventEntry({ sequence: 1, type: "goal.received", payload: { goalId: "goal-terminal-blocked" } }),
+      modelCompletedEntry({
+        sequence: 2,
+        requestId: "request-terminal-blocked",
+        contractId: "desktop.agent_response.v1",
+        decisionSummary: "需要继续读取额外材料。",
+        finishReason: "tool_call",
+      }),
+      eventEntry({
+        sequence: 3,
+        type: "tool.requested",
+        payload: { callId: "tool-call-terminal-read", toolName: "read_file", input: { path: "extra.md" } },
+      }),
+    ],
+    createdAt: "2026-05-07T00:00:00.000Z",
+    updatedAt: "2026-05-07T00:00:03.000Z",
+  });
+  const cancelled = createPanelRunStreamEvents({
+    runId: "run-terminal-cancelled",
+    status: "cancelled",
+    desktopMode: "agent",
+    eventEntries: [
+      eventEntry({ sequence: 1, type: "goal.received", payload: { goalId: "goal-terminal-cancelled" } }),
+      eventEntry({
+        sequence: 2,
+        type: "tool.requested",
+        payload: { callId: "tool-call-terminal-shell", toolName: "shell_command", input: { command: "pnpm" } },
+      }),
+    ],
+    createdAt: "2026-05-07T00:00:00.000Z",
+    updatedAt: "2026-05-07T00:00:02.000Z",
+  });
+
+  assert.deepEqual(
+    blocked.map((event) => event.type),
+    ["run.started", "model.side.completed", "tool.requested", "run.blocked"],
+  );
+  assert.equal(blocked.at(-1)?.status, "blocked");
+  assert.deepEqual(
+    cancelled.map((event) => event.type),
+    ["run.started", "tool.requested", "run.cancelled"],
+  );
+  assert.equal(cancelled.at(-1)?.status, "cancelled");
 });
 
 test("panel transcript preserves typed safe tool display without raw command output", () => {
@@ -914,6 +1082,111 @@ function eventEntry(input: {
     type: input.type,
     message,
     recordedAt: "2026-05-07T00:00:00.000Z",
+  };
+}
+
+function panelRunSummaryFixture(): PanelRunSummary {
+  return {
+    terminalStatus: "approved_package_created",
+    directionPackage: {
+      id: "legacy-direction-package",
+      directionId: "legacy-direction",
+      version: 1,
+      status: "approved",
+      validation: {
+        passed: true,
+        errors: [],
+        warnings: [],
+      },
+    },
+    lineage: {
+      current: {
+        packageId: "legacy-direction-package",
+        directionId: "legacy-direction",
+        version: 1,
+        status: "approved",
+        schemaVersion: "direction-handoff-package/v0.2",
+      },
+      revisionReason: "initial",
+      sourceRefs: ["candidate:legacy"],
+      createdAt: "2026-05-07T00:00:00.000Z",
+    },
+    versions: [1],
+    ai: {
+      enabled: false,
+      mode: "none",
+      status: "disabled",
+      eventCounts: {
+        requested: 0,
+        completed: 0,
+        failed: 0,
+      },
+      aiCandidateCount: 0,
+      fallbackCount: 0,
+      aiFallbackUsed: false,
+      rootletKinds: [],
+      modelCallRefs: [],
+    },
+    tools: {
+      eventCounts: {
+        requested: 0,
+        completed: 0,
+        failed: 0,
+      },
+      toolCallRefs: [],
+    },
+    underground: {
+      autonomy: {
+        enabled: false,
+        cycleCount: 0,
+        spawnedRootletCount: 0,
+        sourceRefs: [],
+        modelCallRefs: [],
+      },
+      rootletKinds: [],
+      budget: {
+        maxRootletClusters: 0,
+        maxCandidateOutputs: 0,
+        spentRootletClusters: 0,
+        spentCandidateOutputs: 0,
+        exhausted: false,
+      },
+      candidateCounts: {
+        total: 0,
+        candidate: 0,
+        accepted: 0,
+        merged: 0,
+        rejected: 0,
+        unknown: 0,
+      },
+      convergence: {
+        reviewId: "legacy-review",
+        outcome: "approved",
+        accepted: 0,
+        merged: 0,
+        rejected: 0,
+        unknown: 0,
+        userEscalationRequired: false,
+      },
+    },
+    observationSnapshot: {
+      phase: "completed",
+      stage: "direction_handoff_completed",
+      eventCursor: {
+        eventCount: 2,
+        lastSequence: 2,
+        lastEventType: "artifact.produced",
+      },
+      layerStatuses: {
+        underground: "completed",
+        handoff: "completed",
+        aboveground: "completed",
+        fruits: "completed",
+        governance: "not_started",
+        soilReturnStub: "not_started",
+      },
+    },
+    eventLog: ["artifact.produced"],
   };
 }
 

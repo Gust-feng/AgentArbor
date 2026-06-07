@@ -7,7 +7,7 @@ import {
   FileSystemDirectionHandoffPackageStore,
   InMemoryDirectionHandoffPackageStore,
 } from "../domain/agentarbor/direction-handoff-package.js";
-import { createUndergroundAiRuntimeConfig } from "./intelligence-channel-factory.js";
+import { createUndergroundAiRuntimeConfig } from "./underground-ai-runtime.js";
 import { recoverUndergroundDirectionSession } from "./underground-direction-recovery.js";
 import {
   runUndergroundDirectionSession,

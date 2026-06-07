@@ -69,7 +69,7 @@ while not cancelled:
 - 安全投影与 raw output 脱敏。
 - tool event 审计。
 
-ToolCenter 是工具执行的唯一入口。模型可以决定“要不要调用某个已暴露工具”，但不能绕过 ToolCenter 获得未授权工具、未裁剪参数、未确认高风险动作、未脱敏输出或未记录审计事件。工具失败、拒绝、取消和确认等待都应以标准安全结果回传模型，让模型基于受保护的世界继续判断。除用户显式中止或外部系统硬失败外，这些结果不应终止普通 loop。
+ToolCenter 是工具执行的统一入口，但不是 `allowedTools` 的唯一防线。AgentTurnRuntime / tool-use-loop 必须在进入具体执行 broker 前先按本轮 `allowedTools` 拦截未授权工具；ToolCenter 和 adapter 可以重复校验、确认和投影，但不能成为唯一依赖。模型可以决定“要不要调用某个已暴露工具”，但不能绕过 ToolCenter 获得未授权工具、未裁剪参数、未确认高风险动作、未脱敏输出或未记录审计事件。工具失败、拒绝、取消和确认等待都应以标准安全结果回传模型，让模型基于受保护的世界继续判断。除用户显式中止或外部系统硬失败外，这些结果不应终止普通 loop。
 
 工具结果回到模型时，只能使用安全摘要、证据引用、截断标记、诊断引用和必要状态。不得把 raw prompt、raw provider response、raw tool output、stdout/stderr、secret、token 或 hidden reasoning 放回普通历史或可见结果。
 
@@ -84,7 +84,7 @@ ToolCenter 是工具执行的唯一入口。模型可以决定“要不要调用
 - `cancelled/cancelled`：用户或系统中止。
 - `failed/model_failed`：provider 失败或响应不可用。
 
-普通 Agent 不应使用 `maxModelRounds` 或 `maxToolRounds` 作为正常运行边界。旧结构化路径、测试桩或专用 agent 可以有显式预算，但这些预算不能流入普通 Desktop Agent 的自主 loop。若底层仍存在进程级保护阀，它只属于异常防护，不能作为普通验收路径、常规暂停 UX 或模型能力上限。
+普通 Agent 不应使用 `maxModelRounds` 或 `maxToolRounds` 作为正常运行边界。默认 Desktop Agent 的 `AgentDefinition.turnPolicy` 不得携带模型轮次或工具轮次上限；旧结构化路径、测试桩或专用 agent 可以有显式预算，但这些预算不能流入默认普通 Desktop Agent 的产品主线。若底层自主 loop 仍接收到显式保护阀，它只能作为异常防护并返回未完成的 paused / blocked 结果，不能合成 completed、不能成为普通验收路径、常规暂停 UX 或模型能力上限。
 
 普通 Agent 的输出预算应来自模型能力目录或用户显式配置。工程层可以在未知模型能力时使用安全默认值，但不能给所有普通会话套一个固定小输出上限；长回答、报告、代码解释和多步结果应由模型能力、上下文窗口、用户要求和安全边界共同决定。
 

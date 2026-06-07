@@ -4,6 +4,7 @@ import type { DesktopAgentConversationMessage } from "../desktop-agent-contracts
 import { sanitizeConversationHistoryText } from "../visible-text-safety.js";
 import {
   clampRatio,
+  compactionAgentDisplayName,
   conversationCompactionOutputContract,
   DEFAULT_THRESHOLD_RATIO,
   inputTokenBudgetFor,
@@ -55,7 +56,11 @@ export async function compactBasicAgentConversationIfNeeded(
     callerRef: { kind: "goal", id: input.goalId, label: "desktop_context_compaction" },
     purpose: "desktop_context_compaction",
     inputRefs: earlier.map((entry) => ({ kind: "event" as const, id: entry.message.ref ?? `conversation:history:${entry.index}` })),
-    sanitizedMessages: compactionMessages({ goal: input.goal, earlier }),
+    sanitizedMessages: compactionMessages({
+      goal: input.goal,
+      agentDisplayName: compactionAgentDisplayName(input.agentIdentity),
+      earlier,
+    }),
     outputContract: conversationCompactionOutputContract(),
     constraintRefs: [],
     budget: {
@@ -111,6 +116,7 @@ export async function compactBasicAgentConversationIfNeeded(
 
 function compactionMessages(input: {
   readonly goal: string;
+  readonly agentDisplayName: string;
   readonly earlier: readonly {
     readonly message: DesktopAgentConversationMessage;
     readonly index: number;
@@ -121,7 +127,7 @@ function compactionMessages(input: {
     {
       role: "system",
       content: [
-        "You compact earlier conversation history for AgentArbor's ordinary desktop agent.",
+        `You compact earlier conversation history for ${input.agentDisplayName}, the ordinary desktop agent for this run.`,
         "Preserve user goals, durable decisions, constraints, unresolved tasks, evidence refs, and useful continuity.",
         "Remove raw prompts, raw provider responses, raw tool output, stdout/stderr, secrets, tokens, hidden reasoning, and internal loop details.",
         "Do not decide whether the task is complete. Do not instruct the agent to stop. Return concise plain text only.",

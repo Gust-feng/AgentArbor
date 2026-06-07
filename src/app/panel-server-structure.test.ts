@@ -14,10 +14,19 @@ test("panel server source keeps conversation restore and persistence split", asy
     runtimeRecords,
     runPersistence,
     runStreamSync,
+    basicAgentRoutes,
+    basicAgentRunView,
+    conversationCurrentRun,
     runRoutes,
+    requestParsers,
+    runModeRouting,
     liveModelStream,
     runJobResponse,
+    panelRunJobs,
+    basicRunViewContracts,
+    conversationContracts,
     panelRuntime,
+    agentDefinitionCatalog,
     skillService,
     runExecution,
     runExecutionContracts,
@@ -38,10 +47,19 @@ test("panel server source keeps conversation restore and persistence split", asy
     readAppSource(path.join("panel-server", "runtime-records.ts")),
     readAppSource(path.join("panel-server", "run-persistence.ts")),
     readAppSource(path.join("panel-server", "run-stream-sync.ts")),
+    readAppSource(path.join("panel-server", "basic-agent-routes.ts")),
+    readAppSource(path.join("panel-server", "basic-agent-run-view.ts")),
+    readAppSource(path.join("panel-server", "conversation-current-run.ts")),
     readAppSource(path.join("panel-server", "run-routes.ts")),
+    readAppSource(path.join("panel-server", "request-parsers.ts")),
+    readAppSource(path.join("panel-server", "run-mode-routing.ts")),
     readAppSource(path.join("panel-server", "live-model-stream.ts")),
     readAppSource(path.join("panel-server", "run-job-response.ts")),
+    readAppSource("panel-run-jobs.ts"),
+    readAppSource("panel-basic-agent-run-view-contracts.ts"),
+    readAppSource("panel-conversation-contracts.ts"),
     readAppSource(path.join("panel-server", "runtime.ts")),
+    readAppSource("agent-definition-catalog.ts"),
     readAppSource(path.join("panel-server", "skill-service.ts")),
     readAppSource(path.join("panel-server", "run-execution.ts")),
     readAppSource(path.join("panel-server", "run-execution-contracts.ts")),
@@ -74,21 +92,173 @@ test("panel server source keeps conversation restore and persistence split", asy
   assert.equal(conversationRoutes.includes("export function scheduleNextQueuedConversationRun"), true);
   assert.equal(conversationRoutes.includes("export async function getPanelConversation"), true);
   assert.equal(conversationRoutes.includes("async function handleConversationMessageRequest"), true);
+  assert.equal(conversationRoutes.includes("runtime.runExecutor.start({"), true);
+  assert.equal(conversationRoutes.includes("runForPanel("), false);
+  assert.equal(conversationRoutes.includes("runDesktopAgentSession"), false);
+  assert.equal(conversationRoutes.includes("runOrdinaryDesktopForPanel"), false);
+  assert.equal(conversationRoutes.includes("const config = await runtime.configCenter.getModelProviderConfig()"), false);
   assert.equal(conversationRoutes.includes("async function handleConversationRollbackRequest"), true);
   assert.equal(conversationRoutes.includes("async function ensurePanelConversationLoaded"), true);
   assert.equal(conversationRoutes.includes("async function listPanelConversations"), true);
   assert.equal(conversationRestore.includes("export async function restorePersistedPanelConversation"), true);
   assert.equal(conversationSync.includes("export function syncConversationTurnForJob"), true);
+  assert.notEqual(
+    conversationSync.indexOf('canvas?.kind === "desktop_agent_canvas"'),
+    -1,
+    "conversation sync should inspect desktop agent canvas"
+  );
+  assert.notEqual(
+    conversationSync.indexOf('canvas?.kind === "work_session_canvas"'),
+    -1,
+    "conversation sync may keep legacy work_session_canvas only as a compatibility fallback"
+  );
+  assert.equal(
+    conversationSync.indexOf('canvas?.kind === "desktop_agent_canvas"') < conversationSync.indexOf('canvas?.kind === "work_session_canvas"'),
+    true,
+    "ordinary conversation sync must prefer desktop_agent_canvas before legacy work_session_canvas"
+  );
   assert.equal(persistedRunResponse.includes("export function createPersistedPanelRunResponse"), true);
+  assert.equal(persistedRunResponse.includes("RunAgentDefinitionRef"), true);
+  assert.equal(persistedRunResponse.includes("readonly agentDefinitionRef?: RunAgentDefinitionRef"), true);
+  assert.equal(persistedRunResponse.includes("agentDefinitionRef: input.snapshot.run.agentDefinitionRef"), true);
+  assert.equal(persistedRunResponse.includes("function persistedRunAgentLabel"), true);
+  assert.equal(persistedRunResponse.includes("snapshot.run.agentDefinitionRef?.agentDisplayName"), true);
+  for (const [sourceName, source] of [
+    ["run-job-response", runJobResponse],
+    ["persisted-run-response", persistedRunResponse],
+    ["basic-agent-run-view", basicAgentRunView],
+    ["conversation-current-run", conversationCurrentRun],
+    ["runtime-records", runtimeRecords],
+    ["run-persistence", runPersistence],
+    ["panel-run-jobs", panelRunJobs],
+    ["panel-basic-agent-run-view-contracts", basicRunViewContracts],
+  ] as const) {
+    assert.equal(source.includes('from "../agent-prompts/contracts.js"'), false, `${sourceName} must not import full AgentDefinition`);
+    assert.equal(source.includes('from "./agent-prompts/contracts.js"'), false, `${sourceName} must not import full AgentDefinition`);
+    assert.equal(source.includes("readonly agentDefinition?: AgentDefinition"), false, `${sourceName} should expose RunAgentDefinitionRef only`);
+    assert.equal(source.includes("AgentDefinition;"), false, `${sourceName} should not carry full AgentDefinition values`);
+    assert.equal(source.includes("systemPrompt"), false, `${sourceName} must not reference prompt body fields`);
+    assert.equal(source.includes("sourcePath"), false, `${sourceName} must not expose agent definition source paths`);
+  }
   assert.equal(runtimeRecords.includes("export function createRuntimeRunRecord"), true);
+  assert.notEqual(
+    runtimeRecords.indexOf('canvas?.kind === "desktop_agent_canvas"'),
+    -1,
+    "runtime records should inspect desktop agent canvas"
+  );
+  assert.notEqual(
+    runtimeRecords.indexOf('canvas?.kind === "work_session_canvas"'),
+    -1,
+    "runtime records may keep legacy work_session_canvas only as a compatibility fallback"
+  );
+  assert.equal(
+    runtimeRecords.indexOf('canvas?.kind === "desktop_agent_canvas"') < runtimeRecords.indexOf('canvas?.kind === "work_session_canvas"'),
+    true,
+    "runtime result summaries must prefer desktop_agent_canvas before legacy work_session_canvas"
+  );
   assert.equal(runPersistence.includes("export async function persistPanelRun"), true);
   assert.equal(runStreamSync.includes("export function syncPanelRunStreamEventsForJob"), true);
+  assert.equal(runStreamSync.includes("agentDefinitionRef: job.agentDefinitionRef"), true);
+  assert.equal(panelRunJobs.includes("function panelJobAgentLabel"), true);
+  assert.equal(panelRunJobs.includes("job.agentDefinitionRef?.agentDisplayName"), true);
+  assert.equal(basicAgentRoutes.includes('from "./basic-agent-run-view.js"'), true);
+  assert.equal(basicAgentRoutes.includes('from "./conversation-current-run.js"'), false);
+  const basicAgentWorkSessionRouteSource = sourceBetween(
+    basicAgentRoutes,
+    "async function handleGetBasicWorkSessionRequest",
+    "async function handleGetBasicRunEventsRequest"
+  );
+  assert.equal(
+    basicAgentWorkSessionRouteSource.includes("createBasicAgentRunViewReadModel(runtime, runId, 0)"),
+    true
+  );
+  assert.equal(basicAgentWorkSessionRouteSource.includes("createLiveBasicAgentWorkSessionReadModel"), false);
+  assert.equal(basicAgentWorkSessionRouteSource.includes("createPersistedBasicAgentWorkSessionReadModel"), false);
+  assert.equal(basicAgentWorkSessionRouteSource.includes("runtime.runtimeDatabase?.getRun"), false);
+  assert.equal(basicAgentWorkSessionRouteSource.includes("runtime.runExecutor.replayEvents"), false);
+  const basicAgentRunViewRouteSource = sourceBetween(
+    basicAgentRoutes,
+    "async function handleGetBasicRunViewRequest",
+    "async function handleGetBasicRunStreamRequest"
+  );
+  assert.equal(basicAgentRunViewRouteSource.includes("createBasicAgentRunViewReadModel(runtime, runId, cursor)"), true);
+  assert.equal(basicAgentRunViewRouteSource.includes("syncLiveRunEvents"), false);
+  assert.equal(basicAgentRunViewRouteSource.includes("runtime.runJobs.get"), false);
+  assert.equal(basicAgentRunView.includes("export async function createBasicAgentRunViewReadModel"), true);
+  assert.equal(basicAgentRunView.includes("function createLiveBasicAgentRunViewReadModel"), true);
+  assert.equal(basicAgentRunView.includes("function createPersistedBasicAgentRunViewReadModel"), true);
+  assert.equal(basicAgentRunView.includes("type BasicAgentRunViewCoreReadModel = Omit<PanelBasicAgentRunViewReadModel, \"workSession\">"), true);
+  assert.equal(basicAgentRunView.includes("function addLegacyWorkSessionAlias"), true);
+  assert.equal(basicAgentRunView.includes("workSession: view.workView"), true);
+  assert.equal(basicAgentRunView.includes("workSession: workView"), false);
+  assert.equal(basicAgentRunView.includes("agentDefinitionRef: job.agentDefinitionRef ?? run.agentDefinitionRef"), true);
+  assert.equal(basicAgentRunView.includes("agentDefinitionRef: run.agentDefinitionRef"), true);
+  assert.equal(basicAgentRunView.includes("agentDefinitionRef: snapshot.run.agentDefinitionRef"), false);
+  assert.equal(basicAgentRunView.includes("createLiveBasicAgentWorkViewReadModel"), true);
+  assert.equal(basicAgentRunView.includes("createPersistedBasicAgentWorkViewReadModel"), true);
+  assert.equal(basicAgentRunView.includes("createLiveBasicAgentWorkSessionReadModel"), false);
+  assert.equal(basicAgentRunView.includes("createPersistedBasicAgentWorkSessionReadModel"), false);
+  assert.equal(basicAgentRunView.includes("createPersistedStreamEvents"), true);
+  assert.equal(basicAgentRunView.includes("panelStatusFromRuntimeStatus"), true);
+  assert.equal(basicAgentRunView.includes("createPersistedPanelRunResponse"), false);
+  assert.equal(basicAgentRunView.includes("getModelProviderConfig"), false);
+  assert.equal(basicAgentRunView.includes("getInformationAccessConfig"), false);
+  assert.equal(basicAgentRunView.includes("readonly configCenter"), false);
+  assert.equal(basicAgentRunView.includes("readonly conversations"), false);
+  assert.equal(conversationCurrentRun.includes('from "./basic-agent-run-view.js"'), true);
+  assert.equal(conversationCurrentRun.includes("export async function createConversationCurrentRunReadModel"), true);
+  assert.equal(conversationCurrentRun.includes("function createLiveBasicAgentRunViewReadModel"), false);
+  assert.equal(conversationCurrentRun.includes("function createPersistedBasicAgentRunViewReadModel"), false);
+  assert.equal(conversationCurrentRun.includes("createPersistedPanelRunResponse"), false);
+  assert.equal(basicRunViewContracts.includes("export type PanelBasicAgentRunViewReadModel"), true);
+  assert.equal(basicRunViewContracts.includes("DesktopWorkViewReadModel"), true);
+  assert.equal(basicRunViewContracts.includes("DesktopWorkSessionReadModel"), false);
+  assert.equal(basicRunViewContracts.includes("RunAgentDefinitionRef"), true);
+  assert.equal(basicRunViewContracts.includes("readonly agentDefinitionRef?: RunAgentDefinitionRef"), true);
+  assert.equal(conversationContracts.includes("PanelConversationCurrentRunReadModel = PanelBasicAgentRunViewReadModel"), true);
   assert.equal(runRoutes.includes("export async function handlePanelRunRoute"), true);
   assert.equal(runRoutes.includes("async function handleRunRequest"), true);
   assert.equal(runRoutes.includes("async function handleStartRunRequest"), true);
   assert.equal(runRoutes.includes("async function handleGetRunRequest"), true);
   assert.equal(runRoutes.includes("function handleGetRunStreamRequest"), true);
   assert.equal(runRoutes.includes("async function createPersistedRunResponse"), true);
+  const startRunRequestSource = sourceBetween(
+    runRoutes,
+    "async function handleStartRunRequest",
+    "function requirePanelRunJob"
+  );
+  assert.equal(runRoutes.includes("async function defaultAiModeForStartRun"), false);
+  assert.equal(runRoutes.includes("defaultAiModeForStartRun("), false);
+  assert.equal(startRunRequestSource.includes("const runInput = parseRunInput(body);"), true);
+  assert.equal(startRunRequestSource.includes("runtime.runExecutor.start({"), true);
+  assert.equal(startRunRequestSource.includes("runtime.runExecutor.schedule"), true);
+  assert.equal(startRunRequestSource.includes("runForPanel("), false);
+  assert.equal(startRunRequestSource.includes("createPanelRunResponse("), false);
+  assert.equal(startRunRequestSource.includes("defaultAiMode"), false);
+  assert.equal(startRunRequestSource.includes("const config = await runtime.configCenter.getModelProviderConfig()"), false);
+  assert.equal(startRunRequestSource.includes("parseRunInput(body,"), false);
+  const runRequestSource = sourceBetween(
+    runRoutes,
+    "async function handleRunRequest",
+    "async function handleStartRunRequest"
+  );
+  assert.equal(runRequestSource.includes('if (runKind === "desktop")'), true);
+  assert.equal(runRequestSource.includes("desktop_sync_run_not_supported"), true);
+  assert.equal(runRequestSource.includes("runtime.runExecutor.start({"), false);
+  assert.equal(runRequestSource.includes("runtime.runExecutor.schedule"), false);
+  assert.equal(requestParsers.includes("export function parseRunInput(raw: unknown): PanelRunInput"), true);
+  assert.equal(requestParsers.includes("export function parseRunInput(raw: unknown,"), false);
+  assert.equal(requestParsers.includes("defaultAiModeForRunKind"), false);
+  assert.equal(requestParsers.includes("defaultAiMode?: ModelRuntimeMode"), false);
+  assert.equal(requestParsers.includes("resolveEffectiveRunMode"), false);
+  assert.equal(runModeRouting.includes("export function resolvePanelRouteRunMode"), true);
+  assert.equal(runModeRouting.includes("resolveRunModeForKind(input.runKind, input.requestedRunMode)"), true);
+  assert.equal(runRoutes.includes('from "./run-mode-routing.js"'), true);
+  assert.equal(runRoutes.includes("resolvePanelRouteRunMode({ runKind, requestedRunMode })"), true);
+  assert.equal(conversationRoutes.includes('from "./run-mode-routing.js"'), true);
+  assert.equal(conversationRoutes.includes("resolvePanelRouteRunMode({"), true);
+  assert.equal(conversationRoutes.includes('runKind: "desktop"'), true);
+  assert.equal(conversationRoutes.includes("conversation_run_mode_not_supported"), true);
   assert.equal(liveModelStream.includes("export function appendLiveModelOutputDelta"), true);
   assert.equal(runJobResponse.includes("export function createPanelRunJobResponse"), true);
   assert.equal(runJobResponse.includes("type PanelDesktopRouteReadModel"), true);
@@ -96,7 +266,39 @@ test("panel server source keeps conversation restore and persistence split", asy
   assert.equal(panelRuntime.includes("export type PanelRuntimeHooks"), true);
   assert.equal(panelRuntime.includes("export function createPanelRuntime"), true);
   assert.equal(panelRuntime.includes("export function isPanelRuntime"), true);
+  assert.equal(panelRuntime.includes('from "../agent-definition-catalog.js"'), true);
+  assert.equal(panelRuntime.includes('from "../agent-prompts/desktop-root-agent.js"'), false);
+  assert.equal(panelRuntime.includes("AgentDefinitionRegistry"), true);
+  assert.equal(panelRuntime.includes("readonly agentDefinitions: AgentDefinitionRegistry"), true);
+  assert.equal(panelRuntime.includes("createRuntimeAgentDefinitionCatalog({"), true);
+  assert.equal(panelRuntime.includes("additionalDefinitions: options.agentDefinitions"), true);
+  assert.equal(panelRuntime.includes("agentDefinitions: agentDefinitionCatalog.registry"), true);
+  assert.equal(panelRuntime.includes("agentDefinitions: options.agentDefinitions ?? []"), false);
+  assert.equal(panelRuntime.includes("new AgentDefinitionRegistry(["), false);
+  assert.equal(agentDefinitionCatalog.includes("export function createRuntimeAgentDefinitionCatalog"), true);
+  assert.equal(agentDefinitionCatalog.includes('from "./agent-definition-registry.js"'), true);
+  assert.equal(agentDefinitionCatalog.includes('from "./agent-prompts/desktop-root-agent.js"'), true);
+  assert.equal(agentDefinitionCatalog.includes("new AgentDefinitionRegistry(["), true);
   assert.equal(panelRuntime.includes("new BasicAgentRunExecutor"), true);
+  assert.equal(panelRuntime.includes("prepareRunStart: (startInput) => preparePanelBasicRunStart(runtime as PanelRuntime, startInput)"), true);
+  assert.equal(panelRuntime.includes("async function preparePanelBasicRunStart"), true);
+  assert.equal(panelRuntime.includes("readonly desktopAgentDefinition"), true);
+  assert.equal(panelRuntime.includes("desktopAgentDefinition: agentDefinitionCatalog.desktopAgentDefinition"), true);
+  assert.equal(panelRuntime.includes("runAgentDefinitionRef(runtime.desktopAgentDefinition)"), true);
+  const panelRunStartPreparationSource = sourceBetween(
+    panelRuntime,
+    "async function preparePanelBasicRunStart",
+    "function resolveSkillRoots"
+  );
+  assert.equal(panelRunStartPreparationSource.includes("runtime.configCenter.getInformationAccessConfig()"), true);
+  assert.equal(panelRunStartPreparationSource.includes('if (input.runKind !== "desktop")'), true);
+  assert.equal(panelRunStartPreparationSource.includes("runtime.configCenter.getModelProviderConfig()"), true);
+  assert.equal(panelRunStartPreparationSource.includes("runtime.capabilityCenter.snapshot()"), true);
+  assert.equal(panelRunStartPreparationSource.includes("const config = capabilitySnapshot.activeModel"), true);
+  assert.equal(panelRunStartPreparationSource.includes("aiMode: input.aiMode ?? config.defaultAiMode"), true);
+  assert.equal(panelRuntime.includes('resolvePanelRunMode, type PanelRunJob'), true);
+  assert.equal(panelRunStartPreparationSource.includes("resolvePanelRunMode(input.runKind, input.runMode) === \"agent\""), true);
+  assert.equal(panelRunStartPreparationSource.includes('input.runMode ?? "agent"'), false);
   assert.equal(panelRuntime.includes('from "./live-model-stream.js"'), true);
   assert.equal(panelRuntime.includes('from "./conversation-sync.js"'), true);
   assert.equal(skillService.includes("export async function listPanelSkills"), true);
@@ -105,27 +307,94 @@ test("panel server source keeps conversation restore and persistence split", asy
   assert.equal(runExecution.includes("export async function executeBasicPanelRun"), true);
   assert.equal(runExecution.includes("export async function failPanelRunJob"), true);
   assert.equal(runExecution.includes("export async function runForPanel"), true);
-  assert.equal(runExecution.includes("export async function createCompletedPanelRunResponse"), true);
+  assert.equal(runExecution.includes("export async function createPanelRunResponse"), true);
+  assert.equal(runExecution.includes("function assertOrdinaryDesktopRunResponseFacts"), true);
+  assert.equal(runExecution.includes("desktop_capability_snapshot_required"), true);
+  assert.equal(runExecution.includes("desktop_information_access_required"), true);
+  assert.equal(runExecution.includes("input.run.agentDefinitionRef === undefined"), true);
   assert.equal(runExecution.includes("export function createConfigurationFailedAiSummary"), true);
   assert.equal(runExecution.includes('from "./conversation-history.js"'), true);
   assert.equal(runExecution.includes('from "./desktop-run-resources.js"'), true);
   assert.equal(runExecution.includes('from "./desktop-agent-execution.js"'), true);
   assert.equal(runExecution.includes('from "./underground-compat-execution.js"'), true);
   assert.equal(runExecution.includes('from "./run-execution-contracts.js"'), true);
+  assert.equal(runExecution.includes("function resolveExecutionAgentDefinition"), true);
+  assert.equal(runExecution.includes("agentDefinition: resolveExecutionAgentDefinition(runtime, job)"), true);
+  assert.equal(runExecution.includes("agentDefinitionRef: job.agentDefinitionRef"), true);
+  assert.equal(runExecution.includes("runtime.agentDefinitions.resolve(job.agentDefinitionRef)"), true);
+  assert.equal(runExecution.includes("job.agentDefinitionRef.agentId !== expectedRef.agentId"), false);
+  assert.equal(runExecution.includes("completed artifact"), false);
+  assert.equal(runExecution.includes("没有形成最终结果"), true);
   assert.equal(runExecutionContracts.includes("export type PanelRunExecutionResult"), true);
   assert.equal(runExecutionContracts.includes("export type PanelRunExecutionOptions"), true);
+  assert.equal(runExecutionContracts.includes("readonly agentDefinition?: AgentDefinition"), true);
+  assert.equal(runExecutionContracts.includes("readonly agentDefinitionRef?: RunAgentDefinitionRef"), true);
+  assert.equal(runExecutionContracts.includes("readonly informationAccess?: SanitizedInformationAccessConfig"), true);
   assert.equal(runExecutionContracts.includes("export type DesktopRunResources"), true);
+  assert.equal(runExecutionContracts.includes("readonly informationAccess: SanitizedInformationAccessConfig"), true);
   assert.equal(desktopRunResources.includes("export async function prepareDesktopRunResources"), true);
   assert.equal(desktopRunResources.includes("export function desktopRuntimeMode"), true);
-  assert.equal(desktopRunResources.includes("export async function createDesktopToolCenterFactory"), true);
+  assert.equal(desktopRunResources.includes("export function createDesktopToolCenterFactory"), true);
+  assert.equal(desktopRunResources.includes("createConfiguredToolCenterFactory"), false);
+  assert.equal(desktopRunResources.includes("createDefaultToolCenter"), true);
   assert.equal(desktopRunResources.includes("function toolStatesFromCapabilitySnapshot"), true);
   assert.equal(desktopRunResources.includes("function activeModelWithRunOpenAISettings"), true);
+  assert.equal(desktopRunResources.includes("desktop_information_access_required"), true);
+  assert.equal(desktopRunResources.includes("informationAccess: options.informationAccess"), true);
+  assert.equal(desktopRunResources.includes("modelCapabilities.supportsParallelToolCalls"), true);
+  assert.equal(desktopRunResources.includes("modelCapabilities.supportsReasoningEffort"), true);
+  assert.equal(desktopRunResources.includes("modelCapabilities.supportsStreaming ? \"force_live\" : \"respect_profile\""), true);
+  assert.equal(desktopRunResources.includes("modelCapabilities.supportsStreaming ? profileStream : false"), true);
+  assert.equal(desktopRunResources.includes("createModelRuntimeEnvironment({"), true);
+  assert.equal(desktopRunResources.includes("createUndergroundAiEnvironment"), false);
+  const desktopToolCenterFactorySource = sourceAfter(desktopRunResources, "export function createDesktopToolCenterFactory");
+  assert.equal(desktopToolCenterFactorySource.includes("runtime.configCenter"), false);
+  assert.equal(desktopToolCenterFactorySource.includes("runtime.capabilityCenter"), false);
+  assert.equal(desktopToolCenterFactorySource.includes("runtime.providerFetch"), false);
+  assert.equal(desktopToolCenterFactorySource.includes("env: resources.aiEnvironment"), true);
+  assert.equal(desktopToolCenterFactorySource.includes("fetch: providerFetch"), true);
+  assert.equal(desktopToolCenterFactorySource.includes("toolStates: resources.toolStates"), true);
+  assert.equal(desktopToolCenterFactorySource.includes("toolCatalogNames: resources.toolCatalogNames"), true);
   assert.equal(desktopAgentExecution.includes("export async function runOrdinaryDesktopForPanel"), true);
   assert.equal(desktopAgentExecution.includes("runDesktopAgentSession"), true);
+  assert.equal(desktopAgentExecution.includes("createDesktopToolCenterFactory(runtime.providerFetch, resources)"), true);
+  assert.equal(desktopAgentExecution.includes("createDefaultToolCenter"), false);
+  assert.equal(desktopAgentExecution.includes("createConfiguredToolCenter"), false);
+  assert.equal(desktopAgentExecution.includes("const agentDefinition = options.agentDefinition ?? runtime.desktopAgentDefinition"), true);
+  assert.equal(desktopAgentExecution.includes("const expectedAgentDefinitionRef = runAgentDefinitionRef(agentDefinition)"), true);
+  assert.equal(desktopAgentExecution.includes("agent_definition_ref_required"), true);
+  assert.equal(desktopAgentExecution.includes("const agentDefinitionRef = options.agentDefinitionRef;"), true);
+  assert.equal(desktopAgentExecution.includes("const agentDefinitionRef = options.agentDefinitionRef ?? expectedAgentDefinitionRef"), false);
+  assert.equal(desktopAgentExecution.includes("assertAgentDefinitionRefMatchesDefinition(agentDefinitionRef, agentDefinition, expectedAgentDefinitionRef)"), true);
+  assert.equal(desktopAgentExecution.includes("function assertAgentDefinitionRefMatchesDefinition"), true);
+  assert.equal(desktopAgentExecution.includes("agentDefinitionRef: runAgentDefinitionRef(agentDefinition)"), false);
+  assert.equal(desktopAgentExecution.includes("agentDefinitionRef,"), true);
+  assert.equal(
+    desktopAgentExecution.includes("resolveTriggeredSkillContexts(runtime, goal, resources.capabilitySnapshot.skillCatalog)"),
+    true
+  );
+  assert.equal(desktopAgentExecution.includes("config: resources.capabilitySnapshot.activeModel"), true);
+  assert.equal(desktopAgentExecution.includes("informationAccess: resources.informationAccess"), true);
+  assert.equal(desktopAgentExecution.includes("informationAccess: options.informationAccess"), false);
+  assert.equal(desktopAgentExecution.includes("capabilitySnapshot: resources.capabilitySnapshot"), true);
+  assert.equal(desktopAgentExecution.includes("type OrdinaryDesktopPanelFacts"), true);
+  assert.equal(desktopAgentExecution.includes("facts: OrdinaryDesktopPanelFacts"), true);
+  assert.equal(desktopAgentExecution.includes("facts: Pick<PanelRunExecutionResult"), false);
+  assert.equal(desktopAgentExecution.includes("facts = {}"), false);
+  assert.equal(desktopAgentExecution.includes('agent.status === "confirmation_needed"'), true);
+  assert.equal(desktopAgentExecution.includes('"approval_needed"'), true);
+  assert.equal(desktopAgentExecution.includes('status: agent.status === "paused" ? "blocked" : "completed"'), false);
+  assert.equal(desktopAgentExecution.includes("desktopPanelResultFromAgent(resumed, facts, reasoningEffort)"), true);
   assert.equal(undergroundCompatExecution.includes("export async function runDeepDesktopForPanel"), true);
   assert.equal(undergroundCompatExecution.includes("export async function runUndergroundForPanel"), true);
   assert.equal(undergroundCompatExecution.includes("runUndergroundDirectionSessionWithIntelligence"), true);
   assert.equal(undergroundCompatExecution.includes("createUndergroundDeepCanvas"), true);
+  const deepDesktopExecutionSource = sourceBetween(
+    undergroundCompatExecution,
+    "export async function runDeepDesktopForPanel",
+    "export async function runUndergroundForPanel"
+  );
+  assert.equal(deepDesktopExecutionSource.includes("informationAccess: resources.informationAccess"), true);
   assert.equal(runStreamEvents.includes('from "./panel-run-stream-copy.js"'), true);
   assert.equal(runStreamEvents.includes('from "./panel-run-read-model.js"'), false);
   assert.equal(runStreamEvents.includes("function agentNoteForEvent"), false);
@@ -163,7 +432,7 @@ test("panel server source keeps conversation restore and persistence split", asy
     assert.equal(requestHandler.includes(privateLiveStreamDetail), false);
     assert.equal(liveModelStream.includes(privateLiveStreamDetail), true);
   }
-  for (const privateRunResponseDetail of ["function routeReadModel", "createPanelTranscriptNodes"]) {
+  for (const privateRunResponseDetail of ["function routeReadModel", "createPanelRunTranscript"]) {
     assert.equal(requestHandler.includes(privateRunResponseDetail), false);
     assert.equal(runJobResponse.includes(privateRunResponseDetail), true);
   }
@@ -229,3 +498,17 @@ test("panel server source keeps conversation restore and persistence split", asy
     assert.equal(desktopAgentExecution.includes(ordinaryDesktopDetail), true);
   }
 });
+
+function sourceBetween(source: string, start: string, end: string): string {
+  const startIndex = source.indexOf(start);
+  const endIndex = source.indexOf(end, startIndex);
+  assert.notEqual(startIndex, -1, `missing source start marker: ${start}`);
+  assert.notEqual(endIndex, -1, `missing source end marker: ${end}`);
+  return source.slice(startIndex, endIndex);
+}
+
+function sourceAfter(source: string, start: string): string {
+  const startIndex = source.indexOf(start);
+  assert.notEqual(startIndex, -1, `missing source start marker: ${start}`);
+  return source.slice(startIndex);
+}

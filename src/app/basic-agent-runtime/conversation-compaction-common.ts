@@ -33,3 +33,10 @@ export function clampRatio(value: number): number {
   }
   return Math.min(0.95, Math.max(0.1, value));
 }
+
+export function compactionAgentDisplayName(input: {
+  readonly displayName: string;
+} | undefined): string {
+  const displayName = input?.displayName.replace(/\s+/g, " ").trim();
+  return displayName === undefined || displayName.length === 0 ? "AgentArbor" : displayName;
+}

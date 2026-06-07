@@ -1,17 +1,16 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import type { BasicAgentRun, DesktopWorkSessionReadModel } from "../../domain/basic-agent/index.js";
-import type { ToolDisplayProjection, ToolResultEnvelope } from "../../domain/tools/index.js";
-import type { RuntimeConfirmationRecord, RuntimeDatabase } from "../../domain/runtime-database/index.js";
+import type { BasicAgentRun } from "../../domain/basic-agent/index.js";
+import type { RuntimeDatabase } from "../../domain/runtime-database/index.js";
 import {
   basicRunFromRuntimeSnapshot,
   basicRunReplayFromRuntimeSnapshot,
   BasicAgentConfirmationDecisionError,
-  createDesktopWorkSessionReadModel,
   submitRestoredBasicConfirmationDecision,
   type BasicAgentRunExecutor,
 } from "../basic-agent-runtime/index.js";
 import type { PanelRunJob } from "../panel-run-jobs.js";
-import { createPanelTranscriptNodes } from "../panel-run-read-model.js";
+import type { PanelRunStreamEvent } from "../panel-run-read-model.js";
+import { createBasicAgentRunViewReadModel } from "./basic-agent-run-view.js";
 import {
   PanelHttpError,
   parseStreamCursor,
@@ -24,6 +23,7 @@ import { parseConfirmationDecision } from "./request-parsers.js";
 export type PanelBasicAgentRouteRuntime = {
   readonly runJobs: {
     get(runId: string): PanelRunJob | undefined;
+    syncStreamEvents(runId: string, events: readonly PanelRunStreamEvent[]): readonly PanelRunStreamEvent[];
   };
   readonly runExecutor: BasicAgentRunExecutor;
   readonly runtimeDatabase?: RuntimeDatabase;
@@ -41,8 +41,7 @@ export async function handlePanelBasicAgentRoute(
     await handleGetBasicWorkSessionRequest(
       runtime,
       decodeURIComponent(basicWorkSessionMatch[1] ?? ""),
-      response,
-      syncLiveRunEvents
+      response
     );
     return true;
   }
@@ -56,6 +55,18 @@ export async function handlePanelBasicAgentRoute(
       request,
       response,
       syncLiveRunEvents
+    );
+    return true;
+  }
+
+  const basicRunViewMatch = /^\/api\/basic-agent\/runs\/([^/]+)\/view$/.exec(url.pathname);
+  if (request.method === "GET" && basicRunViewMatch !== null) {
+    await handleGetBasicRunViewRequest(
+      runtime,
+      decodeURIComponent(basicRunViewMatch[1] ?? ""),
+      url,
+      request,
+      response
     );
     return true;
   }
@@ -108,49 +119,16 @@ export async function handlePanelBasicAgentRoute(
 async function handleGetBasicWorkSessionRequest(
   runtime: PanelBasicAgentRouteRuntime,
   runId: string,
-  response: ServerResponse,
-  syncLiveRunEvents: (job: PanelRunJob) => void
+  response: ServerResponse
 ): Promise<void> {
-  const job = runtime.runJobs.get(runId);
-  if (job !== undefined) {
-    syncLiveRunEvents(job);
-    const replay = runtime.runExecutor.replayEvents(runId, 0);
-    writeJson(response, 200, {
-      ok: true,
-      workSession: createDesktopWorkSessionReadModel({
-        run: requireBasicRun(runtime, runId),
-        events: replay?.events ?? [],
-        canvas: job.completed?.canvas,
-        taskSoilInput: job.taskSoilInput,
-        toolEvidence: toolEnvelopesFromStreamEvents(job.streamEvents),
-        toolDisplays: toolDisplaysFromStreamEvents(job.streamEvents),
-        transcriptNodes: createPanelTranscriptNodes(job.streamEvents),
-      }) satisfies DesktopWorkSessionReadModel,
-    });
-    return;
-  }
-
-  const snapshot = await runtime.runtimeDatabase?.getRun(runId);
-  if (snapshot === undefined) {
+  const view = await createBasicAgentRunViewReadModel(runtime, runId, 0);
+  if (view === undefined) {
     throw new PanelHttpError(404, "run_not_found", "未找到基础 Agent 工作会话。");
   }
-  const replay = basicRunReplayFromRuntimeSnapshot(snapshot);
   writeJson(response, 200, {
     ok: true,
-    workSession: createDesktopWorkSessionReadModel({
-      run: basicRunFromRuntimeSnapshot(snapshot),
-      events: replay.events,
-      pendingConfirmation: restoredPendingConfirmation(snapshot.confirmations),
-      toolEvidence: snapshot.toolCalls.map((call) => call.envelope).filter((envelope): envelope is ToolResultEnvelope => envelope !== undefined),
-      toolDisplays: snapshot.toolCalls.map((call) => call.display).filter((display): display is ToolDisplayProjection => display !== undefined),
-      restoredResult:
-        snapshot.run.resultTitle === undefined && snapshot.run.resultSummary === undefined
-          ? undefined
-          : {
-              title: snapshot.run.resultTitle ?? "结果已生成",
-              summary: snapshot.run.resultSummary ?? "结果已经整理完成。",
-            },
-    }) satisfies DesktopWorkSessionReadModel,
+    workView: view.workView,
+    workSession: view.workSession,
   });
 }
 
@@ -188,6 +166,24 @@ async function handleGetBasicRunEventsRequest(
     runId,
     cursor: restored.cursor,
     events: restored.events.filter((event) => event.sequence > cursor),
+  });
+}
+
+async function handleGetBasicRunViewRequest(
+  runtime: PanelBasicAgentRouteRuntime,
+  runId: string,
+  url: URL,
+  request: IncomingMessage,
+  response: ServerResponse
+): Promise<void> {
+  const cursor = parseStreamCursor(url.searchParams.get("cursor"), request.headers["last-event-id"]);
+  const view = await createBasicAgentRunViewReadModel(runtime, runId, cursor);
+  if (view === undefined) {
+    throw new PanelHttpError(404, "run_not_found", "未找到基础 Agent 运行视图。");
+  }
+  writeJson(response, 200, {
+    ok: true,
+    view,
   });
 }
 
@@ -349,26 +345,6 @@ function requireBasicRun(runtime: PanelBasicAgentRouteRuntime, runId: string): B
   return run;
 }
 
-function restoredPendingConfirmation(confirmations: readonly RuntimeConfirmationRecord[]): DesktopWorkSessionReadModel["pendingConfirmation"] {
-  const pending = confirmations.find((confirmation) => confirmation.status === "pending");
-  if (pending === undefined) {
-    return undefined;
-  }
-  return {
-    confirmationId: pending.confirmationId,
-    runId: pending.runId,
-    conversationId: pending.conversationId,
-    title: pending.title,
-    actionSummary: pending.actionSummary,
-    affectedResources: pending.affectedResources,
-    riskLevel: pending.riskLevel,
-    resumeAvailability: "lost_after_restart",
-    requestedAt: pending.requestedAt,
-    expiresAt: pending.expiresAt,
-    sourceRefs: pending.eventRefs,
-  };
-}
-
 function shouldCloseBasicRunStream(status: BasicAgentRun["status"]): boolean {
   return status === "completed" ||
     status === "failed" ||
@@ -376,43 +352,4 @@ function shouldCloseBasicRunStream(status: BasicAgentRun["status"]): boolean {
     status === "blocked" ||
     status === "approval_needed" ||
     status === "needs_input";
-}
-
-function toolDisplaysFromStreamEvents(events: readonly PanelRunJob["streamEvents"][number][]): readonly ToolDisplayProjection[] {
-  const displays: ToolDisplayProjection[] = [];
-  const seen = new Set<string>();
-  for (const event of events) {
-    const display = event.detail?.display;
-    if (display === undefined) {
-      continue;
-    }
-    const key = JSON.stringify(display);
-    if (seen.has(key)) {
-      continue;
-    }
-    seen.add(key);
-    displays.push(display);
-  }
-  return displays;
-}
-
-function toolEnvelopesFromStreamEvents(events: readonly PanelRunJob["streamEvents"][number][]): readonly ToolResultEnvelope[] {
-  const envelopes: ToolResultEnvelope[] = [];
-  const seen = new Set<string>();
-  for (const event of events) {
-    const envelope = event.detail?.envelope;
-    if (envelope === undefined) {
-      continue;
-    }
-    const key = envelope.diagnosticRef ?? JSON.stringify({
-      summary: envelope.agentSummary,
-      evidenceRefs: envelope.evidenceRefs,
-    });
-    if (seen.has(key)) {
-      continue;
-    }
-    seen.add(key);
-    envelopes.push(envelope);
-  }
-  return envelopes;
 }

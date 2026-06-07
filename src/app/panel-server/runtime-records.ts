@@ -12,7 +12,7 @@ import type {
 import { redactSensitiveText } from "../../kernel/redaction.js";
 import type { EventLogEntry } from "../../kernel/events/in-memory-event-log.js";
 import type { PanelRunCanvasReadModel } from "../panel-canvas-read-model.js";
-import type { PanelRunJob } from "../panel-run-jobs.js";
+import { panelRunPayloadForStatus, type PanelRunJob } from "../panel-run-jobs.js";
 import type {
   PanelRunStatus,
   PanelRunStreamEvent,
@@ -44,6 +44,8 @@ export function createRuntimeRunRecord(input: {
   readonly runtimeHome: string | undefined;
 }): RuntimeRunRecord {
   const restoredResult = resultSummaryForJob(input.job);
+  const statusPayload = panelRunPayloadForStatus(input.job);
+  const statusObservation = statusPayload === undefined || !("observation" in statusPayload) ? undefined : statusPayload.observation;
   return {
     runId: input.job.runId,
     profile: "lite",
@@ -55,8 +57,8 @@ export function createRuntimeRunRecord(input: {
     workspaceId: input.workspace?.workspaceId,
     workspacePath: input.workspace?.path,
     conversationId: input.job.conversationId,
-    traceId: input.job.traceId ?? input.job.completed?.observation?.traceId ?? canvasTraceId(input.job.completed?.canvas),
-    goalId: input.job.goalId ?? input.job.completed?.observation?.goalId,
+    traceId: input.job.traceId ?? statusObservation?.traceId ?? canvasTraceId(statusPayload?.canvas),
+    goalId: input.job.goalId ?? statusObservation?.goalId,
     appHome: input.appHome,
     runHome: input.runtimeHome === undefined ? "" : path.join(input.runtimeHome, "runs", encodeURIComponent(input.job.runId)),
     createdAt: input.job.createdAt,
@@ -65,7 +67,10 @@ export function createRuntimeRunRecord(input: {
     resultTitle: restoredResult?.title,
     resultSummary: restoredResult?.summary,
     error: safeRuntimeError(input.job.failed?.error ?? input.job.cancelled?.reason ?? input.job.blocked?.reason),
+    agentDefinitionRef: input.job.agentDefinitionRef,
     capabilitySnapshot: input.job.capabilitySnapshot,
+    capabilityResolution: statusPayload?.capabilityResolution ?? input.job.capabilityResolution,
+    informationAccess: input.job.informationAccess,
   };
 }
 
@@ -266,25 +271,26 @@ export function canvasTraceId(canvas: PanelRunCanvasReadModel | undefined): stri
 }
 
 function resultSummaryForJob(job: PanelRunJob): { readonly title: string; readonly summary: string } | undefined {
-  if (job.failed !== undefined) {
+  const statusPayload = panelRunPayloadForStatus(job);
+  if (job.status === "failed" && statusPayload !== undefined && "error" in statusPayload) {
     return {
       title: "运行失败",
-      summary: compactRuntimeText(job.failed.error.message, 900),
+      summary: compactRuntimeText(statusPayload.error.message, 900),
     };
   }
-  if (job.cancelled !== undefined) {
+  if (job.status === "cancelled" && statusPayload !== undefined && "reason" in statusPayload) {
     return {
       title: "已取消",
-      summary: compactRuntimeText(job.cancelled.reason.message, 900),
+      summary: compactRuntimeText(statusPayload.reason.message, 900),
     };
   }
-  if (job.blocked !== undefined) {
+  if (job.status === "blocked" && statusPayload !== undefined && "reason" in statusPayload) {
     return {
       title: "需要处理",
-      summary: compactRuntimeText(job.blocked.reason.message, 900),
+      summary: compactRuntimeText(statusPayload.reason.message, 900),
     };
   }
-  const canvas = job.completed?.canvas;
+  const canvas = statusPayload?.canvas;
   if (canvas?.kind === "desktop_agent_canvas" && canvas.agent.answer !== undefined) {
     return {
       title: canvas.agent.pendingConfirmation === undefined ? "已完成" : "需要确认",

@@ -6,7 +6,7 @@ import {
   createUndergroundAiDisabledConfigurationError,
   UndergroundAiConfigurationError,
   type UndergroundAiMode,
-} from "./intelligence-channel-factory.js";
+} from "./underground-ai-runtime.js";
 
 const DEFAULT_GOAL = "Build a small deterministic helper.";
 

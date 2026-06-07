@@ -70,7 +70,7 @@ export class CapabilityCenter {
       this.options.configCenter.listToolStates(),
       this.options.configCenter.listMcpServers(),
       this.options.configCenter.getWorkspaceConfig(),
-      this.options.configCenter.createUndergroundAiEnvironment(),
+      this.options.configCenter.createModelRuntimeEnvironment(),
       this.listSkills(),
     ]);
     const toolCatalog = createDesktopBasicToolRegistry({
@@ -103,6 +103,7 @@ export class CapabilityCenter {
           requiresConfirmation: tool.requiresConfirmation,
           confirmationLabel: tool.confirmationLabel,
           visibleResultPolicy: tool.visibleResultPolicy,
+          scopes: tool.scopes,
           enabled: tool.enabledByDefault,
           availability: tool.availability,
           disabledReason: tool.disabledReason,

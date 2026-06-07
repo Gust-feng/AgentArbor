@@ -1,6 +1,11 @@
 import type { ArborMessageType, ArtifactRef } from "../common.js";
 import type { BasicAgentRun, RunEvent } from "../basic-agent/contracts.js";
-import type { BasicAgentCapabilitySnapshot } from "../config/contracts.js";
+import type {
+  BasicAgentCapabilitySnapshot,
+  RunAgentDefinitionRef,
+  RunCapabilityResolution,
+  SanitizedInformationAccessConfig,
+} from "../config/contracts.js";
 import type { ToolDisplayProjection, ToolResultEnvelope } from "../tools/contracts.js";
 import type {
   ObservationProgress,
@@ -43,7 +48,7 @@ export type RuntimeConversationTurnRecord = {
   readonly role: "user" | "assistant";
   readonly title: string;
   readonly content: string;
-  readonly status: "pending" | "running" | "completed" | "failed";
+  readonly status: "pending" | "running" | "completed" | "failed" | "blocked" | "needs_input";
   readonly runId?: string;
   readonly responseModel?: {
     readonly profileId: string;
@@ -98,7 +103,10 @@ export type RuntimeRunRecord = {
     readonly code: string;
     readonly message: string;
   };
+  readonly agentDefinitionRef?: RunAgentDefinitionRef;
   readonly capabilitySnapshot?: BasicAgentCapabilitySnapshot;
+  readonly capabilityResolution?: RunCapabilityResolution;
+  readonly informationAccess?: SanitizedInformationAccessConfig;
 };
 
 export type RuntimeEventRecord = {

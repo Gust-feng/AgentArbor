@@ -23,21 +23,21 @@ export function AgentWorkTimeline(props: {
 
   return (
     <section className="agent-workline" aria-label="工作进度">
-      <div className="agent-workflow">
+      <div className="agent-activity">
         {items.map((item, index) => (
           <div
-            className={`agent-workflow-step ${item.tone} ${item.phase}`}
+            className={`agent-activity-step ${item.tone} ${item.phase}`}
             data-current={confirmation.current === undefined && index === items.length - 1 ? "true" : undefined}
             aria-current={confirmation.current === undefined && index === items.length - 1 ? "step" : undefined}
             key={item.key}
           >
-            <span className="agent-workflow-marker" aria-hidden="true" />
+            <span className="agent-activity-marker" aria-hidden="true" />
             <ActivityLine item={item} />
           </div>
         ))}
         {confirmation.current !== undefined && (
-          <div className="agent-workflow-step confirmation waiting_approval" data-current="true" aria-current="step">
-            <span className="agent-workflow-marker" aria-hidden="true" />
+          <div className="agent-activity-step confirmation waiting_approval" data-current="true" aria-current="step">
+            <span className="agent-activity-marker" aria-hidden="true" />
             <ConfirmationNode
               confirmation={confirmation.current}
               busy={props.confirmationBusy}
@@ -54,20 +54,20 @@ function ActivityLine({ item }: { readonly item: ActivityItem }): React.ReactEle
   const label = item.copy.label;
   const line = (
     <>
-      {label !== undefined && <span className="agent-workflow-label">{label}</span>}
-      <span className="agent-workflow-detail">{item.copy.detail}</span>
+      {label !== undefined && <span className="agent-activity-label">{label}</span>}
+      <span className="agent-activity-detail">{item.copy.detail}</span>
     </>
   );
   if (item.copy.expandedDetail !== undefined) {
     return (
-      <details className="agent-workflow-disclosure" data-tone={item.tone}>
-        <summary className="agent-workflow-line">{line}</summary>
-        <p className="agent-workflow-expanded-detail">{item.copy.expandedDetail}</p>
+      <details className="agent-activity-disclosure" data-tone={item.tone}>
+        <summary className="agent-activity-line">{line}</summary>
+        <p className="agent-activity-expanded-detail">{item.copy.expandedDetail}</p>
       </details>
     );
   }
   return (
-    <p className="agent-workflow-line">
+    <p className="agent-activity-line">
       {line}
     </p>
   );

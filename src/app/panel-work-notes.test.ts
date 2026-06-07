@@ -5,14 +5,14 @@ import type { ModelVisibleOutputProjection } from "../domain/intelligence/index.
 import type { EventLogEntry } from "../kernel/events/in-memory-event-log.js";
 import { createPanelWorkNotes } from "./panel-work-notes.js";
 
-test("panel work notes keep ordinary desktop chat separate from underground workflow notes", () => {
+test("panel work notes keep ordinary desktop agent separate from underground workflow notes", () => {
   const notes = createPanelWorkNotes({
-    runId: "run-work-notes-chat",
+    runId: "run-work-notes-agent",
     status: "completed",
     eventEntries: [
       modelCompletedEntry({
         sequence: 1,
-        requestId: "request-chat",
+        requestId: "request-agent",
         contractId: "desktop.agent_response.v1",
         decisionSummary: "Answered without starting internal workflow.",
       }),
@@ -21,8 +21,8 @@ test("panel work notes keep ordinary desktop chat separate from underground work
     updatedAt: "2026-05-07T00:00:01.000Z",
     modelCalls: [
       {
-        requestId: "request-chat",
-        responseId: "response-request-chat",
+        requestId: "request-agent",
+        responseId: "response-request-agent",
         status: "completed",
         purpose: "desktop_agent",
         outputContractId: "desktop.agent_response.v1",
@@ -31,11 +31,18 @@ test("panel work notes keep ordinary desktop chat separate from underground work
         eventRefs: ["message-1"],
       },
     ],
-    desktopChatOnly: true,
+    ordinaryDesktopAgentOnly: true,
+    agentDefinitionRef: {
+      agentId: "custom-ordinary-agent",
+      agentDisplayName: "Custom Ordinary Agent",
+    },
   });
 
-  assert.deepEqual(notes.map((note) => note.agentId), ["desktop-agent-session", "intelligence-channel"]);
+  assert.deepEqual(notes.map((note) => note.agentId), ["custom-ordinary-agent", "intelligence-channel"]);
+  assert.equal(notes[0]?.agentLabel, "Custom Ordinary Agent");
   assert.equal(notes.some((note) => note.agentId.includes("underground")), false);
+  assert.equal(JSON.stringify(notes).includes("promptRef"), false);
+  assert.equal(JSON.stringify(notes).includes("systemPrompt"), false);
 });
 
 test("panel work notes attach reasoning traces only to matching underground contracts", () => {
@@ -78,7 +85,7 @@ test("panel work notes attach reasoning traces only to matching underground cont
         eventRefs: ["message-2"],
       },
     ],
-    desktopChatOnly: false,
+    ordinaryDesktopAgentOnly: false,
   });
 
   const intent = notes.find((note) => note.noteId.endsWith(":intent-core"));

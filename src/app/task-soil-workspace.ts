@@ -1,7 +1,7 @@
 import type { Constraint } from "../domain/constraints.js";
 import { createTaskSoil, type ReadonlySoilStore, type TaskSoil, type TaskSoilContextRef } from "../domain/soil/index.js";
 import { redactSensitiveText } from "../kernel/redaction.js";
-import type { UndergroundAiMode } from "./intelligence-channel-factory.js";
+import type { ModelRuntimeMode } from "./model-runtime/index.js";
 
 const MAX_REF_LENGTH = 220;
 const MAX_SUMMARY_LENGTH = 360;
@@ -56,7 +56,7 @@ export function createTaskSoilFromDesktopInput(input: {
   readonly goal: string;
   readonly goalId: string;
   readonly traceId: string;
-  readonly aiMode: UndergroundAiMode;
+  readonly aiMode: ModelRuntimeMode;
   readonly constraints: readonly Constraint[];
   readonly soilStore: ReadonlySoilStore;
   readonly taskSoilInput?: DesktopTaskSoilInput;
@@ -114,7 +114,7 @@ function createDesktopTaskSoilContextRefs(input: {
 }
 
 function createDesktopPermissionRefs(
-  aiMode: UndergroundAiMode,
+  aiMode: ModelRuntimeMode,
   inputPermissionRefs: readonly string[] | undefined
 ): readonly string[] {
   return unique([

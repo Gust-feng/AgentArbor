@@ -174,7 +174,7 @@ export type ToolExecutionContext = {
 
 export type ToolPermissionCheck = {
   readonly callerAgentId: string;
-  readonly allowedTools?: readonly string[];
+  readonly allowedTools: readonly string[];
   readonly approvedConfirmationIds?: readonly string[];
 };
 
@@ -221,7 +221,7 @@ export interface ToolExecutionBroker {
   execute(
     request: ToolCallRequest,
     context: ToolExecutionContext,
-    permission?: ToolPermissionCheck
+    permission: ToolPermissionCheck
   ): Promise<ToolCallResult>;
   resetCallCount(): void;
   getCallCount(): number;

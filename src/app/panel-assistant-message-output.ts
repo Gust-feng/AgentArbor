@@ -10,7 +10,7 @@ export type AssistantDeliverableLike = {
   }[];
 };
 
-export type AssistantWorkSessionOutput<TDeliverable extends AssistantDeliverableLike> = {
+export type AssistantWorkViewOutput<TDeliverable extends AssistantDeliverableLike> = {
   readonly run: {
     readonly runId: string;
   };
@@ -38,26 +38,26 @@ export function assistantMessageOutput(input: {
   };
 }
 
-export function answerForWorkSessionTurn<TDeliverable extends AssistantDeliverableLike>(
-  workSession: AssistantWorkSessionOutput<TDeliverable> | undefined,
+export function answerForWorkViewTurn<TDeliverable extends AssistantDeliverableLike>(
+  workView: AssistantWorkViewOutput<TDeliverable> | undefined,
   runId: string | undefined,
   fallback: string
 ): string {
-  if (runId === undefined || workSession?.run.runId !== runId) {
+  if (runId === undefined || workView?.run.runId !== runId) {
     return fallback;
   }
-  return firstNonEmptyText([workSession.answer?.content, fallback]) ?? "";
+  return firstNonEmptyText([workView.answer?.content, fallback]) ?? "";
 }
 
-export function deliverableForWorkSessionTurn<TDeliverable extends AssistantDeliverableLike>(
-  workSession: AssistantWorkSessionOutput<TDeliverable> | undefined,
+export function deliverableForWorkViewTurn<TDeliverable extends AssistantDeliverableLike>(
+  workView: AssistantWorkViewOutput<TDeliverable> | undefined,
   runId: string | undefined,
   answer: string | undefined
 ): TDeliverable | undefined {
-  if (runId === undefined || workSession?.run.runId !== runId) {
+  if (runId === undefined || workView?.run.runId !== runId) {
     return undefined;
   }
-  return visibleDeliverable(workSession.deliverable, answer, answer);
+  return visibleDeliverable(workView.deliverable, answer, answer);
 }
 
 export function visibleDeliverable<TDeliverable extends AssistantDeliverableLike>(

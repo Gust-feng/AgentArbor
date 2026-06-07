@@ -8,14 +8,14 @@ import { compactStreamDetailText, type PanelRunStreamEventDetail } from "./panel
 import type { PanelObservationReadModel } from "./panel-run-tracking-contracts.js";
 import { cleanConfirmationSummary } from "./confirmation-copy.js";
 import type { PanelRunStreamEvent, PanelRunStreamEventType } from "./panel-run-stream-contracts.js";
-import type { UndergroundDemoSummary } from "./underground-demo-summary.js";
+import type { PanelRunSummary, PanelRunSummaryPayload } from "./panel-run-summary.js";
 import { friendlyUserFacingFailureText } from "./visible-text-safety.js";
 import { modelRequestedSummary as projectedModelRequestedSummary } from "./panel-model-progress-copy.js";
 import { friendlyFailureCopy } from "./failure-copy.js";
 
 export function blockedRunSummary(error: { readonly code: string; readonly message: string } | undefined): string {
   if (error?.code === "out_of_fuel") {
-    return "任务没有完成，当前轮次已到上限。你可以继续发送消息，我会接着处理。";
+    return "任务没有完成。你可以继续发送消息，我会接着处理。";
   }
   return friendlyUserFacingFailureText(error?.message ?? "运行中断，等待用户确认或补充指导。");
 }
@@ -77,7 +77,7 @@ export function modelRequestedSummary(payload: Readonly<Record<string, unknown>>
 
 export function modelCompletedSummary(payload: Readonly<Record<string, unknown>>): string {
   const validation = stringOrUndefined(payload.validationStatus) ?? "unknown";
-  return validation === "passed" ? "内容已整理，并已进入报告或详情。" : `内容已整理，校验 ${validation}。`;
+  return validation === "passed" ? "内容已整理。" : `内容已整理，校验 ${validation}。`;
 }
 
 export function modelFailedSummary(payload: Readonly<Record<string, unknown>>): string {
@@ -249,10 +249,18 @@ export function chunkText(value: string, maxLength: number): readonly string[] {
 }
 
 export function finalResultSummary(input: {
-  readonly summary?: UndergroundDemoSummary | { readonly ai: UndergroundDemoSummary["ai"] };
+  readonly summary?: PanelRunSummaryPayload;
   readonly observation?: PanelObservationReadModel;
   readonly eventEntries: readonly EventLogEntry[];
+  readonly desktopMode?: "agent" | "deep";
 }): string {
+  if (input.desktopMode === "agent") {
+    const directAnswer = latestDirectAnswerPayload(input.eventEntries);
+    if (directAnswer !== undefined) {
+      return `已回答：${directAnswer.answer}`;
+    }
+    return "运行完成。";
+  }
   const summary = fullSummaryOrUndefined(input.summary);
   if (summary !== undefined) {
     return `任务运行完成，已形成可执行方案，状态 ${summary.directionPackage.status}。`;
@@ -275,10 +283,15 @@ export function finalResultSummary(input: {
 }
 
 export function finalSourceRefs(input: {
-  readonly summary?: UndergroundDemoSummary | { readonly ai: UndergroundDemoSummary["ai"] };
+  readonly summary?: PanelRunSummaryPayload;
   readonly observation?: PanelObservationReadModel;
   readonly eventEntries: readonly EventLogEntry[];
+  readonly desktopMode?: "agent" | "deep";
 }): readonly string[] {
+  if (input.desktopMode === "agent") {
+    const directAnswer = latestDirectAnswerPayload(input.eventEntries);
+    return directAnswer?.requestId === undefined ? [] : [`model_call:${directAnswer.requestId}`];
+  }
   const summary = fullSummaryOrUndefined(input.summary);
   if (summary !== undefined) {
     return [
@@ -456,6 +469,6 @@ function isDirectAnswerOutput(visibleOutput: ModelVisibleOutputProjection | unde
     visibleOutput?.contractId === "desktop.chat.answer.v1";
 }
 
-function fullSummaryOrUndefined(value: UndergroundDemoSummary | { readonly ai: UndergroundDemoSummary["ai"] } | undefined): UndergroundDemoSummary | undefined {
+function fullSummaryOrUndefined(value: PanelRunSummaryPayload | undefined): PanelRunSummary | undefined {
   return value !== undefined && "directionPackage" in value ? value : undefined;
 }

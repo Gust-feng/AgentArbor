@@ -6,7 +6,13 @@ import {
   stateWithObservedRunProjection,
 } from "../../panel-run-observation-state";
 import type { AppState } from "./app-state";
-import type { BasicAgentRun, DesktopRunDetail, DesktopWorkSession, RunEvent } from "./contracts/run";
+import type {
+  BasicAgentRun,
+  DesktopRunDetail,
+  DesktopWorkView,
+  RunCapabilityResolution,
+  RunEvent,
+} from "./contracts/run";
 
 export { mergeRunEvents };
 
@@ -26,11 +32,15 @@ export function appStateWithObservedRunProjection(
     readonly runId: string;
     readonly run?: BasicAgentRun;
     readonly events?: readonly RunEvent[];
-    readonly workSession?: DesktopWorkSession;
+    readonly workView?: DesktopWorkView;
+    readonly capabilityResolution?: RunCapabilityResolution;
     readonly detail?: DesktopRunDetail;
   }
 ): AppState {
-  return stateWithObservedRunProjection(previous, input);
+  return {
+    ...stateWithObservedRunProjection(previous, input),
+    ...nextCapabilityResolutionState(previous, input.runId, input.capabilityResolution),
+  };
 }
 
 export function appStateWithObservedRunEvent(
@@ -39,11 +49,15 @@ export function appStateWithObservedRunEvent(
     readonly runId: string;
     readonly event: RunEvent;
     readonly run?: BasicAgentRun;
-    readonly workSession?: DesktopWorkSession;
+    readonly workView?: DesktopWorkView;
+    readonly capabilityResolution?: RunCapabilityResolution;
     readonly detail?: DesktopRunDetail;
   }
 ): AppState {
-  return stateWithObservedRunEvent(previous, input);
+  return {
+    ...stateWithObservedRunEvent(previous, input),
+    ...nextCapabilityResolutionState(previous, input.runId, input.capabilityResolution),
+  };
 }
 
 export function appStateWithAppendOnlyRunEvent(
@@ -54,4 +68,27 @@ export function appStateWithAppendOnlyRunEvent(
   }
 ): AppState {
   return stateWithAppendOnlyRunEvent(previous, input);
+}
+
+function nextCapabilityResolutionState(
+  previous: AppState,
+  runId: string,
+  incoming: RunCapabilityResolution | undefined
+): Pick<AppState, "capabilityResolution" | "capabilityResolutionRunId"> {
+  if (incoming !== undefined) {
+    return {
+      capabilityResolution: incoming,
+      capabilityResolutionRunId: runId,
+    };
+  }
+  if (previous.capabilityResolutionRunId === runId) {
+    return {
+      capabilityResolution: previous.capabilityResolution,
+      capabilityResolutionRunId: previous.capabilityResolutionRunId,
+    };
+  }
+  return {
+    capabilityResolution: undefined,
+    capabilityResolutionRunId: undefined,
+  };
 }

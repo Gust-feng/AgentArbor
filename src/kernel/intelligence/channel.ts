@@ -7,7 +7,7 @@ import type {
 } from "../../domain/intelligence/index.js";
 import type { InMemoryMessageBus } from "../messages/in-memory-message-bus.js";
 import { nowIso } from "../id.js";
-import { createFailedModelResponse } from "./failures.js";
+import { createFailedModelResponse, createFailedModelResponseFromError } from "./failures.js";
 import {
   createModelCompletedMessage,
   createModelFailedMessage,
@@ -47,7 +47,24 @@ export class NativeIntelligenceChannel implements IntelligenceChannel {
 
     this.options.bus.publish(createModelRequestedMessage({ request, provider: this.options.provider }));
 
-    const providerResponse = await this.options.provider.complete(request, options);
+    let providerResponse: ModelResponse;
+    try {
+      providerResponse = await this.options.provider.complete(request, options);
+    } catch (error) {
+      const response = createFailedModelResponseFromError({
+        requestId: request.requestId,
+        providerId: this.options.provider.providerId,
+        providerKind: this.options.provider.providerKind,
+        protocolKind: this.options.provider.protocolKind,
+        model: this.options.provider.model,
+        outputKind: request.outputContract.outputKind,
+        error,
+        fallbackMessage: "Model provider request failed.",
+      });
+      this.options.bus.publish(createModelFailedMessage({ request, response }));
+      return response;
+    }
+
     const validation = this.validateResponse(request, providerResponse);
     const response = normalizeValidatedResponse(providerResponse, validation);
 

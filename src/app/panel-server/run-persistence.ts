@@ -1,10 +1,9 @@
 import type { FileSystemRuntimeDatabasePaths } from "../../adapters/runtime-database/index.js";
-import type { SanitizedWorkspaceConfig } from "../../domain/config/index.js";
 import type { RuntimeDatabase } from "../../domain/runtime-database/index.js";
 import type { BasicAgentRunExecutor } from "../basic-agent-runtime/index.js";
 import type { PanelConversationReadModel } from "../panel-conversations.js";
 import { toRuntimeConversationRecord } from "../panel-conversations.js";
-import { PanelRunJobStore, type PanelRunJob } from "../panel-run-jobs.js";
+import { panelRunPayloadForStatus, PanelRunJobStore, type PanelRunJob } from "../panel-run-jobs.js";
 import { createPanelRunTrace, createPanelRunTranscript } from "../panel-run-read-model.js";
 import {
   enqueuePanelPersistence,
@@ -23,9 +22,6 @@ import {
 import { syncPanelRunStreamEventsForJob } from "./run-stream-sync.js";
 
 export type PanelRunPersistenceRuntime = {
-  readonly configCenter: {
-    getWorkspaceConfig(): Promise<SanitizedWorkspaceConfig>;
-  };
   readonly runJobs: PanelRunJobStore;
   readonly runExecutor: Pick<BasicAgentRunExecutor, "get" | "replayEvents" | "syncRunEvents">;
   readonly conversations: {
@@ -75,7 +71,7 @@ async function persistPanelRunNow(
   if (job.conversationId !== undefined) {
     await persistPanelConversation(runtime, job.conversationId);
   }
-  const workspace = job.capabilitySnapshot?.workspace ?? await runtime.configCenter.getWorkspaceConfig().catch(() => undefined);
+  const workspace = job.capabilitySnapshot?.workspace;
   const workspaceRecord = workspace === undefined ? undefined : createRuntimeWorkspaceRecord(workspace, job.updatedAt);
   if (workspaceRecord !== undefined) {
     await runtime.runtimeDatabase.upsertWorkspace(workspaceRecord);
@@ -88,7 +84,14 @@ async function persistPanelRunNow(
   }));
 
   const eventEntries = job.runtime?.eventLog.list() ?? [];
-  const trace = createPanelRunTrace({ status: job.status, eventEntries });
+  const trace = createPanelRunTrace({
+    status: job.status,
+    runMode: job.runMode,
+    projection: "runtime",
+    eventEntries,
+  });
+  const statusPayload = panelRunPayloadForStatus(job);
+  const transcriptPayload = statusPayload === undefined || !("observation" in statusPayload) ? undefined : statusPayload;
   const streamEvents = syncPanelRunStreamEventsForJob(runtime, job);
   const basicRun = runtime.runExecutor.get(job.runId);
   const basicReplay = runtime.runExecutor.replayEvents(job.runId, 0);
@@ -96,12 +99,13 @@ async function persistPanelRunNow(
     runId: job.runId,
     status: job.status,
     eventEntries,
-    summary: job.completed?.summary,
-    observation: job.completed?.observation,
-    agentRunTree: job.completed?.agentRunTree,
+    summary: transcriptPayload?.summary,
+    observation: transcriptPayload?.observation,
+    agentRunTree: transcriptPayload?.agentRunTree,
     routeDecision: job.routeDecision,
     desktopMode: job.runKind === "desktop" ? job.runMode : undefined,
     reasoningEffort: job.reasoningEffort,
+    agentDefinitionRef: job.agentDefinitionRef,
     createdAt: job.createdAt,
     updatedAt: job.updatedAt,
   });

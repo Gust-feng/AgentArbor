@@ -7,7 +7,7 @@ import type { ConversationTurn } from "../contracts/conversation";
 import type {
   AgentDeliverable,
   BasicAgentRun,
-  DesktopWorkSession,
+  DesktopWorkView,
   TranscriptNode,
 } from "../contracts/run";
 import type { LiveAnswerTone } from "../../../panel-ui-live-transcript";
@@ -43,7 +43,7 @@ export function TranscriptChain(props: {
   readonly run?: BasicAgentRun;
   readonly transcriptNodes: readonly TranscriptNode[];
   readonly live?: LiveRunBuffer;
-  readonly workSession?: DesktopWorkSession;
+  readonly workView?: DesktopWorkView;
   readonly pending?: ConfirmationProjection;
   readonly onDecision: (decision: "approve_once" | "deny" | "guidance", guidance?: string) => void;
   readonly confirmationBusy: boolean;
@@ -72,7 +72,7 @@ export function TranscriptChain(props: {
           run: props.run,
           transcriptNodes: props.transcriptNodes,
           live: props.live,
-          workSession: props.workSession,
+          workView: props.workView,
           pending: props.pending,
         });
         const model = assistantModelForTurn(turn, props.models, props.selectedModelId);

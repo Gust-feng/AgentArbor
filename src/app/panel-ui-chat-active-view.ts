@@ -16,16 +16,16 @@ import {
   visibleResultText,
   visibleRunProblem,
   type AssistantRunDetailLike,
-  type AssistantWorkSessionProblemLike,
+  type AssistantWorkViewProblemLike,
 } from "./panel-assistant-run-output.js";
-import { workflowVisibleNodes } from "./panel-transcript-node-projection.js";
+import { activityVisibleNodes } from "./panel-transcript-node-projection.js";
 import type { ConfirmationIdentity } from "./panel-transcript-confirmation-projection.js";
 
-export type ChatActiveWorkSessionLike<
+export type ChatActiveWorkViewLike<
   TDeliverable extends AssistantDeliverableLike,
   TPending extends ConfirmationIdentity,
   TNode extends ChatActiveTranscriptNode,
-> = AssistantWorkSessionProblemLike & {
+> = AssistantWorkViewProblemLike & {
   readonly run: {
     readonly runId: string;
   };
@@ -51,7 +51,7 @@ export type ChatActiveViewInput<
 > = {
   readonly conversation?: ChatActiveConversation;
   readonly run?: ChatActiveRun;
-  readonly workSession?: ChatActiveWorkSessionLike<TDeliverable, TPending, TNode>;
+  readonly workView?: ChatActiveWorkViewLike<TDeliverable, TPending, TNode>;
   readonly transcriptNodes: readonly TNode[];
   readonly detail?: ChatActiveDetailLike<TNode>;
   readonly live?: LiveRunBuffer;
@@ -71,7 +71,7 @@ export function projectChatActiveView<
   TPending extends ConfirmationIdentity,
   TNode extends ChatActiveTranscriptNode,
 >(input: ChatActiveViewInput<TDeliverable, TPending, TNode>): ChatActiveViewProjection<TDeliverable, TPending> {
-  const transcriptNodes = workflowVisibleNodes(input.transcriptNodes);
+  const transcriptNodes = activityVisibleNodes(input.transcriptNodes);
   const currentRunId = input.run?.runId ?? input.conversation?.activeRunId ?? input.conversation?.latestRunId ?? input.live?.runId;
   const currentRunAssistantTurn = currentRunId === undefined
     ? undefined
@@ -83,23 +83,23 @@ export function projectChatActiveView<
   const detailAnswer = input.detail?.runId === undefined || currentRunId === undefined || input.detail.runId === currentRunId
     ? visibleResultText(input.detail)
     : undefined;
-  const workSessionAnswer = input.workSession?.answer?.content;
+  const workViewAnswer = input.workView?.answer?.content;
   const answer = firstNonEmptyText([
-    workSessionAnswer,
+    workViewAnswer,
     detailAnswer,
     currentRunAssistantTurn?.content,
   ]);
-  const pending = input.workSession?.pendingConfirmation ?? input.pendingConfirmation;
+  const pending = input.workView?.pendingConfirmation ?? input.pendingConfirmation;
   return projectChatActive({
     conversation: input.conversation,
     run: input.run,
     transcriptNodes,
     live: input.live,
-    workSessionAnswer,
+    workViewAnswer,
     detailAnswer,
     pending,
-    deliverable: visibleDeliverable(input.workSession?.deliverable, answer, currentRunAssistantTurn?.content),
-    problem: visibleRunProblem(input.run, input.workSession, input.detail, input.error),
+    deliverable: visibleDeliverable(input.workView?.deliverable, answer, currentRunAssistantTurn?.content),
+    problem: visibleRunProblem(input.run, input.workView, input.detail, input.error),
     appError: input.error,
   });
 }

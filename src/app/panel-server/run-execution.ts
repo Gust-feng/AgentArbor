@@ -11,21 +11,20 @@ import {
   createPanelRunTracking,
   createPanelRunTranscript,
   type PanelObservationReadModel,
+  type PanelRunStatus,
   type PanelRunStreamCursor,
   type PanelRunTraceReadModel,
   type PanelRunTrackingReadModel,
   type PanelRunTranscript,
 } from "../panel-run-read-model.js";
-import type { PanelDesktopRunMode, PanelRunJob, PanelRunKind } from "../panel-run-jobs.js";
+import type { PanelRunJob, PanelRunKind, PanelRunMode } from "../panel-run-jobs.js";
+import type { PanelRunConfigurationFailureSummary, PanelRunSummary } from "../panel-run-summary.js";
 import type { DesktopTaskSoilInput } from "../task-soil-workspace.js";
 import {
   ModelRuntimeConfigurationError,
+  type ModelRuntimeSummaryInput,
   type ModelRuntimeMode,
 } from "../model-runtime/index.js";
-import {
-  type UndergroundDemoAiInput,
-  type UndergroundDemoSummary,
-} from "../underground-demo-summary.js";
 import { friendlyUserFacingFailureText } from "../visible-text-safety.js";
 import { buildConversationHistoryMessages } from "./conversation-history.js";
 import { PanelHttpError } from "./http-utils.js";
@@ -34,7 +33,9 @@ import { canvasTraceId } from "./runtime-records.js";
 import type { PanelRuntime } from "./runtime.js";
 import { runOrdinaryDesktopForPanel } from "./desktop-agent-execution.js";
 import { prepareDesktopRunResources } from "./desktop-run-resources.js";
-import { runDeepDesktopForPanel, runUndergroundForPanel } from "./underground-compat-execution.js";
+import { runUndergroundForPanel } from "./underground-compat-execution.js";
+import type { AgentDefinition } from "../agent-prompts/contracts.js";
+import { assertRunModeForKind, RunModePolicyError } from "../run-mode-policy.js";
 import type {
   PanelRunExecutionOptions,
   PanelRunExecutionResult,
@@ -43,11 +44,13 @@ import type {
 export type PanelRunResponse = {
   readonly ok: true;
   readonly runKind: PanelRunKind;
-  readonly runMode: PanelDesktopRunMode;
-  readonly status: "completed";
+  readonly runMode: PanelRunMode;
+  readonly status: PanelRunStatus;
+  readonly agentDefinitionRef?: PanelRunExecutionResult["agentDefinitionRef"];
+  readonly capabilityResolution?: PanelRunExecutionResult["capabilityResolution"];
   readonly config: SanitizedModelProviderConfig;
   readonly informationAccess: SanitizedInformationAccessConfig;
-  readonly summary?: UndergroundDemoSummary;
+  readonly summary?: PanelRunSummary;
   readonly observation?: PanelObservationReadModel;
   readonly tracking: PanelRunTrackingReadModel;
   readonly trace: PanelRunTraceReadModel;
@@ -57,6 +60,10 @@ export type PanelRunResponse = {
   readonly steps: PanelRunTranscript["steps"];
   readonly streamCursor: PanelRunStreamCursor;
   readonly canvas?: PanelRunCanvasReadModel;
+  readonly error?: {
+    readonly code: string;
+    readonly message: string;
+  };
 };
 
 export async function executeBasicPanelRun(
@@ -74,7 +81,11 @@ export async function executeBasicPanelRun(
   });
   return runForPanel(runtime, job.runKind, job.goal, job.aiMode, job.taskSoilInput, job.runMode, {
     conversationHistory,
+    agentDefinition: resolveExecutionAgentDefinition(runtime, job),
+    agentDefinitionRef: job.agentDefinitionRef,
+    config: job.config,
     capabilitySnapshot: job.capabilitySnapshot,
+    informationAccess: job.informationAccess,
     reasoningEffort: job.reasoningEffort,
     abortSignal: input.abortSignal,
     onRuntimeReady: input.onRuntimeReady,
@@ -94,6 +105,8 @@ export async function failPanelRunJob(
     runtime.runJobs.fail(job.runId, {
       config,
       informationAccess,
+      capabilitySnapshot: job.capabilitySnapshot,
+      capabilityResolution: job.capabilityResolution,
       error: {
         code: error.issue.code,
         message,
@@ -108,6 +121,8 @@ export async function failPanelRunJob(
     runtime.runJobs.fail(job.runId, {
       config,
       informationAccess,
+      capabilitySnapshot: job.capabilitySnapshot,
+      capabilityResolution: job.capabilityResolution,
       error: {
         code: error.code,
         message: panelJobErrorMessage(error),
@@ -120,6 +135,8 @@ export async function failPanelRunJob(
   runtime.runJobs.fail(job.runId, {
     config,
     informationAccess,
+    capabilitySnapshot: job.capabilitySnapshot,
+    capabilityResolution: job.capabilityResolution,
     error: {
       code: "panel_internal_error",
       message: friendlyUserFacingFailureText(
@@ -136,12 +153,13 @@ export async function runForPanel(
   goal: string,
   aiMode: ModelRuntimeMode,
   taskSoilInput: DesktopTaskSoilInput | undefined,
-  runMode: PanelDesktopRunMode = "agent",
+  runMode: PanelRunMode = "agent",
   options: PanelRunExecutionOptions = {}
 ): Promise<PanelRunExecutionResult> {
   throwIfAborted(options.abortSignal);
+  assertSupportedPanelRunMode(runKind, runMode);
   return runKind === "desktop"
-    ? runDesktopForPanel(runtime, goal, aiMode, taskSoilInput, runMode, options)
+    ? runDesktopForPanel(runtime, goal, aiMode, taskSoilInput, options)
     : runUndergroundForPanel(runtime, goal, aiMode, options);
 }
 
@@ -150,31 +168,83 @@ async function runDesktopForPanel(
   goal: string,
   aiMode: ModelRuntimeMode,
   taskSoilInput: DesktopTaskSoilInput | undefined,
-  runMode: PanelDesktopRunMode,
   options: PanelRunExecutionOptions
 ): Promise<PanelRunExecutionResult> {
   throwIfAborted(options.abortSignal);
   const resources = await prepareDesktopRunResources(runtime, aiMode, options);
-  return runMode === "deep"
-    ? runDeepDesktopForPanel(runtime, goal, resources, options)
-    : runOrdinaryDesktopForPanel(runtime, goal, aiMode, taskSoilInput, resources, options);
+  return runOrdinaryDesktopForPanel(runtime, goal, aiMode, taskSoilInput, resources, options);
 }
 
-export async function createCompletedPanelRunResponse(input: {
+function assertSupportedPanelRunMode(runKind: PanelRunKind, runMode: PanelRunMode): void {
+  try {
+    assertRunModeForKind(runKind, runMode);
+  } catch (error) {
+    if (error instanceof RunModePolicyError) {
+      throw new PanelHttpError(
+        400,
+        error.code,
+        runModeNotSupportedMessage(error)
+      );
+    }
+    throw error;
+  }
+}
+
+function runModeNotSupportedMessage(error: RunModePolicyError): string {
+  return error.code === "desktop_run_mode_not_supported"
+    ? "Desktop 默认执行入口当前只支持普通 agent 运行。请使用显式 deep 入口。"
+    : "Underground 执行入口固定运行 deep 模式，不支持普通 agent 运行。";
+}
+
+function resolveExecutionAgentDefinition(
+  runtime: PanelRuntime,
+  job: Pick<PanelRunJob, "runKind" | "runMode" | "agentDefinitionRef">
+): AgentDefinition | undefined {
+  if (job.runKind !== "desktop" || job.runMode !== "agent") {
+    return undefined;
+  }
+  if (job.agentDefinitionRef === undefined) {
+    throw new PanelHttpError(
+      500,
+      "agent_definition_ref_required",
+      "普通 Desktop Agent 运行缺少创建时冻结的 Agent 定义引用。"
+    );
+  }
+  const definition = runtime.agentDefinitions.resolve(job.agentDefinitionRef);
+  if (definition === undefined) {
+    throw new PanelHttpError(
+      500,
+      "agent_definition_mismatch",
+      "运行记录中的 Agent 定义与当前执行定义不一致。"
+    );
+  }
+  return definition;
+}
+
+export async function createPanelRunResponse(input: {
   readonly runtime: PanelRuntime;
   readonly runKind: PanelRunKind;
-  readonly runMode: PanelDesktopRunMode;
+  readonly runMode: PanelRunMode;
   readonly requestedMode: ModelRuntimeMode;
   readonly reasoningEffort?: ModelRunReasoningEffort;
   readonly run: PanelRunExecutionResult;
 }): Promise<PanelRunResponse> {
-  const currentConfig = await input.runtime.configCenter.getModelProviderConfig();
-  const currentInformationAccess = await input.runtime.configCenter.getInformationAccessConfig();
-  const trace = createPanelRunTrace({ status: "completed", eventEntries: input.run.eventEntries });
+  assertOrdinaryDesktopRunResponseFacts(input);
+  const status = panelRunStatusFromExecutionResult(input.run);
+  const error = panelRunErrorFromExecutionResult(input.run);
+  const config =
+    input.run.capabilitySnapshot?.activeModel ??
+    input.run.config ??
+    await input.runtime.configCenter.getModelProviderConfig();
+  const informationAccess =
+    input.run.informationAccess ??
+    await input.runtime.configCenter.getInformationAccessConfig();
+  const trace = createPanelRunTrace({ status, runMode: input.runMode, eventEntries: input.run.eventEntries });
   const tracking = createPanelRunTracking({
-    status: "completed",
-    config: currentConfig,
-    informationAccess: currentInformationAccess,
+    status,
+    runMode: input.runMode,
+    config,
+    informationAccess,
     requestedMode: input.requestedMode,
     summary: input.run.summary,
     observation: input.run.observation,
@@ -184,23 +254,27 @@ export async function createCompletedPanelRunResponse(input: {
   const responseRunId = input.run.observation?.traceId ?? canvasTraceId(input.run.canvas) ?? "panel-sync-run";
   const transcript = createPanelRunTranscript({
     runId: responseRunId,
-    status: "completed",
+    status,
     eventEntries: input.run.eventEntries,
     summary: input.run.summary,
     observation: input.run.observation,
     agentRunTree: input.run.agentRunTree,
     desktopMode: input.runKind === "desktop" ? input.runMode : undefined,
     reasoningEffort: input.reasoningEffort,
+    agentDefinitionRef: input.run.agentDefinitionRef,
     createdAt: input.run.eventEntries[0]?.recordedAt ?? new Date(0).toISOString(),
     updatedAt: input.run.eventEntries.at(-1)?.recordedAt ?? new Date(0).toISOString(),
+    error,
   });
   return {
     ok: true,
     runKind: input.runKind,
     runMode: input.runMode,
-    status: "completed",
-    config: currentConfig,
-    informationAccess: currentInformationAccess,
+    status,
+    agentDefinitionRef: input.run.agentDefinitionRef,
+    capabilityResolution: input.run.capabilityResolution,
+    config,
+    informationAccess,
     summary: input.run.summary,
     observation: input.run.observation,
     tracking,
@@ -214,14 +288,72 @@ export async function createCompletedPanelRunResponse(input: {
       lastSequence: transcript.events.at(-1)?.sequence ?? 0,
     },
     canvas: input.run.canvas,
+    error,
   };
 }
 
+function assertOrdinaryDesktopRunResponseFacts(input: {
+  readonly runKind: PanelRunKind;
+  readonly runMode: PanelRunMode;
+  readonly run: PanelRunExecutionResult;
+}): void {
+  if (input.runKind !== "desktop" || input.runMode !== "agent") {
+    return;
+  }
+  if (input.run.capabilitySnapshot === undefined) {
+    throw new PanelHttpError(
+      500,
+      "desktop_capability_snapshot_required",
+      "Desktop Agent run response requires a capability snapshot frozen when the run was created."
+    );
+  }
+  if (input.run.informationAccess === undefined) {
+    throw new PanelHttpError(
+      500,
+      "desktop_information_access_required",
+      "Desktop Agent run response requires information access settings frozen when the run was created."
+    );
+  }
+  if (input.run.agentDefinitionRef === undefined) {
+    throw new PanelHttpError(
+      500,
+      "agent_definition_ref_required",
+      "Desktop Agent run response requires the Agent definition reference frozen when the run was created."
+    );
+  }
+}
+
+function panelRunStatusFromExecutionResult(run: PanelRunExecutionResult): PanelRunStatus {
+  if (run.failed !== undefined) {
+    return "failed";
+  }
+  if (run.blocked !== undefined) {
+    return "blocked";
+  }
+  if (run.pendingApproval !== undefined) {
+    return "approval_needed";
+  }
+  if (run.completed === true) {
+    return "completed";
+  }
+  throw new PanelHttpError(
+    500,
+    "run_terminal_state_missing",
+    "运行结果缺少明确终态，不能作为完成结果返回。"
+  );
+}
+
+function panelRunErrorFromExecutionResult(
+  run: PanelRunExecutionResult
+): PanelRunResponse["error"] {
+  return run.failed ?? run.blocked;
+}
+
 export function createConfigurationFailedAiSummary(
-  input: UndergroundDemoAiInput,
+  input: ModelRuntimeSummaryInput,
   error: ModelRuntimeConfigurationError,
   message: string
-): UndergroundDemoSummary["ai"] {
+): PanelRunConfigurationFailureSummary["ai"] {
   return {
     ...input,
     status: "configuration_failed",
@@ -267,9 +399,9 @@ function latestModelFailureMessage(eventEntries: readonly EventLogEntry[]): stri
   const location = callRef.length > 0 ? `；调用 ${callRef}` : "";
 
   if (failureKind === "output_validation") {
-    return `真实 AI 输出未通过契约校验：${purpose} / ${contractId}；validation ${validationStatus}，${retryable}${location}。运行已停止，没有生成 completed artifact。`;
+    return `真实 AI 输出未通过契约校验：${purpose} / ${contractId}；validation ${validationStatus}，${retryable}${location}。运行已停止，没有形成最终结果。`;
   }
-  return `真实 AI 调用失败：${purpose} / ${contractId}；原因 ${failureKind}，validation ${validationStatus}，${retryable}${location}。运行已停止，没有生成 completed artifact。`;
+  return `真实 AI 调用失败：${purpose} / ${contractId}；原因 ${failureKind}，validation ${validationStatus}，${retryable}${location}。运行已停止，没有形成最终结果。`;
 }
 
 function modelRequestedPayloadFor(eventEntries: readonly EventLogEntry[], requestId: string): Record<string, unknown> {

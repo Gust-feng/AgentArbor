@@ -16,15 +16,15 @@ import type {
 import type { ConfirmationDecision } from "../../domain/basic-agent/index.js";
 import { TaskSoilInputValidationError, parseDesktopTaskSoilInput, type DesktopTaskSoilInput } from "../task-soil-workspace.js";
 import type { ModelRuntimeMode } from "../model-runtime/index.js";
-import type { PanelDesktopRunMode, PanelRunKind } from "../panel-run-jobs.js";
+import type { PanelRunMode } from "../panel-run-jobs.js";
 import { sanitizeAssistantVisibleText } from "../visible-text-safety.js";
 import { redactSensitiveText } from "../../kernel/redaction.js";
 import { PanelHttpError } from "./http-utils.js";
 
 export type PanelRunInput = {
   readonly goal: string;
-  readonly aiMode: ModelRuntimeMode;
-  readonly runMode: PanelDesktopRunMode;
+  readonly aiMode?: ModelRuntimeMode;
+  readonly requestedRunMode?: PanelRunMode;
   readonly reasoningEffort?: ModelRunReasoningEffort;
   readonly taskSoilInput?: DesktopTaskSoilInput;
 };
@@ -163,7 +163,7 @@ export function parseWebSearchUpdate(raw: unknown): UpdateWebSearchConfigInput {
   };
 }
 
-export function parseRunInput(raw: unknown, defaultAiMode: ModelRuntimeMode): PanelRunInput {
+export function parseRunInput(raw: unknown): PanelRunInput {
   const record = asRecord(raw);
   const goal = optionalString(record.goal);
   if (goal === undefined) {
@@ -180,15 +180,11 @@ export function parseRunInput(raw: unknown, defaultAiMode: ModelRuntimeMode): Pa
   }
   return {
     goal,
-    aiMode: parseOptionalAiMode(record.aiMode, "AI 模式无效。") ?? defaultAiMode,
-    runMode: parseOptionalDesktopRunMode(record.runMode) ?? "agent",
+    aiMode: parseOptionalAiMode(record.aiMode, "AI 模式无效。"),
+    requestedRunMode: parseOptionalRunMode(record.runMode),
     reasoningEffort: parseRunReasoningEffort(record.reasoningEffort, record.openAI),
     taskSoilInput,
   };
-}
-
-export function defaultAiModeForRunKind(_runKind: PanelRunKind, configuredDefault: ModelRuntimeMode): ModelRuntimeMode {
-  return configuredDefault;
 }
 
 export function parseConfirmationDecision(raw: unknown): Pick<ConfirmationDecision, "decision" | "guidance"> {
@@ -274,7 +270,7 @@ function parseOptionalWebSearchProvider(value: unknown): UpdateWebSearchConfigIn
   throw new PanelHttpError(400, "invalid_web_search_provider", "搜索工具 provider 无效。");
 }
 
-function parseOptionalDesktopRunMode(value: unknown): PanelDesktopRunMode | undefined {
+function parseOptionalRunMode(value: unknown): PanelRunMode | undefined {
   if (value === undefined || value === null || value === "") {
     return undefined;
   }

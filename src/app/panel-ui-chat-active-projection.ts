@@ -9,7 +9,7 @@ import type { LiveRunBuffer } from "./panel-ui-live-run-buffer.js";
 import { firstNonEmptyText, hasNonEmptyText } from "./panel-assistant-output.js";
 import {
   isRefreshingTranscriptRun,
-  withStartupWorkflowNode,
+  withStartupActivityNode,
 } from "./panel-transcript-startup-node.js";
 
 export type ChatActiveConversationTurn = {
@@ -48,7 +48,7 @@ export type ChatActiveProjectionInput<TDeliverable, TPending> = {
   readonly run?: ChatActiveRun;
   readonly transcriptNodes: readonly ChatActiveTranscriptNode[];
   readonly live?: LiveRunBuffer;
-  readonly workSessionAnswer?: string;
+  readonly workViewAnswer?: string;
   readonly detailAnswer?: string;
   readonly pending?: TPending;
   readonly deliverable?: TDeliverable;
@@ -86,7 +86,7 @@ export function projectChatActive<TDeliverable, TPending>(
   const currentRunId = input.run?.runId ?? input.conversation?.activeRunId ?? input.conversation?.latestRunId ?? input.live?.runId;
   const activeLive = activeLiveForCurrentRun(input.run, currentRunId, input.live);
   const currentRunProjection = projectLiveRunTranscript(
-    withStartupWorkflowNode(nodesForRun(input.transcriptNodes, currentRunId), {
+    withStartupActivityNode(nodesForRun(input.transcriptNodes, currentRunId), {
       runId: currentRunId,
       refreshing: isRefreshingTranscriptRun(input.run),
     }),
@@ -110,7 +110,7 @@ export function projectChatActive<TDeliverable, TPending>(
     ? currentRunAssistantTurn?.content
     : undefined;
   const answer = pending === undefined ? firstNonEmptyText([
-    input.workSessionAnswer,
+    input.workViewAnswer,
     input.detailAnswer,
     turnContentAnswer,
   ]) : undefined;

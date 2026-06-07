@@ -20,7 +20,6 @@ import type { ToolExecutionBroker } from "../domain/tools/index.js";
 import type { ConfigCenter } from "./config-center.js";
 import type { MinimalRuntime } from "./runtime.js";
 import { createDesktopBasicToolRegistry } from "./basic-agent-runtime/builtin-tool-runtime.js";
-import type { UndergroundDemoAiInput } from "./underground-demo-summary.js";
 
 export type ModelRuntimeMode = "none" | "fake" | "openai-compatible" | "openai-responses";
 export type ModelRuntimeStreamingMode = "respect_profile" | "force_live";
@@ -28,35 +27,41 @@ export type ModelRuntimeStreamingMode = "respect_profile" | "force_live";
 export type ModelRuntimeEnvironment = Readonly<Record<string, string | undefined>>;
 export type ModelRuntimeProviderFetch = FetchLike;
 export type ModelRuntimeModelCatalogFetch = ModelCatalogFetchLike;
+export type ModelRuntimeSummaryInput = {
+  readonly enabled: boolean;
+  readonly mode: ModelRuntimeMode;
+  readonly providerId?: string;
+  readonly providerKind?: string;
+  readonly protocolKind?: string;
+  readonly model?: string;
+  readonly configurationError?: {
+    readonly code: string;
+    readonly message: string;
+  };
+};
 
 export type ModelRuntimeConfig =
   | {
       readonly enabled: false;
       readonly mode: "none";
-      readonly summaryInput: UndergroundDemoAiInput;
+      readonly summaryInput: ModelRuntimeSummaryInput;
     }
   | {
       readonly enabled: true;
       readonly mode: Exclude<ModelRuntimeMode, "none">;
-      readonly summaryInput: UndergroundDemoAiInput;
+      readonly summaryInput: ModelRuntimeSummaryInput;
       createIntelligenceChannel(runtime: MinimalRuntime): IntelligenceChannel;
       createToolCenter(runtime: MinimalRuntime): ToolExecutionBroker;
     };
 
 export type ModelRuntimeConfigurationIssueCode = "ai_disabled" | "missing_api_key" | "missing_model_name";
 
-export type UndergroundAiMode = ModelRuntimeMode;
-export type UndergroundAiEnvironment = ModelRuntimeEnvironment;
-export type UndergroundAiProviderFetch = ModelRuntimeProviderFetch;
-export type UndergroundAiRuntimeConfig = ModelRuntimeConfig;
-export type UndergroundAiConfigurationIssueCode = ModelRuntimeConfigurationIssueCode;
-
 export class ModelRuntimeConfigurationError extends Error {
   constructor(
     readonly issue: {
       readonly code: ModelRuntimeConfigurationIssueCode;
       readonly message: string;
-      readonly summaryInput: UndergroundDemoAiInput;
+      readonly summaryInput: ModelRuntimeSummaryInput;
     }
   ) {
     super(issue.message);
@@ -64,10 +69,8 @@ export class ModelRuntimeConfigurationError extends Error {
   }
 }
 
-export { ModelRuntimeConfigurationError as UndergroundAiConfigurationError };
-
 export function createModelRuntimeDisabledConfigurationError(
-  summaryInput: UndergroundDemoAiInput = { enabled: false, mode: "none" }
+  summaryInput: ModelRuntimeSummaryInput = { enabled: false, mode: "none" }
 ): ModelRuntimeConfigurationError {
   return new ModelRuntimeConfigurationError({
     code: "ai_disabled",
@@ -75,8 +78,6 @@ export function createModelRuntimeDisabledConfigurationError(
     summaryInput,
   });
 }
-
-export const createUndergroundAiDisabledConfigurationError = createModelRuntimeDisabledConfigurationError;
 
 const OPENAI_COMPATIBLE_PROVIDER_ID = "openai-compatible-chat-completions";
 const OPENAI_COMPATIBLE_PROTOCOL = "openai_compatible_chat_completions";
@@ -88,7 +89,10 @@ const OPENAI_RESPONSES_PROTOCOL = "openai_responses";
 export function createModelRuntimeConfig(input: {
   readonly mode?: ModelRuntimeMode;
   readonly env?: ModelRuntimeEnvironment;
-  readonly modelProvider?: Pick<SanitizedModelProviderConfig, "providerKind" | "protocolKind" | "profileId" | "openAI">;
+  readonly modelProvider?: Pick<
+    SanitizedModelProviderConfig,
+    "providerKind" | "protocolKind" | "profileId" | "baseUrl" | "model" | "openAI"
+  >;
   readonly fetch?: FetchLike;
   readonly onModelOutputDelta?: (delta: ModelOutputDelta) => void;
   readonly streamingMode?: ModelRuntimeStreamingMode;
@@ -146,8 +150,6 @@ export function createModelRuntimeConfig(input: {
   });
 }
 
-export const createUndergroundAiRuntimeConfig = createModelRuntimeConfig;
-
 export async function fetchModelRuntimeModelCatalog(input: {
   readonly profile: Pick<SanitizedModelProviderConfig, "profileId" | "label" | "baseUrl" | "providerKind" | "protocolKind">;
   readonly apiKey: string;
@@ -162,15 +164,17 @@ export async function fetchModelRuntimeModelCatalog(input: {
 
 function createOpenAICompatibleConfig(input: {
   readonly env: ModelRuntimeEnvironment;
-  readonly modelProvider?: Pick<SanitizedModelProviderConfig, "profileId" | "openAI">;
+  readonly modelProvider?: Pick<SanitizedModelProviderConfig, "profileId" | "baseUrl" | "model" | "openAI">;
   readonly fetch?: FetchLike;
   readonly onModelOutputDelta?: (delta: ModelOutputDelta) => void;
   readonly streamingMode?: ModelRuntimeStreamingMode;
 }): ModelRuntimeConfig {
   const apiKey = firstNonBlank(input.env.AGENTARBOR_MODEL_API_KEY, input.env.OPENAI_API_KEY);
-  const model = firstNonBlank(input.env.AGENTARBOR_MODEL_NAME);
-  const baseUrl = firstNonBlank(input.env.AGENTARBOR_MODEL_BASE_URL) ?? OPENAI_COMPATIBLE_DEFAULT_BASE_URL;
-  const summaryInput: UndergroundDemoAiInput = {
+  const model = firstNonBlank(input.modelProvider?.model, input.env.AGENTARBOR_MODEL_NAME);
+  const baseUrl =
+    firstNonBlank(input.modelProvider?.baseUrl, input.env.AGENTARBOR_MODEL_BASE_URL) ??
+    OPENAI_COMPATIBLE_DEFAULT_BASE_URL;
+  const summaryInput: ModelRuntimeSummaryInput = {
     enabled: true,
     mode: "openai-compatible",
     providerId: OPENAI_COMPATIBLE_PROVIDER_ID,
@@ -223,15 +227,17 @@ function createOpenAICompatibleConfig(input: {
 
 function createOpenAIResponsesConfig(input: {
   readonly env: ModelRuntimeEnvironment;
-  readonly modelProvider?: Pick<SanitizedModelProviderConfig, "openAI">;
+  readonly modelProvider?: Pick<SanitizedModelProviderConfig, "baseUrl" | "model" | "openAI">;
   readonly fetch?: FetchLike;
   readonly onModelOutputDelta?: (delta: ModelOutputDelta) => void;
   readonly streamingMode?: ModelRuntimeStreamingMode;
 }): ModelRuntimeConfig {
   const apiKey = firstNonBlank(input.env.AGENTARBOR_MODEL_API_KEY, input.env.OPENAI_API_KEY);
-  const model = firstNonBlank(input.env.AGENTARBOR_MODEL_NAME);
-  const baseUrl = firstNonBlank(input.env.AGENTARBOR_MODEL_BASE_URL) ?? OPENAI_COMPATIBLE_DEFAULT_BASE_URL;
-  const summaryInput: UndergroundDemoAiInput = {
+  const model = firstNonBlank(input.modelProvider?.model, input.env.AGENTARBOR_MODEL_NAME);
+  const baseUrl =
+    firstNonBlank(input.modelProvider?.baseUrl, input.env.AGENTARBOR_MODEL_BASE_URL) ??
+    OPENAI_COMPATIBLE_DEFAULT_BASE_URL;
+  const summaryInput: ModelRuntimeSummaryInput = {
     enabled: true,
     mode: "openai-responses",
     providerId: OPENAI_RESPONSES_PROVIDER_ID,
@@ -289,6 +295,8 @@ export function createDefaultToolCenter(input: {
   readonly tavilyMaxResults?: number;
   readonly workspaceRoot?: string;
   readonly playwrightAvailable?: boolean;
+  readonly toolStates?: readonly ToolStateSettings[];
+  readonly toolCatalogNames?: readonly string[];
 } = {}): ToolExecutionBroker {
   return createToolCenterFromEnvironment(input);
 }
@@ -304,11 +312,12 @@ export async function createConfiguredToolCenter(
     readonly workspaceRoot?: string;
     readonly playwrightAvailable?: boolean;
     readonly toolStates?: readonly ToolStateSettings[];
+    readonly toolCatalogNames?: readonly string[];
   } = {}
 ): Promise<ToolExecutionBroker> {
   return createToolCenterFromEnvironment({
     ...input,
-    env: input.env ?? await configCenter.createUndergroundAiEnvironment(),
+    env: input.env ?? await configCenter.createModelRuntimeEnvironment(),
   });
 }
 
@@ -322,9 +331,10 @@ export async function createConfiguredToolCenterFactory(
     readonly workspaceRoot?: string;
     readonly playwrightAvailable?: boolean;
     readonly toolStates?: readonly ToolStateSettings[];
+    readonly toolCatalogNames?: readonly string[];
   } = {}
 ): Promise<(runtime: MinimalRuntime) => ToolExecutionBroker> {
-  const env = input.env ?? await configCenter.createUndergroundAiEnvironment();
+  const env = input.env ?? await configCenter.createModelRuntimeEnvironment();
   return (runtime) => createToolCenterFromEnvironment({ ...input, runtime, env });
 }
 
@@ -337,6 +347,7 @@ function createToolCenterFromEnvironment(input: {
   readonly workspaceRoot?: string;
   readonly playwrightAvailable?: boolean;
   readonly toolStates?: readonly ToolStateSettings[];
+  readonly toolCatalogNames?: readonly string[];
 }): ToolExecutionBroker {
   return createDesktopBasicToolRegistry(input).createToolCenter("desktop-basic");
 }

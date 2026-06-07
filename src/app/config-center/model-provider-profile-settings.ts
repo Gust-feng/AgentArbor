@@ -2,7 +2,7 @@ import type {
   AgentArborLocalSettings,
   ConfiguredModelProviderKind,
   ConfiguredModelProtocolKind,
-  ConfiguredUndergroundAiMode,
+  ConfiguredModelRuntimeMode,
   ModelProviderModelCatalog,
   ModelProviderProfileSettings,
 } from "../../domain/config/index.js";
@@ -196,8 +196,8 @@ function normalizeProfileProtocolForProvider(
 function normalizeProfileAiModeForProvider(
   providerKind: ConfiguredModelProviderKind,
   protocolKind: ConfiguredModelProtocolKind,
-  aiMode: ConfiguredUndergroundAiMode
-): ConfiguredUndergroundAiMode {
+  aiMode: ConfiguredModelRuntimeMode
+): ConfiguredModelRuntimeMode {
   if (providerKind !== "openai_compatible") {
     return aiMode;
   }

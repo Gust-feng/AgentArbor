@@ -19,6 +19,7 @@ export type {
   ModelRuntimeModelCatalogFetch,
   ModelRuntimeMode,
   ModelRuntimeProviderFetch,
+  ModelRuntimeSummaryInput,
 } from "../intelligence-channel-factory.js";
 
 export type ModelRuntimeRequestPlan = {

@@ -8,7 +8,7 @@ import {
   detailForRun,
   type RunProjectionDetail,
   type RunProjectionNode,
-  type RunProjectionWorkSession,
+  type RunProjectionWorkView,
 } from "./panel-ui-run-projection.js";
 
 export type RunObservationEvent = {
@@ -30,12 +30,12 @@ export type RunObservationEvent = {
 export type RunObservationState<
   TRun,
   TEvent extends RunObservationEvent,
-  TWorkSession extends RunProjectionWorkSession<TNode>,
+  TWorkView extends RunProjectionWorkView<TNode>,
   TDetail extends RunProjectionDetail<TNode>,
   TNode extends RunProjectionNode
 > = {
   readonly run?: TRun;
-  readonly workSession?: TWorkSession;
+  readonly workView?: TWorkView;
   readonly transcriptNodes: readonly TNode[];
   readonly transcriptNodesByRunId: Record<string, readonly TNode[]>;
   readonly events: readonly TEvent[];
@@ -57,9 +57,9 @@ export function stateWithObservedRunEvents<
   TNode extends RunProjectionNode,
   TRun,
   TEvent extends RunObservationEvent,
-  TWorkSession extends RunProjectionWorkSession<TNode>,
+  TWorkView extends RunProjectionWorkView<TNode>,
   TDetail extends RunProjectionDetail<TNode>,
-  TState extends RunObservationState<TRun, TEvent, TWorkSession, TDetail, TNode>
+  TState extends RunObservationState<TRun, TEvent, TWorkView, TDetail, TNode>
 >(
   previous: TState,
   input: {
@@ -81,23 +81,23 @@ export function stateWithObservedRunProjection<
   TNode extends RunProjectionNode,
   TRun,
   TEvent extends RunObservationEvent,
-  TWorkSession extends RunProjectionWorkSession<TNode>,
+  TWorkView extends RunProjectionWorkView<TNode>,
   TDetail extends RunProjectionDetail<TNode>,
-  TState extends RunObservationState<TRun, TEvent, TWorkSession, TDetail, TNode>
+  TState extends RunObservationState<TRun, TEvent, TWorkView, TDetail, TNode>
 >(
   previous: TState,
   input: {
     readonly runId: string;
     readonly run?: TRun;
     readonly events?: readonly TEvent[];
-    readonly workSession?: TWorkSession;
+    readonly workView?: TWorkView;
     readonly detail?: TDetail;
   }
 ): TState {
   const events = input.events ?? [];
   const readModel = createRunReadModelPatch(previous, {
     runId: input.runId,
-    workSession: input.workSession,
+    workView: input.workView,
     detail: input.detail ?? detailForRun(input.runId, previous.detail),
   });
   return {
@@ -117,16 +117,16 @@ export function stateWithObservedRunEvent<
   TNode extends RunProjectionNode,
   TRun,
   TEvent extends RunObservationEvent,
-  TWorkSession extends RunProjectionWorkSession<TNode>,
+  TWorkView extends RunProjectionWorkView<TNode>,
   TDetail extends RunProjectionDetail<TNode>,
-  TState extends RunObservationState<TRun, TEvent, TWorkSession, TDetail, TNode>
+  TState extends RunObservationState<TRun, TEvent, TWorkView, TDetail, TNode>
 >(
   previous: TState,
   input: {
     readonly runId: string;
     readonly event: TEvent;
     readonly run?: TRun;
-    readonly workSession?: TWorkSession;
+    readonly workView?: TWorkView;
     readonly detail?: TDetail;
   }
 ): TState {
@@ -134,7 +134,7 @@ export function stateWithObservedRunEvent<
     runId: input.runId,
     run: input.run,
     events: [input.event],
-    workSession: input.workSession,
+    workView: input.workView,
     detail: input.detail,
   });
 }
@@ -143,9 +143,9 @@ export function stateWithAppendOnlyRunEvent<
   TNode extends RunProjectionNode,
   TRun,
   TEvent extends RunObservationEvent,
-  TWorkSession extends RunProjectionWorkSession<TNode>,
+  TWorkView extends RunProjectionWorkView<TNode>,
   TDetail extends RunProjectionDetail<TNode>,
-  TState extends RunObservationState<TRun, TEvent, TWorkSession, TDetail, TNode>
+  TState extends RunObservationState<TRun, TEvent, TWorkView, TDetail, TNode>
 >(
   previous: TState,
   input: {

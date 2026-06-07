@@ -61,7 +61,7 @@ test("assistant turn projection prefers live answer while a matching run is refr
     run: { runId: "run-1", status: "running" },
     transcriptNodes: [],
     live: live("run-1", "正在输出"),
-    workSession: {
+    workView: {
       run: { runId: "run-1" },
       answer: { content: "最终答案" },
     },
@@ -87,7 +87,7 @@ test("assistant turn projection ignores stale live text once the run is complete
     run: { runId: "run-1", status: "completed" },
     transcriptNodes: [],
     live: live("run-1", "不应重播的旧直播文本"),
-    workSession: {
+    workView: {
       run: { runId: "run-1" },
       answer: { content: "最终答案" },
     },

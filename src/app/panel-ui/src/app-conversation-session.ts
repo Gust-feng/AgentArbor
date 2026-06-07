@@ -5,13 +5,8 @@ import { shouldKeepRefreshing, stopLiveUpdates, stopPolling, stopStream } from "
 import type { AppState } from "./app-state";
 import { liveRunForObservedReplay } from "../../panel-ui-submit-flow";
 import { mergeTranscriptNodesByRunId } from "../../panel-ui-transcript-cache";
-import {
-  safeBasicEvents,
-  safeBasicRun,
-  safeDesktopDetail,
-  safeWorkSession,
-} from "./runtime";
 import type { Conversation } from "./contracts/conversation";
+import { ordinaryWorkViewFromRunView } from "./runtime";
 
 export type ConversationSessionControllerOptions = {
   readonly app: AppState;
@@ -39,20 +34,24 @@ export async function loadConversationSession(
   options.setScreen("chat-active");
   options.setAttachments([]);
   const response = await getJson<{ readonly conversation: Conversation }>(`/api/conversations/${encodeURIComponent(conversationId)}`);
-  const latestRunId = response.conversation.activeRunId ?? response.conversation.latestRunId;
+  const currentRun = response.conversation.currentRun;
+  const latestRunId = currentRun?.run.runId ?? response.conversation.activeRunId ?? response.conversation.latestRunId;
   options.activeRunIdRef.current = latestRunId;
-  const detail = latestRunId === undefined ? undefined : await safeDesktopDetail(latestRunId);
-  const run = latestRunId === undefined ? undefined : await safeBasicRun(latestRunId);
-  const replay = latestRunId === undefined ? undefined : await safeBasicEvents(latestRunId, 0);
-  const workSession = latestRunId === undefined ? undefined : await safeWorkSession(latestRunId);
-  const transcriptNodes = transcriptNodesFrom(workSession, detail);
+  const detail = currentRun?.detail;
+  const run = currentRun?.run;
+  const replay = currentRun?.replay;
+  const workView = ordinaryWorkViewFromRunView(currentRun);
+  const capabilityResolution = currentRun?.capabilityResolution;
+  const transcriptNodes = transcriptNodesFrom(workView, detail);
   const historicalTranscriptNodesByRunId = await loadConversationTranscriptNodesByRunId(response.conversation, latestRunId);
   if (!options.mountedRef.current || options.viewEpochRef.current !== epoch) return;
   options.setApp((previous) => ({
     ...previous,
     conversation: response.conversation,
     run,
-    workSession,
+    workView,
+    capabilityResolution,
+    capabilityResolutionRunId: capabilityResolution === undefined ? undefined : run?.runId,
     detail,
     transcriptNodes,
     transcriptNodesByRunId: mergeTranscriptNodesByRunId(historicalTranscriptNodesByRunId, latestRunId, transcriptNodes),
@@ -83,7 +82,9 @@ export function resetConversationSession(options: ConversationSessionControllerO
     ...previous,
     conversation: undefined,
     run: undefined,
-    workSession: undefined,
+    workView: undefined,
+    capabilityResolution: undefined,
+    capabilityResolutionRunId: undefined,
     transcriptNodes: [],
     transcriptNodesByRunId: {},
     events: [],

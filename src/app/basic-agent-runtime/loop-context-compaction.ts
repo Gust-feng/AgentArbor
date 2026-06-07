@@ -4,6 +4,7 @@ import { createId, nowIso } from "../../kernel/id.js";
 import { sanitizeConversationHistoryText } from "../visible-text-safety.js";
 import {
   clampRatio,
+  compactionAgentDisplayName,
   conversationCompactionOutputContract,
   DEFAULT_INPUT_TOKEN_BUDGET,
   DEFAULT_THRESHOLD_RATIO,
@@ -40,7 +41,11 @@ export async function compactBasicAgentLoopContextIfNeeded(
     callerRef: { kind: "goal", id: input.goalId, label: "desktop_context_compaction" },
     purpose: "desktop_context_compaction",
     inputRefs: split.compactible.map((entry) => ({ kind: "event" as const, id: entry.message.ref ?? `loop-context:${entry.index}` })),
-    sanitizedMessages: loopCompactionMessages({ goal: input.goal, compactible: split.compactible }),
+    sanitizedMessages: loopCompactionMessages({
+      goal: input.goal,
+      agentDisplayName: compactionAgentDisplayName(input.agentIdentity),
+      compactible: split.compactible,
+    }),
     outputContract: conversationCompactionOutputContract(),
     constraintRefs: [],
     budget: {
@@ -99,6 +104,7 @@ export async function compactBasicAgentLoopContextIfNeeded(
 
 function loopCompactionMessages(input: {
   readonly goal: string;
+  readonly agentDisplayName: string;
   readonly compactible: readonly {
     readonly message: ModelMessage;
     readonly index: number;
@@ -108,7 +114,7 @@ function loopCompactionMessages(input: {
     {
       role: "system",
       content: [
-        "You compact earlier safe context for AgentArbor's ordinary desktop agent.",
+        `You compact earlier safe context for ${input.agentDisplayName}, the ordinary desktop agent for this run.`,
         "Return exactly one Markdown continuation prompt. Do not return JSON.",
         "Preserve still-relevant goals, user constraints, progress, decisions, next actions, errors, evidence refs, and file paths.",
         "Remove raw prompts, raw provider responses, raw tool output, stdout/stderr, secrets, tokens, hidden reasoning, and internal loop details.",

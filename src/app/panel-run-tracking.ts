@@ -6,16 +6,19 @@ import {
   type RunObservationSnapshot,
 } from "../domain/observation/index.js";
 import { ROOTLET_CLUSTER_KINDS, type CandidatePoolCounts, type RootletClusterKind } from "../domain/underground/index.js";
-import type { AgentRunTree } from "../domain/underground/index.js";
 import type { EventLogEntry } from "../kernel/events/in-memory-event-log.js";
-import type { UndergroundAiMode } from "./intelligence-channel-factory.js";
+import type { AgentRunTreeAttachment } from "./agent-run-tree-attachment.js";
+import type { ModelRuntimeMode } from "./model-runtime/index.js";
+import type { PanelRunSummary } from "./panel-run-summary.js";
 import { createSafeAgentRunTreeView, type SafeAgentRunTreeView } from "./panel-agent-run-tree-view.js";
 import { rootletKindFromAdviceContractId } from "./panel-transcript-model-calls.js";
 import { asRecord, hasEvent, numberOrUndefined, stringOrUndefined } from "./panel-read-model-utils.js";
 import type { PanelRunStatus } from "./panel-run-status.js";
-import type { UndergroundDemoSummary } from "./underground-demo-summary.js";
 import type { PanelObservationReadModel, PanelRootletTrackingReadModel, PanelRunTraceReadModel, PanelRunTrackingReadModel } from "./panel-run-tracking-contracts.js";
 export type { PanelObservationReadModel, PanelRootletTrackingReadModel, PanelRunTraceReadModel, PanelRunTrackingReadModel } from "./panel-run-tracking-contracts.js";
+
+type PanelTraceRunMode = "agent" | "deep";
+type PanelTraceProjection = "visible" | "runtime";
 
 export function toPanelObservation(snapshot: RunObservationSnapshot): PanelObservationReadModel {
   return {
@@ -33,47 +36,65 @@ export function toPanelObservation(snapshot: RunObservationSnapshot): PanelObser
 
 export function createPanelRunTrace(input: {
   readonly status: PanelRunStatus;
+  readonly runMode: PanelTraceRunMode;
+  readonly projection?: PanelTraceProjection;
   readonly eventEntries: readonly EventLogEntry[];
 }): PanelRunTraceReadModel {
-  const events = createRunObservationEventViews(input.eventEntries);
-  const lastEvent = input.eventEntries.at(-1);
-  const position = resolveRunObservationPosition(input.eventEntries);
+  const ordinaryVisibleProjection = input.runMode === "agent" && input.projection !== "runtime";
+  const traceEventEntries = ordinaryVisibleProjection
+    ? ordinaryAgentTraceEntries(input.eventEntries)
+    : input.eventEntries;
+  const events = createRunObservationEventViews(traceEventEntries);
+  const lastEvent = traceEventEntries.at(-1);
+  const position = resolveRunObservationPosition(traceEventEntries);
   return {
     status: input.status,
-    currentPhase: position.currentPhase,
+    currentPhase: ordinaryVisibleProjection
+      ? ordinaryAgentPhaseFor(lastEvent?.type, input.status, position.currentPhase)
+      : position.currentPhase,
     currentStage: position.currentStage,
     eventCursor: {
       eventCount: events.length,
       lastSequence: lastEvent?.sequence ?? 0,
       lastEventType: lastEvent?.type,
     },
-    waitingPoint: waitingPointFor(input.status, lastEvent?.type),
+    waitingPoint: waitingPointFor(input.status, lastEvent?.type, input.runMode),
     events,
   };
 }
 
 export function createPanelRunTracking(input: {
   readonly status: PanelRunStatus;
+  readonly runMode: PanelTraceRunMode;
   readonly config: SanitizedModelProviderConfig;
   readonly informationAccess: SanitizedInformationAccessConfig;
-  readonly requestedMode: UndergroundAiMode;
-  readonly summary?: UndergroundDemoSummary;
+  readonly requestedMode: ModelRuntimeMode;
+  readonly summary?: PanelRunSummary;
   readonly observation?: PanelObservationReadModel;
-  readonly agentRunTree?: AgentRunTree;
+  readonly agentRunTree?: AgentRunTreeAttachment;
   readonly eventEntries: readonly EventLogEntry[];
 }): PanelRunTrackingReadModel {
-  const trace = createPanelRunTrace({ status: input.status, eventEntries: input.eventEntries });
-  const rootletsByKind = createRootletTracking(input);
-  const observedCandidateCounts = countCandidateViews(input.observation?.underground.candidatePool.candidates ?? []);
+  const trace = createPanelRunTrace({ status: input.status, runMode: input.runMode, eventEntries: input.eventEntries });
+  const deepSummary = input.runMode === "agent" ? undefined : input.summary;
+  const deepObservation = input.runMode === "agent" ? undefined : input.observation;
+  const deepAgentRunTree = input.runMode === "agent" ? undefined : input.agentRunTree;
+  const deepEventEntries = input.runMode === "agent" ? [] : input.eventEntries;
+  const rootletsByKind = createRootletTracking({
+    ...input,
+    summary: deepSummary,
+    observation: deepObservation,
+    eventEntries: deepEventEntries,
+  });
+  const observedCandidateCounts = countCandidateViews(deepObservation?.underground.candidatePool.candidates ?? []);
   return {
     run: {
       status: input.status,
-      phase: input.observation?.currentPhase ?? trace.currentPhase,
-      stage: input.observation?.currentStage ?? trace.currentStage,
-      eventCount: input.observation?.eventCursor.eventCount ?? trace.eventCursor.eventCount,
-      lastEventType: input.observation?.eventCursor.lastEventType ?? trace.eventCursor.lastEventType,
+      phase: deepObservation?.currentPhase ?? trace.currentPhase,
+      stage: deepObservation?.currentStage ?? trace.currentStage,
+      eventCount: deepObservation?.eventCursor.eventCount ?? trace.eventCursor.eventCount,
+      lastEventType: deepObservation?.eventCursor.lastEventType ?? trace.eventCursor.lastEventType,
       waitingPoint: trace.waitingPoint,
-      abovegroundStatus: input.observation?.aboveground.status ?? "not_started",
+      abovegroundStatus: deepObservation?.aboveground.status ?? "not_started",
     },
     provider: {
       requestedMode: input.requestedMode,
@@ -97,41 +118,81 @@ export function createPanelRunTracking(input: {
       stubs: input.informationAccess.stubs,
     },
     rootletsByKind,
-    modelTotals: input.summary?.ai.eventCounts ?? countModelEvents(input.eventEntries),
-    toolTotals: input.summary?.tools.eventCounts ?? countToolEvents(input.eventEntries),
+    modelTotals: deepSummary?.ai.eventCounts ?? countModelEvents(input.eventEntries),
+    toolTotals: deepSummary?.tools.eventCounts ?? countToolEvents(input.eventEntries),
     context: {
       compaction: countContextCompactionEvents(input.eventEntries),
     },
     candidates: {
-      total: input.summary?.underground.candidateCounts ?? observedCandidateCounts,
+      total: deepSummary?.underground.candidateCounts ?? observedCandidateCounts,
       byKind: ROOTLET_CLUSTER_KINDS.reduce((result, kind) => {
         result[kind] = rootletsByKind[kind].candidates;
         return result;
       }, {} as Record<RootletClusterKind, CandidatePoolCounts>),
     },
     aiCandidates: {
-      total: input.summary?.ai.aiCandidateCount ?? 0,
-      fallbackTotal: input.summary?.ai.fallbackCount ?? 0,
-      fallbackUsed: input.summary?.ai.aiFallbackUsed ?? false,
+      total: deepSummary?.ai.aiCandidateCount ?? 0,
+      fallbackTotal: deepSummary?.ai.fallbackCount ?? 0,
+      fallbackUsed: deepSummary?.ai.aiFallbackUsed ?? false,
     },
-    autonomy: input.summary?.underground.autonomy ?? {
-      enabled: input.observation?.underground.autonomy.enabled ?? false,
-      cycleCount: input.observation?.underground.autonomy.cycles.length ?? 0,
-      latestAction: input.observation?.underground.autonomy.latestDecision?.action,
-      latestDecisionStatus: input.observation?.underground.autonomy.latestDecision?.status,
-      spawnedRootletCount: input.observation?.underground.autonomy.latestDecision?.spawnedRootletCount ?? 0,
-      stopReason: input.observation?.underground.autonomy.stopReason,
-      sourceRefs: input.observation?.underground.autonomy.latestDecision?.sourceRefs ?? [],
-      modelCallRefs: input.observation?.underground.autonomy.latestDecision?.modelCallRefs ?? [],
+    autonomy: deepSummary?.underground.autonomy ?? {
+      enabled: deepObservation?.underground.autonomy.enabled ?? false,
+      cycleCount: deepObservation?.underground.autonomy.cycles.length ?? 0,
+      latestAction: deepObservation?.underground.autonomy.latestDecision?.action,
+      latestDecisionStatus: deepObservation?.underground.autonomy.latestDecision?.status,
+      spawnedRootletCount: deepObservation?.underground.autonomy.latestDecision?.spawnedRootletCount ?? 0,
+      stopReason: deepObservation?.underground.autonomy.stopReason,
+      sourceRefs: deepObservation?.underground.autonomy.latestDecision?.sourceRefs ?? [],
+      modelCallRefs: deepObservation?.underground.autonomy.latestDecision?.modelCallRefs ?? [],
     },
-    agentRunTree: input.observation?.underground.agentRunTree ?? agentRunTreeViewOrUndefined(input.agentRunTree),
-    convergence: input.summary?.underground.convergence,
-    package: packageTrackingFrom(input),
+    agentRunTree: deepObservation?.underground.agentRunTree ?? agentRunTreeViewOrUndefined(deepAgentRunTree),
+    convergence: deepSummary?.underground.convergence,
+    package: packageTrackingFrom({
+      summary: deepSummary,
+      observation: deepObservation,
+    }),
   };
 }
 
+function ordinaryAgentTraceEntries(eventEntries: readonly EventLogEntry[]): readonly EventLogEntry[] {
+  return eventEntries.filter((entry) => entry.type === "goal.received" || isOrdinaryAgentRuntimeEvent(entry.type));
+}
+
+function ordinaryAgentPhaseFor(
+  type: ArborMessageType | undefined,
+  status: PanelRunStatus,
+  fallback: RunObservationSnapshot["currentPhase"]
+): RunObservationSnapshot["currentPhase"] {
+  if (status === "completed") {
+    return "completed";
+  }
+  if (status === "blocked" || status === "cancelled" || status === "failed") {
+    return "verification";
+  }
+  if (type === undefined || type === "goal.received") {
+    return "not_started";
+  }
+  if (isOrdinaryAgentRuntimeEvent(type)) {
+    return "agent";
+  }
+  return fallback;
+}
+
+function isOrdinaryAgentRuntimeEvent(type: ArborMessageType): boolean {
+  return type === "model.requested" ||
+    type === "model.completed" ||
+    type === "model.failed" ||
+    type === "context.compaction.completed" ||
+    type === "context.compaction.failed" ||
+    type === "tool.requested" ||
+    type === "tool.completed" ||
+    type === "tool.failed" ||
+    type === "user_approval.requested" ||
+    type === "user_approval.received";
+}
+
 function packageTrackingFrom(input: {
-  readonly summary?: UndergroundDemoSummary;
+  readonly summary?: PanelRunSummary;
   readonly observation?: PanelObservationReadModel;
 }): PanelRunTrackingReadModel["package"] {
   if (input.summary !== undefined) {
@@ -158,14 +219,14 @@ function packageTrackingFrom(input: {
   };
 }
 
-function agentRunTreeViewOrUndefined(tree: AgentRunTree | undefined): SafeAgentRunTreeView | undefined {
+function agentRunTreeViewOrUndefined(tree: AgentRunTreeAttachment | undefined): SafeAgentRunTreeView | undefined {
   return tree === undefined ? undefined : createSafeAgentRunTreeView(tree);
 }
 
 function createRootletTracking(input: {
   readonly status: PanelRunStatus;
-  readonly requestedMode: UndergroundAiMode;
-  readonly summary?: UndergroundDemoSummary;
+  readonly requestedMode: ModelRuntimeMode;
+  readonly summary?: PanelRunSummary;
   readonly observation?: PanelObservationReadModel;
   readonly eventEntries: readonly EventLogEntry[];
 }): Readonly<Record<RootletClusterKind, PanelRootletTrackingReadModel>> {
@@ -210,7 +271,7 @@ function createRootletTracking(input: {
 
 function providerStatus(
   config: SanitizedModelProviderConfig,
-  requestedMode: UndergroundAiMode
+  requestedMode: ModelRuntimeMode
 ): PanelRunTrackingReadModel["provider"]["status"] {
   if (requestedMode === "none") {
     return "network_disabled";
@@ -346,7 +407,11 @@ function modelStatus(
   return "requested";
 }
 
-function waitingPointFor(status: PanelRunStatus, lastEventType: ArborMessageType | undefined): string {
+function waitingPointFor(
+  status: PanelRunStatus,
+  lastEventType: ArborMessageType | undefined,
+  runMode: PanelTraceRunMode
+): string {
   if (status === "pending") {
     return "等待后台运行启动。";
   }
@@ -366,7 +431,10 @@ function waitingPointFor(status: PanelRunStatus, lastEventType: ArborMessageType
     return "运行失败，查看错误摘要。";
   }
   if (status === "completed") {
-    return "运行完成，报告或终态摘要已形成。";
+    return runMode === "agent" ? "运行完成，最终结果已形成。" : "运行完成，报告或终态摘要已形成。";
+  }
+  if (runMode === "agent") {
+    return ordinaryAgentWaitingPoint(lastEventType);
   }
   switch (lastEventType) {
     case undefined:
@@ -412,6 +480,37 @@ function waitingPointFor(status: PanelRunStatus, lastEventType: ArborMessageType
       return "收束评审已完成，等待整理结果材料。";
     default:
       return "运行正在推进。";
+  }
+}
+
+function ordinaryAgentWaitingPoint(lastEventType: ArborMessageType | undefined): string {
+  switch (lastEventType) {
+    case undefined:
+      return "后台 job 已启动，等待普通 Agent 接收消息。";
+    case "goal.received":
+      return "消息和上下文已形成，等待普通 Agent 继续处理。";
+    case "model.requested":
+      return "已发出模型请求，等待模型返回。";
+    case "model.completed":
+      return "模型调用已返回，等待普通 Agent 决定下一步。";
+    case "model.failed":
+      return "模型调用失败，运行需要失败或等待后续处理。";
+    case "context.compaction.completed":
+      return "较早上下文已压缩，普通 Agent 将继续处理当前任务。";
+    case "context.compaction.failed":
+      return "上下文压缩没有成功，运行已暂停等待继续处理。";
+    case "tool.requested":
+      return "已发出工具调用，等待工具返回安全结果。";
+    case "tool.completed":
+      return "工具调用已返回，普通 Agent 将基于工具结果继续判断。";
+    case "tool.failed":
+      return "工具调用失败，普通 Agent 将基于失败结果继续判断。";
+    case "user_approval.requested":
+      return "等待用户确认后继续。";
+    case "user_approval.received":
+      return "用户确认或指导已收到，普通 Agent 将继续处理。";
+    default:
+      return "普通 Agent 正在推进。";
   }
 }
 

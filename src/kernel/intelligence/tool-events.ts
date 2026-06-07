@@ -101,7 +101,7 @@ export function createToolApprovalRequiredMessage(input: {
   const confirmation = input.result.confirmationRequest;
   return createMessage({
     traceId: input.context.traceId,
-    from: { id: "tool-center", role: "runtime" },
+    from: { id: input.context.callerAgentId, role: "agent" },
     to: { role: "runtime" },
     type: "user_approval.requested",
     intent: "request_tool_confirmation",

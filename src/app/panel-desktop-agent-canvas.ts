@@ -145,4 +145,8 @@ export function createDesktopAgentCanvas(input: {
   };
 }
 
+/**
+ * @deprecated Historical read-model alias for persisted desktop_chat records.
+ * Current ordinary Agent runs should use createDesktopAgentCanvas.
+ */
 export const createDesktopChatCanvas = createDesktopAgentCanvas;

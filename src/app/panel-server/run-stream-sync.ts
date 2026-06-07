@@ -1,5 +1,5 @@
 import type { BasicAgentRunExecutor } from "../basic-agent-runtime/index.js";
-import type { PanelRunJob, PanelRunJobStore } from "../panel-run-jobs.js";
+import { panelRunPayloadForStatus, type PanelRunJob, type PanelRunJobStore } from "../panel-run-jobs.js";
 import {
   createPanelRunStreamEvents,
   type PanelRunStreamEvent,
@@ -14,15 +14,17 @@ export function syncPanelRunStreamEventsForJob(
   runtime: PanelRunStreamSyncRuntime,
   job: PanelRunJob
 ): readonly PanelRunStreamEvent[] {
+  const statusPayload = panelRunPayloadForStatus(job);
   const derived = createPanelRunStreamEvents({
     runId: job.runId,
     status: job.status,
     eventEntries: job.runtime?.eventLog.list() ?? [],
-    summary: job.completed?.summary ?? job.blocked?.summary ?? job.failed?.summary,
-    observation: job.completed?.observation ?? job.blocked?.observation,
+    summary: statusPayload?.summary,
+    observation: statusPayload === undefined || !("observation" in statusPayload) ? undefined : statusPayload.observation,
     routeDecision: job.routeDecision,
     desktopMode: job.runKind === "desktop" ? job.runMode : undefined,
     reasoningEffort: job.reasoningEffort,
+    agentDefinitionRef: job.agentDefinitionRef,
     createdAt: job.createdAt,
     updatedAt: job.updatedAt,
     error: job.failed?.error ?? job.cancelled?.reason ?? job.blocked?.reason,

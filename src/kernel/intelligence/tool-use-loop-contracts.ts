@@ -20,7 +20,7 @@ export type ToolUseLoopOptions = {
   readonly goalId: string;
   readonly maxModelRounds?: number;
   readonly maxToolRounds?: number;
-  readonly allowedTools?: readonly string[];
+  readonly allowedTools: readonly string[];
   readonly blockedToolNames?: readonly string[];
   readonly approvedConfirmationIds?: readonly string[];
   readonly publishToolEvent?: (message: ArborMessage) => void;

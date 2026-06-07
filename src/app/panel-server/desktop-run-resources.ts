@@ -1,17 +1,19 @@
 import type {
   BasicAgentCapabilitySnapshot,
+  ModelCapabilities,
   ModelRunReasoningEffort,
   SanitizedModelProviderConfig,
   ToolStateSettings,
 } from "../../domain/config/index.js";
 import {
-  createConfiguredToolCenterFactory,
+  createDefaultToolCenter,
   createModelRuntimeConfig,
   createModelRuntimeDisabledConfigurationError,
   type ModelRuntimeMode,
 } from "../model-runtime/index.js";
 import { PanelHttpError } from "./http-utils.js";
 import type { PanelRuntime } from "./runtime.js";
+import type { MinimalRuntime } from "../runtime.js";
 import type { DesktopRunResources, PanelRunExecutionOptions } from "./run-execution-contracts.js";
 
 function toolStatesFromCapabilitySnapshot(snapshot: BasicAgentCapabilitySnapshot): readonly ToolStateSettings[] {
@@ -20,6 +22,10 @@ function toolStatesFromCapabilitySnapshot(snapshot: BasicAgentCapabilitySnapshot
     enabled: tool.enabled,
     updatedAt: snapshot.createdAt,
   }));
+}
+
+function toolCatalogNamesFromCapabilitySnapshot(snapshot: BasicAgentCapabilitySnapshot): readonly string[] {
+  return snapshot.toolCatalog.tools.map((tool) => tool.name);
 }
 
 export async function prepareDesktopRunResources(
@@ -31,10 +37,24 @@ export async function prepareDesktopRunResources(
     throw createModelRuntimeDisabledConfigurationError();
   }
 
-  const baseCapabilitySnapshot = options.capabilitySnapshot ?? (await runtime.capabilityCenter.snapshot());
+  const baseCapabilitySnapshot = options.capabilitySnapshot;
+  if (baseCapabilitySnapshot === undefined) {
+    throw new PanelHttpError(
+      500,
+      "desktop_capability_snapshot_required",
+      "Desktop Agent run requires a capability snapshot frozen when the run was created."
+    );
+  }
+  if (options.informationAccess === undefined) {
+    throw new PanelHttpError(
+      500,
+      "desktop_information_access_required",
+      "Desktop Agent run requires information access settings frozen when the run was created."
+    );
+  }
   const activeModel = activeModelWithRunOpenAISettings(
     baseCapabilitySnapshot.activeModel,
-    baseCapabilitySnapshot.modelCapabilities.supportsReasoningEffort,
+    baseCapabilitySnapshot.modelCapabilities,
     options.reasoningEffort
   );
   const capabilitySnapshot =
@@ -52,8 +72,9 @@ export async function prepareDesktopRunResources(
     );
   }
 
-  const aiEnvironment = await runtime.configCenter.createUndergroundAiEnvironment({
+  const aiEnvironment = await runtime.configCenter.createModelRuntimeEnvironment({
     modelProvider: capabilitySnapshot.activeModel,
+    informationAccess: options.informationAccess,
   });
   const runtimeMode = desktopRuntimeMode(aiMode, capabilitySnapshot.activeModel);
   const aiConfig =
@@ -65,7 +86,7 @@ export async function prepareDesktopRunResources(
           modelProvider: capabilitySnapshot.activeModel,
           fetch: runtime.providerFetch,
           onModelOutputDelta: options.onModelOutputDelta,
-          streamingMode: "force_live",
+          streamingMode: capabilitySnapshot.modelCapabilities.supportsStreaming ? "force_live" : "respect_profile",
         });
 
   if (!aiConfig.enabled) {
@@ -74,10 +95,12 @@ export async function prepareDesktopRunResources(
 
   return {
     capabilitySnapshot,
+    informationAccess: options.informationAccess,
     aiEnvironment,
     aiConfig,
     workspaceRoot: capabilitySnapshot.workspace.workspaceDirectory,
     toolStates: toolStatesFromCapabilitySnapshot(capabilitySnapshot),
+    toolCatalogNames: toolCatalogNamesFromCapabilitySnapshot(capabilitySnapshot),
     playwrightAvailable: capabilitySnapshot.toolCatalog.tools.some(
       (tool) => tool.name === "browser_snapshot" && tool.availability === "available"
     ),
@@ -86,25 +109,46 @@ export async function prepareDesktopRunResources(
 
 function activeModelWithRunOpenAISettings(
   activeModel: SanitizedModelProviderConfig,
-  supportsReasoningEffort: boolean,
+  modelCapabilities: ModelCapabilities,
   reasoningEffort: ModelRunReasoningEffort | undefined
 ): SanitizedModelProviderConfig {
-  const { reasoningEffort: _profileReasoningEffort, ...baseOpenAI } = activeModel.openAI ?? {};
-  if (reasoningEffort !== undefined && !supportsReasoningEffort) {
+  const {
+    reasoningEffort: _profileReasoningEffort,
+    reasoningSummary: profileReasoningSummary,
+    parallelToolCalls: profileParallelToolCalls,
+    stream: profileStream,
+    ...baseOpenAI
+  } = activeModel.openAI ?? {};
+  if (reasoningEffort !== undefined && !modelCapabilities.supportsReasoningEffort) {
     throw new PanelHttpError(
       400,
       "unsupported_model_reasoning_effort",
       "当前模型不支持调节思考强度。"
     );
   }
-  const openAI = {
+  const openAI = removeUndefinedOpenAISettings({
     ...baseOpenAI,
+    ...(modelCapabilities.supportsReasoningEffort && profileReasoningSummary !== undefined
+      ? { reasoningSummary: profileReasoningSummary }
+      : {}),
+    ...(modelCapabilities.supportsParallelToolCalls && profileParallelToolCalls !== undefined
+      ? { parallelToolCalls: profileParallelToolCalls }
+      : {}),
+    ...(profileStream !== undefined || !modelCapabilities.supportsStreaming
+      ? { stream: modelCapabilities.supportsStreaming ? profileStream : false }
+      : {}),
     ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
-  };
+  });
   return {
     ...activeModel,
     openAI: Object.keys(openAI).length === 0 ? undefined : openAI,
   };
+}
+
+function removeUndefinedOpenAISettings<T extends Record<string, unknown>>(settings: T): T {
+  return Object.fromEntries(
+    Object.entries(settings).filter(([, value]) => value !== undefined)
+  ) as T;
 }
 
 function isRealDesktopAiMode(aiMode: ModelRuntimeMode): boolean {
@@ -122,15 +166,17 @@ export function desktopRuntimeMode(
   return "openai-responses";
 }
 
-export async function createDesktopToolCenterFactory(
-  runtime: PanelRuntime,
+export function createDesktopToolCenterFactory(
+  providerFetch: PanelRuntime["providerFetch"],
   resources: DesktopRunResources
 ) {
-  return createConfiguredToolCenterFactory(runtime.configCenter, {
+  return (toolRuntime: MinimalRuntime) => createDefaultToolCenter({
+    runtime: toolRuntime,
     env: resources.aiEnvironment,
-    fetch: runtime.providerFetch,
+    fetch: providerFetch,
     workspaceRoot: resources.workspaceRoot,
     toolStates: resources.toolStates,
+    toolCatalogNames: resources.toolCatalogNames,
     playwrightAvailable: resources.playwrightAvailable,
   });
 }

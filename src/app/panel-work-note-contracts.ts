@@ -1,8 +1,9 @@
 import type { RunObservationSnapshot } from "../domain/observation/index.js";
+import type { RunAgentDefinitionRef } from "../domain/config/index.js";
 import type { EventLogEntry } from "../kernel/events/in-memory-event-log.js";
 import type { SafeAgentRunTreeView } from "./panel-agent-run-tree-view.js";
 import type { PanelTranscriptModelCall } from "./panel-transcript-model-calls.js";
-import type { UndergroundDemoSummary } from "./underground-demo-summary.js";
+import type { PanelRunSummary } from "./panel-run-summary.js";
 
 export type AgentWorkNote = {
   readonly noteId: string;
@@ -29,11 +30,12 @@ export type PanelWorkNotesInput = {
   readonly runId: string;
   readonly status: "pending" | "running" | "approval_needed" | "needs_input" | "completed" | "failed" | "cancelled" | "blocked";
   readonly eventEntries: readonly EventLogEntry[];
-  readonly summary?: UndergroundDemoSummary;
+  readonly summary?: PanelRunSummary;
   readonly observation?: Pick<RunObservationSnapshot, "underground">;
   readonly agentRunTree?: SafeAgentRunTreeView;
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly modelCalls: readonly PanelTranscriptModelCall[];
-  readonly desktopChatOnly: boolean;
+  readonly ordinaryDesktopAgentOnly: boolean;
+  readonly agentDefinitionRef?: Pick<RunAgentDefinitionRef, "agentId" | "agentDisplayName">;
 };

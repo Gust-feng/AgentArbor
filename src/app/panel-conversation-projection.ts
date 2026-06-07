@@ -3,6 +3,7 @@ import type { RuntimeConversationRecord } from "../domain/runtime-database/index
 import { sanitizeAssistantVisibleText } from "./visible-text-safety.js";
 import type {
   PanelConversation,
+  PanelConversationCurrentRunReadModel,
   PanelConversationReadModel,
   PanelConversationSummaryReadModel,
   PanelConversationStatus,
@@ -67,9 +68,12 @@ export function trimRuntimeConversationToClosedPairs(input: {
   };
 }
 
-export function toConversationReadModel(conversation: PanelConversation): PanelConversationReadModel {
+export function toConversationReadModel(
+  conversation: PanelConversation,
+  currentRun?: PanelConversationCurrentRunReadModel
+): PanelConversationReadModel {
   return {
-    ...toConversationSummary(conversation),
+    ...toConversationSummary(conversation, currentRun),
     turns: conversation.turns.map((turn) => ({
       turnId: turn.turnId,
       role: turn.role,
@@ -129,7 +133,10 @@ export function turnModelFromConfig(config: SanitizedModelProviderConfig): Panel
   };
 }
 
-export function toConversationSummary(conversation: PanelConversation): PanelConversationSummaryReadModel {
+export function toConversationSummary(
+  conversation: PanelConversation,
+  currentRun?: PanelConversationCurrentRunReadModel
+): PanelConversationSummaryReadModel {
   const lastTurn = conversation.turns.at(-1);
   const preview =
     lastTurn === undefined
@@ -151,6 +158,7 @@ export function toConversationSummary(conversation: PanelConversation): PanelCon
     requiresUserAction,
     queuedRunIds: [...conversation.queuedRunIds],
     queuedRunCount: conversation.queuedRunIds.length,
+    currentRun,
   };
 }
 
@@ -224,7 +232,7 @@ function closedTurnPrefix(
 }
 
 function isClosedAssistantTurn(turn: RuntimeConversationRecord["turns"][number]): boolean {
-  return turn.status === "completed" || turn.status === "failed";
+  return turn.status === "completed" || turn.status === "failed" || turn.status === "blocked" || turn.status === "needs_input";
 }
 
 function lastAssistantTurn<T extends { readonly role: PanelConversationTurnRole }>(turns: readonly T[]): T | undefined {
@@ -239,7 +247,7 @@ function lastAssistantTurn<T extends { readonly role: PanelConversationTurnRole 
 
 function conversationRequiresUserAction(conversation: PanelConversation): boolean {
   const status = conversationStatus(conversation);
-  if (status === "approval_needed" || status === "needs_input") {
+  if (status === "approval_needed" || status === "needs_input" || status === "blocked") {
     return true;
   }
   const lastAssistant = lastAssistantTurn(conversation.turns);
@@ -257,14 +265,14 @@ function conversationStatus(conversation: PanelConversation): PanelConversationS
   if (activeAssistant?.status === "running" && activeAssistant.title === "需要确认") {
     return "approval_needed";
   }
-  if (activeAssistant?.status === "running" && activeAssistant.title === "需要补充") {
+  if (activeAssistant?.status === "needs_input" || (activeAssistant?.status === "running" && activeAssistant.title === "需要补充")) {
     return "needs_input";
   }
   const lastAssistant = lastAssistantTurn(conversation.turns);
   if (lastAssistant?.status === "running" && lastAssistant.title === "需要确认") {
     return "approval_needed";
   }
-  if (lastAssistant?.status === "running" && lastAssistant.title === "需要补充") {
+  if (lastAssistant?.status === "needs_input" || (lastAssistant?.status === "running" && lastAssistant.title === "需要补充")) {
     return "needs_input";
   }
   if (conversation.currentRunId !== undefined) {
@@ -278,6 +286,12 @@ function conversationStatus(conversation: PanelConversation): PanelConversationS
   }
   if (lastAssistant.status === "failed") {
     return "failed";
+  }
+  if (lastAssistant.status === "blocked") {
+    return "blocked";
+  }
+  if (lastAssistant.status === "completed" && lastAssistant.title === "需要补充") {
+    return "needs_input";
   }
   if (lastAssistant.status === "completed") {
     return "completed";

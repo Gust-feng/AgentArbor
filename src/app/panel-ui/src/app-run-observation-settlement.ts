@@ -1,16 +1,17 @@
 import { appendLiveRunEvents } from "../../panel-ui-live-run-buffer.js";
+import { loadObservedRunReadModel } from "./app-observed-run-read-model.js";
 import { createRunReadModelPatch } from "./app-run-projection.js";
 import { shouldKeepRefreshing } from "./app-runtime-controls.js";
 import type { AppState } from "./app-state";
-import type { BasicAgentRun, RunEvent } from "./contracts/run";
+import type {
+  BasicAgentRun,
+  DesktopRunDetail,
+  DesktopWorkView,
+  RunCapabilityResolution,
+  RunEvent,
+} from "./contracts/run";
 import type { Conversation } from "./contracts/conversation";
-import {
-  safeBasicEvents,
-  safeBasicRun,
-  safeConversation,
-  safeDesktopDetail,
-  safeWorkSession,
-} from "./runtime.js";
+import { ordinaryWorkViewFromRunView, safeBasicRunView, safeConversation } from "./runtime.js";
 
 export type FollowUpActiveRunProjection = {
   readonly conversation?: Conversation;
@@ -21,15 +22,17 @@ export type FollowUpActiveRunProjection = {
       readonly lastSequence: number;
     };
   };
-  readonly workSession?: Awaited<ReturnType<typeof safeWorkSession>>;
-  readonly detail?: Awaited<ReturnType<typeof safeDesktopDetail>>;
+  readonly workView?: DesktopWorkView;
+  readonly capabilityResolution?: RunCapabilityResolution;
+  readonly detail?: DesktopRunDetail;
 };
 
 export type SettledRunProjection = {
   readonly runId: string;
   readonly run: BasicAgentRun;
-  readonly workSession?: Awaited<ReturnType<typeof safeWorkSession>>;
-  readonly detail?: Awaited<ReturnType<typeof safeDesktopDetail>>;
+  readonly workView?: DesktopWorkView;
+  readonly capabilityResolution?: RunCapabilityResolution;
+  readonly detail?: DesktopRunDetail;
   readonly conversation?: Conversation;
   readonly followUp: FollowUpActiveRunProjection;
 };
@@ -37,17 +40,19 @@ export type SettledRunProjection = {
 export async function loadSettledRunProjection(input: {
   readonly runId: string;
   readonly run: BasicAgentRun;
-  readonly workSession?: Awaited<ReturnType<typeof safeWorkSession>>;
+  readonly workView?: DesktopWorkView;
+  readonly capabilityResolution?: RunCapabilityResolution;
 }): Promise<SettledRunProjection> {
-  const [detail, conversation] = await Promise.all([
-    safeDesktopDetail(input.runId),
+  const [view, conversation] = await Promise.all([
+    safeBasicRunView(input.runId, 0),
     input.run.conversationId === undefined ? undefined : safeConversation(input.run.conversationId),
   ]);
   return {
     runId: input.runId,
-    run: input.run,
-    workSession: input.workSession,
-    detail,
+    run: view?.run ?? input.run,
+    workView: ordinaryWorkViewFromRunView(view) ?? input.workView,
+    capabilityResolution: view?.capabilityResolution,
+    detail: view?.detail,
     conversation,
     followUp: await loadFollowUpActiveRunProjection(conversation, input.runId),
   };
@@ -62,12 +67,15 @@ export function appStateWithSettledRunProjection(
   }
   const readModel = createRunReadModelPatch(previous, {
     runId: settled.runId,
-    workSession: settled.workSession,
+    workView: settled.workView,
     detail: settled.detail,
   });
   return {
     ...previous,
     conversation: settled.conversation ?? previous.conversation,
+    run: settled.run,
+    capabilityResolution: settled.capabilityResolution,
+    capabilityResolutionRunId: settled.capabilityResolution === undefined ? undefined : settled.runId,
     live: undefined,
     ...readModel,
   };
@@ -94,13 +102,30 @@ async function loadFollowUpActiveRunProjection(
   if (runId === undefined) {
     return { conversation };
   }
-  const [run, replay, workSession, detail] = await Promise.all([
-    safeBasicRun(runId),
-    safeBasicEvents(runId, 0),
-    safeWorkSession(runId),
-    safeDesktopDetail(runId),
-  ]);
-  return { conversation, run, replay, workSession, detail };
+  const currentRun = conversation?.currentRun;
+  if (currentRun?.run.runId === runId) {
+    return {
+      conversation,
+      run: currentRun.run,
+      replay: currentRun.replay,
+      workView: ordinaryWorkViewFromRunView(currentRun),
+      capabilityResolution: currentRun.capabilityResolution,
+      detail: currentRun.detail,
+    };
+  }
+  const observed = await loadObservedRunReadModel({
+    runId,
+    conversationId: conversation?.conversationId,
+    preferredConversation: conversation,
+  });
+  return {
+    conversation: observed.conversation ?? conversation,
+    run: observed.run,
+    replay: observed.replay,
+    workView: observed.workView,
+    capabilityResolution: observed.capabilityResolution,
+    detail: observed.detail,
+  };
 }
 
 function appStateWithFollowUpActiveRun(
@@ -112,13 +137,15 @@ function appStateWithFollowUpActiveRun(
   }
   const readModel = createRunReadModelPatch(previous, {
     runId: followUp.run.runId,
-    workSession: followUp.workSession,
+    workView: followUp.workView,
     detail: followUp.detail,
   });
   return {
     ...previous,
     conversation: followUp.conversation ?? previous.conversation,
     run: followUp.run,
+    capabilityResolution: followUp.capabilityResolution,
+    capabilityResolutionRunId: followUp.capabilityResolution === undefined ? undefined : followUp.run.runId,
     events: followUp.replay?.events ?? [],
     live: shouldKeepRefreshing(followUp.run.status)
       ? appendLiveRunEvents(followUp.run.runId, undefined, followUp.replay?.events ?? [])

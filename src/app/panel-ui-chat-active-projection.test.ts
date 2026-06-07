@@ -60,7 +60,7 @@ test("active chat projection ignores stale live answer after a run settles", () 
     run: run("run-1", "completed", 8),
     transcriptNodes: [],
     live: live("run-1", "不应重播的旧直播文本"),
-    workSessionAnswer: "最终答案",
+    workViewAnswer: "最终答案",
   });
 
   assert.equal(projection.answer, "最终答案");
@@ -88,7 +88,7 @@ test("active chat projection prefers conversation run ownership over stale live 
   });
 });
 
-test("active chat projection ignores empty work session answers", () => {
+test("active chat projection ignores empty work view answers", () => {
   const projection = projectChatActive({
     conversation: {
       turns: [
@@ -99,7 +99,7 @@ test("active chat projection ignores empty work session answers", () => {
     },
     run: run("run-1", "completed", 5),
     transcriptNodes: [],
-    workSessionAnswer: "",
+    workViewAnswer: "",
     detailAnswer: "详情回答",
   });
 

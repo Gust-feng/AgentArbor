@@ -9,7 +9,7 @@ export function isRefreshingTranscriptRun(run: StartupTranscriptRunLike | undefi
   return run?.status === "queued" || run?.status === "planning" || run?.status === "running" || run?.status === "pending";
 }
 
-export function withStartupWorkflowNode<TNode extends ProjectableTranscriptNode>(
+export function withStartupActivityNode<TNode extends ProjectableTranscriptNode>(
   nodes: readonly TNode[],
   input: {
     readonly runId: string | undefined;

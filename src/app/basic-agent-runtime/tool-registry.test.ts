@@ -63,6 +63,42 @@ test("desktop-basic tool registry applies configured tool disabled state", () =>
   assert.equal(registry.createToolCenter("desktop-basic").has("shell_command"), false);
 });
 
+test("desktop-basic tool registry can restrict executors to a frozen tool catalog", () => {
+  const registry = createDesktopBasicToolRegistry({
+    env: {},
+    workspaceRoot: process.cwd(),
+    playwrightAvailable: true,
+    toolCatalogNames: ["read_file"],
+  });
+  const catalog = registry.catalog("desktop-basic");
+  const center = registry.createToolCenter("desktop-basic");
+
+  assert.deepEqual(catalog.tools.map((tool) => tool.name), ["read_file"]);
+  assert.deepEqual(catalog.allowedTools, ["read_file"]);
+  assert.equal(center.has("read_file"), true);
+  assert.equal(center.has("search"), false);
+  assert.equal(center.has("run_command"), false);
+});
+
+test("desktop-basic tool registry keeps MCP tools out of the default ordinary agent scope", () => {
+  const registry = createDesktopBasicToolRegistry({
+    env: {},
+    workspaceRoot: process.cwd(),
+    playwrightAvailable: true,
+    mcpManager: {
+      getToolsForRegistry: () => [mcpToolExecutor()],
+    } as never,
+  });
+  const desktopCatalog = registry.catalog("desktop-basic");
+  const mcpCatalog = registry.catalog("mcp");
+
+  assert.equal(desktopCatalog.tools.some((tool) => tool.name === "mcp_docs_search"), false);
+  assert.equal(desktopCatalog.allowedTools.includes("mcp_docs_search"), false);
+  assert.equal(registry.createToolCenter("desktop-basic").has("mcp_docs_search"), false);
+  assert.deepEqual(mcpCatalog.allowedTools, ["mcp_docs_search"]);
+  assert.equal(registry.createToolCenter("mcp").has("mcp_docs_search"), true);
+});
+
 
 test("tool registry rejects tools without complete metadata", () => {
   const registry = new ToolRegistry();
@@ -79,3 +115,27 @@ test("tool registry rejects tools without complete metadata", () => {
 
   assert.throws(() => registry.register({ executor, scopes: ["desktop-basic"], enabledByDefault: true }), /without metadata/);
 });
+
+function mcpToolExecutor(): ToolExecutor {
+  return {
+    definition: {
+      name: "mcp_docs_search",
+      description: "Search docs through an MCP server.",
+      inputSchema: { type: "object", properties: { query: { type: "string" } } },
+      metadata: {
+        category: "mcp",
+        riskLevel: "medium",
+        operationType: "external-submit",
+        requiresConfirmation: true,
+        visibleResultPolicy: {
+          userVisible: "summary-only",
+          maxPreviewChars: 400,
+          omitRawOutput: true,
+        },
+      },
+    },
+    async execute() {
+      return { ok: true };
+    },
+  };
+}

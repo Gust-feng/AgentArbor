@@ -1,8 +1,8 @@
 import type { ObservationRef } from "../../domain/observation/index.js";
 import type { TaskSoil } from "../../domain/soil/index.js";
 import type { ToolResultEnvelope } from "../../domain/tools/index.js";
+import type { AgentDefinition } from "../agent-prompts/contracts.js";
 import type { DesktopAgentConversationMessage, DesktopAgentSkillContext } from "../desktop-agent-contracts.js";
-import { DESKTOP_ROOT_AGENT } from "../agent-prompts/desktop-root-agent.js";
 import type { BasicAgentContextItem } from "./contracts.js";
 import type { BasicAgentConversationSummary } from "./conversation-compaction.js";
 import {
@@ -12,7 +12,10 @@ import {
   safeUnboundedContextText as safeUnboundedText,
 } from "./context-ledger-safe-text.js";
 
+export type BasicAgentContextAgentDefinition = Pick<AgentDefinition, "agentId" | "prompt">;
+
 export type BuildContextLedgerDraftInput = {
+  readonly agentDefinition: BasicAgentContextAgentDefinition;
   readonly goal: string;
   readonly taskSoil: TaskSoil;
   readonly conversationHistory: readonly DesktopAgentConversationMessage[];
@@ -32,7 +35,7 @@ const MAX_TOOL_EVIDENCE_CHARS = 1_400;
 
 export function buildContextLedgerDraftItems(input: BuildContextLedgerDraftInput): readonly BasicAgentContextItem[] {
   return [
-    systemContextItem(),
+    systemContextItem(input.agentDefinition),
     ...skillContextItems(input.skillContexts ?? []),
     ...historyContextItems(input.conversationHistory, input.conversationSummary),
     ...taskSoilRefItems(input.taskSoil),
@@ -61,12 +64,12 @@ export function toolEvidenceItems(envelopes: readonly ToolResultEnvelope[]): rea
   });
 }
 
-function systemContextItem(): BasicAgentContextItem {
+function systemContextItem(agentDefinition: BasicAgentContextAgentDefinition): BasicAgentContextItem {
   return {
-    itemId: `context:system:${DESKTOP_ROOT_AGENT.agentId}`,
+    itemId: `context:system:${agentDefinition.agentId}`,
     sourceKind: "system",
-    summary: DESKTOP_ROOT_AGENT.prompt.systemPrompt,
-    refs: [{ kind: "event", id: DESKTOP_ROOT_AGENT.prompt.promptRef }],
+    summary: agentDefinition.prompt.systemPrompt,
+    refs: [{ kind: "event", id: agentDefinition.prompt.promptRef }],
     visibility: "model",
     truncated: false,
   };

@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { BasicAgentCapabilitySnapshot, CapabilityToolCatalogItem } from "../domain/config/index.js";
+import type {
+  BasicAgentCapabilitySnapshot,
+  CapabilityToolCatalogItem,
+  CapabilityToolScope,
+} from "../domain/config/index.js";
 import type { IntelligenceChannel, ModelRequest } from "../domain/intelligence/index.js";
 import type {
   ToolCallRequest,
@@ -11,6 +15,7 @@ import type {
   ToolPermissionCheck,
 } from "../domain/tools/index.js";
 import { toolPresentationForName } from "../domain/tools/index.js";
+import type { AgentDefinition } from "./agent-prompts/contracts.js";
 import { DESKTOP_ROOT_AGENT } from "./agent-prompts/desktop-root-agent.js";
 import { runDesktopAgentSession } from "./desktop-agent-session.js";
 import { createOpenAiStreamTextResponse } from "./panel-openai-test-fixtures.js";
@@ -24,6 +29,66 @@ test("Desktop Agent Session answers ordinary questions without entering deep mod
   assert.deepEqual(result.eventTypes, ["goal.received", "model.requested", "model.completed"]);
   assert.equal(result.runtime.eventLog.types().includes("agent.delegation.planned"), false);
   assert.equal(result.runtime.eventLog.types().includes("artifact.produced"), false);
+});
+
+test("Desktop Agent Session defaults aiMode from the frozen capability snapshot", async () => {
+  const result = await runDesktopAgentSession("使用本轮冻结的默认模型模式", {
+    capabilitySnapshot: desktopCapabilitySnapshot([], {
+      activeModel: {
+        defaultAiMode: "fake",
+        model: "frozen-fixture-model",
+      },
+    }),
+  });
+
+  assert.equal(result.status, "completed");
+  assert.deepEqual(result.eventTypes, ["goal.received", "model.requested", "model.completed"]);
+  const requested = result.runtime.eventLog.list().find((entry) => entry.type === "model.requested");
+  assert.equal((requested?.message.payload as { readonly providerKind?: string }).providerKind, "fake");
+});
+
+test("Desktop Agent Session prefers frozen capability model facts over env model settings", async () => {
+  const fetchCalls: Array<{ readonly url: string; readonly body: Record<string, unknown> }> = [];
+  const result = await runDesktopAgentSession("使用本轮冻结的模型配置回答", {
+    aiMode: "openai-compatible",
+    aiEnvironment: {
+      AGENTARBOR_MODEL_API_KEY: "sk-test-secret",
+      AGENTARBOR_MODEL_NAME: "env-model-should-not-run",
+      AGENTARBOR_MODEL_BASE_URL: "https://env-provider.example",
+    },
+    capabilitySnapshot: desktopCapabilitySnapshot([], {
+      activeModel: {
+        defaultAiMode: "openai-compatible",
+        baseUrl: "https://snapshot-provider.example",
+        model: "snapshot-desktop-model",
+      },
+    }),
+    providerFetch: async (url, init) => {
+      fetchCalls.push({
+        url,
+        body: JSON.parse(String(init.body)) as Record<string, unknown>,
+      });
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          id: "chatcmpl-desktop-snapshot",
+          model: "snapshot-desktop-model",
+          choices: [
+            {
+              message: { role: "assistant", content: "已使用冻结模型配置。" },
+              finish_reason: "stop",
+            },
+          ],
+        }),
+      };
+    },
+  });
+
+  assert.equal(result.status, "completed");
+  assert.equal(fetchCalls[0]?.url, "https://snapshot-provider.example/chat/completions");
+  assert.equal(fetchCalls[0]?.body.model, "snapshot-desktop-model");
+  assert.equal(result.answer?.answer, "已使用冻结模型配置。");
 });
 
 test("Desktop Agent Session keeps complex requests in ordinary desktop assistant mode by default", async () => {
@@ -43,6 +108,10 @@ test("Desktop Agent Session can use authorized tools before answering", async ()
   const result = await runDesktopAgentSession("分析当前仓库的问题并给我优化建议", {
     aiMode: "fake",
     createToolCenter: () => toolCenter,
+    capabilitySnapshot: desktopCapabilitySnapshot([
+      capabilityTool("search", "read-only"),
+      capabilityTool("read", "read-only"),
+    ]),
   });
 
   assert.equal(result.status, "completed");
@@ -66,6 +135,9 @@ test("Desktop Agent Session projects local tool summaries and refs", async () =>
     aiMode: "fake",
     createIntelligenceChannel: () => channel,
     createToolCenter: () => toolCenter,
+    capabilitySnapshot: desktopCapabilitySnapshot([
+      capabilityTool("read_file", "read-only"),
+    ]),
   });
 
   assert.equal(result.status, "completed");
@@ -104,6 +176,142 @@ test("Desktop Agent Session derives model-visible tools from capability snapshot
 
   assert.equal(result.status, "completed");
   assert.deepEqual(capturedRequest?.tools?.map((tool) => tool.name), ["read"]);
+  assert.equal(result.capabilityResolution?.agentId, DESKTOP_ROOT_AGENT.agentId);
+  assert.equal(result.capabilityResolution?.agentDisplayName, DESKTOP_ROOT_AGENT.displayName);
+  assert.equal(result.capabilityResolution?.toolVisibilityProfileId, DESKTOP_ROOT_AGENT.toolVisibilityProfile.profileId);
+  assert.deepEqual(result.capabilityResolution?.allowedTools, ["read"]);
+  assert.equal(result.capabilityResolution?.toolExposures.find((tool) => tool.name === "search")?.modelVisible, false);
+});
+
+test("Desktop Agent Session returns safe run capability resolution with MCP kept as draft only", async () => {
+  let capturedRequest: ModelRequest | undefined;
+  const channel: IntelligenceChannel = {
+    async request(request) {
+      capturedRequest = request;
+      return textResponse(request, "我会使用普通 Agent 可见的工具边界。");
+    },
+    validateResponse() {
+      return { status: "passed", checkedAt: new Date(0).toISOString(), issues: [] };
+    },
+  };
+
+  const result = await runDesktopAgentSession("展示当前能力边界", {
+    aiMode: "fake",
+    createIntelligenceChannel: () => channel,
+    createToolCenter: () => new FixtureToolCenter(),
+    capabilitySnapshot: desktopCapabilitySnapshot([
+      capabilityTool("search", "read-only"),
+      { ...capabilityTool("mcp_docs_search", "external-submit"), scopes: ["desktop-basic", "mcp"] },
+    ], {
+      mcpCatalog: [
+        {
+          serverId: "docs",
+          label: "Docs MCP",
+          transport: "stdio",
+          enabled: true,
+          availability: "configured",
+          commandSummary: "node server.js --token omitted",
+          envSecretRefCount: 1,
+          updatedAt: "2026-05-13T00:00:00.000Z",
+        },
+      ],
+    }),
+  });
+
+  assert.equal(result.status, "completed");
+  assert.deepEqual(capturedRequest?.tools?.map((tool) => tool.name), ["search"]);
+  assert.deepEqual(result.capabilityResolution?.allowedTools, ["search"]);
+  assert.equal(result.capabilityResolution?.toolExposures.find((tool) => tool.name === "mcp_docs_search")?.modelVisible, false);
+  assert.equal(result.capabilityResolution?.mcpDrafts[0]?.source, "mcp");
+  assert.equal(JSON.stringify(result.capabilityResolution).includes(DESKTOP_ROOT_AGENT.prompt.systemPrompt), false);
+  assert.equal(JSON.stringify(result.capabilityResolution).includes("--token"), false);
+  assert.equal(JSON.stringify(result.capabilityResolution).includes("secret://"), false);
+});
+
+test("Desktop Agent Session records executable tool restrictions in run capability resolution", async () => {
+  let capturedRequest: ModelRequest | undefined;
+  const channel: IntelligenceChannel = {
+    async request(request) {
+      capturedRequest = request;
+      return textResponse(request, "我只会看到本轮真实可执行的工具。");
+    },
+    validateResponse() {
+      return { status: "passed", checkedAt: new Date(0).toISOString(), issues: [] };
+    },
+  };
+
+  const result = await runDesktopAgentSession("展示可执行工具边界", {
+    aiMode: "fake",
+    createIntelligenceChannel: () => channel,
+    createToolCenter: () => new SearchOnlyToolCenter(),
+    capabilitySnapshot: desktopCapabilitySnapshot([
+      capabilityTool("search", "read-only"),
+      capabilityTool("read", "read-only"),
+    ]),
+  });
+
+  assert.equal(result.status, "completed");
+  assert.deepEqual(capturedRequest?.tools?.map((tool) => tool.name), ["search"]);
+  assert.deepEqual(result.capabilityResolution?.allowedTools, ["search"]);
+  assert.equal(result.capabilityResolution?.toolExposures.find((tool) => tool.name === "read")?.modelVisible, false);
+  assert.equal(result.capabilityResolution?.toolExposures.find((tool) => tool.name === "read")?.reason, "工具执行器当前未提供该工具。");
+  assert.match(result.capabilityResolution?.warnings.join("\n") ?? "", /工具执行器/);
+  assert.equal(result.capabilityResolution?.warnings.includes("本轮没有模型可见工具。"), false);
+});
+
+test("Desktop Agent Session hides underground-scoped tools from the ordinary agent", async () => {
+  let capturedRequest: ModelRequest | undefined;
+  const channel: IntelligenceChannel = {
+    async request(request) {
+      capturedRequest = request;
+      return textResponse(request, "我只会看到普通路径允许的工具。");
+    },
+    validateResponse() {
+      return { status: "passed", checkedAt: new Date(0).toISOString(), issues: [] };
+    },
+  };
+
+  const result = await runDesktopAgentSession("展示当前可见工具", {
+    aiMode: "fake",
+    createIntelligenceChannel: () => channel,
+    createToolCenter: () => new FixtureToolCenter(),
+    capabilitySnapshot: desktopCapabilitySnapshot([
+      capabilityTool("search", "read-only"),
+      {
+        ...capabilityTool("underground_probe", "read-only"),
+        scopes: ["underground"],
+      },
+    ]),
+  });
+
+  assert.equal(result.status, "completed");
+  assert.deepEqual(capturedRequest?.tools?.map((tool) => tool.name), ["search"]);
+});
+
+test("Desktop Agent Session does not let direct session options override allowed tools", async () => {
+  let capturedRequest: ModelRequest | undefined;
+  const channel: IntelligenceChannel = {
+    async request(request) {
+      capturedRequest = request;
+      return textResponse(request, "我会按正式能力边界使用工具。");
+    },
+    validateResponse() {
+      return { status: "passed", checkedAt: new Date(0).toISOString(), issues: [] };
+    },
+  };
+
+  const result = await runDesktopAgentSession("分析当前仓库的问题并给我优化建议", {
+    aiMode: "fake",
+    createIntelligenceChannel: () => channel,
+    createToolCenter: () => new FixtureToolCenter(),
+    capabilitySnapshot: desktopCapabilitySnapshot([
+      capabilityTool("read", "read-only"),
+    ]),
+  });
+
+  assert.equal(result.status, "completed");
+  assert.deepEqual(capturedRequest?.tools?.map((tool) => tool.name), ["read"]);
+  assert.equal(capturedRequest?.tools?.some((tool) => tool.name === "search"), false);
 });
 
 test("Desktop Agent Session derives caller identity and output contract from the desktop agent definition", async () => {
@@ -129,17 +337,148 @@ test("Desktop Agent Session derives caller identity and output contract from the
   assert.equal(capturedRequest?.sanitizedMessages[0]?.content, DESKTOP_ROOT_AGENT.prompt.systemPrompt);
 });
 
+test("Desktop Agent Session can run with an injected agent definition on the same ordinary loop", async () => {
+  const customAgent = customOrdinaryAgent();
+  let capturedRequest: ModelRequest | undefined;
+  const channel: IntelligenceChannel = {
+    async request(request) {
+      capturedRequest = request;
+      return textResponse(request, "自定义普通 Agent 定义已生效。");
+    },
+    validateResponse() {
+      return { status: "passed", checkedAt: new Date(0).toISOString(), issues: [] };
+    },
+  };
+
+  const result = await runDesktopAgentSession("使用自定义普通 Agent", {
+    aiMode: "fake",
+    agentDefinition: customAgent,
+    createIntelligenceChannel: () => channel,
+    createToolCenter: () => new FixtureToolCenter(),
+    skillContexts: [
+      {
+        skill: {
+          id: "custom-skill",
+          name: "Custom Skill",
+          description: "Fixture skill.",
+          enabled: true,
+          sourcePath: ".agents/skills/custom/SKILL.md",
+          triggers: ["自定义普通 Agent"],
+        },
+        body: "Custom skill body.",
+        triggerReason: "User request matches fixture skill.",
+      },
+    ],
+    capabilitySnapshot: desktopCapabilitySnapshot([
+      capabilityTool("search", "read-only"),
+      capabilityTool("read", "read-only"),
+    ]),
+  });
+
+  assert.equal(result.status, "completed");
+  assert.equal(capturedRequest?.purpose, customAgent.turnPolicy.purpose);
+  assert.equal(capturedRequest?.outputContract.contractId, customAgent.outputContract.contractId);
+  assert.equal(capturedRequest?.sanitizedMessages[0]?.content, "Custom ordinary agent prompt.");
+  assert.deepEqual(capturedRequest?.tools?.map((tool) => tool.name), ["search"]);
+  assert.equal(result.capabilityResolution?.agentId, "custom-ordinary-agent");
+  assert.equal(result.capabilityResolution?.agentDisplayName, "Custom Ordinary Agent");
+  assert.equal(result.capabilityResolution?.toolVisibilityProfileId, "custom-ordinary-agent:read-tools:v1");
+  assert.deepEqual(result.capabilityResolution?.allowedTools, ["search"]);
+  const skillEvent = result.runtime.eventLog.list().find((entry) => entry.type === "skill.triggered");
+  assert.equal(skillEvent?.message.from.id, "custom-ordinary-agent");
+  assert.equal(skillEvent?.message.from.role, "agent");
+});
+
+test("Desktop Agent Session rejects deep AgentDefinitions on the ordinary loop", async () => {
+  const deepAgent: AgentDefinition = {
+    ...customOrdinaryAgent(),
+    agentId: "deep-agent-definition",
+    displayName: "Deep Agent Definition",
+    prompt: {
+      promptRef: "prompt:deep-agent-definition:v1",
+      version: "1",
+      systemPrompt: "Deep agent prompt must not leak.",
+    },
+    toolVisibilityProfile: {
+      profileId: "deep-agent-definition:deep-visible-tools:v1",
+      runMode: "deep",
+      visibleToolScopes: ["underground"],
+    },
+  };
+
+  await assert.rejects(
+    () =>
+      runDesktopAgentSession("不要把 deep 定义放进普通主循环", {
+        aiMode: "fake",
+        agentDefinition: deepAgent,
+      }),
+    (error) => {
+      assert.equal(error instanceof Error, true);
+      const message = error instanceof Error ? error.message : String(error);
+      assert.equal(message.includes("requires an ordinary AgentDefinition"), true);
+      assert.equal(message.includes("deep-agent-definition"), true);
+      assert.equal(message.includes(deepAgent.prompt.systemPrompt), false);
+      assert.equal(message.includes("systemPrompt"), false);
+      return true;
+    }
+  );
+});
+
+test("Desktop Agent Session rejects tool exposure without a capability snapshot", async () => {
+  await assert.rejects(
+    () =>
+      runDesktopAgentSession("分析当前仓库的问题并给我优化建议", {
+        aiMode: "fake",
+        createToolCenter: () => new FixtureToolCenter(),
+      }),
+    /requires a capability snapshot/
+  );
+});
+
 test("Desktop Agent Session projects tool failures without leaking raw output", async () => {
   const toolCenter = new FailingToolCenter();
   const result = await runDesktopAgentSession("分析当前仓库的问题并给我优化建议", {
     aiMode: "fake",
     createToolCenter: () => toolCenter,
+    capabilitySnapshot: desktopCapabilitySnapshot([
+      capabilityTool("search", "read-only"),
+      capabilityTool("read", "read-only"),
+    ]),
   });
 
   assert.equal(result.status, "completed");
   assert.equal(result.eventTypes.includes("tool.failed"), true);
   assert.equal(result.answer?.resultBlocks.some((block) => block.kind === "failure"), true);
   assert.equal(JSON.stringify({ answer: result.answer, activity: result.activity }).includes("raw provider payload"), false);
+  assert.equal(result.runtime.eventLog.types().includes("agent.delegation.planned"), false);
+});
+
+test("Desktop Agent Session blocks hidden tool calls before broker execution and lets the model stop", async () => {
+  const toolCenter = new FixtureToolCenter();
+  const channel = new UnauthorizedToolChannel();
+  const result = await runDesktopAgentSession("读取隐藏材料后回答", {
+    aiMode: "fake",
+    createIntelligenceChannel: () => channel,
+    createToolCenter: () => toolCenter,
+    capabilitySnapshot: desktopCapabilitySnapshot([
+      capabilityTool("search", "read-only"),
+    ]),
+  });
+
+  assert.equal(result.status, "completed");
+  assert.equal(result.answer?.answer.includes("未授权工具没有执行"), true);
+  assert.deepEqual(result.capabilityResolution?.allowedTools, ["search"]);
+  assert.deepEqual(channel.requests[0]?.tools?.map((tool) => tool.name), ["search"]);
+  assert.deepEqual(channel.requests[1]?.tools?.map((tool) => tool.name), ["search"]);
+  assert.equal(result.eventTypes.includes("tool.failed"), true);
+  assert.equal(result.eventTypes.includes("tool.completed"), false);
+  assert.equal(toolCenter.getCallCount(), 0);
+  const toolFeedback = channel.requests[1]?.sanitizedMessages.find(
+    (message) => message.role === "tool" && message.toolCallId === "call-hidden-read"
+  );
+  assert.notEqual(toolFeedback, undefined);
+  assert.equal(toolFeedback?.content.includes("未授权"), true);
+  assert.equal(toolFeedback?.content.includes("Desktop Agent tool evidence"), false);
   assert.equal(result.runtime.eventLog.types().includes("agent.delegation.planned"), false);
 });
 
@@ -150,6 +489,9 @@ test("Desktop Agent Session keeps approval waits out of assistant answers", asyn
     aiMode: "fake",
     createIntelligenceChannel: () => channel,
     createToolCenter: () => toolCenter,
+    capabilitySnapshot: desktopCapabilitySnapshot([
+      capabilityTool("delete_file", "read-write"),
+    ]),
   });
 
   assert.equal(result.status, "confirmation_needed");
@@ -162,6 +504,23 @@ test("Desktop Agent Session keeps approval waits out of assistant answers", asyn
   assert.equal(result.eventTypes.includes("user_approval.requested"), true);
 });
 
+test("Desktop Agent Session publishes confirmation requests from the injected agent identity", async () => {
+  const result = await runDesktopAgentSession("删除 pending.txt", {
+    aiMode: "fake",
+    agentDefinition: customOrdinaryAgent(),
+    createIntelligenceChannel: () => new ApprovalRequiredToolChannel(),
+    createToolCenter: () => new ApprovalRequiredToolCenter(),
+    capabilitySnapshot: desktopCapabilitySnapshot([
+      capabilityTool("delete_file", "read-write"),
+    ]),
+  });
+
+  assert.equal(result.status, "confirmation_needed");
+  const confirmationEvent = result.runtime.eventLog.list().find((entry) => entry.type === "user_approval.requested");
+  assert.equal(confirmationEvent?.message.from.id, "custom-ordinary-agent");
+  assert.equal(confirmationEvent?.message.from.role, "agent");
+});
+
 
 test("Desktop Agent Session keeps returning tool results until the model stops itself", async () => {
   const toolCenter = new MixedToolCenter();
@@ -170,6 +529,11 @@ test("Desktop Agent Session keeps returning tool results until the model stops i
     aiMode: "fake",
     createIntelligenceChannel: () => channel,
     createToolCenter: () => toolCenter,
+    capabilitySnapshot: desktopCapabilitySnapshot([
+      capabilityTool("list_dir", "read-only"),
+      capabilityTool("read_file", "read-only"),
+      capabilityTool("grep_files", "read-only"),
+    ]),
   });
 
   assert.equal(result.status, "completed");
@@ -177,6 +541,197 @@ test("Desktop Agent Session keeps returning tool results until the model stops i
   assert.equal(result.failureMessage, undefined);
   assert.equal(result.eventTypes.includes("tool.failed"), true);
   assert.equal(channel.requests.length, 5);
+});
+
+test("Desktop Agent Session pauses context_overflow when context maintenance fails before provider stop", async () => {
+  const toolCenter = new BulkyToolCenter();
+  const channel = new ContextOverflowChannel();
+  const result = await runDesktopAgentSession("持续读取大量材料直到可以回答", {
+    aiMode: "fake",
+    createIntelligenceChannel: () => channel,
+    createToolCenter: () => toolCenter,
+    capabilitySnapshot: desktopCapabilitySnapshot(
+      [capabilityTool("read_file", "read-only")],
+      {
+        modelCapabilities: {
+          contextWindowTokens: 1_200,
+          maxOutputTokens: 512,
+          supportsToolCalling: true,
+          supportsParallelToolCalls: false,
+          supportsStructuredOutputs: false,
+          supportsStreaming: true,
+          supportsVisionInput: false,
+          supportsReasoningEffort: false,
+          preferredApiStyle: "openai_compatible",
+          stability: "unknown",
+        },
+      }
+    ),
+  });
+
+  assert.equal(result.status, "paused");
+  assert.equal(result.stopReason, "context_overflow");
+  assert.equal(result.answer, undefined);
+  assert.equal(result.failureMessage?.includes("上下文压缩没有成功"), true);
+  assert.equal(result.eventTypes.includes("context.compaction.failed"), true);
+  assert.equal(channel.requests.some((request) => request.purpose === "desktop_context_compaction"), true);
+});
+
+test("Desktop Agent Session publishes context compaction events from the injected agent identity", async () => {
+  const result = await runDesktopAgentSession("持续读取大量材料直到需要压缩上下文", {
+    aiMode: "fake",
+    agentDefinition: customOrdinaryAgent(),
+    createIntelligenceChannel: () => new ContextOverflowChannel(),
+    createToolCenter: () => new BulkyToolCenter(),
+    capabilitySnapshot: desktopCapabilitySnapshot(
+      [capabilityTool("read_file", "read-only")],
+      {
+        modelCapabilities: {
+          contextWindowTokens: 1_200,
+          maxOutputTokens: 512,
+          supportsToolCalling: true,
+          supportsParallelToolCalls: false,
+          supportsStructuredOutputs: false,
+          supportsStreaming: true,
+          supportsVisionInput: false,
+          supportsReasoningEffort: false,
+          preferredApiStyle: "openai_compatible",
+          stability: "unknown",
+        },
+      }
+    ),
+  });
+
+  assert.equal(result.status, "paused");
+  const compactionEvent = result.runtime.eventLog.list().find((entry) => entry.type === "context.compaction.failed");
+  assert.equal(compactionEvent?.message.from.id, "custom-ordinary-agent");
+  assert.equal(compactionEvent?.message.from.role, "runtime");
+});
+
+test("Desktop Agent Session uses capability snapshot model capabilities for loop context maintenance", async () => {
+  const toolCenter = new BulkyToolCenter();
+  const channel = new ContextOverflowChannel();
+  const result = await runDesktopAgentSession("只用本轮快照里的小窗口模型能力维护上下文", {
+    aiMode: "fake",
+    createIntelligenceChannel: () => channel,
+    createToolCenter: () => toolCenter,
+    capabilitySnapshot: desktopCapabilitySnapshot(
+      [capabilityTool("read_file", "read-only")],
+      {
+        modelCapabilities: {
+          contextWindowTokens: 1_200,
+          maxOutputTokens: 512,
+          supportsToolCalling: true,
+          supportsParallelToolCalls: false,
+          supportsStructuredOutputs: false,
+          supportsStreaming: true,
+          supportsVisionInput: false,
+          supportsReasoningEffort: false,
+          preferredApiStyle: "openai_compatible",
+          stability: "unknown",
+        },
+      }
+    ),
+  });
+
+  assert.equal(result.status, "paused");
+  assert.equal(result.stopReason, "context_overflow");
+  assert.equal(channel.requests.some((request) => request.purpose === "desktop_context_compaction"), true);
+});
+
+test("Desktop Agent Session does not let direct model capabilities override a frozen snapshot", async () => {
+  let capturedRequest: ModelRequest | undefined;
+  const channel: IntelligenceChannel = {
+    async request(request) {
+      capturedRequest = request;
+      return textResponse(request, "我会使用本轮冻结的模型能力。");
+    },
+    validateResponse() {
+      return { status: "passed", checkedAt: new Date(0).toISOString(), issues: [] };
+    },
+  };
+
+  const result = await runDesktopAgentSession("检查模型能力事实来源", {
+    aiMode: "fake",
+    createIntelligenceChannel: () => channel,
+    capabilitySnapshot: desktopCapabilitySnapshot([], {
+      modelCapabilities: {
+        contextWindowTokens: 128_000,
+        maxOutputTokens: 16_000,
+        supportsToolCalling: true,
+        supportsParallelToolCalls: true,
+        supportsStructuredOutputs: true,
+        supportsStreaming: true,
+        supportsVisionInput: false,
+        supportsReasoningEffort: false,
+        preferredApiStyle: "openai_compatible",
+        stability: "stable",
+      },
+    }),
+    modelCapabilities: {
+      contextWindowTokens: 4_000,
+      maxOutputTokens: 512,
+      supportsToolCalling: true,
+      supportsParallelToolCalls: false,
+      supportsStructuredOutputs: false,
+      supportsStreaming: false,
+      supportsVisionInput: false,
+      supportsReasoningEffort: false,
+      preferredApiStyle: "chat_completions",
+      stability: "unknown",
+    },
+  });
+
+  assert.equal(result.status, "completed");
+  assert.equal(capturedRequest?.budget.maxOutputTokens, 16_000);
+});
+
+test("Desktop Agent Session does not let fake mode override snapshot tool-calling capability", async () => {
+  let capturedRequest: ModelRequest | undefined;
+  const toolCenter = new FixtureToolCenter();
+  let toolCenterCreated = false;
+  const channel: IntelligenceChannel = {
+    async request(request) {
+      capturedRequest = request;
+      return textResponse(request, "本轮模型能力不允许工具调用。");
+    },
+    validateResponse() {
+      return { status: "passed", checkedAt: new Date(0).toISOString(), issues: [] };
+    },
+  };
+
+  const result = await runDesktopAgentSession("即使是 fake 模式也不能覆盖快照能力", {
+    aiMode: "fake",
+    createIntelligenceChannel: () => channel,
+    createToolCenter: () => {
+      toolCenterCreated = true;
+      return toolCenter;
+    },
+    capabilitySnapshot: desktopCapabilitySnapshot(
+      [capabilityTool("search", "read-only")],
+      {
+        modelCapabilities: {
+          contextWindowTokens: 16_000,
+          maxOutputTokens: 4_000,
+          supportsToolCalling: false,
+          supportsParallelToolCalls: false,
+          supportsStructuredOutputs: false,
+          supportsStreaming: true,
+          supportsVisionInput: false,
+          supportsReasoningEffort: false,
+          preferredApiStyle: "openai_compatible",
+          stability: "unknown",
+        },
+      }
+    ),
+  });
+
+  assert.equal(result.status, "completed");
+  assert.deepEqual(capturedRequest?.tools?.map((tool) => tool.name), []);
+  assert.deepEqual(result.capabilityResolution?.allowedTools, []);
+  assert.equal(result.capabilityResolution?.toolExposures.find((tool) => tool.name === "search")?.reason, "当前模型不支持工具调用。");
+  assert.equal(toolCenter.getCallCount(), 0);
+  assert.equal(toolCenterCreated, false);
 });
 
 test("Desktop Agent Session stops cleanly when AI is disabled", async () => {
@@ -188,6 +743,30 @@ test("Desktop Agent Session stops cleanly when AI is disabled", async () => {
   assert.equal(result.toolCallRefs.length, 0);
   assert.deepEqual(result.eventTypes, ["goal.received"]);
   assert.equal(result.activity.some((item) => item.type === "stopped"), true);
+});
+
+test("Desktop Agent Session surfaces sanitized model request exceptions as failed runs", async () => {
+  const channel: IntelligenceChannel = {
+    async request() {
+      throw new Error("provider network unavailable api_key=sk-desktop-runtime-secret-123456");
+    },
+    validateResponse(_request, response) {
+      return response.validation;
+    },
+  };
+
+  const result = await runDesktopAgentSession("继续分析当前项目", {
+    aiMode: "fake",
+    createIntelligenceChannel: () => channel,
+  });
+
+  assert.equal(result.status, "failed");
+  assert.equal(result.answer, undefined);
+  assert.equal(result.failureMessage?.includes("provider network unavailable"), true);
+  assert.equal(result.failureMessage?.includes("sk-desktop-runtime-secret"), false);
+  assert.equal(result.failureMessage?.includes("[redacted-secret]"), true);
+  assert.notEqual(result.failureMessage, "Desktop Agent model/tool turn failed.");
+  assert.equal(result.modelCallRefs.length >= 2, true);
 });
 
 test("Desktop Agent Session explains missing file context without synthetic confirmation", async () => {
@@ -389,6 +968,25 @@ test("Desktop Agent Session drops provider control markup without synthetic conf
   assert.equal(result.eventTypes.includes("user_approval.requested"), false);
 });
 
+function customOrdinaryAgent(): AgentDefinition {
+  return {
+    ...DESKTOP_ROOT_AGENT,
+    agentId: "custom-ordinary-agent",
+    displayName: "Custom Ordinary Agent",
+    prompt: {
+      promptRef: "prompt:custom-ordinary-agent:v1",
+      version: "1",
+      systemPrompt: "Custom ordinary agent prompt.",
+    },
+    toolVisibilityProfile: {
+      profileId: "custom-ordinary-agent:read-tools:v1",
+      runMode: "agent",
+      visibleToolScopes: ["desktop-basic", "research"],
+      hiddenToolNames: ["read"],
+    },
+  };
+}
+
 function textResponse(
   request: ModelRequest,
   answer: string
@@ -407,6 +1005,38 @@ function textResponse(
     validation: { status: "passed" as const, checkedAt: new Date(0).toISOString(), issues: [] },
     completedAt: new Date(0).toISOString(),
   };
+}
+
+class UnauthorizedToolChannel implements IntelligenceChannel {
+  readonly requests: ModelRequest[] = [];
+
+  async request(request: ModelRequest) {
+    this.requests.push(request);
+    if (this.requests.length === 1) {
+      return {
+        responseId: "model-response-hidden-tool-call",
+        requestId: request.requestId,
+        providerId: "test-provider",
+        providerKind: "fake" as const,
+        protocolKind: "openai_compatible_chat_completions" as const,
+        model: "test-model",
+        status: "completed" as const,
+        outputKind: "explanation" as const,
+        toolCalls: [{ callId: "call-hidden-read", toolName: "read", input: { ref: "hidden" } }],
+        finishReason: "tool_call" as const,
+        validation: { status: "passed" as const, checkedAt: new Date(0).toISOString(), issues: [] },
+        completedAt: new Date(0).toISOString(),
+      };
+    }
+    return {
+      ...textResponse(request, "未授权工具没有执行，我会基于当前可见信息回答。"),
+      responseId: "model-response-after-hidden-tool-failure",
+    };
+  }
+
+  validateResponse() {
+    return { status: "passed" as const, checkedAt: new Date(0).toISOString(), issues: [] };
+  }
 }
 
 class MixedToolLimitChannel implements IntelligenceChannel {
@@ -473,6 +1103,83 @@ class MixedToolLimitChannel implements IntelligenceChannel {
   }
 }
 
+class ContextOverflowChannel implements IntelligenceChannel {
+  readonly requests: ModelRequest[] = [];
+
+  async request(request: ModelRequest) {
+    this.requests.push(request);
+    if (request.purpose === "desktop_context_compaction") {
+      return {
+        ...textResponse(request, ""),
+        responseId: `${request.requestId}-empty-compaction`,
+        textOutput: "",
+      };
+    }
+    return {
+      ...textResponse(request, ""),
+      responseId: `${request.requestId}-tool-call`,
+      textOutput: undefined,
+      toolCalls: [
+        {
+          callId: `call-bulky-read-${this.requests.length}`,
+          toolName: "read_file",
+          input: { path: `bulky-${this.requests.length}.md` },
+        },
+      ],
+      finishReason: "tool_call" as const,
+    };
+  }
+
+  validateResponse() {
+    return { status: "passed" as const, checkedAt: new Date(0).toISOString(), issues: [] };
+  }
+}
+
+class BulkyToolCenter implements ToolExecutionBroker {
+  list(): ToolDefinition[] {
+    return [
+      {
+        name: "read_file",
+        description: "Return a large safe file summary.",
+        inputSchema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
+      },
+    ];
+  }
+
+  has(name: string): boolean {
+    return name === "read_file";
+  }
+
+  async execute(
+    request: ToolCallRequest,
+    _context: ToolExecutionContext,
+    _permission: ToolPermissionCheck
+  ): Promise<ToolCallResult> {
+    const input = request.input as { path?: string };
+    return {
+      callId: request.callId,
+      toolName: request.toolName,
+      input: request.input,
+      output: {
+        action: "read_file",
+        status: "completed",
+        refId: `workspace:file:${input.path ?? "bulky.md"}`,
+        summary: `Large safe summary ${"context ".repeat(900)}`,
+        result: { path: input.path, bytes: 12_000 },
+        truncated: false,
+      },
+      status: "completed",
+      durationMs: 0,
+    };
+  }
+
+  resetCallCount(): void {}
+
+  getCallCount(): number {
+    return 0;
+  }
+}
+
 class MixedToolCenter implements ToolExecutionBroker {
   list(): ToolDefinition[] {
     return [
@@ -486,7 +1193,11 @@ class MixedToolCenter implements ToolExecutionBroker {
     return ["list_dir", "read_file", "grep_files"].includes(name);
   }
 
-  async execute(request: ToolCallRequest): Promise<ToolCallResult> {
+  async execute(
+    request: ToolCallRequest,
+    _context: ToolExecutionContext,
+    _permission: ToolPermissionCheck
+  ): Promise<ToolCallResult> {
     const input = request.input as { path?: string; query?: string };
     if (input.path === "memory://artifacts") {
       return {
@@ -572,7 +1283,11 @@ class LocalToolCenter implements ToolExecutionBroker {
     return name === "read_file";
   }
 
-  async execute(request: ToolCallRequest): Promise<ToolCallResult> {
+  async execute(
+    request: ToolCallRequest,
+    _context: ToolExecutionContext,
+    _permission: ToolPermissionCheck
+  ): Promise<ToolCallResult> {
     this.calls += 1;
     return {
       callId: request.callId,
@@ -649,7 +1364,11 @@ class ApprovalRequiredToolCenter implements ToolExecutionBroker {
     return name === "delete_file";
   }
 
-  async execute(request: ToolCallRequest): Promise<ToolCallResult> {
+  async execute(
+    request: ToolCallRequest,
+    _context: ToolExecutionContext,
+    _permission: ToolPermissionCheck
+  ): Promise<ToolCallResult> {
     return {
       callId: request.callId,
       toolName: request.toolName,
@@ -703,9 +1422,9 @@ class FixtureToolCenter implements ToolExecutionBroker {
   async execute(
     request: ToolCallRequest,
     _context: ToolExecutionContext,
-    permission?: ToolPermissionCheck
+    permission: ToolPermissionCheck
   ): Promise<ToolCallResult> {
-    if (permission?.allowedTools !== undefined && !permission.allowedTools.includes(request.toolName)) {
+    if (!permission.allowedTools.includes(request.toolName)) {
       return {
         callId: request.callId,
         toolName: request.toolName,
@@ -748,11 +1467,21 @@ class FixtureToolCenter implements ToolExecutionBroker {
   }
 }
 
+class SearchOnlyToolCenter extends FixtureToolCenter {
+  override list(): ToolDefinition[] {
+    return super.list().filter((tool) => tool.name === "search");
+  }
+
+  override has(name: string): boolean {
+    return name === "search";
+  }
+}
+
 class FailingToolCenter extends FixtureToolCenter {
   override async execute(
     request: ToolCallRequest,
     _context: ToolExecutionContext,
-    _permission?: ToolPermissionCheck
+    _permission: ToolPermissionCheck
   ): Promise<ToolCallResult> {
     return {
       callId: request.callId,
@@ -768,7 +1497,12 @@ class FailingToolCenter extends FixtureToolCenter {
   }
 }
 
-function desktopCapabilitySnapshot(tools: readonly CapabilityToolCatalogItem[]): BasicAgentCapabilitySnapshot {
+function desktopCapabilitySnapshot(
+  tools: readonly CapabilityToolCatalogItem[],
+  overrides: Partial<Pick<BasicAgentCapabilitySnapshot, "mcpCatalog" | "skillCatalog" | "modelCapabilities">> & {
+    readonly activeModel?: Partial<BasicAgentCapabilitySnapshot["activeModel"]>;
+  } = {}
+): BasicAgentCapabilitySnapshot {
   return {
     snapshotId: "desktop-session-snapshot",
     createdAt: "2026-05-13T00:00:00.000Z",
@@ -784,6 +1518,7 @@ function desktopCapabilitySnapshot(tools: readonly CapabilityToolCatalogItem[]):
       enabled: true,
       secretConfigured: false,
       updatedAt: "2026-05-13T00:00:00.000Z",
+      ...overrides.activeModel,
     },
     modelCapabilities: {
       contextWindowTokens: 128_000,
@@ -796,14 +1531,15 @@ function desktopCapabilitySnapshot(tools: readonly CapabilityToolCatalogItem[]):
       supportsReasoningEffort: false,
       preferredApiStyle: "openai_compatible",
       stability: "stable",
+      ...overrides.modelCapabilities,
     },
     toolCatalog: {
       scope: "desktop-basic",
       tools,
       allowedTools: tools.filter((tool) => tool.enabled && tool.availability === "available").map((tool) => tool.name),
     },
-    skillCatalog: [],
-    mcpCatalog: [],
+    skillCatalog: overrides.skillCatalog ?? [],
+    mcpCatalog: overrides.mcpCatalog ?? [],
     workspace: {
       workspaceDirectory: "Z:/AgentArbor",
       updatedAt: "2026-05-13T00:00:00.000Z",
@@ -846,7 +1582,16 @@ function capabilityTool(
       maxPreviewChars: 800,
       omitRawOutput: true,
     },
+    scopes: defaultCapabilityToolScopes(operationType),
     enabled: true,
     availability: "available",
   };
+}
+
+function defaultCapabilityToolScopes(
+  operationType: CapabilityToolCatalogItem["operationType"]
+): readonly CapabilityToolScope[] {
+  return operationType === "read-only"
+    ? ["desktop-basic", "research"]
+    : ["desktop-basic", "workspace"];
 }

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { promises as fs } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 import { readAppSource } from "./panel-structure-test-utils.js";
@@ -38,14 +39,38 @@ test("basic agent work session keeps projection modules split", async () => {
 });
 
 test("desktop agent session keeps projection and contracts split", async () => {
-  const [session, contracts, sharedContracts, projection, runtime, events, definition] = await Promise.all([
+  const [
+    session,
+    contracts,
+    sharedContracts,
+    projection,
+    runtime,
+    events,
+    registry,
+    definitionRuntime,
+    agentDefinitionContracts,
+    identityAsset,
+    definition,
+    promptAsset,
+    turnPolicyAsset,
+    outputContractAsset,
+    toolVisibilityAsset,
+  ] = await Promise.all([
     readAppSource("desktop-agent-session.ts"),
     readAppSource("desktop-agent-session-contracts.ts"),
     readAppSource("desktop-agent-contracts.ts"),
     readAppSource("desktop-agent-session-projection.ts"),
     readAppSource("desktop-agent-session-runtime.ts"),
     readAppSource("desktop-agent-session-events.ts"),
+    readAppSource("agent-definition-registry.ts"),
+    readAppSource("agent-definition-runtime.ts"),
+    readAppSource(path.join("agent-prompts", "contracts.ts")),
+    readAppSource(path.join("agent-prompts", "desktop-agent-identity.ts")),
     readAppSource(path.join("agent-prompts", "desktop-root-agent.ts")),
+    readAppSource(path.join("agent-prompts", "desktop-root-agent-prompt.ts")),
+    readAppSource(path.join("agent-prompts", "desktop-root-agent-turn-policy.ts")),
+    readAppSource(path.join("agent-prompts", "desktop-root-agent-output-contract.ts")),
+    readAppSource(path.join("agent-prompts", "desktop-root-agent-tool-visibility.ts")),
   ]);
 
   assert.equal(session.includes('from "./desktop-agent-session-contracts.js"'), true);
@@ -53,6 +78,17 @@ test("desktop agent session keeps projection and contracts split", async () => {
   assert.equal(session.includes('from "./desktop-agent-session-runtime.js"'), true);
   assert.equal(session.includes('from "./desktop-agent-session-events.js"'), true);
   assert.equal(session.includes('from "./agent-prompts/desktop-root-agent.js"'), true);
+  assert.equal(session.includes("const agentDefinition = options.agentDefinition ?? DESKTOP_ROOT_AGENT"), true);
+  assert.equal(session.includes("const aiMode = resolveDesktopAgentAiMode(options)"), true);
+  assert.equal(session.includes('options.aiMode ?? "openai-responses"'), false);
+  assert.equal(session.includes("const modelCapabilitiesForRun = modelCapabilitiesForDesktopRun(aiMode, options)"), true);
+  assert.equal(session.includes("modelCapabilitiesForRun?.supportsToolCalling !== false"), true);
+  assert.equal(session.includes("aiMode === \"fake\" || modelCapabilitiesForRun?.supportsToolCalling !== false"), false);
+  assert.equal(session.includes("options.capabilitySnapshot?.modelCapabilities ?? options.modelCapabilities"), true);
+  assert.equal(session.includes("options.modelCapabilities ?? options.capabilitySnapshot?.modelCapabilities"), false);
+  assert.equal(session.includes("options.capabilitySnapshot !== undefined ||"), true);
+  assert.equal(session.includes("agentId: agentDefinition.agentId"), true);
+  assert.equal(session.includes("agentDisplayName: agentDefinition.displayName"), true);
   assert.equal(session.includes("export async function runDesktopAgentSession"), true);
   assert.equal(session.includes("function desktopAgentResultFromTurn"), true);
   assert.equal(session.includes("function parseAnswer"), false);
@@ -69,6 +105,7 @@ test("desktop agent session keeps projection and contracts split", async () => {
   assert.equal(session.includes("function publishTriggeredSkills"), false);
   assert.equal(session.includes("function allowedToolsForDesktopAgent"), false);
   assert.equal(session.includes("function allowedToolsForRun"), false);
+  assert.equal(session.includes("function createDesktopAgentTurnPolicy"), false);
   assert.equal(session.includes("function constraintRefsFromTaskSoil"), false);
   assert.equal(session.includes("new AgentTurnRuntime"), false);
   assert.equal(contracts.includes("export type DesktopAgentSessionResult"), true);
@@ -85,26 +122,251 @@ test("desktop agent session keeps projection and contracts split", async () => {
   assert.equal(projection.includes("function toolActivityTitle"), true);
   assert.equal(runtime.includes('from "./desktop-agent-session-events.js"'), true);
   assert.equal(runtime.includes('from "./agent-prompts/desktop-root-agent.js"'), true);
-  assert.equal(runtime.includes('from "./agent-prompts/contracts.js"'), true);
+  assert.equal(runtime.includes('from "./agent-definition-runtime.js"'), true);
+  assert.equal(runtime.includes('from "./agent-prompts/contracts.js"'), false);
   assert.equal(runtime.includes("export function createIntelligenceChannelFromOptions"), true);
-  assert.equal(runtime.includes("export function createDesktopAgentOutputContract"), true);
+  assert.equal(runtime.includes("export function resolveDesktopAgentAiMode"), true);
+  assert.equal(runtime.includes('options.aiMode ?? options.capabilitySnapshot?.activeModel.defaultAiMode ?? "openai-responses"'), true);
+  assert.equal(runtime.includes("options.capabilitySnapshot?.activeModel.model ??"), true);
+  assert.equal(runtime.includes("export function createDesktopAgentOutputContract"), false);
+  assert.equal(runtime.includes("export function createDesktopAgentTurnPolicy"), true);
+  assert.equal(runtime.includes("createAgentTurnPolicyFromDefinition({"), true);
+  assert.equal(runtime.includes("resolveAgentRunCapabilities({"), true);
+  assert.equal(runtime.includes("input.agentDefinition ?? DESKTOP_ROOT_AGENT"), true);
+  assert.equal(runtime.includes("DESKTOP_ROOT_AGENT.turnPolicy.allowModel"), false);
+  assert.equal(runtime.includes("DESKTOP_ROOT_AGENT.outputContract"), false);
   assert.equal(runtime.includes("export function createDesktopAgentTurnRuntime"), true);
+  assert.equal(runtime.includes("readonly agentId: string"), true);
+  assert.equal(runtime.includes("readonly agentDisplayName: string"), true);
+  assert.equal(runtime.includes("agentId: input.agentId"), true);
+  assert.equal(runtime.includes("displayName: input.agentDisplayName"), true);
   assert.equal(runtime.includes("new AgentTurnRuntime"), true);
-  assert.equal(runtime.includes("export function allowedToolsForRun"), true);
+  assert.equal(runtime.includes("export function allowedToolsForRun"), false);
   assert.equal(runtime.includes("export function constraintRefsFromTaskSoil"), true);
+  assert.equal(registry.includes("export class AgentDefinitionRegistry"), true);
+  assert.equal(registry.includes("runAgentDefinitionRef(definition)"), true);
+  assert.equal(registry.includes("resolve(ref: RunAgentDefinitionRef): AgentDefinition | undefined"), true);
+  assert.equal(registry.includes("this.definitionsByRef.has(key)"), true);
+  assert.equal(registry.includes("Duplicate AgentDefinition run ref"), true);
+  assert.equal(registry.includes('from "./agent-prompts/desktop-root-agent.js"'), false);
+  assert.equal(definitionRuntime.includes('from "./agent-prompts/contracts.js"'), true);
+  assert.equal(definitionRuntime.includes('from "./agent-prompts/desktop-root-agent.js"'), false);
+  assert.equal(definitionRuntime.includes("export function createAgentTurnPolicyFromDefinition"), true);
+  assert.equal(definitionRuntime.includes("export function runAgentDefinitionRef"), true);
+  assert.equal(definitionRuntime.includes("export function resolveAgentRunCapabilities"), true);
+  assert.equal(definitionRuntime.includes("export function allowedToolsForAgentRun"), false);
+  assert.equal(definitionRuntime.includes("export function restrictRunCapabilityResolutionToExecutableTools"), true);
+  assert.equal(definitionRuntime.includes("maxModelRounds"), false);
+  assert.equal(definitionRuntime.includes("maxToolRounds"), false);
+  assert.equal(agentDefinitionContracts.includes("export type AgentSystemPromptSpec"), true);
+  assert.equal(agentDefinitionContracts.includes("export type AgentTurnPolicySpec"), true);
+  assert.equal(agentDefinitionContracts.includes("export type AgentToolVisibilityProfile"), true);
+  assert.equal(agentDefinitionContracts.includes("export type AgentDefinition"), true);
+  assert.equal(agentDefinitionContracts.includes("readonly defaultMaxOutputTokens: number;"), true);
+  assert.equal(agentDefinitionContracts.includes("readonly maxModelRounds"), false);
+  assert.equal(agentDefinitionContracts.includes("readonly maxToolRounds"), false);
+  assert.equal(agentDefinitionContracts.includes("readonly allowedTools"), false);
   assert.equal(events.includes('from "./desktop-agent-session-runtime.js"'), false);
-  assert.equal(events.includes('from "./agent-prompts/desktop-root-agent.js"'), true);
+  assert.equal(events.includes('from "./agent-prompts/desktop-agent-identity.js"'), false);
+  assert.equal(events.includes('from "./agent-prompts/desktop-root-agent.js"'), false);
+  assert.equal(events.includes("readonly agentId: string"), true);
+  assert.equal(events.includes('from: { id: input.agentId, role: "agent" }'), true);
+  assert.equal(events.includes('from: { id: input.agentId, role: "runtime" }'), true);
   assert.equal(events.includes("export function publishGoalReceived"), true);
   assert.equal(events.includes("export function publishConfirmationRequested"), true);
   assert.equal(events.includes("export function publishTriggeredSkills"), true);
   assert.equal(events.includes("export function publishContextCompactionCompleted"), true);
   assert.equal(events.includes("export function publishContextCompactionFailed"), true);
   assert.equal(definition.includes("export const DESKTOP_ROOT_AGENT: AgentDefinition ="), true);
-  assert.equal(definition.includes('export const DESKTOP_AGENT_ID = "desktop-agent-session"'), true);
+  assert.equal(definition.includes('from "./desktop-agent-identity.js"'), true);
+  assert.equal(definition.includes('from "./desktop-root-agent-prompt.js"'), true);
+  assert.equal(definition.includes('from "./desktop-root-agent-turn-policy.js"'), true);
+  assert.equal(definition.includes('from "./desktop-root-agent-output-contract.js"'), true);
+  assert.equal(definition.includes('from "./desktop-root-agent-tool-visibility.js"'), true);
+  assert.equal(identityAsset.includes('export const DESKTOP_AGENT_ID = "desktop-agent-session"'), true);
+  assert.equal(definition.includes('export const DESKTOP_AGENT_ID = "desktop-agent-session"'), false);
   assert.equal(definition.includes("agentId: DESKTOP_AGENT_ID"), true);
-  assert.equal(definition.includes("toolVisibilityProfile"), true);
-  assert.equal(definition.includes("outputContract"), true);
-  assert.equal(definition.includes("turnPolicy"), true);
+  assert.equal(definition.includes("toolVisibilityProfile: DESKTOP_ROOT_AGENT_TOOL_VISIBILITY"), true);
+  assert.equal(definition.includes("outputContract: DESKTOP_ROOT_AGENT_OUTPUT_CONTRACT"), true);
+  assert.equal(definition.includes("turnPolicy: DESKTOP_ROOT_AGENT_TURN_POLICY"), true);
+  assert.equal(definition.includes("You are AgentArbor Desktop Agent"), false);
+  assert.equal(definition.includes("desktop.agent_response.v1"), false);
+  assert.equal(definition.includes("visibleToolScopes"), false);
+  assert.equal(definition.includes("defaultMaxOutputTokens"), false);
+  assert.equal(promptAsset.includes("export const DESKTOP_ROOT_AGENT_PROMPT"), true);
+  assert.equal(promptAsset.includes("You are AgentArbor Desktop Agent"), true);
+  for (const internalProcessTerm of ["deep mode", "Underground", "Aboveground", "Plan", "Handoff", "rootlet", "organization flow"]) {
+    assert.equal(promptAsset.includes(internalProcessTerm), false);
+  }
+  assert.equal(turnPolicyAsset.includes("export const DESKTOP_ROOT_AGENT_TURN_POLICY"), true);
+  assert.equal(turnPolicyAsset.includes("DESKTOP_AGENT_DEFAULT_MAX_OUTPUT_TOKENS"), true);
+  assert.equal(turnPolicyAsset.includes('purpose: "desktop_agent"'), true);
+  assert.equal(turnPolicyAsset.includes("maxModelRounds"), false);
+  assert.equal(turnPolicyAsset.includes("maxToolRounds"), false);
+  assert.equal(outputContractAsset.includes("export const DESKTOP_ROOT_AGENT_OUTPUT_CONTRACT"), true);
+  assert.equal(outputContractAsset.includes('contractId: "desktop.agent_response.v1"'), true);
+  assert.equal(toolVisibilityAsset.includes("export const DESKTOP_ROOT_AGENT_TOOL_VISIBILITY"), true);
+  assert.equal(toolVisibilityAsset.includes('visibleToolScopes: ["desktop-basic", "workspace", "research"]'), true);
+  assert.equal(toolVisibilityAsset.includes('hiddenToolScopes: ["underground", "mcp"]'), true);
+});
+
+test("ordinary shared model runtime paths use neutral model runtime naming", async () => {
+  const directFactoryImport = "intelligence-channel" + "-factory.js";
+  const [
+    panelRunJobs,
+    panelRunTracking,
+    panelRunTrackingContracts,
+    taskSoilWorkspace,
+    modelProviderCommon,
+    modelProviderProfiles,
+    modelRuntimeFactoryTest,
+    modelRuntimeFactory,
+    modelRuntimeFacade,
+    undergroundAiRuntime,
+    configContracts,
+  ] = await Promise.all([
+    readAppSource("panel-run-jobs.ts"),
+    readAppSource("panel-run-tracking.ts"),
+    readAppSource("panel-run-tracking-contracts.ts"),
+    readAppSource("task-soil-workspace.ts"),
+    readAppSource(path.join("config-center", "model-provider-common.ts")),
+    readAppSource(path.join("config-center", "model-provider-profile-settings.ts")),
+    readAppSource("intelligence-channel-factory.test.ts"),
+    readAppSource("intelligence-channel-factory.ts"),
+    readAppSource(path.join("model-runtime", "index.ts")),
+    readAppSource("underground-ai-runtime.ts"),
+    fs.readFile(path.join(process.cwd(), "src", "domain", "config", "contracts.ts"), "utf8"),
+  ]);
+
+  for (const source of [
+    panelRunJobs,
+    panelRunTracking,
+    panelRunTrackingContracts,
+    taskSoilWorkspace,
+  ]) {
+    assert.equal(source.includes("UndergroundAiMode"), false);
+    assert.equal(source.includes("ModelRuntimeMode"), true);
+    assert.equal(source.includes("model-runtime/index.js"), true);
+    assert.equal(source.includes(directFactoryImport), false);
+  }
+  for (const source of [modelProviderCommon, modelProviderProfiles, configContracts]) {
+    assert.equal(source.includes("ConfiguredUndergroundAiMode"), false);
+    assert.equal(source.includes("ConfiguredModelRuntimeMode"), true);
+  }
+  assert.equal(modelRuntimeFactoryTest.includes('from "./model-runtime/index.js"'), true);
+  assert.equal(modelRuntimeFactoryTest.includes(directFactoryImport), false);
+  assert.equal(modelRuntimeFactoryTest.includes("createModelRuntimeConfig"), true);
+  assert.equal(modelRuntimeFactoryTest.includes("ModelRuntimeConfigurationError"), true);
+  assert.equal(modelRuntimeFactoryTest.includes("createUndergroundAiRuntimeConfig"), false);
+  assert.equal(modelRuntimeFactoryTest.includes("UndergroundAiConfigurationError"), false);
+  assert.equal(modelRuntimeFactory.includes(directFactoryImport), false);
+  assert.equal(modelRuntimeFactory.includes("underground-demo-summary.js"), false);
+  assert.equal(modelRuntimeFactory.includes("UndergroundDemoAiInput"), false);
+  assert.equal(modelRuntimeFactory.includes("ModelRuntimeSummaryInput"), true);
+  assert.equal(modelRuntimeFacade.includes(directFactoryImport), true);
+  assert.equal(modelRuntimeFacade.includes("ModelRuntimeSummaryInput"), true);
+  for (const source of [modelRuntimeFactory, modelRuntimeFacade]) {
+    assert.equal(source.includes("UndergroundAiMode"), false);
+    assert.equal(source.includes("UndergroundAiEnvironment"), false);
+    assert.equal(source.includes("UndergroundAiProviderFetch"), false);
+    assert.equal(source.includes("UndergroundAiRuntimeConfig"), false);
+    assert.equal(source.includes("UndergroundAiConfigurationIssueCode"), false);
+    assert.equal(source.includes("UndergroundAiConfigurationError"), false);
+    assert.equal(source.includes("createUndergroundAiRuntimeConfig"), false);
+    assert.equal(source.includes("createUndergroundAiDisabledConfigurationError"), false);
+  }
+  assert.equal(undergroundAiRuntime.includes("from \"./model-runtime/index.js\""), true);
+  assert.equal(undergroundAiRuntime.includes("createUndergroundAiRuntimeConfig"), true);
+  assert.equal(undergroundAiRuntime.includes("UndergroundAiMode"), true);
+
+  const directFactoryImportUsers = (await readAppTypeScriptSources())
+    .filter(({ source }) => source.includes(directFactoryImport))
+    .map(({ relativePath }) => relativePath)
+    .sort();
+  assert.deepEqual(directFactoryImportUsers, ["model-runtime/index.ts"]);
+});
+
+test("shared panel run orchestration uses neutral run mode naming", async () => {
+  const [runModePolicy, panelRunJobs, requestParsers, runModeRouting, runExecution, runJobResponse] = await Promise.all([
+    readAppSource("run-mode-policy.ts"),
+    readAppSource("panel-run-jobs.ts"),
+    readAppSource(path.join("panel-server", "request-parsers.ts")),
+    readAppSource(path.join("panel-server", "run-mode-routing.ts")),
+    readAppSource(path.join("panel-server", "run-execution.ts")),
+    readAppSource(path.join("panel-server", "run-job-response.ts")),
+  ]);
+
+  assert.equal(runModePolicy.includes('export type AgentArborRunMode = "agent" | "deep"'), true);
+  assert.equal(runModePolicy.includes('export type AgentArborRunKind = "desktop" | "underground"'), true);
+  assert.equal(runModePolicy.includes("export function resolveRunModeForKind"), true);
+  assert.equal(runModePolicy.includes("export function assertRunModeForKind"), true);
+  assert.equal(panelRunJobs.includes("export type PanelRunMode = AgentArborRunMode"), true);
+  assert.equal(panelRunJobs.includes("export type PanelRunKind = AgentArborRunKind"), true);
+  assert.equal(panelRunJobs.includes("resolveRunModeForKind(runKind, runMode)"), true);
+
+  for (const source of [panelRunJobs, requestParsers, runExecution, runJobResponse]) {
+    assert.equal(source.includes("PanelRunMode"), true);
+    assert.equal(source.includes("PanelDesktopRunMode"), false);
+    assert.equal(source.includes("parseOptionalDesktopRunMode"), false);
+  }
+  assert.equal(requestParsers.includes("function parseOptionalRunMode"), true);
+  assert.equal(requestParsers.includes("resolveEffectiveRunMode"), false);
+  assert.equal(runModeRouting.includes("export function resolvePanelRouteRunMode"), true);
+  assert.equal(runModeRouting.includes("resolveRunModeForKind(input.runKind, input.requestedRunMode)"), true);
+  assert.equal(runModeRouting.includes("PanelHttpError"), true);
+  assert.equal(runExecution.includes("assertRunModeForKind(runKind, runMode)"), true);
+  assert.equal(runExecution.includes("RunModePolicyError"), true);
+});
+
+test("shared run summary types use app-level contracts before panel aliases", async () => {
+  const [summaryContract, panelSummaryFacade, undergroundSummary] = await Promise.all([
+    readAppSource("run-summary.ts"),
+    readAppSource("panel-run-summary.ts"),
+    readAppSource("underground-demo-summary.ts"),
+  ]);
+  const basicAgentRunSummarySources = await Promise.all([
+    readAppSource(path.join("basic-agent-runtime", "contracts.ts")),
+    readAppSource(path.join("basic-agent-runtime", "run-job.ts")),
+  ]);
+  const panelRunSummarySources = await Promise.all([
+    readAppSource("panel-run-jobs.ts"),
+    readAppSource("panel-run-tracking-contracts.ts"),
+    readAppSource("panel-run-tracking.ts"),
+    readAppSource("panel-run-stream-events.ts"),
+    readAppSource("panel-run-stream-copy.ts"),
+    readAppSource("panel-run-transcript-contracts.ts"),
+    readAppSource("panel-transcript-model-calls.ts"),
+    readAppSource("panel-work-note-contracts.ts"),
+    readAppSource(path.join("panel-server", "run-execution-contracts.ts")),
+    readAppSource(path.join("panel-server", "run-execution.ts")),
+    readAppSource(path.join("panel-server", "run-job-response.ts")),
+  ]);
+
+  assert.equal(summaryContract.includes("underground-demo-summary.js"), false);
+  assert.equal(summaryContract.includes("export type RunSummary = {"), true);
+  assert.equal(summaryContract.includes("export type RunSummaryAiInput = ModelRuntimeSummaryInput"), true);
+  assert.equal(summaryContract.includes("export type RunSummaryPayload"), true);
+  assert.equal(panelSummaryFacade.includes("underground-demo-summary.js"), false);
+  assert.equal(panelSummaryFacade.includes('from "./run-summary.js"'), true);
+  assert.equal(panelSummaryFacade.includes("export type PanelRunSummary = RunSummary"), true);
+  assert.equal(panelSummaryFacade.includes("export type PanelRunSummaryPayload = RunSummaryPayload"), true);
+  assert.equal(undergroundSummary.includes('from "./run-summary.js"'), true);
+  assert.equal(undergroundSummary.includes("export type UndergroundDemoSummary = RunSummary"), true);
+  assert.equal(undergroundSummary.includes("export type UndergroundDemoAiInput = RunSummaryAiInput"), true);
+  for (const source of basicAgentRunSummarySources) {
+    assert.equal(source.includes("underground-demo-summary.js"), false);
+    assert.equal(source.includes("UndergroundDemoSummary"), false);
+    assert.equal(source.includes("PanelRunSummary"), false);
+    assert.equal(source.includes("panel-run-summary.js"), false);
+    assert.equal(source.includes("RunSummary"), true);
+    assert.equal(source.includes("run-summary.js"), true);
+  }
+  for (const source of panelRunSummarySources) {
+    assert.equal(source.includes("underground-demo-summary.js"), false);
+    assert.equal(source.includes("UndergroundDemoSummary"), false);
+    assert.equal(source.includes("PanelRunSummary"), true);
+    assert.equal(source.includes("panel-run-summary.js"), true);
+  }
 });
 
 test("panel canvas keeps ordinary desktop agent projection split", async () => {
@@ -142,10 +404,13 @@ test("panel canvas keeps ordinary desktop agent projection split", async () => {
 });
 
 test("panel run read model stays a compatibility facade", async () => {
-  const [readModel, transcript, steps] = await Promise.all([
+  const [readModel, transcript, transcriptContracts, streamEvents, steps, workNotes] = await Promise.all([
     readAppSource("panel-run-read-model.ts"),
     readAppSource("panel-run-transcript.ts"),
+    readAppSource("panel-run-transcript-contracts.ts"),
+    readAppSource("panel-run-stream-events.ts"),
     readAppSource("panel-run-steps.ts"),
+    readAppSource("panel-work-notes.ts"),
   ]);
 
   assert.equal(readModel.includes("export { createPanelRunTranscript }"), true);
@@ -155,7 +420,18 @@ test("panel run read model stays a compatibility facade", async () => {
   assert.equal(readModel.includes("createPanelWorkNotes("), false);
   assert.equal(transcript.includes("export function createPanelRunTranscript"), true);
   assert.equal(transcript.includes("createPanelWorkNotes("), true);
+  assert.equal(transcript.includes("agentDefinitionRef: input.agentDefinitionRef"), true);
+  assert.equal(transcriptContracts.includes("RunAgentDefinitionRef"), true);
+  assert.equal(transcriptContracts.includes("agentDefinitionRef?"), true);
+  assert.equal(streamEvents.includes("RunAgentDefinitionRef"), true);
+  assert.equal(streamEvents.includes('readonly agentDefinitionRef?: Pick<RunAgentDefinitionRef, "agentDisplayName">'), true);
+  assert.equal(streamEvents.includes("const agentLabel = agentSelfLabel(input.agentDefinitionRef)"), true);
+  assert.equal(streamEvents.includes("function agentSelfLabel"), true);
+  assert.equal(streamEvents.includes("agentLabel,"), true);
   assert.equal(steps.includes("export function deriveRunSteps"), true);
+  assert.equal(workNotes.includes('from "./agent-prompts/desktop-agent-identity.js"'), false);
+  assert.equal(workNotes.includes('from "./agent-prompts/desktop-root-agent.js"'), false);
+  assert.equal(workNotes.includes("input.agentDefinitionRef?.agentId"), true);
 });
 
 test("cognitive work session keeps helpers split by runtime concern", async () => {
@@ -225,3 +501,32 @@ test("cognitive work session keeps helpers split by runtime concern", async () =
   assert.equal(safe.includes("export function safeText"), true);
   assert.equal(safe.includes("export function unique"), true);
 });
+
+type AppTypeScriptSource = {
+  readonly relativePath: string;
+  readonly source: string;
+};
+
+async function readAppTypeScriptSources(relativeDir = ""): Promise<readonly AppTypeScriptSource[]> {
+  const dir = path.join(process.cwd(), "src", "app", relativeDir);
+  const entries = await fs.readdir(dir, { withFileTypes: true });
+  const nestedSources = await Promise.all(
+    entries.map(async (entry): Promise<readonly AppTypeScriptSource[]> => {
+      const childRelativePath = path.join(relativeDir, entry.name);
+      const childPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        return readAppTypeScriptSources(childRelativePath);
+      }
+      if (!entry.isFile() || !entry.name.endsWith(".ts")) {
+        return [];
+      }
+      return [
+        {
+          relativePath: childRelativePath.split(path.sep).join("/"),
+          source: await fs.readFile(childPath, "utf8"),
+        },
+      ];
+    })
+  );
+  return nestedSources.flat();
+}

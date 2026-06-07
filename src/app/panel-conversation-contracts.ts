@@ -1,8 +1,18 @@
 import type { RuntimeConversationRecord, RuntimeRunStatus } from "../domain/runtime-database/index.js";
+import type {
+  PanelBasicAgentRunDetailReadModel,
+  PanelBasicAgentRunViewReadModel,
+} from "./panel-basic-agent-run-view-contracts.js";
 import type { DesktopTaskSoilInput } from "./task-soil-workspace.js";
 
 export type PanelConversationTurnRole = "user" | "assistant";
-export type PanelConversationTurnStatus = "pending" | "running" | "completed" | "failed";
+export type PanelConversationTurnStatus =
+  | "pending"
+  | "running"
+  | "completed"
+  | "failed"
+  | "blocked"
+  | "needs_input";
 export type PanelConversationStatus = Extract<
   RuntimeRunStatus,
   "pending" | "running" | "approval_needed" | "needs_input" | "completed" | "failed" | "cancelled" | "blocked"
@@ -67,10 +77,15 @@ export type PanelConversationReadModel = {
   readonly requiresUserAction: boolean;
   readonly queuedRunIds: readonly string[];
   readonly queuedRunCount: number;
+  readonly currentRun?: PanelConversationCurrentRunReadModel;
   readonly turns: readonly PanelConversationTurnReadModel[];
 };
 
 export type PanelConversationSummaryReadModel = Omit<PanelConversationReadModel, "turns">;
+
+export type PanelConversationCurrentRunDetailReadModel = PanelBasicAgentRunDetailReadModel;
+
+export type PanelConversationCurrentRunReadModel = PanelBasicAgentRunViewReadModel;
 
 export type TrimRuntimeConversationResult = {
   readonly record: RuntimeConversationRecord;

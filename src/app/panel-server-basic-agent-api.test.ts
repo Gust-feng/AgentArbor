@@ -72,6 +72,95 @@ test("basic agent run endpoint returns the transport-neutral completed projectio
   }
 });
 
+test("basic agent run view endpoint returns the backend-owned run read model and incremental replay", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-basic-run-view-endpoint-"));
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+  try {
+    const start = await requestJson(server.url, "/api/desktop/runs", {
+      method: "POST",
+      body: { goal: "直接回答一个普通问题", aiMode: "fake" },
+    });
+    await waitForRun(server.url, start.body.runId, (body) => body.status === "completed", 4_000, "/api/desktop/runs");
+    const fullView = await requestJson(
+      server.url,
+      `/api/basic-agent/runs/${encodeURIComponent(start.body.runId)}/view?cursor=0`
+    );
+    const replayEvents = fullView.body.view.replay.events;
+    const incrementalCursor = replayEvents[0]?.sequence ?? 0;
+    const incrementalView = await requestJson(
+      server.url,
+      `/api/basic-agent/runs/${encodeURIComponent(start.body.runId)}/view?cursor=${incrementalCursor}`
+    );
+
+    assert.equal(fullView.status, 200);
+    assert.equal(fullView.body.view.run.runId, start.body.runId);
+    assert.equal(fullView.body.view.workSession.run.runId, start.body.runId);
+    assert.equal(fullView.body.view.detail.runId, start.body.runId);
+    assert.equal(replayEvents.length > 0, true);
+    assert.equal(replayEvents.some((event: { type: string }) => event.type === "final.result"), true);
+    assert.equal(
+      incrementalView.body.view.replay.events.every((event: { sequence: number }) => event.sequence > incrementalCursor),
+      true
+    );
+    assert.equal(
+      incrementalView.body.view.replay.cursor.lastSequence,
+      fullView.body.view.replay.cursor.lastSequence
+    );
+    assert.equal(JSON.stringify(fullView.body.view).includes("sanitizedMessages"), false);
+    assertSafePanelJsonText(`${fullView.text}\n${incrementalView.text}`);
+  } finally {
+    await server.close();
+    await removeTemporaryTree(directory);
+  }
+});
+
+test("basic agent run view endpoint restores the completed backend read model after restart", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-basic-restored-run-view-"));
+  let server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+  try {
+    const start = await requestJson(server.url, "/api/desktop/runs", {
+      method: "POST",
+      body: { goal: "直接回答一个普通问题", aiMode: "fake" },
+    });
+    await waitForRun(server.url, start.body.runId, (body) => body.status === "completed", 4_000, "/api/desktop/runs");
+    const persistedBeforeRestart = await requestJson(server.url, `/api/runtime/runs/${encodeURIComponent(start.body.runId)}`);
+    const persistedSummary = persistedBeforeRestart.body.snapshot.run.resultSummary;
+    assert.equal(persistedBeforeRestart.body.snapshot.run.status, "completed");
+    assert.equal(typeof persistedSummary, "string");
+    assert.equal(persistedSummary.trim().length > 0, true);
+
+    await server.close();
+    server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+    const restoredView = await requestJson(
+      server.url,
+      `/api/basic-agent/runs/${encodeURIComponent(start.body.runId)}/view?cursor=0`
+    );
+
+    assert.equal(restoredView.status, 200);
+    assert.equal(restoredView.body.view.run.runId, start.body.runId);
+    assert.equal(restoredView.body.view.run.status, "completed");
+    assert.equal(restoredView.body.view.workSession.run.runId, start.body.runId);
+    assert.equal(restoredView.body.view.workSession.stage, "completed");
+    assert.equal(restoredView.body.view.detail.runId, start.body.runId);
+    assert.equal(restoredView.body.view.detail.status, "completed");
+    assert.equal(restoredView.body.view.detail.restoredResult.summary, persistedSummary);
+    assert.equal(
+      restoredView.body.view.detail.transcript.transcriptNodes.some((node: { kind: string }) => node.kind === "answer"),
+      true
+    );
+    assert.equal(
+      restoredView.body.view.replay.events.some((event: { type: string }) => event.type === "final.result"),
+      true
+    );
+    assert.equal(JSON.stringify(restoredView.body.view).includes("sanitizedMessages"), false);
+    assert.equal(JSON.stringify(restoredView.body.view).includes("raw provider response"), false);
+    assertSafePanelJsonText(restoredView.text);
+  } finally {
+    await server.close();
+    await removeTemporaryTree(directory);
+  }
+});
+
 test("basic agent rejects stale confirmation decisions for runs without pending approval", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-basic-stale-confirmation-"));
   const server = await startLocalPanelServer({ port: 0, configDirectory: directory });

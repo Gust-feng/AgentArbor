@@ -1,9 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { BasicAgentCapabilitySnapshot, CapabilityToolCatalogItem } from "../domain/config/index.js";
+import type {
+  BasicAgentCapabilitySnapshot,
+  CapabilityToolCatalogItem,
+  CapabilityToolScope,
+} from "../domain/config/index.js";
 import { toolPresentationForName } from "../domain/tools/index.js";
 import { createTaskSoil } from "../domain/soil/index.js";
 import { DESKTOP_ROOT_AGENT } from "./agent-prompts/desktop-root-agent.js";
+import { restrictRunCapabilityResolutionToExecutableTools } from "./agent-definition-runtime.js";
 import { resolveRunCapabilities } from "./capability-policy.js";
 
 test("run capability policy hides disabled, unavailable, denied, and mode-internal tools", () => {
@@ -12,7 +17,8 @@ test("run capability policy hides disabled, unavailable, denied, and mode-intern
     tool("shell_command", "execute"),
     tool("browser_snapshot", "read-only", { availability: "unavailable" }),
     tool("write_file", "read-write", { enabled: false }),
-    tool("underground_probe", "read-only"),
+    tool("underground_probe", "read-only", { scopes: ["underground"] }),
+    tool("mcp_docs_search", "external-submit", { scopes: ["desktop-basic", "mcp"] }),
   ]);
   const taskSoil = createTaskSoil({
     rawGoal: "research safely",
@@ -27,13 +33,92 @@ test("run capability policy hides disabled, unavailable, denied, and mode-intern
     platform: "win32",
   });
 
+  assert.equal(resolution.agentId, DESKTOP_ROOT_AGENT.agentId);
+  assert.equal(resolution.agentDisplayName, DESKTOP_ROOT_AGENT.displayName);
+  assert.equal(resolution.toolVisibilityProfileId, DESKTOP_ROOT_AGENT.toolVisibilityProfile.profileId);
   assert.deepEqual(resolution.allowedTools, ["search"]);
   assert.equal(resolution.toolExposures.find((item) => item.name === "shell_command")?.modelVisible, false);
   assert.equal(resolution.toolExposures.find((item) => item.name === "shell_command")?.requiresConfirmation, true);
   assert.equal(resolution.toolExposures.find((item) => item.name === "browser_snapshot")?.reason, "工具运行时当前不可用。");
   assert.equal(resolution.toolExposures.find((item) => item.name === "write_file")?.reason, "工具已在配置中停用。");
   assert.equal(resolution.toolExposures.find((item) => item.name === "underground_probe")?.modelVisible, false);
+  assert.equal(resolution.toolExposures.find((item) => item.name === "mcp_docs_search")?.modelVisible, false);
   assert.match(resolution.warnings.join("\n"), /隐藏/);
+});
+
+test("run capability policy hides every tool when the model cannot call tools", () => {
+  const snapshot = capabilitySnapshot([
+    tool("search", "read-only"),
+  ]);
+
+  const resolution = resolveRunCapabilities({
+    snapshot,
+    goal: "answer without tools",
+    agentDefinition: DESKTOP_ROOT_AGENT,
+    modelSupportsToolCalling: false,
+  });
+
+  assert.deepEqual(resolution.allowedTools, []);
+  assert.equal(resolution.toolExposures[0]?.modelVisible, false);
+  assert.equal(resolution.toolExposures[0]?.reason, "当前模型不支持工具调用。");
+  assert.match(resolution.warnings.join("\n"), /本轮没有模型可见工具/);
+});
+
+test("run capability policy never expands beyond snapshot allowed tools", () => {
+  const baseSnapshot = capabilitySnapshot([
+    tool("search", "read-only"),
+    tool("read_file", "read-only"),
+  ]);
+  const snapshot = {
+    ...baseSnapshot,
+    toolCatalog: {
+      ...baseSnapshot.toolCatalog,
+      allowedTools: ["search"],
+    },
+  };
+
+  const resolution = resolveRunCapabilities({
+    snapshot,
+    goal: "read safely",
+    agentDefinition: DESKTOP_ROOT_AGENT,
+  });
+
+  assert.deepEqual(resolution.allowedTools, ["search"]);
+  assert.equal(resolution.toolExposures.find((item) => item.name === "read_file")?.modelVisible, false);
+  assert.equal(
+    resolution.toolExposures.find((item) => item.name === "read_file")?.reason,
+    "工具不在本轮能力快照允许集合内。"
+  );
+});
+
+test("executable restriction only counts tools that were model-visible before execution pruning", () => {
+  const resolution = resolveRunCapabilities({
+    snapshot: capabilitySnapshot([
+      tool("search", "read-only"),
+      tool("read_file", "read-only"),
+      tool("write_file", "read-write", { enabled: false }),
+      tool("underground_probe", "read-only", { scopes: ["underground"] }),
+    ]),
+    goal: "inspect executable boundary",
+    agentDefinition: DESKTOP_ROOT_AGENT,
+  });
+
+  const restricted = restrictRunCapabilityResolutionToExecutableTools(resolution, undefined);
+
+  assert.deepEqual(resolution.allowedTools, ["search", "read_file"]);
+  assert.deepEqual(restricted.allowedTools, []);
+  assert.equal(restricted.toolExposures.find((item) => item.name === "search")?.reason, "本轮没有可执行的工具运行器。");
+  assert.equal(restricted.toolExposures.find((item) => item.name === "read_file")?.reason, "本轮没有可执行的工具运行器。");
+  assert.equal(restricted.toolExposures.find((item) => item.name === "write_file")?.reason, "工具已在配置中停用。");
+  assert.equal(restricted.toolExposures.find((item) => item.name === "underground_probe")?.reason, "该工具不对当前运行模式可见。");
+  assert.equal(
+    restricted.warnings.some((warning) => warning === "本轮有 2 个策略可见工具没有对应的工具执行器。"),
+    true
+  );
+  assert.equal(
+    restricted.warnings.some((warning) => warning.includes("4 个策略可见工具")),
+    false
+  );
 });
 
 test("run capability policy keeps MCP as draft only and filters disabled skills", () => {
@@ -66,10 +151,12 @@ test("run capability policy keeps MCP as draft only and filters disabled skills"
   });
 
   assert.deepEqual(resolution.enabledSkills.map((skill) => skill.id), ["enabled-skill"]);
+  assert.equal("sourcePath" in (resolution.enabledSkills[0] as Record<string, unknown>), false);
   assert.equal(resolution.mcpDrafts.length, 1);
   assert.equal(resolution.mcpDrafts[0]?.source, "mcp");
   assert.match(resolution.mcpDrafts[0]?.reason ?? "", /不执行 MCP tool/);
   const projected = JSON.stringify(resolution);
+  assert.equal(projected.includes(DESKTOP_ROOT_AGENT.prompt.systemPrompt), false);
   assert.equal(projected.includes("sk-secret"), false);
   assert.equal(projected.includes("--token"), false);
 });
@@ -167,8 +254,17 @@ function tool(
       maxPreviewChars: 800,
       omitRawOutput: true,
     },
+    scopes: defaultScopesFor(operationType),
     enabled: true,
     availability: "available",
     ...overrides,
   };
+}
+
+function defaultScopesFor(
+  operationType: CapabilityToolCatalogItem["operationType"]
+): readonly CapabilityToolScope[] {
+  return operationType === "read-only"
+    ? ["desktop-basic", "research"]
+    : ["desktop-basic", "workspace"];
 }

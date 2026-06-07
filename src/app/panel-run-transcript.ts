@@ -1,4 +1,4 @@
-import type { AgentRunTree } from "../domain/underground/agent-fabric.js";
+import type { AgentRunTreeAttachment } from "./agent-run-tree-attachment.js";
 import { createSafeAgentRunTreeView, type SafeAgentRunTreeView } from "./panel-agent-run-tree-view.js";
 import { createPanelRunStreamEvents } from "./panel-run-stream-events.js";
 import { deriveRunSteps } from "./panel-run-steps.js";
@@ -12,7 +12,7 @@ import type {
 
 export function createPanelRunTranscript(input: CreatePanelRunTranscriptInput): PanelRunTranscript {
   const modelCalls = createPanelTranscriptModelCalls(input.eventEntries, input.summary);
-  const streamEvents = createPanelRunStreamEvents({
+  const streamEvents = input.streamEvents ?? createPanelRunStreamEvents({
     runId: input.runId,
     status: input.status,
     eventEntries: input.eventEntries,
@@ -21,16 +21,20 @@ export function createPanelRunTranscript(input: CreatePanelRunTranscriptInput): 
     routeDecision: input.routeDecision,
     desktopMode: input.desktopMode,
     reasoningEffort: input.reasoningEffort,
+    agentDefinitionRef: input.agentDefinitionRef,
     createdAt: input.createdAt,
     updatedAt: input.updatedAt,
+    error: input.error,
   });
-  const isDesktopChatOnly =
+  const isOrdinaryDesktopAgentOnly =
     input.summary === undefined &&
     input.observation === undefined &&
     input.agentRunTree === undefined &&
     modelCalls.length > 0 &&
     modelCalls.every((call) =>
       call.outputContractId === "desktop.agent_response.v1" ||
+      // Historical persisted runs used the desktop.chat contract/purpose for
+      // ordinary desktop agent output. Treat it as replay compatibility only.
       call.outputContractId === "desktop.chat_response.v1" ||
       call.outputContractId === "desktop.intent_gate.v1" ||
       call.purpose === "desktop_agent" ||
@@ -41,7 +45,8 @@ export function createPanelRunTranscript(input: CreatePanelRunTranscriptInput): 
     ...input,
     modelCalls,
     agentRunTree: agentRunTreeViewOrUndefined(input.agentRunTree),
-    desktopChatOnly: isDesktopChatOnly,
+    ordinaryDesktopAgentOnly: isOrdinaryDesktopAgentOnly,
+    agentDefinitionRef: input.agentDefinitionRef,
   });
   const steps = deriveRunSteps(streamEvents);
   return {
@@ -56,6 +61,6 @@ export function createPanelRunTranscript(input: CreatePanelRunTranscriptInput): 
   };
 }
 
-function agentRunTreeViewOrUndefined(tree: AgentRunTree | undefined): SafeAgentRunTreeView | undefined {
+function agentRunTreeViewOrUndefined(tree: AgentRunTreeAttachment | undefined): SafeAgentRunTreeView | undefined {
   return tree === undefined ? undefined : createSafeAgentRunTreeView(tree);
 }

@@ -17,29 +17,31 @@
 
 1. AgentArbor 为什么是桌面通用 Agent，而不是聊天框、IDE 替代品或一次性脚手架。
 2. Desktop Shell 如何接收任务、文件、项目和网页上下文，并形成 Task Soil。
-3. 当前 Desktop Basic Agent Runtime 如何完成直接回答、模型工具循环、确认、事件重放、会话持久化和 Skills 最小闭环。
-4. 当前桌面基础 Agent 如何优先打磨默认会话、模型工具循环、确认、安全投影、会话持久化和工作台结果展示。
-5. Underground / Plan / Aboveground 如何作为长期架构边界保留，并等待未来 deep 项目显式重启。
+3. 当前默认普通 Agent 如何完成直接回答、模型工具循环、确认、事件重放、会话持久化和 Skills 最小闭环。
+4. 当前普通 Agent 为什么不能把普通文件编辑、helper、adapter 或一次工具循环包装成 deep / Plan / Handoff 等过重概念。
+5. Underground / Plan / Aboveground 如何作为长期架构边界和未来 deep / Agent 集群能力保留，并等待显式深入项目重启。
 6. Plan / Plan Package 如何在长期架构中承接地下收束结果，并作为 Aboveground Execution Runtime 的可持久化输入。
 7. Observation Panel 和普通工作台如何展示安全投影，而不泄漏 raw prompt、raw provider response、raw tool output、stdout/stderr、文件正文或 hidden reasoning。
 8. Run Memory、Experience Candidate、Capability Asset 和 Path Bias 如何经过 Governance Pipeline 才能回流 Global Soil。
 9. Shared Agent Kernel、权限模型、工具边界和模型运行时如何共同防止工程边界替 agent 思考。
-10. 开发时必须遵守哪些工程规则。
-11. 哪些架构设计和研究资料可以作为后续设计输入。
+10. Agent 口径和命名如何避免实现层过度设计，同时保留长期 deep 架构。
+11. 开发时必须遵守哪些工程规则。
+12. 哪些架构设计和研究资料可以作为后续设计输入。
 
 ## 阅读顺序
 
 1. [开发指南](开发指南/README.md)
 2. [开发指南总览](开发指南/00-总览.md)
 3. [基础](开发指南/01-基础/README.md)
-4. [核心闭环](开发指南/02-核心闭环/README.md)
-5. [系统架构](开发指南/03-系统架构/README.md)
-6. [模型与契约](开发指南/04-模型与契约/README.md)
-7. [智能体生命周期](开发指南/05-智能体生命周期/README.md)
-8. [工程实现](开发指南/06-工程实现/README.md)
-9. [研究资料](研究资料/README.md)
-10. [架构设计](架构设计/README.md)
-11. [历史看板](任务看板/README.md)
+4. [Agent 口径与命名](开发指南/01-基础/05-Agent口径与命名.md)
+5. [核心闭环](开发指南/02-核心闭环/README.md)
+6. [系统架构](开发指南/03-系统架构/README.md)
+7. [模型与契约](开发指南/04-模型与契约/README.md)
+8. [智能体生命周期](开发指南/05-智能体生命周期/README.md)
+9. [工程实现](开发指南/06-工程实现/README.md)
+10. [研究资料](研究资料/README.md)
+11. [架构设计](架构设计/README.md)
+12. [历史看板](任务看板/README.md)
 
 ## 当前结构
 
@@ -82,7 +84,7 @@ docs/
 - `.opencode/` 保存 OpenCode 开发适配文件。
 - `.claude/` 保存 Claude Code 开发适配文件。
 - `.agentarbor/` 是未来 Plan Package 的默认存储目录名，只在 Plan 契约、读写规则、权限边界和真实出生依据稳定后增量创建；它不是产品概念树节点，不保存最终资产，也不替代 Global Soil。
-- `src/` 保存 AgentArbor TypeScript 实现代码；当前已有地下 AI-first cognitive runtime、Agent Fabric 和监督面板基础，下一阶段应围绕 Desktop Shell、Task Soil 和轻量 Aboveground 执行闭环推进。
+- `src/` 保存 AgentArbor TypeScript 实现代码；当前优先围绕默认普通 Desktop Agent、工作台体验、工具循环、确认、安全投影和持久化推进。已有 Underground / Agent Fabric 代码作为长期 deep 能力基础保留，但不能自动污染普通路径。
 
 `docs/开发指南/` 负责当前开发规则。
 

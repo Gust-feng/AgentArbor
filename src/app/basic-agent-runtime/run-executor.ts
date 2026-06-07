@@ -7,6 +7,7 @@ import type {
   BasicAgentRunJob,
   BasicAgentRunStreamEvent,
 } from "./run-job.js";
+import { resolveBasicAgentRunMode } from "./run-job.js";
 import type { ModelOutputDelta } from "../../domain/intelligence/index.js";
 import type {
   BasicAgentPendingToolContinuation,
@@ -19,6 +20,7 @@ import {
   BasicAgentConfirmationDecisionError,
   BasicAgentPendingContinuationStore,
 } from "./run-executor-continuations.js";
+import { resolveCompatibleRunFacts } from "../run-facts-policy.js";
 
 export type {
   BasicAgentExecutionAdapter,
@@ -39,26 +41,25 @@ export class BasicAgentRunExecutor {
   constructor(private readonly config: BasicAgentRunExecutorConfig) {}
 
   async start(input: BasicAgentRunStartInput): Promise<BasicAgentRun> {
+    const runMode = resolveBasicAgentRunMode(input.runKind, input.runMode);
+    const startInput: BasicAgentRunStartInput = { ...input, runMode };
     const startImmediately = input.startImmediately !== false;
-    const [modelConfig, informationAccess, capabilitySnapshot] = await Promise.all([
-      this.config.getModelProviderConfig(),
-      this.config.getInformationAccessConfig(),
-      this.config.getCapabilitySnapshot?.(),
-    ]);
+    const startFacts = await this.config.prepareRunStart(startInput);
     const job = this.config.runJobs.create({
-      runKind: input.runKind,
-      runMode: input.runMode,
-      goal: input.goal,
-      aiMode: input.aiMode,
-      conversationId: input.conversationId,
-      assistantTurnId: input.assistantTurnId,
-      runAfterRunId: input.runAfterRunId,
-      routeDecision: input.routeDecision,
-      taskSoilInput: input.taskSoilInput,
-      reasoningEffort: input.reasoningEffort,
-      config: modelConfig,
-      informationAccess,
-      capabilitySnapshot,
+      runKind: startInput.runKind,
+      runMode,
+      goal: startInput.goal,
+      aiMode: startFacts.aiMode,
+      conversationId: startInput.conversationId,
+      assistantTurnId: startInput.assistantTurnId,
+      runAfterRunId: startInput.runAfterRunId,
+      routeDecision: startInput.routeDecision,
+      taskSoilInput: startInput.taskSoilInput,
+      reasoningEffort: startInput.reasoningEffort,
+      agentDefinitionRef: startFacts.agentDefinitionRef,
+      config: startFacts.config,
+      informationAccess: startFacts.informationAccess,
+      capabilitySnapshot: startFacts.capabilitySnapshot,
     });
     this.syncRun(job);
     if (this.config.persistRunInBackground !== undefined) {
@@ -122,6 +123,8 @@ export class BasicAgentRunExecutor {
     this.config.runJobs.cancel(runId, {
       config: job.config,
       informationAccess: job.informationAccess,
+      capabilitySnapshot: job.capabilitySnapshot,
+      capabilityResolution: job.capabilityResolution,
       reason: {
         code: "run_cancelled",
         message: "运行已取消。",
@@ -210,31 +213,45 @@ export class BasicAgentRunExecutor {
         await this.cancel(runId);
         return;
       }
+      if (result.failed !== undefined) {
+        await this.failFromExecutionResult(runId, job, result);
+        return;
+      }
       if (result.blocked !== undefined) {
         await this.blockFromExecutionResult(runId, job, result);
         return;
       }
       if (result.pendingApproval !== undefined) {
+        const facts = executionResultRunFacts(job, result);
         this.config.runJobs.awaitApproval(runId, {
-          config: job.config,
-          informationAccess: job.informationAccess,
+          config: facts.config,
+          informationAccess: facts.informationAccess,
+          capabilitySnapshot: facts.capabilitySnapshot,
           summary: result.summary,
           observation: result.observation,
           agentRunTree: result.agentRunTree,
           canvas: result.canvas,
+          capabilityResolution: facts.capabilityResolution,
         });
         const waiting = this.requireJob(runId);
         this.syncRunEvents(waiting);
         await this.config.persistRun(waiting);
         return;
       }
+      if (result.completed !== true) {
+        await this.failFromExecutionResult(runId, job, missingTerminalExecutionResult(result));
+        return;
+      }
+      const facts = executionResultRunFacts(job, result);
       this.config.runJobs.complete(runId, {
-        config: job.config,
-        informationAccess: job.informationAccess,
+        config: facts.config,
+        informationAccess: facts.informationAccess,
+        capabilitySnapshot: facts.capabilitySnapshot,
         summary: result.summary,
         observation: result.observation,
         agentRunTree: result.agentRunTree,
         canvas: result.canvas,
+        capabilityResolution: facts.capabilityResolution,
       });
       const completed = this.requireJob(runId);
       this.syncRunEvents(completed);
@@ -287,6 +304,8 @@ export class BasicAgentRunExecutor {
       this.config.runJobs.block(input.runId, {
         config: input.job.config,
         informationAccess: input.job.informationAccess,
+        capabilitySnapshot: input.job.capabilitySnapshot,
+        capabilityResolution: input.job.capabilityResolution,
         reason: {
           code: blockedByMissingApproval ? "confirmation_continuation_lost" : "confirmation_decision_continuation_lost",
           message: blockedByMissingApproval
@@ -325,31 +344,45 @@ export class BasicAgentRunExecutor {
         await this.cancel(input.runId);
         return this.requireBasicRun(input.runId);
       }
+      if (result.failed !== undefined) {
+        await this.failFromExecutionResult(input.runId, input.job, result);
+        return this.requireBasicRun(input.runId);
+      }
       if (result.blocked !== undefined) {
         await this.blockFromExecutionResult(input.runId, input.job, result);
         return this.requireBasicRun(input.runId);
       }
       if (result.pendingApproval !== undefined) {
+        const facts = executionResultRunFacts(input.job, result);
         this.config.runJobs.awaitApproval(input.runId, {
-          config: input.job.config,
-          informationAccess: input.job.informationAccess,
+          config: facts.config,
+          informationAccess: facts.informationAccess,
+          capabilitySnapshot: facts.capabilitySnapshot,
           summary: result.summary,
           observation: result.observation,
           agentRunTree: result.agentRunTree,
           canvas: result.canvas,
+          capabilityResolution: facts.capabilityResolution,
         });
         const waiting = this.requireJob(input.runId);
         this.syncRunEvents(waiting);
         await this.config.persistRun(waiting);
         return this.requireBasicRun(input.runId);
       }
+      if (result.completed !== true) {
+        await this.failFromExecutionResult(input.runId, input.job, missingTerminalExecutionResult(result));
+        return this.requireBasicRun(input.runId);
+      }
+      const facts = executionResultRunFacts(input.job, result);
       this.config.runJobs.complete(input.runId, {
-        config: input.job.config,
-        informationAccess: input.job.informationAccess,
+        config: facts.config,
+        informationAccess: facts.informationAccess,
+        capabilitySnapshot: facts.capabilitySnapshot,
         summary: result.summary,
         observation: result.observation,
         agentRunTree: result.agentRunTree,
         canvas: result.canvas,
+        capabilityResolution: facts.capabilityResolution,
       });
       const completed = this.requireJob(input.runId);
       this.syncRunEvents(completed);
@@ -383,14 +416,17 @@ export class BasicAgentRunExecutor {
     if (result.blocked === undefined) {
       return;
     }
+    const facts = executionResultRunFacts(job, result);
     this.config.runJobs.block(runId, {
-      config: job.config,
-      informationAccess: job.informationAccess,
+      config: facts.config,
+      informationAccess: facts.informationAccess,
+      capabilitySnapshot: facts.capabilitySnapshot,
       reason: result.blocked,
       summary: result.summary,
       observation: result.observation,
       agentRunTree: result.agentRunTree,
       canvas: result.canvas,
+      capabilityResolution: facts.capabilityResolution,
     });
     const blocked = this.requireJob(runId);
     this.syncRunEvents(blocked);
@@ -398,4 +434,58 @@ export class BasicAgentRunExecutor {
     await this.config.persistRun(blocked);
   }
 
+  private async failFromExecutionResult(
+    runId: string,
+    job: BasicAgentRunJob,
+    result: BasicAgentRunExecutionResult
+  ): Promise<void> {
+    if (result.failed === undefined) {
+      return;
+    }
+    const facts = executionResultRunFacts(job, result);
+    this.config.runJobs.fail(runId, {
+      config: facts.config,
+      informationAccess: facts.informationAccess,
+      capabilitySnapshot: facts.capabilitySnapshot,
+      capabilityResolution: facts.capabilityResolution,
+      canvas: result.canvas,
+      error: result.failed,
+      summary: result.summary,
+    });
+    const failed = this.requireJob(runId);
+    this.syncRunEvents(failed);
+    await this.config.onRunFinished(failed);
+    await this.config.persistRun(failed);
+  }
+
+}
+
+type BasicAgentExecutionRunFacts = {
+  readonly config: BasicAgentRunJob["config"];
+  readonly informationAccess: BasicAgentRunJob["informationAccess"];
+  readonly capabilitySnapshot: BasicAgentRunJob["capabilitySnapshot"];
+  readonly capabilityResolution: BasicAgentRunJob["capabilityResolution"];
+};
+
+function executionResultRunFacts(
+  job: BasicAgentRunJob,
+  result: BasicAgentRunExecutionResult
+): BasicAgentExecutionRunFacts {
+  const facts = resolveCompatibleRunFacts(job, result);
+  return {
+    config: facts.config,
+    informationAccess: facts.informationAccess,
+    capabilitySnapshot: facts.capabilitySnapshot,
+    capabilityResolution: facts.capabilityResolution,
+  };
+}
+
+function missingTerminalExecutionResult(result: BasicAgentRunExecutionResult): BasicAgentRunExecutionResult {
+  return {
+    ...result,
+    failed: {
+      code: "execution_result_missing_terminal_state",
+      message: "执行适配器没有返回明确的完成、失败、阻塞或确认等待状态，运行不能按完成处理。",
+    },
+  };
 }

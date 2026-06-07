@@ -5,7 +5,7 @@ import { AgentTurnRuntime, type AgentTurnRuntimeResult } from "../kernel/intelli
 import {
   createUndergroundAiRuntimeConfig,
   type UndergroundAiMode,
-} from "./intelligence-channel-factory.js";
+} from "./underground-ai-runtime.js";
 import type { MinimalRuntime } from "./runtime.js";
 import type { RunCognitiveWorkSessionOptions } from "./cognitive-work-session-contracts.js";
 

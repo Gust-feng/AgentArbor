@@ -23,7 +23,7 @@ test("visible run problem gives out-of-fuel a recoverable paused message", () =>
     ),
     {
       title: "任务没有完成",
-      message: "这轮调用次数已到上限，任务没有完成。你可以继续发送消息让我接着处理。",
+      message: "任务没有完成。你可以继续发送消息让我接着处理。",
       tone: "warning",
     }
   );
@@ -43,6 +43,23 @@ test("visible run problem surfaces failed run details without inventing a report
       tone: "error",
     }
   );
+});
+
+test("visible run problem sanitizes failed run detail text", () => {
+  const problem = visibleRunProblem(
+    { status: "failed" },
+    { currentAction: "已经输出过的动作" },
+    { error: { code: "provider", message: "模型连接失败。\nraw provider response: sk-test-secret" } },
+    undefined
+  );
+
+  assert.deepEqual(problem, {
+    title: "运行失败",
+    message: "模型连接失败。",
+    tone: "error",
+  });
+  assert.equal(JSON.stringify(problem).includes("raw provider"), false);
+  assert.equal(JSON.stringify(problem).includes("sk-test-secret"), false);
 });
 
 test("visible result text follows the product answer priority", () => {

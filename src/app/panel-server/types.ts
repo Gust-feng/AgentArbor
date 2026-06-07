@@ -1,4 +1,5 @@
 import type { RuntimeDatabase } from "../../domain/runtime-database/index.js";
+import type { AgentDefinition } from "../agent-prompts/contracts.js";
 import type { ConfigCenter } from "../config-center.js";
 
 export type PanelServerOptions = {
@@ -11,6 +12,8 @@ export type PanelServerOptions = {
   readonly modelCatalogFetch?: PanelModelCatalogFetch;
   readonly workspaceDirectoryPicker?: () => Promise<string | undefined>;
   readonly skillRoots?: readonly string[];
+  readonly desktopAgentDefinition?: AgentDefinition;
+  readonly agentDefinitions?: readonly AgentDefinition[];
 };
 
 export type PanelProviderFetch = (

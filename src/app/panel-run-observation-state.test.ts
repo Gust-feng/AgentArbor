@@ -20,7 +20,7 @@ type TestNode = {
   readonly text?: string;
 };
 
-type TestWorkSession = {
+type TestWorkView = {
   readonly run: {
     readonly runId: string;
   };
@@ -34,7 +34,7 @@ type TestDetail = {
   };
 };
 
-type TestState = RunObservationState<TestRun, RunObservationEvent, TestWorkSession, TestDetail, TestNode>;
+type TestState = RunObservationState<TestRun, RunObservationEvent, TestWorkView, TestDetail, TestNode>;
 
 test("run observation state merges events by id and sequence", () => {
   const merged = mergeRunEvents(
@@ -58,14 +58,14 @@ test("append-only observation updates live text without touching run read model"
   assert.equal(next.events.length, 1);
   assert.equal(next.live?.runId, "run-1");
   assert.equal(next.live?.turns[0]?.output.text, "正在输出");
-  assert.equal(next.workSession, undefined);
+  assert.equal(next.workView, undefined);
   assert.deepEqual(next.transcriptNodes, []);
 });
 
 test("observed run projection updates run, events, live buffer, and transcript cache together", () => {
   const run = basicRun("run-1", "running");
   const transcriptNode = node("run-1", 4, "正在整理结果");
-  const workSession: TestWorkSession = {
+  const workView: TestWorkView = {
     run,
     transcriptNodes: [transcriptNode],
   };
@@ -74,13 +74,13 @@ test("observed run projection updates run, events, live buffer, and transcript c
     runId: "run-1",
     run,
     events: [event({ sequence: 4, type: "model.reasoning.delta", delta: "分析" })],
-    workSession,
+    workView,
   });
 
   assert.equal(next.run?.runId, "run-1");
   assert.equal(next.events[0]?.delta, "分析");
   assert.equal(next.live?.turns[0]?.reasoning.text, "分析");
-  assert.equal(next.workSession, workSession);
+  assert.equal(next.workView, workView);
   assert.deepEqual(next.transcriptNodes, [transcriptNode]);
   assert.deepEqual(next.transcriptNodesByRunId["run-1"], [transcriptNode]);
 });

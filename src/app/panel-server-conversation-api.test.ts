@@ -149,6 +149,10 @@ test("conversation API creates a conversation and attaches the desktop run to as
     assert.equal(conversation.body.conversation.turns.length, 2);
     assert.equal(conversation.body.conversation.turns[1].runId, runId);
     assert.equal(conversation.body.conversation.turns[1].content.includes("我可以直接回答问题"), true);
+    assert.equal(conversation.body.conversation.currentRun.run.runId, runId);
+    assert.equal(conversation.body.conversation.currentRun.workSession.run.runId, runId);
+    assert.equal(conversation.body.conversation.currentRun.detail.runId, runId);
+    assert.equal(conversation.body.conversation.currentRun.replay.events.some((event: { runId: string }) => event.runId === runId), true);
   } finally {
     await server.close();
     await removeTemporaryTree(directory);
@@ -402,7 +406,7 @@ test("conversation API sends follow-up history as role-separated model messages"
   }
 });
 
-test("conversation API exposes latest desktop run so completed result can be restored on reopen", async () => {
+test("conversation API rejects deep mode selection and keeps default agent boundary", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-conversation-latest-run-"));
   const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
   try {
@@ -410,28 +414,50 @@ test("conversation API exposes latest desktop run so completed result can be res
       method: "POST",
       body: { goal: "分析当前仓库的问题并给我优化建议", aiMode: "fake", runMode: "deep" },
     });
-    const conversationId = started.body.conversation.conversationId;
-    const runId = started.body.run.runId;
-    const completed = await waitForRun(server.url, runId, (body) => body.status === "completed", 4_000, "/api/desktop/runs");
+
+    const runs = await requestJson(server.url, "/api/runtime/runs");
+
+    assert.equal(started.status, 400);
+    assert.equal(started.body.ok, false);
+    assert.equal(started.body.error.code, "conversation_run_mode_not_supported");
+    assert.equal(runs.body.runs.length, 0);
+  } finally {
+    await server.close();
+    await removeTemporaryTree(directory);
+  }
+});
+
+test("conversation follow-up rejects deep mode and does not enqueue a run", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-conversation-follow-up-deep-"));
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+  try {
+    const first = await requestJson(server.url, "/api/conversations", {
+      method: "POST",
+      body: { goal: "先建立普通会话", aiMode: "fake" },
+    });
+    await waitForRun(server.url, first.body.run.runId, (body) => body.status === "completed", 4_000, "/api/desktop/runs");
+
+    const rejected = await requestJson(
+      server.url,
+      `/api/conversations/${encodeURIComponent(first.body.conversation.conversationId)}/messages`,
+      {
+        method: "POST",
+        body: { goal: "把后续消息升级为 deep", aiMode: "fake", runMode: "deep" },
+      }
+    );
+    const runs = await requestJson(server.url, "/api/runtime/runs");
     const conversation = await requestJson(
       server.url,
-      `/api/conversations/${encodeURIComponent(conversationId)}`
-    );
-    const latestRun = await requestJson(
-      server.url,
-      `/api/desktop/runs/${encodeURIComponent(conversation.body.conversation.latestRunId)}`
+      `/api/conversations/${encodeURIComponent(first.body.conversation.conversationId)}`
     );
 
-    assert.equal(conversation.status, 200);
-    assert.equal(conversation.body.conversation.latestRunId, runId);
-    assert.equal(conversation.body.conversation.activeRunId, undefined);
-    assert.equal(latestRun.status, 200);
-    assert.equal(latestRun.body.runId, runId);
-    assert.equal(latestRun.body.runMode, "deep");
-    assert.equal(latestRun.body.canvas.kind, "underground_deep_canvas");
-    assert.equal(typeof latestRun.body.canvas.underground.recommendedDirection.summary, "string");
-    assert.equal(latestRun.body.canvas.underground.recommendedDirection.summary.length > 0, true);
-    assert.equal(completed.body.canvas.kind, "underground_deep_canvas");
+    assert.equal(rejected.status, 400);
+    assert.equal(rejected.body.ok, false);
+    assert.equal(rejected.body.error.code, "conversation_run_mode_not_supported");
+    assert.equal(runs.body.runs.length, 1);
+    assert.equal(runs.body.runs[0].runId, first.body.run.runId);
+    assert.equal(conversation.body.conversation.turns.length, 2);
+    assert.equal(conversation.body.conversation.queuedRunCount, 0);
   } finally {
     await server.close();
     await removeTemporaryTree(directory);

@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  answerForWorkSessionTurn,
+  answerForWorkViewTurn,
   assistantMessageOutput,
   deliverableAsLinearText,
-  deliverableForWorkSessionTurn,
+  deliverableForWorkViewTurn,
   visibleDeliverable,
   type AssistantDeliverableLike,
 } from "./panel-assistant-message-output.js";
@@ -33,26 +33,26 @@ test("assistant message output falls back to linear deliverable text", () => {
   assert.equal(output.text.includes("### 小节 1"), true);
 });
 
-test("work session answer projection only claims the owning run", () => {
-  const workSession = {
+test("work view answer projection only claims the owning run", () => {
+  const workView = {
     run: { runId: "run-1" },
     answer: { content: "工作会话回答" },
     deliverable: deliverable("报告", "摘要", []),
   };
 
-  assert.equal(answerForWorkSessionTurn(workSession, "run-1", "回合内容"), "工作会话回答");
-  assert.equal(answerForWorkSessionTurn(workSession, "run-2", "回合内容"), "回合内容");
+  assert.equal(answerForWorkViewTurn(workView, "run-1", "回合内容"), "工作会话回答");
+  assert.equal(answerForWorkViewTurn(workView, "run-2", "回合内容"), "回合内容");
 });
 
-test("work session deliverable projection hides duplicate answer deliverables", () => {
-  const workSession = {
+test("work view deliverable projection hides duplicate answer deliverables", () => {
+  const workView = {
     run: { runId: "run-1" },
     deliverable: deliverable("报告", "同一答案", ["更多"]),
   };
 
-  assert.equal(deliverableForWorkSessionTurn(workSession, "run-1", "同一答案"), undefined);
-  assert.equal(deliverableForWorkSessionTurn(workSession, "run-2", "其他"), undefined);
-  assert.equal(visibleDeliverable(workSession.deliverable, "其他答案", "其他答案")?.title, "报告");
+  assert.equal(deliverableForWorkViewTurn(workView, "run-1", "同一答案"), undefined);
+  assert.equal(deliverableForWorkViewTurn(workView, "run-2", "其他"), undefined);
+  assert.equal(visibleDeliverable(workView.deliverable, "其他答案", "其他答案")?.title, "报告");
 });
 
 test("linear deliverable text keeps a bounded section preview", () => {

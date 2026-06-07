@@ -8,7 +8,7 @@ import type {
   UndergroundAiEnvironment,
   UndergroundAiMode,
   UndergroundAiProviderFetch,
-} from "./intelligence-channel-factory.js";
+} from "./underground-ai-runtime.js";
 import type { MinimalRuntime } from "./runtime.js";
 import type { DesktopTaskSoilInput } from "./task-soil-workspace.js";
 

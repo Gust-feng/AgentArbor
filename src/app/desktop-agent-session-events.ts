@@ -1,6 +1,5 @@
 import type { TaskSoil } from "../domain/soil/task-soil.js";
 import { createMessage } from "../kernel/messages/create-message.js";
-import { DESKTOP_ROOT_AGENT } from "./agent-prompts/desktop-root-agent.js";
 import type { DesktopAgentPendingConfirmation } from "./desktop-agent-session-contracts.js";
 import type { DesktopAgentSkillContext } from "./desktop-agent-prompts.js";
 import type { MinimalRuntime } from "./runtime.js";
@@ -32,6 +31,7 @@ export function publishGoalReceived(input: {
 
 export function publishConfirmationRequested(input: {
   readonly runtime: MinimalRuntime;
+  readonly agentId: string;
   readonly traceId: string;
   readonly goalId: string;
   readonly pendingConfirmation: DesktopAgentPendingConfirmation;
@@ -39,7 +39,7 @@ export function publishConfirmationRequested(input: {
   input.runtime.bus.publish(
     createMessage({
       traceId: input.traceId,
-      from: { id: DESKTOP_ROOT_AGENT.agentId, role: "agent" },
+      from: { id: input.agentId, role: "agent" },
       to: { group: "desktop-shell" },
       type: "user_approval.requested",
       intent: "request_user_confirmation",
@@ -58,16 +58,17 @@ export function publishConfirmationRequested(input: {
 
 export function publishTriggeredSkills(input: {
   readonly runtime: MinimalRuntime;
+  readonly agentId: string;
   readonly traceId: string;
   readonly goalId: string;
   readonly skills: readonly DesktopAgentSkillContext[];
 }): void {
   for (const context of input.skills) {
     input.runtime.bus.publish(
-        createMessage({
-          traceId: input.traceId,
-          from: { id: DESKTOP_ROOT_AGENT.agentId, role: "agent" },
-          to: { group: "desktop-shell" },
+      createMessage({
+        traceId: input.traceId,
+        from: { id: input.agentId, role: "agent" },
+        to: { group: "desktop-shell" },
         type: "skill.triggered",
         intent: "inject_desktop_agent_skill",
         payload: {
@@ -84,6 +85,7 @@ export function publishTriggeredSkills(input: {
 
 export function publishContextCompactionCompleted(input: {
   readonly runtime: MinimalRuntime;
+  readonly agentId: string;
   readonly traceId: string;
   readonly goalId: string;
   readonly summaryId: string;
@@ -95,10 +97,10 @@ export function publishContextCompactionCompleted(input: {
   readonly responseId?: string;
 }): void {
   input.runtime.bus.publish(
-      createMessage({
-        traceId: input.traceId,
-        from: { id: DESKTOP_ROOT_AGENT.agentId, role: "runtime" },
-        to: { group: "desktop-shell" },
+    createMessage({
+      traceId: input.traceId,
+      from: { id: input.agentId, role: "runtime" },
+      to: { group: "desktop-shell" },
       type: "context.compaction.completed",
       intent: "compact_desktop_agent_context",
       payload: {
@@ -118,6 +120,7 @@ export function publishContextCompactionCompleted(input: {
 
 export function publishContextCompactionFailed(input: {
   readonly runtime: MinimalRuntime;
+  readonly agentId: string;
   readonly traceId: string;
   readonly goalId: string;
   readonly tokenCount: number;
@@ -127,10 +130,10 @@ export function publishContextCompactionFailed(input: {
   readonly responseId?: string;
 }): void {
   input.runtime.bus.publish(
-      createMessage({
-        traceId: input.traceId,
-        from: { id: DESKTOP_ROOT_AGENT.agentId, role: "runtime" },
-        to: { group: "desktop-shell" },
+    createMessage({
+      traceId: input.traceId,
+      from: { id: input.agentId, role: "runtime" },
+      to: { group: "desktop-shell" },
       type: "context.compaction.failed",
       intent: "compact_desktop_agent_context_failed",
       payload: {

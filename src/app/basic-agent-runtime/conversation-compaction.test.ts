@@ -30,14 +30,19 @@ test("conversation compaction keeps facade, contracts, history, and loop paths s
   assert.equal(facade.includes("async function compactBasicAgentConversationIfNeeded"), false);
   assert.equal(facade.includes("async function compactBasicAgentLoopContextIfNeeded"), false);
   assert.equal(contracts.includes("export type BasicAgentConversationSummary"), true);
+  assert.equal(contracts.includes("export type BasicAgentCompactionAgentIdentity"), true);
   assert.equal(contracts.includes("export type CompactBasicAgentConversationInput"), true);
   assert.equal(contracts.includes("export type CompactBasicAgentLoopContextInput"), true);
+  assert.equal(contracts.includes("readonly agentIdentity?: BasicAgentCompactionAgentIdentity"), true);
   assert.equal(common.includes("export function conversationCompactionOutputContract"), true);
   assert.equal(common.includes("export function inputTokenBudgetFor"), true);
+  assert.equal(common.includes("export function compactionAgentDisplayName"), true);
   assert.equal(history.includes("export async function compactBasicAgentConversationIfNeeded"), true);
   assert.equal(history.includes("function compactionMessages"), true);
+  assert.equal(history.includes("compactionAgentDisplayName(input.agentIdentity)"), true);
   assert.equal(history.includes("function splitLoopMessagesForCompaction"), false);
   assert.equal(loop.includes("export async function compactBasicAgentLoopContextIfNeeded"), true);
+  assert.equal(loop.includes("compactionAgentDisplayName(input.agentIdentity)"), true);
   assert.equal(loop.includes("function splitLoopMessagesForCompaction"), true);
   assert.equal(loop.includes("function assembleCompactedLoopMessages"), true);
   assert.equal(loop.includes("function compactionMessages"), false);
@@ -49,6 +54,10 @@ test("conversation history compaction summarizes older turns and keeps recent tu
     goal: "continue without raw prompt: hidden",
     traceId: "trace-compaction",
     goalId: "goal-compaction",
+    agentIdentity: {
+      agentId: "custom-compact-agent",
+      displayName: "Custom Compact Agent",
+    },
     conversationHistory: [
       {
         role: "user",
@@ -83,6 +92,8 @@ test("conversation history compaction summarizes older turns and keeps recent tu
   const requestText = JSON.stringify(channel.requests[0]?.sanitizedMessages);
   assert.equal(requestText.includes("sk-old-secret"), false);
   assert.equal(requestText.includes("raw provider response: private"), false);
+  assert.equal(requestText.includes("Custom Compact Agent"), true);
+  assert.equal(requestText.includes("AgentArbor's ordinary desktop agent"), false);
   assert.equal(channel.requests[0]?.purpose, "desktop_context_compaction");
 });
 
@@ -92,6 +103,10 @@ test("loop context compaction replaces compactible messages with a continuation 
     goal: "current task",
     traceId: "trace-loop-compaction",
     goalId: "goal-loop-compaction",
+    agentIdentity: {
+      agentId: "custom-loop-agent",
+      displayName: "Custom Loop Agent",
+    },
     messages: [
       { role: "system", content: "system boundary", ref: "prompt:system" },
       { role: "user", content: `old user ${"u".repeat(700)} api_key=sk-loop-secret`, ref: "loop:old-user" },
@@ -134,6 +149,8 @@ test("loop context compaction replaces compactible messages with a continuation 
   const requestText = JSON.stringify(channel.requests[0]?.sanitizedMessages);
   assert.equal(requestText.includes("sk-loop-secret"), false);
   assert.equal(requestText.includes("raw tool output: private"), false);
+  assert.equal(requestText.includes("Custom Loop Agent"), true);
+  assert.equal(requestText.includes("AgentArbor's ordinary desktop agent"), false);
   assert.equal(channel.requests[0]?.toolChoice, "none");
 });
 

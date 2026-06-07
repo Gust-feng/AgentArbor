@@ -25,7 +25,7 @@ export async function runDeepDesktopForPanel(
   resources: DesktopRunResources,
   options: PanelRunExecutionOptions
 ): Promise<PanelRunExecutionResult> {
-  const createToolCenter = await createDesktopToolCenterFactory(runtime, resources);
+  const createToolCenter = createDesktopToolCenterFactory(runtime.providerFetch, resources);
   throwIfAborted(options.abortSignal);
   const result = await runUndergroundDirectionSessionWithIntelligence(goal, {
     createIntelligenceChannel: resources.aiConfig.createIntelligenceChannel,
@@ -50,6 +50,10 @@ export async function runDeepDesktopForPanel(
   });
 
   return {
+    completed: true,
+    config: resources.capabilitySnapshot.activeModel,
+    informationAccess: resources.informationAccess,
+    capabilitySnapshot: resources.capabilitySnapshot,
     summary,
     observation,
     eventEntries,
@@ -72,8 +76,12 @@ export async function runUndergroundForPanel(
     throw createModelRuntimeDisabledConfigurationError();
   }
 
-  const activeModel = await runtime.configCenter.getModelProviderConfig();
-  const aiEnvironment = await runtime.configCenter.createUndergroundAiEnvironment({ modelProvider: activeModel });
+  const activeModel = options.config ?? await runtime.configCenter.getModelProviderConfig();
+  const informationAccess = options.informationAccess ?? await runtime.configCenter.getInformationAccessConfig();
+  const aiEnvironment = await runtime.configCenter.createUndergroundAiEnvironment({
+    modelProvider: activeModel,
+    informationAccess,
+  });
   const runtimeMode = desktopRuntimeMode(aiMode, activeModel);
   const aiConfig =
     aiMode === "fake"
@@ -105,6 +113,9 @@ export async function runUndergroundForPanel(
   throwIfAborted(options.abortSignal);
   const summary = createUndergroundDemoSummary(result, undefined, aiConfig.summaryInput);
   return {
+    completed: true,
+    config: activeModel,
+    informationAccess,
     summary,
     observation: toPanelObservation(result.observationSnapshot),
     eventEntries: result.runtime.eventLog.list(),

@@ -3,7 +3,7 @@ import test from "node:test";
 import { createId } from "../../kernel/id.js";
 import { createMessage } from "../../kernel/messages/create-message.js";
 import { createMinimalRuntime } from "../runtime.js";
-import { createUndergroundAiRuntimeConfig } from "../intelligence-channel-factory.js";
+import { createUndergroundAiRuntimeConfig } from "../underground-ai-runtime.js";
 import { runUndergroundDirectionSessionWithIntelligence } from "../underground-direction-session.js";
 import { UndergroundAgentOrchestrator } from "./orchestrator.js";
 

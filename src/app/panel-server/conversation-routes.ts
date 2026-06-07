@@ -8,10 +8,17 @@ import type { PanelRunJob } from "../panel-run-jobs.js";
 import { isTerminalPanelRunStatus } from "./runtime-records.js";
 import { restorePersistedPanelConversation } from "./conversation-restore.js";
 import { PanelHttpError, readJsonBody, writeJson } from "./http-utils.js";
-import { asRecord, defaultAiModeForRunKind, numberOrUndefined, optionalString, parseRunInput } from "./request-parsers.js";
+import {
+  asRecord,
+  numberOrUndefined,
+  optionalString,
+  parseRunInput,
+} from "./request-parsers.js";
 import { persistPanelConversation } from "./run-persistence.js";
 import { createPanelRunJobResponse } from "./run-job-response.js";
+import { resolvePanelRouteRunMode } from "./run-mode-routing.js";
 import { syncConversationPreviewsForRunningJobs } from "./conversation-sync.js";
+import { createConversationCurrentRunReadModel } from "./conversation-current-run.js";
 import type { PanelRuntime } from "./runtime.js";
 
 export async function handlePanelConversationRoute(
@@ -95,12 +102,20 @@ export async function getPanelConversation(
   runtime: PanelRuntime,
   conversationId: string
 ): Promise<PanelConversationReadModel | undefined> {
-  const memory = runtime.conversations.getReadModel(conversationId);
-  if (memory !== undefined) {
-    return memory;
+  const conversation = runtime.conversations.get(conversationId);
+  if (conversation !== undefined) {
+    const currentRunId = conversation.currentRunId ?? conversation.latestRunId;
+    const currentRun = currentRunId === undefined
+      ? undefined
+      : await createConversationCurrentRunReadModel(runtime, currentRunId);
+    return runtime.conversations.getReadModelWithCurrentRun(conversationId, currentRun);
   }
   const persisted = await runtime.runtimeDatabase?.getConversation(conversationId);
-  return persisted === undefined ? undefined : restorePersistedPanelConversation(runtime, persisted);
+  if (persisted === undefined) {
+    return undefined;
+  }
+  await restorePersistedPanelConversation(runtime, persisted);
+  return getPanelConversation(runtime, conversationId);
 }
 
 async function handleConversationMessageRequest(
@@ -110,8 +125,13 @@ async function handleConversationMessageRequest(
   conversationId: string | undefined
 ): Promise<void> {
   const body = await readJsonBody(request);
-  const config = await runtime.configCenter.getModelProviderConfig();
-  const runInput = parseRunInput(body, defaultAiModeForRunKind("desktop", config.defaultAiMode));
+  const runInput = parseRunInput(body);
+  const runMode = resolvePanelRouteRunMode({
+    runKind: "desktop",
+    requestedRunMode: runInput.requestedRunMode,
+    mismatchCode: "conversation_run_mode_not_supported",
+    mismatchMessage: "对话入口当前只支持默认普通 agent 运行。请使用显式 deep 入口。",
+  });
   if (conversationId !== undefined) {
     await ensurePanelConversationLoaded(runtime, conversationId);
   }
@@ -133,7 +153,7 @@ async function handleConversationMessageRequest(
 
   const basicRun = await runtime.runExecutor.start({
     runKind: "desktop",
-    runMode: runInput.runMode,
+    runMode,
     goal: runInput.goal,
     aiMode: runInput.aiMode,
     conversationId: started.conversation.conversationId,
@@ -166,7 +186,7 @@ async function handleConversationMessageRequest(
   }
   writeJson(response, 202, {
     ok: true,
-    conversation: runtime.conversations.getReadModel(started.conversation.conversationId),
+    conversation: await getPanelConversation(runtime, started.conversation.conversationId),
     run: createPanelRunJobResponse(runtime, job),
   });
   if (!shouldQueue) {

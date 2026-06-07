@@ -2,6 +2,7 @@ import type React from "react";
 import { postJson } from "./api";
 import { taskSoilInputFromAttachments } from "./app-attachments";
 import { runReasoningSettings, type ComposerReasoningEffort, type VisibleAiMode } from "./app-config-projection";
+import { loadObservedRunReadModel } from "./app-observed-run-read-model";
 import {
   createRunReadModelPatch,
   loadConversationTranscriptNodesByRunId,
@@ -22,10 +23,7 @@ import {
 import { emptyLiveRun } from "../../panel-ui-live-run-buffer";
 import { mergeTranscriptNodesByRunId } from "../../panel-ui-transcript-cache";
 import {
-  safeBasicEvents,
-  safeBasicRun,
-  safeDesktopDetail,
-  safeWorkSession,
+  safeConversation,
 } from "./runtime";
 
 export type PanelTaskSubmissionOptions = {
@@ -78,11 +76,19 @@ export async function submitPanelTask(
     conversation: optimisticConversationForSubmit(previous.conversation, trimmed),
     error: undefined,
     run: likelyQueuesBehindActiveRun ? previous.run : undefined,
+    capabilityResolution:
+      likelyQueuesBehindActiveRun && previous.capabilityResolutionRunId === previous.run?.runId
+        ? previous.capabilityResolution
+        : undefined,
+    capabilityResolutionRunId:
+      likelyQueuesBehindActiveRun && previous.capabilityResolutionRunId === previous.run?.runId
+        ? previous.capabilityResolutionRunId
+        : undefined,
     events: likelyQueuesBehindActiveRun ? previous.events : [],
     transcriptNodes: likelyQueuesBehindActiveRun ? previous.transcriptNodes : [],
     live: likelyQueuesBehindActiveRun ? previous.live : undefined,
     detail: likelyQueuesBehindActiveRun ? previous.detail : undefined,
-    workSession: likelyQueuesBehindActiveRun ? previous.workSession : undefined,
+    workView: likelyQueuesBehindActiveRun ? previous.workView : undefined,
   }));
   try {
     const path =
@@ -94,7 +100,6 @@ export async function submitPanelTask(
       readonly run: StartedConversationRun;
     }>(path, {
       goal: trimmed,
-      runMode: "agent",
       aiMode: options.aiMode,
       taskSoilInput: taskSoilInputFromAttachments(options.attachments),
       ...runReasoningSettings(options.composerReasoningEffort, options.selectedModelSupportsReasoningEffort),
@@ -124,6 +129,14 @@ export async function submitPanelTask(
       busy: true,
       conversation: response.conversation,
       run: immediateRun ?? previous.run,
+      capabilityResolution:
+        immediateRun?.runId === previous.run?.runId
+          ? previous.capabilityResolution
+          : undefined,
+      capabilityResolutionRunId:
+        immediateRun?.runId === previous.run?.runId
+          ? previous.capabilityResolutionRunId
+          : undefined,
       events: immediateRun?.runId === previous.run?.runId ? previous.events : [],
       live: immediateLiveRunId === undefined
         ? previous.live
@@ -135,34 +148,52 @@ export async function submitPanelTask(
     if (shouldSwitchLiveStream) {
       options.startLiveUpdates(immediateLiveRunId, 0);
     }
-    const run = await safeBasicRun(response.run.runId);
-    const observedRunId = runIdToObserveAfterStart({
-      conversation: response.conversation,
+    const refreshedConversation = response.conversation.conversationId === undefined
+      ? undefined
+      : await safeConversation(response.conversation.conversationId);
+    const effectiveConversation = refreshedConversation ?? response.conversation;
+    const observedRunId = effectiveConversation.currentRun?.run.runId ?? runIdToObserveAfterStart({
+      conversation: effectiveConversation,
       responseRunId: response.run.runId,
       responseStatus: response.run.status,
-      fetchedStatus: run?.status,
+      fetchedStatus: undefined,
       previousObservedRunId,
     });
-    const observedRun = observedRunId === response.run.runId
-      ? run
-      : observedRunId === undefined
+    const observed = observedRunId === undefined
+      ? undefined
+      : await loadObservedRunReadModel({
+          runId: observedRunId,
+          conversationId: effectiveConversation.conversationId,
+          preferredConversation: effectiveConversation,
+        });
+    const observedRun = observed?.run ??
+      (observedRunId === undefined
         ? undefined
-        : await safeBasicRun(observedRunId);
-    const [workSession, detail, replay] = observedRunId === undefined
-      ? [undefined, undefined, undefined] as const
-      : await Promise.all([
-          safeWorkSession(observedRunId),
-          safeDesktopDetail(observedRunId),
-          safeBasicEvents(observedRunId, 0),
-        ]);
-    const historicalTranscriptNodesByRunId = await loadConversationTranscriptNodesByRunId(response.conversation, observedRunId);
+        : observedRunId === response.run.runId
+          ? immediateRun
+          : options.app.run?.runId === observedRunId
+            ? options.app.run
+            : undefined);
+    const workView = observed?.workView;
+    const detail = observed?.detail;
+    const replay = observed?.replay;
+    const historicalTranscriptNodesByRunId = await loadConversationTranscriptNodesByRunId(effectiveConversation, observedRunId);
     if (!options.mountedRef.current || options.viewEpochRef.current !== epoch) return;
     options.activeRunIdRef.current = observedRunId;
     options.setApp((previous) => ({
       ...previous,
       busy: false,
-      conversation: response.conversation,
+      conversation: observed?.conversation ?? effectiveConversation,
       run: observedRun ?? previous.run,
+      capabilityResolution: observed?.capabilityResolution ?? (
+        observedRun?.runId === previous.capabilityResolutionRunId ? previous.capabilityResolution : undefined
+      ),
+      capabilityResolutionRunId:
+        observed?.capabilityResolution !== undefined
+          ? observedRunId
+          : observedRun?.runId === previous.capabilityResolutionRunId
+            ? previous.capabilityResolutionRunId
+            : undefined,
       events: mergeObservedRunEvents({
         previousRunId: previous.run?.runId,
         observedRunId,
@@ -177,13 +208,13 @@ export async function submitPanelTask(
       }),
       ...createRunReadModelPatch(previous, {
         runId: observedRunId ?? response.run.runId,
-        workSession,
+        workView,
         detail,
       }),
       transcriptNodesByRunId: mergeTranscriptNodesByRunId(
         historicalTranscriptNodesByRunId,
         observedRunId,
-        transcriptNodesFrom(workSession, detail)
+        transcriptNodesFrom(workView, detail)
       ),
     }));
     if (
@@ -210,7 +241,9 @@ export async function submitPanelTask(
       transcriptNodesByRunId: appBeforeSubmit.transcriptNodesByRunId,
       live: appBeforeSubmit.live,
       detail: appBeforeSubmit.detail,
-      workSession: appBeforeSubmit.workSession,
+      workView: appBeforeSubmit.workView,
+      capabilityResolution: appBeforeSubmit.capabilityResolution,
+      capabilityResolutionRunId: appBeforeSubmit.capabilityResolutionRunId,
       error: `系统错误：${error instanceof Error ? error.message : "任务启动失败。"}`,
     }));
   }

@@ -69,7 +69,7 @@ export function activityItemsForNodes(nodes: readonly ProjectableTranscriptNode[
   return items;
 }
 
-export function workflowItemsForNodes(nodes: readonly ProjectableTranscriptNode[]): readonly ActivityItem[] {
+export function displayActivityItemsForNodes(nodes: readonly ProjectableTranscriptNode[]): readonly ActivityItem[] {
   const items: ActivityItem[] = [];
   const requestedToolItemIndexByCall = new Map<string, number>();
   for (const node of nodes) {

@@ -1,7 +1,7 @@
 import type { ModelReasoningOutputProjection, ModelVisibleOutputProjection } from "../domain/intelligence/index.js";
 import type { RootletClusterKind } from "../domain/underground/index.js";
 import type { EventLogEntry } from "../kernel/events/in-memory-event-log.js";
-import type { UndergroundDemoSummary } from "./underground-demo-summary.js";
+import type { PanelRunSummary } from "./panel-run-summary.js";
 
 export type PanelTranscriptModelCall = {
   readonly requestId: string;
@@ -26,7 +26,7 @@ export type PanelTranscriptModelCall = {
 
 export function createPanelTranscriptModelCalls(
   eventEntries: readonly EventLogEntry[],
-  summary: UndergroundDemoSummary | undefined
+  summary: PanelRunSummary | undefined
 ): readonly PanelTranscriptModelCall[] {
   const calls = new Map<string, PanelTranscriptModelCall>();
   const summaryCalls = new Map(summary?.ai.modelCallRefs.map((call) => [call.requestId, call]) ?? []);

@@ -441,7 +441,7 @@ function modelProviderMarketPayload(): {
 }
 
 async function createPanelToolCatalog(runtime: PanelConfigRouteRuntime): Promise<ToolCatalogSnapshot> {
-  const env = await runtime.configCenter.createUndergroundAiEnvironment();
+  const env = await runtime.configCenter.createModelRuntimeEnvironment();
   const workspaceRoot = (await runtime.configCenter.getWorkspaceConfig().catch(() => undefined))?.workspaceDirectory;
   const toolStates = await runtime.configCenter.listToolStates();
   return createDesktopBasicToolRegistry({

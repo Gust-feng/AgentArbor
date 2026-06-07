@@ -7,6 +7,7 @@ import type { DesktopAgentConversationMessage, DesktopAgentSkillContext } from "
 import type { BasicAgentContextItem } from "./contracts.js";
 import type { BasicAgentConversationSummary } from "./conversation-compaction.js";
 import {
+  type BasicAgentContextAgentDefinition,
   buildContextLedgerDraftItems,
   toolEvidenceItems,
 } from "./context-ledger-items.js";
@@ -38,6 +39,7 @@ export type BasicAgentContextLedger = {
 };
 
 export type CreateBasicAgentContextLedgerInput = {
+  readonly agentDefinition: BasicAgentContextAgentDefinition;
   readonly runId: string;
   readonly goal: string;
   readonly taskSoil: TaskSoil;

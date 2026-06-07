@@ -6,6 +6,7 @@ import {
   mergeObservedRunEvents,
   optimisticConversationForSubmit,
   runIdToObserveAfterStart,
+  type StartedConversationRun,
   type SubmitFlowBasicRun,
   type SubmitFlowConversation,
 } from "./panel-ui-submit-flow.js";
@@ -85,7 +86,7 @@ test("submit flow creates an immediate run shell for a new active run", () => {
   assert.equal(immediate?.eventCursor.lastSequence, 3);
 });
 
-test("submit flow treats a just-created active pending run as running", () => {
+test("submit flow keeps a just-created active pending run queued until backend advances it", () => {
   const immediate = immediateRunForStartedConversation({
     previousRun: undefined,
     responseRun: {
@@ -99,7 +100,25 @@ test("submit flow treats a just-created active pending run as running", () => {
   });
 
   assert.equal(immediate?.runId, "run-new");
-  assert.equal(immediate?.status, "running");
+  assert.equal(immediate?.status, "queued");
+});
+
+test("submit flow never propagates deep run mode into the ordinary conversation shell", () => {
+  const unexpectedDeepResponse = {
+    runId: "run-new",
+    status: "running",
+    runMode: "deep",
+  } as unknown as StartedConversationRun;
+
+  const immediate = immediateRunForStartedConversation({
+    previousRun: undefined,
+    responseRun: unexpectedDeepResponse,
+    observedRunId: "run-new",
+    goal: "写一段说明",
+    now: "2026-06-03T00:00:00.000Z",
+  });
+
+  assert.equal(immediate?.runMode, "agent");
 });
 
 test("submit flow appends optimistic user turn without fabricating assistant content", () => {

@@ -1,10 +1,10 @@
-import type { AgentRunTree, RootletClusterKind } from "../domain/underground/index.js";
+import type { AgentRunTreeAttachment, AgentRunTreeAttachmentRootletKind } from "./agent-run-tree-attachment.js";
 
 export type SafeAgentRunTreeView = {
   readonly treeId: string;
   readonly rootRunId: string;
   readonly rootAgentId: string;
-  readonly status: AgentRunTree["status"];
+  readonly status: AgentRunTreeAttachment["status"];
   readonly rootSpec: {
     readonly specId: string;
     readonly agentId: string;
@@ -31,7 +31,7 @@ export type SafeAgentRunTreeView = {
     readonly displayName: string;
     readonly agentKind: string;
     readonly role: string;
-    readonly rootletKind?: RootletClusterKind;
+    readonly rootletKind?: AgentRunTreeAttachmentRootletKind;
     readonly promptRef: string;
     readonly outputContractRef: string;
     readonly allowModel: boolean;
@@ -82,7 +82,7 @@ export type SafeAgentRunTreeView = {
   }[];
 };
 
-export function createSafeAgentRunTreeView(tree: AgentRunTree): SafeAgentRunTreeView {
+export function createSafeAgentRunTreeView(tree: AgentRunTreeAttachment): SafeAgentRunTreeView {
   return {
     treeId: tree.treeId,
     rootRunId: tree.rootRunId,

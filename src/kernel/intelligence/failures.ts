@@ -8,6 +8,7 @@ import type {
   ModelResponse,
 } from "../../domain/intelligence/index.js";
 import { createId, nowIso } from "../id.js";
+import { redactSensitiveText } from "../redaction.js";
 import { failedModelOutputValidation } from "./validation.js";
 
 export function createFailedModelResponse(input: {
@@ -50,4 +51,72 @@ export function createFailedModelResponse(input: {
     failure,
     completedAt: nowIso(),
   };
+}
+
+export function createFailedModelResponseFromError(input: {
+  requestId: string;
+  providerId: string;
+  providerKind: ModelProviderKind;
+  protocolKind: ModelProtocolKind;
+  model: string;
+  outputKind: ModelOutputKind;
+  error: unknown;
+  fallbackMessage?: string;
+  responseId?: string;
+}): ModelResponse {
+  const failureKind = modelFailureKindFromError(input.error);
+  return createFailedModelResponse({
+    requestId: input.requestId,
+    providerId: input.providerId,
+    providerKind: input.providerKind,
+    protocolKind: input.protocolKind,
+    model: input.model,
+    outputKind: input.outputKind,
+    failureKind,
+    retryable: isRetryableModelFailure(failureKind),
+    message: safeModelErrorMessage(input.error, input.fallbackMessage),
+    responseId: input.responseId,
+  });
+}
+
+export function modelFailureKindFromError(error: unknown): ModelFailureKind {
+  const message = rawModelErrorMessage(error).toLowerCase();
+  if (/\b(timeout|timed out|etimedout)\b/.test(message)) {
+    return "provider_timeout";
+  }
+  if (/\b(network|fetch failed|econnreset|econnrefused|enotfound|eai_again|socket|dns)\b/.test(message)) {
+    return "provider_network";
+  }
+  if (/\b(unauthorized|forbidden|auth|401|403)\b/.test(message)) {
+    return "provider_auth";
+  }
+  if (/\b(rate limit|rate_limit|too many requests|429)\b/.test(message)) {
+    return "provider_rate_limit";
+  }
+  if (/\b(config|configuration|missing model|missing provider|base url|api[_ -]?key)\b/.test(message)) {
+    return "provider_config";
+  }
+  return "provider_response";
+}
+
+export function isRetryableModelFailure(kind: ModelFailureKind): boolean {
+  return kind === "provider_network" || kind === "provider_timeout" || kind === "provider_rate_limit" || kind === "provider_response";
+}
+
+function safeModelErrorMessage(error: unknown, fallbackMessage = "Model request failed."): string {
+  const redacted = redactSensitiveText(rawModelErrorMessage(error, fallbackMessage)).replace(/\s+/g, " ").trim();
+  if (redacted.length === 0) {
+    return fallbackMessage;
+  }
+  return redacted.length <= 1_000 ? redacted : `${redacted.slice(0, 999)}…`;
+}
+
+function rawModelErrorMessage(error: unknown, fallbackMessage = "Model request failed."): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  if (typeof error === "string") {
+    return error;
+  }
+  return fallbackMessage;
 }

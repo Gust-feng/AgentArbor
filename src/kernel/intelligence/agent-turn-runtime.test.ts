@@ -103,6 +103,59 @@ test("AgentTurnRuntime completes on no-tool provider stop", async () => {
   assert.deepEqual(channel.requests[0]?.tools?.map((tool) => tool.name), []);
 });
 
+test("AgentTurnRuntime executeAutonomous fails on incomplete no-tool provider stop", async () => {
+  for (const finishReason of ["length", "content_filter", "error"] as const) {
+    const channel = new SequenceIntelligenceChannel([
+      {
+        ...textResponse(`model-request-${finishReason}`, "Incomplete final answer."),
+        finishReason,
+      },
+    ]);
+    const runtime = new AgentTurnRuntime({ intelligenceChannel: channel });
+
+    const result = await runtime.executeAutonomous(createTurnInput({
+      allowedTools: [],
+      maxModelRounds: 2,
+    }));
+
+    assert.equal(result.status, "failed");
+    assert.equal(result.stoppedReason, "model_failed");
+    assert.equal(result.finalOutput?.status, "failed");
+    assert.equal(result.finalOutput?.failure?.kind, "provider_response");
+    assert.equal(result.toolCalls.length, 0);
+  }
+});
+
+test("AgentTurnRuntime returns a failed model response when the model request throws", async () => {
+  const channel: IntelligenceChannel = {
+    async request() {
+      throw new Error("provider network unavailable api_key=sk-runtime-secret-123456");
+    },
+    validateResponse(_request, response) {
+      return response.validation;
+    },
+  };
+  const runtime = new AgentTurnRuntime({ intelligenceChannel: channel });
+
+  const result = await runtime.executeAutonomous(createTurnInput({
+    allowedTools: [],
+    maxModelRounds: 1,
+  }));
+
+  assert.equal(result.status, "failed");
+  assert.equal(result.stoppedReason, "runtime_error");
+  assert.equal(result.modelRequestId, "model-request-test");
+  assert.equal(result.finalOutput?.status, "failed");
+  assert.equal(result.finalOutput?.requestId, "model-request-test");
+  assert.equal(result.finalOutput?.failure?.kind, "provider_network");
+  assert.equal(result.finalOutput?.failure?.retryable, true);
+  assert.equal(result.finalOutput?.failure?.message.includes("provider network unavailable"), true);
+  assert.equal(result.finalOutput?.failure?.message.includes("sk-runtime-secret"), false);
+  assert.equal(result.finalOutput?.failure?.message.includes("[redacted-secret]"), true);
+  assert.equal(result.modelRounds, 0);
+  assert.equal(result.toolCalls.length, 0);
+});
+
 test("AgentTurnRuntime exposes allowed external tools without finish_task", async () => {
   const channel = new SequenceIntelligenceChannel([
     textResponse("model-request-test", "Plain text is the natural stop signal."),
@@ -139,6 +192,33 @@ test("AgentTurnRuntime executeAutonomous hides internal completion tools from or
   assert.equal(result.status, "completed");
   assert.equal(result.stoppedReason, "no_tool_calls");
   assert.deepEqual(channel.requests[0]?.tools?.map((tool) => tool.name), ["web_search"]);
+});
+
+test("AgentTurnRuntime executeAutonomous does not complete via finish_task tool calls", async () => {
+  const channel = new SequenceIntelligenceChannel([
+    toolCallResponse("model-request-test", "call-finish", "finish_task"),
+    textResponse("model-request-final", "Final answer after natural provider stop."),
+  ]);
+  const broker = new PermissionAwareToolBroker(["finish_task"]);
+  const runtime = new AgentTurnRuntime({
+    intelligenceChannel: channel,
+    toolCenter: broker,
+  });
+
+  const result = await runtime.executeAutonomous(createTurnInput({
+    allowedTools: ["finish_task"],
+    maxModelRounds: 3,
+  }));
+
+  assert.equal(result.status, "completed");
+  assert.equal(result.stoppedReason, "completed");
+  assert.equal(result.finalOutput?.textOutput, "Final answer after natural provider stop.");
+  assert.equal(result.toolCalls.length, 1);
+  assert.equal(result.toolCalls[0]?.toolName, "finish_task");
+  assert.equal(result.toolCalls[0]?.status, "failed");
+  assert.equal(broker.executedCount, 0);
+  assert.equal(channel.requests.length, 2);
+  assert.equal(channel.requests[1]?.sanitizedMessages.at(-1)?.role, "tool");
 });
 
 test("AgentTurnRuntime completes after a tool round when the model stops calling tools", async () => {
@@ -209,7 +289,7 @@ test("AgentTurnRuntime pauses out_of_fuel when budgets end before provider stop"
   assert.equal(channel.requests.length, 1);
 });
 
-test("AgentTurnRuntime executeAutonomous ignores engineering round limits and waits for provider stop", async () => {
+test("AgentTurnRuntime executeAutonomous pauses on explicit fuel limits before provider stop", async () => {
   const channel = new SequenceIntelligenceChannel([
     toolCallResponse("model-request-test", "call-search", "web_search"),
     toolCallResponse("model-request-next", "call-search-next", "web_search"),
@@ -226,11 +306,11 @@ test("AgentTurnRuntime executeAutonomous ignores engineering round limits and wa
     maxToolRounds: 2,
   }));
 
-  assert.equal(result.status, "completed");
-  assert.equal(result.stoppedReason, "completed");
-  assert.equal(result.finalOutput?.textOutput, "Final answer after the model stops using tools.");
-  assert.equal(result.toolCalls.length, 2);
-  assert.equal(channel.requests.length, 3);
+  assert.equal(result.status, "paused");
+  assert.equal(result.stoppedReason, "out_of_fuel");
+  assert.equal(result.finalOutput, undefined);
+  assert.equal(result.toolCalls.length, 1);
+  assert.equal(channel.requests.length, 1);
 });
 
 test("AgentTurnRuntime returns approval_required and resumes with a matching confirmation", async () => {
@@ -256,6 +336,9 @@ test("AgentTurnRuntime returns approval_required and resumes with a matching con
   assert.equal(paused.pendingApproval?.confirmationId, "confirmation-call-delete");
   assert.equal(broker.executedCount, 0);
   assert.deepEqual(eventLog.types(), ["tool.requested", "user_approval.requested"]);
+  const approvalEvent = eventLog.list().find((entry) => entry.type === "user_approval.requested");
+  assert.equal(approvalEvent?.message.from.id, "agent-test");
+  assert.equal(approvalEvent?.message.from.role, "agent");
 
   const resumed = await runtime.resume({
     pendingApproval: paused.pendingApproval!,
@@ -457,17 +540,17 @@ class PermissionAwareToolBroker implements ToolExecutionBroker {
   async execute(
     request: ToolCallRequest,
     _context: ToolExecutionContext,
-    permission?: ToolPermissionCheck
+    permission: ToolPermissionCheck
   ): Promise<ToolCallResult> {
     if (!this.has(request.toolName)) {
       return failedToolResult(request, `Tool is not registered: ${request.toolName}`);
     }
-    if (permission?.allowedTools !== undefined && !permission.allowedTools.includes(request.toolName)) {
+    if (!permission.allowedTools.includes(request.toolName)) {
       return failedToolResult(request, `Tool ${request.toolName} is not allowed.`);
     }
     const operationType = this.operationTypes[request.toolName] ?? "read-only";
     const confirmationId = `confirmation-${request.callId}`;
-    if (operationType !== "read-only" && permission?.approvedConfirmationIds?.includes(confirmationId) !== true) {
+    if (operationType !== "read-only" && permission.approvedConfirmationIds?.includes(confirmationId) !== true) {
       return {
         callId: request.callId,
         toolName: request.toolName,

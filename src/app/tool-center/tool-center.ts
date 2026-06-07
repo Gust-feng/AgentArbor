@@ -60,7 +60,7 @@ export class ToolCenter {
   async execute(
     request: ToolCallRequest,
     context: ToolExecutionContext,
-    permission?: ToolPermissionCheck
+    permission: ToolPermissionCheck
   ): Promise<ToolCallResult> {
     const startedAt = Date.now();
     if (isAbortSignalAborted(context.abortSignal)) {
@@ -71,7 +71,15 @@ export class ToolCenter {
       return failedToolResult(request, startedAt, `${toolDisplayName(request.toolName)}未注册。`);
     }
 
-    if (permission?.allowedTools !== undefined && !permission.allowedTools.includes(request.toolName)) {
+    if (permission.callerAgentId !== context.callerAgentId) {
+      return failedToolResult(
+        request,
+        startedAt,
+        `${toolDisplayName(request.toolName)}调用者身份与本轮工具授权不一致。`
+      );
+    }
+
+    if (!permission.allowedTools.includes(request.toolName)) {
       return failedToolResult(
         request,
         startedAt,
@@ -90,7 +98,7 @@ export class ToolCenter {
       metadata,
       context: {
         platform: this.platform,
-        approvedConfirmationIds: permission?.approvedConfirmationIds,
+        approvedConfirmationIds: permission.approvedConfirmationIds,
       },
     });
     if (securityDecision.decision === "blocked") {

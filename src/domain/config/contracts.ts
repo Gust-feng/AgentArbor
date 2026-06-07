@@ -5,7 +5,7 @@ import type {
   ToolVisibleResultPolicy,
 } from "../tools/contracts.js";
 
-export type ConfiguredUndergroundAiMode = "none" | "fake" | "openai-compatible" | "openai-responses";
+export type ConfiguredModelRuntimeMode = "none" | "fake" | "openai-compatible" | "openai-responses";
 
 export type ConfiguredWebSearchProvider = "tavily" | "none";
 
@@ -202,7 +202,7 @@ export type ModelProviderProfileSettings = {
   readonly baseUrl?: string;
   readonly model?: string;
   readonly openAI?: OpenAIModelRequestSettings;
-  readonly defaultAiMode: ConfiguredUndergroundAiMode;
+  readonly defaultAiMode: ConfiguredModelRuntimeMode;
   readonly secretRef: string;
   readonly enabled: boolean;
   readonly updatedAt: string;
@@ -230,7 +230,7 @@ export type SanitizedModelProviderConfig = {
   readonly baseUrl: string;
   readonly model?: string;
   readonly openAI?: OpenAIModelRequestSettings;
-  readonly defaultAiMode: ConfiguredUndergroundAiMode;
+  readonly defaultAiMode: ConfiguredModelRuntimeMode;
   readonly secretRef: string;
   readonly enabled?: boolean;
   readonly secretConfigured: boolean;
@@ -247,7 +247,7 @@ export type UpdateModelProviderConfigInput = {
   readonly model?: string;
   readonly openAI?: OpenAIModelRequestSettings;
   readonly clearModel?: boolean;
-  readonly defaultAiMode?: ConfiguredUndergroundAiMode;
+  readonly defaultAiMode?: ConfiguredModelRuntimeMode;
   readonly enabled?: boolean;
   readonly apiKey?: string;
   readonly clearApiKey?: boolean;
@@ -274,6 +274,8 @@ export type UpsertMcpServerInput = {
   readonly enabled?: boolean;
 };
 
+export type CapabilityToolScope = "desktop-basic" | "underground" | "research" | "workspace" | "mcp";
+
 export type CapabilityToolCatalogItem = {
   readonly name: string;
   readonly displayName: string;
@@ -288,6 +290,7 @@ export type CapabilityToolCatalogItem = {
   readonly requiresConfirmation: boolean;
   readonly confirmationLabel: string;
   readonly visibleResultPolicy: ToolVisibleResultPolicy;
+  readonly scopes: readonly CapabilityToolScope[];
   readonly enabled: boolean;
   readonly availability: "available" | "unavailable";
   readonly disabledReason?: string;
@@ -337,6 +340,7 @@ export type RunToolExposure = {
   readonly displayName: string;
   readonly enabled: boolean;
   readonly modelVisible: boolean;
+  readonly scopes: readonly CapabilityToolScope[];
   readonly availability: CapabilityToolCatalogItem["availability"];
   readonly riskLevel: ToolRiskLevel;
   readonly operationType: ToolOperationType;
@@ -353,16 +357,36 @@ export type CapabilityDraft = {
   readonly reason: string;
 };
 
+export type RunEnabledSkill = {
+  readonly id: string;
+  readonly name: string;
+  readonly description: string;
+  readonly triggers: readonly string[];
+};
+
 export type RunCapabilityResolution = {
   readonly resolutionId: string;
   readonly snapshotId: string;
   readonly runMode: "agent" | "deep";
+  readonly agentId: string;
+  readonly agentDisplayName: string;
+  readonly toolVisibilityProfileId: string;
   readonly allowedTools: readonly string[];
   readonly toolExposures: readonly RunToolExposure[];
-  readonly enabledSkills: readonly CapabilitySkillCatalogItem[];
+  readonly enabledSkills: readonly RunEnabledSkill[];
   readonly mcpDrafts: readonly CapabilityDraft[];
   readonly warnings: readonly string[];
   readonly createdAt: string;
+};
+
+export type RunAgentDefinitionRef = {
+  readonly agentId: string;
+  readonly agentDisplayName: string;
+  readonly promptRef: string;
+  readonly promptVersion: string;
+  readonly outputContractId: string;
+  readonly toolVisibilityProfileId: string;
+  readonly definitionHash?: string;
 };
 
 export type InformationAccessSettings = {

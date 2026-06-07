@@ -33,6 +33,8 @@ export type ModelPurpose =
   | "desktop_intent_gate"
   | "desktop_context_compaction"
   | "desktop_agent"
+  // Legacy purpose kept for persisted read-model and event replay compatibility.
+  // Current ordinary Agent turns must use desktop_agent.
   | "desktop_chat"
   | "work_session_decision"
   | "work_session_child_material"

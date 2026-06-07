@@ -1,14 +1,14 @@
-import type { ModelRunReasoningEffort } from "../domain/config/index.js";
+import type { ModelRunReasoningEffort, RunAgentDefinitionRef } from "../domain/config/index.js";
 import type { ToolDisplayProjection } from "../domain/tools/index.js";
 import type { TranscriptNode } from "../domain/basic-agent/index.js";
-import type { AgentRunTree } from "../domain/underground/index.js";
 import type { EventLogEntry } from "../kernel/events/in-memory-event-log.js";
+import type { AgentRunTreeAttachment } from "./agent-run-tree-attachment.js";
 import type { DesktopIntentDecision } from "./desktop-intent-router.js";
 import type { PanelTranscriptModelCall } from "./panel-transcript-model-calls.js";
 import type { PanelRunStreamEvent } from "./panel-run-stream-contracts.js";
 import type { PanelRunStatus } from "./panel-run-status.js";
 import type { PanelObservationReadModel } from "./panel-run-tracking-contracts.js";
-import type { UndergroundDemoSummary } from "./underground-demo-summary.js";
+import type { PanelRunSummary } from "./panel-run-summary.js";
 import type { AgentWorkNote } from "./panel-work-note-contracts.js";
 
 export type PanelRunStepToolItem = {
@@ -52,12 +52,15 @@ export type CreatePanelRunTranscriptInput = {
   readonly runId: string;
   readonly status: PanelRunStatus;
   readonly eventEntries: readonly EventLogEntry[];
-  readonly summary?: UndergroundDemoSummary;
+  readonly streamEvents?: readonly PanelRunStreamEvent[];
+  readonly summary?: PanelRunSummary;
   readonly observation?: PanelObservationReadModel;
-  readonly agentRunTree?: AgentRunTree;
+  readonly agentRunTree?: AgentRunTreeAttachment;
   readonly routeDecision?: DesktopIntentDecision;
   readonly desktopMode?: "agent" | "deep";
   readonly reasoningEffort?: ModelRunReasoningEffort;
+  readonly agentDefinitionRef?: Pick<RunAgentDefinitionRef, "agentId" | "agentDisplayName">;
   readonly createdAt: string;
   readonly updatedAt: string;
+  readonly error?: { readonly code: string; readonly message: string };
 };

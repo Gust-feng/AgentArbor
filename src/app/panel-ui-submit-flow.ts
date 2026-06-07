@@ -18,7 +18,7 @@ export type SubmitFlowTaskStatus =
 export type StartedConversationRun = {
   readonly runId: string;
   readonly status?: SubmitFlowTaskStatus | "pending";
-  readonly runMode?: "agent" | "deep";
+  readonly runMode?: "agent";
   readonly createdAt?: string;
   readonly updatedAt?: string;
   readonly eventCursor?: {
@@ -114,7 +114,7 @@ export function immediateRunForStartedConversation(input: {
     title: input.goal,
     goalSummary: input.goal,
     status: taskStatusFromStartedRun(input.responseRun.status),
-    runMode: input.responseRun.runMode ?? "agent",
+    runMode: "agent",
     createdAt: input.responseRun.createdAt ?? now,
     updatedAt: input.responseRun.updatedAt ?? now,
     requiresUserAction: false,
@@ -201,7 +201,7 @@ export function liveRunForObservedReplay(input: {
 
 function taskStatusFromStartedRun(status: SubmitFlowTaskStatus | "pending" | undefined): SubmitFlowTaskStatus {
   if (status === "pending") {
-    return "running";
+    return "queued";
   }
   return status ?? "running";
 }

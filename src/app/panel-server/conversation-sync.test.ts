@@ -132,6 +132,48 @@ test("syncConversationTurnForJob keeps concrete confirmation preview", () => {
   assert.equal(assistant?.content, "删除文件：C:\\repo\\old.txt");
 });
 
+test("syncConversationTurnForJob keeps needs-input turns visible as user-action summaries", () => {
+  const { conversations, job } = startedConversationJob();
+
+  syncConversationTurnForJob({
+    conversations,
+    job,
+    response: response({ status: "needs_input" }),
+  });
+
+  const summary = conversations.list().find((item) => item.conversationId === job.conversationId);
+  const assistant = conversations.getReadModel(job.conversationId ?? "")?.turns.find((turn) => turn.role === "assistant");
+  assert.equal(assistant?.title, "需要补充");
+  assert.equal(assistant?.status, "needs_input");
+  assert.equal(summary?.status, "needs_input");
+  assert.equal(summary?.requiresUserAction, true);
+  assert.equal(summary?.nextStep, "补充材料或说明新的限制。");
+});
+
+test("syncConversationTurnForJob keeps blocked turns visible as user-action summaries", () => {
+  const { conversations, job } = startedConversationJob();
+
+  syncConversationTurnForJob({
+    conversations,
+    job,
+    response: response({
+      status: "blocked",
+      error: {
+        code: "context_overflow",
+        message: "上下文超过预算，需要补充方向后继续。",
+      },
+    }),
+  });
+
+  const summary = conversations.list().find((item) => item.conversationId === job.conversationId);
+  const assistant = conversations.getReadModel(job.conversationId ?? "")?.turns.find((turn) => turn.role === "assistant");
+  assert.equal(assistant?.title, "需要处理");
+  assert.equal(assistant?.status, "blocked");
+  assert.equal(summary?.status, "blocked");
+  assert.equal(summary?.requiresUserAction, true);
+  assert.equal(summary?.currentAction.includes("上下文超过预算"), true);
+});
+
 test("syncConversationTurnForJob ignores run started copy and refreshes from model output", () => {
   const { conversations, job } = startedConversationJob();
   const secret = "sk-running-preview-secret";
@@ -632,6 +674,51 @@ test("syncConversationTurnForJob prefers HTTP event errors for failed turns", ()
   assert.equal(assistant?.content.includes("错误信息：HTTP 401"), true);
   assert.equal(assistant?.content.includes("HTTP 401"), true);
   assert.equal(assistant?.content.includes(secret), false);
+});
+
+test("syncConversationTurnForJob does not complete failed turns with forged answer canvas", () => {
+  const { conversations, job } = startedConversationJob();
+
+  syncConversationTurnForJob({
+    conversations,
+    job,
+    response: response({
+      status: "failed",
+      error: {
+        code: "provider_failed",
+        message: "模型服务中断，没有形成最终回答。",
+      },
+      canvas: {
+        kind: "desktop_agent_canvas",
+        taskSoil: taskSoilCanvas(),
+        agent: {
+          status: "completed",
+          answer: {
+            answer: "这段内容看起来像最终回答，但失败状态不能被包装成完成。",
+            modelCallRefs: [],
+            toolCallRefs: [],
+            evidenceRefs: [],
+            resultBlocks: [],
+          },
+          modelCallRefs: [],
+          toolCallRefs: [],
+          activity: [],
+        },
+        explanation: {
+          resultWhyReasonable: "伪造的完成说明不应覆盖失败终态。",
+          observationPanelRole: "展示安全投影。",
+        },
+      },
+    }),
+  });
+
+  const summary = conversations.list().find((item) => item.conversationId === job.conversationId);
+  const assistant = conversations.getReadModel(job.conversationId ?? "")?.turns.find((turn) => turn.role === "assistant");
+  assert.equal(assistant?.title, "运行失败");
+  assert.equal(assistant?.status, "failed");
+  assert.equal(summary?.status, "failed");
+  assert.equal(assistant?.content.includes("看起来像最终回答"), false);
+  assert.equal(assistant?.content.includes("错误信息：模型服务中断，没有形成最终回答。"), true);
 });
 
 test("syncConversationTurnForJob preserves existing assistant output when failing", () => {

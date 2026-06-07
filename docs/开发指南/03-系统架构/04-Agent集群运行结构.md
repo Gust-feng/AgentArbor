@@ -4,6 +4,8 @@
 
 AgentArbor 的 agent 集群依附于 Desktop 任务闭环，而不是独立漂浮的一组角色。
 
+Agent 集群是未来 deep / 深入模式的组织结构，不是当前默认普通 Agent 的隐式实现方式。普通会话、普通文件编辑、helper、adapter 和一次模型工具循环不应套用本章术语。
+
 ```text
 Desktop Shell
   -> Task Soil
@@ -108,7 +110,7 @@ Fruits 是交付和候选沉淀区。Run Memory、Experience Candidate、能力�
 
 ## 第一阶段边界
 
-第一阶段不实现完整多集群自治网络。当前代码基础已经具备地下 AI-first cognitive runtime、动态派生 Agent Fabric 和监督面板。下一阶段应围绕：
+第一阶段不实现完整多集群自治网络。当前代码基础中已有的地下 AI-first cognitive runtime、动态派生 Agent Fabric 和监督面板可作为未来 deep 能力基础保留。当前活跃实现仍应围绕默认普通 Agent 和共享基础设施，避免把简单任务自动升级为集群流程。下一阶段若显式重启 deep，应围绕：
 
 - Desktop Shell 产品骨架。
 - Task Soil 契约。

@@ -3,17 +3,17 @@ import test from "node:test";
 import type { TranscriptNode } from "../domain/basic-agent/index.js";
 import { createPanelTranscriptNodes } from "./panel-transcript-nodes.js";
 import {
+  activityVisibleNodes,
   timelineVisibleNodes,
   visibleTranscriptNodes,
-  workflowVisibleNodes,
 } from "./panel-transcript-node-projection.js";
 import {
   isRefreshingTranscriptRun,
-  withStartupWorkflowNode,
+  withStartupActivityNode,
 } from "./panel-transcript-startup-node.js";
 
-test("workflow projection preserves visible thinking even when the text looks like a progress placeholder", () => {
-  const projected = workflowVisibleNodes([
+test("activity projection preserves visible thinking even when the text looks like a progress placeholder", () => {
+  const projected = activityVisibleNodes([
     node({ nodeId: "thinking", kind: "thinking", sequence: 1, summary: "正在判断下一步。" }),
     node({ nodeId: "system", kind: "system", sequence: 2, summary: "正在判断下一步。" }),
   ]);
@@ -21,7 +21,7 @@ test("workflow projection preserves visible thinking even when the text looks li
   assert.deepEqual(projected.map((item) => item.nodeId), ["thinking"]);
 });
 
-test("timeline projection keeps thinking and excludes answer nodes from the workflow rail", () => {
+test("timeline projection keeps thinking and excludes answer nodes from the activity rail", () => {
   const projected = timelineVisibleNodes([
     node({ nodeId: "answer", kind: "answer", eventType: "final.result", sequence: 4, summary: "最终回答" }),
     node({ nodeId: "thinking", kind: "thinking", eventType: "model.reasoning.completed", sequence: 1, text: "先确认目标" }),
@@ -31,8 +31,8 @@ test("timeline projection keeps thinking and excludes answer nodes from the work
   assert.deepEqual(projected.map((item) => item.nodeId), ["thinking", "tool"]);
 });
 
-test("workflow projection keeps requested and completed tool phases as a full action record", () => {
-  const projected = workflowVisibleNodes([
+test("activity projection keeps requested and completed tool phases as a full action record", () => {
+  const projected = activityVisibleNodes([
     node({
       nodeId: "request",
       kind: "tool",
@@ -115,8 +115,8 @@ test("visible transcript projection aggregates adjacent completed file reads wit
   assert.deepEqual(projected[1]?.display?.kind === "generic_tool_summary" ? projected[1].display.items : [], ["README.md", "package.json"]);
 });
 
-test("workflow projection hides preparing tool requests that are represented by confirmation cards", () => {
-  const projected = workflowVisibleNodes([
+test("activity projection hides preparing tool requests that are represented by confirmation cards", () => {
+  const projected = activityVisibleNodes([
     node({
       nodeId: "request",
       kind: "tool",
@@ -193,11 +193,11 @@ test("panel transcript confirmation ids fall back to the owning tool call id", (
 
   assert.equal(confirmation?.confirmation?.confirmationId, "confirmation-call-shell");
   assert.equal(confirmation?.confirmation?.actionSummary, "执行 Shell：pnpm test");
-  assert.deepEqual(workflowVisibleNodes(projected).map((item) => item.kind), ["confirmation"]);
+  assert.deepEqual(activityVisibleNodes(projected).map((item) => item.kind), ["confirmation"]);
 });
 
-test("startup workflow projection stays silent before real transcript activity", () => {
-  const projected = withStartupWorkflowNode([], {
+test("startup activity projection stays silent before real transcript activity", () => {
+  const projected = withStartupActivityNode([], {
     runId: "run-1",
     refreshing: true,
   });
@@ -207,9 +207,9 @@ test("startup workflow projection stays silent before real transcript activity",
   assert.equal(isRefreshingTranscriptRun({ runId: "run-1", status: "completed" }), false);
 });
 
-test("startup workflow projection keeps existing transcript activity", () => {
+test("startup activity projection keeps existing transcript activity", () => {
   const existing = node({ nodeId: "thinking", kind: "thinking", eventType: "model.reasoning.delta", sequence: 1, text: "先看上下文" });
-  const projected = withStartupWorkflowNode([existing], {
+  const projected = withStartupActivityNode([existing], {
     runId: "run-1",
     refreshing: true,
   });

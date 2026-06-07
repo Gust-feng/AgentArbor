@@ -1,7 +1,7 @@
 import type {
   ConfiguredModelProviderKind,
   ConfiguredModelProtocolKind,
-  ConfiguredUndergroundAiMode,
+  ConfiguredModelRuntimeMode,
 } from "../../domain/config/index.js";
 import { ConfigSchemaValidationError, optionalString } from "./settings-utils.js";
 
@@ -21,7 +21,7 @@ export function normalizeBaseUrl(value: string | undefined): string | undefined 
   return normalized.replace(/\/+$/, "");
 }
 
-export function normalizeAiMode(value: ConfiguredUndergroundAiMode | undefined): ConfiguredUndergroundAiMode | undefined {
+export function normalizeAiMode(value: ConfiguredModelRuntimeMode | undefined): ConfiguredModelRuntimeMode | undefined {
   return value === "none" || value === "fake" || value === "openai-compatible" || value === "openai-responses" ? value : undefined;
 }
 

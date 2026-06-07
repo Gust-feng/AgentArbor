@@ -4,8 +4,8 @@ import type {
   BasicAgentRun,
   ConfirmationRequest,
   DesktopWorkSessionAnswer,
-  DesktopWorkSessionReadModel,
   DesktopWorkSessionStage,
+  DesktopWorkViewReadModel,
   RunEvent,
   TranscriptNode,
 } from "../../domain/basic-agent/index.js";
@@ -79,9 +79,11 @@ export type CreateDesktopWorkSessionReadModelInput = {
   };
 };
 
-export function createDesktopWorkSessionReadModel(
+export type CreateDesktopWorkViewReadModelInput = CreateDesktopWorkSessionReadModelInput;
+
+export function createDesktopWorkViewReadModel(
   input: CreateDesktopWorkSessionReadModelInput
-): DesktopWorkSessionReadModel {
+): DesktopWorkViewReadModel {
   const visibleEvents = visibleWorkSessionEvents(input.events);
   const contextAttachments = contextAttachmentsFor(input);
   const toolEvidence = envelopeSafeToolEvidence(input.toolEvidence ?? []);
@@ -119,6 +121,12 @@ export function createDesktopWorkSessionReadModel(
     },
   };
 }
+
+/**
+ * @deprecated Compatibility name for older panel code. New backend read-model
+ * composition should use createDesktopWorkViewReadModel.
+ */
+export const createDesktopWorkSessionReadModel = createDesktopWorkViewReadModel;
 
 function transcriptSourceEvents(events: readonly RunEvent[]): readonly RunEvent[] {
   return events.filter((event) => event.visibility !== "debug");

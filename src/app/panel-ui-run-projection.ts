@@ -6,7 +6,7 @@ export type RunProjectionNode = {
   readonly sequence: number;
 };
 
-export type RunProjectionWorkSession<TNode extends RunProjectionNode = RunProjectionNode> = {
+export type RunProjectionWorkView<TNode extends RunProjectionNode = RunProjectionNode> = {
   readonly run: {
     readonly runId: string;
   };
@@ -21,35 +21,36 @@ export type RunProjectionDetail<TNode extends RunProjectionNode = RunProjectionN
 };
 
 export type RunReadModelPatchState = {
-  readonly workSession?: RunProjectionWorkSession;
+  readonly workView?: RunProjectionWorkView;
   readonly transcriptNodesByRunId: Record<string, readonly RunProjectionNode[]>;
 };
 
 export type RunReadModelPatch<
-  TWorkSession extends RunProjectionWorkSession<TNode>,
+  TWorkView extends RunProjectionWorkView<TNode>,
   TDetail extends RunProjectionDetail<TNode>,
   TNode extends RunProjectionNode
 > = {
-  readonly workSession: TWorkSession | undefined;
+  readonly workView: TWorkView | undefined;
   readonly detail: TDetail | undefined;
   readonly transcriptNodes: readonly TNode[];
   readonly transcriptNodesByRunId: Record<string, readonly TNode[]>;
 };
 
 export function transcriptNodesFrom<TNode extends RunProjectionNode>(
-  workSession: RunProjectionWorkSession<TNode> | undefined,
+  workView: RunProjectionWorkView<TNode> | undefined,
   detail: RunProjectionDetail<TNode> | undefined
 ): readonly TNode[] {
-  return workSession?.transcriptNodes ?? detail?.transcript?.transcriptNodes ?? [];
+  return workView?.transcriptNodes ?? detail?.transcript?.transcriptNodes ?? [];
 }
 
-export function nextWorkSessionForRun<TWorkSession extends RunProjectionWorkSession>(
+export function nextWorkViewForRun<TWorkView extends RunProjectionWorkView>(
   runId: string,
-  incoming: TWorkSession | undefined,
-  previous: TWorkSession | undefined
-): TWorkSession | undefined {
+  incoming: TWorkView | undefined,
+  previous: TWorkView | undefined,
+  reusePrevious = true
+): TWorkView | undefined {
   if (incoming?.run.runId === runId) return incoming;
-  if (previous?.run.runId === runId) return previous;
+  if (reusePrevious && previous?.run.runId === runId) return previous;
   return undefined;
 }
 
@@ -61,24 +62,30 @@ export function detailForRun<T extends RunProjectionDetail | undefined>(
 }
 
 export function createRunReadModelPatch<
-  TWorkSession extends RunProjectionWorkSession<TNode>,
+  TWorkView extends RunProjectionWorkView<TNode>,
   TDetail extends RunProjectionDetail<TNode>,
   TNode extends RunProjectionNode
 >(
   previous: {
-    readonly workSession?: TWorkSession;
+    readonly workView?: TWorkView;
     readonly transcriptNodesByRunId: Record<string, readonly TNode[]>;
   },
   input: {
     readonly runId: string;
-    readonly workSession: TWorkSession | undefined;
+    readonly workView: TWorkView | undefined;
     readonly detail: TDetail | undefined;
+    readonly reusePreviousWorkView?: boolean;
   }
-): RunReadModelPatch<TWorkSession, TDetail, TNode> {
-  const workSession = nextWorkSessionForRun(input.runId, input.workSession, previous.workSession);
-  const transcriptNodes = transcriptNodesFrom(workSession, input.detail);
+): RunReadModelPatch<TWorkView, TDetail, TNode> {
+  const workView = nextWorkViewForRun(
+    input.runId,
+    input.workView,
+    previous.workView,
+    input.reusePreviousWorkView !== false
+  );
+  const transcriptNodes = transcriptNodesFrom(workView, input.detail);
   return {
-    workSession,
+    workView,
     detail: input.detail,
     transcriptNodes,
     transcriptNodesByRunId: mergeTranscriptNodesByRunId(previous.transcriptNodesByRunId, input.runId, transcriptNodes),

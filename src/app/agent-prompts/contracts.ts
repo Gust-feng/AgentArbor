@@ -1,3 +1,4 @@
+import type { CapabilityToolCatalogItem, CapabilityToolScope } from "../../domain/config/index.js";
 import type { ModelOutputContract, ModelPurpose, ModelRequest } from "../../domain/intelligence/index.js";
 
 export type AgentSystemPromptSpec = {
@@ -9,7 +10,9 @@ export type AgentSystemPromptSpec = {
 export type AgentToolVisibilityProfile = {
   readonly profileId: string;
   readonly runMode: "agent" | "deep";
-  readonly hiddenToolNamePrefixes: readonly string[];
+  readonly visibleToolScopes?: readonly CapabilityToolScope[];
+  readonly hiddenToolScopes?: readonly CapabilityToolScope[];
+  readonly hiddenToolNames?: readonly string[];
 };
 
 export type AgentTurnPolicySpec = {
@@ -31,14 +34,27 @@ export type AgentDefinition = {
 
 export function isToolVisibleToAgentProfile(
   profile: AgentToolVisibilityProfile,
-  toolName: string
+  tool: Pick<CapabilityToolCatalogItem, "name" | "scopes">
 ): boolean {
-  return !profile.hiddenToolNamePrefixes.some((prefix) => toolName.startsWith(prefix));
+  if (profile.hiddenToolNames?.includes(tool.name) === true) {
+    return false;
+  }
+  if (
+    profile.visibleToolScopes !== undefined &&
+    profile.visibleToolScopes.length > 0 &&
+    !tool.scopes.some((scope) => profile.visibleToolScopes?.includes(scope))
+  ) {
+    return false;
+  }
+  if (profile.hiddenToolScopes?.some((scope) => tool.scopes.includes(scope)) === true) {
+    return false;
+  }
+  return true;
 }
 
-export function filterToolNamesVisibleToAgentProfile(
+export function filterToolsVisibleToAgentProfile(
   profile: AgentToolVisibilityProfile,
-  toolNames: readonly string[]
-): readonly string[] {
-  return toolNames.filter((toolName) => isToolVisibleToAgentProfile(profile, toolName));
+  tools: readonly Pick<CapabilityToolCatalogItem, "name" | "scopes">[]
+): readonly Pick<CapabilityToolCatalogItem, "name" | "scopes">[] {
+  return tools.filter((tool) => isToolVisibleToAgentProfile(profile, tool));
 }

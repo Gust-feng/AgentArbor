@@ -6,15 +6,21 @@ import {
 } from "../../adapters/runtime-database/index.js";
 import type { ModelOutputDelta } from "../../domain/intelligence/index.js";
 import type { RuntimeDatabase } from "../../domain/runtime-database/index.js";
+import { createRuntimeAgentDefinitionCatalog } from "../agent-definition-catalog.js";
+import type { AgentDefinitionRegistry } from "../agent-definition-registry.js";
+import { runAgentDefinitionRef } from "../agent-definition-runtime.js";
+import type { AgentDefinition } from "../agent-prompts/contracts.js";
 import {
   BasicAgentRunExecutor,
   type BasicAgentRunExecutionInput,
   type BasicAgentRunExecutionResult,
+  type BasicAgentRunStartFacts,
+  type BasicAgentRunStartInput,
 } from "../basic-agent-runtime/index.js";
 import { CapabilityCenter } from "../capability-center.js";
 import { ConfigCenter, createLocalConfigCenter } from "../config-center.js";
 import { PanelConversationStore } from "../panel-conversations.js";
-import { PanelRunJobStore, type PanelRunJob } from "../panel-run-jobs.js";
+import { PanelRunJobStore, resolvePanelRunMode, type PanelRunJob } from "../panel-run-jobs.js";
 import {
   FileSystemSkillStateStore,
   resolveSkillStateStorePath,
@@ -29,6 +35,8 @@ import { createPanelRunJobResponse } from "./run-job-response.js";
 export type PanelRuntime = {
   readonly configCenter: ConfigCenter;
   readonly capabilityCenter: CapabilityCenter;
+  readonly desktopAgentDefinition: AgentDefinition;
+  readonly agentDefinitions: AgentDefinitionRegistry;
   readonly configDirectory?: string;
   readonly providerFetch?: PanelProviderFetch;
   readonly modelCatalogFetch?: PanelModelCatalogFetch;
@@ -52,10 +60,16 @@ export type PanelRuntimeHooks = {
 };
 
 export function createPanelRuntime(options: PanelServerOptions, hooks: PanelRuntimeHooks): PanelRuntime {
+  const agentDefinitionCatalog = createRuntimeAgentDefinitionCatalog({
+    desktopAgentDefinition: options.desktopAgentDefinition,
+    additionalDefinitions: options.agentDefinitions,
+  });
   if (options.configCenter !== undefined) {
     const runtimePersistence = createPanelRuntimePersistence(options.configDirectory, options.runtimeDatabase);
     return assemblePanelRuntime({
       configCenter: options.configCenter,
+      desktopAgentDefinition: agentDefinitionCatalog.desktopAgentDefinition,
+      agentDefinitions: agentDefinitionCatalog.registry,
       configDirectory: options.configDirectory,
       providerFetch: options.providerFetch,
       modelCatalogFetch: options.modelCatalogFetch,
@@ -70,6 +84,8 @@ export function createPanelRuntime(options: PanelServerOptions, hooks: PanelRunt
   const runtimePersistence = createPanelRuntimePersistence(local.configDirectory, options.runtimeDatabase);
   return assemblePanelRuntime({
     configCenter: local.configCenter,
+    desktopAgentDefinition: agentDefinitionCatalog.desktopAgentDefinition,
+    agentDefinitions: agentDefinitionCatalog.registry,
     configDirectory: local.configDirectory,
     providerFetch: options.providerFetch,
     modelCatalogFetch: options.modelCatalogFetch,
@@ -93,6 +109,8 @@ export function isPanelRuntime(value: PanelServerOptions | PanelRuntime): value 
 
 function assemblePanelRuntime(input: {
   readonly configCenter: ConfigCenter;
+  readonly desktopAgentDefinition: AgentDefinition;
+  readonly agentDefinitions: AgentDefinitionRegistry;
   readonly configDirectory?: string;
   readonly providerFetch?: PanelProviderFetch;
   readonly modelCatalogFetch?: PanelModelCatalogFetch;
@@ -117,6 +135,8 @@ function assemblePanelRuntime(input: {
   const runtime: Omit<PanelRuntime, "runExecutor"> & { runExecutor?: BasicAgentRunExecutor } = {
     configCenter: input.configCenter,
     capabilityCenter,
+    desktopAgentDefinition: input.desktopAgentDefinition,
+    agentDefinitions: input.agentDefinitions,
     configDirectory: input.configDirectory,
     providerFetch: input.providerFetch,
     modelCatalogFetch: input.modelCatalogFetch,
@@ -132,9 +152,7 @@ function assemblePanelRuntime(input: {
     skillStateStore: input.skillStateStore,
   };
   runtime.runExecutor = new BasicAgentRunExecutor({
-    getModelProviderConfig: () => runtime.configCenter.getModelProviderConfig(),
-    getInformationAccessConfig: () => runtime.configCenter.getInformationAccessConfig(),
-    getCapabilitySnapshot: () => runtime.capabilityCenter.snapshot(),
+    prepareRunStart: (startInput) => preparePanelBasicRunStart(runtime as PanelRuntime, startInput),
     runJobs,
     activeRunJobs,
     abortControllers,
@@ -167,6 +185,33 @@ function assemblePanelRuntime(input: {
     },
   });
   return runtime as PanelRuntime;
+}
+
+async function preparePanelBasicRunStart(
+  runtime: PanelRuntime,
+  input: BasicAgentRunStartInput
+): Promise<BasicAgentRunStartFacts> {
+  const informationAccess = await runtime.configCenter.getInformationAccessConfig();
+  if (input.runKind !== "desktop") {
+    const config = await runtime.configCenter.getModelProviderConfig();
+    return {
+      aiMode: input.aiMode ?? config.defaultAiMode,
+      config,
+      informationAccess,
+    };
+  }
+
+  const capabilitySnapshot = await runtime.capabilityCenter.snapshot();
+  const config = capabilitySnapshot.activeModel;
+  return {
+    aiMode: input.aiMode ?? config.defaultAiMode,
+    config,
+    informationAccess,
+    capabilitySnapshot,
+    agentDefinitionRef: resolvePanelRunMode(input.runKind, input.runMode) === "agent"
+      ? runAgentDefinitionRef(runtime.desktopAgentDefinition)
+      : undefined,
+  };
 }
 
 function resolveSkillRoots(options: PanelServerOptions): readonly string[] {

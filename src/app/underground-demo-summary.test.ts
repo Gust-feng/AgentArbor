@@ -6,7 +6,7 @@ import type { ModelProvider, ModelRequest, ModelResponse } from "../domain/intel
 import { nowIso } from "../kernel/id.js";
 import { NativeIntelligenceChannel } from "../kernel/intelligence/channel.js";
 import { pendingModelOutputValidation } from "../kernel/intelligence/validation.js";
-import { createUndergroundAiRuntimeConfig } from "./intelligence-channel-factory.js";
+import { createUndergroundAiRuntimeConfig } from "./underground-ai-runtime.js";
 import { runUndergroundDirectionSession } from "./underground-direction-session.js";
 import { runUndergroundDirectionSessionWithIntelligence } from "./underground-direction-session.js";
 import { recoverUndergroundDirectionSession } from "./underground-direction-recovery.js";

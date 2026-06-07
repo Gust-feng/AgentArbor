@@ -1,13 +1,9 @@
 import { postJson } from "./api";
+import { loadObservedRunReadModel } from "./app-observed-run-read-model";
 import { createRunReadModelPatch } from "./app-run-projection";
 import { shouldKeepRefreshing } from "./app-runtime-controls";
 import type { AppState } from "./app-state";
 import { emptyLiveRun } from "../../panel-ui-live-run-buffer";
-import {
-  safeBasicRun,
-  safeDesktopDetail,
-  safeWorkSession,
-} from "./runtime";
 import type { BasicAgentRun } from "./contracts/run";
 
 export type ConfirmationDecision = "approve_once" | "deny" | "guidance";
@@ -32,6 +28,7 @@ export async function decideRunConfirmation(input: {
   if (input.app.run?.status !== "approval_needed") {
     await refreshRunAfterConfirmationSettled({
       runId: currentRunId,
+      preferredConversation: input.app.conversation,
       mountedRef: input.mountedRef,
       setApp: input.setApp,
       refreshConversations: input.refreshConversations,
@@ -51,29 +48,41 @@ export async function decideRunConfirmation(input: {
       `/api/basic-agent/runs/${encodeURIComponent(currentRunId)}/confirmations/${encodeURIComponent(confirmation.confirmationId)}/decision`,
       { decision: input.decision, guidance: input.guidance?.trim() }
     );
-    const [workSession, detail] = await Promise.all([
-      safeWorkSession(currentRunId),
-      safeDesktopDetail(currentRunId),
-    ]);
-    const shouldResumeLiveUpdates = shouldKeepRefreshing(response.run.status);
+    const observed = await loadObservedRunReadModel({
+      runId: currentRunId,
+      conversationId: response.run.conversationId,
+      preferredConversation: input.app.conversation,
+      requireFreshRunView: true,
+    });
+    const observedRun = observed.run ?? response.run;
+    const shouldResumeLiveUpdates = shouldKeepRefreshing(observedRun.status);
     input.setApp((previous) => {
-      const readModel = createRunReadModelPatch(previous, { runId: currentRunId, workSession, detail });
+      const readModel = createRunReadModelPatch(previous, {
+        runId: currentRunId,
+        workView: observed.workView,
+        detail: observed.detail,
+        reusePreviousWorkView: false,
+      });
       return {
         ...previous,
-        run: response.run,
+        conversation: observed.conversation ?? previous.conversation,
+        run: observedRun,
+        capabilityResolution: observed.capabilityResolution,
+        capabilityResolutionRunId: observed.capabilityResolution === undefined ? undefined : currentRunId,
         live: shouldResumeLiveUpdates ? emptyLiveRun(currentRunId) : previous.live,
         error: undefined,
         ...readModel,
       };
     });
     if (shouldResumeLiveUpdates) {
-      input.startLiveUpdates(currentRunId, response.run.eventCursor.lastSequence);
+      input.startLiveUpdates(currentRunId, observed.replay?.cursor.lastSequence ?? observedRun.eventCursor.lastSequence);
     }
     void input.refreshConversations();
   } catch (error) {
     if (isStaleConfirmationError(error)) {
       await refreshRunAfterConfirmationSettled({
         runId: currentRunId,
+        preferredConversation: input.app.conversation,
         mountedRef: input.mountedRef,
         setApp: input.setApp,
         refreshConversations: input.refreshConversations,
@@ -90,7 +99,7 @@ export async function decideRunConfirmation(input: {
 }
 
 function pendingConfirmationFromApp(app: AppState) {
-  return app.workSession?.pendingConfirmation;
+  return app.workView?.pendingConfirmation;
 }
 
 function localConfirmationDecisionError(
@@ -109,21 +118,31 @@ function localConfirmationDecisionError(
 
 async function refreshRunAfterConfirmationSettled(input: {
   readonly runId: string;
+  readonly preferredConversation?: AppState["conversation"];
   readonly mountedRef: { readonly current: boolean };
   readonly setApp: SetApp;
   readonly refreshConversations: () => Promise<void>;
 }): Promise<void> {
-  const [run, workSession, detail] = await Promise.all([
-    safeBasicRun(input.runId),
-    safeWorkSession(input.runId),
-    safeDesktopDetail(input.runId),
-  ]);
+  const observed = await loadObservedRunReadModel({
+    runId: input.runId,
+    conversationId: input.preferredConversation?.conversationId,
+    preferredConversation: input.preferredConversation,
+    requireFreshRunView: true,
+  });
   if (!input.mountedRef.current) return;
   input.setApp((previous) => {
-    const readModel = createRunReadModelPatch(previous, { runId: input.runId, workSession, detail });
+    const readModel = createRunReadModelPatch(previous, {
+      runId: input.runId,
+      workView: observed.workView,
+      detail: observed.detail,
+      reusePreviousWorkView: false,
+    });
     return {
       ...previous,
-      run: run ?? previous.run,
+      conversation: observed.conversation ?? previous.conversation,
+      run: observed.run ?? previous.run,
+      capabilityResolution: observed.capabilityResolution,
+      capabilityResolutionRunId: observed.capabilityResolution === undefined ? undefined : input.runId,
       error: undefined,
       ...readModel,
     };

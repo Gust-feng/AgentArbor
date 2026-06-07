@@ -12,7 +12,8 @@ test("ToolCenter registers, lists, executes, and unregisters tools", async () =>
 
   const result = await center.execute(
     { callId: "call-1", toolName: "echo", input: { value: "hello" } },
-    { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" }
+    { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
+    allowTools("echo")
   );
 
   assert.equal(result.status, "completed");
@@ -30,11 +31,26 @@ test("ToolCenter enforces allowedTools permissions", async () => {
   const result = await center.execute(
     { callId: "call-1", toolName: "web_search", input: { query: "x" } },
     { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
-    { callerAgentId: "agent-test", allowedTools: ["other_tool"] }
+    allowTools("other_tool")
   );
 
   assert.equal(result.status, "failed");
   assert.match(result.error ?? "", /未授权/);
+  assert.equal(center.getCallCount(), 0);
+});
+
+test("ToolCenter rejects permission records for a different caller agent", async () => {
+  const center = new ToolCenter();
+  center.register(testTool("web_search", async () => ({ ok: true })));
+
+  const result = await center.execute(
+    { callId: "call-1", toolName: "web_search", input: { query: "x" } },
+    { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
+    { callerAgentId: "other-agent", allowedTools: ["web_search"] }
+  );
+
+  assert.equal(result.status, "failed");
+  assert.match(result.error ?? "", /调用者身份与本轮工具授权不一致/);
   assert.equal(center.getCallCount(), 0);
 });
 
@@ -43,8 +59,8 @@ test("ToolCenter enforces maxCallsPerRun", async () => {
   center.register(testTool("echo", async () => ({ ok: true })));
   const context = { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" };
 
-  const first = await center.execute({ callId: "call-1", toolName: "echo", input: {} }, context);
-  const second = await center.execute({ callId: "call-2", toolName: "echo", input: {} }, context);
+  const first = await center.execute({ callId: "call-1", toolName: "echo", input: {} }, context, allowTools("echo"));
+  const second = await center.execute({ callId: "call-2", toolName: "echo", input: {} }, context, allowTools("echo"));
 
   assert.equal(first.status, "completed");
   assert.equal(second.status, "failed");
@@ -61,7 +77,7 @@ test("ToolCenter default does not add a small tool-call budget", async () => {
   const context = { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" };
 
   for (let index = 0; index < 25; index += 1) {
-    const result = await center.execute({ callId: `call-${index}`, toolName: "echo", input: {} }, context);
+    const result = await center.execute({ callId: `call-${index}`, toolName: "echo", input: {} }, context, allowTools("echo"));
     assert.equal(result.status, "completed");
   }
   assert.equal(center.getCallCount(), 25);
@@ -86,9 +102,9 @@ test("ToolCenter uses explicit metadata for confirmation instead of platform ope
   }, "execute", { requiresConfirmation: true }));
   const context = { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" };
 
-  const write = await center.execute({ callId: "call-write", toolName: "custom_write", input: {} }, context);
-  const deleteResult = await center.execute({ callId: "call-delete", toolName: "delete_file", input: {} }, context);
-  const execute = await center.execute({ callId: "call-exec", toolName: "run_command", input: {} }, context);
+  const write = await center.execute({ callId: "call-write", toolName: "custom_write", input: {} }, context, allowTools("custom_write", "delete_file", "run_command"));
+  const deleteResult = await center.execute({ callId: "call-delete", toolName: "delete_file", input: {} }, context, allowTools("custom_write", "delete_file", "run_command"));
+  const execute = await center.execute({ callId: "call-exec", toolName: "run_command", input: {} }, context, allowTools("custom_write", "delete_file", "run_command"));
 
   assert.equal(write.status, "completed");
   assert.equal(deleteResult.status, "approval_required");
@@ -121,7 +137,7 @@ test("ToolCenter lets an approved confirmation id bypass the confirmation gate",
   const result = await center.execute(
     { callId: "call-command", toolName: "run_command", input: {} },
     context,
-    { callerAgentId: "agent-test", approvedConfirmationIds: ["confirmation-call-command"] }
+    { ...allowTools("run_command"), approvedConfirmationIds: ["confirmation-call-command"] }
   );
 
   assert.equal(result.status, "completed");
@@ -146,7 +162,8 @@ test("ToolCenter adds typed safe display projections for command output", async 
 
   const result = await center.execute(
     { callId: "call-shell", toolName: "shell_command", input: { command: "pnpm", args: ["test"] } },
-    { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" }
+    { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
+    allowTools("shell_command")
   );
 
   assert.equal(result.status, "completed");
@@ -173,7 +190,8 @@ test("ToolCenter adds typed safe display projections for search results", async 
 
   const result = await center.execute(
     { callId: "call-search", toolName: "search", input: { query: "AgentArbor" } },
-    { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" }
+    { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
+    allowTools("search")
   );
 
   assert.equal(result.status, "completed");
@@ -204,7 +222,8 @@ test("ToolCenter file diff display does not expose edit input text", async () =>
         newText: "new file body sk-edit-secret",
       },
     },
-    { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" }
+    { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
+    allowTools("edit_file")
   );
 
   const displayJson = JSON.stringify(result.projection?.display);
@@ -238,7 +257,8 @@ test("ToolCenter file diff display exposes bounded redacted edit preview", async
         edits: [{ anchor: "old visible line\napi_key=sk-edit-secret", replacement: "new visible line\napi_key=sk-edit-secret" }],
       },
     },
-    { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" }
+    { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
+    allowTools("edit_file")
   );
 
   const display = result.projection?.display;
@@ -270,7 +290,8 @@ test("ToolCenter file change display exposes bounded redacted create preview", a
         content: "visible created line\npassword=sk-create-secret",
       },
     },
-    { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" }
+    { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
+    allowTools("create_file")
   );
 
   const display = result.projection?.display;
@@ -319,5 +340,12 @@ function testTool(
       },
     },
     execute,
+  };
+}
+
+function allowTools(...allowedTools: readonly string[]) {
+  return {
+    callerAgentId: "agent-test",
+    allowedTools,
   };
 }

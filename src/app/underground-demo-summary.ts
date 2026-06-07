@@ -1,170 +1,27 @@
-import type { ArborMessageType } from "../domain/common.js";
+import type { DirectionHandoffPackage } from "../domain/agentarbor/direction-handoff-package/contracts.js";
 import type {
-  DirectionHandoffPackage,
-  DirectionHandoffPackageLineage,
-  DirectionHandoffPackageValidationResult,
-} from "../domain/agentarbor/direction-handoff-package/contracts.js";
-import type { ObservationStatus, RunPhase, RunStage } from "../domain/observation/contracts.js";
-import type {
-  CandidatePoolCounts,
-  ExplorationBudget,
   RootletClusterKind,
-  UndergroundAutonomyAction,
-  UndergroundAutonomyStopReason,
-  UndergroundConvergenceOutcome,
-  UserClarificationReason,
 } from "../domain/underground/index.js";
 import type { ModelVisibleOutputProjection } from "../domain/intelligence/index.js";
 import type {
   UndergroundDirectionSessionResult,
-  UndergroundDirectionSessionTerminalStatus,
 } from "./underground-direction-session.js";
 import type { UndergroundDirectionSessionRecoveryResult } from "./underground-direction-recovery.js";
+import type {
+  RunDirectionPackageSummary,
+  RunSummary,
+  RunSummaryAiInput,
+  RunSummaryAiSummary,
+  RunSummaryToolSummary,
+} from "./run-summary.js";
 
-type DirectionPackageSummary = {
-  readonly id: string;
-  readonly directionId: string;
-  readonly version: number;
-  readonly status: string;
-  readonly validation: Pick<DirectionHandoffPackageValidationResult, "passed" | "errors" | "warnings">;
-};
+export type UndergroundDemoSummary = RunSummary;
 
-export type UndergroundDemoSummary = {
-  readonly terminalStatus: UndergroundDirectionSessionTerminalStatus;
-  readonly directionPackage: DirectionPackageSummary;
-  readonly recoveredPackage?: DirectionPackageSummary;
-  readonly lineage: DirectionHandoffPackageLineage;
-  readonly versions: readonly number[];
-  readonly writtenPackagePath?: string;
-  readonly ai: UndergroundDemoAiSummary;
-  readonly tools: UndergroundDemoToolSummary;
-  readonly underground: {
-    readonly autonomy: {
-      readonly enabled: boolean;
-      readonly cycleCount: number;
-      readonly latestAction?: UndergroundAutonomyAction;
-      readonly latestDecisionStatus?: "completed" | "failed";
-      readonly spawnedRootletCount: number;
-      readonly stopReason?: UndergroundAutonomyStopReason;
-      readonly sourceRefs: readonly string[];
-      readonly modelCallRefs: readonly string[];
-    };
-    readonly rootletKinds: readonly RootletClusterKind[];
-    readonly budget: ExplorationBudget;
-    readonly candidateCounts: CandidatePoolCounts;
-    readonly convergence: {
-      readonly reviewId: string;
-      readonly outcome: UndergroundConvergenceOutcome;
-      readonly accepted: number;
-      readonly merged: number;
-      readonly rejected: number;
-      readonly unknown: number;
-      readonly userEscalationRequired: boolean;
-      readonly stopReason?: string;
-    };
-  };
-  readonly userEscalation?: {
-    readonly requestId: string;
-    readonly reason: UserClarificationReason;
-    readonly questionCount: number;
-    readonly relatedCandidateRefs: readonly string[];
-  };
-  readonly observationSnapshot: {
-    readonly phase: RunPhase;
-    readonly stage: RunStage;
-    readonly eventCursor: UndergroundDirectionSessionResult["observationSnapshot"]["eventCursor"];
-    readonly layerStatuses: {
-      readonly underground: ObservationStatus;
-      readonly handoff: ObservationStatus;
-      readonly aboveground: ObservationStatus;
-      readonly fruits: ObservationStatus;
-      readonly governance: ObservationStatus;
-      readonly soilReturnStub: ObservationStatus;
-    };
-  };
-  readonly eventLog: readonly ArborMessageType[];
-};
+export type UndergroundDemoAiInput = RunSummaryAiInput;
 
-export type UndergroundDemoAiInput = {
-  readonly enabled: boolean;
-  readonly mode: "none" | "fake" | "openai-compatible" | "openai-responses";
-  readonly providerId?: string;
-  readonly providerKind?: string;
-  readonly protocolKind?: string;
-  readonly model?: string;
-  readonly configurationError?: {
-    readonly code: string;
-    readonly message: string;
-  };
-};
+export type UndergroundDemoAiSummary = RunSummaryAiSummary;
 
-export type UndergroundDemoAiSummary = {
-  readonly enabled: boolean;
-  readonly mode: UndergroundDemoAiInput["mode"];
-  readonly providerId?: string;
-  readonly providerKind?: string;
-  readonly protocolKind?: string;
-  readonly model?: string;
-  readonly status:
-    | "disabled"
-    | "not_requested"
-    | "requested"
-    | "completed"
-    | "failed"
-    | "configuration_failed";
-  readonly eventCounts: {
-    readonly requested: number;
-    readonly completed: number;
-    readonly failed: number;
-  };
-  readonly aiCandidateCount: number;
-  readonly fallbackCount: number;
-  readonly aiFallbackUsed: boolean;
-  readonly rootletKinds: readonly {
-    readonly kind: RootletClusterKind;
-    readonly status: "requested" | "completed" | "failed";
-    readonly requested: number;
-    readonly completed: number;
-    readonly failed: number;
-    readonly aiCandidateCount: number;
-    readonly fallbackCount: number;
-    readonly aiFallbackUsed: boolean;
-  }[];
-  readonly modelCallRefs: readonly {
-    readonly rootletKind?: RootletClusterKind;
-    readonly requestId: string;
-    readonly responseId?: string;
-    readonly providerId?: string;
-    readonly providerKind?: string;
-    readonly protocolKind?: string;
-    readonly model?: string;
-    readonly outputKind?: string;
-    readonly validationStatus?: string;
-    readonly visibleOutput?: ModelVisibleOutputProjection;
-    readonly rootletOutputRefs: readonly string[];
-    readonly candidateRefs: readonly string[];
-  }[];
-  readonly configurationError?: {
-    readonly code: string;
-    readonly message: string;
-  };
-};
-
-export type UndergroundDemoToolSummary = {
-  readonly eventCounts: {
-    readonly requested: number;
-    readonly completed: number;
-    readonly failed: number;
-  };
-  readonly toolCallRefs: readonly {
-    readonly callId: string;
-    readonly toolName?: string;
-    readonly callerAgentId?: string;
-    readonly status: "requested" | "completed" | "failed";
-    readonly durationMs?: number;
-    readonly eventRefs: readonly string[];
-  }[];
-};
+export type UndergroundDemoToolSummary = RunSummaryToolSummary;
 
 export function createUndergroundDemoSummary(
   result: UndergroundDirectionSessionResult,
@@ -244,7 +101,7 @@ export function createUndergroundDemoSummary(
   };
 }
 
-function summarizeDirectionPackage(pkg: DirectionHandoffPackage): DirectionPackageSummary {
+function summarizeDirectionPackage(pkg: DirectionHandoffPackage): RunDirectionPackageSummary {
   return {
     id: pkg.manifest.packageId,
     directionId: pkg.manifest.directionId,

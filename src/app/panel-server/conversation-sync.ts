@@ -239,7 +239,7 @@ function runningAssistantTurnFromResponse(
   if (latest === undefined) {
     return {
       title: response.status === "pending" ? "等待回复" : "正在处理",
-      content: response.status === "pending" ? "等待前一个任务完成。" : "",
+      content: "",
     };
   }
   const text = sanitizeAssistantVisibleText(runningPreviewText(latest));

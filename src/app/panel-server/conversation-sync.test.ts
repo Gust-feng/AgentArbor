@@ -173,6 +173,25 @@ test("syncConversationTurnForJob keeps needs-input turns visible as user-action 
   assert.equal(summary?.nextStep, "补充材料或说明新的限制。");
 });
 
+test("syncConversationTurnForJob keeps queued turns as empty waiting shells", () => {
+  const { conversations, job } = startedConversationJob();
+
+  job.status = "pending";
+  syncConversationTurnForJob({
+    conversations,
+    job,
+    response: response({ status: "pending" }),
+  });
+
+  const summary = conversations.list().find((item) => item.conversationId === job.conversationId);
+  const assistant = conversations.getReadModel(job.conversationId ?? "")?.turns.find((turn) => turn.role === "assistant");
+  assert.equal(assistant?.title, "等待回复");
+  assert.equal(assistant?.content, "");
+  assert.equal(assistant?.status, "pending");
+  assert.equal(summary?.status, "running");
+  assert.equal(JSON.stringify(assistant).includes("等待前一个任务完成"), false);
+});
+
 test("syncConversationTurnForJob keeps blocked turns visible as user-action summaries", () => {
   const { conversations, job } = startedConversationJob();
 

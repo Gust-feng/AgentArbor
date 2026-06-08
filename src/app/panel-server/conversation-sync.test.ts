@@ -170,7 +170,7 @@ test("syncConversationTurnForJob keeps needs-input turns visible as user-action 
   assert.equal(assistant?.status, "needs_input");
   assert.equal(summary?.status, "needs_input");
   assert.equal(summary?.requiresUserAction, true);
-  assert.equal(summary?.nextStep, "补充材料或说明新的限制。");
+  assert.equal(summary?.nextStep, "");
 });
 
 test("syncConversationTurnForJob keeps queued turns as empty waiting shells", () => {

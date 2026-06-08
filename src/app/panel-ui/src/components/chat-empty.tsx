@@ -118,7 +118,7 @@ export function ChatInputBar(props: ChatInputProps): React.ReactElement {
           }
         }}
         rows={3}
-        placeholder={props.placeholder ?? "输入任务、问题或下一步指令..."}
+        placeholder={props.placeholder ?? "输入任务..."}
         disabled={props.busy}
         className="chat-input-textarea"
       />

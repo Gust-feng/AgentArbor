@@ -191,7 +191,7 @@ export function parseConfirmationDecision(raw: unknown): Pick<ConfirmationDecisi
   const record = asRecord(raw);
   const decision = optionalString(record.decision);
   if (decision !== "approve_once" && decision !== "deny" && decision !== "guidance") {
-    throw new PanelHttpError(400, "invalid_confirmation_decision", "请选择继续、不执行或补充要求。");
+    throw new PanelHttpError(400, "invalid_confirmation_decision", "确认操作无效。");
   }
   const guidance = optionalString(record.guidance);
   if (decision === "guidance" && guidance === undefined) {

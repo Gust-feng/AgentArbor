@@ -38,10 +38,7 @@ export function trimRuntimeConversationToClosedPairs(input: {
   const next: RuntimeConversationRecord = {
     ...input.record,
     turns,
-    preview:
-      lastTurn === undefined
-        ? "开始后会显示在这里。"
-        : compact(lastTurn.content || lastTurn.title, 180),
+    preview: conversationPreview(turns),
     currentAction: conversationCurrentAction({
       ...input.record,
       turns,
@@ -137,17 +134,12 @@ export function toConversationSummary(
   conversation: PanelConversation,
   currentRun?: PanelConversationCurrentRunReadModel
 ): PanelConversationSummaryReadModel {
-  const lastTurn = conversation.turns.at(-1);
-  const preview =
-    lastTurn === undefined
-      ? "开始后会显示在这里。"
-      : compact(lastTurn.content || lastTurn.title, 180);
   const requiresUserAction = conversationRequiresUserAction(conversation);
   const status = conversationStatus(conversation);
   return {
     conversationId: conversation.conversationId,
     title: conversation.title,
-    preview,
+    preview: conversationPreview(conversation.turns),
     currentAction: conversationCurrentAction(conversation, status),
     nextStep: conversationNextStep(conversation, status),
     createdAt: conversation.createdAt,
@@ -305,33 +297,69 @@ function conversationCurrentAction(conversation: ConversationProjectionSource, s
     : conversation.currentRunId === undefined
       ? lastAssistantTurn(conversation.turns)
       : assistantTurnByRunId(conversation, conversation.currentRunId) ?? lastAssistantTurn(conversation.turns);
-  const assistantText = assistant === undefined ? undefined : firstNonEmpty([
-    assistant.content,
-    assistant.title,
-  ]);
-  if (status === "approval_needed") return compact(assistantText ?? "等待你判断后继续。", 160);
-  if (status === "needs_input") return compact(assistantText ?? "等待你补充信息后继续。", 160);
-  if (status === "pending") return "等待前一个任务完成。";
-  if (status === "running") return compact(assistantText ?? "正在处理你的任务。", 160);
+  const assistantText = assistantVisibleSummary(assistant);
+  if (status === "approval_needed") return compact(assistantText ?? "", 160);
+  if (status === "needs_input") return compact(assistantText ?? "", 160);
+  if (status === "pending") return compact(assistantText ?? "", 160);
+  if (status === "running") return compact(assistantText ?? "", 160);
   if (status === "completed") return compact(assistantText ?? "", 160);
-  if (status === "failed") return compact(assistantText ?? "未完成。", 160);
-  if (status === "blocked") return compact(assistantText ?? "需要处理后再继续。", 160);
-  if (status === "cancelled") return "任务已取消。";
-  return "打开会话查看上下文、进度和结果。";
+  if (status === "failed") return compact(assistantText ?? "", 160);
+  if (status === "blocked") return compact(assistantText ?? "", 160);
+  if (status === "cancelled") return "";
+  return "";
 }
 
 function conversationNextStep(conversation: ConversationProjectionSource, status: PanelConversationStatus): string {
-  const queuedCount = conversation.queuedRunIds.length;
-  if (status === "approval_needed") return "继续、不执行或补充要求。";
-  if (status === "needs_input") return "补充材料或说明新的限制。";
-  if (status === "pending") return "等待前序任务完成。";
-  if (status === "running") {
-    return queuedCount > 0 ? `还有 ${queuedCount} 个任务排队。` : "任务进行中。";
+  void conversation;
+  void status;
+  return "";
+}
+
+function conversationPreview(turns: readonly ConversationProjectionTurn[]): string {
+  for (let index = turns.length - 1; index >= 0; index -= 1) {
+    const text = turnVisibleSummary(turns[index]);
+    if (text !== undefined) {
+      return compact(text, 180);
+    }
   }
-  if (status === "completed") return "查看结果，或继续追问。";
-  if (status === "failed" || status === "blocked") return "打开查看原因，补充要求后重试。";
-  if (status === "cancelled") return "可重新发起。";
-  return "输入任务。";
+  return "";
+}
+
+function turnVisibleSummary(turn: ConversationProjectionTurn | undefined): string | undefined {
+  if (turn === undefined) {
+    return undefined;
+  }
+  const content = firstNonEmpty([turn.content]);
+  if (content !== undefined) {
+    return content;
+  }
+  if (turn.role === "assistant") {
+    return meaningfulAssistantTitle(turn.title);
+  }
+  return meaningfulUserTitle(turn.title);
+}
+
+function assistantVisibleSummary(turn: ConversationProjectionTurn | undefined): string | undefined {
+  if (turn === undefined) {
+    return undefined;
+  }
+  return firstNonEmpty([turn.content]) ?? meaningfulAssistantTitle(turn.title);
+}
+
+function meaningfulUserTitle(value: string): string | undefined {
+  const title = firstNonEmpty([value]);
+  if (title === undefined || title === "你的消息") {
+    return undefined;
+  }
+  return title;
+}
+
+function meaningfulAssistantTitle(value: string): string | undefined {
+  const title = firstNonEmpty([value]);
+  if (title === undefined || ORDINARY_ASSISTANT_STATUS_TITLES.has(title)) {
+    return undefined;
+  }
+  return title;
 }
 
 function pendingAssistantTurn(conversation: ConversationProjectionSource): ConversationProjectionTurn | undefined {
@@ -367,3 +395,20 @@ function firstNonEmpty(values: readonly (string | undefined)[]): string | undefi
   }
   return undefined;
 }
+
+const ORDINARY_ASSISTANT_STATUS_TITLES = new Set([
+  "助手",
+  "等待回复",
+  "正在回复",
+  "继续处理",
+  "正在使用工具",
+  "工具已完成",
+  "已完成",
+  "未完成",
+  "需要确认",
+  "待确认",
+  "需要你判断",
+  "待处理",
+  "需要补充",
+  "需要处理",
+]);

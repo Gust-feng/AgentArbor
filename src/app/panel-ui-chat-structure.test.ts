@@ -333,7 +333,9 @@ test("panel UI chat and transcript modules stay presentation-focused", async () 
   assert.equal(chatTranscriptChain.includes("node.eventType"), false);
   assert.equal(chatSessionProjection.includes("hasRunId(turn.runId)"), false);
   assert.equal(chatSessionProjection.includes("!terminalStatuses.has(input.run.status)"), false);
-  assert.equal(chatActive.includes("补充要求或限制..."), true);
+  assert.equal(chatActive.includes("补充要求或限制..."), false);
+  assert.equal(chatActive.includes("补充要求..."), true);
+  assert.equal(chatActive.includes("继续输入..."), true);
   assert.equal(chatActive.includes('props.onDecision("guidance", guidance)'), true);
   assert.equal(transcriptTimeline.includes('props.busy ? "处理中" : "允许"'), false);
   assert.equal(transcriptConfirmation.includes('props.busy ? "提交中" : "继续"'), true);

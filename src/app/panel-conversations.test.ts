@@ -177,16 +177,16 @@ test("panel conversation summaries expose actionable and queued task states", ()
   assert.equal(summary.status, "approval_needed");
   assert.equal(summary.requiresUserAction, true);
   assert.equal(summary.currentAction, "删除文件前需要你判断。");
-  assert.equal(summary.nextStep, "继续、不执行或补充要求。");
+  assert.equal(summary.nextStep, "");
   assert.deepEqual(summary.queuedRunIds, ["run-queued"]);
   assert.equal(summary.queuedRunCount, 1);
   assert.equal(persisted.status, "approval_needed");
   assert.equal(persisted.requiresUserAction, true);
   assert.equal(persisted.currentAction, "删除文件前需要你判断。");
-  assert.equal(persisted.nextStep, "继续、不执行或补充要求。");
+  assert.equal(persisted.nextStep, "");
 });
 
-test("panel conversation summaries keep running next steps concise", () => {
+test("panel conversation summaries do not invent running next steps", () => {
   const store = new PanelConversationStore();
   const active = store.startDesktopMessage({ goal: "整理当前文件" });
   store.attachRun({
@@ -197,7 +197,8 @@ test("panel conversation summaries keep running next steps concise", () => {
 
   let summary = store.list().find((item) => item.conversationId === active.conversation.conversationId)!;
   assert.equal(summary.status, "running");
-  assert.equal(summary.nextStep, "任务进行中。");
+  assert.equal(summary.currentAction, "");
+  assert.equal(summary.nextStep, "");
   assert.equal(summary.nextStep.includes("继续观察进度"), false);
   assert.equal(summary.nextStep.includes("必要时"), false);
 
@@ -214,7 +215,7 @@ test("panel conversation summaries keep running next steps concise", () => {
 
   summary = store.list().find((item) => item.conversationId === active.conversation.conversationId)!;
   assert.equal(summary.status, "running");
-  assert.equal(summary.nextStep, "还有 1 个任务排队。");
+  assert.equal(summary.nextStep, "");
   assert.equal(summary.nextStep.includes("继续观察进度"), false);
 });
 

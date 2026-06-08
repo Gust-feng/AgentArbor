@@ -104,7 +104,7 @@ export function ChatActive(props: ChatInputProps & {
     ? props
     : {
         ...props,
-        placeholder: "补充要求或限制...",
+        placeholder: "补充要求...",
         onSubmit: () => {
           const guidance = props.value.trim();
           if (guidance.length === 0 || props.confirmationBusy) return;
@@ -162,7 +162,7 @@ export function ChatActive(props: ChatInputProps & {
       <ChatInputBar
         {...guidanceInputProps}
         running={view.running}
-        placeholder={guidanceInputProps.placeholder ?? "继续补充、改写或让助手处理下一步..."}
+        placeholder={guidanceInputProps.placeholder ?? "继续输入..."}
         variant="floating"
       />
     </div>

@@ -49,6 +49,9 @@ test("work session read model keeps ordinary completed answers separate from del
   assert.equal(workSession.contextAttachments[0]?.ref, "file:notes.md");
   assert.equal(workSession.contextLedger.entries.some((entry) => entry.kind === "attachment"), true);
   assert.equal(workSession.contextLedger.entries.some((entry) => entry.kind === "tool_evidence"), true);
+  assert.equal(workSession.safetySummary.summary, "上下文 1；证据 1");
+  assert.equal(JSON.stringify(workSession).includes("普通视图"), false);
+  assert.equal(JSON.stringify(workSession).includes("模型输入"), false);
 });
 
 test("work session read model does not truncate ordinary answers before the chat turn", () => {
@@ -527,6 +530,63 @@ test("work session context ledger distinguishes blocked context refs", () => {
 
   assert.equal(workSession.contextAttachments[0]?.status, "blocked");
   assert.equal(workSession.contextLedger.entries.some((entry) => entry.status === "blocked"), true);
+});
+
+test("work session context ledger keeps budget details out of ordinary summaries", () => {
+  const run = basicRun("running");
+  const workSession = createDesktopWorkSessionReadModel({
+    run,
+    events: [],
+    canvas: {
+      kind: "desktop_agent_canvas",
+      taskSoil: {
+        taskSoilId: "soil-budget-copy",
+        goalSummary: "整理上下文",
+        contextRefs: [],
+        permissionBoundaryRefs: [],
+      },
+      agent: {
+        status: "running",
+        modelCallRefs: [],
+        toolCallRefs: [],
+        activity: [],
+        context: {
+          items: [],
+          usageSummary: "",
+          budget: {
+            maxInputTokens: 2000,
+            usedInputTokens: 120,
+            tokenCountSource: "openai_tiktoken",
+            maxChars: 4000,
+            usedChars: 240,
+            budgetSource: "model_capabilities",
+          },
+          truncationReport: {
+            truncated: true,
+            omittedItemCount: 2,
+            truncatedItemIds: ["context:item:1", "context:item:2"],
+          },
+        },
+      },
+      explanation: {
+        resultWhyReasonable: "safe",
+        observationPanelRole: "safe",
+      },
+    },
+  });
+  const budgetEntry = workSession.contextLedger.entries.find((entry) => entry.kind === "budget");
+  const omittedEntry = workSession.contextLedger.entries.find((entry) => entry.status === "omitted");
+  const text = JSON.stringify(workSession.contextLedger);
+
+  assert.equal(budgetEntry?.title, "上下文范围");
+  assert.equal(budgetEntry?.summary, "已整理 240 字符；上限 4000 字符；约 120 tokens");
+  assert.equal(omittedEntry?.title, "暂未使用的上下文");
+  assert.equal(text.includes("maxInputTokens"), true);
+  assert.equal(text.includes("tokenCountSource"), true);
+  assert.equal(text.includes("maxInputTokens="), false);
+  assert.equal(text.includes("tokenCountSource="), false);
+  assert.equal(text.includes("模型输入"), false);
+  assert.equal(text.includes("普通视图"), false);
 });
 
 function basicRun(status: BasicAgentRun["status"]): BasicAgentRun {

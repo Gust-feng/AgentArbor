@@ -135,7 +135,7 @@ test("context ledger records goal, history, attachments, skills, budget, and saf
   assert.equal(ledger.readModel.entries.some((entry) => entry.kind === "attachment"), true);
   assert.equal(ledger.readModel.entries.some((entry) => entry.kind === "budget" && entry.status === "used"), true);
   const systemReadModelEntry = ledger.readModel.entries.find((entry) => entry.entryId === "context:system:ledger-test-agent");
-  assert.equal(systemReadModelEntry?.summary, "桌面基础 Agent 系统边界。");
+  assert.equal(systemReadModelEntry?.summary, "当前任务的安全边界。");
   assert.equal(JSON.stringify(ledger.readModel).includes(LEDGER_TEST_AGENT.prompt.systemPrompt), false);
   assert.match(ledger.readModel.summary, /最近对话/);
   const json = JSON.stringify(ledger);
@@ -192,6 +192,11 @@ test("context ledger reports truncation when messages or chars exceed budget", (
   assert.equal(ledger.readModel.entries.some((entry) => entry.status === "omitted"), true);
   assert.equal(ledger.readModel.entries.some((entry) => entry.kind === "truncation" && entry.status === "omitted"), true);
   assert.equal(ledger.readModel.entries.some((entry) => entry.kind === "budget" && entry.status === "truncated"), true);
+  const text = JSON.stringify(ledger.readModel);
+  assert.equal(text.includes("maxInputTokens="), false);
+  assert.equal(text.includes("tokenCountSource="), false);
+  assert.equal(text.includes("模型输入"), false);
+  assert.equal(text.includes("普通视图"), false);
 });
 
 test("context ledger preserves older history until a model-compacted summary is provided", () => {

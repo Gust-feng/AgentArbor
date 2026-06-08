@@ -18,7 +18,7 @@ export function toContextLedgerReadModel(
     entryId: item.itemId,
     kind: contextLedgerEntryKind(item.sourceKind),
     title: contextLedgerEntryTitle(item),
-    summary: safeContextText(item.sourceKind === "system" ? "桌面基础 Agent 系统边界。" : item.summary, 360).text,
+    summary: safeContextText(item.sourceKind === "system" ? "当前任务的安全边界。" : item.summary, 360).text,
     refs: item.refs,
     status: item.truncated ? "truncated" : "used",
   }));
@@ -26,7 +26,7 @@ export function toContextLedgerReadModel(
     entryId: `${item.itemId}:omitted`,
     kind: contextLedgerEntryKind(item.sourceKind),
     title: contextLedgerEntryTitle(item),
-    summary: "因上下文预算限制，该项未进入模型输入；普通视图只保留引用和状态。",
+    summary: "本轮暂未使用这项上下文。",
     refs: item.refs,
     status: "omitted",
   }));
@@ -50,15 +50,8 @@ function contextBudgetEntries(
     {
       entryId: `${runId}:context-budget`,
       kind: "budget",
-      title: "上下文预算",
-      summary: [
-        `maxInputTokens=${budget.maxInputTokens}`,
-        `usedInputTokens=${budget.usedInputTokens}`,
-        `tokenCountSource=${budget.tokenCountSource}`,
-        `maxChars=${budget.maxChars}`,
-        `usedChars=${budget.usedChars}`,
-        `source=${budget.budgetSource}`,
-      ].join("；"),
+      title: "上下文范围",
+      summary: contextBudgetSummary(budget),
       refs: [],
       status: truncationReport.truncated ? "truncated" : "used",
     },
@@ -67,8 +60,8 @@ function contextBudgetEntries(
     entries.push({
       entryId: `${runId}:context-omitted`,
       kind: "truncation",
-      title: "未进入模型的上下文",
-      summary: `因上下文预算限制，${truncationReport.omittedItemCount} 项上下文未进入模型输入。`,
+      title: "暂未使用的上下文",
+      summary: `${truncationReport.omittedItemCount} 项上下文暂未用于本轮处理。`,
       refs: [],
       status: "omitted",
     });
@@ -78,12 +71,21 @@ function contextBudgetEntries(
       entryId: `${runId}:context-truncated`,
       kind: "truncation",
       title: "已截断上下文",
-      summary: `已截断上下文项：${truncationReport.truncatedItemIds.slice(0, 8).join("；")}`,
+      summary: `部分上下文已压缩：${truncationReport.truncatedItemIds.length} 项。`,
       refs: [],
       status: "truncated",
     });
   }
   return entries;
+}
+
+function contextBudgetSummary(budget: BasicAgentContextBudget): string {
+  const parts = [
+    budget.usedChars > 0 ? `已整理 ${budget.usedChars} 字符` : undefined,
+    budget.maxChars > 0 ? `上限 ${budget.maxChars} 字符` : undefined,
+    budget.usedInputTokens > 0 ? `约 ${budget.usedInputTokens} tokens` : undefined,
+  ].filter((part): part is string => part !== undefined);
+  return parts.length === 0 ? "已按当前任务整理上下文。" : parts.join("；");
 }
 
 function contextLedgerEntryKind(kind: BasicAgentContextSourceKind): ContextLedgerEntry["kind"] {
@@ -96,14 +98,14 @@ function contextLedgerEntryKind(kind: BasicAgentContextSourceKind): ContextLedge
 
 function contextLedgerEntryTitle(item: BasicAgentContextItem): string {
   const labels: Record<BasicAgentContextSourceKind, string> = {
-    system: "系统边界",
+    system: "安全边界",
     skill: "技能",
     conversation: "历史对话",
     conversation_summary: "历史摘要",
     conversation_recent_turn: "最近对话",
     user_message: "当前任务",
     task_soil_ref: "上下文引用",
-    tool_evidence: "工具证据",
+    tool_evidence: "证据",
   };
   return labels[item.sourceKind];
 }
@@ -117,17 +119,17 @@ function contextUsageSummary(
     counts.set(item.sourceKind, (counts.get(item.sourceKind) ?? 0) + 1);
   }
   const labels: Record<BasicAgentContextSourceKind, string> = {
-    system: "系统边界",
+    system: "安全边界",
     skill: "技能",
     conversation: "历史对话",
     conversation_summary: "历史摘要",
     conversation_recent_turn: "最近对话",
     user_message: "当前任务",
     task_soil_ref: "上下文引用",
-    tool_evidence: "工具证据",
+    tool_evidence: "证据",
   };
   const summary = [...counts.entries()]
     .map(([kind, count]) => `${labels[kind]} ${count}`)
     .join("；");
-  return omittedItems.length === 0 ? summary : `${summary}；未进入模型 ${omittedItems.length}`;
+  return omittedItems.length === 0 ? summary : `${summary}；暂未使用 ${omittedItems.length}`;
 }

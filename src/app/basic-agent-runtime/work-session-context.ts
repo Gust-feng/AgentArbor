@@ -168,7 +168,7 @@ export function contextLedgerFor(
   const allEntries = [...entries, ...budgetEntries];
   return {
     runId: input.run.runId,
-    summary: context?.usageSummary ?? `上下文来源 ${allEntries.length} 项，普通视图只展示引用和内容摘要。`,
+    summary: context?.usageSummary ?? contextLedgerSummary(allEntries),
     entries: allEntries,
     budget: context?.budget,
     truncation,
@@ -245,15 +245,8 @@ function contextBudgetEntries(
     entries.push({
       entryId: `${runId}:ledger:budget`,
       kind: "budget",
-      title: "上下文预算",
-      summary: [
-        budget.maxInputTokens === undefined ? undefined : `maxInputTokens=${budget.maxInputTokens}`,
-        budget.usedInputTokens === undefined ? undefined : `usedInputTokens=${budget.usedInputTokens}`,
-        budget.tokenCountSource === undefined ? undefined : `tokenCountSource=${budget.tokenCountSource}`,
-        budget.maxChars === undefined ? undefined : `maxChars=${budget.maxChars}`,
-        budget.usedChars === undefined ? undefined : `usedChars=${budget.usedChars}`,
-        budget.budgetSource === undefined ? undefined : `source=${budget.budgetSource}`,
-      ].filter(isString).join("；") || "本轮没有记录上下文预算。",
+      title: "上下文范围",
+      summary: contextBudgetSummary(budget),
       refs: [],
       status: truncation.truncated ? "truncated" : "used",
     });
@@ -262,8 +255,8 @@ function contextBudgetEntries(
     entries.push({
       entryId: `${runId}:ledger:omitted`,
       kind: "truncation",
-      title: "未进入模型的上下文",
-      summary: `因上下文预算限制，${truncation.omittedItemCount} 项上下文未进入模型输入。`,
+      title: "暂未使用的上下文",
+      summary: `${truncation.omittedItemCount} 项上下文暂未用于本轮处理。`,
       refs: [],
       status: "omitted",
     });
@@ -273,12 +266,42 @@ function contextBudgetEntries(
       entryId: `${runId}:ledger:truncated`,
       kind: "truncation",
       title: "已截断上下文",
-      summary: `已截断上下文项：${truncation.truncatedItemIds.slice(0, 8).join("；")}`,
+      summary: `部分上下文已压缩：${truncation.truncatedItemIds.length} 项。`,
       refs: [],
       status: "truncated",
     });
   }
   return entries;
+}
+
+function contextLedgerSummary(entries: readonly ContextLedgerEntry[]): string {
+  const counts = new Map<ContextLedgerEntry["kind"], number>();
+  for (const entry of entries) {
+    if (entry.kind === "budget" || entry.kind === "truncation") {
+      continue;
+    }
+    counts.set(entry.kind, (counts.get(entry.kind) ?? 0) + 1);
+  }
+  const labels: Record<ContextLedgerEntry["kind"], string> = {
+    goal: "任务",
+    attachment: "上下文",
+    history: "历史",
+    skill: "技能",
+    tool_evidence: "证据",
+    budget: "范围",
+    truncation: "压缩",
+  };
+  const parts = [...counts.entries()].map(([kind, count]) => `${labels[kind]} ${count}`);
+  return parts.length === 0 ? "已按当前任务整理上下文。" : parts.join("；");
+}
+
+function contextBudgetSummary(budget: ContextLedger["budget"]): string {
+  const parts = [
+    budget?.usedChars !== undefined && budget.usedChars > 0 ? `已整理 ${budget.usedChars} 字符` : undefined,
+    budget?.maxChars !== undefined && budget.maxChars > 0 ? `上限 ${budget.maxChars} 字符` : undefined,
+    budget?.usedInputTokens !== undefined && budget.usedInputTokens > 0 ? `约 ${budget.usedInputTokens} tokens` : undefined,
+  ].filter(isString);
+  return parts.length === 0 ? "已按当前任务整理上下文。" : parts.join("；");
 }
 
 function toolLedgerTitle(display: ToolDisplayProjection): string {

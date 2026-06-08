@@ -22,7 +22,7 @@ export function safeDesktopAgentContextPack(
     usageSummary: pack.usageSummary,
     items: pack.items.map((item) => ({
       ...item,
-      summary: safeText(item.sourceKind === "system" ? "桌面基础 Agent 系统边界。" : item.summary, 320),
+      summary: safeText(item.sourceKind === "system" ? "当前任务的安全边界。" : item.summary, 320),
     })),
     budget: pack.budget,
     truncationReport: pack.truncationReport,

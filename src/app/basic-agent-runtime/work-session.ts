@@ -112,12 +112,29 @@ export function createDesktopWorkViewReadModel(
     visibleEvents,
     transcriptNodes,
     safetySummary: {
-      summary: "普通视图展示上下文引用、工具摘要、证据和交付结果。",
+      summary: safetySummaryText({
+        pendingActionCount: pendingConfirmation === undefined ? 0 : 1,
+        toolResultCount: toolEvidence.length > 0 ? toolEvidence.length : toolDisplays.length,
+        contextAttachmentCount: contextAttachments.length,
+      }),
       pendingActionCount: pendingConfirmation === undefined ? 0 : 1,
       toolResultCount: toolEvidence.length > 0 ? toolEvidence.length : toolDisplays.length,
       contextAttachmentCount: contextAttachments.length,
     },
   };
+}
+
+function safetySummaryText(input: {
+  readonly pendingActionCount: number;
+  readonly toolResultCount: number;
+  readonly contextAttachmentCount: number;
+}): string {
+  const parts = [
+    input.contextAttachmentCount > 0 ? `上下文 ${input.contextAttachmentCount}` : undefined,
+    input.toolResultCount > 0 ? `证据 ${input.toolResultCount}` : undefined,
+    input.pendingActionCount > 0 ? `待确认 ${input.pendingActionCount}` : undefined,
+  ].filter((part): part is string => part !== undefined);
+  return parts.length === 0 ? "本轮没有额外上下文。" : parts.join("；");
 }
 
 /**

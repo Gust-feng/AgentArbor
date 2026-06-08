@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { sanitizeAssistantVisibleText, sanitizeConversationHistoryText } from "./visible-text-safety.js";
+import {
+  friendlyUserFacingModelFailureText,
+  sanitizeAssistantVisibleText,
+  sanitizeConversationHistoryText,
+} from "./visible-text-safety.js";
 
 test("assistant visible text keeps ordinary hyphenated language", () => {
   assert.equal(
@@ -35,4 +39,21 @@ test("conversation history sanitizer uses the same internal id boundary", () => 
     sanitizeConversationHistoryText("A run-of-the-mill note mentions model-request-abc."),
     "A run-of-the-mill note mentions [运行引用]."
   );
+});
+
+test("model failure visible text keeps diagnostic fields out of ordinary copy", () => {
+  const message = friendlyUserFacingModelFailureText({
+    failureKind: "output_validation",
+    failureMessage: "Model output failed the requested output contract.",
+    requestId: "model-request-abc",
+    responseId: "model-response-abc",
+    purpose: "desktop_agent",
+    outputContract: { contractId: "desktop.agent_response.v1" },
+  });
+
+  assert.equal(message, "模型输出校验失败。");
+  assert.equal(message.includes("desktop_agent"), false);
+  assert.equal(message.includes("desktop.agent_response"), false);
+  assert.equal(message.includes("model-request"), false);
+  assert.equal(message.includes("model-response"), false);
 });

@@ -1,6 +1,8 @@
 import type { DesktopAgentSessionResult } from "./desktop-agent-session-contracts.js";
+import { latestModelFailureTextForUser } from "./model-failure-visible-copy.js";
 import { safeText, taskSoilCanvas, type PanelTaskSoilCanvasReadModel } from "./panel-canvas-common.js";
 import type { PanelRunTranscript } from "./panel-run-transcript-contracts.js";
+import { friendlyUserFacingFailureText } from "./visible-text-safety.js";
 
 export type DesktopAgentCanvasReadModel = {
   readonly kind: "desktop_agent_canvas";
@@ -111,7 +113,9 @@ export function createDesktopAgentCanvas(input: {
               sourceRefs: input.result.pendingConfirmation.sourceRefs.map((value) => safeText(value, 180)),
             },
       failureMessage:
-        input.result.failureMessage === undefined ? undefined : safeText(input.result.failureMessage, 420),
+        input.result.failureMessage === undefined
+          ? undefined
+          : safeText(visibleFailureMessage(input.result), 420),
       modelCallRefs: [...input.result.modelCallRefs],
       toolCallRefs: [...input.result.toolCallRefs],
       activity: [],
@@ -143,6 +147,13 @@ export function createDesktopAgentCanvas(input: {
         `开发者详情只展示调用引用和安全事件；当前安全事件 ${input.transcript.events.length} 条。`,
     },
   };
+}
+
+function visibleFailureMessage(result: DesktopAgentSessionResult): string {
+  return (
+    latestModelFailureTextForUser(result.runtime.eventLog.list()) ??
+    friendlyUserFacingFailureText(result.failureMessage)
+  );
 }
 
 /**

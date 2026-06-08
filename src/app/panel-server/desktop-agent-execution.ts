@@ -2,10 +2,12 @@ import type { ModelRunReasoningEffort } from "../../domain/config/index.js";
 import { agentDefinitionHash, runAgentDefinitionRef } from "../agent-definition-runtime.js";
 import type { AgentDefinition } from "../agent-prompts/contracts.js";
 import { runDesktopAgentSession } from "../desktop-agent-session.js";
+import { latestModelFailureTextForUser } from "../model-failure-visible-copy.js";
 import type { ModelRuntimeMode } from "../model-runtime/index.js";
 import { createDesktopAgentCanvas } from "../panel-desktop-agent-canvas.js";
 import { createPanelRunTranscript } from "../panel-run-read-model.js";
 import type { DesktopTaskSoilInput } from "../task-soil-workspace.js";
+import { friendlyUserFacingFailureText } from "../visible-text-safety.js";
 import { PanelHttpError } from "./http-utils.js";
 import type { PanelRuntime } from "./runtime.js";
 import { resolveTriggeredSkillContexts } from "./skill-service.js";
@@ -170,9 +172,12 @@ function frozenCapabilityResolution(
 function failedRunFromAgent(
   agent: Awaited<ReturnType<typeof runDesktopAgentSession>>
 ): NonNullable<PanelRunExecutionResult["failed"]> {
+  const eventEntries = agent.runtime.eventLog.list();
   return {
     code: "desktop_agent_failed",
-    message: agent.failureMessage ?? "桌面 Agent 没有形成最终结果。",
+    message:
+      latestModelFailureTextForUser(eventEntries) ??
+      friendlyUserFacingFailureText(agent.failureMessage ?? "桌面 Agent 没有形成最终结果。"),
   };
 }
 

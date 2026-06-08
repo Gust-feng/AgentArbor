@@ -31,6 +31,18 @@ test("panel model failure copy treats stream parse failures as compatibility iss
   assert.equal(modelFailureStreamDetail(payload)?.error?.includes("流式返回格式不兼容"), true);
 });
 
+test("panel model failure copy prefers stable user copy for provider network failures", () => {
+  const payload = {
+    failureKind: "provider_network",
+    failureMessage: "fetch failed ECONNRESET apiKey=sk-network-secret",
+    requestId: "model-request-123",
+    responseId: "model-response-123",
+  };
+
+  assert.equal(modelFailedSummary(payload), "模型服务连接失败。");
+  assert.equal(modelFailureStreamDetail(payload)?.error, "模型服务连接失败。");
+});
+
 test("panel agent note copy keeps received-goal activity minimal", () => {
   const note = agentNoteForEvent({ type: "goal.received" } as Parameters<typeof agentNoteForEvent>[0], {});
 

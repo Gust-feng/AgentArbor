@@ -1039,7 +1039,8 @@ test("conversation provider network failure stays failed across run views and ru
     assert.equal(start.status, 202);
     assert.equal(failed.body.status, "failed");
     assert.equal(failed.body.error.code, "desktop_agent_failed");
-    assert.equal(failed.body.error.message.includes("fetch failed ECONNRESET"), true);
+    assert.equal(failed.body.error.message, "模型服务连接失败。");
+    assert.equal(failed.body.error.message.includes("fetch failed ECONNRESET"), false);
     assert.equal(failed.body.error.message.includes(secret), false);
     assert.equal(conversation.body.conversation.currentRun.run.status, "failed");
     assert.equal(conversation.body.conversation.currentRun.workView.stage, "failed");
@@ -1051,7 +1052,7 @@ test("conversation provider network failure stays failed across run views and ru
     assert.equal(runtimeRun.body.snapshot.run.error.code, "desktop_agent_failed");
     assert.deepEqual(basicView.body.view.capabilityResolution, runtimeRun.body.snapshot.run.capabilityResolution);
     assert.equal(visibleText.includes(secret), false);
-    assert.equal(visibleText.includes("[redacted-secret]"), true);
+    assert.equal(visibleText.includes("[redacted-secret]"), false);
     assertSafePanelJsonText(visibleText);
   } finally {
     await server.close();
@@ -1100,7 +1101,7 @@ test("conversation model output contract failure stays failed across run views a
     assert.equal(start.status, 202);
     assert.equal(failed.body.status, "failed");
     assert.equal(failed.body.error.code, "desktop_agent_failed");
-    assert.equal(failed.body.error.message, "Model output failed the requested output contract.");
+    assert.equal(failed.body.error.message, "模型输出校验失败。");
     assert.equal(conversation.body.conversation.currentRun.run.status, "failed");
     assert.equal(conversation.body.conversation.currentRun.workView.stage, "failed");
     assert.equal(conversation.body.conversation.currentRun.detail.status, "failed");
@@ -1109,7 +1110,7 @@ test("conversation model output contract failure stays failed across run views a
     assert.equal(basicView.body.view.detail.status, "failed");
     assert.equal(runtimeRun.body.snapshot.run.status, "failed");
     assert.equal(runtimeRun.body.snapshot.run.error.code, "desktop_agent_failed");
-    assert.equal(runtimeRun.body.snapshot.run.error.message, "Model output failed the requested output contract.");
+    assert.equal(runtimeRun.body.snapshot.run.error.message, "模型输出校验失败。");
     assert.deepEqual(basicView.body.view.capabilityResolution, runtimeRun.body.snapshot.run.capabilityResolution);
     assert.equal(visibleText.includes(secret), false);
     assertSafePanelJsonText(visibleText);

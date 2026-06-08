@@ -8,9 +8,8 @@ import type { PanelObservationReadModel } from "./panel-run-tracking-contracts.j
 import { cleanConfirmationSummary, confirmationActionSummaryText } from "./confirmation-copy.js";
 import type { PanelRunStreamEvent, PanelRunStreamEventType } from "./panel-run-stream-contracts.js";
 import type { PanelRunSummary, PanelRunSummaryPayload } from "./panel-run-summary.js";
-import { friendlyUserFacingFailureText } from "./visible-text-safety.js";
+import { friendlyUserFacingFailureText, friendlyUserFacingModelFailureText } from "./visible-text-safety.js";
 import { modelRequestedSummary as projectedModelRequestedSummary } from "./panel-model-progress-copy.js";
-import { friendlyFailureCopy } from "./failure-copy.js";
 
 export function blockedRunSummary(error: { readonly code: string; readonly message: string } | undefined): string {
   if (error?.code === "out_of_fuel") {
@@ -74,19 +73,16 @@ export function modelCompletedSummary(payload: Readonly<Record<string, unknown>>
 }
 
 export function modelFailedSummary(payload: Readonly<Record<string, unknown>>): string {
-  return modelFailureErrorText(payload) ?? stringOrUndefined(payload.failureKind) ?? "没有返回可用结果。";
+  return friendlyUserFacingModelFailureText(payload);
 }
 
 export function modelFailureStreamDetail(payload: Readonly<Record<string, unknown>>): PanelRunStreamEventDetail | undefined {
-  const error = modelFailureErrorText(payload);
-  return error === undefined
-    ? undefined
-    : {
-        kind: "thinking",
-        action: "回复失败",
-        error,
-        truncated: false,
-      };
+  return {
+    kind: "thinking",
+    action: "回复失败",
+    error: friendlyUserFacingModelFailureText(payload),
+    truncated: false,
+  };
 }
 
 export function runFailureStreamDetail(
@@ -292,50 +288,9 @@ export function finalSourceRefs(input: {
   return directAnswer?.requestId === undefined ? [] : [`model_call:${directAnswer.requestId}`];
 }
 
-function modelFailureErrorText(payload: Readonly<Record<string, unknown>>): string | undefined {
-  const message = modelFailureMessageForDisplay(stringOrUndefined(payload.failureMessage));
-  if (message !== undefined) {
-    return message;
-  }
-  return modelFailureKindForDisplay(stringOrUndefined(payload.failureKind));
-}
-
-function modelFailureMessageForDisplay(message: string | undefined): string | undefined {
-  const safe = compactFailureText(friendlyFailureCopy(message ?? ""), 1_000);
-  if (safe.length === 0) {
-    return undefined;
-  }
-  return safe;
-}
-
 function compactFailureText(value: string, maxLength: number): string {
   const text = value.trim();
   return text.length <= maxLength ? text : `${text.slice(0, Math.max(0, maxLength - 1))}…`;
-}
-
-function modelFailureKindForDisplay(failureKind: string | undefined): string | undefined {
-  switch (failureKind) {
-    case "provider_auth":
-      return "模型服务鉴权失败。";
-    case "provider_rate_limit":
-      return "模型服务限流。";
-    case "provider_timeout":
-      return "模型服务请求超时。";
-    case "provider_network":
-      return "模型服务连接失败。";
-    case "output_validation":
-      return "模型输出校验失败。";
-    case "request_validation":
-      return "模型请求无效。";
-    case "provider_config":
-      return "模型配置无效。";
-    case "provider_response":
-      return "模型服务响应无效。";
-    case "model_failed":
-      return "没有返回可用结果。";
-    default:
-      return undefined;
-  }
 }
 
 function autonomySummary(payload: Readonly<Record<string, unknown>>): string {

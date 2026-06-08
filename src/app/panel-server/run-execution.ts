@@ -3,7 +3,6 @@ import type {
   SanitizedInformationAccessConfig,
   SanitizedModelProviderConfig,
 } from "../../domain/config/index.js";
-import type { EventLogEntry } from "../../kernel/events/in-memory-event-log.js";
 import { type BasicAgentRunExecutionInput } from "../basic-agent-runtime/index.js";
 import { type PanelRunCanvasReadModel } from "../panel-canvas-read-model.js";
 import {
@@ -25,10 +24,11 @@ import {
   type ModelRuntimeSummaryInput,
   type ModelRuntimeMode,
 } from "../model-runtime/index.js";
+import { latestModelFailureTextForUser } from "../model-failure-visible-copy.js";
 import { friendlyUserFacingFailureText } from "../visible-text-safety.js";
 import { buildConversationHistoryMessages } from "./conversation-history.js";
 import { PanelHttpError } from "./http-utils.js";
-import { asRecord, optionalString, throwIfAborted } from "./request-parsers.js";
+import { throwIfAborted } from "./request-parsers.js";
 import { canvasTraceId } from "./runtime-records.js";
 import type { PanelRuntime } from "./runtime.js";
 import { runOrdinaryDesktopForPanel } from "./desktop-agent-execution.js";
@@ -131,7 +131,7 @@ export async function failPanelRunJob(
     return;
   }
   const eventEntries = job.runtime?.eventLog.list() ?? [];
-  const modelFailureMessage = latestModelFailureMessage(eventEntries);
+  const modelFailureMessage = latestModelFailureTextForUser(eventEntries);
   runtime.runJobs.fail(job.runId, {
     config,
     informationAccess,
@@ -139,9 +139,7 @@ export async function failPanelRunJob(
     capabilityResolution: job.capabilityResolution,
     error: {
       code: "panel_internal_error",
-      message: friendlyUserFacingFailureText(
-        modelFailureMessage ?? "本次运行失败。"
-      ),
+      message: modelFailureMessage ?? "本次运行失败。",
     },
   });
 }
@@ -377,40 +375,6 @@ export function panelConfigurationErrorMessage(code: ModelRuntimeConfigurationEr
     return "模型密钥未配置。";
   }
   return "模型未配置。";
-}
-
-function latestModelFailureMessage(eventEntries: readonly EventLogEntry[]): string | undefined {
-  const latestFailure = [...eventEntries].reverse().find((entry) => entry.type === "model.failed");
-  if (latestFailure === undefined) {
-    return undefined;
-  }
-  const failurePayload = asRecord(latestFailure.message.payload);
-  const requestId = optionalString(failurePayload.requestId);
-  const responseId = optionalString(failurePayload.responseId);
-  const requestedPayload = requestId === undefined ? {} : modelRequestedPayloadFor(eventEntries, requestId);
-  const purpose = optionalString(requestedPayload.purpose) ?? "unknown purpose";
-  const outputContract = asRecord(requestedPayload.outputContract);
-  const contractId = optionalString(outputContract.contractId) ?? "unknown contract";
-  const failureKind = optionalString(failurePayload.failureKind) ?? "model_failed";
-  const validationStatus = optionalString(failurePayload.validationStatus) ?? "unknown";
-  const retryable = failurePayload.retryable === true ? "可重试" : "不可重试";
-  const callRef = [requestId, responseId].filter((value): value is string => value !== undefined).join(" / ");
-  const location = callRef.length > 0 ? `；调用 ${callRef}` : "";
-
-  if (failureKind === "output_validation") {
-    return `真实 AI 输出未通过契约校验：${purpose} / ${contractId}；validation ${validationStatus}，${retryable}${location}。运行已停止，没有形成最终结果。`;
-  }
-  return `真实 AI 调用失败：${purpose} / ${contractId}；原因 ${failureKind}，validation ${validationStatus}，${retryable}${location}。运行已停止，没有形成最终结果。`;
-}
-
-function modelRequestedPayloadFor(eventEntries: readonly EventLogEntry[], requestId: string): Record<string, unknown> {
-  const requested = eventEntries.find((entry) => {
-    if (entry.type !== "model.requested") {
-      return false;
-    }
-    return optionalString(asRecord(entry.message.payload).requestId) === requestId;
-  });
-  return requested === undefined ? {} : asRecord(requested.message.payload);
 }
 
 function panelJobErrorMessage(error: PanelHttpError): string {

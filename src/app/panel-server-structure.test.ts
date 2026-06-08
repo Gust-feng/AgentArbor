@@ -39,6 +39,7 @@ test("panel server source keeps conversation restore and persistence split", asy
     runStreamCopy,
     runStreamContracts,
     modelProgressCopy,
+    modelFailureVisibleCopy,
   ] = await Promise.all([
     readAppSource(path.join("panel-server", "request-handler.ts")),
     readAppSource(path.join("panel-server", "conversation-history.ts")),
@@ -73,6 +74,7 @@ test("panel server source keeps conversation restore and persistence split", asy
     readAppSource("panel-run-stream-copy.ts"),
     readAppSource("panel-run-stream-contracts.ts"),
     readAppSource("panel-model-progress-copy.ts"),
+    readAppSource("model-failure-visible-copy.ts"),
   ]);
 
   assert.equal(requestHandler.includes('from "./conversation-history.js"'), false);
@@ -340,13 +342,14 @@ test("panel server source keeps conversation restore and persistence split", asy
   assert.equal(runExecution.includes('from "./desktop-agent-execution.js"'), true);
   assert.equal(runExecution.includes('from "./underground-compat-execution.js"'), true);
   assert.equal(runExecution.includes('from "./run-execution-contracts.js"'), true);
+  assert.equal(runExecution.includes('from "../model-failure-visible-copy.js"'), true);
   assert.equal(runExecution.includes("function resolveExecutionAgentDefinition"), true);
   assert.equal(runExecution.includes("agentDefinition: resolveExecutionAgentDefinition(runtime, job)"), true);
   assert.equal(runExecution.includes("agentDefinitionRef: job.agentDefinitionRef"), true);
   assert.equal(runExecution.includes("runtime.agentDefinitions.resolve(job.agentDefinitionRef)"), true);
   assert.equal(runExecution.includes("job.agentDefinitionRef.agentId !== expectedRef.agentId"), false);
   assert.equal(runExecution.includes("completed artifact"), false);
-  assert.equal(runExecution.includes("没有形成最终结果"), true);
+  assert.equal(runExecution.includes("没有形成最终结果"), false);
   assert.equal(runExecutionContracts.includes("export type PanelRunExecutionResult"), true);
   assert.equal(runExecutionContracts.includes("export type PanelRunExecutionOptions"), true);
   assert.equal(runExecutionContracts.includes("readonly agentDefinition?: AgentDefinition"), true);
@@ -412,6 +415,7 @@ test("panel server source keeps conversation restore and persistence split", asy
   assert.equal(desktopAgentExecution.includes('agent.status === "confirmation_needed"'), true);
   assert.equal(desktopAgentExecution.includes('"approval_needed"'), true);
   assert.equal(desktopAgentExecution.includes('status: agent.status === "paused" ? "blocked" : "completed"'), false);
+  assert.equal(desktopAgentExecution.includes("没有形成最终结果"), true);
   assert.equal(desktopAgentExecution.includes("desktopPanelResultFromAgent(resumed, facts, reasoningEffort)"), true);
   assert.equal(undergroundCompatExecution.includes("export async function runDeepDesktopForPanel"), true);
   assert.equal(undergroundCompatExecution.includes("export async function runUndergroundForPanel"), true);
@@ -490,11 +494,15 @@ test("panel server source keeps conversation restore and persistence split", asy
   }
   for (const privateRunExecutionDetail of [
     "async function runDesktopForPanel",
-    "function latestModelFailureMessage",
   ]) {
     assert.equal(requestHandler.includes(privateRunExecutionDetail), false);
     assert.equal(runExecution.includes(privateRunExecutionDetail), true);
   }
+  assert.equal(requestHandler.includes("latestModelFailureTextForUser"), false);
+  assert.equal(runExecution.includes("latestModelFailureTextForUser"), true);
+  assert.equal(runExecution.includes("function latestModelFailureMessage"), false);
+  assert.equal(modelFailureVisibleCopy.includes("export function latestModelFailureTextForUser"), true);
+  assert.equal(modelFailureVisibleCopy.includes("friendlyUserFacingModelFailureText"), true);
   for (const privateRunRouteDetail of [
     "async function handleRunRequest",
     "async function handleStartRunRequest",

@@ -1,5 +1,5 @@
 import { redactSensitiveText } from "../kernel/redaction.js";
-import { friendlyFailureCopy } from "./failure-copy.js";
+import { friendlyFailureCopy, friendlyModelFailureKindCopy } from "./failure-copy.js";
 
 const INTERNAL_CONTROL_BLOCK_PATTERN =
   /<\s*(start_work_session|tool_call|function_call|use_tool|internal_action|internal_control|query|arguments)\b[^>]*>[\s\S]*?<\s*\/\s*\1\s*>/gi;
@@ -55,9 +55,30 @@ export function sanitizeConversationHistoryText(value: string): string {
 }
 
 export function friendlyUserFacingFailureText(message: string | undefined): string {
+  const text = optionalFriendlyFailureMessage(message);
+  if (text === undefined) {
+    return "运行失败，但没有返回错误详情。";
+  }
+  return text;
+}
+
+export function friendlyUserFacingModelFailureText(
+  payload: Readonly<Record<string, unknown>>
+): string {
+  const failureKind = typeof payload.failureKind === "string" ? payload.failureKind : undefined;
+  const message = optionalFriendlyFailureMessage(
+    typeof payload.failureMessage === "string" ? payload.failureMessage : undefined
+  );
+  if (failureKind === "provider_response" && message !== undefined) {
+    return message;
+  }
+  return friendlyModelFailureKindCopy(failureKind) ?? message ?? "没有返回可用结果。";
+}
+
+function optionalFriendlyFailureMessage(message: string | undefined): string | undefined {
   const text = friendlyFailureCopy(sanitizeAssistantVisibleText(String(message ?? "")).trim());
   if (text.length === 0) {
-    return "运行失败，但没有返回错误详情。";
+    return undefined;
   }
   return text.length <= 1_000 ? text : `${text.slice(0, 999)}…`;
 }

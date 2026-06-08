@@ -33,6 +33,7 @@ test("basic run projection derives BasicAgentRun state and redacts ordinary goal
   assert.equal(run.status, "approval_needed");
   assert.equal(run.title, "待处理");
   assert.equal(run.currentStep, "删除操作。");
+  assert.equal(run.nextStep, undefined);
   assert.equal(run.goalSummary.includes("sk-test-secret"), false);
 });
 

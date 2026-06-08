@@ -71,14 +71,14 @@ export function visibleRunProblem(
   if (run?.status === "blocked" || run?.status === "paused") {
     return {
       title: workView?.headline ?? "任务没有完成",
-      message: visibleBlockedMessage(detail?.error?.code, detail?.error?.message) ?? visibleProblemText(workView?.currentAction) ?? "任务暂停了。你可以继续发送消息让我接着处理。",
+      message: visibleBlockedMessage(detail?.error?.code, detail?.error?.message) ?? visibleProblemText(workView?.currentAction) ?? "任务没有完成。",
       tone: "warning",
     };
   }
   if (run?.status === "failed") {
     return {
       title: "未完成",
-      message: visibleProblemText(detail?.error?.message) ?? visibleProblemText(workView?.currentAction) ?? "没有返回可用结果。你可以补充材料或重新发起。",
+      message: visibleProblemText(detail?.error?.message) ?? visibleProblemText(workView?.currentAction) ?? "没有返回可用结果。",
       tone: "error",
     };
   }
@@ -104,7 +104,7 @@ function readableAppError(error: string): string {
 
 function visibleBlockedMessage(code: string | undefined, message: string | undefined): string | undefined {
   if (code === "out_of_fuel") {
-    return "任务没有完成。你可以继续发送消息让我接着处理。";
+    return "任务没有完成。";
   }
   return visibleProblemText(message);
 }

@@ -23,7 +23,7 @@ test("visible run problem gives out-of-fuel a recoverable paused message", () =>
     ),
     {
       title: "任务没有完成",
-      message: "任务没有完成。你可以继续发送消息让我接着处理。",
+      message: "任务没有完成。",
       tone: "warning",
     }
   );

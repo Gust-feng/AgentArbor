@@ -15,6 +15,10 @@ import type { DesktopTaskSoilInput } from "../task-soil-workspace.js";
 import { redactOrdinaryText } from "../safe-projection.js";
 import { cleanConfirmationSummary, confirmationActionSummaryText } from "../confirmation-copy.js";
 import {
+  isLowValueOrdinaryAgentNote,
+  isOrdinaryTranscriptSuppressedEvent,
+} from "../ordinary-transcript-event-policy.js";
+import {
   contextAttachmentsFor,
   contextLedgerFor,
   envelopeSafeToolEvidence,
@@ -161,12 +165,22 @@ function transcriptSourceEvents(events: readonly RunEvent[]): readonly RunEvent[
 
 function visibleWorkViewEvents(events: readonly RunEvent[]): readonly RunEvent[] {
   const productEvents = events
-    .filter((event) => event.visibility !== "debug")
+    .filter((event) => !isSuppressedOrdinaryWorkViewEvent(event))
     .filter(isProductWorkViewEvent);
   const selected = productEvents.length > 0
     ? productEvents.slice(-18)
-    : events.filter((event) => event.visibility !== "debug").slice(-18);
+    : events.filter((event) => !isSuppressedOrdinaryWorkViewEvent(event)).slice(-18);
   return selected.map(projectVisibleWorkViewEvent);
+}
+
+function isSuppressedOrdinaryWorkViewEvent(event: RunEvent): boolean {
+  if (isOrdinaryTranscriptSuppressedEvent(event)) {
+    return true;
+  }
+  if ((event.type === "agent.note.completed" || event.type === "agent.note.delta") && isLowValueOrdinaryAgentNote(event.summary ?? event.delta)) {
+    return true;
+  }
+  return false;
 }
 
 function projectVisibleWorkViewEvent(event: RunEvent): RunEvent {
@@ -236,16 +250,13 @@ function headlineFor(
   deliverable: AgentDeliverable | undefined,
   answer: DesktopWorkViewAnswer | undefined
 ): string {
-  if (stage === "completed") return deliverable?.title ?? answer?.title ?? "任务已完成";
-  if (stage === "awaiting_approval") return "需要你判断下一步";
-  if (stage === "blocked") return "需要处理后再继续";
-  if (stage === "failed") return "运行失败";
-  if (stage === "cancelled") return "任务已取消";
-  if (stage === "queued") return "已加入队列";
-  if (stage === "using_tools") return "正在处理";
-  if (stage === "gathering_context") return "正在整理上下文";
-  if (stage === "composing_result") return "正在整理结果";
-  return run.title || "正在理解任务";
+  void run;
+  if (stage === "completed") return deliverable?.title ?? answer?.title ?? "";
+  if (stage === "awaiting_approval") return "待处理";
+  if (stage === "blocked") return "需要处理";
+  if (stage === "failed") return "未完成";
+  if (stage === "cancelled") return "已取消";
+  return "";
 }
 
 function currentActionFor(
@@ -268,16 +279,8 @@ function currentActionFor(
   if (run.currentStep !== undefined) {
     return run.currentStep;
   }
-  if (stage === "queued") return "等待前一个任务完成。";
-  if (stage === "completed") return "结果已经整理好。";
-  if (stage === "failed") return "查看失败摘要后可以补充材料或重新发起。";
-  if (stage === "cancelled") return "运行已经停止。";
-  if (stage === "gathering_context") return "正在整理上下文。";
-  if (stage === "using_tools") return "正在处理。";
-  if (stage === "composing_result") return "正在整理结果。";
-  if (stage === "awaiting_approval") return "等待你判断。";
-  if (stage === "blocked") return "需要重新发起或补充要求。";
-  return "正在理解任务。";
+  void stage;
+  return "";
 }
 
 function deliverableFor(input: {

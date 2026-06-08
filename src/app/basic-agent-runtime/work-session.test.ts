@@ -248,9 +248,11 @@ test("work session visible events preserve product activity instead of tail mode
   });
 
   assert.equal(workSession.visibleEvents.some((item) => item.type === "tool.completed"), true);
+  assert.equal(workSession.visibleEvents.some((item) => item.type === "run.started"), false);
   assert.equal(workSession.visibleEvents.some((item) => item.type === "model.output.delta"), false);
+  assert.equal(workSession.visibleEvents.some((item) => item.type === "model.output.completed"), false);
   assert.equal(workSession.visibleEvents.some((item) => item.type === "final.result"), false);
-  assert.equal(workSession.currentAction, "内容已整理。");
+  assert.equal(workSession.currentAction, "file notes.md · 12 bytes");
 });
 
 test("work session read model closes merged reasoning on completion event", () => {
@@ -617,7 +619,8 @@ test("work session current action does not mirror the user task text", () => {
     events: [],
   });
 
-  assert.equal(workSession.currentAction, "正在理解任务。");
+  assert.equal(workSession.headline, "");
+  assert.equal(workSession.currentAction, "");
   assert.equal(workSession.currentAction.includes("sk-user-task-secret"), false);
   assert.equal(workSession.currentAction.includes("目标"), false);
 });

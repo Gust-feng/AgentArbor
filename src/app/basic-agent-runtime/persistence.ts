@@ -44,10 +44,7 @@ export function basicRunFromRuntimeSnapshot(snapshot: RuntimeRunSnapshot): Basic
     agentDefinitionRef: snapshot.run.agentDefinitionRef ?? persisted?.agentDefinitionRef,
     createdAt: persisted?.createdAt ?? snapshot.run.createdAt,
     updatedAt: persisted?.updatedAt ?? snapshot.run.updatedAt,
-    currentStep:
-      status === "blocked" && snapshot.run.status === "running"
-        ? "无法继续原操作。请重新发起或继续处理。"
-        : latestEvent?.summary ?? persisted?.currentStep,
+    currentStep: latestEvent?.summary,
     nextStep: basicRunNextStepFromStatus(status),
     requiresUserAction: status === "approval_needed" || status === "blocked" || status === "needs_input",
     eventCursor: {

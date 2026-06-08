@@ -223,11 +223,7 @@ function basicRunCurrentStep(job: BasicAgentRunProjectionInput): string | undefi
 }
 
 function basicRunNextStep(status: AgentTaskStatus): string | undefined {
-  if (status === "approval_needed") return "等待你判断或补充要求。";
-  if (status === "needs_input") return "等待你补充要求后继续。";
-  if (status === "queued") return "等待前一个任务完成。";
-  if (status === "running") return "继续整理结果。";
-  if (status === "blocked") return "需要重新发起或补充要求。";
+  void status;
   return undefined;
 }
 

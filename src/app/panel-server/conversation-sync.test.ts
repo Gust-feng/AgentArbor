@@ -152,7 +152,7 @@ test("syncConversationTurnForJob keeps concrete confirmation preview", () => {
   assert.equal(assistant?.content, "删除文件：C:\\repo\\old.txt");
 });
 
-test("syncConversationTurnForJob keeps needs-input turns visible as user-action summaries", () => {
+test("syncConversationTurnForJob keeps needs-input turns as empty user-action shells", () => {
   const { conversations, job } = startedConversationJob();
 
   syncConversationTurnForJob({
@@ -164,12 +164,13 @@ test("syncConversationTurnForJob keeps needs-input turns visible as user-action 
   const summary = conversations.list().find((item) => item.conversationId === job.conversationId);
   const assistant = conversations.getReadModel(job.conversationId ?? "")?.turns.find((turn) => turn.role === "assistant");
   assert.equal(assistant?.title, "需要补充");
-  assert.equal(assistant?.content, "需要补充材料或说明。");
+  assert.equal(assistant?.content, "");
   assert.equal(assistant?.content.includes("已收到补充指导"), false);
   assert.equal(assistant?.content.includes("已收到补充要求"), false);
   assert.equal(assistant?.status, "needs_input");
   assert.equal(summary?.status, "needs_input");
   assert.equal(summary?.requiresUserAction, true);
+  assert.equal(summary?.currentAction, "");
   assert.equal(summary?.nextStep, "");
 });
 

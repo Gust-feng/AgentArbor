@@ -102,7 +102,7 @@ export function syncConversationTurnForJob(input: {
       assistantTurnId: job.assistantTurnId,
       runId: job.runId,
       title: "需要补充",
-      content: sanitizeAssistantVisibleText("需要补充材料或说明。"),
+      content: "",
       status: "needs_input",
       responseModel,
     });

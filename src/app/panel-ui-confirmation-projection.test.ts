@@ -6,6 +6,7 @@ import {
   pendingForTurn,
   timelineConfirmationProjection,
 } from "./panel-transcript-confirmation-projection.js";
+import { projectConfirmationDisplay } from "./panel-confirmation-display-projection.js";
 
 type TestConfirmation = ConfirmationIdentity & {
   readonly runId: string;
@@ -57,6 +58,52 @@ test("pending confirmation projection stays scoped to the owning turn", () => {
   assert.equal(pendingForTurn(pending, "run-1")?.confirmationId, "confirmation-current");
   assert.equal(pendingForTurn(pending, "run-2"), undefined);
   assert.equal(pendingForTurn(pending, undefined), undefined);
+});
+
+test("confirmation display projection keeps only concrete action copy", () => {
+  const view = projectConfirmationDisplay({
+    title: "需要你判断",
+    actionSummary: "运行命令：pnpm test",
+    riskLevel: "high",
+  });
+
+  assert.equal(view.title, "运行命令：pnpm test");
+  assert.equal(view.actionPreview, "pnpm test");
+  assert.equal(view.showActionPreview, true);
+  assert.equal(view.riskLevel, "high");
+});
+
+test("confirmation display projection filters internal resources and resume loss", () => {
+  const view = projectConfirmationDisplay({
+    title: "删除文件",
+    actionSummary: "删除文件：old.txt",
+    affectedResources: [
+      "old.txt",
+      "new.txt",
+      "README.md",
+      "package.json",
+      "src/app/index.ts",
+      "docs/guide.md",
+      "hidden-by-limit.txt",
+      "tool:call-delete",
+      "model_call:model-1",
+      "call_delete_123456789",
+    ],
+    riskLevel: "unknown",
+    resumeAvailability: "lost_after_restart",
+  });
+
+  assert.deepEqual(view.resources, [
+    "old.txt",
+    "new.txt",
+    "README.md",
+    "package.json",
+    "src/app/index.ts",
+    "docs/guide.md",
+  ]);
+  assert.equal(view.riskLevel, "medium");
+  assert.equal(view.resumeLost, true);
+  assert.equal(view.resumeLostSummary, "需重新发起。");
 });
 
 function confirmation(

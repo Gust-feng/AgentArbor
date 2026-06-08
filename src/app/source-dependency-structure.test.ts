@@ -276,13 +276,19 @@ test("ordinary Desktop Agent entry does not import legacy desktop chat compatibi
   assert.deepEqual(violations, [], "new ordinary Agent code should import desktop-agent-session directly");
 });
 
-test("confirmation copy has a single shared app owner", async () => {
+test("confirmation copy and display projection stay app-owned", async () => {
   const appRoot = path.join(process.cwd(), "src", "app");
-  const transcriptConfirmation = await readSource(path.join(appRoot, "panel-ui", "src", "components", "transcript-confirmation.tsx"));
+  const [transcriptConfirmation, confirmationDisplayProjection] = await Promise.all([
+    readSource(path.join(appRoot, "panel-ui", "src", "components", "transcript-confirmation.tsx")),
+    readSource(path.join(appRoot, "panel-confirmation-display-projection.ts")),
+  ]);
 
   assert.equal(fileExistsSync(path.join(appRoot, "confirmation-copy.ts")), true);
   assert.equal(fileExistsSync(path.join(appRoot, "panel-confirmation-copy.ts")), false);
-  assert.equal(transcriptConfirmation.includes("../../../confirmation-copy"), true);
+  assert.equal(fileExistsSync(path.join(appRoot, "panel-confirmation-display-projection.ts")), true);
+  assert.equal(confirmationDisplayProjection.includes('from "./confirmation-copy.js"'), true);
+  assert.equal(transcriptConfirmation.includes("../../../confirmation-copy"), false);
+  assert.equal(transcriptConfirmation.includes("../../../panel-confirmation-display-projection"), true);
   assert.equal(transcriptConfirmation.includes("panel-confirmation-copy"), false);
 });
 

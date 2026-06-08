@@ -10,6 +10,7 @@ test("panel UI chat and transcript modules stay presentation-focused", async () 
     chatTranscriptChain,
     transcriptTimeline,
     transcriptConfirmationProjection,
+    confirmationDisplayProjection,
     transcriptTimelineCopy,
     agentWorkTimelineProjection,
     transcriptConfirmation,
@@ -42,6 +43,7 @@ test("panel UI chat and transcript modules stay presentation-focused", async () 
     readPanelUiSource(path.join("components", "chat-transcript-chain.tsx")),
     readPanelUiSource(path.join("components", "transcript-timeline.tsx")),
     readAppSource("panel-transcript-confirmation-projection.ts"),
+    readAppSource("panel-confirmation-display-projection.ts"),
     readAppSource("panel-transcript-activity-copy.ts"),
     readAppSource("panel-agent-work-timeline-view.ts"),
     readPanelUiSource(path.join("components", "transcript-confirmation.tsx")),
@@ -154,6 +156,9 @@ test("panel UI chat and transcript modules stay presentation-focused", async () 
   assert.equal(transcriptConfirmationProjection.includes("export function timelineConfirmationProjection"), true);
   assert.equal(transcriptConfirmationProjection.includes("export function confirmationForNode"), true);
   assert.equal(transcriptConfirmationProjection.includes("export function pendingForTurn"), true);
+  assert.equal(confirmationDisplayProjection.includes("export function projectConfirmationDisplay"), true);
+  assert.equal(confirmationDisplayProjection.includes("cleanConfirmationSummary"), true);
+  assert.equal(confirmationDisplayProjection.includes("需重新发起。"), true);
   assert.equal(transcriptTimeline.includes("agent-workline-current"), false);
   assert.equal(transcriptTimeline.includes("agent-workline-confirmation"), false);
   assert.equal(transcriptTimeline.includes("agent-activity-rail"), false);
@@ -339,6 +344,12 @@ test("panel UI chat and transcript modules stay presentation-focused", async () 
   assert.equal(chatActive.includes("继续输入..."), true);
   assert.equal(chatActive.includes('props.onDecision("guidance", guidance)'), true);
   assert.equal(transcriptTimeline.includes('props.busy ? "处理中" : "允许"'), false);
+  assert.equal(transcriptConfirmation.includes("cleanConfirmationSummary"), false);
+  assert.equal(transcriptConfirmation.includes("isInternalReference"), false);
+  assert.equal(transcriptConfirmation.includes("confirmationAffectedResources"), false);
+  assert.equal(transcriptConfirmation.includes("confirmationDisplayTitle"), false);
+  assert.equal(transcriptConfirmation.includes("需重新发起。"), false);
+  assert.equal(transcriptConfirmation.includes("projectConfirmationDisplay"), true);
   assert.equal(transcriptConfirmation.includes('props.busy ? "提交中" : "继续"'), false);
   assert.equal(transcriptConfirmation.includes('props.busy ? "执行中" : "执行"'), true);
   assert.equal(transcriptConfirmation.includes('props.busy ? "提交中" : "确认继续"'), false);

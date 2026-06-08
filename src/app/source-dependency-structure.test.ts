@@ -102,6 +102,20 @@ test("Basic Agent run executor consumes prepared start facts instead of route in
   ]);
 
   assert.equal(contractsSource.includes("readonly prepareRunStart"), true);
+  const executionResultSource = contractsSource.slice(
+    contractsSource.indexOf("export type BasicAgentRunExecutionResult"),
+    contractsSource.indexOf("export type BasicAgentPendingToolContinuation")
+  );
+  const startFactsSource = contractsSource.slice(
+    contractsSource.indexOf("export type BasicAgentRunStartFacts"),
+    contractsSource.indexOf("export type BasicAgentRunStartInput")
+  );
+  assert.equal(
+    executionResultSource.includes("agentDefinitionRef"),
+    false,
+    "execution results must not be able to override the AgentDefinition ref frozen at run birth"
+  );
+  assert.equal(startFactsSource.includes("readonly agentDefinitionRef?: RunAgentDefinitionRef"), true);
   assert.equal(executorSource.includes("resolveBasicAgentRunMode(input.runKind, input.runMode)"), true);
   assert.equal(executorSource.includes("this.config.prepareRunStart(startInput)"), true);
   for (const routeInfrastructureDetail of [

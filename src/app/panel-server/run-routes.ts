@@ -220,7 +220,7 @@ async function handleGetRunRequest(
   }
   const snapshot = await runtime.runtimeDatabase?.getRun(runId);
   if (snapshot === undefined || snapshot.run.runKind !== expectedRunKind) {
-    throw new PanelHttpError(404, "run_not_found", runNotFoundMessage(expectedRunKind));
+    throw new PanelHttpError(404, "run_not_found", runNotFoundMessage());
   }
   writeJson(response, 200, await createPersistedRunResponse(runtime, snapshot));
 }
@@ -235,7 +235,7 @@ function handleGetRunStreamRequest(
 ): void {
   const job = runtime.runJobs.get(runId);
   if (job === undefined || job.runKind !== expectedRunKind) {
-    throw new PanelHttpError(404, "run_not_found", runNotFoundMessage(expectedRunKind));
+    throw new PanelHttpError(404, "run_not_found", runNotFoundMessage());
   }
 
   let lastSequence = parseStreamCursor(url.searchParams.get("cursor"), request.headers["last-event-id"]);
@@ -319,8 +319,8 @@ async function createPersistedRunResponse(
   });
 }
 
-function runNotFoundMessage(runKind: PanelRunKind): string {
-  return runKind === "desktop" ? "未找到 Desktop Shell 运行 job。" : "未找到地下兼容运行 job。";
+function runNotFoundMessage(): string {
+  return "未找到运行。";
 }
 
 function resolveRunModeForRoute(

@@ -8,9 +8,9 @@ import type {
 import { createMinimalRuntime } from "./runtime.js";
 import {
   createDesktopToolCenterFactory,
-  desktopCapabilitySnapshotForRunStart,
   prepareDesktopRunResources,
 } from "./panel-server/desktop-run-resources.js";
+import { desktopCapabilitySnapshotForRunStart } from "./panel-server/desktop-run-model-settings.js";
 import { PanelHttpError } from "./panel-server/http-utils.js";
 import type { PanelRuntime } from "./panel-server/runtime.js";
 

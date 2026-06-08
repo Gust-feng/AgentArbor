@@ -84,7 +84,6 @@ export type BasicAgentRunExecutionResult = {
   readonly config?: SanitizedModelProviderConfig;
   readonly informationAccess?: SanitizedInformationAccessConfig;
   readonly capabilitySnapshot?: BasicAgentCapabilitySnapshot;
-  readonly agentDefinitionRef?: RunAgentDefinitionRef;
   readonly summary?: RunSummary;
   readonly observation?: unknown;
   readonly agentRunTree?: AgentRunTreeAttachment;

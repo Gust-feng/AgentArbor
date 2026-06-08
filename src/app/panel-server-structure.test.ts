@@ -32,6 +32,7 @@ test("panel server source keeps conversation restore and persistence split", asy
     runExecution,
     runExecutionContracts,
     desktopRunResources,
+    desktopRunModelSettings,
     desktopAgentExecution,
     undergroundCompatExecution,
     runStreamEvents,
@@ -65,6 +66,7 @@ test("panel server source keeps conversation restore and persistence split", asy
     readAppSource(path.join("panel-server", "run-execution.ts")),
     readAppSource(path.join("panel-server", "run-execution-contracts.ts")),
     readAppSource(path.join("panel-server", "desktop-run-resources.ts")),
+    readAppSource(path.join("panel-server", "desktop-run-model-settings.ts")),
     readAppSource(path.join("panel-server", "desktop-agent-execution.ts")),
     readAppSource(path.join("panel-server", "underground-compat-execution.ts")),
     readAppSource("panel-run-stream-events.ts"),
@@ -317,6 +319,8 @@ test("panel server source keeps conversation restore and persistence split", asy
   assert.equal(panelRuntime.includes('resolvePanelRunMode, type PanelRunJob'), true);
   assert.equal(panelRunStartPreparationSource.includes("resolvePanelRunMode(input.runKind, input.runMode) === \"agent\""), true);
   assert.equal(panelRunStartPreparationSource.includes('input.runMode ?? "agent"'), false);
+  assert.equal(panelRuntime.includes('from "./desktop-run-model-settings.js"'), true);
+  assert.equal(panelRuntime.includes('from "./desktop-run-resources.js"'), false);
   assert.equal(panelRuntime.includes('from "./live-model-stream.js"'), true);
   assert.equal(panelRuntime.includes('from "./conversation-sync.js"'), true);
   assert.equal(skillService.includes("export async function listPanelSkills"), true);
@@ -356,15 +360,19 @@ test("panel server source keeps conversation restore and persistence split", asy
   assert.equal(desktopRunResources.includes("createConfiguredToolCenterFactory"), false);
   assert.equal(desktopRunResources.includes("createDefaultToolCenter"), true);
   assert.equal(desktopRunResources.includes("function toolStatesFromCapabilitySnapshot"), true);
-  assert.equal(desktopRunResources.includes("function activeModelWithRunOpenAISettings"), true);
+  assert.equal(desktopRunResources.includes("effectiveDesktopCapabilitySnapshotForRun"), true);
   assert.equal(desktopRunResources.includes("desktop_information_access_required"), true);
   assert.equal(desktopRunResources.includes("informationAccess: options.informationAccess"), true);
-  assert.equal(desktopRunResources.includes("modelCapabilities.supportsParallelToolCalls"), true);
-  assert.equal(desktopRunResources.includes("modelCapabilities.supportsReasoningEffort"), true);
   assert.equal(desktopRunResources.includes("modelCapabilities.supportsStreaming ? \"force_live\" : \"respect_profile\""), true);
-  assert.equal(desktopRunResources.includes("modelCapabilities.supportsStreaming ? profileStream : false"), true);
   assert.equal(desktopRunResources.includes("createModelRuntimeEnvironment({"), true);
   assert.equal(desktopRunResources.includes("createUndergroundAiEnvironment"), false);
+  assert.equal(desktopRunModelSettings.includes("export function desktopCapabilitySnapshotForRunStart"), true);
+  assert.equal(desktopRunModelSettings.includes("export function effectiveDesktopCapabilitySnapshotForRun"), true);
+  assert.equal(desktopRunModelSettings.includes("function activeModelWithRunOpenAISettings"), true);
+  assert.equal(desktopRunModelSettings.includes("modelCapabilities.supportsParallelToolCalls"), true);
+  assert.equal(desktopRunModelSettings.includes("modelCapabilities.supportsReasoningEffort"), true);
+  assert.equal(desktopRunModelSettings.includes("modelCapabilities.supportsStreaming ? profileStream : false"), true);
+  assert.equal(desktopRunModelSettings.includes("unsupported_model_reasoning_effort"), true);
   const desktopToolCenterFactorySource = sourceAfter(desktopRunResources, "export function createDesktopToolCenterFactory");
   assert.equal(desktopToolCenterFactorySource.includes("runtime.configCenter"), false);
   assert.equal(desktopToolCenterFactorySource.includes("runtime.capabilityCenter"), false);
@@ -507,10 +515,15 @@ test("panel server source keeps conversation restore and persistence split", asy
   }
   for (const movedDesktopResourceDetail of [
     "function toolStatesFromCapabilitySnapshot",
-    "function activeModelWithRunOpenAISettings",
   ]) {
     assert.equal(runExecution.includes(movedDesktopResourceDetail), false);
     assert.equal(desktopRunResources.includes(movedDesktopResourceDetail), true);
+  }
+  for (const desktopRunModelSettingDetail of [
+    "function activeModelWithRunOpenAISettings",
+  ]) {
+    assert.equal(runExecution.includes(desktopRunModelSettingDetail), false);
+    assert.equal(desktopRunModelSettings.includes(desktopRunModelSettingDetail), true);
   }
   for (const ordinaryDesktopDetail of ["runDesktopAgentSession", "function desktopPanelResultFromAgent"]) {
     assert.equal(runExecution.includes(ordinaryDesktopDetail), false);

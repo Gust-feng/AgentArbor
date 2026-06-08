@@ -1,7 +1,5 @@
 import type {
   BasicAgentCapabilitySnapshot,
-  ModelCapabilities,
-  ModelRunReasoningEffort,
   SanitizedModelProviderConfig,
   ToolStateSettings,
 } from "../../domain/config/index.js";
@@ -15,6 +13,7 @@ import { PanelHttpError } from "./http-utils.js";
 import type { PanelRuntime } from "./runtime.js";
 import type { MinimalRuntime } from "../runtime.js";
 import type { DesktopRunResources, PanelRunExecutionOptions } from "./run-execution-contracts.js";
+import { effectiveDesktopCapabilitySnapshotForRun } from "./desktop-run-model-settings.js";
 
 function toolStatesFromCapabilitySnapshot(snapshot: BasicAgentCapabilitySnapshot): readonly ToolStateSettings[] {
   return snapshot.toolCatalog.tools.map((tool) => ({
@@ -100,72 +99,6 @@ export async function prepareDesktopRunResources(
       (tool) => tool.name === "browser_snapshot" && tool.availability === "available"
     ),
   };
-}
-
-export function desktopCapabilitySnapshotForRunStart(
-  snapshot: BasicAgentCapabilitySnapshot,
-  reasoningEffort: ModelRunReasoningEffort | undefined
-): BasicAgentCapabilitySnapshot {
-  return effectiveDesktopCapabilitySnapshotForRun(
-    snapshot,
-    snapshot.modelCapabilities.supportsReasoningEffort ? reasoningEffort : undefined
-  );
-}
-
-function effectiveDesktopCapabilitySnapshotForRun(
-  snapshot: BasicAgentCapabilitySnapshot,
-  reasoningEffort: ModelRunReasoningEffort | undefined
-): BasicAgentCapabilitySnapshot {
-  const activeModel = activeModelWithRunOpenAISettings(
-    snapshot.activeModel,
-    snapshot.modelCapabilities,
-    reasoningEffort
-  );
-  return activeModel === snapshot.activeModel ? snapshot : { ...snapshot, activeModel };
-}
-
-function activeModelWithRunOpenAISettings(
-  activeModel: SanitizedModelProviderConfig,
-  modelCapabilities: ModelCapabilities,
-  reasoningEffort: ModelRunReasoningEffort | undefined
-): SanitizedModelProviderConfig {
-  const {
-    reasoningEffort: _profileReasoningEffort,
-    reasoningSummary: profileReasoningSummary,
-    parallelToolCalls: profileParallelToolCalls,
-    stream: profileStream,
-    ...baseOpenAI
-  } = activeModel.openAI ?? {};
-  if (reasoningEffort !== undefined && !modelCapabilities.supportsReasoningEffort) {
-    throw new PanelHttpError(
-      400,
-      "unsupported_model_reasoning_effort",
-      "当前模型不支持调节思考强度。"
-    );
-  }
-  const openAI = removeUndefinedOpenAISettings({
-    ...baseOpenAI,
-    ...(modelCapabilities.supportsReasoningEffort && profileReasoningSummary !== undefined
-      ? { reasoningSummary: profileReasoningSummary }
-      : {}),
-    ...(modelCapabilities.supportsParallelToolCalls && profileParallelToolCalls !== undefined
-      ? { parallelToolCalls: profileParallelToolCalls }
-      : {}),
-    ...(profileStream !== undefined || !modelCapabilities.supportsStreaming
-      ? { stream: modelCapabilities.supportsStreaming ? profileStream : false }
-      : {}),
-    ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
-  });
-  return {
-    ...activeModel,
-    openAI: Object.keys(openAI).length === 0 ? undefined : openAI,
-  };
-}
-
-function removeUndefinedOpenAISettings<T extends Record<string, unknown>>(settings: T): T {
-  return Object.fromEntries(
-    Object.entries(settings).filter(([, value]) => value !== undefined)
-  ) as T;
 }
 
 function isRealDesktopAiMode(aiMode: ModelRuntimeMode): boolean {

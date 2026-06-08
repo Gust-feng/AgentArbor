@@ -140,8 +140,7 @@ export async function failPanelRunJob(
     error: {
       code: "panel_internal_error",
       message: friendlyUserFacingFailureText(
-        modelFailureMessage ??
-          (job.runKind === "desktop" ? "Desktop Shell 运行 job 失败。" : "地下兼容运行 job 失败。")
+        modelFailureMessage ?? "本次运行失败。"
       ),
     },
   });

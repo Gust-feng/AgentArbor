@@ -123,7 +123,7 @@ async function handleGetBasicWorkSessionRequest(
 ): Promise<void> {
   const view = await createBasicAgentRunViewReadModel(runtime, runId, 0);
   if (view === undefined) {
-    throw new PanelHttpError(404, "run_not_found", "未找到基础 Agent 工作会话。");
+    throw new PanelHttpError(404, "run_not_found", "未找到基础 Agent 运行。");
   }
   writeJson(response, 200, {
     ok: true,

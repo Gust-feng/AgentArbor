@@ -3,7 +3,7 @@ import type { TaskStatus } from "./contracts/common";
 export const STATUS_LABELS: Record<TaskStatus, string> = {
   queued: "排队中",
   planning: "准备中",
-  running: "处理中",
+  running: "进行中",
   needs_input: "需要补充",
   approval_needed: "待处理",
   paused: "已中断",

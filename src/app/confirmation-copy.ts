@@ -45,7 +45,7 @@ export function basicConfirmationDecisionSummary(
   decision: Pick<ConfirmationDecision, "decision" | "guidance">
 ): string {
   if (decision.decision === "approve_once") {
-    return "已继续。";
+    return "已允许。";
   }
   if (decision.decision === "deny") {
     return "已不执行。";
@@ -96,6 +96,7 @@ const GENERIC_CONFIRMATION_PROMPTS = new Set([
 
 const GENERIC_APPROVAL_DECISION_TEXT = new Set([
   "已继续",
+  "已允许",
   "继续处理",
   "继续执行",
   "工作继续推进",

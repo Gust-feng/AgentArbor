@@ -47,7 +47,7 @@ export function ConfirmationNode(props: {
               onClick={() => props.onDecision?.("approve_once")}
               disabled={props.busy || resumeLost}
             >
-              {props.busy ? "提交中" : "继续"}
+              {props.busy ? "执行中" : "执行"}
             </button>
             <button
               type="button"

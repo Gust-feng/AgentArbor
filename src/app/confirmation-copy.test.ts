@@ -29,7 +29,7 @@ test("confirmation copy removes generic waiting prompts", () => {
 });
 
 test("confirmation decision copy is shared and redacts guidance", () => {
-  assert.equal(basicConfirmationDecisionSummary({ decision: "approve_once" }), "已继续。");
+  assert.equal(basicConfirmationDecisionSummary({ decision: "approve_once" }), "已允许。");
   assert.equal(basicConfirmationDecisionSummary({ decision: "deny" }), "已不执行。");
   assert.equal(
     basicConfirmationDecisionSummary({
@@ -49,6 +49,7 @@ test("confirmation decision copy is shared and redacts guidance", () => {
 
 test("generic approval copy is treated as low-value projection text", () => {
   assert.equal(cleanConfirmationSummary("已继续。"), "");
+  assert.equal(cleanConfirmationSummary("已允许。"), "");
   assert.equal(cleanConfirmationSummary("用户反馈已收到，工作继续推进。"), "");
   assert.equal(isGenericApprovalDecisionText("继续处理。"), true);
   assert.equal(isGenericApprovalDecisionText("已不执行。"), false);

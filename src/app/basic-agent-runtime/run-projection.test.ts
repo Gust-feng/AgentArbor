@@ -187,7 +187,7 @@ test("basic run projection keeps denied decisions visible as current step", () =
 });
 
 test("basic projection summarizes confirmation decisions safely", () => {
-  assert.equal(basicConfirmationDecisionSummary({ decision: "approve_once" }), "已继续。");
+  assert.equal(basicConfirmationDecisionSummary({ decision: "approve_once" }), "已允许。");
   assert.equal(basicConfirmationDecisionSummary({ decision: "deny" }), "已不执行。");
   assert.match(
     basicConfirmationDecisionSummary({ decision: "guidance", guidance: "继续，但不要暴露 token=sk-test-token-1234567890" }),

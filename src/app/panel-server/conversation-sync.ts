@@ -206,7 +206,7 @@ function assistantTurnFromResponse(
     const summary = report.decisionSummary.trim().length > 0 ? report.decisionSummary : `已生成：${report.title}`;
     const nextAction = report.nextActions[0];
     return {
-      title: "结果已生成",
+      title: "已完成",
       content: sanitizeAssistantVisibleText(nextAction === undefined ? summary : `${summary}\n下一步：${nextAction}`),
     };
   }
@@ -322,12 +322,12 @@ function isModelOutputBoundaryEvent(event: PanelRunTranscript["events"][number])
 
 function runningPreviewTitle(event: PanelRunTranscript["events"][number]): string {
   if (event.type === "confirmation.needed") return "需要确认";
-  if (event.type === "tool.requested") return "正在执行动作";
-  if (event.type === "tool.completed") return "动作已完成";
-  if (event.type === "tool.failed") return "动作未完成";
-  if (event.type === "user_approval.received" || event.type === "run.resumed") return "继续执行";
-  if (event.type === "user.guidance") return "收到补充";
-  if (event.type === "model.reasoning.delta" || event.type === "model.side.completed") return "正在思考";
+  if (event.type === "tool.requested") return "正在处理";
+  if (event.type === "tool.completed") return "已处理";
+  if (event.type === "tool.failed") return "未完成";
+  if (event.type === "user_approval.received" || event.type === "run.resumed") return "继续处理";
+  if (event.type === "user.guidance") return "补充要求";
+  if (event.type === "model.reasoning.delta" || event.type === "model.side.completed") return "正在整理";
   if (event.type === "model.output.delta") return "正在回复";
   if (event.type === "context.compaction.completed") return "整理上下文";
   if (event.type === "context.compaction.failed") return "上下文整理失败";

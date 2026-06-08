@@ -166,6 +166,9 @@ test("panel React workbench consumes Basic Agent projection APIs", async () => {
   assert.equal(text.includes("agent.child.completed"), false);
   assert.equal(text.includes("agent.child.waiting"), false);
   assert.equal(text.includes("agent.parent_synthesis.completed"), false);
+  assert.equal(text.includes("eventTitle"), false);
+  assert.equal(text.includes("agent.note.delta"), false);
+  assert.equal(text.includes("model.reasoning.delta"), false);
   assert.equal(runtime.includes("/work-session"), false);
   assert.equal(app.includes("/api/context/attachments/preview"), false);
   assert.equal(appConfigActions.includes("/api/context/attachments/preview"), false);

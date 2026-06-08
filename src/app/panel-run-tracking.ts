@@ -431,7 +431,7 @@ function waitingPointFor(
     return "未完成，请查看错误摘要。";
   }
   if (status === "completed") {
-    return runMode === "agent" ? "已完成，结果已生成。" : "已完成，报告或终态摘要已形成。";
+    return runMode === "agent" ? "已完成。" : "已完成，报告或终态摘要已形成。";
   }
   if (runMode === "agent") {
     return ordinaryAgentWaitingPoint(lastEventType);
@@ -500,11 +500,11 @@ function ordinaryAgentWaitingPoint(lastEventType: ArborMessageType | undefined):
     case "context.compaction.failed":
       return "上下文整理失败。";
     case "tool.requested":
-      return "正在执行动作。";
+      return "正在处理。";
     case "tool.completed":
-      return "动作已完成。";
+      return "已处理。";
     case "tool.failed":
-      return "动作未完成。";
+      return "未完成。";
     case "user_approval.requested":
       return "等待用户确认后继续。";
     case "user_approval.received":

@@ -51,7 +51,7 @@ test("basic stream event projection maps refs and safe summaries into RunEvent",
     toolCallRefs: ["tool-1"],
   });
 
-  assert.equal(event.title, "动作已完成");
+  assert.equal(event.title, "动作");
   assert.equal(event.status, "running");
   assert.equal(event.visibility, "expanded");
   assert.equal(event.summary?.includes("sk-test-token"), false);

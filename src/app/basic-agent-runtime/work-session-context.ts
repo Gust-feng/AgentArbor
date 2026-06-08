@@ -295,7 +295,7 @@ function toolLedgerSummary(display: ToolDisplayProjection): string {
   if (display.kind === "browser_snapshot") return redactOrdinaryText(display.title ?? display.url ?? "网页已读取。", 240);
   if (display.kind === "command_summary") return redactOrdinaryText(display.command ?? "命令已执行。", 240);
   if (display.kind === "file_change_summary" || display.kind === "file_diff_preview") return redactOrdinaryText(display.path ?? "文件变更摘要。", 240);
-  return redactOrdinaryText(display.summary ?? display.action ?? "动作已完成。", 240);
+  return redactOrdinaryText(display.summary ?? display.action ?? "已处理。", 240);
 }
 
 function mergeContextAttachments(

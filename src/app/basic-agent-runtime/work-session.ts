@@ -225,7 +225,7 @@ function headlineFor(
   if (stage === "failed") return "运行失败";
   if (stage === "cancelled") return "任务已取消";
   if (stage === "queued") return "已加入队列";
-  if (stage === "using_tools") return "正在执行动作";
+  if (stage === "using_tools") return "正在处理";
   if (stage === "gathering_context") return "正在整理上下文";
   if (stage === "composing_result") return "正在整理结果";
   return run.title || "正在理解任务";

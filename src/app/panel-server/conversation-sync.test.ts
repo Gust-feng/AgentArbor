@@ -351,7 +351,7 @@ test("syncConversationTurnForJob suppresses pre-tool model output after confirma
   });
 
   const assistant = conversations.getReadModel(job.conversationId ?? "")?.turns.find((turn) => turn.role === "assistant");
-  assert.equal(assistant?.title, "继续执行");
+  assert.equal(assistant?.title, "继续处理");
   assert.equal(assistant?.content.includes("探索已经开始"), false);
   assert.equal(assistant?.content, "继续执行。");
 });
@@ -403,7 +403,7 @@ test("syncConversationTurnForJob waits for post-tool model output before showing
   });
 
   const assistant = conversations.getReadModel(job.conversationId ?? "")?.turns.find((turn) => turn.role === "assistant");
-  assert.equal(assistant?.title, "动作已完成");
+  assert.equal(assistant?.title, "已处理");
   assert.equal(assistant?.content.includes("我先运行命令"), false);
   assert.equal(assistant?.content, "dir · exit 0");
 
@@ -661,7 +661,7 @@ test("syncConversationPreviewsForRunningJobs skips queued and terminal jobs whil
   });
 
   const assistant = conversations.getReadModel(job.conversationId ?? "")?.turns.find((turn) => turn.role === "assistant");
-  assert.equal(assistant?.title, "正在执行动作");
+  assert.equal(assistant?.title, "正在处理");
   assert.equal(assistant?.content, "目标：README.md");
 });
 

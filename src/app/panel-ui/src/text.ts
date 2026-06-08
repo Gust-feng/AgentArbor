@@ -1,5 +1,4 @@
 import type { TaskStatus } from "./contracts/common";
-import type { RunEvent } from "./contracts/run";
 
 export const STATUS_LABELS: Record<TaskStatus, string> = {
   queued: "排队中",
@@ -13,28 +12,6 @@ export const STATUS_LABELS: Record<TaskStatus, string> = {
   failed: "未完成",
   cancelled: "已取消",
 };
-
-export function eventTitle(event: RunEvent): string {
-  if (event.type === "run.started") return "开始处理";
-  if (event.type === "run.resumed") return "继续处理";
-  if (event.type === "tool.requested") return "正在执行动作";
-  if (event.type === "tool.completed") return "动作完成";
-  if (event.type === "tool.failed") return "动作未完成";
-  if (event.type === "context.compaction.completed") return "上下文已整理";
-  if (event.type === "context.compaction.failed") return "上下文整理失败";
-  if (event.type === "confirmation.needed") return "需要确认";
-  if (event.type === "user_approval.received") return "收到确认";
-  if (event.type === "user.guidance") return "收到补充指导";
-  if (event.type === "agent.note.delta") return "正在判断";
-  if (event.type === "agent.note.completed") return "判断完成";
-  if (event.type === "model.reasoning.delta") return "正在思考";
-  if (event.type === "model.reasoning.completed") return "思考完成";
-  if (event.type === "final.result") return "结果已生成";
-  if (event.type === "run.failed") return "未完成";
-  if (event.type === "run.cancelled") return "已取消";
-  if (event.type === "run.blocked") return "需要处理";
-  return event.title || "状态更新";
-}
 
 export function statusTone(status: TaskStatus | string | undefined): string {
   if (status === "completed") return "success";

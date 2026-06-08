@@ -105,23 +105,21 @@ export function projectRunStreamEventToRunEvent(event: BasicAgentRunStreamEventP
 }
 
 function basicEventTitle(event: BasicAgentRunStreamEventProjectionInput): string {
-  if (event.type === "run.started") return "任务已开始";
-  if (event.type === "run.cancelled") return "任务已取消";
-  if (event.type === "run.blocked") return "任务已暂停";
-  if (event.type === "run.resumed") return "任务继续";
-  if (event.type === "model.reasoning.delta") return "正在思考";
-  if (event.type === "model.reasoning.completed") return "思考完成";
-  if (event.type === "tool.requested") return "正在执行动作";
-  if (event.type === "tool.completed") return "动作已完成";
-  if (event.type === "tool.failed") return "动作未完成";
-  if (event.type === "context.compaction.completed") return "上下文已整理";
-  if (event.type === "context.compaction.failed") return "上下文整理失败";
+  const label = event.agentLabel?.trim();
+  if (label !== undefined && label.length > 0) return label;
+  if (event.type === "run.started") return "任务";
+  if (event.type === "run.cancelled") return "已取消";
+  if (event.type === "run.blocked") return "需要处理";
+  if (event.type === "run.resumed") return "继续处理";
+  if (event.type === "tool.requested" || event.type === "tool.completed") return "动作";
+  if (event.type === "tool.failed") return "未完成";
+  if (event.type === "context.compaction.completed" || event.type === "context.compaction.failed") return "上下文";
   if (event.type === "confirmation.needed") return "需要确认";
-  if (event.type === "user_approval.received") return "收到确认结果";
-  if (event.type === "user.guidance") return "收到用户指导";
-  if (event.type === "final.result") return "结果已生成";
-  if (event.type === "run.failed") return "运行未完成";
-  return event.agentLabel ?? "工作状态更新";
+  if (event.type === "user_approval.received") return "已确认";
+  if (event.type === "user.guidance") return "补充要求";
+  if (event.type === "final.result") return "结果";
+  if (event.type === "run.failed") return "未完成";
+  return "更新";
 }
 
 function basicStatusForRunEvent(event: BasicAgentRunStreamEventProjectionInput): AgentTaskStatus {

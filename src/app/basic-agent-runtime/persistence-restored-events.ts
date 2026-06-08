@@ -120,19 +120,18 @@ function basicEventTypeForRuntimeEvent(type: RuntimeRunSnapshot["events"][number
 }
 
 function basicEventTitleFromType(type: string): string {
-  if (type === "run.started") return "任务已开始";
-  if (type === "run.cancelled") return "任务已取消";
-  if (type === "run.blocked") return "任务已暂停";
-  if (type === "run.resumed") return "任务继续";
-  if (type === "tool.requested") return "正在执行动作";
-  if (type === "tool.completed") return "动作已完成";
-  if (type === "tool.failed") return "动作未完成";
+  if (type === "run.started") return "任务";
+  if (type === "run.cancelled") return "已取消";
+  if (type === "run.blocked") return "需要处理";
+  if (type === "run.resumed") return "继续处理";
+  if (type === "tool.requested" || type === "tool.completed") return "动作";
+  if (type === "tool.failed") return "未完成";
   if (type === "confirmation.needed") return "需要确认";
-  if (type === "user_approval.received") return "收到确认结果";
-  if (type === "user.guidance") return "收到用户指导";
-  if (type === "final.result") return "结果已生成";
-  if (type === "run.failed") return "运行未完成";
-  return "工作状态更新";
+  if (type === "user_approval.received") return "已确认";
+  if (type === "user.guidance") return "补充要求";
+  if (type === "final.result") return "结果";
+  if (type === "run.failed") return "未完成";
+  return "更新";
 }
 
 function agentTaskStatusFromBasicEventType(type: string): BasicAgentRun["status"] {

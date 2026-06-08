@@ -100,7 +100,7 @@ function transcriptNodeFromRunEvent(
     return transcriptNode(event, {
       kind: "thinking",
       phase: event.type === "agent.note.delta" ? "noted" : "completed",
-      title: event.type === "agent.note.delta" ? "判断" : "判断完成",
+      title: "",
       summary,
     });
   }

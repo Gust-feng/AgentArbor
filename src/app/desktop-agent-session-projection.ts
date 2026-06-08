@@ -358,7 +358,7 @@ function terminalActivity(
       activityId,
       type: "completed",
       title: "已完成",
-      summary: "结果已生成。",
+      summary: "已完成。",
       status: "completed",
       createdAt,
       sourceRefs: lastEntry === undefined ? [] : [`event:${lastEntry.message.id}`],

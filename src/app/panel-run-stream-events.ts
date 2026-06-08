@@ -283,7 +283,6 @@ function appendStreamEventsForEvent(input: {
         eventId: `${input.runId}:event:${input.entry.sequence}:model.reasoning.completed`,
         type: "model.reasoning.completed",
         agentLabel: "助手",
-        summary: "思考完成。",
         status: "completed",
         detail: {
           kind: "thinking",

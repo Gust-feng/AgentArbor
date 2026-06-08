@@ -55,7 +55,7 @@ export function restoredConfirmationDecisionEvent(input: {
     runId: input.runId,
     sequence: input.sequence,
     type: input.decision.decision === "guidance" ? "user.guidance" : "user_approval.received",
-    title: input.decision.decision === "guidance" ? "收到用户指导" : "收到确认结果",
+    title: input.decision.decision === "guidance" ? "补充要求" : "已确认",
     summary:
       input.decision.decision === "approve_once"
         ? "已批准，但无法继续原操作。"
@@ -82,7 +82,7 @@ export function restoredBlockedEvent(input: {
     runId: input.runId,
     sequence: input.sequence,
     type: "run.blocked",
-    title: "任务已暂停",
+    title: "需要处理",
     summary: redactOrdinaryText(input.summary, 500),
     status: "blocked",
     timestamp: input.decidedAt,

@@ -118,7 +118,7 @@ function transcriptNodeForEvent(
     return transcriptNode(event, {
       kind: "thinking",
       phase: event.type === "agent.note.delta" ? "noted" : "completed",
-      title: event.type === "agent.note.delta" ? "判断" : "判断完成",
+      title: "",
       summary: event.summary,
     });
   }
@@ -344,7 +344,7 @@ function reasoningNodeFromPending(input: {
     eventType: input.eventType,
     kind: "thinking",
     phase: input.completed ? "completed" : "noted",
-    title: "思考",
+    title: "",
     summary: input.summary,
     text: input.text,
     timestamp: input.firstEvent.timestamp,

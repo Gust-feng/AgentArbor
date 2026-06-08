@@ -2,7 +2,7 @@ import type { ConfirmationDecision } from "../domain/basic-agent/index.js";
 import { redactOrdinaryText } from "./safe-projection.js";
 
 export function cleanConfirmationSummary(value: string): string {
-  return value
+  const cleaned = value
     .replace(/^User approval was requested\.?\s*/i, "")
     .replace(/^Approval required\.?\s*/i, "")
     .replace(/^需要确认[:：]?\s*/i, "")
@@ -14,6 +14,7 @@ export function cleanConfirmationSummary(value: string): string {
     .replace(/^[，,。.\s]+$/g, "")
     .replace(/\s+/g, " ")
     .trim();
+  return isGenericConfirmationPrompt(cleaned) ? "" : cleaned;
 }
 
 export function confirmationActionSummaryText(input: {
@@ -73,6 +74,10 @@ function isGenericConfirmationPrompt(value: string): boolean {
     normalized === "等待确认" ||
     normalized === "等待用户确认下一步" ||
     normalized === "需要你判断" ||
+    normalized === "等待你判断后继续" ||
+    normalized === "等待你判断下一步" ||
+    normalized === "等待用户补充要求" ||
+    normalized === "需要你补充材料后继续" ||
     normalized === "待处理" ||
     normalized === "等待你判断";
 }

@@ -21,6 +21,12 @@ test("confirmation copy keeps concrete action text without tool internals", () =
   );
 });
 
+test("confirmation copy removes generic waiting prompts", () => {
+  assert.equal(cleanConfirmationSummary("等待你判断后继续。"), "");
+  assert.equal(cleanConfirmationSummary("需要你补充材料后继续。"), "");
+  assert.equal(cleanConfirmationSummary("需要你判断：删除文件：C:\\repo\\old.txt"), "删除文件：C:\\repo\\old.txt");
+});
+
 test("confirmation decision copy is shared and redacts guidance", () => {
   assert.equal(basicConfirmationDecisionSummary({ decision: "approve_once" }), "已继续。");
   assert.equal(basicConfirmationDecisionSummary({ decision: "deny" }), "已不执行。");

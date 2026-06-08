@@ -27,6 +27,7 @@ import { friendlyUserFacingFailureText } from "../visible-text-safety.js";
 import { compactRuntimeText } from "./runtime-records.js";
 import type { PanelConversationReadModel } from "../panel-conversations.js";
 import { cleanOrdinaryToolText } from "../ordinary-tool-copy.js";
+import { cleanConfirmationSummary } from "../confirmation-copy.js";
 
 export type PanelPersistedRunResponse = {
   readonly ok: true;
@@ -187,7 +188,7 @@ export function createPersistedRunTrace(
       lastSequence: snapshot.events.at(-1)?.sequence ?? 0,
       lastEventType: snapshot.events.at(-1)?.type,
     },
-    waitingPoint: persistedWaitingPoint(status),
+    waitingPoint: persistedWaitingPoint(status, snapshot.run.runMode),
     events,
   };
 }
@@ -272,7 +273,7 @@ export function createPersistedStreamEvents(
         type: "confirmation.needed",
         createdAt: confirmation.requestedAt,
         agentLabel: "待处理",
-        summary: confirmation.actionSummary,
+        summary: cleanConfirmationSummary(confirmation.actionSummary),
         status: "pending",
         sourceRefs: [`confirmation:${confirmation.confirmationId}`],
         modelCallRefs: [],
@@ -565,7 +566,13 @@ function isPersistedRunStage(value: string): value is PanelRunTraceReadModel["cu
   ].includes(value);
 }
 
-function persistedWaitingPoint(status: PanelRunStatus): string {
+function persistedWaitingPoint(
+  status: PanelRunStatus,
+  runMode: RuntimeRunRecord["runMode"]
+): string {
+  if (runMode === "agent") {
+    return "";
+  }
   if (status === "pending") {
     return "等待开始。";
   }

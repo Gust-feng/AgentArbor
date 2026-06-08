@@ -412,6 +412,9 @@ function waitingPointFor(
   lastEventType: ArborMessageType | undefined,
   runMode: PanelTraceRunMode
 ): string {
+  if (runMode === "agent") {
+    return "";
+  }
   if (status === "pending") {
     return "等待后台运行启动。";
   }
@@ -431,10 +434,7 @@ function waitingPointFor(
     return "未完成，请查看错误摘要。";
   }
   if (status === "completed") {
-    return runMode === "agent" ? "已完成。" : "已完成，报告或终态摘要已形成。";
-  }
-  if (runMode === "agent") {
-    return ordinaryAgentWaitingPoint(lastEventType);
+    return "已完成，报告或终态摘要已形成。";
   }
   switch (lastEventType) {
     case undefined:
@@ -480,37 +480,6 @@ function waitingPointFor(
       return "收束评审已完成，等待整理结果材料。";
     default:
       return "运行正在推进。";
-  }
-}
-
-function ordinaryAgentWaitingPoint(lastEventType: ArborMessageType | undefined): string {
-  switch (lastEventType) {
-    case undefined:
-      return "等待处理。";
-    case "goal.received":
-      return "正在处理。";
-    case "model.requested":
-      return "正在处理。";
-    case "model.completed":
-      return "已更新。";
-    case "model.failed":
-      return "没有返回可用结果。";
-    case "context.compaction.completed":
-      return "较早上下文已整理。";
-    case "context.compaction.failed":
-      return "上下文整理失败。";
-    case "tool.requested":
-      return "正在处理。";
-    case "tool.completed":
-      return "已处理。";
-    case "tool.failed":
-      return "未完成。";
-    case "user_approval.requested":
-      return "等待你判断后继续。";
-    case "user_approval.received":
-      return "已收到反馈。";
-    default:
-      return "正在处理。";
   }
 }
 

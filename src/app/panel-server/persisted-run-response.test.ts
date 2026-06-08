@@ -133,7 +133,7 @@ test("persisted runtime running status restores as blocked ordinary panel state"
   assert.equal(panelStatusFromRuntimeStatus("running"), "blocked");
 });
 
-test("persisted user-action statuses restore explicit waiting points", () => {
+test("persisted user-action statuses restore concrete confirmation without generic waiting points", () => {
   const approval = createPersistedPanelRunResponse({
     snapshot: runtimeSnapshotWithStatus("approval_needed"),
     config: modelConfig(),
@@ -148,15 +148,17 @@ test("persisted user-action statuses restore explicit waiting points", () => {
   assert.equal(approval.status, "approval_needed");
   assert.equal(approval.trace.currentPhase, "agent");
   assert.equal(approval.tracking.run.phase, "agent");
-  assert.equal(approval.trace.waitingPoint, "等待你判断下一步。");
-  assert.equal(approval.tracking.run.waitingPoint, "等待你判断下一步。");
+  assert.equal(approval.trace.waitingPoint, "");
+  assert.equal(approval.tracking.run.waitingPoint, "");
   assert.equal(approval.transcript.events.some((event) => event.type === "confirmation.needed"), true);
   assert.equal(approval.transcript.events.at(-1)?.type, "confirmation.needed");
-  assert.equal(approval.transcript.events.at(-1)?.summary, "等待你判断后继续。");
+  assert.equal(approval.transcript.events.at(-1)?.summary, "删除文件：old.txt");
   assert.equal(needsInput.status, "needs_input");
-  assert.equal(needsInput.trace.waitingPoint, "需要你补充材料后继续。");
-  assert.equal(needsInput.tracking.run.waitingPoint, "需要你补充材料后继续。");
+  assert.equal(needsInput.trace.waitingPoint, "");
+  assert.equal(needsInput.tracking.run.waitingPoint, "");
   assert.equal(needsInput.transcript.events.some((event) => event.type === "confirmation.needed"), false);
+  assert.equal(JSON.stringify(approval).includes("等待你判断下一步"), false);
+  assert.equal(JSON.stringify(needsInput).includes("需要你补充材料后继续"), false);
 });
 
 test("persisted completed ordinary runs do not invent result summaries when none were stored", () => {
@@ -339,7 +341,7 @@ function runtimeSnapshotWithStatus(status: RuntimeRunSnapshot["run"]["status"]):
             conversationId: "conversation-1",
             status: "pending",
             title: "待处理",
-            actionSummary: "等待你判断后继续。",
+            actionSummary: "删除文件：old.txt",
             affectedResources: [],
             riskLevel: "medium",
             requestedAt: "2026-05-31T00:00:04.000Z",

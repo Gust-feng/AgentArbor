@@ -271,6 +271,7 @@ function agentDefinitionRef(): RunAgentDefinitionRef {
     promptVersion: "v1",
     outputContractId: "desktop.agent_response.v1",
     toolVisibilityProfileId: "desktop-root-agent:ordinary-visible-tools:v1",
+    definitionHash: "sha256:desktop-agent-session-test",
   };
 }
 

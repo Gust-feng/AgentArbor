@@ -37,12 +37,13 @@ test("run mode policy rejects dirty run kind and mode pairs", () => {
 });
 
 test("run mode policy requires frozen birth facts for ordinary desktop agent runs", () => {
+  const ref = agentDefinitionRef();
   assert.throws(
     () =>
       assertRunBirthFactsForKind({
         runKind: "desktop",
         runMode: "agent",
-        agentDefinitionRef: {},
+        agentDefinitionRef: ref,
       }),
     (error) =>
       error instanceof RunModePolicyError &&
@@ -63,12 +64,29 @@ test("run mode policy requires frozen birth facts for ordinary desktop agent run
       error.runKind === "desktop" &&
       error.runMode === "agent"
   );
+  assert.throws(
+    () =>
+      assertRunBirthFactsForKind({
+        runKind: "desktop",
+        runMode: "agent",
+        capabilitySnapshot: {},
+        agentDefinitionRef: {
+          ...ref,
+          definitionHash: undefined,
+        },
+      }),
+    (error) =>
+      error instanceof RunModePolicyError &&
+      error.code === "desktop_agent_definition_ref_required" &&
+      error.runKind === "desktop" &&
+      error.runMode === "agent"
+  );
   assert.doesNotThrow(() =>
     assertRunBirthFactsForKind({
       runKind: "desktop",
       runMode: "agent",
       capabilitySnapshot: {},
-      agentDefinitionRef: {},
+      agentDefinitionRef: ref,
     })
   );
   assert.doesNotThrow(() =>
@@ -78,3 +96,15 @@ test("run mode policy requires frozen birth facts for ordinary desktop agent run
     })
   );
 });
+
+function agentDefinitionRef() {
+  return {
+    agentId: "desktop-agent-session",
+    agentDisplayName: "Desktop Agent",
+    promptRef: "prompt:desktop-root-agent:v1",
+    promptVersion: "v1",
+    outputContractId: "desktop.agent_response.v1",
+    toolVisibilityProfileId: "desktop-root-agent:ordinary-visible-tools:v1",
+    definitionHash: "sha256:run-mode-policy-test",
+  };
+}

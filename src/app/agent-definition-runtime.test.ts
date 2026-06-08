@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  agentDefinitionRefMatchesDefinition,
   createAgentTurnPolicyFromDefinition,
+  isCompleteRunAgentDefinitionRef,
   runAgentDefinitionRef,
 } from "./agent-definition-runtime.js";
 import { DESKTOP_ROOT_AGENT } from "./agent-prompts/desktop-root-agent.js";
@@ -80,4 +82,25 @@ test("AgentDefinition safe run ref excludes prompt bodies and turn policy intern
   assert.equal(serialized.includes("defaultMaxOutputTokens"), false);
   assert.equal(serialized.includes("maxModelRounds"), false);
   assert.equal(serialized.includes("maxToolRounds"), false);
+});
+
+test("AgentDefinition runtime distinguishes complete frozen refs from legacy refs", () => {
+  const ref = runAgentDefinitionRef(DESKTOP_ROOT_AGENT);
+  const legacyRef = {
+    agentId: ref.agentId,
+    agentDisplayName: ref.agentDisplayName,
+    promptRef: ref.promptRef,
+    promptVersion: ref.promptVersion,
+    outputContractId: ref.outputContractId,
+    toolVisibilityProfileId: ref.toolVisibilityProfileId,
+  };
+
+  assert.equal(isCompleteRunAgentDefinitionRef(ref), true);
+  assert.equal(isCompleteRunAgentDefinitionRef(legacyRef), false);
+  assert.equal(agentDefinitionRefMatchesDefinition(ref, DESKTOP_ROOT_AGENT), true);
+  assert.equal(agentDefinitionRefMatchesDefinition(legacyRef, DESKTOP_ROOT_AGENT), false);
+  assert.equal(
+    agentDefinitionRefMatchesDefinition(legacyRef, DESKTOP_ROOT_AGENT, { allowMissingDefinitionHash: true }),
+    true
+  );
 });

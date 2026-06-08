@@ -55,6 +55,7 @@ test("persistPanelRun writes the workspace frozen at run birth", async () => {
       promptVersion: "v1",
       outputContractId: "desktop.agent_response.v1",
       toolVisibilityProfileId: "desktop-root-agent:ordinary-visible-tools:v1",
+      definitionHash: "sha256:run-persistence-test",
     },
     capabilitySnapshot: {
       snapshotId: "capability-snapshot-test",

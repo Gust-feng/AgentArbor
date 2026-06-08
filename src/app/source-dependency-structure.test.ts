@@ -139,6 +139,15 @@ test("Basic Agent run executor consumes prepared start facts instead of route in
   }
 });
 
+test("run mode policy depends on AgentDefinition refs without importing runtime capability wiring", async () => {
+  const source = await readSource(path.join(process.cwd(), "src", "app", "run-mode-policy.ts"));
+
+  assert.equal(source.includes("./agent-definition-ref.js"), true);
+  assert.equal(source.includes("./agent-definition-runtime.js"), false);
+  assert.equal(source.includes("resolveRunCapabilities"), false);
+  assert.equal(source.includes("createAgentTurnPolicyFromDefinition"), false);
+});
+
 test("panel server implementation does not import the default desktop root agent directly", async () => {
   const files = await collectSourceFiles(path.join(process.cwd(), "src", "app", "panel-server"));
   const violations: string[] = [];

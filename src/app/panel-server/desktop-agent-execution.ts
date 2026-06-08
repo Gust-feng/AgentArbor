@@ -1,6 +1,5 @@
 import type { ModelRunReasoningEffort } from "../../domain/config/index.js";
-import { agentDefinitionHash, runAgentDefinitionRef } from "../agent-definition-runtime.js";
-import type { AgentDefinition } from "../agent-prompts/contracts.js";
+import { agentDefinitionRefMatchesDefinition } from "../agent-definition-ref.js";
 import { runDesktopAgentSession } from "../desktop-agent-session.js";
 import { latestModelFailureTextForUser } from "../model-failure-visible-copy.js";
 import type { ModelRuntimeMode } from "../model-runtime/index.js";
@@ -27,7 +26,6 @@ export async function runOrdinaryDesktopForPanel(
   options: PanelRunExecutionOptions
 ): Promise<PanelRunExecutionResult> {
   const agentDefinition = options.agentDefinition ?? runtime.desktopAgentDefinition;
-  const expectedAgentDefinitionRef = runAgentDefinitionRef(agentDefinition);
   if (options.agentDefinitionRef === undefined) {
     throw new PanelHttpError(
       500,
@@ -36,7 +34,13 @@ export async function runOrdinaryDesktopForPanel(
     );
   }
   const agentDefinitionRef = options.agentDefinitionRef;
-  assertAgentDefinitionRefMatchesDefinition(agentDefinitionRef, agentDefinition, expectedAgentDefinitionRef);
+  if (!agentDefinitionRefMatchesDefinition(agentDefinitionRef, agentDefinition)) {
+    throw new PanelHttpError(
+      500,
+      "agent_definition_mismatch",
+      "运行记录中的 Agent 定义与当前执行定义不一致。"
+    );
+  }
   const agent = await runDesktopAgentSession(goal, {
     aiMode,
     createIntelligenceChannel: resources.aiConfig.createIntelligenceChannel,
@@ -58,27 +62,6 @@ export async function runOrdinaryDesktopForPanel(
     capabilitySnapshot: resources.capabilitySnapshot,
     agentDefinitionRef,
   }, options.reasoningEffort);
-}
-
-function assertAgentDefinitionRefMatchesDefinition(
-  ref: NonNullable<PanelRunExecutionResult["agentDefinitionRef"]>,
-  definition: AgentDefinition,
-  expectedRef: NonNullable<PanelRunExecutionResult["agentDefinitionRef"]>
-): void {
-  if (
-    ref.agentId !== expectedRef.agentId ||
-    ref.promptRef !== expectedRef.promptRef ||
-    ref.promptVersion !== expectedRef.promptVersion ||
-    ref.outputContractId !== expectedRef.outputContractId ||
-    ref.toolVisibilityProfileId !== expectedRef.toolVisibilityProfileId ||
-    (ref.definitionHash !== undefined && ref.definitionHash !== agentDefinitionHash(definition))
-  ) {
-    throw new PanelHttpError(
-      500,
-      "agent_definition_mismatch",
-      "运行记录中的 Agent 定义与当前执行定义不一致。"
-    );
-  }
 }
 
 type OrdinaryDesktopPanelFacts = {

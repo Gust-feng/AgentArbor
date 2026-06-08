@@ -1,5 +1,5 @@
 import type { RunAgentDefinitionRef } from "../domain/config/index.js";
-import { agentDefinitionHash, runAgentDefinitionRef } from "./agent-definition-runtime.js";
+import { agentDefinitionRefMatchesDefinition, runAgentDefinitionRef } from "./agent-definition-ref.js";
 import type { AgentDefinition } from "./agent-prompts/contracts.js";
 
 export class AgentDefinitionRegistry {
@@ -21,7 +21,7 @@ export class AgentDefinitionRegistry {
     if (definition === undefined) {
       return undefined;
     }
-    if (ref.definitionHash !== undefined && ref.definitionHash !== agentDefinitionHash(definition)) {
+    if (!agentDefinitionRefMatchesDefinition(ref, definition, { allowMissingDefinitionHash: true })) {
       return undefined;
     }
     return definition;

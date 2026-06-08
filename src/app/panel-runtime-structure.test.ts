@@ -56,6 +56,7 @@ test("desktop agent session keeps projection and contracts split", async () => {
     loopPreparation,
     events,
     registry,
+    definitionRef,
     definitionRuntime,
     agentDefinitionContracts,
     identityAsset,
@@ -73,6 +74,7 @@ test("desktop agent session keeps projection and contracts split", async () => {
     readAppSource("desktop-agent-loop-preparation.ts"),
     readAppSource("desktop-agent-session-events.ts"),
     readAppSource("agent-definition-registry.ts"),
+    readAppSource("agent-definition-ref.ts"),
     readAppSource("agent-definition-runtime.ts"),
     readAppSource(path.join("agent-prompts", "contracts.ts")),
     readAppSource(path.join("agent-prompts", "desktop-agent-identity.ts")),
@@ -177,8 +179,11 @@ test("desktop agent session keeps projection and contracts split", async () => {
   assert.equal(registry.includes('from "./agent-prompts/desktop-root-agent.js"'), false);
   assert.equal(definitionRuntime.includes('from "./agent-prompts/contracts.js"'), true);
   assert.equal(definitionRuntime.includes('from "./agent-prompts/desktop-root-agent.js"'), false);
+  assert.equal(definitionRuntime.includes('from "./agent-definition-ref.js"'), true);
   assert.equal(definitionRuntime.includes("export function createAgentTurnPolicyFromDefinition"), true);
-  assert.equal(definitionRuntime.includes("export function runAgentDefinitionRef"), true);
+  assert.equal(definitionRef.includes("export function runAgentDefinitionRef"), true);
+  assert.equal(definitionRef.includes("export function agentDefinitionRefMatchesDefinition"), true);
+  assert.equal(definitionRef.includes("export function isCompleteRunAgentDefinitionRef"), true);
   assert.equal(definitionRuntime.includes("export function resolveAgentRunCapabilities"), true);
   assert.equal(definitionRuntime.includes("export function allowedToolsForAgentRun"), false);
   assert.equal(definitionRuntime.includes("export function restrictRunCapabilityResolutionToExecutableTools"), true);

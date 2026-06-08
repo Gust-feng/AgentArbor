@@ -392,12 +392,13 @@ test("panel server source keeps conversation restore and persistence split", asy
   assert.equal(desktopAgentExecution.includes("createDefaultToolCenter"), false);
   assert.equal(desktopAgentExecution.includes("createConfiguredToolCenter"), false);
   assert.equal(desktopAgentExecution.includes("const agentDefinition = options.agentDefinition ?? runtime.desktopAgentDefinition"), true);
-  assert.equal(desktopAgentExecution.includes("const expectedAgentDefinitionRef = runAgentDefinitionRef(agentDefinition)"), true);
+  assert.equal(desktopAgentExecution.includes('from "../agent-definition-ref.js"'), true);
+  assert.equal(desktopAgentExecution.includes("const expectedAgentDefinitionRef = runAgentDefinitionRef(agentDefinition)"), false);
   assert.equal(desktopAgentExecution.includes("agent_definition_ref_required"), true);
   assert.equal(desktopAgentExecution.includes("const agentDefinitionRef = options.agentDefinitionRef;"), true);
   assert.equal(desktopAgentExecution.includes("const agentDefinitionRef = options.agentDefinitionRef ?? expectedAgentDefinitionRef"), false);
-  assert.equal(desktopAgentExecution.includes("assertAgentDefinitionRefMatchesDefinition(agentDefinitionRef, agentDefinition, expectedAgentDefinitionRef)"), true);
-  assert.equal(desktopAgentExecution.includes("function assertAgentDefinitionRefMatchesDefinition"), true);
+  assert.equal(desktopAgentExecution.includes("agentDefinitionRefMatchesDefinition(agentDefinitionRef, agentDefinition)"), true);
+  assert.equal(desktopAgentExecution.includes("function assertAgentDefinitionRefMatchesDefinition"), false);
   assert.equal(desktopAgentExecution.includes("agentDefinitionRef: runAgentDefinitionRef(agentDefinition)"), false);
   assert.equal(desktopAgentExecution.includes("agentDefinitionRef,"), true);
   assert.equal(

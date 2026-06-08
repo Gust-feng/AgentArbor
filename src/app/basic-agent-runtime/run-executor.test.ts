@@ -1117,6 +1117,7 @@ test("InMemoryBasicAgentRunJobStore labels self stream events from frozen agent 
     promptVersion: "v1",
     outputContractId: "custom.basic_agent_response.v1",
     toolVisibilityProfileId: "custom-basic-agent:ordinary-visible-tools:v1",
+    definitionHash: "sha256:custom-basic-agent-test",
   };
   const createRun = (goal: string, ref?: RunAgentDefinitionRef): BasicAgentRunJob => {
     return runJobs.create({
@@ -1314,6 +1315,7 @@ function defaultAgentDefinitionRef(): RunAgentDefinitionRef {
     promptVersion: "v1",
     outputContractId: "desktop.agent_response.v1",
     toolVisibilityProfileId: "desktop-root-agent:ordinary-visible-tools:v1",
+    definitionHash: "sha256:desktop-agent-session-test",
   };
 }
 

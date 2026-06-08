@@ -1,3 +1,5 @@
+import { isCompleteRunAgentDefinitionRef } from "./agent-definition-ref.js";
+
 export type AgentArborRunKind = "desktop" | "underground";
 
 export type AgentArborRunMode = "agent" | "deep";
@@ -72,10 +74,10 @@ export function assertRunBirthFactsForKind(input: {
       input.runMode
     );
   }
-  if (input.agentDefinitionRef === undefined) {
+  if (!isCompleteRunAgentDefinitionRef(input.agentDefinitionRef)) {
     throw new RunModePolicyError(
       "desktop_agent_definition_ref_required",
-      "Desktop ordinary agent runs require an AgentDefinition ref frozen at run birth.",
+      "Desktop ordinary agent runs require a complete AgentDefinition ref frozen at run birth.",
       input.runKind,
       input.runMode
     );

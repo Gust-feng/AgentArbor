@@ -1,5 +1,5 @@
 import { AgentDefinitionRegistry } from "./agent-definition-registry.js";
-import { runAgentDefinitionRef } from "./agent-definition-runtime.js";
+import { runAgentDefinitionRef } from "./agent-definition-ref.js";
 import type { AgentDefinition } from "./agent-prompts/contracts.js";
 import {
   DESKTOP_ROOT_AGENT,

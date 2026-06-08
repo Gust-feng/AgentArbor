@@ -1,10 +1,17 @@
-import { createHash } from "node:crypto";
-import type { BasicAgentCapabilitySnapshot, RunAgentDefinitionRef, RunCapabilityResolution } from "../domain/config/index.js";
+import type { BasicAgentCapabilitySnapshot, RunCapabilityResolution } from "../domain/config/index.js";
 import type { TaskSoil } from "../domain/soil/index.js";
 import type { ToolExecutionBroker } from "../domain/tools/index.js";
 import type { AgentTurnPolicy } from "../kernel/intelligence/agent-turn-runtime.js";
 import type { AgentDefinition } from "./agent-prompts/contracts.js";
 import { resolveRunCapabilities } from "./capability-policy.js";
+
+export {
+  agentDefinitionHash,
+  agentDefinitionRefMatchesDefinition,
+  isCompleteRunAgentDefinitionRef,
+  runAgentDefinitionRef,
+} from "./agent-definition-ref.js";
+export type { CompleteRunAgentDefinitionRef } from "./agent-definition-ref.js";
 
 export type CreateAgentTurnPolicyFromDefinitionInput = {
   readonly agentDefinition: AgentDefinition;
@@ -40,29 +47,6 @@ export function createAgentTurnPolicyFromDefinition(
         definition.turnPolicy.defaultMaxOutputTokens,
     },
   };
-}
-
-export function runAgentDefinitionRef(definition: AgentDefinition): RunAgentDefinitionRef {
-  return {
-    agentId: definition.agentId,
-    agentDisplayName: definition.displayName,
-    promptRef: definition.prompt.promptRef,
-    promptVersion: definition.prompt.version,
-    outputContractId: definition.outputContract.contractId,
-    toolVisibilityProfileId: definition.toolVisibilityProfile.profileId,
-    definitionHash: agentDefinitionHash(definition),
-  };
-}
-
-export function agentDefinitionHash(definition: AgentDefinition): string {
-  const semanticDefinition = {
-    agentId: definition.agentId,
-    prompt: definition.prompt,
-    turnPolicy: definition.turnPolicy,
-    outputContract: definition.outputContract,
-    toolVisibilityProfile: definition.toolVisibilityProfile,
-  };
-  return `sha256:${createHash("sha256").update(stableJson(semanticDefinition)).digest("hex")}`;
 }
 
 export type ResolveAgentRunCapabilitiesInput = {
@@ -142,24 +126,4 @@ function capabilityWarningsAfterExecutableRestriction(input: {
     next.push(`本轮有 ${input.hiddenCount} 个策略可见工具没有对应的工具执行器。`);
   }
   return next;
-}
-
-function stableJson(value: unknown): string {
-  return JSON.stringify(stableJsonValue(value));
-}
-
-function stableJsonValue(value: unknown): unknown {
-  if (Array.isArray(value)) {
-    return value.map(stableJsonValue);
-  }
-  if (typeof value !== "object" || value === null) {
-    return value;
-  }
-  const record = value as Readonly<Record<string, unknown>>;
-  return Object.fromEntries(
-    Object.keys(record)
-      .filter((key) => record[key] !== undefined)
-      .sort()
-      .map((key) => [key, stableJsonValue(record[key])])
-  );
 }

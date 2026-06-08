@@ -26,6 +26,7 @@ import { restoredModelRequestedSummary } from "../panel-model-progress-copy.js";
 import { friendlyUserFacingFailureText } from "../visible-text-safety.js";
 import { compactRuntimeText } from "./runtime-records.js";
 import type { PanelConversationReadModel } from "../panel-conversations.js";
+import { cleanOrdinaryToolText } from "../ordinary-tool-copy.js";
 
 export type PanelPersistedRunResponse = {
   readonly ok: true;
@@ -251,7 +252,7 @@ export function createPersistedStreamEvents(
       type: streamType,
       createdAt: record.recordedAt,
       agentLabel: persistedStreamAgentLabel(streamType),
-      summary: restoredProgressSummary ?? record.summary,
+      summary: restoredProgressSummary ?? persistedStreamSummary(record),
       status: streamStatusFor(streamType),
       toolName: toolCall?.toolName,
       detail: toolCall === undefined ? undefined : persistedToolStreamDetail(toolCall),
@@ -458,6 +459,13 @@ function persistedStreamAgentLabel(type: PanelRunStreamEvent["type"]): string {
   return "AgentArbor";
 }
 
+function persistedStreamSummary(record: RuntimeEventRecord): string {
+  if (record.type === "tool.requested" || record.type === "tool.completed" || record.type === "tool.failed") {
+    return cleanOrdinaryToolText(record.summary) ?? record.summary;
+  }
+  return record.summary;
+}
+
 function persistedPhaseFor(
   type: RuntimeEventRecord["type"] | undefined,
   status: PanelRunStatus,
@@ -660,7 +668,7 @@ function persistedToolStreamDetail(call: RuntimeToolCallRecord): PanelRunStreamE
     query: call.query,
     command: call.command,
     exitCode: call.exitCode,
-    preview: call.error ?? call.preview ?? call.summary,
+    preview: call.error ?? cleanOrdinaryToolText(call.preview) ?? cleanOrdinaryToolText(call.summary),
     display: call.display,
     truncated: call.truncated,
     error: call.error,

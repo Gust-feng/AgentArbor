@@ -20,6 +20,7 @@ import type {
   PanelRunTranscript,
 } from "../panel-run-read-model.js";
 import { safeCommandToolPreview, safeReadFileToolPreview } from "../safe-tool-preview.js";
+import { cleanOrdinaryToolText } from "../ordinary-tool-copy.js";
 import { sanitizeAssistantVisibleText } from "../visible-text-safety.js";
 import { confirmationActionSummaryText } from "../confirmation-copy.js";
 import { asRecord, optionalString, unique } from "./request-parsers.js";
@@ -147,8 +148,8 @@ export function toRuntimeToolCallRecords(
         query: event.detail?.query ?? detail?.query ?? previous?.query,
         command: event.detail?.command ?? detail?.command ?? previous?.command,
         exitCode: event.detail?.exitCode ?? detail?.exitCode ?? previous?.exitCode,
-        summary: detail?.summary ?? event.summary ?? previous?.summary,
-        preview: event.detail?.preview ?? detail?.preview ?? previous?.preview,
+        summary: cleanOrdinaryToolText(detail?.summary) ?? cleanOrdinaryToolText(event.summary) ?? cleanOrdinaryToolText(previous?.summary),
+        preview: cleanOrdinaryToolText(event.detail?.preview) ?? cleanOrdinaryToolText(detail?.preview) ?? cleanOrdinaryToolText(previous?.preview),
         display: event.detail?.display ?? detail?.display ?? previous?.display,
         envelope: event.detail?.envelope ?? detail?.envelope ?? previous?.envelope,
         truncated: event.detail?.truncated ?? detail?.truncated ?? previous?.truncated,
@@ -372,7 +373,7 @@ function localToolDetailsByCallId(
       query: optionalString(result.query) ?? optionalString(input.query),
       command: command === undefined ? undefined : [command, ...args.filter((value): value is string => typeof value === "string")].join(" ").trim(),
       exitCode: typeof result.exitCode === "number" ? result.exitCode : undefined,
-      summary: optionalString(output.summary),
+      summary: cleanOrdinaryToolText(optionalString(output.summary)),
       preview: persistedToolPreview(optionalString(payload.toolName), output, result, payload),
       display: toolDisplayOrUndefined(output.display),
       envelope: toolResultEnvelopeOrUndefined(output.envelope),
@@ -439,10 +440,9 @@ function persistedToolPreview(
       const record = asRecord(entry);
       const name = optionalString(record.name) ?? "unknown";
       const kind = optionalString(record.kind) ?? "entry";
-      const bytes = typeof record.bytes === "number" ? ` · ${record.bytes} bytes` : "";
-      return `${kind} ${name}${bytes}`;
+      return `${kind} ${name}`;
     });
-    return lines.length === 0 ? optionalString(output.summary) : lines.join("\n");
+    return lines.length === 0 ? cleanOrdinaryToolText(optionalString(output.summary)) : lines.join("\n");
   }
   if (toolName === "grep_files") {
     const matches = Array.isArray(result.matches) ? result.matches : [];
@@ -453,7 +453,7 @@ function persistedToolPreview(
       const preview = optionalString(record.preview) ?? "";
       return `${matchPath}:${line} ${preview}`;
     });
-    return lines.length === 0 ? optionalString(output.summary) : lines.join("\n");
+    return lines.length === 0 ? cleanOrdinaryToolText(optionalString(output.summary)) : lines.join("\n");
   }
   if (toolName === "write_file" || toolName === "create_file" || toolName === "edit_file" || toolName === "delete_file") {
     return persistedFileChangePreview(toolName, asRecord(payload.input), output, result);
@@ -471,7 +471,7 @@ function persistedToolPreview(
       900
     );
   }
-  return optionalString(output.summary);
+  return cleanOrdinaryToolText(optionalString(output.summary));
 }
 
 function persistedFileChangePreview(
@@ -481,20 +481,15 @@ function persistedFileChangePreview(
   result: Readonly<Record<string, unknown>>
 ): string | undefined {
   const resultPath = optionalString(result.path) ?? optionalString(input.path);
-  const summary = optionalString(output.summary);
+  const summary = cleanOrdinaryToolText(optionalString(output.summary));
   if (toolName === "edit_file") {
     const replacements = typeof result.replacements === "number" ? `替换：${result.replacements} 处` : undefined;
-    const lengthChange =
-      typeof result.previousLength === "number" && typeof result.nextLength === "number"
-        ? `长度：${result.previousLength} -> ${result.nextLength} chars`
-        : undefined;
-    const diffPreview = ["变更预览", replacements, lengthChange]
+    const diffPreview = ["变更预览", replacements]
       .filter((item): item is string => item !== undefined && item.length > 0)
       .join("\n");
     return [summary, resultPath === undefined ? undefined : `文件：${resultPath}`, diffPreview].filter((item): item is string => item !== undefined && item.length > 0).join("\n");
   }
-  const bytes = typeof result.bytes === "number" ? `${result.bytes} bytes` : undefined;
-  return [summary, resultPath === undefined ? undefined : `文件：${resultPath}`, bytes === undefined ? undefined : `写入大小：${bytes}`].filter((item): item is string => item !== undefined && item.length > 0).join("\n");
+  return [summary, resultPath === undefined ? undefined : `文件：${resultPath}`].filter((item): item is string => item !== undefined && item.length > 0).join("\n");
 }
 
 function persistedReadFilePreview(

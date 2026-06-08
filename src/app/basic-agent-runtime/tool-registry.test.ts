@@ -162,6 +162,33 @@ test("desktop-basic tool registry keeps MCP tools out of the default ordinary ag
   assert.equal(registry.createToolCenter("mcp").has("mcp_docs_search"), true);
 });
 
+test("desktop-basic tool registry applies the frozen tool catalog to MCP executors", () => {
+  const hidden = createDesktopBasicToolRegistry({
+    env: {},
+    workspaceRoot: process.cwd(),
+    playwrightAvailable: true,
+    toolCatalogNames: ["read_file"],
+    mcpManager: {
+      getToolsForRegistry: () => [mcpToolExecutor()],
+    } as never,
+  });
+  const included = createDesktopBasicToolRegistry({
+    env: {},
+    workspaceRoot: process.cwd(),
+    playwrightAvailable: true,
+    toolCatalogNames: ["mcp_docs_search"],
+    mcpManager: {
+      getToolsForRegistry: () => [mcpToolExecutor()],
+    } as never,
+  });
+
+  assert.deepEqual(hidden.catalog("mcp").tools, []);
+  assert.equal(hidden.createToolCenter("mcp").has("mcp_docs_search"), false);
+  assert.deepEqual(included.catalog("desktop-basic").tools, []);
+  assert.deepEqual(included.catalog("mcp").allowedTools, ["mcp_docs_search"]);
+  assert.equal(included.createToolCenter("mcp").has("mcp_docs_search"), true);
+});
+
 
 test("tool registry rejects tools without complete metadata", () => {
   const registry = new ToolRegistry();

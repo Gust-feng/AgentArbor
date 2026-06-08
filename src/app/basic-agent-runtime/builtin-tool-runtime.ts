@@ -110,6 +110,9 @@ export function createDesktopBasicToolRegistry(
   }
   if (options.mcpManager !== undefined) {
     for (const executor of options.mcpManager.getToolsForRegistry()) {
+      if (toolCatalogNames !== undefined && !toolCatalogNames.has(executor.definition.name)) {
+        continue;
+      }
       registry.register({
         executor,
         scopes: ["mcp"],

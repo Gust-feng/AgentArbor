@@ -356,6 +356,81 @@ test("runtime record mapper persists safe model, event, tool, and confirmation p
   assert.equal(confirmations[0]?.guidance?.includes("[redacted-secret]"), true);
 });
 
+test("runtime record mapper persists ordinary tool previews without diagnostic counters", () => {
+  const toolCalls = toRuntimeToolCallRecords("run-1", [
+    completedToolStreamEvent(1, "tool-command", "shell_command"),
+    completedToolStreamEvent(2, "tool-list", "list_dir"),
+    completedToolStreamEvent(3, "tool-edit", "edit_file"),
+    completedToolStreamEvent(4, "tool-create", "create_file"),
+    completedToolStreamEvent(5, "tool-delete", "delete_file"),
+  ], [
+    toolCompletedEntry(1, "tool-command", "shell_command", { command: "pnpm", args: ["test"] }, {
+      action: "shell_command",
+      summary: "pnpm test · exit 0",
+      result: {
+        command: "pnpm",
+        args: ["test"],
+        exitCode: 0,
+        stdout: "RAW_STDOUT_SENTINEL",
+      },
+    }),
+    toolCompletedEntry(2, "tool-list", "list_dir", { path: "." }, {
+      action: "list_dir",
+      summary: ". · 2 entries",
+      result: {
+        path: ".",
+        entries: [
+          { kind: "file", name: "README.md", bytes: 120 },
+          { kind: "file", name: "package.json", bytes: 300 },
+        ],
+      },
+    }),
+    toolCompletedEntry(3, "tool-edit", "edit_file", {
+      path: "notes.md",
+      oldText: "RAW_OLD_TEXT_SENTINEL",
+      newText: "RAW_NEW_TEXT_SENTINEL",
+    }, {
+      action: "edit_file",
+      summary: "notes.md · 32 -> 18 chars · 1 replacement",
+      result: {
+        path: "notes.md",
+        previousLength: 32,
+        nextLength: 18,
+        replacements: 1,
+      },
+    }),
+    toolCompletedEntry(4, "tool-create", "create_file", { path: "created.md" }, {
+      action: "create_file",
+      summary: "created.md · 42 bytes · created",
+      result: {
+        path: "created.md",
+        bytes: 42,
+      },
+    }),
+    toolCompletedEntry(5, "tool-delete", "delete_file", { path: "old.md" }, {
+      action: "delete_file",
+      summary: "old.md · 42 bytes · deleted",
+      result: {
+        path: "old.md",
+        bytes: 42,
+      },
+    }),
+  ]);
+  const serialized = JSON.stringify(toolCalls);
+
+  assert.equal(toolCalls.find((call) => call.callId === "tool-command")?.preview, "pnpm test");
+  assert.equal(toolCalls.find((call) => call.callId === "tool-list")?.preview, "file README.md\nfile package.json");
+  assert.equal(toolCalls.find((call) => call.callId === "tool-edit")?.preview, "notes.md · 1 处修改\n文件：notes.md\n变更预览\n替换：1 处");
+  assert.equal(toolCalls.find((call) => call.callId === "tool-create")?.preview, "created.md · 已创建\n文件：created.md");
+  assert.equal(toolCalls.find((call) => call.callId === "tool-delete")?.preview, "old.md · 已删除\n文件：old.md");
+  assert.equal(serialized.includes("exit 0"), false);
+  assert.equal(serialized.includes("bytes"), false);
+  assert.equal(serialized.includes("32 -> 18 chars"), false);
+  assert.equal(serialized.includes("RAW_STDOUT_SENTINEL"), false);
+  assert.equal(serialized.includes("RAW_OLD_TEXT_SENTINEL"), false);
+  assert.equal(serialized.includes("RAW_NEW_TEXT_SENTINEL"), false);
+});
+
 test("runtime text compaction redacts secrets before truncating", () => {
   const compacted = compactRuntimeText("prefix sk-secret-value-123456 suffix", 24);
 
@@ -467,6 +542,38 @@ function streamEvent(input: {
     modelCallRefs: [],
     toolCallRefs: input.toolCallRefs ?? [],
   };
+}
+
+function completedToolStreamEvent(
+  sequence: number,
+  toolCallRef: string,
+  toolName: string
+): PanelRunStreamEvent {
+  return streamEvent({
+    sequence,
+    type: "tool.completed",
+    toolName,
+    toolCallRefs: [toolCallRef],
+  });
+}
+
+function toolCompletedEntry(
+  sequence: number,
+  callId: string,
+  toolName: string,
+  input: Record<string, unknown>,
+  output: Record<string, unknown>
+): EventLogEntry {
+  return eventEntry({
+    sequence,
+    type: "tool.completed",
+    payload: {
+      callId,
+      toolName,
+      input,
+      output,
+    },
+  });
 }
 
 function eventEntry(input: {

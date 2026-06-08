@@ -63,6 +63,72 @@ test("persisted run response restores safe transcript and tracking projections",
   assert.equal(JSON.stringify(response.agentDefinitionRef).includes("systemPrompt"), false);
 });
 
+test("persisted run response restores ordinary tool transcript without old diagnostic copy", () => {
+  const response = createPersistedPanelRunResponse({
+    snapshot: {
+      ...runtimeSnapshot(),
+      events: [
+        runtimeEvent(1, "tool.completed", "运行命令：dir · exit 0", [{ kind: "tool_call", id: "tool-command" }]),
+        runtimeEvent(2, "tool.completed", "目标：README.md · 120 bytes", [{ kind: "tool_call", id: "tool-file" }]),
+        runtimeEvent(3, "tool.completed", "notes.md · 32 -> 18 chars · 1 replacement", [{ kind: "tool_call", id: "tool-edit" }]),
+      ],
+      modelCalls: [],
+      toolCalls: [
+        {
+          callId: "tool-command",
+          runId: "run-1",
+          toolName: "shell_command",
+          status: "completed",
+          action: "执行 Shell",
+          command: "dir",
+          exitCode: 0,
+          summary: "运行命令：dir · exit 0",
+          preview: "运行命令：dir · exit 0",
+          eventRefs: ["run-1:event:1"],
+        },
+        {
+          callId: "tool-file",
+          runId: "run-1",
+          toolName: "read_file",
+          status: "completed",
+          action: "读取文件",
+          path: "README.md",
+          summary: "目标：README.md · 120 bytes",
+          preview: "目标：README.md · 120 bytes",
+          eventRefs: ["run-1:event:2"],
+        },
+        {
+          callId: "tool-edit",
+          runId: "run-1",
+          toolName: "edit_file",
+          status: "completed",
+          action: "编辑文件",
+          path: "notes.md",
+          summary: "notes.md · 32 -> 18 chars · 1 replacement",
+          preview: "notes.md · 32 -> 18 chars · 1 replacement",
+          eventRefs: ["run-1:event:3"],
+        },
+      ],
+      confirmations: [],
+    },
+    config: modelConfig(),
+    informationAccess: informationAccess(),
+  });
+  const transcriptText = JSON.stringify({
+    events: response.transcript.events,
+    nodes: response.transcriptNodes,
+  });
+
+  assert.equal(response.transcript.events.some((event) => event.summary === "dir"), true);
+  assert.equal(response.transcript.events.some((event) => event.detail?.preview === "README.md"), true);
+  assert.equal(response.transcriptNodes.some((node) => node.summary === "notes.md · 1 处修改"), true);
+  assert.equal(transcriptText.includes("exit 0"), false);
+  assert.equal(transcriptText.includes("bytes"), false);
+  assert.equal(transcriptText.includes("32 -> 18 chars"), false);
+  assert.equal(transcriptText.includes("目标："), false);
+  assert.equal(transcriptText.includes("运行命令："), false);
+});
+
 test("persisted runtime running status restores as blocked ordinary panel state", () => {
   assert.equal(panelStatusFromRuntimeStatus("running"), "blocked");
 });

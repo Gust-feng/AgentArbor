@@ -116,12 +116,12 @@ function basicEventTitle(event: BasicAgentRunStreamEventProjectionInput): string
   if (event.type === "run.started") return "任务";
   if (event.type === "run.cancelled") return "已取消";
   if (event.type === "run.blocked") return "需要处理";
-  if (event.type === "run.resumed") return "继续处理";
+  if (event.type === "run.resumed") return "运行恢复";
   if (event.type === "tool.requested" || event.type === "tool.completed") return "动作";
   if (event.type === "tool.failed") return "未完成";
   if (event.type === "context.compaction.completed" || event.type === "context.compaction.failed") return "上下文";
   if (event.type === "confirmation.needed") return "需要你判断";
-  if (event.type === "user_approval.received") return "继续处理";
+  if (event.type === "user_approval.received") return "用户决定";
   if (event.type === "user.guidance") return "补充要求";
   if (event.type === "final.result") return "结果";
   if (event.type === "run.failed") return "未完成";
@@ -209,7 +209,7 @@ function basicRunTitle(job: BasicAgentRunProjectionInput, status: AgentTaskStatu
   if (status === "approval_needed") return "待处理";
   if (job.status === "completed") return "已完成";
   if (job.status === "failed") return "未完成";
-  return "正在处理";
+  return "进行中";
 }
 
 function basicRunCurrentStep(job: BasicAgentRunProjectionInput): string | undefined {

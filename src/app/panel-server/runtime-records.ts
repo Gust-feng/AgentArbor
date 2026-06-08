@@ -12,7 +12,11 @@ import type {
 import { redactSensitiveText } from "../../kernel/redaction.js";
 import type { EventLogEntry } from "../../kernel/events/in-memory-event-log.js";
 import type { PanelRunCanvasReadModel } from "../panel-canvas-read-model.js";
-import { panelRunPayloadForStatus, type PanelRunJob } from "../panel-run-jobs.js";
+import {
+  panelRunPayloadForStatus,
+  type PanelRunConfirmationDecisionRecord,
+  type PanelRunJob,
+} from "../panel-run-jobs.js";
 import type {
   PanelRunStatus,
   PanelRunStreamEvent,
@@ -218,8 +222,8 @@ export function toRuntimeConfirmationRecords(
       runId: job.runId,
       conversationId: job.conversationId,
       status: decisionStatusFrom(payload),
-      title: previous?.title ?? "补充要求",
-      actionSummary: previous?.actionSummary ?? "用户已补充要求。",
+      title: previous?.title ?? confirmationRecordTitle(decisionStatusFrom(payload)),
+      actionSummary: previous?.actionSummary ?? confirmationRecordActionSummary(decisionStatusFrom(payload)),
       affectedResources: previous?.affectedResources ?? affectedResourcesFrom(payload),
       riskLevel: previous?.riskLevel ?? "medium",
       requestedAt: previous?.requestedAt ?? entry.recordedAt,
@@ -241,8 +245,8 @@ export function toRuntimeConfirmationRecords(
           : decision.decision === "deny"
             ? "denied"
             : "guidance",
-      title: previous?.title ?? "继续处理",
-      actionSummary: previous?.actionSummary ?? "用户已补充要求。",
+      title: previous?.title ?? confirmationDecisionTitle(decision.decision),
+      actionSummary: previous?.actionSummary ?? confirmationDecisionActionSummary(decision.decision),
       affectedResources: previous?.affectedResources ?? [],
       riskLevel: previous?.riskLevel ?? "medium",
       requestedAt: previous?.requestedAt ?? decision.decidedAt,
@@ -263,6 +267,32 @@ export function compactRuntimeText(value: string, maxLength: number): string {
     return normalized;
   }
   return `${normalized.slice(0, Math.max(0, maxLength - 1))}…`;
+}
+
+function confirmationRecordTitle(status: RuntimeConfirmationRecord["status"]): string {
+  if (status === "guidance") return "补充要求";
+  if (status === "denied") return "已不执行";
+  if (status === "approved") return "已确认";
+  return "待处理";
+}
+
+function confirmationRecordActionSummary(status: RuntimeConfirmationRecord["status"]): string {
+  if (status === "guidance") return "用户已补充要求。";
+  if (status === "denied") return "用户已选择不执行。";
+  if (status === "approved") return "用户已确认。";
+  return "等待你判断。";
+}
+
+function confirmationDecisionTitle(decision: PanelRunConfirmationDecisionRecord["decision"]): string {
+  if (decision === "guidance") return "补充要求";
+  if (decision === "deny") return "已不执行";
+  return "已确认";
+}
+
+function confirmationDecisionActionSummary(decision: PanelRunConfirmationDecisionRecord["decision"]): string {
+  if (decision === "guidance") return "用户已补充要求。";
+  if (decision === "deny") return "用户已选择不执行。";
+  return "用户已确认。";
 }
 
 export function canvasTraceId(canvas: PanelRunCanvasReadModel | undefined): string | undefined {

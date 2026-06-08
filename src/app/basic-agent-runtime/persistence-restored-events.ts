@@ -58,7 +58,10 @@ function fallbackBasicEventsFromRuntimeSnapshot(snapshot: RuntimeRunSnapshot): r
     if (confirmation.decidedAt === undefined) {
       continue;
     }
-    const type = confirmation.status === "guidance" ? "user.guidance" : confirmation.status === "approved" ? "run.resumed" : "user_approval.received";
+    if (confirmation.status === "approved") {
+      continue;
+    }
+    const type = confirmation.status === "guidance" ? "user.guidance" : "user_approval.received";
     events.push({
       id: `${snapshot.run.runId}:restored:confirmation:${confirmation.confirmationId}:${confirmation.status}`,
       runId: snapshot.run.runId,
@@ -122,11 +125,11 @@ function basicEventTitleFromType(type: string): string {
   if (type === "run.started") return "任务";
   if (type === "run.cancelled") return "已取消";
   if (type === "run.blocked") return "需要处理";
-  if (type === "run.resumed") return "继续处理";
+  if (type === "run.resumed") return "运行恢复";
   if (type === "tool.requested" || type === "tool.completed") return "动作";
   if (type === "tool.failed") return "未完成";
   if (type === "confirmation.needed") return "需要你判断";
-  if (type === "user_approval.received") return "继续处理";
+  if (type === "user_approval.received") return "用户决定";
   if (type === "user.guidance") return "补充要求";
   if (type === "final.result") return "结果";
   if (type === "run.failed") return "未完成";
@@ -145,7 +148,7 @@ function agentTaskStatusFromBasicEventType(type: string): BasicAgentRun["status"
 
 function restoredConfirmationDecisionSummary(confirmation: RuntimeConfirmationRecord): string {
   if (confirmation.status === "approved") {
-    return "已继续。";
+    return "已确认。";
   }
   if (confirmation.status === "denied") {
     return "已不执行。";

@@ -24,8 +24,8 @@ export function upsertRestoredConfirmation(input: {
     runId: input.snapshot.run.runId,
     conversationId: previous?.conversationId ?? input.snapshot.run.conversationId,
     status,
-    title: previous?.title ?? "继续处理",
-    actionSummary: previous?.actionSummary ?? "用户已补充要求。",
+    title: previous?.title ?? restoredConfirmationTitle(status),
+    actionSummary: previous?.actionSummary ?? restoredConfirmationActionSummary(status),
     affectedResources: previous?.affectedResources ?? [],
     riskLevel: previous?.riskLevel ?? "medium",
     requestedAt: previous?.requestedAt ?? input.decidedAt,
@@ -56,7 +56,7 @@ export function restoredConfirmationDecisionEvent(input: {
     runId: input.runId,
     sequence: input.sequence,
     type: input.decision.decision === "guidance" ? "user.guidance" : "user_approval.received",
-    title: input.decision.decision === "guidance" ? "补充要求" : "继续处理",
+    title: input.decision.decision === "guidance" ? "补充要求" : "用户决定",
     summary:
       input.decision.decision === "approve_once"
         ? ORDINARY_RUN_BLOCKED_FALLBACK
@@ -70,6 +70,20 @@ export function restoredConfirmationDecisionEvent(input: {
     refs: [{ kind: "event", id: `confirmation:${input.confirmationId}` }],
     visibility: "expanded",
   };
+}
+
+function restoredConfirmationTitle(status: RuntimeConfirmationRecord["status"]): string {
+  if (status === "guidance") return "补充要求";
+  if (status === "denied") return "已不执行";
+  if (status === "approved") return "已确认";
+  return "待处理";
+}
+
+function restoredConfirmationActionSummary(status: RuntimeConfirmationRecord["status"]): string {
+  if (status === "guidance") return "用户已补充要求。";
+  if (status === "denied") return "用户已选择不执行。";
+  if (status === "approved") return "用户已确认。";
+  return "等待你判断。";
 }
 
 export function restoredBlockedEvent(input: {

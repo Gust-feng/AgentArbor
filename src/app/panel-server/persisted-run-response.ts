@@ -410,7 +410,7 @@ export function panelStatusFromRuntimeStatus(status: RuntimeRunRecord["status"])
 
 function restoredConfirmationDecisionSummary(confirmation: RuntimeConfirmationRecord): string {
   if (confirmation.status === "approved") {
-    return "已继续。";
+    return "已确认。";
   }
   if (confirmation.status === "denied") {
     return "已不执行。";

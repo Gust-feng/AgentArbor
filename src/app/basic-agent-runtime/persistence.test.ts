@@ -82,6 +82,44 @@ test("restored basic blocked fallback stays concise", () => {
   assert.equal(JSON.stringify(events).includes("请重新发起或继续处理"), false);
 });
 
+test("restored basic events omit approved confirmations from ordinary replay", () => {
+  const events = restoredBasicEventsFromRuntimeSnapshot({
+    ...snapshotFixture(),
+    confirmations: [
+      {
+        confirmationId: "confirmation-approved",
+        runId: "run-1",
+        status: "approved",
+        title: "已确认",
+        actionSummary: "运行命令：pnpm test",
+        affectedResources: ["shell:test"],
+        riskLevel: "medium",
+        requestedAt: "2026-06-02T00:00:02.000Z",
+        decidedAt: "2026-06-02T00:00:03.000Z",
+        eventRefs: ["event:confirmation-approved"],
+      },
+      {
+        confirmationId: "confirmation-denied",
+        runId: "run-1",
+        status: "denied",
+        title: "已不执行",
+        actionSummary: "删除文件：old.txt",
+        affectedResources: ["file:old.txt"],
+        riskLevel: "high",
+        requestedAt: "2026-06-02T00:00:04.000Z",
+        decidedAt: "2026-06-02T00:00:05.000Z",
+        eventRefs: ["event:confirmation-denied"],
+      },
+    ],
+  });
+  const serialized = JSON.stringify(events);
+
+  assert.equal(events.some((event) => event.type === "run.resumed"), false);
+  assert.equal(events.some((event) => event.summary === "已确认。"), false);
+  assert.equal(events.some((event) => event.type === "user_approval.received"), true);
+  assert.equal(serialized.includes("继续处理"), false);
+});
+
 test("restored confirmation decision updates run, confirmations, basic events, and basic run", async () => {
   const database = new MemoryRuntimeDatabase({
     ...snapshotFixture(),

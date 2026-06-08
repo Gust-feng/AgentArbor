@@ -356,6 +356,39 @@ test("runtime record mapper persists safe model, event, tool, and confirmation p
   assert.equal(confirmations[0]?.guidance?.includes("[redacted-secret]"), true);
 });
 
+test("runtime confirmation records title decisions without generic continue copy", () => {
+  const confirmations = toRuntimeConfirmationRecords(job({
+    confirmationDecisions: [
+      {
+        confirmationId: "confirmation-approved",
+        runId: "run-1",
+        decision: "approve_once",
+        decidedAt: "2026-05-31T00:00:08.000Z",
+      },
+      {
+        confirmationId: "confirmation-denied",
+        runId: "run-1",
+        decision: "deny",
+        decidedAt: "2026-05-31T00:00:09.000Z",
+      },
+      {
+        confirmationId: "confirmation-guidance",
+        runId: "run-1",
+        decision: "guidance",
+        guidance: "只列出风险。",
+        decidedAt: "2026-05-31T00:00:10.000Z",
+      },
+    ],
+  }), []);
+
+  assert.deepEqual(confirmations.map((confirmation) => `${confirmation.status}:${confirmation.title}:${confirmation.actionSummary}`), [
+    "approved:已确认:用户已确认。",
+    "denied:已不执行:用户已选择不执行。",
+    "guidance:补充要求:用户已补充要求。",
+  ]);
+  assert.equal(JSON.stringify(confirmations).includes("继续处理"), false);
+});
+
 test("runtime record mapper persists ordinary tool previews without diagnostic counters", () => {
   const toolCalls = toRuntimeToolCallRecords("run-1", [
     completedToolStreamEvent(1, "tool-command", "shell_command"),

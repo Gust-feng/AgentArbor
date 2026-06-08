@@ -42,7 +42,7 @@ export function basicRunTitleFromStatus(status: BasicAgentRun["status"], resultT
   if (status === "cancelled") return "已取消";
   if (status === "failed") return "未完成";
   if (status === "completed") return "已完成";
-  return "正在处理";
+  return "进行中";
 }
 
 export function basicRunNextStepFromStatus(status: BasicAgentRun["status"]): string | undefined {

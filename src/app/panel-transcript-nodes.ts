@@ -183,7 +183,7 @@ function transcriptNodeForEvent(
     return transcriptNode(event, {
       kind: "user_decision",
       phase: "approved",
-      title: "继续执行",
+      title: "继续处理",
       summary: event.summary,
     });
   }

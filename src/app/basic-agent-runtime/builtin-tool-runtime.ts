@@ -1,4 +1,4 @@
-import type { ToolStateSettings } from "../../domain/config/index.js";
+import type { CapabilityToolAvailability, ToolStateSettings } from "../../domain/config/index.js";
 import type { InformationSourceKind } from "../../domain/research/index.js";
 import type { ToolCategory, ToolExecutor } from "../../domain/tools/index.js";
 import type { McpManager } from "../../adapters/mcp/index.js";
@@ -39,6 +39,7 @@ export type CreateDesktopBasicToolRegistryOptions = {
   readonly playwrightAvailable?: boolean;
   readonly toolStates?: readonly ToolStateSettings[];
   readonly toolCatalogNames?: readonly string[];
+  readonly toolCatalogAvailability?: readonly CapabilityToolAvailability[];
   readonly mcpManager?: McpManager;
 };
 
@@ -89,20 +90,22 @@ export function createDesktopBasicToolRegistry(
   ];
   const toolCatalogNames =
     options.toolCatalogNames === undefined ? undefined : new Set(options.toolCatalogNames);
+  const toolCatalogAvailability = toolAvailabilityByName(options.toolCatalogAvailability);
   for (const executor of executors) {
     if (toolCatalogNames !== undefined && !toolCatalogNames.has(executor.definition.name)) {
       continue;
     }
     const state = options.toolStates?.find((item) => item.name === executor.definition.name);
     const enabledByDefault = state?.enabled ?? executor.definition.name !== "shell_command";
+    const frozenAvailability = toolCatalogAvailability.get(executor.definition.name);
     registry.register({
       executor,
       scopes: ["desktop-basic", toolScopeFor(executor.definition.metadata?.category)],
       enabledByDefault,
       availability:
-        executor.definition.name === "browser_snapshot" && !playwrightAvailable
+        frozenAvailability ?? (executor.definition.name === "browser_snapshot" && !playwrightAvailable
           ? { status: "unavailable", disabledReason: "Playwright is not installed in this workspace." }
-          : { status: "available" },
+          : { status: "available" }),
     });
   }
   if (options.mcpManager !== undefined) {
@@ -115,6 +118,18 @@ export function createDesktopBasicToolRegistry(
     }
   }
   return registry;
+}
+
+function toolAvailabilityByName(
+  items: readonly CapabilityToolAvailability[] | undefined
+): ReadonlyMap<string, { readonly status: "available" } | { readonly status: "unavailable"; readonly disabledReason: string }> {
+  const result = new Map<string, { readonly status: "available" } | { readonly status: "unavailable"; readonly disabledReason: string }>();
+  for (const item of items ?? []) {
+    result.set(item.name, item.availability === "available"
+      ? { status: "available" }
+      : { status: "unavailable", disabledReason: item.disabledReason ?? "Unavailable in the run capability snapshot." });
+  }
+  return result;
 }
 
 function toolScopeFor(category: ToolCategory | undefined): ToolRegistryScope {

@@ -11,6 +11,7 @@ import { NativeIntelligenceChannel } from "../kernel/intelligence/channel.js";
 import type { IntelligenceChannel, ModelOutputDelta } from "../domain/intelligence/index.js";
 import type { InformationSourceKind } from "../domain/research/index.js";
 import type {
+  CapabilityToolAvailability,
   ModelProviderModelCatalog,
   ProviderProtocolProfileId,
   SanitizedModelProviderConfig,
@@ -297,6 +298,7 @@ export function createDefaultToolCenter(input: {
   readonly playwrightAvailable?: boolean;
   readonly toolStates?: readonly ToolStateSettings[];
   readonly toolCatalogNames?: readonly string[];
+  readonly toolCatalogAvailability?: readonly CapabilityToolAvailability[];
 } = {}): ToolExecutionBroker {
   return createToolCenterFromEnvironment(input);
 }
@@ -313,6 +315,7 @@ export async function createConfiguredToolCenter(
     readonly playwrightAvailable?: boolean;
     readonly toolStates?: readonly ToolStateSettings[];
     readonly toolCatalogNames?: readonly string[];
+    readonly toolCatalogAvailability?: readonly CapabilityToolAvailability[];
   } = {}
 ): Promise<ToolExecutionBroker> {
   return createToolCenterFromEnvironment({
@@ -332,6 +335,7 @@ export async function createConfiguredToolCenterFactory(
     readonly playwrightAvailable?: boolean;
     readonly toolStates?: readonly ToolStateSettings[];
     readonly toolCatalogNames?: readonly string[];
+    readonly toolCatalogAvailability?: readonly CapabilityToolAvailability[];
   } = {}
 ): Promise<(runtime: MinimalRuntime) => ToolExecutionBroker> {
   const env = input.env ?? await configCenter.createModelRuntimeEnvironment();
@@ -348,6 +352,7 @@ function createToolCenterFromEnvironment(input: {
   readonly playwrightAvailable?: boolean;
   readonly toolStates?: readonly ToolStateSettings[];
   readonly toolCatalogNames?: readonly string[];
+  readonly toolCatalogAvailability?: readonly CapabilityToolAvailability[];
 }): ToolExecutionBroker {
   return createDesktopBasicToolRegistry(input).createToolCenter("desktop-basic");
 }

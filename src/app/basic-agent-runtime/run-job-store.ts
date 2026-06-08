@@ -228,7 +228,7 @@ export class InMemoryBasicAgentRunJobStore implements BasicAgentRunJobStore {
       type: "run.resumed",
       createdAt: input.resumedAt,
       agentLabel: basicAgentJobLabel(job),
-      summary: "继续执行。",
+      summary: "继续处理。",
       status: "running",
       sourceRefs: [`confirmation:${input.confirmationId}`],
       modelCallRefs: [],

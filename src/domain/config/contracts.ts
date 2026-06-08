@@ -296,6 +296,12 @@ export type CapabilityToolCatalogItem = {
   readonly disabledReason?: string;
 };
 
+export type CapabilityToolAvailability = {
+  readonly name: string;
+  readonly availability: CapabilityToolCatalogItem["availability"];
+  readonly disabledReason?: string;
+};
+
 export type CapabilitySkillCatalogItem = {
   readonly id: string;
   readonly name: string;

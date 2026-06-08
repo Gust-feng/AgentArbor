@@ -354,6 +354,7 @@ test("panel server source keeps conversation restore and persistence split", asy
   assert.equal(runExecutionContracts.includes("readonly informationAccess?: SanitizedInformationAccessConfig"), true);
   assert.equal(runExecutionContracts.includes("export type DesktopRunResources"), true);
   assert.equal(runExecutionContracts.includes("readonly informationAccess: SanitizedInformationAccessConfig"), true);
+  assert.equal(runExecutionContracts.includes("readonly toolCatalogAvailability:"), true);
   assert.equal(desktopRunResources.includes("export async function prepareDesktopRunResources"), true);
   assert.equal(desktopRunResources.includes("export function desktopRuntimeMode"), true);
   assert.equal(desktopRunResources.includes("export function createDesktopToolCenterFactory"), true);
@@ -381,6 +382,7 @@ test("panel server source keeps conversation restore and persistence split", asy
   assert.equal(desktopToolCenterFactorySource.includes("fetch: providerFetch"), true);
   assert.equal(desktopToolCenterFactorySource.includes("toolStates: resources.toolStates"), true);
   assert.equal(desktopToolCenterFactorySource.includes("toolCatalogNames: resources.toolCatalogNames"), true);
+  assert.equal(desktopToolCenterFactorySource.includes("toolCatalogAvailability: resources.toolCatalogAvailability"), true);
   assert.equal(desktopAgentExecution.includes("export async function runOrdinaryDesktopForPanel"), true);
   assert.equal(desktopAgentExecution.includes("runDesktopAgentSession"), true);
   assert.equal(desktopAgentExecution.includes("createDesktopToolCenterFactory(runtime.providerFetch, resources)"), true);

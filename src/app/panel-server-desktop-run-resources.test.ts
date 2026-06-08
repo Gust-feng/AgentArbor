@@ -276,6 +276,54 @@ test("desktop tool center factory restricts executors to the frozen run tool cat
   assert.equal(toolCenter.has("run_command"), false);
 });
 
+test("desktop tool center factory keeps frozen unavailable tools unavailable", async () => {
+  const resources = await prepareDesktopRunResources(runtimeWithAiEnvironment(), "fake", {
+    capabilitySnapshot: capabilitySnapshot({
+      toolCatalog: {
+        scope: "desktop-basic",
+        allowedTools: [],
+        tools: [
+          {
+            name: "read_file",
+            displayName: "Read file",
+            displayDescription: "Read file unavailable in the frozen run snapshot.",
+            description: "Read file unavailable in the frozen run snapshot.",
+            category: "filesystem",
+            categoryLabel: "Filesystem",
+            riskLevel: "low",
+            riskLabel: "Low",
+            operationType: "read-only",
+            operationLabel: "Read only",
+            requiresConfirmation: false,
+            confirmationLabel: "No confirmation",
+            visibleResultPolicy: {
+              userVisible: "summary-only",
+              maxPreviewChars: 800,
+              omitRawOutput: true,
+            },
+            scopes: ["desktop-basic", "workspace"],
+            enabled: true,
+            availability: "unavailable",
+            disabledReason: "Workspace access was unavailable when the run started.",
+          },
+        ],
+      },
+    }),
+    informationAccess: informationAccess(),
+  });
+  const factory = createDesktopToolCenterFactory(undefined, resources);
+  const toolCenter = factory(createMinimalRuntime());
+
+  assert.deepEqual(resources.toolCatalogAvailability, [
+    {
+      name: "read_file",
+      availability: "unavailable",
+      disabledReason: "Workspace access was unavailable when the run started.",
+    },
+  ]);
+  assert.equal(toolCenter.has("read_file"), false);
+});
+
 function runtimeWithAiEnvironment(): PanelRuntime {
   return {
     configCenter: {

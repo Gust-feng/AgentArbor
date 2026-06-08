@@ -70,6 +70,30 @@ test("desktop-basic tool registry keeps unavailable browser tools out of allowed
   assert.equal(registry.createToolCenter("desktop-basic").has("browser_snapshot"), false);
 });
 
+test("desktop-basic tool registry prefers frozen tool availability over current environment", () => {
+  const registry = createDesktopBasicToolRegistry({
+    env: {},
+    workspaceRoot: process.cwd(),
+    playwrightAvailable: true,
+    toolCatalogNames: ["browser_snapshot"],
+    toolCatalogAvailability: [
+      {
+        name: "browser_snapshot",
+        availability: "unavailable",
+        disabledReason: "Unavailable when the run started.",
+      },
+    ],
+  });
+  const catalog = registry.catalog("desktop-basic");
+  const browser = catalog.tools.find((tool) => tool.name === "browser_snapshot");
+
+  assert.deepEqual(catalog.tools.map((tool) => tool.name), ["browser_snapshot"]);
+  assert.equal(browser?.availability, "unavailable");
+  assert.equal(browser?.disabledReason, "Unavailable when the run started.");
+  assert.deepEqual(catalog.allowedTools, []);
+  assert.equal(registry.createToolCenter("desktop-basic").has("browser_snapshot"), false);
+});
+
 test("desktop-basic tool registry applies configured tool disabled state", () => {
   const registry = createDesktopBasicToolRegistry({
     env: {},

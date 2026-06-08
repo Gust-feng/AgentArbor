@@ -344,6 +344,11 @@ function desktopRunResources(input: {
       updatedAt: input.capabilitySnapshot.createdAt,
     })),
     toolCatalogNames: input.capabilitySnapshot.toolCatalog.tools.map((tool) => tool.name),
+    toolCatalogAvailability: input.capabilitySnapshot.toolCatalog.tools.map((tool) => ({
+      name: tool.name,
+      availability: tool.availability,
+      disabledReason: tool.disabledReason,
+    })),
     playwrightAvailable: false,
   };
 }

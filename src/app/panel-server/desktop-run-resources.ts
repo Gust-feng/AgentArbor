@@ -1,5 +1,6 @@
 import type {
   BasicAgentCapabilitySnapshot,
+  CapabilityToolAvailability,
   SanitizedModelProviderConfig,
   ToolStateSettings,
 } from "../../domain/config/index.js";
@@ -25,6 +26,14 @@ function toolStatesFromCapabilitySnapshot(snapshot: BasicAgentCapabilitySnapshot
 
 function toolCatalogNamesFromCapabilitySnapshot(snapshot: BasicAgentCapabilitySnapshot): readonly string[] {
   return snapshot.toolCatalog.tools.map((tool) => tool.name);
+}
+
+function toolCatalogAvailabilityFromCapabilitySnapshot(snapshot: BasicAgentCapabilitySnapshot): readonly CapabilityToolAvailability[] {
+  return snapshot.toolCatalog.tools.map((tool) => ({
+    name: tool.name,
+    availability: tool.availability,
+    disabledReason: tool.disabledReason,
+  }));
 }
 
 export async function prepareDesktopRunResources(
@@ -95,6 +104,7 @@ export async function prepareDesktopRunResources(
     workspaceRoot: capabilitySnapshot.workspace.workspaceDirectory,
     toolStates: toolStatesFromCapabilitySnapshot(capabilitySnapshot),
     toolCatalogNames: toolCatalogNamesFromCapabilitySnapshot(capabilitySnapshot),
+    toolCatalogAvailability: toolCatalogAvailabilityFromCapabilitySnapshot(capabilitySnapshot),
     playwrightAvailable: capabilitySnapshot.toolCatalog.tools.some(
       (tool) => tool.name === "browser_snapshot" && tool.availability === "available"
     ),
@@ -127,6 +137,7 @@ export function createDesktopToolCenterFactory(
     workspaceRoot: resources.workspaceRoot,
     toolStates: resources.toolStates,
     toolCatalogNames: resources.toolCatalogNames,
+    toolCatalogAvailability: resources.toolCatalogAvailability,
     playwrightAvailable: resources.playwrightAvailable,
   });
 }

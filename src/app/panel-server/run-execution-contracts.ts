@@ -1,5 +1,6 @@
 import type {
   BasicAgentCapabilitySnapshot,
+  CapabilityToolAvailability,
   ModelRunReasoningEffort,
   RunAgentDefinitionRef,
   RunCapabilityResolution,
@@ -68,5 +69,6 @@ export type DesktopRunResources = {
   readonly workspaceRoot: string;
   readonly toolStates: readonly ToolStateSettings[];
   readonly toolCatalogNames: readonly string[];
+  readonly toolCatalogAvailability: readonly CapabilityToolAvailability[];
   readonly playwrightAvailable: boolean;
 };

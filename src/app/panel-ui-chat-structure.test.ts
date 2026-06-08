@@ -20,7 +20,6 @@ test("panel UI chat and transcript modules stay presentation-focused", async () 
     transcriptTurnProjection,
     chatActiveProjection,
     chatActiveViewProjection,
-    transcriptStartupNodeProjection,
     assistantVisibleText,
     assistantFailureProjection,
     assistantMessageOutputProjection,
@@ -53,7 +52,6 @@ test("panel UI chat and transcript modules stay presentation-focused", async () 
     readAppSource("panel-transcript-turn-projection.ts"),
     readAppSource("panel-ui-chat-active-projection.ts"),
     readAppSource("panel-ui-chat-active-view.ts"),
-    readAppSource("panel-transcript-startup-node.ts"),
     readAppSource("panel-assistant-visible-text.ts"),
     readAppSource("panel-assistant-failure.ts"),
     readAppSource("panel-assistant-message-output.ts"),
@@ -220,11 +218,8 @@ test("panel UI chat and transcript modules stay presentation-focused", async () 
   assert.equal(chatActiveProjection.includes("projectChatWorkline"), true);
   assert.equal(chatActiveProjection.includes("run.started:node"), false);
   assert.equal(chatActiveProjection.includes("已开始处理。"), false);
-  assert.equal(transcriptStartupNodeProjection.includes("export function withStartupActivityNode"), true);
-  assert.equal(transcriptStartupNodeProjection.includes("export function withStartupWorkflowNode"), false);
-  assert.equal(transcriptStartupNodeProjection.includes("export function isRefreshingTranscriptRun"), true);
-  assert.equal(transcriptStartupNodeProjection.includes("run.started:node"), false);
-  assert.equal(transcriptStartupNodeProjection.includes("已开始处理。"), false);
+  assert.equal(transcriptTurnProjection.includes("panel-transcript-startup-node"), false);
+  assert.equal(chatActiveProjection.includes("panel-transcript-startup-node"), false);
   assert.equal(chatActiveProjection.includes("terminalStatuses"), true);
   assert.equal(chatActiveProjection.includes('"blocked"'), true);
   assert.equal(chatActiveProjection.includes("statusNotice"), true);

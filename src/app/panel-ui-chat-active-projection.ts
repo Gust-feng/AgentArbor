@@ -8,9 +8,8 @@ import { projectChatWorkline, type ChatWorklineProjection, type WorklineTaskStat
 import type { LiveRunBuffer } from "./panel-ui-live-run-buffer.js";
 import { firstNonEmptyText, hasNonEmptyText } from "./panel-assistant-output.js";
 import {
-  isRefreshingTranscriptRun,
-  withStartupActivityNode,
-} from "./panel-transcript-startup-node.js";
+  nodesForRun,
+} from "./panel-transcript-node-projection.js";
 
 export type ChatActiveConversationTurn = {
   readonly turnId: string;
@@ -86,10 +85,7 @@ export function projectChatActive<TDeliverable, TPending>(
   const currentRunId = input.run?.runId ?? input.conversation?.activeRunId ?? input.conversation?.latestRunId ?? input.live?.runId;
   const activeLive = activeLiveForCurrentRun(input.run, currentRunId, input.live);
   const currentRunProjection = projectLiveRunTranscript(
-    withStartupActivityNode(nodesForRun(input.transcriptNodes, currentRunId), {
-      runId: currentRunId,
-      refreshing: isRefreshingTranscriptRun(input.run),
-    }),
+    nodesForRun(input.transcriptNodes, currentRunId),
     activeLive
   );
   const currentRunAssistantTurn = currentRunId === undefined
@@ -232,12 +228,4 @@ function shouldShowStatusNotice(
   if (assistantTurn === undefined) return true;
   if (run?.status === "failed" && assistantTurn.status !== "failed") return true;
   return run?.status === "blocked" || run?.status === "paused";
-}
-
-function nodesForRun<TNode extends { readonly runId: string }>(
-  nodes: readonly TNode[],
-  runId: string | undefined
-): readonly TNode[] {
-  if (runId === undefined) return [];
-  return nodes.filter((node) => node.runId === runId);
 }

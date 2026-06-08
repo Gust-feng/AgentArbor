@@ -7,10 +7,6 @@ import {
   timelineVisibleNodes,
   visibleTranscriptNodes,
 } from "./panel-transcript-node-projection.js";
-import {
-  isRefreshingTranscriptRun,
-  withStartupActivityNode,
-} from "./panel-transcript-startup-node.js";
 
 test("activity projection preserves visible thinking even when the text looks like a progress placeholder", () => {
   const projected = activityVisibleNodes([
@@ -236,27 +232,6 @@ test("panel transcript nodes suppress ordinary startup and placeholder events", 
   assert.equal(JSON.stringify(projected).includes("任务已开始"), false);
   assert.equal(JSON.stringify(projected).includes("等待模型输出"), false);
   assert.equal(JSON.stringify(projected).includes("内容已整理"), false);
-});
-
-test("startup activity projection stays silent before real transcript activity", () => {
-  const projected = withStartupActivityNode([], {
-    runId: "run-1",
-    refreshing: true,
-  });
-
-  assert.equal(projected.length, 0);
-  assert.equal(isRefreshingTranscriptRun({ runId: "run-1", status: "running" }), true);
-  assert.equal(isRefreshingTranscriptRun({ runId: "run-1", status: "completed" }), false);
-});
-
-test("startup activity projection keeps existing transcript activity", () => {
-  const existing = node({ nodeId: "thinking", kind: "thinking", eventType: "model.reasoning.delta", sequence: 1, text: "先看上下文" });
-  const projected = withStartupActivityNode([existing], {
-    runId: "run-1",
-    refreshing: true,
-  });
-
-  assert.deepEqual(projected, [existing]);
 });
 
 function panelEvent(input: {

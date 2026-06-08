@@ -15,10 +15,6 @@ import {
   type ConfirmationIdentity,
 } from "./panel-transcript-confirmation-projection.js";
 import { nodesForRun } from "./panel-transcript-node-projection.js";
-import {
-  isRefreshingTranscriptRun,
-  withStartupActivityNode,
-} from "./panel-transcript-startup-node.js";
 
 export type AssistantTranscriptRunLike = {
   readonly runId: string;
@@ -97,13 +93,9 @@ export function projectAssistantTranscriptTurn<
   const displayRunId = input.projectedTurn.displayRunId;
   const unclaimedRunningTurn = displayRunId === undefined && isPendingAssistantShell(turn);
   const refreshingRun = input.run?.runId === displayRunId && isRefreshingRunStatus(input.run);
-  const startupRunId = displayRunId ?? (unclaimedRunningTurn ? turn.turnId : undefined);
   const live = activeLiveForTurn(input.live, input.run, displayRunId, refreshingRun);
   const runProjection = projectLiveRunTranscript(
-    withStartupActivityNode(nodesForRun(input.transcriptNodes, displayRunId), {
-      runId: startupRunId,
-      refreshing: refreshingRun || unclaimedRunningTurn,
-    }),
+    nodesForRun(input.transcriptNodes, displayRunId),
     live
   );
   const pending = pendingForTurn(input.pending, displayRunId);
@@ -189,7 +181,7 @@ export function assistantTurnSlotKey<TTurn extends WorklineConversationTurn>(
 }
 
 export function isRefreshingRunStatus(run: AssistantTranscriptRunLike | undefined): boolean {
-  return isRefreshingTranscriptRun(run);
+  return run?.status === "queued" || run?.status === "planning" || run?.status === "running" || run?.status === "pending";
 }
 
 function canUseTurnContentAsAnswer<TTurn extends WorklineConversationTurn, TPending>(input: {

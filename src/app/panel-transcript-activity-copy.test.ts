@@ -101,7 +101,7 @@ test("tool activity copy presents concrete generic targets", () => {
   }));
 
   assert.equal(copy?.label, "删除");
-  assert.equal(copy?.detail, "删除文件：Z:\\AgentArbor\\tmp.txt");
+  assert.equal(copy?.detail, "Z:\\AgentArbor\\tmp.txt");
 });
 
 test("tool activity copy removes redundant target prefixes", () => {
@@ -221,7 +221,7 @@ test("tool activity copy surfaces safe failed command details", () => {
 
   assert.deepEqual(copy, {
     label: "命令",
-    detail: "pnpm test · exit 1 · 测试失败：1 个断言未通过",
+    detail: "pnpm test · 测试失败：1 个断言未通过",
   });
 });
 
@@ -323,8 +323,8 @@ test("display activity items collapse requested and terminal tool phases into on
 
   assert.equal(items.length, 1);
   assert.equal(items[0]?.copy.label, "读取");
-  assert.equal(items[0]?.copy.detail, "README.md · 120 bytes");
-  assert.equal(items[0]?.copy.expandedDetail, "发起：README.md\n结果：README.md · 120 bytes");
+  assert.equal(items[0]?.copy.detail, "README.md");
+  assert.equal(items[0]?.copy.expandedDetail, undefined);
 });
 
 test("display activity items show a pending command approval once with the concrete command", () => {

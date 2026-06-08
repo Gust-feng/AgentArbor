@@ -11,6 +11,7 @@ import {
 } from "../kernel/tools/index.js";
 import { redactSensitiveText } from "../kernel/redaction.js";
 import { sanitizeAssistantVisibleText } from "./visible-text-safety.js";
+import { cleanOrdinaryToolText } from "./ordinary-tool-copy.js";
 
 export function redactOrdinaryText(value: string, maxLength = 1_200): string {
   return compactSafeText(sanitizeAssistantVisibleText(redactSensitiveText(value)), maxLength) ?? "";
@@ -116,8 +117,7 @@ export function safeReadFileToolPreview(input: {
   readonly bytes?: number;
   readonly maxLength?: number;
 }): string | undefined {
-  const bytes = typeof input.bytes === "number" ? `${input.bytes} bytes` : undefined;
-  const headline = input.summary ?? [input.path, bytes].filter(isString).join(" · ");
+  const headline = cleanOrdinaryToolText(input.summary) ?? input.path;
   return compactSafeText(headline || "文件已读取。", input.maxLength ?? 900);
 }
 
@@ -127,8 +127,7 @@ export function safeCommandToolPreview(input: {
   readonly exitCode?: number;
   readonly maxLength?: number;
 }): string | undefined {
-  const exit = typeof input.exitCode === "number" ? `exit ${input.exitCode}` : undefined;
-  const headline = input.summary ?? [input.command, exit].filter(isString).join(" · ");
+  const headline = cleanOrdinaryToolText(input.summary) ?? input.command;
   return compactSafeText(headline || "命令已执行。", input.maxLength ?? 900);
 }
 

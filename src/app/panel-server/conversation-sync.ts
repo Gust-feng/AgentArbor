@@ -17,6 +17,8 @@ import {
   textStreamFragmentSourceFromEventId,
 } from "../readable-text-fragments.js";
 import { confirmationActionSummaryText } from "../confirmation-copy.js";
+import type { ToolDisplayProjection } from "../../domain/tools/index.js";
+import { cleanOrdinaryToolText } from "../ordinary-tool-copy.js";
 
 export type PanelConversationSyncRunResponse = {
   readonly status: PanelRunStatus;
@@ -240,7 +242,7 @@ function runningAssistantTurnFromResponse(
       content: response.status === "pending" ? "等待前一个任务完成。" : "",
     };
   }
-  const text = sanitizeAssistantVisibleText(latest.detail?.preview ?? latest.delta ?? latest.summary ?? "");
+  const text = sanitizeAssistantVisibleText(runningPreviewText(latest));
   return {
     title: runningPreviewTitle(latest),
     content: text,
@@ -297,7 +299,7 @@ function latestRunningPreviewEvent(events: PanelRunTranscript["events"]): PanelR
     );
   });
   return candidates.find((event) =>
-    (event.detail?.preview ?? event.delta ?? event.summary ?? "").trim().length > 0
+    runningPreviewText(event).trim().length > 0
   );
 }
 
@@ -322,16 +324,60 @@ function isModelOutputBoundaryEvent(event: PanelRunTranscript["events"][number])
 
 function runningPreviewTitle(event: PanelRunTranscript["events"][number]): string {
   if (event.type === "confirmation.needed") return "需要确认";
-  if (event.type === "tool.requested") return "正在处理";
-  if (event.type === "tool.completed") return "已处理";
+  if (event.type === "tool.requested") return "正在使用工具";
+  if (event.type === "tool.completed") return "工具已完成";
   if (event.type === "tool.failed") return "未完成";
   if (event.type === "user_approval.received" || event.type === "run.resumed") return "继续处理";
   if (event.type === "user.guidance") return "补充要求";
-  if (event.type === "model.reasoning.delta" || event.type === "model.side.completed") return "正在整理";
+  if (event.type === "model.reasoning.delta" || event.type === "model.side.completed") return "正在回复";
   if (event.type === "model.output.delta") return "正在回复";
-  if (event.type === "context.compaction.completed") return "整理上下文";
-  if (event.type === "context.compaction.failed") return "上下文整理失败";
-  return "正在处理";
+  if (event.type === "context.compaction.completed" || event.type === "context.compaction.failed") return "正在回复";
+  return "正在回复";
+}
+
+function runningPreviewText(event: PanelRunTranscript["events"][number]): string {
+  if (event.type === "tool.requested" || event.type === "tool.completed" || event.type === "tool.failed") {
+    return toolPreviewText(event.detail?.display) ??
+      cleanOrdinaryToolText(event.detail?.preview) ??
+      cleanOrdinaryToolText(event.summary) ??
+      "";
+  }
+  if (event.type === "context.compaction.completed" || event.type === "context.compaction.failed") {
+    return "";
+  }
+  return event.detail?.preview ?? event.delta ?? event.summary ?? "";
+}
+
+function toolPreviewText(display: ToolDisplayProjection | undefined): string | undefined {
+  if (display?.kind === "command_summary") {
+    const command = [display.command, ...(display.args ?? [])]
+      .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+      .join(" ");
+    const error = cleanOrdinaryToolText(display.errorSummary);
+    const output = cleanOrdinaryToolText(display.outputSummary);
+    return [command, output, error].filter(isString).join(" · ") || undefined;
+  }
+  if (display?.kind === "search_results") {
+    return [display.query, `${display.results.length} 条结果`].filter(isString).join(" · ") || undefined;
+  }
+  if (display?.kind === "browser_snapshot") {
+    return display.title ?? display.url;
+  }
+  if (display?.kind === "file_diff_preview") {
+    return [display.path, display.replacements === undefined ? undefined : `${display.replacements} 处修改`].filter(isString).join(" · ") || undefined;
+  }
+  if (display?.kind === "file_change_summary") {
+    return [display.path, display.append === true ? "追加写入" : undefined].filter(isString).join(" · ") || undefined;
+  }
+  if (display?.kind === "generic_tool_summary") {
+    const items = display.items?.slice(0, 6).map(cleanOrdinaryToolText).filter(isString) ?? [];
+    return cleanOrdinaryToolText(display.summary) ?? (items.length > 0 ? items.join("\n") : undefined);
+  }
+  return undefined;
+}
+
+function isString(value: string | undefined): value is string {
+  return value !== undefined && value.trim().length > 0;
 }
 
 function assistantFailureTextFromResponse(response: PanelConversationSyncRunResponse): string {

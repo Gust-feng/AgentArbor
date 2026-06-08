@@ -3,6 +3,7 @@ import { toolDisplayName } from "../domain/tools/index.js";
 import { redactSensitiveText } from "../kernel/redaction.js";
 import { asRecord, stringArray, stringOrUndefined } from "./panel-read-model-utils.js";
 import { safeCommandToolPreview, safeReadFileToolPreview } from "./safe-tool-preview.js";
+import { cleanOrdinaryToolText } from "./ordinary-tool-copy.js";
 
 export type PanelRunStreamEventDetail = {
   readonly kind: "thinking" | "tool" | "confirmation" | "work";
@@ -32,14 +33,14 @@ export function toolSummary(
   if (type === "tool.requested") {
     return `正在${displayName}${targetText}。`;
   }
-  const duration = typeof payload.durationMs === "number" ? `，耗时 ${Math.round(payload.durationMs)}ms` : "";
-  const summary = stringOrUndefined(output.summary);
+  const summary = cleanOrdinaryToolText(stringOrUndefined(output.summary));
+  const resultSummary = summary === target ? undefined : summary;
   if (type === "tool.completed") {
-    return summary === undefined
-      ? `${displayName}完成${targetText}${duration}。`
-      : `${displayName}完成${targetText}${duration}：${summary}`;
+    return resultSummary === undefined
+      ? `${displayName}完成${targetText}。`
+      : `${displayName}完成${targetText}：${resultSummary}`;
   }
-  return `${displayName}失败${targetText}${duration}。`;
+  return `${displayName}未完成${targetText}。`;
 }
 
 export function toolStreamDetail(
@@ -124,25 +125,25 @@ function toolResultEnvelopeOrUndefined(value: unknown): ToolResultEnvelope | und
 function toolRequestPreview(toolName: string, input: Readonly<Record<string, unknown>>): string | undefined {
   if (toolName === "read_file" || toolName === "list_dir") {
     const path = stringOrUndefined(input.path);
-    return path === undefined ? undefined : `目标：${path}`;
+    return path;
   }
   if (toolName === "grep_files") {
     const query = stringOrUndefined(input.query);
     const path = stringOrUndefined(input.path);
-    return query === undefined ? undefined : `搜索：${query}${path === undefined ? "" : ` · ${path}`}`;
+    return query === undefined ? undefined : [query, path].filter((item): item is string => item !== undefined).join(" · ");
   }
   if (toolName === "write_file" || toolName === "create_file" || toolName === "edit_file" || toolName === "delete_file") {
     const path = stringOrUndefined(input.path);
-    return path === undefined ? "准备修改文件。" : `目标文件：${path}`;
+    return path;
   }
   if (toolName === "run_command" || toolName === "shell_command") {
     const command = stringOrUndefined(input.command);
     const args = stringArray(input.args);
-    return command === undefined ? undefined : `命令：${[command, ...args].join(" ").trim()}`;
+    return command === undefined ? undefined : [command, ...args].join(" ").trim();
   }
   if (toolName === "browser_snapshot") {
     const url = stringOrUndefined(input.url);
-    return url === undefined ? undefined : `页面：${url}`;
+    return url;
   }
   return undefined;
 }
@@ -154,20 +155,15 @@ function safeFileChangePreview(
   result: Readonly<Record<string, unknown>>
 ): string | undefined {
   const path = stringOrUndefined(result.path) ?? stringOrUndefined(input.path);
-  const summary = stringOrUndefined(output.summary);
+  const summary = cleanOrdinaryToolText(stringOrUndefined(output.summary));
   if (toolName === "edit_file") {
     const replacements = typeof result.replacements === "number" ? `替换：${result.replacements} 处` : undefined;
-    const lengthChange =
-      typeof result.previousLength === "number" && typeof result.nextLength === "number"
-        ? `长度：${result.previousLength} -> ${result.nextLength} chars`
-        : undefined;
-    const diffPreview = ["变更预览", replacements, lengthChange]
+    const diffPreview = ["变更预览", replacements]
       .filter((item): item is string => item !== undefined && item.length > 0)
       .join("\n");
     return [summary, path === undefined ? undefined : `文件：${path}`, diffPreview].filter((item): item is string => item !== undefined && item.length > 0).join("\n");
   }
-  const bytes = typeof result.bytes === "number" ? `${result.bytes} bytes` : undefined;
-  return [summary, path === undefined ? undefined : `文件：${path}`, bytes === undefined ? undefined : `写入大小：${bytes}`].filter((item): item is string => item !== undefined && item.length > 0).join("\n");
+  return [summary, path === undefined ? undefined : `文件：${path}`].filter((item): item is string => item !== undefined && item.length > 0).join("\n");
 }
 
 function toolResultPreview(
@@ -189,8 +185,7 @@ function toolResultPreview(
       const record = asRecord(entry);
       const name = stringOrUndefined(record.name) ?? "unknown";
       const kind = stringOrUndefined(record.kind) ?? "entry";
-      const bytes = typeof record.bytes === "number" ? ` · ${record.bytes} bytes` : "";
-      return `${kind} ${name}${bytes}`;
+      return `${kind} ${name}`;
     });
     return lines.length === 0 ? stringOrUndefined(output.summary) : lines.join("\n");
   }

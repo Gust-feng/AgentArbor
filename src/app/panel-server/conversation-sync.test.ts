@@ -403,9 +403,9 @@ test("syncConversationTurnForJob waits for post-tool model output before showing
   });
 
   const assistant = conversations.getReadModel(job.conversationId ?? "")?.turns.find((turn) => turn.role === "assistant");
-  assert.equal(assistant?.title, "已处理");
+  assert.equal(assistant?.title, "工具已完成");
   assert.equal(assistant?.content.includes("我先运行命令"), false);
-  assert.equal(assistant?.content, "dir · exit 0");
+  assert.equal(assistant?.content, "dir");
 
   syncConversationTurnForJob({
     conversations,
@@ -661,8 +661,8 @@ test("syncConversationPreviewsForRunningJobs skips queued and terminal jobs whil
   });
 
   const assistant = conversations.getReadModel(job.conversationId ?? "")?.turns.find((turn) => turn.role === "assistant");
-  assert.equal(assistant?.title, "正在处理");
-  assert.equal(assistant?.content, "目标：README.md");
+  assert.equal(assistant?.title, "正在使用工具");
+  assert.equal(assistant?.content, "README.md");
 });
 
 test("syncConversationTurnForJob prefers HTTP event errors for failed turns", () => {

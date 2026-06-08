@@ -13,6 +13,7 @@ import {
   type ReasoningTranscriptEvent,
 } from "./transcript-reasoning.js";
 import { isStaleModelProgressSummary } from "./panel-model-progress-copy.js";
+import { cleanOrdinaryToolText } from "./ordinary-tool-copy.js";
 
 export type PanelTranscriptStreamEvent = {
   readonly eventId: string;
@@ -397,8 +398,8 @@ function transcriptToolSummary(event: PanelTranscriptStreamEvent): string | unde
     const command = [display.command, ...(display.args ?? [])]
       .filter((value): value is string => typeof value === "string" && value.length > 0)
       .join(" ");
-    const exit = typeof display.exitCode === "number" ? `exit ${display.exitCode}` : undefined;
-    return [command, exit, display.outputSummary, display.errorSummary]
+    const error = event.type === "tool.failed" ? display.errorSummary : undefined;
+    return [command, display.outputSummary, error]
       .filter((value): value is string => value !== undefined && value.trim().length > 0)
       .join(" · ");
   }
@@ -411,12 +412,16 @@ function transcriptToolSummary(event: PanelTranscriptStreamEvent): string | unde
     return display.title ?? display.url ?? event.detail?.preview ?? event.summary;
   }
   if (display?.kind === "file_change_summary" || display?.kind === "file_diff_preview") {
-    return fileDisplaySummary(display) ?? event.detail?.preview ?? event.summary;
+    return fileDisplaySummary(display) ?? cleanOrdinaryToolText(event.detail?.preview) ?? cleanOrdinaryToolText(event.summary);
   }
   if (display?.kind === "generic_tool_summary") {
-    return display.summary ?? display.items?.slice(0, 6).join("\n") ?? event.detail?.preview ?? event.summary;
+    const items = display.items?.slice(0, 6).map(cleanOrdinaryToolText).filter(isString) ?? [];
+    return cleanOrdinaryToolText(display.summary) ??
+      (items.length > 0 ? items.join("\n") : undefined) ??
+      cleanOrdinaryToolText(event.detail?.preview) ??
+      cleanOrdinaryToolText(event.summary);
   }
-  return event.detail?.preview ?? event.summary;
+  return cleanOrdinaryToolText(event.detail?.preview) ?? cleanOrdinaryToolText(event.summary);
 }
 
 function toolTranscriptTitle(event: PanelTranscriptStreamEvent, phase: TranscriptNodePhase): string {
@@ -478,17 +483,17 @@ function fileDisplaySummary(display: Extract<ToolDisplayProjection, { readonly k
     display.kind === "file_diff_preview"
       ? [
           display.replacements === undefined ? undefined : `${display.replacements} 处修改`,
-          display.previousLength === undefined || display.nextLength === undefined
-            ? undefined
-            : `${display.previousLength} -> ${display.nextLength} chars`,
         ]
       : [
-          display.bytes === undefined ? undefined : `${display.bytes} bytes`,
-          display.append === true ? "append" : undefined,
+          display.append === true ? "追加写入" : undefined,
         ];
   return [display.path, ...changes]
     .filter((value): value is string => value !== undefined && value.trim().length > 0)
     .join(" · ") || undefined;
+}
+
+function isString(value: string | undefined): value is string {
+  return value !== undefined;
 }
 
 function confirmationIdForTranscriptEvent(event: PanelTranscriptStreamEvent): string {

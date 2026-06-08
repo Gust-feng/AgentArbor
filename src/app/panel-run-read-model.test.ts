@@ -279,6 +279,8 @@ test("panel transcript nodes preserve ordered ordinary-agent tool lifecycle", ()
   );
   assert.equal(nodes[0]?.title.includes("准备"), true);
   assert.equal(nodes[3]?.title, "运行命令");
+  assert.equal(nodes[4]?.summary, "pnpm test · tests passed");
+  assert.equal(ordinaryVisibleProjectionIncludes(nodes, "exit "), false);
   assert.equal(nodes[5]?.sequence > nodes[4]!.sequence, true);
 });
 
@@ -747,9 +749,11 @@ test("ordinary agent stream exposes context compaction as safe continuation main
   const serialized = JSON.stringify(events);
 
   assert.equal(compaction?.agentLabel, "上下文");
-  assert.equal(compaction?.summary?.includes("已压缩 18 条"), true);
-  assert.equal(compaction?.detail?.preview?.includes("覆盖较早上下文 18 条"), true);
+  assert.equal(compaction?.summary, "较早上下文已整理。");
+  assert.equal(compaction?.detail?.preview, undefined);
   assert.deepEqual(compaction?.modelCallRefs, ["model-request-compaction", "model-response-compaction"]);
+  assert.equal(ordinaryVisibleProjectionIncludes(events, "tokens"), false);
+  assert.equal(ordinaryVisibleProjectionIncludes(events, "已压缩 18 条"), false);
   assert.equal(serialized.includes("raw prompt"), false);
   assert.equal(serialized.includes("raw tool output"), false);
 });
@@ -919,6 +923,7 @@ test("panel transcript preserves typed safe tool display without raw command out
   assert.equal(JSON.stringify(transcript).includes("RAW_STDOUT_SENTINEL"), false);
   assert.equal(completedNode?.display?.kind, "command_summary");
   assert.equal(completedNode?.summary?.includes("tests passed"), true);
+  assert.equal(completedNode?.summary?.includes("exit 0"), false);
   assert.equal(JSON.stringify(transcript.transcriptNodes).includes("RAW_STDOUT_SENTINEL"), false);
 });
 
@@ -959,7 +964,8 @@ test("panel transcript edit fallback omits raw replacement text", () => {
   const serialized = JSON.stringify(transcript);
   const completedTool = transcript.events.find((event) => event.type === "tool.completed");
 
-  assert.equal(completedTool?.detail?.preview?.includes("长度：32 -> 18 chars"), true);
+  assert.equal(completedTool?.detail?.preview?.includes("32 -> 18 chars"), false);
+  assert.equal(completedTool?.detail?.preview?.includes("替换：1 处"), true);
   assert.equal(serialized.includes("RAW_OLD_TEXT_SENTINEL"), false);
   assert.equal(serialized.includes("RAW_NEW_TEXT_SENTINEL"), false);
   assert.equal(serialized.includes("sk-edit-secret"), false);
@@ -1010,6 +1016,8 @@ test("panel transcript nodes do not invent thinking and keep failed tool results
   );
   assert.equal(nodes.some((node) => node.kind === "thinking"), false);
   assert.equal(nodes[1]?.title.includes("未完成"), true);
+  assert.equal(nodes[1]?.summary, "pnpm test · tests failed");
+  assert.equal(ordinaryVisibleProjectionIncludes(nodes, "exit 1"), false);
   assert.equal(nodes[1]?.display?.kind, "command_summary");
 });
 
@@ -1261,4 +1269,17 @@ function ordinaryEventVisibleText(event: { readonly agentLabel?: string; readonl
   return [event.agentLabel, event.summary, event.delta, detail.action, detail.preview, detail.error]
     .filter((value): value is string => typeof value === "string")
     .join("\n");
+}
+
+function ordinaryVisibleProjectionIncludes(
+  values: readonly { readonly title?: string; readonly agentLabel?: string; readonly summary?: string; readonly delta?: string; readonly detail?: unknown }[],
+  text: string
+): boolean {
+  return values.some((value) => {
+    const detail = typeof value.detail === "object" && value.detail !== null
+      ? value.detail as { readonly action?: string; readonly preview?: string; readonly error?: string }
+      : {};
+    return [value.title, value.agentLabel, value.summary, value.delta, detail.action, detail.preview, detail.error]
+      .some((candidate) => typeof candidate === "string" && candidate.includes(text));
+  });
 }

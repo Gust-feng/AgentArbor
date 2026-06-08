@@ -2,7 +2,7 @@ import type { ArborMessageType } from "../domain/common.js";
 import type { ModelVisibleOutputProjection } from "../domain/intelligence/index.js";
 import type { EventLogEntry } from "../kernel/events/in-memory-event-log.js";
 import { modelVisibleOutputOrUndefined } from "./panel-transcript-model-calls.js";
-import { asRecord, isString, numberOrUndefined, stringOrUndefined } from "./panel-read-model-utils.js";
+import { asRecord, isString, stringOrUndefined } from "./panel-read-model-utils.js";
 import { compactStreamDetailText, type PanelRunStreamEventDetail } from "./panel-stream-tool-projection.js";
 import type { PanelObservationReadModel } from "./panel-run-tracking-contracts.js";
 import { cleanConfirmationSummary, confirmationActionSummaryText } from "./confirmation-copy.js";
@@ -112,27 +112,13 @@ export function contextCompactionStreamSummary(
   type: "context.compaction.completed" | "context.compaction.failed",
   payload: Readonly<Record<string, unknown>>
 ): string {
-  const summary = stringOrUndefined(payload.summary);
-  if (summary !== undefined) {
-    return summary;
-  }
-  const tokenCount = numberOrUndefined(payload.tokenCount);
-  const threshold = numberOrUndefined(payload.threshold);
-  const tokenText = tokenCount === undefined || threshold === undefined ? "" : `（${tokenCount}/${threshold} tokens）`;
   return type === "context.compaction.completed"
-    ? `较早上下文已整理${tokenText}。`
-    : `上下文整理没有成功${tokenText}。`;
+    ? "较早上下文已整理。"
+    : "较早上下文暂未整理。";
 }
 
 export function contextCompactionPreview(payload: Readonly<Record<string, unknown>>): string | undefined {
-  const covered = numberOrUndefined(payload.coveredRefCount);
-  const messageCountAfter = numberOrUndefined(payload.messageCountAfter);
-  const parts = [
-    covered === undefined ? undefined : `覆盖较早上下文 ${covered} 条`,
-    messageCountAfter === undefined ? undefined : `整理后消息 ${messageCountAfter} 条`,
-    stringOrUndefined(payload.error),
-  ].filter(isString);
-  return parts.length === 0 ? undefined : parts.join("；");
+  return stringOrUndefined(payload.error);
 }
 
 export function confirmationSummary(payload: Readonly<Record<string, unknown>>): string {

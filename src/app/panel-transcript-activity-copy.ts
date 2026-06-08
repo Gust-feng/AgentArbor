@@ -6,6 +6,7 @@ import {
   type ProjectableTranscriptNode,
 } from "./panel-transcript-node-projection.js";
 import { commandText, genericItemLabel } from "./panel-transcript-tool-format.js";
+import { cleanOrdinaryToolText } from "./ordinary-tool-copy.js";
 
 export type ActivityLineCopy = {
   readonly label?: string;
@@ -129,6 +130,9 @@ function mergedToolExpandedDetail(
   terminal: ActivityLineCopy,
   phase: ProjectableTranscriptNode["phase"]
 ): string | undefined {
+  if (terminal.expandedDetail === undefined && terminal.detail.trim() === requested.detail.trim()) {
+    return undefined;
+  }
   const lines = uniqueDetailLines([
     phaseDetailLine("发起", requested),
     terminal.detail === requested.detail ? undefined : phaseDetailLine(phase === "failed" ? "失败" : "结果", terminal),
@@ -255,9 +259,8 @@ function toolTargetCopy(node: ProjectableTranscriptNode): Pick<ActivityLineCopy,
   const display = node.display;
   if (display?.kind === "command_summary") {
     const command = cleanToolTargetText(commandText(display) ?? node.summary);
-    const exit = node.phase === "failed" && typeof display.exitCode === "number" ? `exit ${display.exitCode}` : undefined;
     const failure = node.phase === "failed" ? cleanToolTargetText(display.errorSummary) : undefined;
-    return readableToolTarget([command, exit, failure].filter((value): value is string => value !== undefined && value.trim().length > 0).join(" · "));
+    return readableToolTarget([command, failure].filter((value): value is string => value !== undefined && value.trim().length > 0).join(" · "));
   }
   if (display?.kind === "search_results") {
     return readableToolTarget(cleanToolTargetText(display.query ?? node.summary));
@@ -373,6 +376,9 @@ function readableToolTarget(value: string | undefined): Pick<ActivityLineCopy, "
 
 function cleanToolTargetText(value: string | undefined): string | undefined {
   const text = cleanConfirmationSummary(value ?? "")
+    .split(/\r?\n/)
+    .map((line) => cleanOrdinaryToolText(line) ?? "")
+    .join("\n")
     .replace(/^generic_tool_summary[:：]?\s*/i, "")
     .replace(/^(?:目标|搜索|命令|路径|文件|查询)[:：]\s*/u, "")
     .replace(/^\.(\s*·\s*)/u, "当前目录$1")

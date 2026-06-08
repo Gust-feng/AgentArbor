@@ -263,7 +263,9 @@ function lowValueCopy(value: string | undefined): boolean {
     (normalized.includes("助手已选择使用工具") && normalized.includes("工具结果") && normalized.includes("进入后续处理")) ||
     (normalized.includes("模型调用完成") && normalized.includes("可见输出")) ||
     normalized === "内容已整理" ||
-    normalized === "内容已整理并已进入报告或详情";
+    normalized === "内容已整理并已进入报告或详情" ||
+    normalized === "较早上下文已整理" ||
+    normalized === "较早上下文暂未整理";
 }
 
 function normalizeCopy(value: string | undefined): string {

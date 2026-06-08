@@ -41,6 +41,55 @@ test("tool stream projection keeps command output as safe summary", () => {
   assert.equal(JSON.stringify(detail).includes("RAW_STDOUT_SENTINEL"), false);
 });
 
+test("tool stream projection keeps ordinary tool copy free of diagnostic labels", () => {
+  const requested = toolStreamDetail("tool.requested", {
+    toolName: "read_file",
+    input: {
+      path: "README.md",
+    },
+    output: {},
+  });
+  const completedSummary = toolSummary("tool.completed", {
+    toolName: "shell_command",
+    input: {
+      command: "pnpm",
+      args: ["test"],
+    },
+    durationMs: 1234,
+    output: {
+      summary: "pnpm test · exit 0",
+      result: {
+        command: "pnpm",
+        args: ["test"],
+        exitCode: 0,
+      },
+    },
+  });
+
+  assert.equal(requested.preview, "README.md");
+  assert.equal(completedSummary.includes("exit 0"), false);
+  assert.equal(completedSummary.includes("耗时"), false);
+  assert.equal(completedSummary.includes("pnpm test"), true);
+});
+
+test("tool stream projection cleans restored ordinary tool preview labels", () => {
+  const detail = toolStreamDetail("tool.completed", {
+    toolName: "shell_command",
+    input: {
+      command: "dir",
+    },
+    output: {
+      summary: "运行命令：dir · exit 0",
+      result: {
+        command: "dir",
+        exitCode: 0,
+      },
+    },
+  });
+
+  assert.equal(detail.preview, "dir");
+});
+
 test("tool stream projection shows file change metadata without raw replacement text", () => {
   const detail = toolStreamDetail("tool.completed", {
     toolName: "edit_file",

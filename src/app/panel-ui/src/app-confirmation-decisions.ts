@@ -4,6 +4,7 @@ import { createRunReadModelPatch } from "./app-run-projection";
 import { shouldKeepRefreshing } from "./app-runtime-controls";
 import type { AppState } from "./app-state";
 import { emptyLiveRun } from "../../panel-ui-live-run-buffer";
+import { nextRunCapabilityState } from "../../panel-ui-run-capability-state";
 import type { BasicAgentRun } from "./contracts/run";
 
 export type ConfirmationDecision = "approve_once" | "deny" | "guidance";
@@ -63,12 +64,15 @@ export async function decideRunConfirmation(input: {
         detail: observed.detail,
         reusePreviousWorkView: false,
       });
+      const capabilityState = nextRunCapabilityState(previous, {
+        runId: currentRunId,
+        capabilityResolution: observed.capabilityResolution,
+      });
       return {
         ...previous,
+        ...capabilityState,
         conversation: observed.conversation ?? previous.conversation,
         run: observedRun,
-        capabilityResolution: observed.capabilityResolution,
-        capabilityResolutionRunId: observed.capabilityResolution === undefined ? undefined : currentRunId,
         live: shouldResumeLiveUpdates ? emptyLiveRun(currentRunId) : previous.live,
         error: undefined,
         ...readModel,
@@ -137,12 +141,15 @@ async function refreshRunAfterConfirmationSettled(input: {
       detail: observed.detail,
       reusePreviousWorkView: false,
     });
+    const capabilityState = nextRunCapabilityState(previous, {
+      runId: input.runId,
+      capabilityResolution: observed.capabilityResolution,
+    });
     return {
       ...previous,
+      ...capabilityState,
       conversation: observed.conversation ?? previous.conversation,
       run: observed.run ?? previous.run,
-      capabilityResolution: observed.capabilityResolution,
-      capabilityResolutionRunId: observed.capabilityResolution === undefined ? undefined : input.runId,
       error: undefined,
       ...readModel,
     };

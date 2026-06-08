@@ -1,4 +1,5 @@
 import { appendLiveRunEvents } from "../../panel-ui-live-run-buffer.js";
+import { nextRunCapabilityState } from "../../panel-ui-run-capability-state.js";
 import { loadObservedRunReadModel } from "./app-observed-run-read-model.js";
 import { createRunReadModelPatch } from "./app-run-projection.js";
 import { shouldKeepRefreshing } from "./app-runtime-controls.js";
@@ -70,12 +71,15 @@ export function appStateWithSettledRunProjection(
     workView: settled.workView,
     detail: settled.detail,
   });
+  const capabilityState = nextRunCapabilityState(previous, {
+    runId: settled.runId,
+    capabilityResolution: settled.capabilityResolution,
+  });
   return {
     ...previous,
+    ...capabilityState,
     conversation: settled.conversation ?? previous.conversation,
     run: settled.run,
-    capabilityResolution: settled.capabilityResolution,
-    capabilityResolutionRunId: settled.capabilityResolution === undefined ? undefined : settled.runId,
     live: undefined,
     ...readModel,
   };
@@ -140,12 +144,15 @@ function appStateWithFollowUpActiveRun(
     workView: followUp.workView,
     detail: followUp.detail,
   });
+  const capabilityState = nextRunCapabilityState(previous, {
+    runId: followUp.run.runId,
+    capabilityResolution: followUp.capabilityResolution,
+  });
   return {
     ...previous,
+    ...capabilityState,
     conversation: followUp.conversation ?? previous.conversation,
     run: followUp.run,
-    capabilityResolution: followUp.capabilityResolution,
-    capabilityResolutionRunId: followUp.capabilityResolution === undefined ? undefined : followUp.run.runId,
     events: followUp.replay?.events ?? [],
     live: shouldKeepRefreshing(followUp.run.status)
       ? appendLiveRunEvents(followUp.run.runId, undefined, followUp.replay?.events ?? [])

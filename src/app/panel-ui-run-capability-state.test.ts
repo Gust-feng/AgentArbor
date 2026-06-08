@@ -16,6 +16,15 @@ test("panel run capability state only reuses facts for the same run", () => {
   assert.equal(sameRunWithoutCapabilities.capabilityResolution, run1Capabilities);
   assert.equal(sameRunWithoutCapabilities.capabilityResolutionRunId, "run-1");
 
+  const refreshedRun1Capabilities = capabilityResolution("run-1-resolution-refreshed");
+  const sameRunWithCapabilities = nextRunCapabilityState(previous, {
+    runId: "run-1",
+    capabilityResolution: refreshedRun1Capabilities,
+  });
+
+  assert.equal(sameRunWithCapabilities.capabilityResolution, refreshedRun1Capabilities);
+  assert.equal(sameRunWithCapabilities.capabilityResolutionRunId, "run-1");
+
   const nextRunWithoutCapabilities = nextRunCapabilityState(previous, {
     runId: "run-2",
   });

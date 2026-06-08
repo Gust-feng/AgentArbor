@@ -8,6 +8,7 @@ import { loadObservedRunReadModel } from "./app-observed-run-read-model";
 import { stopLiveUpdates } from "./app-runtime-controls";
 import { loadConversationSession, resetConversationSession } from "./app-conversation-session";
 import { submitPanelTask } from "./app-task-submission";
+import { nextRunCapabilityState } from "../../panel-ui-run-capability-state";
 import type { AppState } from "./app-state";
 import type { ContextAttachment } from "./contracts/context";
 import type { ConversationSummary } from "./contracts/conversation";
@@ -96,12 +97,15 @@ export function createAppRunController(options: AppRunControllerOptions): AppRun
         detail: observed.detail,
         reusePreviousWorkView: false,
       });
+      const capabilityState = nextRunCapabilityState(previous, {
+        runId: currentRunId,
+        capabilityResolution: observed.capabilityResolution,
+      });
       return {
         ...previous,
+        ...capabilityState,
         conversation: observed.conversation ?? previous.conversation,
         run: observedRun,
-        capabilityResolution: observed.capabilityResolution,
-        capabilityResolutionRunId: observed.capabilityResolution === undefined ? undefined : currentRunId,
         live: undefined,
         ...readModel,
       };

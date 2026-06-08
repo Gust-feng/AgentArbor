@@ -6,6 +6,8 @@ export function cleanConfirmationSummary(value: string): string {
     .replace(/^User approval was requested\.?\s*/i, "")
     .replace(/^Approval required\.?\s*/i, "")
     .replace(/^需要确认[:：]?\s*/i, "")
+    .replace(/^需要你判断[:：]?\s*/i, "")
+    .replace(/^待处理[:：]?\s*/i, "")
     .replace(/请求执行执行操作/g, "请求执行操作")
     .replace(/\btool:call[_:A-Za-z0-9-]+\b/g, "")
     .replace(/[:：]\s*[:：]/g, "：")
@@ -30,7 +32,7 @@ export function confirmationActionSummaryText(input: {
   if (question.length > 0) {
     return question;
   }
-  return cleanConfirmationSummary(input.fallback ?? "") || "等待确认。";
+  return cleanConfirmationSummary(input.fallback ?? "") || "等待你判断。";
 }
 
 export function basicConfirmationDecisionSummary(
@@ -40,7 +42,7 @@ export function basicConfirmationDecisionSummary(
     return "已继续。";
   }
   if (decision.decision === "deny") {
-    return "已拒绝。";
+    return "已不执行。";
   }
   const guidance = decision.guidance === undefined ? undefined : compactSafeText(decision.guidance, 240);
   return guidance === undefined || guidance.length === 0
@@ -69,5 +71,8 @@ function isGenericConfirmationPrompt(value: string): boolean {
     normalized === "继续执行" ||
     normalized === "确认下一步" ||
     normalized === "等待确认" ||
-    normalized === "等待用户确认下一步";
+    normalized === "等待用户确认下一步" ||
+    normalized === "需要你判断" ||
+    normalized === "待处理" ||
+    normalized === "等待你判断";
 }

@@ -255,21 +255,21 @@ function conversationRequiresUserAction(conversation: PanelConversation): boolea
     return false;
   }
   const text = `${lastAssistant.title}\n${lastAssistant.content}`;
-  return /需要确认|请选择|补充授权|补充材料|待确认/.test(text);
+  return /需要确认|需要你判断|请选择|补充授权|补充材料|待确认|待处理/.test(text);
 }
 
 function conversationStatus(conversation: PanelConversation): PanelConversationStatus {
   const activeAssistant = conversation.currentRunId === undefined
     ? undefined
     : assistantTurnByRunId(conversation, conversation.currentRunId);
-  if (activeAssistant?.status === "running" && activeAssistant.title === "需要确认") {
+  if (activeAssistant?.status === "running" && isApprovalAssistantTitle(activeAssistant.title)) {
     return "approval_needed";
   }
   if (activeAssistant?.status === "needs_input" || (activeAssistant?.status === "running" && activeAssistant.title === "需要补充")) {
     return "needs_input";
   }
   const lastAssistant = lastAssistantTurn(conversation.turns);
-  if (lastAssistant?.status === "running" && lastAssistant.title === "需要确认") {
+  if (lastAssistant?.status === "running" && isApprovalAssistantTitle(lastAssistant.title)) {
     return "approval_needed";
   }
   if (lastAssistant?.status === "needs_input" || (lastAssistant?.status === "running" && lastAssistant.title === "需要补充")) {
@@ -309,7 +309,7 @@ function conversationCurrentAction(conversation: ConversationProjectionSource, s
     assistant.content,
     assistant.title,
   ]);
-  if (status === "approval_needed") return compact(assistantText ?? "等待你确认后继续。", 160);
+  if (status === "approval_needed") return compact(assistantText ?? "等待你判断后继续。", 160);
   if (status === "needs_input") return compact(assistantText ?? "等待你补充信息后继续。", 160);
   if (status === "pending") return "等待前一个任务完成。";
   if (status === "running") return compact(assistantText ?? "正在处理你的任务。", 160);
@@ -322,7 +322,7 @@ function conversationCurrentAction(conversation: ConversationProjectionSource, s
 
 function conversationNextStep(conversation: ConversationProjectionSource, status: PanelConversationStatus): string {
   const queuedCount = conversation.queuedRunIds.length;
-  if (status === "approval_needed") return "确认、拒绝或补充指导。";
+  if (status === "approval_needed") return "继续、不执行或补充要求。";
   if (status === "needs_input") return "补充材料或说明新的限制。";
   if (status === "pending") return "等待前序任务完成。";
   if (status === "running") {
@@ -344,6 +344,10 @@ function assistantTurnByRunId(
 ): ConversationProjectionTurn | undefined {
   const turn = conversation.turns.find((candidate) => candidate.role === "assistant" && candidate.runId === runId);
   return turn;
+}
+
+function isApprovalAssistantTitle(value: string): boolean {
+  return value === "需要确认" || value === "待确认" || value === "需要你判断" || value === "待处理";
 }
 
 function emptyToUndefined(value: string | undefined): string | undefined {

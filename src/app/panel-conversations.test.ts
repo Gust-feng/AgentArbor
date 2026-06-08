@@ -154,8 +154,8 @@ test("panel conversation summaries expose actionable and queued task states", ()
   store.updateAssistantPreview({
     conversationId: pending.conversation.conversationId,
     assistantTurnId: pending.assistantTurn.turnId,
-    title: "需要确认",
-    content: "删除文件前需要你确认。",
+    title: "待处理",
+    content: "删除文件前需要你判断。",
     status: "running",
   });
 
@@ -176,14 +176,14 @@ test("panel conversation summaries expose actionable and queued task states", ()
 
   assert.equal(summary.status, "approval_needed");
   assert.equal(summary.requiresUserAction, true);
-  assert.equal(summary.currentAction, "删除文件前需要你确认。");
-  assert.equal(summary.nextStep, "确认、拒绝或补充指导。");
+  assert.equal(summary.currentAction, "删除文件前需要你判断。");
+  assert.equal(summary.nextStep, "继续、不执行或补充要求。");
   assert.deepEqual(summary.queuedRunIds, ["run-queued"]);
   assert.equal(summary.queuedRunCount, 1);
   assert.equal(persisted.status, "approval_needed");
   assert.equal(persisted.requiresUserAction, true);
-  assert.equal(persisted.currentAction, "删除文件前需要你确认。");
-  assert.equal(persisted.nextStep, "确认、拒绝或补充指导。");
+  assert.equal(persisted.currentAction, "删除文件前需要你判断。");
+  assert.equal(persisted.nextStep, "继续、不执行或补充要求。");
 });
 
 test("panel conversation summaries keep running next steps concise", () => {

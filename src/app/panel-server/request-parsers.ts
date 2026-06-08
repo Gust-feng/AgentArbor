@@ -191,11 +191,11 @@ export function parseConfirmationDecision(raw: unknown): Pick<ConfirmationDecisi
   const record = asRecord(raw);
   const decision = optionalString(record.decision);
   if (decision !== "approve_once" && decision !== "deny" && decision !== "guidance") {
-    throw new PanelHttpError(400, "invalid_confirmation_decision", "确认决定必须是 approve_once、deny 或 guidance。");
+    throw new PanelHttpError(400, "invalid_confirmation_decision", "请选择继续、不执行或补充要求。");
   }
   const guidance = optionalString(record.guidance);
   if (decision === "guidance" && guidance === undefined) {
-    throw new PanelHttpError(400, "missing_confirmation_guidance", "补充指导不能为空。");
+    throw new PanelHttpError(400, "missing_confirmation_guidance", "补充要求不能为空。");
   }
   return {
     decision,

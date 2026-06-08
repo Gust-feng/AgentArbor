@@ -309,7 +309,7 @@ export class BasicAgentRunExecutor {
           code: blockedByMissingApproval ? "confirmation_continuation_lost" : "confirmation_decision_continuation_lost",
           message: blockedByMissingApproval
             ? "无法继续原操作。请重新发起或继续处理。"
-            : "确认结果已记录。你可以继续发送消息让我按该决定处理。",
+            : "你的选择已记录。你可以继续发送消息让我按该决定处理。",
         },
       });
       const blocked = this.requireJob(input.runId);
@@ -484,7 +484,7 @@ function missingTerminalExecutionResult(result: BasicAgentRunExecutionResult): B
     ...result,
     failed: {
       code: "execution_result_missing_terminal_state",
-      message: "执行适配器没有返回明确的完成、失败、阻塞或确认等待状态，运行不能按完成处理。",
+      message: "执行适配器没有返回明确的完成、失败、阻塞或等待用户判断状态，运行不能按完成处理。",
     },
   };
 }

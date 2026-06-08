@@ -419,13 +419,13 @@ function waitingPointFor(
     return "等待你判断后继续。";
   }
   if (status === "needs_input") {
-    return "等待用户补充指导。";
+    return "等待用户补充要求。";
   }
   if (status === "cancelled") {
     return "已取消。";
   }
   if (status === "blocked") {
-    return "等待你确认或补充指导。";
+    return "等待你判断或补充要求。";
   }
   if (status === "failed") {
     return "未完成，请查看错误摘要。";

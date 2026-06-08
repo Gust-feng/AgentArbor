@@ -15,7 +15,7 @@ export function blockedRunSummary(error: { readonly code: string; readonly messa
   if (error?.code === "out_of_fuel") {
     return "任务没有完成。你可以继续发送消息，我会接着处理。";
   }
-  return friendlyUserFacingFailureText(error?.message ?? "等待你确认或补充指导。");
+  return friendlyUserFacingFailureText(error?.message ?? "等待你判断或补充要求。");
 }
 
 export function runStartedSummary(desktopMode: "agent" | "deep" | undefined): string {
@@ -136,7 +136,7 @@ export function userGuidanceSummary(payload: Readonly<Record<string, unknown>>):
   if (decision !== undefined && note !== undefined) {
     return `用户已${decision}：${note}`;
   }
-  return note ?? "用户已补充指导，工作可以继续。";
+  return note ?? "用户已补充要求，工作可以继续。";
 }
 
 export function agentNoteForEvent(
@@ -171,7 +171,7 @@ export function agentNoteForEvent(
     case "direction_handoff.revision_requested":
       return { agentLabel: "结果整理", summary: "结果材料需要修订或补充。", status: "running" };
     case "user_approval.requested":
-      return { agentLabel: "待确认", summary: "继续前需要用户补充判断。", status: "running" };
+      return { agentLabel: "待处理", summary: "继续前需要用户判断。", status: "running" };
     case "user_approval.received":
       return { agentLabel: "继续处理", summary: "用户反馈已收到，工作继续推进。", status: "completed" };
     default:

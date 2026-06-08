@@ -132,7 +132,7 @@ function safetySummaryText(input: {
   const parts = [
     input.contextAttachmentCount > 0 ? `上下文 ${input.contextAttachmentCount}` : undefined,
     input.toolResultCount > 0 ? `证据 ${input.toolResultCount}` : undefined,
-    input.pendingActionCount > 0 ? `待确认 ${input.pendingActionCount}` : undefined,
+    input.pendingActionCount > 0 ? `待处理 ${input.pendingActionCount}` : undefined,
   ].filter((part): part is string => part !== undefined);
   return parts.length === 0 ? "本轮没有额外上下文。" : parts.join("；");
 }
@@ -203,9 +203,9 @@ function isProductWorkViewEvent(event: RunEvent): boolean {
 function cleanConfirmationTitle(title: string, fallback: string): string {
   const cleaned = cleanConfirmationSummary(title);
   if (/^(?:需要确认|待确认|确认继续|确认执行命令)$/i.test(cleaned.trim())) {
-    return fallback.length > 0 ? fallback : "待确认";
+    return fallback.length > 0 ? fallback : "待处理";
   }
-  return cleaned.length > 0 ? cleaned : fallback.length > 0 ? fallback : "待确认";
+  return cleaned.length > 0 ? cleaned : fallback.length > 0 ? fallback : "待处理";
 }
 
 function stageFor(
@@ -237,7 +237,7 @@ function headlineFor(
   answer: DesktopWorkViewAnswer | undefined
 ): string {
   if (stage === "completed") return deliverable?.title ?? answer?.title ?? "任务已完成";
-  if (stage === "awaiting_approval") return "需要你确认下一步";
+  if (stage === "awaiting_approval") return "需要你判断下一步";
   if (stage === "blocked") return "需要处理后再继续";
   if (stage === "failed") return "运行失败";
   if (stage === "cancelled") return "任务已取消";
@@ -275,8 +275,8 @@ function currentActionFor(
   if (stage === "gathering_context") return "正在整理上下文。";
   if (stage === "using_tools") return "正在处理。";
   if (stage === "composing_result") return "正在整理结果。";
-  if (stage === "awaiting_approval") return "等待你判断后继续。";
-  if (stage === "blocked") return "需要重新发起或补充指导。";
+  if (stage === "awaiting_approval") return "等待你判断。";
+  if (stage === "blocked") return "需要重新发起或补充要求。";
   return "正在理解任务。";
 }
 

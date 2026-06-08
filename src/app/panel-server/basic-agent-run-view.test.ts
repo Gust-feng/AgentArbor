@@ -284,7 +284,7 @@ test("basic agent live work view builds transcript nodes from synced backend str
     sequence: 2,
     type: "confirmation.needed",
     createdAt: "2026-06-06T00:00:02.000Z",
-    agentLabel: "待确认",
+    agentLabel: "待处理",
     summary: "需要确认：编辑 Z:\\AgentArbor\\README.md",
     status: "running",
     sourceRefs: ["confirmation:confirmation-live"],
@@ -310,7 +310,7 @@ test("basic agent live work view builds transcript nodes from synced backend str
             kind: "desktop_agent_canvas" as const,
             taskSoil: {
               taskSoilId: "task-soil-confirmation",
-              goalSummary: "等待确认",
+              goalSummary: "等待你判断",
               contextRefs: [],
               permissionBoundaryRefs: [],
             },
@@ -318,7 +318,7 @@ test("basic agent live work view builds transcript nodes from synced backend str
               status: "confirmation_needed" as const,
               pendingConfirmation: {
                 confirmationId: "confirmation-live",
-                title: "需要确认",
+                title: "需要你判断",
                 question: "是否编辑 README.md？",
                 consequence: "会写入工作区文件。",
                 riskLevel: "medium",

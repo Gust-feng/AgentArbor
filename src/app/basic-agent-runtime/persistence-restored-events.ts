@@ -126,7 +126,7 @@ function basicEventTitleFromType(type: string): string {
   if (type === "run.resumed") return "继续处理";
   if (type === "tool.requested" || type === "tool.completed") return "动作";
   if (type === "tool.failed") return "未完成";
-  if (type === "confirmation.needed") return "需要确认";
+  if (type === "confirmation.needed") return "需要你判断";
   if (type === "user_approval.received") return "继续处理";
   if (type === "user.guidance") return "补充要求";
   if (type === "final.result") return "结果";
@@ -149,7 +149,7 @@ function restoredConfirmationDecisionSummary(confirmation: RuntimeConfirmationRe
     return "已继续。";
   }
   if (confirmation.status === "denied") {
-    return "已拒绝。";
+    return "已不执行。";
   }
   return confirmation.guidance === undefined || confirmation.guidance.trim().length === 0
     ? "已补充要求。"

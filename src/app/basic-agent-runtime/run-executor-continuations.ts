@@ -44,13 +44,13 @@ export class BasicAgentPendingContinuationStore {
     if (job.status !== "approval_needed") {
       throw new BasicAgentConfirmationDecisionError(
         "invalid_confirmation_state",
-        "这次运行当前没有等待确认的操作。"
+        "这次运行当前没有等待你判断的操作。"
       );
     }
     if (job.confirmationDecisions.some((decision) => decision.confirmationId === confirmationId)) {
       throw new BasicAgentConfirmationDecisionError(
         "confirmation_not_pending",
-        "这个确认请求已经处理过。"
+        "这项操作已经处理过。"
       );
     }
     if (pendingConfirmationIdFromCanvas(job.completed?.canvas) === confirmationId) {
@@ -61,7 +61,7 @@ export class BasicAgentPendingContinuationStore {
     }
     throw new BasicAgentConfirmationDecisionError(
       "confirmation_not_pending",
-      "没有找到仍可处理的确认请求。"
+      "没有找到仍可处理的操作。"
     );
   }
 }

@@ -91,7 +91,7 @@ export async function decideRunConfirmation(input: {
     }
     input.setApp((previous) => ({
       ...previous,
-      error: `提交确认失败：${error instanceof Error ? error.message : "请重试。"}`,
+      error: `提交失败：${error instanceof Error ? error.message : "请重试。"}`,
     }));
   } finally {
     input.setConfirmationBusy(false);
@@ -108,10 +108,10 @@ function localConfirmationDecisionError(
   guidance: string | undefined
 ): string | undefined {
   if (decision === "approve_once" && resumeAvailability === "lost_after_restart") {
-    return "应用重启后无法继续原操作。请补充指导或重新发起后续任务。";
+    return "应用重启后无法继续原操作。请补充要求或重新发起后续任务。";
   }
   if (decision === "guidance" && (guidance ?? "").trim().length === 0) {
-    return "请先输入补充指导，再提交。";
+    return "请先输入补充要求，再提交。";
   }
   return undefined;
 }
@@ -152,5 +152,5 @@ async function refreshRunAfterConfirmationSettled(input: {
 
 function isStaleConfirmationError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
-  return /没有等待确认|已经处理过|没有找到仍可处理的确认请求/.test(error.message);
+  return /没有等待确认|没有等待你判断|已经处理过|没有找到仍可处理的确认请求|没有找到仍可处理的操作/.test(error.message);
 }

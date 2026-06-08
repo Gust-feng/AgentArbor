@@ -128,7 +128,7 @@ function sidebarConversationMeta(conversation: ConversationSummary): string {
 function statusLabel(status: string | undefined): string {
   if (status === "completed") return "已完成";
   if (status === "running" || status === "planning") return "进行中";
-  if (status === "approval_needed") return "待确认";
+  if (status === "approval_needed") return "待处理";
   if (status === "needs_input") return "待补充";
   if (status === "failed" || status === "blocked") return "未完成";
   return "";

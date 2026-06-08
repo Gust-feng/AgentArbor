@@ -157,12 +157,12 @@ function transcriptNodeForEvent(
     return transcriptNode(event, {
       kind: "confirmation",
       phase: "waiting_approval",
-      title: "待确认",
+      title: "待处理",
       summary,
       confirmation: {
         confirmationId: confirmationIdForTranscriptEvent(event),
         runId: event.runId,
-        title: "需要确认",
+        title: "需要你判断",
         actionSummary: summary,
         affectedResources: [],
         riskLevel: "medium",
@@ -520,7 +520,7 @@ function userDecisionPhase(event: PanelTranscriptStreamEvent): TranscriptNodePha
 
 function userDecisionTitle(phase: TranscriptNodePhase): string {
   if (phase === "guidance") return "补充要求";
-  if (phase === "denied") return "已拒绝";
+  if (phase === "denied") return "已不执行";
   return "继续处理";
 }
 

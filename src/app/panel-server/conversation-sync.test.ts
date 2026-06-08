@@ -84,7 +84,7 @@ test("syncConversationTurnForJob keeps approval requests as running previews", (
           status: "confirmation_needed",
           pendingConfirmation: {
             confirmationId: "confirmation-delete",
-            title: "需要确认",
+            title: "需要你判断",
             question: "是否删除文件？",
             consequence: "会移除工作区文件。",
             riskLevel: "medium",
@@ -106,7 +106,7 @@ test("syncConversationTurnForJob keeps approval requests as running previews", (
 
   const conversation = conversations.getReadModel(job.conversationId ?? "");
   const assistant = conversation?.turns.find((turn) => turn.role === "assistant");
-  assert.equal(assistant?.title, "需要确认");
+  assert.equal(assistant?.title, "待处理");
   assert.equal(assistant?.content.includes("是否删除文件？"), true);
   assert.equal(assistant?.content.includes("会移除工作区文件。"), false);
   assert.equal(assistant?.status, "running");
@@ -127,7 +127,7 @@ test("syncConversationTurnForJob keeps concrete confirmation preview", () => {
           status: "confirmation_needed",
           pendingConfirmation: {
             confirmationId: "confirmation-delete",
-            title: "需要确认",
+            title: "需要你判断",
             question: "删除文件：C:\\repo\\old.txt",
             consequence: "",
             riskLevel: "high",
@@ -148,7 +148,7 @@ test("syncConversationTurnForJob keeps concrete confirmation preview", () => {
   });
 
   const assistant = conversations.getReadModel(job.conversationId ?? "")?.turns.find((turn) => turn.role === "assistant");
-  assert.equal(assistant?.title, "需要确认");
+  assert.equal(assistant?.title, "待处理");
   assert.equal(assistant?.content, "删除文件：C:\\repo\\old.txt");
 });
 
@@ -166,6 +166,7 @@ test("syncConversationTurnForJob keeps needs-input turns visible as user-action 
   assert.equal(assistant?.title, "需要补充");
   assert.equal(assistant?.content, "需要补充材料或说明。");
   assert.equal(assistant?.content.includes("已收到补充指导"), false);
+  assert.equal(assistant?.content.includes("已收到补充要求"), false);
   assert.equal(assistant?.status, "needs_input");
   assert.equal(summary?.status, "needs_input");
   assert.equal(summary?.requiresUserAction, true);

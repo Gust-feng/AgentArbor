@@ -36,7 +36,7 @@ export function basicRunTitleFromStatus(status: BasicAgentRun["status"], resultT
     return redactOrdinaryText(resultTitle, 120);
   }
   if (status === "queued") return "等待开始";
-  if (status === "approval_needed") return "需要确认";
+  if (status === "approval_needed") return "待处理";
   if (status === "needs_input") return "需要补充";
   if (status === "blocked") return "需要处理";
   if (status === "cancelled") return "已取消";
@@ -47,8 +47,8 @@ export function basicRunTitleFromStatus(status: BasicAgentRun["status"], resultT
 
 export function basicRunNextStepFromStatus(status: BasicAgentRun["status"]): string | undefined {
   if (status === "queued") return "等待前一个任务完成。";
-  if (status === "approval_needed") return "等待你确认或补充材料。";
-  if (status === "needs_input") return "等待你补充指导后继续。";
+  if (status === "approval_needed") return "等待你判断或补充要求。";
+  if (status === "needs_input") return "等待你补充要求后继续。";
   if (status === "blocked") return "无法继续原操作。请重新发起或继续处理。";
   if (status === "running" || status === "planning") return "继续整理结果。";
   return undefined;

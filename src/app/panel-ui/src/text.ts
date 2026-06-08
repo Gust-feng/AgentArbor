@@ -5,7 +5,7 @@ export const STATUS_LABELS: Record<TaskStatus, string> = {
   planning: "准备中",
   running: "处理中",
   needs_input: "需要补充",
-  approval_needed: "待确认",
+  approval_needed: "待处理",
   paused: "已中断",
   blocked: "需要处理",
   completed: "已完成",

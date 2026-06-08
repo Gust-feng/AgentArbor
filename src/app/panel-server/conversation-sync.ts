@@ -90,7 +90,7 @@ export function syncConversationTurnForJob(input: {
     conversations.updateAssistantPreview({
       conversationId: job.conversationId,
       assistantTurnId: job.assistantTurnId,
-      title: "需要确认",
+      title: "待处理",
       content: sanitizeAssistantVisibleText(pendingTurn.content),
       status: "running",
     });
@@ -182,13 +182,13 @@ function assistantTurnFromResponse(
   const canvas = response.canvas;
   if (canvas?.kind === "desktop_agent_canvas" && canvas.agent.answer !== undefined) {
     return {
-      title: canvas.agent.pendingConfirmation === undefined ? "已完成" : "需要确认",
+      title: canvas.agent.pendingConfirmation === undefined ? "已完成" : "待处理",
       content: sanitizeAssistantVisibleText(canvas.agent.answer.answer),
     };
   }
   if (canvas?.kind === "desktop_agent_canvas" && canvas.agent.pendingConfirmation !== undefined) {
     return {
-      title: "需要确认",
+      title: "待处理",
       content: sanitizeAssistantVisibleText(
         confirmationActionSummaryText({
           question: canvas.agent.pendingConfirmation.question,
@@ -323,7 +323,7 @@ function isModelOutputBoundaryEvent(event: PanelRunTranscript["events"][number])
 }
 
 function runningPreviewTitle(event: PanelRunTranscript["events"][number]): string {
-  if (event.type === "confirmation.needed") return "需要确认";
+  if (event.type === "confirmation.needed") return "待处理";
   if (event.type === "tool.requested") return "正在使用工具";
   if (event.type === "tool.completed") return "工具已完成";
   if (event.type === "tool.failed") return "未完成";

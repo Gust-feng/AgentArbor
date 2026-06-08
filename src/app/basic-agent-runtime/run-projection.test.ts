@@ -31,8 +31,8 @@ test("basic run projection derives BasicAgentRun state and redacts ordinary goal
   });
 
   assert.equal(run.status, "approval_needed");
-  assert.equal(run.title, "需要确认");
-  assert.equal(run.currentStep, "需要确认删除操作。");
+  assert.equal(run.title, "待处理");
+  assert.equal(run.currentStep, "删除操作。");
   assert.equal(run.goalSummary.includes("sk-test-secret"), false);
 });
 
@@ -108,7 +108,7 @@ test("basic stream event projection keeps long model output deltas for live rend
 
 test("basic projection summarizes confirmation decisions safely", () => {
   assert.equal(basicConfirmationDecisionSummary({ decision: "approve_once" }), "已继续。");
-  assert.equal(basicConfirmationDecisionSummary({ decision: "deny" }), "已拒绝。");
+  assert.equal(basicConfirmationDecisionSummary({ decision: "deny" }), "已不执行。");
   assert.match(
     basicConfirmationDecisionSummary({ decision: "guidance", guidance: "继续，但不要暴露 token=sk-test-token-1234567890" }),
     /^继续/

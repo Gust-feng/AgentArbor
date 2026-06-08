@@ -271,7 +271,7 @@ export function createPersistedStreamEvents(
         sequence: events.length + 1,
         type: "confirmation.needed",
         createdAt: confirmation.requestedAt,
-        agentLabel: "待确认",
+        agentLabel: "待处理",
         summary: confirmation.actionSummary,
         status: "pending",
         sourceRefs: [`confirmation:${confirmation.confirmationId}`],
@@ -410,7 +410,7 @@ function restoredConfirmationDecisionSummary(confirmation: RuntimeConfirmationRe
     return "已继续。";
   }
   if (confirmation.status === "denied") {
-    return "已拒绝。";
+    return "已不执行。";
   }
   return confirmation.guidance === undefined || confirmation.guidance.trim().length === 0
     ? "已补充要求。"
@@ -438,7 +438,7 @@ function persistedStreamAgentLabel(type: PanelRunStreamEvent["type"]): string {
     return "工具";
   }
   if (type === "confirmation.needed") {
-    return "待确认";
+    return "待处理";
   }
   if (type === "user_approval.received") {
     return "继续处理";
@@ -570,7 +570,7 @@ function persistedWaitingPoint(status: PanelRunStatus): string {
     return "等待开始。";
   }
   if (status === "approval_needed") {
-    return "等待你确认下一步。";
+    return "等待你判断下一步。";
   }
   if (status === "needs_input") {
     return "需要你补充材料后继续。";

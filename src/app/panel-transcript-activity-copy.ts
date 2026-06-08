@@ -165,10 +165,10 @@ function uniqueDetailLines(values: readonly (string | undefined)[]): readonly st
 function readableConfirmationCopy(node: ProjectableTranscriptNode): ActivityLineCopy {
   const action = cleanConfirmationSummary(node.confirmation?.actionSummary ?? node.summary ?? "");
   if (action.length === 0) {
-    return { label: "待确认", detail: "等待确认。" };
+    return { label: "待处理", detail: "等待你判断。" };
   }
   const detail = compact(readableActivityText(action), 180);
-  return detail === action ? { label: "待确认", detail } : { label: "待确认", detail, expandedDetail: action };
+  return detail === action ? { label: "待处理", detail } : { label: "待处理", detail, expandedDetail: action };
 }
 
 function readableUserDecisionCopy(node: ProjectableTranscriptNode): ActivityLineCopy {
@@ -185,7 +185,7 @@ function readableUserDecisionCopy(node: ProjectableTranscriptNode): ActivityLine
 }
 
 function userDecisionFallback(phase: ProjectableTranscriptNode["phase"]): string {
-  if (phase === "denied") return "已拒绝。";
+  if (phase === "denied") return "已不执行。";
   if (phase === "guidance") return "已补充要求。";
   return "已继续。";
 }
@@ -298,7 +298,7 @@ function toolStatusText(node: ProjectableTranscriptNode): string {
   if (node.phase === "preparing") return "正在准备。";
   if (node.phase === "executing") return "正在处理。";
   if (node.phase === "failed") return "动作未完成。";
-  if (node.phase === "blocked") return "等待确认后继续。";
+  if (node.phase === "blocked") return "等待你判断后继续。";
   return readableToolTarget(node.title)?.detail ?? "动作已记录。";
 }
 

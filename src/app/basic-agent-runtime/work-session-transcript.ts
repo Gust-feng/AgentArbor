@@ -138,12 +138,12 @@ function transcriptNodeFromRunEvent(
     return transcriptNode(event, {
       kind: "confirmation",
       phase: "waiting_approval",
-      title: "待确认",
+      title: "待处理",
       summary,
       confirmation: context.pendingConfirmation ?? {
         confirmationId: confirmationIdForRunEvent(event),
         runId: event.runId,
-        title: "需要确认",
+        title: "需要你判断",
         actionSummary: summary,
         affectedResources: [],
         riskLevel: "medium",
@@ -155,13 +155,13 @@ function transcriptNodeFromRunEvent(
   if (event.type === "user_approval.received" || event.type === "user.guidance") {
     const phase = event.type === "user.guidance"
       ? "guidance"
-      : event.summary?.includes("拒绝") || event.status === "blocked"
+      : event.summary?.includes("拒绝") || event.summary?.includes("不执行") || event.status === "blocked"
         ? "denied"
         : "approved";
     return transcriptNode(event, {
       kind: "user_decision",
       phase,
-      title: phase === "approved" ? "继续处理" : phase === "denied" ? "已拒绝" : "补充要求",
+      title: phase === "approved" ? "继续处理" : phase === "denied" ? "已不执行" : "补充要求",
       summary: event.summary,
     });
   }

@@ -16,10 +16,11 @@ test("panel HTML serves the React workbench shell without first-screen internals
   assert.equal(firstScreenHtml.includes("新任务"), true);
   assert.equal(firstScreenHtml.includes("有什么可以帮到你？"), false);
   assert.equal(firstScreenHtml.includes("直接输入问题"), false);
-  assert.equal(firstScreenHtml.includes("技能"), true);
-  assert.equal(firstScreenHtml.includes("工具"), true);
+  assert.equal(firstScreenHtml.includes("技能"), false);
+  assert.equal(firstScreenHtml.includes("工具"), false);
   assert.equal(firstScreenHtml.includes("设置"), true);
-  assert.equal(firstScreenHtml.includes("待确认"), true);
+  assert.equal(firstScreenHtml.includes("待处理"), true);
+  assert.equal(firstScreenHtml.includes("待确认"), false);
   assert.equal(firstScreenHtml.includes("工作上下文"), false);
   assert.equal(firstScreenHtml.includes("证据"), false);
   assert.equal(firstScreenHtml.includes("结果"), false);

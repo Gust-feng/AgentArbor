@@ -85,7 +85,7 @@ function createOrdinaryDesktopAgentNote(input: NoteFactoryInput): AgentWorkNote 
     stage: "desktop_agent",
     status: failed ? "failed" : needsConfirmation ? "running" : completed ? "completed" : requested ? "running" : "pending",
     summary: needsConfirmation
-      ? "等待确认。"
+      ? "等待你判断。"
       : completed
         ? "已完成。"
         : requested

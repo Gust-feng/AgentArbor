@@ -386,7 +386,7 @@ function appendStreamEventsForEvent(input: {
       ...base,
       eventId: `${input.runId}:event:${input.entry.sequence}:confirmation.needed`,
       type: "confirmation.needed",
-      agentLabel: "待确认",
+      agentLabel: "待处理",
       summary: confirmationSummary(payload),
       status: "running",
     });

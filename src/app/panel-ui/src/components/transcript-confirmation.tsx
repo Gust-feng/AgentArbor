@@ -55,7 +55,7 @@ export function ConfirmationNode(props: {
               onClick={() => props.onDecision?.("deny")}
               disabled={props.busy}
             >
-              拒绝
+              不执行
             </button>
           </div>
         </>
@@ -79,7 +79,7 @@ export function confirmationDisplayTitle(confirmation: ConfirmationProjection | 
 }
 
 function isGenericConfirmationTitle(value: string): boolean {
-  return /^(?:.*确认.*|运行命令|执行 Shell)$/i.test(value.trim());
+  return /^(?:.*确认.*|需要你判断|待处理|运行命令|执行 Shell)$/i.test(value.trim());
 }
 
 export function confirmationActionPreview(action: string): string {

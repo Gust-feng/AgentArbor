@@ -74,7 +74,7 @@ test("confirmation copy presents concrete confirmation action", () => {
     confirmation: {
       confirmationId: "confirmation-1",
       runId: "run-1",
-      title: "需要确认",
+      title: "需要你判断",
       actionSummary: "删除文件：Z:\\AgentArbor\\tmp.txt",
       affectedResources: [],
       riskLevel: "medium",
@@ -83,7 +83,7 @@ test("confirmation copy presents concrete confirmation action", () => {
     },
   }));
 
-  assert.equal(copy?.label, "待确认");
+  assert.equal(copy?.label, "待处理");
   assert.equal(copy?.detail, "删除文件：Z:\\AgentArbor\\tmp.txt");
 });
 
@@ -256,7 +256,7 @@ test("user decision activity copy preserves visible decision text", () => {
     kind: "user_decision",
     eventType: "user.guidance",
     phase: "guidance",
-    summary: "已收到补充指导：不要删除文件，只列出将要删除的路径。",
+    summary: "已收到补充要求：不要删除文件，只列出将要删除的路径。",
   }));
 
   assert.deepEqual(copy, {
@@ -362,7 +362,7 @@ test("display activity items show a pending command approval once with the concr
   const items = displayActivityItemsForNodes(activityVisibleNodes(nodes));
 
   assert.deepEqual(items.map((item) => item.tone), ["confirmation"]);
-  assert.equal(items[0]?.copy.label, "待确认");
+  assert.equal(items[0]?.copy.label, "待处理");
   assert.equal(items[0]?.copy.detail, "执行 Shell：pnpm test");
 });
 

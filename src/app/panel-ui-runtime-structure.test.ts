@@ -255,6 +255,7 @@ test("panel React workbench consumes Basic Agent projection APIs", async () => {
   assert.equal(appRunController.includes("已提交确认，正在继续处理。"), false);
   assert.equal(appRunController.includes("已记录拒绝，正在让助手重新判断。"), false);
   assert.equal(appRunController.includes("已收到补充指导，正在让助手继续判断。"), false);
+  assert.equal(appRunController.includes("提交确认失败"), false);
   assert.equal(appRunController.includes("error: undefined"), false);
   assert.equal(appConversationSession.includes("error: undefined"), true);
   assert.equal(runtime.includes("safeWorkSession"), false);
@@ -360,7 +361,8 @@ test("panel React workbench consumes Basic Agent projection APIs", async () => {
   assert.equal(sidebar.includes("NAV_ITEMS"), false);
   assert.equal(sidebar.includes("onNavigate"), false);
   assert.equal(sidebar.includes("设置"), true);
-  assert.equal(sidebar.includes("待确认"), true);
+  assert.equal(sidebar.includes("待确认"), false);
+  assert.equal(sidebar.includes("待处理"), true);
   assert.equal(sidebar.includes("sidebarConversationTone"), false);
   assert.equal(sidebar.includes("sidebarConversationStatusLabel"), false);
   assert.equal(sidebar.includes("sidebar-status-pill"), false);
@@ -376,6 +378,8 @@ test("panel React workbench consumes Basic Agent projection APIs", async () => {
   assert.equal(chatActive.includes("工作上下文"), false);
   assert.equal(transcriptConfirmation.includes("<span>待确认</span>"), false);
   assert.equal(transcriptConfirmation.includes("确认继续"), false);
+  assert.equal(transcriptConfirmation.includes("拒绝"), false);
+  assert.equal(transcriptConfirmation.includes("不执行"), true);
   assert.equal(chatActive.includes("assistant-workline"), false);
   assert.equal(chatTranscriptChain.includes("assistant-workline"), true);
   assert.equal(chatActive.includes("deliverableAsLinearText"), false);

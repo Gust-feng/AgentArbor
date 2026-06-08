@@ -141,7 +141,7 @@ export function createDesktopAgentCanvas(input: {
         input.result.answer !== undefined
           ? "已回答。"
           : input.result.pendingConfirmation !== undefined
-            ? "等待确认。"
+            ? "等待你判断。"
             : "",
       observationPanelRole:
         `开发者详情只展示调用引用和安全事件；当前安全事件 ${input.transcript.events.length} 条。`,

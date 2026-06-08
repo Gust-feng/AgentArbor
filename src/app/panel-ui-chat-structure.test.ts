@@ -344,7 +344,8 @@ test("panel UI chat and transcript modules stay presentation-focused", async () 
   assert.equal(transcriptConfirmation.includes('props.busy ? "提交中" : "继续"'), true);
   assert.equal(transcriptConfirmation.includes('props.busy ? "提交中" : "确认继续"'), false);
   assert.equal(transcriptConfirmation.includes("<span>待确认</span>"), false);
-  assert.equal(transcriptConfirmation.includes("拒绝"), true);
+  assert.equal(transcriptConfirmation.includes("拒绝"), false);
+  assert.equal(transcriptConfirmation.includes("不执行"), true);
   assert.equal(transcriptConfirmation.includes("confirmation-guidance-hint"), false);
   assert.equal(transcriptConfirmation.includes("确认后继续当前动作；拒绝则停止。也可以直接补充新的要求。"), false);
   assert.equal(transcriptConfirmation.includes("confirmation-action-summary"), true);

@@ -277,8 +277,8 @@ function activityFromEventEntry(entry: EventLogEntry): readonly DesktopAgentActi
         activity(
           entry,
           "confirmation_needed",
-          "需要确认",
-          stringOrUndefined(payload.question) ?? "继续前需要你补充授权或澄清。",
+          "待处理",
+          stringOrUndefined(payload.question) ?? "继续前需要你判断或补充材料。",
           "running",
           sourceRefs,
         ),
@@ -302,7 +302,7 @@ function toolSummaryText(toolCalls: readonly ToolCallResult[], completed: number
     })
     .filter((value): value is string => value !== undefined)
     .slice(0, 4);
-  const base = `工具调用 ${toolCalls.length} 次；完成 ${completed} 次，失败 ${failed} 次，待确认 ${approvalRequired} 次。`;
+  const base = `工具调用 ${toolCalls.length} 次；完成 ${completed} 次，失败 ${failed} 次，待处理 ${approvalRequired} 次。`;
   return localSummaries.length === 0 ? base : `${base}\n${localSummaries.join("\n")}`;
 }
 
@@ -370,8 +370,8 @@ function terminalActivity(
     return {
       activityId,
       type: "confirmation_needed",
-      title: "等待确认",
-      summary: "需要用户补充授权或具体材料后再继续。",
+      title: "待处理",
+      summary: "需要你判断或补充材料后再继续。",
       status: "running",
       createdAt,
       sourceRefs: lastEntry === undefined ? [] : [`event:${lastEntry.message.id}`],

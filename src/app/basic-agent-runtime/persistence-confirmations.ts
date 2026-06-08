@@ -60,7 +60,7 @@ export function restoredConfirmationDecisionEvent(input: {
       input.decision.decision === "approve_once"
         ? "已尝试继续，但无法继续原操作。"
         : input.decision.decision === "deny"
-          ? "已拒绝。"
+          ? "已不执行。"
           : guidance === undefined
             ? "已补充要求。"
             : guidance,

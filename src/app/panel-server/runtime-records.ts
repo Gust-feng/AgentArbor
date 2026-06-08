@@ -194,12 +194,12 @@ export function toRuntimeConfirmationRecords(
         runId: job.runId,
         conversationId: job.conversationId,
         status: previous?.status ?? "pending",
-        title: compactRuntimeText(optionalString(payload.title) ?? "需要确认", 160),
+        title: compactRuntimeText(optionalString(payload.title) ?? "待处理", 160),
         actionSummary: compactRuntimeText(
           confirmationActionSummaryText({
             question,
             consequence,
-            fallback: "等待确认。",
+            fallback: "等待你判断。",
           }),
           500
         ),
@@ -298,13 +298,13 @@ function resultSummaryForJob(job: PanelRunJob): { readonly title: string; readon
   const canvas = statusPayload?.canvas;
   if (canvas?.kind === "desktop_agent_canvas" && canvas.agent.answer !== undefined) {
     return {
-      title: canvas.agent.pendingConfirmation === undefined ? "已完成" : "需要确认",
+      title: canvas.agent.pendingConfirmation === undefined ? "已完成" : "待处理",
       summary: compactRuntimeText(canvas.agent.answer.answer, 900),
     };
   }
   if (canvas?.kind === "desktop_agent_canvas" && canvas.agent.pendingConfirmation !== undefined) {
     return {
-      title: "需要确认",
+      title: "待处理",
       summary: compactRuntimeText(
         confirmationActionSummaryText({
           question: canvas.agent.pendingConfirmation.question,
@@ -536,7 +536,7 @@ function decisionStatusFrom(payload: Readonly<Record<string, unknown>>): Runtime
   if (decision.includes("approve") || decision.includes("allow") || decision.includes("同意") || decision.includes("允许")) {
     return "approved";
   }
-  if (decision.includes("deny") || decision.includes("reject") || decision.includes("refuse") || decision.includes("拒绝")) {
+  if (decision.includes("deny") || decision.includes("reject") || decision.includes("refuse") || decision.includes("拒绝") || decision.includes("不执行")) {
     return "denied";
   }
   return "guidance";

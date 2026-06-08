@@ -1,8 +1,10 @@
 import type { AgentTaskStatus, BasicAgentRun, ConfirmationDecision, RunEvent } from "../../domain/basic-agent/index.js";
 import type { ObservationRef } from "../../domain/observation/index.js";
 import type { ToolDisplayProjection } from "../../domain/tools/index.js";
-export { basicConfirmationDecisionSummary } from "../confirmation-copy.js";
+import { basicConfirmationDecisionSummary, cleanConfirmationSummary } from "../confirmation-copy.js";
 import { redactOrdinaryMarkdownFragment, redactOrdinaryText } from "../safe-projection.js";
+
+export { basicConfirmationDecisionSummary };
 
 export type BasicAgentCompatRunStatus =
   | "pending"
@@ -114,7 +116,7 @@ function basicEventTitle(event: BasicAgentRunStreamEventProjectionInput): string
   if (event.type === "tool.requested" || event.type === "tool.completed") return "动作";
   if (event.type === "tool.failed") return "未完成";
   if (event.type === "context.compaction.completed" || event.type === "context.compaction.failed") return "上下文";
-  if (event.type === "confirmation.needed") return "需要确认";
+  if (event.type === "confirmation.needed") return "需要你判断";
   if (event.type === "user_approval.received") return "继续处理";
   if (event.type === "user.guidance") return "补充要求";
   if (event.type === "final.result") return "结果";
@@ -197,10 +199,10 @@ function pendingConfirmationIdFromCanvas(canvas: NonNullable<BasicAgentRunProjec
 function basicRunTitle(job: BasicAgentRunProjectionInput, status: AgentTaskStatus): string {
   if (job.status === "cancelled") return "已取消";
   if (job.status === "blocked") return "需要处理";
-  if (job.status === "approval_needed") return "需要确认";
+  if (job.status === "approval_needed") return "待处理";
   if (job.status === "needs_input") return "需要补充";
   if (status === "needs_input") return "需要补充";
-  if (status === "approval_needed") return "需要确认";
+  if (status === "approval_needed") return "待处理";
   if (job.status === "completed") return "已完成";
   if (job.status === "failed") return "未完成";
   return "正在处理";
@@ -212,15 +214,20 @@ function basicRunCurrentStep(job: BasicAgentRunProjectionInput): string | undefi
     event.type !== "model.reasoning.completed" &&
     (event.summary !== undefined || event.delta !== undefined)
   );
-  return safeEventSummary(latest?.summary ?? latest?.delta);
+  const summary = latest?.summary ?? latest?.delta;
+  if (latest?.type === "confirmation.needed") {
+    const cleanSummary = cleanConfirmationSummary(summary ?? "");
+    return cleanSummary.length === 0 ? undefined : safeEventSummary(cleanSummary);
+  }
+  return safeEventSummary(summary);
 }
 
 function basicRunNextStep(status: AgentTaskStatus): string | undefined {
-  if (status === "approval_needed") return "等待你确认或补充材料。";
-  if (status === "needs_input") return "等待你补充指导后继续。";
+  if (status === "approval_needed") return "等待你判断或补充要求。";
+  if (status === "needs_input") return "等待你补充要求后继续。";
   if (status === "queued") return "等待前一个任务完成。";
   if (status === "running") return "继续整理结果。";
-  if (status === "blocked") return "需要重新发起或补充指导。";
+  if (status === "blocked") return "需要重新发起或补充要求。";
   return undefined;
 }
 

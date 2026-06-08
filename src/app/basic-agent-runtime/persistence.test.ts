@@ -125,7 +125,7 @@ test("restored basic run derives user-action state from pending confirmation", (
 
   assert.equal(run.status, "approval_needed");
   assert.equal(run.requiresUserAction, true);
-  assert.equal(run.nextStep, "等待你确认或补充材料。");
+  assert.equal(run.nextStep, "等待你判断或补充要求。");
 });
 
 test("restored basic run keeps the frozen runtime agent definition ref", () => {

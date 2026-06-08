@@ -336,7 +336,7 @@ export class PanelRunJobStore {
       type: "run.resumed",
       createdAt: input.resumedAt,
       agentLabel: panelJobAgentLabel(job),
-      summary: "已批准本次操作，运行继续。",
+      summary: "继续执行。",
       status: "running",
       sourceRefs: [`confirmation:${input.confirmationId}`],
       modelCallRefs: [],

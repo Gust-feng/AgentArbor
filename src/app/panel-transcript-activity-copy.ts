@@ -168,29 +168,30 @@ function readableConfirmationCopy(node: ProjectableTranscriptNode): ActivityLine
 }
 
 function readableUserDecisionCopy(node: ProjectableTranscriptNode): ActivityLineCopy {
-  const label = userDecisionLabel(node.phase);
   const fallback = userDecisionFallback(node.phase);
   const raw = cleanConfirmationSummary(node.text ?? node.summary ?? "");
-  const detail = readableActivityText(stripMarkdownStructure(raw));
+  const detail = readableActivityText(stripUserDecisionBoilerplate(stripMarkdownStructure(raw)));
   if (detail.length === 0) {
-    return { label, detail: fallback };
+    return { detail: fallback };
   }
   const compactDetail = compact(detail, 180);
   return compactDetail === detail
-    ? { label, detail }
-    : { label, detail: compactDetail, expandedDetail: detail };
-}
-
-function userDecisionLabel(phase: ProjectableTranscriptNode["phase"]): string {
-  if (phase === "denied") return "已拒绝";
-  if (phase === "guidance") return "已补充";
-  return "已确认";
+    ? { detail }
+    : { detail: compactDetail, expandedDetail: detail };
 }
 
 function userDecisionFallback(phase: ProjectableTranscriptNode["phase"]): string {
-  if (phase === "denied") return "已拒绝本次确认。";
-  if (phase === "guidance") return "已收到补充要求。";
-  return "已确认。";
+  if (phase === "denied") return "已拒绝。";
+  if (phase === "guidance") return "已补充要求。";
+  return "已批准。";
+}
+
+function stripUserDecisionBoilerplate(value: string): string {
+  return value
+    .replace(/^已收到补充(?:指导|要求)[:：]?\s*/u, "")
+    .replace(/^已补充(?:指导|要求)[:：]?\s*/u, "")
+    .replace(/^用户(?:已)?补充(?:指导|要求)[:：]?\s*/u, "")
+    .trim();
 }
 
 export function readableThinkingText(value: string): string | undefined {

@@ -58,12 +58,12 @@ export function restoredConfirmationDecisionEvent(input: {
     title: input.decision.decision === "guidance" ? "收到用户指导" : "收到确认结果",
     summary:
       input.decision.decision === "approve_once"
-        ? "已批准本次操作，但无法继续原操作。"
+        ? "已批准，但无法继续原操作。"
         : input.decision.decision === "deny"
-          ? "已拒绝本次操作。"
+          ? "已拒绝。"
           : guidance === undefined
-            ? "已收到补充指导。"
-            : `已收到补充指导：${guidance}`,
+            ? "已补充要求。"
+            : guidance,
     status: input.decision.decision === "guidance" ? "needs_input" : "blocked",
     timestamp: input.decidedAt,
     refs: [{ kind: "event", id: `confirmation:${input.confirmationId}` }],

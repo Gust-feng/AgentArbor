@@ -340,10 +340,10 @@ test("syncConversationTurnForJob suppresses pre-tool model output after confirma
         streamEvent({
           sequence: 5,
           type: "run.resumed",
-          summary: "已批准本次操作，运行继续。",
+          summary: "继续执行。",
           detail: {
             kind: "work",
-            preview: "已批准本次操作，运行继续。",
+            preview: "继续执行。",
           },
         }),
       ],
@@ -353,7 +353,7 @@ test("syncConversationTurnForJob suppresses pre-tool model output after confirma
   const assistant = conversations.getReadModel(job.conversationId ?? "")?.turns.find((turn) => turn.role === "assistant");
   assert.equal(assistant?.title, "继续执行");
   assert.equal(assistant?.content.includes("探索已经开始"), false);
-  assert.equal(assistant?.content, "已批准本次操作，运行继续。");
+  assert.equal(assistant?.content, "继续执行。");
 });
 
 test("syncConversationTurnForJob waits for post-tool model output before showing a new answer", () => {

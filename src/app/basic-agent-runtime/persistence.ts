@@ -99,7 +99,7 @@ export async function submitRestoredBasicConfirmationDecision(input: {
             code: blockedByMissingContinuation ? "confirmation_continuation_lost" : "confirmation_denied",
             message: blockedByMissingContinuation
               ? "无法继续原操作。请重新发起或继续处理。"
-              : "已拒绝本次操作。",
+              : "已拒绝。",
           },
   };
   const nextConfirmations = upsertRestoredConfirmation({

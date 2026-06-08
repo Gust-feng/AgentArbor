@@ -406,14 +406,14 @@ export function panelStatusFromRuntimeStatus(status: RuntimeRunRecord["status"])
 
 function restoredConfirmationDecisionSummary(confirmation: RuntimeConfirmationRecord): string {
   if (confirmation.status === "approved") {
-    return "已批准本次操作。";
+    return "已批准。";
   }
   if (confirmation.status === "denied") {
-    return "已拒绝本次操作。";
+    return "已拒绝。";
   }
   return confirmation.guidance === undefined || confirmation.guidance.trim().length === 0
-    ? "已收到补充指导。"
-    : `已收到补充指导：${compactRuntimeText(confirmation.guidance, 240)}`;
+    ? "已补充要求。"
+    : compactRuntimeText(confirmation.guidance, 240);
 }
 
 function hasPersistedUserVisibleWorkActivity(events: readonly RuntimeEventRecord[]): boolean {

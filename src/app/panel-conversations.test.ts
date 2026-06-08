@@ -133,7 +133,7 @@ test("panel conversations keep the active follow-up run when an older guidance t
     assistantTurnId: first.assistantTurn.turnId,
     runId: "run-original",
     title: "需要补充",
-    content: "已收到补充指导，将作为后续消息继续处理。",
+    content: "已补充要求，将作为后续消息继续处理。",
     status: "completed",
   });
 

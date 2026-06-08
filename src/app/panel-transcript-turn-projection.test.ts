@@ -147,7 +147,7 @@ test("assistant turn projection can show direct running reply previews before to
 test("assistant turn projection does not treat running preview content as an answer", () => {
   const turns = [
     turn("user-1", "user", "运行 dir", "completed"),
-    { ...turn("assistant-1", "assistant", "已批准本次操作，运行继续。", "running"), runId: "run-1" },
+    { ...turn("assistant-1", "assistant", "继续执行。", "running"), runId: "run-1" },
   ];
   const projection = projectAssistantTranscriptTurn({
     projectedTurn: projected(turns[1]!, "run-1"),

@@ -127,7 +127,7 @@ test("active chat projection does not use running conversation preview as an ans
     conversation: {
       turns: [
         userTurn("user-1", "运行 dir"),
-        { ...assistantTurn("assistant-1", "已批准本次操作，运行继续。", "running"), runId: "run-1" },
+        { ...assistantTurn("assistant-1", "继续执行。", "running"), runId: "run-1" },
       ],
       activeRunId: "run-1",
     },

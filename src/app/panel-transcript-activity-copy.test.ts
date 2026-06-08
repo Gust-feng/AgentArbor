@@ -260,8 +260,20 @@ test("user decision activity copy preserves visible decision text", () => {
   }));
 
   assert.deepEqual(copy, {
-    label: "已补充",
-    detail: "已收到补充指导：不要删除文件，只列出将要删除的路径。",
+    detail: "不要删除文件，只列出将要删除的路径。",
+  });
+});
+
+test("user decision activity copy strips restored guidance boilerplate", () => {
+  const copy = activityLineForNode(node({
+    kind: "user_decision",
+    eventType: "user.guidance",
+    phase: "guidance",
+    summary: "用户已补充要求：只列出路径，不执行删除。",
+  }));
+
+  assert.deepEqual(copy, {
+    detail: "只列出路径，不执行删除。",
   });
 });
 

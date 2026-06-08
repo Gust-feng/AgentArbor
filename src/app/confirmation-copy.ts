@@ -37,15 +37,15 @@ export function basicConfirmationDecisionSummary(
   decision: Pick<ConfirmationDecision, "decision" | "guidance">
 ): string {
   if (decision.decision === "approve_once") {
-    return "已批准本次操作。";
+    return "已批准。";
   }
   if (decision.decision === "deny") {
-    return "已拒绝本次操作。";
+    return "已拒绝。";
   }
   const guidance = decision.guidance === undefined ? undefined : compactSafeText(decision.guidance, 240);
   return guidance === undefined || guidance.length === 0
-    ? "已收到补充指导。"
-    : `已收到补充指导：${guidance}`;
+    ? "已补充要求。"
+    : guidance;
 }
 
 function compactSafeText(value: string, maxLength: number): string {

@@ -107,11 +107,11 @@ test("basic stream event projection keeps long model output deltas for live rend
 });
 
 test("basic projection summarizes confirmation decisions safely", () => {
-  assert.equal(basicConfirmationDecisionSummary({ decision: "approve_once" }), "已批准本次操作。");
-  assert.equal(basicConfirmationDecisionSummary({ decision: "deny" }), "已拒绝本次操作。");
+  assert.equal(basicConfirmationDecisionSummary({ decision: "approve_once" }), "已批准。");
+  assert.equal(basicConfirmationDecisionSummary({ decision: "deny" }), "已拒绝。");
   assert.match(
     basicConfirmationDecisionSummary({ decision: "guidance", guidance: "继续，但不要暴露 token=sk-test-token-1234567890" }),
-    /^已收到补充指导：/
+    /^继续/
   );
   assert.equal(
     basicConfirmationDecisionSummary({

@@ -589,6 +589,21 @@ test("work session context ledger keeps budget details out of ordinary summaries
   assert.equal(text.includes("普通视图"), false);
 });
 
+test("work session current action does not mirror the user task text", () => {
+  const run: BasicAgentRun = {
+    ...basicRun("running"),
+    goalSummary: "请处理 api_key=sk-user-task-secret-1234567890，并把目标展示出来",
+  };
+  const workSession = createDesktopWorkSessionReadModel({
+    run,
+    events: [],
+  });
+
+  assert.equal(workSession.currentAction, "正在理解任务。");
+  assert.equal(workSession.currentAction.includes("sk-user-task-secret"), false);
+  assert.equal(workSession.currentAction.includes("目标"), false);
+});
+
 function basicRun(status: BasicAgentRun["status"]): BasicAgentRun {
   return {
     runId: "basic-run-test",

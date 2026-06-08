@@ -331,7 +331,7 @@ test("basic agent live work view builds transcript nodes from synced backend str
               activity: [],
             },
             explanation: {
-              resultWhyReasonable: "桌面助手需要用户确认后继续。",
+              resultWhyReasonable: "桌面助手等待你判断后继续。",
               observationPanelRole: "开发者详情只展示安全事件。",
             },
           },

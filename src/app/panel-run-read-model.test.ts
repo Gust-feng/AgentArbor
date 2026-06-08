@@ -223,7 +223,7 @@ test("panel transcript nodes preserve ordered ordinary-agent tool lifecycle", ()
     streamEvent({
       sequence: 4,
       type: "run.resumed",
-      summary: "已确认，继续执行。",
+      summary: "继续执行。",
       sourceRefs: ["confirmation:confirmation-shell"],
     }),
     streamEvent({

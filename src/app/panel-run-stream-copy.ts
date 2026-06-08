@@ -169,15 +169,15 @@ export function agentNoteForEvent(
     case "convergence_review.completed":
       return { agentLabel: "汇总判断", summary: "候选材料已完成汇总判断。", status: "completed" };
     case "direction_handoff.requested":
-      return { agentLabel: "结果整理", summary: "正在把已确认方向整理为可交付结果。", status: "running" };
+      return { agentLabel: "结果整理", summary: "正在把当前方向整理为可交付结果。", status: "running" };
     case "direction_handoff.completed":
       return { agentLabel: "结果整理", summary: "结果材料已通过校验并生成。", status: "completed" };
     case "direction_handoff.revision_requested":
       return { agentLabel: "结果整理", summary: "结果材料需要修订或补充。", status: "running" };
     case "user_approval.requested":
-      return { agentLabel: "用户确认", summary: "继续前需要用户澄清。", status: "running" };
+      return { agentLabel: "待确认", summary: "继续前需要用户补充判断。", status: "running" };
     case "user_approval.received":
-      return { agentLabel: "用户确认", summary: "用户澄清已收到，工作继续推进。", status: "completed" };
+      return { agentLabel: "继续处理", summary: "用户反馈已收到，工作继续推进。", status: "completed" };
     default:
       return undefined;
   }

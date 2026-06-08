@@ -115,7 +115,7 @@ function basicEventTitle(event: BasicAgentRunStreamEventProjectionInput): string
   if (event.type === "tool.failed") return "未完成";
   if (event.type === "context.compaction.completed" || event.type === "context.compaction.failed") return "上下文";
   if (event.type === "confirmation.needed") return "需要确认";
-  if (event.type === "user_approval.received") return "已确认";
+  if (event.type === "user_approval.received") return "继续处理";
   if (event.type === "user.guidance") return "补充要求";
   if (event.type === "final.result") return "结果";
   if (event.type === "run.failed") return "未完成";

@@ -295,7 +295,7 @@ export function createPersistedStreamEvents(
       sequence: events.length + 1,
       type,
       createdAt: confirmation.decidedAt,
-      agentLabel: type === "run.resumed" ? agentLabel : type === "user_approval.received" ? "用户确认" : "用户指导",
+      agentLabel: type === "run.resumed" ? agentLabel : type === "user_approval.received" ? "继续处理" : "补充要求",
       summary: restoredConfirmationDecisionSummary(confirmation),
       status: confirmation.status === "denied" ? "blocked" : confirmation.status === "guidance" ? "pending" : "completed",
       sourceRefs: [`confirmation:${confirmation.confirmationId}`],
@@ -407,7 +407,7 @@ export function panelStatusFromRuntimeStatus(status: RuntimeRunRecord["status"])
 
 function restoredConfirmationDecisionSummary(confirmation: RuntimeConfirmationRecord): string {
   if (confirmation.status === "approved") {
-    return "已批准。";
+    return "已继续。";
   }
   if (confirmation.status === "denied") {
     return "已拒绝。";
@@ -441,10 +441,10 @@ function persistedStreamAgentLabel(type: PanelRunStreamEvent["type"]): string {
     return "待确认";
   }
   if (type === "user_approval.received") {
-    return "用户确认";
+    return "继续处理";
   }
   if (type === "user.guidance") {
-    return "用户指导";
+    return "补充要求";
   }
   if (
     type === "agent.note.delta" ||

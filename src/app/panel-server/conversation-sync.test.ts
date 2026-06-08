@@ -97,7 +97,7 @@ test("syncConversationTurnForJob keeps approval requests as running previews", (
           activity: [],
         },
         explanation: {
-          resultWhyReasonable: "等待用户确认。",
+          resultWhyReasonable: "等待你判断后继续。",
           observationPanelRole: "展示安全投影。",
         },
       },
@@ -140,7 +140,7 @@ test("syncConversationTurnForJob keeps concrete confirmation preview", () => {
           activity: [],
         },
         explanation: {
-          resultWhyReasonable: "等待用户确认。",
+          resultWhyReasonable: "等待你判断后继续。",
           observationPanelRole: "展示安全投影。",
         },
       },
@@ -331,10 +331,10 @@ test("syncConversationTurnForJob suppresses pre-tool model output after confirma
         streamEvent({
           sequence: 4,
           type: "user_approval.received",
-          summary: "已确认继续。",
+          summary: "已继续。",
           detail: {
             kind: "confirmation",
-            preview: "已确认继续。",
+            preview: "已继续。",
           },
         }),
         streamEvent({

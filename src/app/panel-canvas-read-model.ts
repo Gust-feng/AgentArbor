@@ -424,7 +424,7 @@ export function createUndergroundDeepCanvas(input: {
         reason:
           input.result.terminalStatus === "approved_package_created"
             ? `深度组织已完成汇总和收束，保留 ${keyEvidenceRefs.length} 个关键依据引用。`
-            : "地下组织没有批准进入执行，当前只展示停止、等待或不确定材料。",
+            : "深度组织没有进入执行，当前只展示停止、等待或不确定材料。",
       },
       keyEvidenceRefs,
       uncertainty,

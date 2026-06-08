@@ -416,7 +416,7 @@ function waitingPointFor(
     return "等待后台运行启动。";
   }
   if (status === "approval_needed") {
-    return "等待用户确认后继续。";
+    return "等待你判断后继续。";
   }
   if (status === "needs_input") {
     return "等待用户补充指导。";
@@ -506,9 +506,9 @@ function ordinaryAgentWaitingPoint(lastEventType: ArborMessageType | undefined):
     case "tool.failed":
       return "未完成。";
     case "user_approval.requested":
-      return "等待用户确认后继续。";
+      return "等待你判断后继续。";
     case "user_approval.received":
-      return "已收到确认或指导。";
+      return "已收到反馈。";
     default:
       return "正在处理。";
   }

@@ -37,7 +37,7 @@ export function basicConfirmationDecisionSummary(
   decision: Pick<ConfirmationDecision, "decision" | "guidance">
 ): string {
   if (decision.decision === "approve_once") {
-    return "已批准。";
+    return "已继续。";
   }
   if (decision.decision === "deny") {
     return "已拒绝。";

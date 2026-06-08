@@ -521,7 +521,7 @@ function userDecisionPhase(event: PanelTranscriptStreamEvent): TranscriptNodePha
 function userDecisionTitle(phase: TranscriptNodePhase): string {
   if (phase === "guidance") return "补充要求";
   if (phase === "denied") return "已拒绝";
-  return "已确认";
+  return "继续处理";
 }
 
 function userFacingConfirmationSummary(value: string | undefined): string {

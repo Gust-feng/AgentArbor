@@ -187,7 +187,7 @@ function readableUserDecisionCopy(node: ProjectableTranscriptNode): ActivityLine
 function userDecisionFallback(phase: ProjectableTranscriptNode["phase"]): string {
   if (phase === "denied") return "已拒绝。";
   if (phase === "guidance") return "已补充要求。";
-  return "已批准。";
+  return "已继续。";
 }
 
 function stripUserDecisionBoilerplate(value: string): string {

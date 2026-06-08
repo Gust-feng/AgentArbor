@@ -127,7 +127,7 @@ function basicEventTitleFromType(type: string): string {
   if (type === "tool.requested" || type === "tool.completed") return "动作";
   if (type === "tool.failed") return "未完成";
   if (type === "confirmation.needed") return "需要确认";
-  if (type === "user_approval.received") return "已确认";
+  if (type === "user_approval.received") return "继续处理";
   if (type === "user.guidance") return "补充要求";
   if (type === "final.result") return "结果";
   if (type === "run.failed") return "未完成";
@@ -146,7 +146,7 @@ function agentTaskStatusFromBasicEventType(type: string): BasicAgentRun["status"
 
 function restoredConfirmationDecisionSummary(confirmation: RuntimeConfirmationRecord): string {
   if (confirmation.status === "approved") {
-    return "已批准。";
+    return "已继续。";
   }
   if (confirmation.status === "denied") {
     return "已拒绝。";

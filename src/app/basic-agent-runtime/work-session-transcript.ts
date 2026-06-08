@@ -161,7 +161,7 @@ function transcriptNodeFromRunEvent(
     return transcriptNode(event, {
       kind: "user_decision",
       phase,
-      title: phase === "approved" ? "已确认" : phase === "denied" ? "已拒绝" : "补充要求",
+      title: phase === "approved" ? "继续处理" : phase === "denied" ? "已拒绝" : "补充要求",
       summary: event.summary,
     });
   }

@@ -22,7 +22,7 @@ test("confirmation copy keeps concrete action text without tool internals", () =
 });
 
 test("confirmation decision copy is shared and redacts guidance", () => {
-  assert.equal(basicConfirmationDecisionSummary({ decision: "approve_once" }), "已批准。");
+  assert.equal(basicConfirmationDecisionSummary({ decision: "approve_once" }), "已继续。");
   assert.equal(basicConfirmationDecisionSummary({ decision: "deny" }), "已拒绝。");
   assert.equal(
     basicConfirmationDecisionSummary({

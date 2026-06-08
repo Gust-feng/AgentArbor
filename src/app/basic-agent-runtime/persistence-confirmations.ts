@@ -23,8 +23,8 @@ export function upsertRestoredConfirmation(input: {
     runId: input.snapshot.run.runId,
     conversationId: previous?.conversationId ?? input.snapshot.run.conversationId,
     status,
-    title: previous?.title ?? "用户确认",
-    actionSummary: previous?.actionSummary ?? "用户已补充确认或指导。",
+    title: previous?.title ?? "继续处理",
+    actionSummary: previous?.actionSummary ?? "用户已补充要求。",
     affectedResources: previous?.affectedResources ?? [],
     riskLevel: previous?.riskLevel ?? "medium",
     requestedAt: previous?.requestedAt ?? input.decidedAt,
@@ -55,10 +55,10 @@ export function restoredConfirmationDecisionEvent(input: {
     runId: input.runId,
     sequence: input.sequence,
     type: input.decision.decision === "guidance" ? "user.guidance" : "user_approval.received",
-    title: input.decision.decision === "guidance" ? "补充要求" : "已确认",
+    title: input.decision.decision === "guidance" ? "补充要求" : "继续处理",
     summary:
       input.decision.decision === "approve_once"
-        ? "已批准，但无法继续原操作。"
+        ? "已尝试继续，但无法继续原操作。"
         : input.decision.decision === "deny"
           ? "已拒绝。"
           : guidance === undefined

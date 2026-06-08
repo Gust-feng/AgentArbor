@@ -152,7 +152,7 @@ test("persisted user-action statuses restore explicit waiting points", () => {
   assert.equal(approval.tracking.run.waitingPoint, "等待你确认下一步。");
   assert.equal(approval.transcript.events.some((event) => event.type === "confirmation.needed"), true);
   assert.equal(approval.transcript.events.at(-1)?.type, "confirmation.needed");
-  assert.equal(approval.transcript.events.at(-1)?.summary, "等待用户确认下一步。");
+  assert.equal(approval.transcript.events.at(-1)?.summary, "等待你判断后继续。");
   assert.equal(needsInput.status, "needs_input");
   assert.equal(needsInput.trace.waitingPoint, "需要你补充材料后继续。");
   assert.equal(needsInput.tracking.run.waitingPoint, "需要你补充材料后继续。");
@@ -307,7 +307,7 @@ function runtimeSnapshot(): RuntimeRunSnapshot {
         runId: "run-1",
         conversationId: "conversation-1",
         status: "guidance",
-        title: "用户指导",
+        title: "补充要求",
         actionSummary: "用户补充指导",
         affectedResources: [],
         riskLevel: "medium",
@@ -339,7 +339,7 @@ function runtimeSnapshotWithStatus(status: RuntimeRunSnapshot["run"]["status"]):
             conversationId: "conversation-1",
             status: "pending",
             title: "需要确认",
-            actionSummary: "等待用户确认下一步。",
+            actionSummary: "等待你判断后继续。",
             affectedResources: [],
             riskLevel: "medium",
             requestedAt: "2026-05-31T00:00:04.000Z",

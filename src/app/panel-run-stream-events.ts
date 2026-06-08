@@ -398,7 +398,7 @@ function appendStreamEventsForEvent(input: {
       ...base,
       eventId: `${input.runId}:event:${input.entry.sequence}:user.guidance`,
       type: "user.guidance",
-      agentLabel: "用户指导",
+      agentLabel: "补充要求",
       summary: userGuidanceSummary(payload),
       status: "completed",
     });

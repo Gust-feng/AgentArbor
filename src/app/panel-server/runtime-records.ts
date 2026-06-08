@@ -218,8 +218,8 @@ export function toRuntimeConfirmationRecords(
       runId: job.runId,
       conversationId: job.conversationId,
       status: decisionStatusFrom(payload),
-      title: previous?.title ?? "用户指导",
-      actionSummary: previous?.actionSummary ?? "用户已补充确认或指导。",
+      title: previous?.title ?? "补充要求",
+      actionSummary: previous?.actionSummary ?? "用户已补充要求。",
       affectedResources: previous?.affectedResources ?? affectedResourcesFrom(payload),
       riskLevel: previous?.riskLevel ?? "medium",
       requestedAt: previous?.requestedAt ?? entry.recordedAt,
@@ -241,8 +241,8 @@ export function toRuntimeConfirmationRecords(
           : decision.decision === "deny"
             ? "denied"
             : "guidance",
-      title: previous?.title ?? "用户确认",
-      actionSummary: previous?.actionSummary ?? "用户已补充确认或指导。",
+      title: previous?.title ?? "继续处理",
+      actionSummary: previous?.actionSummary ?? "用户已补充要求。",
       affectedResources: previous?.affectedResources ?? [],
       riskLevel: previous?.riskLevel ?? "medium",
       requestedAt: previous?.requestedAt ?? decision.decidedAt,

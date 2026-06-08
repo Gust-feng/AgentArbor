@@ -272,7 +272,12 @@ function currentActionFor(
   if (stage === "completed") return "结果已经整理好。";
   if (stage === "failed") return "查看失败摘要后可以补充材料或重新发起。";
   if (stage === "cancelled") return "运行已经停止。";
-  return run.goalSummary;
+  if (stage === "gathering_context") return "正在整理上下文。";
+  if (stage === "using_tools") return "正在处理。";
+  if (stage === "composing_result") return "正在整理结果。";
+  if (stage === "awaiting_approval") return "等待你判断后继续。";
+  if (stage === "blocked") return "需要重新发起或补充指导。";
+  return "正在理解任务。";
 }
 
 function deliverableFor(input: {

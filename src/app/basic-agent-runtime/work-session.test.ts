@@ -409,6 +409,24 @@ test("work session transcript preserves model side output before tool calls", ()
   assert.equal(nodes.some((node) => node.eventType === "tool.requested"), true);
 });
 
+test("work session transcript suppresses ordinary startup and placeholder events", () => {
+  const run = basicRun("running");
+  const nodes = transcriptNodesFromRunEvents([
+    { ...event(run.runId, "goal.received", "收到任务：请把目标展示出来", "running"), sequence: 1 },
+    { ...event(run.runId, "run.started", "任务已开始。", "running"), sequence: 2 },
+    { ...event(run.runId, "agent.note.completed", "等待模型输出。", "running"), sequence: 3 },
+    { ...event(run.runId, "model.output.completed", "内容已整理。", "running"), sequence: 4 },
+    { ...event(run.runId, "agent.note.completed", "先检查 README.md，再回答。", "running"), sequence: 5 },
+  ], undefined);
+
+  assert.deepEqual(nodes.map((node) => node.eventType), ["agent.note.completed"]);
+  assert.equal(nodes[0]?.summary, "先检查 README.md，再回答。");
+  assert.equal(JSON.stringify(nodes).includes("目标展示"), false);
+  assert.equal(JSON.stringify(nodes).includes("任务已开始"), false);
+  assert.equal(JSON.stringify(nodes).includes("等待模型输出"), false);
+  assert.equal(JSON.stringify(nodes).includes("内容已整理"), false);
+});
+
 test("work session transcript carries tool names for readable workflow actions", () => {
   const run = basicRun("completed");
   const nodes = transcriptNodesFromRunEvents([

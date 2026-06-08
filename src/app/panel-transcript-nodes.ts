@@ -12,8 +12,12 @@ import {
   type PendingReasoningNode,
   type ReasoningTranscriptEvent,
 } from "./transcript-reasoning.js";
-import { isStaleModelProgressSummary } from "./panel-model-progress-copy.js";
 import { cleanOrdinaryToolText } from "./ordinary-tool-copy.js";
+import {
+  isLowValueOrdinaryAgentNote,
+  isOrdinaryTranscriptReasoningSettlementEvent,
+  isOrdinaryTranscriptSuppressedEvent,
+} from "./ordinary-transcript-event-policy.js";
 
 export type PanelTranscriptStreamEvent = {
   readonly eventId: string;
@@ -62,11 +66,11 @@ export function createPanelTranscriptNodes(
       pendingReasoning = updatePendingReasoningNode(pendingReasoning, reasoningEvent, nodes, compactReasoningSummary, reasoningNodeFromPending);
       continue;
     }
-    if (isReasoningSettlementTranscriptEvent(event)) {
+    if (isOrdinaryTranscriptReasoningSettlementEvent(event.type)) {
       pendingReasoning = settlePendingReasoningNode(pendingReasoning, reasoningEvent);
     }
     pendingReasoning = flushPendingReasoningNode(pendingReasoning, nodes, compactReasoningSummary, reasoningNodeFromPending);
-    if (isReasoningSettlementTranscriptEvent(event)) {
+    if (isOrdinaryTranscriptReasoningSettlementEvent(event.type)) {
       completeOpenReasoningNodes(nodes, reasoningEvent, compactReasoningSummary);
     }
     const node = transcriptNodeForEvent(event, {
@@ -91,10 +95,7 @@ function transcriptNodeForEvent(
     readonly requestedByCallId: Map<string, number>;
   }
 ): TranscriptNode | undefined {
-  if (event.type === "run.started") {
-    return undefined;
-  }
-  if (event.type === "model.output.delta" || event.type === "model.output.completed") {
+  if (isOrdinaryTranscriptSuppressedEvent({ type: event.type })) {
     return undefined;
   }
   if (event.type === "model.side.completed") {
@@ -109,7 +110,7 @@ function transcriptNodeForEvent(
       text: event.detail?.preview ?? event.summary,
     });
   }
-  if ((event.type === "agent.note.delta" || event.type === "agent.note.completed") && isLowValueAgentNote(event.summary)) {
+  if ((event.type === "agent.note.delta" || event.type === "agent.note.completed") && isLowValueOrdinaryAgentNote(event.summary)) {
     return undefined;
   }
   if (event.type === "agent.note.delta" || event.type === "agent.note.completed") {
@@ -241,24 +242,6 @@ function requestSequencesBeforeConfirmations(events: readonly PanelTranscriptStr
     }
   }
   return sequences;
-}
-
-function isReasoningSettlementTranscriptEvent(event: PanelTranscriptStreamEvent): boolean {
-  return event.type === "model.output.completed" ||
-    event.type === "model.side.completed" ||
-    event.type === "agent.note.completed" ||
-    event.type === "tool.requested" ||
-    event.type === "tool.completed" ||
-    event.type === "tool.failed" ||
-    event.type === "confirmation.needed" ||
-    event.type === "user_approval.received" ||
-    event.type === "user.guidance" ||
-    event.type === "context.compaction.completed" ||
-    event.type === "context.compaction.failed" ||
-    event.type === "final.result" ||
-    event.type === "run.failed" ||
-    event.type === "run.blocked" ||
-    event.type === "run.cancelled";
 }
 
 function transcriptNode(
@@ -530,21 +513,6 @@ function userFacingConfirmationSummary(value: string | undefined): string {
     return "";
   }
   return cleanConfirmationSummary(text);
-}
-
-function isLowValueAgentNote(value: string | undefined): boolean {
-  const text = value?.trim() ?? "";
-  return isStaleModelProgressSummary(text) ||
-    staleToolProgressNote(text) ||
-    text === "Intelligence Channel requested model output." ||
-    text === "Intelligence Channel completed model output validation.";
-}
-
-function staleToolProgressNote(value: string): boolean {
-  const normalized = value.replace(/[。.!！?？；;:：、，,\s]/g, "");
-  return normalized.includes("助手已选择使用工具") &&
-    normalized.includes("工具结果") &&
-    normalized.includes("后续处理");
 }
 
 function compactSafeLine(value: string, maxLength: number): string {

@@ -196,6 +196,48 @@ test("panel transcript confirmation ids fall back to the owning tool call id", (
   assert.deepEqual(activityVisibleNodes(projected).map((item) => item.kind), ["confirmation"]);
 });
 
+test("panel transcript nodes suppress ordinary startup and placeholder events", () => {
+  const projected = createPanelTranscriptNodes([
+    panelEvent({
+      eventId: "run-1:event:1:goal.received",
+      sequence: 1,
+      type: "goal.received",
+      summary: "收到任务：请把目标展示出来",
+    }),
+    panelEvent({
+      eventId: "run-1:event:2:run.started",
+      sequence: 2,
+      type: "run.started",
+      summary: "任务已开始。",
+    }),
+    panelEvent({
+      eventId: "run-1:event:3:agent.note.completed",
+      sequence: 3,
+      type: "agent.note.completed",
+      summary: "等待模型输出。",
+    }),
+    panelEvent({
+      eventId: "run-1:event:4:model.output.completed",
+      sequence: 4,
+      type: "model.output.completed",
+      summary: "内容已整理。",
+    }),
+    panelEvent({
+      eventId: "run-1:event:5:agent.note.completed",
+      sequence: 5,
+      type: "agent.note.completed",
+      summary: "先检查 README.md，再回答。",
+    }),
+  ]);
+
+  assert.deepEqual(projected.map((item) => item.eventType), ["agent.note.completed"]);
+  assert.equal(projected[0]?.summary, "先检查 README.md，再回答。");
+  assert.equal(JSON.stringify(projected).includes("目标展示"), false);
+  assert.equal(JSON.stringify(projected).includes("任务已开始"), false);
+  assert.equal(JSON.stringify(projected).includes("等待模型输出"), false);
+  assert.equal(JSON.stringify(projected).includes("内容已整理"), false);
+});
+
 test("startup activity projection stays silent before real transcript activity", () => {
   const projected = withStartupActivityNode([], {
     runId: "run-1",
@@ -216,6 +258,25 @@ test("startup activity projection keeps existing transcript activity", () => {
 
   assert.deepEqual(projected, [existing]);
 });
+
+function panelEvent(input: {
+  readonly eventId: string;
+  readonly sequence: number;
+  readonly type: string;
+  readonly summary?: string;
+}) {
+  return {
+    eventId: input.eventId,
+    runId: "run-1",
+    sequence: input.sequence,
+    type: input.type,
+    createdAt: "2026-06-04T00:00:00.000Z",
+    summary: input.summary,
+    sourceRefs: [],
+    modelCallRefs: [],
+    toolCallRefs: [],
+  };
+}
 
 function node(input: {
   readonly nodeId: string;

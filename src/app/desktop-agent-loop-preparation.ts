@@ -10,11 +10,10 @@ import {
   createDesktopAgentTurnPolicy,
   createDesktopAgentTurnRuntime,
   resolveActiveModelName,
-  resolveDesktopAgentRunCapabilities,
-  restrictRunCapabilityResolutionToExecutableTools,
 } from "./desktop-agent-session-runtime.js";
 import type { MinimalRuntime } from "./runtime.js";
 import type { ModelRuntimeMode } from "./model-runtime/index.js";
+import { resolveRunToolBoundary } from "./run-tool-boundary.js";
 
 export type DesktopAgentLoopPreparationInput = {
   readonly runtime: MinimalRuntime;
@@ -69,25 +68,20 @@ export function prepareDesktopAgentLoop(input: DesktopAgentLoopPreparationInput)
     modelCapabilities,
     toolCenter,
   });
-  const capabilityResolution =
-    input.options.capabilitySnapshot === undefined
-      ? undefined
-      : restrictRunCapabilityResolutionToExecutableTools(
-          resolveDesktopAgentRunCapabilities({
-            agentDefinition: input.agentDefinition,
-            snapshot: input.options.capabilitySnapshot,
-            goal: input.goal,
-            taskSoil: input.taskSoil,
-            modelCapabilities,
-            platform: input.options.platform,
-          }),
-          toolCenter
-        );
+  const toolBoundary = resolveRunToolBoundary({
+    agentDefinition: input.agentDefinition,
+    snapshot: input.options.capabilitySnapshot,
+    goal: input.goal,
+    taskSoil: input.taskSoil,
+    modelCapabilities,
+    platform: input.options.platform,
+    toolCenter,
+  });
   const turnPolicy = createDesktopAgentTurnPolicy({
     agentDefinition: input.agentDefinition,
     traceId: input.traceId,
     goalId: input.goalId,
-    allowedTools: capabilityResolution?.allowedTools ?? [],
+    allowedTools: toolBoundary.allowedTools,
     modelCapabilities,
   });
 
@@ -95,7 +89,7 @@ export function prepareDesktopAgentLoop(input: DesktopAgentLoopPreparationInput)
     contextPack,
     turnRuntime,
     turnPolicy,
-    capabilityResolution,
+    capabilityResolution: toolBoundary.capabilityResolution,
   };
 }
 

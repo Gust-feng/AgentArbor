@@ -54,6 +54,7 @@ test("desktop agent session keeps projection and contracts split", async () => {
     projection,
     runtime,
     loopPreparation,
+    runToolBoundary,
     events,
     registry,
     definitionRef,
@@ -72,6 +73,7 @@ test("desktop agent session keeps projection and contracts split", async () => {
     readAppSource("desktop-agent-session-projection.ts"),
     readAppSource("desktop-agent-session-runtime.ts"),
     readAppSource("desktop-agent-loop-preparation.ts"),
+    readAppSource("run-tool-boundary.ts"),
     readAppSource("desktop-agent-session-events.ts"),
     readAppSource("agent-definition-registry.ts"),
     readAppSource("agent-definition-ref.ts"),
@@ -145,7 +147,7 @@ test("desktop agent session keeps projection and contracts split", async () => {
   assert.equal(runtime.includes("export function createDesktopAgentOutputContract"), false);
   assert.equal(runtime.includes("export function createDesktopAgentTurnPolicy"), true);
   assert.equal(runtime.includes("createAgentTurnPolicyFromDefinition({"), true);
-  assert.equal(runtime.includes("resolveAgentRunCapabilities({"), true);
+  assert.equal(runtime.includes("resolveAgentRunCapabilities({"), false);
   assert.equal(runtime.includes("input.agentDefinition ?? DESKTOP_ROOT_AGENT"), true);
   assert.equal(runtime.includes("DESKTOP_ROOT_AGENT.turnPolicy.allowModel"), false);
   assert.equal(runtime.includes("DESKTOP_ROOT_AGENT.outputContract"), false);
@@ -168,9 +170,13 @@ test("desktop agent session keeps projection and contracts split", async () => {
   assert.equal(loopPreparation.includes("options.capabilitySnapshot !== undefined ||"), true);
   assert.equal(loopPreparation.includes("agentId: input.agentDefinition.agentId"), true);
   assert.equal(loopPreparation.includes("agentDisplayName: input.agentDefinition.displayName"), true);
-  assert.equal(loopPreparation.includes("resolveDesktopAgentRunCapabilities({"), true);
-  assert.equal(loopPreparation.includes("restrictRunCapabilityResolutionToExecutableTools("), true);
+  assert.equal(loopPreparation.includes("resolveDesktopAgentRunCapabilities({"), false);
+  assert.equal(loopPreparation.includes("restrictRunCapabilityResolutionToExecutableTools("), false);
+  assert.equal(loopPreparation.includes("resolveRunToolBoundary({"), true);
   assert.equal(loopPreparation.includes("createDesktopAgentTurnPolicy({"), true);
+  assert.equal(runToolBoundary.includes("export function resolveRunToolBoundary"), true);
+  assert.equal(runToolBoundary.includes("export function restrictRunCapabilityResolutionToExecutableTools"), true);
+  assert.equal(runToolBoundary.includes('from "./capability-policy.js"'), true);
   assert.equal(registry.includes("export class AgentDefinitionRegistry"), true);
   assert.equal(registry.includes("runAgentDefinitionRef(definition)"), true);
   assert.equal(registry.includes("resolve(ref: RunAgentDefinitionRef): AgentDefinition | undefined"), true);
@@ -186,7 +192,7 @@ test("desktop agent session keeps projection and contracts split", async () => {
   assert.equal(definitionRef.includes("export function isCompleteRunAgentDefinitionRef"), true);
   assert.equal(definitionRuntime.includes("export function resolveAgentRunCapabilities"), true);
   assert.equal(definitionRuntime.includes("export function allowedToolsForAgentRun"), false);
-  assert.equal(definitionRuntime.includes("export function restrictRunCapabilityResolutionToExecutableTools"), true);
+  assert.equal(definitionRuntime.includes("export function restrictRunCapabilityResolutionToExecutableTools"), false);
   assert.equal(definitionRuntime.includes("maxModelRounds: definition.turnPolicy.maxModelRounds"), true);
   assert.equal(definitionRuntime.includes("maxToolRounds: definition.turnPolicy.maxToolRounds"), true);
   assert.equal(agentDefinitionContracts.includes("export type AgentSystemPromptSpec"), true);

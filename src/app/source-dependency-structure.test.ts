@@ -148,6 +148,23 @@ test("run mode policy depends on AgentDefinition refs without importing runtime 
   assert.equal(source.includes("createAgentTurnPolicyFromDefinition"), false);
 });
 
+test("AgentDefinition runtime does not own executable tool boundary pruning", async () => {
+  const appRoot = path.join(process.cwd(), "src", "app");
+  const [definitionRuntime, runToolBoundary, loopPreparation] = await Promise.all([
+    readSource(path.join(appRoot, "agent-definition-runtime.ts")),
+    readSource(path.join(appRoot, "run-tool-boundary.ts")),
+    readSource(path.join(appRoot, "desktop-agent-loop-preparation.ts")),
+  ]);
+
+  assert.equal(definitionRuntime.includes("ToolExecutionBroker"), false);
+  assert.equal(definitionRuntime.includes("restrictRunCapabilityResolutionToExecutableTools"), false);
+  assert.equal(runToolBoundary.includes("ToolExecutionBroker"), true);
+  assert.equal(runToolBoundary.includes("resolveRunToolBoundary"), true);
+  assert.equal(runToolBoundary.includes("restrictRunCapabilityResolutionToExecutableTools"), true);
+  assert.equal(loopPreparation.includes('from "./run-tool-boundary.js"'), true);
+  assert.equal(loopPreparation.includes("resolveRunToolBoundary({"), true);
+});
+
 test("panel server implementation does not import the default desktop root agent directly", async () => {
   const files = await collectSourceFiles(path.join(process.cwd(), "src", "app", "panel-server"));
   const violations: string[] = [];

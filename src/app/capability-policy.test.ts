@@ -8,8 +8,8 @@ import type {
 import { toolPresentationForName } from "../domain/tools/index.js";
 import { createTaskSoil } from "../domain/soil/index.js";
 import { DESKTOP_ROOT_AGENT } from "./agent-prompts/desktop-root-agent.js";
-import { restrictRunCapabilityResolutionToExecutableTools } from "./agent-definition-runtime.js";
 import { resolveRunCapabilities } from "./capability-policy.js";
+import { restrictRunCapabilityResolutionToExecutableTools } from "./run-tool-boundary.js";
 
 test("run capability policy hides disabled, unavailable, denied, and mode-internal tools", () => {
   const snapshot = capabilitySnapshot([

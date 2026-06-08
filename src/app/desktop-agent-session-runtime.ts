@@ -15,7 +15,6 @@ import {
 } from "./agent-prompts/desktop-root-agent.js";
 import {
   createAgentTurnPolicyFromDefinition,
-  resolveAgentRunCapabilities,
 } from "./agent-definition-runtime.js";
 import {
   createModelRuntimeConfig,
@@ -25,7 +24,6 @@ import {
 import type { MinimalRuntime } from "./runtime.js";
 import type { RunDesktopAgentSessionOptions } from "./desktop-agent-session-contracts.js";
 import type { BasicAgentCapabilitySnapshot } from "../domain/config/contracts.js";
-import type { RunCapabilityResolution } from "../domain/config/index.js";
 import {
   publishContextCompactionCompleted,
   publishContextCompactionFailed,
@@ -154,26 +152,6 @@ export function resolveActiveModelName(options: RunDesktopAgentSessionOptions): 
     process.env.AGENTARBOR_MODEL_NAME
   );
 }
-
-export function resolveDesktopAgentRunCapabilities(input: {
-  readonly agentDefinition?: DesktopAgentDefinition;
-  readonly snapshot: BasicAgentCapabilitySnapshot;
-  readonly goal: string;
-  readonly taskSoil: TaskSoil;
-  readonly modelCapabilities?: BasicAgentCapabilitySnapshot["modelCapabilities"];
-  readonly platform?: NodeJS.Platform;
-}): RunCapabilityResolution {
-  return resolveAgentRunCapabilities({
-    agentDefinition: input.agentDefinition ?? DESKTOP_ROOT_AGENT,
-    snapshot: input.snapshot,
-    goal: input.goal,
-    taskSoil: input.taskSoil,
-    platform: input.platform,
-    modelCapabilities: input.modelCapabilities,
-  });
-}
-
-export { restrictRunCapabilityResolutionToExecutableTools } from "./agent-definition-runtime.js";
 
 export function constraintRefsFromTaskSoil(taskSoil: TaskSoil): readonly ConstraintRef[] {
   const constraintRefs = taskSoil.constraints.map((constraint): ConstraintRef => ({

@@ -67,11 +67,11 @@ const BUILTIN_TOOL_PRESENTATION: Readonly<Record<string, ToolPresentationSeed>> 
   },
   run_command: {
     displayName: "运行命令",
-    displayDescription: "在工作区内运行命令。",
+    displayDescription: "运行已允许的工作区命令，需要确认。",
   },
   shell_command: {
     displayName: "运行命令",
-    displayDescription: "运行工作区命令。",
+    displayDescription: "运行已允许的工作区命令，需要确认。",
   },
 };
 

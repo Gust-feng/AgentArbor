@@ -28,7 +28,7 @@ export function createLocalRunCommandTool(rootDirectory = DEFAULT_LOCAL_WORKSPAC
   return {
     definition: {
       name: "run_command",
-      description: "Run an allowed workspace command under the local workspace root.",
+      description: "Run an allowed workspace command after confirmation. The command is parsed as a bare command name plus arguments; shell operators and arbitrary shell syntax are rejected.",
       metadata: {
         category: "terminal",
         riskLevel: "medium",
@@ -43,8 +43,8 @@ export function createLocalRunCommandTool(rootDirectory = DEFAULT_LOCAL_WORKSPAC
       inputSchema: {
         type: "object",
         properties: {
-          command: { type: "string", description: "Executable name, or a simple shell-style command line without shell operators." },
-          args: { type: "array", items: { type: "string" }, description: "Command arguments." },
+          command: { type: "string", description: "Bare executable name, or a simple command line without shell operators." },
+          args: { type: "array", items: { type: "string" }, description: "Command arguments passed without a shell." },
           timeoutMs: { type: "number", description: "Optional timeout in milliseconds." },
         },
         required: ["command"],

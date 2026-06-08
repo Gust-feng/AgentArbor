@@ -37,6 +37,14 @@ test("desktop-basic tool registry exposes catalog and allowed tools from scoped 
   assert.equal(catalog.tools.every((tool) => tool.displayName !== tool.name), true);
   assert.equal(catalog.tools.every((tool) => tool.categoryLabel.length > 0 && tool.operationLabel.length > 0), true);
   assert.equal(JSON.stringify(catalog).includes("api_key"), false);
+
+  const runCommand = catalog.tools.find((tool) => tool.name === "run_command");
+  const shellCommand = catalog.tools.find((tool) => tool.name === "shell_command");
+  assert.equal(runCommand?.displayDescription, "运行已允许的工作区命令，需要确认。");
+  assert.equal(shellCommand?.displayDescription, "运行已允许的工作区命令，需要确认。");
+  assert.match(runCommand?.description ?? "", /bare command name plus arguments/);
+  assert.match(runCommand?.description ?? "", /shell operators and arbitrary shell syntax are rejected/);
+  assert.match(shellCommand?.description ?? "", /does not run arbitrary shell syntax/i);
 });
 
 test("desktop-basic tool descriptions stay plain and do not expose deep product terms", () => {

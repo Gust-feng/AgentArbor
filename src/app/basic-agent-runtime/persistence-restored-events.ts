@@ -5,7 +5,6 @@ import type {
 } from "../../domain/runtime-database/index.js";
 import { redactOrdinaryText } from "../safe-projection.js";
 import {
-  agentTaskStatusFromRuntimeStatus,
   agentTaskStatusFromSnapshot,
   basicRunTitleFromStatus,
 } from "./persistence-status.js";
@@ -32,20 +31,7 @@ export function restoredBasicEventsFromRuntimeSnapshot(snapshot: RuntimeRunSnaps
 }
 
 function fallbackBasicEventsFromRuntimeSnapshot(snapshot: RuntimeRunSnapshot): readonly RunEvent[] {
-  const events: RunEvent[] = [
-    {
-      id: `${snapshot.run.runId}:restored:run.started`,
-      runId: snapshot.run.runId,
-      sequence: 1,
-      type: "run.started",
-      title: "任务已开始",
-      summary: "已从本地记录恢复这次运行。",
-      status: agentTaskStatusFromRuntimeStatus(snapshot.run.status),
-      timestamp: snapshot.run.createdAt,
-      refs: [],
-      visibility: "compact",
-    },
-  ];
+  const events: RunEvent[] = [];
   for (const record of snapshot.events) {
     if (record.type === "goal.received") {
       continue;

@@ -186,7 +186,7 @@ test("syncConversationTurnForJob keeps queued turns as empty waiting shells", ()
 
   const summary = conversations.list().find((item) => item.conversationId === job.conversationId);
   const assistant = conversations.getReadModel(job.conversationId ?? "")?.turns.find((turn) => turn.role === "assistant");
-  assert.equal(assistant?.title, "等待回复");
+  assert.equal(assistant?.title, "");
   assert.equal(assistant?.content, "");
   assert.equal(assistant?.status, "pending");
   assert.equal(summary?.status, "running");
@@ -252,7 +252,7 @@ test("syncConversationTurnForJob ignores run started copy and refreshes from mod
   const conversation = conversations.getReadModel(job.conversationId ?? "");
   const summary = conversations.list().find((item) => item.conversationId === job.conversationId);
   const assistant = conversation?.turns.find((turn) => turn.role === "assistant");
-  assert.equal(assistant?.title, "正在回复");
+  assert.equal(assistant?.title, "");
   assert.equal(assistant?.content.includes("正在整理可见回答"), true);
   assert.equal(assistant?.content.includes("启动占位"), false);
   assert.equal(assistant?.content.includes(secret), false);
@@ -304,7 +304,7 @@ test("syncConversationTurnForJob accumulates running model output deltas", () =>
   });
 
   const assistant = conversations.getReadModel(job.conversationId ?? "")?.turns.find((turn) => turn.role === "assistant");
-  assert.equal(assistant?.title, "正在回复");
+  assert.equal(assistant?.title, "");
   assert.equal(assistant?.content, "Now let me demonstrate.");
 });
 
@@ -372,9 +372,9 @@ test("syncConversationTurnForJob suppresses pre-tool model output after confirma
   });
 
   const assistant = conversations.getReadModel(job.conversationId ?? "")?.turns.find((turn) => turn.role === "assistant");
-  assert.equal(assistant?.title, "继续处理");
+  assert.equal(assistant?.title, "");
   assert.equal(assistant?.content.includes("探索已经开始"), false);
-  assert.equal(assistant?.content, "继续执行。");
+  assert.equal(assistant?.content, "");
 });
 
 test("syncConversationTurnForJob waits for post-tool model output before showing a new answer", () => {
@@ -424,9 +424,9 @@ test("syncConversationTurnForJob waits for post-tool model output before showing
   });
 
   const assistant = conversations.getReadModel(job.conversationId ?? "")?.turns.find((turn) => turn.role === "assistant");
-  assert.equal(assistant?.title, "工具已完成");
+  assert.equal(assistant?.title, "");
   assert.equal(assistant?.content.includes("我先运行命令"), false);
-  assert.equal(assistant?.content, "dir");
+  assert.equal(assistant?.content, "");
 
   syncConversationTurnForJob({
     conversations,
@@ -481,7 +481,7 @@ test("syncConversationTurnForJob waits for post-tool model output before showing
   });
 
   const updated = conversations.getReadModel(job.conversationId ?? "")?.turns.find((turn) => turn.role === "assistant");
-  assert.equal(updated?.title, "正在回复");
+  assert.equal(updated?.title, "");
   assert.equal(updated?.content, "命令结果显示当前目录可以读取。");
 });
 
@@ -682,8 +682,8 @@ test("syncConversationPreviewsForRunningJobs skips queued and terminal jobs whil
   });
 
   const assistant = conversations.getReadModel(job.conversationId ?? "")?.turns.find((turn) => turn.role === "assistant");
-  assert.equal(assistant?.title, "正在使用工具");
-  assert.equal(assistant?.content, "README.md");
+  assert.equal(assistant?.title, "");
+  assert.equal(assistant?.content, "");
 });
 
 test("syncConversationTurnForJob prefers HTTP event errors for failed turns", () => {

@@ -129,7 +129,7 @@ test("assistant turn projection uses settled replay answer when turn content is 
 test("assistant turn projection can show direct running reply previews before tool boundaries", () => {
   const turns = [
     turn("user-1", "user", "解释一下", "completed"),
-    { ...turn("assistant-1", "assistant", "这是一个普通回答预览。", "running"), title: "正在回复", runId: "run-1" },
+    { ...turn("assistant-1", "assistant", "这是一个普通回答预览。", "running"), title: "", runId: "run-1" },
   ];
   const projection = projectAssistantTranscriptTurn({
     projectedTurn: projected(turns[1]!, "run-1"),

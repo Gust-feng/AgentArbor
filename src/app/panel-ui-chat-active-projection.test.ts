@@ -111,7 +111,7 @@ test("active chat projection can show direct running reply previews before tool 
     conversation: {
       turns: [
         userTurn("user-1", "解释一下"),
-        { ...assistantTurn("assistant-1", "这是一个普通回答预览。", "running"), title: "正在回复", runId: "run-1" },
+        { ...assistantTurn("assistant-1", "这是一个普通回答预览。", "running"), runId: "run-1" },
       ],
       activeRunId: "run-1",
     },
@@ -144,7 +144,7 @@ test("active chat projection accepts running reply after the latest tool boundar
     conversation: {
       turns: [
         userTurn("user-1", "运行 dir"),
-        { ...assistantTurn("assistant-1", "命令结果显示当前目录可以读取。", "running"), title: "正在回复", runId: "run-1" },
+        { ...assistantTurn("assistant-1", "命令结果显示当前目录可以读取。", "running"), runId: "run-1" },
       ],
       activeRunId: "run-1",
     },
@@ -236,7 +236,7 @@ function assistantTurn(turnId: string, content: string, status: string): ChatAct
   return {
     turnId,
     role: "assistant",
-    title: "助手",
+    title: "",
     content,
     status,
   };

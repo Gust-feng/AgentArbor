@@ -43,7 +43,6 @@ test("persisted run response restores safe transcript and tracking projections",
   assert.equal(response.tracking.modelTotals.completed, 1);
   assert.equal(response.tracking.toolTotals.completed, 1);
   assert.deepEqual(response.transcript.events.map((event) => event.type), [
-    "run.started",
     "tool.requested",
     "tool.completed",
     "user.guidance",
@@ -54,7 +53,7 @@ test("persisted run response restores safe transcript and tracking projections",
   assert.equal(JSON.stringify(response.transcript.events).includes("delegation-legacy"), false);
   assert.equal(JSON.stringify(response.transcript.events).includes("child-run-legacy"), false);
   assert.equal(JSON.stringify(response.transcript.events).includes("parent-synthesis-legacy"), false);
-  assert.equal(response.transcript.events[0]?.agentLabel, "Custom Restored Agent");
+  assert.equal(JSON.stringify(response.transcript.events).includes("已从本地记录恢复这次运行"), false);
   assert.equal(response.transcript.events.at(-1)?.agentLabel, "Custom Restored Agent");
   assert.equal(JSON.stringify(response.transcript.events).includes("正在判断下一步"), false);
   assert.equal(response.transcriptNodes.some((node) => node.kind === "tool"), true);

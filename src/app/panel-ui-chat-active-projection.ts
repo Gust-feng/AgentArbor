@@ -168,7 +168,7 @@ function canUseConversationTurnAsAnswer<TPending>(input: {
   if (input.turn === undefined || input.pending !== undefined) return false;
   if (input.run === undefined) return true;
   if (terminalStatuses.has(input.run.status)) return true;
-  if (input.run.status !== "running" || input.turn.title !== "正在回复") {
+  if (input.run.status !== "running" || input.turn.content.trim().length === 0) {
     return false;
   }
   const currentNodes = input.currentRunId === undefined

@@ -60,7 +60,6 @@ test("restored basic events rebuild safe replay from runtime snapshot", () => {
   });
 
   assert.deepEqual(events.map((event) => event.type), [
-    "run.started",
     "tool.requested",
     "tool.completed",
     "final.result",

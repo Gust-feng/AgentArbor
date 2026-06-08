@@ -162,7 +162,7 @@ export class PanelConversationStore {
     });
     const assistantTurn = createTurn({
       role: "assistant",
-      title: queued ? "等待回复" : "助手",
+      title: "",
       content: "",
       status: queued ? "pending" : "running",
     });
@@ -194,7 +194,7 @@ export class PanelConversationStore {
     assistantTurn.runId = input.runId;
     assistantTurn.responseModel = normalizeTurnModel(input.responseModel);
     assistantTurn.status = "pending";
-    assistantTurn.title = "等待回复";
+    assistantTurn.title = "";
     assistantTurn.updatedAt = nowIso();
     if (!conversation.queuedRunIds.includes(input.runId)) {
       conversation.queuedRunIds.push(input.runId);
@@ -214,7 +214,7 @@ export class PanelConversationStore {
     assistantTurn.runId = input.runId;
     assistantTurn.responseModel = normalizeTurnModel(input.responseModel);
     assistantTurn.status = "running";
-    assistantTurn.title = "助手";
+    assistantTurn.title = "";
     assistantTurn.updatedAt = nowIso();
     conversation.currentRunId = input.runId;
     conversation.latestRunId = latestAssistantRunId(conversation) ?? input.runId;
@@ -229,7 +229,7 @@ export class PanelConversationStore {
       throw new Error(`Queued assistant turn not found for run: ${runId}`);
     }
     assistantTurn.status = "running";
-    assistantTurn.title = "助手";
+    assistantTurn.title = "";
     assistantTurn.updatedAt = nowIso();
     const userTurn = previousUserTurn(conversation, assistantTurn.turnId);
     if (userTurn !== undefined && userTurn.status === "pending") {

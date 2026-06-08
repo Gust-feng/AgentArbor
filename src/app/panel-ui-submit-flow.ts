@@ -140,7 +140,7 @@ export function optimisticConversationForSubmit(
   const assistantTurn = {
     turnId: `optimistic-assistant-${now}`,
     role: "assistant" as const,
-    title: "助手",
+    title: "",
     content: "",
     status: "running",
   };

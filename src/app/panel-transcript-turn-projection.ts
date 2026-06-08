@@ -195,7 +195,7 @@ function canUseTurnContentAsAnswer<TTurn extends WorklineConversationTurn, TPend
   if (input.run.status === "completed" || input.run.status === "failed" || input.run.status === "cancelled" || input.run.status === "blocked") {
     return true;
   }
-  if (input.run.status !== "running" || input.turn.title !== "正在回复") {
+  if (input.run.status !== "running" || input.turn.content.trim().length === 0) {
     return false;
   }
   return !input.nodes.some((node) =>

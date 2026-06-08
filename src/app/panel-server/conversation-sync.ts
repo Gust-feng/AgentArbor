@@ -17,8 +17,6 @@ import {
   textStreamFragmentSourceFromEventId,
 } from "../readable-text-fragments.js";
 import { confirmationActionSummaryText } from "../confirmation-copy.js";
-import type { ToolDisplayProjection } from "../../domain/tools/index.js";
-import { cleanOrdinaryToolText } from "../ordinary-tool-copy.js";
 
 export type PanelConversationSyncRunResponse = {
   readonly status: PanelRunStatus;
@@ -110,7 +108,7 @@ export function syncConversationTurnForJob(input: {
   }
   if (response.status === "pending" || response.status === "running") {
     const pendingTurn = runningAssistantTurnFromResponse(response);
-    if (pendingTurn.content.length > 0 || response.status === "pending") {
+    if (pendingTurn.shouldUpdate) {
       conversations.updateAssistantPreview({
         conversationId: job.conversationId,
         assistantTurnId: job.assistantTurnId,
@@ -227,25 +225,19 @@ function assistantTurnFromResponse(
 
 function runningAssistantTurnFromResponse(
   response: PanelConversationSyncRunResponse
-): { readonly title: string; readonly content: string } {
+): { readonly title: string; readonly content: string; readonly shouldUpdate: boolean } {
   const outputText = runningOutputTextFromEvents(response.transcript.events);
   if (outputText.length > 0) {
     return {
-      title: "正在回复",
+      title: "",
       content: sanitizeAssistantVisibleText(outputText),
+      shouldUpdate: true,
     };
   }
-  const latest = latestRunningPreviewEvent(response.transcript.events);
-  if (latest === undefined) {
-    return {
-      title: response.status === "pending" ? "等待回复" : "正在处理",
-      content: "",
-    };
-  }
-  const text = sanitizeAssistantVisibleText(runningPreviewText(latest));
   return {
-    title: runningPreviewTitle(latest),
-    content: text,
+    title: "",
+    content: "",
+    shouldUpdate: response.status === "pending" || latestModelOutputBoundarySequence(response.transcript.events) > 0,
   };
 }
 
@@ -272,37 +264,6 @@ function runningOutputTextFromEvents(events: PanelRunTranscript["events"]): stri
   ).text;
 }
 
-function latestRunningPreviewEvent(events: PanelRunTranscript["events"]): PanelRunTranscript["events"][number] | undefined {
-  const latestModelOutputBoundary = latestModelOutputBoundarySequence(events);
-  const candidates = [...events].reverse().filter((event) => {
-    if (event.status === "failed" || event.status === "cancelled" || event.status === "blocked") {
-      return false;
-    }
-    if (event.type === "model.output.delta" && event.sequence <= latestModelOutputBoundary) {
-      return false;
-    }
-    return (
-      event.type === "confirmation.needed" ||
-      event.type === "tool.requested" ||
-      event.type === "tool.completed" ||
-      event.type === "tool.failed" ||
-      event.type === "user_approval.received" ||
-      event.type === "run.resumed" ||
-      event.type === "user.guidance" ||
-      event.type === "model.output.delta" ||
-      event.type === "model.reasoning.delta" ||
-      event.type === "model.side.completed" ||
-      event.type === "agent.note.delta" ||
-      event.type === "agent.note.completed" ||
-      event.type === "context.compaction.completed" ||
-      event.type === "context.compaction.failed"
-    );
-  });
-  return candidates.find((event) =>
-    runningPreviewText(event).trim().length > 0
-  );
-}
-
 function latestModelOutputBoundarySequence(events: PanelRunTranscript["events"]): number {
   return events.reduce(
     (latest, event) => isModelOutputBoundaryEvent(event) ? Math.max(latest, event.sequence) : latest,
@@ -320,64 +281,6 @@ function isModelOutputBoundaryEvent(event: PanelRunTranscript["events"][number])
     event.type === "user.guidance" ||
     event.type === "context.compaction.completed" ||
     event.type === "context.compaction.failed";
-}
-
-function runningPreviewTitle(event: PanelRunTranscript["events"][number]): string {
-  if (event.type === "confirmation.needed") return "待处理";
-  if (event.type === "tool.requested") return "正在使用工具";
-  if (event.type === "tool.completed") return "工具已完成";
-  if (event.type === "tool.failed") return "未完成";
-  if (event.type === "user_approval.received" || event.type === "run.resumed") return "继续处理";
-  if (event.type === "user.guidance") return "补充要求";
-  if (event.type === "model.reasoning.delta" || event.type === "model.side.completed") return "正在回复";
-  if (event.type === "model.output.delta") return "正在回复";
-  if (event.type === "context.compaction.completed" || event.type === "context.compaction.failed") return "正在回复";
-  return "正在回复";
-}
-
-function runningPreviewText(event: PanelRunTranscript["events"][number]): string {
-  if (event.type === "tool.requested" || event.type === "tool.completed" || event.type === "tool.failed") {
-    return toolPreviewText(event.detail?.display) ??
-      cleanOrdinaryToolText(event.detail?.preview) ??
-      cleanOrdinaryToolText(event.summary) ??
-      "";
-  }
-  if (event.type === "context.compaction.completed" || event.type === "context.compaction.failed") {
-    return "";
-  }
-  return event.detail?.preview ?? event.delta ?? event.summary ?? "";
-}
-
-function toolPreviewText(display: ToolDisplayProjection | undefined): string | undefined {
-  if (display?.kind === "command_summary") {
-    const command = [display.command, ...(display.args ?? [])]
-      .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
-      .join(" ");
-    const error = cleanOrdinaryToolText(display.errorSummary);
-    const output = cleanOrdinaryToolText(display.outputSummary);
-    return [command, output, error].filter(isString).join(" · ") || undefined;
-  }
-  if (display?.kind === "search_results") {
-    return [display.query, `${display.results.length} 条结果`].filter(isString).join(" · ") || undefined;
-  }
-  if (display?.kind === "browser_snapshot") {
-    return display.title ?? display.url;
-  }
-  if (display?.kind === "file_diff_preview") {
-    return [display.path, display.replacements === undefined ? undefined : `${display.replacements} 处修改`].filter(isString).join(" · ") || undefined;
-  }
-  if (display?.kind === "file_change_summary") {
-    return [display.path, display.append === true ? "追加写入" : undefined].filter(isString).join(" · ") || undefined;
-  }
-  if (display?.kind === "generic_tool_summary") {
-    const items = display.items?.slice(0, 6).map(cleanOrdinaryToolText).filter(isString) ?? [];
-    return cleanOrdinaryToolText(display.summary) ?? (items.length > 0 ? items.join("\n") : undefined);
-  }
-  return undefined;
-}
-
-function isString(value: string | undefined): value is string {
-  return value !== undefined && value.trim().length > 0;
 }
 
 function assistantFailureTextFromResponse(response: PanelConversationSyncRunResponse): string {

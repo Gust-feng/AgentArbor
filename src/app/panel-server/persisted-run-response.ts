@@ -205,16 +205,17 @@ export function createPersistedStreamEvents(
   status: PanelRunStatus
 ): readonly PanelRunStreamEvent[] {
   const agentLabel = persistedRunAgentLabel(snapshot);
-  const startedStatus: NonNullable<PanelRunStreamEvent["status"]> =
-    status === "pending"
-      ? "pending"
-      : status === "completed" || status === "running"
-        ? "running"
-        : status;
   const suppressOrdinaryChatProgress =
     snapshot.run.runMode === "agent" && !hasPersistedUserVisibleWorkActivity(snapshot.events);
-  const events: PanelRunStreamEvent[] = [
-    {
+  const events: PanelRunStreamEvent[] = [];
+  if (snapshot.run.runMode !== "agent") {
+    const startedStatus: NonNullable<PanelRunStreamEvent["status"]> =
+      status === "pending"
+        ? "pending"
+        : status === "completed" || status === "running"
+          ? "running"
+          : status;
+    events.push({
       eventId: `${snapshot.run.runId}:restored:run.started`,
       runId: snapshot.run.runId,
       sequence: 1,
@@ -226,8 +227,8 @@ export function createPersistedStreamEvents(
       sourceRefs: [],
       modelCallRefs: [],
       toolCallRefs: [],
-    },
-  ];
+    });
+  }
   for (const record of snapshot.events) {
     if (snapshot.run.runMode === "agent" && record.type === "goal.received") {
       continue;

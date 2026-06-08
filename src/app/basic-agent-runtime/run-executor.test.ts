@@ -1057,6 +1057,7 @@ test("BasicAgentRunExecutor keeps frozen run facts when approval continuation is
 
   const blocked = runJobs.get(run.runId);
   assert.equal(blocked?.blocked?.reason.code, "confirmation_continuation_lost");
+  assert.equal(blocked?.blocked?.reason.message, "这次操作无法继续。");
   assert.equal(blocked?.blocked?.capabilitySnapshot?.snapshotId, "snapshot-lost-continuation");
   assert.equal(blocked?.blocked?.config.profileId, blocked?.config.profileId);
   assert.deepEqual(blocked?.blocked?.informationAccess.sourcePreference, blocked?.informationAccess.sourcePreference);

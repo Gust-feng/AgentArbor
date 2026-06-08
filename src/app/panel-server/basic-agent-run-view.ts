@@ -9,6 +9,7 @@ import type {
 } from "../panel-basic-agent-run-view-contracts.js";
 import { panelRunPayloadForStatus, type PanelRunJob } from "../panel-run-jobs.js";
 import { createPanelTranscriptNodes } from "../panel-run-read-model.js";
+import { restoredRunResultProjection } from "../restored-run-projection.js";
 import { createLiveBasicAgentWorkViewReadModel, createPersistedBasicAgentWorkViewReadModel } from "./basic-agent-read-models.js";
 import { createPersistedStreamEvents, panelStatusFromRuntimeStatus } from "./persisted-run-response.js";
 import type { PanelRuntime } from "./runtime.js";
@@ -122,12 +123,6 @@ function createPersistedBasicAgentRunDetailReadModel(
       events: streamEvents,
       transcriptNodes: createPanelTranscriptNodes(streamEvents),
     },
-    restoredResult:
-      snapshot.run.resultTitle === undefined && snapshot.run.resultSummary === undefined
-        ? undefined
-        : {
-            title: snapshot.run.resultTitle ?? "上次结果",
-            summary: snapshot.run.resultSummary ?? snapshot.run.resultTitle ?? "上次结果",
-          },
+    restoredResult: restoredRunResultProjection(snapshot.run),
   };
 }

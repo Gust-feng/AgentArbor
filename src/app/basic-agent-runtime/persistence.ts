@@ -17,6 +17,7 @@ import {
   basicRunNextStepFromStatus,
   basicRunTitleFromStatus,
 } from "./persistence-status.js";
+import { ORDINARY_RUN_BLOCKED_FALLBACK } from "../restored-run-projection.js";
 
 export { restoredBasicEventsFromRuntimeSnapshot } from "./persistence-restored-events.js";
 
@@ -95,7 +96,7 @@ export async function submitRestoredBasicConfirmationDecision(input: {
         : {
             code: blockedByMissingContinuation ? "confirmation_continuation_lost" : "confirmation_denied",
             message: blockedByMissingContinuation
-              ? "无法继续原操作。请重新发起或继续处理。"
+              ? ORDINARY_RUN_BLOCKED_FALLBACK
               : "已不执行。",
           },
   };
@@ -124,7 +125,7 @@ export async function submitRestoredBasicConfirmationDecision(input: {
             runId: input.runId,
             decidedAt,
             sequence: nextBasicEventSequence(events),
-            summary: nextRun.error?.message ?? "无法继续原操作。请重新发起或继续处理。",
+            summary: nextRun.error?.message ?? ORDINARY_RUN_BLOCKED_FALLBACK,
           }),
         ];
   const nextSnapshot: RuntimeRunSnapshot = {

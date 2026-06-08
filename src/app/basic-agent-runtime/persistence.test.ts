@@ -68,6 +68,20 @@ test("restored basic events rebuild safe replay from runtime snapshot", () => {
   assert.equal(JSON.stringify(events).includes("sk-hidden-secret-token"), false);
 });
 
+test("restored basic blocked fallback stays concise", () => {
+  const events = restoredBasicEventsFromRuntimeSnapshot({
+    ...snapshotFixture(),
+    run: {
+      ...runFixture(),
+      status: "blocked",
+    },
+  });
+
+  assert.equal(events.at(-1)?.type, "run.blocked");
+  assert.equal(events.at(-1)?.summary, "这次操作无法继续。");
+  assert.equal(JSON.stringify(events).includes("请重新发起或继续处理"), false);
+});
+
 test("restored confirmation decision updates run, confirmations, basic events, and basic run", async () => {
   const database = new MemoryRuntimeDatabase({
     ...snapshotFixture(),
@@ -100,6 +114,37 @@ test("restored confirmation decision updates run, confirmations, basic events, a
   assert.equal(database.snapshot.confirmations[0]?.guidance?.includes("sk-guidance-secret-token"), false);
   assert.equal(database.snapshot.basicEvents.at(-1)?.type, "user.guidance");
   assert.equal(database.snapshot.basicRun?.status, "needs_input");
+});
+
+test("restored approval without live continuation blocks with concise copy", async () => {
+  const database = new MemoryRuntimeDatabase({
+    ...snapshotFixture(),
+    confirmations: [{
+      confirmationId: "confirmation-approve",
+      runId: "run-1",
+      status: "pending",
+      title: "运行命令",
+      actionSummary: "运行命令：pnpm test",
+      affectedResources: ["shell:test"],
+      riskLevel: "medium",
+      requestedAt: "2026-06-02T00:00:02.000Z",
+      eventRefs: ["event:confirmation"],
+    }],
+  });
+
+  const run = await submitRestoredBasicConfirmationDecision({
+    runtimeDatabase: database,
+    runId: "run-1",
+    confirmationId: "confirmation-approve",
+    decision: {
+      decision: "approve_once",
+    },
+  });
+
+  assert.equal(run?.status, "blocked");
+  assert.equal(database.snapshot.run.error?.message, "这次操作无法继续。");
+  assert.equal(database.snapshot.basicEvents.at(-1)?.summary, "这次操作无法继续。");
+  assert.equal(JSON.stringify(database.snapshot.basicEvents).includes("无法继续原操作"), false);
 });
 
 test("restored basic run derives user-action state from pending confirmation", () => {

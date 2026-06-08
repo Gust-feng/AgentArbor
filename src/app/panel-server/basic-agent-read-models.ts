@@ -16,6 +16,7 @@ import {
 import { createPanelTranscriptNodes } from "../panel-run-read-model.js";
 import { panelRunPayloadForStatus, type PanelRunJob } from "../panel-run-jobs.js";
 import type { PanelRunStreamEvent } from "../panel-run-stream-contracts.js";
+import { restoredRunResultProjection } from "../restored-run-projection.js";
 
 export function createLiveBasicAgentWorkViewReadModel(input: {
   readonly job: PanelRunJob;
@@ -50,13 +51,7 @@ export function createPersistedBasicAgentWorkViewReadModel(
     toolDisplays: snapshot.toolCalls
       .map((call) => call.display)
       .filter((display): display is ToolDisplayProjection => display !== undefined),
-    restoredResult:
-      snapshot.run.resultTitle === undefined && snapshot.run.resultSummary === undefined
-        ? undefined
-        : {
-            title: snapshot.run.resultTitle ?? "上次结果",
-            summary: snapshot.run.resultSummary ?? snapshot.run.resultTitle ?? "上次结果",
-          },
+    restoredResult: restoredRunResultProjection(snapshot.run),
   }) satisfies DesktopWorkViewReadModel;
 }
 

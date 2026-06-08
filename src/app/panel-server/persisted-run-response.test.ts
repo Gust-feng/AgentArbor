@@ -177,6 +177,26 @@ test("persisted completed ordinary runs do not invent result summaries when none
   assert.equal(serialized.includes("结果已生成"), false);
 });
 
+test("persisted restored results do not invent fallback titles", () => {
+  const base = runtimeSnapshot();
+  const response = createPersistedPanelRunResponse({
+    snapshot: {
+      ...base,
+      run: {
+        ...base.run,
+        resultTitle: undefined,
+        resultSummary: "只有历史摘要",
+      },
+    },
+    config: modelConfig(),
+    informationAccess: informationAccess(),
+  });
+
+  assert.equal(response.restoredResult?.title, "");
+  assert.equal(response.restoredResult?.summary, "只有历史摘要");
+  assert.equal(JSON.stringify(response).includes("上次结果"), false);
+});
+
 test("persisted terminal run responses keep frozen run facts instead of current fallback config", () => {
   for (const status of ["failed", "blocked", "cancelled"] as const) {
     const response = createPersistedPanelRunResponse({

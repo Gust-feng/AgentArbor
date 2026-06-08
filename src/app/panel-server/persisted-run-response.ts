@@ -28,6 +28,10 @@ import { compactRuntimeText } from "./runtime-records.js";
 import type { PanelConversationReadModel } from "../panel-conversations.js";
 import { cleanOrdinaryToolText } from "../ordinary-tool-copy.js";
 import { cleanConfirmationSummary } from "../confirmation-copy.js";
+import {
+  restoredRunResultProjection,
+  restoredRunTerminalSummary,
+} from "../restored-run-projection.js";
 
 export type PanelPersistedRunResponse = {
   readonly ok: true;
@@ -142,13 +146,7 @@ export function createPersistedPanelRunResponse(input: {
     error: input.snapshot.run.error,
     conversation: input.conversation,
     restoredFromSnapshot: true,
-    restoredResult:
-      input.snapshot.run.resultTitle === undefined && input.snapshot.run.resultSummary === undefined
-        ? undefined
-        : {
-            title: input.snapshot.run.resultTitle ?? "上次结果",
-            summary: input.snapshot.run.resultSummary ?? input.snapshot.run.resultTitle ?? "上次结果",
-          },
+    restoredResult: restoredRunResultProjection(input.snapshot.run),
     snapshot: {
       run: input.snapshot.run,
       workspace: input.snapshot.workspace,
@@ -352,7 +350,7 @@ export function createPersistedStreamEvents(
       type: "run.cancelled",
       createdAt: snapshot.run.updatedAt,
       agentLabel,
-      summary: snapshot.run.resultSummary ?? "已取消。",
+      summary: restoredRunTerminalSummary({ run: snapshot.run, status: "cancelled" }),
       status: "cancelled",
       sourceRefs: [],
       modelCallRefs: [],
@@ -367,7 +365,7 @@ export function createPersistedStreamEvents(
       type: "run.blocked",
       createdAt: snapshot.run.updatedAt,
       agentLabel,
-      summary: snapshot.run.resultSummary ?? snapshot.run.error?.message ?? "无法继续原操作。请重新发起或继续处理。",
+      summary: restoredRunTerminalSummary({ run: snapshot.run, status: "blocked" }),
       status: "blocked",
       sourceRefs: [],
       modelCallRefs: [],
@@ -590,7 +588,7 @@ function persistedWaitingPoint(
     return "已取消。";
   }
   if (status === "blocked") {
-    return "无法继续原操作。请重新发起或继续处理。";
+    return "这次操作无法继续。";
   }
   if (status === "failed") {
     return "未完成，请查看错误信息。";

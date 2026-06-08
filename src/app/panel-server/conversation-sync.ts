@@ -11,6 +11,7 @@ import {
   friendlyUserFacingFailureText,
   sanitizeAssistantVisibleText,
 } from "../visible-text-safety.js";
+import { ORDINARY_RUN_BLOCKED_FALLBACK } from "../restored-run-projection.js";
 import {
   appendTextStreamAssembly,
   emptyTextStreamAssembly,
@@ -74,7 +75,7 @@ export function syncConversationTurnForJob(input: {
       assistantTurnId: job.assistantTurnId,
       runId: job.runId,
       title: "需要处理",
-      content: sanitizeAssistantVisibleText(response.error?.message ?? "无法继续原操作。请重新发起或继续处理。"),
+      content: sanitizeAssistantVisibleText(response.error?.message ?? ORDINARY_RUN_BLOCKED_FALLBACK),
       status: "blocked",
       responseModel,
     });

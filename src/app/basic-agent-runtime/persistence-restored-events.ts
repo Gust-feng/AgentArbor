@@ -4,6 +4,7 @@ import type {
   RuntimeRunSnapshot,
 } from "../../domain/runtime-database/index.js";
 import { redactOrdinaryText } from "../safe-projection.js";
+import { restoredRunTerminalSummary } from "../restored-run-projection.js";
 import {
   agentTaskStatusFromSnapshot,
   basicRunTitleFromStatus,
@@ -86,15 +87,27 @@ function createRestoredBasicTerminalEvent(
     sequence: lastSequence + 1,
     type,
     title: basicRunTitleFromStatus(status, undefined),
-    summary:
-      status === "blocked"
-        ? "无法继续原操作。请重新发起或继续处理。"
-        : redactOrdinaryText(snapshot.run.error?.message ?? snapshot.run.resultSummary ?? "", 800),
+    summary: restoredBasicTerminalSummary(snapshot, status),
     status,
     timestamp: snapshot.run.updatedAt,
     refs: [],
     visibility: "compact",
   };
+}
+
+function restoredBasicTerminalSummary(
+  snapshot: RuntimeRunSnapshot,
+  status: BasicAgentRun["status"]
+): string {
+  if (
+    status === "blocked" ||
+    status === "cancelled" ||
+    status === "completed" ||
+    status === "failed"
+  ) {
+    return restoredRunTerminalSummary({ run: snapshot.run, status });
+  }
+  return "";
 }
 
 function basicEventTypeForRuntimeEvent(type: RuntimeRunSnapshot["events"][number]["type"]): string | undefined {

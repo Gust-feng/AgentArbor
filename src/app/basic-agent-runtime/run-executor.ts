@@ -21,6 +21,7 @@ import {
   BasicAgentPendingContinuationStore,
 } from "./run-executor-continuations.js";
 import { resolveCompatibleRunFacts } from "../run-facts-policy.js";
+import { ORDINARY_RUN_BLOCKED_FALLBACK } from "../restored-run-projection.js";
 
 export type {
   BasicAgentExecutionAdapter,
@@ -308,7 +309,7 @@ export class BasicAgentRunExecutor {
         reason: {
           code: blockedByMissingApproval ? "confirmation_continuation_lost" : "confirmation_decision_continuation_lost",
           message: blockedByMissingApproval
-            ? "无法继续原操作。请重新发起或继续处理。"
+            ? ORDINARY_RUN_BLOCKED_FALLBACK
             : "你的选择已记录。你可以继续发送消息让我按该决定处理。",
         },
       });

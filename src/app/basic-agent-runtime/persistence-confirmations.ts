@@ -4,6 +4,7 @@ import type {
   RuntimeRunSnapshot,
 } from "../../domain/runtime-database/index.js";
 import { redactOrdinaryText } from "../safe-projection.js";
+import { ORDINARY_RUN_BLOCKED_FALLBACK } from "../restored-run-projection.js";
 
 export function upsertRestoredConfirmation(input: {
   readonly snapshot: RuntimeRunSnapshot;
@@ -58,7 +59,7 @@ export function restoredConfirmationDecisionEvent(input: {
     title: input.decision.decision === "guidance" ? "补充要求" : "继续处理",
     summary:
       input.decision.decision === "approve_once"
-        ? "已尝试继续，但无法继续原操作。"
+        ? ORDINARY_RUN_BLOCKED_FALLBACK
         : input.decision.decision === "deny"
           ? "已不执行。"
           : guidance === undefined

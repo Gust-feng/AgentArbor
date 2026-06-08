@@ -211,6 +211,8 @@ test("panel React workbench consumes Basic Agent projection APIs", async () => {
   assert.equal(appConfirmationDecisions.includes("response.run.status"), false);
   assert.equal(appConfirmationDecisions.includes("run: response.run"), false);
   assert.equal(appConfirmationDecisions.includes("response.run.eventCursor.lastSequence"), false);
+  assert.equal(appConfirmationDecisions.includes("这次操作无法继续。请补充要求。"), true);
+  assert.equal(appConfirmationDecisions.includes("应用重启后无法继续原操作"), false);
   assert.equal(appConversationSession.includes("safeDesktopDetail"), false);
   assert.equal(appConversationSession.includes("safeWorkSession"), false);
   assert.equal(appConversationSession.includes("conversation.currentRun"), true);

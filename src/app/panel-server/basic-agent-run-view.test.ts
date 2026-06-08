@@ -387,6 +387,38 @@ test("basic agent run view for persisted runs restores from the run snapshot wit
   assert.equal(JSON.stringify(view?.agentDefinitionRef).includes("systemPrompt"), false);
 });
 
+test("basic agent run view does not invent restored result titles", async () => {
+  const base = runtimeSnapshot();
+  const snapshot: RuntimeRunSnapshot = {
+    ...base,
+    run: {
+      ...base.run,
+      resultTitle: undefined,
+      resultSummary: "只有历史摘要",
+    },
+  };
+  const runtime = {
+    runExecutor: {
+      get: () => undefined,
+      replayEvents: () => undefined,
+      syncRunEvents: () => [],
+    },
+    runJobs: {
+      get: () => undefined,
+      syncStreamEvents: (_runId: string, events: readonly never[]) => events,
+    },
+    runtimeDatabase: {
+      getRun: async () => snapshot,
+    },
+  } satisfies Parameters<typeof createBasicAgentRunViewReadModel>[0];
+
+  const view = await createBasicAgentRunViewReadModel(runtime, "run-restored", 0);
+
+  assert.equal(view?.detail.restoredResult?.title, "");
+  assert.equal(view?.detail.restoredResult?.summary, "只有历史摘要");
+  assert.equal(JSON.stringify(view).includes("上次结果"), false);
+});
+
 function basicRun(agentDefinitionRef: RunAgentDefinitionRef): BasicAgentRun {
   return {
     runId: "run-live",

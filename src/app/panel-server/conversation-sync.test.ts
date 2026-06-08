@@ -217,6 +217,24 @@ test("syncConversationTurnForJob keeps blocked turns visible as user-action summ
   assert.equal(summary?.currentAction.includes("上下文超过预算"), true);
 });
 
+test("syncConversationTurnForJob keeps blocked fallback concise", () => {
+  const { conversations, job } = startedConversationJob();
+
+  syncConversationTurnForJob({
+    conversations,
+    job,
+    response: response({
+      status: "blocked",
+    }),
+  });
+
+  const assistant = conversations.getReadModel(job.conversationId ?? "")?.turns.find((turn) => turn.role === "assistant");
+  assert.equal(assistant?.title, "需要处理");
+  assert.equal(assistant?.status, "blocked");
+  assert.equal(assistant?.content, "这次操作无法继续。");
+  assert.equal(JSON.stringify(assistant).includes("无法继续原操作"), false);
+});
+
 test("syncConversationTurnForJob ignores run started copy and refreshes from model output", () => {
   const { conversations, job } = startedConversationJob();
   const secret = "sk-running-preview-secret";

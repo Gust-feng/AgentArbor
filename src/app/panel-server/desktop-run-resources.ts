@@ -52,15 +52,10 @@ export async function prepareDesktopRunResources(
       "Desktop Agent run requires information access settings frozen when the run was created."
     );
   }
-  const activeModel = activeModelWithRunOpenAISettings(
-    baseCapabilitySnapshot.activeModel,
-    baseCapabilitySnapshot.modelCapabilities,
+  const capabilitySnapshot = effectiveDesktopCapabilitySnapshotForRun(
+    baseCapabilitySnapshot,
     options.reasoningEffort
   );
-  const capabilitySnapshot =
-    activeModel === baseCapabilitySnapshot.activeModel
-      ? baseCapabilitySnapshot
-      : { ...baseCapabilitySnapshot, activeModel };
   if (
     isRealDesktopAiMode(aiMode) &&
     capabilitySnapshot.activeModel.providerKind !== "openai_compatible"
@@ -105,6 +100,28 @@ export async function prepareDesktopRunResources(
       (tool) => tool.name === "browser_snapshot" && tool.availability === "available"
     ),
   };
+}
+
+export function desktopCapabilitySnapshotForRunStart(
+  snapshot: BasicAgentCapabilitySnapshot,
+  reasoningEffort: ModelRunReasoningEffort | undefined
+): BasicAgentCapabilitySnapshot {
+  return effectiveDesktopCapabilitySnapshotForRun(
+    snapshot,
+    snapshot.modelCapabilities.supportsReasoningEffort ? reasoningEffort : undefined
+  );
+}
+
+function effectiveDesktopCapabilitySnapshotForRun(
+  snapshot: BasicAgentCapabilitySnapshot,
+  reasoningEffort: ModelRunReasoningEffort | undefined
+): BasicAgentCapabilitySnapshot {
+  const activeModel = activeModelWithRunOpenAISettings(
+    snapshot.activeModel,
+    snapshot.modelCapabilities,
+    reasoningEffort
+  );
+  return activeModel === snapshot.activeModel ? snapshot : { ...snapshot, activeModel };
 }
 
 function activeModelWithRunOpenAISettings(

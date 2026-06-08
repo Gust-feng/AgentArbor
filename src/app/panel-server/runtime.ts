@@ -31,6 +31,7 @@ import { syncConversationTurnForJob } from "./conversation-sync.js";
 import { appendLiveModelOutputDelta } from "./live-model-stream.js";
 import { persistPanelRun, persistPanelRunInBackground } from "./run-persistence.js";
 import { createPanelRunJobResponse } from "./run-job-response.js";
+import { desktopCapabilitySnapshotForRunStart } from "./desktop-run-resources.js";
 
 export type PanelRuntime = {
   readonly configCenter: ConfigCenter;
@@ -201,7 +202,10 @@ async function preparePanelBasicRunStart(
     };
   }
 
-  const capabilitySnapshot = await runtime.capabilityCenter.snapshot();
+  const capabilitySnapshot = desktopCapabilitySnapshotForRunStart(
+    await runtime.capabilityCenter.snapshot(),
+    input.reasoningEffort
+  );
   const config = capabilitySnapshot.activeModel;
   return {
     aiMode: input.aiMode ?? config.defaultAiMode,

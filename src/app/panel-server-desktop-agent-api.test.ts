@@ -224,6 +224,7 @@ test("desktop ordinary run persists the execution-effective model settings after
       "/api/runtime/runs"
     );
 
+    assert.deepEqual(start.body.config.openAI, { stream: false });
     assert.equal(completed.body.config.model, model);
     assert.deepEqual(completed.body.config.openAI, { stream: false });
     assert.equal(requestBody?.parallel_tool_calls, false);

@@ -6,7 +6,11 @@ import type {
   SanitizedInformationAccessConfig,
 } from "../domain/config/index.js";
 import { createMinimalRuntime } from "./runtime.js";
-import { createDesktopToolCenterFactory, prepareDesktopRunResources } from "./panel-server/desktop-run-resources.js";
+import {
+  createDesktopToolCenterFactory,
+  desktopCapabilitySnapshotForRunStart,
+  prepareDesktopRunResources,
+} from "./panel-server/desktop-run-resources.js";
 import { PanelHttpError } from "./panel-server/http-utils.js";
 import type { PanelRuntime } from "./panel-server/runtime.js";
 
@@ -133,6 +137,60 @@ test("desktop run resources reject explicit reasoning effort when the frozen mod
       }),
     (error) => error instanceof PanelHttpError && error.code === "unsupported_model_reasoning_effort"
   );
+});
+
+test("desktop run start snapshot freezes supported request settings without rejecting unsupported effort early", () => {
+  const supported = desktopCapabilitySnapshotForRunStart(
+    capabilitySnapshot({
+      activeModel: {
+        protocolKind: "openai_responses",
+        defaultAiMode: "openai-responses",
+        openAI: {
+          temperature: 0.2,
+          reasoningSummary: "auto",
+          parallelToolCalls: true,
+          stream: true,
+        },
+      },
+      modelCapabilities: {
+        supportsParallelToolCalls: true,
+        supportsStreaming: true,
+        supportsReasoningEffort: true,
+      },
+    }),
+    "high"
+  );
+  const unsupported = desktopCapabilitySnapshotForRunStart(
+    capabilitySnapshot({
+      activeModel: {
+        protocolKind: "openai_responses",
+        defaultAiMode: "openai-responses",
+        openAI: {
+          reasoningEffort: "medium",
+          reasoningSummary: "auto",
+          parallelToolCalls: true,
+          stream: true,
+        },
+      },
+      modelCapabilities: {
+        supportsParallelToolCalls: false,
+        supportsStreaming: false,
+        supportsReasoningEffort: false,
+      },
+    }),
+    "high"
+  );
+
+  assert.deepEqual(supported.activeModel.openAI, {
+    temperature: 0.2,
+    reasoningSummary: "auto",
+    parallelToolCalls: true,
+    stream: true,
+    reasoningEffort: "high",
+  });
+  assert.deepEqual(unsupported.activeModel.openAI, {
+    stream: false,
+  });
 });
 
 test("desktop tool center factory uses frozen run resources instead of rereading current model environment", async () => {

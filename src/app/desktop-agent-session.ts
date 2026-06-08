@@ -4,13 +4,9 @@ import { createId, nowIso } from "../kernel/id.js";
 import type { AgentTurnRuntime, AgentTurnRuntimeResult } from "../kernel/intelligence/index.js";
 import type { MinimalRuntime } from "./runtime.js";
 import { createMinimalRuntime } from "./runtime.js";
-import type { ModelRuntimeMode } from "./model-runtime/index.js";
-import {
-  createOpenAITokenCounter,
-  type BasicAgentContextPack,
-} from "./basic-agent-runtime/index.js";
+import type { BasicAgentContextPack } from "./basic-agent-runtime/index.js";
 import { DESKTOP_ROOT_AGENT } from "./agent-prompts/desktop-root-agent.js";
-import { desktopAgentContextPack } from "./desktop-agent-prompts.js";
+import { prepareDesktopAgentLoop } from "./desktop-agent-loop-preparation.js";
 import { createTaskSoilFromDesktopInput } from "./task-soil-workspace.js";
 import type {
   DesktopAgentPendingConfirmation,
@@ -35,13 +31,8 @@ import {
 } from "./desktop-agent-session-projection.js";
 import {
   constraintRefsFromTaskSoil,
-  createDesktopAgentTurnPolicy,
-  createDesktopAgentTurnRuntime,
   createIntelligenceChannelFromOptions,
   resolveDesktopAgentAiMode,
-  resolveDesktopAgentRunCapabilities,
-  resolveActiveModelName,
-  restrictRunCapabilityResolutionToExecutableTools,
 } from "./desktop-agent-session-runtime.js";
 import { asRecord, stringOrUndefined } from "./panel-read-model-utils.js";
 
@@ -113,63 +104,23 @@ export async function runDesktopAgentSession(
   }
 
   const channel = intelligenceChannel(runtime);
-  const modelCapabilitiesForRun = modelCapabilitiesForDesktopRun(aiMode, options);
-  const mayExposeTools = modelCapabilitiesForRun?.supportsToolCalling !== false && options.createToolCenter !== undefined;
-  if (mayExposeTools && options.capabilitySnapshot === undefined) {
-    throw new Error("Desktop Agent requires a capability snapshot before exposing tools to the model.");
-  }
-  const toolCenter = mayExposeTools ? options.createToolCenter?.(runtime) : undefined;
-  toolCenter?.resetCallCount();
-  const tokenCounter = createOpenAITokenCounter(resolveActiveModelName(options));
-  const contextPack = desktopAgentContextPack({
+  const loop = prepareDesktopAgentLoop({
+    runtime,
     agentDefinition,
     goal,
     taskSoil,
-    conversationHistory: options.conversationHistory ?? [],
-    skillContexts: options.skillContexts ?? [],
-    modelCapabilities: modelCapabilitiesForRun,
-    tokenCounter,
-  });
-  const turnRuntime = createDesktopAgentTurnRuntime({
-    runtime,
-    agentId: agentDefinition.agentId,
-    agentDisplayName: agentDefinition.displayName,
     channel,
-    goal,
     traceId,
     goalId,
+    aiMode,
     options,
-    modelCapabilities: modelCapabilitiesForRun,
-    toolCenter,
   });
-  const capabilityResolution =
-    options.capabilitySnapshot === undefined
-      ? undefined
-      : restrictRunCapabilityResolutionToExecutableTools(
-          resolveDesktopAgentRunCapabilities({
-            agentDefinition,
-            snapshot: options.capabilitySnapshot,
-            goal,
-            taskSoil,
-            modelCapabilities: modelCapabilitiesForRun,
-            platform: options.platform,
-          }),
-          toolCenter
-        );
-  const allowedTools = capabilityResolution?.allowedTools ?? [];
-  const turnPolicy = createDesktopAgentTurnPolicy({
-    agentDefinition,
-    traceId,
-    goalId,
-    allowedTools,
-    modelCapabilities: modelCapabilitiesForRun,
-  });
-  const turn = await turnRuntime.executeAutonomous({
-    policy: turnPolicy,
+  const turn = await loop.turnRuntime.executeAutonomous({
+    policy: loop.turnPolicy,
     requestId: createId("model-request"),
     callerRef: { kind: "goal", id: goalId, label: "desktop_agent" },
-    inputRefs: contextPack.inputRefs,
-    sanitizedMessages: contextPack.messages,
+    inputRefs: loop.contextPack.inputRefs,
+    sanitizedMessages: loop.contextPack.messages,
     constraintRefs: constraintRefsFromTaskSoil(taskSoil),
     toolChoice: "auto",
     requestedAt: nowIso(),
@@ -182,11 +133,11 @@ export async function runDesktopAgentSession(
     traceId,
     goalId,
     taskSoil,
-    contextPack,
+    contextPack: loop.contextPack,
     agentId: agentDefinition.agentId,
-    turnRuntime,
+    turnRuntime: loop.turnRuntime,
     turn,
-    capabilityResolution,
+    capabilityResolution: loop.capabilityResolution,
   });
 }
 
@@ -405,25 +356,6 @@ function hasConfirmationRequested(entries: readonly EventLogEntry[], confirmatio
     const payload = asRecord(entry.message.payload);
     return stringOrUndefined(payload.confirmationId) === confirmationId;
   });
-}
-
-function modelCapabilitiesForDesktopRun(
-  aiMode: ModelRuntimeMode,
-  options: RunDesktopAgentSessionOptions
-): RunDesktopAgentSessionOptions["modelCapabilities"] {
-  const modelCapabilities = options.capabilitySnapshot?.modelCapabilities ?? options.modelCapabilities;
-  if (
-    options.capabilitySnapshot !== undefined ||
-    aiMode !== "fake" ||
-    modelCapabilities === undefined ||
-    modelCapabilities.supportsToolCalling
-  ) {
-    return modelCapabilities;
-  }
-  return {
-    ...modelCapabilities,
-    supportsToolCalling: true,
-  };
 }
 
 function assertOrdinaryDesktopAgentDefinition(

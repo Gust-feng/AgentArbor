@@ -53,6 +53,7 @@ test("desktop agent session keeps projection and contracts split", async () => {
     sharedContracts,
     projection,
     runtime,
+    loopPreparation,
     events,
     registry,
     definitionRuntime,
@@ -69,6 +70,7 @@ test("desktop agent session keeps projection and contracts split", async () => {
     readAppSource("desktop-agent-contracts.ts"),
     readAppSource("desktop-agent-session-projection.ts"),
     readAppSource("desktop-agent-session-runtime.ts"),
+    readAppSource("desktop-agent-loop-preparation.ts"),
     readAppSource("desktop-agent-session-events.ts"),
     readAppSource("agent-definition-registry.ts"),
     readAppSource("agent-definition-runtime.ts"),
@@ -84,19 +86,19 @@ test("desktop agent session keeps projection and contracts split", async () => {
   assert.equal(session.includes('from "./desktop-agent-session-contracts.js"'), true);
   assert.equal(session.includes('from "./desktop-agent-session-projection.js"'), true);
   assert.equal(session.includes('from "./desktop-agent-session-runtime.js"'), true);
+  assert.equal(session.includes('from "./desktop-agent-loop-preparation.js"'), true);
   assert.equal(session.includes('from "./desktop-agent-session-events.js"'), true);
   assert.equal(session.includes('from "./agent-prompts/desktop-root-agent.js"'), true);
   assert.equal(session.includes("const agentDefinition = options.agentDefinition ?? DESKTOP_ROOT_AGENT"), true);
   assert.equal(session.includes("const aiMode = resolveDesktopAgentAiMode(options)"), true);
   assert.equal(session.includes('options.aiMode ?? "openai-responses"'), false);
-  assert.equal(session.includes("const modelCapabilitiesForRun = modelCapabilitiesForDesktopRun(aiMode, options)"), true);
-  assert.equal(session.includes("modelCapabilitiesForRun?.supportsToolCalling !== false"), true);
-  assert.equal(session.includes("aiMode === \"fake\" || modelCapabilitiesForRun?.supportsToolCalling !== false"), false);
-  assert.equal(session.includes("options.capabilitySnapshot?.modelCapabilities ?? options.modelCapabilities"), true);
+  assert.equal(session.includes("const loop = prepareDesktopAgentLoop({"), true);
+  assert.equal(session.includes("const modelCapabilitiesForRun = modelCapabilitiesForDesktopRun(aiMode, options)"), false);
+  assert.equal(session.includes("modelCapabilitiesForRun?.supportsToolCalling !== false"), false);
+  assert.equal(session.includes("options.capabilitySnapshot?.modelCapabilities ?? options.modelCapabilities"), false);
   assert.equal(session.includes("options.modelCapabilities ?? options.capabilitySnapshot?.modelCapabilities"), false);
-  assert.equal(session.includes("options.capabilitySnapshot !== undefined ||"), true);
   assert.equal(session.includes("agentId: agentDefinition.agentId"), true);
-  assert.equal(session.includes("agentDisplayName: agentDefinition.displayName"), true);
+  assert.equal(session.includes("agentDisplayName: agentDefinition.displayName"), false);
   assert.equal(session.includes("export async function runDesktopAgentSession"), true);
   assert.equal(session.includes("function desktopAgentResultFromTurn"), true);
   assert.equal(session.includes("function parseAnswer"), false);
@@ -153,6 +155,20 @@ test("desktop agent session keeps projection and contracts split", async () => {
   assert.equal(runtime.includes("new AgentTurnRuntime"), true);
   assert.equal(runtime.includes("export function allowedToolsForRun"), false);
   assert.equal(runtime.includes("export function constraintRefsFromTaskSoil"), true);
+  assert.equal(loopPreparation.includes('from "./desktop-agent-session-runtime.js"'), true);
+  assert.equal(loopPreparation.includes("export function prepareDesktopAgentLoop"), true);
+  assert.equal(loopPreparation.includes("export function modelCapabilitiesForDesktopRun"), true);
+  assert.equal(loopPreparation.includes("const modelCapabilities = modelCapabilitiesForDesktopRun(input.aiMode, input.options)"), true);
+  assert.equal(loopPreparation.includes("modelCapabilities?.supportsToolCalling !== false"), true);
+  assert.equal(loopPreparation.includes('aiMode === "fake" || modelCapabilities?.supportsToolCalling !== false'), false);
+  assert.equal(loopPreparation.includes("options.capabilitySnapshot?.modelCapabilities ?? options.modelCapabilities"), true);
+  assert.equal(loopPreparation.includes("options.modelCapabilities ?? options.capabilitySnapshot?.modelCapabilities"), false);
+  assert.equal(loopPreparation.includes("options.capabilitySnapshot !== undefined ||"), true);
+  assert.equal(loopPreparation.includes("agentId: input.agentDefinition.agentId"), true);
+  assert.equal(loopPreparation.includes("agentDisplayName: input.agentDefinition.displayName"), true);
+  assert.equal(loopPreparation.includes("resolveDesktopAgentRunCapabilities({"), true);
+  assert.equal(loopPreparation.includes("restrictRunCapabilityResolutionToExecutableTools("), true);
+  assert.equal(loopPreparation.includes("createDesktopAgentTurnPolicy({"), true);
   assert.equal(registry.includes("export class AgentDefinitionRegistry"), true);
   assert.equal(registry.includes("runAgentDefinitionRef(definition)"), true);
   assert.equal(registry.includes("resolve(ref: RunAgentDefinitionRef): AgentDefinition | undefined"), true);

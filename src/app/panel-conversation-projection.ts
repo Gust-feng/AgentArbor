@@ -1,6 +1,7 @@
 import type { SanitizedModelProviderConfig } from "../domain/config/index.js";
 import type { RuntimeConversationRecord } from "../domain/runtime-database/index.js";
 import { sanitizeAssistantVisibleText } from "./visible-text-safety.js";
+import { isGenericApprovalDecisionText } from "./confirmation-copy.js";
 import type {
   PanelConversation,
   PanelConversationCurrentRunReadModel,
@@ -329,12 +330,12 @@ function turnVisibleSummary(turn: ConversationProjectionTurn | undefined): strin
   if (turn === undefined) {
     return undefined;
   }
+  if (turn.role === "assistant") {
+    return assistantVisibleSummary(turn);
+  }
   const content = firstNonEmpty([turn.content]);
   if (content !== undefined) {
     return content;
-  }
-  if (turn.role === "assistant") {
-    return meaningfulAssistantTitle(turn.title);
   }
   return meaningfulUserTitle(turn.title);
 }
@@ -343,7 +344,11 @@ function assistantVisibleSummary(turn: ConversationProjectionTurn | undefined): 
   if (turn === undefined) {
     return undefined;
   }
-  return firstNonEmpty([turn.content]) ?? meaningfulAssistantTitle(turn.title);
+  const content = firstNonEmpty([turn.content]);
+  if (content !== undefined && !isGenericApprovalDecisionText(content)) {
+    return content;
+  }
+  return meaningfulAssistantTitle(turn.title);
 }
 
 function meaningfulUserTitle(value: string): string | undefined {
@@ -400,6 +405,8 @@ const ORDINARY_ASSISTANT_STATUS_TITLES = new Set([
   "助手",
   "等待回复",
   "正在回复",
+  "已继续",
+  "继续执行",
   "继续处理",
   "正在使用工具",
   "工具已完成",

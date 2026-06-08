@@ -110,6 +110,32 @@ test("panel conversation summaries do not invent completed results for empty ass
   assert.equal(conversation.currentAction.includes("结果已生成"), false);
 });
 
+test("panel conversation summaries ignore generic approval assistant copy", () => {
+  const store = new PanelConversationStore();
+  const started = store.startDesktopMessage({ goal: "批准继续" });
+  store.attachRun({
+    conversationId: started.conversation.conversationId,
+    assistantTurnId: started.assistantTurn.turnId,
+    runId: "run-approval",
+  });
+  store.completeAssistantTurn({
+    conversationId: started.conversation.conversationId,
+    assistantTurnId: started.assistantTurn.turnId,
+    runId: "run-approval",
+    title: "继续处理",
+    content: "继续执行。",
+    status: "completed",
+  });
+
+  const conversation = store.getReadModel(started.conversation.conversationId)!;
+  const persisted = toRuntimeConversationRecord(conversation);
+
+  assert.equal(conversation.preview, "批准继续");
+  assert.equal(conversation.currentAction, "");
+  assert.equal(persisted.preview, "批准继续");
+  assert.equal(persisted.currentAction, "");
+});
+
 test("panel conversations keep the active follow-up run when an older guidance turn completes", () => {
   const store = new PanelConversationStore();
   const first = store.startDesktopMessage({ goal: "删除文件前需要确认" });

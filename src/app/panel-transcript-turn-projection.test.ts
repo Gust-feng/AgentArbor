@@ -172,6 +172,35 @@ test("assistant turn projection does not treat running preview content as an ans
   assert.equal(projection.keepStreamMounted, true);
 });
 
+test("assistant turn projection does not treat generic approval copy as an answer", () => {
+  const turns = [
+    turn("user-1", "user", "批准", "completed"),
+    { ...turn("assistant-1", "assistant", "继续执行。", "running"), runId: "run-1" },
+  ];
+  const projection = projectAssistantTranscriptTurn({
+    projectedTurn: projected(turns[1]!, "run-1"),
+    turnIndex: 1,
+    turns,
+    latestAssistantTurnId: latestAssistantTurnIdForTurns(turns),
+    previousEmptyShells: assistantShellSnapshot([]),
+    run: { runId: "run-1", status: "running" },
+    transcriptNodes: [{
+      ...node({
+        nodeId: "resume",
+        runId: "run-1",
+        sequence: 3,
+        kind: "user_decision",
+        eventType: "run.resumed",
+        summary: "继续处理。",
+      }),
+      phase: "approved",
+    }],
+  });
+
+  assert.equal(projection.content, "");
+  assert.equal(projection.keepStreamMounted, true);
+});
+
 test("assistant turn projection hides stale preview while confirmation is pending", () => {
   const turns = [
     turn("user-1", "user", "运行 dir", "completed"),

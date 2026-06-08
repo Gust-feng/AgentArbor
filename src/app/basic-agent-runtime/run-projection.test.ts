@@ -107,6 +107,85 @@ test("basic stream event projection keeps long model output deltas for live rend
   assert.equal(event.delta, longDelta);
 });
 
+test("basic run projection skips generic approval resume events for current step", () => {
+  const run = projectRunJobToBasicRun({
+    runId: "run-approval-step",
+    goal: "运行需要确认的命令",
+    status: "running",
+    runMode: "agent",
+    createdAt: "2026-05-12T00:00:00.000Z",
+    updatedAt: "2026-05-12T00:00:03.000Z",
+    streamEvents: [
+      {
+        eventId: "event-tool",
+        runId: "run-approval-step",
+        sequence: 1,
+        type: "tool.completed",
+        createdAt: "2026-05-12T00:00:01.000Z",
+        summary: "pnpm test · 通过",
+        sourceRefs: [],
+        modelCallRefs: [],
+        toolCallRefs: ["tool-1"],
+      },
+      {
+        eventId: "event-approved",
+        runId: "run-approval-step",
+        sequence: 2,
+        type: "user_approval.received",
+        createdAt: "2026-05-12T00:00:02.000Z",
+        summary: "已继续。",
+        status: "running",
+        sourceRefs: [],
+        modelCallRefs: [],
+        toolCallRefs: [],
+      },
+      {
+        eventId: "event-resumed",
+        runId: "run-approval-step",
+        sequence: 3,
+        type: "run.resumed",
+        createdAt: "2026-05-12T00:00:03.000Z",
+        summary: "继续处理。",
+        status: "running",
+        sourceRefs: [],
+        modelCallRefs: [],
+        toolCallRefs: [],
+      },
+    ],
+    confirmationDecisions: [],
+  });
+
+  assert.equal(run.currentStep, "pnpm test · 通过");
+});
+
+test("basic run projection keeps denied decisions visible as current step", () => {
+  const run = projectRunJobToBasicRun({
+    runId: "run-denied-step",
+    goal: "删除文件",
+    status: "running",
+    runMode: "agent",
+    createdAt: "2026-05-12T00:00:00.000Z",
+    updatedAt: "2026-05-12T00:00:02.000Z",
+    streamEvents: [
+      {
+        eventId: "event-denied",
+        runId: "run-denied-step",
+        sequence: 1,
+        type: "user_approval.received",
+        createdAt: "2026-05-12T00:00:02.000Z",
+        summary: "已不执行。",
+        status: "running",
+        sourceRefs: [],
+        modelCallRefs: [],
+        toolCallRefs: [],
+      },
+    ],
+    confirmationDecisions: [],
+  });
+
+  assert.equal(run.currentStep, "已不执行。");
+});
+
 test("basic projection summarizes confirmation decisions safely", () => {
   assert.equal(basicConfirmationDecisionSummary({ decision: "approve_once" }), "已继续。");
   assert.equal(basicConfirmationDecisionSummary({ decision: "deny" }), "已不执行。");

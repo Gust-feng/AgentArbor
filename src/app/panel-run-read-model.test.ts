@@ -270,7 +270,6 @@ test("panel transcript nodes preserve ordered ordinary-agent tool lifecycle", ()
     [
       "tool.requested:preparing",
       "confirmation.needed:waiting_approval",
-      "run.resumed:approved",
       "tool.requested:executing",
       "tool.completed:completed",
       "model.reasoning.completed:completed",
@@ -278,10 +277,10 @@ test("panel transcript nodes preserve ordered ordinary-agent tool lifecycle", ()
     ],
   );
   assert.equal(nodes[0]?.title.includes("准备"), true);
-  assert.equal(nodes[3]?.title, "运行命令");
-  assert.equal(nodes[4]?.summary, "pnpm test · tests passed");
+  assert.equal(nodes[2]?.title, "运行命令");
+  assert.equal(nodes[3]?.summary, "pnpm test · tests passed");
   assert.equal(ordinaryVisibleProjectionIncludes(nodes, "exit "), false);
-  assert.equal(nodes[5]?.sequence > nodes[4]!.sequence, true);
+  assert.equal(nodes[4]?.sequence > nodes[3]!.sequence, true);
 });
 
 test("panel transcript nodes merge contiguous reasoning deltas without moving tool boundaries", () => {

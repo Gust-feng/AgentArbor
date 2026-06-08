@@ -195,7 +195,8 @@ test("panel UI chat and transcript modules stay presentation-focused", async () 
   assert.equal(transcriptNodeVisibility.includes("export function workflowVisibleNodes"), false);
   assert.equal(transcriptNodeVisibility.includes("hasWorkActivity"), false);
   assert.equal(transcriptNodeVisibility.includes("return text.length > 0;"), true);
-  assert.equal(transcriptNodeVisibility.includes('node.kind === "tool" || node.kind === "confirmation" || node.kind === "user_decision"'), true);
+  assert.equal(transcriptNodeVisibility.includes("export function isLowValueUserDecisionNode"), true);
+  assert.equal(transcriptNodeVisibility.includes('node.kind === "tool" || node.kind === "confirmation"'), true);
   assert.equal(transcriptToolFormat.includes("export function commandText"), true);
   assert.equal(transcriptToolFormat.includes("export function genericItemLabel"), true);
   assert.equal(transcriptConfirmation.includes("export function ConfirmationNode"), true);

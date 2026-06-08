@@ -139,6 +139,26 @@ test("active chat projection does not use running conversation preview as an ans
   assert.equal(projection.hasVisibleContent, true);
 });
 
+test("active chat projection does not use generic approval copy as an answer", () => {
+  const projection = projectChatActive({
+    conversation: {
+      turns: [
+        userTurn("user-1", "批准"),
+        { ...assistantTurn("assistant-1", "继续执行。", "running"), runId: "run-1" },
+      ],
+      activeRunId: "run-1",
+    },
+    run: run("run-1", "running", 3),
+    transcriptNodes: [{
+      ...node("run-1", 2, "user_decision", "run.resumed", "继续处理。"),
+      phase: "approved",
+    }],
+  });
+
+  assert.equal(projection.answer, undefined);
+  assert.equal(projection.currentRunProjection.nodes.length, 1);
+});
+
 test("active chat projection accepts running reply after the latest tool boundary", () => {
   const projection = projectChatActive({
     conversation: {

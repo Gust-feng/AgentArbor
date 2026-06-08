@@ -225,6 +225,24 @@ test("tool activity copy surfaces safe failed command details", () => {
   });
 });
 
+test("tool activity copy omits generic events without concrete target", () => {
+  const requested = activityLineForNode(node({
+    kind: "tool",
+    eventType: "tool.requested",
+    phase: "executing",
+    toolName: "unknown_tool",
+  }));
+  const completed = activityLineForNode(node({
+    kind: "tool",
+    eventType: "tool.completed",
+    phase: "completed",
+    toolName: "unknown_tool",
+  }));
+
+  assert.equal(requested, undefined);
+  assert.equal(completed, undefined);
+});
+
 test("narration copy strips markdown emphasis and numbered emoji prefixes", () => {
   const copy = activityLineForNode(node({
     kind: "system",
@@ -275,6 +293,17 @@ test("user decision activity copy strips restored guidance boilerplate", () => {
   assert.deepEqual(copy, {
     detail: "只列出路径，不执行删除。",
   });
+});
+
+test("user decision activity copy omits generic approval progress", () => {
+  const copy = activityLineForNode(node({
+    kind: "user_decision",
+    eventType: "run.resumed",
+    phase: "approved",
+    summary: "继续处理。",
+  }));
+
+  assert.equal(copy, undefined);
 });
 
 test("activity item projection derives stable render metadata outside React components", () => {

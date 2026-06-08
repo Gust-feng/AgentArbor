@@ -17,6 +17,11 @@ export function cleanConfirmationSummary(value: string): string {
   return isGenericConfirmationPrompt(cleaned) ? "" : cleaned;
 }
 
+export function isGenericApprovalDecisionText(value: string | undefined): boolean {
+  const normalized = normalizedConfirmationPrompt(value ?? "");
+  return normalized.length === 0 || GENERIC_APPROVAL_DECISION_TEXT.has(normalized);
+}
+
 export function confirmationActionSummaryText(input: {
   readonly question?: string;
   readonly consequence?: string;
@@ -60,24 +65,41 @@ function compactSafeText(value: string, maxLength: number): string {
 }
 
 function isGenericConfirmationPrompt(value: string): boolean {
-  const normalized = value
+  const normalized = normalizedConfirmationPrompt(value);
+  return GENERIC_CONFIRMATION_PROMPTS.has(normalized) || GENERIC_APPROVAL_DECISION_TEXT.has(normalized);
+}
+
+function normalizedConfirmationPrompt(value: string): string {
+  return value
     .replace(/[。.!！?？；;:：、，,\s]/g, "")
     .trim();
-  return normalized === "确认" ||
-    normalized === "需要确认" ||
-    normalized === "待确认" ||
-    normalized === "继续" ||
-    normalized === "是否继续" ||
-    normalized === "确认继续" ||
-    normalized === "继续执行" ||
-    normalized === "确认下一步" ||
-    normalized === "等待确认" ||
-    normalized === "等待用户确认下一步" ||
-    normalized === "需要你判断" ||
-    normalized === "等待你判断后继续" ||
-    normalized === "等待你判断下一步" ||
-    normalized === "等待用户补充要求" ||
-    normalized === "需要你补充材料后继续" ||
-    normalized === "待处理" ||
-    normalized === "等待你判断";
 }
+
+const GENERIC_CONFIRMATION_PROMPTS = new Set([
+  "确认",
+  "需要确认",
+  "待确认",
+  "继续",
+  "是否继续",
+  "确认继续",
+  "确认下一步",
+  "等待确认",
+  "等待用户确认下一步",
+  "需要你判断",
+  "等待你判断后继续",
+  "等待你判断下一步",
+  "等待用户补充要求",
+  "需要你补充材料后继续",
+  "待处理",
+  "等待你判断",
+]);
+
+const GENERIC_APPROVAL_DECISION_TEXT = new Set([
+  "已继续",
+  "继续处理",
+  "继续执行",
+  "工作继续推进",
+  "用户反馈已收到工作继续推进",
+  "用户已批准",
+  "已批准",
+]);

@@ -4,6 +4,7 @@ import {
   basicConfirmationDecisionSummary,
   cleanConfirmationSummary,
   confirmationActionSummaryText,
+  isGenericApprovalDecisionText,
 } from "./confirmation-copy.js";
 
 test("confirmation copy keeps concrete action text without tool internals", () => {
@@ -44,6 +45,13 @@ test("confirmation decision copy is shared and redacts guidance", () => {
     }).includes("sk-test-token"),
     false
   );
+});
+
+test("generic approval copy is treated as low-value projection text", () => {
+  assert.equal(cleanConfirmationSummary("已继续。"), "");
+  assert.equal(cleanConfirmationSummary("用户反馈已收到，工作继续推进。"), "");
+  assert.equal(isGenericApprovalDecisionText("继续处理。"), true);
+  assert.equal(isGenericApprovalDecisionText("已不执行。"), false);
 });
 
 test("confirmation action summary prefers concrete action over explanatory consequence", () => {

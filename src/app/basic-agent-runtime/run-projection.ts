@@ -1,7 +1,11 @@
 import type { AgentTaskStatus, BasicAgentRun, ConfirmationDecision, RunEvent } from "../../domain/basic-agent/index.js";
 import type { ObservationRef } from "../../domain/observation/index.js";
 import type { ToolDisplayProjection } from "../../domain/tools/index.js";
-import { basicConfirmationDecisionSummary, cleanConfirmationSummary } from "../confirmation-copy.js";
+import {
+  basicConfirmationDecisionSummary,
+  cleanConfirmationSummary,
+  isGenericApprovalDecisionText,
+} from "../confirmation-copy.js";
 import { redactOrdinaryMarkdownFragment, redactOrdinaryText } from "../safe-projection.js";
 
 export { basicConfirmationDecisionSummary };
@@ -212,6 +216,7 @@ function basicRunCurrentStep(job: BasicAgentRunProjectionInput): string | undefi
   const latest = [...job.streamEvents].reverse().find((event) =>
     event.type !== "model.reasoning.delta" &&
     event.type !== "model.reasoning.completed" &&
+    !isLowValueCurrentStepEvent(event) &&
     (event.summary !== undefined || event.delta !== undefined)
   );
   const summary = latest?.summary ?? latest?.delta;
@@ -220,6 +225,16 @@ function basicRunCurrentStep(job: BasicAgentRunProjectionInput): string | undefi
     return cleanSummary.length === 0 ? undefined : safeEventSummary(cleanSummary);
   }
   return safeEventSummary(summary);
+}
+
+function isLowValueCurrentStepEvent(event: BasicAgentRunStreamEventProjectionInput): boolean {
+  if (event.type === "run.started" || event.type === "goal.received" || event.type === "run.resumed") {
+    return true;
+  }
+  if (event.type === "user_approval.received") {
+    return isGenericApprovalDecisionText(event.summary ?? event.detail?.preview ?? event.agentLabel);
+  }
+  return false;
 }
 
 function basicRunNextStep(status: AgentTaskStatus): string | undefined {

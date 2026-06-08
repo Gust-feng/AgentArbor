@@ -625,6 +625,63 @@ test("work session current action does not mirror the user task text", () => {
   assert.equal(workSession.currentAction.includes("目标"), false);
 });
 
+test("work session current action skips generic approval resume events", () => {
+  const run: BasicAgentRun = {
+    ...basicRun("running"),
+    currentStep: "继续处理。",
+  };
+  const events: RunEvent[] = [
+    {
+      ...event(run.runId, "tool.completed", "pnpm test · 通过", "running"),
+      id: `${run.runId}:tool-completed`,
+      sequence: 1,
+    },
+    {
+      ...event(run.runId, "user_approval.received", "已继续。", "running"),
+      id: `${run.runId}:approval-received`,
+      sequence: 2,
+    },
+    {
+      ...event(run.runId, "run.resumed", "继续处理。", "running"),
+      id: `${run.runId}:run-resumed`,
+      sequence: 3,
+    },
+  ];
+  const workSession = createDesktopWorkSessionReadModel({
+    run,
+    events,
+  });
+
+  assert.equal(workSession.visibleEvents.some((item) => item.type === "user_approval.received"), false);
+  assert.equal(workSession.visibleEvents.some((item) => item.type === "run.resumed"), false);
+  assert.equal(workSession.currentAction, "pnpm test · 通过");
+});
+
+test("work session transcript omits approved resume nodes but keeps denied decisions", () => {
+  const run = basicRun("running");
+  const nodes = transcriptNodesFromRunEvents([
+    {
+      ...event(run.runId, "user_approval.received", "已继续。", "running"),
+      id: `${run.runId}:approval-received`,
+      sequence: 1,
+    },
+    {
+      ...event(run.runId, "run.resumed", "继续处理。", "running"),
+      id: `${run.runId}:run-resumed`,
+      sequence: 2,
+    },
+    {
+      ...event(run.runId, "user_approval.received", "已不执行。", "blocked"),
+      id: `${run.runId}:approval-denied`,
+      sequence: 3,
+    },
+  ], undefined);
+
+  assert.deepEqual(nodes.map((node) => `${node.eventType}:${node.phase}:${node.summary}`), [
+    "user_approval.received:denied:已不执行。",
+  ]);
+});
+
 function basicRun(status: BasicAgentRun["status"]): BasicAgentRun {
   return {
     runId: "basic-run-test",

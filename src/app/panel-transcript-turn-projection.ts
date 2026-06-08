@@ -14,7 +14,11 @@ import {
   pendingForTurn,
   type ConfirmationIdentity,
 } from "./panel-transcript-confirmation-projection.js";
-import { nodesForRun } from "./panel-transcript-node-projection.js";
+import {
+  isLowValueUserDecisionNode,
+  nodesForRun,
+} from "./panel-transcript-node-projection.js";
+import { isGenericApprovalDecisionText } from "./confirmation-copy.js";
 
 export type AssistantTranscriptRunLike = {
   readonly runId: string;
@@ -198,10 +202,13 @@ function canUseTurnContentAsAnswer<TTurn extends WorklineConversationTurn, TPend
   if (input.run.status !== "running" || input.turn.content.trim().length === 0) {
     return false;
   }
+  if (isGenericApprovalDecisionText(input.turn.content)) {
+    return false;
+  }
   return !input.nodes.some((node) =>
     node.kind === "tool" ||
     node.kind === "confirmation" ||
-    node.kind === "user_decision"
+    (node.kind === "user_decision" && !isLowValueUserDecisionNode(node))
   );
 }
 

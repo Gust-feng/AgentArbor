@@ -135,6 +135,64 @@ test("activity projection hides preparing tool requests that are represented by 
   assert.deepEqual(projected.map((item) => item.nodeId), ["confirmation"]);
 });
 
+test("activity projection hides generic approved decisions but keeps real user decisions", () => {
+  const projected = activityVisibleNodes([
+    node({
+      nodeId: "approved",
+      kind: "user_decision",
+      eventType: "run.resumed",
+      phase: "approved",
+      sequence: 1,
+      summary: "继续处理。",
+    }),
+    node({
+      nodeId: "denied",
+      kind: "user_decision",
+      eventType: "user_approval.received",
+      phase: "denied",
+      sequence: 2,
+      summary: "已不执行。",
+    }),
+    node({
+      nodeId: "guidance",
+      kind: "user_decision",
+      eventType: "user.guidance",
+      phase: "guidance",
+      sequence: 3,
+      summary: "只列出路径，不删除。",
+    }),
+  ]);
+
+  assert.deepEqual(projected.map((item) => item.nodeId), ["denied", "guidance"]);
+});
+
+test("panel transcript nodes omit approval resume events from ordinary visible nodes", () => {
+  const projected = createPanelTranscriptNodes([
+    panelEvent({
+      eventId: "run-1:event:1:user_approval.received",
+      sequence: 1,
+      type: "user_approval.received",
+      summary: "已继续。",
+    }),
+    panelEvent({
+      eventId: "run-1:event:2:run.resumed",
+      sequence: 2,
+      type: "run.resumed",
+      summary: "继续处理。",
+    }),
+    panelEvent({
+      eventId: "run-1:event:3:user_approval.received",
+      sequence: 3,
+      type: "user_approval.received",
+      summary: "已不执行。",
+    }),
+  ]);
+
+  assert.deepEqual(projected.map((item) => `${item.eventType}:${item.phase}:${item.summary}`), [
+    "user_approval.received:denied:已不执行。",
+  ]);
+});
+
 test("visible transcript projection keeps preparing tool requests that explain a pending confirmation in details", () => {
   const projected = visibleTranscriptNodes([
     node({

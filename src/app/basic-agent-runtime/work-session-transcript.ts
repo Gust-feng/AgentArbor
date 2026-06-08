@@ -157,23 +157,21 @@ function transcriptNodeFromRunEvent(
   if (event.type === "user_approval.received" || event.type === "user.guidance") {
     const phase = event.type === "user.guidance"
       ? "guidance"
-      : event.summary?.includes("拒绝") || event.summary?.includes("不执行") || event.status === "blocked"
+      : event.detail?.action === "deny" || event.summary?.includes("拒绝") || event.summary?.includes("不执行") || event.status === "blocked"
         ? "denied"
         : "approved";
+    if (phase === "approved") {
+      return undefined;
+    }
     return transcriptNode(event, {
       kind: "user_decision",
       phase,
-      title: phase === "approved" ? "继续处理" : phase === "denied" ? "已不执行" : "补充要求",
+      title: phase === "denied" ? "已不执行" : "补充要求",
       summary: event.summary,
     });
   }
   if (event.type === "run.resumed") {
-    return transcriptNode(event, {
-      kind: "user_decision",
-      phase: "approved",
-      title: "继续处理",
-      summary: event.summary,
-    });
+    return undefined;
   }
   if (event.type === "final.result") {
     return transcriptNode(event, {

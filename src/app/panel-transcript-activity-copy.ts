@@ -1,4 +1,4 @@
-import { cleanConfirmationSummary } from "./confirmation-copy.js";
+import { cleanConfirmationSummary, isGenericApprovalDecisionText } from "./confirmation-copy.js";
 import {
   isFileReadNode,
   isModelSideOutputNode,
@@ -28,9 +28,13 @@ export function activityLineForNode(node: ProjectableTranscriptNode): ActivityLi
   }
   if (node.kind === "tool") {
     const target = toolTargetCopy(node);
+    const statusText = target === undefined ? toolStatusText(node) : undefined;
+    if (target === undefined && statusText === undefined) {
+      return undefined;
+    }
     const copy = {
       label: toolVerb(node),
-      detail: target?.detail ?? toolStatusText(node),
+      detail: target?.detail ?? statusText ?? "",
     };
     return target?.expandedDetail === undefined ? copy : { ...copy, expandedDetail: target.expandedDetail };
   }
@@ -171,12 +175,18 @@ function readableConfirmationCopy(node: ProjectableTranscriptNode): ActivityLine
   return detail === action ? { label: "待处理", detail } : { label: "待处理", detail, expandedDetail: action };
 }
 
-function readableUserDecisionCopy(node: ProjectableTranscriptNode): ActivityLineCopy {
+function readableUserDecisionCopy(node: ProjectableTranscriptNode): ActivityLineCopy | undefined {
+  if (node.phase === "approved") {
+    return undefined;
+  }
   const fallback = userDecisionFallback(node.phase);
   const raw = cleanConfirmationSummary(node.text ?? node.summary ?? "");
   const detail = readableActivityText(stripUserDecisionBoilerplate(stripMarkdownStructure(raw)));
   if (detail.length === 0) {
-    return { detail: fallback };
+    return fallback === undefined ? undefined : { detail: fallback };
+  }
+  if (isGenericApprovalDecisionText(detail)) {
+    return fallback === undefined ? undefined : { detail: fallback };
   }
   const compactDetail = compact(detail, 180);
   return compactDetail === detail
@@ -184,10 +194,10 @@ function readableUserDecisionCopy(node: ProjectableTranscriptNode): ActivityLine
     : { detail: compactDetail, expandedDetail: detail };
 }
 
-function userDecisionFallback(phase: ProjectableTranscriptNode["phase"]): string {
+function userDecisionFallback(phase: ProjectableTranscriptNode["phase"]): string | undefined {
   if (phase === "denied") return "已不执行。";
   if (phase === "guidance") return "已补充要求。";
-  return "已继续。";
+  return undefined;
 }
 
 function stripUserDecisionBoilerplate(value: string): string {
@@ -294,12 +304,9 @@ function toolTargetCopy(node: ProjectableTranscriptNode): Pick<ActivityLineCopy,
   return readableToolTarget(cleanToolTargetText(node.summary));
 }
 
-function toolStatusText(node: ProjectableTranscriptNode): string {
-  if (node.phase === "preparing") return "正在准备。";
-  if (node.phase === "executing") return "正在处理。";
+function toolStatusText(node: ProjectableTranscriptNode): string | undefined {
   if (node.phase === "failed") return "动作未完成。";
-  if (node.phase === "blocked") return "等待你判断后继续。";
-  return readableToolTarget(node.title)?.detail ?? "动作已记录。";
+  return undefined;
 }
 
 function activityItemKey(node: ProjectableTranscriptNode): string {

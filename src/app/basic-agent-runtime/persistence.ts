@@ -5,6 +5,7 @@ import type {
   RuntimeRunSnapshot,
 } from "../../domain/runtime-database/index.js";
 import { redactOrdinaryText } from "../safe-projection.js";
+import { isGenericApprovalDecisionText } from "../confirmation-copy.js";
 import {
   nextBasicEventSequence,
   restoredBlockedEvent,
@@ -33,7 +34,7 @@ export type BasicAgentPersistedReplay = {
 export function basicRunFromRuntimeSnapshot(snapshot: RuntimeRunSnapshot): BasicAgentRun {
   const status = agentTaskStatusFromSnapshot(snapshot);
   const events = restoredBasicEventsFromRuntimeSnapshot(snapshot);
-  const latestEvent = [...events].reverse().find((event) => event.summary !== undefined);
+  const latestEvent = [...events].reverse().find((event) => event.summary !== undefined && !isLowValuePersistedCurrentStepEvent(event));
   const persisted = snapshot.basicRun;
   return {
     runId: persisted?.runId ?? snapshot.run.runId,
@@ -53,6 +54,16 @@ export function basicRunFromRuntimeSnapshot(snapshot: RuntimeRunSnapshot): Basic
       eventCount: events.length,
     },
   };
+}
+
+function isLowValuePersistedCurrentStepEvent(event: RunEvent): boolean {
+  if (event.type === "run.started" || event.type === "goal.received" || event.type === "run.resumed") {
+    return true;
+  }
+  if (event.type === "user_approval.received") {
+    return isGenericApprovalDecisionText(event.summary ?? event.detail?.preview ?? event.title);
+  }
+  return false;
 }
 
 export function basicRunReplayFromRuntimeSnapshot(snapshot: RuntimeRunSnapshot): BasicAgentPersistedReplay {

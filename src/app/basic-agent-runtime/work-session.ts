@@ -13,7 +13,11 @@ import type { ObservationRef } from "../../domain/observation/index.js";
 import type { ToolDisplayProjection, ToolResultEnvelope } from "../../domain/tools/index.js";
 import type { DesktopTaskSoilInput } from "../task-soil-workspace.js";
 import { redactOrdinaryText } from "../safe-projection.js";
-import { cleanConfirmationSummary, confirmationActionSummaryText } from "../confirmation-copy.js";
+import {
+  cleanConfirmationSummary,
+  confirmationActionSummaryText,
+  isGenericApprovalDecisionText,
+} from "../confirmation-copy.js";
 import {
   isLowValueOrdinaryAgentNote,
   isOrdinaryTranscriptSuppressedEvent,
@@ -177,6 +181,12 @@ function isSuppressedOrdinaryWorkViewEvent(event: RunEvent): boolean {
   if (isOrdinaryTranscriptSuppressedEvent(event)) {
     return true;
   }
+  if (event.type === "run.resumed") {
+    return true;
+  }
+  if (event.type === "user_approval.received" && isGenericApprovalDecisionText(event.summary ?? event.detail?.preview ?? event.title)) {
+    return true;
+  }
   if ((event.type === "agent.note.completed" || event.type === "agent.note.delta") && isLowValueOrdinaryAgentNote(event.summary ?? event.delta)) {
     return true;
   }
@@ -276,7 +286,7 @@ function currentActionFor(
   if (latest?.summary !== undefined) {
     return latest.summary;
   }
-  if (run.currentStep !== undefined) {
+  if (run.currentStep !== undefined && !isGenericApprovalDecisionText(run.currentStep)) {
     return run.currentStep;
   }
   void stage;

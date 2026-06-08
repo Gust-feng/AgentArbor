@@ -8,8 +8,10 @@ import { projectChatWorkline, type ChatWorklineProjection, type WorklineTaskStat
 import type { LiveRunBuffer } from "./panel-ui-live-run-buffer.js";
 import { firstNonEmptyText, hasNonEmptyText } from "./panel-assistant-output.js";
 import {
+  isLowValueUserDecisionNode,
   nodesForRun,
 } from "./panel-transcript-node-projection.js";
+import { isGenericApprovalDecisionText } from "./confirmation-copy.js";
 
 export type ChatActiveConversationTurn = {
   readonly turnId: string;
@@ -171,6 +173,9 @@ function canUseConversationTurnAsAnswer<TPending>(input: {
   if (input.run.status !== "running" || input.turn.content.trim().length === 0) {
     return false;
   }
+  if (isGenericApprovalDecisionText(input.turn.content)) {
+    return false;
+  }
   const currentNodes = input.currentRunId === undefined
     ? []
     : input.transcriptNodes.filter((node) => node.runId === input.currentRunId);
@@ -182,7 +187,7 @@ function hasToolOrApprovalBoundary(nodes: readonly ChatActiveTranscriptNode[]): 
   return nodes.some((node) =>
     node.kind === "tool" ||
     node.kind === "confirmation" ||
-    node.kind === "user_decision"
+    (node.kind === "user_decision" && !isLowValueUserDecisionNode(node))
   );
 }
 

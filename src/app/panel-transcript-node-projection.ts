@@ -1,6 +1,7 @@
 import { isStaleModelProgressSummary } from "./panel-model-progress-copy.js";
 import { userVisibleAnswer } from "./panel-assistant-visible-text.js";
 import { genericItemLabel } from "./panel-transcript-tool-format.js";
+import { isGenericApprovalDecisionText } from "./confirmation-copy.js";
 
 export type TranscriptObservationRefLike = {
   readonly kind: string;
@@ -157,6 +158,12 @@ export function isFileReadNode(node: ProjectableTranscriptNode): boolean {
     node.title.includes("读取文件");
 }
 
+export function isLowValueUserDecisionNode(node: ProjectableTranscriptNode): boolean {
+  return node.kind === "user_decision" &&
+    node.phase === "approved" &&
+    isGenericApprovalDecisionText(node.text ?? node.summary ?? node.title);
+}
+
 export function normalizedToolName(value: string | undefined): string {
   return value?.trim().toLowerCase() ?? "";
 }
@@ -250,7 +257,10 @@ function isLowValueNode(node: ProjectableTranscriptNode): boolean {
   if (node.kind === "thinking" || isModelSideOutputNode(node)) {
     return false;
   }
-  if (node.kind === "tool" || node.kind === "confirmation" || node.kind === "user_decision") {
+  if (node.kind === "user_decision") {
+    return isLowValueUserDecisionNode(node);
+  }
+  if (node.kind === "tool" || node.kind === "confirmation") {
     return false;
   }
   return lowValueCopy(node.text ?? node.summary ?? node.title);

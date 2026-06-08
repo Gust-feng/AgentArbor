@@ -6,6 +6,7 @@ import {
   chunkText,
   modelFailedSummary,
   modelFailureStreamDetail,
+  userGuidanceSummary,
   visibleOutputText,
 } from "./panel-run-stream-copy.js";
 
@@ -49,6 +50,16 @@ test("panel agent note copy keeps received-goal activity minimal", () => {
   assert.equal(note?.agentLabel, "用户");
   assert.equal(note?.summary, "消息已收到。");
   assert.equal(note?.summary.includes("调试区"), false);
+});
+
+test("panel agent note copy does not invent approval progress", () => {
+  const note = agentNoteForEvent({ type: "user_approval.received" } as Parameters<typeof agentNoteForEvent>[0], {
+    decision: "approve_once",
+  });
+
+  assert.equal(note, undefined);
+  assert.equal(userGuidanceSummary({ decision: "guidance", note: "只列出文件名。" }), "已补充要求：只列出文件名。");
+  assert.equal(userGuidanceSummary({ decision: "guidance" }), "已补充要求。");
 });
 
 function visibleTextOutput(value: string): ModelVisibleOutputProjection {

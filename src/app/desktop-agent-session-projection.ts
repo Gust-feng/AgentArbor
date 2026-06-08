@@ -173,31 +173,11 @@ function activityFromEventEntry(entry: EventLogEntry): readonly DesktopAgentActi
   const sourceRefs = [`event:${entry.message.id}`];
   switch (entry.type) {
     case "goal.received":
-      return [activity(entry, "task_received", "消息已收到", "开始处理。", "completed", sourceRefs)];
+      return [];
     case "model.requested":
-      return [
-        activity(
-          entry,
-          "model_requested",
-          "正在处理",
-          "正在整理回答或下一步动作。",
-          "running",
-          sourceRefs,
-          refsFromPayload(payload),
-        ),
-      ];
+      return [];
     case "model.completed":
-      return [
-        activity(
-          entry,
-          "model_completed",
-          "已更新",
-          "继续处理。",
-          "completed",
-          sourceRefs,
-          refsFromPayload(payload),
-        ),
-      ];
+      return [];
     case "model.failed":
       return [
         activity(

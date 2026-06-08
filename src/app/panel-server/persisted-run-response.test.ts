@@ -160,6 +160,56 @@ test("persisted user-action statuses restore concrete confirmation without gener
   assert.equal(JSON.stringify(needsInput).includes("需要你补充材料后继续"), false);
 });
 
+test("persisted ordinary responses omit restored approved confirmations from visible streams", () => {
+  const base = runtimeSnapshot();
+  const response = createPersistedPanelRunResponse({
+    snapshot: {
+      ...base,
+      confirmations: [
+        {
+          confirmationId: "confirmation-approved",
+          runId: "run-1",
+          conversationId: "conversation-1",
+          status: "approved",
+          title: "继续处理",
+          actionSummary: "运行命令：pnpm test",
+          affectedResources: [],
+          riskLevel: "medium",
+          requestedAt: "2026-05-31T00:00:04.000Z",
+          decidedAt: "2026-05-31T00:00:05.000Z",
+          eventRefs: ["confirmation:confirmation-approved"],
+        },
+        {
+          confirmationId: "confirmation-denied",
+          runId: "run-1",
+          conversationId: "conversation-1",
+          status: "denied",
+          title: "删除文件",
+          actionSummary: "删除文件：old.txt",
+          affectedResources: [],
+          riskLevel: "medium",
+          requestedAt: "2026-05-31T00:00:06.000Z",
+          decidedAt: "2026-05-31T00:00:07.000Z",
+          eventRefs: ["confirmation:confirmation-denied"],
+        },
+      ],
+    },
+    config: modelConfig(),
+    informationAccess: informationAccess(),
+  });
+  const serialized = JSON.stringify({
+    events: response.transcript.events,
+    nodes: response.transcriptNodes,
+  });
+
+  assert.equal(response.transcript.events.some((event) => event.type === "run.resumed"), false);
+  assert.equal(response.transcript.events.some((event) => event.summary === "已继续。"), false);
+  assert.equal(response.transcript.events.some((event) => event.type === "user_approval.received"), true);
+  assert.equal(response.transcript.events.find((event) => event.type === "user_approval.received")?.agentLabel, "用户");
+  assert.equal(serialized.includes("继续处理"), false);
+  assert.equal(serialized.includes("已不执行"), true);
+});
+
 test("persisted completed ordinary runs do not invent result summaries when none were stored", () => {
   const response = createPersistedPanelRunResponse({
     snapshot: runtimeSnapshotWithStatus("completed"),

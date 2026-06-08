@@ -131,12 +131,8 @@ export function confirmationSummary(payload: Readonly<Record<string, unknown>>):
 }
 
 export function userGuidanceSummary(payload: Readonly<Record<string, unknown>>): string {
-  const decision = stringOrUndefined(payload.decision) ?? stringOrUndefined(payload.status);
   const note = stringOrUndefined(payload.note) ?? stringOrUndefined(payload.guidance);
-  if (decision !== undefined && note !== undefined) {
-    return `用户已${decision}：${note}`;
-  }
-  return note ?? "用户已补充要求，工作可以继续。";
+  return note === undefined ? "已补充要求。" : `已补充要求：${note}`;
 }
 
 export function agentNoteForEvent(
@@ -172,8 +168,6 @@ export function agentNoteForEvent(
       return { agentLabel: "结果整理", summary: "结果材料需要修订或补充。", status: "running" };
     case "user_approval.requested":
       return { agentLabel: "待处理", summary: "继续前需要用户判断。", status: "running" };
-    case "user_approval.received":
-      return { agentLabel: "继续处理", summary: "用户反馈已收到，工作继续推进。", status: "completed" };
     default:
       return undefined;
   }

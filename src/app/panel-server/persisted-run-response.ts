@@ -27,7 +27,7 @@ import { friendlyUserFacingFailureText } from "../visible-text-safety.js";
 import { compactRuntimeText } from "./runtime-records.js";
 import type { PanelConversationReadModel } from "../panel-conversations.js";
 import { cleanOrdinaryToolText } from "../ordinary-tool-copy.js";
-import { cleanConfirmationSummary } from "../confirmation-copy.js";
+import { cleanConfirmationSummary, isGenericApprovalDecisionText } from "../confirmation-copy.js";
 import {
   restoredRunResultProjection,
   restoredRunTerminalSummary,
@@ -283,6 +283,9 @@ export function createPersistedStreamEvents(
     if (confirmation.decidedAt === undefined) {
       continue;
     }
+    if (snapshot.run.runMode === "agent" && confirmation.status === "approved") {
+      continue;
+    }
     const type: PanelRunStreamEvent["type"] =
       confirmation.status === "approved"
         ? "run.resumed"
@@ -295,7 +298,7 @@ export function createPersistedStreamEvents(
       sequence: events.length + 1,
       type,
       createdAt: confirmation.decidedAt,
-      agentLabel: type === "run.resumed" ? agentLabel : type === "user_approval.received" ? "继续处理" : "补充要求",
+      agentLabel: type === "run.resumed" ? agentLabel : type === "user_approval.received" ? "用户" : "补充要求",
       summary: restoredConfirmationDecisionSummary(confirmation),
       status: confirmation.status === "denied" ? "blocked" : confirmation.status === "guidance" ? "pending" : "completed",
       sourceRefs: [`confirmation:${confirmation.confirmationId}`],
@@ -422,7 +425,10 @@ function hasPersistedUserVisibleWorkActivity(events: readonly RuntimeEventRecord
     if (event.type === "tool.requested" || event.type === "tool.completed" || event.type === "tool.failed") {
       return true;
     }
-    if (event.type === "user_approval.requested" || event.type === "user_approval.received") {
+    if (event.type === "user_approval.requested") {
+      return true;
+    }
+    if (event.type === "user_approval.received" && !isGenericApprovalDecisionText(event.summary)) {
       return true;
     }
     return false;
@@ -441,7 +447,7 @@ function persistedStreamAgentLabel(type: PanelRunStreamEvent["type"]): string {
     return "待处理";
   }
   if (type === "user_approval.received") {
-    return "继续处理";
+    return "用户";
   }
   if (type === "user.guidance") {
     return "补充要求";

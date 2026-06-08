@@ -1152,7 +1152,7 @@ test("InMemoryBasicAgentRunJobStore labels self stream events from frozen agent 
     confirmationId: "confirmation-custom-agent",
     resumedAt: "2026-06-02T00:00:00.000Z",
   });
-  assert.equal(runJobs.get(resumed.runId)?.streamEvents.at(-1)?.agentLabel, "Custom Basic Agent");
+  assert.equal(runJobs.get(resumed.runId)?.streamEvents.at(-1), undefined);
 
   const fallback = createRun("cancel with blank agent label", {
     ...defaultAgentDefinitionRef(),

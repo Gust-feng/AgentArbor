@@ -196,14 +196,17 @@ export class InMemoryBasicAgentRunJobStore implements BasicAgentRunJobStore {
       decision,
     ];
     job.updatedAt = decision.decidedAt;
+    if (job.runMode === "agent" && decision.decision === "approve_once") {
+      return;
+    }
     this.appendStreamEvent(decision.runId, {
       eventId: `${decision.runId}:confirmation:${decision.confirmationId}:${decision.decision}`,
       runId: decision.runId,
       type: decision.decision === "guidance" ? "user.guidance" : "user_approval.received",
       createdAt: decision.decidedAt,
-      agentLabel: decision.decision === "guidance" ? "补充要求" : "继续处理",
+      agentLabel: decision.decision === "guidance" ? "补充要求" : "用户",
       summary: basicConfirmationDecisionSummary(decision),
-      status: "running",
+      status: decision.decision === "deny" ? "blocked" : "running",
       sourceRefs: [`confirmation:${decision.confirmationId}`],
       modelCallRefs: [],
       toolCallRefs: [],
@@ -220,6 +223,9 @@ export class InMemoryBasicAgentRunJobStore implements BasicAgentRunJobStore {
   }): void {
     const job = this.requireJob(runId);
     if (isTerminalBasicAgentJobStatus(job.status)) {
+      return;
+    }
+    if (job.runMode === "agent") {
       return;
     }
     appendStreamEventToJob(job, {

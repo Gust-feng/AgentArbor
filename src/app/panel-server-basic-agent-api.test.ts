@@ -337,11 +337,8 @@ test("basic agent confirmation decisions persist approve and guidance outcomes s
     );
     assert.equal(approveRuntime.body.snapshot.confirmations[0].status, "approved");
     assert.equal(approveRuntime.body.snapshot.toolCalls.some((call: { status: string }) => call.status === "completed"), true);
-    assert.equal(approveEvents.body.events.some((event: { type: string }) => event.type === "run.resumed"), true);
-    assert.equal(
-      approveEvents.body.events.some((event: { type: string; status: string }) => event.type === "user_approval.received" && event.status === "running"),
-      true
-    );
+    assert.equal(approveEvents.body.events.some((event: { type: string }) => event.type === "run.resumed"), false);
+    assert.equal(approveEvents.body.events.some((event: { type: string }) => event.type === "user_approval.received"), false);
     assert.equal(approveEvents.body.events.some((event: { type: string }) => event.type === "tool.completed"), true);
     const approvedConfirmationSequence = approveEvents.body.events.find((event: { type: string }) => event.type === "confirmation.needed")?.sequence;
     const approvedCompletedSequence = approveEvents.body.events.find((event: { type: string }) => event.type === "tool.completed")?.sequence;
@@ -457,7 +454,8 @@ test("basic agent shell-style run_command executes after confirmation without sa
     assert.equal(commandCall?.status, "completed");
     assert.equal(commandCall?.command, "echo approval-review");
     assert.equal(events.body.events.some((event: { type: string }) => event.type === "confirmation.needed"), true);
-    assert.equal(events.body.events.some((event: { type: string }) => event.type === "run.resumed"), true);
+    assert.equal(events.body.events.some((event: { type: string }) => event.type === "run.resumed"), false);
+    assert.equal(events.body.events.some((event: { type: string }) => event.type === "user_approval.received"), false);
     assert.equal(events.body.events.some((event: { type: string }) => event.type === "tool.completed"), true);
     assert.equal(events.body.events.some((event: { type: string }) => event.type === "tool.failed"), false);
     assert.equal(events.text.includes("Sandbox policy rejected command: echo approval-review"), false);

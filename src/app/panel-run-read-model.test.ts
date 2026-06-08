@@ -154,7 +154,7 @@ test("panel transcript exposes delegation and parent synthesis as semantic strea
   assertOrdinaryStreamHasNoInternalTerms(transcript.events.map(ordinaryEventVisibleText).join("\n"));
 });
 
-test("panel transcript projects confirmation and user guidance as safe ordinary-agent events", () => {
+test("panel transcript projects concrete user decisions without generic approval progress", () => {
   const transcript = createPanelRunTranscript({
     runId: "run-panel-confirmation",
     status: "completed",
@@ -179,22 +179,43 @@ test("panel transcript projects confirmation and user guidance as safe ordinary-
         type: "user_approval.received",
         payload: {
           confirmationId: "confirmation-1",
+          decision: "approve_once",
+        },
+      }),
+      eventEntry({
+        sequence: 4,
+        type: "user_approval.received",
+        payload: {
+          confirmationId: "confirmation-2",
           decision: "拒绝",
           note: "先不要读取，直接说明需要哪些材料。",
         },
       }),
+      eventEntry({
+        sequence: 5,
+        type: "user_approval.received",
+        payload: {
+          confirmationId: "confirmation-3",
+          decision: "guidance",
+          note: "只列出需要的文件名。",
+        },
+      }),
     ],
     createdAt: "2026-05-07T00:00:00.000Z",
-    updatedAt: "2026-05-07T00:00:03.000Z",
+    updatedAt: "2026-05-07T00:00:05.000Z",
   });
 
   assert.deepEqual(
     transcript.events.map((event) => event.type),
-    ["run.started", "confirmation.needed", "user.guidance"],
+    ["run.started", "confirmation.needed", "user_approval.received", "user.guidance"],
   );
   assert.equal(transcript.events[1]?.summary?.includes("请选择要读取的文件"), true);
   assert.equal(transcript.events[1]?.summary?.includes("未授权前不会读取本地文件"), false);
   assert.equal(transcript.events[2]?.summary?.includes("先不要读取"), true);
+  assert.equal(transcript.events[2]?.summary?.includes("已不执行"), true);
+  assert.equal(transcript.events[3]?.summary?.includes("只列出需要的文件名"), true);
+  assert.equal(JSON.stringify(transcript.events).includes("approve_once"), false);
+  assert.equal(JSON.stringify(transcript.events).includes("继续处理"), false);
   assert.equal(JSON.stringify(transcript).includes("raw prompt"), false);
 });
 

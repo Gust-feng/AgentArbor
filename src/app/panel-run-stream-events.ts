@@ -196,8 +196,11 @@ function hasUserVisibleWorkActivity(
     if (entry.type === "tool.requested" || entry.type === "tool.completed" || entry.type === "tool.failed") {
       return true;
     }
-    if (entry.type === "user_approval.requested" || entry.type === "user_approval.received") {
+    if (entry.type === "user_approval.requested") {
       return true;
+    }
+    if (entry.type === "user_approval.received") {
+      return userApprovalReceivedKind(asRecord(entry.message.payload)) !== "approved";
     }
     return !ordinaryAgentProjection && isAgentFabricStreamType(entry.type);
   });
@@ -394,6 +397,21 @@ function appendStreamEventsForEvent(input: {
   }
 
   if (input.entry.type === "user_approval.received") {
+    const decisionKind = userApprovalReceivedKind(payload);
+    if (decisionKind === "approved") {
+      return;
+    }
+    if (decisionKind === "denied") {
+      input.push({
+        ...base,
+        eventId: `${input.runId}:event:${input.entry.sequence}:user_approval.received`,
+        type: "user_approval.received",
+        agentLabel: "用户",
+        summary: deniedUserApprovalSummary(payload),
+        status: "blocked",
+      });
+      return;
+    }
     input.push({
       ...base,
       eventId: `${input.runId}:event:${input.entry.sequence}:user.guidance`,
@@ -428,6 +446,62 @@ function appendStreamEventsForEvent(input: {
       status: note.status,
     });
   }
+}
+
+type UserApprovalReceivedKind = "approved" | "denied" | "guidance";
+
+function userApprovalReceivedKind(payload: Readonly<Record<string, unknown>>): UserApprovalReceivedKind {
+  const decision = normalizedDecisionText(
+    stringOrUndefined(payload.decision) ??
+      stringOrUndefined(payload.status) ??
+      stringOrUndefined(payload.action)
+  );
+  if (
+    decision === "deny" ||
+    decision === "denied" ||
+    decision === "reject" ||
+    decision === "rejected" ||
+    decision === "refuse" ||
+    decision === "refused" ||
+    decision === "拒绝" ||
+    decision === "不执行" ||
+    decision === "取消"
+  ) {
+    return "denied";
+  }
+  if (
+    decision === "guidance" ||
+    decision === "needsinput" ||
+    decision === "补充" ||
+    decision === "补充要求"
+  ) {
+    return "guidance";
+  }
+  if (
+    decision === "approveonce" ||
+    decision === "approve" ||
+    decision === "approved" ||
+    decision === "continue" ||
+    decision === "ok" ||
+    decision === "批准" ||
+    decision === "同意" ||
+    decision === "继续" ||
+    decision === "已批准"
+  ) {
+    return "approved";
+  }
+  return stringOrUndefined(payload.note) !== undefined || stringOrUndefined(payload.guidance) !== undefined
+    ? "guidance"
+    : "approved";
+}
+
+function deniedUserApprovalSummary(payload: Readonly<Record<string, unknown>>): string {
+  const note = stringOrUndefined(payload.note) ?? stringOrUndefined(payload.guidance);
+  return note === undefined ? "已不执行。" : `已不执行：${note}`;
+}
+
+function normalizedDecisionText(value: string | undefined): string {
+  return value?.replace(/[\s_ -]/g, "").trim().toLowerCase() ?? "";
 }
 
 function isAgentFabricStreamType(type: ArborMessageType): type is Extract<

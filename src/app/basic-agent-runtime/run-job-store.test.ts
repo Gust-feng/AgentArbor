@@ -107,6 +107,47 @@ test("InMemoryBasicAgentRunJobStore keeps completed terminal state stable", () =
   assertFrozenFacts(finalJob?.completed);
 });
 
+test("InMemoryBasicAgentRunJobStore keeps approved confirmations out of ordinary visible stream", () => {
+  const runJobs = new InMemoryBasicAgentRunJobStore();
+  const job = createDesktopAgentJob(runJobs);
+
+  runJobs.recordConfirmationDecision({
+    runId: job.runId,
+    confirmationId: "confirmation-approved",
+    decision: "approve_once",
+    decidedAt: "2026-06-07T00:01:00.000Z",
+  });
+  runJobs.recordRunResumed(job.runId, {
+    confirmationId: "confirmation-approved",
+    resumedAt: "2026-06-07T00:02:00.000Z",
+  });
+  runJobs.recordConfirmationDecision({
+    runId: job.runId,
+    confirmationId: "confirmation-denied",
+    decision: "deny",
+    decidedAt: "2026-06-07T00:03:00.000Z",
+  });
+  runJobs.recordConfirmationDecision({
+    runId: job.runId,
+    confirmationId: "confirmation-guidance",
+    decision: "guidance",
+    guidance: "只列出风险。",
+    decidedAt: "2026-06-07T00:04:00.000Z",
+  });
+
+  const current = runJobs.get(job.runId);
+  const streamText = JSON.stringify(current?.streamEvents);
+
+  assert.equal(current?.confirmationDecisions.length, 3);
+  assert.equal(current?.streamEvents.some((event) => event.type === "run.resumed"), false);
+  assert.equal(current?.streamEvents.some((event) => event.summary === "已继续。"), false);
+  assert.deepEqual(current?.streamEvents.map((event) => event.type), ["user_approval.received", "user.guidance"]);
+  assert.equal(current?.streamEvents[0]?.agentLabel, "用户");
+  assert.equal(current?.streamEvents[0]?.status, "blocked");
+  assert.equal(current?.streamEvents[1]?.agentLabel, "补充要求");
+  assert.equal(streamText.includes("继续处理"), false);
+});
+
 function createDesktopAgentJob(runJobs: InMemoryBasicAgentRunJobStore): BasicAgentRunJob {
   const snapshot = capabilitySnapshot({
     snapshotId: "snapshot-created",

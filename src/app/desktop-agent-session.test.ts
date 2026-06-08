@@ -31,6 +31,18 @@ test("Desktop Agent Session answers ordinary questions without entering deep mod
   assert.equal(result.runtime.eventLog.types().includes("artifact.produced"), false);
 });
 
+test("Desktop Agent Session activity omits generic message and model progress", async () => {
+  const result = await runDesktopAgentSession("你是什么模型？", { aiMode: "fake" });
+  const activityText = JSON.stringify(result.activity);
+
+  assert.equal(result.status, "completed");
+  assert.equal(result.activity.some((item) => item.type === "model_requested"), false);
+  assert.equal(result.activity.some((item) => item.type === "model_completed"), false);
+  assert.equal(result.activity.some((item) => item.type === "task_received"), false);
+  assert.equal(activityText.includes("正在处理"), false);
+  assert.equal(activityText.includes("继续处理"), false);
+});
+
 test("Desktop Agent Session defaults aiMode from the frozen capability snapshot", async () => {
   const result = await runDesktopAgentSession("使用本轮冻结的默认模型模式", {
     capabilitySnapshot: desktopCapabilitySnapshot([], {

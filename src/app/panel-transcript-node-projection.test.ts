@@ -250,6 +250,52 @@ test("panel transcript confirmation ids fall back to the owning tool call id", (
   assert.deepEqual(activityVisibleNodes(projected).map((item) => item.kind), ["confirmation"]);
 });
 
+test("panel transcript nodes can restrict confirmation nodes to the current pending request", () => {
+  const events = [
+    {
+      eventId: "run-1:event:1:confirmation.needed",
+      runId: "run-1",
+      sequence: 1,
+      type: "confirmation.needed",
+      createdAt: "2026-06-04T00:00:00.000Z",
+      summary: "运行命令：python 3",
+      sourceRefs: [],
+      modelCallRefs: [],
+      toolCallRefs: ["call-command"],
+    },
+    {
+      eventId: "run-1:event:2:tool.failed",
+      runId: "run-1",
+      sequence: 2,
+      type: "tool.failed",
+      createdAt: "2026-06-04T00:00:01.000Z",
+      summary: "python 3 · Sandbox policy rejected command.",
+      sourceRefs: [],
+      modelCallRefs: [],
+      toolCallRefs: ["call-command"],
+    },
+  ];
+
+  const stale = createPanelTranscriptNodes(events, { confirmationMode: "current" });
+  const current = createPanelTranscriptNodes(events, {
+    confirmationMode: "current",
+    pendingConfirmation: {
+      confirmationId: "confirmation-call-command",
+      runId: "run-1",
+      title: "运行命令",
+      actionSummary: "运行命令：python 3",
+      affectedResources: [],
+      riskLevel: "medium",
+      requestedAt: "2026-06-04T00:00:00.000Z",
+      sourceRefs: ["tool:call-command"],
+    },
+  });
+
+  assert.equal(stale.some((item) => item.kind === "confirmation"), false);
+  assert.equal(stale.some((item) => item.eventType === "tool.failed"), true);
+  assert.equal(current.find((item) => item.kind === "confirmation")?.confirmation?.confirmationId, "confirmation-call-command");
+});
+
 test("panel transcript nodes suppress ordinary startup and placeholder events", () => {
   const projected = createPanelTranscriptNodes([
     panelEvent({

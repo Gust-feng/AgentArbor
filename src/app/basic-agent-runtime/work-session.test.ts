@@ -134,6 +134,160 @@ test("work session read model surfaces approval as the main stage", () => {
   assert.equal(workSession.deliverable, undefined);
 });
 
+test("work session read model does not keep stale canvas confirmation after approval resumes", () => {
+  const run = basicRun("running");
+  const workSession = createDesktopWorkSessionReadModel({
+    run,
+    events: [event(run.runId, "confirmation.needed", "运行命令：pnpm test", "approval_needed")],
+    canvas: {
+      kind: "desktop_agent_canvas",
+      taskSoil: {
+        taskSoilId: "soil-stale-confirmation",
+        goalSummary: "运行命令",
+        contextRefs: [],
+        permissionBoundaryRefs: ["ask:before-command"],
+      },
+      agent: {
+        status: "confirmation_needed",
+        pendingConfirmation: {
+          confirmationId: "confirmation-command",
+          title: "运行命令",
+          question: "运行命令：pnpm test",
+          consequence: "",
+          riskLevel: "medium",
+          modelCallRefs: ["model-call-1"],
+          toolCallRefs: ["tool-call-1"],
+          sourceRefs: ["tool:tool-call-1"],
+        },
+        modelCallRefs: ["model-call-1"],
+        toolCallRefs: ["tool-call-1"],
+        activity: [],
+      },
+      explanation: {
+        resultWhyReasonable: "safe",
+        observationPanelRole: "safe",
+      },
+    },
+  });
+
+  assert.notEqual(workSession.stage, "awaiting_approval");
+  assert.equal(workSession.pendingConfirmation, undefined);
+  assert.equal(workSession.safetySummary.pendingActionCount, 0);
+  assert.equal(workSession.transcriptNodes?.some((node) => node.kind === "confirmation"), false);
+});
+
+test("work session read model keeps unfinished status matrix explicit without stale confirmations", () => {
+  const cases: readonly {
+    readonly name: string;
+    readonly run: BasicAgentRun;
+    readonly terminalEventType: string;
+    readonly terminalEventStatus: BasicAgentRun["status"];
+    readonly terminalEventSummary: string;
+    readonly expectedStage: ReturnType<typeof createDesktopWorkSessionReadModel>["stage"];
+    readonly expectsPendingConfirmation: boolean;
+  }[] = [
+    {
+      name: "approval-required",
+      run: workViewMatrixRun("approval_needed", "待处理", "运行命令：pnpm test"),
+      terminalEventType: "confirmation.needed",
+      terminalEventStatus: "approval_needed",
+      terminalEventSummary: "运行命令：pnpm test",
+      expectedStage: "awaiting_approval",
+      expectsPendingConfirmation: true,
+    },
+    {
+      name: "out-of-fuel",
+      run: workViewMatrixRun("blocked", "需要处理", "当前轮次已到上限，任务没有完成。"),
+      terminalEventType: "run.blocked",
+      terminalEventStatus: "blocked",
+      terminalEventSummary: "当前轮次已到上限，任务没有完成。",
+      expectedStage: "blocked",
+      expectsPendingConfirmation: false,
+    },
+    {
+      name: "context-overflow",
+      run: workViewMatrixRun("blocked", "需要处理", "上下文整理没有成功，任务没有完成。"),
+      terminalEventType: "run.blocked",
+      terminalEventStatus: "blocked",
+      terminalEventSummary: "上下文整理没有成功，任务没有完成。",
+      expectedStage: "blocked",
+      expectsPendingConfirmation: false,
+    },
+    {
+      name: "model-failed",
+      run: workViewMatrixRun("failed", "未完成", "模型调用失败。"),
+      terminalEventType: "run.failed",
+      terminalEventStatus: "failed",
+      terminalEventSummary: "模型调用失败。",
+      expectedStage: "failed",
+      expectsPendingConfirmation: false,
+    },
+    {
+      name: "cancelled",
+      run: workViewMatrixRun("cancelled", "已取消", "运行已取消。"),
+      terminalEventType: "run.cancelled",
+      terminalEventStatus: "cancelled",
+      terminalEventSummary: "运行已取消。",
+      expectedStage: "cancelled",
+      expectsPendingConfirmation: false,
+    },
+  ];
+
+  for (const item of cases) {
+    const staleConfirmationEvent = {
+      ...event(item.run.runId, "confirmation.needed", "运行命令：pnpm test", "approval_needed"),
+      sequence: 1,
+    };
+    const terminalEvent = {
+      ...event(item.run.runId, item.terminalEventType, item.terminalEventSummary, item.terminalEventStatus),
+      sequence: 2,
+    };
+    const workSession = createDesktopWorkSessionReadModel({
+      run: item.run,
+      events: [staleConfirmationEvent, terminalEvent],
+      canvas: {
+        kind: "desktop_agent_canvas",
+        taskSoil: {
+          taskSoilId: `soil-${item.name}`,
+          goalSummary: "运行命令",
+          contextRefs: [],
+          permissionBoundaryRefs: ["ask:before-command"],
+        },
+        agent: {
+          status: "confirmation_needed",
+          pendingConfirmation: {
+            confirmationId: "confirmation-command",
+            title: "运行命令",
+            question: "运行命令：pnpm test",
+            consequence: "",
+            riskLevel: "medium",
+            modelCallRefs: ["model-call-1"],
+            toolCallRefs: ["tool-call-1"],
+            sourceRefs: ["tool:tool-call-1"],
+          },
+          modelCallRefs: ["model-call-1"],
+          toolCallRefs: ["tool-call-1"],
+          activity: [],
+        },
+        explanation: {
+          resultWhyReasonable: "safe",
+          observationPanelRole: "safe",
+        },
+      },
+    });
+
+    assert.equal(workSession.stage, item.expectedStage, item.name);
+    assert.equal(workSession.pendingConfirmation !== undefined, item.expectsPendingConfirmation, item.name);
+    assert.equal(workSession.safetySummary.pendingActionCount, item.expectsPendingConfirmation ? 1 : 0, item.name);
+    if (!item.expectsPendingConfirmation) {
+      assert.equal(workSession.transcriptNodes.some((node) => node.kind === "confirmation"), false, item.name);
+      assert.notEqual(workSession.stage, "awaiting_approval", item.name);
+      assert.notEqual(workSession.stage, "completed", item.name);
+      assert.equal(JSON.stringify(workSession).includes("正在处理"), false, item.name);
+    }
+  }
+});
+
 test("work session read model preserves concrete confirmation action", () => {
   const run = basicRun("approval_needed");
   const workSession = createDesktopWorkSessionReadModel({
@@ -179,6 +333,34 @@ test("work session read model preserves concrete confirmation action", () => {
 
   assert.equal(workSession.pendingConfirmation?.actionSummary, "删除文件：C:\\repo\\old.txt");
   assert.equal(workSession.transcriptNodes?.some((node) => node.confirmation?.actionSummary === "删除文件：C:\\repo\\old.txt"), true);
+});
+
+test("work session transcript only emits a confirmation node for the current pending confirmation", () => {
+  const run = basicRun("running");
+  const confirmationEvent: RunEvent = {
+    ...event(run.runId, "confirmation.needed", "运行命令：python 3", "approval_needed"),
+    refs: [{ kind: "tool_call", id: "call-command" }],
+  };
+  const pending = {
+    confirmationId: "confirmation-call-command",
+    runId: run.runId,
+    title: "运行命令",
+    actionSummary: "运行命令：python 3",
+    affectedResources: [],
+    riskLevel: "medium" as const,
+    requestedAt: "2026-05-12T00:00:01.000Z",
+    sourceRefs: ["tool:call-command"],
+  };
+
+  const staleNodes = transcriptNodesFromRunEvents([confirmationEvent], undefined);
+  const mismatchedNodes = transcriptNodesFromRunEvents([
+    confirmationEvent,
+  ], { ...pending, confirmationId: "confirmation-other" });
+  const currentNodes = transcriptNodesFromRunEvents([confirmationEvent], pending);
+
+  assert.equal(staleNodes.some((node) => node.kind === "confirmation"), false);
+  assert.equal(mismatchedNodes.some((node) => node.kind === "confirmation"), false);
+  assert.equal(currentNodes.find((node) => node.kind === "confirmation")?.confirmation?.confirmationId, "confirmation-call-command");
 });
 
 test("work session read model keeps tool evidence out of ordinary message deliverables", () => {
@@ -693,6 +875,25 @@ function basicRun(status: BasicAgentRun["status"]): BasicAgentRun {
     updatedAt: "2026-05-12T00:00:01.000Z",
     requiresUserAction: status === "approval_needed",
     eventCursor: { lastSequence: 1, eventCount: 1 },
+  };
+}
+
+function workViewMatrixRun(
+  status: BasicAgentRun["status"],
+  title: string,
+  currentStep: string
+): BasicAgentRun {
+  return {
+    runId: `matrix-${status}-${title}`,
+    title,
+    goalSummary: "测试任务",
+    status,
+    runMode: "agent",
+    createdAt: "2026-05-12T00:00:00.000Z",
+    updatedAt: "2026-05-12T00:00:01.000Z",
+    currentStep,
+    requiresUserAction: status === "approval_needed" || status === "blocked" || status === "needs_input",
+    eventCursor: { lastSequence: 2, eventCount: 2 },
   };
 }
 

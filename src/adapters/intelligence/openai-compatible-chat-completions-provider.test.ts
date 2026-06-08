@@ -941,6 +941,10 @@ test("OpenAI-compatible adapter maps tools, tool results, and provider tool call
       content: JSON.stringify({ status: "completed", output: { results: [] } }),
     },
   ]);
+  const serializedMessages = JSON.stringify(calls[0]?.body.messages);
+  assert.equal(serializedMessages.includes("Search the web."), false);
+  assert.equal(serializedMessages.includes("parameters"), false);
+  assert.equal(serializedMessages.includes("Allowed tools"), false);
 });
 
 test("OpenAI-compatible adapter returns provider_config failure when fetch is unavailable", async () => {

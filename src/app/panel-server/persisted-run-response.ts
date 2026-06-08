@@ -161,7 +161,8 @@ export function createPersistedRunTrace(
   snapshot: RuntimeRunSnapshot,
   status: PanelRunStatus
 ): PanelRunTraceReadModel {
-  const events = snapshot.events.map((event) => ({
+  const traceEvents = persistedTraceEvents(snapshot);
+  const events = traceEvents.map((event) => ({
     sequence: event.sequence,
     type: event.type,
     summary: event.summary,
@@ -176,26 +177,26 @@ export function createPersistedRunTrace(
     createdAt: event.createdAt,
     recordedAt: event.recordedAt,
   }));
-  const lastEvent = lastPersistedTraceEvent(snapshot);
+  const lastEvent = traceEvents.at(-1);
   return {
     status,
     currentPhase: persistedPhaseFor(lastEvent?.type, status, snapshot.run.runMode),
     currentStage: persistedStageFor(lastEvent?.type, status, snapshot.run.runMode),
     eventCursor: {
       eventCount: events.length,
-      lastSequence: snapshot.events.at(-1)?.sequence ?? 0,
-      lastEventType: snapshot.events.at(-1)?.type,
+      lastSequence: lastEvent?.sequence ?? 0,
+      lastEventType: lastEvent?.type,
     },
     waitingPoint: persistedWaitingPoint(status, snapshot.run.runMode),
     events,
   };
 }
 
-function lastPersistedTraceEvent(snapshot: RuntimeRunSnapshot): RuntimeEventRecord | undefined {
+function persistedTraceEvents(snapshot: RuntimeRunSnapshot): readonly RuntimeEventRecord[] {
   if (snapshot.run.runMode !== "agent") {
-    return snapshot.events.at(-1);
+    return snapshot.events;
   }
-  return [...snapshot.events].reverse().find((event) => event.type === "goal.received" || isPersistedOrdinaryAgentRuntimeEvent(event.type));
+  return snapshot.events.filter((event) => event.type === "goal.received" || isPersistedOrdinaryAgentRuntimeEvent(event.type));
 }
 
 export function createPersistedStreamEvents(

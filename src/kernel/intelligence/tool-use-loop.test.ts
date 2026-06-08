@@ -101,6 +101,50 @@ test("executeToolUseLoop exposes only allowed registered tools to the model", as
   assert.equal(center.getCallCount(), 0);
 });
 
+test("executeToolUseLoop passes tools through request schema without mutating prompt messages", async () => {
+  const channel = new SequenceIntelligenceChannel([
+    textResponse("model-request-text", "Final answer with structured tools."),
+  ]);
+  const center = new TestToolBroker();
+  center.register("web_search", async () => ({ ok: true }));
+  center.register("read_file", async () => ({ ok: true }));
+  const request = createValidModelRequest({
+    sanitizedMessages: [
+      { role: "system", content: "Follow the ordinary agent contract.", ref: "system:test" },
+      { role: "user", content: "Use the available runtime safely.", ref: "goal-test" },
+    ],
+  });
+
+  const result = await executeToolUseLoop(
+    {
+      intelligenceChannel: channel,
+      toolCenter: center,
+      callerAgentId: "agent-test",
+      traceId: "trace-test",
+      goalId: "goal-test",
+      allowedTools: ["web_search", "read_file"],
+    },
+    request
+  );
+
+  assert.equal(result.stoppedReason, "no_tool_calls");
+  assert.deepEqual(channel.requests[0]?.tools?.map((tool) => tool.name), ["web_search", "read_file"]);
+  assert.deepEqual(
+    channel.requests[0]?.sanitizedMessages.map((message) => ({
+      role: message.role,
+      content: message.content,
+      ref: message.ref,
+    })),
+    request.sanitizedMessages.map((message) => ({
+      role: message.role,
+      content: message.content,
+      ref: message.ref,
+    }))
+  );
+  assert.equal(JSON.stringify(channel.requests[0]?.sanitizedMessages).includes("web_search"), false);
+  assert.equal(JSON.stringify(channel.requests[0]?.sanitizedMessages).includes("read_file"), false);
+});
+
 test("executeToolUseLoop can hide blocked internal tools from model-visible tools", async () => {
   const channel = new SequenceIntelligenceChannel([
     textResponse("model-request-text", "Final answer chosen by the agent."),
@@ -788,6 +832,30 @@ test("executeToolUseLoop fails instead of completing on incomplete final model f
     assert.equal(result.finalOutput.status, "failed");
     assert.equal(result.finalOutput.failure?.kind, "provider_response");
   }
+});
+
+test("executeToolUseLoop fails instead of completing on failed model responses", async () => {
+  const channel = new SequenceIntelligenceChannel([
+    failedResponse("model-request-failed", "Provider returned an error response."),
+  ]);
+
+  const result = await executeToolUseLoop(
+    {
+      intelligenceChannel: channel,
+      toolCenter: new TestToolBroker(),
+      callerAgentId: "agent-test",
+      traceId: "trace-test",
+      goalId: "goal-test",
+      allowedTools: [],
+    },
+    createValidModelRequest()
+  );
+
+  assert.equal(result.stoppedReason, "error");
+  assert.equal(result.finalOutput.status, "failed");
+  assert.equal(result.finalOutput.failure?.kind, "provider_response");
+  assert.equal(result.toolCalls.length, 0);
+  assert.equal(channel.requests.length, 1);
 });
 
 
@@ -1590,6 +1658,24 @@ function textResponse(requestId: string, text: string): ModelResponse {
     ...completedResponse(requestId, undefined),
     textOutput: text,
     finishReason: "stop",
+  };
+}
+
+function failedResponse(requestId: string, message: string): ModelResponse {
+  return {
+    ...completedResponse(requestId, undefined),
+    status: "failed",
+    finishReason: "error",
+    validation: {
+      status: "failed",
+      checkedAt: nowIso(),
+      issues: [{ code: "MODEL_PROVIDER_RESPONSE", message }],
+    },
+    failure: {
+      kind: "provider_response",
+      retryable: true,
+      message,
+    },
   };
 }
 

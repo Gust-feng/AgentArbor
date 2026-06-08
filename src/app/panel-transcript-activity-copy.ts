@@ -218,7 +218,7 @@ export function readableThinkingCopy(value: string): ActivityLineCopy | undefine
   const expandedDetail = readableExpandedModelText(value);
   if (expandedDetail.length === 0) return undefined;
   const detail = compact(takeNaturalSentences(expandedDetail.replace(/\s*\n+\s*/g, " "), 2), 180);
-  return detail === expandedDetail ? { detail } : { detail, expandedDetail };
+  return copyWithNonRepeatingExpandedDetail(detail, expandedDetail);
 }
 
 export function readableNarrationText(value: string): string | undefined {
@@ -235,7 +235,42 @@ export function readableNarrationCopy(value: string): ActivityLineCopy | undefin
   const expandedDetail = readableModelActivityText(candidate);
   if (expandedDetail.length === 0) return undefined;
   const detail = compact(takeNaturalSentences(expandedDetail, 2), 180);
-  return detail === expandedDetail ? { detail } : { detail, expandedDetail };
+  return copyWithNonRepeatingExpandedDetail(detail, expandedDetail);
+}
+
+function copyWithNonRepeatingExpandedDetail(detail: string, expandedDetail: string): ActivityLineCopy {
+  const rest = nonRepeatingExpandedDetail(detail, expandedDetail);
+  return rest === undefined ? { detail } : { detail, expandedDetail: rest };
+}
+
+function nonRepeatingExpandedDetail(detail: string, expandedDetail: string): string | undefined {
+  const expanded = expandedDetail.replace(/\s+/g, " ").trim();
+  const prefix = detail.replace(/…$/, "").replace(/\s+/g, " ").trim();
+  if (expanded.length === 0 || prefix.length === 0) return undefined;
+  if (expanded === prefix) return undefined;
+  if (detail.endsWith("…") && prefix.length < expanded.length) {
+    return cleanExpandedRemainder(expanded.slice(prefix.length), true);
+  }
+  if (!expanded.startsWith(prefix)) return expanded;
+  return cleanExpandedRemainder(expanded.slice(prefix.length), false);
+}
+
+function cleanExpandedRemainder(value: string, dropPartialSentence: boolean): string | undefined {
+  let rest = value
+    .replace(/^[\s,;:，；：、。.!?？!-]+/u, "")
+    .trim();
+  if (dropPartialSentence && shouldDropPartialSentence(rest)) {
+    const boundary = rest.search(/[。！？!?\.]\s+/u);
+    if (boundary >= 0) {
+      rest = rest.slice(boundary + 1).trim();
+    }
+  }
+  return rest.length === 0 ? undefined : rest;
+}
+
+function shouldDropPartialSentence(value: string): boolean {
+  const first = value.trim()[0];
+  return first !== undefined && /[a-z0-9]/u.test(first);
 }
 
 function toolVerb(node: ProjectableTranscriptNode): string {

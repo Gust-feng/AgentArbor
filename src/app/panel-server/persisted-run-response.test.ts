@@ -6,6 +6,8 @@ import {
   createPersistedPanelRunResponse,
   panelStatusFromRuntimeStatus,
 } from "./persisted-run-response.js";
+import { displayActivityItemsForNodes } from "../panel-transcript-activity-copy.js";
+import { activityVisibleNodes } from "../panel-transcript-node-projection.js";
 
 test("persisted run response restores safe transcript and tracking projections", () => {
   const response = createPersistedPanelRunResponse({
@@ -53,6 +55,11 @@ test("persisted run response restores safe transcript and tracking projections",
   assert.equal(JSON.stringify(response.transcript.events).includes("delegation-legacy"), false);
   assert.equal(JSON.stringify(response.transcript.events).includes("child-run-legacy"), false);
   assert.equal(JSON.stringify(response.transcript.events).includes("parent-synthesis-legacy"), false);
+  assert.equal(JSON.stringify(response.trace.events).includes("legacy-direction"), false);
+  assert.equal(JSON.stringify(response.trace.events).includes("legacy-report-artifact"), false);
+  assert.equal(JSON.stringify(response.trace.events).includes("delegation-legacy"), false);
+  assert.equal(JSON.stringify(response.trace.events).includes("child-run-legacy"), false);
+  assert.equal(JSON.stringify(response.trace.events).includes("parent-synthesis-legacy"), false);
   assert.equal(JSON.stringify(response.transcript.events).includes("已从本地记录恢复这次运行"), false);
   assert.equal(response.transcript.events.at(-1)?.agentLabel, "Custom Restored Agent");
   assert.equal(JSON.stringify(response.transcript.events).includes("正在判断下一步"), false);
@@ -117,6 +124,7 @@ test("persisted run response restores ordinary tool transcript without old diagn
     events: response.transcript.events,
     nodes: response.transcriptNodes,
   });
+  const activityText = JSON.stringify(displayActivityItemsForNodes(activityVisibleNodes(response.transcriptNodes)));
 
   assert.equal(response.transcript.events.some((event) => event.summary === "dir"), true);
   assert.equal(response.transcript.events.some((event) => event.detail?.preview === "README.md"), true);
@@ -126,6 +134,10 @@ test("persisted run response restores ordinary tool transcript without old diagn
   assert.equal(transcriptText.includes("32 -> 18 chars"), false);
   assert.equal(transcriptText.includes("目标："), false);
   assert.equal(transcriptText.includes("运行命令："), false);
+  assert.equal(activityText.includes("README.md"), true);
+  assert.equal(activityText.includes("目标："), false);
+  assert.equal(activityText.includes("bytes"), false);
+  assert.equal(activityText.includes("exit 0"), false);
 });
 
 test("persisted runtime running status restores as blocked ordinary panel state", () => {

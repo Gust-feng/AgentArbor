@@ -158,29 +158,21 @@ export class BasicAgentRunExecutor {
     await this.config.persistRun(this.requireJob(input.runId));
     if (input.decision === "approve_once") {
       const run = this.requireBasicRun(input.runId);
-      setImmediate(() => {
-        this.resumeConfirmationContinuation({
-          runId: input.runId,
-          confirmationId: input.confirmationId,
-          decision: input.decision,
-          job,
-        }).catch((error: unknown) => {
-          console.error(`[run-executor] async resume failed for ${input.runId}:`, error);
-        });
+      this.scheduleConfirmationResume({
+        runId: input.runId,
+        confirmationId: input.confirmationId,
+        decision: input.decision,
+        job,
       });
       return run;
     }
     const run = this.requireBasicRun(input.runId);
-    setImmediate(() => {
-      this.resumeConfirmationContinuation({
-        runId: input.runId,
-        confirmationId: input.confirmationId,
-        decision: input.decision,
-        guidance: input.guidance,
-        job,
-      }).catch((error: unknown) => {
-        console.error(`[run-executor] async confirmation decision resume failed for ${input.runId}:`, error);
-      });
+    this.scheduleConfirmationResume({
+      runId: input.runId,
+      confirmationId: input.confirmationId,
+      decision: input.decision,
+      guidance: input.guidance,
+      job,
     });
     return run;
   }
@@ -289,6 +281,28 @@ export class BasicAgentRunExecutor {
       throw new Error(`Basic Agent run projection not found: ${runId}`);
     }
     return run;
+  }
+
+  private scheduleConfirmationResume(input: {
+    readonly runId: string;
+    readonly confirmationId: string;
+    readonly decision: ConfirmationDecision["decision"];
+    readonly guidance?: string;
+    readonly job: BasicAgentRunJob;
+  }): void {
+    const activeRunJob = new Promise<void>((resolve) => {
+      setImmediate(() => {
+        this.resumeConfirmationContinuation(input)
+          .catch((error: unknown) => {
+            console.error(`[run-executor] async confirmation resume failed for ${input.runId}:`, error);
+          })
+          .finally(resolve);
+      });
+    });
+    this.config.activeRunJobs.add(activeRunJob);
+    void activeRunJob.then(() => {
+      this.config.activeRunJobs.delete(activeRunJob);
+    });
   }
 
   private async resumeConfirmationContinuation(input: {

@@ -398,11 +398,17 @@ test("basic agent shell-style run_command executes after confirmation without sa
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-basic-command-confirmation-"));
   const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-basic-command-workspace-"));
   let providerFetchCalls = 0;
+  let releaseFinalResponse: (() => void) | undefined;
+  const finalResponseGate = new Promise<void>((resolve) => {
+    releaseFinalResponse = resolve;
+  });
   const providerFetch: PanelProviderFetch = async () => {
     providerFetchCalls += 1;
-    return providerFetchCalls === 1
-      ? createOpenAiRunCommandToolCallResponse("echo approval-review")
-      : createOpenAiTextResponse("basic-command-confirmation-model", "命令检查完成。");
+    if (providerFetchCalls === 1) {
+      return createOpenAiRunCommandToolCallResponse("echo approval-review");
+    }
+    await finalResponseGate;
+    return createOpenAiTextResponse("basic-command-confirmation-model", "命令检查完成。");
   };
   const server = await startLocalPanelServer({ port: 0, configDirectory: directory, providerFetch });
   try {
@@ -431,11 +437,23 @@ test("basic agent shell-style run_command executes after confirmation without sa
       "/api/desktop/runs"
     );
     const confirmationId = pending.body.canvas.agent.pendingConfirmation.confirmationId;
-    const approved = await requestJson(
-      server.url,
-      `/api/basic-agent/runs/${encodeURIComponent(runId)}/confirmations/${encodeURIComponent(confirmationId)}/decision`,
-      { method: "POST", body: { decision: "approve_once" } }
+    const approved = await withTimeout(
+      requestJson(
+        server.url,
+        `/api/basic-agent/runs/${encodeURIComponent(runId)}/confirmations/${encodeURIComponent(confirmationId)}/decision`,
+        { method: "POST", body: { decision: "approve_once" } }
+      ),
+      2_000
     );
+    const runningAfterApproval = await requestJson(
+      server.url,
+      `/api/basic-agent/runs/${encodeURIComponent(runId)}`
+    );
+    const runningViewAfterApproval = await requestJson(
+      server.url,
+      `/api/basic-agent/runs/${encodeURIComponent(runId)}/view`
+    );
+    releaseFinalResponse?.();
     const completed = await waitForRun(
       server.url,
       runId,
@@ -450,6 +468,12 @@ test("basic agent shell-style run_command executes after confirmation without sa
     );
 
     assert.equal(approved.status, 200);
+    assert.equal(runningAfterApproval.body.run.status, "running");
+    assert.equal(runningViewAfterApproval.body.view.workView.pendingConfirmation, undefined);
+    assert.equal(
+      runningViewAfterApproval.body.view.workView.transcriptNodes.some((node: { kind: string }) => node.kind === "confirmation"),
+      false
+    );
     assert.equal(completed.body.status, "completed");
     assert.equal(commandCall?.status, "completed");
     assert.equal(commandCall?.command, "echo approval-review");
@@ -461,6 +485,7 @@ test("basic agent shell-style run_command executes after confirmation without sa
     assert.equal(events.text.includes("Sandbox policy rejected command: echo approval-review"), false);
     assertSafePanelJsonText(`${runtimeRun.text}\n${events.text}`);
   } finally {
+    releaseFinalResponse?.();
     await server.close();
     await removeTemporaryTree(directory);
     await removeTemporaryTree(workspace);
@@ -619,3 +644,12 @@ test("basic agent approve after restart blocks because executable continuation i
     await removeTemporaryTree(workspace);
   }
 });
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<never>((_resolve, reject) => {
+      setTimeout(() => reject(new Error("Timed out waiting for HTTP response.")), timeoutMs);
+    }),
+  ]);
+}

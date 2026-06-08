@@ -32,8 +32,8 @@ export function projectAgentWorkTimelineView<
 }): AgentWorkTimelineView<TNode, TConfirmation> {
   const nodes = timelineVisibleNodes(input.nodes);
   const confirmation = timelineConfirmationProjection(confirmationNodesForProjection<TNode, TConfirmation>(nodes), input.pending);
-  const items = displayActivityItemsForNodes(nodes)
-    .filter((item) => item.nodeId !== confirmation.currentNodeId);
+  const activityNodes = nodes.filter((node) => node.kind !== "confirmation");
+  const items = displayActivityItemsForNodes(activityNodes);
   return {
     nodes,
     items,

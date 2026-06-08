@@ -513,6 +513,77 @@ test("BasicAgentRunExecutor resumes denied or guided confirmations through the s
   assert.equal(executor.get(run.runId)?.status, "completed");
 });
 
+test("BasicAgentRunExecutor returns approval decisions before long command continuations finish", async () => {
+  const runJobs = new InMemoryBasicAgentRunJobStore();
+  const activeRunJobs = new Set<Promise<void>>();
+  let releaseContinuation: (() => void) | undefined;
+  let continuationStarted = false;
+  let continuationFinished = false;
+  const continuationGate = new Promise<void>((resolve) => {
+    releaseContinuation = resolve;
+  });
+  const executor = new BasicAgentRunExecutor(executorConfig({
+    runJobs,
+    activeRunJobs,
+    execute: async () => ({
+      pendingApproval: {
+        confirmationId: "confirmation-command",
+        async resume() {
+          continuationStarted = true;
+          await continuationGate;
+          continuationFinished = true;
+          return {
+            completed: true,
+            canvas: {
+              kind: "desktop_agent_canvas",
+              agent: {},
+            },
+          };
+        },
+        async resumeWithDecision() {
+          throw new Error("approval test should not use resumeWithDecision");
+        },
+      },
+      canvas: {
+        kind: "desktop_agent_canvas",
+        agent: {
+          pendingConfirmation: {
+            confirmationId: "confirmation-command",
+          },
+        },
+      },
+    }),
+  }));
+
+  const run = await executor.start({
+    runKind: "desktop",
+    runMode: "agent",
+    goal: "run a long command after confirmation",
+    aiMode: "fake",
+  });
+  await waitUntil(() => runJobs.get(run.runId)?.status === "approval_needed");
+
+  const returned = await withTimeout(
+    executor.submitConfirmationDecision({
+      runId: run.runId,
+      confirmationId: "confirmation-command",
+      decision: "approve_once",
+    }),
+    100
+  );
+
+  assert.equal(returned.status, "running");
+  assert.equal(runJobs.get(run.runId)?.status, "running");
+  assert.equal(activeRunJobs.size, 1);
+  assert.equal(continuationFinished, false);
+
+  await waitUntil(() => continuationStarted);
+  releaseContinuation?.();
+  await waitUntil(() => continuationFinished);
+  await waitUntil(() => runJobs.get(run.runId)?.status === "completed");
+  await waitUntil(() => activeRunJobs.size === 0);
+});
+
 test("BasicAgentRunExecutor stores backend run capability resolution from execution result", async () => {
   const runJobs = new InMemoryBasicAgentRunJobStore();
   const executor = new BasicAgentRunExecutor(executorConfig({
@@ -1270,6 +1341,15 @@ async function waitUntil(predicate: () => boolean, timeoutMs = 1_000): Promise<v
     }
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<never>((_resolve, reject) => {
+      setTimeout(() => reject(new Error("Timed out waiting for confirmation decision response.")), timeoutMs);
+    }),
+  ]);
 }
 
 function modelConfig(): SanitizedModelProviderConfig {

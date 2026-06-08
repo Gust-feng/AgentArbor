@@ -136,22 +136,17 @@ function transcriptNodeFromRunEvent(
     });
   }
   if (event.type === "confirmation.needed") {
+    const pendingConfirmation = pendingConfirmationForEvent(event, context.pendingConfirmation);
+    if (pendingConfirmation === undefined) {
+      return undefined;
+    }
     const summary = userFacingConfirmationSummary(event.summary);
     return transcriptNode(event, {
       kind: "confirmation",
       phase: "waiting_approval",
       title: "待处理",
       summary,
-      confirmation: context.pendingConfirmation ?? {
-        confirmationId: confirmationIdForRunEvent(event),
-        runId: event.runId,
-        title: "需要你判断",
-        actionSummary: summary,
-        affectedResources: [],
-        riskLevel: "medium",
-        requestedAt: event.timestamp,
-        sourceRefs: event.refs.map((ref) => `${ref.kind}:${ref.id}`),
-      },
+      confirmation: pendingConfirmation,
     });
   }
   if (event.type === "user_approval.received" || event.type === "user.guidance") {
@@ -262,9 +257,29 @@ function toolCallRefsForRunEvent(event: RunEvent): readonly string[] {
   return event.refs.filter((ref) => ref.kind === "tool_call").map((ref) => ref.id);
 }
 
-function confirmationIdForRunEvent(event: RunEvent): string {
+function pendingConfirmationForEvent(
+  event: RunEvent,
+  pendingConfirmation: ConfirmationRequest | undefined
+): ConfirmationRequest | undefined {
+  if (pendingConfirmation === undefined) {
+    return undefined;
+  }
+  const eventConfirmationId = confirmationIdFromRunEvent(event);
+  if (eventConfirmationId !== undefined && eventConfirmationId !== pendingConfirmation.confirmationId) {
+    return undefined;
+  }
+  return pendingConfirmation;
+}
+
+function confirmationIdFromRunEvent(event: RunEvent): string | undefined {
+  const explicit = event.refs
+    .map((ref) => ref.kind === "event" ? ref.id.match(/^confirmation:(.+)$/)?.[1] : undefined)
+    .find((value): value is string => value !== undefined && value.trim().length > 0);
+  if (explicit !== undefined) {
+    return explicit.trim();
+  }
   const toolCallRef = toolCallRefsForRunEvent(event)[0];
-  return toolCallRef === undefined ? `confirmation-${event.sequence}` : `confirmation-${toolCallRef}`;
+  return toolCallRef === undefined ? undefined : `confirmation-${toolCallRef}`;
 }
 
 function modelCallRefsForRunEvent(event: RunEvent): readonly string[] {

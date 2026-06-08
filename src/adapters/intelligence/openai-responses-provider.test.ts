@@ -232,6 +232,14 @@ test("OpenAI Responses adapter maps tools to function format and extracts tool c
     },
   ]);
   assert.equal(calls[0]?.body.tool_choice, "auto");
+  const serializedInput = JSON.stringify(calls[0]?.body.input);
+  const serializedInstructions = JSON.stringify(calls[0]?.body.instructions ?? "");
+  assert.equal(serializedInput.includes("Search the web."), false);
+  assert.equal(serializedInput.includes("parameters"), false);
+  assert.equal(serializedInput.includes("Allowed tools"), false);
+  assert.equal(serializedInstructions.includes("Search the web."), false);
+  assert.equal(serializedInstructions.includes("parameters"), false);
+  assert.equal(serializedInstructions.includes("Allowed tools"), false);
 });
 
 test("OpenAI Responses adapter gates parallel tool calls by visible tool risk", async () => {

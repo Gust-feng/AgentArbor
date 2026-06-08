@@ -14,11 +14,11 @@ test("thinking copy keeps a single readable expandable detail without a label", 
   const copy = readableThinkingCopy(text);
 
   assert.equal(copy?.detail, "判断 先检查工作区 再决定是否需要确认");
-  assert.equal(copy?.expandedDetail, "判断\n\n先检查工作区\n再决定是否需要确认");
+  assert.equal(copy?.expandedDetail, undefined);
   assert.equal(copy?.label, undefined);
 });
 
-test("thinking copy preserves normal Kimi reasoning text", () => {
+test("thinking copy folds normal Kimi reasoning text without duplicating the summary", () => {
   const text = [
     `The user is asking me to evaluate my own capabilities—essentially asking "what do you think of your abilities?"`,
     `"This is a reflective/metacognitive question about myself-assessment."`,
@@ -29,9 +29,8 @@ test("thinking copy preserves normal Kimi reasoning text", () => {
   const copy = readableThinkingCopy(text);
 
   assert.match(copy?.detail ?? "", /The user is asking me to evaluate my own capabilities/);
-  assert.match(copy?.expandedDetail ?? "", /what do you think of your abilities/);
-  assert.match(copy?.expandedDetail ?? "", /reflective\/metacognitive question/);
-  assert.match(copy?.expandedDetail ?? "", /there are already several capability demo files/);
+  assert.doesNotMatch(copy?.expandedDetail ?? "", /The user is asking me to evaluate my own capabilities/);
+  assert.doesNotMatch(copy?.expandedDetail ?? "", /reflective\/metacognitive question/);
   assert.match(copy?.expandedDetail ?? "", /Let me look at one of them/);
   assert.match(copy?.expandedDetail ?? "", /maxLength to see content/);
 });
@@ -44,7 +43,7 @@ test("thinking copy does not invent spaces in compact model text", () => {
     copy?.detail,
     "Theuserisaskingmetodemonstratemycapabilities. LetmeshowthemwhatIcandobyexploringthecurrentworkspace."
   );
-  assert.equal(copy?.expandedDetail, text);
+  assert.equal(copy?.expandedDetail, undefined);
 });
 
 test("thinking copy preserves inline code and model punctuation", () => {
@@ -55,7 +54,7 @@ test("thinking copy preserves inline code and model punctuation", () => {
     copy?.detail,
     "OK, so `cmd` is rejected by sandbox policy. Good, file created."
   );
-  assert.equal(copy?.expandedDetail, text);
+  assert.equal(copy?.expandedDetail, "Node.js v24.15.0 works.");
 });
 
 test("thinking copy preserves natural mixed Chinese and English", () => {
@@ -63,7 +62,23 @@ test("thinking copy preserves natural mixed Chinese and English", () => {
   const copy = readableThinkingCopy(text);
 
   assert.equal(copy?.detail, "让我先看看当前工作环境，然后给你一个坦诚的评估。 The model output already contains spaces; the UI must not rewrite it.");
-  assert.equal(copy?.expandedDetail, text);
+  assert.equal(copy?.expandedDetail, undefined);
+});
+
+test("thinking copy keeps expanded detail to the folded overflow only", () => {
+  const text = [
+    "Let me analyze the results:",
+    "",
+    "**list_dir**: Workspace has37 entries, mostly markdown files related to capability demos.",
+    "**search**: Successfully returned web search results about AI Agent capabilities in2025.",
+    "**run_command**: Failed - python3 was rejected by sandbox policy.",
+  ].join("\n");
+  const copy = readableThinkingCopy(text);
+
+  assert.match(copy?.detail ?? "", /^Let me analyze the results:/);
+  assert.doesNotMatch(copy?.expandedDetail ?? "", /^Let me analyze the results:/);
+  assert.doesNotMatch(copy?.expandedDetail ?? "", /^nt capabilities/);
+  assert.match(copy?.expandedDetail ?? "", /python3 was rejected/);
 });
 
 test("confirmation copy presents concrete confirmation action", () => {

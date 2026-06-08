@@ -79,6 +79,32 @@ test("resolveCompatibleRunFacts accepts matching capability resolution refinemen
   assert.deepEqual(resolved.capabilityResolution, candidateResolution);
 });
 
+test("resolveCompatibleRunFacts rejects same-snapshot capability resolutions that expand tools", () => {
+  const createdSnapshot = capabilitySnapshot("snapshot-created", modelConfig("created-profile", "created-model"));
+  const agentRef = agentDefinitionRef();
+  const created = {
+    runKind: "desktop" as const,
+    runMode: "agent" as const,
+    config: createdSnapshot.activeModel,
+    informationAccess: informationAccess("web", 5),
+    capabilitySnapshot: createdSnapshot,
+    agentDefinitionRef: agentRef,
+  };
+
+  const resolved = resolveCompatibleRunFacts(created, {
+    capabilitySnapshot: createdSnapshot,
+    capabilityResolution: capabilityResolution({
+      snapshotId: createdSnapshot.snapshotId,
+      agentRef,
+      allowedTools: ["read_file", "shell_command"],
+      toolExposures: toolExposuresFor(createdSnapshot),
+    }),
+  });
+
+  assert.equal(resolved.capabilitySnapshot, createdSnapshot);
+  assert.equal(resolved.capabilityResolution, undefined);
+});
+
 function modelConfig(profileId: string, model: string): SanitizedModelProviderConfig {
   return {
     defaultAiMode: "fake",

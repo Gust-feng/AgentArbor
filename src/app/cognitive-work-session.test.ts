@@ -176,6 +176,82 @@ test("Cognitive Work Session keeps child delegation bounded and filters unsafe t
   assert.equal(result.agentRunTree.childRuns[0]?.spec.agentKind, "child");
 });
 
+test("Cognitive Work Session keeps child tool schemas out of user prompts", async () => {
+  const provider = new SequenceModelProvider([
+    {
+      action: "spawn_children",
+      childSpecs: [
+        {
+          specId: "prompt-child",
+          displayName: "Prompt Child",
+          role: "prompt_child",
+          objective: "Inspect the child prompt boundary.",
+          allowedTools: ["search", "read"],
+          inputRefs: ["workspace:current"],
+        },
+      ],
+      decisionSummary: "Spawn one child for prompt boundary inspection.",
+      uncertainty: "Fixture uncertainty.",
+      confidence: 0.8,
+    },
+    {
+      summary: "Child inspected the prompt boundary.",
+      findings: ["Tool schemas stayed on the request tools field."],
+      evidenceRefs: ["code:test"],
+      uncertainty: "Fixture child material.",
+      confidence: 0.7,
+    },
+    {
+      action: "synthesize",
+      childSpecs: [],
+      decisionSummary: "Synthesize child material.",
+      uncertainty: "Fixture uncertainty.",
+      confidence: 0.7,
+    },
+    {
+      reportTitle: "Prompt boundary report",
+      keyFindings: ["Child prompt did not list tools."],
+      recommendations: ["Keep tool exposure in request tools."],
+      evidenceRefs: ["code:test"],
+      uncertainty: ["None for fixture."],
+      nextActions: ["Keep the regression test."],
+      decisionSummary: "Parent synthesis completed.",
+      confidence: 0.7,
+    },
+    {
+      action: "produce_artifact",
+      childSpecs: [],
+      decisionSummary: "Produce final report.",
+      uncertainty: "Fixture uncertainty.",
+      confidence: 0.74,
+    },
+  ]);
+  const result = await runCognitiveWorkSession("检查 child 工具提示边界", {
+    aiMode: "fake",
+    createToolCenter: () => new FixtureToolCenter(),
+    createIntelligenceChannel: (runtime) =>
+      new NativeIntelligenceChannel({
+        bus: runtime.bus,
+        provider,
+      }),
+  });
+  const childRequest = provider.requests().find(
+    (request) => request.outputContract.contractId === "work_session.child_material.v1"
+  );
+  const promptText = childRequest?.sanitizedMessages.map((message) => message.content).join("\n") ?? "";
+  const allPromptText = provider.requests().flatMap((request) => request.sanitizedMessages).map((message) => message.content).join("\n");
+
+  assert.equal(result.status, "completed");
+  assert.notEqual(childRequest, undefined);
+  assert.deepEqual(childRequest?.tools?.map((tool) => tool.name), ["search", "read"]);
+  assert.equal(provider.requests().some((request) => request.tools !== undefined && request.tools.length > 0), true);
+  assert.equal(allPromptText.includes("Allowed tools:"), false);
+  assert.equal(promptText.includes("Allowed tools:"), false);
+  assert.equal(promptText.includes("search, read"), false);
+  assert.equal(promptText.includes("Fixture codebase search tool."), false);
+  assert.equal(promptText.includes("Fixture codebase read tool."), false);
+});
+
 test("Cognitive Work Session can use tools before child delegation and preserve evidence refs", async () => {
   const toolCenter = new FixtureToolCenter();
   const result = await runCognitiveWorkSession("先读取当前仓库证据，再分析 AgentArbor 下一步", {
@@ -292,10 +368,12 @@ class SequenceModelProvider implements ModelProvider {
   readonly protocolKind = "openai_compatible_chat_completions" as const;
   readonly model = "work-session-sequence-model";
   private index = 0;
+  private readonly capturedRequests: ModelRequest[] = [];
 
   constructor(private readonly outputs: readonly (unknown | { readonly output?: unknown; readonly textOutput?: string; readonly toolCalls?: readonly ToolCallRequest[] })[]) {}
 
   async complete(request: ModelRequest): Promise<ModelResponse> {
+    this.capturedRequests.push(request);
     const step = this.outputs[this.index] ?? {};
     this.index += 1;
     const output = isProviderStep(step) ? step.output : step;
@@ -317,6 +395,10 @@ class SequenceModelProvider implements ModelProvider {
       validation: pendingModelOutputValidation(),
       completedAt: nowIso(),
     };
+  }
+
+  requests(): readonly ModelRequest[] {
+    return this.capturedRequests;
   }
 }
 

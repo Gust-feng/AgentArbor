@@ -49,6 +49,35 @@ test("agent work timeline view hides low-value answer nodes", () => {
   assert.deepEqual(view.items, []);
 });
 
+test("agent work timeline view does not show historical confirmations as pending activity", () => {
+  const view = projectAgentWorkTimelineView({
+    nodes: [
+      node({
+        nodeId: "confirmation-node",
+        kind: "confirmation",
+        eventType: "confirmation.needed",
+        phase: "waiting_approval",
+        summary: "运行命令：python 3",
+        confirmation: { confirmationId: "confirmation-call-command", runId: "run-1" },
+        refs: [{ kind: "tool_call", id: "call-command" }],
+      }),
+      node({
+        nodeId: "tool-failed",
+        kind: "tool",
+        eventType: "tool.failed",
+        phase: "failed",
+        summary: "python 3 · Sandbox policy rejected command.",
+        toolName: "shell_command",
+        refs: [{ kind: "tool_call", id: "call-command" }],
+      }),
+    ],
+  });
+
+  assert.equal(view.confirmation.current, undefined);
+  assert.equal(view.items.some((item) => item.tone === "confirmation" || item.copy.label === "待处理"), false);
+  assert.deepEqual(view.items.map((item) => item.nodeId), ["tool-failed"]);
+});
+
 function node(input: {
   readonly nodeId: string;
   readonly kind: ProjectableTranscriptNode["kind"];
@@ -56,7 +85,9 @@ function node(input: {
   readonly phase: ProjectableTranscriptNode["phase"];
   readonly text?: string;
   readonly summary?: string;
+  readonly toolName?: string;
   readonly confirmation?: ProjectableTranscriptNode["confirmation"];
+  readonly refs?: ProjectableTranscriptNode["refs"];
 }): ProjectableTranscriptNode {
   return {
     nodeId: input.nodeId,
@@ -68,8 +99,9 @@ function node(input: {
     title: input.kind,
     text: input.text,
     summary: input.summary,
+    toolName: input.toolName,
     confirmation: input.confirmation,
     timestamp: "2026-06-04T00:00:00.000Z",
-    refs: [],
+    refs: input.refs ?? [],
   };
 }

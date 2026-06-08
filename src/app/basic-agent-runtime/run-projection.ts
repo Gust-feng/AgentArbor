@@ -187,7 +187,8 @@ function hasLatestConfirmationDecision(job: BasicAgentRunProjectionInput): boole
   }
   const confirmationId = latestConfirmation.sourceRefs
     .map((ref) => ref.startsWith("confirmation:") ? ref.slice("confirmation:".length) : undefined)
-    .find((ref): ref is string => ref !== undefined && ref.length > 0);
+    .find((ref): ref is string => ref !== undefined && ref.length > 0) ??
+    pendingConfirmationIdFromCanvas(job.completed?.canvas);
   return confirmationId !== undefined && job.confirmationDecisions.some((decision) => decision.confirmationId === confirmationId);
 }
 

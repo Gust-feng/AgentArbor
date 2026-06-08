@@ -47,8 +47,14 @@ export type PanelTranscriptStreamEvent = {
   readonly toolCallRefs: readonly string[];
 };
 
+export type PanelTranscriptNodeOptions = {
+  readonly confirmationMode?: "all" | "current";
+  readonly pendingConfirmation?: TranscriptNode["confirmation"];
+};
+
 export function createPanelTranscriptNodes(
-  streamEvents: readonly PanelTranscriptStreamEvent[]
+  streamEvents: readonly PanelTranscriptStreamEvent[],
+  options: PanelTranscriptNodeOptions = {}
 ): readonly TranscriptNode[] {
   const confirmationToolRefs = new Set(
     streamEvents
@@ -77,6 +83,8 @@ export function createPanelTranscriptNodes(
       confirmationToolRefs,
       confirmationRequestSequences,
       requestedByCallId,
+      confirmationMode: options.confirmationMode ?? "all",
+      pendingConfirmation: options.pendingConfirmation,
     });
     if (node !== undefined) {
       nodes.push(node);
@@ -93,6 +101,8 @@ function transcriptNodeForEvent(
     readonly confirmationToolRefs: ReadonlySet<string>;
     readonly confirmationRequestSequences: ReadonlySet<number>;
     readonly requestedByCallId: Map<string, number>;
+    readonly confirmationMode: "all" | "current";
+    readonly pendingConfirmation?: TranscriptNode["confirmation"];
   }
 ): TranscriptNode | undefined {
   if (isOrdinaryTranscriptSuppressedEvent({ type: event.type })) {
@@ -154,13 +164,17 @@ function transcriptNodeForEvent(
     });
   }
   if (event.type === "confirmation.needed") {
+    const pendingConfirmation = pendingConfirmationForPanelEvent(event, context.pendingConfirmation);
+    if (context.confirmationMode === "current" && pendingConfirmation === undefined) {
+      return undefined;
+    }
     const summary = userFacingConfirmationSummary(event.summary);
     return transcriptNode(event, {
       kind: "confirmation",
       phase: "waiting_approval",
       title: "待处理",
       summary,
-      confirmation: {
+      confirmation: pendingConfirmation ?? {
         confirmationId: confirmationIdForTranscriptEvent(event),
         runId: event.runId,
         title: "需要你判断",
@@ -478,19 +492,40 @@ function isString(value: string | undefined): value is string {
 }
 
 function confirmationIdForTranscriptEvent(event: PanelTranscriptStreamEvent): string {
-  const candidate = event.sourceRefs
-    .map((ref) => ref.match(/^confirmation:(.+)$/)?.[1])
-    .find((value): value is string => value !== undefined && value.trim().length > 0);
+  const candidate = confirmationIdFromPanelEvent(event);
   if (candidate !== undefined) {
     return candidate;
-  }
-  const toolCallRef = event.toolCallRefs[0];
-  if (toolCallRef !== undefined && toolCallRef.trim().length > 0) {
-    return `confirmation-${toolCallRef.trim()}`;
   }
   return event.eventId.includes(":")
     ? event.eventId.split(":").at(-1) ?? event.eventId
     : event.eventId;
+}
+
+function pendingConfirmationForPanelEvent(
+  event: PanelTranscriptStreamEvent,
+  pendingConfirmation: TranscriptNode["confirmation"] | undefined
+): TranscriptNode["confirmation"] | undefined {
+  if (pendingConfirmation === undefined) {
+    return undefined;
+  }
+  const eventConfirmationId = confirmationIdFromPanelEvent(event);
+  if (eventConfirmationId !== undefined && eventConfirmationId !== pendingConfirmation.confirmationId) {
+    return undefined;
+  }
+  return pendingConfirmation;
+}
+
+function confirmationIdFromPanelEvent(event: PanelTranscriptStreamEvent): string | undefined {
+  const sourceRef = event.sourceRefs
+    .map((ref) => ref.match(/^confirmation:(.+)$/)?.[1])
+    .find((value): value is string => value !== undefined && value.trim().length > 0);
+  if (sourceRef !== undefined) {
+    return sourceRef.trim();
+  }
+  const toolCallRef = event.toolCallRefs[0];
+  return toolCallRef === undefined || toolCallRef.trim().length === 0
+    ? undefined
+    : `confirmation-${toolCallRef.trim()}`;
 }
 
 function userDecisionPhase(event: PanelTranscriptStreamEvent): TranscriptNodePhase {

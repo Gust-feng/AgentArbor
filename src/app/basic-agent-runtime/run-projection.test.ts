@@ -5,6 +5,7 @@ import {
   projectRunJobToBasicRun,
   projectRunStreamEventToRunEvent,
 } from "./run-projection.js";
+import type { BasicAgentCompatRunStatus } from "./run-projection.js";
 
 test("basic run projection derives BasicAgentRun state and redacts ordinary goal text", () => {
   const run = projectRunJobToBasicRun({
@@ -107,6 +108,160 @@ test("basic stream event projection keeps long model output deltas for live rend
   assert.equal(event.delta, longDelta);
 });
 
+test("basic run projection keeps the run status matrix explicit", () => {
+  type ExpectedStatus = ReturnType<typeof projectRunJobToBasicRun>["status"];
+  const cases: readonly {
+    readonly name: string;
+    readonly jobStatus: BasicAgentCompatRunStatus;
+    readonly eventType?: string;
+    readonly eventStatus?: BasicAgentCompatRunStatus;
+    readonly eventSummary?: string;
+    readonly expectedStatus: ExpectedStatus;
+    readonly expectedTitle: string;
+    readonly requiresUserAction: boolean;
+    readonly stalePendingConfirmation?: boolean;
+  }[] = [
+    {
+      name: "completed-no-tool-calls",
+      jobStatus: "completed",
+      expectedStatus: "completed",
+      expectedTitle: "已完成",
+      requiresUserAction: false,
+    },
+    {
+      name: "approval-required",
+      jobStatus: "running",
+      eventType: "confirmation.needed",
+      eventStatus: "approval_needed",
+      eventSummary: "运行命令：pnpm test",
+      expectedStatus: "approval_needed",
+      expectedTitle: "待处理",
+      requiresUserAction: true,
+      stalePendingConfirmation: true,
+    },
+    {
+      name: "out-of-fuel",
+      jobStatus: "blocked",
+      eventType: "run.blocked",
+      eventStatus: "blocked",
+      eventSummary: "当前轮次已到上限，任务没有完成。",
+      expectedStatus: "blocked",
+      expectedTitle: "需要处理",
+      requiresUserAction: true,
+      stalePendingConfirmation: true,
+    },
+    {
+      name: "context-overflow",
+      jobStatus: "blocked",
+      eventType: "run.blocked",
+      eventStatus: "blocked",
+      eventSummary: "上下文整理没有成功，任务没有完成。",
+      expectedStatus: "blocked",
+      expectedTitle: "需要处理",
+      requiresUserAction: true,
+      stalePendingConfirmation: true,
+    },
+    {
+      name: "model-failed",
+      jobStatus: "failed",
+      eventType: "model.failed",
+      eventStatus: "failed",
+      eventSummary: "模型调用失败。",
+      expectedStatus: "failed",
+      expectedTitle: "未完成",
+      requiresUserAction: false,
+      stalePendingConfirmation: true,
+    },
+    {
+      name: "cancelled",
+      jobStatus: "cancelled",
+      eventType: "run.cancelled",
+      eventStatus: "cancelled",
+      eventSummary: "运行已取消。",
+      expectedStatus: "cancelled",
+      expectedTitle: "已取消",
+      requiresUserAction: false,
+      stalePendingConfirmation: true,
+    },
+  ];
+
+  for (const item of cases) {
+    const run = projectRunJobToBasicRun({
+      runId: `run-${item.name}`,
+      goal: "执行一个普通 Agent 回归任务",
+      status: item.jobStatus,
+      runMode: "agent",
+      createdAt: "2026-05-12T00:00:00.000Z",
+      updatedAt: "2026-05-12T00:00:03.000Z",
+      streamEvents: item.eventType === undefined
+        ? []
+        : [{
+            eventId: `event-${item.name}`,
+            runId: `run-${item.name}`,
+            sequence: 1,
+            type: item.eventType,
+            createdAt: "2026-05-12T00:00:01.000Z",
+            summary: item.eventSummary,
+            status: item.eventStatus,
+            sourceRefs: [],
+            modelCallRefs: [],
+            toolCallRefs: [],
+          }],
+      confirmationDecisions: [],
+      completed: item.stalePendingConfirmation === true
+        ? {
+            canvas: {
+              kind: "desktop_agent_canvas",
+              agent: {
+                pendingConfirmation: {
+                  confirmationId: "confirmation-stale",
+                },
+              },
+            },
+          }
+        : undefined,
+    });
+
+    assert.equal(run.status, item.expectedStatus, item.name);
+    assert.equal(run.title, item.expectedTitle, item.name);
+    assert.equal(run.requiresUserAction, item.requiresUserAction, item.name);
+    assert.equal(JSON.stringify(run).includes("正在处理"), false, item.name);
+    if (item.expectedStatus !== "completed") {
+      assert.notEqual(run.status, "completed", item.name);
+    }
+    if (item.expectedStatus !== "approval_needed") {
+      assert.notEqual(run.status, "approval_needed", item.name);
+    }
+  }
+});
+
+test("basic run projection does not complete a run with a pending confirmation payload", () => {
+  const run = projectRunJobToBasicRun({
+    runId: "run-completed-stale-pending-confirmation",
+    goal: "等待用户确认",
+    status: "completed",
+    runMode: "agent",
+    createdAt: "2026-05-12T00:00:00.000Z",
+    updatedAt: "2026-05-12T00:00:01.000Z",
+    streamEvents: [],
+    confirmationDecisions: [],
+    completed: {
+      canvas: {
+        kind: "desktop_agent_canvas",
+        agent: {
+          pendingConfirmation: {
+            confirmationId: "confirmation-still-pending",
+          },
+        },
+      },
+    },
+  });
+
+  assert.equal(run.status, "approval_needed");
+  assert.equal(run.requiresUserAction, true);
+  assert.notEqual(run.status, "completed");
+});
+
 test("basic run projection skips generic approval resume events for current step", () => {
   const run = projectRunJobToBasicRun({
     runId: "run-approval-step",
@@ -156,6 +311,47 @@ test("basic run projection skips generic approval resume events for current step
   });
 
   assert.equal(run.currentStep, "pnpm test · 通过");
+});
+
+test("basic run projection clears stale approval state after a recorded current confirmation decision", () => {
+  const run = projectRunJobToBasicRun({
+    runId: "run-approved-stale-confirmation",
+    goal: "运行需要确认的命令",
+    status: "running",
+    runMode: "agent",
+    createdAt: "2026-05-12T00:00:00.000Z",
+    updatedAt: "2026-05-12T00:00:03.000Z",
+    streamEvents: [
+      {
+        eventId: "event-confirmation",
+        runId: "run-approved-stale-confirmation",
+        sequence: 1,
+        type: "confirmation.needed",
+        createdAt: "2026-05-12T00:00:01.000Z",
+        summary: "运行命令：pnpm test",
+        sourceRefs: [],
+        modelCallRefs: [],
+        toolCallRefs: ["tool-command"],
+      },
+    ],
+    confirmationDecisions: [{
+      confirmationId: "confirmation-command",
+      decision: "approve_once",
+    }],
+    completed: {
+      canvas: {
+        kind: "desktop_agent_canvas",
+        agent: {
+          pendingConfirmation: {
+            confirmationId: "confirmation-command",
+          },
+        },
+      },
+    },
+  });
+
+  assert.equal(run.status, "running");
+  assert.equal(run.requiresUserAction, false);
 });
 
 test("basic run projection keeps denied decisions visible as current step", () => {

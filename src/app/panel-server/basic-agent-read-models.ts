@@ -25,15 +25,21 @@ export function createLiveBasicAgentWorkViewReadModel(input: {
   readonly streamEvents: readonly PanelRunStreamEvent[];
 }): DesktopWorkViewReadModel {
   const statusPayload = panelRunPayloadForStatus(input.job);
-  return createDesktopWorkViewReadModel({
+  const base = createDesktopWorkViewReadModel({
     run: input.run,
     events: input.events,
     canvas: statusPayload?.canvas,
     taskSoilInput: input.job.taskSoilInput,
     toolEvidence: toolEnvelopesFromStreamEvents(input.streamEvents),
     toolDisplays: toolDisplaysFromStreamEvents(input.streamEvents),
-    transcriptNodes: createPanelTranscriptNodes(input.streamEvents),
   }) satisfies DesktopWorkViewReadModel;
+  return {
+    ...base,
+    transcriptNodes: createPanelTranscriptNodes(input.streamEvents, {
+      confirmationMode: "current",
+      pendingConfirmation: base.pendingConfirmation,
+    }),
+  } satisfies DesktopWorkViewReadModel;
 }
 
 export function createPersistedBasicAgentWorkViewReadModel(

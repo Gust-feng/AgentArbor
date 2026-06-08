@@ -3,11 +3,13 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { FileSystemLocalDevSecretStore, FileSystemNormalSettingsStore } from "../adapters/config/index.js";
 import {
   FileSystemRuntimeDatabase,
   resolveAgentArborRuntimeDatabasePaths,
 } from "../adapters/runtime-database/index.js";
 import type { RuntimeDatabase } from "../domain/runtime-database/index.js";
+import { ConfigCenter } from "./config-center.js";
 import { startLocalPanelServer, type PanelProviderFetch } from "./panel-server.js";
 import {
   assertSafePanelJsonText,
@@ -17,6 +19,7 @@ import {
   waitForRun,
 } from "./panel-server-test-utils.js";
 import {
+  createOpenAiReadFileToolCallResponse,
   createOpenAiTextResponse,
   extractResponsesMessages,
   hasResponsesToolDefinition,
@@ -1102,6 +1105,9 @@ test("conversation model output contract failure stays failed across run views a
     assert.equal(failed.body.status, "failed");
     assert.equal(failed.body.error.code, "desktop_agent_failed");
     assert.equal(failed.body.error.message, "模型输出校验失败。");
+    assert.equal(failed.body.trace.currentStage, "model_failed");
+    assert.equal(failed.body.trace.events.some((event: { type: string }) => event.type === "model.failed"), true);
+    assert.equal(failed.body.transcript.events.some((event: { type: string }) => event.type === "final.result"), false);
     assert.equal(conversation.body.conversation.currentRun.run.status, "failed");
     assert.equal(conversation.body.conversation.currentRun.workView.stage, "failed");
     assert.equal(conversation.body.conversation.currentRun.detail.status, "failed");
@@ -1112,6 +1118,7 @@ test("conversation model output contract failure stays failed across run views a
     assert.equal(runtimeRun.body.snapshot.run.error.code, "desktop_agent_failed");
     assert.equal(runtimeRun.body.snapshot.run.error.message, "模型输出校验失败。");
     assert.deepEqual(basicView.body.view.capabilityResolution, runtimeRun.body.snapshot.run.capabilityResolution);
+    assert.equal(visibleText.includes("正在处理"), false);
     assert.equal(visibleText.includes(secret), false);
     assertSafePanelJsonText(visibleText);
   } finally {
@@ -1266,6 +1273,103 @@ test("conversation AgentDefinition model round limit stays blocked across run vi
   } finally {
     await server.close();
     await removeTemporaryTree(directory);
+  }
+});
+
+test("conversation context overflow stays blocked across run views and runtime snapshot", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-conversation-context-overflow-"));
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-conversation-context-overflow-workspace-"));
+  const configCenter = new ConfigCenter({
+    settingsStore: new FileSystemNormalSettingsStore(directory),
+    secretStore: new FileSystemLocalDevSecretStore(directory),
+  });
+  const model = "conversation-context-overflow-model";
+  const secret = "sk-conversation-context-overflow-secret";
+  await fs.writeFile(path.join(workspace, "huge.md"), `${"context ".repeat(5_000)}\n`, "utf8");
+  await configCenter.updateWorkspaceConfig({ workspaceDirectory: workspace });
+  await configCenter.updateModelProviderConfig({
+    baseUrl: "https://provider.example",
+    model,
+    protocolKind: "openai_compatible_chat_completions",
+    apiKey: secret,
+    defaultAiMode: "openai-compatible",
+  });
+  await configCenter.updateModelCapabilityOverride({
+    model,
+    providerKind: "openai_compatible",
+    capabilities: {
+      contextWindowTokens: 1_200,
+      maxOutputTokens: 512,
+      supportsToolCalling: true,
+      supportsParallelToolCalls: false,
+      supportsStructuredOutputs: false,
+      supportsStreaming: false,
+      supportsVisionInput: false,
+      supportsReasoningEffort: false,
+      preferredApiStyle: "chat_completions",
+      stability: "unknown",
+    },
+  });
+
+  let providerCalls = 0;
+  const providerFetch: PanelProviderFetch = async (_url, init) => {
+    providerCalls += 1;
+    const body = JSON.parse(init.body) as { messages?: readonly { role?: string; content?: string }[] };
+    const compactionRequest = body.messages?.some((message) =>
+      String(message.content ?? "").includes("Context to compact:")
+    ) === true;
+    return compactionRequest
+      ? createOpenAiTextResponse(model, "")
+      : createOpenAiReadFileToolCallResponse("huge.md", `call-conversation-context-overflow-${providerCalls}`);
+  };
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory, configCenter, providerFetch });
+  try {
+    const start = await requestJson(server.url, "/api/conversations", {
+      method: "POST",
+      body: { goal: "持续读取大量材料直到可以回答", aiMode: "openai-compatible" },
+    });
+    const blocked = await waitForRun(
+      server.url,
+      start.body.run.runId,
+      (body) => body.status === "blocked",
+      4_000,
+      "/api/desktop/runs"
+    );
+    const conversation = await requestJson(
+      server.url,
+      `/api/conversations/${encodeURIComponent(start.body.conversation.conversationId)}`
+    );
+    const basicView = await requestJson(
+      server.url,
+      `/api/basic-agent/runs/${encodeURIComponent(start.body.run.runId)}/view?cursor=0`
+    );
+    const runtimeRun = await requestJson(server.url, `/api/runtime/runs/${encodeURIComponent(start.body.run.runId)}`);
+    const currentRun = conversation.body.conversation.currentRun;
+    const visibleText = `${blocked.text}\n${conversation.text}\n${basicView.text}\n${runtimeRun.text}`;
+
+    assert.equal(start.status, 202);
+    assert.equal(providerCalls >= 2, true);
+    assert.equal(blocked.body.status, "blocked");
+    assert.equal(blocked.body.error.code, "context_overflow");
+    assert.equal(blocked.body.transcript.events.some((event: { type: string }) => event.type === "final.result"), false);
+    assert.equal(currentRun.run.status, "blocked");
+    assert.equal(currentRun.workView.stage, "blocked");
+    assert.equal(currentRun.workView.pendingConfirmation, undefined);
+    assert.equal(currentRun.detail.status, "blocked");
+    assert.equal(basicView.body.view.run.status, "blocked");
+    assert.equal(basicView.body.view.workView.stage, "blocked");
+    assert.equal(basicView.body.view.workView.pendingConfirmation, undefined);
+    assert.equal(basicView.body.view.detail.status, "blocked");
+    assert.equal(runtimeRun.body.snapshot.run.status, "blocked");
+    assert.equal(runtimeRun.body.snapshot.run.error.code, "context_overflow");
+    assert.deepEqual(basicView.body.view.capabilityResolution, runtimeRun.body.snapshot.run.capabilityResolution);
+    assert.equal(visibleText.includes("正在处理"), false);
+    assert.equal(visibleText.includes(secret), false);
+    assertSafePanelJsonText(visibleText);
+  } finally {
+    await server.close();
+    await removeTemporaryTree(directory);
+    await removeTemporaryTree(workspace);
   }
 });
 

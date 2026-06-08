@@ -397,6 +397,9 @@ function pendingConfirmationFor(
   run: BasicAgentRun,
   canvas: DesktopWorkViewCanvasLike | undefined
 ): ConfirmationRequest | undefined {
+  if (run.status !== "approval_needed") {
+    return undefined;
+  }
   if (canvas?.kind !== "desktop_agent_canvas" || canvas.agent?.pendingConfirmation === undefined) {
     return undefined;
   }

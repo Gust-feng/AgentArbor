@@ -202,8 +202,8 @@ test("panel run response projects failed execution result as failed", async () =
       capabilityResolution: resolution,
       eventEntries: [],
       failed: {
-        code: "desktop_agent_failed",
-        message: "模型没有形成最终结果。",
+        code: "model_failed",
+        message: "模型调用失败。",
       },
     }, agentDefinitionRef),
   });
@@ -215,13 +215,14 @@ test("panel run response projects failed execution result as failed", async () =
   assert.deepEqual(response.agentDefinitionRef, agentDefinitionRef);
   assert.deepEqual(response.capabilityResolution, resolution);
   assert.deepEqual(response.error, {
-    code: "desktop_agent_failed",
-    message: "模型没有形成最终结果。",
+    code: "model_failed",
+    message: "模型调用失败。",
   });
   assert.equal(response.transcript.events[0]?.agentLabel, "Frozen Failure Agent");
   assert.equal(response.transcript.events.at(-1)?.type, "run.failed");
   assert.equal(response.transcript.events.at(-1)?.status, "failed");
   assert.equal(response.transcript.events.at(-1)?.agentLabel, "Frozen Failure Agent");
+  assert.equal(JSON.stringify(response).includes("正在处理"), false);
   assert.equal(JSON.stringify(response.agentDefinitionRef).includes("systemPrompt"), false);
   assert.equal(JSON.stringify(response.capabilityResolution).includes("systemPrompt"), false);
 });
@@ -254,6 +255,38 @@ test("panel run response projects blocked execution result as blocked", async ()
   });
   assert.equal(response.transcript.events.at(1)?.type, "run.blocked");
   assert.equal(response.transcript.events.at(1)?.status, "blocked");
+  assert.equal(JSON.stringify(response).includes("正在处理"), false);
+});
+
+test("panel run response projects context overflow as blocked", async () => {
+  const agentDefinitionRef = frozenAgentDefinitionRef();
+  const response = await createPanelRunResponse({
+    runtime: runtimeWithCurrentConfig(modelConfig("current-profile", "current-model"), informationAccess(20)),
+    runKind: "desktop",
+    runMode: "agent",
+    requestedMode: "fake",
+    run: ordinaryDesktopRunResult({
+      config: modelConfig("execution-profile", "execution-model"),
+      informationAccess: informationAccess(5),
+      eventEntries: [],
+      blocked: {
+        code: "context_overflow",
+        message: "上下文超过当前模型可安全处理的范围。",
+      },
+    }, agentDefinitionRef),
+  });
+
+  assert.equal(response.status, "blocked");
+  assert.equal(response.trace.status, "blocked");
+  assert.equal(response.tracking.run.status, "blocked");
+  assert.equal(response.transcript.status, "blocked");
+  assert.deepEqual(response.error, {
+    code: "context_overflow",
+    message: "上下文超过当前模型可安全处理的范围。",
+  });
+  assert.equal(response.transcript.events.at(1)?.type, "run.blocked");
+  assert.equal(response.transcript.events.at(1)?.status, "blocked");
+  assert.equal(JSON.stringify(response).includes("正在处理"), false);
 });
 
 test("panel run response projects pending approval execution result as approval needed", async () => {

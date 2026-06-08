@@ -126,6 +126,25 @@ test("AgentTurnRuntime executeAutonomous fails on incomplete no-tool provider st
   }
 });
 
+test("AgentTurnRuntime executeAutonomous maps failed model responses to non-completed model_failed", async () => {
+  const channel = new SequenceIntelligenceChannel([
+    failedResponse("model-request-failed", "Provider returned a failed response."),
+  ]);
+  const runtime = new AgentTurnRuntime({ intelligenceChannel: channel });
+
+  const result = await runtime.executeAutonomous(createTurnInput({
+    allowedTools: [],
+    maxModelRounds: 2,
+  }));
+
+  assert.equal(result.status, "failed");
+  assert.equal(result.stoppedReason, "model_failed");
+  assert.equal(result.finalOutput?.status, "failed");
+  assert.equal(result.finalOutput?.failure?.kind, "provider_response");
+  assert.equal(result.toolCalls.length, 0);
+  assert.equal(channel.requests.length, 1);
+});
+
 test("AgentTurnRuntime returns a failed model response when the model request throws", async () => {
   const channel: IntelligenceChannel = {
     async request() {
@@ -154,6 +173,56 @@ test("AgentTurnRuntime returns a failed model response when the model request th
   assert.equal(result.finalOutput?.failure?.message.includes("[redacted-secret]"), true);
   assert.equal(result.modelRounds, 0);
   assert.equal(result.toolCalls.length, 0);
+});
+
+test("AgentTurnRuntime executeAutonomous pauses on context_overflow without exposing a final answer", async () => {
+  const channel = new SequenceIntelligenceChannel([
+    textResponse("model-request-final", "must not be requested"),
+  ]);
+  const runtime = new AgentTurnRuntime({
+    intelligenceChannel: channel,
+    maintainContext: async () => ({
+      status: "failed",
+      message: "Context compaction failed before the model could continue.",
+      requestId: "model-request-compaction",
+    }),
+  });
+
+  const result = await runtime.executeAutonomous(createTurnInput({
+    allowedTools: [],
+    maxModelRounds: 2,
+  }));
+
+  assert.equal(result.status, "paused");
+  assert.equal(result.stoppedReason, "context_overflow");
+  assert.equal(result.finalOutput, undefined);
+  assert.equal(result.modelResponseId, undefined);
+  assert.equal(result.toolCalls.length, 0);
+  assert.equal(channel.requests.length, 0);
+});
+
+test("AgentTurnRuntime executeAutonomous returns cancelled without completing when aborted before model request", async () => {
+  const abort = new AbortController();
+  abort.abort();
+  const channel = new SequenceIntelligenceChannel([
+    textResponse("model-request-final", "must not be requested"),
+  ]);
+  const runtime = new AgentTurnRuntime({ intelligenceChannel: channel });
+
+  const result = await runtime.executeAutonomous({
+    ...createTurnInput({
+      allowedTools: [],
+      maxModelRounds: 2,
+    }),
+    abortSignal: abort.signal,
+  });
+
+  assert.equal(result.status, "cancelled");
+  assert.equal(result.stoppedReason, "cancelled");
+  assert.equal(result.finalOutput, undefined);
+  assert.equal(result.toolCalls.length, 0);
+  assert.equal(result.modelRounds, 0);
+  assert.equal(channel.requests.length, 0);
 });
 
 test("AgentTurnRuntime exposes allowed external tools without finish_task", async () => {
@@ -286,6 +355,31 @@ test("AgentTurnRuntime pauses out_of_fuel when budgets end before provider stop"
   assert.equal(result.status, "paused");
   assert.equal(result.stoppedReason, "out_of_fuel");
   assert.equal(result.toolCalls.length, 1);
+  assert.equal(channel.requests.length, 1);
+});
+
+test("AgentTurnRuntime executeAutonomous pauses on tool fuel exhaustion without final synthesis", async () => {
+  const channel = new SequenceIntelligenceChannel([
+    toolCallResponse("model-request-test", "call-search", "web_search"),
+    textResponse("model-request-final", "must not be requested after tool fuel exhaustion"),
+  ]);
+  const broker = new PermissionAwareToolBroker(["web_search"]);
+  const runtime = new AgentTurnRuntime({
+    intelligenceChannel: channel,
+    toolCenter: broker,
+  });
+
+  const result = await runtime.executeAutonomous(createTurnInput({
+    allowedTools: ["web_search"],
+    maxModelRounds: 3,
+    maxToolRounds: 0,
+  }));
+
+  assert.equal(result.status, "paused");
+  assert.equal(result.stoppedReason, "out_of_fuel");
+  assert.equal(result.finalOutput, undefined);
+  assert.equal(result.toolCalls.length, 0);
+  assert.equal(broker.executedCount, 0);
   assert.equal(channel.requests.length, 1);
 });
 
@@ -480,6 +574,24 @@ function textResponse(requestId: string, text: string): ModelResponse {
     ...completedResponse(requestId, undefined),
     textOutput: text,
     finishReason: "stop",
+  };
+}
+
+function failedResponse(requestId: string, message: string): ModelResponse {
+  return {
+    ...completedResponse(requestId, undefined),
+    status: "failed",
+    finishReason: "error",
+    validation: {
+      status: "failed",
+      checkedAt: nowIso(),
+      issues: [{ code: "MODEL_PROVIDER_RESPONSE", message }],
+    },
+    failure: {
+      kind: "provider_response",
+      retryable: true,
+      message,
+    },
   };
 }
 

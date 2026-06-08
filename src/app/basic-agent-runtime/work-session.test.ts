@@ -126,6 +126,8 @@ test("work session read model surfaces approval as the main stage", () => {
 
   assert.equal(workSession.stage, "awaiting_approval");
   assert.equal(workSession.pendingConfirmation?.confirmationId, "confirmation-test");
+  assert.equal(workSession.pendingConfirmation?.actionSummary, "准备删除文件。");
+  assert.equal(workSession.pendingConfirmation?.actionSummary.includes("批准后只执行本次删除"), false);
   assert.equal(workSession.deliverable, undefined);
 });
 

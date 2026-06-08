@@ -351,6 +351,8 @@ test("runtime record mapper persists safe model, event, tool, and confirmation p
   assert.equal(toolCalls[0]?.envelope?.rawRetention, "diagnostic_ref_only");
   assert.equal(JSON.stringify(toolCalls).includes("RAW_STDOUT_SENTINEL"), false);
   assert.equal(confirmations[0]?.status, "guidance");
+  assert.equal(confirmations[0]?.actionSummary, "是否运行命令？");
+  assert.equal(confirmations[0]?.actionSummary.includes("会读取安全摘要"), false);
   assert.equal(confirmations[0]?.guidance?.includes("[redacted-secret]"), true);
 });
 

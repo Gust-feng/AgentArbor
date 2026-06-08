@@ -21,6 +21,7 @@ import type {
 } from "../panel-run-read-model.js";
 import { safeCommandToolPreview, safeReadFileToolPreview } from "../safe-tool-preview.js";
 import { sanitizeAssistantVisibleText } from "../visible-text-safety.js";
+import { confirmationActionSummaryText } from "../confirmation-copy.js";
 import { asRecord, optionalString, unique } from "./request-parsers.js";
 
 export function createRuntimeWorkspaceRecord(
@@ -194,8 +195,11 @@ export function toRuntimeConfirmationRecords(
         status: previous?.status ?? "pending",
         title: compactRuntimeText(optionalString(payload.title) ?? "需要确认", 160),
         actionSummary: compactRuntimeText(
-          [question, consequence].filter((value): value is string => value !== undefined).join(" ") ||
-            "等待确认。",
+          confirmationActionSummaryText({
+            question,
+            consequence,
+            fallback: "等待确认。",
+          }),
           500
         ),
         affectedResources: affectedResourcesFrom(payload),
@@ -300,7 +304,13 @@ function resultSummaryForJob(job: PanelRunJob): { readonly title: string; readon
   if (canvas?.kind === "desktop_agent_canvas" && canvas.agent.pendingConfirmation !== undefined) {
     return {
       title: "需要确认",
-      summary: compactRuntimeText(joinDisplayText(canvas.agent.pendingConfirmation.question, canvas.agent.pendingConfirmation.consequence), 900),
+      summary: compactRuntimeText(
+        confirmationActionSummaryText({
+          question: canvas.agent.pendingConfirmation.question,
+          consequence: canvas.agent.pendingConfirmation.consequence,
+        }),
+        900
+      ),
     };
   }
   if (canvas?.kind === "work_session_canvas" && canvas.workSession.directAnswer !== undefined) {
@@ -570,8 +580,4 @@ function mergeToolStatus(
     return "approval_required";
   }
   return "requested";
-}
-
-function joinDisplayText(...parts: readonly string[]): string {
-  return parts.map((part) => part.trim()).filter((part) => part.length > 0).join("\n");
 }

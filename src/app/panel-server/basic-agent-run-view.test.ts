@@ -346,6 +346,8 @@ test("basic agent live work view builds transcript nodes from synced backend str
   assert.equal(view?.run.status, "approval_needed");
   assert.equal(view?.workView.stage, "awaiting_approval");
   assert.equal(view?.workView.pendingConfirmation?.confirmationId, "confirmation-live");
+  assert.equal(view?.workView.pendingConfirmation?.actionSummary, "是否编辑 README.md？");
+  assert.equal(view?.workView.pendingConfirmation?.actionSummary.includes("会写入工作区文件"), false);
   assert.equal(view?.workView.transcriptNodes.some((node) => node.kind === "confirmation"), true);
   assert.equal(view?.detail.transcript?.events?.some((event) => event.type === "confirmation.needed"), true);
 });

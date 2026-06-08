@@ -13,7 +13,7 @@ import type { ObservationRef } from "../../domain/observation/index.js";
 import type { ToolDisplayProjection, ToolResultEnvelope } from "../../domain/tools/index.js";
 import type { DesktopTaskSoilInput } from "../task-soil-workspace.js";
 import { redactOrdinaryText } from "../safe-projection.js";
-import { cleanConfirmationSummary } from "../confirmation-copy.js";
+import { cleanConfirmationSummary, confirmationActionSummaryText } from "../confirmation-copy.js";
 import {
   contextAttachmentsFor,
   contextLedgerFor,
@@ -371,7 +371,13 @@ function pendingConfirmationFor(
     runId: run.runId,
     conversationId: run.conversationId,
     title: redactOrdinaryText(pending.title, 120),
-    actionSummary: redactOrdinaryText(cleanConfirmationSummary(`${pending.question}\n${pending.consequence}`), 600),
+    actionSummary: redactOrdinaryText(
+      confirmationActionSummaryText({
+        question: pending.question,
+        consequence: pending.consequence,
+      }),
+      600
+    ),
     affectedResources: pending.sourceRefs.map((ref) => redactOrdinaryText(ref, 180)),
     riskLevel: pending.riskLevel === "low" || pending.riskLevel === "medium" || pending.riskLevel === "high" ? pending.riskLevel : "medium",
     resumeAvailability: "live",

@@ -108,7 +108,7 @@ test("syncConversationTurnForJob keeps approval requests as running previews", (
   const assistant = conversation?.turns.find((turn) => turn.role === "assistant");
   assert.equal(assistant?.title, "需要确认");
   assert.equal(assistant?.content.includes("是否删除文件？"), true);
-  assert.equal(assistant?.content.includes("会移除工作区文件。"), true);
+  assert.equal(assistant?.content.includes("会移除工作区文件。"), false);
   assert.equal(assistant?.status, "running");
 });
 
@@ -164,6 +164,8 @@ test("syncConversationTurnForJob keeps needs-input turns visible as user-action 
   const summary = conversations.list().find((item) => item.conversationId === job.conversationId);
   const assistant = conversations.getReadModel(job.conversationId ?? "")?.turns.find((turn) => turn.role === "assistant");
   assert.equal(assistant?.title, "需要补充");
+  assert.equal(assistant?.content, "需要补充材料或说明。");
+  assert.equal(assistant?.content.includes("已收到补充指导"), false);
   assert.equal(assistant?.status, "needs_input");
   assert.equal(summary?.status, "needs_input");
   assert.equal(summary?.requiresUserAction, true);

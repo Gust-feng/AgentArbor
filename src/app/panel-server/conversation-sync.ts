@@ -16,7 +16,7 @@ import {
   emptyTextStreamAssembly,
   textStreamFragmentSourceFromEventId,
 } from "../readable-text-fragments.js";
-import { cleanConfirmationSummary } from "../confirmation-copy.js";
+import { confirmationActionSummaryText } from "../confirmation-copy.js";
 
 export type PanelConversationSyncRunResponse = {
   readonly status: PanelRunStatus;
@@ -100,7 +100,7 @@ export function syncConversationTurnForJob(input: {
       assistantTurnId: job.assistantTurnId,
       runId: job.runId,
       title: "需要补充",
-      content: sanitizeAssistantVisibleText("已收到补充指导，将作为后续消息继续处理。"),
+      content: sanitizeAssistantVisibleText("需要补充材料或说明。"),
       status: "needs_input",
       responseModel,
     });
@@ -188,7 +188,10 @@ function assistantTurnFromResponse(
     return {
       title: "需要确认",
       content: sanitizeAssistantVisibleText(
-        cleanConfirmationSummary(joinDisplayText(canvas.agent.pendingConfirmation.question, canvas.agent.pendingConfirmation.consequence))
+        confirmationActionSummaryText({
+          question: canvas.agent.pendingConfirmation.question,
+          consequence: canvas.agent.pendingConfirmation.consequence,
+        })
       ),
     };
   }
@@ -401,10 +404,6 @@ function conciseRunFailureText(error: { readonly code: string; readonly message:
     default:
       return truncateFailureText(friendlyUserFacingFailureText(error.message), 1_000);
   }
-}
-
-function joinDisplayText(...parts: readonly string[]): string {
-  return parts.map((part) => part.trim()).filter((part) => part.length > 0).join("\n");
 }
 
 function truncateFailureText(value: string, maxLength: number): string {

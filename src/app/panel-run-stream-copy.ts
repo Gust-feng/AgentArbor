@@ -5,7 +5,7 @@ import { modelVisibleOutputOrUndefined } from "./panel-transcript-model-calls.js
 import { asRecord, isString, numberOrUndefined, stringOrUndefined } from "./panel-read-model-utils.js";
 import { compactStreamDetailText, type PanelRunStreamEventDetail } from "./panel-stream-tool-projection.js";
 import type { PanelObservationReadModel } from "./panel-run-tracking-contracts.js";
-import { cleanConfirmationSummary } from "./confirmation-copy.js";
+import { cleanConfirmationSummary, confirmationActionSummaryText } from "./confirmation-copy.js";
 import type { PanelRunStreamEvent, PanelRunStreamEventType } from "./panel-run-stream-contracts.js";
 import type { PanelRunSummary, PanelRunSummaryPayload } from "./panel-run-summary.js";
 import { friendlyUserFacingFailureText } from "./visible-text-safety.js";
@@ -138,12 +138,14 @@ export function contextCompactionPreview(payload: Readonly<Record<string, unknow
 export function confirmationSummary(payload: Readonly<Record<string, unknown>>): string {
   const question = stringOrUndefined(payload.question);
   const consequence = stringOrUndefined(payload.consequence);
-  if (question !== undefined && consequence !== undefined) {
-    return compactStreamDetailText(cleanConfirmationSummary(`${question} ${consequence}`), 500) ?? "继续前需要用户补充授权或澄清。";
-  }
-  return question === undefined
-    ? "继续前需要用户补充授权或澄清。"
-    : compactStreamDetailText(cleanConfirmationSummary(question), 500) ?? "继续前需要用户补充授权或澄清。";
+  return compactStreamDetailText(
+    confirmationActionSummaryText({
+      question,
+      consequence,
+      fallback: "继续前需要用户补充授权或澄清。",
+    }),
+    500
+  ) ?? "继续前需要用户补充授权或澄清。";
 }
 
 export function userGuidanceSummary(payload: Readonly<Record<string, unknown>>): string {

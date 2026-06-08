@@ -193,6 +193,7 @@ test("panel transcript projects confirmation and user guidance as safe ordinary-
     ["run.started", "confirmation.needed", "user.guidance"],
   );
   assert.equal(transcript.events[1]?.summary?.includes("请选择要读取的文件"), true);
+  assert.equal(transcript.events[1]?.summary?.includes("未授权前不会读取本地文件"), false);
   assert.equal(transcript.events[2]?.summary?.includes("先不要读取"), true);
   assert.equal(JSON.stringify(transcript).includes("raw prompt"), false);
 });

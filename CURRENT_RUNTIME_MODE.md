@@ -66,7 +66,7 @@
 - 普通 `agent` 执行阶段只能消费 run 创建时冻结的 `capabilitySnapshot`；执行资源不得在运行中重新向 `CapabilityCenter` 获取当前快照来替代本轮事实
 - 普通 `agent` 的本轮 ToolCenter 执行器全集也必须从 `capabilitySnapshot.toolCatalog.tools` 派生；当前代码新增、删除或启停工具只能影响新 run，不能扩张已创建 run 的可执行工具集合
 - 普通 `agent` 的技能可见与触发集合也来自 run 创建时冻结的 `capabilitySnapshot.skillCatalog`；执行期间的当前 skill 启停状态只影响新 run，不改写已创建 run
-- MCP 当前只进入配置目录、能力快照的 `mcpCatalog` 和能力草案投影；默认普通 `agent` 不把 MCP 工具作为模型可见工具或默认可执行工具
+- MCP 当前进入配置目录、能力快照的 `mcpCatalog`、能力草案投影和普通 `agent` 默认工具边界；只有已启用、已连接、已进入本轮冻结快照且通过 `AgentDefinition.toolVisibilityProfile` 的 MCP 工具，才会作为模型可见工具和可执行工具进入本轮运行
 - 工程决定哪些工具可以执行、哪些需要确认、哪些被隐藏
 - `AgentTurnRuntime / tool-use-loop` 在调用工具执行器前必须强制校验本轮 `allowedTools`；`ToolCenter` 和具体 adapter 仍可重复校验，但不能成为唯一防线
 - 模型只能在本轮可见工具集合内自主选择

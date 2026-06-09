@@ -15,10 +15,10 @@ import type { ToolsResponse } from "../contracts/tools";
 import { CapabilitiesSettings } from "./capability-settings";
 import { ConfirmationSettings } from "./confirmation-settings";
 import { ModelSettings } from "./model-settings";
-import type { ModelForm, SettingsGroup, ToolForm } from "./settings-types";
+import type { McpServerForm, ModelForm, SettingsGroup, ToolForm } from "./settings-types";
 import { WorkspaceSettings } from "./workspace-settings";
 
-export type { ModelForm, SettingsGroup, ToolForm } from "./settings-types";
+export type { McpServerForm, ModelForm, SettingsGroup, ToolForm } from "./settings-types";
 
 export function SettingsDialog(props: {
   readonly open: boolean;
@@ -41,8 +41,11 @@ export function SettingsDialog(props: {
   readonly tools?: ToolsResponse;
   readonly toolForm: ToolForm;
   readonly setToolForm: (form: ToolForm) => void;
+  readonly mcpServerForm: McpServerForm;
+  readonly setMcpServerForm: (form: McpServerForm) => void;
   readonly savingTools?: boolean;
   readonly onSaveTools: () => void;
+  readonly onSaveMcpServer: () => void;
   readonly onUpdateTool: (toolName: string, enabled: boolean) => void;
   readonly onUpdateSkill: (skillId: string, enabled: boolean) => void;
 }): React.ReactElement | null {
@@ -124,8 +127,11 @@ export function SettingsDialog(props: {
                 tools={props.tools}
                 toolForm={props.toolForm}
                 setToolForm={props.setToolForm}
+                mcpServerForm={props.mcpServerForm}
+                setMcpServerForm={props.setMcpServerForm}
                 savingTools={props.savingTools}
                 onSaveTools={props.onSaveTools}
+                onSaveMcpServer={props.onSaveMcpServer}
                 onUpdateTool={props.onUpdateTool}
                 skills={props.skills}
                 onUpdateSkill={props.onUpdateSkill}

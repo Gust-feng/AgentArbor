@@ -3,7 +3,7 @@ import { isConversationWaitingForUser } from "./conversation-state";
 import { ChatActive } from "./components/chat-active";
 import { ChatEmpty } from "./components/chat-empty";
 import { Sidebar, type Screen } from "./components/sidebar";
-import { SettingsDialog, type ModelForm, type SettingsGroup, type ToolForm } from "./components/settings-dialog";
+import { SettingsDialog, type McpServerForm, type ModelForm, type SettingsGroup, type ToolForm } from "./components/settings-dialog";
 import { blockedContextAttachment, previewContextAttachment, uniqueAttachments } from "./app-attachments";
 import { applyAppBootstrap, loadAppBootstrap } from "./app-bootstrap";
 import {
@@ -52,6 +52,16 @@ export function App(): React.ReactElement {
     provider: "tavily",
     tavilyApiKey: "",
     maxResults: "5",
+  });
+  const [mcpServerForm, setMcpServerForm] = useState<McpServerForm>({
+    serverId: "",
+    label: "",
+    transport: "stdio",
+    command: "",
+    args: "",
+    url: "",
+    envSecretRefs: "",
+    enabled: true,
   });
   const [attachments, setAttachments] = useState<readonly ContextAttachment[]>([]);
   const [attachmentKind, setAttachmentKind] = useState<ContextAttachment["kind"]>("workspace");
@@ -126,6 +136,22 @@ export function App(): React.ReactElement {
   }, [app.tools]);
 
   useEffect(() => {
+    setMcpServerForm((previous) => {
+      if (previous.serverId.length > 0) return previous;
+      const firstServer = app.tools?.mcpCatalog?.[0];
+      if (firstServer === undefined) return previous;
+      return {
+        ...previous,
+        serverId: firstServer.serverId,
+        label: firstServer.label,
+        transport: firstServer.transport,
+        url: firstServer.url ?? "",
+        enabled: firstServer.enabled,
+      };
+    });
+  }, [app.tools?.mcpCatalog]);
+
+  useEffect(() => {
     if (app.config?.modelCatalogs !== undefined) {
       setModelCatalogs(catalogRecordFromList(app.config.modelCatalogs));
     }
@@ -175,6 +201,7 @@ export function App(): React.ReactElement {
     workspaceDirectory,
     toolForm,
     setToolForm,
+    mcpServerForm,
     mountedRef,
     modelSaveQueueRef,
     setSavingModel,
@@ -190,6 +217,7 @@ export function App(): React.ReactElement {
     saveModelCatalog,
     saveWorkspace,
     saveTools,
+    saveMcpServer,
     updateTool,
     updateSkill,
   } = settingsController;
@@ -324,8 +352,11 @@ export function App(): React.ReactElement {
         tools={app.tools}
         toolForm={toolForm}
         setToolForm={setToolForm}
+        mcpServerForm={mcpServerForm}
+        setMcpServerForm={setMcpServerForm}
         savingTools={savingTools}
         onSaveTools={() => void saveTools()}
+        onSaveMcpServer={() => void saveMcpServer()}
         onUpdateTool={(toolName, enabled) => void updateTool(toolName, enabled)}
         onUpdateSkill={(skillId, enabled) => void updateSkill(skillId, enabled)}
       />

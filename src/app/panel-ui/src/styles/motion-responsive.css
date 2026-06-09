@@ -81,6 +81,15 @@
     grid-template-columns: 1fr;
   }
 
+  .mcp-service-row,
+  .mcp-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .mcp-service-meta {
+    text-align: left;
+  }
+
   .settings-dialog {
     grid-template-columns: 72px minmax(0, 1fr);
   }

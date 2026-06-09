@@ -5,6 +5,7 @@ import {
   fetchModelProviderCatalog,
   mergeCatalogsIntoConfig,
   revealModelProviderApiKey,
+  saveMcpServerSettings,
   saveModelProviderCatalog,
   saveModelProviderConfig,
   saveToolSettings,
@@ -15,7 +16,7 @@ import {
 } from "./app-config-actions";
 import { mergeConfigResponse, type VisibleAiMode } from "./app-config-projection";
 import type { AppState } from "./app-state";
-import type { ModelForm, ToolForm } from "./components/settings-types";
+import type { McpServerForm, ModelForm, ToolForm } from "./components/settings-types";
 import type { ModelProviderModelCatalog } from "./contracts/config";
 
 export type AppSettingsController = {
@@ -27,6 +28,7 @@ export type AppSettingsController = {
   readonly saveModelCatalog: (profileId: string, catalog: ModelProviderModelCatalog) => Promise<void>;
   readonly saveWorkspace: (nextWorkspaceDirectory?: string) => Promise<void>;
   readonly saveTools: () => Promise<void>;
+  readonly saveMcpServer: () => Promise<void>;
   readonly updateTool: (toolName: string, enabled: boolean) => Promise<void>;
   readonly updateSkill: (skillId: string, enabled: boolean) => Promise<void>;
 };
@@ -41,6 +43,7 @@ export type AppSettingsControllerOptions = {
   readonly workspaceDirectory: string;
   readonly toolForm: ToolForm;
   readonly setToolForm: React.Dispatch<React.SetStateAction<ToolForm>>;
+  readonly mcpServerForm: McpServerForm;
   readonly mountedRef: React.MutableRefObject<boolean>;
   readonly modelSaveQueueRef: React.MutableRefObject<Promise<void>>;
   readonly setSavingModel: React.Dispatch<React.SetStateAction<boolean>>;
@@ -214,7 +217,13 @@ export function createAppSettingsController(options: AppSettingsControllerOption
     try {
       const response = await saveToolSettings(options.toolForm);
       if (options.mountedRef.current) {
-        options.setApp((previous) => ({ ...previous, tools: response }));
+        options.setApp((previous) => ({
+          ...previous,
+          tools: {
+            ...response,
+            mcpCatalog: response.mcpCatalog ?? previous.tools?.mcpCatalog,
+          },
+        }));
         options.setToolForm((previous) => ({ ...previous, tavilyApiKey: "" }));
       }
     } catch (error) {
@@ -229,12 +238,43 @@ export function createAppSettingsController(options: AppSettingsControllerOption
     }
   }
 
+  async function saveMcpServer(): Promise<void> {
+    options.setSavingTools(true);
+    try {
+      const response = await saveMcpServerSettings(options.mcpServerForm);
+      if (options.mountedRef.current) {
+        options.setApp((previous) => ({
+          ...previous,
+          tools: {
+            ...previous.tools,
+            mcpCatalog: response.mcpCatalog ?? [],
+          },
+        }));
+      }
+    } catch (error) {
+      if (options.mountedRef.current) {
+        options.setApp((previous) => ({
+          ...previous,
+          error: error instanceof Error ? error.message : "MCP 服务保存失败。",
+        }));
+      }
+    } finally {
+      if (options.mountedRef.current) options.setSavingTools(false);
+    }
+  }
+
   async function updateTool(toolName: string, enabled: boolean): Promise<void> {
     options.setSavingTools(true);
     try {
       const response = await updateToolState(toolName, enabled);
       if (options.mountedRef.current) {
-        options.setApp((previous) => ({ ...previous, tools: response }));
+        options.setApp((previous) => ({
+          ...previous,
+          tools: {
+            ...response,
+            mcpCatalog: response.mcpCatalog ?? previous.tools?.mcpCatalog,
+          },
+        }));
       }
     } catch (error) {
       if (options.mountedRef.current) {
@@ -276,6 +316,7 @@ export function createAppSettingsController(options: AppSettingsControllerOption
     saveModelCatalog,
     saveWorkspace,
     saveTools,
+    saveMcpServer,
     updateTool,
     updateSkill,
   };

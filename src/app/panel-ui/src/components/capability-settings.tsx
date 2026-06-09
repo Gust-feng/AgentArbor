@@ -2,7 +2,7 @@ import React from "react";
 import type { ConfigResponse } from "../contracts/config";
 import type { SkillDefinition } from "../contracts/skills";
 import type { ToolsResponse } from "../contracts/tools";
-import type { ToolForm } from "./settings-types";
+import type { McpServerForm, ToolForm } from "./settings-types";
 import { providerName, toolDescription, toolMeta, toolTitle } from "./settings-tool-copy";
 import { SettingRow } from "./workspace-common";
 
@@ -13,8 +13,11 @@ export function CapabilitiesSettings(props: {
   readonly tools?: ToolsResponse;
   readonly toolForm: ToolForm;
   readonly setToolForm: (form: ToolForm) => void;
+  readonly mcpServerForm: McpServerForm;
+  readonly setMcpServerForm: (form: McpServerForm) => void;
   readonly savingTools?: boolean;
   readonly onSaveTools: () => void;
+  readonly onSaveMcpServer: () => void;
   readonly onUpdateTool: (toolName: string, enabled: boolean) => void;
   readonly skills: readonly SkillDefinition[];
   readonly onUpdateSkill: (skillId: string, enabled: boolean) => void;
@@ -36,6 +39,13 @@ export function CapabilitiesSettings(props: {
         setToolForm={props.setToolForm}
         saving={props.savingTools}
         onSaveTools={props.onSaveTools}
+      />
+      <McpServiceSettings
+        tools={props.tools}
+        form={props.mcpServerForm}
+        setForm={props.setMcpServerForm}
+        saving={props.savingTools}
+        onSave={props.onSaveMcpServer}
       />
       <ToolCatalogSettings tools={props.tools} saving={props.savingTools} onUpdateTool={props.onUpdateTool} />
       <SkillContextSettings skills={props.skills} onUpdateSkill={props.onUpdateSkill} />
@@ -83,6 +93,124 @@ function WebSearchSettings(props: {
           />
         </label>
         <button type="button" className="page-action-button primary" onClick={props.onSaveTools} disabled={props.saving}>
+          {props.saving ? "保存中" : "保存"}
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function McpServiceSettings(props: {
+  readonly tools?: ToolsResponse;
+  readonly form: McpServerForm;
+  readonly setForm: (form: McpServerForm) => void;
+  readonly saving?: boolean;
+  readonly onSave: () => void;
+}): React.ReactElement {
+  const catalog = props.tools?.mcpCatalog ?? [];
+  const selectedServer = props.form.serverId.length === 0
+    ? undefined
+    : catalog.find((server) => server.serverId === props.form.serverId);
+  const canSave = props.form.serverId.trim().length > 0;
+  return (
+    <section className="settings-card mcp-service-card">
+      <div className="settings-card-title-row">
+        <h3>MCP 服务</h3>
+        <span>{catalog.length} 个</span>
+      </div>
+      <div className="mcp-service-list">
+        {catalog.length === 0 ? (
+          <div className="capability-empty">暂无服务</div>
+        ) : (
+          catalog.map((server) => (
+            <button
+              type="button"
+              key={server.serverId}
+              className={`mcp-service-row ${server.serverId === props.form.serverId ? "selected" : ""}`}
+              onClick={() => props.setForm(formFromMcpCatalog(server, props.form))}
+            >
+              <span className="mcp-service-main">
+                <strong>{server.label}</strong>
+                <span>{mcpServerEndpoint(server)}</span>
+              </span>
+              <span className="mcp-service-meta">{mcpServerMeta(server)}</span>
+            </button>
+          ))
+        )}
+      </div>
+      <div className="mcp-form-grid">
+        <label>
+          服务 ID
+          <input
+            value={props.form.serverId}
+            onChange={(event) => props.setForm({ ...props.form, serverId: event.target.value })}
+            placeholder="filesystem"
+          />
+        </label>
+        <label>
+          名称
+          <input
+            value={props.form.label}
+            onChange={(event) => props.setForm({ ...props.form, label: event.target.value })}
+            placeholder={props.form.serverId || "本地文件服务"}
+          />
+        </label>
+        <label>
+          连接方式
+          <select
+            value={props.form.transport}
+            onChange={(event) => props.setForm({ ...props.form, transport: event.target.value === "http" ? "http" : "stdio" })}
+          >
+            <option value="stdio">stdio</option>
+            <option value="http">HTTP</option>
+          </select>
+        </label>
+        {props.form.transport === "stdio" ? (
+          <>
+            <label className="mcp-form-wide">
+              命令
+              <input
+                value={props.form.command}
+                onChange={(event) => props.setForm({ ...props.form, command: event.target.value })}
+                placeholder={selectedServer?.commandSummary ?? "node server.js"}
+              />
+            </label>
+            <label className="mcp-form-wide">
+              参数
+              <textarea
+                value={props.form.args}
+                onChange={(event) => props.setForm({ ...props.form, args: event.target.value })}
+                placeholder="每行一个参数"
+              />
+            </label>
+          </>
+        ) : (
+          <label className="mcp-form-wide">
+            URL
+            <input
+              value={props.form.url}
+              onChange={(event) => props.setForm({ ...props.form, url: event.target.value })}
+              placeholder={selectedServer?.url ?? "http://127.0.0.1:3000/mcp"}
+            />
+          </label>
+        )}
+        <label className="mcp-form-wide">
+          环境密钥引用
+          <textarea
+            value={props.form.envSecretRefs}
+            onChange={(event) => props.setForm({ ...props.form, envSecretRefs: event.target.value })}
+            placeholder="每行一个环境变量名"
+          />
+        </label>
+        <label className="mcp-enabled-field">
+          <input
+            type="checkbox"
+            checked={props.form.enabled}
+            onChange={(event) => props.setForm({ ...props.form, enabled: event.target.checked })}
+          />
+          启用
+        </label>
+        <button type="button" className="page-action-button primary" onClick={props.onSave} disabled={props.saving || !canSave}>
           {props.saving ? "保存中" : "保存"}
         </button>
       </div>
@@ -146,6 +274,54 @@ function SkillContextSettings(props: {
       </div>
     </section>
   );
+}
+
+function formFromMcpCatalog(server: NonNullable<ToolsResponse["mcpCatalog"]>[number], previous: McpServerForm): McpServerForm {
+  return {
+    ...previous,
+    serverId: server.serverId,
+    label: server.label,
+    transport: server.transport,
+    command: "",
+    args: "",
+    url: server.url ?? "",
+    envSecretRefs: "",
+    enabled: server.enabled,
+  };
+}
+
+function mcpServerEndpoint(server: NonNullable<ToolsResponse["mcpCatalog"]>[number]): string {
+  if (server.transport === "http") {
+    return server.url ?? "HTTP";
+  }
+  return server.commandSummary ?? "stdio";
+}
+
+function mcpServerMeta(server: NonNullable<ToolsResponse["mcpCatalog"]>[number]): string {
+  const status = mcpRuntimeStatusLabel(server.runtimeStatus ?? server.availability);
+  const toolCount = `${server.tools.length} 个工具`;
+  const secretRefs = server.envSecretRefCount > 0 ? ` · ${server.envSecretRefCount} 个密钥引用` : "";
+  const error = server.errorSummary === undefined ? "" : ` · ${server.errorSummary}`;
+  return `${status} · ${toolCount}${secretRefs}${error}`;
+}
+
+function mcpRuntimeStatusLabel(status: string): string {
+  switch (status) {
+    case "connected":
+      return "已连接";
+    case "connecting":
+      return "连接中";
+    case "configured":
+      return "已配置";
+    case "disabled":
+      return "已停用";
+    case "error":
+      return "连接失败";
+    case "unavailable":
+      return "缺少配置";
+    default:
+      return "已配置";
+  }
 }
 
 function CapabilityRow(props: {

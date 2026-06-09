@@ -4,7 +4,7 @@ import {
   mergeConfigResponse,
   type VisibleAiMode,
 } from "./app-config-projection";
-import type { ModelForm, ToolForm } from "./components/settings-types";
+import type { McpServerForm, ModelForm, ToolForm } from "./components/settings-types";
 import type { ConfigResponse, ModelProviderModelCatalog } from "./contracts/config";
 import type { SkillDefinition } from "./contracts/skills";
 import type { ToolsResponse } from "./contracts/tools";
@@ -166,6 +166,22 @@ export async function saveToolSettings(form: ToolForm): Promise<ToolsResponse> {
   });
 }
 
+export async function saveMcpServerSettings(form: McpServerForm): Promise<ToolsResponse> {
+  const response = await postJson<{ readonly catalog?: ToolsResponse["mcpCatalog"] }>("/api/config/mcp", {
+    serverId: form.serverId,
+    label: form.label,
+    transport: form.transport,
+    command: form.transport === "stdio" ? form.command : "",
+    args: splitListInput(form.args),
+    url: form.transport === "http" ? form.url : "",
+    envSecretRefs: splitListInput(form.envSecretRefs),
+    enabled: form.enabled,
+  });
+  return {
+    mcpCatalog: response.catalog ?? [],
+  };
+}
+
 export async function updateToolState(toolName: string, enabled: boolean): Promise<ToolsResponse> {
   return postJson<ToolsResponse>(`/api/config/tools/${encodeURIComponent(toolName)}/state`, {
     enabled,
@@ -184,6 +200,13 @@ export function mergeCatalogsIntoConfig(
   catalogs: readonly ModelProviderModelCatalog[]
 ): ConfigResponse {
   return mergeConfigResponse(config, { modelCatalogs: catalogs });
+}
+
+function splitListInput(value: string): readonly string[] {
+  return value
+    .split(/[\n,]+/u)
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0);
 }
 
 export { catalogRecordFromList };

@@ -286,6 +286,14 @@ export type DesktopWorkView = {
   readonly currentAction: string;
   readonly contextAttachments: readonly ContextAttachment[];
   readonly contextLedger: ContextLedger;
+  readonly triggeredSkills: readonly {
+    readonly skillId: string;
+    readonly name: string;
+    readonly triggerReason: string;
+    readonly summary: string;
+    readonly sourceRef: string;
+    readonly truncated: boolean;
+  }[];
   readonly pendingConfirmation?: {
     readonly confirmationId: string;
     readonly runId: string;

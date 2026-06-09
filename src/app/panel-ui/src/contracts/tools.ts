@@ -59,6 +59,21 @@ export type ToolCatalogItem = {
   readonly confirmationLabel?: string;
 };
 
+export type McpServerCatalogItem = {
+  readonly serverId: string;
+  readonly label: string;
+  readonly transport: "stdio" | "http";
+  readonly enabled: boolean;
+  readonly availability: "configured" | "disabled" | "unavailable";
+  readonly runtimeStatus?: "disabled" | "unavailable" | "configured" | "connecting" | "connected" | "error";
+  readonly errorSummary?: string;
+  readonly commandSummary?: string;
+  readonly url?: string;
+  readonly envSecretRefCount: number;
+  readonly tools: readonly ToolCatalogItem[];
+  readonly updatedAt: string;
+};
+
 export type ToolsResponse = {
   readonly tools?: {
     readonly webSearch?: {
@@ -70,4 +85,5 @@ export type ToolsResponse = {
       readonly tools?: readonly ToolCatalogItem[];
     };
   };
+  readonly mcpCatalog?: readonly McpServerCatalogItem[];
 };

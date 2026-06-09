@@ -18,4 +18,4 @@ export type {
   TranscriptNodePhase,
 } from "./contracts/run";
 export type { SkillDefinition } from "./contracts/skills";
-export type { ToolCatalogItem, ToolDisplayProjection, ToolsResponse } from "./contracts/tools";
+export type { McpServerCatalogItem, ToolCatalogItem, ToolDisplayProjection, ToolsResponse } from "./contracts/tools";

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowUp,
   BrainCircuit,
@@ -61,19 +61,22 @@ export function ChatEmpty(props: ChatInputProps & {
           <section className="chat-empty-copy" aria-label="任务输入">
             <h1>今天要处理什么？</h1>
             {props.error && <div className="system-error-line">{props.error}</div>}
-            <ChatInputBar
-              {...props}
-              variant="embedded"
-              placeholder="输入任务..."
-            />
           </section>
         </div>
       </main>
+      <ChatInputBar
+        {...props}
+        variant="floating"
+        placeholder="输入任务..."
+      />
     </div>
   );
 }
 
 export function ChatInputBar(props: ChatInputProps): React.ReactElement {
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const didAutoFocusRef = useRef(false);
+  const previousBusyRef = useRef(props.busy);
   const [focused, setFocused] = useState(false);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [optionsOpen, setOptionsOpen] = useState(false);
@@ -88,6 +91,21 @@ export function ChatInputBar(props: ChatInputProps): React.ReactElement {
     setOptionsOpen(false);
     setContextOpen(false);
   }, [props.closeSignal]);
+
+  useEffect(() => {
+    if (props.busy) {
+      previousBusyRef.current = true;
+      return;
+    }
+    const shouldFocus = !didAutoFocusRef.current || previousBusyRef.current;
+    if (!shouldFocus || modelMenuOpen || optionsOpen || contextOpen) return;
+    const node = textareaRef.current;
+    if (node === null || node.disabled) return;
+    const focusFrame = window.requestAnimationFrame(() => node.focus());
+    didAutoFocusRef.current = true;
+    previousBusyRef.current = false;
+    return () => window.cancelAnimationFrame(focusFrame);
+  }, [props.busy, modelMenuOpen, optionsOpen, contextOpen]);
 
   const inputCard = (
     <div className={`chat-input-card ${focused ? "focused" : ""}`}>
@@ -107,6 +125,7 @@ export function ChatInputBar(props: ChatInputProps): React.ReactElement {
         </div>
       )}
       <textarea
+        ref={textareaRef}
         value={props.value}
         onChange={(event) => props.onChange(event.target.value)}
         onFocus={() => setFocused(true)}

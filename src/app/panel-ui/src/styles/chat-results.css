@@ -29,7 +29,7 @@
   justify-content: center;
   gap: 6px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   background: var(--surface);
   padding: 0 12px;
   color: var(--fg);
@@ -40,7 +40,7 @@
 .confirmation-actions button.primary,
 .page-action-button.primary {
   border-color: var(--accent-strong);
-  background: var(--accent-strong);
+  background: linear-gradient(135deg, var(--accent-strong), color-mix(in oklch, var(--secondary) 36%, var(--accent-strong)));
   color: var(--primary-foreground);
 }
 
@@ -92,7 +92,7 @@
   margin: 0 0 2px;
   color: color-mix(in oklch, var(--fg) 82%, var(--muted));
   font-size: 12.5px;
-  font-weight: 680;
+  font-weight: 500;
   line-height: 1.35;
 }
 
@@ -125,15 +125,16 @@
 
 .chat-input-floating {
   flex-shrink: 0;
-  background: linear-gradient(180deg, transparent, color-mix(in oklch, var(--bg) 92%, transparent) 34%, var(--bg) 70%);
-  padding: 12px 32px 20px;
+  background: linear-gradient(180deg, transparent, color-mix(in oklch, var(--surface) 82%, transparent) 26%, var(--surface) 72%);
+  padding: var(--space-3) clamp(32px, 5vw, 72px) var(--space-6);
 }
 
 .chat-input-floating-inner {
-  width: min(100%, 800px);
+  width: min(100%, var(--panel-max-width));
   margin: 0 auto;
 }
 
 .chat-input-floating .chat-input-textarea {
-  min-height: 66px;
+  min-height: 78px;
+  font-size: 16px;
 }

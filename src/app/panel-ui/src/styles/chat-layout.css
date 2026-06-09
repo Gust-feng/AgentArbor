@@ -5,7 +5,7 @@
   min-width: 0;
   flex-direction: column;
   overflow: hidden;
-  background: var(--bg);
+  background: linear-gradient(180deg, var(--surface), color-mix(in oklch, var(--bg) 62%, var(--surface)));
 }
 
 .chat-empty-main,
@@ -14,35 +14,43 @@
   flex: 1 1 auto;
   overflow-y: auto;
   overflow-anchor: none;
-  padding: 30px 32px;
+  padding: 40px clamp(32px, 5vw, 72px);
 }
 
 .chat-empty-grid {
   display: grid;
-  width: min(100%, 800px);
+  width: min(100%, var(--panel-max-width));
   min-height: 100%;
   margin: 0 auto;
   grid-template-columns: minmax(0, 1fr);
-  align-content: start;
-  align-items: start;
-  padding-top: clamp(78px, 15vh, 128px);
+  align-content: end;
+  align-items: end;
+  padding-bottom: clamp(22px, 7vh, 76px);
+}
+
+.chat-empty-copy {
+  display: grid;
+  gap: var(--space-4);
+  border: 0;
+  background: transparent;
+  padding: 0;
+  box-shadow: none;
 }
 
 .chat-empty-copy h1 {
-  margin: 0 0 20px;
+  margin: 0;
   color: var(--fg);
   font-size: 28px;
-  font-weight: 640;
-  letter-spacing: -0.025em;
+  font-weight: 500;
   line-height: 1.25;
 }
 
 .system-error-line {
-  margin: 0 0 14px;
+  margin: 0;
   border: 1px solid var(--danger-border);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   background: var(--danger-soft);
-  padding: 10px 12px;
+  padding: 10px var(--space-3);
   color: var(--status-danger);
   font-size: 13px;
   line-height: 1.5;
@@ -55,6 +63,6 @@
   }
 
   .chat-empty-grid {
-    padding-top: clamp(36px, 10vh, 82px);
+    padding-bottom: clamp(18px, 5vh, 44px);
   }
 }

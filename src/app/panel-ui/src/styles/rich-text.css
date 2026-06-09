@@ -68,24 +68,23 @@
 .rich-heading {
   margin: 9px 0 1px;
   color: var(--fg);
-  letter-spacing: -0.01em;
   line-height: 1.34;
 }
 
 .rich-heading-1,
 .rich-heading-2 {
   font-size: 16px;
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .rich-heading-3 {
   font-size: 15px;
-  font-weight: 680;
+  font-weight: 500;
 }
 
 .rich-heading-4 {
   font-size: 14px;
-  font-weight: 650;
+  font-weight: 500;
 }
 
 .rich-link {
@@ -134,7 +133,7 @@
   background: var(--surface-subtle);
   padding: 1px 5px;
   color: color-mix(in oklch, var(--fg) 84%, var(--accent-active));
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  font-family: var(--font-mono);
   font-size: 0.92em;
 }
 
@@ -143,11 +142,11 @@
   max-width: 100%;
   overflow: auto;
   border: 1px solid color-mix(in oklch, var(--border) 70%, transparent);
-  border-radius: 13px;
+  border-radius: var(--radius-lg);
   background: color-mix(in oklch, var(--surface-subtle) 82%, var(--surface));
   padding: 15px;
   color: var(--fg);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.65;
 }
@@ -162,7 +161,7 @@
   top: 9px;
   right: 12px;
   color: var(--muted);
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+  font-family: var(--font-sans);
   font-size: 11px;
   text-transform: uppercase;
 }
@@ -199,7 +198,7 @@
 .rich-table th {
   background: var(--surface-subtle);
   color: var(--fg);
-  font-weight: 650;
+  font-weight: 500;
 }
 
 .rich-table tr:last-child td {

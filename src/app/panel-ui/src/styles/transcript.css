@@ -1,6 +1,6 @@
 .agent-workline {
   display: grid;
-  width: min(720px, 100%);
+  width: min(730px, 100%);
   min-width: 0;
 }
 
@@ -8,7 +8,7 @@
   display: grid;
   min-width: 0;
   gap: 0;
-  padding: 1px 0 3px;
+  padding: 2px 0 var(--space-1);
 }
 
 .agent-activity-step {
@@ -17,8 +17,8 @@
   min-width: 0;
   grid-template-columns: 12px minmax(0, 1fr);
   align-items: start;
-  column-gap: 9px;
-  padding: 3px 0 4px;
+  column-gap: var(--space-2);
+  padding: 4px 0 5px;
   color: color-mix(in oklch, var(--fg) 58%, var(--muted));
   animation: agent-activity-enter 180ms var(--motion-ease-standard) both;
   transition: color 180ms var(--motion-ease-standard), opacity 180ms var(--motion-ease-standard);
@@ -32,7 +32,7 @@
   left: 5px;
   width: 1px;
   border-radius: 999px;
-  background: color-mix(in oklch, var(--border) 32%, transparent);
+  background: color-mix(in oklch, var(--border) 46%, transparent);
 }
 
 .agent-activity-marker {
@@ -42,9 +42,9 @@
   height: 6px;
   border-radius: 999px;
   margin: 8px auto 0;
-  border: 1px solid color-mix(in oklch, var(--muted) 34%, transparent);
-  background: var(--bg);
-  box-shadow: 0 0 0 3px color-mix(in oklch, var(--bg) 96%, transparent);
+  border: 1px solid color-mix(in oklch, var(--muted) 30%, transparent);
+  background: var(--surface);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--surface) 94%, transparent);
   transform: scale(0.72);
   transition:
     background-color 180ms var(--motion-ease-standard),
@@ -60,15 +60,15 @@
 .agent-activity-step:not([data-current="true"]) .agent-activity-marker {
   border-color: color-mix(in oklch, var(--border) 44%, transparent);
   background: transparent;
-  box-shadow: 0 0 0 3px color-mix(in oklch, var(--bg) 96%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--surface) 92%, transparent);
 }
 
 .agent-activity-step[data-current="true"] .agent-activity-marker {
-  border-color: color-mix(in oklch, var(--accent-strong) 24%, transparent);
-  background: color-mix(in oklch, var(--accent-strong) 46%, var(--muted));
+  border-color: color-mix(in oklch, var(--accent-strong) 34%, transparent);
+  background: linear-gradient(135deg, var(--accent), color-mix(in oklch, var(--secondary) 40%, var(--accent)));
   box-shadow:
-    0 0 0 5px color-mix(in oklch, var(--accent-soft) 42%, transparent),
-    0 0 16px color-mix(in oklch, var(--accent-strong) 8%, transparent);
+    0 0 0 5px color-mix(in oklch, var(--accent-soft) 58%, transparent),
+    0 0 18px color-mix(in oklch, var(--accent-strong) 12%, transparent);
   transform: scale(1);
 }
 
@@ -81,7 +81,7 @@
 .agent-activity-step.waiting_approval .agent-activity-marker,
 .agent-activity-step.confirmation .agent-activity-marker {
   background: color-mix(in oklch, var(--status-warning) 78%, var(--muted));
-  box-shadow: 0 0 0 4px color-mix(in oklch, var(--bg) 96%, transparent);
+  box-shadow: 0 0 0 4px color-mix(in oklch, var(--surface) 94%, transparent);
 }
 
 .agent-activity-line {
@@ -90,12 +90,11 @@
   max-width: 100%;
   flex-wrap: nowrap;
   align-items: flex-start;
-  column-gap: 7px;
+  column-gap: var(--space-2);
   row-gap: 2px;
   margin: 0;
-  font-size: 12.6px;
+  font-size: 12.8px;
   line-height: 1.74;
-  letter-spacing: -0.004em;
   transition: color 180ms var(--motion-ease-standard), opacity 180ms var(--motion-ease-standard);
 }
 
@@ -138,7 +137,7 @@
 }
 
 .agent-activity-expanded-detail {
-  margin: 4px 0 0;
+  margin: var(--space-1) 0 0;
   max-width: min(680px, 100%);
   color: color-mix(in oklch, var(--fg) 70%, var(--muted));
   font-size: 12.75px;
@@ -155,8 +154,7 @@
   flex: 0 0 auto;
   color: color-mix(in oklch, var(--fg) 58%, var(--muted));
   font-size: 12px;
-  font-weight: 560;
-  letter-spacing: -0.01em;
+  font-weight: 500;
 }
 
 .agent-activity-label::after {
@@ -168,7 +166,7 @@
 }
 
 .agent-activity-step[data-current="true"] .agent-activity-label {
-  color: color-mix(in oklch, var(--fg) 78%, var(--accent-strong));
+  color: color-mix(in oklch, var(--accent-active) 70%, var(--fg));
 }
 
 .agent-activity-detail {

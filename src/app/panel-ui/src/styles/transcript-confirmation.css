@@ -50,8 +50,7 @@
   min-width: 0;
   color: color-mix(in oklch, var(--fg) 88%, var(--muted));
   font-size: 13.5px;
-  font-weight: 680;
-  letter-spacing: -0.01em;
+  font-weight: 500;
   line-height: 1.45;
   overflow-wrap: anywhere;
 }
@@ -59,7 +58,7 @@
 .confirmation-node-header span {
   color: color-mix(in oklch, var(--status-warning) 70%, var(--muted));
   font-size: 11px;
-  font-weight: 680;
+  font-weight: 500;
   letter-spacing: 0.08em;
   line-height: 1.2;
   text-transform: uppercase;

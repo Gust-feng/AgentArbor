@@ -1,8 +1,10 @@
 .settings-card {
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  background: var(--surface);
-  padding: 16px;
+  border: 1px solid color-mix(in oklch, var(--border) 86%, transparent);
+  border-radius: var(--radius-xl);
+  background:
+    linear-gradient(180deg, color-mix(in oklch, white 94%, transparent), transparent 44%),
+    var(--surface);
+  padding: var(--space-4);
   box-shadow: var(--shadow-soft);
 }
 
@@ -10,7 +12,7 @@
   margin: 0;
   color: var(--fg);
   font-size: 14px;
-  font-weight: 650;
+  font-weight: 500;
 }
 
 .settings-card-title-row {
@@ -26,7 +28,7 @@
 }
 
 .settings-card p {
-  margin: 6px 0 0;
+  margin: var(--space-2) 0 0;
   color: var(--muted);
   font-size: 12px;
   line-height: 1.55;
@@ -34,25 +36,25 @@
 
 .workspace-settings-stack {
   display: grid;
-  gap: 12px;
+  gap: var(--space-3);
 }
 
 .capability-settings-stack {
   display: grid;
-  gap: 12px;
+  gap: var(--space-3);
 }
 
 .service-settings-card {
   display: grid;
-  gap: 12px;
+  gap: var(--space-3);
 }
 
 .service-config-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
-  gap: 10px;
-  border-top: 1px solid var(--border);
-  padding-top: 12px;
+  gap: var(--space-3);
+  border-top: 1px solid color-mix(in oklch, var(--border) 76%, transparent);
+  padding-top: var(--space-3);
 }
 
 .service-config-grid label {
@@ -64,14 +66,14 @@
 
 .mcp-service-card {
   display: grid;
-  gap: 12px;
+  gap: var(--space-3);
 }
 
 .mcp-service-list {
   display: grid;
-  gap: 8px;
-  border-top: 1px solid var(--border);
-  padding-top: 12px;
+  gap: var(--space-2);
+  border-top: 1px solid color-mix(in oklch, var(--border) 76%, transparent);
+  padding-top: var(--space-3);
 }
 
 .mcp-service-row {
@@ -79,9 +81,9 @@
   grid-template-columns: minmax(0, 1fr) minmax(150px, 0.42fr);
   align-items: center;
   gap: 12px;
-  border: 1px solid color-mix(in oklch, var(--border) 72%, white);
-  border-radius: 12px;
-  background: var(--surface-subtle);
+  border: 1px solid color-mix(in oklch, var(--border) 78%, transparent);
+  border-radius: var(--radius-lg);
+  background: color-mix(in oklch, var(--surface-subtle) 58%, var(--surface));
   padding: 10px 12px;
   text-align: left;
 }
@@ -89,7 +91,7 @@
 .mcp-service-row:hover,
 .mcp-service-row.selected {
   border-color: var(--accent-border);
-  background: var(--accent-soft);
+  background: color-mix(in oklch, var(--accent-soft) 62%, var(--surface));
 }
 
 .mcp-service-main {
@@ -109,7 +111,7 @@
 .mcp-service-main strong {
   color: var(--fg);
   font-size: 13px;
-  font-weight: 650;
+  font-weight: 500;
 }
 
 .mcp-service-main span,
@@ -126,7 +128,7 @@
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
   align-items: end;
-  gap: 10px;
+  gap: var(--space-3);
 }
 
 .mcp-form-grid label {
@@ -155,14 +157,14 @@
 
 .capability-list-card {
   display: grid;
-  gap: 12px;
+  gap: var(--space-3);
 }
 
 .capability-list {
   display: grid;
-  gap: 8px;
-  border-top: 1px solid var(--border);
-  padding-top: 12px;
+  gap: var(--space-2);
+  border-top: 1px solid color-mix(in oklch, var(--border) 76%, transparent);
+  padding-top: var(--space-3);
 }
 
 .capability-row {
@@ -170,9 +172,9 @@
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 14px;
-  border: 1px solid color-mix(in oklch, var(--border) 72%, white);
-  border-radius: 12px;
-  background: var(--surface-subtle);
+  border: 1px solid color-mix(in oklch, var(--border) 78%, transparent);
+  border-radius: var(--radius-lg);
+  background: color-mix(in oklch, var(--surface-subtle) 58%, var(--surface));
   padding: 10px 12px;
 }
 
@@ -186,7 +188,7 @@
   overflow: hidden;
   color: var(--fg);
   font-size: 13px;
-  font-weight: 650;
+  font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -214,12 +216,13 @@
   padding: 0 10px;
   color: var(--muted);
   font-size: 12px;
+  font-weight: 500;
 }
 
 .capability-toggle[aria-pressed="true"] {
   border-color: var(--accent-border);
-  background: var(--accent-soft);
-  color: var(--accent-strong);
+  background: color-mix(in oklch, var(--accent-soft) 66%, var(--surface));
+  color: var(--accent-active);
 }
 
 .capability-toggle:disabled {
@@ -229,9 +232,9 @@
 
 .capability-empty {
   border: 1px dashed var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   background: color-mix(in oklch, var(--surface-subtle) 76%, transparent);
-  padding: 14px;
+  padding: var(--space-4);
   color: var(--muted);
   font-size: 12px;
   text-align: center;
@@ -239,9 +242,9 @@
 
 .workspace-empty {
   border: 1px dashed var(--border);
-  border-radius: 16px;
-  background: var(--surface-subtle);
-  padding: 34px 24px;
+  border-radius: var(--radius-xl);
+  background: color-mix(in oklch, var(--surface-subtle) 70%, var(--surface));
+  padding: var(--space-8) var(--space-6);
   color: var(--muted);
   text-align: center;
   font-size: 14px;

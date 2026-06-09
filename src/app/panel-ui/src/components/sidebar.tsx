@@ -1,5 +1,6 @@
 import React from "react";
 import {
+  Leaf,
   Plus,
   Settings,
   ShieldCheck,
@@ -32,6 +33,11 @@ export function Sidebar(props: {
       className="app-sidebar"
       aria-label="工作入口"
     >
+      <header className="sidebar-brand">
+        <span className="sidebar-brand-mark" aria-hidden="true">
+          <Leaf size={16} />
+        </span>
+      </header>
       <div className="sidebar-new-wrap">
         <button
           type="button"

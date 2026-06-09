@@ -74,6 +74,10 @@ test("panel UI chat and transcript modules stay presentation-focused", async () 
 
   assert.equal(chatEmpty.includes("今天要处理什么？"), true);
   assert.equal(chatEmpty.includes("export function ChatInputBar"), true);
+  assert.equal(chatEmpty.includes('variant="floating"'), true);
+  assert.equal(chatEmpty.includes("textareaRef"), true);
+  assert.equal(chatEmpty.includes("didAutoFocusRef"), true);
+  assert.equal(chatEmpty.includes("previousBusyRef"), true);
   assert.equal(chatEmpty.includes("任务中心"), false);
   assert.equal(chatEmpty.includes("workbenchTaskCardsFromConversations"), false);
   assert.equal(chatEmpty.includes("function TaskCenterCard"), false);
@@ -408,6 +412,8 @@ test("panel UI chat and transcript modules stay presentation-focused", async () 
   assert.equal(styleEntry.includes('@import "./styles/chat-results.css"'), true);
   assert.equal(styleEntry.includes(".chat-active-scroll"), false);
   assert.equal(chatLayoutStyles.includes(".chat-empty-screen,"), true);
+  assert.equal(chatLayoutStyles.includes("align-content: end"), true);
+  assert.equal(chatLayoutStyles.includes("padding-bottom: clamp"), true);
   assert.equal(chatLayoutStyles.includes(".chat-empty-task-groups,"), false);
   assert.equal(chatLayoutStyles.includes(".chat-empty-task-group-heading"), false);
   assert.equal(chatLayoutStyles.includes(".chat-empty-resume"), false);

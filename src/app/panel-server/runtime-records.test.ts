@@ -63,8 +63,8 @@ test("runtime record mapper persists safe run capability resolution", () => {
           runMode: "agent",
           agentId: "desktop-agent-session",
           agentDisplayName: "Desktop Agent",
-          toolVisibilityProfileId: "desktop-root-agent:ordinary-visible-tools:v1",
-          allowedTools: ["search"],
+          toolVisibilityProfileId: "desktop-root-agent:ordinary-visible-tools:v2",
+          allowedTools: ["search", "mcp_docs_search"],
           toolExposures: [
             {
               name: "search",
@@ -82,13 +82,13 @@ test("runtime record mapper persists safe run capability resolution", () => {
               name: "mcp_docs_search",
               displayName: "MCP docs",
               enabled: true,
-              modelVisible: false,
-              scopes: ["desktop-basic", "mcp"],
+              modelVisible: true,
+              scopes: ["mcp"],
               availability: "available",
               riskLevel: "medium",
               operationType: "external-submit",
               requiresConfirmation: true,
-              reason: "当前模式不可用。",
+              reason: "可用，高影响动作会先等你判断。",
             },
           ],
           enabledSkills: [],
@@ -112,10 +112,10 @@ test("runtime record mapper persists safe run capability resolution", () => {
     runtimeHome: "C:\\AgentArbor\\runtime",
   });
 
-  assert.deepEqual(run.capabilityResolution?.allowedTools, ["search"]);
+  assert.deepEqual(run.capabilityResolution?.allowedTools, ["search", "mcp_docs_search"]);
   assert.equal(run.capabilityResolution?.agentId, "desktop-agent-session");
-  assert.equal(run.capabilityResolution?.toolVisibilityProfileId, "desktop-root-agent:ordinary-visible-tools:v1");
-  assert.equal(run.capabilityResolution?.toolExposures.find((tool) => tool.name === "mcp_docs_search")?.modelVisible, false);
+  assert.equal(run.capabilityResolution?.toolVisibilityProfileId, "desktop-root-agent:ordinary-visible-tools:v2");
+  assert.equal(run.capabilityResolution?.toolExposures.find((tool) => tool.name === "mcp_docs_search")?.modelVisible, true);
   assert.equal(run.capabilityResolution?.mcpDrafts[0]?.source, "mcp");
   assert.equal(JSON.stringify(run.capabilityResolution).includes("secret://"), false);
   assert.equal(JSON.stringify(run.capabilityResolution).includes("systemPrompt"), false);
@@ -213,7 +213,7 @@ test("runtime record mapper persists safe run agent definition ref independently
         promptRef: "prompt:desktop-root-agent:v1",
         promptVersion: "v1",
         outputContractId: "desktop.agent_response.v1",
-        toolVisibilityProfileId: "desktop-root-agent:ordinary-visible-tools:v1",
+        toolVisibilityProfileId: "desktop-root-agent:ordinary-visible-tools:v2",
         definitionHash: "sha256:runtime-record-safe-definition-hash",
       },
       failed: {
@@ -236,7 +236,7 @@ test("runtime record mapper persists safe run agent definition ref independently
     promptRef: "prompt:desktop-root-agent:v1",
     promptVersion: "v1",
     outputContractId: "desktop.agent_response.v1",
-    toolVisibilityProfileId: "desktop-root-agent:ordinary-visible-tools:v1",
+    toolVisibilityProfileId: "desktop-root-agent:ordinary-visible-tools:v2",
     definitionHash: "sha256:runtime-record-safe-definition-hash",
   });
   assert.equal(run.agentDefinitionRef.definitionHash?.startsWith("sha256:"), true);
@@ -533,7 +533,7 @@ function capabilityResolution(): NonNullable<PanelRunJob["capabilityResolution"]
     runMode: "agent",
     agentId: "desktop-agent-session",
     agentDisplayName: "Desktop Agent",
-    toolVisibilityProfileId: "desktop-root-agent:ordinary-visible-tools:v1",
+    toolVisibilityProfileId: "desktop-root-agent:ordinary-visible-tools:v2",
     allowedTools: ["search"],
     toolExposures: [
       {

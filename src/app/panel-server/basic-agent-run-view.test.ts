@@ -544,7 +544,7 @@ function capabilityResolution(snapshotId: string, allowedTools: readonly string[
     runMode: "agent",
     agentId: "desktop-agent-session",
     agentDisplayName: "Desktop Agent",
-    toolVisibilityProfileId: "desktop-root-agent:ordinary-visible-tools:v1",
+    toolVisibilityProfileId: "desktop-root-agent:ordinary-visible-tools:v2",
     allowedTools,
     toolExposures: allowedTools.map((name) => ({
       name,

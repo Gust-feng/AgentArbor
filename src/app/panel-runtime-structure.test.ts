@@ -243,8 +243,9 @@ test("desktop agent session keeps projection and contracts split", async () => {
   assert.equal(outputContractAsset.includes("export const DESKTOP_ROOT_AGENT_OUTPUT_CONTRACT"), true);
   assert.equal(outputContractAsset.includes('contractId: "desktop.agent_response.v1"'), true);
   assert.equal(toolVisibilityAsset.includes("export const DESKTOP_ROOT_AGENT_TOOL_VISIBILITY"), true);
-  assert.equal(toolVisibilityAsset.includes('visibleToolScopes: ["desktop-basic", "workspace", "research"]'), true);
-  assert.equal(toolVisibilityAsset.includes('hiddenToolScopes: ["underground", "mcp"]'), true);
+  assert.equal(toolVisibilityAsset.includes('visibleToolScopes: ["desktop-basic", "workspace", "research", "mcp"]'), true);
+  assert.equal(toolVisibilityAsset.includes('hiddenToolScopes: ["underground"]'), true);
+  assert.equal(toolVisibilityAsset.includes('"underground", "mcp"'), false);
 });
 
 test("ordinary shared model runtime paths use neutral model runtime naming", async () => {

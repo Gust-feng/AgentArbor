@@ -395,7 +395,7 @@ function agentDefinitionRef(): RunAgentDefinitionRef {
     promptRef: "prompt:desktop-root-agent:v1",
     promptVersion: "v1",
     outputContractId: "desktop.agent_response.v1",
-    toolVisibilityProfileId: "desktop-root-agent:ordinary-visible-tools:v1",
+    toolVisibilityProfileId: "desktop-root-agent:ordinary-visible-tools:v2",
     definitionHash: "sha256:desktop-agent-session-test",
   };
 }
@@ -440,7 +440,7 @@ function forgedCapabilityResolution(): RunCapabilityResolution {
     runMode: "agent",
     agentId: "desktop-agent-session",
     agentDisplayName: "Desktop Agent",
-    toolVisibilityProfileId: "desktop-root-agent:ordinary-visible-tools:v1",
+    toolVisibilityProfileId: "desktop-root-agent:ordinary-visible-tools:v2",
     allowedTools: ["forged-tool"],
     toolExposures: [],
     enabledSkills: [],

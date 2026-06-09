@@ -417,7 +417,7 @@ test("panel server source keeps conversation restore and persistence split", asy
   assert.equal(desktopAgentExecution.includes('"approval_needed"'), true);
   assert.equal(desktopAgentExecution.includes('status: agent.status === "paused" ? "blocked" : "completed"'), false);
   assert.equal(desktopAgentExecution.includes("没有形成最终结果"), true);
-  assert.equal(desktopAgentExecution.includes("desktopPanelResultFromAgent(resumed, facts, reasoningEffort)"), true);
+  assert.equal(desktopAgentExecution.includes("desktopPanelResultFromAgent(resumed, facts, reasoningEffort, releaseResources)"), true);
   assert.equal(undergroundCompatExecution.includes("export async function runDeepDesktopForPanel"), true);
   assert.equal(undergroundCompatExecution.includes("export async function runUndergroundForPanel"), true);
   assert.equal(undergroundCompatExecution.includes("runUndergroundDirectionSessionWithIntelligence"), true);

@@ -70,8 +70,12 @@ export class ToolRegistry {
   }
 
   createToolCenter(scope: ToolRegistryScope): ToolExecutionBroker {
+    return this.createToolCenterForScopes([scope]);
+  }
+
+  createToolCenterForScopes(scopes: readonly ToolRegistryScope[]): ToolExecutionBroker {
     const center = new ToolCenter();
-    for (const entry of this.entriesForScope(scope)) {
+    for (const entry of this.entriesForAnyScope(scopes)) {
       const availability = entry.availability ?? { status: "available" as const };
       if (entry.enabledByDefault && availability.status === "available") {
         center.register(entry.executor);
@@ -117,6 +121,11 @@ export class ToolRegistry {
 
   private entriesForScope(scope: ToolRegistryScope): readonly ToolRegistryEntry[] {
     return [...this.entries.values()].filter((entry) => entry.scopes.includes(scope));
+  }
+
+  private entriesForAnyScope(scopes: readonly ToolRegistryScope[]): readonly ToolRegistryEntry[] {
+    const requested = new Set(scopes);
+    return [...this.entries.values()].filter((entry) => entry.scopes.some((scope) => requested.has(scope)));
   }
 }
 

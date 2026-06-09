@@ -41,6 +41,9 @@ export async function runOrdinaryDesktopForPanel(
       "运行记录中的 Agent 定义与当前执行定义不一致。"
     );
   }
+  const releaseResources = () => {
+    void resources.mcpManager?.disconnectAll?.().catch(() => undefined);
+  };
   const agent = await runDesktopAgentSession(goal, {
     aiMode,
     createIntelligenceChannel: resources.aiConfig.createIntelligenceChannel,
@@ -61,7 +64,7 @@ export async function runOrdinaryDesktopForPanel(
     informationAccess: resources.informationAccess,
     capabilitySnapshot: resources.capabilitySnapshot,
     agentDefinitionRef,
-  }, options.reasoningEffort);
+  }, options.reasoningEffort, releaseResources);
 }
 
 type OrdinaryDesktopPanelFacts = {
@@ -74,7 +77,8 @@ type OrdinaryDesktopPanelFacts = {
 function desktopPanelResultFromAgent(
   agent: Awaited<ReturnType<typeof runDesktopAgentSession>>,
   facts: OrdinaryDesktopPanelFacts,
-  reasoningEffort?: ModelRunReasoningEffort
+  reasoningEffort?: ModelRunReasoningEffort,
+  releaseResources?: () => void
 ): PanelRunExecutionResult {
   if (
     agent.status === "completed" ||
@@ -101,6 +105,9 @@ function desktopPanelResultFromAgent(
       createdAt: eventEntries[0]?.recordedAt ?? new Date(0).toISOString(),
       updatedAt: eventEntries.at(-1)?.recordedAt ?? new Date(0).toISOString(),
     });
+    if (agent.pendingApproval === undefined) {
+      releaseResources?.();
+    }
     return {
       ...facts,
       completed: agent.status === "completed" ? true : undefined,
@@ -125,16 +132,17 @@ function desktopPanelResultFromAgent(
               confirmationId: agent.pendingApproval.confirmationId,
               resume: async (resumeInput) => {
                 const resumed = await agent.pendingApproval!.resume(resumeInput);
-                return desktopPanelResultFromAgent(resumed, facts, reasoningEffort);
+                return desktopPanelResultFromAgent(resumed, facts, reasoningEffort, releaseResources);
               },
               resumeWithDecision: async (resumeInput) => {
                 const resumed = await agent.pendingApproval!.resumeWithDecision(resumeInput);
-                return desktopPanelResultFromAgent(resumed, facts, reasoningEffort);
+                return desktopPanelResultFromAgent(resumed, facts, reasoningEffort, releaseResources);
               },
             },
     };
   }
 
+  releaseResources?.();
   throw new PanelHttpError(500, "desktop_agent_stopped", agent.failureMessage ?? "桌面 Agent 运行已停止。");
 }
 

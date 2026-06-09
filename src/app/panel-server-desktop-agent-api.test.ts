@@ -291,7 +291,7 @@ test("desktop default fake run does not auto-upgrade complex requests into deep 
     assert.equal(runtimeRun.body.snapshot.run.capabilityResolution.agentDisplayName, "Desktop Agent");
     assert.equal(
       runtimeRun.body.snapshot.run.capabilityResolution.toolVisibilityProfileId,
-      "desktop-root-agent:ordinary-visible-tools:v1"
+      "desktop-root-agent:ordinary-visible-tools:v2"
     );
     assert.deepEqual(runtimeRun.body.snapshot.run.capabilityResolution.allowedTools.includes("search"), true);
     assert.equal(

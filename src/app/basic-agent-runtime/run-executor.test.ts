@@ -1261,7 +1261,7 @@ function capabilityResolution(): RunCapabilityResolution {
     runMode: "agent",
     agentId: "desktop-agent-session",
     agentDisplayName: "Desktop Agent",
-    toolVisibilityProfileId: "desktop-root-agent:ordinary-visible-tools:v1",
+    toolVisibilityProfileId: "desktop-root-agent:ordinary-visible-tools:v2",
     allowedTools: ["search"],
     toolExposures: [
       {
@@ -1394,7 +1394,7 @@ function defaultAgentDefinitionRef(): RunAgentDefinitionRef {
     promptRef: "prompt:desktop-root-agent:v1",
     promptVersion: "v1",
     outputContractId: "desktop.agent_response.v1",
-    toolVisibilityProfileId: "desktop-root-agent:ordinary-visible-tools:v1",
+    toolVisibilityProfileId: "desktop-root-agent:ordinary-visible-tools:v2",
     definitionHash: "sha256:desktop-agent-session-test",
   };
 }
@@ -1477,6 +1477,7 @@ function capabilitySnapshotWithSkillAndMcp(): BasicAgentCapabilitySnapshot {
         availability: "configured",
         commandSummary: "context-mcp",
         envSecretRefCount: 0,
+        tools: [],
         updatedAt: "2026-05-12T00:00:00.000Z",
       },
     ],

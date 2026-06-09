@@ -1,9 +1,11 @@
 import type {
   BasicAgentCapabilitySnapshot,
   CapabilityToolAvailability,
+  McpServerSettings,
   SanitizedModelProviderConfig,
   ToolStateSettings,
 } from "../../domain/config/index.js";
+import { McpManager } from "../../adapters/mcp/index.js";
 import {
   createDefaultToolCenter,
   createModelRuntimeConfig,
@@ -15,6 +17,7 @@ import type { PanelRuntime } from "./runtime.js";
 import type { MinimalRuntime } from "../runtime.js";
 import type { DesktopRunResources, PanelRunExecutionOptions } from "./run-execution-contracts.js";
 import { effectiveDesktopCapabilitySnapshotForRun } from "./desktop-run-model-settings.js";
+import type { ToolRegistryScope } from "../basic-agent-runtime/tool-registry.js";
 
 function toolStatesFromCapabilitySnapshot(snapshot: BasicAgentCapabilitySnapshot): readonly ToolStateSettings[] {
   return snapshot.toolCatalog.tools.map((tool) => ({
@@ -95,6 +98,7 @@ export async function prepareDesktopRunResources(
   if (!aiConfig.enabled) {
     throw createModelRuntimeDisabledConfigurationError(aiConfig.summaryInput);
   }
+  const mcpManager = await mcpManagerFromCapabilitySnapshot(capabilitySnapshot, aiEnvironment);
 
   return {
     capabilitySnapshot,
@@ -108,6 +112,7 @@ export async function prepareDesktopRunResources(
     playwrightAvailable: capabilitySnapshot.toolCatalog.tools.some(
       (tool) => tool.name === "browser_snapshot" && tool.availability === "available"
     ),
+    mcpManager,
   };
 }
 
@@ -130,6 +135,8 @@ export function createDesktopToolCenterFactory(
   providerFetch: PanelRuntime["providerFetch"],
   resources: DesktopRunResources
 ) {
+  const toolRegistryScopes: readonly ToolRegistryScope[] =
+    resources.mcpManager === undefined ? ["desktop-basic"] : ["desktop-basic", "mcp"];
   return (toolRuntime: MinimalRuntime) => createDefaultToolCenter({
     runtime: toolRuntime,
     env: resources.aiEnvironment,
@@ -139,5 +146,33 @@ export function createDesktopToolCenterFactory(
     toolCatalogNames: resources.toolCatalogNames,
     toolCatalogAvailability: resources.toolCatalogAvailability,
     playwrightAvailable: resources.playwrightAvailable,
+    mcpManager: resources.mcpManager,
+    toolRegistryScopes,
   });
+}
+
+async function mcpManagerFromCapabilitySnapshot(
+  snapshot: BasicAgentCapabilitySnapshot,
+  env: Readonly<Record<string, string | undefined>>
+): Promise<McpManager | undefined> {
+  const servers = snapshot.mcpCatalog
+    .filter((server) => server.enabled && server.availability === "configured" && server.runtimeConfig !== undefined)
+    .filter((server) => server.tools.length > 0)
+    .map((server): McpServerSettings => ({
+      serverId: server.serverId,
+      label: server.label,
+      transport: server.runtimeConfig!.transport,
+      command: server.runtimeConfig!.command,
+      args: server.runtimeConfig!.args,
+      url: server.runtimeConfig!.url,
+      envSecretRefs: server.runtimeConfig!.envSecretRefs,
+      enabled: true,
+      updatedAt: server.updatedAt,
+    }));
+  if (servers.length === 0) {
+    return undefined;
+  }
+  const manager = new McpManager({ servers, env });
+  await manager.connectAll();
+  return manager;
 }

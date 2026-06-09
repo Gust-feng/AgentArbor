@@ -206,6 +206,15 @@ export type DesktopWorkViewAnswer = {
   readonly nextActions: readonly string[];
 };
 
+export type TriggeredSkillReadModel = {
+  readonly skillId: string;
+  readonly name: string;
+  readonly triggerReason: string;
+  readonly summary: string;
+  readonly sourceRef: string;
+  readonly truncated: boolean;
+};
+
 export type DesktopWorkViewReadModel = {
   readonly run: BasicAgentRun;
   readonly stage: DesktopWorkViewStage;
@@ -213,6 +222,7 @@ export type DesktopWorkViewReadModel = {
   readonly currentAction: string;
   readonly contextAttachments: readonly ContextAttachment[];
   readonly contextLedger: ContextLedger;
+  readonly triggeredSkills: readonly TriggeredSkillReadModel[];
   readonly pendingConfirmation?: ConfirmationRequest;
   readonly answer?: DesktopWorkViewAnswer;
   readonly deliverable?: AgentDeliverable;

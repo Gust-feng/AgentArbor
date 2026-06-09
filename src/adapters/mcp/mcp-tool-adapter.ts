@@ -26,7 +26,7 @@ export function createMcpToolExecutor(
       inputSchema,
       metadata,
     },
-    async execute(input: unknown, _context: ToolExecutionContext): Promise<unknown> {
+  async execute(input: unknown, _context: ToolExecutionContext): Promise<unknown> {
       const result = await client.callTool(tool.name, input);
       if (result.isError === true) {
         const errorText = extractTextContent(result.content);
@@ -45,20 +45,24 @@ function extractTextContent(content: readonly McpContentPart[]): string {
 }
 
 type McpToolOutput = {
-  readonly text: string;
-  readonly multimodal?: readonly McpToolMultimodalContent[];
+  readonly summary: string;
+  readonly result: {
+    readonly text?: string;
+    readonly multimodal?: readonly McpToolMultimodalSummary[];
+  };
+  readonly truncated: boolean;
 };
 
-type McpToolMultimodalContent =
+type McpToolMultimodalSummary =
   | {
       readonly type: "image";
       readonly mimeType: string;
-      readonly data: string;
+      readonly bytesApprox: number;
     }
   | {
       readonly type: "audio";
       readonly mimeType: string;
-      readonly data: string;
+      readonly bytesApprox: number;
     };
 
 function inferToolMetadataFromMcpAnnotations(
@@ -66,10 +70,11 @@ function inferToolMetadataFromMcpAnnotations(
 ): ToolDefinitionMetadata {
   const readOnly = annotations?.readOnlyHint === true;
   const destructive = annotations?.destructiveHint === true;
+  const openWorld = annotations?.openWorldHint === true;
   return {
     category: "mcp",
-    riskLevel: readOnly ? "low" : destructive ? "high" : "medium",
-    operationType: readOnly ? "read-only" : destructive ? "read-write" : "execute",
+    riskLevel: readOnly ? "low" : destructive || openWorld ? "high" : "medium",
+    operationType: readOnly ? "read-only" : openWorld ? "external-submit" : destructive ? "read-write" : "execute",
     requiresConfirmation: !readOnly,
     visibleResultPolicy: {
       userVisible: "safe-preview",
@@ -81,7 +86,7 @@ function inferToolMetadataFromMcpAnnotations(
 
 function buildToolOutput(content: readonly McpContentPart[]): McpToolOutput {
   const textParts: string[] = [];
-  const multimodalParts: McpToolMultimodalContent[] = [];
+  const multimodalParts: McpToolMultimodalSummary[] = [];
   for (const part of content) {
     if (part.type === "text") {
       textParts.push(part.text);
@@ -89,18 +94,47 @@ function buildToolOutput(content: readonly McpContentPart[]): McpToolOutput {
       multimodalParts.push({
         type: "image",
         mimeType: part.mimeType,
-        data: part.data,
+        bytesApprox: approximateBase64Bytes(part.data),
       });
     } else if (part.type === "audio") {
       multimodalParts.push({
         type: "audio",
         mimeType: part.mimeType,
-        data: part.data,
+        bytesApprox: approximateBase64Bytes(part.data),
       });
     }
   }
-  if (multimodalParts.length === 0) {
-    return { text: textParts.join("\n") };
+  const text = textParts.join("\n").trim();
+  const safeText = truncateText(text, 4_000);
+  const mediaSummary = multimodalParts.length === 0
+    ? undefined
+    : `MCP returned ${multimodalParts.length} non-text content item(s); raw media bytes are retained by the MCP server, not AgentArbor.`;
+  const summary = [safeText.text, mediaSummary].filter((item): item is string => item !== undefined && item.length > 0).join("\n");
+  return {
+    summary: summary.length === 0 ? "MCP tool returned no text content." : summary,
+    result: {
+      text: safeText.text.length > 0 ? safeText.text : undefined,
+      multimodal: multimodalParts.length === 0 ? undefined : multimodalParts,
+    },
+    truncated: safeText.truncated,
+  };
+}
+
+function truncateText(value: string, maxLength: number): { readonly text: string; readonly truncated: boolean } {
+  if (value.length <= maxLength) {
+    return { text: value, truncated: false };
   }
-  return { text: textParts.join("\n"), multimodal: multimodalParts };
+  return {
+    text: `${value.slice(0, Math.max(0, maxLength - 1))}…`,
+    truncated: true,
+  };
+}
+
+function approximateBase64Bytes(value: string): number {
+  const clean = value.replace(/\s+/g, "");
+  if (clean.length === 0) {
+    return 0;
+  }
+  const padding = clean.endsWith("==") ? 2 : clean.endsWith("=") ? 1 : 0;
+  return Math.max(0, Math.floor((clean.length * 3) / 4) - padding);
 }

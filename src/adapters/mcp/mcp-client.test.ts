@@ -180,7 +180,14 @@ test("createMcpToolExecutor execute returns text output", async () => {
     }
   );
 
-  assert.deepEqual(output, { text: "Echo: test" });
+  assert.deepEqual(output, {
+    summary: "Echo: test",
+    result: {
+      text: "Echo: test",
+      multimodal: undefined,
+    },
+    truncated: false,
+  });
 
   await client.disconnect();
 });

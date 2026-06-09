@@ -21,6 +21,8 @@ import type { ToolExecutionBroker } from "../domain/tools/index.js";
 import type { ConfigCenter } from "./config-center.js";
 import type { MinimalRuntime } from "./runtime.js";
 import { createDesktopBasicToolRegistry } from "./basic-agent-runtime/builtin-tool-runtime.js";
+import type { McpToolExecutorProvider } from "./basic-agent-runtime/builtin-tool-runtime.js";
+import type { ToolRegistryScope } from "./basic-agent-runtime/tool-registry.js";
 
 export type ModelRuntimeMode = "none" | "fake" | "openai-compatible" | "openai-responses";
 export type ModelRuntimeStreamingMode = "respect_profile" | "force_live";
@@ -299,6 +301,8 @@ export function createDefaultToolCenter(input: {
   readonly toolStates?: readonly ToolStateSettings[];
   readonly toolCatalogNames?: readonly string[];
   readonly toolCatalogAvailability?: readonly CapabilityToolAvailability[];
+  readonly mcpManager?: McpToolExecutorProvider;
+  readonly toolRegistryScopes?: readonly ToolRegistryScope[];
 } = {}): ToolExecutionBroker {
   return createToolCenterFromEnvironment(input);
 }
@@ -316,6 +320,8 @@ export async function createConfiguredToolCenter(
     readonly toolStates?: readonly ToolStateSettings[];
     readonly toolCatalogNames?: readonly string[];
     readonly toolCatalogAvailability?: readonly CapabilityToolAvailability[];
+    readonly mcpManager?: McpToolExecutorProvider;
+    readonly toolRegistryScopes?: readonly ToolRegistryScope[];
   } = {}
 ): Promise<ToolExecutionBroker> {
   return createToolCenterFromEnvironment({
@@ -336,6 +342,8 @@ export async function createConfiguredToolCenterFactory(
     readonly toolStates?: readonly ToolStateSettings[];
     readonly toolCatalogNames?: readonly string[];
     readonly toolCatalogAvailability?: readonly CapabilityToolAvailability[];
+    readonly mcpManager?: McpToolExecutorProvider;
+    readonly toolRegistryScopes?: readonly ToolRegistryScope[];
   } = {}
 ): Promise<(runtime: MinimalRuntime) => ToolExecutionBroker> {
   const env = input.env ?? await configCenter.createModelRuntimeEnvironment();
@@ -353,8 +361,10 @@ function createToolCenterFromEnvironment(input: {
   readonly toolStates?: readonly ToolStateSettings[];
   readonly toolCatalogNames?: readonly string[];
   readonly toolCatalogAvailability?: readonly CapabilityToolAvailability[];
+  readonly mcpManager?: McpToolExecutorProvider;
+  readonly toolRegistryScopes?: readonly ToolRegistryScope[];
 }): ToolExecutionBroker {
-  return createDesktopBasicToolRegistry(input).createToolCenter("desktop-basic");
+  return createDesktopBasicToolRegistry(input).createToolCenterForScopes(input.toolRegistryScopes ?? ["desktop-basic"]);
 }
 
 function firstNonBlank(...values: readonly (string | undefined)[]): string | undefined {

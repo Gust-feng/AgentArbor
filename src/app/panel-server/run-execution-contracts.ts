@@ -18,6 +18,7 @@ import type { PanelRunCanvasReadModel } from "../panel-canvas-read-model.js";
 import type { PanelObservationReadModel } from "../panel-run-read-model.js";
 import type { PanelRunSummary } from "../panel-run-summary.js";
 import type { ModelRuntimeConfig } from "../model-runtime/index.js";
+import type { McpToolExecutorProvider } from "../basic-agent-runtime/builtin-tool-runtime.js";
 import type { UndergroundDirectionSessionRuntimeContext } from "../underground-direction-session.js";
 import type { PanelRuntime } from "./runtime.js";
 
@@ -71,4 +72,5 @@ export type DesktopRunResources = {
   readonly toolCatalogNames: readonly string[];
   readonly toolCatalogAvailability: readonly CapabilityToolAvailability[];
   readonly playwrightAvailable: boolean;
+  readonly mcpManager?: McpToolExecutorProvider;
 };

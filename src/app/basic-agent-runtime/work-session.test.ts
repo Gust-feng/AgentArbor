@@ -91,6 +91,84 @@ test("work session read model does not truncate ordinary answers before the chat
   assert.equal(workSession.answer?.content, longAnswer);
 });
 
+test("work session read model exposes triggered skills without leaking skill body", () => {
+  const run = basicRun("completed");
+  const workSession = createDesktopWorkSessionReadModel({
+    run,
+    events: [event(run.runId, "final.result", "结果已生成", "completed")],
+    canvas: {
+      kind: "desktop_agent_canvas",
+      taskSoil: {
+        taskSoilId: "soil-skill",
+        goalSummary: "review code",
+        contextRefs: [],
+        permissionBoundaryRefs: [],
+      },
+      agent: {
+        status: "completed",
+        answer: {
+          answer: "已完成。",
+          modelCallRefs: ["model-call-1"],
+          toolCallRefs: [],
+          evidenceRefs: [],
+          resultBlocks: [],
+        },
+        modelCallRefs: ["model-call-1"],
+        toolCallRefs: [],
+        activity: [],
+        context: {
+          usageSummary: "技能 1",
+          budget: {
+            maxMessages: 20,
+            maxInputTokens: 16_000,
+            usedInputTokens: 120,
+            tokenCountSource: "test",
+            maxChars: 20_000,
+            usedChars: 500,
+            budgetSource: "default",
+          },
+          truncated: false,
+          truncationReport: {
+            truncated: false,
+            omittedItemCount: 0,
+            truncatedItemIds: [],
+          },
+          items: [
+            {
+              itemId: "context:skill:repo-review",
+              sourceKind: "skill",
+              summary: [
+                "Triggered skill: Repo Review",
+                "Why: 触发词：review",
+                "Use these skill instructions when relevant. Do not mention internal skill loading unless the user asks.",
+                "FULL PRIVATE SKILL BODY SHOULD NOT BE IN TRIGGERED SKILLS",
+              ].join("\n"),
+              truncated: false,
+            },
+          ],
+        },
+      },
+      explanation: {
+        resultWhyReasonable: "safe",
+        observationPanelRole: "safe",
+      },
+    },
+  });
+
+  assert.deepEqual(workSession.triggeredSkills, [
+    {
+      skillId: "repo-review",
+      name: "Repo Review",
+      triggerReason: "触发词：review",
+      summary: "Repo Review：触发词：review",
+      sourceRef: "skill:repo-review",
+      truncated: false,
+    },
+  ]);
+  assert.equal(JSON.stringify(workSession.triggeredSkills).includes("FULL PRIVATE SKILL BODY"), false);
+  assert.equal(workSession.contextLedger.entries.some((entry) => entry.kind === "skill"), true);
+});
+
 test("work session read model surfaces approval as the main stage", () => {
   const run = basicRun("approval_needed");
   const workSession = createDesktopWorkSessionReadModel({

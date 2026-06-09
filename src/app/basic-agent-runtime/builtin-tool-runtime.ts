@@ -1,7 +1,6 @@
 import type { CapabilityToolAvailability, ToolStateSettings } from "../../domain/config/index.js";
 import type { InformationSourceKind } from "../../domain/research/index.js";
 import type { ToolCategory, ToolExecutor } from "../../domain/tools/index.js";
-import type { McpManager } from "../../adapters/mcp/index.js";
 import {
   createBrowserSnapshotTool,
 } from "../tool-center/adapters/browser-tool.js";
@@ -29,6 +28,11 @@ import {
 import type { MinimalRuntime } from "../runtime.js";
 import { ToolRegistry, type ToolRegistryScope } from "./tool-registry.js";
 
+export type McpToolExecutorProvider = {
+  getToolsForRegistry(): readonly ToolExecutor[];
+  disconnectAll?(): Promise<void>;
+};
+
 export type CreateDesktopBasicToolRegistryOptions = {
   readonly runtime?: MinimalRuntime;
   readonly env?: Readonly<Record<string, string | undefined>>;
@@ -40,7 +44,7 @@ export type CreateDesktopBasicToolRegistryOptions = {
   readonly toolStates?: readonly ToolStateSettings[];
   readonly toolCatalogNames?: readonly string[];
   readonly toolCatalogAvailability?: readonly CapabilityToolAvailability[];
-  readonly mcpManager?: McpManager;
+  readonly mcpManager?: McpToolExecutorProvider;
 };
 
 export type ToolRegistryFetchLike = (

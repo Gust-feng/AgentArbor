@@ -151,7 +151,7 @@ test("desktop-basic tool registry can restrict executors to a frozen tool catalo
   assert.equal(center.has("run_command"), false);
 });
 
-test("desktop-basic tool registry keeps MCP tools out of the default ordinary agent scope", () => {
+test("desktop-basic tool registry keeps MCP tools in the dedicated mcp scope", () => {
   const registry = createDesktopBasicToolRegistry({
     env: {},
     workspaceRoot: process.cwd(),

@@ -223,7 +223,7 @@ test("Desktop Agent Session derives model-visible tools from capability snapshot
   assert.equal(result.capabilityResolution?.toolExposures.find((tool) => tool.name === "search")?.modelVisible, false);
 });
 
-test("Desktop Agent Session returns safe run capability resolution with MCP kept as draft only", async () => {
+test("Desktop Agent Session exposes frozen MCP tools to the default ordinary Agent", async () => {
   let capturedRequest: ModelRequest | undefined;
   const channel: IntelligenceChannel = {
     async request(request) {
@@ -238,10 +238,10 @@ test("Desktop Agent Session returns safe run capability resolution with MCP kept
   const result = await runDesktopAgentSession("展示当前能力边界", {
     aiMode: "fake",
     createIntelligenceChannel: () => channel,
-    createToolCenter: () => new FixtureToolCenter(),
+    createToolCenter: () => new McpFixtureToolCenter(),
     capabilitySnapshot: desktopCapabilitySnapshot([
       capabilityTool("search", "read-only"),
-      { ...capabilityTool("mcp_docs_search", "external-submit"), scopes: ["desktop-basic", "mcp"] },
+      { ...capabilityTool("mcp_docs_search", "external-submit"), scopes: ["mcp"] },
     ], {
       mcpCatalog: [
         {
@@ -252,6 +252,7 @@ test("Desktop Agent Session returns safe run capability resolution with MCP kept
           availability: "configured",
           commandSummary: "node server.js --token omitted",
           envSecretRefCount: 1,
+          tools: [],
           updatedAt: "2026-05-13T00:00:00.000Z",
         },
       ],
@@ -259,9 +260,9 @@ test("Desktop Agent Session returns safe run capability resolution with MCP kept
   });
 
   assert.equal(result.status, "completed");
-  assert.deepEqual(capturedRequest?.tools?.map((tool) => tool.name), ["search"]);
-  assert.deepEqual(result.capabilityResolution?.allowedTools, ["search"]);
-  assert.equal(result.capabilityResolution?.toolExposures.find((tool) => tool.name === "mcp_docs_search")?.modelVisible, false);
+  assert.deepEqual(capturedRequest?.tools?.map((tool) => tool.name), ["search", "mcp_docs_search"]);
+  assert.deepEqual(result.capabilityResolution?.allowedTools, ["search", "mcp_docs_search"]);
+  assert.equal(result.capabilityResolution?.toolExposures.find((tool) => tool.name === "mcp_docs_search")?.modelVisible, true);
   assert.equal(result.capabilityResolution?.mcpDrafts[0]?.source, "mcp");
   assert.equal(JSON.stringify(result.capabilityResolution).includes(DESKTOP_ROOT_AGENT.prompt.systemPrompt), false);
   assert.equal(JSON.stringify(result.capabilityResolution).includes("--token"), false);
@@ -1596,6 +1597,23 @@ class SearchOnlyToolCenter extends FixtureToolCenter {
 
   override has(name: string): boolean {
     return name === "search";
+  }
+}
+
+class McpFixtureToolCenter extends FixtureToolCenter {
+  override list(): ToolDefinition[] {
+    return [
+      ...super.list(),
+      {
+        name: "mcp_docs_search",
+        description: "Fixture MCP docs search tool.",
+        inputSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] },
+      },
+    ];
+  }
+
+  override has(name: string): boolean {
+    return name === "mcp_docs_search" || super.has(name);
   }
 }
 

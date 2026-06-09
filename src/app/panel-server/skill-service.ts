@@ -46,7 +46,6 @@ export async function resolveTriggeredSkillContexts(
   const triggered = selectTriggeredSkills(goal, skills, 4);
   const contexts = await Promise.all(triggered.map(async (skill): Promise<DesktopAgentSkillContext> => {
     const body = await loadSkillBody(skill);
-    void runtime.skillStateStore?.markUsed(skill.id);
     return {
       skill,
       body,
@@ -55,5 +54,8 @@ export async function resolveTriggeredSkillContexts(
         : `触发词：${skill.triggers.join(" / ")}`,
     };
   }));
+  for (const context of contexts) {
+    await runtime.skillStateStore?.markUsed(context.skill.id).catch(() => undefined);
+  }
   return contexts;
 }

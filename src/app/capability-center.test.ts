@@ -3,6 +3,7 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import type { ToolExecutor } from "../domain/tools/index.js";
 import { FileSystemLocalDevSecretStore, FileSystemNormalSettingsStore } from "../adapters/config/index.js";
 import { CapabilityCenter } from "./capability-center.js";
 import { ConfigCenter } from "./config-center.js";
@@ -55,6 +56,16 @@ test("CapabilityCenter freezes safe model, tool, skill, and MCP catalog projecti
       configCenter,
       skillRoots: [skillRoot],
       playwrightAvailable: false,
+      createMcpManager: () => fakeMcpManager({
+        runtimeSnapshots: [
+          {
+            serverId: "docs",
+            status: "connected",
+            toolNames: ["lookup"],
+          },
+        ],
+        tools: [mcpToolExecutor("docs__lookup")],
+      }),
     }).snapshot();
     const text = JSON.stringify(snapshot);
 
@@ -65,9 +76,13 @@ test("CapabilityCenter freezes safe model, tool, skill, and MCP catalog projecti
     assert.equal(snapshot.toolCatalog.allowedTools.includes("shell_command"), false);
     assert.equal(snapshot.toolCatalog.allowedTools.includes("browser_snapshot"), false);
     assert.equal(snapshot.toolCatalog.tools.find((tool) => tool.name === "browser_snapshot")?.availability, "unavailable");
-    assert.deepEqual(snapshot.skillCatalog.map((skill) => skill.name), ["Repo Review"]);
+    assert.deepEqual(snapshot.skillCatalog.map((skill) => `${skill.name}:${skill.enabled}`), ["Disabled Skill:false", "Repo Review:true"]);
     assert.equal(snapshot.mcpCatalog[0]?.availability, "configured");
+    assert.equal(snapshot.mcpCatalog[0]?.runtimeStatus, "connected");
     assert.equal(snapshot.mcpCatalog[0]?.envSecretRefCount, 1);
+    assert.deepEqual(snapshot.mcpCatalog[0]?.tools.map((tool) => tool.name), ["docs__lookup"]);
+    assert.equal(snapshot.toolCatalog.tools.some((tool) => tool.name === "docs__lookup" && tool.scopes.includes("mcp")), true);
+    assert.equal(snapshot.toolCatalog.allowedTools.includes("docs__lookup"), true);
     assert.equal(snapshot.securitySummary, "本轮模型、工具、工作方法和工作区能力快照。");
     assert.equal(snapshot.securitySummary.includes("prompt"), false);
     assert.equal(snapshot.securitySummary.includes("raw"), false);
@@ -80,3 +95,120 @@ test("CapabilityCenter freezes safe model, tool, skill, and MCP catalog projecti
     await fs.rm(skillRoot, { recursive: true, force: true });
   }
 });
+
+test("CapabilityCenter marks incomplete MCP servers unavailable without connecting", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-capability-center-mcp-missing-"));
+  try {
+    const settingsStore = new FileSystemNormalSettingsStore(directory);
+    const secretStore = new FileSystemLocalDevSecretStore(directory);
+    const configCenter = new ConfigCenter({ settingsStore, secretStore });
+    await configCenter.upsertMcpServer({
+      serverId: "missing-command",
+      label: "Missing Command",
+      transport: "stdio",
+      enabled: true,
+    });
+    let connected = false;
+
+    const snapshot = await new CapabilityCenter({
+      configCenter,
+      skillRoots: [],
+      createMcpManager: () => fakeMcpManager({
+        connectAll: async () => {
+          connected = true;
+        },
+      }),
+    }).snapshot();
+
+    assert.equal(connected, false);
+    assert.equal(snapshot.mcpCatalog[0]?.availability, "unavailable");
+    assert.equal(snapshot.mcpCatalog[0]?.runtimeStatus, "unavailable");
+    assert.deepEqual(snapshot.mcpCatalog[0]?.tools, []);
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("CapabilityCenter keeps MCP connection errors safe in snapshot", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-capability-center-mcp-error-"));
+  try {
+    const settingsStore = new FileSystemNormalSettingsStore(directory);
+    const secretStore = new FileSystemLocalDevSecretStore(directory);
+    const configCenter = new ConfigCenter({ settingsStore, secretStore });
+    await configCenter.upsertMcpServer({
+      serverId: "broken",
+      label: "Broken",
+      transport: "stdio",
+      command: "node",
+      args: ["server.js", "--token", "do-not-leak"],
+      envSecretRefs: ["secret://local-dev/mcp/broken/token"],
+      enabled: true,
+    });
+
+    const snapshot = await new CapabilityCenter({
+      configCenter,
+      skillRoots: [],
+      createMcpManager: () => fakeMcpManager({
+        runtimeSnapshots: [
+          {
+            serverId: "broken",
+            status: "error",
+            errorSummary: "spawn failed Authorization: Bearer [redacted-token]",
+            toolNames: [],
+          },
+        ],
+      }),
+    }).snapshot();
+    const text = JSON.stringify(snapshot);
+
+    assert.equal(snapshot.mcpCatalog[0]?.runtimeStatus, "error");
+    assert.match(snapshot.mcpCatalog[0]?.errorSummary ?? "", /redacted-token/);
+    assert.equal(text.includes("do-not-leak"), false);
+    assert.equal(text.includes("--token"), false);
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+function fakeMcpManager(input: {
+  readonly runtimeSnapshots?: ReturnType<import("../adapters/mcp/index.js").McpManager["getServerRuntimeSnapshots"]>;
+  readonly tools?: readonly ToolExecutor[];
+  readonly connectAll?: () => Promise<void>;
+} = {}) {
+  return {
+    async connectAll() {
+      await input.connectAll?.();
+    },
+    async disconnectAll() {},
+    getServerRuntimeSnapshots() {
+      return input.runtimeSnapshots ?? [];
+    },
+    getToolsForRegistry() {
+      return input.tools ?? [];
+    },
+  };
+}
+
+function mcpToolExecutor(name: string): ToolExecutor {
+  return {
+    definition: {
+      name,
+      description: "Lookup docs through MCP.",
+      inputSchema: { type: "object", properties: { query: { type: "string" } } },
+      metadata: {
+        category: "mcp",
+        riskLevel: "low",
+        operationType: "read-only",
+        requiresConfirmation: false,
+        visibleResultPolicy: {
+          userVisible: "safe-preview",
+          maxPreviewChars: 600,
+          omitRawOutput: true,
+        },
+      },
+    },
+    async execute() {
+      return { summary: "ok" };
+    },
+  };
+}

@@ -318,9 +318,19 @@ export type CapabilityMcpCatalogItem = {
   readonly transport: McpServerTransportKind;
   readonly enabled: boolean;
   readonly availability: "configured" | "disabled" | "unavailable";
+  readonly runtimeStatus?: "disabled" | "unavailable" | "configured" | "connecting" | "connected" | "error";
+  readonly errorSummary?: string;
   readonly commandSummary?: string;
   readonly url?: string;
   readonly envSecretRefCount: number;
+  readonly runtimeConfig?: {
+    readonly transport: McpServerTransportKind;
+    readonly command?: string;
+    readonly args?: readonly string[];
+    readonly url?: string;
+    readonly envSecretRefs: readonly string[];
+  };
+  readonly tools: readonly CapabilityToolCatalogItem[];
   readonly updatedAt: string;
 };
 

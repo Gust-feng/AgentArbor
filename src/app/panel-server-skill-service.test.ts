@@ -69,3 +69,59 @@ test("resolveTriggeredSkillContexts uses the run-created skill catalog instead o
     await fs.rm(root, { recursive: true, force: true });
   }
 });
+
+test("resolveTriggeredSkillContexts skips disabled frozen skills and caps keyword triggers at four", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-skill-limit-"));
+  try {
+    const catalog: CapabilitySkillCatalogItem[] = [];
+    for (let index = 1; index <= 5; index += 1) {
+      const skillPath = path.join(root, `skill-${index}.md`);
+      await fs.writeFile(
+        skillPath,
+        [
+          "---",
+          `name: Review ${index}`,
+          `description: Review helper ${index}.`,
+          "triggers: [review]",
+          "---",
+          "",
+          `# Review ${index}`,
+          "",
+          `Body ${index}.`,
+        ].join("\n"),
+        "utf8"
+      );
+      catalog.push({
+        id: `review-${index}`,
+        name: `Review ${index}`,
+        description: `Review helper ${index}.`,
+        enabled: index !== 3,
+        sourcePath: skillPath,
+        triggers: ["review"],
+      });
+    }
+    const usedSkillIds: string[] = [];
+    const runtime: PanelSkillRuntime = {
+      skillRoots: [],
+      skillStateStore: {
+        async readStates() {
+          return new Map();
+        },
+        async setEnabled(skillId, enabled) {
+          return { skillId, enabled };
+        },
+        async markUsed(skillId) {
+          usedSkillIds.push(skillId);
+          return { skillId, lastUsedAt: "2026-06-05T00:00:00.000Z" };
+        },
+      },
+    };
+
+    const contexts = await resolveTriggeredSkillContexts(runtime, "please review everything", catalog);
+
+    assert.deepEqual(contexts.map((context) => context.skill.id), ["review-1", "review-2", "review-4", "review-5"]);
+    assert.deepEqual(usedSkillIds, ["review-1", "review-2", "review-4", "review-5"]);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});

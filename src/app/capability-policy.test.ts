@@ -7,6 +7,7 @@ import type {
 } from "../domain/config/index.js";
 import { toolPresentationForName } from "../domain/tools/index.js";
 import { createTaskSoil } from "../domain/soil/index.js";
+import type { AgentDefinition } from "./agent-prompts/contracts.js";
 import { DESKTOP_ROOT_AGENT } from "./agent-prompts/desktop-root-agent.js";
 import { resolveRunCapabilities } from "./capability-policy.js";
 import { restrictRunCapabilityResolutionToExecutableTools } from "./run-tool-boundary.js";
@@ -18,7 +19,7 @@ test("run capability policy hides disabled, unavailable, denied, and mode-intern
     tool("browser_snapshot", "read-only", { availability: "unavailable" }),
     tool("write_file", "read-write", { enabled: false }),
     tool("underground_probe", "read-only", { scopes: ["underground"] }),
-    tool("mcp_docs_search", "external-submit", { scopes: ["desktop-basic", "mcp"] }),
+    tool("mcp_docs_search", "external-submit", { scopes: ["mcp"], category: "mcp" }),
   ]);
   const taskSoil = createTaskSoil({
     rawGoal: "research safely",
@@ -36,13 +37,13 @@ test("run capability policy hides disabled, unavailable, denied, and mode-intern
   assert.equal(resolution.agentId, DESKTOP_ROOT_AGENT.agentId);
   assert.equal(resolution.agentDisplayName, DESKTOP_ROOT_AGENT.displayName);
   assert.equal(resolution.toolVisibilityProfileId, DESKTOP_ROOT_AGENT.toolVisibilityProfile.profileId);
-  assert.deepEqual(resolution.allowedTools, ["search"]);
+  assert.deepEqual(resolution.allowedTools, ["search", "mcp_docs_search"]);
   assert.equal(resolution.toolExposures.find((item) => item.name === "shell_command")?.modelVisible, false);
   assert.equal(resolution.toolExposures.find((item) => item.name === "shell_command")?.requiresConfirmation, true);
   assert.equal(resolution.toolExposures.find((item) => item.name === "browser_snapshot")?.reason, "当前不可用。");
   assert.equal(resolution.toolExposures.find((item) => item.name === "write_file")?.reason, "工具已在配置中停用。");
   assert.equal(resolution.toolExposures.find((item) => item.name === "underground_probe")?.modelVisible, false);
-  assert.equal(resolution.toolExposures.find((item) => item.name === "mcp_docs_search")?.modelVisible, false);
+  assert.equal(resolution.toolExposures.find((item) => item.name === "mcp_docs_search")?.modelVisible, true);
   assert.match(resolution.warnings.join("\n"), /隐藏/);
 });
 
@@ -121,8 +122,9 @@ test("executable restriction only counts tools that were model-visible before ex
   );
 });
 
-test("run capability policy keeps MCP as draft only and filters disabled skills", () => {
-  const snapshot = capabilitySnapshot([tool("search", "read-only")], {
+test("run capability policy exposes MCP by default while filtering disabled skills", () => {
+  const mcpTool = tool("docs__lookup", "read-only", { scopes: ["mcp"], category: "mcp" });
+  const snapshot = capabilitySnapshot([tool("search", "read-only"), mcpTool], {
     skillCatalog: [
       {
         id: "enabled-skill",
@@ -152,6 +154,8 @@ test("run capability policy keeps MCP as draft only and filters disabled skills"
 
   assert.deepEqual(resolution.enabledSkills.map((skill) => skill.id), ["enabled-skill"]);
   assert.equal("sourcePath" in (resolution.enabledSkills[0] as Record<string, unknown>), false);
+  assert.deepEqual(resolution.allowedTools, ["search", "docs__lookup"]);
+  assert.equal(resolution.toolExposures.find((tool) => tool.name === "docs__lookup")?.modelVisible, true);
   assert.equal(resolution.mcpDrafts.length, 1);
   assert.equal(resolution.mcpDrafts[0]?.source, "mcp");
   assert.equal(resolution.mcpDrafts[0]?.reason, "已登记。");
@@ -159,6 +163,34 @@ test("run capability policy keeps MCP as draft only and filters disabled skills"
   assert.equal(projected.includes(DESKTOP_ROOT_AGENT.prompt.systemPrompt), false);
   assert.equal(projected.includes("sk-secret"), false);
   assert.equal(projected.includes("--token"), false);
+});
+
+test("run capability policy hides MCP tools when an AgentDefinition hides mcp scope", () => {
+  const snapshot = capabilitySnapshot([
+    tool("search", "read-only"),
+    tool("docs__lookup", "read-only", { scopes: ["mcp"], category: "mcp" }),
+  ]);
+  const noMcpAgent: AgentDefinition = {
+    ...DESKTOP_ROOT_AGENT,
+    agentId: "no-mcp-test-agent",
+    displayName: "No MCP Test Agent",
+    toolVisibilityProfile: {
+      profileId: "no-mcp-test-agent:no-mcp:v1",
+      runMode: "agent",
+      visibleToolScopes: ["desktop-basic", "workspace", "research"],
+      hiddenToolScopes: ["mcp"],
+    },
+  };
+
+  const resolution = resolveRunCapabilities({
+    snapshot,
+    goal: "lookup docs",
+    agentDefinition: noMcpAgent,
+  });
+
+  assert.deepEqual(resolution.allowedTools, ["search"]);
+  assert.equal(resolution.toolExposures.find((tool) => tool.name === "docs__lookup")?.modelVisible, false);
+  assert.equal(resolution.toolExposures.find((tool) => tool.name === "search")?.modelVisible, true);
 });
 
 function capabilitySnapshot(
@@ -208,6 +240,7 @@ function capabilitySnapshot(
         availability: "configured",
         commandSummary: "node server.js [args omitted]",
         envSecretRefCount: 1,
+        tools: tools.filter((tool) => tool.scopes.includes("mcp")),
         updatedAt: "2026-05-13T00:00:00.000Z",
       },
     ],

@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
+import { promises as fs } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 import type {
   BasicAgentCapabilitySnapshot,
+  CapabilityToolCatalogItem,
   ModelCapabilities,
   SanitizedInformationAccessConfig,
 } from "../domain/config/index.js";
@@ -324,6 +328,79 @@ test("desktop tool center factory keeps frozen unavailable tools unavailable", a
   assert.equal(toolCenter.has("read_file"), false);
 });
 
+test("desktop tool center factory rebuilds executable MCP tools only from the frozen run snapshot", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-mcp-run-resources-"));
+  const serverPath = path.join(directory, "server.mjs");
+  await fs.writeFile(serverPath, mcpServerSource(), "utf8");
+  try {
+    const lookup = mcpCapabilityTool("frozen__lookup", "read-only");
+    const mutate = mcpCapabilityTool("frozen__mutate", "read-write");
+    const resources = await prepareDesktopRunResources(runtimeWithAiEnvironment(), "fake", {
+      capabilitySnapshot: capabilitySnapshot({
+        toolCatalog: {
+          scope: "desktop-basic",
+          allowedTools: ["frozen__lookup", "frozen__mutate"],
+          tools: [lookup, mutate],
+        },
+        mcpCatalog: [
+          {
+            serverId: "frozen",
+            label: "Frozen MCP",
+            transport: "stdio",
+            enabled: true,
+            availability: "configured",
+            runtimeStatus: "connected",
+            commandSummary: `${process.execPath} server.mjs`,
+            envSecretRefCount: 0,
+            runtimeConfig: {
+              transport: "stdio",
+              command: process.execPath,
+              args: [serverPath],
+              envSecretRefs: [],
+            },
+            tools: [lookup, mutate],
+            updatedAt: "2026-06-06T00:00:00.000Z",
+          },
+        ],
+      }),
+      informationAccess: informationAccess(),
+    });
+    const factory = createDesktopToolCenterFactory(undefined, resources);
+    const toolCenter = factory(createMinimalRuntime());
+
+    assert.deepEqual(toolCenter.list().map((tool) => tool.name).sort(), ["frozen__lookup", "frozen__mutate"]);
+
+    const readResult = await toolCenter.execute(
+      { callId: "call-read", toolName: "frozen__lookup", input: { query: "agent" } },
+      { callerAgentId: "agent", traceId: "trace", goalId: "goal" },
+      { callerAgentId: "agent", allowedTools: ["frozen__lookup"] }
+    );
+    assert.equal(readResult.status, "completed");
+    assert.match(JSON.stringify(readResult.output), /Frozen: agent/);
+    assert.equal(readResult.projection?.envelope?.rawRetention, "diagnostic_ref_only");
+
+    const denied = await toolCenter.execute(
+      { callId: "call-denied", toolName: "frozen__lookup", input: { query: "agent" } },
+      { callerAgentId: "agent", traceId: "trace", goalId: "goal" },
+      { callerAgentId: "agent", allowedTools: [] }
+    );
+    assert.equal(denied.status, "failed");
+    assert.match(denied.error ?? "", /未授权/);
+
+    const confirmation = await toolCenter.execute(
+      { callId: "call-write", toolName: "frozen__mutate", input: { value: "change" } },
+      { callerAgentId: "agent", traceId: "trace", goalId: "goal" },
+      { callerAgentId: "agent", allowedTools: ["frozen__mutate"] }
+    );
+    assert.equal(confirmation.status, "approval_required");
+    assert.equal(confirmation.confirmationRequest?.riskLevel, "high");
+
+    await resources.mcpManager?.disconnectAll?.();
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
 function runtimeWithAiEnvironment(): PanelRuntime {
   return {
     configCenter: {
@@ -341,6 +418,7 @@ function capabilitySnapshot(
     readonly activeModel?: Partial<BasicAgentCapabilitySnapshot["activeModel"]>;
     readonly modelCapabilities?: Partial<ModelCapabilities>;
     readonly toolCatalog?: BasicAgentCapabilitySnapshot["toolCatalog"];
+    readonly mcpCatalog?: BasicAgentCapabilitySnapshot["mcpCatalog"];
   } = {}
 ): BasicAgentCapabilitySnapshot {
   return {
@@ -373,7 +451,7 @@ function capabilitySnapshot(
     },
     toolCatalog: overrides.toolCatalog ?? { scope: "desktop-basic", tools: [], allowedTools: [] },
     skillCatalog: [],
-    mcpCatalog: [],
+    mcpCatalog: overrides.mcpCatalog ?? [],
     workspace: {
       workspaceDirectory: process.cwd(),
       updatedAt: "2026-06-06T00:00:00.000Z",
@@ -381,6 +459,51 @@ function capabilitySnapshot(
     securitySummary: "test snapshot",
     warnings: [],
   };
+}
+
+function mcpCapabilityTool(
+  name: string,
+  operationType: CapabilityToolCatalogItem["operationType"]
+): CapabilityToolCatalogItem {
+  const readOnly = operationType === "read-only";
+  return {
+    name,
+    displayName: name,
+    displayDescription: "MCP test tool.",
+    description: "MCP test tool.",
+    category: "mcp",
+    categoryLabel: "MCP",
+    riskLevel: readOnly ? "low" : "high",
+    riskLabel: readOnly ? "Low" : "High",
+    operationType,
+    operationLabel: readOnly ? "Read only" : "Write",
+    requiresConfirmation: !readOnly,
+    confirmationLabel: readOnly ? "No confirmation" : "Requires confirmation",
+    visibleResultPolicy: {
+      userVisible: "safe-preview",
+      maxPreviewChars: 800,
+      omitRawOutput: true,
+    },
+    scopes: ["mcp"],
+    enabled: true,
+    availability: "available",
+  };
+}
+
+function mcpServerSource(): string {
+  const mcpServerModule = import.meta.resolve("@modelcontextprotocol/sdk/server/mcp.js");
+  const stdioTransportModule = import.meta.resolve("@modelcontextprotocol/sdk/server/stdio.js");
+  const zodModule = import.meta.resolve("zod");
+  return [
+    `import { McpServer } from ${JSON.stringify(mcpServerModule)};`,
+    `import { StdioServerTransport } from ${JSON.stringify(stdioTransportModule)};`,
+    `import { z } from ${JSON.stringify(zodModule)};`,
+    'const server = new McpServer({ name: "frozen-test", version: "1.0.0" });',
+    'server.registerTool("lookup", { description: "Lookup frozen docs.", inputSchema: { query: z.string() }, annotations: { readOnlyHint: true } }, async (args) => ({ content: [{ type: "text", text: `Frozen: ${args.query}` }] }));',
+    'server.registerTool("mutate", { description: "Mutate external state.", inputSchema: { value: z.string() }, annotations: { destructiveHint: true } }, async (args) => ({ content: [{ type: "text", text: `Mutated: ${args.value}` }] }));',
+    "await server.connect(new StdioServerTransport());",
+    "",
+  ].join("\n");
 }
 
 function informationAccess(): SanitizedInformationAccessConfig {

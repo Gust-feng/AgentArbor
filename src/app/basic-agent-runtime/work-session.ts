@@ -95,6 +95,7 @@ export function createDesktopWorkViewReadModel(
   const toolEvidence = envelopeSafeToolEvidence(input.toolEvidence ?? []);
   const toolDisplays = mergeToolDisplays(toolEvidence.map((envelope) => envelope.uiDisplay).filter(isToolDisplay), input.toolDisplays ?? []);
   const contextLedger = contextLedgerFor(input, contextAttachments, toolEvidence, toolDisplays);
+  const triggeredSkills = triggeredSkillsFor(input);
   const pendingConfirmation = input.pendingConfirmation ?? pendingConfirmationFor(input.run, input.canvas);
   const answer = answerFor(input);
   const transcriptNodes = input.transcriptNodes ?? transcriptNodesFromRunEvents(transcriptSourceEvents(input.events), pendingConfirmation);
@@ -113,6 +114,7 @@ export function createDesktopWorkViewReadModel(
     currentAction: currentActionFor(input.run, stage, visibleEvents, pendingConfirmation),
     contextAttachments,
     contextLedger,
+    triggeredSkills,
     pendingConfirmation,
     answer,
     deliverable,
@@ -130,6 +132,48 @@ export function createDesktopWorkViewReadModel(
       contextAttachmentCount: contextAttachments.length,
     },
   };
+}
+
+function triggeredSkillsFor(input: CreateDesktopWorkViewReadModelInput): DesktopWorkViewReadModel["triggeredSkills"] {
+  const context = input.canvas?.kind === "desktop_agent_canvas" ? input.canvas.agent?.context : undefined;
+  const items = context?.items ?? [];
+  return items
+    .filter((item) => item.sourceKind === "skill")
+    .map((item) => {
+      const parsed = parseSkillContextSummary(item.itemId, item.summary);
+      return {
+        skillId: parsed.skillId,
+        name: parsed.name,
+        triggerReason: parsed.triggerReason,
+        summary: parsed.summary,
+        sourceRef: `skill:${parsed.skillId}`,
+        truncated: item.truncated,
+      };
+    });
+}
+
+function parseSkillContextSummary(
+  itemId: string,
+  summary: string
+): Pick<DesktopWorkViewReadModel["triggeredSkills"][number], "skillId" | "name" | "triggerReason" | "summary"> {
+  const skillId = itemId.startsWith("context:skill:") ? itemId.slice("context:skill:".length) : itemId;
+  const lines = summary.split(/\r?\n/).map((line) => line.trim()).filter((line) => line.length > 0);
+  const name = stripLabel(lines.find((line) => line.startsWith("Triggered skill:")), "Triggered skill:") ?? skillId;
+  const triggerReason = stripLabel(lines.find((line) => line.startsWith("Why:")), "Why:") ?? "技能名称或描述匹配当前任务。";
+  return {
+    skillId: redactOrdinaryText(skillId, 160),
+    name: redactOrdinaryText(name, 120),
+    triggerReason: redactOrdinaryText(triggerReason, 240),
+    summary: redactOrdinaryText(`${name}：${triggerReason}`, 360),
+  };
+}
+
+function stripLabel(value: string | undefined, label: string): string | undefined {
+  if (value === undefined || !value.startsWith(label)) {
+    return undefined;
+  }
+  const stripped = value.slice(label.length).trim();
+  return stripped.length === 0 ? undefined : stripped;
 }
 
 function safetySummaryText(input: {

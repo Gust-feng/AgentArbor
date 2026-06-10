@@ -26,6 +26,10 @@ export function postJson<T>(path: string, body: unknown): Promise<T> {
   });
 }
 
+export function deleteJson<T>(path: string): Promise<T> {
+  return requestJson<T>(path, { method: "DELETE" });
+}
+
 function errorMessage(value: unknown): string | undefined {
   if (typeof value !== "object" || value === null) {
     return undefined;

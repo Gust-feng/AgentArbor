@@ -26,6 +26,7 @@ import {
 import { createInitialAppState } from "./app-state";
 import type { ModelProviderModelCatalog } from "./contracts/config";
 import type { ContextAttachment } from "./contracts/context";
+import type { McpReferenceResponse } from "./contracts/tools";
 import { modelOptionsFromConfig, selectedModelOptionId } from "./model-options";
 
 export function App(): React.ReactElement {
@@ -47,6 +48,7 @@ export function App(): React.ReactElement {
   });
   const [composerReasoningEffort, setComposerReasoningEffort] = useState<ComposerReasoningEffort>("");
   const [modelCatalogs, setModelCatalogs] = useState<Record<string, ModelProviderModelCatalog>>({});
+  const [mcpReferences, setMcpReferences] = useState<Readonly<Record<string, McpReferenceResponse>>>({});
   const [workspaceDirectory, setWorkspaceDirectory] = useState("");
   const [toolForm, setToolForm] = useState<ToolForm>({
     provider: "tavily",
@@ -57,10 +59,23 @@ export function App(): React.ReactElement {
     serverId: "",
     label: "",
     transport: "stdio",
+    authMode: "none",
+    authTouched: false,
+    confirmationMode: "unsafe_only",
+    toolExposureMode: "none",
     command: "",
     args: "",
+    commandLine: "",
     url: "",
     envSecretRefs: "",
+    headerSecretRefs: "",
+    bearerTokenSecretRef: "",
+    bearerTokenValue: "",
+    apiKeySecretRef: "",
+    apiKeyHeaderName: "Authorization",
+    apiKeyValue: "",
+    customHeaderName: "",
+    customHeaderValue: "",
     enabled: true,
   });
   const [attachments, setAttachments] = useState<readonly ContextAttachment[]>([]);
@@ -145,7 +160,10 @@ export function App(): React.ReactElement {
         serverId: firstServer.serverId,
         label: firstServer.label,
         transport: firstServer.transport,
+        confirmationMode: firstServer.confirmationMode ?? "unsafe_only",
+        toolExposureMode: firstServer.toolExposureMode ?? "none",
         url: firstServer.url ?? "",
+        headerSecretRefs: "",
         enabled: firstServer.enabled,
       };
     });
@@ -202,6 +220,7 @@ export function App(): React.ReactElement {
     toolForm,
     setToolForm,
     mcpServerForm,
+    setMcpServerForm,
     mountedRef,
     modelSaveQueueRef,
     setSavingModel,
@@ -218,6 +237,11 @@ export function App(): React.ReactElement {
     saveWorkspace,
     saveTools,
     saveMcpServer,
+    loadMcpReferences,
+    importMcpConfig,
+    testMcpServer,
+    deleteMcpServer,
+    updateMcpTool,
     updateTool,
     updateSkill,
   } = settingsController;
@@ -354,9 +378,17 @@ export function App(): React.ReactElement {
         setToolForm={setToolForm}
         mcpServerForm={mcpServerForm}
         setMcpServerForm={setMcpServerForm}
+        mcpReferences={mcpReferences}
         savingTools={savingTools}
         onSaveTools={() => void saveTools()}
-        onSaveMcpServer={() => void saveMcpServer()}
+        onSaveMcpServer={saveMcpServer}
+        onLoadMcpReferences={(serverId) => loadMcpReferences(serverId).then((references) => {
+          setMcpReferences((previous) => ({ ...previous, [serverId]: references }));
+        })}
+        onImportMcpConfig={(config) => void importMcpConfig(config)}
+        onTestMcpServer={(serverId) => void testMcpServer(serverId)}
+        onDeleteMcpServer={(serverId) => void deleteMcpServer(serverId)}
+        onUpdateMcpTool={(serverId, toolName, enabled) => void updateMcpTool(serverId, toolName, enabled)}
         onUpdateTool={(toolName, enabled) => void updateTool(toolName, enabled)}
         onUpdateSkill={(skillId, enabled) => void updateSkill(skillId, enabled)}
       />

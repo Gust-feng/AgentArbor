@@ -1,5 +1,5 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { getDefaultEnvironment, StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 
@@ -10,6 +10,7 @@ export type McpClientConfig = {
   readonly args?: readonly string[];
   readonly url?: string;
   readonly env?: Readonly<Record<string, string>>;
+  readonly httpHeaders?: Readonly<Record<string, string>>;
 };
 
 export type McpClientWrapperOptions = {
@@ -31,6 +32,40 @@ export type McpToolInfo = {
 export type McpToolResult = {
   readonly content: readonly McpContentPart[];
   readonly isError?: boolean;
+};
+
+export type McpPromptInfo = {
+  readonly name: string;
+  readonly title?: string;
+  readonly description?: string;
+  readonly arguments?: readonly {
+    readonly name: string;
+    readonly description?: string;
+    readonly required?: boolean;
+  }[];
+};
+
+export type McpResourceInfo = {
+  readonly uri: string;
+  readonly name: string;
+  readonly title?: string;
+  readonly description?: string;
+  readonly mimeType?: string;
+  readonly size?: number;
+};
+
+export type McpResourceTemplateInfo = {
+  readonly uriTemplate: string;
+  readonly name: string;
+  readonly title?: string;
+  readonly description?: string;
+  readonly mimeType?: string;
+};
+
+export type McpReferenceInfo = {
+  readonly prompts: readonly McpPromptInfo[];
+  readonly resources: readonly McpResourceInfo[];
+  readonly resourceTemplates: readonly McpResourceTemplateInfo[];
 };
 
 export type McpContentPart =
@@ -57,18 +92,32 @@ export class McpClientWrapper {
       { name: `agentarbor-${this.config.serverId}`, version: "0.1.0" },
       { capabilities: {} }
     );
-    await this.client.connect(this.transport);
-    this.connected = true;
+    try {
+      await this.client.connect(this.transport);
+      this.connected = true;
+    } catch (error) {
+      await this.disconnect().catch(() => undefined);
+      throw error;
+    }
   }
 
   async disconnect(): Promise<void> {
-    if (!this.connected || this.client === undefined) {
+    const client = this.client;
+    const transport = this.transport;
+    if (client === undefined && transport === undefined) {
       return;
     }
-    await this.client.close();
     this.client = undefined;
     this.transport = undefined;
     this.connected = false;
+    if (client !== undefined) {
+      try {
+        await client.close();
+        return;
+      } catch {
+      }
+    }
+    await transport?.close();
   }
 
   async listTools(): Promise<readonly McpToolInfo[]> {
@@ -98,6 +147,38 @@ export class McpClientWrapper {
     return { content, isError };
   }
 
+  async listReferences(): Promise<McpReferenceInfo> {
+    this.assertConnected();
+    const [prompts, resources, resourceTemplates] = await Promise.all([
+      this.client!.listPrompts().then((result) => result.prompts.map((prompt) => ({
+        name: prompt.name,
+        title: prompt.title,
+        description: prompt.description,
+        arguments: prompt.arguments?.map((argument) => ({
+          name: argument.name,
+          description: argument.description,
+          required: argument.required,
+        })),
+      }))).catch(() => [] as McpPromptInfo[]),
+      this.client!.listResources().then((result) => result.resources.map((resource) => ({
+        uri: resource.uri,
+        name: resource.name,
+        title: resource.title,
+        description: resource.description,
+        mimeType: resource.mimeType,
+        size: resource.size,
+      }))).catch(() => [] as McpResourceInfo[]),
+      this.client!.listResourceTemplates().then((result) => result.resourceTemplates.map((resourceTemplate) => ({
+        uriTemplate: resourceTemplate.uriTemplate,
+        name: resourceTemplate.name,
+        title: resourceTemplate.title,
+        description: resourceTemplate.description,
+        mimeType: resourceTemplate.mimeType,
+      }))).catch(() => [] as McpResourceTemplateInfo[]),
+    ]);
+    return { prompts, resources, resourceTemplates };
+  }
+
   isConnected(): boolean {
     return this.connected;
   }
@@ -117,13 +198,38 @@ function buildTransport(config: McpClientConfig): Transport {
     return new StdioClientTransport({
       command: config.command,
       args: config.args === undefined ? undefined : [...config.args],
-      env: config.env === undefined ? undefined : { ...config.env },
+      env: config.env === undefined ? undefined : buildStdioEnvironment(config.env),
+      stderr: "ignore",
     });
   }
   if (config.url === undefined) {
     throw new Error(`MCP server "${config.serverId}" requires a url for http transport.`);
   }
-  return new StreamableHTTPClientTransport(new URL(config.url));
+  return new StreamableHTTPClientTransport(new URL(config.url), {
+    requestInit: Object.keys(config.httpHeaders ?? {}).length === 0
+      ? undefined
+      : { headers: { ...config.httpHeaders } },
+  });
+}
+
+function buildStdioEnvironment(env: Readonly<Record<string, string>>): Record<string, string> {
+  return {
+    ...getDefaultEnvironment(),
+    ...platformPathEnvironment(process.env),
+    NODE_USE_SYSTEM_CA: process.env.NODE_USE_SYSTEM_CA ?? "1",
+    ...env,
+  };
+}
+
+function platformPathEnvironment(env: NodeJS.ProcessEnv): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const key of ["PATH", "Path", "HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "SystemRoot", "COMSPEC", "PATHEXT", "TEMP", "TMP"]) {
+    const value = env[key];
+    if (value !== undefined && value.trim().length > 0) {
+      result[key] = value;
+    }
+  }
+  return result;
 }
 
 type RawMcpContent = {

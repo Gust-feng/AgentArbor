@@ -62,15 +62,22 @@ export type ToolCatalogItem = {
 export type McpServerCatalogItem = {
   readonly serverId: string;
   readonly label: string;
-  readonly transport: "stdio" | "http";
+  readonly transport: "stdio" | "http" | "sse";
   readonly enabled: boolean;
+  readonly confirmationMode?: "always" | "unsafe_only" | "never";
+  readonly toolExposureMode?: "none" | "all" | "selected";
   readonly availability: "configured" | "disabled" | "unavailable";
   readonly runtimeStatus?: "disabled" | "unavailable" | "configured" | "connecting" | "connected" | "error";
   readonly errorSummary?: string;
   readonly commandSummary?: string;
   readonly url?: string;
   readonly envSecretRefCount: number;
+  readonly authSecretRefCount?: number;
+  readonly enabledTools?: readonly string[];
+  readonly lastConnectedAt?: string;
+  readonly lastError?: string;
   readonly tools: readonly ToolCatalogItem[];
+  readonly exposedTools?: readonly ToolCatalogItem[];
   readonly updatedAt: string;
 };
 
@@ -86,4 +93,53 @@ export type ToolsResponse = {
     };
   };
   readonly mcpCatalog?: readonly McpServerCatalogItem[];
+};
+
+export type McpServerPreset = {
+  readonly presetId: string;
+  readonly label: string;
+  readonly description: string;
+  readonly server: {
+    readonly serverId: string;
+    readonly label?: string;
+    readonly transport?: "stdio" | "http" | "sse";
+    readonly commandLine?: string;
+    readonly url?: string;
+    readonly envSecretRefs?: readonly string[];
+    readonly confirmationMode?: "always" | "unsafe_only" | "never";
+    readonly toolExposureMode?: "none" | "all" | "selected";
+    readonly enabled?: boolean;
+  };
+};
+
+export type McpReferenceResponse = {
+  readonly ok?: boolean;
+  readonly serverId?: string;
+  readonly errorCode?: string;
+  readonly errorSummary?: string;
+  readonly prompts: readonly {
+    readonly name: string;
+    readonly title?: string;
+    readonly description?: string;
+    readonly arguments?: readonly {
+      readonly name: string;
+      readonly description?: string;
+      readonly required?: boolean;
+    }[];
+  }[];
+  readonly resources: readonly {
+    readonly uri: string;
+    readonly name: string;
+    readonly title?: string;
+    readonly description?: string;
+    readonly mimeType?: string;
+    readonly size?: number;
+  }[];
+  readonly resourceTemplates: readonly {
+    readonly uriTemplate: string;
+    readonly name: string;
+    readonly title?: string;
+    readonly description?: string;
+    readonly mimeType?: string;
+  }[];
 };

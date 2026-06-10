@@ -64,6 +64,7 @@ test("config settings schema keeps tool and MCP settings split", async () => {
   assert.equal(settingsSchema.includes('from "./tool-mcp-settings.js"'), true);
   assert.equal(settingsSchema.includes('from "./settings-utils.js"'), true);
   assert.equal(settingsSchema.includes("export function sanitizeMcpArgs"), false);
+  assert.equal(settingsSchema.includes("export function parseMcpCommandLine"), false);
   assert.equal(settingsSchema.includes("function parseToolStates"), false);
   assert.equal(settingsSchema.includes("function parseMcpServers"), false);
   assert.equal(settingsSchema.includes("function normalizeToolStates"), false);
@@ -71,6 +72,7 @@ test("config settings schema keeps tool and MCP settings split", async () => {
   assert.equal(settingsSchema.includes("function requiredString"), false);
   assert.equal(settingsSchema.includes("function asRecord"), false);
   assert.equal(toolMcpSettings.includes("export function sanitizeMcpArgs"), true);
+  assert.equal(toolMcpSettings.includes("export function parseMcpCommandLine"), true);
   assert.equal(toolMcpSettings.includes("export function parseToolStates"), true);
   assert.equal(toolMcpSettings.includes("export function parseMcpServers"), true);
   assert.equal(toolMcpSettings.includes("export function normalizeToolStates"), true);
@@ -763,10 +765,40 @@ test("ConfigCenter stores capability overrides, tool states, and MCP settings wi
       serverId: "local-docs",
       label: "Local Docs",
       transport: "stdio",
-      command: "node",
-      args: ["server.js", "--token=secret-value", "--api-key", "sk-separated-secret"],
+      commandLine: 'node "server.js" --token=secret-value --api-key sk-separated-secret',
       envSecretRefs: ["secret://local-dev/mcp/local-docs/token"],
+      bearerTokenSecretRef: "secret://local-dev/mcp/local-docs/bearer",
+      confirmationMode: "unsafe_only",
+      toolExposureMode: "selected",
+      enabledTools: ["lookup"],
       enabled: true,
+    });
+    await assert.rejects(
+      () =>
+        configCenter.writeMcpServerSecretValue({
+          serverId: "local-docs",
+          secretRef: "secret://local-dev/mcp/local-docs/not-declared",
+          value: "should-not-write",
+        }),
+      /not declared/
+    );
+    const secret = await configCenter.writeMcpServerSecretValue({
+      serverId: "local-docs",
+      secretRef: "secret://local-dev/mcp/local-docs/token",
+      value: "mcp-token-value",
+    });
+    const bearer = await configCenter.writeMcpServerSecretValue({
+      serverId: "local-docs",
+      secretRef: "secret://local-dev/mcp/local-docs/bearer",
+      value: "mcp-bearer-value",
+    });
+    const mcpEnv = await configCenter.createMcpRuntimeEnvironment({
+      servers: [
+        {
+          envSecretRefs: ["secret://local-dev/mcp/local-docs/token"],
+          bearerTokenSecretRef: "secret://local-dev/mcp/local-docs/bearer",
+        },
+      ],
     });
     const settingsRaw = await fs.readFile(settingsStore.settingsPath, "utf8");
 
@@ -779,10 +811,45 @@ test("ConfigCenter stores capability overrides, tool states, and MCP settings wi
     assert.equal(safeOverride.find((override) => override.model === "safe-custom-model")?.capabilities.stability, "preview");
     assert.equal(safeOverride.find((override) => override.model === "safe-custom-model")?.capabilities.lastVerifiedAt, "2026-05-12");
     assert.equal(toolStates.find((state) => state.name === "shell_command")?.enabled, false);
-    assert.equal(mcpServers.find((server) => server.serverId === "local-docs")?.enabled, true);
+    const mcpServer = mcpServers.find((server) => server.serverId === "local-docs");
+    assert.equal(mcpServer?.enabled, true);
+    assert.equal(mcpServer?.confirmationMode, "unsafe_only");
+    assert.equal(mcpServer?.toolExposureMode, "selected");
+    assert.deepEqual(mcpServer?.enabledTools, ["lookup"]);
+    assert.equal(mcpServer?.command, "node");
+    assert.deepEqual(mcpServer?.args, ["server.js", "[secret-ref-required]", "[secret-ref-required]", "[secret-ref-required]"]);
+    assert.equal(secret.configured, true);
+    assert.equal(secret.secretRef, "secret://local-dev/mcp/local-docs/token");
+    assert.equal(bearer.configured, true);
+    assert.equal(mcpEnv["secret://local-dev/mcp/local-docs/token"], "mcp-token-value");
+    assert.equal(mcpEnv["secret://local-dev/mcp/local-docs/bearer"], "mcp-bearer-value");
+    assert.equal(settingsRaw.includes("secret://local-dev/mcp/local-docs/bearer"), true);
     assert.equal(settingsRaw.includes("secret-value"), false);
     assert.equal(settingsRaw.includes("sk-separated-secret"), false);
     assert.equal(settingsRaw.includes("sk-do-not-store"), false);
+    assert.equal(settingsRaw.includes("mcp-token-value"), false);
+    assert.equal(settingsRaw.includes("mcp-bearer-value"), false);
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("ConfigCenter MCP command line parser preserves Windows paths", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-config-mcp-windows-command-"));
+  try {
+    const settingsStore = new FileSystemNormalSettingsStore(directory);
+    const secretStore = new FileSystemLocalDevSecretStore(directory);
+    const configCenter = new ConfigCenter({ settingsStore, secretStore });
+    const servers = await configCenter.upsertMcpServer({
+      serverId: "windows-docs",
+      transport: "stdio",
+      commandLine: String.raw`C:\Tools\node.exe "C:\MCP Servers\server.mjs" --flag value`,
+      enabled: true,
+    });
+    const server = servers.find((item) => item.serverId === "windows-docs");
+
+    assert.equal(server?.command, String.raw`C:\Tools\node.exe`);
+    assert.deepEqual(server?.args, [String.raw`C:\MCP Servers\server.mjs`, "--flag", "value"]);
   } finally {
     await fs.rm(directory, { recursive: true, force: true });
   }

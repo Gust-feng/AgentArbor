@@ -9,12 +9,25 @@ export type ToolForm = {
 export type McpServerForm = {
   readonly serverId: string;
   readonly label: string;
-  readonly transport: "stdio" | "http";
+  readonly transport: "stdio" | "http" | "sse";
+  readonly authMode: "none" | "bearer" | "api_key" | "custom_header";
+  readonly authTouched: boolean;
+  readonly confirmationMode: "always" | "unsafe_only" | "never";
+  readonly toolExposureMode: "none" | "all" | "selected";
   readonly command: string;
   readonly args: string;
+  readonly commandLine: string;
   readonly url: string;
   readonly envSecretRefs: string;
+  readonly headerSecretRefs: string;
+  readonly bearerTokenSecretRef: string;
+  readonly bearerTokenValue: string;
+  readonly apiKeySecretRef: string;
+  readonly apiKeyHeaderName: string;
+  readonly apiKeyValue: string;
+  readonly customHeaderName: string;
+  readonly customHeaderValue: string;
   readonly enabled: boolean;
 };
 
-export type SettingsGroup = "models" | "capabilities" | "workspace" | "confirmation";
+export type SettingsGroup = "models" | "capabilities" | "mcp" | "workspace" | "confirmation";

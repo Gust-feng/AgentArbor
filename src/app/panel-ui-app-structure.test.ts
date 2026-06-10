@@ -261,13 +261,15 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(settingsDialog.includes("function GeneralSettings"), false);
   assert.equal(settingsDialog.includes("function AppearanceSettings"), false);
   assert.equal(settingsDialog.includes('label: "模型服务"'), true);
-  assert.equal(settingsDialog.includes('label: "能力与服务"'), true);
+  assert.equal(settingsDialog.includes('label: "基础能力"'), true);
+  assert.equal(settingsDialog.includes('label: "MCP 服务"'), true);
   assert.equal(settingsDialog.includes('label: "工作区"'), true);
   assert.equal(settingsDialog.includes('label: "高影响动作"'), true);
   assert.equal(settingsDialog.includes('label: "确认边界"'), false);
   assert.equal(capabilitySettings.includes("export function CapabilitiesSettings"), true);
   assert.equal(capabilitySettings.includes("function WebSearchSettings"), true);
   assert.equal(capabilitySettings.includes("function McpServiceSettings"), true);
+  assert.equal(capabilitySettings.includes('from "../app-config-actions"'), false);
   assert.equal(capabilitySettings.includes("基础能力"), true);
   assert.equal(capabilitySettings.includes("MCP 服务"), true);
   assert.equal(capabilitySettings.includes("这里配置可用服务和安全边界"), false);
@@ -340,7 +342,7 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(workspaceStyles.includes(".workspace-tabs"), false);
   assert.equal(workspaceStyles.includes(".workspace-search"), false);
   assert.equal(workspaceStyles.includes(".capability-row"), true);
-  assert.equal(workspaceStyles.includes(".mcp-service-row"), true);
+  assert.equal(workspaceStyles.includes(".mcp-service-card"), true);
   assert.equal(workspaceStyles.includes(".mcp-form-grid"), true);
   assert.equal(workspaceStyles.includes(".settings-capabilities"), false);
   assert.equal(workspaceStyles.includes(".service-config-grid"), true);

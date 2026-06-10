@@ -1,4 +1,4 @@
-import { getJson, postJson } from "./api";
+import { deleteJson, getJson, postJson } from "./api";
 import {
   catalogRecordFromList,
   mergeConfigResponse,
@@ -7,7 +7,7 @@ import {
 import type { McpServerForm, ModelForm, ToolForm } from "./components/settings-types";
 import type { ConfigResponse, ModelProviderModelCatalog } from "./contracts/config";
 import type { SkillDefinition } from "./contracts/skills";
-import type { ToolsResponse } from "./contracts/tools";
+import type { McpReferenceResponse, McpServerPreset, ToolsResponse } from "./contracts/tools";
 import { parseModelOptionId } from "./model-options";
 
 export async function saveModelProviderConfig(input: {
@@ -167,19 +167,110 @@ export async function saveToolSettings(form: ToolForm): Promise<ToolsResponse> {
 }
 
 export async function saveMcpServerSettings(form: McpServerForm): Promise<ToolsResponse> {
+  const normalizedServerId = normalizeMcpServerId(effectiveMcpServerId(form));
+  const auth = mcpAuthConfig(form, normalizedServerId);
+  const isNetworkTransport = isNetworkMcpTransport(form.transport);
   const response = await postJson<{ readonly catalog?: ToolsResponse["mcpCatalog"] }>("/api/config/mcp", {
-    serverId: form.serverId,
+    serverId: normalizedServerId,
     label: form.label,
     transport: form.transport,
+    confirmationMode: form.confirmationMode,
+    toolExposureMode: form.toolExposureMode,
+    commandLine: form.transport === "stdio" ? form.commandLine : "",
     command: form.transport === "stdio" ? form.command : "",
     args: splitListInput(form.args),
-    url: form.transport === "http" ? form.url : "",
-    envSecretRefs: splitListInput(form.envSecretRefs),
+    url: isNetworkTransport ? form.url : "",
+    envSecretRefs: form.transport === "stdio" ? splitListInput(form.envSecretRefs) : [],
+    headerSecretRefs: isNetworkTransport ? auth.headerSecretRefs : undefined,
+    bearerTokenSecretRef: isNetworkTransport ? auth.bearerTokenSecretRef : undefined,
+    clearMcpAuth: isNetworkTransport ? auth.clearMcpAuth : true,
     enabled: form.enabled,
   });
+  let latestCatalog = response.catalog ?? [];
+  for (const secret of auth.secretsToSave) {
+    const secretResponse = await saveMcpServerSecret({
+      serverId: normalizedServerId,
+      secretRef: secret.secretRef,
+      value: secret.value,
+    });
+    latestCatalog = secretResponse.mcpCatalog ?? latestCatalog;
+  }
   return {
-    mcpCatalog: response.catalog ?? [],
+    mcpCatalog: latestCatalog,
   };
+}
+
+export async function saveMcpServerSecret(input: {
+  readonly serverId: string;
+  readonly secretRef: string;
+  readonly value: string;
+}): Promise<ToolsResponse> {
+  const response = await postJson<{ readonly catalog?: ToolsResponse["mcpCatalog"] }>(
+    `/api/config/mcp/${encodeURIComponent(input.serverId)}/secrets`,
+    {
+      secretRef: input.secretRef,
+      value: input.value,
+    }
+  );
+  return { mcpCatalog: response.catalog ?? [] };
+}
+
+export async function testMcpServer(serverId: string): Promise<ToolsResponse> {
+  const response = await postJson<{ readonly catalog?: ToolsResponse["mcpCatalog"] }>(
+    `/api/config/mcp/${encodeURIComponent(serverId)}/test`,
+    {}
+  );
+  return { mcpCatalog: response.catalog ?? [] };
+}
+
+export async function reloadMcpServers(): Promise<ToolsResponse> {
+  const response = await postJson<{ readonly catalog?: ToolsResponse["mcpCatalog"] }>("/api/config/mcp/reload", {});
+  return { mcpCatalog: response.catalog ?? [] };
+}
+
+export async function deleteMcpServer(serverId: string): Promise<ToolsResponse> {
+  const response = await deleteJson<{ readonly catalog?: ToolsResponse["mcpCatalog"] }>(
+    `/api/config/mcp/${encodeURIComponent(serverId)}`
+  );
+  return { mcpCatalog: response.catalog ?? [] };
+}
+
+export async function fetchMcpPresets(): Promise<readonly McpServerPreset[]> {
+  const response = await getJson<{ readonly presets?: readonly McpServerPreset[] }>("/api/config/mcp/presets");
+  return response.presets ?? [];
+}
+
+export async function fetchMcpReferences(serverId: string): Promise<McpReferenceResponse> {
+  const response = await getJson<McpReferenceResponse>(`/api/config/mcp/${encodeURIComponent(serverId)}/references`);
+  return {
+    ...response,
+    prompts: response.prompts ?? [],
+    resources: response.resources ?? [],
+    resourceTemplates: response.resourceTemplates ?? [],
+  };
+}
+
+export async function importMcpServers(config: string): Promise<ToolsResponse> {
+  const response = await postJson<{ readonly catalog?: ToolsResponse["mcpCatalog"] }>("/api/config/mcp/import", {
+    config,
+  });
+  return { mcpCatalog: response.catalog ?? [] };
+}
+
+export async function updateMcpToolState(input: {
+  readonly serverId: string;
+  readonly toolExposureMode?: "none" | "all" | "selected";
+  readonly enabledTools: readonly string[];
+}): Promise<ToolsResponse> {
+  const response = await postJson<{ readonly catalog?: ToolsResponse["mcpCatalog"] }>(
+    `/api/config/mcp/${encodeURIComponent(input.serverId)}`,
+    {
+      serverId: input.serverId,
+      toolExposureMode: input.toolExposureMode,
+      enabledTools: input.enabledTools,
+    }
+  );
+  return { mcpCatalog: response.catalog ?? [] };
 }
 
 export async function updateToolState(toolName: string, enabled: boolean): Promise<ToolsResponse> {
@@ -207,6 +298,64 @@ function splitListInput(value: string): readonly string[] {
     .split(/[\n,]+/u)
     .map((item) => item.trim())
     .filter((item) => item.length > 0);
+}
+
+function effectiveMcpServerId(form: McpServerForm): string {
+  const explicit = form.serverId.trim();
+  if (explicit.length > 0) return explicit;
+  const label = form.label.trim();
+  if (label.length > 0) return label;
+  return suggestMcpServerId(form.transport === "stdio" ? form.commandLine : form.url, form.transport);
+}
+
+function suggestMcpServerId(value: string, transport: McpServerForm["transport"]): string {
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return "";
+  if (transport !== "stdio") {
+    try {
+      const url = new URL(trimmed);
+      return url.pathname.split("/").filter(Boolean).pop() ?? url.hostname;
+    } catch {
+      return trimmed;
+    }
+  }
+  const parts = trimmed.split(/\s+/u).filter(Boolean);
+  return [...parts].reverse().find((part) => !part.startsWith("-") && part !== "." && part !== "npx" && part !== "pnpm" && part !== "bunx") ?? trimmed;
+}
+
+function normalizeMcpServerId(value: string): string {
+  const withoutScope = value.replace(/^@/u, "").replace(/\//gu, "-");
+  return withoutScope.trim().toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "mcp-server";
+}
+
+function mcpAuthConfig(form: McpServerForm, serverId: string): {
+  readonly bearerTokenSecretRef?: string;
+  readonly headerSecretRefs?: readonly string[];
+  readonly clearMcpAuth?: boolean;
+  readonly secretsToSave: readonly { readonly secretRef: string; readonly value: string }[];
+} {
+  if (!isNetworkMcpTransport(form.transport)) {
+    return { clearMcpAuth: true, secretsToSave: [] };
+  }
+  const credential = normalizeAuthorizationCredential(form.bearerTokenValue);
+  if (credential.length === 0) {
+    return { clearMcpAuth: false, secretsToSave: [] };
+  }
+  const secretRef = form.bearerTokenSecretRef || `secret://local-dev/mcp/${serverId}/bearer`;
+  return {
+    bearerTokenSecretRef: secretRef,
+    clearMcpAuth: false,
+    secretsToSave: [{ secretRef, value: credential }],
+  };
+}
+
+function isNetworkMcpTransport(transport: McpServerForm["transport"]): boolean {
+  return transport === "http" || transport === "sse";
+}
+
+function normalizeAuthorizationCredential(value: string): string {
+  const headerValue = value.trim().replace(/^authorization\s*:\s*/iu, "").trim();
+  return headerValue.replace(/^bearer\s+/iu, "").trim();
 }
 
 export { catalogRecordFromList };

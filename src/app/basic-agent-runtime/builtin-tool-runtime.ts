@@ -30,6 +30,7 @@ import { ToolRegistry, type ToolRegistryScope } from "./tool-registry.js";
 
 export type McpToolExecutorProvider = {
   getToolsForRegistry(): readonly ToolExecutor[];
+  getDiscoveredToolsForRegistry?(): readonly ToolExecutor[];
   disconnectAll?(): Promise<void>;
 };
 
@@ -113,7 +114,11 @@ export function createDesktopBasicToolRegistry(
     });
   }
   if (options.mcpManager !== undefined) {
-    for (const executor of options.mcpManager.getToolsForRegistry()) {
+    const mcpExecutors =
+      toolCatalogNames === undefined
+        ? (options.mcpManager.getDiscoveredToolsForRegistry?.() ?? options.mcpManager.getToolsForRegistry())
+        : options.mcpManager.getToolsForRegistry();
+    for (const executor of mcpExecutors) {
       if (toolCatalogNames !== undefined && !toolCatalogNames.has(executor.definition.name)) {
         continue;
       }

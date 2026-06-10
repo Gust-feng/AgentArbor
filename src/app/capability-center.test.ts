@@ -49,6 +49,9 @@ test("CapabilityCenter freezes safe model, tool, skill, and MCP catalog projecti
       command: "node",
       args: ["server.js", "--token", "do-not-leak"],
       envSecretRefs: ["secret://local-dev/mcp/docs/token"],
+      confirmationMode: "unsafe_only",
+      toolExposureMode: "selected",
+      enabledTools: ["lookup"],
       enabled: true,
     });
 
@@ -65,6 +68,7 @@ test("CapabilityCenter freezes safe model, tool, skill, and MCP catalog projecti
           },
         ],
         tools: [mcpToolExecutor("docs__lookup")],
+        discoveredTools: [mcpToolExecutor("docs__lookup")],
       }),
     }).snapshot();
     const text = JSON.stringify(snapshot);
@@ -79,8 +83,13 @@ test("CapabilityCenter freezes safe model, tool, skill, and MCP catalog projecti
     assert.deepEqual(snapshot.skillCatalog.map((skill) => `${skill.name}:${skill.enabled}`), ["Disabled Skill:false", "Repo Review:true"]);
     assert.equal(snapshot.mcpCatalog[0]?.availability, "configured");
     assert.equal(snapshot.mcpCatalog[0]?.runtimeStatus, "connected");
+    assert.equal(snapshot.mcpCatalog[0]?.confirmationMode, "unsafe_only");
+    assert.deepEqual(snapshot.mcpCatalog[0]?.enabledTools, ["lookup"]);
+    assert.equal(snapshot.mcpCatalog[0]?.toolExposureMode, "selected");
     assert.equal(snapshot.mcpCatalog[0]?.envSecretRefCount, 1);
+    assert.equal(snapshot.mcpCatalog[0]?.authSecretRefCount, 0);
     assert.deepEqual(snapshot.mcpCatalog[0]?.tools.map((tool) => tool.name), ["docs__lookup"]);
+    assert.deepEqual(snapshot.mcpCatalog[0]?.exposedTools.map((tool) => tool.name), ["docs__lookup"]);
     assert.equal(snapshot.toolCatalog.tools.some((tool) => tool.name === "docs__lookup" && tool.scopes.includes("mcp")), true);
     assert.equal(snapshot.toolCatalog.allowedTools.includes("docs__lookup"), true);
     assert.equal(snapshot.securitySummary, "本轮模型、工具、工作方法和工作区能力快照。");
@@ -93,6 +102,53 @@ test("CapabilityCenter freezes safe model, tool, skill, and MCP catalog projecti
   } finally {
     await fs.rm(directory, { recursive: true, force: true });
     await fs.rm(skillRoot, { recursive: true, force: true });
+  }
+});
+
+test("CapabilityCenter applies MCP enabledTools and confirmation mode before model exposure", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-capability-center-mcp-policy-"));
+  try {
+    const settingsStore = new FileSystemNormalSettingsStore(directory);
+    const secretStore = new FileSystemLocalDevSecretStore(directory);
+    const configCenter = new ConfigCenter({ settingsStore, secretStore });
+    await configCenter.upsertMcpServer({
+      serverId: "docs",
+      label: "Docs",
+      transport: "stdio",
+      command: "node",
+      confirmationMode: "always",
+      toolExposureMode: "selected",
+      enabledTools: ["lookup"],
+      enabled: true,
+    });
+
+    const snapshot = await new CapabilityCenter({
+      configCenter,
+      skillRoots: [],
+      createMcpManager: () => fakeMcpManager({
+        runtimeSnapshots: [
+          {
+            serverId: "docs",
+            status: "connected",
+            toolNames: ["lookup", "mutate"],
+          },
+        ],
+        tools: [
+          mcpToolExecutor("docs__lookup", { requiresConfirmation: true }),
+        ],
+        discoveredTools: [
+          mcpToolExecutor("docs__lookup", { requiresConfirmation: true }),
+          mcpToolExecutor("docs__mutate", { operationType: "read-write" }),
+        ],
+      }),
+    }).snapshot();
+
+    assert.deepEqual(snapshot.mcpCatalog[0]?.tools.map((tool) => tool.name), ["docs__lookup", "docs__mutate"]);
+    assert.deepEqual(snapshot.mcpCatalog[0]?.exposedTools.map((tool) => tool.name), ["docs__lookup"]);
+    assert.deepEqual(snapshot.toolCatalog.allowedTools.filter((name) => name.startsWith("docs__")), ["docs__lookup"]);
+    assert.equal(snapshot.mcpCatalog[0]?.exposedTools[0]?.requiresConfirmation, true);
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
   }
 });
 
@@ -173,6 +229,7 @@ test("CapabilityCenter keeps MCP connection errors safe in snapshot", async () =
 function fakeMcpManager(input: {
   readonly runtimeSnapshots?: ReturnType<import("../adapters/mcp/index.js").McpManager["getServerRuntimeSnapshots"]>;
   readonly tools?: readonly ToolExecutor[];
+  readonly discoveredTools?: readonly ToolExecutor[];
   readonly connectAll?: () => Promise<void>;
 } = {}) {
   return {
@@ -186,10 +243,22 @@ function fakeMcpManager(input: {
     getToolsForRegistry() {
       return input.tools ?? [];
     },
+    getDiscoveredToolsForRegistry() {
+      return input.discoveredTools ?? input.tools ?? [];
+    },
   };
 }
 
-function mcpToolExecutor(name: string): ToolExecutor {
+function mcpToolExecutor(
+  name: string,
+  options: {
+    readonly operationType?: "read-only" | "read-write" | "execute" | "external-submit";
+    readonly requiresConfirmation?: boolean;
+  } = {}
+): ToolExecutor {
+  const operationType = options.operationType ?? "read-only";
+  const readOnly = operationType === "read-only";
+  const requiresConfirmation = options.requiresConfirmation ?? !readOnly;
   return {
     definition: {
       name,
@@ -197,9 +266,9 @@ function mcpToolExecutor(name: string): ToolExecutor {
       inputSchema: { type: "object", properties: { query: { type: "string" } } },
       metadata: {
         category: "mcp",
-        riskLevel: "low",
-        operationType: "read-only",
-        requiresConfirmation: false,
+        riskLevel: readOnly ? "low" : "high",
+        operationType,
+        requiresConfirmation,
         visibleResultPolicy: {
           userVisible: "safe-preview",
           maxPreviewChars: 600,

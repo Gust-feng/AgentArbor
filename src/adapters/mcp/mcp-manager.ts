@@ -1,7 +1,7 @@
 import type { McpServerSettings } from "../../domain/config/index.js";
 import type { ToolExecutor } from "../../domain/tools/index.js";
 import { redactSensitiveText } from "../../kernel/redaction.js";
-import type { McpClientConfig, McpToolInfo } from "./mcp-client.js";
+import type { McpClientConfig, McpReferenceInfo, McpToolInfo } from "./mcp-client.js";
 import { McpClientWrapper } from "./mcp-client.js";
 import { createMcpToolExecutor } from "./mcp-tool-adapter.js";
 
@@ -17,6 +17,7 @@ export type McpServerRuntimeSnapshot = {
   readonly serverId: string;
   readonly status: McpServerStatus;
   readonly errorSummary?: string;
+  readonly lastConnectedAt?: string;
   readonly toolNames: readonly string[];
 };
 
@@ -26,6 +27,7 @@ type ServerEntry = {
   status: McpServerStatus;
   tools: readonly McpToolInfo[];
   errorMessage?: string;
+  lastConnectedAt?: string;
 };
 
 export class McpManager {
@@ -39,13 +41,18 @@ export class McpManager {
         continue;
       }
       const resolvedEnv = resolveEnvRefs(server.envSecretRefs, config.env);
+      const transport = runtimeTransport(server);
+      if (transport === undefined) {
+        continue;
+      }
       const clientConfig: McpClientConfig = {
         serverId: server.serverId,
-        transport: server.transport,
+        transport,
         command: server.command,
         args: server.args,
         url: server.url,
         env: resolvedEnv,
+        httpHeaders: resolveHttpHeaders(server, config.env),
       };
       this.entries.set(server.serverId, {
         client: new McpClientWrapper(clientConfig),
@@ -63,26 +70,39 @@ export class McpManager {
 
   async disconnectAll(): Promise<void> {
     const promises = [...this.entries.values()].map(async (entry) => {
-      if (entry.status === "connected") {
-        try {
-          await entry.client.disconnect();
-        } catch {
-        }
-        entry.status = "disconnected";
-        entry.tools = [];
+      try {
+        await withTimeout(
+          entry.client.disconnect(),
+          this.connectTimeoutMs + 5_000,
+          `MCP server "${entry.config.serverId}" did not close before timeout.`
+        );
+      } catch {
       }
+      entry.status = "disconnected";
+      entry.tools = [];
     });
     await Promise.allSettled(promises);
   }
 
   getToolsForRegistry(): readonly ToolExecutor[] {
+    return this.getRegistryTools({ exposedOnly: true });
+  }
+
+  getDiscoveredToolsForRegistry(): readonly ToolExecutor[] {
+    return this.getRegistryTools({ exposedOnly: false });
+  }
+
+  private getRegistryTools(options: { readonly exposedOnly: boolean }): readonly ToolExecutor[] {
     const executors: ToolExecutor[] = [];
     for (const entry of this.entries.values()) {
       if (entry.status !== "connected") {
         continue;
       }
       for (const tool of entry.tools) {
-        executors.push(createMcpToolExecutor(entry.client, tool, entry.config.serverId));
+        if (options.exposedOnly && !isToolEnabled(entry.config, tool.name)) {
+          continue;
+        }
+        executors.push(createMcpToolExecutor(entry.client, tool, entry.config.serverId, entry.config.confirmationMode));
       }
     }
     return executors;
@@ -101,8 +121,25 @@ export class McpManager {
       serverId: entry.config.serverId,
       status: entry.status,
       errorSummary: entry.errorMessage === undefined ? undefined : safeErrorSummary(entry.errorMessage),
+      lastConnectedAt: entry.lastConnectedAt,
       toolNames: entry.tools.map((tool) => tool.name),
     }));
+  }
+
+  getServerTools(serverId: string): readonly McpToolInfo[] {
+    return this.entries.get(serverId)?.tools ?? [];
+  }
+
+  async getServerReferences(serverId: string): Promise<McpReferenceInfo | undefined> {
+    const entry = this.entries.get(serverId);
+    if (entry === undefined || entry.status !== "connected") {
+      return undefined;
+    }
+    return withTimeout(
+      entry.client.listReferences(),
+      this.connectTimeoutMs,
+      `MCP server "${entry.config.serverId}" did not list prompts/resources before timeout.`
+    );
   }
 
   getEntryForTesting(serverId: string): ServerEntry | undefined {
@@ -123,7 +160,10 @@ export class McpManager {
         `MCP server "${entry.config.serverId}" did not list tools before timeout.`
       );
       entry.status = "connected";
+      entry.errorMessage = undefined;
+      entry.lastConnectedAt = new Date().toISOString();
     } catch (error) {
+      await entry.client.disconnect().catch(() => undefined);
       entry.status = "error";
       entry.errorMessage = safeErrorSummary(error instanceof Error ? error.message : "Unknown connection error.");
       entry.tools = [];
@@ -151,11 +191,68 @@ function resolveEnvRefs(
   return Object.keys(resolved).length > 0 ? resolved : undefined;
 }
 
+function resolveHttpHeaders(
+  server: McpServerSettings,
+  env?: Readonly<Record<string, string | undefined>>
+): Record<string, string> | undefined {
+  const headers: Record<string, string> = {};
+  if (server.bearerTokenSecretRef !== undefined) {
+    const value = env?.[server.bearerTokenSecretRef];
+    if (value !== undefined) {
+      headers.Authorization = `Bearer ${value}`;
+    }
+  }
+  if (server.apiKeySecretRef !== undefined) {
+    const value = env?.[server.apiKeySecretRef];
+    if (value !== undefined) {
+      headers[server.apiKeyHeaderName ?? "X-API-Key"] = value;
+    }
+  }
+  for (const ref of server.headerSecretRefs ?? []) {
+    const parsed = parseHeaderSecretRef(ref);
+    if (parsed === undefined) {
+      continue;
+    }
+    const value = env?.[parsed.secretRef];
+    if (value !== undefined) {
+      headers[parsed.headerName] = value;
+    }
+  }
+  return Object.keys(headers).length === 0 ? undefined : headers;
+}
+
+function parseHeaderSecretRef(value: string): { readonly headerName: string; readonly secretRef: string } | undefined {
+  const separator = value.indexOf("=");
+  if (separator <= 0) {
+    return undefined;
+  }
+  const headerName = value.slice(0, separator).trim();
+  const secretRef = value.slice(separator + 1).trim();
+  return headerName.length === 0 || secretRef.length === 0 ? undefined : { headerName, secretRef };
+}
+
+function isToolEnabled(server: McpServerSettings, toolName: string): boolean {
+  if (server.toolExposureMode === "none") {
+    return false;
+  }
+  if (server.toolExposureMode === "all") {
+    return true;
+  }
+  return server.enabledTools.includes(toolName) || server.enabledTools.includes(`${server.serverId}__${toolName}`);
+}
+
 function hasCompleteRuntimeConfig(server: McpServerSettings): boolean {
+  if (server.transport === "sse") {
+    return false;
+  }
   if (server.transport === "stdio") {
     return server.command !== undefined && server.command.trim().length > 0;
   }
   return server.url !== undefined && server.url.trim().length > 0;
+}
+
+function runtimeTransport(server: McpServerSettings): McpClientConfig["transport"] | undefined {
+  return server.transport === "stdio" || server.transport === "http" ? server.transport : undefined;
 }
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {

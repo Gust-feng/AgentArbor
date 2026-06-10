@@ -5,14 +5,16 @@ import type {
   ToolInputSchema,
 } from "../../domain/tools/index.js";
 import type { McpClientWrapper, McpContentPart, McpToolInfo } from "./mcp-client.js";
+import type { McpConfirmationMode } from "../../domain/config/index.js";
 
 export function createMcpToolExecutor(
   client: McpClientWrapper,
   tool: McpToolInfo,
-  serverId: string
+  serverId: string,
+  confirmationMode: McpConfirmationMode = "always"
 ): ToolExecutor {
   const namespacedName = `${serverId}__${tool.name}`;
-  const metadata = inferToolMetadataFromMcpAnnotations(tool.annotations) as ToolDefinitionMetadata;
+  const metadata = inferToolMetadataFromMcpAnnotations(tool.annotations, confirmationMode) as ToolDefinitionMetadata;
   const inputSchema: ToolInputSchema = {
     type: "object",
     properties: (tool.inputSchema.properties as Record<string, unknown>) ?? {},
@@ -66,16 +68,23 @@ type McpToolMultimodalSummary =
     };
 
 function inferToolMetadataFromMcpAnnotations(
-  annotations: McpToolInfo["annotations"]
+  annotations: McpToolInfo["annotations"],
+  confirmationMode: McpConfirmationMode
 ): ToolDefinitionMetadata {
   const readOnly = annotations?.readOnlyHint === true;
   const destructive = annotations?.destructiveHint === true;
   const openWorld = annotations?.openWorldHint === true;
+  const requiresConfirmation =
+    confirmationMode === "always"
+      ? true
+      : confirmationMode === "never"
+        ? false
+        : !readOnly || destructive || openWorld;
   return {
     category: "mcp",
     riskLevel: readOnly ? "low" : destructive || openWorld ? "high" : "medium",
     operationType: readOnly ? "read-only" : openWorld ? "external-submit" : destructive ? "read-write" : "execute",
-    requiresConfirmation: !readOnly,
+    requiresConfirmation,
     visibleResultPolicy: {
       userVisible: "safe-preview",
       maxPreviewChars: readOnly ? 1_200 : 600,

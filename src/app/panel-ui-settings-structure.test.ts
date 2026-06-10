@@ -63,7 +63,8 @@ test("panel UI settings and model modules stay split", async () => {
   assert.equal(settingsDialog.includes('useState<SettingsGroup>("models")'), true);
   assert.equal(settingsDialog.includes('props.initialGroup ?? "models"'), true);
   assert.equal(settingsDialog.includes('label: "模型服务"'), true);
-  assert.equal(settingsDialog.includes('label: "能力与服务"'), true);
+  assert.equal(settingsDialog.includes('label: "基础能力"'), true);
+  assert.equal(settingsDialog.includes('label: "MCP 服务"'), true);
   assert.equal(settingsDialog.includes('label: "工作区"'), true);
   assert.equal(settingsDialog.includes('label: "高影响动作"'), true);
   assert.equal(settingsDialog.includes('label: "确认边界"'), false);
@@ -79,7 +80,7 @@ test("panel UI settings and model modules stay split", async () => {
   assert.equal(settingsDialog.includes("resolveModelProviderLogo"), false);
   assert.equal(settingsDialog.includes("provider-base-url-field"), false);
   assert.equal(settingsDialog.includes("网页查证"), false);
-  assert.equal(settingsDialog.includes("MCP 服务"), false);
+  assert.equal(settingsDialog.includes('label: "MCP 服务"'), true);
   assert.equal(settingsDialog.includes("工作方法"), false);
   assert.equal(settingsDialog.includes("由模型按任务判断"), false);
   assert.equal(settingsDialog.includes("接入工具"), false);
@@ -94,7 +95,7 @@ test("panel UI settings and model modules stay split", async () => {
   assert.equal(settingsTypes.includes('export type { ModelForm } from "./model-settings"'), true);
   assert.equal(settingsTypes.includes("export type ToolForm"), true);
   assert.equal(settingsTypes.includes("export type McpServerForm"), true);
-  assert.equal(settingsTypes.includes('export type SettingsGroup = "models" | "capabilities" | "workspace" | "confirmation";'), true);
+  assert.equal(settingsTypes.includes('export type SettingsGroup = "models" | "capabilities" | "mcp" | "workspace" | "confirmation";'), true);
   assert.equal(settingsToolCopy.includes("export function toolTitle"), true);
   assert.equal(settingsToolCopy.includes("export function toolDescription"), true);
   assert.equal(settingsToolCopy.includes("export function toolMeta"), true);
@@ -106,6 +107,7 @@ test("panel UI settings and model modules stay split", async () => {
   assert.equal(capabilitySettings.includes("function ToolCatalogSettings"), true);
   assert.equal(capabilitySettings.includes("function SkillContextSettings"), true);
   assert.equal(capabilitySettings.includes("function CapabilityRow"), true);
+  assert.equal(capabilitySettings.includes('from "../app-config-actions"'), false);
   assert.equal(capabilitySettings.includes("基础能力"), true);
   assert.equal(capabilitySettings.includes("MCP 服务"), true);
   assert.equal(capabilitySettings.includes("工作方法"), true);

@@ -31,6 +31,7 @@ import {
 import {
   normalizeMcpServers,
   normalizeToolStates,
+  parseMcpCommandLine,
   parseMcpServers,
   parseToolStates,
   sanitizeMcpArgs,
@@ -50,7 +51,7 @@ export {
 } from "./model-provider-settings.js";
 export { normalizeOpenAIModelRequestSettings } from "./openai-request-settings.js";
 export { ConfigSchemaValidationError, normalizeRequiredConfigString } from "./settings-utils.js";
-export { sanitizeMcpArgs } from "./tool-mcp-settings.js";
+export { parseMcpCommandLine, sanitizeMcpArgs } from "./tool-mcp-settings.js";
 
 export const INFORMATION_TAVILY_SECRET_REF = "secret://local-dev/information-source/tavily/default/api-key";
 const DEFAULT_INFORMATION_SOURCE_PREFERENCE: readonly ConfiguredInformationSourceKind[] = [

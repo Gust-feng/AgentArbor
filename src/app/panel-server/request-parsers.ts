@@ -2,6 +2,7 @@ import type {
   ConfiguredModelProtocolKind,
   ConfiguredModelProviderKind,
   CreateModelProviderProfileInput,
+  McpConfirmationMode,
   McpServerTransportKind,
   ModelRunReasoningEffort,
   ModelProviderModelCatalogItem,
@@ -126,12 +127,57 @@ export function parseMcpServerUpdate(raw: unknown): UpsertMcpServerInput {
     serverId,
     label: optionalString(record.label),
     transport: parseOptionalMcpTransport(record.transport),
+    commandLine: optionalString(record.commandLine),
     command: optionalString(record.command),
     args: stringArrayOrUndefined(record.args),
     url: optionalString(record.url),
     envSecretRefs: stringArrayOrUndefined(record.envSecretRefs),
+    headerSecretRefs: stringArrayOrUndefined(record.headerSecretRefs),
+    bearerTokenSecretRef: optionalString(record.bearerTokenSecretRef),
+    apiKeySecretRef: optionalString(record.apiKeySecretRef),
+    apiKeyHeaderName: optionalString(record.apiKeyHeaderName),
+    clearMcpAuth: booleanOrUndefined(record.clearMcpAuth),
+    confirmationMode: parseOptionalMcpConfirmationMode(record.confirmationMode),
+    toolExposureMode: parseOptionalMcpToolExposureMode(record.toolExposureMode),
+    enabledTools: stringArrayOrUndefined(record.enabledTools),
     enabled: booleanOrUndefined(record.enabled),
   };
+}
+
+export function parseMcpServerSecretValue(raw: unknown): {
+  readonly secretRef: string;
+  readonly value: string;
+} {
+  const record = asRecord(raw);
+  const secretRef = optionalString(record.secretRef);
+  const value = optionalString(record.value);
+  if (secretRef === undefined) {
+    throw new PanelHttpError(400, "missing_mcp_secret_ref", "MCP secret ref 不能为空。");
+  }
+  if (value === undefined) {
+    throw new PanelHttpError(400, "missing_mcp_secret_value", "MCP secret value 不能为空。");
+  }
+  return { secretRef, value };
+}
+
+export function parseMcpServerImport(raw: unknown): readonly UpsertMcpServerInput[] {
+  const record = asRecord(raw);
+  const source = typeof record.config === "string" ? parseJsonObject(record.config) : record.config ?? raw;
+  const sourceRecord = asRecord(source);
+  const serversRaw = sourceRecord.mcpServers ?? asRecord(sourceRecord.mcp).servers ?? sourceRecord.servers;
+  if (serversRaw === undefined) {
+    throw new PanelHttpError(400, "missing_mcp_import_servers", "导入内容未找到 mcpServers。");
+  }
+  const entries = Array.isArray(serversRaw)
+    ? serversRaw.map((server, index) => [optionalString(asRecord(server).name) ?? optionalString(asRecord(server).serverId) ?? `mcp-${index + 1}`, server] as const)
+    : Object.entries(asRecord(serversRaw));
+  const imported = entries
+    .map(([serverId, value]) => importedMcpServer(serverId, value))
+    .filter((server): server is UpsertMcpServerInput => server !== undefined);
+  if (imported.length === 0) {
+    throw new PanelHttpError(400, "empty_mcp_import", "没有可导入的 MCP server。");
+  }
+  return imported;
 }
 
 export function parseWorkspaceUpdate(raw: unknown): UpdateWorkspaceConfigInput {
@@ -257,7 +303,33 @@ function parseOptionalMcpTransport(value: unknown): McpServerTransportKind | und
   if (value === "stdio" || value === "http") {
     return value;
   }
-  throw new PanelHttpError(400, "invalid_mcp_transport", "MCP transport 必须是 stdio 或 http。");
+  if (value === "streamableHttp") {
+    return "http";
+  }
+  if (value === "sse") {
+    return value;
+  }
+  throw new PanelHttpError(400, "invalid_mcp_transport", "MCP transport 必须是 stdio、streamableHttp 或 sse。");
+}
+
+function parseOptionalMcpConfirmationMode(value: unknown): McpConfirmationMode | undefined {
+  if (value === undefined || value === null || value === "") {
+    return undefined;
+  }
+  if (value === "always" || value === "unsafe_only" || value === "never") {
+    return value;
+  }
+  throw new PanelHttpError(400, "invalid_mcp_confirmation_mode", "MCP 确认模式无效。");
+}
+
+function parseOptionalMcpToolExposureMode(value: unknown): UpsertMcpServerInput["toolExposureMode"] {
+  if (value === undefined || value === null || value === "") {
+    return undefined;
+  }
+  if (value === "none" || value === "all" || value === "selected") {
+    return value;
+  }
+  throw new PanelHttpError(400, "invalid_mcp_tool_exposure_mode", "MCP 工具暴露模式无效。");
 }
 
 function parseOptionalWebSearchProvider(value: unknown): UpdateWebSearchConfigInput["provider"] {
@@ -310,6 +382,63 @@ function stringArrayOrUndefined(value: unknown): readonly string[] | undefined {
     .map((item) => optionalString(item))
     .filter((item): item is string => item !== undefined);
   return items.length === 0 ? undefined : items;
+}
+
+function importedMcpServer(serverId: string, raw: unknown): UpsertMcpServerInput | undefined {
+  const record = asRecord(raw);
+  const id = optionalString(record.serverId) ?? optionalString(record.name) ?? serverId;
+  const transport = parseImportedMcpTransport(record.transport ?? record.type, record.url);
+  const command = optionalString(record.command);
+  const args = stringArrayOrUndefined(record.args);
+  const url = optionalString(record.url);
+  const envRefs = Object.entries(asRecord(record.env))
+    .map(([key, value]) => secretRefFromEnvValue(id, key, value))
+    .filter((value): value is string => value !== undefined);
+  const headerRefs = Object.entries(asRecord(record.headers ?? record.http_headers))
+    .map(([key, value]) => secretRefFromHeaderValue(id, key, value))
+    .filter((value): value is string => value !== undefined);
+  return {
+    serverId: id,
+    label: optionalString(record.label) ?? id,
+    transport,
+    command,
+    args,
+    url,
+    envSecretRefs: envRefs,
+    headerSecretRefs: headerRefs,
+    confirmationMode: "always",
+    toolExposureMode: "none",
+    enabled: booleanOrUndefined(record.enabled) ?? false,
+  };
+}
+
+function parseImportedMcpTransport(value: unknown, url: unknown): UpsertMcpServerInput["transport"] {
+  if (value === "sse") return "sse";
+  if (value === "http" || value === "streamableHttp" || optionalString(url) !== undefined) return "http";
+  return "stdio";
+}
+
+function secretRefFromEnvValue(serverId: string, key: string, value: unknown): string | undefined {
+  if (optionalString(key) === undefined) return undefined;
+  if (typeof value === "string" && value.startsWith("secret://")) return value;
+  return key;
+}
+
+function secretRefFromHeaderValue(serverId: string, key: string, value: unknown): string | undefined {
+  const headerName = optionalString(key);
+  if (headerName === undefined) return undefined;
+  const ref = typeof value === "string" && value.startsWith("secret://")
+    ? value
+    : `secret://local-dev/mcp/${serverId}/${headerName.toLowerCase().replace(/[^a-z0-9_-]+/g, "-")}`;
+  return `${headerName}=${ref}`;
+}
+
+function parseJsonObject(value: string): unknown {
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    throw new PanelHttpError(400, "invalid_mcp_import_json", "导入内容不是有效 JSON。");
+  }
 }
 
 export function numberOrUndefined(value: unknown): number | undefined {

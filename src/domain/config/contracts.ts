@@ -170,7 +170,11 @@ export type ToolStateSettings = {
   readonly updatedAt: string;
 };
 
-export type McpServerTransportKind = "stdio" | "http";
+export type McpServerTransportKind = "stdio" | "http" | "sse";
+
+export type McpConfirmationMode = "always" | "unsafe_only" | "never";
+
+export type McpToolExposureMode = "none" | "all" | "selected";
 
 export type McpServerSettings = {
   readonly serverId: string;
@@ -180,7 +184,16 @@ export type McpServerSettings = {
   readonly args?: readonly string[];
   readonly url?: string;
   readonly envSecretRefs: readonly string[];
+  readonly headerSecretRefs?: readonly string[];
+  readonly bearerTokenSecretRef?: string;
+  readonly apiKeySecretRef?: string;
+  readonly apiKeyHeaderName?: string;
+  readonly confirmationMode: McpConfirmationMode;
+  readonly toolExposureMode: McpToolExposureMode;
+  readonly enabledTools: readonly string[];
   readonly enabled: boolean;
+  readonly lastConnectedAt?: string;
+  readonly lastError?: string;
   readonly updatedAt: string;
 };
 
@@ -267,11 +280,30 @@ export type UpsertMcpServerInput = {
   readonly serverId: string;
   readonly label?: string;
   readonly transport?: McpServerTransportKind;
+  readonly commandLine?: string;
   readonly command?: string;
   readonly args?: readonly string[];
   readonly url?: string;
   readonly envSecretRefs?: readonly string[];
+  readonly headerSecretRefs?: readonly string[];
+  readonly bearerTokenSecretRef?: string;
+  readonly apiKeySecretRef?: string;
+  readonly apiKeyHeaderName?: string;
+  readonly clearMcpAuth?: boolean;
+  readonly confirmationMode?: McpConfirmationMode;
+  readonly toolExposureMode?: McpToolExposureMode;
+  readonly enabledTools?: readonly string[];
   readonly enabled?: boolean;
+};
+
+export type McpServerSecretValueInput = {
+  readonly serverId: string;
+  readonly secretRef: string;
+  readonly value: string;
+};
+
+export type SanitizedMcpServerSecretMetadata = SecretMetadata & {
+  readonly secretRef: string;
 };
 
 export type CapabilityToolScope = "desktop-basic" | "underground" | "research" | "workspace" | "mcp";
@@ -317,20 +349,34 @@ export type CapabilityMcpCatalogItem = {
   readonly label: string;
   readonly transport: McpServerTransportKind;
   readonly enabled: boolean;
+  readonly confirmationMode: McpConfirmationMode;
   readonly availability: "configured" | "disabled" | "unavailable";
   readonly runtimeStatus?: "disabled" | "unavailable" | "configured" | "connecting" | "connected" | "error";
   readonly errorSummary?: string;
   readonly commandSummary?: string;
   readonly url?: string;
   readonly envSecretRefCount: number;
+  readonly authSecretRefCount: number;
+  readonly toolExposureMode: McpToolExposureMode;
+  readonly enabledTools: readonly string[];
+  readonly lastConnectedAt?: string;
+  readonly lastError?: string;
   readonly runtimeConfig?: {
     readonly transport: McpServerTransportKind;
     readonly command?: string;
     readonly args?: readonly string[];
     readonly url?: string;
     readonly envSecretRefs: readonly string[];
+    readonly headerSecretRefs?: readonly string[];
+    readonly bearerTokenSecretRef?: string;
+    readonly apiKeySecretRef?: string;
+    readonly apiKeyHeaderName?: string;
+    readonly confirmationMode: McpConfirmationMode;
+    readonly toolExposureMode: McpToolExposureMode;
+    readonly enabledTools: readonly string[];
   };
   readonly tools: readonly CapabilityToolCatalogItem[];
+  readonly exposedTools: readonly CapabilityToolCatalogItem[];
   readonly updatedAt: string;
 };
 

@@ -9,12 +9,14 @@ import type {
   ConfiguredModelProviderKind,
   CreateModelProviderProfileInput,
   LocalDevSecretStore,
+  McpServerSecretValueInput,
   McpServerSettings,
   ModelCapabilities,
   ModelCapabilityOverrideSettings,
   ModelProviderModelCatalog,
   ModelProviderProfileSettings,
   NormalSettingsStore,
+  SanitizedMcpServerSecretMetadata,
   SanitizedInformationAccessConfig,
   SanitizedModelProviderConfig,
   SanitizedWorkspaceConfig,
@@ -37,6 +39,7 @@ import {
   normalizeModelProfile,
   normalizeModelProviderKind,
   normalizeOptionalString,
+  parseMcpCommandLine,
   normalizePositiveInteger,
   normalizeProfileId,
   normalizeRequiredConfigString,
@@ -74,6 +77,13 @@ export type UndergroundAiConfigEnvironment = ModelRuntimeConfigEnvironment;
 export type CreateModelRuntimeEnvironmentInput = {
   readonly modelProvider?: Pick<SanitizedModelProviderConfig, "secretRef" | "model" | "baseUrl">;
   readonly informationAccess?: Pick<SanitizedInformationAccessConfig, "sourcePreference" | "web">;
+};
+export type CreateMcpRuntimeEnvironmentInput = {
+  readonly servers?: readonly Pick<
+    McpServerSettings,
+    "envSecretRefs" | "headerSecretRefs" | "bearerTokenSecretRef" | "apiKeySecretRef"
+  >[];
+  readonly baseEnv?: ModelRuntimeConfigEnvironment;
 };
 
 export class ConfigCenterValidationError extends Error {
@@ -333,17 +343,33 @@ export class ConfigCenter {
     const now = new Date().toISOString();
     const serverId = normalizeProfileId(input.serverId);
     const existing = (current.mcpServers ?? []).find((server) => server.serverId === serverId);
+    const parsedCommandLine = input.commandLine === undefined ? undefined : parseMcpCommandLine(input.commandLine);
     const nextServer: McpServerSettings = {
       serverId,
       label: normalizeOptionalString(input.label) ?? existing?.label ?? serverId,
-      transport: input.transport === "http" ? "http" : input.transport === "stdio" ? "stdio" : existing?.transport ?? "stdio",
-      command: normalizeOptionalString(input.command) ?? existing?.command,
-      args: input.args === undefined ? existing?.args ?? [] : sanitizeMcpArgs(input.args),
+      transport: input.transport ?? existing?.transport ?? "stdio",
+      command: parsedCommandLine?.command ?? normalizeOptionalString(input.command) ?? existing?.command,
+      args: parsedCommandLine?.args ?? (input.args === undefined ? existing?.args ?? [] : sanitizeMcpArgs(input.args)),
       url: normalizeOptionalString(input.url) ?? existing?.url,
       envSecretRefs: input.envSecretRefs === undefined
         ? existing?.envSecretRefs ?? []
         : input.envSecretRefs.map((ref) => normalizeOptionalString(ref)).filter((ref): ref is string => ref !== undefined),
+      headerSecretRefs: input.clearMcpAuth === true
+        ? []
+        : input.headerSecretRefs === undefined
+        ? existing?.headerSecretRefs ?? []
+        : input.headerSecretRefs.map((ref) => normalizeOptionalString(ref)).filter((ref): ref is string => ref !== undefined),
+      bearerTokenSecretRef: input.clearMcpAuth === true ? undefined : normalizeOptionalString(input.bearerTokenSecretRef) ?? existing?.bearerTokenSecretRef,
+      apiKeySecretRef: input.clearMcpAuth === true ? undefined : normalizeOptionalString(input.apiKeySecretRef) ?? existing?.apiKeySecretRef,
+      apiKeyHeaderName: input.clearMcpAuth === true ? undefined : normalizeOptionalString(input.apiKeyHeaderName) ?? existing?.apiKeyHeaderName,
+      confirmationMode: input.confirmationMode ?? existing?.confirmationMode ?? "always",
+      toolExposureMode: input.toolExposureMode ?? existing?.toolExposureMode ?? "none",
+      enabledTools: input.enabledTools === undefined
+        ? existing?.enabledTools ?? []
+        : [...new Set(input.enabledTools.map((tool) => normalizeOptionalString(tool)).filter((tool): tool is string => tool !== undefined))],
       enabled: input.enabled ?? existing?.enabled ?? false,
+      lastConnectedAt: existing?.lastConnectedAt,
+      lastError: existing?.lastError,
       updatedAt: now,
     };
     const next = normalizeLocalSettings({
@@ -357,6 +383,71 @@ export class ConfigCenter {
     });
     await this.options.settingsStore.writeSettings(next);
     return next.mcpServers ?? [];
+  }
+
+  async deleteMcpServer(serverId: string): Promise<readonly McpServerSettings[]> {
+    const current = await this.readOrCreateSettings();
+    const normalized = normalizeProfileId(serverId);
+    const existing = current.mcpServers ?? [];
+    const nextServers = existing.filter((server) => server.serverId !== normalized);
+    if (nextServers.length === existing.length) {
+      throw new ConfigCenterValidationError(`MCP server not found: ${normalized}`);
+    }
+    const next = normalizeLocalSettings({
+      ...current,
+      version: 3,
+      mcpServers: nextServers,
+      updatedAt: new Date().toISOString(),
+    });
+    await this.options.settingsStore.writeSettings(next);
+    return next.mcpServers ?? [];
+  }
+
+  async updateMcpServerConnectionState(input: {
+    readonly serverId: string;
+    readonly connectedAt?: string;
+    readonly errorSummary?: string;
+  }): Promise<readonly McpServerSettings[]> {
+    const current = await this.readOrCreateSettings();
+    const now = new Date().toISOString();
+    const serverId = normalizeProfileId(input.serverId);
+    const existing = (current.mcpServers ?? []).find((server) => server.serverId === serverId);
+    if (existing === undefined) {
+      throw new ConfigCenterValidationError(`MCP server not found: ${serverId}`);
+    }
+    const nextServer: McpServerSettings = {
+      ...existing,
+      lastConnectedAt: input.connectedAt ?? existing.lastConnectedAt,
+      lastError: input.errorSummary,
+      updatedAt: now,
+    };
+    const next = normalizeLocalSettings({
+      ...current,
+      version: 3,
+      mcpServers: [
+        ...(current.mcpServers ?? []).filter((server) => server.serverId !== serverId),
+        nextServer,
+      ],
+      updatedAt: now,
+    });
+    await this.options.settingsStore.writeSettings(next);
+    return next.mcpServers ?? [];
+  }
+
+  async writeMcpServerSecretValue(input: McpServerSecretValueInput): Promise<SanitizedMcpServerSecretMetadata> {
+    const settings = await this.readOrCreateSettings();
+    const serverId = normalizeProfileId(input.serverId);
+    const server = (settings.mcpServers ?? []).find((item) => item.serverId === serverId);
+    if (server === undefined) {
+      throw new ConfigCenterValidationError(`MCP server not found: ${serverId}`);
+    }
+    const secretRef = normalizeRequiredConfigString(input.secretRef, "MCP secret ref");
+    if (!mcpServerOwnsSecretRef(server, secretRef)) {
+      throw new ConfigCenterValidationError(`MCP secret ref is not declared for server: ${serverId}`);
+    }
+    const value = normalizeRequiredConfigString(input.value, "MCP secret value");
+    const metadata = await this.options.secretStore.writeSecret(secretRef, value);
+    return { secretRef, ...metadata };
   }
 
   async getInformationAccessConfig(): Promise<SanitizedInformationAccessConfig> {
@@ -490,6 +581,32 @@ export class ConfigCenter {
     };
   }
 
+  async createMcpRuntimeEnvironment(
+    input: CreateMcpRuntimeEnvironmentInput = {}
+  ): Promise<ModelRuntimeConfigEnvironment> {
+    const settings = await this.readOrCreateSettings();
+    const servers = input.servers ?? settings.mcpServers ?? [];
+    const refs = new Set<string>();
+    for (const server of servers) {
+      for (const ref of server.envSecretRefs) {
+        refs.add(ref);
+      }
+      for (const ref of server.headerSecretRefs ?? []) {
+        const parsedRef = parseHeaderSecretRef(ref);
+        if (parsedRef !== undefined) {
+          refs.add(parsedRef.secretRef);
+        }
+      }
+      if (server.bearerTokenSecretRef !== undefined) refs.add(server.bearerTokenSecretRef);
+      if (server.apiKeySecretRef !== undefined) refs.add(server.apiKeySecretRef);
+    }
+    const output: Record<string, string | undefined> = { ...(input.baseEnv ?? {}) };
+    for (const ref of refs) {
+      output[ref] = input.baseEnv?.[ref] ?? await this.options.secretStore.readSecret(ref);
+    }
+    return output;
+  }
+
   async createUndergroundAiEnvironment(
     input: CreateModelRuntimeEnvironmentInput = {}
   ): Promise<UndergroundAiConfigEnvironment> {
@@ -580,4 +697,23 @@ function firstNonBlank(...values: readonly (string | undefined)[]): string | und
     }
   }
   return undefined;
+}
+
+function mcpServerOwnsSecretRef(server: McpServerSettings, secretRef: string): boolean {
+  return (
+    server.envSecretRefs.includes(secretRef) ||
+    (server.headerSecretRefs ?? []).some((ref) => parseHeaderSecretRef(ref)?.secretRef === secretRef || ref === secretRef) ||
+    server.bearerTokenSecretRef === secretRef ||
+    server.apiKeySecretRef === secretRef
+  );
+}
+
+function parseHeaderSecretRef(value: string): { readonly headerName: string; readonly secretRef: string } | undefined {
+  const separator = value.indexOf("=");
+  if (separator <= 0) {
+    return undefined;
+  }
+  const headerName = value.slice(0, separator).trim();
+  const secretRef = value.slice(separator + 1).trim();
+  return headerName.length === 0 || secretRef.length === 0 ? undefined : { headerName, secretRef };
 }

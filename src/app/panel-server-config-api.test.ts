@@ -355,6 +355,175 @@ test("panel tool state and MCP config APIs return catalogs without raw MCP secre
   }
 });
 
+test("panel MCP management API tests connection, lists tools, updates whitelist, and keeps secrets out", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-mcp-management-"));
+  const serverDirectory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-mcp-server-"));
+  const serverPath = path.join(serverDirectory, "server.mjs");
+  await fs.writeFile(serverPath, mcpServerSource(), "utf8");
+  const bearerSecret = "secret-mcp-bearer-value";
+  try {
+    const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+    try {
+      const created = await requestJson(server.url, "/api/config/mcp", {
+        method: "POST",
+        body: {
+          serverId: "docs",
+          label: "Docs",
+          transport: "stdio",
+          commandLine: `${process.execPath} ${JSON.stringify(serverPath)}`,
+          confirmationMode: "always",
+          bearerTokenSecretRef: "secret://local-dev/mcp/docs/bearer",
+          enabled: true,
+        },
+      });
+      const secret = await requestJson(server.url, "/api/config/mcp/docs/secrets", {
+        method: "POST",
+        body: {
+          secretRef: "secret://local-dev/mcp/docs/bearer",
+          value: bearerSecret,
+        },
+      });
+      const rejectedSecret = await requestJson(server.url, "/api/config/mcp/docs/secrets", {
+        method: "POST",
+        body: {
+          secretRef: "secret://local-dev/mcp/docs/not-declared",
+          value: "should-not-save",
+        },
+      });
+      const tested = await requestJson(server.url, "/api/config/mcp/docs/test", { method: "POST" });
+      const listed = await requestJson(server.url, "/api/config/mcp/docs/tools");
+      const references = await requestJson(server.url, "/api/config/mcp/docs/references");
+      const narrowed = await requestJson(server.url, "/api/config/mcp/docs", {
+        method: "POST",
+        body: {
+          serverId: "docs",
+          toolExposureMode: "selected",
+          enabledTools: ["lookup"],
+        },
+      });
+      const reloaded = await requestJson(server.url, "/api/config/mcp/reload", { method: "POST" });
+
+      assert.equal(created.status, 200);
+      assert.equal(created.body.catalog[0].confirmationMode, "always");
+      assert.equal(created.body.catalog[0].authSecretRefCount, 1);
+      assert.equal(secret.status, 200);
+      assert.equal(secret.body.secret.configured, true);
+      assert.equal(secret.body.secret.secretRef, "secret://local-dev/mcp/docs/bearer");
+      assert.equal(rejectedSecret.status, 400);
+      assert.equal(tested.status, 200);
+      assert.equal(tested.body.ok, true);
+      assert.equal(tested.body.toolCount, 2);
+      assert.deepEqual(tested.body.tools.map((tool: { name: string }) => tool.name).sort(), ["lookup", "mutate"]);
+      assert.equal(typeof tested.body.connectedAt, "string");
+      assert.equal(listed.status, 200);
+      assert.equal(listed.body.toolCount, 2);
+      assert.equal(references.status, 200);
+      assert.equal(references.body.ok, true);
+      assert.deepEqual(references.body.prompts.map((prompt: { name: string }) => prompt.name), ["draft_summary"]);
+      assert.deepEqual(references.body.resources.map((resource: { name: string }) => resource.name), ["guide"]);
+      assert.deepEqual(references.body.resourceTemplates.map((template: { name: string }) => template.name), ["guide-topic"]);
+      assert.equal(narrowed.status, 200);
+      assert.deepEqual(narrowed.body.catalog[0].enabledTools, ["lookup"]);
+      assert.equal(narrowed.body.catalog[0].toolExposureMode, "selected");
+      assert.deepEqual(narrowed.body.catalog[0].tools.map((tool: { name: string }) => tool.name), ["docs__lookup", "docs__mutate"]);
+      assert.deepEqual(narrowed.body.catalog[0].exposedTools.map((tool: { name: string }) => tool.name), ["docs__lookup"]);
+      assert.equal(narrowed.body.catalog[0].exposedTools[0].requiresConfirmation, true);
+      assert.equal(reloaded.status, 200);
+      assert.equal(reloaded.body.connected, 1);
+      for (const response of [created, secret, rejectedSecret, tested, listed, references, narrowed, reloaded]) {
+        assert.equal(response.text.includes(bearerSecret), false);
+        assert.equal(response.text.includes("should-not-save"), false);
+      }
+    } finally {
+      await server.close();
+    }
+  } finally {
+    await removeTemporaryTree(directory);
+    await removeTemporaryTree(serverDirectory);
+  }
+});
+
+test("panel MCP presets and JSON import keep imported servers conservative", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-mcp-import-"));
+  const token = "ghp-import-token-should-not-leak";
+  try {
+    const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+    try {
+      const presets = await requestJson(server.url, "/api/config/mcp/presets");
+      const imported = await requestJson(server.url, "/api/config/mcp/import", {
+        method: "POST",
+        body: {
+          config: JSON.stringify({
+            mcpServers: {
+              context7: {
+                url: "https://mcp.context7.com/mcp",
+                headers: {
+                  CONTEXT7_API_KEY: token,
+                },
+              },
+              localDocs: {
+                command: "node",
+                args: ["server.mjs"],
+              },
+            },
+          }),
+        },
+      });
+
+      assert.equal(presets.status, 200);
+      assert.equal(presets.body.presets.some((preset: { presetId: string }) => preset.presetId === "filesystem"), true);
+      assert.equal(presets.body.presets.every((preset: { server: { enabled: boolean; toolExposureMode: string } }) => preset.server.enabled === false && preset.server.toolExposureMode === "none"), true);
+      assert.equal(imported.status, 200);
+      assert.equal(imported.body.importedCount, 2);
+      const importedCatalog = imported.body.catalog as readonly { serverId: string; enabled: boolean; toolExposureMode: string; authSecretRefCount: number }[];
+      assert.deepEqual(importedCatalog.map((item) => item.serverId).sort(), ["context7", "localdocs"]);
+      assert.equal(importedCatalog.find((item) => item.serverId === "context7")?.enabled, false);
+      assert.equal(importedCatalog.find((item) => item.serverId === "context7")?.toolExposureMode, "none");
+      assert.equal(importedCatalog.find((item) => item.serverId === "context7")?.authSecretRefCount, 1);
+      assert.equal(imported.text.includes(token), false);
+    } finally {
+      await server.close();
+    }
+  } finally {
+    await removeTemporaryTree(directory);
+  }
+});
+
+test("panel MCP test connection failure returns sanitized error and leaves system usable", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-mcp-failure-"));
+  const secret = "sk-should-not-leak-from-mcp-error";
+  try {
+    const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+    try {
+      const created = await requestJson(server.url, "/api/config/mcp", {
+        method: "POST",
+        body: {
+          serverId: "broken",
+          transport: "stdio",
+          command: "definitely-missing-agentarbor-mcp-command",
+          args: ["--token", secret],
+          enabled: true,
+        },
+      });
+      const tested = await requestJson(server.url, "/api/config/mcp/broken/test", { method: "POST" });
+      const list = await requestJson(server.url, "/api/config/mcp");
+
+      assert.equal(created.status, 200);
+      assert.equal(tested.status, 200);
+      assert.equal(tested.body.ok, false);
+      assert.equal(tested.body.errorCode, "command_not_found");
+      assert.equal(tested.text.includes(secret), false);
+      assert.equal(list.status, 200);
+      assert.equal(list.body.catalog[0].runtimeStatus, "error");
+      assert.equal(list.text.includes(secret), false);
+    } finally {
+      await server.close();
+    }
+  } finally {
+    await removeTemporaryTree(directory);
+  }
+});
+
 test("panel workspace config route stores and returns the workspace directory", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-workspace-config-"));
   const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-workspace-root-"));
@@ -428,3 +597,22 @@ test("panel workspace picker route handles success cancellation and unavailable 
     await removeTemporaryTree(workspace);
   }
 });
+
+function mcpServerSource(): string {
+  const mcpServerModule = import.meta.resolve("@modelcontextprotocol/sdk/server/mcp.js");
+  const stdioTransportModule = import.meta.resolve("@modelcontextprotocol/sdk/server/stdio.js");
+  const zodModule = import.meta.resolve("zod");
+  return [
+    `import { McpServer, ResourceTemplate } from ${JSON.stringify(mcpServerModule)};`,
+    `import { StdioServerTransport } from ${JSON.stringify(stdioTransportModule)};`,
+    `import { z } from ${JSON.stringify(zodModule)};`,
+    'const server = new McpServer({ name: "panel-test", version: "1.0.0" });',
+    'server.registerTool("lookup", { description: "Lookup docs.", inputSchema: { query: z.string() }, annotations: { readOnlyHint: true } }, async (args) => ({ content: [{ type: "text", text: `Docs: ${args.query}` }] }));',
+    'server.registerTool("mutate", { description: "Mutate docs.", inputSchema: { value: z.string() }, annotations: { destructiveHint: true } }, async (args) => ({ content: [{ type: "text", text: `Mutated: ${args.value}` }] }));',
+    'server.registerPrompt("draft_summary", { title: "Draft Summary", description: "Draft a short summary.", argsSchema: { topic: z.string() } }, async (args) => ({ messages: [{ role: "user", content: { type: "text", text: `Summarize ${args.topic}` } }] }));',
+    'server.registerResource("guide", "docs://guide", { title: "Guide", description: "Static guide.", mimeType: "text/plain" }, async (uri) => ({ contents: [{ uri: uri.href, mimeType: "text/plain", text: "Guide body" }] }));',
+    'server.registerResource("guide-topic", new ResourceTemplate("docs://guide/{topic}", { list: undefined }), { title: "Guide Topic", description: "Guide by topic.", mimeType: "text/plain" }, async (uri) => ({ contents: [{ uri: uri.href, mimeType: "text/plain", text: "Topic guide" }] }));',
+    "await server.connect(new StdioServerTransport());",
+    "",
+  ].join("\n");
+}

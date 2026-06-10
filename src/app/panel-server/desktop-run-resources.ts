@@ -98,7 +98,7 @@ export async function prepareDesktopRunResources(
   if (!aiConfig.enabled) {
     throw createModelRuntimeDisabledConfigurationError(aiConfig.summaryInput);
   }
-  const mcpManager = await mcpManagerFromCapabilitySnapshot(capabilitySnapshot, aiEnvironment);
+  const mcpManager = await mcpManagerFromCapabilitySnapshot(runtime, capabilitySnapshot, aiEnvironment);
 
   return {
     capabilitySnapshot,
@@ -131,6 +131,44 @@ export function desktopRuntimeMode(
   return "openai-responses";
 }
 
+async function mcpManagerFromCapabilitySnapshot(
+  runtime: PanelRuntime,
+  snapshot: BasicAgentCapabilitySnapshot,
+  env: Readonly<Record<string, string | undefined>>
+): Promise<McpManager | undefined> {
+  const servers = snapshot.mcpCatalog
+    .filter((server) => server.enabled && server.availability === "configured" && server.runtimeConfig !== undefined)
+    .filter((server) => server.exposedTools.length > 0)
+    .map((server): McpServerSettings => ({
+      serverId: server.serverId,
+      label: server.label,
+      transport: server.runtimeConfig!.transport,
+      command: server.runtimeConfig!.command,
+      args: server.runtimeConfig!.args,
+      url: server.runtimeConfig!.url,
+      envSecretRefs: server.runtimeConfig!.envSecretRefs,
+      headerSecretRefs: server.runtimeConfig!.headerSecretRefs,
+      bearerTokenSecretRef: server.runtimeConfig!.bearerTokenSecretRef,
+      apiKeySecretRef: server.runtimeConfig!.apiKeySecretRef,
+      apiKeyHeaderName: server.runtimeConfig!.apiKeyHeaderName,
+      confirmationMode: server.runtimeConfig!.confirmationMode,
+      toolExposureMode: server.runtimeConfig!.toolExposureMode,
+      enabledTools: server.runtimeConfig!.enabledTools,
+      enabled: true,
+      updatedAt: server.updatedAt,
+    }));
+  if (servers.length === 0) {
+    return undefined;
+  }
+  const mcpEnv =
+    typeof runtime.configCenter.createMcpRuntimeEnvironment === "function"
+      ? await runtime.configCenter.createMcpRuntimeEnvironment({ servers, baseEnv: env })
+      : env;
+  const manager = new McpManager({ servers, env: mcpEnv });
+  await manager.connectAll();
+  return manager;
+}
+
 export function createDesktopToolCenterFactory(
   providerFetch: PanelRuntime["providerFetch"],
   resources: DesktopRunResources
@@ -149,30 +187,4 @@ export function createDesktopToolCenterFactory(
     mcpManager: resources.mcpManager,
     toolRegistryScopes,
   });
-}
-
-async function mcpManagerFromCapabilitySnapshot(
-  snapshot: BasicAgentCapabilitySnapshot,
-  env: Readonly<Record<string, string | undefined>>
-): Promise<McpManager | undefined> {
-  const servers = snapshot.mcpCatalog
-    .filter((server) => server.enabled && server.availability === "configured" && server.runtimeConfig !== undefined)
-    .filter((server) => server.tools.length > 0)
-    .map((server): McpServerSettings => ({
-      serverId: server.serverId,
-      label: server.label,
-      transport: server.runtimeConfig!.transport,
-      command: server.runtimeConfig!.command,
-      args: server.runtimeConfig!.args,
-      url: server.runtimeConfig!.url,
-      envSecretRefs: server.runtimeConfig!.envSecretRefs,
-      enabled: true,
-      updatedAt: server.updatedAt,
-    }));
-  if (servers.length === 0) {
-    return undefined;
-  }
-  const manager = new McpManager({ servers, env });
-  await manager.connectAll();
-  return manager;
 }

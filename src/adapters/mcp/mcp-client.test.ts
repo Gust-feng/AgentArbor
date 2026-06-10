@@ -153,13 +153,27 @@ test("createMcpToolExecutor infers read-only metadata from annotations", async (
 
   const tools = await client.listTools();
   const readOnlyTool = tools.find((t) => t.name === "read_only_tool")!;
-  const executor = createMcpToolExecutor(client, readOnlyTool, "my-server");
+  const executor = createMcpToolExecutor(client, readOnlyTool, "my-server", "unsafe_only");
 
   assert.equal(executor.definition.name, "my-server__read_only_tool");
   assert.equal(executor.definition.metadata?.category, "mcp");
   assert.equal(executor.definition.metadata?.riskLevel, "low");
   assert.equal(executor.definition.metadata?.operationType, "read-only");
   assert.equal(executor.definition.metadata?.requiresConfirmation, false);
+
+  await client.disconnect();
+});
+
+test("createMcpToolExecutor keeps read-only MCP tools confirmable in always mode", async () => {
+  const { client } = await createConnectedPair();
+
+  const tools = await client.listTools();
+  const readOnlyTool = tools.find((t) => t.name === "read_only_tool")!;
+  const executor = createMcpToolExecutor(client, readOnlyTool, "my-server", "always");
+
+  assert.equal(executor.definition.name, "my-server__read_only_tool");
+  assert.equal(executor.definition.metadata?.operationType, "read-only");
+  assert.equal(executor.definition.metadata?.requiresConfirmation, true);
 
   await client.disconnect();
 });
@@ -224,6 +238,9 @@ test("McpManager connectAll connects enabled servers and tracks statuses", async
         transport: "stdio",
         command: "unused",
         envSecretRefs: [],
+        confirmationMode: "always",
+        toolExposureMode: "none",
+        enabledTools: [],
         enabled: true,
         updatedAt: "2026-05-12T00:00:00.000Z",
       },
@@ -257,6 +274,9 @@ test("McpManager skips disabled servers", async () => {
         transport: "stdio",
         command: "unused",
         envSecretRefs: [],
+        confirmationMode: "always",
+        toolExposureMode: "none",
+        enabledTools: [],
         enabled: false,
         updatedAt: "2026-05-12T00:00:00.000Z",
       },
@@ -267,7 +287,7 @@ test("McpManager skips disabled servers", async () => {
   assert.equal(statuses["disabled-server"], undefined);
 });
 
-test("McpManager getToolsForRegistry returns namespaced tools", async () => {
+test("McpManager separates discovered tools from exposed registry tools", async () => {
   const server = createTestServer();
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await server.connect(serverTransport);
@@ -280,6 +300,51 @@ test("McpManager getToolsForRegistry returns namespaced tools", async () => {
         transport: "stdio",
         command: "unused",
         envSecretRefs: [],
+        confirmationMode: "always",
+        toolExposureMode: "none",
+        enabledTools: [],
+        enabled: true,
+        updatedAt: "2026-05-12T00:00:00.000Z",
+      },
+    ],
+  });
+  const entry = manager.getEntryForTesting("srv");
+  assert.ok(entry);
+  entry.client = new McpClientWrapper(
+    {
+      serverId: "srv",
+      transport: "stdio",
+    },
+    { transport: clientTransport }
+  );
+  await manager.connectAll();
+
+  const discoveredTools = manager.getDiscoveredToolsForRegistry();
+  assert.equal(discoveredTools.length, 3);
+  const names = discoveredTools.map((t) => t.definition.name).sort();
+  assert.deepEqual(names, ["srv__echo", "srv__fail_tool", "srv__read_only_tool"]);
+  assert.equal(discoveredTools[0].definition.metadata?.category, "mcp");
+  assert.deepEqual(manager.getToolsForRegistry(), []);
+
+  await manager.disconnectAll();
+});
+
+test("McpManager filters MCP tools by enabledTools whitelist", async () => {
+  const server = createTestServer();
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await server.connect(serverTransport);
+
+  const manager = new McpManager({
+    servers: [
+      {
+        serverId: "srv",
+        label: "Test",
+        transport: "stdio",
+        command: "unused",
+        envSecretRefs: [],
+        confirmationMode: "unsafe_only",
+        toolExposureMode: "selected",
+        enabledTools: ["read_only_tool"],
         enabled: true,
         updatedAt: "2026-05-12T00:00:00.000Z",
       },
@@ -297,10 +362,8 @@ test("McpManager getToolsForRegistry returns namespaced tools", async () => {
   await manager.connectAll();
 
   const tools = manager.getToolsForRegistry();
-  assert.equal(tools.length, 3);
-  const names = tools.map((t) => t.definition.name).sort();
-  assert.deepEqual(names, ["srv__echo", "srv__fail_tool", "srv__read_only_tool"]);
-  assert.equal(tools[0].definition.metadata?.category, "mcp");
+  assert.deepEqual(tools.map((t) => t.definition.name), ["srv__read_only_tool"]);
+  assert.equal(tools[0]?.definition.metadata?.requiresConfirmation, false);
 
   await manager.disconnectAll();
 });
@@ -314,6 +377,9 @@ test("McpManager connection error sets server status to error", async () => {
         transport: "stdio",
         command: "nonexistent-command",
         envSecretRefs: [],
+        confirmationMode: "always",
+        toolExposureMode: "none",
+        enabledTools: [],
         enabled: true,
         updatedAt: "2026-05-12T00:00:00.000Z",
       },

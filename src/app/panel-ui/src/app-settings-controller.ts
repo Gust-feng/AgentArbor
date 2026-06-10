@@ -2,7 +2,10 @@ import type React from "react";
 import {
   catalogRecordFromList,
   createCustomModelProviderProfile,
+  deleteMcpServer,
+  fetchMcpReferences,
   fetchModelProviderCatalog,
+  importMcpServers,
   mergeCatalogsIntoConfig,
   revealModelProviderApiKey,
   saveMcpServerSettings,
@@ -11,6 +14,8 @@ import {
   saveToolSettings,
   saveWorkspaceDirectory,
   selectModelProviderModel,
+  testMcpServer,
+  updateMcpToolState,
   updateSkillState,
   updateToolState,
 } from "./app-config-actions";
@@ -18,6 +23,7 @@ import { mergeConfigResponse, type VisibleAiMode } from "./app-config-projection
 import type { AppState } from "./app-state";
 import type { McpServerForm, ModelForm, ToolForm } from "./components/settings-types";
 import type { ModelProviderModelCatalog } from "./contracts/config";
+import type { McpReferenceResponse } from "./contracts/tools";
 
 export type AppSettingsController = {
   readonly saveModelConfig: (nextModelForm?: ModelForm) => Promise<void>;
@@ -28,7 +34,12 @@ export type AppSettingsController = {
   readonly saveModelCatalog: (profileId: string, catalog: ModelProviderModelCatalog) => Promise<void>;
   readonly saveWorkspace: (nextWorkspaceDirectory?: string) => Promise<void>;
   readonly saveTools: () => Promise<void>;
-  readonly saveMcpServer: () => Promise<void>;
+  readonly saveMcpServer: (nextMcpServerForm?: McpServerForm) => Promise<void>;
+  readonly loadMcpReferences: (serverId: string) => Promise<McpReferenceResponse>;
+  readonly importMcpConfig: (config: string) => Promise<void>;
+  readonly testMcpServer: (serverId: string) => Promise<void>;
+  readonly deleteMcpServer: (serverId: string) => Promise<void>;
+  readonly updateMcpTool: (serverId: string, toolName: string, enabled: boolean) => Promise<void>;
   readonly updateTool: (toolName: string, enabled: boolean) => Promise<void>;
   readonly updateSkill: (skillId: string, enabled: boolean) => Promise<void>;
 };
@@ -44,6 +55,7 @@ export type AppSettingsControllerOptions = {
   readonly toolForm: ToolForm;
   readonly setToolForm: React.Dispatch<React.SetStateAction<ToolForm>>;
   readonly mcpServerForm: McpServerForm;
+  readonly setMcpServerForm: React.Dispatch<React.SetStateAction<McpServerForm>>;
   readonly mountedRef: React.MutableRefObject<boolean>;
   readonly modelSaveQueueRef: React.MutableRefObject<Promise<void>>;
   readonly setSavingModel: React.Dispatch<React.SetStateAction<boolean>>;
@@ -238,10 +250,10 @@ export function createAppSettingsController(options: AppSettingsControllerOption
     }
   }
 
-  async function saveMcpServer(): Promise<void> {
+  async function saveMcpServer(nextMcpServerForm: McpServerForm = options.mcpServerForm): Promise<void> {
     options.setSavingTools(true);
     try {
-      const response = await saveMcpServerSettings(options.mcpServerForm);
+      const response = await saveMcpServerSettings(nextMcpServerForm);
       if (options.mountedRef.current) {
         options.setApp((previous) => ({
           ...previous,
@@ -250,12 +262,152 @@ export function createAppSettingsController(options: AppSettingsControllerOption
             mcpCatalog: response.mcpCatalog ?? [],
           },
         }));
+        options.setMcpServerForm((previous) => ({
+          ...previous,
+          serverId: nextMcpServerForm.serverId || previous.serverId,
+          authTouched: false,
+          bearerTokenValue: "",
+          apiKeyValue: "",
+          customHeaderValue: "",
+        }));
       }
     } catch (error) {
       if (options.mountedRef.current) {
         options.setApp((previous) => ({
           ...previous,
           error: error instanceof Error ? error.message : "MCP 服务保存失败。",
+        }));
+      }
+      throw error;
+    } finally {
+      if (options.mountedRef.current) options.setSavingTools(false);
+    }
+  }
+
+  async function loadMcpReferences(serverId: string): Promise<McpReferenceResponse> {
+    try {
+      return await fetchMcpReferences(serverId);
+    } catch (error) {
+      if (options.mountedRef.current) {
+        options.setApp((previous) => ({
+          ...previous,
+          error: error instanceof Error ? error.message : "MCP 提示与资源读取失败。",
+        }));
+      }
+      return { ok: false, errorSummary: "MCP 提示与资源读取失败。", prompts: [], resources: [], resourceTemplates: [] };
+    }
+  }
+
+  async function importMcpConfig(config: string): Promise<void> {
+    options.setSavingTools(true);
+    try {
+      const response = await importMcpServers(config);
+      if (options.mountedRef.current) {
+        options.setApp((previous) => ({
+          ...previous,
+          tools: {
+            ...previous.tools,
+            mcpCatalog: response.mcpCatalog ?? [],
+          },
+          error: undefined,
+        }));
+      }
+    } catch (error) {
+      if (options.mountedRef.current) {
+        options.setApp((previous) => ({
+          ...previous,
+          error: error instanceof Error ? error.message : "MCP 配置导入失败。",
+        }));
+      }
+    } finally {
+      if (options.mountedRef.current) options.setSavingTools(false);
+    }
+  }
+
+  async function testSelectedMcpServer(serverId: string): Promise<void> {
+    options.setSavingTools(true);
+    try {
+      const response = await testMcpServer(serverId);
+      if (options.mountedRef.current) {
+        options.setApp((previous) => ({
+          ...previous,
+          tools: {
+            ...previous.tools,
+            mcpCatalog: response.mcpCatalog ?? [],
+          },
+          error: undefined,
+        }));
+      }
+    } catch (error) {
+      if (options.mountedRef.current) {
+        options.setApp((previous) => ({
+          ...previous,
+          error: error instanceof Error ? error.message : "MCP 连接测试失败。",
+        }));
+      }
+    } finally {
+      if (options.mountedRef.current) options.setSavingTools(false);
+    }
+  }
+
+  async function deleteSelectedMcpServer(serverId: string): Promise<void> {
+    options.setSavingTools(true);
+    try {
+      const response = await deleteMcpServer(serverId);
+      if (options.mountedRef.current) {
+        options.setApp((previous) => ({
+          ...previous,
+          tools: {
+            ...previous.tools,
+            mcpCatalog: response.mcpCatalog ?? [],
+          },
+          error: undefined,
+        }));
+      }
+    } catch (error) {
+      if (options.mountedRef.current) {
+        options.setApp((previous) => ({
+          ...previous,
+          error: error instanceof Error ? error.message : "MCP 服务删除失败。",
+        }));
+      }
+    } finally {
+      if (options.mountedRef.current) options.setSavingTools(false);
+    }
+  }
+
+  async function updateMcpTool(serverId: string, toolName: string, enabled: boolean): Promise<void> {
+    options.setSavingTools(true);
+    try {
+      const currentServer = options.app.tools?.mcpCatalog?.find((server) => server.serverId === serverId);
+      const currentTools = new Set(currentServer?.enabledTools ?? []);
+      const normalizedToolName = toolName.startsWith(`${serverId}__`) ? toolName.slice(`${serverId}__`.length) : toolName;
+      if (enabled) {
+        currentTools.add(normalizedToolName);
+      } else {
+        currentTools.delete(normalizedToolName);
+        currentTools.delete(toolName);
+      }
+      const response = await updateMcpToolState({
+        serverId,
+        toolExposureMode: "selected",
+        enabledTools: [...currentTools],
+      });
+      if (options.mountedRef.current) {
+        options.setApp((previous) => ({
+          ...previous,
+          tools: {
+            ...previous.tools,
+            mcpCatalog: response.mcpCatalog ?? [],
+          },
+          error: undefined,
+        }));
+      }
+    } catch (error) {
+      if (options.mountedRef.current) {
+        options.setApp((previous) => ({
+          ...previous,
+          error: error instanceof Error ? error.message : "MCP 工具状态保存失败。",
         }));
       }
     } finally {
@@ -317,6 +469,11 @@ export function createAppSettingsController(options: AppSettingsControllerOption
     saveWorkspace,
     saveTools,
     saveMcpServer,
+    loadMcpReferences,
+    importMcpConfig,
+    testMcpServer: testSelectedMcpServer,
+    deleteMcpServer: deleteSelectedMcpServer,
+    updateMcpTool,
     updateTool,
     updateSkill,
   };

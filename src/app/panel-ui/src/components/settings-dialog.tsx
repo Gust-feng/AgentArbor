@@ -3,6 +3,7 @@ import {
   CloudCog,
   Database,
   LockKeyhole,
+  Server,
   SlidersHorizontal,
   X,
 } from "lucide-react";
@@ -11,7 +12,7 @@ import type {
   ModelProviderModelCatalog,
 } from "../contracts/config";
 import type { SkillDefinition } from "../contracts/skills";
-import type { ToolsResponse } from "../contracts/tools";
+import type { McpReferenceResponse, ToolsResponse } from "../contracts/tools";
 import { CapabilitiesSettings } from "./capability-settings";
 import { ConfirmationSettings } from "./confirmation-settings";
 import { ModelSettings } from "./model-settings";
@@ -43,9 +44,15 @@ export function SettingsDialog(props: {
   readonly setToolForm: (form: ToolForm) => void;
   readonly mcpServerForm: McpServerForm;
   readonly setMcpServerForm: (form: McpServerForm) => void;
+  readonly mcpReferences: Readonly<Record<string, McpReferenceResponse>>;
   readonly savingTools?: boolean;
   readonly onSaveTools: () => void;
-  readonly onSaveMcpServer: () => void;
+  readonly onSaveMcpServer: (form?: McpServerForm) => Promise<void>;
+  readonly onLoadMcpReferences: (serverId: string) => void;
+  readonly onImportMcpConfig: (config: string) => void;
+  readonly onTestMcpServer: (serverId: string) => void;
+  readonly onDeleteMcpServer: (serverId: string) => void;
+  readonly onUpdateMcpTool: (serverId: string, toolName: string, enabled: boolean) => void;
   readonly onUpdateTool: (toolName: string, enabled: boolean) => void;
   readonly onUpdateSkill: (skillId: string, enabled: boolean) => void;
 }): React.ReactElement | null {
@@ -121,17 +128,24 @@ export function SettingsDialog(props: {
                 modelCatalogs={props.modelCatalogs}
               />
             )}
-            {activeGroup === "capabilities" && (
+            {(activeGroup === "capabilities" || activeGroup === "mcp") && (
               <CapabilitiesSettings
+                activeSection={activeGroup}
                 config={props.config}
                 tools={props.tools}
                 toolForm={props.toolForm}
                 setToolForm={props.setToolForm}
                 mcpServerForm={props.mcpServerForm}
                 setMcpServerForm={props.setMcpServerForm}
+                mcpReferences={props.mcpReferences}
                 savingTools={props.savingTools}
                 onSaveTools={props.onSaveTools}
                 onSaveMcpServer={props.onSaveMcpServer}
+                onLoadMcpReferences={props.onLoadMcpReferences}
+                onImportMcpConfig={props.onImportMcpConfig}
+                onTestMcpServer={props.onTestMcpServer}
+                onDeleteMcpServer={props.onDeleteMcpServer}
+                onUpdateMcpTool={props.onUpdateMcpTool}
                 onUpdateTool={props.onUpdateTool}
                 skills={props.skills}
                 onUpdateSkill={props.onUpdateSkill}
@@ -154,7 +168,8 @@ export function SettingsDialog(props: {
 
 const SETTINGS_GROUPS: readonly { readonly id: SettingsGroup; readonly label: string; readonly icon: React.ReactNode }[] = [
   { id: "models", label: "模型服务", icon: <CloudCog size={15} /> },
-  { id: "capabilities", label: "能力与服务", icon: <SlidersHorizontal size={15} /> },
+  { id: "capabilities", label: "基础能力", icon: <SlidersHorizontal size={15} /> },
+  { id: "mcp", label: "MCP 服务", icon: <Server size={15} /> },
   { id: "workspace", label: "工作区", icon: <Database size={15} /> },
   { id: "confirmation", label: "高影响动作", icon: <LockKeyhole size={15} /> },
 ];

@@ -34,6 +34,7 @@ export type CapabilityCenterMcpManager = {
   disconnectAll(): Promise<void>;
   getServerRuntimeSnapshots(): readonly McpServerRuntimeSnapshot[];
   getToolsForRegistry(): readonly ToolExecutor[];
+  getDiscoveredToolsForRegistry?(): readonly ToolExecutor[];
 };
 
 export class CapabilityCenter {
@@ -87,18 +88,23 @@ export class CapabilityCenter {
       this.listSkills(),
     ]);
     const connectableMcpServers = mcpServers.filter(isMcpServerConnectable);
+    const mcpEnv = await this.options.configCenter.createMcpRuntimeEnvironment({
+      servers: connectableMcpServers,
+      baseEnv: env,
+    });
     const mcpManager = this.createMcpManager({
       servers: connectableMcpServers,
-      env,
-      connectTimeoutMs: this.options.mcpConnectTimeoutMs ?? 800,
+      env: mcpEnv,
+      connectTimeoutMs: this.options.mcpConnectTimeoutMs ?? 3_000,
     });
-    if (connectableMcpServers.length > 0) {
-      await mcpManager.connectAll();
-    }
     let desktopToolCatalog;
     let mcpToolCatalog;
+    let exposedMcpToolCatalog;
     let mcpRuntimeSnapshots;
     try {
+      if (connectableMcpServers.length > 0) {
+        await mcpManager.connectAll();
+      }
       const registry = createDesktopBasicToolRegistry({
         env,
         fetch: this.options.fetch,
@@ -109,17 +115,18 @@ export class CapabilityCenter {
       });
       desktopToolCatalog = registry.catalog("desktop-basic");
       mcpToolCatalog = registry.catalog("mcp");
+      exposedMcpToolCatalog = filteredMcpToolCatalog(mcpToolCatalog, mcpServers);
       mcpRuntimeSnapshots = mcpManager.getServerRuntimeSnapshots();
     } finally {
       await mcpManager.disconnectAll();
     }
     const allTools = [
       ...desktopToolCatalog.tools,
-      ...mcpToolCatalog.tools,
+      ...exposedMcpToolCatalog.tools,
     ].map(capabilityToolCatalogItem);
     const allAllowedTools = [
       ...desktopToolCatalog.allowedTools,
-      ...mcpToolCatalog.allowedTools,
+      ...exposedMcpToolCatalog.allowedTools,
     ];
     const modelCapabilities = resolveModelCapabilities({ profile: activeModel, overrides });
     const warnings = capabilityWarnings({ activeModel, knownModel: isKnownModel(activeModel), toolCount: allAllowedTools.length });
@@ -143,7 +150,7 @@ export class CapabilityCenter {
         lastUsedAt: skill.lastUsedAt,
       })),
       mcpCatalog: mcpServers.map((server): CapabilityMcpCatalogItem =>
-        mcpCatalogItemForServer(server, mcpRuntimeSnapshots, mcpToolCatalog.tools)
+        mcpCatalogItemForServer(server, mcpRuntimeSnapshots, mcpToolCatalog.tools, exposedMcpToolCatalog.tools)
       ),
       workspace,
       securitySummary: "本轮模型、工具、工作方法和工作区能力快照。",
@@ -201,7 +208,8 @@ function capabilityToolCatalogItem(tool: ToolCatalogItem): CapabilityToolCatalog
 function mcpCatalogItemForServer(
   server: McpServerSettings,
   runtimeSnapshots: readonly McpServerRuntimeSnapshot[],
-  mcpTools: readonly ToolCatalogItem[]
+  discoveredMcpTools: readonly ToolCatalogItem[],
+  exposedMcpTools: readonly ToolCatalogItem[]
 ): CapabilityMcpCatalogItem {
   const availability = server.enabled ? mcpAvailability(server) : "disabled";
   const runtime = runtimeSnapshots.find((snapshot) => snapshot.serverId === server.serverId);
@@ -211,21 +219,43 @@ function mcpCatalogItemForServer(
     label: server.label,
     transport: server.transport,
     enabled: server.enabled,
+    confirmationMode: server.confirmationMode,
     availability,
     runtimeStatus,
-    errorSummary: runtime?.errorSummary,
+    errorSummary: runtime?.errorSummary ?? server.lastError,
     commandSummary: commandSummaryFor(server.command, server.args),
-    url: server.transport === "http" ? server.url : undefined,
+    url: isNetworkMcpTransport(server.transport) ? server.url : undefined,
     envSecretRefCount: server.envSecretRefs.length,
+    authSecretRefCount: [
+      server.bearerTokenSecretRef,
+      server.apiKeySecretRef,
+      ...(server.headerSecretRefs ?? []),
+    ].filter((ref) => ref !== undefined).length,
+    toolExposureMode: server.toolExposureMode,
+    enabledTools: [...server.enabledTools],
+    lastConnectedAt: runtime?.lastConnectedAt ?? server.lastConnectedAt,
+    lastError: server.lastError,
     runtimeConfig: availability === "configured" ? {
       transport: server.transport,
       command: server.transport === "stdio" ? server.command : undefined,
       args: server.transport === "stdio" ? [...(server.args ?? [])] : undefined,
-      url: server.transport === "http" ? server.url : undefined,
+      url: isNetworkMcpTransport(server.transport) ? server.url : undefined,
       envSecretRefs: [...server.envSecretRefs],
+      headerSecretRefs: [...(server.headerSecretRefs ?? [])],
+      bearerTokenSecretRef: server.bearerTokenSecretRef,
+      apiKeySecretRef: server.apiKeySecretRef,
+      apiKeyHeaderName: server.apiKeyHeaderName,
+      confirmationMode: server.confirmationMode,
+      toolExposureMode: server.toolExposureMode,
+      enabledTools: [...server.enabledTools],
     } : undefined,
     tools: runtimeStatus === "connected"
-      ? mcpTools
+      ? discoveredMcpTools
+          .filter((tool) => tool.name.startsWith(`${server.serverId}__`))
+          .map(capabilityToolCatalogItem)
+      : [],
+    exposedTools: runtimeStatus === "connected"
+      ? exposedMcpTools
           .filter((tool) => tool.name.startsWith(`${server.serverId}__`))
           .map(capabilityToolCatalogItem)
       : [],
@@ -233,11 +263,58 @@ function mcpCatalogItemForServer(
   };
 }
 
+function filteredMcpToolCatalog<T extends {
+  readonly tools: readonly ToolCatalogItem[];
+  readonly allowedTools: readonly string[];
+}>(
+  catalog: T,
+  servers: readonly McpServerSettings[]
+): T {
+  const configuredServers = new Map(servers.map((server) => [server.serverId, server]));
+  const tools = catalog.tools.filter((tool) => {
+    const server = serverForNamespacedTool(configuredServers, tool.name);
+    return server === undefined ? false : isMcpToolEnabledForServer(server, tool.name);
+  });
+  const allowedToolNames = new Set(tools.map((tool) => tool.name));
+  return {
+    ...catalog,
+    tools,
+    allowedTools: catalog.allowedTools.filter((name) => allowedToolNames.has(name)),
+  };
+}
+
+function serverForNamespacedTool(
+  servers: ReadonlyMap<string, McpServerSettings>,
+  toolName: string
+): McpServerSettings | undefined {
+  const separator = toolName.indexOf("__");
+  if (separator <= 0) {
+    return undefined;
+  }
+  return servers.get(toolName.slice(0, separator));
+}
+
+function isMcpToolEnabledForServer(server: McpServerSettings, namespacedToolName: string): boolean {
+  if (server.toolExposureMode === "none") {
+    return false;
+  }
+  if (server.toolExposureMode === "all") {
+    return true;
+  }
+  const localName = namespacedToolName.startsWith(`${server.serverId}__`)
+    ? namespacedToolName.slice(`${server.serverId}__`.length)
+    : namespacedToolName;
+  return server.enabledTools.includes(namespacedToolName) || server.enabledTools.includes(localName);
+}
+
 function mcpAvailability(server: {
-  readonly transport: "stdio" | "http";
+  readonly transport: "stdio" | "http" | "sse";
   readonly command?: string;
   readonly url?: string;
 }): CapabilityMcpCatalogItem["availability"] {
+  if (server.transport === "sse") {
+    return "unavailable";
+  }
   if (server.transport === "stdio") {
     return server.command === undefined ? "unavailable" : "configured";
   }
@@ -266,6 +343,10 @@ function mcpRuntimeStatusFor(
 
 function isMcpServerConnectable(server: McpServerSettings): boolean {
   return server.enabled && mcpAvailability(server) === "configured";
+}
+
+function isNetworkMcpTransport(transport: McpServerSettings["transport"]): boolean {
+  return transport === "http" || transport === "sse";
 }
 
 function commandSummaryFor(command: string | undefined, args: readonly string[] | undefined): string | undefined {

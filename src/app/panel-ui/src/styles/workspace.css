@@ -165,22 +165,9 @@
 
 .mcp-service-card-top {
   display: grid;
-  grid-template-columns: 30px minmax(0, 1fr) max-content;
+  grid-template-columns: minmax(0, 1fr) max-content;
   align-items: center;
   gap: 9px;
-}
-
-.mcp-service-avatar {
-  display: grid;
-  width: 30px;
-  height: 30px;
-  place-items: center;
-  border-radius: 9px;
-  background: color-mix(in oklch, var(--accent-strong) 10%, var(--surface-subtle));
-  color: var(--accent-active);
-  font-size: 14px;
-  font-weight: 650;
-  line-height: 1;
 }
 
 .mcp-service-card-title {
@@ -349,6 +336,70 @@
   grid-column: 1 / -1;
 }
 
+.mcp-command-field {
+  display: grid;
+  min-width: 0;
+  align-content: start;
+  gap: 7px;
+}
+
+.mcp-field-title-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.mcp-field-actions {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.mcp-field-title-row label {
+  min-width: 0;
+  color: var(--fg);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.35;
+}
+
+.mcp-inline-action {
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid color-mix(in oklch, var(--border) 78%, transparent);
+  border-radius: 9px;
+  background: color-mix(in oklch, var(--surface-subtle) 48%, var(--surface));
+  padding: 0 10px;
+  color: color-mix(in oklch, var(--fg) 80%, var(--muted));
+  font-size: 12px;
+  font-weight: 560;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.mcp-inline-action:hover {
+  border-color: color-mix(in oklch, var(--accent-strong) 30%, var(--border));
+  background: var(--surface);
+  color: var(--fg);
+}
+
+.mcp-inline-action:focus-visible {
+  border-color: color-mix(in oklch, var(--accent-strong) 58%, var(--border));
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent-strong) 12%, transparent);
+  outline: none;
+}
+
+.mcp-inline-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.52;
+}
+
 .mcp-form-grid label {
   display: grid;
   min-width: 0;
@@ -396,6 +447,56 @@
 .mcp-form-section > label select {
   height: 40px;
   padding: 0 12px;
+}
+
+.mcp-environment-result {
+  display: inline-flex;
+  min-width: 0;
+  max-width: min(240px, 38vw);
+  min-height: 28px;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid color-mix(in oklch, var(--border) 72%, transparent);
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--surface-subtle) 48%, var(--surface));
+  padding: 0 10px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 560;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.mcp-environment-result span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mcp-environment-dot {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.mcp-environment-result.success {
+  border-color: color-mix(in oklch, var(--status-success) 28%, var(--border));
+  background: color-mix(in oklch, var(--status-success) 8%, var(--surface));
+  color: color-mix(in oklch, var(--status-success) 72%, var(--fg));
+}
+
+.mcp-environment-result.warning {
+  border-color: color-mix(in oklch, var(--status-warning) 28%, var(--border));
+  background: color-mix(in oklch, var(--status-warning) 8%, var(--surface));
+  color: color-mix(in oklch, var(--status-warning) 78%, var(--fg));
+}
+
+.mcp-environment-result.danger {
+  border-color: color-mix(in oklch, var(--status-danger) 28%, var(--border));
+  background: color-mix(in oklch, var(--status-danger) 7%, var(--surface));
+  color: color-mix(in oklch, var(--status-danger) 72%, var(--fg));
 }
 
 .settings-select-control {
@@ -790,6 +891,12 @@
   background: var(--surface);
   padding: 4px 9px;
   white-space: nowrap;
+}
+
+.mcp-tool-authorization-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .mcp-tool-list {
@@ -1353,6 +1460,7 @@
   color: var(--fg);
   font-size: 12px;
 }
+
 .workspace-empty {
   border: 1px dashed var(--border);
   border-radius: var(--radius-xl);

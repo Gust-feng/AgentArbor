@@ -356,6 +356,7 @@ test("desktop tool center factory rebuilds executable MCP tools only from the fr
             authSecretRefCount: 0,
             toolExposureMode: "selected",
             enabledTools: ["lookup", "mutate"],
+            autoApprovedTools: [],
             runtimeConfig: {
               transport: "stdio",
               command: process.execPath,
@@ -364,6 +365,7 @@ test("desktop tool center factory rebuilds executable MCP tools only from the fr
               confirmationMode: "unsafe_only",
               toolExposureMode: "selected",
               enabledTools: ["lookup", "mutate"],
+            autoApprovedTools: [],
             },
             tools: [lookup, mutate],
             exposedTools: [lookup, mutate],

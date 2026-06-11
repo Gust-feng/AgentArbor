@@ -1,7 +1,7 @@
 import React from "react";
 import { Link2, Plus, Save, Trash2, X } from "lucide-react";
 import type { ConfigResponse } from "../contracts/config";
-import type { McpReferenceResponse, ToolsResponse } from "../contracts/tools";
+import type { McpEnvironmentCheckResponse, McpReferenceResponse, ToolsResponse } from "../contracts/tools";
 import type { McpServerForm, ToolForm } from "./settings-types";
 import { providerName, toolDescription, toolMeta, toolTitle } from "./settings-tool-copy";
 import { SettingRow } from "./workspace-common";
@@ -28,8 +28,10 @@ export function CapabilitiesSettings(props: {
   readonly onLoadMcpReferences: (serverId: string) => void;
   readonly onImportMcpConfig: (config: string) => void;
   readonly onTestMcpServer: (serverId: string) => void;
+  readonly onCheckMcpEnvironment: (form: Pick<McpServerForm, "command" | "commandLine">) => Promise<McpEnvironmentCheckResponse>;
+  readonly onInstallMcpEnvironment: (form: Pick<McpServerForm, "command" | "commandLine">) => Promise<McpEnvironmentCheckResponse>;
   readonly onDeleteMcpServer: (serverId: string) => void;
-  readonly onUpdateMcpTool: (serverId: string, toolName: string, enabled: boolean) => void;
+  readonly onUpdateMcpTool: (serverId: string, toolName: string, enabled: boolean, autoApproved?: boolean) => void;
   readonly onUpdateTool: (toolName: string, enabled: boolean) => void;
 }): React.ReactElement {
   if (props.activeSection === "mcp") {
@@ -42,6 +44,8 @@ export function CapabilitiesSettings(props: {
         onSave={props.onSaveMcpServer}
         onImport={props.onImportMcpConfig}
         onTest={props.onTestMcpServer}
+        onCheckEnvironment={props.onCheckMcpEnvironment}
+        onInstallEnvironment={props.onInstallMcpEnvironment}
         onDelete={props.onDeleteMcpServer}
         onUpdateTool={props.onUpdateMcpTool}
       />
@@ -131,8 +135,10 @@ function McpServiceSettings(props: {
   readonly onSave: (form?: McpServerForm) => Promise<void>;
   readonly onImport: (config: string) => void;
   readonly onTest: (serverId: string) => void;
+  readonly onCheckEnvironment: (form: Pick<McpServerForm, "command" | "commandLine">) => Promise<McpEnvironmentCheckResponse>;
+  readonly onInstallEnvironment: (form: Pick<McpServerForm, "command" | "commandLine">) => Promise<McpEnvironmentCheckResponse>;
   readonly onDelete: (serverId: string) => void;
-  readonly onUpdateTool: (serverId: string, toolName: string, enabled: boolean) => void;
+  readonly onUpdateTool: (serverId: string, toolName: string, enabled: boolean, autoApproved?: boolean) => void;
 }): React.ReactElement {
   const [importText, setImportText] = React.useState("");
   const [panelMode, setPanelMode] = React.useState<"overview" | "edit" | "add">("overview");
@@ -208,7 +214,6 @@ function McpServiceSettings(props: {
               }}
             >
               <span className="mcp-service-card-top">
-                <span className="mcp-service-avatar">{mcpServerAvatarText(server)}</span>
                 <span className="mcp-service-card-title">
                   <strong>{server.label}</strong>
                   <span>{transportLabel(server.transport)}</span>
@@ -238,6 +243,8 @@ function McpServiceSettings(props: {
           onImport={props.onImport}
           onSave={saveServer}
           onSaveAndTest={saveAndTestServer}
+          onCheckEnvironment={props.onCheckEnvironment}
+          onInstallEnvironment={props.onInstallEnvironment}
           onDelete={props.onDelete}
           onUpdateTool={props.onUpdateTool}
           onCancel={() => setPanelMode("overview")}
@@ -254,6 +261,8 @@ function McpServiceSettings(props: {
           onImport={props.onImport}
           onSave={saveServer}
           onSaveAndTest={saveAndTestServer}
+          onCheckEnvironment={props.onCheckEnvironment}
+          onInstallEnvironment={props.onInstallEnvironment}
           onCancel={() => setPanelMode("overview")}
         />
       )}
@@ -272,8 +281,10 @@ function McpServerPanel(props: {
   readonly onImport: (config: string) => void;
   readonly onSave: (form?: McpServerForm) => Promise<void>;
   readonly onSaveAndTest: (form?: McpServerForm) => Promise<void>;
+  readonly onCheckEnvironment: (form: Pick<McpServerForm, "command" | "commandLine">) => Promise<McpEnvironmentCheckResponse>;
+  readonly onInstallEnvironment: (form: Pick<McpServerForm, "command" | "commandLine">) => Promise<McpEnvironmentCheckResponse>;
   readonly onDelete?: (serverId: string) => void;
-  readonly onUpdateTool?: (serverId: string, toolName: string, enabled: boolean) => void;
+  readonly onUpdateTool?: (serverId: string, toolName: string, enabled: boolean, autoApproved?: boolean) => void;
   readonly onCancel: () => void;
 }): React.ReactElement {
   const canSave = canSaveMcpServerForm(props.form);
@@ -292,14 +303,53 @@ function McpServerPanel(props: {
     : mcpStatusTone(props.selectedServer.runtimeStatus ?? props.selectedServer.availability);
   const activeServer = props.selectedServer;
   const title = editing ? `编辑服务：${props.form.label || props.form.serverId}` : "连接工具";
-  const saveConfirmationMode = (confirmationMode: McpServerForm["confirmationMode"]): void => {
-    if (!editing || props.saving === true) return;
-    const nextForm: McpServerForm = {
-      ...props.form,
-      confirmationMode,
-    };
-    props.setForm(nextForm);
-    void props.onSave(nextForm);
+  const [environmentCheck, setEnvironmentCheck] = React.useState<McpEnvironmentCheckResponse | undefined>();
+  const [checkingEnvironment, setCheckingEnvironment] = React.useState(false);
+  const [installingEnvironment, setInstallingEnvironment] = React.useState(false);
+  React.useEffect(() => {
+    setEnvironmentCheck(undefined);
+  }, [props.form.transport, props.form.command, props.form.commandLine]);
+  const runEnvironmentCheck = async (): Promise<void> => {
+    if (props.form.transport !== "stdio" || checkingEnvironment || installingEnvironment) return;
+    setCheckingEnvironment(true);
+    try {
+      const result = await props.onCheckEnvironment(props.form);
+      setEnvironmentCheck(result);
+    } catch {
+      setEnvironmentCheck({
+        ok: false,
+        status: "check_failed",
+        message: "环境检测未完成。",
+        checkedAt: new Date().toISOString(),
+      });
+    } finally {
+      setCheckingEnvironment(false);
+    }
+  };
+  const runEnvironmentInstall = async (): Promise<void> => {
+    if (props.form.transport !== "stdio" || checkingEnvironment || installingEnvironment) return;
+    setInstallingEnvironment(true);
+    setEnvironmentCheck((previous) => ({
+      ok: false,
+      status: "installing",
+      command: previous?.command,
+      installable: previous?.installable,
+      message: "安装中。",
+      checkedAt: new Date().toISOString(),
+    }));
+    try {
+      const result = await props.onInstallEnvironment(props.form);
+      setEnvironmentCheck(result);
+    } catch {
+      setEnvironmentCheck({
+        ok: false,
+        status: "install_failed",
+        message: "安装失败。",
+        checkedAt: new Date().toISOString(),
+      });
+    } finally {
+      setInstallingEnvironment(false);
+    }
   };
   return (
     <div className="mcp-subpanel-overlay" role="dialog" aria-modal="true" aria-label={editing ? "编辑服务" : "连接工具"}>
@@ -320,8 +370,6 @@ function McpServerPanel(props: {
               <span>{mcpRuntimeStatusLabel(props.selectedServer.runtimeStatus ?? props.selectedServer.availability)}</span>
               <span>{transportLabel(props.selectedServer.transport)}</span>
               <span>{visibleTools.length} 个工具</span>
-              <span>{exposedTools.length} 个给 Agent 使用</span>
-              {hasSavedAuth && <span>Authorization 已保存</span>}
               {props.selectedServer.lastConnectedAt !== undefined && <span>最近连接：{props.selectedServer.lastConnectedAt}</span>}
               {selectedError !== undefined && (
                 <span className="mcp-status-error">错误：{selectedError}</span>
@@ -334,6 +382,11 @@ function McpServerPanel(props: {
             fieldPrefix={fieldPrefix}
             selectedServer={props.selectedServer}
             hasSavedAuth={hasSavedAuth}
+            environmentCheck={environmentCheck}
+            checkingEnvironment={checkingEnvironment}
+            installingEnvironment={installingEnvironment}
+            onCheckEnvironment={() => void runEnvironmentCheck()}
+            onInstallEnvironment={() => void runEnvironmentInstall()}
           />
           {editing && (
             <section className="mcp-form-section">
@@ -342,7 +395,9 @@ function McpServerPanel(props: {
                   <span className="mcp-tool-authorization-copy">
                     <strong>工具授权</strong>
                   </span>
-                  <span className="mcp-tool-authorization-count">{exposedTools.length} / {visibleTools.length} 已启用</span>
+                  <span className="mcp-tool-authorization-actions">
+                    <span className="mcp-tool-authorization-count">{exposedTools.length} / {visibleTools.length} 已启用</span>
+                  </span>
                 </summary>
                 <div className="mcp-tool-list">
                   {activeServer === undefined || visibleTools.length === 0 ? (
@@ -356,8 +411,7 @@ function McpServerPanel(props: {
                       </div>
                       {visibleTools.map((tool) => {
                         const enabled = isMcpToolEnabled(activeServer, tool.name);
-                        const autoApproved = tool.requiresConfirmation !== true;
-                        const nextConfirmationMode = autoApproved ? "always" : mcpAutoApprovalModeForTool(tool);
+                        const autoApproved = isMcpToolAutoApproved(activeServer, tool.name);
                         return (
                           <McpToolAuthorizationRow
                             key={tool.name}
@@ -365,8 +419,12 @@ function McpServerPanel(props: {
                             enabled={enabled}
                             autoApproved={autoApproved}
                             onToggle={() => props.onUpdateTool?.(activeServer.serverId, tool.name, !enabled)}
-                            onToggleAutoApproval={() => saveConfirmationMode(nextConfirmationMode)}
-                            disabled={props.saving === true}
+                            onToggleAutoApproval={() => props.onUpdateTool?.(
+                              activeServer.serverId,
+                              tool.name,
+                              enabled || !autoApproved,
+                              !autoApproved
+                            )}
                           />
                         );
                       })}
@@ -429,8 +487,18 @@ function McpConnectionFields(props: {
   readonly fieldPrefix: string;
   readonly selectedServer?: McpCatalogServer;
   readonly hasSavedAuth?: boolean;
+  readonly environmentCheck?: McpEnvironmentCheckResponse;
+  readonly checkingEnvironment?: boolean;
+  readonly installingEnvironment?: boolean;
+  readonly onCheckEnvironment: () => void;
+  readonly onInstallEnvironment: () => void;
 }): React.ReactElement {
   const authorizationHeaderPlaceholder = props.hasSavedAuth === true ? SAVED_API_KEY_MASK : "Bearer ...";
+  const canCheckEnvironment = (props.form.commandLine.trim() || props.form.command.trim()).length > 0;
+  const canInstallEnvironment =
+    props.environmentCheck?.status === "not_found" &&
+    props.environmentCheck.installable === true &&
+    props.installingEnvironment !== true;
   return (
     <section className="mcp-form-section">
       <div className="mcp-form-grid mcp-identity-grid">
@@ -462,8 +530,38 @@ function McpConnectionFields(props: {
       <div className="mcp-form-grid mcp-transport-params-grid">
         {props.form.transport === "stdio" ? (
           <>
-            <label className="mcp-connection-main" htmlFor={`${props.fieldPrefix}-command`}>
-              命令
+            <div className="mcp-connection-main mcp-command-field">
+              <div className="mcp-field-title-row">
+                <label htmlFor={`${props.fieldPrefix}-command`}>命令</label>
+                <div className="mcp-field-actions">
+                  {props.environmentCheck !== undefined && (
+                    <McpEnvironmentCheckResult result={props.environmentCheck} />
+                  )}
+                  <button
+                    type="button"
+                    className="mcp-inline-action"
+                    onClick={props.onCheckEnvironment}
+                    disabled={props.checkingEnvironment === true || props.installingEnvironment === true || !canCheckEnvironment}
+                  >
+                    {props.checkingEnvironment === true ? "检测中" : "环境检测"}
+                  </button>
+                  {canInstallEnvironment && (
+                    <button
+                      type="button"
+                      className="mcp-inline-action"
+                      onClick={props.onInstallEnvironment}
+                      disabled={!canCheckEnvironment}
+                    >
+                      安装
+                    </button>
+                  )}
+                  {props.installingEnvironment === true && (
+                    <button type="button" className="mcp-inline-action" disabled>
+                      安装中
+                    </button>
+                  )}
+                </div>
+              </div>
               <input
                 id={`${props.fieldPrefix}-command`}
                 aria-label="命令"
@@ -473,7 +571,7 @@ function McpConnectionFields(props: {
                 onChange={(event) => props.setForm({ ...props.form, commandLine: event.target.value, command: "" })}
                 placeholder={props.selectedServer?.commandSummary ?? "npx -y @modelcontextprotocol/server-filesystem ."}
               />
-            </label>
+            </div>
             <label htmlFor={`${props.fieldPrefix}-args`}>
               参数
               <textarea
@@ -534,6 +632,17 @@ function McpConnectionFields(props: {
         )}
       </div>
     </section>
+  );
+}
+
+function McpEnvironmentCheckResult(props: {
+  readonly result: McpEnvironmentCheckResponse;
+}): React.ReactElement {
+  return (
+    <div className={`mcp-environment-result ${mcpEnvironmentTone(props.result.status)}`} role="status">
+      <span className="mcp-environment-dot" aria-hidden="true" />
+      <span>{mcpEnvironmentStatusText(props.result)}</span>
+    </div>
   );
 }
 
@@ -687,7 +796,6 @@ function McpToolAuthorizationRow(props: {
   readonly title: string;
   readonly enabled: boolean;
   readonly autoApproved: boolean;
-  readonly disabled?: boolean;
   readonly onToggle: () => void;
   readonly onToggleAutoApproval: () => void;
 }): React.ReactElement {
@@ -699,7 +807,6 @@ function McpToolAuthorizationRow(props: {
         className="mcp-tool-auth-state"
         aria-pressed={props.enabled}
         aria-label={`${props.enabled ? "停用" : "启用"} ${props.title}`}
-        disabled={props.disabled}
         onClick={props.onToggle}
       >
         <span aria-hidden="true" />
@@ -709,7 +816,6 @@ function McpToolAuthorizationRow(props: {
         className="mcp-tool-auth-state"
         aria-pressed={props.autoApproved}
         aria-label={`${props.autoApproved ? "关闭自动批准" : "开启自动批准"} ${props.title}`}
-        disabled={props.disabled}
         onClick={props.onToggleAutoApproval}
       >
         <span aria-hidden="true" />
@@ -749,7 +855,6 @@ function ToolCatalogSettings(props: {
   );
 }
 
-
 function formFromMcpCatalog(server: NonNullable<ToolsResponse["mcpCatalog"]>[number], previous: McpServerForm): McpServerForm {
   const authMode = server.authSecretRefCount !== undefined && server.authSecretRefCount > 0 && isNetworkMcpTransport(server.transport)
     ? "bearer"
@@ -763,6 +868,8 @@ function formFromMcpCatalog(server: NonNullable<ToolsResponse["mcpCatalog"]>[num
     authTouched: false,
     confirmationMode: server.confirmationMode ?? "unsafe_only",
     toolExposureMode: server.toolExposureMode ?? "none",
+    enabledTools: server.enabledTools ?? [],
+    autoApprovedTools: server.autoApprovedTools ?? [],
     command: "",
     args: "",
     commandLine: server.commandSummary ?? "",
@@ -789,6 +896,8 @@ function emptyMcpServerForm(): McpServerForm {
     authTouched: false,
     confirmationMode: "unsafe_only",
     toolExposureMode: "none",
+    enabledTools: [],
+    autoApprovedTools: [],
     command: "",
     args: "",
     commandLine: "",
@@ -867,15 +976,6 @@ function mcpToolDisplayTitle(
   return localName || tool.name;
 }
 
-function mcpAutoApprovalModeForTool(
-  tool: NonNullable<ToolsResponse["mcpCatalog"]>[number]["tools"][number],
-): McpServerForm["confirmationMode"] {
-  if (tool.operationType === "read-only" || tool.riskLevel === "low") {
-    return "unsafe_only";
-  }
-  return "never";
-}
-
 function mcpStatusTone(status: string): "success" | "danger" | "warning" | "neutral" {
   switch (status) {
     case "connected":
@@ -891,18 +991,8 @@ function mcpStatusTone(status: string): "success" | "danger" | "warning" | "neut
   }
 }
 
-function mcpServerAvatarText(server: NonNullable<ToolsResponse["mcpCatalog"]>[number]): string {
-  const source = server.label || server.serverId;
-  const first = source.trim().charAt(0);
-  return first.length > 0 ? first.toUpperCase() : "M";
-}
-
 function mcpServerCardFacts(server: NonNullable<ToolsResponse["mcpCatalog"]>[number]): readonly string[] {
-  const facts = [`${server.tools.length} 个工具`, mcpConfirmationModeLabel(server.confirmationMode)];
-  if (isNetworkMcpTransport(server.transport) && server.authSecretRefCount !== undefined && server.authSecretRefCount > 0) {
-    facts.splice(1, 0, "Authorization 已保存");
-  }
-  return facts;
+  return [`${server.tools.length} 个工具`, mcpConfirmationModeLabel(server.confirmationMode)];
 }
 
 function mcpServerCardCommand(server: NonNullable<ToolsResponse["mcpCatalog"]>[number]): string {
@@ -928,6 +1018,12 @@ function isMcpToolEnabled(server: NonNullable<ToolsResponse["mcpCatalog"]>[numbe
   const enabledTools = server.enabledTools ?? [];
   const localName = toolName.startsWith(`${server.serverId}__`) ? toolName.slice(`${server.serverId}__`.length) : toolName;
   return enabledTools.includes(toolName) || enabledTools.includes(localName);
+}
+
+function isMcpToolAutoApproved(server: NonNullable<ToolsResponse["mcpCatalog"]>[number], toolName: string): boolean {
+  const autoApprovedTools = server.autoApprovedTools ?? [];
+  const localName = toolName.startsWith(`${server.serverId}__`) ? toolName.slice(`${server.serverId}__`.length) : toolName;
+  return autoApprovedTools.includes(toolName) || autoApprovedTools.includes(localName);
 }
 
 function transportLabel(transport: "stdio" | "http" | "sse"): string {
@@ -1015,6 +1111,35 @@ function mcpCompactError(error?: string): string | undefined {
   const parsedMessage = parseMcpErrorJsonMessage(trimmed);
   const compact = normalizeMcpErrorMessage(parsedMessage ?? trimmed);
   return compact.length > 140 ? `${compact.slice(0, 137)}...` : compact;
+}
+
+function mcpEnvironmentTone(status: McpEnvironmentCheckResponse["status"]): "success" | "warning" | "danger" {
+  if (status === "ready" || status === "installed") return "success";
+  if (status === "check_failed" || status === "install_failed") return "danger";
+  return "warning";
+}
+
+function mcpEnvironmentStatusText(result: McpEnvironmentCheckResponse): string {
+  switch (result.status) {
+    case "ready":
+      return "已就绪";
+    case "installed":
+      return "已安装";
+    case "installing":
+      return "安装中";
+    case "missing_command":
+      return "未填写命令";
+    case "check_failed":
+      return "检测失败";
+    case "install_failed":
+      return "安装失败";
+    case "unsupported":
+      return "不支持安装";
+    default:
+      return result.command === undefined || result.command.trim().length === 0
+        ? "缺少运行文件"
+        : `缺少运行文件：${result.command}`;
+  }
 }
 
 function parseMcpErrorJsonMessage(error: string): string | undefined {

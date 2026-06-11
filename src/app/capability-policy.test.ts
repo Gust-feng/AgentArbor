@@ -244,6 +244,7 @@ function capabilitySnapshot(
         authSecretRefCount: 0,
         toolExposureMode: "all",
         enabledTools: [],
+        autoApprovedTools: [],
         tools: tools.filter((tool) => tool.scopes.includes("mcp")),
         exposedTools: tools.filter((tool) => tool.scopes.includes("mcp")),
         updatedAt: "2026-05-13T00:00:00.000Z",

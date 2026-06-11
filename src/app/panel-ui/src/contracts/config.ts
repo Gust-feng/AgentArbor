@@ -11,6 +11,7 @@ export type ConfigResponse = {
   };
   readonly profile?: ModelProviderProfile;
   readonly profiles?: readonly ModelProviderProfile[];
+  readonly modelProviderOrder?: readonly string[];
   readonly modelCatalogs?: readonly ModelProviderModelCatalog[];
   readonly modelProviderMarket?: {
     readonly presets?: readonly ModelProviderPreset[];

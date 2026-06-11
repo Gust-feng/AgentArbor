@@ -3,7 +3,9 @@ import type {
   ConfiguredInformationSourceKind,
   ConfiguredWebSearchProvider,
   InformationAccessSettings,
+  ModelProviderProfileSettings,
 } from "../../domain/config/index.js";
+import { listBuiltinModelProviderPresets } from "../../domain/config/index.js";
 import {
   normalizeOpenAIModelRequestSettings,
 } from "./openai-request-settings.js";
@@ -99,6 +101,7 @@ export function parseLocalSettingsFile(raw: unknown): AgentArborLocalSettings {
     modelProvider: activeProfile,
     activeModelProfileId: activeProfile.profileId,
     modelProfiles,
+    modelProviderOrder: parseModelProviderOrder(record.modelProviderOrder, modelProfiles),
     modelCatalogs: parseModelCatalogs(record.modelCatalogs, updatedAt),
     modelCapabilityOverrides: parseModelCapabilityOverrides(record.modelCapabilityOverrides, updatedAt),
     toolStates: parseToolStates(record.toolStates, updatedAt),
@@ -136,6 +139,7 @@ export function createDefaultLocalSettings(now: string = new Date().toISOString(
     modelProvider: defaultProfile,
     activeModelProfileId: defaultProfile.profileId,
     modelProfiles: [defaultProfile],
+    modelProviderOrder: [],
     modelCatalogs: [],
     modelCapabilityOverrides: [],
     toolStates: [],
@@ -176,12 +180,51 @@ export function normalizeLocalSettings(settings: AgentArborLocalSettings): Agent
     modelProvider: activeProfile,
     activeModelProfileId: activeProfile.profileId,
     modelProfiles: profiles.length === 0 ? [activeProfile] : profiles,
+    modelProviderOrder: normalizeModelProviderOrder(settings.modelProviderOrder ?? [], profiles),
     modelCatalogs,
     modelCapabilityOverrides: normalizeModelCapabilityOverrides(settings.modelCapabilityOverrides ?? [], now),
     toolStates: normalizeToolStates(settings.toolStates ?? [], now),
     mcpServers: normalizeMcpServers(settings.mcpServers ?? [], now),
     informationAccess: normalizeInformationAccessSettings(settings.informationAccess, now),
   };
+}
+
+function parseModelProviderOrder(
+  raw: unknown,
+  profiles: readonly ModelProviderProfileSettings[]
+): readonly string[] {
+  return Array.isArray(raw) ? normalizeModelProviderOrder(raw, profiles) : [];
+}
+
+function normalizeModelProviderOrder(
+  order: readonly unknown[],
+  profiles: readonly ModelProviderProfileSettings[]
+): readonly string[] {
+  const profileIds = new Set(profiles.map((profile) => profile.profileId));
+  const knownKeys = new Set<string>([
+    ...profiles.map((profile) => `profile:${profile.profileId}`),
+    ...listBuiltinModelProviderPresets().map((preset) => `preset:${preset.presetId}`),
+  ]);
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+  for (const value of order) {
+    const rawKey = optionalString(value);
+    const key = rawKey === undefined ? undefined : normalizeProviderOrderKey(rawKey, profileIds);
+    if (key === undefined || !knownKeys.has(key) || seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    normalized.push(key);
+  }
+  return normalized;
+}
+
+function normalizeProviderOrderKey(key: string, profileIds: ReadonlySet<string>): string {
+  if (!key.startsWith("preset:")) {
+    return key;
+  }
+  const presetId = key.slice("preset:".length);
+  return profileIds.has(presetId) ? `profile:${presetId}` : key;
 }
 
 export function createDefaultInformationAccessSettings(now: string): InformationAccessSettings {

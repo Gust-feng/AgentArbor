@@ -1,6 +1,6 @@
 import type React from "react";
-import { getJson } from "./api";
-import { createRunReadModelPatch, loadConversationTranscriptNodesByRunId, transcriptNodesFrom } from "./app-run-projection";
+import { ApiError, getJson } from "./api";
+import { loadConversationTranscriptNodesByRunId, transcriptNodesFrom } from "./app-run-projection";
 import { shouldKeepRefreshing, stopLiveUpdates, stopPolling, stopStream } from "./app-runtime-controls";
 import type { AppState } from "./app-state";
 import { liveRunForObservedReplay } from "../../panel-ui-submit-flow";
@@ -33,7 +33,26 @@ export async function loadConversationSession(
   stopStream(options.streamRef);
   options.setScreen("chat-active");
   options.setAttachments([]);
-  const response = await getJson<{ readonly conversation: Conversation }>(`/api/conversations/${encodeURIComponent(conversationId)}`);
+  let response: { readonly conversation: Conversation };
+  try {
+    response = await getJson<{ readonly conversation: Conversation }>(`/api/conversations/${encodeURIComponent(conversationId)}`);
+  } catch (error) {
+    if (isMissingConversationError(error)) {
+      resetConversationSession(options);
+      options.setApp((previous) => ({
+        ...previous,
+        conversations: previous.conversations.filter((conversation) => conversation.conversationId !== conversationId),
+        error: undefined,
+      }));
+      try {
+        await options.refreshConversations();
+      } catch {
+        // The main screen is already valid; a later refresh can reconcile the list.
+      }
+      return;
+    }
+    throw error;
+  }
   const currentRun = response.conversation.currentRun;
   const latestRunId = currentRun?.run.runId ?? response.conversation.activeRunId ?? response.conversation.latestRunId;
   options.activeRunIdRef.current = latestRunId;
@@ -69,6 +88,12 @@ export async function loadConversationSession(
   if (run !== undefined && shouldKeepRefreshing(run.status)) {
     options.startLiveUpdates(run.runId, replay?.cursor.lastSequence ?? run.eventCursor.lastSequence);
   }
+}
+
+function isMissingConversationError(error: unknown): boolean {
+  return error instanceof ApiError
+    && error.status === 404
+    && (error.code === "conversation_not_found" || error.code === "not_found");
 }
 
 export function resetConversationSession(options: ConversationSessionControllerOptions): void {

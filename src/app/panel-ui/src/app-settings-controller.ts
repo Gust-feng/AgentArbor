@@ -3,6 +3,7 @@ import {
   catalogRecordFromList,
   createCustomModelProviderProfile,
   deleteMcpServer,
+  deleteModelProviderProfile,
   fetchMcpReferences,
   fetchModelProviderCatalog,
   importMcpServers,
@@ -12,10 +13,13 @@ import {
   saveMcpServerSettings,
   saveModelProviderCatalog,
   saveModelProviderConfig,
+  saveModelProviderOrder,
   saveToolSettings,
   saveWorkspaceDirectory,
   selectModelProviderModel,
   testMcpServer,
+  checkMcpEnvironment,
+  installMcpEnvironment,
   updateMcpToolState,
   updateSkillState,
   updateToolState,
@@ -24,11 +28,13 @@ import { mergeConfigResponse, type VisibleAiMode } from "./app-config-projection
 import type { AppState } from "./app-state";
 import type { McpServerForm, ModelForm, ToolForm } from "./components/settings-types";
 import type { ModelProviderModelCatalog } from "./contracts/config";
-import type { McpReferenceResponse } from "./contracts/tools";
+import type { McpEnvironmentCheckResponse, McpReferenceResponse, McpServerCatalogItem } from "./contracts/tools";
 
 export type AppSettingsController = {
   readonly saveModelConfig: (nextModelForm?: ModelForm) => Promise<void>;
-  readonly createCustomModelProfile: () => Promise<void>;
+  readonly createCustomModelProfile: (nextModelForm?: ModelForm) => Promise<void>;
+  readonly reorderModelProviders: (order: readonly string[]) => Promise<void>;
+  readonly deleteModelProvider: (profileId: string, fallbackProfileId?: string) => Promise<void>;
   readonly revealModelApiKey: (profileId: string) => Promise<string | undefined>;
   readonly selectComposerModel: (modelOptionId: string) => Promise<void>;
   readonly fetchModelsForProfile: (profileId?: string) => Promise<ModelProviderModelCatalog | undefined>;
@@ -39,8 +45,10 @@ export type AppSettingsController = {
   readonly loadMcpReferences: (serverId: string) => Promise<McpReferenceResponse>;
   readonly importMcpConfig: (config: string) => Promise<void>;
   readonly testMcpServer: (serverId: string) => Promise<void>;
+  readonly checkMcpEnvironment: (form: Pick<McpServerForm, "command" | "commandLine">) => Promise<McpEnvironmentCheckResponse>;
+  readonly installMcpEnvironment: (form: Pick<McpServerForm, "command" | "commandLine">) => Promise<McpEnvironmentCheckResponse>;
   readonly deleteMcpServer: (serverId: string) => Promise<void>;
-  readonly updateMcpTool: (serverId: string, toolName: string, enabled: boolean) => Promise<void>;
+  readonly updateMcpTool: (serverId: string, toolName: string, enabled: boolean, autoApproved?: boolean) => Promise<void>;
   readonly updateTool: (toolName: string, enabled: boolean) => Promise<void>;
   readonly refreshSkills: () => Promise<void>;
   readonly updateSkill: (skillId: string, enabled: boolean) => Promise<void>;
@@ -60,6 +68,9 @@ export type AppSettingsControllerOptions = {
   readonly setMcpServerForm: React.Dispatch<React.SetStateAction<McpServerForm>>;
   readonly mountedRef: React.MutableRefObject<boolean>;
   readonly modelSaveQueueRef: React.MutableRefObject<Promise<void>>;
+  readonly mcpToolSaveQueueRef: React.MutableRefObject<Promise<void>>;
+  readonly mcpToolUpdateVersionRef: React.MutableRefObject<number>;
+  readonly mcpToolCatalogDraftRef: React.MutableRefObject<readonly McpServerCatalogItem[] | undefined>;
   readonly setSavingModel: React.Dispatch<React.SetStateAction<boolean>>;
   readonly setSavingWorkspace: React.Dispatch<React.SetStateAction<boolean>>;
   readonly setSavingTools: React.Dispatch<React.SetStateAction<boolean>>;
@@ -103,17 +114,33 @@ export function createAppSettingsController(options: AppSettingsControllerOption
     }
   }
 
-  async function createCustomModelProfile(): Promise<void> {
+  async function createCustomModelProfile(nextModelForm: ModelForm = options.modelForm): Promise<void> {
+    const save = options.modelSaveQueueRef.current
+      .catch(() => undefined)
+      .then(() => persistCreateCustomModelProfile(nextModelForm));
+    options.modelSaveQueueRef.current = save.catch(() => undefined);
+    await save;
+  }
+
+  async function persistCreateCustomModelProfile(nextModelForm: ModelForm): Promise<void> {
     options.setSavingModel(true);
     try {
       const activated = await createCustomModelProviderProfile({
-        form: options.modelForm,
+        form: nextModelForm,
         aiMode: options.aiMode,
       });
       if (options.mountedRef.current) {
         options.setApp((previous) => ({ ...previous, config: mergeConfigResponse(previous.config, activated) }));
         options.setModelForm((previous) => ({ ...previous, apiKey: "", apiKeyCleared: false }));
       }
+    } catch (error) {
+      if (options.mountedRef.current) {
+        options.setApp((previous) => ({
+          ...previous,
+          error: error instanceof Error ? error.message : "模型服务添加失败。",
+        }));
+      }
+      throw error;
     } finally {
       if (options.mountedRef.current) options.setSavingModel(false);
     }
@@ -134,6 +161,14 @@ export function createAppSettingsController(options: AppSettingsControllerOption
   }
 
   async function selectComposerModel(modelOptionId: string): Promise<void> {
+    const save = options.modelSaveQueueRef.current
+      .catch(() => undefined)
+      .then(() => persistComposerModelSelection(modelOptionId));
+    options.modelSaveQueueRef.current = save.catch(() => undefined);
+    await save;
+  }
+
+  async function persistComposerModelSelection(modelOptionId: string): Promise<void> {
     options.setSavingModel(true);
     try {
       const selected = await selectModelProviderModel({
@@ -141,12 +176,104 @@ export function createAppSettingsController(options: AppSettingsControllerOption
         modelOptionId,
         aiMode: options.aiMode,
       });
-      if (options.mountedRef.current && selected.config !== undefined) {
-        options.setApp((previous) => ({ ...previous, config: mergeConfigResponse(previous.config, selected.config!) }));
+      const selectedConfig = selected.config;
+      if (options.mountedRef.current && selectedConfig !== undefined) {
+        options.setApp((previous) => ({
+          ...previous,
+          config: mergeConfigResponse(previous.config, selectedConfig),
+          error: undefined,
+        }));
         if (selected.form !== undefined) {
           options.setModelForm(selected.form);
         }
       }
+      if (options.mountedRef.current && selectedConfig === undefined) {
+        options.setApp((previous) => ({ ...previous, error: "模型切换失败：没有收到有效配置。" }));
+      }
+    } catch (error) {
+      if (options.mountedRef.current) {
+        options.setApp((previous) => ({
+          ...previous,
+          error: error instanceof Error ? error.message : "模型切换失败。",
+        }));
+      }
+      throw error;
+    } finally {
+      if (options.mountedRef.current) options.setSavingModel(false);
+    }
+  }
+
+  async function reorderModelProviders(order: readonly string[]): Promise<void> {
+    const save = options.modelSaveQueueRef.current
+      .catch(() => undefined)
+      .then(() => persistModelProviderOrder(order));
+    options.modelSaveQueueRef.current = save.catch(() => undefined);
+    await save;
+  }
+
+  async function persistModelProviderOrder(order: readonly string[]): Promise<void> {
+    options.setSavingModel(true);
+    try {
+      const response = await saveModelProviderOrder(order);
+      if (options.mountedRef.current) {
+        options.setApp((previous) => ({
+          ...previous,
+          config: mergeConfigResponse(previous.config, response),
+          error: undefined,
+        }));
+      }
+    } catch (error) {
+      if (options.mountedRef.current) {
+        options.setApp((previous) => ({
+          ...previous,
+          error: error instanceof Error ? error.message : "模型服务排序保存失败。",
+        }));
+      }
+      throw error;
+    } finally {
+      if (options.mountedRef.current) options.setSavingModel(false);
+    }
+  }
+
+  async function deleteModelProvider(profileId: string, fallbackProfileId?: string): Promise<void> {
+    const normalizedProfileId = profileId.trim();
+    if (normalizedProfileId.length === 0) return;
+    const save = options.modelSaveQueueRef.current
+      .catch(() => undefined)
+      .then(() => persistDeleteModelProvider(normalizedProfileId, fallbackProfileId));
+    options.modelSaveQueueRef.current = save.catch(() => undefined);
+    await save;
+  }
+
+  async function persistDeleteModelProvider(
+    profileId: string,
+    fallbackProfileId: string | undefined
+  ): Promise<void> {
+    options.setSavingModel(true);
+    try {
+      const response = await deleteModelProviderProfile({
+        config: options.app.config,
+        profileId,
+        fallbackProfileId,
+      });
+      if (options.mountedRef.current) {
+        if (response.modelCatalogs !== undefined) {
+          options.setModelCatalogs(catalogRecordFromList(response.modelCatalogs));
+        }
+        options.setApp((previous) => ({
+          ...previous,
+          config: mergeConfigResponse(previous.config, response),
+          error: undefined,
+        }));
+      }
+    } catch (error) {
+      if (options.mountedRef.current) {
+        options.setApp((previous) => ({
+          ...previous,
+          error: error instanceof Error ? error.message : "模型服务删除失败。",
+        }));
+      }
+      throw error;
     } finally {
       if (options.mountedRef.current) options.setSavingModel(false);
     }
@@ -253,7 +380,6 @@ export function createAppSettingsController(options: AppSettingsControllerOption
   }
 
   async function saveMcpServer(nextMcpServerForm: McpServerForm = options.mcpServerForm): Promise<void> {
-    options.setSavingTools(true);
     try {
       const response = await saveMcpServerSettings(nextMcpServerForm);
       if (options.mountedRef.current) {
@@ -282,7 +408,6 @@ export function createAppSettingsController(options: AppSettingsControllerOption
       }
       throw error;
     } finally {
-      if (options.mountedRef.current) options.setSavingTools(false);
     }
   }
 
@@ -352,6 +477,38 @@ export function createAppSettingsController(options: AppSettingsControllerOption
     }
   }
 
+  async function checkSelectedMcpEnvironment(
+    form: Pick<McpServerForm, "command" | "commandLine">
+  ): Promise<McpEnvironmentCheckResponse> {
+    try {
+      return await checkMcpEnvironment(form);
+    } catch (error) {
+      if (options.mountedRef.current) {
+        options.setApp((previous) => ({
+          ...previous,
+          error: error instanceof Error ? error.message : "MCP 本地运行环境检测失败。",
+        }));
+      }
+      throw error;
+    }
+  }
+
+  async function installSelectedMcpEnvironment(
+    form: Pick<McpServerForm, "command" | "commandLine">
+  ): Promise<McpEnvironmentCheckResponse> {
+    try {
+      return await installMcpEnvironment(form);
+    } catch (error) {
+      if (options.mountedRef.current) {
+        options.setApp((previous) => ({
+          ...previous,
+          error: error instanceof Error ? error.message : "MCP 本地运行环境安装失败。",
+        }));
+      }
+      throw error;
+    }
+  }
+
   async function deleteSelectedMcpServer(serverId: string): Promise<void> {
     options.setSavingTools(true);
     try {
@@ -378,42 +535,55 @@ export function createAppSettingsController(options: AppSettingsControllerOption
     }
   }
 
-  async function updateMcpTool(serverId: string, toolName: string, enabled: boolean): Promise<void> {
-    options.setSavingTools(true);
-    try {
-      const currentServer = options.app.tools?.mcpCatalog?.find((server) => server.serverId === serverId);
-      const currentTools = new Set(currentServer?.enabledTools ?? []);
-      const normalizedToolName = toolName.startsWith(`${serverId}__`) ? toolName.slice(`${serverId}__`.length) : toolName;
-      if (enabled) {
-        currentTools.add(normalizedToolName);
-      } else {
-        currentTools.delete(normalizedToolName);
-        currentTools.delete(toolName);
-      }
-      const response = await updateMcpToolState({
+  async function updateMcpTool(serverId: string, toolName: string, enabled: boolean, autoApproved?: boolean): Promise<void> {
+    const updateVersion = options.mcpToolUpdateVersionRef.current + 1;
+    options.mcpToolUpdateVersionRef.current = updateVersion;
+    const baseCatalog = options.mcpToolCatalogDraftRef.current ?? options.app.tools?.mcpCatalog ?? [];
+    const nextPatch = mcpToolPatchFromCatalog(baseCatalog, serverId, toolName, enabled, autoApproved);
+    const nextCatalog = updateLocalMcpCatalogServer(baseCatalog, serverId, nextPatch);
+    options.mcpToolCatalogDraftRef.current = nextCatalog;
+    if (options.mountedRef.current) {
+      options.setApp((previous) => ({
+        ...previous,
+        tools: {
+          ...previous.tools,
+          mcpCatalog: nextCatalog,
+        },
+        error: undefined,
+      }));
+    }
+
+    const save = options.mcpToolSaveQueueRef.current
+      .catch(() => undefined)
+      .then(() => updateMcpToolState({
         serverId,
         toolExposureMode: "selected",
-        enabledTools: [...currentTools],
-      });
-      if (options.mountedRef.current) {
+        enabledTools: nextPatch.enabledTools,
+        autoApprovedTools: nextPatch.autoApprovedTools,
+      }));
+    options.mcpToolSaveQueueRef.current = save.then(() => undefined, () => undefined);
+
+    try {
+      const response = await save;
+      if (options.mountedRef.current && options.mcpToolUpdateVersionRef.current === updateVersion) {
+        const responseCatalog = response.mcpCatalog ?? [];
+        options.mcpToolCatalogDraftRef.current = responseCatalog;
         options.setApp((previous) => ({
           ...previous,
           tools: {
             ...previous.tools,
-            mcpCatalog: response.mcpCatalog ?? [],
+            mcpCatalog: responseCatalog,
           },
           error: undefined,
         }));
       }
     } catch (error) {
-      if (options.mountedRef.current) {
+      if (options.mountedRef.current && options.mcpToolUpdateVersionRef.current === updateVersion) {
         options.setApp((previous) => ({
           ...previous,
           error: error instanceof Error ? error.message : "MCP 工具状态保存失败。",
         }));
       }
-    } finally {
-      if (options.mountedRef.current) options.setSavingTools(false);
     }
   }
 
@@ -453,7 +623,7 @@ export function createAppSettingsController(options: AppSettingsControllerOption
       if (options.mountedRef.current) {
         options.setApp((previous) => ({
           ...previous,
-          error: error instanceof Error ? error.message : "Skills 状态保存失败。",
+          error: error instanceof Error ? error.message : "技能状态保存失败。",
         }));
       }
     } finally {
@@ -472,7 +642,7 @@ export function createAppSettingsController(options: AppSettingsControllerOption
       if (options.mountedRef.current) {
         options.setApp((previous) => ({
           ...previous,
-          error: error instanceof Error ? error.message : "Skills 刷新失败。",
+          error: error instanceof Error ? error.message : "技能刷新失败。",
         }));
       }
     } finally {
@@ -483,6 +653,8 @@ export function createAppSettingsController(options: AppSettingsControllerOption
   return {
     saveModelConfig,
     createCustomModelProfile,
+    reorderModelProviders,
+    deleteModelProvider,
     revealModelApiKey,
     selectComposerModel,
     fetchModelsForProfile,
@@ -493,10 +665,86 @@ export function createAppSettingsController(options: AppSettingsControllerOption
     loadMcpReferences,
     importMcpConfig,
     testMcpServer: testSelectedMcpServer,
+    checkMcpEnvironment: checkSelectedMcpEnvironment,
+    installMcpEnvironment: installSelectedMcpEnvironment,
     deleteMcpServer: deleteSelectedMcpServer,
     updateMcpTool,
     updateTool,
     refreshSkills,
     updateSkill,
   };
+}
+
+function updateLocalMcpCatalogServer(
+  catalog: readonly McpServerCatalogItem[],
+  serverId: string,
+  patch: {
+    readonly toolExposureMode: NonNullable<McpServerCatalogItem["toolExposureMode"]>;
+    readonly enabledTools: readonly string[];
+    readonly autoApprovedTools: readonly string[];
+  }
+): readonly McpServerCatalogItem[] {
+  return catalog.map((server) => {
+    if (server.serverId !== serverId) {
+      return server;
+    }
+    const exposedTools = server.tools.filter((tool) => isLocalMcpToolEnabled(server.serverId, patch.toolExposureMode, patch.enabledTools, tool.name));
+    return {
+      ...server,
+      toolExposureMode: patch.toolExposureMode,
+      enabledTools: patch.enabledTools,
+      autoApprovedTools: patch.autoApprovedTools,
+      exposedTools,
+    };
+  });
+}
+
+function mcpToolPatchFromCatalog(
+  catalog: readonly McpServerCatalogItem[],
+  serverId: string,
+  toolName: string,
+  enabled: boolean,
+  autoApproved?: boolean
+): {
+  readonly toolExposureMode: NonNullable<McpServerCatalogItem["toolExposureMode"]>;
+  readonly enabledTools: readonly string[];
+  readonly autoApprovedTools: readonly string[];
+} {
+  const currentServer = catalog.find((server) => server.serverId === serverId);
+  const currentTools = new Set(currentServer?.enabledTools ?? []);
+  const currentAutoApprovedTools = new Set(currentServer?.autoApprovedTools ?? []);
+  const normalizedToolName = toolName.startsWith(`${serverId}__`) ? toolName.slice(`${serverId}__`.length) : toolName;
+  if (enabled) {
+    currentTools.add(normalizedToolName);
+  } else {
+    currentTools.delete(normalizedToolName);
+    currentTools.delete(toolName);
+    currentAutoApprovedTools.delete(normalizedToolName);
+    currentAutoApprovedTools.delete(toolName);
+  }
+  if (autoApproved !== undefined) {
+    if (autoApproved) {
+      currentAutoApprovedTools.add(normalizedToolName);
+    } else {
+      currentAutoApprovedTools.delete(normalizedToolName);
+      currentAutoApprovedTools.delete(toolName);
+    }
+  }
+  return {
+    toolExposureMode: "selected",
+    enabledTools: [...currentTools],
+    autoApprovedTools: [...currentAutoApprovedTools],
+  };
+}
+
+function isLocalMcpToolEnabled(
+  serverId: string,
+  exposureMode: NonNullable<McpServerCatalogItem["toolExposureMode"]>,
+  enabledTools: readonly string[],
+  toolName: string
+): boolean {
+  if (exposureMode === "none") return false;
+  if (exposureMode === "all") return true;
+  const localName = toolName.startsWith(`${serverId}__`) ? toolName.slice(`${serverId}__`.length) : toolName;
+  return enabledTools.includes(toolName) || enabledTools.includes(localName);
 }

@@ -10,10 +10,16 @@ export function modelOptionsFromConfig(
   config: ConfigResponse | undefined,
   catalogs: Readonly<Record<string, ModelProviderModelCatalog>>
 ): readonly ChatModelOption[] {
+  const order = config?.modelProviderOrder ?? [];
   return (config?.profiles ?? [])
     .filter(modelProfileHasId)
     .map((profile, index) => ({ profile, index }))
     .sort((left, right) => {
+      const leftOrder = orderIndex(order, `profile:${left.profile.profileId}`);
+      const rightOrder = orderIndex(order, `profile:${right.profile.profileId}`);
+      if (leftOrder !== rightOrder) {
+        return leftOrder - rightOrder;
+      }
       const rankDelta = modelProviderSortRank({
         title: left.profile.label,
         profileId: left.profile.profileId,
@@ -57,6 +63,29 @@ export function selectedModelOptionId(config: ConfigResponse | undefined, option
   if (profileId === undefined || model === undefined) return "";
   const selectedId = modelOptionId(profileId, model);
   return options.some((option) => option.id === selectedId) ? selectedId : "";
+}
+
+export function modelOptionSupportsReasoningEffort(
+  config: ConfigResponse | undefined,
+  optionId: string
+): boolean {
+  if (optionId.length === 0) {
+    return config?.capabilities?.modelCapabilities?.supportsReasoningEffort === true;
+  }
+  const parsed = parseModelOptionId(optionId);
+  if (parsed === undefined) return false;
+  const profile =
+    config?.profiles?.find((item) => item.profileId === parsed.profileId) ??
+    (config?.config?.profileId === parsed.profileId ? config.config : undefined);
+  if (profile === undefined) return false;
+  return modelLooksReasoningEffortCapable({
+    profileId: parsed.profileId,
+    providerKind: profile.providerKind,
+    protocolKind: profile.protocolKind,
+    baseUrl: profile.baseUrl,
+    label: profile.label,
+    model: parsed.modelId,
+  });
 }
 
 export function parseModelOptionId(value: string): { readonly profileId: string; readonly modelId: string } | undefined {
@@ -103,4 +132,39 @@ function modelCatalogItemsWithConfiguredModel(
 
 function modelOptionId(profileId: string, modelId: string): string {
   return JSON.stringify([profileId, modelId]);
+}
+
+function orderIndex(order: readonly string[], key: string): number {
+  const index = order.indexOf(key);
+  if (index !== -1) return index;
+  if (key.startsWith("profile:")) {
+    const presetIndex = order.indexOf(`preset:${key.slice("profile:".length)}`);
+    if (presetIndex !== -1) return presetIndex;
+  }
+  return Number.MAX_SAFE_INTEGER;
+}
+
+function modelLooksReasoningEffortCapable(input: {
+  readonly profileId?: string;
+  readonly providerKind?: string;
+  readonly protocolKind?: string;
+  readonly baseUrl?: string;
+  readonly label?: string;
+  readonly model: string;
+}): boolean {
+  if (input.providerKind !== undefined && input.providerKind !== "openai_compatible") {
+    return false;
+  }
+  const model = input.model.toLowerCase();
+  const signals = `${input.profileId ?? ""} ${input.label ?? ""} ${input.baseUrl ?? ""} ${model}`.toLowerCase();
+  if (signals.includes("deepseek") && model.includes("deepseek-v4")) {
+    return true;
+  }
+  return (
+    model.includes("gpt-5") ||
+    model.includes("gpt-5.4") ||
+    model.includes("gpt-5.5") ||
+    model.includes("o3") ||
+    model.includes("o4")
+  );
 }

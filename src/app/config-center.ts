@@ -117,6 +117,23 @@ export class ConfigCenter {
     ));
   }
 
+  async getModelProviderOrder(): Promise<readonly string[]> {
+    const settings = await this.readOrCreateSettings();
+    return settings.modelProviderOrder ?? [];
+  }
+
+  async updateModelProviderOrder(order: readonly string[]): Promise<readonly string[]> {
+    const current = await this.readOrCreateSettings();
+    const next = normalizeLocalSettings({
+      ...current,
+      version: 3,
+      modelProviderOrder: order,
+      updatedAt: new Date().toISOString(),
+    });
+    await this.options.settingsStore.writeSettings(next);
+    return next.modelProviderOrder ?? [];
+  }
+
   async listModelProviderModelCatalogs(): Promise<readonly ModelProviderModelCatalog[]> {
     const settings = await this.readOrCreateSettings();
     return settings.modelCatalogs ?? [];
@@ -367,6 +384,9 @@ export class ConfigCenter {
       enabledTools: input.enabledTools === undefined
         ? existing?.enabledTools ?? []
         : [...new Set(input.enabledTools.map((tool) => normalizeOptionalString(tool)).filter((tool): tool is string => tool !== undefined))],
+      autoApprovedTools: input.autoApprovedTools === undefined
+        ? existing?.autoApprovedTools ?? []
+        : [...new Set(input.autoApprovedTools.map((tool) => normalizeOptionalString(tool)).filter((tool): tool is string => tool !== undefined))],
       enabled: input.enabled ?? existing?.enabled ?? false,
       lastConnectedAt: existing?.lastConnectedAt,
       lastError: existing?.lastError,

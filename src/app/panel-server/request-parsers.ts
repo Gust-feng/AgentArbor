@@ -27,7 +27,19 @@ export type PanelRunInput = {
   readonly aiMode?: ModelRuntimeMode;
   readonly requestedRunMode?: PanelRunMode;
   readonly reasoningEffort?: ModelRunReasoningEffort;
+  readonly modelOverride?: {
+    readonly profileId: string;
+    readonly model: string;
+  };
   readonly taskSoilInput?: DesktopTaskSoilInput;
+};
+
+export type ConversationRenameInput = {
+  readonly title: string;
+};
+
+export type ConversationPinInput = {
+  readonly pinned: boolean;
 };
 
 export type ModelCatalogUpdateInput = {
@@ -36,6 +48,10 @@ export type ModelCatalogUpdateInput = {
   readonly modelsPath?: string;
   readonly fetchedAt?: string;
   readonly models: readonly ModelProviderModelCatalogItem[];
+};
+
+export type ModelProviderOrderUpdateInput = {
+  readonly order: readonly string[];
 };
 
 // Keep request parsing stateless. Route modules decide what to do with validated inputs.
@@ -72,6 +88,17 @@ export function parseCreateModelProfile(raw: unknown): CreateModelProviderProfil
     ...parsed,
     profileId,
   };
+}
+
+export function parseModelProviderOrderUpdate(raw: unknown): ModelProviderOrderUpdateInput {
+  const record = asRecord(raw);
+  if (!Array.isArray(record.order)) {
+    throw new PanelHttpError(400, "invalid_model_provider_order", "模型服务顺序必须是数组。");
+  }
+  const order = record.order
+    .map((value) => optionalString(value))
+    .filter((value): value is string => value !== undefined);
+  return { order };
 }
 
 export function parseModelCatalogUpdate(raw: unknown): ModelCatalogUpdateInput {
@@ -140,6 +167,7 @@ export function parseMcpServerUpdate(raw: unknown): UpsertMcpServerInput {
     confirmationMode: parseOptionalMcpConfirmationMode(record.confirmationMode),
     toolExposureMode: parseOptionalMcpToolExposureMode(record.toolExposureMode),
     enabledTools: stringArrayOrUndefined(record.enabledTools),
+    autoApprovedTools: stringArrayOrUndefined(record.autoApprovedTools),
     enabled: booleanOrUndefined(record.enabled),
   };
 }
@@ -229,8 +257,25 @@ export function parseRunInput(raw: unknown): PanelRunInput {
     aiMode: parseOptionalAiMode(record.aiMode, "AI 模式无效。"),
     requestedRunMode: parseOptionalRunMode(record.runMode),
     reasoningEffort: parseRunReasoningEffort(record.reasoningEffort, record.openAI),
+    modelOverride: parseModelOverride(record.modelOverride),
     taskSoilInput,
   };
+}
+
+export function parseConversationRenameInput(raw: unknown): ConversationRenameInput {
+  const title = optionalString(asRecord(raw).title);
+  if (title === undefined) {
+    throw new PanelHttpError(400, "missing_conversation_title", "会话标题不能为空。");
+  }
+  return { title };
+}
+
+export function parseConversationPinInput(raw: unknown): ConversationPinInput {
+  const pinned = asRecord(raw).pinned;
+  if (typeof pinned !== "boolean") {
+    throw new PanelHttpError(400, "invalid_conversation_pin_state", "置顶状态必须是布尔值。");
+  }
+  return { pinned };
 }
 
 export function parseConfirmationDecision(raw: unknown): Pick<ConfirmationDecision, "decision" | "guidance"> {
@@ -350,6 +395,19 @@ function parseOptionalRunMode(value: unknown): PanelRunMode | undefined {
     return value;
   }
   throw new PanelHttpError(400, "invalid_run_mode", "运行模式无效。");
+}
+
+function parseModelOverride(value: unknown): PanelRunInput["modelOverride"] {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  const record = asRecord(value);
+  const profileId = optionalString(record.profileId);
+  const model = optionalString(record.model);
+  if (profileId === undefined || model === undefined) {
+    throw new PanelHttpError(400, "invalid_model_override", "本次运行的模型选择无效。");
+  }
+  return { profileId, model };
 }
 
 function parseOptionalAiMode(value: unknown, invalidMessage: string): ModelRuntimeMode | undefined {

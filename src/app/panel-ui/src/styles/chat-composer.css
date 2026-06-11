@@ -1,38 +1,51 @@
+.chat-composer-shell {
+  position: relative;
+  display: grid;
+  width: 100%;
+  gap: var(--space-4);
+}
+
+.chat-composer-home {
+  width: min(100%, var(--panel-max-width));
+  margin: 0 auto;
+}
+
 .chat-input-card {
   position: relative;
-  border: 1px solid color-mix(in oklch, var(--border) 88%, transparent);
-  border-radius: 24px;
-  background:
-    linear-gradient(180deg, color-mix(in oklch, white 98%, transparent), transparent 42%),
-    var(--surface);
-  box-shadow:
-    0 24px 70px color-mix(in oklch, #111827 10%, transparent),
-    inset 0 1px 0 color-mix(in oklch, white 84%, transparent);
+  overflow: visible;
+  border: 1px solid color-mix(in oklch, var(--border) 92%, transparent);
+  border-radius: 16px;
+  background: var(--surface);
+  box-shadow: 0 8px 22px color-mix(in oklch, #111827 4%, transparent);
   transition:
     border-color var(--motion-panel-duration) var(--motion-ease-standard),
     box-shadow var(--motion-panel-duration) var(--motion-ease-standard);
 }
 
 .chat-input-card.focused {
-  border-color: color-mix(in oklch, var(--accent) 50%, var(--border));
-  box-shadow:
-    0 30px 80px color-mix(in oklch, #111827 12%, transparent),
-    0 0 0 4px color-mix(in oklch, var(--accent) 9%, transparent);
+  border-color: color-mix(in oklch, var(--border) 92%, transparent);
+  box-shadow: 0 8px 22px color-mix(in oklch, #111827 4%, transparent);
 }
 
 .chat-input-textarea {
   display: block;
   width: 100%;
-  min-height: 118px;
+  min-height: 42px;
   border: 0;
-  border-radius: 24px 24px 0 0;
+  border-radius: 16px 16px 0 0;
   background: transparent;
-  padding: 22px 22px var(--space-3);
+  padding: 12px 16px 6px;
   color: var(--fg);
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 400;
-  line-height: 1.58;
+  line-height: 1.5;
   resize: none;
+}
+
+.chat-input-textarea:focus,
+.chat-input-textarea:focus-visible {
+  outline: none;
+  box-shadow: none;
 }
 
 .chat-input-textarea::placeholder {
@@ -43,7 +56,7 @@
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-2);
-  padding: var(--space-3) var(--space-3) 0;
+  padding: 10px 12px 0;
 }
 
 .attachment-pill {
@@ -55,7 +68,7 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   background: color-mix(in oklch, var(--accent-soft) 36%, var(--surface));
-  padding: var(--space-2) 10px;
+  padding: 6px 9px;
 }
 
 .attachment-pill.blocked {
@@ -99,9 +112,10 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--space-3);
+  gap: var(--space-4);
+  min-height: 38px;
   border-top: 1px solid color-mix(in oklch, var(--border) 62%, transparent);
-  padding: var(--space-3) var(--space-4) var(--space-4);
+  padding: 5px 12px 8px;
 }
 
 .chat-input-left,
@@ -116,20 +130,26 @@
 .composer-options-button,
 .composer-cancel-button {
   display: inline-flex;
-  height: 34px;
+  height: 28px;
   align-items: center;
   gap: 6px;
-  border: 1px solid color-mix(in oklch, var(--border) 76%, transparent);
+  border: 0;
   border-radius: 999px;
-  padding: 0 var(--space-3);
-  color: var(--muted);
+  background: transparent;
+  padding: 0 8px;
+  color: color-mix(in oklch, var(--fg) 58%, var(--muted));
   font-size: 12px;
-  font-weight: 500;
+  font-weight: 400;
 }
 
 .composer-options-button {
-  background: transparent;
-  color: var(--muted);
+  color: color-mix(in oklch, var(--fg) 72%, var(--muted));
+}
+
+.composer-tool-button[aria-expanded="true"],
+.composer-options-button[aria-expanded="true"] {
+  background: color-mix(in oklch, var(--surface-muted) 72%, transparent);
+  color: var(--fg);
 }
 
 .composer-tool-button:hover,
@@ -141,14 +161,51 @@
   color: var(--fg);
 }
 
+.composer-model-chip {
+  gap: 8px;
+  padding-left: 4px;
+}
+
+.composer-reasoning-chip {
+  gap: 4px;
+  padding-inline: 9px 7px;
+}
+
+.composer-reasoning-prefix {
+  color: var(--muted);
+}
+
+.composer-model-dot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: var(--status-success);
+}
+
+.composer-model-chip.saving .composer-model-dot {
+  background: color-mix(in oklch, var(--fg) 46%, var(--muted));
+}
+
+.composer-options-button:disabled,
+.model-menu-popover button:disabled {
+  cursor: default;
+  opacity: 0.72;
+}
+
+.composer-icon-button {
+  width: 30px;
+  padding: 0;
+  justify-content: center;
+}
+
 .composer-options-menu {
   position: relative;
 }
 
-.composer-options-popover,
-.context-popover {
+.composer-options-popover {
   position: absolute;
-  right: 0;
+  left: 0;
   bottom: calc(100% + 10px);
   z-index: 40;
   width: min(320px, calc(100vw - 48px));
@@ -166,68 +223,61 @@
   gap: 8px;
 }
 
-.composer-reasoning-control,
-.composer-model-summary {
-  display: grid;
-  width: 100%;
-  min-width: 0;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 10px;
-  border-radius: var(--radius-lg);
-  background: transparent;
-  padding: var(--space-2) 10px;
-  color: var(--fg);
-  font-size: 12px;
-}
-
-.composer-reasoning-control span,
-.composer-model-summary span {
-  display: inline-flex;
-  min-width: 0;
-  align-items: center;
-  gap: 6px;
-  color: var(--muted);
-}
-
-.composer-reasoning-control select {
-  max-width: 90px;
-  border: 0;
-  background: transparent;
-  padding: 0;
-  color: inherit;
-  font: inherit;
-}
-
-.composer-model-summary {
-  text-align: left;
-}
-
-.composer-model-summary:hover,
-.composer-reasoning-control:hover {
-  background: color-mix(in oklch, var(--accent-soft) 38%, var(--surface));
-}
-
-.composer-model-summary strong {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--fg);
-  font-size: 12px;
-  font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.composer-model-popover {
+  top: auto;
+  bottom: calc(100% + 8px);
+  width: min(300px, calc(100vw - 48px));
+  padding: 6px;
 }
 
 .model-menu-popover {
   position: static;
   width: 100%;
-  max-height: 260px;
+  max-height: 250px;
   overflow-y: auto;
-  border: 1px solid color-mix(in oklch, var(--border) 72%, transparent);
-  border-radius: var(--radius-lg);
-  background: color-mix(in oklch, var(--surface-subtle) 54%, transparent);
-  padding: 6px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  padding: 0;
   box-shadow: none;
+}
+
+.composer-reasoning-popover {
+  width: 156px;
+  padding: 5px;
+}
+
+.composer-reasoning-popover button {
+  display: grid;
+  width: 100%;
+  gap: 2px;
+  border-radius: var(--radius-md);
+  padding: 7px 9px;
+  color: var(--fg);
+  text-align: left;
+}
+
+.composer-reasoning-popover button:hover,
+.composer-reasoning-popover button.selected {
+  background: color-mix(in oklch, var(--accent-soft) 52%, var(--surface));
+}
+
+.composer-reasoning-popover span,
+.composer-reasoning-popover small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-reasoning-popover span {
+  color: var(--fg);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.composer-reasoning-popover small {
+  color: color-mix(in oklch, var(--fg) 54%, var(--muted));
+  font-size: 11px;
 }
 
 .model-menu-popover section {
@@ -281,6 +331,13 @@
   display: block;
 }
 
+.model-option-initial {
+  color: color-mix(in oklch, var(--fg) 70%, var(--muted));
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+}
+
 .model-option-copy {
   display: grid;
   min-width: 0;
@@ -326,18 +383,22 @@
 
 .composer-send-button {
   display: inline-flex;
-  width: 42px;
-  height: 42px;
+  width: 30px;
+  height: 30px;
   align-items: center;
   justify-content: center;
   border-radius: 999px;
-  background: linear-gradient(135deg, var(--accent-strong), color-mix(in oklch, var(--secondary) 42%, var(--accent-strong)));
+  background: color-mix(in oklch, var(--fg) 42%, var(--muted));
   color: var(--primary-foreground);
-  box-shadow: 0 10px 22px color-mix(in oklch, var(--accent) 22%, transparent);
+  box-shadow: none;
 }
 
 .composer-send-button:hover:not(:disabled) {
-  background: linear-gradient(135deg, var(--accent-hover), color-mix(in oklch, var(--secondary) 38%, var(--accent-hover)));
+  background: color-mix(in oklch, var(--fg) 62%, var(--muted));
+}
+
+.composer-send-button:disabled {
+  opacity: 0.58;
 }
 
 .spinner {
@@ -349,45 +410,36 @@
   animation: spin 0.8s linear infinite;
 }
 
-.context-popover {
-  left: 12px;
-  right: auto;
-  width: min(580px, calc(100vw - 96px));
+.chat-composer-home .chat-input-card {
+  border-radius: 16px;
+  box-shadow: 0 8px 22px color-mix(in oklch, #111827 4%, transparent);
 }
 
-.context-kind-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-bottom: 10px;
+.chat-composer-home .chat-input-card.focused {
+  box-shadow: 0 8px 22px color-mix(in oklch, #111827 4%, transparent);
 }
 
-.context-kind-row button {
+.chat-composer-home .chat-input-textarea {
+  min-height: 78px;
+  border-radius: 16px 16px 0 0;
+  padding: 12px 16px 6px;
+  font-size: 16px;
+}
+
+.chat-composer-home .chat-input-toolbar {
+  min-height: 38px;
+  padding: 5px 12px 8px;
+}
+
+.chat-composer-home .composer-tool-button,
+.chat-composer-home .composer-options-button,
+.chat-composer-home .composer-cancel-button {
   height: 28px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  padding: 0 12px;
-  color: var(--muted);
+  padding: 0 7px;
   font-size: 12px;
 }
 
-.context-kind-row button.selected {
-  border-color: var(--accent-border);
-  background: var(--accent-soft);
-  color: var(--accent-active);
-}
-
-.context-add-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px;
-}
-
-.context-add-row button {
-  height: 36px;
-  border-radius: var(--radius-md);
-  background: var(--accent-strong);
-  padding: 0 14px;
-  color: var(--primary-foreground);
-  font-size: 12px;
+.chat-composer-home .composer-send-button {
+  width: 30px;
+  height: 30px;
 }

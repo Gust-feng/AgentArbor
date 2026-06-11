@@ -2,6 +2,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { getDefaultEnvironment, StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
+import { ensureManagedMcpExecutable, mcpRuntimePathEnvironment } from "./mcp-local-runtime.js";
 
 export type McpClientConfig = {
   readonly serverId: string;
@@ -87,7 +88,7 @@ export class McpClientWrapper {
     if (this.connected) {
       return;
     }
-    this.transport = this.options.transport ?? buildTransport(this.config);
+    this.transport = this.options.transport ?? await buildTransport(this.config);
     this.client = new Client(
       { name: `agentarbor-${this.config.serverId}`, version: "0.1.0" },
       { capabilities: {} }
@@ -190,15 +191,20 @@ export class McpClientWrapper {
   }
 }
 
-function buildTransport(config: McpClientConfig): Transport {
+async function buildTransport(config: McpClientConfig): Promise<Transport> {
   if (config.transport === "stdio") {
     if (config.command === undefined) {
       throw new Error(`MCP server "${config.serverId}" requires a command for stdio transport.`);
     }
+    const stdioEnv = buildStdioEnvironment(config.env ?? {});
+    const command = (await ensureManagedMcpExecutable(config.command, {
+      ...process.env,
+      ...(stdioEnv ?? {}),
+    })).executable ?? config.command;
     return new StdioClientTransport({
-      command: config.command,
+      command,
       args: config.args === undefined ? undefined : [...config.args],
-      env: config.env === undefined ? undefined : buildStdioEnvironment(config.env),
+      env: stdioEnv,
       stderr: "ignore",
     });
   }
@@ -213,11 +219,15 @@ function buildTransport(config: McpClientConfig): Transport {
 }
 
 function buildStdioEnvironment(env: Readonly<Record<string, string>>): Record<string, string> {
-  return {
+  const base = {
     ...getDefaultEnvironment(),
     ...platformPathEnvironment(process.env),
-    NODE_USE_SYSTEM_CA: process.env.NODE_USE_SYSTEM_CA ?? "1",
     ...env,
+  };
+  return {
+    ...base,
+    ...mcpRuntimePathEnvironment(base),
+    NODE_USE_SYSTEM_CA: base.NODE_USE_SYSTEM_CA ?? "1",
   };
 }
 

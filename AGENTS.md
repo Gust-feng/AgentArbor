@@ -108,6 +108,7 @@ Agent 口径必须区分产品架构和实现命名：保留 deep / Agent 集群
 - 不引入新的包管理器、构建系统、运行时代码框架或测试框架，除非用户明确要求扩展实现阶段。
 - 实现以 TypeScript 自研架构为主。
 - 外部模型、工具、协议和平台通过 adapter 接入，不能反向污染核心领域模型。
+- Desktop Shell 中由用户通过系统选择器显式选择的本地文件或文件夹，应视为本轮任务授权上下文；实现不能为了抽象安全边界强制限制在当前 workspace 内。工程层仍可做只读、大小截断、错误处理和可观察投影，但不能把标准附件体验做成手动路径输入、额外确认或无法使用的伪附件。
 - `.agentarbor/` 不提前填充占位 agent、workflow、memory 或 schema；Plan Package 也必须等契约稳定、真实任务出生和显式写入授权后再增量创建。
 - 新增或修改 Codex skill 时，只改 `.agents/skills/`，并遵守 Agent Skills 标准。
 - 新增 Codex custom subagent 使用 `.codex/agents/*.toml`。

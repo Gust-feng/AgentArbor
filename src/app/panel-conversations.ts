@@ -42,7 +42,7 @@ export class PanelConversationStore {
 
   list(): readonly PanelConversationSummaryReadModel[] {
     return [...this.conversations.values()]
-      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+      .sort(compareConversations)
       .map((conversation) => toConversationSummary(conversation));
   }
 
@@ -87,16 +87,45 @@ export class PanelConversationStore {
     return toConversationReadModel(conversation);
   }
 
+  rename(input: {
+    readonly conversationId: string;
+    readonly title: string;
+  }): PanelConversationReadModel {
+    const conversation = this.requireConversation(input.conversationId);
+    const title = compact(input.title, 80);
+    if (title.length === 0) {
+      throw new Error("Panel conversation title cannot be empty.");
+    }
+    conversation.title = title;
+    conversation.titleEditedAt = nowIso();
+    return toConversationReadModel(conversation);
+  }
+
+  setPinned(input: {
+    readonly conversationId: string;
+    readonly pinned: boolean;
+  }): PanelConversationReadModel {
+    const conversation = this.requireConversation(input.conversationId);
+    conversation.pinnedAt = input.pinned ? conversation.pinnedAt ?? nowIso() : undefined;
+    return toConversationReadModel(conversation);
+  }
+
+  delete(conversationId: string): boolean {
+    return this.conversations.delete(conversationId);
+  }
+
   restore(record: RuntimeConversationRecord): PanelConversationReadModel {
     const existing = this.conversations.get(record.conversationId);
-    if (existing !== undefined && existing.updatedAt.localeCompare(record.updatedAt) >= 0) {
+    if (existing !== undefined && conversationVersion(existing).localeCompare(runtimeConversationVersion(record)) >= 0) {
       return toConversationReadModel(existing);
     }
     const conversation: PanelConversation = {
       conversationId: record.conversationId,
       createdAt: record.createdAt,
       title: compact(record.title, 80),
+      titleEditedAt: record.titleEditedAt,
       updatedAt: record.updatedAt,
+      pinnedAt: record.pinnedAt,
       currentRunId: record.activeRunId,
       latestRunId: record.latestRunId,
       queuedRunIds: [...record.queuedRunIds],
@@ -128,7 +157,9 @@ export class PanelConversationStore {
       conversationId: createId("conversation"),
       createdAt,
       title: compact(input?.title ?? "新对话", 80),
+      titleEditedAt: undefined,
       updatedAt: createdAt,
+      pinnedAt: undefined,
       queuedRunIds: [],
       turns: [],
     };
@@ -167,7 +198,9 @@ export class PanelConversationStore {
       status: queued ? "pending" : "running",
     });
     conversation.turns.push(userTurn, assistantTurn);
-    conversation.title = deriveConversationTitle(conversation, input.goal);
+    if (conversation.titleEditedAt === undefined) {
+      conversation.title = deriveConversationTitle(conversation, input.goal);
+    }
     conversation.updatedAt = assistantTurn.updatedAt;
     return { conversation, userTurn, assistantTurn, queueBehindRunId: input.queueBehindRunId };
   }
@@ -424,4 +457,27 @@ function reserveConversationIds(conversation: PanelConversation): void {
     reserveId(turn.turnId);
     reserveId(turn.runId);
   }
+}
+
+function compareConversations(left: PanelConversation, right: PanelConversation): number {
+  const pinned = (right.pinnedAt ?? "").localeCompare(left.pinnedAt ?? "");
+  return pinned === 0 ? right.updatedAt.localeCompare(left.updatedAt) : pinned;
+}
+
+function conversationVersion(conversation: PanelConversation): string {
+  return maxIso([conversation.updatedAt, conversation.titleEditedAt, conversation.pinnedAt]);
+}
+
+function runtimeConversationVersion(conversation: RuntimeConversationRecord): string {
+  return maxIso([conversation.updatedAt, conversation.titleEditedAt, conversation.pinnedAt]);
+}
+
+function maxIso(values: readonly (string | undefined)[]): string {
+  let latest = "";
+  for (const value of values) {
+    if (value !== undefined && value.localeCompare(latest) > 0) {
+      latest = value;
+    }
+  }
+  return latest;
 }

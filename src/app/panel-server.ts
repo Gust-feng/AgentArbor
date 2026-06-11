@@ -4,6 +4,7 @@ export {
 } from "./panel-server/index.js";
 
 export type {
+  PanelContextAttachmentSelection,
   PanelModelCatalogFetch,
   PanelProviderFetch,
   PanelServerOptions,

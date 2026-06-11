@@ -74,6 +74,7 @@ export type McpServerCatalogItem = {
   readonly envSecretRefCount: number;
   readonly authSecretRefCount?: number;
   readonly enabledTools?: readonly string[];
+  readonly autoApprovedTools?: readonly string[];
   readonly lastConnectedAt?: string;
   readonly lastError?: string;
   readonly tools: readonly ToolCatalogItem[];
@@ -93,6 +94,25 @@ export type ToolsResponse = {
     };
   };
   readonly mcpCatalog?: readonly McpServerCatalogItem[];
+};
+
+export type McpEnvironmentCheckResponse = {
+  readonly ok: boolean;
+  readonly status:
+    | "ready"
+    | "missing_command"
+    | "not_found"
+    | "check_failed"
+    | "installing"
+    | "installed"
+    | "unsupported"
+    | "install_failed";
+  readonly command?: string;
+  readonly resolvedCommand?: string;
+  readonly managed?: boolean;
+  readonly installable?: boolean;
+  readonly message: string;
+  readonly checkedAt: string;
 };
 
 export type McpServerPreset = {

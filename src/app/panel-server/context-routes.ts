@@ -3,13 +3,16 @@ import type { ConfigCenter } from "../config-center.js";
 import {
   ContextAttachmentPreviewError,
   createContextAttachmentPreview,
+  createSelectedLocalContextAttachment,
   type CreateContextAttachmentPreviewInput,
 } from "../context-attachments.js";
 import { PanelHttpError, readJsonBody, writeJson } from "./http-utils.js";
 import { asRecord, optionalString } from "./request-parsers.js";
+import type { PanelContextAttachmentSelection } from "./types.js";
 
 export type PanelContextRouteRuntime = {
   readonly configCenter: ConfigCenter;
+  readonly contextAttachmentPicker?: () => Promise<PanelContextAttachmentSelection | undefined>;
 };
 
 export async function handlePanelContextRoute(
@@ -31,6 +34,33 @@ export async function handlePanelContextRoute(
       throw error;
     });
     writeJson(response, 200, { ok: true, attachment });
+    return true;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/context/attachments/select-local") {
+    if (runtime.contextAttachmentPicker === undefined) {
+      throw new PanelHttpError(501, "context_attachment_picker_unavailable", "当前环境不支持系统附件选择器。");
+    }
+    const selected = await runtime.contextAttachmentPicker();
+    if (selected === undefined) {
+      writeJson(response, 200, {
+        ok: true,
+        status: "cancelled",
+        message: "已取消选择附件。",
+      });
+      return true;
+    }
+    const attachment = await createSelectedLocalContextAttachment(selected).catch((error: unknown) => {
+      if (error instanceof ContextAttachmentPreviewError) {
+        throw new PanelHttpError(400, error.code, error.message);
+      }
+      throw error;
+    });
+    writeJson(response, 200, {
+      ok: true,
+      status: "completed",
+      attachment,
+    });
     return true;
   }
   return false;

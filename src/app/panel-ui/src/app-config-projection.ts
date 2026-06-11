@@ -10,6 +10,7 @@ export function mergeConfigResponse(previous: ConfigResponse | undefined, incomi
     ...incoming,
     config: incoming.config ?? incoming.profile ?? previous?.config,
     profiles: incoming.profiles ?? previous?.profiles,
+    modelProviderOrder: incoming.modelProviderOrder ?? previous?.modelProviderOrder,
     modelProviderMarket: incoming.modelProviderMarket ?? previous?.modelProviderMarket,
     modelCatalogs: incoming.modelCatalogs ?? previous?.modelCatalogs,
     workspace: incoming.workspace ?? previous?.workspace,

@@ -1,7 +1,5 @@
-import { existsSync } from "node:fs";
-import path from "node:path";
 import type { McpReferenceInfo } from "../../adapters/mcp/index.js";
-import { McpManager } from "../../adapters/mcp/index.js";
+import { ensureManagedMcpExecutable, installMcpExecutable, McpManager, resolveMcpExecutable } from "../../adapters/mcp/index.js";
 import type { McpServerSettings } from "../../domain/config/index.js";
 import { redactSensitiveText } from "../../kernel/redaction.js";
 import type { CapabilityCenter } from "../capability-center.js";
@@ -39,6 +37,95 @@ export type PanelMcpReferenceResult = {
   readonly resources: McpReferenceInfo["resources"];
   readonly resourceTemplates: McpReferenceInfo["resourceTemplates"];
 };
+
+export type PanelMcpEnvironmentCheckResult = {
+  readonly ok: boolean;
+  readonly status: "ready" | "missing_command" | "not_found" | "installing" | "installed" | "unsupported" | "install_failed";
+  readonly command?: string;
+  readonly resolvedCommand?: string;
+  readonly managed?: boolean;
+  readonly installable?: boolean;
+  readonly message: string;
+  readonly checkedAt: string;
+};
+
+export async function checkPanelMcpEnvironment(input: {
+  readonly commandLine?: string;
+  readonly command?: string;
+}): Promise<PanelMcpEnvironmentCheckResult> {
+  const checkedAt = new Date().toISOString();
+  const command = normalizeMcpEnvironmentCommand(input);
+  if (command === undefined) {
+    return {
+      ok: false,
+      status: "missing_command",
+      message: "先填写本地命令。",
+      checkedAt,
+    };
+  }
+
+  const resolution = await ensureManagedMcpExecutable(command);
+  if (resolution.executable !== undefined) {
+    return {
+      ok: true,
+      status: "ready",
+      command,
+      resolvedCommand: resolution.executable,
+      managed: resolution.source === "agentarbor",
+      installable: false,
+      message: mcpExecutableReadyMessage(resolution.source),
+      checkedAt,
+    };
+  }
+
+  return {
+    ok: false,
+    status: "not_found",
+    command,
+    installable: isInstallableMcpEnvironmentCommand(command),
+    message: `AgentArbor 本地 MCP 运行环境缺少 ${command}。`,
+    checkedAt,
+  };
+}
+
+export async function installPanelMcpEnvironment(input: {
+  readonly commandLine?: string;
+  readonly command?: string;
+}): Promise<PanelMcpEnvironmentCheckResult> {
+  const checkedAt = new Date().toISOString();
+  const command = normalizeMcpEnvironmentCommand(input);
+  if (command === undefined) {
+    return {
+      ok: false,
+      status: "missing_command",
+      message: "先填写本地命令。",
+      checkedAt,
+    };
+  }
+
+  const result = await installMcpExecutable(command);
+  if (result.executable !== undefined && (result.status === "ready" || result.status === "installed")) {
+    return {
+      ok: true,
+      status: result.status === "installed" ? "installed" : "ready",
+      command,
+      resolvedCommand: result.executable,
+      managed: result.source === "agentarbor",
+      installable: result.installable,
+      message: mcpExecutableReadyMessage(result.source),
+      checkedAt,
+    };
+  }
+
+  return {
+    ok: false,
+    status: result.status === "unsupported" ? "unsupported" : result.status === "install_failed" ? "install_failed" : "not_found",
+    command,
+    installable: result.installable,
+    message: result.errorSummary ?? `AgentArbor 本地 MCP 运行环境缺少 ${command}。`,
+    checkedAt,
+  };
+}
 
 export async function testPanelMcpServer(
   runtime: PanelMcpManagementRuntime,
@@ -247,24 +334,77 @@ function missingStdioCommand(server: McpServerSettings): string | undefined {
   if (server.transport !== "stdio" || server.command === undefined) {
     return undefined;
   }
-  return commandExists(server.command) ? undefined : server.command;
+  return resolveMcpExecutable(server.command).executable !== undefined ? undefined : server.command;
 }
 
-function commandExists(command: string): boolean {
-  if (command.trim().length === 0) {
-    return false;
+function normalizeMcpEnvironmentCommand(input: {
+  readonly commandLine?: string;
+  readonly command?: string;
+}): string | undefined {
+  const commandLine = input.commandLine?.trim();
+  if (commandLine !== undefined && commandLine.length > 0) {
+    return firstCommandToken(commandLine);
   }
-  if (command.includes("/") || command.includes("\\") || path.isAbsolute(command)) {
-    return existsSync(command);
+  const command = input.command?.trim();
+  return command !== undefined && command.length > 0 ? command : undefined;
+}
+
+function firstCommandToken(value: string): string | undefined {
+  let current = "";
+  let quote: '"' | "'" | undefined;
+  for (let index = 0; index < value.length; index += 1) {
+    const char = value[index]!;
+    if (char === "\\") {
+      const next = value[index + 1];
+      if (next === quote || next === "\\") {
+        current += next;
+        index += 1;
+      } else {
+        current += char;
+      }
+      continue;
+    }
+    if (quote !== undefined) {
+      if (char === quote) {
+        quote = undefined;
+      } else {
+        current += char;
+      }
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      quote = char;
+      continue;
+    }
+    if (/\s/u.test(char)) {
+      return current.length > 0 ? current : undefined;
+    }
+    current += char;
   }
-  const pathEntries = (process.env.PATH ?? process.env.Path ?? "").split(path.delimiter).filter((item) => item.length > 0);
-  const extensions = process.platform === "win32"
-    ? (process.env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD").split(";").filter((item) => item.length > 0)
-    : [""];
-  const candidates = process.platform === "win32" && path.extname(command).length > 0
-    ? [command]
-    : extensions.map((extension) => `${command}${extension}`);
-  return pathEntries.some((directory) => candidates.some((candidate) => existsSync(path.join(directory, candidate))));
+  return current.length > 0 ? current : undefined;
+}
+
+function isInstallableMcpEnvironmentCommand(command: string): boolean {
+  const normalized = command.toLowerCase().replace(/\.(exe|cmd|bat|ps1)$/u, "");
+  return ["uv", "uvx", "node", "npm", "npx", "pnpm", "pnpx", "bun", "bunx"].includes(pathBasename(normalized));
+}
+
+function pathBasename(value: string): string {
+  const slashIndex = Math.max(value.lastIndexOf("/"), value.lastIndexOf("\\"));
+  return slashIndex < 0 ? value : value.slice(slashIndex + 1);
+}
+
+function mcpExecutableReadyMessage(source: ReturnType<typeof resolveMcpExecutable>["source"]): string {
+  if (source === "agentarbor") {
+    return "AgentArbor 本地 MCP 运行环境已就绪。";
+  }
+  if (source === "common") {
+    return "AgentArbor 已找到本机可用的 MCP 运行文件。";
+  }
+  if (source === "absolute") {
+    return "已确认该运行文件可用。";
+  }
+  return "当前环境可以直接运行该命令。";
 }
 
 function missingConfigCode(server: McpServerSettings): string {

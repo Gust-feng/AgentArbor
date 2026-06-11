@@ -411,6 +411,65 @@ test("conversation API keeps follow-up messages in the same conversation", async
   }
 });
 
+test("conversation API renames, pins, unpins, and deletes persisted conversations", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-conversation-manage-"));
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+  try {
+    const first = await requestJson(server.url, "/api/conversations", {
+      method: "POST",
+      body: { goal: "第一条会话", aiMode: "fake" },
+    });
+    const second = await requestJson(server.url, "/api/conversations", {
+      method: "POST",
+      body: { goal: "第二条会话", aiMode: "fake" },
+    });
+    await waitForRun(server.url, first.body.run.runId, (body) => body.status === "completed", 4_000, "/api/desktop/runs");
+    await waitForRun(server.url, second.body.run.runId, (body) => body.status === "completed", 4_000, "/api/desktop/runs");
+    const firstConversationId = first.body.conversation.conversationId;
+    const secondConversationId = second.body.conversation.conversationId;
+
+    const renamed = await requestJson(server.url, `/api/conversations/${encodeURIComponent(firstConversationId)}/rename`, {
+      method: "POST",
+      body: { title: "项目梳理" },
+    });
+    const pinned = await requestJson(server.url, `/api/conversations/${encodeURIComponent(firstConversationId)}/pin`, {
+      method: "POST",
+      body: { pinned: true },
+    });
+    const listed = await requestJson(server.url, "/api/conversations");
+    const unpinned = await requestJson(server.url, `/api/conversations/${encodeURIComponent(firstConversationId)}/pin`, {
+      method: "POST",
+      body: { pinned: false },
+    });
+    const deleted = await requestJson(server.url, `/api/conversations/${encodeURIComponent(secondConversationId)}`, {
+      method: "DELETE",
+    });
+    const deletedRead = await requestJson(server.url, `/api/conversations/${encodeURIComponent(secondConversationId)}`);
+    const afterDelete = await requestJson(server.url, "/api/conversations");
+
+    assert.equal(renamed.status, 200);
+    assert.equal(renamed.body.conversation.title, "项目梳理");
+    assert.equal(typeof renamed.body.conversation.titleEditedAt, "string");
+    assert.equal(pinned.status, 200);
+    assert.equal(typeof pinned.body.conversation.pinnedAt, "string");
+    assert.equal(listed.body.conversations[0].conversationId, firstConversationId);
+    assert.equal(unpinned.status, 200);
+    assert.equal(unpinned.body.conversation.pinnedAt, undefined);
+    assert.equal(deleted.status, 200);
+    assert.equal(deleted.body.deletedConversationId, secondConversationId);
+    assert.equal(deletedRead.status, 404);
+    assert.equal(deletedRead.body.error.code, "conversation_not_found");
+    assert.equal(deletedRead.text.includes("未找到面板路由"), false);
+    assert.equal(
+      afterDelete.body.conversations.some((item: { conversationId: string }) => item.conversationId === secondConversationId),
+      false
+    );
+  } finally {
+    await server.close();
+    await removeTemporaryTree(directory);
+  }
+});
+
 test("conversation API rolls back completed turns before continuing the same conversation", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-conversation-rollback-"));
   const requests: ResponsesRequestBody[] = [];
@@ -1511,6 +1570,9 @@ function delayedRuntimeDatabase(
     },
     async listConversations() {
       return [];
+    },
+    async deleteConversation() {
+      return undefined;
     },
     async upsertRun(record) {
       return record;

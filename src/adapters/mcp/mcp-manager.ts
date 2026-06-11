@@ -102,7 +102,12 @@ export class McpManager {
         if (options.exposedOnly && !isToolEnabled(entry.config, tool.name)) {
           continue;
         }
-        executors.push(createMcpToolExecutor(entry.client, tool, entry.config.serverId, entry.config.confirmationMode));
+        executors.push(createMcpToolExecutor(
+          entry.client,
+          tool,
+          entry.config.serverId,
+          confirmationModeForTool(entry.config, tool.name)
+        ));
       }
     }
     return executors;
@@ -239,6 +244,18 @@ function isToolEnabled(server: McpServerSettings, toolName: string): boolean {
     return true;
   }
   return server.enabledTools.includes(toolName) || server.enabledTools.includes(`${server.serverId}__${toolName}`);
+}
+
+function confirmationModeForTool(server: McpServerSettings, toolName: string): McpServerSettings["confirmationMode"] {
+  return mcpToolNameSetHas(server.autoApprovedTools, server.serverId, toolName)
+    ? "never"
+    : server.confirmationMode;
+}
+
+function mcpToolNameSetHas(tools: readonly string[], serverId: string, toolName: string): boolean {
+  const localName = toolName.startsWith(`${serverId}__`) ? toolName.slice(`${serverId}__`.length) : toolName;
+  const namespacedName = `${serverId}__${localName}`;
+  return tools.includes(localName) || tools.includes(namespacedName);
 }
 
 function hasCompleteRuntimeConfig(server: McpServerSettings): boolean {

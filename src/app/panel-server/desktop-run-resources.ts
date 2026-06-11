@@ -154,6 +154,7 @@ async function mcpManagerFromCapabilitySnapshot(
       confirmationMode: server.runtimeConfig!.confirmationMode,
       toolExposureMode: server.runtimeConfig!.toolExposureMode,
       enabledTools: server.runtimeConfig!.enabledTools,
+      autoApprovedTools: server.runtimeConfig!.autoApprovedTools,
       enabled: true,
       updatedAt: server.updatedAt,
     }));

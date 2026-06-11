@@ -233,6 +233,7 @@ function mcpCatalogItemForServer(
     ].filter((ref) => ref !== undefined).length,
     toolExposureMode: server.toolExposureMode,
     enabledTools: [...server.enabledTools],
+    autoApprovedTools: [...server.autoApprovedTools],
     lastConnectedAt: runtime?.lastConnectedAt ?? server.lastConnectedAt,
     lastError: server.lastError,
     runtimeConfig: availability === "configured" ? {
@@ -248,6 +249,7 @@ function mcpCatalogItemForServer(
       confirmationMode: server.confirmationMode,
       toolExposureMode: server.toolExposureMode,
       enabledTools: [...server.enabledTools],
+      autoApprovedTools: [...server.autoApprovedTools],
     } : undefined,
     tools: runtimeStatus === "connected"
       ? discoveredMcpTools

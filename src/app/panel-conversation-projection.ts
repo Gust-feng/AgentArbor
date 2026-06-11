@@ -92,6 +92,7 @@ export function toRuntimeConversationRecord(
   return {
     conversationId: conversation.conversationId,
     title: compact(conversation.title, 80),
+    titleEditedAt: conversation.titleEditedAt,
     preview: compact(conversation.preview, 180),
     currentAction: compact(conversation.currentAction, 180),
     nextStep: compact(conversation.nextStep, 180),
@@ -101,6 +102,7 @@ export function toRuntimeConversationRecord(
     requiresUserAction: conversation.requiresUserAction === true,
     queuedRunIds: [...conversation.queuedRunIds],
     queuedRunCount: conversation.queuedRunCount,
+    pinnedAt: conversation.pinnedAt,
     createdAt: conversation.createdAt,
     updatedAt: conversation.updatedAt,
     turns: conversation.turns.map((turn) => ({
@@ -140,11 +142,13 @@ export function toConversationSummary(
   return {
     conversationId: conversation.conversationId,
     title: conversation.title,
+    titleEditedAt: conversation.titleEditedAt,
     preview: conversationPreview(conversation.turns),
     currentAction: conversationCurrentAction(conversation, status),
     nextStep: conversationNextStep(conversation, status),
     createdAt: conversation.createdAt,
     updatedAt: conversation.updatedAt,
+    pinnedAt: conversation.pinnedAt,
     status,
     activeRunId: conversation.currentRunId,
     latestRunId: conversation.latestRunId,

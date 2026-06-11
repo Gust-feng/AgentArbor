@@ -191,6 +191,7 @@ export type McpServerSettings = {
   readonly confirmationMode: McpConfirmationMode;
   readonly toolExposureMode: McpToolExposureMode;
   readonly enabledTools: readonly string[];
+  readonly autoApprovedTools: readonly string[];
   readonly enabled: boolean;
   readonly lastConnectedAt?: string;
   readonly lastError?: string;
@@ -226,6 +227,7 @@ export type AgentArborLocalSettings = {
   readonly modelProvider: ModelProviderProfileSettings;
   readonly activeModelProfileId: string;
   readonly modelProfiles: readonly ModelProviderProfileSettings[];
+  readonly modelProviderOrder?: readonly string[];
   readonly modelCatalogs?: readonly ModelProviderModelCatalog[];
   readonly modelCapabilityOverrides?: readonly ModelCapabilityOverrideSettings[];
   readonly toolStates?: readonly ToolStateSettings[];
@@ -293,6 +295,7 @@ export type UpsertMcpServerInput = {
   readonly confirmationMode?: McpConfirmationMode;
   readonly toolExposureMode?: McpToolExposureMode;
   readonly enabledTools?: readonly string[];
+  readonly autoApprovedTools?: readonly string[];
   readonly enabled?: boolean;
 };
 
@@ -359,6 +362,7 @@ export type CapabilityMcpCatalogItem = {
   readonly authSecretRefCount: number;
   readonly toolExposureMode: McpToolExposureMode;
   readonly enabledTools: readonly string[];
+  readonly autoApprovedTools: readonly string[];
   readonly lastConnectedAt?: string;
   readonly lastError?: string;
   readonly runtimeConfig?: {
@@ -374,6 +378,7 @@ export type CapabilityMcpCatalogItem = {
     readonly confirmationMode: McpConfirmationMode;
     readonly toolExposureMode: McpToolExposureMode;
     readonly enabledTools: readonly string[];
+    readonly autoApprovedTools: readonly string[];
   };
   readonly tools: readonly CapabilityToolCatalogItem[];
   readonly exposedTools: readonly CapabilityToolCatalogItem[];

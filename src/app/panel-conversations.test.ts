@@ -169,6 +169,49 @@ test("panel conversations keep the active follow-up run when an older guidance t
   assert.equal(conversation.status, "running");
 });
 
+test("panel conversation management keeps explicit titles and pinned ordering", () => {
+  const store = new PanelConversationStore();
+  const first = store.startDesktopMessage({ goal: "第一条很长的用户问题" });
+  const second = store.startDesktopMessage({ goal: "第二条用户问题" });
+
+  store.rename({
+    conversationId: first.conversation.conversationId,
+    title: "手动命名的会话",
+  });
+  store.startDesktopMessage({
+    conversationId: first.conversation.conversationId,
+    goal: "继续追问时不要覆盖手动标题",
+  });
+  store.setPinned({
+    conversationId: first.conversation.conversationId,
+    pinned: true,
+  });
+
+  const renamed = store.getReadModel(first.conversation.conversationId)!;
+  const summaries = store.list();
+  const persisted = toRuntimeConversationRecord(renamed);
+  const restored = new PanelConversationStore();
+  restored.restore(persisted);
+
+  assert.equal(renamed.title, "手动命名的会话");
+  assert.equal(typeof renamed.titleEditedAt, "string");
+  assert.equal(typeof renamed.pinnedAt, "string");
+  assert.equal(summaries[0]?.conversationId, first.conversation.conversationId);
+  assert.equal(summaries[1]?.conversationId, second.conversation.conversationId);
+  assert.equal(persisted.title, "手动命名的会话");
+  assert.equal(typeof persisted.titleEditedAt, "string");
+  assert.equal(typeof persisted.pinnedAt, "string");
+  assert.equal(restored.getReadModel(first.conversation.conversationId)?.title, "手动命名的会话");
+});
+
+test("panel conversations can delete local conversation state", () => {
+  const store = new PanelConversationStore();
+  const started = store.startDesktopMessage({ goal: "可以删除的会话" });
+
+  assert.equal(store.delete(started.conversation.conversationId), true);
+  assert.equal(store.getReadModel(started.conversation.conversationId), undefined);
+});
+
 test("panel conversation summaries expose actionable and queued task states", () => {
   const store = new PanelConversationStore();
   const pending = store.startDesktopMessage({ goal: "删除前需要确认" });

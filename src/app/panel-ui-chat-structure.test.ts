@@ -72,9 +72,13 @@ test("panel UI chat and transcript modules stay presentation-focused", async () 
     readPanelUiStyle("chat-results.css"),
   ]);
 
-  assert.equal(chatEmpty.includes("今天要处理什么？"), true);
+  assert.equal(chatEmpty.includes("今天要处理什么？"), false);
+  assert.equal(chatEmpty.includes("chatEmptyVisual"), true);
+  assert.equal(chatEmpty.includes("chat-empty-visual"), true);
+  assert.equal(chatEmpty.includes("draggable"), false);
+  assert.equal(chatEmpty.includes("PromptTraceAnimation"), false);
   assert.equal(chatEmpty.includes("export function ChatInputBar"), true);
-  assert.equal(chatEmpty.includes('variant="floating"'), true);
+  assert.equal(chatEmpty.includes('variant="home"'), true);
   assert.equal(chatEmpty.includes("textareaRef"), true);
   assert.equal(chatEmpty.includes("didAutoFocusRef"), true);
   assert.equal(chatEmpty.includes("previousBusyRef"), true);
@@ -91,7 +95,7 @@ test("panel UI chat and transcript modules stay presentation-focused", async () 
   assert.equal(chatEmpty.includes("composer-options-button"), true);
   assert.equal(chatEmpty.includes("composer-options-popover"), true);
   assert.equal(chatEmpty.includes("model-select-button"), false);
-  assert.equal(chatEmpty.includes("composer-reasoning-control"), true);
+  assert.equal(chatEmpty.includes("composer-reasoning-chip"), true);
   assert.equal(chatEmpty.includes("reasoningEffortEnabled"), true);
   assert.equal(chatEmpty.includes("当前工作入口"), false);
   assert.equal(chatEmpty.includes("继续最近任务"), false);
@@ -177,6 +181,11 @@ test("panel UI chat and transcript modules stay presentation-focused", async () 
   assert.equal(transcriptTimeline.includes("AgentTimelineRow"), false);
   assert.equal(transcriptTimeline.includes("TranscriptTimelineDetail"), false);
   assert.equal(transcriptTimeline.includes("ToolNodeDetail"), false);
+  assert.equal(transcriptTimeline.includes("readonly collapsed?: boolean"), true);
+  assert.equal(transcriptTimeline.includes("agent-workline-disclosure"), true);
+  assert.equal(transcriptTimeline.includes("agent-workline-summary"), true);
+  assert.equal(transcriptTimeline.includes("agent-workline-summary-chip"), true);
+  assert.equal(transcriptTimeline.includes("activityMetrics"), true);
   assert.equal(transcriptTimelineCopy.includes("export function activityLineForNode"), true);
   assert.equal(transcriptTimelineCopy.includes("export function activityItemsForNodes"), true);
   assert.equal(transcriptTimelineCopy.includes("export function displayActivityItemsForNodes"), true);
@@ -255,6 +264,9 @@ test("panel UI chat and transcript modules stay presentation-focused", async () 
   assert.equal(chatTranscriptChain.includes("export function AssistantMessage"), true);
   assert.equal(chatTranscriptChain.includes("export function AssistantAvatar"), true);
   assert.equal(chatTranscriptChain.includes("export function TypingDots"), true);
+  assert.equal(chatTranscriptChain.includes("collapseTimeline"), true);
+  assert.equal(chatTranscriptChain.includes("assistant-workline-collapsed"), true);
+  assert.equal(chatActive.includes("shouldCollapseStandaloneTimeline"), true);
   assert.equal(chatActive.includes("assistant-workline"), false);
   assert.equal(chatTranscriptChain.includes("assistant-workline"), true);
   assert.equal(chatActive.includes("const visible = userVisibleAnswer(props.content);"), false);
@@ -412,8 +424,12 @@ test("panel UI chat and transcript modules stay presentation-focused", async () 
   assert.equal(styleEntry.includes('@import "./styles/chat-results.css"'), true);
   assert.equal(styleEntry.includes(".chat-active-scroll"), false);
   assert.equal(chatLayoutStyles.includes(".chat-empty-screen,"), true);
-  assert.equal(chatLayoutStyles.includes("align-content: end"), true);
-  assert.equal(chatLayoutStyles.includes("padding-bottom: clamp"), true);
+  assert.equal(chatLayoutStyles.includes(".chat-empty-heading"), true);
+  assert.equal(chatLayoutStyles.includes(".chat-empty-visual"), true);
+  assert.equal(chatLayoutStyles.includes(".chat-empty-kinetic"), false);
+  assert.equal(chatLayoutStyles.includes("align-content: center"), true);
+  assert.equal(chatLayoutStyles.includes(".chat-empty-input-dock"), true);
+  assert.equal(chatComposerStyles.includes(".chat-composer-home"), true);
   assert.equal(chatLayoutStyles.includes(".chat-empty-task-groups,"), false);
   assert.equal(chatLayoutStyles.includes(".chat-empty-task-group-heading"), false);
   assert.equal(chatLayoutStyles.includes(".chat-empty-resume"), false);
@@ -427,6 +443,7 @@ test("panel UI chat and transcript modules stay presentation-focused", async () 
   assert.equal(chatMessageStyles.includes(".chat-active-grid"), true);
   assert.equal(chatMessageStyles.includes("task-situation"), false);
   assert.equal(chatMessageStyles.includes(".user-message-queued"), true);
+  assert.equal(chatMessageStyles.includes(".assistant-workline-collapsed"), true);
   assert.equal(chatMessageStyles.includes("queued-dot-breathe"), true);
   assert.equal(chatMessageStyles.includes(".rich-text"), false);
   assert.equal(chatMessageStyles.includes(".live-stream-frozen-chunk"), false);
@@ -439,6 +456,11 @@ test("panel UI chat and transcript modules stay presentation-focused", async () 
   assert.equal(chatFeedbackStyles.includes(".assistant-error-message"), true);
   assert.equal(chatFeedbackStyles.includes(".agent-work-timeline"), false);
   assert.equal(transcriptStyles.includes(".agent-workline"), true);
+  assert.equal(transcriptStyles.includes(".agent-workline-disclosure"), true);
+  assert.equal(transcriptStyles.includes(".agent-workline-summary"), true);
+  assert.equal(transcriptStyles.includes(".agent-workline-summary-chip"), true);
+  assert.equal(transcriptStyles.includes(".agent-workline-summary-icon"), true);
+  assert.equal(transcriptStyles.includes(".agent-workline-summary-chevron"), true);
   assert.equal(transcriptStyles.includes(".agent-workflow"), false);
   assert.equal(transcriptStyles.includes(".agent-activity"), true);
   assert.equal(transcriptStyles.includes(".agent-activity-step"), true);

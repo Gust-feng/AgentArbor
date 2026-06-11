@@ -148,6 +148,15 @@ test("FileSystemRuntimeDatabase persists a safe Lite Profile run snapshot", asyn
     const runs = await database.listRuns();
     const conversation = await database.getConversation("conversation-0001");
     const conversations = await database.listConversations();
+    await database.upsertConversation({
+      ...conversation!,
+      conversationId: "conversation-pinned",
+      title: "pinned",
+      pinnedAt: "2026-05-10T00:00:02.000Z",
+    });
+    const pinnedConversations = await database.listConversations();
+    await database.deleteConversation("conversation-0001");
+    const deletedConversation = await database.getConversation("conversation-0001");
 
     assert.equal(snapshot?.run.runId, "panel-run-0001");
     assert.equal(snapshot?.run.resultSummary, "Safe assistant result.");
@@ -162,6 +171,11 @@ test("FileSystemRuntimeDatabase persists a safe Lite Profile run snapshot", asyn
     assert.deepEqual(runs.map((run) => run.runId), ["panel-run-0001"]);
     assert.equal(conversation?.turns[1]?.content, "Safe assistant result.");
     assert.deepEqual(conversations.map((item) => item.conversationId), ["conversation-0001"]);
+    assert.deepEqual(pinnedConversations.map((item) => item.conversationId), [
+      "conversation-pinned",
+      "conversation-0001",
+    ]);
+    assert.equal(deletedConversation, undefined);
     assert.equal(path.resolve(snapshot?.run.runHome ?? "").startsWith(path.resolve(paths.runtimeHome)), true);
   } finally {
     await fs.rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });

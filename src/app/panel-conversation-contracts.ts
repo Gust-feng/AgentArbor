@@ -44,7 +44,9 @@ export type PanelConversation = {
   readonly conversationId: string;
   readonly createdAt: string;
   title: string;
+  titleEditedAt?: string;
   updatedAt: string;
+  pinnedAt?: string;
   currentRunId?: string;
   latestRunId?: string;
   queuedRunIds: string[];
@@ -66,11 +68,13 @@ export type PanelConversationTurnReadModel = {
 export type PanelConversationReadModel = {
   readonly conversationId: string;
   readonly title: string;
+  readonly titleEditedAt?: string;
   readonly preview: string;
   readonly currentAction: string;
   readonly nextStep: string;
   readonly createdAt: string;
   readonly updatedAt: string;
+  readonly pinnedAt?: string;
   readonly status: PanelConversationStatus;
   readonly activeRunId?: string;
   readonly latestRunId?: string;

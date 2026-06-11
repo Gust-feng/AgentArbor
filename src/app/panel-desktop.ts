@@ -1,4 +1,5 @@
 import { BrowserWindow, app, dialog } from "electron";
+import { stat } from "node:fs/promises";
 import { parsePanelDesktopArgs } from "./panel-args.js";
 import {
   createPanelDesktopWindowOptions,
@@ -26,6 +27,7 @@ async function main(): Promise<void> {
       startPanelServer: startLocalPanelServer,
       createWindow: createElectronPanelWindow,
       selectWorkspaceDirectory: selectWorkspaceDirectory,
+      selectContextAttachment: selectContextAttachment,
       whenReady: app.whenReady(),
       onWindowAllClosed: (handler) => {
         app.on("window-all-closed", () => {
@@ -70,6 +72,27 @@ async function selectWorkspaceDirectory(): Promise<string | undefined> {
     properties: ["openDirectory"],
   });
   return result.canceled ? undefined : result.filePaths[0];
+}
+
+async function selectContextAttachment(): Promise<{ readonly kind: "file" | "project"; readonly path: string } | undefined> {
+  await app.whenReady();
+  const result = await dialog.showOpenDialog({
+    title: "选择附件",
+    properties: ["openFile"],
+    filters: [{ name: "所有文件", extensions: ["*"] }],
+  });
+  if (result.canceled) {
+    return undefined;
+  }
+  const selectedPath = result.filePaths[0];
+  if (selectedPath === undefined) {
+    return undefined;
+  }
+  const selectedStat = await stat(selectedPath).catch(() => undefined);
+  return {
+    kind: selectedStat?.isDirectory() === true ? "project" : "file",
+    path: selectedPath,
+  };
 }
 
 function createElectronPanelWindow(

@@ -14,6 +14,8 @@ export type McpServerForm = {
   readonly authTouched: boolean;
   readonly confirmationMode: "always" | "unsafe_only" | "never";
   readonly toolExposureMode: "none" | "all" | "selected";
+  readonly enabledTools: readonly string[];
+  readonly autoApprovedTools: readonly string[];
   readonly command: string;
   readonly args: string;
   readonly commandLine: string;

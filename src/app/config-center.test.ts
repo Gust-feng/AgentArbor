@@ -771,6 +771,7 @@ test("ConfigCenter stores capability overrides, tool states, and MCP settings wi
       confirmationMode: "unsafe_only",
       toolExposureMode: "selected",
       enabledTools: ["lookup"],
+      autoApprovedTools: [],
       enabled: true,
     });
     await assert.rejects(

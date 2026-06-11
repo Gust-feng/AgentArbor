@@ -13,7 +13,7 @@ import type {
   ModelProviderModelCatalog,
 } from "../contracts/config";
 import type { SkillDefinition } from "../contracts/skills";
-import type { McpReferenceResponse, ToolsResponse } from "../contracts/tools";
+import type { McpEnvironmentCheckResponse, McpReferenceResponse, ToolsResponse } from "../contracts/tools";
 import { CapabilitiesSettings } from "./capability-settings";
 import { ConfirmationSettings } from "./confirmation-settings";
 import { ModelSettings } from "./model-settings";
@@ -34,7 +34,9 @@ export function SettingsDialog(props: {
   readonly setWorkspaceDirectory: (value: string) => void;
   readonly savingModel?: boolean;
   readonly onSaveModel: (form?: ModelForm) => Promise<void>;
-  readonly onCreateCustomProfile: () => void;
+  readonly onCreateCustomProfile: (form?: ModelForm) => Promise<void>;
+  readonly onReorderModelProviders: (order: readonly string[]) => Promise<void>;
+  readonly onDeleteModelProvider: (profileId: string, fallbackProfileId?: string) => Promise<void>;
   readonly onFetchModels: (profileId?: string) => Promise<ModelProviderModelCatalog | undefined>;
   readonly onSaveModelCatalog: (profileId: string, catalog: ModelProviderModelCatalog) => Promise<void>;
   readonly onRevealModelApiKey: (profileId: string) => Promise<string | undefined>;
@@ -53,8 +55,10 @@ export function SettingsDialog(props: {
   readonly onLoadMcpReferences: (serverId: string) => void;
   readonly onImportMcpConfig: (config: string) => void;
   readonly onTestMcpServer: (serverId: string) => void;
+  readonly onCheckMcpEnvironment: (form: Pick<McpServerForm, "command" | "commandLine">) => Promise<McpEnvironmentCheckResponse>;
+  readonly onInstallMcpEnvironment: (form: Pick<McpServerForm, "command" | "commandLine">) => Promise<McpEnvironmentCheckResponse>;
   readonly onDeleteMcpServer: (serverId: string) => void;
-  readonly onUpdateMcpTool: (serverId: string, toolName: string, enabled: boolean) => void;
+  readonly onUpdateMcpTool: (serverId: string, toolName: string, enabled: boolean, autoApproved?: boolean) => void;
   readonly onUpdateTool: (toolName: string, enabled: boolean) => void;
   readonly onRefreshSkills: () => void;
   readonly onUpdateSkill: (skillId: string, enabled: boolean) => void;
@@ -125,6 +129,8 @@ export function SettingsDialog(props: {
                 saving={props.savingModel}
                 onSave={props.onSaveModel}
                 onCreateCustomProfile={props.onCreateCustomProfile}
+                onReorderModelProviders={props.onReorderModelProviders}
+                onDeleteModelProvider={props.onDeleteModelProvider}
                 onFetchModels={props.onFetchModels}
                 onSaveModelCatalog={props.onSaveModelCatalog}
                 onRevealModelApiKey={props.onRevealModelApiKey}
@@ -147,6 +153,8 @@ export function SettingsDialog(props: {
                 onLoadMcpReferences={props.onLoadMcpReferences}
                 onImportMcpConfig={props.onImportMcpConfig}
                 onTestMcpServer={props.onTestMcpServer}
+                onCheckMcpEnvironment={props.onCheckMcpEnvironment}
+                onInstallMcpEnvironment={props.onInstallMcpEnvironment}
                 onDeleteMcpServer={props.onDeleteMcpServer}
                 onUpdateMcpTool={props.onUpdateMcpTool}
                 onUpdateTool={props.onUpdateTool}

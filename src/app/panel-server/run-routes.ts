@@ -173,6 +173,7 @@ async function handleStartRunRequest(
     aiMode: runInput.aiMode,
     taskSoilInput: runInput.taskSoilInput,
     reasoningEffort: runInput.reasoningEffort,
+    modelOverride: runInput.modelOverride,
     deferSchedule: true,
   });
   const job = requirePanelRunJob(runtime, basicRun.runId);

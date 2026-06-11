@@ -7,7 +7,7 @@ import {
 import type { McpServerForm, ModelForm, ToolForm } from "./components/settings-types";
 import type { ConfigResponse, ModelProviderModelCatalog } from "./contracts/config";
 import type { SkillDefinition } from "./contracts/skills";
-import type { McpReferenceResponse, McpServerPreset, ToolsResponse } from "./contracts/tools";
+import type { McpEnvironmentCheckResponse, McpReferenceResponse, McpServerPreset, ToolsResponse } from "./contracts/tools";
 import { parseModelOptionId } from "./model-options";
 
 export async function saveModelProviderConfig(input: {
@@ -62,7 +62,7 @@ export async function createCustomModelProviderProfile(input: {
 }): Promise<ConfigResponse> {
   const label = input.form.label.trim() || "自定义厂商";
   const created = await postJson<ConfigResponse>("/api/config/model-profiles", {
-    profileId: label,
+    profileId: input.form.profileId.trim() || label,
     label,
     providerKind: "openai_compatible",
     protocolKind: input.form.protocolKind || "openai_compatible_chat_completions",
@@ -77,6 +77,34 @@ export async function createCustomModelProviderProfile(input: {
     created,
     await postJson<ConfigResponse>(`/api/config/model-profiles/${encodeURIComponent(profileId)}/activate`, {})
   );
+}
+
+export async function saveModelProviderOrder(order: readonly string[]): Promise<ConfigResponse> {
+  return postJson<ConfigResponse>("/api/config/model-provider-order", { order });
+}
+
+export async function deleteModelProviderProfile(input: {
+  readonly config: ConfigResponse | undefined;
+  readonly profileId: string;
+  readonly fallbackProfileId?: string;
+}): Promise<ConfigResponse> {
+  const profileId = input.profileId.trim();
+  if (profileId.length === 0) {
+    throw new Error("模型服务删除失败：模型配置无效。");
+  }
+  const fallbackProfileId =
+    input.fallbackProfileId?.trim() ||
+    (input.config?.config?.profileId === profileId
+      ? input.config.profiles?.find((profile) => profile.profileId !== profileId)?.profileId
+      : undefined);
+  let activated: ConfigResponse | undefined;
+  if (fallbackProfileId !== undefined && fallbackProfileId.length > 0 && fallbackProfileId !== profileId) {
+    activated = await postJson<ConfigResponse>(`/api/config/model-profiles/${encodeURIComponent(fallbackProfileId)}/activate`, {});
+  } else if (input.config?.config?.profileId === profileId) {
+    throw new Error("模型服务删除失败：至少需要保留一个模型服务。");
+  }
+  const deleted = await deleteJson<ConfigResponse>(`/api/config/model-profiles/${encodeURIComponent(profileId)}`);
+  return activated === undefined ? deleted : mergeConfigResponse(activated, deleted);
 }
 
 export async function revealModelProviderApiKey(profileId: string): Promise<string | undefined> {
@@ -95,9 +123,13 @@ export async function selectModelProviderModel(input: {
   readonly form?: ModelForm;
 }> {
   const parsed = parseModelOptionId(input.modelOptionId);
-  if (parsed === undefined) return {};
+  if (parsed === undefined) {
+    throw new Error("模型切换失败：模型选项无效，请重新打开模型列表后再试。");
+  }
   const profile = input.config?.profiles?.find((item) => item.profileId === parsed.profileId);
-  if (profile === undefined) return {};
+  if (profile === undefined) {
+    throw new Error("模型切换失败：未找到对应模型配置。");
+  }
   const updated = await postJson<ConfigResponse>(`/api/config/model-profiles/${encodeURIComponent(parsed.profileId)}`, {
     model: parsed.modelId,
     defaultAiMode: input.aiMode,
@@ -176,6 +208,8 @@ export async function saveMcpServerSettings(form: McpServerForm): Promise<ToolsR
     transport: form.transport,
     confirmationMode: form.confirmationMode,
     toolExposureMode: form.toolExposureMode,
+    enabledTools: form.enabledTools,
+    autoApprovedTools: form.autoApprovedTools,
     commandLine: form.transport === "stdio" ? form.commandLine : "",
     command: form.transport === "stdio" ? form.command : "",
     args: splitListInput(form.args),
@@ -228,6 +262,20 @@ export async function reloadMcpServers(): Promise<ToolsResponse> {
   return { mcpCatalog: response.catalog ?? [] };
 }
 
+export async function checkMcpEnvironment(form: Pick<McpServerForm, "command" | "commandLine">): Promise<McpEnvironmentCheckResponse> {
+  return postJson<McpEnvironmentCheckResponse>("/api/config/mcp/environment-check", {
+    command: form.command,
+    commandLine: form.commandLine,
+  });
+}
+
+export async function installMcpEnvironment(form: Pick<McpServerForm, "command" | "commandLine">): Promise<McpEnvironmentCheckResponse> {
+  return postJson<McpEnvironmentCheckResponse>("/api/config/mcp/environment-install", {
+    command: form.command,
+    commandLine: form.commandLine,
+  });
+}
+
 export async function deleteMcpServer(serverId: string): Promise<ToolsResponse> {
   const response = await deleteJson<{ readonly catalog?: ToolsResponse["mcpCatalog"] }>(
     `/api/config/mcp/${encodeURIComponent(serverId)}`
@@ -261,6 +309,7 @@ export async function updateMcpToolState(input: {
   readonly serverId: string;
   readonly toolExposureMode?: "none" | "all" | "selected";
   readonly enabledTools: readonly string[];
+  readonly autoApprovedTools?: readonly string[];
 }): Promise<ToolsResponse> {
   const response = await postJson<{ readonly catalog?: ToolsResponse["mcpCatalog"] }>(
     `/api/config/mcp/${encodeURIComponent(input.serverId)}`,
@@ -268,6 +317,7 @@ export async function updateMcpToolState(input: {
       serverId: input.serverId,
       toolExposureMode: input.toolExposureMode,
       enabledTools: input.enabledTools,
+      autoApprovedTools: input.autoApprovedTools,
     }
   );
   return { mcpCatalog: response.catalog ?? [] };

@@ -156,7 +156,7 @@ async function handlePanelRequest(
     status: "failed",
     error: {
       code: "not_found",
-      message: "未找到面板路由。",
+      message: "请求资源不存在。",
     },
   });
 }

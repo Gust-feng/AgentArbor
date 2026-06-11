@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { promises as fs } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
@@ -6,6 +9,7 @@ import { z } from "zod";
 import { McpClientWrapper } from "./mcp-client.js";
 import { createMcpToolExecutor } from "./mcp-tool-adapter.js";
 import { McpManager } from "./mcp-manager.js";
+import { ensureManagedMcpExecutable, mcpManagedRuntimeDirectories, resolveMcpExecutable } from "./mcp-local-runtime.js";
 
 function createTestServer() {
   const server = new McpServer({ name: "test-server", version: "1.0.0" });
@@ -241,6 +245,7 @@ test("McpManager connectAll connects enabled servers and tracks statuses", async
         confirmationMode: "always",
         toolExposureMode: "none",
         enabledTools: [],
+        autoApprovedTools: [],
         enabled: true,
         updatedAt: "2026-05-12T00:00:00.000Z",
       },
@@ -277,6 +282,7 @@ test("McpManager skips disabled servers", async () => {
         confirmationMode: "always",
         toolExposureMode: "none",
         enabledTools: [],
+        autoApprovedTools: [],
         enabled: false,
         updatedAt: "2026-05-12T00:00:00.000Z",
       },
@@ -303,6 +309,7 @@ test("McpManager separates discovered tools from exposed registry tools", async 
         confirmationMode: "always",
         toolExposureMode: "none",
         enabledTools: [],
+        autoApprovedTools: [],
         enabled: true,
         updatedAt: "2026-05-12T00:00:00.000Z",
       },
@@ -329,6 +336,151 @@ test("McpManager separates discovered tools from exposed registry tools", async 
   await manager.disconnectAll();
 });
 
+test("resolveMcpExecutable prioritizes AgentArbor user runtime bin", async () => {
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-mcp-home-"));
+  try {
+    const bin = path.join(home, ".agentarbor", "bin");
+    await fs.mkdir(bin, { recursive: true });
+    const executableName = process.platform === "win32" ? "fake-mcp.cmd" : "fake-mcp";
+    const executablePath = path.join(bin, executableName);
+    await fs.writeFile(executablePath, process.platform === "win32" ? "@echo off\r\n" : "#!/bin/sh\n", "utf8");
+    if (process.platform !== "win32") {
+      await fs.chmod(executablePath, 0o755);
+    }
+
+    const resolution = resolveMcpExecutable("fake-mcp", {
+      USERPROFILE: home,
+      HOME: home,
+      PATH: "",
+      PATHEXT: ".COM;.EXE;.BAT;.CMD",
+    });
+
+    assert.equal(resolution.source, "agentarbor");
+    assert.equal(resolution.executable?.toLowerCase(), executablePath.toLowerCase());
+    assert.equal(resolution.managedDirectories[0], bin);
+  } finally {
+    await fs.rm(home, { recursive: true, force: true });
+  }
+});
+
+test("mcpManagedRuntimeDirectories treats AGENTARBOR_HOME as the user AgentArbor directory", async () => {
+  const agentArborHome = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-mcp-explicit-home-"));
+  try {
+    const directories = mcpManagedRuntimeDirectories({
+      AGENTARBOR_HOME: agentArborHome,
+      USERPROFILE: path.join(os.tmpdir(), "unused-profile"),
+      HOME: path.join(os.tmpdir(), "unused-home"),
+    });
+
+    assert.equal(directories[0], path.join(agentArborHome, "bin"));
+    assert.equal(directories.includes(path.join(agentArborHome, ".agentarbor", "bin")), false);
+  } finally {
+    await fs.rm(agentArborHome, { recursive: true, force: true });
+  }
+});
+
+test("ensureManagedMcpExecutable imports discovered runtime entry into AgentArbor bin", async () => {
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-mcp-managed-home-"));
+  const external = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-mcp-external-bin-"));
+  try {
+    const commandName = "fake-managed-mcp";
+    const externalName = process.platform === "win32" ? `${commandName}.cmd` : commandName;
+    const externalPath = path.join(external, externalName);
+    await fs.writeFile(externalPath, process.platform === "win32" ? "@echo off\r\n" : "#!/bin/sh\n", "utf8");
+    if (process.platform !== "win32") {
+      await fs.chmod(externalPath, 0o755);
+    }
+
+    const env = {
+      USERPROFILE: home,
+      HOME: home,
+      PATH: external,
+      PATHEXT: ".COM;.EXE;.BAT;.CMD",
+    };
+    const ensured = await ensureManagedMcpExecutable(commandName, env);
+    const managedName = process.platform === "win32" ? `${commandName}.cmd` : commandName;
+    const managedPath = path.join(home, ".agentarbor", "bin", managedName);
+    const resolved = resolveMcpExecutable(commandName, env);
+
+    assert.equal(ensured.source, "agentarbor");
+    assert.equal(ensured.executable?.toLowerCase(), managedPath.toLowerCase());
+    assert.equal(ensured.managedAction, process.platform === "win32" ? "wrapped" : "copied");
+    assert.equal(await fileExists(managedPath), true);
+    assert.equal(resolved.source, "agentarbor");
+    assert.equal(resolved.executable?.toLowerCase(), managedPath.toLowerCase());
+  } finally {
+    await fs.rm(home, { recursive: true, force: true });
+    await fs.rm(external, { recursive: true, force: true });
+  }
+});
+
+test("ensureManagedMcpExecutable imports explicit base runtime paths into AgentArbor bin", async () => {
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-mcp-explicit-runtime-home-"));
+  const external = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-mcp-explicit-runtime-bin-"));
+  try {
+    const executableName = process.platform === "win32" ? "node.cmd" : "node";
+    const executablePath = path.join(external, executableName);
+    await fs.writeFile(executablePath, process.platform === "win32" ? "@echo off\r\n" : "#!/bin/sh\n", "utf8");
+    if (process.platform !== "win32") {
+      await fs.chmod(executablePath, 0o755);
+    }
+
+    const env = {
+      USERPROFILE: home,
+      HOME: home,
+      PATH: "",
+      PATHEXT: ".COM;.EXE;.BAT;.CMD",
+    };
+    const ensured = await ensureManagedMcpExecutable(executablePath, env);
+    const managedName = process.platform === "win32" ? "node.cmd" : "node";
+    const managedPath = path.join(home, ".agentarbor", "bin", managedName);
+
+    assert.equal(ensured.source, "agentarbor");
+    assert.equal(ensured.executable?.toLowerCase(), managedPath.toLowerCase());
+    assert.equal(await fileExists(managedPath), true);
+  } finally {
+    await fs.rm(home, { recursive: true, force: true });
+    await fs.rm(external, { recursive: true, force: true });
+  }
+});
+
+test("McpClientWrapper starts stdio servers from AgentArbor user runtime bin", async () => {
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-mcp-runtime-home-"));
+  const serverDirectory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-mcp-runtime-server-"));
+  try {
+    const bin = path.join(home, ".agentarbor", "bin");
+    const serverPath = path.join(serverDirectory, "server.mjs");
+    const commandName = "fake-agentarbor-mcp";
+    const executableName = process.platform === "win32" ? `${commandName}.cmd` : commandName;
+    await fs.mkdir(bin, { recursive: true });
+    await fs.writeFile(serverPath, mcpSpawnServerSource(), "utf8");
+    await fs.writeFile(path.join(bin, executableName), mcpRuntimeWrapperSource(serverPath), "utf8");
+    if (process.platform !== "win32") {
+      await fs.chmod(path.join(bin, executableName), 0o755);
+    }
+
+    const client = new McpClientWrapper({
+      serverId: "agentarbor-runtime-test",
+      transport: "stdio",
+      command: commandName,
+      env: {
+        USERPROFILE: home,
+        HOME: home,
+      },
+    });
+    try {
+      await client.connect();
+      const tools = await client.listTools();
+      assert.deepEqual(tools.map((tool) => tool.name), ["ping"]);
+    } finally {
+      await client.disconnect();
+    }
+  } finally {
+    await fs.rm(home, { recursive: true, force: true });
+    await fs.rm(serverDirectory, { recursive: true, force: true });
+  }
+});
+
 test("McpManager filters MCP tools by enabledTools whitelist", async () => {
   const server = createTestServer();
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -345,6 +497,7 @@ test("McpManager filters MCP tools by enabledTools whitelist", async () => {
         confirmationMode: "unsafe_only",
         toolExposureMode: "selected",
         enabledTools: ["read_only_tool"],
+        autoApprovedTools: [],
         enabled: true,
         updatedAt: "2026-05-12T00:00:00.000Z",
       },
@@ -368,6 +521,47 @@ test("McpManager filters MCP tools by enabledTools whitelist", async () => {
   await manager.disconnectAll();
 });
 
+test("McpManager auto-approves only tools listed in autoApprovedTools", async () => {
+  const server = createTestServer();
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await server.connect(serverTransport);
+
+  const manager = new McpManager({
+    servers: [
+      {
+        serverId: "srv",
+        label: "Test",
+        transport: "stdio",
+        command: "unused",
+        envSecretRefs: [],
+        confirmationMode: "always",
+        toolExposureMode: "selected",
+        enabledTools: ["echo", "read_only_tool"],
+        autoApprovedTools: ["read_only_tool"],
+        enabled: true,
+        updatedAt: "2026-05-12T00:00:00.000Z",
+      },
+    ],
+  });
+  const entry = manager.getEntryForTesting("srv");
+  assert.ok(entry);
+  entry.client = new McpClientWrapper(
+    {
+      serverId: "srv",
+      transport: "stdio",
+    },
+    { transport: clientTransport }
+  );
+  await manager.connectAll();
+
+  const tools = manager.getToolsForRegistry();
+  const byName = new Map(tools.map((tool) => [tool.definition.name, tool]));
+  assert.equal(byName.get("srv__read_only_tool")?.definition.metadata?.requiresConfirmation, false);
+  assert.equal(byName.get("srv__echo")?.definition.metadata?.requiresConfirmation, true);
+
+  await manager.disconnectAll();
+});
+
 test("McpManager connection error sets server status to error", async () => {
   const manager = new McpManager({
     servers: [
@@ -380,6 +574,7 @@ test("McpManager connection error sets server status to error", async () => {
         confirmationMode: "always",
         toolExposureMode: "none",
         enabledTools: [],
+        autoApprovedTools: [],
         enabled: true,
         updatedAt: "2026-05-12T00:00:00.000Z",
       },
@@ -391,3 +586,46 @@ test("McpManager connection error sets server status to error", async () => {
   assert.equal(statuses["broken"], "error");
   assert.equal(manager.getToolsForRegistry().length, 0);
 });
+
+async function fileExists(file: string): Promise<boolean> {
+  try {
+    await fs.access(file);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function mcpSpawnServerSource(): string {
+  const mcpServerModule = import.meta.resolve("@modelcontextprotocol/sdk/server/mcp.js");
+  const stdioTransportModule = import.meta.resolve("@modelcontextprotocol/sdk/server/stdio.js");
+  const zodModule = import.meta.resolve("zod");
+  return [
+    `import { McpServer } from ${JSON.stringify(mcpServerModule)};`,
+    `import { StdioServerTransport } from ${JSON.stringify(stdioTransportModule)};`,
+    `import { z } from ${JSON.stringify(zodModule)};`,
+    'const server = new McpServer({ name: "agentarbor-runtime-test", version: "1.0.0" });',
+    'server.registerTool("ping", { description: "Ping runtime.", inputSchema: { message: z.string().optional() }, annotations: { readOnlyHint: true } }, async () => ({ content: [{ type: "text", text: "pong" }] }));',
+    "await server.connect(new StdioServerTransport());",
+    "",
+  ].join("\n");
+}
+
+function mcpRuntimeWrapperSource(serverPath: string): string {
+  if (process.platform === "win32") {
+    return [
+      "@echo off",
+      `"${process.execPath}" "${serverPath}" %*`,
+      "",
+    ].join("\r\n");
+  }
+  return [
+    "#!/bin/sh",
+    `exec ${shellQuote(process.execPath)} ${shellQuote(serverPath)} "$@"`,
+    "",
+  ].join("\n");
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}

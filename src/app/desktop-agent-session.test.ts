@@ -256,6 +256,7 @@ test("Desktop Agent Session exposes frozen MCP tools to the default ordinary Age
           authSecretRefCount: 0,
           toolExposureMode: "all",
           enabledTools: [],
+        autoApprovedTools: [],
           tools: [{ ...capabilityTool("mcp_docs_search", "external-submit"), scopes: ["mcp"] }],
           exposedTools: [{ ...capabilityTool("mcp_docs_search", "external-submit"), scopes: ["mcp"] }],
           updatedAt: "2026-05-13T00:00:00.000Z",

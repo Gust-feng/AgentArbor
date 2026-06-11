@@ -4,6 +4,11 @@ export type ContextAttachment = {
   readonly ref: string;
   readonly title: string;
   readonly summary: string;
+  readonly readonlyPreview?: {
+    readonly title?: string;
+    readonly text: string;
+    readonly truncated: boolean;
+  };
   readonly permissionRefs: readonly string[];
   readonly readonlyPreviewMeta: {
     readonly available: boolean;

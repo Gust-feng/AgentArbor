@@ -9,6 +9,7 @@ import {
   transcriptNodesFrom,
 } from "./app-run-projection";
 import { shouldKeepRefreshing, stopPolling, stopStream } from "./app-runtime-controls";
+import { parseModelOptionId } from "./model-options";
 import type { AppState } from "./app-state";
 import type { ContextAttachment } from "./contracts/context";
 import type { Conversation } from "./contracts/conversation";
@@ -37,6 +38,7 @@ export type PanelTaskSubmissionOptions = {
   readonly goal: string;
   readonly aiMode: VisibleAiMode;
   readonly composerReasoningEffort: ComposerReasoningEffort;
+  readonly selectedModelId: string;
   readonly selectedModelSupportsReasoningEffort: boolean;
   readonly mountedRef: React.MutableRefObject<boolean>;
   readonly pollTimer: React.MutableRefObject<number | undefined>;
@@ -100,6 +102,7 @@ export async function submitPanelTask(
     }>(path, {
       goal: trimmed,
       aiMode: options.aiMode,
+      modelOverride: modelOverrideFromSelectedOption(options.selectedModelId),
       taskSoilInput: taskSoilInputFromAttachments(options.attachments),
       ...runReasoningSettings(options.composerReasoningEffort, options.selectedModelSupportsReasoningEffort),
     });
@@ -247,4 +250,13 @@ export async function submitPanelTask(
       error: error instanceof Error ? error.message : "任务启动失败。",
     }));
   }
+}
+
+function modelOverrideFromSelectedOption(
+  selectedModelId: string
+): { readonly profileId: string; readonly model: string } | undefined {
+  const parsed = parseModelOptionId(selectedModelId);
+  return parsed === undefined
+    ? undefined
+    : { profileId: parsed.profileId, model: parsed.modelId };
 }

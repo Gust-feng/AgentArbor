@@ -399,6 +399,7 @@ test("panel MCP management API tests connection, lists tools, updates whitelist,
           serverId: "docs",
           toolExposureMode: "selected",
           enabledTools: ["lookup"],
+      autoApprovedTools: [],
         },
       });
       const reloaded = await requestJson(server.url, "/api/config/mcp/reload", { method: "POST" });
@@ -440,6 +441,61 @@ test("panel MCP management API tests connection, lists tools, updates whitelist,
   } finally {
     await removeTemporaryTree(directory);
     await removeTemporaryTree(serverDirectory);
+  }
+});
+
+test("panel MCP environment check reports command availability without echoing sensitive args", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-mcp-env-"));
+  const managedBin = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-mcp-bin-"));
+  const secret = "sk-env-check-should-not-leak";
+  const previousManagedBin = process.env.AGENTARBOR_MCP_BIN;
+  try {
+    process.env.AGENTARBOR_MCP_BIN = managedBin;
+    const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+    try {
+      const available = await requestJson(server.url, "/api/config/mcp/environment-check", {
+        method: "POST",
+        body: {
+          commandLine: `${JSON.stringify(process.execPath)} --version`,
+        },
+      });
+      const missing = await requestJson(server.url, "/api/config/mcp/environment-check", {
+        method: "POST",
+        body: {
+          commandLine: `definitely-missing-agentarbor-env-check --token ${secret}`,
+        },
+      });
+      const unsupportedInstall = await requestJson(server.url, "/api/config/mcp/environment-install", {
+        method: "POST",
+        body: {
+          commandLine: `definitely-missing-agentarbor-env-check --token ${secret}`,
+        },
+      });
+
+      assert.equal(available.status, 200);
+      assert.equal(available.body.ok, true);
+      assert.equal(available.body.status, "ready");
+      assert.equal(available.body.resolvedCommand, path.join(managedBin, process.platform === "win32" ? "node.exe" : "node"));
+      assert.equal(available.body.managed, true);
+      assert.equal(missing.status, 200);
+      assert.equal(missing.body.ok, false);
+      assert.equal(missing.body.status, "not_found");
+      assert.equal(unsupportedInstall.status, 200);
+      assert.equal(unsupportedInstall.body.ok, false);
+      assert.equal(unsupportedInstall.body.status, "unsupported");
+      assert.equal(missing.text.includes(secret), false);
+      assert.equal(unsupportedInstall.text.includes(secret), false);
+    } finally {
+      await server.close();
+    }
+  } finally {
+    if (previousManagedBin === undefined) {
+      delete process.env.AGENTARBOR_MCP_BIN;
+    } else {
+      process.env.AGENTARBOR_MCP_BIN = previousManagedBin;
+    }
+    await removeTemporaryTree(directory);
+    await removeTemporaryTree(managedBin);
   }
 });
 

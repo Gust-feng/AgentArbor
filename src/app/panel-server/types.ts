@@ -11,9 +11,15 @@ export type PanelServerOptions = {
   readonly providerFetch?: PanelProviderFetch;
   readonly modelCatalogFetch?: PanelModelCatalogFetch;
   readonly workspaceDirectoryPicker?: () => Promise<string | undefined>;
+  readonly contextAttachmentPicker?: () => Promise<PanelContextAttachmentSelection | undefined>;
   readonly skillRoots?: readonly string[];
   readonly desktopAgentDefinition?: AgentDefinition;
   readonly agentDefinitions?: readonly AgentDefinition[];
+};
+
+export type PanelContextAttachmentSelection = {
+  readonly kind: "file" | "project";
+  readonly path: string;
 };
 
 export type PanelProviderFetch = (

@@ -83,6 +83,9 @@ export function parseMcpServers(value: unknown, updatedAt: string): AgentArborLo
     const enabledTools = Array.isArray(record.enabledTools)
       ? [...new Set(record.enabledTools.filter((tool): tool is string => typeof tool === "string" && tool.trim().length > 0).map((tool) => tool.trim()))]
       : [];
+    const autoApprovedTools = Array.isArray(record.autoApprovedTools)
+      ? [...new Set(record.autoApprovedTools.filter((tool): tool is string => typeof tool === "string" && tool.trim().length > 0).map((tool) => tool.trim()))]
+      : [];
     servers.push({
       serverId,
       label: optionalString(record.label) ?? serverId,
@@ -102,6 +105,7 @@ export function parseMcpServers(value: unknown, updatedAt: string): AgentArborLo
       confirmationMode: parseConfirmationMode(record.confirmationMode),
       toolExposureMode: parseToolExposureMode(record.toolExposureMode, enabledTools),
       enabledTools,
+      autoApprovedTools,
       enabled: typeof record.enabled === "boolean" ? record.enabled : false,
       lastConnectedAt: optionalString(record.lastConnectedAt),
       lastError: optionalString(record.lastError),
@@ -135,6 +139,7 @@ export function normalizeMcpServers(servers: readonly McpServerSettings[], now: 
     confirmationMode: parseConfirmationMode(server.confirmationMode),
     toolExposureMode: parseToolExposureMode(server.toolExposureMode, server.enabledTools),
     enabledTools: uniqueStrings(server.enabledTools),
+    autoApprovedTools: uniqueStrings(server.autoApprovedTools),
     enabled: server.enabled,
     lastConnectedAt: optionalString(server.lastConnectedAt),
     lastError: optionalString(server.lastError),

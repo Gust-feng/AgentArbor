@@ -1481,6 +1481,7 @@ function capabilitySnapshotWithSkillAndMcp(): BasicAgentCapabilitySnapshot {
         confirmationMode: "always",
         toolExposureMode: "none",
         enabledTools: [],
+        autoApprovedTools: [],
         tools: [],
         exposedTools: [],
         updatedAt: "2026-05-12T00:00:00.000Z",

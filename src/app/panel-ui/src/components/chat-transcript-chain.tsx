@@ -1,7 +1,6 @@
 import React, { useLayoutEffect, useRef } from "react";
 import {
   Copy,
-  Sparkles,
 } from "lucide-react";
 import type { ConversationTurn } from "../contracts/conversation";
 import type {
@@ -76,6 +75,13 @@ export function TranscriptChain(props: {
           pending: props.pending,
         });
         const model = assistantModelForTurn(turn, props.models, props.selectedModelId);
+        const collapseTimeline = shouldCollapseTimelineAfterTurn({
+          displayRunId: assistant.displayRunId,
+          live: assistant.live,
+          pending: assistant.pending,
+          run: props.run,
+          turnStatus: turn.status,
+        });
         return turn.status === "failed"
           ? (
             <AssistantFailureMessage
@@ -83,6 +89,7 @@ export function TranscriptChain(props: {
               content={turn.content}
               model={model}
               transcriptNodes={assistant.runProjection.nodes}
+              collapseTimeline={collapseTimeline}
             />
           )
           : (
@@ -95,6 +102,7 @@ export function TranscriptChain(props: {
               liveTone={assistant.liveTone}
               model={model}
               transcriptNodes={assistant.runProjection.nodes}
+              collapseTimeline={collapseTimeline}
               pending={assistant.pending}
               deliverable={assistant.deliverable}
               onDecision={props.onDecision}
@@ -132,6 +140,7 @@ export function AssistantMessage(props: {
   readonly liveTone?: LiveAnswerTone;
   readonly model?: AssistantModelBadge;
   readonly transcriptNodes?: readonly TranscriptNode[];
+  readonly collapseTimeline?: boolean;
   readonly pending?: ConfirmationProjection;
   readonly deliverable?: AgentDeliverable;
   readonly onDecision?: (decision: "approve_once" | "deny" | "guidance", guidance?: string) => void;
@@ -148,11 +157,12 @@ export function AssistantMessage(props: {
     liveTone: props.liveTone,
   });
   return (
-    <article className="assistant-message assistant-workline">
+    <article className={`assistant-message assistant-workline ${props.collapseTimeline === true ? "assistant-workline-collapsed" : ""}`}>
       <AssistantAvatar model={props.model} />
       <div className="assistant-message-body">
         <AgentWorkTimeline
           view={view.timeline}
+          collapsed={props.collapseTimeline === true}
           onDecision={props.onDecision}
           confirmationBusy={props.confirmationBusy === true}
         />
@@ -184,15 +194,17 @@ function AssistantFailureMessage(props: {
   readonly content: string;
   readonly model?: AssistantModelBadge;
   readonly transcriptNodes?: readonly TranscriptNode[];
+  readonly collapseTimeline?: boolean;
 }): React.ReactElement {
   const failure = assistantFailureParts(props.content);
   const timeline = projectAgentWorkTimelineView<TranscriptNode, ConfirmationProjection>({ nodes: props.transcriptNodes ?? [] });
   return (
-    <article className="assistant-message assistant-message-failed">
+    <article className={`assistant-message assistant-message-failed ${props.collapseTimeline === true ? "assistant-workline-collapsed" : ""}`}>
       <AssistantAvatar model={props.model} />
       <div className="assistant-message-body">
         <AgentWorkTimeline
           view={timeline}
+          collapsed={props.collapseTimeline === true}
           confirmationBusy={false}
         />
         {failure.previous.length > 0 && (
@@ -241,7 +253,7 @@ export function AssistantAvatar({ model }: { readonly model?: AssistantModelBadg
   return (
     <div className="assistant-avatar" aria-label={model === undefined ? "助手" : `${model.providerLabel} ${model.modelName}`}>
       {model?.iconSvg === undefined
-        ? <Sparkles size={13} aria-hidden="true" />
+        ? <span className="assistant-avatar-initial" aria-hidden="true">{assistantAvatarInitial(model)}</span>
         : <span className="assistant-avatar-icon" aria-hidden="true" dangerouslySetInnerHTML={{ __html: model.iconSvg }} />}
     </div>
   );
@@ -261,4 +273,30 @@ function copyToClipboard(value: string): void {
   if (navigator.clipboard !== undefined) {
     void navigator.clipboard.writeText(value);
   }
+}
+
+function assistantAvatarInitial(model: AssistantModelBadge | undefined): string {
+  return (model?.providerLabel.trim() || model?.modelName.trim() || "A").slice(0, 1).toUpperCase();
+}
+
+function shouldCollapseTimelineAfterTurn(input: {
+  readonly displayRunId?: string;
+  readonly live: boolean;
+  readonly pending?: ConfirmationProjection;
+  readonly run?: BasicAgentRun;
+  readonly turnStatus: string;
+}): boolean {
+  if (input.live || input.pending !== undefined) return false;
+  if (input.displayRunId !== undefined && input.run?.runId === input.displayRunId) {
+    return isSettledRunStatus(input.run.status);
+  }
+  return isSettledTurnStatus(input.turnStatus);
+}
+
+function isSettledRunStatus(status: BasicAgentRun["status"]): boolean {
+  return status === "completed" || status === "failed" || status === "cancelled" || status === "blocked";
+}
+
+function isSettledTurnStatus(status: string): boolean {
+  return status === "completed" || status === "failed" || status === "cancelled" || status === "blocked";
 }

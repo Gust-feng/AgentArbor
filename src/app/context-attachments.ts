@@ -4,6 +4,10 @@ import type { ContextAttachment, ContextAttachmentKind } from "../domain/basic-a
 import { createId } from "../kernel/id.js";
 import { redactSensitiveText } from "../kernel/redaction.js";
 
+const MAX_FILE_PREVIEW_BYTES = 96_000;
+const MAX_FILE_PREVIEW_CHARS = 8_000;
+const MAX_DIRECTORY_PREVIEW_ENTRIES = 80;
+
 export class ContextAttachmentPreviewError extends Error {
   constructor(
     readonly code: string,
@@ -20,6 +24,11 @@ export type CreateContextAttachmentPreviewInput = {
   readonly ref?: string;
   readonly title?: string;
   readonly summary?: string;
+};
+
+export type LocalContextAttachmentSelection = {
+  readonly kind: "file" | "project";
+  readonly path: string;
 };
 
 export async function createContextAttachmentPreview(input: {
@@ -42,6 +51,45 @@ export async function createContextAttachmentPreview(input: {
   });
 }
 
+export async function createSelectedLocalContextAttachment(
+  input: LocalContextAttachmentSelection
+): Promise<ContextAttachment> {
+  const absolutePath = requiredAbsolutePath(input.path);
+  const stat = await fs.stat(absolutePath).catch(() => undefined);
+  const actualKind = stat?.isDirectory() === true ? "project" : "file";
+  const kind = stat === undefined ? input.kind : actualKind;
+  const title = safeText(path.basename(absolutePath) || absolutePath, 120);
+  const refPrefix = kind === "project" ? "local-project" : "local-file";
+  const ref = `${refPrefix}:${absolutePath}`;
+  const preview = stat === undefined
+    ? undefined
+    : kind === "project"
+      ? await directoryReadonlyPreview(absolutePath, title)
+      : await fileReadonlyPreview(absolutePath, title, stat.size);
+  const available = stat !== undefined &&
+    ((kind === "project" && stat.isDirectory()) || (kind === "file" && stat.isFile()));
+  return {
+    attachmentId: createId("ctx"),
+    kind,
+    ref,
+    title,
+    summary: safeText(
+      defaultLocalSummary({ kind, absolutePath, stat, preview }),
+      280
+    ),
+    readonlyPreview: preview,
+    permissionRefs: [kind === "project" ? `read:local-project:${absolutePath}` : `read:local-file:${absolutePath}`],
+    readonlyPreviewMeta: {
+      available,
+      title,
+      byteLength: stat?.isFile() === true ? stat.size : undefined,
+      truncated: preview?.truncated ?? false,
+    },
+    status: available ? "ready" : "blocked",
+    warning: available ? undefined : "没有找到这个本地路径。",
+  };
+}
+
 function workspaceAttachment(workspaceRoot: string, raw: CreateContextAttachmentPreviewInput): ContextAttachment {
   const label = safeText(raw.title ?? (path.basename(workspaceRoot) || "当前工作区"), 120);
   return {
@@ -50,6 +98,9 @@ function workspaceAttachment(workspaceRoot: string, raw: CreateContextAttachment
     ref: "workspace:current",
     title: label,
     summary: safeText(raw.summary ?? "允许本轮任务使用当前工作区的只读摘要和安全引用。", 280),
+    readonlyPreview: raw.summary === undefined
+      ? undefined
+      : { title: label, text: safeText(raw.summary, MAX_FILE_PREVIEW_CHARS), truncated: false },
     permissionRefs: ["read:workspace:current-task"],
     readonlyPreviewMeta: { available: true, title: label },
     status: "ready",
@@ -70,12 +121,18 @@ async function fileSystemAttachment(input: {
     stat === undefined ||
     (input.kind === "file" && stat.isFile()) ||
     (input.kind === "project" && stat.isDirectory());
+  const readonlyPreview = stat !== undefined && isExpectedKind
+    ? input.kind === "project"
+      ? await directoryReadonlyPreview(resolved, title)
+      : await fileReadonlyPreview(resolved, title, stat.size)
+    : undefined;
   return {
     attachmentId: createId("ctx"),
     kind: input.kind,
     ref: `${input.kind}:${relativePath || "."}`,
     title,
     summary: safeText(input.raw.summary ?? defaultFileSystemSummary(input.kind, relativePath, stat), 280),
+    readonlyPreview,
     permissionRefs:
       input.kind === "file"
         ? [`read:file:${relativePath}`]
@@ -84,7 +141,7 @@ async function fileSystemAttachment(input: {
       available: stat !== undefined && isExpectedKind,
       title,
       byteLength: stat?.isFile() === true ? stat.size : undefined,
-      truncated: false,
+      truncated: readonlyPreview?.truncated ?? false,
     },
     status: stat !== undefined && isExpectedKind ? "ready" : "blocked",
     warning:
@@ -107,10 +164,91 @@ function webAttachment(value: string, raw: CreateContextAttachmentPreviewInput):
     ref: `web:${url.toString()}`,
     title,
     summary: safeText(raw.summary ?? `网页引用：${url.toString()}`, 280),
+    readonlyPreview: { title, text: safeText(url.toString(), MAX_FILE_PREVIEW_CHARS), truncated: false },
     permissionRefs: ["read:web"],
     readonlyPreviewMeta: { available: true, title },
     status: "ready",
   };
+}
+
+async function fileReadonlyPreview(
+  absolutePath: string,
+  title: string,
+  byteLength: number
+): Promise<NonNullable<ContextAttachment["readonlyPreview"]> | undefined> {
+  const byteLimit = Math.min(byteLength, MAX_FILE_PREVIEW_BYTES);
+  const handle = await fs.open(absolutePath, "r").catch(() => undefined);
+  if (handle === undefined) {
+    return undefined;
+  }
+  try {
+    const buffer = Buffer.alloc(byteLimit);
+    const { bytesRead } = await handle.read(buffer, 0, byteLimit, 0);
+    const body = buffer.subarray(0, bytesRead);
+    if (body.includes(0)) {
+      return {
+        title,
+        text: "[binary file preview omitted]",
+        truncated: byteLength > byteLimit,
+      };
+    }
+    const raw = body.toString("utf8");
+    const redacted = safeText(raw, MAX_FILE_PREVIEW_CHARS);
+    return {
+      title,
+      text: redacted,
+      truncated: byteLength > byteLimit || redacted.length < raw.length,
+    };
+  } finally {
+    await handle.close();
+  }
+}
+
+async function directoryReadonlyPreview(
+  absolutePath: string,
+  title: string
+): Promise<NonNullable<ContextAttachment["readonlyPreview"]> | undefined> {
+  const entries = await fs.readdir(absolutePath, { withFileTypes: true }).catch(() => undefined);
+  if (entries === undefined) {
+    return undefined;
+  }
+  const selected = entries.slice(0, MAX_DIRECTORY_PREVIEW_ENTRIES).map((entry) => {
+    const kind = entry.isDirectory() ? "dir" : entry.isFile() ? "file" : "other";
+    return `${kind} ${entry.name}`;
+  });
+  return {
+    title,
+    text: selected.join("\n") || "(empty directory)",
+    truncated: entries.length > selected.length,
+  };
+}
+
+function defaultLocalSummary(input: {
+  readonly kind: "file" | "project";
+  readonly absolutePath: string;
+  readonly stat: Awaited<ReturnType<typeof fs.stat>> | undefined;
+  readonly preview: ContextAttachment["readonlyPreview"] | undefined;
+}): string {
+  if (input.stat === undefined) {
+    return `${input.kind === "file" ? "本地文件" : "本地文件夹"}：${input.absolutePath}`;
+  }
+  if (input.stat.isDirectory()) {
+    const suffix = input.preview?.truncated === true ? " · 已截断" : "";
+    return `本地文件夹：${input.absolutePath}${suffix}`;
+  }
+  const suffix = input.preview?.truncated === true ? " · 预览已截断" : "";
+  return `本地文件：${input.absolutePath} · ${input.stat.size} bytes${suffix}`;
+}
+
+function requiredAbsolutePath(value: string): string {
+  const normalized = value.trim();
+  if (normalized.length === 0) {
+    throw new ContextAttachmentPreviewError("missing_context_value", "本地附件路径不能为空。");
+  }
+  if (!path.isAbsolute(normalized)) {
+    throw new ContextAttachmentPreviewError("invalid_local_context_path", "本地附件必须是系统选择器返回的绝对路径。");
+  }
+  return path.resolve(normalized);
 }
 
 function inferAttachmentKind(value: string): ContextAttachmentKind {

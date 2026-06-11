@@ -52,6 +52,7 @@ test("CapabilityCenter freezes safe model, tool, skill, and MCP catalog projecti
       confirmationMode: "unsafe_only",
       toolExposureMode: "selected",
       enabledTools: ["lookup"],
+      autoApprovedTools: [],
       enabled: true,
     });
 
@@ -119,6 +120,7 @@ test("CapabilityCenter applies MCP enabledTools and confirmation mode before mod
       confirmationMode: "always",
       toolExposureMode: "selected",
       enabledTools: ["lookup"],
+      autoApprovedTools: [],
       enabled: true,
     });
 

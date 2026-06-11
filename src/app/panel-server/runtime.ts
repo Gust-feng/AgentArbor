@@ -19,6 +19,7 @@ import {
 } from "../basic-agent-runtime/index.js";
 import { CapabilityCenter } from "../capability-center.js";
 import { ConfigCenter, createLocalConfigCenter } from "../config-center.js";
+import { resolveModelCapabilities } from "../model-capability-registry.js";
 import { PanelConversationStore } from "../panel-conversations.js";
 import { PanelRunJobStore, resolvePanelRunMode, type PanelRunJob } from "../panel-run-jobs.js";
 import {
@@ -26,12 +27,13 @@ import {
   resolveSkillStateStorePath,
   type SkillStateStore,
 } from "../skills/index.js";
-import type { PanelModelCatalogFetch, PanelProviderFetch, PanelServerOptions } from "./types.js";
+import type { PanelContextAttachmentSelection, PanelModelCatalogFetch, PanelProviderFetch, PanelServerOptions } from "./types.js";
 import { syncConversationTurnForJob } from "./conversation-sync.js";
 import { appendLiveModelOutputDelta } from "./live-model-stream.js";
 import { persistPanelRun, persistPanelRunInBackground } from "./run-persistence.js";
 import { createPanelRunJobResponse } from "./run-job-response.js";
 import { desktopCapabilitySnapshotForRunStart } from "./desktop-run-model-settings.js";
+import { PanelHttpError } from "./http-utils.js";
 
 export type PanelRuntime = {
   readonly configCenter: ConfigCenter;
@@ -42,6 +44,7 @@ export type PanelRuntime = {
   readonly providerFetch?: PanelProviderFetch;
   readonly modelCatalogFetch?: PanelModelCatalogFetch;
   readonly workspaceDirectoryPicker?: () => Promise<string | undefined>;
+  readonly contextAttachmentPicker?: () => Promise<PanelContextAttachmentSelection | undefined>;
   readonly runJobs: PanelRunJobStore;
   readonly activeRunJobs: Set<Promise<void>>;
   readonly abortControllers: Map<string, AbortController>;
@@ -75,6 +78,7 @@ export function createPanelRuntime(options: PanelServerOptions, hooks: PanelRunt
       providerFetch: options.providerFetch,
       modelCatalogFetch: options.modelCatalogFetch,
       workspaceDirectoryPicker: options.workspaceDirectoryPicker,
+      contextAttachmentPicker: options.contextAttachmentPicker,
       skillRoots: resolveSkillRoots(options),
       skillStateStore: resolveSkillStateStore(options.configDirectory),
       hooks,
@@ -91,6 +95,7 @@ export function createPanelRuntime(options: PanelServerOptions, hooks: PanelRunt
     providerFetch: options.providerFetch,
     modelCatalogFetch: options.modelCatalogFetch,
     workspaceDirectoryPicker: options.workspaceDirectoryPicker,
+    contextAttachmentPicker: options.contextAttachmentPicker,
     skillRoots: resolveSkillRoots(options),
     skillStateStore: resolveSkillStateStore(local.configDirectory),
     hooks,
@@ -116,6 +121,7 @@ function assemblePanelRuntime(input: {
   readonly providerFetch?: PanelProviderFetch;
   readonly modelCatalogFetch?: PanelModelCatalogFetch;
   readonly workspaceDirectoryPicker?: () => Promise<string | undefined>;
+  readonly contextAttachmentPicker?: () => Promise<PanelContextAttachmentSelection | undefined>;
   readonly runtimeDatabase?: RuntimeDatabase;
   readonly runtimePaths?: FileSystemRuntimeDatabasePaths;
   readonly skillRoots: readonly string[];
@@ -142,6 +148,7 @@ function assemblePanelRuntime(input: {
     providerFetch: input.providerFetch,
     modelCatalogFetch: input.modelCatalogFetch,
     workspaceDirectoryPicker: input.workspaceDirectoryPicker,
+    contextAttachmentPicker: input.contextAttachmentPicker,
     runJobs,
     activeRunJobs,
     abortControllers,
@@ -194,7 +201,7 @@ async function preparePanelBasicRunStart(
 ): Promise<BasicAgentRunStartFacts> {
   const informationAccess = await runtime.configCenter.getInformationAccessConfig();
   if (input.runKind !== "desktop") {
-    const config = await runtime.configCenter.getModelProviderConfig();
+    const config = await modelProviderConfigForRun(runtime, input.modelOverride);
     return {
       aiMode: input.aiMode ?? config.defaultAiMode,
       config,
@@ -202,8 +209,9 @@ async function preparePanelBasicRunStart(
     };
   }
 
+  const baseCapabilitySnapshot = await capabilitySnapshotForRun(runtime, input.modelOverride);
   const capabilitySnapshot = desktopCapabilitySnapshotForRunStart(
-    await runtime.capabilityCenter.snapshot(),
+    baseCapabilitySnapshot,
     input.reasoningEffort
   );
   const config = capabilitySnapshot.activeModel;
@@ -215,6 +223,41 @@ async function preparePanelBasicRunStart(
     agentDefinitionRef: resolvePanelRunMode(input.runKind, input.runMode) === "agent"
       ? runAgentDefinitionRef(runtime.desktopAgentDefinition)
       : undefined,
+  };
+}
+
+async function modelProviderConfigForRun(
+  runtime: PanelRuntime,
+  override: BasicAgentRunStartInput["modelOverride"]
+): Promise<BasicAgentRunStartFacts["config"]> {
+  if (override === undefined) {
+    return runtime.configCenter.getModelProviderConfig();
+  }
+  const profile = (await runtime.configCenter.listModelProviderProfiles())
+    .find((item) => item.profileId === override.profileId);
+  if (profile === undefined) {
+    throw new PanelHttpError(400, "model_profile_not_found", "未找到本次选择的模型服务。");
+  }
+  if (profile.enabled === false) {
+    throw new PanelHttpError(400, "model_profile_disabled", "本次选择的模型服务已停用。");
+  }
+  return { ...profile, model: override.model };
+}
+
+async function capabilitySnapshotForRun(
+  runtime: PanelRuntime,
+  override: BasicAgentRunStartInput["modelOverride"]
+): Promise<NonNullable<BasicAgentRunStartFacts["capabilitySnapshot"]>> {
+  const snapshot = await runtime.capabilityCenter.snapshot();
+  if (override === undefined) {
+    return snapshot;
+  }
+  const activeModel = await modelProviderConfigForRun(runtime, override);
+  const overrides = await runtime.configCenter.listModelCapabilityOverrides();
+  return {
+    ...snapshot,
+    activeModel,
+    modelCapabilities: resolveModelCapabilities({ profile: activeModel, overrides }),
   };
 }
 

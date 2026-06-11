@@ -183,13 +183,12 @@ function parseReadonlyPreview(value: unknown): DesktopTaskSoilContextRefInput["r
     return undefined;
   }
   const record = asRecord(value);
-  const text = optionalString(record.text);
-  if (text === undefined) {
+  if (typeof record.text !== "string" || record.text.length === 0) {
     return undefined;
   }
   return {
     title: safeOptionalText(record.title, 120),
-    text,
+    text: record.text,
   };
 }
 
@@ -202,6 +201,12 @@ function parseContextKind(value: unknown): DesktopTaskSoilContextRefInput["kind"
 
 function isAuthorizedContextRef(ref: string, kind: DesktopTaskSoilContextRefInput["kind"]): boolean {
   const normalized = ref.toLowerCase();
+  if (kind === "file" && normalized.startsWith("local-file:")) {
+    return true;
+  }
+  if (kind === "project" && normalized.startsWith("local-project:")) {
+    return true;
+  }
   if (isUnsafeReferenceText(normalized)) {
     return false;
   }
@@ -209,16 +214,19 @@ function isAuthorizedContextRef(ref: string, kind: DesktopTaskSoilContextRefInpu
     return normalized.startsWith("web:") || normalized.startsWith("http://") || normalized.startsWith("https://");
   }
   if (kind === "file") {
-    return normalized.startsWith("file:") || normalized.startsWith("workspace:");
+    return normalized.startsWith("file:") || normalized.startsWith("local-file:") || normalized.startsWith("workspace:");
   }
   if (kind === "project") {
-    return normalized.startsWith("project:") || normalized.startsWith("workspace:");
+    return normalized.startsWith("project:") || normalized.startsWith("local-project:") || normalized.startsWith("workspace:");
   }
   return normalized.startsWith("workspace:");
 }
 
 function isAuthorizedPermissionRef(ref: string): boolean {
   const normalized = ref.toLowerCase();
+  if (normalized.startsWith("read:local-file:") || normalized.startsWith("read:local-project:")) {
+    return true;
+  }
   if (isUnsafeReferenceText(normalized)) {
     return false;
   }

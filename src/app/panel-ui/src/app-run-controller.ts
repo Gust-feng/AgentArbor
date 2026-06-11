@@ -36,6 +36,7 @@ export type AppRunControllerOptions = {
   readonly goal: string;
   readonly aiMode: VisibleAiMode;
   readonly composerReasoningEffort: ComposerReasoningEffort;
+  readonly selectedModelId: string;
   readonly selectedModelSupportsReasoningEffort: boolean;
   readonly confirmationBusy: boolean;
   readonly setConfirmationBusy: React.Dispatch<React.SetStateAction<boolean>>;

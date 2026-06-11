@@ -1,3 +1,14 @@
+export class ApiError extends Error {
+  constructor(
+    readonly status: number,
+    readonly code: string | undefined,
+    message: string
+  ) {
+    super(message);
+    this.name = "ApiError";
+  }
+}
+
 export async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
     ...init,
@@ -10,7 +21,7 @@ export async function requestJson<T>(path: string, init?: RequestInit): Promise<
   const parsed = text.length > 0 ? (JSON.parse(text) as unknown) : {};
   if (!response.ok) {
     const message = errorMessage(parsed) ?? `请求失败：${response.status}`;
-    throw new Error(message);
+    throw new ApiError(response.status, errorCode(parsed), message);
   }
   return parsed as T;
 }
@@ -39,4 +50,15 @@ function errorMessage(value: unknown): string | undefined {
     return record.error.message;
   }
   return typeof record.message === "string" ? record.message : undefined;
+}
+
+function errorCode(value: unknown): string | undefined {
+  if (typeof value !== "object" || value === null) {
+    return undefined;
+  }
+  const record = value as { readonly error?: { readonly code?: unknown }; readonly code?: unknown };
+  if (typeof record.error?.code === "string") {
+    return record.error.code;
+  }
+  return typeof record.code === "string" ? record.code : undefined;
 }

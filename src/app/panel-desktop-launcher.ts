@@ -1,5 +1,5 @@
 import type { PanelLaunchArgs } from "./panel-args.js";
-import type { PanelServerOptions, StartedPanelServer } from "./panel-server.js";
+import type { PanelContextAttachmentSelection, PanelServerOptions, StartedPanelServer } from "./panel-server.js";
 
 export type PanelDesktopWindowOptions = {
   readonly title: string;
@@ -37,6 +37,7 @@ export type PanelDesktopDependencies = {
   readonly startPanelServer: (options: PanelServerOptions) => Promise<StartedPanelServer>;
   readonly createWindow: (options: PanelDesktopWindowOptions) => PanelDesktopWindowHandle;
   readonly selectWorkspaceDirectory?: () => Promise<string | undefined>;
+  readonly selectContextAttachment?: () => Promise<PanelContextAttachmentSelection | undefined>;
   readonly whenReady: Promise<void>;
   readonly onWindowAllClosed: (handler: () => void) => void;
   readonly onBeforeQuit: (handler: () => void) => void;
@@ -53,6 +54,7 @@ export async function startPanelDesktopSession(
     port: args.port,
     configDirectory: args.configDirectory,
     workspaceDirectoryPicker: args.smoke ? undefined : dependencies.selectWorkspaceDirectory,
+    contextAttachmentPicker: args.smoke ? undefined : dependencies.selectContextAttachment,
   });
   const panelUrl = args.devUrl ?? server.url;
   let closed = false;

@@ -149,6 +149,10 @@ export type BasicAgentRunStartInput = {
   readonly runAfterRunId?: string;
   readonly taskSoilInput?: DesktopTaskSoilInput;
   readonly reasoningEffort?: ModelRunReasoningEffort;
+  readonly modelOverride?: {
+    readonly profileId: string;
+    readonly model: string;
+  };
   readonly startImmediately?: boolean;
   readonly deferSchedule?: boolean;
 };

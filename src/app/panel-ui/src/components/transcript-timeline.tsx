@@ -1,4 +1,13 @@
 import React from "react";
+import {
+  ChevronRight,
+  FileText,
+  Globe2,
+  PencilLine,
+  Sparkles,
+  Terminal,
+  type LucideIcon,
+} from "lucide-react";
 import type { TranscriptNode } from "../contracts/run";
 import {
   ConfirmationNode,
@@ -14,6 +23,7 @@ export { pendingForTurn } from "../../../panel-transcript-confirmation-projectio
 
 export function AgentWorkTimeline(props: {
   readonly view: AgentWorkTimelineView<TranscriptNode, ConfirmationProjection>;
+  readonly collapsed?: boolean;
   readonly onDecision?: (decision: "approve_once" | "deny" | "guidance", guidance?: string) => void;
   readonly confirmationBusy: boolean;
 }): React.ReactElement | null {
@@ -21,33 +31,110 @@ export function AgentWorkTimeline(props: {
 
   if (!props.view.hasContent) return null;
 
+  const activity = (
+    <div className="agent-activity">
+      {items.map((item, index) => (
+        <div
+          className={`agent-activity-step ${item.tone} ${item.phase}`}
+          data-current={confirmation.current === undefined && index === items.length - 1 ? "true" : undefined}
+          aria-current={confirmation.current === undefined && index === items.length - 1 ? "step" : undefined}
+          key={item.key}
+        >
+          <span className="agent-activity-marker" aria-hidden="true" />
+          <ActivityLine item={item} />
+        </div>
+      ))}
+      {confirmation.current !== undefined && (
+        <div className="agent-activity-step confirmation waiting_approval" data-current="true" aria-current="step">
+          <span className="agent-activity-marker" aria-hidden="true" />
+          <ConfirmationNode
+            confirmation={confirmation.current}
+            busy={props.confirmationBusy}
+            onDecision={props.onDecision}
+          />
+        </div>
+      )}
+    </div>
+  );
+
+  if (props.collapsed === true && confirmation.current === undefined) {
+    const metrics = activityMetrics(items);
+    const summary = activitySummary(metrics, items.length);
+    return (
+      <section className="agent-workline" aria-label="工作进度">
+        <details className="agent-workline-disclosure">
+          <summary className="agent-workline-summary" aria-label={`展开过程，${summary}`}>
+            <span className="agent-workline-summary-metrics" aria-hidden="true">
+              {metrics.map((metric) => {
+                const Icon = metric.icon;
+                return (
+                  <span className={`agent-workline-summary-chip ${metric.kind}`} key={metric.kind}>
+                    <span className="agent-workline-summary-icon">
+                      <Icon size={13} strokeWidth={2.25} />
+                    </span>
+                    <strong>{metric.count}</strong>
+                  </span>
+                );
+              })}
+            </span>
+            <ChevronRight className="agent-workline-summary-chevron" size={16} aria-hidden="true" />
+          </summary>
+          {activity}
+        </details>
+      </section>
+    );
+  }
+
   return (
     <section className="agent-workline" aria-label="工作进度">
-      <div className="agent-activity">
-        {items.map((item, index) => (
-          <div
-            className={`agent-activity-step ${item.tone} ${item.phase}`}
-            data-current={confirmation.current === undefined && index === items.length - 1 ? "true" : undefined}
-            aria-current={confirmation.current === undefined && index === items.length - 1 ? "step" : undefined}
-            key={item.key}
-          >
-            <span className="agent-activity-marker" aria-hidden="true" />
-            <ActivityLine item={item} />
-          </div>
-        ))}
-        {confirmation.current !== undefined && (
-          <div className="agent-activity-step confirmation waiting_approval" data-current="true" aria-current="step">
-            <span className="agent-activity-marker" aria-hidden="true" />
-            <ConfirmationNode
-              confirmation={confirmation.current}
-              busy={props.confirmationBusy}
-              onDecision={props.onDecision}
-            />
-          </div>
-        )}
-      </div>
+      {activity}
     </section>
   );
+}
+
+type ActivityMetricKind = "web" | "read" | "edit" | "command" | "other";
+
+type ActivityMetric = {
+  readonly kind: ActivityMetricKind;
+  readonly count: number;
+  readonly label: string;
+  readonly icon: LucideIcon;
+};
+
+function activityMetrics(items: readonly ActivityItem[]): readonly ActivityMetric[] {
+  const counts = new Map<ActivityMetricKind, number>();
+  for (const item of items) {
+    const kind = activityMetricKind(item);
+    if (kind === undefined) continue;
+    counts.set(kind, (counts.get(kind) ?? 0) + 1);
+  }
+  if (counts.size === 0 && items.length > 0) {
+    counts.set("other", items.length);
+  }
+  return ACTIVITY_METRIC_ORDER
+    .map((kind) => {
+      const count = counts.get(kind);
+      if (count === undefined || count <= 0) return undefined;
+      return { ...ACTIVITY_METRIC_DEFS[kind], kind, count };
+    })
+    .filter((metric): metric is ActivityMetric => metric !== undefined);
+}
+
+function activityMetricKind(item: ActivityItem): ActivityMetricKind | undefined {
+  const label = item.copy.label;
+  if (label === "网页" || label === "搜索") return "web";
+  if (label === "读取" || label === "查看") return "read";
+  if (label === "编辑" || label === "写入" || label === "创建" || label === "删除" || label === "生成") return "edit";
+  if (label === "命令") return "command";
+  if (item.tone === "tool") return "other";
+  return undefined;
+}
+
+function activitySummary(metrics: readonly ActivityMetric[], itemCount: number): string {
+  if (metrics.length === 0) {
+    return itemCount === 1 ? "1 步" : `${itemCount} 步`;
+  }
+  return metrics.map((metric) => `${metric.label} ${metric.count}`).join("，");
 }
 
 function ActivityLine({ item }: { readonly item: ActivityItem }): React.ReactElement {
@@ -72,3 +159,13 @@ function ActivityLine({ item }: { readonly item: ActivityItem }): React.ReactEle
     </p>
   );
 }
+
+const ACTIVITY_METRIC_ORDER: readonly ActivityMetricKind[] = ["web", "read", "edit", "command", "other"];
+
+const ACTIVITY_METRIC_DEFS: Record<ActivityMetricKind, Omit<ActivityMetric, "kind" | "count">> = {
+  web: { label: "网页", icon: Globe2 },
+  read: { label: "读取", icon: FileText },
+  edit: { label: "编辑", icon: PencilLine },
+  command: { label: "命令", icon: Terminal },
+  other: { label: "动作", icon: Sparkles },
+};

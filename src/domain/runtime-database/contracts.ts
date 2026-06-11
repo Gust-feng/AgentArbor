@@ -65,6 +65,7 @@ export type RuntimeConversationTurnRecord = {
 export type RuntimeConversationRecord = {
   readonly conversationId: string;
   readonly title: string;
+  readonly titleEditedAt?: string;
   readonly preview: string;
   readonly currentAction?: string;
   readonly nextStep?: string;
@@ -74,6 +75,7 @@ export type RuntimeConversationRecord = {
   readonly requiresUserAction?: boolean;
   readonly queuedRunIds: readonly string[];
   readonly queuedRunCount: number;
+  readonly pinnedAt?: string;
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly turns: readonly RuntimeConversationTurnRecord[];
@@ -202,6 +204,7 @@ export interface RuntimeDatabase {
   upsertConversation(record: RuntimeConversationRecord): Promise<RuntimeConversationRecord>;
   getConversation(conversationId: string): Promise<RuntimeConversationRecord | undefined>;
   listConversations(limit?: number): Promise<readonly RuntimeConversationRecord[]>;
+  deleteConversation(conversationId: string): Promise<void>;
   upsertRun(record: RuntimeRunRecord): Promise<RuntimeRunRecord>;
   upsertBasicRun(record: BasicAgentRun): Promise<BasicAgentRun>;
   replaceBasicRunEvents(runId: string, events: readonly RunEvent[]): Promise<readonly RunEvent[]>;

@@ -103,8 +103,9 @@
 
 .typing-dots {
   display: flex;
+  align-items: center;
   gap: 4px;
-  padding: 7px 0;
+  padding: 0;
 }
 
 .typing-dots span {

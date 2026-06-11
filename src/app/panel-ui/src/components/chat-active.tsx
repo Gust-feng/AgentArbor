@@ -141,6 +141,7 @@ export function ChatActive(props: ChatInputProps & {
                     liveTone={view.standaloneAssistant.liveTone}
                     model={selectedComposerModel(props.models, props.selectedModelId)}
                     transcriptNodes={view.currentRunProjection.nodes}
+                    collapseTimeline={shouldCollapseStandaloneTimeline(props.run, view.pending !== undefined)}
                     pending={view.pending}
                     deliverable={view.deliverable}
                     onDecision={props.onDecision}
@@ -180,4 +181,9 @@ function StatusNotice(props: ChatStatusNotice): React.ReactElement {
 
 function isNearBottom(node: HTMLDivElement): boolean {
   return node.scrollHeight - (node.scrollTop + node.clientHeight) <= 64;
+}
+
+function shouldCollapseStandaloneTimeline(run: BasicAgentRun | undefined, hasPendingConfirmation: boolean): boolean {
+  if (run === undefined || hasPendingConfirmation) return false;
+  return run.status === "completed" || run.status === "failed" || run.status === "cancelled" || run.status === "blocked";
 }

@@ -72,8 +72,12 @@ export class FileSystemRuntimeDatabase implements RuntimeDatabase {
     );
     return conversations
       .filter((conversation): conversation is RuntimeConversationRecord => conversation !== undefined)
-      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+      .sort(compareConversations)
       .slice(0, Math.max(0, Math.floor(limit)));
+  }
+
+  async deleteConversation(conversationId: string): Promise<void> {
+    await fs.rm(this.conversationPath(conversationId), { force: true });
   }
 
   async upsertRun(record: RuntimeRunRecord): Promise<RuntimeRunRecord> {
@@ -270,6 +274,11 @@ function safeFileName(value: string): string {
 
 function cloneJson<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function compareConversations(left: RuntimeConversationRecord, right: RuntimeConversationRecord): number {
+  const pinned = (right.pinnedAt ?? "").localeCompare(left.pinnedAt ?? "");
+  return pinned === 0 ? right.updatedAt.localeCompare(left.updatedAt) : pinned;
 }
 
 function isFileNotFound(error: unknown): boolean {

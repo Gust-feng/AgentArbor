@@ -137,6 +137,10 @@ class MemoryRuntimeDatabase implements RuntimeDatabase {
     return [];
   }
 
+  async deleteConversation(_conversationId: string): Promise<void> {
+    return undefined;
+  }
+
   async upsertRun(record: RuntimeRunRecord): Promise<RuntimeRunRecord> {
     this.runRecords.push(record);
     return record;

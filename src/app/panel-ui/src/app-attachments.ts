@@ -6,6 +6,7 @@ export function taskSoilInputFromAttachments(attachments: readonly ContextAttach
     readonly ref: string;
     readonly kind: ContextAttachment["kind"];
     readonly summary?: string;
+    readonly readonlyPreview?: ContextAttachment["readonlyPreview"];
   }[];
   readonly permissionBoundaryRefs?: readonly string[];
 } | undefined {
@@ -18,6 +19,7 @@ export function taskSoilInputFromAttachments(attachments: readonly ContextAttach
       ref: attachment.ref,
       kind: attachment.kind,
       summary: attachment.summary,
+      readonlyPreview: attachment.readonlyPreview,
     })),
     permissionBoundaryRefs: Array.from(new Set(ready.flatMap((attachment) => attachment.permissionRefs))),
   };
@@ -44,6 +46,14 @@ export async function previewContextAttachment(input: {
     value: input.value,
   });
   return response.attachment;
+}
+
+export async function selectLocalContextAttachment(): Promise<ContextAttachment | undefined> {
+  const response = await postJson<{
+    readonly status?: "completed" | "cancelled";
+    readonly attachment?: ContextAttachment;
+  }>("/api/context/attachments/select-local", {});
+  return response.status === "cancelled" ? undefined : response.attachment;
 }
 
 export function blockedContextAttachment(input: {

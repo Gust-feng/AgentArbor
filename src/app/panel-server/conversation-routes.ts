@@ -12,6 +12,8 @@ import {
   asRecord,
   numberOrUndefined,
   optionalString,
+  parseConversationPinInput,
+  parseConversationRenameInput,
   parseRunInput,
 } from "./request-parsers.js";
 import { persistPanelConversation } from "./run-persistence.js";
@@ -61,6 +63,38 @@ export async function handlePanelConversationRoute(
       request,
       response,
       decodeURIComponent(conversationMessagesMatch[1] ?? "")
+    );
+    return true;
+  }
+
+  const conversationRenameMatch = /^\/api\/conversations\/([^/]+)\/rename$/.exec(url.pathname);
+  if (request.method === "POST" && conversationRenameMatch !== null) {
+    await handleConversationRenameRequest(
+      runtime,
+      request,
+      response,
+      decodeURIComponent(conversationRenameMatch[1] ?? "")
+    );
+    return true;
+  }
+
+  const conversationPinMatch = /^\/api\/conversations\/([^/]+)\/pin$/.exec(url.pathname);
+  if (request.method === "POST" && conversationPinMatch !== null) {
+    await handleConversationPinRequest(
+      runtime,
+      request,
+      response,
+      decodeURIComponent(conversationPinMatch[1] ?? "")
+    );
+    return true;
+  }
+
+  const conversationDeleteMatch = /^\/api\/conversations\/([^/]+)$/.exec(url.pathname);
+  if (request.method === "DELETE" && conversationDeleteMatch !== null) {
+    await handleConversationDeleteRequest(
+      runtime,
+      response,
+      decodeURIComponent(conversationDeleteMatch[1] ?? "")
     );
     return true;
   }
@@ -161,6 +195,7 @@ async function handleConversationMessageRequest(
     runAfterRunId,
     taskSoilInput: mergedTaskSoilInput,
     reasoningEffort: runInput.reasoningEffort,
+    modelOverride: runInput.modelOverride,
     startImmediately: !shouldQueue,
     deferSchedule: !shouldQueue,
   });
@@ -240,6 +275,66 @@ async function ensurePanelConversationLoaded(
     throw new PanelHttpError(404, "conversation_not_found", "未找到对话。");
   }
   return restorePersistedPanelConversation(runtime, persisted);
+}
+
+async function handleConversationRenameRequest(
+  runtime: PanelRuntime,
+  request: IncomingMessage,
+  response: ServerResponse,
+  conversationId: string
+): Promise<void> {
+  await ensurePanelConversationLoaded(runtime, conversationId);
+  const input = parseConversationRenameInput(await readJsonBody(request));
+  try {
+    runtime.conversations.rename({ conversationId, title: input.title });
+    await persistPanelConversation(runtime, conversationId);
+    writeJson(response, 200, {
+      ok: true,
+      conversation: await getPanelConversation(runtime, conversationId),
+      conversations: await listPanelConversations(runtime),
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    if (message.includes("title cannot be empty")) {
+      throw new PanelHttpError(400, "missing_conversation_title", "会话标题不能为空。");
+    }
+    throw error;
+  }
+}
+
+async function handleConversationPinRequest(
+  runtime: PanelRuntime,
+  request: IncomingMessage,
+  response: ServerResponse,
+  conversationId: string
+): Promise<void> {
+  await ensurePanelConversationLoaded(runtime, conversationId);
+  const input = parseConversationPinInput(await readJsonBody(request));
+  runtime.conversations.setPinned({ conversationId, pinned: input.pinned });
+  await persistPanelConversation(runtime, conversationId);
+  writeJson(response, 200, {
+    ok: true,
+    conversation: await getPanelConversation(runtime, conversationId),
+    conversations: await listPanelConversations(runtime),
+  });
+}
+
+async function handleConversationDeleteRequest(
+  runtime: PanelRuntime,
+  response: ServerResponse,
+  conversationId: string
+): Promise<void> {
+  const conversation = await ensurePanelConversationLoaded(runtime, conversationId);
+  if (conversation.activeRunId !== undefined || conversation.queuedRunCount > 0) {
+    throw new PanelHttpError(409, "conversation_busy", "会话仍有运行中或排队中的任务，暂不能删除。");
+  }
+  runtime.conversations.delete(conversationId);
+  await runtime.runtimeDatabase?.deleteConversation(conversationId);
+  writeJson(response, 200, {
+    ok: true,
+    deletedConversationId: conversationId,
+    conversations: await listPanelConversations(runtime),
+  });
 }
 
 async function handleConversationRollbackRequest(

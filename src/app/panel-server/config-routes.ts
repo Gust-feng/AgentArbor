@@ -1,6 +1,8 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { SanitizedWebSearchConfig } from "../../domain/config/index.js";
 import { listBuiltinMcpServerPresets, listBuiltinModelProviderPresets, listBuiltinProviderProtocolProfiles } from "../../domain/config/index.js";
+import type { SanitizedModelProviderConfig } from "../../domain/config/index.js";
+import { isKnownModel, resolveModelCapabilities } from "../model-capability-registry.js";
 import { fetchModelRuntimeModelCatalog } from "../model-runtime/index.js";
 import { CapabilityCenter } from "../capability-center.js";
 import {
@@ -18,6 +20,7 @@ import {
   parseCreateModelProfile,
   parseInformationAccessUpdate,
   parseModelCatalogUpdate,
+  parseModelProviderOrderUpdate,
   parseMcpServerSecretValue,
   parseMcpServerImport,
   parseMcpServerUpdate,
@@ -25,7 +28,7 @@ import {
   parseWebSearchUpdate,
   parseWorkspaceUpdate,
 } from "./request-parsers.js";
-import { listPanelMcpReferences, testPanelMcpServer } from "./mcp-management-service.js";
+import { checkPanelMcpEnvironment, installPanelMcpEnvironment, listPanelMcpReferences, testPanelMcpServer } from "./mcp-management-service.js";
 import type { PanelModelCatalogFetch, PanelProviderFetch } from "./types.js";
 
 export type PanelConfigRouteRuntime = {
@@ -55,6 +58,7 @@ export async function handlePanelConfigRoute(
       status: "completed",
       config,
       profiles: await runtime.configCenter.listModelProviderProfiles(),
+      modelProviderOrder: await runtime.configCenter.getModelProviderOrder(),
       modelCatalogs: await runtime.configCenter.listModelProviderModelCatalogs(),
       modelProviderMarket: modelProviderMarketPayload(),
       capabilities,
@@ -79,6 +83,7 @@ export async function handlePanelConfigRoute(
       status: "completed",
       profiles: await runtime.configCenter.listModelProviderProfiles(),
       activeProfile: await runtime.configCenter.getModelProviderConfig(),
+      modelProviderOrder: await runtime.configCenter.getModelProviderOrder(),
       modelCatalogs: await runtime.configCenter.listModelProviderModelCatalogs(),
       modelProviderMarket: modelProviderMarketPayload(),
     });
@@ -93,6 +98,7 @@ export async function handlePanelConfigRoute(
       providerProtocolProfiles: listBuiltinProviderProtocolProfiles(),
       profiles: await runtime.configCenter.listModelProviderProfiles(),
       activeProfile: await runtime.configCenter.getModelProviderConfig(),
+      modelProviderOrder: await runtime.configCenter.getModelProviderOrder(),
       modelCatalogs: await runtime.configCenter.listModelProviderModelCatalogs(),
     });
     return true;
@@ -108,14 +114,32 @@ export async function handlePanelConfigRoute(
         status: "completed",
         profile,
         profiles: await runtime.configCenter.listModelProviderProfiles(),
+        modelProviderOrder: await runtime.configCenter.getModelProviderOrder(),
         modelCatalogs: await runtime.configCenter.listModelProviderModelCatalogs(),
         modelProviderMarket: modelProviderMarketPayload(),
-        capabilities: await runtime.capabilityCenter.snapshot(),
+        capabilities: await modelCapabilitiesPayload(runtime),
       });
       return true;
     } catch (error) {
       throw configCenterHttpError(error);
     }
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/config/model-provider-order") {
+    const body = await readJsonBody(request);
+    const input = parseModelProviderOrderUpdate(body);
+    const modelProviderOrder = await runtime.configCenter.updateModelProviderOrder(input.order);
+    writeJson(response, 200, {
+      ok: true,
+      status: "completed",
+      config: await runtime.configCenter.getModelProviderConfig(),
+      modelProviderOrder,
+      profiles: await runtime.configCenter.listModelProviderProfiles(),
+      modelCatalogs: await runtime.configCenter.listModelProviderModelCatalogs(),
+      modelProviderMarket: modelProviderMarketPayload(),
+      capabilities: await modelCapabilitiesPayload(runtime),
+    });
+    return true;
   }
 
   const modelProfileMatch = /^\/api\/config\/model-profiles\/([^/]+)$/.exec(url.pathname);
@@ -133,9 +157,10 @@ export async function handlePanelConfigRoute(
         status: "completed",
         profile,
         profiles: await runtime.configCenter.listModelProviderProfiles(),
+        modelProviderOrder: await runtime.configCenter.getModelProviderOrder(),
         modelCatalogs: await runtime.configCenter.listModelProviderModelCatalogs(),
         modelProviderMarket: modelProviderMarketPayload(),
-        capabilities: await runtime.capabilityCenter.snapshot(),
+        capabilities: await modelCapabilitiesPayload(runtime),
       });
       return true;
     } catch (error) {
@@ -240,9 +265,10 @@ export async function handlePanelConfigRoute(
         status: "completed",
         profile,
         config: profile,
+        modelProviderOrder: await runtime.configCenter.getModelProviderOrder(),
         modelCatalogs: await runtime.configCenter.listModelProviderModelCatalogs(),
         modelProviderMarket: modelProviderMarketPayload(),
-        capabilities: await runtime.capabilityCenter.snapshot(),
+        capabilities: await modelCapabilitiesPayload(runtime),
       });
       return true;
     } catch (error) {
@@ -261,9 +287,10 @@ export async function handlePanelConfigRoute(
         ok: true,
         status: "completed",
         profiles,
+        modelProviderOrder: await runtime.configCenter.getModelProviderOrder(),
         modelCatalogs: await runtime.configCenter.listModelProviderModelCatalogs(),
         modelProviderMarket: modelProviderMarketPayload(),
-        capabilities: await runtime.capabilityCenter.snapshot(),
+        capabilities: await modelCapabilitiesPayload(runtime),
       });
       return true;
     } catch (error) {
@@ -296,9 +323,10 @@ export async function handlePanelConfigRoute(
         status: "completed",
         config,
         profiles: await runtime.configCenter.listModelProviderProfiles(),
+        modelProviderOrder: await runtime.configCenter.getModelProviderOrder(),
         modelCatalogs: await runtime.configCenter.listModelProviderModelCatalogs(),
         modelProviderMarket: modelProviderMarketPayload(),
-        capabilities: await runtime.capabilityCenter.snapshot(),
+        capabilities: await modelCapabilitiesPayload(runtime),
         informationAccess: await runtime.configCenter.getInformationAccessConfig(),
       });
       return true;
@@ -419,6 +447,52 @@ export async function handlePanelConfigRoute(
       status: "completed",
       connected,
       catalog: capabilitySnapshot.mcpCatalog,
+    });
+    return true;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/config/mcp/environment-check") {
+    const body = await readJsonBody(request);
+    const record = typeof body === "object" && body !== null ? body as {
+      readonly commandLine?: unknown;
+      readonly command?: unknown;
+    } : {};
+    const result = await checkPanelMcpEnvironment({
+      commandLine: typeof record.commandLine === "string" ? record.commandLine : undefined,
+      command: typeof record.command === "string" ? record.command : undefined,
+    });
+    writeJson(response, 200, {
+      ok: result.ok,
+      status: result.status,
+      command: result.command,
+      resolvedCommand: result.resolvedCommand,
+      managed: result.managed,
+      installable: result.installable,
+      message: result.message,
+      checkedAt: result.checkedAt,
+    });
+    return true;
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/config/mcp/environment-install") {
+    const body = await readJsonBody(request);
+    const record = typeof body === "object" && body !== null ? body as {
+      readonly commandLine?: unknown;
+      readonly command?: unknown;
+    } : {};
+    const result = await installPanelMcpEnvironment({
+      commandLine: typeof record.commandLine === "string" ? record.commandLine : undefined,
+      command: typeof record.command === "string" ? record.command : undefined,
+    });
+    writeJson(response, 200, {
+      ok: result.ok,
+      status: result.status,
+      command: result.command,
+      resolvedCommand: result.resolvedCommand,
+      managed: result.managed,
+      installable: result.installable,
+      message: result.message,
+      checkedAt: result.checkedAt,
     });
     return true;
   }
@@ -604,6 +678,35 @@ function modelProviderMarketPayload(): {
     presets: listBuiltinModelProviderPresets(),
     providerProtocolProfiles: listBuiltinProviderProtocolProfiles(),
   };
+}
+
+async function modelCapabilitiesPayload(runtime: PanelConfigRouteRuntime): Promise<{
+  readonly activeModel: SanitizedModelProviderConfig;
+  readonly modelCapabilities: ReturnType<typeof resolveModelCapabilities>;
+  readonly warnings: readonly string[];
+}> {
+  const [activeModel, overrides] = await Promise.all([
+    runtime.configCenter.getModelProviderConfig(),
+    runtime.configCenter.listModelCapabilityOverrides(),
+  ]);
+  return {
+    activeModel,
+    modelCapabilities: resolveModelCapabilities({ profile: activeModel, overrides }),
+    warnings: modelCapabilityWarnings(activeModel),
+  };
+}
+
+function modelCapabilityWarnings(activeModel: SanitizedModelProviderConfig): readonly string[] {
+  const warnings: string[] = [];
+  if (!activeModel.secretConfigured) {
+    warnings.push("当前模型 profile 未配置 API Key。");
+  }
+  if (activeModel.model === undefined) {
+    warnings.push("当前模型 profile 未填写模型名。");
+  } else if (!isKnownModel(activeModel)) {
+    warnings.push("当前模型不在内置能力目录中，已使用保守上下文窗口。");
+  }
+  return warnings;
 }
 
 async function createPanelToolCatalog(runtime: PanelConfigRouteRuntime): Promise<ToolCatalogSnapshot> {

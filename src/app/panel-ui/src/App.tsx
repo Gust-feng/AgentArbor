@@ -4,7 +4,7 @@ import { ChatActive } from "./components/chat-active";
 import { ChatEmpty } from "./components/chat-empty";
 import { Sidebar, type Screen } from "./components/sidebar";
 import { SettingsDialog, type McpServerForm, type ModelForm, type SettingsGroup, type ToolForm } from "./components/settings-dialog";
-import { blockedContextAttachment, previewContextAttachment, uniqueAttachments } from "./app-attachments";
+import { selectLocalContextAttachment, uniqueAttachments } from "./app-attachments";
 import { applyAppBootstrap, loadAppBootstrap } from "./app-bootstrap";
 import {
   normalizeVisibleAiMode,
@@ -14,6 +14,14 @@ import {
   type ComposerReasoningEffort,
   type VisibleAiMode,
 } from "./app-config-projection";
+import {
+  type ConversationManagementResponse,
+  isMissingConversationError,
+  removeConversation,
+  renameConversationTitle,
+  updateConversationPinnedState,
+  upsertConversationSummary,
+} from "./app-conversation-management";
 import { useConversationSummaryRefresh } from "./app-conversation-refresh";
 import { createAppSettingsController } from "./app-settings-controller";
 import {
@@ -26,8 +34,8 @@ import {
 import { createInitialAppState } from "./app-state";
 import type { ModelProviderModelCatalog } from "./contracts/config";
 import type { ContextAttachment } from "./contracts/context";
-import type { McpReferenceResponse } from "./contracts/tools";
-import { modelOptionsFromConfig, selectedModelOptionId } from "./model-options";
+import type { McpReferenceResponse, McpServerCatalogItem } from "./contracts/tools";
+import { modelOptionSupportsReasoningEffort, modelOptionsFromConfig, selectedModelOptionId } from "./model-options";
 
 export function App(): React.ReactElement {
   const [app, setApp] = useState(createInitialAppState);
@@ -47,6 +55,7 @@ export function App(): React.ReactElement {
     apiKeyCleared: false,
   });
   const [composerReasoningEffort, setComposerReasoningEffort] = useState<ComposerReasoningEffort>("");
+  const [composerSelectedModelId, setComposerSelectedModelId] = useState<string | undefined>(undefined);
   const [modelCatalogs, setModelCatalogs] = useState<Record<string, ModelProviderModelCatalog>>({});
   const [mcpReferences, setMcpReferences] = useState<Readonly<Record<string, McpReferenceResponse>>>({});
   const [workspaceDirectory, setWorkspaceDirectory] = useState("");
@@ -63,6 +72,8 @@ export function App(): React.ReactElement {
     authTouched: false,
     confirmationMode: "unsafe_only",
     toolExposureMode: "none",
+    enabledTools: [],
+    autoApprovedTools: [],
     command: "",
     args: "",
     commandLine: "",
@@ -79,8 +90,6 @@ export function App(): React.ReactElement {
     enabled: true,
   });
   const [attachments, setAttachments] = useState<readonly ContextAttachment[]>([]);
-  const [attachmentKind, setAttachmentKind] = useState<ContextAttachment["kind"]>("workspace");
-  const [attachmentValue, setAttachmentValue] = useState(".");
   const [confirmationBusy, setConfirmationBusy] = useState(false);
   const [contextBusy, setContextBusy] = useState(false);
   const [savingModel, setSavingModel] = useState(false);
@@ -93,12 +102,19 @@ export function App(): React.ReactElement {
   const viewEpochRef = useRef(0);
   const lastActiveProfileIdRef = useRef<string | undefined>(undefined);
   const modelSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const mcpToolSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const mcpToolUpdateVersionRef = useRef(0);
+  const mcpToolCatalogDraftRef = useRef<readonly McpServerCatalogItem[] | undefined>(undefined);
 
   useConversationSummaryRefresh({
     conversations: app.conversations,
     setApp,
     mountedRef,
   });
+
+  useEffect(() => {
+    mcpToolCatalogDraftRef.current = app.tools?.mcpCatalog;
+  }, [app.tools?.mcpCatalog]);
 
   useEffect(() => {
     void loadAppBootstrap().then((bootstrap) => {
@@ -176,8 +192,17 @@ export function App(): React.ReactElement {
   }, [app.config?.modelCatalogs]);
 
   const modelOptions = useMemo(() => modelOptionsFromConfig(app.config, modelCatalogs), [app.config, modelCatalogs]);
-  const selectedModelId = useMemo(() => selectedModelOptionId(app.config, modelOptions), [app.config, modelOptions]);
-  const selectedModelSupportsReasoningEffort = app.config?.capabilities?.modelCapabilities?.supportsReasoningEffort === true;
+  const persistedSelectedModelId = useMemo(() => selectedModelOptionId(app.config, modelOptions), [app.config, modelOptions]);
+  const selectedModelId = useMemo(() => {
+    if (composerSelectedModelId !== undefined && modelOptions.some((model) => model.id === composerSelectedModelId)) {
+      return composerSelectedModelId;
+    }
+    return persistedSelectedModelId;
+  }, [composerSelectedModelId, modelOptions, persistedSelectedModelId]);
+  const selectedModelSupportsReasoningEffort = useMemo(
+    () => modelOptionSupportsReasoningEffort(app.config, selectedModelId),
+    [app.config, selectedModelId]
+  );
   const chatScreen = screen === "chat-empty" && (app.conversation !== undefined || app.run !== undefined) ? "chat-active" : screen;
   const currentRun = projectCurrentRun(app);
   const pendingConfirmation = currentRun.workView?.pendingConfirmation;
@@ -193,6 +218,7 @@ export function App(): React.ReactElement {
     goal,
     aiMode,
     composerReasoningEffort,
+    selectedModelId,
     selectedModelSupportsReasoningEffort,
     confirmationBusy,
     setConfirmationBusy,
@@ -223,6 +249,9 @@ export function App(): React.ReactElement {
     setMcpServerForm,
     mountedRef,
     modelSaveQueueRef,
+    mcpToolSaveQueueRef,
+    mcpToolUpdateVersionRef,
+    mcpToolCatalogDraftRef,
     setSavingModel,
     setSavingWorkspace,
     setSavingTools,
@@ -230,6 +259,8 @@ export function App(): React.ReactElement {
   const {
     saveModelConfig,
     createCustomModelProfile,
+    reorderModelProviders,
+    deleteModelProvider,
     revealModelApiKey,
     selectComposerModel,
     fetchModelsForProfile,
@@ -240,6 +271,8 @@ export function App(): React.ReactElement {
     loadMcpReferences,
     importMcpConfig,
     testMcpServer,
+    checkMcpEnvironment,
+    installMcpEnvironment,
     deleteMcpServer,
     updateMcpTool,
     updateTool,
@@ -248,33 +281,45 @@ export function App(): React.ReactElement {
   } = settingsController;
 
   useEffect(() => {
+    if (composerSelectedModelId !== undefined && !modelOptions.some((model) => model.id === composerSelectedModelId)) {
+      setComposerSelectedModelId(undefined);
+    }
+  }, [composerSelectedModelId, modelOptions]);
+
+  useEffect(() => {
+    if (composerSelectedModelId !== undefined && composerSelectedModelId === persistedSelectedModelId) {
+      setComposerSelectedModelId(undefined);
+    }
+  }, [composerSelectedModelId, persistedSelectedModelId]);
+
+  useEffect(() => {
     if (!selectedModelSupportsReasoningEffort && composerReasoningEffort !== "") {
       setComposerReasoningEffort("");
     }
   }, [composerReasoningEffort, selectedModelId, selectedModelSupportsReasoningEffort]);
 
-  async function addAttachment(): Promise<void> {
+  function selectInputModel(modelOptionId: string): void {
+    const fallbackModelId = selectedModelId;
+    setComposerSelectedModelId(modelOptionId);
+    void selectComposerModel(modelOptionId).catch(() => {
+      if (!mountedRef.current) return;
+      setComposerSelectedModelId((current) => current === modelOptionId ? fallbackModelId || undefined : current);
+    });
+  }
+
+
+  async function selectAttachment(): Promise<void> {
     if (contextBusy) return;
     setContextBusy(true);
     try {
-      const attachment = await previewContextAttachment({
-        kind: attachmentKind,
-        value: attachmentValue,
-      });
-      if (mountedRef.current) {
+      const attachment = await selectLocalContextAttachment();
+      if (mountedRef.current && attachment !== undefined) {
         setAttachments((previous) => uniqueAttachments([...previous, attachment]));
-        setAttachmentValue(attachmentKind === "workspace" ? "." : "");
         setApp((previous) => ({ ...previous, error: undefined }));
       }
     } catch (error) {
-      const blocked = blockedContextAttachment({
-        kind: attachmentKind,
-        value: attachmentValue,
-        error,
-      });
       if (mountedRef.current) {
-        setAttachments((previous) => uniqueAttachments([...previous, blocked]));
-        setApp((previous) => ({ ...previous, error: blocked.summary }));
+        setApp((previous) => ({ ...previous, error: errorText(error, "添加附件失败。") }));
       }
     } finally {
       if (mountedRef.current) setContextBusy(false);
@@ -291,18 +336,73 @@ export function App(): React.ReactElement {
     setSettingsOpen(true);
   }
 
+  async function renameConversation(conversationId: string, title: string): Promise<void> {
+    try {
+      const response = await renameConversationTitle(conversationId, title);
+      if (!mountedRef.current) return;
+      applyConversationManagementResponse(response);
+    } catch (error) {
+      if (mountedRef.current) {
+        setApp((previous) => ({ ...previous, error: errorText(error, "重命名会话失败。") }));
+      }
+    }
+  }
+
+  async function toggleConversationPinned(conversationId: string, pinned: boolean): Promise<void> {
+    try {
+      const response = await updateConversationPinnedState(conversationId, pinned);
+      if (!mountedRef.current) return;
+      applyConversationManagementResponse(response);
+    } catch (error) {
+      if (mountedRef.current) {
+        setApp((previous) => ({ ...previous, error: errorText(error, "更新会话置顶失败。") }));
+      }
+    }
+  }
+
+  async function deleteConversation(conversationId: string): Promise<void> {
+    try {
+      const response = await removeConversation(conversationId);
+      if (!mountedRef.current) return;
+      resetChat();
+      setApp((previous) => ({
+        ...previous,
+        conversations: (response.conversations ?? previous.conversations).filter((item) => item.conversationId !== conversationId),
+        error: undefined,
+      }));
+    } catch (error) {
+      if (mountedRef.current) {
+        if (isMissingConversationError(error)) {
+          resetChat();
+          setApp((previous) => ({
+            ...previous,
+            conversations: previous.conversations.filter((item) => item.conversationId !== conversationId),
+            error: undefined,
+          }));
+        } else {
+          setApp((previous) => ({ ...previous, error: errorText(error, "删除会话失败。") }));
+        }
+      }
+    }
+  }
+
+  function applyConversationManagementResponse(response: ConversationManagementResponse): void {
+    setApp((previous) => ({
+      ...previous,
+      conversations: response.conversations ?? upsertConversationSummary(previous.conversations, response.conversation),
+      conversation:
+        previous.conversation?.conversationId === response.conversation.conversationId
+          ? response.conversation
+          : previous.conversation,
+      error: undefined,
+    }));
+  }
+
   const inputProps = {
     value: goal,
     onChange: setGoal,
     attachments,
-    attachmentKind,
-    attachmentValue,
-    onAttachmentKindChange: (kind: ContextAttachment["kind"]) => {
-      setAttachmentKind(kind);
-      setAttachmentValue(kind === "workspace" ? "." : "");
-    },
-    onAttachmentValueChange: setAttachmentValue,
-    onAddAttachment: () => void addAttachment(),
+    onSelectAttachment: () => void selectAttachment(),
     onRemoveAttachment: removeAttachment,
     contextBusy,
     busy: app.busy,
@@ -312,7 +412,7 @@ export function App(): React.ReactElement {
     reasoningEffortEnabled: selectedModelSupportsReasoningEffort,
     onReasoningEffortChange: setComposerReasoningEffort,
     closeSignal: inputCloseSignal,
-    onModelSelect: (modelId: string) => void selectComposerModel(modelId),
+    onModelSelect: selectInputModel,
     onOpenSettings: () => openSettings("models"),
     onSubmit: () => void startTask(),
     onCancel: () => void cancelRun(),
@@ -327,6 +427,9 @@ export function App(): React.ReactElement {
         pendingCount={pendingCount}
         onNew={resetChat}
         onOpen={(id) => void loadConversation(id)}
+        onRename={(id, title) => void renameConversation(id, title)}
+        onTogglePinned={(id, pinned) => void toggleConversationPinned(id, pinned)}
+        onDelete={(id) => void deleteConversation(id)}
         onOpenSettings={() => openSettings("models")}
       />
 
@@ -367,7 +470,9 @@ export function App(): React.ReactElement {
         setWorkspaceDirectory={setWorkspaceDirectory}
         savingModel={savingModel}
         onSaveModel={saveModelConfig}
-        onCreateCustomProfile={() => void createCustomModelProfile()}
+        onCreateCustomProfile={createCustomModelProfile}
+        onReorderModelProviders={reorderModelProviders}
+        onDeleteModelProvider={deleteModelProvider}
         onFetchModels={fetchModelsForProfile}
         onSaveModelCatalog={saveModelCatalog}
         onRevealModelApiKey={revealModelApiKey}
@@ -388,12 +493,18 @@ export function App(): React.ReactElement {
         })}
         onImportMcpConfig={(config) => void importMcpConfig(config)}
         onTestMcpServer={(serverId) => void testMcpServer(serverId)}
+        onCheckMcpEnvironment={checkMcpEnvironment}
+        onInstallMcpEnvironment={installMcpEnvironment}
         onDeleteMcpServer={(serverId) => void deleteMcpServer(serverId)}
-        onUpdateMcpTool={(serverId, toolName, enabled) => void updateMcpTool(serverId, toolName, enabled)}
+        onUpdateMcpTool={(serverId, toolName, enabled, autoApproved) => void updateMcpTool(serverId, toolName, enabled, autoApproved)}
         onUpdateTool={(toolName, enabled) => void updateTool(toolName, enabled)}
         onRefreshSkills={() => void refreshSkills()}
         onUpdateSkill={(skillId, enabled) => void updateSkill(skillId, enabled)}
       />
     </div>
   );
+}
+
+function errorText(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback;
 }

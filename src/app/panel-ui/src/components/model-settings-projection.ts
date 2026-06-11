@@ -34,6 +34,7 @@ export type ModelProviderListItem = {
   readonly profile?: ModelProviderProfileItem;
   readonly presetId?: string;
   readonly preset?: ModelProviderPreset;
+  readonly configured: boolean;
 };
 
 export function filterModelCatalogItems(
@@ -51,9 +52,10 @@ export function formatModelCount(visible: number, total: number, filtered: boole
 export function modelProviderItems(
   config: ConfigResponse | undefined
 ): readonly ModelProviderListItem[] {
-  const profiles = (config?.profiles ?? []).filter(isOpenAIFormatProfile);
-  const presets = (config?.modelProviderMarket?.presets ?? []).filter(isOpenAIFormatPreset);
+  const profiles = (config?.profiles ?? []).filter(isSettingsModelProviderProfile);
+  const presets = (config?.modelProviderMarket?.presets ?? []).filter(isSettingsModelProviderPreset);
   const activeProfileId = config?.config?.profileId;
+  const order = config?.modelProviderOrder ?? [];
   const profileBindings = profiles.map((profile) => ({
     profile,
     identity: resolveModelProviderIdentity({
@@ -95,6 +97,7 @@ export function modelProviderItems(
       profile,
       presetId: preset.presetId,
       preset,
+      configured: profile !== undefined,
     } satisfies ModelProviderListItem;
   });
   const customItems = profileBindings
@@ -109,11 +112,17 @@ export function modelProviderItems(
         protocolKind: profile.protocolKind ?? "openai_compatible_chat_completions",
         profileId: profile.profileId,
         profile,
+        configured: true,
       } satisfies ModelProviderListItem;
     });
   return [...presetItems, ...customItems]
     .map((item, index) => ({ item, index }))
     .sort((left, right) => {
+      const leftOrder = orderIndex(order, left.item.key);
+      const rightOrder = orderIndex(order, right.item.key);
+      if (leftOrder !== rightOrder) {
+        return leftOrder - rightOrder;
+      }
       const rankDelta = modelProviderSortRank(left.item) - modelProviderSortRank(right.item);
       return rankDelta === 0 ? left.index - right.index : rankDelta;
     })
@@ -180,12 +189,18 @@ export function visibleProfileBaseUrl(profile: ModelProviderProfileItem): string
   return baseUrl;
 }
 
-function isOpenAIFormatPreset(preset: ModelProviderPreset): boolean {
+function isSettingsModelProviderPreset(preset: ModelProviderPreset): boolean {
+  if (preset.providerKind === "anthropic") {
+    return preset.protocolKind === "anthropic_messages";
+  }
   return preset.providerKind === "openai_compatible" &&
     (preset.protocolKind === "openai_responses" || preset.protocolKind === "openai_compatible_chat_completions");
 }
 
-function isOpenAIFormatProfile(profile: ModelProviderProfileItem): boolean {
+function isSettingsModelProviderProfile(profile: ModelProviderProfileItem): boolean {
+  if (profile.providerKind === "anthropic") {
+    return profile.protocolKind === "anthropic_messages";
+  }
   return profile.providerKind === "openai_compatible" &&
     (profile.protocolKind === "openai_responses" || profile.protocolKind === "openai_compatible_chat_completions");
 }
@@ -197,4 +212,17 @@ function friendlyProfileTitle(profile: ModelProviderProfileItem, identity: Model
   if (raw.toLowerCase() === "default") return "OpenAI";
   if (raw.toLowerCase() === "custom") return "自定义厂商";
   return raw;
+}
+
+function orderIndex(order: readonly string[], key: string): number {
+  const index = order.indexOf(key);
+  if (index !== -1) return index;
+  const fallbackIndex = order.indexOf(alternateProviderKey(key));
+  return fallbackIndex === -1 ? Number.MAX_SAFE_INTEGER : fallbackIndex;
+}
+
+function alternateProviderKey(key: string): string {
+  if (key.startsWith("profile:")) return `preset:${key.slice("profile:".length)}`;
+  if (key.startsWith("preset:")) return `profile:${key.slice("preset:".length)}`;
+  return key;
 }

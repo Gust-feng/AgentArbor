@@ -8,6 +8,7 @@ import {
   importMcpServers,
   mergeCatalogsIntoConfig,
   revealModelProviderApiKey,
+  refreshSkillCatalog,
   saveMcpServerSettings,
   saveModelProviderCatalog,
   saveModelProviderConfig,
@@ -41,6 +42,7 @@ export type AppSettingsController = {
   readonly deleteMcpServer: (serverId: string) => Promise<void>;
   readonly updateMcpTool: (serverId: string, toolName: string, enabled: boolean) => Promise<void>;
   readonly updateTool: (toolName: string, enabled: boolean) => Promise<void>;
+  readonly refreshSkills: () => Promise<void>;
   readonly updateSkill: (skillId: string, enabled: boolean) => Promise<void>;
 };
 
@@ -445,13 +447,32 @@ export function createAppSettingsController(options: AppSettingsControllerOption
     try {
       const skills = await updateSkillState(skillId, enabled);
       if (options.mountedRef.current) {
-        options.setApp((previous) => ({ ...previous, skills }));
+        options.setApp((previous) => ({ ...previous, skills, error: undefined }));
       }
     } catch (error) {
       if (options.mountedRef.current) {
         options.setApp((previous) => ({
           ...previous,
-          error: error instanceof Error ? error.message : "工作方法状态保存失败。",
+          error: error instanceof Error ? error.message : "Skills 状态保存失败。",
+        }));
+      }
+    } finally {
+      if (options.mountedRef.current) options.setSavingTools(false);
+    }
+  }
+
+  async function refreshSkills(): Promise<void> {
+    options.setSavingTools(true);
+    try {
+      const skills = await refreshSkillCatalog();
+      if (options.mountedRef.current) {
+        options.setApp((previous) => ({ ...previous, skills, error: undefined }));
+      }
+    } catch (error) {
+      if (options.mountedRef.current) {
+        options.setApp((previous) => ({
+          ...previous,
+          error: error instanceof Error ? error.message : "Skills 刷新失败。",
         }));
       }
     } finally {
@@ -475,6 +496,7 @@ export function createAppSettingsController(options: AppSettingsControllerOption
     deleteMcpServer: deleteSelectedMcpServer,
     updateMcpTool,
     updateTool,
+    refreshSkills,
     updateSkill,
   };
 }

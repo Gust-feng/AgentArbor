@@ -30,4 +30,4 @@ export type McpServerForm = {
   readonly enabled: boolean;
 };
 
-export type SettingsGroup = "models" | "capabilities" | "mcp" | "workspace" | "confirmation";
+export type SettingsGroup = "models" | "capabilities" | "mcp" | "skills" | "workspace" | "confirmation";

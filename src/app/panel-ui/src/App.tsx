@@ -243,6 +243,7 @@ export function App(): React.ReactElement {
     deleteMcpServer,
     updateMcpTool,
     updateTool,
+    refreshSkills,
     updateSkill,
   } = settingsController;
 
@@ -390,6 +391,7 @@ export function App(): React.ReactElement {
         onDeleteMcpServer={(serverId) => void deleteMcpServer(serverId)}
         onUpdateMcpTool={(serverId, toolName, enabled) => void updateMcpTool(serverId, toolName, enabled)}
         onUpdateTool={(toolName, enabled) => void updateTool(toolName, enabled)}
+        onRefreshSkills={() => void refreshSkills()}
         onUpdateSkill={(skillId, enabled) => void updateSkill(skillId, enabled)}
       />
     </div>

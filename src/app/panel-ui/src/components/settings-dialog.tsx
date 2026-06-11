@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import {
   CloudCog,
   Database,
+  FileText,
   LockKeyhole,
   Server,
   SlidersHorizontal,
@@ -16,6 +17,7 @@ import type { McpReferenceResponse, ToolsResponse } from "../contracts/tools";
 import { CapabilitiesSettings } from "./capability-settings";
 import { ConfirmationSettings } from "./confirmation-settings";
 import { ModelSettings } from "./model-settings";
+import { SkillSettings } from "./skill-settings";
 import type { McpServerForm, ModelForm, SettingsGroup, ToolForm } from "./settings-types";
 import { WorkspaceSettings } from "./workspace-settings";
 
@@ -54,6 +56,7 @@ export function SettingsDialog(props: {
   readonly onDeleteMcpServer: (serverId: string) => void;
   readonly onUpdateMcpTool: (serverId: string, toolName: string, enabled: boolean) => void;
   readonly onUpdateTool: (toolName: string, enabled: boolean) => void;
+  readonly onRefreshSkills: () => void;
   readonly onUpdateSkill: (skillId: string, enabled: boolean) => void;
 }): React.ReactElement | null {
   const [activeGroup, setActiveGroup] = useState<SettingsGroup>("models");
@@ -147,7 +150,13 @@ export function SettingsDialog(props: {
                 onDeleteMcpServer={props.onDeleteMcpServer}
                 onUpdateMcpTool={props.onUpdateMcpTool}
                 onUpdateTool={props.onUpdateTool}
+              />
+            )}
+            {activeGroup === "skills" && (
+              <SkillSettings
                 skills={props.skills}
+                saving={props.savingTools}
+                onRefreshSkills={props.onRefreshSkills}
                 onUpdateSkill={props.onUpdateSkill}
               />
             )}
@@ -170,6 +179,7 @@ const SETTINGS_GROUPS: readonly { readonly id: SettingsGroup; readonly label: st
   { id: "models", label: "模型服务", icon: <CloudCog size={15} /> },
   { id: "capabilities", label: "基础能力", icon: <SlidersHorizontal size={15} /> },
   { id: "mcp", label: "MCP 服务", icon: <Server size={15} /> },
+  { id: "skills", label: "Skills", icon: <FileText size={15} /> },
   { id: "workspace", label: "工作区", icon: <Database size={15} /> },
   { id: "confirmation", label: "高影响动作", icon: <LockKeyhole size={15} /> },
 ];

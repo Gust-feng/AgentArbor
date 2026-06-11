@@ -61,6 +61,9 @@ test("panel UI contracts stay split by product concern", async () => {
   assert.equal(contractConversation.includes("readonly currentRun?: BasicAgentRunView;"), true);
   assert.equal(contractConversation.includes("readonly currentRun?: {"), false);
   assert.equal(contractSkills.includes("export type SkillDefinition"), true);
+  assert.equal(contractSkills.includes("readonly sourcePath?: string"), true);
+  assert.equal(contractSkills.includes("readonly summary?: string"), true);
+  assert.equal(contractSkills.includes("readonly loadError?: string"), true);
   assert.equal(contractTools.includes("export type ToolsResponse"), true);
   assert.equal(contractTools.includes("export type McpServerCatalogItem"), true);
   assert.equal(contractTools.includes("readonly mcpCatalog?: readonly McpServerCatalogItem[];"), true);

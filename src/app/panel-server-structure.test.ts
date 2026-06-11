@@ -326,6 +326,7 @@ test("panel server source keeps conversation restore and persistence split", asy
   assert.equal(panelRuntime.includes('from "./live-model-stream.js"'), true);
   assert.equal(panelRuntime.includes('from "./conversation-sync.js"'), true);
   assert.equal(skillService.includes("export async function listPanelSkills"), true);
+  assert.equal(skillService.includes("export async function refreshPanelSkills"), true);
   assert.equal(skillService.includes("export async function setPanelSkillEnabled"), true);
   assert.equal(skillService.includes("export async function resolveTriggeredSkillContexts"), true);
   assert.equal(runExecution.includes("export async function executeBasicPanelRun"), true);

@@ -286,6 +286,11 @@ export async function updateSkillState(skillId: string, enabled: boolean): Promi
   return response.skills;
 }
 
+export async function refreshSkillCatalog(): Promise<readonly SkillDefinition[]> {
+  const response = await postJson<{ readonly skills: readonly SkillDefinition[] }>("/api/skills/refresh", {});
+  return response.skills;
+}
+
 export function mergeCatalogsIntoConfig(
   config: ConfigResponse | undefined,
   catalogs: readonly ModelProviderModelCatalog[]

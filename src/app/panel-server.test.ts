@@ -128,6 +128,21 @@ test("panel skills route returns real discovered SKILL metadata only", async () 
     assert.equal(response.body.skills[0].name, "Safe Skill");
     assert.deepEqual(response.body.skills[0].triggers, ["summary"]);
     assert.equal(JSON.stringify(response.body.skills).includes("BODY_SENTINEL"), false);
+
+    const extraSkillDir = path.join(skillRoot, "extra-skill");
+    await fs.mkdir(extraSkillDir, { recursive: true });
+    await fs.writeFile(
+      path.join(extraSkillDir, "SKILL.md"),
+      "---\nname: Extra Skill\ndescription: Extra metadata.\n---\n\nEXTRA_BODY_SENTINEL",
+      "utf8"
+    );
+    const refreshed = await requestJson(server.url, "/api/skills/refresh", { method: "POST" });
+    assert.equal(refreshed.status, 200);
+    assert.deepEqual(
+      refreshed.body.skills.map((skill: { readonly name: string }) => skill.name).sort(),
+      ["Extra Skill", "Safe Skill"]
+    );
+    assert.equal(JSON.stringify(refreshed.body.skills).includes("EXTRA_BODY_SENTINEL"), false);
   } finally {
     await server.close();
     await removeTemporaryTree(directory);

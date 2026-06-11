@@ -1,7 +1,6 @@
 import React from "react";
 import { Link2, Plus, Save, Trash2, X } from "lucide-react";
 import type { ConfigResponse } from "../contracts/config";
-import type { SkillDefinition } from "../contracts/skills";
 import type { McpReferenceResponse, ToolsResponse } from "../contracts/tools";
 import type { McpServerForm, ToolForm } from "./settings-types";
 import { providerName, toolDescription, toolMeta, toolTitle } from "./settings-tool-copy";
@@ -32,8 +31,6 @@ export function CapabilitiesSettings(props: {
   readonly onDeleteMcpServer: (serverId: string) => void;
   readonly onUpdateMcpTool: (serverId: string, toolName: string, enabled: boolean) => void;
   readonly onUpdateTool: (toolName: string, enabled: boolean) => void;
-  readonly skills: readonly SkillDefinition[];
-  readonly onUpdateSkill: (skillId: string, enabled: boolean) => void;
 }): React.ReactElement {
   if (props.activeSection === "mcp") {
     return (
@@ -69,7 +66,6 @@ export function CapabilitiesSettings(props: {
         onSaveTools={props.onSaveTools}
       />
       <ToolCatalogSettings tools={props.tools} saving={props.savingTools} onUpdateTool={props.onUpdateTool} />
-      <SkillContextSettings skills={props.skills} onUpdateSkill={props.onUpdateSkill} />
     </div>
   );
 }
@@ -753,32 +749,6 @@ function ToolCatalogSettings(props: {
   );
 }
 
-function SkillContextSettings(props: {
-  readonly skills: readonly SkillDefinition[];
-  readonly onUpdateSkill: (skillId: string, enabled: boolean) => void;
-}): React.ReactElement {
-  return (
-    <section className="settings-card capability-list-card">
-      <h3>工作方法</h3>
-      <div className="capability-list">
-        {props.skills.length === 0 ? (
-          <div className="capability-empty">暂无工作方法</div>
-        ) : (
-          props.skills.map((skill) => (
-            <CapabilityRow
-              key={skill.id}
-              title={skill.name}
-              description={skill.description}
-              meta={skill.triggers?.slice(0, 2).join(" · ") || "按任务匹配"}
-              enabled={skill.enabled}
-              onToggle={() => props.onUpdateSkill(skill.id, !skill.enabled)}
-            />
-          ))
-        )}
-      </div>
-    </section>
-  );
-}
 
 function formFromMcpCatalog(server: NonNullable<ToolsResponse["mcpCatalog"]>[number], previous: McpServerForm): McpServerForm {
   const authMode = server.authSecretRefCount !== undefined && server.authSecretRefCount > 0 && isNetworkMcpTransport(server.transport)

@@ -24,6 +24,11 @@ export async function listPanelSkills(runtime: PanelSkillRuntime): Promise<reado
   return discoverSkills({ roots: runtime.skillRoots, stateStore: runtime.skillStateStore });
 }
 
+export async function refreshPanelSkills(runtime: PanelSkillRuntime): Promise<readonly SkillDefinition[]> {
+  runtime.capabilityCenter?.invalidate();
+  return listPanelSkills(runtime);
+}
+
 export async function setPanelSkillEnabled(
   runtime: PanelSkillRuntime,
   skillId: string,

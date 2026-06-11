@@ -9,6 +9,7 @@ test("panel UI settings and model modules stay split", async () => {
     settingsTypes,
     settingsToolCopy,
     capabilitySettings,
+    skillSettings,
     workspaceSettings,
     confirmationSettings,
     modelSettings,
@@ -31,6 +32,7 @@ test("panel UI settings and model modules stay split", async () => {
     readPanelUiSource(path.join("components", "settings-types.ts")),
     readPanelUiSource(path.join("components", "settings-tool-copy.ts")),
     readPanelUiSource(path.join("components", "capability-settings.tsx")),
+    readPanelUiSource(path.join("components", "skill-settings.tsx")),
     readPanelUiSource(path.join("components", "workspace-settings.tsx")),
     readPanelUiSource(path.join("components", "confirmation-settings.tsx")),
     readPanelUiSource(path.join("components", "model-settings.tsx")),
@@ -53,6 +55,7 @@ test("panel UI settings and model modules stay split", async () => {
   assert.equal(settingsDialog.includes('from "./skills-page"'), false);
   assert.equal(settingsDialog.includes('from "./tools-page"'), false);
   assert.equal(settingsDialog.includes('from "./capability-settings"'), true);
+  assert.equal(settingsDialog.includes('from "./skill-settings"'), true);
   assert.equal(settingsDialog.includes('from "./confirmation-settings"'), true);
   assert.equal(settingsDialog.includes('from "./model-settings"'), true);
   assert.equal(settingsDialog.includes('from "./settings-types"'), true);
@@ -65,10 +68,12 @@ test("panel UI settings and model modules stay split", async () => {
   assert.equal(settingsDialog.includes('label: "模型服务"'), true);
   assert.equal(settingsDialog.includes('label: "基础能力"'), true);
   assert.equal(settingsDialog.includes('label: "MCP 服务"'), true);
+  assert.equal(settingsDialog.includes('label: "Skills"'), true);
   assert.equal(settingsDialog.includes('label: "工作区"'), true);
   assert.equal(settingsDialog.includes('label: "高影响动作"'), true);
   assert.equal(settingsDialog.includes('label: "确认边界"'), false);
   assert.equal(settingsDialog.includes("<CapabilitiesSettings"), true);
+  assert.equal(settingsDialog.includes("<SkillSettings"), true);
   assert.equal(settingsDialog.includes("<WorkspaceSettings"), true);
   assert.equal(settingsDialog.includes("<ConfirmationSettings"), true);
   assert.equal(settingsDialog.includes("function Capability"), false);
@@ -95,7 +100,7 @@ test("panel UI settings and model modules stay split", async () => {
   assert.equal(settingsTypes.includes('export type { ModelForm } from "./model-settings"'), true);
   assert.equal(settingsTypes.includes("export type ToolForm"), true);
   assert.equal(settingsTypes.includes("export type McpServerForm"), true);
-  assert.equal(settingsTypes.includes('export type SettingsGroup = "models" | "capabilities" | "mcp" | "workspace" | "confirmation";'), true);
+  assert.equal(settingsTypes.includes('export type SettingsGroup = "models" | "capabilities" | "mcp" | "skills" | "workspace" | "confirmation";'), true);
   assert.equal(settingsToolCopy.includes("export function toolTitle"), true);
   assert.equal(settingsToolCopy.includes("export function toolDescription"), true);
   assert.equal(settingsToolCopy.includes("export function toolMeta"), true);
@@ -105,12 +110,15 @@ test("panel UI settings and model modules stay split", async () => {
   assert.equal(capabilitySettings.includes("function WebSearchSettings"), true);
   assert.equal(capabilitySettings.includes("function McpServiceSettings"), true);
   assert.equal(capabilitySettings.includes("function ToolCatalogSettings"), true);
-  assert.equal(capabilitySettings.includes("function SkillContextSettings"), true);
+  assert.equal(capabilitySettings.includes("function SkillContextSettings"), false);
   assert.equal(capabilitySettings.includes("function CapabilityRow"), true);
   assert.equal(capabilitySettings.includes('from "../app-config-actions"'), false);
   assert.equal(capabilitySettings.includes("基础能力"), true);
   assert.equal(capabilitySettings.includes("MCP 服务"), true);
-  assert.equal(capabilitySettings.includes("工作方法"), true);
+  assert.equal(capabilitySettings.includes("工作方法"), false);
+  assert.equal(skillSettings.includes("export function SkillSettings"), true);
+  assert.equal(skillSettings.includes("按任务触发的工作流说明"), false);
+  assert.equal(skillSettings.includes("SKILL.md"), true);
   assert.equal(capabilitySettings.includes("网页查证"), true);
   assert.equal(capabilitySettings.includes("由模型按任务判断"), false);
   assert.equal(capabilitySettings.includes("这里配置可用服务和安全边界"), false);

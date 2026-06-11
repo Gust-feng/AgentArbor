@@ -29,6 +29,7 @@ test("panel UI app shell delegates data and control work", async () => {
     sidebar,
     settingsDialog,
     capabilitySettings,
+    skillSettings,
     workspaceSettings,
     confirmationSettings,
     shellStyles,
@@ -60,6 +61,7 @@ test("panel UI app shell delegates data and control work", async () => {
     readPanelUiSource(path.join("components", "sidebar.tsx")),
     readPanelUiSource(path.join("components", "settings-dialog.tsx")),
     readPanelUiSource(path.join("components", "capability-settings.tsx")),
+    readPanelUiSource(path.join("components", "skill-settings.tsx")),
     readPanelUiSource(path.join("components", "workspace-settings.tsx")),
     readPanelUiSource(path.join("components", "confirmation-settings.tsx")),
     readPanelUiStyle("shell.css"),
@@ -147,6 +149,7 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(appConfigActions.includes("export async function saveMcpServerSettings"), true);
   assert.equal(appConfigActions.includes("export async function updateToolState"), true);
   assert.equal(appConfigActions.includes("export async function updateSkillState"), true);
+  assert.equal(appConfigActions.includes("export async function refreshSkillCatalog"), true);
   assert.equal(appConfigActions.includes('postJson<ConfigResponse>("/api/config/model-provider"'), true);
   assert.equal(appConfigActions.includes('postJson<ToolsResponse>("/api/config/tools/web-search"'), true);
   assert.equal(appConfigActions.includes('postJson<{ readonly catalog?: ToolsResponse["mcpCatalog"] }>("/api/config/mcp"'), true);
@@ -224,6 +227,7 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(appSettingsController.includes("async function saveTools"), true);
   assert.equal(appSettingsController.includes("async function saveMcpServer"), true);
   assert.equal(appSettingsController.includes("async function updateTool"), true);
+  assert.equal(appSettingsController.includes("async function refreshSkills"), true);
   assert.equal(appSettingsController.includes("async function updateSkill"), true);
   assert.equal(appSettingsController.includes("saveModelProviderConfig"), true);
   assert.equal(appSettingsController.includes("saveWorkspaceDirectory"), true);
@@ -235,9 +239,11 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(appState.includes("transcriptNodesByRunId"), true);
   assert.equal(appState.includes("readonly skills"), true);
   assert.equal(settingsDialog.includes('from "./capability-settings"'), true);
+  assert.equal(settingsDialog.includes('from "./skill-settings"'), true);
   assert.equal(settingsDialog.includes('from "./workspace-settings"'), true);
   assert.equal(settingsDialog.includes('from "./confirmation-settings"'), true);
   assert.equal(settingsDialog.includes("<CapabilitiesSettings"), true);
+  assert.equal(settingsDialog.includes("<SkillSettings"), true);
   assert.equal(settingsDialog.includes("<WorkspaceSettings"), true);
   assert.equal(settingsDialog.includes("<ConfirmationSettings"), true);
   assert.equal(settingsDialog.includes("function Capability"), false);
@@ -263,6 +269,7 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(settingsDialog.includes('label: "模型服务"'), true);
   assert.equal(settingsDialog.includes('label: "基础能力"'), true);
   assert.equal(settingsDialog.includes('label: "MCP 服务"'), true);
+  assert.equal(settingsDialog.includes('label: "Skills"'), true);
   assert.equal(settingsDialog.includes('label: "工作区"'), true);
   assert.equal(settingsDialog.includes('label: "高影响动作"'), true);
   assert.equal(settingsDialog.includes('label: "确认边界"'), false);
@@ -275,7 +282,11 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(capabilitySettings.includes("这里配置可用服务和安全边界"), false);
   assert.equal(capabilitySettings.includes("由模型按任务判断"), false);
   assert.equal(capabilitySettings.includes("不替助手决定"), false);
-  assert.equal(capabilitySettings.includes("工作方法"), true);
+  assert.equal(capabilitySettings.includes("工作方法"), false);
+  assert.equal(skillSettings.includes("export function SkillSettings"), true);
+  assert.equal(skillSettings.includes("工作方法"), false);
+  assert.equal(skillSettings.includes("按任务触发的工作流说明"), false);
+  assert.equal(skillSettings.includes("SKILL.md"), true);
   assert.equal(capabilitySettings.includes("接入工具"), false);
   assert.equal(capabilitySettings.includes("管理助手可调用"), false);
   assert.equal(workspaceSettings.includes("export function WorkspaceSettings"), true);

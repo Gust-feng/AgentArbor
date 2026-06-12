@@ -24,9 +24,9 @@ export function SkillSettings(props: {
         </button>
       </header>
       {props.skills.length === 0 ? (
-        <div className="skills-empty">暂无 Skills · <code>.agents/skills/&lt;skill-name&gt;/SKILL.md</code></div>
+        <div className="skills-empty">暂无技能 · <code>.agents/skills/&lt;skill-name&gt;/SKILL.md</code></div>
       ) : (
-        <div className="skills-list" aria-label="Skills 列表">
+        <div className="skills-list" aria-label="技能列表">
           {props.skills.map((skill) => (
             <SkillRow
               key={skill.id}
@@ -48,6 +48,7 @@ function SkillRow(props: {
 }): React.ReactElement {
   const sourcePath = compactSkillSourcePath(props.skill.sourcePath);
   const lastUsedAt = formatSkillDateTime(props.skill.lastUsedAt);
+  const toggleActionLabel = props.skill.enabled ? "停用" : "启用";
   return (
     <article className={`skills-row ${props.skill.enabled ? "" : "disabled"}`}>
       <div className="skills-row-main">
@@ -70,10 +71,11 @@ function SkillRow(props: {
         type="button"
         className="capability-toggle"
         aria-pressed={props.skill.enabled}
+        aria-label={`${toggleActionLabel} ${props.skill.name}`}
         onClick={props.onToggle}
         disabled={props.saving}
       >
-        {props.skill.enabled ? "启用" : "停用"}
+        {toggleActionLabel}
       </button>
     </article>
   );

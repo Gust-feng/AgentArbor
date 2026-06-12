@@ -93,7 +93,7 @@ test("CapabilityCenter freezes safe model, tool, skill, and MCP catalog projecti
     assert.deepEqual(snapshot.mcpCatalog[0]?.exposedTools.map((tool) => tool.name), ["docs__lookup"]);
     assert.equal(snapshot.toolCatalog.tools.some((tool) => tool.name === "docs__lookup" && tool.scopes.includes("mcp")), true);
     assert.equal(snapshot.toolCatalog.allowedTools.includes("docs__lookup"), true);
-    assert.equal(snapshot.securitySummary, "本轮模型、工具、工作方法和工作区能力快照。");
+    assert.equal(snapshot.securitySummary, "本轮模型、工具、技能和工作区能力快照。");
     assert.equal(snapshot.securitySummary.includes("prompt"), false);
     assert.equal(snapshot.securitySummary.includes("raw"), false);
     assert.equal(text.includes("sk-capability-secret"), false);

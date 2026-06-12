@@ -275,7 +275,7 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(settingsDialog.includes('label: "模型服务"'), true);
   assert.equal(settingsDialog.includes('label: "基础能力"'), true);
   assert.equal(settingsDialog.includes('label: "MCP 服务"'), true);
-  assert.equal(settingsDialog.includes('label: "Skills"'), true);
+  assert.equal(settingsDialog.includes('label: "技能"'), true);
   assert.equal(settingsDialog.includes('label: "工作区"'), true);
   assert.equal(settingsDialog.includes('label: "高影响动作"'), true);
   assert.equal(settingsDialog.includes('label: "确认边界"'), false);
@@ -292,6 +292,8 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(skillSettings.includes("export function SkillSettings"), true);
   assert.equal(skillSettings.includes("工作方法"), false);
   assert.equal(skillSettings.includes("按任务触发的工作流说明"), false);
+  assert.equal(skillSettings.includes("暂无技能"), true);
+  assert.equal(skillSettings.includes('aria-label="技能列表"'), true);
   assert.equal(skillSettings.includes("SKILL.md"), true);
   assert.equal(capabilitySettings.includes("接入工具"), false);
   assert.equal(capabilitySettings.includes("管理助手可调用"), false);

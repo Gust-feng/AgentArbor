@@ -153,7 +153,7 @@ export class CapabilityCenter {
         mcpCatalogItemForServer(server, mcpRuntimeSnapshots, mcpToolCatalog.tools, exposedMcpToolCatalog.tools)
       ),
       workspace,
-      securitySummary: "本轮模型、工具、工作方法和工作区能力快照。",
+      securitySummary: "本轮模型、工具、技能和工作区能力快照。",
       warnings,
     };
   }

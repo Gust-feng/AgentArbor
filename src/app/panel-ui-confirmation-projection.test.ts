@@ -103,7 +103,7 @@ test("confirmation display projection filters internal resources and resume loss
   ]);
   assert.equal(view.riskLevel, "medium");
   assert.equal(view.resumeLost, true);
-  assert.equal(view.resumeLostSummary, "需重新发起。");
+  assert.equal(view.resumeLostSummary, "这次操作无法原地继续。发送新消息即可基于当前上下文继续。");
 });
 
 function confirmation(

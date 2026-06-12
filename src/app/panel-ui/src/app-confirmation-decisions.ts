@@ -112,7 +112,7 @@ function localConfirmationDecisionError(
   guidance: string | undefined
 ): string | undefined {
   if (decision === "approve_once" && resumeAvailability === "lost_after_restart") {
-    return "这次操作无法继续。请补充要求。";
+    return "这次操作无法原地继续。请发送新消息，让我基于当前上下文继续。";
   }
   if (decision === "guidance" && (guidance ?? "").trim().length === 0) {
     return "请先输入补充要求，再提交。";

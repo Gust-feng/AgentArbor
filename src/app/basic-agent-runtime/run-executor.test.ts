@@ -463,7 +463,7 @@ test("InMemoryBasicAgentRunJobStore requires frozen birth facts for ordinary des
   );
 });
 
-test("BasicAgentRunExecutor resumes denied or guided confirmations through the same run", async () => {
+test("BasicAgentRunExecutor reject recovers through the same run", async () => {
   const runJobs = new InMemoryBasicAgentRunJobStore();
   const resumedInputs: unknown[] = [];
   const executor = new BasicAgentRunExecutor(executorConfig({
@@ -499,21 +499,20 @@ test("BasicAgentRunExecutor resumes denied or guided confirmations through the s
   await executor.submitConfirmationDecision({
     runId: run.runId,
     confirmationId: "confirmation-tool",
-    decision: "guidance",
-    guidance: "不要执行删除，改为说明。",
+    decision: "deny",
   });
   await waitUntil(() => runJobs.get(run.runId)?.status === "completed");
 
   assert.equal(resumedInputs.length, 1);
   const resumedInput = resumedInputs[0] as { readonly decision: string; readonly guidance?: string; readonly abortSignal?: AbortSignal };
-  assert.equal(resumedInput.decision, "guidance");
-  assert.equal(resumedInput.guidance, "不要执行删除，改为说明。");
+  assert.equal(resumedInput.decision, "deny");
+  assert.equal(resumedInput.guidance, undefined);
   assert.equal(typeof resumedInput.abortSignal?.aborted, "boolean");
-  assert.equal(runJobs.get(run.runId)?.confirmationDecisions[0]?.decision, "guidance");
+  assert.equal(runJobs.get(run.runId)?.confirmationDecisions[0]?.decision, "deny");
   assert.equal(executor.get(run.runId)?.status, "completed");
 });
 
-test("BasicAgentRunExecutor returns approval decisions before long command continuations finish", async () => {
+test("BasicAgentRunExecutor approve continues before long command continuations finish", async () => {
   const runJobs = new InMemoryBasicAgentRunJobStore();
   const activeRunJobs = new Set<Promise<void>>();
   let releaseContinuation: (() => void) | undefined;
@@ -1128,7 +1127,7 @@ test("BasicAgentRunExecutor keeps frozen run facts when approval continuation is
 
   const blocked = runJobs.get(run.runId);
   assert.equal(blocked?.blocked?.reason.code, "confirmation_continuation_lost");
-  assert.equal(blocked?.blocked?.reason.message, "这次操作无法继续。");
+  assert.equal(blocked?.blocked?.reason.message, "这次操作无法原地继续。你可以发送新消息，让我基于当前上下文继续。");
   assert.equal(blocked?.blocked?.capabilitySnapshot?.snapshotId, "snapshot-lost-continuation");
   assert.equal(blocked?.blocked?.config.profileId, blocked?.config.profileId);
   assert.deepEqual(blocked?.blocked?.informationAccess.sourcePreference, blocked?.informationAccess.sourcePreference);

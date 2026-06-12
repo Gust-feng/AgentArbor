@@ -144,6 +144,28 @@ test("persisted runtime running status restores as blocked ordinary panel state"
   assert.equal(panelStatusFromRuntimeStatus("running"), "blocked");
 });
 
+test("persisted blocked ordinary responses explain the new-turn recovery path", () => {
+  const response = createPersistedPanelRunResponse({
+    snapshot: {
+      ...runtimeSnapshot(),
+      run: {
+        ...runtimeSnapshot().run,
+        status: "blocked",
+        error: {
+          code: "confirmation_continuation_lost",
+          message: "这次操作无法原地继续。你可以发送新消息，让我基于当前上下文继续。",
+        },
+      },
+    },
+    config: modelConfig(),
+    informationAccess: informationAccess(),
+  });
+
+  assert.equal(response.status, "blocked");
+  assert.equal(response.transcript.events.at(-1)?.type, "run.blocked");
+  assert.equal(response.transcript.events.at(-1)?.summary, "这次操作无法原地继续。你可以发送新消息，让我基于当前上下文继续。");
+});
+
 test("persisted user-action statuses restore concrete confirmation without generic waiting points", () => {
   const approval = createPersistedPanelRunResponse({
     snapshot: runtimeSnapshotWithStatus("approval_needed"),

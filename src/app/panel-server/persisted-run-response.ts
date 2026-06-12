@@ -595,7 +595,7 @@ function persistedWaitingPoint(
     return "已取消。";
   }
   if (status === "blocked") {
-    return "这次操作无法继续。";
+    return "这次操作无法原地继续。你可以发送新消息，让我基于当前上下文继续。";
   }
   if (status === "failed") {
     return "未完成，请查看错误信息。";

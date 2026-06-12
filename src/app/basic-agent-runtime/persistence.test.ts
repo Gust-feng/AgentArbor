@@ -6,6 +6,7 @@ import type { BasicAgentRun } from "../../domain/basic-agent/index.js";
 import type {
   RuntimeArtifactRecord,
   RuntimeConfirmationRecord,
+  RuntimeContextLedgerRecord,
   RuntimeConversationRecord,
   RuntimeDatabase,
   RuntimeEventRecord,
@@ -78,7 +79,7 @@ test("restored basic blocked fallback stays concise", () => {
   });
 
   assert.equal(events.at(-1)?.type, "run.blocked");
-  assert.equal(events.at(-1)?.summary, "这次操作无法继续。");
+  assert.equal(events.at(-1)?.summary, "这次操作无法原地继续。你可以发送新消息，让我基于当前上下文继续。");
   assert.equal(JSON.stringify(events).includes("请重新发起或继续处理"), false);
 });
 
@@ -154,7 +155,7 @@ test("restored confirmation decision updates run, confirmations, basic events, a
   assert.equal(database.snapshot.basicRun?.status, "needs_input");
 });
 
-test("restored approval without live continuation blocks with concise copy", async () => {
+test("restored approval without live continuation blocks with a new-turn recovery path", async () => {
   const database = new MemoryRuntimeDatabase({
     ...snapshotFixture(),
     confirmations: [{
@@ -180,8 +181,8 @@ test("restored approval without live continuation blocks with concise copy", asy
   });
 
   assert.equal(run?.status, "blocked");
-  assert.equal(database.snapshot.run.error?.message, "这次操作无法继续。");
-  assert.equal(database.snapshot.basicEvents.at(-1)?.summary, "这次操作无法继续。");
+  assert.equal(database.snapshot.run.error?.message, "这次操作无法原地继续。你可以发送新消息，让我基于当前上下文继续。");
+  assert.equal(database.snapshot.basicEvents.at(-1)?.summary, "这次操作无法原地继续。你可以发送新消息，让我基于当前上下文继续。");
   assert.equal(JSON.stringify(database.snapshot.basicEvents).includes("无法继续原操作"), false);
 });
 
@@ -316,6 +317,11 @@ class MemoryRuntimeDatabase implements RuntimeDatabase {
   async replaceConfirmations(_runId: string, confirmations: readonly RuntimeConfirmationRecord[]): Promise<readonly RuntimeConfirmationRecord[]> {
     this.snapshot = { ...this.snapshot, confirmations };
     return confirmations;
+  }
+
+  async upsertContextLedger(record: RuntimeContextLedgerRecord): Promise<RuntimeContextLedgerRecord> {
+    this.snapshot = { ...this.snapshot, contextLedger: record };
+    return record;
   }
 
   async getRun(runId: string): Promise<RuntimeRunSnapshot | undefined> {

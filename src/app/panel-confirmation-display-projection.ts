@@ -33,7 +33,7 @@ export function projectConfirmationDisplay(
     riskLevel: confirmationRiskLevel(confirmation),
     resumeLost: confirmation?.resumeAvailability === "lost_after_restart",
     resumeLostSummary: confirmation?.resumeAvailability === "lost_after_restart"
-      ? "需重新发起。"
+      ? "这次操作无法原地继续。发送新消息即可基于当前上下文继续。"
       : undefined,
   };
 }

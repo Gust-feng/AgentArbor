@@ -7,7 +7,7 @@ export type RestoredRunResultProjection = {
   readonly summary: string;
 };
 
-export const ORDINARY_RUN_BLOCKED_FALLBACK = "这次操作无法继续。";
+export const ORDINARY_RUN_BLOCKED_FALLBACK = "这次操作无法原地继续。你可以发送新消息，让我基于当前上下文继续。";
 
 type RestoredRunResultSource = Pick<RuntimeRunRecord, "resultTitle" | "resultSummary">;
 type RestoredTerminalRunSource = Pick<RuntimeRunRecord, "error" | "resultTitle" | "resultSummary">;
@@ -39,7 +39,7 @@ export function restoredRunTerminalSummary(input: {
     return resultSummary ?? errorMessage ?? "已取消。";
   }
   if (input.status === "blocked") {
-    return resultSummary ?? errorMessage ?? ORDINARY_RUN_BLOCKED_FALLBACK;
+    return errorMessage ?? resultSummary ?? ORDINARY_RUN_BLOCKED_FALLBACK;
   }
   return resultSummary ?? optionalRestoredText(input.run.resultTitle, 300) ?? "";
 }

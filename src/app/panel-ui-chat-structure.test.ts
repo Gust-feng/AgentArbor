@@ -166,7 +166,7 @@ test("panel UI chat and transcript modules stay presentation-focused", async () 
   assert.equal(transcriptConfirmationProjection.includes("export function pendingForTurn"), true);
   assert.equal(confirmationDisplayProjection.includes("export function projectConfirmationDisplay"), true);
   assert.equal(confirmationDisplayProjection.includes("cleanConfirmationSummary"), true);
-  assert.equal(confirmationDisplayProjection.includes("需重新发起。"), true);
+  assert.equal(confirmationDisplayProjection.includes("发送新消息即可基于当前上下文继续。"), true);
   assert.equal(transcriptTimeline.includes("agent-workline-current"), false);
   assert.equal(transcriptTimeline.includes("agent-workline-confirmation"), false);
   assert.equal(transcriptTimeline.includes("agent-activity-rail"), false);

@@ -102,6 +102,11 @@ export function ChatActive(props: ChatInputProps & {
 
   const guidanceInputProps = view.pending === undefined
     ? props
+    : confirmationResumeLost(view.pending)
+      ? {
+          ...props,
+          placeholder: "基于当前上下文继续...",
+        }
     : {
         ...props,
         placeholder: "补充要求...",
@@ -186,4 +191,10 @@ function isNearBottom(node: HTMLDivElement): boolean {
 function shouldCollapseStandaloneTimeline(run: BasicAgentRun | undefined, hasPendingConfirmation: boolean): boolean {
   if (run === undefined || hasPendingConfirmation) return false;
   return run.status === "completed" || run.status === "failed" || run.status === "cancelled" || run.status === "blocked";
+}
+
+function confirmationResumeLost(
+  confirmation: PendingConfirmation | NonNullable<DesktopWorkView["pendingConfirmation"]>
+): boolean {
+  return confirmation.resumeAvailability === "lost_after_restart";
 }

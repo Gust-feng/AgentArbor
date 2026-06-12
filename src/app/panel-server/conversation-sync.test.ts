@@ -231,7 +231,7 @@ test("syncConversationTurnForJob keeps blocked fallback concise", () => {
   const assistant = conversations.getReadModel(job.conversationId ?? "")?.turns.find((turn) => turn.role === "assistant");
   assert.equal(assistant?.title, "需要处理");
   assert.equal(assistant?.status, "blocked");
-  assert.equal(assistant?.content, "这次操作无法继续。");
+  assert.equal(assistant?.content, "这次操作无法原地继续。你可以发送新消息，让我基于当前上下文继续。");
   assert.equal(JSON.stringify(assistant).includes("无法继续原操作"), false);
 });
 

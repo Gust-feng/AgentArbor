@@ -169,6 +169,24 @@ function projectToolDisplay(request: ToolCallRequest, output: unknown): ToolDisp
       truncated: record.truncated === true,
     };
   }
+  if (record.result !== undefined && isMcpToolName(request.toolName)) {
+    const text = stringOrUndefined(result.text);
+    const multimodal = Array.isArray(result.multimodal)
+      ? result.multimodal
+          .slice(0, 6)
+          .map(mcpMultimodalSummary)
+          .filter((item): item is string => item !== undefined)
+      : [];
+    return {
+      kind: "generic_tool_summary",
+      action,
+      summary: summary ?? compactSafeText(text, 500),
+      items: [
+        ...(text === undefined ? [] : [text]),
+        ...multimodal,
+      ].map((item) => redactOrdinaryText(item, 500)).slice(0, 8),
+    };
+  }
   if (request.toolName === "write_file" || request.toolName === "create_file" || request.toolName === "delete_file") {
     const input = asRecord(request.input);
     const preview = request.toolName === "delete_file" ? undefined : fileWriteDiffPreview({
@@ -289,6 +307,16 @@ function projectToolAgentContent(request: ToolCallRequest, output: unknown, trun
       url: stringOrUndefined(result.url),
       title: stringOrUndefined(result.title),
       text: typeof result.text === "string" ? redactOrdinaryMarkdownFragment(result.text, 6_000) : undefined,
+      truncated,
+    };
+  }
+  if (record.result !== undefined && isMcpToolName(request.toolName)) {
+    return {
+      summary,
+      text: typeof result.text === "string" ? redactOrdinaryMarkdownFragment(result.text, 6_000) : undefined,
+      multimodal: Array.isArray(result.multimodal)
+        ? result.multimodal.slice(0, 12).map(projectMcpMultimodalPart)
+        : undefined,
       truncated,
     };
   }
@@ -430,4 +458,36 @@ function summarizeCommandOutput(value: string): string | undefined {
     .filter((line) => line.length > 0)
     .slice(0, 4);
   return compactSafeText(lines.join("\n"), 420);
+}
+
+function isMcpToolName(toolName: string): boolean {
+  return /^[A-Za-z0-9][A-Za-z0-9_.-]*__[A-Za-z0-9][A-Za-z0-9_.-]*$/u.test(toolName);
+}
+
+function mcpMultimodalSummary(value: unknown): string | undefined {
+  const record = asRecord(value);
+  const type = stringOrUndefined(record.type);
+  const mimeType = stringOrUndefined(record.mimeType);
+  const bytesApprox = numberOrUndefined(record.bytesApprox);
+  if (type === undefined) {
+    return undefined;
+  }
+  return [
+    `非文本内容：${type}`,
+    mimeType === undefined ? undefined : `MIME：${mimeType}`,
+    bytesApprox === undefined ? undefined : `约 ${bytesApprox} 字节`,
+  ].filter(isString).join("，");
+}
+
+function projectMcpMultimodalPart(value: unknown): {
+  readonly type?: string;
+  readonly mimeType?: string;
+  readonly bytesApprox?: number;
+} {
+  const record = asRecord(value);
+  return {
+    type: stringOrUndefined(record.type),
+    mimeType: stringOrUndefined(record.mimeType),
+    bytesApprox: numberOrUndefined(record.bytesApprox),
+  };
 }

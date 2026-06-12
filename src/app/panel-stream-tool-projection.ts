@@ -213,6 +213,20 @@ function toolResultPreview(
     const headline = [title, url].filter((item): item is string => item !== undefined).join(" · ");
     return compactStreamDetailText([headline, text].filter((item) => item !== undefined && item.length > 0).join("\n"), 900);
   }
+  if (isMcpToolName(toolName)) {
+    const displaySummary = genericDisplayPreview(output);
+    if (displaySummary !== undefined) {
+      return displaySummary;
+    }
+    const envelope = toolResultEnvelopeOrUndefined(output.envelope);
+    if (envelope?.agentSummary !== undefined) {
+      return compactStreamDetailText(envelope.agentSummary, 900);
+    }
+    const text = stringOrUndefined(result.text);
+    if (text !== undefined) {
+      return compactStreamDetailText(text, 900);
+    }
+  }
   return compactStreamDetailText(stringOrUndefined(output.summary), 900);
 }
 
@@ -281,4 +295,21 @@ function toolTargetText(
     return command === undefined ? undefined : [command, ...args].join(" ").trim();
   }
   return undefined;
+}
+
+function isMcpToolName(toolName: string): boolean {
+  return /^[A-Za-z0-9][A-Za-z0-9_.-]*__[A-Za-z0-9][A-Za-z0-9_.-]*$/u.test(toolName);
+}
+
+function genericDisplayPreview(output: Readonly<Record<string, unknown>>): string | undefined {
+  const display = toolDisplayOrUndefined(output.display);
+  if (display?.kind !== "generic_tool_summary") {
+    return undefined;
+  }
+  return compactStreamDetailText(
+    [display.summary, ...(display.items ?? [])]
+      .filter((item): item is string => item !== undefined && item.length > 0)
+      .join("\n"),
+    900
+  );
 }

@@ -13,6 +13,7 @@ import type {
   ToolCallResult,
   ToolDefinition,
   ToolExecutionBroker,
+  ToolExecutor,
   ToolExecutionContext,
   ToolPermissionCheck,
 } from "../domain/tools/index.js";
@@ -181,6 +182,77 @@ test("ordinary desktop execution can expose optional tools enabled in the frozen
   assert.equal(result.capabilityResolution?.warnings.includes("本轮没有可用工具。"), false);
 });
 
+test("ordinary desktop execution can run a frozen fake MCP tool through the default agent loop", async () => {
+  const mcpTool = capabilityTool("fake_docs__lookup", "read-only", {
+    category: "mcp",
+    categoryLabel: "MCP",
+    scopes: ["mcp"],
+  });
+  const snapshot = capabilitySnapshot({
+    tools: [mcpTool],
+  });
+  const channel = sequenceChannel([
+    {
+      kind: "tool",
+      toolName: "fake_docs__lookup",
+      callId: "call-mcp-lookup",
+      input: { query: "AgentArbor MCP" },
+    },
+    {
+      kind: "text",
+      answer: "我已根据 fake MCP 工具结果回答。",
+    },
+  ]);
+  const toolCenter = mcpToolCenter({
+    name: "fake_docs__lookup",
+    output: {
+      action: "MCP 查询",
+      summary: "找到 AgentArbor MCP 能力底座说明。",
+      result: {
+        text: "AgentArbor MCP tools are exposed from frozen run capability snapshots.",
+      },
+      truncated: false,
+    },
+  });
+  const resources = desktopRunResources({
+    capabilitySnapshot: snapshot,
+    informationAccess: informationAccess(),
+    channel,
+    mcpManager: {
+      getToolsForRegistry: () => [toolCenter],
+    },
+  });
+
+  const result = await runOrdinaryDesktopForPanel(
+    runtime(),
+    "用 MCP 查一下能力底座",
+    "fake",
+    undefined,
+    resources,
+    {
+      agentDefinitionRef: runAgentDefinitionRef(DESKTOP_ROOT_AGENT),
+    }
+  );
+
+  const completedTool = result.eventEntries?.find((entry) => entry.type === "tool.completed");
+  const toolPayload = completedTool?.message.payload as Readonly<Record<string, unknown>> | undefined;
+  assert.equal(result.failed, undefined);
+  assert.equal(result.completed, true);
+  assert.deepEqual(result.capabilityResolution?.allowedTools, ["fake_docs__lookup"]);
+  assert.equal(result.canvas?.kind === "desktop_agent_canvas" ? result.canvas.agent.answer?.answer : undefined, "我已根据 fake MCP 工具结果回答。");
+  assert.deepEqual(channel.requests.map((request) => request.tools?.map((tool) => tool.name)), [
+    ["fake_docs__lookup"],
+    ["fake_docs__lookup"],
+  ]);
+  assert.equal(channel.requests[1]?.sanitizedMessages.some((message) =>
+    message.role === "tool" &&
+    (message.content ?? "").includes("找到 AgentArbor MCP 能力底座说明。")
+  ), true);
+  assert.equal(completedTool?.type, "tool.completed");
+  assert.equal(toolPayload?.toolName, "fake_docs__lookup");
+  assert.equal(JSON.stringify(toolPayload).includes("AgentArbor MCP tools are exposed"), true);
+});
+
 test("ordinary desktop execution projects paused context overflow as blocked", async () => {
   const snapshot = capabilitySnapshot({
     tools: [
@@ -272,7 +344,8 @@ function runtime(): PanelRuntime {
 
 function capabilityTool(
   name: string,
-  operationType: CapabilityToolCatalogItem["operationType"]
+  operationType: CapabilityToolCatalogItem["operationType"],
+  overrides: Partial<CapabilityToolCatalogItem> = {}
 ): CapabilityToolCatalogItem {
   const presentation = toolPresentationForName(name, {
     category: "workspace",
@@ -306,6 +379,7 @@ function capabilityTool(
     scopes: ["desktop-basic", "research"],
     enabled: true,
     availability: "available",
+    ...overrides,
   };
 }
 
@@ -314,6 +388,7 @@ function desktopRunResources(input: {
   readonly informationAccess: SanitizedInformationAccessConfig;
   readonly channel: IntelligenceChannel;
   readonly toolCenter?: ToolExecutionBroker;
+  readonly mcpManager?: DesktopRunResources["mcpManager"];
 }): DesktopRunResources {
   return {
     capabilitySnapshot: input.capabilitySnapshot,
@@ -350,6 +425,7 @@ function desktopRunResources(input: {
       disabledReason: tool.disabledReason,
     })),
     playwrightAvailable: false,
+    mcpManager: input.mcpManager,
   };
 }
 
@@ -469,6 +545,48 @@ function textChannel(answer: string): IntelligenceChannel {
   };
 }
 
+function sequenceChannel(
+  steps: readonly (
+    | {
+        readonly kind: "tool";
+        readonly toolName: string;
+        readonly callId: string;
+        readonly input: unknown;
+      }
+    | {
+        readonly kind: "text";
+        readonly answer: string;
+      }
+  )[]
+): IntelligenceChannel & { readonly requests: ModelRequest[] } {
+  const requests: ModelRequest[] = [];
+  return {
+    requests,
+    async request(request) {
+      requests.push(request);
+      const step = steps[Math.min(requests.length - 1, steps.length - 1)];
+      if (step?.kind === "tool") {
+        return {
+          ...textResponse(request, ""),
+          textOutput: undefined,
+          toolCalls: [
+            {
+              callId: step.callId,
+              toolName: step.toolName,
+              input: step.input,
+            },
+          ],
+          finishReason: "tool_call",
+        };
+      }
+      return textResponse(request, step?.kind === "text" ? step.answer : "完成。");
+    },
+    validateResponse(_request, response) {
+      return response.validation;
+    },
+  };
+}
+
 function failedModelResponse(request: ModelRequest, message: string): ModelResponse {
   return {
     responseId: `${request.requestId}-failed`,
@@ -491,6 +609,33 @@ function failedModelResponse(request: ModelRequest, message: string): ModelRespo
       message,
     },
     completedAt: "2026-06-06T00:00:00.000Z",
+  };
+}
+
+function mcpToolCenter(input: {
+  readonly name: string;
+  readonly output: unknown;
+}): ToolExecutor {
+  return {
+    definition: {
+      name: input.name,
+      description: "Fake MCP lookup tool.",
+      inputSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] },
+      metadata: {
+        category: "mcp",
+        riskLevel: "low",
+        operationType: "read-only",
+        requiresConfirmation: false,
+        visibleResultPolicy: {
+          userVisible: "safe-preview",
+          maxPreviewChars: 800,
+          omitRawOutput: true,
+        },
+      },
+    },
+    async execute() {
+      return input.output;
+    },
   };
 }
 

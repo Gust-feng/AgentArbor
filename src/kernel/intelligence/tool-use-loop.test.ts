@@ -228,6 +228,41 @@ test("executeToolUseLoop returns tool results to the model before natural comple
   assert.equal(center.getCallCount(), 1);
 });
 
+test("executeToolUseLoop returns tool execution failures as model-visible observations", async () => {
+  const eventLog = new InMemoryEventLog();
+  const channel = new SequenceIntelligenceChannel([
+    toolCallResponse("model-request-test", "call-search", "web_search"),
+    textResponse("model-request-final", "Final answer after observing tool failure."),
+  ]);
+  const center = new TestToolBroker();
+  center.register("web_search", async () => {
+    throw new Error("fixture backend unavailable");
+  });
+
+  const result = await executeToolUseLoop(
+    {
+      intelligenceChannel: channel,
+      toolCenter: center,
+      callerAgentId: "agent-test",
+      traceId: "trace-test",
+      goalId: "goal-test",
+      allowedTools: ["web_search"],
+      publishToolEvent: (message) => eventLog.append(message),
+    },
+    createValidModelRequest()
+  );
+
+  const toolMessage = channel.requests[1]?.sanitizedMessages.at(-1);
+  assert.equal(result.stoppedReason, "completed");
+  assert.equal(result.toolCalls[0]?.status, "failed");
+  assert.deepEqual(eventLog.types(), ["tool.requested", "tool.failed"]);
+  assert.equal(toolMessage?.role, "tool");
+  assert.equal(toolMessage?.toolCallId, "call-search");
+  assert.match(toolMessage?.content ?? "", /"status":"failed"/);
+  assert.match(toolMessage?.content ?? "", /fixture backend unavailable/);
+  assert.equal(center.getCallCount(), 1);
+});
+
 test("executeToolUseLoop runs context maintenance before continuing after tool results", async () => {
   const channel = new SequenceIntelligenceChannel([
     toolCallResponse("model-request-test", "call-search", "web_search"),

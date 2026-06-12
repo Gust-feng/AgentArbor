@@ -113,3 +113,46 @@ test("tool stream projection shows file change metadata without raw replacement 
   assert.equal(detail.preview?.includes("secret old text"), false);
   assert.equal(detail.preview?.includes("secret new text"), false);
 });
+
+test("tool stream projection shows MCP safe preview without raw media payload", () => {
+  const detail = toolStreamDetail("tool.completed", {
+    toolName: "docs__lookup",
+    input: {
+      query: "AgentArbor MCP",
+    },
+    output: {
+      summary: "找到 MCP 能力底座说明。",
+      result: {
+        text: "MCP 工具已通过冻结快照进入普通 Agent。",
+        multimodal: [
+          {
+            type: "image",
+            mimeType: "image/png",
+            bytesApprox: 128,
+            data: "RAW_BASE64_SENTINEL",
+          },
+        ],
+      },
+      display: {
+        kind: "generic_tool_summary",
+        action: "MCP 查询",
+        summary: "找到 MCP 能力底座说明。",
+        items: [
+          "MCP 工具已通过冻结快照进入普通 Agent。",
+          "非文本内容：image，MIME：image/png，约 128 字节",
+        ],
+      },
+      envelope: {
+        agentSummary: "找到 MCP 能力底座说明。",
+        evidenceRefs: ["tool:call-mcp"],
+        rawRetention: "diagnostic_ref_only",
+        redacted: true,
+      },
+    },
+  });
+
+  assert.equal(detail.preview?.includes("冻结快照"), true);
+  assert.equal(detail.display?.kind, "generic_tool_summary");
+  assert.equal(detail.envelope?.rawRetention, "diagnostic_ref_only");
+  assert.equal(JSON.stringify(detail).includes("RAW_BASE64_SENTINEL"), false);
+});

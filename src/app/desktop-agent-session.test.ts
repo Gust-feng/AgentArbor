@@ -426,6 +426,14 @@ test("Desktop Agent Session can run with an injected agent definition on the sam
   assert.equal(capturedRequest?.purpose, customAgent.turnPolicy.purpose);
   assert.equal(capturedRequest?.outputContract.contractId, customAgent.outputContract.contractId);
   assert.equal(capturedRequest?.sanitizedMessages[0]?.content, "Custom ordinary agent prompt.");
+  assert.equal(
+    capturedRequest?.sanitizedMessages.some((message) => message.content.includes("Custom skill body.")),
+    true
+  );
+  assert.equal(
+    capturedRequest?.sanitizedMessages.some((message) => message.content.includes("Triggered skill: Custom Skill")),
+    true
+  );
   assert.deepEqual(capturedRequest?.tools?.map((tool) => tool.name), ["search"]);
   assert.equal(result.capabilityResolution?.agentId, "custom-ordinary-agent");
   assert.equal(result.capabilityResolution?.agentDisplayName, "Custom Ordinary Agent");

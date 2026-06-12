@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { RuntimeDatabase, RuntimeRunSnapshot } from "../../domain/runtime-database/index.js";
+import type { RuntimeContextLedgerRecord, RuntimeDatabase, RuntimeRunSnapshot } from "../../domain/runtime-database/index.js";
 import type {
   RuntimeArtifactRecord,
   RuntimeConfirmationRecord,
@@ -12,7 +12,11 @@ import type {
   RuntimeWorkspaceRecord,
 } from "../../domain/runtime-database/index.js";
 import type { BasicAgentRun, RunEvent } from "../../domain/basic-agent/index.js";
-import type { SanitizedInformationAccessConfig, SanitizedModelProviderConfig } from "../../domain/config/index.js";
+import type {
+  BasicAgentCapabilitySnapshot,
+  SanitizedInformationAccessConfig,
+  SanitizedModelProviderConfig,
+} from "../../domain/config/index.js";
 import { PanelRunJobStore } from "../panel-run-jobs.js";
 import type { PanelRunPersistenceRuntime } from "./run-persistence.js";
 import { persistPanelRun } from "./run-persistence.js";
@@ -96,12 +100,112 @@ test("persistPanelRun writes the workspace frozen at run birth", async () => {
   assert.equal(database.runRecords[0]?.workspacePath, "Z:\\FrozenWorkspace");
 });
 
-function persistenceRuntime(database: MemoryRuntimeDatabase, runJobs: PanelRunJobStore): PanelRunPersistenceRuntime {
+test("persistPanelRun stores safe context ledger projection for triggered skills", async () => {
+  const database = new MemoryRuntimeDatabase();
+  const runJobs = new PanelRunJobStore();
+  const basicRun = basicRunFixture("run-placeholder");
+  const runtime = persistenceRuntime(database, runJobs, {
+    getBasicRun: (runId) => ({ ...basicRun, runId }),
+    replayEvents: (runId) => basicReplayFixture(runId),
+  });
+  const job = runJobs.create({
+    runKind: "desktop",
+    runMode: "agent",
+    goal: "please review this change",
+    aiMode: "fake",
+    config: modelConfig(),
+    informationAccess: informationAccess(),
+    capabilitySnapshot: capabilitySnapshot(),
+    agentDefinitionRef: {
+      agentId: "desktop-agent-session",
+      agentDisplayName: "Desktop Agent",
+      promptRef: "prompt:desktop-root-agent:v1",
+      promptVersion: "v1",
+      outputContractId: "desktop.agent_response.v1",
+      toolVisibilityProfileId: "desktop-root-agent:ordinary-visible-tools:v2",
+      definitionHash: "sha256:run-persistence-skill-test",
+    },
+  });
+  runJobs.complete(job.runId, {
+    config: modelConfig(),
+    informationAccess: informationAccess(),
+    canvas: {
+      kind: "desktop_agent_canvas",
+      taskSoil: {
+        taskSoilId: "soil-skill-persist",
+        goalSummary: "please review this change",
+        contextRefs: [],
+        permissionBoundaryRefs: [],
+      },
+      agent: {
+        status: "completed",
+        answer: {
+          answer: "done",
+          modelCallRefs: [],
+          toolCallRefs: [],
+          evidenceRefs: [],
+          resultBlocks: [],
+        },
+        modelCallRefs: [],
+        toolCallRefs: [],
+        activity: [],
+        context: {
+          usageSummary: "技能 1",
+          budget: {
+            maxMessages: 20,
+            maxChars: 8_000,
+            usedChars: 120,
+          },
+          truncated: false,
+          items: [{
+            itemId: "context:skill:repo-review",
+            sourceKind: "skill",
+            summary: [
+              "Triggered skill: Repo Review",
+              "Why: 触发词：review",
+              "FULL PRIVATE SKILL BODY SHOULD NOT PERSIST",
+            ].join("\n"),
+            visibility: "model",
+            truncated: false,
+          }],
+          truncationReport: {
+            truncated: false,
+            omittedItemCount: 0,
+            truncatedItemIds: [],
+          },
+        },
+      },
+      explanation: {
+        resultWhyReasonable: "safe",
+        observationPanelRole: "safe",
+      },
+    },
+  });
+
+  await persistPanelRun(runtime, job);
+
+  assert.equal(database.contextLedgers.length, 1);
+  assert.equal(database.contextLedgers[0]?.entries.some((entry) => entry.kind === "skill"), true);
+  assert.equal(JSON.stringify(database.contextLedgers[0]).includes("Repo Review"), true);
+  assert.equal(JSON.stringify(database.contextLedgers[0]).includes("FULL PRIVATE SKILL BODY"), false);
+});
+
+function persistenceRuntime(
+  database: MemoryRuntimeDatabase,
+  runJobs: PanelRunJobStore,
+  overrides: {
+    readonly getBasicRun?: (runId: string) => BasicAgentRun | undefined;
+    readonly replayEvents?: (runId: string) => {
+      readonly cursor: { readonly runId: string; readonly lastSequence: number; readonly eventCount: number };
+      readonly events: readonly RunEvent[];
+    } | undefined;
+  } = {}
+): PanelRunPersistenceRuntime {
   return {
     runJobs,
     runExecutor: {
-      get: () => undefined,
-      replayEvents: () => undefined,
+      get: (runId) => overrides.getBasicRun?.(runId),
+      replayEvents: (runId) => overrides.replayEvents?.(runId),
       syncRunEvents: () => [],
     },
     conversations: {
@@ -116,9 +220,52 @@ function persistenceRuntime(database: MemoryRuntimeDatabase, runJobs: PanelRunJo
   };
 }
 
+function basicRunFixture(runId: string): BasicAgentRun {
+  return {
+    runId,
+    title: "已完成",
+    goalSummary: "please review this change",
+    status: "completed",
+    runMode: "agent",
+    createdAt: "2026-05-31T00:00:00.000Z",
+    updatedAt: "2026-05-31T00:00:01.000Z",
+    requiresUserAction: false,
+    eventCursor: {
+      lastSequence: 1,
+      eventCount: 1,
+    },
+  };
+}
+
+function basicReplayFixture(runId: string): {
+  readonly cursor: { readonly runId: string; readonly lastSequence: number; readonly eventCount: number };
+  readonly events: readonly RunEvent[];
+} {
+  return {
+    cursor: {
+      runId,
+      lastSequence: 1,
+      eventCount: 1,
+    },
+    events: [{
+      id: `${runId}:event:1`,
+      runId,
+      sequence: 1,
+      type: "final.result",
+      title: "已回答",
+      summary: "已回答。",
+      status: "completed",
+      timestamp: "2026-05-31T00:00:01.000Z",
+      refs: [],
+      visibility: "compact",
+    }],
+  };
+}
+
 class MemoryRuntimeDatabase implements RuntimeDatabase {
   readonly workspaceRecords: RuntimeWorkspaceRecord[] = [];
   readonly runRecords: RuntimeRunRecord[] = [];
+  readonly contextLedgers: RuntimeContextLedgerRecord[] = [];
 
   async upsertWorkspace(record: RuntimeWorkspaceRecord): Promise<RuntimeWorkspaceRecord> {
     this.workspaceRecords.push(record);
@@ -174,6 +321,11 @@ class MemoryRuntimeDatabase implements RuntimeDatabase {
     return confirmations;
   }
 
+  async upsertContextLedger(record: RuntimeContextLedgerRecord): Promise<RuntimeContextLedgerRecord> {
+    this.contextLedgers.push(record);
+    return record;
+  }
+
   async getRun(_runId: string): Promise<RuntimeRunSnapshot | undefined> {
     return undefined;
   }
@@ -215,5 +367,38 @@ function informationAccess(): SanitizedInformationAccessConfig {
       github: "stub",
       run_memory: "stub",
     },
+  };
+}
+
+function capabilitySnapshot(): BasicAgentCapabilitySnapshot {
+  return {
+    snapshotId: "capability-snapshot-test",
+    createdAt: "2026-05-31T00:00:00.000Z",
+    activeModel: modelConfig(),
+    modelCapabilities: {
+      contextWindowTokens: 128_000,
+      maxOutputTokens: 4_000,
+      supportsToolCalling: true,
+      supportsParallelToolCalls: false,
+      supportsStructuredOutputs: false,
+      supportsStreaming: true,
+      supportsVisionInput: false,
+      supportsReasoningEffort: false,
+      preferredApiStyle: "chat_completions",
+      stability: "stable",
+    },
+    toolCatalog: {
+      scope: "desktop-basic",
+      tools: [],
+      allowedTools: [],
+    },
+    skillCatalog: [],
+    mcpCatalog: [],
+    workspace: {
+      workspaceDirectory: "Z:\\AgentArbor",
+      updatedAt: "2026-05-30T00:00:00.000Z",
+    },
+    securitySummary: "Frozen facts for this run.",
+    warnings: [],
   };
 }

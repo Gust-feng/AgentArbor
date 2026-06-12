@@ -1,4 +1,5 @@
 import type {
+  ContextLedger,
   AgentDeliverable,
   AgentDeliverableSection,
   BasicAgentRun,
@@ -85,6 +86,7 @@ export type CreateDesktopWorkViewReadModelInput = {
     readonly title: string;
     readonly summary: string;
   };
+  readonly restoredContextLedger?: ContextLedger;
 };
 
 export function createDesktopWorkViewReadModel(
@@ -94,7 +96,7 @@ export function createDesktopWorkViewReadModel(
   const contextAttachments = contextAttachmentsFor(input);
   const toolEvidence = envelopeSafeToolEvidence(input.toolEvidence ?? []);
   const toolDisplays = mergeToolDisplays(toolEvidence.map((envelope) => envelope.uiDisplay).filter(isToolDisplay), input.toolDisplays ?? []);
-  const contextLedger = contextLedgerFor(input, contextAttachments, toolEvidence, toolDisplays);
+  const contextLedger = input.restoredContextLedger ?? contextLedgerFor(input, contextAttachments, toolEvidence, toolDisplays);
   const triggeredSkills = triggeredSkillsFor(input);
   const pendingConfirmation = input.pendingConfirmation ?? pendingConfirmationFor(input.run, input.canvas);
   const answer = answerFor(input);
@@ -135,6 +137,21 @@ export function createDesktopWorkViewReadModel(
 }
 
 function triggeredSkillsFor(input: CreateDesktopWorkViewReadModelInput): DesktopWorkViewReadModel["triggeredSkills"] {
+  if (input.restoredContextLedger !== undefined) {
+    return input.restoredContextLedger.entries
+      .filter((entry) => entry.kind === "skill" && (entry.status === "used" || entry.status === "truncated"))
+      .map((entry) => {
+        const parsed = parseSkillContextSummary(entry.entryId, entry.summary);
+        return {
+          skillId: parsed.skillId,
+          name: parsed.name,
+          triggerReason: parsed.triggerReason,
+          summary: parsed.summary,
+          sourceRef: `skill:${parsed.skillId}`,
+          truncated: entry.status === "truncated",
+        };
+      });
+  }
   const context = input.canvas?.kind === "desktop_agent_canvas" ? input.canvas.agent?.context : undefined;
   const items = context?.items ?? [];
   return items
@@ -156,7 +173,9 @@ function parseSkillContextSummary(
   itemId: string,
   summary: string
 ): Pick<DesktopWorkViewReadModel["triggeredSkills"][number], "skillId" | "name" | "triggerReason" | "summary"> {
-  const skillId = itemId.startsWith("context:skill:") ? itemId.slice("context:skill:".length) : itemId;
+  const skillMarker = "context:skill:";
+  const markerIndex = itemId.indexOf(skillMarker);
+  const skillId = markerIndex >= 0 ? itemId.slice(markerIndex + skillMarker.length) : itemId;
   const lines = summary.split(/\r?\n/).map((line) => line.trim()).filter((line) => line.length > 0);
   const name = stripLabel(lines.find((line) => line.startsWith("Triggered skill:")), "Triggered skill:") ?? skillId;
   const triggerReason = stripLabel(lines.find((line) => line.startsWith("Why:")), "Why:") ?? "技能名称或描述匹配当前任务。";

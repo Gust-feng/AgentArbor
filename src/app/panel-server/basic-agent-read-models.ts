@@ -58,6 +58,7 @@ export function createPersistedBasicAgentWorkViewReadModel(
       .map((call) => call.display)
       .filter((display): display is ToolDisplayProjection => display !== undefined),
     restoredResult: restoredRunResultProjection(snapshot.run),
+    restoredContextLedger: snapshot.contextLedger,
   }) satisfies DesktopWorkViewReadModel;
 }
 

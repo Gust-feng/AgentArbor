@@ -353,7 +353,10 @@ test("basic agent live work view builds transcript nodes from synced backend str
 });
 
 test("basic agent run view for persisted runs restores from the run snapshot without current config readers", async () => {
-  const snapshot = runtimeSnapshot();
+  const snapshot: RuntimeRunSnapshot = {
+    ...runtimeSnapshot(),
+    contextLedger: skillContextLedger("run-restored"),
+  };
   const runtime = {
     runExecutor: {
       get: () => undefined,
@@ -380,11 +383,75 @@ test("basic agent run view for persisted runs restores from the run snapshot wit
   assert.deepEqual(view?.capabilityResolution, snapshot.run.capabilityResolution);
   assert.equal(view?.capabilityResolution?.snapshotId, "snapshot-restored");
   assert.deepEqual(view?.capabilityResolution?.allowedTools, ["read"]);
+  assert.deepEqual(view?.workView.triggeredSkills, [
+    {
+      skillId: "repo-review",
+      name: "Repo Review",
+      triggerReason: "触发词：review",
+      summary: "Repo Review：触发词：review",
+      sourceRef: "skill:repo-review",
+      truncated: false,
+    },
+  ]);
+  assert.equal(view?.workView.contextLedger.entries.some((entry) => entry.kind === "skill"), true);
   assert.equal(view?.detail.restoredResult?.summary, "历史运行安全摘要");
   assert.equal(view?.replay.events.some((event) => event.type === "final.result"), true);
   assert.equal(view?.detail.transcript?.events?.some((event) => event.type === "final.result"), true);
   assert.equal(view === undefined ? false : "workSession" in view, false);
   assert.equal(JSON.stringify(view?.agentDefinitionRef).includes("systemPrompt"), false);
+  assert.equal(JSON.stringify(view).includes("FULL PRIVATE SKILL BODY"), false);
+});
+
+test("basic agent panel read-model restores pending confirmations after refresh", async () => {
+  const base = runtimeSnapshot();
+  const snapshot: RuntimeRunSnapshot = {
+    ...base,
+    run: {
+      ...base.run,
+      status: "approval_needed",
+      resultTitle: "待处理",
+      resultSummary: "删除文件：old.txt",
+    },
+    confirmations: [
+      {
+        confirmationId: "confirmation-refresh",
+        runId: base.run.runId,
+        conversationId: base.run.conversationId,
+        status: "pending",
+        title: "删除文件",
+        actionSummary: "删除文件：old.txt",
+        affectedResources: ["old.txt"],
+        riskLevel: "high",
+        requestedAt: "2026-06-06T00:00:05.000Z",
+        eventRefs: ["confirmation:confirmation-refresh"],
+      },
+    ],
+  };
+  const runtime = {
+    runExecutor: {
+      get: () => undefined,
+      replayEvents: () => undefined,
+      syncRunEvents: () => [],
+    },
+    runJobs: {
+      get: () => undefined,
+      syncStreamEvents: (_runId: string, events: readonly never[]) => events,
+    },
+    runtimeDatabase: {
+      getRun: async () => snapshot,
+    },
+  } satisfies Parameters<typeof createBasicAgentRunViewReadModel>[0];
+
+  const view = await createBasicAgentRunViewReadModel(runtime, "run-restored", 0);
+
+  assert.equal(view?.run.status, "approval_needed");
+  assert.equal(view?.workView.stage, "awaiting_approval");
+  assert.equal(view?.workView.pendingConfirmation?.confirmationId, "confirmation-refresh");
+  assert.equal(view?.workView.pendingConfirmation?.resumeAvailability, "lost_after_restart");
+  assert.equal(view?.workView.transcriptNodes?.some((node) => node.kind === "confirmation"), true);
+  assert.equal(view?.detail.status, "approval_needed");
+  assert.equal(view?.detail.transcript?.events?.some((event) => event.type === "confirmation.needed"), true);
+  assert.equal(view?.replay.events.some((event) => event.type === "confirmation.needed"), true);
 });
 
 test("basic agent run view does not invent restored result titles", async () => {
@@ -534,6 +601,28 @@ function runtimeSnapshot(): RuntimeRunSnapshot {
     toolCalls: [],
     artifacts: [],
     confirmations: [],
+  };
+}
+
+function skillContextLedger(runId: string): NonNullable<RuntimeRunSnapshot["contextLedger"]> {
+  return {
+    runId,
+    summary: "技能 1；当前任务 1",
+    entries: [
+      {
+        entryId: `${runId}:ledger:context:context:skill:repo-review`,
+        kind: "skill",
+        title: "技能",
+        summary: "Triggered skill: Repo Review\nWhy: 触发词：review",
+        refs: [{ kind: "event", id: "skill:repo-review" }],
+        status: "used",
+      },
+    ],
+    truncation: {
+      truncated: false,
+      omittedItemCount: 0,
+      truncatedItemIds: [],
+    },
   };
 }
 

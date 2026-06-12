@@ -4,6 +4,7 @@ import type { BasicAgentRun, RunEvent } from "../../domain/basic-agent/index.js"
 import type {
   RuntimeArtifactRecord,
   RuntimeConversationRecord,
+  RuntimeContextLedgerRecord,
   RuntimeDatabase,
   RuntimeConfirmationRecord,
   RuntimeEventRecord,
@@ -131,6 +132,12 @@ export class FileSystemRuntimeDatabase implements RuntimeDatabase {
     return stored;
   }
 
+  async upsertContextLedger(record: RuntimeContextLedgerRecord): Promise<RuntimeContextLedgerRecord> {
+    const stored = cloneJson(record);
+    await writeJsonFile(this.contextLedgerPath(record.runId), stored);
+    return stored;
+  }
+
   async getRun(runId: string): Promise<RuntimeRunSnapshot | undefined> {
     const run = await readJsonFile<RuntimeRunRecord>(this.runPath(runId));
     if (run === undefined) {
@@ -150,6 +157,7 @@ export class FileSystemRuntimeDatabase implements RuntimeDatabase {
       toolCalls: await readJsonlFile<RuntimeToolCallRecord>(this.runJsonlPath(runId, "tool-calls.jsonl")),
       artifacts: await readJsonlFile<RuntimeArtifactRecord>(this.runJsonlPath(runId, "artifacts.jsonl")),
       confirmations: await readJsonlFile<RuntimeConfirmationRecord>(this.runJsonlPath(runId, "confirmations.jsonl")),
+      contextLedger: await readJsonFile<RuntimeContextLedgerRecord>(this.contextLedgerPath(runId)),
     };
   }
 
@@ -186,6 +194,10 @@ export class FileSystemRuntimeDatabase implements RuntimeDatabase {
 
   private runPath(runId: string): string {
     return path.join(this.runDirectory(runId), "run.json");
+  }
+
+  private contextLedgerPath(runId: string): string {
+    return path.join(this.runDirectory(runId), "context-ledger.json");
   }
 
   private basicRunPath(runId: string): string {

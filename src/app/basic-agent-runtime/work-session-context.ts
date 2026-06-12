@@ -138,7 +138,7 @@ export function contextLedgerFor(
         entryId: `${input.run.runId}:ledger:context:${item.itemId}`,
         kind: item.sourceKind === "skill" ? "skill" : "history",
         title: item.sourceKind === "skill" ? "触发技能" : item.sourceKind === "conversation_summary" ? "历史摘要" : "历史对话",
-        summary: item.summary,
+        summary: item.sourceKind === "skill" ? skillLedgerSummary(item.summary) : item.summary,
         refs: [{ kind: "event", id: item.itemId }],
         status: item.truncated ? "truncated" : "used",
       })),
@@ -293,6 +293,13 @@ function contextLedgerSummary(entries: readonly ContextLedgerEntry[]): string {
   };
   const parts = [...counts.entries()].map(([kind, count]) => `${labels[kind]} ${count}`);
   return parts.length === 0 ? "已按当前任务整理上下文。" : parts.join("；");
+}
+
+function skillLedgerSummary(summary: string): string {
+  const lines = summary.split(/\r?\n/g).map((line) => line.trim()).filter((line) => line.length > 0);
+  const name = lines.find((line) => line.startsWith("Triggered skill:")) ?? "Triggered skill: 技能";
+  const reason = lines.find((line) => line.startsWith("Why:")) ?? "Why: 技能名称或描述匹配当前任务。";
+  return redactOrdinaryText([name, reason].join("\n"), 420);
 }
 
 function contextBudgetSummary(budget: ContextLedger["budget"]): string {

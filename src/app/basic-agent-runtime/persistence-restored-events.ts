@@ -55,6 +55,21 @@ function fallbackBasicEventsFromRuntimeSnapshot(snapshot: RuntimeRunSnapshot): r
     });
   }
   for (const confirmation of snapshot.confirmations) {
+    if (confirmation.status === "pending") {
+      events.push({
+        id: `${snapshot.run.runId}:restored:confirmation:${confirmation.confirmationId}:pending`,
+        runId: snapshot.run.runId,
+        sequence: events.length + 1,
+        type: "confirmation.needed",
+        title: basicEventTitleFromType("confirmation.needed"),
+        summary: redactOrdinaryText(confirmation.actionSummary, 1_200),
+        status: "approval_needed",
+        timestamp: confirmation.requestedAt,
+        refs: [{ kind: "event", id: `confirmation:${confirmation.confirmationId}` }],
+        visibility: "expanded",
+      });
+      continue;
+    }
     if (confirmation.decidedAt === undefined) {
       continue;
     }

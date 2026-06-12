@@ -1558,7 +1558,7 @@ test("conversation follow-up labels missing-key failure history as a system erro
 function delayedRuntimeDatabase(
   overrides: Partial<RuntimeDatabase>
 ): RuntimeDatabase {
-  return {
+  const base: RuntimeDatabase = {
     async upsertWorkspace(record) {
       return record;
     },
@@ -1598,12 +1598,26 @@ function delayedRuntimeDatabase(
     async replaceConfirmations(_runId, confirmations) {
       return confirmations;
     },
+    async upsertContextLedger(record) {
+      return record;
+    },
     async getRun() {
       return undefined;
     },
     async listRuns() {
       return [];
     },
-    ...overrides,
   };
+  return {
+    ...base,
+    ...definedRuntimeDatabaseOverrides(overrides),
+  };
+}
+
+function definedRuntimeDatabaseOverrides(
+  overrides: Partial<RuntimeDatabase>
+): Partial<RuntimeDatabase> {
+  return Object.fromEntries(
+    Object.entries(overrides).filter((entry): entry is [keyof RuntimeDatabase, RuntimeDatabase[keyof RuntimeDatabase]] => entry[1] !== undefined)
+  ) as Partial<RuntimeDatabase>;
 }

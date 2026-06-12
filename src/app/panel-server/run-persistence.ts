@@ -5,6 +5,7 @@ import type { PanelConversationReadModel } from "../panel-conversations.js";
 import { toRuntimeConversationRecord } from "../panel-conversations.js";
 import { panelRunPayloadForStatus, PanelRunJobStore, type PanelRunJob } from "../panel-run-jobs.js";
 import { createPanelRunTrace, createPanelRunTranscript } from "../panel-run-read-model.js";
+import { createLiveBasicAgentWorkViewReadModel } from "./basic-agent-read-models.js";
 import {
   enqueuePanelPersistence,
   enqueuePanelPersistenceBackground,
@@ -113,6 +114,16 @@ async function persistPanelRunNow(
   }
   if (basicReplay !== undefined) {
     await runtime.runtimeDatabase.replaceBasicRunEvents(job.runId, basicReplay.events);
+  }
+  if (basicRun !== undefined && basicReplay !== undefined) {
+    await runtime.runtimeDatabase.upsertContextLedger(
+      createLiveBasicAgentWorkViewReadModel({
+        job,
+        run: basicRun,
+        events: basicReplay.events,
+        streamEvents,
+      }).contextLedger
+    );
   }
   await runtime.runtimeDatabase.replaceRunEvents(job.runId, trace.events.map((event) => toRuntimeEventRecord(job.runId, event)));
   await runtime.runtimeDatabase.replaceModelCalls(

@@ -1,5 +1,5 @@
 import type { ArborMessageType, ArtifactRef } from "../common.js";
-import type { BasicAgentRun, RunEvent } from "../basic-agent/contracts.js";
+import type { BasicAgentRun, ContextLedger, RunEvent } from "../basic-agent/contracts.js";
 import type {
   BasicAgentCapabilitySnapshot,
   RunAgentDefinitionRef,
@@ -187,6 +187,8 @@ export type RuntimeConfirmationRecord = {
   readonly eventRefs: readonly string[];
 };
 
+export type RuntimeContextLedgerRecord = ContextLedger;
+
 export type RuntimeRunSnapshot = {
   readonly run: RuntimeRunRecord;
   readonly workspace?: RuntimeWorkspaceRecord;
@@ -197,6 +199,7 @@ export type RuntimeRunSnapshot = {
   readonly toolCalls: readonly RuntimeToolCallRecord[];
   readonly artifacts: readonly RuntimeArtifactRecord[];
   readonly confirmations: readonly RuntimeConfirmationRecord[];
+  readonly contextLedger?: RuntimeContextLedgerRecord;
 };
 
 export interface RuntimeDatabase {
@@ -213,6 +216,7 @@ export interface RuntimeDatabase {
   replaceToolCalls(runId: string, calls: readonly RuntimeToolCallRecord[]): Promise<readonly RuntimeToolCallRecord[]>;
   replaceArtifacts(runId: string, artifacts: readonly RuntimeArtifactRecord[]): Promise<readonly RuntimeArtifactRecord[]>;
   replaceConfirmations(runId: string, confirmations: readonly RuntimeConfirmationRecord[]): Promise<readonly RuntimeConfirmationRecord[]>;
+  upsertContextLedger(record: RuntimeContextLedgerRecord): Promise<RuntimeContextLedgerRecord>;
   getRun(runId: string): Promise<RuntimeRunSnapshot | undefined>;
   listRuns(limit?: number): Promise<readonly RuntimeRunRecord[]>;
 }

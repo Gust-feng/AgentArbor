@@ -116,7 +116,7 @@ function toolResultEnvelopeOrUndefined(value: unknown): ToolResultEnvelope | und
       ? Math.max(1, Math.floor(record.tokenEstimate))
       : Math.max(1, Math.ceil(agentSummary.length / 4)),
     truncated: record.truncated === true,
-    redacted: record.redacted !== false,
+    redacted: false,
     diagnosticRef: stringOrUndefined(record.diagnosticRef),
     rawRetention,
   };

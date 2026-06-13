@@ -13,6 +13,8 @@ import type {
   PanelConversationTurnStatus,
 } from "./panel-conversation-contracts.js";
 import {
+  CONVERSATION_ASSISTANT_MESSAGE_MAX_CHARS,
+  CONVERSATION_USER_MESSAGE_MAX_CHARS,
   compact,
   compactMessageContent,
   normalizeTurnModel,
@@ -135,7 +137,7 @@ export class PanelConversationStore {
         title: compact(turn.title, 120),
         content: compactMessageContent(
           turn.role === "assistant" ? sanitizeAssistantVisibleText(turn.content) : turn.content,
-          8_000
+          turn.role === "assistant" ? CONVERSATION_ASSISTANT_MESSAGE_MAX_CHARS : CONVERSATION_USER_MESSAGE_MAX_CHARS
         ),
         status: turn.status,
         createdAt: turn.createdAt,
@@ -187,7 +189,7 @@ export class PanelConversationStore {
     const userTurn = createTurn({
       role: "user",
       title: "你的消息",
-      content: compactMessageContent(input.goal, 4_000),
+      content: compactMessageContent(input.goal, CONVERSATION_USER_MESSAGE_MAX_CHARS),
       status: queued ? "pending" : "completed",
       taskSoilInput: input.taskSoilInput,
     });
@@ -292,7 +294,7 @@ export class PanelConversationStore {
     assistantTurn.runId = input.runId;
     assistantTurn.responseModel = normalizeTurnModel(input.responseModel) ?? assistantTurn.responseModel;
     assistantTurn.title = compact(input.title, 120);
-    assistantTurn.content = compactMessageContent(sanitizeAssistantVisibleText(input.content), 8_000);
+    assistantTurn.content = compactMessageContent(sanitizeAssistantVisibleText(input.content), CONVERSATION_ASSISTANT_MESSAGE_MAX_CHARS);
     assistantTurn.status = input.status;
     assistantTurn.updatedAt = nowIso();
     conversation.latestRunId = latestAssistantRunId(conversation) ?? input.runId;
@@ -320,7 +322,7 @@ export class PanelConversationStore {
     const conversation = this.requireConversation(input.conversationId);
     const assistantTurn = requireTurn(conversation, input.assistantTurnId);
     assistantTurn.title = compact(input.title, 120);
-    assistantTurn.content = compactMessageContent(sanitizeAssistantVisibleText(input.content), 8_000);
+    assistantTurn.content = compactMessageContent(sanitizeAssistantVisibleText(input.content), CONVERSATION_ASSISTANT_MESSAGE_MAX_CHARS);
     assistantTurn.status = input.status;
     assistantTurn.updatedAt = nowIso();
     conversation.updatedAt = assistantTurn.updatedAt;
@@ -402,7 +404,7 @@ function createTurn(input: {
     title: compact(input.title, 120),
     content: compactMessageContent(
       input.role === "assistant" ? sanitizeAssistantVisibleText(input.content) : input.content,
-      8_000
+      input.role === "assistant" ? CONVERSATION_ASSISTANT_MESSAGE_MAX_CHARS : CONVERSATION_USER_MESSAGE_MAX_CHARS
     ),
     status: input.status,
     createdAt,

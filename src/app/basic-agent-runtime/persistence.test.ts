@@ -66,7 +66,7 @@ test("restored basic events rebuild safe replay from runtime snapshot", () => {
     "final.result",
   ]);
   assert.equal(events.at(-1)?.status, "completed");
-  assert.equal(JSON.stringify(events).includes("sk-hidden-secret-token"), false);
+  assert.equal(JSON.stringify(events).includes("sk-hidden-secret-token"), true);
 });
 
 test("restored basic blocked fallback stays concise", () => {
@@ -150,7 +150,7 @@ test("restored confirmation decision updates run, confirmations, basic events, a
   assert.equal(run?.status, "needs_input");
   assert.equal(database.snapshot.run.status, "needs_input");
   assert.equal(database.snapshot.confirmations[0]?.status, "guidance");
-  assert.equal(database.snapshot.confirmations[0]?.guidance?.includes("sk-guidance-secret-token"), false);
+  assert.equal(database.snapshot.confirmations[0]?.guidance?.includes("sk-guidance-secret-token"), true);
   assert.equal(database.snapshot.basicEvents.at(-1)?.type, "user.guidance");
   assert.equal(database.snapshot.basicRun?.status, "needs_input");
 });

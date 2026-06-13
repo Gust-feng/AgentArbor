@@ -797,14 +797,7 @@ function numberOrUndefined(value: unknown): number | undefined {
 }
 
 function safeHandoffText(value: string): string {
-  return sanitizeUndergroundConvergenceAiAdvisoryText(value)
-    .replace(/\bchain[-\s]?of[-\s]?thought\b/giu, "[redacted-reasoning-detail]")
-    .replace(/\bhidden\s+reasoning\b/giu, "[redacted-reasoning-detail]")
-    .replace(/\braw\s+prompt\b/giu, "[redacted-reasoning-detail]")
-    .replace(/\braw\s+provider\s+response\b/giu, "[redacted-reasoning-detail]")
-    .replace(/\b(system|user|assistant|tool)\s*:/giu, "[redacted-reasoning-detail]")
-    .replace(/\braw\s+goal\s*:/giu, "[redacted-reasoning-detail]")
-    .trim();
+  return sanitizeUndergroundConvergenceAiAdvisoryText(value).trim();
 }
 
 function formatConfidenceForHandoff(handoffMaterial: HandoffDecisionMaterial): string {

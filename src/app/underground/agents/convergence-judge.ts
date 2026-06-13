@@ -359,21 +359,6 @@ export class ConvergenceJudgeAgent
       }
     }
 
-    if (report.aiAdvisory !== undefined && report.aiAdvisory.status === "completed") {
-      for (const analysis of report.aiAdvisory.candidateAnalyses) {
-        const sanitized = sanitizeUndergroundConvergenceAiAdvisoryText(analysis.contentDifference);
-        if (sanitized.length === 0 && analysis.contentDifference.trim().length > 0) {
-          violations.push(
-            createGuardViolation({
-              code: "CONVERGENCE_AI_ADVISORY_DESENSITIZATION_EMPTY",
-              message: `AI convergence analysis for candidate ${analysis.candidateId} was fully redacted by desensitization.`,
-              severity: "warning",
-            })
-          );
-        }
-      }
-    }
-
     if (violations.some((v) => v.severity === "error")) {
       return rejectGuardedAction({ output, violations });
     }
@@ -425,7 +410,7 @@ function buildConvergenceJudgmentMessages(percept: ConvergenceJudgePercept): rea
         "You are AgentArbor Underground Convergence Judge.",
         "You are the primary convergence decision-maker, not an advisory overlay.",
         "Decide every candidate as accepted, merged, rejected, or unknown; decide whether to approve handoff, continue exploration, ask the user, or stop.",
-        "Return JSON only. Do not include chain-of-thought. Engineering guards only enforce hard constraints, state legality, evidence refs, redaction, and report/package structure.",
+        "Return JSON only. Do not include chain-of-thought. Engineering guards only enforce hard constraints, state legality, evidence refs, and report/package structure.",
       ].join("\n"),
     },
     {

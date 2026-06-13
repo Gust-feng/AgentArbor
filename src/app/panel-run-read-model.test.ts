@@ -916,9 +916,9 @@ test("panel transcript preserves typed safe tool display without raw command out
               },
               tokenEstimate: 12,
               truncated: false,
-              redacted: true,
+              redacted: false,
               diagnosticRef: "tool:tool-call-shell",
-              rawRetention: "diagnostic_ref_only",
+              rawRetention: "none",
             },
             result: {
               command: "pnpm",
@@ -1008,7 +1008,7 @@ test("panel transcript nodes do not invent thinking and keep failed tool results
         display: { kind: "command_summary", command: "pnpm", args: ["test"] },
       },
     }),
-    streamEvent({ sequence: 5, type: "agent.note.completed", summary: "助手已选择使用工具，工具结果会作为安全摘要进入后续处理。" }),
+    streamEvent({ sequence: 5, type: "agent.note.completed", summary: "助手已选择使用工具，工具结果会进入后续处理。" }),
     streamEvent({
       sequence: 6,
       type: "tool.failed",
@@ -1027,7 +1027,7 @@ test("panel transcript nodes do not invent thinking and keep failed tool results
         },
       },
     }),
-    streamEvent({ sequence: 7, type: "final.result", summary: "根据安全摘要说明失败原因。" }),
+    streamEvent({ sequence: 7, type: "final.result", summary: "根据工具结果说明失败原因。" }),
   ]);
 
   assert.deepEqual(

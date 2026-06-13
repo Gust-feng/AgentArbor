@@ -326,8 +326,6 @@ test("panel UI chat and transcript modules stay presentation-focused", async () 
   assert.equal(chatActive.includes("模型摘要"), false);
   assert.equal(chatActive.includes("工具证据"), false);
   assert.equal(chatActive.includes("运行摘要"), false);
-  assert.equal(chatActive.includes("工具调用的安全摘要已作为依据。"), false);
-  assert.equal(chatActive.includes("模型调用的安全摘要已作为依据。"), false);
   assert.equal(chatActive.includes("evidenceStatusLabel"), false);
   assert.equal(chatActive.includes('className="evidence-card"'), false);
   assert.equal(chatActive.includes("ref.label ?? ref.id"), false);

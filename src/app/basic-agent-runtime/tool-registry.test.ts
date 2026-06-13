@@ -20,20 +20,20 @@ test("desktop-basic tool registry exposes catalog and allowed tools from scoped 
     "run_command",
     "search",
   ]);
-  assert.equal(catalog.tools.every((tool) => tool.visibleResultPolicy.omitRawOutput), true);
-  assert.equal(catalog.tools.find((tool) => tool.name === "create_file")?.requiresConfirmation, false);
-  assert.equal(catalog.tools.find((tool) => tool.name === "edit_file")?.requiresConfirmation, false);
-  assert.equal(catalog.tools.find((tool) => tool.name === "delete_file")?.requiresConfirmation, true);
-  assert.equal(catalog.tools.some((tool) => tool.name === "write_file"), false);
-  assert.equal(catalog.tools.find((tool) => tool.name === "run_command")?.operationType, "execute");
   assert.equal(catalog.tools.find((tool) => tool.name === "run_command")?.requiresConfirmation, true);
   assert.equal(catalog.tools.find((tool) => tool.name === "shell_command")?.requiresConfirmation, true);
+  assert.equal(catalog.tools.find((tool) => tool.name === "run_command")?.visibleResultPolicy.omitRawOutput, false);
+  assert.equal(catalog.tools.find((tool) => tool.name === "create_file")?.requiresConfirmation, false);
+  assert.equal(catalog.tools.find((tool) => tool.name === "edit_file")?.requiresConfirmation, false);
+  assert.equal(catalog.tools.find((tool) => tool.name === "delete_file")?.requiresConfirmation, false);
+  assert.equal(catalog.tools.some((tool) => tool.name === "write_file"), false);
+  assert.equal(catalog.tools.find((tool) => tool.name === "run_command")?.operationType, "execute");
   assert.equal(catalog.tools.find((tool) => tool.name === "shell_command")?.enabledByDefault, false);
   assert.equal(registry.createToolCenter("desktop-basic").has("shell_command"), false);
   assert.equal(catalog.tools.find((tool) => tool.name === "browser_snapshot")?.operationType, "read-only");
   assert.equal(catalog.tools.find((tool) => tool.name === "browser_snapshot")?.availability, "available");
   assert.equal(catalog.tools.find((tool) => tool.name === "read_file")?.displayName, "读取文件");
-  assert.equal(catalog.tools.find((tool) => tool.name === "shell_command")?.confirmationLabel, "高影响");
+  assert.equal(catalog.tools.find((tool) => tool.name === "shell_command")?.confirmationLabel, "需确认");
   assert.equal(catalog.tools.every((tool) => tool.displayName !== tool.name), true);
   assert.equal(catalog.tools.every((tool) => tool.categoryLabel.length > 0 && tool.operationLabel.length > 0), true);
   assert.equal(JSON.stringify(catalog).includes("api_key"), false);
@@ -42,9 +42,9 @@ test("desktop-basic tool registry exposes catalog and allowed tools from scoped 
   const shellCommand = catalog.tools.find((tool) => tool.name === "shell_command");
   assert.equal(runCommand?.displayDescription, "运行已允许的工作区命令，需要确认。");
   assert.equal(shellCommand?.displayDescription, "运行已允许的工作区命令，需要确认。");
-  assert.match(runCommand?.description ?? "", /bare command name plus arguments/);
-  assert.match(runCommand?.description ?? "", /shell operators and arbitrary shell syntax are rejected/);
-  assert.match(shellCommand?.description ?? "", /does not run arbitrary shell syntax/i);
+  assert.match(runCommand?.description ?? "", /workspace shell command/);
+  assert.match(runCommand?.description ?? "", /pipes, redirection, command chaining/);
+  assert.match(shellCommand?.description ?? "", /workspace shell commands/i);
 });
 
 test("desktop-basic tool descriptions stay plain and do not expose deep product terms", () => {

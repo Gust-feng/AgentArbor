@@ -446,7 +446,7 @@ function waitingPointFor(
     case "rootlet_cluster.started":
       return "Rootlet Agents 正在产出候选；AI 模式下可能正在等待模型。";
     case "model.requested":
-      return "已发出模型请求，等待返回脱敏结果引用。";
+      return "已发出模型请求，等待返回结果引用。";
     case "model.completed":
     case "model.failed":
       return "模型调用已返回，Rootlet Agents 正在整理候选或 fallback。";
@@ -455,7 +455,7 @@ function waitingPointFor(
     case "context.compaction.failed":
       return "上下文整理没有成功，已暂停等待继续处理。";
     case "tool.requested":
-      return "已发出工具调用，等待工具返回脱敏结果引用。";
+      return "已发出工具调用，等待工具返回结果引用。";
     case "tool.completed":
     case "tool.failed":
       return "工具调用已返回，模型将基于工具结果继续生成候选。";

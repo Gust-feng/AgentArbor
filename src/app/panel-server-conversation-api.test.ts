@@ -287,7 +287,7 @@ test("conversation provider tools come from backend AgentDefinition instead of r
   }
 });
 
-test("context attachment preview feeds the Basic Agent work session read model safely", async () => {
+test("context attachment preview feeds the Basic Agent work session read model with original text", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-context-work-session-"));
   const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-context-workspace-"));
   const fileBody = "private body with sk-work-session-secret";
@@ -316,6 +316,7 @@ test("context attachment preview feeds the Basic Agent work session read model s
             ref: preview.body.attachment.ref,
             kind: preview.body.attachment.kind,
             summary: preview.body.attachment.summary,
+            readonlyPreview: preview.body.attachment.readonlyPreview,
           }],
           permissionBoundaryRefs: preview.body.attachment.permissionRefs,
         },
@@ -327,7 +328,7 @@ test("context attachment preview feeds the Basic Agent work session read model s
 
     assert.equal(preview.status, 200);
     assert.equal(preview.body.attachment.ref, "file:notes.md");
-    assert.equal(preview.text.includes(fileBody), false);
+    assert.equal(preview.text.includes(fileBody), true);
     assert.equal(invalidKind.status, 400);
     assert.equal(invalidKind.body.error.code, "invalid_context_attachment_kind");
     assert.equal(workSession.status, 200);
@@ -335,7 +336,7 @@ test("context attachment preview feeds the Basic Agent work session read model s
     assert.equal(workSession.body.workSession.contextAttachments.some((item: { ref?: string }) => item.ref === "file:notes.md"), true);
     assert.equal(typeof workSession.body.workSession.answer?.content, "string");
     assert.equal(workSession.body.workSession.deliverable, undefined);
-    assert.equal(workSession.text.includes(fileBody), false);
+    assert.equal(workSession.text.includes("[redacted-secret]"), false);
     assertSafePanelJsonText(workSession.text);
   } finally {
     await server.close();

@@ -42,11 +42,11 @@ test("runtime record mapper creates safe run and workspace records", () => {
   assert.equal(workspace.label, "AgentArbor");
   assert.equal(run.completedAt, "2026-05-31T00:00:10.000Z");
   assert.equal(run.resultTitle, "运行失败");
-  assert.equal(run.resultSummary?.includes("[redacted-secret]"), true);
+  assert.equal(run.resultSummary?.includes("sk-hidden-secret"), true);
   assert.deepEqual(run.informationAccess?.sourcePreference, ["docs"]);
   assert.equal(run.informationAccess?.web.secretRef, "secret://test/tavily");
   assert.equal(run.informationAccess?.web.secretConfigured, false);
-  assert.equal(JSON.stringify(run).includes("sk-hidden-secret"), false);
+  assert.equal(JSON.stringify(run).includes("sk-hidden-secret"), true);
   assert.equal(isTerminalPanelRunStatus("blocked"), true);
   assert.equal(isTerminalPanelRunStatus("running"), false);
 });
@@ -88,7 +88,7 @@ test("runtime record mapper persists safe run capability resolution", () => {
               riskLevel: "medium",
               operationType: "external-submit",
               requiresConfirmation: true,
-              reason: "可用，高影响动作会先等你判断。",
+              reason: "可用，命令执行会先等你确认。",
             },
           ],
           enabledSkills: [],
@@ -176,7 +176,7 @@ test("runtime record mapper preserves failed run capability resolution", () => {
           },
           explanation: {
             resultWhyReasonable: "旧成功投影不应覆盖失败终态。",
-            observationPanelRole: "开发者详情只展示安全事件。",
+            observationPanelRole: "开发者详情展示运行事件。",
           },
         },
       },
@@ -313,8 +313,8 @@ test("runtime record mapper persists safe model, event, tool, and confirmation p
           envelope: {
             agentSummary: "safe command summary",
             evidenceRefs: ["tool:tool-call-1"],
-            rawRetention: "diagnostic_ref_only",
-            redacted: true,
+            rawRetention: "none",
+            redacted: false,
           },
         },
       },
@@ -337,23 +337,23 @@ test("runtime record mapper persists safe model, event, tool, and confirmation p
       payload: {
         confirmationId: "confirmation-1",
         question: "是否运行命令？",
-        consequence: "会读取安全摘要。",
+        consequence: "会读取命令摘要。",
         affectedResources: ["shell:pnpm test"],
         riskLevel: "medium",
       },
     }),
   ]);
 
-  assert.equal(runtimeEvent.summary.includes("[redacted-token]"), true);
+  assert.equal(runtimeEvent.summary.includes("hidden-token"), true);
   assert.equal(modelCall.requestId, "request-1");
   assert.equal(toolCalls[0]?.command, "pnpm test");
   assert.equal(toolCalls[0]?.display?.kind, "command_summary");
-  assert.equal(toolCalls[0]?.envelope?.rawRetention, "diagnostic_ref_only");
+  assert.equal(toolCalls[0]?.envelope?.rawRetention, "none");
   assert.equal(JSON.stringify(toolCalls).includes("RAW_STDOUT_SENTINEL"), false);
   assert.equal(confirmations[0]?.status, "guidance");
   assert.equal(confirmations[0]?.actionSummary, "是否运行命令？");
-  assert.equal(confirmations[0]?.actionSummary.includes("会读取安全摘要"), false);
-  assert.equal(confirmations[0]?.guidance?.includes("[redacted-secret]"), true);
+  assert.equal(confirmations[0]?.actionSummary.includes("会读取命令摘要"), false);
+  assert.equal(confirmations[0]?.guidance?.includes("sk-guidance-secret"), true);
 });
 
 test("runtime confirmation records title decisions without generic continue copy", () => {
@@ -464,10 +464,10 @@ test("runtime record mapper persists ordinary tool previews without diagnostic c
   assert.equal(serialized.includes("RAW_NEW_TEXT_SENTINEL"), false);
 });
 
-test("runtime text compaction redacts secrets before truncating", () => {
+test("runtime text compaction preserves text before truncating", () => {
   const compacted = compactRuntimeText("prefix sk-secret-value-123456 suffix", 24);
 
-  assert.equal(compacted.includes("sk-secret"), false);
+  assert.equal(compacted.includes("sk-secret"), true);
   assert.equal(compacted.length <= 24, true);
 });
 

@@ -79,7 +79,7 @@ test("basic agent run view prefers completed live run facts over stale job facts
             },
             explanation: {
               resultWhyReasonable: "已回答。",
-              observationPanelRole: "开发者详情只展示安全事件。",
+              observationPanelRole: "开发者详情展示运行事件。",
             },
           },
         },
@@ -135,7 +135,7 @@ test("basic agent run view exposes failed live desktop canvas from the backend r
             },
             explanation: {
               resultWhyReasonable: "这是旧的确认投影，不应覆盖失败终态。",
-              observationPanelRole: "开发者详情只展示安全事件。",
+              observationPanelRole: "开发者详情展示运行事件。",
             },
           },
         },
@@ -160,7 +160,7 @@ test("basic agent run view exposes failed live desktop canvas from the backend r
             },
             explanation: {
               resultWhyReasonable: "",
-              observationPanelRole: "开发者详情只展示安全事件。",
+              observationPanelRole: "开发者详情展示运行事件。",
             },
           },
           error: {
@@ -224,7 +224,7 @@ test("basic agent run view exposes cancelled live desktop canvas from the backen
             },
             explanation: {
               resultWhyReasonable: "这是旧的确认投影，不应覆盖取消终态。",
-              observationPanelRole: "开发者详情只展示安全事件。",
+              observationPanelRole: "开发者详情展示运行事件。",
             },
           },
         },
@@ -251,8 +251,8 @@ test("basic agent run view exposes cancelled live desktop canvas from the backen
               activity: [],
             },
             explanation: {
-              resultWhyReasonable: "普通 Agent 运行已由用户取消，当前只展示取消前的安全投影。",
-              observationPanelRole: "开发者详情只展示安全事件。",
+              resultWhyReasonable: "普通 Agent 运行已由用户取消，当前只展示取消前的运行投影。",
+              observationPanelRole: "开发者详情展示运行事件。",
             },
           },
         },
@@ -332,7 +332,7 @@ test("basic agent live work view builds transcript nodes from synced backend str
             },
             explanation: {
               resultWhyReasonable: "桌面助手等待你判断后继续。",
-              observationPanelRole: "开发者详情只展示安全事件。",
+              observationPanelRole: "开发者详情展示运行事件。",
             },
           },
         },
@@ -394,7 +394,7 @@ test("basic agent run view for persisted runs restores from the run snapshot wit
     },
   ]);
   assert.equal(view?.workView.contextLedger.entries.some((entry) => entry.kind === "skill"), true);
-  assert.equal(view?.detail.restoredResult?.summary, "历史运行安全摘要");
+  assert.equal(view?.detail.restoredResult?.summary, "历史运行摘要");
   assert.equal(view?.replay.events.some((event) => event.type === "final.result"), true);
   assert.equal(view?.detail.transcript?.events?.some((event) => event.type === "final.result"), true);
   assert.equal(view === undefined ? false : "workSession" in view, false);
@@ -582,7 +582,7 @@ function runtimeSnapshot(): RuntimeRunSnapshot {
       updatedAt: "2026-06-06T00:00:10.000Z",
       completedAt: "2026-06-06T00:00:10.000Z",
       resultTitle: "已完成",
-      resultSummary: "历史运行安全摘要",
+      resultSummary: "历史运行摘要",
       agentDefinitionRef: {
         agentId: "restored-basic-agent",
         agentDisplayName: "Restored Basic Agent",

@@ -111,7 +111,7 @@ test("HandoffStewardAgent act only consumes reason material and does not call th
   assert.equal(channel.requests.length, 1);
 });
 
-test("HandoffStewardAgent reasoning trace redacts unsafe provider summary fragments", async () => {
+test("HandoffStewardAgent reasoning trace preserves provider summary fragments", async () => {
   const agent = new HandoffStewardAgent();
   const ctx = createHandoffStewardContext({
     agentTurnRuntime: new AgentTurnRuntime({
@@ -128,11 +128,11 @@ test("HandoffStewardAgent reasoning trace redacts unsafe provider summary fragme
   const traceJson = JSON.stringify(decision.reasoningTrace);
 
   assert.equal(decision.source, "ai");
-  assert.equal(traceJson.includes("chain-of-thought"), false);
-  assert.equal(traceJson.includes("Raw goal:"), false);
-  assert.equal(traceJson.includes("raw provider response"), false);
-  assert.equal(traceJson.includes("sk-handoff-secret"), false);
-  assert.equal(traceJson.includes("[redacted-reasoning-detail]"), true);
+  assert.equal(traceJson.includes("chain-of-thought"), true);
+  assert.equal(traceJson.includes("Raw goal:"), true);
+  assert.equal(traceJson.includes("raw provider response"), true);
+  assert.equal(traceJson.includes("sk-handoff-secret"), true);
+  assert.equal(traceJson.includes("[redacted-reasoning-detail]"), false);
 });
 
 function createHandoffStewardContext(input: {

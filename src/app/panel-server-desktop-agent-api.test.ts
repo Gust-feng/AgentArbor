@@ -965,8 +965,8 @@ test("desktop run accepts context refs, permission refs, and readonly previews i
   }
 });
 
-test("desktop canvas redacts Task Soil preview secret shapes", async () => {
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-desktop-context-redaction-"));
+test("desktop canvas preserves Task Soil preview text", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-desktop-context-preview-"));
   const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
   try {
     const start = await requestJson(server.url, "/api/desktop/runs", {
@@ -977,7 +977,7 @@ test("desktop canvas redacts Task Soil preview secret shapes", async () => {
         taskSoil: {
           contextRefs: [
             {
-              ref: "file:notes/redaction.md",
+              ref: "file:notes/preview.md",
               kind: "file",
               summary: "summary api_key=panel-api-value",
               readonlyPreview: {
@@ -986,7 +986,7 @@ test("desktop canvas redacts Task Soil preview secret shapes", async () => {
               },
             },
           ],
-          permissionBoundaryRefs: ["read:file:notes/redaction.md"],
+          permissionBoundaryRefs: ["read:file:notes/preview.md"],
         },
       },
     });
@@ -999,12 +999,12 @@ test("desktop canvas redacts Task Soil preview secret shapes", async () => {
     );
     const canvasText = JSON.stringify(completed.body.canvas);
 
-    assert.equal(canvasText.includes("panel-api-value"), false);
-    assert.equal(canvasText.includes("title-token-value"), false);
-    assert.equal(canvasText.includes("preview-token-value"), false);
-    assert.equal(canvasText.includes("panel-password-value"), false);
-    assert.equal(canvasText.includes("[redacted-secret]"), true);
-    assert.equal(canvasText.includes("[redacted-token]"), true);
+    assert.equal(canvasText.includes("panel-api-value"), true);
+    assert.equal(canvasText.includes("title-token-value"), true);
+    assert.equal(canvasText.includes("preview-token-value"), true);
+    assert.equal(canvasText.includes("panel-password-value"), true);
+    assert.equal(canvasText.includes("[redacted-secret]"), false);
+    assert.equal(canvasText.includes("[redacted-token]"), false);
     assertSafePanelJsonText(canvasText);
   } finally {
     await server.close();
@@ -1104,7 +1104,7 @@ test("desktop openai-compatible missing config fails before provider fetch", asy
   }
 });
 
-test("desktop openai-compatible missing model fails before provider fetch and redacts key", async () => {
+test("desktop openai-compatible missing model fails before provider fetch without exposing config secret", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-desktop-missing-model-"));
   const secret = "sk-desktop-missing-model-secret";
   let fetchCalls = 0;
@@ -1140,7 +1140,7 @@ test("desktop openai-compatible missing model fails before provider fetch and re
   }
 });
 
-test("desktop canvas, tracking, transcript, and SSE keep model and tool internals redacted", async () => {
+test("desktop canvas, tracking, transcript, and SSE expose only runtime projections", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-desktop-safe-"));
   const secret = "sk-desktop-safe-secret";
   const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
@@ -1220,7 +1220,7 @@ test("desktop openai-compatible ordinary agent uses configured search tool befor
     return hasToolMessage
       ? createOpenAiTextResponse(
           "desktop-configured-tools-model",
-          "我已经结合授权搜索结果完成回答；工具输出只以安全摘要和引用进入本轮对话。"
+          "我已经结合授权搜索结果完成回答；工具输出会作为工具结果和引用进入本轮对话。"
         )
       : hasResponsesToolDefinition(body, "search")
         ? createOpenAiSearchToolCallResponse()

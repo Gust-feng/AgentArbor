@@ -52,7 +52,7 @@ export function buildUndergroundRootletCandidateAdviceMessages(
         "",
         "Use the model-visible information actions `search` and `read` to gather real evidence before producing candidates.",
         "Classify information needs before tool use: real-world cases, implementation approaches, project state, technical docs, existing packages, known issues, and historical similar runs.",
-        "`search` returns research refs and short snippets; `read` expands a selected ref or URL into a truncated safe preview.",
+        "`search` returns research refs and short snippets; `read` expands a selected ref or URL into a truncated preview.",
         "Research workflow: identify the information need, always search before speculating, read the most relevant ref before relying on it, cite research:* refs in candidate sourceRefs/evidenceRefs, and stop when the tool reports no-provider/stub instead of inventing facts.",
         "Use research refs, model refs, tool refs, and concise summaries. Do not inline Soil asset body content, raw provider output, full page text, prompts, or secrets.",
         "",

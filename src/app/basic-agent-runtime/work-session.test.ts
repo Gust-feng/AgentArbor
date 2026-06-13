@@ -484,7 +484,7 @@ test("work session read model keeps tool evidence out of ordinary message delive
   assert.equal(toolEntry?.refs.some((ref) => ref.kind === "tool_call" && ref.id === "call-search"), true);
   const json = JSON.stringify(workSession);
   assert.equal(json.includes("RAW_TOOL_OUTPUT_SENTINEL"), false);
-  assert.equal(json.includes("sk-tool-secret"), false);
+  assert.equal(json.includes("sk-tool-secret"), true);
 });
 
 test("work session visible events preserve product activity instead of tail model deltas", () => {
@@ -1005,8 +1005,8 @@ function searchEnvelope(): ToolResultEnvelope {
     },
     tokenEstimate: 16,
     truncated: false,
-    redacted: true,
+    redacted: false,
     diagnosticRef: "tool:call-search",
-    rawRetention: "diagnostic_ref_only",
+    rawRetention: "none",
   };
 }

@@ -11,7 +11,7 @@ import {
   safeReasoningOutputForPanel,
 } from "./panel-transcript-model-calls.js";
 
-test("panel transcript model calls merge request lifecycle into one safe projection", () => {
+test("panel transcript model calls merge request lifecycle into one runtime projection", () => {
   const calls = createPanelTranscriptModelCalls([
     modelEvent({
       sequence: 1,

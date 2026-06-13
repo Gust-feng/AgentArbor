@@ -34,6 +34,8 @@ import {
 } from "./work-session-context.js";
 import { transcriptNodesFromRunEvents } from "./work-session-transcript.js";
 
+const DESKTOP_WORK_VIEW_ANSWER_MAX_CHARS = 128_000;
+
 export type DesktopWorkViewCanvasLike = WorkViewCanvasContextLike & {
   readonly agent?: WorkViewCanvasContextLike["agent"] & {
     readonly answer?: {
@@ -399,7 +401,7 @@ function answerFor(input: CreateDesktopWorkViewReadModelInput): DesktopWorkViewA
   if (canvas?.kind === "desktop_agent_canvas" && canvas.agent?.answer !== undefined) {
     return {
       title: "已回答",
-      content: redactOrdinaryText(canvas.agent.answer.answer, 8_000),
+      content: redactOrdinaryText(canvas.agent.answer.answer, DESKTOP_WORK_VIEW_ANSWER_MAX_CHARS),
       evidenceRefs: observationRefs(canvas.agent.answer.evidenceRefs),
       nextActions: [],
     };
@@ -407,7 +409,7 @@ function answerFor(input: CreateDesktopWorkViewReadModelInput): DesktopWorkViewA
   if (canvas?.kind === "work_session_canvas" && canvas.workSession?.directAnswer !== undefined) {
     return {
       title: "已回答",
-      content: redactOrdinaryText(canvas.workSession.directAnswer.answer, 8_000),
+      content: redactOrdinaryText(canvas.workSession.directAnswer.answer, DESKTOP_WORK_VIEW_ANSWER_MAX_CHARS),
       evidenceRefs: observationRefs(canvas.workSession.directAnswer.evidenceRefs),
       nextActions: canvas.workSession.directAnswer.followUpSuggestions
         .map((item) => redactOrdinaryText(item, 220))

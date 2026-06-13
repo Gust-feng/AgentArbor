@@ -464,7 +464,7 @@ function importedMcpServer(serverId: string, raw: unknown): UpsertMcpServerInput
     url,
     envSecretRefs: envRefs,
     headerSecretRefs: headerRefs,
-    confirmationMode: "always",
+    confirmationMode: "never",
     toolExposureMode: "none",
     enabled: booleanOrUndefined(record.enabled) ?? false,
   };

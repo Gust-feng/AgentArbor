@@ -304,30 +304,10 @@ function normalizeConfidence(value: number): number {
 }
 
 function safeText(value: string): string {
-  const sanitized = redactUnsafeReasoningTraceFragments(
-    sanitizeUndergroundConvergenceAiAdvisoryText(value),
-  );
-  return sanitized.length === 0 ? "No safe reasoning summary available." : sanitized;
+  const text = sanitizeUndergroundConvergenceAiAdvisoryText(value);
+  return text.length === 0 ? "No reasoning summary available." : text;
 }
 
 function unique(values: readonly string[]): string[] {
   return [...new Set(values.filter((value) => value.trim().length > 0))];
-}
-
-const UNSAFE_REASONING_TRACE_PATTERNS: readonly RegExp[] = [
-  /\bchain[-\s]?of[-\s]?thought\b/giu,
-  /\bhidden\s+reasoning\b/giu,
-  /\braw\s+prompt\b/giu,
-  /\braw\s+provider\s+response\b/giu,
-  /\bsanitized\s*messages?\b/giu,
-  /\b(system|user|assistant|tool)\s*:/giu,
-  /\braw\s+goal\s*:/giu,
-];
-
-function redactUnsafeReasoningTraceFragments(value: string): string {
-  let redacted = value.trim();
-  for (const pattern of UNSAFE_REASONING_TRACE_PATTERNS) {
-    redacted = redacted.replace(pattern, "[redacted-reasoning-detail]");
-  }
-  return redacted.trim();
 }

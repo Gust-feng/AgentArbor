@@ -80,7 +80,7 @@ test("panel run job response uses the payload matching the current status", () =
         },
         explanation: {
           resultWhyReasonable: "旧确认投影不应覆盖失败终态。",
-          observationPanelRole: "开发者详情只展示安全事件。",
+          observationPanelRole: "开发者详情展示运行事件。",
         },
       },
     },
@@ -105,7 +105,7 @@ test("panel run job response uses the payload matching the current status", () =
         },
         explanation: {
           resultWhyReasonable: "",
-          observationPanelRole: "开发者详情只展示安全事件。",
+          observationPanelRole: "开发者详情展示运行事件。",
         },
       },
       error: {

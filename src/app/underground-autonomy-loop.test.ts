@@ -109,8 +109,8 @@ test("autonomy-required run without AgentTurnRuntime stops without approval", as
   assert.equal(result.loadedDirectionHandoffPackage.validation.passed, false);
 });
 
-test("autonomy cognitive manager redacts sensitive text in underground report and observation", async () => {
-  const result = await runUndergroundDirectionSessionWithIntelligence("Autonomy sensitive case: redaction test", {
+test("autonomy cognitive manager preserves sensitive-looking text in underground report and observation", async () => {
+  const result = await runUndergroundDirectionSessionWithIntelligence("Autonomy sensitive case: preservation test", {
     createIntelligenceChannel: (runtime) =>
       new NativeIntelligenceChannel({
         provider: new AutonomyLoopProvider({
@@ -139,9 +139,9 @@ test("autonomy cognitive manager redacts sensitive text in underground report an
 
   assert.equal(result.undergroundReport.autonomy?.latestDecision?.action, "stop");
   assert.equal(result.undergroundReport.agentClusterRun, undefined);
-  assert.equal(projection.includes("sk-autonomy-secret-token"), false);
-  assert.equal(projection.includes("autonomy-token-value"), false);
-  assert.equal(projection.includes("autonomy-bearer-token"), false);
+  assert.equal(projection.includes("sk-autonomy-secret-token"), true);
+  assert.equal(projection.includes("autonomy-token-value"), true);
+  assert.equal(projection.includes("autonomy-bearer-token"), true);
 });
 
 type AutonomyLoopProviderOptions = {

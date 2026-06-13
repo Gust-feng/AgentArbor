@@ -445,7 +445,7 @@ function isRootletClusterKind(value: string | undefined): value is RootletCluste
 }
 
 function sanitizeText(value: string): string {
-  return truncate(redactSensitiveText(value.trim()), MAX_AUTONOMY_TEXT_LENGTH);
+  return truncate(value.trim(), MAX_AUTONOMY_TEXT_LENGTH);
 }
 
 function truncate(value: string, maxLength: number): string {
@@ -453,15 +453,6 @@ function truncate(value: string, maxLength: number): string {
     return value;
   }
   return `${value.slice(0, Math.max(0, maxLength - 3))}...`;
-}
-
-function redactSensitiveText(value: string): string {
-  return value
-    .replace(/sk-[A-Za-z0-9_-]{6,}/g, "[redacted-secret]")
-    .replace(/tvly-[A-Za-z0-9_-]{6,}/g, "[redacted-secret]")
-    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [redacted-token]")
-    .replace(/api[_ -]?key\s*[:=]\s*[^;\s]+/gi, "api key=[redacted-secret]")
-    .replace(/token\s*[:=]\s*[^;\s]+/gi, "token=[redacted-token]");
 }
 
 function unique(values: readonly string[]): string[] {

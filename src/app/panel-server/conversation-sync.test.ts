@@ -35,7 +35,7 @@ test("syncConversationTurnForJob completes assistant turn from desktop answer ca
         },
         explanation: {
           resultWhyReasonable: "基于当前会话答案。",
-          observationPanelRole: "展示安全投影。",
+          observationPanelRole: "展示运行投影。",
         },
       },
     }),
@@ -47,6 +47,45 @@ test("syncConversationTurnForJob completes assistant turn from desktop answer ca
   assert.equal(assistant?.content, "已整理完成。");
   assert.equal(assistant?.status, "completed");
   assert.equal(assistant?.responseModel?.model, "gpt-sync-latest");
+});
+
+test("syncConversationTurnForJob keeps long desktop answers intact", () => {
+  const { conversations, job } = startedConversationJob();
+  const longAnswer = `开头\n${"普通桌面 agent 线性会话回答。".repeat(220)}\n结尾`;
+
+  syncConversationTurnForJob({
+    conversations,
+    job,
+    response: response({
+      status: "completed",
+      canvas: {
+        kind: "desktop_agent_canvas",
+        taskSoil: taskSoilCanvas(),
+        agent: {
+          status: "completed",
+          answer: {
+            answer: longAnswer,
+            modelCallRefs: [],
+            toolCallRefs: [],
+            evidenceRefs: [],
+            resultBlocks: [],
+          },
+          modelCallRefs: [],
+          toolCallRefs: [],
+          activity: [],
+        },
+        explanation: {
+          resultWhyReasonable: "基于当前会话答案。",
+          observationPanelRole: "展示运行投影。",
+        },
+      },
+    }),
+  });
+
+  const conversation = conversations.getReadModel(job.conversationId ?? "");
+  const assistant = conversation?.turns.find((turn) => turn.role === "assistant");
+  assert.equal(assistant?.content, longAnswer);
+  assert.equal(assistant?.content.endsWith("结尾"), true);
 });
 
 test("syncConversationTurnForJob does not complete without visible canvas output", () => {
@@ -98,7 +137,7 @@ test("syncConversationTurnForJob keeps approval requests as running previews", (
         },
         explanation: {
           resultWhyReasonable: "等待你判断后继续。",
-          observationPanelRole: "展示安全投影。",
+          observationPanelRole: "展示运行投影。",
         },
       },
     }),
@@ -141,7 +180,7 @@ test("syncConversationTurnForJob keeps concrete confirmation preview", () => {
         },
         explanation: {
           resultWhyReasonable: "等待你判断后继续。",
-          observationPanelRole: "展示安全投影。",
+          observationPanelRole: "展示运行投影。",
         },
       },
     }),
@@ -273,11 +312,11 @@ test("syncConversationTurnForJob ignores run started copy and refreshes from mod
   assert.equal(assistant?.title, "");
   assert.equal(assistant?.content.includes("正在整理可见回答"), true);
   assert.equal(assistant?.content.includes("启动占位"), false);
-  assert.equal(assistant?.content.includes(secret), false);
+  assert.equal(assistant?.content.includes(secret), true);
   assert.equal(assistant?.status, "running");
   assert.equal(summary?.status, "running");
   assert.equal(summary?.currentAction.includes("正在整理可见回答"), true);
-  assert.equal(summary?.currentAction.includes(secret), false);
+  assert.equal(summary?.currentAction.includes(secret), true);
 });
 
 test("syncConversationTurnForJob accumulates running model output deltas", () => {
@@ -734,7 +773,7 @@ test("syncConversationTurnForJob prefers HTTP event errors for failed turns", ()
   assert.equal(assistant?.status, "failed");
   assert.equal(assistant?.content.includes("错误信息：HTTP 401"), true);
   assert.equal(assistant?.content.includes("HTTP 401"), true);
-  assert.equal(assistant?.content.includes(secret), false);
+  assert.equal(assistant?.content.includes(secret), true);
 });
 
 test("syncConversationTurnForJob does not complete failed turns with forged answer canvas", () => {
@@ -767,7 +806,7 @@ test("syncConversationTurnForJob does not complete failed turns with forged answ
         },
         explanation: {
           resultWhyReasonable: "伪造的完成说明不应覆盖失败终态。",
-          observationPanelRole: "展示安全投影。",
+          observationPanelRole: "展示运行投影。",
         },
       },
     }),

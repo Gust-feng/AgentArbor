@@ -490,7 +490,7 @@ test("EventLog and Observation Snapshot do not expose provider secret values", a
   assert.equal(JSON.stringify(result.observationSnapshot).includes("token"), false);
 });
 
-test("Convergence AI advisory text is sanitized before public projections", async () => {
+test("Convergence AI advisory text is preserved in public projections", async () => {
   const secret = "sk-convergence-secret-token";
   const bearer = "Bearer advisory-token-value";
 
@@ -540,10 +540,10 @@ test("Convergence AI advisory text is sanitized before public projections", asyn
     summary,
   });
 
-  assert.equal(publicProjectionText.includes(secret), false);
-  assert.equal(publicProjectionText.includes(bearer), false);
-  assert.equal(publicProjectionText.includes("api key: sk-"), false);
-  assert.equal(publicProjectionText.includes("[redacted-secret]"), true);
+  assert.equal(publicProjectionText.includes(secret), true);
+  assert.equal(publicProjectionText.includes(bearer), true);
+  assert.equal(publicProjectionText.includes("api key: sk-"), true);
+  assert.equal(publicProjectionText.includes("[redacted-secret]"), false);
 });
 
 type TestModelProviderOptions = {

@@ -4,6 +4,8 @@ import { safeText, taskSoilCanvas, type PanelTaskSoilCanvasReadModel } from "./p
 import type { PanelRunTranscript } from "./panel-run-transcript-contracts.js";
 import { friendlyUserFacingFailureText } from "./visible-text-safety.js";
 
+const DESKTOP_AGENT_VISIBLE_ANSWER_MAX_CHARS = 128_000;
+
 export type DesktopAgentCanvasReadModel = {
   readonly kind: "desktop_agent_canvas";
   readonly taskSoil: PanelTaskSoilCanvasReadModel;
@@ -93,7 +95,7 @@ export function createDesktopAgentCanvas(input: {
         input.result.answer === undefined
           ? undefined
           : {
-              answer: safeText(input.result.answer.answer, 1200),
+              answer: safeText(input.result.answer.answer, DESKTOP_AGENT_VISIBLE_ANSWER_MAX_CHARS),
               modelCallRefs: [...input.result.answer.modelCallRefs],
               toolCallRefs: [...input.result.answer.toolCallRefs],
               evidenceRefs: input.result.answer.evidenceRefs.map((value) => safeText(value, 180)),
@@ -144,7 +146,7 @@ export function createDesktopAgentCanvas(input: {
             ? "等待你判断。"
             : "",
       observationPanelRole:
-        `开发者详情只展示调用引用和安全事件；当前安全事件 ${input.transcript.events.length} 条。`,
+        `开发者详情展示调用引用和运行事件；当前运行事件 ${input.transcript.events.length} 条。`,
     },
   };
 }

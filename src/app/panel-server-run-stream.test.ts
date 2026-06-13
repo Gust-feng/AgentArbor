@@ -424,7 +424,7 @@ test("panel async underground run starts without waiting for provider completion
   }
 });
 
-test("panel persists completed Desktop Agent runs to the local RuntimeDatabase safe projection", async () => {
+test("panel persists completed Desktop Agent runs to the local RuntimeDatabase projection", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-runtime-db-"));
   const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-runtime-workspace-"));
   const secret = "sk-runtime-db-secret";
@@ -478,9 +478,10 @@ test("panel persists completed Desktop Agent runs to the local RuntimeDatabase s
     assert.equal(snapshot?.events.some((event) => event.type === "goal.received"), true);
     assert.equal(snapshot?.events.some((event) => event.type === "model.requested"), true);
     assert.equal((snapshot?.modelCalls.length ?? 0) > 0, true);
-    assert.equal(persistedText.includes(secret), false);
-    assert.equal(persistedText.includes(bearer), false);
-    assert.equal(persistedText.includes(password), false);
+    assert.equal(persistedText.includes(secret), true);
+    assert.equal(persistedText.includes(bearer), true);
+    assert.equal(persistedText.includes(password), true);
+    assert.equal(persistedText.includes("[redacted-secret]"), false);
     assert.equal(persistedText.includes("sanitizedMessages"), false);
     assert.equal(persistedText.includes("raw provider response"), false);
     assert.equal(persistedText.includes("raw tool output"), false);

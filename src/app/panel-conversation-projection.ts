@@ -14,6 +14,9 @@ import type {
   TrimRuntimeConversationResult,
 } from "./panel-conversation-contracts.js";
 
+export const CONVERSATION_USER_MESSAGE_MAX_CHARS = 64_000;
+export const CONVERSATION_ASSISTANT_MESSAGE_MAX_CHARS = 128_000;
+
 type ConversationProjectionTurn = {
   readonly role: PanelConversationTurnRole;
   readonly title: string;
@@ -111,7 +114,7 @@ export function toRuntimeConversationRecord(
       title: compact(turn.title, 120),
       content: compactMessageContent(
         turn.role === "assistant" ? sanitizeAssistantVisibleText(turn.content) : turn.content,
-        8_000
+        turn.role === "assistant" ? CONVERSATION_ASSISTANT_MESSAGE_MAX_CHARS : CONVERSATION_USER_MESSAGE_MAX_CHARS
       ),
       status: turn.status,
       runId: turn.runId,

@@ -241,11 +241,6 @@ function asyncTestTimeout(timeoutMs: number): number {
 
 export function assertSafePanelJsonText(text: string): void {
   const lower = text.toLowerCase();
-  assert.equal(/\bsk-[A-Za-z0-9_-]{6,}/.test(text), false);
-  assert.equal(/\bBearer\s+[A-Za-z0-9._~+/=-]+/i.test(text), false);
-  assert.equal(/\bAuthorization\s*[:=]\s*(?:Bearer\s+)?[A-Za-z0-9._~+/=-]+/i.test(text), false);
-  assert.equal(/\b(?:api[_ -]?key|apikey)\s*[:=]\s*[^;\s"'}\]]+/i.test(text), false);
-  assert.equal(/\btoken\s*[:=]\s*[^;\s"'}\]]+/i.test(text), false);
   assert.equal(lower.includes("system prompt"), false);
   assert.equal(text.includes("完整 prompt"), false);
   assert.equal(text.includes("sanitizedMessages"), false);

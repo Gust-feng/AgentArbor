@@ -25,8 +25,8 @@ test("tool stream projection keeps command output as safe summary", () => {
       envelope: {
         agentSummary: "安全命令摘要",
         evidenceRefs: ["tool:tool-1"],
-        rawRetention: "diagnostic_ref_only",
-        redacted: true,
+        rawRetention: "none",
+        redacted: false,
       },
     },
   };
@@ -37,7 +37,7 @@ test("tool stream projection keeps command output as safe summary", () => {
   assert.equal(detail.command, "pnpm test");
   assert.equal(detail.preview, "测试已通过");
   assert.equal(detail.display?.kind, "command_summary");
-  assert.equal(detail.envelope?.rawRetention, "diagnostic_ref_only");
+  assert.equal(detail.envelope?.rawRetention, "none");
   assert.equal(JSON.stringify(detail).includes("RAW_STDOUT_SENTINEL"), false);
 });
 
@@ -114,7 +114,7 @@ test("tool stream projection shows file change metadata without raw replacement 
   assert.equal(detail.preview?.includes("secret new text"), false);
 });
 
-test("tool stream projection shows MCP safe preview without raw media payload", () => {
+test("tool stream projection shows MCP preview without raw media payload", () => {
   const detail = toolStreamDetail("tool.completed", {
     toolName: "docs__lookup",
     input: {
@@ -145,14 +145,14 @@ test("tool stream projection shows MCP safe preview without raw media payload", 
       envelope: {
         agentSummary: "找到 MCP 能力底座说明。",
         evidenceRefs: ["tool:call-mcp"],
-        rawRetention: "diagnostic_ref_only",
-        redacted: true,
+        rawRetention: "none",
+        redacted: false,
       },
     },
   });
 
   assert.equal(detail.preview?.includes("冻结快照"), true);
   assert.equal(detail.display?.kind, "generic_tool_summary");
-  assert.equal(detail.envelope?.rawRetention, "diagnostic_ref_only");
+  assert.equal(detail.envelope?.rawRetention, "none");
   assert.equal(JSON.stringify(detail).includes("RAW_BASE64_SENTINEL"), false);
 });

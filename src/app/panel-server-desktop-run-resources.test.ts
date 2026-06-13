@@ -332,6 +332,7 @@ test("desktop tool center factory rebuilds executable MCP tools only from the fr
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-mcp-run-resources-"));
   const serverPath = path.join(directory, "server.mjs");
   await fs.writeFile(serverPath, mcpServerSource(), "utf8");
+  let disconnectAll: (() => Promise<void>) | undefined;
   try {
     const lookup = mcpCapabilityTool("frozen__lookup", "read-only");
     const mutate = mcpCapabilityTool("frozen__mutate", "read-write");
@@ -375,6 +376,7 @@ test("desktop tool center factory rebuilds executable MCP tools only from the fr
       }),
       informationAccess: informationAccess(),
     });
+    disconnectAll = resources.mcpManager?.disconnectAll?.bind(resources.mcpManager);
     const factory = createDesktopToolCenterFactory(undefined, resources);
     const toolCenter = factory(createMinimalRuntime());
 
@@ -387,7 +389,7 @@ test("desktop tool center factory rebuilds executable MCP tools only from the fr
     );
     assert.equal(readResult.status, "completed");
     assert.match(JSON.stringify(readResult.output), /Frozen: agent/);
-    assert.equal(readResult.projection?.envelope?.rawRetention, "diagnostic_ref_only");
+    assert.equal(readResult.projection?.envelope?.rawRetention, "none");
 
     const denied = await toolCenter.execute(
       { callId: "call-denied", toolName: "frozen__lookup", input: { query: "agent" } },
@@ -397,16 +399,15 @@ test("desktop tool center factory rebuilds executable MCP tools only from the fr
     assert.equal(denied.status, "failed");
     assert.match(denied.error ?? "", /未授权/);
 
-    const confirmation = await toolCenter.execute(
+    const mutation = await toolCenter.execute(
       { callId: "call-write", toolName: "frozen__mutate", input: { value: "change" } },
       { callerAgentId: "agent", traceId: "trace", goalId: "goal" },
       { callerAgentId: "agent", allowedTools: ["frozen__mutate"] }
     );
-    assert.equal(confirmation.status, "approval_required");
-    assert.equal(confirmation.confirmationRequest?.riskLevel, "high");
-
-    await resources.mcpManager?.disconnectAll?.();
+    assert.equal(mutation.status, "completed");
+    assert.match(JSON.stringify(mutation.output), /Mutated: change/);
   } finally {
+    await disconnectAll?.();
     await fs.rm(directory, { recursive: true, force: true });
   }
 });

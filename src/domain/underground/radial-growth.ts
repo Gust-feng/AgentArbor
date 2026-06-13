@@ -518,20 +518,11 @@ export function sanitizeUndergroundConvergenceAiAdvisoryTexts(values: readonly s
 }
 
 export function sanitizeUndergroundConvergenceAiAdvisoryText(value: string): string {
-  const redacted = redactSensitiveText(value.trim());
-  if (redacted.length <= MAX_AI_ADVISORY_TEXT_LENGTH) {
-    return redacted;
+  const text = value.trim();
+  if (text.length <= MAX_AI_ADVISORY_TEXT_LENGTH) {
+    return text;
   }
-  return `${redacted.slice(0, MAX_AI_ADVISORY_TEXT_LENGTH - 3)}...`;
-}
-
-function redactSensitiveText(value: string): string {
-  return value
-    .replace(/sk-[A-Za-z0-9_-]{6,}/g, "[redacted-secret]")
-    .replace(/tvly-[A-Za-z0-9_-]{6,}/g, "[redacted-secret]")
-    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [redacted-token]")
-    .replace(/api[_ -]?key\s*[:=]\s*[^;\s]+/gi, "api key=[redacted-secret]")
-    .replace(/token\s*[:=]\s*[^;\s]+/gi, "token=[redacted-token]");
+  return `${text.slice(0, MAX_AI_ADVISORY_TEXT_LENGTH - 3)}...`;
 }
 
 function refsByStatus(

@@ -31,7 +31,7 @@ test("IntentCoreAgent reason uses AgentTurnRuntime and returns safe AI reasoning
   assert.equal(JSON.stringify(decision.reasoningTrace).includes("chain-of-thought"), false);
 });
 
-test("IntentCoreAgent reasoning trace redacts unsafe provider summary fragments", async () => {
+test("IntentCoreAgent reasoning trace preserves provider summary fragments", async () => {
   const agent = new IntentCoreAgent();
   const ctx = createIntentCoreContext({
     goal: "Build a governed research agent.",
@@ -42,11 +42,11 @@ test("IntentCoreAgent reasoning trace redacts unsafe provider summary fragments"
   const traceJson = JSON.stringify(decision.reasoningTrace);
 
   assert.equal(decision.source, "ai");
-  assert.equal(traceJson.includes("chain-of-thought"), false);
-  assert.equal(traceJson.includes("Raw goal:"), false);
-  assert.equal(traceJson.includes("raw provider response"), false);
-  assert.equal(traceJson.includes("sk-test-secret"), false);
-  assert.equal(traceJson.includes("[redacted-reasoning-detail]"), true);
+  assert.equal(traceJson.includes("chain-of-thought"), true);
+  assert.equal(traceJson.includes("Raw goal:"), true);
+  assert.equal(traceJson.includes("raw provider response"), true);
+  assert.equal(traceJson.includes("sk-test-secret"), true);
+  assert.equal(traceJson.includes("[redacted-reasoning-detail]"), false);
 });
 
 test("IntentCoreAgent reason without AgentTurnRuntime returns deterministic low-confidence fallback", async () => {

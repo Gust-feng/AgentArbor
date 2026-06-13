@@ -418,7 +418,7 @@ function runtimeSnapshot(): RuntimeRunSnapshot {
         riskLevel: "medium",
         requestedAt: "2026-05-31T00:00:04.000Z",
         decidedAt: "2026-05-31T00:00:05.000Z",
-        guidance: "继续使用安全摘要",
+        guidance: "继续使用运行摘要",
         eventRefs: ["confirmation:confirmation-1"],
       },
     ],

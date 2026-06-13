@@ -160,7 +160,7 @@ test("ordinary desktop execution can expose optional tools enabled in the frozen
   const resources = desktopRunResources({
     capabilitySnapshot: snapshot,
     informationAccess: informationAccess(),
-    channel: textChannel("我会只在高影响动作前等待确认。"),
+    channel: textChannel("我会只在命令执行前等待确认。"),
   });
 
   const result = await runOrdinaryDesktopForPanel(

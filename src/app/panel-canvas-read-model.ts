@@ -306,7 +306,7 @@ export function createPanelRunCanvas(input: {
       resultWhyReasonable:
         "方案来自分工检查和收束判断后的候选，并通过校验后才进入执行阶段。",
       observationPanelRole:
-        `开发者详情保留运行树、分工、汇总判断、模型/工具 refs 和 trace；当前活动流安全事件 ${input.transcript.events.length} 条。`,
+        `开发者详情保留运行树、分工、汇总判断、模型/工具 refs 和 trace；当前活动流运行事件 ${input.transcript.events.length} 条。`,
     },
   };
 }
@@ -332,7 +332,7 @@ export function createWorkSessionCanvas(input: {
         input.result.directAnswer === undefined
           ? undefined
           : {
-              answer: safeText(input.result.directAnswer.answer, 1200),
+              answer: safeText(input.result.directAnswer.answer, 128_000),
               evidenceRefs: input.result.directAnswer.evidenceRefs.map((value) => safeText(value, 180)),
               uncertainty: input.result.directAnswer.uncertainty.map((value) => safeText(value, 320)),
               followUpSuggestions: input.result.directAnswer.followUpSuggestions.map((value) => safeText(value, 320)),
@@ -373,9 +373,9 @@ export function createWorkSessionCanvas(input: {
           ? "这是一条直接回答：任务不需要读取工作区、派生子 Agent 或生成报告。"
           : input.result.status === "completed"
           ? "报告来自主会话分工检查后的汇总判断；局部材料没有绕过汇总进入最终结果。"
-          : "工作会话没有完成结果，当前只展示停止原因、开放问题和安全运行证据。",
+          : "工作会话没有完成结果，当前只展示停止原因、开放问题和运行证据。",
       observationPanelRole:
-        `开发者详情展示主助手 / 子检查运行树、汇总判断、模型/工具 refs 和活动流；当前安全事件 ${input.transcript.events.length} 条。`,
+        `开发者详情展示主助手 / 子检查运行树、汇总判断、模型/工具 refs 和活动流；当前运行事件 ${input.transcript.events.length} 条。`,
     },
   };
 }
@@ -439,7 +439,7 @@ export function createUndergroundDeepCanvas(input: {
       resultWhyReasonable:
         "这是显式深度模式：只做方向组织、局部探索、汇总判断和收束；当前不进入执行。",
       observationPanelRole:
-        `详情里展示深度组织的运行树、汇总判断、模型/工具 refs 和安全事件；当前安全事件 ${input.transcript.events.length} 条。`,
+        `详情里展示深度组织的运行树、汇总判断、模型/工具 refs 和运行事件；当前运行事件 ${input.transcript.events.length} 条。`,
     },
   };
 }

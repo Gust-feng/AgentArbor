@@ -8,7 +8,8 @@
 
 - 用户入口：`Desktop Shell / Panel`
 - 默认运行模式：`agent`
-- 默认执行主线：`用户消息 -> Task Soil -> 普通 Agent 主循环 -> 工具调用/确认 -> 结果投影`
+- 默认执行主线：`用户消息 -> Task Soil -> 普通 Agent 主循环 -> 工具调用/命令确认 -> 结果投影`
+- 默认交互形态：线性会话驱动；用户在同一个 conversation 中一轮接一轮补充上下文、要求和判断
 - 当前不对用户暴露 `deep` 入口
 - 当前不自动把普通请求升级为 `deep`
 - `/api/conversations` 与 `/api/desktop/runs` 当前都只接受普通 `agent` 运行
@@ -20,14 +21,16 @@
 
 当前软件默认只有一个对用户可见的普通 Agent 主循环。它的核心行为是：
 
-1. 装配安全上下文
+1. 装配会话上下文
 2. 调用模型
 3. 如果模型请求工具，则走后端工具执行与确认边界
-4. 把安全工具结果回传模型
+4. 把工具结果回传模型
 5. 直到模型不再调用工具，形成最终结果
 
 这意味着：
 
+- 默认普通 Agent 是线性会话助手，不维护独立任务生命周期、任务拆解状态、完成标准状态机或 Plan 交接对象
+- 默认普通路径中的 Task Soil 只是本轮会话输入、上下文引用、权限边界和运行材料的上下文包，不负责驱动任务状态推进
 - “模型不再调用工具”才表示本轮普通 Agent 正常完成
 - 工具调用、确认等待、工具失败后继续判断，都是普通运行的一部分
 - `provider` 失败、网络失败、上下文维护失败、进程失败都不是正常完成
@@ -41,7 +44,7 @@
 
 - 前端负责：发起请求、订阅流式事件、展示后端 read-model、提交确认决定
 - 后端负责：上下文装配、模型调用、工具可见性裁剪、工具执行、确认门控、运行状态、事件投影、持久化与恢复
-- 当前 `GET /api/conversations/:id` 会直接返回当前会话正在查看的 `currentRun` 安全投影，包含当前 run 的基础状态、工作视图、结果详情和安全 replay
+- 当前 `GET /api/conversations/:id` 会直接返回当前会话正在查看的 `currentRun` 投影，包含当前 run 的基础状态、工作视图、结果详情和 replay
 - 当前 `GET /api/basic-agent/runs/:runId/view?cursor=...` 会返回同一套后端拥有的 run view，供前端在 live refresh、结算刷新和历史运行读取时复用
 - 当前后端 run view 的语义字段是 `workView`；`GET /api/basic-agent/runs/:runId/view` 和 `GET /api/conversations/:id` 的 `currentRun` 不再返回顶层 `workSession` alias
 - 当前后端 run view 对普通 `agent` 暴露的顶层 `agentDefinitionRef` 与内层 `run.agentDefinitionRef` 必须来自同一个 run 出生事实，不能让前端面对两套 Agent 定义身份
@@ -67,10 +70,10 @@
 - 普通 `agent` 的本轮 ToolCenter 执行器全集也必须从 `capabilitySnapshot.toolCatalog.tools` 派生；当前代码新增、删除或启停工具只能影响新 run，不能扩张已创建 run 的可执行工具集合
 - 普通 `agent` 的技能可见与触发集合也来自 run 创建时冻结的 `capabilitySnapshot.skillCatalog`；执行期间的当前 skill 启停状态只影响新 run，不改写已创建 run
 - MCP 当前进入配置目录、能力快照的 `mcpCatalog`、能力草案投影和普通 `agent` 默认工具边界；只有已启用、已连接、已进入本轮冻结快照且通过 `AgentDefinition.toolVisibilityProfile` 的 MCP 工具，才会作为模型可见工具和可执行工具进入本轮运行
-- 工程决定哪些工具可以执行、哪些需要确认、哪些被隐藏
+- 工程决定哪些工具可以执行、哪些需要命令确认、哪些被隐藏
 - `AgentTurnRuntime / tool-use-loop` 在调用工具执行器前必须强制校验本轮 `allowedTools`；`ToolCenter` 和具体 adapter 仍可重复校验，但不能成为唯一防线
 - 模型只能在本轮可见工具集合内自主选择
-- 模型不能绕过 ToolCenter、权限、确认、沙箱和安全投影
+- 模型不能绕过 ToolCenter、权限、命令确认和本地策略沙箱；但普通回答、工具结果和错误信息不得被脱敏或安全投影链路吞掉
 
 ### 4. 当前默认产品边界
 

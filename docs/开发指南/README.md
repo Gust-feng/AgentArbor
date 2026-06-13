@@ -1,6 +1,6 @@
 # 开发指南
 
-本目录是 AgentArbor 开发前的正式指南。它采用分册结构，长期产品方向是桌面通用 Agent：用户通过统一 Desktop Shell 提交任务和工作区上下文；默认普通 Agent 先完成会话、模型工具循环、确认、安全投影、持久化和工作台结果展示；未来 deep / Agent 集群模式再通过地下认知运行时成形 Plan，由地上执行运行时交付 Fruits，并把可复用经验经过治理回流 Global Soil。
+本目录是 AgentArbor 开发前的正式指南。它采用分册结构，长期产品方向是桌面通用 Agent：用户通过统一 Desktop Shell 提交任务和工作区上下文；默认普通 Agent 先完成会话、模型工具循环、命令确认、持久化和工作台结果展示；未来 deep / Agent 集群模式再通过地下认知运行时成形 Plan，由地上执行运行时交付 Fruits，并把可复用经验经过治理回流 Global Soil。
 
 开发指南不是过程归档、版本路线图或会议纪要。它只写稳定结论、工程边界和可执行契约。
 
@@ -20,7 +20,7 @@
 
 ## 一句话定位
 
-AgentArbor 是一个桌面通用 Agent。当前默认产品体验先像成熟桌面助手一样可用：用户可以连续提问、绑定工作区上下文、授权工具、等待确认并获得可审阅结果；Underground、Plan、Aboveground、Governance 和 Agent 集群是长期架构边界，等待未来 deep 项目显式重启后继续扩展。避免过度设计指的是普通路径命名和实现语义必须朴素准确，不是删除 deep 长期方向。
+AgentArbor 是一个桌面通用 Agent。当前默认产品体验先像成熟桌面助手一样可用：用户可以连续提问、绑定工作区上下文、授权工具、等待命令确认并获得可审阅结果；Underground、Plan、Aboveground、Governance 和 Agent 集群是长期架构边界，等待未来 deep 项目显式重启后继续扩展。避免过度设计指的是普通路径命名和实现语义必须朴素准确，不是删除 deep 长期方向。
 
 ## 架构原则
 
@@ -28,7 +28,7 @@ AgentArbor 是一个桌面通用 Agent。当前默认产品体验先像成熟桌
 - Desktop Shell 包含 Task Inbox、Workspace Context、Main Canvas、Artifact Area 和 Observation Panel。
 - Task Soil 保存当前任务目标、文件引用、项目上下文、网页材料、临时约束、权限边界和本轮运行材料。
 - Global Soil 保存长期偏好、Capability Asset、Path Bias、历史约束、失败模式和治理后的长期事实。
-- 当前默认普通 Agent 负责直接回答、模型工具循环、确认、安全事件和结果展示。
+- 当前默认普通 Agent 负责直接回答、模型工具循环、命令确认、工具结果回传和结果展示；当前阶段能力优先，不以脱敏或安全投影限制普通回答。
 - 普通 Agent 不自动升级到 Underground，不派生 child/rootlet，不把普通文件编辑、helper、adapter 或一次工具循环包装成 Plan / Handoff / deep flow。
 - Underground Cognitive Runtime 负责方向智能：目标成形、多路探索、动态派生 child agent、父层综合、裁决、追问或停止；当前作为未来 deep / Agent 集群能力边界保留，不进入默认普通路径。
 - Aboveground Execution Runtime 负责执行智能：消费已成形 Plan，进行文件修改、文档生成、原型制作、工具调用和验证；当前作为长期架构边界保留。
@@ -36,10 +36,10 @@ AgentArbor 是一个桌面通用 Agent。当前默认产品体验先像成熟桌
 - Plan 是地下到地上的产品级交接对象；`.agentarbor` 只是 Plan Package 的实现/存储形态或目录名，不再作为独立产品节点。
 - Agent Fabric 是动态派生 child agent 的执行机制，不是独立产品入口；MVP 只允许一层 child agent。
 - child/rootlet 输出默认是局部材料，必须经过父层 synthesis / convergence 才能进入 Plan。
-- 智能通道是所有模型能力的统一接入边界；agent 的 `reason()` 承担语义推理，`guard()` 只守 schema、预算、权限、hard constraint、脱敏和包结构。
+- 智能通道是所有模型能力的统一接入边界；agent 的 `reason()` 承担语义推理，`guard()` 只守 schema、预算、权限、hard constraint 和包结构。
 - `agent`、`atomic`、`Plan`、`Handoff` 等命名必须匹配真实职责；`atomic` 只用于真正有全成功/全失败、回滚或一致性边界的场景。
 - 无 `AgentTurnRuntime` 不允许产出 approved Plan；默认稳定测试应使用 fake/stub AI runtime 验证 AI 路径。
-- reasoningTrace 只能保存安全投影：决策摘要、输入引用、模型/工具引用、不确定性和证据 refs，不保存 raw chain-of-thought。
+- reasoningTrace 只保存决策摘要、输入引用、模型/工具引用、不确定性和证据 refs，不保存 raw chain-of-thought。
 - Fruits 不是 Global Soil；Run Memory、Experience Candidate 和候选能力必须经过 Governance Pipeline 才能入土。
 - Path Bias 只能影响偏好和方案排序，不能覆盖 hard constraint。
 - Codex、OpenCode、Agent Skills 等平台格式是适配层，不是 AgentArbor 产品语义的事实源。

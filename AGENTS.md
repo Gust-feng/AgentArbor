@@ -12,13 +12,13 @@ AgentArbor 的模块化首先是按功能闭环模块化，其次才是按技术
 
 横向基础设施负责提供可复用能力，例如事件、消息、状态机、工具运行、模型运行、外部协议适配、配置和审计；纵向功能模块负责完成业务闭环，例如 Desktop Shell、Task Soil、Underground Cognitive Runtime、Plan、Aboveground Execution Runtime、Fruits、Governance Pipeline、Global Soil 和 Observation Panel。开发时必须优先判断当前变更属于哪个功能闭环，避免为了追随横向分层而把同一功能拆散到多个无主文件中。
 
-大模型接入层必须作为独立功能模块演进，而不是被视为普通 provider adapter 的附属实现。模型运行时应独立承担模型接入、provider 选择、配置边界、流式输出、模型-工具-模型多轮运行、输出脱敏、结构化校验、可见输出投影、模型事件和失败归一化等职责。Underground、Aboveground、Verification、Governance、Panel 等模块只能通过模型运行时契约使用模型能力，不能直接绑定外部 LLM SDK、provider 私有字段或临时流式协议。
+大模型接入层必须作为独立功能模块演进，而不是被视为普通 provider adapter 的附属实现。模型运行时应独立承担模型接入、provider 选择、配置边界、流式输出、模型-工具-模型多轮运行、结构化校验、可见输出投影、模型事件和失败归一化等职责。Underground、Aboveground、Verification、Governance、Panel 等模块只能通过模型运行时契约使用模型能力，不能直接绑定外部 LLM SDK、provider 私有字段或临时流式协议。
 
 不同模块之间必须通过强契约互信：调用方应相信被调用模块会履行自己的契约，并按标准结果返回成功、失败、取消、预算耗尽或验证失败；调用方只处理本模块的业务决策，不能因为不信任其他模块而复制其职责、重建其内部规则或绕过其边界。确定性工程规则应保护 Agent 的权限、预算、证据、审计、验证和治理边界，不能替代 Agent 的目标理解、方案探索、工具选择、计划草案和反思能力。
 
-禁止工程边界替 Agent 思考。schema、类型、状态机、validation、budget、permission、脱敏、fallback、关键词规则和文件边界只能说明“什么不能越界、如何记录、如何失败、如何交接”，不能承担“用户真正要什么、候选之间如何取舍、是否继续探索、该调用什么工具、风险如何权衡、方向如何综合”等 agent 语义职责。
+禁止工程边界替 Agent 思考。schema、类型、状态机、validation、budget、permission、fallback、关键词规则和文件边界只能说明“什么不能越界、如何记录、如何失败、如何交接”，不能承担“用户真正要什么、候选之间如何取舍、是否继续探索、该调用什么工具、风险如何权衡、方向如何综合”等 agent 语义职责。
 
-禁止以“安全投影”“摘要化”“产品化文案”或“鲁棒性”为名削弱模型能力。模型明确返回给用户可见的正文、思考摘要、工具前说明、工具后综合、风险判断和不确定性表达，应尽量按原意、原结构和自然节奏呈现；工程层只能做最低必要的边界保护，例如密钥、token、raw prompt、raw provider response、raw tool output、stdout/stderr 和未经授权文件正文不能泄露。不得把正常模型输出吞掉、改写成空泛状态、折叠成伪摘要，或用固定规则替代模型自己的判断、表达和行动选择。
+禁止以“安全投影”“脱敏”“摘要化”“产品化文案”或“鲁棒性”为名削弱模型能力。当前阶段是开发 agent 能力优先，不是安全优先；默认桌面 agent 的安全边界只保留必要的命令确认，除此之外不得把普通模型正文、工具结果、错误信息、文件内容、stdout/stderr 或开发上下文自动吞掉、替换、脱敏、折叠成伪摘要，或用固定规则替代模型自己的判断、表达和行动选择。UI 需要摘要时只能作为额外展示字段，不能覆盖或截断正式回答和模型可继续使用的内容。
 
 ## 协作规则
 
@@ -30,7 +30,7 @@ AgentArbor 的模块化首先是按功能闭环模块化，其次才是按技术
 
 ## 项目定位
 
-AgentArbor 是桌面通用 Agent / 桌面任务工作台。用户从统一 Desktop Shell 输入任务和工作区上下文；当前默认普通 `agent` 先完成连续会话、模型工具循环、确认、安全投影、持久化和工作台结果展示；长期 deep / Agent 集群能力保留为显式深入模式，由 Underground Cognitive Runtime 做目标成形、动态派生 child/rootlet agent、多路探索、父层综合和裁决，形成 Plan，再由 Aboveground Execution Runtime 消费 Plan 执行交付，产出 Fruits；运行结果经过 Governance Pipeline 后，只有通过治理的经验才回流 Global Soil。
+AgentArbor 是桌面通用 Agent / 桌面任务工作台。用户从统一 Desktop Shell 输入任务和工作区上下文；当前默认普通 `agent` 先完成连续会话、模型工具循环、命令确认、持久化和工作台结果展示；长期 deep / Agent 集群能力保留为显式深入模式，由 Underground Cognitive Runtime 做目标成形、动态派生 child/rootlet agent、多路探索、父层综合和裁决，形成 Plan，再由 Aboveground Execution Runtime 消费 Plan 执行交付，产出 Fruits；运行结果经过 Governance Pipeline 后，只有通过治理的经验才回流 Global Soil。
 
 当前正式产品主线是：
 

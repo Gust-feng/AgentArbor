@@ -11,7 +11,7 @@
 - 使用官方 SDK / 已有 SDK adapter 处理外部协议细节。
 - 让 MCP 和 Skills 成为共享能力底座，而不是新的业务编排层。
 
-完成后可以宣布：默认普通 Agent 第一阶段具备稳定会话、模型工具循环、确认、安全投影、持久化、MCP 外部工具接入边界和 Skills 上下文注入边界。但这不等于 deep / 多 Agent / RAG / Governance 已完成。
+完成后可以宣布：默认普通 Agent 第一阶段具备稳定会话、模型工具循环、命令确认、运行投影、持久化、MCP 外部工具接入边界和 Skills 上下文注入边界。但这不等于 deep / 多 Agent / RAG / Governance 已完成。
 
 ## 当前项目判断
 
@@ -39,7 +39,7 @@ Panel UI
 - `src/kernel/intelligence/agent-turn-runtime.ts`
 - `src/kernel/intelligence/tool-use-loop.ts`
 
-普通 Agent 的完成语义已经明确：模型不再请求工具，才正常形成最终回答。工程层只能守权限、预算、确认、上下文、失败归一化和安全投影，不能替模型判断任务是否完成。
+普通 Agent 的完成语义已经明确：模型不再请求工具，才正常形成最终回答。工程层只能守权限、预算、命令确认、上下文和失败归一化，不能替模型判断任务是否完成，也不能用安全投影替代模型输出。
 
 当前最近提交集中在普通 Agent 可见语义、工具边界、确认事实、运行恢复和前端状态规则，说明项目已经进入“收敛主干”和“补能力底座”阶段，不适合再引入新的编排框架来重写主链。
 
@@ -61,8 +61,8 @@ AgentArbor 应承担：
 - Task Soil 权限裁剪。
 - ToolCenter 执行边界。
 - Confirmation Gate。
-- Safe Projection / ToolResultEnvelope。
-- RuntimeDatabase 安全持久化。
+- Run Projection / ToolResultEnvelope。
+- RuntimeDatabase 运行持久化。
 - Panel read-model。
 
 禁止事项：
@@ -76,10 +76,10 @@ AgentArbor 应承担：
 ```text
 external protocol / SDK
   -> adapters/*
-  -> internal ToolExecutor / ModelResponse / safe config projection
+  -> internal ToolExecutor / ModelResponse / config projection
   -> app capability / policy
   -> AgentTurnRuntime / ToolCenter
-  -> safe run event / runtime database / panel read-model
+  -> run event / runtime database / panel read-model
 ```
 
 ## 不引入 LangChain / LangGraph
@@ -124,7 +124,7 @@ MCP 不需要从零实现协议层。要做的是把已有 SDK adapter 接入 ru
 - `src/app/skills/skill-state-store.ts` 已有启停状态和 `markUsed`。
 - `src/app/panel-server/skill-service.ts` 已能基于冻结 skill catalog 解析触发技能并加载正文。
 - `src/app/basic-agent-runtime/context-ledger-items.ts` 已把 skill body 注入 Context Ledger / Context Pack。
-- `src/app/desktop-agent-session-events.ts` 已有 `skill.triggered` 安全事件。
+- `src/app/desktop-agent-session-events.ts` 已有 `skill.triggered` 运行事件。
 
 未完全闭环：
 
@@ -158,12 +158,12 @@ Skills 不需要重写。要做的是把 snapshot 改成全量 skill catalog，�
 - MCP server 状态发现和安全快照。
 - MCP discovered tools 进入 run capability catalog；默认普通 Agent 的工具可见 profile 允许 `mcp` scope。
 - MCP tools 作为普通 `toolExposures` 进入模型可见集合，再由 snapshot allowedTools、Task Soil 权限、模型工具能力、ToolCenter executable restriction 和确认门继续裁剪。
-- MCP tool 执行继续经过 `allowedTools`、ToolCenter、Confirmation Gate 和 safe projection。
+- MCP tool 执行继续经过 `allowedTools`、ToolCenter 和运行投影；MCP 默认不额外确认，命令工具仍走命令确认。
 - Skills snapshot 表达 enabled / disabled 全量技能。
 - run 创建后冻结本轮可触发 skill 集合。
 - 执行时关键词触发最多 4 个 skill，加载正文注入 Context Ledger。
 - 成功注入后记录 `markUsed`。
-- run view 展示本轮使用过的 skill 名称、触发原因、安全摘要。
+- run view 展示本轮使用过的 skill 名称、触发原因、运行摘要。
 
 本轮不做：
 
@@ -239,7 +239,7 @@ Skills 不需要重写。要做的是把 snapshot 改成全量 skill catalog，�
 
 如果不能可靠地从冻结 snapshot 重建 MCP executor，不要把 MCP tool 标成 executable。宁可让 policy 暴露后再由 executable restriction 隐藏，也不能执行当前配置里后加的 MCP tool。
 
-### 4. MCP safe projection
+### 4. MCP run projection
 
 文件：
 
@@ -251,7 +251,7 @@ Skills 不需要重写。要做的是把 snapshot 改成全量 skill catalog，�
 
 - MCP output 进入现有 `ToolResultEnvelope`。
 - 文本内容按 `visibleResultPolicy.maxPreviewChars` 截断。
-- 图片、音频、base64、多模态 payload 默认不进入 UI raw channel；只保留类型、mime、安全摘要或 diagnostic ref。
+- 图片、音频、base64、多模态 payload 默认不进入 UI raw channel；只保留类型、mime、运行摘要或 diagnostic ref。
 - MCP error 归一成安全错误，不展示 raw stack、secret、env、完整 command args。
 
 ### 5. Skills snapshot 与触发闭环
@@ -274,11 +274,11 @@ Skills 不需要重写。要做的是把 snapshot 改成全量 skill catalog，�
 - `selectTriggeredSkillsWithStrategy("llm")` 不进入正式运行能力。
 - 触发后加载正文，注入 Context Ledger / Context Pack。
 - 正文只进入模型上下文，不进入默认 UI raw 展示。
-- 若本轮要宣称“run 事实严格冻结”，需要在 triggered skill 投影中至少记录 `sourcePath`、正文安全摘要或 content hash、loadedAt、truncated 标记；否则只能宣称 metadata 冻结、正文按需读取。
+- 若本轮要宣称“run 事实严格冻结”，需要在 triggered skill 投影中至少记录 `sourcePath`、正文运行摘要或 content hash、loadedAt、truncated 标记；否则只能宣称 metadata 冻结、正文按需读取。
 - 成功注入后等待或可靠记录 `markUsed`；失败时不应阻塞模型主循环，但应有安全诊断事件或 warning。
-- run view 展示 skill 名称、触发原因和安全摘要，不展示完整 body。
+- run view 展示 skill 名称、触发原因和运行摘要，不展示完整 body。
 
-### 6. Context Ledger 安全投影持久化
+### 6. Context Ledger 运行投影持久化
 
 文件：
 
@@ -354,7 +354,7 @@ Skills tests：
 - disabled skill 不触发，但 snapshot / 管理视图可见。
 - enabled skill 被关键词触发后正文进入 Context Pack。
 - 触发 skill 后更新 lastUsedAt。
-- run view 显示本轮使用 skill 的名称、触发原因和安全摘要。
+- run view 显示本轮使用 skill 的名称、触发原因和运行摘要。
 - run 创建后，后续 skill 启停不影响已创建 run。
 - `llm` strategy 不进入正式运行路径。
 
@@ -387,9 +387,9 @@ node --test dist/adapters/mcp/mcp-client.test.js dist/app/capability-center.test
 必须满足：
 
 - 默认普通 Agent 主循环语义未变化。
-- 默认普通 Agent 可以使用符合冻结快照、工具可见性、执行器、确认和安全投影边界的 MCP。
+- 默认普通 Agent 可以使用符合冻结快照、工具可见性和执行器边界的 MCP。
 - MCP 和 Skills 都从 run 创建时冻结事实出发。
-- MCP 执行不绕过 `allowedTools`、ToolCenter、Confirmation Gate、安全投影。
+- MCP 执行不绕过 `allowedTools`、ToolCenter 和运行投影。
 - Skills 正文只按需进入模型上下文，不泄漏到默认 read-model。
 - 禁用技能、禁用工具、不可用 MCP server 都能被安全展示或解释。
 - 所有新增外部协议对象都停留在 adapter 层。

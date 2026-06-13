@@ -21,7 +21,7 @@
 4. 当前普通 Agent 为什么不能把普通文件编辑、helper、adapter 或一次工具循环包装成 deep / Plan / Handoff 等过重概念。
 5. Underground / Plan / Aboveground 如何作为长期架构边界和未来 deep / Agent 集群能力保留，并等待显式深入项目重启。
 6. Plan / Plan Package 如何在长期架构中承接地下收束结果，并作为 Aboveground Execution Runtime 的可持久化输入。
-7. Observation Panel 和普通工作台如何展示安全投影，而不泄漏 raw prompt、raw provider response、raw tool output、stdout/stderr、文件正文或 hidden reasoning。
+7. Observation Panel 和普通工作台如何展示运行投影，同时保证普通回答、工具结果、错误信息、stdout/stderr、文件正文和开发上下文不被脱敏或安全投影吞掉。
 8. Run Memory、Experience Candidate、Capability Asset 和 Path Bias 如何经过 Governance Pipeline 才能回流 Global Soil。
 9. Shared Agent Kernel、权限模型、工具边界和模型运行时如何共同防止工程边界替 agent 思考。
 10. Agent 口径和命名如何避免实现层过度设计，同时保留长期 deep 架构。
@@ -84,7 +84,7 @@ docs/
 - `.opencode/` 保存 OpenCode 开发适配文件。
 - `.claude/` 保存 Claude Code 开发适配文件。
 - `.agentarbor/` 是未来 Plan Package 的默认存储目录名，只在 Plan 契约、读写规则、权限边界和真实出生依据稳定后增量创建；它不是产品概念树节点，不保存最终资产，也不替代 Global Soil。
-- `src/` 保存 AgentArbor TypeScript 实现代码；当前优先围绕默认普通 Desktop Agent、工作台体验、工具循环、确认、安全投影和持久化推进。已有 Underground / Agent Fabric 代码作为长期 deep 能力基础保留，但不能自动污染普通路径。
+- `src/` 保存 AgentArbor TypeScript 实现代码；当前优先围绕默认普通 Desktop Agent、工作台体验、工具循环、命令确认、运行投影和持久化推进。已有 Underground / Agent Fabric 代码作为长期 deep 能力基础保留，但不能自动污染普通路径。
 
 `docs/开发指南/` 负责当前开发规则。
 

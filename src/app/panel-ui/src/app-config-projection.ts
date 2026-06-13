@@ -14,6 +14,7 @@ export function mergeConfigResponse(previous: ConfigResponse | undefined, incomi
     modelProviderMarket: incoming.modelProviderMarket ?? previous?.modelProviderMarket,
     modelCatalogs: incoming.modelCatalogs ?? previous?.modelCatalogs,
     workspace: incoming.workspace ?? previous?.workspace,
+    commandShell: incoming.commandShell ?? previous?.commandShell,
     capabilities: incoming.capabilities ?? previous?.capabilities,
   };
 }

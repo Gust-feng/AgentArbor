@@ -17,6 +17,7 @@ import {
 import { PanelHttpError, readJsonBody, writeJson } from "./http-utils.js";
 import {
   parseConfigUpdate,
+  parseCommandShellUpdate,
   parseCreateModelProfile,
   parseInformationAccessUpdate,
   parseModelCatalogUpdate,
@@ -64,6 +65,7 @@ export async function handlePanelConfigRoute(
       capabilities,
       informationAccess: await runtime.configCenter.getInformationAccessConfig(),
       workspace: await runtime.configCenter.getWorkspaceConfig(),
+      commandShell: await runtime.configCenter.getCommandShellConfig(),
     });
     return true;
   }
@@ -636,6 +638,23 @@ export async function handlePanelConfigRoute(
     }
   }
 
+  if (request.method === "POST" && url.pathname === "/api/config/command-shell") {
+    const body = await readJsonBody(request);
+    try {
+      const commandShell = await runtime.configCenter.updateCommandShellConfig(parseCommandShellUpdate(body));
+      invalidateCapabilityCache(runtime);
+      writeJson(response, 200, {
+        ok: true,
+        status: "completed",
+        commandShell,
+        capabilities: await runtime.capabilityCenter.snapshot(),
+      });
+      return true;
+    } catch (error) {
+      throw configCenterHttpError(error);
+    }
+  }
+
   if (request.method === "POST" && url.pathname === "/api/config/workspace/select-directory") {
     if (runtime.workspaceDirectoryPicker === undefined) {
       throw new PanelHttpError(501, "workspace_picker_unavailable", "当前环境不支持系统文件夹选择器，请手动输入工作文件夹路径。");
@@ -713,11 +732,13 @@ async function createPanelToolCatalog(runtime: PanelConfigRouteRuntime): Promise
   const env = await runtime.configCenter.createModelRuntimeEnvironment();
   const workspaceRoot = (await runtime.configCenter.getWorkspaceConfig().catch(() => undefined))?.workspaceDirectory;
   const toolStates = await runtime.configCenter.listToolStates();
+  const commandShell = await runtime.configCenter.getCommandShellConfig();
   return createDesktopBasicToolRegistry({
     env,
     fetch: runtime.providerFetch,
     workspaceRoot,
     toolStates,
+    commandShell,
   }).catalog("desktop-basic");
 }
 

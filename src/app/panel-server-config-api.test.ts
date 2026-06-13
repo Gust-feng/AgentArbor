@@ -118,6 +118,33 @@ test("panel tools config routes return sanitized web search config and never ech
   }
 });
 
+test("panel config API persists command shell selection into capability snapshots", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-command-shell-"));
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+  try {
+    const initial = await requestJson(server.url, "/api/config");
+    const update = await requestJson(server.url, "/api/config/command-shell", {
+      method: "POST",
+      body: {
+        kind: "pwsh",
+      },
+    });
+    const after = await requestJson(server.url, "/api/config");
+
+    assert.equal(initial.status, 200);
+    assert.equal(update.status, 200);
+    assert.equal(after.status, 200);
+    assert.equal(update.body.commandShell.kind, "pwsh");
+    assert.equal(update.body.commandShell.syntax, "powershell");
+    assert.equal(update.body.capabilities.commandShell.kind, "pwsh");
+    assert.equal(after.body.commandShell.kind, "pwsh");
+    assert.equal(after.body.capabilities.commandShell.kind, "pwsh");
+  } finally {
+    await server.close();
+    await removeTemporaryTree(directory);
+  }
+});
+
 test("panel capability and profile APIs expose safe unified capability projections", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-capabilities-"));
   const secret = "sk-panel-capability-secret";

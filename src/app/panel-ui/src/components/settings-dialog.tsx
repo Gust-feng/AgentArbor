@@ -32,6 +32,7 @@ export function SettingsDialog(props: {
   readonly setModelForm: (form: ModelForm) => void;
   readonly workspaceDirectory: string;
   readonly setWorkspaceDirectory: (value: string) => void;
+  readonly onSaveCommandShell: (kind: "auto" | "cmd" | "powershell" | "pwsh" | "bash" | "sh") => void;
   readonly savingModel?: boolean;
   readonly onSaveModel: (form?: ModelForm) => Promise<void>;
   readonly onCreateCustomProfile: (form?: ModelForm) => Promise<void>;
@@ -170,9 +171,11 @@ export function SettingsDialog(props: {
             )}
             {activeGroup === "workspace" && (
               <WorkspaceSettings
+                commandShell={props.config?.commandShell}
                 workspaceDirectory={props.workspaceDirectory}
                 setWorkspaceDirectory={props.setWorkspaceDirectory}
                 onSave={props.onSaveWorkspace}
+                onSaveCommandShell={props.onSaveCommandShell}
               />
             )}
             {activeGroup === "confirmation" && <ConfirmationSettings tools={props.tools} />}

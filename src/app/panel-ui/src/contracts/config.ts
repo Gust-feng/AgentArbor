@@ -19,6 +19,7 @@ export type ConfigResponse = {
   readonly workspace?: {
     readonly workspaceDirectory?: string;
   };
+  readonly commandShell?: CommandShellConfig;
   readonly capabilities?: {
     readonly activeModel?: { readonly label?: string; readonly model?: string; readonly secretConfigured?: boolean };
     readonly modelCapabilities?: {
@@ -32,6 +33,20 @@ export type ConfigResponse = {
 };
 
 export type ModelProviderProfile = NonNullable<ConfigResponse["config"]>;
+
+export type CommandShellKind = "cmd" | "powershell" | "pwsh" | "bash" | "sh";
+
+export type CommandShellConfig = {
+  readonly kind?: CommandShellKind;
+  readonly label?: string;
+  readonly executable?: string;
+  readonly syntax?: "cmd" | "powershell" | "posix";
+  readonly platform?: string;
+  readonly invocation?: readonly string[];
+  readonly commandLineParameter?: "commandLine";
+  readonly notes?: readonly string[];
+  readonly updatedAt?: string;
+};
 
 export type ModelProviderPreset = {
   readonly presetId: string;

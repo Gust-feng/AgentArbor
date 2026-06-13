@@ -10,6 +10,7 @@ import {
   mergeCatalogsIntoConfig,
   revealModelProviderApiKey,
   refreshSkillCatalog,
+  saveCommandShellConfig,
   saveMcpServerSettings,
   saveModelProviderCatalog,
   saveModelProviderConfig,
@@ -27,7 +28,7 @@ import {
 import { mergeConfigResponse, type VisibleAiMode } from "./app-config-projection";
 import type { AppState } from "./app-state";
 import type { McpServerForm, ModelForm, ToolForm } from "./components/settings-types";
-import type { ModelProviderModelCatalog } from "./contracts/config";
+import type { CommandShellKind, ModelProviderModelCatalog } from "./contracts/config";
 import type { McpEnvironmentCheckResponse, McpReferenceResponse, McpServerCatalogItem } from "./contracts/tools";
 
 export type AppSettingsController = {
@@ -40,6 +41,7 @@ export type AppSettingsController = {
   readonly fetchModelsForProfile: (profileId?: string) => Promise<ModelProviderModelCatalog | undefined>;
   readonly saveModelCatalog: (profileId: string, catalog: ModelProviderModelCatalog) => Promise<void>;
   readonly saveWorkspace: (nextWorkspaceDirectory?: string) => Promise<void>;
+  readonly saveCommandShell: (kind: CommandShellKind | "auto") => Promise<void>;
   readonly saveTools: () => Promise<void>;
   readonly saveMcpServer: (nextMcpServerForm?: McpServerForm) => Promise<void>;
   readonly loadMcpReferences: (serverId: string) => Promise<McpReferenceResponse>;
@@ -346,6 +348,28 @@ export function createAppSettingsController(options: AppSettingsControllerOption
         options.setApp((previous) => ({
           ...previous,
           error: error instanceof Error ? error.message : "工作目录保存失败。",
+        }));
+      }
+    } finally {
+      if (options.mountedRef.current) options.setSavingWorkspace(false);
+    }
+  }
+
+  async function saveCommandShell(kind: CommandShellKind | "auto"): Promise<void> {
+    options.setSavingWorkspace(true);
+    try {
+      const response = await saveCommandShellConfig(kind);
+      if (options.mountedRef.current) {
+        options.setApp((previous) => ({
+          ...previous,
+          config: mergeConfigResponse(previous.config, response),
+        }));
+      }
+    } catch (error) {
+      if (options.mountedRef.current) {
+        options.setApp((previous) => ({
+          ...previous,
+          error: error instanceof Error ? error.message : "命令 shell 保存失败。",
         }));
       }
     } finally {
@@ -660,6 +684,7 @@ export function createAppSettingsController(options: AppSettingsControllerOption
     fetchModelsForProfile,
     saveModelCatalog,
     saveWorkspace,
+    saveCommandShell,
     saveTools,
     saveMcpServer,
     loadMcpReferences,

@@ -266,6 +266,7 @@ export function App(): React.ReactElement {
     fetchModelsForProfile,
     saveModelCatalog,
     saveWorkspace,
+    saveCommandShell,
     saveTools,
     saveMcpServer,
     loadMcpReferences,
@@ -479,6 +480,7 @@ export function App(): React.ReactElement {
         modelCatalogs={modelCatalogs}
         skills={app.skills}
         onSaveWorkspace={(nextWorkspaceDirectory) => void saveWorkspace(nextWorkspaceDirectory)}
+        onSaveCommandShell={(kind) => void saveCommandShell(kind)}
         tools={app.tools}
         toolForm={toolForm}
         setToolForm={setToolForm}

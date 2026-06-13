@@ -9,6 +9,7 @@ import type {
   OpenAIModelRequestSettings,
   ToolStateSettings,
   UpdateInformationAccessConfigInput,
+  UpdateCommandShellConfigInput,
   UpdateModelProviderConfigInput,
   UpdateWebSearchConfigInput,
   UpdateWorkspaceConfigInput,
@@ -215,6 +216,28 @@ export function parseWorkspaceUpdate(raw: unknown): UpdateWorkspaceConfigInput {
     throw new PanelHttpError(400, "missing_workspace_directory", "工作目录不能为空。");
   }
   return { workspaceDirectory };
+}
+
+export function parseCommandShellUpdate(raw: unknown): UpdateCommandShellConfigInput {
+  const record = asRecord(raw);
+  const kind = optionalString(record.kind);
+  if (kind === undefined) {
+    throw new PanelHttpError(400, "missing_command_shell_kind", "命令 shell 不能为空。");
+  }
+  if (
+    kind !== "auto" &&
+    kind !== "cmd" &&
+    kind !== "powershell" &&
+    kind !== "pwsh" &&
+    kind !== "bash" &&
+    kind !== "sh"
+  ) {
+    throw new PanelHttpError(400, "invalid_command_shell_kind", "命令 shell 无效。");
+  }
+  return {
+    kind,
+    executable: optionalString(record.executable),
+  };
 }
 
 export function parseInformationAccessUpdate(raw: unknown): UpdateInformationAccessConfigInput {

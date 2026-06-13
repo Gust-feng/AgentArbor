@@ -5,7 +5,7 @@ import {
   type VisibleAiMode,
 } from "./app-config-projection";
 import type { McpServerForm, ModelForm, ToolForm } from "./components/settings-types";
-import type { ConfigResponse, ModelProviderModelCatalog } from "./contracts/config";
+import type { CommandShellKind, ConfigResponse, ModelProviderModelCatalog } from "./contracts/config";
 import type { SkillDefinition } from "./contracts/skills";
 import type { McpEnvironmentCheckResponse, McpReferenceResponse, McpServerPreset, ToolsResponse } from "./contracts/tools";
 import { parseModelOptionId } from "./model-options";
@@ -188,6 +188,10 @@ export async function saveWorkspaceDirectory(workspaceDirectory: string): Promis
     workspaceDirectory,
   });
   return response.workspace;
+}
+
+export async function saveCommandShellConfig(kind: CommandShellKind | "auto"): Promise<ConfigResponse> {
+  return postJson<ConfigResponse>("/api/config/command-shell", { kind });
 }
 
 export async function saveToolSettings(form: ToolForm): Promise<ToolsResponse> {

@@ -99,9 +99,20 @@ export class ResearchRuntime implements InformationAccess {
     const limit = Math.max(1, Math.floor(query.limit ?? this.defaultLimit));
     const results: SearchResultRef[] = [];
     const sourceSteps: ResearchTraceSourceStep[] = [];
+    const sourceCapabilities = new Map(this.sourceCapabilities().map((source) => [source.source, source]));
     for (const source of requestedSources) {
       if (results.length >= limit) {
         break;
+      }
+      const capability = sourceCapabilities.get(source);
+      if (capability?.modelVisible === false) {
+        sourceSteps.push({
+          source,
+          status: "no-provider",
+          resultRefs: [],
+          message: capability.unavailableReason ?? "Source is not currently model-visible.",
+        });
+        continue;
       }
       const adapter = this.adapters.get(source);
       if (adapter?.search === undefined) {
@@ -171,6 +182,24 @@ export class ResearchRuntime implements InformationAccess {
 
     const sourceResult = this.searchResultsByRef.get(ref);
     const source = resolveReadSource(request, sourceResult, ref);
+    const capability = this.sourceCapabilities().find((item) => item.source === source);
+    if (capability?.modelVisible === false) {
+      const trace = createTrace({
+        action: "read",
+        startedAt,
+        ref,
+        requestedSources: [source],
+        sourceSteps: [
+          {
+            source,
+            status: "no-provider",
+            resultRefs: [],
+            message: capability.unavailableReason ?? "Source is not currently model-visible.",
+          },
+        ],
+      });
+      return { action: "read", ref, status: trace.status, trace };
+    }
     const adapter = this.adapters.get(source);
     if (adapter?.read === undefined) {
       const trace = createTrace({

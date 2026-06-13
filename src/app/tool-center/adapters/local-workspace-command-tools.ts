@@ -139,7 +139,8 @@ function shellCommandDefinition(commandShell: SanitizedCommandShellConfig): Tool
     description: [
       "Run one complete workspace shell command after confirmation.",
       shellUsageSentence(commandShell),
-      "Put the exact command in commandLine. Do not split it into args.",
+      "Put the exact command in commandLine for normal shell usage.",
+      "When shell quoting would be fragile, especially on Windows cmd or inline scripts, provide command plus args to execute the program directly without shell parsing.",
       "Use normal shell features when they help: pipes, redirection, command chaining, environment expansion, and quoted inline scripts.",
     ].join(" "),
     metadata: {
@@ -171,13 +172,14 @@ function shellCommandDefinition(commandShell: SanitizedCommandShellConfig): Tool
         { label: "invocation", value: commandShell.invocation.join(" ") },
       ],
       usageNotes: [
-        "Use commandLine as the single command string.",
-        "Write the command in the current shell syntax; do not use args for new calls.",
+        "Use commandLine as the single command string for normal shell commands.",
+        "When quoting would be fragile, provide command and args; execution will bypass shell parsing and run the program directly with argv.",
         "Use pipes, redirection, command chaining, environment expansion, and quoted inline scripts directly in commandLine.",
       ],
       outputNotes: [
         "result.stdout and result.stderr are returned to the model for follow-up reasoning.",
         "result.shell records the shell that executed the command.",
+        "If command and args are provided, execution bypasses shell parsing and uses direct argv execution.",
         "A non-zero exitCode is command feedback; inspect stdout/stderr before deciding the next step.",
       ],
       examples: [
@@ -189,6 +191,14 @@ function shellCommandDefinition(commandShell: SanitizedCommandShellConfig): Tool
           title: "Search files",
           input: { commandLine: commandShell.syntax === "cmd" ? "dir /s /b *.ts" : "find . -name '*.ts'" },
         },
+        {
+          title: "Bypass fragile shell quoting",
+          input: {
+            commandLine: `${commandShell.executable} <program invocation>`,
+            command: "node",
+            args: ["-e", "console.log('hello from argv mode')"],
+          },
+        },
       ],
     },
     inputSchema: {
@@ -196,14 +206,23 @@ function shellCommandDefinition(commandShell: SanitizedCommandShellConfig): Tool
       properties: {
         commandLine: {
           type: "string",
-          description: `Required. A complete ${commandShell.syntax} shell command line for ${commandShell.label}.`,
+          description: `Recommended. A complete ${commandShell.syntax} shell command line for ${commandShell.label}. If command plus args are also provided, this is treated as the human-readable equivalent shown in the transcript.`,
+        },
+        command: {
+          type: "string",
+          description: "Optional direct program path or executable name. Use together with args when shell quoting would be fragile and the command should bypass shell parsing.",
+        },
+        args: {
+          type: "array",
+          items: { type: "string" },
+          description: "Optional argv list for direct program execution. When present with command, the runtime executes the program directly instead of parsing commandLine through the shell.",
         },
         timeoutMs: {
           type: "number",
           description: `Optional timeout in milliseconds. Defaults to ${DEFAULT_COMMAND_TIMEOUT_MS}; maximum ${MAX_COMMAND_TIMEOUT_MS}.`,
         },
       },
-      required: ["commandLine"],
+      required: [],
       additionalProperties: false,
     },
   };
@@ -272,7 +291,17 @@ function normalizeShellCommandInput(record: Readonly<Record<string, unknown>>): 
   readonly legacyProgram?: string;
   readonly legacyArgs: readonly string[];
 } {
+  const directCommand = stringField(record.command);
+  const directArgs = toStringArray(record.args);
   const commandLine = stringField(record.commandLine);
+  if (directCommand !== undefined && directArgs.length > 0) {
+    return {
+      command: directCommand,
+      commandLine: commandLine ?? [directCommand, ...directArgs].join(" "),
+      legacyProgram: directCommand,
+      legacyArgs: directArgs,
+    };
+  }
   if (commandLine !== undefined) {
     return {
       command: commandLine,
@@ -281,7 +310,7 @@ function normalizeShellCommandInput(record: Readonly<Record<string, unknown>>): 
     };
   }
   const command = requireCommand(record.command);
-  const legacyArgs = toStringArray(record.args);
+  const legacyArgs = directArgs;
   return {
     command,
     commandLine: legacyArgs.length === 0 ? command : [command, ...legacyArgs].join(" "),

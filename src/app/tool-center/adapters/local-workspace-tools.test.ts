@@ -260,8 +260,8 @@ test("local run_command uses the workspace shell and confirmation metadata", asy
 
     assert.equal(runCommand.definition.metadata?.requiresConfirmation, true);
     assert.equal(shellCommand.definition.metadata?.requiresConfirmation, true);
-    assert.deepEqual(shellCommand.definition.inputSchema.required, ["commandLine"]);
-    assert.equal("args" in shellCommand.definition.inputSchema.properties, false);
+    assert.deepEqual(shellCommand.definition.inputSchema.required, []);
+    assert.equal("args" in shellCommand.definition.inputSchema.properties, true);
     assert.equal(shellCommand.definition.metadata?.runtimeHints?.[0]?.kind, "command_shell");
 
     const echoed = await runCommand.execute({ commandLine: "echo hello workspace" }, context);
@@ -290,6 +290,13 @@ test("local run_command uses the workspace shell and confirmation metadata", asy
     assert.match(String(asRecord(asRecord(typed).result).stdout), /alpha/);
     assert.match(String(asRecord(asRecord(inlineScript).result).stdout), /hello_inline_script/);
     assert.match(String(asRecord(asRecord(legacyArgs).result).stdout), /hello legacy args/);
+
+    const quotedPython = await shellCommand.execute({
+      commandLine: `${process.execPath} -e "console.log('fragile quoted shell')"` ,
+      command: process.execPath,
+      args: ["-e", "console.log('fragile quoted shell')"],
+    }, context);
+    assert.match(String(asRecord(asRecord(quotedPython).result).stdout), /fragile quoted shell/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

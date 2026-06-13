@@ -43,6 +43,20 @@ test("ResearchRuntime default model-visible search sources exclude unavailable s
   assert.equal(result.trace.requestedSources.includes("github"), false);
 });
 
+test("ResearchRuntime explicit hidden stub sources degrade to no-provider instead of returning stub payloads", async () => {
+  const runtime = createDefaultResearchRuntime({ env: {}, tavilyFetch: undefined });
+
+  const search = await runtime.search({ query: "provider", sources: ["docs"] });
+  const read = await runtime.read({ ref: "research:docs:stub", source: "docs" });
+
+  assert.equal(search.status, "no-provider");
+  assert.equal(search.results.length, 0);
+  assert.equal(search.trace.sourceSteps[0]?.status, "no-provider");
+  assert.equal(read.status, "no-provider");
+  assert.equal(read.result, undefined);
+  assert.equal(read.trace.sourceSteps[0]?.status, "no-provider");
+});
+
 test("ResearchRuntime follows configured source preference and links search trace refs", async () => {
   const runtime = new ResearchRuntime({
     sourcePreference: ["codebase", "web"],
@@ -196,7 +210,7 @@ test("ResearchRuntime soil and run_memory sources expose refs without inline ass
   assert.equal(read.result?.summary.includes("Similar task"), true);
 });
 
-test("ResearchRuntime docs packages and github adapters are explicit stubs", async () => {
+test("ResearchRuntime docs packages and github adapters stay hidden from model-visible execution", async () => {
   const runtime = new ResearchRuntime({
     adapters: [
       createStubInformationSourceAdapter("docs"),
@@ -209,10 +223,10 @@ test("ResearchRuntime docs packages and github adapters are explicit stubs", asy
     const search = await runtime.search({ query: "provider", sources: [source] });
     const read = await runtime.read({ ref: `research:${source}:stub`, source });
 
-    assert.equal(search.status, "stub");
+    assert.equal(search.status, "no-provider");
     assert.equal(search.results.length, 0);
-    assert.equal(read.status, "stub");
-    assert.equal(read.result?.source, source);
+    assert.equal(read.status, "no-provider");
+    assert.equal(read.result, undefined);
   }
 });
 

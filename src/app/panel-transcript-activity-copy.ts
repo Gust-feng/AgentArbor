@@ -279,6 +279,7 @@ function toolVerb(node: ProjectableTranscriptNode): string {
   const action = display?.kind === "generic_tool_summary" ? display.action?.toLowerCase() ?? "" : "";
   if (display?.kind === "command_summary" || toolName === "run_command" || toolName === "shell_command" || toolName.includes("terminal") || toolName.includes("powershell") || toolName.includes("cmd")) return "命令";
   if (display?.kind === "search_results" || toolName === "search" || toolName === "web_search" || toolName.includes("grep")) return "搜索";
+  if (display?.kind === "read_result") return "读取";
   if (display?.kind === "browser_snapshot" || toolName === "browser_snapshot" || toolName.includes("browser")) return "网页";
   if (display?.kind === "file_diff_preview" || toolName === "edit_file" || toolName.includes("patch") || toolName.includes("replace")) return "编辑";
   if (toolName === "delete_file" || toolName.includes("delete") || toolName.includes("remove")) return "删除";
@@ -309,6 +310,9 @@ function toolTargetCopy(node: ProjectableTranscriptNode): Pick<ActivityLineCopy,
   }
   if (display?.kind === "search_results") {
     return readableToolTarget(cleanToolTargetText(display.query ?? node.summary));
+  }
+  if (display?.kind === "read_result") {
+    return readableToolTarget(cleanToolTargetText(display.title ?? display.uri ?? display.url ?? node.summary));
   }
   if (display?.kind === "browser_snapshot") {
     return readableToolTarget(cleanToolTargetText(display.title ?? display.url ?? node.summary));

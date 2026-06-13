@@ -5,6 +5,7 @@ import type {
   ModelToolChoice,
 } from "../../domain/intelligence/index.js";
 import type { ToolDefinition } from "../../domain/tools/index.js";
+import { modelVisibleToolDescription } from "../../domain/tools/index.js";
 import { buildOpenAIResponsesControlFields } from "./openai-request-settings.js";
 import { removeUndefinedValues } from "./provider-value-utils.js";
 
@@ -89,7 +90,7 @@ function toResponsesTool(definition: ToolDefinition): Record<string, unknown> {
   return {
     type: "function",
     name: definition.name,
-    description: definition.description,
+    description: modelVisibleToolDescription(definition),
     parameters: definition.inputSchema,
     strict: false,
   };

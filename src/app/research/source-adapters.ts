@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import type {
+  InformationSourceCapability,
   InformationAccessStatus,
   InformationSourceKind,
   ReadResultRef,
@@ -41,6 +42,7 @@ export type InformationSourceReadResponse = {
 
 export interface InformationSourceAdapter {
   readonly source: InformationSourceKind;
+  readonly capability?: Omit<InformationSourceCapability, "source" | "searchable" | "readable">;
   search?(request: InformationSourceSearchRequest): Promise<InformationSourceSearchResponse>;
   read?(request: InformationSourceReadRequest): Promise<InformationSourceReadResponse>;
 }
@@ -64,8 +66,14 @@ export function createWebInformationSourceAdapter(options: {
   readonly maxResults?: number;
 } = {}): InformationSourceAdapter {
   const tool = createWebSearchTool({ apiKey: options.apiKey, fetch: options.fetch, maxResults: options.maxResults });
+  const hasProvider = stringOrUndefined(options.apiKey) !== undefined && (options.fetch !== undefined || resolveGlobalWebSearchFetch() !== undefined);
   return {
     source: "web",
+    capability: {
+      label: "live web search",
+      modelVisible: hasProvider,
+      unavailableReason: hasProvider ? undefined : "No configured web search provider is available.",
+    },
     async search(request) {
       const output = asRecord(
         await tool.execute(
@@ -116,6 +124,13 @@ export function createPageInformationSourceAdapter(options: {
 } = {}): InformationSourceAdapter {
   return {
     source: "page",
+    capability: {
+      label: "HTTP/HTTPS page reader",
+      modelVisible: options.fetch !== undefined || resolveGlobalPageFetch() !== undefined,
+      unavailableReason: options.fetch !== undefined || resolveGlobalPageFetch() !== undefined
+        ? undefined
+        : "No fetch implementation is available for page reads.",
+    },
     async read(request) {
       const uri = request.uri ?? request.ref;
       if (!isHttpUrl(uri)) {
@@ -176,6 +191,10 @@ export function createCodebaseInformationSourceAdapter(options: {
   const maxFiles = Math.max(1, Math.floor(options.maxFiles ?? 800));
   return {
     source: "codebase",
+    capability: {
+      label: "local codebase text search",
+      modelVisible: true,
+    },
     async search(request) {
       const query = normalizeWhitespace(request.query);
       if (query.length === 0) {
@@ -252,6 +271,9 @@ export function createSoilInformationSourceAdapter(options: {
 } = {}): InformationSourceAdapter {
   return createReadonlyRefSourceAdapter({
     source: "soil",
+    label: "readonly Soil refs",
+    modelVisible: options.soilStore !== undefined,
+    unavailableReason: options.soilStore === undefined ? "No readonly Soil store is configured." : undefined,
     emptyStatus: options.soilStore === undefined ? "no-provider" : "empty",
     emptyMessage:
       options.soilStore === undefined
@@ -291,6 +313,9 @@ export function createRunMemoryInformationSourceAdapter(options: {
 } = {}): InformationSourceAdapter {
   return createReadonlyRefSourceAdapter({
     source: "run_memory",
+    label: "historical run memory refs",
+    modelVisible: options.soilStore !== undefined,
+    unavailableReason: options.soilStore === undefined ? "Run Memory provider is not connected." : undefined,
     emptyStatus: options.soilStore === undefined ? "stub" : "empty",
     emptyMessage:
       options.soilStore === undefined
@@ -312,6 +337,11 @@ export function createStubInformationSourceAdapter(
   const label = source === "docs" ? "technical docs" : source === "packages" ? "package registry" : "GitHub";
   return {
     source,
+    capability: {
+      label,
+      modelVisible: false,
+      unavailableReason: `${label} provider is not connected in this MVP.`,
+    },
     async search() {
       return {
         status: "stub",
@@ -338,6 +368,9 @@ export function createStubInformationSourceAdapter(
 
 function createReadonlyRefSourceAdapter(input: {
   readonly source: Extract<InformationSourceKind, "soil" | "run_memory">;
+  readonly label: string;
+  readonly modelVisible: boolean;
+  readonly unavailableReason?: string;
   readonly emptyStatus: InformationAccessStatus;
   readonly emptyMessage: string;
   readonly items: () => readonly {
@@ -349,6 +382,11 @@ function createReadonlyRefSourceAdapter(input: {
 }): InformationSourceAdapter {
   return {
     source: input.source,
+    capability: {
+      label: input.label,
+      modelVisible: input.modelVisible,
+      unavailableReason: input.unavailableReason,
+    },
     async search(request) {
       const query = request.query.toLowerCase();
       const results = input.items()
@@ -508,6 +546,11 @@ function titleFromHtmlText(value: string): string | undefined {
 
 function resolveGlobalPageFetch(): PageFetchLike | undefined {
   const fetchImpl = (globalThis as { fetch?: PageFetchLike }).fetch;
+  return typeof fetchImpl === "function" ? fetchImpl : undefined;
+}
+
+function resolveGlobalWebSearchFetch(): TavilyFetchLike | undefined {
+  const fetchImpl = (globalThis as { fetch?: TavilyFetchLike }).fetch;
   return typeof fetchImpl === "function" ? fetchImpl : undefined;
 }
 

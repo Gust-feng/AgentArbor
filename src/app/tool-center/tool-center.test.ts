@@ -264,6 +264,40 @@ test("ToolCenter file diff display exposes bounded edit preview without redactio
   assert.equal(displayJson.includes("sk-edit-secret"), true);
 });
 
+test("ToolCenter file diff display prefers precise edit parameters in preview labels", async () => {
+  const center = new ToolCenter({ platform: "linux" });
+  center.register(testTool("edit_file", async () => ({
+    action: "edit_file",
+    summary: "notes.md · 20 -> 22 chars · 1 replacement",
+    result: {
+      path: "notes.md",
+      previousLength: 20,
+      nextLength: 22,
+      replacements: 1,
+    },
+  }), "read-write"));
+
+  const result = await center.execute(
+    {
+      callId: "call-edit-occurrence",
+      toolName: "edit_file",
+      input: {
+        path: "notes.md",
+        edits: [{ oldText: "same", newText: "updated", occurrence: 2, startLine: 3, endLine: 3 }],
+      },
+    },
+    { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
+    allowTools("edit_file")
+  );
+
+  const display = result.projection?.display;
+  assert.equal(result.status, "completed");
+  assert.equal(display?.kind, "file_diff_preview");
+  assert.equal(display?.kind === "file_diff_preview" ? display.preview?.includes("@@ occurrence 2 · line 3") : false, true);
+  assert.equal(display?.kind === "file_diff_preview" ? display.preview?.includes("- same") : false, true);
+  assert.equal(display?.kind === "file_diff_preview" ? display.preview?.includes("+ updated") : false, true);
+});
+
 test("ToolCenter file change display exposes bounded create preview without redaction", async () => {
   const center = new ToolCenter({ platform: "linux" });
   center.register(testTool("create_file", async () => ({

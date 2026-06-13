@@ -7,6 +7,23 @@ export type ToolInputSchema = {
   readonly additionalProperties?: boolean;
 };
 
+export type ToolUsageExample = {
+  readonly title?: string;
+  readonly input: Readonly<Record<string, unknown>>;
+};
+
+export type ToolModelRuntimeHint = {
+  readonly label: string;
+  readonly value: string;
+};
+
+export type ToolModelContract = {
+  readonly usageNotes?: readonly string[];
+  readonly outputNotes?: readonly string[];
+  readonly examples?: readonly ToolUsageExample[];
+  readonly runtimeHints?: readonly ToolModelRuntimeHint[];
+};
+
 export type ToolCategory = "research" | "workspace" | "filesystem" | "terminal" | "web" | "mcp" | "other";
 
 export type ToolRiskLevel = "low" | "medium" | "high";
@@ -23,12 +40,26 @@ export type ToolVisibleResultPolicy = {
   readonly omitRawOutput: boolean;
 };
 
+export type ToolRuntimeHint =
+  | {
+      readonly kind: "command_shell";
+      readonly shellId: string;
+      readonly label: string;
+      readonly executable: string;
+      readonly syntax: "cmd" | "powershell" | "posix";
+      readonly platform: NodeJS.Platform;
+      readonly invocation: readonly string[];
+      readonly commandLineParameter: string;
+      readonly notes: readonly string[];
+    };
+
 export type ToolDefinitionMetadata = {
   readonly category: ToolCategory;
   readonly riskLevel: ToolRiskLevel;
   readonly operationType: ToolOperationType;
   readonly requiresConfirmation: boolean;
   readonly visibleResultPolicy: ToolVisibleResultPolicy;
+  readonly runtimeHints?: readonly ToolRuntimeHint[];
 };
 
 export type ToolSafeProjection = {
@@ -67,6 +98,20 @@ export type ToolDisplayProjection =
       readonly truncated?: boolean;
     }
   | {
+      readonly kind: "read_result";
+      readonly ref?: string;
+      readonly source?: string;
+      readonly status?: string;
+      readonly title?: string;
+      readonly url?: string;
+      readonly uri?: string;
+      readonly sourceSearchRef?: string;
+      readonly contentPreview?: string;
+      readonly summary?: string;
+      readonly preview?: string;
+      readonly truncated?: boolean;
+    }
+  | {
       readonly kind: "browser_snapshot";
       readonly title?: string;
       readonly url?: string;
@@ -97,6 +142,8 @@ export type ToolDisplayProjection =
       readonly kind: "command_summary";
       readonly command?: string;
       readonly args?: readonly string[];
+      readonly commandLine?: string;
+      readonly shell?: string;
       readonly exitCode?: number;
       readonly outputSummary?: string;
       readonly errorSummary?: string;
@@ -112,6 +159,7 @@ export type ToolDefinition = {
   readonly name: string;
   readonly description: string;
   readonly inputSchema: ToolInputSchema;
+  readonly modelContract?: ToolModelContract;
   readonly metadata?: ToolDefinitionMetadata;
 };
 
@@ -193,6 +241,7 @@ export type SandboxPolicyRequest = {
   readonly relativePath?: string;
   readonly bytes?: number;
   readonly command?: string;
+  readonly commandLine?: string;
   readonly args?: readonly string[];
 };
 

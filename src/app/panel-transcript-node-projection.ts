@@ -15,6 +15,12 @@ export type TranscriptToolDisplayLike =
       readonly results?: readonly unknown[];
     }
   | {
+      readonly kind: "read_result";
+      readonly title?: string;
+      readonly url?: string;
+      readonly uri?: string;
+    }
+  | {
       readonly kind: "browser_snapshot";
       readonly title?: string;
       readonly url?: string;

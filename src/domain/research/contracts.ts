@@ -100,7 +100,24 @@ export type InformationReadResult = {
   readonly trace: ResearchTrace;
 };
 
+export type InformationSourceCapability = {
+  readonly source: InformationSourceKind;
+  readonly label: string;
+  readonly searchable: boolean;
+  readonly readable: boolean;
+  readonly modelVisible: boolean;
+  readonly unavailableReason?: string;
+};
+
+export type InformationAccessCapabilities = {
+  readonly sources: readonly InformationSourceCapability[];
+  readonly searchableSources: readonly InformationSourceKind[];
+  readonly readableSources: readonly InformationSourceKind[];
+  readonly defaultSearchSources: readonly InformationSourceKind[];
+};
+
 export interface InformationAccess {
   search(query: InformationQuery): Promise<InformationSearchResult>;
   read(request: InformationReadRequest): Promise<InformationReadResult>;
+  getCapabilities?(): InformationAccessCapabilities;
 }

@@ -361,7 +361,8 @@ test("Rootlet AI can call unified search then read before producing candidate ou
   assert.deepEqual(toolEvents, ["tool.requested", "tool.completed", "tool.requested", "tool.completed"]);
   assert.notEqual(modelOutput, undefined);
   assert.equal(eventLogText.includes("tvly-test-secret"), false);
-  assert.equal(eventLogText.includes("Page read body should stay out of EventLog"), false);
+  assert.equal(eventLogText.includes("Page read body should stay out of EventLog"), true);
+  assert.equal(JSON.stringify(modelOutput).includes("Page read body should stay out of EventLog"), false);
 });
 
 test("Contract-violating AI rootlet output falls back before convergence and handoff", async () => {

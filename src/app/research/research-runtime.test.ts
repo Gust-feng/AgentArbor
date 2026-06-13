@@ -27,6 +27,22 @@ test("ResearchRuntime web source returns no-provider without Tavily key", async 
   assert.equal(result.trace.sourceSteps[0]?.status, "no-provider");
 });
 
+test("ResearchRuntime default model-visible search sources exclude unavailable stubs", async () => {
+  const runtime = createDefaultResearchRuntime({ env: {}, tavilyFetch: undefined });
+
+  const capabilities = runtime.getCapabilities();
+  const result = await runtime.search({ query: "AgentArbor research" });
+
+  assert.deepEqual(capabilities.defaultSearchSources, ["codebase"]);
+  assert.equal(capabilities.sources.find((source) => source.source === "docs")?.modelVisible, false);
+  assert.equal(capabilities.sources.find((source) => source.source === "packages")?.modelVisible, false);
+  assert.equal(capabilities.sources.find((source) => source.source === "github")?.modelVisible, false);
+  assert.deepEqual(result.trace.requestedSources, ["codebase"]);
+  assert.equal(result.trace.requestedSources.includes("docs"), false);
+  assert.equal(result.trace.requestedSources.includes("packages"), false);
+  assert.equal(result.trace.requestedSources.includes("github"), false);
+});
+
 test("ResearchRuntime follows configured source preference and links search trace refs", async () => {
   const runtime = new ResearchRuntime({
     sourcePreference: ["codebase", "web"],

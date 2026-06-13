@@ -403,6 +403,9 @@ function transcriptToolSummary(event: PanelTranscriptStreamEvent): string | unde
       .filter((value): value is string => value !== undefined && value.trim().length > 0)
       .join(" · ");
   }
+  if (display?.kind === "read_result") {
+    return display.title ?? display.uri ?? display.url ?? event.detail?.preview ?? event.summary;
+  }
   if (display?.kind === "browser_snapshot") {
     return display.title ?? display.url ?? event.detail?.preview ?? event.summary;
   }
@@ -443,6 +446,9 @@ function toolTranscriptTitleSet(event: PanelTranscriptStreamEvent): {
   }
   if (display?.kind === "search_results" || toolName === "search" || toolName === "web_search") {
     return { action: "搜索资料", completed: "资料搜索完成", failed: "资料搜索未完成" };
+  }
+  if (display?.kind === "read_result") {
+    return { action: "读取资料", completed: "资料读取完成", failed: "资料读取未完成" };
   }
   if (display?.kind === "browser_snapshot" || toolName === "browser_snapshot" || toolName.includes("browser")) {
     return { action: "读取网页", completed: "网页读取完成", failed: "网页读取未完成" };

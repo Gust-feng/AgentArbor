@@ -5,6 +5,7 @@ import type {
   ModelToolChoice,
 } from "../../domain/intelligence/index.js";
 import type { ToolCallRequest, ToolDefinition } from "../../domain/tools/index.js";
+import { modelVisibleToolDescription } from "../../domain/tools/index.js";
 import {
   applyOpenAICompatibleChatDialectControls,
   applyOpenAICompatibleChatRequestPolicy,
@@ -73,7 +74,7 @@ function toOpenAITool(definition: ToolDefinition): Record<string, unknown> {
     type: "function",
     function: {
       name: definition.name,
-      description: definition.description,
+      description: modelVisibleToolDescription(definition),
       parameters: definition.inputSchema,
     },
   };

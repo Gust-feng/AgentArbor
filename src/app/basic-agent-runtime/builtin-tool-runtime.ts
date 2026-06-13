@@ -1,4 +1,8 @@
-import type { CapabilityToolAvailability, ToolStateSettings } from "../../domain/config/index.js";
+import type {
+  CapabilityToolAvailability,
+  SanitizedCommandShellConfig,
+  ToolStateSettings,
+} from "../../domain/config/index.js";
 import type { InformationSourceKind } from "../../domain/research/index.js";
 import type { ToolCategory, ToolExecutor } from "../../domain/tools/index.js";
 import {
@@ -13,6 +17,7 @@ import {
   createLocalReadFileTool,
 } from "../tool-center/adapters/local-workspace-tools.js";
 import {
+  createDefaultCommandShellConfig,
   createLocalRunCommandTool,
   createLocalShellCommandTool,
 } from "../tool-center/adapters/local-workspace-command-tools.js";
@@ -46,6 +51,7 @@ export type CreateDesktopBasicToolRegistryOptions = {
   readonly toolCatalogNames?: readonly string[];
   readonly toolCatalogAvailability?: readonly CapabilityToolAvailability[];
   readonly mcpManager?: McpToolExecutorProvider;
+  readonly commandShell?: SanitizedCommandShellConfig;
 };
 
 export type ToolRegistryFetchLike = (
@@ -79,6 +85,7 @@ export function createDesktopBasicToolRegistry(
     tavilyMaxResults: options.tavilyMaxResults ?? positiveIntegerFromString(env.AGENTARBOR_TAVILY_MAX_RESULTS),
   });
   const sandboxPolicy = createLocalWorkspaceSandboxPolicy();
+  const commandShell = options.commandShell ?? createDefaultCommandShellConfig(process.platform, env);
   const playwrightAvailable = options.playwrightAvailable ?? isPackageResolvable("playwright");
   const executors: readonly ToolExecutor[] = [
     createResearchSearchTool(researchRuntime),
@@ -89,8 +96,8 @@ export function createDesktopBasicToolRegistry(
     createLocalCreateFileTool(workspaceRoot, { sandboxPolicy }),
     createLocalEditFileTool(workspaceRoot, { sandboxPolicy }),
     createLocalDeleteFileTool(workspaceRoot, { sandboxPolicy }),
-    createLocalRunCommandTool(workspaceRoot, { sandboxPolicy }),
-    createLocalShellCommandTool(workspaceRoot, { sandboxPolicy }),
+    createLocalShellCommandTool(workspaceRoot, { sandboxPolicy, commandShell }),
+    createLocalRunCommandTool(workspaceRoot, { sandboxPolicy, commandShell }),
     createBrowserSnapshotTool(),
   ];
   const toolCatalogNames =
@@ -101,7 +108,7 @@ export function createDesktopBasicToolRegistry(
       continue;
     }
     const state = options.toolStates?.find((item) => item.name === executor.definition.name);
-    const enabledByDefault = state?.enabled ?? executor.definition.name !== "shell_command";
+    const enabledByDefault = state?.enabled ?? executor.definition.name !== "run_command";
     const frozenAvailability = toolCatalogAvailability.get(executor.definition.name);
     registry.register({
       executor,

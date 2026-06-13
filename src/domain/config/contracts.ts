@@ -2,6 +2,7 @@ import type {
   ToolCategory,
   ToolOperationType,
   ToolRiskLevel,
+  ToolRuntimeHint,
   ToolVisibleResultPolicy,
 } from "../tools/contracts.js";
 
@@ -170,6 +171,14 @@ export type ToolStateSettings = {
   readonly updatedAt: string;
 };
 
+export type ConfiguredCommandShellKind = "cmd" | "powershell" | "pwsh" | "bash" | "sh" | "auto";
+
+export type CommandShellSettings = {
+  readonly kind: ConfiguredCommandShellKind;
+  readonly executable?: string;
+  readonly updatedAt: string;
+};
+
 export type McpServerTransportKind = "stdio" | "http" | "sse";
 
 export type McpConfirmationMode = "always" | "unsafe_only" | "never";
@@ -231,6 +240,7 @@ export type AgentArborLocalSettings = {
   readonly modelCatalogs?: readonly ModelProviderModelCatalog[];
   readonly modelCapabilityOverrides?: readonly ModelCapabilityOverrideSettings[];
   readonly toolStates?: readonly ToolStateSettings[];
+  readonly commandShell?: CommandShellSettings;
   readonly mcpServers?: readonly McpServerSettings[];
   readonly informationAccess?: InformationAccessSettings;
   readonly workspaceDirectory?: string;
@@ -325,6 +335,7 @@ export type CapabilityToolCatalogItem = {
   readonly requiresConfirmation: boolean;
   readonly confirmationLabel: string;
   readonly visibleResultPolicy: ToolVisibleResultPolicy;
+  readonly runtimeHints?: readonly ToolRuntimeHint[];
   readonly scopes: readonly CapabilityToolScope[];
   readonly enabled: boolean;
   readonly availability: "available" | "unavailable";
@@ -398,6 +409,7 @@ export type BasicAgentCapabilitySnapshot = {
   readonly skillCatalog: readonly CapabilitySkillCatalogItem[];
   readonly mcpCatalog: readonly CapabilityMcpCatalogItem[];
   readonly workspace: SanitizedWorkspaceConfig;
+  readonly commandShell?: SanitizedCommandShellConfig;
   readonly securitySummary: string;
   readonly warnings: readonly string[];
 };
@@ -514,8 +526,25 @@ export type SanitizedWorkspaceConfig = {
   readonly updatedAt: string;
 };
 
+export type SanitizedCommandShellConfig = {
+  readonly kind: Exclude<ConfiguredCommandShellKind, "auto">;
+  readonly label: string;
+  readonly executable: string;
+  readonly syntax: "cmd" | "powershell" | "posix";
+  readonly platform: NodeJS.Platform;
+  readonly invocation: readonly string[];
+  readonly commandLineParameter: "commandLine";
+  readonly notes: readonly string[];
+  readonly updatedAt: string;
+};
+
 export type UpdateWorkspaceConfigInput = {
   readonly workspaceDirectory: string;
+};
+
+export type UpdateCommandShellConfigInput = {
+  readonly kind: ConfiguredCommandShellKind;
+  readonly executable?: string;
 };
 
 export type NormalSettingsStore = {

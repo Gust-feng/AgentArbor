@@ -150,7 +150,7 @@ export function createLocalEditFileTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE_
   return {
     definition: {
       name: "edit_file",
-      description: "Edit a UTF-8 text file under the local workspace by replacing exact text anchors. Optional line hints are used to disambiguate repeated anchors.",
+      description: "Edit a UTF-8 text file under the local workspace with precise text replacements. Provide the exact existing text and the replacement text; when the same text appears multiple times, use occurrence or line range to target the intended location.",
       metadata: {
         category: "filesystem",
         riskLevel: "medium",
@@ -168,16 +168,17 @@ export function createLocalEditFileTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE_
           path: { type: "string", description: "Workspace-relative file path." },
           edits: {
             type: "array",
-            description: "Text edits. Each anchor is exact text to replace; line hints can disambiguate repeated anchors.",
+            description: "Precise text edits. Each edit replaces exact existing text with new text. Use occurrence or line range only when the same text appears more than once.",
             items: {
               type: "object",
               properties: {
-                anchor: { type: "string", description: "Exact existing text to replace. Must match once." },
-                replacement: { type: "string", description: "Replacement text." },
-                startLineHint: { type: "number", description: "Optional 1-based line hint used to disambiguate repeated anchors." },
-                endLineHint: { type: "number", description: "Optional 1-based end line hint used to disambiguate repeated anchors." },
+                oldText: { type: "string", description: "Exact existing text to replace." },
+                newText: { type: "string", description: "Replacement text." },
+                occurrence: { type: "number", description: "Optional 1-based occurrence of oldText in the file." },
+                startLine: { type: "number", description: "Optional 1-based start line used to narrow or verify the target location." },
+                endLine: { type: "number", description: "Optional 1-based end line used to narrow or verify the target location." },
               },
-              required: ["anchor", "replacement"],
+              required: ["oldText", "newText"],
             },
           },
         },
@@ -281,8 +282,9 @@ export function createLocalDeleteFileTool(rootDirectory = DEFAULT_LOCAL_WORKSPAC
 }
 
 type AnchorEditInput = {
-  readonly anchor: string;
+  readonly oldText: string;
   readonly replacement: string;
+  readonly occurrence?: number;
   readonly startLineHint?: number;
   readonly endLineHint?: number;
 };
@@ -298,11 +300,14 @@ function parseAnchorEdits(value: unknown): readonly AnchorEditInput[] {
   }
   return value.map((item, index) => {
     const record = asRecord(item);
+    const oldText = textField(record.oldText) ?? textField(record.anchor);
+    const replacement = textField(record.newText) ?? textField(record.replacement);
     return {
-      anchor: requireText(record.anchor, `edits[${index}].anchor`, { allowEmpty: false }),
-      replacement: requireText(record.replacement, `edits[${index}].replacement`, { allowEmpty: true }),
-      startLineHint: positiveInteger(record.startLineHint),
-      endLineHint: positiveInteger(record.endLineHint),
+      oldText: oldText ?? requireText(record.oldText ?? record.anchor, `edits[${index}].oldText`, { allowEmpty: false }),
+      replacement: replacement ?? requireText(record.newText ?? record.replacement, `edits[${index}].newText`, { allowEmpty: true }),
+      occurrence: positiveInteger(record.occurrence),
+      startLineHint: positiveInteger(record.startLine) ?? positiveInteger(record.startLineHint),
+      endLineHint: positiveInteger(record.endLine) ?? positiveInteger(record.endLineHint),
     };
   });
 }
@@ -313,25 +318,53 @@ function locateAnchorEdits(
   relativePath: string
 ): readonly LocatedAnchorEdit[] {
   return edits.map((edit, index) => {
-    const matches = findAllOccurrences(source, edit.anchor);
-    const hint = lineHintText(edit);
+    const matches = findAllOccurrences(source, edit.oldText);
+    const target = editTargetText(edit);
     if (matches.length === 0) {
-      throw new Error(`edit_file anchor ${index + 1} was not found in ${relativePath}${hint}.`);
+      throw new Error(`edit_file edit ${index + 1} could not find the target text in ${relativePath}${target}.`);
     }
-    const selectedMatches = selectMatchesByLineHint(source, edit, matches);
+    const selectedMatches = selectMatches(source, edit, matches, relativePath, index);
     if (selectedMatches.length > 1) {
-      throw new Error(`edit_file anchor ${index + 1} matched ${matches.length} times in ${relativePath}${hint}; provide a more specific anchor.`);
+      throw new Error(
+        `edit_file edit ${index + 1} matched ${matches.length} locations in ${relativePath}${target}; provide occurrence or line range to disambiguate.`
+      );
     }
     if (selectedMatches.length === 0) {
-      throw new Error(`edit_file anchor ${index + 1} matched ${matches.length} times in ${relativePath}${hint}, but no match overlapped the hinted lines.`);
+      throw new Error(
+        `edit_file edit ${index + 1} matched ${matches.length} locations in ${relativePath}${target}, but none overlapped the requested line range.`
+      );
     }
     const start = selectedMatches[0]!;
     return {
       ...edit,
       start,
-      end: start + edit.anchor.length,
+      end: start + edit.oldText.length,
     };
   });
+}
+
+function selectMatches(
+  source: string,
+  edit: AnchorEditInput,
+  matches: readonly number[],
+  relativePath: string,
+  index: number
+): readonly number[] {
+  if (edit.occurrence !== undefined) {
+    const selected = matches[edit.occurrence - 1];
+    if (selected === undefined) {
+      throw new Error(
+        `edit_file edit ${index + 1} requested occurrence ${edit.occurrence}, but only found ${matches.length} matches in ${relativePath}${editTargetText(edit)}.`
+      );
+    }
+    if (!matchesLineHint(source, edit, selected)) {
+      throw new Error(
+        `edit_file edit ${index + 1} occurrence ${edit.occurrence} in ${relativePath} did not overlap the requested line range${lineHintText(edit)}.`
+      );
+    }
+    return [selected];
+  }
+  return selectMatchesByLineHint(source, edit, matches);
 }
 
 function selectMatchesByLineHint(
@@ -342,13 +375,18 @@ function selectMatchesByLineHint(
   if (matches.length <= 1 || (edit.startLineHint === undefined && edit.endLineHint === undefined)) {
     return matches;
   }
+  return matches.filter((offset) => matchesLineHint(source, edit, offset));
+}
+
+function matchesLineHint(source: string, edit: AnchorEditInput, offset: number): boolean {
+  if (edit.startLineHint === undefined && edit.endLineHint === undefined) {
+    return true;
+  }
   const startLine = edit.startLineHint ?? edit.endLineHint!;
   const endLine = edit.endLineHint ?? startLine;
-  return matches.filter((offset) => {
-    const anchorStartLine = lineNumberAt(source, offset);
-    const anchorEndLine = lineNumberAt(source, offset + edit.anchor.length);
-    return anchorStartLine <= endLine && anchorEndLine >= startLine;
-  });
+  const editStartLine = lineNumberAt(source, offset);
+  const editEndLine = lineNumberAt(source, offset + edit.oldText.length);
+  return editStartLine <= endLine && editEndLine >= startLine;
 }
 
 function assertNoOverlappingEdits(edits: readonly LocatedAnchorEdit[], relativePath: string): void {
@@ -368,7 +406,7 @@ function diffSummaryForEdits(source: string, edits: readonly LocatedAnchorEdit[]
     .sort((left, right) => left.start - right.start)
     .map((edit) => {
       const line = lineNumberAt(source, edit.start);
-      return `line ${line}: ${previewOneLine(edit.anchor)} -> ${previewOneLine(edit.replacement)}`;
+      return `line ${line}: ${previewOneLine(edit.oldText)} -> ${previewOneLine(edit.replacement)}`;
     });
 }
 
@@ -402,12 +440,28 @@ function lineHintText(edit: AnchorEditInput): string {
   if (start === undefined && end === undefined) {
     return "";
   }
-  return ` near hinted lines ${start ?? "?"}-${end ?? start ?? "?"}`;
+  return ` near lines ${start ?? "?"}-${end ?? start ?? "?"}`;
+}
+
+function editTargetText(edit: AnchorEditInput): string {
+  const parts: string[] = [];
+  if (edit.occurrence !== undefined) {
+    parts.push(`occurrence ${edit.occurrence}`);
+  }
+  const hint = lineHintText(edit).trim();
+  if (hint.length > 0) {
+    parts.push(hint);
+  }
+  return parts.length === 0 ? "" : ` (${parts.join(", ")})`;
 }
 
 function previewOneLine(value: string): string {
   const text = value.replace(/\s+/g, " ").trim();
   return text.length <= 80 ? text : `${text.slice(0, 79)}…`;
+}
+
+function textField(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
 }
 
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {

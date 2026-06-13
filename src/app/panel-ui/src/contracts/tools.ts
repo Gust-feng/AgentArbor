@@ -7,6 +7,18 @@ export type ToolDisplayProjection =
       readonly truncated?: boolean;
     }
   | {
+      readonly kind: "read_result";
+      readonly ref?: string;
+      readonly source?: string;
+      readonly status?: string;
+      readonly title?: string;
+      readonly url?: string;
+      readonly uri?: string;
+      readonly sourceSearchRef?: string;
+      readonly contentPreview?: string;
+      readonly truncated?: boolean;
+    }
+  | {
       readonly kind: "browser_snapshot";
       readonly title?: string;
       readonly url?: string;

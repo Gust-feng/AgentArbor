@@ -226,7 +226,27 @@ function cloneToolDefinition(definition: ToolDefinition): ToolDefinition {
         definition.inputSchema.required === undefined ? undefined : [...definition.inputSchema.required],
       additionalProperties: definition.inputSchema.additionalProperties,
     },
+    modelContract: cloneToolModelContract(definition.modelContract),
     metadata: normalizeToolMetadata(definition),
+  };
+}
+
+function cloneToolModelContract(definition: ToolDefinition["modelContract"]): ToolDefinition["modelContract"] {
+  if (definition === undefined) {
+    return undefined;
+  }
+  return {
+    usageNotes: definition.usageNotes === undefined ? undefined : [...definition.usageNotes],
+    outputNotes: definition.outputNotes === undefined ? undefined : [...definition.outputNotes],
+    examples: definition.examples === undefined
+      ? undefined
+      : definition.examples.map((example) => ({
+          title: example.title,
+          input: globalThis.structuredClone(example.input),
+        })),
+    runtimeHints: definition.runtimeHints === undefined
+      ? undefined
+      : definition.runtimeHints.map((hint) => ({ ...hint })),
   };
 }
 
@@ -235,6 +255,7 @@ function normalizeToolMetadata(definition: ToolDefinition): ToolDefinitionMetada
     return {
       ...definition.metadata,
       visibleResultPolicy: { ...definition.metadata.visibleResultPolicy },
+      runtimeHints: cloneRuntimeHints(definition.metadata.runtimeHints),
     };
   }
   return {
@@ -248,6 +269,22 @@ function normalizeToolMetadata(definition: ToolDefinition): ToolDefinitionMetada
       omitRawOutput: true,
     },
   };
+}
+
+function cloneRuntimeHints(value: ToolDefinitionMetadata["runtimeHints"]): ToolDefinitionMetadata["runtimeHints"] {
+  if (value === undefined) {
+    return undefined;
+  }
+  return value.map((hint) => {
+    if (hint.kind === "command_shell") {
+      return {
+        ...hint,
+        invocation: [...hint.invocation],
+        notes: [...hint.notes],
+      };
+    }
+    return hint;
+  });
 }
 
 function isAbortSignalAborted(signal: AbortSignal | undefined): boolean {

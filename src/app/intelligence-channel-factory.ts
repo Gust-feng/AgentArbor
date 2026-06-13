@@ -14,6 +14,7 @@ import type {
   CapabilityToolAvailability,
   ModelProviderModelCatalog,
   ProviderProtocolProfileId,
+  SanitizedCommandShellConfig,
   SanitizedModelProviderConfig,
   ToolStateSettings,
 } from "../domain/config/index.js";
@@ -303,6 +304,7 @@ export function createDefaultToolCenter(input: {
   readonly toolCatalogAvailability?: readonly CapabilityToolAvailability[];
   readonly mcpManager?: McpToolExecutorProvider;
   readonly toolRegistryScopes?: readonly ToolRegistryScope[];
+  readonly commandShell?: SanitizedCommandShellConfig;
 } = {}): ToolExecutionBroker {
   return createToolCenterFromEnvironment(input);
 }
@@ -322,6 +324,7 @@ export async function createConfiguredToolCenter(
     readonly toolCatalogAvailability?: readonly CapabilityToolAvailability[];
     readonly mcpManager?: McpToolExecutorProvider;
     readonly toolRegistryScopes?: readonly ToolRegistryScope[];
+    readonly commandShell?: SanitizedCommandShellConfig;
   } = {}
 ): Promise<ToolExecutionBroker> {
   return createToolCenterFromEnvironment({
@@ -344,6 +347,7 @@ export async function createConfiguredToolCenterFactory(
     readonly toolCatalogAvailability?: readonly CapabilityToolAvailability[];
     readonly mcpManager?: McpToolExecutorProvider;
     readonly toolRegistryScopes?: readonly ToolRegistryScope[];
+    readonly commandShell?: SanitizedCommandShellConfig;
   } = {}
 ): Promise<(runtime: MinimalRuntime) => ToolExecutionBroker> {
   const env = input.env ?? await configCenter.createModelRuntimeEnvironment();
@@ -363,6 +367,7 @@ function createToolCenterFromEnvironment(input: {
   readonly toolCatalogAvailability?: readonly CapabilityToolAvailability[];
   readonly mcpManager?: McpToolExecutorProvider;
   readonly toolRegistryScopes?: readonly ToolRegistryScope[];
+  readonly commandShell?: SanitizedCommandShellConfig;
 }): ToolExecutionBroker {
   return createDesktopBasicToolRegistry(input).createToolCenterForScopes(input.toolRegistryScopes ?? ["desktop-basic"]);
 }

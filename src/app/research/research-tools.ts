@@ -2,11 +2,37 @@ import type { InformationAccess, InformationSourceKind } from "../../domain/rese
 import type { ToolExecutor } from "../../domain/tools/index.js";
 
 export function createResearchSearchTool(researchRuntime: InformationAccess): ToolExecutor {
+  const capabilities = researchRuntime.getCapabilities?.();
+  const searchableSources = capabilities?.defaultSearchSources ?? ["web", "codebase", "soil", "run_memory"];
+  const searchableDescription = formatSourceList(searchableSources);
   return {
     definition: {
       name: "search",
-      description:
-        "Search AgentArbor information sources. Use this before read; returns research refs, source, status, and short snippets.",
+      description: [
+        "Search currently available AgentArbor information sources and return refs with titles, URLs/URIs, source names, statuses, and snippets.",
+        searchableSources.length > 0
+          ? `Model-visible search sources now: ${searchableDescription}.`
+          : "No model-visible search source is currently configured.",
+        "Use read with a returned ref when the full preview is needed.",
+      ].join(" "),
+      modelContract: {
+        runtimeHints: [
+          { label: "searchable sources", value: searchableDescription || "none" },
+        ],
+        usageNotes: [
+          "Search returns real refs from currently available sources only.",
+          "Leave sources empty unless the user explicitly needs a particular available source.",
+          "Call read with a returned ref before relying on a snippet for detailed work.",
+        ],
+        outputNotes: [
+          "results[].refId is the value to pass to read.",
+          "results[].uri or results[].url identifies the source location when available.",
+          "status explains whether the search completed, was empty, partial, or unavailable.",
+        ],
+        examples: [
+          { title: "Search current codebase and available sources", input: { query: "tool self description", limit: 5 } },
+        ],
+      },
       metadata: {
         category: "research",
         riskLevel: "low",
@@ -24,8 +50,10 @@ export function createResearchSearchTool(researchRuntime: InformationAccess): To
           query: { type: "string", description: "Information need or search query." },
           sources: {
             type: "array",
-            items: { type: "string" },
-            description: "Optional source filters: web, codebase, soil, run_memory, docs, packages, github.",
+            items: { type: "string", enum: searchableSources },
+            description: searchableSources.length > 0
+              ? `Optional filters. Only these sources are currently model-visible: ${searchableDescription}. Leave empty to search the default available sources.`
+              : "Optional filters. No model-visible source is currently configured.",
           },
           limit: { type: "number", description: "Maximum result refs to return." },
         },
@@ -45,11 +73,36 @@ export function createResearchSearchTool(researchRuntime: InformationAccess): To
 }
 
 export function createResearchReadTool(researchRuntime: InformationAccess): ToolExecutor {
+  const capabilities = researchRuntime.getCapabilities?.();
+  const readableSources = capabilities?.readableSources ?? ["page", "codebase", "soil", "run_memory"];
+  const readableDescription = formatSourceList(readableSources);
   return {
     definition: {
       name: "read",
-      description:
-        "Read a research ref, http/https URL, or repo file through ResearchRuntime. Returns safe summaries and truncated previews.",
+      description: [
+        "Read a research ref, HTTP/HTTPS URL, repo:// URI, or repository path and return the actual content preview for model use.",
+        `Readable sources now: ${readableDescription || "none"}.`,
+        "The returned object includes title, uri/url, source, status, contentPreview, truncated, and metadata when available.",
+      ].join(" "),
+      modelContract: {
+        runtimeHints: [
+          { label: "readable sources", value: readableDescription || "none" },
+        ],
+        usageNotes: [
+          "Use read to expand a search ref, URL, repo:// URI, or repository path into content the model can continue reasoning over.",
+          "Do not treat UI activity text as the read result; inspect contentPreview and status.",
+          "Increase maxLength when the next step needs more source text.",
+        ],
+        outputNotes: [
+          "result.contentPreview is the model-usable body preview.",
+          "result.truncated indicates whether a longer read may be needed.",
+          "result.sourceSearchRef links the read result back to a search result when available.",
+        ],
+        examples: [
+          { title: "Read search result", input: { ref: "research:web:example", maxLength: 6000 } },
+          { title: "Read repository path", input: { ref: "src/app/research/research-tools.ts", source: "codebase" } },
+        ],
+      },
       metadata: {
         category: "research",
         riskLevel: "low",
@@ -67,7 +120,10 @@ export function createResearchReadTool(researchRuntime: InformationAccess): Tool
           ref: { type: "string", description: "Research ref, http/https URL, repo:// URI, or repository path." },
           source: {
             type: "string",
-            description: "Optional source override: page, codebase, soil, run_memory, docs, packages, github.",
+            enum: readableSources,
+            description: readableSources.length > 0
+              ? `Optional source override. Use only when the ref alone is ambiguous. Current readable sources: ${readableDescription}.`
+              : "Optional source override. No readable source is currently configured.",
           },
           maxLength: { type: "number", description: "Maximum preview characters." },
         },
@@ -108,6 +164,10 @@ function informationSourceOrUndefined(value: unknown): InformationSourceKind | u
     return value;
   }
   return undefined;
+}
+
+function formatSourceList(sources: readonly InformationSourceKind[]): string {
+  return sources.join(", ");
 }
 
 function asRecord(value: unknown): Readonly<Record<string, unknown>> {

@@ -136,7 +136,7 @@ export function createOpenAiDeleteFileToolCallResponse(filePath: string): Awaite
 }
 
 export function createOpenAiRunCommandToolCallResponse(command: string): Awaited<ReturnType<PanelProviderFetch>> {
-  return createOpenAiToolCallResponse("basic-command-confirmation-model", "call-panel-run-command", "run_command", { command });
+  return createOpenAiToolCallResponse("basic-command-confirmation-model", "call-panel-run-command", "shell_command", { commandLine: command });
 }
 
 export function createOpenAiToolCallResponse(

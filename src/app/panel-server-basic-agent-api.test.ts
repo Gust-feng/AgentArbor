@@ -389,7 +389,7 @@ test("basic agent confirmation decisions persist approve and guidance outcomes s
   }
 });
 
-test("basic agent shell-style run_command executes after confirmation without sandbox command-shape failure", async () => {
+test("basic agent shell_command executes after confirmation without command-shape failure", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-basic-command-confirmation-"));
   const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-basic-command-workspace-"));
   let providerFetchCalls = 0;
@@ -459,7 +459,7 @@ test("basic agent shell-style run_command executes after confirmation without sa
     const runtimeRun = await requestJson(server.url, `/api/runtime/runs/${encodeURIComponent(runId)}`);
     const events = await requestJson(server.url, `/api/basic-agent/runs/${encodeURIComponent(runId)}/events?cursor=0`);
     const commandCall = runtimeRun.body.snapshot.toolCalls.find(
-      (call: { toolName?: string; status: string }) => call.toolName === "run_command"
+      (call: { toolName?: string; status: string }) => call.toolName === "shell_command"
     );
 
     assert.equal(approved.status, 200);
@@ -471,7 +471,7 @@ test("basic agent shell-style run_command executes after confirmation without sa
     );
     assert.equal(completed.body.status, "completed");
     assert.equal(commandCall?.status, "completed");
-    assert.equal(commandCall?.command, "echo approval-review");
+    assert.equal(commandCall?.commandLine ?? commandCall?.command, "echo approval-review");
     assert.equal(events.body.events.some((event: { type: string }) => event.type === "confirmation.needed"), true);
     assert.equal(events.body.events.some((event: { type: string }) => event.type === "run.resumed"), false);
     assert.equal(events.body.events.some((event: { type: string }) => event.type === "user_approval.received"), false);

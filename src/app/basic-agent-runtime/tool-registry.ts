@@ -6,6 +6,7 @@ import type {
   ToolExecutor,
   ToolOperationType,
   ToolRiskLevel,
+  ToolRuntimeHint,
   ToolVisibleResultPolicy,
 } from "../../domain/tools/index.js";
 import { toolPresentationForDefinition } from "../../domain/tools/index.js";
@@ -38,6 +39,7 @@ export type ToolCatalogItem = {
   readonly requiresConfirmation: boolean;
   readonly confirmationLabel: string;
   readonly visibleResultPolicy: ToolVisibleResultPolicy;
+  readonly runtimeHints?: readonly ToolRuntimeHint[];
   readonly scopes: readonly ToolRegistryScope[];
   readonly enabledByDefault: boolean;
   readonly availability: ToolRegistryAvailability["status"];
@@ -105,6 +107,7 @@ export class ToolRegistry {
           requiresConfirmation: metadata.requiresConfirmation,
           confirmationLabel: presentation.confirmationLabel,
           visibleResultPolicy: { ...metadata.visibleResultPolicy },
+          runtimeHints: cloneRuntimeHints(metadata.runtimeHints),
           scopes: [...entry.scopes],
           enabledByDefault: entry.enabledByDefault,
           availability: availability.status,
@@ -153,7 +156,24 @@ export function requireToolMetadata(definition: ToolDefinition): ToolDefinitionM
       maxPreviewChars: metadata.visibleResultPolicy.maxPreviewChars,
       omitRawOutput: metadata.visibleResultPolicy.omitRawOutput,
     },
+    runtimeHints: cloneRuntimeHints(metadata.runtimeHints),
   };
+}
+
+function cloneRuntimeHints(value: ToolDefinitionMetadata["runtimeHints"]): ToolDefinitionMetadata["runtimeHints"] {
+  if (value === undefined) {
+    return undefined;
+  }
+  return value.map((hint) => {
+    if (hint.kind === "command_shell") {
+      return {
+        ...hint,
+        invocation: [...hint.invocation],
+        notes: [...hint.notes],
+      };
+    }
+    return hint;
+  });
 }
 
 function uniqueScopes(scopes: readonly ToolRegistryScope[]): readonly ToolRegistryScope[] {

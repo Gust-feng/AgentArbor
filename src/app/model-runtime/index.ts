@@ -1,6 +1,6 @@
 import type { ModelCapabilities } from "../../domain/config/index.js";
 import type { ModelRequest, ModelToolChoice } from "../../domain/intelligence/index.js";
-import type { ToolDefinition } from "../../domain/tools/index.js";
+import type { ToolDefinition, ToolDefinitionMetadata } from "../../domain/tools/index.js";
 
 export {
   createConfiguredToolCenter,
@@ -78,7 +78,7 @@ function toStrictToolDefinition(tool: ToolDefinition): ToolDefinition {
     inputSchema: {
       ...cloned.inputSchema,
       additionalProperties: false,
-      required: Object.keys(cloned.inputSchema.properties),
+      required: cloned.inputSchema.required,
     },
   };
 }
@@ -93,11 +93,48 @@ function cloneToolDefinition(tool: ToolDefinition): ToolDefinition {
       required: tool.inputSchema.required === undefined ? undefined : [...tool.inputSchema.required],
       additionalProperties: tool.inputSchema.additionalProperties,
     },
+    modelContract: cloneToolModelContract(tool.modelContract),
     metadata: tool.metadata === undefined ? undefined : {
       ...tool.metadata,
       visibleResultPolicy: { ...tool.metadata.visibleResultPolicy },
+      runtimeHints: cloneRuntimeHints(tool.metadata.runtimeHints),
     },
   };
+}
+
+function cloneToolModelContract(contract: ToolDefinition["modelContract"]): ToolDefinition["modelContract"] {
+  if (contract === undefined) {
+    return undefined;
+  }
+  return {
+    usageNotes: contract.usageNotes === undefined ? undefined : [...contract.usageNotes],
+    outputNotes: contract.outputNotes === undefined ? undefined : [...contract.outputNotes],
+    examples: contract.examples === undefined
+      ? undefined
+      : contract.examples.map((example) => ({
+          title: example.title,
+          input: globalThis.structuredClone(example.input),
+        })),
+    runtimeHints: contract.runtimeHints === undefined
+      ? undefined
+      : contract.runtimeHints.map((hint) => ({ ...hint })),
+  };
+}
+
+function cloneRuntimeHints(value: ToolDefinitionMetadata["runtimeHints"]): ToolDefinitionMetadata["runtimeHints"] {
+  if (value === undefined) {
+    return undefined;
+  }
+  return value.map((hint) => {
+    if (hint.kind === "command_shell") {
+      return {
+        ...hint,
+        invocation: [...hint.invocation],
+        notes: [...hint.notes],
+      };
+    }
+    return hint;
+  });
 }
 
 function conservativeInputBudget(capabilities: ModelCapabilities): number {

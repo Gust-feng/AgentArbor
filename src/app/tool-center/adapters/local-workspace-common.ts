@@ -6,6 +6,7 @@ export const MAX_LOCAL_WORKSPACE_FILE_BYTES = 512_000;
 
 export type LocalWorkspaceToolOptions = {
   readonly sandboxPolicy?: import("../../../domain/tools/index.js").SandboxPolicy;
+  readonly commandShell?: import("../../../domain/config/index.js").SanitizedCommandShellConfig;
 };
 
 export function throwIfAborted(signal: AbortSignal | undefined): void {

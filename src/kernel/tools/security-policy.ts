@@ -128,6 +128,7 @@ function parseUrl(value: string): URL | undefined {
 function affectedResourcesFromInput(input: unknown): readonly string[] {
   const record = asRecord(input);
   const values = [
+    stringOrUndefined(record.commandLine),
     stringOrUndefined(record.path),
     stringOrUndefined(record.command),
     stringOrUndefined(record.url),

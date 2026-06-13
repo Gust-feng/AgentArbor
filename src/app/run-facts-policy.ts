@@ -243,6 +243,7 @@ function sameFrozenCapabilitySnapshotIdentity(
     sameJsonValue(candidate.skillCatalog, created.skillCatalog) &&
     sameJsonValue(candidate.mcpCatalog, created.mcpCatalog) &&
     sameJsonValue(candidate.workspace, created.workspace) &&
+    sameJsonValue(candidate.commandShell, created.commandShell) &&
     candidate.securitySummary === created.securitySummary &&
     sameJsonValue(candidate.warnings, created.warnings)
   );

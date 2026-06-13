@@ -7,12 +7,14 @@ import { FileSystemLocalDevSecretStore, FileSystemNormalSettingsStore } from "..
 import { ConfigCenter } from "../config-center.js";
 import { createConfiguredToolCenter, createDefaultToolCenter } from "../model-runtime/index.js";
 import type { FetchLike } from "../tool-center/index.js";
+import { createDefaultResearchRuntime } from "./research-runtime.js";
+import { createResearchReadTool, createResearchSearchTool } from "./research-tools.js";
 
 test("default ToolCenter exposes model-visible search and read tools", async () => {
   const center = createDefaultToolCenter({ env: {}, playwrightAvailable: true });
   const names = center.list().map((tool) => tool.name);
 
-  assert.deepEqual(names, ["search", "read", "read_file", "list_dir", "grep_files", "create_file", "edit_file", "delete_file", "run_command", "browser_snapshot"]);
+  assert.deepEqual(names, ["search", "read", "read_file", "list_dir", "grep_files", "create_file", "edit_file", "delete_file", "shell_command", "browser_snapshot"]);
   assert.equal(center.has("web_search"), false);
 
   const search = await center.execute(
@@ -23,6 +25,28 @@ test("default ToolCenter exposes model-visible search and read tools", async () 
 
   assert.equal(search.status, "completed");
   assert.equal((search.output as { status?: string }).status, "no-provider");
+});
+
+test("research tool definitions describe only currently model-visible sources", () => {
+  const runtime = createDefaultResearchRuntime({ env: {}, tavilyFetch: undefined });
+  const search = createResearchSearchTool(runtime).definition;
+  const read = createResearchReadTool(runtime).definition;
+  const sourcesProperty = search.inputSchema.properties.sources as {
+    readonly items?: { readonly enum?: readonly string[] };
+    readonly description?: string;
+  };
+  const sourceOverrideProperty = read.inputSchema.properties.source as {
+    readonly enum?: readonly string[];
+    readonly description?: string;
+  };
+
+  assert.deepEqual(sourcesProperty.items?.enum, ["codebase"]);
+  assert.equal(search.description.includes("docs"), false);
+  assert.equal(search.description.includes("packages"), false);
+  assert.equal(search.description.includes("github"), false);
+  assert.equal(sourcesProperty.description?.includes("docs"), false);
+  assert.equal(sourceOverrideProperty.enum?.includes("docs"), false);
+  assert.equal(read.description.includes("contentPreview"), true);
 });
 
 test("default ToolCenter passes configured Tavily max results into ResearchRuntime", async () => {
@@ -95,7 +119,7 @@ test("configured ToolCenter reads Tavily config and registers search/read withou
       { callerAgentId: "agent-test", allowedTools: ["search", "read"] }
     );
 
-    assert.deepEqual(names, ["search", "read", "read_file", "list_dir", "grep_files", "create_file", "edit_file", "delete_file", "run_command", "browser_snapshot"]);
+    assert.deepEqual(names, ["search", "read", "read_file", "list_dir", "grep_files", "create_file", "edit_file", "delete_file", "shell_command", "browser_snapshot"]);
     assert.equal(search.status, "completed");
     assert.equal(bodies[0]?.max_results, 1);
     assert.equal(JSON.stringify(search.output).includes("tvly-configured-tool-secret"), false);
@@ -119,7 +143,7 @@ test("configured ToolCenter still registers search/read and degrades web search 
       { callerAgentId: "agent-test", allowedTools: ["search", "read"] }
     );
 
-    assert.deepEqual(names, ["search", "read", "read_file", "list_dir", "grep_files", "create_file", "edit_file", "delete_file", "run_command", "browser_snapshot"]);
+    assert.deepEqual(names, ["search", "read", "read_file", "list_dir", "grep_files", "create_file", "edit_file", "delete_file", "shell_command", "browser_snapshot"]);
     assert.equal(search.status, "completed");
     assert.equal((search.output as { status?: string }).status, "no-provider");
   } finally {

@@ -16,12 +16,14 @@ import type {
   ModelProviderModelCatalog,
   ModelProviderProfileSettings,
   NormalSettingsStore,
+  SanitizedCommandShellConfig,
   SanitizedMcpServerSecretMetadata,
   SanitizedInformationAccessConfig,
   SanitizedModelProviderConfig,
   SanitizedWorkspaceConfig,
   SanitizedWebSearchConfig,
   UpdateInformationAccessConfigInput,
+  UpdateCommandShellConfigInput,
   UpdateModelProviderConfigInput,
   UpdateToolStateInput,
   UpsertMcpServerInput,
@@ -44,6 +46,8 @@ import {
   normalizeProfileId,
   normalizeRequiredConfigString,
   normalizeSourcePreference,
+  normalizeCommandShellUpdate,
+  toSanitizedCommandShellConfig,
   normalizeWebSearchProvider,
   parseLocalSettingsFile,
   sanitizeCapabilityOverride,
@@ -560,6 +564,11 @@ export class ConfigCenter {
     return toSanitizedWorkspaceConfig(settings);
   }
 
+  async getCommandShellConfig(): Promise<SanitizedCommandShellConfig> {
+    const settings = await this.readOrCreateSettings();
+    return toSanitizedCommandShellConfig(settings.commandShell, { now: settings.updatedAt });
+  }
+
   async updateWorkspaceConfig(input: UpdateWorkspaceConfigInput): Promise<SanitizedWorkspaceConfig> {
     const current = await this.readOrCreateSettings();
     const now = new Date().toISOString();
@@ -572,6 +581,20 @@ export class ConfigCenter {
     };
     await this.options.settingsStore.writeSettings(next);
     return toSanitizedWorkspaceConfig(next);
+  }
+
+  async updateCommandShellConfig(input: UpdateCommandShellConfigInput): Promise<SanitizedCommandShellConfig> {
+    const current = await this.readOrCreateSettings();
+    const now = new Date().toISOString();
+    const commandShell = normalizeCommandShellUpdate(input, now);
+    const next: AgentArborLocalSettings = {
+      ...current,
+      version: 3,
+      commandShell,
+      updatedAt: now,
+    };
+    await this.options.settingsStore.writeSettings(next);
+    return toSanitizedCommandShellConfig(commandShell, { now });
   }
 
   async createModelRuntimeEnvironment(

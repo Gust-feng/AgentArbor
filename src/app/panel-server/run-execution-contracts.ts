@@ -5,6 +5,7 @@ import type {
   RunAgentDefinitionRef,
   RunCapabilityResolution,
   SanitizedInformationAccessConfig,
+  SanitizedCommandShellConfig,
   SanitizedModelProviderConfig,
   ToolStateSettings,
 } from "../../domain/config/index.js";
@@ -68,6 +69,7 @@ export type DesktopRunResources = {
   readonly aiEnvironment: Awaited<ReturnType<PanelRuntime["configCenter"]["createModelRuntimeEnvironment"]>>;
   readonly aiConfig: Extract<ModelRuntimeConfig, { readonly enabled: true }>;
   readonly workspaceRoot: string;
+  readonly commandShell?: SanitizedCommandShellConfig;
   readonly toolStates: readonly ToolStateSettings[];
   readonly toolCatalogNames: readonly string[];
   readonly toolCatalogAvailability: readonly CapabilityToolAvailability[];

@@ -24,6 +24,12 @@ import {
   parseModelProfile,
 } from "./model-provider-settings.js";
 import {
+  normalizeCommandShellSettings,
+  parseCommandShellSettings,
+  toSanitizedCommandShellConfig,
+  normalizeCommandShellUpdate,
+} from "./command-shell-settings.js";
+import {
   ConfigSchemaValidationError,
   asRecord,
   normalizeRequiredConfigString,
@@ -53,6 +59,11 @@ export {
 } from "./model-provider-settings.js";
 export { normalizeOpenAIModelRequestSettings } from "./openai-request-settings.js";
 export { ConfigSchemaValidationError, normalizeRequiredConfigString } from "./settings-utils.js";
+export {
+  normalizeCommandShellSettings,
+  normalizeCommandShellUpdate,
+  toSanitizedCommandShellConfig,
+} from "./command-shell-settings.js";
 export { parseMcpCommandLine, sanitizeMcpArgs } from "./tool-mcp-settings.js";
 
 export const INFORMATION_TAVILY_SECRET_REF = "secret://local-dev/information-source/tavily/default/api-key";
@@ -105,6 +116,7 @@ export function parseLocalSettingsFile(raw: unknown): AgentArborLocalSettings {
     modelCatalogs: parseModelCatalogs(record.modelCatalogs, updatedAt),
     modelCapabilityOverrides: parseModelCapabilityOverrides(record.modelCapabilityOverrides, updatedAt),
     toolStates: parseToolStates(record.toolStates, updatedAt),
+    commandShell: parseCommandShellSettings(record.commandShell, updatedAt),
     mcpServers: parseMcpServers(record.mcpServers, updatedAt),
     informationAccess:
       Object.keys(informationAccess).length === 0
@@ -143,6 +155,7 @@ export function createDefaultLocalSettings(now: string = new Date().toISOString(
     modelCatalogs: [],
     modelCapabilityOverrides: [],
     toolStates: [],
+    commandShell: normalizeCommandShellSettings(undefined, now),
     mcpServers: [],
     informationAccess: createDefaultInformationAccessSettings(now),
     updatedAt: now,
@@ -184,6 +197,7 @@ export function normalizeLocalSettings(settings: AgentArborLocalSettings): Agent
     modelCatalogs,
     modelCapabilityOverrides: normalizeModelCapabilityOverrides(settings.modelCapabilityOverrides ?? [], now),
     toolStates: normalizeToolStates(settings.toolStates ?? [], now),
+    commandShell: normalizeCommandShellSettings(settings.commandShell, now),
     mcpServers: normalizeMcpServers(settings.mcpServers ?? [], now),
     informationAccess: normalizeInformationAccessSettings(settings.informationAccess, now),
   };

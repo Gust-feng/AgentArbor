@@ -163,6 +163,20 @@ function projectToolDisplay(request: ToolCallRequest, output: unknown): ToolDisp
       truncated: record.results.length > 8 || record.truncated === true,
     };
   }
+  if (request.toolName === "read") {
+    return {
+      kind: "read_result",
+      ref: stringOrUndefined(record.ref) ?? stringOrUndefined(asRecord(request.input).ref),
+      source: stringOrUndefined(result.source),
+      status: stringOrUndefined(record.status) ?? stringOrUndefined(result.status),
+      title: stringOrUndefined(result.title),
+      url: stringOrUndefined(result.uri),
+      uri: stringOrUndefined(result.uri),
+      sourceSearchRef: stringOrUndefined(result.sourceSearchRef),
+      contentPreview: compactSafeText(stringOrUndefined(result.contentPreview) ?? stringOrUndefined(result.summary), 1_200),
+      truncated: result.truncated === true || record.truncated === true,
+    };
+  }
   if (request.toolName === "browser_snapshot") {
     return {
       kind: "browser_snapshot",
@@ -221,10 +235,13 @@ function projectToolDisplay(request: ToolCallRequest, output: unknown): ToolDisp
   if (request.toolName === "run_command" || request.toolName === "shell_command") {
     const stdout = stringOrUndefined(result.stdout);
     const stderr = stringOrUndefined(result.stderr);
+    const commandLine = commandLineFrom(result, request.input);
     return {
       kind: "command_summary",
-      command: stringOrUndefined(result.command) ?? stringOrUndefined(asRecord(request.input).command),
+      command: stringOrUndefined(result.command) ?? commandLine,
       args: stringArray(result.args).length > 0 ? stringArray(result.args) : stringArray(asRecord(request.input).args),
+      commandLine,
+      shell: stringOrUndefined(asRecord(result.shell).label),
       exitCode: numberOrUndefined(result.exitCode),
       outputSummary: stdout === undefined ? undefined : summarizeCommandOutput(stdout),
       errorSummary: stderr === undefined ? undefined : summarizeCommandOutput(stderr),
@@ -293,11 +310,33 @@ function projectToolAgentContent(request: ToolCallRequest, output: unknown, trun
       truncated,
     };
   }
-  if (request.toolName === "run_command" || request.toolName === "shell_command") {
+  if (request.toolName === "read") {
     return {
       summary,
-      command: stringOrUndefined(result.command) ?? stringOrUndefined(asRecord(request.input).command),
-      args: stringArray(result.args).length > 0 ? stringArray(result.args) : stringArray(asRecord(request.input).args),
+      ref: stringOrUndefined(record.ref) ?? stringOrUndefined(asRecord(request.input).ref),
+      source: stringOrUndefined(result.source),
+      status: stringOrUndefined(record.status) ?? stringOrUndefined(result.status),
+      title: stringOrUndefined(result.title),
+      url: stringOrUndefined(result.uri),
+      uri: stringOrUndefined(result.uri),
+      sourceSearchRef: stringOrUndefined(result.sourceSearchRef),
+      contentPreview: typeof result.contentPreview === "string" ? redactOrdinaryFileFragment(result.contentPreview, MODEL_TOOL_TEXT_MAX_CHARS) : undefined,
+      truncated: result.truncated === true || truncated,
+      metadata: asRecord(result.metadata),
+    };
+  }
+  if (request.toolName === "run_command" || request.toolName === "shell_command") {
+    const commandLine = commandLineFrom(result, request.input);
+    return {
+      summary,
+      command: stringOrUndefined(result.command) ?? commandLine,
+      commandLine,
+      shell: {
+        kind: stringOrUndefined(asRecord(result.shell).kind),
+        label: stringOrUndefined(asRecord(result.shell).label),
+        executable: stringOrUndefined(asRecord(result.shell).executable),
+        syntax: stringOrUndefined(asRecord(result.shell).syntax),
+      },
       exitCode: numberOrUndefined(result.exitCode),
       stdout: typeof result.stdout === "string" ? redactOrdinaryFileFragment(result.stdout, MODEL_TOOL_TEXT_MAX_CHARS) : undefined,
       stderr: typeof result.stderr === "string" ? redactOrdinaryFileFragment(result.stderr, MODEL_TOOL_ERROR_MAX_CHARS) : undefined,
@@ -376,13 +415,17 @@ function fileEditDiffPreview(value: unknown): FilePreviewResult | undefined {
   let truncated = value.length > 6;
   for (const item of value.slice(0, 6)) {
     const record = asRecord(item);
-    const anchor = stringOrUndefined(record.anchor);
-    const replacement = typeof record.replacement === "string" ? record.replacement : undefined;
-    if (anchor === undefined && replacement === undefined) continue;
-    const hint = editHintLabel(record);
+    const oldText = stringOrUndefined(record.oldText) ?? stringOrUndefined(record.anchor);
+    const replacement = typeof record.newText === "string"
+      ? record.newText
+      : typeof record.replacement === "string"
+        ? record.replacement
+        : undefined;
+    if (oldText === undefined && replacement === undefined) continue;
+    const hint = editTargetLabel(record);
     if (hint !== undefined) chunks.push(`@@ ${hint}`);
-    const before = boundedDiffPreview(anchor ?? "", "-", "删除内容");
-    const after = boundedDiffPreview(replacement ?? "", "+", "新增内容");
+    const before = boundedDiffPreview(oldText ?? "", "-", "原内容");
+    const after = boundedDiffPreview(replacement ?? "", "+", "新内容");
     if (before !== undefined) {
       chunks.push(before.text);
       truncated = truncated || before.truncated;
@@ -398,11 +441,18 @@ function fileEditDiffPreview(value: unknown): FilePreviewResult | undefined {
   return { text: compacted.text, truncated: truncated || compacted.truncated };
 }
 
-function editHintLabel(record: Readonly<Record<string, unknown>>): string | undefined {
-  const start = numberOrUndefined(record.startLineHint);
-  const end = numberOrUndefined(record.endLineHint);
-  if (start === undefined && end === undefined) return undefined;
-  return `line ${start ?? "?"}${end !== undefined && end !== start ? `-${end}` : ""}`;
+function editTargetLabel(record: Readonly<Record<string, unknown>>): string | undefined {
+  const occurrence = numberOrUndefined(record.occurrence);
+  const start = numberOrUndefined(record.startLine) ?? numberOrUndefined(record.startLineHint);
+  const end = numberOrUndefined(record.endLine) ?? numberOrUndefined(record.endLineHint);
+  const parts: string[] = [];
+  if (occurrence !== undefined) {
+    parts.push(`occurrence ${occurrence}`);
+  }
+  if (start !== undefined || end !== undefined) {
+    parts.push(`line ${start ?? "?"}${end !== undefined && end !== start ? `-${end}` : ""}`);
+  }
+  return parts.length === 0 ? undefined : parts.join(" · ");
 }
 
 function boundedDiffPreview(value: string, marker: "+" | "-", fallbackLabel: string): FilePreviewResult | undefined {
@@ -433,6 +483,19 @@ function displayActionForTool(action: string | undefined, toolName: string): str
 
 function stringArray(value: unknown): readonly string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function commandLineFrom(result: Readonly<Record<string, unknown>>, input: unknown): string | undefined {
+  const inputRecord = asRecord(input);
+  const resultArgs = stringArray(result.args);
+  const inputArgs = stringArray(inputRecord.args);
+  const command =
+    stringOrUndefined(result.commandLine) ??
+    stringOrUndefined(inputRecord.commandLine) ??
+    stringOrUndefined(result.command) ??
+    stringOrUndefined(inputRecord.command);
+  const args = resultArgs.length > 0 ? resultArgs : inputArgs;
+  return command === undefined ? undefined : [command, ...args].join(" ").trim();
 }
 
 function isString(value: unknown): value is string {

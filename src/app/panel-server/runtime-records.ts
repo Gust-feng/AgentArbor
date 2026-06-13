@@ -395,7 +395,7 @@ function localToolDetailsByCallId(
     const input = asRecord(payload.input);
     const result = asRecord(output.result);
     const pathValue = optionalString(result.path) ?? optionalString(input.path);
-    const command = optionalString(result.command) ?? optionalString(input.command);
+    const command = optionalString(result.commandLine) ?? optionalString(input.commandLine) ?? optionalString(result.command) ?? optionalString(input.command);
     const args = Array.isArray(result.args) ? result.args : Array.isArray(input.args) ? input.args : [];
     details.set(callId, {
       action: optionalString(output.action) ?? optionalString(payload.toolName),
@@ -419,6 +419,7 @@ function toolDisplayOrUndefined(value: unknown): RuntimeToolCallRecord["display"
   const kind = optionalString(record.kind);
   if (
     kind === "search_results" ||
+    kind === "read_result" ||
     kind === "browser_snapshot" ||
     kind === "file_change_summary" ||
     kind === "file_diff_preview" ||
@@ -501,6 +502,16 @@ function persistedToolPreview(
       900
     );
   }
+  if (toolName === "read") {
+    const title = optionalString(result.title);
+    const uri = optionalString(result.uri);
+    const contentPreview = optionalString(result.contentPreview);
+    const headline = [title, uri].filter((item): item is string => item !== undefined).join(" · ");
+    return compactRuntimeText(
+      [headline, contentPreview].filter((item): item is string => typeof item === "string" && item.length > 0).join("\n"),
+      900
+    );
+  }
   return cleanOrdinaryToolText(optionalString(output.summary));
 }
 
@@ -539,7 +550,7 @@ function persistedCommandPreview(
 ): string | undefined {
   return safeCommandToolPreview({
     summary: optionalString(output.summary),
-    command: optionalString(result.command),
+    command: optionalString(result.commandLine) ?? optionalString(result.command),
     exitCode: typeof result.exitCode === "number" ? result.exitCode : undefined,
   });
 }

@@ -93,11 +93,25 @@ function agentSummaryForToolDisplay(
       1_800
     );
   }
+  if (display.kind === "read_result") {
+    return redactOrdinaryToolText(
+      [
+        `${label}已完成。`,
+        display.title,
+        display.uri ?? display.url,
+        display.source === undefined ? undefined : `来源：${display.source}`,
+        compactSafeText(display.contentPreview, 1_200),
+        summary,
+      ].filter(isString).join("\n"),
+      1_800
+    );
+  }
   if (display.kind === "command_summary") {
     return redactOrdinaryToolText(
       [
         `${label}已完成${display.exitCode === undefined ? "" : `，退出码 ${display.exitCode}`}。`,
-        [display.command, ...(display.args ?? [])].filter(isString).join(" "),
+        display.shell === undefined ? undefined : `Shell：${display.shell}`,
+        display.commandLine ?? display.command,
         display.outputSummary === undefined ? undefined : `输出摘要：\n${display.outputSummary}`,
         display.errorSummary === undefined ? undefined : `错误摘要：\n${display.errorSummary}`,
       ].filter(isString).join("\n"),
@@ -150,6 +164,13 @@ function evidenceRefsForToolDisplay(
   if (display.kind === "browser_snapshot" && display.url !== undefined) {
     refs.add(redactOrdinaryToolText(display.url, 220));
   }
+  if (display.kind === "read_result") {
+    for (const ref of [display.ref, display.sourceSearchRef, display.uri, display.url]) {
+      if (ref !== undefined) {
+        refs.add(redactOrdinaryToolText(ref, 220));
+      }
+    }
+  }
   if ((display.kind === "file_change_summary" || display.kind === "file_diff_preview") && display.path !== undefined) {
     refs.add(`file:${redactOrdinaryToolText(display.path, 220)}`);
   }
@@ -200,6 +221,20 @@ function sanitizeToolDisplay(display: ToolDisplayProjection): ToolDisplayProject
       truncated: display.truncated,
     };
   }
+  if (display.kind === "read_result") {
+    return {
+      kind: "read_result",
+      ref: compactSafeText(display.ref, 220),
+      source: compactSafeText(display.source, 120),
+      status: compactSafeText(display.status, 120),
+      title: compactSafeText(display.title, 220),
+      url: compactSafeText(display.url, 260),
+      uri: compactSafeText(display.uri, 260),
+      sourceSearchRef: compactSafeText(display.sourceSearchRef, 220),
+      contentPreview: compactSafeText(display.contentPreview, 1_200),
+      truncated: display.truncated,
+    };
+  }
   if (display.kind === "file_change_summary") {
     return {
       kind: "file_change_summary",
@@ -229,6 +264,8 @@ function sanitizeToolDisplay(display: ToolDisplayProjection): ToolDisplayProject
       kind: "command_summary",
       command: compactSafeText(display.command, 260),
       args: display.args?.slice(0, 16).map((arg) => redactOrdinaryToolText(arg, 180)),
+      commandLine: compactSafeText(display.commandLine, 420),
+      shell: compactSafeText(display.shell, 120),
       exitCode: display.exitCode,
       outputSummary: compactSafeText(display.outputSummary, 520),
       errorSummary: compactSafeText(display.errorSummary, 520),

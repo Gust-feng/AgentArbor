@@ -18,7 +18,7 @@ test("model runtime request plan emits strict schemas for structured-output capa
   assert.equal(plan.toolChoice, "auto");
   assert.equal(plan.strictToolSchemas, true);
   assert.equal(plan.parallelToolCalls, true);
-  assert.deepEqual(plan.tools[0]?.inputSchema.required, ["query", "limit"]);
+  assert.deepEqual(plan.tools[0]?.inputSchema.required, ["query"]);
   assert.equal(plan.tools[0]?.inputSchema.additionalProperties, false);
 });
 

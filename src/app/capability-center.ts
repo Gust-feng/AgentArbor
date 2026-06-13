@@ -78,12 +78,13 @@ export class CapabilityCenter {
   }
 
   private async buildSnapshot(): Promise<BasicAgentCapabilitySnapshot> {
-    const [activeModel, overrides, toolStates, mcpServers, workspace, env, skills] = await Promise.all([
+    const [activeModel, overrides, toolStates, mcpServers, workspace, commandShell, env, skills] = await Promise.all([
       this.options.configCenter.getModelProviderConfig(),
       this.options.configCenter.listModelCapabilityOverrides(),
       this.options.configCenter.listToolStates(),
       this.options.configCenter.listMcpServers(),
       this.options.configCenter.getWorkspaceConfig(),
+      this.options.configCenter.getCommandShellConfig(),
       this.options.configCenter.createModelRuntimeEnvironment(),
       this.listSkills(),
     ]);
@@ -112,6 +113,7 @@ export class CapabilityCenter {
         playwrightAvailable: this.options.playwrightAvailable,
         toolStates,
         mcpManager,
+        commandShell,
       });
       desktopToolCatalog = registry.catalog("desktop-basic");
       mcpToolCatalog = registry.catalog("mcp");
@@ -153,6 +155,7 @@ export class CapabilityCenter {
         mcpCatalogItemForServer(server, mcpRuntimeSnapshots, mcpToolCatalog.tools, exposedMcpToolCatalog.tools)
       ),
       workspace,
+      commandShell,
       securitySummary: "本轮模型、工具、技能和工作区能力快照。",
       warnings,
     };
@@ -198,6 +201,7 @@ function capabilityToolCatalogItem(tool: ToolCatalogItem): CapabilityToolCatalog
     requiresConfirmation: tool.requiresConfirmation,
     confirmationLabel: tool.confirmationLabel,
     visibleResultPolicy: tool.visibleResultPolicy,
+    runtimeHints: tool.runtimeHints,
     scopes: tool.scopes,
     enabled: tool.enabledByDefault,
     availability: tool.availability,

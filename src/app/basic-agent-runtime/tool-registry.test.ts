@@ -17,8 +17,8 @@ test("desktop-basic tool registry exposes catalog and allowed tools from scoped 
     "list_dir",
     "read",
     "read_file",
-    "run_command",
     "search",
+    "shell_command",
   ]);
   assert.equal(catalog.tools.find((tool) => tool.name === "run_command")?.requiresConfirmation, true);
   assert.equal(catalog.tools.find((tool) => tool.name === "shell_command")?.requiresConfirmation, true);
@@ -28,8 +28,10 @@ test("desktop-basic tool registry exposes catalog and allowed tools from scoped 
   assert.equal(catalog.tools.find((tool) => tool.name === "delete_file")?.requiresConfirmation, false);
   assert.equal(catalog.tools.some((tool) => tool.name === "write_file"), false);
   assert.equal(catalog.tools.find((tool) => tool.name === "run_command")?.operationType, "execute");
-  assert.equal(catalog.tools.find((tool) => tool.name === "shell_command")?.enabledByDefault, false);
-  assert.equal(registry.createToolCenter("desktop-basic").has("shell_command"), false);
+  assert.equal(catalog.tools.find((tool) => tool.name === "run_command")?.enabledByDefault, false);
+  assert.equal(catalog.tools.find((tool) => tool.name === "shell_command")?.enabledByDefault, true);
+  assert.equal(registry.createToolCenter("desktop-basic").has("run_command"), false);
+  assert.equal(registry.createToolCenter("desktop-basic").has("shell_command"), true);
   assert.equal(catalog.tools.find((tool) => tool.name === "browser_snapshot")?.operationType, "read-only");
   assert.equal(catalog.tools.find((tool) => tool.name === "browser_snapshot")?.availability, "available");
   assert.equal(catalog.tools.find((tool) => tool.name === "read_file")?.displayName, "读取文件");
@@ -40,11 +42,11 @@ test("desktop-basic tool registry exposes catalog and allowed tools from scoped 
 
   const runCommand = catalog.tools.find((tool) => tool.name === "run_command");
   const shellCommand = catalog.tools.find((tool) => tool.name === "shell_command");
-  assert.equal(runCommand?.displayDescription, "运行已允许的工作区命令，需要确认。");
-  assert.equal(shellCommand?.displayDescription, "运行已允许的工作区命令，需要确认。");
-  assert.match(runCommand?.description ?? "", /workspace shell command/);
-  assert.match(runCommand?.description ?? "", /pipes, redirection, command chaining/);
-  assert.match(shellCommand?.description ?? "", /workspace shell commands/i);
+  assert.equal(runCommand?.displayDescription, "兼容旧命令调用；新调用应使用 Shell 命令。");
+  assert.equal(shellCommand?.displayDescription, "在当前会话 Shell 中运行完整命令，需要确认。");
+  assert.match(runCommand?.description ?? "", /Compatibility command executor/);
+  assert.match(shellCommand?.description ?? "", /commandLine/);
+  assert.equal(shellCommand?.runtimeHints?.[0]?.kind, "command_shell");
 });
 
 test("desktop-basic tool descriptions stay plain and do not expose deep product terms", () => {
@@ -65,7 +67,7 @@ test("desktop-basic tool descriptions stay plain and do not expose deep product 
 
   assert.doesNotMatch(plainToolCopy, /\batomic\b|原子|Plan|Handoff|Underground|rootlet|child agent|普通 Agent|自动执行|执行前确认|高级|智能编辑|变异|mutation/i);
   assert.match(plainToolCopy, /编辑文件/);
-  assert.match(plainToolCopy, /按唯一锚点修改工作区文本文件/);
+  assert.match(plainToolCopy, /精确修改工作区文本文件/);
 });
 
 test("desktop-basic tool registry keeps unavailable browser tools out of allowed tools", () => {
@@ -116,22 +118,22 @@ test("desktop-basic tool registry applies configured tool disabled state", () =>
   assert.equal(registry.createToolCenter("desktop-basic").has("shell_command"), false);
 });
 
-test("desktop-basic tool registry can keep optional executors enabled from frozen tool state", () => {
+test("desktop-basic tool registry can keep compatibility executors enabled from frozen tool state", () => {
   const registry = createDesktopBasicToolRegistry({
     env: {},
     workspaceRoot: process.cwd(),
     playwrightAvailable: true,
-    toolStates: [{ name: "shell_command", enabled: true, updatedAt: "2026-05-12T00:00:00.000Z" }],
-    toolCatalogNames: ["shell_command"],
+    toolStates: [{ name: "run_command", enabled: true, updatedAt: "2026-05-12T00:00:00.000Z" }],
+    toolCatalogNames: ["run_command"],
   });
   const catalog = registry.catalog("desktop-basic");
   const center = registry.createToolCenter("desktop-basic");
 
-  assert.deepEqual(catalog.tools.map((tool) => tool.name), ["shell_command"]);
-  assert.deepEqual(catalog.allowedTools, ["shell_command"]);
+  assert.deepEqual(catalog.tools.map((tool) => tool.name), ["run_command"]);
+  assert.deepEqual(catalog.allowedTools, ["run_command"]);
   assert.equal(catalog.tools[0]?.enabledByDefault, true);
   assert.equal(catalog.tools[0]?.requiresConfirmation, true);
-  assert.equal(center.has("shell_command"), true);
+  assert.equal(center.has("run_command"), true);
 });
 
 test("desktop-basic tool registry can restrict executors to a frozen tool catalog", () => {

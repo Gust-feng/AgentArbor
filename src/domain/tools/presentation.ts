@@ -55,7 +55,7 @@ const BUILTIN_TOOL_PRESENTATION: Readonly<Record<string, ToolPresentationSeed>> 
   },
   edit_file: {
     displayName: "编辑文件",
-    displayDescription: "按唯一锚点修改工作区文本文件，并返回变更摘要。",
+    displayDescription: "精确修改工作区文本文件，并返回变更摘要。",
   },
   delete_file: {
     displayName: "删除文件",
@@ -67,11 +67,11 @@ const BUILTIN_TOOL_PRESENTATION: Readonly<Record<string, ToolPresentationSeed>> 
   },
   run_command: {
     displayName: "运行命令",
-    displayDescription: "运行已允许的工作区命令，需要确认。",
+    displayDescription: "兼容旧命令调用；新调用应使用 Shell 命令。",
   },
   shell_command: {
-    displayName: "运行命令",
-    displayDescription: "运行已允许的工作区命令，需要确认。",
+    displayName: "Shell 命令",
+    displayDescription: "在当前会话 Shell 中运行完整命令，需要确认。",
   },
 };
 

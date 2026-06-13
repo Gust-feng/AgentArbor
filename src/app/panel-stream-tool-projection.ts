@@ -75,6 +75,7 @@ function toolDisplayOrUndefined(value: unknown): ToolDisplayProjection | undefin
   const kind = stringOrUndefined(record.kind);
   if (
     kind === "search_results" ||
+    kind === "read_result" ||
     kind === "browser_snapshot" ||
     kind === "file_change_summary" ||
     kind === "file_diff_preview" ||

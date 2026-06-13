@@ -62,6 +62,7 @@ test("local workspace adapter keeps sandbox policy and tool families split from 
   assert.equal(commandSource.includes("export function createLocalRunCommandTool"), true);
   assert.equal(commandSource.includes("export function createLocalShellCommandTool"), true);
   assert.equal(commandSource.includes("function runShellCommand"), true);
+  assert.equal(commandSource.includes("function runProgramCommand"), true);
   assert.equal(commandSource.includes("function commandToolOutput"), true);
   assert.equal(readSource.includes("export function createLocalReadFileTool"), true);
   assert.equal(readSource.includes("export function createLocalListDirTool"), true);
@@ -176,27 +177,42 @@ test("local edit_file validates all anchors before writing and rejects ambiguous
 
     await writeFile(file, "same\nsame\n", "utf8");
     await assert.rejects(
-      () => editFile.execute({ path: "notes.txt", edits: [{ anchor: "same", replacement: "once" }] }, context),
-      /matched 2 times/
+      () => editFile.execute({ path: "notes.txt", edits: [{ oldText: "same", newText: "once" }] }, context),
+      /matched 2 locations/
     );
     assert.equal(await readFile(file, "utf8"), "same\nsame\n");
 
     await editFile.execute({
       path: "notes.txt",
-      edits: [{ anchor: "same", replacement: "second", startLineHint: 2, endLineHint: 2 }],
+      edits: [{ oldText: "same", newText: "second", occurrence: 2 }],
     }, context);
     assert.equal(await readFile(file, "utf8"), "same\nsecond\n");
+
+    await writeFile(file, "same\nsame\nsame\n", "utf8");
+    await editFile.execute({
+      path: "notes.txt",
+      edits: [{ oldText: "same", newText: "middle", startLine: 2, endLine: 2 }],
+    }, context);
+    assert.equal(await readFile(file, "utf8"), "same\nmiddle\nsame\n");
 
     await writeFile(file, "same\nsame\n", "utf8");
     await assert.rejects(
       () => editFile.execute({
         path: "notes.txt",
         edits: [
-          { anchor: "same\nsame", replacement: "both" },
-          { anchor: "same", replacement: "one" },
+          { oldText: "same\nsame", newText: "both" },
+          { oldText: "same", newText: "one" },
         ],
       }, context),
-      /matched 2 times|overlap/
+      /matched 2 locations|overlap/
+    );
+
+    await assert.rejects(
+      () => editFile.execute({
+        path: "notes.txt",
+        edits: [{ oldText: "same", newText: "missing", occurrence: 2, startLine: 1, endLine: 1 }],
+      }, context),
+      /did not overlap the requested line range/
     );
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -244,19 +260,26 @@ test("local run_command uses the workspace shell and confirmation metadata", asy
 
     assert.equal(runCommand.definition.metadata?.requiresConfirmation, true);
     assert.equal(shellCommand.definition.metadata?.requiresConfirmation, true);
+    assert.deepEqual(shellCommand.definition.inputSchema.required, ["commandLine"]);
+    assert.equal("args" in shellCommand.definition.inputSchema.properties, false);
+    assert.equal(shellCommand.definition.metadata?.runtimeHints?.[0]?.kind, "command_shell");
 
-    const echoed = await runCommand.execute({ command: "echo hello workspace" }, context);
-    const shellStyleEchoed = await runCommand.execute({ command: "echo approval-review" }, context);
-    const quotedEchoed = await shellCommand.execute({ command: "echo hello quoted shell" }, context);
-    const shellEchoed = await shellCommand.execute({ command: "echo hello shell" }, context);
-    const chained = await runCommand.execute({ command: "echo safe && echo unsafe" }, context);
-    const piped = await shellCommand.execute({ command: "echo needle | findstr needle" }, context);
-    const listed = await runCommand.execute({ command: "dir /b src" }, context);
-    const typed = await runCommand.execute({ command: "type src\\note.txt" }, context);
+    const echoed = await runCommand.execute({ commandLine: "echo hello workspace" }, context);
+    const shellStyleEchoed = await runCommand.execute({ commandLine: "echo approval-review" }, context);
+    const quotedEchoed = await shellCommand.execute({ commandLine: "echo hello quoted shell" }, context);
+    const shellEchoed = await shellCommand.execute({ commandLine: "echo hello shell" }, context);
+    const chained = await runCommand.execute({ commandLine: "echo safe && echo unsafe" }, context);
+    const piped = await shellCommand.execute({ commandLine: platformPipeCommand() }, context);
+    const listed = await runCommand.execute({ commandLine: platformListCommand("src") }, context);
+    const typed = await runCommand.execute({ commandLine: platformReadCommand(path.join("src", "note.txt")) }, context);
+    const inlineScript = await shellCommand.execute({ commandLine: nodeInlineScriptCommand() }, context);
+    const legacyArgs = await shellCommand.execute({ command: process.execPath, args: ["-e", "console.log('hello legacy args')"] }, context);
 
     assert.equal(asRecord(echoed).action, "run_command");
     assert.equal(asRecord(shellEchoed).action, "shell_command");
     assert.match(String(asRecord(shellEchoed).refId), /^workspace:shell:/);
+    assert.equal(asRecord(asRecord(shellEchoed).result).commandLine, "echo hello shell");
+    assert.equal(typeof asRecord(asRecord(shellEchoed).result).shell, "object");
     assert.match(String(asRecord(asRecord(echoed).result).stdout), /hello workspace/);
     assert.match(String(asRecord(asRecord(shellStyleEchoed).result).stdout), /approval-review/);
     assert.match(String(asRecord(asRecord(quotedEchoed).result).stdout), /hello quoted shell/);
@@ -265,6 +288,8 @@ test("local run_command uses the workspace shell and confirmation metadata", asy
     assert.match(String(asRecord(asRecord(piped).result).stdout), /needle/);
     assert.match(String(asRecord(asRecord(listed).result).stdout), /note\.txt/);
     assert.match(String(asRecord(asRecord(typed).result).stdout), /alpha/);
+    assert.match(String(asRecord(asRecord(inlineScript).result).stdout), /hello_inline_script/);
+    assert.match(String(asRecord(asRecord(legacyArgs).result).stdout), /hello legacy args/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -282,13 +307,40 @@ test("local strategy sandbox can disable writes and command execution", async ()
       /does not allow local file writes/
     );
     await assert.rejects(
-      () => runCommand.execute({ command: "echo", args: ["nope"] }, context),
+      () => runCommand.execute({ commandLine: "echo nope" }, context),
       /does not allow local command execution/
     );
   } finally {
     await rm(root, { recursive: true, force: true });
   }
 });
+
+function platformPipeCommand(): string {
+  return process.platform === "win32" ? "echo needle | findstr needle" : "printf 'needle\\n' | grep needle";
+}
+
+function platformListCommand(directory: string): string {
+  return process.platform === "win32" ? `dir /b ${directory}` : `ls ${directory}`;
+}
+
+function platformReadCommand(file: string): string {
+  const normalized = process.platform === "win32" ? file.split(path.sep).join("\\") : file.split(path.sep).join("/");
+  return process.platform === "win32" ? `type ${normalized}` : `cat ${normalized}`;
+}
+
+function quotePath(value: string): string {
+  if (process.platform === "win32") {
+    return `"${value.replace(/"/g, '\\"')}"`;
+  }
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+function nodeInlineScriptCommand(): string {
+  if (process.platform === "win32") {
+    return "node -e console.log('hello_inline_script')";
+  }
+  return `${quotePath(process.execPath)} -e ${quotePath("console.log('hello_inline_script')")}`;
+}
 
 function asRecord(value: unknown): Record<string, unknown> {
   assert.equal(typeof value, "object");

@@ -83,7 +83,7 @@ test("tool security policy allows normal external read-only URLs", () => {
 });
 
 test("tool security policy gates explicit confirmation tools unless exact confirmation is approved", () => {
-  const request = { callId: "call-shell", toolName: "shell_command", input: { command: "pnpm test" } };
+  const request = { callId: "call-shell", toolName: "shell_command", input: { commandLine: "pnpm test" } };
   const metadata: ToolDefinitionMetadata = {
     ...readOnlyMetadata(),
     category: "terminal",
@@ -122,8 +122,8 @@ test("tool security policy gates explicit confirmation tools unless exact confir
   });
   assert.equal(confirmation.confirmationId, "confirmation-call-shell");
   assert.equal(confirmation.resumeAvailability, "live");
-  assert.equal(confirmation.title, "运行命令");
-  assert.equal(confirmation.actionSummary, "运行命令：pnpm test");
+  assert.equal(confirmation.title, "Shell 命令");
+  assert.equal(confirmation.actionSummary, "Shell 命令：pnpm test");
   assert.equal(confirmation.actionSummary.includes("请求执行执行操作"), false);
   assert.equal(confirmation.actionSummary.includes("需要你确认后继续"), false);
   assert.equal(confirmation.actionSummary.includes("在工作区内执行 Shell 命令"), false);

@@ -1,5 +1,6 @@
 import type {
   InformationAccess,
+  InformationAccessCapabilities,
   InformationAccessStatus,
   InformationQuery,
   InformationReadRequest,
@@ -77,6 +78,7 @@ export class ResearchRuntime implements InformationAccess {
       requested: query.sources,
       preference: query.sourcePreference ?? this.sourcePreference,
       includeReadOnlyPage: false,
+      allowedSources: this.modelVisibleSearchableSources(),
     });
     if (normalizedQuery === undefined) {
       const trace = createTrace({
@@ -221,6 +223,48 @@ export class ResearchRuntime implements InformationAccess {
       trace,
     };
   }
+
+  getCapabilities(): InformationAccessCapabilities {
+    const sources = this.sourceCapabilities();
+    const modelVisibleSources = sources.filter((source) => source.modelVisible);
+    const searchableSources = modelVisibleSources
+      .filter((source) => source.searchable && source.source !== "page")
+      .map((source) => source.source);
+    const readableSources = modelVisibleSources
+      .filter((source) => source.readable)
+      .map((source) => source.source);
+    return {
+      sources,
+      searchableSources,
+      readableSources,
+      defaultSearchSources: this.modelVisibleSearchableSources(),
+    };
+  }
+
+  private modelVisibleSearchableSources(): readonly InformationSourceKind[] {
+    const capabilitiesBySource = new Map(this.sourceCapabilities().map((source) => [source.source, source]));
+    const sources = this.sourcePreference.filter((source) => {
+      const capability = capabilitiesBySource.get(source);
+      return capability?.modelVisible === true && capability.searchable && source !== "page";
+    });
+    if (sources.length > 0) {
+      return sources;
+    }
+    return [...capabilitiesBySource.values()]
+      .filter((source) => source.modelVisible && source.searchable && source.source !== "page")
+      .map((source) => source.source);
+  }
+
+  private sourceCapabilities(): InformationAccessCapabilities["sources"] {
+    return [...this.adapters.values()].map((adapter) => ({
+      source: adapter.source,
+      label: adapter.capability?.label ?? defaultSourceLabel(adapter.source),
+      searchable: adapter.search !== undefined,
+      readable: adapter.read !== undefined,
+      modelVisible: adapter.capability?.modelVisible ?? (adapter.search !== undefined || adapter.read !== undefined),
+      unavailableReason: adapter.capability?.unavailableReason,
+    }));
+  }
 }
 
 export function createDefaultResearchRuntime(options: CreateDefaultResearchRuntimeOptions = {}): ResearchRuntime {
@@ -273,10 +317,17 @@ function resolveRequestedSources(input: {
   readonly requested?: readonly InformationSourceKind[];
   readonly preference: readonly InformationSourceKind[];
   readonly includeReadOnlyPage: boolean;
+  readonly allowedSources?: readonly InformationSourceKind[];
 }): readonly InformationSourceKind[] {
-  const raw = input.requested === undefined || input.requested.length === 0 ? input.preference : input.requested;
+  const hasExplicitRequest = input.requested !== undefined && input.requested.length > 0;
+  const raw = hasExplicitRequest ? input.requested : input.preference;
   const unique = [...new Set(raw)];
-  return input.includeReadOnlyPage ? unique : unique.filter((source) => source !== "page");
+  const withoutReadOnly = input.includeReadOnlyPage ? unique : unique.filter((source) => source !== "page");
+  if (input.allowedSources === undefined || hasExplicitRequest) {
+    return withoutReadOnly;
+  }
+  const allowed = new Set(input.allowedSources);
+  return withoutReadOnly.filter((source) => allowed.has(source));
 }
 
 function createTrace(input: {
@@ -363,4 +414,25 @@ function firstNonBlank(...values: readonly (string | undefined)[]): string | und
     }
   }
   return undefined;
+}
+
+function defaultSourceLabel(source: InformationSourceKind): string {
+  switch (source) {
+    case "web":
+      return "web search";
+    case "page":
+      return "web page reader";
+    case "codebase":
+      return "codebase";
+    case "soil":
+      return "soil";
+    case "run_memory":
+      return "run memory";
+    case "docs":
+      return "technical docs";
+    case "packages":
+      return "package registry";
+    case "github":
+      return "GitHub";
+  }
 }

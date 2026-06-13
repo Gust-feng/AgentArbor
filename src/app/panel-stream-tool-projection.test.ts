@@ -114,6 +114,32 @@ test("tool stream projection shows file change metadata without raw replacement 
   assert.equal(detail.preview?.includes("secret new text"), false);
 });
 
+test("tool stream projection keeps edit preview focused on file-level summary", () => {
+  const detail = toolStreamDetail("tool.completed", {
+    toolName: "edit_file",
+    input: {
+      path: "src/app/example.ts",
+      edits: [{ oldText: "same", newText: "updated", occurrence: 2, startLine: 4, endLine: 4 }],
+    },
+    output: {
+      summary: "src/app/example.ts · 1 处修改",
+      result: {
+        path: "src/app/example.ts",
+        replacements: 1,
+        previousLength: 15,
+        nextLength: 18,
+      },
+    },
+  });
+
+  assert.equal(detail.preview?.includes("src/app/example.ts · 1 处修改"), true);
+  assert.equal(detail.preview?.includes("变更预览"), true);
+  assert.equal(detail.preview?.includes("替换：1 处"), true);
+  assert.equal(detail.preview?.includes("occurrence"), false);
+  assert.equal(detail.preview?.includes("same"), false);
+  assert.equal(detail.preview?.includes("updated"), false);
+});
+
 test("tool stream projection shows MCP preview without raw media payload", () => {
   const detail = toolStreamDetail("tool.completed", {
     toolName: "docs__lookup",

@@ -11,7 +11,7 @@ export function ConfirmationSettings(props: {
   return (
     <div className="workspace-settings-stack">
       <section className="settings-card">
-        <h3>高影响动作</h3>
+        <h3>命令确认</h3>
         {catalog.length === 0 ? (
           <p className="settings-value">暂无工具</p>
         ) : guardedTools.length === 0 ? (

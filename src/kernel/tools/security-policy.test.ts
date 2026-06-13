@@ -7,7 +7,7 @@ import {
   evaluateToolCallSecurity,
 } from "./security-policy.js";
 
-test("tool security policy blocks unsafe URL protocols and secret query parameters", () => {
+test("tool security policy only blocks unsupported URL protocols", () => {
   const ftp = evaluateToolCallSecurity({
     request: { callId: "call-ftp", toolName: "browser_snapshot", input: { url: "ftp://example.test/file" } },
     definition: toolDefinition("browser_snapshot", readOnlyMetadata()),
@@ -23,13 +23,11 @@ test("tool security policy blocks unsafe URL protocols and secret query paramete
 
   assert.equal(ftp.decision, "blocked");
   assert.equal(ftp.decision === "blocked" ? ftp.code : "", "url_protocol_blocked");
-  assert.equal(token.decision, "blocked");
-  assert.equal(token.decision === "blocked" ? token.code : "", "url_secret_query_blocked");
-  assert.equal(JSON.stringify(token).includes("sk-secret"), false);
+  assert.equal(token.decision, "allow");
 });
 
 test("tool security policy never lets confirmation bypass hard URL blocks", () => {
-  const request = { callId: "call-token", toolName: "browser_snapshot", input: { url: "https://example.test/?api_key=sk-secret" } };
+  const request = { callId: "call-ftp", toolName: "browser_snapshot", input: { url: "ftp://example.test/file" } };
   const decision = evaluateToolCallSecurity({
     request,
     definition: toolDefinition("browser_snapshot", readOnlyMetadata()),
@@ -38,10 +36,10 @@ test("tool security policy never lets confirmation bypass hard URL blocks", () =
   });
 
   assert.equal(decision.decision, "blocked");
-  assert.equal(decision.decision === "blocked" ? decision.code : "", "url_secret_query_blocked");
+  assert.equal(decision.decision === "blocked" ? decision.code : "", "url_protocol_blocked");
 });
 
-test("tool security policy lets confirmation approve URL reads that only need approval", () => {
+test("tool security policy allows local and private URL reads without confirmation", () => {
   const request = { callId: "call-local", toolName: "browser_snapshot", input: { url: "http://localhost:3000" } };
   const decision = evaluateToolCallSecurity({
     request,
@@ -53,7 +51,7 @@ test("tool security policy lets confirmation approve URL reads that only need ap
   assert.equal(decision.decision, "allow");
 });
 
-test("tool security policy requires approval for local, private, and metadata URLs", () => {
+test("tool security policy allows local, private, and metadata URLs", () => {
   for (const url of [
     "http://localhost:3000",
     "http://127.0.0.1:8787",
@@ -69,8 +67,7 @@ test("tool security policy requires approval for local, private, and metadata UR
       context: { platform: "linux" },
     });
 
-    assert.equal(decision.decision, "approval_required", url);
-    assert.equal(decision.decision === "approval_required" ? decision.riskLevel : "low", "medium");
+    assert.equal(decision.decision, "allow", url);
   }
 });
 
@@ -132,13 +129,13 @@ test("tool security policy gates explicit confirmation tools unless exact confir
   assert.equal(confirmation.actionSummary.includes("在工作区内执行 Shell 命令"), false);
 });
 
-test("tool security policy does not infer confirmation beyond explicit metadata", () => {
+test("tool security policy does not infer confirmation beyond command tools", () => {
   const metadata: ToolDefinitionMetadata = {
     ...readOnlyMetadata(),
     category: "filesystem",
     operationType: "read-write",
     riskLevel: "medium",
-    requiresConfirmation: false,
+    requiresConfirmation: true,
   };
   const decision = evaluateToolCallSecurity({
     request: { callId: "call-custom-write", toolName: "custom_write", input: { path: "notes.txt" } },

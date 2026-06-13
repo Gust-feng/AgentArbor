@@ -16,7 +16,7 @@ export function evaluateToolCallSecurity(input: {
   readonly metadata: ToolDefinitionMetadata;
   readonly context: ToolSecurityEvaluationContext;
 }): ToolSecurityDecision {
-  const urlDecision = evaluateUrlSecurity(input.request);
+  const urlDecision = evaluateUrlSupport(input.request);
   if (urlDecision?.decision === "blocked") {
     return urlDecision;
   }
@@ -26,11 +26,7 @@ export function evaluateToolCallSecurity(input: {
     return { decision: "allow", reason: "Matching confirmation id was approved for this tool call." };
   }
 
-  if (urlDecision !== undefined) {
-    return urlDecision;
-  }
-
-  if (input.metadata.requiresConfirmation) {
+  if (requiresCommandConfirmation(input.request, input.metadata)) {
     return approvalDecision({
       request: input.request,
       definition: input.definition,
@@ -39,6 +35,14 @@ export function evaluateToolCallSecurity(input: {
   }
 
   return { decision: "allow", reason: "Tool call is allowed by metadata and platform policy." };
+}
+
+function requiresCommandConfirmation(
+  request: ToolCallRequest,
+  metadata: ToolDefinitionMetadata
+): boolean {
+  return metadata.requiresConfirmation === true &&
+    (request.toolName === "run_command" || request.toolName === "shell_command");
 }
 
 export function confirmationRequestFromSecurityDecision(input: {
@@ -90,7 +94,7 @@ function confirmationActionSummary(displayName: string, affectedResources: reado
     : `${displayName}：${affectedResources.join("、")}`;
 }
 
-function evaluateUrlSecurity(request: ToolCallRequest): ToolSecurityDecision | undefined {
+function evaluateUrlSupport(request: ToolCallRequest): ToolSecurityDecision | undefined {
   const url = urlFromInput(request.input);
   if (url === undefined) {
     return undefined;
@@ -102,26 +106,6 @@ function evaluateUrlSecurity(request: ToolCallRequest): ToolSecurityDecision | u
       code: "url_protocol_blocked",
       reason: "Only HTTP and HTTPS URLs are allowed.",
       affectedResources: [redactOrdinaryToolText(url, 220)],
-      sourceRefs: [`tool:${request.callId}`],
-    };
-  }
-  if (hasSensitiveQuery(parsed)) {
-    return {
-      decision: "blocked",
-      code: "url_secret_query_blocked",
-      reason: "URL contains secret-like query parameters.",
-      affectedResources: [redactOrdinaryToolText(parsed.origin + parsed.pathname, 220)],
-      sourceRefs: [`tool:${request.callId}`],
-    };
-  }
-  if (isInternalHost(parsed.hostname)) {
-    return {
-      decision: "approval_required",
-      reason: "Fetching local or private-network URLs requires user confirmation.",
-      title: "需要确认内部网络访问",
-      actionSummary: `工具请求读取内部或本机地址：${redactOrdinaryToolText(parsed.origin, 220)}。`,
-      affectedResources: [redactOrdinaryToolText(parsed.origin, 220)],
-      riskLevel: "medium",
       sourceRefs: [`tool:${request.callId}`],
     };
   }
@@ -139,34 +123,6 @@ function parseUrl(value: string): URL | undefined {
   } catch {
     return undefined;
   }
-}
-
-function hasSensitiveQuery(url: URL): boolean {
-  const sensitiveKeys = ["token", "access_token", "api_key", "apikey", "key", "secret", "authorization", "auth"];
-  for (const key of url.searchParams.keys()) {
-    const normalized = key.toLowerCase();
-    if (sensitiveKeys.some((candidate) => normalized.includes(candidate))) {
-      return true;
-    }
-  }
-  return false;
-}
-
-function isInternalHost(hostname: string): boolean {
-  const host = hostname.toLowerCase();
-  if (host === "localhost" || host.endsWith(".localhost")) {
-    return true;
-  }
-  if (host === "0.0.0.0" || host === "::1" || host === "[::1]") {
-    return true;
-  }
-  if (/^127\./.test(host) || /^10\./.test(host) || /^192\.168\./.test(host)) {
-    return true;
-  }
-  if (/^172\.(1[6-9]|2\d|3[0-1])\./.test(host)) {
-    return true;
-  }
-  return host === "169.254.169.254" || host.startsWith("169.254.");
 }
 
 function affectedResourcesFromInput(input: unknown): readonly string[] {

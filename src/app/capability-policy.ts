@@ -111,7 +111,7 @@ function exposureReason(input: {
   if (!input.allowedBySnapshot) return "不在本轮可用范围内。";
   if (input.denied) return "本轮已隐藏。";
   if (!input.modelVisible) return "当前模式不可用。";
-  if (input.requiresConfirmation) return "可用，高影响动作会先等你判断。";
+  if (input.requiresConfirmation) return "可用，命令执行会先等你确认。";
   return "可用。";
 }
 

@@ -210,7 +210,7 @@ function cancelledToolResult(request: ToolCallRequest, startedAt: number): ToolC
         diagnosticRef,
       }),
       truncated: false,
-      redacted: true,
+      redacted: false,
     },
   };
 }

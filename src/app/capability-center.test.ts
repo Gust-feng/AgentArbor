@@ -187,7 +187,7 @@ test("CapabilityCenter marks incomplete MCP servers unavailable without connecti
   }
 });
 
-test("CapabilityCenter keeps MCP connection errors safe in snapshot", async () => {
+test("CapabilityCenter keeps MCP connection error summaries in snapshot without config args", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-capability-center-mcp-error-"));
   try {
     const settingsStore = new FileSystemNormalSettingsStore(directory);
@@ -211,7 +211,7 @@ test("CapabilityCenter keeps MCP connection errors safe in snapshot", async () =
           {
             serverId: "broken",
             status: "error",
-            errorSummary: "spawn failed Authorization: Bearer [redacted-token]",
+            errorSummary: "spawn failed Authorization: Bearer runtime-token",
             toolNames: [],
           },
         ],
@@ -220,7 +220,7 @@ test("CapabilityCenter keeps MCP connection errors safe in snapshot", async () =
     const text = JSON.stringify(snapshot);
 
     assert.equal(snapshot.mcpCatalog[0]?.runtimeStatus, "error");
-    assert.match(snapshot.mcpCatalog[0]?.errorSummary ?? "", /redacted-token/);
+    assert.match(snapshot.mcpCatalog[0]?.errorSummary ?? "", /runtime-token/);
     assert.equal(text.includes("do-not-leak"), false);
     assert.equal(text.includes("--token"), false);
   } finally {

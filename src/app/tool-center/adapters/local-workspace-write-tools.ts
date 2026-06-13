@@ -83,7 +83,7 @@ export function createLocalCreateFileTool(rootDirectory = DEFAULT_LOCAL_WORKSPAC
   return {
     definition: {
       name: "create_file",
-      description: "Create a new UTF-8 text file under the local workspace. Fails if the target already exists; never overwrites.",
+      description: "Create a UTF-8 text file under the local workspace. By default it fails if the target exists; set overwrite=true to replace the file.",
       metadata: {
         category: "filesystem",
         riskLevel: "medium",
@@ -100,6 +100,7 @@ export function createLocalCreateFileTool(rootDirectory = DEFAULT_LOCAL_WORKSPAC
         properties: {
           path: { type: "string", description: "Workspace-relative file path." },
           content: { type: "string", description: "UTF-8 text content to create." },
+          overwrite: { type: "boolean", description: "If true, overwrite the target file when it already exists." },
         },
         required: ["path", "content"],
       },
@@ -108,6 +109,7 @@ export function createLocalCreateFileTool(rootDirectory = DEFAULT_LOCAL_WORKSPAC
       throwIfAborted(context.abortSignal);
       const record = asRecord(input);
       const content = requireText(record.content, "content", { allowEmpty: true });
+      const overwrite = record.overwrite === true;
       const target = resolveWorkspacePath(rootDirectory, stringOrFallback(record.path, ""));
       if (target.relativePath === ".") {
         throw new Error("create_file expects a file path.");
@@ -117,10 +119,10 @@ export function createLocalCreateFileTool(rootDirectory = DEFAULT_LOCAL_WORKSPAC
       }));
       await fs.mkdir(path.dirname(target.absolutePath), { recursive: true });
       try {
-        await fs.writeFile(target.absolutePath, content, { encoding: "utf8", flag: "wx" });
+        await fs.writeFile(target.absolutePath, content, { encoding: "utf8", flag: overwrite ? "w" : "wx" });
       } catch (error) {
         if (isNodeError(error) && error.code === "EEXIST") {
-          throw new Error(`create_file target already exists: ${target.relativePath}.`);
+          throw new Error(`create_file target already exists: ${target.relativePath}. Set overwrite=true to replace it.`);
         }
         throw error;
       }
@@ -130,11 +132,12 @@ export function createLocalCreateFileTool(rootDirectory = DEFAULT_LOCAL_WORKSPAC
         action: "create_file",
         status: "completed",
         refId: `workspace:file:${target.relativePath}`,
-        summary: `${target.relativePath} · ${stat.size} bytes · created`,
+        summary: `${target.relativePath} · ${stat.size} bytes · ${overwrite ? "overwritten" : "created"}`,
         result: {
           path: target.relativePath,
           bytes: stat.size,
           afterHash,
+          overwrite,
         },
         truncated: false,
       };
@@ -147,7 +150,7 @@ export function createLocalEditFileTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE_
   return {
     definition: {
       name: "edit_file",
-      description: "Edit a UTF-8 text file under the local workspace by replacing exact text anchors.",
+      description: "Edit a UTF-8 text file under the local workspace by replacing exact text anchors. Optional line hints are used to disambiguate repeated anchors.",
       metadata: {
         category: "filesystem",
         riskLevel: "medium",
@@ -165,14 +168,14 @@ export function createLocalEditFileTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE_
           path: { type: "string", description: "Workspace-relative file path." },
           edits: {
             type: "array",
-            description: "Text edits. Each anchor is exact text to replace and must match exactly once.",
+            description: "Text edits. Each anchor is exact text to replace; line hints can disambiguate repeated anchors.",
             items: {
               type: "object",
               properties: {
                 anchor: { type: "string", description: "Exact existing text to replace. Must match once." },
                 replacement: { type: "string", description: "Replacement text." },
-                startLineHint: { type: "number", description: "Optional diagnostic hint only; not used to guess." },
-                endLineHint: { type: "number", description: "Optional diagnostic hint only; not used to guess." },
+                startLineHint: { type: "number", description: "Optional 1-based line hint used to disambiguate repeated anchors." },
+                endLineHint: { type: "number", description: "Optional 1-based end line hint used to disambiguate repeated anchors." },
               },
               required: ["anchor", "replacement"],
             },
@@ -235,9 +238,9 @@ export function createLocalDeleteFileTool(rootDirectory = DEFAULT_LOCAL_WORKSPAC
       description: "Delete a regular file under the local workspace. Directory deletion is not supported.",
       metadata: {
         category: "filesystem",
-        riskLevel: "high",
+        riskLevel: "medium",
         operationType: "read-write",
-        requiresConfirmation: true,
+        requiresConfirmation: false,
         visibleResultPolicy: {
           userVisible: "summary-only",
           maxPreviewChars: 600,
@@ -315,15 +318,36 @@ function locateAnchorEdits(
     if (matches.length === 0) {
       throw new Error(`edit_file anchor ${index + 1} was not found in ${relativePath}${hint}.`);
     }
-    if (matches.length > 1) {
+    const selectedMatches = selectMatchesByLineHint(source, edit, matches);
+    if (selectedMatches.length > 1) {
       throw new Error(`edit_file anchor ${index + 1} matched ${matches.length} times in ${relativePath}${hint}; provide a more specific anchor.`);
     }
-    const start = matches[0]!;
+    if (selectedMatches.length === 0) {
+      throw new Error(`edit_file anchor ${index + 1} matched ${matches.length} times in ${relativePath}${hint}, but no match overlapped the hinted lines.`);
+    }
+    const start = selectedMatches[0]!;
     return {
       ...edit,
       start,
       end: start + edit.anchor.length,
     };
+  });
+}
+
+function selectMatchesByLineHint(
+  source: string,
+  edit: AnchorEditInput,
+  matches: readonly number[]
+): readonly number[] {
+  if (matches.length <= 1 || (edit.startLineHint === undefined && edit.endLineHint === undefined)) {
+    return matches;
+  }
+  const startLine = edit.startLineHint ?? edit.endLineHint!;
+  const endLine = edit.endLineHint ?? startLine;
+  return matches.filter((offset) => {
+    const anchorStartLine = lineNumberAt(source, offset);
+    const anchorEndLine = lineNumberAt(source, offset + edit.anchor.length);
+    return anchorStartLine <= endLine && anchorEndLine >= startLine;
   });
 }
 

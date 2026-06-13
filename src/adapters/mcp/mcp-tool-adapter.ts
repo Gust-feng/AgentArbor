@@ -7,14 +7,16 @@ import type {
 import type { McpClientWrapper, McpContentPart, McpToolInfo } from "./mcp-client.js";
 import type { McpConfirmationMode } from "../../domain/config/index.js";
 
+const MAX_MCP_TEXT_CHARS = 128_000;
+
 export function createMcpToolExecutor(
   client: McpClientWrapper,
   tool: McpToolInfo,
   serverId: string,
-  confirmationMode: McpConfirmationMode = "always"
+  _confirmationMode: McpConfirmationMode = "never"
 ): ToolExecutor {
   const namespacedName = `${serverId}__${tool.name}`;
-  const metadata = inferToolMetadataFromMcpAnnotations(tool.annotations, confirmationMode) as ToolDefinitionMetadata;
+  const metadata = inferToolMetadataFromMcpAnnotations(tool.annotations) as ToolDefinitionMetadata;
   const inputSchema: ToolInputSchema = {
     type: "object",
     properties: (tool.inputSchema.properties as Record<string, unknown>) ?? {},
@@ -67,28 +69,19 @@ type McpToolMultimodalSummary =
       readonly bytesApprox: number;
     };
 
-function inferToolMetadataFromMcpAnnotations(
-  annotations: McpToolInfo["annotations"],
-  confirmationMode: McpConfirmationMode
-): ToolDefinitionMetadata {
+function inferToolMetadataFromMcpAnnotations(annotations: McpToolInfo["annotations"]): ToolDefinitionMetadata {
   const readOnly = annotations?.readOnlyHint === true;
   const destructive = annotations?.destructiveHint === true;
   const openWorld = annotations?.openWorldHint === true;
-  const requiresConfirmation =
-    confirmationMode === "always"
-      ? true
-      : confirmationMode === "never"
-        ? false
-        : !readOnly || destructive || openWorld;
   return {
     category: "mcp",
     riskLevel: readOnly ? "low" : destructive || openWorld ? "high" : "medium",
     operationType: readOnly ? "read-only" : openWorld ? "external-submit" : destructive ? "read-write" : "execute",
-    requiresConfirmation,
+    requiresConfirmation: false,
     visibleResultPolicy: {
-      userVisible: "safe-preview",
-      maxPreviewChars: readOnly ? 1_200 : 600,
-      omitRawOutput: true,
+      userVisible: "summary-only",
+      maxPreviewChars: 1_200,
+      omitRawOutput: false,
     },
   };
 }
@@ -114,18 +107,18 @@ function buildToolOutput(content: readonly McpContentPart[]): McpToolOutput {
     }
   }
   const text = textParts.join("\n").trim();
-  const safeText = truncateText(text, 4_000);
+  const visibleText = truncateText(text, MAX_MCP_TEXT_CHARS);
   const mediaSummary = multimodalParts.length === 0
     ? undefined
     : `MCP returned ${multimodalParts.length} non-text content item(s); raw media bytes are retained by the MCP server, not AgentArbor.`;
-  const summary = [safeText.text, mediaSummary].filter((item): item is string => item !== undefined && item.length > 0).join("\n");
+  const summary = [visibleText.text, mediaSummary].filter((item): item is string => item !== undefined && item.length > 0).join("\n");
   return {
     summary: summary.length === 0 ? "MCP tool returned no text content." : summary,
     result: {
-      text: safeText.text.length > 0 ? safeText.text : undefined,
+      text: visibleText.text.length > 0 ? visibleText.text : undefined,
       multimodal: multimodalParts.length === 0 ? undefined : multimodalParts,
     },
-    truncated: safeText.truncated,
+    truncated: visibleText.truncated,
   };
 }
 

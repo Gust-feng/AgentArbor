@@ -168,7 +168,7 @@ test("createMcpToolExecutor infers read-only metadata from annotations", async (
   await client.disconnect();
 });
 
-test("createMcpToolExecutor keeps read-only MCP tools confirmable in always mode", async () => {
+test("createMcpToolExecutor does not make MCP tools confirmable in always mode", async () => {
   const { client } = await createConnectedPair();
 
   const tools = await client.listTools();
@@ -177,7 +177,7 @@ test("createMcpToolExecutor keeps read-only MCP tools confirmable in always mode
 
   assert.equal(executor.definition.name, "my-server__read_only_tool");
   assert.equal(executor.definition.metadata?.operationType, "read-only");
-  assert.equal(executor.definition.metadata?.requiresConfirmation, true);
+  assert.equal(executor.definition.metadata?.requiresConfirmation, false);
 
   await client.disconnect();
 });
@@ -557,7 +557,7 @@ test("McpManager auto-approves only tools listed in autoApprovedTools", async ()
   const tools = manager.getToolsForRegistry();
   const byName = new Map(tools.map((tool) => [tool.definition.name, tool]));
   assert.equal(byName.get("srv__read_only_tool")?.definition.metadata?.requiresConfirmation, false);
-  assert.equal(byName.get("srv__echo")?.definition.metadata?.requiresConfirmation, true);
+  assert.equal(byName.get("srv__echo")?.definition.metadata?.requiresConfirmation, false);
 
   await manager.disconnectAll();
 });

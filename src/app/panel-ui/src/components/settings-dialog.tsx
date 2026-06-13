@@ -189,5 +189,5 @@ const SETTINGS_GROUPS: readonly { readonly id: SettingsGroup; readonly label: st
   { id: "mcp", label: "MCP 服务", icon: <Server size={15} /> },
   { id: "skills", label: "技能", icon: <FileText size={15} /> },
   { id: "workspace", label: "工作区", icon: <Database size={15} /> },
-  { id: "confirmation", label: "高影响动作", icon: <LockKeyhole size={15} /> },
+  { id: "confirmation", label: "命令确认", icon: <LockKeyhole size={15} /> },
 ];

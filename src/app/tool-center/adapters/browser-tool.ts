@@ -19,6 +19,9 @@ export type BrowserToolOptions = {
   readonly automation?: BrowserAutomation;
 };
 
+const DEFAULT_BROWSER_TEXT_CHARS = 64_000;
+const MAX_BROWSER_TEXT_CHARS = 128_000;
+
 export function createBrowserSnapshotTool(options: BrowserToolOptions = {}): ToolExecutor {
   const automation = options.automation ?? createPlaywrightBrowserAutomation();
   return {
@@ -41,7 +44,7 @@ export function createBrowserSnapshotTool(options: BrowserToolOptions = {}): Too
         properties: {
           url: { type: "string", description: "HTTP or HTTPS URL to open." },
           waitMs: { type: "number", description: "Optional wait time after page load, max 5000ms." },
-          maxTextChars: { type: "number", description: "Optional safe text preview budget." },
+          maxTextChars: { type: "number", description: "Optional maximum text characters to return." },
         },
         required: ["url"],
       },
@@ -51,7 +54,7 @@ export function createBrowserSnapshotTool(options: BrowserToolOptions = {}): Too
       const record = asRecord(input);
       const url = requireHttpUrl(record.url);
       const waitMs = Math.min(5_000, positiveInteger(record.waitMs) ?? 500);
-      const maxTextChars = Math.min(6_000, positiveInteger(record.maxTextChars) ?? 2_000);
+      const maxTextChars = Math.min(MAX_BROWSER_TEXT_CHARS, positiveInteger(record.maxTextChars) ?? DEFAULT_BROWSER_TEXT_CHARS);
       const snapshot = await automation.snapshot({ url, waitMs, maxTextChars, abortSignal: context.abortSignal });
       const text = truncateText(snapshot.text ?? "", maxTextChars);
       return {

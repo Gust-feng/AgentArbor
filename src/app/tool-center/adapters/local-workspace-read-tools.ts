@@ -22,7 +22,7 @@ import {
   sandboxRequest,
 } from "./local-workspace-sandbox.js";
 
-const DEFAULT_MAX_CHARS = 20_000;
+const DEFAULT_MAX_CHARS = 128_000;
 const MAX_LIST_ENTRIES = 200;
 const MAX_GREP_MATCHES = 80;
 

@@ -83,7 +83,7 @@ test("ToolCenter default does not add a small tool-call budget", async () => {
   assert.equal(center.getCallCount(), 25);
 });
 
-test("ToolCenter uses explicit metadata for confirmation instead of platform operation defaults", async () => {
+test("ToolCenter only gates command tools for confirmation", async () => {
   let writes = 0;
   let deletes = 0;
   let executes = 0;
@@ -107,22 +107,15 @@ test("ToolCenter uses explicit metadata for confirmation instead of platform ope
   const execute = await center.execute({ callId: "call-exec", toolName: "run_command", input: {} }, context, allowTools("custom_write", "delete_file", "run_command"));
 
   assert.equal(write.status, "completed");
-  assert.equal(deleteResult.status, "approval_required");
+  assert.equal(deleteResult.status, "completed");
   assert.equal(execute.status, "approval_required");
-  assert.equal(deleteResult.error, "等待确认：删除文件");
   assert.equal(execute.error, "等待确认：运行命令");
-  assert.equal(deleteResult.confirmationRequest?.confirmationId, "confirmation-call-delete");
   assert.equal(execute.confirmationRequest?.confirmationId, "confirmation-call-exec");
-  assert.equal(deleteResult.confirmationRequest?.riskLevel, "high");
-  assert.equal(deleteResult.confirmationRequest?.title, "删除文件");
-  assert.equal(deleteResult.confirmationRequest?.actionSummary, "删除文件");
-  assert.equal(deleteResult.confirmationRequest?.actionSummary.includes("delete_file"), false);
-  assert.equal(deleteResult.projection?.uiSummary, "删除文件");
   assert.equal(writes, 1);
-  assert.equal(deletes, 0);
+  assert.equal(deletes, 1);
   assert.equal(executes, 0);
-  assert.equal(center.getCallCount(), 1);
-  assert.equal(deleteResult.projection?.diagnosticRef, "tool:call-delete:confirmation-required");
+  assert.equal(center.getCallCount(), 2);
+  assert.equal(deleteResult.projection?.diagnosticRef, "tool:call-delete");
 });
 
 test("ToolCenter lets an approved confirmation id bypass the confirmation gate", async () => {
@@ -146,7 +139,7 @@ test("ToolCenter lets an approved confirmation id bypass the confirmation gate",
   assert.equal(result.projection?.uiSummary, "safe command summary");
 });
 
-test("ToolCenter adds typed safe display projections for command output", async () => {
+test("ToolCenter adds typed display projections for command output without redaction", async () => {
   const center = new ToolCenter();
   center.register(testTool("shell_command", async () => ({
     action: "shell_command",
@@ -168,10 +161,11 @@ test("ToolCenter adds typed safe display projections for command output", async 
 
   assert.equal(result.status, "completed");
   assert.equal(result.projection?.display?.kind, "command_summary");
-  assert.equal(JSON.stringify(result.projection?.display).includes("sk-test-secret-token"), false);
+  assert.equal(result.projection?.redacted, false);
+  assert.equal(JSON.stringify(result.projection?.display).includes("sk-test-secret-token"), true);
 });
 
-test("ToolCenter adds typed safe display projections for search results", async () => {
+test("ToolCenter adds typed display projections for search results", async () => {
   const center = new ToolCenter();
   center.register(testTool("search", async () => ({
     action: "search",
@@ -199,7 +193,7 @@ test("ToolCenter adds typed safe display projections for search results", async 
   assert.equal(result.projection?.display?.kind === "search_results" ? result.projection.display.results[0]?.title : "", "AgentArbor result");
 });
 
-test("ToolCenter file diff display does not expose edit input text", async () => {
+test("ToolCenter file diff display ignores legacy oldText/newText preview fields", async () => {
   const center = new ToolCenter({ platform: "linux" });
   center.register(testTool("edit_file", async () => ({
     action: "edit_file",
@@ -235,7 +229,7 @@ test("ToolCenter file diff display does not expose edit input text", async () =>
   assert.equal(result.projection?.display?.kind === "file_diff_preview" ? result.projection.display.replacements : 0, 1);
 });
 
-test("ToolCenter file diff display exposes bounded redacted edit preview", async () => {
+test("ToolCenter file diff display exposes bounded edit preview without redaction", async () => {
   const center = new ToolCenter({ platform: "linux" });
   center.register(testTool("edit_file", async () => ({
     action: "edit_file",
@@ -267,10 +261,10 @@ test("ToolCenter file diff display exposes bounded redacted edit preview", async
   assert.equal(display?.kind, "file_diff_preview");
   assert.equal(display?.kind === "file_diff_preview" ? display.preview?.includes("- old visible line") : false, true);
   assert.equal(display?.kind === "file_diff_preview" ? display.preview?.includes("+ new visible line") : false, true);
-  assert.equal(displayJson.includes("sk-edit-secret"), false);
+  assert.equal(displayJson.includes("sk-edit-secret"), true);
 });
 
-test("ToolCenter file change display exposes bounded redacted create preview", async () => {
+test("ToolCenter file change display exposes bounded create preview without redaction", async () => {
   const center = new ToolCenter({ platform: "linux" });
   center.register(testTool("create_file", async () => ({
     action: "create_file",
@@ -299,8 +293,8 @@ test("ToolCenter file change display exposes bounded redacted create preview", a
   assert.equal(result.status, "completed");
   assert.equal(display?.kind, "file_change_summary");
   assert.equal(display?.kind === "file_change_summary" ? display.preview?.includes("+ visible created line") : false, true);
-  assert.equal(displayJson.includes("sk-create-secret"), false);
-  assert.equal(displayJson.includes("[redacted-secret]"), true);
+  assert.equal(displayJson.includes("sk-create-secret"), true);
+  assert.equal(displayJson.includes("[redacted-secret]"), false);
 });
 
 test("ToolCenter list returns cloned metadata", () => {

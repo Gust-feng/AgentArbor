@@ -9,7 +9,7 @@ export function toolDescription(tool: ToolCatalogItem): string {
 }
 
 export function toolMeta(tool: ToolCatalogItem): string {
-  if (tool.requiresConfirmation === true || tool.riskLevel === "high") return tool.confirmationLabel ?? "高影响";
+  if (tool.requiresConfirmation === true) return tool.confirmationLabel ?? "需确认";
   return [tool.categoryLabel, tool.operationLabel].filter((item): item is string => typeof item === "string" && item.length > 0).join(" · ") || "可用";
 }
 
@@ -19,7 +19,7 @@ export function confirmationRuleLabel(tool: ToolCatalogItem): string {
   }
   return tool.confirmationLabel ??
     ([tool.riskLabel, tool.operationLabel].filter((item): item is string => typeof item === "string" && item.length > 0).join(" · ") ||
-    "高影响动作");
+    "需确认");
 }
 
 export function providerName(value: string): string {

@@ -56,12 +56,12 @@ test("local workspace adapter keeps sandbox policy and tool families split from 
   assert.equal(toolsSource.includes("function resolveWorkspacePath"), false);
   assert.equal(toolsSource.includes("function asRecord"), false);
   assert.equal(sandboxSource.includes("export function createLocalWorkspaceSandboxPolicy"), true);
-  assert.equal(sandboxSource.includes("function checkCommandArgs"), true);
+  assert.equal(sandboxSource.includes("function checkCommandArgs"), false);
   assert.equal(sandboxSource.includes("function checkSandboxPath"), true);
-  assert.equal(sandboxSource.includes("function splitSimpleCommandLine"), true);
+  assert.equal(sandboxSource.includes("function splitSimpleCommandLine"), false);
   assert.equal(commandSource.includes("export function createLocalRunCommandTool"), true);
   assert.equal(commandSource.includes("export function createLocalShellCommandTool"), true);
-  assert.equal(commandSource.includes("async function runInternalWorkspaceCommand"), true);
+  assert.equal(commandSource.includes("function runShellCommand"), true);
   assert.equal(commandSource.includes("function commandToolOutput"), true);
   assert.equal(readSource.includes("export function createLocalReadFileTool"), true);
   assert.equal(readSource.includes("export function createLocalListDirTool"), true);
@@ -147,20 +147,12 @@ test("local create_file and edit_file stay inside the local strategy sandbox", a
       () => createFile.execute({ path: "../outside.md", content: "nope" }, context),
       /outside the workspace boundary/
     );
-    await assert.rejects(
-      () => createFile.execute({ path: ".trellis/local.md", content: "nope" }, context),
-      /blocked workspace path/
-    );
     await mkdir(path.join(root, ".trellis"));
-    await writeFile(path.join(root, ".trellis", "local.md"), "blocked body", "utf8");
-    await assert.rejects(
-      () => editFile.execute({
-        path: ".trellis/local.md",
-        edits: [{ anchor: "blocked body", replacement: "changed" }],
-      }, context),
-      /blocked workspace path/
-    );
-    assert.equal(await readFile(path.join(root, ".trellis", "local.md"), "utf8"), "blocked body");
+    const trellisCreated = await createFile.execute({ path: ".trellis/local.md", content: "allowed body" }, context);
+    assert.equal(asRecord(asRecord(trellisCreated).result).path, ".trellis/local.md");
+    const overwritten = await createFile.execute({ path: "notes/result.md", content: "overwritten", overwrite: true }, context);
+    assert.equal(asRecord(asRecord(overwritten).result).overwrite, true);
+    assert.equal(await readFile(path.join(root, "notes", "result.md"), "utf8"), "overwritten");
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -189,6 +181,13 @@ test("local edit_file validates all anchors before writing and rejects ambiguous
     );
     assert.equal(await readFile(file, "utf8"), "same\nsame\n");
 
+    await editFile.execute({
+      path: "notes.txt",
+      edits: [{ anchor: "same", replacement: "second", startLineHint: 2, endLineHint: 2 }],
+    }, context);
+    assert.equal(await readFile(file, "utf8"), "same\nsecond\n");
+
+    await writeFile(file, "same\nsame\n", "utf8");
     await assert.rejects(
       () => editFile.execute({
         path: "notes.txt",
@@ -204,7 +203,7 @@ test("local edit_file validates all anchors before writing and rejects ambiguous
   }
 });
 
-test("local write tools confirm destructive deletion but not routine workspace writes", async () => {
+test("local write tools do not require confirmation", async () => {
   const writeFileTool = createLocalWriteFileTool();
   const createFileTool = createLocalCreateFileTool();
   const editFileTool = createLocalEditFileTool();
@@ -213,7 +212,7 @@ test("local write tools confirm destructive deletion but not routine workspace w
   assert.equal(writeFileTool.definition.metadata?.requiresConfirmation, false);
   assert.equal(createFileTool.definition.metadata?.requiresConfirmation, false);
   assert.equal(editFileTool.definition.metadata?.requiresConfirmation, false);
-  assert.equal(deleteFileTool.definition.metadata?.requiresConfirmation, true);
+  assert.equal(deleteFileTool.definition.metadata?.requiresConfirmation, false);
 });
 
 test("local delete_file deletes only regular files", async () => {
@@ -235,7 +234,7 @@ test("local delete_file deletes only regular files", async () => {
   }
 });
 
-test("local run_command uses policy allowlists and internal workspace commands", async () => {
+test("local run_command uses the workspace shell and confirmation metadata", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tools-"));
   try {
     await mkdir(path.join(root, "src"));
@@ -246,12 +245,14 @@ test("local run_command uses policy allowlists and internal workspace commands",
     assert.equal(runCommand.definition.metadata?.requiresConfirmation, true);
     assert.equal(shellCommand.definition.metadata?.requiresConfirmation, true);
 
-    const echoed = await runCommand.execute({ command: "echo", args: ["hello", "workspace"] }, context);
+    const echoed = await runCommand.execute({ command: "echo hello workspace" }, context);
     const shellStyleEchoed = await runCommand.execute({ command: "echo approval-review" }, context);
-    const quotedEchoed = await shellCommand.execute({ command: "echo \"hello quoted shell\"" }, context);
-    const shellEchoed = await shellCommand.execute({ command: "echo", args: ["hello", "shell"] }, context);
-    const listed = await runCommand.execute({ command: "dir", args: ["src"] }, context);
-    const typed = await runCommand.execute({ command: "type", args: ["src/note.txt"] }, context);
+    const quotedEchoed = await shellCommand.execute({ command: "echo hello quoted shell" }, context);
+    const shellEchoed = await shellCommand.execute({ command: "echo hello shell" }, context);
+    const chained = await runCommand.execute({ command: "echo safe && echo unsafe" }, context);
+    const piped = await shellCommand.execute({ command: "echo needle | findstr needle" }, context);
+    const listed = await runCommand.execute({ command: "dir /b src" }, context);
+    const typed = await runCommand.execute({ command: "type src\\note.txt" }, context);
 
     assert.equal(asRecord(echoed).action, "run_command");
     assert.equal(asRecord(shellEchoed).action, "shell_command");
@@ -259,28 +260,11 @@ test("local run_command uses policy allowlists and internal workspace commands",
     assert.match(String(asRecord(asRecord(echoed).result).stdout), /hello workspace/);
     assert.match(String(asRecord(asRecord(shellStyleEchoed).result).stdout), /approval-review/);
     assert.match(String(asRecord(asRecord(quotedEchoed).result).stdout), /hello quoted shell/);
+    assert.match(String(asRecord(asRecord(chained).result).stdout), /safe/);
+    assert.match(String(asRecord(asRecord(chained).result).stdout), /unsafe/);
+    assert.match(String(asRecord(asRecord(piped).result).stdout), /needle/);
     assert.match(String(asRecord(asRecord(listed).result).stdout), /note\.txt/);
     assert.match(String(asRecord(asRecord(typed).result).stdout), /alpha/);
-    await assert.rejects(
-      () => runCommand.execute({ command: "echo safe && echo unsafe" }, context),
-      /shell control tokens/
-    );
-    await assert.rejects(
-      () => runCommand.execute({ command: "git", args: ["checkout", "--", "."] }, context),
-      /read-only git commands/
-    );
-    await assert.rejects(
-      () => runCommand.execute({ command: "powershell", args: ["-Command", "Get-ChildItem"] }, context),
-      /rejected command/
-    );
-    await assert.rejects(
-      () => runCommand.execute({ command: path.join(root, "git"), args: ["status"] }, context),
-      /bare command name/
-    );
-    await assert.rejects(
-      () => runCommand.execute({ command: "git", args: ["--git-dir=../other/.git", "status"] }, context),
-      /outside the local workspace boundary/
-    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }

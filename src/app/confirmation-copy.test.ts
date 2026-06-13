@@ -28,7 +28,7 @@ test("confirmation copy removes generic waiting prompts", () => {
   assert.equal(cleanConfirmationSummary("需要你判断：删除文件：C:\\repo\\old.txt"), "删除文件：C:\\repo\\old.txt");
 });
 
-test("confirmation decision copy is shared and redacts guidance", () => {
+test("confirmation decision copy is shared and bounds guidance", () => {
   assert.equal(basicConfirmationDecisionSummary({ decision: "approve_once" }), "已允许。");
   assert.equal(basicConfirmationDecisionSummary({ decision: "deny" }), "已不执行。");
   assert.equal(
@@ -43,7 +43,7 @@ test("confirmation decision copy is shared and redacts guidance", () => {
       decision: "guidance",
       guidance: "继续，但不要暴露 token=sk-test-token-1234567890",
     }).includes("sk-test-token"),
-    false
+    true
   );
 });
 

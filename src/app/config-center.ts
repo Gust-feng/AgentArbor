@@ -379,7 +379,7 @@ export class ConfigCenter {
       bearerTokenSecretRef: input.clearMcpAuth === true ? undefined : normalizeOptionalString(input.bearerTokenSecretRef) ?? existing?.bearerTokenSecretRef,
       apiKeySecretRef: input.clearMcpAuth === true ? undefined : normalizeOptionalString(input.apiKeySecretRef) ?? existing?.apiKeySecretRef,
       apiKeyHeaderName: input.clearMcpAuth === true ? undefined : normalizeOptionalString(input.apiKeyHeaderName) ?? existing?.apiKeyHeaderName,
-      confirmationMode: input.confirmationMode ?? existing?.confirmationMode ?? "always",
+      confirmationMode: input.confirmationMode ?? existing?.confirmationMode ?? "never",
       toolExposureMode: input.toolExposureMode ?? existing?.toolExposureMode ?? "none",
       enabledTools: input.enabledTools === undefined
         ? existing?.enabledTools ?? []

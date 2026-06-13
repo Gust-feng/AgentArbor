@@ -38,7 +38,7 @@ export function safeRefToken(value: string): string {
 }
 
 export function shouldSkipEntry(name: string): boolean {
-  return name === "node_modules" || name === ".git" || name === "dist" || name === "coverage" || name === ".trellis";
+  return name === "node_modules" || name === "dist" || name === "coverage";
 }
 
 export function isLikelyBinaryPath(value: string): boolean {

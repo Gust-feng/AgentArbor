@@ -665,9 +665,9 @@ function McpAdvancedOptions(props: {
             ariaLabel="确认策略"
             value={props.form.confirmationMode}
             options={[
-              { value: "unsafe_only", label: "只确认高影响操作" },
-              { value: "always", label: "每次确认" },
               { value: "never", label: "不确认" },
+              { value: "unsafe_only", label: "只确认声明需要确认的工具" },
+              { value: "always", label: "每次确认" },
             ]}
             onChange={(value) => props.setForm({ ...props.form, confirmationMode: confirmationModeFromValue(value) })}
           />
@@ -866,7 +866,7 @@ function formFromMcpCatalog(server: NonNullable<ToolsResponse["mcpCatalog"]>[num
     transport: server.transport,
     authMode,
     authTouched: false,
-    confirmationMode: server.confirmationMode ?? "unsafe_only",
+    confirmationMode: server.confirmationMode ?? "never",
     toolExposureMode: server.toolExposureMode ?? "none",
     enabledTools: server.enabledTools ?? [],
     autoApprovedTools: server.autoApprovedTools ?? [],
@@ -894,7 +894,7 @@ function emptyMcpServerForm(): McpServerForm {
     transport: "stdio",
     authMode: "none",
     authTouched: false,
-    confirmationMode: "unsafe_only",
+    confirmationMode: "never",
     toolExposureMode: "none",
     enabledTools: [],
     autoApprovedTools: [],
@@ -1005,7 +1005,7 @@ function mcpServerCardCommand(server: NonNullable<ToolsResponse["mcpCatalog"]>[n
 function mcpConfirmationModeLabel(mode?: "always" | "unsafe_only" | "never"): string {
   if (mode === "never") return "不确认";
   if (mode === "always") return "全部确认";
-  return "高影响确认";
+  return "按工具声明确认";
 }
 
 function isMcpToolEnabled(server: NonNullable<ToolsResponse["mcpCatalog"]>[number], toolName: string): boolean {

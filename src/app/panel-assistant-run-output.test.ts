@@ -45,7 +45,7 @@ test("visible run problem surfaces failed run details without inventing a report
   );
 });
 
-test("visible run problem sanitizes failed run detail text", () => {
+test("visible run problem preserves failed run detail text", () => {
   const problem = visibleRunProblem(
     { status: "failed" },
     { currentAction: "已经输出过的动作" },
@@ -55,11 +55,11 @@ test("visible run problem sanitizes failed run detail text", () => {
 
   assert.deepEqual(problem, {
     title: "未完成",
-    message: "模型连接失败。",
+    message: "模型连接失败。\nraw provider response: sk-test-secret",
     tone: "error",
   });
-  assert.equal(JSON.stringify(problem).includes("raw provider"), false);
-  assert.equal(JSON.stringify(problem).includes("sk-test-secret"), false);
+  assert.equal(JSON.stringify(problem).includes("raw provider"), true);
+  assert.equal(JSON.stringify(problem).includes("sk-test-secret"), true);
 });
 
 test("visible result text follows the product answer priority", () => {

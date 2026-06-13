@@ -232,6 +232,23 @@ test("desktop agent session keeps projection and contracts split", async () => {
   assert.equal(definition.includes("defaultMaxOutputTokens"), false);
   assert.equal(promptAsset.includes("export const DESKTOP_ROOT_AGENT_PROMPT"), true);
   assert.equal(promptAsset.includes("You are AgentArbor Desktop Agent"), true);
+  assert.equal(promptAsset.includes('promptRef: "prompt:desktop-root-agent:v2"'), true);
+  assert.equal(promptAsset.includes('version: "v2"'), true);
+  const currentPromptAsset = currentDesktopRootPromptSource(promptAsset);
+  assert.equal(currentPromptAsset.includes("The latest user message is the current instruction"), true);
+  assert.equal(currentPromptAsset.includes("tool descriptions define the tools"), true);
+  assert.equal(currentPromptAsset.includes("reasoning controls are provided by the runtime"), true);
+  assert.equal(currentPromptAsset.includes("Stay in the ordinary desktop agent path"), true);
+  assert.equal(promptAsset.includes("DESKTOP_ROOT_AGENT_PROMPT_LEGACY_VERSION_V1"), true);
+  for (const promptBloatTerm of [
+    "capable senior collaborator",
+    "Use tools when you need",
+    "inspect the relevant files",
+    "concise reasoning",
+    "chain-of-thought",
+  ]) {
+    assert.equal(currentPromptAsset.includes(promptBloatTerm), false);
+  }
   for (const internalProcessTerm of ["deep mode", "Underground", "Aboveground", "Plan", "Handoff", "rootlet", "organization flow"]) {
     assert.equal(promptAsset.includes(internalProcessTerm), false);
   }
@@ -567,4 +584,12 @@ async function readAppTypeScriptSources(relativeDir = ""): Promise<readonly AppT
     })
   );
   return nestedSources.flat();
+}
+
+function currentDesktopRootPromptSource(source: string): string {
+  const start = source.indexOf("export const DESKTOP_ROOT_AGENT_PROMPT:");
+  const end = source.indexOf("export const DESKTOP_ROOT_AGENT_PROMPT_LEGACY_VERSION_V1:");
+  assert.notEqual(start, -1);
+  assert.notEqual(end, -1);
+  return source.slice(start, end);
 }

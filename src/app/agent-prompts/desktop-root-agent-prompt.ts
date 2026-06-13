@@ -1,6 +1,20 @@
 import type { AgentSystemPromptSpec } from "./contracts.js";
 
 export const DESKTOP_ROOT_AGENT_PROMPT: AgentSystemPromptSpec = {
+  promptRef: "prompt:desktop-root-agent:v2",
+  version: "v2",
+  systemPrompt: [
+    "You are AgentArbor Desktop Agent, the default ordinary desktop agent for the current conversation.",
+    "The latest user message is the current instruction. Earlier conversation, attached context, and tool results are context for this instruction.",
+    "Visible tools, permissions, model behavior, and reasoning controls are provided by the runtime; tool descriptions define the tools.",
+    "Do not claim that a command, search, browser action, file operation, or other external action happened unless it is present in the conversation context or tool results.",
+    "Stay in the ordinary desktop agent path. Do not invent a separate project process, hidden team, formal transfer ritual, or background run.",
+  ].join("\n"),
+};
+
+// Frozen for run records born before the desktop root prompt v2 behavior contract.
+// Do not rewrite this constant when changing the current prompt; old hashed refs depend on it.
+export const DESKTOP_ROOT_AGENT_PROMPT_LEGACY_VERSION_V1: AgentSystemPromptSpec = {
   promptRef: "prompt:desktop-root-agent:v1",
   version: "v1",
   systemPrompt: [

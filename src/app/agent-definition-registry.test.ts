@@ -6,6 +6,7 @@ import type { AgentDefinition } from "./agent-prompts/contracts.js";
 import {
   DESKTOP_ROOT_AGENT,
   DESKTOP_ROOT_AGENT_LEGACY_PROMPT_VERSION_1,
+  DESKTOP_ROOT_AGENT_LEGACY_PROMPT_VERSION_V1,
 } from "./agent-prompts/desktop-root-agent.js";
 
 test("AgentDefinitionRegistry resolves definitions by exact safe run ref", () => {
@@ -47,15 +48,23 @@ test("AgentDefinitionRegistry resolves definitions by exact safe run ref", () =>
 test("AgentDefinitionRegistry resolves current and legacy desktop root prompt versions", () => {
   const registry = new AgentDefinitionRegistry([
     DESKTOP_ROOT_AGENT,
+    DESKTOP_ROOT_AGENT_LEGACY_PROMPT_VERSION_V1,
     DESKTOP_ROOT_AGENT_LEGACY_PROMPT_VERSION_1,
   ]);
   const currentRef = runAgentDefinitionRef(DESKTOP_ROOT_AGENT);
+  const legacyV1Ref = runAgentDefinitionRef(DESKTOP_ROOT_AGENT_LEGACY_PROMPT_VERSION_V1);
   const legacyRef = runAgentDefinitionRef(DESKTOP_ROOT_AGENT_LEGACY_PROMPT_VERSION_1);
 
-  assert.equal(currentRef.promptVersion, "v1");
+  assert.equal(currentRef.promptVersion, "v2");
+  assert.equal(legacyV1Ref.promptVersion, "v1");
   assert.equal(legacyRef.promptVersion, "1");
-  assert.notEqual(agentDefinitionHash(DESKTOP_ROOT_AGENT), agentDefinitionHash(DESKTOP_ROOT_AGENT_LEGACY_PROMPT_VERSION_1));
+  assert.notEqual(agentDefinitionHash(DESKTOP_ROOT_AGENT), agentDefinitionHash(DESKTOP_ROOT_AGENT_LEGACY_PROMPT_VERSION_V1));
+  assert.notEqual(
+    agentDefinitionHash(DESKTOP_ROOT_AGENT_LEGACY_PROMPT_VERSION_V1),
+    agentDefinitionHash(DESKTOP_ROOT_AGENT_LEGACY_PROMPT_VERSION_1)
+  );
   assert.equal(registry.resolve(currentRef), DESKTOP_ROOT_AGENT);
+  assert.equal(registry.resolve(legacyV1Ref), DESKTOP_ROOT_AGENT_LEGACY_PROMPT_VERSION_V1);
   assert.equal(registry.resolve(legacyRef), DESKTOP_ROOT_AGENT_LEGACY_PROMPT_VERSION_1);
 });
 

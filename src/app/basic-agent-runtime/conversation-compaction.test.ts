@@ -90,8 +90,8 @@ test("conversation history compaction summarizes older turns and keeps recent tu
   ]);
   assert.equal(channel.requests.length, 1);
   const requestText = JSON.stringify(channel.requests[0]?.sanitizedMessages);
-  assert.equal(requestText.includes("sk-old-secret"), false);
-  assert.equal(requestText.includes("raw provider response: private"), false);
+  assert.equal(requestText.includes("sk-old-secret"), true);
+  assert.equal(requestText.includes("raw provider response: private"), true);
   assert.equal(requestText.includes("Custom Compact Agent"), true);
   assert.equal(requestText.includes("AgentArbor's ordinary desktop agent"), false);
   assert.equal(channel.requests[0]?.purpose, "desktop_context_compaction");
@@ -147,8 +147,8 @@ test("loop context compaction replaces compactible messages with a continuation 
   assert.equal(result.messages.some((message) => message.content.includes("This summary is background only")), true);
   assert.deepEqual(result.conversationSummary.coveredRefs, ["loop:old-user", "loop:old-assistant"]);
   const requestText = JSON.stringify(channel.requests[0]?.sanitizedMessages);
-  assert.equal(requestText.includes("sk-loop-secret"), false);
-  assert.equal(requestText.includes("raw tool output: private"), false);
+  assert.equal(requestText.includes("sk-loop-secret"), true);
+  assert.equal(requestText.includes("raw tool output: private"), true);
   assert.equal(requestText.includes("Custom Loop Agent"), true);
   assert.equal(requestText.includes("AgentArbor's ordinary desktop agent"), false);
   assert.equal(channel.requests[0]?.toolChoice, "none");

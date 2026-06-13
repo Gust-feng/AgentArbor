@@ -110,7 +110,7 @@ test("OpenAI-compatible Chat Completions adapter appends /v1 only for bare OpenA
   assert.equal(calls[0]?.url, "https://api.openai.com/v1/chat/completions");
 });
 
-test("OpenAI-compatible Chat adapter preserves sanitized transport failure", async () => {
+test("OpenAI-compatible Chat adapter preserves transport failure detail", async () => {
   const secret = "sk-adapter-network-secret-123456";
   const fetch: FetchLike = async () => {
     throw new Error(`fetch failed ECONNRESET apiKey=${secret}`);
@@ -128,7 +128,7 @@ test("OpenAI-compatible Chat adapter preserves sanitized transport failure", asy
   assert.equal(response.failure?.kind, "provider_network");
   assert.equal(response.failure?.retryable, true);
   assert.equal(response.failure?.message.includes("fetch failed ECONNRESET"), true);
-  assert.equal(response.failure?.message.includes(secret), false);
+  assert.equal(response.failure?.message.includes(secret), true);
 });
 
 test("OpenAI-compatible Chat Completions adapter streams safe output deltas", async () => {

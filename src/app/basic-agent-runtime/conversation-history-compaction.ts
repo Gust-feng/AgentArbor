@@ -129,7 +129,7 @@ function compactionMessages(input: {
       content: [
         `You compact earlier conversation history for ${input.agentDisplayName}, the ordinary desktop agent for this run.`,
         "Preserve user goals, durable decisions, constraints, unresolved tasks, evidence refs, and useful continuity.",
-        "Remove raw prompts, raw provider responses, raw tool output, stdout/stderr, secrets, tokens, hidden reasoning, and internal loop details.",
+        "Preserve concrete conversation facts, tool results, errors, stdout/stderr, file paths, and development context that may be needed to continue.",
         "Do not decide whether the task is complete. Do not instruct the agent to stop. Return concise plain text only.",
       ].join("\n"),
       ref: "prompt:desktop.context_compaction.v1",

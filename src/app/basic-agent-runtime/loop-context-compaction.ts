@@ -114,10 +114,10 @@ function loopCompactionMessages(input: {
     {
       role: "system",
       content: [
-        `You compact earlier safe context for ${input.agentDisplayName}, the ordinary desktop agent for this run.`,
+        `You compact earlier runtime context for ${input.agentDisplayName}, the ordinary desktop agent for this run.`,
         "Return exactly one Markdown continuation prompt. Do not return JSON.",
         "Preserve still-relevant goals, user constraints, progress, decisions, next actions, errors, evidence refs, and file paths.",
-        "Remove raw prompts, raw provider responses, raw tool output, stdout/stderr, secrets, tokens, hidden reasoning, and internal loop details.",
+        "Preserve concrete tool results, errors, stdout/stderr, file content fragments, and development context that may be needed to continue.",
         "Do not decide whether the task is complete. Do not instruct the agent to stop.",
         "",
         "Use this section order:",

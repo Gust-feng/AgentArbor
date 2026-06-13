@@ -49,7 +49,7 @@ export function fakeDesktopAgentStep(request: ModelRequest): FakeModelProviderSt
     return { textOutput: answer };
   }
   const answer =
-    `我会把“${goalAnchor}”作为桌面任务处理：先说明当前可判断的结论，再基于你授权的文件、网页或搜索材料继续补证据；涉及删除、发送、命令执行或读取未授权材料等高影响动作时会先请求确认。`;
+    `我会把“${goalAnchor}”作为桌面任务处理：先说明当前可判断的结论，再基于你授权的文件、网页或搜索材料继续补证据；涉及命令执行时会先请求确认。`;
   return { textOutput: answer };
 }
 
@@ -175,7 +175,7 @@ export function fakeWorkSessionDirectAnswerOutput(request: ModelRequest): string
     return "我是 AgentArbor 桌面助手。具体底层模型取决于你在设置中配置的模型运行时；我会直接回答普通问题，也会在授权范围内读取文件、网页或工具材料来完成桌面任务。";
   }
   if (asksCapability) {
-    return "我可以直接回答问题，也可以在你授权的上下文里整理材料、分析文件和网页、生成报告、草稿或工作区文件；遇到删除、命令执行、发送、越权读取等高影响动作时会先停下来问你。你可以继续随便问，也可以直接交给我一个要完成的任务。";
+    return "我可以直接回答问题，也可以在你授权的上下文里整理材料、分析文件和网页、生成报告、草稿或工作区文件；遇到命令执行时会先停下来问你。你可以继续随便问，也可以直接交给我一个要完成的任务。";
   }
   if (asksFollowUp) {
     return "可以继续。你可以把我当作一个桌面任务助手：普通问题我直接回答；当你给出需要上下文、文件、网页、工具或多步判断的任务时，我会展示正在做的事、引用的材料和需要你确认的边界。";

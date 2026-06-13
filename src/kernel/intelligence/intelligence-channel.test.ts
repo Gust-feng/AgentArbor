@@ -60,13 +60,13 @@ test("IntelligenceChannel converts thrown provider errors into failed model fact
   assert.equal(response.failure?.kind, "provider_network");
   assert.equal(response.failure?.retryable, true);
   assert.equal(response.failure?.message.includes("provider network unavailable"), true);
-  assert.equal(response.failure?.message.includes("sk-channel-secret"), false);
-  assert.equal(response.failure?.message.includes("[redacted-secret]"), true);
+  assert.equal(response.failure?.message.includes("sk-channel-secret"), true);
+  assert.equal(response.failure?.message.includes("[redacted-secret]"), false);
   assert.deepEqual(eventLog.types(), ["model.requested", "model.failed"]);
   const failedPayload = eventLog.list().at(-1)?.message.payload as { failureKind?: string; failureMessage?: string };
   assert.equal(failedPayload.failureKind, "provider_network");
   assert.equal(failedPayload.failureMessage?.includes("provider network unavailable"), true);
-  assert.equal(failedPayload.failureMessage?.includes("sk-channel-secret"), false);
+  assert.equal(failedPayload.failureMessage?.includes("sk-channel-secret"), true);
 });
 
 test("IntelligenceChannel preserves sanitized provider error cause", async () => {
@@ -83,12 +83,12 @@ test("IntelligenceChannel preserves sanitized provider error cause", async () =>
   assert.equal(response.failure?.retryable, true);
   assert.equal(response.failure?.message.includes("Connection error."), true);
   assert.equal(response.failure?.message.includes("fetch failed ECONNRESET"), true);
-  assert.equal(response.failure?.message.includes("sk-channel-cause-secret"), false);
-  assert.equal(response.failure?.message.includes("[redacted-secret]"), true);
+  assert.equal(response.failure?.message.includes("sk-channel-cause-secret"), true);
+  assert.equal(response.failure?.message.includes("[redacted-secret]"), false);
   const failedPayload = eventLog.list().at(-1)?.message.payload as { failureKind?: string; failureMessage?: string };
   assert.equal(failedPayload.failureKind, "provider_network");
   assert.equal(failedPayload.failureMessage?.includes("fetch failed ECONNRESET"), true);
-  assert.equal(failedPayload.failureMessage?.includes("sk-channel-cause-secret"), false);
+  assert.equal(failedPayload.failureMessage?.includes("sk-channel-cause-secret"), true);
 });
 
 test("IntelligenceChannel turns contract-violating output into a failed response", async () => {

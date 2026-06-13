@@ -63,7 +63,7 @@ test("default ToolCenter passes configured Tavily max results into ResearchRunti
   assert.equal(JSON.stringify(search.output).includes("tvly-configured-secret"), false);
 });
 
-test("configured ToolCenter reads Tavily config, registers search/read, and redacts the key", async () => {
+test("configured ToolCenter reads Tavily config and registers search/read without exposing the configured key", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-configured-tool-center-"));
   const bodies: Record<string, unknown>[] = [];
   const fetch: FetchLike = async (_url, init) => {

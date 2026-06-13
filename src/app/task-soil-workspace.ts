@@ -1,6 +1,5 @@
 import type { Constraint } from "../domain/constraints.js";
 import { createTaskSoil, type ReadonlySoilStore, type TaskSoil, type TaskSoilContextRef } from "../domain/soil/index.js";
-import { redactSensitiveText } from "../kernel/redaction.js";
 import type { ModelRuntimeMode } from "./model-runtime/index.js";
 
 const MAX_REF_LENGTH = 220;
@@ -207,9 +206,6 @@ function isAuthorizedContextRef(ref: string, kind: DesktopTaskSoilContextRefInpu
   if (kind === "project" && normalized.startsWith("local-project:")) {
     return true;
   }
-  if (isUnsafeReferenceText(normalized)) {
-    return false;
-  }
   if (kind === "web") {
     return normalized.startsWith("web:") || normalized.startsWith("http://") || normalized.startsWith("https://");
   }
@@ -227,29 +223,11 @@ function isAuthorizedPermissionRef(ref: string): boolean {
   if (normalized.startsWith("read:local-file:") || normalized.startsWith("read:local-project:")) {
     return true;
   }
-  if (isUnsafeReferenceText(normalized)) {
-    return false;
-  }
   return (
     ref.startsWith("read:") ||
     ref.startsWith("execute:") ||
     ref.startsWith("deny:") ||
     ref.startsWith("ask:")
-  );
-}
-
-function isUnsafeReferenceText(normalized: string): boolean {
-  return (
-    normalized.startsWith("secret:") ||
-    normalized.startsWith("runtime:") ||
-    normalized.startsWith("store:") ||
-    normalized.includes(":secret:") ||
-    normalized.includes(":runtime:") ||
-    normalized.includes(":store:") ||
-    normalized.includes("api_key") ||
-    normalized.includes("apikey") ||
-    normalized.includes("token") ||
-    normalized.includes("authorization")
   );
 }
 
@@ -266,8 +244,7 @@ function safeOptionalText(value: unknown, maxLength: number): string | undefined
 }
 
 function safeText(value: string, maxLength: number): string {
-  const redacted = redactSensitiveText(value);
-  return redacted.length <= maxLength ? redacted : `${redacted.slice(0, maxLength - 1)}…`;
+  return value.length <= maxLength ? value : `${value.slice(0, maxLength - 1)}…`;
 }
 
 function optionalString(value: unknown): string | undefined {

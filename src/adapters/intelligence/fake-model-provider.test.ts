@@ -244,10 +244,10 @@ test("FakeModelProvider default output satisfies work session direct answer text
         outputKind: "explanation",
         format: "text",
         minTextLength: 1,
-        maxTextLength: 12000,
+        maxTextLength: 128_000,
         visibleOutput: {
           fields: ["text"],
-          maxFieldLength: 1200,
+          maxFieldLength: 128_000,
         },
       },
     })
@@ -271,7 +271,7 @@ test("FakeModelProvider desktop agent answers directly and can request authorize
         outputKind: "explanation",
         format: "text",
         minTextLength: 1,
-        maxTextLength: 12000,
+        maxTextLength: 128_000,
       },
       tools: [],
       toolChoice: "auto",
@@ -286,7 +286,7 @@ test("FakeModelProvider desktop agent answers directly and can request authorize
         outputKind: "explanation",
         format: "text",
         minTextLength: 1,
-        maxTextLength: 12000,
+        maxTextLength: 128_000,
       },
       tools: [
         {
@@ -307,7 +307,7 @@ test("FakeModelProvider desktop agent answers directly and can request authorize
         outputKind: "explanation",
         format: "text",
         minTextLength: 1,
-        maxTextLength: 12000,
+        maxTextLength: 128_000,
       },
       tools: [],
       toolChoice: "none",
@@ -342,7 +342,7 @@ test("FakeModelProvider output deltas carry request purpose", async () => {
         outputKind: "explanation",
         format: "text",
         minTextLength: 1,
-        maxTextLength: 12000,
+        maxTextLength: 128_000,
       },
     })
   );

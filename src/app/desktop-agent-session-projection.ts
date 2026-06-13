@@ -15,6 +15,8 @@ import type {
 import { asRecord, isString, numberOrUndefined, stringOrUndefined } from "./panel-read-model-utils.js";
 import { sanitizeAssistantVisibleText } from "./visible-text-safety.js";
 
+const DESKTOP_AGENT_VISIBLE_ANSWER_MAX_CHARS = 128_000;
+
 export function safeDesktopAgentContextPack(
   pack: BasicAgentContextPack
 ): NonNullable<DesktopAgentSessionResult["contextPack"]> {
@@ -22,7 +24,7 @@ export function safeDesktopAgentContextPack(
     usageSummary: pack.usageSummary,
     items: pack.items.map((item) => ({
       ...item,
-      summary: safeText(item.sourceKind === "system" ? "当前任务的安全边界。" : item.summary, 320),
+      summary: safeText(item.sourceKind === "system" ? "当前任务的系统指令。" : item.summary, 320),
     })),
     budget: pack.budget,
     truncationReport: pack.truncationReport,
@@ -45,7 +47,7 @@ export function parseAnswer(
   }
   const visible = sanitizeAssistantVisibleText(text);
   return visible.length > 0
-    ? safeText(visible, 12000)
+    ? safeText(visible, DESKTOP_AGENT_VISIBLE_ANSWER_MAX_CHARS)
     : undefined;
 }
 

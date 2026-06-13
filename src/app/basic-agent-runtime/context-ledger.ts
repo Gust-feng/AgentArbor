@@ -59,7 +59,7 @@ const DEFAULT_MAX_CHARS = 1_000_000;
 const DEFAULT_MAX_INPUT_TOKENS = 4_500;
 
 // The ledger is the Basic Agent's single model-input governor. Context Pack
-// serialization must consume this selected, redacted ledger instead of
+// serialization must consume this selected ledger instead of
 // reassembling prompts from session, panel, or tool-specific helpers.
 export function createBasicAgentContextLedger(input: CreateBasicAgentContextLedgerInput): BasicAgentContextLedger {
   const maxMessages = Math.max(4, Math.floor(input.maxMessages ?? DEFAULT_MAX_MESSAGES));

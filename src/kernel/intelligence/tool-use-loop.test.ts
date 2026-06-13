@@ -564,11 +564,11 @@ test("executeToolUseLoop truncates verbose tool messages before model continuati
   assert.ok(toolMessage?.content.length !== undefined && toolMessage.content.length < 41_000);
 });
 
-test("executeToolUseLoop keeps verbose tool output out of EventLog and redacts tool messages", async () => {
+test("executeToolUseLoop keeps verbose tool output out of EventLog while preserving model tool messages", async () => {
   const eventLog = new InMemoryEventLog();
   const channel = new SequenceIntelligenceChannel([
     toolCallResponse("model-request-test", "call-read", "read"),
-    completedResponse("model-request-final", { summary: "Final answer with redacted tool result." }),
+    completedResponse("model-request-final", { summary: "Final answer with tool result." }),
   ]);
   const center = new TestToolBroker();
   center.register("read", async () => ({
@@ -622,9 +622,9 @@ test("executeToolUseLoop keeps verbose tool output out of EventLog and redacts t
   assert.equal(completedPayloadText.includes("research:page:secret"), true);
   assert.equal(completedPayloadText.includes("verboseOutputOmitted"), true);
   assert.equal(toolMessage?.role, "tool");
-  assert.equal(toolMessageText.includes("sk-preview-secret-token"), false);
-  assert.equal(toolMessageText.includes("Bearer event-token-value"), false);
-  assert.equal(toolMessageText.includes("[redacted-secret]"), true);
+  assert.equal(toolMessageText.includes("sk-preview-secret-token"), true);
+  assert.equal(toolMessageText.includes("Bearer event-token-value"), true);
+  assert.equal(toolMessageText.includes("[redacted-secret]"), false);
   assert.equal(toolMessageText.includes("contentPreview"), true);
 });
 
@@ -661,20 +661,20 @@ test("executeToolUseLoop uses projected agentContent for model tool continuation
       status: "completed",
       durationMs: 1,
       projection: {
-        agentContent: { summary: "projected model-safe content" },
-        uiSummary: "safe UI summary",
+        agentContent: { summary: "projected model content" },
+        uiSummary: "UI summary",
         diagnosticRef: "tool:projected",
         envelope: {
-          agentSummary: "envelope model-safe summary",
+          agentSummary: "envelope model summary",
           evidenceRefs: ["tool:projected"],
           tokenEstimate: 8,
           truncated: false,
-          redacted: true,
+          redacted: false,
           diagnosticRef: "tool:projected",
-          rawRetention: "diagnostic_ref_only",
+          rawRetention: "none",
         },
         truncated: false,
-        redacted: true,
+        redacted: false,
       },
     }),
     resetCallCount: () => undefined,
@@ -694,16 +694,16 @@ test("executeToolUseLoop uses projected agentContent for model tool continuation
   );
 
   const toolMessageText = JSON.stringify(channel.requests[1]?.sanitizedMessages.at(-1));
-  assert.equal(toolMessageText.includes("projected model-safe content"), true);
-  assert.equal(toolMessageText.includes("envelope model-safe summary"), false);
+  assert.equal(toolMessageText.includes("projected model content"), true);
+  assert.equal(toolMessageText.includes("envelope model summary"), false);
   assert.equal(toolMessageText.includes("raw-secret-output"), false);
   assert.equal(toolMessageText.includes("sk-raw-tool-secret"), false);
 });
 
-test("executeToolUseLoop redacts projected agentContent before model continuation", async () => {
+test("executeToolUseLoop preserves projected agentContent before model continuation", async () => {
   const channel = new SequenceIntelligenceChannel([
     toolCallResponse("model-request-test", "call-read", "read"),
-    completedResponse("model-request-final", { summary: "Final answer with sanitized projected content." }),
+    completedResponse("model-request-final", { summary: "Final answer with projected content." }),
   ]);
   const broker: ToolExecutionBroker = {
     list: () => [
@@ -728,9 +728,9 @@ test("executeToolUseLoop redacts projected agentContent before model continuatio
             token: "sk-agent-content-token-123456",
           },
         },
-        uiSummary: "safe UI summary",
+        uiSummary: "UI summary",
         truncated: false,
-        redacted: true,
+        redacted: false,
       },
     }),
     resetCallCount: () => undefined,
@@ -751,16 +751,16 @@ test("executeToolUseLoop redacts projected agentContent before model continuatio
 
   const toolMessageText = JSON.stringify(channel.requests[1]?.sanitizedMessages.at(-1));
   assert.equal(toolMessageText.includes("safe projected summary"), true);
-  assert.equal(toolMessageText.includes("sk-agent-content-secret"), false);
-  assert.equal(toolMessageText.includes("sk-agent-content-token"), false);
-  assert.equal(toolMessageText.includes("[redacted-secret]"), true);
-  assert.equal(toolMessageText.includes("[redacted]"), true);
+  assert.equal(toolMessageText.includes("sk-agent-content-secret"), true);
+  assert.equal(toolMessageText.includes("sk-agent-content-token"), true);
+  assert.equal(toolMessageText.includes("[redacted-secret]"), false);
+  assert.equal(toolMessageText.includes("[redacted]"), false);
 });
 
-test("executeToolUseLoop redacts tool failure errors before model continuation", async () => {
+test("executeToolUseLoop preserves tool failure errors before model continuation", async () => {
   const channel = new SequenceIntelligenceChannel([
     toolCallResponse("model-request-test", "call-read", "read"),
-    textResponse("model-request-final", "Final answer after redacted tool failure."),
+    textResponse("model-request-final", "Final answer after tool failure."),
   ]);
   const center = new TestToolBroker();
   center.register("read", async () => {
@@ -782,8 +782,8 @@ test("executeToolUseLoop redacts tool failure errors before model continuation",
   const toolMessageText = JSON.stringify(channel.requests[1]?.sanitizedMessages.at(-1));
   assert.equal(result.toolCalls[0]?.status, "failed");
   assert.equal(toolMessageText.includes("read failed with raw stderr"), true);
-  assert.equal(toolMessageText.includes("sk-tool-error-secret"), false);
-  assert.equal(toolMessageText.includes("[redacted-secret]"), true);
+  assert.equal(toolMessageText.includes("sk-tool-error-secret"), true);
+  assert.equal(toolMessageText.includes("[redacted-secret]"), false);
 });
 
 test("executeToolUseLoop sends full workspace tool facts to the next model turn", async () => {
@@ -1644,8 +1644,8 @@ test("resumeToolUseLoopFromConfirmationDecision returns guidance and skipped bat
   assert.deepEqual(resumed.toolCalls.map((call) => call.status), ["failed", "cancelled"]);
   assert.equal(channel.requests[1]?.sanitizedMessages.filter((message) => message.role === "tool").length, 2);
   const requestText = JSON.stringify(channel.requests[1]?.sanitizedMessages);
-  assert.equal(requestText.includes("sk-guidance-secret-token"), false);
-  assert.equal(requestText.includes("[redacted-secret]"), true);
+  assert.equal(requestText.includes("sk-guidance-secret-token"), true);
+  assert.equal(requestText.includes("[redacted-secret]"), false);
 });
 
 function createValidModelRequest(overrides: Partial<ModelRequest> = {}): ModelRequest {
@@ -1789,7 +1789,7 @@ class ProjectedToolBroker implements ToolExecutionBroker {
         agentContent: this.projectedContent[request.toolName],
         uiSummary: `${request.toolName} completed`,
         truncated: false,
-        redacted: true,
+        redacted: false,
       },
     };
   }

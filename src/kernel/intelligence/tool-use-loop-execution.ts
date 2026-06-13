@@ -205,7 +205,7 @@ function unauthorizedToolResult(request: ToolCallRequest): ToolCallResult {
         diagnosticRef,
       }),
       truncated: false,
-      redacted: true,
+      redacted: false,
     },
   };
 }

@@ -46,7 +46,7 @@ test("ResearchRuntime follows configured source preference and links search trac
   assert.equal(result.trace.sourceSteps.length, 1);
 });
 
-test("ResearchRuntime searches web refs and reads selected pages through safe previews", async () => {
+test("ResearchRuntime searches web refs and reads selected pages through previews", async () => {
   const secret = "tvly-research-secret";
   const tavilyCalls: Record<string, unknown>[] = [];
   const tavilyFetch: TavilyFetchLike = async (_url, init) => {

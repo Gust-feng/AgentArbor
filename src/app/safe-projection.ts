@@ -13,6 +13,9 @@ import { redactSensitiveText } from "../kernel/redaction.js";
 import { sanitizeAssistantVisibleText } from "./visible-text-safety.js";
 import { cleanOrdinaryToolText } from "./ordinary-tool-copy.js";
 
+const MODEL_TOOL_TEXT_MAX_CHARS = 128_000;
+const MODEL_TOOL_ERROR_MAX_CHARS = 64_000;
+
 export function redactOrdinaryText(value: string, maxLength = 1_200): string {
   return compactSafeText(sanitizeAssistantVisibleText(redactSensitiveText(value)), maxLength) ?? "";
 }
@@ -61,7 +64,7 @@ export function projectToolResult(input: {
     display,
     envelope,
     truncated,
-    redacted: true,
+    redacted: false,
   };
 }
 
@@ -81,7 +84,7 @@ export function projectToolFailure(input: {
       diagnosticRef,
     }),
     truncated: false,
-    redacted: true,
+    redacted: false,
   };
 }
 
@@ -268,7 +271,7 @@ function projectToolAgentContent(request: ToolCallRequest, output: unknown, trun
       path: stringOrUndefined(result.path),
       bytes: numberOrUndefined(result.bytes),
       binary: result.binary === true,
-      content: typeof result.content === "string" ? redactOrdinaryFileFragment(result.content, 20_000) : undefined,
+      content: typeof result.content === "string" ? redactOrdinaryFileFragment(result.content, MODEL_TOOL_TEXT_MAX_CHARS) : undefined,
       truncated,
     };
   }
@@ -296,8 +299,8 @@ function projectToolAgentContent(request: ToolCallRequest, output: unknown, trun
       command: stringOrUndefined(result.command) ?? stringOrUndefined(asRecord(request.input).command),
       args: stringArray(result.args).length > 0 ? stringArray(result.args) : stringArray(asRecord(request.input).args),
       exitCode: numberOrUndefined(result.exitCode),
-      stdout: typeof result.stdout === "string" ? redactOrdinaryFileFragment(result.stdout, 8_000) : undefined,
-      stderr: typeof result.stderr === "string" ? redactOrdinaryFileFragment(result.stderr, 2_000) : undefined,
+      stdout: typeof result.stdout === "string" ? redactOrdinaryFileFragment(result.stdout, MODEL_TOOL_TEXT_MAX_CHARS) : undefined,
+      stderr: typeof result.stderr === "string" ? redactOrdinaryFileFragment(result.stderr, MODEL_TOOL_ERROR_MAX_CHARS) : undefined,
       truncated,
     };
   }
@@ -306,14 +309,14 @@ function projectToolAgentContent(request: ToolCallRequest, output: unknown, trun
       summary,
       url: stringOrUndefined(result.url),
       title: stringOrUndefined(result.title),
-      text: typeof result.text === "string" ? redactOrdinaryMarkdownFragment(result.text, 6_000) : undefined,
+      text: typeof result.text === "string" ? redactOrdinaryMarkdownFragment(result.text, MODEL_TOOL_TEXT_MAX_CHARS) : undefined,
       truncated,
     };
   }
   if (record.result !== undefined && isMcpToolName(request.toolName)) {
     return {
       summary,
-      text: typeof result.text === "string" ? redactOrdinaryMarkdownFragment(result.text, 6_000) : undefined,
+      text: typeof result.text === "string" ? redactOrdinaryMarkdownFragment(result.text, MODEL_TOOL_TEXT_MAX_CHARS) : undefined,
       multimodal: Array.isArray(result.multimodal)
         ? result.multimodal.slice(0, 12).map(projectMcpMultimodalPart)
         : undefined,

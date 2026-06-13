@@ -22,9 +22,8 @@ export type ProjectToolStatusEnvelopeInput = {
   readonly evidenceRefs?: readonly string[];
 };
 
-// The envelope is the only cross-boundary form of tool output. Adapters may
-// keep raw data behind diagnostic refs, but model/UI/runtime channels consume
-// this redacted summary and typed safe display.
+// The envelope is the compact cross-boundary form of tool output. Adapters may
+// still expose richer agentContent when the model needs details.
 export function projectToolResultEnvelope(input: ProjectToolResultEnvelopeInput): ToolResultEnvelope {
   const display = sanitizeToolDisplay(input.display);
   const agentSummary = agentSummaryForToolDisplay(display, input.summary, input.request.toolName);
@@ -35,9 +34,9 @@ export function projectToolResultEnvelope(input: ProjectToolResultEnvelopeInput)
     uiDisplay: display,
     tokenEstimate: estimateTokens(agentSummary),
     truncated: input.truncated || displayIsTruncated(input.display),
-    redacted: true,
+    redacted: false,
     diagnosticRef: input.diagnosticRef,
-    rawRetention: "diagnostic_ref_only",
+    rawRetention: "none",
   };
 }
 
@@ -48,9 +47,9 @@ export function projectToolStatusEnvelope(input: ProjectToolStatusEnvelopeInput)
     evidenceRefs: unique([`tool:${input.request.callId}`, input.diagnosticRef, ...(input.evidenceRefs ?? [])]),
     tokenEstimate: estimateTokens(agentSummary),
     truncated: false,
-    redacted: true,
+    redacted: false,
     diagnosticRef: input.diagnosticRef,
-    rawRetention: "diagnostic_ref_only",
+    rawRetention: "none",
   };
 }
 

@@ -13,10 +13,10 @@ test("assistant visible text keeps ordinary hyphenated language", () => {
   );
 });
 
-test("assistant visible text still redacts concrete internal run references", () => {
+test("assistant visible text keeps concrete run references", () => {
   assert.equal(
     sanitizeAssistantVisibleText("requestId: model-request-abc\nResult from run-0003 is ready."),
-    "Result from [运行引用] is ready."
+    "requestId: model-request-abc\nResult from run-0003 is ready."
   );
 });
 
@@ -34,10 +34,10 @@ test("assistant visible text preserves intentional blank lines", () => {
   );
 });
 
-test("conversation history sanitizer uses the same internal id boundary", () => {
+test("conversation history sanitizer keeps ordinary ids while compacting whitespace", () => {
   assert.equal(
     sanitizeConversationHistoryText("A run-of-the-mill note mentions model-request-abc."),
-    "A run-of-the-mill note mentions [运行引用]."
+    "A run-of-the-mill note mentions model-request-abc."
   );
 });
 

@@ -1,10 +1,10 @@
+// Historical compatibility shim.
+//
+// The default desktop agent is a developer agent: ordinary model output,
+// tool results, errors, files, stdout/stderr, and development context must
+// remain model-visible and user-visible unless a caller is only doing explicit
+// structural truncation. Do not reintroduce token/key masking here; command
+// confirmation is the default runtime boundary.
 export function redactSensitiveText(value: string): string {
-  return value
-    .replace(/\bsk-[A-Za-z0-9_-]{6,}\b/g, "[redacted-secret]")
-    .replace(/\btvly-[A-Za-z0-9_-]{6,}\b/g, "[redacted-secret]")
-    .replace(/\bAuthorization\s*[:=]\s*(?:Bearer\s+)?[A-Za-z0-9._~+/=-]+/gi, "[redacted-token]")
-    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, "[redacted-token]")
-    .replace(/\b(?:api[_ -]?key|apikey)\s*[:=]\s*[^;\s]+/gi, "[redacted-secret]")
-    .replace(/\btoken\s*[:=]\s*[^;\s]+/gi, "[redacted-token]")
-    .replace(/\b(?:secret|password)\s*[:=]\s*[^;\s]+/gi, "[redacted-secret]");
+  return value;
 }

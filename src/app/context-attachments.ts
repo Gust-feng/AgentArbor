@@ -2,7 +2,6 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import type { ContextAttachment, ContextAttachmentKind } from "../domain/basic-agent/index.js";
 import { createId } from "../kernel/id.js";
-import { redactSensitiveText } from "../kernel/redaction.js";
 
 const MAX_FILE_PREVIEW_BYTES = 96_000;
 const MAX_FILE_PREVIEW_CHARS = 8_000;
@@ -97,7 +96,7 @@ function workspaceAttachment(workspaceRoot: string, raw: CreateContextAttachment
     kind: "workspace",
     ref: "workspace:current",
     title: label,
-    summary: safeText(raw.summary ?? "允许本轮任务使用当前工作区的只读摘要和安全引用。", 280),
+    summary: safeText(raw.summary ?? "允许本轮任务使用当前工作区上下文。", 280),
     readonlyPreview: raw.summary === undefined
       ? undefined
       : { title: label, text: safeText(raw.summary, MAX_FILE_PREVIEW_CHARS), truncated: false },
@@ -268,9 +267,6 @@ function resolveWorkspacePath(workspaceRoot: string, value: string): string {
   if (relative.startsWith("..") || path.isAbsolute(relative)) {
     throw new ContextAttachmentPreviewError("context_path_outside_workspace", "上下文路径必须位于当前工作区内。");
   }
-  if (isUnsafeReferenceText(rawPath)) {
-    throw new ContextAttachmentPreviewError("unsafe_context_reference", "上下文引用不能包含密钥、token 或运行时内部引用。");
-  }
   return resolved;
 }
 
@@ -283,9 +279,6 @@ function parseSafeWebUrl(value: string): URL {
   }
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     throw new ContextAttachmentPreviewError("invalid_web_context", "网页上下文只支持 HTTP 或 HTTPS 地址。");
-  }
-  if (isUnsafeReferenceText(url.toString())) {
-    throw new ContextAttachmentPreviewError("unsafe_context_reference", "网页地址不能包含密钥、token 或授权参数。");
   }
   return url;
 }
@@ -313,32 +306,10 @@ function requiredText(value: string | undefined, message: string): string {
   if (normalized === undefined || normalized.length === 0) {
     throw new ContextAttachmentPreviewError("missing_context_value", message);
   }
-  if (isUnsafeReferenceText(normalized)) {
-    throw new ContextAttachmentPreviewError("unsafe_context_reference", "上下文引用不能包含密钥、token 或运行时内部引用。");
-  }
   return normalized;
 }
 
 function safeText(value: string, maxLength: number): string {
-  const redacted = redactSensitiveText(value).replace(/\b(runtime|store|secret):[^\s]+/gi, "[redacted-ref]").trim();
-  return redacted.length <= maxLength ? redacted : `${redacted.slice(0, Math.max(0, maxLength - 1))}…`;
-}
-
-function isUnsafeReferenceText(value: string): boolean {
-  const normalized = value.toLowerCase();
-  return (
-    normalized.startsWith("secret:") ||
-    normalized.startsWith("runtime:") ||
-    normalized.startsWith("store:") ||
-    normalized.includes(":secret:") ||
-    normalized.includes(":runtime:") ||
-    normalized.includes(":store:") ||
-    normalized.includes("api_key") ||
-    normalized.includes("apikey") ||
-    normalized.includes("access_token") ||
-    normalized.includes("authorization") ||
-    normalized.includes("bearer ") ||
-    normalized.includes("token=") ||
-    normalized.includes("secret=")
-  );
+  const text = value.trim();
+  return text.length <= maxLength ? text : `${text.slice(0, Math.max(0, maxLength - 1))}…`;
 }

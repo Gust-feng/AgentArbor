@@ -18,7 +18,7 @@ export function toContextLedgerReadModel(
     entryId: item.itemId,
     kind: contextLedgerEntryKind(item.sourceKind),
     title: contextLedgerEntryTitle(item),
-    summary: safeContextText(item.sourceKind === "system" ? "当前任务的安全边界。" : item.summary, 360).text,
+    summary: safeContextText(item.sourceKind === "system" ? "当前任务的系统指令。" : item.summary, 360).text,
     refs: item.refs,
     status: item.truncated ? "truncated" : "used",
   }));
@@ -98,7 +98,7 @@ function contextLedgerEntryKind(kind: BasicAgentContextSourceKind): ContextLedge
 
 function contextLedgerEntryTitle(item: BasicAgentContextItem): string {
   const labels: Record<BasicAgentContextSourceKind, string> = {
-    system: "安全边界",
+    system: "系统指令",
     skill: "技能",
     conversation: "历史对话",
     conversation_summary: "历史摘要",
@@ -119,7 +119,7 @@ function contextUsageSummary(
     counts.set(item.sourceKind, (counts.get(item.sourceKind) ?? 0) + 1);
   }
   const labels: Record<BasicAgentContextSourceKind, string> = {
-    system: "安全边界",
+    system: "系统指令",
     skill: "技能",
     conversation: "历史对话",
     conversation_summary: "历史摘要",

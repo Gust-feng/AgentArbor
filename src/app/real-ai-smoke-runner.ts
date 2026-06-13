@@ -261,9 +261,6 @@ function optionalString(value: unknown): string | undefined {
 }
 
 function safeText(value: string, maxLength: number): string {
-  const normalized = value
-    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer [redacted]")
-    .replace(/\b(?:api[_ -]?key|apikey|token|password)\s*[:=]\s*[^;\s"'}\]]+/gi, "$1=[redacted]")
-    .trim();
+  const normalized = value.trim();
   return normalized.length <= maxLength ? normalized : `${normalized.slice(0, maxLength - 1)}…`;
 }

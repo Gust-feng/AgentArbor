@@ -129,18 +129,17 @@ test("Desktop Agent Session fails when the model stops without a visible answer"
   assert.deepEqual(result.eventTypes, ["goal.received"]);
 });
 
-test("Desktop Agent Session fails when safety projection removes the whole model answer", async () => {
+test("Desktop Agent Session preserves model text that used to look like control markup", async () => {
   const channel = new EmptyVisibleAnswerChannel("<tool_call>{\"name\":\"read_file\"}</tool_call>");
   const result = await runDesktopAgentSession("不要把内部控制文本当答案", {
     aiMode: "fake",
     createIntelligenceChannel: () => channel,
   });
 
-  assert.equal(result.status, "failed");
-  assert.equal(result.answer, undefined);
-  assert.equal(result.failureMessage, "Desktop Agent model stopped without a visible answer.");
+  assert.equal(result.status, "completed");
+  assert.equal(result.answer?.answer, "<tool_call>{\"name\":\"read_file\"}</tool_call>");
   assert.equal(channel.requests.length, 1);
-  assert.equal(JSON.stringify(result).includes("<tool_call>"), false);
+  assert.equal(JSON.stringify(result).includes("<tool_call>"), true);
 });
 
 test("Desktop Agent Session can use authorized tools before answering", async () => {
@@ -885,8 +884,8 @@ test("Desktop Agent Session surfaces sanitized model request exceptions as faile
   assert.equal(result.status, "failed");
   assert.equal(result.answer, undefined);
   assert.equal(result.failureMessage?.includes("provider network unavailable"), true);
-  assert.equal(result.failureMessage?.includes("sk-desktop-runtime-secret"), false);
-  assert.equal(result.failureMessage?.includes("[redacted-secret]"), true);
+  assert.equal(result.failureMessage?.includes("sk-desktop-runtime-secret"), true);
+  assert.equal(result.failureMessage?.includes("[redacted-secret]"), false);
   assert.notEqual(result.failureMessage, "任务没有完成。");
   assert.equal(result.modelCallRefs.length >= 2, true);
 });
@@ -1014,7 +1013,7 @@ test("Desktop Agent Session forces live streaming when a delta callback is provi
   assert.equal(result.answer?.answer, "第一段第二段");
 });
 
-test("Desktop Agent Session removes internal control fragments from visible answers", async () => {
+test("Desktop Agent Session preserves visible answers without stripping control-like fragments", async () => {
   const channel: IntelligenceChannel = {
     async request(request) {
       return textResponse(
@@ -1033,12 +1032,12 @@ test("Desktop Agent Session removes internal control fragments from visible answ
   });
 
   assert.equal(result.status, "completed");
-  assert.equal(result.answer?.answer.includes("<start_work_session>"), false);
-  assert.equal(result.answer?.answer.includes("<query>"), false);
+  assert.equal(result.answer?.answer.includes("<start_work_session>"), true);
+  assert.equal(result.answer?.answer.includes("<query>"), true);
   assert.equal(result.answer?.answer.includes("可见结论"), true);
 });
 
-test("Desktop Agent Session redacts raw references without dropping ordinary task headings", async () => {
+test("Desktop Agent Session preserves raw references in visible answers", async () => {
   const channel: IntelligenceChannel = {
     async request(request) {
       return textResponse(
@@ -1058,12 +1057,12 @@ test("Desktop Agent Session redacts raw references without dropping ordinary tas
 
   assert.equal(result.status, "completed");
   assert.equal(result.answer?.answer.includes("当前任务"), true);
-  assert.equal(result.answer?.answer.includes("goal-0003"), false);
-  assert.equal(result.answer?.answer.includes("model-request-abc"), false);
+  assert.equal(result.answer?.answer.includes("goal-0003"), true);
+  assert.equal(result.answer?.answer.includes("model-request-abc"), true);
   assert.equal(result.answer?.answer.includes("可以继续"), true);
 });
 
-test("Desktop Agent Session drops provider control markup without synthetic confirmation", async () => {
+test("Desktop Agent Session preserves provider control-like markup without synthetic confirmation", async () => {
   const channel: IntelligenceChannel = {
     async request(request) {
       return textResponse(
@@ -1082,8 +1081,8 @@ test("Desktop Agent Session drops provider control markup without synthetic conf
   });
 
   assert.equal(result.status, "completed");
-  assert.equal(result.answer?.answer.includes("<tool_call>"), false);
-  assert.equal(result.answer?.answer.includes("\"name\":\"read\""), false);
+  assert.equal(result.answer?.answer.includes("<tool_call>"), true);
+  assert.equal(result.answer?.answer.includes("\"name\":\"read\""), true);
   assert.equal(result.answer?.answer.includes("准备调用工具"), false);
   assert.equal(result.answer?.answer.includes("我需要你先提供文件引用"), true);
   assert.equal(result.pendingConfirmation, undefined);

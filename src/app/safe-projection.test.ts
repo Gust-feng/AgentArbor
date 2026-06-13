@@ -15,9 +15,9 @@ test("ordinary markdown fragments preserve indentation and repeated spaces", () 
   );
 });
 
-test("ordinary markdown fragments still redact secrets without trimming visible text", () => {
+test("ordinary markdown fragments keep visible text without redaction", () => {
   assert.equal(
     redactOrdinaryMarkdownFragment(" hello api_key=secret-value "),
-    " hello [redacted-secret] "
+    " hello api_key=secret-value "
   );
 });

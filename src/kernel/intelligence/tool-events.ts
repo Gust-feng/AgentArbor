@@ -190,7 +190,7 @@ function toJsonSafe(value: unknown): unknown {
     return value;
   }
   if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
-    return typeof value === "string" ? redactSensitiveText(value) : value;
+    return value;
   }
   if (Array.isArray(value)) {
     return value.map(toJsonSafe);
@@ -198,11 +198,7 @@ function toJsonSafe(value: unknown): unknown {
   if (typeof value === "object") {
     const result: Record<string, unknown> = {};
     for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
-      if (isSecretLikeKey(key)) {
-        result[key] = "[redacted]";
-      } else {
-        result[key] = toJsonSafe(item);
-      }
+      result[key] = toJsonSafe(item);
     }
     return result;
   }
@@ -249,11 +245,6 @@ function truncateDeep(
 
 function sanitizeError(value: string): string {
   return redactSensitiveText(value).slice(0, 500);
-}
-
-function isSecretLikeKey(key: string): boolean {
-  const normalized = key.toLowerCase();
-  return normalized.includes("apikey") || normalized.includes("api_key") || normalized.includes("token") || normalized.includes("secret");
 }
 
 function isVerboseToolOutputKey(key: string): boolean {

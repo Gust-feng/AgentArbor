@@ -5,9 +5,8 @@ export const DESKTOP_ROOT_AGENT_OUTPUT_CONTRACT: ModelOutputContract = {
   outputKind: "explanation",
   format: "text",
   minTextLength: 1,
-  maxTextLength: 12000,
   visibleOutput: {
     fields: ["text"],
-    maxFieldLength: 1200,
+    maxFieldLength: 128_000,
   },
 };

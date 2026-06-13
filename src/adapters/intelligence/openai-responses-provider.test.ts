@@ -169,8 +169,8 @@ test("OpenAI Responses adapter preserves sanitized transport failure", async () 
   assert.equal(response.failure?.kind, "provider_network");
   assert.equal(response.failure?.retryable, true);
   assert.equal(response.failure?.message.includes("fetch failed ECONNRESET"), true);
-  assert.equal(response.failure?.message.includes(secret), false);
-  assert.equal(response.failure?.message.includes("[redacted-secret]"), true);
+  assert.equal(response.failure?.message.includes(secret), true);
+  assert.equal(response.failure?.message.includes("[redacted-secret]"), false);
 });
 
 test("OpenAI Responses adapter maps tools to function format and extracts tool calls from output", async () => {

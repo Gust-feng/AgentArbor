@@ -91,7 +91,7 @@ export function toolPresentationForName(
     categoryLabel: toolCategoryLabel(metadata?.category),
     operationLabel: toolOperationLabel(metadata?.operationType),
     riskLabel: toolRiskLabel(metadata?.riskLevel),
-    confirmationLabel: metadata?.requiresConfirmation === true ? "高影响" : "可用",
+    confirmationLabel: metadata?.requiresConfirmation === true ? "需确认" : "可用",
   };
 }
 

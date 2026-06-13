@@ -33,7 +33,7 @@ test("Desktop Agent context pack uses the default AgentDefinition when none is i
   assert.equal(pack.inputRefs.some((ref) => ref.kind === "event" && ref.id === DESKTOP_ROOT_AGENT.prompt.promptRef), true);
 });
 
-test("Basic Agent context pack includes history, task refs, readonly previews, and skills safely", () => {
+test("Basic Agent context pack includes history, task refs, readonly previews, and skills without redaction", () => {
   const skill: DesktopAgentSkillContext = {
     skill: {
       id: "repo-review",
@@ -86,9 +86,10 @@ test("Basic Agent context pack includes history, task refs, readonly previews, a
   const text = JSON.stringify(pack);
   assert.equal(text.includes("previous assistant reply"), true);
   assert.equal(text.includes("README.md"), true);
-  assert.equal(text.includes("sk-skill-secret-token"), false);
-  assert.equal(text.includes("context-token-value"), false);
-  assert.equal(text.includes("api_key"), false);
+  assert.equal(text.includes("context-token-value"), true);
+  assert.equal(text.includes("api_key=sk-context-secret"), true);
+  assert.equal(text.includes("[redacted-secret]"), false);
+  assert.equal(text.includes("[redacted-token]"), false);
 });
 
 test("Basic Agent context pack does not expose run facts or tool visibility metadata", () => {

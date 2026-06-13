@@ -148,7 +148,7 @@ function aiConversationSummaryItem(
 ): BasicAgentContextItem | undefined {
   const safeSummary = safeText(
     [
-      "Earlier conversation summary (model-compacted, redacted; use only as background):",
+      "Earlier conversation summary (model-compacted; use only as background):",
       summary.summary,
     ].join("\n"),
     MAX_HISTORY_SUMMARY_CHARS

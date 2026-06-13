@@ -23,6 +23,8 @@ import {
   stringArray,
 } from "./cognitive-work-session-safe.js";
 
+const DIRECT_ANSWER_MAX_CHARS = 128_000;
+
 export function managerDecisionMessages(input: {
   readonly goal: string;
   readonly taskSoil: TaskSoil;
@@ -201,10 +203,10 @@ export function directAnswerOutputContract(): ModelOutputContract {
     outputKind: "explanation",
     format: "text",
     minTextLength: 1,
-    maxTextLength: 12000,
+    maxTextLength: DIRECT_ANSWER_MAX_CHARS,
     visibleOutput: {
       fields: ["text"],
-      maxFieldLength: 1200,
+      maxFieldLength: DIRECT_ANSWER_MAX_CHARS,
     },
   };
 }
@@ -315,7 +317,7 @@ export function parseDirectAnswer(response: ModelResponse | undefined): Cognitiv
         : undefined;
   if (textAnswer !== undefined) {
     return {
-      answer: safeText(textAnswer, 12000),
+      answer: safeText(textAnswer, DIRECT_ANSWER_MAX_CHARS),
       evidenceRefs: [],
       uncertainty: [],
       followUpSuggestions: [],

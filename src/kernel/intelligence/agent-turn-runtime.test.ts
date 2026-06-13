@@ -169,8 +169,8 @@ test("AgentTurnRuntime returns a failed model response when the model request th
   assert.equal(result.finalOutput?.failure?.kind, "provider_network");
   assert.equal(result.finalOutput?.failure?.retryable, true);
   assert.equal(result.finalOutput?.failure?.message.includes("provider network unavailable"), true);
-  assert.equal(result.finalOutput?.failure?.message.includes("sk-runtime-secret"), false);
-  assert.equal(result.finalOutput?.failure?.message.includes("[redacted-secret]"), true);
+  assert.equal(result.finalOutput?.failure?.message.includes("sk-runtime-secret"), true);
+  assert.equal(result.finalOutput?.failure?.message.includes("[redacted-secret]"), false);
   assert.equal(result.modelRounds, 0);
   assert.equal(result.toolCalls.length, 0);
 });

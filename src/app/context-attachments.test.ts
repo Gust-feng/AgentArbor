@@ -8,7 +8,7 @@ import {
   createContextAttachmentPreview,
 } from "./context-attachments.js";
 
-test("context attachment preview creates safe file refs without file body", async () => {
+test("context attachment preview creates file refs with bounded file preview", async () => {
   const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-context-preview-"));
   const secretBody = "private note with sk-context-secret and Bearer live-token";
   await fs.writeFile(path.join(workspace, "notes.md"), secretBody, "utf8");
@@ -24,25 +24,23 @@ test("context attachment preview creates safe file refs without file body", asyn
     assert.equal(attachment.status, "ready");
     assert.equal(attachment.permissionRefs.includes("read:file:notes.md"), true);
     assert.equal(attachment.readonlyPreviewMeta.byteLength, Buffer.byteLength(secretBody));
-    assert.equal(text.includes(secretBody), false);
-    assert.equal(text.includes("sk-context-secret"), false);
-    assert.equal(text.includes("Bearer live-token"), false);
+    assert.equal(text.includes(secretBody), true);
+    assert.equal(text.includes("sk-context-secret"), true);
+    assert.equal(text.includes("Bearer live-token"), true);
   } finally {
     await fs.rm(workspace, { recursive: true, force: true });
   }
 });
 
-test("context attachment preview rejects unsafe and outside-workspace refs", async () => {
+test("context attachment preview rejects outside-workspace refs and accepts token-like URLs", async () => {
   const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-context-reject-"));
   try {
     await assert.rejects(
       () => createContextAttachmentPreview({ workspaceRoot: workspace, raw: { kind: "file", value: "..\\outside.md" } }),
       (error: unknown) => error instanceof ContextAttachmentPreviewError && error.code === "context_path_outside_workspace"
     );
-    await assert.rejects(
-      () => createContextAttachmentPreview({ workspaceRoot: workspace, raw: { kind: "web", value: "https://example.com/?access_token=abc" } }),
-      (error: unknown) => error instanceof ContextAttachmentPreviewError && error.code === "unsafe_context_reference"
-    );
+    const web = await createContextAttachmentPreview({ workspaceRoot: workspace, raw: { kind: "web", value: "https://example.com/?access_token=abc" } });
+    assert.equal(web.ref, "web:https://example.com/?access_token=abc");
   } finally {
     await fs.rm(workspace, { recursive: true, force: true });
   }

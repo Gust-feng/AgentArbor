@@ -1,6 +1,5 @@
 import type { ModelMessage, ModelResponse } from "../../domain/intelligence/index.js";
 import type { ToolCallRequest, ToolCallResult } from "../../domain/tools/index.js";
-import { redactSensitiveText } from "../redaction.js";
 import { redactOrdinaryToolText } from "../tools/index.js";
 import { toSafeToolEventValue } from "./tool-events.js";
 import { cloneModelMessage, cloneToolCallRequest } from "./tool-use-loop-cloning.js";
@@ -62,7 +61,7 @@ function sanitizeProjectedAgentContent(value: unknown): unknown {
     return value;
   }
   if (typeof value === "string") {
-    return redactSensitiveText(value);
+    return value;
   }
   if (typeof value === "number" || typeof value === "boolean") {
     return value;
@@ -73,20 +72,11 @@ function sanitizeProjectedAgentContent(value: unknown): unknown {
   if (typeof value === "object") {
     const result: Record<string, unknown> = {};
     for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
-      result[key] = isSecretLikeKey(key) ? "[redacted]" : sanitizeProjectedAgentContent(item);
+      result[key] = sanitizeProjectedAgentContent(item);
     }
     return result;
   }
   return String(value);
-}
-
-function isSecretLikeKey(key: string): boolean {
-  const normalized = key.toLowerCase();
-  return normalized.includes("apikey") ||
-    normalized.includes("api_key") ||
-    normalized.includes("token") ||
-    normalized.includes("secret") ||
-    normalized.includes("password");
 }
 
 function truncateToolMessageContent(value: string): string {

@@ -1,7 +1,6 @@
 import type { ModelRequest, ModelResponse } from "../../domain/intelligence/index.js";
 import type { ToolCallRequest, ToolCallResult } from "../../domain/tools/index.js";
 import { toolDisplayName } from "../../domain/tools/index.js";
-import { redactSensitiveText } from "../redaction.js";
 import { projectToolStatusEnvelope } from "../tools/index.js";
 import type {
   ToolUseLoopConfirmationDecision,
@@ -61,7 +60,7 @@ export function cancelledToolResult(request: ToolCallRequest): ToolCallResult {
         diagnosticRef,
       }),
       truncated: false,
-      redacted: true,
+      redacted: false,
     },
   };
 }
@@ -149,7 +148,7 @@ export function approvalRequiredResultFromPending(pendingApproval: ToolUseLoopPe
         diagnosticRef,
       }),
       truncated: false,
-      redacted: true,
+      redacted: false,
     },
     confirmationRequest: globalThis.structuredClone(confirmationRequest),
   };
@@ -199,7 +198,7 @@ export function confirmationDecisionToolResult(
         evidenceRefs: [`confirmation:${decision.confirmationId}`],
       }),
       truncated: false,
-      redacted: true,
+      redacted: false,
     },
   };
 }
@@ -234,7 +233,7 @@ export function confirmationDecisionSkippedToolResult(
         evidenceRefs: [`confirmation:${decision.confirmationId}`],
       }),
       truncated: false,
-      redacted: true,
+      redacted: false,
     },
   };
 }
@@ -294,15 +293,15 @@ function contextOverflowModelResponse(
 
 function confirmationDecisionSummary(decision: ToolUseLoopConfirmationDecision): string {
   if (decision.decision === "deny") {
-    return "用户拒绝了本次工具执行。不要执行该工具；请基于当前安全上下文判断是否改用其他方式、请求更多信息或直接回答。";
+    return "用户拒绝了本次工具执行。不要执行该工具；请基于当前上下文判断是否改用其他方式、请求更多信息或直接回答。";
   }
   const guidance = decision.guidance === undefined ? undefined : compactConfirmationGuidance(decision.guidance);
   return guidance === undefined || guidance.length === 0
-    ? "用户没有批准本次工具执行，并补充了指导。不要执行该工具；请基于当前安全上下文继续判断下一步。"
+    ? "用户没有批准本次工具执行，并补充了指导。不要执行该工具；请基于当前上下文继续判断下一步。"
     : `用户没有批准本次工具执行，并补充了指导：${guidance}。不要执行该工具；请基于该指导继续判断下一步。`;
 }
 
 function compactConfirmationGuidance(value: string): string {
-  const redacted = redactSensitiveText(value).replace(/\s+/g, " ").trim();
-  return redacted.length <= 1_000 ? redacted : `${redacted.slice(0, 999)}…`;
+  const text = value.replace(/\s+/g, " ").trim();
+  return text.length <= 1_000 ? text : `${text.slice(0, 999)}…`;
 }

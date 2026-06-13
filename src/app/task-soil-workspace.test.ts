@@ -65,15 +65,10 @@ test("Desktop Task Soil input accepts refs, permission refs, and truncated reado
   assert.equal(taskSoil.permissionBoundaryRefs.includes("read:file:src/app/panel-assets.ts"), true);
 });
 
-test("Desktop Task Soil input rejects runtime, secret, and write refs", () => {
-  assert.throws(
-    () =>
-      parseDesktopTaskSoilInput({
-        contextRefs: [{ ref: "runtime:store/live", kind: "workspace" }],
-      }),
-    (error) =>
-      error instanceof TaskSoilInputValidationError && error.code === "unauthorized_context_ref"
-  );
+test("Desktop Task Soil input rejects unsupported write refs but accepts token-like read refs", () => {
+  assert.deepEqual(parseDesktopTaskSoilInput({
+    contextRefs: [{ ref: "workspace:secret-notes", kind: "workspace" }],
+  }).contextRefs?.[0]?.ref, "workspace:secret-notes");
   assert.throws(
     () =>
       parseDesktopTaskSoilInput({
@@ -82,33 +77,12 @@ test("Desktop Task Soil input rejects runtime, secret, and write refs", () => {
     (error) =>
       error instanceof TaskSoilInputValidationError && error.code === "unauthorized_permission_ref"
   );
-  assert.throws(
-    () =>
-      parseDesktopTaskSoilInput({
-        permissionBoundaryRefs: ["read:secret:local-dev/model-provider"],
-      }),
-    (error) =>
-      error instanceof TaskSoilInputValidationError && error.code === "unauthorized_permission_ref"
-  );
-  assert.throws(
-    () =>
-      parseDesktopTaskSoilInput({
-        permissionBoundaryRefs: ["execute:runtime:store/live"],
-      }),
-    (error) =>
-      error instanceof TaskSoilInputValidationError && error.code === "unauthorized_permission_ref"
-  );
-  assert.throws(
-    () =>
-      parseDesktopTaskSoilInput({
-        permissionBoundaryRefs: ["ask:token:local-value"],
-      }),
-    (error) =>
-      error instanceof TaskSoilInputValidationError && error.code === "unauthorized_permission_ref"
-  );
+  assert.deepEqual(parseDesktopTaskSoilInput({
+    permissionBoundaryRefs: ["read:secret:local-dev/model-provider", "execute:runtime:store/live", "ask:token:local-value"],
+  }).permissionBoundaryRefs, ["read:secret:local-dev/model-provider", "execute:runtime:store/live", "ask:token:local-value"]);
 });
 
-test("Desktop Task Soil input redacts common secret shapes from summaries and previews", () => {
+test("Desktop Task Soil input preserves summaries and previews", () => {
   const parsed = parseDesktopTaskSoilInput({
     taskSoil: {
       contextRefs: [
@@ -128,7 +102,7 @@ test("Desktop Task Soil input redacts common secret shapes from summaries and pr
   const constraints = createMinimalSoilConstraints();
   const soilStore = createMinimalReadonlySoilStore(constraints);
   const taskSoil = createTaskSoilFromDesktopInput({
-    goal: "Redact context preview.",
+    goal: "Keep context preview.",
     goalId: "goal-redact",
     traceId: "trace-redact",
     aiMode: "fake",
@@ -139,11 +113,11 @@ test("Desktop Task Soil input redacts common secret shapes from summaries and pr
   });
   const serialized = JSON.stringify(taskSoil);
 
-  assert.equal(serialized.includes("plain-api-value"), false);
-  assert.equal(serialized.includes("summary-token-value"), false);
-  assert.equal(serialized.includes("title-token-value"), false);
-  assert.equal(serialized.includes("preview-token-value"), false);
-  assert.equal(serialized.includes("plain-password-value"), false);
-  assert.equal(serialized.includes("[redacted-secret]"), true);
-  assert.equal(serialized.includes("[redacted-token]"), true);
+  assert.equal(serialized.includes("plain-api-value"), true);
+  assert.equal(serialized.includes("summary-token-value"), true);
+  assert.equal(serialized.includes("title-token-value"), true);
+  assert.equal(serialized.includes("preview-token-value"), true);
+  assert.equal(serialized.includes("plain-password-value"), true);
+  assert.equal(serialized.includes("[redacted-secret]"), false);
+  assert.equal(serialized.includes("[redacted-token]"), false);
 });

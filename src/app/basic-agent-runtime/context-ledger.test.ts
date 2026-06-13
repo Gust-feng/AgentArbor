@@ -78,7 +78,7 @@ test("context ledger keeps safe text and read model projection split from select
   assert.equal(readModelSource.includes("function contextUsageSummary"), true);
 });
 
-test("context ledger records goal, history, attachments, skills, budget, and safe refs", () => {
+test("context ledger records goal, history, attachments, skills, budget, and refs without redaction", () => {
   const taskSoil = createTaskSoil({
     rawGoal: "summarize attached project",
     goalId: "goal-ledger",
@@ -135,17 +135,17 @@ test("context ledger records goal, history, attachments, skills, budget, and saf
   assert.equal(ledger.readModel.entries.some((entry) => entry.kind === "attachment"), true);
   assert.equal(ledger.readModel.entries.some((entry) => entry.kind === "budget" && entry.status === "used"), true);
   const systemReadModelEntry = ledger.readModel.entries.find((entry) => entry.entryId === "context:system:ledger-test-agent");
-  assert.equal(systemReadModelEntry?.summary, "当前任务的安全边界。");
+  assert.equal(systemReadModelEntry?.summary, "当前任务的系统指令。");
   assert.equal(JSON.stringify(ledger.readModel).includes(LEDGER_TEST_AGENT.prompt.systemPrompt), false);
   assert.match(ledger.readModel.summary, /最近对话/);
   const json = JSON.stringify(ledger);
-  assert.equal(json.includes("sk-context-secret"), false);
-  assert.equal(json.includes("sk-user-secret"), false);
+  assert.equal(json.includes("sk-context-secret"), true);
+  assert.equal(json.includes("sk-user-secret"), true);
   assert.equal(json.includes("runtime:"), false);
   assert.equal(json.includes("store:"), false);
 });
 
-test("context ledger append preserves existing context and adds only safe tool evidence", () => {
+test("context ledger append preserves existing context and adds tool evidence without redaction", () => {
   const taskSoil = createTaskSoil({
     rawGoal: "answer with evidence",
     goalId: "goal-append",
@@ -167,7 +167,7 @@ test("context ledger append preserves existing context and adds only safe tool e
   assert.equal(appended.evidenceRefs.includes("web:https://example.test"), true);
   const json = JSON.stringify(appended);
   assert.equal(json.includes("raw stdout body"), false);
-  assert.equal(json.includes("sk-tool-secret"), false);
+  assert.equal(json.includes("sk-tool-secret"), true);
 });
 
 test("context ledger reports truncation when messages or chars exceed budget", () => {
@@ -313,7 +313,7 @@ test("context ledger keeps recent role history ahead of bulky skills under budge
   assert.equal(ledger.truncationReport.truncated, true);
 });
 
-test("context ledger conversation history redacts secrets and internal raw fragments", () => {
+test("context ledger conversation history preserves prior conversation text", () => {
   const taskSoil = createTaskSoil({ rawGoal: "continue safely", goalId: "goal-safe-history", traceId: "trace-safe-history" });
   const ledger = createBasicAgentContextLedger({
     agentDefinition: LEDGER_TEST_AGENT,
@@ -352,12 +352,12 @@ test("context ledger conversation history redacts secrets and internal raw fragm
 
   assert.equal(text.includes("safe older request"), true);
   assert.equal(text.includes("safe older answer"), true);
-  assert.equal(text.includes("sk-history-secret"), false);
-  assert.equal(text.includes("raw prompt"), false);
-  assert.equal(text.includes("raw provider response"), false);
-  assert.equal(text.includes("raw tool output"), false);
-  assert.equal(text.includes("hidden reasoning"), false);
-  assert.equal(text.includes("internal loop"), false);
+  assert.equal(text.includes("sk-history-secret"), true);
+  assert.equal(text.includes("raw prompt"), true);
+  assert.equal(text.includes("raw provider response"), true);
+  assert.equal(text.includes("raw tool output"), true);
+  assert.equal(text.includes("hidden reasoning"), true);
+  assert.equal(text.includes("internal loop"), true);
 });
 
 function skillContext(): DesktopAgentSkillContext {
@@ -381,9 +381,9 @@ function toolEnvelope(): ToolResultEnvelope {
     evidenceRefs: ["web:https://example.test"],
     tokenEstimate: 12,
     truncated: false,
-    redacted: true,
+    redacted: false,
     diagnosticRef: "tool:search:1",
-    rawRetention: "diagnostic_ref_only",
+    rawRetention: "none",
     uiDisplay: {
       kind: "generic_tool_summary",
       action: "search",

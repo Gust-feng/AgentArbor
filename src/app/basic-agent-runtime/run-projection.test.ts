@@ -7,7 +7,7 @@ import {
 } from "./run-projection.js";
 import type { BasicAgentCompatRunStatus } from "./run-projection.js";
 
-test("basic run projection derives BasicAgentRun state and redacts ordinary goal text", () => {
+test("basic run projection derives BasicAgentRun state and preserves ordinary goal text", () => {
   const run = projectRunJobToBasicRun({
     runId: "run-1",
     goal: "请处理这个任务，api_key=sk-test-secret-value-1234567890",
@@ -35,10 +35,10 @@ test("basic run projection derives BasicAgentRun state and redacts ordinary goal
   assert.equal(run.title, "待处理");
   assert.equal(run.currentStep, "删除操作。");
   assert.equal(run.nextStep, undefined);
-  assert.equal(run.goalSummary.includes("sk-test-secret"), false);
+  assert.equal(run.goalSummary.includes("sk-test-secret"), true);
 });
 
-test("basic stream event projection maps refs and safe summaries into RunEvent", () => {
+test("basic stream event projection maps refs and preserves summaries into RunEvent", () => {
   const event = projectRunStreamEventToRunEvent({
     eventId: "event-1",
     runId: "run-1",
@@ -56,8 +56,8 @@ test("basic stream event projection maps refs and safe summaries into RunEvent",
   assert.equal(event.title, "动作");
   assert.equal(event.status, "running");
   assert.equal(event.visibility, "expanded");
-  assert.equal(event.summary?.includes("sk-test-token"), false);
-  assert.equal(event.detail?.preview?.includes("sk-test-token"), false);
+  assert.equal(event.summary?.includes("sk-test-token"), true);
+  assert.equal(event.detail?.preview?.includes("sk-test-token"), true);
   assert.deepEqual(event.refs, [
     { kind: "event", id: "event-1" },
     { kind: "model_call", id: "model-1" },
@@ -68,7 +68,7 @@ test("basic stream event projection maps refs and safe summaries into RunEvent",
   ]);
 });
 
-test("basic stream event projection keeps safe model output delta for live assistant rendering", () => {
+test("basic stream event projection keeps model output delta for live assistant rendering", () => {
   const event = projectRunStreamEventToRunEvent({
     eventId: "event-delta-1",
     runId: "run-1",
@@ -85,7 +85,7 @@ test("basic stream event projection keeps safe model output delta for live assis
 
   assert.equal(event.type, "model.output.delta");
   assert.equal(event.delta?.includes("正在生成结果"), true);
-  assert.equal(event.delta?.includes("sk-test-token"), false);
+  assert.equal(event.delta?.includes("sk-test-token"), true);
   assert.equal(event.summary, event.delta);
 });
 
@@ -382,7 +382,7 @@ test("basic run projection keeps denied decisions visible as current step", () =
   assert.equal(run.currentStep, "已不执行。");
 });
 
-test("basic projection summarizes confirmation decisions safely", () => {
+test("basic projection summarizes confirmation decisions", () => {
   assert.equal(basicConfirmationDecisionSummary({ decision: "approve_once" }), "已允许。");
   assert.equal(basicConfirmationDecisionSummary({ decision: "deny" }), "已不执行。");
   assert.match(
@@ -394,6 +394,6 @@ test("basic projection summarizes confirmation decisions safely", () => {
       decision: "guidance",
       guidance: "继续，但不要暴露 token=sk-test-token-1234567890",
     }).includes("sk-test-token"),
-    false
+    true
   );
 });

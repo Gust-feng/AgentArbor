@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { projectToolResultEnvelope, projectToolStatusEnvelope } from "./tool-result-envelope.js";
 
-test("tool result envelope converts typed display into safe model summary and refs", () => {
+test("tool result envelope converts typed display into compact model summary and refs without redaction", () => {
   const envelope = projectToolResultEnvelope({
     request: { callId: "call-search", toolName: "search", input: { query: "AgentArbor" } },
     display: {
@@ -21,16 +21,16 @@ test("tool result envelope converts typed display into safe model summary and re
     truncated: false,
   });
 
-  assert.equal(envelope.rawRetention, "diagnostic_ref_only");
-  assert.equal(envelope.redacted, true);
+  assert.equal(envelope.rawRetention, "none");
+  assert.equal(envelope.redacted, false);
   assert.equal(envelope.uiDisplay?.kind, "search_results");
   assert.equal(envelope.evidenceRefs.includes("tool:call-search"), true);
   const json = JSON.stringify(envelope);
-  assert.equal(json.includes("sk-secret"), false);
-  assert.equal(json.includes("api_key"), false);
+  assert.equal(json.includes("sk-secret"), true);
+  assert.equal(json.includes("api_key"), true);
 });
 
-test("tool status envelope covers failed, approval-required, and cancelled without raw output", () => {
+test("tool status envelope covers failed, approval-required, and cancelled without redaction", () => {
   for (const status of ["failed", "approval_required", "cancelled"] as const) {
     const envelope = projectToolStatusEnvelope({
       request: { callId: `call-${status}`, toolName: "shell_command", input: { command: "pnpm test" } },
@@ -39,9 +39,9 @@ test("tool status envelope covers failed, approval-required, and cancelled witho
       diagnosticRef: `tool:call-${status}:${status}`,
     });
 
-    assert.equal(envelope.rawRetention, "diagnostic_ref_only");
-    assert.equal(envelope.redacted, true);
+    assert.equal(envelope.rawRetention, "none");
+    assert.equal(envelope.redacted, false);
     assert.equal(envelope.evidenceRefs.includes(`tool:call-${status}`), true);
-    assert.equal(JSON.stringify(envelope).includes("sk-secret"), false);
+    assert.equal(JSON.stringify(envelope).includes("sk-secret"), true);
   }
 });

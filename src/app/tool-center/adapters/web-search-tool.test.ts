@@ -27,6 +27,7 @@ test("web_search maps Tavily results through injected fetch", async () => {
   assert.deepEqual(output, {
     provider: "tavily",
     status: "completed",
+    searched: true,
     query: "AgentArbor ToolCenter",
     results: [{ title: "Result A", url: "https://example.test/a", snippet: "Snippet A" }],
   });
@@ -45,8 +46,9 @@ test("web_search returns no_search_provider without API key", async () => {
   assert.deepEqual(output, {
     provider: "none",
     status: "no_search_provider",
+    searched: false,
     query: "AgentArbor ToolCenter",
     results: [],
-    message: "No configured search provider. Set a Tavily API key to enable live search.",
+    message: "No configured search provider; no live web search was performed. Set a Tavily API key to enable live search.",
   });
 });

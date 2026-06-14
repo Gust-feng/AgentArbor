@@ -140,6 +140,57 @@ test("persisted run response restores ordinary tool transcript without old diagn
   assert.equal(activityText.includes("exit 0"), false);
 });
 
+test("persisted run response restores model failures as typed failed events", () => {
+  const base = runtimeSnapshot();
+  const response = createPersistedPanelRunResponse({
+    snapshot: {
+      ...base,
+      run: {
+        ...base.run,
+        status: "failed",
+        completedAt: undefined,
+        resultTitle: undefined,
+        resultSummary: undefined,
+        error: {
+          code: "model_failed",
+          message: "工具已执行，但后续模型续跑失败。模型服务连接失败。",
+        },
+      },
+      events: [
+        runtimeEvent(1, "tool.completed", "python hello_agent.py · exit 0", [{ kind: "tool_call", id: "tool-1" }]),
+        runtimeEvent(2, "model.failed", "模型服务连接失败。", [{ kind: "model_call", id: "model-1" }]),
+      ],
+      modelCalls: [
+        {
+          requestId: "model-1",
+          runId: "run-1",
+          status: "failed",
+          purpose: "desktop_agent",
+          providerKind: "openai_compatible",
+          protocolKind: "openai_compatible_chat_completions",
+          model: "fake-model",
+          failureKind: "provider_network",
+          retryable: true,
+          eventRefs: ["run-1:event:2"],
+        },
+      ],
+      confirmations: [],
+    },
+    config: modelConfig(),
+    informationAccess: informationAccess(),
+  });
+  const modelFailure = response.transcript.events.find((event) => event.type === "model.failed");
+  const modelFailureNode = response.transcriptNodes.find((node) => node.eventType === "model.failed");
+  const activityText = JSON.stringify(displayActivityItemsForNodes(activityVisibleNodes(response.transcriptNodes)));
+
+  assert.equal(modelFailure?.status, "failed");
+  assert.equal(modelFailure?.agentLabel, "助手");
+  assert.equal(modelFailureNode?.kind, "system");
+  assert.equal(modelFailureNode?.phase, "failed");
+  assert.equal(activityText.includes("模型"), true);
+  assert.equal(response.transcript.events.some((event) => event.type === "agent.note.completed" && event.summary === "模型服务连接失败。"), false);
+});
+
 test("persisted runtime running status restores as blocked ordinary panel state", () => {
   assert.equal(panelStatusFromRuntimeStatus("running"), "blocked");
 });

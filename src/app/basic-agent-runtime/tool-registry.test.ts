@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ToolExecutor } from "../../domain/tools/index.js";
+import {
+  modelVisibleToolDescription,
+  validateModelVisibleToolContract,
+} from "../../domain/tools/index.js";
 import { createDesktopBasicToolRegistry } from "./builtin-tool-runtime.js";
 import { ToolRegistry } from "./tool-registry.js";
 
@@ -19,14 +23,15 @@ test("desktop-basic tool registry exposes catalog and allowed tools from scoped 
     "read_file",
     "search",
     "shell_command",
+    "write_file",
   ]);
   assert.equal(catalog.tools.find((tool) => tool.name === "run_command")?.requiresConfirmation, true);
   assert.equal(catalog.tools.find((tool) => tool.name === "shell_command")?.requiresConfirmation, true);
   assert.equal(catalog.tools.find((tool) => tool.name === "run_command")?.visibleResultPolicy.omitRawOutput, false);
+  assert.equal(catalog.tools.find((tool) => tool.name === "write_file")?.requiresConfirmation, false);
   assert.equal(catalog.tools.find((tool) => tool.name === "create_file")?.requiresConfirmation, false);
   assert.equal(catalog.tools.find((tool) => tool.name === "edit_file")?.requiresConfirmation, false);
   assert.equal(catalog.tools.find((tool) => tool.name === "delete_file")?.requiresConfirmation, false);
-  assert.equal(catalog.tools.some((tool) => tool.name === "write_file"), false);
   assert.equal(catalog.tools.find((tool) => tool.name === "run_command")?.operationType, "execute");
   assert.equal(catalog.tools.find((tool) => tool.name === "run_command")?.enabledByDefault, false);
   assert.equal(catalog.tools.find((tool) => tool.name === "shell_command")?.enabledByDefault, true);
@@ -42,11 +47,59 @@ test("desktop-basic tool registry exposes catalog and allowed tools from scoped 
 
   const runCommand = catalog.tools.find((tool) => tool.name === "run_command");
   const shellCommand = catalog.tools.find((tool) => tool.name === "shell_command");
-  assert.equal(runCommand?.displayDescription, "兼容旧命令调用；新调用应使用 Shell 命令。");
-  assert.equal(shellCommand?.displayDescription, "在当前会话 Shell 中运行完整命令，需要确认。");
-  assert.match(runCommand?.description ?? "", /Compatibility command executor/);
-  assert.match(shellCommand?.description ?? "", /commandLine/);
+  assert.equal(runCommand?.displayDescription, "兼容旧命令入口，保留给历史运行与旧提示词。");
+  assert.equal(shellCommand?.displayDescription, "在当前会话 Shell 中运行命令，并把结果原样返回给模型。");
+  assert.match(runCommand?.description ?? "", /Legacy alias of shell_command/);
+  assert.match(shellCommand?.description ?? "", /current integrated shell/);
+  assert.match(shellCommand?.description ?? "", /Use commandLine for normal shell-native command execution/);
   assert.equal(shellCommand?.runtimeHints?.[0]?.kind, "command_shell");
+});
+
+test("desktop-basic model-visible tools carry structured model contracts", () => {
+  const registry = createDesktopBasicToolRegistry({ env: {}, workspaceRoot: process.cwd(), playwrightAvailable: true });
+  const center = registry.createToolCenter("desktop-basic");
+  const modelVisibleTools = center.list();
+
+  assert.deepEqual(modelVisibleTools.map((tool) => tool.name), [
+    "search",
+    "read",
+    "read_file",
+    "list_dir",
+    "grep_files",
+    "create_file",
+    "write_file",
+    "edit_file",
+    "delete_file",
+    "shell_command",
+    "browser_snapshot",
+  ]);
+
+  for (const tool of modelVisibleTools) {
+    const validation = validateModelVisibleToolContract(tool);
+    assert.equal(validation.ok, true, `${tool.name}: ${validation.missing.join(", ")}`);
+  }
+});
+
+test("model-visible tool description is concise and structured for the model", () => {
+  const registry = createDesktopBasicToolRegistry({
+    env: {},
+    workspaceRoot: process.cwd(),
+    playwrightAvailable: true,
+    toolCatalogNames: ["shell_command"],
+  });
+  const shellCommand = registry.createToolCenter("desktop-basic").list()[0];
+  assert.notEqual(shellCommand, undefined);
+  const description = modelVisibleToolDescription(shellCommand!);
+
+  assert.match(description, /^Purpose: Run a real command/m);
+  assert.match(description, /\n\nWhen to use:\n- /);
+  assert.match(description, /\n\nInputs:\n- commandLine/);
+  assert.match(description, /\n\nRuntime hints:\n- current shell:/);
+  assert.match(description, /\n\nOutput:\n- result\.stdout/);
+  assert.match(description, /creating directories, copying or moving files/);
+  assert.match(description, /\n\nExamples:\n- Run tests: \{"commandLine":"pnpm test","timeoutMs":120000\}/);
+  assert.doesNotMatch(description, /Shell 命令|需确认|终端命令|风险|运行时工具/);
+  assert.equal(description.includes("Allowed tools:"), false);
 });
 
 test("desktop-basic tool descriptions stay plain and do not expose deep product terms", () => {
@@ -214,6 +267,36 @@ test("tool registry rejects tools without complete metadata", () => {
   };
 
   assert.throws(() => registry.register({ executor, scopes: ["desktop-basic"], enabledByDefault: true }), /without metadata/);
+});
+
+test("tool registry rejects enabled built-in-scope tools without model-visible contract guidance", () => {
+  const registry = new ToolRegistry();
+  const executor: ToolExecutor = {
+    definition: {
+      name: "thin_visible_tool",
+      description: "Thin model-visible tool.",
+      inputSchema: { type: "object", properties: {} },
+      metadata: {
+        category: "other",
+        riskLevel: "low",
+        operationType: "read-only",
+        requiresConfirmation: false,
+        visibleResultPolicy: {
+          userVisible: "summary-only",
+          maxPreviewChars: 400,
+          omitRawOutput: true,
+        },
+      },
+    },
+    async execute() {
+      return { ok: true };
+    },
+  };
+
+  assert.throws(
+    () => registry.register({ executor, scopes: ["desktop-basic"], enabledByDefault: true }),
+    /missing model contract fields: modelContract/
+  );
 });
 
 function mcpToolExecutor(): ToolExecutor {

@@ -284,6 +284,20 @@ test("narration copy keeps dotted product and version text together", () => {
   });
 });
 
+test("activity copy labels model failures distinctly from generic problems", () => {
+  const copy = activityLineForNode(node({
+    kind: "system",
+    eventType: "model.failed",
+    phase: "failed",
+    summary: "工具已执行，但后续模型续跑失败。模型服务连接失败。",
+  }));
+
+  assert.deepEqual(copy, {
+    label: "模型",
+    detail: "工具已执行，但后续模型续跑失败。 模型服务连接失败。",
+  });
+});
+
 test("user decision activity copy preserves visible decision text", () => {
   const copy = activityLineForNode(node({
     kind: "user_decision",

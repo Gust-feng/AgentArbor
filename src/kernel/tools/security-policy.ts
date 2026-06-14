@@ -6,7 +6,7 @@ import type {
   ToolSecurityDecision,
   ToolSecurityEvaluationContext,
 } from "../../domain/tools/index.js";
-import { toolPresentationForDefinition } from "../../domain/tools/index.js";
+import { commandTextFromValue, toolPresentationForDefinition } from "../../domain/tools/index.js";
 import { nowIso } from "../id.js";
 import { redactOrdinaryToolText } from "./tool-result-envelope.js";
 
@@ -26,7 +26,7 @@ export function evaluateToolCallSecurity(input: {
     return { decision: "allow", reason: "Matching confirmation id was approved for this tool call." };
   }
 
-  if (requiresCommandConfirmation(input.request, input.metadata)) {
+  if (input.metadata.requiresConfirmation === true) {
     return approvalDecision({
       request: input.request,
       definition: input.definition,
@@ -35,14 +35,6 @@ export function evaluateToolCallSecurity(input: {
   }
 
   return { decision: "allow", reason: "Tool call is allowed by metadata and platform policy." };
-}
-
-function requiresCommandConfirmation(
-  request: ToolCallRequest,
-  metadata: ToolDefinitionMetadata
-): boolean {
-  return metadata.requiresConfirmation === true &&
-    (request.toolName === "run_command" || request.toolName === "shell_command");
 }
 
 export function confirmationRequestFromSecurityDecision(input: {
@@ -127,10 +119,10 @@ function parseUrl(value: string): URL | undefined {
 
 function affectedResourcesFromInput(input: unknown): readonly string[] {
   const record = asRecord(input);
+  const commandText = commandTextFromValue(record);
   const values = [
-    stringOrUndefined(record.commandLine),
+    commandText,
     stringOrUndefined(record.path),
-    stringOrUndefined(record.command),
     stringOrUndefined(record.url),
     stringOrUndefined(record.ref),
   ];

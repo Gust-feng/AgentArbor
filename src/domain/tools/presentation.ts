@@ -20,6 +20,12 @@ type ToolPresentationSeed = {
   readonly displayDescription: string;
 };
 
+export type CommandTextLike = {
+  readonly command?: string;
+  readonly args?: readonly string[];
+  readonly commandLine?: string;
+};
+
 const BUILTIN_TOOL_PRESENTATION: Readonly<Record<string, ToolPresentationSeed>> = {
   search: {
     displayName: "资料搜索",
@@ -67,11 +73,11 @@ const BUILTIN_TOOL_PRESENTATION: Readonly<Record<string, ToolPresentationSeed>> 
   },
   run_command: {
     displayName: "运行命令",
-    displayDescription: "兼容旧命令调用；新调用应使用 Shell 命令。",
+    displayDescription: "兼容旧命令入口，保留给历史运行与旧提示词。",
   },
   shell_command: {
     displayName: "Shell 命令",
-    displayDescription: "在当前会话 Shell 中运行完整命令，需要确认。",
+    displayDescription: "在当前会话 Shell 中运行命令，并把结果原样返回给模型。",
   },
 };
 
@@ -97,6 +103,43 @@ export function toolPresentationForName(
 
 export function toolDisplayName(name: string, metadata?: ToolDefinitionMetadata): string {
   return toolPresentationForName(name, metadata).displayName;
+}
+
+export function commandDisplayText(display: CommandTextLike): string | undefined {
+  if (typeof display.commandLine === "string" && display.commandLine.trim().length > 0) {
+    return display.commandLine.trim();
+  }
+  const parts = [display.command, ...(display.args ?? [])]
+    .filter((value): value is string => typeof value === "string" && value.trim().length > 0);
+  return parts.length === 0 ? undefined : parts.join(" ");
+}
+
+export function commandTextFromValue(value: unknown, fallback?: unknown): string | undefined {
+  const primary = asRecord(value);
+  const secondary = asRecord(fallback);
+  const commandLine =
+    stringOrUndefined(primary.commandLine) ??
+    stringOrUndefined(secondary.commandLine);
+  if (commandLine !== undefined) {
+    return commandLine;
+  }
+  const command =
+    stringOrUndefined(primary.command) ??
+    stringOrUndefined(secondary.command);
+  if (command === undefined) {
+    return undefined;
+  }
+  const primaryArgs = stringArray(primary.args);
+  const args = primaryArgs.length > 0 ? primaryArgs : stringArray(secondary.args);
+  return [command, ...args].join(" ").trim();
+}
+
+export function commandProgramFromValue(value: unknown, fallback?: unknown): string | undefined {
+  const primary = asRecord(value);
+  const secondary = asRecord(fallback);
+  return stringOrUndefined(primary.command)
+    ?? stringOrUndefined(secondary.command)
+    ?? commandTextFromValue(primary, secondary);
 }
 
 export function toolCategoryLabel(category: ToolCategory | undefined): string {
@@ -176,4 +219,20 @@ function fallbackPresentation(metadata: ToolDefinitionMetadata | undefined): Too
     displayName: "工具能力",
     displayDescription: "运行时工具。",
   };
+}
+
+function asRecord(value: unknown): Readonly<Record<string, unknown>> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as Readonly<Record<string, unknown>>
+    : {};
+}
+
+function stringArray(value: unknown): readonly string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : [];
+}
+
+function stringOrUndefined(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
 }

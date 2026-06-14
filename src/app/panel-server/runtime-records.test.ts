@@ -356,6 +356,50 @@ test("runtime record mapper persists safe model, event, tool, and confirmation p
   assert.equal(confirmations[0]?.guidance?.includes("sk-guidance-secret"), true);
 });
 
+test("runtime record mapper keeps commandLine as the persisted command fact", () => {
+  const toolCalls = toRuntimeToolCallRecords("run-1", [
+    streamEvent({
+      sequence: 1,
+      type: "tool.completed",
+      toolName: "shell_command",
+      toolCallRefs: ["tool-call-quoted"],
+      detail: {
+        kind: "tool",
+        action: "执行 Shell",
+      },
+    }),
+  ], [
+    eventEntry({
+      sequence: 1,
+      type: "tool.completed",
+      payload: {
+        callId: "tool-call-quoted",
+        toolName: "shell_command",
+        input: {
+          commandLine: `node -e "console.log('fragile quoted shell')"`,
+          command: "node",
+          args: ["-e", "console.log('fragile quoted shell')"],
+        },
+        output: {
+          action: "shell_command",
+          summary: `node -e "console.log('fragile quoted shell')" · exit 0`,
+          result: {
+            command: "node",
+            commandLine: `node -e "console.log('fragile quoted shell')"`,
+            args: ["-e", "console.log('fragile quoted shell')"],
+            exitCode: 0,
+            stdout: "fragile quoted shell",
+          },
+        },
+      },
+    }),
+  ]);
+
+  assert.equal(toolCalls[0]?.command, `node -e "console.log('fragile quoted shell')"`);
+  assert.equal(toolCalls[0]?.command?.includes(`-e console.log('fragile quoted shell')`), false);
+  assert.equal(toolCalls[0]?.preview, `node -e "console.log('fragile quoted shell')"`);
+});
+
 test("runtime confirmation records title decisions without generic continue copy", () => {
   const confirmations = toRuntimeConfirmationRecords(job({
     confirmationDecisions: [

@@ -73,6 +73,18 @@ test("confirmation display projection keeps only concrete action copy", () => {
   assert.equal(view.riskLevel, "high");
 });
 
+test("confirmation display projection keeps shell command preview concrete without duplicating the title", () => {
+  const view = projectConfirmationDisplay({
+    title: "Shell 命令",
+    actionSummary: "Shell 命令：python -c print('ok')",
+    riskLevel: "medium",
+  });
+
+  assert.equal(view.title, "Shell 命令");
+  assert.equal(view.actionPreview, "python -c print('ok')");
+  assert.equal(view.showActionPreview, true);
+});
+
 test("confirmation display projection filters internal resources and resume loss", () => {
   const view = projectConfirmationDisplay({
     title: "删除文件",

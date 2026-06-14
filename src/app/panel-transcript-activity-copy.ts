@@ -49,7 +49,10 @@ export function activityLineForNode(node: ProjectableTranscriptNode): ActivityLi
       return readableNarrationCopy(node.text ?? node.summary ?? "");
     }
     if (node.phase === "failed" || node.phase === "blocked") {
-      return { label: "问题", detail: readableNarrationText(node.text ?? node.summary ?? node.title) ?? "任务未完成。" };
+      return {
+        label: node.eventType === "model.failed" ? "模型" : "问题",
+        detail: readableNarrationText(node.text ?? node.summary ?? node.title) ?? "任务未完成。",
+      };
     }
     if (node.phase === "cancelled") return { label: "已停止", detail: "任务已取消。" };
     const detail = readableNarrationText(node.text ?? node.summary ?? node.title);

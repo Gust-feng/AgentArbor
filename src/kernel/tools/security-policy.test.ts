@@ -28,10 +28,16 @@ test("tool security policy only blocks unsupported URL protocols", () => {
 
 test("tool security policy never lets confirmation bypass hard URL blocks", () => {
   const request = { callId: "call-ftp", toolName: "browser_snapshot", input: { url: "ftp://example.test/file" } };
+  const metadata: ToolDefinitionMetadata = {
+    ...readOnlyMetadata(),
+    operationType: "external-submit",
+    riskLevel: "high",
+    requiresConfirmation: true,
+  };
   const decision = evaluateToolCallSecurity({
     request,
-    definition: toolDefinition("browser_snapshot", readOnlyMetadata()),
-    metadata: readOnlyMetadata(),
+    definition: toolDefinition("browser_snapshot", metadata),
+    metadata,
     context: { platform: "linux", approvedConfirmationIds: [confirmationIdForToolCall(request.callId)] },
   });
 
@@ -129,22 +135,68 @@ test("tool security policy gates explicit confirmation tools unless exact confir
   assert.equal(confirmation.actionSummary.includes("在工作区内执行 Shell 命令"), false);
 });
 
-test("tool security policy does not infer confirmation beyond command tools", () => {
+test("tool security policy uses full argv text for shell confirmations without commandLine", () => {
+  const request = {
+    callId: "call-python",
+    toolName: "shell_command",
+    input: { command: "python", args: ["-c", "print('ok')"] },
+  };
   const metadata: ToolDefinitionMetadata = {
+    ...readOnlyMetadata(),
+    category: "terminal",
+    operationType: "execute",
+    riskLevel: "high",
+    requiresConfirmation: true,
+  };
+  const pending = evaluateToolCallSecurity({
+    request,
+    definition: toolDefinition("shell_command", metadata),
+    metadata,
+    context: { platform: "win32" },
+  });
+
+  assert.equal(pending.decision, "approval_required");
+  assert.deepEqual(
+    pending.decision === "approval_required" ? pending.affectedResources : [],
+    ["python -c print('ok')"]
+  );
+});
+
+test("tool security policy gates any tool metadata that explicitly requires confirmation", () => {
+  const writeMetadata: ToolDefinitionMetadata = {
     ...readOnlyMetadata(),
     category: "filesystem",
     operationType: "read-write",
     riskLevel: "medium",
     requiresConfirmation: true,
   };
-  const decision = evaluateToolCallSecurity({
+  const submitMetadata: ToolDefinitionMetadata = {
+    ...readOnlyMetadata(),
+    category: "mcp",
+    operationType: "external-submit",
+    riskLevel: "high",
+    requiresConfirmation: true,
+  };
+  const writeDecision = evaluateToolCallSecurity({
     request: { callId: "call-custom-write", toolName: "custom_write", input: { path: "notes.txt" } },
-    definition: toolDefinition("custom_write", metadata),
-    metadata,
+    definition: toolDefinition("custom_write", writeMetadata),
+    metadata: writeMetadata,
+    context: { platform: "win32" },
+  });
+  const submitDecision = evaluateToolCallSecurity({
+    request: { callId: "call-submit", toolName: "external_submit", input: { url: "https://example.test/post", ref: "payload-1" } },
+    definition: toolDefinition("external_submit", submitMetadata),
+    metadata: submitMetadata,
     context: { platform: "win32" },
   });
 
-  assert.equal(decision.decision, "allow");
+  assert.equal(writeDecision.decision, "approval_required");
+  assert.equal(writeDecision.decision === "approval_required" ? writeDecision.affectedResources[0] : "", "notes.txt");
+  assert.equal(submitDecision.decision, "approval_required");
+  assert.deepEqual(
+    submitDecision.decision === "approval_required" ? submitDecision.affectedResources : [],
+    ["https://example.test/post", "payload-1"]
+  );
 });
 
 function toolDefinition(name: string, metadata: ToolDefinitionMetadata): ToolDefinition {

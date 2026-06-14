@@ -236,6 +236,10 @@ function cloneToolModelContract(definition: ToolDefinition["modelContract"]): To
     return undefined;
   }
   return {
+    purpose: definition.purpose,
+    whenToUse: definition.whenToUse === undefined ? undefined : [...definition.whenToUse],
+    whenNotToUse: definition.whenNotToUse === undefined ? undefined : [...definition.whenNotToUse],
+    inputNotes: definition.inputNotes === undefined ? undefined : [...definition.inputNotes],
     usageNotes: definition.usageNotes === undefined ? undefined : [...definition.usageNotes],
     outputNotes: definition.outputNotes === undefined ? undefined : [...definition.outputNotes],
     examples: definition.examples === undefined

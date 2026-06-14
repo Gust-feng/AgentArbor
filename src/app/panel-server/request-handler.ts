@@ -53,6 +53,7 @@ export function createPanelRequestHandler(options: PanelServerOptions | PanelRun
         writePanelError(response, error);
         return;
       }
+      logUnhandledPanelRequestError(request, error);
       writePanelError(response, new PanelHttpError(500, "panel_internal_error", "面板请求失败。"));
     });
   };
@@ -218,4 +219,11 @@ function close(server: Server): Promise<void> {
       resolve();
     });
   });
+}
+
+function logUnhandledPanelRequestError(request: IncomingMessage, error: unknown): void {
+  const method = request.method ?? "UNKNOWN";
+  const url = request.url ?? "/";
+  console.error(`[panel-server] unhandled request failure ${method} ${url}`);
+  console.error(error);
 }

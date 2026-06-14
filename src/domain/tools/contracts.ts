@@ -18,6 +18,10 @@ export type ToolModelRuntimeHint = {
 };
 
 export type ToolModelContract = {
+  readonly purpose?: string;
+  readonly whenToUse?: readonly string[];
+  readonly whenNotToUse?: readonly string[];
+  readonly inputNotes?: readonly string[];
   readonly usageNotes?: readonly string[];
   readonly outputNotes?: readonly string[];
   readonly examples?: readonly ToolUsageExample[];
@@ -143,8 +147,14 @@ export type ToolDisplayProjection =
       readonly command?: string;
       readonly args?: readonly string[];
       readonly commandLine?: string;
+      readonly cwd?: string;
       readonly shell?: string;
       readonly exitCode?: number;
+      readonly timedOut?: boolean;
+      readonly background?: boolean;
+      readonly pid?: number;
+      readonly logPath?: string;
+      readonly stopCommand?: string;
       readonly outputSummary?: string;
       readonly errorSummary?: string;
     }

@@ -2,15 +2,13 @@ import type {
   RunEvent,
   TranscriptNodePhase,
 } from "../../domain/basic-agent/index.js";
-import type { ToolDisplayProjection } from "../../domain/tools/index.js";
+import { commandDisplayText, type ToolDisplayProjection } from "../../domain/tools/index.js";
 import { cleanOrdinaryToolText } from "../ordinary-tool-copy.js";
 
 export function transcriptToolSummaryFromRunEvent(event: RunEvent): string | undefined {
   const display = event.detail?.display;
   if (display?.kind === "command_summary") {
-    const command = [display.command, ...(display.args ?? [])]
-      .filter((value): value is string => typeof value === "string" && value.length > 0)
-      .join(" ");
+    const command = commandDisplayText(display);
     const error = event.type === "tool.failed" ? display.errorSummary : undefined;
     return [command, display.outputSummary, error]
       .filter((value): value is string => value !== undefined && value.trim().length > 0)

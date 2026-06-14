@@ -28,6 +28,35 @@ export function createBrowserSnapshotTool(options: BrowserToolOptions = {}): Too
     definition: {
       name: "browser_snapshot",
       description: "Open an HTTP or HTTPS page and return a text snapshot. Requires Playwright at runtime.",
+      modelContract: {
+        purpose: "Open an HTTP or HTTPS page with Playwright and return the page title, final URL, and body text snapshot.",
+        whenToUse: [
+          "Use when a web page needs to be inspected beyond search snippets.",
+          "Use for pages where the current rendered text matters.",
+        ],
+        whenNotToUse: [
+          "Do not use for non-HTTP URLs.",
+          "Do not use as an interactive browser control; this tool only returns a text snapshot.",
+        ],
+        inputNotes: [
+          "url is required and must use http or https.",
+          "waitMs optionally waits after load and is capped at 5000ms.",
+          "maxTextChars optionally caps returned body text.",
+        ],
+        outputNotes: [
+          "result.url is the final page URL after navigation.",
+          "result.title is the browser page title when available.",
+          "result.text is the returned body text snapshot.",
+          "truncated tells whether the body text was capped.",
+        ],
+        runtimeHints: [
+          { label: "browser engine", value: "Playwright Chromium when available" },
+          { label: "max text chars", value: String(MAX_BROWSER_TEXT_CHARS) },
+        ],
+        examples: [
+          { title: "Read rendered page text", input: { url: "https://example.com", waitMs: 500, maxTextChars: 12000 } },
+        ],
+      },
       metadata: {
         category: "web",
         riskLevel: "medium",

@@ -25,6 +25,32 @@ export function createLocalWriteFileTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE
     definition: {
       name: "write_file",
       description: "Create or overwrite a UTF-8 text file under the local workspace. Returns the written path and byte size.",
+      modelContract: {
+        purpose: "Create, overwrite, or append a UTF-8 text file under the local workspace.",
+        whenToUse: [
+          "Use when the intended result is a full file body or an append operation.",
+          "Use create_file for new-file creation when you want existing files to fail by default.",
+        ],
+        whenNotToUse: [
+          "Do not use for precise replacements in an existing file; use edit_file.",
+        ],
+        inputNotes: [
+          "path and content are required.",
+          "append=true appends to the target; otherwise the target is overwritten or created.",
+        ],
+        outputNotes: [
+          "result.path is the written workspace-relative path.",
+          "result.bytes is the final file byte size.",
+          "result.append records whether append mode was used.",
+        ],
+        runtimeHints: [
+          { label: "workspace root", value: "current configured local workspace" },
+          { label: "content encoding", value: "UTF-8 text" },
+        ],
+        examples: [
+          { title: "Append a note", input: { path: "notes.md", content: "\nNext step\n", append: true } },
+        ],
+      },
       metadata: {
         category: "filesystem",
         riskLevel: "medium",
@@ -84,6 +110,32 @@ export function createLocalCreateFileTool(rootDirectory = DEFAULT_LOCAL_WORKSPAC
     definition: {
       name: "create_file",
       description: "Create a UTF-8 text file under the local workspace. By default it fails if the target exists; set overwrite=true to replace the file.",
+      modelContract: {
+        purpose: "Create a UTF-8 text file under the local workspace, failing on existing files unless overwrite is true.",
+        whenToUse: [
+          "Use to add a new source, test, or documentation file.",
+          "Use overwrite=true only when replacing the whole existing file is intended.",
+        ],
+        whenNotToUse: [
+          "Do not use for small edits to an existing file; use edit_file.",
+        ],
+        inputNotes: [
+          "path and content are required.",
+          "overwrite defaults to false and must be true to replace an existing file.",
+        ],
+        outputNotes: [
+          "result.path and result.bytes describe the created file.",
+          "result.afterHash is the SHA-256 hash of the created content.",
+          "result.overwrite records whether an existing file was replaced.",
+        ],
+        runtimeHints: [
+          { label: "workspace root", value: "current configured local workspace" },
+          { label: "content encoding", value: "UTF-8 text" },
+        ],
+        examples: [
+          { title: "Create a test fixture", input: { path: "src/app/example.test.ts", content: "import test from \"node:test\";\n" } },
+        ],
+      },
       metadata: {
         category: "filesystem",
         riskLevel: "medium",
@@ -151,6 +203,40 @@ export function createLocalEditFileTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE_
     definition: {
       name: "edit_file",
       description: "Edit a UTF-8 text file under the local workspace with precise text replacements. Provide the exact existing text and the replacement text; when the same text appears multiple times, use occurrence or line range to target the intended location.",
+      modelContract: {
+        purpose: "Apply precise text replacements to a workspace UTF-8 text file.",
+        whenToUse: [
+          "Use after reading enough file context to know the exact oldText.",
+          "Use for targeted changes that should preserve the rest of the file.",
+        ],
+        whenNotToUse: [
+          "Do not use when you do not know the exact existing text; read_file first.",
+          "Do not use for replacing an entire file body; use write_file or create_file with overwrite.",
+        ],
+        inputNotes: [
+          "path is required and must be workspace-relative.",
+          "edits is a non-empty array of exact oldText/newText replacements.",
+          "Use occurrence or startLine/endLine only to disambiguate repeated oldText.",
+        ],
+        outputNotes: [
+          "result.replacements is the number of applied edits.",
+          "result.beforeHash and result.afterHash identify the before/after file bodies.",
+          "result.diffSummary summarizes changed lines.",
+        ],
+        runtimeHints: [
+          { label: "workspace root", value: "current configured local workspace" },
+          { label: "edit mode", value: "exact text replacement" },
+        ],
+        examples: [
+          {
+            title: "Replace one import",
+            input: {
+              path: "src/app/example.ts",
+              edits: [{ oldText: "import { oldName } from \"./old\";", newText: "import { newName } from \"./new\";" }],
+            },
+          },
+        ],
+      },
       metadata: {
         category: "filesystem",
         riskLevel: "medium",
@@ -237,6 +323,31 @@ export function createLocalDeleteFileTool(rootDirectory = DEFAULT_LOCAL_WORKSPAC
     definition: {
       name: "delete_file",
       description: "Delete a regular file under the local workspace. Directory deletion is not supported.",
+      modelContract: {
+        purpose: "Delete one regular file under the local workspace.",
+        whenToUse: [
+          "Use when a file should be removed as part of the requested change.",
+          "Use after verifying the target path is the intended file.",
+        ],
+        whenNotToUse: [
+          "Do not use for deleting directories; this tool only deletes regular files.",
+          "Do not use when the user asked to keep or archive the file.",
+        ],
+        inputNotes: [
+          "path is required and must be workspace-relative.",
+        ],
+        outputNotes: [
+          "result.path is the deleted workspace-relative path.",
+          "result.bytes is the size of the file before deletion.",
+        ],
+        runtimeHints: [
+          { label: "workspace root", value: "current configured local workspace" },
+          { label: "target kind", value: "regular file only" },
+        ],
+        examples: [
+          { title: "Delete obsolete fixture", input: { path: "src/app/obsolete-fixture.ts" } },
+        ],
+      },
       metadata: {
         category: "filesystem",
         riskLevel: "medium",

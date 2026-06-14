@@ -342,8 +342,8 @@ function appendStreamEventsForEvent(input: {
   if (input.entry.type === "model.failed") {
     input.push({
       ...base,
-      eventId: `${input.runId}:event:${input.entry.sequence}:agent.note.completed`,
-      type: "agent.note.completed",
+      eventId: `${input.runId}:event:${input.entry.sequence}:model.failed`,
+      type: "model.failed",
       agentLabel: "助手",
       summary: modelFailedSummary(payload),
       status: "failed",

@@ -1,12 +1,11 @@
-export type CommandDisplayProjectionLike = {
+import { commandDisplayText, type CommandTextLike } from "../domain/tools/presentation.js";
+
+export type CommandDisplayProjectionLike = CommandTextLike & {
   readonly kind: "command_summary";
-  readonly command?: string;
-  readonly args?: readonly string[];
 };
 
 export function commandText(display: CommandDisplayProjectionLike): string | undefined {
-  const parts = [display.command, ...(display.args ?? [])].filter((value): value is string => value !== undefined && value.trim().length > 0);
-  return parts.length === 0 ? undefined : parts.join(" ");
+  return commandDisplayText(display);
 }
 
 export function genericItemLabel(value: string): string {

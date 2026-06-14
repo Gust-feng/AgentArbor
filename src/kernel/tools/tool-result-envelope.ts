@@ -4,7 +4,6 @@ import type {
   ToolResultEnvelope,
 } from "../../domain/tools/index.js";
 import { toolDisplayName } from "../../domain/tools/index.js";
-import { redactSensitiveText } from "../redaction.js";
 
 export type ProjectToolResultEnvelopeInput = {
   readonly request: ToolCallRequest;
@@ -22,10 +21,11 @@ export type ProjectToolStatusEnvelopeInput = {
   readonly evidenceRefs?: readonly string[];
 };
 
-// The envelope is the compact cross-boundary form of tool output. Adapters may
-// still expose richer agentContent when the model needs details.
+// The envelope is the compact UI/context evidence form of tool output. It is
+// deliberately separate from ToolSafeProjection.agentContent, which carries the
+// fuller model-visible result when the agent needs to continue working.
 export function projectToolResultEnvelope(input: ProjectToolResultEnvelopeInput): ToolResultEnvelope {
-  const display = sanitizeToolDisplay(input.display);
+  const display = compactToolDisplayForUi(input.display);
   const agentSummary = agentSummaryForToolDisplay(display, input.summary, input.request.toolName);
   const evidenceRefs = evidenceRefsForToolDisplay(display, input.request.callId, input.diagnosticRef);
   return {
@@ -41,7 +41,7 @@ export function projectToolResultEnvelope(input: ProjectToolResultEnvelopeInput)
 }
 
 export function projectToolStatusEnvelope(input: ProjectToolStatusEnvelopeInput): ToolResultEnvelope {
-  const agentSummary = redactOrdinaryToolText(input.summary, 1_200);
+  const agentSummary = compactOrdinaryToolText(input.summary, 1_200);
   return {
     agentSummary,
     evidenceRefs: unique([`tool:${input.request.callId}`, input.diagnosticRef, ...(input.evidenceRefs ?? [])]),
@@ -53,10 +53,14 @@ export function projectToolStatusEnvelope(input: ProjectToolStatusEnvelopeInput)
   };
 }
 
-export function redactOrdinaryToolText(value: string, maxLength = 1_200): string {
-  const text = redactSensitiveText(value).trim();
+export function compactOrdinaryToolText(value: string, maxLength = 1_200): string {
+  const text = value.trim();
   return text.length <= maxLength ? text : `${text.slice(0, Math.max(0, maxLength - 1))}...`;
 }
+
+// Compatibility export for older call sites. It now only compacts text; it
+// does not mask tokens, passwords, stdout/stderr, file content, or errors.
+export const redactOrdinaryToolText = compactOrdinaryToolText;
 
 function agentSummaryForToolDisplay(
   display: ToolDisplayProjection,
@@ -74,7 +78,7 @@ function agentSummaryForToolDisplay(
         return `${index + 1}. ${result.title}${url === undefined ? "" : ` (${url})`}${snippet === undefined ? "" : ` - ${snippet}`}`;
       })
       .join("\n");
-    return redactOrdinaryToolText(
+    return compactOrdinaryToolText(
       [`${label}已完成${display.query === undefined ? "" : `：${display.query}`}。`, results || fallback]
         .filter((item) => item.trim().length > 0)
         .join("\n"),
@@ -82,7 +86,7 @@ function agentSummaryForToolDisplay(
     );
   }
   if (display.kind === "browser_snapshot") {
-    return redactOrdinaryToolText(
+    return compactOrdinaryToolText(
       [
         `${label}已完成。`,
         display.title,
@@ -94,7 +98,7 @@ function agentSummaryForToolDisplay(
     );
   }
   if (display.kind === "read_result") {
-    return redactOrdinaryToolText(
+    return compactOrdinaryToolText(
       [
         `${label}已完成。`,
         display.title,
@@ -107,10 +111,16 @@ function agentSummaryForToolDisplay(
     );
   }
   if (display.kind === "command_summary") {
-    return redactOrdinaryToolText(
+    return compactOrdinaryToolText(
       [
         `${label}已完成${display.exitCode === undefined ? "" : `，退出码 ${display.exitCode}`}。`,
         display.shell === undefined ? undefined : `Shell：${display.shell}`,
+        display.cwd === undefined ? undefined : `目录：${display.cwd}`,
+        display.timedOut === true ? "状态：命令超时。" : undefined,
+        display.background === true ? "状态：后台运行。" : undefined,
+        display.pid === undefined ? undefined : `PID：${display.pid}`,
+        display.logPath === undefined ? undefined : `日志：${display.logPath}`,
+        display.stopCommand === undefined ? undefined : `停止命令：${display.stopCommand}`,
         display.commandLine ?? display.command,
         display.outputSummary === undefined ? undefined : `输出摘要：\n${display.outputSummary}`,
         display.errorSummary === undefined ? undefined : `错误摘要：\n${display.errorSummary}`,
@@ -119,7 +129,7 @@ function agentSummaryForToolDisplay(
     );
   }
   if (display.kind === "file_change_summary") {
-    return redactOrdinaryToolText(
+    return compactOrdinaryToolText(
       [
         `${label}：${display.path ?? "工作区文件"}。`,
         display.append === true ? "模式：追加。" : undefined,
@@ -131,7 +141,7 @@ function agentSummaryForToolDisplay(
     );
   }
   if (display.kind === "file_diff_preview") {
-    return redactOrdinaryToolText(
+    return compactOrdinaryToolText(
       [
         `${label}：${display.path ?? "工作区文件"}。`,
         display.replacements === undefined ? undefined : `替换次数：${display.replacements}。`,
@@ -144,7 +154,7 @@ function agentSummaryForToolDisplay(
     );
   }
   const items = display.items?.slice(0, 8).join("\n");
-  return redactOrdinaryToolText([summary ?? display.summary ?? fallback, items].filter(isString).join("\n"), 1_400);
+  return compactOrdinaryToolText([summary ?? display.summary ?? fallback, items].filter(isString).join("\n"), 1_400);
 }
 
 function evidenceRefsForToolDisplay(
@@ -157,22 +167,22 @@ function evidenceRefsForToolDisplay(
     for (const result of display.results.slice(0, 8)) {
       const ref = result.refId ?? result.url ?? result.title;
       if (ref !== undefined) {
-        refs.add(redactOrdinaryToolText(ref, 220));
+        refs.add(compactOrdinaryToolText(ref, 220));
       }
     }
   }
   if (display.kind === "browser_snapshot" && display.url !== undefined) {
-    refs.add(redactOrdinaryToolText(display.url, 220));
+    refs.add(compactOrdinaryToolText(display.url, 220));
   }
   if (display.kind === "read_result") {
     for (const ref of [display.ref, display.sourceSearchRef, display.uri, display.url]) {
       if (ref !== undefined) {
-        refs.add(redactOrdinaryToolText(ref, 220));
+        refs.add(compactOrdinaryToolText(ref, 220));
       }
     }
   }
   if ((display.kind === "file_change_summary" || display.kind === "file_diff_preview") && display.path !== undefined) {
-    refs.add(`file:${redactOrdinaryToolText(display.path, 220)}`);
+    refs.add(`file:${compactOrdinaryToolText(display.path, 220)}`);
   }
   return [...refs].filter((ref) => ref.length > 0).slice(0, 12);
 }
@@ -189,21 +199,21 @@ function compactSafeText(value: string | undefined, maxLength: number): string |
   if (value === undefined) {
     return undefined;
   }
-  const text = redactSensitiveText(value).trim();
+  const text = value.trim();
   if (text.length === 0) {
     return undefined;
   }
   return text.length <= maxLength ? text : `${text.slice(0, Math.max(0, maxLength - 1))}...`;
 }
 
-function sanitizeToolDisplay(display: ToolDisplayProjection): ToolDisplayProjection {
+function compactToolDisplayForUi(display: ToolDisplayProjection): ToolDisplayProjection {
   if (display.kind === "search_results") {
     return {
       kind: "search_results",
       query: compactSafeText(display.query, 240),
       status: compactSafeText(display.status, 120),
       results: display.results.slice(0, 8).map((result) => ({
-        title: redactOrdinaryToolText(result.title, 180),
+        title: compactOrdinaryToolText(result.title, 180),
         url: compactSafeText(result.url, 260),
         refId: compactSafeText(result.refId, 180),
         source: compactSafeText(result.source, 120),
@@ -263,10 +273,16 @@ function sanitizeToolDisplay(display: ToolDisplayProjection): ToolDisplayProject
     return {
       kind: "command_summary",
       command: compactSafeText(display.command, 260),
-      args: display.args?.slice(0, 16).map((arg) => redactOrdinaryToolText(arg, 180)),
+      args: display.args?.slice(0, 16).map((arg) => compactOrdinaryToolText(arg, 180)),
       commandLine: compactSafeText(display.commandLine, 420),
+      cwd: compactSafeText(display.cwd, 260),
       shell: compactSafeText(display.shell, 120),
       exitCode: display.exitCode,
+      timedOut: display.timedOut,
+      background: display.background,
+      pid: display.pid,
+      logPath: compactSafeText(display.logPath, 260),
+      stopCommand: compactSafeText(display.stopCommand, 260),
       outputSummary: compactSafeText(display.outputSummary, 520),
       errorSummary: compactSafeText(display.errorSummary, 520),
     };
@@ -275,7 +291,7 @@ function sanitizeToolDisplay(display: ToolDisplayProjection): ToolDisplayProject
     kind: "generic_tool_summary",
     action: compactSafeText(display.action, 160),
     summary: compactSafeText(display.summary, 700),
-    items: display.items?.slice(0, 12).map((item) => redactOrdinaryToolText(item, 260)),
+    items: display.items?.slice(0, 12).map((item) => compactOrdinaryToolText(item, 260)),
   };
 }
 

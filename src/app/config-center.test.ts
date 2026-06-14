@@ -6,6 +6,7 @@ import test from "node:test";
 import type { ModelCapabilities } from "../domain/config/index.js";
 import { FileSystemLocalDevSecretStore, FileSystemNormalSettingsStore, resolveAgentArborConfigDirectory } from "../adapters/config/index.js";
 import { ConfigCenter, ConfigCenterValidationError } from "./config-center.js";
+import { toSanitizedCommandShellConfig } from "./config-center/command-shell-settings.js";
 
 test("config settings schema keeps OpenAI request settings split", async () => {
   const [settingsSchema, openAIRequestSettings] = await Promise.all([
@@ -108,6 +109,39 @@ test("ConfigCenter keeps projections and workspace validation split from orchest
   assert.equal(workspaceSettings.includes("export class WorkspaceDirectoryValidationError"), true);
   assert.equal(workspaceSettings.includes("export async function normalizeWorkspaceDirectory"), true);
   assert.equal(workspaceSettings.includes("export function normalizeConfiguredWorkspaceDirectory"), true);
+});
+
+test("command shell auto mode prefers Windows shells that avoid cmd quoting traps", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-config-shell-"));
+  try {
+    const fakeGitBash = path.join(directory, "bash.exe");
+    await fs.writeFile(fakeGitBash, "", "utf8");
+
+    const gitBash = toSanitizedCommandShellConfig(undefined, {
+      platform: "win32",
+      env: { CLAUDE_CODE_GIT_BASH_PATH: fakeGitBash },
+      now: "test",
+    });
+    const powerShell = toSanitizedCommandShellConfig(undefined, {
+      platform: "win32",
+      env: { CLAUDE_CODE_GIT_BASH_PATH: fakeGitBash, CLAUDE_CODE_USE_POWERSHELL_TOOL: "1" },
+      now: "test",
+    });
+    const explicitCmd = toSanitizedCommandShellConfig({ kind: "cmd", updatedAt: "test" }, {
+      platform: "win32",
+      env: { CLAUDE_CODE_GIT_BASH_PATH: fakeGitBash },
+      now: "test",
+    });
+
+    assert.equal(gitBash.kind, "bash");
+    assert.equal(gitBash.syntax, "posix");
+    assert.equal(gitBash.executable, fakeGitBash);
+    assert.equal(powerShell.kind, "powershell");
+    assert.equal(powerShell.syntax, "powershell");
+    assert.equal(explicitCmd.kind, "cmd");
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+  }
 });
 
 test("ConfigCenter keeps raw API key out of the normal settings store", async () => {

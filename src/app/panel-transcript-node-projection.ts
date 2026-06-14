@@ -37,7 +37,15 @@ export type TranscriptToolDisplayLike =
       readonly kind: "command_summary";
       readonly command?: string;
       readonly args?: readonly string[];
+      readonly commandLine?: string;
+      readonly cwd?: string;
+      readonly shell?: string;
       readonly exitCode?: number;
+      readonly timedOut?: boolean;
+      readonly background?: boolean;
+      readonly pid?: number;
+      readonly logPath?: string;
+      readonly stopCommand?: string;
       readonly outputSummary?: string;
       readonly errorSummary?: string;
     }

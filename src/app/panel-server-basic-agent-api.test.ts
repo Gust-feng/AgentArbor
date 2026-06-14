@@ -13,6 +13,7 @@ import {
   waitForRun,
 } from "./panel-server-test-utils.js";
 import {
+  createOpenAiToolCallResponse,
   createOpenAiRunCommandToolCallResponse,
   createOpenAiTextResponse,
 } from "./panel-openai-test-fixtures.js";
@@ -630,6 +631,125 @@ test("basic agent approve after restart blocks because executable continuation i
     assert.equal(restoredEvents.body.events.some((event: { type: string }) => event.type === "run.blocked"), true);
     assertSafePanelJsonText(`${approved.text}\n${restoredEvents.text}\n${runtimeRun.text}`);
   } finally {
+    await server.close();
+    await removeTemporaryTree(directory);
+    await removeTemporaryTree(workspace);
+  }
+});
+
+test("basic agent confirmation survives prior edit_file failures before shell_command approval", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-basic-failed-tools-before-confirmation-"));
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-basic-failed-tools-before-confirmation-workspace-"));
+  let providerFetchCalls = 0;
+  let releaseFinalResponse: (() => void) | undefined;
+  const finalResponseGate = new Promise<void>((resolve) => {
+    releaseFinalResponse = resolve;
+  });
+  const providerFetch: PanelProviderFetch = async () => {
+    providerFetchCalls += 1;
+    if (providerFetchCalls === 1) {
+      return createOpenAiToolCallResponse(
+        "basic-edit-then-command-model",
+        "call-panel-edit-miss-1",
+        "edit_file",
+        {
+          path: "edge_cases.txt",
+          edits: [{ oldText: "missing-alpha", newText: "present-alpha", occurrence: 3 }],
+        }
+      );
+    }
+    if (providerFetchCalls === 2) {
+      return createOpenAiToolCallResponse(
+        "basic-edit-then-command-model",
+        "call-panel-edit-miss-2",
+        "edit_file",
+        {
+          path: "edge_test/occurrence_test.txt",
+          edits: [{ oldText: "missing-beta", newText: "present-beta", occurrence: 99 }],
+        }
+      );
+    }
+    if (providerFetchCalls === 3) {
+      return createOpenAiRunCommandToolCallResponse(`echo "start" && echo "middle" && echo "end"`);
+    }
+    await finalResponseGate;
+    return createOpenAiTextResponse("basic-edit-then-command-model", "复杂工作流已完成。");
+  };
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory, providerFetch });
+  try {
+    await fs.mkdir(path.join(workspace, "edge_test"), { recursive: true });
+    await fs.writeFile(path.join(workspace, "edge_cases.txt"), "present-alpha\n", "utf8");
+    await fs.writeFile(path.join(workspace, "edge_test", "occurrence_test.txt"), "present-beta\n", "utf8");
+    await requestJson(server.url, "/api/config/model-provider", {
+      method: "POST",
+      body: {
+        baseUrl: "https://provider.example",
+        model: "gpt-4o-mini",
+        apiKey: "sk-basic-failed-tools-before-confirmation",
+      },
+    });
+    await requestJson(server.url, "/api/config/workspace", {
+      method: "POST",
+      body: { workspaceDirectory: workspace },
+    });
+    const start = await requestJson(server.url, "/api/conversations", {
+      method: "POST",
+      body: { goal: "先尝试修复两个文件，再运行 echo start middle end 并等待确认", aiMode: "openai-compatible" },
+    });
+    const runId = start.body.run.runId;
+    const pending = await waitForRun(
+      server.url,
+      runId,
+      (body) => body.status === "approval_needed" && body.canvas?.agent?.pendingConfirmation !== undefined,
+      6_000,
+      "/api/desktop/runs"
+    );
+    const confirmationId = pending.body.canvas.agent.pendingConfirmation.confirmationId;
+    const pendingEvents = await requestJson(
+      server.url,
+      `/api/basic-agent/runs/${encodeURIComponent(runId)}/events?cursor=0`
+    );
+    const failedToolEvents = pendingEvents.body.events.filter((event: { type: string }) => event.type === "tool.failed");
+
+    assert.equal(failedToolEvents.length >= 2, true);
+    assert.equal(pendingEvents.text.includes("edit_file edit 1 could not find the target text in edge_cases.txt"), true);
+    assert.equal(
+      pendingEvents.text.includes("edit_file edit 1 could not find the target text in edge_test/occurrence_test.txt"),
+      true
+    );
+
+    const approved = await withTimeout(
+      requestJson(
+        server.url,
+        `/api/basic-agent/runs/${encodeURIComponent(runId)}/confirmations/${encodeURIComponent(confirmationId)}/decision`,
+        { method: "POST", body: { decision: "approve_once" } }
+      ),
+      2_500
+    );
+    releaseFinalResponse?.();
+    const completed = await waitForRun(
+      server.url,
+      runId,
+      (body) => body.status === "completed",
+      6_000,
+      "/api/desktop/runs"
+    );
+    const runtimeRun = await requestJson(server.url, `/api/runtime/runs/${encodeURIComponent(runId)}`);
+    const events = await requestJson(server.url, `/api/basic-agent/runs/${encodeURIComponent(runId)}/events?cursor=0`);
+    const commandCall = runtimeRun.body.snapshot.toolCalls.find(
+      (call: { toolName?: string; command?: string; status: string }) => call.toolName === "shell_command"
+    );
+
+    assert.equal(approved.status, 200);
+    assert.equal(completed.body.status, "completed");
+    assert.equal(commandCall?.status, "completed");
+    assert.equal(commandCall?.command, `echo "start" && echo "middle" && echo "end"`);
+    assert.equal(events.body.events.some((event: { type: string }) => event.type === "tool.failed"), true);
+    assert.equal(events.body.events.some((event: { type: string }) => event.type === "tool.completed"), true);
+    assert.equal(events.text.includes("面板请求失败"), false);
+    assertSafePanelJsonText(`${runtimeRun.text}\n${events.text}`);
+  } finally {
+    releaseFinalResponse?.();
     await server.close();
     await removeTemporaryTree(directory);
     await removeTemporaryTree(workspace);

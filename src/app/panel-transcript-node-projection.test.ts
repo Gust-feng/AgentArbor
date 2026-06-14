@@ -338,6 +338,23 @@ test("panel transcript nodes suppress ordinary startup and placeholder events", 
   assert.equal(JSON.stringify(projected).includes("内容已整理"), false);
 });
 
+test("panel transcript nodes render model failures as system failures", () => {
+  const projected = createPanelTranscriptNodes([
+    panelEvent({
+      eventId: "run-1:event:1:model.failed",
+      sequence: 1,
+      type: "model.failed",
+      summary: "工具已执行，但后续模型续跑失败。模型服务连接失败。",
+    }),
+  ]);
+
+  assert.equal(projected.length, 1);
+  assert.equal(projected[0]?.eventType, "model.failed");
+  assert.equal(projected[0]?.kind, "system");
+  assert.equal(projected[0]?.phase, "failed");
+  assert.equal(projected[0]?.title, "模型回复失败");
+});
+
 function panelEvent(input: {
   readonly eventId: string;
   readonly sequence: number;

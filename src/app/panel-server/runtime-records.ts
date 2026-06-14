@@ -23,6 +23,7 @@ import type {
   PanelRunTraceReadModel,
   PanelRunTranscript,
 } from "../panel-run-read-model.js";
+import { commandTextFromToolResult } from "../command-text.js";
 import { safeCommandToolPreview, safeReadFileToolPreview } from "../safe-tool-preview.js";
 import { cleanOrdinaryToolText } from "../ordinary-tool-copy.js";
 import { sanitizeAssistantVisibleText } from "../visible-text-safety.js";
@@ -395,13 +396,11 @@ function localToolDetailsByCallId(
     const input = asRecord(payload.input);
     const result = asRecord(output.result);
     const pathValue = optionalString(result.path) ?? optionalString(input.path);
-    const command = optionalString(result.commandLine) ?? optionalString(input.commandLine) ?? optionalString(result.command) ?? optionalString(input.command);
-    const args = Array.isArray(result.args) ? result.args : Array.isArray(input.args) ? input.args : [];
     details.set(callId, {
       action: optionalString(output.action) ?? optionalString(payload.toolName),
       path: pathValue,
       query: optionalString(result.query) ?? optionalString(input.query),
-      command: command === undefined ? undefined : [command, ...args.filter((value): value is string => typeof value === "string")].join(" ").trim(),
+      command: commandTextFromToolResult(result, input),
       exitCode: typeof result.exitCode === "number" ? result.exitCode : undefined,
       summary: cleanOrdinaryToolText(optionalString(output.summary)),
       preview: persistedToolPreview(optionalString(payload.toolName), output, result, payload),
@@ -550,7 +549,7 @@ function persistedCommandPreview(
 ): string | undefined {
   return safeCommandToolPreview({
     summary: optionalString(output.summary),
-    command: optionalString(result.commandLine) ?? optionalString(result.command),
+    command: commandTextFromToolResult(result),
     exitCode: typeof result.exitCode === "number" ? result.exitCode : undefined,
   });
 }

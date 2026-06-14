@@ -139,6 +139,7 @@ export function isLiveAppendOnlyEvent(event: RunEventLike): boolean {
 
 function isLiveReasoningSettlementEvent(event: RunEventLike): boolean {
   return event.type === "model.output.completed" ||
+    event.type === "model.failed" ||
     event.type === "model.side.completed" ||
     event.type === "agent.note.completed" ||
     event.type === "tool.completed" ||

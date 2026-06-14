@@ -59,7 +59,7 @@ function isGenericConfirmationTitle(value: string): boolean {
 
 function confirmationActionPreview(action: string): string {
   return action
-    .replace(/^(?:运行|执行)?\s*命令[:：]?\s*/i, "")
+    .replace(/^(?:执行\s*Shell|Shell\s*命令|运行\s*命令|执行\s*命令|命令)[:：]?\s*/i, "")
     .replace(/^command[:：]?\s*/i, "")
     .trim() || action;
 }

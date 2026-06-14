@@ -83,7 +83,7 @@ test("ToolCenter default does not add a small tool-call budget", async () => {
   assert.equal(center.getCallCount(), 25);
 });
 
-test("ToolCenter only gates command tools for confirmation", async () => {
+test("ToolCenter gates any tool metadata that requires confirmation before execution", async () => {
   let writes = 0;
   let deletes = 0;
   let executes = 0;
@@ -103,40 +103,94 @@ test("ToolCenter only gates command tools for confirmation", async () => {
   const context = { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" };
 
   const write = await center.execute({ callId: "call-write", toolName: "custom_write", input: {} }, context, allowTools("custom_write", "delete_file", "run_command"));
-  const deleteResult = await center.execute({ callId: "call-delete", toolName: "delete_file", input: {} }, context, allowTools("custom_write", "delete_file", "run_command"));
-  const execute = await center.execute({ callId: "call-exec", toolName: "run_command", input: {} }, context, allowTools("custom_write", "delete_file", "run_command"));
+  const deleteResult = await center.execute(
+    { callId: "call-delete", toolName: "delete_file", input: { path: "notes.txt" } },
+    context,
+    allowTools("custom_write", "delete_file", "run_command")
+  );
+  const execute = await center.execute(
+    { callId: "call-exec", toolName: "run_command", input: { commandLine: "pnpm test" } },
+    context,
+    allowTools("custom_write", "delete_file", "run_command")
+  );
 
   assert.equal(write.status, "completed");
-  assert.equal(deleteResult.status, "completed");
+  assert.equal(deleteResult.status, "approval_required");
   assert.equal(execute.status, "approval_required");
-  assert.equal(execute.error, "等待确认：运行命令");
+  assert.equal(deleteResult.error, "等待确认：删除文件：notes.txt");
+  assert.equal(execute.error, "等待确认：运行命令：pnpm test");
+  assert.equal(deleteResult.confirmationRequest?.confirmationId, "confirmation-call-delete");
+  assert.equal(deleteResult.confirmationRequest?.affectedResources[0], "notes.txt");
   assert.equal(execute.confirmationRequest?.confirmationId, "confirmation-call-exec");
+  assert.equal(execute.confirmationRequest?.affectedResources[0], "pnpm test");
   assert.equal(writes, 1);
-  assert.equal(deletes, 1);
+  assert.equal(deletes, 0);
   assert.equal(executes, 0);
-  assert.equal(center.getCallCount(), 2);
-  assert.equal(deleteResult.projection?.diagnosticRef, "tool:call-delete");
+  assert.equal(center.getCallCount(), 1);
+  assert.equal(deleteResult.projection?.diagnosticRef, "tool:call-delete:confirmation-required");
 });
 
-test("ToolCenter lets an approved confirmation id bypass the confirmation gate", async () => {
+test("ToolCenter keeps shell_command behind confirmation until the same confirmation id is approved", async () => {
   let executes = 0;
   const center = new ToolCenter({ platform: "win32" });
-  center.register(testTool("run_command", async () => {
+  center.register(testTool("shell_command", async () => {
     executes += 1;
     return { summary: "safe command summary" };
   }, "execute", { requiresConfirmation: true }));
   const context = { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" };
+  const request = {
+    callId: "call-command",
+    toolName: "shell_command",
+    input: { commandLine: "pnpm test" },
+  };
 
-  const result = await center.execute(
-    { callId: "call-command", toolName: "run_command", input: {} },
+  const pending = await center.execute(
+    request,
     context,
-    { ...allowTools("run_command"), approvedConfirmationIds: ["confirmation-call-command"] }
+    allowTools("shell_command")
+  );
+  const result = await center.execute(
+    request,
+    context,
+    { ...allowTools("shell_command"), approvedConfirmationIds: ["confirmation-call-command"] }
   );
 
+  assert.equal(pending.status, "approval_required");
+  assert.equal(pending.confirmationRequest?.confirmationId, "confirmation-call-command");
+  assert.equal(pending.confirmationRequest?.actionSummary, "Shell 命令：pnpm test");
   assert.equal(result.status, "completed");
   assert.equal(executes, 1);
   assert.equal(center.getCallCount(), 1);
   assert.equal(result.projection?.uiSummary, "safe command summary");
+});
+
+test("ToolCenter executes the same non-command tool call only after matching confirmation approval", async () => {
+  let deletes = 0;
+  const center = new ToolCenter({ platform: "win32" });
+  center.register(testTool("delete_file", async () => {
+    deletes += 1;
+    return { ok: true };
+  }, "read-write", { requiresConfirmation: true }));
+  const context = { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" };
+  const request = { callId: "call-delete", toolName: "delete_file", input: { path: "notes.txt" } };
+
+  const pending = await center.execute(request, context, allowTools("delete_file"));
+  const wrongApproval = await center.execute(
+    request,
+    context,
+    { ...allowTools("delete_file"), approvedConfirmationIds: ["confirmation-other"] }
+  );
+  const approved = await center.execute(
+    request,
+    context,
+    { ...allowTools("delete_file"), approvedConfirmationIds: ["confirmation-call-delete"] }
+  );
+
+  assert.equal(pending.status, "approval_required");
+  assert.equal(wrongApproval.status, "approval_required");
+  assert.equal(approved.status, "completed");
+  assert.equal(deletes, 1);
+  assert.equal(center.getCallCount(), 1);
 });
 
 test("ToolCenter adds typed display projections for command output without redaction", async () => {
@@ -339,6 +393,42 @@ test("ToolCenter list returns cloned metadata", () => {
   (listed[0]!.metadata!.visibleResultPolicy as { maxPreviewChars: number }).maxPreviewChars = 1;
 
   assert.equal(center.list()[0]?.metadata?.visibleResultPolicy.maxPreviewChars, 800);
+});
+
+test("ToolCenter list returns cloned model contracts", () => {
+  const center = new ToolCenter();
+  const executor = testTool("read_file", async () => ({ ok: true }), "read-only");
+  center.register({
+    ...executor,
+    definition: {
+      ...executor.definition,
+      modelContract: {
+        purpose: "Read a file.",
+        whenToUse: ["Need file contents."],
+        whenNotToUse: ["Need to edit."],
+        inputNotes: ["path is required."],
+        usageNotes: ["Read before editing."],
+        outputNotes: ["result.content has text."],
+        runtimeHints: [{ label: "workspace root", value: "current workspace" }],
+        examples: [{ title: "Read", input: { path: "README.md" } }],
+      },
+    },
+  });
+
+  const listed = center.list()[0]!;
+  const listedContract = listed.modelContract! as {
+    readonly examples: readonly { readonly input: { path: string } }[];
+    readonly runtimeHints: { label: string; value: string }[];
+    readonly whenToUse: string[];
+  };
+  listedContract.whenToUse.push("mutated");
+  listedContract.examples[0]!.input.path = "changed.md";
+  listedContract.runtimeHints[0]!.value = "changed";
+
+  const fresh = center.list()[0]!.modelContract!;
+  assert.deepEqual(fresh.whenToUse, ["Need file contents."]);
+  assert.deepEqual(fresh.examples?.[0]?.input, { path: "README.md" });
+  assert.equal(fresh.runtimeHints?.[0]?.value, "current workspace");
 });
 
 function testTool(

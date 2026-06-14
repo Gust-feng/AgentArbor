@@ -77,3 +77,292 @@ test("read tool projection exposes content preview to model continuation", () =>
   assert.equal(JSON.stringify(agentContent).includes("资料读取完成"), false);
   assert.equal(JSON.stringify(agentContent).includes("材料已读取"), false);
 });
+
+test("command projection keeps commandLine as the single command fact for model continuation", () => {
+  const projection = projectToolResult({
+    request: {
+      callId: "call-shell",
+      toolName: "shell_command",
+      input: {
+        commandLine: `node -e "console.log('fragile quoted shell')"`,
+        command: "node",
+        args: ["-e", "console.log('fragile quoted shell')"],
+      },
+    },
+    output: {
+      action: "shell_command",
+      summary: "node -e \"console.log('fragile quoted shell')\" · exit 0",
+      result: {
+        command: "node",
+        commandLine: `node -e "console.log('fragile quoted shell')"`,
+        args: ["-e", "console.log('fragile quoted shell')"],
+        exitCode: 0,
+        stdout: "fragile quoted shell",
+        stderr: "",
+        shell: {
+          kind: "cmd",
+          label: "Windows Command Prompt",
+          executable: "cmd.exe",
+          syntax: "cmd",
+          invocation: ["cmd.exe", "/d", "/s", "/c", "<commandLine>"],
+        },
+      },
+    },
+  });
+
+  const display = projection.display;
+  assert.equal(display?.kind, "command_summary");
+  assert.equal(display?.kind === "command_summary" ? display.commandLine : undefined, `node -e "console.log('fragile quoted shell')"`);
+  assert.equal(display?.kind === "command_summary" ? display.command : undefined, "node");
+
+  const agentContent = projection.agentContent as {
+    readonly command?: string;
+    readonly commandLine?: string;
+  };
+  assert.equal(agentContent.command, "node");
+  assert.equal(agentContent.commandLine, `node -e "console.log('fragile quoted shell')"`);
+  assert.equal(JSON.stringify(agentContent).includes(`node -e "console.log('fragile quoted shell')" -e console.log('fragile quoted shell')`), false);
+});
+
+test("command projection keeps token-like stdout and stderr in model-visible agent content", () => {
+  const projection = projectToolResult({
+    request: {
+      callId: "call-command-secret",
+      toolName: "shell_command",
+      input: { commandLine: "print-secret" },
+    },
+    output: {
+      action: "shell_command",
+      summary: "print-secret · exit 1",
+      result: {
+        commandLine: "print-secret",
+        exitCode: 1,
+        stdout: "stdout token=sk-live-token password=hunter2",
+        stderr: "stderr Bearer sk-error-token api_key=abc123",
+        shell: { label: "PowerShell" },
+      },
+    },
+  });
+
+  const agentContent = projection.agentContent as {
+    readonly stdout?: string;
+    readonly stderr?: string;
+    readonly truncated?: boolean;
+    readonly rawStdoutRef?: string;
+    readonly rawStderrRef?: string;
+  };
+
+  assert.equal(agentContent.stdout, "stdout token=sk-live-token password=hunter2");
+  assert.equal(agentContent.stderr, "stderr Bearer sk-error-token api_key=abc123");
+  assert.equal(agentContent.truncated, false);
+  assert.equal(agentContent.rawStdoutRef, undefined);
+  assert.equal(agentContent.rawStderrRef, undefined);
+  assert.equal(JSON.stringify(agentContent).includes("[redacted"), false);
+});
+
+test("command projection exposes timeout and background recovery metadata to model continuation", () => {
+  const backgroundProjection = projectToolResult({
+    request: {
+      callId: "call-command-background",
+      toolName: "shell_command",
+      input: { commandLine: "pnpm dev", background: true },
+    },
+    output: {
+      action: "shell_command",
+      summary: "pnpm dev · started background pid 123",
+      result: {
+        commandLine: "pnpm dev",
+        cwd: "apps/web",
+        exitCode: 0,
+        timedOut: false,
+        background: true,
+        pid: 123,
+        logPath: "C:/Temp/agentarbor-command-logs/pnpm-dev.log",
+        stopCommand: "taskkill /pid 123 /T /F",
+        stdout: "Started background process pid 123.",
+        stderr: "",
+        shell: { label: "Windows Command Prompt" },
+      },
+    },
+  });
+
+  const display = backgroundProjection.display;
+  const agentContent = backgroundProjection.agentContent as {
+    readonly cwd?: string;
+    readonly background?: boolean;
+    readonly pid?: number;
+    readonly logPath?: string;
+    readonly stopCommand?: string;
+    readonly timedOut?: boolean;
+  };
+
+  assert.equal(display?.kind === "command_summary" ? display.background : undefined, true);
+  assert.equal(display?.kind === "command_summary" ? display.pid : undefined, 123);
+  assert.equal(display?.kind === "command_summary" ? display.cwd : undefined, "apps/web");
+  assert.equal(agentContent.cwd, "apps/web");
+  assert.equal(agentContent.background, true);
+  assert.equal(agentContent.timedOut, false);
+  assert.equal(agentContent.pid, 123);
+  assert.equal(agentContent.logPath, "C:/Temp/agentarbor-command-logs/pnpm-dev.log");
+  assert.equal(agentContent.stopCommand, "taskkill /pid 123 /T /F");
+
+  const timeoutProjection = projectToolResult({
+    request: {
+      callId: "call-command-timeout",
+      toolName: "shell_command",
+      input: { commandLine: "pnpm dev" },
+    },
+    output: {
+      action: "shell_command",
+      summary: "pnpm dev · timed out (exit 124)",
+      result: {
+        commandLine: "pnpm dev",
+        exitCode: 124,
+        timedOut: true,
+        stdout: "dev server booting",
+        stderr: "Command timed out after 30000ms and was terminated.",
+      },
+    },
+  });
+  const timeoutContent = timeoutProjection.agentContent as {
+    readonly timedOut?: boolean;
+    readonly exitCode?: number;
+    readonly stdout?: string;
+    readonly stderr?: string;
+  };
+
+  assert.equal(timeoutContent.timedOut, true);
+  assert.equal(timeoutContent.exitCode, 124);
+  assert.match(timeoutContent.stdout ?? "", /dev server booting/);
+  assert.match(timeoutContent.stderr ?? "", /timed out/);
+});
+
+test("read_file projection keeps token-like file content in model-visible agent content", () => {
+  const projection = projectToolResult({
+    request: {
+      callId: "call-read-file-secret",
+      toolName: "read_file",
+      input: { path: "secrets.txt" },
+    },
+    output: {
+      action: "read_file",
+      summary: "secrets.txt 已读取。",
+      result: {
+        path: "secrets.txt",
+        bytes: 54,
+        content: "password=hunter2\napi_key=sk-file-secret\nplain text",
+        truncated: false,
+      },
+    },
+  });
+
+  const agentContent = projection.agentContent as {
+    readonly content?: string;
+    readonly truncated?: boolean;
+    readonly rawContentRef?: string;
+  };
+
+  assert.equal(agentContent.content, "password=hunter2\napi_key=sk-file-secret\nplain text");
+  assert.equal(agentContent.truncated, false);
+  assert.equal(agentContent.rawContentRef, undefined);
+  assert.equal(JSON.stringify(agentContent).includes("[redacted"), false);
+});
+
+test("truncated command stdout and stderr keep real prefixes and raw refs", () => {
+  const longStdout = `stdout token=sk-${"x".repeat(130_000)}`;
+  const longStderr = `stderr Bearer sk-${"y".repeat(70_000)}`;
+  const projection = projectToolResult({
+    request: {
+      callId: "call-long-command",
+      toolName: "shell_command",
+      input: { commandLine: "long-output" },
+    },
+    output: {
+      action: "shell_command",
+      result: {
+        commandLine: "long-output",
+        exitCode: 0,
+        stdout: longStdout,
+        stderr: longStderr,
+      },
+    },
+  });
+
+  const agentContent = projection.agentContent as {
+    readonly stdout?: string;
+    readonly stderr?: string;
+    readonly truncated?: boolean;
+    readonly rawStdoutRef?: string;
+    readonly rawStderrRef?: string;
+  };
+
+  assert.equal(agentContent.truncated, true);
+  assert.equal(agentContent.stdout?.startsWith("stdout token=sk-"), true);
+  assert.equal(agentContent.stderr?.startsWith("stderr Bearer sk-"), true);
+  assert.equal(agentContent.stdout?.endsWith("[truncated to 128000 chars]"), true);
+  assert.equal(agentContent.stderr?.endsWith("[truncated to 64000 chars]"), true);
+  assert.equal(agentContent.rawStdoutRef, "tool:call-long-command:raw:shell_command:stdout");
+  assert.equal(agentContent.rawStderrRef, "tool:call-long-command:raw:shell_command:stderr");
+  assert.equal(agentContent.stdout?.includes("safe summary"), false);
+});
+
+test("truncated read_file content keeps real prefix and raw content ref", () => {
+  const longContent = `password=hunter2\napi_key=sk-file-${"z".repeat(130_000)}`;
+  const projection = projectToolResult({
+    request: {
+      callId: "call-long-read-file",
+      toolName: "read_file",
+      input: { path: "secrets.txt" },
+    },
+    output: {
+      action: "read_file",
+      result: {
+        path: "secrets.txt",
+        bytes: longContent.length,
+        content: longContent,
+      },
+    },
+  });
+
+  const agentContent = projection.agentContent as {
+    readonly content?: string;
+    readonly truncated?: boolean;
+    readonly rawContentRef?: string;
+  };
+
+  assert.equal(agentContent.truncated, true);
+  assert.equal(agentContent.content?.startsWith("password=hunter2\napi_key=sk-file-"), true);
+  assert.equal(agentContent.content?.endsWith("[truncated to 128000 chars]"), true);
+  assert.equal(agentContent.rawContentRef, "tool:call-long-read-file:raw:read_file:content");
+});
+
+test("truncated research read preview keeps raw preview ref", () => {
+  const longPreview = `page content token=sk-preview-${"p".repeat(130_000)}`;
+  const projection = projectToolResult({
+    request: {
+      callId: "call-long-read",
+      toolName: "read",
+      input: { ref: "research:web:1" },
+    },
+    output: {
+      action: "read",
+      ref: "research:web:1",
+      result: {
+        title: "Long page",
+        uri: "https://example.test/long",
+        contentPreview: longPreview,
+      },
+    },
+  });
+
+  const agentContent = projection.agentContent as {
+    readonly contentPreview?: string;
+    readonly truncated?: boolean;
+    readonly rawContentPreviewRef?: string;
+  };
+
+  assert.equal(agentContent.truncated, true);
+  assert.equal(agentContent.contentPreview?.startsWith("page content token=sk-preview-"), true);
+  assert.equal(agentContent.contentPreview?.endsWith("[truncated to 128000 chars]"), true);
+  assert.equal(agentContent.rawContentPreviewRef, "tool:call-long-read:raw:read:contentPreview");
+});

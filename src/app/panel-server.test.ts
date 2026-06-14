@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { startLocalPanelServer, type PanelProviderFetch } from "./panel-server.js";
+import { ConfigCenter } from "./config-center.js";
 import {
   removeTemporaryTree,
   requestJson,
@@ -146,6 +147,65 @@ test("panel skills route returns real discovered SKILL metadata only", async () 
   } finally {
     await server.close();
     await removeTemporaryTree(directory);
+  }
+});
+
+test("panel server logs unhandled request failures before returning panel_internal_error", async () => {
+  const errorLogs: unknown[][] = [];
+  const originalConsoleError = console.error;
+  console.error = (...args: unknown[]) => {
+    errorLogs.push(args);
+  };
+  try {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-unhandled-request-error-"));
+    const brokenConfigCenter = new ConfigCenter({
+      settingsStore: {
+        async readSettings(): Promise<never> {
+          throw new Error("synthetic panel request failure");
+        },
+        async writeSettings(): Promise<void> {
+          throw new Error("synthetic panel request failure");
+        },
+      },
+      secretStore: {
+        async getMetadata() {
+          return { configured: false } as const;
+        },
+        async readSecret() {
+          return undefined;
+        },
+        async writeSecret() {
+          return { configured: true } as const;
+        },
+        async deleteSecret() {
+          return { configured: false } as const;
+        },
+      },
+    });
+    const server = await startLocalPanelServer({
+      port: 0,
+      configDirectory: directory,
+      configCenter: brokenConfigCenter,
+    });
+    try {
+      const failed = await requestText(server.url, "/health");
+
+      assert.equal(failed.status, 500);
+      assert.equal(failed.text.includes("\"code\":\"panel_internal_error\""), true);
+      assert.equal(
+        errorLogs.some((args) => String(args[0]).includes("[panel-server] unhandled request failure GET /health")),
+        true
+      );
+      assert.equal(
+        errorLogs.some((args) => args.some((item) => String(item).includes("synthetic panel request failure"))),
+        true
+      );
+    } finally {
+      await server.close();
+      await removeTemporaryTree(directory);
+    }
+  } finally {
+    console.error = originalConsoleError;
   }
 });
 

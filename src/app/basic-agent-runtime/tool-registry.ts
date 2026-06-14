@@ -9,7 +9,10 @@ import type {
   ToolRuntimeHint,
   ToolVisibleResultPolicy,
 } from "../../domain/tools/index.js";
-import { toolPresentationForDefinition } from "../../domain/tools/index.js";
+import {
+  toolPresentationForDefinition,
+  validateModelVisibleToolContract,
+} from "../../domain/tools/index.js";
 import { ToolCenter } from "../tool-center/tool-center.js";
 
 export type ToolRegistryScope = "desktop-basic" | "underground" | "research" | "workspace" | "mcp";
@@ -57,6 +60,14 @@ export class ToolRegistry {
 
   register(entry: ToolRegistryEntry): void {
     const metadata = requireToolMetadata(entry.executor.definition);
+    const scopes = uniqueScopes(entry.scopes);
+    const availability = entry.availability ?? { status: "available" as const };
+    assertModelVisibleToolContract({
+      definition: entry.executor.definition,
+      scopes,
+      enabledByDefault: entry.enabledByDefault,
+      availability,
+    });
     this.entries.set(entry.executor.definition.name, {
       executor: {
         ...entry.executor,
@@ -65,9 +76,9 @@ export class ToolRegistry {
           metadata,
         },
       },
-      scopes: uniqueScopes(entry.scopes),
+      scopes,
       enabledByDefault: entry.enabledByDefault,
-      availability: entry.availability ?? { status: "available" },
+      availability,
     });
   }
 
@@ -179,6 +190,36 @@ function cloneRuntimeHints(value: ToolDefinitionMetadata["runtimeHints"]): ToolD
 function uniqueScopes(scopes: readonly ToolRegistryScope[]): readonly ToolRegistryScope[] {
   const source: readonly ToolRegistryScope[] = scopes.length === 0 ? ["desktop-basic"] : scopes;
   return [...new Set<ToolRegistryScope>(source)];
+}
+
+function assertModelVisibleToolContract(input: {
+  readonly definition: ToolDefinition;
+  readonly scopes: readonly ToolRegistryScope[];
+  readonly enabledByDefault: boolean;
+  readonly availability: ToolRegistryAvailability;
+}): void {
+  if (!shouldRequireModelContract(input)) {
+    return;
+  }
+  const validation = validateModelVisibleToolContract(input.definition);
+  if (!validation.ok) {
+    throw new Error(
+      `Model-visible tool ${input.definition.name} is missing model contract fields: ${validation.missing.join(", ")}.`
+    );
+  }
+}
+
+function shouldRequireModelContract(input: {
+  readonly scopes: readonly ToolRegistryScope[];
+  readonly enabledByDefault: boolean;
+  readonly availability: ToolRegistryAvailability;
+}): boolean {
+  if (!input.enabledByDefault || input.availability.status !== "available") {
+    return false;
+  }
+  return input.scopes.some((scope) =>
+    scope === "desktop-basic" || scope === "research" || scope === "workspace"
+  );
 }
 
 function isToolCategory(value: unknown): value is ToolCategory {

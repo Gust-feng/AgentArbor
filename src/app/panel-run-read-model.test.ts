@@ -562,6 +562,50 @@ test("ordinary agent stream stays quiet for direct answers while preserving tool
   assert.equal(JSON.stringify(withTool).includes("\"action\":\"read_file\""), false);
 });
 
+test("ordinary agent stream preserves typed model failures after tool work", () => {
+  const events = createPanelRunStreamEvents({
+    runId: "run-tool-then-model-failure",
+    status: "failed",
+    desktopMode: "agent",
+    eventEntries: [
+      eventEntry({ sequence: 1, type: "goal.received", payload: { goalId: "goal-tool-failure" } }),
+      eventEntry({
+        sequence: 2,
+        type: "tool.completed",
+        payload: {
+          callId: "tool-call-shell",
+          toolName: "shell_command",
+          input: { command: "python", args: ["hello_agent.py"] },
+          output: {
+            action: "shell_command",
+            summary: "python hello_agent.py · exit 0",
+            result: { command: "python", args: ["hello_agent.py"], exitCode: 0 },
+          },
+        },
+      }),
+      eventEntry({
+        sequence: 3,
+        type: "model.failed",
+        payload: {
+          requestId: "request-after-tool",
+          failureKind: "provider_network",
+          failureMessage: "fetch failed",
+          retryable: true,
+        },
+      }),
+    ],
+    createdAt: "2026-05-07T00:00:00.000Z",
+    updatedAt: "2026-05-07T00:00:03.000Z",
+  });
+  const modelFailure = events.find((event) => event.type === "model.failed");
+
+  assert.equal(modelFailure?.status, "failed");
+  assert.equal(modelFailure?.summary, "模型服务连接失败。");
+  assert.equal(modelFailure?.detail?.kind, "thinking");
+  assert.equal(modelFailure?.detail?.error, "模型服务连接失败。");
+  assert.equal(events.some((event) => event.type === "agent.note.completed" && event.summary === "模型服务连接失败。"), false);
+});
+
 test("ordinary agent completed stream ignores compatibility payloads and does not invent answers", () => {
   const events = createPanelRunStreamEvents({
     runId: "run-ordinary-legacy-output",

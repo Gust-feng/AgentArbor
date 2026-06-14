@@ -1,6 +1,6 @@
 import type { TranscriptNode, TranscriptNodePhase } from "../domain/basic-agent/index.js";
 import type { ObservationRef } from "../domain/observation/index.js";
-import type { ToolDisplayProjection } from "../domain/tools/index.js";
+import { commandDisplayText, type ToolDisplayProjection } from "../domain/tools/index.js";
 import { toolDisplayName } from "../domain/tools/index.js";
 import { cleanConfirmationSummary } from "./confirmation-copy.js";
 import {
@@ -122,6 +122,14 @@ function transcriptNodeForEvent(
   }
   if ((event.type === "agent.note.delta" || event.type === "agent.note.completed") && isLowValueOrdinaryAgentNote(event.summary)) {
     return undefined;
+  }
+  if (event.type === "model.failed") {
+    return transcriptNode(event, {
+      kind: "system",
+      phase: "failed",
+      title: "模型回复失败",
+      summary: event.summary,
+    });
   }
   if (event.type === "agent.note.delta" || event.type === "agent.note.completed") {
     if (event.summary === undefined || event.summary.trim().length === 0) {
@@ -390,9 +398,7 @@ function isObservationRefKind(value: string): value is ObservationRef["kind"] {
 function transcriptToolSummary(event: PanelTranscriptStreamEvent): string | undefined {
   const display = event.detail?.display;
   if (display?.kind === "command_summary") {
-    const command = [display.command, ...(display.args ?? [])]
-      .filter((value): value is string => typeof value === "string" && value.length > 0)
-      .join(" ");
+    const command = commandDisplayText(display);
     const error = event.type === "tool.failed" ? display.errorSummary : undefined;
     return [command, display.outputSummary, error]
       .filter((value): value is string => value !== undefined && value.trim().length > 0)

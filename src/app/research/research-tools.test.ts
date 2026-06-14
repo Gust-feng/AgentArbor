@@ -14,7 +14,7 @@ test("default ToolCenter exposes model-visible search and read tools", async () 
   const center = createDefaultToolCenter({ env: {}, playwrightAvailable: true });
   const names = center.list().map((tool) => tool.name);
 
-  assert.deepEqual(names, ["search", "read", "read_file", "list_dir", "grep_files", "create_file", "edit_file", "delete_file", "shell_command", "browser_snapshot"]);
+  assert.deepEqual(names, ["search", "read", "read_file", "list_dir", "grep_files", "create_file", "write_file", "edit_file", "delete_file", "shell_command", "browser_snapshot"]);
   assert.equal(center.has("web_search"), false);
 
   const search = await center.execute(
@@ -44,9 +44,39 @@ test("research tool definitions describe only currently model-visible sources", 
   assert.equal(search.description.includes("docs"), false);
   assert.equal(search.description.includes("packages"), false);
   assert.equal(search.description.includes("github"), false);
+  assert.equal(search.description.includes("soil"), false);
+  assert.equal(search.description.includes("run_memory"), false);
+  assert.equal(JSON.stringify(search.modelContract).includes("soil"), false);
+  assert.equal(JSON.stringify(search.modelContract).includes("run memory"), false);
+  assert.equal(JSON.stringify(search.modelContract).includes("run_memory"), false);
   assert.equal(sourcesProperty.description?.includes("docs"), false);
+  assert.equal(sourcesProperty.description?.includes("soil"), false);
+  assert.equal(sourcesProperty.items?.enum?.includes("soil"), false);
+  assert.equal(sourcesProperty.items?.enum?.includes("run_memory"), false);
   assert.equal(sourceOverrideProperty.enum?.includes("docs"), false);
+  assert.equal(sourceOverrideProperty.enum?.includes("soil"), false);
+  assert.equal(sourceOverrideProperty.enum?.includes("run_memory"), false);
   assert.equal(read.description.includes("contentPreview"), true);
+});
+
+test("research tools keep explicitly requested hidden sources as no-provider facts", async () => {
+  const runtime = createDefaultResearchRuntime({ env: {}, tavilyFetch: undefined });
+  const searchTool = createResearchSearchTool(runtime);
+  const readTool = createResearchReadTool(runtime);
+
+  const search = await searchTool.execute(
+    { query: "createResearchSearchTool", sources: ["soil", "run_memory"] },
+    { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" }
+  );
+  const read = await readTool.execute(
+    { ref: "research:soil:unavailable", source: "soil" },
+    { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" }
+  );
+
+  assert.equal((search as { status?: string }).status, "no-provider");
+  assert.deepEqual((search as { trace?: { requestedSources?: readonly string[] } }).trace?.requestedSources, ["soil", "run_memory"]);
+  assert.equal((read as { status?: string }).status, "no-provider");
+  assert.deepEqual((read as { trace?: { requestedSources?: readonly string[] } }).trace?.requestedSources, ["soil"]);
 });
 
 test("default ToolCenter passes configured Tavily max results into ResearchRuntime", async () => {
@@ -119,7 +149,7 @@ test("configured ToolCenter reads Tavily config and registers search/read withou
       { callerAgentId: "agent-test", allowedTools: ["search", "read"] }
     );
 
-    assert.deepEqual(names, ["search", "read", "read_file", "list_dir", "grep_files", "create_file", "edit_file", "delete_file", "shell_command", "browser_snapshot"]);
+    assert.deepEqual(names, ["search", "read", "read_file", "list_dir", "grep_files", "create_file", "write_file", "edit_file", "delete_file", "shell_command", "browser_snapshot"]);
     assert.equal(search.status, "completed");
     assert.equal(bodies[0]?.max_results, 1);
     assert.equal(JSON.stringify(search.output).includes("tvly-configured-tool-secret"), false);
@@ -143,7 +173,7 @@ test("configured ToolCenter still registers search/read and degrades web search 
       { callerAgentId: "agent-test", allowedTools: ["search", "read"] }
     );
 
-    assert.deepEqual(names, ["search", "read", "read_file", "list_dir", "grep_files", "create_file", "edit_file", "delete_file", "shell_command", "browser_snapshot"]);
+    assert.deepEqual(names, ["search", "read", "read_file", "list_dir", "grep_files", "create_file", "write_file", "edit_file", "delete_file", "shell_command", "browser_snapshot"]);
     assert.equal(search.status, "completed");
     assert.equal((search.output as { status?: string }).status, "no-provider");
   } finally {

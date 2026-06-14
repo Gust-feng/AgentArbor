@@ -26,6 +26,7 @@ export type WebSearchToolOptions = {
 export type WebSearchToolOutput = {
   readonly provider: "tavily" | "none";
   readonly status: "completed" | "no_search_provider" | "invalid_input" | "provider_failed";
+  readonly searched: boolean;
   readonly query: string;
   readonly results: readonly {
     readonly title: string;
@@ -42,7 +43,19 @@ export function createWebSearchTool(options: WebSearchToolOptions = {}): ToolExe
   return {
     definition: {
       name: "web_search",
-      description: "Search the web for current information. Returns top results with titles, URLs, and snippets.",
+      description: "Search the web for current information only when a real provider is configured. Without a provider, returns no_search_provider and does not claim a search occurred.",
+      modelContract: {
+        usageNotes: [
+          "Use this for live/current web lookup only.",
+          "If status is no_search_provider, no live web search was performed; tell the user or choose another available source.",
+          "Do not treat an empty no_search_provider result as evidence that nothing exists on the web.",
+        ],
+        outputNotes: [
+          "searched is true only when a provider request was attempted.",
+          "status no_search_provider means the tool did not access the web.",
+          "results contain provider snippets, not full page reads.",
+        ],
+      },
       metadata: {
         category: "web",
         riskLevel: "low",
@@ -76,6 +89,7 @@ async function executeWebSearch(
     return {
       provider: "none",
       status: "provider_failed",
+      searched: false,
       query: "",
       results: [],
       message: "web_search was cancelled.",
@@ -85,6 +99,7 @@ async function executeWebSearch(
     return {
       provider: "none",
       status: "invalid_input",
+      searched: false,
       query: "",
       results: [],
       message: "web_search requires a non-empty string query.",
@@ -97,9 +112,10 @@ async function executeWebSearch(
     return {
       provider: "none",
       status: "no_search_provider",
+      searched: false,
       query,
       results: [],
-      message: "No configured search provider. Set a Tavily API key to enable live search.",
+      message: "No configured search provider; no live web search was performed. Set a Tavily API key to enable live search.",
     };
   }
 
@@ -122,6 +138,7 @@ async function executeWebSearch(
     return {
       provider: "tavily",
       status: "provider_failed",
+      searched: true,
       query,
       results: [],
       message: `Tavily search returned HTTP ${response.status}.`,
@@ -132,6 +149,7 @@ async function executeWebSearch(
   return {
     provider: "tavily",
     status: "completed",
+    searched: true,
     query,
     results: resultsFromTavily(raw).slice(0, maxResults),
   };

@@ -456,6 +456,7 @@ function persistedStreamAgentLabel(type: PanelRunStreamEvent["type"]): string {
   if (
     type === "agent.note.delta" ||
     type === "agent.note.completed" ||
+    type === "model.failed" ||
     type === "model.output.delta" ||
     type === "model.output.completed" ||
     type === "model.reasoning.delta" ||
@@ -617,7 +618,7 @@ function streamTypeForRuntimeEvent(
     return "model.output.completed";
   }
   if (type === "model.failed") {
-    return "agent.note.completed";
+    return "model.failed";
   }
   if (type === "context.compaction.completed" || type === "context.compaction.failed") {
     return type;
@@ -659,7 +660,7 @@ function streamStatusFor(type: PanelRunStreamEvent["type"]): NonNullable<PanelRu
   if (type === "run.blocked") {
     return "blocked";
   }
-  if (type === "tool.failed" || type === "run.failed" || type === "context.compaction.failed") {
+  if (type === "model.failed" || type === "tool.failed" || type === "run.failed" || type === "context.compaction.failed") {
     return "failed";
   }
   return "completed";
@@ -679,7 +680,9 @@ function persistedToolStreamDetail(call: RuntimeToolCallRecord): PanelRunStreamE
     action: call.action ?? call.toolName,
     path: call.path,
     query: call.query,
-    command: call.command,
+    command: call.display?.kind === "command_summary"
+      ? call.display.commandLine ?? call.command
+      : call.command,
     exitCode: call.exitCode,
     preview: call.error ?? cleanOrdinaryToolText(call.preview) ?? cleanOrdinaryToolText(call.summary),
     display: call.display,

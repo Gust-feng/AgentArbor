@@ -19,6 +19,7 @@ test("tool stream projection keeps command output as safe summary", () => {
         kind: "command_summary",
         command: "pnpm",
         args: ["test"],
+        commandLine: "pnpm test",
         exitCode: 0,
         outputSummary: "测试已通过",
       },
@@ -37,6 +38,7 @@ test("tool stream projection keeps command output as safe summary", () => {
   assert.equal(detail.command, "pnpm test");
   assert.equal(detail.preview, "测试已通过");
   assert.equal(detail.display?.kind, "command_summary");
+  assert.equal(detail.display?.kind === "command_summary" ? detail.display.commandLine : undefined, "pnpm test");
   assert.equal(detail.envelope?.rawRetention, "none");
   assert.equal(JSON.stringify(detail).includes("RAW_STDOUT_SENTINEL"), false);
 });
@@ -70,6 +72,30 @@ test("tool stream projection keeps ordinary tool copy free of diagnostic labels"
   assert.equal(completedSummary.includes("exit 0"), false);
   assert.equal(completedSummary.includes("耗时"), false);
   assert.equal(completedSummary.includes("pnpm test"), true);
+});
+
+test("tool stream projection prefers commandLine over recombining argv text", () => {
+  const detail = toolStreamDetail("tool.completed", {
+    toolName: "shell_command",
+    input: {
+      commandLine: `node -e "console.log('fragile quoted shell')"`,
+      command: "node",
+      args: ["-e", "console.log('fragile quoted shell')"],
+    },
+    output: {
+      summary: `node -e "console.log('fragile quoted shell')" · exit 0`,
+      result: {
+        command: "node",
+        commandLine: `node -e "console.log('fragile quoted shell')"`,
+        args: ["-e", "console.log('fragile quoted shell')"],
+        exitCode: 0,
+      },
+    },
+  });
+
+  assert.equal(detail.command, `node -e "console.log('fragile quoted shell')"`);
+  assert.equal(detail.command?.includes(`-e console.log('fragile quoted shell')`), false);
+  assert.equal(detail.preview, `node -e "console.log('fragile quoted shell')"`);
 });
 
 test("tool stream projection cleans restored ordinary tool preview labels", () => {

@@ -107,6 +107,10 @@ function cloneToolModelContract(contract: ToolDefinition["modelContract"]): Tool
     return undefined;
   }
   return {
+    purpose: contract.purpose,
+    whenToUse: contract.whenToUse === undefined ? undefined : [...contract.whenToUse],
+    whenNotToUse: contract.whenNotToUse === undefined ? undefined : [...contract.whenNotToUse],
+    inputNotes: contract.inputNotes === undefined ? undefined : [...contract.inputNotes],
     usageNotes: contract.usageNotes === undefined ? undefined : [...contract.usageNotes],
     outputNotes: contract.outputNotes === undefined ? undefined : [...contract.outputNotes],
     examples: contract.examples === undefined

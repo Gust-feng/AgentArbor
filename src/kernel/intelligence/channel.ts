@@ -47,23 +47,7 @@ export class NativeIntelligenceChannel implements IntelligenceChannel {
 
     this.options.bus.publish(createModelRequestedMessage({ request, provider: this.options.provider }));
 
-    let providerResponse: ModelResponse;
-    try {
-      providerResponse = await this.options.provider.complete(request, options);
-    } catch (error) {
-      const response = createFailedModelResponseFromError({
-        requestId: request.requestId,
-        providerId: this.options.provider.providerId,
-        providerKind: this.options.provider.providerKind,
-        protocolKind: this.options.provider.protocolKind,
-        model: this.options.provider.model,
-        outputKind: request.outputContract.outputKind,
-        error,
-        fallbackMessage: "Model provider request failed.",
-      });
-      this.options.bus.publish(createModelFailedMessage({ request, response }));
-      return response;
-    }
+    const providerResponse = await requestProviderWithRetry(this.options.provider, request, options);
 
     const validation = this.validateResponse(request, providerResponse);
     const response = normalizeValidatedResponse(providerResponse, validation);
@@ -81,6 +65,50 @@ export class NativeIntelligenceChannel implements IntelligenceChannel {
     return validateModelResponse(request, response);
   }
 }
+
+async function requestProviderWithRetry(
+  provider: ModelProvider,
+  request: ModelRequest,
+  options: ModelRequestOptions
+): Promise<ModelResponse> {
+  let attempt = 0;
+  for (;;) {
+    try {
+      const response = await provider.complete(request, options);
+      if (!shouldRetryFailedResponse(response, attempt, options)) {
+        return response;
+      }
+    } catch (error) {
+      const response = createFailedModelResponseFromError({
+        requestId: request.requestId,
+        providerId: provider.providerId,
+        providerKind: provider.providerKind,
+        protocolKind: provider.protocolKind,
+        model: provider.model,
+        outputKind: request.outputContract.outputKind,
+        error,
+        fallbackMessage: "Model provider request failed.",
+      });
+      if (!shouldRetryFailedResponse(response, attempt, options)) {
+        return response;
+      }
+    }
+    attempt += 1;
+  }
+}
+
+function shouldRetryFailedResponse(
+  response: ModelResponse,
+  attempt: number,
+  options: ModelRequestOptions
+): boolean {
+  return options.abortSignal?.aborted !== true &&
+    response.status === "failed" &&
+    response.failure?.retryable === true &&
+    attempt < MODEL_REQUEST_RETRY_LIMIT;
+}
+
+const MODEL_REQUEST_RETRY_LIMIT = 1;
 
 function normalizeValidatedResponse(
   response: ModelResponse,

@@ -15,6 +15,7 @@ import {
   createLocalGrepFilesTool,
   createLocalListDirTool,
   createLocalReadFileTool,
+  createLocalWriteFileTool,
 } from "../tool-center/adapters/local-workspace-tools.js";
 import {
   createDefaultCommandShellConfig,
@@ -94,6 +95,7 @@ export function createDesktopBasicToolRegistry(
     createLocalListDirTool(workspaceRoot, { sandboxPolicy }),
     createLocalGrepFilesTool(workspaceRoot, { sandboxPolicy }),
     createLocalCreateFileTool(workspaceRoot, { sandboxPolicy }),
+    createLocalWriteFileTool(workspaceRoot, { sandboxPolicy }),
     createLocalEditFileTool(workspaceRoot, { sandboxPolicy }),
     createLocalDeleteFileTool(workspaceRoot, { sandboxPolicy }),
     createLocalShellCommandTool(workspaceRoot, { sandboxPolicy, commandShell }),

@@ -539,13 +539,36 @@ test("executeToolUseLoop truncates verbose tool messages before model continuati
     toolCallResponse("model-request-test", "call-1", "read"),
     completedResponse("model-request-final", { summary: "Final answer after truncation." }),
   ]);
-  const center = new TestToolBroker();
-  center.register("read", async () => Object.fromEntries(
-    Array.from({ length: 16 }, (_, fieldIndex) => [
-      `field${fieldIndex}`,
-      Array.from({ length: 8 }, (_, itemIndex) => `${fieldIndex}-${itemIndex}-` + Array.from({ length: 700 }, (__, index) => String(index % 10)).join("")),
-    ])
-  ));
+  const verboseText = Array.from({ length: 240_000 }, (_, index) => String(index % 10)).join("");
+  const center: ToolExecutionBroker = {
+    list: () => [
+      {
+        name: "read",
+        description: "Projected verbose read tool.",
+        inputSchema: { type: "object", properties: {} },
+      },
+    ],
+    has: (name) => name === "read",
+    execute: async (request, _context, _permission) => ({
+      callId: request.callId,
+      toolName: request.toolName,
+      input: request.input,
+      output: { raw: "raw output omitted from model continuation" },
+      status: "completed",
+      durationMs: 1,
+      projection: {
+        agentContent: {
+          truncated: false,
+          stdout: verboseText,
+        },
+        uiSummary: "UI summary",
+        truncated: false,
+        redacted: false,
+      },
+    }),
+    resetCallCount: () => undefined,
+    getCallCount: () => 1,
+  };
 
   await executeToolUseLoop(
     {
@@ -561,7 +584,7 @@ test("executeToolUseLoop truncates verbose tool messages before model continuati
 
   const toolMessage = channel.requests[1]?.sanitizedMessages.find((message) => message.role === "tool");
   assert.equal(toolMessage?.content.includes("tool message truncated"), true);
-  assert.ok(toolMessage?.content.length !== undefined && toolMessage.content.length < 41_000);
+  assert.ok(toolMessage?.content.length !== undefined && toolMessage.content.length < 221_000);
 });
 
 test("executeToolUseLoop keeps verbose tool output out of EventLog while preserving model tool messages", async () => {
@@ -755,6 +778,119 @@ test("executeToolUseLoop preserves projected agentContent before model continuat
   assert.equal(toolMessageText.includes("sk-agent-content-token"), true);
   assert.equal(toolMessageText.includes("[redacted-secret]"), false);
   assert.equal(toolMessageText.includes("[redacted]"), false);
+});
+
+test("executeToolUseLoop preserves projected command stdout and stderr for model continuation", async () => {
+  const channel = new SequenceIntelligenceChannel([
+    toolCallResponse("model-request-test", "call-shell", "shell_command"),
+    completedResponse("model-request-final", { summary: "Final answer with command output." }),
+  ]);
+  const broker: ToolExecutionBroker = {
+    list: () => [
+      {
+        name: "shell_command",
+        description: "Projected shell tool.",
+        inputSchema: { type: "object", properties: {} },
+      },
+    ],
+    has: (name) => name === "shell_command",
+    execute: async (request, _context, _permission) => ({
+      callId: request.callId,
+      toolName: request.toolName,
+      input: request.input,
+      output: { raw: "adapter raw output must not be used" },
+      status: "completed",
+      durationMs: 1,
+      projection: {
+        agentContent: {
+          commandLine: "print-secret",
+          exitCode: 1,
+          truncated: false,
+          stdout: "stdout token=sk-loop-token password=hunter2",
+          stderr: "stderr Bearer sk-loop-error api_key=abc123",
+        },
+        uiSummary: "Short UI summary",
+        truncated: false,
+        redacted: false,
+      },
+    }),
+    resetCallCount: () => undefined,
+    getCallCount: () => 1,
+  };
+
+  await executeToolUseLoop(
+    {
+      intelligenceChannel: channel,
+      toolCenter: broker,
+      callerAgentId: "agent-test",
+      traceId: "trace-test",
+      goalId: "goal-test",
+      allowedTools: ["shell_command"],
+    },
+    createValidModelRequest()
+  );
+
+  const toolMessageText = JSON.stringify(channel.requests[1]?.sanitizedMessages.at(-1));
+  assert.equal(toolMessageText.includes("stdout token=sk-loop-token password=hunter2"), true);
+  assert.equal(toolMessageText.includes("stderr Bearer sk-loop-error api_key=abc123"), true);
+  assert.equal(toolMessageText.includes("Short UI summary"), false);
+  assert.equal(toolMessageText.includes("[redacted"), false);
+});
+
+test("executeToolUseLoop keeps projected raw refs in tool result message and does not fall back to UI summary", async () => {
+  const channel = new SequenceIntelligenceChannel([
+    toolCallResponse("model-request-test", "call-read-file", "read_file"),
+    completedResponse("model-request-final", { summary: "Final answer with evidence ref." }),
+  ]);
+  const broker: ToolExecutionBroker = {
+    list: () => [
+      {
+        name: "read_file",
+        description: "Projected read_file tool.",
+        inputSchema: { type: "object", properties: {} },
+      },
+    ],
+    has: (name) => name === "read_file",
+    execute: async (request, _context, _permission) => ({
+      callId: request.callId,
+      toolName: request.toolName,
+      input: request.input,
+      output: { raw: "adapter raw output must not be used" },
+      status: "completed",
+      durationMs: 1,
+      projection: {
+        agentContent: {
+          truncated: true,
+          content: "password=hunter2\napi_key=sk-loop-file-secret\n[truncated to 128000 chars]",
+          rawContentRef: "tool:call-read-file:raw:read_file:content",
+        },
+        uiSummary: "Summary only for UI",
+        truncated: true,
+        redacted: false,
+      },
+    }),
+    resetCallCount: () => undefined,
+    getCallCount: () => 1,
+  };
+
+  await executeToolUseLoop(
+    {
+      intelligenceChannel: channel,
+      toolCenter: broker,
+      callerAgentId: "agent-test",
+      traceId: "trace-test",
+      goalId: "goal-test",
+      allowedTools: ["read_file"],
+    },
+    createValidModelRequest()
+  );
+
+  const toolMessageText = JSON.stringify(channel.requests[1]?.sanitizedMessages.at(-1));
+  assert.equal(toolMessageText.includes("password=hunter2"), true);
+  assert.equal(toolMessageText.includes("api_key=sk-loop-file-secret"), true);
+  assert.equal(toolMessageText.includes("tool:call-read-file:raw:read_file:content"), true);
+  assert.equal(toolMessageText.includes("Summary only for UI"), false);
+  assert.equal(toolMessageText.includes("adapter raw output must not be used"), false);
 });
 
 test("executeToolUseLoop preserves tool failure errors before model continuation", async () => {

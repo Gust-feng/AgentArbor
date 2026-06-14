@@ -2,7 +2,7 @@ import path from "node:path";
 import type { SandboxPolicy, SandboxPolicyRequest } from "../../../domain/tools/index.js";
 
 const MAX_FILE_BYTES = 512_000;
-const MAX_COMMAND_TIMEOUT_MS = 30_000;
+const MAX_COMMAND_TIMEOUT_MS = 120_000;
 const BLOCKED_PATH_SEGMENTS = new Set<string>();
 
 export type LocalWorkspaceSandboxPolicyOptions = {

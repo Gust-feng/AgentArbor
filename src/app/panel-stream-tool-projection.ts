@@ -1,6 +1,7 @@
 import type { ToolDisplayProjection, ToolResultEnvelope } from "../domain/tools/index.js";
 import { toolDisplayName } from "../domain/tools/index.js";
 import { redactSensitiveText } from "../kernel/redaction.js";
+import { commandTextFromToolInput, commandTextFromToolResult } from "./command-text.js";
 import { asRecord, stringArray, stringOrUndefined } from "./panel-read-model-utils.js";
 import { safeCommandToolPreview, safeReadFileToolPreview } from "./safe-tool-preview.js";
 import { cleanOrdinaryToolText } from "./ordinary-tool-copy.js";
@@ -53,14 +54,12 @@ export function toolStreamDetail(
   const result = asRecord(output.result);
   const display = toolDisplayOrUndefined(output.display);
   const envelope = toolResultEnvelopeOrUndefined(output.envelope);
-  const command = stringOrUndefined(result.command) ?? stringOrUndefined(input.command);
-  const args = stringArray(result.args).length > 0 ? stringArray(result.args) : stringArray(input.args);
   return {
     kind: "tool",
     action: displayActionLabel(stringOrUndefined(output.action) ?? localToolLabel(toolName)),
     path: stringOrUndefined(result.path) ?? stringOrUndefined(input.path),
     query: stringOrUndefined(result.query) ?? stringOrUndefined(input.query),
-    command: command === undefined ? undefined : [command, ...args].join(" ").trim(),
+    command: commandTextFromToolResult(result, input),
     exitCode: typeof result.exitCode === "number" ? result.exitCode : undefined,
     preview: type === "tool.requested" ? toolRequestPreview(toolName, input) : toolResultPreview(toolName, output, result, payload),
     display,
@@ -138,9 +137,7 @@ function toolRequestPreview(toolName: string, input: Readonly<Record<string, unk
     return path;
   }
   if (toolName === "run_command" || toolName === "shell_command") {
-    const command = stringOrUndefined(input.command);
-    const args = stringArray(input.args);
-    return command === undefined ? undefined : [command, ...args].join(" ").trim();
+    return commandTextFromToolInput(input);
   }
   if (toolName === "browser_snapshot") {
     const url = stringOrUndefined(input.url);
@@ -205,7 +202,7 @@ function toolResultPreview(
     return safeFileChangePreview(toolName, asRecord(payload.input), output, result);
   }
   if (toolName === "run_command" || toolName === "shell_command") {
-    return safeCommandPreview(output, result);
+    return safeCommandPreview(output, result, asRecord(payload.input));
   }
   if (toolName === "browser_snapshot") {
     const title = stringOrUndefined(result.title);
@@ -244,11 +241,12 @@ function safeReadFilePreview(
 
 function safeCommandPreview(
   output: Readonly<Record<string, unknown>>,
-  result: Readonly<Record<string, unknown>>
+  result: Readonly<Record<string, unknown>>,
+  input: Readonly<Record<string, unknown>>
 ): string | undefined {
   return safeCommandToolPreview({
     summary: stringOrUndefined(output.summary),
-    command: stringOrUndefined(result.command),
+    command: commandTextFromToolResult(result, input),
     exitCode: typeof result.exitCode === "number" ? result.exitCode : undefined,
   });
 }
@@ -291,9 +289,7 @@ function toolTargetText(
     return url;
   }
   if (toolName === "run_command" || toolName === "shell_command") {
-    const command = stringOrUndefined(result.command) ?? stringOrUndefined(input.command);
-    const args = stringArray(result.args).length > 0 ? stringArray(result.args) : stringArray(input.args);
-    return command === undefined ? undefined : [command, ...args].join(" ").trim();
+    return commandTextFromToolResult(result, input);
   }
   return undefined;
 }

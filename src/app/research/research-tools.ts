@@ -3,7 +3,7 @@ import type { ToolExecutor } from "../../domain/tools/index.js";
 
 export function createResearchSearchTool(researchRuntime: InformationAccess): ToolExecutor {
   const capabilities = researchRuntime.getCapabilities?.();
-  const searchableSources = capabilities?.defaultSearchSources ?? ["web", "codebase", "soil", "run_memory"];
+  const searchableSources = capabilities?.defaultSearchSources ?? ["web", "codebase"];
   const searchableDescription = formatSourceList(searchableSources);
   return {
     definition: {
@@ -16,6 +16,19 @@ export function createResearchSearchTool(researchRuntime: InformationAccess): To
         "Use read with a returned ref when the full preview is needed.",
       ].join(" "),
       modelContract: {
+        purpose: "Search the currently available AgentArbor information sources and return refs the model can inspect with read.",
+        whenToUse: [
+          "Use when you need to locate current source material before answering or editing.",
+          "Use when you need refs from the currently model-visible information sources.",
+        ],
+        whenNotToUse: [
+          "Do not use as the final evidence for detailed work; expand important refs with read first.",
+        ],
+        inputNotes: [
+          "query is required and should describe the information need.",
+          "sources is optional; omit it unless a specific currently available source is needed.",
+          "limit optionally caps returned refs.",
+        ],
         runtimeHints: [
           { label: "searchable sources", value: searchableDescription || "none" },
         ],
@@ -74,7 +87,7 @@ export function createResearchSearchTool(researchRuntime: InformationAccess): To
 
 export function createResearchReadTool(researchRuntime: InformationAccess): ToolExecutor {
   const capabilities = researchRuntime.getCapabilities?.();
-  const readableSources = capabilities?.readableSources ?? ["page", "codebase", "soil", "run_memory"];
+  const readableSources = capabilities?.readableSources ?? ["page", "codebase"];
   const readableDescription = formatSourceList(readableSources);
   return {
     definition: {
@@ -85,6 +98,19 @@ export function createResearchReadTool(researchRuntime: InformationAccess): Tool
         "The returned object includes title, uri/url, source, status, contentPreview, truncated, and metadata when available.",
       ].join(" "),
       modelContract: {
+        purpose: "Read a research ref, URL, repo URI, or repository path and return contentPreview for model reasoning.",
+        whenToUse: [
+          "Use after search when a snippet is not enough.",
+          "Use directly for a known URL, repo:// URI, or workspace path that should be inspected.",
+        ],
+        whenNotToUse: [
+          "Do not use for writing or editing files; it only reads content.",
+        ],
+        inputNotes: [
+          "ref is required and may be a returned refId, HTTP/HTTPS URL, repo:// URI, or repository path.",
+          "source is optional and should only disambiguate refs.",
+          "maxLength increases or bounds the returned preview.",
+        ],
         runtimeHints: [
           { label: "readable sources", value: readableDescription || "none" },
         ],

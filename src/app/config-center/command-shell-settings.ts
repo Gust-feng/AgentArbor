@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import type {
   CommandShellSettings,
   ConfiguredCommandShellKind,
@@ -87,7 +88,10 @@ function defaultShellKind(
   env: Readonly<Record<string, string | undefined>>
 ): Exclude<ConfiguredCommandShellKind, "auto"> {
   if (platform === "win32") {
-    return "cmd";
+    if (usePowerShellOnWindows(env)) {
+      return "powershell";
+    }
+    return windowsGitBashExecutable(env) === undefined ? "powershell" : "bash";
   }
   const shell = optionalString(env.SHELL);
   return shell?.endsWith("/bash") === true || shell === "bash" ? "bash" : "sh";
@@ -108,7 +112,9 @@ function defaultExecutable(
     return "pwsh";
   }
   if (kind === "bash") {
-    return platform === "win32" ? "bash.exe" : (optionalString(env.SHELL)?.endsWith("/bash") === true ? env.SHELL! : "bash");
+    return platform === "win32"
+      ? windowsGitBashExecutable(env) ?? "bash.exe"
+      : (optionalString(env.SHELL)?.endsWith("/bash") === true ? env.SHELL! : "bash");
   }
   return optionalString(env.SHELL) ?? "/bin/sh";
 }
@@ -125,6 +131,21 @@ function shellLabel(kind: Exclude<ConfiguredCommandShellKind, "auto">): string {
   if (kind === "pwsh") return "PowerShell";
   if (kind === "bash") return "Bash";
   return "POSIX shell";
+}
+
+function usePowerShellOnWindows(env: Readonly<Record<string, string | undefined>>): boolean {
+  return env.AGENTARBOR_USE_POWERSHELL_TOOL === "1" || env.CLAUDE_CODE_USE_POWERSHELL_TOOL === "1";
+}
+
+function windowsGitBashExecutable(env: Readonly<Record<string, string | undefined>>): string | undefined {
+  const configured = optionalString(env.AGENTARBOR_GIT_BASH_PATH) ?? optionalString(env.CLAUDE_CODE_GIT_BASH_PATH) ?? optionalString(env.GIT_BASH_PATH);
+  if (configured !== undefined) {
+    return configured;
+  }
+  return [
+    "C:\\Program Files\\Git\\bin\\bash.exe",
+    "C:\\Program Files (x86)\\Git\\bin\\bash.exe",
+  ].find((candidate) => existsSync(candidate));
 }
 
 function shellInvocation(executable: string, syntax: SanitizedCommandShellConfig["syntax"]): readonly string[] {

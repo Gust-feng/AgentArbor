@@ -50,7 +50,10 @@ export function toolResultMessage(result: ToolCallResult): ModelMessage {
   };
 }
 
-const MAX_TOOL_MESSAGE_CHARS = 40_000;
+// Final transport guard after ToolSafeProjection.agentContent has already
+// shaped model-visible tool content. Keep this larger than the projection caps
+// so stdout/stderr and file bodies are not silently replaced by a short message.
+const MAX_TOOL_MESSAGE_CHARS = 220_000;
 
 function safeToolErrorForModel(error: string | undefined): string | undefined {
   return error === undefined ? undefined : redactOrdinaryToolText(error, 1_000);

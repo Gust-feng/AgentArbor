@@ -12,6 +12,7 @@ export type PanelRunStreamEventType =
   | "model.output.delta"
   | "model.output.completed"
   | "model.side.completed"
+  | "model.failed"
   | "context.compaction.completed"
   | "context.compaction.failed"
   | "tool.requested"

@@ -9,28 +9,30 @@ import {
   projectToolResultEnvelope as projectKernelToolResultEnvelope,
   projectToolStatusEnvelope,
 } from "../kernel/tools/index.js";
-import { redactSensitiveText } from "../kernel/redaction.js";
+import { commandProgramFromToolResult, commandTextFromToolResult } from "./command-text.js";
 import { sanitizeAssistantVisibleText } from "./visible-text-safety.js";
 import { cleanOrdinaryToolText } from "./ordinary-tool-copy.js";
 
 const MODEL_TOOL_TEXT_MAX_CHARS = 128_000;
 const MODEL_TOOL_ERROR_MAX_CHARS = 64_000;
 
+// Historical compatibility name: callers across the app still import
+// "redactOrdinaryText", but current ordinary text policy is compact-only.
 export function redactOrdinaryText(value: string, maxLength = 1_200): string {
-  return compactSafeText(sanitizeAssistantVisibleText(redactSensitiveText(value)), maxLength) ?? "";
+  return compactSafeText(sanitizeAssistantVisibleText(value), maxLength) ?? "";
 }
 
+// Historical compatibility name: markdown visible to the model/UI is preserved
+// except for newline normalization and transparent length clipping.
 export function redactOrdinaryMarkdownFragment(value: string, maxLength = 1_200): string {
-  const text = redactSensitiveText(
-    sanitizeAssistantVisibleText(value, { preserveOuterWhitespace: true })
-  )
+  const text = sanitizeAssistantVisibleText(value, { preserveOuterWhitespace: true })
     .replace(/\r\n?/g, "\n");
   if (text.trim().length === 0) return text;
   return text.length <= maxLength ? text : `${text.slice(0, Math.max(0, maxLength - 1)).trimEnd()}...`;
 }
 
 function redactOrdinaryFileFragment(value: string, maxLength = 1_200): string {
-  const text = redactSensitiveText(value)
+  const text = value
     .replace(/\r\n?/g, "\n")
     .replace(/[^\S\n]+/g, " ");
   if (text.trim().length === 0 && !text.includes("\n")) {
@@ -57,6 +59,8 @@ export function projectToolResult(input: {
     diagnosticRef,
     truncated,
   });
+  // agentContent is the model-continuation payload. UI-only summaries and
+  // display previews must never replace it.
   return {
     agentContent: projectToolAgentContent(input.request, input.output, truncated),
     uiSummary: compactSafeText(summary ?? `${toolDisplayName(input.request.toolName)}已完成。`, input.maxPreviewChars ?? 800),
@@ -138,7 +142,7 @@ export function compactSafeText(value: string | undefined, maxLength: number): s
   if (value === undefined) {
     return undefined;
   }
-  const text = redactSensitiveText(value).trim();
+  const text = value.trim();
   if (text.length === 0) {
     return undefined;
   }
@@ -235,14 +239,20 @@ function projectToolDisplay(request: ToolCallRequest, output: unknown): ToolDisp
   if (request.toolName === "run_command" || request.toolName === "shell_command") {
     const stdout = stringOrUndefined(result.stdout);
     const stderr = stringOrUndefined(result.stderr);
-    const commandLine = commandLineFrom(result, request.input);
+    const commandLine = commandTextFromToolResult(result, request.input);
     return {
       kind: "command_summary",
-      command: stringOrUndefined(result.command) ?? commandLine,
+      command: commandProgramFromToolResult(result, request.input),
       args: stringArray(result.args).length > 0 ? stringArray(result.args) : stringArray(asRecord(request.input).args),
       commandLine,
+      cwd: stringOrUndefined(result.cwd),
       shell: stringOrUndefined(asRecord(result.shell).label),
       exitCode: numberOrUndefined(result.exitCode),
+      timedOut: result.timedOut === true,
+      background: result.background === true,
+      pid: numberOrUndefined(result.pid),
+      logPath: stringOrUndefined(result.logPath),
+      stopCommand: stringOrUndefined(result.stopCommand),
       outputSummary: stdout === undefined ? undefined : summarizeCommandOutput(stdout),
       errorSummary: stderr === undefined ? undefined : summarizeCommandOutput(stderr),
     };
@@ -283,13 +293,27 @@ function projectToolAgentContent(request: ToolCallRequest, output: unknown, trun
   const result = asRecord(record.result);
   const summary = stringOrUndefined(record.summary);
   if (request.toolName === "read_file") {
+    const content = typeof result.content === "string"
+      ? modelVisibleTextFragment({
+          value: result.content,
+          maxLength: MODEL_TOOL_TEXT_MAX_CHARS,
+          request,
+          field: "content",
+        })
+      : undefined;
     return {
       summary,
       path: stringOrUndefined(result.path),
       bytes: numberOrUndefined(result.bytes),
       binary: result.binary === true,
-      content: typeof result.content === "string" ? redactOrdinaryFileFragment(result.content, MODEL_TOOL_TEXT_MAX_CHARS) : undefined,
-      truncated,
+      startLine: numberOrUndefined(result.startLine),
+      endLine: numberOrUndefined(result.endLine),
+      totalLines: numberOrUndefined(result.totalLines),
+      hasMoreBefore: result.hasMoreBefore === true,
+      hasMoreAfter: result.hasMoreAfter === true,
+      truncated: truncated || content?.truncated === true,
+      content: content?.text,
+      rawContentRef: content?.rawRef,
     };
   }
   if (request.toolName === "list_dir") {
@@ -311,6 +335,14 @@ function projectToolAgentContent(request: ToolCallRequest, output: unknown, trun
     };
   }
   if (request.toolName === "read") {
+    const contentPreview = typeof result.contentPreview === "string"
+      ? modelVisibleTextFragment({
+          value: result.contentPreview,
+          maxLength: MODEL_TOOL_TEXT_MAX_CHARS,
+          request,
+          field: "contentPreview",
+        })
+      : undefined;
     return {
       summary,
       ref: stringOrUndefined(record.ref) ?? stringOrUndefined(asRecord(request.input).ref),
@@ -320,17 +352,35 @@ function projectToolAgentContent(request: ToolCallRequest, output: unknown, trun
       url: stringOrUndefined(result.uri),
       uri: stringOrUndefined(result.uri),
       sourceSearchRef: stringOrUndefined(result.sourceSearchRef),
-      contentPreview: typeof result.contentPreview === "string" ? redactOrdinaryFileFragment(result.contentPreview, MODEL_TOOL_TEXT_MAX_CHARS) : undefined,
-      truncated: result.truncated === true || truncated,
+      truncated: result.truncated === true || truncated || contentPreview?.truncated === true,
+      contentPreview: contentPreview?.text,
+      rawContentPreviewRef: contentPreview?.rawRef,
       metadata: asRecord(result.metadata),
     };
   }
   if (request.toolName === "run_command" || request.toolName === "shell_command") {
-    const commandLine = commandLineFrom(result, request.input);
+    const commandLine = commandTextFromToolResult(result, request.input);
+    const stdout = typeof result.stdout === "string"
+      ? modelVisibleTextFragment({
+          value: result.stdout,
+          maxLength: MODEL_TOOL_TEXT_MAX_CHARS,
+          request,
+          field: "stdout",
+        })
+      : undefined;
+    const stderr = typeof result.stderr === "string"
+      ? modelVisibleTextFragment({
+          value: result.stderr,
+          maxLength: MODEL_TOOL_ERROR_MAX_CHARS,
+          request,
+          field: "stderr",
+        })
+      : undefined;
     return {
       summary,
-      command: stringOrUndefined(result.command) ?? commandLine,
+      command: commandProgramFromToolResult(result, request.input),
       commandLine,
+      cwd: stringOrUndefined(result.cwd),
       shell: {
         kind: stringOrUndefined(asRecord(result.shell).kind),
         label: stringOrUndefined(asRecord(result.shell).label),
@@ -338,28 +388,53 @@ function projectToolAgentContent(request: ToolCallRequest, output: unknown, trun
         syntax: stringOrUndefined(asRecord(result.shell).syntax),
       },
       exitCode: numberOrUndefined(result.exitCode),
-      stdout: typeof result.stdout === "string" ? redactOrdinaryFileFragment(result.stdout, MODEL_TOOL_TEXT_MAX_CHARS) : undefined,
-      stderr: typeof result.stderr === "string" ? redactOrdinaryFileFragment(result.stderr, MODEL_TOOL_ERROR_MAX_CHARS) : undefined,
-      truncated,
+      timedOut: result.timedOut === true,
+      background: result.background === true,
+      pid: numberOrUndefined(result.pid),
+      logPath: stringOrUndefined(result.logPath),
+      stopCommand: stringOrUndefined(result.stopCommand),
+      truncated: truncated || stdout?.truncated === true || stderr?.truncated === true,
+      stdout: stdout?.text,
+      stderr: stderr?.text,
+      rawStdoutRef: stdout?.rawRef,
+      rawStderrRef: stderr?.rawRef,
     };
   }
   if (request.toolName === "browser_snapshot") {
+    const text = typeof result.text === "string"
+      ? modelVisibleTextFragment({
+          value: result.text,
+          maxLength: MODEL_TOOL_TEXT_MAX_CHARS,
+          request,
+          field: "text",
+        })
+      : undefined;
     return {
       summary,
       url: stringOrUndefined(result.url),
       title: stringOrUndefined(result.title),
-      text: typeof result.text === "string" ? redactOrdinaryMarkdownFragment(result.text, MODEL_TOOL_TEXT_MAX_CHARS) : undefined,
-      truncated,
+      truncated: truncated || text?.truncated === true,
+      text: text?.text,
+      rawTextRef: text?.rawRef,
     };
   }
   if (record.result !== undefined && isMcpToolName(request.toolName)) {
+    const text = typeof result.text === "string"
+      ? modelVisibleTextFragment({
+          value: result.text,
+          maxLength: MODEL_TOOL_TEXT_MAX_CHARS,
+          request,
+          field: "text",
+        })
+      : undefined;
     return {
       summary,
-      text: typeof result.text === "string" ? redactOrdinaryMarkdownFragment(result.text, MODEL_TOOL_TEXT_MAX_CHARS) : undefined,
+      truncated: truncated || text?.truncated === true,
+      text: text?.text,
+      rawTextRef: text?.rawRef,
       multimodal: Array.isArray(result.multimodal)
         ? result.multimodal.slice(0, 12).map(projectMcpMultimodalPart)
         : undefined,
-      truncated,
     };
   }
   const display = projectToolDisplay(request, output);
@@ -381,11 +456,44 @@ function projectDirectoryEntry(value: unknown): { readonly name?: string; readon
 
 function projectGrepMatch(value: unknown): { readonly path?: string; readonly line?: number; readonly preview?: string } {
   const record = asRecord(value);
+  const preview = typeof record.preview === "string"
+    ? modelVisibleTextFragment({ value: record.preview, maxLength: 500 })
+    : undefined;
   return {
     path: stringOrUndefined(record.path),
     line: numberOrUndefined(record.line),
-    preview: typeof record.preview === "string" ? redactOrdinaryFileFragment(record.preview, 500) : undefined,
+    preview: preview?.text,
   };
+}
+
+type ModelVisibleTextFragment = {
+  readonly text: string;
+  readonly truncated: boolean;
+  readonly rawRef?: string;
+};
+
+function modelVisibleTextFragment(input: {
+  readonly value: string;
+  readonly maxLength: number;
+  readonly request?: ToolCallRequest;
+  readonly field?: string;
+}): ModelVisibleTextFragment {
+  const { value, maxLength } = input;
+  if (value.length <= maxLength) {
+    return { text: value, truncated: false };
+  }
+  const marker = `\n[truncated to ${maxLength} chars]`;
+  return {
+    text: `${value.slice(0, Math.max(0, maxLength - marker.length))}${marker}`,
+    truncated: true,
+    rawRef: input.request === undefined || input.field === undefined
+      ? undefined
+      : rawToolFieldRef(input.request, input.field),
+  };
+}
+
+function rawToolFieldRef(request: ToolCallRequest, field: string): string {
+  return `tool:${request.callId}:raw:${request.toolName}:${field}`;
 }
 
 function stringOrUndefined(value: unknown): string | undefined {
@@ -485,19 +593,6 @@ function stringArray(value: unknown): readonly string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 }
 
-function commandLineFrom(result: Readonly<Record<string, unknown>>, input: unknown): string | undefined {
-  const inputRecord = asRecord(input);
-  const resultArgs = stringArray(result.args);
-  const inputArgs = stringArray(inputRecord.args);
-  const command =
-    stringOrUndefined(result.commandLine) ??
-    stringOrUndefined(inputRecord.commandLine) ??
-    stringOrUndefined(result.command) ??
-    stringOrUndefined(inputRecord.command);
-  const args = resultArgs.length > 0 ? resultArgs : inputArgs;
-  return command === undefined ? undefined : [command, ...args].join(" ").trim();
-}
-
 function isString(value: unknown): value is string {
   return typeof value === "string";
 }
@@ -518,7 +613,7 @@ function searchDisplayItem(value: unknown): Extract<ToolDisplayProjection, { rea
 }
 
 function summarizeCommandOutput(value: string): string | undefined {
-  const lines = redactSensitiveText(value)
+  const lines = value
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter((line) => line.length > 0)

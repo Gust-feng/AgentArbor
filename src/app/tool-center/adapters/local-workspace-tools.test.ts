@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile, mkdir } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { setTimeout as delay } from "node:timers/promises";
 import {
   createLocalCreateFileTool,
   createLocalDeleteFileTool,
@@ -15,6 +16,7 @@ import {
   createLocalWorkspaceSandboxPolicy,
   createLocalWriteFileTool,
 } from "./local-workspace-tools.js";
+import { createDefaultCommandShellConfig } from "./local-workspace-command-tools.js";
 
 const context = { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" };
 const sourceDirectory = path.join(process.cwd(), "src", "app", "tool-center", "adapters");
@@ -78,6 +80,32 @@ test("local workspace adapter keeps sandbox policy and tool families split from 
   assert.equal(commonSource.includes("export function asRecord"), true);
 });
 
+test("default command shell follows mainstream Windows fallback order", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "agentarbor-shell-default-"));
+  try {
+    const fakeGitBash = path.join(root, "bash.exe");
+    await writeFile(fakeGitBash, "", "utf8");
+
+    const gitBash = createDefaultCommandShellConfig("win32", {
+      CLAUDE_CODE_GIT_BASH_PATH: fakeGitBash,
+    });
+    const powerShell = createDefaultCommandShellConfig("win32", {
+      CLAUDE_CODE_GIT_BASH_PATH: fakeGitBash,
+      CLAUDE_CODE_USE_POWERSHELL_TOOL: "1",
+    });
+    const fallback = createDefaultCommandShellConfig("win32", {});
+
+    assert.equal(gitBash.kind, "bash");
+    assert.equal(gitBash.syntax, "posix");
+    assert.equal(gitBash.executable, fakeGitBash);
+    assert.equal(powerShell.kind, "powershell");
+    assert.equal(powerShell.syntax, "powershell");
+    assert.equal(fallback.kind === "bash" || fallback.kind === "powershell", true);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("local workspace tools read, list, and grep within workspace boundary", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tools-"));
   try {
@@ -93,6 +121,21 @@ test("local workspace tools read, list, and grep within workspace boundary", asy
     assert.equal(asRecord(read).refId, "workspace:file:src/note.txt");
     assert.equal(asRecord(asRecord(read).result).path, "src/note.txt");
     assert.match(String(asRecord(asRecord(read).result).content), /needle beta/);
+    assert.equal(asRecord(asRecord(read).result).totalLines, 3);
+
+    const rangedRead = await readFile.execute({ path: "src/note.txt", startLine: 2, endLine: 2 }, context);
+    assert.equal(asRecord(rangedRead).summary, "src/note.txt · 18 bytes · lines 2-2 of 3");
+    assert.equal(asRecord(asRecord(rangedRead).result).content, "needle beta");
+    assert.equal(asRecord(asRecord(rangedRead).result).startLine, 2);
+    assert.equal(asRecord(asRecord(rangedRead).result).endLine, 2);
+    assert.equal(asRecord(asRecord(rangedRead).result).hasMoreBefore, true);
+    assert.equal(asRecord(asRecord(rangedRead).result).hasMoreAfter, true);
+
+    const emptyRangeRead = await readFile.execute({ path: "src/note.txt", startLine: 20, endLine: 21 }, context);
+    assert.equal(asRecord(emptyRangeRead).summary, "src/note.txt · 18 bytes · lines 20-20 of 3");
+    assert.equal(asRecord(asRecord(emptyRangeRead).result).content, "");
+    assert.equal(asRecord(asRecord(emptyRangeRead).result).hasMoreBefore, true);
+    assert.equal(asRecord(asRecord(emptyRangeRead).result).hasMoreAfter, false);
 
     const listed = await listDir.execute({ path: "src" }, context);
     assert.equal(asRecord(listed).action, "list_dir");
@@ -102,6 +145,51 @@ test("local workspace tools read, list, and grep within workspace boundary", asy
     const grep = await grepFiles.execute({ path: "src", query: "needle" }, context);
     assert.equal(asRecord(grep).action, "grep_files");
     const matches = asRecord(asRecord(grep).result).matches as readonly { readonly path: string; readonly line: number }[];
+    assert.deepEqual(matches, [{ path: "src/note.txt", line: 2, preview: "needle beta" }]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("local grep_files prefers ripgrep runner and records the search engine", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tools-"));
+  try {
+    let called = false;
+    const grepFiles = createLocalGrepFilesTool(root, {
+      ripgrepSearch: async (request) => {
+        called = true;
+        assert.equal(request.query, "Needle");
+        assert.equal(request.limit, 1);
+        return [{ path: "src/from-rg.txt", line: 7, preview: "Needle from rg" }];
+      },
+    });
+
+    const grep = await grepFiles.execute({ path: ".", query: "Needle", limit: 1 }, context);
+    const result = asRecord(asRecord(grep).result);
+    const matches = result.matches as readonly { readonly path: string; readonly line: number; readonly preview: string }[];
+
+    assert.equal(called, true);
+    assert.equal(result.engine, "rg");
+    assert.deepEqual(matches, [{ path: "src/from-rg.txt", line: 7, preview: "Needle from rg" }]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("local grep_files falls back to JS recursion when ripgrep is unavailable", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tools-"));
+  try {
+    await mkdir(path.join(root, "src"));
+    await writeFile(path.join(root, "src", "note.txt"), "alpha\nneedle beta\n", "utf8");
+    const grepFiles = createLocalGrepFilesTool(root, {
+      ripgrepSearch: async () => undefined,
+    });
+
+    const grep = await grepFiles.execute({ path: "src", query: "needle" }, context);
+    const result = asRecord(asRecord(grep).result);
+    const matches = result.matches as readonly { readonly path: string; readonly line: number }[];
+
+    assert.equal(result.engine, "js");
     assert.deepEqual(matches, [{ path: "src/note.txt", line: 2, preview: "needle beta" }]);
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -257,28 +345,34 @@ test("local run_command uses the workspace shell and confirmation metadata", asy
     await writeFile(path.join(root, "src", "note.txt"), "alpha", "utf8");
     const runCommand = createLocalRunCommandTool(root);
     const shellCommand = createLocalShellCommandTool(root);
+    const syntax = shellSyntaxFromTool(shellCommand);
 
     assert.equal(runCommand.definition.metadata?.requiresConfirmation, true);
     assert.equal(shellCommand.definition.metadata?.requiresConfirmation, true);
     assert.deepEqual(shellCommand.definition.inputSchema.required, []);
     assert.equal("args" in shellCommand.definition.inputSchema.properties, true);
+    assert.equal("background" in shellCommand.definition.inputSchema.properties, true);
+    assert.equal("cwd" in shellCommand.definition.inputSchema.properties, true);
+    assert.equal("backgroundWaitMs" in shellCommand.definition.inputSchema.properties, true);
     assert.equal(shellCommand.definition.metadata?.runtimeHints?.[0]?.kind, "command_shell");
 
-    const echoed = await runCommand.execute({ commandLine: "echo hello workspace" }, context);
-    const shellStyleEchoed = await runCommand.execute({ commandLine: "echo approval-review" }, context);
-    const quotedEchoed = await shellCommand.execute({ commandLine: "echo hello quoted shell" }, context);
-    const shellEchoed = await shellCommand.execute({ commandLine: "echo hello shell" }, context);
-    const chained = await runCommand.execute({ commandLine: "echo safe && echo unsafe" }, context);
-    const piped = await shellCommand.execute({ commandLine: platformPipeCommand() }, context);
-    const listed = await runCommand.execute({ commandLine: platformListCommand("src") }, context);
-    const typed = await runCommand.execute({ commandLine: platformReadCommand(path.join("src", "note.txt")) }, context);
-    const inlineScript = await shellCommand.execute({ commandLine: nodeInlineScriptCommand() }, context);
+    const echoed = await runCommand.execute({ commandLine: shellEchoCommand("hello workspace", syntax) }, context);
+    const shellStyleEchoed = await runCommand.execute({ commandLine: shellEchoCommand("approval-review", syntax) }, context);
+    const quotedEchoed = await shellCommand.execute({ commandLine: shellEchoCommand("hello quoted shell", syntax) }, context);
+    const shellEchoed = await shellCommand.execute({ commandLine: shellEchoCommand("hello shell", syntax) }, context);
+    const chained = await runCommand.execute({ commandLine: shellChainedEchoCommand(syntax) }, context);
+    const piped = await shellCommand.execute({ commandLine: shellPipeCommand(syntax) }, context);
+    const listed = await runCommand.execute({ commandLine: shellListCommand("src", syntax) }, context);
+    const listedWithCwd = await shellCommand.execute({ commandLine: shellListCommand(".", syntax), cwd: "src" }, context);
+    const typed = await runCommand.execute({ commandLine: shellReadCommand(path.join("src", "note.txt"), syntax) }, context);
+    const inlineScript = await shellCommand.execute({ commandLine: nodeInlineScriptCommand(syntax) }, context);
     const legacyArgs = await shellCommand.execute({ command: process.execPath, args: ["-e", "console.log('hello legacy args')"] }, context);
+    const madeDirectory = await shellCommand.execute({ commandLine: shellMakeDirectoryCommand("generated/nested", syntax) }, context);
 
     assert.equal(asRecord(echoed).action, "run_command");
     assert.equal(asRecord(shellEchoed).action, "shell_command");
     assert.match(String(asRecord(shellEchoed).refId), /^workspace:shell:/);
-    assert.equal(asRecord(asRecord(shellEchoed).result).commandLine, "echo hello shell");
+    assert.equal(asRecord(asRecord(shellEchoed).result).commandLine, shellEchoCommand("hello shell", syntax));
     assert.equal(typeof asRecord(asRecord(shellEchoed).result).shell, "object");
     assert.match(String(asRecord(asRecord(echoed).result).stdout), /hello workspace/);
     assert.match(String(asRecord(asRecord(shellStyleEchoed).result).stdout), /approval-review/);
@@ -287,9 +381,13 @@ test("local run_command uses the workspace shell and confirmation metadata", asy
     assert.match(String(asRecord(asRecord(chained).result).stdout), /unsafe/);
     assert.match(String(asRecord(asRecord(piped).result).stdout), /needle/);
     assert.match(String(asRecord(asRecord(listed).result).stdout), /note\.txt/);
+    assert.equal(asRecord(asRecord(listedWithCwd).result).cwd, "src");
+    assert.match(String(asRecord(asRecord(listedWithCwd).result).stdout), /note\.txt/);
     assert.match(String(asRecord(asRecord(typed).result).stdout), /alpha/);
     assert.match(String(asRecord(asRecord(inlineScript).result).stdout), /hello_inline_script/);
     assert.match(String(asRecord(asRecord(legacyArgs).result).stdout), /hello legacy args/);
+    assert.equal(asRecord(asRecord(madeDirectory).result).exitCode, 0);
+    assert.equal((await stat(path.join(root, "generated", "nested"))).isDirectory(), true);
 
     const quotedPython = await shellCommand.execute({
       commandLine: `${process.execPath} -e "console.log('fragile quoted shell')"` ,
@@ -297,7 +395,206 @@ test("local run_command uses the workspace shell and confirmation metadata", asy
       args: ["-e", "console.log('fragile quoted shell')"],
     }, context);
     assert.match(String(asRecord(asRecord(quotedPython).result).stdout), /fragile quoted shell/);
+
+    await assert.rejects(
+      () => shellCommand.execute({ commandLine: shellEchoCommand("nope", syntax), cwd: "../outside" }, context),
+      /outside the workspace boundary/
+    );
   } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("local shell_command bounds foreground process lifetime and output volume", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tools-"));
+  try {
+    const shellCommand = createLocalShellCommandTool(root);
+
+    const timedOut = await shellCommand.execute({
+      command: process.execPath,
+      args: ["-e", "console.log('before-timeout'); setTimeout(() => {}, 5000);"],
+      timeoutMs: 200,
+    }, context);
+    const timeoutResult = asRecord(asRecord(timedOut).result);
+    assert.equal(timeoutResult.exitCode, 124);
+    assert.equal(timeoutResult.timedOut, true);
+    assert.match(String(timeoutResult.stdout), /before-timeout/);
+    assert.match(String(timeoutResult.stderr), /timed out after 200ms/);
+
+    const largeOutput = await shellCommand.execute({
+      command: process.execPath,
+      args: ["-e", "process.stdout.write('x'.repeat(140000)); process.stderr.write('y'.repeat(70000));"],
+    }, context);
+    const largeResult = asRecord(asRecord(largeOutput).result);
+    assert.equal(asRecord(largeOutput).truncated, true);
+    assert.equal(String(largeResult.stdout).length <= 128_000, true);
+    assert.equal(String(largeResult.stderr).length <= 64_000, true);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("local shell_command can start long-running commands in the background with a log path", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tools-"));
+  try {
+    const shellCommand = createLocalShellCommandTool(root);
+    const started = await shellCommand.execute({
+      command: process.execPath,
+      args: ["-e", "console.log('background-ready'); setTimeout(() => {}, 5000);"],
+      background: true,
+    }, context);
+    const result = asRecord(asRecord(started).result);
+    const logPath = String(result.logPath);
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.background, true);
+    assert.equal(typeof result.pid, "number");
+    assert.match(String(result.stopCommand), process.platform === "win32" ? /taskkill/ : /kill -TERM/);
+    assert.match(String(result.stdout), /Started background process/);
+    assert.match(String(result.stdout), /Log:/);
+    assert.match(String(result.stdout), /background-ready/);
+    await waitUntil(async () => {
+      try {
+        return (await readFile(logPath, "utf8")).includes("background-ready");
+      } catch {
+        return false;
+      }
+    });
+    await shellCommand.execute({ commandLine: String(result.stopCommand), timeoutMs: 1_000 }, context);
+    await delay(50);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("local shell_command captures shell-native background command output", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tools-"));
+  try {
+    const shellCommand = createLocalShellCommandTool(root);
+    const syntax = shellSyntaxFromTool(shellCommand);
+    const started = await shellCommand.execute({
+      commandLine: shellBackgroundLogCommand(syntax),
+      background: true,
+      backgroundWaitMs: 1_000,
+    }, context);
+    const result = asRecord(asRecord(started).result);
+    const logPath = String(result.logPath);
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.background, true);
+    assert.equal(typeof result.pid, "number");
+    assert.match(String(result.stdout), /Started background process/);
+    assert.match(String(result.stdout), /SHELL_BG_READY/);
+    await waitUntil(async () => {
+      try {
+        return (await readFile(logPath, "utf8")).includes("SHELL_BG_READY");
+      } catch {
+        return false;
+      }
+    });
+    await shellCommand.execute({ commandLine: String(result.stopCommand), timeoutMs: 1_000 }, context);
+    await delay(50);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("local shell_command reports background commands that exit immediately", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tools-"));
+  try {
+    const shellCommand = createLocalShellCommandTool(root);
+    const exited = await shellCommand.execute({
+      command: process.execPath,
+      args: ["-e", "console.error('background failed fast'); process.exit(7);"],
+      background: true,
+    }, context);
+    const result = asRecord(asRecord(exited).result);
+
+    assert.equal(result.exitCode, 7);
+    assert.equal(result.background, undefined);
+    assert.equal(typeof result.logPath, "string");
+    assert.match(String(result.stdout), /background failed fast/);
+    assert.match(String(result.stderr), /exited before it stayed running/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("local shell_command reports background commands that fail during the startup observation window", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tools-"));
+  try {
+    const shellCommand = createLocalShellCommandTool(root);
+    const exited = await shellCommand.execute({
+      command: process.execPath,
+      args: ["-e", "setTimeout(() => { console.error('background delayed fail'); process.exit(9); }, 250);"],
+      background: true,
+      backgroundWaitMs: 750,
+    }, context);
+    const result = asRecord(asRecord(exited).result);
+
+    assert.equal(result.exitCode, 9);
+    assert.equal(result.background, undefined);
+    assert.equal(typeof result.logPath, "string");
+    assert.match(String(result.stdout), /background delayed fail/);
+    assert.match(String(result.stderr), /exited before it stayed running/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("local shell_command falls back to shell execution for Windows cmd shims while preserving direct argv for executables", async () => {
+  if (process.platform !== "win32") {
+    return;
+  }
+  const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tools-"));
+  const fakeBin = path.join(root, "bin");
+  const originalPath = process.env.PATH;
+  try {
+    await mkdir(fakeBin);
+    await writeFile(
+      path.join(fakeBin, "fakecmd.cmd"),
+      "@echo off\r\nset \"arg1=%~1\"\r\nset \"arg2=%~2\"\r\necho fakecmd:%arg1%:%arg2%\r\n",
+      "utf8"
+    );
+    process.env.PATH = `${fakeBin}${path.delimiter}${originalPath ?? ""}`;
+    const shellCommand = createLocalShellCommandTool(root, {
+      commandShell: {
+        kind: "cmd",
+        label: "Windows Command Prompt",
+        executable: process.env.ComSpec ?? process.env.COMSPEC ?? "cmd.exe",
+        syntax: "cmd",
+        platform: "win32",
+        invocation: [process.env.ComSpec ?? process.env.COMSPEC ?? "cmd.exe", "/d", "/s", "/c", "<commandLine>"],
+        commandLineParameter: "commandLine",
+        notes: ["Test cmd shell."],
+        updatedAt: "test",
+      },
+    });
+
+    const shim = await shellCommand.execute({
+      commandLine: "fakecmd hello world",
+      command: "fakecmd",
+      args: ["hello", "world"],
+    }, context);
+    const shimArgvOnly = await shellCommand.execute({
+      command: "fakecmd",
+      args: ["hello space", "A&B"],
+    }, context);
+    const direct = await shellCommand.execute({
+      commandLine: `${process.execPath} -e "console.log('direct argv')"` ,
+      command: process.execPath,
+      args: ["-e", "console.log('direct argv')"],
+    }, context);
+
+    assert.match(String(asRecord(asRecord(shim).result).stdout), /fakecmd:hello:world/i);
+    assert.match(String(asRecord(asRecord(shimArgvOnly).result).stdout), /fakecmd:hello space:A&B/i);
+    assert.match(String(asRecord(asRecord(direct).result).stdout), /direct argv/);
+  } finally {
+    if (originalPath === undefined) {
+      delete process.env.PATH;
+    } else {
+      process.env.PATH = originalPath;
+    }
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -322,31 +619,86 @@ test("local strategy sandbox can disable writes and command execution", async ()
   }
 });
 
-function platformPipeCommand(): string {
-  return process.platform === "win32" ? "echo needle | findstr needle" : "printf 'needle\\n' | grep needle";
+function shellSyntaxFromTool(tool: ReturnType<typeof createLocalShellCommandTool>): "cmd" | "powershell" | "posix" {
+  const hint = tool.definition.metadata?.runtimeHints?.[0];
+  assert.equal(hint?.kind, "command_shell");
+  return hint.syntax;
 }
 
-function platformListCommand(directory: string): string {
-  return process.platform === "win32" ? `dir /b ${directory}` : `ls ${directory}`;
+function shellEchoCommand(text: string, syntax: "cmd" | "powershell" | "posix"): string {
+  if (syntax === "powershell") return `Write-Output ${quoteShellPath(text, syntax)}`;
+  return `echo ${quoteShellPath(text, syntax)}`;
 }
 
-function platformReadCommand(file: string): string {
-  const normalized = process.platform === "win32" ? file.split(path.sep).join("\\") : file.split(path.sep).join("/");
-  return process.platform === "win32" ? `type ${normalized}` : `cat ${normalized}`;
+function shellChainedEchoCommand(syntax: "cmd" | "powershell" | "posix"): string {
+  if (syntax === "powershell") return "Write-Output safe; Write-Output unsafe";
+  return "echo safe && echo unsafe";
 }
 
-function quotePath(value: string): string {
-  if (process.platform === "win32") {
-    return `"${value.replace(/"/g, '\\"')}"`;
+function shellPipeCommand(syntax: "cmd" | "powershell" | "posix"): string {
+  if (syntax === "cmd") return "echo needle | findstr needle";
+  if (syntax === "powershell") return "Write-Output needle | Select-String needle";
+  return "printf 'needle\\n' | grep needle";
+}
+
+function shellListCommand(directory: string, syntax: "cmd" | "powershell" | "posix"): string {
+  if (syntax === "cmd") return `dir /b ${directory}`;
+  if (syntax === "powershell") return `Get-ChildItem -Name ${quoteShellPath(directory, syntax)}`;
+  return `ls ${quoteShellPath(directory, syntax)}`;
+}
+
+function shellReadCommand(file: string, syntax: "cmd" | "powershell" | "posix"): string {
+  const normalized = syntax === "cmd" || syntax === "powershell"
+    ? file.split(path.sep).join("\\")
+    : file.split(path.sep).join("/");
+  if (syntax === "cmd") return `type ${normalized}`;
+  if (syntax === "powershell") return `Get-Content ${quoteShellPath(normalized, syntax)}`;
+  return `cat ${quoteShellPath(normalized, syntax)}`;
+}
+
+function shellMakeDirectoryCommand(directory: string, syntax: "cmd" | "powershell" | "posix"): string {
+  const normalized = syntax === "cmd" || syntax === "powershell" ? directory.split("/").join("\\") : directory;
+  if (syntax === "cmd" || syntax === "powershell") return `mkdir ${quoteShellPath(normalized, syntax)}`;
+  return `mkdir -p ${quoteShellPath(normalized, syntax)}`;
+}
+
+function shellBackgroundLogCommand(syntax: "cmd" | "powershell" | "posix"): string {
+  if (syntax === "cmd") return "echo SHELL_BG_READY && ping -n 6 127.0.0.1 >nul";
+  if (syntax === "powershell") return "Write-Output SHELL_BG_READY; Start-Sleep -Seconds 5";
+  return "printf 'SHELL_BG_READY\\n'; sleep 5";
+}
+
+function quoteShellPath(value: string, syntax: "cmd" | "powershell" | "posix"): string {
+  if (/^[A-Za-z0-9_./:\\-]+$/u.test(value) && value.length > 0) {
+    return value;
+  }
+  if (syntax === "cmd") {
+    return `"${value.replace(/"/g, '\\"').replace(/[&|<>()]/g, (character) => `^${character}`)}"`;
+  }
+  if (syntax === "powershell") {
+    return `'${value.replace(/'/g, "''")}'`;
   }
   return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
-function nodeInlineScriptCommand(): string {
-  if (process.platform === "win32") {
+function nodeInlineScriptCommand(syntax: "cmd" | "powershell" | "posix"): string {
+  if (syntax === "cmd") {
     return "node -e console.log('hello_inline_script')";
   }
-  return `${quotePath(process.execPath)} -e ${quotePath("console.log('hello_inline_script')")}`;
+  return `node -e ${quoteShellPath('console.log("hello_inline_script")', syntax)}`;
+}
+
+async function waitUntil(predicate: () => Promise<boolean>, timeoutMs = 2_000): Promise<void> {
+  const startedAt = Date.now();
+  for (;;) {
+    if (await predicate()) {
+      return;
+    }
+    if (Date.now() - startedAt > timeoutMs) {
+      throw new Error("Timed out waiting for condition.");
+    }
+    await delay(25);
+  }
 }
 
 function asRecord(value: unknown): Record<string, unknown> {

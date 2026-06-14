@@ -315,6 +315,7 @@ function toolActivityTitle(toolName: string, phase: "start" | "completed" | "fai
   if (toolName === "run_command") return phase === "start" ? "正在执行命令" : phase === "completed" ? "命令已执行" : "命令执行失败";
   if (toolName === "shell_command") return phase === "start" ? "正在执行 Shell" : phase === "completed" ? "Shell 已执行" : "Shell 执行失败";
   if (toolName === "browser_snapshot") return phase === "start" ? "正在浏览网页" : phase === "completed" ? "网页已浏览" : "网页浏览失败";
+  if (toolName === "http_request") return phase === "start" ? "正在发送 HTTP 请求" : phase === "completed" ? "HTTP 请求已完成" : "HTTP 请求失败";
   if (toolName === "search") return phase === "start" ? "正在搜索材料" : phase === "completed" ? "搜索已完成" : "搜索失败";
   if (toolName === "read") return phase === "start" ? "正在读取材料" : phase === "completed" ? "材料已读取" : "材料读取失败";
   return phase === "start" ? "正在执行工具" : phase === "completed" ? "工具已完成" : "工具执行失败";

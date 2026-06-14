@@ -307,7 +307,7 @@ function toolVerb(node: ProjectableTranscriptNode): string {
 function toolTargetCopy(node: ProjectableTranscriptNode): Pick<ActivityLineCopy, "detail" | "expandedDetail"> | undefined {
   const display = node.display;
   if (display?.kind === "command_summary") {
-    const command = cleanToolTargetText(commandText(display) ?? node.summary);
+    const command = cleanToolTargetText(node.summary) ?? cleanToolTargetText(commandText(display));
     const failure = node.phase === "failed" ? cleanToolTargetText(display.errorSummary) : undefined;
     return readableToolTarget([command, failure].filter((value): value is string => value !== undefined && value.trim().length > 0).join(" · "));
   }

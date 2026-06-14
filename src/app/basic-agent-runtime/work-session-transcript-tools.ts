@@ -25,6 +25,13 @@ export function transcriptToolSummaryFromRunEvent(event: RunEvent): string | und
   if (display?.kind === "browser_snapshot") {
     return display.title ?? display.url ?? event.detail?.preview ?? event.summary;
   }
+  if (display?.kind === "http_response") {
+    return [
+      display.method,
+      display.url,
+      display.statusCode === undefined ? undefined : `${display.statusCode}${display.statusText === undefined ? "" : ` ${display.statusText}`}`,
+    ].filter(isString).join(" · ") || event.detail?.preview || event.summary;
+  }
   if (display?.kind === "file_change_summary" || display?.kind === "file_diff_preview") {
     return fileDisplaySummary(display) ?? cleanOrdinaryToolText(event.detail?.preview) ?? cleanOrdinaryToolText(event.summary);
   }
@@ -68,6 +75,9 @@ function toolTranscriptTitleSetFromRunEvent(event: RunEvent): {
   }
   if (display?.kind === "browser_snapshot" || toolName === "browser_snapshot" || toolName.includes("browser")) {
     return { action: "读取网页", completed: "网页读取完成", failed: "网页读取未完成" };
+  }
+  if (display?.kind === "http_response" || toolName === "http_request") {
+    return { action: "发送 HTTP 请求", completed: "HTTP 请求完成", failed: "HTTP 请求未完成" };
   }
   if (display?.kind === "file_diff_preview" || toolName === "edit_file" || toolName.includes("patch") || toolName.includes("replace")) {
     return { action: "编辑文件", completed: "编辑完成", failed: "编辑未完成" };

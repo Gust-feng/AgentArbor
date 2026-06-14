@@ -299,8 +299,8 @@ test("panel transcript nodes preserve ordered ordinary-agent tool lifecycle", ()
   );
   assert.equal(nodes[0]?.title.includes("准备"), true);
   assert.equal(nodes[2]?.title, "运行命令");
-  assert.equal(nodes[3]?.summary, "pnpm test · tests passed");
-  assert.equal(ordinaryVisibleProjectionIncludes(nodes, "exit "), false);
+  assert.equal(nodes[3]?.summary, "pnpm test · exit 0 · tests passed");
+  assert.equal(ordinaryVisibleProjectionIncludes(nodes, "exit 0"), true);
   assert.equal(nodes[4]?.sequence > nodes[3]!.sequence, true);
 });
 
@@ -987,7 +987,7 @@ test("panel transcript preserves typed safe tool display without raw command out
   assert.equal(JSON.stringify(transcript).includes("RAW_STDOUT_SENTINEL"), false);
   assert.equal(completedNode?.display?.kind, "command_summary");
   assert.equal(completedNode?.summary?.includes("tests passed"), true);
-  assert.equal(completedNode?.summary?.includes("exit 0"), false);
+  assert.equal(completedNode?.summary?.includes("exit 0"), true);
   assert.equal(JSON.stringify(transcript.transcriptNodes).includes("RAW_STDOUT_SENTINEL"), false);
 });
 
@@ -1080,8 +1080,8 @@ test("panel transcript nodes do not invent thinking and keep failed tool results
   );
   assert.equal(nodes.some((node) => node.kind === "thinking"), false);
   assert.equal(nodes[1]?.title.includes("未完成"), true);
-  assert.equal(nodes[1]?.summary, "pnpm test · tests failed");
-  assert.equal(ordinaryVisibleProjectionIncludes(nodes, "exit 1"), false);
+  assert.equal(nodes[1]?.summary, "pnpm test · exit 1 · tests failed");
+  assert.equal(ordinaryVisibleProjectionIncludes(nodes, "exit 1"), true);
   assert.equal(nodes[1]?.display?.kind, "command_summary");
 });
 

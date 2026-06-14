@@ -9,6 +9,9 @@ import {
   createBrowserSnapshotTool,
 } from "../tool-center/adapters/browser-tool.js";
 import {
+  createHttpRequestTool,
+} from "../tool-center/adapters/http-request-tool.js";
+import {
   createLocalCreateFileTool,
   createLocalDeleteFileTool,
   createLocalEditFileTool,
@@ -100,6 +103,7 @@ export function createDesktopBasicToolRegistry(
     createLocalDeleteFileTool(workspaceRoot, { sandboxPolicy }),
     createLocalShellCommandTool(workspaceRoot, { sandboxPolicy, commandShell }),
     createLocalRunCommandTool(workspaceRoot, { sandboxPolicy, commandShell }),
+    createHttpRequestTool(),
     createBrowserSnapshotTool(),
   ];
   const toolCatalogNames =

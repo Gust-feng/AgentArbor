@@ -36,7 +36,7 @@ test("tool stream projection keeps command output as safe summary", () => {
 
   assert.equal(toolSummary("tool.completed", payload).includes("测试已通过"), true);
   assert.equal(detail.command, "pnpm test");
-  assert.equal(detail.preview, "测试已通过");
+  assert.equal(detail.preview, "pnpm test · exit 0 · 测试已通过");
   assert.equal(detail.display?.kind, "command_summary");
   assert.equal(detail.display?.kind === "command_summary" ? detail.display.commandLine : undefined, "pnpm test");
   assert.equal(detail.envelope?.rawRetention, "none");
@@ -95,7 +95,7 @@ test("tool stream projection prefers commandLine over recombining argv text", ()
 
   assert.equal(detail.command, `node -e "console.log('fragile quoted shell')"`);
   assert.equal(detail.command?.includes(`-e console.log('fragile quoted shell')`), false);
-  assert.equal(detail.preview, `node -e "console.log('fragile quoted shell')"`);
+  assert.equal(detail.preview, `node -e "console.log('fragile quoted shell')" · exit 0`);
 });
 
 test("tool stream projection cleans restored ordinary tool preview labels", () => {
@@ -113,7 +113,51 @@ test("tool stream projection cleans restored ordinary tool preview labels", () =
     },
   });
 
-  assert.equal(detail.preview, "dir");
+  assert.equal(detail.preview, "dir · exit 0");
+});
+
+test("tool stream projection exposes command execution facts for UI display", () => {
+  const detail = toolStreamDetail("tool.completed", {
+    toolName: "shell_command",
+    input: {
+      commandLine: "pnpm dev",
+      cwd: "apps/web",
+    },
+    durationMs: 1530,
+    output: {
+      summary: "dev server started",
+      result: {
+        commandLine: "pnpm dev",
+        cwd: "apps/web",
+        exitCode: 0,
+        timedOut: false,
+        background: true,
+        pid: 1234,
+        logPath: "C:/Temp/agentarbor-command-logs/pnpm-dev.log",
+        stopCommand: "taskkill /pid 1234 /T /F",
+        waitForPort: 5173,
+        portReady: true,
+        stdoutTruncated: true,
+        stderrTruncated: false,
+        stdoutChars: 1200,
+        stderrChars: 0,
+        stdoutOmittedChars: 340,
+      },
+    },
+  });
+
+  assert.equal(detail.display?.kind, "command_summary");
+  assert.equal(detail.display?.kind === "command_summary" ? detail.display.durationMs : undefined, 1530);
+  assert.equal(detail.display?.kind === "command_summary" ? detail.display.pid : undefined, 1234);
+  assert.equal(detail.display?.kind === "command_summary" ? detail.display.logPath : undefined, "C:/Temp/agentarbor-command-logs/pnpm-dev.log");
+  assert.equal(detail.display?.kind === "command_summary" ? detail.display.stopCommand : undefined, "taskkill /pid 1234 /T /F");
+  assert.equal(detail.display?.kind === "command_summary" ? detail.display.portReady : undefined, true);
+  assert.equal(detail.preview?.includes("exit 0"), true);
+  assert.equal(detail.preview?.includes("1.5s"), true);
+  assert.equal(detail.preview?.includes("后台 pid 1234"), true);
+  assert.equal(detail.preview?.includes("port 5173 ready"), true);
+  assert.equal(detail.preview?.includes("stdout truncated 1200 chars 340 omitted"), true);
+  assert.equal(detail.preview?.includes("stderr not truncated 0 chars"), true);
 });
 
 test("tool stream projection shows file change metadata without raw replacement text", () => {

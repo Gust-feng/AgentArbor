@@ -43,6 +43,10 @@ const BUILTIN_TOOL_PRESENTATION: Readonly<Record<string, ToolPresentationSeed>> 
     displayName: "浏览网页",
     displayDescription: "打开网页并返回文本快照。",
   },
+  http_request: {
+    displayName: "HTTP 请求",
+    displayDescription: "发送 HTTP/HTTPS 请求并返回状态、响应头和有上限的响应体。",
+  },
   read_file: {
     displayName: "读取文件",
     displayDescription: "读取授权工作区内的文本文件，用于理解项目上下文。",

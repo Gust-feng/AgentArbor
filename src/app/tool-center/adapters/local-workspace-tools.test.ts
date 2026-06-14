@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm, stat, writeFile, mkdir } from "node:fs/promises";
+import { createConnection, createServer as createNetServer } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -427,8 +428,14 @@ test("local shell_command bounds foreground process lifetime and output volume",
     }, context);
     const largeResult = asRecord(asRecord(largeOutput).result);
     assert.equal(asRecord(largeOutput).truncated, true);
-    assert.equal(String(largeResult.stdout).length <= 128_000, true);
-    assert.equal(String(largeResult.stderr).length <= 64_000, true);
+    assert.equal(String(largeResult.stdout).length, 64_000);
+    assert.equal(String(largeResult.stderr).length, 32_000);
+    assert.equal(largeResult.stdoutTruncated, true);
+    assert.equal(largeResult.stderrTruncated, true);
+    assert.equal(largeResult.stdoutChars, 140_000);
+    assert.equal(largeResult.stderrChars, 70_000);
+    assert.equal(largeResult.stdoutOmittedChars, 76_000);
+    assert.equal(largeResult.stderrOmittedChars, 38_000);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -452,7 +459,6 @@ test("local shell_command can start long-running commands in the background with
     assert.match(String(result.stopCommand), process.platform === "win32" ? /taskkill/ : /kill -TERM/);
     assert.match(String(result.stdout), /Started background process/);
     assert.match(String(result.stdout), /Log:/);
-    assert.match(String(result.stdout), /background-ready/);
     await waitUntil(async () => {
       try {
         return (await readFile(logPath, "utf8")).includes("background-ready");
@@ -463,7 +469,69 @@ test("local shell_command can start long-running commands in the background with
     await shellCommand.execute({ commandLine: String(result.stopCommand), timeoutMs: 1_000 }, context);
     await delay(50);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await removeTempTree(root);
+  }
+});
+
+test("local shell_command waits for a background server port", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tools-"));
+  try {
+    const port = await unusedLocalPort();
+    const shellCommand = createLocalShellCommandTool(root);
+    const script = [
+      "const http=require('node:http');",
+      "const server=http.createServer((req,res)=>res.end('ok'));",
+      `server.listen(${port}, '127.0.0.1', () => console.log('server-ready:${port}'));`,
+      "setInterval(() => {}, 1000);",
+    ].join("");
+    const started = await shellCommand.execute({
+      command: process.execPath,
+      args: ["-e", script],
+      background: true,
+      backgroundWaitMs: 500,
+      waitForPort: port,
+      waitForPortTimeoutMs: 3_000,
+    }, context);
+    const result = asRecord(asRecord(started).result);
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.background, true);
+    assert.equal(result.waitForPort, port);
+    assert.equal(result.portReady, true);
+    assert.equal(typeof result.durationMs, "number");
+    assert.match(String(result.stdout), new RegExp(`Port ${port} is ready\\.`));
+    await shellCommand.execute({ commandLine: String(result.stopCommand), timeoutMs: 1_000 }, context);
+    await waitUntil(async () => !(await canConnectToLocalPort(port)), 5_000);
+  } finally {
+    await removeTempTree(root);
+  }
+});
+
+test("local shell_command reports when a requested background port is not ready", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tools-"));
+  try {
+    const port = await unusedLocalPort();
+    const shellCommand = createLocalShellCommandTool(root);
+    const started = await shellCommand.execute({
+      command: process.execPath,
+      args: ["-e", "console.log('background-without-port'); setTimeout(() => {}, 5000);"],
+      background: true,
+      backgroundWaitMs: 500,
+      waitForPort: port,
+      waitForPortTimeoutMs: 300,
+    }, context);
+    const result = asRecord(asRecord(started).result);
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.background, true);
+    assert.equal(result.waitForPort, port);
+    assert.equal(result.portReady, false);
+    assert.equal(typeof result.durationMs, "number");
+    assert.match(String(result.stderr), new RegExp(`Port ${port} did not become ready within 300ms\\.`));
+    await shellCommand.execute({ commandLine: String(result.stopCommand), timeoutMs: 1_000 }, context);
+    await delay(50);
+  } finally {
+    await removeTempTree(root);
   }
 });
 
@@ -484,7 +552,6 @@ test("local shell_command captures shell-native background command output", asyn
     assert.equal(result.background, true);
     assert.equal(typeof result.pid, "number");
     assert.match(String(result.stdout), /Started background process/);
-    assert.match(String(result.stdout), /SHELL_BG_READY/);
     await waitUntil(async () => {
       try {
         return (await readFile(logPath, "utf8")).includes("SHELL_BG_READY");
@@ -495,7 +562,7 @@ test("local shell_command captures shell-native background command output", asyn
     await shellCommand.execute({ commandLine: String(result.stopCommand), timeoutMs: 1_000 }, context);
     await delay(50);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await removeTempTree(root);
   }
 });
 
@@ -516,7 +583,7 @@ test("local shell_command reports background commands that exit immediately", as
     assert.match(String(result.stdout), /background failed fast/);
     assert.match(String(result.stderr), /exited before it stayed running/);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await removeTempTree(root);
   }
 });
 
@@ -538,7 +605,7 @@ test("local shell_command reports background commands that fail during the start
     assert.match(String(result.stdout), /background delayed fail/);
     assert.match(String(result.stderr), /exited before it stayed running/);
   } finally {
-    await rm(root, { recursive: true, force: true });
+    await removeTempTree(root);
   }
 });
 
@@ -688,7 +755,7 @@ function nodeInlineScriptCommand(syntax: "cmd" | "powershell" | "posix"): string
   return `node -e ${quoteShellPath('console.log("hello_inline_script")', syntax)}`;
 }
 
-async function waitUntil(predicate: () => Promise<boolean>, timeoutMs = 2_000): Promise<void> {
+async function waitUntil(predicate: () => Promise<boolean>, timeoutMs = 5_000): Promise<void> {
   const startedAt = Date.now();
   for (;;) {
     if (await predicate()) {
@@ -699,6 +766,51 @@ async function waitUntil(predicate: () => Promise<boolean>, timeoutMs = 2_000): 
     }
     await delay(25);
   }
+}
+
+async function removeTempTree(root: string): Promise<void> {
+  await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+}
+
+async function unusedLocalPort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const server = createNetServer();
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      const port = typeof address === "object" && address !== null ? address.port : undefined;
+      server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+        if (port === undefined) {
+          reject(new Error("Could not allocate local port."));
+          return;
+        }
+        resolve(port);
+      });
+    });
+  });
+}
+
+function canConnectToLocalPort(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = createConnection({ host: "127.0.0.1", port });
+    let settled = false;
+    const settle = (ready: boolean) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      socket.destroy();
+      resolve(ready);
+    };
+    socket.setTimeout(250);
+    socket.once("connect", () => settle(true));
+    socket.once("timeout", () => settle(false));
+    socket.once("error", () => settle(false));
+  });
 }
 
 function asRecord(value: unknown): Record<string, unknown> {

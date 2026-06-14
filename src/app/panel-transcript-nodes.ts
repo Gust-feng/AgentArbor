@@ -1,6 +1,6 @@
 import type { TranscriptNode, TranscriptNodePhase } from "../domain/basic-agent/index.js";
 import type { ObservationRef } from "../domain/observation/index.js";
-import { commandDisplayText, type ToolDisplayProjection } from "../domain/tools/index.js";
+import { type ToolDisplayProjection } from "../domain/tools/index.js";
 import { toolDisplayName } from "../domain/tools/index.js";
 import { cleanConfirmationSummary } from "./confirmation-copy.js";
 import {
@@ -13,6 +13,7 @@ import {
   type ReasoningTranscriptEvent,
 } from "./transcript-reasoning.js";
 import { cleanOrdinaryToolText } from "./ordinary-tool-copy.js";
+import { commandSummaryParts } from "./panel-transcript-tool-format.js";
 import {
   isLowValueOrdinaryAgentNote,
   isOrdinaryTranscriptReasoningSettlementEvent,
@@ -398,11 +399,10 @@ function isObservationRefKind(value: string): value is ObservationRef["kind"] {
 function transcriptToolSummary(event: PanelTranscriptStreamEvent): string | undefined {
   const display = event.detail?.display;
   if (display?.kind === "command_summary") {
-    const command = commandDisplayText(display);
-    const error = event.type === "tool.failed" ? display.errorSummary : undefined;
-    return [command, display.outputSummary, error]
-      .filter((value): value is string => value !== undefined && value.trim().length > 0)
-      .join(" · ");
+    return commandSummaryParts({
+      display,
+      failed: event.type === "tool.failed",
+    }).join(" · ") || undefined;
   }
   if (display?.kind === "search_results") {
     return [display.query, `${display.results.length} 条结果`]
@@ -414,6 +414,13 @@ function transcriptToolSummary(event: PanelTranscriptStreamEvent): string | unde
   }
   if (display?.kind === "browser_snapshot") {
     return display.title ?? display.url ?? event.detail?.preview ?? event.summary;
+  }
+  if (display?.kind === "http_response") {
+    return [
+      display.method,
+      display.url,
+      display.statusCode === undefined ? undefined : `${display.statusCode}${display.statusText === undefined ? "" : ` ${display.statusText}`}`,
+    ].filter(isString).join(" · ") || event.detail?.preview || event.summary;
   }
   if (display?.kind === "file_change_summary" || display?.kind === "file_diff_preview") {
     return fileDisplaySummary(display) ?? cleanOrdinaryToolText(event.detail?.preview) ?? cleanOrdinaryToolText(event.summary);
@@ -458,6 +465,9 @@ function toolTranscriptTitleSet(event: PanelTranscriptStreamEvent): {
   }
   if (display?.kind === "browser_snapshot" || toolName === "browser_snapshot" || toolName.includes("browser")) {
     return { action: "读取网页", completed: "网页读取完成", failed: "网页读取未完成" };
+  }
+  if (display?.kind === "http_response" || toolName === "http_request") {
+    return { action: "发送 HTTP 请求", completed: "HTTP 请求完成", failed: "HTTP 请求未完成" };
   }
   if (display?.kind === "file_diff_preview" || toolName === "edit_file" || toolName.includes("patch") || toolName.includes("replace")) {
     return { action: "编辑文件", completed: "编辑完成", failed: "编辑未完成" };

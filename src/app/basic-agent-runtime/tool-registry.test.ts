@@ -18,6 +18,7 @@ test("desktop-basic tool registry exposes catalog and allowed tools from scoped 
     "delete_file",
     "edit_file",
     "grep_files",
+    "http_request",
     "list_dir",
     "read",
     "read_file",
@@ -38,6 +39,9 @@ test("desktop-basic tool registry exposes catalog and allowed tools from scoped 
   assert.equal(registry.createToolCenter("desktop-basic").has("run_command"), false);
   assert.equal(registry.createToolCenter("desktop-basic").has("shell_command"), true);
   assert.equal(catalog.tools.find((tool) => tool.name === "browser_snapshot")?.operationType, "read-only");
+  assert.equal(catalog.tools.find((tool) => tool.name === "http_request")?.operationType, "external-submit");
+  assert.equal(catalog.tools.find((tool) => tool.name === "http_request")?.requiresConfirmation, false);
+  assert.equal(catalog.tools.find((tool) => tool.name === "http_request")?.displayName, "HTTP 请求");
   assert.equal(catalog.tools.find((tool) => tool.name === "browser_snapshot")?.availability, "available");
   assert.equal(catalog.tools.find((tool) => tool.name === "read_file")?.displayName, "读取文件");
   assert.equal(catalog.tools.find((tool) => tool.name === "shell_command")?.confirmationLabel, "需确认");
@@ -71,6 +75,7 @@ test("desktop-basic model-visible tools carry structured model contracts", () =>
     "edit_file",
     "delete_file",
     "shell_command",
+    "http_request",
     "browser_snapshot",
   ]);
 

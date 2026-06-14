@@ -30,6 +30,26 @@ import { sanitizeAssistantVisibleText } from "../visible-text-safety.js";
 import { confirmationActionSummaryText } from "../confirmation-copy.js";
 import { asRecord, optionalString, unique } from "./request-parsers.js";
 
+export type RuntimeErrorDomain =
+  | "tool_error"
+  | "runtime_error"
+  | "model_error"
+  | "ui_submit_error"
+  | "process_error";
+
+export type RuntimeRunRecordWithErrorDomain = RuntimeRunRecord & {
+  readonly error?: RuntimeRunRecord["error"] & {
+    readonly errorDomain?: RuntimeErrorDomain;
+  };
+};
+
+export type RuntimeToolCallRecordWithErrorDomain = RuntimeToolCallRecord & {
+  readonly errorDomain?: RuntimeErrorDomain;
+  readonly envelope?: RuntimeToolCallRecord["envelope"] & {
+    readonly errorDomain?: RuntimeErrorDomain;
+  };
+};
+
 export function createRuntimeWorkspaceRecord(
   workspace: SanitizedWorkspaceConfig,
   selectedAt: string
@@ -49,10 +69,11 @@ export function createRuntimeRunRecord(input: {
   readonly workspace: RuntimeWorkspaceRecord | undefined;
   readonly appHome: string;
   readonly runtimeHome: string | undefined;
-}): RuntimeRunRecord {
+}): RuntimeRunRecordWithErrorDomain {
   const restoredResult = resultSummaryForJob(input.job);
   const statusPayload = panelRunPayloadForStatus(input.job);
   const statusObservation = statusPayload === undefined || !("observation" in statusPayload) ? undefined : statusPayload.observation;
+  const terminalError = input.job.failed?.error ?? input.job.cancelled?.reason ?? input.job.blocked?.reason;
   return {
     runId: input.job.runId,
     profile: "lite",
@@ -73,7 +94,7 @@ export function createRuntimeRunRecord(input: {
     completedAt: isTerminalPanelRunStatus(input.job.status) ? input.job.updatedAt : undefined,
     resultTitle: restoredResult?.title,
     resultSummary: restoredResult?.summary,
-    error: safeRuntimeError(input.job.failed?.error ?? input.job.cancelled?.reason ?? input.job.blocked?.reason),
+    error: safeRuntimeError(terminalError, inferRunErrorDomain(input.job, terminalError)),
     agentDefinitionRef: input.job.agentDefinitionRef,
     capabilitySnapshot: input.job.capabilitySnapshot,
     capabilityResolution: statusPayload?.capabilityResolution ?? input.job.capabilityResolution,
@@ -133,9 +154,9 @@ export function toRuntimeToolCallRecords(
   runId: string,
   events: readonly PanelRunStreamEvent[],
   eventEntries: readonly EventLogEntry[]
-): readonly RuntimeToolCallRecord[] {
+): readonly RuntimeToolCallRecordWithErrorDomain[] {
   const detailsByCallId = localToolDetailsByCallId(eventEntries);
-  const calls = new Map<string, RuntimeToolCallRecord>();
+  const calls = new Map<string, RuntimeToolCallRecordWithErrorDomain>();
   for (const event of events) {
     if (!event.type.startsWith("tool.") && event.type !== "confirmation.needed") {
       continue;
@@ -159,6 +180,14 @@ export function toRuntimeToolCallRecords(
         envelope: event.detail?.envelope ?? detail?.envelope ?? previous?.envelope,
         truncated: event.detail?.truncated ?? detail?.truncated ?? previous?.truncated,
         error: event.detail?.error ?? detail?.error ?? previous?.error,
+        errorDomain: inferToolCallErrorDomain({
+          eventType: event.type,
+          toolName: event.toolName ?? previous?.toolName,
+          envelope: event.detail?.envelope ?? detail?.envelope ?? previous?.envelope,
+          error: event.detail?.error ?? detail?.error ?? previous?.error,
+          exitCode: event.detail?.exitCode ?? detail?.exitCode ?? previous?.exitCode,
+          previous: previous?.errorDomain,
+        }),
         eventRefs: unique([...(previous?.eventRefs ?? []), event.eventId]),
         createdAt: previous?.createdAt ?? event.createdAt,
       });
@@ -369,20 +398,141 @@ function resultSummaryForJob(job: PanelRunJob): { readonly title: string; readon
   return undefined;
 }
 
-function safeRuntimeError(error: RuntimeRunRecord["error"] | undefined): RuntimeRunRecord["error"] | undefined {
+function safeRuntimeError(
+  error: RuntimeRunRecord["error"] | undefined,
+  errorDomain: RuntimeErrorDomain | undefined
+): RuntimeRunRecordWithErrorDomain["error"] | undefined {
   if (error === undefined) {
     return undefined;
   }
   return {
     code: compactRuntimeText(error.code, 160),
     message: compactRuntimeText(error.message, 900),
+    errorDomain,
   };
+}
+
+function inferRunErrorDomain(
+  job: PanelRunJob,
+  error: RuntimeRunRecord["error"] | undefined
+): RuntimeErrorDomain | undefined {
+  const explicit = errorDomainFromUnknown(error);
+  if (explicit !== undefined) {
+    return explicit;
+  }
+  if (error === undefined) {
+    return undefined;
+  }
+  const code = error.code.toLowerCase();
+  const message = error.message.toLowerCase();
+  const hasModelFailureEvent = job.streamEvents.some((event) => event.type === "model.failed");
+  const hasToolFailureEvent = job.streamEvents.some((event) => event.type === "tool.failed");
+  const hasProcessToolFailureEvent = job.streamEvents.some((event) =>
+    event.type === "tool.failed" &&
+    isProcessTool(event.toolName)
+  );
+  if (hasModelFailureEvent || isModelErrorCode(code) || isModelErrorMessage(message)) {
+    return "model_error";
+  }
+  if (hasProcessToolFailureEvent || isProcessErrorCode(code) || (!hasToolFailureEvent && isProcessErrorMessage(message))) {
+    return "process_error";
+  }
+  if (hasToolFailureEvent) {
+    return "tool_error";
+  }
+  if (isUiSubmitErrorCode(code)) {
+    return "ui_submit_error";
+  }
+  return "runtime_error";
+}
+
+function inferToolCallErrorDomain(input: {
+  readonly eventType: PanelRunStreamEvent["type"];
+  readonly toolName?: string;
+  readonly envelope?: RuntimeToolCallRecordWithErrorDomain["envelope"];
+  readonly error?: string;
+  readonly exitCode?: number;
+  readonly previous?: RuntimeErrorDomain;
+}): RuntimeErrorDomain | undefined {
+  const explicit = input.envelope?.errorDomain ?? input.previous;
+  if (explicit !== undefined) {
+    return explicit;
+  }
+  if (input.eventType !== "tool.failed") {
+    return undefined;
+  }
+  if (
+    isProcessTool(input.toolName) ||
+    input.exitCode !== undefined ||
+    isProcessErrorMessage(input.error?.toLowerCase() ?? "")
+  ) {
+    return "process_error";
+  }
+  return "tool_error";
+}
+
+function errorDomainFromUnknown(value: unknown): RuntimeErrorDomain | undefined {
+  return errorDomainOrUndefined(asRecord(value).errorDomain);
+}
+
+function errorDomainOrUndefined(value: unknown): RuntimeErrorDomain | undefined {
+  return value === "tool_error" ||
+    value === "runtime_error" ||
+    value === "model_error" ||
+    value === "ui_submit_error" ||
+    value === "process_error"
+    ? value
+    : undefined;
+}
+
+function isModelErrorCode(code: string): boolean {
+  return code === "model_failed" ||
+    code === "provider_failed" ||
+    code === "missing_api_key" ||
+    code === "missing_model_name" ||
+    code === "ai_disabled" ||
+    code.includes("model") ||
+    code.includes("provider");
+}
+
+function isModelErrorMessage(message: string): boolean {
+  return message.includes("模型") ||
+    message.includes("model") ||
+    message.includes("provider");
+}
+
+function isProcessErrorCode(code: string): boolean {
+  return code.includes("process") ||
+    code.includes("spawn") ||
+    code.includes("exit") ||
+    code.includes("signal") ||
+    code === "command_not_found";
+}
+
+function isProcessErrorMessage(message: string): boolean {
+  return message.includes("spawn") ||
+    message.includes("enoent") ||
+    message.includes("exit code") ||
+    message.includes("退出码") ||
+    message.includes("command not found") ||
+    message.includes("not recognized as");
+}
+
+function isUiSubmitErrorCode(code: string): boolean {
+  return code.startsWith("invalid_") ||
+    code.startsWith("missing_") ||
+    code.endsWith("_not_found") ||
+    code.includes("request");
+}
+
+function isProcessTool(toolName: string | undefined): boolean {
+  return toolName === "run_command" || toolName === "shell_command";
 }
 
 function localToolDetailsByCallId(
   eventEntries: readonly EventLogEntry[]
-): Map<string, Pick<RuntimeToolCallRecord, "action" | "path" | "query" | "command" | "exitCode" | "summary" | "preview" | "display" | "envelope" | "truncated" | "error">> {
-  const details = new Map<string, Pick<RuntimeToolCallRecord, "action" | "path" | "query" | "command" | "exitCode" | "summary" | "preview" | "display" | "envelope" | "truncated" | "error">>();
+): Map<string, Pick<RuntimeToolCallRecordWithErrorDomain, "action" | "path" | "query" | "command" | "exitCode" | "summary" | "preview" | "display" | "envelope" | "truncated" | "error" | "errorDomain">> {
+  const details = new Map<string, Pick<RuntimeToolCallRecordWithErrorDomain, "action" | "path" | "query" | "command" | "exitCode" | "summary" | "preview" | "display" | "envelope" | "truncated" | "error" | "errorDomain">>();
   for (const entry of eventEntries) {
     if (entry.type !== "tool.completed" && entry.type !== "tool.failed") {
       continue;
@@ -396,6 +546,8 @@ function localToolDetailsByCallId(
     const input = asRecord(payload.input);
     const result = asRecord(output.result);
     const pathValue = optionalString(result.path) ?? optionalString(input.path);
+    const envelope = toolResultEnvelopeOrUndefined(output.envelope);
+    const error = optionalString(payload.error);
     details.set(callId, {
       action: optionalString(output.action) ?? optionalString(payload.toolName),
       path: pathValue,
@@ -405,9 +557,16 @@ function localToolDetailsByCallId(
       summary: cleanOrdinaryToolText(optionalString(output.summary)),
       preview: persistedToolPreview(optionalString(payload.toolName), output, result, payload),
       display: toolDisplayOrUndefined(output.display),
-      envelope: toolResultEnvelopeOrUndefined(output.envelope),
+      envelope,
       truncated: output.truncated === true,
-      error: optionalString(payload.error),
+      error,
+      errorDomain: inferToolCallErrorDomain({
+        eventType: entry.type === "tool.failed" ? "tool.failed" : "tool.completed",
+        toolName: optionalString(payload.toolName),
+        envelope,
+        error,
+        exitCode: typeof result.exitCode === "number" ? result.exitCode : undefined,
+      }),
     });
   }
   return details;
@@ -420,6 +579,7 @@ function toolDisplayOrUndefined(value: unknown): RuntimeToolCallRecord["display"
     kind === "search_results" ||
     kind === "read_result" ||
     kind === "browser_snapshot" ||
+    kind === "http_response" ||
     kind === "file_change_summary" ||
     kind === "file_diff_preview" ||
     kind === "command_summary" ||
@@ -430,7 +590,7 @@ function toolDisplayOrUndefined(value: unknown): RuntimeToolCallRecord["display"
   return undefined;
 }
 
-function toolResultEnvelopeOrUndefined(value: unknown): RuntimeToolCallRecord["envelope"] | undefined {
+function toolResultEnvelopeOrUndefined(value: unknown): RuntimeToolCallRecordWithErrorDomain["envelope"] | undefined {
   const record = asRecord(value);
   const agentSummary = optionalString(record.agentSummary);
   const rawRetention = optionalString(record.rawRetention);
@@ -448,6 +608,7 @@ function toolResultEnvelopeOrUndefined(value: unknown): RuntimeToolCallRecord["e
     redacted: record.redacted !== false,
     diagnosticRef: optionalString(record.diagnosticRef),
     rawRetention,
+    errorDomain: errorDomainOrUndefined(record.errorDomain),
   };
 }
 
@@ -498,6 +659,22 @@ function persistedToolPreview(
     const headline = [title, url].filter((item): item is string => item !== undefined).join(" · ");
     return compactRuntimeText(
       [headline, text].filter((item): item is string => typeof item === "string" && item.length > 0).join("\n"),
+      900
+    );
+  }
+  if (toolName === "http_request") {
+    const method = optionalString(result.method);
+    const url = optionalString(result.url);
+    const statusCode = typeof result.statusCode === "number" ? result.statusCode : undefined;
+    const statusText = optionalString(result.statusText);
+    const body = optionalString(result.body);
+    const headline = [
+      method,
+      url,
+      statusCode === undefined ? undefined : `${statusCode}${statusText === undefined ? "" : ` ${statusText}`}`,
+    ].filter((item): item is string => item !== undefined).join(" · ");
+    return compactRuntimeText(
+      [headline, body].filter((item): item is string => typeof item === "string" && item.length > 0).join("\n"),
       900
     );
   }

@@ -3,6 +3,7 @@ import { toolDisplayName } from "../domain/tools/index.js";
 import { redactSensitiveText } from "../kernel/redaction.js";
 import { commandTextFromToolInput, commandTextFromToolResult } from "./command-text.js";
 import { asRecord, stringArray, stringOrUndefined } from "./panel-read-model-utils.js";
+import { commandSummaryParts } from "./panel-transcript-tool-format.js";
 import { safeCommandToolPreview, safeReadFileToolPreview } from "./safe-tool-preview.js";
 import { cleanOrdinaryToolText } from "./ordinary-tool-copy.js";
 
@@ -52,7 +53,7 @@ export function toolStreamDetail(
   const input = asRecord(payload.input);
   const output = asRecord(payload.output);
   const result = asRecord(output.result);
-  const display = toolDisplayOrUndefined(output.display);
+  const display = commandDisplayForReadModel(toolName, input, output, result, payload) ?? toolDisplayOrUndefined(output.display);
   const envelope = toolResultEnvelopeOrUndefined(output.envelope);
   return {
     kind: "tool",
@@ -76,6 +77,7 @@ function toolDisplayOrUndefined(value: unknown): ToolDisplayProjection | undefin
     kind === "search_results" ||
     kind === "read_result" ||
     kind === "browser_snapshot" ||
+    kind === "http_response" ||
     kind === "file_change_summary" ||
     kind === "file_diff_preview" ||
     kind === "command_summary" ||
@@ -95,6 +97,50 @@ function normalizeToolDisplayForReadModel(display: ToolDisplayProjection): ToolD
     ...display,
     action: action === undefined ? undefined : displayActionLabel(action),
   };
+}
+
+function commandDisplayForReadModel(
+  toolName: string,
+  input: Readonly<Record<string, unknown>>,
+  output: Readonly<Record<string, unknown>>,
+  result: Readonly<Record<string, unknown>>,
+  payload: Readonly<Record<string, unknown>>
+): ToolDisplayProjection | undefined {
+  if (toolName !== "run_command" && toolName !== "shell_command") {
+    return undefined;
+  }
+  const existing = toolDisplayOrUndefined(output.display);
+  const existingCommand = existing?.kind === "command_summary" ? existing : undefined;
+  const stdout = stringOrUndefined(result.stdout);
+  const stderr = stringOrUndefined(result.stderr);
+  const display: ToolDisplayProjection & { readonly cancelled?: boolean } = {
+    kind: "command_summary",
+    ...existingCommand,
+    command: existingCommand?.command ?? stringOrUndefined(result.command) ?? stringOrUndefined(input.command),
+    args: existingCommand?.args ?? (stringArray(result.args).length > 0 ? stringArray(result.args) : stringArray(input.args)),
+    commandLine: existingCommand?.commandLine ?? commandTextFromToolResult(result, input),
+    cwd: existingCommand?.cwd ?? stringOrUndefined(result.cwd) ?? stringOrUndefined(input.cwd),
+    shell: existingCommand?.shell ?? stringOrUndefined(asRecord(result.shell).label),
+    exitCode: existingCommand?.exitCode ?? numberOrUndefined(result.exitCode),
+    timedOut: existingCommand?.timedOut ?? booleanOrUndefined(result.timedOut),
+    cancelled: booleanOrUndefined((existingCommand as { readonly cancelled?: unknown } | undefined)?.cancelled) ?? booleanOrUndefined(result.cancelled),
+    background: existingCommand?.background ?? booleanOrUndefined(result.background),
+    pid: existingCommand?.pid ?? numberOrUndefined(result.pid),
+    logPath: existingCommand?.logPath ?? stringOrUndefined(result.logPath),
+    stopCommand: existingCommand?.stopCommand ?? stringOrUndefined(result.stopCommand),
+    durationMs: existingCommand?.durationMs ?? numberOrUndefined(result.durationMs) ?? numberOrUndefined(payload.durationMs),
+    waitForPort: existingCommand?.waitForPort ?? numberOrUndefined(result.waitForPort),
+    portReady: existingCommand?.portReady ?? booleanOrUndefined(result.portReady),
+    stdoutTruncated: existingCommand?.stdoutTruncated ?? booleanOrUndefined(result.stdoutTruncated),
+    stderrTruncated: existingCommand?.stderrTruncated ?? booleanOrUndefined(result.stderrTruncated),
+    stdoutChars: existingCommand?.stdoutChars ?? numberOrUndefined(result.stdoutChars),
+    stderrChars: existingCommand?.stderrChars ?? numberOrUndefined(result.stderrChars),
+    stdoutOmittedChars: existingCommand?.stdoutOmittedChars ?? numberOrUndefined(result.stdoutOmittedChars),
+    stderrOmittedChars: existingCommand?.stderrOmittedChars ?? numberOrUndefined(result.stderrOmittedChars),
+    outputSummary: existingCommand?.outputSummary ?? summarizeCommandOutput(stdout),
+    errorSummary: existingCommand?.errorSummary ?? summarizeCommandOutput(stderr),
+  };
+  return display;
 }
 
 function displayActionLabel(value: string): string {
@@ -142,6 +188,11 @@ function toolRequestPreview(toolName: string, input: Readonly<Record<string, unk
   if (toolName === "browser_snapshot") {
     const url = stringOrUndefined(input.url);
     return url;
+  }
+  if (toolName === "http_request") {
+    const method = stringOrUndefined(input.method) ?? "GET";
+    const url = stringOrUndefined(input.url);
+    return url === undefined ? method : `${method.toUpperCase()} ${url}`;
   }
   return undefined;
 }
@@ -202,7 +253,7 @@ function toolResultPreview(
     return safeFileChangePreview(toolName, asRecord(payload.input), output, result);
   }
   if (toolName === "run_command" || toolName === "shell_command") {
-    return safeCommandPreview(output, result, asRecord(payload.input));
+    return safeCommandPreview(output, result, asRecord(payload.input), payload);
   }
   if (toolName === "browser_snapshot") {
     const title = stringOrUndefined(result.title);
@@ -210,6 +261,19 @@ function toolResultPreview(
     const text = stringOrUndefined(result.text);
     const headline = [title, url].filter((item): item is string => item !== undefined).join(" · ");
     return compactStreamDetailText([headline, text].filter((item) => item !== undefined && item.length > 0).join("\n"), 900);
+  }
+  if (toolName === "http_request") {
+    const method = stringOrUndefined(result.method);
+    const url = stringOrUndefined(result.url);
+    const statusCode = typeof result.statusCode === "number" ? result.statusCode : undefined;
+    const statusText = stringOrUndefined(result.statusText);
+    const body = stringOrUndefined(result.body);
+    const headline = [
+      method,
+      url,
+      statusCode === undefined ? undefined : `${statusCode}${statusText === undefined ? "" : ` ${statusText}`}`,
+    ].filter((item): item is string => item !== undefined).join(" · ");
+    return compactStreamDetailText([headline, body].filter((item) => item !== undefined && item.length > 0).join("\n"), 900);
   }
   if (isMcpToolName(toolName)) {
     const displaySummary = genericDisplayPreview(output);
@@ -242,13 +306,45 @@ function safeReadFilePreview(
 function safeCommandPreview(
   output: Readonly<Record<string, unknown>>,
   result: Readonly<Record<string, unknown>>,
-  input: Readonly<Record<string, unknown>>
+  input: Readonly<Record<string, unknown>>,
+  payload: Readonly<Record<string, unknown>>
 ): string | undefined {
+  const display = commandDisplayForReadModel("shell_command", input, output, result, payload);
+  if (display?.kind === "command_summary") {
+    const parts = commandSummaryParts({
+      display,
+      failed: typeof result.exitCode === "number" && result.exitCode !== 0,
+    });
+    const preview = compactStreamDetailText(parts.join(" · "), 900);
+    if (preview !== undefined) {
+      return preview;
+    }
+  }
   return safeCommandToolPreview({
     summary: stringOrUndefined(output.summary),
     command: commandTextFromToolResult(result, input),
     exitCode: typeof result.exitCode === "number" ? result.exitCode : undefined,
   });
+}
+
+function summarizeCommandOutput(value: string | undefined): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  const lines = value
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .slice(0, 4);
+  return compactStreamDetailText(lines.join("\n"), 420);
+}
+
+function numberOrUndefined(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function booleanOrUndefined(value: unknown): boolean | undefined {
+  return value === true ? true : value === false ? false : undefined;
 }
 
 export function compactStreamDetailText(value: string | undefined, maxLength: number): string | undefined {

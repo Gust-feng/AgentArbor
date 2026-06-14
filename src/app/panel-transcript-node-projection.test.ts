@@ -7,6 +7,7 @@ import {
   timelineVisibleNodes,
   visibleTranscriptNodes,
 } from "./panel-transcript-node-projection.js";
+import { displayActivityItemsForNodes } from "./panel-transcript-activity-copy.js";
 
 test("activity projection preserves visible thinking even when the text looks like a progress placeholder", () => {
   const projected = activityVisibleNodes([
@@ -353,6 +354,78 @@ test("panel transcript nodes render model failures as system failures", () => {
   assert.equal(projected[0]?.kind, "system");
   assert.equal(projected[0]?.phase, "failed");
   assert.equal(projected[0]?.title, "模型回复失败");
+});
+
+test("panel transcript nodes expose command execution facts in visible summaries", () => {
+  const projected = createPanelTranscriptNodes([
+    {
+      eventId: "run-1:event:1:tool.completed",
+      runId: "run-1",
+      sequence: 1,
+      type: "tool.completed",
+      createdAt: "2026-06-04T00:00:00.000Z",
+      toolName: "shell_command",
+      detail: {
+        display: {
+          kind: "command_summary",
+          commandLine: "pnpm dev",
+          exitCode: 0,
+          durationMs: 1530,
+          background: true,
+          pid: 1234,
+          logPath: "C:/Temp/agentarbor-command-logs/pnpm-dev.log",
+          stopCommand: "taskkill /pid 1234 /T /F",
+          waitForPort: 5173,
+          portReady: true,
+          stdoutTruncated: true,
+          stderrTruncated: false,
+          stdoutChars: 1200,
+          stderrChars: 0,
+          stdoutOmittedChars: 340,
+        },
+      },
+      sourceRefs: [],
+      modelCallRefs: [],
+      toolCallRefs: ["call-command"],
+    },
+  ]);
+
+  const command = projected[0];
+  assert.equal(command?.summary?.includes("pnpm dev"), true);
+  assert.equal(command?.summary?.includes("exit 0"), true);
+  assert.equal(command?.summary?.includes("1.5s"), true);
+  assert.equal(command?.summary?.includes("后台 pid 1234"), true);
+  assert.equal(command?.summary?.includes("log C:/Temp/agentarbor-command-logs/pnpm-dev.log"), true);
+  assert.equal(command?.summary?.includes("stop taskkill /pid 1234 /T /F"), true);
+  assert.equal(command?.summary?.includes("port 5173 ready"), true);
+  assert.equal(command?.summary?.includes("stdout truncated 1200 chars 340 omitted"), true);
+  assert.equal(command?.summary?.includes("stderr not truncated 0 chars"), true);
+
+  const items = displayActivityItemsForNodes(timelineVisibleNodes(projected));
+  assert.equal(items[0]?.copy.label, "命令");
+  assert.equal(items[0]?.copy.expandedDetail?.includes("stdout truncated 1200 chars 340 omitted"), true);
+});
+
+test("visible transcript projection keeps successful command results with observable facts", () => {
+  const projected = visibleTranscriptNodes([
+    node({
+      nodeId: "completed",
+      kind: "tool",
+      eventType: "tool.completed",
+      phase: "completed",
+      sequence: 1,
+      toolName: "shell_command",
+      display: {
+        kind: "command_summary",
+        commandLine: "pnpm dev",
+        exitCode: 0,
+        durationMs: 1530,
+      },
+      refs: [{ kind: "tool_call", id: "tool-1" }],
+    }),
+  ]);
+
+  assert.deepEqual(projected.map((item) => item.nodeId), ["completed"]);
 });
 
 function panelEvent(input: {

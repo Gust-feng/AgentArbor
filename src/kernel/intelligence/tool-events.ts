@@ -157,9 +157,11 @@ function safeToolResultEnvelope(output: unknown): Readonly<Record<string, unknow
     ? result.entries.slice(0, 12).map((entry) => {
         const entryRecord = asRecord(entry);
         return {
+          path: typeof entryRecord.path === "string" ? entryRecord.path : undefined,
           name: typeof entryRecord.name === "string" ? entryRecord.name : undefined,
           kind: typeof entryRecord.kind === "string" ? entryRecord.kind : undefined,
           bytes: typeof entryRecord.bytes === "number" ? entryRecord.bytes : undefined,
+          depth: typeof entryRecord.depth === "number" ? entryRecord.depth : undefined,
         };
       })
     : undefined;
@@ -172,9 +174,21 @@ function safeToolResultEnvelope(output: unknown): Readonly<Record<string, unknow
         };
       })
     : undefined;
+  const skippedSamples = Array.isArray(result.skippedSamples)
+    ? result.skippedSamples.slice(0, 8).map((sample) => {
+        const sampleRecord = asRecord(sample);
+        return {
+          path: typeof sampleRecord.path === "string" ? sampleRecord.path : undefined,
+          reason: typeof sampleRecord.reason === "string" ? sampleRecord.reason : undefined,
+          bytes: typeof sampleRecord.bytes === "number" ? sampleRecord.bytes : undefined,
+          errorCode: typeof sampleRecord.errorCode === "string" ? sampleRecord.errorCode : undefined,
+        };
+      })
+    : undefined;
   return {
     path: typeof result.path === "string" ? result.path : undefined,
     query: typeof result.query === "string" ? result.query : undefined,
+    engine: typeof result.engine === "string" ? result.engine : undefined,
     command: typeof result.command === "string" ? result.command : undefined,
     args: Array.isArray(result.args) ? result.args.filter((value): value is string => typeof value === "string") : undefined,
     cwd: typeof result.cwd === "string" ? result.cwd : undefined,
@@ -184,10 +198,32 @@ function safeToolResultEnvelope(output: unknown): Readonly<Record<string, unknow
     pid: typeof result.pid === "number" ? result.pid : undefined,
     logPath: typeof result.logPath === "string" ? result.logPath : undefined,
     stopCommand: typeof result.stopCommand === "string" ? result.stopCommand : undefined,
+    durationMs: typeof result.durationMs === "number" ? result.durationMs : undefined,
+    waitForPort: typeof result.waitForPort === "number" ? result.waitForPort : undefined,
+    portReady: typeof result.portReady === "boolean" ? result.portReady : undefined,
+    stdoutTruncated: typeof result.stdoutTruncated === "boolean" ? result.stdoutTruncated : undefined,
+    stderrTruncated: typeof result.stderrTruncated === "boolean" ? result.stderrTruncated : undefined,
+    stdoutChars: typeof result.stdoutChars === "number" ? result.stdoutChars : undefined,
+    stderrChars: typeof result.stderrChars === "number" ? result.stderrChars : undefined,
+    stdoutOmittedChars: typeof result.stdoutOmittedChars === "number" ? result.stdoutOmittedChars : undefined,
+    stderrOmittedChars: typeof result.stderrOmittedChars === "number" ? result.stderrOmittedChars : undefined,
     bytes: typeof result.bytes === "number" ? result.bytes : undefined,
+    depth: typeof result.depth === "number" ? result.depth : undefined,
+    maxDepth: typeof result.maxDepth === "number" ? result.maxDepth : undefined,
     entries,
+    entriesReturned: typeof result.entriesReturned === "number" ? result.entriesReturned : undefined,
     matches,
     totalEntries: typeof result.totalEntries === "number" ? result.totalEntries : undefined,
+    searchedFiles: typeof result.searchedFiles === "number" ? result.searchedFiles : undefined,
+    skippedFactsAvailable: typeof result.skippedFactsAvailable === "boolean" ? result.skippedFactsAvailable : undefined,
+    skippedFactsComplete: typeof result.skippedFactsComplete === "boolean" ? result.skippedFactsComplete : undefined,
+    skippedFiles: typeof result.skippedFiles === "number" ? result.skippedFiles : undefined,
+    skippedBinaryFiles: typeof result.skippedBinaryFiles === "number" ? result.skippedBinaryFiles : undefined,
+    skippedTooLargeFiles: typeof result.skippedTooLargeFiles === "number" ? result.skippedTooLargeFiles : undefined,
+    skippedUnreadableFiles: typeof result.skippedUnreadableFiles === "number" ? result.skippedUnreadableFiles : undefined,
+    skippedDirectories: typeof result.skippedDirectories === "number" ? result.skippedDirectories : undefined,
+    skippedOtherEntries: typeof result.skippedOtherEntries === "number" ? result.skippedOtherEntries : undefined,
+    skippedSamples,
   };
 }
 

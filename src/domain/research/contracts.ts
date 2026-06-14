@@ -23,6 +23,7 @@ export type InformationAccessStatus =
 
 export type InformationQuery = {
   readonly query: string;
+  readonly site?: string;
   readonly sources?: readonly InformationSourceKind[];
   readonly sourcePreference?: readonly InformationSourceKind[];
   readonly limit?: number;
@@ -76,6 +77,7 @@ export type ResearchTrace = {
   readonly traceId: string;
   readonly action: "search" | "read";
   readonly query?: string;
+  readonly site?: string;
   readonly ref?: string;
   readonly requestedSources: readonly InformationSourceKind[];
   readonly status: InformationAccessStatus;
@@ -87,6 +89,7 @@ export type ResearchTrace = {
 export type InformationSearchResult = {
   readonly action: "search";
   readonly query: string;
+  readonly site?: string;
   readonly status: InformationAccessStatus;
   readonly results: readonly SearchResultRef[];
   readonly trace: ResearchTrace;

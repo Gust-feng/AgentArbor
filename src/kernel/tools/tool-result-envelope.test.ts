@@ -43,5 +43,18 @@ test("tool status envelope covers failed, approval-required, and cancelled witho
     assert.equal(envelope.redacted, false);
     assert.equal(envelope.evidenceRefs.includes(`tool:call-${status}`), true);
     assert.equal(JSON.stringify(envelope).includes("sk-secret"), true);
+    assert.equal(envelope.errorDomain, status === "failed" ? "process_error" : undefined);
   }
+});
+
+test("tool status envelope classifies non-process failures as tool errors", () => {
+  const envelope = projectToolStatusEnvelope({
+    request: { callId: "call-read", toolName: "read_file", input: { path: "missing.md" } },
+    status: "failed",
+    summary: "ENOENT: no such file or directory, open missing.md",
+    diagnosticRef: "tool:call-read:failed",
+  });
+
+  assert.equal(envelope.errorDomain, "tool_error");
+  assert.equal(envelope.agentSummary.includes("ENOENT"), true);
 });

@@ -167,6 +167,14 @@ function projectToolDisplay(request: ToolCallRequest, output: unknown): ToolDisp
       truncated: record.results.length > 8 || record.truncated === true,
     };
   }
+  if (request.toolName === "read" && Array.isArray(output)) {
+    return {
+      kind: "generic_tool_summary",
+      action,
+      summary: `读取 ${output.length} 个 ref。`,
+      items: output.slice(0, 8).map(batchReadDisplayItem).filter(isString),
+    };
+  }
   if (request.toolName === "read") {
     return {
       kind: "read_result",
@@ -188,6 +196,18 @@ function projectToolDisplay(request: ToolCallRequest, output: unknown): ToolDisp
       url: stringOrUndefined(result.url),
       text: compactSafeText(stringOrUndefined(result.text), 900),
       truncated: record.truncated === true,
+    };
+  }
+  if (request.toolName === "http_request") {
+    return {
+      kind: "http_response",
+      method: stringOrUndefined(result.method),
+      url: stringOrUndefined(result.url),
+      statusCode: numberOrUndefined(result.statusCode),
+      statusText: stringOrUndefined(result.statusText),
+      durationMs: numberOrUndefined(result.durationMs),
+      bodyPreview: compactSafeText(stringOrUndefined(result.body), 900),
+      truncated: result.truncated === true || record.truncated === true,
     };
   }
   if (record.result !== undefined && isMcpToolName(request.toolName)) {
@@ -253,6 +273,15 @@ function projectToolDisplay(request: ToolCallRequest, output: unknown): ToolDisp
       pid: numberOrUndefined(result.pid),
       logPath: stringOrUndefined(result.logPath),
       stopCommand: stringOrUndefined(result.stopCommand),
+      durationMs: numberOrUndefined(result.durationMs),
+      waitForPort: numberOrUndefined(result.waitForPort),
+      portReady: result.portReady === true ? true : result.portReady === false ? false : undefined,
+      stdoutTruncated: result.stdoutTruncated === true ? true : result.stdoutTruncated === false ? false : undefined,
+      stderrTruncated: result.stderrTruncated === true ? true : result.stderrTruncated === false ? false : undefined,
+      stdoutChars: numberOrUndefined(result.stdoutChars),
+      stderrChars: numberOrUndefined(result.stderrChars),
+      stdoutOmittedChars: numberOrUndefined(result.stdoutOmittedChars),
+      stderrOmittedChars: numberOrUndefined(result.stderrOmittedChars),
       outputSummary: stdout === undefined ? undefined : summarizeCommandOutput(stdout),
       errorSummary: stderr === undefined ? undefined : summarizeCommandOutput(stderr),
     };
@@ -264,7 +293,13 @@ function projectToolDisplay(request: ToolCallRequest, output: unknown): ToolDisp
       summary,
       items: result.entries.slice(0, 12).map((entry) => {
         const item = asRecord(entry);
-        return [stringOrUndefined(item.kind), stringOrUndefined(item.name)].filter(isString).join(" ");
+        const path = stringOrUndefined(item.path) ?? stringOrUndefined(item.name);
+        const depth = numberOrUndefined(item.depth);
+        return [
+          stringOrUndefined(item.kind),
+          path,
+          depth === undefined ? undefined : `depth=${depth}`,
+        ].filter(isString).join(" ");
       }).filter((item) => item.length > 0),
     };
   }
@@ -320,8 +355,15 @@ function projectToolAgentContent(request: ToolCallRequest, output: unknown, trun
     return {
       summary,
       path: stringOrUndefined(result.path),
+      depth: numberOrUndefined(result.depth),
+      maxDepth: numberOrUndefined(result.maxDepth),
       entries: Array.isArray(result.entries) ? result.entries.slice(0, 200).map(projectDirectoryEntry) : undefined,
+      entriesReturned: numberOrUndefined(result.entriesReturned),
       totalEntries: numberOrUndefined(result.totalEntries),
+      unreadableDirectories: numberOrUndefined(result.unreadableDirectories),
+      unreadableSamples: Array.isArray(result.unreadableSamples)
+        ? result.unreadableSamples.slice(0, 8).map(projectUnreadableDirectorySample)
+        : undefined,
       truncated,
     };
   }
@@ -330,11 +372,32 @@ function projectToolAgentContent(request: ToolCallRequest, output: unknown, trun
       summary,
       query: stringOrUndefined(result.query),
       path: stringOrUndefined(result.path),
+      engine: stringOrUndefined(result.engine),
       matches: Array.isArray(result.matches) ? result.matches.slice(0, 80).map(projectGrepMatch) : undefined,
+      searchedFiles: numberOrUndefined(result.searchedFiles),
+      skippedFactsAvailable: result.skippedFactsAvailable === true ? true : result.skippedFactsAvailable === false ? false : undefined,
+      skippedFactsComplete: result.skippedFactsComplete === true ? true : result.skippedFactsComplete === false ? false : undefined,
+      skippedFiles: numberOrUndefined(result.skippedFiles),
+      skippedBinaryFiles: numberOrUndefined(result.skippedBinaryFiles),
+      skippedTooLargeFiles: numberOrUndefined(result.skippedTooLargeFiles),
+      skippedUnreadableFiles: numberOrUndefined(result.skippedUnreadableFiles),
+      skippedDirectories: numberOrUndefined(result.skippedDirectories),
+      skippedOtherEntries: numberOrUndefined(result.skippedOtherEntries),
+      skippedSamples: Array.isArray(result.skippedSamples)
+        ? result.skippedSamples.slice(0, 8).map(projectGrepSkippedSample)
+        : undefined,
       truncated,
     };
   }
   if (request.toolName === "read") {
+    if (Array.isArray(output)) {
+      const results = output.map((item, index) => projectBatchReadAgentItem(item, request, index));
+      return {
+        summary: `read batch completed with ${results.length} item${results.length === 1 ? "" : "s"}.`,
+        results,
+        truncated: truncated || results.some((item) => item.truncated === true),
+      };
+    }
     const contentPreview = typeof result.contentPreview === "string"
       ? modelVisibleTextFragment({
           value: result.contentPreview,
@@ -393,6 +456,15 @@ function projectToolAgentContent(request: ToolCallRequest, output: unknown, trun
       pid: numberOrUndefined(result.pid),
       logPath: stringOrUndefined(result.logPath),
       stopCommand: stringOrUndefined(result.stopCommand),
+      durationMs: numberOrUndefined(result.durationMs),
+      waitForPort: numberOrUndefined(result.waitForPort),
+      portReady: result.portReady === true ? true : result.portReady === false ? false : undefined,
+      stdoutTruncated: result.stdoutTruncated === true ? true : result.stdoutTruncated === false ? false : undefined,
+      stderrTruncated: result.stderrTruncated === true ? true : result.stderrTruncated === false ? false : undefined,
+      stdoutChars: numberOrUndefined(result.stdoutChars),
+      stderrChars: numberOrUndefined(result.stderrChars),
+      stdoutOmittedChars: numberOrUndefined(result.stdoutOmittedChars),
+      stderrOmittedChars: numberOrUndefined(result.stderrOmittedChars),
       truncated: truncated || stdout?.truncated === true || stderr?.truncated === true,
       stdout: stdout?.text,
       stderr: stderr?.text,
@@ -416,6 +488,28 @@ function projectToolAgentContent(request: ToolCallRequest, output: unknown, trun
       truncated: truncated || text?.truncated === true,
       text: text?.text,
       rawTextRef: text?.rawRef,
+    };
+  }
+  if (request.toolName === "http_request") {
+    const body = typeof result.body === "string"
+      ? modelVisibleTextFragment({
+          value: result.body,
+          maxLength: MODEL_TOOL_TEXT_MAX_CHARS,
+          request,
+          field: "body",
+        })
+      : undefined;
+    return {
+      summary,
+      url: stringOrUndefined(result.url),
+      method: stringOrUndefined(result.method),
+      statusCode: numberOrUndefined(result.statusCode),
+      statusText: stringOrUndefined(result.statusText),
+      headers: asRecord(result.headers),
+      durationMs: numberOrUndefined(result.durationMs),
+      truncated: result.truncated === true || truncated || body?.truncated === true,
+      body: body?.text,
+      rawBodyRef: body?.rawRef,
     };
   }
   if (record.result !== undefined && isMcpToolName(request.toolName)) {
@@ -445,12 +539,80 @@ function projectToolAgentContent(request: ToolCallRequest, output: unknown, trun
   };
 }
 
-function projectDirectoryEntry(value: unknown): { readonly name?: string; readonly kind?: string; readonly bytes?: number } {
+function batchReadDisplayItem(value: unknown): string | undefined {
+  const item = asRecord(value);
+  const ref = stringOrUndefined(item.ref);
+  const status = stringOrUndefined(item.status);
+  const title = stringOrUndefined(item.title);
+  const error = stringOrUndefined(item.error);
+  const headline = title ?? ref;
+  if (headline === undefined && status === undefined) {
+    return undefined;
+  }
+  return [status, headline, error].filter(isString).join(" · ");
+}
+
+function projectBatchReadAgentItem(
+  value: unknown,
+  request: ToolCallRequest,
+  index: number
+): {
+  readonly ref?: string;
+  readonly status?: string;
+  readonly refId?: string;
+  readonly source?: string;
+  readonly title?: string;
+  readonly url?: string;
+  readonly uri?: string;
+  readonly summary?: string;
+  readonly contentPreview?: string;
+  readonly truncated: boolean;
+  readonly rawContentPreviewRef?: string;
+  readonly sourceSearchRef?: string;
+  readonly error?: string;
+  readonly metadata?: Readonly<Record<string, unknown>>;
+} {
+  const item = asRecord(value);
+  const contentPreview = typeof item.contentPreview === "string"
+    ? modelVisibleTextFragment({
+        value: item.contentPreview,
+        maxLength: MODEL_TOOL_TEXT_MAX_CHARS,
+        request,
+        field: `contentPreview:${index}`,
+      })
+    : undefined;
+  return {
+    ref: stringOrUndefined(item.ref),
+    status: stringOrUndefined(item.status),
+    refId: stringOrUndefined(item.refId),
+    source: stringOrUndefined(item.source),
+    title: stringOrUndefined(item.title),
+    url: stringOrUndefined(item.uri),
+    uri: stringOrUndefined(item.uri),
+    summary: stringOrUndefined(item.summary),
+    contentPreview: contentPreview?.text,
+    truncated: item.truncated === true || contentPreview?.truncated === true,
+    rawContentPreviewRef: contentPreview?.rawRef,
+    sourceSearchRef: stringOrUndefined(item.sourceSearchRef),
+    error: stringOrUndefined(item.error),
+    metadata: asRecord(item.metadata),
+  };
+}
+
+function projectDirectoryEntry(value: unknown): {
+  readonly path?: string;
+  readonly name?: string;
+  readonly kind?: string;
+  readonly bytes?: number;
+  readonly depth?: number;
+} {
   const record = asRecord(value);
   return {
+    path: stringOrUndefined(record.path),
     name: stringOrUndefined(record.name),
     kind: stringOrUndefined(record.kind),
     bytes: numberOrUndefined(record.bytes),
+    depth: numberOrUndefined(record.depth),
   };
 }
 
@@ -463,6 +625,32 @@ function projectGrepMatch(value: unknown): { readonly path?: string; readonly li
     path: stringOrUndefined(record.path),
     line: numberOrUndefined(record.line),
     preview: preview?.text,
+  };
+}
+
+function projectUnreadableDirectorySample(value: unknown): {
+  readonly path?: string;
+  readonly errorCode?: string;
+} {
+  const record = asRecord(value);
+  return {
+    path: stringOrUndefined(record.path),
+    errorCode: stringOrUndefined(record.errorCode),
+  };
+}
+
+function projectGrepSkippedSample(value: unknown): {
+  readonly path?: string;
+  readonly reason?: string;
+  readonly bytes?: number;
+  readonly errorCode?: string;
+} {
+  const record = asRecord(value);
+  return {
+    path: stringOrUndefined(record.path),
+    reason: stringOrUndefined(record.reason),
+    bytes: numberOrUndefined(record.bytes),
+    errorCode: stringOrUndefined(record.errorCode),
   };
 }
 

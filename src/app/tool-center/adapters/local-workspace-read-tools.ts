@@ -26,12 +26,49 @@ import {
 
 const DEFAULT_MAX_CHARS = 128_000;
 const MAX_LIST_ENTRIES = 200;
+const DEFAULT_LIST_DEPTH = 1;
+const MAX_LIST_DEPTH = 3;
 const MAX_GREP_MATCHES = 80;
+const MAX_SKIPPED_SAMPLES = 8;
 const MAX_READ_LINE_COUNT = 2_000;
 const DEFAULT_READ_LINE_COUNT = 200;
 const RIPGREP_TIMEOUT_MS = 10_000;
 
 type GrepMatch = { readonly path: string; readonly line: number; readonly preview: string };
+type ListDirEntry = {
+  readonly path: string;
+  readonly name: string;
+  readonly kind: "directory" | "file" | "symlink" | "other";
+  readonly bytes?: number;
+  readonly depth: number;
+};
+
+type GrepSkippedReason =
+  | "binary"
+  | "too_large"
+  | "unreadable"
+  | "skipped_directory"
+  | "skipped_entry"
+  | "not_file";
+
+type GrepSkippedSample = {
+  readonly path: string;
+  readonly reason: GrepSkippedReason;
+  readonly bytes?: number;
+  readonly errorCode?: string;
+};
+
+type GrepFacts = {
+  searchedFiles: number;
+  skippedFiles: number;
+  skippedBinaryFiles: number;
+  skippedTooLargeFiles: number;
+  skippedUnreadableFiles: number;
+  skippedDirectories: number;
+  skippedOtherEntries: number;
+  skippedSamples: GrepSkippedSample[];
+  skippedFactsComplete: boolean;
+};
 
 export type LocalWorkspaceReadToolOptions = LocalWorkspaceToolOptions & {
   readonly ripgrepSearch?: RipgrepSearchRunner | false;
@@ -165,19 +202,20 @@ export function createLocalListDirTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE_R
   return {
     definition: {
       name: "list_dir",
-      description: "List files and folders under a local workspace directory. Returns names, kinds, and sizes.",
+      description: "List files and folders under a local workspace directory. Returns factual path, name, kind, size, and depth metadata.",
       modelContract: {
         usageNotes: [
-          "List a workspace directory and return entry names, kinds, sizes, and total count.",
+          "List a workspace directory and return entry paths, names, kinds, byte sizes, depths, and counts.",
           "Use to discover project structure before reading or editing files.",
           "Use when the exact file path is unknown.",
           "Do not use for text search inside files; use grep_files for that.",
           "path is optional and defaults to the workspace root.",
+          "depth defaults to 1 and cannot exceed 3.",
           "limit optionally caps returned entries and cannot exceed the tool maximum.",
         ],
         outputNotes: [
-          "result.entries contains directory entries with name, kind, and optional byte size.",
-          "result.totalEntries is the full entry count for the directory.",
+          "result.entries contains directory entries with path, name, kind, bytes, and depth.",
+          "result.totalEntries is the full enumerated entry count when traversal completes.",
           "truncated tells whether not all entries were returned.",
         ],
         runtimeHints: [
@@ -204,6 +242,7 @@ export function createLocalListDirTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE_R
         type: "object",
         properties: {
           path: { type: "string", description: "Workspace-relative directory path. Defaults to workspace root." },
+          depth: { type: "number", description: "Recursive listing depth. Defaults to 1 and is capped at 3." },
           limit: { type: "number", description: "Maximum entries to return." },
         },
       },
@@ -217,29 +256,32 @@ export function createLocalListDirTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE_R
       if (!targetStat.isDirectory()) {
         throw new Error(`list_dir expects a directory path: ${target.relativePath}`);
       }
-      const entries = await fs.readdir(target.absolutePath, { withFileTypes: true });
+      const requestedDepth = positiveInteger(record.depth) ?? DEFAULT_LIST_DEPTH;
+      const depth = Math.min(MAX_LIST_DEPTH, requestedDepth);
       const limit = Math.min(MAX_LIST_ENTRIES, positiveInteger(record.limit) ?? MAX_LIST_ENTRIES);
-      const listed = await Promise.all(entries.slice(0, limit).map(async (entry) => {
-        const absolutePath = path.join(target.absolutePath, entry.name);
-        const stat = await fs.stat(absolutePath).catch(() => undefined);
-        return {
-          name: entry.name,
-          kind: entry.isDirectory() ? "directory" : entry.isFile() ? "file" : "other",
-          bytes: stat?.isFile() === true ? stat.size : undefined,
-        };
-      }));
-      const truncated = entries.length > listed.length;
+      const listed = await listDirectoryTree({
+        absolutePath: target.absolutePath,
+        rootDirectory,
+        maxDepth: depth,
+        limit,
+      });
       return {
         action: "list_dir",
         status: "completed",
         refId: `workspace:dir:${target.relativePath}`,
-        summary: `${target.relativePath} · ${entries.length} entries${truncated ? " · truncated" : ""}`,
+        summary: `${target.relativePath} · ${listed.entries.length}${listed.truncated ? ` of ${listed.totalEntries}` : ""} entries · depth ${depth}${listed.truncated ? " · truncated" : ""}`,
         result: {
           path: target.relativePath,
-          entries: listed,
-          totalEntries: entries.length,
+          depth,
+          maxDepth: MAX_LIST_DEPTH,
+          maxEntries: MAX_LIST_ENTRIES,
+          entries: listed.entries,
+          entriesReturned: listed.entries.length,
+          totalEntries: listed.totalEntries,
+          unreadableDirectories: listed.unreadableDirectories,
+          unreadableSamples: listed.unreadableSamples,
         },
-        truncated,
+        truncated: listed.truncated,
       };
     },
   };
@@ -265,6 +307,8 @@ export function createLocalGrepFilesTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE
         ],
         outputNotes: [
           "result.matches[] includes path, 1-based line, and preview.",
+          "result.engine records whether ripgrep or the JS fallback produced the result.",
+          "The JS fallback reports factual skipped file counts and samples. The ripgrep path leaves skipped facts unavailable rather than inventing them.",
           "truncated tells whether the match limit was reached.",
         ],
         runtimeHints: [
@@ -313,9 +357,12 @@ export function createLocalGrepFilesTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE
         limit,
       }).catch(() => undefined);
       const matches: GrepMatch[] = [];
+      let grepFacts: GrepFacts | undefined;
       const engine = ripgrepMatches === undefined ? "js" : "rg";
       if (ripgrepMatches === undefined) {
-        await grepPath(target.absolutePath, rootDirectory, query.toLowerCase(), limit, matches);
+        grepFacts = createGrepFacts();
+        await grepPath(target.absolutePath, rootDirectory, query.toLowerCase(), limit, matches, grepFacts);
+        grepFacts.skippedFactsComplete = matches.length < limit;
       } else {
         matches.push(...ripgrepMatches.slice(0, limit));
       }
@@ -330,6 +377,16 @@ export function createLocalGrepFilesTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE
           path: target.relativePath,
           engine,
           matches,
+          searchedFiles: grepFacts?.searchedFiles,
+          skippedFactsAvailable: grepFacts !== undefined,
+          skippedFactsComplete: grepFacts?.skippedFactsComplete,
+          skippedFiles: grepFacts?.skippedFiles,
+          skippedBinaryFiles: grepFacts?.skippedBinaryFiles,
+          skippedTooLargeFiles: grepFacts?.skippedTooLargeFiles,
+          skippedUnreadableFiles: grepFacts?.skippedUnreadableFiles,
+          skippedDirectories: grepFacts?.skippedDirectories,
+          skippedOtherEntries: grepFacts?.skippedOtherEntries,
+          skippedSamples: grepFacts?.skippedSamples,
         },
         truncated,
       };
@@ -337,37 +394,165 @@ export function createLocalGrepFilesTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE
   };
 }
 
+async function listDirectoryTree(input: {
+  readonly absolutePath: string;
+  readonly rootDirectory: string;
+  readonly maxDepth: number;
+  readonly limit: number;
+}): Promise<{
+  readonly entries: readonly ListDirEntry[];
+  readonly totalEntries: number;
+  readonly unreadableDirectories: number;
+  readonly unreadableSamples: readonly { readonly path: string; readonly errorCode?: string }[];
+  readonly truncated: boolean;
+}> {
+  const entries: ListDirEntry[] = [];
+  const unreadableSamples: { path: string; errorCode?: string }[] = [];
+  let totalEntries = 0;
+  let unreadableDirectories = 0;
+
+  async function visit(directory: string, currentDepth: number): Promise<void> {
+    if (currentDepth >= input.maxDepth) {
+      return;
+    }
+    const children = await fs.readdir(directory, { withFileTypes: true }).catch((error: unknown) => {
+      unreadableDirectories += 1;
+      pushUnreadableDirectorySample(input.rootDirectory, directory, error, unreadableSamples);
+      return undefined;
+    });
+    if (children === undefined) {
+      return;
+    }
+
+    children.sort((left, right) => left.name.localeCompare(right.name));
+    for (const child of children) {
+      const absoluteChild = path.join(directory, child.name);
+      const stat = await fs.stat(absoluteChild).catch(() => undefined);
+      const entryDepth = currentDepth + 1;
+      totalEntries += 1;
+      if (entries.length < input.limit) {
+        entries.push({
+          path: toWorkspaceRelative(input.rootDirectory, absoluteChild),
+          name: child.name,
+          kind: directoryEntryKind(child),
+          bytes: stat?.size,
+          depth: entryDepth,
+        });
+      }
+      if (child.isDirectory()) {
+        await visit(absoluteChild, entryDepth);
+      }
+    }
+  }
+
+  await visit(input.absolutePath, 0);
+  return {
+    entries,
+    totalEntries,
+    unreadableDirectories,
+    unreadableSamples,
+    truncated: totalEntries > entries.length,
+  };
+}
+
+function directoryEntryKind(entry: import("node:fs").Dirent): ListDirEntry["kind"] {
+  if (entry.isDirectory()) return "directory";
+  if (entry.isFile()) return "file";
+  if (entry.isSymbolicLink()) return "symlink";
+  return "other";
+}
+
+function pushUnreadableDirectorySample(
+  rootDirectory: string,
+  absolutePath: string,
+  error: unknown,
+  samples: { path: string; errorCode?: string }[]
+): void {
+  if (samples.length >= MAX_SKIPPED_SAMPLES) {
+    return;
+  }
+  samples.push({
+    path: toWorkspaceRelative(rootDirectory, absolutePath),
+    errorCode: nodeErrorCode(error),
+  });
+}
+
 async function grepPath(
   absolutePath: string,
   rootDirectory: string,
   normalizedQuery: string,
   limit: number,
-  matches: GrepMatch[]
+  matches: GrepMatch[],
+  facts: GrepFacts,
+  isRoot = true
 ): Promise<void> {
   if (matches.length >= limit) {
     return;
   }
-  const stat = await fs.stat(absolutePath);
+  const stat = await fs.stat(absolutePath).catch((error: unknown) => {
+    if (isRoot) {
+      throw error;
+    }
+    recordSkippedFile(facts, rootDirectory, absolutePath, "unreadable", undefined, error);
+    return undefined;
+  });
+  if (stat === undefined) {
+    return;
+  }
   if (stat.isDirectory()) {
-    const entries = await fs.readdir(absolutePath, { withFileTypes: true });
+    const entries = await fs.readdir(absolutePath, { withFileTypes: true }).catch((error: unknown) => {
+      if (isRoot) {
+        throw error;
+      }
+      recordSkippedDirectory(facts, rootDirectory, absolutePath, "unreadable", error);
+      return undefined;
+    });
+    if (entries === undefined) {
+      return;
+    }
     for (const entry of entries) {
       if (matches.length >= limit) {
         return;
       }
+      const childPath = path.join(absolutePath, entry.name);
       if (shouldSkipEntry(entry.name)) {
+        if (entry.isDirectory()) {
+          recordSkippedDirectory(facts, rootDirectory, childPath, "skipped_directory");
+        } else if (entry.isFile()) {
+          recordSkippedFile(facts, rootDirectory, childPath, "skipped_entry");
+        } else {
+          recordSkippedOtherEntry(facts, rootDirectory, childPath, "skipped_entry");
+        }
         continue;
       }
-      await grepPath(path.join(absolutePath, entry.name), rootDirectory, normalizedQuery, limit, matches).catch(() => undefined);
+      await grepPath(childPath, rootDirectory, normalizedQuery, limit, matches, facts, false);
     }
     return;
   }
-  if (!stat.isFile() || stat.size > MAX_LOCAL_WORKSPACE_FILE_BYTES || isLikelyBinaryPath(absolutePath)) {
+  if (!stat.isFile()) {
+    recordSkippedOtherEntry(facts, rootDirectory, absolutePath, "not_file", stat.size);
     return;
   }
-  const raw = await fs.readFile(absolutePath, "utf8").catch(() => undefined);
-  if (raw === undefined || raw.includes("\u0000")) {
+  if (stat.size > MAX_LOCAL_WORKSPACE_FILE_BYTES) {
+    recordSkippedFile(facts, rootDirectory, absolutePath, "too_large", stat.size);
     return;
   }
+  if (isLikelyBinaryPath(absolutePath)) {
+    recordSkippedFile(facts, rootDirectory, absolutePath, "binary", stat.size);
+    return;
+  }
+  const raw = await fs.readFile(absolutePath, "utf8").catch((error: unknown) => {
+    recordSkippedFile(facts, rootDirectory, absolutePath, "unreadable", stat.size, error);
+    return undefined;
+  });
+  if (raw === undefined) {
+    return;
+  }
+  if (raw.includes("\u0000")) {
+    recordSkippedFile(facts, rootDirectory, absolutePath, "binary", stat.size);
+    return;
+  }
+  facts.searchedFiles += 1;
   const lines = raw.split(/\r?\n/);
   for (let index = 0; index < lines.length && matches.length < limit; index += 1) {
     const line = lines[index] ?? "";
@@ -379,6 +564,83 @@ async function grepPath(
       });
     }
   }
+}
+
+function createGrepFacts(): GrepFacts {
+  return {
+    searchedFiles: 0,
+    skippedFiles: 0,
+    skippedBinaryFiles: 0,
+    skippedTooLargeFiles: 0,
+    skippedUnreadableFiles: 0,
+    skippedDirectories: 0,
+    skippedOtherEntries: 0,
+    skippedSamples: [],
+    skippedFactsComplete: true,
+  };
+}
+
+function recordSkippedFile(
+  facts: GrepFacts,
+  rootDirectory: string,
+  absolutePath: string,
+  reason: GrepSkippedReason,
+  bytes?: number,
+  error?: unknown
+): void {
+  facts.skippedFiles += 1;
+  if (reason === "binary") facts.skippedBinaryFiles += 1;
+  if (reason === "too_large") facts.skippedTooLargeFiles += 1;
+  if (reason === "unreadable") facts.skippedUnreadableFiles += 1;
+  pushSkippedSample(facts, rootDirectory, absolutePath, reason, bytes, error);
+}
+
+function recordSkippedDirectory(
+  facts: GrepFacts,
+  rootDirectory: string,
+  absolutePath: string,
+  reason: GrepSkippedReason,
+  error?: unknown
+): void {
+  facts.skippedDirectories += 1;
+  pushSkippedSample(facts, rootDirectory, absolutePath, reason, undefined, error);
+}
+
+function recordSkippedOtherEntry(
+  facts: GrepFacts,
+  rootDirectory: string,
+  absolutePath: string,
+  reason: GrepSkippedReason,
+  bytes?: number,
+  error?: unknown
+): void {
+  facts.skippedOtherEntries += 1;
+  pushSkippedSample(facts, rootDirectory, absolutePath, reason, bytes, error);
+}
+
+function pushSkippedSample(
+  facts: GrepFacts,
+  rootDirectory: string,
+  absolutePath: string,
+  reason: GrepSkippedReason,
+  bytes?: number,
+  error?: unknown
+): void {
+  if (facts.skippedSamples.length >= MAX_SKIPPED_SAMPLES) {
+    return;
+  }
+  facts.skippedSamples.push({
+    path: toWorkspaceRelative(rootDirectory, absolutePath),
+    reason,
+    bytes,
+    errorCode: nodeErrorCode(error),
+  });
+}
+
+function nodeErrorCode(error: unknown): string | undefined {
+  return error instanceof Error && "code" in error
+    ? String((error as NodeJS.ErrnoException).code)
+    : undefined;
 }
 
 function parseLineRange(record: Readonly<Record<string, unknown>>): { readonly startLine: number; readonly endLine: number } | undefined {

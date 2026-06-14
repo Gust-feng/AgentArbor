@@ -203,6 +203,88 @@ test("runtime record mapper preserves failed run capability resolution", () => {
   assert.equal(run.capabilityResolution?.snapshotId, "snapshot-test");
 });
 
+test("runtime record mapper classifies failed run error domains from existing facts", () => {
+  const toolFailedRun = createRuntimeRunRecord({
+    job: job({
+      status: "failed",
+      streamEvents: [
+        streamEvent({
+          sequence: 1,
+          type: "tool.failed",
+          toolName: "read_file",
+          toolCallRefs: ["tool-read-missing"],
+          detail: {
+            kind: "tool",
+            action: "读取文件",
+            error: "ENOENT: no such file or directory, open missing.md",
+          },
+        }),
+      ],
+      failed: {
+        config: modelConfig(),
+        informationAccess: informationAccess(),
+        error: {
+          code: "desktop_agent_failed",
+          message: "ENOENT: no such file or directory, open missing.md",
+        },
+      },
+    }),
+    workspace: undefined,
+    appHome: "C:\\AgentArbor\\app",
+    runtimeHome: "C:\\AgentArbor\\runtime",
+  });
+  const modelFailedRun = createRuntimeRunRecord({
+    job: job({
+      status: "failed",
+      failed: {
+        config: modelConfig(),
+        informationAccess: informationAccess(),
+        error: {
+          code: "desktop_agent_failed",
+          message: "模型服务连接失败。",
+        },
+      },
+    }),
+    workspace: undefined,
+    appHome: "C:\\AgentArbor\\app",
+    runtimeHome: "C:\\AgentArbor\\runtime",
+  });
+  const processFailedRun = createRuntimeRunRecord({
+    job: job({
+      status: "failed",
+      streamEvents: [
+        streamEvent({
+          sequence: 1,
+          type: "tool.failed",
+          toolName: "shell_command",
+          toolCallRefs: ["tool-shell-missing"],
+          detail: {
+            kind: "tool",
+            action: "执行 Shell",
+            error: "spawn pnpm ENOENT",
+          },
+        }),
+      ],
+      failed: {
+        config: modelConfig(),
+        informationAccess: informationAccess(),
+        error: {
+          code: "desktop_agent_failed",
+          message: "spawn pnpm ENOENT",
+        },
+      },
+    }),
+    workspace: undefined,
+    appHome: "C:\\AgentArbor\\app",
+    runtimeHome: "C:\\AgentArbor\\runtime",
+  });
+
+  assert.equal(toolFailedRun.error?.errorDomain, "tool_error");
+  assert.equal(toolFailedRun.error?.message, "ENOENT: no such file or directory, open missing.md");
+  assert.equal(modelFailedRun.error?.errorDomain, "model_error");
+  assert.equal(processFailedRun.error?.errorDomain, "process_error");
+});
+
 test("runtime record mapper persists safe run agent definition ref independently from capability resolution", () => {
   const run = createRuntimeRunRecord({
     job: job({
@@ -506,6 +588,73 @@ test("runtime record mapper persists ordinary tool previews without diagnostic c
   assert.equal(serialized.includes("RAW_STDOUT_SENTINEL"), false);
   assert.equal(serialized.includes("RAW_OLD_TEXT_SENTINEL"), false);
   assert.equal(serialized.includes("RAW_NEW_TEXT_SENTINEL"), false);
+});
+
+test("runtime tool call records preserve tool and process error domains", () => {
+  const toolCalls = toRuntimeToolCallRecords("run-1", [
+    streamEvent({
+      sequence: 1,
+      type: "tool.failed",
+      toolName: "read_file",
+      toolCallRefs: ["tool-read-missing"],
+      detail: {
+        kind: "tool",
+        action: "读取文件",
+        error: "ENOENT: no such file or directory, open missing.md",
+      },
+    }),
+    streamEvent({
+      sequence: 2,
+      type: "tool.failed",
+      toolName: "shell_command",
+      toolCallRefs: ["tool-shell-missing"],
+      detail: {
+        kind: "tool",
+        action: "执行 Shell",
+        error: "spawn pnpm ENOENT",
+      },
+    }),
+  ], [
+    eventEntry({
+      sequence: 1,
+      type: "tool.failed",
+      payload: {
+        callId: "tool-read-missing",
+        toolName: "read_file",
+        input: { path: "missing.md" },
+        error: "ENOENT: no such file or directory, open missing.md",
+        output: {
+          envelope: {
+            agentSummary: "ENOENT: no such file or directory, open missing.md",
+            evidenceRefs: ["tool:tool-read-missing"],
+            rawRetention: "none",
+            redacted: false,
+            errorDomain: "tool_error",
+          },
+        },
+      },
+    }),
+    eventEntry({
+      sequence: 2,
+      type: "tool.failed",
+      payload: {
+        callId: "tool-shell-missing",
+        toolName: "shell_command",
+        input: { command: "pnpm", args: ["missing"] },
+        error: "spawn pnpm ENOENT",
+        output: {
+          result: {
+            command: "pnpm",
+            args: ["missing"],
+          },
+        },
+      },
+    }),
+  ]);
+
+  assert.equal(toolCalls.find((call) => call.callId === "tool-read-missing")?.errorDomain, "tool_error");
+  assert.equal(toolCalls.find((call) => call.callId === "tool-read-missing")?.envelope?.errorDomain, "tool_error");
+  assert.equal(toolCalls.find((call) => call.callId === "tool-shell-missing")?.errorDomain, "process_error");
 });
 
 test("runtime text compaction preserves text before truncating", () => {

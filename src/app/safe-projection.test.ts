@@ -78,6 +78,52 @@ test("read tool projection exposes content preview to model continuation", () =>
   assert.equal(JSON.stringify(agentContent).includes("材料已读取"), false);
 });
 
+test("batch read projection exposes per-ref content and errors to model continuation", () => {
+  const projection = projectToolResult({
+    request: {
+      callId: "call-batch-read",
+      toolName: "read",
+      input: { ref: ["a.md", "missing.md"] },
+    },
+    output: [
+      {
+        ref: "a.md",
+        status: "completed",
+        refId: "read:a.md",
+        source: "codebase",
+        title: "a.md",
+        uri: "repo://a.md",
+        contentPreview: "Alpha body",
+        truncated: false,
+      },
+      {
+        ref: "missing.md",
+        status: "provider-failed",
+        truncated: false,
+        error: "codebase read could not read the requested text file.",
+      },
+    ],
+  });
+
+  const agentContent = projection.agentContent as {
+    readonly results?: readonly {
+      readonly ref?: string;
+      readonly status?: string;
+      readonly contentPreview?: string;
+      readonly error?: string;
+      readonly truncated?: boolean;
+    }[];
+  };
+
+  assert.equal(projection.display?.kind, "generic_tool_summary");
+  assert.equal(agentContent.results?.[0]?.contentPreview, "Alpha body");
+  assert.equal(agentContent.results?.[0]?.status, "completed");
+  assert.equal(agentContent.results?.[1]?.ref, "missing.md");
+  assert.equal(agentContent.results?.[1]?.status, "provider-failed");
+  assert.equal(agentContent.results?.[1]?.error, "codebase read could not read the requested text file.");
+  assert.equal(agentContent.results?.every((item) => typeof item.truncated === "boolean"), true);
+});
+
 test("command projection keeps commandLine as the single command fact for model continuation", () => {
   const projection = projectToolResult({
     request: {
@@ -237,6 +283,92 @@ test("command projection exposes timeout and background recovery metadata to mod
   assert.match(timeoutContent.stderr ?? "", /timed out/);
 });
 
+test("workspace list and grep projections keep factual traversal metadata", () => {
+  const listProjection = projectToolResult({
+    request: {
+      callId: "call-list",
+      toolName: "list_dir",
+      input: { path: ".", depth: 2 },
+    },
+    output: {
+      action: "list_dir",
+      summary: ". · 2 entries · depth 2",
+      result: {
+        path: ".",
+        depth: 2,
+        maxDepth: 3,
+        entriesReturned: 2,
+        totalEntries: 2,
+        unreadableDirectories: 0,
+        entries: [
+          { path: "src", name: "src", kind: "directory", depth: 1 },
+          { path: "src/index.ts", name: "index.ts", kind: "file", bytes: 12, depth: 2 },
+        ],
+      },
+    },
+  });
+  const listContent = listProjection.agentContent as {
+    readonly depth?: number;
+    readonly entriesReturned?: number;
+    readonly totalEntries?: number;
+    readonly entries?: readonly {
+      readonly path?: string;
+      readonly name?: string;
+      readonly depth?: number;
+    }[];
+  };
+
+  assert.equal(listContent.depth, 2);
+  assert.equal(listContent.entriesReturned, 2);
+  assert.equal(listContent.totalEntries, 2);
+  assert.equal(listContent.entries?.[1]?.path, "src/index.ts");
+  assert.equal(listContent.entries?.[1]?.depth, 2);
+
+  const grepProjection = projectToolResult({
+    request: {
+      callId: "call-grep",
+      toolName: "grep_files",
+      input: { path: ".", query: "needle" },
+    },
+    output: {
+      action: "grep_files",
+      summary: ". · 1 matches for needle",
+      result: {
+        query: "needle",
+        path: ".",
+        engine: "js",
+        matches: [{ path: "src/index.ts", line: 1, preview: "needle" }],
+        searchedFiles: 1,
+        skippedFactsAvailable: true,
+        skippedFactsComplete: true,
+        skippedFiles: 2,
+        skippedBinaryFiles: 1,
+        skippedTooLargeFiles: 1,
+        skippedUnreadableFiles: 0,
+        skippedDirectories: 1,
+        skippedOtherEntries: 0,
+        skippedSamples: [
+          { path: "dist", reason: "skipped_directory" },
+          { path: "logo.png", reason: "binary", bytes: 3 },
+        ],
+      },
+    },
+  });
+  const grepContent = grepProjection.agentContent as {
+    readonly engine?: string;
+    readonly searchedFiles?: number;
+    readonly skippedFactsAvailable?: boolean;
+    readonly skippedFiles?: number;
+    readonly skippedSamples?: readonly { readonly path?: string; readonly reason?: string }[];
+  };
+
+  assert.equal(grepContent.engine, "js");
+  assert.equal(grepContent.searchedFiles, 1);
+  assert.equal(grepContent.skippedFactsAvailable, true);
+  assert.equal(grepContent.skippedFiles, 2);
+  assert.deepEqual(grepContent.skippedSamples?.map((sample) => sample.reason), ["skipped_directory", "binary"]);
+});
+
 test("read_file projection keeps token-like file content in model-visible agent content", () => {
   const projection = projectToolResult({
     request: {
@@ -284,6 +416,12 @@ test("truncated command stdout and stderr keep real prefixes and raw refs", () =
         exitCode: 0,
         stdout: longStdout,
         stderr: longStderr,
+        stdoutTruncated: true,
+        stderrTruncated: true,
+        stdoutChars: longStdout.length,
+        stderrChars: longStderr.length,
+        stdoutOmittedChars: 2_000,
+        stderrOmittedChars: 1_000,
       },
     },
   });
@@ -292,11 +430,23 @@ test("truncated command stdout and stderr keep real prefixes and raw refs", () =
     readonly stdout?: string;
     readonly stderr?: string;
     readonly truncated?: boolean;
+    readonly stdoutTruncated?: boolean;
+    readonly stderrTruncated?: boolean;
+    readonly stdoutChars?: number;
+    readonly stderrChars?: number;
+    readonly stdoutOmittedChars?: number;
+    readonly stderrOmittedChars?: number;
     readonly rawStdoutRef?: string;
     readonly rawStderrRef?: string;
   };
 
   assert.equal(agentContent.truncated, true);
+  assert.equal(agentContent.stdoutTruncated, true);
+  assert.equal(agentContent.stderrTruncated, true);
+  assert.equal(agentContent.stdoutChars, longStdout.length);
+  assert.equal(agentContent.stderrChars, longStderr.length);
+  assert.equal(agentContent.stdoutOmittedChars, 2_000);
+  assert.equal(agentContent.stderrOmittedChars, 1_000);
   assert.equal(agentContent.stdout?.startsWith("stdout token=sk-"), true);
   assert.equal(agentContent.stderr?.startsWith("stderr Bearer sk-"), true);
   assert.equal(agentContent.stdout?.endsWith("[truncated to 128000 chars]"), true);

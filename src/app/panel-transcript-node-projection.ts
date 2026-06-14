@@ -26,6 +26,13 @@ export type TranscriptToolDisplayLike =
       readonly url?: string;
     }
   | {
+      readonly kind: "http_response";
+      readonly method?: string;
+      readonly url?: string;
+      readonly statusCode?: number;
+      readonly statusText?: string;
+    }
+  | {
       readonly kind: "file_change_summary";
       readonly path?: string;
     }
@@ -42,10 +49,20 @@ export type TranscriptToolDisplayLike =
       readonly shell?: string;
       readonly exitCode?: number;
       readonly timedOut?: boolean;
+      readonly cancelled?: boolean;
       readonly background?: boolean;
       readonly pid?: number;
       readonly logPath?: string;
       readonly stopCommand?: string;
+      readonly durationMs?: number;
+      readonly waitForPort?: number;
+      readonly portReady?: boolean;
+      readonly stdoutTruncated?: boolean;
+      readonly stderrTruncated?: boolean;
+      readonly stdoutChars?: number;
+      readonly stderrChars?: number;
+      readonly stdoutOmittedChars?: number;
+      readonly stderrOmittedChars?: number;
       readonly outputSummary?: string;
       readonly errorSummary?: string;
     }
@@ -261,6 +278,17 @@ function isBoringSuccessfulToolResult(node: ProjectableTranscriptNode): boolean 
   if (display === undefined) return lowValueCopy(node.summary);
   if (display.kind === "command_summary") {
     return display.exitCode === 0 &&
+      display.timedOut !== true &&
+      display.cancelled !== true &&
+      display.background !== true &&
+      display.pid === undefined &&
+      display.logPath === undefined &&
+      display.stopCommand === undefined &&
+      display.durationMs === undefined &&
+      display.waitForPort === undefined &&
+      display.portReady === undefined &&
+      display.stdoutTruncated !== true &&
+      display.stderrTruncated !== true &&
       display.outputSummary === undefined &&
       display.errorSummary === undefined;
   }

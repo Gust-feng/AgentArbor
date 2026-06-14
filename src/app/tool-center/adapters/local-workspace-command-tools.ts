@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { closeSync, existsSync, openSync, promises as fs } from "node:fs";
+import { createConnection } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import type { SanitizedCommandShellConfig } from "../../../domain/config/index.js";
@@ -11,7 +12,6 @@ import {
   resolveWorkspacePath,
   safeRefToken,
   throwIfAborted,
-  truncateText,
   type LocalWorkspaceToolOptions,
 } from "./local-workspace-common.js";
 import {
@@ -21,13 +21,18 @@ import {
 
 const MAX_COMMAND_TIMEOUT_MS = 120_000;
 const DEFAULT_COMMAND_TIMEOUT_MS = 30_000;
-const MAX_COMMAND_STDOUT_CHARS = 128_000;
-const MAX_COMMAND_STDERR_CHARS = 64_000;
+const MAX_COMMAND_STDOUT_CHARS = 64_000;
+const MAX_COMMAND_STDERR_CHARS = 32_000;
 const COMMAND_TIMEOUT_EXIT_CODE = 124;
 const COMMAND_CANCELLED_EXIT_CODE = 130;
+const COMMAND_TERMINATION_GRACE_MS = 5_000;
 const DEFAULT_BACKGROUND_WAIT_MS = 500;
 const MAX_BACKGROUND_WAIT_MS = 5_000;
 const BACKGROUND_LOG_PREVIEW_CHARS = 2_000;
+const DEFAULT_WAIT_FOR_PORT_TIMEOUT_MS = 10_000;
+const MAX_WAIT_FOR_PORT_TIMEOUT_MS = 60_000;
+const PORT_CONNECT_TIMEOUT_MS = 250;
+const PORT_POLL_INTERVAL_MS = 100;
 
 type CommandExecutionResult = {
   readonly stdout: string;
@@ -35,12 +40,28 @@ type CommandExecutionResult = {
   readonly exitCode: number;
   readonly cwd: string;
   readonly timedOut?: boolean;
+  readonly cancelled?: boolean;
   readonly signal?: string;
   readonly background?: boolean;
   readonly pid?: number;
   readonly logPath?: string;
   readonly stopCommand?: string;
+  readonly durationMs?: number;
+  readonly waitForPort?: number;
+  readonly portReady?: boolean;
+  readonly portWaitCancelled?: boolean;
   readonly truncated?: boolean;
+  readonly stdoutChars?: number;
+  readonly stderrChars?: number;
+  readonly stdoutOmittedChars?: number;
+  readonly stderrOmittedChars?: number;
+};
+
+type TextPreview = {
+  readonly text: string;
+  readonly chars: number;
+  readonly omittedChars: number;
+  readonly truncated: boolean;
 };
 
 export function createDefaultCommandShellConfig(
@@ -120,6 +141,11 @@ export function createLocalShellCommandTool(
       const normalized = normalizeShellCommandInput(record, commandShell.syntax);
       const timeoutMs = Math.min(MAX_COMMAND_TIMEOUT_MS, positiveInteger(record.timeoutMs) ?? DEFAULT_COMMAND_TIMEOUT_MS);
       const backgroundWaitMs = Math.min(MAX_BACKGROUND_WAIT_MS, positiveInteger(record.backgroundWaitMs) ?? DEFAULT_BACKGROUND_WAIT_MS);
+      const waitForPort = optionalPort(record.waitForPort);
+      const waitForPortTimeoutMs = Math.min(
+        MAX_WAIT_FOR_PORT_TIMEOUT_MS,
+        positiveInteger(record.waitForPortTimeoutMs) ?? DEFAULT_WAIT_FOR_PORT_TIMEOUT_MS
+      );
       const background = record.background === true;
       const cwd = await resolveCommandCwd(rootDirectory, record.cwd);
       assertSandboxAllowed(sandboxPolicy, {
@@ -137,13 +163,21 @@ export function createLocalShellCommandTool(
           rootDirectory,
           platform: commandShell.platform,
         });
-      const result = background
+      const startedAt = Date.now();
+      const rawResult = background
         ? normalized.legacyProgram === undefined || !executeDirectly
           ? await runBackgroundShellCommand(commandShell, normalized.commandLine, cwd.absolutePath, cwd.relativePath, backgroundWaitMs)
           : await runBackgroundProgramCommand(commandShell, normalized.legacyProgram, normalized.legacyArgs, normalized.commandLine, cwd.absolutePath, cwd.relativePath, backgroundWaitMs)
         : normalized.legacyProgram === undefined || !executeDirectly
           ? await runShellCommand(commandShell, normalized.commandLine, cwd.absolutePath, cwd.relativePath, timeoutMs, context.abortSignal)
           : await runProgramCommand(normalized.legacyProgram, normalized.legacyArgs, cwd.absolutePath, cwd.relativePath, timeoutMs, context.abortSignal);
+      const result = await enrichCommandResult({
+        result: rawResult,
+        waitForPort,
+        waitForPortTimeoutMs,
+        startedAt,
+        abortSignal: context.abortSignal,
+      });
       return commandToolOutput({
         action: "shell_command",
         command: normalized.command,
@@ -183,6 +217,7 @@ export function createLocalRunCommandTool(
           "Use the same inputs as shell_command: commandLine for shell execution, or command plus args for direct argv execution.",
           "timeoutMs optionally caps execution time.",
           "background=true starts the command as a detached background process and returns pid, logPath, and stopCommand.",
+          "waitForPort optionally waits for a localhost TCP port to become reachable after starting a background command.",
           "cwd optionally selects a workspace-relative working directory for this command.",
         ],
         runtimeHints: [
@@ -194,7 +229,8 @@ export function createLocalRunCommandTool(
           "If command and args are provided, the runtime executes the program directly with argv instead of shell parsing.",
         ],
         outputNotes: [
-          "Returns result.commandLine, result.shell, result.exitCode, result.stdout, result.stderr, and timeout/background metadata when relevant.",
+          "When stdout/stderr are under the preview caps, result.stdout and result.stderr contain the exact command text.",
+          "Returns result.commandLine, result.shell, result.exitCode, result.stdout/result.stderr previews, truncation facts, and timeout/background metadata when relevant.",
         ],
         examples: [
           { title: "Compatibility command", input: { commandLine: commandShell.syntax === "cmd" ? "dir" : "pwd" } },
@@ -260,6 +296,7 @@ function shellCommandDefinition(commandShell: SanitizedCommandShellConfig): Tool
         "cwd optionally selects a workspace-relative working directory; omit it to run from the workspace root.",
         "background=true starts a detached process and returns immediately with pid, logPath, and stopCommand.",
         `backgroundWaitMs watches a background command for early exit and initial logs; defaults to ${DEFAULT_BACKGROUND_WAIT_MS} and is capped at ${MAX_BACKGROUND_WAIT_MS}.`,
+        `waitForPort optionally waits for a localhost TCP port to become reachable after a background command starts; waitForPortTimeoutMs defaults to ${DEFAULT_WAIT_FOR_PORT_TIMEOUT_MS} and is capped at ${MAX_WAIT_FOR_PORT_TIMEOUT_MS}.`,
         `timeoutMs defaults to ${DEFAULT_COMMAND_TIMEOUT_MS} and is capped at ${MAX_COMMAND_TIMEOUT_MS}.`,
       ],
       runtimeHints: [
@@ -274,18 +311,22 @@ function shellCommandDefinition(commandShell: SanitizedCommandShellConfig): Tool
         "If curl is unavailable, use the installed runtime such as node or python for HTTP requests instead of waiting for a separate HTTP tool.",
         "Use this tool for normal filesystem commands such as mkdir, rmdir, copy, move, and recursive cleanup.",
         "Use background=true for dev servers, file watchers, long-running demos, and other commands expected to keep running.",
+        "For dev servers, combine background=true with waitForPort so the tool returns only after the local port is reachable or the port wait times out.",
         "When background=true, do not append shell-native background operators such as POSIX & just to detach the process; the tool already returns pid, logPath, and stopCommand.",
         "Use cwd instead of repeated cd chaining when the command should run inside a project subdirectory.",
         "Before relying on a command, you may probe the environment with ordinary shell commands such as where, which, command -v, or version checks.",
       ],
       outputNotes: [
-        "result.stdout and result.stderr are returned to the model for follow-up reasoning.",
+        `result.stdout and result.stderr are model-visible previews capped at ${MAX_COMMAND_STDOUT_CHARS} and ${MAX_COMMAND_STDERR_CHARS} characters for foreground command output; under those caps they contain the exact command text.`,
+        "result.stdoutTruncated/result.stderrTruncated, result.stdoutChars/result.stderrChars, and result.stdoutOmittedChars/result.stderrOmittedChars report the concrete truncation facts for those previews.",
         "result.shell records the shell that executed the command.",
         "result.cwd records the workspace-relative working directory used for the command.",
         "result.timedOut is true when the foreground command exceeded timeoutMs; stdout/stderr contain captured output before termination.",
-        "result.background, result.pid, result.logPath, and result.stopCommand describe detached background commands; stdout includes an initial log preview when available.",
+        "result.background, result.pid, result.logPath, and result.stopCommand describe detached background commands; these small metadata fields are not shortened by stdout/stderr preview budgeting.",
+        "result.durationMs records total observed tool execution time; result.portReady records whether waitForPort became reachable.",
+        "result.cancelled records foreground command cancellation; result.portWaitCancelled records cancellation while waiting for a background port.",
         "If command and args are provided, execution bypasses shell parsing and uses direct argv execution.",
-        "A non-zero exitCode is command feedback; inspect stdout/stderr before deciding the next step.",
+        "A non-zero exitCode is command feedback; stdout/stderr remain command output previews, not interpreted recommendations.",
       ],
       examples: [
         {
@@ -310,7 +351,7 @@ function shellCommandDefinition(commandShell: SanitizedCommandShellConfig): Tool
         },
         {
           title: "Start dev server in background",
-          input: { commandLine: "pnpm dev", cwd: "apps/web", background: true },
+          input: { commandLine: "pnpm dev", cwd: "apps/web", background: true, waitForPort: 5173 },
         },
         {
           title: "Run Python inline script with argv",
@@ -354,6 +395,14 @@ function shellCommandDefinition(commandShell: SanitizedCommandShellConfig): Tool
           type: "number",
           description: `Optional background startup observation window in milliseconds. Defaults to ${DEFAULT_BACKGROUND_WAIT_MS}; maximum ${MAX_BACKGROUND_WAIT_MS}.`,
         },
+        waitForPort: {
+          type: "number",
+          description: "Optional localhost TCP port to poll after a background command starts, useful for dev servers.",
+        },
+        waitForPortTimeoutMs: {
+          type: "number",
+          description: `Optional port wait timeout in milliseconds. Defaults to ${DEFAULT_WAIT_FOR_PORT_TIMEOUT_MS}; maximum ${MAX_WAIT_FOR_PORT_TIMEOUT_MS}.`,
+        },
       },
       required: [],
       additionalProperties: false,
@@ -389,22 +438,49 @@ function commandToolOutput(input: {
     readonly exitCode: number;
     readonly stdout: string;
     readonly stderr: string;
+    readonly stdoutTruncated: boolean;
+    readonly stderrTruncated: boolean;
+    readonly stdoutChars: number;
+    readonly stderrChars: number;
+    readonly stdoutOmittedChars: number;
+    readonly stderrOmittedChars: number;
     readonly timedOut?: boolean;
+    readonly cancelled?: boolean;
     readonly signal?: string;
     readonly background?: boolean;
     readonly pid?: number;
     readonly logPath?: string;
     readonly stopCommand?: string;
+    readonly durationMs?: number;
+    readonly waitForPort?: number;
+    readonly portReady?: boolean;
+    readonly portWaitCancelled?: boolean;
   };
   readonly truncated: boolean;
 } {
-  const stdout = truncateText(input.result.stdout, MAX_COMMAND_STDOUT_CHARS);
-  const stderr = truncateText(input.result.stderr, MAX_COMMAND_STDERR_CHARS);
+  const stdout = commandOutputPreview({
+    text: input.result.stdout,
+    chars: input.result.stdoutChars,
+    omittedChars: input.result.stdoutOmittedChars,
+    maxChars: MAX_COMMAND_STDOUT_CHARS,
+  });
+  const stderr = commandOutputPreview({
+    text: input.result.stderr,
+    chars: input.result.stderrChars,
+    omittedChars: input.result.stderrOmittedChars,
+    maxChars: MAX_COMMAND_STDERR_CHARS,
+  });
   const prefix = input.action === "shell_command" ? "workspace:shell" : "workspace:command";
   const statusText = input.result.background === true
-    ? `started background pid ${input.result.pid ?? "unknown"}`
+    ? input.result.waitForPort !== undefined && input.result.portReady !== true
+      ? `started background pid ${input.result.pid ?? "unknown"}; port ${input.result.waitForPort} not ready`
+      : input.result.waitForPort !== undefined
+        ? `started background pid ${input.result.pid ?? "unknown"}; port ${input.result.waitForPort} ready`
+        : `started background pid ${input.result.pid ?? "unknown"}`
     : input.result.timedOut === true
       ? `timed out (exit ${input.result.exitCode})`
+      : input.result.cancelled === true
+        ? `cancelled (exit ${input.result.exitCode})`
       : `exit ${input.result.exitCode}`;
   return {
     action: input.action,
@@ -424,16 +500,45 @@ function commandToolOutput(input: {
       },
       cwd: input.result.cwd,
       exitCode: input.result.exitCode,
-      stdout,
-      stderr,
+      stdout: stdout.text,
+      stderr: stderr.text,
+      stdoutTruncated: stdout.truncated,
+      stderrTruncated: stderr.truncated,
+      stdoutChars: stdout.chars,
+      stderrChars: stderr.chars,
+      stdoutOmittedChars: stdout.omittedChars,
+      stderrOmittedChars: stderr.omittedChars,
       timedOut: input.result.timedOut === true ? true : undefined,
+      cancelled: input.result.cancelled === true ? true : undefined,
       signal: input.result.signal,
       background: input.result.background === true ? true : undefined,
       pid: input.result.pid,
       logPath: input.result.logPath,
       stopCommand: input.result.stopCommand,
+      durationMs: input.result.durationMs,
+      waitForPort: input.result.waitForPort,
+      portReady: input.result.portReady,
+      portWaitCancelled: input.result.portWaitCancelled === true ? true : undefined,
     },
-    truncated: input.truncated || input.result.truncated === true || stdout.length < input.result.stdout.length || stderr.length < input.result.stderr.length,
+    truncated: input.truncated || input.result.truncated === true || stdout.truncated || stderr.truncated,
+  };
+}
+
+function commandOutputPreview(input: {
+  readonly text: string;
+  readonly chars: number | undefined;
+  readonly omittedChars?: number;
+  readonly maxChars: number;
+}): TextPreview {
+  const chars = Math.max(input.chars ?? input.text.length + (input.omittedChars ?? 0), input.text.length);
+  const text = input.text.length <= input.maxChars
+    ? input.text
+    : input.text.slice(0, input.maxChars);
+  return {
+    text,
+    chars,
+    omittedChars: Math.max(0, chars - text.length),
+    truncated: text.length < chars,
   };
 }
 
@@ -602,27 +707,78 @@ async function runSpawnedCommand(
     let timedOut = false;
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let terminationTimer: ReturnType<typeof setTimeout> | undefined;
     let abortHandler: (() => void) | undefined;
+    let child: ChildProcess;
     const stdout = createBoundedOutputCollector(MAX_COMMAND_STDOUT_CHARS);
     const stderr = createBoundedOutputCollector(MAX_COMMAND_STDERR_CHARS);
+    const appendTerminationDiagnostic = () => {
+      const timeoutMessage = timedOut ? `Command timed out after ${timeoutMs}ms and was terminated.` : undefined;
+      const cancelMessage = cancelled ? "Command execution cancelled." : undefined;
+      if (timeoutMessage !== undefined) stderr.appendText(timeoutMessage);
+      if (cancelMessage !== undefined) stderr.appendText(cancelMessage);
+    };
+    const resultFromClose = (code: number | null, signal: NodeJS.Signals | null | undefined): CommandExecutionResult => ({
+      stdout: stdout.text(),
+      stderr: stderr.text(),
+      stdoutChars: stdout.chars(),
+      stderrChars: stderr.chars(),
+      stdoutOmittedChars: stdout.omittedChars(),
+      stderrOmittedChars: stderr.omittedChars(),
+      exitCode: timedOut
+        ? COMMAND_TIMEOUT_EXIT_CODE
+        : cancelled
+          ? COMMAND_CANCELLED_EXIT_CODE
+          : typeof code === "number"
+            ? code
+            : signal === undefined || signal === null
+            ? 0
+            : COMMAND_CANCELLED_EXIT_CODE,
+      cwd: relativeCwd,
+      timedOut,
+      cancelled,
+      signal: signal ?? undefined,
+      truncated: stdout.truncated() || stderr.truncated(),
+    });
     const finish = (value: CommandExecutionResult) => {
       if (settled) return;
       settled = true;
       if (timer !== undefined) {
         clearTimeout(timer);
       }
+      if (terminationTimer !== undefined) {
+        clearTimeout(terminationTimer);
+      }
       if (abortHandler !== undefined) {
         abortSignal?.removeEventListener("abort", abortHandler);
       }
       resolve(value);
     };
-    const child = spawn(file, [...args], {
+    const requestTermination = () => {
+      terminateProcessTree(child);
+      if (terminationTimer === undefined) {
+        terminationTimer = setTimeout(() => {
+          appendTerminationDiagnostic();
+          stderr.appendText(
+            `Command process did not close within ${COMMAND_TERMINATION_GRACE_MS}ms after termination was requested.`
+          );
+          child.stdout?.destroy();
+          child.stderr?.destroy();
+          finish(resultFromClose(null, undefined));
+        }, COMMAND_TERMINATION_GRACE_MS);
+        terminationTimer.unref?.();
+      }
+    };
+    child = spawn(file, [...args], {
       cwd: workingDirectory,
       windowsHide: true,
       windowsVerbatimArguments: options.windowsVerbatimArguments === true,
       detached: process.platform !== "win32",
       stdio: ["ignore", "pipe", "pipe"],
     });
+    if (child.stdout === null || child.stderr === null) {
+      throw new Error("Command process did not expose stdout/stderr pipes.");
+    }
     child.stdout.on("data", (chunk: Buffer) => stdout.append(chunk));
     child.stderr.on("data", (chunk: Buffer) => stderr.append(chunk));
     child.once("error", (error) => {
@@ -637,37 +793,22 @@ async function runSpawnedCommand(
       reject(error);
     });
     child.once("close", (code, signal) => {
-      const timeoutMessage = timedOut ? `Command timed out after ${timeoutMs}ms and was terminated.` : undefined;
-      const cancelMessage = cancelled ? "Command execution cancelled." : undefined;
-      if (timeoutMessage !== undefined) stderr.appendText(timeoutMessage);
-      if (cancelMessage !== undefined) stderr.appendText(cancelMessage);
-      finish({
-        stdout: stdout.text(),
-        stderr: stderr.text(),
-        exitCode: timedOut
-          ? COMMAND_TIMEOUT_EXIT_CODE
-          : cancelled
-            ? COMMAND_CANCELLED_EXIT_CODE
-            : typeof code === "number"
-              ? code
-              : signal === undefined
-              ? 0
-              : COMMAND_CANCELLED_EXIT_CODE,
-        cwd: relativeCwd,
-        timedOut,
-        signal: signal ?? undefined,
-        truncated: stdout.truncated() || stderr.truncated(),
-      });
+      if (settled) return;
+      appendTerminationDiagnostic();
+      finish(resultFromClose(code, signal));
     });
     timer = setTimeout(() => {
       timedOut = true;
-      terminateProcessTree(child);
+      requestTermination();
     }, timeoutMs);
     abortHandler = () => {
       cancelled = true;
-      terminateProcessTree(child);
+      requestTermination();
     };
     abortSignal?.addEventListener("abort", abortHandler, { once: true });
+    if (abortSignal?.aborted === true) {
+      abortHandler();
+    }
   });
 }
 
@@ -681,6 +822,135 @@ async function resolveCommandCwd(
     throw new Error(`shell_command cwd must be a workspace directory: ${target.relativePath}`);
   }
   return target;
+}
+
+async function enrichCommandResult(input: {
+  readonly result: CommandExecutionResult;
+  readonly waitForPort: number | undefined;
+  readonly waitForPortTimeoutMs: number;
+  readonly startedAt: number;
+  readonly abortSignal: AbortSignal | undefined;
+}): Promise<CommandExecutionResult> {
+  if (input.waitForPort === undefined) {
+    return {
+      ...input.result,
+      durationMs: Date.now() - input.startedAt,
+    };
+  }
+  if (input.result.background !== true) {
+    return {
+      ...input.result,
+      waitForPort: input.waitForPort,
+      portReady: false,
+      durationMs: Date.now() - input.startedAt,
+      stderr: appendCommandDiagnostic(
+        input.result.stderr,
+        "waitForPort was requested but the command is not running in the background."
+      ),
+    };
+  }
+  const portWait = await waitForLocalhostPort({
+    port: input.waitForPort,
+    timeoutMs: input.waitForPortTimeoutMs,
+    abortSignal: input.abortSignal,
+  });
+  const portReady = portWait.ready;
+  const durationMs = Date.now() - input.startedAt;
+  return {
+    ...input.result,
+    waitForPort: input.waitForPort,
+    portReady,
+    portWaitCancelled: portWait.cancelled ? true : undefined,
+    durationMs,
+    stdout: portReady
+      ? appendCommandDiagnostic(input.result.stdout, `Port ${input.waitForPort} is ready.`)
+      : input.result.stdout,
+    stderr: portWait.ready
+      ? input.result.stderr
+      : portWait.cancelled
+        ? appendCommandDiagnostic(
+            input.result.stderr,
+            `Port wait for ${input.waitForPort} was cancelled before the port became ready.`
+          )
+      : appendCommandDiagnostic(
+          input.result.stderr,
+          `Port ${input.waitForPort} did not become ready within ${input.waitForPortTimeoutMs}ms.`
+        ),
+  };
+}
+
+async function waitForLocalhostPort(input: {
+  readonly port: number;
+  readonly timeoutMs: number;
+  readonly abortSignal: AbortSignal | undefined;
+}): Promise<{ readonly ready: boolean; readonly cancelled: boolean }> {
+  const deadline = Date.now() + input.timeoutMs;
+  do {
+    if (input.abortSignal?.aborted === true) {
+      return { ready: false, cancelled: true };
+    }
+    if (await canConnectToLocalhostPort(input.port)) {
+      return { ready: true, cancelled: false };
+    }
+    try {
+      await delay(Math.min(PORT_POLL_INTERVAL_MS, Math.max(0, deadline - Date.now())), input.abortSignal);
+    } catch (error) {
+      if (Boolean(input.abortSignal?.aborted)) {
+        return { ready: false, cancelled: true };
+      }
+      throw error;
+    }
+  } while (Date.now() < deadline);
+  return { ready: false, cancelled: false };
+}
+
+function canConnectToLocalhostPort(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = createConnection({ host: "127.0.0.1", port });
+    let settled = false;
+    const settle = (ready: boolean) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      socket.destroy();
+      resolve(ready);
+    };
+    socket.setTimeout(PORT_CONNECT_TIMEOUT_MS);
+    socket.once("connect", () => settle(true));
+    socket.once("timeout", () => settle(false));
+    socket.once("error", () => settle(false));
+  });
+}
+
+function delay(ms: number, abortSignal: AbortSignal | undefined): Promise<void> {
+  if (ms <= 0) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      abortSignal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timer);
+      reject(new Error("Command execution cancelled."));
+    };
+    abortSignal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+function appendCommandDiagnostic(existing: string, message: string): string {
+  return existing.trim().length === 0 ? message : `${existing.replace(/\s*$/u, "")}\n${message}`;
 }
 
 async function runBackgroundCommand(input: {
@@ -700,6 +970,7 @@ async function runBackgroundCommand(input: {
   const captureMode = input.captureMode ?? "stdio";
   const logFd = captureMode === "stdio" ? openSync(logPath, "a") : undefined;
   let child: ChildProcess | undefined;
+  let earlyExit: { readonly code: number | null; readonly signal: NodeJS.Signals | null } | undefined;
   try {
     child = spawn(input.file, [...input.args], {
       cwd: input.workingDirectory,
@@ -710,18 +981,10 @@ async function runBackgroundCommand(input: {
     });
     const start = await waitForBackgroundStart(child, input.waitMs);
     if (start.status === "exited") {
-      const logText = await readBackgroundLogPreview(logPath);
-      return {
-        stdout: logText,
-        stderr: `Background command exited before it stayed running${start.signal == null ? "" : ` with signal ${start.signal}`}.`,
-        exitCode: typeof start.code === "number" ? start.code : COMMAND_CANCELLED_EXIT_CODE,
-        cwd: input.relativeCwd,
-        signal: start.signal ?? undefined,
-        logPath,
-        truncated: logText.length >= MAX_COMMAND_STDOUT_CHARS,
-      };
+      earlyExit = { code: start.code, signal: start.signal };
+    } else {
+      child.unref();
     }
-    child.unref();
   } finally {
     if (logFd !== undefined) {
       closeSync(logFd);
@@ -730,6 +993,23 @@ async function runBackgroundCommand(input: {
   if (child === undefined) {
     throw new Error("Failed to start background command.");
   }
+  if (earlyExit !== undefined) {
+    const logPreview = await readBackgroundLogPreview(logPath);
+    const stderr = `Background command exited before it stayed running${earlyExit.signal == null ? "" : ` with signal ${earlyExit.signal}`}.`;
+    return {
+      stdout: logPreview.text,
+      stderr,
+      exitCode: typeof earlyExit.code === "number" ? earlyExit.code : COMMAND_CANCELLED_EXIT_CODE,
+      cwd: input.relativeCwd,
+      signal: earlyExit.signal ?? undefined,
+      logPath,
+      stdoutChars: logPreview.chars,
+      stderrChars: stderr.length,
+      stdoutOmittedChars: logPreview.omittedChars,
+      stderrOmittedChars: 0,
+      truncated: logPreview.truncated,
+    };
+  }
   const pid = child.pid;
   const stopCommand = pid === undefined ? undefined : stopCommandForPid(pid, input.platform, input.stopShellSyntax);
   const initialLogPreview = await readBackgroundLogPreview(logPath, BACKGROUND_LOG_PREVIEW_CHARS);
@@ -737,7 +1017,7 @@ async function runBackgroundCommand(input: {
     `Started background process${pid === undefined ? "" : ` pid ${pid}`}.`,
     `Log: ${logPath}`,
     stopCommand === undefined ? undefined : `Stop: ${stopCommand}`,
-    initialLogPreview.trim().length === 0 ? undefined : `Initial output:\n${initialLogPreview.trimEnd()}`,
+    initialLogPreview.text.trim().length === 0 ? undefined : `Initial output:\n${initialLogPreview.text}`,
   ].filter((line): line is string => line !== undefined).join("\n");
   return {
     stdout,
@@ -748,6 +1028,11 @@ async function runBackgroundCommand(input: {
     pid,
     logPath,
     stopCommand,
+    stdoutChars: stdout.length + initialLogPreview.omittedChars,
+    stderrChars: 0,
+    stdoutOmittedChars: initialLogPreview.omittedChars,
+    stderrOmittedChars: 0,
+    truncated: initialLogPreview.truncated,
   };
 }
 
@@ -782,13 +1067,17 @@ function createBoundedOutputCollector(maxChars: number): {
   readonly appendText: (text: string) => void;
   readonly text: () => string;
   readonly truncated: () => boolean;
+  readonly chars: () => number;
+  readonly omittedChars: () => number;
 } {
   let value = "";
+  let totalChars = 0;
   let isTruncated = false;
   const appendText = (text: string) => {
     if (text.length === 0) {
       return;
     }
+    totalChars += text.length;
     const remaining = maxChars - value.length;
     if (remaining <= 0) {
       isTruncated = true;
@@ -811,6 +1100,12 @@ function createBoundedOutputCollector(maxChars: number): {
     },
     truncated() {
       return isTruncated;
+    },
+    chars() {
+      return totalChars;
+    },
+    omittedChars() {
+      return Math.max(0, totalChars - value.length);
     },
   };
 }
@@ -859,12 +1154,17 @@ async function waitForBackgroundStart(child: ChildProcess, waitMs: number): Prom
   });
 }
 
-async function readBackgroundLogPreview(logPath: string, maxChars = MAX_COMMAND_STDOUT_CHARS): Promise<string> {
+async function readBackgroundLogPreview(logPath: string, maxChars = MAX_COMMAND_STDOUT_CHARS): Promise<TextPreview> {
   try {
     const text = await fs.readFile(logPath, "utf8");
-    return truncateText(text, maxChars);
+    return commandOutputPreview({ text, chars: text.length, maxChars });
   } catch {
-    return "";
+    return {
+      text: "",
+      chars: 0,
+      omittedChars: 0,
+      truncated: false,
+    };
   }
 }
 
@@ -956,6 +1256,17 @@ function toStringArray(value: unknown): string[] {
     return [];
   }
   return value.map((item) => (typeof item === "string" ? item : String(item ?? "")));
+}
+
+function optionalPort(value: unknown): number | undefined {
+  if (value === undefined || value === null || value === "") {
+    return undefined;
+  }
+  const port = positiveInteger(value);
+  if (port === undefined || port > 65_535) {
+    throw new Error("waitForPort must be an integer TCP port between 1 and 65535.");
+  }
+  return port;
 }
 
 function firstNonBlank(...values: readonly (string | undefined)[]): string | undefined {

@@ -13,12 +13,24 @@ export type ProjectToolResultEnvelopeInput = {
   readonly truncated: boolean;
 };
 
+export type ToolErrorDomain =
+  | "tool_error"
+  | "runtime_error"
+  | "model_error"
+  | "ui_submit_error"
+  | "process_error";
+
+export type ToolResultEnvelopeWithErrorDomain = ToolResultEnvelope & {
+  readonly errorDomain?: ToolErrorDomain;
+};
+
 export type ProjectToolStatusEnvelopeInput = {
   readonly request: ToolCallRequest;
   readonly status: "failed" | "approval_required" | "cancelled";
   readonly summary: string;
   readonly diagnosticRef: string;
   readonly evidenceRefs?: readonly string[];
+  readonly errorDomain?: ToolErrorDomain;
 };
 
 // The envelope is the compact UI/context evidence form of tool output. It is
@@ -40,8 +52,9 @@ export function projectToolResultEnvelope(input: ProjectToolResultEnvelopeInput)
   };
 }
 
-export function projectToolStatusEnvelope(input: ProjectToolStatusEnvelopeInput): ToolResultEnvelope {
+export function projectToolStatusEnvelope(input: ProjectToolStatusEnvelopeInput): ToolResultEnvelopeWithErrorDomain {
   const agentSummary = compactOrdinaryToolText(input.summary, 1_200);
+  const errorDomain = input.errorDomain ?? defaultToolStatusErrorDomain(input.request.toolName, input.status);
   return {
     agentSummary,
     evidenceRefs: unique([`tool:${input.request.callId}`, input.diagnosticRef, ...(input.evidenceRefs ?? [])]),
@@ -50,6 +63,7 @@ export function projectToolStatusEnvelope(input: ProjectToolStatusEnvelopeInput)
     redacted: false,
     diagnosticRef: input.diagnosticRef,
     rawRetention: "none",
+    errorDomain,
   };
 }
 
@@ -97,6 +111,21 @@ function agentSummaryForToolDisplay(
       1_800
     );
   }
+  if (display.kind === "http_response") {
+    const status = display.statusCode === undefined
+      ? undefined
+      : `${display.statusCode}${display.statusText === undefined ? "" : ` ${display.statusText}`}`;
+    return compactOrdinaryToolText(
+      [
+        `${label}已完成。`,
+        [display.method, display.url, status].filter(isString).join(" · "),
+        display.durationMs === undefined ? undefined : `耗时：${display.durationMs}ms`,
+        compactSafeText(display.bodyPreview, 1_200),
+        summary,
+      ].filter(isString).join("\n"),
+      1_800
+    );
+  }
   if (display.kind === "read_result") {
     return compactOrdinaryToolText(
       [
@@ -121,6 +150,15 @@ function agentSummaryForToolDisplay(
         display.pid === undefined ? undefined : `PID：${display.pid}`,
         display.logPath === undefined ? undefined : `日志：${display.logPath}`,
         display.stopCommand === undefined ? undefined : `停止命令：${display.stopCommand}`,
+        display.durationMs === undefined ? undefined : `耗时：${display.durationMs}ms`,
+        display.waitForPort === undefined ? undefined : `等待端口：${display.waitForPort}`,
+        display.portReady === undefined ? undefined : `端口状态：${display.portReady ? "就绪" : "未就绪"}`,
+        display.stdoutTruncated === true
+          ? `stdout：${display.stdoutChars ?? "unknown"} chars，省略 ${display.stdoutOmittedChars ?? "unknown"} chars`
+          : undefined,
+        display.stderrTruncated === true
+          ? `stderr：${display.stderrChars ?? "unknown"} chars，省略 ${display.stderrOmittedChars ?? "unknown"} chars`
+          : undefined,
         display.commandLine ?? display.command,
         display.outputSummary === undefined ? undefined : `输出摘要：\n${display.outputSummary}`,
         display.errorSummary === undefined ? undefined : `错误摘要：\n${display.errorSummary}`,
@@ -172,6 +210,9 @@ function evidenceRefsForToolDisplay(
     }
   }
   if (display.kind === "browser_snapshot" && display.url !== undefined) {
+    refs.add(compactOrdinaryToolText(display.url, 220));
+  }
+  if (display.kind === "http_response" && display.url !== undefined) {
     refs.add(compactOrdinaryToolText(display.url, 220));
   }
   if (display.kind === "read_result") {
@@ -245,6 +286,18 @@ function compactToolDisplayForUi(display: ToolDisplayProjection): ToolDisplayPro
       truncated: display.truncated,
     };
   }
+  if (display.kind === "http_response") {
+    return {
+      kind: "http_response",
+      method: compactSafeText(display.method, 20),
+      url: compactSafeText(display.url, 260),
+      statusCode: display.statusCode,
+      statusText: compactSafeText(display.statusText, 120),
+      durationMs: display.durationMs,
+      bodyPreview: compactSafeText(display.bodyPreview, 1_200),
+      truncated: display.truncated,
+    };
+  }
   if (display.kind === "file_change_summary") {
     return {
       kind: "file_change_summary",
@@ -283,6 +336,15 @@ function compactToolDisplayForUi(display: ToolDisplayProjection): ToolDisplayPro
       pid: display.pid,
       logPath: compactSafeText(display.logPath, 260),
       stopCommand: compactSafeText(display.stopCommand, 260),
+      durationMs: display.durationMs,
+      waitForPort: display.waitForPort,
+      portReady: display.portReady,
+      stdoutTruncated: display.stdoutTruncated,
+      stderrTruncated: display.stderrTruncated,
+      stdoutChars: display.stdoutChars,
+      stderrChars: display.stderrChars,
+      stdoutOmittedChars: display.stdoutOmittedChars,
+      stderrOmittedChars: display.stderrOmittedChars,
       outputSummary: compactSafeText(display.outputSummary, 520),
       errorSummary: compactSafeText(display.errorSummary, 520),
     };
@@ -301,4 +363,18 @@ function isString(value: unknown): value is string {
 
 function unique(values: readonly string[]): readonly string[] {
   return [...new Set(values.filter((value) => value.trim().length > 0))];
+}
+
+function defaultToolStatusErrorDomain(
+  toolName: string,
+  status: ProjectToolStatusEnvelopeInput["status"]
+): ToolErrorDomain | undefined {
+  if (status !== "failed") {
+    return undefined;
+  }
+  return isProcessTool(toolName) ? "process_error" : "tool_error";
+}
+
+function isProcessTool(toolName: string): boolean {
+  return toolName === "run_command" || toolName === "shell_command";
 }

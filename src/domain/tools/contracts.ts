@@ -123,6 +123,16 @@ export type ToolDisplayProjection =
       readonly truncated?: boolean;
     }
   | {
+      readonly kind: "http_response";
+      readonly method?: string;
+      readonly url?: string;
+      readonly statusCode?: number;
+      readonly statusText?: string;
+      readonly durationMs?: number;
+      readonly bodyPreview?: string;
+      readonly truncated?: boolean;
+    }
+  | {
       readonly kind: "file_change_summary";
       readonly path?: string;
       readonly bytes?: number;
@@ -155,6 +165,15 @@ export type ToolDisplayProjection =
       readonly pid?: number;
       readonly logPath?: string;
       readonly stopCommand?: string;
+      readonly durationMs?: number;
+      readonly waitForPort?: number;
+      readonly portReady?: boolean;
+      readonly stdoutTruncated?: boolean;
+      readonly stderrTruncated?: boolean;
+      readonly stdoutChars?: number;
+      readonly stderrChars?: number;
+      readonly stdoutOmittedChars?: number;
+      readonly stderrOmittedChars?: number;
       readonly outputSummary?: string;
       readonly errorSummary?: string;
     }

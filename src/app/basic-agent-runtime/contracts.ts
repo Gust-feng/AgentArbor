@@ -71,6 +71,13 @@ export type BasicAgentRuntimeReadyContext = {
   readonly goalId: string;
 };
 
+export type BasicAgentErrorDomain =
+  | "tool_error"
+  | "runtime_error"
+  | "model_error"
+  | "ui_submit_error"
+  | "process_error";
+
 export type BasicAgentRunExecutionInput = {
   readonly job: BasicAgentRunJob;
   readonly conversationHistory?: readonly DesktopAgentConversationMessage[];
@@ -92,10 +99,12 @@ export type BasicAgentRunExecutionResult = {
   readonly failed?: {
     readonly code: string;
     readonly message: string;
+    readonly errorDomain?: BasicAgentErrorDomain;
   };
   readonly blocked?: {
     readonly code: string;
     readonly message: string;
+    readonly errorDomain?: BasicAgentErrorDomain;
   };
   readonly pendingApproval?: BasicAgentPendingToolContinuation;
 };

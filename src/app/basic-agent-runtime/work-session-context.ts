@@ -315,6 +315,7 @@ function toolLedgerTitle(display: ToolDisplayProjection): string {
   if (display.kind === "search_results") return "搜索证据";
   if (display.kind === "read_result") return "资料正文";
   if (display.kind === "browser_snapshot") return "网页摘要";
+  if (display.kind === "http_response") return "HTTP 响应";
   if (display.kind === "file_change_summary") return "文件变更";
   if (display.kind === "file_diff_preview") return "差异预览";
   if (display.kind === "command_summary") return "命令摘要";
@@ -325,6 +326,14 @@ function toolLedgerSummary(display: ToolDisplayProjection): string {
   if (display.kind === "search_results") return redactOrdinaryText(display.query ?? `搜索结果 ${display.results.length} 条`, 240);
   if (display.kind === "read_result") return redactOrdinaryText(display.title ?? display.uri ?? display.url ?? "资料已读取。", 240);
   if (display.kind === "browser_snapshot") return redactOrdinaryText(display.title ?? display.url ?? "网页已读取。", 240);
+  if (display.kind === "http_response") return redactOrdinaryText(
+    [
+      display.method,
+      display.url,
+      display.statusCode === undefined ? undefined : `${display.statusCode}${display.statusText === undefined ? "" : ` ${display.statusText}`}`,
+    ].filter(isString).join(" · ") || "HTTP 响应已返回。",
+    240
+  );
   if (display.kind === "command_summary") return redactOrdinaryText(display.command ?? "命令已执行。", 240);
   if (display.kind === "file_change_summary" || display.kind === "file_diff_preview") return redactOrdinaryText(display.path ?? "文件变更摘要。", 240);
   return redactOrdinaryText(display.summary ?? display.action ?? "已处理。", 240);

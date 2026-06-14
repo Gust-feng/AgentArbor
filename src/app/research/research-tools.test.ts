@@ -4,6 +4,14 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { FileSystemLocalDevSecretStore, FileSystemNormalSettingsStore } from "../../adapters/config/index.js";
+import type {
+  InformationAccess,
+  InformationQuery,
+  InformationReadRequest,
+  InformationReadResult,
+  InformationSearchResult,
+  InformationSourceKind,
+} from "../../domain/research/index.js";
 import { ConfigCenter } from "../config-center.js";
 import { createConfiguredToolCenter, createDefaultToolCenter } from "../model-runtime/index.js";
 import type { FetchLike } from "../tool-center/index.js";
@@ -14,7 +22,7 @@ test("default ToolCenter exposes model-visible search and read tools", async () 
   const center = createDefaultToolCenter({ env: {}, playwrightAvailable: true });
   const names = center.list().map((tool) => tool.name);
 
-  assert.deepEqual(names, ["search", "read", "read_file", "list_dir", "grep_files", "create_file", "write_file", "edit_file", "delete_file", "shell_command", "browser_snapshot"]);
+  assert.deepEqual(names, ["search", "read", "read_file", "list_dir", "grep_files", "create_file", "write_file", "edit_file", "delete_file", "shell_command", "http_request", "browser_snapshot"]);
   assert.equal(center.has("web_search"), false);
 
   const search = await center.execute(
@@ -56,7 +64,11 @@ test("research tool definitions describe only currently model-visible sources", 
   assert.equal(sourceOverrideProperty.enum?.includes("docs"), false);
   assert.equal(sourceOverrideProperty.enum?.includes("soil"), false);
   assert.equal(sourceOverrideProperty.enum?.includes("run_memory"), false);
+  assert.equal("site" in search.inputSchema.properties, true);
+  assert.equal(JSON.stringify(search.modelContract).includes("site"), true);
   assert.equal(read.description.includes("contentPreview"), true);
+  assert.equal(JSON.stringify(read.inputSchema.properties.ref).includes("array"), true);
+  assert.equal(JSON.stringify(read.modelContract).includes("array"), true);
 });
 
 test("research tools keep explicitly requested hidden sources as no-provider facts", async () => {
@@ -77,6 +89,146 @@ test("research tools keep explicitly requested hidden sources as no-provider fac
   assert.deepEqual((search as { trace?: { requestedSources?: readonly string[] } }).trace?.requestedSources, ["soil", "run_memory"]);
   assert.equal((read as { status?: string }).status, "no-provider");
   assert.deepEqual((read as { trace?: { requestedSources?: readonly string[] } }).trace?.requestedSources, ["soil"]);
+});
+
+test("research read tool keeps single ref output compatible", async () => {
+  const expected = fixedReadResult({
+    ref: "research:codebase:one",
+    status: "completed",
+    source: "codebase",
+    contentPreview: "single compatible content",
+  });
+  const runtime = fixedResearchRuntime({
+    read: async () => expected,
+  });
+  const readTool = createResearchReadTool(runtime);
+
+  const read = await readTool.execute(
+    { ref: "research:codebase:one", maxLength: 100 },
+    { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" }
+  );
+
+  assert.deepEqual(read, expected);
+});
+
+test("research read tool batches multiple refs without changing per-item content", async () => {
+  const calls: InformationReadRequest[] = [];
+  const runtime = fixedResearchRuntime({
+    read: async (request) => {
+      calls.push(request);
+      return fixedReadResult({
+        ref: request.ref,
+        status: "completed",
+        source: "codebase",
+        contentPreview: `content for ${request.ref}`,
+      });
+    },
+  });
+  const readTool = createResearchReadTool(runtime);
+
+  const read = await readTool.execute(
+    { ref: ["src/a.ts", "src/b.ts"], source: "codebase", maxLength: 200 },
+    { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" }
+  ) as readonly {
+    readonly ref: string;
+    readonly status: string;
+    readonly contentPreview?: string;
+    readonly truncated: boolean;
+    readonly source?: string;
+  }[];
+
+  assert.equal(Array.isArray(read), true);
+  assert.deepEqual(calls.map((call) => ({ ref: call.ref, source: call.source, maxLength: call.maxLength })), [
+    { ref: "src/a.ts", source: "codebase", maxLength: 200 },
+    { ref: "src/b.ts", source: "codebase", maxLength: 200 },
+  ]);
+  assert.deepEqual(read.map((item) => item.ref), ["src/a.ts", "src/b.ts"]);
+  assert.deepEqual(read.map((item) => item.status), ["completed", "completed"]);
+  assert.deepEqual(read.map((item) => item.contentPreview), ["content for src/a.ts", "content for src/b.ts"]);
+  assert.deepEqual(read.map((item) => item.truncated), [false, false]);
+});
+
+test("research read tool returns an empty batch without provider calls", async () => {
+  let calls = 0;
+  const runtime = fixedResearchRuntime({
+    read: async () => {
+      calls += 1;
+      throw new Error("read should not be called for an empty batch");
+    },
+  });
+  const readTool = createResearchReadTool(runtime);
+
+  const read = await readTool.execute(
+    { ref: [] },
+    { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" }
+  );
+
+  assert.deepEqual(read, []);
+  assert.equal(calls, 0);
+});
+
+test("research read tool batch reports partial failures per ref", async () => {
+  const runtime = fixedResearchRuntime({
+    read: async (request) => {
+      if (request.ref === "missing.md") {
+        return fixedReadResult({
+          ref: request.ref,
+          status: "provider-failed",
+          message: "codebase read could not read the requested text file.",
+        });
+      }
+      if (request.ref === "throws.md") {
+        throw new Error("adapter exploded");
+      }
+      return fixedReadResult({
+        ref: request.ref,
+        status: "completed",
+        source: "codebase",
+        contentPreview: "available content",
+      });
+    },
+  });
+  const readTool = createResearchReadTool(runtime);
+
+  const read = await readTool.execute(
+    { ref: ["ok.md", "missing.md", "throws.md"], source: "codebase" },
+    { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" }
+  ) as readonly {
+    readonly ref: string;
+    readonly status: string;
+    readonly contentPreview?: string;
+    readonly truncated: boolean;
+    readonly error?: string;
+  }[];
+
+  assert.deepEqual(read.map((item) => item.ref), ["ok.md", "missing.md", "throws.md"]);
+  assert.deepEqual(read.map((item) => item.status), ["completed", "provider-failed", "provider-failed"]);
+  assert.equal(read[0]?.contentPreview, "available content");
+  assert.equal(read[1]?.error, "codebase read could not read the requested text file.");
+  assert.equal(read[2]?.error, "adapter exploded");
+  assert.equal(read.every((item) => typeof item.truncated === "boolean"), true);
+});
+
+test("research search tool passes site constraint into runtime query", async () => {
+  let captured: InformationQuery | undefined;
+  const runtime = fixedResearchRuntime({
+    search: async (query) => {
+      captured = query;
+      return fixedSearchResult(query);
+    },
+  });
+  const searchTool = createResearchSearchTool(runtime);
+
+  const search = await searchTool.execute(
+    { query: "AgentArbor", site: "example.com", sources: ["web"], limit: 3 },
+    { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" }
+  ) as InformationSearchResult;
+
+  assert.equal(captured?.query, "AgentArbor");
+  assert.equal(captured?.site, "example.com");
+  assert.deepEqual(captured?.sources, ["web"]);
+  assert.equal(captured?.limit, 3);
+  assert.equal(search.site, "example.com");
 });
 
 test("default ToolCenter passes configured Tavily max results into ResearchRuntime", async () => {
@@ -117,6 +269,43 @@ test("default ToolCenter passes configured Tavily max results into ResearchRunti
   assert.equal(JSON.stringify(search.output).includes("tvly-configured-secret"), false);
 });
 
+test("default ToolCenter folds search site into provider query without exposing the key", async () => {
+  const bodies: Record<string, unknown>[] = [];
+  const fetch: FetchLike = async (_url, init) => {
+    bodies.push(JSON.parse(init.body) as Record<string, unknown>);
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        results: [{ title: "Scoped", url: "https://example.test/scoped", content: "scoped snippet" }],
+      }),
+    };
+  };
+  const center = createDefaultToolCenter({
+    env: {
+      AGENTARBOR_TAVILY_API_KEY: "tvly-site-secret",
+    },
+    fetch,
+    playwrightAvailable: true,
+  });
+
+  const search = await center.execute(
+    { callId: "call-search-site", toolName: "search", input: { query: "AgentArbor", site: "https://Example.TEST/docs", sources: ["web"] } },
+    { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
+    { callerAgentId: "agent-test", allowedTools: ["search"] }
+  );
+  const output = search.output as {
+    readonly site?: string;
+    readonly results?: readonly { readonly metadata?: Readonly<Record<string, unknown>> }[];
+  };
+
+  assert.equal(search.status, "completed");
+  assert.equal(bodies[0]?.query, "AgentArbor site:example.test");
+  assert.equal(output.site, "https://Example.TEST/docs");
+  assert.equal(output.results?.[0]?.metadata?.site, "https://Example.TEST/docs");
+  assert.equal(JSON.stringify(search.output).includes("tvly-site-secret"), false);
+});
+
 test("configured ToolCenter reads Tavily config and registers search/read without exposing the configured key", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-configured-tool-center-"));
   const bodies: Record<string, unknown>[] = [];
@@ -149,7 +338,7 @@ test("configured ToolCenter reads Tavily config and registers search/read withou
       { callerAgentId: "agent-test", allowedTools: ["search", "read"] }
     );
 
-    assert.deepEqual(names, ["search", "read", "read_file", "list_dir", "grep_files", "create_file", "write_file", "edit_file", "delete_file", "shell_command", "browser_snapshot"]);
+    assert.deepEqual(names, ["search", "read", "read_file", "list_dir", "grep_files", "create_file", "write_file", "edit_file", "delete_file", "shell_command", "http_request", "browser_snapshot"]);
     assert.equal(search.status, "completed");
     assert.equal(bodies[0]?.max_results, 1);
     assert.equal(JSON.stringify(search.output).includes("tvly-configured-tool-secret"), false);
@@ -173,7 +362,7 @@ test("configured ToolCenter still registers search/read and degrades web search 
       { callerAgentId: "agent-test", allowedTools: ["search", "read"] }
     );
 
-    assert.deepEqual(names, ["search", "read", "read_file", "list_dir", "grep_files", "create_file", "write_file", "edit_file", "delete_file", "shell_command", "browser_snapshot"]);
+    assert.deepEqual(names, ["search", "read", "read_file", "list_dir", "grep_files", "create_file", "write_file", "edit_file", "delete_file", "shell_command", "http_request", "browser_snapshot"]);
     assert.equal(search.status, "completed");
     assert.equal((search.output as { status?: string }).status, "no-provider");
   } finally {
@@ -272,3 +461,92 @@ test("configured ToolCenter keeps web search disabled even when a historical Tav
     await fs.rm(directory, { recursive: true, force: true });
   }
 });
+
+function fixedResearchRuntime(overrides: {
+  readonly search?: (query: InformationQuery) => Promise<InformationSearchResult>;
+  readonly read?: (request: InformationReadRequest) => Promise<InformationReadResult>;
+}): InformationAccess {
+  return {
+    search: overrides.search ?? (async (query) => fixedSearchResult(query)),
+    read: overrides.read ?? (async (request) => fixedReadResult({
+      ref: request.ref,
+      status: "completed",
+      source: request.source ?? "codebase",
+      contentPreview: "fixed content",
+    })),
+    getCapabilities: () => ({
+      sources: [
+        { source: "web", label: "web", searchable: true, readable: false, modelVisible: true },
+        { source: "codebase", label: "codebase", searchable: true, readable: true, modelVisible: true },
+      ],
+      searchableSources: ["web", "codebase"],
+      readableSources: ["codebase"],
+      defaultSearchSources: ["web", "codebase"],
+    }),
+  };
+}
+
+function fixedSearchResult(query: InformationQuery): InformationSearchResult {
+  return {
+    action: "search",
+    query: query.query,
+    site: query.site,
+    status: "empty",
+    results: [],
+    trace: {
+      traceId: "research-trace-test",
+      action: "search",
+      query: query.query,
+      site: query.site,
+      requestedSources: query.sources ?? [],
+      status: "empty",
+      startedAt: "2026-01-01T00:00:00.000Z",
+      completedAt: "2026-01-01T00:00:00.001Z",
+      sourceSteps: [],
+    },
+  };
+}
+
+function fixedReadResult(input: {
+  readonly ref: string;
+  readonly status: InformationReadResult["status"];
+  readonly source?: InformationSourceKind;
+  readonly contentPreview?: string;
+  readonly message?: string;
+}): InformationReadResult {
+  return {
+    action: "read",
+    ref: input.ref,
+    status: input.status,
+    result: input.status === "completed"
+      ? {
+          refId: `read:${input.ref}`,
+          source: input.source ?? "codebase",
+          title: input.ref,
+          uri: input.source === "page" ? `https://example.test/${input.ref}` : `repo://${input.ref}`,
+          status: "completed",
+          summary: input.contentPreview ?? "",
+          contentPreview: input.contentPreview,
+          truncated: false,
+          metadata: { fixture: true },
+        }
+      : undefined,
+    trace: {
+      traceId: "research-trace-test",
+      action: "read",
+      ref: input.ref,
+      requestedSources: input.source === undefined ? [] : [input.source],
+      status: input.status,
+      startedAt: "2026-01-01T00:00:00.000Z",
+      completedAt: "2026-01-01T00:00:00.001Z",
+      sourceSteps: [
+        {
+          source: input.source ?? "codebase",
+          status: input.status,
+          resultRefs: input.status === "completed" ? [`read:${input.ref}`] : [],
+          message: input.message,
+        },
+      ],
+    },
+  };
+}

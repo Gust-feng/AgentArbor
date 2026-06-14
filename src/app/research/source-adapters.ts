@@ -12,6 +12,7 @@ import { createWebSearchTool, type FetchLike as TavilyFetchLike } from "../tool-
 
 export type InformationSourceSearchRequest = {
   readonly query: string;
+  readonly site?: string;
   readonly limit: number;
   readonly traceId?: string;
   readonly goalId?: string;
@@ -75,9 +76,10 @@ export function createWebInformationSourceAdapter(options: {
       unavailableReason: hasProvider ? undefined : "No configured web search provider is available.",
     },
     async search(request) {
+      const providerQuery = searchQueryWithSite(request.query, request.site);
       const output = asRecord(
         await tool.execute(
-          { query: request.query },
+          { query: providerQuery },
           {
             callerAgentId: "research-runtime",
             traceId: request.traceId ?? "research-trace",
@@ -100,14 +102,16 @@ export function createWebInformationSourceAdapter(options: {
       const results = arrayItems(output.results).slice(0, request.limit).map((item, index) => {
         const record = asRecord(item);
         const uri = stringOrUndefined(record.url);
+        const metadata: Readonly<Record<string, string | number | boolean>> =
+          request.site === undefined ? { provider: "tavily" } : { provider: "tavily", site: request.site };
         return {
-          refId: createResearchRefId("web", `${request.query}:${uri ?? index}`),
+          refId: createResearchRefId("web", `${providerQuery}:${uri ?? index}`),
           source: "web" as const,
           title: stringOrUndefined(record.title) ?? "Untitled web result",
           uri,
           snippet: truncate(normalizeWhitespace(stringOrUndefined(record.snippet) ?? ""), 320),
           status: uri === undefined ? "no-provider" as const : "available" as const,
-          metadata: { provider: "tavily" },
+          metadata,
         };
       });
       return {
@@ -508,6 +512,33 @@ function snippetAround(text: string, index: number, queryLength: number): string
 
 function createResearchRefId(source: string, value: string): string {
   return `research:${source}:${hash(value)}`;
+}
+
+function searchQueryWithSite(query: string, site: string | undefined): string {
+  const normalizedSite = normalizeSiteConstraint(site);
+  return normalizedSite === undefined ? query : `${query} site:${normalizedSite}`;
+}
+
+function normalizeSiteConstraint(value: string | undefined): string | undefined {
+  const raw = stringOrUndefined(value);
+  if (raw === undefined) {
+    return undefined;
+  }
+  const withoutOperator = raw.replace(/^site:/i, "").trim();
+  const candidate = hostnameFromUrl(withoutOperator) ?? withoutOperator.split(/[/?#]/u)[0]?.trim();
+  if (candidate === undefined || candidate.length === 0 || /\s/u.test(candidate)) {
+    return undefined;
+  }
+  return candidate.toLowerCase();
+}
+
+function hostnameFromUrl(value: string): string | undefined {
+  try {
+    const url = new URL(value.includes("://") ? value : `https://${value}`);
+    return url.hostname.length > 0 ? url.hostname : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function hash(value: string): string {

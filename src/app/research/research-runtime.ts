@@ -74,6 +74,7 @@ export class ResearchRuntime implements InformationAccess {
   async search(query: InformationQuery): Promise<InformationSearchResult> {
     const startedAt = nowIso();
     const normalizedQuery = normalizeOptionalString(query.query);
+    const normalizedSite = normalizeOptionalString(query.site);
     const requestedSources = resolveRequestedSources({
       requested: query.sources,
       preference: query.sourcePreference ?? this.sourcePreference,
@@ -85,6 +86,7 @@ export class ResearchRuntime implements InformationAccess {
         action: "search",
         startedAt,
         query: "",
+        site: normalizedSite,
         requestedSources,
         sourceSteps: requestedSources.map((source) => ({
           source,
@@ -126,6 +128,7 @@ export class ResearchRuntime implements InformationAccess {
       }
       const response = await adapter.search({
         query: normalizedQuery,
+        site: normalizedSite,
         limit: limit - results.length,
         traceId: query.traceId,
         goalId: query.goalId,
@@ -147,12 +150,14 @@ export class ResearchRuntime implements InformationAccess {
       action: "search",
       startedAt,
       query: normalizedQuery,
+      site: normalizedSite,
       requestedSources,
       sourceSteps,
     });
     return {
       action: "search",
       query: normalizedQuery,
+      site: normalizedSite,
       status: trace.status,
       results,
       trace,
@@ -363,6 +368,7 @@ function createTrace(input: {
   readonly action: "search" | "read";
   readonly startedAt: string;
   readonly query?: string;
+  readonly site?: string;
   readonly ref?: string;
   readonly requestedSources: readonly InformationSourceKind[];
   readonly sourceSteps: readonly ResearchTraceSourceStep[];
@@ -371,6 +377,7 @@ function createTrace(input: {
     traceId: createId("research-trace"),
     action: input.action,
     query: input.query,
+    site: input.site,
     ref: input.ref,
     requestedSources: [...input.requestedSources],
     status: summarizeStatus(input.sourceSteps),

@@ -114,6 +114,7 @@ export async function prepareDesktopRunResources(
       (tool) => tool.name === "browser_snapshot" && tool.availability === "available"
     ),
     mcpManager,
+    processRegistry: runtime.processRegistry,
   };
 }
 
@@ -189,5 +190,6 @@ export function createDesktopToolCenterFactory(
     playwrightAvailable: resources.playwrightAvailable,
     mcpManager: resources.mcpManager,
     toolRegistryScopes,
+    processRegistry: resources.processRegistry,
   });
 }

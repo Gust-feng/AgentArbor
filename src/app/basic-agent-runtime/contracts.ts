@@ -129,6 +129,7 @@ export type BasicAgentRunExecutorConfig = {
   readonly abortControllers: Map<string, AbortController>;
   readonly persistRun: (job: BasicAgentRunJob) => Promise<void>;
   readonly persistRunInBackground?: (job: BasicAgentRunJob) => void;
+  readonly cleanupRunResources?: (runId: string) => Promise<unknown> | unknown;
   readonly executionAdapter: BasicAgentExecutionAdapter;
   readonly failRun: (job: BasicAgentRunJob, error: unknown) => Promise<void>;
   readonly onRuntimeReady: (runId: string, context: BasicAgentRuntimeReadyContext) => void;

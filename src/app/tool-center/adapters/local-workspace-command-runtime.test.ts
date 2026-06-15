@@ -6,14 +6,21 @@ import path from "node:path";
 import test from "node:test";
 import { ensurePidExited } from "./background-process-test-utils.js";
 import { createLocalRunCommandTool, createLocalShellCommandTool } from "./local-workspace-command-tools.js";
+import { InMemoryProcessRegistry, type ProcessPortFact, type ProcessRecordUpdate, type ProcessRegistration } from "../../runtime-guard/index.js";
 
 const context = { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" };
+const processContext = {
+  ...context,
+  runId: "run-test",
+  toolCallId: "tool-call-test",
+} as typeof context & { readonly runId: string; readonly toolCallId: string };
 const commandLogRefPrefix = "command-log://";
 
 test("shell_command returns stable foreground cancellation facts", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-command-runtime-"));
   try {
-    const shellCommand = createLocalShellCommandTool(root);
+    const registry = createRecordingProcessRegistry();
+    const shellCommand = createLocalShellCommandTool(root, { processRegistry: registry });
     const controller = new AbortController();
     const abortTimer = setTimeout(() => controller.abort(), 150);
     try {
@@ -23,7 +30,7 @@ test("shell_command returns stable foreground cancellation facts", async () => {
           args: ["-e", "console.log('before-cancel'); setInterval(() => {}, 1000);"],
           timeoutMs: 10_000,
         },
-        { ...context, abortSignal: controller.signal }
+        { ...processContext, abortSignal: controller.signal }
       );
       const result = asRecord(asRecord(output).result);
 
@@ -31,9 +38,20 @@ test("shell_command returns stable foreground cancellation facts", async () => {
       assert.equal(result.exitCode, 130);
       assert.equal(result.cancelled, true);
       assert.equal(result.timedOut, undefined);
+      assert.equal("processId" in result, false);
       assert.match(String(result.stdout), /before-cancel/);
       assert.match(String(result.stderr), /Command execution cancelled\./);
       assert.match(String(asRecord(output).summary), /cancelled \(exit 130\)/);
+      assert.equal(registry.registered.length, 1);
+      assert.equal(registry.registered[0]?.kind, "foreground");
+      assert.equal(registry.registered[0]?.owned, true);
+      assert.equal(registry.registered[0]?.runId, "run-test");
+      assert.equal(registry.registered[0]?.toolCallId, "tool-call-test");
+      assert.equal(registry.registered[0]?.status, "running");
+      assert.equal(registry.exited.length, 1);
+      assert.equal(registry.exited[0]?.input?.exitCode, 130);
+      assert.equal(registry.listAll()[0]?.status, "exited");
+      assert.equal(registry.listAll()[0]?.exitCode, 130);
     } finally {
       clearTimeout(abortTimer);
     }
@@ -45,11 +63,12 @@ test("shell_command returns stable foreground cancellation facts", async () => {
 test("shell_command preserves foreground exit code and stdout stderr facts", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-command-runtime-"));
   try {
-    const shellCommand = createLocalShellCommandTool(root);
+    const registry = createRecordingProcessRegistry();
+    const shellCommand = createLocalShellCommandTool(root, { processRegistry: registry });
     const output = await shellCommand.execute({
       command: process.execPath,
       args: ["-e", "console.log('known-stdout'); console.error('known-stderr'); process.exit(7);"],
-    }, context);
+    }, processContext);
     const result = asRecord(asRecord(output).result);
 
     assert.equal(result.exitCode, 7);
@@ -59,6 +78,77 @@ test("shell_command preserves foreground exit code and stdout stderr facts", asy
     assert.equal(result.stderrTruncated, false);
     assert.equal(result.stdoutChars, "known-stdout\n".length);
     assert.equal(result.stderrChars, "known-stderr\n".length);
+    assert.equal("processId" in result, false);
+    assert.equal(registry.registered.length, 1);
+    assert.equal(registry.registered[0]?.kind, "foreground");
+    assert.equal(registry.registered[0]?.status, "running");
+    assert.equal(registry.exited.length, 1);
+    assert.equal(registry.exited[0]?.input?.exitCode, 7);
+    assert.equal(registry.listAll()[0]?.status, "exited");
+    assert.equal(registry.listAll()[0]?.exitCode, 7);
+  } finally {
+    await removeTempTree(root);
+  }
+});
+
+test("shell_command records background process facts and port wait facts", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "agentarbor-command-runtime-"));
+  try {
+    const registry = createRecordingProcessRegistry();
+    const port = await unusedLocalPort();
+    const shellCommand = createLocalShellCommandTool(root, { processRegistry: registry });
+    const output = await shellCommand.execute(
+      {
+        command: process.execPath,
+        args: [
+          "-e",
+          [
+            "const http=require('node:http');",
+            "const server=http.createServer((req,res)=>res.end('ok'));",
+            `server.listen(${port}, '127.0.0.1', () => console.log('background-started:${port}'));`,
+            "setInterval(() => {}, 1000);",
+          ].join(""),
+        ],
+        background: true,
+        backgroundWaitMs: 50,
+        waitForPort: port,
+        waitForPortTimeoutMs: 3_000,
+      },
+      processContext
+    );
+    const result = asRecord(asRecord(output).result);
+
+    try {
+      assert.equal(result.exitCode, 0);
+      assert.equal(result.background, true);
+      assert.equal(result.waitForPort, port);
+      assert.equal(result.portReady, true);
+      assert.equal(typeof result.pid, "number");
+      assert.equal("processId" in result, false);
+      assertControlledLogRef(result);
+      assert.equal(registry.registered.length, 1);
+      assert.equal(registry.registered[0]?.kind, "background");
+      assert.equal(registry.registered[0]?.status, "running");
+      assert.equal(registry.registered[0]?.runId, "run-test");
+      assert.equal(registry.registered[0]?.toolCallId, "tool-call-test");
+      assert.equal(registry.portFacts.length, 1);
+      assert.deepEqual(registry.portFacts[0], {
+        port,
+        host: "127.0.0.1",
+        requestedAt: registry.portFacts[0]!.requestedAt,
+        checkedAt: registry.portFacts[0]!.checkedAt,
+        durationMs: registry.portFacts[0]!.durationMs,
+        timeoutMs: 3_000,
+        status: "ready",
+        ready: true,
+      });
+      assert.equal(registry.listAll()[0]?.ports.length, 1);
+      assert.equal(registry.listAll()[0]?.ports[0]?.port, port);
+      assert.equal(registry.listAll()[0]?.ports[0]?.ready, true);
+    } finally {
+      await shellCommand.execute({ commandLine: String(result.stopCommand), timeoutMs: 2_000 }, processContext);
+      await ensurePidExited(typeof result.pid === "number" ? result.pid : undefined, 5_000);
+    }
   } finally {
     await removeTempTree(root);
   }
@@ -68,7 +158,8 @@ test("shell_command returns background metadata when waitForPort is cancelled", 
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-command-runtime-"));
   try {
     const port = await unusedLocalPort();
-    const shellCommand = createLocalShellCommandTool(root);
+    const registry = createRecordingProcessRegistry();
+    const shellCommand = createLocalShellCommandTool(root, { processRegistry: registry });
     const controller = new AbortController();
     const abortTimer = setTimeout(() => controller.abort(), 150);
     let stopCommand: string | undefined;
@@ -98,7 +189,14 @@ test("shell_command returns background metadata when waitForPort is cancelled", 
       assert.equal(result.waitForPort, port);
       assert.equal(result.portReady, false);
       assert.equal(result.portWaitCancelled, true);
+      assert.equal("processId" in result, false);
       assert.match(String(result.stderr), new RegExp(`Port wait for ${port} was cancelled before the port became ready\\.`));
+      assert.equal(registry.registered.length, 1);
+      assert.equal(registry.registered[0]?.kind, "background");
+      assert.equal(registry.registered[0]?.status, "running");
+      assert.equal(registry.portFacts.length, 1);
+      assert.equal(registry.portFacts[0]?.port, port);
+      assert.equal(registry.portFacts[0]?.cancelled, true);
     } finally {
       clearTimeout(abortTimer);
       if (stopCommand !== undefined) {
@@ -114,7 +212,8 @@ test("shell_command returns background metadata when waitForPort is cancelled", 
 test("shell_command returns a controlled logRef for background command logs", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-command-runtime-"));
   try {
-    const shellCommand = createLocalShellCommandTool(root);
+    const registry = createRecordingProcessRegistry();
+    const shellCommand = createLocalShellCommandTool(root, { processRegistry: registry });
     const output = await shellCommand.execute({
       command: process.execPath,
       args: ["-e", "console.log('background-log-ref-ready'); setInterval(() => {}, 1000);"],
@@ -127,6 +226,10 @@ test("shell_command returns a controlled logRef for background command logs", as
       assert.equal(result.exitCode, 0);
       assert.equal(result.background, true);
       assertControlledLogRef(result);
+      assert.equal("processId" in result, false);
+      assert.equal(registry.registered.length, 1);
+      assert.equal(registry.registered[0]?.kind, "background");
+      assert.equal(registry.registered[0]?.status, "running");
       assert.match(String(result.stdout), new RegExp(`Log: ${escapeRegExp(String(result.logRef))}`));
       assert.doesNotMatch(String(result.stdout), new RegExp(`Log: ${escapeRegExp(String(result.logPath))}`));
     } finally {
@@ -182,7 +285,8 @@ test("shell_command makes background waitForPort timeout visible in summary and 
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-command-runtime-"));
   try {
     const port = await unusedLocalPort();
-    const shellCommand = createLocalShellCommandTool(root);
+    const registry = createRecordingProcessRegistry();
+    const shellCommand = createLocalShellCommandTool(root, { processRegistry: registry });
     const output = await shellCommand.execute({
       command: process.execPath,
       args: ["-e", "console.log('no-port-server'); setInterval(() => {}, 1000);"],
@@ -198,8 +302,15 @@ test("shell_command makes background waitForPort timeout visible in summary and 
     assertControlledLogRef(result);
     assert.equal(result.waitForPort, port);
     assert.equal(result.portReady, false);
+    assert.equal("processId" in result, false);
     assert.match(String(result.stderr), new RegExp(`Port ${port} did not become ready within 250ms\\.`));
     assert.match(String(asRecord(output).summary), new RegExp(`port ${port} not ready`));
+    assert.equal(registry.registered.length, 1);
+    assert.equal(registry.registered[0]?.kind, "background");
+    assert.equal(registry.registered[0]?.status, "running");
+    assert.equal(registry.portFacts.length, 1);
+    assert.equal(registry.portFacts[0]?.port, port);
+    assert.equal(registry.portFacts[0]?.ready, false);
     await shellCommand.execute({ commandLine: String(result.stopCommand), timeoutMs: 2_000 }, context);
     await ensurePidExited(typeof result.pid === "number" ? result.pid : undefined, 5_000);
   } finally {
@@ -252,4 +363,42 @@ function assertControlledLogRef(result: Record<string, unknown>): void {
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function createRecordingProcessRegistry() {
+  const registry = new InMemoryProcessRegistry({ now: () => "2026-06-15T00:00:00.000Z" });
+  const registered: ProcessRegistration[] = [];
+  const updates: Array<{ readonly processId: string; readonly patch: ProcessRecordUpdate }> = [];
+  const exited: Array<{
+    readonly processId: string;
+    readonly input?: { readonly exitCode?: number; readonly signal?: string; readonly exitedAt?: string };
+  }> = [];
+  const portFacts: ProcessPortFact[] = [];
+  return {
+    registered,
+    updates,
+    exited,
+    portFacts,
+    register(input: ProcessRegistration): unknown {
+      registered.push(input);
+      return registry.register(input);
+    },
+    update(processId: string, patch: ProcessRecordUpdate): unknown {
+      updates.push({ processId, patch });
+      return registry.update(processId, patch);
+    },
+    markExited(
+      processId: string,
+      input?: { readonly exitCode?: number; readonly signal?: string; readonly exitedAt?: string }
+    ): unknown {
+      exited.push({ processId, input });
+      return registry.markExited(processId, input);
+    },
+    appendPortFact(processId: string, fact: ProcessPortFact): unknown {
+      portFacts.push(fact);
+      return registry.appendPortFact(processId, fact);
+    },
+    get: registry.get.bind(registry),
+    listAll: registry.listAll.bind(registry),
+  };
 }

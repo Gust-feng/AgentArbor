@@ -24,6 +24,7 @@ import {
   createDefaultCommandShellConfig,
   createLocalRunCommandTool,
   createLocalShellCommandTool,
+  type LocalCommandProcessRegistry,
   readLocalCommandLogRef,
 } from "../tool-center/adapters/local-workspace-command-tools.js";
 import {
@@ -57,6 +58,7 @@ export type CreateDesktopBasicToolRegistryOptions = {
   readonly toolCatalogAvailability?: readonly CapabilityToolAvailability[];
   readonly mcpManager?: McpToolExecutorProvider;
   readonly commandShell?: SanitizedCommandShellConfig;
+  readonly processRegistry?: LocalCommandProcessRegistry;
 };
 
 export type ToolRegistryFetchLike = (
@@ -105,8 +107,8 @@ export function createDesktopBasicToolRegistry(
     createLocalWriteFileTool(workspaceRoot, { sandboxPolicy }),
     createLocalEditFileTool(workspaceRoot, { sandboxPolicy }),
     createLocalDeleteFileTool(workspaceRoot, { sandboxPolicy }),
-    createLocalShellCommandTool(workspaceRoot, { sandboxPolicy, commandShell }),
-    createLocalRunCommandTool(workspaceRoot, { sandboxPolicy, commandShell }),
+    createLocalShellCommandTool(workspaceRoot, { sandboxPolicy, commandShell, processRegistry: options.processRegistry }),
+    createLocalRunCommandTool(workspaceRoot, { sandboxPolicy, commandShell, processRegistry: options.processRegistry }),
     createHttpRequestTool(),
     createBrowserSnapshotTool(),
   ];

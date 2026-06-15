@@ -23,6 +23,10 @@ import { resolveModelCapabilities } from "../model-capability-registry.js";
 import { PanelConversationStore } from "../panel-conversations.js";
 import { PanelRunJobStore, resolvePanelRunMode, type PanelRunJob } from "../panel-run-jobs.js";
 import {
+  createPlatformProcessTerminator,
+  InMemoryProcessRegistry,
+} from "../runtime-guard/index.js";
+import {
   FileSystemSkillStateStore,
   resolveSkillStateStorePath,
   type SkillStateStore,
@@ -53,6 +57,7 @@ export type PanelRuntime = {
   readonly conversations: PanelConversationStore;
   readonly runtimeDatabase?: RuntimeDatabase;
   readonly runtimePaths?: FileSystemRuntimeDatabasePaths;
+  readonly processRegistry: InMemoryProcessRegistry;
   readonly skillRoots: readonly string[];
   readonly skillStateStore?: SkillStateStore;
 };
@@ -133,6 +138,7 @@ function assemblePanelRuntime(input: {
   const abortControllers = new Map<string, AbortController>();
   const persistenceChains = new Map<string, Promise<void>>();
   const conversations = new PanelConversationStore();
+  const processRegistry = new InMemoryProcessRegistry();
   const capabilityCenter = new CapabilityCenter({
     configCenter: input.configCenter,
     skillRoots: input.skillRoots,
@@ -156,6 +162,7 @@ function assemblePanelRuntime(input: {
     conversations,
     runtimeDatabase: input.runtimeDatabase,
     runtimePaths: input.runtimePaths,
+    processRegistry,
     skillRoots: input.skillRoots,
     skillStateStore: input.skillStateStore,
   };
@@ -166,6 +173,8 @@ function assemblePanelRuntime(input: {
     abortControllers,
     persistRun: (job) => persistPanelRun(runtime as PanelRuntime, job as PanelRunJob),
     persistRunInBackground: (job) => persistPanelRunInBackground(runtime as PanelRuntime, job as PanelRunJob),
+    cleanupRunResources: (runId) =>
+      runtime.processRegistry.cleanupByRun(runId, createPlatformProcessTerminator()),
     executionAdapter: {
       execute: (execution) => input.hooks.executeRun(runtime as PanelRuntime, execution),
     },

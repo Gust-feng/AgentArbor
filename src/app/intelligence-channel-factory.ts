@@ -24,6 +24,7 @@ import type { MinimalRuntime } from "./runtime.js";
 import { createDesktopBasicToolRegistry } from "./basic-agent-runtime/builtin-tool-runtime.js";
 import type { McpToolExecutorProvider } from "./basic-agent-runtime/builtin-tool-runtime.js";
 import type { ToolRegistryScope } from "./basic-agent-runtime/tool-registry.js";
+import type { LocalCommandProcessRegistry } from "./tool-center/adapters/local-workspace-command-tools.js";
 
 export type ModelRuntimeMode = "none" | "fake" | "openai-compatible" | "openai-responses";
 export type ModelRuntimeStreamingMode = "respect_profile" | "force_live";
@@ -305,6 +306,7 @@ export function createDefaultToolCenter(input: {
   readonly mcpManager?: McpToolExecutorProvider;
   readonly toolRegistryScopes?: readonly ToolRegistryScope[];
   readonly commandShell?: SanitizedCommandShellConfig;
+  readonly processRegistry?: LocalCommandProcessRegistry;
 } = {}): ToolExecutionBroker {
   return createToolCenterFromEnvironment(input);
 }
@@ -325,6 +327,7 @@ export async function createConfiguredToolCenter(
     readonly mcpManager?: McpToolExecutorProvider;
     readonly toolRegistryScopes?: readonly ToolRegistryScope[];
     readonly commandShell?: SanitizedCommandShellConfig;
+    readonly processRegistry?: LocalCommandProcessRegistry;
   } = {}
 ): Promise<ToolExecutionBroker> {
   return createToolCenterFromEnvironment({
@@ -348,6 +351,7 @@ export async function createConfiguredToolCenterFactory(
     readonly mcpManager?: McpToolExecutorProvider;
     readonly toolRegistryScopes?: readonly ToolRegistryScope[];
     readonly commandShell?: SanitizedCommandShellConfig;
+    readonly processRegistry?: LocalCommandProcessRegistry;
   } = {}
 ): Promise<(runtime: MinimalRuntime) => ToolExecutionBroker> {
   const env = input.env ?? await configCenter.createModelRuntimeEnvironment();
@@ -368,6 +372,7 @@ function createToolCenterFromEnvironment(input: {
   readonly mcpManager?: McpToolExecutorProvider;
   readonly toolRegistryScopes?: readonly ToolRegistryScope[];
   readonly commandShell?: SanitizedCommandShellConfig;
+  readonly processRegistry?: LocalCommandProcessRegistry;
 }): ToolExecutionBroker {
   return createDesktopBasicToolRegistry(input).createToolCenterForScopes(input.toolRegistryScopes ?? ["desktop-basic"]);
 }

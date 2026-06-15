@@ -63,6 +63,7 @@ function executorConfig(input: {
   readonly prepareRunStart?: BasicAgentRunExecutorConfig["prepareRunStart"];
   readonly persistRun?: BasicAgentRunExecutorConfig["persistRun"];
   readonly persistRunInBackground?: BasicAgentRunExecutorConfig["persistRunInBackground"];
+  readonly cleanupRunResources?: BasicAgentRunExecutorConfig["cleanupRunResources"];
   readonly execute?: BasicAgentRunExecutorConfig["executionAdapter"]["execute"];
   readonly failRun?: BasicAgentRunExecutorConfig["failRun"];
   readonly onRuntimeReady?: BasicAgentRunExecutorConfig["onRuntimeReady"];
@@ -76,6 +77,7 @@ function executorConfig(input: {
     abortControllers: input.abortControllers ?? new Map(),
     persistRun: input.persistRun ?? (async () => undefined),
     persistRunInBackground: input.persistRunInBackground,
+    cleanupRunResources: input.cleanupRunResources,
     executionAdapter: {
       execute: input.execute ?? (async () => {
         throw new Error("not used");
@@ -1044,14 +1046,26 @@ test("BasicAgentRunExecutor rejects capability resolution that rewrites frozen M
 
 test("BasicAgentRunExecutor keeps frozen run facts on cancellation payloads", async () => {
   const runJobs = new InMemoryBasicAgentRunJobStore();
+  const steps: string[] = [];
+  const cleanupRunIds: string[] = [];
   const executor = new BasicAgentRunExecutor(executorConfig({
     runJobs,
     prepareRunStart: defaultPrepareRunStart({
       capabilitySnapshot: {
-      ...capabilitySnapshot(),
-      snapshotId: "snapshot-cancel",
+        ...capabilitySnapshot(),
+        snapshotId: "snapshot-cancel",
       },
     }),
+    cleanupRunResources: (runId) => {
+      cleanupRunIds.push(runId);
+      steps.push(`cleanup:${runJobs.get(runId)?.status ?? "missing"}`);
+    },
+    onRunFinished: (job) => {
+      steps.push(`finished:${job.status}`);
+    },
+    persistRun: async (job) => {
+      steps.push(`persist:${job.status}`);
+    },
   }));
 
   const run = await executor.start({
@@ -1064,11 +1078,57 @@ test("BasicAgentRunExecutor keeps frozen run facts on cancellation payloads", as
   await executor.cancel(run.runId);
 
   const job = runJobs.get(run.runId);
+  assert.deepEqual(cleanupRunIds, [run.runId]);
+  assert.deepEqual(steps.slice(-3), ["cleanup:cancelled", "finished:cancelled", "persist:cancelled"]);
   assert.equal(job?.status, "cancelled");
   assert.equal(job?.capabilitySnapshot?.snapshotId, "snapshot-cancel");
   assert.equal(job?.cancelled?.capabilitySnapshot?.snapshotId, "snapshot-cancel");
   assert.equal(job?.cancelled?.config.profileId, job?.config.profileId);
   assert.deepEqual(job?.cancelled?.informationAccess.sourcePreference, job?.informationAccess.sourcePreference);
+});
+
+test("BasicAgentRunExecutor preserves cancellation when cleanup fails", async () => {
+  const runJobs = new InMemoryBasicAgentRunJobStore();
+  let cleanupCalls = 0;
+  let finished = false;
+  let persisted = false;
+  const executor = new BasicAgentRunExecutor(executorConfig({
+    runJobs,
+    prepareRunStart: defaultPrepareRunStart({
+      capabilitySnapshot: {
+        ...capabilitySnapshot(),
+        snapshotId: "snapshot-cleanup-failure",
+      },
+    }),
+    cleanupRunResources: () => {
+      cleanupCalls += 1;
+      throw new Error("cleanup failed");
+    },
+    onRunFinished: (job) => {
+      finished = job.status === "cancelled";
+    },
+    persistRun: async (job) => {
+      persisted = job.status === "cancelled";
+    },
+  }));
+
+  const run = await executor.start({
+    runKind: "desktop",
+    runMode: "agent",
+    goal: "cancel despite cleanup failure",
+    aiMode: "fake",
+    startImmediately: false,
+  });
+  const returned = await executor.cancel(run.runId);
+
+  const job = runJobs.get(run.runId);
+  assert.equal(cleanupCalls, 1);
+  assert.equal(finished, true);
+  assert.equal(persisted, true);
+  assert.equal(returned.status, "cancelled");
+  assert.equal(job?.status, "cancelled");
+  assert.equal(job?.cancelled?.reason.code, "run_cancelled");
+  assert.equal(job?.cancelled?.capabilitySnapshot?.snapshotId, "snapshot-cleanup-failure");
 });
 
 test("BasicAgentRunExecutor keeps frozen run facts when approval continuation is lost", async () => {

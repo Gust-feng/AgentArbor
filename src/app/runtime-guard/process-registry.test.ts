@@ -1,0 +1,281 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import {
+  InMemoryProcessRegistry,
+  processPortFactFromLocalPortFact,
+  type ProcessKillTreeResult,
+  type ProcessRecord,
+} from "./process-registry.js";
+
+test("process registry registers background processes, lists by run, and appends port facts", () => {
+  const registry = new InMemoryProcessRegistry({ now: fixedNow("2026-06-15T00:00:00.000Z") });
+
+  registry.register({
+    processId: "process-dev-server",
+    runId: "run-a",
+    toolCallId: "tool-call-a",
+    pid: 12001,
+    kind: "background",
+    owned: true,
+    commandLine: "pnpm dev -- --port 5173",
+    cwd: "Z:\\AgentArbor",
+    startedAt: "2026-06-15T00:00:00.000Z",
+    status: "running",
+    logRef: "command-log://run-a/tool-call-a",
+  });
+  registry.register({
+    processId: "process-other-run",
+    runId: "run-b",
+    pid: 12002,
+    kind: "background",
+    owned: true,
+    commandLine: "node server.js",
+    cwd: "Z:\\AgentArbor",
+    startedAt: "2026-06-15T00:01:00.000Z",
+    status: "running",
+  });
+
+  const updated = registry.appendPortFact("process-dev-server", {
+    port: 5173,
+    host: "127.0.0.1",
+    requestedAt: "2026-06-15T00:00:01.000Z",
+    checkedAt: "2026-06-15T00:00:02.000Z",
+    ready: true,
+  });
+
+  assert.equal(updated?.ports.length, 1);
+  assert.deepEqual(
+    registry.listByRun("run-a").map((record) => record.processId),
+    ["process-dev-server"]
+  );
+  assert.deepEqual(registry.get("process-dev-server")?.ports, [
+    {
+      port: 5173,
+      host: "127.0.0.1",
+      requestedAt: "2026-06-15T00:00:01.000Z",
+      checkedAt: "2026-06-15T00:00:02.000Z",
+      ready: true,
+    },
+  ]);
+});
+
+test("process registry preserves local port probe facts", () => {
+  const registry = new InMemoryProcessRegistry({ now: fixedNow("2026-06-15T00:02:00.000Z") });
+  registerProcess(registry, {
+    processId: "port-fact-process",
+    runId: "run-port-fact",
+    pid: 12500,
+    owned: true,
+    status: "running",
+  });
+
+  registry.appendPortFact(
+    "port-fact-process",
+    processPortFactFromLocalPortFact({
+      kind: "wait",
+      port: 5173,
+      host: "127.0.0.1",
+      status: "ready",
+      ready: true,
+      requestedAt: "2026-06-15T00:02:00.000Z",
+      checkedAt: "2026-06-15T00:02:01.000Z",
+      durationMs: 1000,
+      timeoutMs: 10_000,
+      probeTimeoutMs: 250,
+      pollIntervalMs: 100,
+      attempts: 3,
+      externalOccupant: {
+        pid: 34567,
+        observedBy: "platform_probe",
+        ownedByUs: false,
+      },
+    })
+  );
+
+  assert.deepEqual(registry.get("port-fact-process")?.ports, [
+    {
+      port: 5173,
+      host: "127.0.0.1",
+      requestedAt: "2026-06-15T00:02:00.000Z",
+      status: "ready",
+      ready: true,
+      checkedAt: "2026-06-15T00:02:01.000Z",
+      durationMs: 1000,
+      timeoutMs: 10_000,
+      externalOccupant: {
+        pid: 34567,
+        observedBy: "platform_probe",
+        ownedByUs: false,
+      },
+    },
+  ]);
+});
+
+test("cleanupByRun terminates only owned active processes for the requested run", async () => {
+  const registry = new InMemoryProcessRegistry({ now: fixedNow("2026-06-15T00:05:00.000Z") });
+  registerProcess(registry, {
+    processId: "owned-active",
+    runId: "run-cleanup",
+    pid: 21001,
+    owned: true,
+    status: "running",
+  });
+  registerProcess(registry, {
+    processId: "owned-foreground",
+    runId: "run-cleanup",
+    pid: 21005,
+    owned: true,
+    status: "running",
+    kind: "foreground",
+  });
+  registerProcess(registry, {
+    processId: "unowned-active",
+    runId: "run-cleanup",
+    pid: 21002,
+    owned: false,
+    status: "running",
+  });
+  registerProcess(registry, {
+    processId: "other-run-active",
+    runId: "run-other",
+    pid: 21003,
+    owned: true,
+    status: "running",
+  });
+  registerProcess(registry, {
+    processId: "owned-exited",
+    runId: "run-cleanup",
+    pid: 21004,
+    owned: true,
+    status: "exited",
+  });
+
+  const killedPids: number[] = [];
+  const result = await registry.cleanupByRun("run-cleanup", {
+    killTree(pid) {
+      killedPids.push(pid);
+      return {
+        status: "killed",
+        signal: "SIGTERM",
+      };
+    },
+  });
+
+  assert.deepEqual(killedPids, [21001, 21005]);
+  assert.deepEqual(
+    result.attempted.map((attempt) => attempt.processId),
+    ["owned-active", "owned-foreground"]
+  );
+  assert.deepEqual(
+    result.skipped.map((skip) => [skip.processId, skip.reason]),
+    [
+      ["unowned-active", "unowned"],
+      ["owned-exited", "inactive_status"],
+    ]
+  );
+  assert.equal(registry.get("owned-active")?.status, "killed");
+  assert.equal(registry.get("owned-foreground")?.status, "killed");
+  assert.equal(registry.get("owned-active")?.facts[0]?.kind, "kill_tree");
+  assert.equal(registry.get("owned-active")?.facts[0]?.resultStatus, "killed");
+  assert.equal(registry.get("unowned-active")?.status, "running");
+  assert.equal(registry.get("other-run-active")?.status, "running");
+  assert.equal(registry.get("owned-exited")?.status, "exited");
+});
+
+test("cleanupByRun does not kill or relabel naturally exited processes", async () => {
+  const registry = new InMemoryProcessRegistry({ now: fixedNow("2026-06-15T00:10:00.000Z") });
+  registerProcess(registry, {
+    processId: "natural-exit",
+    runId: "run-natural-exit",
+    pid: 22001,
+    owned: true,
+    status: "running",
+  });
+  registry.markExited("natural-exit", {
+    exitCode: 0,
+    exitedAt: "2026-06-15T00:09:00.000Z",
+  });
+
+  const result = await registry.cleanupByRun("run-natural-exit", {
+    killTree() {
+      throw new Error("cleanup should not call killTree for exited processes");
+    },
+  });
+
+  assert.deepEqual(result.attempted, []);
+  assert.equal(registry.get("natural-exit")?.status, "exited");
+  assert.equal(registry.get("natural-exit")?.exitCode, 0);
+  assert.equal(registry.get("natural-exit")?.facts.length, 0);
+});
+
+test("cleanupByRun records unknown and failed kill-tree facts without recovery advice", async () => {
+  const registry = new InMemoryProcessRegistry({ now: fixedNow("2026-06-15T00:15:00.000Z") });
+  registerProcess(registry, {
+    processId: "unknown-after-cleanup",
+    runId: "run-unknown",
+    pid: 23001,
+    owned: true,
+    status: "running",
+  });
+  registerProcess(registry, {
+    processId: "failed-after-cleanup",
+    runId: "run-unknown",
+    pid: 23002,
+    owned: true,
+    status: "running",
+  });
+
+  const results = new Map<number, ProcessKillTreeResult>([
+    [23001, { status: "unknown", message: "process state could not be confirmed" }],
+    [23002, { status: "failed", errorMessage: "access denied" }],
+  ]);
+
+  await registry.cleanupByRun("run-unknown", {
+    killTree(pid) {
+      const result = results.get(pid);
+      if (result === undefined) {
+        throw new Error(`Unexpected pid: ${pid}`);
+      }
+      return result;
+    },
+  });
+
+  const unknownRecord = registry.get("unknown-after-cleanup");
+  const failedRecord = registry.get("failed-after-cleanup");
+
+  assert.equal(unknownRecord?.status, "unknown");
+  assert.equal(unknownRecord?.facts[0]?.resultStatus, "unknown");
+  assert.equal(failedRecord?.status, "unknown");
+  assert.equal(failedRecord?.facts[0]?.resultStatus, "failed");
+  assert.equal(failedRecord?.facts[0]?.errorMessage, "access denied");
+  assert.equal(JSON.stringify(failedRecord?.facts).includes("recovery"), false);
+  assert.equal(JSON.stringify(failedRecord?.facts).includes("suggest"), false);
+});
+
+function registerProcess(
+  registry: InMemoryProcessRegistry,
+  input: {
+    readonly processId: string;
+    readonly runId: string;
+    readonly pid: number;
+    readonly owned: boolean;
+    readonly status: ProcessRecord["status"];
+    readonly kind?: ProcessRecord["kind"];
+  }
+): ProcessRecord {
+  return registry.register({
+    processId: input.processId,
+    runId: input.runId,
+    pid: input.pid,
+    kind: input.kind ?? "background",
+    owned: input.owned,
+    commandLine: `test-command ${input.processId}`,
+    cwd: "Z:\\AgentArbor",
+    startedAt: "2026-06-15T00:00:00.000Z",
+    status: input.status,
+  });
+}
+
+function fixedNow(value: string): () => string {
+  return () => value;
+}

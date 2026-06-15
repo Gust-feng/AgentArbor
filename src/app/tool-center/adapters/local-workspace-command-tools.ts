@@ -1,11 +1,17 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { closeSync, existsSync, openSync, promises as fs, writeSync } from "node:fs";
-import { createConnection } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import type { SanitizedCommandShellConfig } from "../../../domain/config/index.js";
-import type { ToolDefinition, ToolExecutor } from "../../../domain/tools/index.js";
+import type { ToolDefinition, ToolExecutionContext, ToolExecutor } from "../../../domain/tools/index.js";
+import {
+  processPortFactFromLocalPortFact,
+  waitForLocalPort,
+  type ProcessPortFact,
+  type ProcessRecordUpdate,
+  type ProcessRegistration,
+} from "../../runtime-guard/index.js";
 import {
   asRecord,
   DEFAULT_LOCAL_WORKSPACE_ROOT,
@@ -32,8 +38,6 @@ const MAX_BACKGROUND_WAIT_MS = 5_000;
 const BACKGROUND_LOG_PREVIEW_CHARS = 2_000;
 const DEFAULT_WAIT_FOR_PORT_TIMEOUT_MS = 10_000;
 const MAX_WAIT_FOR_PORT_TIMEOUT_MS = 60_000;
-const PORT_CONNECT_TIMEOUT_MS = 250;
-const PORT_POLL_INTERVAL_MS = 100;
 const COMMAND_LOG_REF_SCHEME = "command-log";
 const COMMAND_LOG_REF_PREFIX = `${COMMAND_LOG_REF_SCHEME}://`;
 const COMMAND_LOG_DIRECTORY_NAME = "agentarbor-command-logs";
@@ -63,10 +67,29 @@ type CommandExecutionResult = {
   readonly stderrOmittedChars?: number;
 };
 
+type CommandExecutionOutcome = {
+  readonly result: CommandExecutionResult;
+  readonly processId?: string;
+};
+
 type CommandLogTarget = {
   readonly id: string;
   readonly ref: string;
   readonly path: string;
+};
+
+export type LocalCommandProcessRegistry = {
+  readonly register: (input: ProcessRegistration) => unknown;
+  readonly update?: (processId: string, patch: ProcessRecordUpdate) => unknown;
+  readonly markExited?: (
+    processId: string,
+    input?: { readonly exitCode?: number; readonly signal?: string; readonly exitedAt?: string }
+  ) => unknown;
+  readonly appendPortFact?: (processId: string, fact: ProcessPortFact) => unknown;
+};
+
+export type LocalWorkspaceCommandToolOptions = LocalWorkspaceToolOptions & {
+  readonly processRegistry?: LocalCommandProcessRegistry;
 };
 
 export type LocalCommandLogReadEntry = {
@@ -82,6 +105,12 @@ type TextPreview = {
   readonly chars: number;
   readonly omittedChars: number;
   readonly truncated: boolean;
+};
+
+type CommandProcessFacts = {
+  readonly registry: LocalCommandProcessRegistry;
+  readonly runId?: string;
+  readonly toolCallId?: string;
 };
 
 export function createDefaultCommandShellConfig(
@@ -149,7 +178,7 @@ function createWindowsPowerShellConfig(platform: NodeJS.Platform): SanitizedComm
 
 export function createLocalShellCommandTool(
   rootDirectory = DEFAULT_LOCAL_WORKSPACE_ROOT,
-  options: LocalWorkspaceToolOptions = {}
+  options: LocalWorkspaceCommandToolOptions = {}
 ): ToolExecutor {
   const sandboxPolicy = options.sandboxPolicy ?? createLocalWorkspaceSandboxPolicy();
   const commandShell = normalizeCommandShellConfig(options.commandShell);
@@ -168,6 +197,7 @@ export function createLocalShellCommandTool(
       );
       const background = record.background === true;
       const cwd = await resolveCommandCwd(rootDirectory, record.cwd);
+      const processFacts = commandProcessFacts(options.processRegistry, context);
       assertSandboxAllowed(sandboxPolicy, {
         operation: "execute",
         workspaceRoot: path.resolve(rootDirectory),
@@ -184,19 +214,21 @@ export function createLocalShellCommandTool(
           platform: commandShell.platform,
         });
       const startedAt = Date.now();
-      const rawResult = background
+      const rawOutcome = background
         ? normalized.legacyProgram === undefined || !executeDirectly
-          ? await runBackgroundShellCommand(commandShell, normalized.commandLine, cwd.absolutePath, cwd.relativePath, backgroundWaitMs)
-          : await runBackgroundProgramCommand(commandShell, normalized.legacyProgram, normalized.legacyArgs, normalized.commandLine, cwd.absolutePath, cwd.relativePath, backgroundWaitMs)
+          ? await runBackgroundShellCommand(commandShell, normalized.commandLine, cwd.absolutePath, cwd.relativePath, backgroundWaitMs, processFacts)
+          : await runBackgroundProgramCommand(commandShell, normalized.legacyProgram, normalized.legacyArgs, normalized.commandLine, cwd.absolutePath, cwd.relativePath, backgroundWaitMs, processFacts)
         : normalized.legacyProgram === undefined || !executeDirectly
-          ? await runShellCommand(commandShell, normalized.commandLine, cwd.absolutePath, cwd.relativePath, timeoutMs, context.abortSignal)
-          : await runProgramCommand(normalized.legacyProgram, normalized.legacyArgs, normalized.commandLine, cwd.absolutePath, cwd.relativePath, timeoutMs, context.abortSignal);
+          ? await runShellCommand(commandShell, normalized.commandLine, cwd.absolutePath, cwd.relativePath, timeoutMs, context.abortSignal, processFacts)
+          : await runProgramCommand(normalized.legacyProgram, normalized.legacyArgs, normalized.commandLine, cwd.absolutePath, cwd.relativePath, timeoutMs, context.abortSignal, processFacts);
       const result = await enrichCommandResult({
-        result: rawResult,
+        result: rawOutcome.result,
         waitForPort,
         waitForPortTimeoutMs,
         startedAt,
         abortSignal: context.abortSignal,
+        processRegistry: options.processRegistry,
+        processId: rawOutcome.processId,
       });
       return commandToolOutput({
         action: "shell_command",
@@ -213,7 +245,7 @@ export function createLocalShellCommandTool(
 
 export function createLocalRunCommandTool(
   rootDirectory = DEFAULT_LOCAL_WORKSPACE_ROOT,
-  options: LocalWorkspaceToolOptions = {}
+  options: LocalWorkspaceCommandToolOptions = {}
 ): ToolExecutor {
   const shellCommand = createLocalShellCommandTool(rootDirectory, options);
   const commandShell = normalizeCommandShellConfig(options.commandShell);
@@ -677,19 +709,105 @@ function quoteCmdArg(value: string): string {
   return `"${escaped}"`;
 }
 
+function commandProcessFacts(
+  registry: LocalCommandProcessRegistry | undefined,
+  context: ToolExecutionContext
+): CommandProcessFacts | undefined {
+  if (registry === undefined) {
+    return undefined;
+  }
+  const record = asRecord(context);
+  return {
+    registry,
+    runId: stringField(record.runId) ?? stringField(record.traceId),
+    toolCallId: stringField(record.toolCallId) ?? stringField(record.callId),
+  };
+}
+
+function registerCommandProcess(
+  facts: CommandProcessFacts | undefined,
+  input: Omit<ProcessRegistration, "processId" | "owned" | "runId" | "toolCallId" | "ports" | "facts">
+): string | undefined {
+  if (facts === undefined) {
+    return undefined;
+  }
+  const processId = `process-${randomUUID()}`;
+  const registration: ProcessRegistration = {
+    ...input,
+    processId,
+    runId: facts.runId,
+    toolCallId: facts.toolCallId,
+    owned: true,
+  };
+  try {
+    facts.registry.register(registration);
+    return processId;
+  } catch {
+    return undefined;
+  }
+}
+
+function markCommandProcessExited(
+  facts: CommandProcessFacts | undefined,
+  processId: string | undefined,
+  input: { readonly exitCode?: number; readonly signal?: string }
+): void {
+  if (facts === undefined || processId === undefined) {
+    return;
+  }
+  try {
+    if (facts.registry.markExited !== undefined) {
+      facts.registry.markExited(processId, {
+        exitCode: input.exitCode,
+        signal: input.signal,
+        exitedAt: new Date().toISOString(),
+      });
+      return;
+    }
+    facts.registry.update?.(processId, {
+      status: "exited",
+      endedAt: new Date().toISOString(),
+      exitCode: input.exitCode,
+      signal: input.signal,
+    });
+  } catch {
+    // Process facts are observational and must not change command execution results.
+  }
+}
+
+function appendCommandPortFact(
+  registry: LocalCommandProcessRegistry | undefined,
+  processId: string | undefined,
+  fact: ProcessPortFact
+): void {
+  if (registry === undefined || processId === undefined) {
+    return;
+  }
+  try {
+    if (registry.appendPortFact !== undefined) {
+      registry.appendPortFact(processId, fact);
+      return;
+    }
+    registry.update?.(processId, { ports: [fact] });
+  } catch {
+    // Process facts are observational and must not change command execution results.
+  }
+}
+
 async function runShellCommand(
   shell: SanitizedCommandShellConfig,
   commandLine: string,
   workingDirectory: string,
   relativeCwd: string,
   timeoutMs: number,
-  abortSignal: AbortSignal | undefined
-): Promise<CommandExecutionResult> {
+  abortSignal: AbortSignal | undefined,
+  processFacts: CommandProcessFacts | undefined
+): Promise<CommandExecutionOutcome> {
   const args = shellArgs(shell, commandLine);
   return runSpawnedCommand(shell.executable, args, workingDirectory, relativeCwd, timeoutMs, abortSignal, {
     commandLine,
     windowsVerbatimArguments: shell.syntax === "cmd",
-  });
+  }, processFacts);
 }
 
 async function runProgramCommand(
@@ -699,9 +817,10 @@ async function runProgramCommand(
   workingDirectory: string,
   relativeCwd: string,
   timeoutMs: number,
-  abortSignal: AbortSignal | undefined
-): Promise<CommandExecutionResult> {
-  return runSpawnedCommand(command, [...args], workingDirectory, relativeCwd, timeoutMs, abortSignal, { commandLine });
+  abortSignal: AbortSignal | undefined,
+  processFacts: CommandProcessFacts | undefined
+): Promise<CommandExecutionOutcome> {
+  return runSpawnedCommand(command, [...args], workingDirectory, relativeCwd, timeoutMs, abortSignal, { commandLine }, processFacts);
 }
 
 async function runBackgroundShellCommand(
@@ -709,8 +828,9 @@ async function runBackgroundShellCommand(
   commandLine: string,
   workingDirectory: string,
   relativeCwd: string,
-  waitMs: number
-): Promise<CommandExecutionResult> {
+  waitMs: number,
+  processFacts: CommandProcessFacts | undefined
+): Promise<CommandExecutionOutcome> {
   const logTarget = await createCommandLogTarget(commandLine);
   return runBackgroundCommand({
     file: shell.executable,
@@ -724,6 +844,7 @@ async function runBackgroundShellCommand(
     logTarget,
     captureMode: "shell-redirection",
     windowsVerbatimArguments: shell.syntax === "cmd",
+    processFacts,
   });
 }
 
@@ -734,8 +855,9 @@ async function runBackgroundProgramCommand(
   commandLine: string,
   workingDirectory: string,
   relativeCwd: string,
-  waitMs: number
-): Promise<CommandExecutionResult> {
+  waitMs: number,
+  processFacts: CommandProcessFacts | undefined
+): Promise<CommandExecutionOutcome> {
   return runBackgroundCommand({
     file: command,
     args: [...args],
@@ -745,6 +867,7 @@ async function runBackgroundProgramCommand(
     waitMs,
     stopShellSyntax: shell.syntax,
     platform: shell.platform,
+    processFacts,
   });
 }
 
@@ -755,8 +878,9 @@ async function runSpawnedCommand(
   relativeCwd: string,
   timeoutMs: number,
   abortSignal: AbortSignal | undefined,
-  options: { readonly commandLine: string; readonly windowsVerbatimArguments?: boolean }
-): Promise<CommandExecutionResult> {
+  options: { readonly commandLine: string; readonly windowsVerbatimArguments?: boolean },
+  processFacts: CommandProcessFacts | undefined
+): Promise<CommandExecutionOutcome> {
   const logTarget = await createCommandLogTarget(options.commandLine);
   return new Promise((resolve, reject) => {
     let settled = false;
@@ -766,6 +890,7 @@ async function runSpawnedCommand(
     let terminationTimer: ReturnType<typeof setTimeout> | undefined;
     let abortHandler: (() => void) | undefined;
     let child: ChildProcess;
+    let processId: string | undefined;
     let logFd: number | undefined = openSync(logTarget.path, "a");
     const stdout = createBoundedOutputCollector(MAX_COMMAND_STDOUT_CHARS);
     const stderr = createBoundedOutputCollector(MAX_COMMAND_STDERR_CHARS);
@@ -835,16 +960,23 @@ async function runSpawnedCommand(
         abortSignal?.removeEventListener("abort", abortHandler);
       }
       closeLog();
+      markCommandProcessExited(processFacts, processId, {
+        exitCode: value.exitCode,
+        signal: value.signal,
+      });
       if (value.truncated === true) {
         resolve({
-          ...value,
-          logRef: logTarget.ref,
-          logPath: logTarget.path,
+          result: {
+            ...value,
+            logRef: logTarget.ref,
+            logPath: logTarget.path,
+          },
+          processId,
         });
         return;
       }
       removeLog();
-      resolve(value);
+      resolve({ result: value, processId });
     };
     const requestTermination = () => {
       terminateProcessTree(child);
@@ -875,6 +1007,14 @@ async function runSpawnedCommand(
       reject(error);
       return;
     }
+    processId = registerCommandProcess(processFacts, {
+      kind: "foreground",
+      pid: child.pid,
+      commandLine: options.commandLine,
+      cwd: workingDirectory,
+      startedAt: new Date().toISOString(),
+      status: "running",
+    });
     if (child.stdout === null || child.stderr === null) {
       closeLog();
       removeLog();
@@ -891,6 +1031,7 @@ async function runSpawnedCommand(
       if (abortHandler !== undefined) {
         abortSignal?.removeEventListener("abort", abortHandler);
       }
+      markCommandProcessExited(processFacts, processId, {});
       closeLog();
       removeLog();
       reject(error);
@@ -933,6 +1074,8 @@ async function enrichCommandResult(input: {
   readonly waitForPortTimeoutMs: number;
   readonly startedAt: number;
   readonly abortSignal: AbortSignal | undefined;
+  readonly processRegistry: LocalCommandProcessRegistry | undefined;
+  readonly processId?: string;
 }): Promise<CommandExecutionResult> {
   if (input.waitForPort === undefined) {
     return {
@@ -952,11 +1095,15 @@ async function enrichCommandResult(input: {
       ),
     };
   }
-  const portWait = await waitForLocalhostPort({
+  const portWait = await waitForLocalPort({
     port: input.waitForPort,
+    host: "127.0.0.1",
     timeoutMs: input.waitForPortTimeoutMs,
+    probeTimeoutMs: 250,
+    pollIntervalMs: 100,
     abortSignal: input.abortSignal,
   });
+  appendCommandPortFact(input.processRegistry, input.processId, processPortFactFromLocalPortFact(portWait));
   const portReady = portWait.ready;
   const durationMs = Date.now() - input.startedAt;
   return {
@@ -982,76 +1129,6 @@ async function enrichCommandResult(input: {
   };
 }
 
-async function waitForLocalhostPort(input: {
-  readonly port: number;
-  readonly timeoutMs: number;
-  readonly abortSignal: AbortSignal | undefined;
-}): Promise<{ readonly ready: boolean; readonly cancelled: boolean }> {
-  const deadline = Date.now() + input.timeoutMs;
-  do {
-    if (input.abortSignal?.aborted === true) {
-      return { ready: false, cancelled: true };
-    }
-    if (await canConnectToLocalhostPort(input.port)) {
-      return { ready: true, cancelled: false };
-    }
-    try {
-      await delay(Math.min(PORT_POLL_INTERVAL_MS, Math.max(0, deadline - Date.now())), input.abortSignal);
-    } catch (error) {
-      if (Boolean(input.abortSignal?.aborted)) {
-        return { ready: false, cancelled: true };
-      }
-      throw error;
-    }
-  } while (Date.now() < deadline);
-  return { ready: false, cancelled: false };
-}
-
-function canConnectToLocalhostPort(port: number): Promise<boolean> {
-  return new Promise((resolve) => {
-    const socket = createConnection({ host: "127.0.0.1", port });
-    let settled = false;
-    const settle = (ready: boolean) => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      socket.destroy();
-      resolve(ready);
-    };
-    socket.setTimeout(PORT_CONNECT_TIMEOUT_MS);
-    socket.once("connect", () => settle(true));
-    socket.once("timeout", () => settle(false));
-    socket.once("error", () => settle(false));
-  });
-}
-
-function delay(ms: number, abortSignal: AbortSignal | undefined): Promise<void> {
-  if (ms <= 0) {
-    return Promise.resolve();
-  }
-  return new Promise((resolve, reject) => {
-    let settled = false;
-    const timer = setTimeout(() => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      abortSignal?.removeEventListener("abort", onAbort);
-      resolve();
-    }, ms);
-    const onAbort = () => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      clearTimeout(timer);
-      reject(new Error("Command execution cancelled."));
-    };
-    abortSignal?.addEventListener("abort", onAbort, { once: true });
-  });
-}
-
 function appendCommandDiagnostic(existing: string, message: string): string {
   return existing.trim().length === 0 ? message : `${existing.replace(/\s*$/u, "")}\n${message}`;
 }
@@ -1068,13 +1145,15 @@ async function runBackgroundCommand(input: {
   readonly logTarget?: CommandLogTarget;
   readonly captureMode?: "stdio" | "shell-redirection";
   readonly windowsVerbatimArguments?: boolean;
-}): Promise<CommandExecutionResult> {
+  readonly processFacts?: CommandProcessFacts;
+}): Promise<CommandExecutionOutcome> {
   const logTarget = input.logTarget ?? await createCommandLogTarget(input.commandLine);
   const logPath = logTarget.path;
   const captureMode = input.captureMode ?? "stdio";
   const logFd = captureMode === "stdio" ? openSync(logPath, "a") : undefined;
   let child: ChildProcess | undefined;
   let earlyExit: { readonly code: number | null; readonly signal: NodeJS.Signals | null } | undefined;
+  const startedAt = new Date().toISOString();
   try {
     child = spawn(input.file, [...input.args], {
       cwd: input.workingDirectory,
@@ -1097,26 +1176,52 @@ async function runBackgroundCommand(input: {
   if (child === undefined) {
     throw new Error("Failed to start background command.");
   }
+  const pid = child.pid;
   if (earlyExit !== undefined) {
-    const logPreview = await readBackgroundLogPreview(logPath);
-    const stderr = `Background command exited before it stayed running${earlyExit.signal == null ? "" : ` with signal ${earlyExit.signal}`}.`;
-    return {
-      stdout: logPreview.text,
-      stderr,
+    const processId = registerCommandProcess(input.processFacts, {
+      kind: "background",
+      pid,
+      commandLine: input.commandLine,
+      cwd: input.workingDirectory,
+      startedAt,
+      status: "exited",
       exitCode: typeof earlyExit.code === "number" ? earlyExit.code : COMMAND_CANCELLED_EXIT_CODE,
-      cwd: input.relativeCwd,
       signal: earlyExit.signal ?? undefined,
       logRef: logTarget.ref,
       logPath,
-      stdoutChars: logPreview.chars,
-      stderrChars: stderr.length,
-      stdoutOmittedChars: logPreview.omittedChars,
-      stderrOmittedChars: 0,
-      truncated: logPreview.truncated,
+    });
+    const logPreview = await readBackgroundLogPreview(logPath);
+    const stderr = `Background command exited before it stayed running${earlyExit.signal == null ? "" : ` with signal ${earlyExit.signal}`}.`;
+    return {
+      processId,
+      result: {
+        stdout: logPreview.text,
+        stderr,
+        exitCode: typeof earlyExit.code === "number" ? earlyExit.code : COMMAND_CANCELLED_EXIT_CODE,
+        cwd: input.relativeCwd,
+        signal: earlyExit.signal ?? undefined,
+        logRef: logTarget.ref,
+        logPath,
+        stdoutChars: logPreview.chars,
+        stderrChars: stderr.length,
+        stdoutOmittedChars: logPreview.omittedChars,
+        stderrOmittedChars: 0,
+        truncated: logPreview.truncated,
+      },
     };
   }
-  const pid = child.pid;
   const stopCommand = pid === undefined ? undefined : stopCommandForPid(pid, input.platform, input.stopShellSyntax);
+  const processId = registerCommandProcess(input.processFacts, {
+    kind: "background",
+    pid,
+    commandLine: input.commandLine,
+    cwd: input.workingDirectory,
+    startedAt,
+    status: "running",
+    logRef: logTarget.ref,
+    logPath,
+    stopCommand,
+  });
   const initialLogPreview = await readBackgroundLogPreview(logPath, BACKGROUND_LOG_PREVIEW_CHARS);
   const stdout = [
     `Started background process${pid === undefined ? "" : ` pid ${pid}`}.`,
@@ -1125,20 +1230,23 @@ async function runBackgroundCommand(input: {
     initialLogPreview.text.trim().length === 0 ? undefined : `Initial output:\n${initialLogPreview.text}`,
   ].filter((line): line is string => line !== undefined).join("\n");
   return {
-    stdout,
-    stderr: "",
-    exitCode: 0,
-    cwd: input.relativeCwd,
-    background: true,
-    pid,
-    logRef: logTarget.ref,
-    logPath,
-    stopCommand,
-    stdoutChars: stdout.length + initialLogPreview.omittedChars,
-    stderrChars: 0,
-    stdoutOmittedChars: initialLogPreview.omittedChars,
-    stderrOmittedChars: 0,
-    truncated: initialLogPreview.truncated,
+    processId,
+    result: {
+      stdout,
+      stderr: "",
+      exitCode: 0,
+      cwd: input.relativeCwd,
+      background: true,
+      pid,
+      logRef: logTarget.ref,
+      logPath,
+      stopCommand,
+      stdoutChars: stdout.length + initialLogPreview.omittedChars,
+      stderrChars: 0,
+      stdoutOmittedChars: initialLogPreview.omittedChars,
+      stderrOmittedChars: 0,
+      truncated: initialLogPreview.truncated,
+    },
   };
 }
 

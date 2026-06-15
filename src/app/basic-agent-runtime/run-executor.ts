@@ -119,6 +119,7 @@ export class BasicAgentRunExecutor {
 
   async cancel(runId: string): Promise<BasicAgentRun> {
     const job = this.requireJob(runId);
+    const shouldCleanup = !isTerminalBasicAgentRunJob(job);
     this.pendingContinuations.deleteForRun(runId);
     this.config.abortControllers.get(runId)?.abort();
     this.config.runJobs.cancel(runId, {
@@ -133,6 +134,9 @@ export class BasicAgentRunExecutor {
     });
     const cancelled = this.requireJob(runId);
     this.syncRunEvents(cancelled);
+    if (shouldCleanup && cancelled.status === "cancelled") {
+      await this.cleanupRunResources(runId);
+    }
     await this.config.onRunFinished(cancelled);
     await this.config.persistRun(cancelled);
     return this.requireBasicRun(runId);
@@ -282,6 +286,14 @@ export class BasicAgentRunExecutor {
       throw new Error(`Basic Agent run projection not found: ${runId}`);
     }
     return run;
+  }
+
+  private async cleanupRunResources(runId: string): Promise<void> {
+    try {
+      await this.config.cleanupRunResources?.(runId);
+    } catch {
+      // Cleanup failures must not rewrite the already-cancelled run outcome.
+    }
   }
 
   private scheduleConfirmationResume(input: {
@@ -503,4 +515,8 @@ function missingTerminalExecutionResult(result: BasicAgentRunExecutionResult): B
       message: "执行适配器没有返回明确的完成、失败、阻塞或等待用户判断状态，运行不能按完成处理。",
     },
   };
+}
+
+function isTerminalBasicAgentRunJob(job: BasicAgentRunJob): boolean {
+  return job.status === "completed" || job.status === "failed" || job.status === "cancelled" || job.status === "blocked";
 }

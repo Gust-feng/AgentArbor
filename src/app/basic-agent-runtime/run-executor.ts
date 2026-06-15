@@ -56,6 +56,7 @@ export class BasicAgentRunExecutor {
       runAfterRunId: startInput.runAfterRunId,
       taskSoilInput: startInput.taskSoilInput,
       reasoningEffort: startInput.reasoningEffort,
+      toolConfirmationPolicy: startInput.toolConfirmationPolicy,
       agentDefinitionRef: startFacts.agentDefinitionRef,
       config: startFacts.config,
       informationAccess: startFacts.informationAccess,

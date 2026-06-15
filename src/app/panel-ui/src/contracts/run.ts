@@ -1,6 +1,6 @@
 import type { ObservationRef, TaskStatus } from "./common";
 import type { ContextAttachment } from "./context";
-import type { ToolDisplayProjection } from "./tools";
+import type { ToolDisplayProjection, ToolErrorFacts, ToolResultEnvelope } from "./tools";
 import type {
   PanelBasicAgentReplay,
   PanelBasicAgentRunDetail,
@@ -97,8 +97,10 @@ export type RunEvent = {
     readonly exitCode?: number;
     readonly preview?: string;
     readonly display?: ToolDisplayProjection;
+    readonly envelope?: ToolResultEnvelope;
     readonly truncated?: boolean;
     readonly error?: string;
+    readonly errorFacts?: ToolErrorFacts;
   };
 };
 
@@ -120,7 +122,9 @@ export type PanelStreamEvent = {
     readonly exitCode?: number;
     readonly preview?: string;
     readonly display?: ToolDisplayProjection;
+    readonly envelope?: ToolResultEnvelope;
     readonly error?: string;
+    readonly errorFacts?: ToolErrorFacts;
     readonly truncated?: boolean;
   };
 };

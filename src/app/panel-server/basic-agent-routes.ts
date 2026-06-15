@@ -5,6 +5,7 @@ import {
   basicRunFromRuntimeSnapshot,
   basicRunReplayFromRuntimeSnapshot,
   BasicAgentConfirmationDecisionError,
+  projectRunStreamEventToRunEvent,
   submitRestoredBasicConfirmationDecision,
   type BasicAgentRunExecutor,
 } from "../basic-agent-runtime/index.js";
@@ -238,10 +239,13 @@ async function handleGetBasicRunStreamRequest(
       return;
     }
     syncLiveRunEvents(job);
-    const replay = runtime.runExecutor.replayEvents(runId, lastSequence);
-    for (const event of replay?.events ?? []) {
-      writeSseEvent(response, event);
-      lastSequence = event.sequence;
+    for (const event of job.streamEvents) {
+      if (event.sequence <= lastSequence) {
+        continue;
+      }
+      const runEvent = projectRunStreamEventToRunEvent(event);
+      writeSseEvent(response, runEvent);
+      lastSequence = runEvent.sequence;
     }
     const run = runtime.runExecutor.get(runId);
     if (run !== undefined && shouldCloseBasicRunStream(run.status)) {

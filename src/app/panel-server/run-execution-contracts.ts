@@ -10,6 +10,7 @@ import type {
   ToolStateSettings,
 } from "../../domain/config/index.js";
 import type { ModelOutputDelta } from "../../domain/intelligence/index.js";
+import type { ToolConfirmationPolicy } from "../../domain/tools/index.js";
 import type { EventLogEntry } from "../../kernel/events/in-memory-event-log.js";
 import type { AgentRunTreeAttachment } from "../agent-run-tree-attachment.js";
 import type { AgentDefinition } from "../agent-prompts/contracts.js";
@@ -54,6 +55,7 @@ export type PanelRunExecutionOptions = {
   readonly capabilitySnapshot?: BasicAgentCapabilitySnapshot;
   readonly informationAccess?: SanitizedInformationAccessConfig;
   readonly reasoningEffort?: ModelRunReasoningEffort;
+  readonly toolConfirmationPolicy?: ToolConfirmationPolicy;
   readonly abortSignal?: AbortSignal;
   readonly onRuntimeReady?: (context: PanelRuntimeReadyContext) => void;
   readonly onModelOutputDelta?: (delta: ModelOutputDelta) => void;

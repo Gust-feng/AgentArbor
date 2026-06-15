@@ -686,8 +686,10 @@ function persistedToolStreamDetail(call: RuntimeToolCallRecord): PanelRunStreamE
     exitCode: call.exitCode,
     preview: call.error ?? cleanOrdinaryToolText(call.preview) ?? cleanOrdinaryToolText(call.summary),
     display: call.display,
+    envelope: call.envelope,
     truncated: call.truncated,
     error: call.error,
+    errorFacts: call.errorFacts,
   };
 }
 

@@ -51,13 +51,105 @@ test("shell_command reports factual truncation and omitted counts only after out
     assert.equal(output.truncated, true);
     assert.equal(result.stdoutTruncated, true);
     assert.equal(result.stderrTruncated, true);
-    assert.equal(String(result.stdout).length, 64_000);
-    assert.equal(String(result.stderr).length, 32_000);
+    assert.equal(String(result.stdout).length, 16_000);
+    assert.equal(String(result.stderr).length, 8_000);
     assert.equal(result.stdoutChars, stdoutChars);
     assert.equal(result.stderrChars, stderrChars);
-    assert.equal(result.stdoutOmittedChars, stdoutChars - 64_000);
-    assert.equal(result.stderrOmittedChars, stderrChars - 32_000);
+    assert.equal(result.stdoutOmittedChars, stdoutChars - 16_000);
+    assert.equal(result.stderrOmittedChars, stderrChars - 8_000);
     assert.doesNotMatch(JSON.stringify(output), suggestionPattern);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("ToolCenter preserves command logRef in model-visible command facts", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tool-facts-shell-log-ref-"));
+  try {
+    const registry = createDesktopBasicToolRegistry({
+      env: {},
+      workspaceRoot: root,
+      playwrightAvailable: false,
+      toolCatalogNames: ["shell_command"],
+    });
+    const center = registry.createToolCenter("desktop-basic");
+    const result = await center.execute(
+      {
+        callId: "call-shell-log-ref",
+        toolName: "shell_command",
+        input: {
+          command: process.execPath,
+          args: ["-e", "process.stdout.write('z'.repeat(20000));"],
+        },
+      },
+      context,
+      {
+        callerAgentId: context.callerAgentId,
+        allowedTools: ["shell_command"],
+        approvedConfirmationIds: ["confirmation-call-shell-log-ref"],
+      }
+    );
+
+    const agentContent = asRecord(result.projection?.agentContent);
+
+    assert.equal(result.status, "completed");
+    assert.equal(agentContent.truncated, true);
+    assert.equal(agentContent.stdoutTruncated, true);
+    assert.match(String(agentContent.logRef), /^command-log:\/\/[^\\/]+$/);
+    assert.equal(typeof agentContent.logPath, "string");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("ToolCenter read can consume shell_command command-log refs", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tool-facts-shell-log-read-"));
+  try {
+    const registry = createDesktopBasicToolRegistry({
+      env: {},
+      workspaceRoot: root,
+      playwrightAvailable: false,
+      toolCatalogNames: ["shell_command", "read"],
+    });
+    const center = registry.createToolCenter("desktop-basic");
+    const shellResult = await center.execute(
+      {
+        callId: "call-shell-log-readable",
+        toolName: "shell_command",
+        input: {
+          command: process.execPath,
+          args: ["-e", "process.stdout.write('readable-log-start\\n' + 'q'.repeat(20000) + '\\nreadable-log-end');"],
+        },
+      },
+      context,
+      {
+        callerAgentId: context.callerAgentId,
+        allowedTools: ["shell_command", "read"],
+        approvedConfirmationIds: ["confirmation-call-shell-log-readable"],
+      }
+    );
+    const logRef = String(asRecord(asRecord(shellResult.output).result).logRef);
+
+    const readResult = await center.execute(
+      { callId: "call-read-command-log", toolName: "read", input: { ref: logRef, maxLength: 30_000 } },
+      context,
+      {
+        callerAgentId: context.callerAgentId,
+        allowedTools: ["shell_command", "read"],
+      }
+    );
+    const read = asRecord(readResult.output);
+    const readContent = asRecord(read.result);
+
+    assert.equal(shellResult.status, "completed");
+    assert.match(logRef, /^command-log:\/\/[^\\/]+$/);
+    assert.equal(readResult.status, "completed");
+    assert.equal(read.status, "completed");
+    assert.equal(readContent.source, "command_log");
+    assert.equal(readContent.uri, logRef);
+    assert.match(String(readContent.contentPreview), /readable-log-start/);
+    assert.match(String(readContent.contentPreview), /readable-log-end/);
+    assert.equal(JSON.stringify(readContent.metadata).includes(String(asRecord(asRecord(shellResult.output).result).logPath)), false);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

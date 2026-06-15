@@ -44,6 +44,23 @@ export type ToolVisibleResultPolicy = {
   readonly omitRawOutput: boolean;
 };
 
+export type ToolErrorDomain =
+  | "tool_error"
+  | "runtime_error"
+  | "model_error"
+  | "ui_submit_error"
+  | "process_error";
+
+export type ToolErrorFactValue =
+  | string
+  | number
+  | boolean
+  | null
+  | readonly ToolErrorFactValue[]
+  | { readonly [key: string]: ToolErrorFactValue };
+
+export type ToolErrorFacts = Readonly<Record<string, ToolErrorFactValue>>;
+
 export type ToolRuntimeHint =
   | {
       readonly kind: "command_shell";
@@ -85,6 +102,8 @@ export type ToolResultEnvelope = {
   readonly redacted: boolean;
   readonly diagnosticRef?: string;
   readonly rawRetention: "none" | "diagnostic_ref_only";
+  readonly errorDomain?: ToolErrorDomain;
+  readonly errorFacts?: ToolErrorFacts;
 };
 
 export type ToolDisplayProjection =
@@ -92,6 +111,7 @@ export type ToolDisplayProjection =
       readonly kind: "search_results";
       readonly query?: string;
       readonly status?: string;
+      readonly message?: string;
       readonly results: readonly {
         readonly title: string;
         readonly url?: string;
@@ -113,6 +133,8 @@ export type ToolDisplayProjection =
       readonly contentPreview?: string;
       readonly summary?: string;
       readonly preview?: string;
+      readonly error?: string;
+      readonly errorFacts?: ToolErrorFacts;
       readonly truncated?: boolean;
     }
   | {
@@ -163,6 +185,7 @@ export type ToolDisplayProjection =
       readonly timedOut?: boolean;
       readonly background?: boolean;
       readonly pid?: number;
+      readonly logRef?: string;
       readonly logPath?: string;
       readonly stopCommand?: string;
       readonly durationMs?: number;
@@ -205,6 +228,8 @@ export type ToolCallResult = {
   readonly output: unknown;
   readonly status: "completed" | "failed" | "approval_required" | "cancelled";
   readonly error?: string;
+  readonly errorDomain?: ToolErrorDomain;
+  readonly errorFacts?: ToolErrorFacts;
   readonly durationMs: number;
   readonly projection?: ToolSafeProjection;
   readonly confirmationRequest?: ConfirmationRequest;
@@ -235,6 +260,7 @@ export type ToolSecurityDecision =
 export type ToolSecurityEvaluationContext = {
   readonly platform: NodeJS.Platform;
   readonly approvedConfirmationIds?: readonly string[];
+  readonly confirmationPolicy?: ToolConfirmationPolicy;
   readonly workspaceRoot?: string;
 };
 
@@ -253,7 +279,10 @@ export type ToolPermissionCheck = {
   readonly callerAgentId: string;
   readonly allowedTools: readonly string[];
   readonly approvedConfirmationIds?: readonly string[];
+  readonly confirmationPolicy?: ToolConfirmationPolicy;
 };
+
+export type ToolConfirmationPolicy = "prompt" | "full_access";
 
 export type SandboxOperation =
   | "read"

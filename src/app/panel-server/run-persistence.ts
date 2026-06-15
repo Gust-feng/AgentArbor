@@ -20,7 +20,7 @@ import {
   toRuntimeModelCallRecord,
   toRuntimeToolCallRecords,
 } from "./runtime-records.js";
-import { syncPanelRunStreamEventsForJob } from "./run-stream-sync.js";
+import { persistentPanelRunStreamEvents, syncPanelRunStreamEventsForJob } from "./run-stream-sync.js";
 
 export type PanelRunPersistenceRuntime = {
   readonly runJobs: PanelRunJobStore;
@@ -93,7 +93,7 @@ async function persistPanelRunNow(
   });
   const statusPayload = panelRunPayloadForStatus(job);
   const transcriptPayload = statusPayload === undefined || !("observation" in statusPayload) ? undefined : statusPayload;
-  const streamEvents = syncPanelRunStreamEventsForJob(runtime, job);
+  const streamEvents = persistentPanelRunStreamEvents(syncPanelRunStreamEventsForJob(runtime, job));
   const basicRun = runtime.runExecutor.get(job.runId);
   const basicReplay = runtime.runExecutor.replayEvents(job.runId, 0);
   const transcript = createPanelRunTranscript({

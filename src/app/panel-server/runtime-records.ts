@@ -1,6 +1,12 @@
 import path from "node:path";
 import type { SanitizedWorkspaceConfig } from "../../domain/config/index.js";
 import type {
+  ToolErrorDomain,
+  ToolErrorFacts,
+  ToolResultEnvelope,
+} from "../../domain/tools/index.js";
+import { isToolErrorDomain, normalizeToolErrorFacts } from "../../domain/tools/index.js";
+import type {
   RuntimeArtifactRecord,
   RuntimeConfirmationRecord,
   RuntimeEventRecord,
@@ -30,12 +36,7 @@ import { sanitizeAssistantVisibleText } from "../visible-text-safety.js";
 import { confirmationActionSummaryText } from "../confirmation-copy.js";
 import { asRecord, optionalString, unique } from "./request-parsers.js";
 
-export type RuntimeErrorDomain =
-  | "tool_error"
-  | "runtime_error"
-  | "model_error"
-  | "ui_submit_error"
-  | "process_error";
+export type RuntimeErrorDomain = ToolErrorDomain;
 
 export type RuntimeRunRecordWithErrorDomain = RuntimeRunRecord & {
   readonly error?: RuntimeRunRecord["error"] & {
@@ -45,9 +46,8 @@ export type RuntimeRunRecordWithErrorDomain = RuntimeRunRecord & {
 
 export type RuntimeToolCallRecordWithErrorDomain = RuntimeToolCallRecord & {
   readonly errorDomain?: RuntimeErrorDomain;
-  readonly envelope?: RuntimeToolCallRecord["envelope"] & {
-    readonly errorDomain?: RuntimeErrorDomain;
-  };
+  readonly errorFacts?: ToolErrorFacts;
+  readonly envelope?: ToolResultEnvelope;
 };
 
 export function createRuntimeWorkspaceRecord(
@@ -180,6 +180,7 @@ export function toRuntimeToolCallRecords(
         envelope: event.detail?.envelope ?? detail?.envelope ?? previous?.envelope,
         truncated: event.detail?.truncated ?? detail?.truncated ?? previous?.truncated,
         error: event.detail?.error ?? detail?.error ?? previous?.error,
+        errorFacts: event.detail?.errorFacts ?? (event.detail?.envelope ?? detail?.envelope ?? previous?.envelope)?.errorFacts ?? detail?.errorFacts ?? previous?.errorFacts,
         errorDomain: inferToolCallErrorDomain({
           eventType: event.type,
           toolName: event.toolName ?? previous?.toolName,
@@ -297,6 +298,10 @@ export function compactRuntimeText(value: string, maxLength: number): string {
     return normalized;
   }
   return `${normalized.slice(0, Math.max(0, maxLength - 1))}…`;
+}
+
+function compactFactsText(facts: ToolErrorFacts): string {
+  return JSON.stringify(facts).slice(0, 500);
 }
 
 function confirmationRecordTitle(status: RuntimeConfirmationRecord["status"]): string {
@@ -476,13 +481,7 @@ function errorDomainFromUnknown(value: unknown): RuntimeErrorDomain | undefined 
 }
 
 function errorDomainOrUndefined(value: unknown): RuntimeErrorDomain | undefined {
-  return value === "tool_error" ||
-    value === "runtime_error" ||
-    value === "model_error" ||
-    value === "ui_submit_error" ||
-    value === "process_error"
-    ? value
-    : undefined;
+  return isToolErrorDomain(value) ? value : undefined;
 }
 
 function isModelErrorCode(code: string): boolean {
@@ -531,8 +530,8 @@ function isProcessTool(toolName: string | undefined): boolean {
 
 function localToolDetailsByCallId(
   eventEntries: readonly EventLogEntry[]
-): Map<string, Pick<RuntimeToolCallRecordWithErrorDomain, "action" | "path" | "query" | "command" | "exitCode" | "summary" | "preview" | "display" | "envelope" | "truncated" | "error" | "errorDomain">> {
-  const details = new Map<string, Pick<RuntimeToolCallRecordWithErrorDomain, "action" | "path" | "query" | "command" | "exitCode" | "summary" | "preview" | "display" | "envelope" | "truncated" | "error" | "errorDomain">>();
+): Map<string, Pick<RuntimeToolCallRecordWithErrorDomain, "action" | "path" | "query" | "command" | "exitCode" | "summary" | "preview" | "display" | "envelope" | "truncated" | "error" | "errorDomain" | "errorFacts">> {
+  const details = new Map<string, Pick<RuntimeToolCallRecordWithErrorDomain, "action" | "path" | "query" | "command" | "exitCode" | "summary" | "preview" | "display" | "envelope" | "truncated" | "error" | "errorDomain" | "errorFacts">>();
   for (const entry of eventEntries) {
     if (entry.type !== "tool.completed" && entry.type !== "tool.failed") {
       continue;
@@ -560,6 +559,7 @@ function localToolDetailsByCallId(
       envelope,
       truncated: output.truncated === true,
       error,
+      errorFacts: envelope?.errorFacts,
       errorDomain: inferToolCallErrorDomain({
         eventType: entry.type === "tool.failed" ? "tool.failed" : "tool.completed",
         toolName: optionalString(payload.toolName),
@@ -609,6 +609,7 @@ function toolResultEnvelopeOrUndefined(value: unknown): RuntimeToolCallRecordWit
     diagnosticRef: optionalString(record.diagnosticRef),
     rawRetention,
     errorDomain: errorDomainOrUndefined(record.errorDomain),
+    errorFacts: normalizeToolErrorFacts(record.errorFacts),
   };
 }
 
@@ -646,6 +647,18 @@ function persistedToolPreview(
     });
     return lines.length === 0 ? cleanOrdinaryToolText(optionalString(output.summary)) : lines.join("\n");
   }
+  if (toolName === "search") {
+    const display = toolDisplayOrUndefined(output.display);
+    if (display?.kind === "search_results") {
+      return compactRuntimeText([
+        display.query,
+        display.status,
+        display.message,
+        `results: ${display.results.length}`,
+      ].filter((item): item is string => item !== undefined && item.length > 0).join(" · "), 900);
+    }
+    return cleanOrdinaryToolText(optionalString(output.summary));
+  }
   if (toolName === "write_file" || toolName === "create_file" || toolName === "edit_file" || toolName === "delete_file") {
     return persistedFileChangePreview(toolName, asRecord(payload.input), output, result);
   }
@@ -679,16 +692,47 @@ function persistedToolPreview(
     );
   }
   if (toolName === "read") {
+    const display = toolDisplayOrUndefined(output.display);
+    if (display?.kind === "read_result") {
+      return persistedReadPreviewFromDisplay(display, asRecord(payload.input));
+    }
+    const envelope = toolResultEnvelopeOrUndefined(output.envelope);
+    if (envelope?.agentSummary !== undefined) {
+      return compactRuntimeText(envelope.agentSummary, 900);
+    }
     const title = optionalString(result.title);
     const uri = optionalString(result.uri);
     const contentPreview = optionalString(result.contentPreview);
+    const error = optionalString(output.error);
+    const errorFacts = normalizeToolErrorFacts(output.errorFacts);
     const headline = [title, uri].filter((item): item is string => item !== undefined).join(" · ");
     return compactRuntimeText(
-      [headline, contentPreview].filter((item): item is string => typeof item === "string" && item.length > 0).join("\n"),
+      [
+        headline,
+        error,
+        errorFacts === undefined ? undefined : `errorFacts: ${compactFactsText(errorFacts)}`,
+        contentPreview,
+      ].filter((item): item is string => typeof item === "string" && item.length > 0).join("\n"),
       900
     );
   }
   return cleanOrdinaryToolText(optionalString(output.summary));
+}
+
+function persistedReadPreviewFromDisplay(
+  display: Extract<RuntimeToolCallRecord["display"], { readonly kind: "read_result" }>,
+  input: Readonly<Record<string, unknown>>
+): string | undefined {
+  const headline = [
+    display.status,
+    display.title ?? display.uri ?? display.url ?? display.ref ?? optionalString(input.ref),
+  ].filter((item): item is string => item !== undefined).join(" · ");
+  return compactRuntimeText([
+    headline,
+    display.error,
+    display.errorFacts === undefined ? undefined : `errorFacts: ${compactFactsText(display.errorFacts)}`,
+    display.contentPreview,
+  ].filter((item): item is string => typeof item === "string" && item.length > 0).join("\n"), 900);
 }
 
 function persistedFileChangePreview(

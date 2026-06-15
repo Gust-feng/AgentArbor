@@ -1,7 +1,12 @@
 import type React from "react";
 import { postJson } from "./api";
 import { taskSoilInputFromAttachments } from "./app-attachments";
-import { runReasoningSettings, type ComposerReasoningEffort, type VisibleAiMode } from "./app-config-projection";
+import {
+  runReasoningSettings,
+  type ComposerReasoningEffort,
+  type ComposerToolConfirmationPolicy,
+  type VisibleAiMode,
+} from "./app-config-projection";
 import { loadObservedRunReadModel } from "./app-observed-run-read-model";
 import {
   createRunReadModelPatch,
@@ -38,6 +43,7 @@ export type PanelTaskSubmissionOptions = {
   readonly goal: string;
   readonly aiMode: VisibleAiMode;
   readonly composerReasoningEffort: ComposerReasoningEffort;
+  readonly toolConfirmationPolicy: ComposerToolConfirmationPolicy;
   readonly selectedModelId: string;
   readonly selectedModelSupportsReasoningEffort: boolean;
   readonly mountedRef: React.MutableRefObject<boolean>;
@@ -102,6 +108,7 @@ export async function submitPanelTask(
     }>(path, {
       goal: trimmed,
       aiMode: options.aiMode,
+      toolConfirmationPolicy: options.toolConfirmationPolicy,
       modelOverride: modelOverrideFromSelectedOption(options.selectedModelId),
       taskSoilInput: taskSoilInputFromAttachments(options.attachments),
       ...runReasoningSettings(options.composerReasoningEffort, options.selectedModelSupportsReasoningEffort),

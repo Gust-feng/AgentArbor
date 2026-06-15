@@ -24,6 +24,7 @@ import {
   createDefaultCommandShellConfig,
   createLocalRunCommandTool,
   createLocalShellCommandTool,
+  readLocalCommandLogRef,
 } from "../tool-center/adapters/local-workspace-command-tools.js";
 import {
   createLocalWorkspaceSandboxPolicy,
@@ -84,6 +85,9 @@ export function createDesktopBasicToolRegistry(
     tavilyFetch: options.fetch,
     pageFetch: options.fetch as unknown as PageFetchLike,
     codebaseRoot: workspaceRoot,
+    commandLogRegistry: {
+      read: readLocalCommandLogRef,
+    },
     constraints: options.runtime?.constraints,
     sourcePreference: options.sourcePreference ?? parseInformationSourcePreference(env.AGENTARBOR_INFORMATION_SOURCE_PREFERENCE),
     tavilyMaxResults: options.tavilyMaxResults ?? positiveIntegerFromString(env.AGENTARBOR_TAVILY_MAX_RESULTS),
@@ -186,7 +190,8 @@ function informationSourceOrUndefined(value: string): InformationSourceKind | un
     value === "run_memory" ||
     value === "docs" ||
     value === "packages" ||
-    value === "github"
+    value === "github" ||
+    value === "command_log"
   ) {
     return value;
   }

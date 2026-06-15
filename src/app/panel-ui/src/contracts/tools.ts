@@ -1,8 +1,19 @@
+export type ToolErrorFactValue =
+  | string
+  | number
+  | boolean
+  | null
+  | readonly ToolErrorFactValue[]
+  | { readonly [key: string]: ToolErrorFactValue };
+
+export type ToolErrorFacts = Readonly<Record<string, ToolErrorFactValue>>;
+
 export type ToolDisplayProjection =
   | {
       readonly kind: "search_results";
       readonly query?: string;
       readonly status?: string;
+      readonly message?: string;
       readonly results: readonly { readonly title: string; readonly url?: string; readonly summary?: string; readonly snippet?: string; readonly refId?: string; readonly source?: string }[];
       readonly truncated?: boolean;
     }
@@ -16,6 +27,8 @@ export type ToolDisplayProjection =
       readonly uri?: string;
       readonly sourceSearchRef?: string;
       readonly contentPreview?: string;
+      readonly error?: string;
+      readonly errorFacts?: ToolErrorFacts;
       readonly truncated?: boolean;
     }
   | {
@@ -60,6 +73,7 @@ export type ToolDisplayProjection =
       readonly cancelled?: boolean;
       readonly background?: boolean;
       readonly pid?: number;
+      readonly logRef?: string;
       readonly logPath?: string;
       readonly stopCommand?: string;
       readonly durationMs?: number;
@@ -80,6 +94,19 @@ export type ToolDisplayProjection =
       readonly summary?: string;
       readonly items?: readonly string[];
     };
+
+export type ToolResultEnvelope = {
+  readonly agentSummary: string;
+  readonly evidenceRefs: readonly string[];
+  readonly uiDisplay?: ToolDisplayProjection;
+  readonly tokenEstimate: number;
+  readonly truncated: boolean;
+  readonly redacted: boolean;
+  readonly diagnosticRef?: string;
+  readonly rawRetention: "none" | "diagnostic_ref_only";
+  readonly errorDomain?: string;
+  readonly errorFacts?: ToolErrorFacts;
+};
 
 export type ToolCatalogItem = {
   readonly name: string;

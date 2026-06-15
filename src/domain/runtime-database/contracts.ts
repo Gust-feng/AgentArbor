@@ -6,7 +6,7 @@ import type {
   RunCapabilityResolution,
   SanitizedInformationAccessConfig,
 } from "../config/contracts.js";
-import type { ToolDisplayProjection, ToolResultEnvelope } from "../tools/contracts.js";
+import type { ToolDisplayProjection, ToolErrorDomain, ToolErrorFacts, ToolResultEnvelope } from "../tools/contracts.js";
 import type {
   ObservationProgress,
   ObservationRef,
@@ -104,6 +104,7 @@ export type RuntimeRunRecord = {
   readonly error?: {
     readonly code: string;
     readonly message: string;
+    readonly errorDomain?: ToolErrorDomain;
   };
   readonly agentDefinitionRef?: RunAgentDefinitionRef;
   readonly capabilitySnapshot?: BasicAgentCapabilitySnapshot;
@@ -161,6 +162,8 @@ export type RuntimeToolCallRecord = {
   readonly envelope?: ToolResultEnvelope;
   readonly truncated?: boolean;
   readonly error?: string;
+  readonly errorDomain?: ToolErrorDomain;
+  readonly errorFacts?: ToolErrorFacts;
   readonly eventRefs: readonly string[];
   readonly createdAt?: string;
 };

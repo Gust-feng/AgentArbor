@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { closeSync, existsSync, openSync, promises as fs } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { closeSync, existsSync, openSync, promises as fs, writeSync } from "node:fs";
 import { createConnection } from "node:net";
 import os from "node:os";
 import path from "node:path";
@@ -21,8 +22,8 @@ import {
 
 const MAX_COMMAND_TIMEOUT_MS = 120_000;
 const DEFAULT_COMMAND_TIMEOUT_MS = 30_000;
-const MAX_COMMAND_STDOUT_CHARS = 64_000;
-const MAX_COMMAND_STDERR_CHARS = 32_000;
+const MAX_COMMAND_STDOUT_CHARS = 16_000;
+const MAX_COMMAND_STDERR_CHARS = 8_000;
 const COMMAND_TIMEOUT_EXIT_CODE = 124;
 const COMMAND_CANCELLED_EXIT_CODE = 130;
 const COMMAND_TERMINATION_GRACE_MS = 5_000;
@@ -33,6 +34,10 @@ const DEFAULT_WAIT_FOR_PORT_TIMEOUT_MS = 10_000;
 const MAX_WAIT_FOR_PORT_TIMEOUT_MS = 60_000;
 const PORT_CONNECT_TIMEOUT_MS = 250;
 const PORT_POLL_INTERVAL_MS = 100;
+const COMMAND_LOG_REF_SCHEME = "command-log";
+const COMMAND_LOG_REF_PREFIX = `${COMMAND_LOG_REF_SCHEME}://`;
+const COMMAND_LOG_DIRECTORY_NAME = "agentarbor-command-logs";
+const COMMAND_LOG_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,180}$/u;
 
 type CommandExecutionResult = {
   readonly stdout: string;
@@ -44,6 +49,7 @@ type CommandExecutionResult = {
   readonly signal?: string;
   readonly background?: boolean;
   readonly pid?: number;
+  readonly logRef?: string;
   readonly logPath?: string;
   readonly stopCommand?: string;
   readonly durationMs?: number;
@@ -55,6 +61,20 @@ type CommandExecutionResult = {
   readonly stderrChars?: number;
   readonly stdoutOmittedChars?: number;
   readonly stderrOmittedChars?: number;
+};
+
+type CommandLogTarget = {
+  readonly id: string;
+  readonly ref: string;
+  readonly path: string;
+};
+
+export type LocalCommandLogReadEntry = {
+  readonly refId: string;
+  readonly title: string;
+  readonly uri: string;
+  readonly content: string;
+  readonly metadata: Readonly<Record<string, string | number | boolean>>;
 };
 
 type TextPreview = {
@@ -170,7 +190,7 @@ export function createLocalShellCommandTool(
           : await runBackgroundProgramCommand(commandShell, normalized.legacyProgram, normalized.legacyArgs, normalized.commandLine, cwd.absolutePath, cwd.relativePath, backgroundWaitMs)
         : normalized.legacyProgram === undefined || !executeDirectly
           ? await runShellCommand(commandShell, normalized.commandLine, cwd.absolutePath, cwd.relativePath, timeoutMs, context.abortSignal)
-          : await runProgramCommand(normalized.legacyProgram, normalized.legacyArgs, cwd.absolutePath, cwd.relativePath, timeoutMs, context.abortSignal);
+          : await runProgramCommand(normalized.legacyProgram, normalized.legacyArgs, normalized.commandLine, cwd.absolutePath, cwd.relativePath, timeoutMs, context.abortSignal);
       const result = await enrichCommandResult({
         result: rawResult,
         waitForPort,
@@ -216,7 +236,7 @@ export function createLocalRunCommandTool(
         inputNotes: [
           "Use the same inputs as shell_command: commandLine for shell execution, or command plus args for direct argv execution.",
           "timeoutMs optionally caps execution time.",
-          "background=true starts the command as a detached background process and returns pid, logPath, and stopCommand.",
+          "background=true starts the command as a detached background process and returns pid, logRef, diagnostic logPath, and stopCommand.",
           "waitForPort optionally waits for a localhost TCP port to become reachable after starting a background command.",
           "cwd optionally selects a workspace-relative working directory for this command.",
         ],
@@ -230,7 +250,7 @@ export function createLocalRunCommandTool(
         ],
         outputNotes: [
           "When stdout/stderr are under the preview caps, result.stdout and result.stderr contain the exact command text.",
-          "Returns result.commandLine, result.shell, result.exitCode, result.stdout/result.stderr previews, truncation facts, and timeout/background metadata when relevant.",
+          "Returns result.commandLine, result.shell, result.exitCode, result.stdout/result.stderr previews, truncation facts, controlled logRef, and timeout/background metadata when relevant.",
         ],
         examples: [
           { title: "Compatibility command", input: { commandLine: commandShell.syntax === "cmd" ? "dir" : "pwd" } },
@@ -294,7 +314,7 @@ function shellCommandDefinition(commandShell: SanitizedCommandShellConfig): Tool
         "commandLine is the normal complete shell command line.",
         "command plus args executes a program directly with argv and bypasses shell parsing.",
         "cwd optionally selects a workspace-relative working directory; omit it to run from the workspace root.",
-        "background=true starts a detached process and returns immediately with pid, logPath, and stopCommand.",
+        "background=true starts a detached process and returns immediately with pid, logRef, diagnostic logPath, and stopCommand.",
         `backgroundWaitMs watches a background command for early exit and initial logs; defaults to ${DEFAULT_BACKGROUND_WAIT_MS} and is capped at ${MAX_BACKGROUND_WAIT_MS}.`,
         `waitForPort optionally waits for a localhost TCP port to become reachable after a background command starts; waitForPortTimeoutMs defaults to ${DEFAULT_WAIT_FOR_PORT_TIMEOUT_MS} and is capped at ${MAX_WAIT_FOR_PORT_TIMEOUT_MS}.`,
         `timeoutMs defaults to ${DEFAULT_COMMAND_TIMEOUT_MS} and is capped at ${MAX_COMMAND_TIMEOUT_MS}.`,
@@ -312,7 +332,7 @@ function shellCommandDefinition(commandShell: SanitizedCommandShellConfig): Tool
         "Use this tool for normal filesystem commands such as mkdir, rmdir, copy, move, and recursive cleanup.",
         "Use background=true for dev servers, file watchers, long-running demos, and other commands expected to keep running.",
         "For dev servers, combine background=true with waitForPort so the tool returns only after the local port is reachable or the port wait times out.",
-        "When background=true, do not append shell-native background operators such as POSIX & just to detach the process; the tool already returns pid, logPath, and stopCommand.",
+        "When background=true, do not append shell-native background operators such as POSIX & just to detach the process; the tool already returns pid, logRef, diagnostic logPath, and stopCommand.",
         "Use cwd instead of repeated cd chaining when the command should run inside a project subdirectory.",
         "Before relying on a command, you may probe the environment with ordinary shell commands such as where, which, command -v, or version checks.",
       ],
@@ -322,7 +342,8 @@ function shellCommandDefinition(commandShell: SanitizedCommandShellConfig): Tool
         "result.shell records the shell that executed the command.",
         "result.cwd records the workspace-relative working directory used for the command.",
         "result.timedOut is true when the foreground command exceeded timeoutMs; stdout/stderr contain captured output before termination.",
-        "result.background, result.pid, result.logPath, and result.stopCommand describe detached background commands; these small metadata fields are not shortened by stdout/stderr preview budgeting.",
+        "result.background, result.pid, result.logRef, result.logPath, and result.stopCommand describe detached background commands; these small metadata fields are not shortened by stdout/stderr preview budgeting.",
+        "Use result.logRef as the controlled command-log entry point. result.logPath is retained only as a diagnostic filesystem detail.",
         "result.durationMs records total observed tool execution time; result.portReady records whether waitForPort became reachable.",
         "result.cancelled records foreground command cancellation; result.portWaitCancelled records cancellation while waiting for a background port.",
         "If command and args are provided, execution bypasses shell parsing and uses direct argv execution.",
@@ -389,7 +410,7 @@ function shellCommandDefinition(commandShell: SanitizedCommandShellConfig): Tool
         },
         background: {
           type: "boolean",
-          description: "If true, start the command as a detached background process and return pid, logPath, and stopCommand without waiting for the process to exit.",
+          description: "If true, start the command as a detached background process and return pid, logRef, diagnostic logPath, and stopCommand without waiting for the process to exit.",
         },
         backgroundWaitMs: {
           type: "number",
@@ -449,6 +470,7 @@ function commandToolOutput(input: {
     readonly signal?: string;
     readonly background?: boolean;
     readonly pid?: number;
+    readonly logRef?: string;
     readonly logPath?: string;
     readonly stopCommand?: string;
     readonly durationMs?: number;
@@ -513,6 +535,7 @@ function commandToolOutput(input: {
       signal: input.result.signal,
       background: input.result.background === true ? true : undefined,
       pid: input.result.pid,
+      logRef: input.result.logRef,
       logPath: input.result.logPath,
       stopCommand: input.result.stopCommand,
       durationMs: input.result.durationMs,
@@ -521,6 +544,36 @@ function commandToolOutput(input: {
       portWaitCancelled: input.result.portWaitCancelled === true ? true : undefined,
     },
     truncated: input.truncated || input.result.truncated === true || stdout.truncated || stderr.truncated,
+  };
+}
+
+export async function readLocalCommandLogRef(
+  ref: string,
+  request: { readonly maxLength: number; readonly abortSignal?: AbortSignal }
+): Promise<LocalCommandLogReadEntry | undefined> {
+  throwIfAborted(request.abortSignal);
+  const target = commandLogTargetFromRef(ref);
+  if (target === undefined) {
+    return undefined;
+  }
+  let content: string;
+  try {
+    content = await fs.readFile(target.path, "utf8");
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      return undefined;
+    }
+    throw error;
+  }
+  throwIfAborted(request.abortSignal);
+  return {
+    refId: ref,
+    title: `Command log ${target.id}`,
+    uri: ref,
+    content,
+    metadata: {
+      id: target.id,
+    },
   };
 }
 
@@ -634,6 +687,7 @@ async function runShellCommand(
 ): Promise<CommandExecutionResult> {
   const args = shellArgs(shell, commandLine);
   return runSpawnedCommand(shell.executable, args, workingDirectory, relativeCwd, timeoutMs, abortSignal, {
+    commandLine,
     windowsVerbatimArguments: shell.syntax === "cmd",
   });
 }
@@ -641,12 +695,13 @@ async function runShellCommand(
 async function runProgramCommand(
   command: string,
   args: readonly string[],
+  commandLine: string,
   workingDirectory: string,
   relativeCwd: string,
   timeoutMs: number,
   abortSignal: AbortSignal | undefined
 ): Promise<CommandExecutionResult> {
-  return runSpawnedCommand(command, [...args], workingDirectory, relativeCwd, timeoutMs, abortSignal);
+  return runSpawnedCommand(command, [...args], workingDirectory, relativeCwd, timeoutMs, abortSignal, { commandLine });
 }
 
 async function runBackgroundShellCommand(
@@ -656,17 +711,17 @@ async function runBackgroundShellCommand(
   relativeCwd: string,
   waitMs: number
 ): Promise<CommandExecutionResult> {
-  const logPath = await createBackgroundCommandLogPath(commandLine);
+  const logTarget = await createCommandLogTarget(commandLine);
   return runBackgroundCommand({
     file: shell.executable,
-    args: shellArgs(shell, backgroundShellRedirectCommandLine(shell, commandLine, logPath)),
+    args: shellArgs(shell, backgroundShellRedirectCommandLine(shell, commandLine, logTarget.path)),
     commandLine,
     workingDirectory,
     relativeCwd,
     waitMs,
     stopShellSyntax: shell.syntax,
     platform: shell.platform,
-    logPath,
+    logTarget,
     captureMode: "shell-redirection",
     windowsVerbatimArguments: shell.syntax === "cmd",
   });
@@ -700,8 +755,9 @@ async function runSpawnedCommand(
   relativeCwd: string,
   timeoutMs: number,
   abortSignal: AbortSignal | undefined,
-  options: { readonly windowsVerbatimArguments?: boolean } = {}
+  options: { readonly commandLine: string; readonly windowsVerbatimArguments?: boolean }
 ): Promise<CommandExecutionResult> {
+  const logTarget = await createCommandLogTarget(options.commandLine);
   return new Promise((resolve, reject) => {
     let settled = false;
     let timedOut = false;
@@ -710,13 +766,39 @@ async function runSpawnedCommand(
     let terminationTimer: ReturnType<typeof setTimeout> | undefined;
     let abortHandler: (() => void) | undefined;
     let child: ChildProcess;
+    let logFd: number | undefined = openSync(logTarget.path, "a");
     const stdout = createBoundedOutputCollector(MAX_COMMAND_STDOUT_CHARS);
     const stderr = createBoundedOutputCollector(MAX_COMMAND_STDERR_CHARS);
+    writeCommandLogHeader(logFd, options.commandLine, relativeCwd);
+    const appendStdout = (chunk: Buffer) => {
+      stdout.append(chunk);
+      writeCommandLogChunk(logFd, "stdout", chunk);
+    };
+    const appendStderr = (chunk: Buffer) => {
+      stderr.append(chunk);
+      writeCommandLogChunk(logFd, "stderr", chunk);
+    };
+    const appendStderrText = (text: string) => {
+      stderr.appendText(text);
+      writeCommandLogText(logFd, "stderr", text);
+    };
+    const closeLog = () => {
+      if (logFd === undefined) {
+        return;
+      }
+      closeSync(logFd);
+      logFd = undefined;
+    };
+    const removeLog = () => {
+      void fs.unlink(logTarget.path).catch(() => {
+        // Best-effort cleanup for non-truncated foreground commands.
+      });
+    };
     const appendTerminationDiagnostic = () => {
       const timeoutMessage = timedOut ? `Command timed out after ${timeoutMs}ms and was terminated.` : undefined;
       const cancelMessage = cancelled ? "Command execution cancelled." : undefined;
-      if (timeoutMessage !== undefined) stderr.appendText(timeoutMessage);
-      if (cancelMessage !== undefined) stderr.appendText(cancelMessage);
+      if (timeoutMessage !== undefined) appendStderrText(timeoutMessage);
+      if (cancelMessage !== undefined) appendStderrText(cancelMessage);
     };
     const resultFromClose = (code: number | null, signal: NodeJS.Signals | null | undefined): CommandExecutionResult => ({
       stdout: stdout.text(),
@@ -752,6 +834,16 @@ async function runSpawnedCommand(
       if (abortHandler !== undefined) {
         abortSignal?.removeEventListener("abort", abortHandler);
       }
+      closeLog();
+      if (value.truncated === true) {
+        resolve({
+          ...value,
+          logRef: logTarget.ref,
+          logPath: logTarget.path,
+        });
+        return;
+      }
+      removeLog();
       resolve(value);
     };
     const requestTermination = () => {
@@ -759,7 +851,7 @@ async function runSpawnedCommand(
       if (terminationTimer === undefined) {
         terminationTimer = setTimeout(() => {
           appendTerminationDiagnostic();
-          stderr.appendText(
+          appendStderrText(
             `Command process did not close within ${COMMAND_TERMINATION_GRACE_MS}ms after termination was requested.`
           );
           child.stdout?.destroy();
@@ -769,18 +861,27 @@ async function runSpawnedCommand(
         terminationTimer.unref?.();
       }
     };
-    child = spawn(file, [...args], {
-      cwd: workingDirectory,
-      windowsHide: true,
-      windowsVerbatimArguments: options.windowsVerbatimArguments === true,
-      detached: process.platform !== "win32",
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+    try {
+      child = spawn(file, [...args], {
+        cwd: workingDirectory,
+        windowsHide: true,
+        windowsVerbatimArguments: options.windowsVerbatimArguments === true,
+        detached: process.platform !== "win32",
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+    } catch (error) {
+      closeLog();
+      removeLog();
+      reject(error);
+      return;
+    }
     if (child.stdout === null || child.stderr === null) {
+      closeLog();
+      removeLog();
       throw new Error("Command process did not expose stdout/stderr pipes.");
     }
-    child.stdout.on("data", (chunk: Buffer) => stdout.append(chunk));
-    child.stderr.on("data", (chunk: Buffer) => stderr.append(chunk));
+    child.stdout.on("data", appendStdout);
+    child.stderr.on("data", appendStderr);
     child.once("error", (error) => {
       if (settled) return;
       settled = true;
@@ -790,6 +891,8 @@ async function runSpawnedCommand(
       if (abortHandler !== undefined) {
         abortSignal?.removeEventListener("abort", abortHandler);
       }
+      closeLog();
+      removeLog();
       reject(error);
     });
     child.once("close", (code, signal) => {
@@ -962,11 +1065,12 @@ async function runBackgroundCommand(input: {
   readonly waitMs: number;
   readonly stopShellSyntax: SanitizedCommandShellConfig["syntax"];
   readonly platform: NodeJS.Platform;
-  readonly logPath?: string;
+  readonly logTarget?: CommandLogTarget;
   readonly captureMode?: "stdio" | "shell-redirection";
   readonly windowsVerbatimArguments?: boolean;
 }): Promise<CommandExecutionResult> {
-  const logPath = input.logPath ?? await createBackgroundCommandLogPath(input.commandLine);
+  const logTarget = input.logTarget ?? await createCommandLogTarget(input.commandLine);
+  const logPath = logTarget.path;
   const captureMode = input.captureMode ?? "stdio";
   const logFd = captureMode === "stdio" ? openSync(logPath, "a") : undefined;
   let child: ChildProcess | undefined;
@@ -1002,6 +1106,7 @@ async function runBackgroundCommand(input: {
       exitCode: typeof earlyExit.code === "number" ? earlyExit.code : COMMAND_CANCELLED_EXIT_CODE,
       cwd: input.relativeCwd,
       signal: earlyExit.signal ?? undefined,
+      logRef: logTarget.ref,
       logPath,
       stdoutChars: logPreview.chars,
       stderrChars: stderr.length,
@@ -1015,7 +1120,7 @@ async function runBackgroundCommand(input: {
   const initialLogPreview = await readBackgroundLogPreview(logPath, BACKGROUND_LOG_PREVIEW_CHARS);
   const stdout = [
     `Started background process${pid === undefined ? "" : ` pid ${pid}`}.`,
-    `Log: ${logPath}`,
+    `Log: ${logTarget.ref}`,
     stopCommand === undefined ? undefined : `Stop: ${stopCommand}`,
     initialLogPreview.text.trim().length === 0 ? undefined : `Initial output:\n${initialLogPreview.text}`,
   ].filter((line): line is string => line !== undefined).join("\n");
@@ -1026,6 +1131,7 @@ async function runBackgroundCommand(input: {
     cwd: input.relativeCwd,
     background: true,
     pid,
+    logRef: logTarget.ref,
     logPath,
     stopCommand,
     stdoutChars: stdout.length + initialLogPreview.omittedChars,
@@ -1110,11 +1216,66 @@ function createBoundedOutputCollector(maxChars: number): {
   };
 }
 
-async function createBackgroundCommandLogPath(commandLine: string): Promise<string> {
-  const directory = path.join(os.tmpdir(), "agentarbor-command-logs");
+async function createCommandLogTarget(commandLine: string): Promise<CommandLogTarget> {
+  const directory = commandLogDirectory();
   await fs.mkdir(directory, { recursive: true });
   const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-  return path.join(directory, `${timestamp}-${safeRefToken(commandLine)}.log`);
+  const id = `${timestamp}-${randomUUID()}-${safeRefToken(commandLine)}`;
+  return {
+    id,
+    ref: `${COMMAND_LOG_REF_PREFIX}${id}`,
+    path: path.join(directory, `${id}.log`),
+  };
+}
+
+function commandLogTargetFromRef(ref: string): CommandLogTarget | undefined {
+  if (!ref.startsWith(COMMAND_LOG_REF_PREFIX)) {
+    return undefined;
+  }
+  const id = ref.slice(COMMAND_LOG_REF_PREFIX.length);
+  if (!COMMAND_LOG_ID_PATTERN.test(id)) {
+    return undefined;
+  }
+  return {
+    id,
+    ref,
+    path: path.join(commandLogDirectory(), `${id}.log`),
+  };
+}
+
+function commandLogDirectory(): string {
+  return path.join(os.tmpdir(), COMMAND_LOG_DIRECTORY_NAME);
+}
+
+function writeCommandLogHeader(fd: number | undefined, commandLine: string, cwd: string): void {
+  if (fd === undefined) {
+    return;
+  }
+  writeSync(fd, [
+    `command: ${commandLine}`,
+    `cwd: ${cwd}`,
+    `createdAt: ${new Date().toISOString()}`,
+    "",
+  ].join("\n"));
+}
+
+function writeCommandLogChunk(fd: number | undefined, stream: "stdout" | "stderr", chunk: Buffer): void {
+  if (fd === undefined || chunk.length === 0) {
+    return;
+  }
+  writeSync(fd, `\n[${stream}]\n`);
+  writeSync(fd, chunk);
+}
+
+function writeCommandLogText(fd: number | undefined, stream: "stdout" | "stderr", text: string): void {
+  if (fd === undefined || text.length === 0) {
+    return;
+  }
+  writeSync(fd, `\n[${stream}]\n${text}`);
+}
+
+function isMissingFileError(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "code" in error && (error as { readonly code?: unknown }).code === "ENOENT";
 }
 
 async function waitForBackgroundStart(child: ChildProcess, waitMs: number): Promise<

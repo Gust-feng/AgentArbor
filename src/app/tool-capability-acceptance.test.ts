@@ -7,6 +7,7 @@ import test from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { modelVisibleToolDescription } from "../domain/tools/index.js";
 import { createDesktopBasicToolRegistry } from "./basic-agent-runtime/index.js";
+import { ensurePidExited } from "./tool-center/adapters/background-process-test-utils.js";
 
 const context = { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" };
 
@@ -175,7 +176,7 @@ test("tool capability acceptance supports a demo-building workflow without comma
       timeoutMs: 2_000,
     });
     backgroundStopCommand = undefined;
-    await waitForPidExit(serverPid, 5_000);
+    await ensurePidExited(serverPid, 5_000);
     serverPid = undefined;
     assert.equal(stoppedServer.status, "completed");
     await waitUntil(async () => !(await canConnectToLocalhostPort(port)), 5_000);
@@ -190,7 +191,7 @@ test("tool capability acceptance supports a demo-building workflow without comma
     };
     assert.equal(largeOutput.status, "completed");
     assert.equal(largeContent.truncated, true);
-    assert.equal((largeContent.stdout?.length ?? 0) <= 128_000, true);
+    assert.equal((largeContent.stdout?.length ?? 0) <= 16_000, true);
 
     const startedAt = Date.now();
     const timedOut = await executeTool("call-timeout", "shell_command", {
@@ -245,7 +246,7 @@ test("tool capability acceptance supports a demo-building workflow without comma
       timeoutMs: 2_000,
     });
     backgroundStopCommand = undefined;
-    await waitForPidExit(backgroundPid, 5_000);
+    await ensurePidExited(backgroundPid, 5_000);
     backgroundPid = undefined;
     assert.equal(stopped.status, "completed");
     await delay(100);
@@ -283,7 +284,7 @@ test("tool capability acceptance supports a demo-building workflow without comma
       timeoutMs: 2_000,
     });
     shellBackgroundStopCommand = undefined;
-    await waitForPidExit(shellBackgroundPid, 5_000);
+    await ensurePidExited(shellBackgroundPid, 5_000);
     shellBackgroundPid = undefined;
     assert.equal(shellBackgroundStopped.status, "completed");
     await delay(100);
@@ -293,7 +294,7 @@ test("tool capability acceptance supports a demo-building workflow without comma
         commandLine: shellBackgroundStopCommand,
         timeoutMs: 2_000,
       }).catch(() => undefined);
-      await waitForPidExit(shellBackgroundPid, 5_000).catch(() => undefined);
+      await ensurePidExited(shellBackgroundPid, 5_000).catch(() => undefined);
       await delay(50);
     }
     if (backgroundStopCommand !== undefined) {
@@ -301,7 +302,7 @@ test("tool capability acceptance supports a demo-building workflow without comma
         commandLine: backgroundStopCommand,
         timeoutMs: 2_000,
       }).catch(() => undefined);
-      await waitForPidExit(backgroundPid ?? serverPid, 5_000).catch(() => undefined);
+      await ensurePidExited(backgroundPid ?? serverPid, 5_000).catch(() => undefined);
       await delay(50);
     }
     await removeTempTree(workspace);
@@ -396,20 +397,4 @@ function canConnectToLocalhostPort(port: number): Promise<boolean> {
     socket.once("timeout", () => settle(false));
     socket.once("error", () => settle(false));
   });
-}
-
-async function waitForPidExit(pid: number | undefined, timeoutMs: number): Promise<void> {
-  if (pid === undefined) {
-    return;
-  }
-  await waitUntil(async () => !isPidRunning(pid), timeoutMs);
-}
-
-function isPidRunning(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
 }

@@ -195,6 +195,7 @@ async function handleConversationMessageRequest(
     runAfterRunId,
     taskSoilInput: mergedTaskSoilInput,
     reasoningEffort: runInput.reasoningEffort,
+    toolConfirmationPolicy: runInput.toolConfirmationPolicy,
     modelOverride: runInput.modelOverride,
     startImmediately: !shouldQueue,
     deferSchedule: !shouldQueue,

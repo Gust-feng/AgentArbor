@@ -1,5 +1,5 @@
-import type { ToolDisplayProjection, ToolResultEnvelope } from "../domain/tools/index.js";
-import { toolDisplayName } from "../domain/tools/index.js";
+import type { ToolDisplayProjection, ToolErrorDomain, ToolErrorFacts, ToolResultEnvelope } from "../domain/tools/index.js";
+import { isToolErrorDomain, normalizeToolErrorFacts, toolDisplayName } from "../domain/tools/index.js";
 import { redactSensitiveText } from "../kernel/redaction.js";
 import { commandTextFromToolInput, commandTextFromToolResult } from "./command-text.js";
 import { asRecord, stringArray, stringOrUndefined } from "./panel-read-model-utils.js";
@@ -19,6 +19,7 @@ export type PanelRunStreamEventDetail = {
   readonly envelope?: ToolResultEnvelope;
   readonly truncated?: boolean;
   readonly error?: string;
+  readonly errorFacts?: ToolErrorFacts;
 };
 
 export function toolSummary(
@@ -55,6 +56,7 @@ export function toolStreamDetail(
   const result = asRecord(output.result);
   const display = commandDisplayForReadModel(toolName, input, output, result, payload) ?? toolDisplayOrUndefined(output.display);
   const envelope = toolResultEnvelopeOrUndefined(output.envelope);
+  const errorFacts = errorFactsFromToolProjection(output, display, envelope);
   return {
     kind: "tool",
     action: displayActionLabel(stringOrUndefined(output.action) ?? localToolLabel(toolName)),
@@ -67,6 +69,7 @@ export function toolStreamDetail(
     envelope,
     truncated: output.truncated === true,
     error: type === "tool.failed" ? stringOrUndefined(payload.error) : undefined,
+    errorFacts,
   };
 }
 
@@ -126,6 +129,7 @@ function commandDisplayForReadModel(
     cancelled: booleanOrUndefined((existingCommand as { readonly cancelled?: unknown } | undefined)?.cancelled) ?? booleanOrUndefined(result.cancelled),
     background: existingCommand?.background ?? booleanOrUndefined(result.background),
     pid: existingCommand?.pid ?? numberOrUndefined(result.pid),
+    logRef: existingCommand?.logRef ?? stringOrUndefined(result.logRef),
     logPath: existingCommand?.logPath ?? stringOrUndefined(result.logPath),
     stopCommand: existingCommand?.stopCommand ?? stringOrUndefined(result.stopCommand),
     durationMs: existingCommand?.durationMs ?? numberOrUndefined(result.durationMs) ?? numberOrUndefined(payload.durationMs),
@@ -165,7 +169,27 @@ function toolResultEnvelopeOrUndefined(value: unknown): ToolResultEnvelope | und
     redacted: false,
     diagnosticRef: stringOrUndefined(record.diagnosticRef),
     rawRetention,
+    errorDomain: toolErrorDomainOrUndefined(record.errorDomain),
+    errorFacts: normalizeToolErrorFacts(record.errorFacts),
   };
+}
+
+function toolErrorDomainOrUndefined(value: unknown): ToolErrorDomain | undefined {
+  return isToolErrorDomain(value) ? value : undefined;
+}
+
+function errorFactsFromToolProjection(
+  output: Readonly<Record<string, unknown>>,
+  display: ToolDisplayProjection | undefined,
+  envelope: ToolResultEnvelope | undefined
+): ToolErrorFacts | undefined {
+  if (envelope?.errorFacts !== undefined) {
+    return envelope.errorFacts;
+  }
+  if (display?.kind === "read_result" && display.errorFacts !== undefined) {
+    return display.errorFacts;
+  }
+  return normalizeToolErrorFacts(output.errorFacts);
 }
 
 function toolRequestPreview(toolName: string, input: Readonly<Record<string, unknown>>): string | undefined {
@@ -249,11 +273,26 @@ function toolResultPreview(
     });
     return lines.length === 0 ? stringOrUndefined(output.summary) : lines.join("\n");
   }
+  if (toolName === "search") {
+    const display = toolDisplayOrUndefined(output.display);
+    if (display?.kind === "search_results") {
+      return compactStreamDetailText([
+        display.query,
+        display.status,
+        display.message,
+        `results: ${display.results.length}`,
+      ].filter((item): item is string => item !== undefined && item.length > 0).join(" · "), 900);
+    }
+    return compactStreamDetailText(stringOrUndefined(output.summary), 900);
+  }
   if (toolName === "write_file" || toolName === "create_file" || toolName === "edit_file" || toolName === "delete_file") {
     return safeFileChangePreview(toolName, asRecord(payload.input), output, result);
   }
   if (toolName === "run_command" || toolName === "shell_command") {
     return safeCommandPreview(output, result, asRecord(payload.input), payload);
+  }
+  if (toolName === "read") {
+    return safeReadPreview(output, result, asRecord(payload.input));
   }
   if (toolName === "browser_snapshot") {
     const title = stringOrUndefined(result.title);
@@ -292,6 +331,49 @@ function toolResultPreview(
   return compactStreamDetailText(stringOrUndefined(output.summary), 900);
 }
 
+function safeReadPreview(
+  output: Readonly<Record<string, unknown>>,
+  result: Readonly<Record<string, unknown>>,
+  input: Readonly<Record<string, unknown>>
+): string | undefined {
+  const display = toolDisplayOrUndefined(output.display);
+  if (display?.kind === "read_result") {
+    return readDisplayPreview(display, input);
+  }
+  const envelope = toolResultEnvelopeOrUndefined(output.envelope);
+  if (envelope?.agentSummary !== undefined) {
+    return compactStreamDetailText(envelope.agentSummary, 900);
+  }
+  const error = stringOrUndefined(output.error);
+  const facts = normalizeToolErrorFacts(output.errorFacts);
+  const headline = [
+    stringOrUndefined(result.title),
+    stringOrUndefined(result.uri) ?? stringOrUndefined(result.url) ?? stringOrUndefined(input.ref),
+  ].filter((item): item is string => item !== undefined).join(" · ");
+  return compactStreamDetailText([
+    headline,
+    error,
+    facts === undefined ? undefined : `errorFacts: ${compactFactsText(facts)}`,
+    stringOrUndefined(result.contentPreview),
+  ].filter((item): item is string => item !== undefined && item.length > 0).join("\n"), 900);
+}
+
+function readDisplayPreview(
+  display: Extract<ToolDisplayProjection, { readonly kind: "read_result" }>,
+  input: Readonly<Record<string, unknown>>
+): string | undefined {
+  const headline = [
+    display.status,
+    display.title ?? display.uri ?? display.url ?? display.ref ?? stringOrUndefined(input.ref),
+  ].filter((item): item is string => item !== undefined).join(" · ");
+  return compactStreamDetailText([
+    headline,
+    display.error,
+    display.errorFacts === undefined ? undefined : `errorFacts: ${compactFactsText(display.errorFacts)}`,
+    display.contentPreview,
+  ].filter((item): item is string => item !== undefined && item.length > 0).join("\n"), 900);
+}
+
 function safeReadFilePreview(
   output: Readonly<Record<string, unknown>>,
   result: Readonly<Record<string, unknown>>
@@ -325,6 +407,10 @@ function safeCommandPreview(
     command: commandTextFromToolResult(result, input),
     exitCode: typeof result.exitCode === "number" ? result.exitCode : undefined,
   });
+}
+
+function compactFactsText(facts: ToolErrorFacts): string {
+  return JSON.stringify(facts).slice(0, 500);
 }
 
 function summarizeCommandOutput(value: string | undefined): string | undefined {

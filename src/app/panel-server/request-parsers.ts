@@ -16,6 +16,7 @@ import type {
   UpsertMcpServerInput,
 } from "../../domain/config/index.js";
 import type { ConfirmationDecision } from "../../domain/basic-agent/index.js";
+import type { ToolConfirmationPolicy } from "../../domain/tools/index.js";
 import { TaskSoilInputValidationError, parseDesktopTaskSoilInput, type DesktopTaskSoilInput } from "../task-soil-workspace.js";
 import type { ModelRuntimeMode } from "../model-runtime/index.js";
 import type { PanelRunMode } from "../panel-run-jobs.js";
@@ -28,6 +29,7 @@ export type PanelRunInput = {
   readonly aiMode?: ModelRuntimeMode;
   readonly requestedRunMode?: PanelRunMode;
   readonly reasoningEffort?: ModelRunReasoningEffort;
+  readonly toolConfirmationPolicy?: ToolConfirmationPolicy;
   readonly modelOverride?: {
     readonly profileId: string;
     readonly model: string;
@@ -280,6 +282,7 @@ export function parseRunInput(raw: unknown): PanelRunInput {
     aiMode: parseOptionalAiMode(record.aiMode, "AI 模式无效。"),
     requestedRunMode: parseOptionalRunMode(record.runMode),
     reasoningEffort: parseRunReasoningEffort(record.reasoningEffort, record.openAI),
+    toolConfirmationPolicy: parseToolConfirmationPolicy(record.toolConfirmationPolicy),
     modelOverride: parseModelOverride(record.modelOverride),
     taskSoilInput,
   };
@@ -418,6 +421,16 @@ function parseOptionalRunMode(value: unknown): PanelRunMode | undefined {
     return value;
   }
   throw new PanelHttpError(400, "invalid_run_mode", "运行模式无效。");
+}
+
+function parseToolConfirmationPolicy(value: unknown): ToolConfirmationPolicy | undefined {
+  if (value === undefined || value === null || value === "") {
+    return undefined;
+  }
+  if (value === "prompt" || value === "full_access") {
+    return value;
+  }
+  throw new PanelHttpError(400, "invalid_tool_confirmation_policy", "工具确认策略无效。");
 }
 
 function parseModelOverride(value: unknown): PanelRunInput["modelOverride"] {

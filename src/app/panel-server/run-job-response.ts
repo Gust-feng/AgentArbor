@@ -25,7 +25,11 @@ import {
   type PanelRunMode,
 } from "../panel-run-jobs.js";
 import type { PanelRunSummaryPayload } from "../panel-run-summary.js";
-import { syncPanelRunStreamEventsForJob, type PanelRunStreamSyncRuntime } from "./run-stream-sync.js";
+import {
+  persistentPanelRunStreamEvents,
+  syncPanelRunStreamEventsForJob,
+  type PanelRunStreamSyncRuntime,
+} from "./run-stream-sync.js";
 
 export type PanelRunJobResponseRuntime = PanelRunStreamSyncRuntime & {
   readonly conversations: Pick<PanelConversationStore, "getReadModel">;
@@ -94,7 +98,7 @@ export function createPanelRunJobResponse(
     agentRunTree,
     eventEntries,
   });
-  const streamEvents = syncPanelRunStreamEventsForJob(runtime, job);
+  const streamEvents = persistentPanelRunStreamEvents(syncPanelRunStreamEventsForJob(runtime, job));
   const transcript = createPanelRunTranscript({
     runId: job.runId,
     status: job.status,

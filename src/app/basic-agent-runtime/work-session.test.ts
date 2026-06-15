@@ -997,6 +997,7 @@ function searchEnvelope(): ToolResultEnvelope {
     uiDisplay: {
       kind: "search_results",
       query: "AgentArbor",
+      message: "search source message",
       results: [{
         title: "AgentArbor docs",
         url: "https://example.test/agentarbor",

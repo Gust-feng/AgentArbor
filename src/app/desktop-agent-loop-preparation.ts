@@ -82,6 +82,7 @@ export function prepareDesktopAgentLoop(input: DesktopAgentLoopPreparationInput)
     traceId: input.traceId,
     goalId: input.goalId,
     allowedTools: toolBoundary.allowedTools,
+    confirmationPolicy: input.options.toolConfirmationPolicy,
     modelCapabilities,
   });
 

@@ -9,6 +9,7 @@ import type {
 } from "../../domain/config/index.js";
 import type { ModelMessage, ModelOutputDelta } from "../../domain/intelligence/index.js";
 import type { ObservationRef } from "../../domain/observation/index.js";
+import type { ToolConfirmationPolicy, ToolErrorDomain } from "../../domain/tools/index.js";
 import type { AgentRunTreeAttachment } from "../agent-run-tree-attachment.js";
 import type { MinimalRuntime } from "../runtime.js";
 import type { DesktopAgentConversationMessage } from "../desktop-agent-contracts.js";
@@ -71,12 +72,7 @@ export type BasicAgentRuntimeReadyContext = {
   readonly goalId: string;
 };
 
-export type BasicAgentErrorDomain =
-  | "tool_error"
-  | "runtime_error"
-  | "model_error"
-  | "ui_submit_error"
-  | "process_error";
+export type BasicAgentErrorDomain = ToolErrorDomain;
 
 export type BasicAgentRunExecutionInput = {
   readonly job: BasicAgentRunJob;
@@ -158,6 +154,7 @@ export type BasicAgentRunStartInput = {
   readonly runAfterRunId?: string;
   readonly taskSoilInput?: DesktopTaskSoilInput;
   readonly reasoningEffort?: ModelRunReasoningEffort;
+  readonly toolConfirmationPolicy?: ToolConfirmationPolicy;
   readonly modelOverride?: {
     readonly profileId: string;
     readonly model: string;

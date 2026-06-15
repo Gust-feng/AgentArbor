@@ -2,6 +2,7 @@ import { modelProviderDisplayName, resolveModelProviderIdentity } from "./model-
 import type { ConfigResponse, ModelProviderModelCatalog } from "./contracts/config";
 
 export type ComposerReasoningEffort = "" | "low" | "medium" | "high";
+export type ComposerToolConfirmationPolicy = "prompt" | "full_access";
 export type VisibleAiMode = "none" | "fake" | "openai-compatible" | "openai-responses";
 
 export function mergeConfigResponse(previous: ConfigResponse | undefined, incoming: ConfigResponse): ConfigResponse {

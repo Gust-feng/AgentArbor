@@ -18,11 +18,13 @@ import { createId, nowIso } from "../../kernel/id.js";
 import type { FetchLike as TavilyFetchLike } from "../tool-center/adapters/web-search-tool.js";
 import {
   createCodebaseInformationSourceAdapter,
+  createCommandLogInformationSourceAdapter,
   createPageInformationSourceAdapter,
   createRunMemoryInformationSourceAdapter,
   createSoilInformationSourceAdapter,
   createStubInformationSourceAdapter,
   createWebInformationSourceAdapter,
+  type CommandLogReadRegistry,
   type InformationSourceAdapter,
   type PageFetchLike,
 } from "./source-adapters.js";
@@ -38,6 +40,7 @@ export type CreateDefaultResearchRuntimeOptions = {
   readonly env?: Readonly<Record<string, string | undefined>>;
   readonly tavilyFetch?: TavilyFetchLike;
   readonly pageFetch?: PageFetchLike;
+  readonly commandLogRegistry?: CommandLogReadRegistry;
   readonly codebaseRoot?: string;
   readonly soilStore?: ReadonlySoilStore;
   readonly constraints?: readonly Constraint[];
@@ -82,6 +85,7 @@ export class ResearchRuntime implements InformationAccess {
       allowedSources: this.modelVisibleSearchableSources(),
     });
     if (normalizedQuery === undefined) {
+      const message = "search requires a non-empty query.";
       const trace = createTrace({
         action: "search",
         startedAt,
@@ -92,10 +96,10 @@ export class ResearchRuntime implements InformationAccess {
           source,
           status: "invalid-input",
           resultRefs: [],
-          message: "search requires a non-empty query.",
+          message,
         })),
       });
-      return { action: "search", query: "", status: "invalid-input", results: [], trace };
+      return { action: "search", query: "", status: "invalid-input", message, results: [], trace };
     }
 
     const limit = Math.max(1, Math.floor(query.limit ?? this.defaultLimit));
@@ -154,11 +158,13 @@ export class ResearchRuntime implements InformationAccess {
       requestedSources,
       sourceSteps,
     });
+    const message = firstTraceMessage(sourceSteps);
     return {
       action: "search",
       query: normalizedQuery,
       site: normalizedSite,
       status: trace.status,
+      message,
       results,
       trace,
     };
@@ -239,6 +245,7 @@ export class ResearchRuntime implements InformationAccess {
         status: response.status,
         resultRefs: response.result === undefined ? [] : [response.result.refId],
         message: response.message,
+        errorFacts: response.errorFacts,
       },
     ];
     const trace = createTrace({
@@ -316,6 +323,7 @@ export function createDefaultResearchRuntime(options: CreateDefaultResearchRunti
         maxResults: options.tavilyMaxResults,
       }),
       createPageInformationSourceAdapter({ fetch: options.pageFetch }),
+      createCommandLogInformationSourceAdapter({ registry: options.commandLogRegistry }),
       createCodebaseInformationSourceAdapter({ rootDirectory: options.codebaseRoot }),
       createSoilInformationSourceAdapter({ soilStore }),
       createRunMemoryInformationSourceAdapter({ soilStore }),
@@ -324,6 +332,18 @@ export function createDefaultResearchRuntime(options: CreateDefaultResearchRunti
       createStubInformationSourceAdapter("github"),
     ],
   });
+}
+
+function firstTraceMessage(sourceSteps: readonly ResearchTraceSourceStep[]): string | undefined {
+  for (const step of sourceSteps) {
+    if (step.status === "completed") {
+      continue;
+    }
+    if (step.message !== undefined && step.message.trim().length > 0) {
+      return step.message;
+    }
+  }
+  return undefined;
 }
 
 function resolveReadSource(
@@ -342,6 +362,9 @@ function resolveReadSource(
   }
   if (isHttpUrl(ref)) {
     return "page";
+  }
+  if (isCommandLogRef(ref)) {
+    return "command_log";
   }
   const sourceFromRef = sourceFromResearchRef(ref);
   return sourceFromRef ?? "codebase";
@@ -426,7 +449,8 @@ function isInformationSourceKind(value: string | undefined): value is Informatio
     value === "run_memory" ||
     value === "docs" ||
     value === "packages" ||
-    value === "github"
+    value === "github" ||
+    value === "command_log"
   );
 }
 
@@ -470,5 +494,11 @@ function defaultSourceLabel(source: InformationSourceKind): string {
       return "package registry";
     case "github":
       return "GitHub";
+    case "command_log":
+      return "registered command logs";
   }
+}
+
+function isCommandLogRef(value: string): boolean {
+  return value.startsWith("command-log://");
 }

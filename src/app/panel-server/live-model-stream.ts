@@ -1,6 +1,5 @@
 import type { ModelOutputDelta } from "../../domain/intelligence/index.js";
 import type { EventLogEntry } from "../../kernel/events/in-memory-event-log.js";
-import type { BasicAgentRunExecutor } from "../basic-agent-runtime/run-executor.js";
 import { redactOrdinaryMarkdownFragment } from "../safe-projection.js";
 import type { PanelRunJob, PanelRunJobStore } from "../panel-run-jobs.js";
 import type { PanelRunStreamEvent } from "../panel-run-read-model.js";
@@ -10,7 +9,6 @@ type PanelRunStreamEventInput = Omit<PanelRunStreamEvent, "sequence"> | PanelRun
 
 export type PanelLiveModelStreamRuntime = {
   readonly runJobs: Pick<PanelRunJobStore, "get" | "appendStreamEvent">;
-  readonly runExecutor: Pick<BasicAgentRunExecutor, "syncRunEvents">;
 };
 
 export function appendLiveModelOutputDelta(
@@ -30,8 +28,7 @@ export function appendLiveModelOutputDelta(
   if (!isUserFacingStreamingPurpose(job, purpose)) {
     return;
   }
-  const event = runtime.runJobs.appendStreamEvent(runId, streamEventFromLiveModelDelta(job, delta, safeDelta));
-  runtime.runExecutor.syncRunEvents(job, [event]);
+  runtime.runJobs.appendStreamEvent(runId, streamEventFromLiveModelDelta(job, delta, safeDelta));
 }
 
 function streamEventFromLiveModelDelta(

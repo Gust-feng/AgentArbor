@@ -55,7 +55,7 @@ test("append-only observation updates live text without touching run read model"
     event: event({ type: "model.output.delta", delta: "正在输出" }),
   });
 
-  assert.equal(next.events.length, 1);
+  assert.equal(next.events.length, 0);
   assert.equal(next.live?.runId, "run-1");
   assert.equal(next.live?.turns[0]?.output.text, "正在输出");
   assert.equal(next.workView, undefined);

@@ -7,6 +7,7 @@ import type {
 } from "../domain/config/index.js";
 import type { BasicAgentCapabilitySnapshot } from "../domain/config/index.js";
 import type { ConfirmationDecision } from "../domain/basic-agent/index.js";
+import type { ToolConfirmationPolicy } from "../domain/tools/index.js";
 import { createId, nowIso } from "../kernel/id.js";
 import type { ModelRuntimeMode } from "./model-runtime/index.js";
 import type { PanelRunConfigurationFailureSummary, PanelRunSummary } from "./panel-run-summary.js";
@@ -83,6 +84,7 @@ export type PanelRunJob = {
   readonly runAfterRunId?: string;
   readonly taskSoilInput?: DesktopTaskSoilInput;
   readonly reasoningEffort?: ModelRunReasoningEffort;
+  readonly toolConfirmationPolicy?: ToolConfirmationPolicy;
   readonly agentDefinitionRef?: RunAgentDefinitionRef;
   readonly createdAt: string;
   status: PanelRunStatus;
@@ -119,6 +121,7 @@ export class PanelRunJobStore {
     readonly runAfterRunId?: string;
     readonly taskSoilInput?: DesktopTaskSoilInput;
     readonly reasoningEffort?: ModelRunReasoningEffort;
+    readonly toolConfirmationPolicy?: ToolConfirmationPolicy;
     readonly agentDefinitionRef?: RunAgentDefinitionRef;
     readonly config: SanitizedModelProviderConfig;
     readonly informationAccess: SanitizedInformationAccessConfig;
@@ -143,6 +146,7 @@ export class PanelRunJobStore {
       runAfterRunId: input.runAfterRunId,
       taskSoilInput: input.taskSoilInput,
       reasoningEffort: input.reasoningEffort,
+      toolConfirmationPolicy: input.toolConfirmationPolicy,
       agentDefinitionRef: input.agentDefinitionRef,
       config: input.config,
       informationAccess: input.informationAccess,

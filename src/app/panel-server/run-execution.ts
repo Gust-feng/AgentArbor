@@ -87,6 +87,7 @@ export async function executeBasicPanelRun(
     capabilitySnapshot: job.capabilitySnapshot,
     informationAccess: job.informationAccess,
     reasoningEffort: job.reasoningEffort,
+    toolConfirmationPolicy: job.toolConfirmationPolicy,
     abortSignal: input.abortSignal,
     onRuntimeReady: input.onRuntimeReady,
     onModelOutputDelta: input.onModelOutputDelta,

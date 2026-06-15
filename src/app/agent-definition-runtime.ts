@@ -1,5 +1,6 @@
 import type { BasicAgentCapabilitySnapshot, RunCapabilityResolution } from "../domain/config/index.js";
 import type { TaskSoil } from "../domain/soil/index.js";
+import type { ToolConfirmationPolicy } from "../domain/tools/index.js";
 import type { AgentTurnPolicy } from "../kernel/intelligence/agent-turn-runtime.js";
 import type { AgentDefinition } from "./agent-prompts/contracts.js";
 import { resolveRunCapabilities } from "./capability-policy.js";
@@ -17,6 +18,7 @@ export type CreateAgentTurnPolicyFromDefinitionInput = {
   readonly traceId: string;
   readonly goalId: string;
   readonly allowedTools: readonly string[];
+  readonly confirmationPolicy?: ToolConfirmationPolicy;
   readonly modelCapabilities?: BasicAgentCapabilitySnapshot["modelCapabilities"];
 };
 
@@ -27,6 +29,7 @@ export function createAgentTurnPolicyFromDefinition(
   return {
     allowModel: definition.turnPolicy.allowModel,
     allowedTools: [...input.allowedTools],
+    confirmationPolicy: input.confirmationPolicy,
     ...(definition.turnPolicy.maxModelRounds === undefined
       ? {}
       : { maxModelRounds: definition.turnPolicy.maxModelRounds }),

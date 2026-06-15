@@ -1,5 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { TextDecoder } from "node:util";
 import type { ToolExecutor } from "../../../domain/tools/index.js";
 import {
   asRecord,
@@ -211,6 +212,7 @@ export function createLocalEditFileTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE_
         ],
         whenNotToUse: [
           "Do not use for replacing an entire file body; use write_file or create_file with overwrite.",
+          "Do not use for binary or non-UTF-8 text files; edit_file refuses those targets before resolving edits.",
         ],
         inputNotes: [
           "path is required and must be workspace-relative.",
@@ -288,7 +290,7 @@ export function createLocalEditFileTool(rootDirectory = DEFAULT_LOCAL_WORKSPACE_
       if (stat.size > MAX_LOCAL_WORKSPACE_FILE_BYTES) {
         throw new Error(`File is too large to edit safely: ${target.relativePath}`);
       }
-      const original = await fs.readFile(target.absolutePath, "utf8");
+      const original = await readEditableUtf8TextFile(target.absolutePath, target.relativePath);
       const located = locateAnchorEdits(original, edits, target.relativePath);
       assertNoOverlappingEdits(located, target.relativePath);
       let updated = original;
@@ -637,6 +639,18 @@ function editFactText(input: {
 function previewOneLine(value: string): string {
   const text = value.replace(/\s+/g, " ").trim();
   return text.length <= 80 ? text : `${text.slice(0, 79)}…`;
+}
+
+async function readEditableUtf8TextFile(absolutePath: string, relativePath: string): Promise<string> {
+  const content = await fs.readFile(absolutePath);
+  if (content.includes(0)) {
+    throw new Error(`edit_file target is binary or non-text: ${relativePath}; bytes=${content.length}`);
+  }
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(content);
+  } catch {
+    throw new Error(`edit_file target is binary or non-text: ${relativePath}; bytes=${content.length}`);
+  }
 }
 
 function textField(value: unknown): string | undefined {

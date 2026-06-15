@@ -171,6 +171,15 @@
   padding-inline: 9px 7px;
 }
 
+.composer-access-chip {
+  gap: 5px;
+  padding-inline: 8px 7px;
+}
+
+.composer-access-chip.full-access {
+  color: color-mix(in oklch, var(--fg) 84%, var(--status-warning));
+}
+
 .composer-reasoning-prefix {
   color: var(--muted);
 }
@@ -247,7 +256,13 @@
   padding: 5px;
 }
 
-.composer-reasoning-popover button {
+.composer-access-popover {
+  width: 172px;
+  padding: 5px;
+}
+
+.composer-reasoning-popover button,
+.composer-access-popover button {
   display: grid;
   width: 100%;
   gap: 2px;
@@ -258,24 +273,30 @@
 }
 
 .composer-reasoning-popover button:hover,
-.composer-reasoning-popover button.selected {
+.composer-reasoning-popover button.selected,
+.composer-access-popover button:hover,
+.composer-access-popover button.selected {
   background: color-mix(in oklch, var(--accent-soft) 52%, var(--surface));
 }
 
 .composer-reasoning-popover span,
-.composer-reasoning-popover small {
+.composer-reasoning-popover small,
+.composer-access-popover span,
+.composer-access-popover small {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.composer-reasoning-popover span {
+.composer-reasoning-popover span,
+.composer-access-popover span {
   color: var(--fg);
   font-size: 12px;
   font-weight: 600;
 }
 
-.composer-reasoning-popover small {
+.composer-reasoning-popover small,
+.composer-access-popover small {
   color: color-mix(in oklch, var(--fg) 54%, var(--muted));
   font-size: 11px;
 }

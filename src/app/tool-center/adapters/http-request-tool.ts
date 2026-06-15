@@ -422,7 +422,7 @@ function timeoutError(timeoutMs: number): Error {
   return new Error(`http_request timed out after ${timeoutMs}ms.`);
 }
 
-function normalizeHttpRequestFailure(input: {
+export function normalizeHttpRequestFailure(input: {
   readonly error: unknown;
   readonly url: string;
   readonly method: HttpRequestMethod;

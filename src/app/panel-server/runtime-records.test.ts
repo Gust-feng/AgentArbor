@@ -630,6 +630,10 @@ test("runtime tool call records preserve tool and process error domains", () => 
             rawRetention: "none",
             redacted: false,
             errorDomain: "tool_error",
+            errorFacts: {
+              code: "ENOENT",
+              path: "missing.md",
+            },
           },
         },
       },
@@ -654,7 +658,118 @@ test("runtime tool call records preserve tool and process error domains", () => 
 
   assert.equal(toolCalls.find((call) => call.callId === "tool-read-missing")?.errorDomain, "tool_error");
   assert.equal(toolCalls.find((call) => call.callId === "tool-read-missing")?.envelope?.errorDomain, "tool_error");
+  assert.equal(toolCalls.find((call) => call.callId === "tool-read-missing")?.errorFacts?.code, "ENOENT");
+  assert.equal(toolCalls.find((call) => call.callId === "tool-read-missing")?.envelope?.errorFacts?.path, "missing.md");
   assert.equal(toolCalls.find((call) => call.callId === "tool-shell-missing")?.errorDomain, "process_error");
+});
+
+test("runtime record mapper persists completed read provider failure facts", () => {
+  const errorFacts = {
+    code: "ECONNREFUSED",
+    errno: -4078,
+    syscall: "connect",
+    address: "127.0.0.1",
+    port: 54321,
+    method: "GET",
+    url: "http://127.0.0.1:54321/status",
+    durationMs: 5,
+  };
+  const display = {
+    kind: "read_result" as const,
+    ref: "http://127.0.0.1:54321/status",
+    status: "provider-failed",
+    error: "http_request failed: ECONNREFUSED 127.0.0.1:54321",
+    errorFacts,
+  };
+  const envelope = {
+    agentSummary: "资料读取已完成。\n错误：http_request failed: ECONNREFUSED 127.0.0.1:54321",
+    evidenceRefs: ["tool:tool-read-http", "http://127.0.0.1:54321/status"],
+    tokenEstimate: 24,
+    truncated: false,
+    rawRetention: "none" as const,
+    redacted: false,
+    errorFacts,
+  };
+  const toolCalls = toRuntimeToolCallRecords("run-1", [
+    streamEvent({
+      sequence: 1,
+      type: "tool.completed",
+      toolName: "read",
+      toolCallRefs: ["tool-read-http"],
+      detail: {
+        kind: "tool",
+        action: "读取资料",
+        display,
+        envelope,
+        errorFacts,
+      },
+    }),
+  ], [
+    eventEntry({
+      sequence: 1,
+      type: "tool.completed",
+      payload: {
+        callId: "tool-read-http",
+        toolName: "read",
+        input: { ref: "http://127.0.0.1:54321/status" },
+        output: {
+          summary: "资料读取已完成。",
+          display,
+          envelope,
+          result: {},
+        },
+      },
+    }),
+  ]);
+  const call = toolCalls.find((item) => item.callId === "tool-read-http");
+
+  assert.equal(call?.status, "completed");
+  assert.equal(call?.display?.kind, "read_result");
+  assert.equal(call?.errorFacts?.code, "ECONNREFUSED");
+  assert.equal(call?.envelope?.errorFacts?.port, 54321);
+  assert.equal(call?.preview?.includes("ECONNREFUSED"), true);
+});
+
+test("runtime record mapper persists search invalid-input messages", () => {
+  const display = {
+    kind: "search_results" as const,
+    query: "",
+    status: "invalid-input",
+    message: "search requires a non-empty query.",
+    results: [],
+  };
+  const toolCalls = toRuntimeToolCallRecords("run-1", [
+    streamEvent({
+      sequence: 1,
+      type: "tool.completed",
+      toolName: "search",
+      toolCallRefs: ["tool-search-empty"],
+      detail: {
+        kind: "tool",
+        action: "搜索资料",
+      },
+    }),
+  ], [
+    eventEntry({
+      sequence: 1,
+      type: "tool.completed",
+      payload: {
+        callId: "tool-search-empty",
+        toolName: "search",
+        input: { query: "" },
+        output: {
+          action: "search",
+          display,
+        },
+      },
+    }),
+  ]);
+  const call = toolCalls.find((item) => item.callId === "tool-search-empty");
+
+  assert.equal(call?.display?.kind, "search_results");
+  assert.equal(call?.display?.kind === "search_results" ? call.display.message : undefined, "search requires a non-empty query.");
+  assert.equal(call?.preview?.includes("invalid-input"), true);
+  assert.equal(call?.preview?.includes("search requires a non-empty query."), true);
 });
 
 test("runtime text compaction preserves text before truncating", () => {

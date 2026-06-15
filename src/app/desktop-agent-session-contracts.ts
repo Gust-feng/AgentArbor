@@ -1,7 +1,7 @@
 import type { BasicAgentCapabilitySnapshot, ModelCapabilities, RunCapabilityResolution } from "../domain/config/index.js";
 import type { IntelligenceChannel, ModelOutputDelta } from "../domain/intelligence/index.js";
 import type { TaskSoil } from "../domain/soil/index.js";
-import type { ToolExecutionBroker } from "../domain/tools/index.js";
+import type { ToolConfirmationPolicy, ToolExecutionBroker } from "../domain/tools/index.js";
 import type { AgentDefinition } from "./agent-prompts/contracts.js";
 import type { BasicAgentContextPack } from "./basic-agent-runtime/context-pack.js";
 import type { DesktopAgentConversationMessage, DesktopAgentSkillContext } from "./desktop-agent-contracts.js";
@@ -122,6 +122,7 @@ export type RunDesktopAgentSessionOptions = {
   readonly skillContexts?: readonly DesktopAgentSkillContext[];
   readonly modelCapabilities?: ModelCapabilities;
   readonly capabilitySnapshot?: BasicAgentCapabilitySnapshot;
+  readonly toolConfirmationPolicy?: ToolConfirmationPolicy;
   readonly platform?: NodeJS.Platform;
   readonly abortSignal?: AbortSignal;
   readonly runtime?: MinimalRuntime;

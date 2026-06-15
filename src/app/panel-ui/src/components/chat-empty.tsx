@@ -3,9 +3,11 @@ import {
   ArrowUp,
   ChevronDown,
   Paperclip,
+  ShieldCheck,
   X,
 } from "lucide-react";
 import { compact } from "../text";
+import type { ComposerToolConfirmationPolicy } from "../app-config-projection";
 import type { ContextAttachment } from "../contracts/context";
 import type { ModelProviderIdentity } from "../model-provider-logos";
 import chatEmptyVisual from "../assets/chat-empty-visual.png";
@@ -37,6 +39,8 @@ export type ChatInputProps = AttachmentInputProps & {
   readonly reasoningEffort: "" | "low" | "medium" | "high";
   readonly reasoningEffortEnabled: boolean;
   readonly onReasoningEffortChange: (value: "" | "low" | "medium" | "high") => void;
+  readonly toolConfirmationPolicy: ComposerToolConfirmationPolicy;
+  readonly onToolConfirmationPolicyChange: (value: ComposerToolConfirmationPolicy) => void;
   readonly onModelSelect: (modelId: string) => void | Promise<void>;
   readonly onOpenSettings: () => void;
   readonly onSubmit: () => void;
@@ -84,6 +88,7 @@ export function ChatInputBar(props: ChatInputProps): React.ReactElement {
   const [focused, setFocused] = useState(false);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [reasoningMenuOpen, setReasoningMenuOpen] = useState(false);
+  const [accessMenuOpen, setAccessMenuOpen] = useState(false);
   const selectedModel = props.models.find((model) => model.id === props.selectedModelId);
   const canSend = props.value.trim().length > 0 && !props.busy;
   const modelGroups = useMemo(() => groupModels(props.models), [props.models]);
@@ -91,10 +96,11 @@ export function ChatInputBar(props: ChatInputProps): React.ReactElement {
   useEffect(() => {
     setModelMenuOpen(false);
     setReasoningMenuOpen(false);
+    setAccessMenuOpen(false);
   }, [props.closeSignal]);
 
   useEffect(() => {
-    if (!modelMenuOpen && !reasoningMenuOpen) {
+    if (!modelMenuOpen && !reasoningMenuOpen && !accessMenuOpen) {
       return;
     }
 
@@ -117,7 +123,7 @@ export function ChatInputBar(props: ChatInputProps): React.ReactElement {
       document.removeEventListener("pointerdown", closeOnOutsidePointer);
       document.removeEventListener("keydown", closeOnEscape);
     };
-  }, [modelMenuOpen, reasoningMenuOpen]);
+  }, [modelMenuOpen, reasoningMenuOpen, accessMenuOpen]);
 
   useEffect(() => {
     if (props.busy) {
@@ -125,18 +131,19 @@ export function ChatInputBar(props: ChatInputProps): React.ReactElement {
       return;
     }
     const shouldFocus = !didAutoFocusRef.current || previousBusyRef.current;
-    if (!shouldFocus || modelMenuOpen || reasoningMenuOpen) return;
+    if (!shouldFocus || modelMenuOpen || reasoningMenuOpen || accessMenuOpen) return;
     const node = textareaRef.current;
     if (node === null || node.disabled) return;
     const focusFrame = window.requestAnimationFrame(() => node.focus());
     didAutoFocusRef.current = true;
     previousBusyRef.current = false;
     return () => window.cancelAnimationFrame(focusFrame);
-  }, [props.busy, modelMenuOpen, reasoningMenuOpen]);
+  }, [props.busy, modelMenuOpen, reasoningMenuOpen, accessMenuOpen]);
 
   function closeComposerPanels(): void {
     setModelMenuOpen(false);
     setReasoningMenuOpen(false);
+    setAccessMenuOpen(false);
   }
 
   function selectModel(modelId: string): void {
@@ -193,6 +200,7 @@ export function ChatInputBar(props: ChatInputProps): React.ReactElement {
               onClick={() => {
                 setModelMenuOpen((value) => !value);
                 setReasoningMenuOpen(false);
+                setAccessMenuOpen(false);
               }}
               aria-expanded={modelMenuOpen}
             >
@@ -256,6 +264,7 @@ export function ChatInputBar(props: ChatInputProps): React.ReactElement {
                 onClick={() => {
                   setModelMenuOpen(false);
                   setReasoningMenuOpen((value) => !value);
+                  setAccessMenuOpen(false);
                 }}
                 aria-expanded={reasoningMenuOpen}
                 aria-label="思考强度"
@@ -287,6 +296,44 @@ export function ChatInputBar(props: ChatInputProps): React.ReactElement {
               )}
             </div>
           )}
+          <div className="composer-options-menu">
+            <button
+              type="button"
+              className={`composer-options-button composer-access-chip ${props.toolConfirmationPolicy === "full_access" ? "full-access" : ""}`}
+              onClick={() => {
+                setModelMenuOpen(false);
+                setReasoningMenuOpen(false);
+                setAccessMenuOpen((value) => !value);
+              }}
+              aria-expanded={accessMenuOpen}
+              aria-label="访问模式"
+              title="访问模式"
+            >
+              <ShieldCheck size={13} aria-hidden="true" />
+              <span>{toolAccessPolicyLabel(props.toolConfirmationPolicy)}</span>
+              <ChevronDown size={13} aria-hidden="true" />
+            </button>
+            {accessMenuOpen && (
+              <div className="composer-options-popover composer-access-popover" role="menu" aria-label="访问模式">
+                {TOOL_ACCESS_OPTIONS.map((option) => (
+                  <button
+                    type="button"
+                    role="menuitemradio"
+                    aria-checked={props.toolConfirmationPolicy === option.value}
+                    className={props.toolConfirmationPolicy === option.value ? "selected" : ""}
+                    key={option.value}
+                    onClick={() => {
+                      props.onToolConfirmationPolicyChange(option.value);
+                      setAccessMenuOpen(false);
+                    }}
+                  >
+                    <span>{option.label}</span>
+                    <small>{option.description}</small>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
         <div className="chat-input-right">
           <button
@@ -359,8 +406,21 @@ const REASONING_EFFORT_OPTIONS: readonly {
   { value: "high", label: "深入", description: "高强度" },
 ];
 
+const TOOL_ACCESS_OPTIONS: readonly {
+  readonly value: ComposerToolConfirmationPolicy;
+  readonly label: string;
+  readonly description: string;
+}[] = [
+  { value: "prompt", label: "标准访问", description: "命令确认" },
+  { value: "full_access", label: "完全访问", description: "跳过确认" },
+];
+
 function reasoningEffortLabel(value: "" | "low" | "medium" | "high"): string {
   return REASONING_EFFORT_OPTIONS.find((option) => option.value === value)?.label ?? "自动";
+}
+
+function toolAccessPolicyLabel(value: ComposerToolConfirmationPolicy): string {
+  return TOOL_ACCESS_OPTIONS.find((option) => option.value === value)?.label ?? "标准访问";
 }
 
 function modelOptionInitial(model: ChatModelOption): string {

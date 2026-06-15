@@ -57,6 +57,7 @@ export function createDesktopAgentTurnPolicy(input: {
   readonly traceId: string;
   readonly goalId: string;
   readonly allowedTools: readonly string[];
+  readonly confirmationPolicy?: RunDesktopAgentSessionOptions["toolConfirmationPolicy"];
   readonly modelCapabilities?: BasicAgentCapabilitySnapshot["modelCapabilities"];
 }): AgentTurnPolicy {
   return createAgentTurnPolicyFromDefinition({
@@ -64,6 +65,7 @@ export function createDesktopAgentTurnPolicy(input: {
     traceId: input.traceId,
     goalId: input.goalId,
     allowedTools: input.allowedTools,
+    confirmationPolicy: input.confirmationPolicy,
     modelCapabilities: input.modelCapabilities,
   });
 }

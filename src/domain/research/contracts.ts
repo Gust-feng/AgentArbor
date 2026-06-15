@@ -7,6 +7,7 @@ export const INFORMATION_SOURCE_KINDS = [
   "docs",
   "packages",
   "github",
+  "command_log",
 ] as const;
 
 export type InformationSourceKind = (typeof INFORMATION_SOURCE_KINDS)[number];
@@ -66,11 +67,14 @@ export type ReadResultRef = {
   readonly metadata?: Readonly<Record<string, string | number | boolean>>;
 };
 
+export type ResearchErrorFacts = Readonly<Record<string, string | number | boolean>>;
+
 export type ResearchTraceSourceStep = {
   readonly source: InformationSourceKind;
   readonly status: InformationAccessStatus;
   readonly resultRefs: readonly string[];
   readonly message?: string;
+  readonly errorFacts?: ResearchErrorFacts;
 };
 
 export type ResearchTrace = {
@@ -91,6 +95,7 @@ export type InformationSearchResult = {
   readonly query: string;
   readonly site?: string;
   readonly status: InformationAccessStatus;
+  readonly message?: string;
   readonly results: readonly SearchResultRef[];
   readonly trace: ResearchTrace;
 };

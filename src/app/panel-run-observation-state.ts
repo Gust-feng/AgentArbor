@@ -156,6 +156,5 @@ export function stateWithAppendOnlyRunEvent<
   return {
     ...previous,
     live: appendLiveRunEvent(input.runId, previous.live, input.event),
-    events: mergeRunEvents(previous.events, [input.event]),
   };
 }

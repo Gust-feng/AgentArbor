@@ -124,6 +124,120 @@ test("batch read projection exposes per-ref content and errors to model continua
   assert.equal(agentContent.results?.every((item) => typeof item.truncated === "boolean"), true);
 });
 
+test("read failure projection preserves HTTP error facts for model continuation", () => {
+  const errorFacts = {
+    code: "ECONNREFUSED",
+    errno: -4078,
+    syscall: "connect",
+    address: "127.0.0.1",
+    port: 65432,
+    method: "GET",
+    url: "http://127.0.0.1:65432/status",
+    durationMs: 2,
+  };
+  const projection = projectToolResult({
+    request: {
+      callId: "call-read-http-failed",
+      toolName: "read",
+      input: { ref: "http://127.0.0.1:65432/status" },
+    },
+    output: {
+      action: "read",
+      ref: "http://127.0.0.1:65432/status",
+      status: "provider-failed",
+      trace: {
+        traceId: "research-trace-test",
+        action: "read",
+        ref: "http://127.0.0.1:65432/status",
+        requestedSources: ["page"],
+        status: "provider-failed",
+        startedAt: "2026-01-01T00:00:00.000Z",
+        completedAt: "2026-01-01T00:00:00.001Z",
+        sourceSteps: [
+          {
+            source: "page",
+            status: "provider-failed",
+            resultRefs: [],
+            message: "http_request failed: ECONNREFUSED 127.0.0.1:65432",
+            errorFacts,
+          },
+        ],
+      },
+    },
+  });
+
+  const agentContent = projection.agentContent as {
+    readonly status?: string;
+    readonly error?: string;
+    readonly errorFacts?: Readonly<Record<string, unknown>>;
+    readonly metadata?: Readonly<Record<string, unknown>>;
+  };
+
+  assert.equal(projection.display?.kind, "read_result");
+  assert.equal(agentContent.status, "provider-failed");
+  assert.match(agentContent.error ?? "", /ECONNREFUSED/);
+  assert.equal(agentContent.errorFacts?.code, "ECONNREFUSED");
+  assert.equal(agentContent.errorFacts?.errno, -4078);
+  assert.equal(agentContent.errorFacts?.address, "127.0.0.1");
+  assert.equal(agentContent.errorFacts?.port, 65432);
+  assert.equal(agentContent.errorFacts?.method, "GET");
+  assert.equal(agentContent.metadata, undefined);
+  const envelope = projection.envelope;
+  assert.ok(envelope);
+  assert.equal(envelope.errorFacts?.code, "ECONNREFUSED");
+  const uiDisplay = envelope.uiDisplay;
+  assert.ok(uiDisplay);
+  if (uiDisplay.kind !== "read_result") {
+    throw new Error("expected read_result display");
+  }
+  assert.equal(uiDisplay.errorFacts?.code, "ECONNREFUSED");
+});
+
+test("search invalid input projection keeps the provider message visible", () => {
+  const projection = projectToolResult({
+    request: {
+      callId: "call-search-empty",
+      toolName: "search",
+      input: { query: "" },
+    },
+    output: {
+      action: "search",
+      query: "",
+      status: "invalid-input",
+      results: [],
+      trace: {
+        traceId: "research-trace-search-empty",
+        action: "search",
+        query: "",
+        requestedSources: ["codebase"],
+        status: "invalid-input",
+        startedAt: "2026-01-01T00:00:00.000Z",
+        completedAt: "2026-01-01T00:00:00.001Z",
+        sourceSteps: [
+          {
+            source: "codebase",
+            status: "invalid-input",
+            resultRefs: [],
+            message: "search requires a non-empty query.",
+          },
+        ],
+      },
+    },
+  });
+
+  assert.equal(projection.display?.kind, "search_results");
+  const display = projection.display;
+  if (display?.kind !== "search_results") {
+    throw new Error("expected search_results display");
+  }
+  assert.equal(display.status, "invalid-input");
+  assert.equal(display.message, "search requires a non-empty query.");
+  assert.equal(display.results.length, 0);
+  assert.equal(JSON.stringify(projection.agentContent).includes("search requires a non-empty query."), true);
+  assert.equal(projection.envelope?.uiDisplay?.kind, "search_results");
+  assert.equal(projection.envelope?.agentSummary.includes("search requires a non-empty query."), true);
+});
+
 test("command projection keeps commandLine as the single command fact for model continuation", () => {
   const projection = projectToolResult({
     request: {

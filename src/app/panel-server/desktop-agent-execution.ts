@@ -54,6 +54,7 @@ export async function runOrdinaryDesktopForPanel(
     skillContexts: await resolveTriggeredSkillContexts(runtime, goal, resources.capabilitySnapshot.skillCatalog),
     modelCapabilities: resources.capabilitySnapshot.modelCapabilities,
     capabilitySnapshot: resources.capabilitySnapshot,
+    toolConfirmationPolicy: options.toolConfirmationPolicy,
     platform: process.platform,
     abortSignal: options.abortSignal,
     onRuntimeReady: options.onRuntimeReady,

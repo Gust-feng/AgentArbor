@@ -1,6 +1,8 @@
 import type {
   ToolCallRequest,
   ToolDisplayProjection,
+  ToolErrorDomain,
+  ToolErrorFacts,
   ToolResultEnvelope,
 } from "../../domain/tools/index.js";
 import { toolDisplayName } from "../../domain/tools/index.js";
@@ -13,17 +15,6 @@ export type ProjectToolResultEnvelopeInput = {
   readonly truncated: boolean;
 };
 
-export type ToolErrorDomain =
-  | "tool_error"
-  | "runtime_error"
-  | "model_error"
-  | "ui_submit_error"
-  | "process_error";
-
-export type ToolResultEnvelopeWithErrorDomain = ToolResultEnvelope & {
-  readonly errorDomain?: ToolErrorDomain;
-};
-
 export type ProjectToolStatusEnvelopeInput = {
   readonly request: ToolCallRequest;
   readonly status: "failed" | "approval_required" | "cancelled";
@@ -31,6 +22,7 @@ export type ProjectToolStatusEnvelopeInput = {
   readonly diagnosticRef: string;
   readonly evidenceRefs?: readonly string[];
   readonly errorDomain?: ToolErrorDomain;
+  readonly errorFacts?: ToolErrorFacts;
 };
 
 // The envelope is the compact UI/context evidence form of tool output. It is
@@ -40,6 +32,7 @@ export function projectToolResultEnvelope(input: ProjectToolResultEnvelopeInput)
   const display = compactToolDisplayForUi(input.display);
   const agentSummary = agentSummaryForToolDisplay(display, input.summary, input.request.toolName);
   const evidenceRefs = evidenceRefsForToolDisplay(display, input.request.callId, input.diagnosticRef);
+  const errorFacts = errorFactsForToolDisplay(display);
   return {
     agentSummary,
     evidenceRefs,
@@ -49,10 +42,11 @@ export function projectToolResultEnvelope(input: ProjectToolResultEnvelopeInput)
     redacted: false,
     diagnosticRef: input.diagnosticRef,
     rawRetention: "none",
+    errorFacts,
   };
 }
 
-export function projectToolStatusEnvelope(input: ProjectToolStatusEnvelopeInput): ToolResultEnvelopeWithErrorDomain {
+export function projectToolStatusEnvelope(input: ProjectToolStatusEnvelopeInput): ToolResultEnvelope {
   const agentSummary = compactOrdinaryToolText(input.summary, 1_200);
   const errorDomain = input.errorDomain ?? defaultToolStatusErrorDomain(input.request.toolName, input.status);
   return {
@@ -64,6 +58,7 @@ export function projectToolStatusEnvelope(input: ProjectToolStatusEnvelopeInput)
     diagnosticRef: input.diagnosticRef,
     rawRetention: "none",
     errorDomain,
+    errorFacts: input.errorFacts,
   };
 }
 
@@ -93,7 +88,8 @@ function agentSummaryForToolDisplay(
       })
       .join("\n");
     return compactOrdinaryToolText(
-      [`${label}已完成${display.query === undefined ? "" : `：${display.query}`}。`, results || fallback]
+      [`${label}已完成${display.query === undefined ? "" : `：${display.query}`}。`, display.message, results || fallback]
+        .filter(isString)
         .filter((item) => item.trim().length > 0)
         .join("\n"),
       1_800
@@ -133,6 +129,8 @@ function agentSummaryForToolDisplay(
         display.title,
         display.uri ?? display.url,
         display.source === undefined ? undefined : `来源：${display.source}`,
+        display.error === undefined ? undefined : `错误：${display.error}`,
+        display.errorFacts === undefined ? undefined : `错误事实：${compactFactsText(display.errorFacts)}`,
         compactSafeText(display.contentPreview, 1_200),
         summary,
       ].filter(isString).join("\n"),
@@ -148,7 +146,9 @@ function agentSummaryForToolDisplay(
         display.timedOut === true ? "状态：命令超时。" : undefined,
         display.background === true ? "状态：后台运行。" : undefined,
         display.pid === undefined ? undefined : `PID：${display.pid}`,
-        display.logPath === undefined ? undefined : `日志：${display.logPath}`,
+        display.logRef === undefined
+          ? display.logPath === undefined ? undefined : `日志路径：${display.logPath}`
+          : `日志：${display.logRef}`,
         display.stopCommand === undefined ? undefined : `停止命令：${display.stopCommand}`,
         display.durationMs === undefined ? undefined : `耗时：${display.durationMs}ms`,
         display.waitForPort === undefined ? undefined : `等待端口：${display.waitForPort}`,
@@ -236,6 +236,14 @@ function displayIsTruncated(display: ToolDisplayProjection): boolean {
   return "truncated" in display && display.truncated === true;
 }
 
+function errorFactsForToolDisplay(display: ToolDisplayProjection): ToolErrorFacts | undefined {
+  return display.kind === "read_result" ? display.errorFacts : undefined;
+}
+
+function compactFactsText(facts: ToolErrorFacts): string | undefined {
+  return compactSafeText(JSON.stringify(facts), 800);
+}
+
 function compactSafeText(value: string | undefined, maxLength: number): string | undefined {
   if (value === undefined) {
     return undefined;
@@ -253,6 +261,7 @@ function compactToolDisplayForUi(display: ToolDisplayProjection): ToolDisplayPro
       kind: "search_results",
       query: compactSafeText(display.query, 240),
       status: compactSafeText(display.status, 120),
+      message: compactSafeText(display.message, 500),
       results: display.results.slice(0, 8).map((result) => ({
         title: compactOrdinaryToolText(result.title, 180),
         url: compactSafeText(result.url, 260),
@@ -283,6 +292,8 @@ function compactToolDisplayForUi(display: ToolDisplayProjection): ToolDisplayPro
       uri: compactSafeText(display.uri, 260),
       sourceSearchRef: compactSafeText(display.sourceSearchRef, 220),
       contentPreview: compactSafeText(display.contentPreview, 1_200),
+      error: compactSafeText(display.error, 500),
+      errorFacts: display.errorFacts,
       truncated: display.truncated,
     };
   }
@@ -334,6 +345,7 @@ function compactToolDisplayForUi(display: ToolDisplayProjection): ToolDisplayPro
       timedOut: display.timedOut,
       background: display.background,
       pid: display.pid,
+      logRef: compactSafeText(display.logRef, 260),
       logPath: compactSafeText(display.logPath, 260),
       stopCommand: compactSafeText(display.stopCommand, 260),
       durationMs: display.durationMs,

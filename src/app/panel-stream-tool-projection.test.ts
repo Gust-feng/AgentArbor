@@ -43,6 +43,97 @@ test("tool stream projection keeps command output as safe summary", () => {
   assert.equal(JSON.stringify(detail).includes("RAW_STDOUT_SENTINEL"), false);
 });
 
+test("tool stream projection preserves failed envelope error facts", () => {
+  const detail = toolStreamDetail("tool.failed", {
+    toolName: "shell_command",
+    input: { command: "pnpm", args: ["missing"] },
+    output: {
+      envelope: {
+        agentSummary: "spawn pnpm ENOENT",
+        evidenceRefs: ["tool:tool-shell-missing"],
+        rawRetention: "none",
+        redacted: false,
+        errorDomain: "process_error",
+        errorFacts: {
+          code: "ENOENT",
+          syscall: "spawn",
+          command: "pnpm",
+        },
+      },
+    },
+  });
+
+  assert.equal(detail.envelope?.errorDomain, "process_error");
+  assert.equal(detail.envelope?.errorFacts?.code, "ENOENT");
+  assert.equal(detail.envelope?.errorFacts?.syscall, "spawn");
+  assert.equal(detail.envelope?.errorFacts?.command, "pnpm");
+});
+
+test("tool stream projection surfaces read HTTP failure facts in preview and detail", () => {
+  const errorFacts = {
+    code: "ECONNREFUSED",
+    errno: -4078,
+    syscall: "connect",
+    address: "127.0.0.1",
+    port: 54321,
+    method: "GET",
+    url: "http://127.0.0.1:54321/status",
+    durationMs: 5,
+  };
+  const detail = toolStreamDetail("tool.completed", {
+    toolName: "read",
+    input: { ref: "http://127.0.0.1:54321/status" },
+    output: {
+      action: "读取资料",
+      summary: "资料读取已完成。",
+      display: {
+        kind: "read_result",
+        ref: "http://127.0.0.1:54321/status",
+        status: "provider-failed",
+        error: "http_request failed: ECONNREFUSED 127.0.0.1:54321",
+        errorFacts,
+      },
+      envelope: {
+        agentSummary: "资料读取已完成。\n错误：http_request failed: ECONNREFUSED 127.0.0.1:54321",
+        evidenceRefs: ["tool:read-fail", "http://127.0.0.1:54321/status"],
+        rawRetention: "none",
+        redacted: false,
+        errorFacts,
+      },
+      result: {},
+    },
+  });
+
+  assert.equal(detail.display?.kind, "read_result");
+  assert.equal(detail.display?.kind === "read_result" ? detail.display.errorFacts?.code : undefined, "ECONNREFUSED");
+  assert.equal(detail.errorFacts?.code, "ECONNREFUSED");
+  assert.equal(detail.envelope?.errorFacts?.port, 54321);
+  assert.equal(detail.preview?.includes("ECONNREFUSED"), true);
+  assert.equal(detail.preview?.includes("errorFacts"), true);
+});
+
+test("tool stream projection surfaces search invalid-input messages", () => {
+  const detail = toolStreamDetail("tool.completed", {
+    toolName: "search",
+    input: { query: "" },
+    output: {
+      action: "search",
+      display: {
+        kind: "search_results",
+        query: "",
+        status: "invalid-input",
+        message: "search requires a non-empty query.",
+        results: [],
+      },
+    },
+  });
+
+  assert.equal(detail.display?.kind, "search_results");
+  assert.equal(detail.display?.kind === "search_results" ? detail.display.message : undefined, "search requires a non-empty query.");
+  assert.equal(detail.preview?.includes("invalid-input"), true);
+  assert.equal(detail.preview?.includes("search requires a non-empty query."), true);
+});
+
 test("tool stream projection keeps ordinary tool copy free of diagnostic labels", () => {
   const requested = toolStreamDetail("tool.requested", {
     toolName: "read_file",

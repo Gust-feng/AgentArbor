@@ -3,13 +3,14 @@ import type {
   ToolCallResult,
   ToolDefinition,
   ToolDefinitionMetadata,
+  ToolErrorDomain,
+  ToolErrorFacts,
   ToolExecutionContext,
   ToolExecutor,
   ToolPermissionCheck,
-  ToolSafeProjection,
   ToolSecurityDecision,
 } from "../../domain/tools/index.js";
-import { toolDisplayName } from "../../domain/tools/index.js";
+import { isToolErrorDomain, normalizeToolErrorFacts, normalizeToolErrorFactValue, toolDisplayName } from "../../domain/tools/index.js";
 import type { ConfirmationRequest } from "../../domain/basic-agent/index.js";
 import {
   confirmationRequestFromSecurityDecision,
@@ -68,14 +69,20 @@ export class ToolCenter {
     }
     const executor = this.tools.get(request.toolName);
     if (executor === undefined) {
-      return failedToolResult(request, startedAt, `${toolDisplayName(request.toolName)}未注册。`);
+      return failedToolResult(request, startedAt, {
+        message: `${toolDisplayName(request.toolName)}未注册。`,
+        errorDomain: "tool_error",
+      });
     }
 
     if (permission.callerAgentId !== context.callerAgentId) {
       return failedToolResult(
         request,
         startedAt,
-        `${toolDisplayName(request.toolName)}调用者身份与本轮工具授权不一致。`
+        {
+          message: `${toolDisplayName(request.toolName)}调用者身份与本轮工具授权不一致。`,
+          errorDomain: "tool_error",
+        }
       );
     }
 
@@ -83,12 +90,19 @@ export class ToolCenter {
       return failedToolResult(
         request,
         startedAt,
-        `${toolDisplayName(request.toolName)}未授权给当前 Agent。`
+        {
+          message: `${toolDisplayName(request.toolName)}未授权给当前 Agent。`,
+          errorDomain: "tool_error",
+        }
       );
     }
 
     if (this.callCount >= this.maxCallsPerRun) {
-      return failedToolResult(request, startedAt, `工具调用保护上限已触发：maxCallsPerRun=${this.maxCallsPerRun}。`);
+      return failedToolResult(request, startedAt, {
+        message: `工具调用保护上限已触发：maxCallsPerRun=${this.maxCallsPerRun}。`,
+        errorDomain: "runtime_error",
+        facts: { maxCallsPerRun: this.maxCallsPerRun },
+      });
     }
 
     const metadata = normalizeToolMetadata(executor.definition);
@@ -99,14 +113,19 @@ export class ToolCenter {
       context: {
         platform: this.platform,
         approvedConfirmationIds: permission.approvedConfirmationIds,
+        confirmationPolicy: permission.confirmationPolicy,
       },
     });
     if (securityDecision.decision === "blocked") {
-      return failedToolResult(request, startedAt, securityDecision.reason, projectToolFailure({
-        request,
-        error: securityDecision.reason,
+      return failedToolResult(request, startedAt, {
+        message: securityDecision.reason,
+        errorDomain: "tool_error",
+        facts: {
+          code: securityDecision.code,
+          affectedResources: [...securityDecision.affectedResources],
+        },
         diagnosticRef: `tool:${request.callId}:${securityDecision.code}`,
-      }));
+      });
     }
     if (securityDecision.decision === "approval_required") {
       return approvalRequiredToolResult(request, startedAt, securityDecision);
@@ -135,7 +154,7 @@ export class ToolCenter {
       if (isAbortSignalAborted(context.abortSignal)) {
         return cancelledToolResult(request, startedAt);
       }
-      return failedToolResult(request, startedAt, sanitizeError(error));
+      return failedToolResult(request, startedAt, sanitizeError(error, request.toolName));
     }
   }
 
@@ -151,18 +170,28 @@ export class ToolCenter {
 function failedToolResult(
   request: ToolCallRequest,
   startedAt: number,
-  error: string,
-  projection?: ToolSafeProjection
+  error: SanitizedToolError
 ): ToolCallResult {
+  const durationMs = Date.now() - startedAt;
+  const diagnosticRef = error.diagnosticRef ?? `tool:${request.callId}:failed`;
   return {
     callId: request.callId,
     toolName: request.toolName,
     input: request.input,
     output: undefined,
     status: "failed",
-    error,
-    durationMs: Date.now() - startedAt,
-    projection: projection ?? projectToolFailure({ request, error }),
+    error: error.message,
+    errorDomain: error.errorDomain,
+    errorFacts: error.facts,
+    durationMs,
+    projection: projectToolFailure({
+      request,
+      error: error.message,
+      diagnosticRef,
+      errorDomain: error.errorDomain,
+      errorFacts: error.facts,
+      durationMs,
+    }),
   };
 }
 
@@ -295,7 +324,65 @@ function isAbortSignalAborted(signal: AbortSignal | undefined): boolean {
   return signal?.aborted === true;
 }
 
-function sanitizeError(error: unknown): string {
+type SanitizedToolError = {
+  readonly message: string;
+  readonly errorDomain: ToolErrorDomain;
+  readonly facts?: ToolErrorFacts;
+  readonly diagnosticRef?: string;
+};
+
+function sanitizeError(error: unknown, toolName: string): SanitizedToolError {
   const message = error instanceof Error ? error.message : "Tool execution failed.";
-  return redactOrdinaryText(message, 500);
+  const facts = toolErrorFactsFromUnknown(error);
+  return {
+    message: redactOrdinaryText(message, 500),
+    errorDomain: toolErrorDomainFromUnknown(error) ?? defaultToolErrorDomain(toolName, facts),
+    facts,
+  };
+}
+
+function defaultToolErrorDomain(toolName: string, facts: ToolErrorFacts | undefined): ToolErrorDomain {
+  if (toolName === "shell_command" || toolName === "run_command") {
+    return "process_error";
+  }
+  const code = typeof facts?.code === "string" ? facts.code.toLowerCase() : undefined;
+  if (
+    code !== undefined &&
+    (code.includes("enoent") ||
+      code.includes("spawn") ||
+      code.includes("exit") ||
+      code.includes("signal") ||
+      code.includes("process"))
+  ) {
+    return "process_error";
+  }
+  return "tool_error";
+}
+
+function toolErrorDomainFromUnknown(value: unknown): ToolErrorDomain | undefined {
+  const record = asRecord(value);
+  return isToolErrorDomain(record.errorDomain) ? record.errorDomain : undefined;
+}
+
+function toolErrorFactsFromUnknown(value: unknown): ToolErrorFacts | undefined {
+  const record = asRecord(value);
+  const compactString = (text: string) => redactOrdinaryText(text, 500);
+  const facts = normalizeToolErrorFacts(record.facts, { compactString });
+  const code = normalizeToolErrorFactValue(record.code, { compactString });
+  const name = typeof record.name === "string" && record.name.length > 0 ? record.name : undefined;
+  const merged: Record<string, ToolErrorFacts[string]> = {};
+  if (facts !== undefined) {
+    Object.assign(merged, facts);
+  }
+  if (code !== undefined && merged.code === undefined) {
+    merged.code = code;
+  }
+  if (name !== undefined && merged.name === undefined) {
+    merged.name = name;
+  }
+  return Object.keys(merged).length === 0 ? undefined : merged;
+}
+
+function asRecord(value: unknown): Readonly<Record<string, unknown>> {
+  return typeof value === "object" && value !== null ? value as Readonly<Record<string, unknown>> : {};
 }

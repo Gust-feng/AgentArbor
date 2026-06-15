@@ -13,7 +13,7 @@ import { restoredRunResultProjection } from "../restored-run-projection.js";
 import { createLiveBasicAgentWorkViewReadModel, createPersistedBasicAgentWorkViewReadModel } from "./basic-agent-read-models.js";
 import { createPersistedStreamEvents, panelStatusFromRuntimeStatus } from "./persisted-run-response.js";
 import type { PanelRuntime } from "./runtime.js";
-import { syncPanelRunStreamEventsForJob } from "./run-stream-sync.js";
+import { persistentPanelRunStreamEvents, syncPanelRunStreamEventsForJob } from "./run-stream-sync.js";
 
 export type BasicAgentRunViewRuntime = {
   readonly runExecutor: Pick<PanelRuntime["runExecutor"], "get" | "replayEvents" | "syncRunEvents">;
@@ -42,7 +42,7 @@ async function createLiveBasicAgentRunViewReadModel(
   job: PanelRunJob,
   afterSequence: number
 ): Promise<PanelBasicAgentRunViewReadModel | undefined> {
-  const streamEvents = syncPanelRunStreamEventsForJob(runtime, job);
+  const streamEvents = persistentPanelRunStreamEvents(syncPanelRunStreamEventsForJob(runtime, job));
   const run = runtime.runExecutor.get(job.runId);
   const fullReplay = runtime.runExecutor.replayEvents(job.runId, 0);
   const replay = runtime.runExecutor.replayEvents(job.runId, afterSequence);

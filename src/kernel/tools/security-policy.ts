@@ -27,6 +27,9 @@ export function evaluateToolCallSecurity(input: {
   }
 
   if (input.metadata.requiresConfirmation === true) {
+    if (input.context.confirmationPolicy === "full_access") {
+      return { decision: "allow", reason: "Full access mode allows confirmation-gated tool calls." };
+    }
     return approvalDecision({
       request: input.request,
       definition: input.definition,

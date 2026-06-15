@@ -19,6 +19,7 @@ type BatchReadItem = {
   readonly sourceSearchRef?: string;
   readonly metadata?: Readonly<Record<string, string | number | boolean>>;
   readonly error?: string;
+  readonly errorFacts?: Readonly<Record<string, string | number | boolean>>;
 };
 
 export function createResearchSearchTool(researchRuntime: InformationAccess): ToolExecutor {
@@ -121,23 +122,23 @@ export function createResearchReadTool(researchRuntime: InformationAccess): Tool
     definition: {
       name: "read",
       description: [
-        "Read a research ref, HTTP/HTTPS URL, repo:// URI, or repository path and return the actual content preview for model use.",
+        "Read a research ref, HTTP/HTTPS URL, command-log:// ref, repo:// URI, or repository path and return the actual content preview for model use.",
         "Pass ref as a string for the existing single-read output, or as a string array to read multiple refs in one call.",
         `Readable sources now: ${readableDescription || "none"}.`,
         "Single-read output includes title, uri/url, source, status, contentPreview, truncated, and metadata when available. Batch output is an array with one item per ref and does not fail the whole batch when one ref fails.",
       ].join(" "),
       modelContract: {
-        purpose: "Read one or more research refs, URLs, repo URIs, or repository paths and return contentPreview for model reasoning.",
+        purpose: "Read one or more research refs, URLs, command log refs, repo URIs, or repository paths and return contentPreview for model reasoning.",
         whenToUse: [
           "Use after search when a snippet is not enough.",
-          "Use directly for a known URL, repo:// URI, or workspace path that should be inspected.",
+          "Use directly for a known URL, command-log:// ref, repo:// URI, or workspace path that should be inspected.",
           "Use a ref array when several refs are needed and independent per-ref status is acceptable.",
         ],
         whenNotToUse: [
           "Do not use for writing or editing files; it only reads content.",
         ],
         inputNotes: [
-          "ref is required and may be a returned refId, HTTP/HTTPS URL, repo:// URI, repository path, or an array of those strings.",
+          "ref is required and may be a returned refId, HTTP/HTTPS URL, command-log:// ref, repo:// URI, repository path, or an array of those strings.",
           "source is optional and should only disambiguate refs.",
           "maxLength increases or bounds the returned preview.",
         ],
@@ -145,14 +146,14 @@ export function createResearchReadTool(researchRuntime: InformationAccess): Tool
           { label: "readable sources", value: readableDescription || "none" },
         ],
         usageNotes: [
-          "Use read to expand a search ref, URL, repo:// URI, or repository path into content the model can continue reasoning over.",
+          "Use read to expand a search ref, URL, command-log:// ref, repo:// URI, or repository path into content the model can continue reasoning over.",
           "For batch reads, inspect each array item status and error instead of assuming every ref succeeded.",
           "Do not treat UI activity text as the read result; inspect contentPreview and status.",
           "Increase maxLength when the next step needs more source text.",
         ],
         outputNotes: [
           "Single ref calls keep the existing result.contentPreview shape.",
-          "Batch ref calls return an array; each item has ref, status, contentPreview, truncated, and error when the item failed.",
+          "Batch ref calls return an array; each item has ref, status, contentPreview, truncated, error, and errorFacts when available.",
           "truncated indicates whether a longer read may be needed.",
           "sourceSearchRef links the read result back to a search result when available.",
         ],
@@ -181,7 +182,7 @@ export function createResearchReadTool(researchRuntime: InformationAccess): Tool
               { type: "string" },
               { type: "array", items: { type: "string" } },
             ],
-            description: "Research ref, http/https URL, repo:// URI, repository path, or an array of those strings.",
+            description: "Research ref, http/https URL, command-log:// ref, repo:// URI, repository path, or an array of those strings.",
           },
           source: {
             type: "string",
@@ -218,19 +219,36 @@ export function createResearchReadTool(researchRuntime: InformationAccess): Tool
           }
         }));
       }
-      return researchRuntime.read({
+      const result = await researchRuntime.read({
         ref: stringOrFallback(record.ref, ""),
         source: informationSourceOrUndefined(record.source),
         maxLength: numberOrUndefined(record.maxLength),
         abortSignal: context.abortSignal,
       });
+      return singleReadOutputFromResult(result);
     },
+  };
+}
+
+function singleReadOutputFromResult(read: InformationReadResult): InformationReadResult & {
+  readonly error?: string;
+  readonly errorFacts?: Readonly<Record<string, string | number | boolean>>;
+} {
+  const firstFailureStep = firstFailureSourceStep(read);
+  if (read.status === "completed" || firstFailureStep === undefined) {
+    return read;
+  }
+  return {
+    ...read,
+    error: firstFailureStep.message,
+    errorFacts: firstFailureStep.errorFacts,
   };
 }
 
 function batchReadItemFromResult(read: InformationReadResult): BatchReadItem {
   const result = read.result;
-  const error = read.status === "completed" ? undefined : firstTraceMessage(read);
+  const firstFailureStep = firstFailureSourceStep(read);
+  const error = read.status === "completed" ? undefined : firstFailureStep?.message;
   return {
     ref: read.ref,
     status: read.status,
@@ -244,11 +262,12 @@ function batchReadItemFromResult(read: InformationReadResult): BatchReadItem {
     sourceSearchRef: result?.sourceSearchRef,
     metadata: result?.metadata,
     error,
+    errorFacts: firstFailureStep?.errorFacts,
   };
 }
 
-function firstTraceMessage(read: InformationReadResult): string | undefined {
-  return read.trace.sourceSteps.map((step) => step.message).find((message): message is string => message !== undefined);
+function firstFailureSourceStep(read: InformationReadResult): InformationReadResult["trace"]["sourceSteps"][number] | undefined {
+  return read.trace.sourceSteps.find((step) => step.status !== "completed");
 }
 
 function refsFromInput(value: unknown): readonly string[] | undefined {
@@ -282,7 +301,8 @@ function informationSourceOrUndefined(value: unknown): InformationSourceKind | u
     value === "run_memory" ||
     value === "docs" ||
     value === "packages" ||
-    value === "github"
+    value === "github" ||
+    value === "command_log"
   ) {
     return value;
   }

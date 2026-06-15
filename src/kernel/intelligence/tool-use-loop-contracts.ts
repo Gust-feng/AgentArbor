@@ -6,6 +6,7 @@ import type {
   ModelResponse,
 } from "../../domain/intelligence/index.js";
 import type {
+  ToolConfirmationPolicy,
   ToolCallRequest,
   ToolCallResult,
   ToolDefinition,
@@ -23,6 +24,7 @@ export type ToolUseLoopOptions = {
   readonly allowedTools: readonly string[];
   readonly blockedToolNames?: readonly string[];
   readonly approvedConfirmationIds?: readonly string[];
+  readonly confirmationPolicy?: ToolConfirmationPolicy;
   readonly publishToolEvent?: (message: ArborMessage) => void;
   readonly maintainContext?: ToolUseLoopContextMaintainer;
   readonly abortSignal?: AbortSignal;

@@ -12,6 +12,7 @@ export type TranscriptToolDisplayLike =
   | {
       readonly kind: "search_results";
       readonly query?: string;
+      readonly message?: string;
       readonly results?: readonly unknown[];
     }
   | {

@@ -405,7 +405,7 @@ function transcriptToolSummary(event: PanelTranscriptStreamEvent): string | unde
     }).join(" · ") || undefined;
   }
   if (display?.kind === "search_results") {
-    return [display.query, `${display.results.length} 条结果`]
+    return [display.query, display.message, `${display.results.length} 条结果`]
       .filter((value): value is string => value !== undefined && value.trim().length > 0)
       .join(" · ");
   }

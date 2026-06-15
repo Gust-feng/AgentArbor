@@ -323,8 +323,18 @@ function toolLedgerTitle(display: ToolDisplayProjection): string {
 }
 
 function toolLedgerSummary(display: ToolDisplayProjection): string {
-  if (display.kind === "search_results") return redactOrdinaryText(display.query ?? `搜索结果 ${display.results.length} 条`, 240);
-  if (display.kind === "read_result") return redactOrdinaryText(display.title ?? display.uri ?? display.url ?? "资料已读取。", 240);
+  if (display.kind === "search_results") return redactOrdinaryText(
+    [display.query, display.message, `搜索结果 ${display.results.length} 条`].filter(isString).join(" · "),
+    300
+  );
+  if (display.kind === "read_result") return redactOrdinaryText(
+    [
+      display.title ?? display.uri ?? display.url ?? "资料已读取。",
+      display.error,
+      display.errorFacts === undefined ? undefined : `errorFacts: ${JSON.stringify(display.errorFacts)}`,
+    ].filter(isString).join(" · "),
+    420
+  );
   if (display.kind === "browser_snapshot") return redactOrdinaryText(display.title ?? display.url ?? "网页已读取。", 240);
   if (display.kind === "http_response") return redactOrdinaryText(
     [

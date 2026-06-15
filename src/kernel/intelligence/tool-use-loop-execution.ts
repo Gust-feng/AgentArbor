@@ -134,6 +134,7 @@ export async function executeToolCallSafely(
       callerAgentId: options.callerAgentId,
       allowedTools: options.allowedTools,
       approvedConfirmationIds: options.approvedConfirmationIds,
+      confirmationPolicy: options.confirmationPolicy,
     });
   } catch (error) {
     return {

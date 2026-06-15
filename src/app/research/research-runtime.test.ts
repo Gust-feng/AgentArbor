@@ -37,10 +37,25 @@ test("ResearchRuntime default model-visible search sources exclude unavailable s
   assert.equal(capabilities.sources.find((source) => source.source === "docs")?.modelVisible, false);
   assert.equal(capabilities.sources.find((source) => source.source === "packages")?.modelVisible, false);
   assert.equal(capabilities.sources.find((source) => source.source === "github")?.modelVisible, false);
+  assert.equal(capabilities.sources.find((source) => source.source === "soil")?.modelVisible, false);
+  assert.equal(capabilities.sources.find((source) => source.source === "run_memory")?.modelVisible, false);
   assert.deepEqual(result.trace.requestedSources, ["codebase"]);
   assert.equal(result.trace.requestedSources.includes("docs"), false);
   assert.equal(result.trace.requestedSources.includes("packages"), false);
   assert.equal(result.trace.requestedSources.includes("github"), false);
+  assert.equal(result.trace.requestedSources.includes("soil"), false);
+  assert.equal(result.trace.requestedSources.includes("run_memory"), false);
+});
+
+test("ResearchRuntime search returns a top-level message for empty queries", async () => {
+  const runtime = createDefaultResearchRuntime({ env: {}, tavilyFetch: undefined });
+
+  const result = await runtime.search({ query: "" });
+
+  assert.equal(result.status, "invalid-input");
+  assert.equal(result.message, "search requires a non-empty query.");
+  assert.equal(result.results.length, 0);
+  assert.equal(result.trace.sourceSteps[0]?.message, "search requires a non-empty query.");
 });
 
 test("ResearchRuntime explicit hidden stub sources degrade to no-provider instead of returning stub payloads", async () => {
@@ -139,6 +154,100 @@ test("ResearchRuntime page source rejects invalid URLs and degrades when fetch i
   }
 });
 
+test("ResearchRuntime page read returns structured HTTP failure facts", async () => {
+  const cause = Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:43210"), {
+    code: "ECONNREFUSED",
+    errno: -4078,
+    syscall: "connect",
+    address: "127.0.0.1",
+    port: 43210,
+  });
+  const pageFetch: PageFetchLike = async () => {
+    const error = new TypeError("fetch failed") as Error & { cause?: unknown };
+    error.cause = cause;
+    throw error;
+  };
+  const runtime = createDefaultResearchRuntime({ pageFetch });
+
+  const read = await runtime.read({ ref: "http://127.0.0.1:43210/status" });
+  const step = read.trace.sourceSteps[0];
+
+  assert.equal(read.status, "provider-failed");
+  assert.equal(step?.source, "page");
+  assert.equal(step?.status, "provider-failed");
+  assert.match(step?.message ?? "", /ECONNREFUSED/);
+  assert.equal(step?.errorFacts?.code, "ECONNREFUSED");
+  assert.equal(step?.errorFacts?.errno, -4078);
+  assert.equal(step?.errorFacts?.syscall, "connect");
+  assert.equal(step?.errorFacts?.address, "127.0.0.1");
+  assert.equal(step?.errorFacts?.port, 43210);
+  assert.equal(step?.errorFacts?.method, "GET");
+  assert.equal(step?.errorFacts?.url, "http://127.0.0.1:43210/status");
+  assert.equal(typeof step?.errorFacts?.durationMs, "number");
+});
+
+test("ResearchRuntime page read returns HTTP status facts for non-OK responses", async () => {
+  const pageFetch: PageFetchLike = async () => ({
+    ok: false,
+    status: 500,
+    statusText: "Internal Server Error",
+    text: async () => "server failed",
+  });
+  const runtime = createDefaultResearchRuntime({ pageFetch });
+
+  const read = await runtime.read({ ref: "https://example.test/fail" });
+  const step = read.trace.sourceSteps[0];
+
+  assert.equal(read.status, "provider-failed");
+  assert.equal(step?.source, "page");
+  assert.equal(step?.status, "provider-failed");
+  assert.equal(step?.message, "Page read returned HTTP 500.");
+  assert.equal(step?.errorFacts?.statusCode, 500);
+  assert.equal(step?.errorFacts?.statusText, "Internal Server Error");
+  assert.equal(step?.errorFacts?.method, "GET");
+  assert.equal(step?.errorFacts?.url, "https://example.test/fail");
+  assert.equal(typeof step?.errorFacts?.durationMs, "number");
+});
+
+test("ResearchRuntime reads only registered command-log refs", async () => {
+  const codebaseRoot = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-research-command-log-codebase-"));
+  const logRef = "command-log://shell-abc123";
+  try {
+    await fs.writeFile(path.join(codebaseRoot, "shell-abc123"), "must not be read through command-log fallback", "utf8");
+    const runtime = createDefaultResearchRuntime({
+      codebaseRoot,
+      commandLogRegistry: {
+        read: async (ref) => ref === logRef
+          ? {
+              title: "shell command log",
+              content: "background-ready\nserver listening\n",
+              metadata: { pid: 1234 },
+            }
+          : undefined,
+      },
+    });
+
+    const registered = await runtime.read({ ref: logRef, maxLength: 200 });
+    const unknown = await runtime.read({ ref: "command-log://shell-unknown", maxLength: 200 });
+    const illegal = await runtime.read({ ref: "command-log://../shell-abc123", maxLength: 200 });
+
+    assert.equal(registered.status, "completed");
+    assert.equal(registered.result?.source, "command_log");
+    assert.equal(registered.result?.uri, logRef);
+    assert.equal(registered.result?.contentPreview, "background-ready\nserver listening\n");
+    assert.equal(registered.result?.metadata?.refKind, "command_log");
+    assert.equal(registered.result?.metadata?.pid, 1234);
+    assert.equal(unknown.status, "invalid-input");
+    assert.equal(unknown.result, undefined);
+    assert.equal(unknown.trace.sourceSteps[0]?.message, "Unknown or unregistered command log ref.");
+    assert.equal(illegal.status, "invalid-input");
+    assert.equal(illegal.result, undefined);
+    assert.equal(JSON.stringify({ unknown, illegal }).includes("must not be read"), false);
+  } finally {
+    await fs.rm(codebaseRoot, { recursive: true, force: true });
+  }
+});
+
 test("ResearchRuntime codebase adapter searches and reads repository text files", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-research-codebase-"));
   try {
@@ -172,7 +281,7 @@ test("ResearchRuntime codebase adapter rejects path traversal reads", async () =
   }
 });
 
-test("ResearchRuntime soil and run_memory sources expose refs without inline asset bodies", async () => {
+test("ResearchRuntime exposes Soil refs but keeps Run Memory hidden until enabled", async () => {
   const constraint: Constraint = {
     id: "constraint:research",
     source: "soil",
@@ -201,13 +310,31 @@ test("ResearchRuntime soil and run_memory sources expose refs without inline ass
 
   const soil = await runtime.search({ query: "candidate evidence", sources: ["soil"] });
   const runMemory = await runtime.search({ query: "fallback", sources: ["run_memory"] });
-  const read = await runtime.read({ ref: runMemory.results[0]!.refId });
+  const read = await runtime.read({ ref: "soil:run-memory:similar-task", source: "run_memory" });
 
   assert.equal(soil.status, "completed");
   assert.equal(soil.results[0]?.source, "soil");
-  assert.equal(runMemory.status, "completed");
-  assert.equal(runMemory.results[0]?.source, "run_memory");
-  assert.equal(read.result?.summary.includes("Similar task"), true);
+  assert.equal(runMemory.status, "no-provider");
+  assert.equal(runMemory.results.length, 0);
+  assert.equal(runMemory.message, "Run Memory is not enabled in the current ordinary Agent tool contract.");
+  assert.equal(read.status, "no-provider");
+  assert.equal(read.result, undefined);
+});
+
+test("ResearchRuntime keeps empty Soil stores out of model-visible search sources", async () => {
+  const runtime = createDefaultResearchRuntime({
+    soilStore: new InMemoryReadonlySoilStore({ constraints: [] }),
+  });
+
+  const capabilities = runtime.getCapabilities();
+  const search = await runtime.search({ query: "anything" });
+  const explicitSoil = await runtime.search({ query: "anything", sources: ["soil"] });
+
+  assert.equal(capabilities.sources.find((source) => source.source === "soil")?.modelVisible, false);
+  assert.equal(capabilities.defaultSearchSources.includes("soil"), false);
+  assert.equal(search.trace.requestedSources.includes("soil"), false);
+  assert.equal(explicitSoil.status, "no-provider");
+  assert.equal(explicitSoil.message, "No readonly Soil refs are configured.");
 });
 
 test("ResearchRuntime docs packages and github adapters stay hidden from model-visible execution", async () => {

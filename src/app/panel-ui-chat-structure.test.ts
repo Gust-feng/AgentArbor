@@ -96,6 +96,9 @@ test("panel UI chat and transcript modules stay presentation-focused", async () 
   assert.equal(chatEmpty.includes("composer-options-popover"), true);
   assert.equal(chatEmpty.includes("model-select-button"), false);
   assert.equal(chatEmpty.includes("composer-reasoning-chip"), true);
+  assert.equal(chatEmpty.includes("composer-access-chip"), true);
+  assert.equal(chatEmpty.includes("完全访问"), true);
+  assert.equal(chatEmpty.includes("toolConfirmationPolicy"), true);
   assert.equal(chatEmpty.includes("reasoningEffortEnabled"), true);
   assert.equal(chatEmpty.includes("当前工作入口"), false);
   assert.equal(chatEmpty.includes("继续最近任务"), false);
@@ -436,6 +439,7 @@ test("panel UI chat and transcript modules stay presentation-focused", async () 
   assert.equal(chatComposerStyles.includes(".chat-input-card"), true);
   assert.equal(chatComposerStyles.includes(".composer-options-button"), true);
   assert.equal(chatComposerStyles.includes(".composer-options-popover"), true);
+  assert.equal(chatComposerStyles.includes(".composer-access-chip"), true);
   assert.equal(chatComposerStyles.includes(".model-select-button"), false);
   assert.equal(chatComposerStyles.includes(".chat-active-grid"), false);
   assert.equal(chatMessageStyles.includes(".chat-active-grid"), true);

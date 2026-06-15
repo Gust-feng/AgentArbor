@@ -1,7 +1,7 @@
 import type React from "react";
 import { getJson, postJson } from "./api";
 import { decideRunConfirmation } from "./app-confirmation-decisions";
-import { type ComposerReasoningEffort, type VisibleAiMode } from "./app-config-projection";
+import { type ComposerReasoningEffort, type ComposerToolConfirmationPolicy, type VisibleAiMode } from "./app-config-projection";
 import { createRunReadModelPatch } from "./app-run-projection";
 import { createLiveRunUpdateController } from "./app-live-run-updates";
 import { loadObservedRunReadModel } from "./app-observed-run-read-model";
@@ -36,6 +36,7 @@ export type AppRunControllerOptions = {
   readonly goal: string;
   readonly aiMode: VisibleAiMode;
   readonly composerReasoningEffort: ComposerReasoningEffort;
+  readonly toolConfirmationPolicy: ComposerToolConfirmationPolicy;
   readonly selectedModelId: string;
   readonly selectedModelSupportsReasoningEffort: boolean;
   readonly confirmationBusy: boolean;

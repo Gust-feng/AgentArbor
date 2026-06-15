@@ -10,6 +10,12 @@ export type PanelRunStreamSyncRuntime = {
   readonly runExecutor: Pick<BasicAgentRunExecutor, "syncRunEvents">;
 };
 
+export function persistentPanelRunStreamEvents(
+  events: readonly PanelRunStreamEvent[]
+): readonly PanelRunStreamEvent[] {
+  return events.filter((event) => !isVolatileLiveModelDelta(event));
+}
+
 export function syncPanelRunStreamEventsForJob(
   runtime: PanelRunStreamSyncRuntime,
   job: PanelRunJob
@@ -29,6 +35,11 @@ export function syncPanelRunStreamEventsForJob(
     error: job.failed?.error ?? job.cancelled?.reason ?? job.blocked?.reason,
   });
   const events = runtime.runJobs.syncStreamEvents(job.runId, derived);
-  runtime.runExecutor.syncRunEvents(job, events);
+  runtime.runExecutor.syncRunEvents(job, persistentPanelRunStreamEvents(events));
   return events;
+}
+
+function isVolatileLiveModelDelta(event: PanelRunStreamEvent): boolean {
+  return event.eventId.includes(":live:model.") &&
+    (event.type === "model.output.delta" || event.type === "model.reasoning.delta");
 }

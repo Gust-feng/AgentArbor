@@ -38,7 +38,11 @@ test("tool security policy never lets confirmation bypass hard URL blocks", () =
     request,
     definition: toolDefinition("browser_snapshot", metadata),
     metadata,
-    context: { platform: "linux", approvedConfirmationIds: [confirmationIdForToolCall(request.callId)] },
+    context: {
+      platform: "linux",
+      approvedConfirmationIds: [confirmationIdForToolCall(request.callId)],
+      confirmationPolicy: "full_access",
+    },
   });
 
   assert.equal(decision.decision, "blocked");
@@ -133,6 +137,25 @@ test("tool security policy gates explicit confirmation tools unless exact confir
   assert.equal(confirmation.actionSummary.includes("请求执行执行操作"), false);
   assert.equal(confirmation.actionSummary.includes("需要你确认后继续"), false);
   assert.equal(confirmation.actionSummary.includes("在工作区内执行 Shell 命令"), false);
+});
+
+test("tool security policy lets full access mode skip confirmation-gated tools", () => {
+  const request = { callId: "call-shell-full-access", toolName: "shell_command", input: { commandLine: "pnpm test" } };
+  const metadata: ToolDefinitionMetadata = {
+    ...readOnlyMetadata(),
+    category: "terminal",
+    operationType: "execute",
+    riskLevel: "high",
+    requiresConfirmation: true,
+  };
+  const decision = evaluateToolCallSecurity({
+    request,
+    definition: toolDefinition("shell_command", metadata),
+    metadata,
+    context: { platform: "win32", confirmationPolicy: "full_access" },
+  });
+
+  assert.equal(decision.decision, "allow");
 });
 
 test("tool security policy uses full argv text for shell confirmations without commandLine", () => {

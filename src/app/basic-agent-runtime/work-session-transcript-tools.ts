@@ -15,12 +15,17 @@ export function transcriptToolSummaryFromRunEvent(event: RunEvent): string | und
       .join(" · ");
   }
   if (display?.kind === "search_results") {
-    return [display.query, `${display.results.length} 条结果`]
+    return [display.query, display.message, `${display.results.length} 条结果`]
       .filter((value): value is string => value !== undefined && value.trim().length > 0)
       .join(" · ");
   }
   if (display?.kind === "read_result") {
-    return display.title ?? display.uri ?? display.url ?? event.detail?.preview ?? event.summary;
+    const target = display.title ?? display.uri ?? display.url ?? event.detail?.preview ?? event.summary;
+    return [
+      target,
+      display.error,
+      display.errorFacts === undefined ? undefined : `errorFacts: ${JSON.stringify(display.errorFacts)}`,
+    ].filter(isString).join(" · ");
   }
   if (display?.kind === "browser_snapshot") {
     return display.title ?? display.url ?? event.detail?.preview ?? event.summary;

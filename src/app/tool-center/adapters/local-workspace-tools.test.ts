@@ -17,6 +17,7 @@ import {
   createLocalWorkspaceSandboxPolicy,
   createLocalWriteFileTool,
 } from "./local-workspace-tools.js";
+import { ensurePidExited } from "./background-process-test-utils.js";
 import { createDefaultCommandShellConfig } from "./local-workspace-command-tools.js";
 
 const context = { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" };
@@ -308,6 +309,37 @@ test("local edit_file validates all anchors before writing and rejects ambiguous
   }
 });
 
+test("local edit_file rejects binary targets before dryRun or write", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "agentarbor-tools-binary-edit-"));
+  try {
+    const file = path.join(root, "image.bin");
+    const original = Buffer.from([0x61, 0x6c, 0x70, 0x68, 0x61, 0x00, 0x62, 0x65, 0x74, 0x61]);
+    await writeFile(file, original);
+    const editFile = createLocalEditFileTool(root);
+
+    await assert.rejects(
+      () => editFile.execute({
+        path: "image.bin",
+        edits: [{ oldText: "alpha", newText: "ALPHA" }],
+      }, context),
+      /edit_file target is binary or non-text: image\.bin; bytes=10/
+    );
+    assert.deepEqual(await readFile(file), original);
+
+    await assert.rejects(
+      () => editFile.execute({
+        path: "image.bin",
+        dryRun: true,
+        edits: [{ oldText: "beta", newText: "BETA" }],
+      }, context),
+      /edit_file target is binary or non-text: image\.bin; bytes=10/
+    );
+    assert.deepEqual(await readFile(file), original);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("local write tools do not require confirmation", async () => {
   const writeFileTool = createLocalWriteFileTool();
   const createFileTool = createLocalCreateFileTool();
@@ -428,14 +460,14 @@ test("local shell_command bounds foreground process lifetime and output volume",
     }, context);
     const largeResult = asRecord(asRecord(largeOutput).result);
     assert.equal(asRecord(largeOutput).truncated, true);
-    assert.equal(String(largeResult.stdout).length, 64_000);
-    assert.equal(String(largeResult.stderr).length, 32_000);
+    assert.equal(String(largeResult.stdout).length, 16_000);
+    assert.equal(String(largeResult.stderr).length, 8_000);
     assert.equal(largeResult.stdoutTruncated, true);
     assert.equal(largeResult.stderrTruncated, true);
     assert.equal(largeResult.stdoutChars, 140_000);
     assert.equal(largeResult.stderrChars, 70_000);
-    assert.equal(largeResult.stdoutOmittedChars, 76_000);
-    assert.equal(largeResult.stderrOmittedChars, 38_000);
+    assert.equal(largeResult.stdoutOmittedChars, 124_000);
+    assert.equal(largeResult.stderrOmittedChars, 62_000);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -467,7 +499,7 @@ test("local shell_command can start long-running commands in the background with
       }
     });
     await shellCommand.execute({ commandLine: String(result.stopCommand), timeoutMs: 1_000 }, context);
-    await delay(50);
+    await ensurePidExited(typeof result.pid === "number" ? result.pid : undefined, 5_000);
   } finally {
     await removeTempTree(root);
   }
@@ -501,6 +533,7 @@ test("local shell_command waits for a background server port", async () => {
     assert.equal(typeof result.durationMs, "number");
     assert.match(String(result.stdout), new RegExp(`Port ${port} is ready\\.`));
     await shellCommand.execute({ commandLine: String(result.stopCommand), timeoutMs: 1_000 }, context);
+    await ensurePidExited(typeof result.pid === "number" ? result.pid : undefined, 5_000);
     await waitUntil(async () => !(await canConnectToLocalPort(port)), 5_000);
   } finally {
     await removeTempTree(root);
@@ -529,7 +562,7 @@ test("local shell_command reports when a requested background port is not ready"
     assert.equal(typeof result.durationMs, "number");
     assert.match(String(result.stderr), new RegExp(`Port ${port} did not become ready within 300ms\\.`));
     await shellCommand.execute({ commandLine: String(result.stopCommand), timeoutMs: 1_000 }, context);
-    await delay(50);
+    await ensurePidExited(typeof result.pid === "number" ? result.pid : undefined, 5_000);
   } finally {
     await removeTempTree(root);
   }
@@ -560,7 +593,7 @@ test("local shell_command captures shell-native background command output", asyn
       }
     });
     await shellCommand.execute({ commandLine: String(result.stopCommand), timeoutMs: 1_000 }, context);
-    await delay(50);
+    await ensurePidExited(typeof result.pid === "number" ? result.pid : undefined, 5_000);
   } finally {
     await removeTempTree(root);
   }

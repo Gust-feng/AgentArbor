@@ -312,7 +312,9 @@ function toolTargetCopy(node: ProjectableTranscriptNode): Pick<ActivityLineCopy,
     return readableToolTarget([command, failure].filter((value): value is string => value !== undefined && value.trim().length > 0).join(" · "));
   }
   if (display?.kind === "search_results") {
-    return readableToolTarget(cleanToolTargetText(display.query ?? node.summary));
+    return readableToolTarget(cleanToolTargetText(
+      [display.query, display.message].filter((value): value is string => value !== undefined && value.trim().length > 0).join(" · ") || node.summary
+    ));
   }
   if (display?.kind === "read_result") {
     return readableToolTarget(cleanToolTargetText(display.title ?? display.uri ?? display.url ?? node.summary));

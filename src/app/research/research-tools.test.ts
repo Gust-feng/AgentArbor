@@ -17,6 +17,7 @@ import { createConfiguredToolCenter, createDefaultToolCenter } from "../model-ru
 import type { FetchLike } from "../tool-center/index.js";
 import { createDefaultResearchRuntime } from "./research-runtime.js";
 import { createResearchReadTool, createResearchSearchTool } from "./research-tools.js";
+import type { PageFetchLike } from "./source-adapters.js";
 
 test("default ToolCenter exposes model-visible search and read tools", async () => {
   const center = createDefaultToolCenter({ env: {}, playwrightAvailable: true });
@@ -109,6 +110,48 @@ test("research read tool keeps single ref output compatible", async () => {
   );
 
   assert.deepEqual(read, expected);
+});
+
+test("research read tool exposes single-ref failure facts", async () => {
+  const expected = fixedReadResult({
+    ref: "http://127.0.0.1:43210/status",
+    status: "provider-failed",
+    source: "page",
+    message: "http_request failed: ECONNREFUSED 127.0.0.1:43210",
+    errorFacts: {
+      code: "ECONNREFUSED",
+      errno: -4078,
+      syscall: "connect",
+      address: "127.0.0.1",
+      port: 43210,
+      method: "GET",
+      url: "http://127.0.0.1:43210/status",
+      durationMs: 3,
+    },
+  });
+  const runtime = fixedResearchRuntime({
+    read: async () => expected,
+  });
+  const readTool = createResearchReadTool(runtime);
+
+  const read = await readTool.execute(
+    { ref: "http://127.0.0.1:43210/status" },
+    { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" }
+  ) as InformationReadResult & {
+    readonly error?: string;
+    readonly errorFacts?: Readonly<Record<string, string | number | boolean>>;
+  };
+
+  assert.equal(read.status, "provider-failed");
+  assert.match(read.error ?? "", /ECONNREFUSED/);
+  assert.equal(read.errorFacts?.code, "ECONNREFUSED");
+  assert.equal(read.errorFacts?.errno, -4078);
+  assert.equal(read.errorFacts?.syscall, "connect");
+  assert.equal(read.errorFacts?.address, "127.0.0.1");
+  assert.equal(read.errorFacts?.port, 43210);
+  assert.equal(read.errorFacts?.method, "GET");
+  assert.equal(read.errorFacts?.url, "http://127.0.0.1:43210/status");
+  assert.equal(read.errorFacts?.durationMs, 3);
 });
 
 test("research read tool batches multiple refs without changing per-item content", async () => {
@@ -207,6 +250,52 @@ test("research read tool batch reports partial failures per ref", async () => {
   assert.equal(read[1]?.error, "codebase read could not read the requested text file.");
   assert.equal(read[2]?.error, "adapter exploded");
   assert.equal(read.every((item) => typeof item.truncated === "boolean"), true);
+});
+
+test("research read tool batch preserves command-log successes and HTTP failure facts", async () => {
+  const cause = Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:43210"), {
+    code: "ECONNREFUSED",
+    errno: -4078,
+    syscall: "connect",
+    address: "127.0.0.1",
+    port: 43210,
+  });
+  const pageFetch: PageFetchLike = async () => {
+    const error = new TypeError("fetch failed") as Error & { cause?: unknown };
+    error.cause = cause;
+    throw error;
+  };
+  const runtime = createDefaultResearchRuntime({
+    pageFetch,
+    commandLogRegistry: {
+      read: (ref) => ref === "command-log://shell-batch"
+        ? { content: "shell batch log\n" }
+        : undefined,
+    },
+  });
+  const readTool = createResearchReadTool(runtime);
+
+  const read = await readTool.execute(
+    { ref: ["command-log://shell-batch", "http://127.0.0.1:43210/status", "command-log://missing"] },
+    { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" }
+  ) as readonly {
+    readonly ref: string;
+    readonly status: string;
+    readonly contentPreview?: string;
+    readonly error?: string;
+    readonly errorFacts?: Readonly<Record<string, string | number | boolean>>;
+  }[];
+
+  assert.deepEqual(read.map((item) => item.status), ["completed", "provider-failed", "invalid-input"]);
+  assert.equal(read[0]?.contentPreview, "shell batch log\n");
+  assert.match(read[1]?.error ?? "", /ECONNREFUSED/);
+  assert.equal(read[1]?.errorFacts?.code, "ECONNREFUSED");
+  assert.equal(read[1]?.errorFacts?.errno, -4078);
+  assert.equal(read[1]?.errorFacts?.syscall, "connect");
+  assert.equal(read[1]?.errorFacts?.address, "127.0.0.1");
+  assert.equal(read[1]?.errorFacts?.port, 43210);
+  assert.equal(typeof read[1]?.errorFacts?.durationMs, "number");
+  assert.equal(read[2]?.error, "Unknown or unregistered command log ref.");
 });
 
 test("research search tool passes site constraint into runtime query", async () => {
@@ -513,6 +602,7 @@ function fixedReadResult(input: {
   readonly source?: InformationSourceKind;
   readonly contentPreview?: string;
   readonly message?: string;
+  readonly errorFacts?: Readonly<Record<string, string | number | boolean>>;
 }): InformationReadResult {
   return {
     action: "read",
@@ -545,6 +635,7 @@ function fixedReadResult(input: {
           status: input.status,
           resultRefs: input.status === "completed" ? [`read:${input.ref}`] : [],
           message: input.message,
+          errorFacts: input.errorFacts,
         },
       ],
     },

@@ -173,6 +173,7 @@ async function handleStartRunRequest(
     aiMode: runInput.aiMode,
     taskSoilInput: runInput.taskSoilInput,
     reasoningEffort: runInput.reasoningEffort,
+    toolConfirmationPolicy: runInput.toolConfirmationPolicy,
     modelOverride: runInput.modelOverride,
     deferSchedule: true,
   });

@@ -164,6 +164,27 @@ test("ToolCenter keeps shell_command behind confirmation until the same confirma
   assert.equal(result.projection?.uiSummary, "safe command summary");
 });
 
+test("ToolCenter lets full access mode execute confirmation-gated shell commands", async () => {
+  let executes = 0;
+  const center = new ToolCenter({ platform: "win32" });
+  center.register(testTool("shell_command", async () => {
+    executes += 1;
+    return { summary: "safe command summary" };
+  }, "execute", { requiresConfirmation: true }));
+  const context = { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" };
+
+  const result = await center.execute(
+    { callId: "call-command-full-access", toolName: "shell_command", input: { commandLine: "pnpm test" } },
+    context,
+    { ...allowTools("shell_command"), confirmationPolicy: "full_access" }
+  );
+
+  assert.equal(result.status, "completed");
+  assert.equal(result.confirmationRequest, undefined);
+  assert.equal(executes, 1);
+  assert.equal(center.getCallCount(), 1);
+});
+
 test("ToolCenter executes the same non-command tool call only after matching confirmation approval", async () => {
   let deletes = 0;
   const center = new ToolCenter({ platform: "win32" });
@@ -383,6 +404,52 @@ test("ToolCenter file change display exposes bounded create preview without reda
   assert.equal(display?.kind === "file_change_summary" ? display.preview?.includes("+ visible created line") : false, true);
   assert.equal(displayJson.includes("sk-create-secret"), true);
   assert.equal(displayJson.includes("[redacted-secret]"), false);
+});
+
+test("ToolCenter preserves adapter error facts in failed results and projections", async () => {
+  const center = new ToolCenter();
+  center.register(testTool("shell_command", async () => {
+    throw Object.assign(new Error("spawn pnpm ENOENT"), {
+      code: "ENOENT",
+      facts: {
+        code: "ENOENT",
+        syscall: "spawn",
+        command: "pnpm",
+        args: ["missing"],
+      },
+    });
+  }));
+
+  const result = await center.execute(
+    { callId: "call-shell-failed", toolName: "shell_command", input: { command: "pnpm", args: ["missing"] } },
+    { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
+    allowTools("shell_command")
+  );
+  const agentContent = result.projection?.agentContent as {
+    readonly status?: string;
+    readonly toolName?: string;
+    readonly callId?: string;
+    readonly error?: string;
+    readonly errorDomain?: string;
+    readonly facts?: Record<string, unknown>;
+    readonly durationMs?: number;
+  };
+
+  assert.equal(result.status, "failed");
+  assert.equal(result.errorDomain, "process_error");
+  assert.equal(result.errorFacts?.code, "ENOENT");
+  assert.equal(result.errorFacts?.syscall, "spawn");
+  assert.equal(result.errorFacts?.command, "pnpm");
+  assert.deepEqual(result.errorFacts?.args, ["missing"]);
+  assert.equal(result.projection?.envelope?.errorDomain, "process_error");
+  assert.equal(result.projection?.envelope?.errorFacts?.code, "ENOENT");
+  assert.equal(agentContent.status, "failed");
+  assert.equal(agentContent.toolName, "shell_command");
+  assert.equal(agentContent.callId, "call-shell-failed");
+  assert.equal(agentContent.error, "spawn pnpm ENOENT");
+  assert.equal(agentContent.errorDomain, "process_error");
+  assert.equal(agentContent.facts?.code, "ENOENT");
+  assert.equal(agentContent.durationMs, result.durationMs);
 });
 
 test("ToolCenter list returns cloned metadata", () => {

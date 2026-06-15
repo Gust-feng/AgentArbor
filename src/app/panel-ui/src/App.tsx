@@ -12,6 +12,7 @@ import {
   visibleConfigLabel,
   catalogRecordFromList,
   type ComposerReasoningEffort,
+  type ComposerToolConfirmationPolicy,
   type VisibleAiMode,
 } from "./app-config-projection";
 import {
@@ -55,6 +56,7 @@ export function App(): React.ReactElement {
     apiKeyCleared: false,
   });
   const [composerReasoningEffort, setComposerReasoningEffort] = useState<ComposerReasoningEffort>("");
+  const [toolConfirmationPolicy, setToolConfirmationPolicy] = useState<ComposerToolConfirmationPolicy>("prompt");
   const [composerSelectedModelId, setComposerSelectedModelId] = useState<string | undefined>(undefined);
   const [modelCatalogs, setModelCatalogs] = useState<Record<string, ModelProviderModelCatalog>>({});
   const [mcpReferences, setMcpReferences] = useState<Readonly<Record<string, McpReferenceResponse>>>({});
@@ -218,6 +220,7 @@ export function App(): React.ReactElement {
     goal,
     aiMode,
     composerReasoningEffort,
+    toolConfirmationPolicy,
     selectedModelId,
     selectedModelSupportsReasoningEffort,
     confirmationBusy,
@@ -412,6 +415,8 @@ export function App(): React.ReactElement {
     reasoningEffort: composerReasoningEffort,
     reasoningEffortEnabled: selectedModelSupportsReasoningEffort,
     onReasoningEffortChange: setComposerReasoningEffort,
+    toolConfirmationPolicy,
+    onToolConfirmationPolicyChange: setToolConfirmationPolicy,
     closeSignal: inputCloseSignal,
     onModelSelect: selectInputModel,
     onOpenSettings: () => openSettings("models"),

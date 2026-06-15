@@ -3,11 +3,16 @@ import path from "node:path";
 import type {
   InformationSourceCapability,
   InformationAccessStatus,
+  ResearchErrorFacts,
   InformationSourceKind,
   ReadResultRef,
   SearchResultRef,
 } from "../../domain/research/index.js";
 import type { ReadonlySoilStore } from "../../domain/soil/index.js";
+import {
+  normalizeHttpRequestFailure,
+  type HttpRequestErrorFacts,
+} from "../tool-center/adapters/http-request-tool.js";
 import { createWebSearchTool, type FetchLike as TavilyFetchLike } from "../tool-center/adapters/web-search-tool.js";
 
 export type InformationSourceSearchRequest = {
@@ -39,6 +44,7 @@ export type InformationSourceReadResponse = {
   readonly status: InformationAccessStatus;
   readonly result?: ReadResultRef;
   readonly message?: string;
+  readonly errorFacts?: ResearchErrorFacts;
 };
 
 export interface InformationSourceAdapter {
@@ -58,8 +64,27 @@ export type PageFetchLike = (
 ) => Promise<{
   readonly ok: boolean;
   readonly status: number;
+  readonly statusText?: string;
   readonly text: () => Promise<string>;
 }>;
+
+export type CommandLogReadEntry = {
+  readonly refId?: string;
+  readonly title?: string;
+  readonly uri?: string;
+  readonly content: string;
+  readonly metadata?: Readonly<Record<string, string | number | boolean>>;
+};
+
+export type CommandLogReadRegistry = {
+  read(
+    ref: string,
+    request: {
+      readonly maxLength: number;
+      readonly abortSignal?: AbortSignal;
+    }
+  ): Promise<CommandLogReadEntry | undefined> | CommandLogReadEntry | undefined;
+};
 
 export function createWebInformationSourceAdapter(options: {
   readonly apiKey?: string;
@@ -150,18 +175,42 @@ export function createPageInformationSourceAdapter(options: {
           message: "No fetch implementation is available for page reads.",
         };
       }
-      const response = await fetchImpl(uri, {
-        method: "GET",
-        headers: {
-          accept: "text/html,text/plain;q=0.9,*/*;q=0.5",
-          "user-agent": "AgentArbor-ResearchRuntime/0.1",
-        },
-        signal: request.abortSignal,
-      });
+      const startedAt = Date.now();
+      let response: Awaited<ReturnType<PageFetchLike>>;
+      try {
+        response = await fetchImpl(uri, {
+          method: "GET",
+          headers: {
+            accept: "text/html,text/plain;q=0.9,*/*;q=0.5",
+            "user-agent": "AgentArbor-ResearchRuntime/0.1",
+          },
+          signal: request.abortSignal,
+        });
+      } catch (error) {
+        const failure = normalizeHttpRequestFailure({
+          error,
+          url: uri,
+          method: "GET",
+          durationMs: Date.now() - startedAt,
+        });
+        return {
+          status: "provider-failed",
+          message: failure.message,
+          errorFacts: researchErrorFactsFromHttpRequest(failure.facts),
+        };
+      }
       if (!response.ok) {
+        const durationMs = Date.now() - startedAt;
         return {
           status: "provider-failed",
           message: `Page read returned HTTP ${response.status}.`,
+          errorFacts: compactResearchFacts({
+            url: uri,
+            method: "GET",
+            durationMs,
+            statusCode: response.status,
+            statusText: response.statusText,
+          }),
         };
       }
       const text = normalizeWhitespace(cleanPageText(await response.text()));
@@ -181,6 +230,65 @@ export function createPageInformationSourceAdapter(options: {
           truncated: text.length > contentPreview.length,
           sourceSearchRef: request.sourceResult?.refId,
           metadata: { contentLength: text.length },
+        },
+      };
+    },
+  };
+}
+
+export function createCommandLogInformationSourceAdapter(options: {
+  readonly registry?: CommandLogReadRegistry;
+} = {}): InformationSourceAdapter {
+  return {
+    source: "command_log",
+    capability: {
+      label: "registered command logs",
+      modelVisible: options.registry !== undefined,
+      unavailableReason: options.registry === undefined
+        ? "No command log registry is connected for read."
+        : undefined,
+    },
+    async read(request) {
+      if (!isCommandLogRef(request.ref)) {
+        return {
+          status: "invalid-input",
+          message: "command log read requires a command-log://<id> ref.",
+        };
+      }
+      const registry = options.registry;
+      if (registry === undefined) {
+        return {
+          status: "no-provider",
+          message: "No command log registry is connected for read.",
+        };
+      }
+      const entry = await registry.read(request.ref, {
+        maxLength: request.maxLength,
+        abortSignal: request.abortSignal,
+      });
+      if (entry === undefined) {
+        return {
+          status: "invalid-input",
+          message: "Unknown or unregistered command log ref.",
+        };
+      }
+      const contentPreview = truncate(entry.content, request.maxLength);
+      return {
+        status: "completed",
+        result: {
+          refId: entry.refId ?? request.ref,
+          source: "command_log",
+          title: entry.title ?? `Command log ${commandLogId(request.ref)}`,
+          uri: entry.uri ?? request.ref,
+          status: "completed",
+          summary: truncate(contentPreview, 260),
+          contentPreview,
+          truncated: entry.content.length > contentPreview.length,
+          sourceSearchRef: request.sourceResult?.refId,
+          metadata: {
+            ...entry.metadata,
+            refKind: "command_log",
+          },
         },
       };
     },
@@ -273,16 +381,17 @@ export function createCodebaseInformationSourceAdapter(options: {
 export function createSoilInformationSourceAdapter(options: {
   readonly soilStore?: ReadonlySoilStore;
 } = {}): InformationSourceAdapter {
+  const hasProvider = hasSoilSearchRefs(options.soilStore);
   return createReadonlyRefSourceAdapter({
     source: "soil",
     label: "readonly Soil refs",
-    modelVisible: options.soilStore !== undefined,
-    unavailableReason: options.soilStore === undefined ? "No readonly Soil store is configured." : undefined,
-    emptyStatus: options.soilStore === undefined ? "no-provider" : "empty",
+    modelVisible: hasProvider,
+    unavailableReason: hasProvider ? undefined : "No readonly Soil refs are configured.",
+    emptyStatus: hasProvider ? "empty" : "no-provider",
     emptyMessage:
-      options.soilStore === undefined
-        ? "No readonly Soil store is configured for research."
-        : "Readonly Soil store has no matching refs.",
+      hasProvider
+        ? "Readonly Soil store has no matching refs."
+        : "No readonly Soil refs are configured for research.",
     items: () => {
       const soilStore = options.soilStore;
       if (soilStore === undefined) {
@@ -318,13 +427,10 @@ export function createRunMemoryInformationSourceAdapter(options: {
   return createReadonlyRefSourceAdapter({
     source: "run_memory",
     label: "historical run memory refs",
-    modelVisible: options.soilStore !== undefined,
-    unavailableReason: options.soilStore === undefined ? "Run Memory provider is not connected." : undefined,
-    emptyStatus: options.soilStore === undefined ? "stub" : "empty",
-    emptyMessage:
-      options.soilStore === undefined
-        ? "Run Memory provider is a stub in this MVP."
-        : "Readonly Soil store has no historical run refs yet.",
+    modelVisible: false,
+    unavailableReason: "Run Memory is not enabled in the current ordinary Agent tool contract.",
+    emptyStatus: "no-provider",
+    emptyMessage: "Run Memory is not enabled in the current ordinary Agent tool contract.",
     items: () =>
       options.soilStore?.listHistoricalRunRefs().map((ref) => ({
         id: ref.id,
@@ -448,6 +554,38 @@ function pathFromCodebaseReadRequest(request: InformationSourceReadRequest): str
     return uri.slice("repo://".length);
   }
   return uri.includes("://") || uri.startsWith("research:") ? undefined : uri;
+}
+
+function isCommandLogRef(value: string): boolean {
+  return /^command-log:\/\/[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u.test(value);
+}
+
+function commandLogId(ref: string): string {
+  return ref.slice("command-log://".length);
+}
+
+function researchErrorFactsFromHttpRequest(facts: HttpRequestErrorFacts): ResearchErrorFacts {
+  return compactResearchFacts({
+    url: facts.url,
+    method: facts.method,
+    durationMs: facts.durationMs,
+    code: facts.code,
+    errno: facts.errno,
+    syscall: facts.syscall,
+    address: facts.address,
+    port: facts.port,
+    hostname: facts.hostname,
+  });
+}
+
+function compactResearchFacts(facts: Readonly<Record<string, string | number | boolean | undefined>>): ResearchErrorFacts {
+  const result: Record<string, string | number | boolean> = {};
+  for (const [key, value] of Object.entries(facts)) {
+    if (value !== undefined) {
+      result[key] = value;
+    }
+  }
+  return result;
 }
 
 async function collectTextFiles(root: string, maxFiles: number): Promise<string[]> {
@@ -583,6 +721,15 @@ function resolveGlobalPageFetch(): PageFetchLike | undefined {
 function resolveGlobalWebSearchFetch(): TavilyFetchLike | undefined {
   const fetchImpl = (globalThis as { fetch?: TavilyFetchLike }).fetch;
   return typeof fetchImpl === "function" ? fetchImpl : undefined;
+}
+
+function hasSoilSearchRefs(soilStore: ReadonlySoilStore | undefined): boolean {
+  if (soilStore === undefined) {
+    return false;
+  }
+  return soilStore.listConstraints().length > 0 ||
+    soilStore.listCapabilityAssetRefs().length > 0 ||
+    soilStore.listPathBiasRefs().length > 0;
 }
 
 function isHttpUrl(value: string): boolean {

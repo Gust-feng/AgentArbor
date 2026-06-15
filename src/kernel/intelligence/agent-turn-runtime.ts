@@ -11,6 +11,7 @@ import type {
 } from "../../domain/intelligence/index.js";
 import type { ObservationRef } from "../../domain/observation/index.js";
 import type {
+  ToolConfirmationPolicy,
   ToolCallRequest,
   ToolCallResult,
   ToolDefinition,
@@ -39,6 +40,7 @@ export type AgentTurnPolicy = {
   readonly allowedTools: readonly string[];
   readonly maxModelRounds?: number;
   readonly maxToolRounds?: number;
+  readonly confirmationPolicy?: ToolConfirmationPolicy;
   readonly fallback: AgentTurnFallbackBehavior;
   readonly callerAgentId: string;
   readonly traceId: string;
@@ -168,6 +170,7 @@ export class AgentTurnRuntime {
           maxToolRounds: semantics.enforceRoundLimits ? policy.maxToolRounds : undefined,
           allowedTools: policy.allowedTools,
           blockedToolNames: semantics.blockedToolNames,
+          confirmationPolicy: policy.confirmationPolicy,
           publishToolEvent: this.options.publishToolEvent,
           maintainContext: this.options.maintainContext,
           abortSignal: input.abortSignal,
@@ -236,6 +239,7 @@ export class AgentTurnRuntime {
           allowedTools: policy.allowedTools,
           blockedToolNames: semantics.blockedToolNames,
           approvedConfirmationIds: input.approvedConfirmationIds,
+          confirmationPolicy: policy.confirmationPolicy,
           publishToolEvent: this.options.publishToolEvent,
           maintainContext: this.options.maintainContext,
           abortSignal: input.abortSignal,
@@ -271,6 +275,7 @@ export class AgentTurnRuntime {
           maxToolRounds: semantics.enforceRoundLimits ? policy.maxToolRounds : undefined,
           allowedTools: policy.allowedTools,
           blockedToolNames: semantics.blockedToolNames,
+          confirmationPolicy: policy.confirmationPolicy,
           publishToolEvent: this.options.publishToolEvent,
           maintainContext: this.options.maintainContext,
           abortSignal: input.abortSignal,

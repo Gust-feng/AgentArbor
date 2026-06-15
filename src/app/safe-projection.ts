@@ -2,6 +2,8 @@ import type { ModelFailure } from "../domain/intelligence/index.js";
 import type {
   ToolCallRequest,
   ToolDisplayProjection,
+  ToolErrorDomain,
+  ToolErrorFacts,
   ToolSafeProjection,
 } from "../domain/tools/index.js";
 import { toolDisplayName } from "../domain/tools/index.js";
@@ -76,9 +78,21 @@ export function projectToolFailure(input: {
   readonly request: ToolCallRequest;
   readonly error: string;
   readonly diagnosticRef?: string;
+  readonly errorDomain?: ToolErrorDomain;
+  readonly errorFacts?: ToolErrorFacts;
+  readonly durationMs?: number;
 }): ToolSafeProjection {
   const diagnosticRef = input.diagnosticRef ?? `tool:${input.request.callId}:failed`;
   return {
+    agentContent: {
+      status: "failed",
+      toolName: input.request.toolName,
+      callId: input.request.callId,
+      error: input.error,
+      errorDomain: input.errorDomain,
+      facts: input.errorFacts,
+      durationMs: input.durationMs,
+    },
     uiSummary: redactOrdinaryText(input.error, 500),
     diagnosticRef,
     envelope: projectToolStatusEnvelope({
@@ -86,6 +100,8 @@ export function projectToolFailure(input: {
       status: "failed",
       summary: input.error,
       diagnosticRef,
+      errorDomain: input.errorDomain,
+      errorFacts: input.errorFacts,
     }),
     truncated: false,
     redacted: false,
@@ -153,6 +169,71 @@ function asRecord(value: unknown): Readonly<Record<string, unknown>> {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Readonly<Record<string, unknown>> : {};
 }
 
+function optionalRecord(value: unknown): Readonly<Record<string, unknown>> | undefined {
+  const record = asRecord(value);
+  return Object.keys(record).length === 0 ? undefined : record;
+}
+
+function readErrorFactsFromOutput(record: Readonly<Record<string, unknown>>): ToolErrorFacts | undefined {
+  const direct = optionalRecord(record.errorFacts);
+  if (direct !== undefined) {
+    return direct as ToolErrorFacts;
+  }
+  const trace = asRecord(record.trace);
+  const sourceSteps = Array.isArray(trace.sourceSteps) ? trace.sourceSteps : [];
+  for (const value of sourceSteps) {
+    const step = asRecord(value);
+    if (stringOrUndefined(step.status) === "completed") {
+      continue;
+    }
+    const facts = optionalRecord(step.errorFacts);
+    if (facts !== undefined) {
+      return facts as ToolErrorFacts;
+    }
+  }
+  return undefined;
+}
+
+function readErrorMessageFromOutput(record: Readonly<Record<string, unknown>>): string | undefined {
+  const direct = stringOrUndefined(record.error);
+  if (direct !== undefined) {
+    return direct;
+  }
+  const trace = asRecord(record.trace);
+  const sourceSteps = Array.isArray(trace.sourceSteps) ? trace.sourceSteps : [];
+  for (const value of sourceSteps) {
+    const step = asRecord(value);
+    if (stringOrUndefined(step.status) === "completed") {
+      continue;
+    }
+    const message = stringOrUndefined(step.message);
+    if (message !== undefined) {
+      return message;
+    }
+  }
+  return undefined;
+}
+
+function searchMessageFromOutput(record: Readonly<Record<string, unknown>>): string | undefined {
+  const direct = stringOrUndefined(record.message);
+  if (direct !== undefined) {
+    return direct;
+  }
+  const trace = asRecord(record.trace);
+  const sourceSteps = Array.isArray(trace.sourceSteps) ? trace.sourceSteps : [];
+  for (const value of sourceSteps) {
+    const step = asRecord(value);
+    if (stringOrUndefined(step.status) === "completed") {
+      continue;
+    }
+    const message = stringOrUndefined(step.message);
+    if (message !== undefined) {
+      return message;
+    }
+  }
+  return undefined;
+}
+
 function projectToolDisplay(request: ToolCallRequest, output: unknown): ToolDisplayProjection {
   const record = asRecord(output);
   const result = asRecord(record.result);
@@ -163,6 +244,7 @@ function projectToolDisplay(request: ToolCallRequest, output: unknown): ToolDisp
       kind: "search_results",
       query: stringOrUndefined(record.query),
       status: stringOrUndefined(record.status),
+      message: compactSafeText(searchMessageFromOutput(record), 500),
       results: record.results.slice(0, 8).map(searchDisplayItem).filter((item): item is NonNullable<ReturnType<typeof searchDisplayItem>> => item !== undefined),
       truncated: record.results.length > 8 || record.truncated === true,
     };
@@ -176,6 +258,8 @@ function projectToolDisplay(request: ToolCallRequest, output: unknown): ToolDisp
     };
   }
   if (request.toolName === "read") {
+    const errorFacts = readErrorFactsFromOutput(record);
+    const error = readErrorMessageFromOutput(record);
     return {
       kind: "read_result",
       ref: stringOrUndefined(record.ref) ?? stringOrUndefined(asRecord(request.input).ref),
@@ -186,6 +270,8 @@ function projectToolDisplay(request: ToolCallRequest, output: unknown): ToolDisp
       uri: stringOrUndefined(result.uri),
       sourceSearchRef: stringOrUndefined(result.sourceSearchRef),
       contentPreview: compactSafeText(stringOrUndefined(result.contentPreview) ?? stringOrUndefined(result.summary), 1_200),
+      error,
+      errorFacts,
       truncated: result.truncated === true || record.truncated === true,
     };
   }
@@ -271,6 +357,7 @@ function projectToolDisplay(request: ToolCallRequest, output: unknown): ToolDisp
       timedOut: result.timedOut === true,
       background: result.background === true,
       pid: numberOrUndefined(result.pid),
+      logRef: stringOrUndefined(result.logRef),
       logPath: stringOrUndefined(result.logPath),
       stopCommand: stringOrUndefined(result.stopCommand),
       durationMs: numberOrUndefined(result.durationMs),
@@ -390,6 +477,8 @@ function projectToolAgentContent(request: ToolCallRequest, output: unknown, trun
     };
   }
   if (request.toolName === "read") {
+    const errorFacts = readErrorFactsFromOutput(record);
+    const error = readErrorMessageFromOutput(record);
     if (Array.isArray(output)) {
       const results = output.map((item, index) => projectBatchReadAgentItem(item, request, index));
       return {
@@ -415,10 +504,12 @@ function projectToolAgentContent(request: ToolCallRequest, output: unknown, trun
       url: stringOrUndefined(result.uri),
       uri: stringOrUndefined(result.uri),
       sourceSearchRef: stringOrUndefined(result.sourceSearchRef),
+      error,
+      errorFacts,
       truncated: result.truncated === true || truncated || contentPreview?.truncated === true,
       contentPreview: contentPreview?.text,
       rawContentPreviewRef: contentPreview?.rawRef,
-      metadata: asRecord(result.metadata),
+      metadata: optionalRecord(result.metadata),
     };
   }
   if (request.toolName === "run_command" || request.toolName === "shell_command") {
@@ -454,6 +545,7 @@ function projectToolAgentContent(request: ToolCallRequest, output: unknown, trun
       timedOut: result.timedOut === true,
       background: result.background === true,
       pid: numberOrUndefined(result.pid),
+      logRef: stringOrUndefined(result.logRef),
       logPath: stringOrUndefined(result.logPath),
       stopCommand: stringOrUndefined(result.stopCommand),
       durationMs: numberOrUndefined(result.durationMs),
@@ -570,6 +662,7 @@ function projectBatchReadAgentItem(
   readonly rawContentPreviewRef?: string;
   readonly sourceSearchRef?: string;
   readonly error?: string;
+  readonly errorFacts?: Readonly<Record<string, unknown>>;
   readonly metadata?: Readonly<Record<string, unknown>>;
 } {
   const item = asRecord(value);
@@ -595,7 +688,8 @@ function projectBatchReadAgentItem(
     rawContentPreviewRef: contentPreview?.rawRef,
     sourceSearchRef: stringOrUndefined(item.sourceSearchRef),
     error: stringOrUndefined(item.error),
-    metadata: asRecord(item.metadata),
+    errorFacts: optionalRecord(item.errorFacts),
+    metadata: optionalRecord(item.metadata),
   };
 }
 

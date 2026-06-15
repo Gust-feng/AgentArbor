@@ -8,6 +8,7 @@ import type {
 } from "../../domain/config/index.js";
 import type { ConfirmationDecision } from "../../domain/basic-agent/index.js";
 import type { AgentRunTreeAttachment } from "../agent-run-tree-attachment.js";
+import type { ToolConfirmationPolicy } from "../../domain/tools/index.js";
 import type { ModelRuntimeMode } from "../model-runtime/index.js";
 import type { RunConfigurationFailureSummary, RunSummary } from "../run-summary.js";
 import type { MinimalRuntime } from "../runtime.js";
@@ -83,6 +84,7 @@ export type BasicAgentRunJob = Omit<BasicAgentRunProjectionInput, "confirmationD
   readonly runAfterRunId?: string;
   readonly taskSoilInput?: DesktopTaskSoilInput;
   readonly reasoningEffort?: ModelRunReasoningEffort;
+  readonly toolConfirmationPolicy?: ToolConfirmationPolicy;
   readonly agentDefinitionRef?: RunAgentDefinitionRef;
   config: SanitizedModelProviderConfig;
   informationAccess: SanitizedInformationAccessConfig;
@@ -108,6 +110,7 @@ export type BasicAgentRunJobCreateInput = {
   readonly runAfterRunId?: string;
   readonly taskSoilInput?: DesktopTaskSoilInput;
   readonly reasoningEffort?: ModelRunReasoningEffort;
+  readonly toolConfirmationPolicy?: ToolConfirmationPolicy;
   readonly agentDefinitionRef?: RunAgentDefinitionRef;
   readonly config: SanitizedModelProviderConfig;
   readonly informationAccess: SanitizedInformationAccessConfig;

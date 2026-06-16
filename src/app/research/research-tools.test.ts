@@ -19,6 +19,8 @@ import { createDefaultResearchRuntime } from "./research-runtime.js";
 import { createResearchReadTool, createResearchSearchTool } from "./research-tools.js";
 import type { PageFetchLike } from "./source-adapters.js";
 
+const suggestionPattern = /\btry\b|\bprovide\b|\bsuggest|\brecommend\b|recoveryHint|\u5efa\u8bae/iu;
+
 test("default ToolCenter exposes model-visible search and read tools", async () => {
   const center = createDefaultToolCenter({ env: {}, playwrightAvailable: true });
   const names = center.list().map((tool) => tool.name);
@@ -316,6 +318,139 @@ test("research read tool batch preserves command-log successes and HTTP failure 
   assert.equal(read[2]?.errorFacts?.method, "GET");
   assert.equal(read[2]?.errorFacts?.url, "https://example.test/missing");
   assert.equal(read[3]?.error, "Unknown or unregistered command log ref.");
+});
+
+test("ToolCenter read direct bad HTTP URL preserves page error facts through output, projection, and envelope", async () => {
+  const cause = Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:43210"), {
+    code: "ECONNREFUSED",
+    errno: -4078,
+    syscall: "connect",
+    address: "127.0.0.1",
+    port: 43210,
+  });
+  const pageFetch = async () => {
+    const error = new TypeError("fetch failed") as Error & { cause?: unknown };
+    error.cause = cause;
+    throw error;
+  };
+  const center = createDefaultToolCenter({
+    env: {},
+    fetch: pageFetch as unknown as FetchLike,
+    playwrightAvailable: false,
+    toolCatalogNames: ["read"],
+  });
+
+  const result = await center.execute(
+    { callId: "call-read-refused-url", toolName: "read", input: { ref: "http://127.0.0.1:43210/status" } },
+    { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
+    { callerAgentId: "agent-test", allowedTools: ["read"] }
+  );
+  const output = result.output as {
+    readonly status?: string;
+    readonly error?: string;
+    readonly errorFacts?: Readonly<Record<string, string | number | boolean>>;
+    readonly trace?: {
+      readonly sourceSteps?: readonly {
+        readonly status?: string;
+        readonly errorFacts?: Readonly<Record<string, string | number | boolean>>;
+      }[];
+    };
+  };
+  const agentContent = result.projection?.agentContent as {
+    readonly status?: string;
+    readonly error?: string;
+    readonly errorFacts?: Readonly<Record<string, unknown>>;
+  };
+  const display = result.projection?.display;
+  const envelope = result.projection?.envelope;
+  const uiDisplay = envelope?.uiDisplay;
+
+  assert.equal(result.status, "completed");
+  assert.equal(output.status, "provider-failed");
+  assert.match(output.error ?? "", /ECONNREFUSED/);
+  assert.equal(output.errorFacts?.code, "ECONNREFUSED");
+  assert.equal(output.errorFacts?.errno, -4078);
+  assert.equal(output.errorFacts?.syscall, "connect");
+  assert.equal(output.errorFacts?.address, "127.0.0.1");
+  assert.equal(output.errorFacts?.port, 43210);
+  assert.equal(output.errorFacts?.method, "GET");
+  assert.equal(output.errorFacts?.url, "http://127.0.0.1:43210/status");
+  assert.equal(typeof output.errorFacts?.durationMs, "number");
+  assert.equal(output.trace?.sourceSteps?.[0]?.status, "provider-failed");
+  assert.equal(output.trace?.sourceSteps?.[0]?.errorFacts?.code, "ECONNREFUSED");
+  assert.equal(agentContent.status, "provider-failed");
+  assert.match(agentContent.error ?? "", /ECONNREFUSED/);
+  assert.equal(agentContent.errorFacts?.code, "ECONNREFUSED");
+  assert.equal(display?.kind, "read_result");
+  if (display?.kind !== "read_result") {
+    throw new Error("expected read_result display");
+  }
+  assert.equal(display.errorFacts?.code, "ECONNREFUSED");
+  assert.equal(envelope?.errorFacts?.code, "ECONNREFUSED");
+  assert.equal(uiDisplay?.kind, "read_result");
+  if (uiDisplay?.kind !== "read_result") {
+    throw new Error("expected read_result envelope display");
+  }
+  assert.equal(uiDisplay.errorFacts?.code, "ECONNREFUSED");
+  assert.equal(JSON.stringify(result).includes("recoveryHint"), false);
+  assert.doesNotMatch(JSON.stringify(result), suggestionPattern);
+});
+
+test("ToolCenter search empty query is invalid-input instead of empty results", async () => {
+  const center = createDefaultToolCenter({
+    env: {},
+    playwrightAvailable: false,
+    toolCatalogNames: ["search"],
+  });
+
+  const result = await center.execute(
+    { callId: "call-search-empty-query", toolName: "search", input: { query: "   " } },
+    { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
+    { callerAgentId: "agent-test", allowedTools: ["search"] }
+  );
+  const output = result.output as {
+    readonly status?: string;
+    readonly message?: string;
+    readonly results?: readonly unknown[];
+    readonly trace?: {
+      readonly status?: string;
+      readonly sourceSteps?: readonly {
+        readonly status?: string;
+        readonly message?: string;
+      }[];
+    };
+  };
+  const agentContent = result.projection?.agentContent as {
+    readonly display?: {
+      readonly kind?: string;
+      readonly status?: string;
+      readonly message?: string;
+      readonly results?: readonly unknown[];
+    };
+  };
+  const display = result.projection?.display;
+
+  assert.equal(result.status, "completed");
+  assert.equal(output.status, "invalid-input");
+  assert.equal(output.message, "search requires a non-empty query.");
+  assert.equal(output.results?.length, 0);
+  assert.equal(output.trace?.status, "invalid-input");
+  assert.equal(output.trace?.sourceSteps?.[0]?.status, "invalid-input");
+  assert.equal(output.trace?.sourceSteps?.[0]?.message, "search requires a non-empty query.");
+  assert.equal(display?.kind, "search_results");
+  if (display?.kind !== "search_results") {
+    throw new Error("expected search_results display");
+  }
+  assert.equal(display.status, "invalid-input");
+  assert.equal(display.message, "search requires a non-empty query.");
+  assert.equal(display.results.length, 0);
+  assert.equal(agentContent.display?.kind, "search_results");
+  assert.equal(agentContent.display?.status, "invalid-input");
+  assert.equal(agentContent.display?.message, "search requires a non-empty query.");
+  assert.equal(result.projection?.envelope?.uiDisplay?.kind, "search_results");
+  assert.equal(result.projection?.envelope?.agentSummary.includes("search requires a non-empty query."), true);
+  assert.equal(JSON.stringify(result).includes("recoveryHint"), false);
+  assert.doesNotMatch(JSON.stringify(result), suggestionPattern);
 });
 
 test("research search tool passes site constraint into runtime query", async () => {

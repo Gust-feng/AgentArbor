@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { createDesktopBasicToolRegistry } from "../../basic-agent-runtime/index.js";
+import { ToolCenter } from "../tool-center.js";
 import { createHttpRequestTool, type HttpRequestFetchLike } from "./http-request-tool.js";
 import { createLocalShellCommandTool } from "./local-workspace-command-tools.js";
 import { createLocalGrepFilesTool } from "./local-workspace-read-tools.js";
@@ -303,6 +304,46 @@ test("http_request network errors expose OS facts without recoveryHint", async (
       return true;
     }
   );
+});
+
+test("ToolCenter http_request failures preserve network facts in result, projection, and envelope", async () => {
+  const cause = Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:43210"), {
+    code: "ECONNREFUSED",
+    errno: -4078,
+    syscall: "connect",
+    address: "127.0.0.1",
+    port: 43210,
+  });
+  const center = new ToolCenter();
+  center.register(createHttpRequestTool({ fetch: rejectingFetch(fetchFailureWithCause(cause)) }));
+
+  const result = await center.execute(
+    { callId: "call-http-refused", toolName: "http_request", input: { url: "http://127.0.0.1:43210/status" } },
+    context,
+    { callerAgentId: context.callerAgentId, allowedTools: ["http_request"] }
+  );
+  const agentContent = asRecord(result.projection?.agentContent);
+  const envelope = asRecord(result.projection?.envelope);
+  const errorFacts = asRecord(result.errorFacts);
+  const projectedFacts = asRecord(agentContent.errorFacts);
+  const agentFacts = asRecord(agentContent.facts);
+  const envelopeFacts = asRecord(envelope.errorFacts);
+
+  assert.equal(result.status, "failed");
+  assert.match(result.error ?? "", /ECONNREFUSED/);
+  assert.equal(result.errorDomain, "tool_error");
+  assert.equal(errorFacts.code, "ECONNREFUSED");
+  assert.equal(errorFacts.errno, -4078);
+  assert.equal(errorFacts.syscall, "connect");
+  assert.equal(errorFacts.address, "127.0.0.1");
+  assert.equal(errorFacts.port, 43210);
+  assert.equal(errorFacts.method, "GET");
+  assert.equal(errorFacts.url, "http://127.0.0.1:43210/status");
+  assert.equal(typeof errorFacts.durationMs, "number");
+  assert.equal(projectedFacts.code, "ECONNREFUSED");
+  assert.equal(agentFacts.syscall, "connect");
+  assert.equal(envelopeFacts.address, "127.0.0.1");
+  assert.doesNotMatch(JSON.stringify(result), suggestionPattern);
 });
 
 function asRecord(value: unknown): Record<string, unknown> {

@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ArborMessage, ArborMessageType } from "../../domain/common.js";
+import type { ToolCallResult } from "../../domain/tools/index.js";
 import type { EventLogEntry } from "../../kernel/events/in-memory-event-log.js";
+import { createToolFailedMessage } from "../../kernel/intelligence/tool-events.js";
 import type { PanelRunJob } from "../panel-run-jobs.js";
+import { createPanelRunTranscript } from "../panel-run-read-model.js";
 import type { PanelRunStreamEvent } from "../panel-run-stream-contracts.js";
 import type { PanelRunTraceReadModel } from "../panel-run-tracking-contracts.js";
 import type { PanelRunTranscript } from "../panel-run-transcript-contracts.js";
@@ -661,6 +664,107 @@ test("runtime tool call records preserve tool and process error domains", () => 
   assert.equal(toolCalls.find((call) => call.callId === "tool-read-missing")?.errorFacts?.code, "ENOENT");
   assert.equal(toolCalls.find((call) => call.callId === "tool-read-missing")?.envelope?.errorFacts?.path, "missing.md");
   assert.equal(toolCalls.find((call) => call.callId === "tool-shell-missing")?.errorDomain, "process_error");
+});
+
+test("runtime record mapper preserves projected failure facts from real tool.failed events", () => {
+  const errorFacts = {
+    code: "ENOENT",
+    syscall: "spawn",
+    command: "pnpm",
+    args: ["missing"],
+  };
+  const result: ToolCallResult = {
+    callId: "tool-shell-missing",
+    toolName: "shell_command",
+    input: { command: "pnpm", args: ["missing"] },
+    output: undefined,
+    status: "failed",
+    error: "spawn pnpm ENOENT",
+    errorDomain: "process_error",
+    errorFacts,
+    durationMs: 7,
+    projection: {
+      agentContent: {
+        status: "failed",
+        toolName: "shell_command",
+        callId: "tool-shell-missing",
+        error: "spawn pnpm ENOENT",
+        errorDomain: "process_error",
+        errorFacts,
+      },
+      uiSummary: "spawn pnpm ENOENT",
+      diagnosticRef: "tool:tool-shell-missing:failed",
+      envelope: {
+        agentSummary: "spawn pnpm ENOENT",
+        evidenceRefs: ["tool:tool-shell-missing"],
+        tokenEstimate: 8,
+        truncated: false,
+        redacted: false,
+        diagnosticRef: "tool:tool-shell-missing:failed",
+        rawRetention: "none",
+        errorDomain: "process_error",
+        errorFacts,
+      },
+      truncated: false,
+      redacted: false,
+    },
+  };
+  const message = createToolFailedMessage({
+    result,
+    context: {
+      callerAgentId: "agent-test",
+      traceId: "trace-runtime-records",
+      goalId: "goal-test",
+    },
+  });
+  const projectedOutput = message.payload.output as {
+    readonly envelope?: {
+      readonly errorDomain?: string;
+      readonly errorFacts?: {
+        readonly code?: string;
+        readonly command?: string;
+      };
+    };
+  };
+  const eventEntries: readonly EventLogEntry[] = [
+    {
+      sequence: 1,
+      type: message.type,
+      message,
+      recordedAt: "2026-05-31T00:00:01.000Z",
+    },
+  ];
+  const transcript = createPanelRunTranscript({
+    runId: "run-1",
+    status: "failed",
+    eventEntries,
+    desktopMode: "agent",
+    createdAt: "2026-05-31T00:00:00.000Z",
+    updatedAt: "2026-05-31T00:00:10.000Z",
+    error: {
+      code: "desktop_agent_failed",
+      message: "spawn pnpm ENOENT",
+    },
+  });
+  const failedStreamEvent = transcript.events.find((event) => event.type === "tool.failed");
+  const failedNode = transcript.transcriptNodes.find((node) => node.eventType === "tool.failed");
+  const toolCalls = toRuntimeToolCallRecords("run-1", transcript.events, eventEntries);
+  const call = toolCalls.find((item) => item.callId === "tool-shell-missing");
+
+  assert.equal(message.payload.errorDomain, "process_error");
+  assert.equal(message.payload.errorFacts?.code, "ENOENT");
+  assert.equal(projectedOutput.envelope?.errorDomain, "process_error");
+  assert.equal(projectedOutput.envelope?.errorFacts?.command, "pnpm");
+  assert.equal(failedStreamEvent?.detail?.errorDomain, "process_error");
+  assert.equal(failedStreamEvent?.detail?.envelope?.errorFacts?.code, "ENOENT");
+  assert.equal(failedStreamEvent?.detail?.errorFacts?.syscall, "spawn");
+  assert.equal(failedNode?.phase, "failed");
+  assert.equal(failedNode?.refs.some((ref) => ref.kind === "tool_call" && ref.id === "tool-shell-missing"), true);
+  assert.equal(call?.errorDomain, "process_error");
+  assert.equal(call?.errorFacts?.code, "ENOENT");
+  assert.deepEqual(call?.errorFacts?.args, ["missing"]);
+  assert.equal(call?.envelope?.errorDomain, "process_error");
+  assert.equal(call?.envelope?.errorFacts?.command, "pnpm");
 });
 
 test("runtime record mapper persists completed read provider failure facts", () => {

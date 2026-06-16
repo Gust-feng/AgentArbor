@@ -1,6 +1,6 @@
 import type { ArborMessage } from "../../domain/common.js";
 import type { ToolCallRequest, ToolCallResult, ToolExecutionContext } from "../../domain/tools/index.js";
-import { toolDisplayName } from "../../domain/tools/index.js";
+import { normalizeToolErrorFacts, toolDisplayName } from "../../domain/tools/index.js";
 import { createMessage } from "../messages/create-message.js";
 import { redactSensitiveText } from "../redaction.js";
 
@@ -20,7 +20,10 @@ export type ToolCompletedEventPayload = ToolRequestedEventPayload & {
 };
 
 export type ToolFailedEventPayload = ToolRequestedEventPayload & {
+  readonly output?: unknown;
   readonly error: string;
+  readonly errorDomain?: ToolCallResult["errorDomain"];
+  readonly errorFacts?: ToolCallResult["errorFacts"];
   readonly durationMs: number;
 };
 
@@ -74,6 +77,9 @@ export function createToolFailedMessage(input: {
   readonly result: ToolCallResult;
   readonly context: ToolExecutionContext;
 }): ArborMessage<ToolFailedEventPayload> {
+  const errorDomain = input.result.errorDomain ?? input.result.projection?.envelope?.errorDomain;
+  const errorFacts = normalizeToolErrorFacts(input.result.errorFacts ?? input.result.projection?.envelope?.errorFacts);
+  const output = toProjectedToolEventOutput(input.result);
   return createMessage({
     traceId: input.context.traceId,
     from: { id: "tool-center", role: "runtime" },
@@ -88,7 +94,10 @@ export function createToolFailedMessage(input: {
       toolName: input.result.toolName,
       toolDisplayName: toolDisplayName(input.result.toolName),
       input: toSafeToolEventSummaryValue(input.result.input),
+      output: output === undefined ? undefined : toSafeToolEventSummaryValue(output),
       error: sanitizeError(input.result.error ?? "Tool execution failed."),
+      errorDomain,
+      errorFacts,
       durationMs: input.result.durationMs,
     },
   });

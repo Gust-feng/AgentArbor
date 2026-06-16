@@ -1,6 +1,6 @@
 import type { TranscriptNode, TranscriptNodePhase } from "../domain/basic-agent/index.js";
 import type { ObservationRef } from "../domain/observation/index.js";
-import { type ToolDisplayProjection } from "../domain/tools/index.js";
+import { type ToolDisplayProjection, type ToolErrorDomain, type ToolErrorFacts, type ToolResultEnvelope } from "../domain/tools/index.js";
 import { toolDisplayName } from "../domain/tools/index.js";
 import { cleanConfirmationSummary } from "./confirmation-copy.js";
 import {
@@ -39,9 +39,12 @@ export type PanelTranscriptStreamEvent = {
     readonly command?: string;
     readonly exitCode?: number;
     readonly display?: ToolDisplayProjection;
+    readonly envelope?: ToolResultEnvelope;
     readonly preview?: string;
     readonly truncated?: boolean;
     readonly error?: string;
+    readonly errorDomain?: ToolErrorDomain;
+    readonly errorFacts?: ToolErrorFacts;
   };
   readonly sourceRefs: readonly string[];
   readonly modelCallRefs: readonly string[];

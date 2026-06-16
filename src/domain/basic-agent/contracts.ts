@@ -1,6 +1,11 @@
 import type { RunAgentDefinitionRef } from "../config/contracts.js";
 import type { ObservationRef } from "../observation/contracts.js";
-import type { ToolDisplayProjection, ToolResultEnvelope } from "../tools/contracts.js";
+import type {
+  ToolDisplayProjection,
+  ToolErrorDomain,
+  ToolErrorFacts,
+  ToolResultEnvelope,
+} from "../tools/contracts.js";
 import type { ConfirmationRequest } from "./confirmation-contracts.js";
 export type { ConfirmationDecision, ConfirmationRequest, ConfirmationRiskLevel } from "./confirmation-contracts.js";
 
@@ -58,8 +63,11 @@ export type RunEvent = {
     readonly exitCode?: number;
     readonly preview?: string;
     readonly display?: ToolDisplayProjection;
+    readonly envelope?: ToolResultEnvelope;
     readonly truncated?: boolean;
     readonly error?: string;
+    readonly errorDomain?: ToolErrorDomain;
+    readonly errorFacts?: ToolErrorFacts;
   };
 };
 

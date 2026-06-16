@@ -2,12 +2,16 @@ import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { createServer as createHttpServer, type Server as HttpServer } from "node:http";
-import { createServer as createNetServer, type Server as NetServer } from "node:net";
+import { createConnection, createServer as createNetServer, type Server as NetServer } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import test from "node:test";
-import type { BasicAgentRunExecutionInput, BasicAgentRunExecutionResult } from "../basic-agent-runtime/index.js";
+import {
+  createDesktopBasicToolRegistry,
+  type BasicAgentRunExecutionInput,
+  type BasicAgentRunExecutionResult,
+} from "../basic-agent-runtime/index.js";
 import type { PanelRunJob } from "../panel-run-jobs.js";
 import { closePanelServer } from "../panel-server/request-handler.js";
 import { createPanelRuntime, type PanelRuntime } from "../panel-server/runtime.js";
@@ -24,6 +28,152 @@ const context = {
   traceId: "trace-runtime-guard-e2e",
   goalId: "goal-runtime-guard-e2e",
 };
+
+test("runtime guard workflow creates a demo project, serves it, reads command logs, and releases the port on cleanup", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "agentarbor-runtime-guard-workflow-"));
+  const runId = "run-runtime-guard-workflow";
+  const registry = new InMemoryProcessRegistry();
+  const toolRegistry = createDesktopBasicToolRegistry({
+    env: {},
+    workspaceRoot: root,
+    playwrightAvailable: false,
+    processRegistry: registry,
+    toolCatalogNames: ["create_file", "write_file", "read", "shell_command", "http_request"],
+  });
+  const center = toolRegistry.createToolCenter("desktop-basic");
+  const allowedTools = center.list().map((tool) => tool.name);
+  let serverPid: number | undefined;
+  let cleaned = false;
+
+  try {
+    assert.deepEqual(allowedTools, ["read", "create_file", "write_file", "shell_command", "http_request"]);
+
+    const createPackage = await executeTool("call-create-package", "create_file", {
+      path: "demo/package.json",
+      content: JSON.stringify({ type: "module", scripts: { dev: "node server.mjs" } }, null, 2),
+    });
+    assert.equal(createPackage.status, "completed");
+
+    const writeHtml = await executeTool("call-write-index", "write_file", {
+      path: "demo/public/index.html",
+      content: [
+        "<!doctype html>",
+        "<html>",
+        "  <head><title>AgentArbor Runtime Guard Demo</title></head>",
+        "  <body><main id=\"app\">runtime-guard-demo-ready</main></body>",
+        "</html>",
+        "",
+      ].join("\n"),
+    });
+    assert.equal(writeHtml.status, "completed");
+
+    const writeServer = await executeTool("call-write-server", "write_file", {
+      path: "demo/server.mjs",
+      content: demoServerSource(),
+    });
+    assert.equal(writeServer.status, "completed");
+
+    const port = await unusedLocalPort();
+    const startServer = await executeTool("call-start-demo-server", "shell_command", {
+      command: process.execPath,
+      args: ["server.mjs", String(port)],
+      cwd: "demo",
+      background: true,
+      backgroundWaitMs: 100,
+      waitForPort: port,
+      waitForPortTimeoutMs: 5_000,
+    });
+    const startOutput = asRecord(startServer.output);
+    const startResult = asRecord(startOutput.result);
+    serverPid = numberField(startResult.pid);
+    const logRef = stringField(startResult.logRef);
+
+    assert.equal(startServer.status, "completed");
+    assert.equal(startResult.exitCode, 0);
+    assert.equal(startResult.background, true);
+    assert.equal(startResult.waitForPort, port);
+    assert.equal(startResult.portReady, true);
+    assert.equal(typeof serverPid, "number");
+    assert.match(logRef ?? "", /^command-log:\/\/[^\\/]+$/);
+    assert.equal((stringField(startResult.stopCommand)?.length ?? 0) > 0, true);
+
+    const record = onlyRecord(registry.listByRun(runId));
+    assert.equal(record.pid, serverPid);
+    assert.equal(record.toolCallId, "call-start-demo-server");
+    assert.equal(record.status, "running");
+    assert.equal(record.logRef, logRef);
+    assert.equal(record.ports[0]?.port, port);
+    assert.equal(record.ports[0]?.ready, true);
+
+    const httpIndex = await executeTool("call-http-index", "http_request", {
+      url: `http://127.0.0.1:${port}/`,
+      timeoutMs: 2_000,
+    });
+    const httpIndexResult = asRecord(asRecord(httpIndex.output).result);
+    assert.equal(httpIndex.status, "completed");
+    assert.equal(httpIndexResult.statusCode, 200);
+    assert.match(String(httpIndexResult.body), /runtime-guard-demo-ready/);
+
+    const httpStatus = await executeTool("call-http-status", "http_request", {
+      url: `http://127.0.0.1:${port}/api/status`,
+      timeoutMs: 2_000,
+    });
+    const httpStatusResult = asRecord(asRecord(httpStatus.output).result);
+    assert.equal(httpStatus.status, "completed");
+    assert.equal(httpStatusResult.statusCode, 200);
+    assert.match(String(httpStatusResult.body), /"ok":true/);
+    assert.match(String(httpStatusResult.body), /"project":"runtime-guard-demo"/);
+
+    const logRead = await waitForCommandLogContent(logRef!, /DEMO_SERVER_READY:/, async (callId) =>
+      executeTool(callId, "read", { ref: logRef, maxLength: 30_000 })
+    );
+    const logReadResult = asRecord(asRecord(logRead.output).result);
+    assert.equal(logRead.status, "completed");
+    assert.equal(logReadResult.source, "command_log");
+    assert.equal(logReadResult.uri, logRef);
+    assert.match(String(logReadResult.contentPreview), new RegExp(`DEMO_SERVER_READY:${port}`));
+    assert.equal(JSON.stringify(logReadResult.metadata).includes(String(startResult.logPath)), false);
+
+    const cleanup = await registry.cleanupByRun(runId, createPlatformProcessTerminator(), { reason: "cancel" });
+    cleaned = true;
+
+    assert.deepEqual(cleanup.skipped, []);
+    assert.equal(cleanup.attempted.length, 1);
+    assert.equal(cleanup.attempted[0]?.processId, record.processId);
+    assert.match(cleanup.attempted[0]?.outcome ?? "", /^(killed|already-exited|unknown)$/);
+    assert.notEqual(registry.get(record.processId)?.status, "running");
+    assert.equal(await waitForPidExit(serverPid, 5_000), true);
+    assert.equal(await canConnectToLocalhostPort(port), false);
+
+    const portAfterCleanup = await waitForLocalPort({
+      port,
+      host: "127.0.0.1",
+      timeoutMs: 350,
+      probeTimeoutMs: 100,
+      pollIntervalMs: 50,
+    });
+    assert.equal(portAfterCleanup.ready, false);
+  } finally {
+    if (!cleaned) {
+      await registry.cleanupByRun(runId, createPlatformProcessTerminator()).catch(() => undefined);
+    }
+    await ensurePidExited(serverPid, 5_000).catch(() => undefined);
+    await removeTempTree(root);
+  }
+
+  async function executeTool(callId: string, toolName: string, input: Record<string, unknown>) {
+    const executionContext = { ...context, runId, toolCallId: callId };
+    return center.execute(
+      { callId, toolName, input },
+      executionContext,
+      {
+        callerAgentId: context.callerAgentId,
+        allowedTools,
+        approvedConfirmationIds: [`confirmation-${callId}`],
+      }
+    );
+  }
+});
 
 test("runtime guard starts a background dev server, records waitForPort, and cleans it by run", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-runtime-guard-e2e-"));
@@ -265,6 +415,37 @@ function nodeHttpServerScript(port: number, readyText: string): string {
   ].join("");
 }
 
+function demoServerSource(): string {
+  return [
+    "import { readFile } from 'node:fs/promises';",
+    "import { createServer } from 'node:http';",
+    "",
+    "const port = Number(process.argv[2]);",
+    "const publicRoot = new URL('./public/', import.meta.url);",
+    "",
+    "const server = createServer(async (request, response) => {",
+    "  const url = new URL(request.url ?? '/', 'http://127.0.0.1');",
+    "  if (url.pathname === '/api/status') {",
+    "    response.writeHead(200, { 'content-type': 'application/json' });",
+    "    response.end(JSON.stringify({ ok: true, project: 'runtime-guard-demo' }));",
+    "    return;",
+    "  }",
+    "  if (url.pathname === '/') {",
+    "    const html = await readFile(new URL('index.html', publicRoot), 'utf8');",
+    "    response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });",
+    "    response.end(html);",
+    "    return;",
+    "  }",
+    "  response.writeHead(404, { 'content-type': 'text/plain' });",
+    "  response.end('not found');",
+    "});",
+    "",
+    "server.listen(port, '127.0.0.1', () => console.log(`DEMO_SERVER_READY:${port}`));",
+    "process.on('SIGTERM', () => server.close(() => process.exit(0)));",
+    "",
+  ].join("\n");
+}
+
 async function startExternalNodeServer(port: number): Promise<ChildProcess> {
   const child = spawn(process.execPath, ["-e", nodeHttpServerScript(port, "external-dev-server-ready")], {
     stdio: "ignore",
@@ -300,6 +481,30 @@ function onceChildExit(child: ChildProcess): Promise<{ readonly exitCode: number
     child.once("error", reject);
     child.once("exit", (code) => resolve({ exitCode: code }));
   });
+}
+
+async function waitForCommandLogContent<T extends { readonly output?: unknown; readonly status: string }>(
+  logRef: string,
+  pattern: RegExp,
+  read: (callId: string) => Promise<T>,
+  timeoutMs = 5_000
+): Promise<T> {
+  const startedAt = Date.now();
+  let attempt = 0;
+  let lastContent = "";
+  for (;;) {
+    attempt += 1;
+    const output = await read(`call-read-command-log-${attempt}`);
+    const content = String(asRecord(asRecord(output.output).result).contentPreview ?? "");
+    if (output.status === "completed" && pattern.test(content)) {
+      return output;
+    }
+    lastContent = content;
+    if (Date.now() - startedAt > timeoutMs) {
+      throw new Error(`Timed out waiting for ${logRef} to contain ${pattern}. Last content: ${lastContent}`);
+    }
+    await delay(50);
+  }
 }
 
 async function unusedLocalPort(): Promise<number> {
@@ -365,6 +570,25 @@ function closeNetServer(server: NetServer): Promise<void> {
   });
 }
 
+function canConnectToLocalhostPort(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = createConnection({ host: "127.0.0.1", port });
+    let settled = false;
+    const settle = (ready: boolean) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      socket.destroy();
+      resolve(ready);
+    };
+    socket.setTimeout(250);
+    socket.once("connect", () => settle(true));
+    socket.once("timeout", () => settle(false));
+    socket.once("error", () => settle(false));
+  });
+}
+
 async function waitForPidExit(pid: number | undefined, timeoutMs: number): Promise<boolean> {
   if (pid === undefined) {
     await delay(50);
@@ -410,4 +634,8 @@ function asRecord(value: unknown): Record<string, unknown> {
 
 function numberField(value: unknown): number | undefined {
   return typeof value === "number" ? value : undefined;
+}
+
+function stringField(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
 }

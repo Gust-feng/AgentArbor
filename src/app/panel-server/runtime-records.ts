@@ -181,7 +181,7 @@ export function toRuntimeToolCallRecords(
         truncated: event.detail?.truncated ?? detail?.truncated ?? previous?.truncated,
         error: event.detail?.error ?? detail?.error ?? previous?.error,
         errorFacts: event.detail?.errorFacts ?? (event.detail?.envelope ?? detail?.envelope ?? previous?.envelope)?.errorFacts ?? detail?.errorFacts ?? previous?.errorFacts,
-        errorDomain: inferToolCallErrorDomain({
+        errorDomain: event.detail?.errorDomain ?? inferToolCallErrorDomain({
           eventType: event.type,
           toolName: event.toolName ?? previous?.toolName,
           envelope: event.detail?.envelope ?? detail?.envelope ?? previous?.envelope,
@@ -547,6 +547,8 @@ function localToolDetailsByCallId(
     const pathValue = optionalString(result.path) ?? optionalString(input.path);
     const envelope = toolResultEnvelopeOrUndefined(output.envelope);
     const error = optionalString(payload.error);
+    const payloadErrorDomain = errorDomainOrUndefined(payload.errorDomain);
+    const payloadErrorFacts = normalizeToolErrorFacts(payload.errorFacts);
     details.set(callId, {
       action: optionalString(output.action) ?? optionalString(payload.toolName),
       path: pathValue,
@@ -559,8 +561,8 @@ function localToolDetailsByCallId(
       envelope,
       truncated: output.truncated === true,
       error,
-      errorFacts: envelope?.errorFacts,
-      errorDomain: inferToolCallErrorDomain({
+      errorFacts: envelope?.errorFacts ?? payloadErrorFacts,
+      errorDomain: payloadErrorDomain ?? inferToolCallErrorDomain({
         eventType: entry.type === "tool.failed" ? "tool.failed" : "tool.completed",
         toolName: optionalString(payload.toolName),
         envelope,

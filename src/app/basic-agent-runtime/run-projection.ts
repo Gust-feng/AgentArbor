@@ -1,6 +1,11 @@
 import type { AgentTaskStatus, BasicAgentRun, ConfirmationDecision, RunEvent } from "../../domain/basic-agent/index.js";
 import type { ObservationRef } from "../../domain/observation/index.js";
-import type { ToolDisplayProjection } from "../../domain/tools/index.js";
+import type {
+  ToolDisplayProjection,
+  ToolErrorDomain,
+  ToolErrorFacts,
+  ToolResultEnvelope,
+} from "../../domain/tools/index.js";
 import {
   basicConfirmationDecisionSummary,
   cleanConfirmationSummary,
@@ -60,8 +65,11 @@ export type BasicAgentRunStreamEventProjectionInput = {
     readonly exitCode?: number;
     readonly preview?: string;
     readonly display?: ToolDisplayProjection;
+    readonly envelope?: ToolResultEnvelope;
     readonly truncated?: boolean;
     readonly error?: string;
+    readonly errorDomain?: ToolErrorDomain;
+    readonly errorFacts?: ToolErrorFacts;
   };
   readonly sourceRefs: readonly string[];
   readonly modelCallRefs: readonly string[];
@@ -263,8 +271,11 @@ function safeEventDetail(detail: BasicAgentRunStreamEventProjectionInput["detail
     exitCode: detail.exitCode,
     preview: safeEventSummary(detail.preview),
     display: detail.display,
+    envelope: detail.envelope,
     truncated: detail.truncated,
     error: safeEventSummary(detail.error),
+    errorDomain: detail.errorDomain,
+    errorFacts: detail.errorFacts,
   };
   return Object.values(projected).some((value) => value !== undefined) ? projected : undefined;
 }

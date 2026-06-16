@@ -124,6 +124,7 @@ export type PanelStreamEvent = {
     readonly display?: ToolDisplayProjection;
     readonly envelope?: ToolResultEnvelope;
     readonly error?: string;
+    readonly errorDomain?: string;
     readonly errorFacts?: ToolErrorFacts;
     readonly truncated?: boolean;
   };

@@ -19,6 +19,7 @@ export type PanelRunStreamEventDetail = {
   readonly envelope?: ToolResultEnvelope;
   readonly truncated?: boolean;
   readonly error?: string;
+  readonly errorDomain?: ToolErrorDomain;
   readonly errorFacts?: ToolErrorFacts;
 };
 
@@ -56,7 +57,8 @@ export function toolStreamDetail(
   const result = asRecord(output.result);
   const display = commandDisplayForReadModel(toolName, input, output, result, payload) ?? toolDisplayOrUndefined(output.display);
   const envelope = toolResultEnvelopeOrUndefined(output.envelope);
-  const errorFacts = errorFactsFromToolProjection(output, display, envelope);
+  const errorDomain = errorDomainFromToolProjection(payload, output, envelope);
+  const errorFacts = errorFactsFromToolProjection(payload, output, display, envelope);
   return {
     kind: "tool",
     action: displayActionLabel(stringOrUndefined(output.action) ?? localToolLabel(toolName)),
@@ -69,6 +71,7 @@ export function toolStreamDetail(
     envelope,
     truncated: output.truncated === true,
     error: type === "tool.failed" ? stringOrUndefined(payload.error) : undefined,
+    errorDomain,
     errorFacts,
   };
 }
@@ -178,7 +181,16 @@ function toolErrorDomainOrUndefined(value: unknown): ToolErrorDomain | undefined
   return isToolErrorDomain(value) ? value : undefined;
 }
 
+function errorDomainFromToolProjection(
+  payload: Readonly<Record<string, unknown>>,
+  output: Readonly<Record<string, unknown>>,
+  envelope: ToolResultEnvelope | undefined
+): ToolErrorDomain | undefined {
+  return envelope?.errorDomain ?? toolErrorDomainOrUndefined(output.errorDomain) ?? toolErrorDomainOrUndefined(payload.errorDomain);
+}
+
 function errorFactsFromToolProjection(
+  payload: Readonly<Record<string, unknown>>,
   output: Readonly<Record<string, unknown>>,
   display: ToolDisplayProjection | undefined,
   envelope: ToolResultEnvelope | undefined
@@ -189,7 +201,7 @@ function errorFactsFromToolProjection(
   if (display?.kind === "read_result" && display.errorFacts !== undefined) {
     return display.errorFacts;
   }
-  return readErrorFactsFromOutput(output) ?? normalizeToolErrorFacts(output.errorFacts);
+  return readErrorFactsFromOutput(output) ?? normalizeToolErrorFacts(output.errorFacts) ?? normalizeToolErrorFacts(payload.errorFacts);
 }
 
 function toolRequestPreview(toolName: string, input: Readonly<Record<string, unknown>>): string | undefined {

@@ -689,6 +689,7 @@ function persistedToolStreamDetail(call: RuntimeToolCallRecord): PanelRunStreamE
     envelope: call.envelope,
     truncated: call.truncated,
     error: call.error,
+    errorDomain: call.errorDomain,
     errorFacts: call.errorFacts,
   };
 }

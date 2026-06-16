@@ -200,12 +200,24 @@ function listen(server: Server, port: number, host: string): Promise<void> {
 }
 
 export async function closePanelServer(server: Server, runtime: PanelRuntime): Promise<void> {
-  await close(server);
-  abortPanelRuntimeActiveRuns(runtime);
-  await cleanupPanelRuntimeOwnedBackgroundProcesses(runtime);
-  await waitForPanelRuntimeIdle(runtime);
-  await cleanupPanelRuntimeOwnedBackgroundProcesses(runtime);
-  await waitForPanelPersistenceIdle(runtime);
+  let serverCloseError: unknown;
+  const serverClosed = close(server).catch((error: unknown) => {
+    serverCloseError = error;
+  });
+
+  try {
+    abortPanelRuntimeActiveRuns(runtime);
+    await cleanupPanelRuntimeOwnedBackgroundProcesses(runtime);
+    await waitForPanelRuntimeIdle(runtime);
+    await cleanupPanelRuntimeOwnedBackgroundProcesses(runtime);
+    await waitForPanelPersistenceIdle(runtime);
+  } finally {
+    await serverClosed;
+  }
+
+  if (serverCloseError !== undefined) {
+    throw serverCloseError;
+  }
 }
 
 async function waitForPanelRuntimeIdle(runtime: PanelRuntime): Promise<void> {

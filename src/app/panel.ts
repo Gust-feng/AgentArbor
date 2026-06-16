@@ -21,14 +21,21 @@ async function main(): Promise<void> {
     return;
   }
 
-  process.on("SIGINT", () => {
-    server
-      .close()
+  let closing: Promise<void> | undefined;
+  const closeServerOnce = (): Promise<void> => {
+    closing ??= server.close();
+    return closing;
+  };
+  const closeAndExit = (): void => {
+    closeServerOnce()
       .then(() => {
         process.exit(0);
       })
       .catch(() => {
         process.exit(1);
       });
-  });
+  };
+
+  process.on("SIGINT", closeAndExit);
+  process.on("SIGTERM", closeAndExit);
 }

@@ -4,6 +4,7 @@ import {
   InMemoryProcessRegistry,
   processPortFactFromLocalPortFact,
   type ProcessKillTreeResult,
+  type ProcessPortFact,
   type ProcessRecord,
 } from "./process-registry.js";
 
@@ -109,6 +110,61 @@ test("process registry preserves local port probe facts", () => {
       },
     },
   ]);
+});
+
+test("process registry isolates nested port fact objects from caller mutation", () => {
+  const registry = new InMemoryProcessRegistry({ now: fixedNow("2026-06-15T00:03:00.000Z") });
+  const error = {
+    name: "TimeoutError",
+    message: "initial timeout",
+    code: "WAIT_FOR_PORT_TIMEOUT",
+  };
+  const externalOccupant = {
+    pid: 34567,
+    observedBy: "platform_probe" as const,
+    ownedByUs: false as const,
+  };
+  const portFact: ProcessPortFact = {
+    port: 5173,
+    host: "127.0.0.1",
+    requestedAt: "2026-06-15T00:03:00.000Z",
+    status: "timeout",
+    ready: false,
+    checkedAt: "2026-06-15T00:03:01.000Z",
+    durationMs: 1000,
+    timeoutMs: 1000,
+    timedOut: true,
+    error,
+    externalOccupant,
+  };
+
+  registry.register({
+    processId: "nested-fact-process",
+    runId: "run-nested-fact",
+    pid: 12501,
+    kind: "background",
+    owned: true,
+    commandLine: "test-command nested-fact-process",
+    cwd: "Z:\\AgentArbor",
+    startedAt: "2026-06-15T00:00:00.000Z",
+    status: "running",
+    ports: [portFact],
+  });
+
+  error.message = "mutated timeout";
+  externalOccupant.pid = 45678;
+
+  const stored = registry.get("nested-fact-process")?.ports[0];
+  assert.equal(stored?.error?.message, "initial timeout");
+  assert.equal(stored?.externalOccupant?.pid, 34567);
+
+  const read = registry.get("nested-fact-process")?.ports[0];
+  (read?.error as { message: string } | undefined)!.message = "read mutation";
+  (read?.externalOccupant as { pid?: number } | undefined)!.pid = 56789;
+
+  const reread = registry.get("nested-fact-process")?.ports[0];
+  assert.equal(reread?.error?.message, "initial timeout");
+  assert.equal(reread?.externalOccupant?.pid, 34567);
 });
 
 test("cleanupByRun terminates only owned active processes for the requested run", async () => {

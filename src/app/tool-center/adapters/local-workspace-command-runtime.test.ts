@@ -333,6 +333,73 @@ test("shell_command makes background waitForPort timeout visible in summary and 
   }
 });
 
+test("shell_command records post-start external port occupant facts", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "agentarbor-command-runtime-"));
+  const server = createNetServer();
+  let listenTimer: ReturnType<typeof setTimeout> | undefined;
+  let delayedListen: Promise<void> | undefined;
+  let stopCommand: string | undefined;
+  let backgroundPid: number | undefined;
+  try {
+    const port = await unusedLocalPort();
+    const registry = createRecordingProcessRegistry();
+    const portOccupantProbe: PortOccupantProbe = (input) => {
+      assert.equal(input.port, port);
+      return {
+        pid: 54321,
+        observedBy: "platform_probe",
+      };
+    };
+    const shellCommand = createLocalShellCommandTool(root, { processRegistry: registry, portOccupantProbe });
+    listenTimer = setTimeout(() => {
+      delayedListen = listenOnLocalPort(server, port).catch(() => undefined);
+    }, 100);
+
+    const output = await shellCommand.execute(
+      {
+        command: process.execPath,
+        args: ["-e", "console.log('background-no-port'); setInterval(() => {}, 1000);"],
+        background: true,
+        backgroundWaitMs: 50,
+        waitForPort: port,
+        waitForPortTimeoutMs: 3_000,
+      },
+      processContext
+    );
+    const result = asRecord(asRecord(output).result);
+    stopCommand = typeof result.stopCommand === "string" ? result.stopCommand : undefined;
+    backgroundPid = typeof result.pid === "number" ? result.pid : undefined;
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.background, true);
+    assert.equal(result.waitForPort, port);
+    assert.equal(result.portReady, true);
+    assert.equal(registry.portFacts.length, 1);
+    assert.deepEqual(registry.portFacts[0]?.externalOccupant, {
+      pid: 54321,
+      observedBy: "platform_probe",
+      ownedByUs: false,
+    });
+    assert.deepEqual(registry.listAll()[0]?.ports[0]?.externalOccupant, {
+      pid: 54321,
+      observedBy: "platform_probe",
+      ownedByUs: false,
+    });
+  } finally {
+    if (listenTimer !== undefined) {
+      clearTimeout(listenTimer);
+    }
+    await delayedListen;
+    await closeServer(server);
+    const shellCommand = createLocalShellCommandTool(root);
+    if (stopCommand !== undefined) {
+      await shellCommand.execute({ commandLine: stopCommand, timeoutMs: 2_000 }, context);
+      await ensurePidExited(backgroundPid, 5_000);
+    }
+    await removeTempTree(root);
+  }
+});
+
 test("shell_command returns pre-start occupied port facts without starting a duplicate server", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-command-runtime-"));
   const server = createNetServer();
@@ -476,6 +543,72 @@ test("shell_command marks pre-start occupied ports as owned when registry has th
   }
 });
 
+test("shell_command keeps pre-start port ownership unknown without an observed pid match", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "agentarbor-command-runtime-"));
+  const server = createNetServer();
+  try {
+    const port = await listenOnUnusedLocalPort(server);
+    const registry = createRecordingProcessRegistry();
+    registry.register({
+      processId: "stale-port-fact",
+      runId: "previous-run",
+      toolCallId: "previous-tool-call",
+      pid: 43210,
+      kind: "background",
+      owned: true,
+      commandLine: "pnpm dev",
+      cwd: root,
+      startedAt: "2026-06-15T00:00:00.000Z",
+      status: "running",
+      ports: [{
+        port,
+        host: "127.0.0.1",
+        requestedAt: "2026-06-15T00:00:00.000Z",
+        checkedAt: "2026-06-15T00:00:00.000Z",
+        status: "ready",
+        ready: true,
+      }],
+    });
+    registry.registered.length = 0;
+    const portOccupantProbe: PortOccupantProbe = () => ({
+      observedBy: "platform_probe",
+    });
+    const shellCommand = createLocalShellCommandTool(root, { processRegistry: registry, portOccupantProbe });
+    const markerPath = path.join(root, "unknown-owner-started.txt");
+    const output = await shellCommand.execute(
+      {
+        command: process.execPath,
+        args: ["-e", `require('node:fs').writeFileSync(${JSON.stringify(markerPath)}, 'started');`],
+        background: true,
+        backgroundWaitMs: 50,
+        waitForPort: port,
+        waitForPortTimeoutMs: 1_000,
+      },
+      processContext
+    );
+    const result = asRecord(asRecord(output).result);
+    const occupancy = asRecord(result.preStartPortOccupancy);
+
+    assert.equal(result.notStarted, true);
+    assert.equal(result.portReady, false);
+    assert.equal(registry.registered.length, 0);
+    assert.equal(occupancy.kind, "pre_start_port_occupancy");
+    assert.equal(occupancy.port, port);
+    assert.equal(occupancy.pid, undefined);
+    assert.equal(occupancy.pidKnown, false);
+    assert.equal(occupancy.owner, "unknown");
+    assert.equal(occupancy.ownerUnknown, true);
+    assert.equal(occupancy.ownedByUs, undefined);
+    assert.equal(occupancy.ownershipSource, undefined);
+    assert.equal(occupancy.registryProcessId, undefined);
+    assert.equal(occupancy.source, "platform_probe");
+    await assert.rejects(() => readFile(markerPath, "utf8"));
+  } finally {
+    await closeServer(server);
+    await removeTempTree(root);
+  }
+});
+
 async function removeTempTree(root: string): Promise<void> {
   await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 }
@@ -513,6 +646,16 @@ function listenOnUnusedLocalPort(server: Server): Promise<number> {
         return;
       }
       resolve(port);
+    });
+  });
+}
+
+function listenOnLocalPort(server: Server, port: number): Promise<void> {
+  return new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(port, "127.0.0.1", () => {
+      server.off("error", reject);
+      resolve();
     });
   });
 }

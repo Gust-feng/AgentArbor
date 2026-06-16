@@ -539,7 +539,11 @@ function clonePortFacts(facts: readonly ProcessPortFact[]): readonly ProcessPort
 }
 
 function clonePortFact(fact: ProcessPortFact): ProcessPortFact {
-  return { ...fact };
+  return {
+    ...fact,
+    ...(fact.error === undefined ? {} : { error: { ...fact.error } }),
+    ...(fact.externalOccupant === undefined ? {} : { externalOccupant: { ...fact.externalOccupant } }),
+  };
 }
 
 function cloneFacts(facts: readonly ProcessFact[]): readonly ProcessFact[] {

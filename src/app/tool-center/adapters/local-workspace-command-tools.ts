@@ -127,6 +127,7 @@ type CommandProcessFacts = {
 type RegistryPortOwner = {
   readonly processId: string;
   readonly pid?: number;
+  readonly match: "pid" | "port_fact";
 };
 
 export function createDefaultCommandShellConfig(
@@ -873,16 +874,21 @@ function findActiveRegistryPortOwner(
     if (record.owned !== true || !isActiveProcessStatus(record.status)) {
       continue;
     }
-    if (observedPid !== undefined && record.pid === observedPid) {
+    if (observedPid !== undefined) {
+      if (record.pid !== observedPid) {
+        continue;
+      }
       return {
         processId: record.processId,
         pid: record.pid,
+        match: "pid",
       };
     }
     if (record.ports.some((fact) => fact.port === port && fact.host === host && fact.ready === true)) {
       return {
         processId: record.processId,
         pid: record.pid,
+        match: "port_fact",
       };
     }
   }
@@ -920,9 +926,9 @@ function portOccupancyFromPreStartFact(
   }
   const observedPid = fact.externalOccupant?.pid;
   const registryOwner = findActiveRegistryPortOwner(registry, fact.port, fact.host, observedPid);
-  const pid = observedPid ?? registryOwner?.pid;
+  const pid = observedPid;
   const source = fact.externalOccupant?.observedBy ?? "connect_probe";
-  if (registryOwner !== undefined) {
+  if (registryOwner?.match === "pid") {
     return {
       kind: "pre_start_port_occupancy",
       port: fact.port,
@@ -1303,6 +1309,7 @@ async function enrichCommandResult(input: {
     probeTimeoutMs: 250,
     pollIntervalMs: 100,
     abortSignal: input.abortSignal,
+    portOccupantProbe: input.portOccupantProbe,
   });
   appendCommandPortFact(input.processRegistry, input.processId, processPortFactFromLocalPortFact(portWait));
   const portReady = portWait.ready;

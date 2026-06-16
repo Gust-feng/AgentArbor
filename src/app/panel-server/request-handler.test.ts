@@ -89,6 +89,62 @@ test("panel server close aborts active runs and cleans owned background processe
   );
 });
 
+test("panel server close runs shutdown cleanup before server close callback resolves", async () => {
+  const killedPids: number[] = [];
+  const runtime = createPanelRuntime({
+    processTerminator: {
+      killTree(pid) {
+        killedPids.push(pid);
+        return { status: "killed", signal: "SIGTERM" };
+      },
+    },
+  }, panelRuntimeHooks());
+  const abort = new AbortController();
+  runtime.abortControllers.set("run-shutdown-open-connection", abort);
+  runtime.processRegistry.register({
+    processId: "shutdown-open-connection-background",
+    runId: "run-shutdown-open-connection",
+    pid: 33001,
+    kind: "background",
+    owned: true,
+    commandLine: "pnpm dev",
+    cwd: "Z:\\AgentArbor",
+    startedAt: "2026-06-15T00:00:00.000Z",
+    status: "running",
+  });
+
+  let closeCallback: ((error?: Error) => void) | undefined;
+  const server = {
+    close(callback?: (error?: Error) => void) {
+      closeCallback = callback;
+      return this as Server;
+    },
+  } as Server;
+
+  const closing = closePanelServer(server, runtime);
+  let closeSettled = false;
+  closing.then(
+    () => {
+      closeSettled = true;
+    },
+    () => {
+      closeSettled = true;
+    }
+  );
+
+  await waitFor(() => runtime.processRegistry.get("shutdown-open-connection-background")?.status === "killed");
+
+  assert.equal(closeSettled, false);
+  assert.equal(abort.signal.aborted, true);
+  assert.deepEqual(killedPids, [33001]);
+  assert.equal(runtime.processRegistry.get("shutdown-open-connection-background")?.status, "killed");
+  assert.equal(closeCallback !== undefined, true);
+
+  closeCallback?.();
+  await closing;
+  assert.equal(closeSettled, true);
+});
+
 function panelRuntimeHooks() {
   return {
     async executeRun(_runtime: PanelRuntime, _execution: BasicAgentRunExecutionInput): Promise<BasicAgentRunExecutionResult> {
@@ -111,4 +167,16 @@ function listen(server: Server): Promise<void> {
       resolve();
     });
   });
+}
+
+async function waitFor(predicate: () => boolean): Promise<void> {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    if (predicate()) {
+      return;
+    }
+    await new Promise<void>((resolve) => {
+      setImmediate(resolve);
+    });
+  }
+  assert.equal(predicate(), true);
 }

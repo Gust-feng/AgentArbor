@@ -154,6 +154,9 @@ export function ChatActive(props: ChatInputProps & {
                   />
                 )}
                 {view.statusNotice !== undefined && <StatusNotice {...view.statusNotice} />}
+                {props.detail?.runtimeSummary !== undefined && (
+                  <RuntimeSummaryPanel summary={props.detail.runtimeSummary} />
+                )}
               </>
             ) : (
               <div className="session-placeholder">
@@ -182,6 +185,112 @@ function StatusNotice(props: ChatStatusNotice): React.ReactElement {
       <RichText text={props.message} />
     </article>
   );
+}
+
+type RuntimeSummary = NonNullable<DesktopRunDetail["runtimeSummary"]>;
+type RuntimeProcess = RuntimeSummary["processes"][number];
+type RuntimePortFact = RuntimeProcess["ports"][number];
+
+function RuntimeSummaryPanel(props: { readonly summary: RuntimeSummary }): React.ReactElement | null {
+  if (props.summary.processes.length === 0) return null;
+  return (
+    <aside className="runtime-summary-panel" aria-label="运行时事实摘要">
+      <div className="runtime-summary-heading">
+        <span>运行时事实</span>
+        <span>{runtimeSummaryCountText(props.summary)}</span>
+      </div>
+      <div className="runtime-process-list">
+        {props.summary.processes.map((process) => (
+          <RuntimeProcessRow key={process.processId} process={process} />
+        ))}
+      </div>
+    </aside>
+  );
+}
+
+function RuntimeProcessRow(props: { readonly process: RuntimeProcess }): React.ReactElement {
+  const process = props.process;
+  const portText = runtimePortsText(process.ports);
+  const latestFact = runtimeLatestFactText(process);
+  return (
+    <article className="runtime-process-row" data-status={process.status}>
+      <div className="runtime-process-main">
+        <span className="runtime-status">{runtimeStatusText(process.status)}</span>
+        {process.pid !== undefined && <span>pid {process.pid}</span>}
+        <span>{process.kind === "background" ? "后台" : "前台"}</span>
+        <span>{process.owned ? "自有" : "非自有"}</span>
+      </div>
+      <code className="runtime-command-line">{process.commandLine}</code>
+      <div className="runtime-process-facts">
+        {portText !== undefined && <span>{portText}</span>}
+        {process.logRef !== undefined && <span>logRef {process.logRef}</span>}
+        {process.logPath !== undefined && <span>logPath {process.logPath}</span>}
+        {latestFact !== undefined && <span>{latestFact}</span>}
+      </div>
+    </article>
+  );
+}
+
+function runtimeSummaryCountText(summary: RuntimeSummary): string {
+  if (summary.residualCount > 0) {
+    return `${summary.residualCount}/${summary.totalCount} 未终态`;
+  }
+  return `${summary.totalCount} 个进程事实`;
+}
+
+function runtimeStatusText(status: RuntimeProcess["status"]): string {
+  switch (status) {
+    case "starting":
+      return "启动中";
+    case "running":
+      return "运行中";
+    case "exited":
+      return "已退出";
+    case "killing":
+      return "停止中";
+    case "killed":
+      return "已停止";
+    case "unknown":
+      return "未知";
+  }
+}
+
+function runtimePortsText(ports: readonly RuntimePortFact[]): string | undefined {
+  if (ports.length === 0) return undefined;
+  return ports.map(runtimePortText).join(" / ");
+}
+
+function runtimePortText(port: RuntimePortFact): string {
+  const readiness = port.ready === true
+    ? "ready"
+    : port.ready === false
+      ? "not_ready"
+      : port.status;
+  const occupant = port.externalOccupant?.pid === undefined
+    ? undefined
+    : `external pid ${port.externalOccupant.pid}`;
+  return [
+    `port ${port.port}`,
+    port.host,
+    readiness,
+    port.timedOut === true ? "timeout" : undefined,
+    port.cancelled === true ? "cancelled" : undefined,
+    occupant,
+  ].filter((item): item is string => item !== undefined && item.length > 0).join(" ");
+}
+
+function runtimeLatestFactText(process: RuntimeProcess): string | undefined {
+  const fact = process.latestFact;
+  if (fact === undefined) return undefined;
+  if (fact.kind === "kill_tree") {
+    return [
+      "kill_tree",
+      fact.resultStatus,
+      fact.message,
+      fact.errorMessage,
+    ].filter((item): item is string => item !== undefined && item.length > 0).join(" ");
+  }
+  return undefined;
 }
 
 function isNearBottom(node: HTMLDivElement): boolean {

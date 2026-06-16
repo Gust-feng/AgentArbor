@@ -25,6 +25,8 @@ import { PanelRunJobStore, resolvePanelRunMode, type PanelRunJob } from "../pane
 import {
   createPlatformProcessTerminator,
   InMemoryProcessRegistry,
+  type ProcessRegistryCleanupResult,
+  type ProcessTerminator,
 } from "../runtime-guard/index.js";
 import {
   FileSystemSkillStateStore,
@@ -58,6 +60,7 @@ export type PanelRuntime = {
   readonly runtimeDatabase?: RuntimeDatabase;
   readonly runtimePaths?: FileSystemRuntimeDatabasePaths;
   readonly processRegistry: InMemoryProcessRegistry;
+  readonly processTerminator: ProcessTerminator;
   readonly skillRoots: readonly string[];
   readonly skillStateStore?: SkillStateStore;
 };
@@ -86,6 +89,7 @@ export function createPanelRuntime(options: PanelServerOptions, hooks: PanelRunt
       contextAttachmentPicker: options.contextAttachmentPicker,
       skillRoots: resolveSkillRoots(options),
       skillStateStore: resolveSkillStateStore(options.configDirectory),
+      processTerminator: options.processTerminator,
       hooks,
       ...runtimePersistence,
     });
@@ -103,6 +107,7 @@ export function createPanelRuntime(options: PanelServerOptions, hooks: PanelRunt
     contextAttachmentPicker: options.contextAttachmentPicker,
     skillRoots: resolveSkillRoots(options),
     skillStateStore: resolveSkillStateStore(local.configDirectory),
+    processTerminator: options.processTerminator,
     hooks,
     ...runtimePersistence,
   });
@@ -131,6 +136,7 @@ function assemblePanelRuntime(input: {
   readonly runtimePaths?: FileSystemRuntimeDatabasePaths;
   readonly skillRoots: readonly string[];
   readonly skillStateStore?: SkillStateStore;
+  readonly processTerminator?: ProcessTerminator;
   readonly hooks: PanelRuntimeHooks;
 }): PanelRuntime {
   const runJobs = new PanelRunJobStore();
@@ -139,6 +145,7 @@ function assemblePanelRuntime(input: {
   const persistenceChains = new Map<string, Promise<void>>();
   const conversations = new PanelConversationStore();
   const processRegistry = new InMemoryProcessRegistry();
+  const processTerminator = input.processTerminator ?? createPlatformProcessTerminator();
   const capabilityCenter = new CapabilityCenter({
     configCenter: input.configCenter,
     skillRoots: input.skillRoots,
@@ -163,6 +170,7 @@ function assemblePanelRuntime(input: {
     runtimeDatabase: input.runtimeDatabase,
     runtimePaths: input.runtimePaths,
     processRegistry,
+    processTerminator,
     skillRoots: input.skillRoots,
     skillStateStore: input.skillStateStore,
   };
@@ -174,7 +182,9 @@ function assemblePanelRuntime(input: {
     persistRun: (job) => persistPanelRun(runtime as PanelRuntime, job as PanelRunJob),
     persistRunInBackground: (job) => persistPanelRunInBackground(runtime as PanelRuntime, job as PanelRunJob),
     cleanupRunResources: (runId) =>
-      runtime.processRegistry.cleanupByRun(runId, createPlatformProcessTerminator()),
+      runtime.processRegistry.cleanupByRun(runId, runtime.processTerminator),
+    inspectRunResources: (runId) =>
+      runtime.processRegistry.recordRunResidueSummary(runId),
     executionAdapter: {
       execute: (execution) => input.hooks.executeRun(runtime as PanelRuntime, execution),
     },
@@ -202,6 +212,16 @@ function assemblePanelRuntime(input: {
     },
   });
   return runtime as PanelRuntime;
+}
+
+export async function cleanupPanelRuntimeOwnedBackgroundProcesses(
+  runtime: PanelRuntime
+): Promise<ProcessRegistryCleanupResult | undefined> {
+  try {
+    return await runtime.processRegistry.cleanupOwnedBackgroundProcesses(runtime.processTerminator);
+  } catch {
+    return undefined;
+  }
 }
 
 async function preparePanelBasicRunStart(

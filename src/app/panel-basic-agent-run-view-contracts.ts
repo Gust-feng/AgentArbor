@@ -6,6 +6,7 @@ import type {
 } from "../domain/basic-agent/index.js";
 import type { RunAgentDefinitionRef, RunCapabilityResolution } from "../domain/config/index.js";
 import type { PanelRunCanvasReadModel } from "./panel-canvas-read-model.js";
+import type { PanelRuntimeSummaryReadModel } from "./panel-runtime-summary.js";
 import type { PanelRunStreamEvent } from "./panel-run-stream-contracts.js";
 
 export type PanelBasicAgentReplayCursor = {
@@ -29,6 +30,7 @@ export type PanelBasicAgentRunDetail<TStreamEvent, TTranscriptNode, TCanvas> = {
     readonly transcriptNodes?: readonly TTranscriptNode[];
   };
   readonly canvas?: TCanvas;
+  readonly runtimeSummary?: PanelRuntimeSummaryReadModel;
   readonly restoredResult?: {
     readonly title: string;
     readonly summary: string;

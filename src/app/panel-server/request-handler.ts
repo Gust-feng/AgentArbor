@@ -19,7 +19,13 @@ import type { PanelModelCatalogFetch, PanelProviderFetch, PanelServerOptions, St
 import { asRecord } from "./request-parsers.js";
 import { waitForPanelPersistenceIdle as waitForPanelPersistenceChainsIdle } from "./persistence.js";
 import { syncPanelRunStreamEventsForJob } from "./run-stream-sync.js";
-import { createPanelRuntime, isPanelRuntime, type PanelRuntime, type PanelRuntimeHooks } from "./runtime.js";
+import {
+  cleanupPanelRuntimeOwnedBackgroundProcesses,
+  createPanelRuntime,
+  isPanelRuntime,
+  type PanelRuntime,
+  type PanelRuntimeHooks,
+} from "./runtime.js";
 import {
   executeBasicPanelRun,
   failPanelRunJob,
@@ -193,9 +199,12 @@ function listen(server: Server, port: number, host: string): Promise<void> {
   });
 }
 
-async function closePanelServer(server: Server, runtime: PanelRuntime): Promise<void> {
+export async function closePanelServer(server: Server, runtime: PanelRuntime): Promise<void> {
   await close(server);
+  abortPanelRuntimeActiveRuns(runtime);
+  await cleanupPanelRuntimeOwnedBackgroundProcesses(runtime);
   await waitForPanelRuntimeIdle(runtime);
+  await cleanupPanelRuntimeOwnedBackgroundProcesses(runtime);
   await waitForPanelPersistenceIdle(runtime);
 }
 
@@ -207,6 +216,12 @@ async function waitForPanelRuntimeIdle(runtime: PanelRuntime): Promise<void> {
 
 async function waitForPanelPersistenceIdle(runtime: PanelRuntime): Promise<void> {
   await waitForPanelPersistenceChainsIdle(runtime.persistenceChains);
+}
+
+function abortPanelRuntimeActiveRuns(runtime: PanelRuntime): void {
+  for (const controller of runtime.abortControllers.values()) {
+    controller.abort();
+  }
 }
 
 function close(server: Server): Promise<void> {

@@ -25,6 +25,7 @@ import {
   type PanelRunMode,
 } from "../panel-run-jobs.js";
 import type { PanelRunSummaryPayload } from "../panel-run-summary.js";
+import { summarizePanelRuntimeVisibility, type PanelRuntimeSummaryReadModel, type PanelRuntimeSummaryRegistry } from "../panel-runtime-summary.js";
 import {
   persistentPanelRunStreamEvents,
   syncPanelRunStreamEventsForJob,
@@ -33,6 +34,7 @@ import {
 
 export type PanelRunJobResponseRuntime = PanelRunStreamSyncRuntime & {
   readonly conversations: Pick<PanelConversationStore, "getReadModel">;
+  readonly processRegistry?: PanelRuntimeSummaryRegistry;
 };
 
 export type PanelRunJobResponse = {
@@ -55,6 +57,7 @@ export type PanelRunJobResponse = {
   readonly summary?: PanelRunSummaryPayload;
   readonly observation?: PanelObservationReadModel;
   readonly canvas?: PanelRunCanvasReadModel;
+  readonly runtimeSummary?: PanelRuntimeSummaryReadModel;
   readonly error?: {
     readonly code: string;
     readonly message: string;
@@ -138,6 +141,10 @@ export function createPanelRunJobResponse(
     summary: responseSummary,
     observation,
     canvas: statusPayload?.canvas,
+    runtimeSummary: summarizePanelRuntimeVisibility({
+      runId: job.runId,
+      processRegistry: runtime.processRegistry,
+    }),
     error: job.failed?.error ?? job.cancelled?.reason ?? job.blocked?.reason,
     conversation:
       job.conversationId === undefined

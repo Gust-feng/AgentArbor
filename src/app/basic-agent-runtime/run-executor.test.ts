@@ -1168,6 +1168,42 @@ test("BasicAgentRunExecutor keeps frozen run facts on cancellation payloads", as
   assert.deepEqual(job?.cancelled?.informationAccess.sourcePreference, job?.informationAccess.sourcePreference);
 });
 
+test("BasicAgentRunExecutor inspects resources after cancelled cleanup", async () => {
+  const runJobs = new InMemoryBasicAgentRunJobStore();
+  const steps: string[] = [];
+  const executor = new BasicAgentRunExecutor(executorConfig({
+    runJobs,
+    cleanupRunResources: (runId, context) => {
+      steps.push(`cleanup:${runJobs.get(runId)?.status}:${context?.terminalStatus}`);
+    },
+    inspectRunResources: (runId, context) => {
+      steps.push(`inspect:${runJobs.get(runId)?.status}:${context.terminalStatus}`);
+    },
+    persistRun: async (job) => {
+      steps.push(`persist:${job.status}`);
+    },
+    onRunFinished: (job) => {
+      steps.push(`finished:${job.status}`);
+    },
+  }));
+
+  const run = await executor.start({
+    runKind: "desktop",
+    runMode: "agent",
+    goal: "cancel with cleanup then inspection",
+    aiMode: "fake",
+    startImmediately: false,
+  });
+  await executor.cancel(run.runId);
+
+  assert.deepEqual(steps.slice(-4), [
+    "cleanup:cancelled:cancelled",
+    "inspect:cancelled:cancelled",
+    "finished:cancelled",
+    "persist:cancelled",
+  ]);
+});
+
 test("BasicAgentRunExecutor preserves cancellation when cleanup fails", async () => {
   const runJobs = new InMemoryBasicAgentRunJobStore();
   let cleanupCalls = 0;

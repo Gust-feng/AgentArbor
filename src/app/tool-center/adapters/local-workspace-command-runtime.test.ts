@@ -333,7 +333,7 @@ test("shell_command makes background waitForPort timeout visible in summary and 
   }
 });
 
-test("shell_command records pre-existing external port occupant facts on duplicate port start", async () => {
+test("shell_command returns pre-start occupied port facts without starting a duplicate server", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-command-runtime-"));
   const server = createNetServer();
   try {
@@ -349,12 +349,14 @@ test("shell_command records pre-existing external port occupant facts on duplica
       };
     };
     const shellCommand = createLocalShellCommandTool(root, { processRegistry: registry, portOccupantProbe });
+    const markerPath = path.join(root, "duplicate-started.txt");
     const output = await shellCommand.execute(
       {
         command: process.execPath,
         args: [
           "-e",
           [
+            `require('node:fs').writeFileSync(${JSON.stringify(markerPath)}, 'started');`,
             "const net=require('node:net');",
             "const server=net.createServer();",
             "server.on('error', () => process.exit(31));",
@@ -370,27 +372,104 @@ test("shell_command records pre-existing external port occupant facts on duplica
       processContext
     );
     const result = asRecord(asRecord(output).result);
+    const occupancy = asRecord(result.preStartPortOccupancy);
 
+    assert.equal(result.notStarted, true);
     assert.equal(result.background, undefined);
-    assert.equal(result.exitCode, 31);
+    assert.equal(result.exitCode, null);
     assert.equal(result.waitForPort, port);
     assert.equal(result.portReady, false);
+    assert.equal(result.pid, undefined);
+    assert.equal(result.logRef, undefined);
     assert.equal("processId" in result, false);
-    assert.equal(registry.registered.length, 1);
-    assert.equal(registry.registered[0]?.kind, "background");
-    assert.equal(registry.registered[0]?.status, "exited");
-    assert.equal(registry.portFacts.length, 1);
-    assert.equal(registry.portFacts[0]?.status, "ready");
-    assert.equal(registry.portFacts[0]?.ready, true);
-    assert.equal(registry.portFacts[0]?.port, port);
-    assert.equal(registry.portFacts[0]?.host, "127.0.0.1");
-    assert.deepEqual(registry.portFacts[0]?.externalOccupant, {
-      pid: 54321,
-      observedBy: "platform_probe",
-      ownedByUs: false,
-    });
+    assert.equal(registry.registered.length, 0);
+    assert.equal(registry.portFacts.length, 0);
+    assert.equal(occupancy.kind, "pre_start_port_occupancy");
+    assert.equal(occupancy.port, port);
+    assert.equal(occupancy.host, "127.0.0.1");
+    assert.equal(occupancy.occupied, true);
+    assert.equal(occupancy.pid, 54321);
+    assert.equal(occupancy.pidKnown, true);
+    assert.equal(occupancy.owner, "unknown");
+    assert.equal(occupancy.ownerUnknown, true);
+    assert.equal(occupancy.ownedByUs, undefined);
+    assert.equal(occupancy.source, "platform_probe");
+    assert.equal(typeof occupancy.checkedAt, "string");
     assert.deepEqual(occupantProbeCalls, [port]);
     assert.equal(server.listening, true);
+    await assert.rejects(() => readFile(markerPath, "utf8"));
+  } finally {
+    await closeServer(server);
+    await removeTempTree(root);
+  }
+});
+
+test("shell_command marks pre-start occupied ports as owned when registry has the active process", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "agentarbor-command-runtime-"));
+  const server = createNetServer();
+  try {
+    const port = await listenOnUnusedLocalPort(server);
+    const registry = createRecordingProcessRegistry();
+    registry.register({
+      processId: "existing-dev-server",
+      runId: "previous-run",
+      toolCallId: "previous-tool-call",
+      pid: 43210,
+      kind: "background",
+      owned: true,
+      commandLine: "pnpm dev",
+      cwd: root,
+      startedAt: "2026-06-15T00:00:00.000Z",
+      status: "running",
+      ports: [{
+        port,
+        host: "127.0.0.1",
+        requestedAt: "2026-06-15T00:00:00.000Z",
+        checkedAt: "2026-06-15T00:00:00.000Z",
+        status: "ready",
+        ready: true,
+      }],
+    });
+    registry.registered.length = 0;
+    const occupantProbeCalls: number[] = [];
+    const portOccupantProbe: PortOccupantProbe = (input) => {
+      occupantProbeCalls.push(input.port);
+      return {
+        pid: 43210,
+        observedBy: "platform_probe",
+      };
+    };
+    const shellCommand = createLocalShellCommandTool(root, { processRegistry: registry, portOccupantProbe });
+    const markerPath = path.join(root, "owned-started.txt");
+    const output = await shellCommand.execute(
+      {
+        command: process.execPath,
+        args: ["-e", `require('node:fs').writeFileSync(${JSON.stringify(markerPath)}, 'started');`],
+        background: true,
+        backgroundWaitMs: 50,
+        waitForPort: port,
+        waitForPortTimeoutMs: 1_000,
+      },
+      processContext
+    );
+    const result = asRecord(asRecord(output).result);
+    const occupancy = asRecord(result.preStartPortOccupancy);
+
+    assert.equal(result.notStarted, true);
+    assert.equal(result.exitCode, null);
+    assert.equal(result.waitForPort, port);
+    assert.equal(result.portReady, false);
+    assert.equal(registry.registered.length, 0);
+    assert.equal(occupancy.owner, "agentarbor");
+    assert.equal(occupancy.ownedByUs, true);
+    assert.equal(occupancy.ownerUnknown, undefined);
+    assert.equal(occupancy.pid, 43210);
+    assert.equal(occupancy.pidKnown, true);
+    assert.equal(occupancy.source, "platform_probe");
+    assert.equal(occupancy.ownershipSource, "process_registry");
+    assert.equal(occupancy.registryProcessId, "existing-dev-server");
+    assert.deepEqual(occupantProbeCalls, [port]);
+    await assert.rejects(() => readFile(markerPath, "utf8"));
   } finally {
     await closeServer(server);
     await removeTempTree(root);

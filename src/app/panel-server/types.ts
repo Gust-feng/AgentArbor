@@ -1,6 +1,7 @@
 import type { RuntimeDatabase } from "../../domain/runtime-database/index.js";
 import type { AgentDefinition } from "../agent-prompts/contracts.js";
 import type { ConfigCenter } from "../config-center.js";
+import type { ProcessTerminator } from "../runtime-guard/index.js";
 
 export type PanelServerOptions = {
   readonly host?: string;
@@ -15,6 +16,7 @@ export type PanelServerOptions = {
   readonly skillRoots?: readonly string[];
   readonly desktopAgentDefinition?: AgentDefinition;
   readonly agentDefinitions?: readonly AgentDefinition[];
+  readonly processTerminator?: ProcessTerminator;
 };
 
 export type PanelContextAttachmentSelection = {

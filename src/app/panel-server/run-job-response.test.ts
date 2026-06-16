@@ -7,6 +7,7 @@ import type {
 } from "../../domain/config/index.js";
 import type { PanelRunJob } from "../panel-run-jobs.js";
 import type { PanelRunStreamEvent } from "../panel-run-stream-contracts.js";
+import { InMemoryProcessRegistry } from "../runtime-guard/index.js";
 import { createPanelRunJobResponse } from "./run-job-response.js";
 
 test("panel run job response derives events, transcript nodes, and steps from synced stream events", () => {
@@ -160,6 +161,45 @@ test("panel run job response preserves failed configuration summaries", () => {
   assert.equal(response.status, "failed");
   assert.equal(response.summary?.ai.status, "configuration_failed");
   assert.equal(response.summary?.ai.eventCounts.requested, 0);
+});
+
+test("panel run job response exposes runtime visibility summary from process registry facts", () => {
+  const registry = new InMemoryProcessRegistry({ now: () => "2026-06-16T00:00:00.000Z" });
+  registry.register({
+    processId: "process-response-dev-server",
+    runId: "run-response",
+    toolCallId: "tool-call-response-shell",
+    pid: 6180,
+    kind: "background",
+    owned: true,
+    commandLine: "pnpm dev -- --port 6180",
+    cwd: "Z:\\AgentArbor",
+    startedAt: "2026-06-16T00:00:00.000Z",
+    status: "running",
+    logRef: "command-log://run-response/tool-call-response-shell",
+    logPath: "C:\\Temp\\agentarbor-command-logs\\response-dev.log",
+    ports: [
+      {
+        port: 6180,
+        host: "localhost",
+        requestedAt: "2026-06-16T00:00:01.000Z",
+        status: "ready",
+        ready: true,
+      },
+    ],
+  });
+
+  const response = createPanelRunJobResponse({
+    ...emptyRuntime(),
+    processRegistry: registry,
+  }, panelRunJob());
+
+  assert.equal(response.runtimeSummary?.kind, "panel_runtime_visibility_summary");
+  assert.equal(response.runtimeSummary?.totalCount, 1);
+  assert.equal(response.runtimeSummary?.processes[0]?.pid, 6180);
+  assert.equal(response.runtimeSummary?.processes[0]?.ports[0]?.port, 6180);
+  assert.equal(response.runtimeSummary?.processes[0]?.logRef, "command-log://run-response/tool-call-response-shell");
+  assert.equal(JSON.stringify(response.runtimeSummary).includes("should"), false);
 });
 
 function emptyRuntime(): Parameters<typeof createPanelRunJobResponse>[0] {

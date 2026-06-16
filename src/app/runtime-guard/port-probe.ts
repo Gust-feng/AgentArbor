@@ -4,11 +4,29 @@ export type LocalPortHost = "127.0.0.1" | "localhost";
 export type LocalPortProbeStatus = "ready" | "not_ready" | "timeout" | "cancelled" | "error";
 export type LocalPortWaitStatus = Exclude<LocalPortProbeStatus, "not_ready">;
 export type PortOccupantProbeSource = "netstat" | "lsof" | "ss" | "platform_probe";
+export type LocalPortOccupancySource = PortOccupantProbeSource | "connect_probe";
+export type LocalPortOccupancyOwner = "agentarbor" | "unknown";
 
 export type ExternalPortOccupantFact = {
   readonly pid?: number;
   readonly observedBy: PortOccupantProbeSource;
   readonly ownedByUs: false;
+};
+
+export type LocalPortOccupancyFact = {
+  readonly kind: "pre_start_port_occupancy";
+  readonly port: number;
+  readonly host: LocalPortHost;
+  readonly occupied: true;
+  readonly pid?: number;
+  readonly pidKnown: boolean;
+  readonly owner: LocalPortOccupancyOwner;
+  readonly ownedByUs?: true;
+  readonly ownerUnknown?: true;
+  readonly source: LocalPortOccupancySource;
+  readonly ownershipSource?: "process_registry";
+  readonly registryProcessId?: string;
+  readonly checkedAt: string;
 };
 
 export type PortOccupantProbeInput = {

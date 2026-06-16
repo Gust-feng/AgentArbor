@@ -11,6 +11,7 @@ import type { BasicAgentRun, RunEvent } from "../../domain/basic-agent/index.js"
 import type { RuntimeRunSnapshot } from "../../domain/runtime-database/index.js";
 import type { PanelRunJob } from "../panel-run-jobs.js";
 import type { PanelRunStreamEvent } from "../panel-run-stream-contracts.js";
+import { InMemoryProcessRegistry } from "../runtime-guard/index.js";
 import { createBasicAgentRunViewReadModel } from "./basic-agent-run-view.js";
 
 test("basic agent run view for live runs exposes the job birth agent definition ref consistently", async () => {
@@ -350,6 +351,58 @@ test("basic agent live work view builds transcript nodes from synced backend str
   assert.equal(view?.workView.pendingConfirmation?.actionSummary.includes("会写入工作区文件"), false);
   assert.equal(view?.workView.transcriptNodes.some((node) => node.kind === "confirmation"), true);
   assert.equal(view?.detail.transcript?.events?.some((event) => event.type === "confirmation.needed"), true);
+});
+
+test("basic agent run view exposes live runtime guard facts as a read-only detail summary", async () => {
+  const runAgentDefinitionRef = agentRef("run-agent", "Run Agent");
+  const run = basicRun(runAgentDefinitionRef);
+  const registry = new InMemoryProcessRegistry({ now: () => "2026-06-16T00:00:00.000Z" });
+  registry.register({
+    processId: "process-live-dev-server",
+    runId: run.runId,
+    toolCallId: "tool-call-shell",
+    pid: 5173,
+    kind: "background",
+    owned: true,
+    commandLine: "pnpm dev -- --port 5173",
+    cwd: "Z:\\AgentArbor",
+    startedAt: "2026-06-16T00:00:00.000Z",
+    status: "running",
+    logRef: "command-log://run-live/tool-call-shell",
+    logPath: "C:\\Temp\\agentarbor-command-logs\\dev.log",
+    ports: [
+      {
+        port: 5173,
+        host: "127.0.0.1",
+        requestedAt: "2026-06-16T00:00:01.000Z",
+        status: "ready",
+        ready: true,
+      },
+    ],
+  });
+  const runtime = {
+    runExecutor: {
+      get: () => run,
+      replayEvents: () => basicReplay(run.runId),
+      syncRunEvents: () => [],
+    },
+    runJobs: {
+      get: () => basicJob(runAgentDefinitionRef),
+      syncStreamEvents: (_runId: string, events: readonly never[]) => events,
+    },
+    processRegistry: registry,
+  } satisfies Parameters<typeof createBasicAgentRunViewReadModel>[0];
+
+  const view = await createBasicAgentRunViewReadModel(runtime, run.runId, 0);
+
+  assert.equal(view?.detail.runtimeSummary?.kind, "panel_runtime_visibility_summary");
+  assert.equal(view?.detail.runtimeSummary?.totalCount, 1);
+  assert.equal(view?.detail.runtimeSummary?.processes[0]?.status, "running");
+  assert.equal(view?.detail.runtimeSummary?.processes[0]?.pid, 5173);
+  assert.equal(view?.detail.runtimeSummary?.processes[0]?.ports[0]?.ready, true);
+  assert.equal(view?.detail.runtimeSummary?.processes[0]?.logRef, "command-log://run-live/tool-call-shell");
+  assert.equal(view?.detail.runtimeSummary?.processes[0]?.logPath, "C:\\Temp\\agentarbor-command-logs\\dev.log");
+  assert.equal(view?.workView.answer?.content.includes("command-log://"), undefined);
 });
 
 test("basic agent run view for persisted runs restores from the run snapshot without current config readers", async () => {

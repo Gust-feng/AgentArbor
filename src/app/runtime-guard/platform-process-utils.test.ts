@@ -232,6 +232,20 @@ test("probePlatformPortOccupant prefers Linux ss and parses pid facts", async ()
   });
 });
 
+test("probePlatformPortOccupant keeps Linux ss occupancy facts when pid is unavailable", async () => {
+  const result = await probePlatformPortOccupant(portInput(5173), {
+    platform: "linux",
+    commandRunner(request) {
+      assert.equal(request.file, "ss");
+      return commandResult("LISTEN 0 511 127.0.0.1:5173 0.0.0.0:*");
+    },
+  });
+
+  assert.deepEqual(result, {
+    observedBy: "ss",
+  });
+});
+
 test("probePlatformPortOccupant falls back to lsof when Linux ss is unavailable", async () => {
   const files: string[] = [];
 

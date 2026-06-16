@@ -11,6 +11,7 @@ import {
   processPortFactFromLocalPortFact,
   waitForLocalPort,
   type LocalPortHost,
+  type LocalPortOccupancyFact,
   type LocalPortProbeFact,
   type PortOccupantProbe,
   type ProcessPortFact,
@@ -52,8 +53,9 @@ const COMMAND_LOG_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,180}$/u;
 type CommandExecutionResult = {
   readonly stdout: string;
   readonly stderr: string;
-  readonly exitCode: number;
+  readonly exitCode: number | null;
   readonly cwd: string;
+  readonly notStarted?: boolean;
   readonly timedOut?: boolean;
   readonly cancelled?: boolean;
   readonly signal?: string;
@@ -65,6 +67,7 @@ type CommandExecutionResult = {
   readonly durationMs?: number;
   readonly waitForPort?: number;
   readonly portReady?: boolean;
+  readonly preStartPortOccupancy?: LocalPortOccupancyFact;
   readonly portWaitCancelled?: boolean;
   readonly truncated?: boolean;
   readonly stdoutChars?: number;
@@ -119,6 +122,11 @@ type CommandProcessFacts = {
   readonly registry: LocalCommandProcessRegistry;
   readonly runId?: string;
   readonly toolCallId?: string;
+};
+
+type RegistryPortOwner = {
+  readonly processId: string;
+  readonly pid?: number;
 };
 
 export function createDefaultCommandShellConfig(
@@ -227,9 +235,26 @@ export function createLocalShellCommandTool(
       const preStartPortFact = await probePreStartWaitPort({
         waitForPort,
         abortSignal: context.abortSignal,
-        portOccupantProbe: externalPortOccupantProbe,
+        portOccupantProbe,
       });
+      const preStartPortOccupancy = portOccupancyFromPreStartFact(preStartPortFact, options.processRegistry);
       throwIfAborted(context.abortSignal);
+      if (background && preStartPortOccupancy !== undefined) {
+        return commandToolOutput({
+          action: "shell_command",
+          command: normalized.command,
+          commandLine: normalized.commandLine,
+          legacyArgs: normalized.legacyArgs,
+          shell: commandShell,
+          result: commandNotStartedForOccupiedPort({
+            cwd: cwd.relativePath,
+            waitForPort,
+            preStartPortOccupancy,
+            startedAt,
+          }),
+          truncated: false,
+        });
+      }
       const rawOutcome = background
         ? normalized.legacyProgram === undefined || !executeDirectly
           ? await runBackgroundShellCommand(commandShell, normalized.commandLine, cwd.absolutePath, cwd.relativePath, backgroundWaitMs, processFacts)
@@ -395,6 +420,7 @@ function shellCommandDefinition(commandShell: SanitizedCommandShellConfig): Tool
         "result.background, result.pid, result.logRef, result.logPath, and result.stopCommand describe detached background commands; these small metadata fields are not shortened by stdout/stderr preview budgeting.",
         "Use result.logRef as the controlled command-log entry point. result.logPath is retained only as a diagnostic filesystem detail.",
         "result.durationMs records total observed tool execution time; result.portReady records whether waitForPort became reachable.",
+        "If background=true and waitForPort is already occupied before start, result.notStarted is true, result.exitCode is null, and result.preStartPortOccupancy records the port, pid when known, owner status, and observation source.",
         "result.cancelled records foreground command cancellation; result.portWaitCancelled records cancellation while waiting for a background port.",
         "If command and args are provided, execution bypasses shell parsing and uses direct argv execution.",
         "A non-zero exitCode is command feedback; stdout/stderr remain command output previews, not interpreted recommendations.",
@@ -506,7 +532,8 @@ function commandToolOutput(input: {
       readonly invocation: readonly string[];
     };
     readonly cwd: string;
-    readonly exitCode: number;
+    readonly exitCode: number | null;
+    readonly notStarted?: boolean;
     readonly stdout: string;
     readonly stderr: string;
     readonly stdoutTruncated: boolean;
@@ -526,6 +553,7 @@ function commandToolOutput(input: {
     readonly durationMs?: number;
     readonly waitForPort?: number;
     readonly portReady?: boolean;
+    readonly preStartPortOccupancy?: LocalPortOccupancyFact;
     readonly portWaitCancelled?: boolean;
   };
   readonly truncated: boolean;
@@ -543,7 +571,11 @@ function commandToolOutput(input: {
     maxChars: MAX_COMMAND_STDERR_CHARS,
   });
   const prefix = input.action === "shell_command" ? "workspace:shell" : "workspace:command";
-  const statusText = input.result.background === true
+  const statusText = input.result.notStarted === true
+    ? input.result.preStartPortOccupancy !== undefined
+      ? `not started; port ${input.result.preStartPortOccupancy.port} occupied`
+      : "not started"
+    : input.result.background === true
     ? input.result.waitForPort !== undefined && input.result.portReady !== true
       ? `started background pid ${input.result.pid ?? "unknown"}; port ${input.result.waitForPort} not ready`
       : input.result.waitForPort !== undefined
@@ -572,6 +604,7 @@ function commandToolOutput(input: {
       },
       cwd: input.result.cwd,
       exitCode: input.result.exitCode,
+      notStarted: input.result.notStarted === true ? true : undefined,
       stdout: stdout.text,
       stderr: stderr.text,
       stdoutTruncated: stdout.truncated,
@@ -591,6 +624,7 @@ function commandToolOutput(input: {
       durationMs: input.result.durationMs,
       waitForPort: input.result.waitForPort,
       portReady: input.result.portReady,
+      preStartPortOccupancy: input.result.preStartPortOccupancy,
       portWaitCancelled: input.result.portWaitCancelled === true ? true : undefined,
     },
     truncated: input.truncated || input.result.truncated === true || stdout.truncated || stderr.truncated,
@@ -821,29 +855,38 @@ function externalOnlyPortOccupantProbe(
     if (observed === undefined) {
       return undefined;
     }
-    if (registryHasActivePortOwner(registry, input.port, input.host, observed.pid)) {
+    if (findActiveRegistryPortOwner(registry, input.port, input.host, observed.pid) !== undefined) {
       return undefined;
     }
     return observed;
   };
 }
 
-function registryHasActivePortOwner(
+function findActiveRegistryPortOwner(
   registry: LocalCommandProcessRegistry | undefined,
   port: number,
   host: LocalPortHost,
   observedPid: number | undefined
-): boolean {
+): RegistryPortOwner | undefined {
   const records = registry?.listAll?.() ?? [];
-  return records.some((record) => {
+  for (const record of records) {
     if (record.owned !== true || !isActiveProcessStatus(record.status)) {
-      return false;
+      continue;
     }
     if (observedPid !== undefined && record.pid === observedPid) {
-      return true;
+      return {
+        processId: record.processId,
+        pid: record.pid,
+      };
     }
-    return record.ports.some((fact) => fact.port === port && fact.host === host && fact.ready === true);
-  });
+    if (record.ports.some((fact) => fact.port === port && fact.host === host && fact.ready === true)) {
+      return {
+        processId: record.processId,
+        pid: record.pid,
+      };
+    }
+  }
+  return undefined;
 }
 
 function isActiveProcessStatus(status: ProcessRecord["status"]): boolean {
@@ -866,6 +909,71 @@ async function probePreStartWaitPort(input: {
     portOccupantProbe: input.portOccupantProbe,
   });
   return fact.ready === true ? fact : undefined;
+}
+
+function portOccupancyFromPreStartFact(
+  fact: LocalPortProbeFact | undefined,
+  registry: LocalCommandProcessRegistry | undefined
+): LocalPortOccupancyFact | undefined {
+  if (fact === undefined || fact.ready !== true) {
+    return undefined;
+  }
+  const observedPid = fact.externalOccupant?.pid;
+  const registryOwner = findActiveRegistryPortOwner(registry, fact.port, fact.host, observedPid);
+  const pid = observedPid ?? registryOwner?.pid;
+  const source = fact.externalOccupant?.observedBy ?? "connect_probe";
+  if (registryOwner !== undefined) {
+    return {
+      kind: "pre_start_port_occupancy",
+      port: fact.port,
+      host: fact.host,
+      occupied: true,
+      ...(pid === undefined ? {} : { pid }),
+      pidKnown: pid !== undefined,
+      owner: "agentarbor",
+      ownedByUs: true,
+      source,
+      ownershipSource: "process_registry",
+      registryProcessId: registryOwner.processId,
+      checkedAt: fact.checkedAt,
+    };
+  }
+  return {
+    kind: "pre_start_port_occupancy",
+    port: fact.port,
+    host: fact.host,
+    occupied: true,
+    ...(pid === undefined ? {} : { pid }),
+    pidKnown: pid !== undefined,
+    owner: "unknown",
+    ownerUnknown: true,
+    source,
+    checkedAt: fact.checkedAt,
+  };
+}
+
+function commandNotStartedForOccupiedPort(input: {
+  readonly cwd: string;
+  readonly waitForPort: number | undefined;
+  readonly preStartPortOccupancy: LocalPortOccupancyFact;
+  readonly startedAt: number;
+}): CommandExecutionResult {
+  return {
+    stdout: "",
+    stderr: "",
+    exitCode: null,
+    cwd: input.cwd,
+    notStarted: true,
+    waitForPort: input.waitForPort,
+    portReady: false,
+    preStartPortOccupancy: input.preStartPortOccupancy,
+    durationMs: Date.now() - input.startedAt,
+    stdoutChars: 0,
+    stderrChars: 0,
+    stdoutOmittedChars: 0,
+    stderrOmittedChars: 0,
+    truncated: false,
+  };
 }
 
 async function runShellCommand(
@@ -1035,7 +1143,7 @@ async function runSpawnedCommand(
       }
       closeLog();
       markCommandProcessExited(processFacts, processId, {
-        exitCode: value.exitCode,
+        exitCode: typeof value.exitCode === "number" ? value.exitCode : undefined,
         signal: value.signal,
       });
       if (value.truncated === true) {
@@ -1167,11 +1275,13 @@ async function enrichCommandResult(input: {
       abortSignal: input.abortSignal,
       portOccupantProbe: input.portOccupantProbe,
     });
+    const preStartPortOccupancy = portOccupancyFromPreStartFact(portFact, input.processRegistry);
     appendCommandPortFact(input.processRegistry, input.processId, processPortFactFromLocalPortFact(portFact));
     return {
       ...input.result,
       waitForPort: input.waitForPort,
       portReady: false,
+      preStartPortOccupancy,
       durationMs: Date.now() - input.startedAt,
       stderr: appendCommandDiagnostic(
         input.result.stderr,

@@ -8,6 +8,7 @@ import type {
   PanelBasicAgentRunViewReadModel,
 } from "../panel-basic-agent-run-view-contracts.js";
 import { panelRunPayloadForStatus, type PanelRunJob } from "../panel-run-jobs.js";
+import { summarizePanelRuntimeVisibility, type PanelRuntimeSummaryRegistry } from "../panel-runtime-summary.js";
 import { createPanelTranscriptNodes } from "../panel-run-read-model.js";
 import { restoredRunResultProjection } from "../restored-run-projection.js";
 import { createLiveBasicAgentWorkViewReadModel, createPersistedBasicAgentWorkViewReadModel } from "./basic-agent-read-models.js";
@@ -19,6 +20,7 @@ export type BasicAgentRunViewRuntime = {
   readonly runExecutor: Pick<PanelRuntime["runExecutor"], "get" | "replayEvents" | "syncRunEvents">;
   readonly runJobs: Pick<PanelRuntime["runJobs"], "get" | "syncStreamEvents">;
   readonly runtimeDatabase?: Pick<NonNullable<PanelRuntime["runtimeDatabase"]>, "getRun">;
+  readonly processRegistry?: PanelRuntimeSummaryRegistry;
 };
 
 export async function createBasicAgentRunViewReadModel(
@@ -38,7 +40,7 @@ export async function createBasicAgentRunViewReadModel(
 }
 
 async function createLiveBasicAgentRunViewReadModel(
-  runtime: Pick<BasicAgentRunViewRuntime, "runExecutor" | "runJobs">,
+  runtime: Pick<BasicAgentRunViewRuntime, "runExecutor" | "runJobs" | "processRegistry">,
   job: PanelRunJob,
   afterSequence: number
 ): Promise<PanelBasicAgentRunViewReadModel | undefined> {
@@ -77,6 +79,10 @@ async function createLiveBasicAgentRunViewReadModel(
         transcriptNodes: workView.transcriptNodes,
       },
       canvas: statusPayload?.canvas,
+      runtimeSummary: summarizePanelRuntimeVisibility({
+        runId: job.runId,
+        processRegistry: runtime.processRegistry,
+      }),
     },
     replay: {
       events: replay.events,

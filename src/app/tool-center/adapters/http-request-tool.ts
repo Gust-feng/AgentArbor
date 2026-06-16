@@ -53,11 +53,15 @@ export type HttpRequestErrorFacts = {
   readonly method: HttpRequestMethod;
   readonly durationMs: number;
   readonly code?: string;
+  readonly statusCode?: number;
+  readonly statusText?: string;
   readonly errno?: string | number;
   readonly syscall?: string;
   readonly address?: string;
   readonly port?: number;
   readonly hostname?: string;
+  readonly timedOut?: boolean;
+  readonly timeoutMs?: number;
 };
 
 export class HttpRequestError extends Error {
@@ -72,11 +76,15 @@ export class HttpRequestError extends Error {
 
 type MutableNetworkFacts = {
   code?: string;
+  statusCode?: number;
+  statusText?: string;
   errno?: string | number;
   syscall?: string;
   address?: string;
   port?: number;
   hostname?: string;
+  timedOut?: boolean;
+  timeoutMs?: number;
 };
 
 const DEFAULT_TIMEOUT_MS = 15_000;
@@ -220,7 +228,12 @@ async function executeHttpRequest(
     };
   } catch (error) {
     if (controller.signal.aborted && controller.signal.reason === timeoutReason) {
-      throw new Error(`http_request timed out after ${timeoutMs}ms.`);
+      throw normalizeHttpRequestFailure({
+        error: timeoutReason,
+        url,
+        method,
+        durationMs: Date.now() - startedAt,
+      });
     }
     if (context.abortSignal?.aborted === true) {
       throw new Error("http_request was cancelled.");
@@ -418,8 +431,20 @@ function attachAbortForwarder(parent: AbortSignal | undefined, controller: Abort
   return () => parent.removeEventListener("abort", abort);
 }
 
+export function createHttpTimeoutCause(label: string, timeoutMs: number): Error & {
+  readonly code: "ETIMEDOUT";
+  readonly timedOut: true;
+  readonly timeoutMs: number;
+} {
+  return Object.assign(new Error(`${label} timed out after ${timeoutMs}ms.`), {
+    code: "ETIMEDOUT" as const,
+    timedOut: true as const,
+    timeoutMs,
+  });
+}
+
 function timeoutError(timeoutMs: number): Error {
-  return new Error(`http_request timed out after ${timeoutMs}ms.`);
+  return createHttpTimeoutCause("http_request", timeoutMs);
 }
 
 export function normalizeHttpRequestFailure(input: {
@@ -429,7 +454,7 @@ export function normalizeHttpRequestFailure(input: {
   readonly durationMs: number;
 }): HttpRequestError {
   const causeFacts = networkFailureFacts(input.error);
-  const facts = compactFacts({
+  const facts = createHttpRequestErrorFacts({
     url: input.url,
     method: input.method,
     durationMs: input.durationMs,
@@ -442,6 +467,26 @@ export function normalizeHttpRequestFailure(input: {
   );
 }
 
+export function createHttpRequestErrorFacts(facts: HttpRequestErrorFacts): HttpRequestErrorFacts {
+  return compactFacts(facts);
+}
+
+export function createHttpStatusErrorFacts(input: {
+  readonly url: string;
+  readonly method: HttpRequestMethod;
+  readonly durationMs: number;
+  readonly statusCode: number;
+  readonly statusText?: string;
+}): HttpRequestErrorFacts {
+  return createHttpRequestErrorFacts({
+    url: input.url,
+    method: input.method,
+    durationMs: input.durationMs,
+    statusCode: input.statusCode,
+    statusText: input.statusText,
+  });
+}
+
 function networkFailureFacts(error: unknown): MutableNetworkFacts {
   const facts: MutableNetworkFacts = {};
   for (const value of errorCauseChain(error)) {
@@ -450,11 +495,15 @@ function networkFailureFacts(error: unknown): MutableNetworkFacts {
       continue;
     }
     facts.code ??= stringOrUndefined(record.code);
+    facts.statusCode ??= numberOrUndefined(record.statusCode);
+    facts.statusText ??= stringOrUndefined(record.statusText);
     facts.errno ??= stringOrNumberOrUndefined(record.errno);
     facts.syscall ??= stringOrUndefined(record.syscall);
     facts.address ??= stringOrUndefined(record.address);
     facts.port ??= numberOrUndefined(record.port);
     facts.hostname ??= stringOrUndefined(record.hostname);
+    facts.timedOut ??= booleanOrUndefined(record.timedOut);
+    facts.timeoutMs ??= numberOrUndefined(record.timeoutMs);
   }
   return facts;
 }
@@ -476,11 +525,15 @@ function describeFailure(error: unknown, facts: HttpRequestErrorFacts): string {
   const message = messages.length === 0 ? undefined : messages.join("; cause=");
   const parts = [
     facts.code === undefined ? undefined : `code=${facts.code}`,
+    facts.statusCode === undefined ? undefined : `statusCode=${facts.statusCode}`,
+    facts.statusText === undefined ? undefined : `statusText=${facts.statusText}`,
     facts.errno === undefined ? undefined : `errno=${String(facts.errno)}`,
     facts.syscall === undefined ? undefined : `syscall=${facts.syscall}`,
     facts.hostname === undefined ? undefined : `hostname=${facts.hostname}`,
     facts.address === undefined ? undefined : `address=${facts.address}`,
     facts.port === undefined ? undefined : `port=${facts.port}`,
+    facts.timedOut === true ? "timedOut=true" : undefined,
+    facts.timeoutMs === undefined ? undefined : `timeoutMs=${facts.timeoutMs}`,
     `durationMs=${facts.durationMs}`,
   ].filter(isString);
   const factsText = parts.join(", ");
@@ -509,11 +562,15 @@ function compactFacts(facts: HttpRequestErrorFacts): HttpRequestErrorFacts {
     method: facts.method,
     durationMs: facts.durationMs,
     code: stringOrUndefined(facts.code),
+    statusCode: numberOrUndefined(facts.statusCode),
+    statusText: stringOrUndefined(facts.statusText),
     errno: facts.errno,
     syscall: stringOrUndefined(facts.syscall),
     address: stringOrUndefined(facts.address),
     port: numberOrUndefined(facts.port),
     hostname: stringOrUndefined(facts.hostname),
+    timedOut: facts.timedOut === true ? true : undefined,
+    timeoutMs: numberOrUndefined(facts.timeoutMs),
   };
 }
 
@@ -547,6 +604,10 @@ function stringOrNumberOrUndefined(value: unknown): string | number | undefined 
 
 function numberOrUndefined(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function booleanOrUndefined(value: unknown): boolean | undefined {
+  return value === true ? true : value === false ? false : undefined;
 }
 
 function isString(value: unknown): value is string {

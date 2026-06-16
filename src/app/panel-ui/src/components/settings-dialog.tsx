@@ -11,6 +11,7 @@ import {
 import type {
   ConfigResponse,
   ModelProviderModelCatalog,
+  ToolConfirmationPolicy,
 } from "../contracts/config";
 import type { SkillDefinition } from "../contracts/skills";
 import type { McpEnvironmentCheckResponse, McpReferenceResponse, ToolsResponse } from "../contracts/tools";
@@ -45,6 +46,8 @@ export function SettingsDialog(props: {
   readonly skills: readonly SkillDefinition[];
   readonly onSaveWorkspace: (workspaceDirectory?: string) => void;
   readonly tools?: ToolsResponse;
+  readonly toolConfirmationPolicy: ToolConfirmationPolicy;
+  readonly onToolConfirmationPolicyChange: (value: ToolConfirmationPolicy) => void;
   readonly toolForm: ToolForm;
   readonly setToolForm: (form: ToolForm) => void;
   readonly mcpServerForm: McpServerForm;
@@ -178,7 +181,14 @@ export function SettingsDialog(props: {
                 onSaveCommandShell={props.onSaveCommandShell}
               />
             )}
-            {activeGroup === "confirmation" && <ConfirmationSettings tools={props.tools} />}
+            {activeGroup === "confirmation" && (
+              <ConfirmationSettings
+                tools={props.tools}
+                toolConfirmation={props.config?.toolConfirmation}
+                toolConfirmationPolicy={props.toolConfirmationPolicy}
+                onToolConfirmationPolicyChange={props.onToolConfirmationPolicyChange}
+              />
+            )}
           </div>
         </div>
       </section>

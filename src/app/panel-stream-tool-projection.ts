@@ -189,7 +189,7 @@ function errorFactsFromToolProjection(
   if (display?.kind === "read_result" && display.errorFacts !== undefined) {
     return display.errorFacts;
   }
-  return normalizeToolErrorFacts(output.errorFacts);
+  return readErrorFactsFromOutput(output) ?? normalizeToolErrorFacts(output.errorFacts);
 }
 
 function toolRequestPreview(toolName: string, input: Readonly<Record<string, unknown>>): string | undefined {
@@ -344,8 +344,8 @@ function safeReadPreview(
   if (envelope?.agentSummary !== undefined) {
     return compactStreamDetailText(envelope.agentSummary, 900);
   }
-  const error = stringOrUndefined(output.error);
-  const facts = normalizeToolErrorFacts(output.errorFacts);
+  const error = readErrorMessageFromOutput(output);
+  const facts = readErrorFactsFromOutput(output);
   const headline = [
     stringOrUndefined(result.title),
     stringOrUndefined(result.uri) ?? stringOrUndefined(result.url) ?? stringOrUndefined(input.ref),
@@ -372,6 +372,52 @@ function readDisplayPreview(
     display.errorFacts === undefined ? undefined : `errorFacts: ${compactFactsText(display.errorFacts)}`,
     display.contentPreview,
   ].filter((item): item is string => item !== undefined && item.length > 0).join("\n"), 900);
+}
+
+function readErrorFactsFromOutput(output: Readonly<Record<string, unknown>>): ToolErrorFacts | undefined {
+  const direct = normalizeToolErrorFacts(output.errorFacts);
+  if (direct !== undefined) {
+    return direct;
+  }
+  if (stringOrUndefined(output.action) !== "read") {
+    return undefined;
+  }
+  const trace = asRecord(output.trace);
+  const sourceSteps = Array.isArray(trace.sourceSteps) ? trace.sourceSteps : [];
+  for (const value of sourceSteps) {
+    const step = asRecord(value);
+    if (stringOrUndefined(step.status) === "completed") {
+      continue;
+    }
+    const facts = normalizeToolErrorFacts(step.errorFacts);
+    if (facts !== undefined) {
+      return facts;
+    }
+  }
+  return undefined;
+}
+
+function readErrorMessageFromOutput(output: Readonly<Record<string, unknown>>): string | undefined {
+  const direct = stringOrUndefined(output.error);
+  if (direct !== undefined) {
+    return direct;
+  }
+  if (stringOrUndefined(output.action) !== "read") {
+    return undefined;
+  }
+  const trace = asRecord(output.trace);
+  const sourceSteps = Array.isArray(trace.sourceSteps) ? trace.sourceSteps : [];
+  for (const value of sourceSteps) {
+    const step = asRecord(value);
+    if (stringOrUndefined(step.status) === "completed") {
+      continue;
+    }
+    const message = stringOrUndefined(step.message);
+    if (message !== undefined) {
+      return message;
+    }
+  }
+  return undefined;
 }
 
 function safeReadFilePreview(

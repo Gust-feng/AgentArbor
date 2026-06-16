@@ -78,10 +78,11 @@ export class CapabilityCenter {
   }
 
   private async buildSnapshot(): Promise<BasicAgentCapabilitySnapshot> {
-    const [activeModel, overrides, toolStates, mcpServers, workspace, commandShell, env, skills] = await Promise.all([
+    const [activeModel, overrides, toolStates, toolConfirmation, mcpServers, workspace, commandShell, env, skills] = await Promise.all([
       this.options.configCenter.getModelProviderConfig(),
       this.options.configCenter.listModelCapabilityOverrides(),
       this.options.configCenter.listToolStates(),
+      this.options.configCenter.getToolConfirmationConfig(),
       this.options.configCenter.listMcpServers(),
       this.options.configCenter.getWorkspaceConfig(),
       this.options.configCenter.getCommandShellConfig(),
@@ -156,7 +157,8 @@ export class CapabilityCenter {
       ),
       workspace,
       commandShell,
-      securitySummary: "本轮模型、工具、技能和工作区能力快照。",
+      toolConfirmation,
+      securitySummary: `本轮模型、工具、技能和工作区能力快照。确认策略：${toolConfirmation.label}。`,
       warnings,
     };
   }

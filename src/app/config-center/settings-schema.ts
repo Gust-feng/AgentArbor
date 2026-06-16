@@ -30,6 +30,12 @@ import {
   normalizeCommandShellUpdate,
 } from "./command-shell-settings.js";
 import {
+  normalizeToolConfirmationSettings,
+  normalizeToolConfirmationUpdate,
+  parseToolConfirmationSettings,
+  toSanitizedToolConfirmationConfig,
+} from "./tool-confirmation-settings.js";
+import {
   ConfigSchemaValidationError,
   asRecord,
   normalizeRequiredConfigString,
@@ -64,6 +70,11 @@ export {
   normalizeCommandShellUpdate,
   toSanitizedCommandShellConfig,
 } from "./command-shell-settings.js";
+export {
+  normalizeToolConfirmationSettings,
+  normalizeToolConfirmationUpdate,
+  toSanitizedToolConfirmationConfig,
+} from "./tool-confirmation-settings.js";
 export { parseMcpCommandLine, sanitizeMcpArgs } from "./tool-mcp-settings.js";
 
 export const INFORMATION_TAVILY_SECRET_REF = "secret://local-dev/information-source/tavily/default/api-key";
@@ -116,6 +127,10 @@ export function parseLocalSettingsFile(raw: unknown): AgentArborLocalSettings {
     modelCatalogs: parseModelCatalogs(record.modelCatalogs, updatedAt),
     modelCapabilityOverrides: parseModelCapabilityOverrides(record.modelCapabilityOverrides, updatedAt),
     toolStates: parseToolStates(record.toolStates, updatedAt),
+    toolConfirmation: parseToolConfirmationSettings(
+      record.toolConfirmation ?? record.toolConfirmationPolicy,
+      updatedAt
+    ),
     commandShell: parseCommandShellSettings(record.commandShell, updatedAt),
     mcpServers: parseMcpServers(record.mcpServers, updatedAt),
     informationAccess:
@@ -155,6 +170,7 @@ export function createDefaultLocalSettings(now: string = new Date().toISOString(
     modelCatalogs: [],
     modelCapabilityOverrides: [],
     toolStates: [],
+    toolConfirmation: normalizeToolConfirmationSettings(undefined, now),
     commandShell: normalizeCommandShellSettings(undefined, now),
     mcpServers: [],
     informationAccess: createDefaultInformationAccessSettings(now),
@@ -197,6 +213,7 @@ export function normalizeLocalSettings(settings: AgentArborLocalSettings): Agent
     modelCatalogs,
     modelCapabilityOverrides: normalizeModelCapabilityOverrides(settings.modelCapabilityOverrides ?? [], now),
     toolStates: normalizeToolStates(settings.toolStates ?? [], now),
+    toolConfirmation: normalizeToolConfirmationSettings(settings.toolConfirmation, now),
     commandShell: normalizeCommandShellSettings(settings.commandShell, now),
     mcpServers: normalizeMcpServers(settings.mcpServers ?? [], now),
     informationAccess: normalizeInformationAccessSettings(settings.informationAccess, now),

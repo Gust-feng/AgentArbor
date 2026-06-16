@@ -112,6 +112,47 @@ test("tool stream projection surfaces read HTTP failure facts in preview and det
   assert.equal(detail.preview?.includes("errorFacts"), true);
 });
 
+test("tool stream projection extracts read HTTP failure facts from raw trace output", () => {
+  const detail = toolStreamDetail("tool.completed", {
+    toolName: "read",
+    input: { ref: "https://example.test/missing" },
+    output: {
+      action: "read",
+      ref: "https://example.test/missing",
+      status: "provider-failed",
+      trace: {
+        traceId: "research-trace-http-404",
+        action: "read",
+        ref: "https://example.test/missing",
+        requestedSources: ["page"],
+        status: "provider-failed",
+        startedAt: "2026-01-01T00:00:00.000Z",
+        completedAt: "2026-01-01T00:00:00.010Z",
+        sourceSteps: [
+          {
+            source: "page",
+            status: "provider-failed",
+            resultRefs: [],
+            message: "Page read returned HTTP 404 Not Found.",
+            errorFacts: {
+              statusCode: 404,
+              statusText: "Not Found",
+              method: "GET",
+              url: "https://example.test/missing",
+              durationMs: 10,
+            },
+          },
+        ],
+      },
+    },
+  });
+
+  assert.equal(detail.errorFacts?.statusCode, 404);
+  assert.equal(detail.errorFacts?.statusText, "Not Found");
+  assert.equal(detail.preview?.includes("HTTP 404 Not Found"), true);
+  assert.equal(detail.preview?.includes("errorFacts"), true);
+});
+
 test("tool stream projection surfaces search invalid-input messages", () => {
   const detail = toolStreamDetail("tool.completed", {
     toolName: "search",

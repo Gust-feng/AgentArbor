@@ -10,6 +10,8 @@ import type {
 } from "../../domain/research/index.js";
 import type { ReadonlySoilStore } from "../../domain/soil/index.js";
 import {
+  createHttpStatusErrorFacts,
+  createHttpTimeoutCause,
   normalizeHttpRequestFailure,
   type HttpRequestErrorFacts,
 } from "../tool-center/adapters/http-request-tool.js";
@@ -86,6 +88,9 @@ export type CommandLogReadRegistry = {
   ): Promise<CommandLogReadEntry | undefined> | CommandLogReadEntry | undefined;
 };
 
+const DEFAULT_PAGE_READ_TIMEOUT_MS = 15_000;
+const MAX_PAGE_READ_TIMEOUT_MS = 120_000;
+
 export function createWebInformationSourceAdapter(options: {
   readonly apiKey?: string;
   readonly fetch?: TavilyFetchLike;
@@ -150,6 +155,8 @@ export function createWebInformationSourceAdapter(options: {
 export function createPageInformationSourceAdapter(options: {
   readonly fetch?: PageFetchLike;
   readonly defaultMaxLength?: number;
+  readonly defaultTimeoutMs?: number;
+  readonly maxTimeoutMs?: number;
 } = {}): InformationSourceAdapter {
   return {
     source: "page",
@@ -176,19 +183,60 @@ export function createPageInformationSourceAdapter(options: {
         };
       }
       const startedAt = Date.now();
-      let response: Awaited<ReturnType<PageFetchLike>>;
+      const timeoutMs = boundedPositiveInteger(
+        options.defaultTimeoutMs,
+        DEFAULT_PAGE_READ_TIMEOUT_MS,
+        options.maxTimeoutMs ?? MAX_PAGE_READ_TIMEOUT_MS
+      );
+      const controller = new AbortController();
+      const detachAbort = attachAbortForwarder(request.abortSignal, controller);
+      const timeoutCause = createHttpTimeoutCause("page read", timeoutMs);
+      const timeout = setTimeout(() => controller.abort(timeoutCause), timeoutMs);
       try {
-        response = await fetchImpl(uri, {
+        const response = await fetchImpl(uri, {
           method: "GET",
           headers: {
             accept: "text/html,text/plain;q=0.9,*/*;q=0.5",
             "user-agent": "AgentArbor-ResearchRuntime/0.1",
           },
-          signal: request.abortSignal,
+          signal: controller.signal,
         });
+        if (!response.ok) {
+          const facts = createHttpStatusErrorFacts({
+            url: uri,
+            method: "GET",
+            durationMs: Date.now() - startedAt,
+            statusCode: response.status,
+            statusText: response.statusText,
+          });
+          return {
+            status: "provider-failed",
+            message: pageHttpStatusMessage(response.status, response.statusText),
+            errorFacts: researchErrorFactsFromHttpRequest(facts),
+          };
+        }
+        const text = normalizeWhitespace(cleanPageText(await response.text()));
+        const maxLength = Math.max(200, request.maxLength || options.defaultMaxLength || 1_200);
+        const contentPreview = truncate(text, maxLength);
+        const refId = createResearchRefId("page", uri);
+        return {
+          status: "completed",
+          result: {
+            refId,
+            source: "page",
+            title: request.title ?? titleFromHtmlText(text) ?? uri,
+            uri,
+            status: "completed",
+            summary: truncate(contentPreview, 260),
+            contentPreview,
+            truncated: text.length > contentPreview.length,
+            sourceSearchRef: request.sourceResult?.refId,
+            metadata: { contentLength: text.length },
+          },
+        };
       } catch (error) {
         const failure = normalizeHttpRequestFailure({
-          error,
+          error: controller.signal.aborted && controller.signal.reason === timeoutCause ? timeoutCause : error,
           url: uri,
           method: "GET",
           durationMs: Date.now() - startedAt,
@@ -198,40 +246,10 @@ export function createPageInformationSourceAdapter(options: {
           message: failure.message,
           errorFacts: researchErrorFactsFromHttpRequest(failure.facts),
         };
+      } finally {
+        clearTimeout(timeout);
+        detachAbort();
       }
-      if (!response.ok) {
-        const durationMs = Date.now() - startedAt;
-        return {
-          status: "provider-failed",
-          message: `Page read returned HTTP ${response.status}.`,
-          errorFacts: compactResearchFacts({
-            url: uri,
-            method: "GET",
-            durationMs,
-            statusCode: response.status,
-            statusText: response.statusText,
-          }),
-        };
-      }
-      const text = normalizeWhitespace(cleanPageText(await response.text()));
-      const maxLength = Math.max(200, request.maxLength || options.defaultMaxLength || 1_200);
-      const contentPreview = truncate(text, maxLength);
-      const refId = createResearchRefId("page", uri);
-      return {
-        status: "completed",
-        result: {
-          refId,
-          source: "page",
-          title: request.title ?? titleFromHtmlText(text) ?? uri,
-          uri,
-          status: "completed",
-          summary: truncate(contentPreview, 260),
-          contentPreview,
-          truncated: text.length > contentPreview.length,
-          sourceSearchRef: request.sourceResult?.refId,
-          metadata: { contentLength: text.length },
-        },
-      };
     },
   };
 }
@@ -570,11 +588,15 @@ function researchErrorFactsFromHttpRequest(facts: HttpRequestErrorFacts): Resear
     method: facts.method,
     durationMs: facts.durationMs,
     code: facts.code,
+    statusCode: facts.statusCode,
+    statusText: facts.statusText,
     errno: facts.errno,
     syscall: facts.syscall,
     address: facts.address,
     port: facts.port,
     hostname: facts.hostname,
+    timedOut: facts.timedOut,
+    timeoutMs: facts.timeoutMs,
   });
 }
 
@@ -739,6 +761,32 @@ function isHttpUrl(value: string): boolean {
   } catch {
     return false;
   }
+}
+
+function pageHttpStatusMessage(statusCode: number, statusText: string | undefined): string {
+  const text = stringOrUndefined(statusText);
+  return `Page read returned HTTP ${statusCode}${text === undefined ? "" : ` ${text}`}.`;
+}
+
+function boundedPositiveInteger(value: unknown, fallback: number, max: number): number {
+  const normalizedMax = Math.max(1, Math.floor(max));
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    return Math.min(Math.max(1, Math.floor(fallback)), normalizedMax);
+  }
+  return Math.min(Math.floor(value), normalizedMax);
+}
+
+function attachAbortForwarder(parent: AbortSignal | undefined, controller: AbortController): () => void {
+  if (parent === undefined) {
+    return () => undefined;
+  }
+  const abort = () => controller.abort(parent.reason);
+  if (parent.aborted) {
+    abort();
+    return () => undefined;
+  }
+  parent.addEventListener("abort", abort, { once: true });
+  return () => parent.removeEventListener("abort", abort);
 }
 
 function arrayItems(value: unknown): readonly unknown[] {

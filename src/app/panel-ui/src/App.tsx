@@ -8,6 +8,7 @@ import { selectLocalContextAttachment, uniqueAttachments } from "./app-attachmen
 import { applyAppBootstrap, loadAppBootstrap } from "./app-bootstrap";
 import {
   normalizeVisibleAiMode,
+  normalizeComposerToolConfirmationPolicy,
   visibleConfigBaseUrl,
   visibleConfigLabel,
   catalogRecordFromList,
@@ -158,6 +159,12 @@ export function App(): React.ReactElement {
   }, [app.config]);
 
   useEffect(() => {
+    if (app.config?.toolConfirmation?.policy !== undefined) {
+      setToolConfirmationPolicy(normalizeComposerToolConfirmationPolicy(app.config.toolConfirmation.policy));
+    }
+  }, [app.config?.toolConfirmation?.policy]);
+
+  useEffect(() => {
     const webSearch = app.tools?.tools?.webSearch;
     if (webSearch !== undefined) {
       setToolForm({
@@ -270,6 +277,7 @@ export function App(): React.ReactElement {
     saveModelCatalog,
     saveWorkspace,
     saveCommandShell,
+    saveToolConfirmationPolicy,
     saveTools,
     saveMcpServer,
     loadMcpReferences,
@@ -338,6 +346,16 @@ export function App(): React.ReactElement {
     setInputCloseSignal((value) => value + 1);
     setSettingsGroup(group);
     setSettingsOpen(true);
+  }
+
+  function changeToolConfirmationPolicy(nextPolicy: ComposerToolConfirmationPolicy): void {
+    const previousPolicy = toolConfirmationPolicy;
+    setToolConfirmationPolicy(nextPolicy);
+    void saveToolConfirmationPolicy(nextPolicy)
+      .catch(() => {
+        if (!mountedRef.current) return;
+        setToolConfirmationPolicy(previousPolicy);
+      });
   }
 
   async function renameConversation(conversationId: string, title: string): Promise<void> {
@@ -416,7 +434,7 @@ export function App(): React.ReactElement {
     reasoningEffortEnabled: selectedModelSupportsReasoningEffort,
     onReasoningEffortChange: setComposerReasoningEffort,
     toolConfirmationPolicy,
-    onToolConfirmationPolicyChange: setToolConfirmationPolicy,
+    onToolConfirmationPolicyChange: changeToolConfirmationPolicy,
     closeSignal: inputCloseSignal,
     onModelSelect: selectInputModel,
     onOpenSettings: () => openSettings("models"),
@@ -487,6 +505,8 @@ export function App(): React.ReactElement {
         onSaveWorkspace={(nextWorkspaceDirectory) => void saveWorkspace(nextWorkspaceDirectory)}
         onSaveCommandShell={(kind) => void saveCommandShell(kind)}
         tools={app.tools}
+        toolConfirmationPolicy={toolConfirmationPolicy}
+        onToolConfirmationPolicyChange={changeToolConfirmationPolicy}
         toolForm={toolForm}
         setToolForm={setToolForm}
         mcpServerForm={mcpServerForm}

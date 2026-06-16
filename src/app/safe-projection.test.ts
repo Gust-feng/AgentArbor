@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { projectToolResult, redactOrdinaryMarkdownFragment } from "./safe-projection.js";
+import { projectToolFailure, projectToolResult, redactOrdinaryMarkdownFragment } from "./safe-projection.js";
 
 test("ordinary markdown fragments preserve whitespace-only streaming deltas", () => {
   assert.equal(redactOrdinaryMarkdownFragment(" "), " ");
@@ -191,6 +191,39 @@ test("read failure projection preserves HTTP error facts for model continuation"
     throw new Error("expected read_result display");
   }
   assert.equal(uiDisplay.errorFacts?.code, "ECONNREFUSED");
+});
+
+test("failed tool projection exposes errorFacts in model continuation and envelope", () => {
+  const projection = projectToolFailure({
+    request: {
+      callId: "call-http-timeout",
+      toolName: "http_request",
+      input: { url: "https://example.test/slow" },
+    },
+    error: "http_request failed: http_request timed out after 20ms.",
+    errorFacts: {
+      code: "ETIMEDOUT",
+      timedOut: true,
+      timeoutMs: 20,
+      method: "GET",
+      url: "https://example.test/slow",
+      durationMs: 21,
+    },
+    durationMs: 21,
+  });
+
+  const agentContent = projection.agentContent as {
+    readonly status?: string;
+    readonly errorFacts?: Readonly<Record<string, unknown>>;
+    readonly facts?: Readonly<Record<string, unknown>>;
+  };
+
+  assert.equal(agentContent.status, "failed");
+  assert.equal(agentContent.errorFacts?.code, "ETIMEDOUT");
+  assert.equal(agentContent.errorFacts?.timedOut, true);
+  assert.equal(agentContent.facts?.code, "ETIMEDOUT");
+  assert.equal(projection.envelope?.errorFacts?.timeoutMs, 20);
+  assert.equal(JSON.stringify(agentContent).includes("recoveryHint"), false);
 });
 
 test("search invalid input projection keeps the provider message visible", () => {

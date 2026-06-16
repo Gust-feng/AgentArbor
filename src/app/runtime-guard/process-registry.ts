@@ -105,11 +105,49 @@ export type ProcessCleanupResult = {
   readonly runId: string;
   readonly attempted: readonly ProcessCleanupAttempt[];
   readonly skipped: readonly ProcessCleanupSkip[];
+  readonly summary: ProcessRunResidueSummary;
 };
 
 export type ProcessCleanupOptions = {
   readonly includeUnowned?: boolean;
   readonly statuses?: readonly ProcessStatus[];
+};
+
+export type ProcessStatusCounts = Readonly<Record<ProcessStatus, number>>;
+
+export type ProcessRunProcessSummary = {
+  readonly processId: string;
+  readonly runId?: string;
+  readonly toolCallId?: string;
+  readonly pid?: number;
+  readonly kind: ProcessKind;
+  readonly owned: boolean;
+  readonly commandLine: string;
+  readonly cwd: string;
+  readonly startedAt: string;
+  readonly endedAt?: string;
+  readonly status: ProcessStatus;
+  readonly exitCode?: number;
+  readonly signal?: string;
+  readonly logRef?: string;
+  readonly logPath?: string;
+  readonly stopCommand?: string;
+  readonly ports: readonly ProcessPortFact[];
+  readonly factCount: number;
+  readonly latestFact?: ProcessFact;
+};
+
+export type ProcessRunResidueSummary = {
+  readonly kind: "process_run_residue_summary";
+  readonly runId: string;
+  readonly observedAt: string;
+  readonly totalCount: number;
+  readonly ownedCount: number;
+  readonly unownedCount: number;
+  readonly residualCount: number;
+  readonly statuses: ProcessStatusCounts;
+  readonly processes: readonly ProcessRunProcessSummary[];
+  readonly residualProcesses: readonly ProcessRunProcessSummary[];
 };
 
 export type ProcessRegistryClock = () => string;
@@ -119,6 +157,8 @@ export type ProcessTerminator = {
 };
 
 const ACTIVE_PROCESS_STATUSES: readonly ProcessStatus[] = ["starting", "running", "killing"];
+const UNRESOLVED_PROCESS_STATUSES: readonly ProcessStatus[] = ["starting", "running", "killing", "unknown"];
+const PROCESS_STATUSES: readonly ProcessStatus[] = ["starting", "running", "exited", "killing", "killed", "unknown"];
 
 export class InMemoryProcessRegistry {
   private readonly records = new Map<string, ProcessRecord>();
@@ -158,6 +198,14 @@ export class InMemoryProcessRegistry {
 
   listActiveByRun(runId: string): readonly ProcessRecord[] {
     return this.listByRun(runId).filter((record) => isActiveStatus(record.status));
+  }
+
+  listUnresolvedByRun(runId: string): readonly ProcessRecord[] {
+    return this.listByRun(runId).filter((record) => isUnresolvedStatus(record.status));
+  }
+
+  summarizeRun(runId: string): ProcessRunResidueSummary {
+    return processRunResidueSummary(runId, this.listByRun(runId), this.now());
   }
 
   update(processId: string, patch: ProcessRecordUpdate): ProcessRecord | undefined {
@@ -208,7 +256,7 @@ export class InMemoryProcessRegistry {
     options: ProcessCleanupOptions = {}
   ): Promise<ProcessCleanupResult> {
     const includeUnowned = options.includeUnowned ?? false;
-    const cleanupStatuses = options.statuses ?? ACTIVE_PROCESS_STATUSES;
+    const cleanupStatuses = options.statuses ?? UNRESOLVED_PROCESS_STATUSES;
     const attempted: ProcessCleanupAttempt[] = [];
     const skipped: ProcessCleanupSkip[] = [];
 
@@ -272,6 +320,7 @@ export class InMemoryProcessRegistry {
       runId,
       attempted,
       skipped,
+      summary: this.summarizeRun(runId),
     };
   }
 
@@ -328,6 +377,10 @@ function isActiveStatus(status: ProcessStatus): boolean {
   return ACTIVE_PROCESS_STATUSES.includes(status);
 }
 
+function isUnresolvedStatus(status: ProcessStatus): boolean {
+  return UNRESOLVED_PROCESS_STATUSES.includes(status);
+}
+
 function isTerminalStatus(status: ProcessStatus): boolean {
   return status === "exited" || status === "killed";
 }
@@ -375,6 +428,81 @@ function cloneFacts(facts: readonly ProcessFact[]): readonly ProcessFact[] {
 
 function cloneKillTreeResult(result: ProcessKillTreeResult): ProcessKillTreeResult {
   return { ...result };
+}
+
+function processRunResidueSummary(
+  runId: string,
+  records: readonly ProcessRecord[],
+  observedAt: string
+): ProcessRunResidueSummary {
+  const processes = records.map(processRunProcessSummary);
+  return {
+    kind: "process_run_residue_summary",
+    runId,
+    observedAt,
+    totalCount: processes.length,
+    ownedCount: processes.filter((process) => process.owned).length,
+    unownedCount: processes.filter((process) => !process.owned).length,
+    residualCount: processes.filter((process) => isUnresolvedStatus(process.status)).length,
+    statuses: processStatusCounts(records),
+    processes,
+    residualProcesses: processes.filter((process) => isUnresolvedStatus(process.status)),
+  };
+}
+
+function processRunProcessSummary(record: ProcessRecord): ProcessRunProcessSummary {
+  const latestFact = record.facts.at(-1);
+  const summary: ProcessRunProcessSummary = {
+    processId: record.processId,
+    runId: record.runId,
+    toolCallId: record.toolCallId,
+    pid: record.pid,
+    kind: record.kind,
+    owned: record.owned,
+    commandLine: record.commandLine,
+    cwd: record.cwd,
+    startedAt: record.startedAt,
+    endedAt: record.endedAt,
+    status: record.status,
+    exitCode: record.exitCode,
+    signal: record.signal,
+    logRef: record.logRef,
+    logPath: record.logPath,
+    stopCommand: record.stopCommand,
+    ports: clonePortFacts(record.ports),
+    factCount: record.facts.length,
+    latestFact: latestFact === undefined ? undefined : { ...latestFact },
+  };
+  return withDefinedOptionals(summary, {
+    runId: summary.runId,
+    toolCallId: summary.toolCallId,
+    pid: summary.pid,
+    endedAt: summary.endedAt,
+    exitCode: summary.exitCode,
+    signal: summary.signal,
+    logRef: summary.logRef,
+    logPath: summary.logPath,
+    stopCommand: summary.stopCommand,
+    latestFact: summary.latestFact,
+  });
+}
+
+function processStatusCounts(records: readonly ProcessRecord[]): ProcessStatusCounts {
+  const counts: Record<ProcessStatus, number> = {
+    starting: 0,
+    running: 0,
+    exited: 0,
+    killing: 0,
+    killed: 0,
+    unknown: 0,
+  };
+  for (const record of records) {
+    counts[record.status] += 1;
+  }
+  for (const status of PROCESS_STATUSES) {
+    counts[status] = counts[status] ?? 0;
+  }
+  return counts;
 }
 
 function errorMessage(error: unknown): string {

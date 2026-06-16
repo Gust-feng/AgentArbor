@@ -45,6 +45,7 @@ function preparedStartFacts(
     aiMode: overrides.aiMode ?? input.aiMode ?? config.defaultAiMode,
     config,
     informationAccess: overrides.informationAccess ?? informationAccess(),
+    toolConfirmationPolicy: overrides.toolConfirmationPolicy,
     ...capabilitySnapshotPart,
     ...agentDefinitionPart,
   };
@@ -64,6 +65,7 @@ function executorConfig(input: {
   readonly persistRun?: BasicAgentRunExecutorConfig["persistRun"];
   readonly persistRunInBackground?: BasicAgentRunExecutorConfig["persistRunInBackground"];
   readonly cleanupRunResources?: BasicAgentRunExecutorConfig["cleanupRunResources"];
+  readonly inspectRunResources?: BasicAgentRunExecutorConfig["inspectRunResources"];
   readonly execute?: BasicAgentRunExecutorConfig["executionAdapter"]["execute"];
   readonly failRun?: BasicAgentRunExecutorConfig["failRun"];
   readonly onRuntimeReady?: BasicAgentRunExecutorConfig["onRuntimeReady"];
@@ -78,6 +80,7 @@ function executorConfig(input: {
     persistRun: input.persistRun ?? (async () => undefined),
     persistRunInBackground: input.persistRunInBackground,
     cleanupRunResources: input.cleanupRunResources,
+    inspectRunResources: input.inspectRunResources,
     executionAdapter: {
       execute: input.execute ?? (async () => {
         throw new Error("not used");
@@ -203,6 +206,33 @@ test("BasicAgentRunExecutor owns basic run projection and replay cursor", async 
   const replay = executor.replayEvents(run.runId, 0);
   assert.equal(replay?.cursor.eventCount, 1);
   assert.equal(replay?.events[0]?.type, "tool.completed");
+});
+
+test("BasicAgentRunExecutor defaults tool confirmation policy from prepared start facts", async () => {
+  const runJobs = new InMemoryBasicAgentRunJobStore();
+  const executor = new BasicAgentRunExecutor(executorConfig({
+    runJobs,
+    prepareRunStart: defaultPrepareRunStart({ toolConfirmationPolicy: "full_access" }),
+  }));
+
+  const run = await executor.start({
+    runKind: "desktop",
+    runMode: "agent",
+    goal: "use persisted confirmation policy",
+    aiMode: "fake",
+    startImmediately: false,
+  });
+  const explicitPrompt = await executor.start({
+    runKind: "desktop",
+    runMode: "agent",
+    goal: "use request confirmation policy",
+    aiMode: "fake",
+    toolConfirmationPolicy: "prompt",
+    startImmediately: false,
+  });
+
+  assert.equal(runJobs.get(run.runId)?.toolConfirmationPolicy, "full_access");
+  assert.equal(runJobs.get(explicitPrompt.runId)?.toolConfirmationPolicy, "prompt");
 });
 
 test("BasicAgentRunExecutor can defer scheduling until the caller has responded", async () => {
@@ -1044,10 +1074,59 @@ test("BasicAgentRunExecutor rejects capability resolution that rewrites frozen M
   assert.equal(job?.completed?.capabilityResolution, undefined);
 });
 
+test("BasicAgentRunExecutor inspects run resources after completed and failed terminal outcomes", async () => {
+  const runJobs = new InMemoryBasicAgentRunJobStore();
+  const cleanupRunIds: string[] = [];
+  const inspections: Array<{ readonly runId: string; readonly terminalStatus: string }> = [];
+  const executor = new BasicAgentRunExecutor(executorConfig({
+    runJobs,
+    cleanupRunResources: (runId) => {
+      cleanupRunIds.push(runId);
+    },
+    inspectRunResources: (runId, context) => {
+      inspections.push({ runId, terminalStatus: context.terminalStatus });
+    },
+    execute: async ({ job }) => {
+      if (job.goal.includes("fail")) {
+        return {
+          failed: {
+            code: "model_failed",
+            message: "model failed",
+          },
+        };
+      }
+      return { completed: true };
+    },
+  }));
+
+  const completed = await executor.start({
+    runKind: "desktop",
+    runMode: "agent",
+    goal: "complete with resource inspection",
+    aiMode: "fake",
+  });
+  const failed = await executor.start({
+    runKind: "desktop",
+    runMode: "agent",
+    goal: "fail with resource inspection",
+    aiMode: "fake",
+  });
+
+  await waitUntil(() => runJobs.get(completed.runId)?.status === "completed");
+  await waitUntil(() => runJobs.get(failed.runId)?.status === "failed");
+
+  assert.deepEqual(cleanupRunIds, []);
+  assert.deepEqual(inspections, [
+    { runId: completed.runId, terminalStatus: "completed" },
+    { runId: failed.runId, terminalStatus: "failed" },
+  ]);
+});
+
 test("BasicAgentRunExecutor keeps frozen run facts on cancellation payloads", async () => {
   const runJobs = new InMemoryBasicAgentRunJobStore();
   const steps: string[] = [];
   const cleanupRunIds: string[] = [];
+  const cleanupContexts: unknown[] = [];
   const executor = new BasicAgentRunExecutor(executorConfig({
     runJobs,
     prepareRunStart: defaultPrepareRunStart({
@@ -1056,8 +1135,9 @@ test("BasicAgentRunExecutor keeps frozen run facts on cancellation payloads", as
         snapshotId: "snapshot-cancel",
       },
     }),
-    cleanupRunResources: (runId) => {
+    cleanupRunResources: (runId, context) => {
       cleanupRunIds.push(runId);
+      cleanupContexts.push(context);
       steps.push(`cleanup:${runJobs.get(runId)?.status ?? "missing"}`);
     },
     onRunFinished: (job) => {
@@ -1079,6 +1159,7 @@ test("BasicAgentRunExecutor keeps frozen run facts on cancellation payloads", as
 
   const job = runJobs.get(run.runId);
   assert.deepEqual(cleanupRunIds, [run.runId]);
+  assert.deepEqual(cleanupContexts, [{ reason: "cancel", terminalStatus: "cancelled" }]);
   assert.deepEqual(steps.slice(-3), ["cleanup:cancelled", "finished:cancelled", "persist:cancelled"]);
   assert.equal(job?.status, "cancelled");
   assert.equal(job?.capabilitySnapshot?.snapshotId, "snapshot-cancel");
@@ -1090,6 +1171,7 @@ test("BasicAgentRunExecutor keeps frozen run facts on cancellation payloads", as
 test("BasicAgentRunExecutor preserves cancellation when cleanup fails", async () => {
   const runJobs = new InMemoryBasicAgentRunJobStore();
   let cleanupCalls = 0;
+  let inspectCalls = 0;
   let finished = false;
   let persisted = false;
   const executor = new BasicAgentRunExecutor(executorConfig({
@@ -1103,6 +1185,11 @@ test("BasicAgentRunExecutor preserves cancellation when cleanup fails", async ()
     cleanupRunResources: () => {
       cleanupCalls += 1;
       throw new Error("cleanup failed");
+    },
+    inspectRunResources: (_runId, context) => {
+      inspectCalls += 1;
+      assert.equal(context.terminalStatus, "cancelled");
+      throw new Error("inspection failed");
     },
     onRunFinished: (job) => {
       finished = job.status === "cancelled";
@@ -1123,6 +1210,7 @@ test("BasicAgentRunExecutor preserves cancellation when cleanup fails", async ()
 
   const job = runJobs.get(run.runId);
   assert.equal(cleanupCalls, 1);
+  assert.equal(inspectCalls, 1);
   assert.equal(finished, true);
   assert.equal(persisted, true);
   assert.equal(returned.status, "cancelled");
@@ -1171,8 +1259,12 @@ test("BasicAgentRunExecutor keeps frozen run facts when approval continuation is
   await waitUntil(() => runJobs.get(run.runId)?.status === "approval_needed");
   const job = runJobs.get(run.runId);
   assert.equal(job?.capabilitySnapshot?.snapshotId, "snapshot-lost-continuation");
+  const inspections: { readonly runId: string; readonly terminalStatus: string }[] = [];
   const restartedExecutor = new BasicAgentRunExecutor(executorConfig({
     runJobs,
+    inspectRunResources: (runId, context) => {
+      inspections.push({ runId, terminalStatus: context.terminalStatus });
+    },
     execute: async () => {
       throw new Error("lost continuation test should not start a fresh run");
     },
@@ -1191,6 +1283,7 @@ test("BasicAgentRunExecutor keeps frozen run facts when approval continuation is
   assert.equal(blocked?.blocked?.capabilitySnapshot?.snapshotId, "snapshot-lost-continuation");
   assert.equal(blocked?.blocked?.config.profileId, blocked?.config.profileId);
   assert.deepEqual(blocked?.blocked?.informationAccess.sourcePreference, blocked?.informationAccess.sourcePreference);
+  assert.deepEqual(inspections, [{ runId: run.runId, terminalStatus: "blocked" }]);
 });
 
 test("BasicAgentRunExecutor stores prepared agent definition ref when a run is created", async () => {

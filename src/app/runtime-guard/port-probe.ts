@@ -119,6 +119,7 @@ export async function probeLocalPort(options: ProbeLocalPortOptions): Promise<Lo
       requestedAtTime,
       timeoutMs,
       cancelled: true,
+      error: cancelledPortErrorFact(),
     });
   }
 
@@ -140,7 +141,12 @@ export async function probeLocalPort(options: ProbeLocalPortOptions): Promise<Lo
       timeoutMs,
       timedOut: connection.status === "timeout" ? true : undefined,
       cancelled: connection.status === "cancelled" ? true : undefined,
-      error: connection.error,
+      error: connection.error ??
+        (connection.status === "cancelled"
+          ? cancelledPortErrorFact()
+          : connection.status === "timeout"
+            ? probeTimeoutErrorFact(timeoutMs)
+            : undefined),
     });
   }
 
@@ -200,11 +206,13 @@ export async function waitForLocalPort(options: WaitForLocalPortOptions): Promis
       pollIntervalMs,
       attempts: 0,
       cancelled: true,
+      error: cancelledPortErrorFact(),
     });
   }
 
   const deadline = requestedAtTime + timeoutMs;
   let attempts = 0;
+  let lastProbeError: LocalPortErrorFact | undefined;
   for (;;) {
     const remainingMs = Math.max(0, deadline - Date.now());
     if (remainingMs <= 0) {
@@ -220,6 +228,7 @@ export async function waitForLocalPort(options: WaitForLocalPortOptions): Promis
         pollIntervalMs,
         attempts,
         timedOut: true,
+        error: lastProbeError ?? waitTimeoutErrorFact(timeoutMs),
       });
     }
 
@@ -231,6 +240,9 @@ export async function waitForLocalPort(options: WaitForLocalPortOptions): Promis
       abortSignal: options.abortSignal,
       portOccupantProbe: options.portOccupantProbe,
     });
+    if (probe.error !== undefined) {
+      lastProbeError = probe.error;
+    }
     if (probe.status === "ready" || probe.status === "cancelled" || probe.status === "error") {
       return waitFact({
         port: probe.port,
@@ -244,7 +256,7 @@ export async function waitForLocalPort(options: WaitForLocalPortOptions): Promis
         pollIntervalMs,
         attempts,
         cancelled: probe.cancelled,
-        error: probe.error,
+        error: probe.error ?? (probe.cancelled === true ? cancelledPortErrorFact() : undefined),
         externalOccupant: probe.externalOccupant,
       });
     }
@@ -264,6 +276,7 @@ export async function waitForLocalPort(options: WaitForLocalPortOptions): Promis
         pollIntervalMs,
         attempts,
         cancelled: true,
+        error: cancelledPortErrorFact(),
       });
     }
   }
@@ -423,6 +436,31 @@ function validateTcpPort(port: number): LocalPortErrorFact | undefined {
   return {
     name: "InvalidPort",
     message: "Local TCP port must be an integer between 1 and 65535.",
+    code: "ERR_INVALID_TCP_PORT",
+  };
+}
+
+function waitTimeoutErrorFact(timeoutMs: number): LocalPortErrorFact {
+  return {
+    name: "TimeoutError",
+    message: `Local TCP port did not become ready within ${timeoutMs}ms.`,
+    code: "WAIT_FOR_PORT_TIMEOUT",
+  };
+}
+
+function probeTimeoutErrorFact(timeoutMs: number): LocalPortErrorFact {
+  return {
+    name: "TimeoutError",
+    message: `Local TCP port probe did not finish within ${timeoutMs}ms.`,
+    code: "PORT_PROBE_TIMEOUT",
+  };
+}
+
+function cancelledPortErrorFact(): LocalPortErrorFact {
+  return {
+    name: "AbortError",
+    message: "Local TCP port wait was cancelled.",
+    code: "ABORT_ERR",
   };
 }
 

@@ -48,6 +48,8 @@ test("waitForLocalPort returns timeout facts for an unused port", async () => {
   assert.equal(fact.timedOut, true);
   assert.equal(fact.cancelled, undefined);
   assert.equal(fact.timeoutMs, 50);
+  assert.equal(typeof fact.durationMs, "number");
+  assert.equal(fact.error?.code, "ECONNREFUSED");
   assert.equal(fact.attempts >= 1, true);
 });
 
@@ -86,6 +88,7 @@ test("waitForLocalPort returns cancelled facts from AbortSignal", async () => {
     assert.equal(fact.ready, false);
     assert.equal(fact.cancelled, true);
     assert.equal(fact.timedOut, undefined);
+    assert.equal(fact.error?.code, "ABORT_ERR");
   } finally {
     clearTimeout(abortTimer);
   }
@@ -140,6 +143,35 @@ test("probeLocalPort keeps ready facts when occupant probing fails", async () =>
     assert.equal(fact.status, "ready");
     assert.equal(fact.ready, true);
     assert.equal(fact.externalOccupant, undefined);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("waitForLocalPort preserves injected external occupant facts on ready ports", async () => {
+  const server = createNetServer();
+  try {
+    const port = await listenOnUnusedLocalPort(server);
+    const occupantProbe: PortOccupantProbe = () => ({
+      pid: 12346,
+      observedBy: "platform_probe",
+    });
+
+    const fact = await waitForLocalPort({
+      port,
+      timeoutMs: 1_000,
+      probeTimeoutMs: 100,
+      pollIntervalMs: 10,
+      portOccupantProbe: occupantProbe,
+    });
+
+    assert.equal(fact.status, "ready");
+    assert.equal(fact.ready, true);
+    assert.deepEqual(fact.externalOccupant, {
+      pid: 12346,
+      observedBy: "platform_probe",
+      ownedByUs: false,
+    });
   } finally {
     await closeServer(server);
   }

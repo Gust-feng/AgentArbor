@@ -15,6 +15,7 @@ import {
   saveModelProviderCatalog,
   saveModelProviderConfig,
   saveModelProviderOrder,
+  saveToolConfirmationConfig,
   saveToolSettings,
   saveWorkspaceDirectory,
   selectModelProviderModel,
@@ -25,7 +26,7 @@ import {
   updateSkillState,
   updateToolState,
 } from "./app-config-actions";
-import { mergeConfigResponse, type VisibleAiMode } from "./app-config-projection";
+import { mergeConfigResponse, type ComposerToolConfirmationPolicy, type VisibleAiMode } from "./app-config-projection";
 import type { AppState } from "./app-state";
 import type { McpServerForm, ModelForm, ToolForm } from "./components/settings-types";
 import type { CommandShellKind, ModelProviderModelCatalog } from "./contracts/config";
@@ -42,6 +43,7 @@ export type AppSettingsController = {
   readonly saveModelCatalog: (profileId: string, catalog: ModelProviderModelCatalog) => Promise<void>;
   readonly saveWorkspace: (nextWorkspaceDirectory?: string) => Promise<void>;
   readonly saveCommandShell: (kind: CommandShellKind | "auto") => Promise<void>;
+  readonly saveToolConfirmationPolicy: (policy: ComposerToolConfirmationPolicy) => Promise<void>;
   readonly saveTools: () => Promise<void>;
   readonly saveMcpServer: (nextMcpServerForm?: McpServerForm) => Promise<void>;
   readonly loadMcpReferences: (serverId: string) => Promise<McpReferenceResponse>;
@@ -377,6 +379,27 @@ export function createAppSettingsController(options: AppSettingsControllerOption
     }
   }
 
+  async function saveToolConfirmationPolicy(policy: ComposerToolConfirmationPolicy): Promise<void> {
+    try {
+      const response = await saveToolConfirmationConfig(policy);
+      if (options.mountedRef.current) {
+        options.setApp((previous) => ({
+          ...previous,
+          config: mergeConfigResponse(previous.config, response),
+          error: undefined,
+        }));
+      }
+    } catch (error) {
+      if (options.mountedRef.current) {
+        options.setApp((previous) => ({
+          ...previous,
+          error: error instanceof Error ? error.message : "确认策略保存失败。",
+        }));
+      }
+      throw error;
+    }
+  }
+
   async function saveTools(): Promise<void> {
     options.setSavingTools(true);
     try {
@@ -685,6 +708,7 @@ export function createAppSettingsController(options: AppSettingsControllerOption
     saveModelCatalog,
     saveWorkspace,
     saveCommandShell,
+    saveToolConfirmationPolicy,
     saveTools,
     saveMcpServer,
     loadMcpReferences,

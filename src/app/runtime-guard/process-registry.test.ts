@@ -177,6 +177,18 @@ test("cleanupByRun terminates only owned active processes for the requested run"
   assert.equal(registry.get("owned-foreground")?.status, "killed");
   assert.equal(registry.get("owned-active")?.facts[0]?.kind, "kill_tree");
   assert.equal(registry.get("owned-active")?.facts[0]?.resultStatus, "killed");
+  assert.equal(result.summary.totalCount, 4);
+  assert.equal(result.summary.statuses.killed, 2);
+  assert.equal(result.summary.statuses.running, 1);
+  assert.deepEqual(
+    result.summary.processes
+      .filter((process) => process.status === "killed")
+      .map((process) => [process.processId, process.kind]),
+    [
+      ["owned-active", "background"],
+      ["owned-foreground", "foreground"],
+    ]
+  );
   assert.equal(registry.get("unowned-active")?.status, "running");
   assert.equal(registry.get("other-run-active")?.status, "running");
   assert.equal(registry.get("owned-exited")?.status, "exited");
@@ -206,6 +218,35 @@ test("cleanupByRun does not kill or relabel naturally exited processes", async (
   assert.equal(registry.get("natural-exit")?.status, "exited");
   assert.equal(registry.get("natural-exit")?.exitCode, 0);
   assert.equal(registry.get("natural-exit")?.facts.length, 0);
+});
+
+test("cleanupByRun records already-exited kill-tree observations without claiming a kill", async () => {
+  const registry = new InMemoryProcessRegistry({ now: fixedNow("2026-06-15T00:12:00.000Z") });
+  registerProcess(registry, {
+    processId: "already-gone",
+    runId: "run-already-gone",
+    pid: 22500,
+    owned: true,
+    status: "running",
+  });
+
+  const result = await registry.cleanupByRun("run-already-gone", {
+    killTree() {
+      return {
+        status: "exited",
+        message: "Process 22500 was not running.",
+      };
+    },
+  });
+
+  const record = registry.get("already-gone");
+  assert.equal(result.attempted[0]?.afterStatus, "exited");
+  assert.equal(record?.status, "exited");
+  assert.equal(record?.endedAt, "2026-06-15T00:12:00.000Z");
+  assert.equal(record?.facts[0]?.resultStatus, "exited");
+  assert.equal(record?.facts[0]?.message, "Process 22500 was not running.");
+  assert.equal(result.summary.statuses.exited, 1);
+  assert.equal(result.summary.residualCount, 0);
 });
 
 test("cleanupByRun records unknown and failed kill-tree facts without recovery advice", async () => {
@@ -248,8 +289,92 @@ test("cleanupByRun records unknown and failed kill-tree facts without recovery a
   assert.equal(failedRecord?.status, "unknown");
   assert.equal(failedRecord?.facts[0]?.resultStatus, "failed");
   assert.equal(failedRecord?.facts[0]?.errorMessage, "access denied");
+  assert.equal(registry.summarizeRun("run-unknown").residualCount, 2);
+  assert.deepEqual(
+    registry.listUnresolvedByRun("run-unknown").map((record) => record.processId),
+    ["unknown-after-cleanup", "failed-after-cleanup"]
+  );
   assert.equal(JSON.stringify(failedRecord?.facts).includes("recovery"), false);
   assert.equal(JSON.stringify(failedRecord?.facts).includes("suggest"), false);
+
+  const retriedPids: number[] = [];
+  await registry.cleanupByRun("run-unknown", {
+    killTree(pid) {
+      retriedPids.push(pid);
+      return {
+        status: "exited",
+      };
+    },
+  });
+
+  assert.deepEqual(retriedPids, [23001, 23002]);
+});
+
+test("summarizeRun returns a read-only residue fact summary without recovery advice", () => {
+  const registry = new InMemoryProcessRegistry({ now: fixedNow("2026-06-15T00:20:00.000Z") });
+  registerProcess(registry, {
+    processId: "summary-running",
+    runId: "run-summary",
+    pid: 24001,
+    owned: true,
+    status: "running",
+  });
+  registerProcess(registry, {
+    processId: "summary-killing",
+    runId: "run-summary",
+    pid: 24002,
+    owned: true,
+    status: "killing",
+    kind: "foreground",
+  });
+  registerProcess(registry, {
+    processId: "summary-unknown",
+    runId: "run-summary",
+    pid: 24003,
+    owned: true,
+    status: "unknown",
+  });
+  registerProcess(registry, {
+    processId: "summary-killed",
+    runId: "run-summary",
+    pid: 24004,
+    owned: true,
+    status: "killed",
+  });
+  registerProcess(registry, {
+    processId: "summary-exited",
+    runId: "run-summary",
+    pid: 24005,
+    owned: false,
+    status: "exited",
+  });
+
+  const summary = registry.summarizeRun("run-summary");
+
+  assert.equal(summary.kind, "process_run_residue_summary");
+  assert.equal(summary.observedAt, "2026-06-15T00:20:00.000Z");
+  assert.equal(summary.totalCount, 5);
+  assert.equal(summary.ownedCount, 4);
+  assert.equal(summary.unownedCount, 1);
+  assert.equal(summary.residualCount, 3);
+  assert.deepEqual(summary.statuses, {
+    starting: 0,
+    running: 1,
+    exited: 1,
+    killing: 1,
+    killed: 1,
+    unknown: 1,
+  });
+  assert.deepEqual(
+    summary.residualProcesses.map((process) => [process.processId, process.status]),
+    [
+      ["summary-running", "running"],
+      ["summary-killing", "killing"],
+      ["summary-unknown", "unknown"],
+    ]
+  );
+  assert.equal(JSON.stringify(summary).includes("recovery"), false);
+  assert.equal(JSON.stringify(summary).includes("suggest"), false);
 });
 
 function registerProcess(

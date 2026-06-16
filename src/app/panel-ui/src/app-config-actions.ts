@@ -2,6 +2,7 @@ import { deleteJson, getJson, postJson } from "./api";
 import {
   catalogRecordFromList,
   mergeConfigResponse,
+  type ComposerToolConfirmationPolicy,
   type VisibleAiMode,
 } from "./app-config-projection";
 import type { McpServerForm, ModelForm, ToolForm } from "./components/settings-types";
@@ -192,6 +193,10 @@ export async function saveWorkspaceDirectory(workspaceDirectory: string): Promis
 
 export async function saveCommandShellConfig(kind: CommandShellKind | "auto"): Promise<ConfigResponse> {
   return postJson<ConfigResponse>("/api/config/command-shell", { kind });
+}
+
+export async function saveToolConfirmationConfig(policy: ComposerToolConfirmationPolicy): Promise<ConfigResponse> {
+  return postJson<ConfigResponse>("/api/config/tool-confirmation", { policy });
 }
 
 export async function saveToolSettings(form: ToolForm): Promise<ToolsResponse> {

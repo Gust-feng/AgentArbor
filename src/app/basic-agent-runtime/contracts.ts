@@ -129,12 +129,22 @@ export type BasicAgentRunExecutorConfig = {
   readonly abortControllers: Map<string, AbortController>;
   readonly persistRun: (job: BasicAgentRunJob) => Promise<void>;
   readonly persistRunInBackground?: (job: BasicAgentRunJob) => void;
-  readonly cleanupRunResources?: (runId: string) => Promise<unknown> | unknown;
+  readonly cleanupRunResources?: (runId: string, context?: BasicAgentRunResourceCleanupContext) => Promise<unknown> | unknown;
+  readonly inspectRunResources?: (runId: string, context: BasicAgentRunResourceInspectionContext) => Promise<unknown> | unknown;
   readonly executionAdapter: BasicAgentExecutionAdapter;
   readonly failRun: (job: BasicAgentRunJob, error: unknown) => Promise<void>;
   readonly onRuntimeReady: (runId: string, context: BasicAgentRuntimeReadyContext) => void;
   readonly onModelOutputDelta: (runId: string, delta: ModelOutputDelta) => void;
   readonly onRunFinished: (job: BasicAgentRunJob) => Promise<void> | void;
+};
+
+export type BasicAgentRunResourceCleanupContext = {
+  readonly reason: "cancel";
+  readonly terminalStatus: "cancelled";
+};
+
+export type BasicAgentRunResourceInspectionContext = {
+  readonly terminalStatus: "completed" | "failed" | "blocked" | "cancelled";
 };
 
 export type BasicAgentRunStartFacts = {
@@ -143,6 +153,7 @@ export type BasicAgentRunStartFacts = {
   readonly informationAccess: SanitizedInformationAccessConfig;
   readonly capabilitySnapshot?: BasicAgentCapabilitySnapshot;
   readonly agentDefinitionRef?: RunAgentDefinitionRef;
+  readonly toolConfirmationPolicy?: ToolConfirmationPolicy;
 };
 
 export type BasicAgentRunStartInput = {

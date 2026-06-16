@@ -20,11 +20,13 @@ import type {
   SanitizedMcpServerSecretMetadata,
   SanitizedInformationAccessConfig,
   SanitizedModelProviderConfig,
+  SanitizedToolConfirmationConfig,
   SanitizedWorkspaceConfig,
   SanitizedWebSearchConfig,
   UpdateInformationAccessConfigInput,
   UpdateCommandShellConfigInput,
   UpdateModelProviderConfigInput,
+  UpdateToolConfirmationConfigInput,
   UpdateToolStateInput,
   UpsertMcpServerInput,
   UpdateWorkspaceConfigInput,
@@ -47,7 +49,9 @@ import {
   normalizeRequiredConfigString,
   normalizeSourcePreference,
   normalizeCommandShellUpdate,
+  normalizeToolConfirmationUpdate,
   toSanitizedCommandShellConfig,
+  toSanitizedToolConfirmationConfig,
   normalizeWebSearchProvider,
   parseLocalSettingsFile,
   sanitizeCapabilityOverride,
@@ -569,6 +573,11 @@ export class ConfigCenter {
     return toSanitizedCommandShellConfig(settings.commandShell, { now: settings.updatedAt });
   }
 
+  async getToolConfirmationConfig(): Promise<SanitizedToolConfirmationConfig> {
+    const settings = await this.readOrCreateSettings();
+    return toSanitizedToolConfirmationConfig(settings.toolConfirmation, { now: settings.updatedAt });
+  }
+
   async updateWorkspaceConfig(input: UpdateWorkspaceConfigInput): Promise<SanitizedWorkspaceConfig> {
     const current = await this.readOrCreateSettings();
     const now = new Date().toISOString();
@@ -595,6 +604,20 @@ export class ConfigCenter {
     };
     await this.options.settingsStore.writeSettings(next);
     return toSanitizedCommandShellConfig(commandShell, { now });
+  }
+
+  async updateToolConfirmationConfig(input: UpdateToolConfirmationConfigInput): Promise<SanitizedToolConfirmationConfig> {
+    const current = await this.readOrCreateSettings();
+    const now = new Date().toISOString();
+    const toolConfirmation = normalizeToolConfirmationUpdate(input, now);
+    const next: AgentArborLocalSettings = {
+      ...current,
+      version: 3,
+      toolConfirmation,
+      updatedAt: now,
+    };
+    await this.options.settingsStore.writeSettings(next);
+    return toSanitizedToolConfirmationConfig(toolConfirmation, { now });
   }
 
   async createModelRuntimeEnvironment(

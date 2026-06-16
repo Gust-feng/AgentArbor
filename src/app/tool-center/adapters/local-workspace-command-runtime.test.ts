@@ -1,12 +1,18 @@
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
-import { createServer as createNetServer } from "node:net";
+import { createServer as createNetServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { ensurePidExited } from "./background-process-test-utils.js";
 import { createLocalRunCommandTool, createLocalShellCommandTool } from "./local-workspace-command-tools.js";
-import { InMemoryProcessRegistry, type ProcessPortFact, type ProcessRecordUpdate, type ProcessRegistration } from "../../runtime-guard/index.js";
+import {
+  InMemoryProcessRegistry,
+  type PortOccupantProbe,
+  type ProcessPortFact,
+  type ProcessRecordUpdate,
+  type ProcessRegistration,
+} from "../../runtime-guard/index.js";
 
 const context = { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" };
 const processContext = {
@@ -197,6 +203,10 @@ test("shell_command returns background metadata when waitForPort is cancelled", 
       assert.equal(registry.portFacts.length, 1);
       assert.equal(registry.portFacts[0]?.port, port);
       assert.equal(registry.portFacts[0]?.cancelled, true);
+      assert.equal(registry.portFacts[0]?.host, "127.0.0.1");
+      assert.equal(typeof registry.portFacts[0]?.durationMs, "number");
+      assert.equal(registry.portFacts[0]?.timeoutMs, 5_000);
+      assert.equal(registry.portFacts[0]?.error?.code, "ABORT_ERR");
     } finally {
       clearTimeout(abortTimer);
       if (stopCommand !== undefined) {
@@ -311,9 +321,78 @@ test("shell_command makes background waitForPort timeout visible in summary and 
     assert.equal(registry.portFacts.length, 1);
     assert.equal(registry.portFacts[0]?.port, port);
     assert.equal(registry.portFacts[0]?.ready, false);
+    assert.equal(registry.portFacts[0]?.host, "127.0.0.1");
+    assert.equal(typeof registry.portFacts[0]?.durationMs, "number");
+    assert.equal(registry.portFacts[0]?.timeoutMs, 250);
+    assert.equal(registry.portFacts[0]?.timedOut, true);
+    assert.equal(registry.portFacts[0]?.error?.code, "ECONNREFUSED");
     await shellCommand.execute({ commandLine: String(result.stopCommand), timeoutMs: 2_000 }, context);
     await ensurePidExited(typeof result.pid === "number" ? result.pid : undefined, 5_000);
   } finally {
+    await removeTempTree(root);
+  }
+});
+
+test("shell_command records pre-existing external port occupant facts on duplicate port start", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "agentarbor-command-runtime-"));
+  const server = createNetServer();
+  try {
+    const port = await listenOnUnusedLocalPort(server);
+    const registry = createRecordingProcessRegistry();
+    const occupantProbeCalls: number[] = [];
+    const portOccupantProbe: PortOccupantProbe = (input) => {
+      occupantProbeCalls.push(input.port);
+      assert.equal(input.host, "127.0.0.1");
+      return {
+        pid: 54321,
+        observedBy: "platform_probe",
+      };
+    };
+    const shellCommand = createLocalShellCommandTool(root, { processRegistry: registry, portOccupantProbe });
+    const output = await shellCommand.execute(
+      {
+        command: process.execPath,
+        args: [
+          "-e",
+          [
+            "const net=require('node:net');",
+            "const server=net.createServer();",
+            "server.on('error', () => process.exit(31));",
+            `server.listen(${port}, '127.0.0.1');`,
+            "setInterval(() => {}, 1000);",
+          ].join(""),
+        ],
+        background: true,
+        backgroundWaitMs: 750,
+        waitForPort: port,
+        waitForPortTimeoutMs: 1_000,
+      },
+      processContext
+    );
+    const result = asRecord(asRecord(output).result);
+
+    assert.equal(result.background, undefined);
+    assert.equal(result.exitCode, 31);
+    assert.equal(result.waitForPort, port);
+    assert.equal(result.portReady, false);
+    assert.equal("processId" in result, false);
+    assert.equal(registry.registered.length, 1);
+    assert.equal(registry.registered[0]?.kind, "background");
+    assert.equal(registry.registered[0]?.status, "exited");
+    assert.equal(registry.portFacts.length, 1);
+    assert.equal(registry.portFacts[0]?.status, "ready");
+    assert.equal(registry.portFacts[0]?.ready, true);
+    assert.equal(registry.portFacts[0]?.port, port);
+    assert.equal(registry.portFacts[0]?.host, "127.0.0.1");
+    assert.deepEqual(registry.portFacts[0]?.externalOccupant, {
+      pid: 54321,
+      observedBy: "platform_probe",
+      ownedByUs: false,
+    });
+    assert.deepEqual(occupantProbeCalls, [port]);
+    assert.equal(server.listening, true);
+  } finally {
+    await closeServer(server);
     await removeTempTree(root);
   }
 });
@@ -340,6 +419,37 @@ async function unusedLocalPort(): Promise<number> {
         }
         resolve(port);
       });
+    });
+  });
+}
+
+function listenOnUnusedLocalPort(server: Server): Promise<number> {
+  return new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      const port = typeof address === "object" && address !== null ? address.port : undefined;
+      if (port === undefined) {
+        reject(new Error("Could not allocate local port."));
+        return;
+      }
+      resolve(port);
+    });
+  });
+}
+
+function closeServer(server: Server): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (!server.listening) {
+      resolve();
+      return;
+    }
+    server.close((error) => {
+      if (error !== undefined) {
+        reject(error);
+        return;
+      }
+      resolve();
     });
   });
 }

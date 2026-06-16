@@ -20,8 +20,10 @@ export type ConfigResponse = {
     readonly workspaceDirectory?: string;
   };
   readonly commandShell?: CommandShellConfig;
+  readonly toolConfirmation?: ToolConfirmationConfig;
   readonly capabilities?: {
     readonly activeModel?: { readonly label?: string; readonly model?: string; readonly secretConfigured?: boolean };
+    readonly toolConfirmation?: ToolConfirmationConfig;
     readonly modelCapabilities?: {
       readonly contextWindowTokens?: number;
       readonly maxOutputTokens?: number;
@@ -35,6 +37,18 @@ export type ConfigResponse = {
 export type ModelProviderProfile = NonNullable<ConfigResponse["config"]>;
 
 export type CommandShellKind = "cmd" | "powershell" | "pwsh" | "bash" | "sh";
+
+export type ToolConfirmationPolicy = "prompt" | "full_access";
+
+export type ToolConfirmationConfig = {
+  readonly policy?: ToolConfirmationPolicy;
+  readonly label?: string;
+  readonly shellCommandConfirmation?: "prompt" | "skipped_by_full_access";
+  readonly shellCommandRequiresConfirmation?: boolean;
+  readonly summary?: string;
+  readonly riskDisclosure?: string;
+  readonly updatedAt?: string;
+};
 
 export type CommandShellConfig = {
   readonly kind?: CommandShellKind;

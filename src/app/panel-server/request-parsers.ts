@@ -11,6 +11,7 @@ import type {
   UpdateInformationAccessConfigInput,
   UpdateCommandShellConfigInput,
   UpdateModelProviderConfigInput,
+  UpdateToolConfirmationConfigInput,
   UpdateWebSearchConfigInput,
   UpdateWorkspaceConfigInput,
   UpsertMcpServerInput,
@@ -145,6 +146,15 @@ export function parseToolStateUpdate(toolName: string, raw: unknown): ToolStateS
     enabled,
     updatedAt: new Date().toISOString(),
   };
+}
+
+export function parseToolConfirmationUpdate(raw: unknown): UpdateToolConfirmationConfigInput {
+  const record = asRecord(raw);
+  const policy = parseToolConfirmationPolicy(record.policy);
+  if (policy === undefined) {
+    throw new PanelHttpError(400, "invalid_tool_confirmation_policy", "工具确认策略无效。");
+  }
+  return { policy };
 }
 
 export function parseMcpServerUpdate(raw: unknown): UpsertMcpServerInput {

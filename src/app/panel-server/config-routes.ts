@@ -25,6 +25,7 @@ import {
   parseMcpServerSecretValue,
   parseMcpServerImport,
   parseMcpServerUpdate,
+  parseToolConfirmationUpdate,
   parseToolStateUpdate,
   parseWebSearchUpdate,
   parseWorkspaceUpdate,
@@ -66,6 +67,7 @@ export async function handlePanelConfigRoute(
       informationAccess: await runtime.configCenter.getInformationAccessConfig(),
       workspace: await runtime.configCenter.getWorkspaceConfig(),
       commandShell: await runtime.configCenter.getCommandShellConfig(),
+      toolConfirmation: await runtime.configCenter.getToolConfirmationConfig(),
     });
     return true;
   }
@@ -647,6 +649,23 @@ export async function handlePanelConfigRoute(
         ok: true,
         status: "completed",
         commandShell,
+        capabilities: await runtime.capabilityCenter.snapshot(),
+      });
+      return true;
+    } catch (error) {
+      throw configCenterHttpError(error);
+    }
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/config/tool-confirmation") {
+    const body = await readJsonBody(request);
+    try {
+      const toolConfirmation = await runtime.configCenter.updateToolConfirmationConfig(parseToolConfirmationUpdate(body));
+      invalidateCapabilityCache(runtime);
+      writeJson(response, 200, {
+        ok: true,
+        status: "completed",
+        toolConfirmation,
         capabilities: await runtime.capabilityCenter.snapshot(),
       });
       return true;

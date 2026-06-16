@@ -90,6 +90,7 @@ export function projectToolFailure(input: {
       callId: input.request.callId,
       error: input.error,
       errorDomain: input.errorDomain,
+      errorFacts: input.errorFacts,
       facts: input.errorFacts,
       durationMs: input.durationMs,
     },

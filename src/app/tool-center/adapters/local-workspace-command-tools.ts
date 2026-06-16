@@ -6,9 +6,15 @@ import path from "node:path";
 import type { SanitizedCommandShellConfig } from "../../../domain/config/index.js";
 import type { ToolDefinition, ToolExecutionContext, ToolExecutor } from "../../../domain/tools/index.js";
 import {
+  createPlatformPortOccupantProbe,
+  probeLocalPort,
   processPortFactFromLocalPortFact,
   waitForLocalPort,
+  type LocalPortHost,
+  type LocalPortProbeFact,
+  type PortOccupantProbe,
   type ProcessPortFact,
+  type ProcessRecord,
   type ProcessRecordUpdate,
   type ProcessRegistration,
 } from "../../runtime-guard/index.js";
@@ -80,6 +86,7 @@ type CommandLogTarget = {
 
 export type LocalCommandProcessRegistry = {
   readonly register: (input: ProcessRegistration) => unknown;
+  readonly listAll?: () => readonly ProcessRecord[];
   readonly update?: (processId: string, patch: ProcessRecordUpdate) => unknown;
   readonly markExited?: (
     processId: string,
@@ -90,6 +97,7 @@ export type LocalCommandProcessRegistry = {
 
 export type LocalWorkspaceCommandToolOptions = LocalWorkspaceToolOptions & {
   readonly processRegistry?: LocalCommandProcessRegistry;
+  readonly portOccupantProbe?: PortOccupantProbe;
 };
 
 export type LocalCommandLogReadEntry = {
@@ -182,6 +190,7 @@ export function createLocalShellCommandTool(
 ): ToolExecutor {
   const sandboxPolicy = options.sandboxPolicy ?? createLocalWorkspaceSandboxPolicy();
   const commandShell = normalizeCommandShellConfig(options.commandShell);
+  const portOccupantProbe = options.portOccupantProbe ?? createPlatformPortOccupantProbe();
   return {
     definition: shellCommandDefinition(commandShell),
     execute: async (input, context) => {
@@ -214,6 +223,13 @@ export function createLocalShellCommandTool(
           platform: commandShell.platform,
         });
       const startedAt = Date.now();
+      const externalPortOccupantProbe = externalOnlyPortOccupantProbe(options.processRegistry, portOccupantProbe);
+      const preStartPortFact = await probePreStartWaitPort({
+        waitForPort,
+        abortSignal: context.abortSignal,
+        portOccupantProbe: externalPortOccupantProbe,
+      });
+      throwIfAborted(context.abortSignal);
       const rawOutcome = background
         ? normalized.legacyProgram === undefined || !executeDirectly
           ? await runBackgroundShellCommand(commandShell, normalized.commandLine, cwd.absolutePath, cwd.relativePath, backgroundWaitMs, processFacts)
@@ -225,10 +241,12 @@ export function createLocalShellCommandTool(
         result: rawOutcome.result,
         waitForPort,
         waitForPortTimeoutMs,
+        preStartPortFact,
         startedAt,
         abortSignal: context.abortSignal,
         processRegistry: options.processRegistry,
         processId: rawOutcome.processId,
+        portOccupantProbe: externalPortOccupantProbe,
       });
       return commandToolOutput({
         action: "shell_command",
@@ -794,6 +812,62 @@ function appendCommandPortFact(
   }
 }
 
+function externalOnlyPortOccupantProbe(
+  registry: LocalCommandProcessRegistry | undefined,
+  probe: PortOccupantProbe
+): PortOccupantProbe {
+  return async (input) => {
+    const observed = await probe(input);
+    if (observed === undefined) {
+      return undefined;
+    }
+    if (registryHasActivePortOwner(registry, input.port, input.host, observed.pid)) {
+      return undefined;
+    }
+    return observed;
+  };
+}
+
+function registryHasActivePortOwner(
+  registry: LocalCommandProcessRegistry | undefined,
+  port: number,
+  host: LocalPortHost,
+  observedPid: number | undefined
+): boolean {
+  const records = registry?.listAll?.() ?? [];
+  return records.some((record) => {
+    if (record.owned !== true || !isActiveProcessStatus(record.status)) {
+      return false;
+    }
+    if (observedPid !== undefined && record.pid === observedPid) {
+      return true;
+    }
+    return record.ports.some((fact) => fact.port === port && fact.host === host && fact.ready === true);
+  });
+}
+
+function isActiveProcessStatus(status: ProcessRecord["status"]): boolean {
+  return status === "starting" || status === "running" || status === "killing";
+}
+
+async function probePreStartWaitPort(input: {
+  readonly waitForPort: number | undefined;
+  readonly abortSignal: AbortSignal | undefined;
+  readonly portOccupantProbe: PortOccupantProbe;
+}): Promise<LocalPortProbeFact | undefined> {
+  if (input.waitForPort === undefined) {
+    return undefined;
+  }
+  const fact = await probeLocalPort({
+    port: input.waitForPort,
+    host: "127.0.0.1",
+    timeoutMs: 250,
+    abortSignal: input.abortSignal,
+    portOccupantProbe: input.portOccupantProbe,
+  });
+  return fact.ready === true ? fact : undefined;
+}
+
 async function runShellCommand(
   shell: SanitizedCommandShellConfig,
   commandLine: string,
@@ -1072,10 +1146,12 @@ async function enrichCommandResult(input: {
   readonly result: CommandExecutionResult;
   readonly waitForPort: number | undefined;
   readonly waitForPortTimeoutMs: number;
+  readonly preStartPortFact: LocalPortProbeFact | undefined;
   readonly startedAt: number;
   readonly abortSignal: AbortSignal | undefined;
   readonly processRegistry: LocalCommandProcessRegistry | undefined;
   readonly processId?: string;
+  readonly portOccupantProbe: PortOccupantProbe;
 }): Promise<CommandExecutionResult> {
   if (input.waitForPort === undefined) {
     return {
@@ -1084,6 +1160,14 @@ async function enrichCommandResult(input: {
     };
   }
   if (input.result.background !== true) {
+    const portFact = input.preStartPortFact ?? await probeLocalPort({
+      port: input.waitForPort,
+      host: "127.0.0.1",
+      timeoutMs: Math.min(250, input.waitForPortTimeoutMs),
+      abortSignal: input.abortSignal,
+      portOccupantProbe: input.portOccupantProbe,
+    });
+    appendCommandPortFact(input.processRegistry, input.processId, processPortFactFromLocalPortFact(portFact));
     return {
       ...input.result,
       waitForPort: input.waitForPort,
@@ -1094,6 +1178,13 @@ async function enrichCommandResult(input: {
         "waitForPort was requested but the command is not running in the background."
       ),
     };
+  }
+  if (input.preStartPortFact !== undefined) {
+    appendCommandPortFact(
+      input.processRegistry,
+      input.processId,
+      processPortFactFromLocalPortFact(input.preStartPortFact)
+    );
   }
   const portWait = await waitForLocalPort({
     port: input.waitForPort,

@@ -186,27 +186,102 @@ test("ResearchRuntime page read returns structured HTTP failure facts", async ()
   assert.equal(typeof step?.errorFacts?.durationMs, "number");
 });
 
-test("ResearchRuntime page read returns HTTP status facts for non-OK responses", async () => {
-  const pageFetch: PageFetchLike = async () => ({
-    ok: false,
-    status: 500,
-    statusText: "Internal Server Error",
-    text: async () => "server failed",
+test("ResearchRuntime page read returns DNS failure facts", async () => {
+  const cause = Object.assign(new Error("getaddrinfo ENOTFOUND missing.example.test"), {
+    code: "ENOTFOUND",
+    errno: -3008,
+    syscall: "getaddrinfo",
+    hostname: "missing.example.test",
   });
+  const pageFetch: PageFetchLike = async () => {
+    const error = new TypeError("fetch failed") as Error & { cause?: unknown };
+    error.cause = cause;
+    throw error;
+  };
   const runtime = createDefaultResearchRuntime({ pageFetch });
 
-  const read = await runtime.read({ ref: "https://example.test/fail" });
+  const read = await runtime.read({ ref: "https://missing.example.test/api" });
   const step = read.trace.sourceSteps[0];
 
   assert.equal(read.status, "provider-failed");
   assert.equal(step?.source, "page");
   assert.equal(step?.status, "provider-failed");
-  assert.equal(step?.message, "Page read returned HTTP 500.");
-  assert.equal(step?.errorFacts?.statusCode, 500);
-  assert.equal(step?.errorFacts?.statusText, "Internal Server Error");
+  assert.match(step?.message ?? "", /ENOTFOUND/);
+  assert.equal(step?.errorFacts?.code, "ENOTFOUND");
+  assert.equal(step?.errorFacts?.errno, -3008);
+  assert.equal(step?.errorFacts?.syscall, "getaddrinfo");
+  assert.equal(step?.errorFacts?.hostname, "missing.example.test");
   assert.equal(step?.errorFacts?.method, "GET");
-  assert.equal(step?.errorFacts?.url, "https://example.test/fail");
+  assert.equal(step?.errorFacts?.url, "https://missing.example.test/api");
   assert.equal(typeof step?.errorFacts?.durationMs, "number");
+});
+
+test("ResearchRuntime page read returns timeout facts", async () => {
+  const pageFetch: PageFetchLike = async (_url, init) => {
+    await new Promise<void>((resolve, reject) => {
+      if (init.signal?.aborted === true) {
+        reject(init.signal.reason);
+        return;
+      }
+      const wait = setTimeout(resolve, 100);
+      init.signal?.addEventListener("abort", () => {
+        clearTimeout(wait);
+        reject(init.signal?.reason);
+      }, { once: true });
+    });
+    return {
+      ok: true,
+      status: 200,
+      text: async () => "late body",
+    };
+  };
+  const runtime = new ResearchRuntime({
+    adapters: [
+      createPageInformationSourceAdapter({ fetch: pageFetch, defaultTimeoutMs: 20 }),
+    ],
+  });
+
+  const read = await runtime.read({ ref: "https://example.test/slow" });
+  const step = read.trace.sourceSteps[0];
+
+  assert.equal(read.status, "provider-failed");
+  assert.equal(step?.source, "page");
+  assert.equal(step?.status, "provider-failed");
+  assert.match(step?.message ?? "", /timed out after 20ms/);
+  assert.equal(step?.errorFacts?.code, "ETIMEDOUT");
+  assert.equal(step?.errorFacts?.timedOut, true);
+  assert.equal(step?.errorFacts?.timeoutMs, 20);
+  assert.equal(step?.errorFacts?.method, "GET");
+  assert.equal(step?.errorFacts?.url, "https://example.test/slow");
+  assert.equal(typeof step?.errorFacts?.durationMs, "number");
+});
+
+test("ResearchRuntime page read returns HTTP status facts for non-OK responses", async () => {
+  for (const scenario of [
+    { status: 404, statusText: "Not Found", url: "https://example.test/missing" },
+    { status: 500, statusText: "Internal Server Error", url: "https://example.test/fail" },
+  ] as const) {
+    const pageFetch: PageFetchLike = async () => ({
+      ok: false,
+      status: scenario.status,
+      statusText: scenario.statusText,
+      text: async () => "server failed",
+    });
+    const runtime = createDefaultResearchRuntime({ pageFetch });
+
+    const read = await runtime.read({ ref: scenario.url });
+    const step = read.trace.sourceSteps[0];
+
+    assert.equal(read.status, "provider-failed");
+    assert.equal(step?.source, "page");
+    assert.equal(step?.status, "provider-failed");
+    assert.equal(step?.message, `Page read returned HTTP ${scenario.status} ${scenario.statusText}.`);
+    assert.equal(step?.errorFacts?.statusCode, scenario.status);
+    assert.equal(step?.errorFacts?.statusText, scenario.statusText);
+    assert.equal(step?.errorFacts?.method, "GET");
+    assert.equal(step?.errorFacts?.url, scenario.url);
+    assert.equal(typeof step?.errorFacts?.durationMs, "number");
+  }
 });
 
 test("ResearchRuntime reads only registered command-log refs", async () => {

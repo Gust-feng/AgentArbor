@@ -145,6 +145,35 @@ test("panel config API persists command shell selection into capability snapshot
   }
 });
 
+test("panel config API persists tool confirmation policy into capability snapshots", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-tool-confirmation-"));
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+  try {
+    const initial = await requestJson(server.url, "/api/config");
+    const update = await requestJson(server.url, "/api/config/tool-confirmation", {
+      method: "POST",
+      body: {
+        policy: "full_access",
+      },
+    });
+    const after = await requestJson(server.url, "/api/config");
+
+    assert.equal(initial.status, 200);
+    assert.equal(update.status, 200);
+    assert.equal(after.status, 200);
+    assert.equal(initial.body.toolConfirmation.policy, "prompt");
+    assert.equal(initial.body.toolConfirmation.shellCommandRequiresConfirmation, true);
+    assert.equal(update.body.toolConfirmation.policy, "full_access");
+    assert.equal(update.body.toolConfirmation.shellCommandRequiresConfirmation, false);
+    assert.equal(update.body.capabilities.toolConfirmation.policy, "full_access");
+    assert.equal(after.body.toolConfirmation.policy, "full_access");
+    assert.equal(after.body.capabilities.toolConfirmation.policy, "full_access");
+  } finally {
+    await server.close();
+    await removeTemporaryTree(directory);
+  }
+});
+
 test("panel capability and profile APIs expose safe unified capability projections", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-capabilities-"));
   const secret = "sk-panel-capability-secret";

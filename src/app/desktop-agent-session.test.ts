@@ -19,6 +19,7 @@ import type { AgentDefinition } from "./agent-prompts/contracts.js";
 import { DESKTOP_ROOT_AGENT } from "./agent-prompts/desktop-root-agent.js";
 import { runDesktopAgentSession } from "./desktop-agent-session.js";
 import { createOpenAiStreamTextResponse } from "./panel-openai-test-fixtures.js";
+import { ToolCenter } from "./tool-center/index.js";
 
 test("Desktop Agent Session answers ordinary questions without entering deep mode", async () => {
   const result = await runDesktopAgentSession("你是什么模型？", { aiMode: "fake" });
@@ -608,6 +609,35 @@ test("Desktop Agent Session publishes confirmation requests from the injected ag
   const confirmationEvent = result.runtime.eventLog.list().find((entry) => entry.type === "user_approval.requested");
   assert.equal(confirmationEvent?.message.from.id, "custom-ordinary-agent");
   assert.equal(confirmationEvent?.message.from.role, "agent");
+});
+
+test("Desktop Agent Session uses full access policy to bypass shell confirmation through ToolCenter", async () => {
+  const promptResult = await runDesktopAgentSession("运行 echo ok", {
+    aiMode: "fake",
+    createIntelligenceChannel: () => new ShellCommandToolChannel(),
+    createToolCenter: () => confirmationAwareShellToolCenter(),
+    capabilitySnapshot: desktopCapabilitySnapshot([
+      capabilityTool("shell_command", "execute"),
+    ]),
+  });
+  const fullAccessResult = await runDesktopAgentSession("运行 echo ok", {
+    aiMode: "fake",
+    toolConfirmationPolicy: "full_access",
+    createIntelligenceChannel: () => new ShellCommandToolChannel(),
+    createToolCenter: () => confirmationAwareShellToolCenter(),
+    capabilitySnapshot: desktopCapabilitySnapshot([
+      capabilityTool("shell_command", "execute"),
+    ]),
+  });
+
+  assert.equal(promptResult.status, "confirmation_needed");
+  assert.equal(promptResult.pendingConfirmation?.confirmationId, "confirmation-call-shell-policy");
+  assert.equal(promptResult.runtime.eventLog.types().includes("user_approval.requested"), true);
+  assert.equal(fullAccessResult.status, "completed");
+  assert.equal(fullAccessResult.pendingConfirmation, undefined);
+  assert.equal(fullAccessResult.runtime.eventLog.types().includes("tool.requested"), true);
+  assert.equal(fullAccessResult.runtime.eventLog.types().includes("tool.completed"), true);
+  assert.equal(fullAccessResult.runtime.eventLog.types().includes("user_approval.requested"), false);
 });
 
 
@@ -1449,6 +1479,86 @@ class LocalToolCenter implements ToolExecutionBroker {
   getCallCount(): number {
     return this.calls;
   }
+}
+
+class ShellCommandToolChannel implements IntelligenceChannel {
+  readonly requests: ModelRequest[] = [];
+
+  async request(request: ModelRequest) {
+    this.requests.push(request);
+    const responseBase = {
+      requestId: request.requestId,
+      providerId: "test-provider",
+      providerKind: "fake" as const,
+      protocolKind: "openai_compatible_chat_completions" as const,
+      model: "test-model",
+      status: "completed" as const,
+      outputKind: "explanation" as const,
+      validation: { status: "passed" as const, checkedAt: new Date(0).toISOString(), issues: [] },
+      completedAt: new Date(0).toISOString(),
+    };
+    if (this.requests.length === 1) {
+      return {
+        ...responseBase,
+        responseId: "model-response-shell-command-call",
+        toolCalls: [{ callId: "call-shell-policy", toolName: "shell_command", input: { commandLine: "echo ok" } }],
+        finishReason: "tool_call" as const,
+      };
+    }
+    return {
+      ...responseBase,
+      responseId: "model-response-shell-command-final",
+      textOutput: "命令已执行。",
+      finishReason: "stop" as const,
+    };
+  }
+
+  validateResponse() {
+    return { status: "passed" as const, checkedAt: new Date(0).toISOString(), issues: [] };
+  }
+}
+
+function confirmationAwareShellToolCenter(): ToolCenter {
+  const center = new ToolCenter({ platform: "win32" });
+  center.register({
+    definition: {
+      name: "shell_command",
+      description: "Fixture shell command.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          commandLine: { type: "string" },
+        },
+        required: ["commandLine"],
+      },
+      metadata: {
+        category: "terminal",
+        riskLevel: "high",
+        operationType: "execute",
+        requiresConfirmation: true,
+        visibleResultPolicy: {
+          userVisible: "safe-preview",
+          maxPreviewChars: 800,
+          omitRawOutput: true,
+        },
+      },
+    },
+    async execute(input) {
+      return {
+        action: "shell_command",
+        status: "completed",
+        summary: "echo ok · exit 0",
+        result: {
+          commandLine: (input as { readonly commandLine?: string }).commandLine,
+          exitCode: 0,
+          stdout: "ok\n",
+          stderr: "",
+          durationMs: 0,
+        },
+      };
+    },
+  });
+  return center;
 }
 
 class ApprovalRequiredToolChannel implements IntelligenceChannel {

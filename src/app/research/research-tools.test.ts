@@ -261,12 +261,20 @@ test("research read tool batch preserves command-log successes and HTTP failure 
     port: 43210,
   });
   const pageFetch: PageFetchLike = async () => {
+    return {
+      ok: false,
+      status: 404,
+      statusText: "Not Found",
+      text: async () => "missing",
+    };
+  };
+  const refusingFetch: PageFetchLike = async () => {
     const error = new TypeError("fetch failed") as Error & { cause?: unknown };
     error.cause = cause;
     throw error;
   };
   const runtime = createDefaultResearchRuntime({
-    pageFetch,
+    pageFetch: async (url, init) => url.includes("127.0.0.1") ? refusingFetch(url, init) : pageFetch(url, init),
     commandLogRegistry: {
       read: (ref) => ref === "command-log://shell-batch"
         ? { content: "shell batch log\n" }
@@ -276,7 +284,14 @@ test("research read tool batch preserves command-log successes and HTTP failure 
   const readTool = createResearchReadTool(runtime);
 
   const read = await readTool.execute(
-    { ref: ["command-log://shell-batch", "http://127.0.0.1:43210/status", "command-log://missing"] },
+    {
+      ref: [
+        "command-log://shell-batch",
+        "http://127.0.0.1:43210/status",
+        "https://example.test/missing",
+        "command-log://missing",
+      ],
+    },
     { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" }
   ) as readonly {
     readonly ref: string;
@@ -286,7 +301,7 @@ test("research read tool batch preserves command-log successes and HTTP failure 
     readonly errorFacts?: Readonly<Record<string, string | number | boolean>>;
   }[];
 
-  assert.deepEqual(read.map((item) => item.status), ["completed", "provider-failed", "invalid-input"]);
+  assert.deepEqual(read.map((item) => item.status), ["completed", "provider-failed", "provider-failed", "invalid-input"]);
   assert.equal(read[0]?.contentPreview, "shell batch log\n");
   assert.match(read[1]?.error ?? "", /ECONNREFUSED/);
   assert.equal(read[1]?.errorFacts?.code, "ECONNREFUSED");
@@ -295,7 +310,12 @@ test("research read tool batch preserves command-log successes and HTTP failure 
   assert.equal(read[1]?.errorFacts?.address, "127.0.0.1");
   assert.equal(read[1]?.errorFacts?.port, 43210);
   assert.equal(typeof read[1]?.errorFacts?.durationMs, "number");
-  assert.equal(read[2]?.error, "Unknown or unregistered command log ref.");
+  assert.equal(read[2]?.error, "Page read returned HTTP 404 Not Found.");
+  assert.equal(read[2]?.errorFacts?.statusCode, 404);
+  assert.equal(read[2]?.errorFacts?.statusText, "Not Found");
+  assert.equal(read[2]?.errorFacts?.method, "GET");
+  assert.equal(read[2]?.errorFacts?.url, "https://example.test/missing");
+  assert.equal(read[3]?.error, "Unknown or unregistered command log ref.");
 });
 
 test("research search tool passes site constraint into runtime query", async () => {

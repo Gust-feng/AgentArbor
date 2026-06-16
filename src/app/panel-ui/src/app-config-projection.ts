@@ -1,8 +1,8 @@
 import { modelProviderDisplayName, resolveModelProviderIdentity } from "./model-provider-logos";
-import type { ConfigResponse, ModelProviderModelCatalog } from "./contracts/config";
+import type { ConfigResponse, ModelProviderModelCatalog, ToolConfirmationPolicy } from "./contracts/config";
 
 export type ComposerReasoningEffort = "" | "low" | "medium" | "high";
-export type ComposerToolConfirmationPolicy = "prompt" | "full_access";
+export type ComposerToolConfirmationPolicy = ToolConfirmationPolicy;
 export type VisibleAiMode = "none" | "fake" | "openai-compatible" | "openai-responses";
 
 export function mergeConfigResponse(previous: ConfigResponse | undefined, incoming: ConfigResponse): ConfigResponse {
@@ -16,6 +16,7 @@ export function mergeConfigResponse(previous: ConfigResponse | undefined, incomi
     modelCatalogs: incoming.modelCatalogs ?? previous?.modelCatalogs,
     workspace: incoming.workspace ?? previous?.workspace,
     commandShell: incoming.commandShell ?? previous?.commandShell,
+    toolConfirmation: incoming.toolConfirmation ?? previous?.toolConfirmation,
     capabilities: incoming.capabilities ?? previous?.capabilities,
   };
 }
@@ -27,6 +28,12 @@ export function normalizeVisibleAiMode(mode: VisibleAiMode | undefined): Visible
     mode === "openai-responses"
     ? mode
     : "openai-compatible";
+}
+
+export function normalizeComposerToolConfirmationPolicy(
+  policy: ComposerToolConfirmationPolicy | undefined
+): ComposerToolConfirmationPolicy {
+  return policy === "full_access" ? "full_access" : "prompt";
 }
 
 export function visibleConfigLabel(config: NonNullable<ConfigResponse["config"]>): string {

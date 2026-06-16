@@ -93,7 +93,9 @@ test("CapabilityCenter freezes safe model, tool, skill, and MCP catalog projecti
     assert.deepEqual(snapshot.mcpCatalog[0]?.exposedTools.map((tool) => tool.name), ["docs__lookup"]);
     assert.equal(snapshot.toolCatalog.tools.some((tool) => tool.name === "docs__lookup" && tool.scopes.includes("mcp")), true);
     assert.equal(snapshot.toolCatalog.allowedTools.includes("docs__lookup"), true);
-    assert.equal(snapshot.securitySummary, "本轮模型、工具、技能和工作区能力快照。");
+    assert.equal(snapshot.toolConfirmation?.policy, "prompt");
+    assert.equal(snapshot.toolConfirmation?.shellCommandRequiresConfirmation, true);
+    assert.equal(snapshot.securitySummary, "本轮模型、工具、技能和工作区能力快照。确认策略：标准访问。");
     assert.equal(snapshot.securitySummary.includes("prompt"), false);
     assert.equal(snapshot.securitySummary.includes("raw"), false);
     assert.equal(text.includes("sk-capability-secret"), false);
@@ -103,6 +105,27 @@ test("CapabilityCenter freezes safe model, tool, skill, and MCP catalog projecti
   } finally {
     await fs.rm(directory, { recursive: true, force: true });
     await fs.rm(skillRoot, { recursive: true, force: true });
+  }
+});
+
+test("CapabilityCenter freezes full access confirmation policy in snapshots", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-capability-center-full-access-"));
+  try {
+    const settingsStore = new FileSystemNormalSettingsStore(directory);
+    const secretStore = new FileSystemLocalDevSecretStore(directory);
+    const configCenter = new ConfigCenter({ settingsStore, secretStore });
+    await configCenter.updateToolConfirmationConfig({ policy: "full_access" });
+
+    const snapshot = await new CapabilityCenter({
+      configCenter,
+      skillRoots: [],
+    }).snapshot();
+
+    assert.equal(snapshot.toolConfirmation?.policy, "full_access");
+    assert.equal(snapshot.toolConfirmation?.shellCommandRequiresConfirmation, false);
+    assert.equal(snapshot.securitySummary.includes("完全访问"), true);
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
   }
 });
 

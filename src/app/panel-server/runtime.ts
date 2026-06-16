@@ -208,13 +208,17 @@ async function preparePanelBasicRunStart(
   runtime: PanelRuntime,
   input: BasicAgentRunStartInput
 ): Promise<BasicAgentRunStartFacts> {
-  const informationAccess = await runtime.configCenter.getInformationAccessConfig();
+  const [informationAccess, toolConfirmation] = await Promise.all([
+    runtime.configCenter.getInformationAccessConfig(),
+    runtime.configCenter.getToolConfirmationConfig(),
+  ]);
   if (input.runKind !== "desktop") {
     const config = await modelProviderConfigForRun(runtime, input.modelOverride);
     return {
       aiMode: input.aiMode ?? config.defaultAiMode,
       config,
       informationAccess,
+      toolConfirmationPolicy: input.toolConfirmationPolicy ?? toolConfirmation.policy,
     };
   }
 
@@ -229,6 +233,7 @@ async function preparePanelBasicRunStart(
     config,
     informationAccess,
     capabilitySnapshot,
+    toolConfirmationPolicy: input.toolConfirmationPolicy ?? toolConfirmation.policy,
     agentDefinitionRef: resolvePanelRunMode(input.runKind, input.runMode) === "agent"
       ? runAgentDefinitionRef(runtime.desktopAgentDefinition)
       : undefined,

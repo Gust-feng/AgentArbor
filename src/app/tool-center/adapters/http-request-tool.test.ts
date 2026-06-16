@@ -94,6 +94,13 @@ test("http_request times out and rejects invalid URLs", async () => {
         assertError(error);
         assert.match(error.message, /timed out after 20ms/);
         assert.doesNotMatch(error.message, /cancelled/);
+        const facts = factsFromError(error);
+        assert.equal(facts.code, "ETIMEDOUT");
+        assert.equal(facts.timedOut, true);
+        assert.equal(facts.timeoutMs, 20);
+        assert.equal(facts.method, "GET");
+        assert.equal(facts.url, `${server.origin}/slow`);
+        assert.equal(typeof facts.durationMs, "number");
         return true;
       }
     );

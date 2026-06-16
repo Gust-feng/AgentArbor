@@ -56,13 +56,15 @@ test("config settings schema keeps model provider settings split", async () => {
 });
 
 test("config settings schema keeps tool and MCP settings split", async () => {
-  const [settingsSchema, toolMcpSettings, settingsUtils] = await Promise.all([
+  const [settingsSchema, toolMcpSettings, toolConfirmationSettings, settingsUtils] = await Promise.all([
     fs.readFile(path.join(process.cwd(), "src", "app", "config-center", "settings-schema.ts"), "utf8"),
     fs.readFile(path.join(process.cwd(), "src", "app", "config-center", "tool-mcp-settings.ts"), "utf8"),
+    fs.readFile(path.join(process.cwd(), "src", "app", "config-center", "tool-confirmation-settings.ts"), "utf8"),
     fs.readFile(path.join(process.cwd(), "src", "app", "config-center", "settings-utils.ts"), "utf8"),
   ]);
 
   assert.equal(settingsSchema.includes('from "./tool-mcp-settings.js"'), true);
+  assert.equal(settingsSchema.includes('from "./tool-confirmation-settings.js"'), true);
   assert.equal(settingsSchema.includes('from "./settings-utils.js"'), true);
   assert.equal(settingsSchema.includes("export function sanitizeMcpArgs"), false);
   assert.equal(settingsSchema.includes("export function parseMcpCommandLine"), false);
@@ -70,6 +72,8 @@ test("config settings schema keeps tool and MCP settings split", async () => {
   assert.equal(settingsSchema.includes("function parseMcpServers"), false);
   assert.equal(settingsSchema.includes("function normalizeToolStates"), false);
   assert.equal(settingsSchema.includes("function normalizeMcpServers"), false);
+  assert.equal(settingsSchema.includes("function parseToolConfirmationSettings"), false);
+  assert.equal(settingsSchema.includes("function normalizeToolConfirmationSettings"), false);
   assert.equal(settingsSchema.includes("function requiredString"), false);
   assert.equal(settingsSchema.includes("function asRecord"), false);
   assert.equal(toolMcpSettings.includes("export function sanitizeMcpArgs"), true);
@@ -78,6 +82,8 @@ test("config settings schema keeps tool and MCP settings split", async () => {
   assert.equal(toolMcpSettings.includes("export function parseMcpServers"), true);
   assert.equal(toolMcpSettings.includes("export function normalizeToolStates"), true);
   assert.equal(toolMcpSettings.includes("export function normalizeMcpServers"), true);
+  assert.equal(toolConfirmationSettings.includes("export function parseToolConfirmationSettings"), true);
+  assert.equal(toolConfirmationSettings.includes("export function normalizeToolConfirmationSettings"), true);
   assert.equal(settingsUtils.includes("export function requiredString"), true);
   assert.equal(settingsUtils.includes("export function asRecord"), true);
 });
@@ -139,6 +145,32 @@ test("command shell auto mode prefers Windows shells that avoid cmd quoting trap
     assert.equal(powerShell.kind, "powershell");
     assert.equal(powerShell.syntax, "powershell");
     assert.equal(explicitCmd.kind, "cmd");
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("ConfigCenter persists tool confirmation policy and defaults shell commands to prompt", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-config-tool-confirmation-"));
+  try {
+    const settingsStore = new FileSystemNormalSettingsStore(directory);
+    const secretStore = new FileSystemLocalDevSecretStore(directory);
+    const configCenter = new ConfigCenter({ settingsStore, secretStore });
+
+    const initial = await configCenter.getToolConfirmationConfig();
+    const updated = await configCenter.updateToolConfirmationConfig({ policy: "full_access" });
+    const reloaded = await new ConfigCenter({ settingsStore, secretStore }).getToolConfirmationConfig();
+    const settingsRaw = JSON.parse(await fs.readFile(settingsStore.settingsPath, "utf8")) as {
+      readonly toolConfirmation?: { readonly policy?: string };
+    };
+
+    assert.equal(initial.policy, "prompt");
+    assert.equal(initial.shellCommandRequiresConfirmation, true);
+    assert.equal(updated.policy, "full_access");
+    assert.equal(updated.shellCommandRequiresConfirmation, false);
+    assert.equal(updated.riskDisclosure.includes("sandbox"), true);
+    assert.equal(reloaded.policy, "full_access");
+    assert.equal(settingsRaw.toolConfirmation?.policy, "full_access");
   } finally {
     await fs.rm(directory, { recursive: true, force: true });
   }

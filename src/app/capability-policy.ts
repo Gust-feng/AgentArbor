@@ -46,6 +46,9 @@ export function resolveRunCapabilities(input: ResolveRunCapabilitiesInput): RunC
       riskLevel: tool.riskLevel,
       operationType: tool.operationType,
       requiresConfirmation: tool.requiresConfirmation,
+      ...(input.snapshot.toolConfirmation === undefined
+        ? {}
+        : { confirmationPolicy: input.snapshot.toolConfirmation.policy }),
       reason: exposureReason({
         enabled: tool.enabled,
         availability: tool.availability,
@@ -54,6 +57,7 @@ export function resolveRunCapabilities(input: ResolveRunCapabilitiesInput): RunC
         modelSupportsToolCalling,
         modelVisible,
         requiresConfirmation: tool.requiresConfirmation,
+        confirmationPolicy: input.snapshot.toolConfirmation?.policy,
       }),
     };
   });
@@ -104,6 +108,7 @@ function exposureReason(input: {
   readonly modelSupportsToolCalling: boolean;
   readonly modelVisible: boolean;
   readonly requiresConfirmation: boolean;
+  readonly confirmationPolicy?: "prompt" | "full_access";
 }): string {
   if (!input.modelSupportsToolCalling) return "当前模型不支持工具调用。";
   if (!input.enabled) return "工具已在配置中停用。";
@@ -111,6 +116,7 @@ function exposureReason(input: {
   if (!input.allowedBySnapshot) return "不在本轮可用范围内。";
   if (input.denied) return "本轮已隐藏。";
   if (!input.modelVisible) return "当前模式不可用。";
+  if (input.requiresConfirmation && input.confirmationPolicy === "full_access") return "可用，当前完全访问会跳过逐条确认。";
   if (input.requiresConfirmation) return "可用，命令执行会先等你确认。";
   return "可用。";
 }

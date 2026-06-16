@@ -14,6 +14,7 @@ import type {
   BasicAgentRunExecutionResult,
   BasicAgentRunExecutorConfig,
   BasicAgentRunStartInput,
+  BasicAgentRunResourceInspectionContext,
   BasicAgentRuntimeReadyContext,
 } from "./contracts.js";
 import {
@@ -46,6 +47,7 @@ export class BasicAgentRunExecutor {
     const startInput: BasicAgentRunStartInput = { ...input, runMode };
     const startImmediately = input.startImmediately !== false;
     const startFacts = await this.config.prepareRunStart(startInput);
+    const toolConfirmationPolicy = startInput.toolConfirmationPolicy ?? startFacts.toolConfirmationPolicy;
     const job = this.config.runJobs.create({
       runKind: startInput.runKind,
       runMode,
@@ -56,7 +58,7 @@ export class BasicAgentRunExecutor {
       runAfterRunId: startInput.runAfterRunId,
       taskSoilInput: startInput.taskSoilInput,
       reasoningEffort: startInput.reasoningEffort,
-      toolConfirmationPolicy: startInput.toolConfirmationPolicy,
+      toolConfirmationPolicy,
       agentDefinitionRef: startFacts.agentDefinitionRef,
       config: startFacts.config,
       informationAccess: startFacts.informationAccess,
@@ -137,8 +139,7 @@ export class BasicAgentRunExecutor {
     if (shouldCleanup && cancelled.status === "cancelled") {
       await this.cleanupRunResources(runId);
     }
-    await this.config.onRunFinished(cancelled);
-    await this.config.persistRun(cancelled);
+    await this.finalizeTerminalJob(cancelled);
     return this.requireBasicRun(runId);
   }
 
@@ -252,8 +253,7 @@ export class BasicAgentRunExecutor {
       });
       const completed = this.requireJob(runId);
       this.syncRunEvents(completed);
-      await this.config.onRunFinished(completed);
-      await this.config.persistRun(completed);
+      await this.finalizeTerminalJob(completed);
     } catch (error) {
       if (abort.signal.aborted) {
         await this.cancel(runId);
@@ -264,8 +264,7 @@ export class BasicAgentRunExecutor {
       const failed = this.config.runJobs.get(runId);
       if (failed !== undefined) {
         this.syncRunEvents(failed);
-        await this.config.onRunFinished(failed);
-        await this.config.persistRun(failed);
+        await this.finalizeTerminalJob(failed);
       }
     } finally {
       this.config.abortControllers.delete(runId);
@@ -290,10 +289,33 @@ export class BasicAgentRunExecutor {
 
   private async cleanupRunResources(runId: string): Promise<void> {
     try {
-      await this.config.cleanupRunResources?.(runId);
+      await this.config.cleanupRunResources?.(runId, {
+        reason: "cancel",
+        terminalStatus: "cancelled",
+      });
     } catch {
       // Cleanup failures must not rewrite the already-cancelled run outcome.
     }
+  }
+
+  private async inspectRunResources(
+    runId: string,
+    terminalStatus: BasicAgentRunResourceInspectionContext["terminalStatus"]
+  ): Promise<void> {
+    try {
+      await this.config.inspectRunResources?.(runId, { terminalStatus });
+    } catch {
+      // Runtime guard inspection is diagnostic and must not rewrite terminal outcomes.
+    }
+  }
+
+  private async finalizeTerminalJob(job: BasicAgentRunJob): Promise<void> {
+    const terminalStatus = inspectableTerminalStatus(job.status);
+    if (terminalStatus !== undefined) {
+      await this.inspectRunResources(job.runId, terminalStatus);
+    }
+    await this.config.onRunFinished(job);
+    await this.config.persistRun(job);
   }
 
   private scheduleConfirmationResume(input: {
@@ -342,8 +364,7 @@ export class BasicAgentRunExecutor {
       });
       const blocked = this.requireJob(input.runId);
       this.syncRunEvents(blocked);
-      await this.config.onRunFinished(blocked);
-      await this.config.persistRun(blocked);
+      await this.finalizeTerminalJob(blocked);
       return this.requireBasicRun(input.runId);
     }
 
@@ -413,8 +434,7 @@ export class BasicAgentRunExecutor {
       });
       const completed = this.requireJob(input.runId);
       this.syncRunEvents(completed);
-      await this.config.onRunFinished(completed);
-      await this.config.persistRun(completed);
+      await this.finalizeTerminalJob(completed);
       return this.requireBasicRun(input.runId);
     } catch (error) {
       if (abort.signal.aborted) {
@@ -426,8 +446,7 @@ export class BasicAgentRunExecutor {
       const failed = this.config.runJobs.get(input.runId);
       if (failed !== undefined) {
         this.syncRunEvents(failed);
-        await this.config.onRunFinished(failed);
-        await this.config.persistRun(failed);
+        await this.finalizeTerminalJob(failed);
       }
       return this.requireBasicRun(input.runId);
     } finally {
@@ -457,8 +476,7 @@ export class BasicAgentRunExecutor {
     });
     const blocked = this.requireJob(runId);
     this.syncRunEvents(blocked);
-    await this.config.onRunFinished(blocked);
-    await this.config.persistRun(blocked);
+    await this.finalizeTerminalJob(blocked);
   }
 
   private async failFromExecutionResult(
@@ -481,8 +499,7 @@ export class BasicAgentRunExecutor {
     });
     const failed = this.requireJob(runId);
     this.syncRunEvents(failed);
-    await this.config.onRunFinished(failed);
-    await this.config.persistRun(failed);
+    await this.finalizeTerminalJob(failed);
   }
 
 }
@@ -519,4 +536,13 @@ function missingTerminalExecutionResult(result: BasicAgentRunExecutionResult): B
 
 function isTerminalBasicAgentRunJob(job: BasicAgentRunJob): boolean {
   return job.status === "completed" || job.status === "failed" || job.status === "cancelled" || job.status === "blocked";
+}
+
+function inspectableTerminalStatus(
+  status: BasicAgentRunJob["status"]
+): BasicAgentRunResourceInspectionContext["terminalStatus"] | undefined {
+  if (status === "completed" || status === "failed" || status === "blocked" || status === "cancelled") {
+    return status;
+  }
+  return undefined;
 }

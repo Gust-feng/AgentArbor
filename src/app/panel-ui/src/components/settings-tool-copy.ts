@@ -1,3 +1,4 @@
+import type { ToolConfirmationPolicy } from "../contracts/config";
 import type { ToolCatalogItem } from "../contracts/tools";
 
 export function toolTitle(tool: ToolCatalogItem): string {
@@ -13,9 +14,12 @@ export function toolMeta(tool: ToolCatalogItem): string {
   return [tool.categoryLabel, tool.operationLabel].filter((item): item is string => typeof item === "string" && item.length > 0).join(" · ") || "可用";
 }
 
-export function confirmationRuleLabel(tool: ToolCatalogItem): string {
+export function confirmationRuleLabel(tool: ToolCatalogItem, policy: ToolConfirmationPolicy = "prompt"): string {
   if (tool.available === false) {
     return tool.unavailableReason ?? "当前不可用";
+  }
+  if (tool.requiresConfirmation === true && policy === "full_access") {
+    return "完全访问：跳过逐条确认";
   }
   return tool.confirmationLabel ??
     ([tool.riskLabel, tool.operationLabel].filter((item): item is string => typeof item === "string" && item.length > 0).join(" · ") ||

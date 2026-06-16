@@ -52,6 +52,24 @@ test("killProcessTree reports exited when Windows taskkill says the process is a
   assert.equal(result.message, "ERROR: The process \"4321\" not found.");
 });
 
+test("killProcessTree reports unknown when Windows taskkill exits without a code", async () => {
+  const result = await killProcessTree(4321, {
+    platform: "win32",
+    commandRunner() {
+      return {
+        exitCode: null,
+        signal: "SIGTERM",
+        stdout: "",
+        stderr: "taskkill was interrupted.",
+      };
+    },
+  });
+
+  assert.equal(result.status, "unknown");
+  assert.equal(result.signal, "SIGTERM");
+  assert.equal(result.message, "taskkill was interrupted.");
+});
+
 test("killProcessTree reports failed command facts without recovery advice", async () => {
   const result = await killProcessTree(4321, {
     platform: "win32",

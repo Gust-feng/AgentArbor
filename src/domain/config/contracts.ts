@@ -1,5 +1,6 @@
 import type {
   ToolCategory,
+  ToolConfirmationPolicy,
   ToolOperationType,
   ToolRiskLevel,
   ToolRuntimeHint,
@@ -179,6 +180,11 @@ export type CommandShellSettings = {
   readonly updatedAt: string;
 };
 
+export type ToolConfirmationSettings = {
+  readonly policy: ToolConfirmationPolicy;
+  readonly updatedAt: string;
+};
+
 export type McpServerTransportKind = "stdio" | "http" | "sse";
 
 export type McpConfirmationMode = "always" | "unsafe_only" | "never";
@@ -240,6 +246,7 @@ export type AgentArborLocalSettings = {
   readonly modelCatalogs?: readonly ModelProviderModelCatalog[];
   readonly modelCapabilityOverrides?: readonly ModelCapabilityOverrideSettings[];
   readonly toolStates?: readonly ToolStateSettings[];
+  readonly toolConfirmation?: ToolConfirmationSettings;
   readonly commandShell?: CommandShellSettings;
   readonly mcpServers?: readonly McpServerSettings[];
   readonly informationAccess?: InformationAccessSettings;
@@ -286,6 +293,20 @@ export type CreateModelProviderProfileInput = UpdateModelProviderConfigInput & {
 export type UpdateToolStateInput = {
   readonly name: string;
   readonly enabled: boolean;
+};
+
+export type SanitizedToolConfirmationConfig = {
+  readonly policy: ToolConfirmationPolicy;
+  readonly label: string;
+  readonly shellCommandConfirmation: "prompt" | "skipped_by_full_access";
+  readonly shellCommandRequiresConfirmation: boolean;
+  readonly summary: string;
+  readonly riskDisclosure: string;
+  readonly updatedAt: string;
+};
+
+export type UpdateToolConfirmationConfigInput = {
+  readonly policy: ToolConfirmationPolicy;
 };
 
 export type UpsertMcpServerInput = {
@@ -410,6 +431,7 @@ export type BasicAgentCapabilitySnapshot = {
   readonly mcpCatalog: readonly CapabilityMcpCatalogItem[];
   readonly workspace: SanitizedWorkspaceConfig;
   readonly commandShell?: SanitizedCommandShellConfig;
+  readonly toolConfirmation?: SanitizedToolConfirmationConfig;
   readonly securitySummary: string;
   readonly warnings: readonly string[];
 };
@@ -424,6 +446,7 @@ export type RunToolExposure = {
   readonly riskLevel: ToolRiskLevel;
   readonly operationType: ToolOperationType;
   readonly requiresConfirmation: boolean;
+  readonly confirmationPolicy?: ToolConfirmationPolicy;
   readonly reason: string;
 };
 

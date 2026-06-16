@@ -65,6 +65,36 @@ test("run capability policy hides every tool when the model cannot call tools", 
   assert.match(resolution.warnings.join("\n"), /本轮没有可用工具/);
 });
 
+test("run capability policy projects full access confirmation policy without hiding tool risk", () => {
+  const baseSnapshot = capabilitySnapshot([
+    tool("shell_command", "execute"),
+  ]);
+  const snapshot: BasicAgentCapabilitySnapshot = {
+    ...baseSnapshot,
+    toolConfirmation: {
+      policy: "full_access",
+      label: "完全访问",
+      shellCommandConfirmation: "skipped_by_full_access",
+      shellCommandRequiresConfirmation: false,
+      summary: "shell_command 会跳过逐条确认。",
+      riskDisclosure: "这不是 sandbox；工具仍经过 ToolCenter、事件、runtime facts 和日志。",
+      updatedAt: "2026-05-13T00:00:00.000Z",
+    },
+  };
+
+  const resolution = resolveRunCapabilities({
+    snapshot,
+    goal: "run command without prompt",
+    agentDefinition: DESKTOP_ROOT_AGENT,
+  });
+  const shell = resolution.toolExposures.find((item) => item.name === "shell_command");
+
+  assert.deepEqual(resolution.allowedTools, ["shell_command"]);
+  assert.equal(shell?.requiresConfirmation, true);
+  assert.equal(shell?.confirmationPolicy, "full_access");
+  assert.equal(shell?.reason, "可用，当前完全访问会跳过逐条确认。");
+});
+
 test("run capability policy never expands beyond snapshot allowed tools", () => {
   const baseSnapshot = capabilitySnapshot([
     tool("search", "read-only"),

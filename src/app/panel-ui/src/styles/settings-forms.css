@@ -26,6 +26,10 @@
   padding: 10px 0;
 }
 
+.settings-row > div {
+  min-width: 0;
+}
+
 .settings-row:first-of-type {
   margin-top: var(--space-3);
 }
@@ -44,6 +48,7 @@
 .settings-value {
   color: var(--muted);
   font-size: 13px;
+  overflow-wrap: anywhere;
 }
 
 .settings-actions {

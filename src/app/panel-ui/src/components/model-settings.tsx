@@ -10,6 +10,7 @@ import { ModelCatalogPanel } from "./model-catalog-panel";
 import { removeRecordKey, useModelCatalogState } from "./model-catalog-state";
 import { ModelProviderForm } from "./model-provider-form";
 import { ProviderLogo } from "./model-settings-icons";
+import { sameStringList } from "./model-settings-list-equality";
 import { ModelProviderList } from "./model-provider-list";
 import {
   modelFormFromProviderItem,
@@ -630,11 +631,6 @@ function addProviderKey(
 ): readonly string[] {
   const withoutAddedKey = currentKeys.filter((key) => key !== nextKey && key !== previousKey);
   return [...withoutAddedKey, nextKey];
-}
-
-function sameStringList(left: readonly string[] | undefined, right: readonly string[] | undefined): boolean {
-  if (left === undefined || right === undefined || left.length !== right.length) return false;
-  return left.every((value, index) => value === right[index]);
 }
 
 function sameProfileList(

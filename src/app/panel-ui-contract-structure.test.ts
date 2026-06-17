@@ -13,6 +13,7 @@ test("panel UI contracts stay split by product concern", async () => {
     contractRun,
     contractSkills,
     contractTools,
+    appConfigProjection,
     appRunController,
     appState,
     chatActive,
@@ -26,6 +27,7 @@ test("panel UI contracts stay split by product concern", async () => {
     readPanelUiSource(path.join("contracts", "run.ts")),
     readPanelUiSource(path.join("contracts", "skills.ts")),
     readPanelUiSource(path.join("contracts", "tools.ts")),
+    readPanelUiSource("app-config-projection.ts"),
     readPanelUiSource("app-run-controller.ts"),
     readPanelUiSource("app-state.ts"),
     readPanelUiSource(path.join("components", "chat-active.tsx")),
@@ -56,6 +58,11 @@ test("panel UI contracts stay split by product concern", async () => {
   assert.equal(contractRun.includes('readonly runMode: "agent";'), true);
   assert.equal(contractRun.includes('"agent" | "deep"'), false);
   assert.equal(contractConfig.includes("export type ConfigResponse"), true);
+  assert.equal(contractConfig.includes("readonly product?: ProductInfo"), true);
+  assert.equal(contractConfig.includes("readonly appearance?: AppearanceConfig"), true);
+  assert.equal(contractConfig.includes("export type ProductInfo"), true);
+  assert.equal(appConfigProjection.includes("product: incoming.product ?? previous?.product"), true);
+  assert.equal(appConfigProjection.includes("appearance: incoming.appearance ?? previous?.appearance"), true);
   assert.equal(contractContext.includes("export type ContextAttachment"), true);
   assert.equal(contractConversation.includes("export type Conversation"), true);
   assert.equal(contractConversation.includes("readonly currentRun?: BasicAgentRunView;"), true);

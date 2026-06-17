@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { GripVertical, Plus, Search, Trash2 } from "lucide-react";
 import type { ModelProviderListItem } from "./model-settings-projection";
 import { ProviderLogo } from "./model-settings-icons";
+import { sameStringList } from "./model-settings-list-equality";
 
 const SETTLE_DURATION_MS = 320;
 
@@ -411,8 +412,4 @@ function providerRowStep(node: HTMLElement): number {
 
 function clampIndex(value: number, itemCount: number): number {
   return Math.min(Math.max(value, 0), Math.max(0, itemCount - 1));
-}
-
-function sameStringList(left: readonly string[], right: readonly string[]): boolean {
-  return left.length === right.length && left.every((value, index) => value === right[index]);
 }

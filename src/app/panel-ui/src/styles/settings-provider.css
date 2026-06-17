@@ -146,7 +146,7 @@
   border-left-color: var(--accent);
   background: var(--surface);
   box-shadow:
-    0 10px 22px color-mix(in oklch, #111827 10%, transparent),
+    0 10px 22px color-mix(in oklch, var(--shadow-ink) 10%, transparent),
     inset 0 0 0 1px color-mix(in oklch, var(--accent) 18%, transparent);
   opacity: 0.98;
   transition:
@@ -164,7 +164,7 @@
   z-index: 2;
   border-left-color: var(--accent);
   background: var(--surface);
-  box-shadow: 0 10px 22px color-mix(in oklch, #111827 8%, transparent);
+  box-shadow: 0 10px 22px color-mix(in oklch, var(--shadow-ink) 8%, transparent);
   transition:
     border-color var(--motion-fast-duration) var(--motion-ease-standard),
     background var(--motion-fast-duration) var(--motion-ease-standard),

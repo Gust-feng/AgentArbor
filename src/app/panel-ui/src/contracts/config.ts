@@ -1,4 +1,6 @@
 export type ConfigResponse = {
+  readonly product?: ProductInfo;
+  readonly appearance?: AppearanceConfig;
   readonly config?: {
     readonly profileId?: string;
     readonly label?: string;
@@ -35,6 +37,25 @@ export type ConfigResponse = {
 };
 
 export type ModelProviderProfile = NonNullable<ConfigResponse["config"]>;
+
+export type ProductInfo = {
+  readonly name?: string;
+  readonly version?: string;
+  readonly defaultEntry?: string;
+  readonly runtimeMode?: "agent";
+  readonly runtimeModeLabel?: string;
+  readonly configDirectory?: string;
+  readonly runtimeDirectory?: string;
+};
+
+export type AppearanceConfig = {
+  readonly source?: "builtin_panel_styles" | "user_config" | string;
+  readonly themeLabel?: string;
+  readonly densityLabel?: string;
+  readonly colorScheme?: "light" | "dark" | string;
+  readonly configurable?: boolean;
+  readonly updatedAt?: string;
+};
 
 export type CommandShellKind = "cmd" | "powershell" | "pwsh" | "bash" | "sh";
 

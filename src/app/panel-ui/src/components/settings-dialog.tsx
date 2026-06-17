@@ -178,8 +178,8 @@ export function SettingsDialog(props: {
                 onSaveCommandShell={props.onSaveCommandShell}
               />
             )}
-            {activeGroup === "appearance" && <AppearanceSettings />}
-            {activeGroup === "about" && <AboutSettings />}
+            {activeGroup === "appearance" && <AppearanceSettings config={props.config} />}
+            {activeGroup === "about" && <AboutSettings config={props.config} />}
           </div>
         </div>
       </section>
@@ -197,35 +197,122 @@ const SETTINGS_GROUPS: readonly { readonly id: SettingsGroup; readonly label: st
   { id: "about", label: "关于", icon: <Info size={15} /> },
 ];
 
-function AppearanceSettings(): React.ReactElement {
+function AppearanceSettings(props: { readonly config?: ConfigResponse }): React.ReactElement {
+  const browserAppearance = useBrowserAppearanceSnapshot();
+  const configuredAppearance = props.config?.appearance;
+  const hasAppearanceConfig = configuredAppearance !== undefined;
+  const configuredTheme = configuredAppearance?.themeLabel ?? configuredAppearance?.colorScheme;
+  const documentColorScheme = configuredAppearance?.colorScheme ?? browserAppearance.documentColorScheme;
   return (
     <div className="workspace-settings-stack">
       <section className="settings-card">
         <h3>外观</h3>
         <div className="settings-row">
-          <span>主题</span>
-          <div><span className="settings-value">暖色工作台</span></div>
+          <span>样式来源</span>
+          <div><span className="settings-value">{appearanceSourceLabel(configuredAppearance?.source)}</span></div>
+        </div>
+        <div className="settings-row">
+          <span>主题配置</span>
+          <div><span className="settings-value">{configuredTheme ?? "未配置独立主题"}</span></div>
+        </div>
+        <div className="settings-row">
+          <span>文档色彩方案</span>
+          <div><span className="settings-value">{colorSchemeLabel(documentColorScheme)}</span></div>
+        </div>
+        <div className="settings-row">
+          <span>系统偏好</span>
+          <div><span className="settings-value">{colorSchemeLabel(browserAppearance.systemColorPreference)}</span></div>
         </div>
         <div className="settings-row">
           <span>界面密度</span>
-          <div><span className="settings-value">标准</span></div>
+          <div><span className="settings-value">{configuredAppearance?.densityLabel ?? "内置标准密度"}</span></div>
+        </div>
+        <div className="settings-row">
+          <span>配置状态</span>
+          <div>
+            <span className="settings-value">
+              {hasAppearanceConfig && configuredAppearance.configurable === true ? "可由配置控制" : "只读：当前没有外观配置入口"}
+            </span>
+          </div>
         </div>
       </section>
     </div>
   );
 }
 
-function AboutSettings(): React.ReactElement {
+function AboutSettings(props: { readonly config?: ConfigResponse }): React.ReactElement {
+  const product = props.config?.product;
   return (
     <div className="workspace-settings-stack">
       <section className="settings-card">
-        <h3>AgentArbor</h3>
+        <h3>{product?.name ?? "AgentArbor"}</h3>
         <p>桌面通用 Agent 工作台。</p>
         <div className="settings-row">
-          <span>当前形态</span>
-          <div><span className="settings-value">基础 Agent</span></div>
+          <span>版本</span>
+          <div><span className="settings-value">{product?.version ?? "未提供"}</span></div>
+        </div>
+        <div className="settings-row">
+          <span>默认入口</span>
+          <div><span className="settings-value">{product?.defaultEntry ?? "Desktop Shell / Panel"}</span></div>
+        </div>
+        <div className="settings-row">
+          <span>默认运行模式</span>
+          <div><span className="settings-value">{product?.runtimeModeLabel ?? "普通 agent"}</span></div>
+        </div>
+        <div className="settings-row">
+          <span>配置目录</span>
+          <div><span className="settings-value">{product?.configDirectory ?? "未提供"}</span></div>
+        </div>
+        <div className="settings-row">
+          <span>运行数据目录</span>
+          <div><span className="settings-value">{product?.runtimeDirectory ?? "未提供"}</span></div>
         </div>
       </section>
     </div>
   );
+}
+
+type BrowserAppearanceSnapshot = {
+  readonly documentColorScheme: string;
+  readonly systemColorPreference: "light" | "dark" | "unknown";
+};
+
+function useBrowserAppearanceSnapshot(): BrowserAppearanceSnapshot {
+  const [snapshot, setSnapshot] = useState<BrowserAppearanceSnapshot>(() => readBrowserAppearanceSnapshot());
+  useEffect(() => {
+    setSnapshot(readBrowserAppearanceSnapshot());
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+      return;
+    }
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const onChange = (): void => setSnapshot(readBrowserAppearanceSnapshot());
+    media.addEventListener("change", onChange);
+    return () => media.removeEventListener("change", onChange);
+  }, []);
+  return snapshot;
+}
+
+function readBrowserAppearanceSnapshot(): BrowserAppearanceSnapshot {
+  if (typeof window === "undefined" || typeof document === "undefined") {
+    return { documentColorScheme: "unknown", systemColorPreference: "unknown" };
+  }
+  const documentColorScheme = window.getComputedStyle(document.documentElement).colorScheme.trim() || "unknown";
+  const systemColorPreference = typeof window.matchMedia === "function" && window.matchMedia("(prefers-color-scheme: dark)").matches
+    ? "dark"
+    : "light";
+  return { documentColorScheme, systemColorPreference };
+}
+
+function appearanceSourceLabel(source: NonNullable<ConfigResponse["appearance"]>["source"] | undefined): string {
+  if (source === "user_config") {
+    return "用户配置";
+  }
+  return "内置 Panel 样式表";
+}
+
+function colorSchemeLabel(value: string | undefined): string {
+  if (value === "light") return "浅色";
+  if (value === "dark") return "深色";
+  if (value === undefined || value === "unknown") return "未声明";
+  return value;
 }

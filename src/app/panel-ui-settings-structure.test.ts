@@ -16,6 +16,7 @@ test("panel UI settings and model modules stay split", async () => {
     modelProviderForm,
     modelProviderList,
     modelSettingsIcons,
+    modelSettingsListEquality,
     modelCatalogState,
     modelSettingsProjection,
     workspaceCommon,
@@ -38,6 +39,7 @@ test("panel UI settings and model modules stay split", async () => {
     readPanelUiSource(path.join("components", "model-provider-form.tsx")),
     readPanelUiSource(path.join("components", "model-provider-list.tsx")),
     readPanelUiSource(path.join("components", "model-settings-icons.tsx")),
+    readPanelUiSource(path.join("components", "model-settings-list-equality.ts")),
     readPanelUiSource(path.join("components", "model-catalog-state.ts")),
     readPanelUiSource(path.join("components", "model-settings-projection.ts")),
     readPanelUiSource(path.join("components", "workspace-common.tsx")),
@@ -81,6 +83,16 @@ test("panel UI settings and model modules stay split", async () => {
   assert.equal(settingsDialog.includes("function ConfirmationSettings"), false);
   assert.equal(settingsDialog.includes("function AppearanceSettings"), true);
   assert.equal(settingsDialog.includes("function AboutSettings"), true);
+  assert.equal(settingsDialog.includes("<AppearanceSettings config={props.config} />"), true);
+  assert.equal(settingsDialog.includes("<AboutSettings config={props.config} />"), true);
+  assert.equal(settingsDialog.includes("useBrowserAppearanceSnapshot"), true);
+  assert.equal(settingsDialog.includes("未配置独立主题"), true);
+  assert.equal(settingsDialog.includes("只读：当前没有外观配置入口"), true);
+  assert.equal(settingsDialog.includes("product?.version"), true);
+  assert.equal(settingsDialog.includes("product?.configDirectory"), true);
+  assert.equal(settingsDialog.includes("product?.runtimeDirectory"), true);
+  assert.equal(settingsDialog.includes("暖色工作台"), false);
+  assert.equal(settingsDialog.includes("基础 Agent"), false);
   assert.equal(settingsDialog.includes("function ModelSettings"), false);
   assert.equal(settingsDialog.includes("function ModelIcon"), false);
   assert.equal(settingsDialog.includes("function modelProviderItems"), false);
@@ -145,6 +157,8 @@ test("panel UI settings and model modules stay split", async () => {
   assert.equal(modelSettings.includes('from "./model-provider-list"'), true);
   assert.equal(modelSettings.includes('from "./model-settings-icons"'), true);
   assert.equal(modelSettings.includes('from "./model-catalog-state"'), true);
+  assert.equal(modelSettings.includes('from "./model-settings-list-equality"'), true);
+  assert.equal(modelSettings.includes("function sameStringList"), false);
   assert.equal(modelSettings.includes("className=\"provider-list-pane\""), false);
   assert.equal(modelSettings.includes("className=\"provider-form\""), false);
   assert.equal(modelSettings.includes("className=\"model-list-panel\""), false);
@@ -165,8 +179,15 @@ test("panel UI settings and model modules stay split", async () => {
   assert.equal(modelProviderForm.includes("className=\"provider-form\""), true);
   assert.equal(modelProviderList.includes("export function ModelProviderList"), true);
   assert.equal(modelProviderList.includes("className=\"provider-list-pane\""), true);
+  assert.equal(modelProviderList.includes('from "./model-settings-list-equality"'), true);
+  assert.equal(modelProviderList.includes("function sameStringList"), false);
   assert.equal(modelSettingsIcons.includes("export function ModelIcon"), true);
   assert.equal(modelSettingsIcons.includes("export function ProviderLogo"), true);
+  assert.equal(modelSettingsListEquality.includes("export function sameStringList"), true);
+  assert.equal(modelSettingsListEquality.includes("left: readonly string[] | undefined"), true);
+  assert.equal(modelSettingsListEquality.includes("right: readonly string[] | undefined"), true);
+  assert.equal(modelSettingsListEquality.includes("left === right"), true);
+  assert.equal(modelSettingsListEquality.includes("left === undefined || right === undefined"), true);
   assert.equal(modelCatalogState.includes("export function useModelCatalogState"), true);
   assert.equal(modelCatalogState.includes("modelCatalogItemsWithConfiguredModel"), true);
   assert.equal(modelCatalogState.includes("filterModelCatalogItems"), true);

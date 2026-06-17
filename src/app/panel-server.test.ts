@@ -46,6 +46,27 @@ test("panel server serves Vite React frontend assets", async () => {
   }
 });
 
+test("panel config route returns product runtime metadata for settings about page", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-config-product-"));
+  const packageJson = JSON.parse(await fs.readFile("package.json", "utf8")) as { readonly version: string };
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+  try {
+    const response = await requestJson(server.url, "/api/config");
+
+    assert.equal(response.status, 200);
+    assert.equal(response.body.product.name, "AgentArbor");
+    assert.equal(response.body.product.version, packageJson.version);
+    assert.equal(response.body.product.defaultEntry, "Desktop Shell / Panel");
+    assert.equal(response.body.product.runtimeMode, "agent");
+    assert.equal(response.body.product.runtimeModeLabel, "普通 agent");
+    assert.equal(response.body.product.configDirectory, directory);
+    assert.equal(response.body.product.runtimeDirectory, path.join(directory, "runtime"));
+  } finally {
+    await server.close();
+    await removeTemporaryTree(directory);
+  }
+});
+
 test("panel tools route can disable web search without using the stored Tavily key", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-tools-disabled-"));
   const modelSecret = "sk-disabled-tools-secret";

@@ -584,7 +584,7 @@
     var(--surface);
   padding: 5px;
   box-shadow:
-    0 18px 48px color-mix(in oklch, #111827 13%, transparent),
+    0 18px 48px color-mix(in oklch, var(--shadow-ink) 13%, transparent),
     0 0 0 1px color-mix(in oklch, white 64%, transparent) inset;
 }
 
@@ -688,7 +688,7 @@
 .mcp-subpanel-backdrop {
   position: absolute;
   inset: 0;
-  background: color-mix(in oklch, #111827 26%, transparent);
+  background: color-mix(in oklch, var(--overlay-ink) 26%, transparent);
 }
 
 .mcp-subpanel {
@@ -702,7 +702,7 @@
   border: 1px solid color-mix(in oklch, var(--border) 86%, transparent);
   border-radius: 22px;
   background: var(--surface);
-  box-shadow: 0 34px 90px color-mix(in oklch, #111827 20%, transparent);
+  box-shadow: 0 34px 90px color-mix(in oklch, var(--shadow-ink) 20%, transparent);
 }
 
 .mcp-subpanel.edit {
@@ -985,7 +985,7 @@
   height: 17px;
   border-radius: 999px;
   background: color-mix(in oklch, var(--muted) 64%, white);
-  box-shadow: 0 1px 3px color-mix(in oklch, #111827 16%, transparent);
+  box-shadow: 0 1px 3px color-mix(in oklch, var(--shadow-ink) 16%, transparent);
   transform: translateX(0);
   transition:
     background-color var(--motion-fast-duration) var(--motion-ease-standard),
@@ -1136,7 +1136,7 @@
     color-mix(in oklch, var(--surface-subtle) 24%, var(--surface));
   padding: 14px;
   box-shadow:
-    0 16px 42px color-mix(in oklch, #111827 5%, transparent),
+    0 16px 42px color-mix(in oklch, var(--shadow-ink) 5%, transparent),
     inset 0 1px 0 color-mix(in oklch, white 84%, transparent);
 }
 
@@ -1168,7 +1168,7 @@
   padding: 0 12px;
   color: inherit;
   font-size: 12px;
-  box-shadow: 0 8px 22px color-mix(in oklch, #111827 4%, transparent);
+  box-shadow: 0 8px 22px color-mix(in oklch, var(--shadow-ink) 4%, transparent);
 }
 
 .mcp-import-block {

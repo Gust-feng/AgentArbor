@@ -33,9 +33,11 @@
   --amber-text: color-mix(in oklch, var(--status-warning) 58%, black);
   --danger-soft: color-mix(in oklch, var(--status-danger) 14%, var(--surface));
   --danger-border: color-mix(in oklch, var(--status-danger) 32%, var(--border));
-  --shadow-card: 0 1px 2px color-mix(in oklch, var(--fg) 5%, transparent);
-  --shadow-soft: 0 1px 2px color-mix(in oklch, var(--fg) 5%, transparent);
-  --shadow-elevated: 0 12px 28px color-mix(in oklch, var(--fg) 10%, transparent);
+  --shadow-ink: #1c1917;
+  --overlay-ink: #1c1917;
+  --shadow-card: 0 1px 2px color-mix(in oklch, var(--shadow-ink) 5%, transparent);
+  --shadow-soft: 0 1px 2px color-mix(in oklch, var(--shadow-ink) 5%, transparent);
+  --shadow-elevated: 0 12px 28px color-mix(in oklch, var(--shadow-ink) 10%, transparent);
   --shadow-pane: none;
   --panel-max-width: 680px;
   --panel-reading-width: 760px;

@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { readFileSync } from "node:fs";
 import type { SanitizedWebSearchConfig } from "../../domain/config/index.js";
 import { listBuiltinMcpServerPresets, listBuiltinModelProviderPresets, listBuiltinProviderProtocolProfiles } from "../../domain/config/index.js";
 import type { SanitizedModelProviderConfig } from "../../domain/config/index.js";
@@ -36,6 +37,10 @@ import type { PanelModelCatalogFetch, PanelProviderFetch } from "./types.js";
 export type PanelConfigRouteRuntime = {
   readonly configCenter: ConfigCenter;
   readonly capabilityCenter: CapabilityCenter;
+  readonly configDirectory?: string;
+  readonly runtimePaths?: {
+    readonly runtimeHome: string;
+  };
   readonly providerFetch?: PanelProviderFetch;
   readonly modelCatalogFetch?: PanelModelCatalogFetch;
   readonly workspaceDirectoryPicker?: () => Promise<string | undefined>;
@@ -63,6 +68,7 @@ export async function handlePanelConfigRoute(
       modelProviderOrder: await runtime.configCenter.getModelProviderOrder(),
       modelCatalogs: await runtime.configCenter.listModelProviderModelCatalogs(),
       modelProviderMarket: modelProviderMarketPayload(),
+      product: productInfoPayload(runtime),
       capabilities,
       informationAccess: await runtime.configCenter.getInformationAccessConfig(),
       workspace: await runtime.configCenter.getWorkspaceConfig(),
@@ -716,6 +722,46 @@ function modelProviderMarketPayload(): {
     presets: listBuiltinModelProviderPresets(),
     providerProtocolProfiles: listBuiltinProviderProtocolProfiles(),
   };
+}
+
+function productInfoPayload(runtime: PanelConfigRouteRuntime): {
+  readonly name: "AgentArbor";
+  readonly version: string;
+  readonly defaultEntry: "Desktop Shell / Panel";
+  readonly runtimeMode: "agent";
+  readonly runtimeModeLabel: string;
+  readonly configDirectory?: string;
+  readonly runtimeDirectory?: string;
+} {
+  return {
+    name: "AgentArbor",
+    version: agentArborPackageVersion(),
+    defaultEntry: "Desktop Shell / Panel",
+    runtimeMode: "agent",
+    runtimeModeLabel: "普通 agent",
+    configDirectory: runtime.configDirectory,
+    runtimeDirectory: runtime.runtimePaths?.runtimeHome,
+  };
+}
+
+let cachedAgentArborPackageVersion: string | undefined;
+
+function agentArborPackageVersion(): string {
+  if (cachedAgentArborPackageVersion !== undefined) {
+    return cachedAgentArborPackageVersion;
+  }
+  try {
+    const parsed = JSON.parse(readFileSync(new URL("../../../package.json", import.meta.url), "utf8")) as {
+      readonly version?: unknown;
+    };
+    cachedAgentArborPackageVersion =
+      typeof parsed.version === "string" && parsed.version.trim().length > 0
+        ? parsed.version
+        : "unknown";
+  } catch {
+    cachedAgentArborPackageVersion = "unknown";
+  }
+  return cachedAgentArborPackageVersion;
 }
 
 async function modelCapabilitiesPayload(runtime: PanelConfigRouteRuntime): Promise<{

@@ -9,6 +9,8 @@ export function mergeConfigResponse(previous: ConfigResponse | undefined, incomi
   return {
     ...previous,
     ...incoming,
+    product: incoming.product ?? previous?.product,
+    appearance: incoming.appearance ?? previous?.appearance,
     config: incoming.config ?? incoming.profile ?? previous?.config,
     profiles: incoming.profiles ?? previous?.profiles,
     modelProviderOrder: incoming.modelProviderOrder ?? previous?.modelProviderOrder,

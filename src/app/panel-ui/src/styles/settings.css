@@ -11,7 +11,7 @@
 .settings-backdrop {
   position: absolute;
   inset: 0;
-  background: color-mix(in oklch, #111827 20%, transparent);
+  background: color-mix(in oklch, var(--overlay-ink) 20%, transparent);
   backdrop-filter: blur(4px);
 }
 
@@ -25,7 +25,7 @@
   border: 2px solid var(--border-strong);
   border-radius: var(--radius-lg);
   background: var(--surface);
-  box-shadow: 0 22px 70px color-mix(in oklch, #111827 18%, transparent);
+  box-shadow: 0 22px 70px color-mix(in oklch, var(--shadow-ink) 18%, transparent);
   animation: modal-card-enter var(--motion-dialog-duration) var(--motion-ease-standard) both;
 }
 

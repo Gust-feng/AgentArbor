@@ -3,7 +3,8 @@ import {
   CloudCog,
   Database,
   FileText,
-  LockKeyhole,
+  Info,
+  Palette,
   Server,
   SlidersHorizontal,
   X,
@@ -11,12 +12,10 @@ import {
 import type {
   ConfigResponse,
   ModelProviderModelCatalog,
-  ToolConfirmationPolicy,
 } from "../contracts/config";
 import type { SkillDefinition } from "../contracts/skills";
 import type { McpEnvironmentCheckResponse, McpReferenceResponse, ToolsResponse } from "../contracts/tools";
 import { CapabilitiesSettings } from "./capability-settings";
-import { ConfirmationSettings } from "./confirmation-settings";
 import { ModelSettings } from "./model-settings";
 import { SkillSettings } from "./skill-settings";
 import type { McpServerForm, ModelForm, SettingsGroup, ToolForm } from "./settings-types";
@@ -46,8 +45,6 @@ export function SettingsDialog(props: {
   readonly skills: readonly SkillDefinition[];
   readonly onSaveWorkspace: (workspaceDirectory?: string) => void;
   readonly tools?: ToolsResponse;
-  readonly toolConfirmationPolicy: ToolConfirmationPolicy;
-  readonly onToolConfirmationPolicyChange: (value: ToolConfirmationPolicy) => void;
   readonly toolForm: ToolForm;
   readonly setToolForm: (form: ToolForm) => void;
   readonly mcpServerForm: McpServerForm;
@@ -181,14 +178,8 @@ export function SettingsDialog(props: {
                 onSaveCommandShell={props.onSaveCommandShell}
               />
             )}
-            {activeGroup === "confirmation" && (
-              <ConfirmationSettings
-                tools={props.tools}
-                toolConfirmation={props.config?.toolConfirmation}
-                toolConfirmationPolicy={props.toolConfirmationPolicy}
-                onToolConfirmationPolicyChange={props.onToolConfirmationPolicyChange}
-              />
-            )}
+            {activeGroup === "appearance" && <AppearanceSettings />}
+            {activeGroup === "about" && <AboutSettings />}
           </div>
         </div>
       </section>
@@ -202,5 +193,39 @@ const SETTINGS_GROUPS: readonly { readonly id: SettingsGroup; readonly label: st
   { id: "mcp", label: "MCP 服务", icon: <Server size={15} /> },
   { id: "skills", label: "技能", icon: <FileText size={15} /> },
   { id: "workspace", label: "工作区", icon: <Database size={15} /> },
-  { id: "confirmation", label: "命令确认", icon: <LockKeyhole size={15} /> },
+  { id: "appearance", label: "外观", icon: <Palette size={15} /> },
+  { id: "about", label: "关于", icon: <Info size={15} /> },
 ];
+
+function AppearanceSettings(): React.ReactElement {
+  return (
+    <div className="workspace-settings-stack">
+      <section className="settings-card">
+        <h3>外观</h3>
+        <div className="settings-row">
+          <span>主题</span>
+          <div><span className="settings-value">暖色工作台</span></div>
+        </div>
+        <div className="settings-row">
+          <span>界面密度</span>
+          <div><span className="settings-value">标准</span></div>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function AboutSettings(): React.ReactElement {
+  return (
+    <div className="workspace-settings-stack">
+      <section className="settings-card">
+        <h3>AgentArbor</h3>
+        <p>桌面通用 Agent 工作台。</p>
+        <div className="settings-row">
+          <span>当前形态</span>
+          <div><span className="settings-value">基础 Agent</span></div>
+        </div>
+      </section>
+    </div>
+  );
+}

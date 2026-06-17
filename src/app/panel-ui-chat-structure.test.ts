@@ -73,12 +73,13 @@ test("panel UI chat and transcript modules stay presentation-focused", async () 
   ]);
 
   assert.equal(chatEmpty.includes("今天要处理什么？"), false);
-  assert.equal(chatEmpty.includes("chatEmptyVisual"), true);
-  assert.equal(chatEmpty.includes("chat-empty-visual"), true);
+  assert.equal(chatEmpty.includes("chatEmptyVisual"), false);
+  assert.equal(chatEmpty.includes("chat-empty-visual"), false);
   assert.equal(chatEmpty.includes("draggable"), false);
   assert.equal(chatEmpty.includes("PromptTraceAnimation"), false);
   assert.equal(chatEmpty.includes("export function ChatInputBar"), true);
-  assert.equal(chatEmpty.includes('variant="home"'), true);
+  assert.equal(chatEmpty.includes('variant="home"'), false);
+  assert.equal(chatEmpty.includes('variant="floating"'), true);
   assert.equal(chatEmpty.includes("textareaRef"), true);
   assert.equal(chatEmpty.includes("didAutoFocusRef"), true);
   assert.equal(chatEmpty.includes("previousBusyRef"), true);
@@ -426,11 +427,11 @@ test("panel UI chat and transcript modules stay presentation-focused", async () 
   assert.equal(styleEntry.includes(".chat-active-scroll"), false);
   assert.equal(chatLayoutStyles.includes(".chat-empty-screen,"), true);
   assert.equal(chatLayoutStyles.includes(".chat-empty-heading"), true);
-  assert.equal(chatLayoutStyles.includes(".chat-empty-visual"), true);
+  assert.equal(chatLayoutStyles.includes(".chat-empty-visual"), false);
   assert.equal(chatLayoutStyles.includes(".chat-empty-kinetic"), false);
   assert.equal(chatLayoutStyles.includes("align-content: center"), true);
-  assert.equal(chatLayoutStyles.includes(".chat-empty-input-dock"), true);
-  assert.equal(chatComposerStyles.includes(".chat-composer-home"), true);
+  assert.equal(chatLayoutStyles.includes(".chat-empty-input-dock"), false);
+  assert.equal(chatComposerStyles.includes(".chat-composer-home"), false);
   assert.equal(chatLayoutStyles.includes(".chat-empty-task-groups,"), false);
   assert.equal(chatLayoutStyles.includes(".chat-empty-task-group-heading"), false);
   assert.equal(chatLayoutStyles.includes(".chat-empty-resume"), false);
@@ -453,7 +454,7 @@ test("panel UI chat and transcript modules stay presentation-focused", async () 
   assert.equal(richTextStyles.includes(".rich-text"), true);
   assert.equal(richTextStyles.includes(".live-stream-live-tail-text"), false);
   assert.equal(richTextStyles.includes("white-space: normal"), false);
-  assert.equal(richTextStyles.includes("min-height: 1.82em"), true);
+  assert.equal(richTextStyles.includes("min-height: 1.84em"), true);
   assert.equal(richTextStyles.includes("dangerouslySetInnerHTML"), false);
   assert.equal(chatFeedbackStyles.includes(".assistant-error-message"), true);
   assert.equal(chatFeedbackStyles.includes(".agent-work-timeline"), false);

@@ -1,48 +1,49 @@
 :root {
   color-scheme: light;
-  font-family: "Google Sans", "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
-  --font-sans: "Google Sans", "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
-  --font-mono: "Anonymous Pro", ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
-  --bg: #eef2f6;
-  --surface: #ffffff;
-  --fg: #172033;
-  --muted: #667085;
-  --border: #d9e1ec;
-  --accent: #2563eb;
-  --secondary: #0f766e;
-  --accent-soft: #edf4ff;
-  --accent-strong: #2563eb;
-  --accent-hover: #1d4ed8;
-  --accent-active: #1e40af;
-  --surface-subtle: #f6f8fb;
-  --surface-muted: #e9eef5;
+  font-family: var(--font-sans);
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+  --font-serif: Georgia, "Times New Roman", Times, serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  --bg: #f8f5f0;
+  --surface: #fffdf9;
+  --fg: #1c1917;
+  --muted: #70665c;
+  --border: #e5e0d8;
+  --border-strong: #1c1917;
+  --accent: #c2410c;
+  --secondary: #7c5c2e;
+  --accent-soft: #fbefe8;
+  --accent-strong: #c2410c;
+  --accent-hover: #9a3412;
+  --accent-active: #7c2d12;
+  --surface-subtle: #f1ede6;
+  --surface-muted: #ebe4da;
   --status-success: #16a34a;
-  --status-warning: #d97706;
-  --status-danger: #dc2626;
-  --sidebar: #f8fafc;
-  --sidebar-border: color-mix(in oklch, var(--border) 82%, transparent);
-  --primary-foreground: white;
-  --accent-border: color-mix(in oklch, var(--accent) 40%, var(--border));
+  --status-warning: #c08830;
+  --status-danger: #c85050;
+  --sidebar: var(--bg);
+  --sidebar-border: var(--border-strong);
+  --primary-foreground: #fff7ed;
+  --accent-border: color-mix(in oklch, var(--accent) 42%, var(--border));
   --accent-border-soft: color-mix(in oklch, var(--accent) 24%, var(--border));
-  --placeholder: color-mix(in oklch, var(--muted) 66%, white);
-  --border-strong: color-mix(in oklch, var(--border) 62%, var(--muted));
+  --placeholder: color-mix(in oklch, var(--fg) 28%, var(--bg));
   --cyan-soft: color-mix(in oklch, var(--status-success) 16%, var(--surface));
   --cyan-text: color-mix(in oklch, var(--status-success) 58%, black);
   --amber-soft: color-mix(in oklch, var(--status-warning) 18%, var(--surface));
   --amber-text: color-mix(in oklch, var(--status-warning) 58%, black);
   --danger-soft: color-mix(in oklch, var(--status-danger) 14%, var(--surface));
   --danger-border: color-mix(in oklch, var(--status-danger) 32%, var(--border));
-  --shadow-card: 0 24px 70px color-mix(in oklch, #111827 9%, transparent);
-  --shadow-soft: 0 1px 2px color-mix(in oklch, #111827 5%, transparent);
-  --shadow-elevated: 0 18px 48px color-mix(in oklch, #111827 9%, transparent);
-  --shadow-pane: 0 18px 46px color-mix(in oklch, #111827 8%, transparent);
-  --panel-max-width: 1040px;
-  --panel-reading-width: 840px;
-  --radius-sm: 4px;
-  --radius-md: 8px;
-  --radius-lg: 10px;
-  --radius-xl: 12px;
-  --radius-2xl: 16px;
+  --shadow-card: 0 1px 2px color-mix(in oklch, var(--fg) 5%, transparent);
+  --shadow-soft: 0 1px 2px color-mix(in oklch, var(--fg) 5%, transparent);
+  --shadow-elevated: 0 12px 28px color-mix(in oklch, var(--fg) 10%, transparent);
+  --shadow-pane: none;
+  --panel-max-width: 680px;
+  --panel-reading-width: 760px;
+  --radius-sm: 2px;
+  --radius-md: 4px;
+  --radius-lg: 4px;
+  --radius-xl: 6px;
+  --radius-2xl: 8px;
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -50,13 +51,19 @@
   --space-5: 20px;
   --space-6: 24px;
   --space-8: 32px;
-  --motion-sidebar-duration: 260ms;
+  --motion-sidebar-duration: 180ms;
   --motion-dialog-duration: 180ms;
-  --motion-panel-duration: 170ms;
-  --motion-fast-duration: 130ms;
-  --motion-ease-standard: cubic-bezier(0.16, 1, 0.3, 1);
+  --motion-panel-duration: 150ms;
+  --motion-fast-duration: 100ms;
+  --motion-ease-standard: ease;
+  --sidebar-width: 280px;
+  --sidebar-compact-width: 68px;
   --sidebar-rail-control: 44px;
   --sidebar-label-gap: 0.5rem;
+  --settings-sidebar-width: 200px;
+  --settings-sidebar-compact-width: 58px;
+  --settings-dialog-max-width: 1120px;
+  --settings-dialog-max-height: 760px;
 }
 
 * {
@@ -65,12 +72,12 @@
 
 * {
   scrollbar-width: thin;
-  scrollbar-color: color-mix(in oklch, var(--muted) 34%, transparent) transparent;
+  scrollbar-color: color-mix(in oklch, var(--fg) 16%, transparent) transparent;
 }
 
 *::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+  width: 7px;
+  height: 7px;
 }
 
 *::-webkit-scrollbar-track {
@@ -78,15 +85,12 @@
 }
 
 *::-webkit-scrollbar-thumb {
-  border: 3px solid transparent;
   border-radius: 999px;
-  background: color-mix(in oklch, var(--muted) 30%, transparent);
-  background-clip: content-box;
+  background: color-mix(in oklch, var(--fg) 12%, transparent);
 }
 
 *::-webkit-scrollbar-thumb:hover {
-  background: color-mix(in oklch, var(--muted) 44%, transparent);
-  background-clip: content-box;
+  background: color-mix(in oklch, var(--fg) 22%, transparent);
 }
 
 html,
@@ -100,7 +104,13 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--fg);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.65;
   overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
 }
 
 button,
@@ -148,8 +158,8 @@ textarea {
 input:focus,
 select:focus,
 textarea:focus {
-  border-color: var(--accent-border);
-  box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent) 10%, transparent);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent) 12%, transparent);
 }
 
 input,

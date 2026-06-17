@@ -130,8 +130,11 @@ const UserMessage = React.memo(function UserMessage({ content, status }: { reado
   const queued = status === "pending";
   return (
     <article className="user-message">
-      <div>
-        <RichText text={content} />
+      <div className="user-message-wrap">
+        <div className="user-message-label">用户</div>
+        <div className="user-message-content">
+          <RichText text={content} />
+        </div>
         {queued && (
           <p className="user-message-queued" role="status" aria-label="等待当前回复完成">
             <span aria-hidden="true" />
@@ -176,7 +179,7 @@ const MemoAssistantMessage = React.memo(function AssistantMessageContent(props: 
   });
   return (
     <article className={`assistant-message assistant-workline ${props.collapseTimeline === true ? "assistant-workline-collapsed" : ""}`}>
-      <AssistantAvatar model={props.model} />
+      <AssistantMessageLabel model={props.model} />
       <div className="assistant-message-body">
         <AgentWorkTimeline
           view={view.timeline}
@@ -220,7 +223,7 @@ const AssistantFailureMessage = React.memo(function AssistantFailureMessage(prop
   const timeline = projectAgentWorkTimelineView<TranscriptNode, ConfirmationProjection>({ nodes: props.transcriptNodes ?? [] });
   return (
     <article className={`assistant-message assistant-message-failed ${props.collapseTimeline === true ? "assistant-workline-collapsed" : ""}`}>
-      <AssistantAvatar model={props.model} />
+      <AssistantMessageLabel model={props.model} />
       <div className="assistant-message-body">
         <AgentWorkTimeline
           view={timeline}
@@ -257,7 +260,10 @@ const AssistantAnswerBlock = React.memo(function AssistantAnswerBlock(props: {
         tone={props.liveTone ?? "formal"}
         renderText={(displayed) => <RichText text={displayed} />}
         renderStreamingText={(displayed) => (
-          <div className="rich-text rich-text-streaming">{displayed}</div>
+          <div className="rich-text rich-text-streaming">
+            {displayed}
+            <span className="stream-cursor" aria-hidden="true" />
+          </div>
         )}
       />
       {props.showActions && (
@@ -271,6 +277,16 @@ const AssistantAnswerBlock = React.memo(function AssistantAnswerBlock(props: {
     </div>
   );
 });
+
+function AssistantMessageLabel({ model }: { readonly model?: AssistantModelBadge }): React.ReactElement {
+  const modelLabel = assistantModelLabel(model);
+  return (
+    <div className="assistant-message-label">
+      <span>AgentArbor</span>
+      {modelLabel !== undefined && <span className="assistant-message-model">{modelLabel}</span>}
+    </div>
+  );
+}
 
 export function AssistantAvatar({ model }: { readonly model?: AssistantModelBadge }): React.ReactElement {
   return <MemoAssistantAvatar model={model} />;
@@ -352,6 +368,16 @@ function copyToClipboard(value: string): void {
 
 function assistantAvatarInitial(model: AssistantModelBadge | undefined): string {
   return (model?.providerLabel.trim() || model?.modelName.trim() || "A").slice(0, 1).toUpperCase();
+}
+
+function assistantModelLabel(model: AssistantModelBadge | undefined): string | undefined {
+  if (model === undefined) return undefined;
+  const provider = model.providerLabel.trim();
+  const name = model.modelName.trim();
+  if (provider.length === 0 && name.length === 0) return undefined;
+  if (provider.length === 0) return name;
+  if (name.length === 0) return provider;
+  return `${provider} · ${name}`;
 }
 
 function shouldCollapseTimelineAfterTurn(input: {

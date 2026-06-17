@@ -59,7 +59,7 @@
   color: color-mix(in oklch, var(--status-warning) 70%, var(--muted));
   font-size: 11px;
   font-weight: 500;
-  letter-spacing: 0.08em;
+  letter-spacing: 0;
   line-height: 1.2;
   text-transform: uppercase;
 }

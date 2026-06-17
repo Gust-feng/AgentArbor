@@ -445,6 +445,7 @@ export function ModelSettings(props: {
           <ProviderLogo item={selectedItem} large />
           <div>
             <h3>{selectedItem.title}</h3>
+            <p>{providerDetailMeta(selectedItem)}</p>
           </div>
         </header>
 
@@ -491,6 +492,14 @@ export function ModelSettings(props: {
       </section>
     </div>
   );
+}
+
+function providerDetailMeta(item: ModelProviderListItem): string {
+  const model = item.model.trim();
+  if (model.length > 0) return `默认模型 ${model}`;
+  const baseUrl = item.baseUrl.trim();
+  if (baseUrl.length > 0) return baseUrl;
+  return "尚未设置默认模型";
 }
 
 function applyModelProviderProjectionDraft(

@@ -5,8 +5,7 @@
   min-width: 0;
   flex-direction: column;
   overflow: hidden;
-  background:
-    linear-gradient(180deg, color-mix(in oklch, var(--surface) 94%, var(--bg)), color-mix(in oklch, var(--bg) 42%, var(--surface)));
+  background: var(--bg);
 }
 
 .chat-empty-main,
@@ -15,67 +14,53 @@
   flex: 1 1 auto;
   overflow-y: auto;
   overflow-anchor: none;
-  padding: 42px clamp(40px, 6vw, 104px);
+  padding: 56px 72px;
 }
 
 .chat-empty-grid {
   display: grid;
-  width: min(100%, calc(var(--panel-max-width) + 40px));
+  width: min(100%, var(--panel-max-width));
   min-height: 100%;
   margin: 0 auto;
   grid-template-columns: minmax(0, 1fr);
   align-content: center;
   align-items: center;
-  padding-block: clamp(24px, 5vh, 64px) clamp(12px, 4vh, 44px);
+  padding-block: 44px 28px;
 }
 
 .chat-empty-copy {
   display: grid;
-  gap: var(--space-5);
+  gap: var(--space-6);
   justify-items: center;
   border: 0;
   background: transparent;
   padding: 0;
   box-shadow: none;
+  text-align: center;
 }
 
 .chat-empty-heading {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip: rect(0 0 0 0);
-  clip-path: inset(50%);
-  white-space: nowrap;
-}
-
-.chat-empty-visual {
-  display: block;
-  width: min(620px, 56vw, 100%);
-  aspect-ratio: 1672 / 941;
-  background-position: center;
-  background-repeat: no-repeat;
-  background-size: contain;
-  -webkit-user-drag: none;
-  opacity: 0.86;
-  pointer-events: none;
-  user-select: none;
+  margin: 0;
+  border-bottom: 2px solid var(--border-strong);
+  padding: 0 2px var(--space-3);
+  color: var(--fg);
+  font-family: var(--font-serif);
+  font-size: 64px;
+  font-weight: 650;
+  letter-spacing: 0;
+  line-height: 0.95;
 }
 
 .system-error-line {
   margin: 0;
   border: 1px solid var(--danger-border);
-  border-radius: var(--radius-lg);
+  border-left: 3px solid var(--status-danger);
+  border-radius: var(--radius-md);
   background: var(--danger-soft);
   padding: 10px var(--space-3);
   color: var(--status-danger);
   font-size: 13px;
   line-height: 1.5;
-}
-
-.chat-empty-input-dock {
-  flex-shrink: 0;
-  padding: 0 clamp(40px, 6vw, 104px) clamp(28px, 5vh, 48px);
 }
 
 @media (max-width: 720px) {
@@ -88,11 +73,14 @@
     padding-block: 24px 28px;
   }
 
-  .chat-empty-visual {
-    width: min(420px, 86vw, 100%);
+  .chat-empty-heading {
+    font-size: 42px;
+    line-height: 1;
   }
+}
 
-  .chat-empty-input-dock {
-    padding: 0 18px 18px;
+@media (max-width: 430px) {
+  .chat-empty-heading {
+    font-size: 34px;
   }
 }

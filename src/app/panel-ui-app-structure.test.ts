@@ -31,7 +31,6 @@ test("panel UI app shell delegates data and control work", async () => {
     capabilitySettings,
     skillSettings,
     workspaceSettings,
-    confirmationSettings,
     shellStyles,
     chatComposerStyles,
     motionResponsiveStyles,
@@ -63,7 +62,6 @@ test("panel UI app shell delegates data and control work", async () => {
     readPanelUiSource(path.join("components", "capability-settings.tsx")),
     readPanelUiSource(path.join("components", "skill-settings.tsx")),
     readPanelUiSource(path.join("components", "workspace-settings.tsx")),
-    readPanelUiSource(path.join("components", "confirmation-settings.tsx")),
     readPanelUiStyle("shell.css"),
     readPanelUiStyle("chat-composer.css"),
     readPanelUiStyle("motion-responsive.css"),
@@ -247,14 +245,16 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(settingsDialog.includes('from "./capability-settings"'), true);
   assert.equal(settingsDialog.includes('from "./skill-settings"'), true);
   assert.equal(settingsDialog.includes('from "./workspace-settings"'), true);
-  assert.equal(settingsDialog.includes('from "./confirmation-settings"'), true);
+  assert.equal(settingsDialog.includes('from "./confirmation-settings"'), false);
   assert.equal(settingsDialog.includes("<CapabilitiesSettings"), true);
   assert.equal(settingsDialog.includes("<SkillSettings"), true);
   assert.equal(settingsDialog.includes("<WorkspaceSettings"), true);
-  assert.equal(settingsDialog.includes("<ConfirmationSettings"), true);
+  assert.equal(settingsDialog.includes("<ConfirmationSettings"), false);
   assert.equal(settingsDialog.includes("function Capability"), false);
   assert.equal(settingsDialog.includes("function WorkspaceSettings"), false);
   assert.equal(settingsDialog.includes("function ConfirmationSettings"), false);
+  assert.equal(settingsDialog.includes("function AppearanceSettings"), true);
+  assert.equal(settingsDialog.includes("function AboutSettings"), true);
   assert.equal(settingsDialog.includes("SkillsPage"), false);
   assert.equal(settingsDialog.includes("ToolsPage"), false);
   assert.equal(settingsDialog.includes("onStartSkill"), false);
@@ -271,13 +271,14 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(settingsDialog.includes('label: "常规"'), false);
   assert.equal(settingsDialog.includes('label: "界面"'), false);
   assert.equal(settingsDialog.includes("function GeneralSettings"), false);
-  assert.equal(settingsDialog.includes("function AppearanceSettings"), false);
   assert.equal(settingsDialog.includes('label: "模型服务"'), true);
   assert.equal(settingsDialog.includes('label: "基础能力"'), true);
   assert.equal(settingsDialog.includes('label: "MCP 服务"'), true);
   assert.equal(settingsDialog.includes('label: "技能"'), true);
   assert.equal(settingsDialog.includes('label: "工作区"'), true);
-  assert.equal(settingsDialog.includes('label: "命令确认"'), true);
+  assert.equal(settingsDialog.includes('label: "命令确认"'), false);
+  assert.equal(settingsDialog.includes('label: "外观"'), true);
+  assert.equal(settingsDialog.includes('label: "关于"'), true);
   assert.equal(settingsDialog.includes('label: "确认边界"'), false);
   assert.equal(capabilitySettings.includes("export function CapabilitiesSettings"), true);
   assert.equal(capabilitySettings.includes("function WebSearchSettings"), true);
@@ -299,9 +300,6 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(capabilitySettings.includes("管理助手可调用"), false);
   assert.equal(workspaceSettings.includes("export function WorkspaceSettings"), true);
   assert.equal(workspaceSettings.includes("这是助手可使用的本地上下文边界"), false);
-  assert.equal(confirmationSettings.includes("export function ConfirmationSettings"), true);
-  assert.equal(confirmationSettings.includes("确认门只处理命令执行的授权"), false);
-  assert.equal(confirmationSettings.includes("工具加载后显示相关动作"), false);
   assert.equal(app.includes('from "../../panel-ui-transcript-cache"'), false);
   assert.equal(appRunController.includes('from "../../panel-ui-transcript-cache"'), false);
   assert.equal(appConversationSession.includes('from "../../panel-ui-transcript-cache"'), true);
@@ -317,7 +315,7 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(sidebar.includes("PencilLine"), false);
   assert.equal(sidebar.includes("  Pin,"), false);
   assert.equal(sidebar.includes("Trash2"), false);
-  assert.equal(sidebar.includes("  Plus,"), false);
+  assert.equal(sidebar.includes("  Plus,"), true);
   assert.equal(sidebar.includes("sidebar-brand"), false);
   assert.equal(sidebar.includes("document.addEventListener(\"pointerdown\""), true);
   assert.equal(sidebar.includes("document.addEventListener(\"keydown\""), true);

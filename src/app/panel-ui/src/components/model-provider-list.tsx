@@ -223,10 +223,13 @@ export function ModelProviderList(props: {
 
   return (
     <aside className="provider-list-pane" aria-label="模型服务">
-      <label className="provider-search">
-        <Search size={16} />
-        <input value={props.query} onChange={(event) => props.onQueryChange(event.target.value)} placeholder="搜索" />
-      </label>
+      <div className="provider-list-header">
+        <span>模型服务</span>
+        <label className="provider-search">
+          <Search size={14} />
+          <input value={props.query} onChange={(event) => props.onQueryChange(event.target.value)} placeholder="搜索" />
+        </label>
+      </div>
       <div className={`provider-list ${draggingKey === undefined ? "" : "reordering"}`}>
         {props.items.map((item, index) => {
           const selected = item.key === props.selectedItem.key;
@@ -276,6 +279,7 @@ export function ModelProviderList(props: {
                 <ProviderLogo item={item} />
                 <span>
                   <strong>{item.title}</strong>
+                  <small>{providerRowMeta(item)}</small>
                 </span>
               </button>
               <button
@@ -353,6 +357,14 @@ export function ModelProviderList(props: {
       </button>
     </aside>
   );
+}
+
+function providerRowMeta(item: ModelProviderListItem): string {
+  const model = item.model.trim();
+  if (model.length > 0) return model;
+  const baseUrl = item.baseUrl.trim();
+  if (baseUrl.length > 0) return baseUrl;
+  return item.vendor ?? "未设置模型";
 }
 
 function reorderedProviderKeys(

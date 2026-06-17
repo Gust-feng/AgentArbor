@@ -10,7 +10,6 @@ import { compact } from "../text";
 import type { ComposerToolConfirmationPolicy } from "../app-config-projection";
 import type { ContextAttachment } from "../contracts/context";
 import type { ModelProviderIdentity } from "../model-provider-logos";
-import chatEmptyVisual from "../assets/chat-empty-visual.png";
 
 export type ChatModelOption = {
   readonly id: string;
@@ -47,7 +46,7 @@ export type ChatInputProps = AttachmentInputProps & {
   readonly onCancel?: () => void;
   readonly running?: boolean;
   readonly placeholder?: string;
-  readonly variant?: "embedded" | "floating" | "home";
+  readonly variant?: "embedded" | "floating";
   readonly closeSignal?: number;
 };
 
@@ -60,22 +59,15 @@ export function ChatEmpty(props: ChatInputProps & {
         <div className="chat-empty-grid">
           <section className="chat-empty-copy" aria-label="任务输入">
             <h1 className="chat-empty-heading">新任务</h1>
-          <div
-            className="chat-empty-visual"
-            style={{ backgroundImage: `url(${chatEmptyVisual})` }}
-            aria-hidden="true"
-          />
             {props.error && <div className="system-error-line">{props.error}</div>}
           </section>
         </div>
       </main>
-      <div className="chat-empty-input-dock">
-        <ChatInputBar
-          {...props}
-          variant="home"
-          placeholder="输入任务..."
-        />
-      </div>
+      <ChatInputBar
+        {...props}
+        variant="floating"
+        placeholder="输入任务..."
+      />
     </div>
   );
 }
@@ -375,7 +367,7 @@ export function ChatInputBar(props: ChatInputProps): React.ReactElement {
     </div>
   );
 
-  if (variant === "embedded" || variant === "home") {
+  if (variant === "embedded") {
     return composer;
   }
 

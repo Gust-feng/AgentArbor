@@ -1,13 +1,30 @@
 .rich-text {
-  overflow-wrap: anywhere;
+  display: grid;
+  min-width: 0;
+  gap: 12px;
+  color: inherit;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+
+.assistant-answer .rich-text {
+  gap: 13px;
+  font-family: var(--font-serif);
+  font-size: 16px;
+  line-height: 1.84;
 }
 
 .assistant-answer .rich-paragraph {
-  min-height: 1.82em;
+  min-height: 1.84em;
+  line-height: 1.84;
+}
+
+.user-message-content .rich-text {
+  gap: 10px;
 }
 
 .live-stream-box.process {
-  color: color-mix(in oklch, var(--fg) 72%, var(--muted));
+  color: color-mix(in oklch, var(--fg) 70%, var(--muted));
   font-style: normal;
 }
 
@@ -16,7 +33,8 @@
 }
 
 .live-stream-box.thinking {
-  color: color-mix(in oklch, var(--fg) 78%, var(--muted));
+  color: color-mix(in oklch, var(--fg) 74%, var(--muted));
+  font-family: var(--font-sans);
   font-size: 13px;
   line-height: 1.7;
 }
@@ -26,30 +44,13 @@
   width: min(700px, 100%);
   min-width: 0;
   padding: 1px 0;
-  color: color-mix(in oklch, var(--fg) 70%, var(--muted));
+  color: color-mix(in oklch, var(--fg) 68%, var(--muted));
   font-size: 13px;
   line-height: 1.68;
 }
 
 .agent-model-output-line .live-stream-box {
   padding-right: 0;
-}
-
-.assistant-answer .rich-text {
-  gap: 11px;
-}
-
-.assistant-answer .rich-paragraph {
-  line-height: 1.84;
-}
-
-.rich-text {
-  display: grid;
-  min-width: 0;
-  gap: 10px;
-  color: inherit;
-  overflow-wrap: break-word;
-  word-break: normal;
 }
 
 .rich-text > :first-child {
@@ -66,37 +67,39 @@
 }
 
 .rich-heading {
-  margin: 9px 0 1px;
+  margin: 12px 0 2px;
   color: var(--fg);
-  line-height: 1.34;
+  font-family: var(--font-serif);
+  line-height: 1.32;
 }
 
 .rich-heading-1,
 .rich-heading-2 {
-  font-size: 16px;
-  font-weight: 600;
+  font-size: 18px;
+  font-weight: 700;
 }
 
 .rich-heading-3 {
-  font-size: 15px;
-  font-weight: 500;
+  font-size: 16px;
+  font-weight: 650;
 }
 
 .rich-heading-4 {
   font-size: 14px;
-  font-weight: 500;
+  font-weight: 650;
 }
 
 .rich-link {
   color: var(--accent-active);
-  font-weight: 560;
+  font-weight: 650;
   text-decoration: underline;
+  text-decoration-thickness: 1px;
   text-underline-offset: 3px;
 }
 
 .rich-list {
   display: grid;
-  gap: 6px;
+  gap: 7px;
   margin: 0;
   padding-left: 22px;
 }
@@ -107,7 +110,7 @@
 }
 
 .rich-list li::marker {
-  color: var(--muted);
+  color: color-mix(in oklch, var(--accent) 64%, var(--muted));
 }
 
 .rich-list input[type="checkbox"] {
@@ -115,44 +118,44 @@
   height: 13px;
   margin: 0 6px 0 -18px;
   vertical-align: -2px;
-  accent-color: var(--accent-strong);
+  accent-color: var(--accent);
 }
 
 .rich-blockquote {
   margin: 2px 0;
-  border-left: 2px solid color-mix(in oklch, var(--accent-border) 72%, var(--border));
-  border-radius: 0 10px 10px 0;
-  background: color-mix(in oklch, var(--surface-subtle) 58%, transparent);
+  border-left: 3px solid var(--accent);
+  border-radius: 0;
+  background: color-mix(in oklch, var(--accent) 4%, transparent);
   padding: 9px 13px;
-  color: color-mix(in oklch, var(--fg) 68%, var(--muted));
+  color: color-mix(in oklch, var(--fg) 72%, var(--muted));
 }
 
 .rich-inline-code {
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--surface-subtle);
+  border: 1px solid color-mix(in oklch, var(--border) 88%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in oklch, var(--surface-subtle) 78%, var(--surface));
   padding: 1px 5px;
-  color: color-mix(in oklch, var(--fg) 84%, var(--accent-active));
+  color: color-mix(in oklch, var(--fg) 82%, var(--accent-active));
   font-family: var(--font-mono);
-  font-size: 0.92em;
+  font-size: 0.9em;
 }
 
 .rich-code-block {
   position: relative;
   max-width: 100%;
   overflow: auto;
-  border: 1px solid color-mix(in oklch, var(--border) 70%, transparent);
-  border-radius: var(--radius-lg);
-  background: color-mix(in oklch, var(--surface-subtle) 82%, var(--surface));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: color-mix(in oklch, var(--surface) 86%, var(--surface-subtle));
   padding: 15px;
   color: var(--fg);
   font-family: var(--font-mono);
   font-size: 12px;
-  line-height: 1.65;
+  line-height: 1.68;
 }
 
 .rich-code-block[data-language] {
-  padding-top: 34px;
+  padding-top: 35px;
 }
 
 .rich-code-block[data-language]::before {
@@ -160,9 +163,12 @@
   position: absolute;
   top: 9px;
   right: 12px;
-  color: var(--muted);
+  color: color-mix(in oklch, var(--fg) 42%, var(--muted));
   font-family: var(--font-sans);
-  font-size: 11px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0;
+  line-height: 1.2;
   text-transform: uppercase;
 }
 
@@ -176,7 +182,7 @@
   max-width: 100%;
   overflow-x: auto;
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius-md);
   background: var(--surface);
 }
 
@@ -184,6 +190,7 @@
   width: 100%;
   min-width: 420px;
   border-collapse: collapse;
+  font-family: var(--font-sans);
   font-size: 13px;
 }
 
@@ -196,9 +203,9 @@
 }
 
 .rich-table th {
-  background: var(--surface-subtle);
+  background: color-mix(in oklch, var(--fg) 3%, transparent);
   color: var(--fg);
-  font-weight: 500;
+  font-weight: 700;
 }
 
 .rich-table tr:last-child td {
@@ -210,13 +217,49 @@
 }
 
 .rich-text-streaming {
-  white-space: pre-wrap;
+  min-width: 0;
+  color: var(--fg);
+  font-family: var(--font-serif);
+  font-size: 16px;
   line-height: 1.84;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .rich-divider {
   width: 100%;
   border: 0;
   border-top: 1px solid var(--border);
-  margin: 4px 0;
+  margin: 6px 0;
+}
+
+.stream-cursor {
+  display: inline-block;
+  width: 2px;
+  height: 1.15em;
+  margin-left: 2px;
+  background: var(--accent);
+  vertical-align: text-bottom;
+  animation: stream-cursor-blink 1s steps(2, start) infinite;
+}
+
+@media (max-width: 720px) {
+  .assistant-answer .rich-text,
+  .rich-text-streaming {
+    font-size: 15px;
+    line-height: 1.78;
+  }
+
+  .rich-code-block {
+    padding: 13px;
+    font-size: 11.5px;
+  }
+
+  .rich-code-block[data-language] {
+    padding-top: 32px;
+  }
+
+  .rich-table {
+    min-width: 360px;
+  }
 }

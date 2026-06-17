@@ -70,6 +70,7 @@ const MemoAgentWorkTimeline = React.memo(function AgentWorkTimelineContent(props
       <section className="agent-workline" aria-label="工作进度">
         <details className="agent-workline-disclosure">
           <summary className="agent-workline-summary" aria-label={`展开过程，${summary}`}>
+            <span className="agent-workline-summary-text">{summary}</span>
             <span className="agent-workline-summary-metrics" aria-hidden="true">
               {metrics.map((metric) => {
                 const Icon = metric.icon;

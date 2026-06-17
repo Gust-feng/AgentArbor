@@ -524,8 +524,6 @@ export function App(): React.ReactElement {
         onSaveWorkspace={(nextWorkspaceDirectory) => void saveWorkspace(nextWorkspaceDirectory)}
         onSaveCommandShell={(kind) => void saveCommandShell(kind)}
         tools={app.tools}
-        toolConfirmationPolicy={toolConfirmationPolicy}
-        onToolConfirmationPolicyChange={changeToolConfirmationPolicy}
         toolForm={toolForm}
         setToolForm={setToolForm}
         mcpServerForm={mcpServerForm}

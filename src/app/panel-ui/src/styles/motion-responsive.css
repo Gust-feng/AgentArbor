@@ -134,34 +134,6 @@
     justify-content: space-between;
   }
 
-  .chat-composer-home .chat-input-card {
-    border-radius: 20px;
-  }
-
-  .chat-composer-home .chat-input-textarea {
-    min-height: 78px;
-    border-radius: 18px 18px 0 0;
-    padding: 12px 16px 6px;
-    font-size: 16px;
-  }
-
-  .chat-composer-home .chat-input-toolbar {
-    min-height: 46px;
-    padding: 8px 14px 12px;
-  }
-
-  .chat-composer-home .composer-tool-button,
-  .chat-composer-home .composer-options-button {
-    height: 30px;
-    padding: 0 6px;
-    font-size: 12px;
-  }
-
-  .chat-composer-home .composer-send-button {
-    width: 34px;
-    height: 34px;
-  }
-
   .settings-row {
     grid-template-columns: 1fr;
     align-items: stretch;
@@ -172,16 +144,6 @@
   .chat-empty-grid {
     gap: 28px;
     padding-block: 46px 26px;
-  }
-
-  .chat-composer-home .chat-input-textarea {
-    min-height: 78px;
-    padding-top: 12px;
-    padding-bottom: 6px;
-  }
-
-  .chat-composer-home .chat-input-toolbar {
-    min-height: 44px;
   }
 
 }

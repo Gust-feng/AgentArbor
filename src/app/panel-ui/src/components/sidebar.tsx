@@ -2,7 +2,7 @@ import React from "react";
 import {
   Check,
   EllipsisVertical,
-  Leaf,
+  Plus,
   Settings,
   ShieldCheck,
   X,
@@ -119,7 +119,7 @@ export function Sidebar(props: {
           className={`sidebar-action sidebar-rail-button sidebar-new-button ${newTaskActive ? "active" : ""}`}
         >
           <span className="sidebar-icon-slot" aria-hidden="true">
-            <Leaf size={16} />
+            <Plus size={16} />
           </span>
           <span className="sidebar-label">新任务</span>
         </button>
@@ -245,10 +245,10 @@ function ConversationGroup(props: {
       <div className="sidebar-list-heading">
         <span>{props.title}</span>
       </div>
-      {props.conversations.map((conversation) => (
-        <ConversationListItem
-          key={conversation.conversationId}
-          conversation={conversation}
+              {props.conversations.map((conversation) => (
+                <ConversationListItem
+                  key={conversation.conversationId}
+                  conversation={conversation}
           active={conversation.conversationId === props.activeConversationId}
           editing={conversation.conversationId === props.editingConversationId}
           editingTitle={props.editingTitle}

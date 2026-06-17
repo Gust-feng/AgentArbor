@@ -2,7 +2,7 @@
   width: min(var(--panel-reading-width), calc(100% - 46px));
   margin-left: 46px;
   border: 0;
-  border-left: 2px solid color-mix(in oklch, var(--border) 78%, transparent);
+  border-left: 2px solid var(--border-strong);
   border-radius: 0;
   background: transparent;
   padding: 4px 0 4px 12px;
@@ -39,8 +39,8 @@
 
 .confirmation-actions button.primary,
 .page-action-button.primary {
-  border-color: var(--accent-strong);
-  background: linear-gradient(135deg, var(--accent-strong), color-mix(in oklch, var(--secondary) 36%, var(--accent-strong)));
+  border-color: var(--fg);
+  background: var(--fg);
   color: var(--primary-foreground);
 }
 
@@ -51,7 +51,7 @@
 
 .confirmation-actions button {
   height: 28px;
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   padding: 0 11px;
   font-size: 12px;
   font-weight: 560;
@@ -59,13 +59,13 @@
 }
 
 .confirmation-actions button.primary {
-  border-color: color-mix(in oklch, var(--accent-strong) 60%, var(--border));
-  background: color-mix(in oklch, var(--accent-strong) 10%, transparent);
-  color: color-mix(in oklch, var(--accent-active) 84%, var(--fg));
+  border-color: var(--accent);
+  background: color-mix(in oklch, var(--accent) 9%, transparent);
+  color: color-mix(in oklch, var(--accent-active) 78%, var(--fg));
 }
 
 .confirmation-actions button.primary:hover:not(:disabled) {
-  background: color-mix(in oklch, var(--accent-strong) 15%, transparent);
+  background: color-mix(in oklch, var(--accent) 14%, transparent);
 }
 
 .confirmation-actions button.secondary {
@@ -75,12 +75,12 @@
 }
 
 .status-notice.warning {
-  border-left-color: color-mix(in oklch, var(--status-warning) 70%, var(--border));
+  border-left-color: var(--status-warning);
   background: transparent;
 }
 
 .status-notice.error {
-  border-left-color: color-mix(in oklch, var(--status-danger) 68%, var(--border));
+  border-left-color: var(--status-danger);
   background: transparent;
 }
 
@@ -126,18 +126,18 @@
 
 .chat-input-floating {
   flex-shrink: 0;
-  background:
-    linear-gradient(180deg, transparent, color-mix(in oklch, var(--surface) 78%, transparent) 22%, color-mix(in oklch, var(--surface) 96%, var(--bg)) 76%);
-  padding: var(--space-3) clamp(40px, 6vw, 104px) var(--space-6);
+  border-top: 1px solid color-mix(in oklch, var(--fg) 5%, transparent);
+  background: transparent;
+  padding: var(--space-3) 72px var(--space-4);
 }
 
 .chat-input-floating-inner {
-  width: min(100%, var(--panel-max-width));
+  width: min(100%, var(--panel-reading-width));
   margin: 0 auto;
 }
 
 .chat-input-floating .chat-input-textarea {
-  min-height: 82px;
+  min-height: 58px;
   font-size: 16px;
 }
 
@@ -148,6 +148,6 @@
   }
 
   .chat-input-floating {
-    padding: var(--space-2) 18px 18px;
+    padding: var(--space-2) 18px var(--space-3);
   }
 }

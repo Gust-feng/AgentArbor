@@ -36,18 +36,36 @@ export function ChatActive(props: ChatInputProps & {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const autoStickToBottomRef = useRef(true);
   const resizeFrameRef = useRef<number | undefined>(undefined);
-  const view = useMemo(
+  // 静态视图：不依赖 live，在纯文本增量 SSE 事件期间保持缓存
+  // （此类事件只更新 live buffer，不更新 conversation/run/workView/transcriptNodes）
+  const baseView = useMemo(
     () => projectChatActiveView({
       conversation: props.conversation,
       run: props.run,
       workView: props.workView,
       transcriptNodes: props.transcriptNodes,
       detail: props.detail,
-      live: props.live,
       error: props.error,
       pendingConfirmation: props.pendingConfirmation,
     }),
-    [props.conversation, props.run, props.workView, props.transcriptNodes, props.detail, props.live, props.error, props.pendingConfirmation]
+    [props.conversation, props.run, props.workView, props.transcriptNodes, props.detail, props.error, props.pendingConfirmation]
+  );
+  // 完整视图：无 live 时直接复用 baseView 跳过投影重算；
+  // 有 live 时合并 live 数据，仅在此刻重新投影
+  const view = useMemo(
+    () => props.live === undefined
+      ? baseView
+      : projectChatActiveView({
+          conversation: props.conversation,
+          run: props.run,
+          workView: props.workView,
+          transcriptNodes: props.transcriptNodes,
+          detail: props.detail,
+          live: props.live,
+          error: props.error,
+          pendingConfirmation: props.pendingConfirmation,
+        }),
+    [baseView, props.live]
   );
 
   useLayoutEffect(() => {

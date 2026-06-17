@@ -18,12 +18,14 @@ export function LiveStreamBox({
   animateOnMount = false,
   tone = "formal",
   renderText,
+  renderStreamingText,
 }: {
   readonly text: string;
   readonly live: boolean;
   readonly animateOnMount?: boolean;
   readonly tone?: StreamingTextTone;
   readonly renderText?: (text: string) => React.ReactNode;
+  readonly renderStreamingText?: (text: string) => React.ReactNode;
 }): React.ReactElement {
   const initialRef = useRef<{
     readonly stream: StreamingTextState;
@@ -120,13 +122,17 @@ export function LiveStreamBox({
     setStreamingRender(isLive);
   }
 
+  const rendered = streamingRender && renderStreamingText !== undefined
+    ? renderStreamingText(displayed)
+    : renderText === undefined ? displayed : renderText(displayed);
+
   return (
     <div
       className={`live-stream-box ${streamingRender ? "streaming" : "settled"} ${tone}`}
       aria-live={streamingRender ? "polite" : "off"}
       aria-atomic="false"
     >
-      {renderText === undefined ? displayed : renderText(displayed)}
+      {rendered}
     </div>
   );
 }

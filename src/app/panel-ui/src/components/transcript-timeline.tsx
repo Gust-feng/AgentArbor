@@ -21,12 +21,18 @@ import type { ActivityItem } from "../../../panel-transcript-activity-copy";
 export type { ConfirmationProjection } from "./transcript-confirmation";
 export { pendingForTurn } from "../../../panel-transcript-confirmation-projection";
 
-export function AgentWorkTimeline(props: {
+type AgentWorkTimelineProps = {
   readonly view: AgentWorkTimelineView<TranscriptNode, ConfirmationProjection>;
   readonly collapsed?: boolean;
   readonly onDecision?: (decision: "approve_once" | "deny" | "guidance", guidance?: string) => void;
   readonly confirmationBusy: boolean;
-}): React.ReactElement | null {
+};
+
+export function AgentWorkTimeline(props: AgentWorkTimelineProps): React.ReactElement | null {
+  return <MemoAgentWorkTimeline {...props} />;
+}
+
+const MemoAgentWorkTimeline = React.memo(function AgentWorkTimelineContent(props: AgentWorkTimelineProps): React.ReactElement | null {
   const { confirmation, items } = props.view;
 
   if (!props.view.hasContent) return null;
@@ -90,7 +96,7 @@ export function AgentWorkTimeline(props: {
       {activity}
     </section>
   );
-}
+}, agentWorkTimelinePropsEqual);
 
 type ActivityMetricKind = "web" | "read" | "edit" | "command" | "other";
 
@@ -158,6 +164,45 @@ function ActivityLine({ item }: { readonly item: ActivityItem }): React.ReactEle
       {line}
     </p>
   );
+}
+
+function agentWorkTimelinePropsEqual(left: AgentWorkTimelineProps, right: AgentWorkTimelineProps): boolean {
+  return left.collapsed === right.collapsed &&
+    left.onDecision === right.onDecision &&
+    left.confirmationBusy === right.confirmationBusy &&
+    timelineViewsEqual(left.view, right.view);
+}
+
+function timelineViewsEqual(
+  left: AgentWorkTimelineView<TranscriptNode, ConfirmationProjection>,
+  right: AgentWorkTimelineView<TranscriptNode, ConfirmationProjection>
+): boolean {
+  if (left === right) return true;
+  return left.hasContent === right.hasContent &&
+    activityItemsEqual(left.items, right.items) &&
+    left.confirmation.current === right.confirmation.current &&
+    left.confirmation.currentNodeId === right.confirmation.currentNodeId;
+}
+
+function activityItemsEqual(left: readonly ActivityItem[], right: readonly ActivityItem[]): boolean {
+  if (left === right) return true;
+  if (left.length !== right.length) return false;
+  for (let index = 0; index < left.length; index += 1) {
+    if (!activityItemEqual(left[index], right[index])) return false;
+  }
+  return true;
+}
+
+function activityItemEqual(left: ActivityItem | undefined, right: ActivityItem | undefined): boolean {
+  if (left === right) return true;
+  if (left === undefined || right === undefined) return false;
+  return left.nodeId === right.nodeId &&
+    left.key === right.key &&
+    left.tone === right.tone &&
+    left.phase === right.phase &&
+    left.copy.label === right.copy.label &&
+    left.copy.detail === right.copy.detail &&
+    left.copy.expandedDetail === right.copy.expandedDetail;
 }
 
 const ACTIVITY_METRIC_ORDER: readonly ActivityMetricKind[] = ["web", "read", "edit", "command", "other"];

@@ -62,7 +62,6 @@ export async function loadConversationSession(
   const workView = ordinaryWorkViewFromRunView(currentRun);
   const capabilityResolution = currentRun?.capabilityResolution;
   const transcriptNodes = transcriptNodesFrom(workView, detail);
-  const historicalTranscriptNodesByRunId = await loadConversationTranscriptNodesByRunId(response.conversation, latestRunId);
   if (!options.mountedRef.current || options.viewEpochRef.current !== epoch) return;
   options.setApp((previous) => ({
     ...previous,
@@ -73,7 +72,7 @@ export async function loadConversationSession(
     capabilityResolutionRunId: capabilityResolution === undefined ? undefined : run?.runId,
     detail,
     transcriptNodes,
-    transcriptNodesByRunId: mergeTranscriptNodesByRunId(historicalTranscriptNodesByRunId, latestRunId, transcriptNodes),
+    transcriptNodesByRunId: mergeTranscriptNodesByRunId({}, latestRunId, transcriptNodes),
     events: replay?.events ?? [],
     live: run !== undefined && latestRunId !== undefined && shouldKeepRefreshing(run.status)
       ? liveRunForObservedReplay({
@@ -88,6 +87,28 @@ export async function loadConversationSession(
   if (run !== undefined && shouldKeepRefreshing(run.status)) {
     options.startLiveUpdates(run.runId, replay?.cursor.lastSequence ?? run.eventCursor.lastSequence);
   }
+  const historicalTranscriptNodesByRunId = await loadConversationTranscriptNodesByRunId(
+    response.conversation,
+    latestRunId,
+    (partial) => {
+      if (!options.mountedRef.current || options.viewEpochRef.current !== epoch) return;
+      options.setApp((previous) => ({
+        ...previous,
+        transcriptNodesByRunId: {
+          ...previous.transcriptNodesByRunId,
+          ...partial,
+        },
+      }));
+    }
+  );
+  if (!options.mountedRef.current || options.viewEpochRef.current !== epoch) return;
+  options.setApp((previous) => ({
+    ...previous,
+    transcriptNodesByRunId: {
+      ...previous.transcriptNodesByRunId,
+      ...historicalTranscriptNodesByRunId,
+    },
+  }));
 }
 
 function isMissingConversationError(error: unknown): boolean {

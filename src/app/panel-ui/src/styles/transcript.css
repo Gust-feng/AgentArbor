@@ -1,6 +1,6 @@
 .agent-workline {
   display: grid;
-  width: min(730px, 100%);
+  width: min(var(--panel-reading-width), 100%);
   min-width: 0;
 }
 
@@ -16,15 +16,15 @@
   max-width: 100%;
   align-items: center;
   gap: 8px;
-  border: 1px solid color-mix(in oklch, var(--border) 88%, transparent);
+  border: 1px solid color-mix(in oklch, var(--border) 92%, transparent);
   border-radius: var(--radius-lg);
-  background: color-mix(in oklch, var(--surface-subtle) 74%, var(--surface));
-  padding: 8px 10px;
+  background: color-mix(in oklch, var(--surface) 72%, var(--surface-subtle));
+  padding: 8px 11px;
   color: var(--fg);
   cursor: pointer;
   line-height: 1;
   list-style: none;
-  box-shadow: 0 8px 18px color-mix(in oklch, #111827 4%, transparent);
+  box-shadow: 0 7px 16px color-mix(in oklch, #111827 3%, transparent);
   transition:
     border-color var(--motion-fast-duration) var(--motion-ease-standard),
     background-color var(--motion-fast-duration) var(--motion-ease-standard),
@@ -37,7 +37,7 @@
 
 .agent-workline-disclosure > summary:hover {
   border-color: color-mix(in oklch, var(--accent-border) 54%, var(--border));
-  background: color-mix(in oklch, var(--surface-subtle) 56%, var(--surface));
+  background: var(--surface);
 }
 
 .agent-workline-summary-metrics {
@@ -116,18 +116,18 @@
   display: grid;
   min-width: 0;
   gap: 0;
-  padding: 2px 0 var(--space-1);
+  padding: 4px 0 var(--space-1);
 }
 
 .agent-activity-step {
   position: relative;
   display: grid;
   min-width: 0;
-  grid-template-columns: 12px minmax(0, 1fr);
+  grid-template-columns: 14px minmax(0, 1fr);
   align-items: start;
   column-gap: var(--space-2);
-  padding: 4px 0 5px;
-  color: color-mix(in oklch, var(--fg) 58%, var(--muted));
+  padding: 5px 0 6px;
+  color: color-mix(in oklch, var(--fg) 64%, var(--muted));
   animation: agent-activity-enter 180ms var(--motion-ease-standard) both;
   transition: color 180ms var(--motion-ease-standard), opacity 180ms var(--motion-ease-standard);
 }
@@ -137,17 +137,17 @@
   position: absolute;
   top: 16px;
   bottom: -8px;
-  left: 5px;
+  left: 6px;
   width: 1px;
   border-radius: 999px;
-  background: color-mix(in oklch, var(--border) 46%, transparent);
+  background: color-mix(in oklch, var(--border) 58%, transparent);
 }
 
 .agent-activity-marker {
   position: relative;
   z-index: 1;
-  width: 6px;
-  height: 6px;
+  width: 7px;
+  height: 7px;
   border-radius: 999px;
   margin: 8px auto 0;
   border: 1px solid color-mix(in oklch, var(--muted) 30%, transparent);
@@ -201,7 +201,7 @@
   column-gap: var(--space-2);
   row-gap: 2px;
   margin: 0;
-  font-size: 12.8px;
+  font-size: 13px;
   line-height: 1.74;
   transition: color 180ms var(--motion-ease-standard), opacity 180ms var(--motion-ease-standard);
 }
@@ -246,7 +246,7 @@
 
 .agent-activity-expanded-detail {
   margin: var(--space-1) 0 0;
-  max-width: min(680px, 100%);
+  max-width: min(var(--panel-reading-width), 100%);
   color: color-mix(in oklch, var(--fg) 70%, var(--muted));
   font-size: 12.75px;
   line-height: 1.72;
@@ -260,9 +260,9 @@
   align-items: center;
   gap: 7px;
   flex: 0 0 auto;
-  color: color-mix(in oklch, var(--fg) 58%, var(--muted));
+  color: color-mix(in oklch, var(--fg) 64%, var(--muted));
   font-size: 12px;
-  font-weight: 500;
+  font-weight: 560;
 }
 
 .agent-activity-label::after {
@@ -281,7 +281,7 @@
   display: -webkit-box;
   flex: 1 1 auto;
   min-width: 0;
-  color: inherit;
+  color: color-mix(in oklch, var(--fg) 76%, var(--muted));
   overflow: hidden;
   overflow-wrap: anywhere;
   -webkit-box-orient: vertical;
@@ -316,7 +316,7 @@
 
 .agent-activity-step.tool:not([data-current="true"]) .agent-activity-detail,
 .agent-activity-step.decision:not([data-current="true"]) .agent-activity-detail {
-  color: color-mix(in oklch, var(--fg) 55%, var(--muted));
+  color: color-mix(in oklch, var(--fg) 62%, var(--muted));
 }
 
 .agent-activity-step.confirmation {
@@ -328,7 +328,7 @@
 }
 
 .agent-activity-step.confirmation .confirmation-node-body {
-  width: min(680px, 100%);
+  width: min(var(--panel-reading-width), 100%);
   padding-top: 0;
 }
 

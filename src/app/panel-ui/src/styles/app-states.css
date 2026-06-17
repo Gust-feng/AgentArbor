@@ -1,0 +1,92 @@
+/* 应用级状态样式：错误边界、初始加载 */
+
+.app-bootstrap-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-4);
+  height: 100%;
+  min-height: 240px;
+  border-radius: inherit;
+  background: color-mix(in oklch, var(--surface) 88%, var(--bg));
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.app-bootstrap-spinner {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 3px solid var(--surface-muted);
+  border-top-color: var(--accent);
+  animation: app-bootstrap-spin 0.7s linear infinite;
+}
+
+@keyframes app-bootstrap-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.app-error-boundary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  padding: var(--space-8);
+  background: var(--bg);
+}
+
+.app-error-boundary-card {
+  display: grid;
+  gap: var(--space-4);
+  max-width: 420px;
+  padding: var(--space-8);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-elevated);
+  text-align: center;
+}
+
+.app-error-boundary-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.app-error-boundary-message {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.app-error-boundary-detail {
+  margin: 0;
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--surface-subtle);
+  color: var(--status-danger);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.app-error-boundary-retry {
+  justify-self: center;
+  padding: 10px 24px;
+  border-radius: var(--radius-md);
+  background: var(--accent);
+  color: var(--primary-foreground);
+  font-size: 14px;
+  font-weight: 500;
+  transition: background-color var(--motion-fast-duration) var(--motion-ease-standard);
+}
+
+.app-error-boundary-retry:hover {
+  background: var(--accent-hover);
+}

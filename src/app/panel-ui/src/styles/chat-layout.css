@@ -5,7 +5,8 @@
   min-width: 0;
   flex-direction: column;
   overflow: hidden;
-  background: linear-gradient(180deg, var(--surface), color-mix(in oklch, var(--bg) 62%, var(--surface)));
+  background:
+    linear-gradient(180deg, color-mix(in oklch, var(--surface) 94%, var(--bg)), color-mix(in oklch, var(--bg) 42%, var(--surface)));
 }
 
 .chat-empty-main,
@@ -14,18 +15,18 @@
   flex: 1 1 auto;
   overflow-y: auto;
   overflow-anchor: none;
-  padding: 40px clamp(48px, 8vw, 132px);
+  padding: 42px clamp(40px, 6vw, 104px);
 }
 
 .chat-empty-grid {
   display: grid;
-  width: min(100%, var(--panel-max-width));
+  width: min(100%, calc(var(--panel-max-width) + 40px));
   min-height: 100%;
   margin: 0 auto;
   grid-template-columns: minmax(0, 1fr);
   align-content: center;
   align-items: center;
-  padding-block: clamp(28px, 6vh, 72px) clamp(16px, 4vh, 48px);
+  padding-block: clamp(24px, 5vh, 64px) clamp(12px, 4vh, 44px);
 }
 
 .chat-empty-copy {
@@ -50,12 +51,13 @@
 
 .chat-empty-visual {
   display: block;
-  width: min(760px, 70vw, 100%);
+  width: min(620px, 56vw, 100%);
   aspect-ratio: 1672 / 941;
   background-position: center;
   background-repeat: no-repeat;
   background-size: contain;
   -webkit-user-drag: none;
+  opacity: 0.86;
   pointer-events: none;
   user-select: none;
 }
@@ -73,7 +75,7 @@
 
 .chat-empty-input-dock {
   flex-shrink: 0;
-  padding: 0 clamp(48px, 8vw, 132px) clamp(28px, 5vh, 52px);
+  padding: 0 clamp(40px, 6vw, 104px) clamp(28px, 5vh, 48px);
 }
 
 @media (max-width: 720px) {
@@ -83,7 +85,11 @@
   }
 
   .chat-empty-grid {
-    padding-block: 26px 28px;
+    padding-block: 24px 28px;
+  }
+
+  .chat-empty-visual {
+    width: min(420px, 86vw, 100%);
   }
 
   .chat-empty-input-dock {

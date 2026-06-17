@@ -27,6 +27,7 @@ import {
 import { useConversationSummaryRefresh } from "./app-conversation-refresh";
 import { createAppSettingsController } from "./app-settings-controller";
 import {
+  currentRunProjectionDeps,
   projectCurrentRun,
 } from "./app-run-projection";
 import { createAppRunController } from "./app-run-controller";
@@ -213,14 +214,14 @@ export function App(): React.ReactElement {
     [app.config, selectedModelId]
   );
   const chatScreen = screen === "chat-empty" && (app.conversation !== undefined || app.run !== undefined) ? "chat-active" : screen;
-  const currentRun = projectCurrentRun(app);
+  const currentRun = useMemo(() => projectCurrentRun(app), currentRunProjectionDeps(app));
   const pendingConfirmation = currentRun.workView?.pendingConfirmation;
   const pendingConversationCount = app.conversations.filter(isConversationWaitingForUser).length;
   const pendingCount = Math.max(pendingConversationCount, pendingConfirmation === undefined ? 0 : 1);
-  const runController = createAppRunController({
+  const runController = useMemo(() => createAppRunController({
     app,
     setApp,
-    setScreen: (nextScreen) => setScreen(nextScreen),
+    setScreen,
     setGoal,
     attachments,
     setAttachments,
@@ -237,7 +238,17 @@ export function App(): React.ReactElement {
     streamRef,
     activeRunIdRef,
     viewEpochRef,
-  });
+  }), [
+    app,
+    attachments,
+    goal,
+    aiMode,
+    composerReasoningEffort,
+    toolConfirmationPolicy,
+    selectedModelId,
+    selectedModelSupportsReasoningEffort,
+    confirmationBusy,
+  ]);
   const {
     loadConversation,
     startTask,
@@ -442,6 +453,8 @@ export function App(): React.ReactElement {
     onCancel: () => void cancelRun(),
   };
 
+  const isBootstrapping = app.config === undefined && app.conversations.length === 0 && app.error === undefined;
+
   return (
     <div className="app-root">
       <Sidebar
@@ -459,13 +472,19 @@ export function App(): React.ReactElement {
 
       <div className="app-workbench">
         <main className="app-main">
-          {chatScreen === "chat-empty" && (
+          {isBootstrapping && (
+            <div className="app-bootstrap-loading">
+              <div className="app-bootstrap-spinner" />
+              <p>正在初始化工作台</p>
+            </div>
+          )}
+          {!isBootstrapping && chatScreen === "chat-empty" && (
             <ChatEmpty
               {...inputProps}
               error={app.error}
             />
           )}
-          {chatScreen === "chat-active" && (
+          {!isBootstrapping && chatScreen === "chat-active" && (
             <ChatActive
               {...inputProps}
               conversation={app.conversation}

@@ -2,7 +2,7 @@
   position: relative;
   display: grid;
   width: 100%;
-  gap: var(--space-4);
+  gap: var(--space-3);
 }
 
 .chat-composer-home {
@@ -13,18 +13,22 @@
 .chat-input-card {
   position: relative;
   overflow: visible;
-  border: 1px solid color-mix(in oklch, var(--border) 92%, transparent);
-  border-radius: 16px;
+  border: 1px solid color-mix(in oklch, var(--border) 96%, var(--muted));
+  border-radius: var(--radius-xl);
   background: var(--surface);
-  box-shadow: 0 8px 22px color-mix(in oklch, #111827 4%, transparent);
+  box-shadow:
+    0 1px 0 color-mix(in oklch, #ffffff 78%, transparent) inset,
+    0 18px 46px color-mix(in oklch, #111827 7%, transparent);
   transition:
     border-color var(--motion-panel-duration) var(--motion-ease-standard),
     box-shadow var(--motion-panel-duration) var(--motion-ease-standard);
 }
 
 .chat-input-card.focused {
-  border-color: color-mix(in oklch, var(--border) 92%, transparent);
-  box-shadow: 0 8px 22px color-mix(in oklch, #111827 4%, transparent);
+  border-color: color-mix(in oklch, var(--accent) 38%, var(--border));
+  box-shadow:
+    0 0 0 3px color-mix(in oklch, var(--accent) 9%, transparent),
+    0 22px 54px color-mix(in oklch, #111827 8%, transparent);
 }
 
 .chat-input-textarea {
@@ -32,9 +36,9 @@
   width: 100%;
   min-height: 42px;
   border: 0;
-  border-radius: 16px 16px 0 0;
+  border-radius: var(--radius-xl) var(--radius-xl) 0 0;
   background: transparent;
-  padding: 12px 16px 6px;
+  padding: 14px 16px 7px;
   color: var(--fg);
   font-size: 16px;
   font-weight: 400;
@@ -113,9 +117,9 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--space-4);
-  min-height: 38px;
-  border-top: 1px solid color-mix(in oklch, var(--border) 62%, transparent);
-  padding: 5px 12px 8px;
+  min-height: 42px;
+  border-top: 1px solid color-mix(in oklch, var(--border) 72%, transparent);
+  padding: 6px 12px 9px;
 }
 
 .chat-input-left,
@@ -134,8 +138,8 @@
   align-items: center;
   gap: 6px;
   border: 0;
-  border-radius: 999px;
-  background: transparent;
+  border-radius: var(--radius-md);
+  background: color-mix(in oklch, var(--surface-subtle) 56%, transparent);
   padding: 0 8px;
   color: color-mix(in oklch, var(--fg) 58%, var(--muted));
   font-size: 12px;
@@ -148,7 +152,7 @@
 
 .composer-tool-button[aria-expanded="true"],
 .composer-options-button[aria-expanded="true"] {
-  background: color-mix(in oklch, var(--surface-muted) 72%, transparent);
+  background: color-mix(in oklch, var(--surface-muted) 84%, transparent);
   color: var(--fg);
 }
 
@@ -157,7 +161,7 @@
 .composer-cancel-button:hover,
 .turn-actions button:hover,
 .settings-actions button:hover {
-  background: color-mix(in oklch, var(--accent-soft) 44%, var(--surface));
+  background: color-mix(in oklch, var(--accent-soft) 54%, var(--surface));
   color: var(--fg);
 }
 
@@ -177,6 +181,7 @@
 }
 
 .composer-access-chip.full-access {
+  background: color-mix(in oklch, var(--amber-soft) 44%, var(--surface));
   color: color-mix(in oklch, var(--fg) 84%, var(--status-warning));
 }
 
@@ -404,18 +409,18 @@
 
 .composer-send-button {
   display: inline-flex;
-  width: 30px;
-  height: 30px;
+  width: 32px;
+  height: 32px;
   align-items: center;
   justify-content: center;
   border-radius: 999px;
-  background: color-mix(in oklch, var(--fg) 42%, var(--muted));
+  background: var(--accent-strong);
   color: var(--primary-foreground);
-  box-shadow: none;
+  box-shadow: 0 8px 18px color-mix(in oklch, var(--accent-strong) 18%, transparent);
 }
 
 .composer-send-button:hover:not(:disabled) {
-  background: color-mix(in oklch, var(--fg) 62%, var(--muted));
+  background: var(--accent-hover);
 }
 
 .composer-send-button:disabled {
@@ -432,18 +437,22 @@
 }
 
 .chat-composer-home .chat-input-card {
-  border-radius: 16px;
-  box-shadow: 0 8px 22px color-mix(in oklch, #111827 4%, transparent);
+  border-radius: var(--radius-xl);
+  box-shadow:
+    0 1px 0 color-mix(in oklch, #ffffff 78%, transparent) inset,
+    0 20px 54px color-mix(in oklch, #111827 8%, transparent);
 }
 
 .chat-composer-home .chat-input-card.focused {
-  box-shadow: 0 8px 22px color-mix(in oklch, #111827 4%, transparent);
+  box-shadow:
+    0 0 0 3px color-mix(in oklch, var(--accent) 9%, transparent),
+    0 22px 58px color-mix(in oklch, #111827 9%, transparent);
 }
 
 .chat-composer-home .chat-input-textarea {
-  min-height: 78px;
-  border-radius: 16px 16px 0 0;
-  padding: 12px 16px 6px;
+  min-height: 88px;
+  border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+  padding: 15px 16px 7px;
   font-size: 16px;
 }
 
@@ -461,6 +470,36 @@
 }
 
 .chat-composer-home .composer-send-button {
-  width: 30px;
-  height: 30px;
+  width: 32px;
+  height: 32px;
+}
+
+@media (max-width: 720px) {
+  .chat-input-toolbar {
+    flex-wrap: wrap;
+    align-items: stretch;
+    gap: 8px;
+  }
+
+  .chat-input-left {
+    flex: 1 1 100%;
+    flex-wrap: wrap;
+  }
+
+  .chat-input-right {
+    width: 100%;
+    justify-content: flex-end;
+  }
+
+  .composer-options-button,
+  .composer-tool-button,
+  .composer-cancel-button {
+    max-width: 100%;
+  }
+
+  .chat-composer-home .chat-input-textarea,
+  .chat-input-floating .chat-input-textarea {
+    min-height: 76px;
+    font-size: 15px;
+  }
 }

@@ -1,5 +1,5 @@
 .status-notice {
-  width: min(760px, calc(100% - 46px));
+  width: min(var(--panel-reading-width), calc(100% - 46px));
   margin-left: 46px;
   border: 0;
   border-left: 2px solid color-mix(in oklch, var(--border) 78%, transparent);
@@ -126,8 +126,9 @@
 
 .chat-input-floating {
   flex-shrink: 0;
-  background: linear-gradient(180deg, transparent, color-mix(in oklch, var(--surface) 82%, transparent) 26%, var(--surface) 72%);
-  padding: var(--space-3) clamp(32px, 5vw, 72px) var(--space-6);
+  background:
+    linear-gradient(180deg, transparent, color-mix(in oklch, var(--surface) 78%, transparent) 22%, color-mix(in oklch, var(--surface) 96%, var(--bg)) 76%);
+  padding: var(--space-3) clamp(40px, 6vw, 104px) var(--space-6);
 }
 
 .chat-input-floating-inner {
@@ -136,6 +137,17 @@
 }
 
 .chat-input-floating .chat-input-textarea {
-  min-height: 78px;
+  min-height: 82px;
   font-size: 16px;
+}
+
+@media (max-width: 720px) {
+  .status-notice {
+    width: calc(100% - 38px);
+    margin-left: 38px;
+  }
+
+  .chat-input-floating {
+    padding: var(--space-2) 18px 18px;
+  }
 }

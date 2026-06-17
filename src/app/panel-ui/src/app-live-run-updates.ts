@@ -22,8 +22,8 @@ import {
 import type { BasicAgentRun, RunEvent } from "./contracts/run";
 
 const FALLBACK_POLL_INTERVAL_MS = 1_200;
-const STREAM_BOOTSTRAP_POLL_INTERVAL_MS = 160;
-const STREAM_BOOTSTRAP_POLL_LIMIT = 75;
+const STREAM_BOOTSTRAP_POLL_INTERVAL_MS = 500;
+const STREAM_BOOTSTRAP_POLL_LIMIT = 12;
 
 export type LiveRunUpdateController = {
   readonly startLiveUpdates: (runId: string, cursor: number) => void;

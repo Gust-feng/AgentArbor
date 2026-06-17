@@ -11,7 +11,6 @@ import { loadObservedRunReadModel } from "./app-observed-run-read-model";
 import {
   createRunReadModelPatch,
   loadConversationTranscriptNodesByRunId,
-  transcriptNodesFrom,
 } from "./app-run-projection";
 import { shouldKeepRefreshing, stopPolling, stopStream } from "./app-runtime-controls";
 import { parseModelOptionId } from "./model-options";
@@ -28,7 +27,6 @@ import {
 } from "../../panel-ui-submit-flow";
 import { nextRunCapabilityState } from "../../panel-ui-run-capability-state";
 import { emptyLiveRun } from "../../panel-ui-live-run-buffer";
-import { mergeTranscriptNodesByRunId } from "../../panel-ui-transcript-cache";
 import {
   safeConversation,
 } from "./runtime";
@@ -184,7 +182,6 @@ export async function submitPanelTask(
     const workView = observed?.workView;
     const detail = observed?.detail;
     const replay = observed?.replay;
-    const historicalTranscriptNodesByRunId = await loadConversationTranscriptNodesByRunId(effectiveConversation, observedRunId);
     if (!options.mountedRef.current || options.viewEpochRef.current !== epoch) return;
     options.activeRunIdRef.current = observedRunId;
     options.setApp((previous) => {
@@ -220,23 +217,48 @@ export async function submitPanelTask(
           workView,
           detail,
         }),
-        transcriptNodesByRunId: mergeTranscriptNodesByRunId(
-          historicalTranscriptNodesByRunId,
-          observedRunId,
-          transcriptNodesFrom(workView, detail)
-        ),
       };
     });
-    if (
+    const shouldStartObservedLive =
       observedRunId !== undefined &&
       observedRun !== undefined &&
       shouldKeepRefreshing(observedRun.status) &&
       observedRunId !== immediateLiveRunId &&
-      (!likelyQueuesBehindActiveRun || observedRunId !== previousObservedRunId)
-    ) {
+      (!likelyQueuesBehindActiveRun || observedRunId !== previousObservedRunId);
+    if (shouldStartObservedLive) {
       options.startLiveUpdates(observedRunId, replay?.cursor.lastSequence ?? 0);
     }
     void options.refreshConversations();
+    try {
+      const historicalTranscriptNodesByRunId = await loadConversationTranscriptNodesByRunId(
+        effectiveConversation,
+        observedRunId,
+        (partial) => {
+          if (!options.mountedRef.current || options.viewEpochRef.current !== epoch) return;
+          options.setApp((previous) => ({
+            ...previous,
+            transcriptNodesByRunId: {
+              ...previous.transcriptNodesByRunId,
+              ...partial,
+            },
+          }));
+        }
+      );
+      if (!options.mountedRef.current || options.viewEpochRef.current !== epoch) return;
+      options.setApp((previous) => ({
+        ...previous,
+        transcriptNodesByRunId: {
+          ...previous.transcriptNodesByRunId,
+          ...historicalTranscriptNodesByRunId,
+        },
+      }));
+    } catch (error) {
+      if (!options.mountedRef.current || options.viewEpochRef.current !== epoch) return;
+      options.setApp((previous) => ({
+        ...previous,
+        error: error instanceof Error ? error.message : "历史会话记录加载失败。",
+      }));
+    }
   } catch (error) {
     if (!options.mountedRef.current || options.viewEpochRef.current !== epoch) return;
     options.setGoal(trimmed);

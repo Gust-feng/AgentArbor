@@ -3,9 +3,10 @@
   width: 100%;
   height: 100vh;
   overflow: hidden;
-  gap: 10px;
-  padding: 10px;
-  background: var(--bg);
+  gap: 8px;
+  padding: 8px;
+  background:
+    linear-gradient(180deg, color-mix(in oklch, var(--bg) 88%, white), var(--bg));
   color: var(--fg);
 }
 
@@ -15,10 +16,10 @@
   min-width: 0;
   flex-direction: column;
   overflow: hidden;
-  border: 1px solid color-mix(in oklch, var(--border) 78%, transparent);
-  border-radius: 20px;
-  background: var(--surface);
-  box-shadow: 0 18px 54px color-mix(in oklch, #111827 9%, transparent);
+  border: 1px solid color-mix(in oklch, var(--border) 86%, transparent);
+  border-radius: 16px;
+  background: color-mix(in oklch, var(--surface) 92%, var(--bg));
+  box-shadow: var(--shadow-pane);
 }
 
 .app-main {
@@ -33,15 +34,15 @@
   position: relative;
   z-index: 20;
   display: flex;
-  width: 268px;
+  width: 280px;
   height: 100%;
   flex-shrink: 0;
   flex-direction: column;
   overflow: hidden;
-  border: 1px solid color-mix(in oklch, var(--border) 80%, transparent);
-  border-radius: 20px;
-  background: var(--surface);
-  box-shadow: 0 10px 28px color-mix(in oklch, #111827 6%, transparent);
+  border: 1px solid color-mix(in oklch, var(--border) 86%, transparent);
+  border-radius: 16px;
+  background: var(--sidebar);
+  box-shadow: 0 10px 26px color-mix(in oklch, #111827 5%, transparent);
   transition: width var(--motion-sidebar-duration) var(--motion-ease-standard);
 }
 
@@ -78,15 +79,19 @@
   width: 100%;
   height: 42px;
   border-radius: var(--radius-md);
-  background: var(--surface-subtle);
+  background: var(--surface);
   color: var(--fg);
-  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--accent) 16%, var(--border));
+  box-shadow:
+    inset 0 0 0 1px color-mix(in oklch, var(--accent) 24%, var(--border)),
+    var(--shadow-soft);
 }
 
 .sidebar-new-button.active {
-  background: var(--surface);
+  background: color-mix(in oklch, var(--accent-soft) 54%, var(--surface));
   color: var(--fg);
-  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--accent) 28%, var(--border));
+  box-shadow:
+    inset 0 0 0 1px color-mix(in oklch, var(--accent) 36%, var(--border)),
+    var(--shadow-soft);
 }
 
 .sidebar-new-button .sidebar-icon-slot {
@@ -102,9 +107,9 @@
 
 .sidebar-nav-button:hover,
 .sidebar-nav-button.active {
-  background: color-mix(in oklch, var(--accent-soft) 42%, var(--surface));
+  background: color-mix(in oklch, var(--surface) 72%, var(--accent-soft));
   color: var(--fg);
-  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--accent) 18%, var(--border)), var(--shadow-soft);
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--accent) 14%, var(--border));
 }
 
 .sidebar-nav-button.active .sidebar-icon-slot {
@@ -299,14 +304,31 @@
   color: var(--muted);
 }
 
+.sidebar-recent-item::before {
+  position: absolute;
+  top: 8px;
+  bottom: 8px;
+  left: 2px;
+  width: 2px;
+  border-radius: 999px;
+  background: transparent;
+  content: "";
+}
+
 .sidebar-recent-item:hover,
 .sidebar-recent-item.active {
   background: color-mix(in oklch, var(--surface-subtle) 82%, var(--surface));
 }
 
 .sidebar-recent-item.active {
-  background: var(--surface-subtle);
-  box-shadow: none;
+  background: var(--surface);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in oklch, var(--border) 66%, transparent),
+    var(--shadow-soft);
+}
+
+.sidebar-recent-item.active::before {
+  background: var(--accent-strong);
 }
 
 .sidebar-recent-row {
@@ -316,7 +338,7 @@
   min-height: 36px;
   grid-template-columns: minmax(0, 1fr);
   align-items: center;
-  padding: 7px 4px 7px 12px;
+  padding: 8px 4px 8px 13px;
   text-align: left;
   color: inherit;
 }
@@ -344,7 +366,7 @@
 
 .sidebar-recent-row strong {
   color: var(--fg);
-  font-size: 13px;
+  font-size: 13.2px;
   font-weight: 500;
 }
 
@@ -449,8 +471,9 @@
 }
 
 .sidebar-footer {
-  border-top: 1px solid color-mix(in oklch, var(--border) 64%, transparent);
+  border-top: 1px solid color-mix(in oklch, var(--border) 72%, transparent);
   padding: var(--space-3) var(--space-4) var(--space-4);
+  background: color-mix(in oklch, var(--surface) 56%, transparent);
 }
 
 .sidebar-settings-button {

@@ -1,4 +1,4 @@
-import React, { useLayoutEffect, useRef } from "react";
+import React, { useCallback, useLayoutEffect, useRef } from "react";
 import {
   Copy,
 } from "lucide-react";
@@ -52,9 +52,19 @@ export function TranscriptChain(props: {
     emptyAssistantShellsRef.current = assistantShellSnapshot(props.turns.map((projection) => projection.turn));
   }, [props.turns]);
 
+  // 稳定化 onDecision 回调，使 React.memo 可以跳过已完成 turn
+  const onDecisionRef = useRef(props.onDecision);
+  onDecisionRef.current = props.onDecision;
+  const stableOnDecision = useCallback((decision: "approve_once" | "deny" | "guidance", guidance?: string) => {
+    onDecisionRef.current(decision, guidance);
+  }, []);
+
   if (props.turns.length === 0) return null;
+
   const turns = props.turns.map((projection) => projection.turn);
   const latestAssistantTurnId = latestAssistantTurnIdForTurns(turns);
+  const shells = emptyAssistantShellsRef.current;
+
   return (
     <div className="transcript-list">
       {props.turns.map((projection, turnIndex) => {
@@ -62,12 +72,13 @@ export function TranscriptChain(props: {
         if (turn.role === "user") {
           return <UserMessage key={turn.turnId} content={turn.content} status={turn.status} />;
         }
+
         const assistant = projectAssistantTranscriptTurn({
           projectedTurn: projection,
           turnIndex,
           turns,
           latestAssistantTurnId,
-          previousEmptyShells: emptyAssistantShellsRef.current,
+          previousEmptyShells: shells,
           run: props.run,
           transcriptNodes: props.transcriptNodes,
           live: props.live,
@@ -82,6 +93,7 @@ export function TranscriptChain(props: {
           run: props.run,
           turnStatus: turn.status,
         });
+
         return turn.status === "failed"
           ? (
             <AssistantFailureMessage
@@ -105,8 +117,8 @@ export function TranscriptChain(props: {
               collapseTimeline={collapseTimeline}
               pending={assistant.pending}
               deliverable={assistant.deliverable}
-              onDecision={props.onDecision}
-              confirmationBusy={props.confirmationBusy}
+              onDecision={stableOnDecision}
+              confirmationBusy={assistant.pending !== undefined && props.confirmationBusy}
             />
           );
       })}
@@ -114,7 +126,7 @@ export function TranscriptChain(props: {
   );
 }
 
-function UserMessage({ content, status }: { readonly content: string; readonly status: string }): React.ReactElement {
+const UserMessage = React.memo(function UserMessage({ content, status }: { readonly content: string; readonly status: string }): React.ReactElement {
   const queued = status === "pending";
   return (
     <article className="user-message">
@@ -130,9 +142,9 @@ function UserMessage({ content, status }: { readonly content: string; readonly s
       </div>
     </article>
   );
-}
+});
 
-export function AssistantMessage(props: {
+type AssistantMessageProps = {
   readonly content: string;
   readonly live?: boolean;
   readonly keepStreamMounted?: boolean;
@@ -145,7 +157,13 @@ export function AssistantMessage(props: {
   readonly deliverable?: AgentDeliverable;
   readonly onDecision?: (decision: "approve_once" | "deny" | "guidance", guidance?: string) => void;
   readonly confirmationBusy?: boolean;
-}): React.ReactElement {
+};
+
+export function AssistantMessage(props: AssistantMessageProps): React.ReactElement {
+  return <MemoAssistantMessage {...props} />;
+}
+
+const MemoAssistantMessage = React.memo(function AssistantMessageContent(props: AssistantMessageProps): React.ReactElement {
   const view = projectAssistantMessageView({
     content: props.content,
     deliverable: props.deliverable,
@@ -180,22 +198,24 @@ export function AssistantMessage(props: {
       </div>
     </article>
   );
-}
+}, assistantMessagePropsEqual);
 
-function AssistantPendingBlock(): React.ReactElement {
+const AssistantPendingBlock = React.memo(function AssistantPendingBlock(): React.ReactElement {
   return (
     <div className="assistant-answer assistant-answer-pending" aria-label="正在输出">
       <TypingDots />
     </div>
   );
-}
+});
 
-function AssistantFailureMessage(props: {
+type AssistantFailureMessageProps = {
   readonly content: string;
   readonly model?: AssistantModelBadge;
   readonly transcriptNodes?: readonly TranscriptNode[];
   readonly collapseTimeline?: boolean;
-}): React.ReactElement {
+};
+
+const AssistantFailureMessage = React.memo(function AssistantFailureMessage(props: AssistantFailureMessageProps): React.ReactElement {
   const failure = assistantFailureParts(props.content);
   const timeline = projectAgentWorkTimelineView<TranscriptNode, ConfirmationProjection>({ nodes: props.transcriptNodes ?? [] });
   return (
@@ -218,9 +238,9 @@ function AssistantFailureMessage(props: {
       </div>
     </article>
   );
-}
+}, assistantFailureMessagePropsEqual);
 
-function AssistantAnswerBlock(props: {
+const AssistantAnswerBlock = React.memo(function AssistantAnswerBlock(props: {
   readonly text: string;
   readonly copyText: string;
   readonly showActions: boolean;
@@ -236,6 +256,9 @@ function AssistantAnswerBlock(props: {
         animateOnMount={props.animateOnMount === true}
         tone={props.liveTone ?? "formal"}
         renderText={(displayed) => <RichText text={displayed} />}
+        renderStreamingText={(displayed) => (
+          <div className="rich-text rich-text-streaming">{displayed}</div>
+        )}
       />
       {props.showActions && (
         <div className="turn-actions">
@@ -247,9 +270,13 @@ function AssistantAnswerBlock(props: {
       )}
     </div>
   );
-}
+});
 
 export function AssistantAvatar({ model }: { readonly model?: AssistantModelBadge }): React.ReactElement {
+  return <MemoAssistantAvatar model={model} />;
+}
+
+const MemoAssistantAvatar = React.memo(function AssistantAvatarContent({ model }: { readonly model?: AssistantModelBadge }): React.ReactElement {
   return (
     <div className="assistant-avatar" aria-label={model === undefined ? "助手" : `${model.providerLabel} ${model.modelName}`}>
       {model?.iconSvg === undefined
@@ -257,9 +284,13 @@ export function AssistantAvatar({ model }: { readonly model?: AssistantModelBadg
         : <span className="assistant-avatar-icon" aria-hidden="true" dangerouslySetInnerHTML={{ __html: model.iconSvg }} />}
     </div>
   );
-}
+}, (left, right) => assistantModelBadgesEqual(left.model, right.model));
 
 export function TypingDots(): React.ReactElement {
+  return <MemoTypingDots />;
+}
+
+const MemoTypingDots = React.memo(function TypingDotsContent(): React.ReactElement {
   return (
     <div className="typing-dots" aria-label="正在整理">
       <span />
@@ -267,6 +298,50 @@ export function TypingDots(): React.ReactElement {
       <span />
     </div>
   );
+});
+
+function assistantMessagePropsEqual(left: AssistantMessageProps, right: AssistantMessageProps): boolean {
+  return left.content === right.content &&
+    left.live === right.live &&
+    left.keepStreamMounted === right.keepStreamMounted &&
+    left.animateOnMount === right.animateOnMount &&
+    left.liveTone === right.liveTone &&
+    assistantModelBadgesEqual(left.model, right.model) &&
+    transcriptNodeListsEqual(left.transcriptNodes, right.transcriptNodes) &&
+    left.collapseTimeline === right.collapseTimeline &&
+    left.pending === right.pending &&
+    left.deliverable === right.deliverable &&
+    left.onDecision === right.onDecision &&
+    left.confirmationBusy === right.confirmationBusy;
+}
+
+function assistantFailureMessagePropsEqual(left: AssistantFailureMessageProps, right: AssistantFailureMessageProps): boolean {
+  return left.content === right.content &&
+    assistantModelBadgesEqual(left.model, right.model) &&
+    transcriptNodeListsEqual(left.transcriptNodes, right.transcriptNodes) &&
+    left.collapseTimeline === right.collapseTimeline;
+}
+
+function assistantModelBadgesEqual(left: AssistantModelBadge | undefined, right: AssistantModelBadge | undefined): boolean {
+  if (left === right) return true;
+  if (left === undefined || right === undefined) return false;
+  return left.modelName === right.modelName &&
+    left.providerLabel === right.providerLabel &&
+    left.providerIdentity === right.providerIdentity &&
+    left.iconSvg === right.iconSvg;
+}
+
+function transcriptNodeListsEqual(
+  left: readonly TranscriptNode[] | undefined,
+  right: readonly TranscriptNode[] | undefined
+): boolean {
+  if (left === right) return true;
+  if (left === undefined || right === undefined) return false;
+  if (left.length !== right.length) return false;
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index] !== right[index]) return false;
+  }
+  return true;
 }
 
 function copyToClipboard(value: string): void {

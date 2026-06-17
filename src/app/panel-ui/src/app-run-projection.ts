@@ -73,22 +73,35 @@ export function createRunReadModelPatch(
 
 export async function loadConversationTranscriptNodesByRunId(
   conversation: Conversation,
-  exceptRunId: string | undefined
+  exceptRunId: string | undefined,
+  onPartial?: (partial: Record<string, readonly TranscriptNode[]>) => void
 ): Promise<Record<string, readonly TranscriptNode[]>> {
-  const entries = await Promise.all(
-    runIdsForConversation(conversation)
-      .filter((runId) => runId !== exceptRunId)
-      .map(async (runId) => {
+  // 按最近优先（倒序）、分批加载历史 run 的 transcript 节点。
+  // 长会话（20+ 轮）不再一次性并发 20+ 个 HTTP 请求，
+  // 而是分批处理（每批 5 个），通过 onPartial 回调渐进式更新视图。
+  const allRunIds = runIdsForConversation(conversation)
+    .filter((runId) => runId !== exceptRunId)
+    .reverse();
+  if (allRunIds.length === 0) return {};
+  const byRunId: Record<string, readonly TranscriptNode[]> = {};
+  const batchSize = 5;
+  for (let batchStart = 0; batchStart < allRunIds.length; batchStart += batchSize) {
+    const batch = allRunIds.slice(batchStart, batchStart + batchSize);
+    const entries = await Promise.all(
+      batch.map(async (runId) => {
         const view = await safeBasicRunView(runId, 0);
         return [
           runId,
           transcriptNodesFrom(ordinaryWorkViewFromRunView(view), view?.detail).filter((node) => node.runId === runId),
         ] as const;
       })
-  );
-  const byRunId: Record<string, readonly TranscriptNode[]> = {};
-  for (const [runId, nodes] of entries) {
-    byRunId[runId] = nodes;
+    );
+    for (const [runId, nodes] of entries) {
+      byRunId[runId] = nodes;
+    }
+    if (onPartial !== undefined) {
+      onPartial({ ...byRunId });
+    }
   }
   return byRunId;
 }
@@ -114,6 +127,20 @@ export function projectCurrentRun(app: RunProjectionState): CurrentRunProjection
     events,
     transcriptNodes,
   };
+}
+
+export function currentRunProjectionDeps(app: RunProjectionState): readonly unknown[] {
+  return [
+    app.conversation,
+    app.run,
+    app.workView,
+    app.capabilityResolution,
+    app.capabilityResolutionRunId,
+    app.transcriptNodesByRunId,
+    app.events,
+    app.live,
+    app.detail,
+  ];
 }
 
 function transcriptNodesForConversation(app: RunProjectionState): readonly TranscriptNode[] {

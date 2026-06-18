@@ -233,16 +233,6 @@
   margin: 6px 0;
 }
 
-.stream-cursor {
-  display: inline-block;
-  width: 2px;
-  height: 1.15em;
-  margin-left: 2px;
-  background: var(--accent);
-  vertical-align: text-bottom;
-  animation: stream-cursor-blink 1s steps(2, start) infinite;
-}
-
 @media (max-width: 720px) {
   .assistant-answer .rich-text,
   .rich-text-streaming {

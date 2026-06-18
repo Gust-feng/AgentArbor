@@ -16,18 +16,18 @@
   max-width: 100%;
   min-width: 0;
   align-items: center;
-  gap: var(--space-3);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: color-mix(in oklch, var(--surface) 82%, transparent);
-  padding: 8px 10px;
+  gap: var(--space-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  padding: 2px 0;
   color: var(--fg);
   cursor: pointer;
   line-height: 1;
   list-style: none;
   transition:
-    border-color var(--motion-fast-duration) var(--motion-ease-standard),
-    background-color var(--motion-fast-duration) var(--motion-ease-standard);
+    color var(--motion-fast-duration) var(--motion-ease-standard),
+    opacity var(--motion-fast-duration) var(--motion-ease-standard);
 }
 
 .agent-workline-disclosure > summary::-webkit-details-marker {
@@ -35,15 +35,24 @@
 }
 
 .agent-workline-disclosure > summary:hover {
-  border-color: color-mix(in oklch, var(--accent) 36%, var(--border));
-  background: var(--surface);
+  color: color-mix(in oklch, var(--fg) 80%, var(--muted));
+  opacity: 0.9;
+}
+
+.agent-workline-summary-status {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--status-success) 72%, var(--accent));
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--status-success) 9%, transparent);
 }
 
 .agent-workline-summary-text {
   min-width: 0;
-  color: color-mix(in oklch, var(--fg) 70%, var(--muted));
+  color: color-mix(in oklch, var(--fg) 56%, var(--muted));
   font-size: 12px;
-  font-weight: 650;
+  font-weight: 620;
   letter-spacing: 0;
   line-height: 1.35;
   overflow-wrap: anywhere;
@@ -55,14 +64,14 @@
   flex: 0 1 auto;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
 }
 
 .agent-workline-summary-chip {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  color: color-mix(in oklch, var(--fg) 70%, var(--muted));
+  gap: 3px;
+  color: color-mix(in oklch, var(--fg) 48%, var(--muted));
   font-size: 12px;
   font-variant-numeric: tabular-nums;
   line-height: 1;
@@ -75,13 +84,13 @@
 
 .agent-workline-summary-icon {
   display: inline-flex;
-  width: 21px;
-  height: 21px;
+  width: 15px;
+  height: 15px;
   align-items: center;
   justify-content: center;
-  border: 1px solid color-mix(in oklch, var(--border) 74%, transparent);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
   color: var(--fg);
 }
 
@@ -107,8 +116,8 @@
 
 .agent-workline-summary-chevron {
   flex: 0 0 auto;
-  color: color-mix(in oklch, var(--fg) 48%, var(--muted));
-  transition: transform 140ms ease;
+  color: color-mix(in oklch, var(--fg) 38%, var(--muted));
+  transition: transform var(--motion-enter-duration) var(--motion-ease-spring);
 }
 
 .agent-workline-disclosure[open] .agent-workline-summary-chevron {
@@ -118,6 +127,10 @@
 .agent-workline-disclosure > summary:focus-visible {
   outline: 2px solid color-mix(in oklch, var(--accent) 58%, transparent);
   outline-offset: 3px;
+}
+
+.agent-workline-disclosure[open] > summary {
+  margin-bottom: var(--space-2);
 }
 
 .agent-activity {
@@ -138,7 +151,6 @@
   padding: 7px var(--space-2);
   color: color-mix(in oklch, var(--fg) 62%, var(--muted));
   border-radius: var(--radius-sm);
-  animation: agent-activity-enter 180ms var(--motion-ease-standard) both;
   transition:
     background-color 180ms var(--motion-ease-standard),
     color 180ms var(--motion-ease-standard),
@@ -170,10 +182,11 @@
   color: color-mix(in oklch, var(--fg) 86%, var(--muted));
 }
 
-.agent-activity-step[data-current="true"] .agent-activity-marker {
+.assistant-message[data-entering] .agent-activity-step[data-current="true"] .agent-activity-marker {
   border-color: var(--accent);
   background: var(--accent);
   box-shadow: 0 0 0 4px color-mix(in oklch, var(--accent) 12%, transparent);
+  animation: marker-pulse-ring 2s var(--motion-ease-standard) infinite;
 }
 
 .agent-activity-step.tool[data-current="true"] .agent-activity-marker {
@@ -229,7 +242,7 @@
   font-size: 14px;
   line-height: 1.2;
   opacity: 0.45;
-  transition: opacity 140ms ease, transform 140ms ease;
+  transition: opacity 140ms ease, transform var(--motion-enter-duration) var(--motion-ease-spring);
 }
 
 .agent-activity-disclosure[open] > summary.agent-activity-line::after {
@@ -254,7 +267,6 @@
   line-height: 1.68;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
-  animation: agent-activity-detail-enter 150ms var(--motion-ease-standard) both;
 }
 
 .agent-activity-label {
@@ -330,18 +342,37 @@
 @keyframes agent-activity-enter {
   from {
     opacity: 0;
+    transform: translateY(-4px);
   }
   to {
     opacity: 1;
+    transform: translateY(0);
   }
 }
 
 @keyframes agent-activity-detail-enter {
   from {
     opacity: 0;
+    transform: translateY(-6px) scale(0.98);
   }
   to {
     opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes marker-pulse-ring {
+  0% {
+    box-shadow:
+      0 0 0 4px color-mix(in oklch, var(--accent) 12%, transparent);
+  }
+  50% {
+    box-shadow:
+      0 0 0 7px color-mix(in oklch, var(--accent) 5%, transparent);
+  }
+  100% {
+    box-shadow:
+      0 0 0 4px color-mix(in oklch, var(--accent) 12%, transparent);
   }
 }
 

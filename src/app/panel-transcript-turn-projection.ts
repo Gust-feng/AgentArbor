@@ -30,7 +30,7 @@ export type AssistantTranscriptNodeLike = {
   readonly runId: string;
   readonly sequence: number;
   readonly eventType: string;
-  readonly kind: "thinking" | "tool" | "confirmation" | "user_decision" | "answer" | "system";
+  readonly kind: "thinking" | "tool" | "confirmation" | "user_decision" | "answer" | "body" | "system";
   readonly phase:
     | "noted"
     | "preparing"
@@ -88,7 +88,9 @@ export function projectAssistantTranscriptTurn<
   readonly latestAssistantTurnId: string | undefined;
   readonly previousEmptyShells: AssistantShellSnapshot;
   readonly run?: AssistantTranscriptRunLike;
-  readonly transcriptNodes: readonly TNode[];
+  readonly transcriptNodes?: readonly TNode[];
+  readonly transcriptNodesForRun?: readonly TNode[];
+  readonly assistantTurnSlotKey?: string;
   readonly live?: LiveRunBuffer;
   readonly workView?: AssistantWorkViewOutput<TDeliverable>;
   readonly pending?: TPending;
@@ -99,7 +101,7 @@ export function projectAssistantTranscriptTurn<
   const refreshingRun = input.run?.runId === displayRunId && isRefreshingRunStatus(input.run);
   const live = activeLiveForTurn(input.live, input.run, displayRunId, refreshingRun);
   const runProjection = projectLiveRunTranscript(
-    nodesForRun(input.transcriptNodes, displayRunId),
+    input.transcriptNodesForRun ?? nodesForRun(input.transcriptNodes ?? [], displayRunId),
     live
   );
   const pending = pendingForTurn(input.pending, displayRunId);
@@ -115,26 +117,13 @@ export function projectAssistantTranscriptTurn<
   const content = liveAnswer?.text ?? (turnAnswer.trim().length > 0 ? turnAnswer : settledAnswerFallback);
   const deliverable = deliverableForWorkViewTurn(input.workView, displayRunId, content);
   const keepStreamMounted = live !== undefined || refreshingRun || unclaimedRunningTurn;
-  const shellKey = assistantTurnSlotKey(input.turns, input.turnIndex);
+  const shellKey = input.assistantTurnSlotKey ?? assistantTurnSlotKey(input.turns, input.turnIndex);
   const hasVisibleAnswer = content.trim().length > 0;
-  const settledCurrentRunAnswer =
-    input.run !== undefined &&
-    input.run.runId === displayRunId &&
-    input.run.status === "completed" &&
-    hasVisibleAnswer;
   const animateFromObservedShell =
     hasVisibleAnswer &&
     (
       input.previousEmptyShells.turnIds.has(turn.turnId) ||
       input.previousEmptyShells.slotKeys.has(shellKey)
-    );
-  const animateLatestSettledAnswer =
-    turn.turnId === input.latestAssistantTurnId &&
-    hasVisibleAnswer &&
-    (
-      turn.content.trim().length === 0 ||
-      input.previousEmptyShells.slotKeys.has(shellKey) ||
-      settledCurrentRunAnswer
     );
 
   return {
@@ -146,7 +135,7 @@ export function projectAssistantTranscriptTurn<
     deliverable,
     live: liveAnswer !== undefined,
     keepStreamMounted,
-    animateOnMount: keepStreamMounted || animateFromObservedShell || animateLatestSettledAnswer,
+    animateOnMount: keepStreamMounted || animateFromObservedShell,
     liveTone: liveAnswer?.tone ?? runProjection.answer?.tone,
   };
 }
@@ -156,12 +145,13 @@ export function assistantShellSnapshot<TTurn extends WorklineConversationTurn>(
 ): AssistantShellSnapshot {
   const turnIds = new Set<string>();
   const slotKeys = new Set<string>();
+  const precomputedSlotKeys = precomputeAssistantTurnSlotKeys(turns);
   turns.forEach((turn, index) => {
     if (!isEmptyRunningAssistantTurn(turn)) {
       return;
     }
     turnIds.add(turn.turnId);
-    slotKeys.add(assistantTurnSlotKey(turns, index));
+    slotKeys.add(precomputedSlotKeys[index] ?? assistantTurnSlotKey(turns, index));
   });
   return { turnIds, slotKeys };
 }
@@ -182,6 +172,24 @@ export function assistantTurnSlotKey<TTurn extends WorklineConversationTurn>(
     .length;
   const previousUser = [...turns.slice(0, turnIndex)].reverse().find((turn) => turn.role === "user");
   return `${assistantOrdinal}:${previousUser?.content ?? ""}`;
+}
+
+export function precomputeAssistantTurnSlotKeys<TTurn extends WorklineConversationTurn>(
+  turns: readonly TTurn[]
+): readonly (string | undefined)[] {
+  const slotKeys: (string | undefined)[] = new Array(turns.length);
+  let assistantOrdinal = 0;
+  let previousUserContent = "";
+  for (let index = 0; index < turns.length; index += 1) {
+    const turn = turns[index]!;
+    if (turn.role === "user") {
+      previousUserContent = turn.content;
+      continue;
+    }
+    assistantOrdinal += 1;
+    slotKeys[index] = `${assistantOrdinal}:${previousUserContent}`;
+  }
+  return slotKeys;
 }
 
 export function isRefreshingRunStatus(run: AssistantTranscriptRunLike | undefined): boolean {

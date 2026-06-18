@@ -43,7 +43,6 @@ import {
   runFailureStreamDetail,
   runStartedSummary,
   userGuidanceSummary,
-  visibleOutputSummary,
   visibleOutputText,
 } from "./panel-run-stream-copy.js";
 
@@ -228,6 +227,9 @@ function shouldSuppressOrdinaryChatEvent(entry: EventLogEntry): boolean {
     return false;
   }
   const payload = asRecord(entry.message.payload);
+  if (stringOrUndefined(payload.finishReason) === "tool_call") {
+    return false;
+  }
   return modelReasoningOutputOrUndefined(payload.reasoningOutput) === undefined;
 }
 
@@ -293,25 +295,6 @@ function appendStreamEventsForEvent(input: {
           truncated: reasoningOutput?.truncated === true,
         },
       });
-    }
-    if (stringOrUndefined(payload.finishReason) === "tool_call") {
-      const sideText = visibleOutputText(payload.visibleOutput);
-      if (sideText.trim().length > 0) {
-        input.push({
-          ...base,
-          eventId: `${input.runId}:event:${input.entry.sequence}:model.side.completed`,
-          type: "model.side.completed",
-          agentLabel: "助手",
-          summary: visibleOutputSummary(sideText, 220),
-          status: "completed",
-          detail: {
-            kind: "thinking",
-            preview: sideText,
-            truncated: false,
-          },
-        });
-      }
-      return;
     }
     const text = visibleOutputText(payload.visibleOutput);
     const chunks = chunkText(text, 90);

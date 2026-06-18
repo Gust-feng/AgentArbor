@@ -822,7 +822,7 @@ test("ordinary agent stream exposes context compaction as safe continuation main
   assert.equal(serialized.includes("raw tool output"), false);
 });
 
-test("ordinary agent stream treats tool-call model text as status instead of visible answer", () => {
+test("ordinary agent stream turns tool-call visible text into body output before tool work", () => {
   const events = createPanelRunStreamEvents({
     runId: "run-tool-call-text",
     status: "blocked",
@@ -850,13 +850,21 @@ test("ordinary agent stream treats tool-call model text as status instead of vis
     updatedAt: "2026-05-07T00:00:03.000Z",
   });
   const serialized = JSON.stringify(events);
+  const nodes = createPanelTranscriptNodes(events);
 
-  assert.equal(events.some((event) => event.type === "model.output.delta"), false);
-  assert.equal(events.some((event) => event.type === "model.output.completed"), false);
-  assert.equal(events.some((event) => event.type === "model.side.completed"), true);
+  assert.equal(events.some((event) => event.type === "model.output.delta"), true);
+  assert.equal(events.some((event) => event.type === "model.output.completed"), true);
+  assert.equal(events.some((event) => event.type === "model.side.completed"), false);
   assert.equal(events.some((event) => event.type === "tool.requested"), true);
-  const sideSummary = events.find((event) => event.type === "model.side.completed")?.summary ?? "";
-  assert.equal(sideSummary.includes("我还没有主动完成"), true);
+  const bodyText = events
+    .filter((event) => event.type === "model.output.delta")
+    .map((event) => event.delta ?? "")
+    .join("");
+  assert.equal(bodyText.includes("我还没有主动完成"), true);
+  assert.deepEqual(
+    nodes.map((node) => `${node.kind}:${node.eventType}`),
+    ["body:model.output.completed", "tool:tool.requested", "system:run.blocked"],
+  );
   const blockedSummary = events.find((event) => event.type === "run.blocked")?.summary ?? "";
   assert.equal(blockedSummary.includes("任务没有完成"), true);
   assert.equal(blockedSummary.includes("轮次"), false);
@@ -867,6 +875,35 @@ test("ordinary agent stream treats tool-call model text as status instead of vis
   assert.equal(serialized.includes("raw prompt"), false);
   assert.equal(serialized.includes("fuel"), false);
   assertOrdinaryStreamHasNoInternalTerms(events.map(ordinaryEventVisibleText).join("\n"));
+});
+
+test("ordinary agent stream keeps tool-call visible text even if no tool event is recorded yet", () => {
+  const events = createPanelRunStreamEvents({
+    runId: "run-tool-call-without-tool-event",
+    status: "blocked",
+    desktopMode: "agent",
+    error: {
+      code: "out_of_fuel",
+      message: "当前任务没有完成。",
+    },
+    eventEntries: [
+      eventEntry({ sequence: 1, type: "goal.received", payload: { goalId: "goal-tool-call-without-tool-event" } }),
+      modelCompletedEntry({
+        sequence: 2,
+        requestId: "request-tool-call-without-tool-event",
+        contractId: "desktop.agent_response.v1",
+        decisionSummary: "我先说明需要读取额外材料。",
+        finishReason: "tool_call",
+      }),
+    ],
+    createdAt: "2026-05-07T00:00:00.000Z",
+    updatedAt: "2026-05-07T00:00:02.000Z",
+  });
+
+  assert.deepEqual(
+    events.map((event) => event.type),
+    ["run.started", "model.output.delta", "model.output.completed", "run.blocked"],
+  );
 });
 
 test("ordinary agent terminal stream events follow recorded runtime facts", () => {
@@ -914,7 +951,7 @@ test("ordinary agent terminal stream events follow recorded runtime facts", () =
 
   assert.deepEqual(
     blocked.map((event) => event.type),
-    ["run.started", "model.side.completed", "tool.requested", "run.blocked"],
+    ["run.started", "model.output.delta", "model.output.completed", "tool.requested", "run.blocked"],
   );
   assert.equal(blocked.at(-1)?.status, "blocked");
   assert.deepEqual(

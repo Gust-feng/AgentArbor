@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   mergeTranscriptNodesByRunId,
+  resetConversationTranscriptNodes,
+  transcriptNodesByRunIdForConversation,
   transcriptNodesForConversation,
+  updateConversationTranscriptNodes,
 } from "./panel-ui-transcript-cache.js";
 
 type TestNode = {
@@ -48,6 +51,178 @@ test("transcript cache replaces only the targeted active run", () => {
   assert.equal(updated["run-2"]?.[0]?.text, "新内容");
 });
 
+test("conversation transcript cache keeps the previous conversation readable before a new conversation fills", () => {
+  const first = updateConversationTranscriptNodes({}, "conversation-a", {
+    "run-a": [node("run-a:answer", "run-a", 1, "A 的历史")],
+  });
+
+  assert.deepEqual(
+    transcriptNodesByRunIdForConversation(first, "conversation-a")["run-a"]?.map((item) => item.text),
+    ["A 的历史"],
+  );
+  assert.deepEqual(transcriptNodesByRunIdForConversation(first, "conversation-b"), {});
+  assert.deepEqual(
+    transcriptNodesByRunIdForConversation(first, "conversation-a")["run-a"]?.map((item) => item.text),
+    ["A 的历史"],
+  );
+});
+
+test("conversation transcript cache updates one conversation without polluting another", () => {
+  const first = updateConversationTranscriptNodes({}, "conversation-a", {
+    "run-a": [node("run-a:answer", "run-a", 1, "A 的历史")],
+  });
+  const second = updateConversationTranscriptNodes(first, "conversation-b", {
+    "run-b": [node("run-b:answer", "run-b", 1, "B 的历史")],
+  });
+  const updated = updateConversationTranscriptNodes(second, "conversation-a", {
+    "run-a": [node("run-a:answer", "run-a", 1, "A 的更新")],
+  });
+
+  assert.deepEqual(
+    transcriptNodesByRunIdForConversation(updated, "conversation-a")["run-a"]?.map((item) => item.text),
+    ["A 的更新"],
+  );
+  assert.deepEqual(
+    transcriptNodesByRunIdForConversation(updated, "conversation-b")["run-b"]?.map((item) => item.text),
+    ["B 的历史"],
+  );
+});
+
+test("conversation transcript cache reset removes only the selected conversation", () => {
+  const cached = updateConversationTranscriptNodes(
+    updateConversationTranscriptNodes({}, "conversation-a", {
+      "run-a": [node("run-a:answer", "run-a", 1, "A 的历史")],
+    }),
+    "conversation-b",
+    {
+      "run-b": [node("run-b:answer", "run-b", 1, "B 的历史")],
+    },
+  );
+  const reset = resetConversationTranscriptNodes(cached, "conversation-a");
+
+  assert.deepEqual(transcriptNodesByRunIdForConversation(reset, "conversation-a"), {});
+  assert.deepEqual(
+    transcriptNodesByRunIdForConversation(reset, "conversation-b")["run-b"]?.map((item) => item.text),
+    ["B 的历史"],
+  );
+});
+
+test("transcript cache merges live and settled reasoning with different node ids", () => {
+  const cached = mergeTranscriptNodesByRunId({}, "run-1", [
+    transcriptNode({
+      nodeId: "run-1:live:model-1:thinking",
+      runId: "run-1",
+      sequence: 1,
+      kind: "thinking",
+      eventType: "model.reasoning.delta",
+      phase: "noted",
+      text: "The user is asking me to demonstrate capabilities.",
+      refs: [{ kind: "model_call", id: "model-1" }],
+    }),
+  ]);
+  const updated = mergeTranscriptNodesByRunId(cached, "run-1", [
+    transcriptNode({
+      nodeId: "run-1:event:9:model.reasoning.completed",
+      runId: "run-1",
+      sequence: 9,
+      kind: "thinking",
+      eventType: "model.reasoning.completed",
+      phase: "completed",
+      text: "The user is asking me to demonstrate capabilities and inspect the workspace.",
+      refs: [{ kind: "model_call", id: "model-1" }],
+    }),
+  ]);
+
+  assert.equal(updated["run-1"]?.length, 1);
+  assert.equal(updated["run-1"]?.[0]?.nodeId, "run-1:live:model-1:thinking");
+  assert.equal(updated["run-1"]?.[0]?.sequence, 1);
+  assert.equal(updated["run-1"]?.[0]?.text, "The user is asking me to demonstrate capabilities and inspect the workspace.");
+});
+
+test("transcript cache merges exact repeated model activity even when refs differ", () => {
+  const cached = mergeTranscriptNodesByRunId({}, "run-1", [
+    transcriptNode({
+      nodeId: "thinking-live",
+      runId: "run-1",
+      sequence: 1,
+      kind: "thinking",
+      eventType: "model.reasoning.completed",
+      phase: "completed",
+      text: "The user is asking me to demonstrate my capabilities.",
+      refs: [{ kind: "model_call", id: "model-live" }],
+    }),
+  ]);
+  const updated = mergeTranscriptNodesByRunId(cached, "run-1", [
+    transcriptNode({
+      nodeId: "thinking-settled",
+      runId: "run-1",
+      sequence: 3,
+      kind: "thinking",
+      eventType: "model.reasoning.completed",
+      phase: "completed",
+      text: "The user is asking me to demonstrate my capabilities.",
+      refs: [{ kind: "model_call", id: "model-settled" }],
+    }),
+  ]);
+
+  assert.deepEqual(updated["run-1"]?.map((item) => item.nodeId), ["thinking-live"]);
+});
+
+test("transcript cache merges live and settled body nodes with different ids", () => {
+  const cached = mergeTranscriptNodesByRunId({}, "run-1", [
+    transcriptNode({
+      nodeId: "body-live",
+      runId: "run-1",
+      sequence: 2,
+      kind: "body",
+      eventType: "model.output.delta",
+      phase: "noted",
+      text: "Let me showcase",
+      refs: [{ kind: "model_call", id: "model-1" }],
+    }),
+  ]);
+  const updated = mergeTranscriptNodesByRunId(cached, "run-1", [
+    transcriptNode({
+      nodeId: "body-settled",
+      runId: "run-1",
+      sequence: 5,
+      kind: "body",
+      eventType: "model.output.completed",
+      phase: "completed",
+      text: "Let me showcase my capabilities.",
+      refs: [{ kind: "model_call", id: "model-1" }],
+    }),
+  ]);
+
+  assert.deepEqual(updated["run-1"]?.map((item) => item.nodeId), ["body-live"]);
+  assert.equal(updated["run-1"]?.[0]?.text, "Let me showcase my capabilities.");
+});
+
 function node(nodeId: string, runId: string, sequence: number, text: string): TestNode {
   return { nodeId, runId, sequence, text };
+}
+
+function transcriptNode(input: {
+  readonly nodeId: string;
+  readonly runId: string;
+  readonly sequence: number;
+  readonly kind: string;
+  readonly eventType: string;
+  readonly phase: string;
+  readonly text: string;
+  readonly refs?: readonly { readonly kind: string; readonly id: string }[];
+}) {
+  return {
+    nodeId: input.nodeId,
+    runId: input.runId,
+    sequence: input.sequence,
+    eventType: input.eventType,
+    kind: input.kind,
+    phase: input.phase,
+    title: input.kind,
+    summary: input.text,
+    text: input.text,
+    timestamp: "",
+    refs: input.refs ?? [],
+  };
 }

@@ -12,6 +12,12 @@ import {
   type PendingReasoningNode,
   type ReasoningTranscriptEvent,
 } from "./transcript-reasoning.js";
+import {
+  appendTextStreamAssembly,
+  emptyTextStreamAssembly,
+  textStreamFragmentSourceFromEventId,
+  type TextStreamAssembly,
+} from "./readable-text-fragments.js";
 import { cleanOrdinaryToolText } from "./ordinary-tool-copy.js";
 import { commandSummaryParts } from "./panel-transcript-tool-format.js";
 import {
@@ -69,6 +75,7 @@ export function createPanelTranscriptNodes(
   const requestedByCallId = new Map<string, number>();
   const nodes: TranscriptNode[] = [];
   let pendingReasoning: PendingReasoningNode | undefined;
+  let pendingBodyByModelCallId = new Map<string, PendingBodyNode>();
 
   for (const event of streamEvents) {
     const reasoningEvent = reasoningEventFromPanelEvent(event);
@@ -76,11 +83,12 @@ export function createPanelTranscriptNodes(
       pendingReasoning = updatePendingReasoningNode(pendingReasoning, reasoningEvent, nodes, compactReasoningSummary, reasoningNodeFromPending);
       continue;
     }
-    if (isOrdinaryTranscriptReasoningSettlementEvent(event.type)) {
+    pendingBodyByModelCallId = handlePendingBodyBeforeEvent(pendingBodyByModelCallId, event, nodes);
+    pendingBodyByModelCallId = handleBodyEvent(pendingBodyByModelCallId, event, nodes);
+    const settlesReasoning = isOrdinaryTranscriptReasoningSettlementEvent(event.type);
+    if (settlesReasoning) {
       pendingReasoning = settlePendingReasoningNode(pendingReasoning, reasoningEvent);
-    }
-    pendingReasoning = flushPendingReasoningNode(pendingReasoning, nodes, compactReasoningSummary, reasoningNodeFromPending);
-    if (isOrdinaryTranscriptReasoningSettlementEvent(event.type)) {
+      pendingReasoning = flushPendingReasoningNode(pendingReasoning, nodes, compactReasoningSummary, reasoningNodeFromPending);
       completeOpenReasoningNodes(nodes, reasoningEvent, compactReasoningSummary);
     }
     const node = transcriptNodeForEvent(event, {
@@ -94,6 +102,7 @@ export function createPanelTranscriptNodes(
       nodes.push(node);
     }
   }
+  flushPendingBodies(pendingBodyByModelCallId, nodes, true);
   flushPendingReasoningNode(pendingReasoning, nodes, compactReasoningSummary, reasoningNodeFromPending);
 
   return nodes;
@@ -109,7 +118,13 @@ function transcriptNodeForEvent(
     readonly pendingConfirmation?: TranscriptNode["confirmation"];
   }
 ): TranscriptNode | undefined {
+  if (event.type === "model.output.delta" || event.type === "model.output.completed") {
+    return undefined;
+  }
   if (isOrdinaryTranscriptSuppressedEvent({ type: event.type })) {
+    return undefined;
+  }
+  if (event.type === "model.output.side") {
     return undefined;
   }
   if (event.type === "model.side.completed") {
@@ -246,6 +261,125 @@ function transcriptNodeForEvent(
     });
   }
   return undefined;
+}
+
+type PendingBodyNode = {
+  readonly modelCallId: string;
+  readonly sequence: number;
+  readonly event: PanelTranscriptStreamEvent;
+  readonly stream: TextStreamAssembly;
+};
+
+function handlePendingBodyBeforeEvent(
+  pending: Map<string, PendingBodyNode>,
+  event: PanelTranscriptStreamEvent,
+  nodes: TranscriptNode[]
+): Map<string, PendingBodyNode> {
+  if (pending.size === 0) {
+    return pending;
+  }
+  if (event.type === "tool.requested" || event.type === "confirmation.needed" || event.type === "run.failed" || event.type === "run.blocked" || event.type === "run.cancelled" || event.type === "final.result") {
+    flushPendingBodies(pending, nodes, false);
+    return new Map();
+  }
+  return pending;
+}
+
+function handleBodyEvent(
+  pending: Map<string, PendingBodyNode>,
+  event: PanelTranscriptStreamEvent,
+  nodes: TranscriptNode[]
+): Map<string, PendingBodyNode> {
+  const modelCallIds = bodyModelTurnIdsForPanelEvent(event);
+  if (modelCallIds.length === 0) return pending;
+  const next = new Map(pending);
+  for (const modelCallId of modelCallIds) {
+    const existing = next.get(modelCallId);
+    if (event.type === "model.output.delta") {
+      next.set(modelCallId, {
+        modelCallId,
+        sequence: event.sequence,
+        event,
+        stream: appendBodyStream(existing?.stream, event, event.delta ?? ""),
+      });
+      continue;
+    }
+    if (event.type === "model.output.completed") {
+      const currentText = existing?.stream.text ?? "";
+      next.set(modelCallId, {
+        modelCallId,
+        sequence: event.sequence,
+        event,
+        stream: appendBodyStream(existing?.stream, event, bodyCompletionFragment(currentText, event)),
+      });
+      continue;
+    }
+    if (event.type === "tool.requested" || event.type === "confirmation.needed" || event.type === "final.result" || event.type === "run.failed" || event.type === "run.blocked" || event.type === "run.cancelled") {
+      if (existing !== undefined) {
+        nodes.push(bodyNodeFromPending(existing));
+        next.delete(modelCallId);
+      }
+    }
+  }
+  return next;
+}
+
+function bodyModelTurnIdsForPanelEvent(event: PanelTranscriptStreamEvent): readonly string[] {
+  const primary = event.modelCallRefs[0];
+  return primary === undefined ? [] : [primary];
+}
+
+function flushPendingBodies(pending: Map<string, PendingBodyNode>, nodes: TranscriptNode[], includeEmpty: boolean): void {
+  for (const body of pending.values()) {
+    if (!includeEmpty && body.stream.text.trim().length === 0) continue;
+    nodes.push(bodyNodeFromPending(body));
+  }
+  pending.clear();
+}
+
+function bodyNodeFromPending(input: PendingBodyNode): TranscriptNode {
+  return transcriptNode(input.event, {
+    kind: "body",
+    phase: "completed",
+    title: "",
+    summary: compactSafeLine(input.stream.text, 220),
+    text: input.stream.text,
+  });
+}
+
+function appendBodyStream(
+  current: TextStreamAssembly | undefined,
+  event: Pick<PanelTranscriptStreamEvent, "eventId">,
+  next: string
+): TextStreamAssembly {
+  return appendTextStreamAssembly(
+    current ?? emptyTextStreamAssembly(),
+    next,
+    textStreamFragmentSourceFromEventId(event.eventId),
+  );
+}
+
+function bodyCompletionFragment(
+  currentText: string,
+  event: Pick<PanelTranscriptStreamEvent, "summary" | "detail">
+): string {
+  const preview = event.detail?.preview?.trim();
+  if (preview !== undefined && preview.length > 0) {
+    return preview;
+  }
+  const summary = event.summary?.trim() ?? "";
+  if (summary.length === 0) {
+    return "";
+  }
+  if (currentText.trim().length > 0 && isGenericCompletedBodySummary(summary)) {
+    return "";
+  }
+  return summary;
+}
+
+function isGenericCompletedBodySummary(value: string): boolean {
+  const normalized = value.replace(/[。.!！?？；;:：、，,\s]/g, "");
+  return normalized === "内容已整理" || normalized === "内容已整理并已进入报告或详情";
 }
 
 function requestSequencesBeforeConfirmations(events: readonly PanelTranscriptStreamEvent[]): ReadonlySet<number> {

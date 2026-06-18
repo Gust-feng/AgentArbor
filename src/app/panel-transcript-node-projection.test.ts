@@ -21,11 +21,294 @@ test("activity projection preserves visible thinking even when the text looks li
 test("timeline projection keeps thinking and excludes answer nodes from the activity rail", () => {
   const projected = timelineVisibleNodes([
     node({ nodeId: "answer", kind: "answer", eventType: "final.result", sequence: 4, summary: "最终回答" }),
+    node({ nodeId: "body", kind: "body", eventType: "model.output.completed", sequence: 2, text: "正文" }),
     node({ nodeId: "thinking", kind: "thinking", eventType: "model.reasoning.completed", sequence: 1, text: "先确认目标" }),
     node({ nodeId: "tool", kind: "tool", eventType: "tool.completed", phase: "completed", sequence: 3, toolName: "read_file", summary: "README.md" }),
   ]);
 
   assert.deepEqual(projected.map((item) => item.nodeId), ["thinking", "tool"]);
+});
+
+test("activity projection deduplicates semantically repeated thinking while keeping the earlier position", () => {
+  const projected = activityVisibleNodes([
+    node({
+      nodeId: "thinking-live",
+      kind: "thinking",
+      eventType: "model.reasoning.delta",
+      phase: "noted",
+      sequence: 1,
+      text: "The user is asking me to demonstrate my capabilities.",
+      refs: [{ kind: "model_call", id: "model-1" }],
+    }),
+    node({
+      nodeId: "body-1",
+      kind: "body",
+      eventType: "model.output.completed",
+      phase: "completed",
+      sequence: 2,
+      text: "Let me showcase my capabilities by exploring the workspace.",
+    }),
+    node({
+      nodeId: "thinking-settled",
+      kind: "thinking",
+      eventType: "model.reasoning.completed",
+      phase: "completed",
+      sequence: 3,
+      text: "The user is asking me to demonstrate my capabilities.",
+      refs: [{ kind: "model_call", id: "model-1" }],
+    }),
+    node({
+      nodeId: "tool-1",
+      kind: "tool",
+      eventType: "tool.completed",
+      phase: "completed",
+      sequence: 4,
+      summary: "README.md",
+    }),
+  ]);
+
+  const thinking = projected.filter((item) => item.kind === "thinking");
+
+  assert.equal(thinking.length, 1);
+  assert.equal(thinking[0]?.nodeId, "thinking-live");
+  assert.equal(thinking[0]?.phase, "completed");
+  assert.equal(thinking[0]?.eventType, "model.reasoning.completed");
+  assert.deepEqual(projected.map((item) => item.nodeId), ["thinking-live", "body-1", "tool-1"]);
+});
+
+test("activity projection deduplicates exact repeated model activity even when model refs differ", () => {
+  const projected = activityVisibleNodes([
+    node({
+      nodeId: "thinking-live",
+      kind: "thinking",
+      eventType: "model.reasoning.completed",
+      phase: "completed",
+      sequence: 1,
+      text: "The user is asking me to demonstrate my capabilities.",
+      refs: [{ kind: "model_call", id: "model-live" }],
+    }),
+    node({
+      nodeId: "body-1",
+      kind: "body",
+      eventType: "model.output.completed",
+      phase: "completed",
+      sequence: 2,
+      text: "Let me showcase my capabilities by exploring the workspace.",
+    }),
+    node({
+      nodeId: "thinking-settled",
+      kind: "thinking",
+      eventType: "model.reasoning.completed",
+      phase: "completed",
+      sequence: 3,
+      text: "The user is asking me to demonstrate my capabilities.",
+      refs: [{ kind: "model_call", id: "model-settled" }],
+    }),
+  ]);
+
+  assert.deepEqual(projected.map((item) => item.nodeId), ["thinking-live", "body-1"]);
+});
+
+test("activity projection deduplicates repeated model activity across thinking and narration", () => {
+  const projected = activityVisibleNodes([
+    node({
+      nodeId: "thinking-1",
+      kind: "thinking",
+      eventType: "model.reasoning.completed",
+      phase: "completed",
+      sequence: 1,
+      text: "The user is asking me to demonstrate my capabilities.",
+      refs: [{ kind: "model_call", id: "model-1" }],
+    }),
+    node({
+      nodeId: "body-1",
+      kind: "body",
+      eventType: "model.output.completed",
+      phase: "completed",
+      sequence: 2,
+      text: "Let me showcase my capabilities by exploring the workspace.",
+    }),
+    node({
+      nodeId: "side-1",
+      kind: "system",
+      eventType: "model.side.completed",
+      phase: "completed",
+      sequence: 3,
+      text: "The user is asking me to demonstrate my capabilities.",
+      summary: "The user is asking me to demonstrate my capabilities.",
+      refs: [{ kind: "model_call", id: "model-1" }],
+    }),
+    node({
+      nodeId: "tool-1",
+      kind: "tool",
+      eventType: "tool.completed",
+      phase: "completed",
+      sequence: 4,
+      summary: "README.md",
+    }),
+  ]);
+
+  const modelActivity = projected.filter((item) => item.kind === "thinking" || item.kind === "system");
+
+  assert.equal(modelActivity.length, 1);
+  assert.equal(modelActivity[0]?.nodeId, "thinking-1");
+  assert.equal(modelActivity[0]?.kind, "thinking");
+  assert.deepEqual(projected.map((item) => item.nodeId), ["thinking-1", "body-1", "tool-1"]);
+});
+
+test("panel transcript nodes capture model output as body nodes", () => {
+  const projected = createPanelTranscriptNodes([
+    {
+      eventId: "run-1:event:1:model.output.delta",
+      runId: "run-1",
+      sequence: 1,
+      type: "model.output.delta",
+      createdAt: "2026-06-04T00:00:00.000Z",
+      delta: "先说明一下：",
+      sourceRefs: [],
+      modelCallRefs: ["model-1"],
+      toolCallRefs: [],
+    },
+    {
+      eventId: "run-1:event:2:model.output.delta",
+      runId: "run-1",
+      sequence: 2,
+      type: "model.output.delta",
+      createdAt: "2026-06-04T00:00:00.000Z",
+      delta: "我会读取文件。",
+      sourceRefs: [],
+      modelCallRefs: ["model-1"],
+      toolCallRefs: [],
+    },
+    {
+      eventId: "run-1:event:3:tool.requested",
+      runId: "run-1",
+      sequence: 3,
+      type: "tool.requested",
+      createdAt: "2026-06-04T00:00:00.000Z",
+      toolName: "read_file",
+      sourceRefs: [],
+      modelCallRefs: ["model-1"],
+      toolCallRefs: ["tool-1"],
+    },
+  ]);
+
+  assert.deepEqual(projected.map((item) => item.kind), ["body", "tool"]);
+  assert.equal(projected[0]?.text, "先说明一下：我会读取文件。");
+  assert.deepEqual(timelineVisibleNodes(projected).map((item) => item.kind), ["tool"]);
+  assert.deepEqual(activityVisibleNodes(projected).map((item) => item.kind), ["body", "tool"]);
+  assert.deepEqual(visibleTranscriptNodes(projected).map((item) => item.kind), ["tool"]);
+});
+
+test("panel transcript nodes keep one reasoning node when replay catches up after body streaming starts", () => {
+  const projected = createPanelTranscriptNodes([
+    panelEvent({
+      eventId: "run-1:live:model.reasoning.delta:model-1:1",
+      sequence: 1,
+      type: "model.reasoning.delta",
+      delta: "Now",
+      modelCallRefs: ["model-1"],
+    }),
+    panelEvent({
+      eventId: "run-1:live:model.reasoning.delta:model-1:2",
+      sequence: 2,
+      type: "model.reasoning.delta",
+      delta: " let",
+      modelCallRefs: ["model-1"],
+    }),
+    panelEvent({
+      eventId: "run-1:live:model.output.delta:model-1:3",
+      sequence: 3,
+      type: "model.output.delta",
+      delta: "先",
+      modelCallRefs: ["model-1"],
+    }),
+    panelEvent({
+      eventId: "run-1:live:model.output.delta:model-1:4",
+      sequence: 4,
+      type: "model.output.delta",
+      delta: "说明",
+      modelCallRefs: ["model-1"],
+    }),
+    panelEvent({
+      eventId: "run-1:event:10:model.reasoning.delta:1",
+      sequence: 10,
+      type: "model.reasoning.delta",
+      delta: "Now let me read files.",
+      modelCallRefs: ["model-1"],
+    }),
+    panelEvent({
+      eventId: "run-1:event:10:model.reasoning.completed",
+      sequence: 11,
+      type: "model.reasoning.completed",
+      summary: "Now let me read files.",
+      modelCallRefs: ["model-1"],
+    }),
+    panelEvent({
+      eventId: "run-1:event:10:model.output.completed",
+      sequence: 12,
+      type: "model.output.completed",
+      summary: "内容已整理。",
+      modelCallRefs: ["model-1"],
+    }),
+    panelEvent({
+      eventId: "run-1:event:11:tool.requested",
+      sequence: 13,
+      type: "tool.requested",
+      modelCallRefs: ["model-1"],
+      toolCallRefs: ["tool-1"],
+    }),
+  ]);
+
+  const thinking = projected.filter((item) => item.kind === "thinking");
+
+  assert.equal(thinking.length, 1);
+  assert.equal(thinking[0]?.eventType, "model.reasoning.completed");
+  assert.equal(thinking[0]?.text, "Now let me read files.");
+});
+
+test("panel transcript nodes do not duplicate replay catch-up body text", () => {
+  const projected = createPanelTranscriptNodes([
+    panelEvent({
+      eventId: "run-1:live:model.output.delta:model-1:1",
+      sequence: 1,
+      type: "model.output.delta",
+      delta: "先",
+      modelCallRefs: ["model-1"],
+    }),
+    panelEvent({
+      eventId: "run-1:live:model.output.delta:model-1:2",
+      sequence: 2,
+      type: "model.output.delta",
+      delta: "说明",
+      modelCallRefs: ["model-1"],
+    }),
+    panelEvent({
+      eventId: "run-1:event:10:model.output.delta:1",
+      sequence: 10,
+      type: "model.output.delta",
+      delta: "先说明",
+      modelCallRefs: ["model-1"],
+    }),
+    panelEvent({
+      eventId: "run-1:event:10:model.output.completed",
+      sequence: 11,
+      type: "model.output.completed",
+      summary: "内容已整理。",
+      modelCallRefs: ["model-1"],
+    }),
+    panelEvent({
+      eventId: "run-1:event:11:tool.requested",
+      sequence: 12,
+      type: "tool.requested",
+      modelCallRefs: ["model-1"],
+      toolCallRefs: ["tool-1"],
+    }),
+  ]);
+
+  const body = projected.find((item) => item.kind === "body");
+
+  assert.equal(body?.text, "先说明");
 });
 
 test("activity projection keeps requested and completed tool phases as a full action record", () => {
@@ -433,6 +716,9 @@ function panelEvent(input: {
   readonly sequence: number;
   readonly type: string;
   readonly summary?: string;
+  readonly delta?: string;
+  readonly modelCallRefs?: readonly string[];
+  readonly toolCallRefs?: readonly string[];
 }) {
   return {
     eventId: input.eventId,
@@ -441,9 +727,10 @@ function panelEvent(input: {
     type: input.type,
     createdAt: "2026-06-04T00:00:00.000Z",
     summary: input.summary,
+    delta: input.delta,
     sourceRefs: [],
-    modelCallRefs: [],
-    toolCallRefs: [],
+    modelCallRefs: input.modelCallRefs ?? [],
+    toolCallRefs: input.toolCallRefs ?? [],
   };
 }
 

@@ -2,6 +2,12 @@ import { isStaleModelProgressSummary } from "./panel-model-progress-copy.js";
 import { userVisibleAnswer } from "./panel-assistant-visible-text.js";
 import { genericItemLabel } from "./panel-transcript-tool-format.js";
 import { isGenericApprovalDecisionText } from "./confirmation-copy.js";
+import {
+  isMergeableModelTranscriptNode,
+  isModelSideTranscriptNode,
+  mergeTranscriptNodes,
+  sameTranscriptNodeIdentity,
+} from "./panel-transcript-node-identity.js";
 
 export type TranscriptObservationRefLike = {
   readonly kind: string;
@@ -79,7 +85,7 @@ export type ProjectableTranscriptNode = {
   readonly runId: string;
   readonly sequence: number;
   readonly eventType: string;
-  readonly kind: "thinking" | "tool" | "confirmation" | "user_decision" | "answer" | "system";
+  readonly kind: "thinking" | "tool" | "confirmation" | "user_decision" | "answer" | "body" | "system";
   readonly phase:
     | "noted"
     | "preparing"
@@ -109,6 +115,7 @@ export type ProjectableTranscriptNode = {
 export function visibleTranscriptNodes<TNode extends ProjectableTranscriptNode>(nodes: readonly TNode[]): readonly TNode[] {
   const sorted = [...nodes]
     .filter((node) => node.kind !== "answer")
+    .filter((node) => node.kind !== "body")
     .filter((node) => !isLowValueNode(node))
     .sort(compareNodeOrder);
   const terminalToolCallIds = new Set(
@@ -137,7 +144,9 @@ export function visibleTranscriptNodes<TNode extends ProjectableTranscriptNode>(
 }
 
 export function timelineVisibleNodes<TNode extends ProjectableTranscriptNode>(nodes: readonly TNode[]): readonly TNode[] {
-  return activityVisibleNodes(nodes).filter((node) => node.kind !== "answer");
+  return activityVisibleNodes(nodes)
+    .filter((node) => node.kind !== "answer")
+    .filter((node) => node.kind !== "body");
 }
 
 export function activityVisibleNodes<TNode extends ProjectableTranscriptNode>(nodes: readonly TNode[]): readonly TNode[] {
@@ -153,11 +162,27 @@ export function activityVisibleNodes<TNode extends ProjectableTranscriptNode>(no
   for (const node of sorted) {
     if (node.kind === "thinking") {
       if (!hasReadableModelText(node)) continue;
+      const duplicateThinkingIndex = duplicateModelActivityIndex(result, node);
+      if (duplicateThinkingIndex >= 0) {
+        const previous = result[duplicateThinkingIndex];
+        if (previous !== undefined) {
+          result[duplicateThinkingIndex] = mergeModelActivityNodes(previous, node);
+        }
+        continue;
+      }
       result.push(node);
       continue;
     }
     if (isModelSideOutputNode(node)) {
       if (!hasReadableModelText(node)) continue;
+      const duplicateNarrationIndex = duplicateModelActivityIndex(result, node);
+      if (duplicateNarrationIndex >= 0) {
+        const previous = result[duplicateNarrationIndex];
+        if (previous !== undefined) {
+          result[duplicateNarrationIndex] = mergeModelActivityNodes(previous, node);
+        }
+        continue;
+      }
       result.push(node);
       continue;
     }
@@ -175,7 +200,11 @@ export function nodesForRun<TNode extends { readonly runId: string }>(nodes: rea
 }
 
 export function isModelSideOutputNode(node: ProjectableTranscriptNode): boolean {
-  return node.kind === "system" && (node.eventType === "model.side.completed" || node.eventType === "model.output.side");
+  return isModelSideTranscriptNode(node);
+}
+
+function isMergeableModelActivityNode(node: ProjectableTranscriptNode): boolean {
+  return isMergeableModelTranscriptNode(node);
 }
 
 export function isFileReadNode(node: ProjectableTranscriptNode): boolean {
@@ -231,10 +260,11 @@ function hasReadableModelText(node: ProjectableTranscriptNode): boolean {
 function transcriptNodeOrderRank(node: ProjectableTranscriptNode): number {
   if (node.kind === "thinking") return 0;
   if (isModelSideOutputNode(node)) return 1;
-  if (node.kind === "tool") return 2;
-  if (node.kind === "confirmation") return 3;
-  if (node.kind === "user_decision") return 4;
-  if (node.kind === "system") return 5;
+  if (node.kind === "body") return 2;
+  if (node.kind === "tool") return 3;
+  if (node.kind === "confirmation") return 4;
+  if (node.kind === "user_decision") return 5;
+  if (node.kind === "system") return 6;
   return 6;
 }
 
@@ -303,10 +333,39 @@ function isLowValueNode(node: ProjectableTranscriptNode): boolean {
   if (node.kind === "user_decision") {
     return isLowValueUserDecisionNode(node);
   }
-  if (node.kind === "tool" || node.kind === "confirmation") {
+  if (node.kind === "tool" || node.kind === "confirmation" || node.kind === "body") {
     return false;
   }
   return lowValueCopy(node.text ?? node.summary ?? node.title);
+}
+
+function duplicateModelActivityIndex<TNode extends ProjectableTranscriptNode>(
+  nodes: readonly TNode[],
+  candidate: TNode,
+): number {
+  for (let index = nodes.length - 1; index >= 0; index -= 1) {
+    const existing = nodes[index];
+    if (existing === undefined || !sameModelActivity(existing, candidate)) {
+      continue;
+    }
+    return index;
+  }
+  return -1;
+}
+
+function sameModelActivity(left: ProjectableTranscriptNode, right: ProjectableTranscriptNode): boolean {
+  if (!sameModelActivityKind(left, right)) {
+    return false;
+  }
+  return sameTranscriptNodeIdentity(left, right);
+}
+
+function sameModelActivityKind(left: ProjectableTranscriptNode, right: ProjectableTranscriptNode): boolean {
+  return isMergeableModelActivityNode(left) && isMergeableModelActivityNode(right);
+}
+
+function mergeModelActivityNodes<TNode extends ProjectableTranscriptNode>(previous: TNode, next: TNode): TNode {
+  return mergeTranscriptNodes(previous, next);
 }
 
 function lowValueCopy(value: string | undefined): boolean {

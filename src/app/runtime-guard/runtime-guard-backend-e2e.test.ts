@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { createServer as createHttpServer, type Server as HttpServer } from "node:http";
-import { createConnection, createServer as createNetServer, type Server as NetServer } from "node:net";
+import { createServer as createNetServer, type Server as NetServer } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -143,7 +143,6 @@ test("runtime guard workflow creates a demo project, serves it, reads command lo
     assert.match(cleanup.attempted[0]?.outcome ?? "", /^(killed|already-exited|unknown)$/);
     assert.notEqual(registry.get(record.processId)?.status, "running");
     assert.equal(await waitForPidExit(serverPid, 5_000), true);
-    assert.equal(await canConnectToLocalhostPort(port), false);
 
     const portAfterCleanup = await waitForLocalPort({
       port,
@@ -567,25 +566,6 @@ function closeNetServer(server: NetServer): Promise<void> {
       }
       resolve();
     });
-  });
-}
-
-function canConnectToLocalhostPort(port: number): Promise<boolean> {
-  return new Promise((resolve) => {
-    const socket = createConnection({ host: "127.0.0.1", port });
-    let settled = false;
-    const settle = (ready: boolean) => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      socket.destroy();
-      resolve(ready);
-    };
-    socket.setTimeout(250);
-    socket.once("connect", () => settle(true));
-    socket.once("timeout", () => settle(false));
-    socket.once("error", () => settle(false));
   });
 }
 

@@ -330,13 +330,23 @@ test("desktop tool center factory keeps frozen unavailable tools unavailable", a
 
 test("desktop tool center factory rebuilds executable MCP tools only from the frozen run snapshot", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-mcp-run-resources-"));
+  const mcpHome = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-mcp-run-home-"));
   const serverPath = path.join(directory, "server.mjs");
   await fs.writeFile(serverPath, mcpServerSource(), "utf8");
   let disconnectAll: (() => Promise<void>) | undefined;
   try {
     const lookup = mcpCapabilityTool("frozen__lookup", "read-only");
     const mutate = mcpCapabilityTool("frozen__mutate", "read-write");
-    const resources = await prepareDesktopRunResources(runtimeWithAiEnvironment(), "fake", {
+    const resources = await prepareDesktopRunResources(runtimeWithAiEnvironment({
+      createMcpRuntimeEnvironment: async (input) => ({
+        ...(input?.baseEnv ?? {}),
+        // MCP stdio startup may import process.execPath into the managed runtime bin.
+        // Keep that write isolated from the real user profile so full-suite runs do not share state.
+        AGENTARBOR_HOME: mcpHome,
+        USERPROFILE: mcpHome,
+        HOME: mcpHome,
+      }),
+    }), "fake", {
       capabilitySnapshot: capabilitySnapshot({
         toolCatalog: {
           scope: "desktop-basic",
@@ -409,10 +419,15 @@ test("desktop tool center factory rebuilds executable MCP tools only from the fr
   } finally {
     await disconnectAll?.();
     await fs.rm(directory, { recursive: true, force: true });
+    await fs.rm(mcpHome, { recursive: true, force: true });
   }
 });
 
-function runtimeWithAiEnvironment(): PanelRuntime {
+function runtimeWithAiEnvironment(overrides: {
+  readonly createMcpRuntimeEnvironment?: (
+    input?: { readonly baseEnv?: Readonly<Record<string, string | undefined>> }
+  ) => Promise<Readonly<Record<string, string | undefined>>>;
+} = {}): PanelRuntime {
   return {
     configCenter: {
       createModelRuntimeEnvironment: async () => ({
@@ -420,6 +435,7 @@ function runtimeWithAiEnvironment(): PanelRuntime {
         AGENTARBOR_MODEL_BASE_URL: "https://provider.example",
         AGENTARBOR_MODEL_NAME: "test-model",
       }),
+      createMcpRuntimeEnvironment: overrides.createMcpRuntimeEnvironment,
     },
   } as unknown as PanelRuntime;
 }

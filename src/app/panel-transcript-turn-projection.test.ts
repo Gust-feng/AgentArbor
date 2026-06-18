@@ -6,6 +6,7 @@ import {
   assistantTurnSlotKey,
   isRefreshingRunStatus,
   latestAssistantTurnIdForTurns,
+  precomputeAssistantTurnSlotKeys,
   projectAssistantTranscriptTurn,
   type AssistantTranscriptNodeLike,
 } from "./panel-transcript-turn-projection.js";
@@ -22,6 +23,24 @@ test("assistant shell snapshot tracks empty running turns by id and stable slot"
   assert.equal(snapshot.turnIds.has("assistant-shell"), true);
   assert.equal(snapshot.slotKeys.has("1:检查项目"), true);
   assert.equal(assistantTurnSlotKey(turns, 1), "1:检查项目");
+});
+
+test("assistant turn slot keys can be precomputed in conversation order", () => {
+  const turns = [
+    turn("user-1", "user", "第一问", "completed"),
+    turn("assistant-1", "assistant", "第一答", "completed"),
+    turn("user-2", "user", "第二问", "completed"),
+    turn("assistant-2", "assistant", "", "running"),
+    turn("assistant-3", "assistant", "补充", "completed"),
+  ];
+
+  const slotKeys = precomputeAssistantTurnSlotKeys(turns);
+
+  assert.equal(slotKeys[0], undefined);
+  assert.equal(slotKeys[1], "1:第一问");
+  assert.equal(slotKeys[3], "2:第二问");
+  assert.equal(slotKeys[4], "3:第二问");
+  assert.equal(slotKeys[4], assistantTurnSlotKey(turns, 4));
 });
 
 test("assistant turn projection animates content that replaces a previous empty shell", () => {
@@ -96,7 +115,35 @@ test("assistant turn projection ignores stale live text once the run is complete
   assert.equal(projection.content, "最终答案");
   assert.equal(projection.live, false);
   assert.equal(projection.keepStreamMounted, false);
-  assert.equal(projection.animateOnMount, true);
+  assert.equal(projection.animateOnMount, false);
+});
+
+test("assistant turn projection does not animate settled content on cold-load conversation switch", () => {
+  const turns = [
+    turn("user-1", "user", "你好", "completed"),
+    turn("assistant-1", "assistant", "你好，有什么可以帮你的？", "completed"),
+    turn("user-2", "user", "解释一下 React", "completed"),
+    turn("assistant-2", "assistant", "React 是一个用于构建用户界面的 JavaScript 库。", "completed"),
+  ];
+  const coldLoadShells = assistantShellSnapshot([]);
+
+  const firstAssistant = projectAssistantTranscriptTurn({
+    projectedTurn: projected(turns[1]!),
+    turnIndex: 1,
+    turns,
+    latestAssistantTurnId: latestAssistantTurnIdForTurns(turns),
+    previousEmptyShells: coldLoadShells,
+  });
+  assert.equal(firstAssistant.animateOnMount, false);
+
+  const latestAssistant = projectAssistantTranscriptTurn({
+    projectedTurn: projected(turns[3]!),
+    turnIndex: 3,
+    turns,
+    latestAssistantTurnId: latestAssistantTurnIdForTurns(turns),
+    previousEmptyShells: coldLoadShells,
+  });
+  assert.equal(latestAssistant.animateOnMount, false);
 });
 
 test("assistant turn projection uses settled replay answer when turn content is empty", () => {
@@ -123,7 +170,7 @@ test("assistant turn projection uses settled replay answer when turn content is 
   });
 
   assert.equal(projection.content, "恢复答案");
-  assert.equal(projection.animateOnMount, true);
+  assert.equal(projection.animateOnMount, false);
 });
 
 test("assistant turn projection can show direct running reply previews before tool boundaries", () => {

@@ -3,16 +3,15 @@ import {
   type AssistantDeliverableLike,
 } from "./panel-assistant-message-output.js";
 import {
-  projectAgentWorkTimelineView,
-  type AgentWorkTimelineView,
-} from "./panel-agent-work-timeline-view.js";
-import {
-  type ConfirmationIdentity,
-} from "./panel-transcript-confirmation-projection.js";
-import {
-  type ProjectableTranscriptNode,
-} from "./panel-transcript-node-projection.js";
+  projectAssistantMessageStructure,
+  type AssistantMessageSegment,
+  type AssistantMessageStructure,
+} from "./panel-assistant-message-structure.js";
+import type { ConfirmationIdentity } from "./panel-transcript-confirmation-projection.js";
+import type { ProjectableTranscriptNode } from "./panel-transcript-node-projection.js";
 import type { LiveAnswerTone } from "./panel-ui-live-transcript.js";
+
+export type { AssistantMessageSegment, AssistantMessageStructure };
 
 export type AssistantMessageAnswerView = {
   readonly text: string;
@@ -26,10 +25,7 @@ export type AssistantMessageAnswerView = {
 export type AssistantMessageView<
   TNode extends ProjectableTranscriptNode,
   TConfirmation extends ConfirmationIdentity = ConfirmationIdentity,
-> = {
-  readonly timeline: AgentWorkTimelineView<TNode, TConfirmation>;
-  readonly hasTimeline: boolean;
-  readonly awaitingFirstVisibleOutput: boolean;
+> = AssistantMessageStructure<TNode, TConfirmation> & {
   readonly answer?: AssistantMessageAnswerView;
 };
 
@@ -45,19 +41,25 @@ export function projectAssistantMessageView<
   readonly keepStreamMounted?: boolean;
   readonly animateOnMount?: boolean;
   readonly liveTone?: LiveAnswerTone;
+  readonly preferTranscriptBodies?: boolean;
 }): AssistantMessageView<TNode, TConfirmation> {
   const output = assistantMessageOutput({ content: input.content, deliverable: input.deliverable });
-  const timeline = projectAgentWorkTimelineView({
-    nodes: input.transcriptNodes ?? [],
-    pending: input.pending,
-  });
   const live = input.live === true;
   const keepStreamMounted = live || input.keepStreamMounted === true;
   const animateAnswerOnMount = keepStreamMounted || input.animateOnMount === true;
+  const tone = input.liveTone ?? "formal";
+  const structure = projectAssistantMessageStructure<TNode, TConfirmation>({
+    fallbackText: output.hasAnswer ? output.text : undefined,
+    transcriptNodes: input.transcriptNodes,
+    pending: input.pending,
+    live,
+    keepStreamMounted,
+    animateOnMount: animateAnswerOnMount,
+    liveTone: tone,
+    preferTranscriptBodies: input.preferTranscriptBodies,
+  });
   return {
-    timeline,
-    hasTimeline: timeline.hasContent,
-    awaitingFirstVisibleOutput: !output.hasAnswer && !timeline.hasContent && keepStreamMounted,
+    ...structure,
     answer: output.hasAnswer
       ? {
           text: output.text,
@@ -65,7 +67,7 @@ export function projectAssistantMessageView<
           showActions: !keepStreamMounted,
           live: keepStreamMounted,
           animateOnMount: animateAnswerOnMount,
-          tone: input.liveTone ?? "formal",
+          tone,
         }
       : undefined,
   };

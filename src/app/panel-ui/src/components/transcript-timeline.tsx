@@ -17,6 +17,7 @@ import {
   type AgentWorkTimelineView,
 } from "../../../panel-agent-work-timeline-view";
 import type { ActivityItem } from "../../../panel-transcript-activity-copy";
+import { collapsedTimelineSummary } from "../../../panel-ui-timeline-collapse";
 
 export type { ConfirmationProjection } from "./transcript-confirmation";
 export { pendingForTurn } from "../../../panel-transcript-confirmation-projection";
@@ -24,6 +25,8 @@ export { pendingForTurn } from "../../../panel-transcript-confirmation-projectio
 type AgentWorkTimelineProps = {
   readonly view: AgentWorkTimelineView<TranscriptNode, ConfirmationProjection>;
   readonly collapsed?: boolean;
+  readonly lifecycle?: "open" | "settled" | "attention";
+  readonly collapseReason?: string;
   readonly onDecision?: (decision: "approve_once" | "deny" | "guidance", guidance?: string) => void;
   readonly confirmationBusy: boolean;
 };
@@ -39,17 +42,20 @@ const MemoAgentWorkTimeline = React.memo(function AgentWorkTimelineContent(props
 
   const activity = (
     <div className="agent-activity">
-      {items.map((item, index) => (
-        <div
-          className={`agent-activity-step ${item.tone} ${item.phase}`}
-          data-current={confirmation.current === undefined && index === items.length - 1 ? "true" : undefined}
-          aria-current={confirmation.current === undefined && index === items.length - 1 ? "step" : undefined}
-          key={item.key}
-        >
-          <span className="agent-activity-marker" aria-hidden="true" />
-          <ActivityLine item={item} />
-        </div>
-      ))}
+      {items.map((item, index) => {
+        const current = props.lifecycle !== "settled" && confirmation.current === undefined && index === items.length - 1;
+        return (
+          <div
+            className={`agent-activity-step ${item.tone} ${item.phase}`}
+            data-current={current ? "true" : undefined}
+            aria-current={current ? "step" : undefined}
+            key={item.key}
+          >
+            <span className="agent-activity-marker" aria-hidden="true" />
+            <ActivityLine item={item} />
+          </div>
+        );
+      })}
       {confirmation.current !== undefined && (
         <div className="agent-activity-step confirmation waiting_approval" data-current="true" aria-current="step">
           <span className="agent-activity-marker" aria-hidden="true" />
@@ -65,11 +71,20 @@ const MemoAgentWorkTimeline = React.memo(function AgentWorkTimelineContent(props
 
   if (props.collapsed === true && confirmation.current === undefined) {
     const metrics = activityMetrics(items);
-    const summary = activitySummary(metrics, items.length);
+    const summary = collapsedTimelineSummary({
+      items,
+      hasCurrentConfirmation: false,
+    });
     return (
-      <section className="agent-workline" aria-label="工作进度">
+      <section
+        className="agent-workline"
+        aria-label="工作进度"
+        data-lifecycle={props.lifecycle}
+        data-collapse-reason={props.collapseReason}
+      >
         <details className="agent-workline-disclosure">
           <summary className="agent-workline-summary" aria-label={`展开过程，${summary}`}>
+            <span className="agent-workline-summary-status" aria-hidden="true" />
             <span className="agent-workline-summary-text">{summary}</span>
             <span className="agent-workline-summary-metrics" aria-hidden="true">
               {metrics.map((metric) => {
@@ -93,7 +108,12 @@ const MemoAgentWorkTimeline = React.memo(function AgentWorkTimelineContent(props
   }
 
   return (
-    <section className="agent-workline" aria-label="工作进度">
+    <section
+      className="agent-workline"
+      aria-label="工作进度"
+      data-lifecycle={props.lifecycle}
+      data-collapse-reason={props.collapseReason}
+    >
       {activity}
     </section>
   );
@@ -137,13 +157,6 @@ function activityMetricKind(item: ActivityItem): ActivityMetricKind | undefined 
   return undefined;
 }
 
-function activitySummary(metrics: readonly ActivityMetric[], itemCount: number): string {
-  if (metrics.length === 0) {
-    return itemCount === 1 ? "1 步" : `${itemCount} 步`;
-  }
-  return metrics.map((metric) => `${metric.label} ${metric.count}`).join("，");
-}
-
 function ActivityLine({ item }: { readonly item: ActivityItem }): React.ReactElement {
   const label = item.copy.label;
   const line = (
@@ -169,6 +182,8 @@ function ActivityLine({ item }: { readonly item: ActivityItem }): React.ReactEle
 
 function agentWorkTimelinePropsEqual(left: AgentWorkTimelineProps, right: AgentWorkTimelineProps): boolean {
   return left.collapsed === right.collapsed &&
+    left.lifecycle === right.lifecycle &&
+    left.collapseReason === right.collapseReason &&
     left.onDecision === right.onDecision &&
     left.confirmationBusy === right.confirmationBusy &&
     timelineViewsEqual(left.view, right.view);

@@ -1,124 +1,84 @@
-import React, { useCallback, useLayoutEffect, useRef } from "react";
+import React, { useCallback, useRef } from "react";
 import {
   Copy,
 } from "lucide-react";
 import type { ConversationTurn } from "../contracts/conversation";
 import type {
-  AgentDeliverable,
-  BasicAgentRun,
-  DesktopWorkView,
   TranscriptNode,
 } from "../contracts/run";
 import type { LiveAnswerTone } from "../../../panel-ui-live-transcript";
-import type { WorklineProjectedTurn } from "../../../panel-ui-chat-workline";
-import type { LiveRunBuffer } from "../../../panel-ui-live-run-buffer";
-import { projectAssistantMessageView } from "../../../panel-assistant-message-view";
+import type { AssistantWorkflowDisplay } from "../../../panel-assistant-workflow-display";
+import type { ConversationDisplayItem } from "../../../panel-conversation-display-list";
 import { LiveStreamBox } from "./live-stream-text";
 import { RichText } from "./rich-text";
 import type { ChatModelOption } from "./chat-empty";
-import { assistantFailureParts } from "../../../panel-assistant-failure";
+import type { AssistantFailureParts } from "../../../panel-assistant-failure";
 import {
   assistantModelForTurn,
+  selectedComposerModel,
   type AssistantModelBadge,
 } from "./chat-session-projection";
 import {
   AgentWorkTimeline,
   type ConfirmationProjection,
 } from "./transcript-timeline";
-import { projectAgentWorkTimelineView } from "../../../panel-agent-work-timeline-view";
-import {
-  assistantShellSnapshot,
-  latestAssistantTurnIdForTurns,
-  projectAssistantTranscriptTurn,
-  type AssistantShellSnapshot,
-} from "../../../panel-transcript-turn-projection";
 
 export { isRefreshingRunStatus } from "../../../panel-transcript-turn-projection";
 
 export function TranscriptChain(props: {
-  readonly turns: readonly WorklineProjectedTurn<ConversationTurn>[];
+  readonly items: readonly ConversationDisplayItem<ConversationTurn, TranscriptNode, ConfirmationProjection>[];
   readonly models: readonly ChatModelOption[];
   readonly selectedModelId: string;
-  readonly run?: BasicAgentRun;
-  readonly transcriptNodes: readonly TranscriptNode[];
-  readonly live?: LiveRunBuffer;
-  readonly workView?: DesktopWorkView;
-  readonly pending?: ConfirmationProjection;
   readonly onDecision: (decision: "approve_once" | "deny" | "guidance", guidance?: string) => void;
   readonly confirmationBusy: boolean;
+  readonly hiddenEarlierTurnCount?: number;
+  readonly onShowEarlierTurns?: () => void;
 }): React.ReactElement | null {
-  const emptyAssistantShellsRef = useRef<AssistantShellSnapshot>(assistantShellSnapshot([]));
-  useLayoutEffect(() => {
-    emptyAssistantShellsRef.current = assistantShellSnapshot(props.turns.map((projection) => projection.turn));
-  }, [props.turns]);
-
   // 稳定化 onDecision 回调，使 React.memo 可以跳过已完成 turn
   const onDecisionRef = useRef(props.onDecision);
   onDecisionRef.current = props.onDecision;
   const stableOnDecision = useCallback((decision: "approve_once" | "deny" | "guidance", guidance?: string) => {
     onDecisionRef.current(decision, guidance);
   }, []);
-
-  if (props.turns.length === 0) return null;
-
-  const turns = props.turns.map((projection) => projection.turn);
-  const latestAssistantTurnId = latestAssistantTurnIdForTurns(turns);
-  const shells = emptyAssistantShellsRef.current;
+  const items = props.items;
+  if (items.length === 0) return null;
 
   return (
     <div className="transcript-list">
-      {props.turns.map((projection, turnIndex) => {
-        const turn = projection.turn;
-        if (turn.role === "user") {
-          return <UserMessage key={turn.turnId} content={turn.content} status={turn.status} />;
+      {(props.hiddenEarlierTurnCount ?? 0) > 0 && props.onShowEarlierTurns !== undefined && (
+        <button
+          type="button"
+          className="transcript-load-earlier"
+          onClick={props.onShowEarlierTurns}
+        >
+          查看更早消息
+        </button>
+      )}
+      {items.map((item) => {
+        if (item.kind === "user") {
+          return <UserMessage key={item.key} content={item.turn.content} status={item.turn.status} />;
         }
-
-        const assistant = projectAssistantTranscriptTurn({
-          projectedTurn: projection,
-          turnIndex,
-          turns,
-          latestAssistantTurnId,
-          previousEmptyShells: shells,
-          run: props.run,
-          transcriptNodes: props.transcriptNodes,
-          live: props.live,
-          workView: props.workView,
-          pending: props.pending,
-        });
-        const model = assistantModelForTurn(turn, props.models, props.selectedModelId);
-        const collapseTimeline = shouldCollapseTimelineAfterTurn({
-          displayRunId: assistant.displayRunId,
-          live: assistant.live,
-          pending: assistant.pending,
-          run: props.run,
-          turnStatus: turn.status,
-        });
-
-        return turn.status === "failed"
+        const model = item.source === "turn" && item.turn !== undefined
+          ? assistantModelForTurn(item.turn, props.models, props.selectedModelId)
+          : selectedComposerModel(props.models, props.selectedModelId);
+        return item.failure !== undefined
           ? (
             <AssistantFailureMessage
-              key={turn.turnId}
-              content={turn.content}
+              key={item.key}
+              failure={item.failure}
               model={model}
-              transcriptNodes={assistant.runProjection.nodes}
-              collapseTimeline={collapseTimeline}
+              workflow={item.workflow}
             />
           )
           : (
             <AssistantMessage
-              key={turn.turnId}
-              content={assistant.content}
-              live={assistant.live}
-              keepStreamMounted={assistant.keepStreamMounted}
-              animateOnMount={assistant.animateOnMount}
-              liveTone={assistant.liveTone}
+              key={item.key}
+              live={item.live}
+              animateOnMount={item.animateOnMount}
               model={model}
-              transcriptNodes={assistant.runProjection.nodes}
-              collapseTimeline={collapseTimeline}
-              pending={assistant.pending}
-              deliverable={assistant.deliverable}
+              workflow={item.workflow}
               onDecision={stableOnDecision}
-              confirmationBusy={assistant.pending !== undefined && props.confirmationBusy}
+              confirmationBusy={item.hasPendingConfirmation && props.confirmationBusy}
             />
           );
       })}
@@ -129,9 +89,8 @@ export function TranscriptChain(props: {
 const UserMessage = React.memo(function UserMessage({ content, status }: { readonly content: string; readonly status: string }): React.ReactElement {
   const queued = status === "pending";
   return (
-    <article className="user-message">
+    <article className="user-message" {...(queued ? { "data-entering": "" } : undefined)}>
       <div className="user-message-wrap">
-        <div className="user-message-label">用户</div>
         <div className="user-message-content">
           <RichText text={content} />
         </div>
@@ -148,16 +107,10 @@ const UserMessage = React.memo(function UserMessage({ content, status }: { reado
 });
 
 type AssistantMessageProps = {
-  readonly content: string;
   readonly live?: boolean;
-  readonly keepStreamMounted?: boolean;
   readonly animateOnMount?: boolean;
-  readonly liveTone?: LiveAnswerTone;
   readonly model?: AssistantModelBadge;
-  readonly transcriptNodes?: readonly TranscriptNode[];
-  readonly collapseTimeline?: boolean;
-  readonly pending?: ConfirmationProjection;
-  readonly deliverable?: AgentDeliverable;
+  readonly workflow?: AssistantWorkflowDisplay<TranscriptNode, ConfirmationProjection>;
   readonly onDecision?: (decision: "approve_once" | "deny" | "guidance", guidance?: string) => void;
   readonly confirmationBusy?: boolean;
 };
@@ -167,36 +120,35 @@ export function AssistantMessage(props: AssistantMessageProps): React.ReactEleme
 }
 
 const MemoAssistantMessage = React.memo(function AssistantMessageContent(props: AssistantMessageProps): React.ReactElement {
-  const view = projectAssistantMessageView({
-    content: props.content,
-    deliverable: props.deliverable,
-    transcriptNodes: props.transcriptNodes,
-    pending: props.pending,
-    live: props.live,
-    keepStreamMounted: props.keepStreamMounted,
-    animateOnMount: props.animateOnMount,
-    liveTone: props.liveTone,
-  });
+  const workflow = props.workflow;
+  if (workflow === undefined) {
+    return <AssistantPendingBlock />;
+  }
+  const entering = props.animateOnMount === true || props.live === true;
   return (
-    <article className={`assistant-message assistant-workline ${props.collapseTimeline === true ? "assistant-workline-collapsed" : ""}`}>
+    <article
+      className="assistant-message assistant-workline"
+      {...(entering ? { "data-entering": "" } : undefined)}
+    >
       <AssistantMessageLabel model={props.model} />
       <div className="assistant-message-body">
-        <AgentWorkTimeline
-          view={view.timeline}
-          collapsed={props.collapseTimeline === true}
-          onDecision={props.onDecision}
-          confirmationBusy={props.confirmationBusy === true}
-        />
-        {view.awaitingFirstVisibleOutput && <AssistantPendingBlock />}
-        {view.answer !== undefined && (
-          <AssistantAnswerBlock
-            text={view.answer.text}
-            copyText={view.answer.copyText}
-            showActions={view.answer.showActions}
-            live={view.answer.live}
-            animateOnMount={view.answer.animateOnMount}
-            liveTone={view.answer.tone}
-          />
+        {workflow.segments.map((segment, index) => {
+          return (
+            <AssistantWorkflowSegment
+              key={segment.kind === "awaiting" ? `awaiting-${index}` : segment.segmentKey}
+              segment={segment}
+              onDecision={props.onDecision}
+              confirmationBusy={props.confirmationBusy === true}
+            />
+          );
+        })}
+        {workflow.copyText.trim().length > 0 && workflow.showCopyActions && (
+          <div className="turn-actions">
+            <button type="button" onClick={() => copyToClipboard(workflow.copyText)}>
+              <Copy size={13} />
+              复制
+            </button>
+          </div>
         )}
       </div>
     </article>
@@ -212,36 +164,79 @@ const AssistantPendingBlock = React.memo(function AssistantPendingBlock(): React
 });
 
 type AssistantFailureMessageProps = {
-  readonly content: string;
+  readonly failure: AssistantFailureParts;
   readonly model?: AssistantModelBadge;
-  readonly transcriptNodes?: readonly TranscriptNode[];
-  readonly collapseTimeline?: boolean;
+  readonly workflow?: AssistantWorkflowDisplay<TranscriptNode, ConfirmationProjection>;
 };
 
 const AssistantFailureMessage = React.memo(function AssistantFailureMessage(props: AssistantFailureMessageProps): React.ReactElement {
-  const failure = assistantFailureParts(props.content);
-  const timeline = projectAgentWorkTimelineView<TranscriptNode, ConfirmationProjection>({ nodes: props.transcriptNodes ?? [] });
+  const workflow = props.workflow;
+  const collapsedClass = workflowHasCollapsedActivity(workflow) ? " assistant-workline-collapsed" : "";
   return (
-    <article className={`assistant-message assistant-message-failed ${props.collapseTimeline === true ? "assistant-workline-collapsed" : ""}`}>
+    <article className={`assistant-message assistant-message-failed assistant-workline${collapsedClass}`}>
       <AssistantMessageLabel model={props.model} />
       <div className="assistant-message-body">
-        <AgentWorkTimeline
-          view={timeline}
-          collapsed={props.collapseTimeline === true}
-          confirmationBusy={false}
-        />
-        {failure.previous.length > 0 && (
+        {workflow !== undefined
+          ? workflow.segments.map((segment, index) => (
+            <AssistantWorkflowSegment
+              key={segment.kind === "awaiting" ? `awaiting-${index}` : segment.segmentKey}
+              segment={segment}
+              confirmationBusy={false}
+            />
+          ))
+          : props.failure.previous.length > 0 && (
           <AssistantAnswerBlock
-            text={failure.previous}
-            copyText={failure.previous}
+            text={props.failure.previous}
+            copyText={props.failure.previous}
             showActions={true}
           />
         )}
-        <p className="assistant-error-message">{failure.error}</p>
+        {workflow !== undefined && workflow.copyText.trim().length > 0 && workflow.showCopyActions && (
+          <div className="turn-actions">
+            <button type="button" onClick={() => copyToClipboard(workflow.copyText)}>
+              <Copy size={13} />
+              复制
+            </button>
+          </div>
+        )}
+        <p className="assistant-error-message">{props.failure.error}</p>
       </div>
     </article>
   );
 }, assistantFailureMessagePropsEqual);
+
+function AssistantWorkflowSegment(props: {
+  readonly segment: AssistantWorkflowDisplay<TranscriptNode, ConfirmationProjection>["segments"][number];
+  readonly onDecision?: (decision: "approve_once" | "deny" | "guidance", guidance?: string) => void;
+  readonly confirmationBusy: boolean;
+}): React.ReactElement {
+  const segment = props.segment;
+  if (segment.kind === "activity") {
+    return (
+      <AgentWorkTimeline
+        view={segment.timeline}
+        collapsed={segment.collapsed}
+        lifecycle={segment.lifecycle}
+        collapseReason={segment.collapseReason}
+        onDecision={props.onDecision}
+        confirmationBusy={props.confirmationBusy}
+      />
+    );
+  }
+  if (segment.kind === "awaiting") {
+    return <AssistantPendingBlock />;
+  }
+  return (
+    <AssistantAnswerBlock
+      text={segment.text}
+      copyText={segment.copyText}
+      showActions={false}
+      live={segment.live}
+      animateOnMount={segment.animateOnMount}
+      liveTone={segment.tone}
+    />
+  );
+}
 
 const AssistantAnswerBlock = React.memo(function AssistantAnswerBlock(props: {
   readonly text: string;
@@ -260,10 +255,7 @@ const AssistantAnswerBlock = React.memo(function AssistantAnswerBlock(props: {
         tone={props.liveTone ?? "formal"}
         renderText={(displayed) => <RichText text={displayed} />}
         renderStreamingText={(displayed) => (
-          <div className="rich-text rich-text-streaming">
-            {displayed}
-            <span className="stream-cursor" aria-hidden="true" />
-          </div>
+          <div className="rich-text rich-text-streaming">{streamingPreviewText(displayed)}</div>
         )}
       />
       {props.showActions && (
@@ -282,7 +274,9 @@ function AssistantMessageLabel({ model }: { readonly model?: AssistantModelBadge
   const modelLabel = assistantModelLabel(model);
   return (
     <div className="assistant-message-label">
-      <span>AgentArbor</span>
+      {model?.iconSvg !== undefined && (
+        <span className="assistant-message-icon" aria-hidden="true" dangerouslySetInnerHTML={{ __html: model.iconSvg }} />
+      )}
       {modelLabel !== undefined && <span className="assistant-message-model">{modelLabel}</span>}
     </div>
   );
@@ -317,25 +311,19 @@ const MemoTypingDots = React.memo(function TypingDotsContent(): React.ReactEleme
 });
 
 function assistantMessagePropsEqual(left: AssistantMessageProps, right: AssistantMessageProps): boolean {
-  return left.content === right.content &&
+  return left.workflow === right.workflow &&
     left.live === right.live &&
-    left.keepStreamMounted === right.keepStreamMounted &&
     left.animateOnMount === right.animateOnMount &&
-    left.liveTone === right.liveTone &&
     assistantModelBadgesEqual(left.model, right.model) &&
-    transcriptNodeListsEqual(left.transcriptNodes, right.transcriptNodes) &&
-    left.collapseTimeline === right.collapseTimeline &&
-    left.pending === right.pending &&
-    left.deliverable === right.deliverable &&
     left.onDecision === right.onDecision &&
     left.confirmationBusy === right.confirmationBusy;
 }
 
 function assistantFailureMessagePropsEqual(left: AssistantFailureMessageProps, right: AssistantFailureMessageProps): boolean {
-  return left.content === right.content &&
+  return left.failure.previous === right.failure.previous &&
+    left.failure.error === right.failure.error &&
     assistantModelBadgesEqual(left.model, right.model) &&
-    transcriptNodeListsEqual(left.transcriptNodes, right.transcriptNodes) &&
-    left.collapseTimeline === right.collapseTimeline;
+    left.workflow === right.workflow;
 }
 
 function assistantModelBadgesEqual(left: AssistantModelBadge | undefined, right: AssistantModelBadge | undefined): boolean {
@@ -347,23 +335,16 @@ function assistantModelBadgesEqual(left: AssistantModelBadge | undefined, right:
     left.iconSvg === right.iconSvg;
 }
 
-function transcriptNodeListsEqual(
-  left: readonly TranscriptNode[] | undefined,
-  right: readonly TranscriptNode[] | undefined
-): boolean {
-  if (left === right) return true;
-  if (left === undefined || right === undefined) return false;
-  if (left.length !== right.length) return false;
-  for (let index = 0; index < left.length; index += 1) {
-    if (left[index] !== right[index]) return false;
-  }
-  return true;
-}
-
 function copyToClipboard(value: string): void {
   if (navigator.clipboard !== undefined) {
     void navigator.clipboard.writeText(value);
   }
+}
+
+function workflowHasCollapsedActivity(
+  workflow: AssistantWorkflowDisplay<TranscriptNode, ConfirmationProjection> | undefined,
+): boolean {
+  return workflow?.segments.some((segment) => segment.kind === "activity" && segment.collapsed) === true;
 }
 
 function assistantAvatarInitial(model: AssistantModelBadge | undefined): string {
@@ -372,32 +353,28 @@ function assistantAvatarInitial(model: AssistantModelBadge | undefined): string 
 
 function assistantModelLabel(model: AssistantModelBadge | undefined): string | undefined {
   if (model === undefined) return undefined;
-  const provider = model.providerLabel.trim();
   const name = model.modelName.trim();
-  if (provider.length === 0 && name.length === 0) return undefined;
-  if (provider.length === 0) return name;
-  if (name.length === 0) return provider;
-  return `${provider} · ${name}`;
+  return name.length > 0 ? name : undefined;
 }
 
-function shouldCollapseTimelineAfterTurn(input: {
-  readonly displayRunId?: string;
-  readonly live: boolean;
-  readonly pending?: ConfirmationProjection;
-  readonly run?: BasicAgentRun;
-  readonly turnStatus: string;
-}): boolean {
-  if (input.live || input.pending !== undefined) return false;
-  if (input.displayRunId !== undefined && input.run?.runId === input.displayRunId) {
-    return isSettledRunStatus(input.run.status);
-  }
-  return isSettledTurnStatus(input.turnStatus);
+function streamingPreviewText(value: string): string {
+  return stripTrailingStreamingMarkdown(
+    value
+      .replace(/\r\n/g, "\n")
+      .replace(/^#{1,6}\s+/gm, "")
+      .replace(/^[-*]\s+/gm, "")
+      .replace(/^\d+[.)、]\s+/gm, "")
+      .replace(/\*\*([^*]+)\*\*/g, "$1")
+      .replace(/__([^_]+)__/g, "$1")
+      .replace(/`([^`]+)`/g, "$1")
+      .replace(/\*\*/g, "")
+      .replace(/__/g, "")
+  );
 }
 
-function isSettledRunStatus(status: BasicAgentRun["status"]): boolean {
-  return status === "completed" || status === "failed" || status === "cancelled" || status === "blocked";
-}
-
-function isSettledTurnStatus(status: string): boolean {
-  return status === "completed" || status === "failed" || status === "cancelled" || status === "blocked";
+function stripTrailingStreamingMarkdown(value: string): string {
+  return value
+    .replace(/(?:\n(?:[-*]|\d+[.)、]|#{1,6}|>|`{1,3}|\|)\s*)+$/u, "")
+    .replace(/(?:\*\*|__|`)+$/u, "")
+    .replace(/\s+$/u, "");
 }

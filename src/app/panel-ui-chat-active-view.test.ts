@@ -47,7 +47,7 @@ test("chat active view filters transcript nodes before building the workline", (
   assert.equal(view.workline.turns[1]?.displayRunId, "run-1");
 });
 
-test("chat active view projects standalone assistant render state", () => {
+test("chat active view marks standalone runs and keeps live answer in the current run projection", () => {
   const view = projectChatActiveView({
     conversation: {
       turns: [
@@ -60,12 +60,12 @@ test("chat active view projects standalone assistant render state", () => {
     live: live("run-1", "正在回答"),
   });
 
-  assert.deepEqual(view.standaloneAssistant, {
-    content: "正在回答",
-    live: true,
-    keepStreamMounted: true,
-    animateOnMount: true,
-    liveTone: "process",
+  assert.equal(view.workline.standaloneRun, true);
+  assert.equal(view.answer, undefined);
+  assert.deepEqual(view.liveAnswer, {
+    text: "正在回答",
+    tone: "process",
+    streaming: true,
   });
 });
 

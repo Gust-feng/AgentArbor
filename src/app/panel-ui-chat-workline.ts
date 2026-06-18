@@ -45,30 +45,49 @@ export function projectChatWorkline<TTurn extends WorklineConversationTurn>(inpu
   readonly hasPendingConfirmation: boolean;
   readonly hasDeliverable: boolean;
 }): ChatWorklineProjection<TTurn> {
-  const runIdsWithVisibleNodes = new Set(input.transcriptNodes.map((node) => node.runId));
+  const runIdsWithVisibleNodes = new Set<string>();
+  for (const node of input.transcriptNodes) {
+    runIdsWithVisibleNodes.add(node.runId);
+  }
   const currentRunHasMaterial = hasCurrentRunMaterial(input, runIdsWithVisibleNodes);
-  const hasAssistantTurnForCurrentRun = input.currentRunId !== undefined &&
-    input.turns.some((turn) => turn.role === "assistant" && turn.runId === input.currentRunId);
+  let hasAssistantTurnForCurrentRun = false;
+  let latestClaimableAssistantTurnId: string | undefined;
+  if (input.currentRunId !== undefined) {
+    for (const turn of input.turns) {
+      if (turn.role !== "assistant") continue;
+      if (turn.runId === input.currentRunId) {
+        hasAssistantTurnForCurrentRun = true;
+      }
+      if (
+        turn.runId === undefined &&
+        turn.content.trim().length === 0 &&
+        (turn.status === "running" || turn.status === "pending")
+      ) {
+        latestClaimableAssistantTurnId = turn.turnId;
+      }
+    }
+  }
   const claimableTurnId = hasAssistantTurnForCurrentRun || !currentRunHasMaterial
     ? undefined
-    : latestClaimableAssistantTurnId(input.turns);
+    : latestClaimableAssistantTurnId;
 
-  const projectedTurns = input.turns
-    .map((turn): WorklineProjectedTurn<TTurn> => {
-      const claimedCurrentRun = claimableTurnId !== undefined && turn.turnId === claimableTurnId;
-      return {
-        turn,
-        displayRunId: turn.runId ?? (claimedCurrentRun ? input.currentRunId : undefined),
-        claimedCurrentRun,
-      };
-    })
-    .filter((projection) => shouldShowTurn(projection, input.currentRunId, runIdsWithVisibleNodes, currentRunHasMaterial));
-
-  const projectedAssistantOwnsCurrentRun = input.currentRunId !== undefined &&
-    projectedTurns.some((projection) =>
-      projection.turn.role === "assistant" &&
-      projection.displayRunId === input.currentRunId
-    );
+  const projectedTurns: WorklineProjectedTurn<TTurn>[] = [];
+  let projectedAssistantOwnsCurrentRun = false;
+  for (const turn of input.turns) {
+    const claimedCurrentRun = claimableTurnId !== undefined && turn.turnId === claimableTurnId;
+    const projection: WorklineProjectedTurn<TTurn> = {
+      turn,
+      displayRunId: turn.runId ?? (claimedCurrentRun ? input.currentRunId : undefined),
+      claimedCurrentRun,
+    };
+    if (!shouldShowTurn(projection, input.currentRunId, runIdsWithVisibleNodes, currentRunHasMaterial)) {
+      continue;
+    }
+    if (turn.role === "assistant" && projection.displayRunId === input.currentRunId) {
+      projectedAssistantOwnsCurrentRun = true;
+    }
+    projectedTurns.push(projection);
+  }
 
   return {
     turns: projectedTurns,
@@ -100,17 +119,6 @@ function hasCurrentRunMaterial<TTurn extends WorklineConversationTurn>(
     input.currentRunStatus === "running" ||
     input.currentRunStatus === "approval_needed" ||
     input.currentRunStatus === "needs_input";
-}
-
-function latestClaimableAssistantTurnId<TTurn extends WorklineConversationTurn>(
-  turns: readonly TTurn[]
-): string | undefined {
-  return [...turns].reverse().find((turn) =>
-    turn.role === "assistant" &&
-    turn.runId === undefined &&
-    turn.content.trim().length === 0 &&
-    (turn.status === "running" || turn.status === "pending")
-  )?.turnId;
 }
 
 function shouldShowTurn<TTurn extends WorklineConversationTurn>(

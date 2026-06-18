@@ -65,7 +65,6 @@ export type ChatActiveProjection<TDeliverable, TPending> = {
   readonly pending?: TPending;
   readonly deliverable?: TDeliverable;
   readonly liveAnswer?: LiveAnswerProjection;
-  readonly standaloneAssistant?: ChatActiveStandaloneAssistant;
   readonly running: boolean;
   readonly statusNotice?: ChatActiveStatusNotice;
   readonly workline: ChatWorklineProjection<ChatActiveConversationTurn>;
@@ -73,36 +72,23 @@ export type ChatActiveProjection<TDeliverable, TPending> = {
   readonly scrollKey: string;
 };
 
-export type ChatActiveStandaloneAssistant = {
-  readonly content: string;
-  readonly live: boolean;
-  readonly keepStreamMounted: boolean;
-  readonly animateOnMount: boolean;
-  readonly liveTone?: LiveAnswerProjection["tone"];
-};
-
 export function projectChatActive<TDeliverable, TPending>(
   input: ChatActiveProjectionInput<TDeliverable, TPending>
 ): ChatActiveProjection<TDeliverable, TPending> {
   const currentRunId = input.run?.runId ?? input.conversation?.activeRunId ?? input.conversation?.latestRunId ?? input.live?.runId;
   const activeLive = activeLiveForCurrentRun(input.run, currentRunId, input.live);
-  const currentRunProjection = projectLiveRunTranscript(
-    nodesForRun(input.transcriptNodes, currentRunId),
-    activeLive
-  );
+  const currentRunNodes = nodesForRun(input.transcriptNodes, currentRunId);
+  const currentRunProjection = projectLiveRunTranscript(currentRunNodes, activeLive);
   const currentRunAssistantTurn = currentRunId === undefined
     ? undefined
-    : [...(input.conversation?.turns ?? [])].reverse().find((turn) => (
-        turn.role === "assistant" &&
-        turn.runId === currentRunId &&
-        turn.content.trim().length > 0
-      ));
+    : latestAssistantTurnForRun(input.conversation?.turns ?? [], currentRunId);
   const pending = input.pending;
   const turnContentAnswer = canUseConversationTurnAsAnswer({
     run: input.run,
     pending,
     turn: currentRunAssistantTurn,
     transcriptNodes: currentRunProjection.nodes,
+    currentRunNodes,
     currentRunId,
   })
     ? currentRunAssistantTurn?.content
@@ -128,9 +114,6 @@ export function projectChatActive<TDeliverable, TPending>(
     hasDeliverable: input.deliverable !== undefined,
   });
   const latestTurn = workline.turns.at(-1);
-  const standaloneAssistant = workline.standaloneRun
-    ? standaloneAssistantForProjection(input.run, answer, liveAnswer)
-    : undefined;
   const scrollKey = [
     latestTurn?.turn.turnId,
     latestTurn?.turn.content.length,
@@ -148,7 +131,6 @@ export function projectChatActive<TDeliverable, TPending>(
     pending,
     deliverable: input.deliverable,
     liveAnswer,
-    standaloneAssistant,
     running,
     statusNotice,
     workline,
@@ -165,6 +147,7 @@ function canUseConversationTurnAsAnswer<TPending>(input: {
   readonly pending: TPending | undefined;
   readonly turn: ChatActiveConversationTurn | undefined;
   readonly transcriptNodes: readonly ChatActiveTranscriptNode[];
+  readonly currentRunNodes?: readonly ChatActiveTranscriptNode[];
   readonly currentRunId: string | undefined;
 }): boolean {
   if (input.turn === undefined || input.pending !== undefined) return false;
@@ -176,11 +159,26 @@ function canUseConversationTurnAsAnswer<TPending>(input: {
   if (isGenericApprovalDecisionText(input.turn.content)) {
     return false;
   }
-  const currentNodes = input.currentRunId === undefined
-    ? []
-    : input.transcriptNodes.filter((node) => node.runId === input.currentRunId);
+  const currentNodes = input.currentRunNodes ?? (
+    input.currentRunId === undefined
+      ? []
+      : input.transcriptNodes.filter((node) => node.runId === input.currentRunId)
+  );
   const latestNodeSequence = currentNodes.reduce((latest, node) => Math.max(latest, node.sequence), 0);
   return !hasToolOrApprovalBoundary(currentNodes) || input.run.eventCursor.lastSequence > latestNodeSequence;
+}
+
+function latestAssistantTurnForRun(
+  turns: readonly ChatActiveConversationTurn[],
+  runId: string
+): ChatActiveConversationTurn | undefined {
+  for (let index = turns.length - 1; index >= 0; index -= 1) {
+    const turn = turns[index]!;
+    if (turn.role === "assistant" && turn.runId === runId && turn.content.trim().length > 0) {
+      return turn;
+    }
+  }
+  return undefined;
 }
 
 function hasToolOrApprovalBoundary(nodes: readonly ChatActiveTranscriptNode[]): boolean {
@@ -203,23 +201,6 @@ function activeLiveForCurrentRun(
     return live;
   }
   return refreshingStatuses.has(run.status) ? live : undefined;
-}
-
-function standaloneAssistantForProjection(
-  run: ChatActiveRun | undefined,
-  answer: string | undefined,
-  liveAnswer: LiveAnswerProjection | undefined
-): ChatActiveStandaloneAssistant {
-  const liveStreamingAnswer = liveAnswer?.streaming === true ? liveAnswer : undefined;
-  const refreshing = run !== undefined && refreshingStatuses.has(run.status);
-  const content = liveStreamingAnswer?.text ?? answer ?? liveAnswer?.text ?? "";
-  return {
-    content,
-    live: refreshing && liveStreamingAnswer !== undefined,
-    keepStreamMounted: refreshing,
-    animateOnMount: liveStreamingAnswer !== undefined || (!refreshing && content.trim().length > 0),
-    liveTone: liveStreamingAnswer?.tone ?? liveAnswer?.tone,
-  };
 }
 
 function shouldShowStatusNotice(

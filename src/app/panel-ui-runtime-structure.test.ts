@@ -35,7 +35,9 @@ test("panel React workbench consumes Basic Agent projection APIs", async () => {
     modelCatalogPanel,
     chatEmpty,
     chatActive,
+    chatTranscriptDisplay,
     chatTranscriptChain,
+    conversationDisplayListProjection,
     assistantMessageViewProjection,
     chatActiveViewProjection,
     transcriptTurnProjection,
@@ -72,7 +74,9 @@ test("panel React workbench consumes Basic Agent projection APIs", async () => {
     readPanelUiSource(path.join("components", "model-catalog-panel.tsx")),
     readPanelUiSource(path.join("components", "chat-empty.tsx")),
     readPanelUiSource(path.join("components", "chat-active.tsx")),
+    readPanelUiSource(path.join("components", "chat-transcript-display.tsx")),
     readPanelUiSource(path.join("components", "chat-transcript-chain.tsx")),
+    readAppSource("panel-conversation-display-list.ts"),
     readAppSource("panel-assistant-message-view.ts"),
     readAppSource("panel-ui-chat-active-view.ts"),
     readAppSource("panel-transcript-turn-projection.ts"),
@@ -389,7 +393,17 @@ test("panel React workbench consumes Basic Agent projection APIs", async () => {
   assert.equal(chatActive.includes("deliverableAsLinearText"), false);
   assert.equal(chatTranscriptChain.includes("deliverableAsLinearText"), false);
   assert.equal(chatTranscriptChain.includes("assistantMessageOutput"), false);
-  assert.equal(chatTranscriptChain.includes("projectAssistantMessageView"), true);
+  assert.equal(chatTranscriptChain.includes("projectAssistantMessageView"), false);
+  assert.equal(chatTranscriptChain.includes("panel-assistant-workflow-display"), true);
+  assert.equal(chatTranscriptChain.includes("projectConversationWorkflowDisplay"), false);
+  assert.equal(chatActive.includes("projectConversationDisplayList"), false);
+  assert.equal(chatActive.includes("<ChatTranscriptDisplay"), true);
+  assert.equal(chatTranscriptDisplay.includes("projectConversationDisplayList"), true);
+  assert.equal(chatTranscriptDisplay.includes("createConversationWorkflowDisplayState"), true);
+  assert.equal(chatTranscriptDisplay.includes("subscribeTranscriptNodesCache"), true);
+  assert.equal(chatActive.includes("standaloneAssistant"), false);
+  assert.equal(conversationDisplayListProjection.includes("projectConversationWorkflowDisplay"), true);
+  assert.equal(chatTranscriptChain.includes("assistantShellSnapshot"), false);
   assert.equal(assistantMessageViewProjection.includes("assistantMessageOutput"), true);
   assert.equal(chatTranscriptChain.includes("panel-transcript-turn-projection"), true);
   assert.equal(chatTranscriptChain.includes("deliverableForWorkViewTurn"), false);

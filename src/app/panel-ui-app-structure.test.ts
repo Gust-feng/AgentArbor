@@ -23,6 +23,7 @@ test("panel UI app shell delegates data and control work", async () => {
     appConversationSession,
     appTaskSubmission,
     appLiveRunUpdates,
+    transcriptStore,
     appSettingsController,
     appState,
     chatEmpty,
@@ -54,6 +55,7 @@ test("panel UI app shell delegates data and control work", async () => {
     readPanelUiSource("app-conversation-session.ts"),
     readPanelUiSource("app-task-submission.ts"),
     readPanelUiSource("app-live-run-updates.ts"),
+    readPanelUiSource("panel-ui-transcript-store.ts"),
     readPanelUiSource("app-settings-controller.ts"),
     readPanelUiSource("app-state.ts"),
     readPanelUiSource(path.join("components", "chat-empty.tsx")),
@@ -196,11 +198,27 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(appRunController.includes("function startPolling"), false);
   assert.equal(appRunController.includes("safeWorkSession"), false);
   assert.equal(appRunController.includes("loadObservedRunReadModel"), true);
-  assert.equal(appTaskSubmission.includes("options.startLiveUpdates(immediateLiveRunId, 0)"), true);
+  assert.equal(appRunController.includes("safeBasicRunView"), false);
+  assert.equal(appRunController.includes("ordinaryWorkViewFromRunView"), false);
+  assert.equal(appTaskSubmission.includes("options.startLiveUpdates({"), true);
+  assert.equal(appTaskSubmission.includes("conversationId: response.conversation.conversationId"), true);
+  assert.equal(appTaskSubmission.includes("epoch,"), true);
+  assert.equal(appTaskSubmission.includes("loadObservedRunReadModel"), true);
+  assert.equal(appTaskSubmission.includes("safeBasicRunView"), false);
+  assert.equal(appTaskSubmission.includes("ordinaryWorkViewFromRunView"), false);
   assert.equal(appTaskSubmission.includes("replay?.cursor.lastSequence ?? 0"), true);
   assert.equal(appLiveRunUpdates.includes("export function createLiveRunUpdateController"), true);
   assert.equal(appLiveRunUpdates.includes("function startLiveUpdates"), true);
-  assert.equal(appLiveRunUpdates.includes("startPolling(runId"), true);
+  assert.equal(appLiveRunUpdates.includes("function startPolling(subscription"), true);
+  assert.equal(appLiveRunUpdates.includes("canApplyRunSubscriptionToAppState"), true);
+  assert.equal(appLiveRunUpdates.includes("createAppendOnlyRunEventBatcher"), true);
+  assert.equal(appLiveRunUpdates.includes("appStateWithAppendOnlyRunEvents"), true);
+  assert.equal(appLiveRunUpdates.includes("appendOnlyBatcher.enqueue({ subscription, event })"), true);
+  assert.equal(
+    appLiveRunUpdates.includes("appendOnlyBatcher.flush();\n      const runView = await fetchBasicRunView(runId, 0);"),
+    true
+  );
+  assert.equal(appLiveRunUpdates.includes("requestAnimationFrame"), true);
   assert.equal(appRunController.includes("function decideConfirmation"), true);
   assert.equal(appRunController.includes("loadConversationSession"), true);
   assert.equal(appRunController.includes("resetConversationSession"), true);
@@ -213,13 +231,26 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(appConversationSession.includes('error.code === "conversation_not_found"'), true);
   assert.equal(appConversationSession.includes("resetConversationSession(options)"), true);
   assert.equal(app.includes("resetChat();"), true);
-  assert.equal(appConversationSession.includes("loadConversationTranscriptNodesByRunId"), true);
+  assert.equal(appConversationSession.includes("updateTranscriptNodesCache"), true);
+  assert.equal(appConversationSession.includes("loadHistoricalTranscriptNodeEntries"), true);
+  assert.equal(appConversationSession.includes("HISTORICAL_RUN_LOAD_CONCURRENCY = 4"), true);
+  assert.equal(appConversationSession.includes("resetTranscriptNodesCache(conversationId)"), false);
   assert.equal(appConversationSession.includes("transcriptNodesByRunId"), true);
+  assert.equal(transcriptStore.includes("readonly nodesByConversationId"), true);
+  assert.equal(transcriptStore.includes("transcriptNodesCacheForConversation"), true);
+  assert.equal(transcriptStore.includes("transcriptNodesByRunIdForConversation"), true);
+  assert.equal(transcriptStore.includes("subscribeTranscriptNodesCache(\n  conversationId: string | undefined"), true);
+  assert.equal(transcriptStore.includes("updateTranscriptNodesCache("), true);
+  assert.equal(transcriptStore.includes("notifyTranscriptNodesCache(conversationId)"), true);
+  assert.equal(transcriptStore.includes("notifyAllTranscriptNodesCache();\n  } else {\n    notifyTranscriptNodesCache(conversationId);"), true);
   assert.equal(appTaskSubmission.includes("taskSoilInputFromAttachments"), true);
   assert.equal(appObservedRunReadModel.includes("conversation.currentRun"), true);
   assert.equal(appObservedRunReadModel.includes("safeBasicRunView"), true);
+  assert.equal(appObservedRunReadModel.includes("ordinaryWorkViewFromRunView(currentRun)"), true);
+  assert.equal(appObservedRunReadModel.includes("ordinaryWorkViewFromRunView(view)"), true);
   assert.equal(appObservedRunReadModel.includes("safeBasicRun("), false);
   assert.equal(appObservedRunReadModel.includes("safeWorkSession"), false);
+  assert.equal(appObservedRunReadModel.includes("/work-session"), false);
   assert.equal(appObservedRunReadModel.includes("safeDesktopDetail"), false);
   assert.equal(appObservedRunReadModel.includes("safeBasicEvents"), false);
   assert.equal(appSettingsController.includes("export function createAppSettingsController"), true);

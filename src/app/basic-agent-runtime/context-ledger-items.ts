@@ -176,12 +176,7 @@ function currentUserMessageItem(goal: string, taskSoil: TaskSoil): BasicAgentCon
   return {
     itemId: `context:goal:${taskSoil.goalId}`,
     sourceKind: "user_message",
-    summary: [
-      `Current user message: ${safe.text}`,
-      "Context refs:",
-      ...(taskSoil.contextRefs.length === 0 ? ["- none"] : taskSoil.contextRefs.map(contextRefPromptLine)),
-      `Permission refs: ${taskSoil.permissionBoundaryRefs.join("; ") || "none"}`,
-    ].join("\n"),
+    summary: safe.text,
     refs: [{ kind: "goal", id: taskSoil.goalId ?? taskSoil.taskSoilId }],
     visibility: "model",
     truncated: safe.truncated,

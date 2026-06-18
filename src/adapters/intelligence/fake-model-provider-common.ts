@@ -5,6 +5,13 @@ export function fakeRequestContent(request: ModelRequest): string {
 }
 
 export function fakeGoalAnchorFromRequest(request: ModelRequest): string {
+  const currentUserMessage = [...request.sanitizedMessages]
+    .reverse()
+    .find((message) => message.role === "user" && message.ref?.startsWith("context:goal:") === true)
+    ?.content.trim();
+  if (currentUserMessage !== undefined && currentUserMessage.length > 0) {
+    return truncate(currentUserMessage, 80);
+  }
   const content = fakeRequestContent(request);
   const rawGoal =
     matchLineValue(content, "Raw goal:") ??

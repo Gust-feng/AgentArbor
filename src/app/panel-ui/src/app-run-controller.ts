@@ -110,6 +110,7 @@ export function createAppRunController(options: AppRunControllerOptions): AppRun
         ...capabilityState,
         conversation: observed.conversation ?? previous.conversation,
         run: observedRun,
+        busy: false,
         live: undefined,
         ...readModel,
       };

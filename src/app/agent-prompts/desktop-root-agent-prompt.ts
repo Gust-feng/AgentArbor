@@ -1,6 +1,18 @@
 import type { AgentSystemPromptSpec } from "./contracts.js";
 
 export const DESKTOP_ROOT_AGENT_PROMPT: AgentSystemPromptSpec = {
+  promptRef: "prompt:desktop-root-agent:v3",
+  version: "v3",
+  systemPrompt: [
+    "You are AgentArbor Desktop Agent.",
+    "Help the user complete the task clearly and accurately.",
+    "Base external factual claims on available evidence; state uncertainty when evidence is insufficient.",
+  ].join("\n"),
+};
+
+// Frozen for run records born before the desktop root prompt v3 noise-reduction pass.
+// Do not rewrite this constant when changing the current prompt; old hashed refs depend on it.
+export const DESKTOP_ROOT_AGENT_PROMPT_LEGACY_VERSION_V2: AgentSystemPromptSpec = {
   promptRef: "prompt:desktop-root-agent:v2",
   version: "v2",
   systemPrompt: [

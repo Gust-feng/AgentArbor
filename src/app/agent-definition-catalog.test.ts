@@ -6,6 +6,7 @@ import type { AgentDefinition } from "./agent-prompts/contracts.js";
 import {
   DESKTOP_ROOT_AGENT,
   DESKTOP_ROOT_AGENT_LEGACY_PROMPT_VERSION_1,
+  DESKTOP_ROOT_AGENT_LEGACY_PROMPT_VERSION_V2,
   DESKTOP_ROOT_AGENT_LEGACY_PROMPT_VERSION_V1,
 } from "./agent-prompts/desktop-root-agent.js";
 
@@ -31,8 +32,12 @@ test("runtime AgentDefinition catalog owns the default desktop definition and ex
   });
 
   assert.equal(catalog.desktopAgentDefinition, DESKTOP_ROOT_AGENT);
-  assert.equal(runAgentDefinitionRef(catalog.desktopAgentDefinition).promptVersion, "v2");
+  assert.equal(runAgentDefinitionRef(catalog.desktopAgentDefinition).promptVersion, "v3");
   assert.equal(catalog.registry.resolve(runAgentDefinitionRef(DESKTOP_ROOT_AGENT)), DESKTOP_ROOT_AGENT);
+  assert.equal(
+    catalog.registry.resolve(runAgentDefinitionRef(DESKTOP_ROOT_AGENT_LEGACY_PROMPT_VERSION_V2)),
+    DESKTOP_ROOT_AGENT_LEGACY_PROMPT_VERSION_V2
+  );
   assert.equal(
     catalog.registry.resolve(runAgentDefinitionRef(DESKTOP_ROOT_AGENT_LEGACY_PROMPT_VERSION_V1)),
     DESKTOP_ROOT_AGENT_LEGACY_PROMPT_VERSION_V1
@@ -66,6 +71,10 @@ test("runtime AgentDefinition catalog treats custom desktop definition as the ru
   assert.equal(catalog.desktopAgentDefinition, desktopDefinition);
   assert.equal(catalog.registry.resolve(runAgentDefinitionRef(desktopDefinition)), desktopDefinition);
   assert.equal(catalog.registry.resolve(runAgentDefinitionRef(DESKTOP_ROOT_AGENT)), DESKTOP_ROOT_AGENT);
+  assert.equal(
+    catalog.registry.resolve(runAgentDefinitionRef(DESKTOP_ROOT_AGENT_LEGACY_PROMPT_VERSION_V2)),
+    DESKTOP_ROOT_AGENT_LEGACY_PROMPT_VERSION_V2
+  );
   assert.equal(
     catalog.registry.resolve(runAgentDefinitionRef(DESKTOP_ROOT_AGENT_LEGACY_PROMPT_VERSION_V1)),
     DESKTOP_ROOT_AGENT_LEGACY_PROMPT_VERSION_V1

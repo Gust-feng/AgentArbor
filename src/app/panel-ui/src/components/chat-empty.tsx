@@ -3,6 +3,7 @@ import {
   ArrowUp,
   ChevronDown,
   Paperclip,
+  PencilLine,
   ShieldCheck,
   X,
 } from "lucide-react";
@@ -22,6 +23,11 @@ export type ChatModelOption = {
   readonly iconSvg?: string;
 };
 
+export type QueuedChatMessage = {
+  readonly id: string;
+  readonly content: string;
+};
+
 type AttachmentInputProps = {
   readonly attachments: readonly ContextAttachment[];
   readonly onSelectAttachment: () => void;
@@ -33,6 +39,7 @@ export type ChatInputProps = AttachmentInputProps & {
   readonly value: string;
   readonly onChange: (value: string) => void;
   readonly busy: boolean;
+  readonly allowInputWhileBusy?: boolean;
   readonly models: readonly ChatModelOption[];
   readonly selectedModelId: string;
   readonly reasoningEffort: "" | "low" | "medium" | "high";
@@ -47,6 +54,9 @@ export type ChatInputProps = AttachmentInputProps & {
   readonly running?: boolean;
   readonly placeholder?: string;
   readonly variant?: "embedded" | "floating";
+  readonly queuedMessages?: readonly QueuedChatMessage[];
+  readonly onRemoveQueuedMessage?: (id: string) => void;
+  readonly onUpdateQueuedMessage?: (id: string, content: string) => void;
   readonly closeSignal?: number;
 };
 
@@ -82,7 +92,7 @@ export function ChatInputBar(props: ChatInputProps): React.ReactElement {
   const [reasoningMenuOpen, setReasoningMenuOpen] = useState(false);
   const [accessMenuOpen, setAccessMenuOpen] = useState(false);
   const selectedModel = props.models.find((model) => model.id === props.selectedModelId);
-  const canSend = props.value.trim().length > 0 && !props.busy;
+  const canSend = props.value.trim().length > 0 && (!props.busy || props.allowInputWhileBusy === true);
   const modelGroups = useMemo(() => groupModels(props.models), [props.models]);
 
   useEffect(() => {
@@ -180,7 +190,7 @@ export function ChatInputBar(props: ChatInputProps): React.ReactElement {
         }}
         rows={2}
         placeholder={props.placeholder ?? "输入任务..."}
-        disabled={props.busy}
+        disabled={props.busy && props.allowInputWhileBusy !== true}
         className="chat-input-textarea"
       />
       <div className="chat-input-toolbar">
@@ -361,8 +371,16 @@ export function ChatInputBar(props: ChatInputProps): React.ReactElement {
   );
 
   const variant = props.variant ?? "embedded";
+  const hasQueuedMessages = props.queuedMessages !== undefined && props.queuedMessages.length > 0;
   const composer = (
-    <div ref={composerRef} className={`chat-composer-shell chat-composer-${variant}`}>
+    <div ref={composerRef} className={`chat-composer-shell chat-composer-${variant}${hasQueuedMessages ? " has-message-queue" : ""}`}>
+      {hasQueuedMessages && (
+        <MessageQueue
+          messages={props.queuedMessages ?? []}
+          onRemove={props.onRemoveQueuedMessage ?? (() => {})}
+          onUpdate={props.onUpdateQueuedMessage ?? (() => {})}
+        />
+      )}
       {inputCard}
     </div>
   );
@@ -374,6 +392,101 @@ export function ChatInputBar(props: ChatInputProps): React.ReactElement {
   return (
     <div className="chat-input-floating">
       <div className="chat-input-floating-inner">{composer}</div>
+    </div>
+  );
+}
+
+function MessageQueue(props: {
+  readonly messages: readonly QueuedChatMessage[];
+  readonly onRemove: (id: string) => void;
+  readonly onUpdate: (id: string, content: string) => void;
+}): React.ReactElement {
+  return (
+    <div className="message-queue" role="list" aria-label="待发送消息队列">
+      <div className="message-queue-header">
+        <span>待发送</span>
+        <span className="message-queue-count">{props.messages.length}</span>
+      </div>
+      <div className="message-queue-items">
+        {props.messages.map((message) => (
+          <MessageQueueItem
+            key={message.id}
+            message={message}
+            onRemove={props.onRemove}
+            onUpdate={props.onUpdate}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function MessageQueueItem(props: {
+  readonly message: QueuedChatMessage;
+  readonly onRemove: (id: string) => void;
+  readonly onUpdate: (id: string, content: string) => void;
+}): React.ReactElement {
+  const [editing, setEditing] = useState(false);
+  const [editValue, setEditValue] = useState(props.message.content);
+  const cancellingRef = useRef(false);
+
+  function startEdit(): void {
+    setEditValue(props.message.content);
+    setEditing(true);
+  }
+
+  function commitEdit(): void {
+    if (cancellingRef.current) {
+      cancellingRef.current = false;
+      return;
+    }
+    const trimmed = editValue.trim();
+    if (trimmed.length > 0 && trimmed !== props.message.content) {
+      props.onUpdate(props.message.id, trimmed);
+    }
+    setEditing(false);
+  }
+
+  function cancelEdit(): void {
+    cancellingRef.current = true;
+    setEditValue(props.message.content);
+    setEditing(false);
+  }
+
+  return (
+    <div className="message-queue-item" role="listitem">
+      {editing ? (
+        <div className="message-queue-edit">
+          <textarea
+            value={editValue}
+            onChange={(event) => setEditValue(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                commitEdit();
+              }
+              if (event.key === "Escape") {
+                cancelEdit();
+              }
+            }}
+            onBlur={commitEdit}
+            rows={2}
+            autoFocus
+          />
+        </div>
+      ) : (
+        <>
+          <p className="message-queue-content">{props.message.content}</p>
+          <div className="message-queue-actions">
+            <button type="button" className="message-queue-action" onClick={startEdit} title="编辑" aria-label="编辑消息">
+              <PencilLine size={13} />
+            </button>
+            <button type="button" className="message-queue-action" onClick={() => props.onRemove(props.message.id)} title="撤回" aria-label="撤回消息">
+              <X size={13} />
+            </button>
+          </div>
+        </>
+      )}
     </div>
   );
 }

@@ -32,6 +32,9 @@ import {
 } from "./chat-transcript-chain";
 import { ChatTranscriptDisplay } from "./chat-transcript-display";
 import type { ConfirmationProjection } from "./transcript-confirmation";
+import type { QueuedChatMessage } from "./chat-empty";
+
+export type QueuedMessage = QueuedChatMessage;
 
 const HISTORICAL_TRANSCRIPT_LOAD_CONCURRENCY = 4;
 
@@ -46,6 +49,9 @@ export function ChatActive(props: ChatInputProps & {
   readonly pendingConfirmation?: PendingConfirmation | NonNullable<DesktopWorkView["pendingConfirmation"]>;
   readonly onDecision: (decision: "approve_once" | "deny" | "guidance", guidance?: string) => void;
   readonly confirmationBusy: boolean;
+  readonly queuedMessages?: readonly QueuedMessage[];
+  readonly onRemoveQueuedMessage?: (id: string) => void;
+  readonly onUpdateQueuedMessage?: (id: string, content: string) => void;
 }): React.ReactElement {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const autoStickToBottomRef = useRef(true);

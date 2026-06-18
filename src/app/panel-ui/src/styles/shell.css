@@ -44,6 +44,7 @@
   background: var(--sidebar);
   box-shadow: none;
   transition: width var(--motion-sidebar-duration) var(--motion-ease-standard);
+  user-select: none;
 }
 
 .icon-tile,
@@ -437,6 +438,11 @@
   background: var(--danger-soft);
 }
 
+.sidebar-recent-item.editing {
+  border-left-color: transparent;
+  background: transparent;
+}
+
 .sidebar-rename-form {
   grid-column: 1 / -1;
   display: grid;
@@ -444,31 +450,60 @@
   gap: 4px;
   align-items: center;
   width: 100%;
-  border-left: 3px solid var(--accent);
+  min-height: 40px;
   border-radius: var(--radius-md);
-  background: color-mix(in oklch, var(--accent) 5%, transparent);
-  padding: 5px 4px 5px 6px;
+  background: color-mix(in oklch, var(--fg) 4%, transparent);
+  padding: 0 4px 0 16px;
 }
 
 .sidebar-rename-form input {
-  height: 32px;
-  border-radius: var(--radius-md);
+  width: 100%;
+  height: 40px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  padding: 0 4px 0 0;
+  color: var(--fg);
   font-size: 13px;
+  font-weight: 500;
+  line-height: 40px;
+}
+
+.sidebar-rename-form input:focus,
+.sidebar-rename-form input:focus-visible {
+  border: 0;
+  box-shadow: none;
+  outline: none;
+}
+
+.sidebar-rename-form input::selection {
+  background: color-mix(in oklch, var(--accent) 14%, transparent);
 }
 
 .sidebar-icon-button {
   display: inline-flex;
-  width: 28px;
-  height: 28px;
+  width: 26px;
+  height: 30px;
   align-items: center;
   justify-content: center;
-  border-radius: var(--radius-md);
-  color: color-mix(in oklch, var(--muted) 82%, var(--fg));
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  opacity: 0.68;
+  transition:
+    background var(--motion-fast-duration) var(--motion-ease-standard),
+    color var(--motion-fast-duration) var(--motion-ease-standard),
+    opacity var(--motion-fast-duration) var(--motion-ease-standard);
 }
 
 .sidebar-icon-button:hover:not(:disabled) {
   background: color-mix(in oklch, var(--fg) 6%, transparent);
   color: var(--fg);
+  opacity: 1;
+}
+
+.sidebar-icon-button[type="submit"]:hover:not(:disabled) {
+  color: color-mix(in oklch, var(--status-success) 72%, var(--fg));
 }
 
 .sidebar-footer {

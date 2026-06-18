@@ -976,7 +976,7 @@ test("Desktop Agent Session injects safe conversation history as separate messag
   assert.deepEqual(messages.map((message) => message.role), ["system", "user", "assistant", "user"]);
   assert.equal(messages[1]?.content.includes("你好，你能做什么"), true);
   assert.equal(messages[2]?.content.includes("我可以直接回答问题"), true);
-  assert.equal(messages[3]?.content.includes("Current user message: 那你能继续解释一下吗？"), true);
+  assert.equal(messages[3]?.content, "那你能继续解释一下吗？");
   assert.equal(JSON.stringify(messages).includes("workspace:conversation-history"), false);
   assert.equal(capturedRequest?.budget.maxOutputTokens, 3200);
   assert.equal(capturedRequest?.budget.maxLatencyMs, undefined);

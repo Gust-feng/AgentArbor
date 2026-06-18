@@ -83,6 +83,11 @@
   scrollbar-color: color-mix(in oklch, var(--fg) 16%, transparent) transparent;
 }
 
+::selection {
+  background: color-mix(in oklch, var(--accent) 18%, transparent);
+  color: var(--fg);
+}
+
 *::-webkit-scrollbar {
   width: 7px;
   height: 7px;
@@ -133,6 +138,7 @@ button {
   background: transparent;
   color: inherit;
   cursor: pointer;
+  user-select: none;
 }
 
 button:disabled {

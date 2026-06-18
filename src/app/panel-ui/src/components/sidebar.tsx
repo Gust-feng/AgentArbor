@@ -80,8 +80,7 @@ export function Sidebar(props: {
     setEditingTitle("");
   }
 
-  function submitRename(event: React.FormEvent<HTMLFormElement>, conversation: ConversationSummary): void {
-    event.preventDefault();
+  function commitRename(conversation: ConversationSummary): void {
     const nextTitle = editingTitle.trim();
     if (nextTitle.length === 0 || nextTitle === conversation.title) {
       cancelRename();
@@ -89,6 +88,11 @@ export function Sidebar(props: {
     }
     props.onRename(conversation.conversationId, nextTitle);
     cancelRename();
+  }
+
+  function submitRename(event: React.FormEvent<HTMLFormElement>, conversation: ConversationSummary): void {
+    event.preventDefault();
+    commitRename(conversation);
   }
 
   function toggleMenu(conversationId: string): void {
@@ -161,6 +165,7 @@ export function Sidebar(props: {
                   onOpen={props.onOpen}
                   onRenameStart={beginRename}
                   onRenameCancel={cancelRename}
+                  onRenameCommit={commitRename}
                   onRenameSubmit={submitRename}
                   onMenuToggle={toggleMenu}
                   onTogglePinned={togglePinned}
@@ -178,6 +183,7 @@ export function Sidebar(props: {
                 onOpen={props.onOpen}
                 onRenameStart={beginRename}
                 onRenameCancel={cancelRename}
+                onRenameCommit={commitRename}
                 onRenameSubmit={submitRename}
                 onMenuToggle={toggleMenu}
                 onTogglePinned={togglePinned}
@@ -232,6 +238,7 @@ function ConversationGroup(props: {
   readonly onOpen: (conversationId: string) => void;
   readonly onRenameStart: (conversation: ConversationSummary) => void;
   readonly onRenameCancel: () => void;
+  readonly onRenameCommit: (conversation: ConversationSummary) => void;
   readonly onRenameSubmit: (event: React.FormEvent<HTMLFormElement>, conversation: ConversationSummary) => void;
   readonly onMenuToggle: (conversationId: string) => void;
   readonly onTogglePinned: (conversation: ConversationSummary) => void;
@@ -257,6 +264,7 @@ function ConversationGroup(props: {
           onOpen={props.onOpen}
           onRenameStart={props.onRenameStart}
           onRenameCancel={props.onRenameCancel}
+          onRenameCommit={props.onRenameCommit}
           onRenameSubmit={props.onRenameSubmit}
           onMenuToggle={props.onMenuToggle}
           onTogglePinned={props.onTogglePinned}
@@ -277,6 +285,7 @@ function ConversationListItem(props: {
   readonly onOpen: (conversationId: string) => void;
   readonly onRenameStart: (conversation: ConversationSummary) => void;
   readonly onRenameCancel: () => void;
+  readonly onRenameCommit: (conversation: ConversationSummary) => void;
   readonly onRenameSubmit: (event: React.FormEvent<HTMLFormElement>, conversation: ConversationSummary) => void;
   readonly onMenuToggle: (conversationId: string) => void;
   readonly onTogglePinned: (conversation: ConversationSummary) => void;
@@ -285,6 +294,7 @@ function ConversationListItem(props: {
   const pinned = props.conversation.pinnedAt !== undefined;
   const deleteDisabled = conversationHasActiveWork(props.conversation);
   const menuButtonRef = React.useRef<HTMLButtonElement>(null);
+  const renameInputRef = React.useRef<HTMLInputElement>(null);
   const [menuPosition, setMenuPosition] = React.useState<React.CSSProperties | undefined>();
 
   React.useLayoutEffect(() => {
@@ -295,6 +305,15 @@ function ConversationListItem(props: {
     setMenuPosition(positionConversationMenu(menuButtonRef.current));
   }, [props.menuOpen]);
 
+  React.useLayoutEffect(() => {
+    if (!props.editing) return;
+    const input = renameInputRef.current;
+    if (input === null) return;
+    input.focus();
+    const end = input.value.length;
+    input.setSelectionRange(end, end);
+  }, [props.editing]);
+
   return (
     <div
       className={`sidebar-recent-item ${props.active ? "active" : ""} ${props.editing ? "editing" : ""} ${props.menuOpen ? "menu-open" : ""}`}
@@ -303,10 +322,22 @@ function ConversationListItem(props: {
         <form
           className="sidebar-rename-form"
           onSubmit={(event) => props.onRenameSubmit(event, props.conversation)}
+          onBlur={(event) => {
+            const nextTarget = event.relatedTarget;
+            if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) return;
+            props.onRenameCommit(props.conversation);
+          }}
         >
           <input
+            ref={renameInputRef}
             value={props.editingTitle}
             onChange={(event) => props.setEditingTitle(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                event.preventDefault();
+                props.onRenameCancel();
+              }
+            }}
             aria-label="会话标题"
             maxLength={80}
             autoFocus

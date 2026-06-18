@@ -5,6 +5,10 @@
   gap: var(--space-3);
 }
 
+.chat-composer-shell.has-message-queue {
+  gap: 4px;
+}
+
 .chat-input-card {
   position: relative;
   overflow: visible;
@@ -500,5 +504,143 @@
   .composer-options-popover,
   .composer-model-popover {
     width: min(300px, calc(100dvw - 96px));
+  }
+}
+
+/* ── Message Queue ── */
+
+.message-queue {
+  display: grid;
+  gap: 4px;
+  padding: 0 2px;
+}
+
+.message-queue-header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 18px;
+  color: color-mix(in oklch, var(--fg) 70%, var(--muted));
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.message-queue-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--accent) 14%, transparent);
+  color: color-mix(in oklch, var(--accent) 72%, var(--fg));
+  font-size: 10px;
+  font-weight: 700;
+  padding: 0 4px;
+}
+
+.message-queue-items {
+  display: grid;
+  gap: 4px;
+}
+
+.message-queue-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid color-mix(in oklch, var(--border) 62%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in oklch, var(--surface) 88%, transparent);
+  padding: 6px 7px 6px 10px;
+  animation: queue-item-enter var(--motion-enter-duration) var(--motion-ease-out-back) both;
+}
+
+.message-queue-item:has(.message-queue-edit) {
+  align-items: stretch;
+  padding: 0;
+  overflow: hidden;
+}
+
+.message-queue-content {
+  min-width: 0;
+  margin: 0;
+  color: color-mix(in oklch, var(--fg) 78%, var(--muted));
+  font-size: 13px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.message-queue-actions {
+  display: flex;
+  gap: 2px;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity var(--motion-fast-duration) var(--motion-ease-standard);
+}
+
+.message-queue-item:hover .message-queue-actions,
+.message-queue-item:focus-within .message-queue-actions {
+  opacity: 1;
+}
+
+.message-queue-action {
+  display: inline-flex;
+  width: 24px;
+  height: 24px;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  opacity: 0.72;
+  transition:
+    background var(--motion-fast-duration) var(--motion-ease-standard),
+    color var(--motion-fast-duration) var(--motion-ease-standard),
+    opacity var(--motion-fast-duration) var(--motion-ease-standard);
+}
+
+.message-queue-action:hover {
+  background: color-mix(in oklch, var(--fg) 6%, transparent);
+  color: var(--fg);
+  opacity: 1;
+}
+
+.message-queue-edit {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
+.message-queue-edit textarea {
+  display: block;
+  width: 100%;
+  min-height: 38px;
+  max-height: 120px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  padding: 8px 10px;
+  color: var(--fg);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.35;
+  resize: none;
+  scrollbar-width: thin;
+}
+
+.message-queue-edit textarea:focus {
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--border) 88%, var(--fg));
+  outline: none;
+}
+
+@keyframes queue-item-enter {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }

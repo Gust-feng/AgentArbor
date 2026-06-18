@@ -115,16 +115,26 @@ function workflowDisplayFromMessageView<
         hasCurrentConfirmation: segment.timeline.confirmation.current !== undefined,
         hasBodySegments,
       });
+      // When the turn has definitively settled, override orphaned
+      // intermediate phases (executing/noted/preparing) that were never
+      // reconciled by a terminal tool/note event.
+      const settledOverride =
+        input.collapseTimeline &&
+        !currentDecision.collapsed &&
+        currentDecision.reason !== "needs_attention"
+          ? { collapsed: true, reason: "turn_settled" as const }
+          : undefined;
+      const effectiveDecision = settledOverride ?? currentDecision;
       const previousCollapse = previousCollapseState(input.previous, segment.segmentKey);
       const inheritPreviousCollapse = previousCollapse.collapsed &&
-        !activitySegmentNeedsAttention(segment, currentDecision);
+        !activitySegmentNeedsAttention(segment, effectiveDecision);
       return {
         kind: "activity",
         segmentKey: segment.segmentKey,
-        lifecycle: segment.lifecycle,
+        lifecycle: settledOverride ? "settled" as const : segment.lifecycle,
         timeline: segment.timeline,
-        collapsed: inheritPreviousCollapse || currentDecision.collapsed,
-        collapseReason: inheritPreviousCollapse ? previousCollapse.reason : currentDecision.reason,
+        collapsed: inheritPreviousCollapse || effectiveDecision.collapsed,
+        collapseReason: inheritPreviousCollapse ? previousCollapse.reason : effectiveDecision.reason,
       };
     }),
   };

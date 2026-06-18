@@ -232,13 +232,20 @@ test("desktop agent session keeps projection and contracts split", async () => {
   assert.equal(definition.includes("defaultMaxOutputTokens"), false);
   assert.equal(promptAsset.includes("export const DESKTOP_ROOT_AGENT_PROMPT"), true);
   assert.equal(promptAsset.includes("You are AgentArbor Desktop Agent"), true);
-  assert.equal(promptAsset.includes('promptRef: "prompt:desktop-root-agent:v2"'), true);
-  assert.equal(promptAsset.includes('version: "v2"'), true);
+  assert.equal(promptAsset.includes('promptRef: "prompt:desktop-root-agent:v3"'), true);
+  assert.equal(promptAsset.includes('version: "v3"'), true);
   const currentPromptAsset = currentDesktopRootPromptSource(promptAsset);
-  assert.equal(currentPromptAsset.includes("The latest user message is the current instruction"), true);
-  assert.equal(currentPromptAsset.includes("tool descriptions define the tools"), true);
-  assert.equal(currentPromptAsset.includes("reasoning controls are provided by the runtime"), true);
-  assert.equal(currentPromptAsset.includes("Stay in the ordinary desktop agent path"), true);
+  assert.equal(currentPromptAsset.includes("You are AgentArbor Desktop Agent."), true);
+  assert.equal(currentPromptAsset.includes("Help the user complete the task clearly and accurately."), true);
+  assert.equal(currentPromptAsset.includes("Base external factual claims on available evidence"), true);
+  assert.equal(currentPromptAsset.includes("latest user message"), false);
+  assert.equal(currentPromptAsset.includes("active request"), false);
+  assert.equal(currentPromptAsset.includes("earlier messages"), false);
+  assert.equal(currentPromptAsset.includes("tool results"), false);
+  assert.equal(currentPromptAsset.includes("tool descriptions define the tools"), false);
+  assert.equal(currentPromptAsset.includes("reasoning controls are provided by the runtime"), false);
+  assert.equal(currentPromptAsset.includes("Stay in the ordinary desktop agent path"), false);
+  assert.equal(promptAsset.includes("DESKTOP_ROOT_AGENT_PROMPT_LEGACY_VERSION_V2"), true);
   assert.equal(promptAsset.includes("DESKTOP_ROOT_AGENT_PROMPT_LEGACY_VERSION_V1"), true);
   for (const promptBloatTerm of [
     "capable senior collaborator",
@@ -588,7 +595,7 @@ async function readAppTypeScriptSources(relativeDir = ""): Promise<readonly AppT
 
 function currentDesktopRootPromptSource(source: string): string {
   const start = source.indexOf("export const DESKTOP_ROOT_AGENT_PROMPT:");
-  const end = source.indexOf("export const DESKTOP_ROOT_AGENT_PROMPT_LEGACY_VERSION_V1:");
+  const end = source.indexOf("export const DESKTOP_ROOT_AGENT_PROMPT_LEGACY_VERSION_V2:");
   assert.notEqual(start, -1);
   assert.notEqual(end, -1);
   return source.slice(start, end);

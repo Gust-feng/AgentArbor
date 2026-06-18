@@ -177,7 +177,7 @@ test("Basic Agent context pack keeps current user message last under tight budge
 
   const lastMessage = pack.messages.at(-1);
   assert.equal(lastMessage?.role, "user");
-  assert.equal(lastMessage?.content.includes("Current user message: this is the current user instruction"), true);
+  assert.equal(lastMessage?.content, "this is the current user instruction");
   assert.equal(pack.items.some((item) => item.sourceKind === "conversation_summary"), false);
   assert.equal(pack.truncated, true);
 });
@@ -224,7 +224,7 @@ test("Basic Agent context pack preserves history roles without pre-threshold det
     "assistant",
     "user",
   ]);
-  assert.equal(pack.messages.at(-1)?.content.includes("Current user message: continue"), true);
+  assert.equal(pack.messages.at(-1)?.content, "continue");
 });
 
 test("Basic Agent context pack keeps recent role turns before bulky skill instructions", () => {

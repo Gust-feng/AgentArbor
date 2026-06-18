@@ -57,9 +57,9 @@
 .user-message-wrap {
   width: min(100%, 620px);
   min-width: 0;
-  border-left: 3px solid var(--accent);
-  background: color-mix(in oklch, var(--accent) 4%, transparent);
-  padding: 6px 0 4px var(--space-4);
+  border-left: 2px solid color-mix(in oklch, var(--accent) 42%, var(--border));
+  background: color-mix(in oklch, var(--surface) 70%, transparent);
+  padding: 7px 0 7px var(--space-4);
 }
 
 .assistant-message-label {
@@ -216,7 +216,7 @@
 .assistant-answer {
   min-width: 0;
   max-width: 100%;
-  border-left: 2px solid color-mix(in oklch, var(--border) 80%, transparent);
+  border-left: 1px solid color-mix(in oklch, var(--border) 70%, transparent);
   padding: 1px 0 1px var(--space-4);
 }
 

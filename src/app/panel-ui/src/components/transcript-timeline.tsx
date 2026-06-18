@@ -1,11 +1,19 @@
 import React from "react";
 import {
   ChevronRight,
+  CircleCheck,
+  Cog,
+  Compass,
+  Eye,
   FileText,
   Globe2,
   PencilLine,
+  Scale,
+  Search,
   Sparkles,
   Terminal,
+  Wand2,
+  Zap,
   type LucideIcon,
 } from "lucide-react";
 import type { TranscriptNode } from "../contracts/run";
@@ -16,11 +24,25 @@ import {
 import {
   type AgentWorkTimelineView,
 } from "../../../panel-agent-work-timeline-view";
-import type { ActivityItem } from "../../../panel-transcript-activity-copy";
+import type { ActivityItem, ActivityExpandedSection } from "../../../panel-transcript-activity-copy";
+import { resolveActivityToolKind } from "../../../panel-transcript-activity-copy";
 import { collapsedTimelineSummary } from "../../../panel-ui-timeline-collapse";
 
 export type { ConfirmationProjection } from "./transcript-confirmation";
 export { pendingForTurn } from "../../../panel-transcript-confirmation-projection";
+
+const TOOL_KIND_ICON: Record<string, LucideIcon> = {
+  command: Terminal,
+  search: Search,
+  read: Eye,
+  edit: PencilLine,
+  web: Compass,
+  thinking: Zap,
+  confirmation: CircleCheck,
+  decision: Scale,
+  system: Cog,
+  other: Wand2,
+};
 
 type AgentWorkTimelineProps = {
   readonly view: AgentWorkTimelineView<TranscriptNode, ConfirmationProjection>;
@@ -44,10 +66,12 @@ const MemoAgentWorkTimeline = React.memo(function AgentWorkTimelineContent(props
     <div className="agent-activity">
       {items.map((item, index) => {
         const current = props.lifecycle !== "settled" && confirmation.current === undefined && index === items.length - 1;
+        const toolKind = item.toolKind ?? resolveActivityToolKind(item);
         return (
           <div
             className={`agent-activity-step ${item.tone} ${item.phase}`}
             data-current={current ? "true" : undefined}
+            data-tool-kind={toolKind}
             aria-current={current ? "step" : undefined}
             key={item.key}
           >
@@ -158,10 +182,13 @@ function activityMetricKind(item: ActivityItem): ActivityMetricKind | undefined 
 }
 
 function ActivityLine({ item }: { readonly item: ActivityItem }): React.ReactElement {
-  const label = item.copy.label;
+  const toolKind = item.toolKind ?? resolveActivityToolKind(item);
+  const Icon = TOOL_KIND_ICON[toolKind] ?? Sparkles;
   const line = (
     <>
-      {label !== undefined && <span className="agent-activity-label">{label}</span>}
+      <span className="agent-activity-label" aria-hidden="true">
+        <Icon size={12} strokeWidth={2.25} />
+      </span>
       <span className="agent-activity-detail">{item.copy.detail}</span>
     </>
   );
@@ -169,7 +196,7 @@ function ActivityLine({ item }: { readonly item: ActivityItem }): React.ReactEle
     return (
       <details className="agent-activity-disclosure" data-tone={item.tone}>
         <summary className="agent-activity-line">{line}</summary>
-        <p className="agent-activity-expanded-detail">{item.copy.expandedDetail}</p>
+        <ExpandedDetailPanel item={item} />
       </details>
     );
   }
@@ -178,6 +205,23 @@ function ActivityLine({ item }: { readonly item: ActivityItem }): React.ReactEle
       {line}
     </p>
   );
+}
+
+function ExpandedDetailPanel({ item }: { readonly item: ActivityItem }): React.ReactElement {
+  const sections = item.expandedSections;
+  if (sections !== undefined && sections.length > 0) {
+    return (
+      <div className="agent-activity-expanded-detail">
+        {sections.map((section: ActivityExpandedSection, index: number) => (
+          <div className="agent-activity-expanded-section" key={index}>
+            <div className="agent-activity-expanded-section-title">{section.title}</div>
+            <div className="agent-activity-expanded-section-content">{section.content}</div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+  return <p className="agent-activity-expanded-detail">{item.copy.expandedDetail}</p>;
 }
 
 function agentWorkTimelinePropsEqual(left: AgentWorkTimelineProps, right: AgentWorkTimelineProps): boolean {
@@ -216,9 +260,24 @@ function activityItemEqual(left: ActivityItem | undefined, right: ActivityItem |
     left.key === right.key &&
     left.tone === right.tone &&
     left.phase === right.phase &&
+    left.toolKind === right.toolKind &&
     left.copy.label === right.copy.label &&
     left.copy.detail === right.copy.detail &&
-    left.copy.expandedDetail === right.copy.expandedDetail;
+    left.copy.expandedDetail === right.copy.expandedDetail &&
+    expandedSectionsEqual(left.expandedSections, right.expandedSections);
+}
+
+function expandedSectionsEqual(
+  left: readonly ActivityExpandedSection[] | undefined,
+  right: readonly ActivityExpandedSection[] | undefined,
+): boolean {
+  if (left === right) return true;
+  if (left === undefined || right === undefined) return false;
+  if (left.length !== right.length) return false;
+  for (let i = 0; i < left.length; i += 1) {
+    if (left[i]?.title !== right[i]?.title || left[i]?.content !== right[i]?.content) return false;
+  }
+  return true;
 }
 
 const ACTIVITY_METRIC_ORDER: readonly ActivityMetricKind[] = ["web", "read", "edit", "command", "other"];

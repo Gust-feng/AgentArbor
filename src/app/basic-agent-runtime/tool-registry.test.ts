@@ -96,13 +96,14 @@ test("model-visible tool description is concise and structured for the model", (
   assert.notEqual(shellCommand, undefined);
   const description = modelVisibleToolDescription(shellCommand!);
 
-  assert.match(description, /^Purpose: Run a real command/m);
-  assert.match(description, /\n\nWhen to use:\n- /);
-  assert.match(description, /\n\nInputs:\n- commandLine/);
-  assert.match(description, /\n\nRuntime hints:\n- current shell:/);
-  assert.match(description, /\n\nOutput:\n- result\.stdout/);
+  assert.match(description, /^Run a real command/m);
+  assert.match(description, /\nUse for: /);
+  assert.match(description, /\nInputs: commandLine/);
+  assert.match(description, /\nRuntime: current shell=/);
+  assert.match(description, /\nOutputs: result\.stdout/);
   assert.match(description, /creating directories, copying or moving files/);
-  assert.match(description, /\n\nExamples:\n- Run tests: \{"commandLine":"pnpm test","timeoutMs":120000\}/);
+  assert.match(description, /\nExample: \{"commandLine":"pnpm test","timeoutMs":120000\}/);
+  assert.equal(description.includes("When to use"), false);
   assert.doesNotMatch(description, /Shell 命令|需确认|终端命令|风险|运行时工具/);
   assert.equal(description.includes("Allowed tools:"), false);
 });

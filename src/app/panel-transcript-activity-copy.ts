@@ -14,13 +14,22 @@ export type ActivityLineCopy = {
   readonly expandedDetail?: string;
 };
 
+export type ActivityExpandedSection = {
+  readonly title: string;
+  readonly content: string;
+};
+
 export type ActivityItem = {
   readonly nodeId: string;
   readonly key: string;
   readonly copy: ActivityLineCopy;
   readonly tone: "thinking" | "narration" | "tool" | "confirmation" | "decision" | "system";
   readonly phase: ProjectableTranscriptNode["phase"];
+  readonly toolKind?: "command" | "search" | "read" | "edit" | "web" | "thinking" | "system" | "confirmation" | "decision" | "other";
+  readonly expandedSections?: readonly ActivityExpandedSection[];
 };
+
+export type ActivityToolKind = NonNullable<ActivityItem["toolKind"]>;
 
 export function activityLineForNode(node: ProjectableTranscriptNode): ActivityLineCopy | undefined {
   if (node.kind === "thinking") {
@@ -61,18 +70,39 @@ export function activityLineForNode(node: ProjectableTranscriptNode): ActivityLi
   return undefined;
 }
 
+export function resolveActivityToolKind(item: {
+  readonly tone: ActivityItem["tone"];
+  readonly copy: { readonly label?: string };
+}): ActivityToolKind {
+  if (item.tone === "thinking") return "thinking";
+  if (item.tone === "confirmation") return "confirmation";
+  if (item.tone === "decision") return "decision";
+  if (item.tone === "system") return "system";
+  const label = item.copy.label;
+  if (label === "命令") return "command";
+  if (label === "搜索") return "search";
+  if (label === "读取" || label === "查看") return "read";
+  if (label === "编辑" || label === "写入" || label === "创建" || label === "删除") return "edit";
+  if (label === "网页") return "web";
+  if (label === "生成") return "edit";
+  return "other";
+}
+
 export function activityItemsForNodes(nodes: readonly ProjectableTranscriptNode[]): readonly ActivityItem[] {
   const items: ActivityItem[] = [];
   for (const node of nodes) {
     const copy = activityLineForNode(node);
     if (copy === undefined) continue;
-    items.push({
+    const tone = activityToneForNode(node);
+    const item: ActivityItem = {
       nodeId: node.nodeId,
       key: activityItemKey(node),
       copy,
-      tone: activityToneForNode(node),
+      tone,
       phase: node.phase,
-    });
+      toolKind: resolveActivityToolKind({ tone, copy }),
+    };
+    items.push(item);
   }
   return items;
 }
@@ -98,18 +128,24 @@ export function displayActivityItemsForNodes(nodes: readonly ProjectableTranscri
         requestedToolItemIndexByCall.set(toolCallId, items.length);
       }
     }
-    items.push(item);
+    items.push(
+      item.copy.expandedDetail !== undefined && item.expandedSections === undefined
+        ? { ...item, expandedSections: [{ title: "详情", content: item.copy.expandedDetail }] }
+        : item,
+    );
   }
   return items;
 }
 
 function activityItemFromNode(node: ProjectableTranscriptNode, copy: ActivityLineCopy): ActivityItem {
+  const tone = activityToneForNode(node);
   return {
     nodeId: node.nodeId,
     key: activityItemKey(node),
     copy,
-    tone: activityToneForNode(node),
+    tone,
     phase: node.phase,
+    toolKind: resolveActivityToolKind({ tone, copy }),
   };
 }
 
@@ -122,6 +158,7 @@ function isTerminalToolNode(node: ProjectableTranscriptNode): boolean {
 }
 
 function mergeToolActivityItems(requested: ActivityItem, terminal: ActivityItem): ActivityItem {
+  const sections = buildExpandedSections(requested.copy, terminal.copy, terminal.phase);
   return {
     ...terminal,
     key: requested.key,
@@ -129,7 +166,33 @@ function mergeToolActivityItems(requested: ActivityItem, terminal: ActivityItem)
       ...terminal.copy,
       expandedDetail: mergedToolExpandedDetail(requested.copy, terminal.copy, terminal.phase),
     },
+    toolKind: resolveActivityToolKind(terminal),
+    expandedSections: sections.length > 0 ? sections : undefined,
   };
+}
+
+function buildExpandedSections(
+  requested: ActivityLineCopy,
+  terminal: ActivityLineCopy,
+  phase: ProjectableTranscriptNode["phase"],
+): readonly ActivityExpandedSection[] {
+  const sections: ActivityExpandedSection[] = [];
+  const reqDetail = requested.detail.trim();
+  const termDetail = terminal.detail.trim();
+
+  if (reqDetail.length > 0) {
+    sections.push({ title: "发起", content: reqDetail });
+  }
+  if (termDetail !== reqDetail && termDetail.length > 0) {
+    sections.push({
+      title: phase === "failed" ? "失败" : "结果",
+      content: termDetail,
+    });
+  }
+  if (terminal.expandedDetail !== undefined) {
+    sections.push({ title: "详情", content: terminal.expandedDetail });
+  }
+  return sections;
 }
 
 function mergedToolExpandedDetail(

@@ -531,7 +531,7 @@ test("conversation API rolls back completed turns before continuing the same con
     assert.equal(latestText.includes("第一轮"), true);
     assert.equal(latestText.includes("第二轮"), true);
     assert.equal(latestText.includes("第三轮需要回退"), false);
-    assert.equal(latestText.includes("Current user message: 回退后继续"), true);
+    assert.equal(latestMessages.at(-1)?.content, "回退后继续");
   } finally {
     await server.close();
     await removeTemporaryTree(directory);
@@ -584,7 +584,7 @@ test("conversation API sends follow-up history as role-separated model messages"
     assert.deepEqual(secondMessages.map((message) => message.role), ["system", "user", "assistant", "user"]);
     assert.equal(secondMessages[1]?.content?.includes("你好，你能做什么"), true);
     assert.equal(secondMessages[2]?.content?.includes("我可以直接回答问题"), true);
-    assert.equal(secondMessages[3]?.content?.includes("Current user message: 那你能继续解释一下吗？"), true);
+    assert.equal(secondMessages[3]?.content, "那你能继续解释一下吗？");
     assert.equal(secondMessages[3]?.content?.includes("你好，你能做什么"), false);
     assert.equal(JSON.stringify(secondMessages).includes("workspace:conversation-history"), false);
     assert.equal(requests.at(-1)?.max_output_tokens ?? requests.at(-1)?.max_completion_tokens ?? requests.at(-1)?.max_tokens, 4000);
@@ -764,7 +764,7 @@ test("conversation message POST restores persisted conversation after restart an
     assert.deepEqual(secondMessages.map((message) => message.role), ["system", "user", "assistant", "user"]);
     assert.equal(secondMessages[1]?.content?.includes("第一轮问题"), true);
     assert.equal(secondMessages[2]?.content?.includes("第一轮安全回答"), true);
-    assert.equal(secondMessages[3]?.content?.includes("Current user message: 第二轮问题"), true);
+    assert.equal(secondMessages[3]?.content, "第二轮问题");
     assert.equal(JSON.stringify(secondMessages).includes(secret), false);
   } finally {
     await server.close();

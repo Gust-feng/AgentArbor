@@ -3,7 +3,7 @@ import { getJson, postJson } from "./api";
 import { decideRunConfirmation } from "./app-confirmation-decisions";
 import { type ComposerReasoningEffort, type ComposerToolConfirmationPolicy, type VisibleAiMode } from "./app-config-projection";
 import { createRunReadModelPatch } from "./app-run-projection";
-import { createLiveRunUpdateController } from "./app-live-run-updates";
+import { createLiveRunUpdateController, type LiveRunSubscription } from "./app-live-run-updates";
 import { loadObservedRunReadModel } from "./app-observed-run-read-model";
 import { stopLiveUpdates } from "./app-runtime-controls";
 import { loadConversationSession, resetConversationSession } from "./app-conversation-session";
@@ -20,7 +20,7 @@ export type AppRunController = {
   readonly loadConversation: (conversationId: string) => Promise<void>;
   readonly startTask: (explicitGoal?: string) => Promise<void>;
   readonly refreshConversations: () => Promise<void>;
-  readonly startLiveUpdates: (runId: string, cursor: number) => void;
+  readonly startLiveUpdates: (input: LiveRunSubscription) => void;
   readonly cancelRun: () => Promise<void>;
   readonly decideConfirmation: (decision: "approve_once" | "deny" | "guidance", guidance?: string) => Promise<void>;
   readonly resetChat: () => void;
@@ -46,6 +46,7 @@ export type AppRunControllerOptions = {
   readonly streamRef: React.MutableRefObject<EventSource | undefined>;
   readonly activeRunIdRef: React.MutableRefObject<string | undefined>;
   readonly viewEpochRef: React.MutableRefObject<number>;
+  readonly conversationLoadAbortRef: React.MutableRefObject<AbortController | undefined>;
 };
 
 export function createAppRunController(options: AppRunControllerOptions): AppRunController {
@@ -56,6 +57,7 @@ export function createAppRunController(options: AppRunControllerOptions): AppRun
     pollTimer: options.pollTimer,
     streamRef: options.streamRef,
     activeRunIdRef: options.activeRunIdRef,
+    viewEpochRef: options.viewEpochRef,
     refreshConversations,
   });
 
@@ -125,6 +127,7 @@ export function createAppRunController(options: AppRunControllerOptions): AppRun
       setConfirmationBusy: options.setConfirmationBusy,
       setApp: options.setApp,
       mountedRef: options.mountedRef,
+      viewEpochRef: options.viewEpochRef,
       refreshConversations,
       startLiveUpdates: liveUpdates.startLiveUpdates,
     });

@@ -38,6 +38,11 @@ export type RunReadModelPatch = {
   readonly transcriptNodesByRunId: Record<string, readonly TranscriptNode[]>;
 };
 
+export type ConversationTranscriptLoadOptions = {
+  readonly signal?: AbortSignal;
+  readonly onPartial?: (partial: Record<string, readonly TranscriptNode[]>) => void;
+};
+
 type RunProjectionState = {
   readonly conversation?: Conversation;
   readonly run?: BasicAgentRun;
@@ -74,11 +79,11 @@ export function createRunReadModelPatch(
 export async function loadConversationTranscriptNodesByRunId(
   conversation: Conversation,
   exceptRunId: string | undefined,
-  onPartial?: (partial: Record<string, readonly TranscriptNode[]>) => void
+  options: ConversationTranscriptLoadOptions = {}
 ): Promise<Record<string, readonly TranscriptNode[]>> {
   // 按最近优先（倒序）、分批加载历史 run 的 transcript 节点。
   // 长会话（20+ 轮）不再一次性并发 20+ 个 HTTP 请求，
-  // 而是分批处理（每批 5 个），通过 onPartial 回调渐进式更新视图。
+  // 而是分批处理，并且只把本批新增节点交给视图，避免重复合并旧批次。
   const allRunIds = runIdsForConversation(conversation)
     .filter((runId) => runId !== exceptRunId)
     .reverse();
@@ -86,22 +91,24 @@ export async function loadConversationTranscriptNodesByRunId(
   const byRunId: Record<string, readonly TranscriptNode[]> = {};
   const batchSize = 5;
   for (let batchStart = 0; batchStart < allRunIds.length; batchStart += batchSize) {
+    if (options.signal?.aborted) return byRunId;
     const batch = allRunIds.slice(batchStart, batchStart + batchSize);
     const entries = await Promise.all(
       batch.map(async (runId) => {
-        const view = await safeBasicRunView(runId, 0);
+        const view = await safeBasicRunView(runId, 0, { signal: options.signal });
         return [
           runId,
           transcriptNodesFrom(ordinaryWorkViewFromRunView(view), view?.detail).filter((node) => node.runId === runId),
         ] as const;
       })
     );
+    if (options.signal?.aborted) return byRunId;
+    const batchByRunId: Record<string, readonly TranscriptNode[]> = {};
     for (const [runId, nodes] of entries) {
       byRunId[runId] = nodes;
+      batchByRunId[runId] = nodes;
     }
-    if (onPartial !== undefined) {
-      onPartial({ ...byRunId });
-    }
+    options.onPartial?.(batchByRunId);
   }
   return byRunId;
 }

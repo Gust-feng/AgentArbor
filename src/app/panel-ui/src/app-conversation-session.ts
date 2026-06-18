@@ -1,12 +1,22 @@
 import type React from "react";
 import { ApiError, getJson } from "./api";
-import { loadConversationTranscriptNodesByRunId, transcriptNodesFrom } from "./app-run-projection";
+import { transcriptNodesFrom } from "./app-run-projection";
 import { shouldKeepRefreshing, stopLiveUpdates, stopPolling, stopStream } from "./app-runtime-controls";
 import type { AppState } from "./app-state";
 import { liveRunForObservedReplay } from "../../panel-ui-submit-flow";
-import { mergeTranscriptNodesByRunId } from "../../panel-ui-transcript-cache";
+import { mergeTranscriptNodesByRunId, runIdsForConversation } from "../../panel-ui-transcript-cache";
+import { resetTranscriptNodesCache, updateTranscriptNodesCache } from "./panel-ui-transcript-store";
 import type { Conversation } from "./contracts/conversation";
-import { ordinaryWorkViewFromRunView } from "./runtime";
+import type { TranscriptNode } from "./contracts/run";
+import { ordinaryWorkViewFromRunView, safeBasicRunView } from "./runtime";
+import type { LiveRunSubscription } from "./app-live-run-updates";
+import {
+  initialVisibleTranscriptTurnCount,
+  runIdsForTurnWindow,
+  transcriptVisibleTurnWindow,
+} from "../../panel-ui-transcript-window";
+
+const HISTORICAL_RUN_LOAD_CONCURRENCY = 4;
 
 export type ConversationSessionControllerOptions = {
   readonly app: AppState;
@@ -19,24 +29,44 @@ export type ConversationSessionControllerOptions = {
   readonly streamRef: React.MutableRefObject<EventSource | undefined>;
   readonly activeRunIdRef: React.MutableRefObject<string | undefined>;
   readonly viewEpochRef: React.MutableRefObject<number>;
+  readonly conversationLoadAbortRef: React.MutableRefObject<AbortController | undefined>;
   readonly refreshConversations: () => Promise<void>;
-  readonly startLiveUpdates: (runId: string, cursor: number) => void;
+  readonly startLiveUpdates: (input: LiveRunSubscription) => void;
 };
 
 export async function loadConversationSession(
   options: ConversationSessionControllerOptions,
   conversationId: string
 ): Promise<void> {
+  const currentLoad = options.conversationLoadAbortRef.current;
+  if (currentLoad !== undefined && !currentLoad.signal.aborted) {
+    if (options.app.conversation?.conversationId === conversationId) {
+      return;
+    }
+    currentLoad.abort();
+    options.conversationLoadAbortRef.current = undefined;
+  }
+  if (options.conversationLoadAbortRef.current !== undefined) {
+    options.conversationLoadAbortRef.current.abort();
+    options.conversationLoadAbortRef.current = undefined;
+  }
+  const abortController = new AbortController();
+  options.conversationLoadAbortRef.current = abortController;
+  if (abortController.signal.aborted) {
+    return;
+  }
   const epoch = options.viewEpochRef.current + 1;
   options.viewEpochRef.current = epoch;
   stopPolling(options.pollTimer);
   stopStream(options.streamRef);
-  options.setScreen("chat-active");
-  options.setAttachments([]);
   let response: { readonly conversation: Conversation };
   try {
-    response = await getJson<{ readonly conversation: Conversation }>(`/api/conversations/${encodeURIComponent(conversationId)}`);
+    response = await getJson<{ readonly conversation: Conversation }>(
+      `/api/conversations/${encodeURIComponent(conversationId)}`,
+      { signal: abortController.signal }
+    );
   } catch (error) {
+    if (abortController.signal.aborted) return;
     if (isMissingConversationError(error)) {
       resetConversationSession(options);
       options.setApp((previous) => ({
@@ -53,6 +83,7 @@ export async function loadConversationSession(
     }
     throw error;
   }
+  if (abortController.signal.aborted) return;
   const currentRun = response.conversation.currentRun;
   const latestRunId = currentRun?.run.runId ?? response.conversation.activeRunId ?? response.conversation.latestRunId;
   options.activeRunIdRef.current = latestRunId;
@@ -63,6 +94,22 @@ export async function loadConversationSession(
   const capabilityResolution = currentRun?.capabilityResolution;
   const transcriptNodes = transcriptNodesFrom(workView, detail);
   if (!options.mountedRef.current || options.viewEpochRef.current !== epoch) return;
+
+  // ── Phase 1: Switch to the new conversation immediately ──────────────
+  //
+  // The conversation metadata fetch is a single fast API call (~100 ms).
+  // As soon as it resolves we switch the screen so the user sees the new
+  // conversation right away — no freeze, no loading spinner.
+  //
+  // These three synchronous dispatches are batched by React 18 into a
+  // single commit.  We intentionally do NOT wrap them in startTransition:
+  // the render is fast (~50 ms with stable grouping + memo) and keeping
+  // the update synchronous avoids a race condition where startLiveUpdates
+  // (fired right below) would merge live events into the old conversation
+  // state before a deferred transition commits.
+  //
+  // At this point only the CURRENT run's transcript nodes are available.
+  // Historical runs are loaded silently in Phase 2 below.
   options.setApp((previous) => ({
     ...previous,
     conversation: response.conversation,
@@ -84,31 +131,53 @@ export async function loadConversationSession(
       : undefined,
     error: undefined,
   }));
+  options.setScreen("chat-active");
+  options.setAttachments([]);
   if (run !== undefined && shouldKeepRefreshing(run.status)) {
-    options.startLiveUpdates(run.runId, replay?.cursor.lastSequence ?? run.eventCursor.lastSequence);
+    options.startLiveUpdates({
+      runId: run.runId,
+      cursor: replay?.cursor.lastSequence ?? run.eventCursor.lastSequence,
+      conversationId: response.conversation.conversationId,
+      epoch,
+    });
   }
-  const historicalTranscriptNodesByRunId = await loadConversationTranscriptNodesByRunId(
-    response.conversation,
-    latestRunId,
-    (partial) => {
-      if (!options.mountedRef.current || options.viewEpochRef.current !== epoch) return;
-      options.setApp((previous) => ({
-        ...previous,
-        transcriptNodesByRunId: {
-          ...previous.transcriptNodesByRunId,
-          ...partial,
-        },
-      }));
-    }
+
+  // ── Phase 2: Load historical runs in the background ──────────────────
+  //
+  // Two key optimizations over the original code:
+  //
+  // 1. BOUNDED parallel fetch — historical runs are requested with fixed
+  //    concurrency so long conversations do not overload the browser.
+  //
+  // 2. EXTERNAL cache — historical nodes are written to a module-level
+  //    cache (panel-ui-transcript-store) instead of app state.  Only
+  //    TranscriptChain subscribes to that cache via useSyncExternalStore,
+  //    so the rest of the UI (App, ChatActive, status bars, etc.) does
+  //    NOT re-render.  The historical nodes carry no data-entering
+  //    attribute, so no CSS animation fires — the user perceives a
+  //    silent background fill-in with zero flicker.
+  const initialVisibleWindow = transcriptVisibleTurnWindow(
+    response.conversation.turns.length,
+    initialVisibleTranscriptTurnCount(response.conversation.turns.length)
   );
-  if (!options.mountedRef.current || options.viewEpochRef.current !== epoch) return;
-  options.setApp((previous) => ({
-    ...previous,
-    transcriptNodesByRunId: {
-      ...previous.transcriptNodesByRunId,
-      ...historicalTranscriptNodesByRunId,
-    },
-  }));
+  const historicalRunIds = runIdsForTurnWindow(response.conversation.turns, initialVisibleWindow.startIndex)
+    .filter((id) => id !== latestRunId);
+  if (historicalRunIds.length > 0) {
+    const entries = await loadHistoricalTranscriptNodeEntries(historicalRunIds, abortController.signal);
+    if (options.conversationLoadAbortRef.current === abortController) {
+      options.conversationLoadAbortRef.current = undefined;
+    }
+    if (!options.mountedRef.current || options.viewEpochRef.current !== epoch || abortController.signal.aborted) return;
+    const patch: Record<string, readonly TranscriptNode[]> = {};
+    for (const [runId, nodes] of entries) {
+      patch[runId] = nodes;
+    }
+    updateTranscriptNodesCache(response.conversation.conversationId, patch);
+  } else {
+    if (options.conversationLoadAbortRef.current === abortController) {
+      options.conversationLoadAbortRef.current = undefined;
+    }
+  }
 }
 
 function isMissingConversationError(error: unknown): boolean {
@@ -118,9 +187,12 @@ function isMissingConversationError(error: unknown): boolean {
 }
 
 export function resetConversationSession(options: ConversationSessionControllerOptions): void {
+  options.conversationLoadAbortRef.current?.abort();
+  options.conversationLoadAbortRef.current = undefined;
   options.viewEpochRef.current += 1;
   stopLiveUpdates(options.pollTimer, options.streamRef);
   options.activeRunIdRef.current = undefined;
+  resetTranscriptNodesCache();
   options.setScreen("chat-empty");
   options.setGoal("");
   options.setAttachments([]);
@@ -138,4 +210,25 @@ export function resetConversationSession(options: ConversationSessionControllerO
     detail: undefined,
     error: undefined,
   }));
+}
+
+export async function loadHistoricalTranscriptNodeEntries(
+  runIds: readonly string[],
+  signal?: AbortSignal
+): Promise<readonly (readonly [string, readonly TranscriptNode[]])[]> {
+  const entries: (readonly [string, readonly TranscriptNode[]])[] = [];
+  let nextIndex = 0;
+  const workerCount = Math.min(HISTORICAL_RUN_LOAD_CONCURRENCY, runIds.length);
+  await Promise.all(Array.from({ length: workerCount }, async () => {
+    while (nextIndex < runIds.length) {
+      if (signal?.aborted) return;
+      const runId = runIds[nextIndex]!;
+      nextIndex += 1;
+      const view = await safeBasicRunView(runId, 0, { signal });
+      const nodes = transcriptNodesFrom(ordinaryWorkViewFromRunView(view), view?.detail)
+        .filter((node: TranscriptNode) => node.runId === runId);
+      entries.push([runId, nodes] as const);
+    }
+  }));
+  return entries.sort((left, right) => runIds.indexOf(left[0]) - runIds.indexOf(right[0]));
 }

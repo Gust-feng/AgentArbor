@@ -5,6 +5,7 @@ import { shouldKeepRefreshing } from "./app-runtime-controls";
 import type { AppState } from "./app-state";
 import { emptyLiveRun } from "../../panel-ui-live-run-buffer";
 import { nextRunCapabilityState } from "../../panel-ui-run-capability-state";
+import type { LiveRunSubscription } from "./app-live-run-updates";
 import type { BasicAgentRun } from "./contracts/run";
 
 export type ConfirmationDecision = "approve_once" | "deny" | "guidance";
@@ -20,8 +21,9 @@ export async function decideRunConfirmation(input: {
   readonly setConfirmationBusy: (busy: boolean) => void;
   readonly setApp: SetApp;
   readonly mountedRef: { readonly current: boolean };
+  readonly viewEpochRef: { readonly current: number };
   readonly refreshConversations: () => Promise<void>;
-  readonly startLiveUpdates: (runId: string, cursor: number) => void;
+  readonly startLiveUpdates: (input: LiveRunSubscription) => void;
 }): Promise<void> {
   const confirmation = pendingConfirmationFromApp(input.app);
   if (input.currentRunId === undefined || confirmation === undefined || input.confirmationBusy) return;
@@ -79,7 +81,12 @@ export async function decideRunConfirmation(input: {
       };
     });
     if (shouldResumeLiveUpdates) {
-      input.startLiveUpdates(currentRunId, observed.replay?.cursor.lastSequence ?? observedRun.eventCursor.lastSequence);
+      input.startLiveUpdates({
+        runId: currentRunId,
+        cursor: observed.replay?.cursor.lastSequence ?? observedRun.eventCursor.lastSequence,
+        conversationId: observed.conversation?.conversationId ?? input.app.conversation?.conversationId,
+        epoch: input.viewEpochRef.current,
+      });
     }
     void input.refreshConversations();
   } catch (error) {

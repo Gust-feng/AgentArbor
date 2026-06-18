@@ -10,13 +10,15 @@ import {
 import { loadObservedRunReadModel } from "./app-observed-run-read-model";
 import {
   createRunReadModelPatch,
-  loadConversationTranscriptNodesByRunId,
 } from "./app-run-projection";
+import { runIdsForConversation } from "../../panel-ui-transcript-cache";
+import { resetTranscriptNodesCache, updateTranscriptNodesCache } from "./panel-ui-transcript-store";
 import { shouldKeepRefreshing, stopPolling, stopStream } from "./app-runtime-controls";
 import { parseModelOptionId } from "./model-options";
 import type { AppState } from "./app-state";
 import type { ContextAttachment } from "./contracts/context";
 import type { Conversation } from "./contracts/conversation";
+import type { TranscriptNode } from "./contracts/run";
 import {
   immediateRunForStartedConversation,
   liveRunForObservedReplay,
@@ -30,6 +32,8 @@ import { emptyLiveRun } from "../../panel-ui-live-run-buffer";
 import {
   safeConversation,
 } from "./runtime";
+import { loadHistoricalTranscriptNodeEntries } from "./app-conversation-session";
+import type { LiveRunSubscription } from "./app-live-run-updates";
 
 export type PanelTaskSubmissionOptions = {
   readonly app: AppState;
@@ -49,8 +53,9 @@ export type PanelTaskSubmissionOptions = {
   readonly streamRef: React.MutableRefObject<EventSource | undefined>;
   readonly activeRunIdRef: React.MutableRefObject<string | undefined>;
   readonly viewEpochRef: React.MutableRefObject<number>;
+  readonly conversationLoadAbortRef: React.MutableRefObject<AbortController | undefined>;
   readonly refreshConversations: () => Promise<void>;
-  readonly startLiveUpdates: (runId: string, cursor: number) => void;
+  readonly startLiveUpdates: (input: LiveRunSubscription) => void;
 };
 
 export async function submitPanelTask(
@@ -68,6 +73,11 @@ export async function submitPanelTask(
     previousObservedRunId !== undefined &&
     options.app.run !== undefined &&
     shouldKeepRefreshing(options.app.run.status);
+  options.conversationLoadAbortRef.current?.abort();
+  options.conversationLoadAbortRef.current = undefined;
+  if (!likelyQueuesBehindActiveRun) {
+    resetTranscriptNodesCache(options.app.conversation?.conversationId);
+  }
   options.viewEpochRef.current = epoch;
   if (!likelyQueuesBehindActiveRun) {
     stopPolling(options.pollTimer);
@@ -151,7 +161,12 @@ export async function submitPanelTask(
       };
     });
     if (shouldSwitchLiveStream) {
-      options.startLiveUpdates(immediateLiveRunId, 0);
+      options.startLiveUpdates({
+        runId: immediateLiveRunId,
+        cursor: 0,
+        conversationId: response.conversation.conversationId,
+        epoch,
+      });
     }
     const refreshedConversation = response.conversation.conversationId === undefined
       ? undefined
@@ -226,32 +241,28 @@ export async function submitPanelTask(
       observedRunId !== immediateLiveRunId &&
       (!likelyQueuesBehindActiveRun || observedRunId !== previousObservedRunId);
     if (shouldStartObservedLive) {
-      options.startLiveUpdates(observedRunId, replay?.cursor.lastSequence ?? 0);
+      options.startLiveUpdates({
+        runId: observedRunId,
+        cursor: replay?.cursor.lastSequence ?? 0,
+        conversationId: effectiveConversation.conversationId,
+        epoch,
+      });
     }
     void options.refreshConversations();
     try {
-      const historicalTranscriptNodesByRunId = await loadConversationTranscriptNodesByRunId(
-        effectiveConversation,
-        observedRunId,
-        (partial) => {
-          if (!options.mountedRef.current || options.viewEpochRef.current !== epoch) return;
-          options.setApp((previous) => ({
-            ...previous,
-            transcriptNodesByRunId: {
-              ...previous.transcriptNodesByRunId,
-              ...partial,
-            },
-          }));
+      // Parallel-load historical run transcript nodes into the external cache
+      // (same pattern as loadConversationSession — no onPartial setApp calls).
+      const historicalRunIds = runIdsForConversation(effectiveConversation.turns)
+        .filter((id) => id !== observedRunId);
+      if (historicalRunIds.length > 0) {
+        const entries = await loadHistoricalTranscriptNodeEntries(historicalRunIds);
+        if (!options.mountedRef.current || options.viewEpochRef.current !== epoch) return;
+        const patch: Record<string, readonly TranscriptNode[]> = {};
+        for (const [runId, nodes] of entries) {
+          patch[runId] = nodes;
         }
-      );
-      if (!options.mountedRef.current || options.viewEpochRef.current !== epoch) return;
-      options.setApp((previous) => ({
-        ...previous,
-        transcriptNodesByRunId: {
-          ...previous.transcriptNodesByRunId,
-          ...historicalTranscriptNodesByRunId,
-        },
-      }));
+        updateTranscriptNodesCache(effectiveConversation.conversationId, patch);
+      }
     } catch (error) {
       if (!options.mountedRef.current || options.viewEpochRef.current !== epoch) return;
       options.setApp((previous) => ({

@@ -60,6 +60,56 @@ test("withLiveTranscriptNodes adds side text as a stable system node", () => {
   assert.equal(merged[0]?.text, "准备读取文件");
 });
 
+test("withLiveTranscriptNodes adds live model output as a body node", () => {
+  const merged = withLiveTranscriptNodes([], live({
+    outputText: "我先解释当前判断。",
+  }));
+
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0]?.kind, "body");
+  assert.equal(merged[0]?.eventType, "model.output.delta");
+  assert.equal(merged[0]?.text, "我先解释当前判断。");
+});
+
+test("withLiveTranscriptNodes marks live body as completed after output completion settles", () => {
+  const merged = withLiveTranscriptNodes([], live({
+    outputText: "我先解释当前判断。",
+    outputCompleted: true,
+    outputSequence: 5,
+    updatedAtSequence: 5,
+  }));
+
+  assert.equal(merged[0]?.kind, "body");
+  assert.equal(merged[0]?.eventType, "model.output.completed");
+  assert.equal(merged[0]?.phase, "completed");
+  assert.equal(merged[0]?.text, "我先解释当前判断。");
+});
+
+test("withLiveTranscriptNodes keeps live body ordered before later tool activity", () => {
+  const merged = withLiveTranscriptNodes([
+    node({
+      nodeId: "tool-requested",
+      sequence: 2,
+      eventType: "tool.requested",
+      kind: "tool",
+      phase: "executing",
+      summary: "读取 README.md",
+    }),
+  ], live({
+    outputText: "好的！让我来展示一下我的各项能力。",
+    outputSequence: 1,
+    updatedAtSequence: 3,
+  }));
+
+  assert.deepEqual(
+    merged
+      .slice()
+      .sort((left, right) => left.sequence - right.sequence)
+      .map((item) => `${item.kind}:${item.sequence}`),
+    ["body:1", "tool:2"],
+  );
+});
+
 test("withLiveTranscriptNodes replaces existing side text node instead of duplicating it", () => {
   const existing = node({
     nodeId: "side-existing",
@@ -81,8 +131,116 @@ test("withLiveTranscriptNodes replaces existing side text node instead of duplic
   assert.equal(merged[0]?.text, "准备读取文件");
 });
 
+test("withLiveTranscriptNodes keeps completed body text stable across live to settled handoff", () => {
+  const existing = node({
+    nodeId: "body-existing",
+    sequence: 9,
+    eventType: "model.output.completed",
+    kind: "body",
+    phase: "completed",
+    text: "The user is asking",
+    refs: [{ kind: "model_call", id: "model-1" }],
+  });
+  const merged = withLiveTranscriptNodes([existing], live({
+    outputText: "Theuserisasking",
+    outputCompleted: true,
+    outputSequence: 8,
+    updatedAtSequence: 8,
+  }));
+
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0]?.nodeId, "body-existing");
+  assert.equal(merged[0]?.eventType, "model.output.completed");
+  assert.equal(merged[0]?.phase, "completed");
+  assert.equal(merged[0]?.text, "The user is asking");
+});
+
+test("withLiveTranscriptNodes does not rewrite a completed body by comparable text alone", () => {
+  const existing = node({
+    nodeId: "body-existing",
+    sequence: 9,
+    eventType: "model.output.completed",
+    kind: "body",
+    phase: "completed",
+    text: "先说明当前步骤",
+    refs: [],
+  });
+  const merged = withLiveTranscriptNodes([existing], live({
+    outputText: "先说明当前步骤，然后继续处理",
+    modelRefs: [],
+    updatedAtSequence: 10,
+  }));
+
+  assert.equal(merged.length, 2);
+  assert.equal(merged[0]?.nodeId, "body-existing");
+  assert.equal(merged[1]?.kind, "body");
+  assert.notEqual(merged[1]?.nodeId, "body-existing");
+});
+
+test("withLiveTranscriptNodes does not rewrite completed reasoning by comparable text alone", () => {
+  const existing = node({
+    nodeId: "reasoning-existing",
+    sequence: 4,
+    eventType: "model.reasoning.completed",
+    kind: "thinking",
+    phase: "completed",
+    text: "先分析目标",
+    refs: [],
+  });
+  const merged = withLiveTranscriptNodes([existing], live({
+    reasoningText: "先分析目标，再检查约束",
+    modelRefs: [],
+    updatedAtSequence: 5,
+  }));
+
+  assert.equal(merged.length, 2);
+  assert.equal(merged[0]?.nodeId, "reasoning-existing");
+  assert.equal(merged[1]?.kind, "thinking");
+  assert.notEqual(merged[1]?.nodeId, "reasoning-existing");
+});
+
+test("withLiveTranscriptNodes reuses completed reasoning when the live text is exactly the same", () => {
+  const existing = node({
+    nodeId: "reasoning-existing",
+    sequence: 4,
+    eventType: "model.reasoning.completed",
+    kind: "thinking",
+    phase: "completed",
+    text: "先分析目标",
+    refs: [],
+  });
+  const merged = withLiveTranscriptNodes([existing], live({
+    reasoningText: "先分析目标",
+    modelRefs: [],
+    updatedAtSequence: 5,
+  }));
+
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0]?.nodeId, "reasoning-existing");
+});
+
+test("withLiveTranscriptNodes reuses completed body when the live text is exactly the same", () => {
+  const existing = node({
+    nodeId: "body-existing",
+    sequence: 9,
+    eventType: "model.output.completed",
+    kind: "body",
+    phase: "completed",
+    text: "先说明当前步骤",
+    refs: [],
+  });
+  const merged = withLiveTranscriptNodes([existing], live({
+    outputText: "先说明当前步骤",
+    modelRefs: [],
+    updatedAtSequence: 10,
+  }));
+
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0]?.nodeId, "body-existing");
+});
+
 test("liveStreamingAnswer uses formal tone after a tool result", () => {
-  const answer = liveStreamingAnswer(live({ outputText: "这是最终回答", updatedAtSequence: 5 }), [
+  const answer = liveStreamingAnswer(live({ outputText: "这是最终回答", outputSequence: 5, updatedAtSequence: 5 }), [
     node({
       nodeId: "tool-completed",
       sequence: 4,
@@ -95,6 +253,28 @@ test("liveStreamingAnswer uses formal tone after a tool result", () => {
   assert.deepEqual(answer, {
     text: "这是最终回答",
     tone: "formal",
+    streaming: true,
+  });
+});
+
+test("liveStreamingAnswer keeps process tone when later tool events arrive after early output", () => {
+  const answer = liveStreamingAnswer(live({
+    outputText: "先说明一下接下来会做什么。",
+    outputSequence: 1,
+    updatedAtSequence: 4,
+  }), [
+    node({
+      nodeId: "tool-completed",
+      sequence: 3,
+      eventType: "tool.completed",
+      kind: "tool",
+      phase: "completed",
+    }),
+  ]);
+
+  assert.deepEqual(answer, {
+    text: "先说明一下接下来会做什么。",
+    tone: "process",
     streaming: true,
   });
 });
@@ -172,8 +352,12 @@ test("projectLiveRunTranscript derives nodes and answer from the same live proje
 
 function live(input: {
   readonly outputText?: string;
+  readonly outputSequence?: number;
+  readonly outputCompleted?: boolean;
   readonly sideText?: string;
+  readonly sideTextSequence?: number;
   readonly reasoningText?: string;
+  readonly reasoningSequence?: number;
   readonly reasoningCompleted?: boolean;
   readonly modelRefs?: readonly string[];
   readonly updatedAtSequence?: number;
@@ -185,8 +369,12 @@ function live(input: {
       {
         requestId: "model-1",
         output: textStreamAssemblyFromText(input.outputText ?? ""),
+        outputSequence: input.outputSequence ?? (input.outputText === undefined ? 0 : input.updatedAtSequence ?? 2),
+        outputCompleted: input.outputCompleted ?? false,
         sideText: input.sideText ?? "",
+        sideTextSequence: input.sideTextSequence ?? (input.sideText === undefined ? 0 : input.updatedAtSequence ?? 2),
         reasoning: textStreamAssemblyFromText(input.reasoningText ?? ""),
+        reasoningSequence: input.reasoningSequence ?? (input.reasoningText === undefined ? 0 : input.updatedAtSequence ?? 2),
         reasoningCompleted: input.reasoningCompleted ?? false,
         modelRefs: input.modelRefs ?? ["model-1"],
         updatedAtSequence: input.updatedAtSequence ?? 2,

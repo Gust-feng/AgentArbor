@@ -30,20 +30,25 @@ const BASIC_RUN_EVENT_TYPES = [
 
 export async function safeBasicRunView(
   runId: string,
-  cursor = 0
+  cursor = 0,
+  init?: RequestInit
 ): Promise<BasicAgentRunView | undefined> {
   try {
     return (await getJson<{ readonly view: BasicAgentRunView }>(
-      `/api/basic-agent/runs/${encodeURIComponent(runId)}/view?cursor=${cursor}`
+      `/api/basic-agent/runs/${encodeURIComponent(runId)}/view?cursor=${cursor}`,
+      init
     )).view;
   } catch {
     return undefined;
   }
 }
 
-export async function safeConversation(conversationId: string): Promise<Conversation | undefined> {
+export async function safeConversation(conversationId: string, init?: RequestInit): Promise<Conversation | undefined> {
   try {
-    return (await getJson<{ readonly conversation: Conversation }>(`/api/conversations/${encodeURIComponent(conversationId)}`)).conversation;
+    return (await getJson<{ readonly conversation: Conversation }>(
+      `/api/conversations/${encodeURIComponent(conversationId)}`,
+      init
+    )).conversation;
   } catch {
     return undefined;
   }

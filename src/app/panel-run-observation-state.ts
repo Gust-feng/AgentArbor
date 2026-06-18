@@ -53,6 +53,39 @@ export function mergeRunEvents<TEvent extends RunObservationEvent>(
   return [...byId.values()].sort((left, right) => left.sequence - right.sequence);
 }
 
+export function canApplyRunSubscriptionToState(input: {
+  readonly previous: {
+    readonly conversation?: {
+      readonly conversationId: string;
+    };
+  };
+  readonly activeRunId: string | undefined;
+  readonly currentEpoch: number;
+  readonly runId: string;
+  readonly conversationId?: string;
+  readonly epoch: number;
+}): boolean {
+  return input.activeRunId === input.runId &&
+    input.currentEpoch === input.epoch &&
+    input.previous.conversation?.conversationId === input.conversationId;
+}
+
+export function stateWithConversationGuard<TState>(
+  previous: TState & {
+    readonly conversation?: {
+      readonly conversationId: string;
+    };
+  },
+  input: {
+    readonly expectedConversationId?: string;
+    readonly next: TState;
+  }
+): TState {
+  return previous.conversation?.conversationId === input.expectedConversationId
+    ? input.next
+    : previous;
+}
+
 export function stateWithObservedRunEvents<
   TNode extends RunProjectionNode,
   TRun,
@@ -156,5 +189,89 @@ export function stateWithAppendOnlyRunEvent<
   return {
     ...previous,
     live: appendLiveRunEvent(input.runId, previous.live, input.event),
+  };
+}
+
+export function stateWithAppendOnlyRunEvents<
+  TNode extends RunProjectionNode,
+  TRun,
+  TEvent extends RunObservationEvent,
+  TWorkView extends RunProjectionWorkView<TNode>,
+  TDetail extends RunProjectionDetail<TNode>,
+  TState extends RunObservationState<TRun, TEvent, TWorkView, TDetail, TNode>
+>(
+  previous: TState,
+  input: {
+    readonly runId: string;
+    readonly events: readonly TEvent[];
+  }
+): TState {
+  if (input.events.length === 0) {
+    return previous;
+  }
+  return {
+    ...previous,
+    live: appendLiveRunEvents(input.runId, previous.live, input.events),
+  };
+}
+
+export type AppendOnlyRunEventBatcher<TItem> = {
+  readonly enqueue: (item: TItem) => void;
+  readonly flush: () => void;
+  readonly clear: () => void;
+  readonly pendingCount: () => number;
+};
+
+export function createAppendOnlyRunEventBatcher<TItem>(input: {
+  readonly schedule: (flush: () => void) => (() => void) | undefined;
+  readonly apply: (items: readonly TItem[]) => void;
+}): AppendOnlyRunEventBatcher<TItem> {
+  let pending: TItem[] = [];
+  let scheduled = false;
+  let cancelScheduled: (() => void) | undefined;
+
+  const applyPending = (): void => {
+    if (pending.length === 0) {
+      return;
+    }
+    const items = pending;
+    pending = [];
+    input.apply(items);
+  };
+
+  const runScheduledFlush = (): void => {
+    scheduled = false;
+    cancelScheduled = undefined;
+    applyPending();
+  };
+
+  const requestFlush = (): void => {
+    if (scheduled) {
+      return;
+    }
+    scheduled = true;
+    cancelScheduled = input.schedule(runScheduledFlush);
+  };
+
+  return {
+    enqueue(event): void {
+      pending = [...pending, event];
+      requestFlush();
+    },
+    flush(): void {
+      cancelScheduled?.();
+      scheduled = false;
+      cancelScheduled = undefined;
+      applyPending();
+    },
+    clear(): void {
+      cancelScheduled?.();
+      scheduled = false;
+      cancelScheduled = undefined;
+      pending = [];
+    },
+    pendingCount(): number {
+      return pending.length;
+    },
   };
 }

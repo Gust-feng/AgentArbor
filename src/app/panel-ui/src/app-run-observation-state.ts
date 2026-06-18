@@ -1,6 +1,10 @@
 import {
+  canApplyRunSubscriptionToState,
+  createAppendOnlyRunEventBatcher,
   mergeRunEvents,
+  stateWithConversationGuard,
   stateWithAppendOnlyRunEvent,
+  stateWithAppendOnlyRunEvents,
   stateWithObservedRunEvent,
   stateWithObservedRunEvents,
   stateWithObservedRunProjection,
@@ -16,6 +20,28 @@ import type {
 } from "./contracts/run";
 
 export { mergeRunEvents };
+export { createAppendOnlyRunEventBatcher };
+
+export function canApplyRunSubscriptionToAppState(input: {
+  readonly previous: Pick<AppState, "conversation">;
+  readonly activeRunId: string | undefined;
+  readonly currentEpoch: number;
+  readonly runId: string;
+  readonly conversationId?: string;
+  readonly epoch: number;
+}): boolean {
+  return canApplyRunSubscriptionToState(input);
+}
+
+export function appStateWithSettledConversationGuard(
+  previous: AppState,
+  input: {
+    readonly expectedConversationId?: string;
+    readonly next: AppState;
+  }
+): AppState {
+  return stateWithConversationGuard(previous, input);
+}
 
 export function appStateWithObservedRunEvents(
   previous: AppState,
@@ -69,6 +95,16 @@ export function appStateWithAppendOnlyRunEvent(
   }
 ): AppState {
   return stateWithAppendOnlyRunEvent(previous, input);
+}
+
+export function appStateWithAppendOnlyRunEvents(
+  previous: AppState,
+  input: {
+    readonly runId: string;
+    readonly events: readonly RunEvent[];
+  }
+): AppState {
+  return stateWithAppendOnlyRunEvents(previous, input);
 }
 
 function nextCapabilityResolutionState(

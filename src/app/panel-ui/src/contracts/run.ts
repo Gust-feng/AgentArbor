@@ -136,6 +136,7 @@ export type TranscriptNodeKind =
   | "confirmation"
   | "user_decision"
   | "answer"
+  | "body"
   | "system";
 
 export type TranscriptNodePhase =

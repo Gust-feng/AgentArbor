@@ -177,6 +177,68 @@ test("model turn settlement stops live reasoning without an explicit completed e
   assert.equal(buffer.turns[0]?.reasoningCompleted, true);
 });
 
+test("model output delta closes prior reasoning stage before the body is rendered", () => {
+  const buffer = appendLiveRunEvents("run-1", emptyLiveRun("run-1"), [
+    event({
+      id: "event-1",
+      sequence: 1,
+      type: "model.reasoning.delta",
+      delta: "The user is asking me to demonstrate capabilities.",
+    }),
+    event({
+      id: "event-2",
+      sequence: 2,
+      type: "model.output.delta",
+      delta: "Let me showcase my capabilities.",
+    }),
+  ]);
+
+  assert.equal(buffer.turns[0]?.reasoning.text, "The user is asking me to demonstrate capabilities.");
+  assert.equal(buffer.turns[0]?.reasoningCompleted, true);
+  assert.equal(buffer.turns[0]?.output.text, "Let me showcase my capabilities.");
+});
+
+test("model output completed can settle live output to the final snapshot", () => {
+  const buffer = appendLiveRunEvents("run-1", emptyLiveRun("run-1"), [
+    event({
+      id: "run-1:live:model.output.delta:model-1:1",
+      sequence: 1,
+      type: "model.output.delta",
+      delta: "The user is",
+    }),
+    event({
+      id: "run-1:event:10:model.output.completed",
+      sequence: 10,
+      type: "model.output.completed",
+      summary: "Theuserisasking",
+    }),
+  ]);
+
+  assert.equal(buffer.turns[0]?.output.text, "The user is asking");
+  assert.equal(buffer.turns[0]?.outputCompleted, true);
+  assert.equal(buffer.turns[0]?.outputSequence, 10);
+});
+
+test("model output completed ignores generic completion copy when live text already exists", () => {
+  const buffer = appendLiveRunEvents("run-1", emptyLiveRun("run-1"), [
+    event({
+      id: "run-1:live:model.output.delta:model-1:1",
+      sequence: 1,
+      type: "model.output.delta",
+      delta: "先说明",
+    }),
+    event({
+      id: "run-1:event:10:model.output.completed",
+      sequence: 10,
+      type: "model.output.completed",
+      summary: "回答完成。",
+    }),
+  ]);
+
+  assert.equal(buffer.turns[0]?.output.text, "先说明");
+  assert.equal(buffer.turns[0]?.outputCompleted, true);
+});
+
 test("live run buffer keeps output and reasoning exact", () => {
   const buffer = appendLiveRunEvents("run-1", emptyLiveRun("run-1"), [
     event({
@@ -454,7 +516,7 @@ test("live run buffer uses replay chunks to catch up incomplete live output", ()
   assert.equal(buffer.turns[0]?.output.text, "foobar");
 });
 
-test("tool requests move live output into side text only once", () => {
+test("tool requests keep live output separate from side text", () => {
   const output = event({
     id: "event-1",
     sequence: 1,
@@ -469,8 +531,33 @@ test("tool requests move live output into side text only once", () => {
 
   const buffer = appendLiveRunEvents("run-1", emptyLiveRun("run-1"), [output, requested, requested]);
 
-  assert.equal(buffer.turns[0]?.output.text, "");
-  assert.equal(buffer.turns[0]?.sideText, "准备读取文件");
+  assert.equal(buffer.turns[0]?.output.text, "准备读取文件");
+  assert.equal(buffer.turns[0]?.sideText, "");
+  assert.equal(buffer.appliedEventKeys.length, 2);
+});
+
+test("tool events do not move the original live output sequence forward", () => {
+  const buffer = appendLiveRunEvents("run-1", emptyLiveRun("run-1"), [
+    event({
+      id: "event-1",
+      sequence: 1,
+      type: "model.output.delta",
+      delta: "先说明一下。",
+    }),
+    event({
+      id: "event-2",
+      sequence: 2,
+      type: "tool.requested",
+    }),
+    event({
+      id: "event-3",
+      sequence: 3,
+      type: "tool.completed",
+    }),
+  ]);
+
+  assert.equal(buffer.turns[0]?.outputSequence, 1);
+  assert.equal(buffer.turns[0]?.updatedAtSequence, 3);
 });
 
 function event(input: {

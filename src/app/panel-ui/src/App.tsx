@@ -104,6 +104,7 @@ export function App(): React.ReactElement {
   const streamRef = useRef<EventSource | undefined>(undefined);
   const activeRunIdRef = useRef<string | undefined>(undefined);
   const viewEpochRef = useRef(0);
+  const conversationLoadAbortRef = useRef<AbortController | undefined>(undefined);
   const lastActiveProfileIdRef = useRef<string | undefined>(undefined);
   const modelSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
   const mcpToolSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
@@ -135,6 +136,8 @@ export function App(): React.ReactElement {
     });
     return () => {
       mountedRef.current = false;
+      conversationLoadAbortRef.current?.abort();
+      conversationLoadAbortRef.current = undefined;
       stopLiveUpdates(pollTimer, streamRef);
     };
   }, []);
@@ -238,6 +241,7 @@ export function App(): React.ReactElement {
     streamRef,
     activeRunIdRef,
     viewEpochRef,
+    conversationLoadAbortRef,
   }), [
     app,
     attachments,

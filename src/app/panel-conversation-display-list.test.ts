@@ -425,6 +425,85 @@ test("conversation display list keeps standalone plain failed content out of wor
   assert.deepEqual(item?.kind === "assistant" ? item.workflow?.segments : undefined, []);
 });
 
+test("conversation display list omits standalone duplicate system failure activity", () => {
+  const display = projectConversationDisplayList({
+    previous: createConversationWorkflowDisplayState(),
+    conversationId: "conversation-1",
+    projectedTurns: [projected(turn("user-1", "user", "继续", "completed"))],
+    turns: [turn("user-1", "user", "继续", "completed")],
+    cachedNodesByRunId: {},
+    currentRunId: "run-1",
+    currentRunNodes: [
+      transcriptNode({
+        nodeId: "tool-1",
+        runId: "run-1",
+        sequence: 1,
+        kind: "tool",
+        eventType: "tool.failed",
+        phase: "failed",
+        summary: "读取模型能力信息失败",
+      }),
+      transcriptNode({
+        nodeId: "system-1",
+        runId: "run-1",
+        sequence: 2,
+        kind: "system",
+        eventType: "model.failed",
+        phase: "failed",
+        text: "当前模型不支持调节思考强度。",
+      }),
+    ],
+    standaloneRun: {
+      currentRunId: "run-1",
+      runStatus: "failed",
+      answer: "错误信息：当前模型不支持调节思考强度。",
+      runProjection: {
+        nodes: [
+          transcriptNode({
+            nodeId: "tool-1",
+            runId: "run-1",
+            sequence: 1,
+            kind: "tool",
+            eventType: "tool.failed",
+            phase: "failed",
+            summary: "读取模型能力信息失败",
+          }),
+          transcriptNode({
+            nodeId: "system-1",
+            runId: "run-1",
+            sequence: 2,
+            kind: "system",
+            eventType: "model.failed",
+            phase: "failed",
+            text: "当前模型不支持调节思考强度。",
+          }),
+        ],
+        answer: {
+          text: "错误信息：当前模型不支持调节思考强度。",
+          tone: "formal",
+          streaming: false,
+        },
+      },
+      collapseTimeline: false,
+    },
+  });
+
+  const item = display.items[1];
+  const activity = item?.kind === "assistant"
+    ? item.workflow?.segments.find((segment) => segment.kind === "activity")
+    : undefined;
+
+  assert.equal(item?.kind, "assistant");
+  assert.deepEqual(item?.kind === "assistant" ? item.failure : undefined, {
+    previous: "",
+    error: "错误信息：当前模型不支持调节思考强度。",
+  });
+  assert.deepEqual(
+    activity?.kind === "activity" ? activity.timeline.items.map((timelineItem) => timelineItem.nodeId) : [],
+    ["tool-1"],
+  );
+});
+
 function projected<TTurn extends ReturnType<typeof turn>>(
   turn: TTurn,
   displayRunId?: string,

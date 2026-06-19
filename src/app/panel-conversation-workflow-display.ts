@@ -28,7 +28,11 @@ import {
   type AssistantWorkflowDisplay,
   type AssistantWorkflowDisplayState,
 } from "./panel-assistant-workflow-display.js";
-import { assistantFailureParts, type AssistantFailureParts } from "./panel-assistant-failure.js";
+import {
+  assistantFailureParts,
+  transcriptNodesWithoutFailureEcho,
+  type AssistantFailureParts,
+} from "./panel-assistant-failure.js";
 
 export type ConversationWorkflowDisplayState<
   TTurn extends WorklineConversationTurn,
@@ -169,11 +173,15 @@ export function projectStandaloneAssistantWorkflowDisplay<
     ? previous.standaloneAssistant.workflow
     : undefined);
   const failure = input.failed === true ? assistantFailureParts(input.content) : undefined;
+  const workflowTranscriptNodes = transcriptNodesWithoutFailureEcho(
+    input.transcriptNodes,
+    failure,
+  );
   const workflow = projectStableAssistantWorkflowDisplay({
     previous: previousWorkflow,
     content: failure?.previous ?? input.content,
     deliverable: failure === undefined ? input.deliverable : undefined,
-    transcriptNodes: input.transcriptNodes,
+    transcriptNodes: workflowTranscriptNodes,
     pending: input.pending,
     live: input.live,
     keepStreamMounted: input.keepStreamMounted,

@@ -426,6 +426,55 @@ test("stable assistant turn displays treat plain failed content as failure-only 
   assert.deepEqual(display?.workflow?.segments, []);
 });
 
+test("stable assistant turn displays omit duplicate system failure text from workflow activity", () => {
+  const turns = [
+    turn("user-1", "user", "继续", "completed"),
+    { ...turn("assistant-1", "assistant", "错误信息：当前模型不支持调节思考强度。", "failed"), runId: "run-1" },
+  ];
+  const result = projectStableAssistantTurnDisplays({
+    projectedTurns: [
+      projected(turns[0]!),
+      projected(turns[1]!, "run-1"),
+    ],
+    turns,
+    latestAssistantTurnId: latestAssistantTurnIdForTurns(turns),
+    previousEmptyShells: assistantShellSnapshot([]),
+    assistantTurnSlotKeys: precomputeAssistantTurnSlotKeys(turns),
+    transcriptNodesByRunId: new Map<string, readonly ReturnType<typeof transcriptNode>[]>([
+      ["run-1", [
+        transcriptNode({
+          nodeId: "tool-1",
+          runId: "run-1",
+          sequence: 1,
+          kind: "tool",
+          eventType: "tool.failed",
+          phase: "failed",
+          summary: "读取模型能力信息失败",
+        }),
+        transcriptNode({
+          nodeId: "system-1",
+          runId: "run-1",
+          sequence: 2,
+          kind: "system",
+          eventType: "model.failed",
+          phase: "failed",
+          text: "当前模型不支持调节思考强度。",
+        }),
+      ]],
+    ]),
+  });
+
+  const display = result.displays.get("assistant-1");
+  const activity = display?.workflow?.segments.find((segment) => segment.kind === "activity");
+
+  assert.equal(display?.failure?.previous, "");
+  assert.equal(display?.failure?.error, "错误信息：当前模型不支持调节思考强度。");
+  assert.deepEqual(
+    activity?.kind === "activity" ? activity.timeline.items.map((item) => item.nodeId) : [],
+    ["tool-1"],
+  );
+});
+
 function projected<TTurn extends ReturnType<typeof turn>>(
   turn: TTurn,
   displayRunId?: string,

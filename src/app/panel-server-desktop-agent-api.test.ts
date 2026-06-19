@@ -190,10 +190,14 @@ test("desktop ordinary run persists the execution-effective model settings after
   };
   const server = await startLocalPanelServer({ port: 0, configDirectory: directory, providerFetch });
   try {
-    await requestJson(server.url, "/api/config/model-provider", {
+    await requestJson(server.url, "/api/config/model-profiles", {
       method: "POST",
       body: {
-        baseUrl: "https://provider.example",
+        profileId: "glm",
+        label: "GLM",
+        providerKind: "openai_compatible",
+        protocolKind: "openai_compatible_chat_completions",
+        baseUrl: "https://open.bigmodel.cn/api/paas/v4",
         model,
         apiKey: secret,
         openAI: {
@@ -204,6 +208,7 @@ test("desktop ordinary run persists the execution-effective model settings after
         defaultAiMode: "openai-compatible",
       },
     });
+    await requestJson(server.url, "/api/config/model-profiles/glm/activate", { method: "POST" });
 
     const start = await requestJson(server.url, "/api/desktop/runs", {
       method: "POST",
@@ -779,6 +784,81 @@ test("desktop default run follows the active chat-compatible profile mode", asyn
     assert.equal(Array.isArray(bodies[0]?.messages), true);
     assert.equal(bodies[0]?.input, undefined);
     assert.equal(bodies[0]?.reasoning, undefined);
+  } finally {
+    await server.close();
+    await removeTemporaryTree(directory);
+  }
+});
+
+test("desktop model override routes duplicate model ids through the selected provider profile", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-desktop-duplicate-model-provider-route-"));
+  const sharedModel = "deepseek-v4-pro";
+  const openRouterSecret = "sk-openrouter-duplicate-model-secret";
+  const deepSeekSecret = "sk-deepseek-duplicate-model-secret";
+  const calls: Array<{ readonly url: string; readonly authorization?: string; readonly body: Record<string, unknown> }> = [];
+  const configCenter = new ConfigCenter({
+    settingsStore: new FileSystemNormalSettingsStore(directory),
+    secretStore: new FileSystemLocalDevSecretStore(directory),
+  });
+  const providerFetch: PanelProviderFetch = async (url, init) => {
+    calls.push({
+      url: String(url),
+      authorization: init.headers.authorization,
+      body: JSON.parse(init.body) as Record<string, unknown>,
+    });
+    return createOpenAiTextResponse(sharedModel, "同名模型已通过所选服务完成。");
+  };
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory, configCenter, providerFetch });
+  try {
+    await configCenter.createModelProviderProfile({
+      profileId: "openrouter",
+      label: "OpenRouter",
+      providerKind: "openai_compatible",
+      protocolKind: "openai_compatible_chat_completions",
+      baseUrl: "https://openrouter.ai/api/v1",
+      model: sharedModel,
+      apiKey: openRouterSecret,
+      defaultAiMode: "openai-compatible",
+    });
+    await configCenter.createModelProviderProfile({
+      profileId: "deepseek",
+      label: "DeepSeek",
+      providerKind: "openai_compatible",
+      protocolKind: "openai_compatible_chat_completions",
+      baseUrl: "https://api.deepseek.com",
+      model: sharedModel,
+      apiKey: deepSeekSecret,
+      defaultAiMode: "openai-compatible",
+    });
+
+    const start = await requestJson(server.url, "/api/desktop/runs", {
+      method: "POST",
+      body: {
+        goal: "Use the selected OpenRouter provider for this shared model.",
+        aiMode: "openai-compatible",
+        modelOverride: { profileId: "openrouter", model: sharedModel },
+      },
+    });
+    const completed = await waitForRun(
+      server.url,
+      start.body.runId,
+      (body) => body.status === "completed",
+      4_000,
+      "/api/desktop/runs"
+    );
+
+    assert.equal(start.status, 202);
+    assert.equal(completed.body.config.profileId, "openrouter");
+    assert.equal(completed.body.config.baseUrl, "https://openrouter.ai/api/v1");
+    assert.equal(completed.body.config.model, sharedModel);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0]?.url, "https://openrouter.ai/api/v1/chat/completions");
+    assert.equal(calls[0]?.authorization, `Bearer ${openRouterSecret}`);
+    assert.equal(calls[0]?.body.model, sharedModel);
+    assert.equal(calls[0]?.url.includes("api.deepseek.com"), false);
+    assert.equal(completed.text.includes(openRouterSecret), false);
+    assert.equal(completed.text.includes(deepSeekSecret), false);
+    assertSafePanelJsonText(completed.text);
   } finally {
     await server.close();
     await removeTemporaryTree(directory);

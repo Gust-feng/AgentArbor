@@ -125,7 +125,6 @@ export function normalizeBuiltInModelProviderProfiles(
   catalogs: readonly ModelProviderModelCatalog[],
   now: string
 ): readonly ModelProviderProfileSettings[] {
-  const catalogModelOwners = catalogModelOwnerMap(catalogs);
   return profiles.map((profile) => {
     const preset = builtInPresetForProfile(profile);
     if (preset === undefined) {
@@ -135,7 +134,7 @@ export function normalizeBuiltInModelProviderProfiles(
     const protocolKind = normalizeBuiltInProfileProtocol(profile, preset);
     const defaultAiMode = normalizeProfileAiModeForProvider(providerKind, protocolKind, profile.defaultAiMode);
     const baseUrl = normalizeBuiltInProfileBaseUrl(profile, preset);
-    const model = shouldClearBuiltInProfileModel(profile, preset.presetId, catalogs, catalogModelOwners)
+    const model = shouldClearBuiltInProfileModel(profile, preset.presetId, catalogs)
       ? undefined
       : profile.model;
     const next: ModelProviderProfileSettings = {
@@ -282,8 +281,7 @@ function normalizeBuiltInProfileBaseUrl(
 function shouldClearBuiltInProfileModel(
   profile: ModelProviderProfileSettings,
   presetId: string,
-  catalogs: readonly ModelProviderModelCatalog[],
-  catalogModelOwners: ReadonlyMap<string, ReadonlySet<string>>
+  catalogs: readonly ModelProviderModelCatalog[]
 ): boolean {
   const model = normalizeOptionalString(profile.model);
   if (model === undefined) {
@@ -293,28 +291,12 @@ function shouldClearBuiltInProfileModel(
   if (ownCatalog?.models.some((item) => item.id === model) === true) {
     return false;
   }
-  const catalogOwners = catalogModelOwners.get(model);
-  if (catalogOwners !== undefined && [...catalogOwners].some((profileId) => profileId !== profile.profileId)) {
-    return true;
-  }
   const modelSignalOwner = builtInPresetIdForModelSignal(model);
   if (modelSignalOwner === undefined || modelSignalOwner === presetId) {
     return false;
   }
   const currentBaseUrl = normalizeBaseUrl(profile.baseUrl);
   return currentBaseUrl === undefined || builtInPresetIdForCanonicalBaseUrl(currentBaseUrl) !== undefined;
-}
-
-function catalogModelOwnerMap(catalogs: readonly ModelProviderModelCatalog[]): ReadonlyMap<string, ReadonlySet<string>> {
-  const owners = new Map<string, Set<string>>();
-  for (const catalog of catalogs) {
-    for (const model of catalog.models) {
-      const existing = owners.get(model.id) ?? new Set<string>();
-      existing.add(catalog.profileId);
-      owners.set(model.id, existing);
-    }
-  }
-  return owners;
 }
 
 function builtInPresetIdForCanonicalBaseUrl(baseUrl: string): string | undefined {

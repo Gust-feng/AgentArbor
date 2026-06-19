@@ -4,6 +4,7 @@ import type {
   ModelProviderModelCatalogItem,
   ModelProviderProfileSettings,
 } from "../../domain/config/index.js";
+import { normalizeModelCatalogDisplayName } from "../../domain/config/index.js";
 import { asRecord, optionalString, safeConfigId } from "./settings-utils.js";
 import {
   DEFAULT_MODEL_PROVIDER_BASE_URL,
@@ -82,7 +83,7 @@ function parseModelCatalogItems(value: unknown): readonly ModelProviderModelCata
       }
       return {
         id,
-        displayName: optionalString(record.displayName) ?? id,
+        displayName: normalizeModelCatalogDisplayName(optionalString(record.displayName), id),
         owner: optionalString(record.owner),
         createdAt: optionalString(record.createdAt),
       };
@@ -101,7 +102,7 @@ function normalizeModelCatalogItems(
     }
     map.set(id, {
       id,
-      displayName: normalizeOptionalString(model.displayName) ?? id,
+      displayName: normalizeModelCatalogDisplayName(normalizeOptionalString(model.displayName), id),
       owner: normalizeOptionalString(model.owner),
       createdAt: normalizeCatalogFetchedAt(model.createdAt),
     });

@@ -471,8 +471,7 @@ function providerProtocolProfileIdFor(profile: SanitizedModelProviderConfig): Pr
   const label = (profile.label ?? "").toLowerCase();
   const baseUrl = (profile.baseUrl ?? "").replace(/\/+$/, "").toLowerCase();
   if (baseUrl === "https://api.openai.com" || baseUrl === "https://api.openai.com/v1") return "openai";
-  const model = (profile.model ?? "").toLowerCase();
-  const signals = `${profileId} ${label} ${baseUrl} ${model}`;
+  const signals = `${profileId} ${label} ${baseUrl}`;
   if (signals.includes("deepseek")) return "deepseek";
   if (signals.includes("moonshot") || signals.includes("kimi")) return "moonshot";
   if (signals.includes("bigmodel") || signals.includes("z.ai") || signals.includes("zhipu") || signals.includes("glm")) return "glm";

@@ -445,6 +445,51 @@ test("OpenAI-compatible Chat adapter applies DeepSeek reasoning controls and ext
   assert.equal(calls[0]?.body.top_p, undefined);
 });
 
+test("OpenAI-compatible Chat adapter does not infer provider dialect from shared model ids", async () => {
+  const calls: { url: string; body: Record<string, unknown> }[] = [];
+  const fetch: FetchLike = async (url, init) => {
+    calls.push({
+      url,
+      body: JSON.parse(init.body) as Record<string, unknown>,
+    });
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        id: "chatcmpl-shared-model-proxy",
+        model: "deepseek-v4-pro",
+        choices: [
+          {
+            message: { role: "assistant", content: JSON.stringify({ summary: "Proxy route stayed scoped." }) },
+            finish_reason: "stop",
+          },
+        ],
+      }),
+    };
+  };
+  const provider = new OpenAICompatibleChatCompletionsProvider({
+    baseUrl: "https://openrouter.ai/api/v1",
+    apiKey: "sk-test-secret-token",
+    model: "deepseek-v4-pro",
+    requestSettings: {
+      temperature: 0.2,
+      topP: 0.8,
+      reasoningEffort: "high",
+    },
+    fetch,
+  });
+
+  const response = await provider.complete(createValidModelRequest());
+
+  assert.equal(response.status, "completed");
+  assert.equal(calls[0]?.url, "https://openrouter.ai/api/v1/chat/completions");
+  assert.equal(calls[0]?.body.model, "deepseek-v4-pro");
+  assert.equal(calls[0]?.body.thinking, undefined);
+  assert.equal(calls[0]?.body.temperature, 0.2);
+  assert.equal(calls[0]?.body.top_p, 0.8);
+  assert.equal(calls[0]?.body.reasoning_effort, undefined);
+});
+
 test("OpenAI-compatible Chat adapter sends Kimi thinking as a provider extension", async () => {
   const calls: { body: Record<string, unknown> }[] = [];
   const fetch: FetchLike = async (_url, init) => {

@@ -16,6 +16,7 @@ import type {
   UpdateWorkspaceConfigInput,
   UpsertMcpServerInput,
 } from "../../domain/config/index.js";
+import { normalizeModelCatalogDisplayName } from "../../domain/config/index.js";
 import type { ConfirmationDecision } from "../../domain/basic-agent/index.js";
 import type { ToolConfirmationPolicy } from "../../domain/tools/index.js";
 import { TaskSoilInputValidationError, parseDesktopTaskSoilInput, type DesktopTaskSoilInput } from "../task-soil-workspace.js";
@@ -120,7 +121,7 @@ export function parseModelCatalogUpdate(raw: unknown): ModelCatalogUpdateInput {
       }
       return {
         id,
-        displayName: optionalString(model.displayName) ?? id,
+        displayName: normalizeModelCatalogDisplayName(optionalString(model.displayName), id),
         owner: optionalString(model.owner),
         createdAt: optionalString(model.createdAt),
       };

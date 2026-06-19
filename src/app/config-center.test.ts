@@ -654,6 +654,94 @@ test("ConfigCenter repairs built-in model provider drift without overwriting cus
   }
 });
 
+test("ConfigCenter keeps duplicate model ids scoped to provider profiles", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-config-duplicate-provider-models-"));
+  try {
+    const settingsStore = new FileSystemNormalSettingsStore(directory);
+    const secretStore = new FileSystemLocalDevSecretStore(directory);
+    const now = new Date("2026-05-19T00:00:00.000Z").toISOString();
+    const sharedModel = "shared-router-model";
+    await fs.mkdir(directory, { recursive: true });
+    await fs.writeFile(
+      settingsStore.settingsPath,
+      `${JSON.stringify(
+        {
+          version: 3,
+          activeModelProfileId: "openai",
+          modelProvider: {
+            profileId: "openai",
+            label: "OpenAI Router",
+            providerKind: "openai_compatible",
+            protocolKind: "openai_compatible_chat_completions",
+            baseUrl: "https://openrouter.ai/api/v1",
+            model: sharedModel,
+            defaultAiMode: "openai-compatible",
+            secretRef: "secret://local-dev/model-provider/openai/api-key",
+            enabled: true,
+            updatedAt: now,
+          },
+          modelProfiles: [
+            {
+              profileId: "openai",
+              label: "OpenAI Router",
+              providerKind: "openai_compatible",
+              protocolKind: "openai_compatible_chat_completions",
+              baseUrl: "https://openrouter.ai/api/v1",
+              model: sharedModel,
+              defaultAiMode: "openai-compatible",
+              secretRef: "secret://local-dev/model-provider/openai/api-key",
+              enabled: true,
+              updatedAt: now,
+            },
+            {
+              profileId: "deepseek",
+              label: "DeepSeek",
+              providerKind: "openai_compatible",
+              protocolKind: "openai_compatible_chat_completions",
+              baseUrl: "https://api.deepseek.com",
+              model: sharedModel,
+              defaultAiMode: "openai-compatible",
+              secretRef: "secret://local-dev/model-provider/deepseek/api-key",
+              enabled: true,
+              updatedAt: now,
+            },
+          ],
+          modelCatalogs: [
+            {
+              profileId: "deepseek",
+              label: "DeepSeek",
+              baseUrl: "https://api.deepseek.com",
+              modelsPath: "/models",
+              fetchedAt: now,
+              models: [{ id: sharedModel, displayName: sharedModel, owner: "deepseek" }],
+            },
+          ],
+          updatedAt: now,
+        },
+        null,
+        2
+      )}\n`
+    );
+    await secretStore.writeSecret("secret://local-dev/model-provider/openai/api-key", "sk-openrouter");
+    await secretStore.writeSecret("secret://local-dev/model-provider/deepseek/api-key", "sk-deepseek");
+
+    const configCenter = new ConfigCenter({ settingsStore, secretStore });
+    const active = await configCenter.getModelProviderConfig();
+    const profiles = await configCenter.listModelProviderProfiles();
+    const env = await configCenter.createModelRuntimeEnvironment({ modelProvider: active });
+
+    assert.equal(active.profileId, "openai");
+    assert.equal(active.baseUrl, "https://openrouter.ai/api/v1");
+    assert.equal(active.model, sharedModel);
+    assert.equal(profiles.find((profile) => profile.profileId === "deepseek")?.model, sharedModel);
+    assert.equal(env.AGENTARBOR_MODEL_BASE_URL, "https://openrouter.ai/api/v1");
+    assert.equal(env.AGENTARBOR_MODEL_NAME, sharedModel);
+    assert.equal(env.AGENTARBOR_MODEL_API_KEY, "sk-openrouter");
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("ConfigCenter manages model profiles and keeps profile secrets scoped", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-config-profiles-"));
   try {
@@ -749,6 +837,42 @@ test("ConfigCenter persists model catalogs and removes them with deleted profile
     assert.equal(clearedProfile?.model, undefined);
     assert.equal(remainingProfiles.some((profile) => profile.profileId === "deepseek"), false);
     assert.equal(remainingCatalogs.length, 0);
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("ConfigCenter repairs cosmetic generated model catalog display names", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-config-model-catalog-display-names-"));
+  try {
+    const settingsStore = new FileSystemNormalSettingsStore(directory);
+    const secretStore = new FileSystemLocalDevSecretStore(directory);
+    const configCenter = new ConfigCenter({ settingsStore, secretStore });
+
+    await configCenter.createModelProviderProfile({
+      profileId: "minimax",
+      label: "MiniMax",
+      providerKind: "openai_compatible",
+      protocolKind: "openai_compatible_chat_completions",
+      baseUrl: "https://api.minimaxi.com/v1",
+      defaultAiMode: "openai-compatible",
+    });
+    await configCenter.upsertModelProviderModelCatalog({
+      profileId: "minimax",
+      label: "MiniMax",
+      baseUrl: "https://api.minimaxi.com/v1",
+      modelsPath: "/models",
+      fetchedAt: "2026-05-19T00:00:00.000Z",
+      models: [
+        { id: "MiniMax-M3", displayName: "Mini Max M3", owner: "minimax" },
+        { id: "plain-model", displayName: "Provider Plain Model", owner: "provider" },
+      ],
+    });
+
+    const catalogs = await new ConfigCenter({ settingsStore, secretStore }).listModelProviderModelCatalogs();
+
+    assert.equal(catalogs[0]?.models.find((model) => model.id === "MiniMax-M3")?.displayName, "MiniMax-M3");
+    assert.equal(catalogs[0]?.models.find((model) => model.id === "plain-model")?.displayName, "Provider Plain Model");
   } finally {
     await fs.rm(directory, { recursive: true, force: true });
   }

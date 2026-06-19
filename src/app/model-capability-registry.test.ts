@@ -66,6 +66,20 @@ test("model capability registry enables tools for current DeepSeek V4 OpenAI-com
   assert.equal(capabilities.preferredApiStyle, "openai_compatible");
 });
 
+test("model capability registry does not infer provider ownership from shared model ids", () => {
+  const routedProfile = profile("deepseek-v4-pro", {
+    profileId: "openrouter",
+    label: "OpenRouter",
+    baseUrl: "https://openrouter.ai/api/v1",
+  });
+  const capabilities = resolveModelCapabilities({ profile: routedProfile });
+
+  assert.equal(isKnownModel(routedProfile), false);
+  assert.equal(capabilities.protocolProfileId, "custom_openai_chat");
+  assert.equal(capabilities.contextWindowTokens, CONSERVATIVE_MODEL_CAPABILITIES.contextWindowTokens);
+  assert.equal(capabilities.maxOutputTokens, CONSERVATIVE_MODEL_CAPABILITIES.maxOutputTokens);
+});
+
 test("model capability registry keeps provider-specific reasoning controls conservative", () => {
   const kimi = resolveModelCapabilities({
     profile: profile("kimi-k2.6", {

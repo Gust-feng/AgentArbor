@@ -1,7 +1,8 @@
-import type {
-  ModelProviderModelCatalog,
-  ModelProviderModelCatalogItem,
-  SanitizedModelProviderConfig,
+import {
+  modelCatalogDisplayNameFromId,
+  type ModelProviderModelCatalog,
+  type ModelProviderModelCatalogItem,
+  type SanitizedModelProviderConfig,
 } from "../../domain/config/index.js";
 import { nowIso } from "../../kernel/id.js";
 import { normalizeOpenAICompatibleSdkBaseUrl } from "./openai-compatible-base-url.js";
@@ -75,7 +76,7 @@ function parseModels(raw: unknown): readonly ModelProviderModelCatalogItem[] {
       const created = numberOrUndefined(model.created);
       return {
         id,
-        displayName: id,
+        displayName: modelCatalogDisplayNameFromId(id),
         owner: stringOrUndefined(model.owned_by),
         createdAt: created === undefined ? undefined : new Date(created * 1000).toISOString(),
       };

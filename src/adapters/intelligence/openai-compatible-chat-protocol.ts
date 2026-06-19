@@ -29,7 +29,7 @@ export function resolveOpenAICompatibleChatDialect(input: {
   readonly baseUrl: string;
   readonly model: string;
 }): OpenAICompatibleChatDialect {
-  const profileId = input.providerProfileId ?? inferProviderProfileId(input.baseUrl, input.model);
+  const profileId = input.providerProfileId ?? inferProviderProfileId(input.baseUrl);
   switch (profileId) {
     case "openai":
       return {
@@ -357,19 +357,22 @@ function openAIReasoningEffortOrUndefined(value: unknown): OpenAIReasoningEffort
   return undefined;
 }
 
-function inferProviderProfileId(baseUrl: string, model: string): ProviderProtocolProfileId {
+function inferProviderProfileId(baseUrl: string): ProviderProtocolProfileId {
   const normalizedBaseUrl = baseUrl.replace(/\/+$/, "").toLowerCase();
-  const normalizedModel = model.toLowerCase();
-  const signals = `${normalizedBaseUrl} ${normalizedModel}`;
   if (normalizedBaseUrl === "https://api.openai.com" || normalizedBaseUrl === "https://api.openai.com/v1") {
     return "openai";
   }
-  if (signals.includes("deepseek")) return "deepseek";
-  if (signals.includes("moonshot") || signals.includes("kimi")) return "moonshot";
-  if (signals.includes("bigmodel") || signals.includes("z.ai") || signals.includes("zhipu") || signals.includes("glm")) {
+  if (normalizedBaseUrl.includes("deepseek")) return "deepseek";
+  if (normalizedBaseUrl.includes("moonshot") || normalizedBaseUrl.includes("kimi")) return "moonshot";
+  if (
+    normalizedBaseUrl.includes("bigmodel") ||
+    normalizedBaseUrl.includes("z.ai") ||
+    normalizedBaseUrl.includes("zhipu") ||
+    normalizedBaseUrl.includes("glm")
+  ) {
     return "glm";
   }
-  if (signals.includes("minimax") || signals.includes("minimaxi")) return "minimax";
+  if (normalizedBaseUrl.includes("minimax") || normalizedBaseUrl.includes("minimaxi")) return "minimax";
   return "custom_openai_chat";
 }
 

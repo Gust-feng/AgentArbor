@@ -16,7 +16,7 @@ export function ModelCatalogPanel(props: {
   readonly modelQuery: string;
   readonly selectedModelRowId?: string;
   readonly modelNameDrafts: Readonly<Record<string, string>>;
-  readonly selectedModelIconSvg?: string;
+  readonly modelIconSvg: (model: ModelProviderModelItem) => string | undefined;
   readonly saving?: boolean;
   readonly modelsFetchBusy?: boolean;
   readonly onModelQueryChange: (value: string) => void;
@@ -62,7 +62,7 @@ function SavedModels(props: {
   readonly catalogModels: readonly ModelProviderModelItem[];
   readonly visibleCatalogModels: readonly ModelProviderModelItem[];
   readonly modelNameDrafts: Readonly<Record<string, string>>;
-  readonly selectedModelIconSvg?: string;
+  readonly modelIconSvg: (model: ModelProviderModelItem) => string | undefined;
   readonly selectedModelRowId?: string;
   readonly saving?: boolean;
   readonly onSelectCatalogModel: (modelId: string) => void;
@@ -92,7 +92,7 @@ function SavedModels(props: {
                   props.onSelectCatalogModel(model.id);
                 }}
               >
-                <ModelIcon svg={props.selectedModelIconSvg} />
+                <ModelIcon svg={props.modelIconSvg(model)} />
                 <div className="model-row-copy">
                   <input
                     className="model-name-input"
@@ -118,6 +118,9 @@ function SavedModels(props: {
                   type="button"
                   className="model-row-action"
                   aria-label={`移除 ${model.displayName}`}
+                  onMouseDown={(event) => {
+                    event.preventDefault();
+                  }}
                   onClick={(event) => {
                     event.stopPropagation();
                     void props.onRemoveCatalogModel(model.id);
@@ -139,7 +142,7 @@ function FetchedModels(props: {
   readonly fetchedCandidates: readonly ModelProviderModelItem[];
   readonly visibleFetchedCandidates: readonly ModelProviderModelItem[];
   readonly hasModelQuery: boolean;
-  readonly selectedModelIconSvg?: string;
+  readonly modelIconSvg: (model: ModelProviderModelItem) => string | undefined;
   readonly saving?: boolean;
   readonly onAddCatalogModel: (model: ModelProviderModelItem) => Promise<void>;
 }): React.ReactElement {
@@ -157,7 +160,7 @@ function FetchedModels(props: {
         <div className="model-list">
           {props.visibleFetchedCandidates.map((model) => (
             <div className="model-list-row" key={model.id}>
-              <ModelIcon svg={props.selectedModelIconSvg} />
+              <ModelIcon svg={props.modelIconSvg(model)} />
               <div className="model-candidate-copy">
                 <strong>{model.displayName === model.id ? model.id : model.displayName}</strong>
                 {model.displayName !== model.id && <small>{model.id}</small>}

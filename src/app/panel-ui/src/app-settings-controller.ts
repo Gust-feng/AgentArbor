@@ -285,7 +285,6 @@ export function createAppSettingsController(options: AppSettingsControllerOption
     profileId = options.app.config?.config?.profileId
   ): Promise<ModelProviderModelCatalog | undefined> {
     if (profileId === undefined) return undefined;
-    options.setSavingModel(true);
     try {
       const response = await fetchModelProviderCatalog(profileId);
       if (options.mountedRef.current) {
@@ -307,20 +306,27 @@ export function createAppSettingsController(options: AppSettingsControllerOption
         }));
       }
       return undefined;
-    } finally {
-      if (options.mountedRef.current) options.setSavingModel(false);
     }
   }
 
   async function saveModelCatalog(profileId: string, catalog: ModelProviderModelCatalog): Promise<void> {
+    const save = options.modelSaveQueueRef.current
+      .catch(() => undefined)
+      .then(() => persistModelCatalog(profileId, catalog));
+    options.modelSaveQueueRef.current = save.catch(() => undefined);
+    await save;
+  }
+
+  async function persistModelCatalog(profileId: string, catalog: ModelProviderModelCatalog): Promise<void> {
     options.setSavingModel(true);
     try {
-      const catalogs = await saveModelProviderCatalog({ profileId, catalog });
+      const response = await saveModelProviderCatalog({ profileId, catalog });
+      const catalogs = response.modelCatalogs ?? [];
       if (options.mountedRef.current) {
         options.setModelCatalogs(catalogRecordFromList(catalogs));
         options.setApp((previous) => ({
           ...previous,
-          config: mergeCatalogsIntoConfig(previous.config, catalogs),
+          config: mergeConfigResponse(mergeCatalogsIntoConfig(previous.config, catalogs), response),
         }));
       }
     } catch (error) {

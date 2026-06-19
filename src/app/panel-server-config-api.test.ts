@@ -247,6 +247,7 @@ test("panel model profile catalog route fetches provider models without leaking 
         apiKey: secret,
       },
     });
+    const activateProfile = await requestJson(server.url, "/api/config/model-profiles/deepseek/activate", { method: "POST" });
     const catalog = await requestJson(server.url, "/api/config/model-profiles/deepseek/models");
     const configAfterFetch = await requestJson(server.url, "/api/config");
     const savedCatalog = await requestJson(server.url, "/api/config/model-profiles/deepseek/model-catalog", {
@@ -271,6 +272,18 @@ test("panel model profile catalog route fetches provider models without leaking 
       },
     });
     const configAfterTrim = await requestJson(server.url, "/api/config");
+    const selectedRemainingModel = await requestJson(server.url, "/api/config/model-provider", {
+      method: "POST",
+      body: {
+        profileId: "deepseek",
+        label: "DeepSeek",
+        protocolKind: "openai_compatible_chat_completions",
+        baseUrl: "https://api.deepseek.com",
+        model: "deepseek-reasoner",
+        defaultAiMode: "openai-compatible",
+      },
+    });
+    const configAfterSelectRemaining = await requestJson(server.url, "/api/config");
     const emptyCatalog = await requestJson(server.url, "/api/config/model-profiles/deepseek/model-catalog", {
       method: "POST",
       body: {
@@ -285,12 +298,15 @@ test("panel model profile catalog route fetches provider models without leaking 
     const apiKey = await requestJson(server.url, "/api/config/model-profiles/deepseek/api-key");
 
     assert.equal(createProfile.status, 200);
+    assert.equal(activateProfile.status, 200);
     assert.equal(catalog.status, 200);
     assert.equal(configAfterFetch.status, 200);
     assert.equal(savedCatalog.status, 200);
     assert.equal(configAfterSave.status, 200);
     assert.equal(trimmedCatalog.status, 200);
     assert.equal(configAfterTrim.status, 200);
+    assert.equal(selectedRemainingModel.status, 200);
+    assert.equal(configAfterSelectRemaining.status, 200);
     assert.equal(emptyCatalog.status, 200);
     assert.equal(configAfterEmpty.status, 200);
     assert.equal(apiKey.status, 200);
@@ -315,13 +331,26 @@ test("panel model profile catalog route fetches provider models without leaking 
       trimmedCatalog.body.catalog.models.map((model: { id: string }) => model.id),
       ["deepseek-reasoner"]
     );
+    assert.equal(
+      trimmedCatalog.body.profiles.find((profile: { profileId?: string }) => profile.profileId === "deepseek")?.model,
+      undefined
+    );
     assert.equal(configAfterTrim.body.config.model, undefined);
+    assert.equal(configAfterSelectRemaining.body.config.model, "deepseek-reasoner");
     assert.deepEqual(emptyCatalog.body.catalog.models, []);
+    assert.equal(emptyCatalog.body.config.model, undefined);
+    assert.equal(
+      emptyCatalog.body.profiles.find((profile: { profileId?: string }) => profile.profileId === "deepseek")?.model,
+      undefined
+    );
     assert.deepEqual(configAfterEmpty.body.modelCatalogs, []);
+    assert.equal(configAfterEmpty.body.config.model, undefined);
     assert.equal(catalog.text.includes(secret), false);
     assert.equal(savedCatalog.text.includes(secret), false);
     assert.equal(configAfterSave.text.includes(secret), false);
+    assert.equal(selectedRemainingModel.text.includes(secret), false);
     assert.equal(createProfile.text.includes(secret), false);
+    assert.equal(activateProfile.text.includes(secret), false);
   } finally {
     await server.close();
     await removeTemporaryTree(directory);

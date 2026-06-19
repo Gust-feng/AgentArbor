@@ -205,8 +205,12 @@ export async function handlePanelConfigRoute(
       writeJson(response, 200, {
         ok: true,
         status: "completed",
+        config: await runtime.configCenter.getModelProviderConfig(),
+        profiles: await runtime.configCenter.listModelProviderProfiles(),
+        modelProviderOrder: await runtime.configCenter.getModelProviderOrder(),
         catalog,
         modelCatalogs: await runtime.configCenter.listModelProviderModelCatalogs(),
+        capabilities: await modelCapabilitiesPayload(runtime),
       });
       return true;
     } catch (error) {
@@ -238,8 +242,12 @@ export async function handlePanelConfigRoute(
       writeJson(response, 200, {
         ok: true,
         status: "completed",
+        config: await runtime.configCenter.getModelProviderConfig(),
+        profiles: await runtime.configCenter.listModelProviderProfiles(),
+        modelProviderOrder: await runtime.configCenter.getModelProviderOrder(),
         catalog,
         modelCatalogs: await runtime.configCenter.listModelProviderModelCatalogs(),
+        capabilities: await modelCapabilitiesPayload(runtime),
       });
       return true;
     } catch (error) {

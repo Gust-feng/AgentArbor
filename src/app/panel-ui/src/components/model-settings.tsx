@@ -3,7 +3,7 @@ import type {
   ConfigResponse,
   ModelProviderModelCatalog,
 } from "../contracts/config";
-import { resolveModelIconSvg } from "../model-icons";
+import { resolveModelIconSvgForModel } from "../model-icons";
 import { resolveModelProviderIdentity } from "../model-provider-logos";
 import { EmptyBlock } from "./workspace-common";
 import { ModelCatalogPanel } from "./model-catalog-panel";
@@ -83,7 +83,7 @@ export function ModelSettings(props: {
   const selectedCatalog = selectedItem?.profileId === undefined ? undefined : props.modelCatalogs?.[selectedItem.profileId];
   const catalogState = useModelCatalogState({ selectedItem, selectedCatalog });
   const selectedProfileId = selectedItem?.profileId;
-  const selectedModelIconSvg = selectedItem === undefined ? undefined : resolveModelIconSvg(resolveModelProviderIdentity(selectedItem));
+  const selectedProviderIdentity = selectedItem === undefined ? "unknown" : resolveModelProviderIdentity(selectedItem);
   const hasKey = props.modelForm.apiKey.length > 0;
   const hasApiKeyAction = hasKey || selectedSecretConfigured;
   const addableItems = providerItems.filter((item) => !item.configured);
@@ -375,17 +375,16 @@ export function ModelSettings(props: {
   }
 
   async function removeCatalogModel(modelId: string): Promise<void> {
-    const nextModels = catalogState.catalogModels.filter((model) => model.id !== modelId);
+    const nextModels = (selectedCatalog?.models ?? catalogState.catalogModels).filter((model) => model.id !== modelId);
+    if (props.modelForm.model === modelId || selectedItem?.model === modelId) {
+      props.setModelForm({ ...props.modelForm, model: "" });
+      catalogState.setSelectedModelRowId(undefined);
+    }
+    catalogState.setModelNameDrafts((previous) => removeRecordKey(previous, modelId));
     try {
       await saveCatalogModels(nextModels);
     } catch {
       return;
-    }
-    if (props.modelForm.model === modelId) {
-      const nextForm = { ...props.modelForm, model: "" };
-      props.setModelForm(nextForm);
-      catalogState.setSelectedModelRowId(undefined);
-      await saveModelImmediately(nextForm).catch(() => undefined);
     }
   }
 
@@ -478,7 +477,11 @@ export function ModelSettings(props: {
           modelQuery={catalogState.modelQuery}
           selectedModelRowId={catalogState.selectedModelRowId}
           modelNameDrafts={catalogState.modelNameDrafts}
-          selectedModelIconSvg={selectedModelIconSvg}
+          modelIconSvg={(model) => resolveModelIconSvgForModel({
+            providerIdentity: selectedProviderIdentity,
+            modelId: model.id,
+            displayName: model.displayName,
+          })}
           saving={props.saving}
           modelsFetchBusy={modelsFetchBusy}
           onModelQueryChange={catalogState.setModelQuery}

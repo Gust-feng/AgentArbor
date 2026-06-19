@@ -5,7 +5,7 @@ import kimiModelIcon from "./assets/model-icons/kimi_model_icon.svg?raw";
 import minimaxModelIcon from "./assets/model-icons/minimax_model_icon.svg?raw";
 import openaiModelIcon from "./assets/model-icons/chatgpt_gpt_model_icon.svg?raw";
 import { decorativeSvg } from "./icon-svg";
-import type { ModelProviderIdentity } from "./model-provider-logos";
+import { resolveModelProviderIdentity, type ModelProviderIdentity } from "./model-provider-logos";
 
 const openaiModelSvg = decorativeSvg(openaiModelIcon);
 const claudeModelSvg = decorativeSvg(claudeModelIcon);
@@ -22,4 +22,24 @@ export function resolveModelIconSvg(identity: ModelProviderIdentity): string | u
   if (identity === "glm") return glmModelSvg;
   if (identity === "minimax") return minimaxModelSvg;
   return undefined;
+}
+
+export function resolveModelIconIdentity(input: {
+  readonly providerIdentity?: ModelProviderIdentity;
+  readonly modelId?: string;
+  readonly displayName?: string;
+}): ModelProviderIdentity {
+  const modelIdentity = resolveModelProviderIdentity({
+    title: input.displayName,
+    model: input.modelId,
+  });
+  return modelIdentity === "unknown" ? input.providerIdentity ?? "unknown" : modelIdentity;
+}
+
+export function resolveModelIconSvgForModel(input: {
+  readonly providerIdentity?: ModelProviderIdentity;
+  readonly modelId?: string;
+  readonly displayName?: string;
+}): string | undefined {
+  return resolveModelIconSvg(resolveModelIconIdentity(input));
 }

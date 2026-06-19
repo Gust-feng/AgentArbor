@@ -170,18 +170,21 @@ export async function fetchModelProviderCatalog(profileId: string): Promise<{
 export async function saveModelProviderCatalog(input: {
   readonly profileId: string;
   readonly catalog: ModelProviderModelCatalog;
-}): Promise<readonly ModelProviderModelCatalog[]> {
+}): Promise<ConfigResponse> {
   const response = await postJson<{
     readonly catalog: ModelProviderModelCatalog;
     readonly modelCatalogs?: readonly ModelProviderModelCatalog[];
-  }>(`/api/config/model-profiles/${encodeURIComponent(input.profileId)}/model-catalog`, {
+  } & ConfigResponse>(`/api/config/model-profiles/${encodeURIComponent(input.profileId)}/model-catalog`, {
     label: input.catalog.label,
     baseUrl: input.catalog.baseUrl,
     modelsPath: input.catalog.modelsPath,
     fetchedAt: input.catalog.fetchedAt,
     models: input.catalog.models,
   });
-  return response.modelCatalogs ?? [response.catalog];
+  return {
+    ...response,
+    modelCatalogs: response.modelCatalogs ?? [response.catalog],
+  };
 }
 
 export async function saveWorkspaceDirectory(workspaceDirectory: string): Promise<{ readonly workspaceDirectory?: string }> {

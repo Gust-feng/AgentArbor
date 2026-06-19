@@ -333,7 +333,6 @@ export function ModelProviderList(props: {
                 <ProviderLogo item={item} />
                 <span>
                   <strong>{item.title}</strong>
-                  <small>{providerRowMeta(item)}</small>
                 </span>
               </button>
               <button
@@ -372,15 +371,11 @@ export function ModelProviderList(props: {
       </div>
       {props.adding && !deleteMode && (
         <div className="provider-add-menu" aria-label="添加模型提供商">
-          {props.addableItems.length === 0 && (
-            <div className="provider-add-empty">内置模型提供商已全部添加</div>
-          )}
           {props.addableItems.map((item) => (
             <button type="button" key={item.key} onClick={() => props.onAddProvider(item)} disabled={props.saving}>
               <ProviderLogo item={item} />
               <span>
                 <strong>{item.title}</strong>
-                <small>{item.baseUrl}</small>
               </span>
             </button>
           ))}
@@ -388,7 +383,6 @@ export function ModelProviderList(props: {
             <Plus size={16} />
             <span>
               <strong>自定义厂商</strong>
-              <small>OpenAI Chat 兼容接口</small>
             </span>
           </button>
         </div>
@@ -409,14 +403,6 @@ export function ModelProviderList(props: {
       </button>
     </aside>
   );
-}
-
-function providerRowMeta(item: ModelProviderListItem): string {
-  const model = item.model.trim();
-  if (model.length > 0) return model;
-  const baseUrl = item.baseUrl.trim();
-  if (baseUrl.length > 0) return baseUrl;
-  return item.vendor ?? "未设置模型";
 }
 
 function reorderedProviderKeys(

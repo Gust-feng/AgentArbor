@@ -46,7 +46,7 @@ export function projectAssistantMessageView<
   const output = assistantMessageOutput({ content: input.content, deliverable: input.deliverable });
   const live = input.live === true;
   const keepStreamMounted = live || input.keepStreamMounted === true;
-  const animateAnswerOnMount = keepStreamMounted || input.animateOnMount === true;
+  const animateAnswerOnMount = input.animateOnMount === true;
   const tone = input.liveTone ?? "formal";
   const structure = projectAssistantMessageStructure<TNode, TConfirmation>({
     fallbackText: output.hasAnswer ? output.text : undefined,

@@ -1,3 +1,4 @@
+.assistant-error-message,
 .assistant-failure-notice {
   display: grid;
   gap: 4px;
@@ -6,6 +7,7 @@
   padding: 10px 12px;
 }
 
+.assistant-error-message strong,
 .assistant-failure-notice strong {
   color: color-mix(in oklch, var(--fg) 78%, var(--status-danger));
   font-size: 12px;
@@ -13,10 +15,19 @@
   line-height: 1.3;
 }
 
+.assistant-error-message .rich-text,
 .assistant-failure-notice .rich-text {
   color: color-mix(in oklch, var(--fg) 68%, var(--status-danger));
   font-size: 13px;
   line-height: 1.7;
+}
+
+.assistant-failure-activity {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid color-mix(in oklch, var(--border) 72%, transparent);
 }
 
 .assistant-message-pending .assistant-message-body {

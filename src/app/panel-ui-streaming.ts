@@ -21,11 +21,10 @@ export function createStreamingTextState(text = ""): StreamingTextState {
 
 export function createInitialStreamingTextState(
   text: string,
-  live: boolean,
   animateOnMount: boolean,
   tone: StreamingTextTone
 ): StreamingTextState {
-  if (text.length === 0 || (!live && !animateOnMount)) {
+  if (text.length === 0 || !animateOnMount) {
     return createStreamingTextState(text);
   }
   return consumeStreamingTextFrame(

@@ -2,7 +2,6 @@ import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   consumeStreamingTextFrame,
   createInitialStreamingTextState,
-  createStreamingTextState,
   updateStreamingTextTarget,
   type StreamingTextState,
   type StreamingTextTone,
@@ -32,7 +31,7 @@ export function LiveStreamBox({
     readonly streamingRender: boolean;
   } | undefined>(undefined);
   if (initialRef.current === undefined) {
-    const stream = createInitialStreamingTextState(text, live, animateOnMount, tone);
+    const stream = createInitialStreamingTextState(text, animateOnMount, tone);
     const streaming = live || stream.queue.length > 0;
     initialRef.current = {
       stream,
@@ -41,7 +40,6 @@ export function LiveStreamBox({
   }
   const stateRef = useRef<StreamingTextState>(initialRef.current.stream);
   const rafRef = useRef<number | undefined>(undefined);
-  const wasLiveRef = useRef(live);
   const latestPropsRef = useRef({ live, text, tone });
   const [displayed, setDisplayed] = useState(initialRef.current.stream.displayed);
   const [streamingRender, setStreamingRender] = useState(initialRef.current.streamingRender);
@@ -58,7 +56,6 @@ export function LiveStreamBox({
       stateRef.current = updateStreamingTextTarget(stateRef.current, text, true);
       stateRef.current = consumeStreamingTextFrame(stateRef.current, tone);
       const hasQueuedText = stateRef.current.queue.length > 0;
-      wasLiveRef.current = live || hasQueuedText;
       commitDisplayedText(stateRef.current.displayed, live || hasQueuedText);
       if (hasQueuedText) {
         scheduleTick();
@@ -67,23 +64,11 @@ export function LiveStreamBox({
       }
       return;
     }
-    if (wasLiveRef.current || stateRef.current.queue.length > 0) {
-      wasLiveRef.current = false;
-      stateRef.current = updateStreamingTextTarget(stateRef.current, text, true);
-      if (stateRef.current.queue.length > 0) {
-        scheduleTick();
-        return;
-      }
-      cancelTick();
-      stateRef.current = updateStreamingTextTarget(stateRef.current, text, false);
-      commitDisplayedText(stateRef.current.displayed, false);
-      return;
-    }
+
+    // Once the backend has settled this segment, the UI should snap to the
+    // final text instead of replaying buffered characters after the user
+    // returns to the view.
     stateRef.current = updateStreamingTextTarget(stateRef.current, text, false);
-    if (stateRef.current.queue.length > 0) {
-      scheduleTick();
-      return;
-    }
     cancelTick();
     commitDisplayedText(stateRef.current.displayed, false);
   }, [text, live, animateOnMount, tone]);

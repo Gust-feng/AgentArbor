@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { assistantFailureParts } from "./panel-assistant-failure.js";
+import { assistantFailureParts, transcriptNodesWithoutFailureEcho } from "./panel-assistant-failure.js";
 
 test("assistant failure projection preserves previous output before the error marker", () => {
   assert.deepEqual(
@@ -39,3 +39,70 @@ test("assistant failure projection treats plain failed content as the error mess
     }
   );
 });
+
+test("assistant failure projection strips failed system nodes from workflow timeline", () => {
+  const failure = assistantFailureParts("错误信息：模型输出校验失败。");
+  const nodes = transcriptNodesWithoutFailureEcho([
+    node({
+      nodeId: "tool-1",
+      eventType: "tool.failed",
+      kind: "tool",
+      phase: "failed",
+      summary: "读取模型能力信息失败",
+    }),
+    node({
+      nodeId: "system-1",
+      eventType: "model.failed",
+      kind: "system",
+      phase: "failed",
+      summary: "模型输出校验失败。",
+    }),
+    node({
+      nodeId: "system-2",
+      eventType: "run.failed",
+      kind: "system",
+      phase: "failed",
+      summary: "模型输出校验失败。",
+    }),
+  ], failure);
+
+  assert.deepEqual(nodes?.map((item) => item.nodeId), ["tool-1"]);
+});
+
+test("assistant failure projection keeps non-failed system narration in workflow timeline", () => {
+  const failure = assistantFailureParts("错误信息：模型输出校验失败。");
+  const nodes = transcriptNodesWithoutFailureEcho([
+    node({
+      nodeId: "system-1",
+      eventType: "model.side.completed",
+      kind: "system",
+      phase: "completed",
+      summary: "已切换到回退路径。",
+    }),
+  ], failure);
+
+  assert.deepEqual(nodes?.map((item) => item.nodeId), ["system-1"]);
+});
+
+function node(input: {
+  readonly nodeId: string;
+  readonly eventType: string;
+  readonly kind: "thinking" | "tool" | "confirmation" | "user_decision" | "answer" | "body" | "system";
+  readonly phase: "noted" | "preparing" | "waiting_approval" | "approved" | "denied" | "guidance" | "executing" | "completed" | "failed" | "blocked" | "cancelled";
+  readonly text?: string;
+  readonly summary?: string;
+}) {
+  return {
+    nodeId: input.nodeId,
+    runId: "run-1",
+    sequence: 1,
+    eventType: input.eventType,
+    kind: input.kind,
+    phase: input.phase,
+    text: input.text,
+    summary: input.summary,
+    title: "",
+    timestamp: "2026-06-20T00:00:00.000Z",
+    refs: [],
+  };
+}

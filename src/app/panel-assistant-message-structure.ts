@@ -72,7 +72,7 @@ export function projectAssistantMessageStructure<
   const transcriptNodes = input.transcriptNodes ?? [];
   const live = input.live === true;
   const keepStreamMounted = live || input.keepStreamMounted === true;
-  const animateOnMount = keepStreamMounted || input.animateOnMount === true;
+  const animateOnMount = input.animateOnMount === true;
   const tone = input.liveTone ?? "formal";
   const preferTranscriptBodies = input.preferTranscriptBodies === true || keepStreamMounted;
   const bodySegments = assistantBodySegments<TNode, TConfirmation>({
@@ -279,7 +279,7 @@ function finalizeBodySegments<
     ...draft,
     live: draft.phase === "noted",
     lifecycle: draft.phase === "noted" ? "open" : "settled",
-    animateOnMount: draft.phase === "noted" || (animateOnMount && index === lastIndex),
+    animateOnMount: animateOnMount && index === lastIndex,
   }));
 }
 

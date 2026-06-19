@@ -171,13 +171,15 @@ type AssistantFailureMessageProps = {
 
 const AssistantFailureMessage = React.memo(function AssistantFailureMessage(props: AssistantFailureMessageProps): React.ReactElement {
   const workflow = props.workflow;
+  const bodySegments = workflow?.segments.filter((segment) => segment.kind !== "activity") ?? [];
+  const activitySegments = workflow?.segments.filter((segment) => segment.kind === "activity") ?? [];
   const collapsedClass = workflowHasCollapsedActivity(workflow) ? " assistant-workline-collapsed" : "";
   return (
     <article className={`assistant-message assistant-message-failed assistant-workline${collapsedClass}`}>
       <AssistantMessageLabel model={props.model} />
       <div className="assistant-message-body">
         {workflow !== undefined
-          ? workflow.segments.map((segment, index) => (
+          ? bodySegments.map((segment, index) => (
             <AssistantWorkflowSegment
               key={segment.kind === "awaiting" ? `awaiting-${index}` : segment.segmentKey}
               segment={segment}
@@ -200,6 +202,17 @@ const AssistantFailureMessage = React.memo(function AssistantFailureMessage(prop
           </div>
         )}
         <AssistantFailureNotice error={props.failure.error} />
+        {activitySegments.length > 0 && (
+          <div className="assistant-failure-activity">
+            {activitySegments.map((segment) => (
+              <AssistantWorkflowSegment
+                key={segment.segmentKey}
+                segment={segment}
+                confirmationBusy={false}
+              />
+            ))}
+          </div>
+        )}
       </div>
     </article>
   );
@@ -274,7 +287,7 @@ function AssistantFailureNotice(props: {
   readonly error: string;
 }): React.ReactElement {
   return (
-    <section className="assistant-failure-notice" aria-label="错误信息">
+    <section className="assistant-error-message assistant-failure-notice" aria-label="错误信息">
       <strong>错误信息</strong>
       <RichText text={props.error.replace(/^错误信息[:：]\s*/u, "")} />
     </section>

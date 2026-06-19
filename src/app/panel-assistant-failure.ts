@@ -69,8 +69,16 @@ function isFailureEchoNode(node: FailureEchoTranscriptNode, comparableError: str
   if (node.kind === "body" || node.kind === "answer") {
     return false;
   }
+  if (isFailureSystemNode(node)) {
+    return true;
+  }
   const comparableNodeText = comparableFailureText(node.text ?? node.summary ?? node.title);
   return comparableNodeText.length > 0 && comparableNodeText === comparableError;
+}
+
+function isFailureSystemNode(node: FailureEchoTranscriptNode): boolean {
+  return node.kind === "system" &&
+    (node.phase === "failed" || node.phase === "blocked" || node.phase === "cancelled");
 }
 
 function comparableFailureText(value: string): string {

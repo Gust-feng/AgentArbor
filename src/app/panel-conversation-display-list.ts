@@ -227,7 +227,7 @@ function standaloneAssistantFacts<
     failed: standaloneRun.runStatus === "failed",
     live: refreshing && liveStreamingAnswer !== undefined,
     keepStreamMounted: refreshing,
-    animateOnMount: liveStreamingAnswer !== undefined || (!refreshing && content.trim().length > 0),
+    animateOnMount: false,
     liveTone: liveStreamingAnswer?.tone ?? standaloneRun.runProjection.answer?.tone,
   };
 }

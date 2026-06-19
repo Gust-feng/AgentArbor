@@ -46,7 +46,7 @@ test("assistant message view projects answer rendering state outside React", () 
     copyText: "最终回答",
     showActions: false,
     live: true,
-    animateOnMount: true,
+    animateOnMount: false,
     tone: "process",
   });
 });
@@ -581,7 +581,7 @@ test("assistant message view keeps live state on the latest body only", () => {
   assert.equal(bodySegments[0]?.live, false);
   assert.equal(bodySegments[0]?.animateOnMount, false);
   assert.equal(bodySegments[1]?.live, true);
-  assert.equal(bodySegments[1]?.animateOnMount, true);
+  assert.equal(bodySegments[1]?.animateOnMount, false);
 });
 
 test("assistant message view treats pending confirmation as workflow content", () => {

@@ -389,8 +389,8 @@ function shellCommandDefinition(commandShell: SanitizedCommandShellConfig): Tool
       inputNotes: [
         "commandLine is the normal complete shell command line.",
         "command plus args executes a program directly with argv and bypasses shell parsing.",
-        "cwd optionally selects a workspace-relative working directory; omit it to run from the workspace root.",
         "background=true starts a detached process and returns immediately with pid, logRef, diagnostic logPath, and stopCommand.",
+        "cwd optionally selects a workspace-relative working directory; omit it to run from the workspace root.",
         `backgroundWaitMs watches a background command for early exit and initial logs; defaults to ${DEFAULT_BACKGROUND_WAIT_MS} and is capped at ${MAX_BACKGROUND_WAIT_MS}.`,
         `waitForPort optionally waits for a localhost TCP port to become reachable after a background command starts; waitForPortTimeoutMs defaults to ${DEFAULT_WAIT_FOR_PORT_TIMEOUT_MS} and is capped at ${MAX_WAIT_FOR_PORT_TIMEOUT_MS}.`,
         `timeoutMs defaults to ${DEFAULT_COMMAND_TIMEOUT_MS} and is capped at ${MAX_COMMAND_TIMEOUT_MS}.`,
@@ -403,10 +403,10 @@ function shellCommandDefinition(commandShell: SanitizedCommandShellConfig): Tool
       usageNotes: [
         "Choose the command form yourself based on the current shell and the task.",
         "Use commandLine for normal shell commands, pipelines, redirection, chaining, environment expansion, shell builtins, and shell-native quoting.",
+        "Use background=true for dev servers, file watchers, long-running demos, and other commands expected to keep running.",
         "Use command and args when quoting would be fragile, especially for inline scripts such as node -e, python -c, or paths and arguments that are easier to express as argv.",
         "If curl is unavailable, use the installed runtime such as node or python for HTTP requests instead of waiting for a separate HTTP tool.",
         "Use this tool for normal filesystem commands such as mkdir, rmdir, copy, move, and recursive cleanup.",
-        "Use background=true for dev servers, file watchers, long-running demos, and other commands expected to keep running.",
         "For dev servers, combine background=true with waitForPort so the tool returns only after the local port is reachable or the port wait times out.",
         "When background=true, do not append shell-native background operators such as POSIX & just to detach the process; the tool already returns pid, logRef, diagnostic logPath, and stopCommand.",
         "Use cwd instead of repeated cd chaining when the command should run inside a project subdirectory.",

@@ -689,24 +689,6 @@ html[data-style="default"] .agent-activity-expanded-section + .agent-activity-ex
   border-top-color: color-mix(in oklch, var(--border) 48%, transparent);
 }
 
-html[data-style="default"] .rich-blockquote {
-  border-left-color: color-mix(in oklch, var(--accent) 44%, var(--secondary));
-  border-radius: var(--radius-md);
-  background: color-mix(in oklch, var(--accent-soft) 40%, var(--surface));
-}
-
-html[data-style="default"] .rich-inline-code {
-  border-color: color-mix(in oklch, var(--content-border) 92%, transparent);
-  background: var(--content-surface);
-}
-
-html[data-style="default"] .rich-code-block,
-html[data-style="default"] .rich-table-wrap {
-  border-color: color-mix(in oklch, var(--content-border) 94%, transparent);
-  background: var(--content-surface);
-  box-shadow: inset 0 1px 0 color-mix(in oklch, white 18%, transparent);
-}
-
 html[data-style="default"] .settings-dialog {
   border-width: var(--border-width-thin);
   border-radius: var(--radius-xl);
@@ -888,6 +870,118 @@ html[data-style="default"][data-color="dark"] .sidebar-new-button.active {
 
 html[data-style="default"][data-color="dark"] .chat-empty-heading {
   color: color-mix(in oklch, var(--fg) 98%, var(--muted));
+}
+
+/* ====================================================================== */
+/*  Model Output — Modern & Clean (Notion-inspired)                        */
+/*  Sans-serif body, clear heading hierarchy, flat geometry                */
+/* ====================================================================== */
+
+html[data-style="default"] {
+  --rt-body-family: var(--font-sans);
+  --rt-body-size: 15.5px;
+  --rt-body-lh: 1.76;
+  --rt-gap: 13px;
+  --rt-heading-family: var(--font-sans);
+  --rt-heading-weight: var(--weight-heading);
+  --rt-heading-gap: 20px;
+  --rt-heading-gap-after: 6px;
+  --rt-h1-size: 21px;
+  --rt-h2-size: 18px;
+  --rt-h3-size: 16px;
+  --rt-h4-size: 14.5px;
+  --rt-h2-border: 1px solid color-mix(in oklch, var(--border) 64%, transparent);
+  --rt-h2-padding: 6px 0;
+  --rt-list-gap: 8px;
+  --rt-bq-border: 3px solid color-mix(in oklch, var(--accent) 50%, var(--border));
+  --rt-bq-radius: 0 var(--radius-md) var(--radius-md) 0;
+  --rt-bq-bg: color-mix(in oklch, var(--accent) 4%, var(--surface));
+  --rt-bq-padding: 10px 14px;
+  --rt-bq-color: color-mix(in oklch, var(--fg) 76%, var(--muted));
+  --rt-bq-margin: 4px 0;
+  --rt-bq-style: normal;
+  --rt-ic-border: color-mix(in oklch, var(--border) 78%, transparent);
+  --rt-ic-radius: var(--radius-sm);
+  --rt-ic-bg: color-mix(in oklch, var(--surface-subtle) 64%, var(--surface));
+  --rt-ic-padding: 2px 6px;
+  --rt-ic-color: color-mix(in oklch, var(--fg) 78%, var(--accent));
+  --rt-ic-size: 0.88em;
+  --rt-code-radius: var(--radius-md);
+  --rt-code-bg: color-mix(in oklch, var(--surface-subtle) 68%, var(--surface));
+  --rt-code-padding: 16px;
+  --rt-code-size: 12.5px;
+  --rt-code-lh: 1.72;
+  --rt-code-header-height: 36px;
+  --rt-code-label-top: 10px;
+  --rt-code-label-right: 14px;
+  --rt-code-label-color: color-mix(in oklch, var(--fg) 38%, var(--muted));
+  --rt-code-label-size: 10px;
+  --rt-table-family: var(--font-sans);
+  --rt-table-size: 13px;
+  --rt-table-border: 1px solid color-mix(in oklch, var(--border) 74%, transparent);
+  --rt-table-cell-padding: 10px 12px;
+  --rt-table-header-bg: color-mix(in oklch, var(--surface-subtle) 72%, var(--surface));
+  --rt-table-header-size: 12px;
+  --rt-divider: 1px solid color-mix(in oklch, var(--border) 56%, transparent);
+  --rt-divider-gap: 10px 0;
+}
+
+html[data-style="default"] .rich-heading-1 {
+  letter-spacing: -0.01em;
+}
+
+html[data-style="default"] .rich-heading-2 {
+  letter-spacing: -0.005em;
+}
+
+html[data-style="default"] .rich-heading-3 {
+  color: color-mix(in oklch, var(--fg) 92%, var(--muted));
+}
+
+html[data-style="default"] .rich-heading-4 {
+  color: color-mix(in oklch, var(--fg) 82%, var(--muted));
+  text-transform: none;
+}
+
+html[data-style="default"] .rich-link {
+  color: var(--accent);
+  font-weight: var(--weight-body);
+  text-decoration-color: color-mix(in oklch, var(--accent) 32%, transparent);
+}
+
+html[data-style="default"] .rich-link:hover {
+  text-decoration-color: var(--accent);
+}
+
+html[data-style="default"] .rich-list li::marker {
+  color: color-mix(in oklch, var(--accent) 52%, var(--muted));
+}
+
+html[data-style="default"] .rich-blockquote {
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--accent) 6%, transparent);
+}
+
+html[data-style="default"] .rich-inline-code {
+  box-shadow: 0 1px 0 color-mix(in oklch, var(--shadow-ink) 2%, transparent);
+}
+
+html[data-style="default"] .rich-code-block,
+html[data-style="default"] .rich-table-wrap {
+  border-color: color-mix(in oklch, var(--content-border) 88%, transparent);
+  background: var(--content-surface);
+  box-shadow:
+    0 1px 2px color-mix(in oklch, var(--shadow-ink) 3%, transparent),
+    inset 0 1px 0 color-mix(in oklch, white 14%, transparent);
+}
+
+html[data-style="default"] .rich-table th {
+  font-weight: var(--weight-heading);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+html[data-style="default"] .rich-divider {
+  margin: 14px 0;
 }
 
 @media (max-width: 720px) {

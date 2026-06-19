@@ -135,7 +135,7 @@ export function projectAssistantTranscriptTurn<
     deliverable,
     live: liveAnswer !== undefined,
     keepStreamMounted,
-    animateOnMount: keepStreamMounted || animateFromObservedShell,
+    animateOnMount: liveAnswer !== undefined || animateFromObservedShell,
     liveTone: liveAnswer?.tone ?? runProjection.answer?.tone,
   };
 }

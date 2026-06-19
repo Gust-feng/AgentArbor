@@ -75,6 +75,7 @@ test("conversation display list appends standalone assistant after transcript it
   assert.deepEqual(display.items.map((item) => item.kind), ["user", "assistant"]);
   assert.equal(display.items[1]?.kind, "assistant");
   assert.equal(display.items[1]?.kind === "assistant" ? display.items[1].source : undefined, "standalone");
+  assert.equal(display.items[1]?.kind === "assistant" ? display.items[1].animateOnMount : undefined, false);
 });
 
 test("conversation display list keeps assistant turns in the unified list without adding a standalone duplicate", () => {

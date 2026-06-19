@@ -345,6 +345,60 @@ html[data-style="glass"] {
   --scrollbar-thumb-hover: color-mix(in oklch, var(--fg) 24%, transparent);
   --scrollbar-pane-thumb: color-mix(in oklch, var(--fg) 12%, transparent);
   --scrollbar-pane-thumb-hover: color-mix(in oklch, var(--fg) 22%, transparent);
+
+  /* ---- Rich text — luminous glass typography ---- */
+  --rt-body-family: var(--font-sans);
+  --rt-body-size: 16px;
+  --rt-body-lh: 1.82;
+  --rt-gap: 14px;
+  --rt-heading-family: var(--font-sans);
+  --rt-heading-weight: var(--weight-bold);
+  --rt-heading-gap: 22px;
+  --rt-heading-gap-after: 6px;
+  --rt-h1-size: 22px;
+  --rt-h2-size: 18.5px;
+  --rt-h3-size: 16.5px;
+  --rt-h4-size: 14.5px;
+  --rt-h2-border: 1px solid color-mix(in oklch, white 28%, var(--border));
+  --rt-h2-padding: 6px 0;
+  --rt-list-gap: 9px;
+  --rt-bq-border: 3px solid color-mix(in oklch, var(--accent) 38%, white);
+  --rt-bq-radius: 0 var(--radius-lg) var(--radius-lg) 0;
+  --rt-bq-bg:
+    linear-gradient(135deg, color-mix(in oklch, var(--accent) 6%, transparent), transparent 68%),
+    color-mix(in oklch, var(--surface) 46%, var(--glass-shell-tone));
+  --rt-bq-padding: 12px 16px;
+  --rt-bq-color: color-mix(in oklch, var(--fg) 74%, var(--muted));
+  --rt-bq-margin: 4px 0;
+  --rt-bq-style: normal;
+  --rt-ic-border: color-mix(in oklch, white 34%, var(--border));
+  --rt-ic-radius: var(--radius-sm);
+  --rt-ic-bg: color-mix(in oklch, white 38%, transparent);
+  --rt-ic-padding: 2px 6px;
+  --rt-ic-color: color-mix(in oklch, var(--fg) 84%, var(--accent));
+  --rt-ic-size: 0.88em;
+  --rt-code-radius: var(--radius-lg);
+  --rt-code-bg:
+    linear-gradient(180deg, color-mix(in oklch, white 18%, transparent), transparent 50%),
+    color-mix(in oklch, var(--surface) 52%, var(--glass-shell-tone));
+  --rt-code-padding: 16px 18px;
+  --rt-code-size: 12.5px;
+  --rt-code-lh: 1.72;
+  --rt-code-header-height: 38px;
+  --rt-code-label-top: 11px;
+  --rt-code-label-right: 14px;
+  --rt-code-label-color: color-mix(in oklch, var(--fg) 36%, white);
+  --rt-code-label-size: 10px;
+  --rt-table-family: var(--font-sans);
+  --rt-table-size: 13px;
+  --rt-table-border: 1px solid color-mix(in oklch, white 26%, var(--border));
+  --rt-table-cell-padding: 10px 13px;
+  --rt-table-header-bg:
+    linear-gradient(180deg, color-mix(in oklch, white 14%, transparent), transparent 60%),
+    color-mix(in oklch, var(--surface) 44%, var(--glass-shell-tone));
+  --rt-table-header-size: 12px;
+  --rt-divider: 1px solid color-mix(in oklch, white 30%, var(--border));
+  --rt-divider-gap: 12px 0;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1062,7 +1116,9 @@ html[data-style="glass"] .assistant-answer {
 html[data-style="glass"] .assistant-answer .rich-blockquote,
 html[data-style="glass"] .rich-code-block,
 html[data-style="glass"] .rich-table-wrap {
-  box-shadow: var(--shadow-soft);
+  box-shadow:
+    var(--shadow-soft),
+    inset 0 1px 0 color-mix(in oklch, white 52%, transparent);
 }
 
 html[data-style="glass"] .assistant-message-label::after {
@@ -1461,23 +1517,67 @@ html[data-style="glass"] .sidebar-empty-rail-dot {
 }
 
 html[data-style="glass"] .rich-blockquote {
-  border-left-color: color-mix(in oklch, var(--accent) 38%, white);
-  background:
-    linear-gradient(135deg, color-mix(in oklch, var(--accent) 6%, transparent), transparent 68%),
-    color-mix(in oklch, var(--surface) 46%, var(--glass-shell-tone));
+  backdrop-filter: var(--glass-backdrop-filter);
+  -webkit-backdrop-filter: var(--glass-backdrop-filter);
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklch, white 46%, transparent),
+    inset 0 -1px 0 color-mix(in oklch, white 8%, transparent);
 }
 
 html[data-style="glass"] .rich-inline-code {
-  border-color: color-mix(in oklch, white 34%, var(--border));
-  background: color-mix(in oklch, white 38%, transparent);
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklch, white 42%, transparent),
+    0 1px 2px color-mix(in oklch, var(--shadow-ink) 2%, transparent);
 }
 
 html[data-style="glass"] .rich-code-block,
 html[data-style="glass"] .rich-table-wrap {
-  border-color: color-mix(in oklch, white 40%, var(--border));
-  background:
-    linear-gradient(180deg, color-mix(in oklch, white 18%, transparent), transparent 50%),
-    color-mix(in oklch, var(--surface) 52%, var(--glass-shell-tone));
+  backdrop-filter: saturate(1.03);
+  -webkit-backdrop-filter: saturate(1.03);
+}
+
+html[data-style="glass"] .rich-heading-1 {
+  letter-spacing: -0.015em;
+  color: color-mix(in oklch, var(--fg) 96%, var(--accent));
+}
+
+html[data-style="glass"] .rich-heading-2 {
+  letter-spacing: -0.008em;
+}
+
+html[data-style="glass"] .rich-heading-3 {
+  color: color-mix(in oklch, var(--fg) 90%, var(--muted));
+}
+
+html[data-style="glass"] .rich-heading-4 {
+  color: color-mix(in oklch, var(--fg) 82%, var(--muted));
+  font-weight: var(--weight-heading);
+}
+
+html[data-style="glass"] .rich-link {
+  color: var(--accent);
+  font-weight: var(--weight-body);
+  text-decoration-color: color-mix(in oklch, var(--accent) 36%, transparent);
+}
+
+html[data-style="glass"] .rich-link:hover {
+  text-decoration-color: color-mix(in oklch, var(--accent) 72%, transparent);
+}
+
+html[data-style="glass"] .rich-list li::marker {
+  color: color-mix(in oklch, var(--accent) 46%, white);
+}
+
+html[data-style="glass"] .rich-table th {
+  font-weight: var(--weight-heading);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  font-size: 12px;
+}
+
+html[data-style="glass"] .rich-divider {
+  margin: 14px 0;
+  border-top-color: color-mix(in oklch, white 32%, var(--border));
 }
 
 /* ========================================================================== */

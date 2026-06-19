@@ -379,8 +379,8 @@ test("panel React workbench consumes Basic Agent projection APIs", async () => {
   assert.equal(sidebar.includes("sidebar-confirmation-card"), false);
   assert.equal(sidebar.includes("最近会话"), true);
   assert.equal(app.includes('from "./components/topbar"'), false);
-  assert.equal(app.includes("sidebarCollapsed"), false);
-  assert.equal(app.includes("onToggleSidebar"), false);
+  assert.equal(app.includes("sidebarCollapsed"), true);
+  assert.equal(app.includes("onToggleSidebar"), true);
   assert.equal(motionResponsiveStyles.includes(".topbar-chip"), false);
   assert.equal(chatActive.includes("WorkContextPanel"), false);
   assert.equal(chatActive.includes("工作上下文"), false);

@@ -353,12 +353,15 @@ test("panel UI chat and transcript modules stay presentation-focused", async () 
   assert.equal(chatTranscriptChain.includes("workflow={item.workflow}"), true);
   assert.equal(chatTranscriptChain.includes("readonly failure: AssistantFailureParts;"), true);
   assert.equal(chatTranscriptChain.includes("readonly workflow?: AssistantWorkflowDisplay<TranscriptNode, ConfirmationProjection>;"), true);
-  assert.equal(chatTranscriptChain.includes("workflow !== undefined\n          ? workflow.segments.map"), true);
+  assert.equal(chatTranscriptChain.includes("const bodySegments = workflow?.segments.filter((segment) => segment.kind !== \"activity\") ?? [];"), true);
+  assert.equal(chatTranscriptChain.includes("const activitySegments = workflow?.segments.filter((segment) => segment.kind === \"activity\") ?? [];"), true);
+  assert.equal(chatTranscriptChain.includes("workflow !== undefined\n          ? bodySegments.map"), true);
   assert.equal(chatTranscriptChain.includes(": props.failure.previous.length > 0 && ("), true);
   assert.equal(chatTranscriptChain.includes("transcriptNodes={item.failure.transcriptNodes}"), false);
   assert.equal(chatTranscriptChain.includes("readonly transcriptNodes?: readonly TranscriptNode[];"), false);
-  assert.equal(chatTranscriptChain.includes(".filter((segment) => segment.kind === \"activity\")"), false);
-  assert.equal(chatTranscriptChain.includes("workflow.segments.map((segment, index)"), true);
+  assert.equal(chatTranscriptChain.includes(".filter((segment) => segment.kind === \"activity\")"), true);
+  assert.equal(chatTranscriptChain.includes("className=\"assistant-failure-activity\""), true);
+  assert.equal(chatTranscriptChain.includes("activitySegments.map((segment) => ("), true);
   assert.match(conversationDisplayListProjection, /turn\.status === "failed"[\s\S]*workflow,[\s\S]*failure: assistantDisplay\.failure/);
   assert.equal(conversationDisplayListProjection.includes("assistantFailureParts("), false);
   assert.equal(chatActive.includes("错误信息："), false);

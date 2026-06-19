@@ -83,18 +83,25 @@ test("streaming first live target can paint immediately", () => {
   assert.equal(firstFrame.queue.join(""), "世界");
 });
 
-test("streaming initial state paints the first frame without waiting for effects", () => {
-  const initial = createInitialStreamingTextState("你好世界", true, false, "formal");
+test("streaming initial state does not replay restored live text on mount", () => {
+  const initial = createInitialStreamingTextState("你好世界", false, "formal");
 
-  assert.equal(initial.displayed, "你好");
-  assert.equal(initial.queue.join(""), "世界");
+  assert.equal(initial.displayed, "你好世界");
+  assert.equal(initial.queue.join(""), "");
 });
 
 test("settled animated initial state also paints the first frame", () => {
-  const initial = createInitialStreamingTextState("等待后返回的完整答案。", false, true, "formal");
+  const initial = createInitialStreamingTextState("等待后返回的完整答案。", true, "formal");
 
   assert.equal(initial.displayed, "等待");
   assert.equal(initial.queue.join(""), "后返回的完整答案。");
+});
+
+test("streaming initial state still animates when mount animation is explicitly requested", () => {
+  const initial = createInitialStreamingTextState("你好世界", true, "formal");
+
+  assert.equal(initial.displayed, "你好");
+  assert.equal(initial.queue.join(""), "世界");
 });
 
 test("streaming first frame can fully settle very short catch-up text", () => {

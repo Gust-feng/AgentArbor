@@ -1,5 +1,5 @@
 import type { ChatModelOption } from "./components/chat-empty";
-import { resolveModelIconSvg } from "./model-icons";
+import { resolveModelIconSvgForModel } from "./model-icons";
 import { modelProviderDisplayName, modelProviderSortRank, resolveModelProviderIdentity } from "./model-provider-logos";
 import type { ConfigResponse, ModelProviderModelCatalog } from "./contracts/config";
 
@@ -52,7 +52,9 @@ export function modelOptionsFromConfig(
           providerIdentity: identity,
           profileId: profile.profileId,
           modelId: model.id,
-          iconSvg: shouldShowProviderIcon(profile) ? resolveModelIconSvg(identity) : undefined,
+          iconSvg: shouldShowProviderIcon(profile)
+            ? resolveModelIconSvgForModel({ providerIdentity: identity, modelId: model.id, displayName: model.displayName })
+            : undefined,
         }));
     });
 }
@@ -156,9 +158,16 @@ function modelLooksReasoningEffortCapable(input: {
     return false;
   }
   const model = input.model.toLowerCase();
-  const signals = `${input.profileId ?? ""} ${input.label ?? ""} ${input.baseUrl ?? ""} ${model}`.toLowerCase();
-  if (signals.includes("deepseek") && model.includes("deepseek-v4")) {
+  const providerSignals = `${input.profileId ?? ""} ${input.label ?? ""} ${input.baseUrl ?? ""}`.toLowerCase();
+  if (providerSignals.includes("deepseek") && model.includes("deepseek-v4")) {
     return true;
+  }
+  const openAiProvider =
+    providerSignals.includes("api.openai.com") ||
+    providerSignals.includes("openai") ||
+    (providerSignals.includes("default") && (input.baseUrl ?? "").trim().length === 0);
+  if (!openAiProvider) {
+    return false;
   }
   return (
     model.includes("gpt-5") ||

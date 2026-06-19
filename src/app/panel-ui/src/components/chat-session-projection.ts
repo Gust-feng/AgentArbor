@@ -1,4 +1,4 @@
-import { resolveModelIconSvg } from "../model-icons";
+import { resolveModelIconSvgForModel } from "../model-icons";
 import { modelProviderDisplayName, resolveModelProviderIdentity, type ModelProviderIdentity } from "../model-provider-logos";
 import type { ConversationTurn } from "../contracts/conversation";
 import type { ChatModelOption } from "./chat-empty";
@@ -37,7 +37,11 @@ export function assistantModelForTurn(
       modelName: turn.responseModel.model ?? turn.responseModel.label ?? "模型",
       providerLabel: identity === "unknown" ? turn.responseModel.label ?? "模型" : modelProviderDisplayName(identity),
       providerIdentity: identity,
-      iconSvg: identity === "unknown" ? undefined : resolveModelIconSvg(identity),
+      iconSvg: resolveModelIconSvgForModel({
+        providerIdentity: identity,
+        modelId: turn.responseModel.model,
+        displayName: turn.responseModel.label,
+      }),
     };
   }
   return selectedComposerModel(models, selectedModelId);

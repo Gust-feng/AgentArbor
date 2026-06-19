@@ -112,6 +112,57 @@
   color: var(--primary-foreground);
 }
 
+.model-fetch-button {
+  width: 108px;
+  min-width: 108px;
+  overflow: hidden;
+  font-weight: var(--weight-label);
+  transition:
+    border-color var(--motion-fast-duration) var(--motion-ease-standard),
+    background var(--motion-fast-duration) var(--motion-ease-standard),
+    color var(--motion-fast-duration) var(--motion-ease-standard),
+    opacity var(--motion-fast-duration) var(--motion-ease-standard);
+}
+
+.model-fetch-button.loading {
+  border-color: color-mix(in oklch, var(--accent-border) 64%, var(--field-border));
+  background:
+    linear-gradient(90deg, transparent, color-mix(in oklch, var(--accent-soft) 42%, transparent), transparent),
+    color-mix(in oklch, var(--accent-soft) 22%, var(--field-bg));
+  color: color-mix(in oklch, var(--accent-active) 72%, var(--fg));
+  opacity: 1;
+}
+
+.model-fetch-button:disabled {
+  cursor: default;
+}
+
+.model-fetch-icon {
+  flex: 0 0 auto;
+}
+
+.model-fetch-button.loading .model-fetch-icon {
+  animation: model-fetch-spin 900ms linear infinite;
+}
+
+.model-fetch-label {
+  display: inline-block;
+  width: 44px;
+  text-align: left;
+}
+
+@keyframes model-fetch-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .model-fetch-button.loading .model-fetch-icon {
+    animation: none;
+  }
+}
+
 .model-empty {
   display: flex;
   min-height: 38px;

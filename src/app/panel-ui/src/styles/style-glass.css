@@ -780,13 +780,6 @@ html[data-style="glass"] .mcp-tool-auth-row:hover {
   box-shadow: var(--liquid-row-shadow-hover);
 }
 
-html[data-style="glass"] .provider-add-menu {
-  border-top-color: color-mix(in oklch, white 34%, transparent);
-  background:
-    linear-gradient(180deg, color-mix(in oklch, white 24%, transparent), transparent 52%),
-    var(--content-surface-muted);
-}
-
 html[data-style="glass"] .mcp-tool-auth-state {
   border-color: color-mix(in oklch, white 20%, var(--border));
   background:

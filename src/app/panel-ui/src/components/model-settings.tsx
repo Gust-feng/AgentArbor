@@ -52,7 +52,6 @@ export function ModelSettings(props: {
   const [revealed, setRevealed] = useState(false);
   const [fetchBusy, setFetchBusy] = useState(false);
   const [modelsFetchBusy, setModelsFetchBusy] = useState(false);
-  const [addingProvider, setAddingProvider] = useState(false);
   const saveTimerRef = useRef<number | undefined>(undefined);
   const fetchSeqRef = useRef(0);
   const providerOrderRef = useRef<readonly string[]>([]);
@@ -86,7 +85,6 @@ export function ModelSettings(props: {
   const selectedProviderIdentity = selectedItem === undefined ? "unknown" : resolveModelProviderIdentity(selectedItem);
   const hasKey = props.modelForm.apiKey.length > 0;
   const hasApiKeyAction = hasKey || selectedSecretConfigured;
-  const addableItems = providerItems.filter((item) => !item.configured);
 
   useEffect(() => {
     setProviderDraft((previous) => reconcileModelProviderProjectionDraft(previous, props.config));
@@ -154,44 +152,10 @@ export function ModelSettings(props: {
   }
 
   function selectItem(item: ModelProviderListItem): void {
-    setAddingProvider(false);
     setSelectedKey(item.key);
   }
 
-  async function addProvider(item: ModelProviderListItem): Promise<void> {
-    setAddingProvider(false);
-    const nextForm = modelFormFromProviderItem(item);
-    const nextProfile = profileFromProviderForm(item, nextForm, projectedConfig?.config?.defaultAiMode);
-    const nextProfileId = nextProfile.profileId ?? nextForm.profileId;
-    const nextKey = `profile:${nextProfileId}`;
-    const previousOrder = providerOrderRef.current;
-    const nextOrder = addProviderKey(providerOrderRef.current, item.key, nextKey);
-    providerOrderRef.current = nextOrder;
-    setSelectedKey(nextKey);
-    props.setModelForm(nextForm);
-    setProviderDraft((previous) => ({
-      ...previous,
-      createdProfiles: upsertProfileDraft(previous.createdProfiles, nextProfile),
-      removedProfileIds: previous.removedProfileIds.filter((profileId) => profileId !== nextProfile.profileId),
-      activeProfile: nextProfile,
-      order: nextOrder,
-    }));
-    if (item.profileId !== undefined) return;
-    try {
-      await saveModelImmediately(nextForm);
-      void props.onReorderModelProviders(providerOrderRef.current.length > 0 ? providerOrderRef.current : nextOrder).catch(() => {
-        setProviderDraft((previous) => ({ ...previous, order: undefined }));
-      });
-    } catch {
-      providerOrderRef.current = previousOrder;
-      setProviderDraft((previous) => removeCreatedProfileDraft(previous, nextProfileId));
-      setSelectedKey((current) => current === nextKey ? item.key : current);
-      // The parent owns user-facing error state.
-    }
-  }
-
   async function addCustomProvider(): Promise<void> {
-    setAddingProvider(false);
     const profileId = `custom_${Date.now().toString(36)}`;
     const nextForm: ModelForm = {
       profileId,
@@ -243,7 +207,6 @@ export function ModelSettings(props: {
 
   async function deleteProvider(item: ModelProviderListItem): Promise<void> {
     if (item.profileId === undefined) return;
-    setAddingProvider(false);
     const deletingActive = item.profileId === activeProfileId;
     const fallbackItem = items.find((candidate) => candidate.key !== item.key);
     const fallbackProfile = deletingActive ? fallbackItem?.profile : undefined;
@@ -424,17 +387,12 @@ export function ModelSettings(props: {
     <div className="settings-provider-manager">
       <ModelProviderList
         items={filteredItems}
-        addableItems={addableItems}
         selectedItem={selectedItem}
         query={query}
         saving={props.saving}
-        adding={addingProvider}
         reorderEnabled={query.trim().length === 0}
         onQueryChange={setQuery}
         onSelect={selectItem}
-        onToggleAdding={() => setAddingProvider((value) => !value)}
-        onCloseAdding={() => setAddingProvider(false)}
-        onAddProvider={(item) => void addProvider(item)}
         onAddCustomProvider={() => void addCustomProvider()}
         onReorder={reorderProviders}
         onDeleteProvider={deleteProvider}
@@ -563,18 +521,6 @@ function reconcileModelProviderProjectionDraft(
     activeProfile: nextActiveProfile,
     order: nextOrder,
   };
-}
-
-function profileFromProviderForm(
-  item: ModelProviderListItem,
-  form: ModelForm,
-  defaultAiMode: ModelProviderProfileItem["defaultAiMode"] | undefined
-): ModelProviderProfileItem {
-  return profileFromModelForm(
-    form,
-    item.profile?.providerKind ?? item.preset?.providerKind ?? "openai_compatible",
-    defaultAiMode
-  );
 }
 
 function profileFromModelForm(

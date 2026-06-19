@@ -5,7 +5,7 @@ import kimiModelIcon from "./assets/model-icons/kimi_model_icon.svg?raw";
 import minimaxModelIcon from "./assets/model-icons/minimax_model_icon.svg?raw";
 import openaiModelIcon from "./assets/model-icons/chatgpt_gpt_model_icon.svg?raw";
 import { decorativeSvg } from "./icon-svg";
-import { resolveModelProviderIdentity, type ModelProviderIdentity } from "./model-provider-logos";
+import { resolveModelFamilyIdentity, type ModelProviderIdentity } from "./model-provider-logos";
 
 const openaiModelSvg = decorativeSvg(openaiModelIcon);
 const claudeModelSvg = decorativeSvg(claudeModelIcon);
@@ -29,8 +29,8 @@ export function resolveModelIconIdentity(input: {
   readonly modelId?: string;
   readonly displayName?: string;
 }): ModelProviderIdentity {
-  const modelIdentity = resolveModelProviderIdentity({
-    title: input.displayName,
+  const modelIdentity = resolveModelFamilyIdentity({
+    displayName: input.displayName,
     model: input.modelId,
   });
   return modelIdentity === "unknown" ? input.providerIdentity ?? "unknown" : modelIdentity;

@@ -1,5 +1,5 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { GripVertical, Plus, Search, Trash2 } from "lucide-react";
+import { Plus, Search, Trash2 } from "lucide-react";
 import type { ModelProviderListItem } from "./model-settings-projection";
 import { ProviderLogo } from "./model-settings-icons";
 import { sameStringList } from "./model-settings-list-equality";
@@ -8,17 +8,12 @@ const SETTLE_DURATION_MS = 320;
 
 export function ModelProviderList(props: {
   readonly items: readonly ModelProviderListItem[];
-  readonly addableItems: readonly ModelProviderListItem[];
   readonly selectedItem: ModelProviderListItem;
   readonly query: string;
   readonly saving?: boolean;
-  readonly adding: boolean;
   readonly reorderEnabled: boolean;
   readonly onQueryChange: (value: string) => void;
   readonly onSelect: (item: ModelProviderListItem) => void;
-  readonly onToggleAdding: () => void;
-  readonly onCloseAdding: () => void;
-  readonly onAddProvider: (item: ModelProviderListItem) => void;
   readonly onAddCustomProvider: () => void;
   readonly onReorder: (order: readonly string[]) => Promise<void>;
   readonly onDeleteProvider: (item: ModelProviderListItem) => Promise<void>;
@@ -213,7 +208,6 @@ export function ModelProviderList(props: {
     setDragRowStep(rowStep);
     if (active) {
       cancelSettleAnimation();
-      props.onCloseAdding();
       setDropHandoffActive(false);
       clearDropHandoffTimer();
       setDraggingKey(item.key);
@@ -232,7 +226,6 @@ export function ModelProviderList(props: {
       if (Math.abs(offsetY) < 5) return;
       dragStateRef.current = { ...dragState, active: true };
       cancelSettleAnimation();
-      props.onCloseAdding();
       setDropHandoffActive(false);
       clearDropHandoffTimer();
       setDraggingKey(item.key);
@@ -363,43 +356,25 @@ export function ModelProviderList(props: {
                   cancelReorder();
                 }}
               >
-                <GripVertical size={15} />
+                <span className="provider-row-grip" aria-hidden="true" />
               </button>
             </article>
           );
         })}
       </div>
-      {props.adding && !deleteMode && (
-        <div className="provider-add-menu" aria-label="添加模型提供商">
-          {props.addableItems.map((item) => (
-            <button type="button" key={item.key} onClick={() => props.onAddProvider(item)} disabled={props.saving}>
-              <ProviderLogo item={item} />
-              <span>
-                <strong>{item.title}</strong>
-              </span>
-            </button>
-          ))}
-          <button type="button" onClick={props.onAddCustomProvider} disabled={props.saving}>
-            <Plus size={16} />
-            <span>
-              <strong>自定义厂商</strong>
-            </span>
-          </button>
-        </div>
-      )}
       <button
         ref={deleteZoneRef}
         type="button"
         className={`provider-add-button ${deleteMode ? "delete-drop" : ""} ${deleteZoneActive ? "active" : ""}`}
         onClick={() => {
           if (deleteMode) return;
-          props.onToggleAdding();
+          props.onAddCustomProvider();
         }}
         disabled={deleteMode ? !deleteAvailable : props.saving}
-        aria-label={deleteMode ? "删除模型提供商" : "添加模型提供商"}
+        aria-label={deleteMode ? "删除模型供应商" : "添加模型供应商"}
       >
         {deleteMode ? <Trash2 size={16} /> : <Plus size={16} />}
-        {deleteMode ? (deleteAvailable ? "删除模型提供商" : "无法删除") : "添加模型提供商"}
+        {deleteMode ? (deleteAvailable ? "删除模型供应商" : "无法删除") : "添加模型供应商"}
       </button>
     </aside>
   );

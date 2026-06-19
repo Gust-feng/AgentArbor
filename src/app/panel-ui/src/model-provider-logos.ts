@@ -33,6 +33,15 @@ export type ModelProviderLogo = {
 
 export type ModelProviderIdentity = "openai" | "claude" | "deepseek" | "kimi" | "glm" | "minimax" | "unknown";
 
+const providerIdentityPatterns: readonly [Exclude<ModelProviderIdentity, "unknown">, RegExp][] = [
+  ["openai", /api\.openai\.com|openai|chatgpt|gpt/iu],
+  ["claude", /anthropic|claude/iu],
+  ["deepseek", /deepseek/iu],
+  ["kimi", /moonshot|kimi|月之暗面/iu],
+  ["glm", /bigmodel|zhipu|glm|智谱/iu],
+  ["minimax", /minimaxi?|mini\s*max/iu],
+];
+
 export function modelProviderDisplayName(identity: Exclude<ModelProviderIdentity, "unknown">): string {
   if (identity === "openai") return "OpenAI";
   if (identity === "claude") return "Anthropic";
@@ -44,7 +53,6 @@ export function modelProviderDisplayName(identity: Exclude<ModelProviderIdentity
 
 export function resolveModelProviderIdentity(input: ModelProviderLogoInput): ModelProviderIdentity {
   const baseUrl = normalizeProviderSignal(input.baseUrl);
-  const model = normalizeProviderSignal(input.model);
   const explicitProvider = normalizeProviderSignal([input.presetId, input.vendor].filter(Boolean).join(" "));
   const displayText = normalizeProviderSignal([input.title, input.profileId].filter(Boolean).join(" "));
 
@@ -54,7 +62,16 @@ export function resolveModelProviderIdentity(input: ModelProviderLogoInput): Mod
   const displaySignal = resolveStrongProviderSignal(displayText);
   if (displaySignal !== undefined) return displaySignal;
 
-  return resolveStrongProviderSignal(model) ?? "unknown";
+  return "unknown";
+}
+
+export function resolveModelFamilyIdentity(input: {
+  readonly model?: string;
+  readonly displayName?: string;
+}): ModelProviderIdentity {
+  return resolveStrongProviderSignal(
+    normalizeProviderSignal([input.displayName, input.model].filter(Boolean).join(" "))
+  ) ?? "unknown";
 }
 
 function normalizeProviderSignal(value: string | undefined): string {
@@ -62,12 +79,11 @@ function normalizeProviderSignal(value: string | undefined): string {
 }
 
 function resolveStrongProviderSignal(value: string): Exclude<ModelProviderIdentity, "unknown"> | undefined {
-  if (value.includes("api.openai.com") || value.includes("openai") || value.includes("chatgpt")) return "openai";
-  if (value.includes("anthropic") || value.includes("claude")) return "claude";
-  if (value.includes("deepseek")) return "deepseek";
-  if (value.includes("moonshot") || value.includes("kimi") || value.includes("月之暗面")) return "kimi";
-  if (value.includes("bigmodel") || value.includes("zhipu") || value.includes("glm") || value.includes("智谱")) return "glm";
-  if (value.includes("minimax") || value.includes("minimaxi")) return "minimax";
+  for (const [identity, pattern] of providerIdentityPatterns) {
+    if (pattern.test(value)) {
+      return identity;
+    }
+  }
   return undefined;
 }
 

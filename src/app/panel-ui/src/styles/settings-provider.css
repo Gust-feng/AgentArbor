@@ -83,7 +83,7 @@
 }
 
 .provider-list.reordering {
-  cursor: grabbing;
+  cursor: default;
   user-select: none;
 }
 
@@ -208,16 +208,16 @@
 
 .provider-row-drag {
   display: inline-flex;
-  width: 26px;
-  height: 34px;
+  width: 24px;
+  height: 32px;
   align-items: center;
   justify-content: center;
   border: 0;
-  border-radius: var(--radius-sm);
+  border-radius: 6px;
   background: transparent;
-  color: color-mix(in oklch, var(--muted) 58%, transparent);
-  cursor: grab;
-  opacity: 0.42;
+  color: color-mix(in oklch, var(--muted) 48%, transparent);
+  cursor: default;
+  opacity: 0.5;
   transition:
     opacity var(--motion-fast-duration) var(--motion-ease-standard),
     background-color var(--motion-fast-duration) var(--motion-ease-standard),
@@ -227,20 +227,29 @@
 .provider-row:hover .provider-row-drag,
 .provider-row:focus-within .provider-row-drag,
 .provider-row.selected .provider-row-drag {
-  opacity: 1;
+  opacity: 0.74;
 }
 
 .provider-row-drag:hover {
-  background: color-mix(in oklch, var(--accent-soft) 58%, var(--surface));
-  color: color-mix(in oklch, var(--accent-active) 78%, var(--fg));
-  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--accent) 18%, transparent);
+  background: color-mix(in oklch, var(--accent-soft) 22%, transparent);
+  color: color-mix(in oklch, var(--accent-active) 58%, var(--muted));
 }
 
 .provider-row.dragging .provider-row-drag {
-  background: color-mix(in oklch, var(--accent-strong) 12%, transparent);
-  color: var(--accent-active);
-  cursor: grabbing;
+  background: color-mix(in oklch, var(--accent-strong) 8%, transparent);
+  color: color-mix(in oklch, var(--accent-active) 72%, var(--fg));
+  cursor: default;
   opacity: 1;
+}
+
+.provider-row-grip {
+  display: block;
+  width: 12px;
+  height: 18px;
+  background-image: radial-gradient(currentColor 1.35px, transparent 1.55px);
+  background-position: 0 0;
+  background-size: 6px 6px;
+  opacity: 0.9;
 }
 
 .provider-row-main strong {
@@ -279,7 +288,7 @@
 }
 
 .provider-logo.kimi {
-  border-color: color-mix(in oklch, #1783ff 34%, var(--border));
+  border-color: var(--content-border);
   background: #07101f;
 }
 
@@ -350,7 +359,7 @@
   border-color: color-mix(in oklch, var(--status-danger) 22%, var(--border));
   background: color-mix(in oklch, var(--status-danger) 5%, var(--surface));
   color: color-mix(in oklch, var(--status-danger) 78%, var(--fg));
-  cursor: grabbing;
+  cursor: default;
   opacity: 1;
   box-shadow: 0 10px 24px color-mix(in oklch, var(--status-danger) 7%, transparent);
 }
@@ -362,51 +371,6 @@
   box-shadow:
     inset 0 0 0 1px color-mix(in oklch, var(--status-danger) 18%, transparent),
     0 14px 30px color-mix(in oklch, var(--status-danger) 12%, transparent);
-}
-
-.provider-add-menu {
-  display: grid;
-  flex-shrink: 0;
-  gap: 3px;
-  border-top: 1px solid var(--border);
-  background: var(--content-surface-muted);
-  padding: var(--space-2) var(--space-5);
-  backdrop-filter: var(--content-backdrop-filter);
-  -webkit-backdrop-filter: var(--content-backdrop-filter);
-}
-
-.provider-add-menu button {
-  display: grid;
-  min-height: 38px;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: center;
-  gap: 10px;
-  border-radius: var(--radius-sm);
-  padding: 6px 8px;
-  color: var(--fg);
-  text-align: left;
-}
-
-.provider-add-menu button:hover:not(:disabled) {
-  background: var(--row-hover-bg);
-}
-
-.provider-add-menu button:disabled {
-  cursor: not-allowed;
-  opacity: 0.54;
-}
-
-.provider-add-menu strong {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.provider-add-menu strong {
-  color: var(--fg);
-  font-size: 12px;
-  font-weight: var(--weight-label);
 }
 
 .provider-detail-pane {
@@ -620,10 +584,6 @@
   .provider-list {
     max-height: 160px;
     flex: 0 1 auto;
-  }
-
-  .provider-add-menu {
-    padding: var(--space-2) var(--space-4);
   }
 
   .provider-add-button {

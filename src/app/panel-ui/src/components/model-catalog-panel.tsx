@@ -46,9 +46,17 @@ export function ModelCatalogPanel(props: {
               />
             </label>
           )}
-          <button type="button" onClick={() => void props.onFetchModels()} disabled={props.saving || props.modelsFetchBusy}>
-            <RefreshCw size={14} />
-            {props.modelsFetchBusy ? "获取中" : "获取模型"}
+          <button
+            type="button"
+            className={`model-fetch-button ${props.modelsFetchBusy ? "loading" : ""}`}
+            onClick={() => void props.onFetchModels()}
+            disabled={props.saving || props.modelsFetchBusy}
+            aria-busy={props.modelsFetchBusy ? "true" : "false"}
+          >
+            <RefreshCw className="model-fetch-icon" size={14} />
+            <span className="model-fetch-label" aria-live="polite">
+              {props.modelsFetchBusy ? "获取中" : "获取模型"}
+            </span>
           </button>
         </div>
       </div>

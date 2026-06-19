@@ -17,6 +17,9 @@ output/
 
 # Logs
 *.log
+.pnpm-store/
+.workbuddy/
+.canvas-meta.json
 .playwright-mcp
 .playwright-cli/
 

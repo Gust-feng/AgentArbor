@@ -28,4 +28,21 @@ html[data-style="classic"][data-color="forest"] {
   --primary-foreground: #f3fbf6;
   --shadow-ink: #17231f;
   --overlay-ink: #17231f;
+  --classic-shell-bg: #edf2ea;
+  --classic-sidebar-bg: #dde6da;
+  --classic-paper-bg: #f3f7f1;
+  --classic-paper-highlight: rgba(250, 253, 248, 0.78);
+  --classic-paper-grid-major: rgba(86, 108, 92, 0.08);
+  --classic-paper-grid-minor: rgba(86, 108, 92, 0.045);
+  --classic-panel-surface: #fbfdf8;
+  --classic-panel-muted: #eaf1e7;
+  --classic-overlay-surface: #f4f8f2;
+  --classic-composer-shell: #e4ece3;
+  --classic-composer-surface: #f3f8f1;
+  --classic-support-surface: #f4ebde;
+  --classic-support-fill: #ebdcc6;
+  --classic-support-border: #c8a274;
+  --classic-support-ink: #835821;
+  --classic-nav-hover-fill: #eef3eb;
+  --classic-nav-active-fill: #dce8df;
 }

@@ -316,6 +316,7 @@ textarea {
 html.theme-switching body,
 html.theme-switching .app-root,
 html.theme-switching .app-workbench,
+html.theme-switching .app-workbench-header,
 html.theme-switching .app-main,
 html.theme-switching .chat-empty-screen,
 html.theme-switching .chat-active-screen,
@@ -375,5 +376,31 @@ html.theme-switching .model-row-action,
 html.theme-switching .page-action-button,
 html.theme-switching .confirmation-actions button,
 html.theme-switching .workspace-action-button {
-  transition: none !important;
+  transition:
+    background-color 180ms var(--motion-ease-standard),
+    border-color 180ms var(--motion-ease-standard),
+    color 180ms var(--motion-ease-standard),
+    box-shadow 180ms var(--motion-ease-standard),
+    opacity 180ms var(--motion-ease-standard) !important;
+}
+
+html.theme-switching .app-workbench-sidebar-toggle,
+html.theme-switching .app-workbench-brand {
+  transition:
+    background-color 180ms var(--motion-ease-standard),
+    border-color 180ms var(--motion-ease-standard),
+    color 180ms var(--motion-ease-standard),
+    box-shadow 180ms var(--motion-ease-standard),
+    opacity 180ms var(--motion-ease-standard) !important;
+}
+
+html.theme-switching .composer-options-button::after,
+html.theme-switching .app-sidebar::before,
+html.theme-switching .app-sidebar::after,
+html.theme-switching .theme-style-preview,
+html.theme-switching .theme-palette-preview {
+  transition:
+    opacity 180ms var(--motion-ease-standard),
+    border-color 180ms var(--motion-ease-standard),
+    box-shadow 180ms var(--motion-ease-standard) !important;
 }

@@ -177,6 +177,10 @@ function StylePreview(props: { readonly styleId: ThemeStyleId }): React.ReactEle
           <div className="default-preview-line active" />
         </div>
         <div className="style-preview-default-content">
+          <div className="default-preview-header">
+            <div className="default-preview-toggle" />
+            <div className="default-preview-brand" />
+          </div>
           <div className="default-preview-title" />
           <div className="default-preview-card" />
           <div className="default-preview-composer" />
@@ -196,6 +200,10 @@ function StylePreview(props: { readonly styleId: ThemeStyleId }): React.ReactEle
             <div className="glass-line short" />
           </div>
           <div className="style-preview-glass-content">
+            <div className="glass-preview-header">
+              <div className="glass-preview-toggle" />
+              <div className="glass-preview-brand" />
+            </div>
             <div className="glass-text-line" />
             <div className="glass-text-line short" />
             <div className="glass-chip" />
@@ -215,6 +223,10 @@ function StylePreview(props: { readonly styleId: ThemeStyleId }): React.ReactEle
           <div className="theme-preview-sidebar-line short" />
         </div>
         <div className="theme-preview-content">
+          <div className="theme-preview-header">
+            <div className="theme-preview-toggle" />
+            <div className="theme-preview-brand" />
+          </div>
           <div className="theme-preview-text-line" />
           <div className="theme-preview-text-line short" />
           <div className="theme-preview-accent-chip" />

@@ -96,7 +96,7 @@
   height: 26px;
   align-items: center;
   justify-content: center;
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
   background: color-mix(in oklch, var(--surface-muted) 74%, var(--surface));
   color: var(--muted);
   font-size: 12px;
@@ -249,7 +249,7 @@
   align-items: center;
   justify-content: center;
   border: 1px solid var(--content-border);
-  border-radius: 999px;
+  border-radius: var(--radius-lg);
   background: var(--content-surface-muted);
   padding: 3px 9px;
   color: var(--muted);
@@ -457,7 +457,7 @@
   align-items: center;
   gap: 6px;
   border: 1px solid var(--content-border);
-  border-radius: 999px;
+  border-radius: var(--radius-lg);
   background: var(--content-surface-muted);
   padding: 0 10px;
   color: var(--muted);
@@ -886,7 +886,7 @@
 
 .mcp-tool-authorization-count {
   border: 1px solid var(--content-border);
-  border-radius: 999px;
+  border-radius: var(--radius-lg);
   background: var(--content-surface);
   padding: 4px 9px;
   white-space: nowrap;
@@ -1154,7 +1154,7 @@
   align-items: center;
   justify-content: center;
   border: 1px dashed color-mix(in oklch, var(--border) 90%, transparent);
-  border-radius: 999px;
+  border-radius: var(--radius-lg);
   background:
     linear-gradient(180deg, var(--surface-highlight), transparent),
     var(--surface);
@@ -1339,7 +1339,7 @@
 .skills-row-title span {
   flex: 0 0 auto;
   border: 1px solid color-mix(in oklch, var(--border) 80%, transparent);
-  border-radius: 999px;
+  border-radius: var(--radius-lg);
   padding: 2px 8px;
   color: var(--muted);
   font-size: 11px;

@@ -24,58 +24,98 @@ html[data-style="classic"] {
 
   /* ---- Surface highlight — flat (no highlight sheen) ---- */
   --surface-highlight: transparent;
-  --sidebar: color-mix(in oklch, var(--surface-subtle) 84%, var(--bg));
-  --surface-panel: var(--surface);
-  --surface-control: color-mix(in oklch, var(--surface) 86%, var(--surface-subtle));
-  --surface-control-muted: color-mix(in oklch, var(--surface-subtle) 70%, var(--surface));
-  --surface-overlay: var(--surface);
-  --surface-translucent: color-mix(in oklch, var(--surface) 94%, var(--surface-subtle));
-  --workbench-bg:
-    linear-gradient(90deg, color-mix(in oklch, var(--border) 22%, transparent) 1px, transparent 1px),
-    linear-gradient(180deg, color-mix(in oklch, var(--border) 16%, transparent) 1px, transparent 1px),
-    var(--bg);
+  --sidebar: var(--classic-sidebar-bg, color-mix(in oklch, var(--surface-subtle) 86%, var(--bg)));
+  --surface-panel: var(--classic-panel-surface, color-mix(in oklch, var(--surface) 94%, var(--surface-subtle)));
+  --surface-control: var(--classic-panel-surface, color-mix(in oklch, var(--surface) 90%, var(--surface-subtle)));
+  --surface-control-muted: var(--classic-panel-muted, color-mix(in oklch, var(--surface-subtle) 74%, var(--surface)));
+  --surface-overlay: var(--classic-overlay-surface, color-mix(in oklch, var(--surface) 95%, var(--surface-subtle)));
+  --surface-translucent: var(--classic-overlay-surface, color-mix(in oklch, var(--surface) 96%, var(--surface-subtle)));
+  --workbench-bg: var(--classic-shell-bg, var(--bg));
+  --classic-grid:
+    linear-gradient(90deg, var(--classic-paper-grid-major, color-mix(in oklch, var(--border) 18%, transparent)) 1px, transparent 1px),
+    linear-gradient(180deg, var(--classic-paper-grid-minor, color-mix(in oklch, var(--border) 12%, transparent)) 1px, transparent 1px);
+  --classic-sheet-bg:
+    linear-gradient(180deg, var(--classic-paper-highlight, color-mix(in oklch, var(--surface) 24%, transparent)), transparent 18%),
+    var(--classic-grid),
+    var(--classic-paper-bg, color-mix(in oklch, var(--bg) 82%, var(--surface)));
+  --classic-panel-fill:
+    linear-gradient(180deg, color-mix(in oklch, white 22%, transparent), transparent 22%),
+    var(--classic-panel-surface, var(--surface));
+  --classic-composer-fill:
+    linear-gradient(180deg, color-mix(in oklch, white 20%, transparent), transparent 24%),
+    var(--classic-composer-surface, var(--classic-panel-surface, var(--surface)));
+  --classic-overlay-fill:
+    linear-gradient(180deg, color-mix(in oklch, white 18%, transparent), transparent 18%),
+    var(--classic-overlay-surface, color-mix(in oklch, var(--surface) 94%, var(--surface-subtle)));
+  --classic-support-surface-base:
+    var(--classic-support-surface, color-mix(in oklch, var(--secondary) 8%, var(--surface)));
+  --classic-support-fill-base:
+    var(--classic-support-fill, color-mix(in oklch, var(--secondary) 12%, var(--surface)));
+  --classic-support-border-color:
+    var(--classic-support-border, color-mix(in oklch, var(--secondary) 34%, var(--border)));
+  --classic-support-ink-color:
+    var(--classic-support-ink, color-mix(in oklch, var(--fg) 82%, var(--secondary)));
+  --classic-support-panel-fill:
+    linear-gradient(180deg, color-mix(in oklch, white 18%, transparent), transparent 72%),
+    var(--classic-support-fill-base);
+  --classic-paper-shadow:
+    0 14px 32px color-mix(in oklch, var(--shadow-ink) 12%, transparent),
+    inset 0 1px 0 color-mix(in oklch, white 42%, transparent);
   --workbench-overlay: none;
   --message-user-bg: color-mix(in oklch, var(--accent-soft) 32%, var(--surface));
-  --message-assistant-border: color-mix(in oklch, var(--border-strong) 24%, var(--border));
-  --nav-hover-bg: color-mix(in oklch, var(--fg) 5%, transparent);
-  --nav-active-bg: color-mix(in oklch, var(--accent-soft) 48%, var(--surface));
-  --composer-bg: var(--surface);
+  --message-assistant-border: var(--classic-support-border-color);
+  --nav-hover-bg:
+    linear-gradient(90deg, color-mix(in oklch, var(--border-strong) 7%, transparent), transparent 58%),
+    var(--classic-nav-hover-fill, color-mix(in srgb, var(--surface) 88%, var(--surface-subtle)));
+  --nav-active-bg:
+    linear-gradient(90deg, color-mix(in srgb, var(--accent-soft) 72%, transparent), transparent 70%),
+    var(--classic-nav-active-fill, color-mix(in srgb, var(--surface) 80%, var(--accent-soft)));
+  --classic-cta-fill-start: color-mix(in oklch, var(--accent-soft) 86%, var(--accent) 14%);
+  --classic-cta-fill-mid: color-mix(in oklch, var(--accent-soft) 54%, var(--surface));
+  --classic-cta-fill-end: color-mix(in oklch, var(--accent-soft) 18%, var(--surface));
+  --classic-cta-fill-hover-start: color-mix(in oklch, var(--accent-soft) 88%, var(--accent) 16%);
+  --classic-cta-fill-hover-mid: color-mix(in oklch, var(--accent-soft) 60%, var(--surface));
+  --classic-cta-fill-hover-end: color-mix(in oklch, var(--accent-soft) 24%, var(--surface));
+  --classic-cta-fill-active-start: color-mix(in oklch, var(--accent-soft) 90%, var(--accent) 18%);
+  --classic-cta-fill-active-mid: color-mix(in oklch, var(--accent-soft) 66%, var(--surface));
+  --classic-cta-fill-active-end: color-mix(in oklch, var(--accent-soft) 30%, var(--surface));
+  --composer-bg: var(--classic-composer-fill);
   --composer-border: color-mix(in oklch, var(--border-strong) 28%, var(--border));
-  --popover-bg: var(--surface);
+  --popover-bg: var(--classic-overlay-fill);
 
   /* ---- Semantic contract — solid paper engineering language ---- */
-  --panel-card-bg: var(--surface);
-  --panel-card-border: color-mix(in oklch, var(--border-strong) 18%, var(--border));
-  --panel-card-shadow:
-    0 2px 4px color-mix(in oklch, var(--shadow-ink) 6%, transparent),
-    inset 0 1px 0 color-mix(in oklch, white 36%, transparent);
+  --panel-card-bg: var(--classic-panel-fill);
+  --panel-card-border: color-mix(in oklch, var(--border-strong) 24%, var(--border));
+  --panel-card-shadow: inset 0 1px 0 color-mix(in oklch, white 44%, transparent);
   --panel-card-backdrop-filter: none;
-  --floating-panel-bg: var(--surface-overlay);
-  --floating-panel-border: var(--border-strong);
-  --floating-panel-shadow: var(--shadow-dialog);
+  --floating-panel-bg: var(--classic-overlay-fill);
+  --floating-panel-border: color-mix(in oklch, var(--border-strong) 86%, var(--border));
+  --floating-panel-shadow: var(--classic-paper-shadow);
   --floating-panel-backdrop-filter: none;
-  --subpanel-bg: var(--surface);
-  --subpanel-border: color-mix(in oklch, var(--border) 86%, transparent);
-  --subpanel-footer-bg: color-mix(in oklch, var(--surface-subtle) 42%, var(--surface));
-  --subpanel-shadow: 0 34px 90px color-mix(in oklch, var(--shadow-ink) 20%, transparent);
+  --subpanel-bg: var(--classic-overlay-fill);
+  --subpanel-border: color-mix(in oklch, var(--border-strong) 20%, var(--border));
+  --subpanel-footer-bg: color-mix(in oklch, var(--surface-subtle) 60%, var(--surface));
+  --subpanel-shadow: var(--classic-paper-shadow);
   --subpanel-backdrop-filter: none;
-  --content-surface: color-mix(in oklch, var(--surface-subtle) 68%, var(--surface));
-  --content-surface-muted: color-mix(in oklch, var(--surface) 78%, var(--surface-subtle));
-  --content-border: color-mix(in oklch, var(--border-strong) 13%, var(--border));
-  --content-highlight: color-mix(in oklch, var(--accent-soft) 38%, transparent);
+  --content-surface: color-mix(in oklch, var(--surface) 84%, var(--surface-subtle));
+  --content-surface-muted: color-mix(in oklch, var(--surface-subtle) 46%, var(--surface));
+  --content-border: color-mix(in oklch, var(--border-strong) 18%, var(--border));
+  --content-highlight: color-mix(in oklch, var(--accent-soft) 46%, transparent);
   --content-backdrop-filter: none;
-  --empty-state-bg: color-mix(in oklch, var(--surface-subtle) 78%, var(--surface));
-  --empty-state-border: color-mix(in oklch, var(--border-strong) 18%, var(--border));
-  --row-bg: color-mix(in oklch, var(--surface-subtle) 56%, var(--surface));
-  --row-border: color-mix(in oklch, var(--border-strong) 12%, var(--border));
-  --row-hover-bg: color-mix(in oklch, var(--surface) 72%, var(--surface-subtle));
-  --row-hover-border: color-mix(in oklch, var(--border-strong) 24%, var(--border));
-  --row-hover-shadow: inset 2px 0 0 color-mix(in oklch, var(--border-strong) 30%, transparent);
-  --row-active-bg: color-mix(in oklch, var(--accent-soft) 54%, var(--surface));
-  --row-active-border: color-mix(in oklch, var(--accent-strong) 54%, var(--border));
+  --empty-state-bg: color-mix(in oklch, var(--surface) 72%, var(--surface-subtle));
+  --empty-state-border: color-mix(in oklch, var(--border-strong) 22%, var(--border));
+  --row-bg: color-mix(in oklch, var(--surface) 86%, var(--surface-subtle));
+  --row-border: color-mix(in oklch, var(--border-strong) 16%, var(--border));
+  --row-hover-bg: color-mix(in oklch, var(--surface) 94%, var(--surface-subtle));
+  --row-hover-border: color-mix(in oklch, var(--border-strong) 28%, var(--border));
+  --row-hover-shadow: inset 2px 0 0 color-mix(in oklch, var(--border-strong) 34%, transparent);
+  --row-active-bg:
+    linear-gradient(90deg, color-mix(in srgb, var(--accent-soft) 76%, transparent), transparent 72%),
+    var(--classic-nav-active-fill, color-mix(in srgb, var(--surface) 84%, var(--accent-soft)));
+  --row-active-border: color-mix(in oklch, var(--accent-strong) 60%, var(--border));
   --row-active-shadow:
     inset 3px 0 0 color-mix(in oklch, var(--accent-strong) 70%, var(--accent-border)),
-    0 1px 0 color-mix(in oklch, var(--shadow-ink) 4%, transparent);
+    inset 0 1px 0 color-mix(in oklch, white 30%, transparent);
   --list-row-radius: 0;
   --list-row-marker-width: var(--border-width-thick);
   --list-row-border: transparent;
@@ -85,19 +125,23 @@ html[data-style="classic"] {
   --list-row-active-border: transparent;
   --list-row-active-marker: var(--accent);
   --list-row-active-shadow: none;
-  --list-pane-bg: var(--surface-subtle);
-  --detail-pane-bg: var(--surface);
-  --field-bg: color-mix(in oklch, var(--surface) 88%, var(--surface-subtle));
-  --field-border: color-mix(in oklch, var(--border-strong) 16%, var(--border));
+  --list-pane-bg: var(--classic-sidebar-bg, color-mix(in oklch, var(--surface-subtle) 84%, var(--bg)));
+  --detail-pane-bg: var(--classic-paper-bg, color-mix(in oklch, var(--surface) 90%, var(--bg)));
+  --field-bg: var(--classic-panel-surface, color-mix(in oklch, var(--surface) 92%, var(--surface-subtle)));
+  --field-border: color-mix(in oklch, var(--border-strong) 22%, var(--border));
   --field-hover-bg: var(--surface);
-  --field-hover-border: color-mix(in oklch, var(--border-strong) 28%, var(--border));
+  --field-hover-border: color-mix(in oklch, var(--border-strong) 32%, var(--border));
   --field-focus-border: color-mix(in oklch, var(--accent-strong) 70%, var(--border));
-  --field-focus-ring: 0 0 0 3px color-mix(in oklch, var(--accent) 12%, transparent);
+  --field-focus-ring: 0 0 0 2px color-mix(in oklch, var(--accent) 12%, transparent);
   --composer-radius: var(--radius-md);
-  --composer-shadow: var(--shadow-soft);
+  --composer-shadow:
+    0 6px 14px color-mix(in oklch, var(--shadow-ink) 7%, transparent),
+    inset 0 1px 0 color-mix(in oklch, white 38%, transparent);
   --composer-backdrop-filter: none;
-  --popover-border: var(--border);
-  --popover-shadow: var(--shadow-elevated);
+  --popover-border: color-mix(in oklch, var(--border-strong) 18%, var(--border));
+  --popover-shadow:
+    0 10px 24px color-mix(in oklch, var(--shadow-ink) 10%, transparent),
+    inset 0 1px 0 color-mix(in oklch, white 36%, transparent);
   --popover-backdrop-filter: none;
 }
 
@@ -110,16 +154,37 @@ html[data-style="classic"] .app-root {
 html[data-style="classic"] .app-workbench {
   border: 0;
   border-radius: 0;
-  background: var(--workbench-bg);
-  background-size: 22px 22px, 22px 22px, auto;
+  background:
+    linear-gradient(180deg, color-mix(in oklch, white 16%, transparent), transparent 22%),
+    var(--workbench-bg);
   box-shadow: none;
+}
+
+html[data-style="classic"] .app-workbench-header {
+  border-bottom-color: color-mix(in oklch, var(--border-strong) 18%, var(--border));
+  background:
+    linear-gradient(180deg, color-mix(in oklch, white 18%, transparent), transparent 72%),
+    var(--classic-overlay-fill);
+}
+
+html[data-style="classic"] .app-workbench-brand strong {
+  color: color-mix(in oklch, var(--fg) 94%, var(--accent-active));
+}
+
+html[data-style="classic"] .app-workbench-brand-mark {
+  color: var(--accent);
 }
 
 html[data-style="classic"] .app-main,
 html[data-style="classic"] .chat-empty-screen,
 html[data-style="classic"] .chat-active-screen {
   background: var(--workbench-bg);
-  background-size: 22px 22px, 22px 22px, auto;
+}
+
+html[data-style="classic"] .chat-empty-main,
+html[data-style="classic"] .chat-active-scroll {
+  background: var(--classic-sheet-bg);
+  background-size: auto, 24px 24px, 24px 24px, auto;
 }
 
 html[data-style="classic"] .app-sidebar {
@@ -128,47 +193,272 @@ html[data-style="classic"] .app-sidebar {
   border-right: var(--border-width-md) solid var(--border-strong);
   border-radius: 0;
   background:
-    linear-gradient(180deg, color-mix(in oklch, var(--surface) 42%, transparent), transparent 34%),
+    linear-gradient(180deg, color-mix(in oklch, white 16%, transparent), transparent 28%),
+    linear-gradient(180deg, color-mix(in oklch, var(--border-strong) 5%, transparent), transparent 84%),
     var(--sidebar);
   box-shadow: none;
 }
 
 html[data-style="classic"] .sidebar-new-wrap {
-  padding-top: 30px;
+  padding: 18px var(--space-5) 16px;
 }
 
 html[data-style="classic"] .sidebar-footer {
   border-top: var(--border-width-md) solid var(--border-strong);
+  background: color-mix(in srgb, var(--sidebar) 92%, white 8%);
+}
+
+html[data-style="classic"] .sidebar-list-heading {
+  border-bottom-color: color-mix(in oklch, var(--classic-support-border-color) 34%, transparent);
+  color: color-mix(in oklch, var(--fg) 54%, var(--classic-support-ink-color));
+}
+
+html[data-style="classic"] .app-workbench-sidebar-toggle {
+  border-color: transparent;
+  border-radius: var(--radius-sm);
   background: transparent;
+  box-shadow: none;
+  color: color-mix(in oklch, var(--muted) 72%, var(--fg));
+}
+
+html[data-style="classic"] .app-workbench-sidebar-toggle:hover {
+  border-color: color-mix(in oklch, var(--border-strong) 18%, var(--border));
+  background: color-mix(in oklch, var(--surface) 86%, var(--surface-subtle));
+  box-shadow: inset 0 1px 0 color-mix(in oklch, white 18%, transparent);
+  color: var(--fg);
 }
 
 html[data-style="classic"] .sidebar-new-button,
 html[data-style="classic"] .sidebar-nav-button,
-html[data-style="classic"] .sidebar-recent-item {
+html[data-style="classic"] .sidebar-recent-item,
+html[data-style="classic"] .settings-sidebar nav button {
+  border-radius: 0;
   box-shadow: none;
 }
 
+html[data-style="classic"] .sidebar-new-button,
 html[data-style="classic"] .sidebar-nav-button,
-html[data-style="classic"] .sidebar-recent-item {
+html[data-style="classic"] .settings-sidebar nav button {
   border-left: var(--border-width-thick) solid transparent;
 }
 
+html[data-style="classic"] .sidebar-new-button {
+  height: 46px;
+  border-left-width: var(--border-width-md);
+  border-color: color-mix(in oklch, var(--border-strong) 20%, var(--border));
+  border-radius: var(--radius-md);
+  background:
+    linear-gradient(180deg, color-mix(in oklch, white 18%, transparent), transparent 72%),
+    linear-gradient(
+      90deg,
+      var(--classic-cta-fill-start) 0 46px,
+      var(--classic-cta-fill-mid) 46px 72%,
+      var(--classic-cta-fill-end) 100%
+    );
+  color: color-mix(in oklch, var(--fg) 94%, var(--accent-active));
+  box-shadow: inset 0 1px 0 color-mix(in oklch, white 26%, transparent);
+}
+
+html[data-style="classic"] .sidebar-new-button .sidebar-icon-slot {
+  color: color-mix(in oklch, var(--accent) 86%, var(--accent-active));
+}
+
+html[data-style="classic"] .sidebar-new-button:hover,
+html[data-style="classic"] .sidebar-nav-button:hover,
+html[data-style="classic"] .sidebar-recent-item:hover,
+html[data-style="classic"] .settings-sidebar nav button:hover {
+  border-left-color: var(--list-row-hover-marker);
+  background: var(--nav-hover-bg);
+}
+
+html[data-style="classic"] .sidebar-new-button:hover {
+  border-color: color-mix(in oklch, var(--border-strong) 28%, var(--border));
+  background:
+    linear-gradient(180deg, color-mix(in oklch, white 22%, transparent), transparent 72%),
+    linear-gradient(
+      90deg,
+      var(--classic-cta-fill-hover-start) 0 46px,
+      var(--classic-cta-fill-hover-mid) 46px 72%,
+      var(--classic-cta-fill-hover-end) 100%
+    );
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklch, white 28%, transparent),
+    0 2px 8px color-mix(in oklch, var(--shadow-ink) 4%, transparent);
+}
+
+html[data-style="classic"] .sidebar-new-button.active,
+html[data-style="classic"] .sidebar-nav-button.active,
 html[data-style="classic"] .sidebar-recent-item.active {
-  border-left-color: var(--accent);
   background: var(--nav-active-bg);
-  box-shadow: none;
+  box-shadow: inset 0 1px 0 color-mix(in oklch, white 24%, transparent);
+}
+
+html[data-style="classic"] .sidebar-new-button.active {
+  border-left-color: color-mix(in oklch, var(--border-strong) 20%, var(--border));
+  border-color: color-mix(in oklch, var(--accent-strong) 22%, var(--border));
+  background:
+    linear-gradient(180deg, color-mix(in oklch, white 20%, transparent), transparent 72%),
+    linear-gradient(
+      90deg,
+      var(--classic-cta-fill-active-start) 0 46px,
+      var(--classic-cta-fill-active-mid) 46px 72%,
+      var(--classic-cta-fill-active-end) 100%
+    );
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklch, white 30%, transparent),
+    inset 0 0 0 1px color-mix(in oklch, var(--accent) 8%, transparent);
+}
+
+html[data-style="classic"] .sidebar-new-button.active .sidebar-icon-slot,
+html[data-style="classic"] .sidebar-nav-button.active .sidebar-icon-slot,
+html[data-style="classic"] .sidebar-recent-item.active .sidebar-recent-row svg,
+html[data-style="classic"] .settings-sidebar nav button.active svg:first-child {
+  color: var(--accent);
+}
+
+html[data-style="classic"] .sidebar-recent-item.active .sidebar-conversation-badge {
+  border-color: color-mix(in oklch, var(--classic-support-border-color) 56%, var(--border));
+  background: var(--classic-support-panel-fill);
+  color: var(--classic-support-ink-color);
+}
+
+html[data-style="classic"] .sidebar-conversation-badge {
+  box-sizing: border-box;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  color: color-mix(in oklch, var(--muted) 78%, var(--classic-support-ink-color));
+}
+
+html[data-style="classic"] .sidebar-recent-item:hover .sidebar-conversation-badge {
+  border: 1px solid color-mix(in oklch, var(--classic-support-border-color) 34%, transparent);
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--classic-support-surface-base) 90%, transparent);
+  color: color-mix(in oklch, var(--fg) 44%, var(--classic-support-ink-color));
+}
+
+html[data-style="classic"] .app-workbench-sidebar-toggle,
+html[data-style="classic"] .app-sidebar[data-collapsed="true"] .sidebar-collapsed-button {
+  border-color: color-mix(in oklch, var(--border-strong) 22%, var(--border));
+  border-radius: var(--radius-md);
+  background: var(--surface-control);
+  box-shadow: inset 0 1px 0 color-mix(in oklch, white 26%, transparent);
+}
+
+html[data-style="classic"] .app-sidebar[data-collapsed="true"] .sidebar-new-button {
+  border-left-width: var(--border-width-md);
+  border-left-color: color-mix(in oklch, var(--border-strong) 22%, var(--border));
+  border-color: color-mix(in oklch, var(--accent-strong) 18%, var(--border));
+  background:
+    linear-gradient(180deg, color-mix(in oklch, white 18%, transparent), transparent 72%),
+    linear-gradient(
+      90deg,
+      var(--classic-cta-fill-start) 0 46px,
+      var(--classic-cta-fill-mid) 46px 72%,
+      var(--classic-cta-fill-end) 100%
+    );
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklch, white 28%, transparent),
+    inset 0 0 0 1px color-mix(in oklch, var(--accent) 7%, transparent);
+}
+
+html[data-style="classic"] .app-sidebar[data-collapsed="true"] .sidebar-new-button .sidebar-icon-slot {
+  color: color-mix(in oklch, var(--accent-active) 82%, var(--accent));
+}
+
+html[data-style="classic"] .app-sidebar[data-collapsed="true"] .sidebar-new-button:hover,
+html[data-style="classic"] .app-sidebar[data-collapsed="true"] .sidebar-new-button.active {
+  border-left-color: color-mix(in oklch, var(--border-strong) 22%, var(--border));
+  border-color: color-mix(in oklch, var(--accent-strong) 24%, var(--border));
+  background:
+    linear-gradient(180deg, color-mix(in oklch, white 20%, transparent), transparent 72%),
+    linear-gradient(
+      90deg,
+      var(--classic-cta-fill-hover-start) 0 46px,
+      var(--classic-cta-fill-hover-mid) 46px 72%,
+      var(--classic-cta-fill-hover-end) 100%
+    );
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklch, white 30%, transparent),
+    inset 0 0 0 1px color-mix(in oklch, var(--accent) 10%, transparent);
+}
+
+html[data-style="classic"] .sidebar-settings-button {
+  border-left-width: var(--border-width-thin);
+  border-color: color-mix(in oklch, var(--border-strong) 12%, var(--border));
+  border-radius: var(--radius-md);
+  background:
+    linear-gradient(180deg, color-mix(in oklch, white 16%, transparent), transparent 74%),
+    color-mix(in srgb, var(--sidebar) 95%, white 5%);
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklch, white 16%, transparent),
+    inset 0 0 0 1px color-mix(in oklch, var(--classic-support-border-color) 4%, transparent);
+  color: color-mix(in oklch, var(--fg) 72%, var(--classic-support-ink-color));
+}
+
+html[data-style="classic"] .sidebar-settings-button:hover {
+  border-color: color-mix(in oklch, var(--border-strong) 24%, var(--border));
+  background:
+    linear-gradient(180deg, color-mix(in oklch, white 18%, transparent), transparent 74%),
+    color-mix(in srgb, var(--sidebar) 92%, white 8%);
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklch, white 20%, transparent),
+    inset 2px 0 0 color-mix(in oklch, var(--border-strong) 16%, transparent);
+  color: color-mix(in oklch, var(--fg) 82%, var(--classic-support-ink-color));
+}
+
+html[data-style="classic"] .app-sidebar[data-collapsed="true"] .sidebar-settings-button {
+  border-left-width: var(--border-width-thin);
+  border-color: color-mix(in oklch, var(--border-strong) 18%, var(--border));
+  border-radius: var(--radius-md);
+  background:
+    linear-gradient(180deg, color-mix(in oklch, white 18%, transparent), transparent 74%),
+    color-mix(in srgb, var(--sidebar) 95%, white 5%);
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklch, white 22%, transparent),
+    inset 0 0 0 1px color-mix(in oklch, var(--classic-support-border-color) 8%, transparent),
+    0 2px 8px color-mix(in oklch, var(--shadow-ink) 3%, transparent);
+}
+
+html[data-style="classic"] .app-sidebar[data-collapsed="true"] .sidebar-settings-button .sidebar-icon-slot {
+  color: color-mix(in oklch, var(--classic-support-ink-color) 72%, var(--fg));
+  transform: translateX(-1px);
+}
+
+html[data-style="classic"] .app-workbench-sidebar-toggle:hover,
+html[data-style="classic"] .app-sidebar[data-collapsed="true"] .sidebar-settings-button:hover,
+html[data-style="classic"] .app-sidebar[data-collapsed="true"] .sidebar-pending-reminder:hover {
+  border-color: color-mix(in oklch, var(--border-strong) 34%, var(--border));
+  background: var(--nav-hover-bg);
+  box-shadow: inset 2px 0 0 color-mix(in oklch, var(--border-strong) 28%, transparent);
+  color: var(--fg);
+}
+
+html[data-style="classic"] .app-sidebar[data-collapsed="true"] .sidebar-settings-button:hover {
+  border-color: color-mix(in oklch, var(--classic-support-border-color) 44%, var(--border));
+  background:
+    linear-gradient(180deg, color-mix(in oklch, white 20%, transparent), transparent 74%),
+    color-mix(in srgb, var(--sidebar) 90%, var(--surface));
+  box-shadow:
+    inset 2px 0 0 color-mix(in oklch, var(--classic-support-border-color) 24%, transparent),
+    inset 0 1px 0 color-mix(in oklch, white 24%, transparent);
+  color: color-mix(in oklch, var(--fg) 92%, var(--classic-support-ink-color));
 }
 
 html[data-style="classic"] .chat-empty-heading {
+  border-bottom-color: transparent;
   background:
-    linear-gradient(180deg, transparent 58%, color-mix(in oklch, var(--accent-soft) 70%, transparent) 58%);
+    linear-gradient(
+      90deg,
+      color-mix(in oklch, var(--classic-support-fill-base) 90%, transparent) 0 34%,
+      color-mix(in oklch, var(--accent-soft) 76%, transparent) 34% 100%
+    )
+    0 100% / 100% 0.54em no-repeat;
   color: color-mix(in oklch, var(--fg) 92%, var(--accent-active));
 }
 
 html[data-style="classic"] .chat-input-floating {
-  border-top: 1px solid color-mix(in oklch, var(--fg) 6%, transparent);
-  background: var(--workbench-bg);
-  background-size: 22px 22px, 22px 22px, auto;
+  border-top: 1px solid color-mix(in oklch, var(--border-strong) 18%, var(--border));
+  background: var(--classic-composer-shell, color-mix(in srgb, var(--surface) 52%, var(--bg)));
 }
 
 html[data-style="classic"] .chat-input-card {
@@ -181,17 +471,34 @@ html[data-style="classic"] .user-message-wrap {
   border-left-color: var(--accent);
 }
 
+html[data-style="classic"] .assistant-message-label {
+  color: color-mix(in oklch, var(--fg) 48%, var(--classic-support-ink-color));
+}
+
 html[data-style="classic"] .assistant-message-label::after {
-  background: color-mix(in oklch, var(--border-strong) 18%, var(--border));
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in oklch, var(--classic-support-border-color) 56%, transparent),
+      color-mix(in oklch, var(--border-strong) 14%, transparent)
+    );
 }
 
 html[data-style="classic"] .assistant-answer {
   border-left-color: var(--message-assistant-border);
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in oklch, var(--classic-support-surface-base) 58%, transparent) 0 10%,
+      color-mix(in oklch, var(--classic-support-surface-base) 26%, transparent) 10% 26%,
+      color-mix(in oklch, var(--surface) 18%, transparent) 26% 48%,
+      transparent 66%
+    );
 }
 
 html[data-style="classic"] .rich-blockquote {
-  border-left-color: var(--secondary);
-  background: color-mix(in oklch, var(--secondary) 8%, var(--surface));
+  border-left-color: var(--classic-support-ink-color);
+  background: color-mix(in oklch, var(--classic-support-surface-base) 82%, var(--surface));
 }
 
 html[data-style="classic"] .rich-code-block,
@@ -202,22 +509,32 @@ html[data-style="classic"] .rich-table-wrap {
 }
 
 html[data-style="classic"] .settings-dialog {
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
   background: var(--floating-panel-bg);
   box-shadow: var(--floating-panel-shadow);
 }
 
 html[data-style="classic"] .settings-sidebar {
+  border-right-color: color-mix(in oklch, var(--border-strong) 16%, var(--border));
+  background:
+    linear-gradient(180deg, color-mix(in oklch, var(--surface) 34%, transparent), transparent 24%),
+    var(--list-pane-bg);
+}
+
+html[data-style="classic"] .settings-main > header {
+  border-bottom-color: color-mix(in oklch, var(--border-strong) 16%, var(--border));
   background: var(--list-pane-bg);
 }
 
 html[data-style="classic"] .settings-content {
-  background: var(--detail-pane-bg);
+  background:
+    linear-gradient(180deg, color-mix(in oklch, var(--surface) 18%, transparent), transparent 16%),
+    var(--detail-pane-bg);
 }
 
 html[data-style="classic"] .settings-card {
   border-color: var(--panel-card-border);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
   background: var(--panel-card-bg);
   box-shadow: var(--panel-card-shadow);
 }
@@ -229,10 +546,164 @@ html[data-style="classic"] .settings-sidebar nav button {
 
 html[data-style="classic"] .settings-sidebar nav button.active {
   border-left-color: var(--accent);
+  background: var(--nav-active-bg);
+}
+
+html[data-style="classic"] .sidebar-new-button:focus-visible,
+html[data-style="classic"] .sidebar-settings-button:focus-visible {
+  outline-color: color-mix(in oklch, var(--classic-support-border-color) 46%, transparent);
+  outline-offset: 1px;
 }
 
 html[data-style="classic"] .composer-send-button {
   box-shadow:
     inset 0 1px 0 color-mix(in oklch, white 16%, transparent),
     0 1px 2px color-mix(in oklch, var(--shadow-ink) 8%, transparent);
+}
+
+html[data-style="classic"] .composer-model-chip {
+  color: color-mix(in oklch, var(--fg) 68%, var(--classic-support-ink-color));
+}
+
+html[data-style="classic"] .composer-model-chip[aria-expanded="true"],
+html[data-style="classic"] .composer-model-chip.is-confirmed {
+  border-color: color-mix(in oklch, var(--classic-support-border-color) 72%, var(--border));
+  background: var(--classic-support-panel-fill);
+  color: var(--classic-support-ink-color);
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklch, white 40%, transparent),
+    0 0 0 2px color-mix(in oklch, var(--classic-support-border-color) 14%, transparent);
+}
+
+html[data-style="classic"] .composer-model-chip[aria-expanded="true"] .composer-model-dot,
+html[data-style="classic"] .composer-model-chip.is-confirmed .composer-model-dot {
+  box-shadow:
+    0 0 0 3px color-mix(in oklch, var(--status-success) 10%, transparent),
+    0 0 10px color-mix(in oklch, var(--classic-support-border-color) 18%, transparent);
+}
+
+html[data-style="classic"] .model-menu-popover button {
+  border-color: color-mix(in oklch, var(--border-strong) 18%, var(--border));
+  background: color-mix(in oklch, var(--surface) 94%, var(--surface-subtle));
+  box-shadow: inset 0 1px 0 color-mix(in oklch, white 32%, transparent);
+}
+
+html[data-style="classic"] .model-menu-popover button:hover {
+  border-color: color-mix(in oklch, var(--classic-support-border-color) 34%, var(--border));
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--classic-support-fill-base) 20%, transparent), transparent 74%),
+    color-mix(in oklch, var(--surface) 97%, var(--classic-support-surface-base));
+  box-shadow:
+    inset 2px 0 0 color-mix(in oklch, var(--classic-support-border-color) 18%, transparent),
+    inset 0 1px 0 color-mix(in oklch, white 36%, transparent);
+}
+
+html[data-style="classic"] .model-menu-popover button.selected {
+  border-color: color-mix(in oklch, var(--classic-support-border-color) 48%, var(--border));
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--classic-support-fill-base) 34%, transparent), transparent 76%),
+    color-mix(in oklch, var(--surface) 94%, var(--classic-support-surface-base));
+  box-shadow:
+    inset 2px 0 0 color-mix(in oklch, var(--accent-strong) 40%, transparent),
+    inset 0 1px 0 color-mix(in oklch, white 40%, transparent);
+}
+
+html[data-style="classic"] .model-menu-popover button.selected::after {
+  border-right-color: color-mix(in oklch, var(--accent-active) 76%, var(--classic-support-ink-color));
+  border-bottom-color: color-mix(in oklch, var(--accent-active) 76%, var(--classic-support-ink-color));
+}
+
+html[data-style="classic"] .model-menu-popover button.selected .model-option-icon {
+  border-color: color-mix(in oklch, var(--classic-support-border-color) 42%, var(--border));
+  background: color-mix(in oklch, var(--surface) 92%, var(--classic-support-surface-base));
+}
+
+html[data-style="classic"] .settings-backdrop,
+html[data-style="classic"] .mcp-subpanel-backdrop {
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in oklch, var(--overlay-ink) 16%, transparent),
+      color-mix(in oklch, var(--overlay-ink) 30%, transparent)
+    );
+}
+
+html[data-style="classic"] .mcp-subpanel {
+  border-radius: var(--radius-md);
+}
+
+html[data-style="classic"] .mcp-subpanel-header,
+html[data-style="classic"] .mcp-subpanel-footer {
+  background: color-mix(in oklch, var(--surface-subtle) 32%, var(--surface));
+}
+
+html[data-style="classic"] .mcp-subpanel-header {
+  border-bottom-color: color-mix(in oklch, var(--border-strong) 16%, var(--border));
+}
+
+html[data-style="classic"] .mcp-subpanel-body {
+  background:
+    linear-gradient(180deg, color-mix(in oklch, var(--surface) 16%, transparent), transparent 18%),
+    var(--subpanel-bg);
+}
+
+html[data-style="classic"] .mcp-subpanel-footer {
+  border-top-color: color-mix(in oklch, var(--border-strong) 16%, var(--border));
+}
+
+html[data-style="classic"] .sidebar-conversation-menu,
+html[data-style="classic"] .composer-options-popover,
+html[data-style="classic"] .settings-select-popover {
+  border-radius: var(--radius-md);
+  background: var(--popover-bg);
+  box-shadow: var(--popover-shadow);
+}
+
+html[data-style="classic"] .message-queue-count {
+  border: 1px solid color-mix(in oklch, var(--classic-support-border-color) 42%, transparent);
+  background: color-mix(in oklch, var(--classic-support-surface-base) 88%, var(--surface));
+  color: var(--classic-support-ink-color);
+}
+
+html[data-style="classic"] .sidebar-conversation-menu button:hover:not(:disabled),
+html[data-style="classic"] .settings-select-option:hover,
+html[data-style="classic"] .settings-select-option:focus-visible {
+  background: var(--nav-hover-bg);
+}
+
+html[data-style="classic"] .settings-select-option[data-selected="true"] {
+  background: var(--nav-active-bg);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+html[data-style="classic"] .theme-settings-card {
+  border-radius: var(--radius-md);
+}
+
+html[data-style="classic"] .theme-style-option,
+html[data-style="classic"] .theme-palette-option {
+  border-radius: var(--radius-md);
+  background: var(--panel-card-bg);
+  box-shadow: inset 0 1px 0 color-mix(in oklch, white 36%, transparent);
+}
+
+html[data-style="classic"] .theme-style-option:hover,
+html[data-style="classic"] .theme-palette-option:hover {
+  border-color: var(--row-hover-border);
+  background: var(--nav-hover-bg);
+  box-shadow: inset 0 1px 0 color-mix(in oklch, white 24%, transparent);
+}
+
+html[data-style="classic"] .theme-style-option.active,
+html[data-style="classic"] .theme-palette-option.active {
+  border-color: var(--row-active-border);
+  background: var(--nav-active-bg);
+  box-shadow:
+    inset 3px 0 0 var(--accent),
+    inset 0 1px 0 color-mix(in oklch, white 28%, transparent);
+}
+
+html[data-style="classic"] .theme-style-preview,
+html[data-style="classic"] .theme-palette-preview {
+  border-radius: var(--radius-sm);
 }

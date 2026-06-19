@@ -12,7 +12,8 @@
   position: absolute;
   inset: 0;
   background: color-mix(in oklch, var(--overlay-ink) 20%, transparent);
-  backdrop-filter: blur(4px);
+  backdrop-filter: blur(var(--app-backdrop-blur));
+  -webkit-backdrop-filter: blur(var(--app-backdrop-blur));
 }
 
 .settings-dialog {
@@ -22,10 +23,12 @@
   height: min(var(--settings-dialog-max-height), calc(100vh - 36px));
   overflow: hidden;
   grid-template-columns: var(--settings-sidebar-width) minmax(0, 1fr);
-  border: 2px solid var(--border-strong);
+  border: var(--border-width-md) solid var(--floating-panel-border);
   border-radius: var(--radius-lg);
-  background: var(--surface);
-  box-shadow: 0 22px 70px color-mix(in oklch, var(--shadow-ink) 18%, transparent);
+  background: var(--floating-panel-bg);
+  box-shadow: var(--floating-panel-shadow);
+  backdrop-filter: var(--floating-panel-backdrop-filter);
+  -webkit-backdrop-filter: var(--floating-panel-backdrop-filter);
   animation: modal-card-enter var(--motion-dialog-duration) var(--motion-ease-standard) both;
 }
 
@@ -33,8 +36,8 @@
   display: flex;
   min-height: 0;
   flex-direction: column;
-  border-right: 1px solid var(--border);
-  background: var(--surface-subtle);
+  border-right: var(--border-width-thin) solid var(--border);
+  background: var(--list-pane-bg);
   padding: var(--space-4) 0;
 }
 
@@ -48,11 +51,15 @@
   border-radius: var(--radius-sm);
   color: var(--muted);
   margin: 0 var(--space-4) var(--space-3);
+  transition:
+    border-color var(--motion-interaction-duration) var(--motion-ease-standard),
+    background-color var(--motion-interaction-duration) var(--motion-ease-standard),
+    color var(--motion-interaction-duration) var(--motion-ease-standard);
 }
 
 .settings-close-button:hover {
   border-color: var(--border);
-  background: var(--surface);
+  background: var(--surface-panel);
   color: var(--fg);
 }
 
@@ -67,26 +74,34 @@
   grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
   gap: var(--space-2);
-  border-left: 2px solid transparent;
-  border-radius: 0;
+  border: 1px solid var(--list-row-border);
+  border-left: var(--list-row-marker-width) solid transparent;
+  border-radius: var(--list-row-radius);
   padding: 0 var(--space-5);
   color: var(--muted);
   text-align: left;
   font-size: 13px;
-  font-weight: 500;
+  font-weight: var(--weight-body);
+  transition:
+    background-color var(--motion-interaction-duration) var(--motion-ease-standard),
+    border-color var(--motion-interaction-duration) var(--motion-ease-standard),
+    color var(--motion-interaction-duration) var(--motion-ease-standard),
+    box-shadow var(--motion-interaction-duration) var(--motion-ease-standard);
 }
 
 .settings-sidebar nav button:hover,
 .settings-sidebar nav button.active {
-  background: var(--surface);
+  background: var(--row-hover-bg);
   color: var(--fg);
   box-shadow: none;
 }
 
 .settings-sidebar nav button.active {
-  border-left-color: var(--accent);
-  background: color-mix(in oklch, var(--accent-soft) 72%, var(--surface));
-  font-weight: 600;
+  border-color: var(--list-row-active-border);
+  border-left-color: var(--list-row-active-marker);
+  background: var(--row-active-bg);
+  box-shadow: var(--list-row-active-shadow);
+  font-weight: var(--weight-label);
 }
 
 .settings-sidebar nav button.active svg:first-child {
@@ -108,7 +123,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: var(--border-width-thin) solid var(--border);
   padding: 0 var(--space-6);
 }
 
@@ -117,7 +132,7 @@
   overflow: hidden;
   margin: 0;
   font-size: 17px;
-  font-weight: 600;
+  font-weight: var(--weight-label);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -126,10 +141,10 @@
   min-height: 0;
   flex: 1 1 auto;
   overflow-y: auto;
-  background: var(--surface);
+  background: var(--detail-pane-bg);
   padding: var(--space-6);
   scrollbar-width: thin;
-  scrollbar-color: color-mix(in oklch, var(--muted) 42%, transparent) transparent;
+  scrollbar-color: var(--scrollbar-pane-thumb) transparent;
 }
 
 .settings-content.model-settings-content {

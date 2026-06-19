@@ -76,22 +76,22 @@
 .rich-heading-1,
 .rich-heading-2 {
   font-size: 18px;
-  font-weight: 700;
+  font-weight: var(--weight-bold);
 }
 
 .rich-heading-3 {
   font-size: 16px;
-  font-weight: 650;
+  font-weight: var(--weight-heading);
 }
 
 .rich-heading-4 {
   font-size: 14px;
-  font-weight: 650;
+  font-weight: var(--weight-heading);
 }
 
 .rich-link {
   color: var(--accent-active);
-  font-weight: 650;
+  font-weight: var(--weight-heading);
   text-decoration: underline;
   text-decoration-thickness: 1px;
   text-underline-offset: 3px;
@@ -125,15 +125,17 @@
   margin: 2px 0;
   border-left: 3px solid var(--accent);
   border-radius: 0;
-  background: color-mix(in oklch, var(--accent) 4%, transparent);
+  background: var(--content-highlight);
   padding: 9px 13px;
   color: color-mix(in oklch, var(--fg) 72%, var(--muted));
+  backdrop-filter: var(--content-backdrop-filter);
+  -webkit-backdrop-filter: var(--content-backdrop-filter);
 }
 
 .rich-inline-code {
-  border: 1px solid color-mix(in oklch, var(--border) 88%, transparent);
+  border: 1px solid var(--content-border);
   border-radius: var(--radius-sm);
-  background: color-mix(in oklch, var(--surface-subtle) 78%, var(--surface));
+  background: var(--content-surface);
   padding: 1px 5px;
   color: color-mix(in oklch, var(--fg) 82%, var(--accent-active));
   font-family: var(--font-mono);
@@ -144,14 +146,16 @@
   position: relative;
   max-width: 100%;
   overflow: auto;
-  border: 1px solid var(--border);
+  border: 1px solid var(--content-border);
   border-radius: var(--radius-md);
-  background: color-mix(in oklch, var(--surface) 86%, var(--surface-subtle));
+  background: var(--content-surface);
   padding: 15px;
   color: var(--fg);
   font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.68;
+  backdrop-filter: var(--content-backdrop-filter);
+  -webkit-backdrop-filter: var(--content-backdrop-filter);
 }
 
 .rich-code-block[data-language] {
@@ -166,7 +170,7 @@
   color: color-mix(in oklch, var(--fg) 42%, var(--muted));
   font-family: var(--font-sans);
   font-size: 10px;
-  font-weight: 700;
+  font-weight: var(--weight-bold);
   letter-spacing: 0;
   line-height: 1.2;
   text-transform: uppercase;
@@ -181,9 +185,11 @@
 .rich-table-wrap {
   max-width: 100%;
   overflow-x: auto;
-  border: 1px solid var(--border);
+  border: 1px solid var(--content-border);
   border-radius: var(--radius-md);
-  background: var(--surface);
+  background: var(--content-surface-muted);
+  backdrop-filter: var(--content-backdrop-filter);
+  -webkit-backdrop-filter: var(--content-backdrop-filter);
 }
 
 .rich-table {
@@ -196,16 +202,16 @@
 
 .rich-table th,
 .rich-table td {
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--content-border);
   padding: 9px 11px;
   text-align: left;
   vertical-align: top;
 }
 
 .rich-table th {
-  background: color-mix(in oklch, var(--fg) 3%, transparent);
+  background: var(--content-highlight);
   color: var(--fg);
-  font-weight: 700;
+  font-weight: var(--weight-bold);
 }
 
 .rich-table tr:last-child td {
@@ -229,7 +235,7 @@
 .rich-divider {
   width: 100%;
   border: 0;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--content-border);
   margin: 6px 0;
 }
 

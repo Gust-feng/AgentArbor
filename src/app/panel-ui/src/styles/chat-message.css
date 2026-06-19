@@ -30,11 +30,11 @@
   align-self: center;
   border: 1px solid color-mix(in oklch, var(--border) 78%, transparent);
   border-radius: var(--radius-sm);
-  background: color-mix(in oklch, var(--surface) 88%, transparent);
+  background: var(--surface-translucent);
   color: color-mix(in oklch, var(--fg) 62%, var(--muted));
   cursor: pointer;
   font-size: 12px;
-  font-weight: 650;
+  font-weight: var(--weight-heading);
   line-height: 1;
   padding: 8px 12px;
 }
@@ -57,8 +57,9 @@
 .user-message-wrap {
   width: min(100%, 620px);
   min-width: 0;
-  border-left: 2px solid color-mix(in oklch, var(--accent) 42%, var(--border));
-  background: color-mix(in oklch, var(--surface) 70%, transparent);
+  border-left: var(--border-width-md) solid color-mix(in oklch, var(--accent) 42%, var(--border));
+  background: var(--message-user-bg);
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
   padding: 7px 0 7px var(--space-4);
 }
 
@@ -70,7 +71,7 @@
   width: 100%;
   color: color-mix(in oklch, var(--fg) 44%, var(--muted));
   font-size: 10px;
-  font-weight: 700;
+  font-weight: var(--weight-bold);
   letter-spacing: 0;
   line-height: 1.2;
   text-transform: none;
@@ -141,7 +142,7 @@
   flex: 1 1 auto;
   min-width: 32px;
   height: 1px;
-  background: var(--border);
+  background: color-mix(in oklch, var(--border) 84%, transparent);
 }
 
 .assistant-message[data-entering] .assistant-message-label::after {
@@ -157,7 +158,7 @@
   color: color-mix(in oklch, var(--fg) 50%, var(--muted));
   font-family: var(--font-mono);
   font-size: 10px;
-  font-weight: 500;
+  font-weight: var(--weight-body);
   letter-spacing: 0;
   text-overflow: ellipsis;
   text-transform: none;
@@ -193,9 +194,9 @@
   width: 28px;
   height: 28px;
   flex: 0 0 auto;
-  border: 1px solid color-mix(in oklch, var(--border) 82%, transparent);
+  border: var(--border-width-thin) solid color-mix(in oklch, var(--border) 82%, transparent);
   border-radius: var(--radius-md);
-  background: var(--surface);
+  background: var(--surface-control);
   color: color-mix(in oklch, var(--fg) 62%, var(--muted));
 }
 
@@ -209,14 +210,14 @@
 .assistant-avatar-initial {
   color: inherit;
   font-size: 12px;
-  font-weight: 700;
+  font-weight: var(--weight-bold);
   line-height: 1;
 }
 
 .assistant-answer {
   min-width: 0;
   max-width: 100%;
-  border-left: 1px solid color-mix(in oklch, var(--border) 70%, transparent);
+  border-left: var(--border-width-thin) solid var(--message-assistant-border);
   padding: 1px 0 1px var(--space-4);
 }
 
@@ -227,7 +228,7 @@
 }
 
 .assistant-workline .assistant-answer {
-  border-left-color: color-mix(in oklch, var(--border) 74%, transparent);
+  border-left: var(--border-width-thin) solid color-mix(in oklch, var(--message-assistant-border) 88%, var(--accent));
 }
 
 .assistant-answer-pending {

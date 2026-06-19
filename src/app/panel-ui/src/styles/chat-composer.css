@@ -12,10 +12,12 @@
 .chat-input-card {
   position: relative;
   overflow: visible;
-  border: 1px solid color-mix(in oklch, var(--border) 88%, var(--fg));
-  border-radius: var(--radius-md);
-  background: var(--surface);
-  box-shadow: 0 1px 2px color-mix(in oklch, var(--fg) 4%, transparent);
+  border: var(--border-width-thin) solid var(--composer-border);
+  border-radius: var(--composer-radius);
+  background: var(--composer-bg);
+  box-shadow: var(--composer-shadow);
+  backdrop-filter: var(--composer-backdrop-filter);
+  -webkit-backdrop-filter: var(--composer-backdrop-filter);
   transition:
     background-color var(--motion-panel-duration) var(--motion-ease-standard),
     border-color var(--motion-panel-duration) var(--motion-ease-standard),
@@ -25,8 +27,8 @@
 .chat-input-card.focused {
   border-color: color-mix(in oklch, var(--accent) 34%, var(--border));
   box-shadow:
-    0 1px 2px color-mix(in oklch, var(--fg) 4%, transparent),
-    0 0 0 2px color-mix(in oklch, var(--accent) 7%, transparent);
+    var(--composer-shadow),
+    var(--focus-ring);
 }
 
 .chat-input-textarea {
@@ -44,8 +46,11 @@
   resize: none;
 }
 
+.chat-input-textarea:hover,
 .chat-input-textarea:focus,
 .chat-input-textarea:focus-visible {
+  border-color: transparent;
+  background: transparent;
   outline: none;
   box-shadow: none;
 }
@@ -69,7 +74,7 @@
   align-items: center;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  background: color-mix(in oklch, var(--fg) 3%, transparent);
+  background: var(--surface-control-muted);
   padding: 6px 8px;
   animation: pill-slide-in var(--motion-enter-duration) var(--motion-ease-spring) both;
 }
@@ -133,27 +138,81 @@
 .composer-tool-button,
 .composer-options-button,
 .composer-cancel-button {
+  position: relative;
   display: inline-flex;
   height: 30px;
   align-items: center;
   gap: 6px;
-  border: 0;
+  border: 1px solid transparent;
   border-radius: var(--radius-sm);
   background: transparent;
   padding: 0 8px;
   color: color-mix(in oklch, var(--fg) 56%, var(--muted));
   font-size: 12px;
-  font-weight: 500;
+  font-weight: var(--weight-body);
+  isolation: isolate;
+  transition:
+    background-color var(--motion-fast-duration) var(--motion-ease-standard),
+    border-color var(--motion-fast-duration) var(--motion-ease-standard),
+    box-shadow var(--motion-fast-duration) var(--motion-ease-standard),
+    color var(--motion-fast-duration) var(--motion-ease-standard),
+    transform var(--motion-fast-duration) var(--motion-ease-snap);
 }
 
 .composer-options-button {
+  min-width: 0;
   color: color-mix(in oklch, var(--fg) 72%, var(--muted));
+}
+
+.composer-options-button::after {
+  position: absolute;
+  inset: -1px;
+  z-index: -1;
+  border-radius: inherit;
+  background:
+    linear-gradient(135deg, color-mix(in oklch, white 34%, transparent), transparent 56%),
+    color-mix(in oklch, var(--accent) 8%, transparent);
+  content: "";
+  opacity: 0;
+  transform: scale(0.96);
+  transition:
+    opacity var(--motion-fast-duration) var(--motion-ease-standard),
+    transform var(--motion-fast-duration) var(--motion-ease-snap);
+}
+
+.composer-options-button svg:last-child {
+  flex: 0 0 auto;
+  transition: transform var(--motion-fast-duration) var(--motion-ease-standard);
 }
 
 .composer-tool-button[aria-expanded="true"],
 .composer-options-button[aria-expanded="true"] {
-  background: color-mix(in oklch, var(--fg) 6%, transparent);
+  border-color: color-mix(in oklch, var(--accent) 24%, var(--border));
+  background: color-mix(in oklch, var(--accent) 9%, var(--surface));
   color: var(--fg);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in oklch, var(--accent) 12%, transparent),
+    0 6px 16px color-mix(in oklch, var(--accent) 8%, transparent);
+}
+
+.composer-options-button[aria-expanded="true"]::after,
+.composer-options-button.is-confirmed::after {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.composer-options-button[aria-expanded="true"] svg:last-child {
+  transform: rotate(180deg);
+}
+
+.composer-options-button.is-confirmed {
+  border-color: color-mix(in oklch, var(--accent) 34%, var(--border));
+  background: color-mix(in oklch, var(--accent) 11%, var(--surface));
+  color: color-mix(in oklch, var(--accent-active) 76%, var(--fg));
+  box-shadow:
+    inset 0 0 0 1px color-mix(in oklch, var(--accent) 18%, transparent),
+    0 8px 20px color-mix(in oklch, var(--accent) 10%, transparent);
+  animation: composer-chip-confirm var(--motion-enter-duration) var(--motion-ease-spring) both;
 }
 
 .composer-tool-button:hover,
@@ -161,8 +220,12 @@
 .composer-cancel-button:hover,
 .turn-actions button:hover,
 .settings-actions button:hover {
-  background: color-mix(in oklch, var(--fg) 6%, transparent);
+  border-color: color-mix(in oklch, var(--accent) 18%, var(--border));
+  background: var(--nav-hover-bg);
   color: var(--fg);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in oklch, var(--surface-highlight) 42%, transparent),
+    0 4px 12px color-mix(in oklch, var(--shadow-ink) 5%, transparent);
 }
 
 .composer-tool-button:active,
@@ -188,6 +251,7 @@
 }
 
 .composer-access-chip.full-access {
+  border-color: color-mix(in oklch, var(--accent) 16%, transparent);
   background: color-mix(in oklch, var(--accent) 8%, transparent);
   color: color-mix(in oklch, var(--accent-active) 78%, var(--fg));
 }
@@ -200,8 +264,21 @@
   width: 6px;
   height: 6px;
   flex: 0 0 auto;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--status-success);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--status-success) 10%, transparent);
+  transition:
+    background-color var(--motion-fast-duration) var(--motion-ease-standard),
+    box-shadow var(--motion-fast-duration) var(--motion-ease-standard),
+    transform var(--motion-fast-duration) var(--motion-ease-snap);
+}
+
+.composer-model-chip[aria-expanded="true"] .composer-model-dot,
+.composer-model-chip.is-confirmed .composer-model-dot {
+  box-shadow:
+    0 0 0 3px color-mix(in oklch, var(--status-success) 14%, transparent),
+    0 0 12px color-mix(in oklch, var(--status-success) 36%, transparent);
+  transform: scale(1.16);
 }
 
 .composer-model-chip.saving .composer-model-dot {
@@ -232,11 +309,13 @@
   width: min(320px, calc(100vw - 48px));
   max-height: 340px;
   overflow-y: auto;
-  border: 1px solid var(--border);
+  border: var(--border-width-thin) solid var(--popover-border);
   border-radius: var(--radius-md);
-  background: var(--surface);
+  background: var(--popover-bg);
   padding: var(--space-2);
-  box-shadow: var(--shadow-elevated);
+  box-shadow: var(--popover-shadow);
+  backdrop-filter: var(--popover-backdrop-filter);
+  -webkit-backdrop-filter: var(--popover-backdrop-filter);
   animation: popover-enter var(--motion-enter-duration) var(--motion-ease-out-back) both;
 }
 
@@ -276,20 +355,48 @@
 
 .composer-reasoning-popover button,
 .composer-access-popover button {
+  position: relative;
   display: grid;
   width: 100%;
+  grid-template-columns: minmax(0, 1fr);
   gap: 2px;
+  border: 1px solid transparent;
   border-radius: var(--radius-sm);
-  padding: 7px 9px;
+  padding: 7px 28px 7px 9px;
   color: var(--fg);
   text-align: left;
+  transition:
+    background-color var(--motion-fast-duration) var(--motion-ease-standard),
+    border-color var(--motion-fast-duration) var(--motion-ease-standard),
+    box-shadow var(--motion-fast-duration) var(--motion-ease-standard),
+    color var(--motion-fast-duration) var(--motion-ease-standard);
 }
 
 .composer-reasoning-popover button:hover,
-.composer-reasoning-popover button.selected,
-.composer-access-popover button:hover,
-.composer-access-popover button.selected {
+.composer-access-popover button:hover {
   background: color-mix(in oklch, var(--accent) 7%, transparent);
+}
+
+.composer-reasoning-popover button.selected,
+.composer-access-popover button.selected {
+  border-color: color-mix(in oklch, var(--accent) 22%, var(--border));
+  background:
+    linear-gradient(90deg, color-mix(in oklch, var(--accent) 12%, transparent), transparent 72%),
+    color-mix(in oklch, var(--surface) 82%, transparent);
+  box-shadow: inset 2px 0 0 color-mix(in oklch, var(--accent) 68%, transparent);
+}
+
+.composer-reasoning-popover button.selected::after,
+.composer-access-popover button.selected::after {
+  position: absolute;
+  top: 9px;
+  right: 9px;
+  width: 5px;
+  height: 9px;
+  border-right: 2px solid color-mix(in oklch, var(--accent) 74%, var(--fg));
+  border-bottom: 2px solid color-mix(in oklch, var(--accent) 74%, var(--fg));
+  content: "";
+  transform: rotate(45deg);
 }
 
 .composer-reasoning-popover span,
@@ -305,7 +412,7 @@
 .composer-access-popover span {
   color: var(--fg);
   font-size: 12px;
-  font-weight: 600;
+  font-weight: var(--weight-label);
 }
 
 .composer-reasoning-popover small,
@@ -323,27 +430,53 @@
   padding: 0 8px;
   color: var(--placeholder);
   font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0;
+  font-weight: var(--weight-body);
+  letter-spacing: 0.05em;
   text-transform: uppercase;
 }
 
 .model-menu-popover button {
+  position: relative;
   display: flex;
   width: 100%;
   min-height: 42px;
   align-items: center;
   gap: 8px;
+  border: 1px solid transparent;
   border-radius: var(--radius-sm);
-  padding: 7px 9px;
+  padding: 7px 28px 7px 9px;
   text-align: left;
   color: var(--fg);
   font-size: 12px;
+  transition:
+    background-color var(--motion-fast-duration) var(--motion-ease-standard),
+    border-color var(--motion-fast-duration) var(--motion-ease-standard),
+    box-shadow var(--motion-fast-duration) var(--motion-ease-standard),
+    color var(--motion-fast-duration) var(--motion-ease-standard);
 }
 
-.model-menu-popover button:hover,
-.model-menu-popover button.selected {
+.model-menu-popover button:hover {
   background: color-mix(in oklch, var(--accent) 7%, transparent);
+}
+
+.model-menu-popover button.selected {
+  border-color: color-mix(in oklch, var(--accent) 22%, var(--border));
+  background:
+    linear-gradient(90deg, color-mix(in oklch, var(--accent) 12%, transparent), transparent 70%),
+    color-mix(in oklch, var(--surface) 84%, transparent);
+  box-shadow: inset 2px 0 0 color-mix(in oklch, var(--accent) 68%, transparent);
+}
+
+.model-menu-popover button.selected::after {
+  position: absolute;
+  top: 16px;
+  right: 10px;
+  width: 5px;
+  height: 9px;
+  border-right: 2px solid color-mix(in oklch, var(--accent) 74%, var(--fg));
+  border-bottom: 2px solid color-mix(in oklch, var(--accent) 74%, var(--fg));
+  content: "";
+  transform: rotate(45deg);
 }
 
 .model-option-icon {
@@ -356,7 +489,7 @@
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  background: var(--surface);
+  background: var(--surface-control);
 }
 
 .model-option-icon svg {
@@ -368,7 +501,7 @@
 .model-option-initial {
   color: color-mix(in oklch, var(--fg) 70%, var(--muted));
   font-size: 11px;
-  font-weight: 700;
+  font-weight: var(--weight-bold);
   line-height: 1;
 }
 
@@ -388,7 +521,7 @@
 .model-option-copy strong {
   color: var(--fg);
   font-size: 12px;
-  font-weight: 600;
+  font-weight: var(--weight-label);
 }
 
 .model-option-copy small {
@@ -423,11 +556,13 @@
   align-items: center;
   justify-content: center;
   border-radius: var(--radius-sm);
-  background: var(--fg);
+  background: color-mix(in oklch, var(--fg) 92%, var(--accent));
   color: var(--primary-foreground);
-  box-shadow: none;
+  box-shadow: var(--shadow-soft);
   transition:
-    background var(--motion-enter-duration) var(--motion-ease-spring),
+    border-color var(--motion-fast-duration) var(--motion-ease-standard),
+    box-shadow var(--motion-fast-duration) var(--motion-ease-standard),
+    color var(--motion-fast-duration) var(--motion-ease-standard),
     transform var(--motion-fast-duration) var(--motion-ease-snap);
 }
 
@@ -448,7 +583,7 @@
   height: 14px;
   border: 2px solid color-mix(in oklch, var(--primary-foreground) 36%, transparent);
   border-top-color: var(--primary-foreground);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   animation: spin 0.8s linear infinite;
 }
 
@@ -473,6 +608,18 @@
   to {
     opacity: 1;
     transform: translateX(0);
+  }
+}
+
+@keyframes composer-chip-confirm {
+  0% {
+    transform: scale(0.96);
+  }
+  58% {
+    transform: scale(1.035);
+  }
+  100% {
+    transform: scale(1);
   }
 }
 
@@ -522,7 +669,7 @@
   min-height: 18px;
   color: color-mix(in oklch, var(--fg) 70%, var(--muted));
   font-size: 12px;
-  font-weight: 700;
+  font-weight: var(--weight-bold);
   line-height: 1;
 }
 
@@ -532,11 +679,11 @@
   justify-content: center;
   min-width: 16px;
   height: 16px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: color-mix(in oklch, var(--accent) 14%, transparent);
   color: color-mix(in oklch, var(--accent) 72%, var(--fg));
   font-size: 10px;
-  font-weight: 700;
+  font-weight: var(--weight-bold);
   padding: 0 4px;
 }
 
@@ -550,9 +697,9 @@
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
-  border: 1px solid color-mix(in oklch, var(--border) 62%, transparent);
+  border: var(--border-width-thin) solid color-mix(in oklch, var(--border) 62%, transparent);
   border-radius: var(--radius-sm);
-  background: color-mix(in oklch, var(--surface) 88%, transparent);
+  background: var(--surface-translucent);
   padding: 6px 7px 6px 10px;
   animation: queue-item-enter var(--motion-enter-duration) var(--motion-ease-out-back) both;
 }
@@ -629,7 +776,14 @@
   scrollbar-width: thin;
 }
 
+.message-queue-edit textarea:hover {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+
 .message-queue-edit textarea:focus {
+  background: transparent;
   box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--border) 88%, var(--fg));
   outline: none;
 }

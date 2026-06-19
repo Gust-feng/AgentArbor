@@ -5,7 +5,7 @@
   min-width: 0;
   flex-direction: column;
   overflow: hidden;
-  background: var(--bg);
+  background: var(--workbench-bg);
 }
 
 .chat-empty-main,
@@ -41,14 +41,14 @@
 
 .chat-empty-heading {
   margin: 0;
-  border-bottom: 2px solid var(--border-strong);
+  border-bottom: var(--border-width-md) solid var(--border-strong);
   padding: 0 2px var(--space-3);
   color: var(--fg);
-  font-family: var(--font-serif);
-  font-size: 64px;
-  font-weight: 650;
+  font-family: var(--font-sans);
+  font-size: 54px;
+  font-weight: var(--weight-heading);
   letter-spacing: 0;
-  line-height: 0.95;
+  line-height: 1;
 }
 
 .system-error-line {

@@ -37,7 +37,7 @@
 .settings-row > span {
   color: var(--fg);
   font-size: 13px;
-  font-weight: 500;
+  font-weight: var(--weight-body);
 }
 
 .settings-row input,
@@ -71,18 +71,24 @@
   grid-template-columns: auto minmax(0, 1fr);
   gap: 10px;
   align-items: center;
-  border: 1px solid color-mix(in oklch, var(--border) 78%, transparent);
+  border: 1px solid var(--row-border);
   border-radius: var(--radius-lg);
-  background: color-mix(in oklch, var(--surface-subtle) 58%, var(--surface));
+  background: var(--row-bg);
   padding: 10px;
   text-align: left;
 }
 
 .preset-list button:hover,
-.model-catalog-grid button:hover,
+.model-catalog-grid button:hover {
+  border-color: var(--row-hover-border);
+  background: var(--row-hover-bg);
+  box-shadow: var(--row-hover-shadow);
+}
+
 .model-catalog-grid button.active {
-  border-color: var(--accent-border);
-  background: color-mix(in oklch, var(--accent-soft) 62%, var(--surface));
+  border-color: var(--row-active-border);
+  background: var(--row-active-bg);
+  box-shadow: var(--row-active-shadow);
 }
 
 .preset-list strong,

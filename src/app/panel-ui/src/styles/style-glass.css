@@ -1,0 +1,1403 @@
+/*
+ * AgentArbor Panel — Glass Style (液态玻璃)
+ *
+ * A fundamentally different visual language:
+ *   • Soft gradient environment behind detached panels
+ *   • Liquid-glass control layers with bright edge refraction
+ *   • Low-cost blur only on major containers and popovers
+ *   • Translucent surfaces with enough opacity to keep text legible
+ *   • Slightly softer border-radius
+ *
+ * Activated by: html[data-style="glass"]
+ * Color palettes: [data-color="aurora" | "sunset" | "ocean"]
+ */
+
+/* ========================================================================== */
+/*  Structural overrides — applied to ALL glass color palettes                */
+/* ========================================================================== */
+
+html[data-style="glass"] {
+  color-scheme: light;
+
+  /* ---- Shape — floating and softer than classic ---- */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 18px;
+  --radius-2xl: 24px;
+
+  /* ---- Border — luminous alpha ---- */
+  --border-width-thin: 1px;
+  --border-width-md: 1px;
+  --border-width-thick: 3px;
+  --border: color-mix(in oklch, var(--fg) 12%, transparent);
+  --border-strong: color-mix(in oklch, var(--fg) 20%, transparent);
+
+  /* ---- Focus ring — glow ---- */
+  --focus-ring-width: 3px;
+  --focus-ring: 0 0 0 var(--focus-ring-width) color-mix(in oklch, var(--accent) 22%, transparent);
+
+  /* ---- Shadow — soft floating layers, no expensive motion ---- */
+  --shadow-soft:
+    0 8px 22px color-mix(in oklch, var(--shadow-ink) 6%, transparent),
+    inset 0 1px 0 color-mix(in oklch, white 66%, transparent);
+  --shadow-elevated:
+    0 22px 54px color-mix(in oklch, var(--shadow-ink) 12%, transparent),
+    0 0 0 1px color-mix(in oklch, white 34%, transparent) inset,
+    inset 0 1px 0 color-mix(in oklch, white 72%, transparent);
+  --shadow-card:
+    0 16px 38px color-mix(in oklch, var(--shadow-ink) 9%, transparent),
+    0 2px 8px color-mix(in oklch, var(--accent) 4%, transparent),
+    inset 0 1px 0 color-mix(in oklch, white 68%, transparent);
+  --shadow-inset: inset 0 0 0 1px color-mix(in oklch, white 48%, transparent);
+  --shadow-dialog:
+    0 28px 72px color-mix(in oklch, var(--shadow-ink) 16%, transparent),
+    0 8px 28px color-mix(in oklch, var(--accent) 6%, transparent),
+    inset 0 1px 0 color-mix(in oklch, white 76%, transparent);
+  --shadow-pane:
+    0 20px 52px color-mix(in oklch, var(--shadow-ink) 8%, transparent),
+    inset 0 1px 0 color-mix(in oklch, white 58%, transparent);
+
+  /* ---- Typography weight & line-height — inherited from foundation :root ---- */
+
+  /* ---- Glass tokens — ACTIVATED ---- */
+  --blur-glass: 14px;
+  --blur-glass-heavy: 18px;
+  --glass-saturation: 1.16;
+  --glass-opacity-surface: 68%;
+  --glass-opacity-sidebar: 62%;
+  --glass-border-opacity: 24%;
+  --glass-backdrop-filter: blur(var(--blur-glass)) saturate(var(--glass-saturation));
+  --glass-backdrop-filter-heavy: blur(var(--blur-glass-heavy)) saturate(1.2);
+  --liquid-glass-fill-soft:
+    radial-gradient(
+      138% 148% at 0% 0%,
+      color-mix(in oklch, white 56%, transparent) 0%,
+      color-mix(in oklch, white 22%, transparent) 30%,
+      transparent 68%
+    ),
+    radial-gradient(
+      128% 138% at 100% 100%,
+      color-mix(in oklch, var(--secondary) 8%, transparent) 0%,
+      color-mix(in oklch, var(--accent) 3%, transparent) 34%,
+      transparent 72%
+    ),
+    linear-gradient(
+      180deg,
+      color-mix(in oklch, white 26%, transparent) 0%,
+      color-mix(in oklch, white 10%, transparent) 26%,
+      transparent 60%
+    ),
+    color-mix(in oklch, var(--surface) 70%, transparent);
+  --liquid-glass-fill-strong:
+    radial-gradient(
+      142% 154% at 0% 0%,
+      color-mix(in oklch, white 62%, transparent) 0%,
+      color-mix(in oklch, white 26%, transparent) 30%,
+      transparent 70%
+    ),
+    radial-gradient(
+      132% 144% at 100% 100%,
+      color-mix(in oklch, var(--secondary) 10%, transparent) 0%,
+      color-mix(in oklch, var(--accent) 4%, transparent) 34%,
+      transparent 72%
+    ),
+    linear-gradient(
+      180deg,
+      color-mix(in oklch, white 32%, transparent) 0%,
+      color-mix(in oklch, white 12%, transparent) 28%,
+      transparent 62%
+    ),
+    color-mix(in oklch, var(--surface) 78%, transparent);
+  --liquid-glass-fill-row:
+    linear-gradient(
+      180deg,
+      color-mix(in oklch, white 28%, transparent) 0%,
+      color-mix(in oklch, white 12%, transparent) 24%,
+      transparent 100%
+    ),
+    color-mix(in oklch, var(--surface) 74%, transparent);
+  --liquid-glass-fill-row-hover:
+    linear-gradient(
+      180deg,
+      color-mix(in oklch, white 32%, transparent) 0%,
+      color-mix(in oklch, white 14%, transparent) 24%,
+      transparent 100%
+    ),
+    linear-gradient(135deg, color-mix(in oklch, var(--accent) 6%, transparent), transparent 62%),
+    color-mix(in oklch, var(--surface) 80%, transparent);
+  --liquid-glass-fill-row-active:
+    linear-gradient(
+      180deg,
+      color-mix(in oklch, white 36%, transparent) 0%,
+      color-mix(in oklch, white 16%, transparent) 24%,
+      transparent 100%
+    ),
+    linear-gradient(
+      135deg,
+      color-mix(in oklch, var(--accent) 10%, transparent),
+      color-mix(in oklch, var(--secondary) 5%, transparent)
+    ),
+    color-mix(in oklch, var(--surface) 84%, transparent);
+  --liquid-glass-bg: var(--liquid-glass-fill-soft);
+  --liquid-glass-bg-strong: var(--liquid-glass-fill-strong);
+  --liquid-glass-border: color-mix(in oklch, white 58%, var(--accent));
+  --liquid-glass-border-soft: color-mix(in oklch, white 52%, transparent);
+  --liquid-glass-edge:
+    inset 0 1px 0 color-mix(in oklch, white 82%, transparent),
+    inset 0 -1px 0 color-mix(in oklch, var(--accent) 10%, transparent),
+    inset 1px 0 0 color-mix(in oklch, white 52%, transparent),
+    inset -1px 0 0 color-mix(in oklch, var(--secondary) 8%, transparent);
+  --liquid-glass-specular:
+    radial-gradient(
+      122% 148% at 0% 0%,
+      color-mix(in oklch, white 54%, transparent) 0%,
+      color-mix(in oklch, white 18%, transparent) 34%,
+      transparent 70%
+    ),
+    linear-gradient(
+      180deg,
+      color-mix(in oklch, white 26%, transparent) 0%,
+      color-mix(in oklch, white 10%, transparent) 20%,
+      transparent 56%
+    );
+  --liquid-glass-specular-wide:
+    radial-gradient(
+      138% 166% at 0% 0%,
+      color-mix(in oklch, white 58%, transparent) 0%,
+      color-mix(in oklch, white 22%, transparent) 34%,
+      transparent 70%
+    ),
+    linear-gradient(
+      180deg,
+      color-mix(in oklch, white 28%, transparent) 0%,
+      color-mix(in oklch, white 10%, transparent) 22%,
+      transparent 58%
+    ),
+    radial-gradient(
+      136% 144% at 100% 100%,
+      color-mix(in oklch, var(--secondary) 7%, transparent) 0%,
+      transparent 64%
+    );
+  --liquid-glass-refraction:
+    radial-gradient(
+      128% 136% at 100% 100%,
+      color-mix(in oklch, var(--secondary) 7%, transparent) 0%,
+      transparent 64%
+    ),
+    linear-gradient(180deg, transparent 60%, color-mix(in oklch, var(--accent) 4%, transparent));
+  --liquid-glass-refraction-soft:
+    linear-gradient(180deg, transparent 62%, color-mix(in oklch, var(--accent) 3%, transparent)),
+    radial-gradient(128% 136% at 100% 100%, color-mix(in oklch, var(--secondary) 4%, transparent) 0%, transparent 68%);
+  --liquid-glass-shadow:
+    0 20px 48px color-mix(in oklch, var(--shadow-ink) 10%, transparent),
+    0 6px 18px color-mix(in oklch, var(--accent) 8%, transparent),
+    var(--liquid-glass-edge);
+  --liquid-glass-shadow-raised:
+    0 30px 74px color-mix(in oklch, var(--shadow-ink) 14%, transparent),
+    0 10px 28px color-mix(in oklch, var(--accent) 10%, transparent),
+    var(--liquid-glass-edge);
+  --liquid-glass-highlight: var(--liquid-glass-specular-wide);
+  --liquid-content-shadow:
+    0 12px 30px color-mix(in oklch, var(--shadow-ink) 6%, transparent),
+    inset 0 1px 0 color-mix(in oklch, white 72%, transparent),
+    inset 0 -1px 0 color-mix(in oklch, var(--accent) 6%, transparent);
+  --liquid-row-shadow:
+    inset 0 1px 0 color-mix(in oklch, white 70%, transparent),
+    inset 0 -1px 0 color-mix(in oklch, var(--accent) 5%, transparent);
+  --liquid-row-shadow-hover:
+    0 10px 24px color-mix(in oklch, var(--shadow-ink) 6%, transparent),
+    0 3px 8px color-mix(in oklch, var(--accent) 5%, transparent),
+    inset 0 1px 0 color-mix(in oklch, white 74%, transparent),
+    inset 0 -1px 0 color-mix(in oklch, var(--accent) 8%, transparent);
+  --liquid-row-shadow-active:
+    0 14px 32px color-mix(in oklch, var(--shadow-ink) 8%, transparent),
+    0 4px 12px color-mix(in oklch, var(--accent) 9%, transparent),
+    inset 0 1px 0 color-mix(in oklch, white 80%, transparent),
+    inset 0 -1px 0 color-mix(in oklch, var(--accent) 12%, transparent);
+  --surface-highlight: color-mix(in oklch, white 72%, transparent);
+  --surface-panel: color-mix(in oklch, var(--surface) 74%, transparent);
+  --surface-panel-subtle: color-mix(in oklch, var(--surface) 58%, transparent);
+  --surface-control: color-mix(in oklch, var(--surface) 78%, transparent);
+  --surface-control-muted: color-mix(in oklch, var(--surface) 62%, transparent);
+  --surface-overlay: color-mix(in oklch, var(--surface) 76%, transparent);
+  --surface-translucent: color-mix(in oklch, var(--surface) 60%, transparent);
+  --workbench-bg: transparent;
+  --workbench-overlay:
+    radial-gradient(
+      ellipse 138% 96% at 88% 10%,
+      color-mix(in oklch, var(--secondary) 10%, transparent) 0%,
+      color-mix(in oklch, var(--secondary) 4%, transparent) 42%,
+      transparent 82%
+    ),
+    radial-gradient(
+      ellipse 128% 108% at 10% 14%,
+      color-mix(in oklch, var(--accent) 9%, transparent) 0%,
+      color-mix(in oklch, var(--accent) 4%, transparent) 40%,
+      transparent 82%
+    ),
+    radial-gradient(
+      ellipse 120% 92% at 50% 76%,
+      color-mix(in oklch, white 24%, transparent) 0%,
+      color-mix(in oklch, white 10%, transparent) 46%,
+      transparent 84%
+    ),
+    linear-gradient(180deg, color-mix(in oklch, white 22%, var(--bg)), var(--bg));
+  --composer-bg: var(--liquid-glass-bg-strong);
+  --composer-border: var(--liquid-glass-border);
+  --composer-radius: var(--radius-xl);
+  --composer-shadow: var(--liquid-glass-shadow-raised);
+  --composer-backdrop-filter: var(--glass-backdrop-filter);
+  --message-user-bg:
+    linear-gradient(135deg, color-mix(in oklch, var(--accent) 9%, transparent), transparent 58%),
+    color-mix(in oklch, var(--surface) 78%, transparent);
+  --message-assistant-border: color-mix(in oklch, var(--accent) 22%, transparent);
+  --nav-hover-bg:
+    linear-gradient(90deg, color-mix(in oklch, white 28%, transparent), transparent 70%),
+    color-mix(in oklch, var(--surface) 22%, transparent);
+  --nav-active-bg:
+    linear-gradient(90deg, color-mix(in oklch, var(--accent) 8%, transparent), transparent 66%),
+    linear-gradient(180deg, color-mix(in oklch, white 24%, transparent), transparent 72%),
+    color-mix(in oklch, var(--surface) 28%, transparent);
+  --sidebar-conversation-hover-bg:
+    linear-gradient(90deg, color-mix(in oklch, white 18%, transparent), transparent 72%),
+    color-mix(in oklch, var(--surface) 14%, transparent);
+  --sidebar-conversation-active-bg:
+    linear-gradient(180deg, color-mix(in oklch, white 28%, transparent), transparent 68%),
+    linear-gradient(135deg, color-mix(in oklch, var(--accent) 9%, transparent), color-mix(in oklch, var(--secondary) 4%, transparent)),
+    color-mix(in oklch, white 30%, transparent);
+  --sidebar-conversation-active-hover-bg:
+    linear-gradient(180deg, color-mix(in oklch, white 32%, transparent), transparent 68%),
+    linear-gradient(135deg, color-mix(in oklch, var(--accent) 11%, transparent), color-mix(in oklch, var(--secondary) 5%, transparent)),
+    color-mix(in oklch, white 36%, transparent);
+  --sidebar-conversation-active-marker: color-mix(in oklch, var(--accent) 64%, white);
+  --sidebar-conversation-active-text: color-mix(in oklch, var(--accent-active) 44%, var(--fg));
+  --sidebar-conversation-active-shadow:
+    inset 0 0 0 1px color-mix(in oklch, white 42%, transparent),
+    inset 0 1px 0 color-mix(in oklch, white 46%, transparent);
+  --sidebar-conversation-active-hover-shadow:
+    inset 0 0 0 1px color-mix(in oklch, white 48%, transparent),
+    inset 0 1px 0 color-mix(in oklch, white 52%, transparent);
+  --popover-bg: var(--liquid-glass-bg-strong);
+  --popover-border: var(--liquid-glass-border-soft);
+  --popover-shadow: var(--liquid-glass-shadow-raised);
+  --popover-backdrop-filter: var(--glass-backdrop-filter);
+  --app-backdrop-blur: var(--blur-glass);
+
+  /* ---- Semantic panel contract — floating glass language ---- */
+  --panel-card-bg: var(--liquid-glass-fill-row);
+  --panel-card-border: color-mix(in oklch, white 56%, transparent);
+  --panel-card-shadow: var(--liquid-content-shadow);
+  --panel-card-backdrop-filter: saturate(1.08);
+  --floating-panel-bg: var(--liquid-glass-bg-strong);
+  --floating-panel-border: var(--liquid-glass-border);
+  --floating-panel-shadow: var(--liquid-glass-shadow-raised);
+  --floating-panel-backdrop-filter: var(--glass-backdrop-filter-heavy);
+  --subpanel-bg: var(--liquid-glass-fill-row);
+  --subpanel-border: color-mix(in oklch, white 52%, transparent);
+  --subpanel-footer-bg: color-mix(in oklch, white 28%, transparent);
+  --subpanel-shadow: var(--liquid-content-shadow);
+  --subpanel-backdrop-filter: saturate(1.1);
+  --content-surface: var(--surface-control-muted);
+  --content-surface-muted: var(--surface-translucent);
+  --content-border: color-mix(in oklch, white 50%, var(--border));
+  --content-highlight: color-mix(in oklch, white 48%, transparent);
+  --content-backdrop-filter: saturate(1.06);
+  --empty-state-bg: var(--surface-translucent);
+  --empty-state-border: color-mix(in oklch, white 36%, var(--border));
+  --empty-state-shadow: inset 0 1px 0 color-mix(in oklch, white 44%, transparent);
+  --row-bg: var(--liquid-glass-fill-row);
+  --row-border: color-mix(in oklch, white 54%, var(--border));
+  --row-hover-bg: var(--liquid-glass-fill-row-hover);
+  --row-hover-border: color-mix(in oklch, var(--accent) 18%, white);
+  --row-hover-shadow: var(--liquid-row-shadow-hover);
+  --row-active-bg: var(--liquid-glass-fill-row-active);
+  --row-active-border: color-mix(in oklch, var(--accent) 32%, white);
+  --row-active-shadow: var(--liquid-row-shadow-active);
+  --list-row-radius: var(--radius-lg);
+  --list-row-marker-width: var(--border-width-thick);
+  --list-row-border: transparent;
+  --list-row-hover-border: var(--row-hover-border);
+  --list-row-hover-marker: transparent;
+  --list-row-hover-shadow: var(--row-hover-shadow);
+  --list-row-active-border: var(--row-active-border);
+  --list-row-active-marker: transparent;
+  --list-row-active-shadow: var(--row-active-shadow);
+  --list-pane-bg: var(--surface-panel-subtle);
+  --detail-pane-bg:
+    linear-gradient(180deg, color-mix(in oklch, white 24%, transparent), transparent 38%),
+    linear-gradient(180deg, transparent 92%, color-mix(in oklch, var(--accent) 4%, transparent)),
+    color-mix(in oklch, var(--surface) 38%, transparent);
+  --field-bg: color-mix(in oklch, var(--surface) 84%, transparent);
+  --field-border: color-mix(in oklch, white 52%, var(--border));
+  --field-hover-bg: color-mix(in oklch, var(--surface) 94%, transparent);
+  --field-hover-border: color-mix(in oklch, var(--accent) 32%, white);
+  --field-focus-border: color-mix(in oklch, var(--accent) 54%, white);
+  --field-focus-ring: 0 0 0 3px color-mix(in oklch, var(--accent) 20%, transparent);
+  --scrollbar-thumb: color-mix(in oklch, var(--fg) 14%, transparent);
+  --scrollbar-thumb-hover: color-mix(in oklch, var(--fg) 24%, transparent);
+  --scrollbar-pane-thumb: color-mix(in oklch, var(--fg) 12%, transparent);
+  --scrollbar-pane-thumb-hover: color-mix(in oklch, var(--fg) 22%, transparent);
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Gradient mesh background                                                   */
+/* -------------------------------------------------------------------------- */
+
+html[data-style="glass"] body {
+  background: var(--gradient-mesh, var(--bg));
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
+  background-attachment: fixed;
+}
+
+html[data-style="glass"] .app-root {
+  gap: 0;
+  padding: 0;
+  background: transparent;
+}
+
+html[data-style="glass"] .app-workbench {
+  border: 0;
+  border-radius: 0;
+  background:
+    linear-gradient(180deg, color-mix(in oklch, white 18%, transparent), transparent 44%),
+    var(--workbench-bg);
+  box-shadow: var(--shadow-pane);
+}
+
+html[data-style="glass"] .app-main,
+html[data-style="glass"] .chat-empty-screen,
+html[data-style="glass"] .chat-active-screen {
+  background: var(--workbench-overlay);
+  background-repeat: no-repeat;
+  background-size: 100% 100%;
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Frosted glass surfaces — sidebar                                          */
+/* -------------------------------------------------------------------------- */
+
+html[data-style="glass"] .app-sidebar {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  background: var(--liquid-glass-bg);
+  backdrop-filter: var(--glass-backdrop-filter-heavy);
+  -webkit-backdrop-filter: var(--glass-backdrop-filter-heavy);
+  height: 100%;
+  border: 0;
+  border-right: var(--border-width-md) solid color-mix(in oklch, white 60%, var(--accent));
+  border-radius: 0;
+  box-shadow:
+    12px 0 40px color-mix(in oklch, var(--shadow-ink) 8%, transparent),
+    inset -1px 0 0 color-mix(in oklch, white 56%, transparent),
+    inset 1px 0 0 color-mix(in oklch, white 72%, transparent);
+}
+
+html[data-style="glass"] .app-sidebar::before {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: var(--liquid-glass-highlight);
+  content: "";
+}
+
+html[data-style="glass"] .app-sidebar::after {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: var(--liquid-glass-refraction);
+  content: "";
+  opacity: 0.92;
+}
+
+html[data-style="glass"] .app-sidebar > * {
+  position: relative;
+  z-index: 1;
+}
+
+html[data-style="glass"] .sidebar-new-wrap {
+  padding: 30px var(--space-5) var(--space-5);
+}
+
+html[data-style="glass"] .sidebar-recent {
+  padding: 0 var(--space-5) var(--space-4);
+}
+
+html[data-style="glass"] .sidebar-footer {
+  border-top: var(--border-width-md) solid color-mix(in oklch, white 46%, transparent);
+  padding: var(--space-4) var(--space-5) var(--space-5);
+}
+
+html[data-style="glass"] .sidebar-list-heading {
+  border-bottom-color: color-mix(in oklch, white 36%, var(--border));
+  color: color-mix(in oklch, var(--fg) 54%, var(--muted));
+  font-family: var(--font-sans);
+}
+
+html[data-style="glass"] .sidebar-new-button {
+  height: 42px;
+  border-color: color-mix(in oklch, white 58%, var(--accent));
+  border-radius: var(--radius-lg);
+  background:
+    linear-gradient(135deg, color-mix(in oklch, white 44%, transparent), transparent 58%),
+    color-mix(in oklch, var(--accent) 14%, white);
+  color: color-mix(in oklch, var(--accent-active) 74%, var(--fg));
+  box-shadow:
+    0 12px 28px color-mix(in oklch, var(--accent) 11%, transparent),
+    inset 0 1px 0 color-mix(in oklch, white 76%, transparent),
+    inset 0 -1px 0 color-mix(in oklch, var(--accent) 12%, transparent);
+}
+
+html[data-style="glass"] .sidebar-new-button:hover,
+html[data-style="glass"] .sidebar-new-button.active {
+  border-color: color-mix(in oklch, white 66%, var(--accent));
+  background:
+    linear-gradient(135deg, color-mix(in oklch, white 48%, transparent), transparent 58%),
+    color-mix(in oklch, var(--accent) 20%, white);
+  color: color-mix(in oklch, var(--accent-active) 82%, var(--fg));
+  box-shadow:
+    0 12px 28px color-mix(in oklch, var(--accent) 13%, transparent),
+    inset 0 1px 0 color-mix(in oklch, white 80%, transparent),
+    inset 0 -1px 0 color-mix(in oklch, var(--accent) 14%, transparent);
+}
+
+html[data-style="glass"] .sidebar-new-button .sidebar-icon-slot,
+html[data-style="glass"] .sidebar-new-button:hover .sidebar-icon-slot,
+html[data-style="glass"] .sidebar-new-button.active .sidebar-icon-slot {
+  color: var(--accent);
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Frosted glass surfaces — cards & panels                                   */
+/* -------------------------------------------------------------------------- */
+
+html[data-style="glass"] .chat-input-floating {
+  border-top: 1px solid color-mix(in oklch, white 44%, var(--border));
+  background:
+    linear-gradient(180deg, transparent, color-mix(in oklch, var(--bg) 42%, transparent) 42%, color-mix(in oklch, var(--bg) 70%, transparent));
+  padding: var(--space-3) 72px var(--space-4);
+}
+
+html[data-style="glass"] .chat-input-card {
+  overflow: visible;
+  isolation: isolate;
+  border-color: var(--composer-border);
+  border-radius: var(--composer-radius);
+  background: var(--composer-bg);
+  backdrop-filter: var(--composer-backdrop-filter);
+  -webkit-backdrop-filter: var(--composer-backdrop-filter);
+  box-shadow: var(--composer-shadow);
+}
+
+html[data-style="glass"] .chat-input-card.focused {
+  border-color: color-mix(in oklch, var(--accent) 42%, white);
+  box-shadow:
+    var(--composer-shadow),
+    0 0 0 3px color-mix(in oklch, var(--accent) 16%, transparent);
+}
+
+html[data-style="glass"] .chat-input-card::before {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: var(--liquid-glass-highlight);
+  content: "";
+}
+
+html[data-style="glass"] .chat-input-card::after {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: var(--liquid-glass-refraction);
+  content: "";
+  opacity: 0.84;
+}
+
+html[data-style="glass"] .chat-input-card > .chat-input-textarea,
+html[data-style="glass"] .chat-input-card > .attachment-row,
+html[data-style="glass"] .chat-input-card > .chat-input-toolbar {
+  position: relative;
+  z-index: 1;
+}
+
+html[data-style="glass"] .chat-input-floating .chat-input-textarea {
+  padding-top: 12px;
+}
+
+html[data-style="glass"] .chat-input-toolbar {
+  border-top-color: color-mix(in oklch, white 48%, var(--border));
+  margin-inline: var(--space-3);
+}
+
+html[data-style="glass"] .composer-send-button {
+  border-radius: var(--radius-lg);
+  background:
+    linear-gradient(135deg, var(--accent-strong), color-mix(in oklch, var(--secondary) 44%, var(--accent-strong)));
+  box-shadow:
+    0 9px 20px color-mix(in oklch, var(--accent) 18%, transparent),
+    inset 0 1px 0 color-mix(in oklch, white 42%, transparent);
+}
+
+html[data-style="glass"] .composer-send-button:hover:not(:disabled) {
+  background:
+    linear-gradient(135deg, var(--accent-hover), color-mix(in oklch, var(--secondary) 52%, var(--accent-hover)));
+}
+
+html[data-style="glass"] .settings-sidebar {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  border-right-color: color-mix(in oklch, white 42%, var(--border));
+  backdrop-filter: var(--glass-backdrop-filter);
+  -webkit-backdrop-filter: var(--glass-backdrop-filter);
+  background:
+    linear-gradient(180deg, color-mix(in oklch, white 38%, transparent), transparent 42%),
+    var(--list-pane-bg);
+}
+
+html[data-style="glass"] .settings-sidebar::before {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: var(--liquid-glass-specular);
+  content: "";
+  opacity: 0.6;
+}
+
+html[data-style="glass"] .settings-sidebar::after {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: var(--liquid-glass-refraction-soft);
+  content: "";
+  opacity: 0.74;
+}
+
+html[data-style="glass"] .settings-sidebar > * {
+  position: relative;
+  z-index: 1;
+}
+
+html[data-style="glass"] .settings-sidebar nav {
+  padding-inline: 0;
+}
+
+html[data-style="glass"] .settings-sidebar nav button {
+  padding-inline: var(--space-5);
+}
+
+html[data-style="glass"] .settings-dialog {
+  border-width: var(--border-width-md);
+  border-radius: var(--radius-2xl);
+  backdrop-filter: var(--floating-panel-backdrop-filter);
+  -webkit-backdrop-filter: var(--floating-panel-backdrop-filter);
+  isolation: isolate;
+}
+
+html[data-style="glass"] .settings-dialog::before,
+html[data-style="glass"] .composer-options-popover::before,
+html[data-style="glass"] .sidebar-conversation-menu::before,
+html[data-style="glass"] .settings-select-popover::before {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: var(--liquid-glass-highlight);
+  content: "";
+}
+
+html[data-style="glass"] .settings-dialog::after,
+html[data-style="glass"] .composer-options-popover::after,
+html[data-style="glass"] .sidebar-conversation-menu::after,
+html[data-style="glass"] .settings-select-popover::after {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: var(--liquid-glass-refraction);
+  content: "";
+  opacity: 0.86;
+}
+
+html[data-style="glass"] .settings-dialog > *,
+html[data-style="glass"] .composer-options-popover > *,
+html[data-style="glass"] .sidebar-conversation-menu > *,
+html[data-style="glass"] .settings-select-popover > * {
+  position: relative;
+  z-index: 1;
+}
+
+html[data-style="glass"] .settings-main > header {
+  border-bottom-color: color-mix(in oklch, white 42%, var(--border));
+  background:
+    linear-gradient(180deg, color-mix(in oklch, white 36%, transparent), transparent 68%),
+    color-mix(in oklch, var(--surface) 42%, transparent);
+}
+
+html[data-style="glass"] .settings-card,
+html[data-style="glass"] .mcp-service-card,
+html[data-style="glass"] .skills-row {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  background: var(--panel-card-bg);
+  box-shadow: var(--panel-card-shadow);
+  backdrop-filter: var(--panel-card-backdrop-filter);
+  -webkit-backdrop-filter: var(--panel-card-backdrop-filter);
+}
+
+html[data-style="glass"] .settings-card {
+  border-color: var(--panel-card-border);
+}
+
+html[data-style="glass"] .provider-list-pane,
+html[data-style="glass"] .provider-search,
+html[data-style="glass"] .model-search-field,
+html[data-style="glass"] .mcp-tool-auth-header {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+html[data-style="glass"] input::placeholder,
+html[data-style="glass"] textarea::placeholder {
+  color: color-mix(in oklch, var(--fg) 45%, transparent);
+}
+
+html[data-style="glass"] .provider-list-pane {
+  box-shadow:
+    inset -1px 0 0 color-mix(in oklch, white 50%, transparent),
+    inset 0 1px 0 color-mix(in oklch, white 22%, transparent);
+}
+
+html[data-style="glass"] .model-list-panel {
+  border-top-color: color-mix(in oklch, white 38%, transparent);
+  background:
+    linear-gradient(180deg, color-mix(in oklch, white 18%, transparent), transparent 52%);
+}
+
+html[data-style="glass"] .provider-search,
+html[data-style="glass"] .model-search-field,
+html[data-style="glass"] .provider-add-button,
+html[data-style="glass"] .mcp-tool-auth-header,
+html[data-style="glass"] .mcp-tool-auth-row {
+  border-color: color-mix(in oklch, white 54%, var(--border));
+  background: var(--liquid-glass-fill-row);
+  box-shadow: var(--liquid-row-shadow);
+}
+
+html[data-style="glass"] .provider-search:focus-within,
+html[data-style="glass"] .model-search-field:focus-within,
+html[data-style="glass"] .provider-add-button:hover,
+html[data-style="glass"] .mcp-tool-auth-row:hover {
+  border-color: color-mix(in oklch, white 60%, var(--accent));
+  background: var(--liquid-glass-fill-row-hover);
+  box-shadow: var(--liquid-row-shadow-hover);
+}
+
+html[data-style="glass"] .provider-add-menu {
+  border-top-color: color-mix(in oklch, white 34%, transparent);
+  background:
+    linear-gradient(180deg, color-mix(in oklch, white 24%, transparent), transparent 52%),
+    var(--content-surface-muted);
+}
+
+html[data-style="glass"] .mcp-tool-auth-state {
+  border-color: color-mix(in oklch, white 56%, var(--border));
+  background:
+    linear-gradient(180deg, color-mix(in oklch, white 30%, transparent), transparent 58%),
+    color-mix(in oklch, var(--surface) 78%, transparent);
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklch, white 74%, transparent),
+    inset 0 -1px 0 color-mix(in oklch, var(--accent) 6%, transparent);
+}
+
+html[data-style="glass"] .mcp-tool-auth-state span {
+  background:
+    linear-gradient(180deg, color-mix(in oklch, white 84%, transparent), color-mix(in oklch, white 42%, transparent)),
+    color-mix(in oklch, var(--muted) 58%, var(--surface-highlight));
+  box-shadow:
+    0 4px 8px color-mix(in oklch, var(--shadow-ink) 10%, transparent),
+    inset 0 1px 0 color-mix(in oklch, white 78%, transparent);
+}
+
+html[data-style="glass"] .mcp-tool-auth-state:hover {
+  border-color: color-mix(in oklch, white 58%, var(--accent));
+  background: var(--liquid-glass-fill-row-hover);
+}
+
+html[data-style="glass"] .mcp-tool-auth-state[aria-pressed="true"] {
+  border-color: color-mix(in oklch, white 62%, var(--accent));
+  background: var(--liquid-glass-fill-row-active);
+  box-shadow:
+    0 8px 20px color-mix(in oklch, var(--accent) 10%, transparent),
+    inset 0 1px 0 color-mix(in oklch, white 80%, transparent),
+    inset 0 -1px 0 color-mix(in oklch, var(--accent) 12%, transparent);
+}
+
+html[data-style="glass"] .mcp-tool-auth-state[aria-pressed="true"] span {
+  background:
+    linear-gradient(180deg, color-mix(in oklch, white 34%, transparent), transparent 86%),
+    color-mix(in oklch, var(--accent-active) 88%, white);
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Interactive elements — buttons, nav items                                 */
+/* -------------------------------------------------------------------------- */
+
+html[data-style="glass"] .sidebar-nav-button:hover {
+  background: var(--nav-hover-bg);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in oklch, white 34%, transparent),
+    inset 0 1px 0 color-mix(in oklch, white 30%, transparent);
+}
+
+html[data-style="glass"] .sidebar-nav-button.active {
+  background: var(--nav-active-bg);
+}
+
+html[data-style="glass"] .sidebar-nav-button.active {
+  box-shadow:
+    inset 0 0 0 1px color-mix(in oklch, white 40%, transparent),
+    inset 0 1px 0 color-mix(in oklch, white 44%, transparent),
+    0 6px 16px color-mix(in oklch, var(--accent) 7%, transparent);
+}
+
+html[data-style="glass"] .sidebar-nav-button,
+html[data-style="glass"] .sidebar-recent-item {
+  border-left-color: transparent;
+}
+
+html[data-style="glass"] .sidebar-nav-button {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  border-radius: var(--radius-md);
+}
+
+html[data-style="glass"] .sidebar-recent-item {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+}
+
+html[data-style="glass"] .settings-sidebar nav button,
+html[data-style="glass"] .provider-row,
+html[data-style="glass"] .model-list-row,
+html[data-style="glass"] .mcp-tool-auth-row,
+html[data-style="glass"] .preset-list button,
+html[data-style="glass"] .model-catalog-grid button {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+html[data-style="glass"] .sidebar-nav-button:hover,
+html[data-style="glass"] .sidebar-nav-button.active,
+html[data-style="glass"] .sidebar-recent-item:hover,
+html[data-style="glass"] .sidebar-recent-item.active {
+  border-left-color: transparent;
+}
+
+html[data-style="glass"] .sidebar-recent-item.active {
+  border-color: color-mix(in oklch, white 62%, var(--accent));
+  background: var(--sidebar-conversation-active-bg);
+  color: var(--fg);
+  box-shadow: var(--sidebar-conversation-active-shadow);
+  backdrop-filter: saturate(1.12);
+  -webkit-backdrop-filter: saturate(1.12);
+}
+
+html[data-style="glass"] .sidebar-recent-item.active .sidebar-recent-row {
+  color: inherit;
+}
+
+html[data-style="glass"] .sidebar-recent-item .sidebar-recent-row strong {
+  color: color-mix(in oklch, var(--fg) 76%, var(--muted));
+}
+
+html[data-style="glass"] .sidebar-recent-item:hover .sidebar-recent-row strong {
+  color: var(--fg);
+}
+
+html[data-style="glass"] .sidebar-recent-item.active .sidebar-recent-row strong {
+  color: var(--sidebar-conversation-active-text);
+  font-weight: var(--weight-label);
+}
+
+html[data-style="glass"] .sidebar-recent-item.active .sidebar-recent-row svg {
+  color: color-mix(in oklch, var(--accent) 58%, var(--muted));
+}
+
+html[data-style="glass"] .sidebar-recent-item:hover:not(.active) {
+  background: var(--sidebar-conversation-hover-bg);
+  box-shadow: none;
+}
+
+html[data-style="glass"] .sidebar-recent-item.active:hover {
+  background: var(--sidebar-conversation-active-hover-bg);
+  box-shadow: var(--sidebar-conversation-active-hover-shadow);
+}
+
+html[data-style="glass"] .sidebar-recent-item.active .sidebar-kebab-button {
+  color: color-mix(in oklch, var(--muted) 74%, var(--fg));
+}
+
+html[data-style="glass"] .sidebar-recent-item:hover .sidebar-kebab-button,
+html[data-style="glass"] .sidebar-recent-item:focus-within .sidebar-kebab-button,
+html[data-style="glass"] .sidebar-recent-item.menu-open .sidebar-kebab-button {
+  opacity: 0.72;
+}
+
+html[data-style="glass"] .sidebar-recent-item.active .sidebar-kebab-button:hover,
+html[data-style="glass"] .sidebar-recent-item.active .sidebar-kebab-button[aria-expanded="true"] {
+  background: color-mix(in oklch, white 26%, transparent);
+  color: color-mix(in oklch, var(--fg) 76%, var(--accent));
+}
+
+html[data-style="glass"] .sidebar-settings-button:hover {
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, white 38%, transparent);
+}
+
+html[data-style="glass"] .composer-tool-button:hover,
+html[data-style="glass"] .composer-options-button:hover,
+html[data-style="glass"] .composer-cancel-button:hover,
+html[data-style="glass"] .turn-actions button:hover,
+html[data-style="glass"] .settings-actions button:hover {
+  box-shadow:
+    inset 0 0 0 1px color-mix(in oklch, white 34%, transparent),
+    0 5px 14px color-mix(in oklch, var(--shadow-ink) 5%, transparent);
+}
+
+html[data-style="glass"] .composer-options-button[aria-expanded="true"],
+html[data-style="glass"] .composer-options-button.is-confirmed {
+  border-color: color-mix(in oklch, white 58%, var(--accent));
+  background:
+    linear-gradient(135deg, color-mix(in oklch, white 42%, transparent), transparent 58%),
+    linear-gradient(315deg, color-mix(in oklch, var(--accent) 13%, transparent), color-mix(in oklch, var(--secondary) 8%, transparent)),
+    color-mix(in oklch, var(--surface) 42%, transparent);
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklch, white 76%, transparent),
+    inset 0 -1px 0 color-mix(in oklch, var(--accent) 13%, transparent),
+    0 10px 24px color-mix(in oklch, var(--accent) 12%, transparent);
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Accent soft backgrounds                                                   */
+/* -------------------------------------------------------------------------- */
+
+html[data-style="glass"] .assistant-workline {
+  border-left-color: color-mix(in oklch, var(--accent) 35%, transparent);
+}
+
+html[data-style="glass"] .user-message-wrap {
+  border-left: var(--border-width-md) solid color-mix(in oklch, var(--accent) 28%, transparent);
+  border-radius: var(--radius-xl);
+  background: var(--message-user-bg);
+  padding: 8px 0 8px var(--space-4);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in oklch, white 48%, transparent),
+    0 8px 18px color-mix(in oklch, var(--shadow-ink) 4%, transparent);
+}
+
+html[data-style="glass"] .assistant-answer {
+  border-left-color: color-mix(in oklch, var(--accent) 20%, transparent);
+  border-radius: 0 var(--radius-lg) var(--radius-lg) 0;
+  background:
+    linear-gradient(180deg, color-mix(in oklch, white 16%, transparent), transparent 46%),
+    linear-gradient(90deg, color-mix(in oklch, var(--accent) 5%, transparent), transparent 42%);
+  padding: 4px 0 4px var(--space-4);
+}
+
+html[data-style="glass"] .assistant-answer .rich-blockquote,
+html[data-style="glass"] .rich-code-block,
+html[data-style="glass"] .rich-table-wrap {
+  box-shadow: var(--shadow-soft);
+}
+
+html[data-style="glass"] .assistant-message-label::after {
+  background: color-mix(in oklch, white 34%, var(--border));
+}
+
+html[data-style="glass"] .composer-options-popover,
+html[data-style="glass"] .sidebar-conversation-menu,
+html[data-style="glass"] .settings-select-popover {
+  border-color: var(--popover-border);
+  background: var(--popover-bg);
+  backdrop-filter: var(--popover-backdrop-filter);
+  -webkit-backdrop-filter: var(--popover-backdrop-filter);
+  box-shadow:
+    var(--popover-shadow),
+    inset 0 1px 0 color-mix(in oklch, white 74%, transparent),
+    inset 0 -1px 0 color-mix(in oklch, var(--accent) 10%, transparent);
+}
+
+html[data-style="glass"] .model-menu-popover button:hover,
+html[data-style="glass"] .model-menu-popover button.selected,
+html[data-style="glass"] .composer-reasoning-popover button:hover,
+html[data-style="glass"] .composer-reasoning-popover button.selected,
+html[data-style="glass"] .composer-access-popover button:hover,
+html[data-style="glass"] .composer-access-popover button.selected,
+html[data-style="glass"] .settings-select-option:hover,
+html[data-style="glass"] .settings-select-option:focus-visible {
+  background:
+    linear-gradient(135deg, color-mix(in oklch, white 42%, transparent), transparent 62%),
+    color-mix(in oklch, var(--accent) 8%, transparent);
+}
+
+@media (max-width: 920px) {
+  html[data-style="glass"] .app-root {
+    gap: 0;
+    padding: 0;
+  }
+
+  html[data-style="glass"] .app-sidebar {
+    height: 100%;
+  }
+
+  html[data-style="glass"] .app-root .app-sidebar {
+    border-radius: 0 !important;
+  }
+
+  html[data-style="glass"] .sidebar-new-wrap,
+  html[data-style="glass"] .sidebar-recent,
+  html[data-style="glass"] .sidebar-footer {
+    padding-right: var(--space-3);
+    padding-left: var(--space-3);
+  }
+}
+
+@media (max-width: 760px) {
+  html[data-style="glass"] .app-root {
+    gap: 0;
+    padding: 0;
+  }
+
+  html[data-style="glass"] .app-workbench,
+  html[data-style="glass"] .app-sidebar {
+    border-radius: 0;
+  }
+
+  html[data-style="glass"] .app-root .app-sidebar {
+    height: 100%;
+    border-top: 0;
+    border-bottom: 0;
+    border-left: 0;
+    border-radius: 0 !important;
+  }
+
+}
+
+@media (max-width: 620px) {
+  html[data-style="glass"] .settings-sidebar nav {
+    padding-inline: 0;
+  }
+
+  html[data-style="glass"] .settings-sidebar nav button {
+    border-radius: var(--radius-md);
+    padding: 0;
+  }
+}
+
+@media (max-width: 420px) {
+  html[data-style="glass"] .settings-dialog {
+    border-radius: 0;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  html[data-style="glass"] {
+    --glass-backdrop-filter: saturate(1.04);
+    --glass-backdrop-filter-heavy: saturate(1.06);
+    --liquid-glass-bg:
+      linear-gradient(180deg, color-mix(in oklch, white 30%, transparent), transparent 52%),
+      color-mix(in oklch, var(--surface) 92%, var(--bg));
+    --liquid-glass-bg-strong:
+      linear-gradient(180deg, color-mix(in oklch, white 34%, transparent), transparent 52%),
+      color-mix(in oklch, var(--surface) 96%, var(--bg));
+    --liquid-glass-shadow:
+      0 10px 28px color-mix(in oklch, var(--shadow-ink) 8%, transparent),
+      inset 0 1px 0 color-mix(in oklch, white 62%, transparent);
+    --liquid-glass-shadow-raised:
+      0 18px 42px color-mix(in oklch, var(--shadow-ink) 12%, transparent),
+      inset 0 1px 0 color-mix(in oklch, white 66%, transparent);
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Selection                                                                 */
+/* -------------------------------------------------------------------------- */
+
+html[data-style="glass"] ::selection {
+  background: color-mix(in oklch, var(--accent) 35%, transparent);
+  color: var(--fg);
+}
+
+/* ========================================================================== */
+/*  Component polish — glass adaptations                                      */
+/* ========================================================================== */
+
+html[data-style="glass"] .mcp-connect-button {
+  background: color-mix(in oklch, var(--accent) 85%, white);
+  color: var(--primary-foreground);
+  border-color: color-mix(in oklch, var(--accent) 40%, white);
+  box-shadow:
+    0 8px 20px color-mix(in oklch, var(--accent) 18%, transparent),
+    inset 0 1px 0 color-mix(in oklch, white 40%, transparent);
+}
+
+html[data-style="glass"] .mcp-connect-button:hover {
+  background: color-mix(in oklch, var(--accent) 92%, white);
+  box-shadow:
+    0 10px 28px color-mix(in oklch, var(--accent) 22%, transparent),
+    inset 0 1px 0 color-mix(in oklch, white 44%, transparent);
+}
+
+html[data-style="glass"] .attachment-pill {
+  border-color: color-mix(in oklch, white 40%, var(--border));
+  box-shadow: var(--shadow-soft);
+}
+
+html[data-style="glass"] .page-action-button {
+  border-color: color-mix(in oklch, white 28%, var(--border));
+  box-shadow:
+    0 4px 12px color-mix(in oklch, var(--shadow-ink) 6%, transparent),
+    inset 0 1px 0 color-mix(in oklch, white 36%, transparent);
+}
+
+html[data-style="glass"] .page-action-button:hover {
+  background: color-mix(in oklch, white 32%, transparent);
+}
+
+html[data-style="glass"] .status-notice {
+  border-left-color: color-mix(in oklch, var(--fg) 32%, transparent);
+  background:
+    linear-gradient(135deg, color-mix(in oklch, white 34%, transparent), transparent 58%),
+    color-mix(in oklch, var(--surface) 56%, transparent);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in oklch, white 24%, transparent),
+    0 5px 14px color-mix(in oklch, var(--shadow-ink) 4%, transparent);
+}
+
+html[data-style="glass"] .status-notice.warning {
+  background: color-mix(in oklch, var(--status-warning) 10%, color-mix(in oklch, var(--surface) 52%, transparent));
+}
+
+html[data-style="glass"] .status-notice.error {
+  background: color-mix(in oklch, var(--status-danger) 8%, color-mix(in oklch, var(--surface) 52%, transparent));
+}
+
+html[data-style="glass"] .agent-workline-summary-status {
+  box-shadow:
+    0 0 0 4px color-mix(in oklch, var(--status-success) 12%, transparent),
+    0 0 16px color-mix(in oklch, var(--status-success) 20%, transparent);
+}
+
+html[data-style="glass"] .agent-activity {
+  border-left-color: color-mix(in oklch, white 28%, var(--border));
+}
+
+html[data-style="glass"] .agent-activity-marker {
+  background: color-mix(in oklch, var(--surface) 76%, transparent);
+  border-color: color-mix(in oklch, white 44%, var(--border));
+  box-shadow: 0 0 0 3px color-mix(in oklch, white 16%, transparent);
+}
+
+html[data-style="glass"] .agent-activity-step:hover {
+  background:
+    linear-gradient(90deg, color-mix(in oklch, var(--tool-accent, var(--accent)) 7%, transparent), transparent 70%),
+    color-mix(in oklch, white 24%, transparent);
+}
+
+html[data-style="glass"] .agent-activity-step[data-current="true"] {
+  background:
+    linear-gradient(90deg, color-mix(in oklch, var(--tool-accent, var(--accent)) 12%, transparent), transparent 72%),
+    color-mix(in oklch, white 28%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, white 22%, transparent);
+}
+
+html[data-style="glass"] .app-error-boundary-retry {
+  background: color-mix(in oklch, var(--accent) 85%, white);
+  box-shadow:
+    0 8px 20px color-mix(in oklch, var(--accent) 14%, transparent),
+    inset 0 1px 0 color-mix(in oklch, white 36%, transparent);
+}
+
+html[data-style="glass"] .model-list-panel button.primary {
+  box-shadow:
+    0 6px 16px color-mix(in oklch, var(--accent) 14%, transparent),
+    inset 0 1px 0 color-mix(in oklch, white 32%, transparent);
+}
+
+html[data-style="glass"] .mcp-subpanel-header {
+  border-bottom-color: color-mix(in oklch, white 32%, transparent);
+  background: linear-gradient(180deg, color-mix(in oklch, white 22%, transparent), transparent);
+}
+
+html[data-style="glass"] .mcp-subpanel-footer {
+  border-top-color: color-mix(in oklch, white 32%, transparent);
+}
+
+/* ---- Settings close button hover ---- */
+html[data-style="glass"] .settings-close-button:hover {
+  border-color: color-mix(in oklch, white 36%, transparent);
+  background: color-mix(in oklch, white 44%, transparent);
+  box-shadow: 0 4px 12px color-mix(in oklch, var(--shadow-ink) 6%, transparent);
+}
+
+/* ---- Confirmation action buttons (non-primary) ---- */
+html[data-style="glass"] .confirmation-actions button:not(.primary) {
+  border-color: color-mix(in oklch, white 32%, var(--border));
+  background: color-mix(in oklch, white 36%, transparent);
+  box-shadow:
+    0 4px 12px color-mix(in oklch, var(--shadow-ink) 6%, transparent),
+    inset 0 1px 0 color-mix(in oklch, white 40%, transparent);
+}
+
+html[data-style="glass"] .confirmation-actions button:not(.primary):hover {
+  background: color-mix(in oklch, white 48%, transparent);
+  border-color: color-mix(in oklch, white 40%, var(--border));
+}
+
+html[data-style="glass"] .confirmation-actions button.primary {
+  border-color: color-mix(in oklch, var(--accent) 36%, white);
+  background:
+    linear-gradient(135deg, color-mix(in oklch, var(--accent) 20%, white), color-mix(in oklch, var(--secondary) 9%, white));
+  color: color-mix(in oklch, var(--accent-active) 78%, var(--fg));
+  box-shadow:
+    0 6px 18px color-mix(in oklch, var(--accent) 12%, transparent),
+    inset 0 1px 0 color-mix(in oklch, white 46%, transparent);
+}
+
+html[data-style="glass"] .confirmation-node-meta span {
+  border-color: color-mix(in oklch, white 34%, transparent);
+  background: color-mix(in oklch, white 38%, transparent);
+}
+
+html[data-style="glass"] .confirmation-node-header span {
+  color: color-mix(in oklch, var(--status-warning) 76%, var(--fg));
+}
+
+/* ---- Settings backdrop — stronger overlay without blur ---- */
+html[data-style="glass"] .settings-backdrop {
+  background: color-mix(in oklch, var(--overlay-ink) 28%, transparent);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+/* ---- Provider list pane border ---- */
+html[data-style="glass"] .provider-list-pane {
+  border-right-color: color-mix(in oklch, white 36%, transparent);
+}
+
+/* ---- Model list panel border ---- */
+html[data-style="glass"] .model-list-panel {
+  border-top-color: color-mix(in oklch, white 34%, transparent);
+}
+
+html[data-style="glass"] .provider-row:hover:not(.selected),
+html[data-style="glass"] .model-list-row.saved:hover,
+html[data-style="glass"] .model-list-row:not(.saved):hover,
+html[data-style="glass"] .mcp-service-card:hover,
+html[data-style="glass"] .preset-list button:hover,
+html[data-style="glass"] .model-catalog-grid button:hover {
+  border-color: var(--row-hover-border);
+  background: var(--row-hover-bg);
+  box-shadow: var(--row-hover-shadow);
+}
+
+html[data-style="glass"] .provider-row.selected,
+html[data-style="glass"] .model-list-row.saved.selected,
+html[data-style="glass"] .mcp-service-card.selected,
+html[data-style="glass"] .model-catalog-grid button.active,
+html[data-style="glass"] .settings-sidebar nav button.active {
+  border-color: var(--row-active-border);
+  background: var(--row-active-bg);
+  box-shadow: var(--row-active-shadow);
+  backdrop-filter: saturate(1.12);
+  -webkit-backdrop-filter: saturate(1.12);
+}
+
+html[data-style="glass"] .provider-logo,
+html[data-style="glass"] .model-option-icon,
+html[data-style="glass"] .model-row-icon {
+  border-color: color-mix(in oklch, white 34%, var(--border));
+  background:
+    linear-gradient(180deg, color-mix(in oklch, white 26%, transparent), transparent 58%),
+    var(--content-surface);
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklch, white 38%, transparent),
+    0 4px 12px color-mix(in oklch, var(--shadow-ink) 4%, transparent);
+}
+
+/* ---- Message queue items ---- */
+html[data-style="glass"] .message-queue-item {
+  border-color: color-mix(in oklch, white 36%, transparent);
+  box-shadow:
+    0 4px 12px color-mix(in oklch, var(--shadow-ink) 5%, transparent),
+    inset 0 1px 0 color-mix(in oklch, white 44%, transparent);
+}
+
+/* ---- Transcript "load earlier" button ---- */
+html[data-style="glass"] .transcript-load-earlier {
+  border-color: color-mix(in oklch, white 36%, transparent);
+  box-shadow:
+    0 4px 14px color-mix(in oklch, var(--shadow-ink) 5%, transparent),
+    inset 0 1px 0 color-mix(in oklch, white 44%, transparent);
+}
+
+html[data-style="glass"] .transcript-load-earlier:hover {
+  border-color: color-mix(in oklch, var(--accent) 28%, white);
+  background: color-mix(in oklch, white 48%, transparent);
+  box-shadow:
+    0 6px 18px color-mix(in oklch, var(--shadow-ink) 7%, transparent),
+    inset 0 1px 0 color-mix(in oklch, white 50%, transparent);
+}
+
+/* ---- Agent activity expanded detail ---- */
+html[data-style="glass"] .agent-activity-expanded-detail {
+  border-color: color-mix(in oklch, white 30%, transparent);
+  border-left-color: color-mix(in oklch, var(--accent) 34%, transparent);
+  box-shadow:
+    0 6px 16px color-mix(in oklch, var(--shadow-ink) 5%, transparent),
+    inset 0 1px 0 color-mix(in oklch, white 36%, transparent);
+}
+
+/* ---- Sidebar skeleton rows ---- */
+html[data-style="glass"] .sidebar-empty-row {
+  border-color: color-mix(in oklch, white 28%, transparent);
+  background: color-mix(in oklch, var(--surface) 52%, transparent);
+}
+
+html[data-style="glass"] .sidebar-empty-row::after {
+  background: color-mix(in oklch, var(--fg) 10%, transparent);
+}
+
+html[data-style="glass"] .sidebar-empty-rail-dot {
+  border-color: color-mix(in oklch, white 32%, transparent);
+  background: color-mix(in oklch, var(--surface) 48%, transparent);
+}
+
+html[data-style="glass"] .rich-blockquote {
+  border-left-color: color-mix(in oklch, var(--accent) 38%, white);
+  background:
+    linear-gradient(135deg, color-mix(in oklch, var(--accent) 8%, transparent), transparent 66%),
+    color-mix(in oklch, var(--surface) 58%, transparent);
+}
+
+html[data-style="glass"] .rich-inline-code {
+  border-color: color-mix(in oklch, white 34%, var(--border));
+  background: color-mix(in oklch, white 38%, transparent);
+}
+
+html[data-style="glass"] .rich-code-block,
+html[data-style="glass"] .rich-table-wrap {
+  border-color: color-mix(in oklch, white 40%, var(--border));
+  background:
+    linear-gradient(180deg, color-mix(in oklch, white 24%, transparent), transparent 50%),
+    color-mix(in oklch, var(--surface) 68%, transparent);
+}
+
+/* ========================================================================== */
+/*  COLOR PALETTE: 极光 Aurora                                                 */
+/*  Gentle purple → teal gradient, translucent white glass                    */
+/* ========================================================================== */
+
+html[data-style="glass"][data-color="aurora"] {
+  --bg: #edf7ff;
+  --surface: #ffffff;
+  --fg: #172033;
+  --muted: #657388;
+  --accent: #775cff;
+  --secondary: #12b8ae;
+  --accent-soft: color-mix(in oklch, #775cff 16%, white);
+  --accent-strong: #684ff0;
+  --accent-hover: #5c43dc;
+  --accent-active: #4c36bd;
+  --surface-subtle: #ffffff;
+  --surface-muted: #dceafb;
+  --status-success: #12815e;
+  --status-warning: #a46d1f;
+  --status-danger: #b24656;
+  --primary-foreground: #fbfaff;
+  --shadow-ink: #20324a;
+  --overlay-ink: #20324a;
+
+  --gradient-mesh:
+    radial-gradient(ellipse 132% 108% at 12% 14%, rgba(119, 92, 255, 0.14) 0%, rgba(119, 92, 255, 0.06) 38%, transparent 80%),
+    radial-gradient(ellipse 136% 104% at 88% 10%, rgba(18, 184, 174, 0.12) 0%, rgba(18, 184, 174, 0.05) 40%, transparent 82%),
+    radial-gradient(ellipse 122% 96% at 50% 74%, rgba(255, 255, 255, 0.3) 0%, rgba(255, 255, 255, 0.14) 42%, transparent 84%),
+    #edf7ff;
+}
+
+/* ========================================================================== */
+/*  COLOR PALETTE: 日落 Sunset                                                 */
+/*  Warm orange → rose gradient, amber accents                                */
+/* ========================================================================== */
+
+html[data-style="glass"][data-color="sunset"] {
+  --bg: #fff1e8;
+  --surface: #ffffff;
+  --fg: #2c211c;
+  --muted: #77645b;
+  --accent: #d86431;
+  --secondary: #d45c8d;
+  --accent-soft: color-mix(in oklch, #d86431 17%, white);
+  --accent-strong: #c95828;
+  --accent-hover: #b04b21;
+  --accent-active: #8e3d1b;
+  --surface-subtle: #ffffff;
+  --surface-muted: #f5dfd2;
+  --status-success: #21764c;
+  --status-warning: #9f641d;
+  --status-danger: #b64545;
+  --primary-foreground: #fff7f0;
+  --shadow-ink: #3a281f;
+  --overlay-ink: #3a281f;
+
+  --gradient-mesh:
+    radial-gradient(ellipse 132% 108% at 12% 14%, rgba(216, 100, 49, 0.14) 0%, rgba(216, 100, 49, 0.06) 40%, transparent 82%),
+    radial-gradient(ellipse 136% 102% at 88% 10%, rgba(212, 92, 141, 0.11) 0%, rgba(212, 92, 141, 0.045) 40%, transparent 82%),
+    radial-gradient(ellipse 122% 96% at 50% 74%, rgba(255, 255, 255, 0.26) 0%, rgba(255, 255, 255, 0.12) 42%, transparent 84%),
+    #fff1e8;
+}
+
+/* ========================================================================== */
+/*  COLOR PALETTE: 深海 Ocean                                                  */
+/*  Deep blue → indigo gradient, teal accents                                 */
+/* ========================================================================== */
+
+html[data-style="glass"][data-color="ocean"] {
+  --bg: #eaf8fb;
+  --surface: #ffffff;
+  --fg: #132833;
+  --muted: #5e7480;
+  --accent: #1198ad;
+  --secondary: #5a77e6;
+  --accent-soft: color-mix(in oklch, #1198ad 15%, white);
+  --accent-strong: #0d899d;
+  --accent-hover: #0b788a;
+  --accent-active: #075f6d;
+  --surface-subtle: #ffffff;
+  --surface-muted: #d5ebf0;
+  --status-success: #147b55;
+  --status-warning: #9c7128;
+  --status-danger: #b4464a;
+  --primary-foreground: #eefcff;
+  --shadow-ink: #1d3a46;
+  --overlay-ink: #1d3a46;
+
+  --gradient-mesh:
+    radial-gradient(ellipse 132% 108% at 12% 14%, rgba(17, 152, 173, 0.13) 0%, rgba(17, 152, 173, 0.055) 40%, transparent 82%),
+    radial-gradient(ellipse 136% 102% at 88% 10%, rgba(90, 119, 230, 0.11) 0%, rgba(90, 119, 230, 0.045) 40%, transparent 82%),
+    radial-gradient(ellipse 122% 96% at 50% 74%, rgba(255, 255, 255, 0.28) 0%, rgba(255, 255, 255, 0.12) 42%, transparent 84%),
+    #eaf8fb;
+}

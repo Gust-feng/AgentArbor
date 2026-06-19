@@ -3,7 +3,7 @@ import { Link2, Plus, Save, Trash2, X } from "lucide-react";
 import type { ConfigResponse } from "../contracts/config";
 import type { McpEnvironmentCheckResponse, McpReferenceResponse, ToolsResponse } from "../contracts/tools";
 import type { McpServerForm, ToolForm } from "./settings-types";
-import { providerName, toolDescription, toolMeta, toolTitle } from "./settings-tool-copy";
+import { providerName } from "./settings-tool-copy";
 import { SettingRow } from "./workspace-common";
 
 const SAVED_API_KEY_MASK = "****************";
@@ -32,7 +32,6 @@ export function CapabilitiesSettings(props: {
   readonly onInstallMcpEnvironment: (form: Pick<McpServerForm, "command" | "commandLine">) => Promise<McpEnvironmentCheckResponse>;
   readonly onDeleteMcpServer: (serverId: string) => void;
   readonly onUpdateMcpTool: (serverId: string, toolName: string, enabled: boolean, autoApproved?: boolean) => void;
-  readonly onUpdateTool: (toolName: string, enabled: boolean) => void;
 }): React.ReactElement {
   if (props.activeSection === "mcp") {
     return (
@@ -69,7 +68,6 @@ export function CapabilitiesSettings(props: {
         saving={props.savingTools}
         onSaveTools={props.onSaveTools}
       />
-      <ToolCatalogSettings tools={props.tools} saving={props.savingTools} onUpdateTool={props.onUpdateTool} />
     </div>
   );
 }
@@ -455,7 +453,6 @@ function McpServerPanel(props: {
               type="button"
               className="page-action-button danger icon-only"
               aria-label="删除服务"
-              title="删除服务"
               onClick={() => props.onDelete?.(props.selectedServer?.serverId ?? "")}
               disabled={props.saving}
             >
@@ -824,37 +821,6 @@ function McpToolAuthorizationRow(props: {
   );
 }
 
-function ToolCatalogSettings(props: {
-  readonly tools?: ToolsResponse;
-  readonly saving?: boolean;
-  readonly onUpdateTool: (toolName: string, enabled: boolean) => void;
-}): React.ReactElement {
-  const catalog = props.tools?.tools?.catalog?.tools ?? [];
-  return (
-    <section className="settings-card capability-list-card">
-      <h3>运行时工具</h3>
-      <div className="capability-list">
-        {catalog.length === 0 ? (
-          <div className="capability-empty">暂无工具</div>
-        ) : (
-          catalog.map((tool) => (
-            <CapabilityRow
-              key={tool.name}
-              title={toolTitle(tool)}
-              description={toolDescription(tool)}
-              meta={toolMeta(tool)}
-              enabled={tool.enabled && tool.available !== false}
-              blocked={tool.available === false}
-              onToggle={() => props.onUpdateTool(tool.name, !tool.enabled)}
-              disabled={props.saving === true || tool.available === false}
-            />
-          ))
-        )}
-      </div>
-    </section>
-  );
-}
-
 function formFromMcpCatalog(server: NonNullable<ToolsResponse["mcpCatalog"]>[number], previous: McpServerForm): McpServerForm {
   const authMode = server.authSecretRefCount !== undefined && server.authSecretRefCount > 0 && isNetworkMcpTransport(server.transport)
     ? "bearer"
@@ -1155,35 +1121,4 @@ function parseMcpErrorJsonMessage(error: string): string | undefined {
 
 function normalizeMcpErrorMessage(message: string): string {
   return message.replace(/^Internal error:\s*/i, "").trim();
-}
-
-function CapabilityRow(props: {
-  readonly title: string;
-  readonly description: string;
-  readonly meta: string;
-  readonly enabled: boolean;
-  readonly blocked?: boolean;
-  readonly disabled?: boolean;
-  readonly onToggle: () => void;
-}): React.ReactElement {
-  return (
-    <article className="capability-row">
-      <div className="capability-row-main">
-        <strong>{props.title}</strong>
-        <span>{props.description}</span>
-      </div>
-      <div className="capability-row-meta">
-        <span>{props.blocked === true ? "不可用" : props.meta}</span>
-        <button
-          type="button"
-          className="capability-toggle"
-          aria-pressed={props.enabled}
-          disabled={props.disabled}
-          onClick={props.onToggle}
-        >
-          {props.enabled ? "可用" : "停用"}
-        </button>
-      </div>
-    </article>
-  );
 }

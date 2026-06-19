@@ -305,7 +305,6 @@ export function App(): React.ReactElement {
     installMcpEnvironment,
     deleteMcpServer,
     updateMcpTool,
-    updateTool,
     refreshSkills,
     updateSkill,
   } = settingsController;
@@ -612,7 +611,6 @@ export function App(): React.ReactElement {
         onInstallMcpEnvironment={installMcpEnvironment}
         onDeleteMcpServer={(serverId) => void deleteMcpServer(serverId)}
         onUpdateMcpTool={(serverId, toolName, enabled, autoApproved) => void updateMcpTool(serverId, toolName, enabled, autoApproved)}
-        onUpdateTool={(toolName, enabled) => void updateTool(toolName, enabled)}
         onRefreshSkills={() => void refreshSkills()}
         onUpdateSkill={(skillId, enabled) => void updateSkill(skillId, enabled)}
       />

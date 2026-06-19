@@ -34,7 +34,7 @@
 .model-list-panel strong {
   color: var(--fg);
   font-size: 13px;
-  font-weight: 650;
+  font-weight: var(--weight-heading);
   white-space: nowrap;
 }
 
@@ -60,9 +60,9 @@
   height: 34px;
   align-items: center;
   gap: 7px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--field-border);
   border-radius: var(--radius-sm);
-  background: var(--surface);
+  background: var(--field-bg);
   padding: 0 10px;
   color: var(--muted);
 }
@@ -77,6 +77,15 @@
   outline: none;
 }
 
+.model-search-field input:hover,
+.model-search-field input:focus,
+.model-search-field input:focus-visible {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+  outline: none;
+}
+
 .model-search-field input::placeholder {
   color: var(--placeholder);
 }
@@ -87,9 +96,9 @@
   align-items: center;
   justify-content: center;
   gap: 6px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--field-border);
   border-radius: var(--radius-sm);
-  background: var(--surface);
+  background: var(--field-bg);
   padding: 0 10px;
   color: var(--fg);
   font-size: 12px;
@@ -134,8 +143,9 @@
   min-height: 42px;
   gap: 9px;
   align-items: center;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
+  border: 1px solid var(--list-row-border);
+  border-left: var(--list-row-marker-width) solid transparent;
+  border-radius: var(--list-row-radius);
   padding: 6px 7px;
 }
 
@@ -148,8 +158,10 @@
 }
 
 .model-list-row:not(.saved):hover {
-  border-color: var(--border);
-  background: var(--surface-subtle);
+  border-color: var(--list-row-hover-border);
+  border-left-color: var(--list-row-hover-marker);
+  background: var(--row-hover-bg);
+  box-shadow: var(--list-row-hover-shadow);
 }
 
 .model-list-row.saved {
@@ -163,25 +175,29 @@
 }
 
 .model-list-row.saved.selected {
-  border-color: color-mix(in oklch, var(--accent) 30%, var(--border));
-  background: color-mix(in oklch, var(--accent-soft) 66%, var(--surface));
-  box-shadow:
-    inset 2px 0 0 var(--accent),
-    0 0 0 0 transparent;
+  border-color: var(--list-row-active-border);
+  border-left-color: var(--list-row-active-marker);
+  background: var(--row-active-bg);
+  box-shadow: var(--list-row-active-shadow);
 }
 
 .model-list-row.saved:focus-visible {
-  border-color: var(--accent-border);
+  border-color: var(--row-active-border);
   outline: none;
 }
 
 .model-list-row.saved:hover {
-  border-color: var(--border);
-  background: var(--surface-subtle);
+  border-color: var(--list-row-hover-border);
+  border-left-color: var(--list-row-hover-marker);
+  background: var(--row-hover-bg);
+  box-shadow: var(--list-row-hover-shadow);
 }
 
 .model-list-row.saved.selected:hover {
-  background: color-mix(in oklch, var(--accent-soft) 72%, var(--surface));
+  border-color: var(--list-row-active-border);
+  border-left-color: var(--list-row-active-marker);
+  background: var(--row-active-bg);
+  box-shadow: var(--list-row-active-shadow);
 }
 
 .model-row-icon {
@@ -193,7 +209,7 @@
   overflow: hidden;
   border: 1px solid color-mix(in oklch, var(--border) 68%, transparent);
   border-radius: var(--radius-sm);
-  background: var(--surface);
+  background: var(--content-surface);
   color: var(--fg);
 }
 
@@ -222,7 +238,7 @@
   padding: 0;
   color: var(--fg);
   font-size: 13px;
-  font-weight: 500;
+  font-weight: var(--weight-body);
   line-height: 20px;
   outline: none;
   text-decoration: none;
@@ -232,9 +248,19 @@
   color: var(--placeholder);
 }
 
-.model-name-input:focus {
+.model-name-input:hover {
+  border-color: transparent;
+  border-bottom-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+
+.model-name-input:focus,
+.model-name-input:focus-visible {
   border-bottom-color: color-mix(in oklch, var(--accent-strong) 72%, var(--border));
   background: transparent;
+  box-shadow: none;
+  outline: none;
 }
 
 .model-row-copy small {
@@ -298,7 +324,7 @@
 .model-candidate-section > header strong {
   color: color-mix(in oklch, var(--fg) 82%, var(--muted));
   font-size: 12px;
-  font-weight: 500;
+  font-weight: var(--weight-body);
 }
 
 .model-candidate-copy {
@@ -316,7 +342,7 @@
 
 .model-candidate-copy strong {
   font-size: 13px;
-  font-weight: 500;
+  font-weight: var(--weight-body);
 }
 
 @media (max-width: 620px) {

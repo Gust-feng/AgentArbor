@@ -332,12 +332,6 @@ export async function updateMcpToolState(input: {
   return { mcpCatalog: response.catalog ?? [] };
 }
 
-export async function updateToolState(toolName: string, enabled: boolean): Promise<ToolsResponse> {
-  return postJson<ToolsResponse>(`/api/config/tools/${encodeURIComponent(toolName)}/state`, {
-    enabled,
-  });
-}
-
 export async function updateSkillState(skillId: string, enabled: boolean): Promise<readonly SkillDefinition[]> {
   const response = await postJson<{ readonly skills: readonly SkillDefinition[] }>(`/api/skills/${encodeURIComponent(skillId)}/state`, {
     enabled,

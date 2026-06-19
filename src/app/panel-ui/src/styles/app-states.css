@@ -9,9 +9,10 @@
   height: 100%;
   min-height: 240px;
   border-radius: inherit;
-  background: color-mix(in oklch, var(--surface) 88%, var(--bg));
+  background: var(--empty-state-bg);
   color: var(--muted);
   font-size: 14px;
+  box-shadow: var(--empty-state-shadow);
 }
 
 .app-bootstrap-spinner {
@@ -43,17 +44,19 @@
   gap: var(--space-4);
   max-width: 420px;
   padding: var(--space-8);
-  background: var(--surface);
-  border: 1px solid var(--border);
+  background: var(--floating-panel-bg);
+  border: 1px solid var(--floating-panel-border);
   border-radius: var(--radius-xl);
-  box-shadow: var(--shadow-elevated);
+  box-shadow: var(--floating-panel-shadow);
+  backdrop-filter: var(--floating-panel-backdrop-filter);
+  -webkit-backdrop-filter: var(--floating-panel-backdrop-filter);
   text-align: center;
 }
 
 .app-error-boundary-title {
   margin: 0;
   font-size: 18px;
-  font-weight: 600;
+  font-weight: var(--weight-label);
   color: var(--fg);
 }
 
@@ -68,7 +71,7 @@
   margin: 0;
   padding: var(--space-3);
   border-radius: var(--radius-md);
-  background: var(--surface-subtle);
+  background: var(--content-surface);
   color: var(--status-danger);
   font-family: var(--font-mono);
   font-size: 12px;
@@ -83,7 +86,7 @@
   background: var(--accent);
   color: var(--primary-foreground);
   font-size: 14px;
-  font-weight: 500;
+  font-weight: var(--weight-body);
   transition: background-color var(--motion-fast-duration) var(--motion-ease-standard);
 }
 

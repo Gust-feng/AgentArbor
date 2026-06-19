@@ -1,0 +1,31 @@
+/*
+ * AgentArbor Panel — Classic Color: 暖色 Warm
+ *
+ * Color seed tokens for a paper-and-ink workspace palette.
+ * Warm accents sit on a neutral base instead of tinting every surface.
+ */
+
+html[data-style="classic"][data-color="warm"] {
+  color-scheme: light;
+
+  --bg: #f1eee7;
+  --surface: #fffaf0;
+  --fg: #211f1a;
+  --muted: #695f52;
+  --border: #d8cab8;
+  --border-strong: #2b2720;
+  --accent: #b85f2a;
+  --secondary: #1f7469;
+  --accent-soft: #f3dfc9;
+  --accent-strong: #a94f1f;
+  --accent-hover: #8b3f18;
+  --accent-active: #703112;
+  --surface-subtle: #e9dfcf;
+  --surface-muted: #ddd0bd;
+  --status-success: #257047;
+  --status-warning: #9c681f;
+  --status-danger: #a9433c;
+  --primary-foreground: #fff8ed;
+  --shadow-ink: #2b2720;
+  --overlay-ink: #211f1a;
+}

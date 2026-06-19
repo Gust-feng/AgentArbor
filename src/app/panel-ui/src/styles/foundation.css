@@ -4,26 +4,25 @@
   --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
   --font-serif: Georgia, "Times New Roman", Times, serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
-  --bg: #f8f5f0;
-  --surface: #fffdf9;
-  --fg: #1c1917;
-  --muted: #70665c;
-  --border: #e5e0d8;
-  --border-strong: #1c1917;
-  --accent: #c2410c;
-  --secondary: #7c5c2e;
-  --accent-soft: #fbefe8;
-  --accent-strong: #c2410c;
-  --accent-hover: #9a3412;
-  --accent-active: #7c2d12;
-  --surface-subtle: #f1ede6;
-  --surface-muted: #ebe4da;
-  --status-success: #16a34a;
-  --status-warning: #c08830;
-  --status-danger: #c85050;
+  --bg: #f4f6f5;
+  --surface: #fffdfa;
+  --fg: #202225;
+  --muted: #60676c;
+  --border: #d8dedc;
+  --border-strong: #25272a;
+  --accent: #b35f2b;
+  --secondary: #19716d;
+  --accent-soft: #f4e4da;
+  --accent-strong: #b35f2b;
+  --accent-hover: #914a20;
+  --accent-active: #773c19;
+  --surface-subtle: #e9eeec;
+  --surface-muted: #dde5e2;
+  --status-success: #197448;
+  --status-warning: #a86d22;
+  --status-danger: #b3433f;
   --sidebar: var(--bg);
-  --sidebar-border: var(--border-strong);
-  --primary-foreground: #fff7ed;
+  --primary-foreground: #fff9f1;
   --accent-border: color-mix(in oklch, var(--accent) 42%, var(--border));
   --accent-border-soft: color-mix(in oklch, var(--accent) 24%, var(--border));
   --placeholder: color-mix(in oklch, var(--fg) 28%, var(--bg));
@@ -33,8 +32,8 @@
   --amber-text: color-mix(in oklch, var(--status-warning) 58%, black);
   --danger-soft: color-mix(in oklch, var(--status-danger) 14%, var(--surface));
   --danger-border: color-mix(in oklch, var(--status-danger) 32%, var(--border));
-  --shadow-ink: #1c1917;
-  --overlay-ink: #1c1917;
+  --shadow-ink: #202225;
+  --overlay-ink: #202225;
   --shadow-card: 0 1px 2px color-mix(in oklch, var(--shadow-ink) 5%, transparent);
   --shadow-soft: 0 1px 2px color-mix(in oklch, var(--shadow-ink) 5%, transparent);
   --shadow-elevated: 0 12px 28px color-mix(in oklch, var(--shadow-ink) 10%, transparent);
@@ -43,9 +42,9 @@
   --panel-reading-width: 760px;
   --radius-sm: 2px;
   --radius-md: 4px;
-  --radius-lg: 4px;
-  --radius-xl: 6px;
-  --radius-2xl: 8px;
+  --radius-lg: 8px;
+  --radius-xl: 10px;
+  --radius-2xl: 12px;
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -57,6 +56,8 @@
   --motion-dialog-duration: 180ms;
   --motion-panel-duration: 150ms;
   --motion-fast-duration: 100ms;
+  --motion-interaction-duration: 180ms;
+  --motion-quick-duration: 140ms;
   --motion-ease-standard: ease;
   /* Spring-like easing curves — refined micro-interactions */
   --motion-ease-spring: cubic-bezier(0.22, 1, 0.36, 1);
@@ -72,6 +73,126 @@
   --settings-sidebar-compact-width: 58px;
   --settings-dialog-max-width: 1120px;
   --settings-dialog-max-height: 760px;
+  --surface-highlight: color-mix(in oklch, white 88%, transparent);
+  --surface-panel: var(--surface);
+  --surface-panel-subtle: var(--surface-subtle);
+  --surface-control: var(--surface);
+  --surface-control-muted: color-mix(in oklch, var(--surface-subtle) 64%, var(--surface));
+  --surface-overlay: var(--surface);
+  --surface-translucent: color-mix(in oklch, var(--surface) 88%, transparent);
+  --workbench-bg: var(--bg);
+  --workbench-overlay: none;
+  --composer-bg: var(--surface);
+  --composer-border: color-mix(in oklch, var(--border) 88%, var(--fg));
+  --composer-radius: var(--radius-md);
+  --composer-shadow: var(--shadow-soft);
+  --composer-backdrop-filter: none;
+  --message-user-bg: color-mix(in oklch, var(--surface) 70%, transparent);
+  --message-assistant-border: color-mix(in oklch, var(--border) 70%, transparent);
+  --nav-hover-bg: color-mix(in oklch, var(--fg) 4%, transparent);
+  --nav-active-bg: color-mix(in oklch, var(--accent) 5%, transparent);
+  --popover-bg: var(--surface);
+  --popover-border: var(--border);
+  --popover-shadow: var(--shadow-elevated);
+  --popover-backdrop-filter: none;
+  --app-backdrop-blur: 0px;
+
+  /* ---- Semantic surfaces for reusable panel regions ---- */
+  --panel-card-bg: linear-gradient(180deg, var(--surface-highlight), transparent 44%), var(--surface);
+  --panel-card-border: color-mix(in oklch, var(--border) 86%, transparent);
+  --panel-card-shadow: var(--shadow-soft);
+  --panel-card-backdrop-filter: none;
+  --floating-panel-bg: var(--surface);
+  --floating-panel-border: var(--border-strong);
+  --floating-panel-shadow: var(--shadow-dialog);
+  --floating-panel-backdrop-filter: none;
+  --subpanel-bg: var(--surface);
+  --subpanel-border: color-mix(in oklch, var(--border) 86%, transparent);
+  --subpanel-footer-bg: color-mix(in oklch, var(--surface-subtle) 42%, var(--surface));
+  --subpanel-shadow: 0 34px 90px color-mix(in oklch, var(--shadow-ink) 20%, transparent);
+  --subpanel-backdrop-filter: none;
+
+  /* ---- Semantic content blocks ---- */
+  --content-surface: var(--surface-control-muted);
+  --content-surface-muted: var(--surface-translucent);
+  --content-border: var(--border);
+  --content-highlight: color-mix(in oklch, var(--fg) 3%, transparent);
+  --content-backdrop-filter: none;
+  --empty-state-bg: color-mix(in oklch, var(--surface-subtle) 70%, var(--surface));
+  --empty-state-border: var(--border);
+  --empty-state-shadow: none;
+
+  /* ---- Semantic rows, fields, and scrollbars ---- */
+  --row-bg: color-mix(in oklch, var(--surface-subtle) 48%, var(--surface));
+  --row-border: color-mix(in oklch, var(--border) 78%, transparent);
+  --row-hover-bg: color-mix(in oklch, var(--surface) 88%, var(--surface-subtle));
+  --row-hover-border: color-mix(in oklch, var(--border) 88%, transparent);
+  --row-hover-shadow: none;
+  --row-active-bg: color-mix(in oklch, var(--accent-soft) 24%, var(--surface));
+  --row-active-border: color-mix(in oklch, var(--accent-strong) 46%, var(--border));
+  --row-active-shadow:
+    inset 3px 0 0 color-mix(in oklch, var(--accent-strong) 70%, var(--accent-border)),
+    0 10px 24px color-mix(in oklch, var(--accent) 7%, transparent);
+  --list-row-radius: 0;
+  --list-row-marker-width: 2px;
+  --list-row-border: transparent;
+  --list-row-hover-border: transparent;
+  --list-row-hover-marker: color-mix(in oklch, var(--border-strong) 64%, transparent);
+  --list-row-hover-shadow: none;
+  --list-row-active-border: transparent;
+  --list-row-active-marker: var(--accent);
+  --list-row-active-shadow: none;
+  --list-pane-bg: var(--surface-subtle);
+  --detail-pane-bg: var(--surface);
+  --field-bg: color-mix(in oklch, var(--surface) 94%, var(--surface-subtle));
+  --field-border: color-mix(in oklch, var(--border) 78%, transparent);
+  --field-hover-bg: var(--surface);
+  --field-hover-border: color-mix(in oklch, var(--border) 92%, var(--accent-border));
+  --field-focus-border: color-mix(in oklch, var(--accent-strong) 64%, var(--border));
+  --field-focus-ring: 0 0 0 3px color-mix(in oklch, var(--accent-strong) 12%, transparent);
+  --scrollbar-thumb: color-mix(in oklch, var(--fg) 12%, transparent);
+  --scrollbar-thumb-hover: color-mix(in oklch, var(--fg) 22%, transparent);
+  --scrollbar-pane-thumb: color-mix(in oklch, var(--muted) 30%, transparent);
+  --scrollbar-pane-thumb-hover: color-mix(in oklch, var(--muted) 38%, transparent);
+
+  /* ---- Shape — border-radius semantic aliases ---- */
+  --radius-pill: 999px;
+  --radius-none: 0;
+
+  /* ---- Border — width & style ---- */
+  --border-width-thin: 1px;
+  --border-width-md: 2px;
+  --border-width-thick: 3px;
+
+  /* ---- Focus ring ---- */
+  --focus-ring-width: 3px;
+  --focus-ring: 0 0 0 var(--focus-ring-width) color-mix(in oklch, var(--accent) 12%, transparent);
+
+  /* ---- Shadow — extended levels ---- */
+  --shadow-inset: inset 0 0 0 1px color-mix(in oklch, var(--border) 62%, transparent);
+  --shadow-dialog: 0 22px 70px color-mix(in oklch, var(--shadow-ink) 18%, transparent);
+
+  /* ---- Typography — weight scale ---- */
+  --weight-body: 500;
+  --weight-label: 600;
+  --weight-heading: 650;
+  --weight-bold: 700;
+
+  /* ---- Typography — line-height scale ---- */
+  --line-height-body: 1.65;
+  --line-height-tight: 1.45;
+
+  /* ---- Glass tokens (no-op in classic style, activated in glass) ---- */
+  --blur-glass: 0px;
+  --blur-glass-heavy: 0px;
+  --glass-saturation: 1;
+  --glass-opacity-surface: 100%;
+  --glass-opacity-sidebar: 100%;
+  --glass-border-opacity: 0%;
+  --glass-backdrop-filter: none;
+  --glass-backdrop-filter-heavy: none;
+  --glass-shadow: none;
+  --gradient-mesh: none;
 }
 
 * {
@@ -80,7 +201,7 @@
 
 * {
   scrollbar-width: thin;
-  scrollbar-color: color-mix(in oklch, var(--fg) 16%, transparent) transparent;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
 }
 
 ::selection {
@@ -99,11 +220,11 @@
 
 *::-webkit-scrollbar-thumb {
   border-radius: 999px;
-  background: color-mix(in oklch, var(--fg) 12%, transparent);
+  background: var(--scrollbar-thumb);
 }
 
 *::-webkit-scrollbar-thumb:hover {
-  background: color-mix(in oklch, var(--fg) 22%, transparent);
+  background: var(--scrollbar-thumb-hover);
 }
 
 html,
@@ -119,7 +240,7 @@ body {
   color: var(--fg);
   font-family: var(--font-sans);
   font-size: 14px;
-  line-height: 1.65;
+  line-height: var(--line-height-body);
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -152,15 +273,16 @@ textarea:focus-visible,
 input:focus-visible {
   outline: 2px solid color-mix(in oklch, var(--accent) 58%, transparent);
   outline-offset: 2px;
+  box-shadow: var(--focus-ring);
 }
 
 input,
 select,
 textarea {
   min-width: 0;
-  border: 1px solid var(--border);
+  border: 1px solid var(--field-border);
   border-radius: var(--radius-md);
-  background: var(--surface);
+  background: var(--field-bg);
   color: var(--fg);
   outline: none;
   transition:
@@ -169,11 +291,14 @@ textarea {
     background-color var(--motion-fast-duration) var(--motion-ease-standard);
 }
 
-input:focus,
-select:focus,
-textarea:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent) 12%, transparent);
+:where(input, select, textarea):hover {
+  border-color: var(--field-hover-border);
+  background: var(--field-hover-bg);
+}
+
+:where(input, select, textarea):focus {
+  border-color: var(--field-focus-border);
+  box-shadow: var(--field-focus-ring);
 }
 
 input,
@@ -186,4 +311,69 @@ textarea {
   resize: vertical;
   padding: 10px 12px;
   line-height: 1.6;
+}
+
+html.theme-switching body,
+html.theme-switching .app-root,
+html.theme-switching .app-workbench,
+html.theme-switching .app-main,
+html.theme-switching .chat-empty-screen,
+html.theme-switching .chat-active-screen,
+html.theme-switching .app-sidebar,
+html.theme-switching .sidebar-footer,
+html.theme-switching .chat-input-floating,
+html.theme-switching .chat-input-card,
+html.theme-switching .settings-backdrop,
+html.theme-switching .settings-dialog,
+html.theme-switching .settings-sidebar,
+html.theme-switching .settings-main > header,
+html.theme-switching .settings-content,
+html.theme-switching .settings-card,
+html.theme-switching .assistant-answer,
+html.theme-switching .user-message-wrap,
+html.theme-switching .transcript-entry,
+html.theme-switching .agent-activity-step,
+html.theme-switching .agent-activity-marker,
+html.theme-switching .agent-activity-step::before,
+html.theme-switching .tool-result-card,
+html.theme-switching .workspace-card {
+  transition:
+    background-color 220ms var(--motion-ease-standard),
+    border-color 220ms var(--motion-ease-standard),
+    color 220ms var(--motion-ease-standard),
+    box-shadow 220ms var(--motion-ease-standard),
+    opacity 220ms var(--motion-ease-standard);
+}
+
+html.theme-switching button,
+html.theme-switching input,
+html.theme-switching select,
+html.theme-switching textarea,
+html.theme-switching .sidebar-action,
+html.theme-switching .sidebar-new-button,
+html.theme-switching .sidebar-nav-button,
+html.theme-switching .sidebar-recent-item,
+html.theme-switching .sidebar-kebab-button,
+html.theme-switching .sidebar-icon-button,
+html.theme-switching .settings-close-button,
+html.theme-switching .settings-sidebar nav button,
+html.theme-switching .app-error-boundary-retry,
+html.theme-switching .theme-style-option,
+html.theme-switching .theme-palette-option,
+html.theme-switching .composer-options-button,
+html.theme-switching .composer-tool-button,
+html.theme-switching .composer-cancel-button,
+html.theme-switching .composer-send-button,
+html.theme-switching .message-queue-action,
+html.theme-switching .provider-row,
+html.theme-switching .provider-row-main,
+html.theme-switching .provider-row-drag,
+html.theme-switching .provider-add-button,
+html.theme-switching .provider-action,
+html.theme-switching .model-list-row,
+html.theme-switching .model-row-action,
+html.theme-switching .page-action-button,
+html.theme-switching .confirmation-actions button,
+html.theme-switching .workspace-action-button {
+  transition: none !important;
 }

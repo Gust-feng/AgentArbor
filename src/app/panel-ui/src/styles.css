@@ -17,3 +17,15 @@
 @import "./styles/settings-forms.css";
 @import "./styles/motion-responsive.css";
 @import "./styles/app-states.css";
+
+/* Style layer — structural visual language */
+@import "./styles/style-default.css";
+@import "./styles/style-classic.css";
+@import "./styles/style-glass.css";
+
+/* Color layer — per-style palettes (classic; glass palettes are in style-glass.css) */
+@import "./styles/colors-classic-warm.css";
+@import "./styles/colors-classic-forest.css";
+
+/* Theme switcher component */
+@import "./styles/theme-switcher.css";

@@ -24,7 +24,6 @@ import {
   installMcpEnvironment,
   updateMcpToolState,
   updateSkillState,
-  updateToolState,
 } from "./app-config-actions";
 import { mergeConfigResponse, type ComposerToolConfirmationPolicy, type VisibleAiMode } from "./app-config-projection";
 import type { AppState } from "./app-state";
@@ -53,7 +52,6 @@ export type AppSettingsController = {
   readonly installMcpEnvironment: (form: Pick<McpServerForm, "command" | "commandLine">) => Promise<McpEnvironmentCheckResponse>;
   readonly deleteMcpServer: (serverId: string) => Promise<void>;
   readonly updateMcpTool: (serverId: string, toolName: string, enabled: boolean, autoApproved?: boolean) => Promise<void>;
-  readonly updateTool: (toolName: string, enabled: boolean) => Promise<void>;
   readonly refreshSkills: () => Promise<void>;
   readonly updateSkill: (skillId: string, enabled: boolean) => Promise<void>;
 };
@@ -634,31 +632,6 @@ export function createAppSettingsController(options: AppSettingsControllerOption
     }
   }
 
-  async function updateTool(toolName: string, enabled: boolean): Promise<void> {
-    options.setSavingTools(true);
-    try {
-      const response = await updateToolState(toolName, enabled);
-      if (options.mountedRef.current) {
-        options.setApp((previous) => ({
-          ...previous,
-          tools: {
-            ...response,
-            mcpCatalog: response.mcpCatalog ?? previous.tools?.mcpCatalog,
-          },
-        }));
-      }
-    } catch (error) {
-      if (options.mountedRef.current) {
-        options.setApp((previous) => ({
-          ...previous,
-          error: error instanceof Error ? error.message : "工具状态保存失败。",
-        }));
-      }
-    } finally {
-      if (options.mountedRef.current) options.setSavingTools(false);
-    }
-  }
-
   async function updateSkill(skillId: string, enabled: boolean): Promise<void> {
     options.setSavingTools(true);
     try {
@@ -718,7 +691,6 @@ export function createAppSettingsController(options: AppSettingsControllerOption
     installMcpEnvironment: installSelectedMcpEnvironment,
     deleteMcpServer: deleteSelectedMcpServer,
     updateMcpTool,
-    updateTool,
     refreshSkills,
     updateSkill,
   };

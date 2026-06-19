@@ -1,0 +1,31 @@
+/*
+ * AgentArbor Panel — Classic Color: 森林 Forest
+ *
+ * Color seed tokens for a cool editorial workspace palette.
+ * Green anchors the system while slate and amber prevent a one-note theme.
+ */
+
+html[data-style="classic"][data-color="forest"] {
+  color-scheme: light;
+
+  --bg: #eef2ec;
+  --surface: #fbfcf6;
+  --fg: #17231f;
+  --muted: #5d675f;
+  --border: #cbd8cf;
+  --border-strong: #17231f;
+  --accent: #216f5d;
+  --secondary: #a06b2c;
+  --accent-soft: #dcece3;
+  --accent-strong: #1c624f;
+  --accent-hover: #174f41;
+  --accent-active: #113e32;
+  --surface-subtle: #e2eadf;
+  --surface-muted: #d5dfd3;
+  --status-success: #176c43;
+  --status-warning: #936425;
+  --status-danger: #a74345;
+  --primary-foreground: #f3fbf6;
+  --shadow-ink: #17231f;
+  --overlay-ink: #17231f;
+}

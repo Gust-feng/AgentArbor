@@ -5,7 +5,7 @@
   overflow: hidden;
   gap: 0;
   padding: 0;
-  background: var(--bg);
+  background: var(--gradient-mesh, var(--bg));
   color: var(--fg);
 }
 
@@ -17,8 +17,8 @@
   overflow: hidden;
   border: 0;
   border-radius: 0;
-  background: var(--bg);
-  box-shadow: none;
+  background: var(--workbench-bg);
+  box-shadow: var(--shadow-pane);
 }
 
 .app-main {
@@ -39,7 +39,7 @@
   flex-direction: column;
   overflow: hidden;
   border: 0;
-  border-right: 2px solid var(--border-strong);
+  border-right: var(--border-width-md) solid var(--border-strong);
   border-radius: 0;
   background: var(--sidebar);
   box-shadow: none;
@@ -80,19 +80,24 @@
 .sidebar-new-button {
   width: 100%;
   height: 42px;
-  border: 2px solid var(--border-strong);
+  border: var(--border-width-md) solid var(--border-strong);
   border-radius: var(--radius-md);
   background: transparent;
   color: var(--fg);
   font-size: 13px;
-  font-weight: 650;
+  font-weight: var(--weight-heading);
   box-shadow: none;
+  transition:
+    background-color var(--motion-interaction-duration) var(--motion-ease-standard),
+    border-color var(--motion-interaction-duration) var(--motion-ease-standard),
+    color var(--motion-interaction-duration) var(--motion-ease-standard),
+    box-shadow var(--motion-interaction-duration) var(--motion-ease-standard);
 }
 
 .sidebar-new-button:hover,
 .sidebar-new-button.active {
   border-color: var(--fg);
-  background: var(--fg);
+  background: color-mix(in oklch, var(--fg) 94%, var(--accent));
   color: var(--primary-foreground);
   box-shadow: none;
 }
@@ -109,17 +114,21 @@
 .sidebar-nav-button {
   width: 100%;
   height: 40px;
-  border-left: 3px solid transparent;
+  border-left: var(--border-width-thick) solid transparent;
   border-radius: var(--radius-md);
   color: var(--muted);
   font-size: 13px;
-  font-weight: 500;
+  font-weight: var(--weight-body);
+  transition:
+    border-color var(--motion-interaction-duration) var(--motion-ease-standard),
+    background-color var(--motion-interaction-duration) var(--motion-ease-standard),
+    color var(--motion-interaction-duration) var(--motion-ease-standard);
 }
 
 .sidebar-nav-button:hover,
 .sidebar-nav-button.active {
   border-left-color: var(--border-strong);
-  background: color-mix(in oklch, var(--fg) 4%, transparent);
+  background: var(--nav-hover-bg);
   color: var(--fg);
   box-shadow: none;
 }
@@ -160,7 +169,7 @@
   gap: 8px;
   color: var(--fg);
   font-size: 12px;
-  font-weight: 600;
+  font-weight: var(--weight-label);
   letter-spacing: 0;
   text-transform: none;
 }
@@ -197,7 +206,7 @@
   width: 5px;
   height: 5px;
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--surface);
 }
 
@@ -210,7 +219,7 @@
   width: 1px;
   height: 50px;
   margin: 5px 0;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: linear-gradient(
     180deg,
     color-mix(in oklch, var(--fg) 18%, transparent),
@@ -264,12 +273,12 @@
 .sidebar-pending-reminder {
   height: 40px;
   margin: 0 var(--space-5) var(--space-5);
-  border-left: 3px solid var(--status-warning);
+  border-left: var(--border-width-thick) solid var(--status-warning);
   border-radius: var(--radius-md);
   background: color-mix(in oklch, var(--status-warning) 8%, transparent);
   color: var(--fg);
   font-size: 13px;
-  font-weight: 500;
+  font-weight: var(--weight-body);
 }
 
 .sidebar-pending-reminder .sidebar-icon-slot {
@@ -286,12 +295,12 @@
 
 .sidebar-list-heading {
   margin: var(--space-5) var(--space-1) var(--space-2);
-  border-bottom: 1px solid var(--border);
+  border-bottom: var(--border-width-thin) solid var(--border);
   padding-bottom: var(--space-2);
   color: color-mix(in oklch, var(--fg) 52%, var(--bg));
   font-family: var(--font-serif);
   font-size: 12px;
-  font-weight: 500;
+  font-weight: var(--weight-body);
 }
 
 .sidebar-recent-list {
@@ -314,19 +323,23 @@
   align-items: center;
   width: 100%;
   min-height: 40px;
-  border-left: 3px solid transparent;
+  border-left: var(--border-width-thick) solid transparent;
   border-radius: var(--radius-md);
   color: var(--muted);
+  transition:
+    border-color var(--motion-interaction-duration) var(--motion-ease-standard),
+    background-color var(--motion-interaction-duration) var(--motion-ease-standard),
+    color var(--motion-interaction-duration) var(--motion-ease-standard);
 }
 
 .sidebar-recent-item:hover,
 .sidebar-recent-item.active {
-  background: color-mix(in oklch, var(--fg) 4%, transparent);
+  background: var(--nav-hover-bg);
 }
 
 .sidebar-recent-item.active {
   border-left-color: var(--accent);
-  background: color-mix(in oklch, var(--accent) 5%, transparent);
+  background: var(--nav-active-bg);
   box-shadow: none;
 }
 
@@ -366,7 +379,7 @@
 .sidebar-recent-row strong {
   color: var(--fg);
   font-size: 13px;
-  font-weight: 500;
+  font-weight: var(--weight-body);
 }
 
 .sidebar-menu-wrap {
@@ -411,10 +424,13 @@
   display: grid;
   min-width: 118px;
   padding: 5px;
-  border: 1px solid var(--border);
+  border: var(--border-width-thin) solid var(--popover-border);
   border-radius: var(--radius-md);
-  background: var(--surface);
-  box-shadow: var(--shadow-elevated);
+  background: var(--popover-bg);
+  box-shadow: var(--popover-shadow);
+  backdrop-filter: var(--popover-backdrop-filter);
+  -webkit-backdrop-filter: var(--popover-backdrop-filter);
+  animation: popover-enter var(--motion-enter-duration) var(--motion-ease-out-back) both;
 }
 
 .sidebar-conversation-menu button {
@@ -466,13 +482,15 @@
   padding: 0 4px 0 0;
   color: var(--fg);
   font-size: 13px;
-  font-weight: 500;
+  font-weight: var(--weight-body);
   line-height: 40px;
 }
 
+.sidebar-rename-form input:hover,
 .sidebar-rename-form input:focus,
 .sidebar-rename-form input:focus-visible {
   border: 0;
+  background: transparent;
   box-shadow: none;
   outline: none;
 }
@@ -507,7 +525,7 @@
 }
 
 .sidebar-footer {
-  border-top: 2px solid var(--border-strong);
+  border-top: var(--border-width-md) solid var(--border-strong);
   padding: var(--space-4) var(--space-5) var(--space-5);
   background: transparent;
 }

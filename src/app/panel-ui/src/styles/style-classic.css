@@ -1,0 +1,238 @@
+/*
+ * AgentArbor Panel — Classic Style (纸面工程)
+ *
+ * Structural overrides for the classic visual language:
+ * solid surfaces, crisp borders, compact controls, and attached panels.
+ *
+ * Base tokens (radius, border-width, shadow, weight, line-height, glass
+ * no-ops, surface roles) are defined in foundation.css :root and inherited
+ * automatically. This file only declares tokens that intentionally differ
+ * from those defaults.
+ *
+ * Activated by: html[data-style="classic"]
+ * When no data-style is set, :root defaults match classic.
+ */
+
+html[data-style="classic"] {
+  /* ---- Shape — radius-lg intentionally smaller than foundation default (8px) ---- */
+  --radius-sm: 2px;
+  --radius-md: 4px;
+  --radius-lg: 7px;
+  --radius-xl: 8px;
+  --radius-2xl: 10px;
+  --border-width-md: 1px;
+
+  /* ---- Surface highlight — flat (no highlight sheen) ---- */
+  --surface-highlight: transparent;
+  --sidebar: color-mix(in oklch, var(--surface-subtle) 84%, var(--bg));
+  --surface-panel: var(--surface);
+  --surface-control: color-mix(in oklch, var(--surface) 86%, var(--surface-subtle));
+  --surface-control-muted: color-mix(in oklch, var(--surface-subtle) 70%, var(--surface));
+  --surface-overlay: var(--surface);
+  --surface-translucent: color-mix(in oklch, var(--surface) 94%, var(--surface-subtle));
+  --workbench-bg:
+    linear-gradient(90deg, color-mix(in oklch, var(--border) 22%, transparent) 1px, transparent 1px),
+    linear-gradient(180deg, color-mix(in oklch, var(--border) 16%, transparent) 1px, transparent 1px),
+    var(--bg);
+  --workbench-overlay: none;
+  --message-user-bg: color-mix(in oklch, var(--accent-soft) 32%, var(--surface));
+  --message-assistant-border: color-mix(in oklch, var(--border-strong) 24%, var(--border));
+  --nav-hover-bg: color-mix(in oklch, var(--fg) 5%, transparent);
+  --nav-active-bg: color-mix(in oklch, var(--accent-soft) 48%, var(--surface));
+  --composer-bg: var(--surface);
+  --composer-border: color-mix(in oklch, var(--border-strong) 28%, var(--border));
+  --popover-bg: var(--surface);
+
+  /* ---- Semantic contract — solid paper engineering language ---- */
+  --panel-card-bg: var(--surface);
+  --panel-card-border: color-mix(in oklch, var(--border-strong) 18%, var(--border));
+  --panel-card-shadow:
+    0 2px 4px color-mix(in oklch, var(--shadow-ink) 6%, transparent),
+    inset 0 1px 0 color-mix(in oklch, white 36%, transparent);
+  --panel-card-backdrop-filter: none;
+  --floating-panel-bg: var(--surface-overlay);
+  --floating-panel-border: var(--border-strong);
+  --floating-panel-shadow: var(--shadow-dialog);
+  --floating-panel-backdrop-filter: none;
+  --subpanel-bg: var(--surface);
+  --subpanel-border: color-mix(in oklch, var(--border) 86%, transparent);
+  --subpanel-footer-bg: color-mix(in oklch, var(--surface-subtle) 42%, var(--surface));
+  --subpanel-shadow: 0 34px 90px color-mix(in oklch, var(--shadow-ink) 20%, transparent);
+  --subpanel-backdrop-filter: none;
+  --content-surface: color-mix(in oklch, var(--surface-subtle) 68%, var(--surface));
+  --content-surface-muted: color-mix(in oklch, var(--surface) 78%, var(--surface-subtle));
+  --content-border: color-mix(in oklch, var(--border-strong) 13%, var(--border));
+  --content-highlight: color-mix(in oklch, var(--accent-soft) 38%, transparent);
+  --content-backdrop-filter: none;
+  --empty-state-bg: color-mix(in oklch, var(--surface-subtle) 78%, var(--surface));
+  --empty-state-border: color-mix(in oklch, var(--border-strong) 18%, var(--border));
+  --row-bg: color-mix(in oklch, var(--surface-subtle) 56%, var(--surface));
+  --row-border: color-mix(in oklch, var(--border-strong) 12%, var(--border));
+  --row-hover-bg: color-mix(in oklch, var(--surface) 72%, var(--surface-subtle));
+  --row-hover-border: color-mix(in oklch, var(--border-strong) 24%, var(--border));
+  --row-hover-shadow: inset 2px 0 0 color-mix(in oklch, var(--border-strong) 30%, transparent);
+  --row-active-bg: color-mix(in oklch, var(--accent-soft) 54%, var(--surface));
+  --row-active-border: color-mix(in oklch, var(--accent-strong) 54%, var(--border));
+  --row-active-shadow:
+    inset 3px 0 0 color-mix(in oklch, var(--accent-strong) 70%, var(--accent-border)),
+    0 1px 0 color-mix(in oklch, var(--shadow-ink) 4%, transparent);
+  --list-row-radius: 0;
+  --list-row-marker-width: var(--border-width-thick);
+  --list-row-border: transparent;
+  --list-row-hover-border: transparent;
+  --list-row-hover-marker: color-mix(in oklch, var(--border-strong) 64%, transparent);
+  --list-row-hover-shadow: none;
+  --list-row-active-border: transparent;
+  --list-row-active-marker: var(--accent);
+  --list-row-active-shadow: none;
+  --list-pane-bg: var(--surface-subtle);
+  --detail-pane-bg: var(--surface);
+  --field-bg: color-mix(in oklch, var(--surface) 88%, var(--surface-subtle));
+  --field-border: color-mix(in oklch, var(--border-strong) 16%, var(--border));
+  --field-hover-bg: var(--surface);
+  --field-hover-border: color-mix(in oklch, var(--border-strong) 28%, var(--border));
+  --field-focus-border: color-mix(in oklch, var(--accent-strong) 70%, var(--border));
+  --field-focus-ring: 0 0 0 3px color-mix(in oklch, var(--accent) 12%, transparent);
+  --composer-radius: var(--radius-md);
+  --composer-shadow: var(--shadow-soft);
+  --composer-backdrop-filter: none;
+  --popover-border: var(--border);
+  --popover-shadow: var(--shadow-elevated);
+  --popover-backdrop-filter: none;
+}
+
+html[data-style="classic"] .app-root {
+  gap: 0;
+  padding: 0;
+  background: var(--bg);
+}
+
+html[data-style="classic"] .app-workbench {
+  border: 0;
+  border-radius: 0;
+  background: var(--workbench-bg);
+  background-size: 22px 22px, 22px 22px, auto;
+  box-shadow: none;
+}
+
+html[data-style="classic"] .app-main,
+html[data-style="classic"] .chat-empty-screen,
+html[data-style="classic"] .chat-active-screen {
+  background: var(--workbench-bg);
+  background-size: 22px 22px, 22px 22px, auto;
+}
+
+html[data-style="classic"] .app-sidebar {
+  height: 100%;
+  border: 0;
+  border-right: var(--border-width-md) solid var(--border-strong);
+  border-radius: 0;
+  background:
+    linear-gradient(180deg, color-mix(in oklch, var(--surface) 42%, transparent), transparent 34%),
+    var(--sidebar);
+  box-shadow: none;
+}
+
+html[data-style="classic"] .sidebar-new-wrap {
+  padding-top: 30px;
+}
+
+html[data-style="classic"] .sidebar-footer {
+  border-top: var(--border-width-md) solid var(--border-strong);
+  background: transparent;
+}
+
+html[data-style="classic"] .sidebar-new-button,
+html[data-style="classic"] .sidebar-nav-button,
+html[data-style="classic"] .sidebar-recent-item {
+  box-shadow: none;
+}
+
+html[data-style="classic"] .sidebar-nav-button,
+html[data-style="classic"] .sidebar-recent-item {
+  border-left: var(--border-width-thick) solid transparent;
+}
+
+html[data-style="classic"] .sidebar-recent-item.active {
+  border-left-color: var(--accent);
+  background: var(--nav-active-bg);
+  box-shadow: none;
+}
+
+html[data-style="classic"] .chat-empty-heading {
+  background:
+    linear-gradient(180deg, transparent 58%, color-mix(in oklch, var(--accent-soft) 70%, transparent) 58%);
+  color: color-mix(in oklch, var(--fg) 92%, var(--accent-active));
+}
+
+html[data-style="classic"] .chat-input-floating {
+  border-top: 1px solid color-mix(in oklch, var(--fg) 6%, transparent);
+  background: var(--workbench-bg);
+  background-size: 22px 22px, 22px 22px, auto;
+}
+
+html[data-style="classic"] .chat-input-card {
+  border-radius: var(--radius-md);
+  background: var(--composer-bg);
+  box-shadow: var(--composer-shadow);
+}
+
+html[data-style="classic"] .user-message-wrap {
+  border-left-color: var(--accent);
+}
+
+html[data-style="classic"] .assistant-message-label::after {
+  background: color-mix(in oklch, var(--border-strong) 18%, var(--border));
+}
+
+html[data-style="classic"] .assistant-answer {
+  border-left-color: var(--message-assistant-border);
+}
+
+html[data-style="classic"] .rich-blockquote {
+  border-left-color: var(--secondary);
+  background: color-mix(in oklch, var(--secondary) 8%, var(--surface));
+}
+
+html[data-style="classic"] .rich-code-block,
+html[data-style="classic"] .rich-table-wrap {
+  border-radius: var(--radius-md);
+  background: color-mix(in oklch, var(--surface-subtle) 62%, var(--surface));
+  box-shadow: inset 0 1px 0 color-mix(in oklch, white 38%, transparent);
+}
+
+html[data-style="classic"] .settings-dialog {
+  border-radius: var(--radius-lg);
+  background: var(--floating-panel-bg);
+  box-shadow: var(--floating-panel-shadow);
+}
+
+html[data-style="classic"] .settings-sidebar {
+  background: var(--list-pane-bg);
+}
+
+html[data-style="classic"] .settings-content {
+  background: var(--detail-pane-bg);
+}
+
+html[data-style="classic"] .settings-card {
+  border-color: var(--panel-card-border);
+  border-radius: var(--radius-lg);
+  background: var(--panel-card-bg);
+  box-shadow: var(--panel-card-shadow);
+}
+
+html[data-style="classic"] .settings-sidebar nav button {
+  border-left: var(--border-width-thick) solid transparent;
+  border-radius: 0;
+}
+
+html[data-style="classic"] .settings-sidebar nav button.active {
+  border-left-color: var(--accent);
+}
+
+html[data-style="classic"] .composer-send-button {
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklch, white 16%, transparent),
+    0 1px 2px color-mix(in oklch, var(--shadow-ink) 8%, transparent);
+}

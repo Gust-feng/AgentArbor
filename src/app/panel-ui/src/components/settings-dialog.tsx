@@ -18,6 +18,8 @@ import type { McpEnvironmentCheckResponse, McpReferenceResponse, ToolsResponse }
 import { CapabilitiesSettings } from "./capability-settings";
 import { ModelSettings } from "./model-settings";
 import { SkillSettings } from "./skill-settings";
+import { ThemeSwitcher } from "./theme-switcher";
+import { getInitialTheme } from "../app-theme";
 import type { McpServerForm, ModelForm, SettingsGroup, ToolForm } from "./settings-types";
 import { WorkspaceSettings } from "./workspace-settings";
 
@@ -60,7 +62,6 @@ export function SettingsDialog(props: {
   readonly onInstallMcpEnvironment: (form: Pick<McpServerForm, "command" | "commandLine">) => Promise<McpEnvironmentCheckResponse>;
   readonly onDeleteMcpServer: (serverId: string) => void;
   readonly onUpdateMcpTool: (serverId: string, toolName: string, enabled: boolean, autoApproved?: boolean) => void;
-  readonly onUpdateTool: (toolName: string, enabled: boolean) => void;
   readonly onRefreshSkills: () => void;
   readonly onUpdateSkill: (skillId: string, enabled: boolean) => void;
 }): React.ReactElement | null {
@@ -158,7 +159,6 @@ export function SettingsDialog(props: {
                 onInstallMcpEnvironment={props.onInstallMcpEnvironment}
                 onDeleteMcpServer={props.onDeleteMcpServer}
                 onUpdateMcpTool={props.onUpdateMcpTool}
-                onUpdateTool={props.onUpdateTool}
               />
             )}
             {activeGroup === "skills" && (
@@ -200,20 +200,23 @@ const SETTINGS_GROUPS: readonly { readonly id: SettingsGroup; readonly label: st
 function AppearanceSettings(props: { readonly config?: ConfigResponse }): React.ReactElement {
   const browserAppearance = useBrowserAppearanceSnapshot();
   const configuredAppearance = props.config?.appearance;
-  const hasAppearanceConfig = configuredAppearance !== undefined;
-  const configuredTheme = configuredAppearance?.themeLabel ?? configuredAppearance?.colorScheme;
   const documentColorScheme = configuredAppearance?.colorScheme ?? browserAppearance.documentColorScheme;
+  const [initialTheme] = useState(() => getInitialTheme());
+  const [currentStyleId, setCurrentStyleId] = useState(initialTheme.styleId);
+  const [currentColorId, setCurrentColorId] = useState(initialTheme.colorId);
   return (
     <div className="workspace-settings-stack">
+      <ThemeSwitcher
+        activeStyleId={currentStyleId}
+        activeColorId={currentColorId}
+        onStyleChange={setCurrentStyleId}
+        onColorChange={setCurrentColorId}
+      />
       <section className="settings-card">
-        <h3>外观</h3>
+        <h3>当前环境</h3>
         <div className="settings-row">
-          <span>样式来源</span>
-          <div><span className="settings-value">{appearanceSourceLabel(configuredAppearance?.source)}</span></div>
-        </div>
-        <div className="settings-row">
-          <span>主题配置</span>
-          <div><span className="settings-value">{configuredTheme ?? "未配置独立主题"}</span></div>
+          <span>主题来源</span>
+          <div><span className="settings-value">本机偏好，立即生效</span></div>
         </div>
         <div className="settings-row">
           <span>文档色彩方案</span>
@@ -225,15 +228,7 @@ function AppearanceSettings(props: { readonly config?: ConfigResponse }): React.
         </div>
         <div className="settings-row">
           <span>界面密度</span>
-          <div><span className="settings-value">{configuredAppearance?.densityLabel ?? "内置标准密度"}</span></div>
-        </div>
-        <div className="settings-row">
-          <span>配置状态</span>
-          <div>
-            <span className="settings-value">
-              {hasAppearanceConfig && configuredAppearance.configurable === true ? "可由配置控制" : "只读：当前没有外观配置入口"}
-            </span>
-          </div>
+          <div><span className="settings-value">{configuredAppearance?.densityLabel ?? "标准"}</span></div>
         </div>
       </section>
     </div>
@@ -301,13 +296,6 @@ function readBrowserAppearanceSnapshot(): BrowserAppearanceSnapshot {
     ? "dark"
     : "light";
   return { documentColorScheme, systemColorPreference };
-}
-
-function appearanceSourceLabel(source: NonNullable<ConfigResponse["appearance"]>["source"] | undefined): string {
-  if (source === "user_config") {
-    return "用户配置";
-  }
-  return "内置 Panel 样式表";
 }
 
 function colorSchemeLabel(value: string | undefined): string {

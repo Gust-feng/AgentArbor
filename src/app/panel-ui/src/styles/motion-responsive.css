@@ -54,7 +54,7 @@
 
   .app-sidebar {
     width: 68px !important;
-    border-radius: 20px;
+    border-radius: var(--radius-2xl);
   }
 
   .app-sidebar .sidebar-rail-button {

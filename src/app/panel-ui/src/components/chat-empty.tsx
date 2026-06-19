@@ -12,6 +12,10 @@ import type { ComposerToolConfirmationPolicy } from "../app-config-projection";
 import type { ContextAttachment } from "../contracts/context";
 import type { ModelProviderIdentity } from "../model-provider-logos";
 
+type ComposerChipFeedback = "model" | "reasoning" | "access";
+
+const COMPOSER_CHIP_FEEDBACK_MS = 540;
+
 export type ChatModelOption = {
   readonly id: string;
   readonly name: string;
@@ -87,19 +91,61 @@ export function ChatInputBar(props: ChatInputProps): React.ReactElement {
   const composerRef = useRef<HTMLDivElement | null>(null);
   const didAutoFocusRef = useRef(false);
   const previousBusyRef = useRef(props.busy);
+  const chipFeedbackTimerRef = useRef<number | undefined>(undefined);
+  const previousChipValuesRef = useRef({
+    modelId: props.selectedModelId,
+    reasoningEffort: props.reasoningEffort,
+    toolConfirmationPolicy: props.toolConfirmationPolicy,
+  });
   const [focused, setFocused] = useState(false);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [reasoningMenuOpen, setReasoningMenuOpen] = useState(false);
   const [accessMenuOpen, setAccessMenuOpen] = useState(false);
+  const [confirmedChip, setConfirmedChip] = useState<ComposerChipFeedback | undefined>();
   const selectedModel = props.models.find((model) => model.id === props.selectedModelId);
   const canSend = props.value.trim().length > 0 && (!props.busy || props.allowInputWhileBusy === true);
   const modelGroups = useMemo(() => groupModels(props.models), [props.models]);
+
+  function showChipFeedback(target: ComposerChipFeedback): void {
+    if (chipFeedbackTimerRef.current !== undefined) {
+      window.clearTimeout(chipFeedbackTimerRef.current);
+    }
+    setConfirmedChip(target);
+    chipFeedbackTimerRef.current = window.setTimeout(() => {
+      setConfirmedChip(undefined);
+      chipFeedbackTimerRef.current = undefined;
+    }, COMPOSER_CHIP_FEEDBACK_MS);
+  }
+
+  useEffect(() => {
+    const previous = previousChipValuesRef.current;
+    if (previous.modelId !== props.selectedModelId) {
+      showChipFeedback("model");
+    } else if (previous.reasoningEffort !== props.reasoningEffort) {
+      showChipFeedback("reasoning");
+    } else if (previous.toolConfirmationPolicy !== props.toolConfirmationPolicy) {
+      showChipFeedback("access");
+    }
+    previousChipValuesRef.current = {
+      modelId: props.selectedModelId,
+      reasoningEffort: props.reasoningEffort,
+      toolConfirmationPolicy: props.toolConfirmationPolicy,
+    };
+  }, [props.selectedModelId, props.reasoningEffort, props.toolConfirmationPolicy]);
 
   useEffect(() => {
     setModelMenuOpen(false);
     setReasoningMenuOpen(false);
     setAccessMenuOpen(false);
   }, [props.closeSignal]);
+
+  useEffect(() => {
+    return () => {
+      if (chipFeedbackTimerRef.current !== undefined) {
+        window.clearTimeout(chipFeedbackTimerRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (!modelMenuOpen && !reasoningMenuOpen && !accessMenuOpen) {
@@ -198,7 +244,7 @@ export function ChatInputBar(props: ChatInputProps): React.ReactElement {
           <div className="composer-options-menu">
             <button
               type="button"
-              className="composer-options-button composer-model-chip"
+              className={`composer-options-button composer-model-chip ${confirmedChip === "model" ? "is-confirmed" : ""}`}
               onClick={() => {
                 setModelMenuOpen((value) => !value);
                 setReasoningMenuOpen(false);
@@ -262,7 +308,7 @@ export function ChatInputBar(props: ChatInputProps): React.ReactElement {
             <div className="composer-options-menu">
               <button
                 type="button"
-                className="composer-options-button composer-reasoning-chip"
+                className={`composer-options-button composer-reasoning-chip ${confirmedChip === "reasoning" ? "is-confirmed" : ""}`}
                 onClick={() => {
                   setModelMenuOpen(false);
                   setReasoningMenuOpen((value) => !value);
@@ -270,7 +316,6 @@ export function ChatInputBar(props: ChatInputProps): React.ReactElement {
                 }}
                 aria-expanded={reasoningMenuOpen}
                 aria-label="思考强度"
-                title="思考强度"
               >
                 <span className="composer-reasoning-prefix">思考</span>
                 <span>{reasoningEffortLabel(props.reasoningEffort)}</span>
@@ -301,7 +346,7 @@ export function ChatInputBar(props: ChatInputProps): React.ReactElement {
           <div className="composer-options-menu">
             <button
               type="button"
-              className={`composer-options-button composer-access-chip ${props.toolConfirmationPolicy === "full_access" ? "full-access" : ""}`}
+              className={`composer-options-button composer-access-chip ${props.toolConfirmationPolicy === "full_access" ? "full-access" : ""} ${confirmedChip === "access" ? "is-confirmed" : ""}`}
               onClick={() => {
                 setModelMenuOpen(false);
                 setReasoningMenuOpen(false);
@@ -309,7 +354,6 @@ export function ChatInputBar(props: ChatInputProps): React.ReactElement {
               }}
               aria-expanded={accessMenuOpen}
               aria-label="访问模式"
-              title="访问模式"
             >
               <ShieldCheck size={13} aria-hidden="true" />
               <span>{toolAccessPolicyLabel(props.toolConfirmationPolicy)}</span>
@@ -347,7 +391,6 @@ export function ChatInputBar(props: ChatInputProps): React.ReactElement {
             }}
             disabled={props.contextBusy === true}
             aria-label="添加附件"
-            title="添加附件"
           >
             <Paperclip size={18} />
           </button>
@@ -478,10 +521,10 @@ function MessageQueueItem(props: {
         <>
           <p className="message-queue-content">{props.message.content}</p>
           <div className="message-queue-actions">
-            <button type="button" className="message-queue-action" onClick={startEdit} title="编辑" aria-label="编辑消息">
+            <button type="button" className="message-queue-action" onClick={startEdit} aria-label="编辑消息">
               <PencilLine size={13} />
             </button>
-            <button type="button" className="message-queue-action" onClick={() => props.onRemove(props.message.id)} title="撤回" aria-label="撤回消息">
+            <button type="button" className="message-queue-action" onClick={() => props.onRemove(props.message.id)} aria-label="撤回消息">
               <X size={13} />
             </button>
           </div>

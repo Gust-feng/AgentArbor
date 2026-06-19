@@ -45,7 +45,6 @@ export function ModelProviderForm(props: {
               type="button"
               className="api-key-action"
               aria-label={props.revealed ? "隐藏 API Key" : "查看 API Key"}
-              title={props.revealed ? "隐藏" : "查看"}
               disabled={!props.hasApiKeyAction || props.fetchBusy || props.saving}
               onMouseDown={(event) => {
                 event.preventDefault();
@@ -58,7 +57,6 @@ export function ModelProviderForm(props: {
               type="button"
               className="api-key-action"
               aria-label="清空 API Key"
-              title="清空"
               disabled={!props.hasApiKeyAction || props.saving}
               onMouseDown={(event) => {
                 event.preventDefault();

@@ -342,10 +342,10 @@ function ConversationListItem(props: {
             maxLength={80}
             autoFocus
           />
-          <button type="submit" className="sidebar-icon-button" title="保存重命名" aria-label="保存重命名">
+          <button type="submit" className="sidebar-icon-button" aria-label="保存重命名">
             <Check size={14} />
           </button>
-          <button type="button" className="sidebar-icon-button" title="取消" aria-label="取消" onClick={props.onRenameCancel}>
+          <button type="button" className="sidebar-icon-button" aria-label="取消" onClick={props.onRenameCancel}>
             <X size={14} />
           </button>
         </form>
@@ -366,7 +366,6 @@ function ConversationListItem(props: {
               ref={menuButtonRef}
               type="button"
               className="sidebar-kebab-button"
-              title="会话操作"
               aria-label="会话操作"
               aria-haspopup="menu"
               aria-expanded={props.menuOpen}

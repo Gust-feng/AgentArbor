@@ -288,7 +288,6 @@ export function ModelProviderList(props: {
                 className="provider-row-drag"
                 disabled={!props.reorderEnabled}
                 aria-label="拖动排序"
-                title={props.reorderEnabled ? "拖动排序" : "搜索时不可排序"}
                 onPointerDown={(event) => {
                   if (!props.reorderEnabled || event.button !== 0) {
                     event.preventDefault();
@@ -351,7 +350,6 @@ export function ModelProviderList(props: {
         }}
         disabled={deleteMode ? !deleteAvailable : props.saving}
         aria-label={deleteMode ? "删除模型提供商" : "添加模型提供商"}
-        title={deleteMode ? "删除模型提供商" : "添加模型提供商"}
       >
         {deleteMode ? <Trash2 size={16} /> : <Plus size={16} />}
         {deleteMode ? (deleteAvailable ? "删除模型提供商" : "无法删除") : "添加模型提供商"}

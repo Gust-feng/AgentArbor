@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { GripVertical, Plus, Search, Trash2 } from "lucide-react";
 import type { ModelProviderListItem } from "./model-settings-projection";
 import { ProviderLogo } from "./model-settings-icons";
@@ -28,8 +28,10 @@ export function ModelProviderList(props: {
   const [dragOffsetY, setDragOffsetY] = useState(0);
   const [dragRowStep, setDragRowStep] = useState(0);
   const [settlingDrag, setSettlingDrag] = useState<{ readonly key: string; readonly offsetY: number } | undefined>(undefined);
+  const [dropHandoffActive, setDropHandoffActive] = useState(false);
   const [deleteZoneActive, setDeleteZoneActiveState] = useState(false);
   const deleteZoneRef = useRef<HTMLButtonElement | null>(null);
+  const rowRefs = useRef(new Map<string, HTMLElement>());
   const dragStateRef = useRef<{
     readonly key: string;
     readonly pointerId: number;
@@ -44,6 +46,8 @@ export function ModelProviderList(props: {
   const suppressSelectRef = useRef(false);
   const settleFrameRef = useRef<number | undefined>(undefined);
   const settleTimerRef = useRef<number | undefined>(undefined);
+  const dropHandoffTimerRef = useRef<number | undefined>(undefined);
+  const pendingSettleRef = useRef<{ readonly key: string; readonly fromTop: number } | undefined>(undefined);
   const draggingIndex = draggingKey === undefined ? -1 : props.items.findIndex((item) => item.key === draggingKey);
   const draggingItem = draggingKey === undefined ? undefined : props.items.find((item) => item.key === draggingKey);
   const deleteMode = draggingItem !== undefined;
@@ -52,8 +56,21 @@ export function ModelProviderList(props: {
   useEffect(() => {
     return () => {
       clearSettleTimers();
+      clearDropHandoffTimer();
     };
   }, []);
+
+  useLayoutEffect(() => {
+    const pending = pendingSettleRef.current;
+    if (pending === undefined) return;
+    pendingSettleRef.current = undefined;
+    const row = rowRefs.current.get(pending.key);
+    if (row === undefined) {
+      cancelSettleAnimation();
+      return;
+    }
+    startSettleAnimation(pending.key, pending.fromTop - row.getBoundingClientRect().top);
+  });
 
   function updateInsertIndex(clientY: number): void {
     const dragState = dragStateRef.current;
@@ -73,10 +90,8 @@ export function ModelProviderList(props: {
     const nextOrder = nextIndex === undefined
       ? undefined
       : reorderedProviderKeys(currentKeys, item.key, nextIndex);
-    const settleOffsetY =
-      nextOrder === undefined
-        ? 0
-        : dragOffsetY - (nextOrder.indexOf(item.key) - currentKeys.indexOf(item.key)) * dragRowStep;
+    const draggedRow = rowRefs.current.get(item.key);
+    const settleFromTop = draggedRow?.getBoundingClientRect().top;
     dragStateRef.current = undefined;
     setDraggingKey(undefined);
     setDragOffsetY(0);
@@ -85,22 +100,29 @@ export function ModelProviderList(props: {
     setDeleteZoneActive(false);
     if (shouldDelete) {
       cancelSettleAnimation();
+      startDropHandoff();
       void props.onDeleteProvider(item);
       return;
     }
+    if (settleFromTop !== undefined) {
+      pendingSettleRef.current = { key: item.key, fromTop: settleFromTop };
+    }
     if (nextOrder !== undefined) {
-      startSettleAnimation(item.key, settleOffsetY);
+      startDropHandoff();
       void props.onReorder(nextOrder);
     }
   }
 
   function cancelReorder(): void {
     dragStateRef.current = undefined;
+    pendingSettleRef.current = undefined;
     setDraggingKey(undefined);
     setDragOffsetY(0);
     setDragRowStep(0);
     setActiveInsertIndex(undefined);
     setDeleteZoneActive(false);
+    setDropHandoffActive(false);
+    clearDropHandoffTimer();
   }
 
   function setActiveInsertIndex(value: number | undefined): void {
@@ -131,6 +153,22 @@ export function ModelProviderList(props: {
     }
   }
 
+  function clearDropHandoffTimer(): void {
+    if (dropHandoffTimerRef.current !== undefined) {
+      window.clearTimeout(dropHandoffTimerRef.current);
+      dropHandoffTimerRef.current = undefined;
+    }
+  }
+
+  function startDropHandoff(): void {
+    clearDropHandoffTimer();
+    setDropHandoffActive(true);
+    dropHandoffTimerRef.current = window.setTimeout(() => {
+      dropHandoffTimerRef.current = undefined;
+      setDropHandoffActive(false);
+    }, SETTLE_DURATION_MS + 80);
+  }
+
   function startSettleAnimation(key: string, offsetY: number): void {
     cancelSettleAnimation();
     if (Math.abs(offsetY) < 0.5) {
@@ -157,8 +195,9 @@ export function ModelProviderList(props: {
     }
     const rect = zone.getBoundingClientRect();
     const inside = clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom;
-    setDeleteZoneActive(inside && item.profileId !== undefined);
-    return inside;
+    const active = inside && item.profileId !== undefined;
+    setDeleteZoneActive(active);
+    return active;
   }
 
   function beginPointerReorder(
@@ -175,6 +214,8 @@ export function ModelProviderList(props: {
     if (active) {
       cancelSettleAnimation();
       props.onCloseAdding();
+      setDropHandoffActive(false);
+      clearDropHandoffTimer();
       setDraggingKey(item.key);
       setDragOffsetY(0);
       setDeleteZoneActive(false);
@@ -192,6 +233,8 @@ export function ModelProviderList(props: {
       dragStateRef.current = { ...dragState, active: true };
       cancelSettleAnimation();
       props.onCloseAdding();
+      setDropHandoffActive(false);
+      clearDropHandoffTimer();
       setDraggingKey(item.key);
       setDragRowStep(dragState.rowStep);
       setActiveInsertIndex(dragState.startIndex);
@@ -231,21 +274,31 @@ export function ModelProviderList(props: {
           <input value={props.query} onChange={(event) => props.onQueryChange(event.target.value)} placeholder="搜索" />
         </label>
       </div>
-      <div className={`provider-list ${draggingKey === undefined ? "" : "reordering"}`}>
+      <div className={`provider-list ${draggingKey === undefined ? "" : "reordering"} ${dropHandoffActive ? "drop-handoff" : ""}`}>
         {props.items.map((item, index) => {
           const selected = item.key === props.selectedItem.key;
           const dragging = item.key === draggingKey;
           const settling = item.key === settlingDrag?.key;
+          const deletePreview = deleteZoneActive && deleteAvailable;
           const rowShiftY = dragging
             ? dragOffsetY
             : settling
               ? settlingDrag.offsetY
-            : providerRowShift(index, draggingIndex, insertIndex, dragRowStep);
+              : deletePreview
+                ? providerDeleteRowShift(index, draggingIndex, dragRowStep)
+                : providerRowShift(index, draggingIndex, insertIndex, dragRowStep);
           return (
             <article
               className={`provider-row ${selected ? "selected" : ""} ${dragging ? "dragging" : ""} ${settling ? "settling" : ""}`}
               data-provider-key={item.key}
               key={item.key}
+              ref={(node) => {
+                if (node === null) {
+                  rowRefs.current.delete(item.key);
+                  return;
+                }
+                rowRefs.current.set(item.key, node);
+              }}
               style={rowShiftY === 0 ? undefined : { transform: `translate3d(0, ${rowShiftY}px, 0)` }}
             >
               <button
@@ -395,6 +448,17 @@ function providerRowShift(
     return index >= insertIndex && index < draggingIndex ? rowStep : 0;
   }
   return index > draggingIndex && index <= insertIndex ? -rowStep : 0;
+}
+
+function providerDeleteRowShift(
+  index: number,
+  draggingIndex: number,
+  rowStep: number
+): number {
+  if (draggingIndex < 0 || rowStep <= 0 || index <= draggingIndex) {
+    return 0;
+  }
+  return -rowStep;
 }
 
 function providerRowStep(node: HTMLElement): number {

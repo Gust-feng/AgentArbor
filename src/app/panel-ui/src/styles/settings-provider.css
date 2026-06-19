@@ -91,6 +91,14 @@
   opacity: 0.92;
 }
 
+.provider-list.drop-handoff .provider-row:not(.dragging):not(.settling) {
+  transition:
+    border-color var(--motion-fast-duration) var(--motion-ease-standard),
+    background var(--motion-fast-duration) var(--motion-ease-standard),
+    box-shadow var(--motion-fast-duration) var(--motion-ease-standard),
+    opacity var(--motion-fast-duration) var(--motion-ease-standard);
+}
+
 .provider-list::-webkit-scrollbar,
 .provider-detail-pane::-webkit-scrollbar,
 .settings-content::-webkit-scrollbar {

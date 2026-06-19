@@ -20,6 +20,7 @@ export function Sidebar(props: {
   readonly conversations: readonly ConversationSummary[];
   readonly activeConversationId?: string;
   readonly pendingCount: number;
+  readonly collapsed: boolean;
   readonly onNew: () => void;
   readonly onOpen: (conversationId: string) => void;
   readonly onRename: (conversationId: string, title: string) => void;
@@ -69,6 +70,15 @@ export function Sidebar(props: {
     };
   }, [openMenuConversationId]);
 
+  React.useEffect(() => {
+    if (!props.collapsed) {
+      return;
+    }
+    setEditingConversationId(undefined);
+    setEditingTitle("");
+    setOpenMenuConversationId(undefined);
+  }, [props.collapsed]);
+
   function beginRename(conversation: ConversationSummary): void {
     setOpenMenuConversationId(undefined);
     setEditingConversationId(conversation.conversationId);
@@ -112,6 +122,7 @@ export function Sidebar(props: {
   return (
     <aside
       className="app-sidebar"
+      data-collapsed={props.collapsed ? "true" : "false"}
       aria-label="工作入口"
     >
       <div className="sidebar-new-wrap">
@@ -120,7 +131,7 @@ export function Sidebar(props: {
           onClick={props.onNew}
           aria-label="新任务"
           aria-current={newTaskActive ? "page" : undefined}
-          className={`sidebar-action sidebar-rail-button sidebar-new-button ${newTaskActive ? "active" : ""}`}
+          className={`sidebar-action sidebar-rail-button sidebar-new-button sidebar-collapsed-button ${newTaskActive ? "active" : ""}`}
         >
           <span className="sidebar-icon-slot" aria-hidden="true">
             <Plus size={16} />
@@ -132,7 +143,8 @@ export function Sidebar(props: {
       {props.pendingCount > 0 && (
         <button
           type="button"
-          className="sidebar-action sidebar-rail-button sidebar-pending-reminder"
+          className="sidebar-action sidebar-rail-button sidebar-pending-reminder sidebar-collapsed-button"
+          aria-label={`${props.pendingCount} 个待处理`}
           onClick={() => {
             const firstPending = pendingConversations[0];
             if (firstPending !== undefined) {
@@ -144,10 +156,15 @@ export function Sidebar(props: {
             <ShieldCheck size={15} />
           </span>
           <span className="sidebar-label">{props.pendingCount} 个待处理</span>
+          <span className="sidebar-pending-count" aria-hidden="true">{props.pendingCount}</span>
         </button>
       )}
 
-      <section className="sidebar-expandable sidebar-recent" aria-label="会话列表">
+      <section
+        className="sidebar-expandable sidebar-recent"
+        aria-label="会话列表"
+        aria-hidden={props.collapsed}
+      >
         <div className="sidebar-recent-list">
           {visibleConversations.length === 0 ? (
             <SidebarEmptyState />
@@ -156,8 +173,10 @@ export function Sidebar(props: {
               {pinnedConversations.length > 0 && (
                 <ConversationGroup
                   title="置顶"
+                  hideTitle={false}
                   conversations={pinnedConversations}
                   activeConversationId={props.activeConversationId}
+                  collapsed={props.collapsed}
                   editingConversationId={editingConversationId}
                   editingTitle={editingTitle}
                   openMenuConversationId={openMenuConversationId}
@@ -174,8 +193,10 @@ export function Sidebar(props: {
               )}
               <ConversationGroup
                 title="最近会话"
+                hideTitle={pinnedConversations.length === 0}
                 conversations={recentConversations}
                 activeConversationId={props.activeConversationId}
+                collapsed={props.collapsed}
                 editingConversationId={editingConversationId}
                 editingTitle={editingTitle}
                 openMenuConversationId={openMenuConversationId}
@@ -198,7 +219,8 @@ export function Sidebar(props: {
         <button
           type="button"
           onClick={props.onOpenSettings}
-          className="sidebar-action sidebar-rail-button sidebar-nav-button sidebar-settings-button"
+          className="sidebar-action sidebar-rail-button sidebar-nav-button sidebar-settings-button sidebar-collapsed-button"
+          aria-label="设置"
         >
           <span className="sidebar-icon-slot" aria-hidden="true">
             <Settings size={15} />
@@ -229,8 +251,10 @@ function SidebarEmptyState(): React.ReactElement {
 
 function ConversationGroup(props: {
   readonly title: string;
+  readonly hideTitle?: boolean;
   readonly conversations: readonly ConversationSummary[];
   readonly activeConversationId?: string;
+  readonly collapsed: boolean;
   readonly editingConversationId?: string;
   readonly editingTitle: string;
   readonly openMenuConversationId?: string;
@@ -249,14 +273,17 @@ function ConversationGroup(props: {
   }
   return (
     <div className="sidebar-conversation-group">
-      <div className="sidebar-list-heading">
-        <span>{props.title}</span>
-      </div>
-              {props.conversations.map((conversation) => (
-                <ConversationListItem
-                  key={conversation.conversationId}
-                  conversation={conversation}
+      {!props.hideTitle && (
+        <div className="sidebar-list-heading">
+          <span>{props.title}</span>
+        </div>
+      )}
+      {props.conversations.map((conversation) => (
+        <ConversationListItem
+          key={conversation.conversationId}
+          conversation={conversation}
           active={conversation.conversationId === props.activeConversationId}
+          collapsed={props.collapsed}
           editing={conversation.conversationId === props.editingConversationId}
           editingTitle={props.editingTitle}
           menuOpen={conversation.conversationId === props.openMenuConversationId}
@@ -278,6 +305,7 @@ function ConversationGroup(props: {
 function ConversationListItem(props: {
   readonly conversation: ConversationSummary;
   readonly active: boolean;
+  readonly collapsed: boolean;
   readonly editing: boolean;
   readonly editingTitle: string;
   readonly menuOpen: boolean;
@@ -356,43 +384,46 @@ function ConversationListItem(props: {
             onClick={() => props.onOpen(props.conversation.conversationId)}
             className="sidebar-recent-row"
             aria-label={props.conversation.title}
+            tabIndex={props.collapsed ? -1 : 0}
           >
             <span className="sidebar-conversation-copy">
               <strong>{compact(props.conversation.title, 34)}</strong>
             </span>
           </button>
-          <div className="sidebar-menu-wrap" data-sidebar-menu-owner={props.conversation.conversationId}>
-            <button
-              ref={menuButtonRef}
-              type="button"
-              className="sidebar-kebab-button"
-              aria-label="会话操作"
-              aria-haspopup="menu"
-              aria-expanded={props.menuOpen}
-              onClick={() => props.onMenuToggle(props.conversation.conversationId)}
-            >
-              <EllipsisVertical size={17} />
-            </button>
-            {props.menuOpen && (
-              <div className="sidebar-conversation-menu" role="menu" style={menuPosition}>
-                <button type="button" role="menuitem" onClick={() => props.onRenameStart(props.conversation)}>
-                  重命名
-                </button>
-                <button type="button" role="menuitem" onClick={() => props.onTogglePinned(props.conversation)}>
-                  {pinned ? "取消置顶" : "置顶"}
-                </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  className="danger"
-                  disabled={deleteDisabled}
-                  onClick={() => props.onDelete(props.conversation)}
-                >
-                  删除
-                </button>
-              </div>
-            )}
-          </div>
+          {!props.collapsed && (
+            <div className="sidebar-menu-wrap" data-sidebar-menu-owner={props.conversation.conversationId}>
+              <button
+                ref={menuButtonRef}
+                type="button"
+                className="sidebar-kebab-button"
+                aria-label="会话操作"
+                aria-haspopup="menu"
+                aria-expanded={props.menuOpen}
+                onClick={() => props.onMenuToggle(props.conversation.conversationId)}
+              >
+                <EllipsisVertical size={17} />
+              </button>
+              {props.menuOpen && (
+                <div className="sidebar-conversation-menu" role="menu" style={menuPosition}>
+                  <button type="button" role="menuitem" onClick={() => props.onRenameStart(props.conversation)}>
+                    重命名
+                  </button>
+                  <button type="button" role="menuitem" onClick={() => props.onTogglePinned(props.conversation)}>
+                    {pinned ? "取消置顶" : "置顶"}
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="danger"
+                    disabled={deleteDisabled}
+                    onClick={() => props.onDelete(props.conversation)}
+                  >
+                    删除
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
         </>
       )}
     </div>

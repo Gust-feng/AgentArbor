@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { isConversationWaitingForUser } from "./conversation-state";
 import { ChatActive } from "./components/chat-active";
 import { ChatEmpty } from "./components/chat-empty";
@@ -46,6 +47,7 @@ export function App(): React.ReactElement {
   const [screen, setScreen] = useState<Screen>("chat-empty");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsGroup, setSettingsGroup] = useState<SettingsGroup>("models");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(loadSidebarCollapsedPreference);
   const [inputCloseSignal, setInputCloseSignal] = useState(0);
   const [goal, setGoal] = useState("");
   const [aiMode, setAiMode] = useState<VisibleAiMode>("openai-responses");
@@ -327,6 +329,10 @@ export function App(): React.ReactElement {
     }
   }, [composerReasoningEffort, selectedModelId, selectedModelSupportsReasoningEffort]);
 
+  useEffect(() => {
+    persistSidebarCollapsedPreference(sidebarCollapsed);
+  }, [sidebarCollapsed]);
+
   function selectInputModel(modelOptionId: string): void {
     const fallbackModelId = selectedModelId;
     setComposerSelectedModelId(modelOptionId);
@@ -523,12 +529,13 @@ export function App(): React.ReactElement {
   const isBootstrapping = app.config === undefined && app.conversations.length === 0 && app.error === undefined;
 
   return (
-    <div className="app-root">
+    <div className="app-root" data-sidebar-collapsed={sidebarCollapsed ? "true" : "false"}>
       <Sidebar
         currentScreen={chatScreen}
         conversations={app.conversations}
         activeConversationId={app.conversation?.conversationId}
         pendingCount={pendingCount}
+        collapsed={sidebarCollapsed}
         onNew={resetChat}
         onOpen={(id) => void loadConversation(id)}
         onRename={(id, title) => void renameConversation(id, title)}
@@ -538,6 +545,10 @@ export function App(): React.ReactElement {
       />
 
       <div className="app-workbench">
+        <WorkbenchHeader
+          collapsed={sidebarCollapsed}
+          onToggleSidebar={() => setSidebarCollapsed((current) => !current)}
+        />
         <main className="app-main">
           {isBootstrapping && (
             <div className="app-bootstrap-loading">
@@ -618,6 +629,52 @@ export function App(): React.ReactElement {
   );
 }
 
+function WorkbenchHeader(props: {
+  readonly collapsed: boolean;
+  readonly onToggleSidebar: () => void;
+}): React.ReactElement {
+  const toggleLabel = props.collapsed ? "展开侧栏" : "收起侧栏";
+
+  return (
+    <header className="app-workbench-header">
+      <div className="app-workbench-header-inner">
+        <button
+          type="button"
+          className="app-workbench-sidebar-toggle"
+          aria-label={toggleLabel}
+          onClick={props.onToggleSidebar}
+        >
+          {props.collapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+        </button>
+      </div>
+    </header>
+  );
+}
+
 function errorText(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
+}
+
+const SIDEBAR_COLLAPSED_STORAGE_KEY = "agentarbor.panel.sidebar.collapsed";
+
+function loadSidebarCollapsedPreference(): boolean {
+  if (typeof window === "undefined") {
+    return false;
+  }
+  try {
+    return window.localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
+
+function persistSidebarCollapsedPreference(collapsed: boolean): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+  try {
+    window.localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, collapsed ? "true" : "false");
+  } catch {
+    // Local preference persistence is best-effort only.
+  }
 }

@@ -143,14 +143,15 @@
   height: 30px;
   align-items: center;
   gap: 6px;
-  border: 1px solid transparent;
+  border: 1px solid color-mix(in oklch, var(--field-border) 86%, transparent);
   border-radius: var(--radius-sm);
-  background: transparent;
+  background: var(--surface-control-muted);
   padding: 0 8px;
   color: color-mix(in oklch, var(--fg) 56%, var(--muted));
   font-size: 12px;
   font-weight: var(--weight-body);
   isolation: isolate;
+  box-shadow: inset 0 1px 0 color-mix(in oklch, var(--surface-highlight) 34%, transparent);
   transition:
     background-color var(--motion-fast-duration) var(--motion-ease-standard),
     border-color var(--motion-fast-duration) var(--motion-ease-standard),
@@ -170,14 +171,12 @@
   z-index: -1;
   border-radius: inherit;
   background:
-    linear-gradient(135deg, color-mix(in oklch, white 34%, transparent), transparent 56%),
-    color-mix(in oklch, var(--accent) 8%, transparent);
+    linear-gradient(180deg, color-mix(in oklch, var(--surface-highlight) 42%, transparent), transparent 60%),
+    linear-gradient(135deg, color-mix(in oklch, var(--accent) 7%, transparent), transparent 72%);
   content: "";
   opacity: 0;
-  transform: scale(0.96);
   transition:
-    opacity var(--motion-fast-duration) var(--motion-ease-standard),
-    transform var(--motion-fast-duration) var(--motion-ease-snap);
+    opacity var(--motion-fast-duration) var(--motion-ease-standard);
 }
 
 .composer-options-button svg:last-child {
@@ -187,18 +186,17 @@
 
 .composer-tool-button[aria-expanded="true"],
 .composer-options-button[aria-expanded="true"] {
-  border-color: color-mix(in oklch, var(--accent) 24%, var(--border));
-  background: color-mix(in oklch, var(--accent) 9%, var(--surface));
+  border-color: var(--field-focus-border);
+  background: color-mix(in oklch, var(--content-surface) 82%, var(--surface-control));
   color: var(--fg);
   box-shadow:
-    inset 0 0 0 1px color-mix(in oklch, var(--accent) 12%, transparent),
-    0 6px 16px color-mix(in oklch, var(--accent) 8%, transparent);
+    inset 0 1px 0 color-mix(in oklch, var(--surface-highlight) 46%, transparent),
+    var(--field-focus-ring);
 }
 
 .composer-options-button[aria-expanded="true"]::after,
 .composer-options-button.is-confirmed::after {
   opacity: 1;
-  transform: scale(1);
 }
 
 .composer-options-button[aria-expanded="true"] svg:last-child {
@@ -206,12 +204,12 @@
 }
 
 .composer-options-button.is-confirmed {
-  border-color: color-mix(in oklch, var(--accent) 34%, var(--border));
-  background: color-mix(in oklch, var(--accent) 11%, var(--surface));
+  border-color: var(--field-focus-border);
+  background: color-mix(in oklch, var(--content-surface) 88%, var(--surface-control));
   color: color-mix(in oklch, var(--accent-active) 76%, var(--fg));
   box-shadow:
-    inset 0 0 0 1px color-mix(in oklch, var(--accent) 18%, transparent),
-    0 8px 20px color-mix(in oklch, var(--accent) 10%, transparent);
+    inset 0 1px 0 color-mix(in oklch, var(--surface-highlight) 50%, transparent),
+    var(--field-focus-ring);
   animation: composer-chip-confirm var(--motion-enter-duration) var(--motion-ease-spring) both;
 }
 
@@ -220,24 +218,22 @@
 .composer-cancel-button:hover,
 .turn-actions button:hover,
 .settings-actions button:hover {
-  border-color: color-mix(in oklch, var(--accent) 18%, var(--border));
-  background: var(--nav-hover-bg);
+  border-color: var(--field-hover-border);
+  background: var(--field-hover-bg);
   color: var(--fg);
-  box-shadow:
-    inset 0 0 0 1px color-mix(in oklch, var(--surface-highlight) 42%, transparent),
-    0 4px 12px color-mix(in oklch, var(--shadow-ink) 5%, transparent);
+  box-shadow: inset 0 1px 0 color-mix(in oklch, var(--surface-highlight) 42%, transparent);
 }
 
 .composer-tool-button:active,
 .composer-options-button:active,
 .composer-cancel-button:active {
-  transform: scale(0.96);
+  transform: translateY(1px);
   transition: transform var(--motion-fast-duration) var(--motion-ease-snap);
 }
 
 .composer-model-chip {
-  gap: 8px;
-  padding-left: 4px;
+  gap: 6px;
+  padding-inline: 8px;
 }
 
 .composer-reasoning-chip {
@@ -258,31 +254,6 @@
 
 .composer-reasoning-prefix {
   color: var(--muted);
-}
-
-.composer-model-dot {
-  width: 6px;
-  height: 6px;
-  flex: 0 0 auto;
-  border-radius: var(--radius-pill);
-  background: var(--status-success);
-  box-shadow: 0 0 0 3px color-mix(in oklch, var(--status-success) 10%, transparent);
-  transition:
-    background-color var(--motion-fast-duration) var(--motion-ease-standard),
-    box-shadow var(--motion-fast-duration) var(--motion-ease-standard),
-    transform var(--motion-fast-duration) var(--motion-ease-snap);
-}
-
-.composer-model-chip[aria-expanded="true"] .composer-model-dot,
-.composer-model-chip.is-confirmed .composer-model-dot {
-  box-shadow:
-    0 0 0 3px color-mix(in oklch, var(--status-success) 14%, transparent),
-    0 0 12px color-mix(in oklch, var(--status-success) 36%, transparent);
-  transform: scale(1.16);
-}
-
-.composer-model-chip.saving .composer-model-dot {
-  background: color-mix(in oklch, var(--fg) 46%, var(--muted));
 }
 
 .composer-options-button:disabled,
@@ -316,7 +287,7 @@
   box-shadow: var(--popover-shadow);
   backdrop-filter: var(--popover-backdrop-filter);
   -webkit-backdrop-filter: var(--popover-backdrop-filter);
-  animation: popover-enter var(--motion-enter-duration) var(--motion-ease-out-back) both;
+  animation: popover-enter var(--motion-enter-duration) var(--motion-ease-standard) both;
 }
 
 .composer-options-popover {
@@ -360,7 +331,7 @@
   width: 100%;
   grid-template-columns: minmax(0, 1fr);
   gap: 2px;
-  border: 1px solid transparent;
+  border: 1px solid var(--list-row-border);
   border-radius: var(--radius-sm);
   padding: 7px 28px 7px 9px;
   color: var(--fg);
@@ -374,16 +345,18 @@
 
 .composer-reasoning-popover button:hover,
 .composer-access-popover button:hover {
-  background: color-mix(in oklch, var(--accent) 7%, transparent);
+  border-color: var(--list-row-hover-border);
+  background: var(--row-hover-bg);
+  box-shadow: var(--list-row-hover-shadow);
 }
 
 .composer-reasoning-popover button.selected,
 .composer-access-popover button.selected {
-  border-color: color-mix(in oklch, var(--accent) 22%, var(--border));
-  background:
-    linear-gradient(90deg, color-mix(in oklch, var(--accent) 12%, transparent), transparent 72%),
-    color-mix(in oklch, var(--surface) 82%, transparent);
-  box-shadow: inset 2px 0 0 color-mix(in oklch, var(--accent) 68%, transparent);
+  border-color: var(--list-row-active-border);
+  background: var(--row-active-bg);
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklch, var(--surface-highlight) 42%, transparent),
+    0 0 0 1px color-mix(in oklch, var(--accent) 10%, transparent);
 }
 
 .composer-reasoning-popover button.selected::after,
@@ -400,9 +373,7 @@
 }
 
 .composer-reasoning-popover span,
-.composer-reasoning-popover small,
-.composer-access-popover span,
-.composer-access-popover small {
+.composer-access-popover span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -419,6 +390,10 @@
 .composer-access-popover small {
   color: color-mix(in oklch, var(--fg) 54%, var(--muted));
   font-size: 11px;
+  line-height: 1.35;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
 }
 
 .model-menu-popover section {
@@ -442,7 +417,7 @@
   min-height: 42px;
   align-items: center;
   gap: 8px;
-  border: 1px solid transparent;
+  border: 1px solid var(--list-row-border);
   border-radius: var(--radius-sm);
   padding: 7px 28px 7px 9px;
   text-align: left;
@@ -456,15 +431,17 @@
 }
 
 .model-menu-popover button:hover {
-  background: color-mix(in oklch, var(--accent) 7%, transparent);
+  border-color: var(--list-row-hover-border);
+  background: var(--row-hover-bg);
+  box-shadow: var(--list-row-hover-shadow);
 }
 
 .model-menu-popover button.selected {
-  border-color: color-mix(in oklch, var(--accent) 22%, var(--border));
-  background:
-    linear-gradient(90deg, color-mix(in oklch, var(--accent) 12%, transparent), transparent 70%),
-    color-mix(in oklch, var(--surface) 84%, transparent);
-  box-shadow: inset 2px 0 0 color-mix(in oklch, var(--accent) 68%, transparent);
+  border-color: var(--list-row-active-border);
+  background: var(--row-active-bg);
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklch, var(--surface-highlight) 42%, transparent),
+    0 0 0 1px color-mix(in oklch, var(--accent) 10%, transparent);
 }
 
 .model-menu-popover button.selected::after {
@@ -555,11 +532,15 @@
   height: 32px;
   align-items: center;
   justify-content: center;
+  border: 1px solid color-mix(in oklch, var(--accent) 24%, transparent);
   border-radius: var(--radius-sm);
-  background: color-mix(in oklch, var(--fg) 92%, var(--accent));
+  background: color-mix(in oklch, var(--accent) 82%, var(--fg));
   color: var(--primary-foreground);
-  box-shadow: var(--shadow-soft);
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklch, white 18%, transparent),
+    0 8px 18px color-mix(in oklch, var(--shadow-ink) 8%, transparent);
   transition:
+    background-color var(--motion-fast-duration) var(--motion-ease-standard),
     border-color var(--motion-fast-duration) var(--motion-ease-standard),
     box-shadow var(--motion-fast-duration) var(--motion-ease-standard),
     color var(--motion-fast-duration) var(--motion-ease-standard),
@@ -567,11 +548,15 @@
 }
 
 .composer-send-button:hover:not(:disabled) {
-  background: var(--accent);
+  border-color: color-mix(in oklch, var(--accent) 34%, transparent);
+  background: color-mix(in oklch, var(--accent) 90%, var(--fg));
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklch, white 24%, transparent),
+    0 10px 22px color-mix(in oklch, var(--shadow-ink) 10%, transparent);
 }
 
 .composer-send-button:active:not(:disabled) {
-  transform: scale(0.88);
+  transform: translateY(1px);
 }
 
 .composer-send-button:disabled {
@@ -592,11 +577,11 @@
 @keyframes popover-enter {
   from {
     opacity: 0;
-    transform: translateY(4px) scale(0.96);
+    transform: translateY(6px);
   }
   to {
     opacity: 1;
-    transform: translateY(0) scale(1);
+    transform: translateY(0);
   }
 }
 
@@ -613,13 +598,12 @@
 
 @keyframes composer-chip-confirm {
   0% {
-    transform: scale(0.96);
-  }
-  58% {
-    transform: scale(1.035);
+    opacity: 0.76;
+    transform: translateY(1px);
   }
   100% {
-    transform: scale(1);
+    opacity: 1;
+    transform: translateY(0);
   }
 }
 

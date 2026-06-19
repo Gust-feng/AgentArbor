@@ -199,7 +199,7 @@ const AssistantFailureMessage = React.memo(function AssistantFailureMessage(prop
             </button>
           </div>
         )}
-        <p className="assistant-error-message">{props.failure.error}</p>
+        <AssistantFailureNotice error={props.failure.error} />
       </div>
     </article>
   );
@@ -269,6 +269,17 @@ const AssistantAnswerBlock = React.memo(function AssistantAnswerBlock(props: {
     </div>
   );
 });
+
+function AssistantFailureNotice(props: {
+  readonly error: string;
+}): React.ReactElement {
+  return (
+    <section className="assistant-failure-notice" aria-label="错误信息">
+      <strong>错误信息</strong>
+      <RichText text={props.error.replace(/^错误信息[:：]\s*/u, "")} />
+    </section>
+  );
+}
 
 function AssistantMessageLabel({ model }: { readonly model?: AssistantModelBadge }): React.ReactElement {
   const modelLabel = assistantModelLabel(model);

@@ -1,10 +1,22 @@
-.assistant-error-message {
-  margin: 0;
-  color: var(--status-danger);
+.assistant-failure-notice {
+  display: grid;
+  gap: 4px;
+  border-left: 2px solid var(--status-danger);
+  background: color-mix(in oklch, var(--status-danger) 6%, transparent);
+  padding: 10px 12px;
+}
+
+.assistant-failure-notice strong {
+  color: color-mix(in oklch, var(--fg) 78%, var(--status-danger));
+  font-size: 12px;
+  font-weight: var(--weight-heading);
+  line-height: 1.3;
+}
+
+.assistant-failure-notice .rich-text {
+  color: color-mix(in oklch, var(--fg) 68%, var(--status-danger));
   font-size: 13px;
   line-height: 1.7;
-  overflow-wrap: anywhere;
-  white-space: pre-wrap;
 }
 
 .assistant-message-pending .assistant-message-body {

@@ -72,7 +72,7 @@ export function ChatEmpty(props: ChatInputProps & {
       <main className="chat-empty-main">
         <div className="chat-empty-grid">
           <section className="chat-empty-copy" aria-label="任务输入">
-            <h1 className="chat-empty-heading">新任务</h1>
+            <h1 className="chat-empty-heading">今天想处理什么？</h1>
             {props.error && <div className="system-error-line">{props.error}</div>}
           </section>
         </div>
@@ -252,9 +252,7 @@ export function ChatInputBar(props: ChatInputProps): React.ReactElement {
               }}
               aria-expanded={modelMenuOpen}
             >
-              <span className="composer-model-dot" aria-hidden="true" />
               <span>{selectedModel?.name ?? "选择模型"}</span>
-              <ChevronDown size={13} aria-hidden="true" />
             </button>
             {modelMenuOpen && (
               <div className="composer-options-popover composer-model-popover" aria-label="选择模型">
@@ -294,7 +292,6 @@ export function ChatInputBar(props: ChatInputProps): React.ReactElement {
                           </span>
                           <span className="model-option-copy">
                             <strong>{model.name}</strong>
-                            <small>{model.providerLabel}</small>
                           </span>
                         </button>
                       ))}

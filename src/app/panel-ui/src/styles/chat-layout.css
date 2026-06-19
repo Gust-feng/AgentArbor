@@ -30,7 +30,8 @@
 
 .chat-empty-copy {
   display: grid;
-  gap: var(--space-6);
+  width: min(100%, 620px);
+  gap: var(--space-3);
   justify-items: center;
   border: 0;
   background: transparent;
@@ -41,11 +42,11 @@
 
 .chat-empty-heading {
   margin: 0;
-  border-bottom: var(--border-width-md) solid var(--border-strong);
+  border-bottom: var(--border-width-md) solid transparent;
   padding: 0 2px var(--space-3);
   color: var(--fg);
   font-family: var(--font-sans);
-  font-size: 54px;
+  font-size: 46px;
   font-weight: var(--weight-heading);
   letter-spacing: 0;
   line-height: 1;

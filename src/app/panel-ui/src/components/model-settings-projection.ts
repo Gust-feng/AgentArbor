@@ -85,7 +85,7 @@ export function modelProviderItems(
       boundProfileIds.add(binding.profile.profileId);
     }
     const profile = binding?.profile;
-    const configuredModel = profile?.model ?? preset.defaultModel ?? "";
+    const configuredModel = profile === undefined ? preset.defaultModel ?? "" : profile.model ?? "";
     return {
       key: profile?.profileId === undefined ? `preset:${preset.presetId}` : `profile:${profile.profileId}`,
       title: presetIdentity === "unknown" ? preset.label : modelProviderDisplayName(presetIdentity),

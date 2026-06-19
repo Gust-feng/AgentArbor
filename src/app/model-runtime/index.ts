@@ -160,8 +160,5 @@ function requestPlanWarnings(
   if (plannedTools.length > 0 && !parallelToolCalls && plannedTools.some((tool) => tool.metadata?.operationType !== "read-only")) {
     warnings.push("本轮包含写入或执行类工具，已关闭并行工具调用。");
   }
-  if (capabilities.stability === "unknown") {
-    warnings.push("当前模型能力未知，按保守预算运行。");
-  }
   return warnings;
 }

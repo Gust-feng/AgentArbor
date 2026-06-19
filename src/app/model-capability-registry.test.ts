@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { SanitizedModelProviderConfig } from "../domain/config/index.js";
 import {
-  CONSERVATIVE_MODEL_CAPABILITIES,
-  isKnownModel,
+  PROTOCOL_BASELINE_MODEL_CAPABILITIES,
+  hasModelCapabilityOverride,
   resolveModelCapabilities,
 } from "./model-capability-registry.js";
 
@@ -30,7 +30,6 @@ function profile(
 test("model capability registry resolves current OpenAI-compatible model families", () => {
   const capabilities = resolveModelCapabilities({ profile: profile("gpt-5.5") });
 
-  assert.equal(isKnownModel(profile("gpt-5.5")), true);
   assert.equal(capabilities.contextWindowTokens, 1_050_000);
   assert.equal(capabilities.maxOutputTokens, 128_000);
   assert.equal(capabilities.supportsToolCalling, true);
@@ -57,7 +56,6 @@ test("model capability registry enables tools for current DeepSeek V4 OpenAI-com
   });
   const capabilities = resolveModelCapabilities({ profile: deepseekProfile });
 
-  assert.equal(isKnownModel(deepseekProfile), true);
   assert.equal(capabilities.contextWindowTokens, 1_000_000);
   assert.equal(capabilities.maxOutputTokens, 384_000);
   assert.equal(capabilities.supportsToolCalling, true);
@@ -72,12 +70,23 @@ test("model capability registry does not infer provider ownership from shared mo
     label: "OpenRouter",
     baseUrl: "https://openrouter.ai/api/v1",
   });
+  const routedGptProfile = profile("gpt-5.5", {
+    profileId: "gateway",
+    label: "Gateway",
+    baseUrl: "https://gateway.example/v1",
+  });
   const capabilities = resolveModelCapabilities({ profile: routedProfile });
+  const gptCapabilities = resolveModelCapabilities({ profile: routedGptProfile });
 
-  assert.equal(isKnownModel(routedProfile), false);
-  assert.equal(capabilities.protocolProfileId, "custom_openai_chat");
-  assert.equal(capabilities.contextWindowTokens, CONSERVATIVE_MODEL_CAPABILITIES.contextWindowTokens);
-  assert.equal(capabilities.maxOutputTokens, CONSERVATIVE_MODEL_CAPABILITIES.maxOutputTokens);
+  assert.equal(capabilities.protocolProfileId, "openai_compatible");
+  assert.equal(capabilities.contextWindowTokens, PROTOCOL_BASELINE_MODEL_CAPABILITIES.contextWindowTokens);
+  assert.equal(capabilities.maxOutputTokens, PROTOCOL_BASELINE_MODEL_CAPABILITIES.maxOutputTokens);
+  assert.equal(capabilities.supportsToolCalling, true);
+  assert.equal(capabilities.supportsReasoningEffort, false);
+  assert.equal(gptCapabilities.contextWindowTokens, PROTOCOL_BASELINE_MODEL_CAPABILITIES.contextWindowTokens);
+  assert.equal(gptCapabilities.maxOutputTokens, PROTOCOL_BASELINE_MODEL_CAPABILITIES.maxOutputTokens);
+  assert.equal(gptCapabilities.supportsToolCalling, true);
+  assert.equal(gptCapabilities.supportsReasoningEffort, false);
 });
 
 test("model capability registry keeps provider-specific reasoning controls conservative", () => {
@@ -128,15 +137,23 @@ test("model capability registry keeps provider-specific reasoning controls conse
   assert.equal(minimax.supportsStreaming, true);
 });
 
-test("unknown models use conservative capabilities until explicitly overridden", () => {
-  const unknown = profile("vendor-new-model", {
+test("protocol baseline models keep tool calling while budgets stay conservative", () => {
+  const chatProfile = profile("vendor-new-model", {
     profileId: "vendor",
     label: "Vendor",
     baseUrl: "https://vendor.example/v1",
   });
-  const fallback = resolveModelCapabilities({ profile: unknown });
+  const responsesProfile = profile("vendor-responses-model", {
+    profileId: "vendor-responses",
+    label: "Vendor Responses",
+    protocolKind: "openai_responses",
+    defaultAiMode: "openai-responses",
+    baseUrl: "https://responses.example/v1",
+  });
+  const chatBaseline = resolveModelCapabilities({ profile: chatProfile });
+  const responsesBaseline = resolveModelCapabilities({ profile: responsesProfile });
   const overridden = resolveModelCapabilities({
-    profile: unknown,
+    profile: chatProfile,
     overrides: [
       {
         providerKind: "openai_compatible",
@@ -151,12 +168,128 @@ test("unknown models use conservative capabilities until explicitly overridden",
       },
     ],
   });
+  const overrideApplied = hasModelCapabilityOverride({
+    profile: chatProfile,
+    overrides: [
+      {
+        providerKind: "openai_compatible",
+        model: "vendor-new-model",
+        capabilities: {
+          supportsToolCalling: true,
+        },
+        updatedAt: "2026-05-12T00:00:00.000Z",
+      },
+    ],
+  });
 
-  assert.equal(isKnownModel(unknown), false);
-  assert.deepEqual(fallback, CONSERVATIVE_MODEL_CAPABILITIES);
+  assert.equal(overrideApplied, true);
+  assert.equal(chatBaseline.contextWindowTokens, PROTOCOL_BASELINE_MODEL_CAPABILITIES.contextWindowTokens);
+  assert.equal(chatBaseline.maxOutputTokens, PROTOCOL_BASELINE_MODEL_CAPABILITIES.maxOutputTokens);
+  assert.equal(chatBaseline.supportsToolCalling, true);
+  assert.equal(chatBaseline.supportsParallelToolCalls, false);
+  assert.equal(chatBaseline.supportsStructuredOutputs, false);
+  assert.equal(chatBaseline.preferredApiStyle, "chat_completions");
+  assert.equal(responsesBaseline.supportsToolCalling, true);
+  assert.equal(responsesBaseline.preferredApiStyle, "responses");
   assert.equal(overridden.contextWindowTokens, 96_000);
   assert.equal(overridden.maxOutputTokens, 12_000);
   assert.equal(overridden.supportsToolCalling, true);
   assert.equal(overridden.supportsStructuredOutputs, true);
   assert.equal(JSON.stringify(overridden).includes("secret"), false);
+});
+
+test("protocols without a runtime tool-call adapter do not expose tools by default", () => {
+  const anthropicProfile = profile("same-profile-model", {
+    profileId: "anthropic-custom",
+    label: "Anthropic Custom",
+    providerKind: "anthropic",
+    protocolKind: "anthropic_messages",
+    baseUrl: "https://anthropic.example",
+  });
+  const baseline = resolveModelCapabilities({ profile: anthropicProfile });
+
+  assert.deepEqual(baseline, {
+    ...PROTOCOL_BASELINE_MODEL_CAPABILITIES,
+    protocolProfileId: "anthropic",
+    preferredApiStyle: "messages",
+  });
+});
+
+test("model capability registry scopes overrides to the selected profile before legacy provider matches", () => {
+  const firstProfile = profile("shared-route-model", {
+    profileId: "custom-a",
+    label: "Custom A",
+    baseUrl: "https://a.example/v1",
+  });
+  const secondProfile = profile("shared-route-model", {
+    profileId: "custom-b",
+    label: "Custom B",
+    baseUrl: "https://b.example/v1",
+  });
+  const overrides = [
+    {
+      profileId: "custom-a",
+      providerKind: "openai_compatible" as const,
+      model: "shared-route-model",
+      capabilities: {
+        supportsToolCalling: true,
+        contextWindowTokens: 64_000,
+      },
+      updatedAt: "2026-06-20T00:00:00.000Z",
+    },
+    {
+      providerKind: "openai_compatible" as const,
+      model: "shared-route-model",
+      capabilities: {
+        supportsToolCalling: false,
+        contextWindowTokens: 8_000,
+      },
+      updatedAt: "2026-06-20T00:00:00.000Z",
+    },
+  ];
+
+  const first = resolveModelCapabilities({ profile: firstProfile, overrides });
+  const second = resolveModelCapabilities({ profile: secondProfile, overrides });
+
+  assert.equal(first.supportsToolCalling, true);
+  assert.equal(first.contextWindowTokens, 64_000);
+  assert.equal(second.supportsToolCalling, false);
+  assert.equal(second.contextWindowTokens, 8_000);
+});
+
+test("model capability registry does not let stale profile overrides cross provider kinds", () => {
+  const selectedProfile = profile("same-profile-model", {
+    profileId: "custom-a",
+    label: "Custom A",
+    providerKind: "anthropic",
+    protocolKind: "anthropic_messages",
+    baseUrl: "https://anthropic.example",
+  });
+  const overrides = [
+    {
+      profileId: "custom-a",
+      providerKind: "openai_compatible" as const,
+      model: "same-profile-model",
+      capabilities: {
+        supportsToolCalling: true,
+        contextWindowTokens: 64_000,
+      },
+      updatedAt: "2026-06-20T00:00:00.000Z",
+    },
+    {
+      profileId: "custom-a",
+      providerKind: "anthropic" as const,
+      model: "same-profile-model",
+      capabilities: {
+        supportsToolCalling: false,
+        contextWindowTokens: 32_000,
+      },
+      updatedAt: "2026-06-20T00:01:00.000Z",
+    },
+  ];
+
+  const resolved = resolveModelCapabilities({ profile: selectedProfile, overrides });
+
+  assert.equal(resolved.supportsToolCalling, false);
+  assert.equal(resolved.contextWindowTokens, 32_000);
 });

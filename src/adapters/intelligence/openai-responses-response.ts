@@ -21,7 +21,7 @@ export function normalizeOpenAIResponsesResponse(input: {
   request: ModelRequest;
   raw: unknown;
   providerId: string;
-  providerKind: "openai";
+  providerKind: "openai_compatible";
   protocolKind: "openai_responses";
   model: string;
   latencyMs: number;
@@ -79,7 +79,7 @@ export async function normalizeOpenAIResponsesStreamResponse(input: {
   request: ModelRequest;
   stream: AsyncIterable<unknown>;
   providerId: string;
-  providerKind: "openai";
+  providerKind: "openai_compatible";
   protocolKind: "openai_responses";
   model: string;
   latencyMs: number;
@@ -400,7 +400,7 @@ function assistantMessageFromOutput(input: {
 function failedResponseForIncompleteResponsesFinish(input: {
   readonly request: ModelRequest;
   readonly providerId: string;
-  readonly providerKind: "openai";
+  readonly providerKind: "openai_compatible";
   readonly protocolKind: "openai_responses";
   readonly model: string;
   readonly finishReason: ModelResponse["finishReason"];

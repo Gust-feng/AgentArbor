@@ -40,7 +40,7 @@ export type OpenAIResponsesProviderOptions = {
 
 export class OpenAIResponsesProvider implements ModelProvider {
   readonly providerId: string;
-  readonly providerKind = "openai" as const;
+  readonly providerKind = "openai_compatible" as const;
   readonly protocolKind = "openai_responses" as const;
   readonly model: string;
 
@@ -166,7 +166,7 @@ export class OpenAIResponsesProvider implements ModelProvider {
 function cancelledResponse(input: {
   request: ModelRequest;
   providerId: string;
-  providerKind: "openai";
+  providerKind: "openai_compatible";
   protocolKind: "openai_responses";
   model: string;
 }): ModelResponse {

@@ -21,7 +21,7 @@ export type ModelDefinition = {
 const VERIFIED_AT = "2026-05-12";
 const OPENAI_FORMAT_PROVIDER_VERIFIED_AT = "2026-05-21";
 
-export const CONSERVATIVE_MODEL_CAPABILITIES: ModelCapabilities = {
+export const PROTOCOL_BASELINE_MODEL_CAPABILITIES: ModelCapabilities = {
   contextWindowTokens: 16_000,
   maxOutputTokens: 4_000,
   supportsToolCalling: false,
@@ -32,8 +32,8 @@ export const CONSERVATIVE_MODEL_CAPABILITIES: ModelCapabilities = {
   supportsReasoningEffort: false,
   supportsReasoningOutput: false,
   preferredApiStyle: "openai_compatible",
-  stability: "unknown",
-  protocolProfileId: "custom_openai_chat",
+  stability: "stable",
+  protocolProfileId: "openai_compatible",
   reasoningControl: "none",
   lastVerifiedAt: VERIFIED_AT,
 };
@@ -248,46 +248,6 @@ const OPENAI_COMPATIBLE_DEFINITIONS: readonly ModelDefinition[] = [
   },
   {
     providerKind: "openai_compatible",
-    providerProfileId: "custom_openai_chat",
-    protocolKind: "openai_compatible_chat_completions",
-    modelPattern: "gpt-",
-    label: "OpenAI-compatible GPT proxy",
-    capabilities: {
-      contextWindowTokens: 128_000,
-      maxOutputTokens: 16_384,
-      supportsToolCalling: true,
-      supportsParallelToolCalls: false,
-      supportsStructuredOutputs: true,
-      supportsStreaming: true,
-      supportsVisionInput: true,
-      supportsReasoningEffort: false,
-      preferredApiStyle: "openai_compatible",
-      stability: "unknown",
-      lastVerifiedAt: VERIFIED_AT,
-    },
-  },
-  {
-    providerKind: "openai_compatible",
-    providerProfileId: "custom_openai_chat",
-    protocolKind: "openai_compatible_chat_completions",
-    modelPattern: "claude",
-    label: "OpenAI-compatible Claude proxy",
-    capabilities: {
-      contextWindowTokens: 200_000,
-      maxOutputTokens: 8_192,
-      supportsToolCalling: true,
-      supportsParallelToolCalls: false,
-      supportsStructuredOutputs: false,
-      supportsStreaming: true,
-      supportsVisionInput: true,
-      supportsReasoningEffort: false,
-      preferredApiStyle: "openai_compatible",
-      stability: "unknown",
-      lastVerifiedAt: VERIFIED_AT,
-    },
-  },
-  {
-    providerKind: "openai_compatible",
     providerProfileId: "deepseek",
     protocolKind: "openai_compatible_chat_completions",
     modelPattern: "deepseek-v4",
@@ -396,26 +356,6 @@ const OPENAI_COMPATIBLE_DEFINITIONS: readonly ModelDefinition[] = [
       lastVerifiedAt: OPENAI_FORMAT_PROVIDER_VERIFIED_AT,
     },
   },
-  {
-    providerKind: "openai_compatible",
-    providerProfileId: "custom_openai_chat",
-    protocolKind: "openai_compatible_chat_completions",
-    modelPattern: "gemini",
-    label: "OpenAI-compatible Gemini proxy",
-    capabilities: {
-      contextWindowTokens: 1_000_000,
-      maxOutputTokens: 65_536,
-      supportsToolCalling: true,
-      supportsParallelToolCalls: true,
-      supportsStructuredOutputs: true,
-      supportsStreaming: true,
-      supportsVisionInput: true,
-      supportsReasoningEffort: false,
-      preferredApiStyle: "openai_compatible",
-      stability: "unknown",
-      lastVerifiedAt: VERIFIED_AT,
-    },
-  },
 ];
 
 export const BUILTIN_MODEL_DEFINITIONS: readonly ModelDefinition[] = [
@@ -429,17 +369,17 @@ export function resolveModelCapabilities(input: {
   const definition = bestDefinitionFor(input.profile);
   const base =
     definition === undefined
-      ? { ...CONSERVATIVE_MODEL_CAPABILITIES, protocolProfileId: providerProtocolProfileIdFor(input.profile) }
+      ? fallbackCapabilitiesForProfile(input.profile)
       : capabilitiesForDefinition(definition);
-  const override = input.overrides?.find((item) =>
-    item.model.toLowerCase() === (input.profile.model ?? "").toLowerCase() &&
-    (item.providerKind === undefined || item.providerKind === input.profile.providerKind)
-  );
+  const override = bestOverrideFor(input.profile, input.overrides);
   return override === undefined ? { ...base } : mergeCapabilities(base, override.capabilities);
 }
 
-export function isKnownModel(profile: SanitizedModelProviderConfig): boolean {
-  return bestDefinitionFor(profile) !== undefined;
+export function hasModelCapabilityOverride(input: {
+  readonly profile: SanitizedModelProviderConfig;
+  readonly overrides?: readonly ModelCapabilityOverrideSettings[];
+}): boolean {
+  return bestOverrideFor(input.profile, input.overrides) !== undefined;
 }
 
 function bestDefinitionFor(profile: SanitizedModelProviderConfig): ModelDefinition | undefined {
@@ -465,6 +405,64 @@ function capabilitiesForDefinition(definition: ModelDefinition): ModelCapabiliti
   };
 }
 
+function fallbackCapabilitiesForProfile(profile: SanitizedModelProviderConfig): ModelCapabilities {
+  const base = {
+    ...PROTOCOL_BASELINE_MODEL_CAPABILITIES,
+    protocolProfileId: providerProtocolProfileIdFor(profile),
+    preferredApiStyle: preferredApiStyleForProtocol(profile.protocolKind),
+  };
+  return {
+    ...base,
+    supportsToolCalling: protocolSupportsToolCalling(profile.protocolKind),
+  };
+}
+
+function protocolSupportsToolCalling(protocolKind: ConfiguredModelProtocolKind): boolean {
+  switch (protocolKind) {
+    case "openai_compatible_chat_completions":
+    case "openai_responses":
+      return true;
+    case "anthropic_messages":
+    case "gemini_generate_content":
+    case "ollama_generate":
+      return false;
+  }
+}
+
+function preferredApiStyleForProtocol(protocolKind: ConfiguredModelProtocolKind): ModelCapabilities["preferredApiStyle"] {
+  switch (protocolKind) {
+    case "openai_compatible_chat_completions":
+      return "chat_completions";
+    case "openai_responses":
+      return "responses";
+    case "anthropic_messages":
+      return "messages";
+    case "gemini_generate_content":
+      return "gemini_generate_content";
+    case "ollama_generate":
+      return "openai_compatible";
+  }
+}
+
+function bestOverrideFor(
+  profile: SanitizedModelProviderConfig,
+  overrides: readonly ModelCapabilityOverrideSettings[] | undefined
+): ModelCapabilityOverrideSettings | undefined {
+  if (overrides === undefined || profile.model === undefined) {
+    return undefined;
+  }
+  const model = profile.model.toLowerCase();
+  const matchingModel = overrides.filter((item) => item.model.toLowerCase() === model);
+  return matchingModel.find((item) =>
+    item.profileId === profile.profileId &&
+    (item.providerKind === undefined || item.providerKind === profile.providerKind)
+  ) ??
+    matchingModel.find((item) =>
+      item.profileId === undefined &&
+      (item.providerKind === undefined || item.providerKind === profile.providerKind)
+    );
+}
+
 function providerProtocolProfileIdFor(profile: SanitizedModelProviderConfig): ProviderProtocolProfileId {
   if (profile.providerKind === "anthropic") return "anthropic";
   const profileId = (profile.profileId ?? "").toLowerCase();
@@ -477,7 +475,7 @@ function providerProtocolProfileIdFor(profile: SanitizedModelProviderConfig): Pr
   if (signals.includes("bigmodel") || signals.includes("z.ai") || signals.includes("zhipu") || signals.includes("glm")) return "glm";
   if (signals.includes("minimax") || signals.includes("minimaxi")) return "minimax";
   if (baseUrl.length === 0 && (profileId === "default" || profileId === "openai")) return "openai";
-  return "custom_openai_chat";
+  return "openai_compatible";
 }
 
 function mergeCapabilities(

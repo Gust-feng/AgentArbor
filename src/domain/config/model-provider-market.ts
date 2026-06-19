@@ -109,8 +109,8 @@ export const BUILTIN_PROVIDER_PROTOCOL_PROFILES: readonly ProviderProtocolProfil
     dangerousParams: [],
   },
   {
-    profileId: "custom_openai_chat",
-    label: "自定义 OpenAI Chat 兼容",
+    profileId: "openai_compatible",
+    label: "通用 OpenAI 兼容",
     providerKind: "openai_compatible",
     recommendedProtocolKind: "openai_compatible_chat_completions",
     supportedProtocolKinds: ["openai_compatible_chat_completions", "openai_responses"],

@@ -112,7 +112,7 @@ export async function normalizeOpenAICompatibleStreamResponse(input: {
           });
         }
       }
-      accumulateStreamingToolCalls(toolCalls, delta.tool_calls);
+      accumulateStreamingToolCalls(toolCalls, delta.tool_calls, delta.function_call);
       accumulateStreamingProtocolExtensions(protocolExtensions, delta);
       finishReason = finishReasonForOpenAI(firstChoice.finish_reason) ?? finishReason;
     }
@@ -349,11 +349,14 @@ function appendReasoningContent(current: string, next: string): string {
 
 function accumulateStreamingToolCalls(
   toolCalls: Map<number, { id?: string; name?: string; arguments: string }>,
-  value: unknown
+  value: unknown,
+  legacyFunctionCall: unknown
 ): void {
   if (!Array.isArray(value)) {
+    accumulateLegacyStreamingFunctionCall(toolCalls, legacyFunctionCall);
     return;
   }
+  let parsed = false;
   for (const item of value) {
     const record = asRecord(item);
     const index = typeof record.index === "number" ? record.index : toolCalls.size;
@@ -364,7 +367,27 @@ function accumulateStreamingToolCalls(
       name: typeof fn.name === "string" ? fn.name : current.name,
       arguments: current.arguments + (typeof fn.arguments === "string" ? fn.arguments : ""),
     });
+    parsed = true;
   }
+  if (!parsed) {
+    accumulateLegacyStreamingFunctionCall(toolCalls, legacyFunctionCall);
+  }
+}
+
+function accumulateLegacyStreamingFunctionCall(
+  toolCalls: Map<number, { id?: string; name?: string; arguments: string }>,
+  value: unknown
+): void {
+  const fn = asRecord(value);
+  if (Object.keys(fn).length === 0) {
+    return;
+  }
+  const current = toolCalls.get(0) ?? { arguments: "" };
+  toolCalls.set(0, {
+    id: current.id,
+    name: typeof fn.name === "string" ? fn.name : current.name,
+    arguments: current.arguments + (typeof fn.arguments === "string" ? fn.arguments : ""),
+  });
 }
 
 function accumulateStreamingProtocolExtensions(extensions: Map<string, unknown>, delta: Record<string, unknown>): void {

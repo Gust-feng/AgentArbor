@@ -992,6 +992,107 @@ test("OpenAI-compatible adapter maps tools, tool results, and provider tool call
   assert.equal(serializedMessages.includes("Allowed tools"), false);
 });
 
+test("OpenAI-compatible adapter maps legacy function_call as a tool call", async () => {
+  const fetch: FetchLike = async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({
+      id: "chatcmpl-legacy-function-call",
+      model: "legacy-function-call-model",
+      choices: [
+        {
+          message: {
+            role: "assistant",
+            content: "",
+            function_call: {
+              name: "web_search",
+              arguments: JSON.stringify({ query: "AgentArbor tools" }),
+            },
+          },
+          finish_reason: "function_call",
+        },
+      ],
+    }),
+  });
+  const provider = new OpenAICompatibleChatCompletionsProvider({
+    baseUrl: "https://llm.example.test",
+    apiKey: "sk-test-secret-token",
+    model: "legacy-function-call-model",
+    fetch,
+  });
+  const eventLog = new InMemoryEventLog();
+  const channel = new NativeIntelligenceChannel({ provider, bus: new InMemoryMessageBus(eventLog) });
+
+  const response = await channel.request(createValidModelRequest({
+    tools: [
+      {
+        name: "web_search",
+        description: "Search the web.",
+        inputSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] },
+      },
+    ],
+    toolChoice: "auto",
+  }));
+
+  assert.equal(response.status, "completed");
+  assert.equal(response.validation.status, "passed");
+  assert.equal(response.finishReason, "tool_call");
+  assert.deepEqual(response.toolCalls, [
+    { callId: response.toolCalls?.[0]?.callId, toolName: "web_search", input: { query: "AgentArbor tools" } },
+  ]);
+});
+
+test("OpenAI-compatible adapter streams legacy function_call arguments as a tool call", async () => {
+  const fetch: FetchLike = async () => ({
+    ok: true,
+    status: 200,
+    body: sseChunks([
+      {
+        model: "legacy-function-call-stream-model",
+        choices: [{ delta: { function_call: { name: "web_search" } }, finish_reason: null }],
+      },
+      {
+        model: "legacy-function-call-stream-model",
+        choices: [{ delta: { function_call: { arguments: "{\"query\":" } }, finish_reason: null }],
+      },
+      {
+        model: "legacy-function-call-stream-model",
+        choices: [{ delta: { function_call: { arguments: "\"AgentArbor tools\"}" } }, finish_reason: "function_call" }],
+      },
+    ]),
+    json: async () => {
+      throw new Error("Streaming response should not be read through json().");
+    },
+  });
+  const provider = new OpenAICompatibleChatCompletionsProvider({
+    baseUrl: "https://llm.example.test",
+    apiKey: "sk-test-secret-token",
+    model: "legacy-function-call-stream-model",
+    fetch,
+    stream: true,
+  });
+  const eventLog = new InMemoryEventLog();
+  const channel = new NativeIntelligenceChannel({ provider, bus: new InMemoryMessageBus(eventLog) });
+
+  const response = await channel.request(createValidModelRequest({
+    tools: [
+      {
+        name: "web_search",
+        description: "Search the web.",
+        inputSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] },
+      },
+    ],
+    toolChoice: "auto",
+  }));
+
+  assert.equal(response.status, "completed");
+  assert.equal(response.validation.status, "passed");
+  assert.equal(response.finishReason, "tool_call");
+  assert.deepEqual(response.toolCalls, [
+    { callId: response.toolCalls?.[0]?.callId, toolName: "web_search", input: { query: "AgentArbor tools" } },
+  ]);
+});
+
 test("OpenAI-compatible adapter returns provider_config failure when fetch is unavailable", async () => {
   const originalFetch = globalThis.fetch;
   try {

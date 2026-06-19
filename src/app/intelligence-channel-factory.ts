@@ -246,7 +246,7 @@ function createOpenAIResponsesConfig(input: {
     enabled: true,
     mode: "openai-responses",
     providerId: OPENAI_RESPONSES_PROVIDER_ID,
-    providerKind: "openai",
+    providerKind: "openai_compatible",
     protocolKind: OPENAI_RESPONSES_PROTOCOL,
     model,
   };
@@ -394,7 +394,7 @@ function providerProfileIdFromConfig(value: string | undefined): ProviderProtoco
     value === "moonshot" ||
     value === "glm" ||
     value === "minimax" ||
-    value === "custom_openai_chat"
+    value === "openai_compatible"
   ) {
     return value;
   }

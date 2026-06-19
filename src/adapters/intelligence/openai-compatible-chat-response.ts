@@ -38,7 +38,7 @@ export function normalizeOpenAICompatibleResponse(input: {
   const content = decoded.textContent;
   const reasoningOutput = reasoningOutputForChatMessage(decoded);
   const parsedOutput = parseStructuredOutput(content);
-  const toolCalls = parseToolCalls(message.tool_calls);
+  const toolCalls = parseToolCalls(message.tool_calls, message.function_call);
   const assistantMessage = assistantContinuationMessage({ message, content: decoded.rawContent, toolCalls });
   const usage = asRecord(raw.usage);
   const finishReason = finishReasonForOpenAI(firstChoice.finish_reason);
@@ -97,9 +97,9 @@ export function finishReasonForOpenAI(value: unknown): ModelResponse["finishReas
   }
 }
 
-export function parseToolCalls(value: unknown): ToolCallRequest[] {
+export function parseToolCalls(value: unknown, legacyFunctionCall?: unknown): ToolCallRequest[] {
   if (!Array.isArray(value)) {
-    return [];
+    return parseLegacyFunctionCall(legacyFunctionCall);
   }
   const calls: ToolCallRequest[] = [];
   for (const item of value) {
@@ -115,7 +115,20 @@ export function parseToolCalls(value: unknown): ToolCallRequest[] {
       input: parseToolArguments(fn.arguments),
     });
   }
-  return calls;
+  return calls.length > 0 ? calls : parseLegacyFunctionCall(legacyFunctionCall);
+}
+
+function parseLegacyFunctionCall(value: unknown): ToolCallRequest[] {
+  const fn = asRecord(value);
+  const name = typeof fn.name === "string" ? fn.name : undefined;
+  if (name === undefined) {
+    return [];
+  }
+  return [{
+    callId: createId("tool-call"),
+    toolName: name,
+    input: parseToolArguments(fn.arguments),
+  }];
 }
 
 export function protocolExtensionsForResponse(message: Record<string, unknown>): Readonly<Record<string, unknown>> | undefined {

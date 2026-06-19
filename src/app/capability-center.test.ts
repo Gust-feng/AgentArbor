@@ -29,11 +29,11 @@ test("CapabilityCenter freezes safe model, tool, skill, and MCP catalog projecti
     const secretStore = new FileSystemLocalDevSecretStore(directory);
     const configCenter = new ConfigCenter({ settingsStore, secretStore });
     await configCenter.updateModelProviderConfig({
-      model: "custom-unknown-model",
+      model: "custom-vendor-model",
       apiKey: "sk-capability-secret",
     });
     await configCenter.updateModelCapabilityOverride({
-      model: "custom-unknown-model",
+      model: "custom-vendor-model",
       providerKind: "openai_compatible",
       capabilities: {
         contextWindowTokens: 48_000,
@@ -74,7 +74,7 @@ test("CapabilityCenter freezes safe model, tool, skill, and MCP catalog projecti
     }).snapshot();
     const text = JSON.stringify(snapshot);
 
-    assert.equal(snapshot.activeModel.model, "custom-unknown-model");
+    assert.equal(snapshot.activeModel.model, "custom-vendor-model");
     assert.equal(snapshot.activeModel.secretConfigured, true);
     assert.equal(snapshot.modelCapabilities.contextWindowTokens, 48_000);
     assert.equal(snapshot.modelCapabilities.supportsToolCalling, true);

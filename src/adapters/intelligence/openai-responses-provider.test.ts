@@ -74,7 +74,7 @@ test("OpenAI Responses adapter maps messages to input items and returns text out
     latencyMs: response.usage?.latencyMs,
   });
   assert.equal(response.protocolKind, "openai_responses");
-  assert.equal(response.providerKind, "openai");
+  assert.equal(response.providerKind, "openai_compatible");
   assert.equal(calls.length, 1);
   assert.equal(calls[0]?.url, "https://api.openai.com/v1/responses");
   assert.equal(calls[0]?.authorization, "Bearer sk-test-key");
@@ -848,7 +848,7 @@ test("OpenAI Responses adapter uses custom providerId", async () => {
 
   assert.equal(provider.providerId, "my-custom-provider");
   assert.equal(provider.protocolKind, "openai_responses");
-  assert.equal(provider.providerKind, "openai");
+  assert.equal(provider.providerKind, "openai_compatible");
 });
 
 function responseSseEvents(events: readonly unknown[]): AsyncGenerator<string> {

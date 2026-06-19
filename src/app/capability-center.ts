@@ -4,13 +4,14 @@ import type {
   CapabilitySkillCatalogItem,
   CapabilityToolCatalogItem,
   McpServerSettings,
+  SanitizedModelProviderConfig,
 } from "../domain/config/index.js";
 import type { SkillDefinition } from "../domain/basic-agent/index.js";
 import type { ToolExecutor } from "../domain/tools/index.js";
 import { createId, nowIso } from "../kernel/id.js";
 import { McpManager, type McpManagerConfig, type McpServerRuntimeSnapshot } from "../adapters/mcp/index.js";
 import type { ConfigCenter } from "./config-center.js";
-import { isKnownModel, resolveModelCapabilities } from "./model-capability-registry.js";
+import { resolveModelCapabilities } from "./model-capability-registry.js";
 import {
   createDesktopBasicToolRegistry,
   type ToolRegistryFetchLike,
@@ -132,7 +133,10 @@ export class CapabilityCenter {
       ...exposedMcpToolCatalog.allowedTools,
     ];
     const modelCapabilities = resolveModelCapabilities({ profile: activeModel, overrides });
-    const warnings = capabilityWarnings({ activeModel, knownModel: isKnownModel(activeModel), toolCount: allAllowedTools.length });
+    const warnings = capabilityWarnings({
+      activeModel,
+      toolCount: allAllowedTools.length,
+    });
     return {
       snapshotId: createId("capability-snapshot"),
       createdAt: nowIso(),
@@ -169,8 +173,7 @@ export class CapabilityCenter {
 }
 
 function capabilityWarnings(input: {
-  readonly activeModel: { readonly model?: string; readonly secretConfigured: boolean };
-  readonly knownModel: boolean;
+  readonly activeModel: SanitizedModelProviderConfig;
   readonly toolCount: number;
 }): readonly string[] {
   const warnings: string[] = [];
@@ -179,8 +182,6 @@ function capabilityWarnings(input: {
   }
   if (input.activeModel.model === undefined) {
     warnings.push("当前模型 profile 未填写模型名。");
-  } else if (!input.knownModel) {
-    warnings.push("当前模型不在内置能力目录中，已使用保守上下文窗口。");
   }
   if (input.toolCount === 0) {
     warnings.push("当前没有可用工具。");

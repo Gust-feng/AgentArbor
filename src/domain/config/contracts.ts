@@ -32,7 +32,7 @@ export type ProviderProtocolProfileId =
   | "moonshot"
   | "glm"
   | "minimax"
-  | "custom_openai_chat";
+  | "openai_compatible";
 
 export type ModelReasoningControlKind =
   | "none"
@@ -160,6 +160,7 @@ export type ModelCapabilityProfile = {
 };
 
 export type ModelCapabilityOverrideSettings = {
+  readonly profileId?: string;
   readonly providerKind?: ConfiguredModelProviderKind;
   readonly model: string;
   readonly capabilities: Partial<ModelCapabilities>;

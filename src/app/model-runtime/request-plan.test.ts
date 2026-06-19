@@ -36,14 +36,14 @@ test("model runtime request plan disables parallel calls when any model-visible 
   assert.match(plan.warnings.join("\n"), /关闭并行工具调用/);
 });
 
-test("model runtime request plan closes tools for conservative unknown models", () => {
+test("model runtime request plan closes tools when the selected protocol cannot carry tool calls", () => {
   const plan = createModelRuntimeRequestPlan({
     request: request([tool("search", "read-only")]),
     modelCapabilities: capabilities({
       supportsToolCalling: false,
       supportsParallelToolCalls: false,
       supportsStructuredOutputs: false,
-      stability: "unknown",
+      stability: "stable",
     }),
   });
 
@@ -51,7 +51,6 @@ test("model runtime request plan closes tools for conservative unknown models", 
   assert.deepEqual(plan.tools, []);
   assert.equal(plan.parallelToolCalls, false);
   assert.match(plan.warnings.join("\n"), /未启用工具调用/);
-  assert.match(plan.warnings.join("\n"), /能力未知/);
   assert.equal(plan.budget.maxInputTokens, 5_488);
 });
 

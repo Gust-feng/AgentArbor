@@ -82,7 +82,7 @@ export function resolveOpenAICompatibleChatDialect(input: {
       };
     default:
       return {
-        profileId: "custom_openai_chat",
+        profileId: "openai_compatible",
         reasoningControl: "none",
         preserveFullAssistantMessage: false,
         supportsStreaming: true,
@@ -373,7 +373,7 @@ function inferProviderProfileId(baseUrl: string): ProviderProtocolProfileId {
     return "glm";
   }
   if (normalizedBaseUrl.includes("minimax") || normalizedBaseUrl.includes("minimaxi")) return "minimax";
-  return "custom_openai_chat";
+  return "openai_compatible";
 }
 
 function isModernGLMThinkingModel(model: string): boolean {

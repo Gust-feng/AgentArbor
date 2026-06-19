@@ -609,6 +609,133 @@ test("desktop openai-compatible direct answer completes on natural no-tool stop"
   }
 });
 
+test("desktop custom Chat Completions model keeps configured tools in the provider request", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-desktop-custom-chat-tools-"));
+  const modelSecret = "sk-desktop-custom-chat-tools-secret";
+  const tavilySecret = "tvly-desktop-custom-chat-tools-secret";
+  let modelBody: Record<string, unknown> | undefined;
+  const providerFetch: PanelProviderFetch = async (url, init) => {
+    assert.notEqual(url, "https://api.tavily.com/search");
+    modelBody = JSON.parse(init.body) as Record<string, unknown>;
+    return createOpenAiTextResponse("vendor-new-chat-model", "我可以使用本轮暴露给我的工具。");
+  };
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory, providerFetch });
+  try {
+    await requestJson(server.url, "/api/config/model-provider", {
+      method: "POST",
+      body: {
+        baseUrl: "https://provider.example",
+        model: "vendor-new-chat-model",
+        protocolKind: "openai_compatible_chat_completions",
+        defaultAiMode: "openai-compatible",
+        apiKey: modelSecret,
+      },
+    });
+    await requestJson(server.url, "/api/config/tools/web-search", {
+      method: "POST",
+      body: {
+        provider: "tavily",
+        apiKey: tavilySecret,
+        maxResults: 1,
+      },
+    });
+
+    const start = await requestJson(server.url, "/api/desktop/runs", {
+      method: "POST",
+      body: { goal: "你能够使用工具吗", aiMode: "openai-compatible", runMode: "agent" },
+    });
+    const completed = await waitForRun(
+      server.url,
+      start.body.runId,
+      (body) => body.status === "completed",
+      4_000,
+      "/api/desktop/runs"
+    );
+    const runtimeRun = await waitForRun(
+      server.url,
+      start.body.runId,
+      (body) => body.snapshot?.run?.status === "completed",
+      4_000,
+      "/api/runtime/runs"
+    );
+    const requestedTools = modelBody?.tools as
+      | readonly { function?: { name?: string } }[]
+      | undefined;
+
+    assert.equal(runtimeRun.body.snapshot.run.capabilitySnapshot.modelCapabilities.supportsToolCalling, true);
+    assert.equal(completed.body.capabilityResolution.allowedTools.includes("search"), true);
+    assert.equal(requestedTools?.some((tool) => tool.function?.name === "search") ?? false, true);
+    assert.equal(modelBody?.tool_choice, "auto");
+    assert.equal(JSON.stringify(completed.body).includes(modelSecret), false);
+    assert.equal(JSON.stringify(completed.body).includes(tavilySecret), false);
+  } finally {
+    await server.close();
+    await removeTemporaryTree(directory);
+  }
+});
+
+test("desktop custom Responses model keeps configured tools in the provider request", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-desktop-custom-responses-tools-"));
+  const modelSecret = "sk-desktop-custom-responses-tools-secret";
+  const tavilySecret = "tvly-desktop-custom-responses-tools-secret";
+  let modelBody: ReturnType<typeof parseResponsesRequestBody> | undefined;
+  const providerFetch: PanelProviderFetch = async (url, init) => {
+    assert.notEqual(url, "https://api.tavily.com/search");
+    modelBody = parseResponsesRequestBody(init.body);
+    return createOpenAiTextResponse("vendor-new-responses-model", "我可以使用本轮暴露给我的工具。");
+  };
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory, providerFetch });
+  try {
+    await requestJson(server.url, "/api/config/model-provider", {
+      method: "POST",
+      body: {
+        baseUrl: "https://provider.example",
+        model: "vendor-new-responses-model",
+        protocolKind: "openai_responses",
+        defaultAiMode: "openai-responses",
+        apiKey: modelSecret,
+      },
+    });
+    await requestJson(server.url, "/api/config/tools/web-search", {
+      method: "POST",
+      body: {
+        provider: "tavily",
+        apiKey: tavilySecret,
+        maxResults: 1,
+      },
+    });
+
+    const start = await requestJson(server.url, "/api/desktop/runs", {
+      method: "POST",
+      body: { goal: "你能够使用工具吗", aiMode: "openai-responses", runMode: "agent" },
+    });
+    const completed = await waitForRun(
+      server.url,
+      start.body.runId,
+      (body) => body.status === "completed",
+      4_000,
+      "/api/desktop/runs"
+    );
+    const runtimeRun = await waitForRun(
+      server.url,
+      start.body.runId,
+      (body) => body.snapshot?.run?.status === "completed",
+      4_000,
+      "/api/runtime/runs"
+    );
+
+    assert.equal(runtimeRun.body.snapshot.run.capabilitySnapshot.modelCapabilities.supportsToolCalling, true);
+    assert.equal(completed.body.capabilityResolution.allowedTools.includes("search"), true);
+    assert.equal(modelBody === undefined ? false : hasResponsesToolDefinition(modelBody, "search"), true);
+    assert.equal(modelBody?.tool_choice, "auto");
+    assert.equal(JSON.stringify(completed.body).includes(modelSecret), false);
+    assert.equal(JSON.stringify(completed.body).includes(tavilySecret), false);
+  } finally {
+    await server.close();
+    await removeTemporaryTree(directory);
+  }
+});
+
 test("desktop run applies composer reasoning only for reasoning-capable models", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-desktop-composer-reasoning-"));
   const secret = "sk-desktop-composer-reasoning-secret";

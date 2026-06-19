@@ -5,6 +5,7 @@ export type ResponsesRequestBody = {
   readonly input?: readonly unknown[];
   readonly messages?: readonly { readonly role?: string; readonly content?: string }[];
   readonly tools?: readonly unknown[];
+  readonly tool_choice?: unknown;
   readonly max_output_tokens?: number;
   readonly max_completion_tokens?: number;
   readonly max_tokens?: number;

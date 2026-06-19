@@ -316,7 +316,7 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(capabilitySettings.includes("function WebSearchSettings"), true);
   assert.equal(capabilitySettings.includes("function McpServiceSettings"), true);
   assert.equal(capabilitySettings.includes('from "../app-config-actions"'), false);
-  assert.equal(capabilitySettings.includes("基础能力"), true);
+  assert.equal(capabilitySettings.includes("模型能力"), true);
   assert.equal(capabilitySettings.includes("MCP 服务"), true);
   assert.equal(capabilitySettings.includes("这里配置可用服务和安全边界"), false);
   assert.equal(capabilitySettings.includes("由模型按任务判断"), false);

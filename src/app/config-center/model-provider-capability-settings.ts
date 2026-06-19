@@ -12,6 +12,7 @@ import {
   normalizeModelProviderKind,
   normalizeOptionalString,
   normalizePositiveInteger,
+  normalizeProfileId,
 } from "./model-provider-common.js";
 
 export function parseModelCapabilityOverrides(
@@ -29,7 +30,9 @@ export function parseModelCapabilityOverrides(
       continue;
     }
     const providerKind = optionalModelProviderKind(record.providerKind);
+    const profileId = optionalString(record.profileId);
     overrides.push({
+      ...(profileId === undefined ? {} : { profileId }),
       ...(providerKind === undefined ? {} : { providerKind }),
       model,
       capabilities: parsePartialCapabilities(asRecord(record.capabilities)),
@@ -44,6 +47,7 @@ export function normalizeModelCapabilityOverrides(
   now: string
 ): readonly ModelCapabilityOverrideSettings[] {
   return overrides.map((override) => ({
+    ...(override.profileId === undefined ? {} : { profileId: normalizeProfileId(override.profileId) }),
     providerKind: normalizeModelProviderKind(override.providerKind),
     model: normalizeRequiredConfigString(override.model, "model"),
     capabilities: sanitizeCapabilityOverride(override.capabilities),
@@ -61,6 +65,7 @@ export function sanitizeCapabilityOverride(capabilities: Partial<ModelCapabiliti
     supportsStreaming: booleanOrUndefined(capabilities.supportsStreaming),
     supportsVisionInput: booleanOrUndefined(capabilities.supportsVisionInput),
     supportsReasoningEffort: booleanOrUndefined(capabilities.supportsReasoningEffort),
+    supportsReasoningOutput: booleanOrUndefined(capabilities.supportsReasoningOutput),
     preferredApiStyle: normalizePreferredApiStyle(capabilities.preferredApiStyle),
     stability: normalizeModelStability(capabilities.stability),
     lastVerifiedAt: normalizeCapabilityVerifiedAt(capabilities.lastVerifiedAt),
@@ -77,6 +82,7 @@ function parsePartialCapabilities(record: Record<string, unknown>): NonNullable<
     supportsStreaming: booleanFromUnknown(record.supportsStreaming),
     supportsVisionInput: booleanFromUnknown(record.supportsVisionInput),
     supportsReasoningEffort: booleanFromUnknown(record.supportsReasoningEffort),
+    supportsReasoningOutput: booleanFromUnknown(record.supportsReasoningOutput),
     preferredApiStyle: parsePreferredApiStyle(record.preferredApiStyle),
     stability: parseModelStability(record.stability),
     lastVerifiedAt: optionalString(record.lastVerifiedAt),

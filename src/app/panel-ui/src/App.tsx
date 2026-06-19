@@ -37,7 +37,7 @@ import {
   stopLiveUpdates,
 } from "./app-runtime-controls";
 import { createInitialAppState } from "./app-state";
-import type { ModelProviderModelCatalog } from "./contracts/config";
+import type { ModelCapabilities, ModelProviderModelCatalog } from "./contracts/config";
 import type { ContextAttachment } from "./contracts/context";
 import type { McpReferenceResponse, McpServerCatalogItem } from "./contracts/tools";
 import { modelOptionSupportsReasoningEffort, modelOptionsFromConfig, selectedModelOptionId } from "./model-options";
@@ -101,6 +101,7 @@ export function App(): React.ReactElement {
   const [contextBusy, setContextBusy] = useState(false);
   const [queuedMessages, setQueuedMessages] = useState<readonly { readonly id: string; readonly content: string }[]>([]);
   const [savingModel, setSavingModel] = useState(false);
+  const [savingModelCapabilities, setSavingModelCapabilities] = useState(false);
   const [, setSavingWorkspace] = useState(false);
   const [savingTools, setSavingTools] = useState(false);
   const mountedRef = useRef(true);
@@ -283,6 +284,7 @@ export function App(): React.ReactElement {
     mcpToolUpdateVersionRef,
     mcpToolCatalogDraftRef,
     setSavingModel,
+    setSavingModelCapabilities,
     setSavingWorkspace,
     setSavingTools,
   });
@@ -298,6 +300,7 @@ export function App(): React.ReactElement {
     saveWorkspace,
     saveCommandShell,
     saveToolConfirmationPolicy,
+    saveModelCapabilities,
     saveTools,
     saveMcpServer,
     loadMcpReferences,
@@ -604,6 +607,8 @@ export function App(): React.ReactElement {
         skills={app.skills}
         onSaveWorkspace={(nextWorkspaceDirectory) => void saveWorkspace(nextWorkspaceDirectory)}
         onSaveCommandShell={(kind) => void saveCommandShell(kind)}
+        savingModelCapabilities={savingModelCapabilities}
+        onSaveModelCapabilities={(capabilities: Partial<ModelCapabilities>) => saveModelCapabilities(capabilities)}
         tools={app.tools}
         toolForm={toolForm}
         setToolForm={setToolForm}

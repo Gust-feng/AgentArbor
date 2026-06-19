@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import type { SanitizedWebSearchConfig } from "../../domain/config/index.js";
 import { listBuiltinMcpServerPresets, listBuiltinModelProviderPresets, listBuiltinProviderProtocolProfiles } from "../../domain/config/index.js";
 import type { SanitizedModelProviderConfig } from "../../domain/config/index.js";
-import { isKnownModel, resolveModelCapabilities } from "../model-capability-registry.js";
+import { resolveModelCapabilities } from "../model-capability-registry.js";
 import { fetchModelRuntimeModelCatalog } from "../model-runtime/index.js";
 import { CapabilityCenter } from "../capability-center.js";
 import {
@@ -21,6 +21,7 @@ import {
   parseCommandShellUpdate,
   parseCreateModelProfile,
   parseInformationAccessUpdate,
+  parseModelCapabilityUpdate,
   parseModelCatalogUpdate,
   parseModelProviderOrderUpdate,
   parseMcpServerSecretValue,
@@ -351,6 +352,38 @@ export async function handlePanelConfigRoute(
     } catch (error) {
       throw configCenterHttpError(error);
     }
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/config/model-capabilities") {
+    const body = await readJsonBody(request);
+    const input = parseModelCapabilityUpdate(body);
+    const activeProfile = await runtime.configCenter.getModelProviderConfig();
+    const targetProfile = input.profileId === undefined
+      ? activeProfile
+      : (await runtime.configCenter.listModelProviderProfiles()).find((profile) => profile.profileId === input.profileId);
+    if (targetProfile === undefined) {
+      throw new PanelHttpError(404, "model_profile_not_found", "未找到模型配置。");
+    }
+    const model = input.model ?? targetProfile.model;
+    if (model === undefined) {
+      throw new PanelHttpError(400, "missing_model_name", "保存模型能力前需要先填写模型名。");
+    }
+    await runtime.configCenter.updateModelCapabilityOverride({
+      profileId: targetProfile.profileId,
+      providerKind: input.providerKind ?? targetProfile.providerKind,
+      model,
+      capabilities: input.capabilities,
+    });
+    invalidateCapabilityCache(runtime);
+    writeJson(response, 200, {
+      ok: true,
+      status: "completed",
+      config: await runtime.configCenter.getModelProviderConfig(),
+      profiles: await runtime.configCenter.listModelProviderProfiles(),
+      modelCatalogs: await runtime.configCenter.listModelProviderModelCatalogs(),
+      capabilities: await runtime.capabilityCenter.snapshot(),
+    });
+    return true;
   }
 
   if (request.method === "POST" && url.pathname === "/api/config/information-sources") {
@@ -795,8 +828,6 @@ function modelCapabilityWarnings(activeModel: SanitizedModelProviderConfig): rea
   }
   if (activeModel.model === undefined) {
     warnings.push("当前模型 profile 未填写模型名。");
-  } else if (!isKnownModel(activeModel)) {
-    warnings.push("当前模型不在内置能力目录中，已使用保守上下文窗口。");
   }
   return warnings;
 }

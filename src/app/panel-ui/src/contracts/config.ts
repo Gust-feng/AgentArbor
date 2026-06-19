@@ -24,19 +24,29 @@ export type ConfigResponse = {
   readonly commandShell?: CommandShellConfig;
   readonly toolConfirmation?: ToolConfirmationConfig;
   readonly capabilities?: {
-    readonly activeModel?: { readonly label?: string; readonly model?: string; readonly secretConfigured?: boolean };
+    readonly activeModel?: ModelProviderProfile;
     readonly toolConfirmation?: ToolConfirmationConfig;
-    readonly modelCapabilities?: {
-      readonly contextWindowTokens?: number;
-      readonly maxOutputTokens?: number;
-      readonly supportsToolCalling?: boolean;
-      readonly supportsReasoningEffort?: boolean;
-    };
+    readonly modelCapabilities?: ModelCapabilities;
     readonly warnings?: readonly string[];
   };
 };
 
 export type ModelProviderProfile = NonNullable<ConfigResponse["config"]>;
+
+export type ModelCapabilities = {
+  readonly contextWindowTokens?: number;
+  readonly maxOutputTokens?: number;
+  readonly supportsToolCalling?: boolean;
+  readonly supportsParallelToolCalls?: boolean;
+  readonly supportsStructuredOutputs?: boolean;
+  readonly supportsStreaming?: boolean;
+  readonly supportsVisionInput?: boolean;
+  readonly supportsReasoningEffort?: boolean;
+  readonly supportsReasoningOutput?: boolean;
+  readonly preferredApiStyle?: string;
+  readonly stability?: string;
+  readonly lastVerifiedAt?: string;
+};
 
 export type ProductInfo = {
   readonly name?: string;

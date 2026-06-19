@@ -1,6 +1,6 @@
 import React from "react";
 import { Link2, Plus, Save, Trash2, X } from "lucide-react";
-import type { ConfigResponse } from "../contracts/config";
+import type { ConfigResponse, ModelCapabilities } from "../contracts/config";
 import type { McpEnvironmentCheckResponse, McpReferenceResponse, ToolsResponse } from "../contracts/tools";
 import type { McpServerForm, ToolForm } from "./settings-types";
 import { providerName } from "./settings-tool-copy";
@@ -19,6 +19,8 @@ export function CapabilitiesSettings(props: {
   readonly tools?: ToolsResponse;
   readonly toolForm: ToolForm;
   readonly setToolForm: (form: ToolForm) => void;
+  readonly savingModelCapabilities?: boolean;
+  readonly onSaveModelCapabilities: (capabilities: Partial<ModelCapabilities>) => Promise<void>;
   readonly mcpServerForm: McpServerForm;
   readonly setMcpServerForm: (form: McpServerForm) => void;
   readonly mcpReferences: Readonly<Record<string, McpReferenceResponse>>;
@@ -52,15 +54,11 @@ export function CapabilitiesSettings(props: {
   }
   return (
     <div className="capability-settings-stack">
-      <section className="settings-card">
-        <h3>基础能力</h3>
-        <SettingRow label="工具调用">
-          <span className="settings-value">{props.config?.capabilities?.modelCapabilities?.supportsToolCalling === false ? "未声明支持" : "可用"}</span>
-        </SettingRow>
-        <SettingRow label="外部查证">
-          <span className="settings-value">{providerName(props.tools?.tools?.webSearch?.provider ?? props.toolForm.provider)}</span>
-        </SettingRow>
-      </section>
+      <ModelCapabilitySettings
+        config={props.config}
+        saving={props.savingModelCapabilities}
+        onSave={props.onSaveModelCapabilities}
+      />
       <WebSearchSettings
         tools={props.tools}
         toolForm={props.toolForm}
@@ -70,6 +68,214 @@ export function CapabilitiesSettings(props: {
       />
     </div>
   );
+}
+
+type ModelCapabilityDraft = {
+  readonly contextWindowTokens: string;
+  readonly maxOutputTokens: string;
+  readonly supportsToolCalling: boolean;
+  readonly supportsParallelToolCalls: boolean;
+  readonly supportsStructuredOutputs: boolean;
+  readonly supportsStreaming: boolean;
+  readonly supportsVisionInput: boolean;
+  readonly supportsReasoningEffort: boolean;
+  readonly supportsReasoningOutput: boolean;
+};
+
+function ModelCapabilitySettings(props: {
+  readonly config?: ConfigResponse;
+  readonly saving?: boolean;
+  readonly onSave: (capabilities: Partial<ModelCapabilities>) => Promise<void>;
+}): React.ReactElement {
+  const capabilities = props.config?.capabilities?.modelCapabilities;
+  const activeModel = props.config?.capabilities?.activeModel ?? props.config?.config;
+  const modelName = activeModel?.model ?? props.config?.config?.model;
+  const [draft, setDraft] = React.useState<ModelCapabilityDraft>(() => capabilityDraftFromConfig(capabilities));
+
+  React.useEffect(() => {
+    setDraft(capabilityDraftFromConfig(capabilities));
+  }, [
+    capabilities?.contextWindowTokens,
+    capabilities?.maxOutputTokens,
+    capabilities?.supportsToolCalling,
+    capabilities?.supportsParallelToolCalls,
+    capabilities?.supportsStructuredOutputs,
+    capabilities?.supportsStreaming,
+    capabilities?.supportsVisionInput,
+    capabilities?.supportsReasoningEffort,
+    capabilities?.supportsReasoningOutput,
+  ]);
+
+  const canSave = modelName !== undefined && modelName.trim().length > 0 && props.saving !== true;
+  const save = async (): Promise<void> => {
+    if (!canSave) return;
+    await props.onSave(capabilitiesFromDraft(draft));
+  };
+
+  return (
+    <section className="settings-card model-capability-card">
+      <div className="settings-card-title-row">
+        <h3>模型能力</h3>
+        <button
+          type="button"
+          className="page-action-button primary capability-save-button"
+          onClick={() => void save()}
+          disabled={!canSave}
+        >
+          <Save size={14} />
+          {props.saving ? "保存中" : "保存"}
+        </button>
+      </div>
+      <div className="model-capability-grid">
+        <SettingRow label="当前模型">
+          <span className="settings-value">{modelName ?? "未填写"}</span>
+        </SettingRow>
+        <SettingRow label="上下文窗口">
+          <CapabilityNumberInput
+            value={draft.contextWindowTokens}
+            onChange={(value) => setDraft({ ...draft, contextWindowTokens: value })}
+            disabled={props.saving}
+            ariaLabel="上下文窗口"
+          />
+        </SettingRow>
+        <SettingRow label="最大输出">
+          <CapabilityNumberInput
+            value={draft.maxOutputTokens}
+            onChange={(value) => setDraft({ ...draft, maxOutputTokens: value })}
+            disabled={props.saving}
+            ariaLabel="最大输出"
+          />
+        </SettingRow>
+        <CapabilityToggleRow
+          label="工具调用"
+          pressed={draft.supportsToolCalling}
+          disabled={props.saving}
+          onToggle={() => setDraft({ ...draft, supportsToolCalling: !draft.supportsToolCalling })}
+        />
+        <CapabilityToggleRow
+          label="并行工具"
+          pressed={draft.supportsParallelToolCalls}
+          disabled={props.saving}
+          onToggle={() => setDraft({ ...draft, supportsParallelToolCalls: !draft.supportsParallelToolCalls })}
+        />
+        <CapabilityToggleRow
+          label="结构化输出"
+          pressed={draft.supportsStructuredOutputs}
+          disabled={props.saving}
+          onToggle={() => setDraft({ ...draft, supportsStructuredOutputs: !draft.supportsStructuredOutputs })}
+        />
+        <CapabilityToggleRow
+          label="流式输出"
+          pressed={draft.supportsStreaming}
+          disabled={props.saving}
+          onToggle={() => setDraft({ ...draft, supportsStreaming: !draft.supportsStreaming })}
+        />
+        <CapabilityToggleRow
+          label="视觉输入"
+          pressed={draft.supportsVisionInput}
+          disabled={props.saving}
+          onToggle={() => setDraft({ ...draft, supportsVisionInput: !draft.supportsVisionInput })}
+        />
+        <CapabilityToggleRow
+          label="思考强度"
+          pressed={draft.supportsReasoningEffort}
+          disabled={props.saving}
+          onToggle={() => setDraft({ ...draft, supportsReasoningEffort: !draft.supportsReasoningEffort })}
+        />
+        <CapabilityToggleRow
+          label="思考输出"
+          pressed={draft.supportsReasoningOutput}
+          disabled={props.saving}
+          onToggle={() => setDraft({ ...draft, supportsReasoningOutput: !draft.supportsReasoningOutput })}
+        />
+      </div>
+      {props.config?.capabilities?.warnings !== undefined && props.config.capabilities.warnings.length > 0 && (
+        <div className="capability-warning-list">
+          {props.config.capabilities.warnings.map((warning) => (
+            <span key={warning}>{warning}</span>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function CapabilityNumberInput(props: {
+  readonly value: string;
+  readonly onChange: (value: string) => void;
+  readonly disabled?: boolean;
+  readonly ariaLabel: string;
+}): React.ReactElement {
+  return (
+    <input
+      className="capability-number-input"
+      type="number"
+      min={1}
+      value={props.value}
+      disabled={props.disabled}
+      aria-label={props.ariaLabel}
+      onChange={(event) => props.onChange(event.target.value)}
+    />
+  );
+}
+
+function CapabilityToggleRow(props: {
+  readonly label: string;
+  readonly pressed: boolean;
+  readonly disabled?: boolean;
+  readonly onToggle: () => void;
+}): React.ReactElement {
+  return (
+    <SettingRow label={props.label}>
+      <button
+        type="button"
+        className="capability-toggle"
+        aria-pressed={props.pressed}
+        disabled={props.disabled}
+        onClick={props.onToggle}
+      >
+        {props.pressed ? "开启" : "关闭"}
+      </button>
+    </SettingRow>
+  );
+}
+
+function capabilityDraftFromConfig(capabilities: ModelCapabilities | undefined): ModelCapabilityDraft {
+  return {
+    contextWindowTokens: stringFromPositiveInteger(capabilities?.contextWindowTokens),
+    maxOutputTokens: stringFromPositiveInteger(capabilities?.maxOutputTokens),
+    supportsToolCalling: capabilities?.supportsToolCalling === true,
+    supportsParallelToolCalls: capabilities?.supportsParallelToolCalls === true,
+    supportsStructuredOutputs: capabilities?.supportsStructuredOutputs === true,
+    supportsStreaming: capabilities?.supportsStreaming === true,
+    supportsVisionInput: capabilities?.supportsVisionInput === true,
+    supportsReasoningEffort: capabilities?.supportsReasoningEffort === true,
+    supportsReasoningOutput: capabilities?.supportsReasoningOutput === true,
+  };
+}
+
+function capabilitiesFromDraft(draft: ModelCapabilityDraft): Partial<ModelCapabilities> {
+  return {
+    contextWindowTokens: positiveIntegerFromString(draft.contextWindowTokens),
+    maxOutputTokens: positiveIntegerFromString(draft.maxOutputTokens),
+    supportsToolCalling: draft.supportsToolCalling,
+    supportsParallelToolCalls: draft.supportsParallelToolCalls,
+    supportsStructuredOutputs: draft.supportsStructuredOutputs,
+    supportsStreaming: draft.supportsStreaming,
+    supportsVisionInput: draft.supportsVisionInput,
+    supportsReasoningEffort: draft.supportsReasoningEffort,
+    supportsReasoningOutput: draft.supportsReasoningOutput,
+    lastVerifiedAt: new Date().toISOString().slice(0, 10),
+  };
+}
+
+function stringFromPositiveInteger(value: number | undefined): string {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? String(Math.floor(value)) : "";
+}
+
+function positiveIntegerFromString(value: string): number | undefined {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : undefined;
 }
 
 function WebSearchSettings(props: {

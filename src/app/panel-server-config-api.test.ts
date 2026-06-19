@@ -188,23 +188,45 @@ test("panel capability and profile APIs expose safe unified capability projectio
           providerKind: "openai_compatible",
           protocolKind: "openai_compatible_chat_completions",
           baseUrl: "https://provider.example/v1",
-          model: "unknown-model",
+          model: "vendor-model",
           defaultAiMode: "openai-compatible",
           apiKey: secret,
         },
       });
       const activate = await requestJson(server.url, "/api/config/model-profiles/custom/activate", { method: "POST" });
       const capabilities = await requestJson(server.url, "/api/config/capabilities");
+      const capabilityUpdate = await requestJson(server.url, "/api/config/model-capabilities", {
+        method: "POST",
+        body: {
+          profileId: "custom",
+          model: "vendor-model",
+          capabilities: {
+            contextWindowTokens: 32_000,
+            maxOutputTokens: 4_000,
+            supportsToolCalling: true,
+            supportsParallelToolCalls: false,
+            supportsStructuredOutputs: true,
+            supportsStreaming: true,
+          },
+        },
+      });
       const deleteActive = await requestJson(server.url, "/api/config/model-profiles/custom", { method: "DELETE" });
 
       assert.equal(createProfile.status, 200);
       assert.equal(activate.status, 200);
       assert.equal(capabilities.status, 200);
+      assert.equal(capabilityUpdate.status, 200);
       assert.equal(capabilities.body.capabilities.activeModel.profileId, "custom");
       assert.equal(capabilities.body.capabilities.modelCapabilities.contextWindowTokens, 16_000);
-      assert.equal(capabilities.body.capabilities.modelCapabilities.supportsToolCalling, false);
+      assert.equal(capabilities.body.capabilities.modelCapabilities.supportsToolCalling, true);
+      assert.equal(capabilityUpdate.body.capabilities.activeModel.profileId, "custom");
+      assert.equal(capabilityUpdate.body.capabilities.modelCapabilities.contextWindowTokens, 32_000);
+      assert.equal(capabilityUpdate.body.capabilities.modelCapabilities.maxOutputTokens, 4_000);
+      assert.equal(capabilityUpdate.body.capabilities.modelCapabilities.supportsToolCalling, true);
+      assert.equal(capabilityUpdate.body.capabilities.modelCapabilities.supportsStructuredOutputs, true);
       assert.equal(Array.isArray(capabilities.body.capabilities.toolCatalog.allowedTools), true);
       assert.equal(capabilities.text.includes(secret), false);
+      assert.equal(capabilityUpdate.text.includes(secret), false);
       assert.equal(deleteActive.status, 400);
       assert.equal(deleteActive.body.error.code, "invalid_config");
     } finally {

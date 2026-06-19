@@ -310,14 +310,17 @@ export class ConfigCenter {
   }
 
   async updateModelCapabilityOverride(input: {
+    readonly profileId?: string;
     readonly model: string;
     readonly providerKind?: ConfiguredModelProviderKind;
     readonly capabilities: Partial<ModelCapabilities>;
   }): Promise<readonly ModelCapabilityOverrideSettings[]> {
     const current = await this.readOrCreateSettings();
     const now = new Date().toISOString();
+    const profileId = input.profileId === undefined ? undefined : normalizeProfileId(input.profileId);
     const model = normalizeRequiredConfigString(input.model, "model");
     const nextOverride: ModelCapabilityOverrideSettings = {
+      ...(profileId === undefined ? {} : { profileId }),
       providerKind: normalizeModelProviderKind(input.providerKind),
       model,
       capabilities: sanitizeCapabilityOverride(input.capabilities),
@@ -328,7 +331,7 @@ export class ConfigCenter {
       ...current,
       version: 3,
       modelCapabilityOverrides: [
-        ...existing.filter((item) => item.model !== model || item.providerKind !== nextOverride.providerKind),
+        ...existing.filter((item) => !sameCapabilityOverrideScope(item, nextOverride)),
         nextOverride,
       ],
       updatedAt: now,
@@ -693,6 +696,15 @@ export class ConfigCenter {
     await this.options.settingsStore.writeSettings(created);
     return created;
   }
+}
+
+function sameCapabilityOverrideScope(
+  left: ModelCapabilityOverrideSettings,
+  right: ModelCapabilityOverrideSettings
+): boolean {
+  return left.profileId === right.profileId &&
+    left.providerKind === right.providerKind &&
+    left.model === right.model;
 }
 
 export function createLocalConfigCenter(options: CreateLocalConfigCenterOptions = {}): {

@@ -929,6 +929,7 @@ test("ConfigCenter stores capability overrides, tool states, and MCP settings wi
     const configCenter = new ConfigCenter({ settingsStore, secretStore });
 
     const overrides = await configCenter.updateModelCapabilityOverride({
+      profileId: "custom-profile",
       providerKind: "openai_compatible",
       model: "custom-model",
       capabilities: {
@@ -993,6 +994,7 @@ test("ConfigCenter stores capability overrides, tool states, and MCP settings wi
     });
     const settingsRaw = await fs.readFile(settingsStore.settingsPath, "utf8");
 
+    assert.equal(overrides[0]?.profileId, "custom-profile");
     assert.equal(overrides[0]?.capabilities.contextWindowTokens, 64_000);
     assert.equal(overrides[0]?.capabilities.supportsToolCalling, true);
     assert.equal(overrides[0]?.capabilities.preferredApiStyle, undefined);

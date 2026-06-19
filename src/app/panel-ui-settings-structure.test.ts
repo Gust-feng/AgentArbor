@@ -86,8 +86,9 @@ test("panel UI settings and model modules stay split", async () => {
   assert.equal(settingsDialog.includes("<AppearanceSettings config={props.config} />"), true);
   assert.equal(settingsDialog.includes("<AboutSettings config={props.config} />"), true);
   assert.equal(settingsDialog.includes("useBrowserAppearanceSnapshot"), true);
-  assert.equal(settingsDialog.includes("未配置独立主题"), true);
-  assert.equal(settingsDialog.includes("只读：当前没有外观配置入口"), true);
+  assert.equal(settingsDialog.includes("<ThemeSwitcher"), true);
+  assert.equal(settingsDialog.includes("未配置独立主题"), false);
+  assert.equal(settingsDialog.includes("只读：当前没有外观配置入口"), false);
   assert.equal(settingsDialog.includes("product?.version"), true);
   assert.equal(settingsDialog.includes("product?.configDirectory"), true);
   assert.equal(settingsDialog.includes("product?.runtimeDirectory"), true);
@@ -126,7 +127,7 @@ test("panel UI settings and model modules stay split", async () => {
   assert.equal(capabilitySettings.includes("function SkillContextSettings"), false);
   assert.equal(capabilitySettings.includes("function CapabilityRow"), false);
   assert.equal(capabilitySettings.includes('from "../app-config-actions"'), false);
-  assert.equal(capabilitySettings.includes("基础能力"), true);
+  assert.equal(capabilitySettings.includes("模型能力"), true);
   assert.equal(capabilitySettings.includes("MCP 服务"), true);
   assert.equal(capabilitySettings.includes("运行时工具"), false);
   assert.equal(capabilitySettings.includes("工作方法"), false);

@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import type {
   ConfigResponse,
+  ModelCapabilities,
   ModelProviderModelCatalog,
 } from "../contracts/config";
 import type { SkillDefinition } from "../contracts/skills";
@@ -35,6 +36,8 @@ export function SettingsDialog(props: {
   readonly workspaceDirectory: string;
   readonly setWorkspaceDirectory: (value: string) => void;
   readonly onSaveCommandShell: (kind: "auto" | "cmd" | "powershell" | "pwsh" | "bash" | "sh") => void;
+  readonly savingModelCapabilities?: boolean;
+  readonly onSaveModelCapabilities: (capabilities: Partial<ModelCapabilities>) => Promise<void>;
   readonly savingModel?: boolean;
   readonly onSaveModel: (form?: ModelForm) => Promise<void>;
   readonly onCreateCustomProfile: (form?: ModelForm) => Promise<void>;
@@ -146,6 +149,8 @@ export function SettingsDialog(props: {
                 tools={props.tools}
                 toolForm={props.toolForm}
                 setToolForm={props.setToolForm}
+                savingModelCapabilities={props.savingModelCapabilities}
+                onSaveModelCapabilities={props.onSaveModelCapabilities}
                 mcpServerForm={props.mcpServerForm}
                 setMcpServerForm={props.setMcpServerForm}
                 mcpReferences={props.mcpReferences}

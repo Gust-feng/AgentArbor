@@ -6,7 +6,7 @@ import {
   type VisibleAiMode,
 } from "./app-config-projection";
 import type { McpServerForm, ModelForm, ToolForm } from "./components/settings-types";
-import type { CommandShellKind, ConfigResponse, ModelCapabilities, ModelProviderModelCatalog } from "./contracts/config";
+import type { CommandShellKind, ConfigResponse, ModelProviderModelCatalog } from "./contracts/config";
 import type { SkillDefinition } from "./contracts/skills";
 import type { McpEnvironmentCheckResponse, McpReferenceResponse, McpServerPreset, ToolsResponse } from "./contracts/tools";
 import { parseModelOptionId } from "./model-options";
@@ -208,14 +208,6 @@ export async function saveCommandShellConfig(kind: CommandShellKind | "auto"): P
 
 export async function saveToolConfirmationConfig(policy: ComposerToolConfirmationPolicy): Promise<ConfigResponse> {
   return postJson<ConfigResponse>("/api/config/tool-confirmation", { policy });
-}
-
-export async function saveModelCapabilitySettings(input: {
-  readonly profileId?: string;
-  readonly model?: string;
-  readonly capabilities: Partial<ModelCapabilities>;
-}): Promise<ConfigResponse> {
-  return postJson<ConfigResponse>("/api/config/model-capabilities", input);
 }
 
 export async function saveToolSettings(form: ToolForm): Promise<ToolsResponse> {

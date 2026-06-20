@@ -240,8 +240,9 @@ test("panel server source keeps conversation restore and persistence split", asy
   assert.equal(basicRunViewContracts.includes("DesktopWorkSessionReadModel"), false);
   assert.equal(basicRunViewContracts.includes("RunAgentDefinitionRef"), true);
   assert.equal(basicRunViewContracts.includes("readonly agentDefinitionRef?: RunAgentDefinitionRef"), true);
-  assert.equal(basicRunViewContracts.includes("PanelRunResultReadModel"), true);
-  assert.equal(basicRunViewContracts.includes("readonly result: PanelRunResultReadModel"), true);
+  assert.equal(basicAgentRunView.includes("createPanelRunResultReadModel"), false);
+  assert.equal(basicRunViewContracts.includes("PanelRunResultReadModel"), false);
+  assert.equal(basicRunViewContracts.includes("readonly result:"), false);
   assert.equal(conversationContracts.includes("PanelConversationCurrentRunReadModel = PanelBasicAgentRunViewReadModel"), true);
   assert.equal(conversationContracts.includes("readonly result: PanelRunResultReadModel"), false);
   assert.equal(runRoutes.includes("export async function handlePanelRunRoute"), true);

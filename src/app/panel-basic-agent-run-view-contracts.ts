@@ -6,7 +6,6 @@ import type {
 } from "../domain/basic-agent/index.js";
 import type { RunAgentDefinitionRef, RunCapabilityResolution } from "../domain/config/index.js";
 import type { PanelRunCanvasReadModel } from "./panel-canvas-read-model.js";
-import type { PanelRunResultReadModel } from "./panel-run-result-read-model.js";
 import type { PanelRuntimeSummaryReadModel } from "./panel-runtime-summary.js";
 import type { PanelRunStreamEvent } from "./panel-run-stream-contracts.js";
 
@@ -51,7 +50,6 @@ export type PanelBasicAgentRunView<
   readonly agentDefinitionRef?: RunAgentDefinitionRef;
   readonly capabilityResolution?: TCapabilityResolution;
   readonly workView: TWorkView;
-  readonly result: PanelRunResultReadModel;
   readonly detail: PanelBasicAgentRunDetail<TStreamEvent, TTranscriptNode, TCanvas>;
   readonly replay: PanelBasicAgentReplay<TEvent>;
 };

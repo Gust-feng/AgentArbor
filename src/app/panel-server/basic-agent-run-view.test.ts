@@ -98,11 +98,8 @@ test("basic agent run view prefers completed live run facts over stale job facts
   assert.equal(view?.capabilityResolution?.snapshotId, "snapshot-completed");
   assert.deepEqual(view?.capabilityResolution?.allowedTools, ["read"]);
   assert.notEqual(view?.capabilityResolution?.snapshotId, "snapshot-stale-job");
-  assert.equal(view?.result.runId, run.runId);
-  assert.equal(view?.result.status, "completed");
-  assert.equal(view?.result.answer?.markdown, "完成回答。");
-  assert.equal(JSON.stringify(view?.result).includes("replay"), false);
-  assert.equal(JSON.stringify(view?.result).includes("transcript"), false);
+  assert.equal(view?.workView.answer?.content, "完成回答。");
+  assert.equal(view === undefined ? false : "result" in view, false);
 });
 
 test("basic agent run view exposes failed live desktop canvas from the backend result", async () => {
@@ -454,9 +451,8 @@ test("basic agent run view for persisted runs restores from the run snapshot wit
   ]);
   assert.equal(view?.workView.contextLedger.entries.some((entry) => entry.kind === "skill"), true);
   assert.equal(view?.detail.restoredResult?.summary, "历史运行摘要");
-  assert.equal(view?.result.runId, "run-restored");
-  assert.equal(view?.result.status, "completed");
-  assert.equal(view?.result.answer?.markdown, "历史运行摘要");
+  assert.equal(view?.detail.restoredResult?.title, "已完成");
+  assert.equal(view === undefined ? false : "result" in view, false);
   assert.equal(view?.replay.events.some((event) => event.type === "final.result"), true);
   assert.equal(view?.detail.transcript?.events?.some((event) => event.type === "final.result"), true);
   assert.equal(view === undefined ? false : "workSession" in view, false);

@@ -76,73 +76,6 @@ export type BasicAgentRun = {
   };
 };
 
-export type PanelRunResultStatus =
-  | "queued"
-  | "running"
-  | "waiting_confirmation"
-  | "completed"
-  | "failed"
-  | "cancelled"
-  | "blocked";
-
-export type PanelRunResultActionKind = "next" | "confirm" | "retry" | "open_file" | "inspect";
-
-export type PanelRunResultActionStatus = "available" | "pending" | "done";
-
-export type PanelRunResultReadModel = {
-  readonly runId: string;
-  readonly conversationId?: string;
-  readonly status: PanelRunResultStatus;
-  readonly answer?: {
-    readonly markdown: string;
-    readonly copyText: string;
-    readonly tone?: "live" | "final" | "error";
-  };
-  readonly actions: readonly {
-    readonly id: string;
-    readonly label: string;
-    readonly kind: PanelRunResultActionKind;
-    readonly status?: PanelRunResultActionStatus;
-  }[];
-  readonly evidence: {
-    readonly files: readonly {
-      readonly path: string;
-      readonly kind: "created" | "modified" | "deleted" | "changed";
-      readonly summary?: string;
-      readonly preview?: string;
-    }[];
-    readonly commands: readonly {
-      readonly command?: string;
-      readonly exitCode?: number;
-      readonly summary?: string;
-      readonly logRef?: string;
-    }[];
-    readonly sources: readonly {
-      readonly label: string;
-      readonly ref?: string;
-      readonly url?: string;
-      readonly summary?: string;
-    }[];
-  };
-  readonly process: {
-    readonly summary: string;
-    readonly items: readonly {
-      readonly id: string;
-      readonly label: string;
-      readonly status: string;
-      readonly kind: string;
-    }[];
-    readonly defaultCollapsed: boolean;
-  };
-  readonly confirmation?: {
-    readonly confirmationId: string;
-    readonly title: string;
-    readonly body: string;
-    readonly riskLevel?: "low" | "medium" | "high";
-    readonly affectedResources: readonly string[];
-  };
-};
-
 export type RunEvent = {
   readonly id: string;
   readonly runId: string;
@@ -401,6 +334,4 @@ type BackendBasicAgentRunView = PanelBasicAgentRunView<
   RunCapabilityResolution
 >;
 
-export type BasicAgentRunView = BackendBasicAgentRunView & {
-  readonly result?: PanelRunResultReadModel;
-};
+export type BasicAgentRunView = BackendBasicAgentRunView;

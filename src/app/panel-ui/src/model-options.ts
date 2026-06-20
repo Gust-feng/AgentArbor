@@ -71,23 +71,15 @@ export function modelOptionSupportsReasoningEffort(
   config: ConfigResponse | undefined,
   optionId: string
 ): boolean {
+  const supportsCurrentModel = config?.capabilities?.modelCapabilities?.supportsReasoningEffort === true;
   if (optionId.length === 0) {
-    return config?.capabilities?.modelCapabilities?.supportsReasoningEffort === true;
+    return supportsCurrentModel;
   }
   const parsed = parseModelOptionId(optionId);
   if (parsed === undefined) return false;
-  const profile =
-    config?.profiles?.find((item) => item.profileId === parsed.profileId) ??
-    (config?.config?.profileId === parsed.profileId ? config.config : undefined);
-  if (profile === undefined) return false;
-  return modelLooksReasoningEffortCapable({
-    profileId: parsed.profileId,
-    providerKind: profile.providerKind,
-    protocolKind: profile.protocolKind,
-    baseUrl: profile.baseUrl,
-    label: profile.label,
-    model: parsed.modelId,
-  });
+  return config?.config?.profileId === parsed.profileId &&
+    config.config.model === parsed.modelId &&
+    supportsCurrentModel;
 }
 
 export function parseModelOptionId(value: string): { readonly profileId: string; readonly modelId: string } | undefined {
@@ -144,36 +136,4 @@ function orderIndex(order: readonly string[], key: string): number {
     if (presetIndex !== -1) return presetIndex;
   }
   return Number.MAX_SAFE_INTEGER;
-}
-
-function modelLooksReasoningEffortCapable(input: {
-  readonly profileId?: string;
-  readonly providerKind?: string;
-  readonly protocolKind?: string;
-  readonly baseUrl?: string;
-  readonly label?: string;
-  readonly model: string;
-}): boolean {
-  if (input.providerKind !== undefined && input.providerKind !== "openai_compatible") {
-    return false;
-  }
-  const model = input.model.toLowerCase();
-  const providerSignals = `${input.profileId ?? ""} ${input.label ?? ""} ${input.baseUrl ?? ""}`.toLowerCase();
-  if (providerSignals.includes("deepseek") && model.includes("deepseek-v4")) {
-    return true;
-  }
-  const openAiProvider =
-    providerSignals.includes("api.openai.com") ||
-    providerSignals.includes("openai") ||
-    (providerSignals.includes("default") && (input.baseUrl ?? "").trim().length === 0);
-  if (!openAiProvider) {
-    return false;
-  }
-  return (
-    model.includes("gpt-5") ||
-    model.includes("gpt-5.4") ||
-    model.includes("gpt-5.5") ||
-    model.includes("o3") ||
-    model.includes("o4")
-  );
 }

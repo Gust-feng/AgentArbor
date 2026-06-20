@@ -6,7 +6,6 @@ import type {
   DesktopRunDetail,
   DesktopWorkView,
   PendingConfirmation,
-  PanelRunResultReadModel,
   TranscriptNode,
 } from "../contracts/run";
 import type { LiveRunBuffer } from "../../../panel-ui-live-run-buffer";
@@ -43,14 +42,12 @@ export function ChatActive(props: ChatInputProps & {
   readonly conversation?: Conversation;
   readonly run?: BasicAgentRun;
   readonly workView?: DesktopWorkView;
-  readonly result?: PanelRunResultReadModel;
   readonly transcriptNodes: readonly TranscriptNode[];
   readonly detail?: DesktopRunDetail;
   readonly live?: LiveRunBuffer;
   readonly error?: string;
   readonly pendingConfirmation?: PendingConfirmation | NonNullable<DesktopWorkView["pendingConfirmation"]>;
   readonly onDecision: (decision: "approve_once" | "deny" | "guidance", guidance?: string) => void;
-  readonly onResultAction?: (action: PanelRunResultReadModel["actions"][number]) => void;
   readonly confirmationBusy: boolean;
   readonly queuedMessages?: readonly QueuedMessage[];
   readonly onRemoveQueuedMessage?: (id: string) => void;
@@ -255,7 +252,6 @@ export function ChatActive(props: ChatInputProps & {
                   currentRunId={view.currentRunId}
                   currentRunNodes={props.transcriptNodes}
                   run={props.run}
-                  result={props.result}
                   live={props.live}
                   workView={props.workView}
                   pending={view.pending}
@@ -272,7 +268,6 @@ export function ChatActive(props: ChatInputProps & {
                   models={props.models}
                   selectedModelId={props.selectedModelId}
                   onDecision={props.onDecision}
-                  onResultAction={props.onResultAction}
                   confirmationBusy={props.confirmationBusy}
                   hiddenEarlierTurnCount={visibleStartIndex}
                   onShowEarlierTurns={showEarlierTurns}

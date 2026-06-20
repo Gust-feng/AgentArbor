@@ -789,6 +789,10 @@ html[data-style="glass"] .settings-card {
   border-color: var(--panel-card-border);
 }
 
+html[data-style="glass"] .service-settings-card {
+  overflow: visible;
+}
+
 html[data-style="glass"] .provider-list-pane,
 html[data-style="glass"] .provider-search,
 html[data-style="glass"] .model-search-field,

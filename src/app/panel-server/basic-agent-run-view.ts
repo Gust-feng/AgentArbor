@@ -8,7 +8,6 @@ import type {
   PanelBasicAgentRunViewReadModel,
 } from "../panel-basic-agent-run-view-contracts.js";
 import { panelRunPayloadForStatus, type PanelRunJob } from "../panel-run-jobs.js";
-import { createPanelRunResultReadModel } from "../panel-run-result-read-model.js";
 import { summarizePanelRuntimeVisibility, type PanelRuntimeSummaryRegistry } from "../panel-runtime-summary.js";
 import { createPanelTranscriptNodes } from "../panel-run-read-model.js";
 import { restoredRunResultProjection } from "../restored-run-projection.js";
@@ -71,10 +70,6 @@ async function createLiveBasicAgentRunViewReadModel(
     agentDefinitionRef,
     capabilityResolution: statusPayload?.capabilityResolution ?? job.capabilityResolution,
     workView,
-    result: createPanelRunResultReadModel({
-      workView,
-      transcriptNodes: workView.transcriptNodes,
-    }),
     detail: {
       runId: job.runId,
       status: job.status,
@@ -112,11 +107,6 @@ async function createPersistedBasicAgentRunViewReadModel(
     agentDefinitionRef: run.agentDefinitionRef,
     capabilityResolution: snapshot.run.capabilityResolution,
     workView,
-    result: createPanelRunResultReadModel({
-      workView,
-      transcriptNodes: detail.transcript?.transcriptNodes,
-      restoredResult: detail.restoredResult,
-    }),
     detail,
     replay: {
       events: replayEvents,

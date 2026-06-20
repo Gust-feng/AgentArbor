@@ -12,7 +12,6 @@ import {
   refreshSkillCatalog,
   saveCommandShellConfig,
   saveMcpServerSettings,
-  saveModelCapabilitySettings,
   saveModelProviderCatalog,
   saveModelProviderConfig,
   saveModelProviderOrder,
@@ -29,7 +28,7 @@ import {
 import { mergeConfigResponse, type ComposerToolConfirmationPolicy, type VisibleAiMode } from "./app-config-projection";
 import type { AppState } from "./app-state";
 import type { McpServerForm, ModelForm, ToolForm } from "./components/settings-types";
-import type { CommandShellKind, ModelCapabilities, ModelProviderModelCatalog } from "./contracts/config";
+import type { CommandShellKind, ModelProviderModelCatalog } from "./contracts/config";
 import type { McpEnvironmentCheckResponse, McpReferenceResponse, McpServerCatalogItem } from "./contracts/tools";
 
 export type AppSettingsController = {
@@ -44,7 +43,6 @@ export type AppSettingsController = {
   readonly saveWorkspace: (nextWorkspaceDirectory?: string) => Promise<void>;
   readonly saveCommandShell: (kind: CommandShellKind | "auto") => Promise<void>;
   readonly saveToolConfirmationPolicy: (policy: ComposerToolConfirmationPolicy) => Promise<void>;
-  readonly saveModelCapabilities: (capabilities: Partial<ModelCapabilities>) => Promise<void>;
   readonly saveTools: () => Promise<void>;
   readonly saveMcpServer: (nextMcpServerForm?: McpServerForm) => Promise<void>;
   readonly loadMcpReferences: (serverId: string) => Promise<McpReferenceResponse>;
@@ -76,7 +74,6 @@ export type AppSettingsControllerOptions = {
   readonly mcpToolUpdateVersionRef: React.MutableRefObject<number>;
   readonly mcpToolCatalogDraftRef: React.MutableRefObject<readonly McpServerCatalogItem[] | undefined>;
   readonly setSavingModel: React.Dispatch<React.SetStateAction<boolean>>;
-  readonly setSavingModelCapabilities: React.Dispatch<React.SetStateAction<boolean>>;
   readonly setSavingWorkspace: React.Dispatch<React.SetStateAction<boolean>>;
   readonly setSavingTools: React.Dispatch<React.SetStateAction<boolean>>;
 };
@@ -408,34 +405,6 @@ export function createAppSettingsController(options: AppSettingsControllerOption
     }
   }
 
-  async function saveModelCapabilities(capabilities: Partial<ModelCapabilities>): Promise<void> {
-    options.setSavingModelCapabilities(true);
-    try {
-      const response = await saveModelCapabilitySettings({
-        profileId: options.app.config?.config?.profileId,
-        model: options.app.config?.config?.model,
-        capabilities,
-      });
-      if (options.mountedRef.current) {
-        options.setApp((previous) => ({
-          ...previous,
-          config: mergeConfigResponse(previous.config, response),
-          error: undefined,
-        }));
-      }
-    } catch (error) {
-      if (options.mountedRef.current) {
-        options.setApp((previous) => ({
-          ...previous,
-          error: error instanceof Error ? error.message : "模型能力保存失败。",
-        }));
-      }
-      throw error;
-    } finally {
-      if (options.mountedRef.current) options.setSavingModelCapabilities(false);
-    }
-  }
-
   async function saveTools(): Promise<void> {
     options.setSavingTools(true);
     try {
@@ -720,7 +689,6 @@ export function createAppSettingsController(options: AppSettingsControllerOption
     saveWorkspace,
     saveCommandShell,
     saveToolConfirmationPolicy,
-    saveModelCapabilities,
     saveTools,
     saveMcpServer,
     loadMcpReferences,

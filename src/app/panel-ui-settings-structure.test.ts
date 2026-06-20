@@ -27,6 +27,8 @@ test("panel UI settings and model modules stay split", async () => {
     settingsProviderStyles,
     settingsModelListStyles,
     settingsFormStyles,
+    workspaceStyles,
+    glassStyle,
   ] = await Promise.all([
     readPanelUiSource(path.join("components", "settings-dialog.tsx")),
     readPanelUiSource(path.join("components", "settings-types.ts")),
@@ -50,6 +52,8 @@ test("panel UI settings and model modules stay split", async () => {
     readPanelUiStyle("settings-provider.css"),
     readPanelUiStyle("settings-model-list.css"),
     readPanelUiStyle("settings-forms.css"),
+    readPanelUiStyle("workspace.css"),
+    readPanelUiStyle("style-glass.css"),
   ]);
 
   assert.equal(settingsDialog.includes('from "./skills-page"'), false);
@@ -74,7 +78,8 @@ test("panel UI settings and model modules stay split", async () => {
   assert.equal(settingsDialog.includes('label: "外观"'), true);
   assert.equal(settingsDialog.includes('label: "关于"'), true);
   assert.equal(settingsDialog.includes('label: "确认边界"'), false);
-  assert.equal(settingsDialog.includes("<CapabilitiesSettings"), true);
+  assert.equal(settingsDialog.includes("<BasicCapabilitiesSettings"), true);
+  assert.equal(settingsDialog.includes("<McpServiceSettings"), true);
   assert.equal(settingsDialog.includes("<SkillSettings"), true);
   assert.equal(settingsDialog.includes("<WorkspaceSettings"), true);
   assert.equal(settingsDialog.includes("<ConfirmationSettings"), false);
@@ -114,20 +119,21 @@ test("panel UI settings and model modules stay split", async () => {
   assert.equal(settingsTypes.includes('export type { ModelForm } from "./model-settings"'), true);
   assert.equal(settingsTypes.includes("export type ToolForm"), true);
   assert.equal(settingsTypes.includes("export type McpServerForm"), true);
-  assert.equal(settingsTypes.includes('export type SettingsGroup = "models" | "capabilities" | "mcp" | "skills" | "workspace" | "appearance" | "about";'), true);
+  assert.equal(settingsTypes.includes('export type SettingsGroup = "models" | "basicCapabilities" | "mcp" | "skills" | "workspace" | "appearance" | "about";'), true);
   assert.equal(settingsToolCopy.includes("export function toolTitle"), false);
   assert.equal(settingsToolCopy.includes("export function toolDescription"), false);
   assert.equal(settingsToolCopy.includes("export function toolMeta"), false);
   assert.equal(settingsToolCopy.includes("export function confirmationRuleLabel"), true);
   assert.equal(settingsToolCopy.includes("export function providerName"), true);
-  assert.equal(capabilitySettings.includes("export function CapabilitiesSettings"), true);
+  assert.equal(capabilitySettings.includes("export function BasicCapabilitiesSettings"), true);
+  assert.equal(capabilitySettings.includes("export function McpServiceSettings"), true);
   assert.equal(capabilitySettings.includes("function WebSearchSettings"), true);
-  assert.equal(capabilitySettings.includes("function McpServiceSettings"), true);
+  assert.equal(capabilitySettings.includes("function McpServiceBoard"), true);
   assert.equal(capabilitySettings.includes("function ToolCatalogSettings"), false);
   assert.equal(capabilitySettings.includes("function SkillContextSettings"), false);
   assert.equal(capabilitySettings.includes("function CapabilityRow"), false);
   assert.equal(capabilitySettings.includes('from "../app-config-actions"'), false);
-  assert.equal(capabilitySettings.includes("模型能力"), true);
+  assert.equal(capabilitySettings.includes("模型能力"), false);
   assert.equal(capabilitySettings.includes("MCP 服务"), true);
   assert.equal(capabilitySettings.includes("运行时工具"), false);
   assert.equal(capabilitySettings.includes("工作方法"), false);
@@ -136,7 +142,14 @@ test("panel UI settings and model modules stay split", async () => {
   assert.equal(skillSettings.includes("暂无技能"), true);
   assert.equal(skillSettings.includes('aria-label="技能列表"'), true);
   assert.equal(skillSettings.includes("SKILL.md"), true);
-  assert.equal(capabilitySettings.includes("网页查证"), true);
+  assert.equal(capabilitySettings.includes("网络搜索"), true);
+  assert.equal(capabilitySettings.includes("网页查证"), false);
+  assert.equal(capabilitySettings.includes("McpReferencePanel"), true);
+  assert.equal(workspaceStyles.includes(".service-settings-card"), true);
+  assert.equal(workspaceStyles.includes("overflow: visible;"), true);
+  assert.equal(workspaceStyles.includes(".settings-select-control.open"), true);
+  assert.equal(glassStyle.includes('html[data-style="glass"] .service-settings-card'), true);
+  assert.equal(glassStyle.includes("overflow: visible;"), true);
   assert.equal(capabilitySettings.includes("由模型按任务判断"), false);
   assert.equal(capabilitySettings.includes("这里配置可用服务和安全边界"), false);
   assert.equal(capabilitySettings.includes("不替助手决定"), false);

@@ -1,10 +1,7 @@
 import React from "react";
 import { Link2, Plus, Save, Trash2, X } from "lucide-react";
-import type { ConfigResponse, ModelCapabilities } from "../contracts/config";
 import type { McpEnvironmentCheckResponse, McpReferenceResponse, ToolsResponse } from "../contracts/tools";
 import type { McpServerForm, ToolForm } from "./settings-types";
-import { providerName } from "./settings-tool-copy";
-import { SettingRow } from "./workspace-common";
 
 const SAVED_API_KEY_MASK = "****************";
 type McpCatalogServer = NonNullable<ToolsResponse["mcpCatalog"]>[number];
@@ -13,52 +10,15 @@ type SettingsSelectOption = {
   readonly label: string;
 };
 
-export function CapabilitiesSettings(props: {
-  readonly activeSection?: "capabilities" | "mcp";
-  readonly config?: ConfigResponse;
+export function BasicCapabilitiesSettings(props: {
   readonly tools?: ToolsResponse;
   readonly toolForm: ToolForm;
   readonly setToolForm: (form: ToolForm) => void;
-  readonly savingModelCapabilities?: boolean;
-  readonly onSaveModelCapabilities: (capabilities: Partial<ModelCapabilities>) => Promise<void>;
-  readonly mcpServerForm: McpServerForm;
-  readonly setMcpServerForm: (form: McpServerForm) => void;
-  readonly mcpReferences: Readonly<Record<string, McpReferenceResponse>>;
   readonly savingTools?: boolean;
   readonly onSaveTools: () => void;
-  readonly onSaveMcpServer: (form?: McpServerForm) => Promise<void>;
-  readonly onLoadMcpReferences: (serverId: string) => void;
-  readonly onImportMcpConfig: (config: string) => void;
-  readonly onTestMcpServer: (serverId: string) => void;
-  readonly onCheckMcpEnvironment: (form: Pick<McpServerForm, "command" | "commandLine">) => Promise<McpEnvironmentCheckResponse>;
-  readonly onInstallMcpEnvironment: (form: Pick<McpServerForm, "command" | "commandLine">) => Promise<McpEnvironmentCheckResponse>;
-  readonly onDeleteMcpServer: (serverId: string) => void;
-  readonly onUpdateMcpTool: (serverId: string, toolName: string, enabled: boolean, autoApproved?: boolean) => void;
 }): React.ReactElement {
-  if (props.activeSection === "mcp") {
-    return (
-      <McpServiceSettings
-        tools={props.tools}
-        form={props.mcpServerForm}
-        setForm={props.setMcpServerForm}
-        saving={props.savingTools}
-        onSave={props.onSaveMcpServer}
-        onImport={props.onImportMcpConfig}
-        onTest={props.onTestMcpServer}
-        onCheckEnvironment={props.onCheckMcpEnvironment}
-        onInstallEnvironment={props.onInstallMcpEnvironment}
-        onDelete={props.onDeleteMcpServer}
-        onUpdateTool={props.onUpdateMcpTool}
-      />
-    );
-  }
   return (
-    <div className="capability-settings-stack">
-      <ModelCapabilitySettings
-        config={props.config}
-        saving={props.savingModelCapabilities}
-        onSave={props.onSaveModelCapabilities}
-      />
+    <div className="service-settings-stack">
       <WebSearchSettings
         tools={props.tools}
         toolForm={props.toolForm}
@@ -70,216 +30,38 @@ export function CapabilitiesSettings(props: {
   );
 }
 
-type ModelCapabilityDraft = {
-  readonly contextWindowTokens: string;
-  readonly maxOutputTokens: string;
-  readonly supportsToolCalling: boolean;
-  readonly supportsParallelToolCalls: boolean;
-  readonly supportsStructuredOutputs: boolean;
-  readonly supportsStreaming: boolean;
-  readonly supportsVisionInput: boolean;
-  readonly supportsReasoningEffort: boolean;
-  readonly supportsReasoningOutput: boolean;
-};
-
-function ModelCapabilitySettings(props: {
-  readonly config?: ConfigResponse;
-  readonly saving?: boolean;
-  readonly onSave: (capabilities: Partial<ModelCapabilities>) => Promise<void>;
-}): React.ReactElement {
-  const capabilities = props.config?.capabilities?.modelCapabilities;
-  const activeModel = props.config?.capabilities?.activeModel ?? props.config?.config;
-  const modelName = activeModel?.model ?? props.config?.config?.model;
-  const [draft, setDraft] = React.useState<ModelCapabilityDraft>(() => capabilityDraftFromConfig(capabilities));
-
-  React.useEffect(() => {
-    setDraft(capabilityDraftFromConfig(capabilities));
-  }, [
-    capabilities?.contextWindowTokens,
-    capabilities?.maxOutputTokens,
-    capabilities?.supportsToolCalling,
-    capabilities?.supportsParallelToolCalls,
-    capabilities?.supportsStructuredOutputs,
-    capabilities?.supportsStreaming,
-    capabilities?.supportsVisionInput,
-    capabilities?.supportsReasoningEffort,
-    capabilities?.supportsReasoningOutput,
-  ]);
-
-  const canSave = modelName !== undefined && modelName.trim().length > 0 && props.saving !== true;
-  const save = async (): Promise<void> => {
-    if (!canSave) return;
-    await props.onSave(capabilitiesFromDraft(draft));
-  };
-
-  return (
-    <section className="settings-card model-capability-card">
-      <div className="settings-card-title-row">
-        <h3>模型能力</h3>
-        <button
-          type="button"
-          className="page-action-button primary capability-save-button"
-          onClick={() => void save()}
-          disabled={!canSave}
-        >
-          <Save size={14} />
-          {props.saving ? "保存中" : "保存"}
-        </button>
-      </div>
-      <div className="model-capability-grid">
-        <SettingRow label="当前模型">
-          <span className="settings-value">{modelName ?? "未填写"}</span>
-        </SettingRow>
-        <SettingRow label="上下文窗口">
-          <CapabilityNumberInput
-            value={draft.contextWindowTokens}
-            onChange={(value) => setDraft({ ...draft, contextWindowTokens: value })}
-            disabled={props.saving}
-            ariaLabel="上下文窗口"
-          />
-        </SettingRow>
-        <SettingRow label="最大输出">
-          <CapabilityNumberInput
-            value={draft.maxOutputTokens}
-            onChange={(value) => setDraft({ ...draft, maxOutputTokens: value })}
-            disabled={props.saving}
-            ariaLabel="最大输出"
-          />
-        </SettingRow>
-        <CapabilityToggleRow
-          label="工具调用"
-          pressed={draft.supportsToolCalling}
-          disabled={props.saving}
-          onToggle={() => setDraft({ ...draft, supportsToolCalling: !draft.supportsToolCalling })}
-        />
-        <CapabilityToggleRow
-          label="并行工具"
-          pressed={draft.supportsParallelToolCalls}
-          disabled={props.saving}
-          onToggle={() => setDraft({ ...draft, supportsParallelToolCalls: !draft.supportsParallelToolCalls })}
-        />
-        <CapabilityToggleRow
-          label="结构化输出"
-          pressed={draft.supportsStructuredOutputs}
-          disabled={props.saving}
-          onToggle={() => setDraft({ ...draft, supportsStructuredOutputs: !draft.supportsStructuredOutputs })}
-        />
-        <CapabilityToggleRow
-          label="流式输出"
-          pressed={draft.supportsStreaming}
-          disabled={props.saving}
-          onToggle={() => setDraft({ ...draft, supportsStreaming: !draft.supportsStreaming })}
-        />
-        <CapabilityToggleRow
-          label="视觉输入"
-          pressed={draft.supportsVisionInput}
-          disabled={props.saving}
-          onToggle={() => setDraft({ ...draft, supportsVisionInput: !draft.supportsVisionInput })}
-        />
-        <CapabilityToggleRow
-          label="思考强度"
-          pressed={draft.supportsReasoningEffort}
-          disabled={props.saving}
-          onToggle={() => setDraft({ ...draft, supportsReasoningEffort: !draft.supportsReasoningEffort })}
-        />
-        <CapabilityToggleRow
-          label="思考输出"
-          pressed={draft.supportsReasoningOutput}
-          disabled={props.saving}
-          onToggle={() => setDraft({ ...draft, supportsReasoningOutput: !draft.supportsReasoningOutput })}
-        />
-      </div>
-      {props.config?.capabilities?.warnings !== undefined && props.config.capabilities.warnings.length > 0 && (
-        <div className="capability-warning-list">
-          {props.config.capabilities.warnings.map((warning) => (
-            <span key={warning}>{warning}</span>
-          ))}
-        </div>
-      )}
-    </section>
-  );
-}
-
-function CapabilityNumberInput(props: {
-  readonly value: string;
-  readonly onChange: (value: string) => void;
-  readonly disabled?: boolean;
-  readonly ariaLabel: string;
+export function McpServiceSettings(props: {
+  readonly tools?: ToolsResponse;
+  readonly mcpServerForm: McpServerForm;
+  readonly setMcpServerForm: (form: McpServerForm) => void;
+  readonly savingTools?: boolean;
+  readonly onSaveMcpServer: (form?: McpServerForm) => Promise<void>;
+  readonly onLoadMcpReferences: (serverId: string) => Promise<McpReferenceResponse>;
+  readonly onImportMcpConfig: (config: string) => void;
+  readonly onTestMcpServer: (serverId: string) => void;
+  readonly onCheckMcpEnvironment: (form: Pick<McpServerForm, "command" | "commandLine">) => Promise<McpEnvironmentCheckResponse>;
+  readonly onInstallMcpEnvironment: (form: Pick<McpServerForm, "command" | "commandLine">) => Promise<McpEnvironmentCheckResponse>;
+  readonly onDeleteMcpServer: (serverId: string) => void;
+  readonly onUpdateMcpTool: (serverId: string, toolName: string, enabled: boolean, autoApproved?: boolean) => void;
 }): React.ReactElement {
   return (
-    <input
-      className="capability-number-input"
-      type="number"
-      min={1}
-      value={props.value}
-      disabled={props.disabled}
-      aria-label={props.ariaLabel}
-      spellCheck={false}
-      autoComplete="off"
-      autoCorrect="off"
-      autoCapitalize="off"
-      onChange={(event) => props.onChange(event.target.value)}
-    />
+    <div className="service-settings-stack">
+      <McpServiceBoard
+        tools={props.tools}
+        form={props.mcpServerForm}
+        setForm={props.setMcpServerForm}
+        saving={props.savingTools}
+        onSave={props.onSaveMcpServer}
+        onLoadReferences={props.onLoadMcpReferences}
+        onImport={props.onImportMcpConfig}
+        onTest={props.onTestMcpServer}
+        onCheckEnvironment={props.onCheckMcpEnvironment}
+        onInstallEnvironment={props.onInstallMcpEnvironment}
+        onDelete={props.onDeleteMcpServer}
+        onUpdateTool={props.onUpdateMcpTool}
+      />
+    </div>
   );
-}
-
-function CapabilityToggleRow(props: {
-  readonly label: string;
-  readonly pressed: boolean;
-  readonly disabled?: boolean;
-  readonly onToggle: () => void;
-}): React.ReactElement {
-  return (
-    <SettingRow label={props.label}>
-      <button
-        type="button"
-        className="capability-toggle"
-        aria-pressed={props.pressed}
-        disabled={props.disabled}
-        onClick={props.onToggle}
-      >
-        {props.pressed ? "开启" : "关闭"}
-      </button>
-    </SettingRow>
-  );
-}
-
-function capabilityDraftFromConfig(capabilities: ModelCapabilities | undefined): ModelCapabilityDraft {
-  return {
-    contextWindowTokens: stringFromPositiveInteger(capabilities?.contextWindowTokens),
-    maxOutputTokens: stringFromPositiveInteger(capabilities?.maxOutputTokens),
-    supportsToolCalling: capabilities?.supportsToolCalling === true,
-    supportsParallelToolCalls: capabilities?.supportsParallelToolCalls === true,
-    supportsStructuredOutputs: capabilities?.supportsStructuredOutputs === true,
-    supportsStreaming: capabilities?.supportsStreaming === true,
-    supportsVisionInput: capabilities?.supportsVisionInput === true,
-    supportsReasoningEffort: capabilities?.supportsReasoningEffort === true,
-    supportsReasoningOutput: capabilities?.supportsReasoningOutput === true,
-  };
-}
-
-function capabilitiesFromDraft(draft: ModelCapabilityDraft): Partial<ModelCapabilities> {
-  return {
-    contextWindowTokens: positiveIntegerFromString(draft.contextWindowTokens),
-    maxOutputTokens: positiveIntegerFromString(draft.maxOutputTokens),
-    supportsToolCalling: draft.supportsToolCalling,
-    supportsParallelToolCalls: draft.supportsParallelToolCalls,
-    supportsStructuredOutputs: draft.supportsStructuredOutputs,
-    supportsStreaming: draft.supportsStreaming,
-    supportsVisionInput: draft.supportsVisionInput,
-    supportsReasoningEffort: draft.supportsReasoningEffort,
-    supportsReasoningOutput: draft.supportsReasoningOutput,
-    lastVerifiedAt: new Date().toISOString().slice(0, 10),
-  };
-}
-
-function stringFromPositiveInteger(value: number | undefined): string {
-  return typeof value === "number" && Number.isFinite(value) && value > 0 ? String(Math.floor(value)) : "";
-}
-
-function positiveIntegerFromString(value: string): number | undefined {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : undefined;
 }
 
 function WebSearchSettings(props: {
@@ -290,10 +72,9 @@ function WebSearchSettings(props: {
   readonly onSaveTools: () => void;
 }): React.ReactElement {
   const configured = props.tools?.tools?.webSearch?.secretConfigured === true;
-  const current = props.tools?.tools?.webSearch?.provider ?? props.toolForm.provider;
   return (
     <section className="settings-card service-settings-card">
-      <h3>网页查证</h3>
+      <h3>网络搜索</h3>
       <div className="service-config-grid">
         <label>
           搜索服务
@@ -343,12 +124,13 @@ function WebSearchSettings(props: {
   );
 }
 
-function McpServiceSettings(props: {
+function McpServiceBoard(props: {
   readonly tools?: ToolsResponse;
   readonly form: McpServerForm;
   readonly setForm: (form: McpServerForm) => void;
   readonly saving?: boolean;
   readonly onSave: (form?: McpServerForm) => Promise<void>;
+  readonly onLoadReferences: (serverId: string) => Promise<McpReferenceResponse>;
   readonly onImport: (config: string) => void;
   readonly onTest: (serverId: string) => void;
   readonly onCheckEnvironment: (form: Pick<McpServerForm, "command" | "commandLine">) => Promise<McpEnvironmentCheckResponse>;
@@ -459,6 +241,7 @@ function McpServiceSettings(props: {
           onImport={props.onImport}
           onSave={saveServer}
           onSaveAndTest={saveAndTestServer}
+          onLoadReferences={props.onLoadReferences}
           onCheckEnvironment={props.onCheckEnvironment}
           onInstallEnvironment={props.onInstallEnvironment}
           onDelete={props.onDelete}
@@ -497,6 +280,7 @@ function McpServerPanel(props: {
   readonly onImport: (config: string) => void;
   readonly onSave: (form?: McpServerForm) => Promise<void>;
   readonly onSaveAndTest: (form?: McpServerForm) => Promise<void>;
+  readonly onLoadReferences?: (serverId: string) => Promise<McpReferenceResponse>;
   readonly onCheckEnvironment: (form: Pick<McpServerForm, "command" | "commandLine">) => Promise<McpEnvironmentCheckResponse>;
   readonly onInstallEnvironment: (form: Pick<McpServerForm, "command" | "commandLine">) => Promise<McpEnvironmentCheckResponse>;
   readonly onDelete?: (serverId: string) => void;
@@ -522,9 +306,31 @@ function McpServerPanel(props: {
   const [environmentCheck, setEnvironmentCheck] = React.useState<McpEnvironmentCheckResponse | undefined>();
   const [checkingEnvironment, setCheckingEnvironment] = React.useState(false);
   const [installingEnvironment, setInstallingEnvironment] = React.useState(false);
+  const [referenceState, setReferenceState] = React.useState<McpReferenceLoadState>({ status: "idle" });
   React.useEffect(() => {
     setEnvironmentCheck(undefined);
   }, [props.form.transport, props.form.command, props.form.commandLine]);
+  React.useEffect(() => {
+    if (!editing || props.selectedServer === undefined || props.onLoadReferences === undefined) {
+      setReferenceState({ status: "idle" });
+      return;
+    }
+    let cancelled = false;
+    const serverId = props.selectedServer.serverId;
+    setReferenceState({ status: "loading" });
+    props.onLoadReferences(serverId).then((references) => {
+      if (!cancelled) {
+        setReferenceState({ status: references.ok === false ? "failed" : "ready", references });
+      }
+    }).catch(() => {
+      if (!cancelled) {
+        setReferenceState({ status: "failed" });
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [editing, props.selectedServer?.serverId, props.onLoadReferences]);
   const runEnvironmentCheck = async (): Promise<void> => {
     if (props.form.transport !== "stdio" || checkingEnvironment || installingEnvironment) return;
     setCheckingEnvironment(true);
@@ -650,6 +456,9 @@ function McpServerPanel(props: {
               </details>
             </section>
           )}
+          {editing && (
+            <McpReferencePanel state={referenceState} />
+          )}
           {!editing && (
             <details className="mcp-advanced">
               <summary><span className="mcp-advanced-summary-label">高级设置</span></summary>
@@ -694,6 +503,101 @@ function McpServerPanel(props: {
       </section>
     </div>
   );
+}
+
+type McpReferenceLoadState =
+  | { readonly status: "idle" }
+  | { readonly status: "loading" }
+  | { readonly status: "ready"; readonly references: McpReferenceResponse }
+  | { readonly status: "failed"; readonly references?: McpReferenceResponse };
+
+function McpReferencePanel(props: {
+  readonly state: McpReferenceLoadState;
+}): React.ReactElement {
+  const references = props.state.status === "ready" || props.state.status === "failed"
+    ? props.state.references
+    : undefined;
+  const totalCount =
+    (references?.prompts.length ?? 0) +
+    (references?.resources.length ?? 0) +
+    (references?.resourceTemplates.length ?? 0);
+  return (
+    <section className="mcp-form-section">
+      <details className="mcp-tool-authorization">
+        <summary>
+          <span className="mcp-tool-authorization-copy">
+            <strong>提示与资源</strong>
+          </span>
+          <span className="mcp-tool-authorization-actions">
+            <span className="mcp-tool-authorization-count">{mcpReferenceSummary(props.state, totalCount)}</span>
+          </span>
+        </summary>
+        <div className="mcp-tool-list">
+          {props.state.status === "loading" && <div className="capability-empty">读取中</div>}
+          {props.state.status === "failed" && (
+            <div className="capability-empty">{references?.errorSummary ?? "读取失败"}</div>
+          )}
+          {props.state.status === "ready" && totalCount === 0 && (
+            <div className="capability-empty">暂无提示或资源</div>
+          )}
+          {props.state.status === "ready" && totalCount > 0 && (
+            <div className="mcp-reference-table">
+              <div className="mcp-reference-header" aria-hidden="true">
+                <span>类型</span>
+                <span>名称</span>
+                <span>说明</span>
+              </div>
+              {references?.prompts.map((prompt) => (
+                <McpReferenceRow
+                  key={`prompt:${prompt.name}`}
+                  kind="提示"
+                  title={prompt.title ?? prompt.name}
+                  detail={prompt.description}
+                />
+              ))}
+              {references?.resources.map((resource) => (
+                <McpReferenceRow
+                  key={`resource:${resource.uri}`}
+                  kind="资源"
+                  title={resource.title ?? resource.name}
+                  detail={resource.description ?? resource.uri}
+                />
+              ))}
+              {references?.resourceTemplates.map((template) => (
+                <McpReferenceRow
+                  key={`template:${template.uriTemplate}`}
+                  kind="模板"
+                  title={template.title ?? template.name}
+                  detail={template.description ?? template.uriTemplate}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      </details>
+    </section>
+  );
+}
+
+function McpReferenceRow(props: {
+  readonly kind: string;
+  readonly title: string;
+  readonly detail?: string;
+}): React.ReactElement {
+  return (
+    <article className="mcp-reference-row">
+      <span>{props.kind}</span>
+      <strong>{props.title}</strong>
+      <span>{props.detail ?? "无说明"}</span>
+    </article>
+  );
+}
+
+function mcpReferenceSummary(state: McpReferenceLoadState, totalCount: number): string {
+  if (state.status === "loading") return "读取中";
+  if (state.status === "failed") return "读取失败";
+  if (state.status === "ready") return `${totalCount} 项`;
+  return "未读取";
 }
 
 function McpConnectionFields(props: {

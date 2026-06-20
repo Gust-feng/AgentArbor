@@ -27,7 +27,6 @@ export type Conversation = {
   readonly activeRunId?: string;
   readonly latestRunId?: string;
   readonly currentRun?: BasicAgentRunView;
-  readonly currentResult?: BasicAgentRunView["result"];
   readonly queuedRunIds?: readonly string[];
   readonly pinnedAt?: string;
   readonly updatedAt?: string;

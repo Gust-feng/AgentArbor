@@ -32,4 +32,4 @@ export type McpServerForm = {
   readonly enabled: boolean;
 };
 
-export type SettingsGroup = "models" | "capabilities" | "mcp" | "skills" | "workspace" | "appearance" | "about";
+export type SettingsGroup = "models" | "basicCapabilities" | "mcp" | "skills" | "workspace" | "appearance" | "about";

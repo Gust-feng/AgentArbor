@@ -39,7 +39,7 @@
   gap: var(--space-3);
 }
 
-.capability-settings-stack {
+.service-settings-stack {
   display: grid;
   gap: var(--space-3);
 }
@@ -47,68 +47,7 @@
 .service-settings-card {
   display: grid;
   gap: var(--space-3);
-}
-
-.model-capability-card {
-  display: grid;
-  gap: var(--space-3);
-}
-
-.model-capability-grid {
-  display: grid;
-  gap: 0;
-  border-top: var(--border-width-thin) solid color-mix(in oklch, var(--border) 76%, transparent);
-  padding-top: 2px;
-}
-
-.capability-save-button {
-  min-width: 82px;
-  height: 32px;
-  gap: 6px;
-  padding: 0 12px;
-  font-size: 12px;
-}
-
-.capability-number-input {
-  box-sizing: border-box;
-  width: min(180px, 100%);
-  height: 34px;
-  border: 1px solid var(--field-border);
-  border-radius: var(--radius-lg);
-  background: var(--field-bg);
-  padding: 0 10px;
-  color: var(--fg);
-  font: inherit;
-  font-size: 12px;
-}
-
-.capability-number-input:hover {
-  border-color: var(--field-hover-border);
-  background: var(--field-hover-bg);
-}
-
-.capability-number-input:focus {
-  border-color: var(--field-focus-border);
-  box-shadow: var(--field-focus-ring);
-  outline: none;
-}
-
-.capability-number-input:disabled {
-  cursor: not-allowed;
-  opacity: 0.56;
-}
-
-.capability-warning-list {
-  display: grid;
-  gap: 6px;
-  border-top: var(--border-width-thin) solid color-mix(in oklch, var(--border) 62%, transparent);
-  padding-top: var(--space-3);
-}
-
-.capability-warning-list span {
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.4;
+  overflow: visible;
 }
 
 .service-config-grid {
@@ -563,8 +502,13 @@
 
 .settings-select-control {
   position: relative;
+  z-index: 0;
   min-width: 0;
   width: 100%;
+}
+
+.settings-select-control.open {
+  z-index: 10;
 }
 
 .settings-select-trigger {
@@ -1017,6 +961,59 @@
   font-size: 13px;
   font-weight: var(--weight-label);
   line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.mcp-reference-table {
+  display: grid;
+  gap: 6px;
+  padding: 8px;
+}
+
+.mcp-reference-header,
+.mcp-reference-row {
+  display: grid;
+  grid-template-columns: 58px minmax(110px, 0.65fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+}
+
+.mcp-reference-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  min-height: 30px;
+  border: 1px solid var(--content-border);
+  border-radius: var(--radius-lg);
+  background: var(--content-surface);
+  color: color-mix(in oklch, var(--muted) 88%, var(--fg));
+  font-size: 11.5px;
+  font-weight: var(--weight-label);
+  line-height: 1.2;
+  padding: 0 10px 0 12px;
+}
+
+.mcp-reference-row {
+  min-height: 44px;
+  border: 1px solid var(--row-border);
+  border-radius: var(--radius-lg);
+  background: var(--row-bg);
+  color: color-mix(in oklch, var(--muted) 88%, var(--fg));
+  font-size: 12px;
+  line-height: 1.35;
+  padding: 7px 10px 7px 12px;
+}
+
+.mcp-reference-row strong {
+  min-width: 0;
+  color: var(--fg);
+  font-size: 13px;
+  font-weight: var(--weight-label);
+  overflow-wrap: anywhere;
+}
+
+.mcp-reference-row span {
+  min-width: 0;
   overflow-wrap: anywhere;
 }
 
@@ -1537,6 +1534,16 @@
     padding-right: 8px;
     padding-left: 10px;
     font-size: 11px;
+  }
+
+  .mcp-reference-header,
+  .mcp-reference-row {
+    grid-template-columns: 46px minmax(0, 1fr);
+  }
+
+  .mcp-reference-header span:last-child,
+  .mcp-reference-row span:last-child {
+    grid-column: 1 / -1;
   }
 
   .skills-row {

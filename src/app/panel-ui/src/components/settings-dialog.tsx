@@ -11,12 +11,11 @@ import {
 } from "lucide-react";
 import type {
   ConfigResponse,
-  ModelCapabilities,
   ModelProviderModelCatalog,
 } from "../contracts/config";
 import type { SkillDefinition } from "../contracts/skills";
 import type { McpEnvironmentCheckResponse, McpReferenceResponse, ToolsResponse } from "../contracts/tools";
-import { CapabilitiesSettings } from "./capability-settings";
+import { BasicCapabilitiesSettings, McpServiceSettings } from "./capability-settings";
 import { ModelSettings } from "./model-settings";
 import { SkillSettings } from "./skill-settings";
 import { ThemeSwitcher } from "./theme-switcher";
@@ -36,8 +35,6 @@ export function SettingsDialog(props: {
   readonly workspaceDirectory: string;
   readonly setWorkspaceDirectory: (value: string) => void;
   readonly onSaveCommandShell: (kind: "auto" | "cmd" | "powershell" | "pwsh" | "bash" | "sh") => void;
-  readonly savingModelCapabilities?: boolean;
-  readonly onSaveModelCapabilities: (capabilities: Partial<ModelCapabilities>) => Promise<void>;
   readonly savingModel?: boolean;
   readonly onSaveModel: (form?: ModelForm) => Promise<void>;
   readonly onCreateCustomProfile: (form?: ModelForm) => Promise<void>;
@@ -54,11 +51,10 @@ export function SettingsDialog(props: {
   readonly setToolForm: (form: ToolForm) => void;
   readonly mcpServerForm: McpServerForm;
   readonly setMcpServerForm: (form: McpServerForm) => void;
-  readonly mcpReferences: Readonly<Record<string, McpReferenceResponse>>;
   readonly savingTools?: boolean;
   readonly onSaveTools: () => void;
   readonly onSaveMcpServer: (form?: McpServerForm) => Promise<void>;
-  readonly onLoadMcpReferences: (serverId: string) => void;
+  readonly onLoadMcpReferences: (serverId: string) => Promise<McpReferenceResponse>;
   readonly onImportMcpConfig: (config: string) => void;
   readonly onTestMcpServer: (serverId: string) => void;
   readonly onCheckMcpEnvironment: (form: Pick<McpServerForm, "command" | "commandLine">) => Promise<McpEnvironmentCheckResponse>;
@@ -142,20 +138,21 @@ export function SettingsDialog(props: {
                 modelCatalogs={props.modelCatalogs}
               />
             )}
-            {(activeGroup === "capabilities" || activeGroup === "mcp") && (
-              <CapabilitiesSettings
-                activeSection={activeGroup}
-                config={props.config}
+            {activeGroup === "basicCapabilities" && (
+              <BasicCapabilitiesSettings
                 tools={props.tools}
                 toolForm={props.toolForm}
                 setToolForm={props.setToolForm}
-                savingModelCapabilities={props.savingModelCapabilities}
-                onSaveModelCapabilities={props.onSaveModelCapabilities}
-                mcpServerForm={props.mcpServerForm}
-                setMcpServerForm={props.setMcpServerForm}
-                mcpReferences={props.mcpReferences}
                 savingTools={props.savingTools}
                 onSaveTools={props.onSaveTools}
+              />
+            )}
+            {activeGroup === "mcp" && (
+              <McpServiceSettings
+                tools={props.tools}
+                mcpServerForm={props.mcpServerForm}
+                setMcpServerForm={props.setMcpServerForm}
+                savingTools={props.savingTools}
                 onSaveMcpServer={props.onSaveMcpServer}
                 onLoadMcpReferences={props.onLoadMcpReferences}
                 onImportMcpConfig={props.onImportMcpConfig}
@@ -194,7 +191,7 @@ export function SettingsDialog(props: {
 
 const SETTINGS_GROUPS: readonly { readonly id: SettingsGroup; readonly label: string; readonly icon: React.ReactNode }[] = [
   { id: "models", label: "模型服务", icon: <CloudCog size={15} /> },
-  { id: "capabilities", label: "基础能力", icon: <SlidersHorizontal size={15} /> },
+  { id: "basicCapabilities", label: "基础能力", icon: <SlidersHorizontal size={15} /> },
   { id: "mcp", label: "MCP 服务", icon: <Server size={15} /> },
   { id: "skills", label: "技能", icon: <FileText size={15} /> },
   { id: "workspace", label: "工作区", icon: <Database size={15} /> },

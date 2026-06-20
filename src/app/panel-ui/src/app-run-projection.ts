@@ -15,7 +15,6 @@ import type {
   BasicAgentRun,
   DesktopRunDetail,
   DesktopWorkView,
-  PanelRunResultReadModel,
   RunCapabilityResolution,
   RunEvent,
   TranscriptNode,
@@ -25,7 +24,6 @@ import type { LiveRunBuffer } from "../../panel-ui-live-run-buffer";
 export type CurrentRunProjection = {
   readonly run?: BasicAgentRun;
   readonly workView?: DesktopWorkView;
-  readonly result?: PanelRunResultReadModel;
   readonly capabilityResolution?: RunCapabilityResolution;
   readonly detail?: DesktopRunDetail;
   readonly live?: LiveRunBuffer;
@@ -121,7 +119,6 @@ export function projectCurrentRun(app: RunProjectionState): CurrentRunProjection
     return { events: [], transcriptNodes: transcriptNodesForConversation(app) };
   }
   const workView = app.workView?.run.runId === runId ? app.workView : undefined;
-  const result = app.conversation?.currentRun?.run.runId === runId ? app.conversation.currentRun.result : undefined;
   const capabilityResolution = app.capabilityResolutionRunId === runId ? app.capabilityResolution : undefined;
   const detail = app.detail?.runId === runId ? app.detail : undefined;
   const live = app.live?.runId === runId ? app.live : undefined;
@@ -131,7 +128,6 @@ export function projectCurrentRun(app: RunProjectionState): CurrentRunProjection
   return {
     run: app.run,
     workView,
-    result,
     capabilityResolution,
     detail,
     live,
@@ -145,7 +141,6 @@ export function currentRunProjectionDeps(app: RunProjectionState): readonly unkn
     app.conversation,
     app.run,
     app.workView,
-    app.conversation?.currentRun?.result,
     app.capabilityResolution,
     app.capabilityResolutionRunId,
     app.transcriptNodesByRunId,

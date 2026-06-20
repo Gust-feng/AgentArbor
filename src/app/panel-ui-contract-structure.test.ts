@@ -49,6 +49,8 @@ test("panel UI contracts stay split by product concern", async () => {
   assert.equal(contractRun.includes('from "../../../panel-basic-agent-run-view-contracts"'), true);
   assert.equal(contractRun.includes("type BackendBasicAgentRunView = PanelBasicAgentRunView<"), true);
   assert.equal(contractRun.includes("export type BasicAgentRunView = BackendBasicAgentRunView"), true);
+  assert.equal(contractRun.includes("PanelRunResultReadModel"), false);
+  assert.equal(contractRun.includes("readonly result?:"), false);
   assert.equal(contractRun.includes('Omit<BackendBasicAgentRunView, "workSession">'), false);
   assert.equal(contractRun.includes("DesktopWorkSession"), false);
   assert.equal(contractRun.includes("readonly workSession?:"), false);

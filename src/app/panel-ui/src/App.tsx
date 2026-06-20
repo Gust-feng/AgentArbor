@@ -37,11 +37,9 @@ import {
   stopLiveUpdates,
 } from "./app-runtime-controls";
 import { createInitialAppState } from "./app-state";
-import type { Conversation } from "./contracts/conversation";
-import type { ModelCapabilities, ModelProviderModelCatalog } from "./contracts/config";
+import type { ModelProviderModelCatalog } from "./contracts/config";
 import type { ContextAttachment } from "./contracts/context";
-import type { PanelRunResultReadModel } from "./contracts/run";
-import type { McpReferenceResponse, McpServerCatalogItem } from "./contracts/tools";
+import type { McpServerCatalogItem } from "./contracts/tools";
 import { modelOptionSupportsReasoningEffort, modelOptionsFromConfig, selectedModelOptionId } from "./model-options";
 
 export function App(): React.ReactElement {
@@ -68,7 +66,6 @@ export function App(): React.ReactElement {
   const [toolConfirmationPolicy, setToolConfirmationPolicy] = useState<ComposerToolConfirmationPolicy>("prompt");
   const [composerSelectedModelId, setComposerSelectedModelId] = useState<string | undefined>(undefined);
   const [modelCatalogs, setModelCatalogs] = useState<Record<string, ModelProviderModelCatalog>>({});
-  const [mcpReferences, setMcpReferences] = useState<Readonly<Record<string, McpReferenceResponse>>>({});
   const [workspaceDirectory, setWorkspaceDirectory] = useState("");
   const [toolForm, setToolForm] = useState<ToolForm>({
     provider: "tavily",
@@ -105,7 +102,6 @@ export function App(): React.ReactElement {
   const [contextBusy, setContextBusy] = useState(false);
   const [queuedMessages, setQueuedMessages] = useState<readonly { readonly id: string; readonly content: string }[]>([]);
   const [savingModel, setSavingModel] = useState(false);
-  const [savingModelCapabilities, setSavingModelCapabilities] = useState(false);
   const [, setSavingWorkspace] = useState(false);
   const [savingTools, setSavingTools] = useState(false);
   const mountedRef = useRef(true);
@@ -229,7 +225,6 @@ export function App(): React.ReactElement {
   );
   const chatScreen = screen === "chat-empty" && (app.conversation !== undefined || app.run !== undefined) ? "chat-active" : screen;
   const currentRun = useMemo(() => projectCurrentRun(app), currentRunProjectionDeps(app));
-  const currentResult = currentRun.result ?? app.conversation?.currentResult;
   const modelResponding = currentRun.run !== undefined && shouldKeepRefreshing(currentRun.run.status);
   const pendingConfirmation = currentRun.workView?.pendingConfirmation;
   const pendingConversationCount = app.conversations.filter(isConversationWaitingForUser).length;
@@ -291,7 +286,6 @@ export function App(): React.ReactElement {
     mcpToolUpdateVersionRef,
     mcpToolCatalogDraftRef,
     setSavingModel,
-    setSavingModelCapabilities,
     setSavingWorkspace,
     setSavingTools,
   });
@@ -307,7 +301,6 @@ export function App(): React.ReactElement {
     saveWorkspace,
     saveCommandShell,
     saveToolConfirmationPolicy,
-    saveModelCapabilities,
     saveTools,
     saveMcpServer,
     loadMcpReferences,
@@ -472,21 +465,6 @@ export function App(): React.ReactElement {
     );
   }, []);
 
-  const handleResultAction = useCallback((action: PanelRunResultReadModel["actions"][number]) => {
-    if (action.status === "done") return;
-    if (action.kind === "next") {
-      setGoal(action.label);
-      setInputCloseSignal((value) => value + 1);
-      return;
-    }
-    if (action.kind === "retry") {
-      const retryGoal = lastUserTurnContent(app.conversation?.turns) ?? app.run?.goalSummary ?? "";
-      if (retryGoal.trim().length > 0) {
-        void startTask(retryGoal);
-      }
-    }
-  }, [app.conversation?.turns, app.run?.goalSummary, startTask]);
-
   const previousRunActivityRef = useRef<{ readonly runId?: string; readonly responding: boolean }>({ responding: false });
   const queueReadyAfterRunRef = useRef<string | undefined>(undefined);
   const dispatchedQueueAfterRunRef = useRef<string | undefined>(undefined);
@@ -592,7 +570,6 @@ export function App(): React.ReactElement {
               {...inputProps}
               conversation={app.conversation}
               run={currentRun.run}
-              result={currentResult}
               workView={currentRun.workView}
               transcriptNodes={currentRun.transcriptNodes}
               detail={currentRun.detail}
@@ -600,7 +577,6 @@ export function App(): React.ReactElement {
               error={app.error}
               pendingConfirmation={pendingConfirmation}
               onDecision={(decision, guidance) => void decideConfirmation(decision, guidance)}
-              onResultAction={handleResultAction}
               confirmationBusy={confirmationBusy}
               queuedMessages={queuedMessages}
               onRemoveQueuedMessage={removeQueuedMessage}
@@ -631,20 +607,15 @@ export function App(): React.ReactElement {
         skills={app.skills}
         onSaveWorkspace={(nextWorkspaceDirectory) => void saveWorkspace(nextWorkspaceDirectory)}
         onSaveCommandShell={(kind) => void saveCommandShell(kind)}
-        savingModelCapabilities={savingModelCapabilities}
-        onSaveModelCapabilities={(capabilities: Partial<ModelCapabilities>) => saveModelCapabilities(capabilities)}
         tools={app.tools}
         toolForm={toolForm}
         setToolForm={setToolForm}
         mcpServerForm={mcpServerForm}
         setMcpServerForm={setMcpServerForm}
-        mcpReferences={mcpReferences}
         savingTools={savingTools}
         onSaveTools={() => void saveTools()}
         onSaveMcpServer={saveMcpServer}
-        onLoadMcpReferences={(serverId) => loadMcpReferences(serverId).then((references) => {
-          setMcpReferences((previous) => ({ ...previous, [serverId]: references }));
-        })}
+        onLoadMcpReferences={loadMcpReferences}
         onImportMcpConfig={(config) => void importMcpConfig(config)}
         onTestMcpServer={(serverId) => void testMcpServer(serverId)}
         onCheckMcpEnvironment={checkMcpEnvironment}
@@ -656,17 +627,6 @@ export function App(): React.ReactElement {
       />
     </div>
   );
-}
-
-function lastUserTurnContent(turns: Conversation["turns"] | undefined): string | undefined {
-  if (turns === undefined) return undefined;
-  for (let index = turns.length - 1; index >= 0; index -= 1) {
-    const turn = turns[index];
-    if (turn?.role === "user") {
-      return turn.content;
-    }
-  }
-  return undefined;
 }
 
 function WorkbenchHeader(props: {

@@ -361,32 +361,6 @@ test("assistant workflow display exposes segment lifecycle for observation", () 
   assert.equal(segments[2]?.kind === "activity" ? segments[2].lifecycle : undefined, "settled");
 });
 
-test("assistant workflow display surfaces file evidence from transcript tools", () => {
-  const display = projectStableAssistantWorkflowDisplay({
-    content: "已完成。",
-    transcriptNodes: [
-      node({
-        nodeId: "edit-1",
-        sequence: 1,
-        kind: "tool",
-        eventType: "tool.completed",
-        phase: "completed",
-        display: {
-          kind: "file_diff_preview",
-          path: "src/app/example.ts",
-          replacements: 1,
-          preview: "- old\n+ new",
-        },
-      }),
-    ],
-    collapseTimeline: false,
-  });
-
-  assert.equal(display.workflow.resultEvidence?.fileChanges.length, 1);
-  assert.equal(display.workflow.resultEvidence?.fileChanges[0]?.path, "src/app/example.ts");
-  assert.equal(display.workflow.resultEvidence?.fileChanges[0]?.kind, "file_diff_preview");
-});
-
 function node(input: {
   readonly nodeId: string;
   readonly sequence: number;

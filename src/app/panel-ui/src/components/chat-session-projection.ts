@@ -1,5 +1,5 @@
 import { resolveModelIconSvgForModel } from "../model-icons";
-import { modelProviderDisplayName, resolveModelProviderIdentity, type ModelProviderIdentity } from "../model-provider-logos";
+import { resolveModelProviderIdentity, type ModelProviderIdentity } from "../model-provider-logos";
 import type { ConversationTurn } from "../contracts/conversation";
 import type { ChatModelOption } from "./chat-empty";
 
@@ -35,7 +35,7 @@ export function assistantModelForTurn(
     });
     return {
       modelName: turn.responseModel.model ?? turn.responseModel.label ?? "模型",
-      providerLabel: identity === "unknown" ? turn.responseModel.label ?? "模型" : modelProviderDisplayName(identity),
+      providerLabel: turn.responseModel.label ?? "模型",
       providerIdentity: identity,
       iconSvg: resolveModelIconSvgForModel({
         providerIdentity: identity,

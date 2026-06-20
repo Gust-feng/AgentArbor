@@ -1,9 +1,12 @@
 import React, { useCallback, useRef } from "react";
 import {
   Copy,
+  FileText,
+  ListChecks,
 } from "lucide-react";
 import type { ConversationTurn } from "../contracts/conversation";
 import type {
+  PanelRunResultReadModel,
   TranscriptNode,
 } from "../contracts/run";
 import type { LiveAnswerTone } from "../../../panel-ui-live-transcript";
@@ -22,6 +25,7 @@ import {
   AgentWorkTimeline,
   type ConfirmationProjection,
 } from "./transcript-timeline";
+import { ChatRunResult } from "./chat-run-result";
 
 export { isRefreshingRunStatus } from "../../../panel-transcript-turn-projection";
 
@@ -30,7 +34,9 @@ export function TranscriptChain(props: {
   readonly models: readonly ChatModelOption[];
   readonly selectedModelId: string;
   readonly onDecision: (decision: "approve_once" | "deny" | "guidance", guidance?: string) => void;
+  readonly onResultAction?: (action: PanelRunResultReadModel["actions"][number]) => void;
   readonly confirmationBusy: boolean;
+  readonly currentResult?: PanelRunResultReadModel;
   readonly hiddenEarlierTurnCount?: number;
   readonly onShowEarlierTurns?: () => void;
 }): React.ReactElement | null {
@@ -61,6 +67,19 @@ export function TranscriptChain(props: {
         const model = item.source === "turn" && item.turn !== undefined
           ? assistantModelForTurn(item.turn, props.models, props.selectedModelId)
           : selectedComposerModel(props.models, props.selectedModelId);
+        const result = resultForAssistantItem(props.currentResult, item);
+        if (result !== undefined) {
+          return (
+            <ChatRunResult
+              key={item.key}
+              result={result}
+              model={model}
+              onAction={props.onResultAction}
+              onDecision={stableOnDecision}
+              confirmationBusy={item.hasPendingConfirmation && props.confirmationBusy}
+            />
+          );
+        }
         return item.failure !== undefined
           ? (
             <AssistantFailureMessage
@@ -84,6 +103,17 @@ export function TranscriptChain(props: {
       })}
     </div>
   );
+}
+
+function resultForAssistantItem(
+  result: PanelRunResultReadModel | undefined,
+  item: ConversationDisplayItem<ConversationTurn, TranscriptNode, ConfirmationProjection>,
+): PanelRunResultReadModel | undefined {
+  if (result === undefined || item.kind !== "assistant") return undefined;
+  if (item.source === "turn") {
+    return item.turn.runId === result.runId ? result : undefined;
+  }
+  return result;
 }
 
 const UserMessage = React.memo(function UserMessage({ content, status }: { readonly content: string; readonly status: string }): React.ReactElement {
@@ -142,6 +172,9 @@ const MemoAssistantMessage = React.memo(function AssistantMessageContent(props: 
             />
           );
         })}
+        {workflow.resultEvidence !== undefined && (
+          <AssistantResultEvidenceBlock evidence={workflow.resultEvidence} />
+        )}
         {workflow.copyText.trim().length > 0 && workflow.showCopyActions && (
           <div className="turn-actions">
             <button type="button" onClick={() => copyToClipboard(workflow.copyText)}>
@@ -282,6 +315,141 @@ const AssistantAnswerBlock = React.memo(function AssistantAnswerBlock(props: {
     </div>
   );
 });
+
+const AssistantResultEvidenceBlock = React.memo(function AssistantResultEvidenceBlock(props: {
+  readonly evidence: WorkflowResultEvidence;
+}): React.ReactElement | null {
+  const fileChanges = props.evidence.fileChanges;
+  const nextActions = props.evidence.nextActions.slice(0, 5);
+  if (fileChanges.length === 0 && nextActions.length === 0) {
+    return null;
+  }
+  return (
+    <section className="assistant-result-evidence" aria-label="结果证据">
+      {fileChanges.length > 0 && (
+        <div className="assistant-result-group">
+          <h3>
+            <FileText size={14} aria-hidden="true" />
+            文件改动
+          </h3>
+          <ul className="assistant-file-change-list">
+            {fileChanges.map((change, index) => (
+              <li key={`${change.path ?? "file"}-${change.kind}-${index}`} className="assistant-file-change">
+                <div className="assistant-file-change-head">
+                  <span className="assistant-file-change-path">{change.path}</span>
+                  <div className="assistant-file-change-meta">
+                    <AssistantEvidenceChip label={fileChangeTypeLabel(change)} tone={fileChangeTone(change)} />
+                    {fileChangeBadges(change).map((badge, badgeIndex) => (
+                      <AssistantEvidenceChip
+                        key={`${badge.label}-${badgeIndex}`}
+                        label={badge.label}
+                        tone={badge.tone}
+                        monospace={badge.monospace}
+                      />
+                    ))}
+                  </div>
+                </div>
+                {change.summary !== undefined && change.summary.trim().length > 0 && (
+                  <p className="assistant-file-change-summary">{change.summary.trim()}</p>
+                )}
+                {change.preview !== undefined && change.preview.trim().length > 0 && (
+                  <pre className="assistant-file-change-preview"><code>{change.preview.trim()}</code></pre>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {nextActions.length > 0 && (
+        <div className="assistant-result-group">
+          <h3>
+            <ListChecks size={14} aria-hidden="true" />
+            下一步建议
+          </h3>
+          <ol className="assistant-next-action-list">
+            {nextActions.map((action, index) => (
+              <li key={`${index}-${action}`}>
+                <span className="assistant-next-action-index" aria-hidden="true">{index + 1}</span>
+                <span>{action}</span>
+              </li>
+            ))}
+          </ol>
+        </div>
+      )}
+    </section>
+  );
+});
+
+type WorkflowResultEvidence = NonNullable<AssistantWorkflowDisplay<TranscriptNode, ConfirmationProjection>["resultEvidence"]>;
+type WorkflowFileChange = WorkflowResultEvidence["fileChanges"][number];
+
+function fileChangeTypeLabel(change: WorkflowFileChange): string {
+  const summary = (change.summary ?? "").toLowerCase();
+  if (summary.includes("delete") || summary.includes("删除") || summary.includes("移除")) return "删除";
+  if (summary.includes("create") || summary.includes("created") || summary.includes("new") || summary.includes("新建") || summary.includes("创建")) return "新建";
+  if (summary.includes("append") || summary.includes("追加")) return "追加";
+  if (change.kind === "file_diff_preview") return "修改";
+  return "文件变更";
+}
+
+function fileChangeTone(change: WorkflowFileChange): "accent" | "success" | "warning" | "danger" | "neutral" {
+  const type = fileChangeTypeLabel(change);
+  if (type === "删除") return "danger";
+  if (type === "新建") return "success";
+  if (type === "追加") return "accent";
+  if (type === "修改") return "warning";
+  return "neutral";
+}
+
+function fileChangeBadges(change: WorkflowFileChange): readonly {
+  readonly label: string;
+  readonly tone?: "accent" | "success" | "warning" | "danger" | "neutral";
+  readonly monospace?: boolean;
+}[] {
+  const badges: {
+    readonly label: string;
+    readonly tone?: "accent" | "success" | "warning" | "danger" | "neutral";
+    readonly monospace?: boolean;
+  }[] = [];
+  if (change.replacements !== undefined) {
+    badges.push({ label: `${change.replacements} 处修改`, tone: "warning" });
+  }
+  if (change.bytes !== undefined) {
+    badges.push({ label: byteLabel(change.bytes), monospace: true });
+  }
+  if (change.append === true) {
+    badges.push({ label: "追加", tone: "accent" });
+  }
+  if (change.truncated === true) {
+    badges.push({ label: "预览截断", tone: "warning" });
+  }
+  return badges;
+}
+
+function byteLabel(value: number): string {
+  if (!Number.isFinite(value) || value < 0) return "0 B";
+  if (value < 1_024) return `${Math.round(value)} B`;
+  if (value < 1_024 * 1_024) {
+    return `${(value / 1_024).toFixed(value < 10 * 1_024 ? 1 : 0).replace(/\.0$/, "")} KB`;
+  }
+  return `${(value / (1_024 * 1_024)).toFixed(1).replace(/\.0$/, "")} MB`;
+}
+
+function AssistantEvidenceChip(props: {
+  readonly label: string;
+  readonly tone?: "accent" | "success" | "warning" | "danger" | "neutral";
+  readonly monospace?: boolean;
+}): React.ReactElement {
+  return (
+    <span
+      className="assistant-evidence-chip"
+      data-tone={props.tone ?? "neutral"}
+      data-monospace={props.monospace === true ? "true" : undefined}
+    >
+      {props.label}
+    </span>
+  );
+}
 
 function AssistantFailureNotice(props: {
   readonly error: string;

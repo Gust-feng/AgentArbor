@@ -8,5 +8,9 @@ export async function createConversationCurrentRunReadModel(
   runtime: BasicAgentRunViewRuntime,
   runId: string
 ): Promise<PanelConversationCurrentRunReadModel | undefined> {
-  return createBasicAgentRunViewReadModel(runtime, runId, 0);
+  const view = await createBasicAgentRunViewReadModel(runtime, runId, 0);
+  if (view === undefined) {
+    return undefined;
+  }
+  return view;
 }

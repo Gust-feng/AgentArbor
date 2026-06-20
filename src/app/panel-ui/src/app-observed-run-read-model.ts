@@ -3,6 +3,7 @@ import type {
   BasicAgentRun,
   DesktopRunDetail,
   DesktopWorkView,
+  PanelRunResultReadModel,
   RunCapabilityResolution,
   RunEvent,
 } from "./contracts/run";
@@ -17,6 +18,7 @@ export type ObservedRunReadModel = {
   readonly runId: string;
   readonly run?: BasicAgentRun;
   readonly workView?: DesktopWorkView;
+  readonly result?: PanelRunResultReadModel;
   readonly capabilityResolution?: RunCapabilityResolution;
   readonly detail?: DesktopRunDetail;
   readonly replay?: {
@@ -45,6 +47,7 @@ export async function loadObservedRunReadModel(input: {
       runId: input.runId,
       run: currentRun.run,
       workView: ordinaryWorkViewFromRunView(currentRun),
+      result: currentRun.result,
       capabilityResolution: currentRun.capabilityResolution,
       detail: currentRun.detail,
       replay: currentRun.replay,
@@ -58,6 +61,7 @@ export async function loadObservedRunReadModel(input: {
     runId: input.runId,
     run: view?.run,
     workView: ordinaryWorkViewFromRunView(view),
+    result: view?.result,
     capabilityResolution: view?.capabilityResolution,
     detail: view?.detail,
     replay: view?.replay,

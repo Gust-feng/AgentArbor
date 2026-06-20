@@ -37,8 +37,10 @@ import {
   stopLiveUpdates,
 } from "./app-runtime-controls";
 import { createInitialAppState } from "./app-state";
+import type { Conversation } from "./contracts/conversation";
 import type { ModelCapabilities, ModelProviderModelCatalog } from "./contracts/config";
 import type { ContextAttachment } from "./contracts/context";
+import type { PanelRunResultReadModel } from "./contracts/run";
 import type { McpReferenceResponse, McpServerCatalogItem } from "./contracts/tools";
 import { modelOptionSupportsReasoningEffort, modelOptionsFromConfig, selectedModelOptionId } from "./model-options";
 
@@ -54,6 +56,8 @@ export function App(): React.ReactElement {
   const [modelForm, setModelForm] = useState<ModelForm>({
     profileId: "",
     label: "",
+    logoDataUrl: "",
+    logoCleared: false,
     baseUrl: "",
     protocolKind: "openai_compatible_chat_completions",
     model: "",
@@ -155,6 +159,8 @@ export function App(): React.ReactElement {
       setModelForm({
         profileId: activeProfileId,
         label: visibleConfigLabel(app.config!.config!),
+        logoDataUrl: app.config!.config!.logoDataUrl ?? "",
+        logoCleared: false,
         baseUrl: visibleConfigBaseUrl(app.config!.config!),
         protocolKind: app.config!.config!.protocolKind ?? "openai_compatible_chat_completions",
         model: app.config!.config!.model ?? "",
@@ -223,6 +229,7 @@ export function App(): React.ReactElement {
   );
   const chatScreen = screen === "chat-empty" && (app.conversation !== undefined || app.run !== undefined) ? "chat-active" : screen;
   const currentRun = useMemo(() => projectCurrentRun(app), currentRunProjectionDeps(app));
+  const currentResult = currentRun.result ?? app.conversation?.currentResult;
   const modelResponding = currentRun.run !== undefined && shouldKeepRefreshing(currentRun.run.status);
   const pendingConfirmation = currentRun.workView?.pendingConfirmation;
   const pendingConversationCount = app.conversations.filter(isConversationWaitingForUser).length;
@@ -465,6 +472,21 @@ export function App(): React.ReactElement {
     );
   }, []);
 
+  const handleResultAction = useCallback((action: PanelRunResultReadModel["actions"][number]) => {
+    if (action.status === "done") return;
+    if (action.kind === "next") {
+      setGoal(action.label);
+      setInputCloseSignal((value) => value + 1);
+      return;
+    }
+    if (action.kind === "retry") {
+      const retryGoal = lastUserTurnContent(app.conversation?.turns) ?? app.run?.goalSummary ?? "";
+      if (retryGoal.trim().length > 0) {
+        void startTask(retryGoal);
+      }
+    }
+  }, [app.conversation?.turns, app.run?.goalSummary, startTask]);
+
   const previousRunActivityRef = useRef<{ readonly runId?: string; readonly responding: boolean }>({ responding: false });
   const queueReadyAfterRunRef = useRef<string | undefined>(undefined);
   const dispatchedQueueAfterRunRef = useRef<string | undefined>(undefined);
@@ -570,6 +592,7 @@ export function App(): React.ReactElement {
               {...inputProps}
               conversation={app.conversation}
               run={currentRun.run}
+              result={currentResult}
               workView={currentRun.workView}
               transcriptNodes={currentRun.transcriptNodes}
               detail={currentRun.detail}
@@ -577,6 +600,7 @@ export function App(): React.ReactElement {
               error={app.error}
               pendingConfirmation={pendingConfirmation}
               onDecision={(decision, guidance) => void decideConfirmation(decision, guidance)}
+              onResultAction={handleResultAction}
               confirmationBusy={confirmationBusy}
               queuedMessages={queuedMessages}
               onRemoveQueuedMessage={removeQueuedMessage}
@@ -632,6 +656,17 @@ export function App(): React.ReactElement {
       />
     </div>
   );
+}
+
+function lastUserTurnContent(turns: Conversation["turns"] | undefined): string | undefined {
+  if (turns === undefined) return undefined;
+  for (let index = turns.length - 1; index >= 0; index -= 1) {
+    const turn = turns[index];
+    if (turn?.role === "user") {
+      return turn.content;
+    }
+  }
+  return undefined;
 }
 
 function WorkbenchHeader(props: {

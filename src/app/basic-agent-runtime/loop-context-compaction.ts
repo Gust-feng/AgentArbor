@@ -1,7 +1,7 @@
 import type { ModelMessage } from "../../domain/intelligence/index.js";
 import type { ToolDefinition } from "../../domain/tools/index.js";
 import { createId, nowIso } from "../../kernel/id.js";
-import { sanitizeConversationHistoryText } from "../visible-text-safety.js";
+import { normalizeModelFacingText } from "../visible-text-safety.js";
 import {
   clampRatio,
   compactionAgentDisplayName,
@@ -68,7 +68,9 @@ export async function compactBasicAgentLoopContextIfNeeded(
     };
   }
 
-  const promptText = sanitizeConversationHistoryText(
+  // The continuation prompt is re-fed to the model as compacted context, so keep
+  // its internal whitespace/blank lines (section breaks, code fragments) intact.
+  const promptText = normalizeModelFacingText(
     typeof response.textOutput === "string" && response.textOutput.trim().length > 0
       ? response.textOutput
       : typeof response.structuredOutput === "string"
@@ -137,7 +139,7 @@ function loopCompactionMessages(input: {
     {
       role: "user",
       content: [
-        `Current user request: ${sanitizeConversationHistoryText(input.goal)}`,
+        `Current user request: ${normalizeModelFacingText(input.goal)}`,
         "Context to compact:",
         ...input.compactible.map((entry) => serializeLoopMessageForCompaction(entry.message, entry.index)),
         "",
@@ -260,7 +262,9 @@ function serializeLoopMessageForCompaction(message: ModelMessage, index: number)
   const toolResult = message.toolCallId === undefined ? "" : `\n  toolResultFor: ${message.toolName ?? "tool"}#${message.toolCallId}`;
   return [
     `- [${ref}] ${message.role}:${toolCalls}${toolResult}`,
-    indentBlock(sanitizeConversationHistoryText(message.content)),
+    // Model-facing: keep tool results / file content / stdout indentation intact
+    // before indenting the block for the compaction request.
+    indentBlock(normalizeModelFacingText(message.content)),
   ].join("\n");
 }
 

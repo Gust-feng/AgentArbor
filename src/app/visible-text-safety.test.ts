@@ -5,6 +5,7 @@ import type { EventLogEntry } from "../kernel/events/in-memory-event-log.js";
 import { latestModelFailureTextForUser } from "./model-failure-visible-copy.js";
 import {
   friendlyUserFacingModelFailureText,
+  normalizeModelFacingText,
   sanitizeAssistantVisibleText,
   sanitizeConversationHistoryText,
 } from "./visible-text-safety.js";
@@ -42,6 +43,28 @@ test("conversation history sanitizer keeps ordinary ids while compacting whitesp
     sanitizeConversationHistoryText("A run-of-the-mill note mentions model-request-abc."),
     "A run-of-the-mill note mentions model-request-abc."
   );
+});
+
+test("model-facing text normalizer preserves code indentation and internal spacing", () => {
+  const code = [
+    "Ran the command, stdout was:",
+    "```",
+    "name    status",
+    "alpha   ok",
+    "beta    pending",
+    "```",
+  ].join("\n");
+  // Model-facing text must keep column alignment / indentation exactly as written.
+  assert.equal(normalizeModelFacingText(code), code);
+});
+
+test("model-facing text normalizer only normalizes line endings and outer whitespace", () => {
+  assert.equal(
+    normalizeModelFacingText("  line one\n\n  line two\n\tindented  \r\n"),
+    "line one\n\n  line two\n\tindented"
+  );
+  // Internal runs of spaces/tabs are preserved (not collapsed).
+  assert.equal(normalizeModelFacingText("a\t\tb     c"), "a\t\tb     c");
 });
 
 test("model failure visible text keeps diagnostic fields out of ordinary copy", () => {

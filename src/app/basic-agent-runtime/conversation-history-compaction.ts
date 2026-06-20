@@ -1,7 +1,7 @@
 import type { ModelMessage } from "../../domain/intelligence/index.js";
 import { createId, nowIso } from "../../kernel/id.js";
 import type { DesktopAgentConversationMessage } from "../desktop-agent-contracts.js";
-import { sanitizeConversationHistoryText } from "../visible-text-safety.js";
+import { normalizeModelFacingText } from "../visible-text-safety.js";
 import {
   clampRatio,
   compactionAgentDisplayName,
@@ -31,7 +31,9 @@ export async function compactBasicAgentConversationIfNeeded(
     .map((message, index) => ({
       message,
       index,
-      safeContent: sanitizeConversationHistoryText(message.content),
+      // Model-facing: preserve internal whitespace/indentation so code, stdout,
+      // and JSON in earlier turns keep their structure when fed to the compaction model.
+      safeContent: normalizeModelFacingText(message.content),
     }))
     .filter((entry) => entry.safeContent.trim().length > 0);
   const historyTokens = tokenCounter.countMessages(
@@ -82,7 +84,7 @@ export async function compactBasicAgentConversationIfNeeded(
     };
   }
 
-  const summaryText = sanitizeConversationHistoryText(
+  const summaryText = normalizeModelFacingText(
     typeof response.textOutput === "string" && response.textOutput.trim().length > 0
       ? response.textOutput
       : typeof response.structuredOutput === "string"
@@ -137,7 +139,7 @@ function compactionMessages(input: {
     {
       role: "user",
       content: [
-        `Current user message: ${sanitizeConversationHistoryText(input.goal)}`,
+        `Current user message: ${normalizeModelFacingText(input.goal)}`,
         "Earlier conversation to compact:",
         ...input.earlier.map((entry) => {
           const role = entry.message.role === "assistant" ? "assistant" : "user";

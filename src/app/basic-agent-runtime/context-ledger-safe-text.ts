@@ -1,4 +1,4 @@
-import { sanitizeConversationHistoryText } from "../visible-text-safety.js";
+import { normalizeModelFacingText } from "../visible-text-safety.js";
 
 export function safeContextText(value: string, maxLength: number): { readonly text: string; readonly truncated: boolean } {
   const text = value.trim();
@@ -19,7 +19,10 @@ export function safeUnboundedContextText(value: string): { readonly text: string
 }
 
 export function safeConversationContextText(value: string, maxLength: number): { readonly text: string; readonly truncated: boolean } {
-  return safeContextText(sanitizeConversationHistoryText(value), maxLength);
+  // This feeds conversation history into the model context pack (visibility:"model"),
+  // so it must preserve internal whitespace/indentation/blank lines. Only normalize
+  // line endings and outer whitespace; do NOT collapse internal whitespace.
+  return safeContextText(normalizeModelFacingText(value), maxLength);
 }
 
 export function safePlainContextText(value: string, maxLength: number): string {

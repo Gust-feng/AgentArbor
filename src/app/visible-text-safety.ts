@@ -14,6 +14,21 @@ export function sanitizeConversationHistoryText(value: string): string {
     .trim();
 }
 
+/**
+ * Normalize text that will be shown to the model as conversation history or
+ * runtime context. The model must see the full fidelity of code blocks, command
+ * output, JSON, and indentation, so this only normalizes line endings
+ * (\r\n -> \n) and trims outer whitespace. It deliberately does NOT collapse
+ * internal whitespace, blank lines, or indentation.
+ *
+ * sanitizeConversationHistoryText is reserved for UI display projections only;
+ * never route model-facing text through it, because collapsing whitespace
+ * destroys the code/stdout/JSON structure the model needs to continue the task.
+ */
+export function normalizeModelFacingText(value: string): string {
+  return String(value).replace(/\r\n?/g, "\n").trim();
+}
+
 export function friendlyUserFacingFailureText(message: string | undefined): string {
   const text = optionalFriendlyFailureMessage(message);
   if (text === undefined) {

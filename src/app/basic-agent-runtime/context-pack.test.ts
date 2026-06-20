@@ -92,6 +92,39 @@ test("Basic Agent context pack includes history, task refs, readonly previews, a
   assert.equal(text.includes("[redacted-token]"), false);
 });
 
+test("Basic Agent context pack preserves conversation history indentation and blank lines for the model", () => {
+  const taskSoil = createTaskSoil({
+    rawGoal: "keep history formatting",
+    goalId: "goal-history-fidelity",
+    traceId: "trace-history-fidelity",
+  });
+  const codeHistory = [
+    "I ran the command, the output was:",
+    "```",
+    "name    status",
+    "alpha   ok",
+    "beta    pending",
+    "```",
+  ].join("\n");
+
+  const pack = buildBasicAgentContextPack({
+    agentDefinition: CONTEXT_PACK_TEST_AGENT,
+    goal: "continue",
+    taskSoil,
+    conversationHistory: [
+      { role: "user", content: codeHistory, ref: "conversation:fidelity:user" },
+      { role: "assistant", content: "understood", ref: "conversation:fidelity:assistant" },
+    ],
+  });
+
+  const historyMessage = pack.messages.find((message) => message.ref === "conversation:fidelity:user");
+  assert.notEqual(historyMessage, undefined);
+  // Model-facing history must keep internal whitespace, blank lines, and column
+  // alignment exactly as written (no whitespace collapsing), so code/stdout/JSON
+  // structure the model needs to continue the task is preserved.
+  assert.equal(historyMessage?.content, codeHistory);
+});
+
 test("Basic Agent context pack does not expose run facts or tool visibility metadata", () => {
   const taskSoil = createTaskSoil({
     rawGoal: "answer using available context",

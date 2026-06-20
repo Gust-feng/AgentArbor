@@ -711,7 +711,7 @@ test("panel MCP presets and JSON import keep imported servers conservative", asy
   }
 });
 
-test("panel MCP test connection failure returns sanitized error and leaves system usable", async () => {
+test("panel MCP test connection failure returns connection error and leaves system usable", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-mcp-failure-"));
   const secret = "sk-should-not-leak-from-mcp-error";
   try {

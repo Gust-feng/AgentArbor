@@ -3,6 +3,7 @@ import type {
   ToolExecutionContext,
   ToolExecutor,
   ToolInputSchema,
+  ToolModelContract,
 } from "../../domain/tools/index.js";
 import type { McpConfirmationMode } from "../../domain/config/index.js";
 import type { McpClientWrapper, McpContentPart, McpToolInfo } from "./mcp-client.js";
@@ -26,24 +27,25 @@ export function createMcpToolExecutor(
   confirmationStrategy: McpToolConfirmationStrategy = DEFAULT_CONFIRMATION_STRATEGY
 ): ToolExecutor {
   const namespacedName = `${serverId}__${tool.name}`;
+  const inputSchema = toolInputSchema(tool);
   const metadata = inferToolMetadataFromMcpAnnotations(tool.annotations, {
     serverId,
     toolName: tool.name,
     confirmationStrategy,
   }) as ToolDefinitionMetadata;
-  const inputSchema: ToolInputSchema = {
-    type: "object",
-    properties: (tool.inputSchema.properties as Record<string, unknown>) ?? {},
-    required: tool.inputSchema.required as readonly string[] | undefined,
-    additionalProperties: tool.inputSchema.additionalProperties as boolean | undefined,
-  };
   return {
     definition: {
       name: namespacedName,
       description: tool.description ?? `MCP tool: ${tool.name} from ${serverId}`,
       inputSchema,
+      modelContract: createMcpToolModelContract({
+        serverId,
+        tool,
+        inputSchema,
         metadata,
-      },
+      }),
+      metadata,
+    },
     async execute(input: unknown, _context: ToolExecutionContext): Promise<unknown> {
       const result = await client.callTool(tool.name, input);
       if (result.isError === true) {
@@ -52,6 +54,70 @@ export function createMcpToolExecutor(
       }
       return buildToolOutput(result.content);
     },
+  };
+}
+
+function toolInputSchema(tool: McpToolInfo): ToolInputSchema {
+  return {
+    type: "object",
+    properties: recordOrEmpty(tool.inputSchema.properties),
+    required: stringArrayOrUndefined(tool.inputSchema.required),
+    additionalProperties: typeof tool.inputSchema.additionalProperties === "boolean"
+      ? tool.inputSchema.additionalProperties
+      : undefined,
+  };
+}
+
+function createMcpToolModelContract(input: {
+  readonly serverId: string;
+  readonly tool: McpToolInfo;
+  readonly inputSchema: ToolInputSchema;
+  readonly metadata: ToolDefinitionMetadata;
+}): ToolModelContract {
+  const propertyNames = Object.keys(input.inputSchema.properties);
+  const required = new Set(input.inputSchema.required ?? []);
+  const requiredNames = propertyNames.filter((name) => required.has(name));
+  const optionalNames = propertyNames.filter((name) => !required.has(name));
+  const inputNotes = [
+    propertyNames.length === 0
+      ? "Input is a JSON object; this MCP tool declares no named input fields."
+      : `Input is a JSON object with fields: ${propertyNames.join(", ")}.`,
+    requiredNames.length === 0 ? "No required input fields are declared." : `Required fields: ${requiredNames.join(", ")}.`,
+    optionalNames.length === 0 ? undefined : `Optional fields: ${optionalNames.join(", ")}.`,
+    input.inputSchema.additionalProperties === false
+      ? "Do not include fields outside the declared MCP input schema."
+      : "Additional fields may be accepted only if the MCP server supports them.",
+  ].filter(isString);
+  return {
+    purpose: input.tool.description?.trim() ?? `Call MCP tool ${input.tool.name} on server ${input.serverId}.`,
+    whenToUse: [
+      `Use when the task needs the ${input.tool.name} capability exposed by MCP server ${input.serverId}.`,
+      "Use only for the operation described by the MCP tool description and input schema.",
+    ],
+    whenNotToUse: [
+      "Do not use when a built-in workspace, shell, research, HTTP, or browser tool directly fits the task.",
+    ],
+    inputNotes,
+    usageNotes: [
+      `The model-visible tool name is ${input.serverId}__${input.tool.name}; the MCP server receives the original tool name ${input.tool.name}.`,
+      "MCP annotations are advisory; rely on the tool description, schema, and returned result when deciding follow-up steps.",
+    ],
+    outputNotes: [
+      "Successful calls return MCP content normalized into summary, result.text, result.multimodal, and truncated.",
+      "MCP tool error results fail the tool call and preserve server-provided error text when available.",
+    ],
+    runtimeHints: [
+      { label: "MCP server", value: input.serverId },
+      { label: "MCP tool", value: input.tool.name },
+      { label: "operation", value: input.metadata.operationType },
+      { label: "requires confirmation", value: String(input.metadata.requiresConfirmation) },
+    ],
+    examples: [
+      {
+        title: "Call MCP tool",
+        input: exampleInputForSchema(input.inputSchema),
+      },
+    ],
   };
 }
 
@@ -200,4 +266,63 @@ function approximateBase64Bytes(value: string): number {
   }
   const padding = clean.endsWith("==") ? 2 : clean.endsWith("=") ? 1 : 0;
   return Math.max(0, Math.floor((clean.length * 3) / 4) - padding);
+}
+
+function exampleInputForSchema(schema: ToolInputSchema): Readonly<Record<string, unknown>> {
+  const entries = Object.entries(schema.properties);
+  if (entries.length === 0) {
+    return {};
+  }
+  const required = new Set(schema.required ?? []);
+  const selected = entries
+    .filter(([name]) => required.has(name))
+    .concat(entries.filter(([name]) => !required.has(name)))
+    .slice(0, 3);
+  const result: Record<string, unknown> = {};
+  for (const [name, propertySchema] of selected) {
+    result[name] = exampleValueForJsonSchema(propertySchema);
+  }
+  return result;
+}
+
+function exampleValueForJsonSchema(value: unknown): unknown {
+  const schema = recordOrUndefined(value);
+  const type = typeof schema?.type === "string" ? schema.type : undefined;
+  if (Array.isArray(schema?.enum) && schema.enum.length > 0) {
+    return schema.enum[0];
+  }
+  if (type === "string") {
+    return "example";
+  }
+  if (type === "number" || type === "integer") {
+    return 1;
+  }
+  if (type === "boolean") {
+    return true;
+  }
+  if (type === "array") {
+    return [];
+  }
+  if (type === "object") {
+    return {};
+  }
+  return "example";
+}
+
+function recordOrEmpty(value: unknown): Record<string, unknown> {
+  return recordOrUndefined(value) ?? {};
+}
+
+function recordOrUndefined(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
+function stringArrayOrUndefined(value: unknown): readonly string[] | undefined {
+  return Array.isArray(value) && value.every((item) => typeof item === "string") ? value : undefined;
+}
+
+function isString(value: string | undefined): value is string {
+  return value !== undefined;
 }

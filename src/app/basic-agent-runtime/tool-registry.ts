@@ -234,7 +234,7 @@ function shouldRequireModelContract(input: {
     return false;
   }
   return input.scopes.some((scope) =>
-    scope === "desktop-basic" || scope === "research" || scope === "workspace"
+    scope === "desktop-basic" || scope === "research" || scope === "workspace" || scope === "mcp"
   );
 }
 

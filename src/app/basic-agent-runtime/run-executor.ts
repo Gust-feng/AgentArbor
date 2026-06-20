@@ -328,8 +328,15 @@ export class BasicAgentRunExecutor {
     const activeRunJob = new Promise<void>((resolve) => {
       setImmediate(() => {
         this.resumeConfirmationContinuation(input)
-          .catch((error: unknown) => {
+          .catch(async (error: unknown) => {
             console.error(`[run-executor] async confirmation resume failed for ${input.runId}:`, error);
+            // Convergence guard: resumeConfirmationContinuation self-finalizes inside its
+            // own try/catch, but a throw in the pre-resume setup (consume / markResuming /
+            // recordRunResumed / syncRunEvents) or a re-throw from the inner catch would
+            // otherwise escape with only a log line, leaving the run stuck in a
+            // non-terminal status (running / resuming / approval_needed). Fail any job
+            // that is still non-terminal so every scheduled resume reaches a terminal state.
+            await this.finalizeConfirmationResumeFailure(input.runId, input.job, error);
           })
           .finally(resolve);
       });
@@ -338,6 +345,26 @@ export class BasicAgentRunExecutor {
     void activeRunJob.then(() => {
       this.config.activeRunJobs.delete(activeRunJob);
     });
+  }
+
+  private async finalizeConfirmationResumeFailure(
+    runId: string,
+    fallbackJob: BasicAgentRunJob,
+    error: unknown
+  ): Promise<void> {
+    const latestJob = this.config.runJobs.get(runId) ?? fallbackJob;
+    if (inspectableTerminalStatus(latestJob.status) !== undefined) {
+      // Already terminal (e.g. the inner catch finalized before re-throwing, or the
+      // continuation-lost branch already moved the job to blocked). Do not rewrite the
+      // outcome; only ensure the terminal side effects are persisted.
+      return;
+    }
+    await this.config.failRun(latestJob, error);
+    const failed = this.config.runJobs.get(runId);
+    if (failed !== undefined) {
+      this.syncRunEvents(failed);
+      await this.finalizeTerminalJob(failed);
+    }
   }
 
   private async resumeConfirmationContinuation(input: {

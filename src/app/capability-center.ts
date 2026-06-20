@@ -189,6 +189,20 @@ function capabilityWarnings(input: {
   return warnings;
 }
 
+/**
+ * 把注册表目录项冻结为能力快照条目（FR-TOOL-001）。
+ *
+ * CapabilityCenter 只冻结工具契约的原始字段，**不做模型可见集合判定**：
+ * 模型可见集合的裁剪在 `capability-policy` 的 `resolveRunCapabilities` 中由
+ * `capabilitySnapshot.toolCatalog.tools` ∩ `toolVisibilityProfile` ∩
+ * `snapshot.allowedTools` ∩ permission 单一推导得到；裸 ToolCenter 仅执行，
+ * 不另立可见集合。
+ *
+ * 这里冻结的 `requiresConfirmation` 是契约的显式声明值。保守确认默认
+ * （缺确认策略时按需确认，FR-TOOL-002）在消费层（capability-policy）通过
+ * `resolveEffectiveConfirmationRequirement` 应用，不在快照层重写——保证快照
+ * 冻结的是工具自身契约事实，能力推导始终来自单一函数。
+ */
 function capabilityToolCatalogItem(tool: ToolCatalogItem): CapabilityToolCatalogItem {
   return {
     name: tool.name,

@@ -17,14 +17,31 @@ export type ToolModelRuntimeHint = {
   readonly value: string;
 };
 
+/**
+ * 模型可见工具的「功能性契约」：用于让模型依据契约本身（而非记忆外部约定）区分相近工具、
+ * 判断何时该用/不该用、正确组装参数与理解输出。
+ *
+ * 这些字段是工具在模型可见层具备「区分度」的来源（FR-TOOL-004 的功能性基础）。
+ * 对模型可见的工具，`validateModelVisibleToolContract` 会把其中的关键字段
+ * （用途/参数说明/输出说明/runtimeHints/examples）作为「进模型可见集合」的完备门槛；
+ * 缺这些字段的工具不得进入模型可见集合（FR-TOOL-002）。
+ */
 export type ToolModelContract = {
+  /** 工具用途的一句话说明；缺省时回退到 `ToolDefinition.description`。 */
   readonly purpose?: string;
+  /** 何时使用本工具，帮助模型在相近工具之间正向选择。 */
   readonly whenToUse?: readonly string[];
+  /** 何时不应使用本工具，帮助模型在相近工具之间反向排除（区分度的关键）。 */
   readonly whenNotToUse?: readonly string[];
+  /** 参数说明：每个关键参数的语义、单位、约束。 */
   readonly inputNotes?: readonly string[];
+  /** 使用注意：跨参数的通用约束、平台差异、副作用边界。 */
   readonly usageNotes?: readonly string[];
+  /** 输出说明：返回结构、字段含义、截断/省略行为。 */
   readonly outputNotes?: readonly string[];
+  /** 可被模型直接复用的最小化参数示例。 */
   readonly examples?: readonly ToolUsageExample[];
+  /** 运行时提示键值（如 current shell、平台），让模型无需记忆外部约定即可正确组装参数。 */
   readonly runtimeHints?: readonly ToolModelRuntimeHint[];
 };
 
@@ -81,11 +98,31 @@ export type ToolRuntimeHint =
       readonly notes: readonly string[];
     };
 
+/**
+ * 工具的「能力契约元数据」（FR-TOOL-002）。
+ *
+ * 这是「工具是否需要确认 / 是否只读 / 可否并行 / 是否具备删除子能力」等能力判定的
+ * **唯一依据**。能力判定必须基于这些显式契约字段，而非工具名正则、关键字或硬编码白名单。
+ *
+ * 对模型可见的工具，`validateModelVisibleToolContract` 把 `category` / `riskLevel` /
+ * `operationType` / `requiresConfirmation` / `visibleResultPolicy` 作为「进模型可见集合」的
+ * 完备门槛：缺任一字段的工具不得进入模型可见集合。
+ *
+ * 确认策略保守默认：当 `requiresConfirmation` 缺失（例如经松散运行时数据绕过完备门槛的
+ * 兼容/MCP 路径）时，`resolveEffectiveConfirmationRequirement` 对高影响动作
+ * （execute / external-submit / delete / high risk）默认按需确认，确保不会因契约字段缺失
+ * 而静默执行高影响动作。
+ */
 export type ToolDefinitionMetadata = {
+  /** 工具类别，用于归类与可见性 scope 派生。 */
   readonly category: ToolCategory;
+  /** 风险等级，能力判定（如默认确认策略）的依据之一。 */
   readonly riskLevel: ToolRiskLevel;
+  /** 粗粒度读写执行分类；并行许可以 `operationType === "read-only"` 全员只读为前提。 */
   readonly operationType: ToolOperationType;
+  /** 显式确认策略：是否需要逐条确认。能力判定唯一依据，缺失时走保守默认。 */
   readonly requiresConfirmation: boolean;
+  /** 用户可见结果策略：摘要/预览/隐藏与截断上限。 */
   readonly visibleResultPolicy: ToolVisibleResultPolicy;
   readonly runtimeHints?: readonly ToolRuntimeHint[];
   /**

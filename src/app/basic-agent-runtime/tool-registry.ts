@@ -196,7 +196,19 @@ function uniqueScopes(scopes: readonly ToolRegistryScope[]): readonly ToolRegist
   return [...new Set<ToolRegistryScope>(source)];
 }
 
-function assertModelVisibleToolContract(input: {
+/**
+ * 「进模型可见集合」的硬门槛（FR-TOOL-001 / FR-TOOL-002）。
+ *
+ * 这是工具进入模型可见集合（进而进入本轮 `allowedTools`）的统一完备校验：
+ * 缺模型可见功能性契约字段或能力契约元数据字段的工具不得进入模型可见集合。
+ * 校验只依赖工具自身的显式契约字段（{@link validateModelVisibleToolContract}），
+ * 不依赖工具名前缀、关键字或硬编码白名单。
+ *
+ * 当前仅对会成为默认普通 Agent 模型可见来源的 scope（desktop-basic / research /
+ * workspace）且默认启用且可用的工具强制门槛；`mcp` scope 的契约门槛对齐属于
+ * FR-COMPAT-003（阶段 2 gated），不在本任务范围。
+ */
+export function assertModelVisibleToolContract(input: {
   readonly definition: ToolDefinition;
   readonly scopes: readonly ToolRegistryScope[];
   readonly enabledByDefault: boolean;

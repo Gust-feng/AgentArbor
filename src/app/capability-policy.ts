@@ -9,6 +9,7 @@ import {
 } from "../domain/config/index.js";
 import type { TaskSoil } from "../domain/soil/index.js";
 import { createId, nowIso } from "../kernel/id.js";
+import { resolveEffectiveConfirmationRequirement } from "../domain/tools/index.js";
 import { isToolVisibleToAgentProfile as isVisibleToProfile } from "./agent-prompts/contracts.js";
 import { createRunCapabilityPlan } from "./model-capability-registry.js";
 
@@ -39,6 +40,10 @@ export function resolveRunCapabilities(input: ResolveRunCapabilitiesInput): RunC
       : input.snapshot.modelCapabilities,
   });
   const snapshotAllowedTools = new Set(input.snapshot.toolCatalog.allowedTools);
+  // 模型可见集合的「单一推导」（FR-TOOL-001）：任一工具是否对模型可见，只由
+  //   capabilitySnapshot.toolCatalog.tools ∩ toolVisibilityProfile ∩ snapshot.allowedTools ∩ permission
+  // 这一条路径决定。这里不存在工具名前缀 / 关键字 / 硬编码白名单判定；裸 ToolCenter 仅执行，
+  // 不单独决定可见集合（执行器裁剪在 run-tool-boundary 以交集方式二次收紧，不另立可见集合）。
   const toolExposures = input.snapshot.toolCatalog.tools.map((tool): RunToolExposure => {
     const availabilityAllowed = tool.enabled && tool.availability === "available";
     const allowedBySnapshot = snapshotAllowedTools.has(tool.name);
@@ -49,6 +54,8 @@ export function resolveRunCapabilities(input: ResolveRunCapabilitiesInput): RunC
       allowedBySnapshot &&
       !denied &&
       isVisibleToProfile(input.agentDefinition.toolVisibilityProfile, tool);
+    // 有效确认要求取保守默认（FR-TOOL-002）：显式契约字段权威；缺失时高影响动作默认按需确认。
+    const requiresConfirmation = resolveEffectiveConfirmationRequirement(tool);
     return {
       name: tool.name,
       displayName: tool.displayName,
@@ -59,7 +66,7 @@ export function resolveRunCapabilities(input: ResolveRunCapabilitiesInput): RunC
       riskLevel: tool.riskLevel,
       operationType: tool.operationType,
       fileOperation: tool.fileOperation,
-      requiresConfirmation: tool.requiresConfirmation,
+      requiresConfirmation,
       ...(input.snapshot.toolConfirmation === undefined
         ? {}
         : { confirmationPolicy: input.snapshot.toolConfirmation.policy }),
@@ -70,7 +77,7 @@ export function resolveRunCapabilities(input: ResolveRunCapabilitiesInput): RunC
         denied,
         canExposeModelTools: baseCapabilityPlan.canExposeModelTools,
         modelVisible,
-        requiresConfirmation: tool.requiresConfirmation,
+        requiresConfirmation,
         confirmationPolicy: input.snapshot.toolConfirmation?.policy,
       }),
     };

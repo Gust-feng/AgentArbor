@@ -8,6 +8,13 @@ export type ToolErrorFactValue =
 
 export type ToolErrorFacts = Readonly<Record<string, ToolErrorFactValue>>;
 
+export type ToolFileDisplayOperation =
+  | "create"
+  | "write"
+  | "append"
+  | "edit"
+  | "delete";
+
 export type ToolDisplayProjection =
   | {
       readonly kind: "search_results";
@@ -52,6 +59,7 @@ export type ToolDisplayProjection =
   | {
       readonly kind: "file_change_summary" | "file_diff_preview";
       readonly path?: string;
+      readonly operation?: ToolFileDisplayOperation;
       readonly summary?: string;
       readonly preview?: string;
       readonly bytes?: number;

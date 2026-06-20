@@ -7,7 +7,9 @@ import type { WorklineConversationTurn, WorklineProjectedTurn } from "./panel-ui
 import {
   answerForWorkViewTurn,
   deliverableForWorkViewTurn,
+  deliverableResultEvidence,
   type AssistantDeliverableLike,
+  type AssistantResultEvidence,
   type AssistantWorkViewOutput,
 } from "./panel-assistant-message-output.js";
 import {
@@ -70,6 +72,7 @@ export type AssistantTranscriptTurnProjection<
   readonly pending?: TPending;
   readonly content: string;
   readonly deliverable?: TDeliverable;
+  readonly resultEvidence?: AssistantResultEvidence;
   readonly live: boolean;
   readonly keepStreamMounted: boolean;
   readonly animateOnMount: boolean;
@@ -116,6 +119,7 @@ export function projectAssistantTranscriptTurn<
   const turnAnswer = answerForWorkViewTurn(input.workView, displayRunId, turnContentAnswer);
   const content = liveAnswer?.text ?? (turnAnswer.trim().length > 0 ? turnAnswer : settledAnswerFallback);
   const deliverable = deliverableForWorkViewTurn(input.workView, displayRunId, content);
+  const resultEvidence = resultEvidenceForWorkViewTurn(input.workView, displayRunId);
   const keepStreamMounted = live !== undefined || refreshingRun || unclaimedRunningTurn;
   const shellKey = input.assistantTurnSlotKey ?? assistantTurnSlotKey(input.turns, input.turnIndex);
   const hasVisibleAnswer = content.trim().length > 0;
@@ -133,11 +137,22 @@ export function projectAssistantTranscriptTurn<
     pending,
     content,
     deliverable,
+    resultEvidence,
     live: liveAnswer !== undefined,
     keepStreamMounted,
     animateOnMount: liveAnswer !== undefined || animateFromObservedShell,
     liveTone: liveAnswer?.tone ?? runProjection.answer?.tone,
   };
+}
+
+function resultEvidenceForWorkViewTurn<TDeliverable extends AssistantDeliverableLike>(
+  workView: AssistantWorkViewOutput<TDeliverable> | undefined,
+  runId: string | undefined,
+): AssistantResultEvidence | undefined {
+  if (runId === undefined || workView?.run.runId !== runId) {
+    return undefined;
+  }
+  return deliverableResultEvidence(workView.deliverable);
 }
 
 export function assistantShellSnapshot<TTurn extends WorklineConversationTurn>(

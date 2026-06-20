@@ -11,7 +11,13 @@ import {
 } from "./panel-ui-timeline-collapse.js";
 import type { ConfirmationIdentity } from "./panel-transcript-confirmation-projection.js";
 import type { ProjectableTranscriptNode } from "./panel-transcript-node-projection.js";
-import type { AssistantDeliverableLike } from "./panel-assistant-message-output.js";
+import {
+  deliverableResultEvidence,
+  mergeAssistantResultEvidence,
+  transcriptResultEvidence,
+  type AssistantDeliverableLike,
+  type AssistantResultEvidence,
+} from "./panel-assistant-message-output.js";
 import type { LiveAnswerTone } from "./panel-ui-live-transcript.js";
 
 export type AssistantWorkflowDisplaySegment<
@@ -36,6 +42,7 @@ export type AssistantWorkflowDisplay<
   readonly awaitingFirstVisibleOutput: boolean;
   readonly showCopyActions: boolean;
   readonly copyText: string;
+  readonly resultEvidence?: AssistantResultEvidence;
   readonly segments: readonly AssistantWorkflowDisplaySegment<TNode, TConfirmation>[];
 };
 
@@ -54,6 +61,7 @@ export function projectStableAssistantWorkflowDisplay<
   readonly previous?: AssistantWorkflowDisplayState<TNode, TConfirmation>;
   readonly content: string;
   readonly deliverable?: AssistantDeliverableLike;
+  readonly resultEvidence?: AssistantResultEvidence;
   readonly transcriptNodes?: readonly TNode[];
   readonly pending?: TConfirmation;
   readonly live?: boolean;
@@ -79,6 +87,11 @@ export function projectStableAssistantWorkflowDisplay<
   const workflow = workflowDisplayFromMessageView({
     previous: input.previous?.workflow,
     messageView,
+    resultEvidence: mergeAssistantResultEvidence(
+      input.resultEvidence,
+      deliverableResultEvidence(input.deliverable),
+      transcriptResultEvidence(input.transcriptNodes),
+    ),
     showCopyActions: !keepStreamMounted,
     collapseTimeline: input.collapseTimeline,
   });
@@ -94,6 +107,7 @@ function workflowDisplayFromMessageView<
 >(input: {
   readonly previous?: AssistantWorkflowDisplay<TNode, TConfirmation>;
   readonly messageView: AssistantMessageView<TNode, TConfirmation>;
+  readonly resultEvidence?: AssistantResultEvidence;
   readonly showCopyActions: boolean;
   readonly collapseTimeline: boolean;
 }): AssistantWorkflowDisplay<TNode, TConfirmation> {
@@ -103,6 +117,7 @@ function workflowDisplayFromMessageView<
     awaitingFirstVisibleOutput: input.messageView.awaitingFirstVisibleOutput,
     showCopyActions: input.showCopyActions,
     copyText: input.messageView.copyText,
+    resultEvidence: input.resultEvidence,
     segments: input.messageView.segments.map((segment) => {
       if (segment.kind !== "activity") {
         return segment;

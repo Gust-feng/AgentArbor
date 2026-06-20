@@ -5,6 +5,7 @@ import {
   assistantMessageOutput,
   deliverableAsLinearText,
   deliverableForWorkViewTurn,
+  deliverableResultEvidence,
   visibleDeliverable,
   type AssistantDeliverableLike,
 } from "./panel-assistant-message-output.js";
@@ -60,6 +61,22 @@ test("linear deliverable text keeps a bounded section preview", () => {
 
   assert.equal(text.includes("### 小节 4"), true);
   assert.equal(text.includes("### 小节 5"), false);
+});
+
+test("deliverable result evidence keeps renderable file changes and trimmed next actions", () => {
+  const evidence = deliverableResultEvidence({
+    ...deliverable("报告", "摘要", []),
+    fileChanges: [
+      { kind: "file_diff_preview", path: "src/app.ts", replacements: 2, preview: "- old\n+ new" },
+      { kind: "generic_tool_summary", path: "ignored" },
+    ],
+    nextActions: [" 运行测试 ", "", "检查视觉细节 "],
+  });
+
+  assert.deepEqual(evidence, {
+    fileChanges: [{ kind: "file_diff_preview", path: "src/app.ts", replacements: 2, preview: "- old\n+ new" }],
+    nextActions: ["运行测试", "检查视觉细节"],
+  });
 });
 
 function deliverable(title: string, summary: string, sectionContents: readonly string[]): AssistantDeliverableLike {

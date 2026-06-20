@@ -119,6 +119,42 @@ test("tool activity copy presents concrete generic targets", () => {
   assert.equal(copy?.detail, "Z:\\AgentArbor\\tmp.txt");
 });
 
+test("tool activity copy labels write_file as write when only summary carries the path", () => {
+  const copy = activityLineForNode(node({
+    kind: "tool",
+    eventType: "tool.requested",
+    phase: "executing",
+    toolName: "write_file",
+    summary: "路径：src/generated.txt",
+  }));
+
+  assert.deepEqual(copy, {
+    label: "写入",
+    detail: "src/generated.txt",
+  });
+});
+
+test("display activity items keep generic file write summaries visible", () => {
+  const items = displayActivityItemsForNodes(activityVisibleNodes([
+    node({
+      kind: "tool",
+      eventType: "tool.completed",
+      phase: "completed",
+      toolName: "filesystem_tool",
+      display: {
+        kind: "generic_tool_summary",
+        action: "写入文件",
+        summary: "路径：src/generated.txt",
+      },
+    }),
+  ]));
+
+  assert.equal(items.length, 1);
+  assert.equal(items[0]?.copy.label, "写入");
+  assert.equal(items[0]?.copy.detail, "src/generated.txt");
+  assert.equal(items[0]?.statusBadge?.label, "已完成");
+});
+
 test("tool activity copy removes redundant target prefixes", () => {
   const read = activityLineForNode(node({
     kind: "tool",
@@ -445,6 +481,68 @@ test("activity item keys stay stable while reasoning settles", () => {
   ]);
 
   assert.equal(delta[0]?.key, completed[0]?.key);
+});
+
+test("activity items expose command status badges and structured sections", () => {
+  const item = activityItemsForNodes([
+    node({
+      kind: "tool",
+      eventType: "tool.completed",
+      phase: "completed",
+      toolName: "shell_command",
+      display: {
+        kind: "command_summary",
+        command: "pnpm",
+        args: ["test"],
+        exitCode: 0,
+        durationMs: 1530,
+        cwd: "Z:/AgentArbor",
+        outputSummary: "全部测试通过",
+      },
+    }),
+  ])[0];
+
+  assert.equal(item?.statusBadge?.label, "已完成");
+  assert.deepEqual(item?.badges?.map((badge) => badge.label), ["exit 0", "1.5s"]);
+  assert.deepEqual(item?.expandedSections?.map((section) => section.title), ["命令", "执行环境", "输出摘要"]);
+  assert.equal(item?.expandedSections?.[0]?.format, "code");
+});
+
+test("display activity items preserve requested detail and terminal preview for file edits", () => {
+  const items = displayActivityItemsForNodes([
+    node({
+      kind: "tool",
+      eventType: "tool.requested",
+      phase: "executing",
+      toolName: "edit_file",
+      display: {
+        kind: "file_diff_preview",
+        path: "src/app.ts",
+      },
+      refs: [{ kind: "tool_call", id: "tool-edit-1" }],
+    }),
+    node({
+      kind: "tool",
+      eventType: "tool.completed",
+      phase: "completed",
+      toolName: "edit_file",
+      display: {
+        kind: "file_diff_preview",
+        path: "src/app.ts",
+        replacements: 1,
+        preview: "@@ line 2\n- old\n+ new",
+      },
+      refs: [{ kind: "tool_call", id: "tool-edit-1" }],
+    }),
+  ]);
+
+  assert.equal(items.length, 1);
+  assert.equal(items[0]?.copy.label, "编辑");
+  assert.equal(items[0]?.copy.detail, "src/app.ts");
+  assert.equal(items[0]?.statusBadge?.label, "已完成");
+  assert.deepEqual(items[0]?.expandedSections?.map((section) => section.title), ["发起", "文件", "差异预览"]);
+  assert.equal(items[0]?.expandedSections?.[2]?.format, "code");
+  assert.equal(items[0]?.badges?.[0]?.label, "1 处修改");
 });
 
 function node(input: {

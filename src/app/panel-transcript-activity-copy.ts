@@ -17,6 +17,14 @@ export type ActivityLineCopy = {
 export type ActivityExpandedSection = {
   readonly title: string;
   readonly content: string;
+  readonly format?: "plain" | "code" | "list";
+  readonly tone?: "neutral" | "accent" | "success" | "warning" | "danger";
+};
+
+export type ActivityBadge = {
+  readonly label: string;
+  readonly tone?: "neutral" | "accent" | "success" | "warning" | "danger";
+  readonly monospace?: boolean;
 };
 
 export type ActivityItem = {
@@ -26,6 +34,8 @@ export type ActivityItem = {
   readonly tone: "thinking" | "narration" | "tool" | "confirmation" | "decision" | "system";
   readonly phase: ProjectableTranscriptNode["phase"];
   readonly toolKind?: "command" | "search" | "read" | "edit" | "web" | "thinking" | "system" | "confirmation" | "decision" | "other";
+  readonly statusBadge?: ActivityBadge;
+  readonly badges?: readonly ActivityBadge[];
   readonly expandedSections?: readonly ActivityExpandedSection[];
 };
 
@@ -101,6 +111,9 @@ export function activityItemsForNodes(nodes: readonly ProjectableTranscriptNode[
       tone,
       phase: node.phase,
       toolKind: resolveActivityToolKind({ tone, copy }),
+      statusBadge: activityStatusBadge(node),
+      badges: activityBadgesForNode(node),
+      expandedSections: activityExpandedSectionsForNode(node, copy),
     };
     items.push(item);
   }
@@ -146,7 +159,208 @@ function activityItemFromNode(node: ProjectableTranscriptNode, copy: ActivityLin
     tone,
     phase: node.phase,
     toolKind: resolveActivityToolKind({ tone, copy }),
+    statusBadge: activityStatusBadge(node),
+    badges: activityBadgesForNode(node),
+    expandedSections: activityExpandedSectionsForNode(node, copy),
   };
+}
+
+function activityStatusBadge(node: ProjectableTranscriptNode): ActivityBadge | undefined {
+  if (node.kind === "confirmation") {
+    return { label: "待确认", tone: "warning" };
+  }
+  if (node.kind === "user_decision") {
+    if (node.phase === "guidance") return { label: "已补充", tone: "accent" };
+    if (node.phase === "denied") return { label: "已拒绝", tone: "danger" };
+    if (node.phase === "approved") return { label: "已允许", tone: "success" };
+    return undefined;
+  }
+  if (node.kind !== "tool") {
+    if (node.phase === "failed" || node.phase === "blocked") return { label: "未完成", tone: "danger" };
+    if (node.phase === "cancelled") return { label: "已停止", tone: "warning" };
+    return undefined;
+  }
+  if (node.phase === "preparing" || node.phase === "executing" || node.phase === "noted") {
+    return { label: "进行中", tone: "accent" };
+  }
+  if (node.phase === "completed") {
+    return { label: "已完成", tone: "success" };
+  }
+  if (node.phase === "failed" || node.phase === "blocked" || node.phase === "cancelled") {
+    return { label: "未完成", tone: "danger" };
+  }
+  return undefined;
+}
+
+function activityBadgesForNode(node: ProjectableTranscriptNode): readonly ActivityBadge[] | undefined {
+  const display = node.display;
+  const badges: ActivityBadge[] = [];
+  if (display?.kind === "command_summary") {
+    if (display.exitCode !== undefined) {
+      badges.push({
+        label: `exit ${display.exitCode}`,
+        tone: display.exitCode === 0 ? "success" : "danger",
+        monospace: true,
+      });
+    }
+    if (display.durationMs !== undefined) {
+      badges.push({ label: durationLabel(display.durationMs), monospace: true });
+    }
+    if (display.background === true) badges.push({ label: "后台", tone: "accent" });
+    if (display.waitForPort !== undefined) {
+      badges.push({
+        label: display.portReady === true ? `端口 ${display.waitForPort}` : `等待端口 ${display.waitForPort}`,
+        tone: display.portReady === false ? "warning" : "accent",
+      });
+    }
+    if (display.stdoutTruncated === true || display.stderrTruncated === true) {
+      badges.push({ label: "输出截断", tone: "warning" });
+    }
+  } else if (display?.kind === "search_results") {
+    badges.push({ label: `${display.results?.length ?? 0} 条结果`, tone: "accent" });
+    if (display.truncated === true) badges.push({ label: "已截断", tone: "warning" });
+  } else if (display?.kind === "read_result") {
+    const source = compactHostLabel(display.url ?? display.uri);
+    if (source !== undefined) badges.push({ label: source });
+    if (display.truncated === true) badges.push({ label: "已截断", tone: "warning" });
+  } else if (display?.kind === "browser_snapshot") {
+    const source = compactHostLabel(display.url);
+    if (source !== undefined) badges.push({ label: source });
+    if (display.truncated === true) badges.push({ label: "已截断", tone: "warning" });
+  } else if (display?.kind === "http_response") {
+    if (display.statusCode !== undefined) {
+      badges.push({
+        label: `${display.statusCode}`,
+        tone: httpStatusTone(display.statusCode),
+        monospace: true,
+      });
+    }
+    if (display.durationMs !== undefined) {
+      badges.push({ label: durationLabel(display.durationMs), monospace: true });
+    }
+    if (display.truncated === true) badges.push({ label: "已截断", tone: "warning" });
+  } else if (display?.kind === "file_change_summary" || display?.kind === "file_diff_preview") {
+    if (display.replacements !== undefined) {
+      badges.push({ label: `${display.replacements} 处修改`, tone: "warning" });
+    }
+    if (display.bytes !== undefined) {
+      badges.push({ label: byteLabel(display.bytes), monospace: true });
+    }
+    if (display.append === true) badges.push({ label: "追加", tone: "accent" });
+    if (display.truncated === true) badges.push({ label: "预览截断", tone: "warning" });
+  } else if (display?.kind === "generic_tool_summary") {
+    if ((display.items?.length ?? 0) > 1) {
+      badges.push({ label: `${display.items?.length ?? 0} 项` });
+    }
+  }
+  return badges.length === 0 ? undefined : badges;
+}
+
+function activityExpandedSectionsForNode(
+  node: ProjectableTranscriptNode,
+  copy: ActivityLineCopy,
+): readonly ActivityExpandedSection[] | undefined {
+  const display = node.display;
+  const sections: ActivityExpandedSection[] = [];
+  if (display?.kind === "command_summary") {
+    const command = commandText(display);
+    if (command !== undefined) {
+      sections.push({ title: "命令", content: command, format: "code" });
+    }
+    const context = [
+      display.cwd === undefined ? undefined : `目录：${display.cwd}`,
+      display.shell === undefined ? undefined : `Shell：${display.shell}`,
+      display.logPath === undefined ? undefined : `日志：${display.logPath}`,
+      display.stopCommand === undefined ? undefined : `停止：${display.stopCommand}`,
+    ].filter((value): value is string => value !== undefined && value.trim().length > 0);
+    if (context.length > 0) {
+      sections.push({ title: "执行环境", content: context.join("\n"), format: "list" });
+    }
+    if (display.outputSummary !== undefined) {
+      sections.push({ title: "输出摘要", content: display.outputSummary });
+    }
+    if (display.errorSummary !== undefined) {
+      sections.push({ title: "错误摘要", content: display.errorSummary, tone: "danger" });
+    }
+  } else if (display?.kind === "search_results") {
+    if (display.query !== undefined) {
+      sections.push({ title: "查询", content: display.query });
+    }
+    if (display.message !== undefined) {
+      sections.push({ title: "摘要", content: display.message });
+    }
+    const results = (display.results ?? [])
+      .slice(0, 5)
+      .map((result) => searchResultLine(result.title, result.source, result.url, result.summary ?? result.snippet));
+    if (results.length > 0) {
+      sections.push({ title: "命中结果", content: results.join("\n"), format: "list" });
+    }
+  } else if (display?.kind === "read_result") {
+    const source = [display.title, display.url ?? display.uri]
+      .filter((value): value is string => value !== undefined && value.trim().length > 0)
+      .join("\n");
+    if (source.length > 0) {
+      sections.push({ title: "资料", content: source });
+    }
+    if (display.contentPreview !== undefined) {
+      sections.push({ title: "摘录", content: display.contentPreview, format: "code" });
+    }
+    if (display.error !== undefined) {
+      sections.push({ title: "错误摘要", content: display.error, tone: "danger" });
+    }
+  } else if (display?.kind === "browser_snapshot") {
+    const source = [display.title, display.url]
+      .filter((value): value is string => value !== undefined && value.trim().length > 0)
+      .join("\n");
+    if (source.length > 0) {
+      sections.push({ title: "网页", content: source });
+    }
+    if (display.summary !== undefined) {
+      sections.push({ title: "页面摘要", content: display.summary });
+    }
+    if (display.text !== undefined) {
+      sections.push({ title: "页面摘录", content: display.text, format: "code" });
+    }
+  } else if (display?.kind === "http_response") {
+    const responseLine = [
+      display.method,
+      display.url,
+      display.statusCode === undefined ? undefined : `${display.statusCode}${display.statusText === undefined ? "" : ` ${display.statusText}`}`,
+    ].filter((value): value is string => value !== undefined && value.trim().length > 0).join("\n");
+    if (responseLine.length > 0) {
+      sections.push({ title: "响应", content: responseLine });
+    }
+    if (display.bodyPreview !== undefined) {
+      sections.push({ title: "内容预览", content: display.bodyPreview, format: "code" });
+    }
+  } else if (display?.kind === "file_change_summary" || display?.kind === "file_diff_preview") {
+    if (display.path !== undefined) {
+      sections.push({ title: "文件", content: display.path, format: "code" });
+    }
+    if (display.summary !== undefined && display.summary.trim() !== copy.detail.trim()) {
+      sections.push({ title: "摘要", content: display.summary });
+    }
+    if (display.preview !== undefined) {
+      sections.push({
+        title: display.kind === "file_diff_preview" ? "差异预览" : "内容预览",
+        content: display.preview,
+        format: "code",
+      });
+    }
+  } else if (display?.kind === "generic_tool_summary") {
+    if (display.summary !== undefined && display.summary.trim() !== copy.detail.trim()) {
+      sections.push({ title: "摘要", content: display.summary });
+    }
+    const items = display.items
+      ?.map((item) => cleanToolTargetText(genericItemLabel(item)) ?? "")
+      .filter((value) => value.length > 0);
+    if ((items?.length ?? 0) > 0) {
+      sections.push({ title: "条目", content: items!.join("\n"), format: "list" });
+    }
+  }
+  const fallback = copy.expandedDetail === undefined ? [] : [{ title: "详情", content: copy.expandedDetail }];
+  const allSections = dedupeExpandedSections([...sections, ...fallback]);
+  return allSections.length === 0 ? undefined : allSections;
 }
 
 function toolCallIdForActivityNode(node: ProjectableTranscriptNode): string | undefined {
@@ -158,7 +372,7 @@ function isTerminalToolNode(node: ProjectableTranscriptNode): boolean {
 }
 
 function mergeToolActivityItems(requested: ActivityItem, terminal: ActivityItem): ActivityItem {
-  const sections = buildExpandedSections(requested.copy, terminal.copy, terminal.phase);
+  const sections = buildExpandedSections(requested, terminal);
   return {
     ...terminal,
     key: requested.key,
@@ -172,27 +386,24 @@ function mergeToolActivityItems(requested: ActivityItem, terminal: ActivityItem)
 }
 
 function buildExpandedSections(
-  requested: ActivityLineCopy,
-  terminal: ActivityLineCopy,
-  phase: ProjectableTranscriptNode["phase"],
+  requested: ActivityItem,
+  terminal: ActivityItem,
 ): readonly ActivityExpandedSection[] {
   const sections: ActivityExpandedSection[] = [];
-  const reqDetail = requested.detail.trim();
-  const termDetail = terminal.detail.trim();
+  const reqDetail = requested.copy.detail.trim();
+  const termDetail = terminal.copy.detail.trim();
 
   if (reqDetail.length > 0) {
     sections.push({ title: "发起", content: reqDetail });
   }
   if (termDetail !== reqDetail && termDetail.length > 0) {
     sections.push({
-      title: phase === "failed" ? "失败" : "结果",
+      title: terminal.phase === "failed" ? "失败" : "结果",
       content: termDetail,
     });
   }
-  if (terminal.expandedDetail !== undefined) {
-    sections.push({ title: "详情", content: terminal.expandedDetail });
-  }
-  return sections;
+  const terminalSections = terminal.expandedSections ?? fallbackExpandedSections(terminal.copy);
+  return dedupeExpandedSections(appendSectionsWithoutDuplicateContent(sections, terminalSections));
 }
 
 function mergedToolExpandedDetail(
@@ -209,6 +420,48 @@ function mergedToolExpandedDetail(
     terminal.expandedDetail,
   ]);
   return lines.length === 0 ? undefined : lines.join("\n");
+}
+
+function fallbackExpandedSections(copy: ActivityLineCopy): readonly ActivityExpandedSection[] {
+  return copy.expandedDetail === undefined ? [] : [{ title: "详情", content: copy.expandedDetail }];
+}
+
+function dedupeExpandedSections(sections: readonly ActivityExpandedSection[]): readonly ActivityExpandedSection[] {
+  const seen = new Set<string>();
+  const result: ActivityExpandedSection[] = [];
+  for (const section of sections) {
+    const title = section.title.trim();
+    const content = section.content.trim();
+    if (title.length === 0 || content.length === 0) {
+      continue;
+    }
+    const key = `${title}\u0000${content}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    result.push({ ...section, title, content });
+  }
+  return result;
+}
+
+function appendSectionsWithoutDuplicateContent(
+  base: readonly ActivityExpandedSection[],
+  incoming: readonly ActivityExpandedSection[],
+): readonly ActivityExpandedSection[] {
+  const seenContent = new Set(base.map((section) => section.content.trim()).filter((value) => value.length > 0));
+  const result = [...base];
+  for (const section of incoming) {
+    const content = section.content.trim();
+    if (content.length > 0 && seenContent.has(content) && section.title.trim() !== "文件") {
+      continue;
+    }
+    if (content.length > 0) {
+      seenContent.add(content);
+    }
+    result.push(section);
+  }
+  return result;
 }
 
 function phaseDetailLine(label: string, copy: ActivityLineCopy): string | undefined {
@@ -343,16 +596,12 @@ function toolVerb(node: ProjectableTranscriptNode): string {
   const display = node.display;
   const toolName = normalizedToolName(node.toolName);
   const action = display?.kind === "generic_tool_summary" ? display.action?.toLowerCase() ?? "" : "";
+  const fileMutationVerb = fileMutationVerbForTool(toolName, display);
   if (display?.kind === "command_summary" || toolName === "run_command" || toolName === "shell_command" || toolName.includes("terminal") || toolName.includes("powershell") || toolName.includes("cmd")) return "命令";
   if (display?.kind === "search_results" || toolName === "search" || toolName === "web_search" || toolName.includes("grep")) return "搜索";
+  if (fileMutationVerb !== undefined) return fileMutationVerb;
   if (display?.kind === "read_result") return "读取";
   if (display?.kind === "browser_snapshot" || toolName === "browser_snapshot" || toolName.includes("browser")) return "网页";
-  if (display?.kind === "file_diff_preview" || toolName === "edit_file" || toolName.includes("patch") || toolName.includes("replace")) return "编辑";
-  if (toolName === "delete_file" || toolName.includes("delete") || toolName.includes("remove")) return "删除";
-  if (toolName === "create_file" || toolName.includes("create")) return "创建";
-  if (display?.kind === "file_change_summary") {
-    return "写入";
-  }
   if (toolName === "list_dir" || toolName === "list_files" || toolName.includes("list") || toolName.includes("dir")) return "查看";
   if (toolName === "read" || toolName === "read_file" || toolName.startsWith("read_") || toolName.includes("file")) return "读取";
   if (action.includes("读取")) return "读取";
@@ -365,6 +614,51 @@ function toolVerb(node: ProjectableTranscriptNode): string {
   if (action.includes("删除")) return "删除";
   if (toolName.includes("generate") || action.includes("生成")) return "生成";
   return "动作";
+}
+
+function fileMutationVerbForTool(
+  toolName: string,
+  display: ProjectableTranscriptNode["display"],
+): "写入" | "创建" | "删除" | "编辑" | undefined {
+  const genericText = display?.kind === "generic_tool_summary"
+    ? [display.action, display.summary].filter((value): value is string => value !== undefined).join(" ").toLowerCase()
+    : "";
+  if (toolName === "delete_file" || toolName.includes("delete_file") || toolName.includes("remove_file") || mentionsDeleteFile(genericText)) {
+    return "删除";
+  }
+  if (toolName === "create_file" || toolName.includes("create_file") || mentionsCreateFile(genericText)) {
+    return "创建";
+  }
+  if (
+    display?.kind === "file_diff_preview" ||
+    toolName === "edit_file" ||
+    toolName.includes("edit_file") ||
+    toolName.includes("patch") ||
+    toolName.includes("replace") ||
+    mentionsEditFile(genericText)
+  ) {
+    return "编辑";
+  }
+  if (display?.kind === "file_change_summary" || toolName === "write_file" || toolName.includes("write_file") || mentionsWriteFile(genericText)) {
+    return "写入";
+  }
+  return undefined;
+}
+
+function mentionsWriteFile(value: string): boolean {
+  return value.includes("写入文件") || value.includes("write_file") || value.includes("write file") || value.includes("written");
+}
+
+function mentionsCreateFile(value: string): boolean {
+  return value.includes("创建文件") || value.includes("create_file") || value.includes("create file") || value.includes("created");
+}
+
+function mentionsDeleteFile(value: string): boolean {
+  return value.includes("删除文件") || value.includes("delete_file") || value.includes("delete file") || value.includes("deleted");
+}
+
+function mentionsEditFile(value: string): boolean {
+  return value.includes("编辑文件") || value.includes("修改文件") || value.includes("edit_file") || value.includes("edit file");
 }
 
 function toolTargetCopy(node: ProjectableTranscriptNode): Pick<ActivityLineCopy, "detail" | "expandedDetail"> | undefined {
@@ -406,7 +700,7 @@ function toolTargetCopy(node: ProjectableTranscriptNode): Pick<ActivityLineCopy,
         expandedDetail: items.join("\n"),
       };
     }
-    return readableToolTarget(summary);
+    return readableToolTarget(summary ?? (fileMutationVerbForTool(normalizedToolName(node.toolName), display) === undefined ? undefined : display.action));
   }
   return readableToolTarget(cleanToolTargetText(node.summary));
 }
@@ -499,6 +793,65 @@ function cleanToolTargetText(value: string | undefined): string | undefined {
     .replace(/^\.$/u, "当前目录")
     .trim();
   return text.length === 0 ? undefined : text;
+}
+
+function searchResultLine(
+  title: string | undefined,
+  source: string | undefined,
+  url: string | undefined,
+  summary: string | undefined,
+): string {
+  const headline = [title, source ?? compactHostLabel(url)]
+    .filter((value): value is string => value !== undefined && value.trim().length > 0)
+    .join(" · ");
+  const detail = cleanToolTargetText(summary);
+  if (headline.length === 0) {
+    return detail ?? "";
+  }
+  return detail === undefined ? headline : `${headline}\n${detail}`;
+}
+
+function compactHostLabel(value: string | undefined): string | undefined {
+  if (value === undefined || value.trim().length === 0) {
+    return undefined;
+  }
+  try {
+    return new URL(value).host || value;
+  } catch {
+    return value;
+  }
+}
+
+function httpStatusTone(code: number): ActivityBadge["tone"] {
+  if (code >= 500) return "danger";
+  if (code >= 400) return "warning";
+  if (code >= 200 && code < 300) return "success";
+  return "neutral";
+}
+
+function durationLabel(value: number): string {
+  if (!Number.isFinite(value)) {
+    return "0ms";
+  }
+  if (value < 1_000) {
+    return `${Math.max(0, Math.round(value))}ms`;
+  }
+  const seconds = value / 1_000;
+  const rounded = seconds < 10 ? seconds.toFixed(1) : Math.round(seconds).toString();
+  return `${rounded.replace(/\.0$/, "")}s`;
+}
+
+function byteLabel(value: number): string {
+  if (!Number.isFinite(value) || value < 0) {
+    return "0 B";
+  }
+  if (value < 1_024) {
+    return `${Math.round(value)} B`;
+  }
+  if (value < 1_024 * 1_024) {
+    return `${(value / 1_024).toFixed(value < 10 * 1_024 ? 1 : 0).replace(/\.0$/, "")} KB`;
+  }
+  return `${(value / (1_024 * 1_024)).toFixed(1).replace(/\.0$/, "")} MB`;
 }
 
 function narrationCandidate(value: string): string | undefined {

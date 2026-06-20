@@ -663,3 +663,29 @@ test("truncated research read preview keeps raw preview ref", () => {
   assert.equal(agentContent.contentPreview?.endsWith("[truncated to 128000 chars]"), true);
   assert.equal(agentContent.rawContentPreviewRef, "tool:call-long-read:raw:read:contentPreview");
 });
+
+test("custom file write action projects as file change display", () => {
+  const projection = projectToolResult({
+    request: {
+      callId: "call-custom-write",
+      toolName: "workspace__write_file",
+      input: { path: "notes/custom.md", content: "RAW_CUSTOM_BODY" },
+    },
+    output: {
+      action: "write_file",
+      summary: "notes/custom.md written",
+      result: {
+        path: "notes/custom.md",
+        bytes: 15,
+      },
+    },
+  });
+
+  assert.equal(projection.display?.kind, "file_change_summary");
+  assert.equal(projection.display?.kind === "file_change_summary" ? projection.display.path : undefined, "notes/custom.md");
+  assert.equal(projection.display?.kind === "file_change_summary" ? projection.display.operation : undefined, "write");
+  assert.equal(projection.envelope?.uiDisplay?.kind, "file_change_summary");
+  assert.equal(projection.envelope?.uiDisplay?.kind === "file_change_summary" ? projection.envelope.uiDisplay.operation : undefined, "write");
+  assert.equal(projection.envelope?.evidenceRefs.includes("file:notes/custom.md"), true);
+  assert.equal(JSON.stringify(projection.display).includes("RAW_CUSTOM_BODY"), false);
+});

@@ -18,19 +18,38 @@ export type TranscriptToolDisplayLike =
   | {
       readonly kind: "search_results";
       readonly query?: string;
+      readonly status?: string;
       readonly message?: string;
-      readonly results?: readonly unknown[];
+      readonly results?: readonly {
+        readonly title: string;
+        readonly url?: string;
+        readonly summary?: string;
+        readonly snippet?: string;
+        readonly refId?: string;
+        readonly source?: string;
+      }[];
+      readonly truncated?: boolean;
     }
   | {
       readonly kind: "read_result";
+      readonly ref?: string;
+      readonly source?: string;
+      readonly status?: string;
       readonly title?: string;
       readonly url?: string;
       readonly uri?: string;
+      readonly sourceSearchRef?: string;
+      readonly contentPreview?: string;
+      readonly error?: string;
+      readonly truncated?: boolean;
     }
   | {
       readonly kind: "browser_snapshot";
       readonly title?: string;
       readonly url?: string;
+      readonly summary?: string;
+      readonly text?: string;
+      readonly truncated?: boolean;
     }
   | {
       readonly kind: "http_response";
@@ -38,14 +57,21 @@ export type TranscriptToolDisplayLike =
       readonly url?: string;
       readonly statusCode?: number;
       readonly statusText?: string;
+      readonly durationMs?: number;
+      readonly bodyPreview?: string;
+      readonly truncated?: boolean;
     }
   | {
-      readonly kind: "file_change_summary";
+      readonly kind: "file_change_summary" | "file_diff_preview";
       readonly path?: string;
-    }
-  | {
-      readonly kind: "file_diff_preview";
-      readonly path?: string;
+      readonly summary?: string;
+      readonly preview?: string;
+      readonly bytes?: number;
+      readonly replacements?: number;
+      readonly previousLength?: number;
+      readonly nextLength?: number;
+      readonly append?: boolean;
+      readonly truncated?: boolean;
     }
   | {
       readonly kind: "command_summary";
@@ -211,12 +237,48 @@ export function isFileReadNode(node: ProjectableTranscriptNode): boolean {
   if (node.kind !== "tool") return false;
   const toolName = normalizedToolName(node.toolName);
   const action = node.display?.kind === "generic_tool_summary" ? node.display.action?.toLowerCase() ?? "" : "";
+  const genericText = node.display?.kind === "generic_tool_summary"
+    ? [node.display.action, node.display.summary].filter((value): value is string => value !== undefined).join(" ").toLowerCase()
+    : "";
+  if (isFileMutationToolName(toolName) || mentionsFileMutation(genericText) || mentionsFileMutation(node.title.toLowerCase())) {
+    return false;
+  }
   return toolName === "read" ||
     toolName === "read_file" ||
     toolName.startsWith("read_") ||
     action === "read_file" ||
     action.includes("读取文件") ||
     node.title.includes("读取文件");
+}
+
+function isFileMutationToolName(toolName: string): boolean {
+  return toolName === "write_file" ||
+    toolName === "create_file" ||
+    toolName === "delete_file" ||
+    toolName === "edit_file" ||
+    toolName.includes("write_file") ||
+    toolName.includes("create_file") ||
+    toolName.includes("delete_file") ||
+    toolName.includes("remove_file") ||
+    toolName.includes("edit_file") ||
+    toolName.includes("patch") ||
+    toolName.includes("replace");
+}
+
+function mentionsFileMutation(value: string): boolean {
+  return value.includes("写入文件") ||
+    value.includes("创建文件") ||
+    value.includes("删除文件") ||
+    value.includes("编辑文件") ||
+    value.includes("修改文件") ||
+    value.includes("write_file") ||
+    value.includes("create_file") ||
+    value.includes("delete_file") ||
+    value.includes("edit_file") ||
+    value.includes("write file") ||
+    value.includes("create file") ||
+    value.includes("delete file") ||
+    value.includes("edit file");
 }
 
 export function isLowValueUserDecisionNode(node: ProjectableTranscriptNode): boolean {

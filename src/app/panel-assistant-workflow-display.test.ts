@@ -361,6 +361,32 @@ test("assistant workflow display exposes segment lifecycle for observation", () 
   assert.equal(segments[2]?.kind === "activity" ? segments[2].lifecycle : undefined, "settled");
 });
 
+test("assistant workflow display surfaces file evidence from transcript tools", () => {
+  const display = projectStableAssistantWorkflowDisplay({
+    content: "已完成。",
+    transcriptNodes: [
+      node({
+        nodeId: "edit-1",
+        sequence: 1,
+        kind: "tool",
+        eventType: "tool.completed",
+        phase: "completed",
+        display: {
+          kind: "file_diff_preview",
+          path: "src/app/example.ts",
+          replacements: 1,
+          preview: "- old\n+ new",
+        },
+      }),
+    ],
+    collapseTimeline: false,
+  });
+
+  assert.equal(display.workflow.resultEvidence?.fileChanges.length, 1);
+  assert.equal(display.workflow.resultEvidence?.fileChanges[0]?.path, "src/app/example.ts");
+  assert.equal(display.workflow.resultEvidence?.fileChanges[0]?.kind, "file_diff_preview");
+});
+
 function node(input: {
   readonly nodeId: string;
   readonly sequence: number;
@@ -369,6 +395,12 @@ function node(input: {
   readonly phase: "noted" | "preparing" | "waiting_approval" | "approved" | "denied" | "guidance" | "executing" | "completed" | "failed" | "blocked" | "cancelled";
   readonly text?: string;
   readonly summary?: string;
+  readonly display?: {
+    readonly kind: "file_change_summary" | "file_diff_preview";
+    readonly path?: string;
+    readonly replacements?: number;
+    readonly preview?: string;
+  };
 }) {
   return {
     nodeId: input.nodeId,
@@ -380,6 +412,7 @@ function node(input: {
     title: "",
     summary: input.summary ?? input.text,
     text: input.text,
+    display: input.display,
     timestamp: "",
     refs: [],
   };

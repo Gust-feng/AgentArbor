@@ -24,7 +24,11 @@ import {
 import {
   type AgentWorkTimelineView,
 } from "../../../panel-agent-work-timeline-view";
-import type { ActivityItem, ActivityExpandedSection } from "../../../panel-transcript-activity-copy";
+import type {
+  ActivityBadge,
+  ActivityItem,
+  ActivityExpandedSection,
+} from "../../../panel-transcript-activity-copy";
 import { resolveActivityToolKind } from "../../../panel-transcript-activity-copy";
 import { collapsedTimelineSummary } from "../../../panel-ui-timeline-collapse";
 
@@ -184,15 +188,29 @@ function activityMetricKind(item: ActivityItem): ActivityMetricKind | undefined 
 function ActivityLine({ item }: { readonly item: ActivityItem }): React.ReactElement {
   const toolKind = item.toolKind ?? resolveActivityToolKind(item);
   const Icon = TOOL_KIND_ICON[toolKind] ?? Sparkles;
+  const hasExpandedDetail = (item.expandedSections?.length ?? 0) > 0 || item.copy.expandedDetail !== undefined;
   const line = (
     <>
       <span className="agent-activity-label" aria-hidden="true">
         <Icon size={12} strokeWidth={2.25} />
       </span>
-      <span className="agent-activity-detail">{item.copy.detail}</span>
+      <span className="agent-activity-body">
+        {(item.copy.label !== undefined || item.statusBadge !== undefined || (item.badges?.length ?? 0) > 0) && (
+          <span className="agent-activity-meta">
+            {item.copy.label !== undefined && (
+              <ActivityBadgeChip badge={{ label: item.copy.label, tone: badgeToneForKind(toolKind) }} variant="kind" />
+            )}
+            {item.statusBadge !== undefined && <ActivityBadgeChip badge={item.statusBadge} variant="status" />}
+            {item.badges?.map((badge, index) => (
+              <ActivityBadgeChip key={`${badge.label}-${index}`} badge={badge} variant="meta" />
+            ))}
+          </span>
+        )}
+        <span className="agent-activity-detail">{item.copy.detail}</span>
+      </span>
     </>
   );
-  if (item.copy.expandedDetail !== undefined) {
+  if (hasExpandedDetail) {
     return (
       <details className="agent-activity-disclosure" data-tone={item.tone}>
         <summary className="agent-activity-line">{line}</summary>
@@ -213,15 +231,68 @@ function ExpandedDetailPanel({ item }: { readonly item: ActivityItem }): React.R
     return (
       <div className="agent-activity-expanded-detail">
         {sections.map((section: ActivityExpandedSection, index: number) => (
-          <div className="agent-activity-expanded-section" key={index}>
+          <div
+            className="agent-activity-expanded-section"
+            data-tone={section.tone}
+            key={index}
+          >
             <div className="agent-activity-expanded-section-title">{section.title}</div>
-            <div className="agent-activity-expanded-section-content">{section.content}</div>
+            <ExpandedSectionContent section={section} />
           </div>
         ))}
       </div>
     );
   }
   return <p className="agent-activity-expanded-detail">{item.copy.expandedDetail}</p>;
+}
+
+function ExpandedSectionContent(props: {
+  readonly section: ActivityExpandedSection;
+}): React.ReactElement {
+  if (props.section.format === "code") {
+    return (
+      <pre className="agent-activity-expanded-section-content agent-activity-expanded-code">
+        <code>{props.section.content}</code>
+      </pre>
+    );
+  }
+  if (props.section.format === "list") {
+    return (
+      <ul className="agent-activity-expanded-section-content agent-activity-expanded-list">
+        {props.section.content
+          .split("\n")
+          .map((line) => line.trim())
+          .filter((line) => line.length > 0)
+          .map((line, index) => <li key={`${index}-${line}`}>{line}</li>)}
+      </ul>
+    );
+  }
+  return <div className="agent-activity-expanded-section-content">{props.section.content}</div>;
+}
+
+function ActivityBadgeChip(props: {
+  readonly badge: ActivityBadge;
+  readonly variant: "kind" | "status" | "meta";
+}): React.ReactElement {
+  return (
+    <span
+      className={`agent-activity-chip ${props.variant}`}
+      data-tone={props.badge.tone ?? "neutral"}
+      data-monospace={props.badge.monospace === true ? "true" : undefined}
+    >
+      {props.badge.label}
+    </span>
+  );
+}
+
+function badgeToneForKind(kind: string): ActivityBadge["tone"] {
+  if (kind === "command") return "accent";
+  if (kind === "search" || kind === "web") return "accent";
+  if (kind === "read") return "success";
+  if (kind === "edit") return "warning";
+  if (kind === 'confirmation') return "warning";
+  if (kind === "decision") return "accent";
+  return "neutral";
 }
 
 function agentWorkTimelinePropsEqual(left: AgentWorkTimelineProps, right: AgentWorkTimelineProps): boolean {
@@ -264,7 +335,30 @@ function activityItemEqual(left: ActivityItem | undefined, right: ActivityItem |
     left.copy.label === right.copy.label &&
     left.copy.detail === right.copy.detail &&
     left.copy.expandedDetail === right.copy.expandedDetail &&
+    badgesEqual(left.statusBadge, right.statusBadge) &&
+    badgeListsEqual(left.badges, right.badges) &&
     expandedSectionsEqual(left.expandedSections, right.expandedSections);
+}
+
+function badgeListsEqual(
+  left: readonly ActivityBadge[] | undefined,
+  right: readonly ActivityBadge[] | undefined,
+): boolean {
+  if (left === right) return true;
+  if (left === undefined || right === undefined) return false;
+  if (left.length !== right.length) return false;
+  for (let index = 0; index < left.length; index += 1) {
+    if (!badgesEqual(left[index], right[index])) return false;
+  }
+  return true;
+}
+
+function badgesEqual(left: ActivityBadge | undefined, right: ActivityBadge | undefined): boolean {
+  if (left === right) return true;
+  if (left === undefined || right === undefined) return false;
+  return left.label === right.label &&
+    left.tone === right.tone &&
+    left.monospace === right.monospace;
 }
 
 function expandedSectionsEqual(
@@ -275,7 +369,14 @@ function expandedSectionsEqual(
   if (left === undefined || right === undefined) return false;
   if (left.length !== right.length) return false;
   for (let i = 0; i < left.length; i += 1) {
-    if (left[i]?.title !== right[i]?.title || left[i]?.content !== right[i]?.content) return false;
+    if (
+      left[i]?.title !== right[i]?.title ||
+      left[i]?.content !== right[i]?.content ||
+      left[i]?.format !== right[i]?.format ||
+      left[i]?.tone !== right[i]?.tone
+    ) {
+      return false;
+    }
   }
   return true;
 }

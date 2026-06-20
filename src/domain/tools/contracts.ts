@@ -38,6 +38,13 @@ export type ToolOperationType =
   | "execute"
   | "external-submit";
 
+export type ToolFileDisplayOperation =
+  | "create"
+  | "write"
+  | "append"
+  | "edit"
+  | "delete";
+
 export type ToolVisibleResultPolicy = {
   readonly userVisible: "summary-only" | "safe-preview" | "hidden";
   readonly maxPreviewChars: number;
@@ -157,6 +164,7 @@ export type ToolDisplayProjection =
   | {
       readonly kind: "file_change_summary";
       readonly path?: string;
+      readonly operation?: ToolFileDisplayOperation;
       readonly bytes?: number;
       readonly append?: boolean;
       readonly replacements?: number;
@@ -168,6 +176,7 @@ export type ToolDisplayProjection =
   | {
       readonly kind: "file_diff_preview";
       readonly path?: string;
+      readonly operation?: ToolFileDisplayOperation;
       readonly replacements?: number;
       readonly previousLength?: number;
       readonly nextLength?: number;

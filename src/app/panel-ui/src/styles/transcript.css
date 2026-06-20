@@ -260,7 +260,7 @@
   min-width: 0;
   max-width: 100%;
   grid-template-columns: auto minmax(0, 1fr);
-  align-items: baseline;
+  align-items: start;
   column-gap: var(--space-2);
   row-gap: 3px;
   margin: 0;
@@ -359,6 +359,23 @@
   overflow-wrap: anywhere;
 }
 
+.agent-activity-expanded-code {
+  margin: 0;
+}
+
+.agent-activity-expanded-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 1rem;
+  font-family: var(--font-sans);
+  white-space: normal;
+}
+
+.agent-activity-expanded-list li {
+  overflow-wrap: anywhere;
+}
+
 .agent-activity-label {
   display: inline-flex;
   align-items: center;
@@ -367,6 +384,70 @@
   flex-shrink: 0;
   color: color-mix(in oklch, var(--fg) 42%, var(--muted));
   line-height: 1;
+}
+
+.agent-activity-body {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+}
+
+.agent-activity-meta {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.agent-activity-chip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  border: 1px solid color-mix(in oklch, var(--border) 72%, transparent);
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--surface) 82%, transparent);
+  padding: 2px 8px;
+  color: color-mix(in oklch, var(--fg) 56%, var(--muted));
+  font-size: 10.5px;
+  font-weight: var(--weight-heading);
+  line-height: 1.25;
+  white-space: nowrap;
+}
+
+.agent-activity-chip[data-monospace="true"] {
+  font-family: var(--font-mono);
+}
+
+.agent-activity-chip.kind {
+  color: color-mix(in oklch, var(--fg) 78%, var(--muted));
+}
+
+.agent-activity-chip.status[data-tone="accent"],
+.agent-activity-chip.meta[data-tone="accent"] {
+  border-color: color-mix(in oklch, var(--accent) 26%, var(--border));
+  background: color-mix(in oklch, var(--accent) 7%, transparent);
+  color: color-mix(in oklch, var(--accent) 82%, var(--fg));
+}
+
+.agent-activity-chip.status[data-tone="success"],
+.agent-activity-chip.meta[data-tone="success"] {
+  border-color: color-mix(in oklch, var(--status-success) 26%, var(--border));
+  background: color-mix(in oklch, var(--status-success) 7%, transparent);
+  color: color-mix(in oklch, var(--status-success) 82%, var(--fg));
+}
+
+.agent-activity-chip.status[data-tone="warning"],
+.agent-activity-chip.meta[data-tone="warning"] {
+  border-color: color-mix(in oklch, var(--status-warning) 28%, var(--border));
+  background: color-mix(in oklch, var(--status-warning) 8%, transparent);
+  color: color-mix(in oklch, var(--status-warning) 82%, var(--fg));
+}
+
+.agent-activity-chip.status[data-tone="danger"],
+.agent-activity-chip.meta[data-tone="danger"] {
+  border-color: color-mix(in oklch, var(--status-danger) 28%, var(--border));
+  background: color-mix(in oklch, var(--status-danger) 8%, transparent);
+  color: color-mix(in oklch, var(--status-danger) 82%, var(--fg));
 }
 
 /* ── Semantic icon colors by tool kind ── */
@@ -395,6 +476,10 @@
   color: color-mix(in oklch, var(--fg) 72%, var(--muted));
   overflow-wrap: anywhere;
   white-space: normal;
+}
+
+.agent-activity-expanded-section[data-tone="danger"] .agent-activity-expanded-section-title {
+  color: color-mix(in oklch, var(--status-danger) 76%, var(--fg));
 }
 
 .agent-activity-step.thinking:not([data-current="true"]) .agent-activity-detail {
@@ -473,6 +558,10 @@
   .agent-activity-line {
     grid-template-columns: minmax(0, 1fr);
     row-gap: 2px;
+  }
+
+  .agent-activity-meta {
+    row-gap: 5px;
   }
 
   .agent-activity-disclosure > summary.agent-activity-line::after {

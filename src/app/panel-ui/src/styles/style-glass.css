@@ -1113,6 +1113,27 @@ html[data-style="glass"] .assistant-answer {
   padding: 4px 0 4px var(--space-4);
 }
 
+html[data-style="glass"] .assistant-result-evidence {
+  border-left-color: color-mix(in oklch, var(--accent) 22%, transparent);
+}
+
+html[data-style="glass"] .assistant-file-change {
+  border-color: color-mix(in oklch, white 28%, transparent);
+  background:
+    linear-gradient(180deg, color-mix(in oklch, white 22%, transparent), transparent 62%),
+    color-mix(in oklch, var(--surface) 44%, var(--glass-shell-tone));
+  box-shadow:
+    0 6px 14px color-mix(in oklch, var(--shadow-ink) 4%, transparent),
+    inset 0 1px 0 color-mix(in oklch, white 24%, transparent);
+}
+
+html[data-style="glass"] .assistant-file-change-preview {
+  border-color: color-mix(in oklch, white 28%, transparent);
+  box-shadow:
+    0 4px 10px color-mix(in oklch, var(--shadow-ink) 3%, transparent),
+    inset 0 1px 0 color-mix(in oklch, white 18%, transparent);
+}
+
 html[data-style="glass"] .assistant-answer .rich-blockquote,
 html[data-style="glass"] .rich-code-block,
 html[data-style="glass"] .rich-table-wrap {

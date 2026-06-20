@@ -313,6 +313,7 @@ function compactToolDisplayForUi(display: ToolDisplayProjection): ToolDisplayPro
     return {
       kind: "file_change_summary",
       path: compactSafeText(display.path, 260),
+      operation: display.operation,
       bytes: display.bytes,
       append: display.append,
       replacements: display.replacements,
@@ -326,6 +327,7 @@ function compactToolDisplayForUi(display: ToolDisplayProjection): ToolDisplayPro
     return {
       kind: "file_diff_preview",
       path: compactSafeText(display.path, 260),
+      operation: display.operation,
       replacements: display.replacements,
       previousLength: display.previousLength,
       nextLength: display.nextLength,

@@ -314,6 +314,10 @@ test("tool stream projection shows file change metadata without raw replacement 
   assert.equal(detail.preview?.includes("文件已更新"), true);
   assert.equal(detail.preview?.includes("secret old text"), false);
   assert.equal(detail.preview?.includes("secret new text"), false);
+  assert.equal(detail.display?.kind, "file_diff_preview");
+  assert.equal(detail.display?.kind === "file_diff_preview" ? detail.display.path : undefined, "src/app/example.ts");
+  assert.equal(detail.display?.kind === "file_diff_preview" ? detail.display.operation : undefined, "edit");
+  assert.equal(detail.display?.kind === "file_diff_preview" ? detail.display.replacements : undefined, 1);
 });
 
 test("tool stream projection keeps edit preview focused on file-level summary", () => {

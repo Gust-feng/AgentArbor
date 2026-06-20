@@ -119,6 +119,8 @@ async function handleRunRequest(
   const aiMode = runInput.aiMode ?? config.defaultAiMode;
 
   try {
+    // Legacy synchronous underground route. Desktop routes must use
+    // BasicAgentRunExecutor.start so run birth facts are frozen before execution.
     const run = await runForPanel(runtime, runKind, runInput.goal, aiMode, runInput.taskSoilInput, runMode, {
       config,
       informationAccess,

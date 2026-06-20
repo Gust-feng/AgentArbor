@@ -588,6 +588,7 @@ function toolTranscriptTitleSet(event: PanelTranscriptStreamEvent): {
 } {
   const display = event.detail?.display;
   const toolName = event.toolName?.trim().toLowerCase() ?? "";
+  const fileMutationTitle = fileMutationTitleSet(toolName, display);
   if (display?.kind === "command_summary" || toolName === "run_command") {
     return { action: "运行命令", completed: "命令完成", failed: "命令未完成" };
   }
@@ -597,6 +598,9 @@ function toolTranscriptTitleSet(event: PanelTranscriptStreamEvent): {
   if (display?.kind === "search_results" || toolName === "search" || toolName === "web_search") {
     return { action: "搜索资料", completed: "资料搜索完成", failed: "资料搜索未完成" };
   }
+  if (fileMutationTitle !== undefined) {
+    return fileMutationTitle;
+  }
   if (display?.kind === "read_result") {
     return { action: "读取资料", completed: "资料读取完成", failed: "资料读取未完成" };
   }
@@ -605,14 +609,6 @@ function toolTranscriptTitleSet(event: PanelTranscriptStreamEvent): {
   }
   if (display?.kind === "http_response" || toolName === "http_request") {
     return { action: "发送 HTTP 请求", completed: "HTTP 请求完成", failed: "HTTP 请求未完成" };
-  }
-  if (display?.kind === "file_diff_preview" || toolName === "edit_file" || toolName.includes("patch") || toolName.includes("replace")) {
-    return { action: "编辑文件", completed: "编辑完成", failed: "编辑未完成" };
-  }
-  if (display?.kind === "file_change_summary") {
-    if (toolName === "create_file" || toolName.includes("create")) return { action: "创建文件", completed: "创建完成", failed: "创建未完成" };
-    if (toolName === "delete_file" || toolName.includes("delete") || toolName.includes("remove")) return { action: "删除文件", completed: "删除完成", failed: "删除未完成" };
-    return { action: "写入文件", completed: "写入完成", failed: "写入未完成" };
   }
   if (toolName === "grep_files" || toolName.includes("grep")) {
     return { action: "搜索文件", completed: "搜索完成", failed: "搜索未完成" };
@@ -630,6 +626,51 @@ function toolTranscriptTitleSet(event: PanelTranscriptStreamEvent): {
     (event.detail?.display?.kind === "generic_tool_summary" ? event.detail.display.action : undefined);
   const fallback = action ?? (event.toolName === undefined ? "使用工具" : toolDisplayName(event.toolName));
   return { action: fallback, completed: `${fallback}完成`, failed: `${fallback}未完成` };
+}
+
+function fileMutationTitleSet(
+  toolName: string,
+  display: ToolDisplayProjection | undefined,
+): { readonly action: string; readonly completed: string; readonly failed: string } | undefined {
+  const genericText = display?.kind === "generic_tool_summary"
+    ? [display.action, display.summary].filter((value): value is string => value !== undefined).join(" ").toLowerCase()
+    : "";
+  if (toolName === "delete_file" || toolName.includes("delete_file") || toolName.includes("remove_file") || mentionsDeleteFile(genericText)) {
+    return { action: "删除文件", completed: "删除完成", failed: "删除未完成" };
+  }
+  if (toolName === "create_file" || toolName.includes("create_file") || mentionsCreateFile(genericText)) {
+    return { action: "创建文件", completed: "创建完成", failed: "创建未完成" };
+  }
+  if (
+    display?.kind === "file_diff_preview" ||
+    toolName === "edit_file" ||
+    toolName.includes("edit_file") ||
+    toolName.includes("patch") ||
+    toolName.includes("replace") ||
+    mentionsEditFile(genericText)
+  ) {
+    return { action: "编辑文件", completed: "编辑完成", failed: "编辑未完成" };
+  }
+  if (display?.kind === "file_change_summary" || toolName === "write_file" || toolName.includes("write_file") || mentionsWriteFile(genericText)) {
+    return { action: "写入文件", completed: "写入完成", failed: "写入未完成" };
+  }
+  return undefined;
+}
+
+function mentionsWriteFile(value: string): boolean {
+  return value.includes("写入文件") || value.includes("write_file") || value.includes("write file") || value.includes("written");
+}
+
+function mentionsCreateFile(value: string): boolean {
+  return value.includes("创建文件") || value.includes("create_file") || value.includes("create file") || value.includes("created");
+}
+
+function mentionsDeleteFile(value: string): boolean {
+  return value.includes("删除文件") || value.includes("delete_file") || value.includes("delete file") || value.includes("deleted");
+}
+
+function mentionsEditFile(value: string): boolean {
+  return value.includes("编辑文件") || value.includes("修改文件") || value.includes("edit_file") || value.includes("edit file");
 }
 
 function fileDisplaySummary(display: Extract<ToolDisplayProjection, { readonly kind: "file_change_summary" | "file_diff_preview" }>): string | undefined {

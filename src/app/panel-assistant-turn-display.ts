@@ -92,6 +92,7 @@ export function projectStableAssistantTurnDisplay<
     previous: input.previousWorkflow,
     content: failure?.previous ?? assistant.content,
     deliverable: failure === undefined ? assistant.deliverable : undefined,
+    resultEvidence: failure === undefined ? assistant.resultEvidence : undefined,
     transcriptNodes: workflowTranscriptNodes,
     pending: assistant.pending,
     live: assistant.live,

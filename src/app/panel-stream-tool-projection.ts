@@ -6,6 +6,10 @@ import { asRecord, stringArray, stringOrUndefined } from "./panel-read-model-uti
 import { commandSummaryParts } from "./panel-transcript-tool-format.js";
 import { safeCommandToolPreview, safeReadFileToolPreview } from "./safe-tool-preview.js";
 import { cleanOrdinaryToolText } from "./ordinary-tool-copy.js";
+import {
+  normalizeToolDisplayForOperation,
+  toolDisplayProjectionOrUndefined,
+} from "./tool-display-normalization.js";
 
 export type PanelRunStreamEventDetail = {
   readonly kind: "thinking" | "tool" | "confirmation" | "work";
@@ -55,7 +59,14 @@ export function toolStreamDetail(
   const input = asRecord(payload.input);
   const output = asRecord(payload.output);
   const result = asRecord(output.result);
-  const display = commandDisplayForReadModel(toolName, input, output, result, payload) ?? toolDisplayOrUndefined(output.display);
+  const display = commandDisplayForReadModel(toolName, input, output, result, payload) ??
+    normalizeToolDisplayForOperation({
+      toolName,
+      input,
+      output,
+      existingDisplay: output.display,
+      truncated: output.truncated === true,
+    });
   const envelope = toolResultEnvelopeOrUndefined(output.envelope);
   const errorDomain = errorDomainFromToolProjection(payload, output, envelope);
   const errorFacts = errorFactsFromToolProjection(payload, output, display, envelope);
@@ -77,31 +88,13 @@ export function toolStreamDetail(
 }
 
 function toolDisplayOrUndefined(value: unknown): ToolDisplayProjection | undefined {
-  const record = asRecord(value);
-  const kind = stringOrUndefined(record.kind);
-  if (
-    kind === "search_results" ||
-    kind === "read_result" ||
-    kind === "browser_snapshot" ||
-    kind === "http_response" ||
-    kind === "file_change_summary" ||
-    kind === "file_diff_preview" ||
-    kind === "command_summary" ||
-    kind === "generic_tool_summary"
-  ) {
-    return normalizeToolDisplayForReadModel(value as ToolDisplayProjection);
-  }
-  return undefined;
-}
-
-function normalizeToolDisplayForReadModel(display: ToolDisplayProjection): ToolDisplayProjection {
-  if (display.kind !== "generic_tool_summary") {
+  const display = toolDisplayProjectionOrUndefined(value);
+  if (display?.kind !== "generic_tool_summary") {
     return display;
   }
-  const action = display.action;
   return {
     ...display,
-    action: action === undefined ? undefined : displayActionLabel(action),
+    action: display.action === undefined ? undefined : displayActionLabel(display.action),
   };
 }
 

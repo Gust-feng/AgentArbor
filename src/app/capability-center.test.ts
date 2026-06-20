@@ -288,6 +288,19 @@ function mcpToolExecutor(
     definition: {
       name,
       description: "Lookup docs through MCP.",
+      modelContract: {
+        purpose: "Lookup documentation through a configured MCP server.",
+        whenToUse: ["Use when this MCP docs lookup capability is needed."],
+        inputNotes: ["query is required and contains the lookup text."],
+        outputNotes: ["Returns the MCP lookup result payload."],
+        runtimeHints: [
+          { label: "MCP server", value: name.split("__")[0] ?? "mcp" },
+          { label: "MCP tool", value: name.split("__")[1] ?? name },
+        ],
+        examples: [
+          { title: "Lookup docs", input: { query: "routing" } },
+        ],
+      },
       inputSchema: { type: "object", properties: { query: { type: "string" } } },
       metadata: {
         category: "mcp",

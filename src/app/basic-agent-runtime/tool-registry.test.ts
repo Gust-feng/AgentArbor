@@ -307,11 +307,54 @@ test("tool registry rejects enabled built-in-scope tools without model-visible c
   );
 });
 
+test("tool registry rejects enabled MCP tools without model-visible contract guidance", () => {
+  const registry = new ToolRegistry();
+  const executor: ToolExecutor = {
+    definition: {
+      name: "mcp_thin_tool",
+      description: "Thin MCP tool.",
+      inputSchema: { type: "object", properties: {} },
+      metadata: {
+        category: "mcp",
+        riskLevel: "low",
+        operationType: "read-only",
+        requiresConfirmation: false,
+        visibleResultPolicy: {
+          userVisible: "summary-only",
+          maxPreviewChars: 400,
+          omitRawOutput: true,
+        },
+      },
+    },
+    async execute() {
+      return { ok: true };
+    },
+  };
+
+  assert.throws(
+    () => registry.register({ executor, scopes: ["mcp"], enabledByDefault: true }),
+    /missing model contract fields: modelContract/
+  );
+});
+
 function mcpToolExecutor(): ToolExecutor {
   return {
     definition: {
       name: "mcp_docs_search",
       description: "Search docs through an MCP server.",
+      modelContract: {
+        purpose: "Search documentation through a configured MCP server.",
+        whenToUse: ["Use when docs_search capability is exposed by the MCP server."],
+        inputNotes: ["query is required and contains the search text."],
+        outputNotes: ["Returns the MCP search result payload."],
+        runtimeHints: [
+          { label: "MCP server", value: "docs" },
+          { label: "MCP tool", value: "search" },
+        ],
+        examples: [
+          { title: "Search docs", input: { query: "routing" } },
+        ],
+      },
       inputSchema: { type: "object", properties: { query: { type: "string" } } },
       metadata: {
         category: "mcp",

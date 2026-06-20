@@ -701,11 +701,10 @@ test("conversation and desktop run APIs recover safe history from RuntimeDatabas
     assert.equal(conversation.body.conversation.turns.length, 2);
     assert.equal(conversation.body.conversation.turns[1].content.includes("我可以直接回答问题"), true);
     assert.deepEqual(conversation.body.conversation.turns[1].responseModel, {
-      profileId: "default",
-      label: "OpenAI",
-      providerKind: "openai_compatible",
-      protocolKind: "openai_responses",
-      baseUrl: "https://api.openai.com/v1",
+      profileId: "fake",
+      label: "Fake",
+      providerKind: "fake",
+      protocolKind: "openai_compatible_chat_completions",
       model: "fake-deterministic-model",
     });
     assert.equal(run.status, 200);

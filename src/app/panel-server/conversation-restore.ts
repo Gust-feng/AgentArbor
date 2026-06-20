@@ -6,11 +6,14 @@ import type {
 } from "../../domain/runtime-database/index.js";
 import {
   trimRuntimeConversationToClosedPairs,
-  turnModelFromConfig,
   toRuntimeConversationRecord,
   type PanelConversationReadModel,
   type PanelConversationStore,
 } from "../panel-conversations.js";
+import {
+  turnModelFromConfigAndModelCall,
+  turnModelFromModelCallFallback,
+} from "../panel-conversation-response-model.js";
 import { unique } from "./request-parsers.js";
 
 export type PanelConversationRestoreRuntime = {
@@ -86,24 +89,12 @@ async function backfillConversationResponseModels(
 function conversationTurnModelFromRunSnapshot(
   snapshot: RuntimeRunSnapshot
 ): RuntimeConversationRecord["turns"][number]["responseModel"] | undefined {
+  const latestCall = latestRuntimeModelCall(snapshot.modelCalls);
   const activeModel = snapshot.run.capabilitySnapshot?.activeModel;
   if (activeModel !== undefined) {
-    const latestCallModel = latestRuntimeModelCall(snapshot.modelCalls)?.model;
-    return {
-      ...turnModelFromConfig(activeModel),
-      model: latestCallModel ?? activeModel.model,
-    };
+    return turnModelFromConfigAndModelCall(activeModel, latestCall);
   }
-  const latestCall = latestRuntimeModelCall(snapshot.modelCalls);
-  if (latestCall === undefined || latestCall.model === undefined) {
-    return undefined;
-  }
-  return {
-    profileId: latestCall.providerKind ?? `run:${snapshot.run.runId}`,
-    providerKind: latestCall.providerKind,
-    protocolKind: latestCall.protocolKind,
-    model: latestCall.model,
-  };
+  return turnModelFromModelCallFallback(latestCall, `run:${snapshot.run.runId}`);
 }
 
 function latestRuntimeModelCall(

@@ -3,8 +3,8 @@ import type { PanelRunCanvasReadModel } from "../panel-canvas-read-model.js";
 import {
   type PanelConversationStore,
   type PanelConversationTurnModel,
-  turnModelFromConfig,
 } from "../panel-conversations.js";
+import { turnModelFromConfigAndModelCall } from "../panel-conversation-response-model.js";
 import type { PanelRunJob } from "../panel-run-jobs.js";
 import type { PanelRunStatus, PanelRunTranscript } from "../panel-run-read-model.js";
 import {
@@ -162,11 +162,10 @@ export function syncConversationPreviewsForRunningJobs(input: {
 }
 
 function turnModelFromRunResponse(response: PanelConversationSyncRunResponse): PanelConversationTurnModel {
-  const latestCallModel = latestPanelTranscriptModelCall(response.transcript.modelCalls)?.model;
-  return {
-    ...turnModelFromConfig(response.config),
-    model: latestCallModel ?? response.config.model,
-  };
+  return turnModelFromConfigAndModelCall(
+    response.config,
+    latestPanelTranscriptModelCall(response.transcript.modelCalls)
+  );
 }
 
 function latestPanelTranscriptModelCall(

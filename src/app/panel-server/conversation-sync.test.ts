@@ -49,6 +49,60 @@ test("syncConversationTurnForJob completes assistant turn from desktop answer ca
   assert.equal(assistant?.responseModel?.model, "gpt-sync-latest");
 });
 
+test("syncConversationTurnForJob records fake runs as the actual fake response model", () => {
+  const { conversations, job } = startedConversationJob();
+
+  syncConversationTurnForJob({
+    conversations,
+    job,
+    response: response({
+      status: "completed",
+      modelCalls: [
+        {
+          requestId: "model-call-fake",
+          status: "completed",
+          providerKind: "fake",
+          protocolKind: "openai_compatible_chat_completions",
+          model: "fake-deterministic-model",
+          candidateRefs: [],
+          eventRefs: [],
+        },
+      ],
+      canvas: {
+        kind: "desktop_agent_canvas",
+        taskSoil: taskSoilCanvas(),
+        agent: {
+          status: "completed",
+          answer: {
+            answer: "fake 运行完成。",
+            modelCallRefs: [],
+            toolCallRefs: [],
+            evidenceRefs: [],
+            resultBlocks: [],
+          },
+          modelCallRefs: [],
+          toolCallRefs: [],
+          activity: [],
+        },
+        explanation: {
+          resultWhyReasonable: "基于 fake 模型输出。",
+          observationPanelRole: "展示运行投影。",
+        },
+      },
+    }),
+  });
+
+  const assistant = conversations.getReadModel(job.conversationId ?? "")?.turns.find((turn) => turn.role === "assistant");
+  assert.deepEqual(assistant?.responseModel, {
+    profileId: "fake",
+    label: "Fake",
+    providerKind: "fake",
+    protocolKind: "openai_compatible_chat_completions",
+    baseUrl: undefined,
+    model: "fake-deterministic-model",
+  });
+});
+
 test("syncConversationTurnForJob keeps long desktop answers intact", () => {
   const { conversations, job } = startedConversationJob();
   const longAnswer = `开头\n${"普通桌面 agent 线性会话回答。".repeat(220)}\n结尾`;
@@ -986,6 +1040,7 @@ function response(input: {
   readonly canvas?: PanelConversationSyncRunResponse["canvas"];
   readonly error?: PanelConversationSyncRunResponse["error"];
   readonly transcriptEvents?: readonly PanelRunStreamEvent[];
+  readonly modelCalls?: PanelConversationSyncRunResponse["transcript"]["modelCalls"];
 }): PanelConversationSyncRunResponse {
   return {
     status: input.status,
@@ -994,7 +1049,7 @@ function response(input: {
     canvas: input.canvas,
     transcript: {
       events: input.transcriptEvents ?? [],
-      modelCalls: [
+      modelCalls: input.modelCalls ?? [
         {
           requestId: "model-call-sync",
           status: "completed",

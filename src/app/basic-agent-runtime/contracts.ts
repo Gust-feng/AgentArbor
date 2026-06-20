@@ -175,6 +175,35 @@ export type BasicAgentRunStartInput = {
   readonly deferSchedule?: boolean;
 };
 
+/** User/API request shape for the ordinary Desktop Agent run birth path. */
+export type DesktopAgentRunSpec = Omit<BasicAgentRunStartInput, "runKind" | "runMode"> & {
+  readonly runKind: "desktop";
+  readonly runMode?: "agent";
+};
+
+/** Facts frozen when an ordinary Desktop Agent run is created. */
+export type DesktopAgentRunBirthFacts = BasicAgentRunStartFacts & {
+  readonly capabilitySnapshot: BasicAgentCapabilitySnapshot;
+  readonly agentDefinitionRef: RunAgentDefinitionRef;
+};
+
+/** Execution input for an already-created ordinary Desktop Agent run. */
+export type DesktopAgentRunExecutionInput = BasicAgentRunExecutionInput & {
+  readonly job: BasicAgentRunJob & {
+    readonly runKind: "desktop";
+    readonly runMode: "agent";
+    readonly capabilitySnapshot: BasicAgentCapabilitySnapshot;
+    readonly agentDefinitionRef: RunAgentDefinitionRef;
+  };
+};
+
+/**
+ * Transitional ordinary Desktop Agent execution result. Phase 2 keeps this
+ * assignment-compatible with BasicAgentRunExecutionResult until panel
+ * projection fields can be split without breaking persisted/read-model code.
+ */
+export type DesktopAgentRunExecutionResult = BasicAgentRunExecutionResult;
+
 export type BasicAgentRunExecutorView = {
   start(input: BasicAgentRunStartInput): Promise<BasicAgentRun>;
   get(runId: string): BasicAgentRun | undefined;

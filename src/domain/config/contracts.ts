@@ -128,6 +128,13 @@ export type ModelCapabilities = {
   readonly lastVerifiedAt?: string;
 };
 
+export type ProtocolToolCallCapabilities = {
+  readonly protocolKind: ConfiguredModelProtocolKind;
+  readonly canSendToolDefinitions: boolean;
+  readonly canReceiveToolCalls: boolean;
+  readonly canRoundTripToolResults: boolean;
+};
+
 export type ProviderProtocolProfile = {
   readonly profileId: ProviderProtocolProfileId;
   readonly label: string;
@@ -227,6 +234,7 @@ export type ConfiguredInformationSourceKind =
 export type ModelProviderProfileSettings = {
   readonly profileId: string;
   readonly label: string;
+  readonly logoDataUrl?: string;
   readonly providerKind: ConfiguredModelProviderKind;
   readonly protocolKind: ConfiguredModelProtocolKind;
   readonly baseUrl?: string;
@@ -258,6 +266,7 @@ export type AgentArborLocalSettings = {
 export type SanitizedModelProviderConfig = {
   readonly profileId: string;
   readonly label?: string;
+  readonly logoDataUrl?: string;
   readonly providerKind: ModelProviderProfileSettings["providerKind"];
   readonly protocolKind: ModelProviderProfileSettings["protocolKind"];
   readonly baseUrl: string;
@@ -274,6 +283,8 @@ export type SanitizedModelProviderConfig = {
 export type UpdateModelProviderConfigInput = {
   readonly profileId?: string;
   readonly label?: string;
+  readonly logoDataUrl?: string;
+  readonly clearLogoDataUrl?: boolean;
   readonly providerKind?: ConfiguredModelProviderKind;
   readonly protocolKind?: ConfiguredModelProtocolKind;
   readonly baseUrl?: string;
@@ -474,12 +485,42 @@ export type RunCapabilityResolution = {
   readonly agentId: string;
   readonly agentDisplayName: string;
   readonly toolVisibilityProfileId: string;
+  readonly capabilityPlan: RunCapabilityPlan;
   readonly allowedTools: readonly string[];
   readonly toolExposures: readonly RunToolExposure[];
   readonly enabledSkills: readonly RunEnabledSkill[];
   readonly mcpDrafts: readonly CapabilityDraft[];
   readonly warnings: readonly string[];
   readonly createdAt: string;
+};
+
+export type RunCapabilityPlanToolPolicy = {
+  readonly canExposeToModel: boolean;
+  readonly allowedTools: readonly string[];
+};
+
+export type RunCapabilityPlanFilePolicy = {
+  readonly canReadWorkspace: boolean;
+  readonly canWriteWorkspace: boolean;
+  readonly canDeleteWorkspace: boolean;
+  readonly canExecuteCommands: boolean;
+};
+
+export type RunCapabilityPlanUiPolicy = {
+  readonly canShowStreamingOutput: boolean;
+  readonly canShowToolCards: boolean;
+  readonly visibleToolNames: readonly string[];
+};
+
+export type RunCapabilityPlan = {
+  readonly protocolToolCallCapabilities: ProtocolToolCallCapabilities;
+  readonly modelCapabilities: ModelCapabilities;
+  readonly canExposeModelTools: boolean;
+  readonly tools?: RunCapabilityPlanToolPolicy;
+  readonly fileOperations?: RunCapabilityPlanFilePolicy;
+  readonly uiDisplay?: RunCapabilityPlanUiPolicy;
+  readonly allowedTools: readonly string[];
+  readonly warnings: readonly string[];
 };
 
 export type RunAgentDefinitionRef = {

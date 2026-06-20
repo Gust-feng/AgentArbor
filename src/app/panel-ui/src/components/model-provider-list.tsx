@@ -46,7 +46,7 @@ export function ModelProviderList(props: {
   const draggingIndex = draggingKey === undefined ? -1 : props.items.findIndex((item) => item.key === draggingKey);
   const draggingItem = draggingKey === undefined ? undefined : props.items.find((item) => item.key === draggingKey);
   const deleteMode = draggingItem !== undefined;
-  const deleteAvailable = draggingItem?.profileId !== undefined;
+  const deleteAvailable = draggingItem?.profileId !== undefined && draggingItem.protectedBuiltin !== true;
 
   useEffect(() => {
     return () => {
@@ -80,7 +80,7 @@ export function ModelProviderList(props: {
 
   function finishDrag(item: ModelProviderListItem): void {
     const nextIndex = insertIndexRef.current;
-    const shouldDelete = deleteZoneActiveRef.current && item.profileId !== undefined;
+    const shouldDelete = deleteZoneActiveRef.current && item.profileId !== undefined && item.protectedBuiltin !== true;
     const currentKeys = props.items.map((provider) => provider.key);
     const nextOrder = nextIndex === undefined
       ? undefined
@@ -190,7 +190,7 @@ export function ModelProviderList(props: {
     }
     const rect = zone.getBoundingClientRect();
     const inside = clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom;
-    const active = inside && item.profileId !== undefined;
+    const active = inside && item.profileId !== undefined && item.protectedBuiltin !== true;
     setDeleteZoneActive(active);
     return active;
   }
@@ -264,7 +264,15 @@ export function ModelProviderList(props: {
         <span>模型服务</span>
         <label className="provider-search">
           <Search size={14} />
-          <input value={props.query} onChange={(event) => props.onQueryChange(event.target.value)} placeholder="搜索" />
+          <input
+            value={props.query}
+            onChange={(event) => props.onQueryChange(event.target.value)}
+            placeholder="搜索"
+            spellCheck={false}
+            autoComplete="off"
+            autoCorrect="off"
+            autoCapitalize="off"
+          />
         </label>
       </div>
       <div className={`provider-list ${draggingKey === undefined ? "" : "reordering"} ${dropHandoffActive ? "drop-handoff" : ""}`}>

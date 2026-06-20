@@ -308,8 +308,16 @@
   height: 21px;
 }
 
+.provider-logo-image {
+  display: block;
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
+}
+
 .provider-logo.large .provider-logo-svg,
-.provider-logo.large .provider-logo-svg svg {
+.provider-logo.large .provider-logo-svg svg,
+.provider-logo.large .provider-logo-image {
   width: 28px;
   height: 28px;
 }
@@ -395,15 +403,69 @@
   gap: var(--space-3);
 }
 
-.provider-detail-header > div {
-  min-width: 0;
+.provider-detail-logo-edit {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+  cursor: pointer;
 }
 
-.provider-detail-header h3 {
-  margin: 0;
+.provider-detail-logo-edit input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  clip-path: inset(50%);
+}
+
+.provider-detail-logo-edit:hover .provider-logo {
+  border-color: var(--field-focus-border);
+  box-shadow: var(--field-focus-ring);
+}
+
+.provider-detail-title-field {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.provider-detail-title {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.provider-detail-title strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--fg);
   font-size: 20px;
   font-weight: var(--weight-heading);
+  line-height: 1.3;
+  padding: 4px 6px;
+}
+
+.provider-detail-title-field input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg);
+  font-size: 20px;
+  font-weight: var(--weight-heading);
+  padding: 4px 6px;
+}
+
+.provider-detail-title-field input:hover,
+.provider-detail-title-field input:focus,
+.provider-detail-title-field input:focus-visible {
+  border-color: transparent;
+  background: color-mix(in oklch, var(--accent-soft) 18%, transparent);
+  box-shadow: none;
+  outline: none;
 }
 
 .provider-detail-divider {
@@ -606,7 +668,11 @@
     align-items: flex-start;
   }
 
-  .provider-detail-header h3 {
+  .provider-detail-title-field input {
+    font-size: 18px;
+  }
+
+  .provider-detail-title strong {
     font-size: 18px;
   }
 
@@ -658,7 +724,11 @@
     padding: var(--space-4) var(--space-3) var(--space-5);
   }
 
-  .provider-detail-header h3 {
+  .provider-detail-title-field input {
+    font-size: 17px;
+  }
+
+  .provider-detail-title strong {
     font-size: 17px;
   }
 }

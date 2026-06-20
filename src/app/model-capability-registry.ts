@@ -4,6 +4,8 @@ import type {
   ModelCapabilities,
   ModelCapabilityOverrideSettings,
   ModelReasoningControlKind,
+  ProtocolToolCallCapabilities,
+  RunCapabilityPlan,
   ProviderProtocolProfileId,
   SanitizedModelProviderConfig,
 } from "../domain/config/index.js";
@@ -36,6 +38,39 @@ export const PROTOCOL_BASELINE_MODEL_CAPABILITIES: ModelCapabilities = {
   protocolProfileId: "openai_compatible",
   reasoningControl: "none",
   lastVerifiedAt: VERIFIED_AT,
+};
+
+const PROTOCOL_TOOL_CALL_CAPABILITIES: Record<ConfiguredModelProtocolKind, ProtocolToolCallCapabilities> = {
+  openai_compatible_chat_completions: {
+    protocolKind: "openai_compatible_chat_completions",
+    canSendToolDefinitions: true,
+    canReceiveToolCalls: true,
+    canRoundTripToolResults: true,
+  },
+  openai_responses: {
+    protocolKind: "openai_responses",
+    canSendToolDefinitions: true,
+    canReceiveToolCalls: true,
+    canRoundTripToolResults: true,
+  },
+  anthropic_messages: {
+    protocolKind: "anthropic_messages",
+    canSendToolDefinitions: false,
+    canReceiveToolCalls: false,
+    canRoundTripToolResults: false,
+  },
+  gemini_generate_content: {
+    protocolKind: "gemini_generate_content",
+    canSendToolDefinitions: false,
+    canReceiveToolCalls: false,
+    canRoundTripToolResults: false,
+  },
+  ollama_generate: {
+    protocolKind: "ollama_generate",
+    canSendToolDefinitions: false,
+    canReceiveToolCalls: false,
+    canRoundTripToolResults: false,
+  },
 };
 
 const OPENAI_COMPATIBLE_DEFINITIONS: readonly ModelDefinition[] = [
@@ -367,12 +402,68 @@ export function resolveModelCapabilities(input: {
   readonly overrides?: readonly ModelCapabilityOverrideSettings[];
 }): ModelCapabilities {
   const definition = bestDefinitionFor(input.profile);
-  const base =
+  const protocolCapabilities = resolveProtocolToolCallCapabilities(input.profile.protocolKind);
+  const base = constrainCapabilitiesToProtocolToolCalling(
     definition === undefined
       ? fallbackCapabilitiesForProfile(input.profile)
-      : capabilitiesForDefinition(definition);
+      : capabilitiesForDefinition(definition),
+    protocolCapabilities
+  );
   const override = bestOverrideFor(input.profile, input.overrides);
-  return override === undefined ? { ...base } : mergeCapabilities(base, override.capabilities);
+  const resolved = override === undefined ? { ...base } : mergeCapabilities(base, override.capabilities);
+  return constrainCapabilitiesToProtocolToolCalling(resolved, protocolCapabilities);
+}
+
+export function resolveProtocolToolCallCapabilities(
+  protocolKind: ConfiguredModelProtocolKind
+): ProtocolToolCallCapabilities {
+  return PROTOCOL_TOOL_CALL_CAPABILITIES[protocolKind];
+}
+
+export function supportsProtocolToolCalling(capabilities: ProtocolToolCallCapabilities): boolean {
+  return capabilities.canSendToolDefinitions &&
+    capabilities.canReceiveToolCalls &&
+    capabilities.canRoundTripToolResults;
+}
+
+export function createRunCapabilityPlan(input: {
+  readonly profile: SanitizedModelProviderConfig;
+  readonly modelCapabilities: ModelCapabilities;
+  readonly allowedTools?: readonly string[];
+  readonly fileOperationTools?: readonly string[];
+  readonly uiVisibleToolNames?: readonly string[];
+  readonly warnings?: readonly string[];
+}): RunCapabilityPlan {
+  const protocolToolCallCapabilities = resolveProtocolToolCallCapabilities(input.profile.protocolKind);
+  const canExposeModelTools = input.modelCapabilities.supportsToolCalling &&
+    supportsProtocolToolCalling(protocolToolCallCapabilities);
+  const allowedTools = input.allowedTools ?? [];
+  const fileOperationTools = input.fileOperationTools ?? [];
+  const uiVisibleToolNames = input.uiVisibleToolNames ?? allowedTools;
+  return {
+    protocolToolCallCapabilities,
+    modelCapabilities: input.modelCapabilities,
+    canExposeModelTools,
+    tools: {
+      canExposeToModel: canExposeModelTools,
+      allowedTools,
+    },
+    fileOperations: {
+      canReadWorkspace: fileOperationTools.includes("read-only") ||
+        fileOperationTools.includes("read-write") ||
+        fileOperationTools.includes("execute"),
+      canWriteWorkspace: fileOperationTools.includes("read-write"),
+      canDeleteWorkspace: fileOperationTools.includes("delete"),
+      canExecuteCommands: fileOperationTools.includes("execute"),
+    },
+    uiDisplay: {
+      canShowStreamingOutput: input.modelCapabilities.supportsStreaming,
+      canShowToolCards: uiVisibleToolNames.length > 0,
+      visibleToolNames: uiVisibleToolNames,
+    },
+    allowedTools,
+    warnings: input.warnings ?? [],
+  };
 }
 
 export function hasModelCapabilityOverride(input: {
@@ -406,27 +497,27 @@ function capabilitiesForDefinition(definition: ModelDefinition): ModelCapabiliti
 }
 
 function fallbackCapabilitiesForProfile(profile: SanitizedModelProviderConfig): ModelCapabilities {
-  const base = {
+  const protocolCapabilities = resolveProtocolToolCallCapabilities(profile.protocolKind);
+  return {
     ...PROTOCOL_BASELINE_MODEL_CAPABILITIES,
     protocolProfileId: providerProtocolProfileIdFor(profile),
     preferredApiStyle: preferredApiStyleForProtocol(profile.protocolKind),
-  };
-  return {
-    ...base,
-    supportsToolCalling: protocolSupportsToolCalling(profile.protocolKind),
+    supportsToolCalling: supportsProtocolToolCalling(protocolCapabilities),
   };
 }
 
-function protocolSupportsToolCalling(protocolKind: ConfiguredModelProtocolKind): boolean {
-  switch (protocolKind) {
-    case "openai_compatible_chat_completions":
-    case "openai_responses":
-      return true;
-    case "anthropic_messages":
-    case "gemini_generate_content":
-    case "ollama_generate":
-      return false;
+function constrainCapabilitiesToProtocolToolCalling(
+  capabilities: ModelCapabilities,
+  protocolCapabilities: ProtocolToolCallCapabilities
+): ModelCapabilities {
+  if (supportsProtocolToolCalling(protocolCapabilities)) {
+    return capabilities;
   }
+  return {
+    ...capabilities,
+    supportsToolCalling: false,
+    supportsParallelToolCalls: false,
+  };
 }
 
 function preferredApiStyleForProtocol(protocolKind: ConfiguredModelProtocolKind): ModelCapabilities["preferredApiStyle"] {

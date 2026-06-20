@@ -19,6 +19,7 @@ import {
   BasicAgentConfirmationDecisionError,
   BasicAgentPendingContinuationStore,
 } from "./run-executor-continuations.js";
+import { createRunCapabilityPlan } from "../model-capability-registry.js";
 import type { BasicAgentRunJob } from "./run-job.js";
 import { InMemoryBasicAgentRunJobStore } from "./run-job-store.js";
 
@@ -1443,14 +1444,23 @@ function jobFixture(overrides: Partial<BasicAgentRunJob> = {}): BasicAgentRunJob
 }
 
 function capabilityResolution(): RunCapabilityResolution {
+  const snapshot = capabilitySnapshot();
+  const allowedTools = ["search"];
+  const warnings: readonly string[] = [];
   return {
     resolutionId: "capability-resolution-test",
-    snapshotId: "snapshot-fixture",
+    snapshotId: snapshot.snapshotId,
     runMode: "agent",
     agentId: "desktop-agent-session",
     agentDisplayName: "Desktop Agent",
     toolVisibilityProfileId: "desktop-root-agent:ordinary-visible-tools:v2",
-    allowedTools: ["search"],
+    capabilityPlan: createRunCapabilityPlan({
+      profile: snapshot.activeModel,
+      modelCapabilities: snapshot.modelCapabilities,
+      allowedTools,
+      warnings,
+    }),
+    allowedTools,
     toolExposures: [
       {
         name: "search",
@@ -1467,7 +1477,7 @@ function capabilityResolution(): RunCapabilityResolution {
     ],
     enabledSkills: [],
     mcpDrafts: [],
-    warnings: [],
+    warnings,
     createdAt: "2026-05-12T00:00:00.000Z",
   };
 }
@@ -1500,9 +1510,16 @@ function capabilityResolutionWithReadFile(input: {
   readonly allowedTools: readonly string[];
   readonly readFileModelVisible: boolean;
 }): RunCapabilityResolution {
+  const snapshot = capabilitySnapshotWithReadFile();
   return {
     ...capabilityResolution(),
     allowedTools: input.allowedTools,
+    capabilityPlan: createRunCapabilityPlan({
+      profile: snapshot.activeModel,
+      modelCapabilities: snapshot.modelCapabilities,
+      allowedTools: input.allowedTools,
+      warnings: [],
+    }),
     toolExposures: [
       ...capabilityResolution().toolExposures,
       {

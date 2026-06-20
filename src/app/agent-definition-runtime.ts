@@ -4,6 +4,7 @@ import type { ToolConfirmationPolicy } from "../domain/tools/index.js";
 import type { AgentTurnPolicy } from "../kernel/intelligence/agent-turn-runtime.js";
 import type { AgentDefinition } from "./agent-prompts/contracts.js";
 import { resolveRunCapabilities } from "./capability-policy.js";
+import { createRunCapabilityPlan } from "./model-capability-registry.js";
 
 export {
   agentDefinitionHash,
@@ -61,14 +62,16 @@ export type ResolveAgentRunCapabilitiesInput = {
 };
 
 export function resolveAgentRunCapabilities(input: ResolveAgentRunCapabilitiesInput): RunCapabilityResolution {
+  const modelCapabilities = input.modelCapabilities ?? input.snapshot.modelCapabilities;
   return resolveRunCapabilities({
     snapshot: input.snapshot,
     goal: input.goal,
     agentDefinition: input.agentDefinition,
     taskSoil: input.taskSoil,
     platform: input.platform,
-    modelSupportsToolCalling:
-      input.modelCapabilities?.supportsToolCalling ??
-      input.snapshot.modelCapabilities.supportsToolCalling,
+    capabilityPlan: createRunCapabilityPlan({
+      profile: input.snapshot.activeModel,
+      modelCapabilities,
+    }),
   });
 }

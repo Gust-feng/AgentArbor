@@ -9,6 +9,7 @@ import { createPanelRunTranscript } from "../panel-run-read-model.js";
 import type { PanelRunStreamEvent } from "../panel-run-stream-contracts.js";
 import type { PanelRunTraceReadModel } from "../panel-run-tracking-contracts.js";
 import type { PanelRunTranscript } from "../panel-run-transcript-contracts.js";
+import { createRunCapabilityPlan } from "../model-capability-registry.js";
 import {
   compactRuntimeText,
   createRuntimeRunRecord,
@@ -61,12 +62,13 @@ test("runtime record mapper persists safe run capability resolution", () => {
         config: modelConfig(),
         informationAccess: informationAccess(),
         capabilityResolution: {
-          resolutionId: "capability-resolution-test",
-          snapshotId: "snapshot-test",
-          runMode: "agent",
-          agentId: "desktop-agent-session",
-          agentDisplayName: "Desktop Agent",
-          toolVisibilityProfileId: "desktop-root-agent:ordinary-visible-tools:v2",
+          ...capabilityResolution(),
+          capabilityPlan: createRunCapabilityPlan({
+            profile: modelConfig(),
+            modelCapabilities: modelCapabilities(),
+            allowedTools: ["search", "mcp_docs_search"],
+            warnings: ["MCP 已登记。"],
+          }),
           allowedTools: ["search", "mcp_docs_search"],
           toolExposures: [
             {
@@ -106,7 +108,6 @@ test("runtime record mapper persists safe run capability resolution", () => {
             },
           ],
           warnings: ["MCP 已登记。"],
-          createdAt: "2026-05-31T00:00:01.000Z",
         },
       },
     }),
@@ -917,6 +918,21 @@ function modelConfig(): PanelRunJob["config"] {
   };
 }
 
+function modelCapabilities(): NonNullable<PanelRunJob["capabilitySnapshot"]>["modelCapabilities"] {
+  return {
+    contextWindowTokens: 16_000,
+    maxOutputTokens: 4_000,
+    supportsToolCalling: true,
+    supportsParallelToolCalls: false,
+    supportsStructuredOutputs: false,
+    supportsStreaming: true,
+    supportsVisionInput: false,
+    supportsReasoningEffort: false,
+    preferredApiStyle: "chat_completions",
+    stability: "stable",
+  };
+}
+
 function informationAccess(): PanelRunJob["informationAccess"] {
   return {
     sourcePreference: ["docs"],
@@ -939,6 +955,8 @@ function informationAccess(): PanelRunJob["informationAccess"] {
 }
 
 function capabilityResolution(): NonNullable<PanelRunJob["capabilityResolution"]> {
+  const allowedTools = ["search"];
+  const warnings: readonly string[] = [];
   return {
     resolutionId: "capability-resolution-test",
     snapshotId: "snapshot-test",
@@ -946,7 +964,13 @@ function capabilityResolution(): NonNullable<PanelRunJob["capabilityResolution"]
     agentId: "desktop-agent-session",
     agentDisplayName: "Desktop Agent",
     toolVisibilityProfileId: "desktop-root-agent:ordinary-visible-tools:v2",
-    allowedTools: ["search"],
+    capabilityPlan: createRunCapabilityPlan({
+      profile: modelConfig(),
+      modelCapabilities: modelCapabilities(),
+      allowedTools,
+      warnings,
+    }),
+    allowedTools,
     toolExposures: [
       {
         name: "search",
@@ -963,7 +987,7 @@ function capabilityResolution(): NonNullable<PanelRunJob["capabilityResolution"]
     ],
     enabledSkills: [],
     mcpDrafts: [],
-    warnings: [],
+    warnings,
     createdAt: "2026-05-31T00:00:01.000Z",
   };
 }

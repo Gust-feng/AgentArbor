@@ -13,6 +13,7 @@ import {
 } from "./desktop-agent-session-runtime.js";
 import type { MinimalRuntime } from "./runtime.js";
 import type { ModelRuntimeMode } from "./model-runtime/index.js";
+import { createRunCapabilityPlan } from "./model-capability-registry.js";
 import { resolveRunToolBoundary } from "./run-tool-boundary.js";
 
 export type DesktopAgentLoopPreparationInput = {
@@ -36,8 +37,14 @@ export type DesktopAgentLoopPreparation = {
 
 export function prepareDesktopAgentLoop(input: DesktopAgentLoopPreparationInput): DesktopAgentLoopPreparation {
   const modelCapabilities = modelCapabilitiesForDesktopRun(input.aiMode, input.options);
+  const capabilityPlan = input.options.capabilitySnapshot === undefined
+    ? undefined
+    : createRunCapabilityPlan({
+        profile: input.options.capabilitySnapshot.activeModel,
+        modelCapabilities: modelCapabilities ?? input.options.capabilitySnapshot.modelCapabilities,
+      });
   const mayExposeTools =
-    modelCapabilities?.supportsToolCalling !== false &&
+    (capabilityPlan?.canExposeModelTools ?? modelCapabilities?.supportsToolCalling) !== false &&
     input.options.createToolCenter !== undefined;
   if (mayExposeTools && input.options.capabilitySnapshot === undefined) {
     throw new Error("Desktop Agent requires a capability snapshot before exposing tools to the model.");
@@ -74,6 +81,7 @@ export function prepareDesktopAgentLoop(input: DesktopAgentLoopPreparationInput)
     goal: input.goal,
     taskSoil: input.taskSoil,
     modelCapabilities,
+    capabilityPlan,
     platform: input.options.platform,
     toolCenter,
   });

@@ -225,6 +225,10 @@ export function ChatInputBar(props: ChatInputProps): React.ReactElement {
       <textarea
         ref={textareaRef}
         value={props.value}
+        spellCheck={false}
+        autoComplete="off"
+        autoCorrect="off"
+        autoCapitalize="off"
         onChange={(event) => props.onChange(event.target.value)}
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}
@@ -499,6 +503,10 @@ function MessageQueueItem(props: {
         <div className="message-queue-edit">
           <textarea
             value={editValue}
+            spellCheck={false}
+            autoComplete="off"
+            autoCorrect="off"
+            autoCapitalize="off"
             onChange={(event) => setEditValue(event.target.value)}
             onKeyDown={(event) => {
               if (event.key === "Enter" && !event.shiftKey) {

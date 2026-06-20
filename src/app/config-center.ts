@@ -33,6 +33,7 @@ import type {
   UpdateWebSearchConfigInput,
   ToolStateSettings,
 } from "../domain/config/index.js";
+import { listBuiltinModelProviderPresets } from "../domain/config/index.js";
 import type { InformationAccessSettings } from "../domain/config/index.js";
 import {
   DEFAULT_MODEL_PROVIDER_BASE_URL,
@@ -271,13 +272,35 @@ export class ConfigCenter {
     if (existing === undefined) {
       throw new ConfigCenterValidationError(`Model profile not found: ${profileId}`);
     }
+    const protectedBuiltInProfile = builtinPresetForProtectedProfile({
+      profileId,
+      baseUrl: input.baseUrl ?? existing.baseUrl,
+    });
+    const effectiveInput = protectedBuiltInProfile === undefined
+      ? input
+      : {
+          ...input,
+          label: undefined,
+          logoDataUrl: undefined,
+          clearLogoDataUrl: undefined,
+        };
     const normalizedProfile = normalizeModelProfile({
       ...existing,
-      ...input,
+      ...effectiveInput,
       profileId,
       updatedAt: now,
     }, existing);
-    const updatedProfile = input.clearModel === true ? { ...normalizedProfile, model: undefined } : normalizedProfile;
+    const updatedProfile = {
+      ...normalizedProfile,
+      ...(protectedBuiltInProfile === undefined
+        ? {}
+        : {
+            label: protectedBuiltInProfile.label,
+            logoDataUrl: undefined,
+          }),
+      ...(effectiveInput.clearModel === true ? { model: undefined } : {}),
+      ...(effectiveInput.clearLogoDataUrl === true ? { logoDataUrl: undefined } : {}),
+    };
     const nextProfiles = current.modelProfiles.map((profile) =>
       profile.profileId === updatedProfile.profileId ? updatedProfile : profile
     );
@@ -739,6 +762,20 @@ function createModelProviderProfileFallback(
     enabled: true,
     updatedAt: now,
   };
+}
+
+function builtinPresetForProtectedProfile(
+  profile: Pick<ModelProviderProfileSettings, "profileId" | "baseUrl">
+): ReturnType<typeof listBuiltinModelProviderPresets>[number] | undefined {
+  const presets = listBuiltinModelProviderPresets();
+  const baseUrl = normalizeBaseUrl(profile.baseUrl);
+  if (baseUrl === undefined) {
+    const profileId = profile.profileId.trim().toLowerCase();
+    return profileId === "default"
+      ? presets.find((preset: ReturnType<typeof listBuiltinModelProviderPresets>[number]) => preset.presetId === "openai")
+      : undefined;
+  }
+  return presets.find((preset: ReturnType<typeof listBuiltinModelProviderPresets>[number]) => normalizeBaseUrl(preset.baseUrl) === baseUrl);
 }
 
 function clearProfileModelOutsideCatalog(

@@ -6,6 +6,10 @@ import type {
   SanitizedModelProviderConfig,
 } from "../domain/config/index.js";
 import type { AgentArborRunKind, AgentArborRunMode } from "./run-mode-policy.js";
+import {
+  resolveProtocolToolCallCapabilities,
+  supportsProtocolToolCalling,
+} from "./model-capability-registry.js";
 
 export type RunFactOwner = {
   readonly runKind: AgentArborRunKind;
@@ -96,6 +100,7 @@ function capabilityResolutionMatchesFrozenResolution(
     candidate.agentId === created.agentId &&
     candidate.agentDisplayName === created.agentDisplayName &&
     candidate.toolVisibilityProfileId === created.toolVisibilityProfileId &&
+    sameJsonValue(candidate.capabilityPlan, created.capabilityPlan) &&
     sameJsonValue(candidate.allowedTools, created.allowedTools) &&
     sameJsonValue(candidate.toolExposures, created.toolExposures) &&
     sameJsonValue(candidate.enabledSkills, created.enabledSkills) &&
@@ -132,6 +137,9 @@ function capabilityResolutionMatchesFrozenRunFacts(
     return false;
   }
   if (candidate.allowedTools.some((toolName) => !snapshotAllowedTools.has(toolName))) {
+    return false;
+  }
+  if (!candidateCapabilityPlanMatchesFrozenRunFacts(candidate, snapshot)) {
     return false;
   }
   const candidateAllowedTools = new Set(candidate.allowedTools);
@@ -189,6 +197,23 @@ function capabilityResolutionMatchesFrozenRunFacts(
     candidateMcpDraftIds.add(draft.draftId);
   }
   return true;
+}
+
+function candidateCapabilityPlanMatchesFrozenRunFacts(
+  candidate: NonNullable<RunFactCandidate["capabilityResolution"]>,
+  snapshot: BasicAgentCapabilitySnapshot
+): boolean {
+  const protocolToolCallCapabilities = resolveProtocolToolCallCapabilities(snapshot.activeModel.protocolKind);
+  return (
+    sameJsonValue(candidate.capabilityPlan.protocolToolCallCapabilities, protocolToolCallCapabilities) &&
+    sameJsonValue(candidate.capabilityPlan.modelCapabilities, snapshot.modelCapabilities) &&
+    candidate.capabilityPlan.canExposeModelTools === (
+      snapshot.modelCapabilities.supportsToolCalling &&
+      supportsProtocolToolCalling(protocolToolCallCapabilities)
+    ) &&
+    sameJsonValue(candidate.capabilityPlan.allowedTools, candidate.allowedTools) &&
+    sameJsonValue(candidate.capabilityPlan.warnings, candidate.warnings)
+  );
 }
 
 function runToolExposureMatchesSnapshotTool(

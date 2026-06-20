@@ -22,16 +22,32 @@ export type ModelProviderLogoInput = {
   readonly vendor?: string;
   readonly profileId?: string;
   readonly presetId?: string;
+  readonly logoDataUrl?: string;
   readonly baseUrl?: string;
   readonly model?: string;
 };
 
 export type ModelProviderLogo = {
-  readonly svg: string;
+  readonly svg?: string;
+  readonly imageSrc?: string;
   readonly tone: string;
 };
 
 export type ModelProviderIdentity = "openai" | "claude" | "deepseek" | "kimi" | "glm" | "minimax" | "unknown";
+
+const builtinProviderPresetAliases = new Map<string, Exclude<ModelProviderIdentity, "unknown">>([
+  ["default", "openai"],
+  ["openai", "openai"],
+  ["claude", "claude"],
+  ["anthropic", "claude"],
+  ["deepseek", "deepseek"],
+  ["moonshot", "kimi"],
+  ["kimi", "kimi"],
+  ["glm", "glm"],
+  ["zhipu", "glm"],
+  ["zai", "glm"],
+  ["minimax", "minimax"],
+]);
 
 const providerIdentityPatterns: readonly [Exclude<ModelProviderIdentity, "unknown">, RegExp][] = [
   ["openai", /api\.openai\.com|openai|chatgpt|gpt/iu],
@@ -52,15 +68,15 @@ export function modelProviderDisplayName(identity: Exclude<ModelProviderIdentity
 }
 
 export function resolveModelProviderIdentity(input: ModelProviderLogoInput): ModelProviderIdentity {
+  const builtinIdentity = builtinProviderIdentity(input);
+  if (builtinIdentity !== undefined) {
+    return builtinIdentity;
+  }
   const baseUrl = normalizeProviderSignal(input.baseUrl);
   const explicitProvider = normalizeProviderSignal([input.presetId, input.vendor].filter(Boolean).join(" "));
-  const displayText = normalizeProviderSignal([input.title, input.profileId].filter(Boolean).join(" "));
 
   const strongSignal = resolveStrongProviderSignal(baseUrl) ?? resolveStrongProviderSignal(explicitProvider);
   if (strongSignal !== undefined) return strongSignal;
-
-  const displaySignal = resolveStrongProviderSignal(displayText);
-  if (displaySignal !== undefined) return displaySignal;
 
   return "unknown";
 }
@@ -99,6 +115,9 @@ export function modelProviderSortRank(input: ModelProviderLogoInput): number {
 }
 
 export function resolveModelProviderLogo(input: ModelProviderLogoInput): ModelProviderLogo {
+  if (input.logoDataUrl !== undefined && input.logoDataUrl.trim().length > 0) {
+    return { imageSrc: input.logoDataUrl, tone: "custom" };
+  }
   const identity = resolveModelProviderIdentity(input);
   if (identity === "openai") return { svg: providerLogos.openai, tone: "openai" };
   if (identity === "claude") return { svg: providerLogos.anthropic, tone: "claude" };
@@ -107,4 +126,63 @@ export function resolveModelProviderLogo(input: ModelProviderLogoInput): ModelPr
   if (identity === "glm") return { svg: providerLogos.zai, tone: "glm" };
   if (identity === "minimax") return { svg: providerLogos.minimax, tone: "minimax" };
   return { svg: providerLogos.modelProvider, tone: "default" };
+}
+
+export function builtinProviderPresetId(input: {
+  readonly profileId?: string;
+  readonly presetId?: string;
+  readonly baseUrl?: string;
+}): string | undefined {
+  const explicitPreset = normalizeProviderSignal(input.presetId);
+  if (explicitPreset.length > 0) {
+    return explicitPreset;
+  }
+  const normalizedProfileId = normalizeProviderSignal(input.profileId);
+  const aliasedProfile = builtinProviderPresetAliases.get(normalizedProfileId);
+  if (aliasedProfile !== undefined) {
+    return presetIdFromIdentity(aliasedProfile);
+  }
+  const normalizedBaseUrl = normalizeProviderSignal(input.baseUrl);
+  if (normalizedBaseUrl.length === 0) {
+    return undefined;
+  }
+  if (normalizedBaseUrl === "https://api.openai.com" || normalizedBaseUrl === "https://api.openai.com/v1") {
+    return "openai";
+  }
+  if (normalizedBaseUrl === "https://api.anthropic.com") {
+    return "claude";
+  }
+  if (normalizedBaseUrl === "https://api.deepseek.com") {
+    return "deepseek";
+  }
+  if (normalizedBaseUrl === "https://api.moonshot.cn/v1") {
+    return "moonshot";
+  }
+  if (normalizedBaseUrl === "https://open.bigmodel.cn/api/paas/v4") {
+    return "glm";
+  }
+  if (normalizedBaseUrl === "https://api.minimaxi.com/v1") {
+    return "minimax";
+  }
+  return undefined;
+}
+
+function builtinProviderIdentity(input: ModelProviderLogoInput): Exclude<ModelProviderIdentity, "unknown"> | undefined {
+  const presetId = builtinProviderPresetId(input);
+  if (presetId === undefined) {
+    return undefined;
+  }
+  if (presetId === "openai") return "openai";
+  if (presetId === "claude") return "claude";
+  if (presetId === "deepseek") return "deepseek";
+  if (presetId === "moonshot") return "kimi";
+  if (presetId === "glm") return "glm";
+  if (presetId === "minimax") return "minimax";
+  return undefined;
+}
+
+function presetIdFromIdentity(identity: Exclude<ModelProviderIdentity, "unknown">): string {
+  if (identity === "kimi") return "moonshot";
+  if (identity === "claude") return "claude";
+  return identity;
 }

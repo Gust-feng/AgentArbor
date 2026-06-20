@@ -11,11 +11,14 @@ test("panel config API keeps model provider and search keys out of ordinary resp
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-config-"));
   const secret = "sk-panel-secret";
   const tavilySecret = "tvly-panel-secret";
+  const logoDataUrl = "data:image/png;base64,iVBORw0KGgo=";
   const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
   try {
     const update = await requestJson(server.url, "/api/config/model-provider", {
       method: "POST",
       body: {
+        label: "OpenAI Router",
+        logoDataUrl,
         baseUrl: "https://provider.example/",
         model: "panel-model",
         defaultAiMode: "fake",
@@ -70,8 +73,64 @@ test("panel config API keeps model provider and search keys out of ordinary resp
       true
     );
     assert.equal(config.text.includes("sk-panel-secret"), false);
+    assert.equal(update.body.config.label, "OpenAI Router");
+    assert.equal(update.body.config.logoDataUrl, logoDataUrl);
     assert.equal(update.body.config.baseUrl, "https://provider.example");
     assert.equal(update.body.config.defaultAiMode, "openai-compatible");
+    assert.equal(config.body.config.label, "OpenAI Router");
+    assert.equal(config.body.config.logoDataUrl, logoDataUrl);
+
+    const clearLogo = await requestJson(server.url, "/api/config/model-provider", {
+      method: "POST",
+      body: {
+        clearLogoDataUrl: true,
+      },
+    });
+    assert.equal(clearLogo.status, 200);
+    assert.equal(clearLogo.body.config.label, "OpenAI Router");
+    assert.equal(clearLogo.body.config.logoDataUrl, undefined);
+  } finally {
+    await server.close();
+    await removeTemporaryTree(directory);
+  }
+});
+
+test("panel config API keeps built-in provider label and logo immutable", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-builtin-provider-immutable-"));
+  const customLogoDataUrl = "data:image/png;base64,iVBORw0KGgo=";
+  const builtInLogoAttempt = "data:image/png;base64,aGVsbG8=";
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+  try {
+    const custom = await requestJson(server.url, "/api/config/model-provider", {
+      method: "POST",
+      body: {
+        label: "OpenAI Router",
+        logoDataUrl: customLogoDataUrl,
+        baseUrl: "https://openrouter.ai/api/v1",
+        model: "openai/gpt-4.1",
+        defaultAiMode: "openai-compatible",
+      },
+    });
+    const builtIn = await requestJson(server.url, "/api/config/model-provider", {
+      method: "POST",
+      body: {
+        label: "Should Be Ignored",
+        logoDataUrl: builtInLogoAttempt,
+        baseUrl: "https://api.openai.com/v1",
+        defaultAiMode: "openai-responses",
+      },
+    });
+    const config = await requestJson(server.url, "/api/config");
+
+    assert.equal(custom.status, 200);
+    assert.equal(builtIn.status, 200);
+    assert.equal(config.status, 200);
+    assert.equal(custom.body.config.label, "OpenAI Router");
+    assert.equal(custom.body.config.logoDataUrl, customLogoDataUrl);
+    assert.equal(builtIn.body.config.label, "OpenAI");
+    assert.equal(builtIn.body.config.logoDataUrl, undefined);
+    assert.equal(config.body.config.label, "OpenAI");
+    assert.equal(config.body.config.logoDataUrl, undefined);
   } finally {
     await server.close();
     await removeTemporaryTree(directory);

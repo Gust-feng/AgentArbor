@@ -12,6 +12,7 @@ import type { RuntimeRunSnapshot } from "../../domain/runtime-database/index.js"
 import type { PanelRunJob } from "../panel-run-jobs.js";
 import type { PanelRunStreamEvent } from "../panel-run-stream-contracts.js";
 import { InMemoryProcessRegistry } from "../runtime-guard/index.js";
+import { createRunCapabilityPlan } from "../model-capability-registry.js";
 import { createBasicAgentRunViewReadModel } from "./basic-agent-run-view.js";
 
 test("basic agent run view for live runs exposes the job birth agent definition ref consistently", async () => {
@@ -97,6 +98,11 @@ test("basic agent run view prefers completed live run facts over stale job facts
   assert.equal(view?.capabilityResolution?.snapshotId, "snapshot-completed");
   assert.deepEqual(view?.capabilityResolution?.allowedTools, ["read"]);
   assert.notEqual(view?.capabilityResolution?.snapshotId, "snapshot-stale-job");
+  assert.equal(view?.result.runId, run.runId);
+  assert.equal(view?.result.status, "completed");
+  assert.equal(view?.result.answer?.markdown, "完成回答。");
+  assert.equal(JSON.stringify(view?.result).includes("replay"), false);
+  assert.equal(JSON.stringify(view?.result).includes("transcript"), false);
 });
 
 test("basic agent run view exposes failed live desktop canvas from the backend result", async () => {
@@ -448,6 +454,9 @@ test("basic agent run view for persisted runs restores from the run snapshot wit
   ]);
   assert.equal(view?.workView.contextLedger.entries.some((entry) => entry.kind === "skill"), true);
   assert.equal(view?.detail.restoredResult?.summary, "历史运行摘要");
+  assert.equal(view?.result.runId, "run-restored");
+  assert.equal(view?.result.status, "completed");
+  assert.equal(view?.result.answer?.markdown, "历史运行摘要");
   assert.equal(view?.replay.events.some((event) => event.type === "final.result"), true);
   assert.equal(view?.detail.transcript?.events?.some((event) => event.type === "final.result"), true);
   assert.equal(view === undefined ? false : "workSession" in view, false);
@@ -680,6 +689,11 @@ function skillContextLedger(runId: string): NonNullable<RuntimeRunSnapshot["cont
 }
 
 function capabilityResolution(snapshotId: string, allowedTools: readonly string[]): RunCapabilityResolution {
+  const snapshot = {
+    ...capabilitySnapshot(),
+    snapshotId,
+  };
+  const warnings: readonly string[] = [];
   return {
     resolutionId: `capability-resolution-${snapshotId}`,
     snapshotId,
@@ -687,6 +701,12 @@ function capabilityResolution(snapshotId: string, allowedTools: readonly string[
     agentId: "desktop-agent-session",
     agentDisplayName: "Desktop Agent",
     toolVisibilityProfileId: "desktop-root-agent:ordinary-visible-tools:v2",
+    capabilityPlan: createRunCapabilityPlan({
+      profile: snapshot.activeModel,
+      modelCapabilities: snapshot.modelCapabilities,
+      allowedTools,
+      warnings,
+    }),
     allowedTools,
     toolExposures: allowedTools.map((name) => ({
       name,
@@ -702,7 +722,7 @@ function capabilityResolution(snapshotId: string, allowedTools: readonly string[
     })),
     enabledSkills: [],
     mcpDrafts: [],
-    warnings: [],
+    warnings,
     createdAt: "2026-06-06T00:00:00.000Z",
   };
 }

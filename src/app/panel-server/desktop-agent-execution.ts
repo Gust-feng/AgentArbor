@@ -17,14 +17,19 @@ import type {
   PanelRunExecutionResult,
 } from "./run-execution-contracts.js";
 
-export async function runOrdinaryDesktopForPanel(
-  runtime: PanelRuntime,
-  goal: string,
-  aiMode: ModelRuntimeMode,
-  taskSoilInput: DesktopTaskSoilInput | undefined,
-  resources: DesktopRunResources,
-  options: PanelRunExecutionOptions
+export type OrdinaryDesktopPanelRunExecutionInput = {
+  readonly runtime: PanelRuntime;
+  readonly goal: string;
+  readonly aiMode: ModelRuntimeMode;
+  readonly taskSoilInput: DesktopTaskSoilInput | undefined;
+  readonly resources: DesktopRunResources;
+  readonly options: PanelRunExecutionOptions;
+};
+
+export async function executeOrdinaryDesktopRunForPanel(
+  input: OrdinaryDesktopPanelRunExecutionInput
 ): Promise<PanelRunExecutionResult> {
+  const { runtime, goal, aiMode, taskSoilInput, resources, options } = input;
   const agentDefinition = options.agentDefinition ?? runtime.desktopAgentDefinition;
   if (options.agentDefinitionRef === undefined) {
     throw new PanelHttpError(
@@ -66,6 +71,28 @@ export async function runOrdinaryDesktopForPanel(
     capabilitySnapshot: resources.capabilitySnapshot,
     agentDefinitionRef,
   }, options.reasoningEffort, releaseResources);
+}
+
+/**
+ * @deprecated Use executeOrdinaryDesktopRunForPanel with an object input. This
+ * wrapper exists for old callers while Phase 2 narrows the runtime boundary.
+ */
+export async function runOrdinaryDesktopForPanel(
+  runtime: PanelRuntime,
+  goal: string,
+  aiMode: ModelRuntimeMode,
+  taskSoilInput: DesktopTaskSoilInput | undefined,
+  resources: DesktopRunResources,
+  options: PanelRunExecutionOptions
+): Promise<PanelRunExecutionResult> {
+  return executeOrdinaryDesktopRunForPanel({
+    runtime,
+    goal,
+    aiMode,
+    taskSoilInput,
+    resources,
+    options,
+  });
 }
 
 type OrdinaryDesktopPanelFacts = {

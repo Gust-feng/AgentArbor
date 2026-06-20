@@ -2,17 +2,19 @@ import type {
   ConfigResponse,
   ModelProviderModelCatalog,
   ModelProviderPreset,
-} from "../contracts/config";
+} from "../contracts/config.js";
 import {
+  builtinProviderPresetId,
   modelProviderDisplayName,
   modelProviderSortRank,
   resolveModelProviderIdentity,
-  type ModelProviderIdentity,
-} from "../model-provider-logos";
+} from "../model-provider-logos.js";
 
 export type ModelForm = {
   readonly profileId: string;
   readonly label: string;
+  readonly logoDataUrl: string;
+  readonly logoCleared: boolean;
   readonly baseUrl: string;
   readonly protocolKind: string;
   readonly model: string;
@@ -27,6 +29,7 @@ export type ModelProviderListItem = {
   readonly key: string;
   readonly title: string;
   readonly vendor?: string;
+  readonly logoDataUrl?: string;
   readonly model: string;
   readonly baseUrl: string;
   readonly protocolKind: string;
@@ -35,6 +38,7 @@ export type ModelProviderListItem = {
   readonly presetId?: string;
   readonly preset?: ModelProviderPreset;
   readonly configured: boolean;
+  readonly protectedBuiltin: boolean;
 };
 
 export function filterModelCatalogItems(
@@ -56,21 +60,19 @@ export function modelProviderItems(
   const presets = (config?.modelProviderMarket?.presets ?? []).filter(isSettingsModelProviderPreset);
   const activeProfileId = config?.config?.profileId;
   const order = config?.modelProviderOrder ?? [];
-  const profileBindings = profiles.map((profile) => ({
+  const profileBindings = profiles.map((profile: ModelProviderProfileItem) => ({
     profile,
-    identity: resolveModelProviderIdentity({
+    presetId: builtinProviderPresetId({
       profileId: profile.profileId,
-      title: profile.label,
       baseUrl: profile.baseUrl,
-      model: profile.model,
     }),
   }));
   const boundProfileIds = new Set<string>();
-  const presetItems = presets.map((preset) => {
+  const presetItems = presets.map((preset: ModelProviderPreset) => {
     const presetIdentity = resolveModelProviderIdentity(preset);
     const bindings = profileBindings.filter((item) => {
       if (item.profile.profileId === preset.presetId) return true;
-      return presetIdentity !== "unknown" && item.identity === presetIdentity;
+      return item.presetId === preset.presetId;
     });
     for (const item of bindings) {
       if (item.profile.profileId !== undefined) {
@@ -88,8 +90,11 @@ export function modelProviderItems(
     const configuredModel = profile === undefined ? preset.defaultModel ?? "" : profile.model ?? "";
     return {
       key: profile?.profileId === undefined ? `preset:${preset.presetId}` : `profile:${profile.profileId}`,
-      title: presetIdentity === "unknown" ? preset.label : modelProviderDisplayName(presetIdentity),
+      title: profile === undefined
+        ? presetIdentity === "unknown" ? preset.label : modelProviderDisplayName(presetIdentity)
+        : friendlyProfileTitle(profile),
       vendor: preset.vendor,
+      logoDataUrl: profile?.logoDataUrl,
       model: configuredModel,
       baseUrl: profile === undefined ? preset.baseUrl : visibleProfileBaseUrl(profile),
       protocolKind: profile?.protocolKind ?? preset.protocolKind,
@@ -98,25 +103,28 @@ export function modelProviderItems(
       presetId: preset.presetId,
       preset,
       configured: profile !== undefined,
+      protectedBuiltin: true,
     } satisfies ModelProviderListItem;
   });
   const customItems = profileBindings
     .filter((item) => item.profile.profileId === undefined || !boundProfileIds.has(item.profile.profileId))
-    .map(({ profile, identity }) => {
+    .map(({ profile }: { readonly profile: ModelProviderProfileItem }) => {
       const configuredModel = profile.model ?? "";
       return {
         key: `profile:${profile.profileId ?? profile.label ?? profile.baseUrl ?? profile.model ?? "custom"}`,
-        title: friendlyProfileTitle(profile, identity),
+        title: friendlyProfileTitle(profile),
+        logoDataUrl: profile.logoDataUrl,
         model: configuredModel,
         baseUrl: visibleProfileBaseUrl(profile),
         protocolKind: profile.protocolKind ?? "openai_compatible_chat_completions",
         profileId: profile.profileId,
         profile,
         configured: true,
+        protectedBuiltin: false,
       } satisfies ModelProviderListItem;
     });
   return [...presetItems, ...customItems]
-    .map((item, index) => ({ item, index }))
+    .map((item: ModelProviderListItem, index: number) => ({ item, index }))
     .sort((left, right) => {
       const leftOrder = orderIndex(order, left.item.key);
       const rightOrder = orderIndex(order, right.item.key);
@@ -126,7 +134,7 @@ export function modelProviderItems(
       const rankDelta = modelProviderSortRank(left.item) - modelProviderSortRank(right.item);
       return rankDelta === 0 ? left.index - right.index : rankDelta;
     })
-    .map(({ item }) => item);
+    .map(({ item }: { readonly item: ModelProviderListItem }) => item);
 }
 
 export function modelCatalogItemsWithConfiguredModel(
@@ -156,6 +164,8 @@ export function modelFormFromProviderItem(item: ModelProviderListItem): ModelFor
   return {
     profileId: modelProviderFormId(item),
     label: item.title,
+    logoDataUrl: item.logoDataUrl ?? "",
+    logoCleared: false,
     baseUrl: item.baseUrl,
     protocolKind: item.protocolKind,
     model: item.model,
@@ -205,9 +215,10 @@ function isSettingsModelProviderProfile(profile: ModelProviderProfileItem): bool
     (profile.protocolKind === "openai_responses" || profile.protocolKind === "openai_compatible_chat_completions");
 }
 
-function friendlyProfileTitle(profile: ModelProviderProfileItem, identity: ModelProviderIdentity): string {
-  const raw = profile.label ?? profile.profileId ?? "";
-  if (identity !== "unknown") return modelProviderDisplayName(identity);
+function friendlyProfileTitle(profile: ModelProviderProfileItem): string {
+  const label = profile.label?.trim();
+  if (label !== undefined && label.length > 0) return label;
+  const raw = profile.profileId ?? "";
   if (raw.trim().length === 0) return "自定义厂商";
   if (raw.toLowerCase() === "default") return "OpenAI";
   if (raw.toLowerCase() === "custom") return "自定义厂商";

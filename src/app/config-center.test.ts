@@ -284,6 +284,78 @@ test("ConfigCenter clears saved model provider API keys explicitly", async () =>
   }
 });
 
+test("ConfigCenter persists custom model provider label and logo", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-config-model-provider-logo-"));
+  const logoDataUrl = "data:image/png;base64,iVBORw0KGgo=";
+  try {
+    const settingsStore = new FileSystemNormalSettingsStore(directory);
+    const secretStore = new FileSystemLocalDevSecretStore(directory);
+    const configCenter = new ConfigCenter({ settingsStore, secretStore });
+
+    const saved = await configCenter.updateModelProviderConfig({
+      label: "OpenAI Router",
+      logoDataUrl,
+      baseUrl: "https://openrouter.ai/api/v1",
+      model: "openai/gpt-4.1",
+      defaultAiMode: "openai-compatible",
+    });
+    const reloaded = await new ConfigCenter({ settingsStore, secretStore }).getModelProviderConfig();
+    const ignoredInvalidLogo = await configCenter.updateModelProviderConfig({
+      logoDataUrl: "data:text/plain;base64,Zm9v",
+    });
+    const cleared = await configCenter.updateModelProviderConfig({
+      clearLogoDataUrl: true,
+    });
+
+    assert.equal(saved.label, "OpenAI Router");
+    assert.equal(saved.logoDataUrl, logoDataUrl);
+    assert.equal(saved.baseUrl, "https://openrouter.ai/api/v1");
+    assert.equal(reloaded.label, "OpenAI Router");
+    assert.equal(reloaded.logoDataUrl, logoDataUrl);
+    assert.equal(ignoredInvalidLogo.logoDataUrl, logoDataUrl);
+    assert.equal(cleared.label, "OpenAI Router");
+    assert.equal(cleared.logoDataUrl, undefined);
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("ConfigCenter keeps built-in provider label and logo immutable", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-config-builtin-provider-immutable-"));
+  const logoDataUrl = "data:image/png;base64,iVBORw0KGgo=";
+  try {
+    const settingsStore = new FileSystemNormalSettingsStore(directory);
+    const secretStore = new FileSystemLocalDevSecretStore(directory);
+    const configCenter = new ConfigCenter({ settingsStore, secretStore });
+
+    const saved = await configCenter.updateModelProviderConfig({
+      label: "OpenAI Router",
+      logoDataUrl,
+      baseUrl: "https://openrouter.ai/api/v1",
+      model: "openai/gpt-4.1",
+      defaultAiMode: "openai-compatible",
+    });
+    const revertedToBuiltin = await configCenter.updateModelProviderConfig({
+      profileId: "default",
+      label: "Should Be Ignored",
+      logoDataUrl,
+      baseUrl: "https://api.openai.com/v1",
+      defaultAiMode: "openai-responses",
+    });
+    const reloaded = await new ConfigCenter({ settingsStore, secretStore }).getModelProviderConfig();
+
+    assert.equal(saved.label, "OpenAI Router");
+    assert.equal(saved.logoDataUrl, logoDataUrl);
+    assert.equal(revertedToBuiltin.label, "OpenAI");
+    assert.equal(revertedToBuiltin.logoDataUrl, undefined);
+    assert.equal(revertedToBuiltin.baseUrl, "https://api.openai.com/v1");
+    assert.equal(reloaded.label, "OpenAI");
+    assert.equal(reloaded.logoDataUrl, undefined);
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("ConfigCenter clears model names explicitly and does not inherit them into new profiles", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-config-clear-model-name-"));
   try {
@@ -633,7 +705,7 @@ test("ConfigCenter repairs built-in model provider drift without overwriting cus
     assert.equal(openai?.protocolKind, "openai_responses");
     assert.equal(openai?.defaultAiMode, "openai-responses");
     assert.equal(openai?.model, undefined);
-    assert.equal(anthropic?.label, "Anthropic");
+    assert.equal(anthropic?.label, "Claude");
     assert.equal(anthropic?.providerKind, "anthropic");
     assert.equal(anthropic?.protocolKind, "anthropic_messages");
     assert.equal(anthropic?.baseUrl, "https://api.anthropic.com");
@@ -646,7 +718,7 @@ test("ConfigCenter repairs built-in model provider drift without overwriting cus
     assert.equal(glmAlias?.model, "glm-4.5");
     assert.equal(proxy?.baseUrl, "https://openrouter.ai/api/v1");
     assert.equal(proxy?.model, "anthropic/claude-sonnet-4");
-    assert.equal(openaiProxy?.label, "OpenAI");
+    assert.equal(openaiProxy?.label, "OpenAI Proxy");
     assert.equal(openaiProxy?.baseUrl, "https://openrouter.ai/api/v1");
     assert.equal(openaiProxy?.model, "deepseek-proxy-model");
   } finally {

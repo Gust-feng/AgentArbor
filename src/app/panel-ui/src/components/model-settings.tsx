@@ -23,6 +23,9 @@ import {
 } from "./model-settings-projection";
 export type { ModelForm } from "./model-settings-projection";
 
+const LOGO_FILE_MAX_BYTES = 150_000;
+const LOGO_FILE_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif", "image/svg+xml"]);
+
 type ModelProviderProjectionDraft = {
   readonly createdProfiles: readonly ModelProviderProfileItem[];
   readonly removedProfileIds: readonly string[];
@@ -83,6 +86,7 @@ export function ModelSettings(props: {
   const catalogState = useModelCatalogState({ selectedItem, selectedCatalog });
   const selectedProfileId = selectedItem?.profileId;
   const selectedProviderIdentity = selectedItem === undefined ? "unknown" : resolveModelProviderIdentity(selectedItem);
+  const selectedBuiltinLocked = selectedItem?.protectedBuiltin === true;
   const hasKey = props.modelForm.apiKey.length > 0;
   const hasApiKeyAction = hasKey || selectedSecretConfigured;
 
@@ -160,6 +164,8 @@ export function ModelSettings(props: {
     const nextForm: ModelForm = {
       profileId,
       label: "自定义厂商",
+      logoDataUrl: "",
+      logoCleared: false,
       baseUrl: "https://api.example.com/v1",
       protocolKind: "openai_compatible_chat_completions",
       model: "",
@@ -257,6 +263,19 @@ export function ModelSettings(props: {
     const nextForm = { ...props.modelForm, ...patch };
     props.setModelForm(nextForm);
     scheduleModelSave(nextForm);
+  }
+
+  function updateProviderLogo(file: File | undefined): void {
+    if (file === undefined) return;
+    if (!LOGO_FILE_TYPES.has(file.type) || file.size > LOGO_FILE_MAX_BYTES) {
+      return;
+    }
+    const reader = new FileReader();
+    reader.addEventListener("load", () => {
+      if (typeof reader.result !== "string") return;
+      updateModelForm({ logoDataUrl: reader.result, logoCleared: false });
+    });
+    reader.readAsDataURL(file);
   }
 
   async function clearApiKey(): Promise<void> {
@@ -400,10 +419,41 @@ export function ModelSettings(props: {
 
       <section className="provider-detail-pane" aria-label="模型服务详情">
         <header className="provider-detail-header">
-          <ProviderLogo item={selectedItem} large />
-          <div>
-            <h3>{selectedItem.title}</h3>
-          </div>
+          {selectedBuiltinLocked ? (
+            <>
+              <ProviderLogo item={selectedItem} large />
+              <div className="provider-detail-title">
+                <strong>{selectedItem.title}</strong>
+              </div>
+            </>
+          ) : (
+            <>
+              <label className="provider-detail-logo-edit" aria-label="替换供应商 logo">
+                <ProviderLogo item={{ ...selectedItem, logoDataUrl: props.modelForm.logoDataUrl || selectedItem.logoDataUrl }} large />
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml"
+                  disabled={props.saving}
+                  onChange={(event) => {
+                    updateProviderLogo(event.target.files?.[0]);
+                    event.target.value = "";
+                  }}
+                />
+              </label>
+              <div className="provider-detail-title-field">
+                <input
+                  value={props.modelForm.label}
+                  onChange={(event) => updateModelForm({ label: event.target.value })}
+                  aria-label="供应商名称"
+                  placeholder="自定义厂商"
+                  spellCheck={false}
+                  autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="off"
+                />
+              </div>
+            </>
+          )}
         </header>
 
         <div className="provider-detail-divider" />
@@ -531,6 +581,7 @@ function profileFromModelForm(
   return {
     profileId: form.profileId,
     label: form.label.trim() || form.profileId,
+    logoDataUrl: form.logoDataUrl.trim().length > 0 ? form.logoDataUrl : undefined,
     providerKind,
     protocolKind: form.protocolKind || "openai_compatible_chat_completions",
     baseUrl: form.baseUrl,

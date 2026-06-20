@@ -170,6 +170,15 @@ test("conversation API creates a conversation and attaches the desktop run to as
     assert.equal(conversation.body.conversation.turns[1].runId, runId);
     assert.equal(conversation.body.conversation.turns[1].content.includes("我可以直接回答问题"), true);
     assert.equal(currentRun.run.runId, runId);
+    assert.equal(currentRun.result.runId, runId);
+    assert.equal(currentRun.result.conversationId, conversationId);
+    assert.equal(currentRun.result.status, "completed");
+    assert.equal(currentRun.result.answer.markdown.includes("我可以直接回答问题"), true);
+    assert.deepEqual(Object.keys(currentRun.result.evidence).sort(), ["commands", "files", "sources"]);
+    assert.equal(JSON.stringify(currentRun.result).includes("replay"), false);
+    assert.equal(JSON.stringify(currentRun.result).includes("transcript"), false);
+    assert.equal(JSON.stringify(currentRun.result).includes("events"), false);
+    assert.equal(JSON.stringify(currentRun.result).includes("systemPrompt"), false);
     assert.equal(currentRun.workView.run.runId, runId);
     assert.equal(currentRun.workView.run.runId, runId);
     assert.equal("workSession" in currentRun, false);

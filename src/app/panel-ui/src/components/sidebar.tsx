@@ -359,6 +359,10 @@ function ConversationListItem(props: {
           <input
             ref={renameInputRef}
             value={props.editingTitle}
+            spellCheck={false}
+            autoComplete="off"
+            autoCorrect="off"
+            autoCapitalize="off"
             onChange={(event) => props.setEditingTitle(event.target.value)}
             onKeyDown={(event) => {
               if (event.key === "Escape") {

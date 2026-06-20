@@ -10,6 +10,7 @@ import { createTaskSoil } from "../domain/soil/index.js";
 import type { AgentDefinition } from "./agent-prompts/contracts.js";
 import { DESKTOP_ROOT_AGENT } from "./agent-prompts/desktop-root-agent.js";
 import { resolveRunCapabilities } from "./capability-policy.js";
+import { resolveModelCapabilities } from "./model-capability-registry.js";
 import { restrictRunCapabilityResolutionToExecutableTools } from "./run-tool-boundary.js";
 
 test("run capability policy hides disabled, unavailable, denied, and mode-internal tools", () => {
@@ -50,19 +51,135 @@ test("run capability policy hides disabled, unavailable, denied, and mode-intern
 test("run capability policy hides every tool when the model cannot call tools", () => {
   const snapshot = capabilitySnapshot([
     tool("search", "read-only"),
-  ]);
+  ], {
+    modelCapabilities: {
+      supportsToolCalling: false,
+      supportsParallelToolCalls: false,
+    },
+  });
 
   const resolution = resolveRunCapabilities({
     snapshot,
     goal: "answer without tools",
     agentDefinition: DESKTOP_ROOT_AGENT,
-    modelSupportsToolCalling: false,
   });
 
   assert.deepEqual(resolution.allowedTools, []);
+  assert.equal(resolution.capabilityPlan.canExposeModelTools, false);
+  assert.deepEqual(resolution.capabilityPlan.allowedTools, []);
   assert.equal(resolution.toolExposures[0]?.modelVisible, false);
   assert.equal(resolution.toolExposures[0]?.reason, "当前模型不支持工具调用。");
   assert.match(resolution.warnings.join("\n"), /本轮没有可用工具/);
+});
+
+test("run capability policy exposes tools only when the selected protocol can round-trip tool calls", () => {
+  const tools = [tool("search", "read-only")];
+  const cases = [
+    {
+      protocolKind: "openai_compatible_chat_completions" as const,
+      providerKind: "openai_compatible" as const,
+      expectedCanExposeModelTools: true,
+      expectedAllowedTools: ["search"],
+    },
+    {
+      protocolKind: "openai_responses" as const,
+      providerKind: "openai_compatible" as const,
+      expectedCanExposeModelTools: true,
+      expectedAllowedTools: ["search"],
+    },
+    {
+      protocolKind: "anthropic_messages" as const,
+      providerKind: "anthropic" as const,
+      expectedCanExposeModelTools: false,
+      expectedAllowedTools: [],
+    },
+    {
+      protocolKind: "gemini_generate_content" as const,
+      providerKind: "gemini" as const,
+      expectedCanExposeModelTools: false,
+      expectedAllowedTools: [],
+    },
+    {
+      protocolKind: "ollama_generate" as const,
+      providerKind: "ollama" as const,
+      expectedCanExposeModelTools: false,
+      expectedAllowedTools: [],
+    },
+  ];
+
+  for (const item of cases) {
+    const baseSnapshot = capabilitySnapshot(tools, {
+      activeModel: {
+        providerKind: item.providerKind,
+        protocolKind: item.protocolKind,
+        model: "gpt-5.5",
+      },
+    });
+    const snapshot = {
+      ...baseSnapshot,
+      modelCapabilities: resolveModelCapabilities({
+        profile: baseSnapshot.activeModel,
+        overrides: [
+          {
+            profileId: baseSnapshot.activeModel.profileId,
+            providerKind: item.providerKind,
+            model: "gpt-5.5",
+            capabilities: {
+              supportsToolCalling: true,
+              supportsParallelToolCalls: true,
+            },
+            updatedAt: "2026-06-20T00:00:00.000Z",
+          },
+        ],
+      }),
+    };
+    const resolution = resolveRunCapabilities({
+      snapshot,
+      goal: "protocol tool boundary",
+      agentDefinition: DESKTOP_ROOT_AGENT,
+    });
+
+    assert.equal(resolution.capabilityPlan.canExposeModelTools, item.expectedCanExposeModelTools);
+    assert.deepEqual(resolution.allowedTools, item.expectedAllowedTools);
+    assert.deepEqual(resolution.capabilityPlan.allowedTools, item.expectedAllowedTools);
+  }
+});
+
+test("run capability policy lets model override close OpenAI-compatible tool exposure", () => {
+  const baseSnapshot = capabilitySnapshot([tool("search", "read-only")], {
+    activeModel: {
+      profileId: "override-no-tools",
+      model: "custom-openai-compatible-model",
+    },
+  });
+  const snapshot = {
+    ...baseSnapshot,
+    modelCapabilities: resolveModelCapabilities({
+      profile: baseSnapshot.activeModel,
+      overrides: [
+        {
+          profileId: "override-no-tools",
+          providerKind: "openai_compatible",
+          model: "custom-openai-compatible-model",
+          capabilities: {
+            supportsToolCalling: false,
+            supportsParallelToolCalls: false,
+          },
+          updatedAt: "2026-06-20T00:00:00.000Z",
+        },
+      ],
+    }),
+  };
+  const resolution = resolveRunCapabilities({
+    snapshot,
+    goal: "override closes tools",
+    agentDefinition: DESKTOP_ROOT_AGENT,
+  });
+
+  assert.equal(resolution.capabilityPlan.protocolToolCallCapabilities.canRoundTripToolResults, true);
+  assert.equal(resolution.capabilityPlan.canExposeModelTools, false);
+  assert.deepEqual(resolution.allowedTools, []);
+  assert.equal(resolution.toolExposures[0]?.reason, "当前模型不支持工具调用。");
 });
 
 test("run capability policy projects full access confirmation policy without hiding tool risk", () => {
@@ -225,7 +342,11 @@ test("run capability policy hides MCP tools when an AgentDefinition hides mcp sc
 
 function capabilitySnapshot(
   tools: readonly CapabilityToolCatalogItem[],
-  overrides: Partial<Pick<BasicAgentCapabilitySnapshot, "skillCatalog">> = {}
+  overrides: {
+    readonly skillCatalog?: BasicAgentCapabilitySnapshot["skillCatalog"];
+    readonly activeModel?: Partial<BasicAgentCapabilitySnapshot["activeModel"]>;
+    readonly modelCapabilities?: Partial<BasicAgentCapabilitySnapshot["modelCapabilities"]>;
+  } = {}
 ): BasicAgentCapabilitySnapshot {
   return {
     snapshotId: "capability-snapshot-test",
@@ -242,6 +363,7 @@ function capabilitySnapshot(
       enabled: true,
       secretConfigured: false,
       updatedAt: "2026-05-13T00:00:00.000Z",
+      ...overrides.activeModel,
     },
     modelCapabilities: {
       contextWindowTokens: 128_000,
@@ -254,6 +376,7 @@ function capabilitySnapshot(
       supportsReasoningEffort: false,
       preferredApiStyle: "openai_compatible",
       stability: "stable",
+      ...overrides.modelCapabilities,
     },
     toolCatalog: {
       scope: "desktop-basic",

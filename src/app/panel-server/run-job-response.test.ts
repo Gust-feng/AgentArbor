@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type {
+  ModelCapabilities,
   RunCapabilityResolution,
   SanitizedInformationAccessConfig,
   SanitizedModelProviderConfig,
@@ -8,6 +9,7 @@ import type {
 import type { PanelRunJob } from "../panel-run-jobs.js";
 import type { PanelRunStreamEvent } from "../panel-run-stream-contracts.js";
 import { InMemoryProcessRegistry } from "../runtime-guard/index.js";
+import { createRunCapabilityPlan } from "../model-capability-registry.js";
 import { createPanelRunJobResponse } from "./run-job-response.js";
 
 test("panel run job response derives events, transcript nodes, and steps from synced stream events", () => {
@@ -236,6 +238,7 @@ function panelRunJob(): PanelRunJob {
 }
 
 function capabilityResolution(snapshotId: string, allowedTools: readonly string[]): RunCapabilityResolution {
+  const warnings: readonly string[] = [];
   return {
     resolutionId: `capability-resolution-${snapshotId}`,
     snapshotId,
@@ -243,6 +246,12 @@ function capabilityResolution(snapshotId: string, allowedTools: readonly string[
     agentId: "desktop-agent-session",
     agentDisplayName: "Desktop Agent",
     toolVisibilityProfileId: "desktop-root-agent:ordinary-visible-tools:v2",
+    capabilityPlan: createRunCapabilityPlan({
+      profile: modelConfig(),
+      modelCapabilities: modelCapabilities(),
+      allowedTools,
+      warnings,
+    }),
     allowedTools,
     toolExposures: allowedTools.map((name) => ({
       name,
@@ -258,7 +267,7 @@ function capabilityResolution(snapshotId: string, allowedTools: readonly string[
     })),
     enabledSkills: [],
     mcpDrafts: [],
-    warnings: [],
+    warnings,
     createdAt: "2026-06-06T00:00:00.000Z",
   };
 }
@@ -274,6 +283,21 @@ function modelConfig(): SanitizedModelProviderConfig {
     secretRef: "secret://test/model",
     secretConfigured: false,
     updatedAt: "2026-06-06T00:00:00.000Z",
+  };
+}
+
+function modelCapabilities(): ModelCapabilities {
+  return {
+    contextWindowTokens: 16_000,
+    maxOutputTokens: 4_000,
+    supportsToolCalling: true,
+    supportsParallelToolCalls: false,
+    supportsStructuredOutputs: false,
+    supportsStreaming: true,
+    supportsVisionInput: false,
+    supportsReasoningEffort: false,
+    preferredApiStyle: "chat_completions",
+    stability: "stable",
   };
 }
 

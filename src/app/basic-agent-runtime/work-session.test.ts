@@ -54,6 +54,43 @@ test("work session read model keeps ordinary completed answers separate from del
   assert.equal(JSON.stringify(workSession).includes("模型输入"), false);
 });
 
+test("desktop work view read model does not re-expose the legacy workSession alias", () => {
+  const run = basicRun("completed");
+  const workView = createDesktopWorkSessionReadModel({
+    run,
+    events: [event(run.runId, "final.result", "结果已生成", "completed")],
+    canvas: {
+      kind: "desktop_agent_canvas",
+      taskSoil: {
+        taskSoilId: "soil-work-view-boundary",
+        goalSummary: "总结 notes.md",
+        contextRefs: [],
+        permissionBoundaryRefs: [],
+      },
+      agent: {
+        status: "completed",
+        answer: {
+          answer: "这是总结结果。",
+          modelCallRefs: ["model-call-1"],
+          toolCallRefs: [],
+          evidenceRefs: [],
+          resultBlocks: [],
+        },
+        modelCallRefs: ["model-call-1"],
+        toolCallRefs: [],
+        activity: [],
+      },
+      explanation: {
+        resultWhyReasonable: "safe",
+        observationPanelRole: "safe",
+      },
+    },
+  });
+
+  assert.equal(Object.hasOwn(workView, "workSession"), false);
+  assert.equal(Object.hasOwn(workView, "canvas"), false);
+  assert.equal(workView.answer?.content, "这是总结结果。");
+});
 test("work session read model does not truncate ordinary answers before the chat turn", () => {
   const run = basicRun("completed");
   const longAnswer = `开头\n${"模型正文。".repeat(420)}\n结尾`;

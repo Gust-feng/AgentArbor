@@ -24,6 +24,8 @@ export async function saveModelProviderConfig(input: {
     const created = await postJson<ConfigResponse>("/api/config/model-profiles", {
       profileId: preset.presetId,
       label: input.form.label.trim() || preset.label,
+      logoDataUrl: input.form.logoCleared ? undefined : input.form.logoDataUrl,
+      clearLogoDataUrl: input.form.logoCleared,
       providerKind: preset.providerKind,
       protocolKind: input.form.protocolKind || preset.protocolKind,
       baseUrl: input.form.baseUrl || preset.baseUrl,
@@ -41,6 +43,8 @@ export async function saveModelProviderConfig(input: {
   const updated = await postJson<ConfigResponse>("/api/config/model-provider", {
     profileId: input.form.profileId,
     label: input.form.label,
+    logoDataUrl: input.form.logoCleared ? undefined : input.form.logoDataUrl,
+    clearLogoDataUrl: input.form.logoCleared,
     baseUrl: input.form.baseUrl,
     protocolKind: input.form.protocolKind,
     model: input.form.model,
@@ -65,6 +69,8 @@ export async function createCustomModelProviderProfile(input: {
   const created = await postJson<ConfigResponse>("/api/config/model-profiles", {
     profileId: input.form.profileId.trim() || label,
     label,
+    logoDataUrl: input.form.logoCleared ? undefined : input.form.logoDataUrl,
+    clearLogoDataUrl: input.form.logoCleared,
     providerKind: "openai_compatible",
     protocolKind: input.form.protocolKind || "openai_compatible_chat_completions",
     baseUrl: input.form.baseUrl,
@@ -144,6 +150,8 @@ export async function selectModelProviderModel(input: {
     form: {
       profileId: parsed.profileId,
       label: profile.label ?? parsed.profileId,
+      logoDataUrl: profile.logoDataUrl ?? "",
+      logoCleared: false,
       baseUrl: profile.baseUrl ?? "",
       protocolKind: profile.protocolKind ?? "openai_compatible_chat_completions",
       model: parsed.modelId,

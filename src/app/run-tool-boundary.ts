@@ -1,8 +1,9 @@
-import type { BasicAgentCapabilitySnapshot, RunCapabilityResolution } from "../domain/config/index.js";
+import type { BasicAgentCapabilitySnapshot, RunCapabilityPlan, RunCapabilityResolution } from "../domain/config/index.js";
 import type { TaskSoil } from "../domain/soil/index.js";
 import type { ToolExecutionBroker } from "../domain/tools/index.js";
 import type { AgentDefinition } from "./agent-prompts/contracts.js";
 import { resolveRunCapabilities } from "./capability-policy.js";
+import { createRunCapabilityPlan } from "./model-capability-registry.js";
 
 export type ResolveRunToolBoundaryInput = {
   readonly agentDefinition: AgentDefinition;
@@ -10,6 +11,7 @@ export type ResolveRunToolBoundaryInput = {
   readonly goal: string;
   readonly taskSoil: TaskSoil;
   readonly modelCapabilities?: BasicAgentCapabilitySnapshot["modelCapabilities"];
+  readonly capabilityPlan?: RunCapabilityPlan;
   readonly platform?: NodeJS.Platform;
   readonly toolCenter?: ToolExecutionBroker;
 };
@@ -26,6 +28,10 @@ export function resolveRunToolBoundary(input: ResolveRunToolBoundaryInput): Reso
       capabilityResolution: undefined,
     };
   }
+  const capabilityPlan = input.capabilityPlan ?? createRunCapabilityPlan({
+    profile: input.snapshot.activeModel,
+    modelCapabilities: input.modelCapabilities ?? input.snapshot.modelCapabilities,
+  });
   const capabilityResolution = restrictRunCapabilityResolutionToExecutableTools(
     resolveRunCapabilities({
       snapshot: input.snapshot,
@@ -33,9 +39,7 @@ export function resolveRunToolBoundary(input: ResolveRunToolBoundaryInput): Reso
       agentDefinition: input.agentDefinition,
       taskSoil: input.taskSoil,
       platform: input.platform,
-      modelSupportsToolCalling:
-        input.modelCapabilities?.supportsToolCalling ??
-        input.snapshot.modelCapabilities.supportsToolCalling,
+      capabilityPlan,
     }),
     input.toolCenter
   );
@@ -52,38 +56,50 @@ export function restrictRunCapabilityResolutionToExecutableTools(
   const executableTools = new Set(toolCenter?.list().map((tool) => tool.name) ?? []);
   if (executableTools.size === 0) {
     const hiddenExecutableToolCount = resolution.allowedTools.length;
+    const warnings = capabilityWarningsAfterExecutableRestriction({
+      warnings: resolution.warnings,
+      hiddenCount: hiddenExecutableToolCount,
+      noModelVisibleTools: true,
+    });
     return {
       ...resolution,
       allowedTools: [],
+      capabilityPlan: {
+        ...resolution.capabilityPlan,
+        allowedTools: [],
+        warnings,
+      },
       toolExposures: resolution.toolExposures.map((tool) =>
         tool.modelVisible
           ? { ...tool, modelVisible: false, reason: "本轮没有可执行的工具运行器。" }
           : tool
       ),
-      warnings: capabilityWarningsAfterExecutableRestriction({
-        warnings: resolution.warnings,
-        hiddenCount: hiddenExecutableToolCount,
-        noModelVisibleTools: true,
-      }),
+      warnings,
     };
   }
   const allowedTools = resolution.allowedTools.filter((toolName) => executableTools.has(toolName));
   const hiddenExecutableToolCount = resolution.allowedTools.length - allowedTools.length;
+  const warnings = hiddenExecutableToolCount <= 0
+    ? resolution.warnings
+    : capabilityWarningsAfterExecutableRestriction({
+        warnings: resolution.warnings,
+        hiddenCount: hiddenExecutableToolCount,
+        noModelVisibleTools: allowedTools.length === 0,
+      });
   return {
     ...resolution,
     allowedTools,
+    capabilityPlan: {
+      ...resolution.capabilityPlan,
+      allowedTools,
+      warnings,
+    },
     toolExposures: resolution.toolExposures.map((tool) =>
       tool.modelVisible && !executableTools.has(tool.name)
         ? { ...tool, modelVisible: false, reason: "工具执行器当前未提供该工具。" }
         : tool
     ),
-    warnings: hiddenExecutableToolCount <= 0
-      ? resolution.warnings
-      : capabilityWarningsAfterExecutableRestriction({
-          warnings: resolution.warnings,
-          hiddenCount: hiddenExecutableToolCount,
-          noModelVisibleTools: allowedTools.length === 0,
-        }),
+    warnings,
   };
 }
 

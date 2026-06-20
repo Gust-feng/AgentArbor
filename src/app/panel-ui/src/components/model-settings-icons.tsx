@@ -15,7 +15,11 @@ export function ProviderLogo({ item, large = false }: { readonly item: ModelProv
   const logo = resolveModelProviderLogo(item);
   return (
     <span className={`provider-logo ${logo.tone} ${large ? "large" : ""}`}>
-      <span className={`provider-logo-svg ${logo.tone}`} aria-hidden="true" dangerouslySetInnerHTML={{ __html: logo.svg }} />
+      {logo.imageSrc === undefined ? (
+        <span className={`provider-logo-svg ${logo.tone}`} aria-hidden="true" dangerouslySetInnerHTML={{ __html: logo.svg ?? "" }} />
+      ) : (
+        <img className="provider-logo-image" src={logo.imageSrc} alt="" aria-hidden="true" />
+      )}
     </span>
   );
 }

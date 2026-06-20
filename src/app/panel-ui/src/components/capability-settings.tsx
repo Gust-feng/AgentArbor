@@ -214,6 +214,10 @@ function CapabilityNumberInput(props: {
       value={props.value}
       disabled={props.disabled}
       aria-label={props.ariaLabel}
+      spellCheck={false}
+      autoComplete="off"
+      autoCorrect="off"
+      autoCapitalize="off"
       onChange={(event) => props.onChange(event.target.value)}
     />
   );
@@ -309,6 +313,10 @@ function WebSearchSettings(props: {
           <input
             type="password"
             value={props.toolForm.tavilyApiKey}
+            spellCheck={false}
+            autoComplete="off"
+            autoCorrect="off"
+            autoCapitalize="off"
             onChange={(event) => props.setToolForm({ ...props.toolForm, tavilyApiKey: event.target.value })}
             placeholder={configured ? SAVED_API_KEY_MASK : "请输入密钥"}
           />
@@ -320,6 +328,10 @@ function WebSearchSettings(props: {
             min={1}
             max={10}
             value={props.toolForm.maxResults}
+            spellCheck={false}
+            autoComplete="off"
+            autoCorrect="off"
+            autoCapitalize="off"
             onChange={(event) => props.setToolForm({ ...props.toolForm, maxResults: event.target.value })}
           />
         </label>
@@ -725,6 +737,10 @@ function McpConnectionFields(props: {
             id={`${props.fieldPrefix}-label`}
             aria-label="名称"
             value={props.form.label}
+            spellCheck={false}
+            autoComplete="off"
+            autoCorrect="off"
+            autoCapitalize="off"
             onChange={(event) => props.setForm({ ...props.form, label: event.target.value })}
             placeholder="我的工具服务"
           />
@@ -770,6 +786,8 @@ function McpConnectionFields(props: {
                 aria-label="命令"
                 autoComplete="off"
                 spellCheck={false}
+                autoCorrect="off"
+                autoCapitalize="off"
                 value={props.form.commandLine}
                 onChange={(event) => props.setForm({ ...props.form, commandLine: event.target.value, command: "" })}
                 placeholder={props.selectedServer?.commandSummary ?? "npx -y @modelcontextprotocol/server-filesystem ."}
@@ -781,6 +799,10 @@ function McpConnectionFields(props: {
                 id={`${props.fieldPrefix}-args`}
                 aria-label="参数"
                 value={props.form.args}
+                spellCheck={false}
+                autoComplete="off"
+                autoCorrect="off"
+                autoCapitalize="off"
                 onChange={(event) => props.setForm({ ...props.form, args: event.target.value })}
                 placeholder="可选，每行一个参数"
               />
@@ -791,6 +813,10 @@ function McpConnectionFields(props: {
                 id={`${props.fieldPrefix}-env`}
                 aria-label="环境变量"
                 value={props.form.envSecretRefs}
+                spellCheck={false}
+                autoComplete="off"
+                autoCorrect="off"
+                autoCapitalize="off"
                 onChange={(event) => props.setForm({ ...props.form, envSecretRefs: event.target.value })}
                 placeholder="可选，每行一个变量名"
               />
@@ -805,6 +831,8 @@ function McpConnectionFields(props: {
                 aria-label="URL"
                 autoComplete="off"
                 spellCheck={false}
+                autoCorrect="off"
+                autoCapitalize="off"
                 value={props.form.url}
                 onChange={(event) => props.setForm({ ...props.form, url: event.target.value })}
                 placeholder={props.selectedServer?.url ?? "https://example.com/mcp"}
@@ -817,6 +845,10 @@ function McpConnectionFields(props: {
                 aria-label="Authorization 请求头"
                 type="password"
                 value={props.form.bearerTokenValue}
+                spellCheck={false}
+                autoComplete="off"
+                autoCorrect="off"
+                autoCapitalize="off"
                 onChange={(event) => {
                   const token = event.target.value;
                   props.setForm({
@@ -895,6 +927,10 @@ function McpAdvancedOptions(props: {
           id={`${props.fieldPrefix}-import-json`}
           aria-label="导入 JSON"
           value={props.importText}
+          spellCheck={false}
+          autoComplete="off"
+          autoCorrect="off"
+          autoCapitalize="off"
           onChange={(event) => props.setImportText(event.target.value)}
           placeholder='{"mcpServers":{"context7":{"url":"https://mcp.context7.com/mcp"}}}'
         />

@@ -50,9 +50,10 @@ export type {
 } from "./desktop-agent-session-contracts.js";
 
 /**
- * Ordinary desktop agent runtime: a single conversational/tool-assisted turn
- * that shares infrastructure with other runtimes but never starts
- * non-ordinary orchestration by itself.
+ * Ordinary desktop agent turn/session executor. Runtime orchestration should
+ * reach this only through the already-created run execution adapter path
+ * (`BasicAgentRunExecutor -> executeBasicPanelRun -> executeOrdinaryDesktopRunForPanel`).
+ * It does not create runs or freeze run birth facts by itself.
  */
 export async function runDesktopAgentSession(
   goal: string,

@@ -40,6 +40,7 @@ test("panel server source keeps conversation restore and persistence split", asy
     runStreamContracts,
     modelProgressCopy,
     modelFailureVisibleCopy,
+    basicAgentContracts,
   ] = await Promise.all([
     readAppSource(path.join("panel-server", "request-handler.ts")),
     readAppSource(path.join("panel-server", "conversation-history.ts")),
@@ -75,6 +76,7 @@ test("panel server source keeps conversation restore and persistence split", asy
     readAppSource("panel-run-stream-contracts.ts"),
     readAppSource("panel-model-progress-copy.ts"),
     readAppSource("model-failure-visible-copy.ts"),
+    readAppSource(path.join("basic-agent-runtime", "contracts.ts")),
   ]);
 
   assert.equal(requestHandler.includes('from "./conversation-history.js"'), false);
@@ -232,12 +234,16 @@ test("panel server source keeps conversation restore and persistence split", asy
   assert.equal(conversationCurrentRun.includes("function createLiveBasicAgentRunViewReadModel"), false);
   assert.equal(conversationCurrentRun.includes("function createPersistedBasicAgentRunViewReadModel"), false);
   assert.equal(conversationCurrentRun.includes("createPersistedPanelRunResponse"), false);
+  assert.equal(conversationCurrentRun.includes("createPanelRunResultReadModel"), false);
   assert.equal(basicRunViewContracts.includes("export type PanelBasicAgentRunViewReadModel"), true);
   assert.equal(basicRunViewContracts.includes("DesktopWorkViewReadModel"), true);
   assert.equal(basicRunViewContracts.includes("DesktopWorkSessionReadModel"), false);
   assert.equal(basicRunViewContracts.includes("RunAgentDefinitionRef"), true);
   assert.equal(basicRunViewContracts.includes("readonly agentDefinitionRef?: RunAgentDefinitionRef"), true);
+  assert.equal(basicRunViewContracts.includes("PanelRunResultReadModel"), true);
+  assert.equal(basicRunViewContracts.includes("readonly result: PanelRunResultReadModel"), true);
   assert.equal(conversationContracts.includes("PanelConversationCurrentRunReadModel = PanelBasicAgentRunViewReadModel"), true);
+  assert.equal(conversationContracts.includes("readonly result: PanelRunResultReadModel"), false);
   assert.equal(runRoutes.includes("export async function handlePanelRunRoute"), true);
   assert.equal(runRoutes.includes("async function handleRunRequest"), true);
   assert.equal(runRoutes.includes("async function handleStartRunRequest"), true);
@@ -330,6 +336,25 @@ test("panel server source keeps conversation restore and persistence split", asy
   assert.equal(skillService.includes("export async function setPanelSkillEnabled"), true);
   assert.equal(skillService.includes("export async function resolveTriggeredSkillContexts"), true);
   assert.equal(runExecution.includes("export async function executeBasicPanelRun"), true);
+  const executeBasicPanelRunSource = sourceBetween(
+    runExecution,
+    "export async function executeBasicPanelRun",
+    "export async function failPanelRunJob"
+  );
+  assert.equal(executeBasicPanelRunSource.includes("executePanelRunFromFrozenJob(runtime,"), true);
+  assert.equal(executeBasicPanelRunSource.includes("runForPanel("), false);
+  assert.equal(runExecution.includes("BasicAgentRunExecutor.start"), true);
+  assert.equal(runExecution.includes("function executePanelRunFromFrozenJob"), true);
+  assert.equal(runExecution.includes("@deprecated Compatibility helper for legacy synchronous run routes"), true);
+  assert.equal(runExecution.includes("Default\n * ordinary Desktop Agent runs must be created through BasicAgentRunExecutor.start"), true);
+  const runForPanelSource = sourceBetween(
+    runExecution,
+    "export async function runForPanel",
+    "type PanelRunFrozenExecutionInput"
+  );
+  assert.equal(runForPanelSource.includes('if (runKind === "desktop")'), true);
+  assert.equal(runForPanelSource.includes("desktop_sync_run_not_supported"), true);
+  assert.equal(runForPanelSource.includes("runDesktopForPanel("), false);
   assert.equal(runExecution.includes("export async function failPanelRunJob"), true);
   assert.equal(runExecution.includes("export async function runForPanel"), true);
   assert.equal(runExecution.includes("export async function createPanelRunResponse"), true);
@@ -359,6 +384,12 @@ test("panel server source keeps conversation restore and persistence split", asy
   assert.equal(runExecutionContracts.includes("export type DesktopRunResources"), true);
   assert.equal(runExecutionContracts.includes("readonly informationAccess: SanitizedInformationAccessConfig"), true);
   assert.equal(runExecutionContracts.includes("readonly toolCatalogAvailability:"), true);
+  assert.equal(basicAgentContracts.includes("export type DesktopAgentRunSpec"), true);
+  assert.equal(basicAgentContracts.includes("export type DesktopAgentRunBirthFacts"), true);
+  assert.equal(basicAgentContracts.includes("export type DesktopAgentRunExecutionInput"), true);
+  assert.equal(basicAgentContracts.includes("readonly runKind: \"desktop\""), true);
+  assert.equal(basicAgentContracts.includes("readonly runMode: \"agent\""), true);
+  assert.equal(basicAgentContracts.includes("export type DesktopAgentRunExecutionResult = BasicAgentRunExecutionResult"), true);
   assert.equal(desktopRunResources.includes("export async function prepareDesktopRunResources"), true);
   assert.equal(desktopRunResources.includes("export function desktopRuntimeMode"), true);
   assert.equal(desktopRunResources.includes("export function createDesktopToolCenterFactory"), true);
@@ -387,6 +418,9 @@ test("panel server source keeps conversation restore and persistence split", asy
   assert.equal(desktopToolCenterFactorySource.includes("toolStates: resources.toolStates"), true);
   assert.equal(desktopToolCenterFactorySource.includes("toolCatalogNames: resources.toolCatalogNames"), true);
   assert.equal(desktopToolCenterFactorySource.includes("toolCatalogAvailability: resources.toolCatalogAvailability"), true);
+  assert.equal(desktopAgentExecution.includes("export type OrdinaryDesktopPanelRunExecutionInput"), true);
+  assert.equal(desktopAgentExecution.includes("export async function executeOrdinaryDesktopRunForPanel"), true);
+  assert.equal(desktopAgentExecution.includes("@deprecated Use executeOrdinaryDesktopRunForPanel with an object input"), true);
   assert.equal(desktopAgentExecution.includes("export async function runOrdinaryDesktopForPanel"), true);
   assert.equal(desktopAgentExecution.includes("runDesktopAgentSession"), true);
   assert.equal(desktopAgentExecution.includes("createDesktopToolCenterFactory(runtime.providerFetch, resources)"), true);
@@ -550,6 +584,7 @@ test("panel server routes cannot bypass ordinary desktop run creation", async ()
     const relative = path.relative(process.cwd(), file);
     assert.equal(source.includes("runDesktopAgentSession"), false, `${relative} must not call desktop session directly`);
     assert.equal(source.includes("runOrdinaryDesktopForPanel"), false, `${relative} must not call ordinary desktop execution directly`);
+    assert.equal(source.includes("executeOrdinaryDesktopRunForPanel"), false, `${relative} must not call ordinary desktop execution directly`);
     assert.equal(source.includes('from "../desktop-agent-session'), false, `${relative} must not import desktop session directly`);
     assert.equal(source.includes('from "./desktop-agent-execution'), false, `${relative} must not import desktop execution directly`);
   }

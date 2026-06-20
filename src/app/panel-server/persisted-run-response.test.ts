@@ -8,6 +8,7 @@ import {
 } from "./persisted-run-response.js";
 import { displayActivityItemsForNodes } from "../panel-transcript-activity-copy.js";
 import { activityVisibleNodes } from "../panel-transcript-node-projection.js";
+import { createRunCapabilityPlan } from "../model-capability-registry.js";
 
 test("persisted run response restores safe transcript and tracking projections", () => {
   const response = createPersistedPanelRunResponse({
@@ -546,6 +547,9 @@ function frozenCapabilitySnapshot(): NonNullable<RuntimeRunSnapshot["run"]["capa
 }
 
 function frozenCapabilityResolution(): NonNullable<RuntimeRunSnapshot["run"]["capabilityResolution"]> {
+  const snapshot = frozenCapabilitySnapshot();
+  const allowedTools = ["shell_command"];
+  const warnings: readonly string[] = [];
   return {
     resolutionId: "capability-resolution-1",
     snapshotId: "capability-snapshot-1",
@@ -553,7 +557,13 @@ function frozenCapabilityResolution(): NonNullable<RuntimeRunSnapshot["run"]["ca
     agentDisplayName: "Custom Restored Agent",
     runMode: "agent",
     toolVisibilityProfileId: "custom-restored-agent:ordinary-visible-tools:v1",
-    allowedTools: ["shell_command"],
+    capabilityPlan: createRunCapabilityPlan({
+      profile: snapshot.activeModel,
+      modelCapabilities: snapshot.modelCapabilities,
+      allowedTools,
+      warnings,
+    }),
+    allowedTools,
     toolExposures: [
       {
         name: "shell_command",
@@ -570,7 +580,7 @@ function frozenCapabilityResolution(): NonNullable<RuntimeRunSnapshot["run"]["ca
     ],
     enabledSkills: [],
     mcpDrafts: [],
-    warnings: [],
+    warnings,
     createdAt: "2026-05-31T00:00:00.000Z",
   };
 }

@@ -10,6 +10,7 @@ import type {
 import { AgentDefinitionRegistry } from "../agent-definition-registry.js";
 import { runAgentDefinitionRef } from "../agent-definition-runtime.js";
 import { DESKTOP_ROOT_AGENT } from "../agent-prompts/desktop-root-agent.js";
+import { createRunCapabilityPlan } from "../model-capability-registry.js";
 import { createPanelRunResponse, executeBasicPanelRun, runForPanel } from "./run-execution.js";
 import { PanelHttpError } from "./http-utils.js";
 import type { PanelRuntime } from "./runtime.js";
@@ -87,6 +88,33 @@ test("panel run response rejects ordinary desktop results without run-created fa
       const panelError = error as PanelHttpError;
       assert.equal(panelError.statusCode, 500);
       assert.equal(panelError.code, "desktop_capability_snapshot_required");
+      return true;
+    }
+  );
+});
+
+test("legacy panel run helper rejects ordinary desktop sync execution below the route layer", async () => {
+  await assert.rejects(
+    () =>
+      runForPanel(
+        runtimeWithCurrentConfig(modelConfig("current-profile", "current-model"), informationAccess(20)),
+        "desktop",
+        "不要从内部绕过 BasicAgentRunExecutor.start 执行普通 Desktop",
+        "fake",
+        undefined,
+        "agent",
+        {
+          config: modelConfig("frozen-profile", "frozen-model"),
+          informationAccess: informationAccess(5),
+          capabilitySnapshot: capabilitySnapshot(modelConfig("frozen-profile", "frozen-model")),
+          agentDefinitionRef: frozenAgentDefinitionRef(),
+        }
+      ),
+    (error) => {
+      assert.equal(error instanceof PanelHttpError, true);
+      const panelError = error as PanelHttpError;
+      assert.equal(panelError.statusCode, 400);
+      assert.equal(panelError.code, "desktop_sync_run_not_supported");
       return true;
     }
   );
@@ -450,14 +478,23 @@ function frozenAgentDefinitionRef(): RunAgentDefinitionRef {
 }
 
 function capabilityResolution(agentDefinitionRef: RunAgentDefinitionRef): RunCapabilityResolution {
+  const snapshot = capabilitySnapshot(modelConfig("frozen-profile", "frozen-model"));
+  const allowedTools = ["search"];
+  const warnings: readonly string[] = [];
   return {
     resolutionId: "capability-resolution-failure",
-    snapshotId: "snapshot-test",
+    snapshotId: snapshot.snapshotId,
     runMode: "agent",
     agentId: agentDefinitionRef.agentId,
     agentDisplayName: agentDefinitionRef.agentDisplayName,
     toolVisibilityProfileId: agentDefinitionRef.toolVisibilityProfileId,
-    allowedTools: ["search"],
+    capabilityPlan: createRunCapabilityPlan({
+      profile: snapshot.activeModel,
+      modelCapabilities: snapshot.modelCapabilities,
+      allowedTools,
+      warnings,
+    }),
+    allowedTools,
     toolExposures: [{
       name: "search",
       displayName: "Search",
@@ -472,7 +509,7 @@ function capabilityResolution(agentDefinitionRef: RunAgentDefinitionRef): RunCap
     }],
     enabledSkills: [],
     mcpDrafts: [],
-    warnings: [],
+    warnings,
     createdAt: "2026-06-06T00:00:00.000Z",
   };
 }

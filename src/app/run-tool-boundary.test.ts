@@ -34,6 +34,8 @@ test("run tool boundary intersects policy-visible tools with executable tools", 
 
   assert.deepEqual(boundary.allowedTools, ["search"]);
   assert.deepEqual(boundary.capabilityResolution?.allowedTools, ["search"]);
+  assert.deepEqual(boundary.capabilityResolution?.capabilityPlan.allowedTools, ["search"]);
+  assert.equal(boundary.capabilityResolution?.capabilityPlan.canExposeModelTools, true);
   assert.equal(
     boundary.capabilityResolution?.toolExposures.find((item) => item.name === "read_file")?.reason,
     "工具执行器当前未提供该工具。"

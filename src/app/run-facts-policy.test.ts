@@ -7,6 +7,7 @@ import type {
   SanitizedInformationAccessConfig,
   SanitizedModelProviderConfig,
 } from "../domain/config/index.js";
+import { createRunCapabilityPlan } from "./model-capability-registry.js";
 import { resolveCompatibleRunFacts } from "./run-facts-policy.js";
 
 test("resolveCompatibleRunFacts keeps frozen ordinary desktop facts over terminal payload facts", () => {
@@ -23,6 +24,7 @@ test("resolveCompatibleRunFacts keeps frozen ordinary desktop facts over termina
       agentRef: agentDefinitionRef(),
       allowedTools: ["read_file"],
       toolExposures: toolExposuresFor(createdSnapshot),
+      snapshot: createdSnapshot,
     }),
     agentDefinitionRef: agentDefinitionRef(),
   };
@@ -40,6 +42,7 @@ test("resolveCompatibleRunFacts keeps frozen ordinary desktop facts over termina
       },
       allowedTools: ["shell_command"],
       toolExposures: toolExposuresFor(forgedSnapshot),
+      snapshot: forgedSnapshot,
     }),
   });
 
@@ -68,6 +71,7 @@ test("resolveCompatibleRunFacts accepts matching capability resolution refinemen
     agentRef,
     allowedTools: ["read_file"],
     toolExposures: toolExposuresFor(createdSnapshot),
+    snapshot: createdSnapshot,
   });
 
   const resolved = resolveCompatibleRunFacts(created, {
@@ -98,7 +102,42 @@ test("resolveCompatibleRunFacts rejects same-snapshot capability resolutions tha
       agentRef,
       allowedTools: ["read_file", "shell_command"],
       toolExposures: toolExposuresFor(createdSnapshot),
+      snapshot: createdSnapshot,
     }),
+  });
+
+  assert.equal(resolved.capabilitySnapshot, createdSnapshot);
+  assert.equal(resolved.capabilityResolution, undefined);
+});
+
+test("resolveCompatibleRunFacts rejects same-snapshot capability resolutions with forged capability plans", () => {
+  const createdSnapshot = capabilitySnapshot("snapshot-created", modelConfig("created-profile", "created-model"));
+  const agentRef = agentDefinitionRef();
+  const created = {
+    runKind: "desktop" as const,
+    runMode: "agent" as const,
+    config: createdSnapshot.activeModel,
+    informationAccess: informationAccess("web", 5),
+    capabilitySnapshot: createdSnapshot,
+    agentDefinitionRef: agentRef,
+  };
+  const matching = capabilityResolution({
+    snapshotId: createdSnapshot.snapshotId,
+    agentRef,
+    allowedTools: ["read_file"],
+    toolExposures: toolExposuresFor(createdSnapshot),
+    snapshot: createdSnapshot,
+  });
+
+  const resolved = resolveCompatibleRunFacts(created, {
+    capabilitySnapshot: createdSnapshot,
+    capabilityResolution: {
+      ...matching,
+      capabilityPlan: {
+        ...matching.capabilityPlan,
+        canExposeModelTools: false,
+      },
+    },
   });
 
   assert.equal(resolved.capabilitySnapshot, createdSnapshot);
@@ -234,7 +273,9 @@ function capabilityResolution(input: {
   readonly agentRef: RunAgentDefinitionRef;
   readonly allowedTools: readonly string[];
   readonly toolExposures: RunCapabilityResolution["toolExposures"];
+  readonly snapshot?: BasicAgentCapabilitySnapshot;
 }): RunCapabilityResolution {
+  const snapshot = input.snapshot ?? capabilitySnapshot(input.snapshotId, modelConfig("fixture-profile", "fixture-model"));
   return {
     resolutionId: `capability-resolution-${input.snapshotId}`,
     snapshotId: input.snapshotId,
@@ -242,6 +283,12 @@ function capabilityResolution(input: {
     agentId: input.agentRef.agentId,
     agentDisplayName: input.agentRef.agentDisplayName,
     toolVisibilityProfileId: input.agentRef.toolVisibilityProfileId,
+    capabilityPlan: createRunCapabilityPlan({
+      profile: snapshot.activeModel,
+      modelCapabilities: snapshot.modelCapabilities,
+      allowedTools: input.allowedTools,
+      warnings: [],
+    }),
     allowedTools: input.allowedTools,
     toolExposures: input.toolExposures,
     enabledSkills: [],

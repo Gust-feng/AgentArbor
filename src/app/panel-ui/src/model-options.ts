@@ -1,6 +1,6 @@
 import type { ChatModelOption } from "./components/chat-empty";
 import { resolveModelIconSvgForModel } from "./model-icons";
-import { modelProviderDisplayName, modelProviderSortRank, resolveModelProviderIdentity } from "./model-provider-logos";
+import { modelProviderSortRank, resolveModelProviderIdentity } from "./model-provider-logos";
 import type { ConfigResponse, ModelProviderModelCatalog } from "./contracts/config";
 
 type ConfigModelProfile = NonNullable<ConfigResponse["profiles"]>[number];
@@ -41,7 +41,7 @@ export function modelOptionsFromConfig(
         baseUrl: profile.baseUrl ?? catalog?.baseUrl,
         model: profile.model,
       });
-      const label = identity === "unknown" ? profile.label ?? catalog?.label ?? profile.profileId : modelProviderDisplayName(identity);
+      const label = profile.label ?? catalog?.label ?? profile.profileId;
       return modelCatalogItemsWithConfiguredModel(catalog?.models ?? [], profile.model, label)
         .filter((model) => model.id.trim().length > 0)
         .map((model) => ({

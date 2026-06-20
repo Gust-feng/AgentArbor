@@ -4,6 +4,7 @@ export type ConfigResponse = {
   readonly config?: {
     readonly profileId?: string;
     readonly label?: string;
+    readonly logoDataUrl?: string;
     readonly providerKind?: string;
     readonly protocolKind?: string;
     readonly baseUrl?: string;

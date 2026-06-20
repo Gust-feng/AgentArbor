@@ -7,6 +7,7 @@ import type {
   SanitizedInformationAccessConfig,
   SanitizedModelProviderConfig,
 } from "../domain/config/index.js";
+import { createRunCapabilityPlan } from "./model-capability-registry.js";
 import { PanelRunJobStore, type PanelRunJob } from "./panel-run-jobs.js";
 
 test("PanelRunJobStore derives deep mode for underground run jobs at birth", () => {
@@ -434,18 +435,30 @@ function capabilitySnapshot(): BasicAgentCapabilitySnapshot {
 }
 
 function forgedCapabilityResolution(): RunCapabilityResolution {
+  const snapshot = {
+    ...capabilitySnapshot(),
+    snapshotId: "snapshot-forged-panel-run-job",
+  };
+  const allowedTools = ["forged-tool"];
+  const warnings: readonly string[] = [];
   return {
     resolutionId: "capability-resolution-forged",
-    snapshotId: "snapshot-forged-panel-run-job",
+    snapshotId: snapshot.snapshotId,
     runMode: "agent",
     agentId: "desktop-agent-session",
     agentDisplayName: "Desktop Agent",
     toolVisibilityProfileId: "desktop-root-agent:ordinary-visible-tools:v2",
-    allowedTools: ["forged-tool"],
+    capabilityPlan: createRunCapabilityPlan({
+      profile: snapshot.activeModel,
+      modelCapabilities: snapshot.modelCapabilities,
+      allowedTools,
+      warnings,
+    }),
+    allowedTools,
     toolExposures: [],
     enabledSkills: [],
     mcpDrafts: [],
-    warnings: [],
+    warnings,
     createdAt: "2026-06-07T00:00:00.000Z",
   };
 }
@@ -458,6 +471,8 @@ function matchingCapabilityResolution(
   assert.notEqual(agentRef, undefined);
   const frozenSnapshot = snapshot as BasicAgentCapabilitySnapshot;
   const frozenAgentRef = agentRef as RunAgentDefinitionRef;
+  const allowedTools: readonly string[] = [];
+  const warnings: readonly string[] = [];
   return {
     resolutionId: "capability-resolution-matching",
     snapshotId: frozenSnapshot.snapshotId,
@@ -465,11 +480,17 @@ function matchingCapabilityResolution(
     agentId: frozenAgentRef.agentId,
     agentDisplayName: frozenAgentRef.agentDisplayName,
     toolVisibilityProfileId: frozenAgentRef.toolVisibilityProfileId,
+    capabilityPlan: createRunCapabilityPlan({
+      profile: frozenSnapshot.activeModel,
+      modelCapabilities: frozenSnapshot.modelCapabilities,
+      allowedTools,
+      warnings,
+    }),
     allowedTools: [],
     toolExposures: [],
     enabledSkills: [],
     mcpDrafts: [],
-    warnings: [],
+    warnings,
     createdAt: "2026-06-07T00:00:00.000Z",
   };
 }

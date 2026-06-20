@@ -1,4 +1,3 @@
-import { modelProviderDisplayName, resolveModelProviderIdentity } from "./model-provider-logos";
 import type { ConfigResponse, ModelProviderModelCatalog, ToolConfirmationPolicy } from "./contracts/config";
 
 export type ComposerReasoningEffort = "" | "low" | "medium" | "high";
@@ -39,13 +38,7 @@ export function normalizeComposerToolConfirmationPolicy(
 }
 
 export function visibleConfigLabel(config: NonNullable<ConfigResponse["config"]>): string {
-  const identity = resolveModelProviderIdentity({
-    title: config.label,
-    profileId: config.profileId,
-    baseUrl: config.baseUrl,
-    model: config.model,
-  });
-  return identity === "unknown" ? config.label ?? "" : modelProviderDisplayName(identity);
+  return config.label ?? "";
 }
 
 export function visibleConfigBaseUrl(config: NonNullable<ConfigResponse["config"]>): string {

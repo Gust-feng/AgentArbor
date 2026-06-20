@@ -39,6 +39,9 @@ const BUILTIN_PROFILE_PRESET_ALIASES = new Map<string, string>([
   ["minimax", "minimax"],
 ]);
 
+const MODEL_PROVIDER_LOGO_DATA_URL_MAX_LENGTH = 240_000;
+const MODEL_PROVIDER_LOGO_DATA_URL_PATTERN = /^data:image\/(?:png|jpeg|jpg|webp|gif|svg\+xml);base64,[A-Za-z0-9+/]+={0,2}$/u;
+
 export function createDefaultModelProviderProfile(now: string): ModelProviderProfileSettings {
   return {
     profileId: DEFAULT_MODEL_PROFILE_ID,
@@ -73,6 +76,7 @@ export function parseModelProfile(
   return {
     profileId,
     label: optionalString(record.label) ?? fallbacks.fallbackLabel ?? profileId,
+    logoDataUrl: normalizeLogoDataUrl(record.logoDataUrl),
     providerKind,
     protocolKind,
     baseUrl,
@@ -108,6 +112,9 @@ export function normalizeModelProfile(
   return {
     profileId: normalizeProfileId(input.profileId ?? fallback.profileId),
     label: normalizeOptionalString(input.label) ?? fallback.label,
+    logoDataUrl: input.logoDataUrl === undefined
+      ? fallback.logoDataUrl
+      : normalizeLogoDataUrl(input.logoDataUrl) ?? fallback.logoDataUrl,
     providerKind,
     protocolKind: normalizedProtocolKind,
     baseUrl: normalizeBaseUrl(input.baseUrl) ?? fallback.baseUrl,
@@ -139,7 +146,6 @@ export function normalizeBuiltInModelProviderProfiles(
       : profile.model;
     const next: ModelProviderProfileSettings = {
       ...profile,
-      label: preset.label,
       providerKind,
       protocolKind,
       baseUrl,
@@ -325,6 +331,7 @@ function builtInPresetIdForModelSignal(model: string): string | undefined {
 function sameModelProfile(left: ModelProviderProfileSettings, right: ModelProviderProfileSettings): boolean {
   return left.profileId === right.profileId &&
     left.label === right.label &&
+    left.logoDataUrl === right.logoDataUrl &&
     left.providerKind === right.providerKind &&
     left.protocolKind === right.protocolKind &&
     left.baseUrl === right.baseUrl &&
@@ -344,4 +351,15 @@ function parseAiMode(value: unknown): AgentArborLocalSettings["modelProvider"]["
     return value;
   }
   return "none";
+}
+
+export function normalizeLogoDataUrl(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const normalized = value.trim();
+  if (normalized.length === 0 || normalized.length > MODEL_PROVIDER_LOGO_DATA_URL_MAX_LENGTH) {
+    return undefined;
+  }
+  return MODEL_PROVIDER_LOGO_DATA_URL_PATTERN.test(normalized) ? normalized : undefined;
 }

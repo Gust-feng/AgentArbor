@@ -73,6 +73,11 @@ export function ModelProviderForm(props: {
         <div className="provider-base-url-field">
           <input
             value={props.modelForm.baseUrl || props.item.baseUrl}
+            disabled={props.saving}
+            spellCheck={false}
+            autoComplete="off"
+            autoCorrect="off"
+            autoCapitalize="off"
             onChange={(event) => {
               props.onUpdateModelForm({ baseUrl: event.target.value });
             }}

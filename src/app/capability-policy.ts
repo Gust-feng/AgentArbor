@@ -5,10 +5,12 @@ import {
   RunCapabilityResolution,
   RunEnabledSkill,
   RunToolExposure,
+  RunCapabilityPlan,
 } from "../domain/config/index.js";
 import type { TaskSoil } from "../domain/soil/index.js";
 import { createId, nowIso } from "../kernel/id.js";
 import { isToolVisibleToAgentProfile as isVisibleToProfile } from "./agent-prompts/contracts.js";
+import { createRunCapabilityPlan } from "./model-capability-registry.js";
 
 export type ResolveRunCapabilitiesInput = {
   readonly snapshot: BasicAgentCapabilitySnapshot;
@@ -16,6 +18,8 @@ export type ResolveRunCapabilitiesInput = {
   readonly agentDefinition: AgentDefinition;
   readonly taskSoil?: TaskSoil;
   readonly platform?: NodeJS.Platform;
+  readonly capabilityPlan?: RunCapabilityPlan;
+  /** Compatibility for older callers; new code should pass capabilityPlan. */
   readonly modelSupportsToolCalling?: boolean;
 };
 
@@ -24,14 +28,23 @@ export type ResolveRunCapabilitiesInput = {
 // boundaries are applied.
 export function resolveRunCapabilities(input: ResolveRunCapabilitiesInput): RunCapabilityResolution {
   const permissionRefs = new Set(input.taskSoil?.permissionBoundaryRefs ?? []);
-  const modelSupportsToolCalling = input.modelSupportsToolCalling ?? true;
+  const baseCapabilityPlan = input.capabilityPlan ?? createRunCapabilityPlan({
+    profile: input.snapshot.activeModel,
+    modelCapabilities: input.modelSupportsToolCalling === false
+      ? {
+          ...input.snapshot.modelCapabilities,
+          supportsToolCalling: false,
+          supportsParallelToolCalls: false,
+        }
+      : input.snapshot.modelCapabilities,
+  });
   const snapshotAllowedTools = new Set(input.snapshot.toolCatalog.allowedTools);
   const toolExposures = input.snapshot.toolCatalog.tools.map((tool): RunToolExposure => {
     const availabilityAllowed = tool.enabled && tool.availability === "available";
     const allowedBySnapshot = snapshotAllowedTools.has(tool.name);
     const denied = isDeniedByPermissionRef(tool.name, permissionRefs);
     const modelVisible =
-      modelSupportsToolCalling &&
+      baseCapabilityPlan.canExposeModelTools &&
       availabilityAllowed &&
       allowedBySnapshot &&
       !denied &&
@@ -54,7 +67,7 @@ export function resolveRunCapabilities(input: ResolveRunCapabilitiesInput): RunC
         availability: tool.availability,
         allowedBySnapshot,
         denied,
-        modelSupportsToolCalling,
+        canExposeModelTools: baseCapabilityPlan.canExposeModelTools,
         modelVisible,
         requiresConfirmation: tool.requiresConfirmation,
         confirmationPolicy: input.snapshot.toolConfirmation?.policy,
@@ -64,6 +77,13 @@ export function resolveRunCapabilities(input: ResolveRunCapabilitiesInput): RunC
   const allowedTools = toolExposures
     .filter((tool) => tool.modelVisible)
     .map((tool) => tool.name);
+  const warnings = capabilityResolutionWarnings({ snapshot: input.snapshot, allowedTools, toolExposures });
+  const capabilityPlan = capabilityPlanForResolvedRun({
+    baseCapabilityPlan,
+    toolExposures,
+    allowedTools,
+    warnings,
+  });
   return {
     resolutionId: createId("capability-resolution"),
     snapshotId: input.snapshot.snapshotId,
@@ -71,6 +91,7 @@ export function resolveRunCapabilities(input: ResolveRunCapabilitiesInput): RunC
     agentId: input.agentDefinition.agentId,
     agentDisplayName: input.agentDefinition.displayName,
     toolVisibilityProfileId: input.agentDefinition.toolVisibilityProfile.profileId,
+    capabilityPlan,
     allowedTools,
     toolExposures,
     enabledSkills: input.snapshot.skillCatalog
@@ -91,8 +112,44 @@ export function resolveRunCapabilities(input: ResolveRunCapabilitiesInput): RunC
         ? "已登记。"
         : "已停用。",
     })),
-    warnings: capabilityResolutionWarnings({ snapshot: input.snapshot, allowedTools, toolExposures }),
+    warnings,
     createdAt: nowIso(),
+  };
+}
+
+function capabilityPlanForResolvedRun(input: {
+  readonly baseCapabilityPlan: RunCapabilityPlan;
+  readonly toolExposures: readonly RunToolExposure[];
+  readonly allowedTools: readonly string[];
+  readonly warnings: readonly string[];
+}): RunCapabilityPlan {
+  const visibleTools = input.toolExposures.filter((tool) => tool.modelVisible);
+  const visibleToolNames = visibleTools.map((tool) => tool.name);
+  return {
+    ...input.baseCapabilityPlan,
+    tools: {
+      canExposeToModel: input.baseCapabilityPlan.canExposeModelTools,
+      allowedTools: input.allowedTools,
+    },
+    fileOperations: {
+      canReadWorkspace: visibleTools.some((tool) =>
+        tool.operationType === "read-only" ||
+        tool.operationType === "read-write" ||
+        tool.operationType === "execute"
+      ),
+      canWriteWorkspace: visibleTools.some((tool) => tool.operationType === "read-write"),
+      canDeleteWorkspace: visibleTools.some((tool) =>
+        tool.operationType === "read-write" && /(?:^|_)delete(?:_|$)/.test(tool.name)
+      ),
+      canExecuteCommands: visibleTools.some((tool) => tool.operationType === "execute"),
+    },
+    uiDisplay: {
+      canShowStreamingOutput: input.baseCapabilityPlan.modelCapabilities.supportsStreaming,
+      canShowToolCards: visibleToolNames.length > 0,
+      visibleToolNames,
+    },
+    allowedTools: input.allowedTools,
+    warnings: input.warnings,
   };
 }
 
@@ -105,12 +162,12 @@ function exposureReason(input: {
   readonly availability: "available" | "unavailable";
   readonly allowedBySnapshot: boolean;
   readonly denied: boolean;
-  readonly modelSupportsToolCalling: boolean;
+  readonly canExposeModelTools: boolean;
   readonly modelVisible: boolean;
   readonly requiresConfirmation: boolean;
   readonly confirmationPolicy?: "prompt" | "full_access";
 }): string {
-  if (!input.modelSupportsToolCalling) return "当前模型不支持工具调用。";
+  if (!input.canExposeModelTools) return "当前模型不支持工具调用。";
   if (!input.enabled) return "工具已在配置中停用。";
   if (input.availability !== "available") return "当前不可用。";
   if (!input.allowedBySnapshot) return "不在本轮可用范围内。";

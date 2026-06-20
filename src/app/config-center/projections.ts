@@ -32,6 +32,7 @@ export async function toSanitizedModelProfile(input: {
   return {
     profileId: input.profile.profileId,
     label: input.profile.label,
+    logoDataUrl: input.profile.logoDataUrl,
     providerKind: input.profile.providerKind,
     protocolKind: input.profile.protocolKind,
     baseUrl: normalizeBaseUrl(input.profile.baseUrl) ?? DEFAULT_MODEL_PROVIDER_BASE_URL,

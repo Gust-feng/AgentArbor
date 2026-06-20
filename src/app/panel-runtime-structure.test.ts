@@ -163,7 +163,8 @@ test("desktop agent session keeps projection and contracts split", async () => {
   assert.equal(loopPreparation.includes("export function prepareDesktopAgentLoop"), true);
   assert.equal(loopPreparation.includes("export function modelCapabilitiesForDesktopRun"), true);
   assert.equal(loopPreparation.includes("const modelCapabilities = modelCapabilitiesForDesktopRun(input.aiMode, input.options)"), true);
-  assert.equal(loopPreparation.includes("modelCapabilities?.supportsToolCalling !== false"), true);
+  assert.equal(loopPreparation.includes("modelCapabilities?.supportsToolCalling !== false"), false);
+  assert.equal(loopPreparation.includes("(capabilityPlan?.canExposeModelTools ?? modelCapabilities?.supportsToolCalling) !== false"), true);
   assert.equal(loopPreparation.includes('aiMode === "fake" || modelCapabilities?.supportsToolCalling !== false'), false);
   assert.equal(loopPreparation.includes("options.capabilitySnapshot?.modelCapabilities ?? options.modelCapabilities"), true);
   assert.equal(loopPreparation.includes("options.modelCapabilities ?? options.capabilitySnapshot?.modelCapabilities"), false);
@@ -562,6 +563,45 @@ test("cognitive work session keeps helpers split by runtime concern", async () =
   assert.equal(runtime.includes("export async function executeRequiredTurn"), true);
   assert.equal(safe.includes("export function safeText"), true);
   assert.equal(safe.includes("export function unique"), true);
+});
+
+test("ordinary desktop runtime does not adopt legacy model purposes", async () => {
+  const [
+    session,
+    runtime,
+    loopPreparation,
+    runExecution,
+    desktopAgentExecution,
+    turnPolicyAsset,
+    desktopChatFacade,
+  ] = await Promise.all([
+    readAppSource("desktop-agent-session.ts"),
+    readAppSource("desktop-agent-session-runtime.ts"),
+    readAppSource("desktop-agent-loop-preparation.ts"),
+    readAppSource(path.join("panel-server", "run-execution.ts")),
+    readAppSource(path.join("panel-server", "desktop-agent-execution.ts")),
+    readAppSource(path.join("agent-prompts", "desktop-root-agent-turn-policy.ts")),
+    readAppSource("desktop-chat-session.ts"),
+  ]);
+
+  for (const [sourceName, source] of [
+    ["desktop-agent-session", session],
+    ["desktop-agent-session-runtime", runtime],
+    ["desktop-agent-loop-preparation", loopPreparation],
+    ["panel run execution", runExecution],
+    ["ordinary desktop panel execution", desktopAgentExecution],
+    ["desktop root turn policy", turnPolicyAsset],
+  ] as const) {
+    assert.equal(source.includes('purpose: "desktop_chat"'), false, `${sourceName} must not use desktop_chat as an ordinary purpose`);
+    assert.equal(source.includes('purpose: "work_session_'), false, `${sourceName} must not use work_session purposes`);
+    assert.equal(source.includes('label: "desktop_chat"'), false, `${sourceName} must not label ordinary model calls as desktop_chat`);
+    assert.equal(source.includes('label: "work_session_'), false, `${sourceName} must not label ordinary model calls as work_session`);
+  }
+
+  assert.equal(turnPolicyAsset.includes('purpose: "desktop_agent"'), true);
+  assert.equal(session.includes('label: "desktop_agent"'), true);
+  assert.equal(desktopChatFacade.includes("@deprecated Compatibility exports for older callers"), true);
+  assert.equal(desktopChatFacade.includes("runDesktopAgentSession as runDesktopChatSession"), true);
 });
 
 type AppTypeScriptSource = {

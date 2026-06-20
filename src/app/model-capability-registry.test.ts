@@ -5,6 +5,7 @@ import {
   PROTOCOL_BASELINE_MODEL_CAPABILITIES,
   hasModelCapabilityOverride,
   resolveModelCapabilities,
+  resolveProtocolToolCallCapabilities,
 } from "./model-capability-registry.js";
 
 function profile(
@@ -27,6 +28,115 @@ function profile(
   };
 }
 
+test("protocol capability registry describes tool-call round trips by adapter", () => {
+  assert.deepEqual(resolveProtocolToolCallCapabilities("openai_compatible_chat_completions"), {
+    protocolKind: "openai_compatible_chat_completions",
+    canSendToolDefinitions: true,
+    canReceiveToolCalls: true,
+    canRoundTripToolResults: true,
+  });
+  assert.deepEqual(resolveProtocolToolCallCapabilities("openai_responses"), {
+    protocolKind: "openai_responses",
+    canSendToolDefinitions: true,
+    canReceiveToolCalls: true,
+    canRoundTripToolResults: true,
+  });
+  assert.deepEqual(resolveProtocolToolCallCapabilities("anthropic_messages"), {
+    protocolKind: "anthropic_messages",
+    canSendToolDefinitions: false,
+    canReceiveToolCalls: false,
+    canRoundTripToolResults: false,
+  });
+});
+
+test("unknown OpenAI-compatible chat and responses models inherit protocol tool support", () => {
+  const chat = resolveModelCapabilities({
+    profile: profile("custom-frontier-chat-model", {
+      profileId: "custom-chat",
+      label: "Custom Chat",
+      baseUrl: "https://custom.example/v1",
+    }),
+  });
+  const responses = resolveModelCapabilities({
+    profile: profile("custom-frontier-responses-model", {
+      profileId: "custom-responses",
+      label: "Custom Responses",
+      protocolKind: "openai_responses",
+      defaultAiMode: "openai-responses",
+      baseUrl: "https://responses.example/v1",
+    }),
+  });
+
+  assert.equal(chat.supportsToolCalling, true);
+  assert.equal(chat.supportsParallelToolCalls, false);
+  assert.equal(chat.preferredApiStyle, "chat_completions");
+  assert.equal(responses.supportsToolCalling, true);
+  assert.equal(responses.supportsParallelToolCalls, false);
+  assert.equal(responses.preferredApiStyle, "responses");
+});
+
+test("protocol capability boundary blocks model hints for unimplemented tool adapters", () => {
+  const anthropicGpt = resolveModelCapabilities({
+    profile: profile("gpt-5.5", {
+      profileId: "anthropic-custom",
+      label: "Anthropic Custom",
+      providerKind: "anthropic",
+      protocolKind: "anthropic_messages",
+      baseUrl: "https://anthropic.example",
+    }),
+  });
+  const geminiGpt = resolveModelCapabilities({
+    profile: profile("gpt-5.5", {
+      profileId: "gemini-custom",
+      label: "Gemini Custom",
+      providerKind: "gemini",
+      protocolKind: "gemini_generate_content",
+      baseUrl: "https://gemini.example",
+    }),
+    overrides: [
+      {
+        profileId: "gemini-custom",
+        providerKind: "gemini",
+        model: "gpt-5.5",
+        capabilities: {
+          supportsToolCalling: true,
+          supportsParallelToolCalls: true,
+        },
+        updatedAt: "2026-06-20T00:00:00.000Z",
+      },
+    ],
+  });
+
+  assert.equal(anthropicGpt.supportsToolCalling, false);
+  assert.equal(anthropicGpt.supportsParallelToolCalls, false);
+  assert.equal(geminiGpt.supportsToolCalling, false);
+  assert.equal(geminiGpt.supportsParallelToolCalls, false);
+});
+
+test("model capability override can still close protocol tool support", () => {
+  const resolved = resolveModelCapabilities({
+    profile: profile("custom-no-tools-model", {
+      profileId: "custom-no-tools",
+      label: "Custom No Tools",
+      baseUrl: "https://custom.example/v1",
+    }),
+    overrides: [
+      {
+        profileId: "custom-no-tools",
+        providerKind: "openai_compatible",
+        model: "custom-no-tools-model",
+        capabilities: {
+          supportsToolCalling: false,
+          supportsParallelToolCalls: false,
+        },
+        updatedAt: "2026-06-20T00:00:00.000Z",
+      },
+    ],
+  });
+
+  assert.equal(resolved.supportsToolCalling, false);
+  assert.equal(resolved.supportsParallelToolCalls, false);
+});
 test("model capability registry resolves current OpenAI-compatible model families", () => {
   const capabilities = resolveModelCapabilities({ profile: profile("gpt-5.5") });
 

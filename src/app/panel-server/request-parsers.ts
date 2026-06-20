@@ -73,6 +73,8 @@ export function parseConfigUpdate(raw: unknown): UpdateModelProviderConfigInput 
   const update: UpdateModelProviderConfigInput = {
     profileId: optionalString(record.profileId),
     label: optionalString(record.label),
+    logoDataUrl: optionalString(record.logoDataUrl),
+    clearLogoDataUrl: booleanOrUndefined(record.clearLogoDataUrl),
     providerKind: parseOptionalModelProviderKind(record.providerKind),
     protocolKind: parseOptionalModelProtocolKind(record.protocolKind),
     baseUrl: optionalString(record.baseUrl),

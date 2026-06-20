@@ -14,6 +14,7 @@ import type {
   BasicAgentRunTerminalPayload,
 } from "./run-job.js";
 import { InMemoryBasicAgentRunJobStore } from "./run-job-store.js";
+import { createRunCapabilityPlan } from "../model-capability-registry.js";
 
 test("InMemoryBasicAgentRunJobStore keeps frozen run facts when awaiting approval receives forged facts", () => {
   const runJobs = new InMemoryBasicAgentRunJobStore();
@@ -188,6 +189,12 @@ function forgedFacts(): {
       agentId: "desktop-agent-session",
       agentDisplayName: "Desktop Agent",
       toolVisibilityProfileId: "desktop-root-agent:ordinary-visible-tools:v2",
+      capabilityPlan: createRunCapabilityPlan({
+        profile: snapshot.activeModel,
+        modelCapabilities: snapshot.modelCapabilities,
+        allowedTools: ["forged-tool"],
+        warnings: [],
+      }),
       allowedTools: ["forged-tool"],
       toolExposures: [],
       enabledSkills: [],

@@ -31,7 +31,7 @@ import { PanelHttpError } from "./http-utils.js";
 import { throwIfAborted } from "./request-parsers.js";
 import { canvasTraceId } from "./runtime-records.js";
 import type { PanelRuntime } from "./runtime.js";
-import { runOrdinaryDesktopForPanel } from "./desktop-agent-execution.js";
+import { executeOrdinaryDesktopRunForPanel } from "./desktop-agent-execution.js";
 import { prepareDesktopRunResources } from "./desktop-run-resources.js";
 import { runUndergroundForPanel } from "./underground-compat-execution.js";
 import type { AgentDefinition } from "../agent-prompts/contracts.js";
@@ -79,18 +79,25 @@ export async function executeBasicPanelRun(
     conversationId: job.conversationId,
     assistantTurnId: job.assistantTurnId,
   });
-  return runForPanel(runtime, job.runKind, job.goal, job.aiMode, job.taskSoilInput, job.runMode, {
-    conversationHistory,
-    agentDefinition: resolveExecutionAgentDefinition(runtime, job),
-    agentDefinitionRef: job.agentDefinitionRef,
-    config: job.config,
-    capabilitySnapshot: job.capabilitySnapshot,
-    informationAccess: job.informationAccess,
-    reasoningEffort: job.reasoningEffort,
-    toolConfirmationPolicy: job.toolConfirmationPolicy,
-    abortSignal: input.abortSignal,
-    onRuntimeReady: input.onRuntimeReady,
-    onModelOutputDelta: input.onModelOutputDelta,
+  return executePanelRunFromFrozenJob(runtime, {
+    runKind: job.runKind,
+    runMode: job.runMode,
+    goal: job.goal,
+    aiMode: job.aiMode,
+    taskSoilInput: job.taskSoilInput,
+    options: {
+      conversationHistory,
+      agentDefinition: resolveExecutionAgentDefinition(runtime, job),
+      agentDefinitionRef: job.agentDefinitionRef,
+      config: job.config,
+      capabilitySnapshot: job.capabilitySnapshot,
+      informationAccess: job.informationAccess,
+      reasoningEffort: job.reasoningEffort,
+      toolConfirmationPolicy: job.toolConfirmationPolicy,
+      abortSignal: input.abortSignal,
+      onRuntimeReady: input.onRuntimeReady,
+      onModelOutputDelta: input.onModelOutputDelta,
+    },
   });
 }
 
@@ -145,6 +152,11 @@ export async function failPanelRunJob(
   });
 }
 
+/**
+ * @deprecated Compatibility helper for legacy synchronous run routes. Default
+ * ordinary Desktop Agent runs must be created through BasicAgentRunExecutor.start
+ * so run birth facts are frozen before execution.
+ */
 export async function runForPanel(
   runtime: PanelRuntime,
   runKind: PanelRunKind,
@@ -154,11 +166,42 @@ export async function runForPanel(
   runMode: PanelRunMode = "agent",
   options: PanelRunExecutionOptions = {}
 ): Promise<PanelRunExecutionResult> {
-  throwIfAborted(options.abortSignal);
   assertSupportedPanelRunMode(runKind, runMode);
-  return runKind === "desktop"
-    ? runDesktopForPanel(runtime, goal, aiMode, taskSoilInput, options)
-    : runUndergroundForPanel(runtime, goal, aiMode, options);
+  if (runKind === "desktop") {
+    throw new PanelHttpError(
+      400,
+      "desktop_sync_run_not_supported",
+      "Desktop 默认运行入口必须通过 BasicAgentRunExecutor.start 创建并冻结运行事实。"
+    );
+  }
+  return executePanelRunFromFrozenJob(runtime, {
+    runKind,
+    runMode,
+    goal,
+    aiMode,
+    taskSoilInput,
+    options,
+  });
+}
+
+type PanelRunFrozenExecutionInput = {
+  readonly runKind: PanelRunKind;
+  readonly runMode: PanelRunMode;
+  readonly goal: string;
+  readonly aiMode: ModelRuntimeMode;
+  readonly taskSoilInput: DesktopTaskSoilInput | undefined;
+  readonly options: PanelRunExecutionOptions;
+};
+
+async function executePanelRunFromFrozenJob(
+  runtime: PanelRuntime,
+  input: PanelRunFrozenExecutionInput
+): Promise<PanelRunExecutionResult> {
+  throwIfAborted(input.options.abortSignal);
+  assertSupportedPanelRunMode(input.runKind, input.runMode);
+  return input.runKind === "desktop"
+    ? runDesktopForPanel(runtime, input.goal, input.aiMode, input.taskSoilInput, input.options)
+    : runUndergroundForPanel(runtime, input.goal, input.aiMode, input.options);
 }
 
 async function runDesktopForPanel(
@@ -170,7 +213,14 @@ async function runDesktopForPanel(
 ): Promise<PanelRunExecutionResult> {
   throwIfAborted(options.abortSignal);
   const resources = await prepareDesktopRunResources(runtime, aiMode, options);
-  return runOrdinaryDesktopForPanel(runtime, goal, aiMode, taskSoilInput, resources, options);
+  return executeOrdinaryDesktopRunForPanel({
+    runtime,
+    goal,
+    aiMode,
+    taskSoilInput,
+    resources,
+    options,
+  });
 }
 
 function assertSupportedPanelRunMode(runKind: PanelRunKind, runMode: PanelRunMode): void {

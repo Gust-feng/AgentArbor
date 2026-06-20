@@ -43,6 +43,7 @@ export type DesktopWorkViewCanvasLike = WorkViewCanvasContextLike & {
       readonly evidenceRefs: readonly string[];
       readonly [key: string]: unknown;
     };
+    readonly finalAnswer?: string;
     readonly pendingConfirmation?: {
       readonly confirmationId: string;
       readonly title: string;
@@ -403,6 +404,14 @@ function answerFor(input: CreateDesktopWorkViewReadModelInput): DesktopWorkViewA
       title: "已回答",
       content: redactOrdinaryText(canvas.agent.answer.answer, DESKTOP_WORK_VIEW_ANSWER_MAX_CHARS),
       evidenceRefs: observationRefs(canvas.agent.answer.evidenceRefs),
+      nextActions: [],
+    };
+  }
+  if (canvas?.kind === "desktop_agent_canvas" && typeof canvas.agent?.finalAnswer === "string" && canvas.agent.finalAnswer.trim().length > 0) {
+    return {
+      title: "已回答",
+      content: redactOrdinaryText(canvas.agent.finalAnswer, DESKTOP_WORK_VIEW_ANSWER_MAX_CHARS),
+      evidenceRefs: [],
       nextActions: [],
     };
   }

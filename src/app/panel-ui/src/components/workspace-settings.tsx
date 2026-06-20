@@ -35,6 +35,10 @@ export function WorkspaceSettings(props: {
         <SettingRow label="文件夹">
           <input
             value={props.workspaceDirectory}
+            spellCheck={false}
+            autoComplete="off"
+            autoCorrect="off"
+            autoCapitalize="off"
             onChange={(event) => {
               const nextWorkspaceDirectory = event.target.value;
               props.setWorkspaceDirectory(nextWorkspaceDirectory);

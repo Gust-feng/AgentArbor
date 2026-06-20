@@ -104,6 +104,7 @@ export function createAppSettingsController(options: AppSettingsControllerOption
           ...previous,
           apiKey: nextModelForm.apiKeyCleared ? "" : previous.apiKey,
           apiKeyCleared: false,
+          logoCleared: false,
         }));
       }
     } catch (error) {
@@ -136,7 +137,7 @@ export function createAppSettingsController(options: AppSettingsControllerOption
       });
       if (options.mountedRef.current) {
         options.setApp((previous) => ({ ...previous, config: mergeConfigResponse(previous.config, activated) }));
-        options.setModelForm((previous) => ({ ...previous, apiKey: "", apiKeyCleared: false }));
+        options.setModelForm((previous) => ({ ...previous, apiKey: "", apiKeyCleared: false, logoCleared: false }));
       }
     } catch (error) {
       if (options.mountedRef.current) {

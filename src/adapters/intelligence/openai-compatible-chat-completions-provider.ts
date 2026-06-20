@@ -1,7 +1,6 @@
 import OpenAI from "openai";
 import type { OpenAIModelRequestSettings, ProviderProtocolProfileId } from "../../domain/config/index.js";
 import type {
-  ModelFailureKind,
   ModelOutputDelta,
   ModelProvider,
   ModelRequest,
@@ -28,6 +27,11 @@ import { buildOpenAICompatibleChatRequestBody } from "./openai-compatible-chat-r
 import { normalizeOpenAICompatibleResponse } from "./openai-compatible-chat-response.js";
 import { normalizeOpenAICompatibleStreamResponse } from "./openai-compatible-chat-stream.js";
 import { providerErrorMessage } from "./provider-error-message.js";
+import {
+  classifyProviderFailureKind,
+  isRetryableProviderFailureStatus,
+  isTimeoutLikeError,
+} from "./provider-failure-classification.js";
 
 export type { FetchLike, FetchLikeResponse } from "./openai-fetch-bridge.js";
 
@@ -197,11 +201,12 @@ export class OpenAICompatibleChatCompletionsProvider implements ModelProvider {
           protocolKind: this.protocolKind,
           model: this.model,
           outputKind: request.outputContract.outputKind,
-          failureKind: failureKindForStatus(status),
-          retryable: status === 429 || status >= 500,
+          failureKind: classifyProviderFailureKind(status),
+          retryable: isRetryableProviderFailureStatus(status),
           message: providerErrorMessage(error, `HTTP ${status}`),
         });
       }
+      const timeoutLike = isTimeoutLikeError(lastTransportError ?? error);
       return createFailedModelResponse({
         requestId: request.requestId,
         providerId: this.providerId,
@@ -209,9 +214,12 @@ export class OpenAICompatibleChatCompletionsProvider implements ModelProvider {
         protocolKind: this.protocolKind,
         model: this.model,
         outputKind: request.outputContract.outputKind,
-        failureKind: "provider_network",
+        failureKind: timeoutLike ? "provider_timeout" : "provider_network",
         retryable: true,
-        message: providerErrorMessage(lastTransportError ?? error, "Network request failed."),
+        message: providerErrorMessage(
+          lastTransportError ?? error,
+          timeoutLike ? "Request timed out." : "Network request failed."
+        ),
       });
     }
   }
@@ -219,16 +227,6 @@ export class OpenAICompatibleChatCompletionsProvider implements ModelProvider {
 
 function trimTrailingSlashes(value: string): string {
   return value.replace(/\/+$/, "");
-}
-
-function failureKindForStatus(status: number): ModelFailureKind {
-  if (status === 401 || status === 403) {
-    return "provider_auth";
-  }
-  if (status === 429) {
-    return "provider_rate_limit";
-  }
-  return "provider_response";
 }
 
 function shouldRetryWithoutStreaming(

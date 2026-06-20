@@ -1,4 +1,5 @@
 import { redactSensitiveText } from "../../kernel/redaction.js";
+import { asRecord } from "./provider-value-utils.js";
 
 export function providerErrorMessage(error: unknown, fallback: string, maxLength = 1_000): string {
   const message = redactSensitiveText(extractProviderErrorMessage(error) ?? fallback);
@@ -65,11 +66,4 @@ function stripSdkStatusPrefix(message: string | undefined, status: number | unde
 function statusFromRecord(record: Record<string, unknown>): number | undefined {
   const value = record.status ?? record.statusCode;
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
-}
-
-function asRecord(value: unknown): Record<string, unknown> {
-  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
-    return value as Record<string, unknown>;
-  }
-  return {};
 }

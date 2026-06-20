@@ -6,22 +6,12 @@ import {
 } from "../../domain/config/index.js";
 import { nowIso } from "../../kernel/id.js";
 import { normalizeOpenAICompatibleSdkBaseUrl } from "./openai-compatible-base-url.js";
+import { asRecord, numberOrUndefined, stringOrUndefined } from "./provider-value-utils.js";
+import { joinUrlPath, resolveGlobalModelCatalogFetch } from "./model-catalog-shared.js";
+import type { ModelCatalogFetchLike } from "./model-catalog-shared.js";
 
-export type ModelCatalogFetchLike = (
-  url: string,
-  init: {
-    readonly method: "GET";
-    readonly headers: Record<string, string>;
-    readonly signal?: AbortSignal;
-  }
-) => Promise<ModelCatalogFetchLikeResponse>;
-
-export type ModelCatalogFetchLikeResponse = {
-  readonly ok: boolean;
-  readonly status: number;
-  readonly json: () => Promise<unknown>;
-  readonly text?: () => Promise<string>;
-};
+// 保留历史导出面：catalog fetch 类型仍从本模块对外暴露（经 index.js 被 intelligence-channel-factory 使用）。
+export type { ModelCatalogFetchLike, ModelCatalogFetchLikeResponse } from "./model-catalog-shared.js";
 
 export type OpenAICompatibleModelCatalogOptions = {
   readonly profile: Pick<SanitizedModelProviderConfig, "profileId" | "label" | "baseUrl">;
@@ -83,40 +73,4 @@ function parseModels(raw: unknown): readonly ModelProviderModelCatalogItem[] {
     })
     .filter((item): item is ModelProviderModelCatalogItem => item !== undefined)
     .sort((left, right) => left.id.localeCompare(right.id));
-}
-
-function resolveGlobalModelCatalogFetch(): ModelCatalogFetchLike | undefined {
-  const fetchImpl = globalThis.fetch;
-  if (typeof fetchImpl !== "function") {
-    return undefined;
-  }
-  return async (url, init) => {
-    const response = await fetchImpl(url, {
-      method: init.method,
-      headers: init.headers,
-      signal: init.signal,
-    });
-    return {
-      ok: response.ok,
-      status: response.status,
-      json: () => response.json() as Promise<unknown>,
-      text: () => response.text(),
-    };
-  };
-}
-
-function joinUrlPath(baseUrl: string, path: string): string {
-  return `${baseUrl.replace(/\/+$/, "")}/${path.replace(/^\/+/, "")}`;
-}
-
-function stringOrUndefined(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
-}
-
-function numberOrUndefined(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
-}
-
-function asRecord(value: unknown): Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }

@@ -131,6 +131,67 @@ test("OpenAI-compatible Chat adapter preserves transport failure detail", async 
   assert.equal(response.failure?.message.includes(secret), true);
 });
 
+test("OpenAI-compatible Chat adapter classifies 408 response as provider_timeout", async () => {
+  const fetch: FetchLike = async () => ({
+    ok: false,
+    status: 408,
+    json: async () => ({ error: { message: "Request Timeout" } }),
+  });
+  const provider = new OpenAICompatibleChatCompletionsProvider({
+    baseUrl: "https://llm.example.test",
+    apiKey: "sk-test-secret-token",
+    model: "gpt-compatible-test",
+    fetch,
+  });
+
+  const response = await provider.complete(createValidModelRequest());
+
+  assert.equal(response.status, "failed");
+  assert.equal(response.failure?.kind, "provider_timeout");
+  assert.equal(response.failure?.retryable, true);
+  assert.equal(response.failure?.message, "Request Timeout");
+});
+
+test("OpenAI-compatible Chat adapter classifies 504 response as provider_timeout", async () => {
+  const fetch: FetchLike = async () => ({
+    ok: false,
+    status: 504,
+    json: async () => ({ error: { message: "Gateway Timeout" } }),
+  });
+  const provider = new OpenAICompatibleChatCompletionsProvider({
+    baseUrl: "https://llm.example.test",
+    apiKey: "sk-test-secret-token",
+    model: "gpt-compatible-test",
+    fetch,
+  });
+
+  const response = await provider.complete(createValidModelRequest());
+
+  assert.equal(response.status, "failed");
+  assert.equal(response.failure?.kind, "provider_timeout");
+  assert.equal(response.failure?.retryable, true);
+  assert.equal(response.failure?.message, "Gateway Timeout");
+});
+
+test("OpenAI-compatible Chat adapter normalizes timeout-like transport error as provider_timeout", async () => {
+  const fetch: FetchLike = async () => {
+    throw new Error("Request timed out after 30000ms");
+  };
+  const provider = new OpenAICompatibleChatCompletionsProvider({
+    baseUrl: "https://llm.example.test",
+    apiKey: "sk-test-secret-token",
+    model: "gpt-compatible-test",
+    fetch,
+  });
+
+  const response = await provider.complete(createValidModelRequest());
+
+  assert.equal(response.status, "failed");
+  assert.equal(response.failure?.kind, "provider_timeout");
+  assert.equal(response.failure?.retryable, true);
+  assert.equal(response.failure?.message.includes("timed out"), true);
+});
+
 test("OpenAI-compatible Chat Completions adapter streams safe output deltas", async () => {
   const calls: { body: Record<string, unknown> }[] = [];
   const deltas: Array<{ purpose: string | undefined; delta: string }> = [];

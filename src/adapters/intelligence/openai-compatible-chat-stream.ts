@@ -21,6 +21,7 @@ import {
 } from "./openai-compatible-chat-response.js";
 import {
   asRecord,
+  isPlainRecord,
   parseStructuredOutput,
   parseToolArguments,
 } from "./provider-value-utils.js";
@@ -413,8 +414,4 @@ function protocolExtensionsFromMap(extensions: ReadonlyMap<string, unknown>): Re
     return undefined;
   }
   return Object.fromEntries(extensions.entries());
-}
-
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

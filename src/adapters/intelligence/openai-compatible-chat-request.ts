@@ -13,6 +13,7 @@ import {
 } from "./openai-compatible-chat-protocol.js";
 import { buildOpenAIChatCompletionsControlFields } from "./openai-request-settings.js";
 import { removeUndefinedValues } from "./provider-value-utils.js";
+import { filterOpenAIChatProtocolExtensions } from "./openai-compatible-chat-protocol-extensions.js";
 
 export function buildOpenAICompatibleChatRequestBody(input: {
   readonly request: ModelRequest;
@@ -112,67 +113,5 @@ function protocolExtensionsForRequest(
   if (extensions === undefined) {
     return {};
   }
-  return Object.fromEntries(
-    Object.entries(extensions).filter(
-      ([key, value]) => !isStandardOpenAIMessageField(key) && isProtocolExtensionValue(value)
-    )
-  );
-}
-
-function isStandardOpenAIMessageField(key: string): boolean {
-  return (
-    key === "role" ||
-    key === "content" ||
-    key === "refusal" ||
-    key === "tool_calls" ||
-    key === "function_call" ||
-    key === "tool_call_id" ||
-    key === "name"
-  );
-}
-
-function isProtocolExtensionValue(value: unknown): boolean {
-  if (value === null) {
-    return true;
-  }
-  switch (typeof value) {
-    case "string":
-    case "number":
-    case "boolean":
-      return true;
-    default:
-      return isJsonSafeProtocolExtension(value);
-  }
-}
-
-function isJsonSafeProtocolExtension(value: unknown, depth = 0): boolean {
-  if (depth > 4) {
-    return false;
-  }
-  if (Array.isArray(value)) {
-    return value.length <= 32 && value.every((item) => isProtocolExtensionValueAtDepth(item, depth + 1));
-  }
-  if (!isPlainRecord(value)) {
-    return false;
-  }
-  const entries = Object.entries(value);
-  return entries.length <= 32 && entries.every(([, item]) => isProtocolExtensionValueAtDepth(item, depth + 1));
-}
-
-function isProtocolExtensionValueAtDepth(value: unknown, depth: number): boolean {
-  if (value === null) {
-    return true;
-  }
-  switch (typeof value) {
-    case "string":
-    case "number":
-    case "boolean":
-      return true;
-    default:
-      return isJsonSafeProtocolExtension(value, depth);
-  }
-}
-
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+  return filterOpenAIChatProtocolExtensions(extensions);
 }

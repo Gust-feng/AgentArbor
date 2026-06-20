@@ -19,6 +19,7 @@ import {
   parseStructuredOutput,
   parseToolArguments,
 } from "./provider-value-utils.js";
+import { filterOpenAIChatProtocolExtensions } from "./openai-compatible-chat-protocol-extensions.js";
 
 export function normalizeOpenAICompatibleResponse(input: {
   request: ModelRequest;
@@ -132,37 +133,12 @@ function parseLegacyFunctionCall(value: unknown): ToolCallRequest[] {
 }
 
 export function protocolExtensionsForResponse(message: Record<string, unknown>): Readonly<Record<string, unknown>> | undefined {
-  const entries = Object.entries(message).filter(
-    ([key, value]) => !isStandardOpenAIMessageField(key) && isProtocolExtensionValue(value)
-  );
-  return entries.length === 0 ? undefined : Object.fromEntries(entries);
+  const filtered = filterOpenAIChatProtocolExtensions(message);
+  return Object.keys(filtered).length === 0 ? undefined : filtered;
 }
 
-export function isStandardOpenAIMessageField(key: string): boolean {
-  return (
-    key === "role" ||
-    key === "content" ||
-    key === "refusal" ||
-    key === "tool_calls" ||
-    key === "function_call" ||
-    key === "tool_call_id" ||
-    key === "name"
-  );
-}
-
-export function isProtocolExtensionValue(value: unknown): boolean {
-  if (value === null) {
-    return true;
-  }
-  switch (typeof value) {
-    case "string":
-    case "number":
-    case "boolean":
-      return true;
-    default:
-      return isJsonSafeProtocolExtension(value);
-  }
-}
+// 协议扩展判定逻辑已收敛到 openai-compatible-chat-protocol-extensions，此处仅再导出以保持原有导出面。
+export { isProtocolExtensionValue, isStandardOpenAIMessageField } from "./openai-compatible-chat-protocol-extensions.js";
 
 function failedResponseForIncompleteFinish(input: {
   readonly request: ModelRequest;
@@ -218,36 +194,4 @@ function reasoningOutputForChatMessage(
         source: decoded.reasoningSource,
         content: decoded.reasoningContent,
       });
-}
-
-function isJsonSafeProtocolExtension(value: unknown, depth = 0): boolean {
-  if (depth > 4) {
-    return false;
-  }
-  if (Array.isArray(value)) {
-    return value.length <= 32 && value.every((item) => isProtocolExtensionValueAtDepth(item, depth + 1));
-  }
-  if (!isPlainRecord(value)) {
-    return false;
-  }
-  const entries = Object.entries(value);
-  return entries.length <= 32 && entries.every(([, item]) => isProtocolExtensionValueAtDepth(item, depth + 1));
-}
-
-function isProtocolExtensionValueAtDepth(value: unknown, depth: number): boolean {
-  if (value === null) {
-    return true;
-  }
-  switch (typeof value) {
-    case "string":
-    case "number":
-    case "boolean":
-      return true;
-    default:
-      return isJsonSafeProtocolExtension(value, depth);
-  }
-}
-
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

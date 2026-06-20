@@ -5,6 +5,7 @@ import type {
   ProviderProtocolProfileId,
 } from "../../domain/config/index.js";
 import type { ModelReasoningOutputProjection } from "../../domain/intelligence/index.js";
+import { asRecord, isPlainRecord } from "./provider-value-utils.js";
 
 export type OpenAICompatibleChatDialect = {
   readonly profileId: ProviderProtocolProfileId;
@@ -397,12 +398,4 @@ function possibleTagSuffixLength(value: string, tag: string): number {
 
 function stringValue(value: unknown): string {
   return typeof value === "string" ? value : "";
-}
-
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function asRecord(value: unknown): Record<string, unknown> {
-  return isPlainRecord(value) ? value : {};
 }

@@ -1,3 +1,5 @@
+import { asRecord } from "./provider-value-utils.js";
+
 export type FetchLike = (
   url: string,
   init: {
@@ -124,11 +126,4 @@ function encodeChunk(value: unknown): Uint8Array {
 
 function isAsyncIterable(value: unknown): value is AsyncIterable<unknown> {
   return typeof value === "object" && value !== null && Symbol.asyncIterator in value;
-}
-
-function asRecord(value: unknown): Record<string, unknown> {
-  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
-    return value as Record<string, unknown>;
-  }
-  return {};
 }

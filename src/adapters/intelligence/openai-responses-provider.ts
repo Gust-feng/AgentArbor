@@ -1,7 +1,6 @@
 import OpenAI from "openai";
 import type { OpenAIModelRequestSettings } from "../../domain/config/index.js";
 import type {
-  ModelFailureKind,
   ModelOutputDelta,
   ModelProvider,
   ModelRequest,
@@ -24,6 +23,11 @@ import {
   normalizeOpenAIResponsesStreamResponse,
 } from "./openai-responses-response.js";
 import { providerErrorMessage } from "./provider-error-message.js";
+import {
+  classifyProviderFailureKind,
+  isRetryableProviderFailureStatus,
+  isTimeoutLikeError,
+} from "./provider-failure-classification.js";
 import { asRecord } from "./provider-value-utils.js";
 
 export type OpenAIResponsesProviderOptions = {
@@ -139,12 +143,13 @@ export class OpenAIResponsesProvider implements ModelProvider {
           protocolKind: this.protocolKind,
           model: this.model,
           outputKind: request.outputContract.outputKind,
-          failureKind: failureKindForStatus(status),
-          retryable: status === 429 || status >= 500,
+          failureKind: classifyProviderFailureKind(status),
+          retryable: isRetryableProviderFailureStatus(status),
           message: providerErrorMessage(error, `HTTP ${status}`),
         });
       }
 
+      const timeoutLike = isTimeoutLikeError(lastTransportError ?? error);
       return createFailedModelResponse({
         requestId: request.requestId,
         providerId: this.providerId,
@@ -152,11 +157,11 @@ export class OpenAIResponsesProvider implements ModelProvider {
         protocolKind: this.protocolKind,
         model: this.model,
         outputKind: request.outputContract.outputKind,
-        failureKind: timeoutLikeError(error) ? "provider_timeout" : "provider_network",
+        failureKind: timeoutLike ? "provider_timeout" : "provider_network",
         retryable: true,
         message: providerErrorMessage(
           lastTransportError ?? error,
-          timeoutLikeError(error) ? "Request timed out." : "Network request failed."
+          timeoutLike ? "Request timed out." : "Network request failed."
         ),
       });
     }
@@ -195,28 +200,8 @@ function trimTrailingSlashes(value: string): string {
   return value.replace(/\/+$/, "");
 }
 
-function failureKindForStatus(status: number): ModelFailureKind {
-  if (status === 401 || status === 403) {
-    return "provider_auth";
-  }
-  if (status === 429) {
-    return "provider_rate_limit";
-  }
-  if (status === 408 || status === 504) {
-    return "provider_timeout";
-  }
-  return "provider_response";
-}
-
 function statusFromError(error: unknown): number | undefined {
   const record = asRecord(error);
   const status = record.status ?? record.statusCode;
   return typeof status === "number" && Number.isFinite(status) ? status : undefined;
-}
-
-function timeoutLikeError(error: unknown): boolean {
-  const record = asRecord(error);
-  const name = typeof record.name === "string" ? record.name.toLowerCase() : "";
-  const message = typeof record.message === "string" ? record.message.toLowerCase() : "";
-  return name.includes("timeout") || message.includes("timeout") || message.includes("timed out");
 }

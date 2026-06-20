@@ -653,6 +653,67 @@ test("OpenAI Responses adapter returns provider_rate_limit failure on 429", asyn
   assert.equal(response.failure?.message, "Rate limit exceeded");
 });
 
+test("OpenAI Responses adapter classifies 408 response as provider_timeout", async () => {
+  const fetch: FetchLike = async () => ({
+    ok: false,
+    status: 408,
+    json: async () => ({ error: { message: "Request Timeout" } }),
+  });
+  const provider = new OpenAIResponsesProvider({
+    baseUrl: "https://api.openai.com",
+    apiKey: "sk-test-key",
+    model: "gpt-4.1",
+    fetch,
+  });
+
+  const response = await provider.complete(createValidModelRequest());
+
+  assert.equal(response.status, "failed");
+  assert.equal(response.failure?.kind, "provider_timeout");
+  assert.equal(response.failure?.retryable, true);
+  assert.equal(response.failure?.message, "Request Timeout");
+});
+
+test("OpenAI Responses adapter classifies 504 response as provider_timeout", async () => {
+  const fetch: FetchLike = async () => ({
+    ok: false,
+    status: 504,
+    json: async () => ({ error: { message: "Gateway Timeout" } }),
+  });
+  const provider = new OpenAIResponsesProvider({
+    baseUrl: "https://api.openai.com",
+    apiKey: "sk-test-key",
+    model: "gpt-4.1",
+    fetch,
+  });
+
+  const response = await provider.complete(createValidModelRequest());
+
+  assert.equal(response.status, "failed");
+  assert.equal(response.failure?.kind, "provider_timeout");
+  assert.equal(response.failure?.retryable, true);
+  assert.equal(response.failure?.message, "Gateway Timeout");
+});
+
+test("OpenAI Responses adapter normalizes timeout-like transport error as provider_timeout", async () => {
+  const fetch: FetchLike = async () => {
+    throw new Error("The user aborted a request, Request timed out.");
+  };
+  const provider = new OpenAIResponsesProvider({
+    baseUrl: "https://api.openai.com",
+    apiKey: "sk-test-key",
+    model: "gpt-4.1",
+    fetch,
+  });
+
+  const response = await provider.complete(createValidModelRequest());
+
+  assert.equal(response.status, "failed");
+  assert.equal(response.failure?.kind, "provider_timeout");
+  assert.equal(response.failure?.retryable, true);
+  assert.equal(response.failure?.message.includes("timed out"), true);
+});
+
 test("OpenAI Responses adapter preserves plain text provider errors", async () => {
   const fetch: FetchLike = async () => ({
     ok: false,

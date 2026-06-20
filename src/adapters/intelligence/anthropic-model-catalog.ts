@@ -4,10 +4,12 @@ import type {
   SanitizedModelProviderConfig,
 } from "../../domain/config/index.js";
 import { nowIso } from "../../kernel/id.js";
-import type {
-  ModelCatalogFetchLike,
-  ModelCatalogFetchLikeResponse,
-} from "./openai-compatible-model-catalog.js";
+import { asRecord, stringOrUndefined } from "./provider-value-utils.js";
+import {
+  type ModelCatalogFetchLike,
+  joinUrlPath,
+  resolveGlobalModelCatalogFetch,
+} from "./model-catalog-shared.js";
 
 export type AnthropicModelCatalogOptions = {
   readonly profile: Pick<SanitizedModelProviderConfig, "profileId" | "label" | "baseUrl">;
@@ -69,38 +71,6 @@ function parseModels(raw: unknown): readonly ModelProviderModelCatalogItem[] {
     .sort((left, right) => left.id.localeCompare(right.id));
 }
 
-function resolveGlobalModelCatalogFetch(): ModelCatalogFetchLike | undefined {
-  const fetchImpl = globalThis.fetch;
-  if (typeof fetchImpl !== "function") {
-    return undefined;
-  }
-  return async (url, init): Promise<ModelCatalogFetchLikeResponse> => {
-    const response = await fetchImpl(url, {
-      method: init.method,
-      headers: init.headers,
-      signal: init.signal,
-    });
-    return {
-      ok: response.ok,
-      status: response.status,
-      json: () => response.json() as Promise<unknown>,
-      text: () => response.text(),
-    };
-  };
-}
-
 function normalizeAnthropicBaseUrl(value: string): string {
   return value.replace(/\/+$/, "");
-}
-
-function joinUrlPath(baseUrl: string, path: string): string {
-  return `${baseUrl.replace(/\/+$/, "")}/${path.replace(/^\/+/, "")}`;
-}
-
-function stringOrUndefined(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
-}
-
-function asRecord(value: unknown): Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }

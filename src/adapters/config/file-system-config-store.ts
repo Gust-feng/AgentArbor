@@ -1,4 +1,5 @@
 import { promises as fs } from "node:fs";
+import { randomUUID } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import type {
@@ -7,6 +8,7 @@ import type {
   NormalSettingsStore,
   SecretMetadata,
 } from "../../domain/config/index.js";
+import { asRecord } from "../intelligence/provider-value-utils.js";
 
 export type AgentArborConfigDirectoryEnvironment = Readonly<Record<string, string | undefined>>;
 
@@ -34,11 +36,7 @@ export class FileSystemNormalSettingsStore implements NormalSettingsStore {
   }
 
   async writeSettings(settings: AgentArborLocalSettings): Promise<void> {
-    await fs.mkdir(this.configDirectory, { recursive: true });
-    await fs.writeFile(this.settingsPath, `${JSON.stringify(settings, null, 2)}\n`, {
-      encoding: "utf8",
-      mode: 0o600,
-    });
+    await writeJsonFileAtomically(this.settingsPath, settings);
   }
 }
 
@@ -71,11 +69,7 @@ export class FileSystemLocalDevSecretStore implements LocalDevSecretStore {
       },
       updatedAt,
     };
-    await fs.mkdir(this.configDirectory, { recursive: true });
-    await fs.writeFile(this.secretsPath, `${JSON.stringify(next, null, 2)}\n`, {
-      encoding: "utf8",
-      mode: 0o600,
-    });
+    await writeJsonFileAtomically(this.secretsPath, next);
     return { configured: true, updatedAt };
   }
 
@@ -93,11 +87,7 @@ export class FileSystemLocalDevSecretStore implements LocalDevSecretStore {
       secrets: remainingSecrets,
       updatedAt,
     };
-    await fs.mkdir(this.configDirectory, { recursive: true });
-    await fs.writeFile(this.secretsPath, `${JSON.stringify(next, null, 2)}\n`, {
-      encoding: "utf8",
-      mode: 0o600,
-    });
+    await writeJsonFileAtomically(this.secretsPath, next);
     return { configured: false };
   }
 
@@ -147,6 +137,25 @@ async function readJsonFile(filePath: string): Promise<unknown | undefined> {
   }
 }
 
+async function writeJsonFileAtomically(filePath: string, value: unknown): Promise<void> {
+  const directory = path.dirname(filePath);
+  const tempPath = path.join(directory, `.${path.basename(filePath)}.${process.pid}.${randomUUID()}.tmp`);
+  const payload = `${JSON.stringify(value, null, 2)}\n`;
+
+  await fs.mkdir(directory, { recursive: true });
+  try {
+    await fs.writeFile(tempPath, payload, { encoding: "utf8", mode: 0o600 });
+    await fs.rename(tempPath, filePath);
+  } catch (error) {
+    try {
+      await fs.rm(tempPath, { force: true });
+    } catch {
+      // Keep the original persistence failure visible to the caller.
+    }
+    throw error;
+  }
+}
+
 function parseSecretsFile(raw: unknown): LocalDevSecretsFile {
   const record = asRecord(raw);
   const rawSecrets = asRecord(record.secrets);
@@ -172,13 +181,6 @@ function optionalString(value: unknown): string | undefined {
 
 function nonBlank(value: string | undefined): string | undefined {
   return value !== undefined && value.trim().length > 0 ? value.trim() : undefined;
-}
-
-function asRecord(value: unknown): Record<string, unknown> {
-  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
-    return value as Record<string, unknown>;
-  }
-  return {};
 }
 
 function isFileNotFound(error: unknown): boolean {

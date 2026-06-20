@@ -4,6 +4,7 @@ import type {
   ToolDefinitionMetadata,
   ToolExecutionBroker,
   ToolExecutor,
+  ToolFileDisplayOperation,
   ToolOperationType,
   ToolRiskLevel,
   ToolRuntimeHint,
@@ -38,6 +39,7 @@ export type ToolCatalogItem = {
   readonly riskLevel: ToolRiskLevel;
   readonly riskLabel: string;
   readonly operationType: ToolOperationType;
+  readonly fileOperation?: ToolFileDisplayOperation;
   readonly operationLabel: string;
   readonly requiresConfirmation: boolean;
   readonly confirmationLabel: string;
@@ -114,6 +116,7 @@ export class ToolRegistry {
           riskLevel: metadata.riskLevel,
           riskLabel: presentation.riskLabel,
           operationType: metadata.operationType,
+          fileOperation: metadata.fileOperation,
           operationLabel: presentation.operationLabel,
           requiresConfirmation: metadata.requiresConfirmation,
           confirmationLabel: presentation.confirmationLabel,
@@ -161,6 +164,7 @@ export function requireToolMetadata(definition: ToolDefinition): ToolDefinitionM
     category: metadata.category,
     riskLevel: metadata.riskLevel,
     operationType: metadata.operationType,
+    fileOperation: metadata.fileOperation,
     requiresConfirmation: metadata.requiresConfirmation,
     visibleResultPolicy: {
       userVisible: metadata.visibleResultPolicy.userVisible,

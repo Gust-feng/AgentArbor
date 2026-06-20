@@ -362,6 +362,7 @@ export function createLocalDeleteFileTool(rootDirectory = DEFAULT_LOCAL_WORKSPAC
         category: "filesystem",
         riskLevel: "medium",
         operationType: "read-write",
+        fileOperation: "delete",
         requiresConfirmation: false,
         visibleResultPolicy: {
           userVisible: "summary-only",

@@ -58,6 +58,7 @@ export function resolveRunCapabilities(input: ResolveRunCapabilitiesInput): RunC
       availability: tool.availability,
       riskLevel: tool.riskLevel,
       operationType: tool.operationType,
+      fileOperation: tool.fileOperation,
       requiresConfirmation: tool.requiresConfirmation,
       ...(input.snapshot.toolConfirmation === undefined
         ? {}
@@ -138,9 +139,7 @@ function capabilityPlanForResolvedRun(input: {
         tool.operationType === "execute"
       ),
       canWriteWorkspace: visibleTools.some((tool) => tool.operationType === "read-write"),
-      canDeleteWorkspace: visibleTools.some((tool) =>
-        tool.operationType === "read-write" && /(?:^|_)delete(?:_|$)/.test(tool.name)
-      ),
+      canDeleteWorkspace: visibleTools.some((tool) => tool.fileOperation === "delete"),
       canExecuteCommands: visibleTools.some((tool) => tool.operationType === "execute"),
     },
     uiDisplay: {

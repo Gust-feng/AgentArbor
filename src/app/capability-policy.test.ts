@@ -48,6 +48,41 @@ test("run capability policy hides disabled, unavailable, denied, and mode-intern
   assert.match(resolution.warnings.join("\n"), /隐藏/);
 });
 
+test("run capability policy derives workspace delete capability from the explicit fileOperation contract", () => {
+  const snapshot = capabilitySnapshot([
+    tool("write_file", "read-write"),
+    tool("delete_file", "read-write", { fileOperation: "delete" }),
+  ]);
+
+  const resolution = resolveRunCapabilities({
+    snapshot,
+    goal: "edit and delete files",
+    agentDefinition: DESKTOP_ROOT_AGENT,
+  });
+
+  assert.equal(
+    resolution.toolExposures.find((item) => item.name === "delete_file")?.fileOperation,
+    "delete"
+  );
+  assert.equal(resolution.capabilityPlan.fileOperations?.canWriteWorkspace, true);
+  assert.equal(resolution.capabilityPlan.fileOperations?.canDeleteWorkspace, true);
+});
+
+test("run capability policy does not infer delete capability without an explicit delete contract", () => {
+  const snapshot = capabilitySnapshot([
+    tool("write_file", "read-write"),
+  ]);
+
+  const resolution = resolveRunCapabilities({
+    snapshot,
+    goal: "edit files only",
+    agentDefinition: DESKTOP_ROOT_AGENT,
+  });
+
+  assert.equal(resolution.capabilityPlan.fileOperations?.canWriteWorkspace, true);
+  assert.equal(resolution.capabilityPlan.fileOperations?.canDeleteWorkspace, false);
+});
+
 test("run capability policy hides every tool when the model cannot call tools", () => {
   const snapshot = capabilitySnapshot([
     tool("search", "read-only"),

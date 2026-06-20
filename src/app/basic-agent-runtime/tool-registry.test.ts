@@ -33,6 +33,8 @@ test("desktop-basic tool registry exposes catalog and allowed tools from scoped 
   assert.equal(catalog.tools.find((tool) => tool.name === "create_file")?.requiresConfirmation, false);
   assert.equal(catalog.tools.find((tool) => tool.name === "edit_file")?.requiresConfirmation, false);
   assert.equal(catalog.tools.find((tool) => tool.name === "delete_file")?.requiresConfirmation, false);
+  assert.equal(catalog.tools.find((tool) => tool.name === "delete_file")?.fileOperation, "delete");
+  assert.equal(catalog.tools.find((tool) => tool.name === "write_file")?.fileOperation, undefined);
   assert.equal(catalog.tools.find((tool) => tool.name === "run_command")?.operationType, "execute");
   assert.equal(catalog.tools.find((tool) => tool.name === "run_command")?.enabledByDefault, false);
   assert.equal(catalog.tools.find((tool) => tool.name === "shell_command")?.enabledByDefault, true);

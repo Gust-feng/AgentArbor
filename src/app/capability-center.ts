@@ -200,6 +200,7 @@ function capabilityToolCatalogItem(tool: ToolCatalogItem): CapabilityToolCatalog
     riskLevel: tool.riskLevel,
     riskLabel: tool.riskLabel,
     operationType: tool.operationType,
+    fileOperation: tool.fileOperation,
     operationLabel: tool.operationLabel,
     requiresConfirmation: tool.requiresConfirmation,
     confirmationLabel: tool.confirmationLabel,

@@ -88,6 +88,17 @@ export type ToolDefinitionMetadata = {
   readonly requiresConfirmation: boolean;
   readonly visibleResultPolicy: ToolVisibleResultPolicy;
   readonly runtimeHints?: readonly ToolRuntimeHint[];
+  /**
+   * 文件系统操作工具显式声明的文件操作子类型（create/write/append/edit/delete）。
+   *
+   * 这是工具自身声明的显式能力契约，用于工作区能力判定（例如是否具备删除能力），
+   * 取代按工具名正则猜测。只有真正执行文件操作的 builtin 工具才声明该字段；
+   * 非文件工具（搜索、命令、HTTP、MCP 等）不声明，判定时按 undefined 处理。
+   *
+   * 注意：`operationType` 是粗粒度读写执行分类，无法区分“删除”这类子能力；
+   * 删除工具的 `operationType` 仍是 "read-write"（删除属于写操作），删除子能力由本字段表达。
+   */
+  readonly fileOperation?: ToolFileDisplayOperation;
 };
 
 export type ToolSafeProjection = {

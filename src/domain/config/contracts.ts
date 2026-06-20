@@ -1,6 +1,7 @@
 import type {
   ToolCategory,
   ToolConfirmationPolicy,
+  ToolFileDisplayOperation,
   ToolOperationType,
   ToolRiskLevel,
   ToolRuntimeHint,
@@ -364,6 +365,7 @@ export type CapabilityToolCatalogItem = {
   readonly riskLevel: ToolRiskLevel;
   readonly riskLabel: string;
   readonly operationType: ToolOperationType;
+  readonly fileOperation?: ToolFileDisplayOperation;
   readonly operationLabel: string;
   readonly requiresConfirmation: boolean;
   readonly confirmationLabel: string;
@@ -457,6 +459,7 @@ export type RunToolExposure = {
   readonly availability: CapabilityToolCatalogItem["availability"];
   readonly riskLevel: ToolRiskLevel;
   readonly operationType: ToolOperationType;
+  readonly fileOperation?: ToolFileDisplayOperation;
   readonly requiresConfirmation: boolean;
   readonly confirmationPolicy?: ToolConfirmationPolicy;
   readonly reason: string;

@@ -678,16 +678,16 @@ html[data-style="default"] .agent-activity {
 }
 
 html[data-style="default"] .agent-activity-step {
-  border-radius: var(--radius-md);
+  border-radius: 0;
 }
 
 html[data-style="default"] .agent-activity-step:hover {
-  background: color-mix(in oklch, var(--tool-accent, var(--accent)) 5%, var(--surface));
+  background: transparent;
 }
 
 html[data-style="default"] .agent-activity-step[data-current="true"] {
-  background: color-mix(in oklch, var(--tool-accent, var(--accent)) 7%, var(--surface));
-  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--tool-accent, var(--accent)) 10%, transparent);
+  background: transparent;
+  box-shadow: none;
 }
 
 html[data-style="default"] .agent-activity-marker {

@@ -33,10 +33,18 @@ export function isLowValueOrdinaryAgentNote(value: string | undefined): boolean 
   const text = value?.trim() ?? "";
   return text.length === 0 ||
     text === "等待模型输出。" ||
+    isGenericOrdinaryProgressNote(text) ||
     isStaleModelProgressSummary(text) ||
     staleToolProgressNote(text) ||
     text === "Intelligence Channel requested model output." ||
     text === "Intelligence Channel completed model output validation.";
+}
+
+function isGenericOrdinaryProgressNote(value: string): boolean {
+  const normalized = value.replace(/[。.!！?？；;:：、，,\s]/g, "");
+  return normalized === "任务处理中" ||
+    normalized === "正在整理结果" ||
+    normalized === "正在整理结果材料";
 }
 
 function staleToolProgressNote(value: string): boolean {

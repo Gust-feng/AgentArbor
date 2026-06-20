@@ -18,6 +18,25 @@ test("activity projection preserves visible thinking even when the text looks li
   assert.deepEqual(projected.map((item) => item.nodeId), ["thinking"]);
 });
 
+test("panel transcript nodes drop generic ordinary processing notes", () => {
+  const nodes = createPanelTranscriptNodes([
+    panelEvent({
+      eventId: "run-1:event:1:agent.note.completed",
+      sequence: 1,
+      type: "agent.note.completed",
+      summary: "任务处理中。",
+    }),
+    panelEvent({
+      eventId: "run-1:event:2:agent.note.completed",
+      sequence: 2,
+      type: "agent.note.completed",
+      summary: "正在整理结果。",
+    }),
+  ]);
+
+  assert.deepEqual(nodes, []);
+});
+
 test("timeline projection keeps thinking and excludes answer nodes from the activity rail", () => {
   const projected = timelineVisibleNodes([
     node({ nodeId: "answer", kind: "answer", eventType: "final.result", sequence: 4, summary: "最终回答" }),

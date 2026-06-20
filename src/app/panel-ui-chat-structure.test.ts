@@ -38,6 +38,8 @@ test("panel UI chat and transcript modules stay presentation-focused", async () 
     richTextStyles,
     chatFeedbackStyles,
     transcriptStyles,
+    defaultStyle,
+    glassStyle,
     transcriptConfirmationStyles,
     chatResultStyles,
   ] = await Promise.all([
@@ -74,6 +76,8 @@ test("panel UI chat and transcript modules stay presentation-focused", async () 
     readPanelUiStyle("rich-text.css"),
     readPanelUiStyle("chat-feedback.css"),
     readPanelUiStyle("transcript.css"),
+    readPanelUiStyle("style-default.css"),
+    readPanelUiStyle("style-glass.css"),
     readPanelUiStyle("transcript-confirmation.css"),
     readPanelUiStyle("chat-results.css"),
   ]);
@@ -192,6 +196,8 @@ test("panel UI chat and transcript modules stay presentation-focused", async () 
   assert.equal(transcriptTimeline.includes("agent-activity-disclosure"), true);
   assert.equal(transcriptTimeline.includes("agent-activity-expanded-detail"), true);
   assert.equal(transcriptTimeline.includes("expandedDetail"), true);
+  assert.equal(transcriptTimeline.includes("function shouldRenderExpandedDetail"), true);
+  assert.equal(transcriptTimeline.includes('item.tone === "thinking" || item.tone === "narration" || item.tone === "system"'), true);
   assert.equal(transcriptTimeline.includes("timelineConfirmationProjection"), false);
   assert.equal(transcriptTimeline.includes("confirmationForNode"), false);
   assert.equal(transcriptTimeline.includes("currentConfirmationNode"), false);
@@ -535,6 +541,10 @@ test("panel UI chat and transcript modules stay presentation-focused", async () 
   assert.equal(transcriptStyles.includes(".agent-activity-label"), true);
   assert.equal(transcriptStyles.includes(".agent-activity-detail"), true);
   assert.equal(transcriptStyles.includes(".agent-activity-expanded-detail"), true);
+  assert.match(transcriptStyles, /\.agent-activity-step\[data-current="true"\]\s*\{[\s\S]*?background:\s*transparent;/);
+  assert.match(transcriptStyles, /\.agent-activity-label\s*\{[\s\S]*?background:\s*transparent;/);
+  assert.match(defaultStyle, /html\[data-style="default"\] \.agent-activity-step\[data-current="true"\]\s*\{[\s\S]*?background:\s*transparent;[\s\S]*?box-shadow:\s*none;/);
+  assert.match(glassStyle, /html\[data-style="glass"\] \.agent-activity-step\[data-current="true"\]\s*\{[\s\S]*?background:\s*transparent;[\s\S]*?box-shadow:\s*none;/);
   assert.equal(transcriptStyles.includes(".agent-workline-current"), false);
   assert.equal(transcriptStyles.includes(".agent-workline-label"), false);
   assert.equal(transcriptStyles.includes(".agent-workline-detail"), false);

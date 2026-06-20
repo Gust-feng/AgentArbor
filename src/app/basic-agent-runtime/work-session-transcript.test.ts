@@ -79,6 +79,25 @@ test("work session transcript keeps one reasoning node and one deduplicated body
   assert.equal(body?.text, "先说明");
 });
 
+test("work session transcript drops generic processing notes", () => {
+  const nodes = transcriptNodesFromRunEvents([
+    event({
+      id: "run-1:event:1:agent.note.completed",
+      sequence: 1,
+      type: "agent.note.completed",
+      summary: "任务处理中。",
+    }),
+    event({
+      id: "run-1:event:2:agent.note.completed",
+      sequence: 2,
+      type: "agent.note.completed",
+      summary: "正在整理结果。",
+    }),
+  ], undefined);
+
+  assert.deepEqual(nodes, []);
+});
+
 function event(input: {
   readonly id: string;
   readonly sequence: number;

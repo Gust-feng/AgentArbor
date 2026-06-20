@@ -188,7 +188,7 @@ function activityMetricKind(item: ActivityItem): ActivityMetricKind | undefined 
 function ActivityLine({ item }: { readonly item: ActivityItem }): React.ReactElement {
   const toolKind = item.toolKind ?? resolveActivityToolKind(item);
   const Icon = TOOL_KIND_ICON[toolKind] ?? Sparkles;
-  const hasExpandedDetail = (item.expandedSections?.length ?? 0) > 0 || item.copy.expandedDetail !== undefined;
+  const hasExpandedDetail = shouldRenderExpandedDetail(item);
   const line = (
     <>
       <span className="agent-activity-label" aria-hidden="true">
@@ -223,6 +223,16 @@ function ActivityLine({ item }: { readonly item: ActivityItem }): React.ReactEle
       {line}
     </p>
   );
+}
+
+function shouldRenderExpandedDetail(item: ActivityItem): boolean {
+  const sections = item.expandedSections ?? [];
+  const hasStructuredSections = sections.some((section) => section.title !== "详情");
+  if (hasStructuredSections) return true;
+  if (item.tone === "thinking" || item.tone === "narration" || item.tone === "system") {
+    return false;
+  }
+  return sections.length > 0 || item.copy.expandedDetail !== undefined;
 }
 
 function ExpandedDetailPanel({ item }: { readonly item: ActivityItem }): React.ReactElement {

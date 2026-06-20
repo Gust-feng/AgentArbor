@@ -6,6 +6,7 @@ import test from "node:test";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { z } from "zod";
+import { validateModelVisibleToolContract } from "../../domain/tools/index.js";
 import { McpClientWrapper } from "./mcp-client.js";
 import { createMcpToolExecutor } from "./mcp-tool-adapter.js";
 import { McpManager } from "./mcp-manager.js";
@@ -170,6 +171,9 @@ test("createMcpToolExecutor creates correct namespaced ToolExecutor", async () =
   assert.equal(executor.definition.metadata?.category, "mcp");
   assert.equal(executor.definition.metadata?.riskLevel, "medium");
   assert.equal(executor.definition.metadata?.operationType, "execute");
+  const validation = validateModelVisibleToolContract(executor.definition);
+  assert.equal(validation.ok, true, validation.missing.join(", "));
+  assert.equal(executor.definition.modelContract?.runtimeHints?.some((hint) => hint.value === "my-server"), true);
 
   await client.disconnect();
 });

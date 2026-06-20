@@ -1,6 +1,5 @@
 import type { McpServerSettings } from "../../domain/config/index.js";
 import type { ToolExecutor } from "../../domain/tools/index.js";
-import { redactSensitiveText } from "../../kernel/redaction.js";
 import type { McpClientConfig, McpReferenceInfo, McpToolInfo } from "./mcp-client.js";
 import { McpClientWrapper } from "./mcp-client.js";
 import { createMcpToolExecutor } from "./mcp-tool-adapter.js";
@@ -128,7 +127,7 @@ export class McpManager {
     return [...this.entries.values()].map((entry) => ({
       serverId: entry.config.serverId,
       status: entry.status,
-      errorSummary: entry.errorMessage === undefined ? undefined : safeErrorSummary(entry.errorMessage),
+      errorSummary: entry.errorMessage,
       lastConnectedAt: entry.lastConnectedAt,
       toolNames: entry.tools.map((tool) => tool.name),
     }));
@@ -173,7 +172,7 @@ export class McpManager {
     } catch (error) {
       await entry.client.disconnect().catch(() => undefined);
       entry.status = "error";
-      entry.errorMessage = safeErrorSummary(error instanceof Error ? error.message : "Unknown connection error.");
+      entry.errorMessage = mcpErrorMessage(error instanceof Error ? error.message : "Unknown connection error.");
       entry.tools = [];
     }
   }
@@ -279,9 +278,7 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: s
   }
 }
 
-function safeErrorSummary(message: string): string {
-  const redacted = redactSensitiveText(message)
-    .replace(/\s+/g, " ")
-    .trim();
-  return redacted.length <= 500 ? redacted : `${redacted.slice(0, 499)}…`;
+function mcpErrorMessage(message: string): string {
+  const normalized = message.trim();
+  return normalized.length === 0 ? "Unknown connection error." : normalized;
 }

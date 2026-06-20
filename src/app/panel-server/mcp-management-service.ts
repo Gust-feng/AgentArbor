@@ -1,7 +1,6 @@
 import type { McpReferenceInfo } from "../../adapters/mcp/index.js";
 import { ensureManagedMcpExecutable, installMcpExecutable, McpManager, resolveMcpExecutable } from "../../adapters/mcp/index.js";
 import type { McpServerSettings } from "../../domain/config/index.js";
-import { redactSensitiveText } from "../../kernel/redaction.js";
 import type { CapabilityCenter } from "../capability-center.js";
 import type { ConfigCenter } from "../config-center.js";
 import { PanelHttpError } from "./http-utils.js";
@@ -285,7 +284,7 @@ export async function listPanelMcpReferences(
       resourceTemplates: references?.resourceTemplates ?? [],
     };
   } catch (error) {
-    const errorSummary = safePanelMcpErrorSummary(error instanceof Error ? error.message : "MCP prompts/resources 获取失败。");
+    const errorSummary = panelMcpErrorMessage(error instanceof Error ? error.message : "MCP prompts/resources 获取失败。");
     return {
       ok: false,
       errorCode: classifyMcpConnectionError(errorSummary, server),
@@ -430,9 +429,7 @@ function hasCompleteMcpRuntimeConfig(server: McpServerSettings): boolean {
   return server.url !== undefined && server.url.trim().length > 0;
 }
 
-function safePanelMcpErrorSummary(message: string): string {
-  const redacted = redactSensitiveText(message)
-    .replace(/\s+/g, " ")
-    .trim();
-  return redacted.length <= 500 ? redacted : `${redacted.slice(0, 499)}…`;
+function panelMcpErrorMessage(message: string): string {
+  const normalized = message.trim();
+  return normalized.length === 0 ? "MCP prompts/resources 获取失败。" : normalized;
 }

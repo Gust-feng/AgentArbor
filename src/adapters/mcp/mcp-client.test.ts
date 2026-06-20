@@ -44,6 +44,28 @@ function createTestServer() {
       content: [{ type: "text" as const, text: `Result: ${args.query}` }],
     })
   );
+  server.registerTool(
+    "destructive_tool",
+    {
+      description: "Mutates external state",
+      inputSchema: { value: z.string() },
+      annotations: { destructiveHint: true, title: "Destructive" },
+    },
+    async (args) => ({
+      content: [{ type: "text" as const, text: `Mutated: ${args.value}` }],
+    })
+  );
+  server.registerTool(
+    "open_world_tool",
+    {
+      description: "Submits data outside the local workspace",
+      inputSchema: { value: z.string() },
+      annotations: { openWorldHint: true, title: "Open World" },
+    },
+    async (args) => ({
+      content: [{ type: "text" as const, text: `Submitted: ${args.value}` }],
+    })
+  );
   return server;
 }
 
@@ -85,7 +107,7 @@ test("McpClientWrapper listTools returns expected format", async () => {
   const { client } = await createConnectedPair();
 
   const tools = await client.listTools();
-  assert.equal(tools.length, 3);
+  assert.equal(tools.length, 5);
 
   const echo = tools.find((t) => t.name === "echo");
   assert.ok(echo);
@@ -157,7 +179,10 @@ test("createMcpToolExecutor infers read-only metadata from annotations", async (
 
   const tools = await client.listTools();
   const readOnlyTool = tools.find((t) => t.name === "read_only_tool")!;
-  const executor = createMcpToolExecutor(client, readOnlyTool, "my-server", "unsafe_only");
+  const executor = createMcpToolExecutor(client, readOnlyTool, "my-server", {
+    confirmationMode: "unsafe_only",
+    autoApprovedTools: [],
+  });
 
   assert.equal(executor.definition.name, "my-server__read_only_tool");
   assert.equal(executor.definition.metadata?.category, "mcp");
@@ -168,16 +193,55 @@ test("createMcpToolExecutor infers read-only metadata from annotations", async (
   await client.disconnect();
 });
 
-test("createMcpToolExecutor does not make MCP tools confirmable in always mode", async () => {
+test("createMcpToolExecutor requires confirmation for unsafe MCP tools in unsafe_only mode", async () => {
   const { client } = await createConnectedPair();
 
   const tools = await client.listTools();
-  const readOnlyTool = tools.find((t) => t.name === "read_only_tool")!;
-  const executor = createMcpToolExecutor(client, readOnlyTool, "my-server", "always");
+  const destructiveTool = tools.find((t) => t.name === "destructive_tool")!;
+  const openWorldTool = tools.find((t) => t.name === "open_world_tool")!;
+  const destructiveExecutor = createMcpToolExecutor(client, destructiveTool, "my-server", {
+    confirmationMode: "unsafe_only",
+    autoApprovedTools: [],
+  });
+  const openWorldExecutor = createMcpToolExecutor(client, openWorldTool, "my-server", {
+    confirmationMode: "unsafe_only",
+    autoApprovedTools: [],
+  });
 
-  assert.equal(executor.definition.name, "my-server__read_only_tool");
-  assert.equal(executor.definition.metadata?.operationType, "read-only");
-  assert.equal(executor.definition.metadata?.requiresConfirmation, false);
+  assert.equal(destructiveExecutor.definition.metadata?.riskLevel, "high");
+  assert.equal(destructiveExecutor.definition.metadata?.operationType, "read-write");
+  assert.equal(destructiveExecutor.definition.metadata?.requiresConfirmation, true);
+  assert.equal(openWorldExecutor.definition.metadata?.riskLevel, "high");
+  assert.equal(openWorldExecutor.definition.metadata?.operationType, "external-submit");
+  assert.equal(openWorldExecutor.definition.metadata?.requiresConfirmation, true);
+
+  await client.disconnect();
+});
+
+test("createMcpToolExecutor honors always mode and autoApprovedTools", async () => {
+  const { client } = await createConnectedPair();
+
+  const tools = await client.listTools();
+  const echoTool = tools.find((t) => t.name === "echo")!;
+  const readOnlyTool = tools.find((t) => t.name === "read_only_tool")!;
+  const destructiveTool = tools.find((t) => t.name === "destructive_tool")!;
+  const echoExecutor = createMcpToolExecutor(client, echoTool, "my-server", {
+    confirmationMode: "always",
+    autoApprovedTools: [],
+  });
+  const readOnlyExecutor = createMcpToolExecutor(client, readOnlyTool, "my-server", {
+    confirmationMode: "always",
+    autoApprovedTools: ["read_only_tool"],
+  });
+  const destructiveExecutor = createMcpToolExecutor(client, destructiveTool, "my-server", {
+    confirmationMode: "always",
+    autoApprovedTools: ["my-server__destructive_tool"],
+  });
+
+  assert.equal(echoExecutor.definition.metadata?.operationType, "execute");
+  assert.equal(echoExecutor.definition.metadata?.requiresConfirmation, true);
+  assert.equal(readOnlyExecutor.definition.metadata?.requiresConfirmation, false);
+  assert.equal(destructiveExecutor.definition.metadata?.requiresConfirmation, false);
 
   await client.disconnect();
 });
@@ -327,9 +391,15 @@ test("McpManager separates discovered tools from exposed registry tools", async 
   await manager.connectAll();
 
   const discoveredTools = manager.getDiscoveredToolsForRegistry();
-  assert.equal(discoveredTools.length, 3);
+  assert.equal(discoveredTools.length, 5);
   const names = discoveredTools.map((t) => t.definition.name).sort();
-  assert.deepEqual(names, ["srv__echo", "srv__fail_tool", "srv__read_only_tool"]);
+  assert.deepEqual(names, [
+    "srv__destructive_tool",
+    "srv__echo",
+    "srv__fail_tool",
+    "srv__open_world_tool",
+    "srv__read_only_tool",
+  ]);
   assert.equal(discoveredTools[0].definition.metadata?.category, "mcp");
   assert.deepEqual(manager.getToolsForRegistry(), []);
 
@@ -521,7 +591,7 @@ test("McpManager filters MCP tools by enabledTools whitelist", async () => {
   await manager.disconnectAll();
 });
 
-test("McpManager auto-approves only tools listed in autoApprovedTools", async () => {
+test("McpManager applies MCP confirmationMode and autoApprovedTools", async () => {
   const server = createTestServer();
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await server.connect(serverTransport);
@@ -536,8 +606,8 @@ test("McpManager auto-approves only tools listed in autoApprovedTools", async ()
         envSecretRefs: [],
         confirmationMode: "always",
         toolExposureMode: "selected",
-        enabledTools: ["echo", "read_only_tool"],
-        autoApprovedTools: ["read_only_tool"],
+        enabledTools: ["echo", "read_only_tool", "destructive_tool", "open_world_tool"],
+        autoApprovedTools: ["read_only_tool", "srv__destructive_tool"],
         enabled: true,
         updatedAt: "2026-05-12T00:00:00.000Z",
       },
@@ -557,7 +627,9 @@ test("McpManager auto-approves only tools listed in autoApprovedTools", async ()
   const tools = manager.getToolsForRegistry();
   const byName = new Map(tools.map((tool) => [tool.definition.name, tool]));
   assert.equal(byName.get("srv__read_only_tool")?.definition.metadata?.requiresConfirmation, false);
-  assert.equal(byName.get("srv__echo")?.definition.metadata?.requiresConfirmation, false);
+  assert.equal(byName.get("srv__destructive_tool")?.definition.metadata?.requiresConfirmation, false);
+  assert.equal(byName.get("srv__echo")?.definition.metadata?.requiresConfirmation, true);
+  assert.equal(byName.get("srv__open_world_tool")?.definition.metadata?.requiresConfirmation, true);
 
   await manager.disconnectAll();
 });

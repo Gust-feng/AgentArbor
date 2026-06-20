@@ -106,7 +106,10 @@ export class McpManager {
           entry.client,
           tool,
           entry.config.serverId,
-          confirmationModeForTool(entry.config, tool.name)
+          {
+            confirmationMode: entry.config.confirmationMode,
+            autoApprovedTools: entry.config.autoApprovedTools,
+          }
         ));
       }
     }
@@ -244,18 +247,6 @@ function isToolEnabled(server: McpServerSettings, toolName: string): boolean {
     return true;
   }
   return server.enabledTools.includes(toolName) || server.enabledTools.includes(`${server.serverId}__${toolName}`);
-}
-
-function confirmationModeForTool(server: McpServerSettings, toolName: string): McpServerSettings["confirmationMode"] {
-  return mcpToolNameSetHas(server.autoApprovedTools, server.serverId, toolName)
-    ? "never"
-    : server.confirmationMode;
-}
-
-function mcpToolNameSetHas(tools: readonly string[], serverId: string, toolName: string): boolean {
-  const localName = toolName.startsWith(`${serverId}__`) ? toolName.slice(`${serverId}__`.length) : toolName;
-  const namespacedName = `${serverId}__${localName}`;
-  return tools.includes(localName) || tools.includes(namespacedName);
 }
 
 function hasCompleteRuntimeConfig(server: McpServerSettings): boolean {

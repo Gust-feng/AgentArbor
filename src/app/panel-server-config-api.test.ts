@@ -565,7 +565,7 @@ test("panel MCP management API tests connection, lists tools, updates whitelist,
           serverId: "docs",
           toolExposureMode: "selected",
           enabledTools: ["lookup"],
-      autoApprovedTools: [],
+          autoApprovedTools: [],
         },
       });
       const reloaded = await requestJson(server.url, "/api/config/mcp/reload", { method: "POST" });
@@ -594,7 +594,7 @@ test("panel MCP management API tests connection, lists tools, updates whitelist,
       assert.equal(narrowed.body.catalog[0].toolExposureMode, "selected");
       assert.deepEqual(narrowed.body.catalog[0].tools.map((tool: { name: string }) => tool.name), ["docs__lookup", "docs__mutate"]);
       assert.deepEqual(narrowed.body.catalog[0].exposedTools.map((tool: { name: string }) => tool.name), ["docs__lookup"]);
-      assert.equal(narrowed.body.catalog[0].exposedTools[0].requiresConfirmation, false);
+      assert.equal(narrowed.body.catalog[0].exposedTools[0].requiresConfirmation, true);
       assert.equal(reloaded.status, 200);
       assert.equal(reloaded.body.connected, 1);
       for (const response of [created, secret, rejectedSecret, tested, listed, references, narrowed, reloaded]) {

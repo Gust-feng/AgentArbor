@@ -4,19 +4,33 @@ import type {
   ToolExecutor,
   ToolInputSchema,
 } from "../../domain/tools/index.js";
-import type { McpClientWrapper, McpContentPart, McpToolInfo } from "./mcp-client.js";
 import type { McpConfirmationMode } from "../../domain/config/index.js";
+import type { McpClientWrapper, McpContentPart, McpToolInfo } from "./mcp-client.js";
 
 const MAX_MCP_TEXT_CHARS = 128_000;
+
+export type McpToolConfirmationStrategy = {
+  readonly confirmationMode: McpConfirmationMode;
+  readonly autoApprovedTools: readonly string[];
+};
+
+const DEFAULT_CONFIRMATION_STRATEGY: McpToolConfirmationStrategy = {
+  confirmationMode: "never",
+  autoApprovedTools: [],
+};
 
 export function createMcpToolExecutor(
   client: McpClientWrapper,
   tool: McpToolInfo,
   serverId: string,
-  _confirmationMode: McpConfirmationMode = "never"
+  confirmationStrategy: McpToolConfirmationStrategy = DEFAULT_CONFIRMATION_STRATEGY
 ): ToolExecutor {
   const namespacedName = `${serverId}__${tool.name}`;
-  const metadata = inferToolMetadataFromMcpAnnotations(tool.annotations) as ToolDefinitionMetadata;
+  const metadata = inferToolMetadataFromMcpAnnotations(tool.annotations, {
+    serverId,
+    toolName: tool.name,
+    confirmationStrategy,
+  }) as ToolDefinitionMetadata;
   const inputSchema: ToolInputSchema = {
     type: "object",
     properties: (tool.inputSchema.properties as Record<string, unknown>) ?? {},
@@ -28,9 +42,9 @@ export function createMcpToolExecutor(
       name: namespacedName,
       description: tool.description ?? `MCP tool: ${tool.name} from ${serverId}`,
       inputSchema,
-      metadata,
-    },
-  async execute(input: unknown, _context: ToolExecutionContext): Promise<unknown> {
+        metadata,
+      },
+    async execute(input: unknown, _context: ToolExecutionContext): Promise<unknown> {
       const result = await client.callTool(tool.name, input);
       if (result.isError === true) {
         const errorText = extractTextContent(result.content);
@@ -69,21 +83,68 @@ type McpToolMultimodalSummary =
       readonly bytesApprox: number;
     };
 
-function inferToolMetadataFromMcpAnnotations(annotations: McpToolInfo["annotations"]): ToolDefinitionMetadata {
+function inferToolMetadataFromMcpAnnotations(
+  annotations: McpToolInfo["annotations"],
+  options: {
+    readonly serverId: string;
+    readonly toolName: string;
+    readonly confirmationStrategy: McpToolConfirmationStrategy;
+  }
+): ToolDefinitionMetadata {
   const readOnly = annotations?.readOnlyHint === true;
   const destructive = annotations?.destructiveHint === true;
   const openWorld = annotations?.openWorldHint === true;
+  const riskLevel = destructive || openWorld ? "high" : readOnly ? "low" : "medium";
+  const operationType = openWorld ? "external-submit" : destructive ? "read-write" : readOnly ? "read-only" : "execute";
   return {
     category: "mcp",
-    riskLevel: readOnly ? "low" : destructive || openWorld ? "high" : "medium",
-    operationType: readOnly ? "read-only" : openWorld ? "external-submit" : destructive ? "read-write" : "execute",
-    requiresConfirmation: false,
+    riskLevel,
+    operationType,
+    requiresConfirmation: requiresMcpToolConfirmation({
+      serverId: options.serverId,
+      toolName: options.toolName,
+      confirmationStrategy: options.confirmationStrategy,
+      riskLevel,
+      operationType,
+    }),
     visibleResultPolicy: {
       userVisible: "summary-only",
       maxPreviewChars: 1_200,
       omitRawOutput: false,
     },
   };
+}
+
+function requiresMcpToolConfirmation(input: {
+  readonly serverId: string;
+  readonly toolName: string;
+  readonly confirmationStrategy: McpToolConfirmationStrategy;
+  readonly riskLevel: ToolDefinitionMetadata["riskLevel"];
+  readonly operationType: ToolDefinitionMetadata["operationType"];
+}): boolean {
+  if (mcpToolNameSetHas(
+    input.confirmationStrategy.autoApprovedTools,
+    input.serverId,
+    input.toolName
+  )) {
+    return false;
+  }
+  if (input.confirmationStrategy.confirmationMode === "never") {
+    return false;
+  }
+  if (input.confirmationStrategy.confirmationMode === "always") {
+    return true;
+  }
+  if (input.operationType === "read-only") {
+    return false;
+  }
+  return input.riskLevel === "high" || input.operationType === "external-submit";
+}
+
+function mcpToolNameSetHas(tools: readonly string[], serverId: string, toolName: string): boolean {
+  const localName = toolName.startsWith(`${serverId}__`) ? toolName.slice(`${serverId}__`.length) : toolName;
+  const namespacedName = `${serverId}__${localName}`;
+  return tools.includes(localName) || tools.includes(namespacedName);
 }
 
 function buildToolOutput(content: readonly McpContentPart[]): McpToolOutput {

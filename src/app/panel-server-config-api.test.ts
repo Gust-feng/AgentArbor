@@ -504,6 +504,7 @@ test("panel tool state and MCP config APIs return catalogs without raw MCP secre
         body: {
           serverId: "docs",
           label: "Docs",
+          description: "Documentation MCP service.",
           transport: "stdio",
           command: "node",
           args: ["server.js", "--token=secret-mcp-value"],
@@ -517,6 +518,7 @@ test("panel tool state and MCP config APIs return catalogs without raw MCP secre
       assert.equal(toolState.body.tools.catalog.allowedTools.includes("shell_command"), false);
       assert.equal(mcp.status, 200);
       assert.equal(mcp.body.catalog[0].serverId, "docs");
+      assert.equal(mcp.body.catalog[0].description, "Documentation MCP service.");
       assert.equal(mcp.body.catalog[0].envSecretRefCount, 1);
       assert.equal(mcp.text.includes("secret-mcp-value"), false);
       assert.equal(mcpList.text.includes("secret-mcp-value"), false);
@@ -590,10 +592,16 @@ test("panel MCP management API tests connection, lists tools, updates whitelist,
       assert.equal(tested.body.toolCount, 2);
       assert.deepEqual(tested.body.tools.map((tool: { name: string }) => tool.name).sort(), ["lookup", "mutate"]);
       assert.equal(typeof tested.body.connectedAt, "string");
+      assert.equal(tested.body.catalog[0].promptCount, 1);
+      assert.equal(tested.body.catalog[0].resourceCount, 1);
+      assert.equal(tested.body.catalog[0].resourceTemplateCount, 1);
+      assert.equal(typeof tested.body.catalog[0].referencesCachedAt, "string");
       assert.equal(listed.status, 200);
       assert.equal(listed.body.toolCount, 2);
       assert.equal(references.status, 200);
       assert.equal(references.body.ok, true);
+      assert.equal(references.body.cached, undefined);
+      assert.equal(references.body.cachedAt, undefined);
       assert.deepEqual(references.body.prompts.map((prompt: { name: string }) => prompt.name), ["draft_summary"]);
       assert.deepEqual(references.body.resources.map((resource: { name: string }) => resource.name), ["guide"]);
       assert.deepEqual(references.body.resourceTemplates.map((template: { name: string }) => template.name), ["guide-topic"]);

@@ -1,5 +1,7 @@
 import type {
   AgentArborLocalSettings,
+  McpCachedReferenceInfo,
+  McpCachedToolInfo,
   McpConfirmationMode,
   McpServerSettings,
   McpToolExposureMode,
@@ -86,9 +88,16 @@ export function parseMcpServers(value: unknown, updatedAt: string): AgentArborLo
     const autoApprovedTools = Array.isArray(record.autoApprovedTools)
       ? [...new Set(record.autoApprovedTools.filter((tool): tool is string => typeof tool === "string" && tool.trim().length > 0).map((tool) => tool.trim()))]
       : [];
+    const cachedTools = parseMcpCachedTools(record.cachedTools);
+    const cachedReferences = parseMcpCachedReferences(record.cachedReferences);
+    const referencesCachedAt =
+      optionalString(record.referencesCachedAt) ??
+      optionalString(record.lastConnectedAt) ??
+      (Object.keys(asRecord(record.cachedReferences)).length > 0 ? updatedAt : undefined);
     servers.push({
       serverId,
       label: optionalString(record.label) ?? serverId,
+      description: optionalString(record.description),
       transport,
       command: optionalString(record.command),
       args: sanitizeMcpArgs(Array.isArray(record.args) ? record.args.filter((arg): arg is string => typeof arg === "string") : []),
@@ -109,6 +118,14 @@ export function parseMcpServers(value: unknown, updatedAt: string): AgentArborLo
       enabled: typeof record.enabled === "boolean" ? record.enabled : false,
       lastConnectedAt: optionalString(record.lastConnectedAt),
       lastError: optionalString(record.lastError),
+      ...(cachedTools.length > 0 ? {
+        cachedTools,
+        toolsCachedAt: optionalString(record.toolsCachedAt) ?? optionalString(record.lastConnectedAt) ?? updatedAt,
+      } : {}),
+      ...(referencesCachedAt !== undefined ? {
+        cachedReferences,
+        referencesCachedAt,
+      } : {}),
       updatedAt: optionalString(record.updatedAt) ?? updatedAt,
     });
   }
@@ -124,27 +141,41 @@ export function normalizeToolStates(states: readonly ToolStateSettings[], now: s
 }
 
 export function normalizeMcpServers(servers: readonly McpServerSettings[], now: string): readonly McpServerSettings[] {
-  return servers.map((server) => ({
-    serverId: normalizeConfigId(server.serverId),
-    label: optionalString(server.label) ?? server.serverId,
-    transport: parseTransport(server.transport),
-    command: optionalString(server.command),
-    args: sanitizeMcpArgs(server.args ?? []),
-    url: optionalString(server.url),
-    envSecretRefs: server.envSecretRefs.map((ref) => optionalString(ref)).filter((ref): ref is string => ref !== undefined),
-    headerSecretRefs: uniqueStrings(server.headerSecretRefs),
-    bearerTokenSecretRef: optionalString(server.bearerTokenSecretRef),
-    apiKeySecretRef: optionalString(server.apiKeySecretRef),
-    apiKeyHeaderName: optionalString(server.apiKeyHeaderName),
-    confirmationMode: parseConfirmationMode(server.confirmationMode),
-    toolExposureMode: parseToolExposureMode(server.toolExposureMode, server.enabledTools),
-    enabledTools: uniqueStrings(server.enabledTools),
-    autoApprovedTools: uniqueStrings(server.autoApprovedTools),
-    enabled: server.enabled,
-    lastConnectedAt: optionalString(server.lastConnectedAt),
-    lastError: optionalString(server.lastError),
-    updatedAt: optionalString(server.updatedAt) ?? now,
-}));
+  return servers.map((server) => {
+    const cachedTools = normalizeMcpCachedTools(server.cachedTools ?? []);
+    const cachedReferences = normalizeMcpCachedReferences(server.cachedReferences);
+    const referencesCachedAt = optionalString(server.referencesCachedAt);
+    return {
+      serverId: normalizeConfigId(server.serverId),
+      label: optionalString(server.label) ?? server.serverId,
+      description: optionalString(server.description),
+      transport: parseTransport(server.transport),
+      command: optionalString(server.command),
+      args: sanitizeMcpArgs(server.args ?? []),
+      url: optionalString(server.url),
+      envSecretRefs: server.envSecretRefs.map((ref) => optionalString(ref)).filter((ref): ref is string => ref !== undefined),
+      headerSecretRefs: uniqueStrings(server.headerSecretRefs),
+      bearerTokenSecretRef: optionalString(server.bearerTokenSecretRef),
+      apiKeySecretRef: optionalString(server.apiKeySecretRef),
+      apiKeyHeaderName: optionalString(server.apiKeyHeaderName),
+      confirmationMode: parseConfirmationMode(server.confirmationMode),
+      toolExposureMode: parseToolExposureMode(server.toolExposureMode, server.enabledTools),
+      enabledTools: uniqueStrings(server.enabledTools),
+      autoApprovedTools: uniqueStrings(server.autoApprovedTools),
+      enabled: server.enabled,
+      lastConnectedAt: optionalString(server.lastConnectedAt),
+      lastError: optionalString(server.lastError),
+      ...(cachedTools.length > 0 ? {
+        cachedTools,
+        toolsCachedAt: optionalString(server.toolsCachedAt) ?? optionalString(server.lastConnectedAt) ?? now,
+      } : {}),
+      ...(server.cachedReferences !== undefined || referencesCachedAt !== undefined ? {
+        cachedReferences,
+        referencesCachedAt: referencesCachedAt ?? optionalString(server.lastConnectedAt) ?? now,
+      } : {}),
+      updatedAt: optionalString(server.updatedAt) ?? now,
+    };
+  });
 }
 
 function normalizeConfigId(value: string): string {
@@ -170,15 +201,191 @@ function parseToolExposureMode(value: unknown, enabledTools: readonly string[] =
 }
 
 function parseTransport(value: unknown): McpServerSettings["transport"] {
-  return value === "http" || value === "streamableHttp"
+  return value === "http" || value === "streamableHttp" || value === "sse"
     ? "http"
-    : value === "sse"
-      ? "sse"
-      : "stdio";
+    : "stdio";
 }
 
 function uniqueStrings(values: readonly string[] | undefined): readonly string[] {
   return [...new Set((values ?? []).map((value) => optionalString(value)).filter((value): value is string => value !== undefined))];
+}
+
+function parseMcpCachedTools(value: unknown): readonly McpCachedToolInfo[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const parsed: McpCachedToolInfo[] = [];
+  for (const item of value) {
+    const record = asRecord(item);
+    const name = optionalString(record.name);
+    if (name === undefined) {
+      continue;
+    }
+    parsed.push({
+      name,
+      title: optionalString(record.title),
+      description: optionalString(record.description),
+      inputSchema: asRecord(record.inputSchema),
+      outputSchema: optionalRecord(record.outputSchema),
+      annotations: parseMcpToolAnnotations(record.annotations),
+    });
+  }
+  return normalizeMcpCachedTools(parsed);
+}
+
+function normalizeMcpCachedTools(value: readonly McpCachedToolInfo[]): readonly McpCachedToolInfo[] {
+  const tools: McpCachedToolInfo[] = [];
+  const seen = new Set<string>();
+  for (const tool of value) {
+    const name = optionalString(tool.name);
+    if (name === undefined || seen.has(name)) {
+      continue;
+    }
+    seen.add(name);
+    tools.push({
+      name,
+      title: optionalString(tool.title),
+      description: optionalString(tool.description),
+      inputSchema: asRecord(tool.inputSchema),
+      outputSchema: optionalRecord(tool.outputSchema),
+      annotations: parseMcpToolAnnotations(tool.annotations),
+    });
+  }
+  return tools;
+}
+
+function parseMcpCachedReferences(value: unknown): McpCachedReferenceInfo {
+  const record = asRecord(value);
+  return normalizeMcpCachedReferences({
+    prompts: Array.isArray(record.prompts) ? record.prompts.map(parseMcpCachedPrompt).filter(isDefined) : [],
+    resources: Array.isArray(record.resources) ? record.resources.map(parseMcpCachedResource).filter(isDefined) : [],
+    resourceTemplates: Array.isArray(record.resourceTemplates)
+      ? record.resourceTemplates.map(parseMcpCachedResourceTemplate).filter(isDefined)
+      : [],
+  });
+}
+
+function normalizeMcpCachedReferences(value: McpCachedReferenceInfo | undefined): McpCachedReferenceInfo {
+  return {
+    prompts: uniqueByName((value?.prompts ?? []).map((prompt) => ({
+      name: optionalString(prompt.name) ?? "",
+      title: optionalString(prompt.title),
+      description: optionalString(prompt.description),
+      arguments: Array.isArray(prompt.arguments)
+        ? prompt.arguments.map(parseMcpPromptArgument).filter(isDefined)
+        : undefined,
+    })).filter((prompt) => prompt.name.length > 0)),
+    resources: uniqueByName((value?.resources ?? []).map((resource) => ({
+      uri: optionalString(resource.uri) ?? "",
+      name: optionalString(resource.name) ?? "",
+      title: optionalString(resource.title),
+      description: optionalString(resource.description),
+      mimeType: optionalString(resource.mimeType),
+      size: typeof resource.size === "number" && Number.isFinite(resource.size) ? Math.max(0, Math.floor(resource.size)) : undefined,
+    })).filter((resource) => resource.uri.length > 0 && resource.name.length > 0)),
+    resourceTemplates: uniqueByName((value?.resourceTemplates ?? []).map((template) => ({
+      uriTemplate: optionalString(template.uriTemplate) ?? "",
+      name: optionalString(template.name) ?? "",
+      title: optionalString(template.title),
+      description: optionalString(template.description),
+      mimeType: optionalString(template.mimeType),
+    })).filter((template) => template.uriTemplate.length > 0 && template.name.length > 0)),
+  };
+}
+
+function parseMcpCachedPrompt(value: unknown): McpCachedReferenceInfo["prompts"][number] | undefined {
+  const record = asRecord(value);
+  const name = optionalString(record.name);
+  if (name === undefined) {
+    return undefined;
+  }
+  return {
+    name,
+    title: optionalString(record.title),
+    description: optionalString(record.description),
+    arguments: Array.isArray(record.arguments)
+      ? record.arguments.map(parseMcpPromptArgument).filter(isDefined)
+      : undefined,
+  };
+}
+
+function parseMcpPromptArgument(value: unknown): NonNullable<McpCachedReferenceInfo["prompts"][number]["arguments"]>[number] | undefined {
+  const record = asRecord(value);
+  const name = optionalString(record.name);
+  if (name === undefined) {
+    return undefined;
+  }
+  return {
+    name,
+    description: optionalString(record.description),
+    required: typeof record.required === "boolean" ? record.required : undefined,
+  };
+}
+
+function parseMcpCachedResource(value: unknown): McpCachedReferenceInfo["resources"][number] | undefined {
+  const record = asRecord(value);
+  const uri = optionalString(record.uri);
+  const name = optionalString(record.name);
+  if (uri === undefined || name === undefined) {
+    return undefined;
+  }
+  return {
+    uri,
+    name,
+    title: optionalString(record.title),
+    description: optionalString(record.description),
+    mimeType: optionalString(record.mimeType),
+    size: typeof record.size === "number" && Number.isFinite(record.size) ? Math.max(0, Math.floor(record.size)) : undefined,
+  };
+}
+
+function parseMcpCachedResourceTemplate(value: unknown): McpCachedReferenceInfo["resourceTemplates"][number] | undefined {
+  const record = asRecord(value);
+  const uriTemplate = optionalString(record.uriTemplate);
+  const name = optionalString(record.name);
+  if (uriTemplate === undefined || name === undefined) {
+    return undefined;
+  }
+  return {
+    uriTemplate,
+    name,
+    title: optionalString(record.title),
+    description: optionalString(record.description),
+    mimeType: optionalString(record.mimeType),
+  };
+}
+
+function uniqueByName<T extends { readonly name: string }>(values: readonly T[]): readonly T[] {
+  const seen = new Set<string>();
+  const output: T[] = [];
+  for (const value of values) {
+    if (seen.has(value.name)) {
+      continue;
+    }
+    seen.add(value.name);
+    output.push(value);
+  }
+  return output;
+}
+
+function parseMcpToolAnnotations(value: unknown): McpCachedToolInfo["annotations"] {
+  const record = asRecord(value);
+  const annotations = {
+    title: optionalString(record.title),
+    readOnlyHint: typeof record.readOnlyHint === "boolean" ? record.readOnlyHint : undefined,
+    destructiveHint: typeof record.destructiveHint === "boolean" ? record.destructiveHint : undefined,
+    openWorldHint: typeof record.openWorldHint === "boolean" ? record.openWorldHint : undefined,
+  };
+  return Object.values(annotations).some((item) => item !== undefined) ? annotations : undefined;
+}
+
+function optionalRecord(value: unknown): Record<string, unknown> | undefined {
+  const record = asRecord(value);
+  return Object.keys(record).length === 0 ? undefined : record;
+}
+
+function isDefined<T>(value: T | undefined): value is T {
+  return value !== undefined;
 }
 
 function splitCommandLine(value: string): readonly string[] {

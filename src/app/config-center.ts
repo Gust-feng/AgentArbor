@@ -9,6 +9,8 @@ import type {
   ConfiguredModelProviderKind,
   CreateModelProviderProfileInput,
   LocalDevSecretStore,
+  McpCachedReferenceInfo,
+  McpCachedToolInfo,
   McpServerSecretValueInput,
   McpServerSettings,
   ModelCapabilities,
@@ -395,9 +397,10 @@ export class ConfigCenter {
     const serverId = normalizeProfileId(input.serverId);
     const existing = (current.mcpServers ?? []).find((server) => server.serverId === serverId);
     const parsedCommandLine = input.commandLine === undefined ? undefined : parseMcpCommandLine(input.commandLine);
-    const nextServer: McpServerSettings = {
+    const draftServer: McpServerSettings = {
       serverId,
       label: normalizeOptionalString(input.label) ?? existing?.label ?? serverId,
+      description: input.description === undefined ? existing?.description : normalizeOptionalString(input.description),
       transport: input.transport ?? existing?.transport ?? "stdio",
       command: parsedCommandLine?.command ?? normalizeOptionalString(input.command) ?? existing?.command,
       args: parsedCommandLine?.args ?? (input.args === undefined ? existing?.args ?? [] : sanitizeMcpArgs(input.args)),
@@ -422,9 +425,23 @@ export class ConfigCenter {
         ? existing?.autoApprovedTools ?? []
         : [...new Set(input.autoApprovedTools.map((tool) => normalizeOptionalString(tool)).filter((tool): tool is string => tool !== undefined))],
       enabled: input.enabled ?? existing?.enabled ?? false,
-      lastConnectedAt: existing?.lastConnectedAt,
-      lastError: existing?.lastError,
       updatedAt: now,
+    };
+    const connectionChanged = existing !== undefined && mcpConnectionConfigChanged(existing, draftServer);
+    const cachedTools = connectionChanged ? undefined : existing?.cachedTools;
+    const cachedReferences = connectionChanged ? undefined : existing?.cachedReferences;
+    const nextServer: McpServerSettings = {
+      ...draftServer,
+      lastConnectedAt: connectionChanged ? undefined : existing?.lastConnectedAt,
+      lastError: connectionChanged ? undefined : existing?.lastError,
+      ...(cachedTools !== undefined && cachedTools.length > 0 ? {
+        cachedTools,
+        toolsCachedAt: existing?.toolsCachedAt,
+      } : {}),
+      ...(cachedReferences !== undefined ? {
+        cachedReferences,
+        referencesCachedAt: existing?.referencesCachedAt,
+      } : {}),
     };
     const next = normalizeLocalSettings({
       ...current,
@@ -461,6 +478,8 @@ export class ConfigCenter {
     readonly serverId: string;
     readonly connectedAt?: string;
     readonly errorSummary?: string;
+    readonly cachedTools?: readonly McpCachedToolInfo[];
+    readonly cachedReferences?: McpCachedReferenceInfo;
   }): Promise<readonly McpServerSettings[]> {
     const current = await this.readOrCreateSettings();
     const now = new Date().toISOString();
@@ -473,6 +492,14 @@ export class ConfigCenter {
       ...existing,
       lastConnectedAt: input.connectedAt ?? existing.lastConnectedAt,
       lastError: input.errorSummary,
+      ...(input.cachedTools !== undefined ? {
+        cachedTools: input.cachedTools,
+        toolsCachedAt: now,
+      } : {}),
+      ...(input.cachedReferences !== undefined ? {
+        cachedReferences: input.cachedReferences,
+        referencesCachedAt: now,
+      } : {}),
       updatedAt: now,
     };
     const next = normalizeLocalSettings({
@@ -719,6 +746,24 @@ export class ConfigCenter {
     await this.options.settingsStore.writeSettings(created);
     return created;
   }
+}
+
+function mcpConnectionConfigChanged(left: McpServerSettings, right: McpServerSettings): boolean {
+  return (
+    left.transport !== right.transport ||
+    left.command !== right.command ||
+    !sameStringList(left.args ?? [], right.args ?? []) ||
+    left.url !== right.url ||
+    !sameStringList(left.envSecretRefs, right.envSecretRefs) ||
+    !sameStringList(left.headerSecretRefs ?? [], right.headerSecretRefs ?? []) ||
+    left.bearerTokenSecretRef !== right.bearerTokenSecretRef ||
+    left.apiKeySecretRef !== right.apiKeySecretRef ||
+    left.apiKeyHeaderName !== right.apiKeyHeaderName
+  );
+}
+
+function sameStringList(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((item, index) => item === right[index]);
 }
 
 function sameCapabilityOverrideScope(

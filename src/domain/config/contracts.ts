@@ -194,15 +194,58 @@ export type ToolConfirmationSettings = {
   readonly updatedAt: string;
 };
 
-export type McpServerTransportKind = "stdio" | "http" | "sse";
+export type McpServerTransportKind = "stdio" | "http";
 
 export type McpConfirmationMode = "always" | "unsafe_only" | "never";
 
 export type McpToolExposureMode = "none" | "all" | "selected";
 
+export type McpCachedToolInfo = {
+  readonly name: string;
+  readonly title?: string;
+  readonly description?: string;
+  readonly inputSchema: Record<string, unknown>;
+  readonly outputSchema?: Record<string, unknown>;
+  readonly annotations?: {
+    readonly title?: string;
+    readonly readOnlyHint?: boolean;
+    readonly destructiveHint?: boolean;
+    readonly openWorldHint?: boolean;
+  };
+};
+
+export type McpCachedReferenceInfo = {
+  readonly prompts: readonly {
+    readonly name: string;
+    readonly title?: string;
+    readonly description?: string;
+    readonly arguments?: readonly {
+      readonly name: string;
+      readonly description?: string;
+      readonly required?: boolean;
+    }[];
+  }[];
+  readonly resources: readonly {
+    readonly uri: string;
+    readonly name: string;
+    readonly title?: string;
+    readonly description?: string;
+    readonly mimeType?: string;
+    readonly size?: number;
+  }[];
+  readonly resourceTemplates: readonly {
+    readonly uriTemplate: string;
+    readonly name: string;
+    readonly title?: string;
+    readonly description?: string;
+    readonly mimeType?: string;
+  }[];
+};
+
 export type McpServerSettings = {
   readonly serverId: string;
   readonly label: string;
+  readonly description?: string;
   readonly transport: McpServerTransportKind;
   readonly command?: string;
   readonly args?: readonly string[];
@@ -219,6 +262,10 @@ export type McpServerSettings = {
   readonly enabled: boolean;
   readonly lastConnectedAt?: string;
   readonly lastError?: string;
+  readonly cachedTools?: readonly McpCachedToolInfo[];
+  readonly toolsCachedAt?: string;
+  readonly cachedReferences?: McpCachedReferenceInfo;
+  readonly referencesCachedAt?: string;
   readonly updatedAt: string;
 };
 
@@ -325,6 +372,7 @@ export type UpdateToolConfirmationConfigInput = {
 export type UpsertMcpServerInput = {
   readonly serverId: string;
   readonly label?: string;
+  readonly description?: string;
   readonly transport?: McpServerTransportKind;
   readonly commandLine?: string;
   readonly command?: string;
@@ -396,6 +444,7 @@ export type CapabilitySkillCatalogItem = {
 export type CapabilityMcpCatalogItem = {
   readonly serverId: string;
   readonly label: string;
+  readonly description?: string;
   readonly transport: McpServerTransportKind;
   readonly enabled: boolean;
   readonly confirmationMode: McpConfirmationMode;
@@ -411,6 +460,11 @@ export type CapabilityMcpCatalogItem = {
   readonly autoApprovedTools: readonly string[];
   readonly lastConnectedAt?: string;
   readonly lastError?: string;
+  readonly toolsCachedAt?: string;
+  readonly promptCount?: number;
+  readonly resourceCount?: number;
+  readonly resourceTemplateCount?: number;
+  readonly referencesCachedAt?: string;
   readonly runtimeConfig?: {
     readonly transport: McpServerTransportKind;
     readonly command?: string;

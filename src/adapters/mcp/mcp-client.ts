@@ -20,8 +20,10 @@ export type McpClientWrapperOptions = {
 
 export type McpToolInfo = {
   readonly name: string;
+  readonly title?: string;
   readonly description?: string;
   readonly inputSchema: Record<string, unknown>;
+  readonly outputSchema?: Record<string, unknown>;
   readonly annotations?: {
     readonly title?: string;
     readonly readOnlyHint?: boolean;
@@ -29,6 +31,8 @@ export type McpToolInfo = {
     readonly openWorldHint?: boolean;
   };
 };
+
+const MAX_MCP_LIST_PAGES = 100;
 
 export type McpToolResult = {
   readonly content: readonly McpContentPart[];
@@ -123,11 +127,17 @@ export class McpClientWrapper {
 
   async listTools(): Promise<readonly McpToolInfo[]> {
     this.assertConnected();
-    const result = await this.client!.listTools();
-    return result.tools.map((tool) => ({
+    const rawTools = await collectPaginated(
+      (cursor) => this.client!.listTools(cursor === undefined ? undefined : { cursor }),
+      (page) => page.tools
+    );
+    cacheSdkToolMetadata(this.client!, rawTools);
+    return rawTools.map((tool) => ({
       name: tool.name,
+      title: tool.title,
       description: tool.description,
       inputSchema: tool.inputSchema as Record<string, unknown>,
+      outputSchema: tool.outputSchema as Record<string, unknown> | undefined,
       annotations: tool.annotations === undefined ? undefined : {
         title: tool.annotations.title,
         readOnlyHint: tool.annotations.readOnlyHint,
@@ -151,7 +161,10 @@ export class McpClientWrapper {
   async listReferences(): Promise<McpReferenceInfo> {
     this.assertConnected();
     const [prompts, resources, resourceTemplates] = await Promise.all([
-      this.client!.listPrompts().then((result) => result.prompts.map((prompt) => ({
+      collectPaginated(
+        (cursor) => this.client!.listPrompts(cursor === undefined ? undefined : { cursor }),
+        (page) => page.prompts
+      ).then((result) => result.map((prompt) => ({
         name: prompt.name,
         title: prompt.title,
         description: prompt.description,
@@ -161,7 +174,10 @@ export class McpClientWrapper {
           required: argument.required,
         })),
       }))).catch(() => [] as McpPromptInfo[]),
-      this.client!.listResources().then((result) => result.resources.map((resource) => ({
+      collectPaginated(
+        (cursor) => this.client!.listResources(cursor === undefined ? undefined : { cursor }),
+        (page) => page.resources
+      ).then((result) => result.map((resource) => ({
         uri: resource.uri,
         name: resource.name,
         title: resource.title,
@@ -169,7 +185,10 @@ export class McpClientWrapper {
         mimeType: resource.mimeType,
         size: resource.size,
       }))).catch(() => [] as McpResourceInfo[]),
-      this.client!.listResourceTemplates().then((result) => result.resourceTemplates.map((resourceTemplate) => ({
+      collectPaginated(
+        (cursor) => this.client!.listResourceTemplates(cursor === undefined ? undefined : { cursor }),
+        (page) => page.resourceTemplates
+      ).then((result) => result.map((resourceTemplate) => ({
         uriTemplate: resourceTemplate.uriTemplate,
         name: resourceTemplate.name,
         title: resourceTemplate.title,
@@ -189,6 +208,39 @@ export class McpClientWrapper {
       throw new Error(`MCP client "${this.config.serverId}" is not connected.`);
     }
   }
+}
+
+async function collectPaginated<TItem, TPage extends { readonly nextCursor?: string }>(
+  loadPage: (cursor?: string) => Promise<TPage>,
+  itemsFromPage: (page: TPage) => readonly TItem[]
+): Promise<readonly TItem[]> {
+  const items: TItem[] = [];
+  const seenCursors = new Set<string>();
+  let cursor: string | undefined;
+  for (let pageIndex = 0; pageIndex < MAX_MCP_LIST_PAGES; pageIndex += 1) {
+    const page = await loadPage(cursor);
+    items.push(...itemsFromPage(page));
+    const nextCursor = page.nextCursor;
+    if (nextCursor === undefined || nextCursor.length === 0) {
+      return items;
+    }
+    if (seenCursors.has(nextCursor)) {
+      throw new Error("MCP list pagination returned a repeated cursor.");
+    }
+    seenCursors.add(nextCursor);
+    cursor = nextCursor;
+  }
+  throw new Error(`MCP list pagination exceeded ${MAX_MCP_LIST_PAGES} pages.`);
+}
+
+function cacheSdkToolMetadata(
+  client: Client,
+  tools: readonly Awaited<ReturnType<Client["listTools"]>>["tools"][number][]
+): void {
+  const metadataCache = client as unknown as {
+    cacheToolMetadata?: (tools: readonly Awaited<ReturnType<Client["listTools"]>>["tools"][number][]) => void;
+  };
+  metadataCache.cacheToolMetadata?.(tools);
 }
 
 async function buildTransport(config: McpClientConfig): Promise<Transport> {

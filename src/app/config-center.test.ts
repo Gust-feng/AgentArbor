@@ -3,7 +3,7 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import type { ModelCapabilities } from "../domain/config/index.js";
+import type { McpCachedToolInfo, ModelCapabilities } from "../domain/config/index.js";
 import { FileSystemLocalDevSecretStore, FileSystemNormalSettingsStore, resolveAgentArborConfigDirectory } from "../adapters/config/index.js";
 import { ConfigCenter, ConfigCenterValidationError } from "./config-center.js";
 import { toSanitizedCommandShellConfig } from "./config-center/command-shell-settings.js";
@@ -1068,6 +1068,7 @@ test("ConfigCenter stores capability overrides, tool states, and MCP settings wi
     const mcpServers = await configCenter.upsertMcpServer({
       serverId: "local-docs",
       label: "Local Docs",
+      description: "Local documentation tools.",
       transport: "stdio",
       commandLine: 'node "server.js" --token=secret-value --api-key sk-separated-secret',
       envSecretRefs: ["secret://local-dev/mcp/local-docs/token"],
@@ -1119,6 +1120,7 @@ test("ConfigCenter stores capability overrides, tool states, and MCP settings wi
     assert.equal(toolStates.find((state) => state.name === "shell_command")?.enabled, false);
     const mcpServer = mcpServers.find((server) => server.serverId === "local-docs");
     assert.equal(mcpServer?.enabled, true);
+    assert.equal(mcpServer?.description, "Local documentation tools.");
     assert.equal(mcpServer?.confirmationMode, "unsafe_only");
     assert.equal(mcpServer?.toolExposureMode, "selected");
     assert.deepEqual(mcpServer?.enabledTools, ["lookup"]);
@@ -1156,6 +1158,118 @@ test("ConfigCenter MCP command line parser preserves Windows paths", async () =>
 
     assert.equal(server?.command, String.raw`C:\Tools\node.exe`);
     assert.deepEqual(server?.args, [String.raw`C:\MCP Servers\server.mjs`, "--flag", "value"]);
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("ConfigCenter normalizes legacy MCP SSE transport to streamable HTTP", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-config-mcp-legacy-sse-"));
+  try {
+    const settingsStore = new FileSystemNormalSettingsStore(directory);
+    const secretStore = new FileSystemLocalDevSecretStore(directory);
+    await fs.mkdir(directory, { recursive: true });
+    await fs.writeFile(
+      settingsStore.settingsPath,
+      JSON.stringify({
+        version: 3,
+        mcpServers: [
+          {
+            serverId: "legacy-docs",
+            label: "Legacy Docs",
+            transport: "sse",
+            url: "https://mcp.example.test/mcp",
+            envSecretRefs: [],
+            confirmationMode: "never",
+            toolExposureMode: "none",
+            enabledTools: [],
+            autoApprovedTools: [],
+            enabled: true,
+            updatedAt: "2026-06-20T00:00:00.000Z",
+          },
+        ],
+        updatedAt: "2026-06-20T00:00:00.000Z",
+      }, null, 2),
+      "utf8"
+    );
+    const configCenter = new ConfigCenter({ settingsStore, secretStore });
+
+    const servers = await configCenter.listMcpServers();
+
+    assert.equal(servers[0]?.transport, "http");
+    assert.equal(servers[0]?.url, "https://mcp.example.test/mcp");
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("ConfigCenter preserves MCP tool cache across policy edits and clears it when connection config changes", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-config-mcp-cache-"));
+  try {
+    const settingsStore = new FileSystemNormalSettingsStore(directory);
+    const secretStore = new FileSystemLocalDevSecretStore(directory);
+    const configCenter = new ConfigCenter({ settingsStore, secretStore });
+    const cachedTools: readonly McpCachedToolInfo[] = [
+      {
+        name: "lookup",
+        description: "Lookup docs.",
+        inputSchema: { type: "object", properties: { query: { type: "string" } } },
+        annotations: { readOnlyHint: true },
+      },
+    ];
+
+    await configCenter.upsertMcpServer({
+      serverId: "docs",
+      description: "Docs lookup.",
+      transport: "http",
+      url: "https://mcp.example.test/mcp",
+      toolExposureMode: "selected",
+      enabledTools: ["lookup"],
+      enabled: true,
+    });
+    await configCenter.updateMcpServerConnectionState({
+      serverId: "docs",
+      connectedAt: "2026-06-20T00:00:00.000Z",
+      cachedTools,
+      cachedReferences: {
+        prompts: [{ name: "draft", title: "Draft", description: "Draft with docs." }],
+        resources: [{ uri: "docs://guide", name: "guide", title: "Guide", mimeType: "text/plain" }],
+        resourceTemplates: [],
+      },
+    });
+    const afterPolicyEdit = await configCenter.upsertMcpServer({
+      serverId: "docs",
+      description: "Internal docs lookup.",
+      toolExposureMode: "selected",
+      enabledTools: ["lookup", "search"],
+      autoApprovedTools: ["lookup"],
+    });
+    const preserved = afterPolicyEdit.find((server) => server.serverId === "docs");
+    const afterDescriptionClear = await configCenter.upsertMcpServer({
+      serverId: "docs",
+      description: "",
+    });
+    const clearedDescription = afterDescriptionClear.find((server) => server.serverId === "docs");
+    await configCenter.upsertMcpServer({
+      serverId: "docs",
+      url: "https://mcp.example.test/changed",
+    });
+    const changed = (await configCenter.listMcpServers()).find((server) => server.serverId === "docs");
+
+    assert.deepEqual(preserved?.cachedTools?.map((tool) => tool.name), ["lookup"]);
+    assert.deepEqual(preserved?.cachedReferences?.prompts.map((prompt) => prompt.name), ["draft"]);
+    assert.deepEqual(preserved?.cachedReferences?.resources.map((resource) => resource.name), ["guide"]);
+    assert.equal(preserved?.description, "Internal docs lookup.");
+    assert.equal(preserved?.lastConnectedAt, "2026-06-20T00:00:00.000Z");
+    assert.deepEqual(preserved?.autoApprovedTools, ["lookup"]);
+    assert.equal(clearedDescription?.description, undefined);
+    assert.deepEqual(clearedDescription?.cachedTools?.map((tool) => tool.name), ["lookup"]);
+    assert.deepEqual(clearedDescription?.cachedReferences?.prompts.map((prompt) => prompt.name), ["draft"]);
+    assert.equal(changed?.cachedTools, undefined);
+    assert.equal(changed?.cachedReferences, undefined);
+    assert.equal(changed?.toolsCachedAt, undefined);
+    assert.equal(changed?.lastConnectedAt, undefined);
+    assert.equal(changed?.lastError, undefined);
   } finally {
     await fs.rm(directory, { recursive: true, force: true });
   }

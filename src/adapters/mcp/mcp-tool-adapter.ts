@@ -26,26 +26,8 @@ export function createMcpToolExecutor(
   serverId: string,
   confirmationStrategy: McpToolConfirmationStrategy = DEFAULT_CONFIRMATION_STRATEGY
 ): ToolExecutor {
-  const namespacedName = `${serverId}__${tool.name}`;
-  const inputSchema = toolInputSchema(tool);
-  const metadata = inferToolMetadataFromMcpAnnotations(tool.annotations, {
-    serverId,
-    toolName: tool.name,
-    confirmationStrategy,
-  }) as ToolDefinitionMetadata;
   return {
-    definition: {
-      name: namespacedName,
-      description: tool.description ?? `MCP tool: ${tool.name} from ${serverId}`,
-      inputSchema,
-      modelContract: createMcpToolModelContract({
-        serverId,
-        tool,
-        inputSchema,
-        metadata,
-      }),
-      metadata,
-    },
+    definition: createMcpToolDefinition(tool, serverId, confirmationStrategy),
     async execute(input: unknown, _context: ToolExecutionContext): Promise<unknown> {
       const result = await client.callTool(tool.name, input);
       if (result.isError === true) {
@@ -54,6 +36,45 @@ export function createMcpToolExecutor(
       }
       return buildToolOutput(result.content);
     },
+  };
+}
+
+export function createCachedMcpToolExecutor(
+  tool: McpToolInfo,
+  serverId: string,
+  confirmationStrategy: McpToolConfirmationStrategy = DEFAULT_CONFIRMATION_STRATEGY
+): ToolExecutor {
+  return {
+    definition: createMcpToolDefinition(tool, serverId, confirmationStrategy),
+    async execute(): Promise<unknown> {
+      throw new Error(`MCP tool "${serverId}__${tool.name}" is cached for catalog use and requires a live MCP connection to execute.`);
+    },
+  };
+}
+
+function createMcpToolDefinition(
+  tool: McpToolInfo,
+  serverId: string,
+  confirmationStrategy: McpToolConfirmationStrategy
+): ToolExecutor["definition"] {
+  const namespacedName = `${serverId}__${tool.name}`;
+  const inputSchema = toolInputSchema(tool);
+  const metadata = inferToolMetadataFromMcpAnnotations(tool.annotations, {
+    serverId,
+    toolName: tool.name,
+    confirmationStrategy,
+  }) as ToolDefinitionMetadata;
+  return {
+    name: namespacedName,
+    description: tool.description ?? tool.title ?? `MCP tool: ${tool.name} from ${serverId}`,
+    inputSchema,
+    modelContract: createMcpToolModelContract({
+      serverId,
+      tool,
+      inputSchema,
+      metadata,
+    }),
+    metadata,
   };
 }
 
@@ -89,7 +110,7 @@ function createMcpToolModelContract(input: {
       : "Additional fields may be accepted only if the MCP server supports them.",
   ].filter(isString);
   return {
-    purpose: input.tool.description?.trim() ?? `Call MCP tool ${input.tool.name} on server ${input.serverId}.`,
+    purpose: input.tool.description?.trim() ?? input.tool.title?.trim() ?? `Call MCP tool ${input.tool.name} on server ${input.serverId}.`,
     whenToUse: [
       `Use when the task needs the ${input.tool.name} capability exposed by MCP server ${input.serverId}.`,
       "Use only for the operation described by the MCP tool description and input schema.",
@@ -109,6 +130,7 @@ function createMcpToolModelContract(input: {
     runtimeHints: [
       { label: "MCP server", value: input.serverId },
       { label: "MCP tool", value: input.tool.name },
+      ...(input.tool.title === undefined ? [] : [{ label: "MCP title", value: input.tool.title }]),
       { label: "operation", value: input.metadata.operationType },
       { label: "requires confirmation", value: String(input.metadata.requiresConfirmation) },
     ],

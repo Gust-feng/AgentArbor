@@ -237,6 +237,7 @@ export function parseMcpServerUpdate(raw: unknown): UpsertMcpServerInput {
   return {
     serverId,
     label: optionalString(record.label),
+    description: typeof record.description === "string" ? record.description : undefined,
     transport: parseOptionalMcpTransport(record.transport),
     commandLine: optionalString(record.commandLine),
     command: optionalString(record.command),
@@ -459,9 +460,9 @@ function parseOptionalMcpTransport(value: unknown): McpServerTransportKind | und
     return "http";
   }
   if (value === "sse") {
-    return value;
+    return "http";
   }
-  throw new PanelHttpError(400, "invalid_mcp_transport", "MCP transport 必须是 stdio、streamableHttp 或 sse。");
+  throw new PanelHttpError(400, "invalid_mcp_transport", "MCP transport 必须是 stdio 或 streamableHttp。");
 }
 
 function parseOptionalMcpConfirmationMode(value: unknown): McpConfirmationMode | undefined {
@@ -575,6 +576,7 @@ function importedMcpServer(serverId: string, raw: unknown): UpsertMcpServerInput
   return {
     serverId: id,
     label: optionalString(record.label) ?? id,
+    description: optionalString(record.description),
     transport,
     command,
     args,
@@ -588,8 +590,7 @@ function importedMcpServer(serverId: string, raw: unknown): UpsertMcpServerInput
 }
 
 function parseImportedMcpTransport(value: unknown, url: unknown): UpsertMcpServerInput["transport"] {
-  if (value === "sse") return "sse";
-  if (value === "http" || value === "streamableHttp" || optionalString(url) !== undefined) return "http";
+  if (value === "http" || value === "streamableHttp" || value === "sse" || optionalString(url) !== undefined) return "http";
   return "stdio";
 }
 

@@ -1,9 +1,11 @@
 import type { McpReferenceInfo } from "../../adapters/mcp/index.js";
 import { ensureManagedMcpExecutable, installMcpExecutable, McpManager, resolveMcpExecutable } from "../../adapters/mcp/index.js";
-import type { McpServerSettings } from "../../domain/config/index.js";
+import type { McpCachedReferenceInfo, McpCachedToolInfo, McpServerSettings } from "../../domain/config/index.js";
 import type { CapabilityCenter } from "../capability-center.js";
 import type { ConfigCenter } from "../config-center.js";
 import { PanelHttpError } from "./http-utils.js";
+
+const PANEL_MCP_CONNECT_TIMEOUT_MS = 8_000;
 
 export type PanelMcpManagementRuntime = {
   readonly configCenter: ConfigCenter;
@@ -13,6 +15,7 @@ export type PanelMcpManagementRuntime = {
 export type PanelMcpToolSummary = {
   readonly name: string;
   readonly namespacedName: string;
+  readonly title?: string;
   readonly description?: string;
   readonly readOnlyHint?: boolean;
   readonly destructiveHint?: boolean;
@@ -174,7 +177,7 @@ export async function testPanelMcpServer(
   const manager = new McpManager({
     servers: [{ ...server, enabled: true }],
     env: mcpEnv,
-    connectTimeoutMs: 3_000,
+    connectTimeoutMs: PANEL_MCP_CONNECT_TIMEOUT_MS,
   });
   try {
     await manager.connectAll();
@@ -184,16 +187,20 @@ export async function testPanelMcpServer(
       const testedTools = manager.getServerTools(server.serverId).map((tool) => ({
         name: tool.name,
         namespacedName: `${serverId}__${tool.name}`,
+        title: tool.title,
         description: tool.description,
         readOnlyHint: tool.annotations?.readOnlyHint,
         destructiveHint: tool.annotations?.destructiveHint,
         openWorldHint: tool.annotations?.openWorldHint,
       }));
+      const references = (await manager.getServerReferences(server.serverId).catch(() => emptyMcpReferenceInfo())) ?? emptyMcpReferenceInfo();
       if (options.persistConnectionState !== false) {
         await runtime.configCenter.updateMcpServerConnectionState({
           serverId,
           connectedAt,
           errorSummary: undefined,
+          cachedTools: manager.getServerTools(server.serverId).map(cachedToolFromMcpTool),
+          cachedReferences: cachedReferencesFromMcpReferenceInfo(references),
         });
         runtime.capabilityCenter.invalidate();
       }
@@ -223,6 +230,51 @@ export async function testPanelMcpServer(
   }
 }
 
+function cachedToolFromMcpTool(tool: ReturnType<McpManager["getServerTools"]>[number]): McpCachedToolInfo {
+  return {
+    name: tool.name,
+    title: tool.title,
+    description: tool.description,
+    inputSchema: { ...tool.inputSchema },
+    outputSchema: tool.outputSchema === undefined ? undefined : { ...tool.outputSchema },
+    annotations: tool.annotations === undefined ? undefined : { ...tool.annotations },
+  };
+}
+
+function cachedReferencesFromMcpReferenceInfo(references: McpReferenceInfo): McpCachedReferenceInfo {
+  return {
+    prompts: references.prompts.map((prompt) => ({
+      name: prompt.name,
+      title: prompt.title,
+      description: prompt.description,
+      arguments: prompt.arguments?.map((argument) => ({
+        name: argument.name,
+        description: argument.description,
+        required: argument.required,
+      })),
+    })),
+    resources: references.resources.map((resource) => ({
+      uri: resource.uri,
+      name: resource.name,
+      title: resource.title,
+      description: resource.description,
+      mimeType: resource.mimeType,
+      size: resource.size,
+    })),
+    resourceTemplates: references.resourceTemplates.map((template) => ({
+      uriTemplate: template.uriTemplate,
+      name: template.name,
+      title: template.title,
+      description: template.description,
+      mimeType: template.mimeType,
+    })),
+  };
+}
+
+function emptyMcpReferenceInfo(): McpReferenceInfo {
+  return { prompts: [], resources: [], resourceTemplates: [] };
+}
+
 export async function listPanelMcpReferences(
   runtime: PanelMcpManagementRuntime,
   serverId: string
@@ -230,6 +282,14 @@ export async function listPanelMcpReferences(
   const server = (await runtime.configCenter.listMcpServers()).find((item) => item.serverId === serverId);
   if (server === undefined) {
     throw new PanelHttpError(404, "mcp_server_not_found", "未找到 MCP 服务。");
+  }
+  if (server.cachedReferences !== undefined && server.lastError === undefined) {
+    return {
+      ok: true,
+      prompts: server.cachedReferences.prompts,
+      resources: server.cachedReferences.resources,
+      resourceTemplates: server.cachedReferences.resourceTemplates,
+    };
   }
   if (!hasCompleteMcpRuntimeConfig(server)) {
     return {
@@ -260,7 +320,7 @@ export async function listPanelMcpReferences(
   const manager = new McpManager({
     servers: [{ ...server, enabled: true }],
     env: mcpEnv,
-    connectTimeoutMs: 3_000,
+    connectTimeoutMs: PANEL_MCP_CONNECT_TIMEOUT_MS,
   });
   try {
     await manager.connectAll();
@@ -413,16 +473,10 @@ function missingConfigCode(server: McpServerSettings): string {
   if (server.transport === "stdio" && (server.command === undefined || server.command.trim().length === 0)) {
     return "missing_command";
   }
-  if (server.transport === "sse") {
-    return "legacy_sse_unavailable";
-  }
   return "missing_config";
 }
 
 function hasCompleteMcpRuntimeConfig(server: McpServerSettings): boolean {
-  if (server.transport === "sse") {
-    return false;
-  }
   if (server.transport === "stdio") {
     return server.command !== undefined && server.command.trim().length > 0;
   }

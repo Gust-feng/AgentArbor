@@ -5,6 +5,9 @@ import path from "node:path";
 import test from "node:test";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
+import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
+import { LATEST_PROTOCOL_VERSION } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { validateModelVisibleToolContract } from "../../domain/tools/index.js";
 import { McpClientWrapper } from "./mcp-client.js";
@@ -116,6 +119,151 @@ test("McpClientWrapper listTools returns expected format", async () => {
   assert.deepEqual(echo.inputSchema.properties, { message: { type: "string" } });
   assert.deepEqual(echo.inputSchema.required, ["message"]);
 
+  await client.disconnect();
+});
+
+test("McpClientWrapper follows MCP pagination for tools and references", async () => {
+  const transport = new PaginatedMcpTestTransport({
+    pages: {
+      "tools/list": [
+        {
+          tools: [
+            {
+              name: "lookup",
+              title: "Lookup",
+              description: "Lookup docs.",
+              inputSchema: {
+                type: "object",
+                properties: { query: { type: "string" } },
+                required: ["query"],
+              },
+              outputSchema: {
+                type: "object",
+                properties: { text: { type: "string" } },
+                required: ["text"],
+              },
+              annotations: { readOnlyHint: true },
+            },
+          ],
+          nextCursor: "tools-page-2",
+        },
+        {
+          tools: [
+            {
+              name: "mutate",
+              description: "Mutate docs.",
+              inputSchema: { type: "object", properties: {} },
+              annotations: { destructiveHint: true },
+            },
+          ],
+        },
+      ],
+      "prompts/list": [
+        {
+          prompts: [
+            {
+              name: "draft",
+              title: "Draft",
+              description: "Draft a summary.",
+              arguments: [{ name: "topic", description: "Topic", required: true }],
+            },
+          ],
+          nextCursor: "prompts-page-2",
+        },
+        {
+          prompts: [{ name: "revise", description: "Revise a summary." }],
+        },
+      ],
+      "resources/list": [
+        {
+          resources: [
+            {
+              uri: "docs://guide",
+              name: "guide",
+              title: "Guide",
+              description: "Static guide.",
+              mimeType: "text/plain",
+              size: 42,
+            },
+          ],
+        },
+      ],
+      "resources/templates/list": [
+        {
+          resourceTemplates: [
+            {
+              uriTemplate: "docs://guide/{topic}",
+              name: "guide-topic",
+              title: "Guide Topic",
+              description: "Topic guide.",
+              mimeType: "text/plain",
+            },
+          ],
+          nextCursor: "templates-page-2",
+        },
+        {
+          resourceTemplates: [{ uriTemplate: "docs://faq/{topic}", name: "faq-topic" }],
+        },
+      ],
+    },
+  });
+  const client = new McpClientWrapper(
+    { serverId: "paginated-server", transport: "stdio" },
+    { transport }
+  );
+
+  await client.connect();
+  const tools = await client.listTools();
+  const references = await client.listReferences();
+
+  assert.deepEqual(tools.map((tool) => tool.name), ["lookup", "mutate"]);
+  assert.equal(tools[0]?.title, "Lookup");
+  assert.deepEqual(tools[0]?.outputSchema?.required, ["text"]);
+  assert.deepEqual(references.prompts.map((prompt) => prompt.name), ["draft", "revise"]);
+  assert.deepEqual(references.resources.map((resource) => resource.name), ["guide"]);
+  assert.deepEqual(references.resourceTemplates.map((template) => template.name), ["guide-topic", "faq-topic"]);
+  assert.deepEqual(transport.cursorsFor("tools/list"), [undefined, "tools-page-2"]);
+  assert.deepEqual(transport.cursorsFor("prompts/list"), [undefined, "prompts-page-2"]);
+  assert.deepEqual(transport.cursorsFor("resources/templates/list"), [undefined, "templates-page-2"]);
+
+  await client.disconnect();
+});
+
+test("McpClientWrapper rejects repeated MCP pagination cursors", async () => {
+  const client = new McpClientWrapper(
+    { serverId: "repeated-cursor-server", transport: "stdio" },
+    {
+      transport: new PaginatedMcpTestTransport({
+        pages: {
+          "tools/list": [
+            {
+              tools: [
+                {
+                  name: "first",
+                  description: "First page.",
+                  inputSchema: { type: "object", properties: {} },
+                },
+              ],
+              nextCursor: "same",
+            },
+            {
+              tools: [
+                {
+                  name: "second",
+                  description: "Second page.",
+                  inputSchema: { type: "object", properties: {} },
+                },
+              ],
+              nextCursor: "same",
+            },
+          ],
+        },
+      }),
+    }
+  );
+
+  await client.connect();
+  await assert.rejects(() => client.listTools(), /repeated cursor/);
   await client.disconnect();
 });
 
@@ -704,4 +852,98 @@ function mcpRuntimeWrapperSource(serverPath: string): string {
 
 function shellQuote(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+type TestMcpPage = Readonly<Record<string, unknown>> & {
+  readonly nextCursor?: string;
+};
+
+class PaginatedMcpTestTransport implements Transport {
+  onclose?: () => void;
+  onerror?: (error: Error) => void;
+  onmessage?: (message: JSONRPCMessage) => void;
+  private readonly calls = new Map<string, (string | undefined)[]>();
+
+  constructor(
+    private readonly options: {
+      readonly pages: Readonly<Record<string, readonly TestMcpPage[]>>;
+    }
+  ) {}
+
+  async start(): Promise<void> {}
+
+  async close(): Promise<void> {
+    this.onclose?.();
+  }
+
+  async send(message: JSONRPCMessage): Promise<void> {
+    if (!("method" in message)) {
+      return;
+    }
+    if (!("id" in message)) {
+      return;
+    }
+
+    if (message.method === "initialize") {
+      this.onmessage?.({
+        jsonrpc: "2.0",
+        id: message.id,
+        result: {
+          protocolVersion: LATEST_PROTOCOL_VERSION,
+          capabilities: {
+            tools: {},
+            prompts: {},
+            resources: {},
+          },
+          serverInfo: { name: "paginated-test-server", version: "1.0.0" },
+        },
+      });
+      return;
+    }
+
+    const pages = this.options.pages[message.method] ?? [emptyPageFor(message.method)];
+    const cursor = cursorFromMessage(message);
+    const callCursors = this.calls.get(message.method) ?? [];
+    callCursors.push(cursor);
+    this.calls.set(message.method, callCursors);
+    const page = pageForCursor(pages, cursor);
+    this.onmessage?.({
+      jsonrpc: "2.0",
+      id: message.id,
+      result: page,
+    });
+  }
+
+  cursorsFor(method: string): readonly (string | undefined)[] {
+    return this.calls.get(method) ?? [];
+  }
+}
+
+function cursorFromMessage(message: JSONRPCMessage & { readonly method: string }): string | undefined {
+  if (!("params" in message) || typeof message.params !== "object" || message.params === null) {
+    return undefined;
+  }
+  const cursor = (message.params as { readonly cursor?: unknown }).cursor;
+  return typeof cursor === "string" ? cursor : undefined;
+}
+
+function pageForCursor(pages: readonly TestMcpPage[], cursor: string | undefined): TestMcpPage {
+  if (cursor === undefined) {
+    return pages[0] ?? {};
+  }
+  const index = pages.findIndex((page) => page.nextCursor === cursor);
+  return pages[index + 1] ?? emptyPageFor("");
+}
+
+function emptyPageFor(method: string): TestMcpPage {
+  if (method === "prompts/list") {
+    return { prompts: [] };
+  }
+  if (method === "resources/list") {
+    return { resources: [] };
+  }
+  if (method === "resources/templates/list") {
+    return { resourceTemplates: [] };
+  }
+  return { tools: [] };
 }

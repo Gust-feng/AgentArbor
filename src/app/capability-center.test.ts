@@ -45,6 +45,7 @@ test("CapabilityCenter freezes safe model, tool, skill, and MCP catalog projecti
     await configCenter.upsertMcpServer({
       serverId: "docs",
       label: "Docs",
+      description: "Documentation MCP service.",
       transport: "stdio",
       command: "node",
       args: ["server.js", "--token", "do-not-leak"],
@@ -83,6 +84,7 @@ test("CapabilityCenter freezes safe model, tool, skill, and MCP catalog projecti
     assert.equal(snapshot.toolCatalog.tools.find((tool) => tool.name === "browser_snapshot")?.availability, "unavailable");
     assert.deepEqual(snapshot.skillCatalog.map((skill) => `${skill.name}:${skill.enabled}`), ["Disabled Skill:false", "Repo Review:true"]);
     assert.equal(snapshot.mcpCatalog[0]?.availability, "configured");
+    assert.equal(snapshot.mcpCatalog[0]?.description, "Documentation MCP service.");
     assert.equal(snapshot.mcpCatalog[0]?.runtimeStatus, "connected");
     assert.equal(snapshot.mcpCatalog[0]?.confirmationMode, "unsafe_only");
     assert.deepEqual(snapshot.mcpCatalog[0]?.enabledTools, ["lookup"]);
@@ -172,6 +174,74 @@ test("CapabilityCenter applies MCP enabledTools and confirmation mode before mod
     assert.deepEqual(snapshot.mcpCatalog[0]?.exposedTools.map((tool) => tool.name), ["docs__lookup"]);
     assert.deepEqual(snapshot.toolCatalog.allowedTools.filter((name) => name.startsWith("docs__")), ["docs__lookup"]);
     assert.equal(snapshot.mcpCatalog[0]?.exposedTools[0]?.requiresConfirmation, true);
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+
+test("CapabilityCenter uses cached MCP tools without reconnecting unchanged servers", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-capability-center-mcp-cache-"));
+  try {
+    const settingsStore = new FileSystemNormalSettingsStore(directory);
+    const secretStore = new FileSystemLocalDevSecretStore(directory);
+    const configCenter = new ConfigCenter({ settingsStore, secretStore });
+    await configCenter.upsertMcpServer({
+      serverId: "docs",
+      label: "Docs",
+      transport: "http",
+      url: "https://mcp.example.test/mcp",
+      confirmationMode: "unsafe_only",
+      toolExposureMode: "selected",
+      enabledTools: ["lookup"],
+      autoApprovedTools: [],
+      enabled: true,
+    });
+    await configCenter.updateMcpServerConnectionState({
+      serverId: "docs",
+      connectedAt: "2026-06-20T00:00:00.000Z",
+      cachedTools: [
+        {
+          name: "lookup",
+          description: "Lookup docs.",
+          inputSchema: {
+            type: "object",
+            properties: { query: { type: "string" } },
+            required: ["query"],
+          },
+          annotations: { readOnlyHint: true },
+        },
+      ],
+      cachedReferences: {
+        prompts: [{ name: "draft", description: "Draft docs." }],
+        resources: [{ uri: "docs://guide", name: "guide" }],
+        resourceTemplates: [{ uriTemplate: "docs://guide/{topic}", name: "guide-topic" }],
+      },
+    });
+    let connectCalls = 0;
+
+    const snapshot = await new CapabilityCenter({
+      configCenter,
+      skillRoots: [],
+      createMcpManager: (config) => {
+        assert.deepEqual(config.servers, []);
+        return fakeMcpManager({
+          connectAll: async () => {
+            connectCalls += 1;
+          },
+        });
+      },
+    }).snapshot();
+
+    assert.equal(connectCalls, 0);
+    assert.equal(snapshot.mcpCatalog[0]?.runtimeStatus, "connected");
+    assert.equal(snapshot.mcpCatalog[0]?.promptCount, 1);
+    assert.equal(snapshot.mcpCatalog[0]?.resourceCount, 1);
+    assert.equal(snapshot.mcpCatalog[0]?.resourceTemplateCount, 1);
+    assert.equal(typeof snapshot.mcpCatalog[0]?.referencesCachedAt, "string");
+    assert.deepEqual(snapshot.mcpCatalog[0]?.tools.map((tool) => tool.name), ["docs__lookup"]);
+    assert.deepEqual(snapshot.mcpCatalog[0]?.exposedTools.map((tool) => tool.name), ["docs__lookup"]);
+    assert.deepEqual(snapshot.toolCatalog.allowedTools.filter((name) => name.startsWith("docs__")), ["docs__lookup"]);
   } finally {
     await fs.rm(directory, { recursive: true, force: true });
   }

@@ -249,9 +249,6 @@ function isToolEnabled(server: McpServerSettings, toolName: string): boolean {
 }
 
 function hasCompleteRuntimeConfig(server: McpServerSettings): boolean {
-  if (server.transport === "sse") {
-    return false;
-  }
   if (server.transport === "stdio") {
     return server.command !== undefined && server.command.trim().length > 0;
   }
@@ -259,7 +256,7 @@ function hasCompleteRuntimeConfig(server: McpServerSettings): boolean {
 }
 
 function runtimeTransport(server: McpServerSettings): McpClientConfig["transport"] | undefined {
-  return server.transport === "stdio" || server.transport === "http" ? server.transport : undefined;
+  return server.transport;
 }
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {

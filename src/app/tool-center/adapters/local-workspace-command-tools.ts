@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { closeSync, existsSync, openSync, promises as fs, writeSync } from "node:fs";
+import { closeSync, openSync, promises as fs, writeSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import type { SanitizedCommandShellConfig } from "../../../domain/config/index.js";
@@ -19,6 +19,7 @@ import {
   type ProcessRecordUpdate,
   type ProcessRegistration,
 } from "../../runtime-guard/index.js";
+import { toSanitizedCommandShellConfig } from "../../config-center/command-shell-settings.js";
 import {
   asRecord,
   DEFAULT_LOCAL_WORKSPACE_ROOT,
@@ -134,63 +135,7 @@ export function createDefaultCommandShellConfig(
   platform: NodeJS.Platform = process.platform,
   env: Readonly<Record<string, string | undefined>> = process.env
 ): SanitizedCommandShellConfig {
-  if (platform === "win32") {
-    if (usePowerShellOnWindows(env)) {
-      return createWindowsPowerShellConfig(platform);
-    }
-    const gitBash = windowsGitBashExecutable(env);
-    if (gitBash !== undefined) {
-      return {
-        kind: "bash",
-        label: "Git Bash",
-        executable: gitBash,
-        syntax: "posix",
-        platform,
-        invocation: [gitBash, "-lc", "<commandLine>"],
-        commandLineParameter: "commandLine",
-        notes: [
-          "Write one complete POSIX shell command line.",
-          "Auto-selected Git Bash on Windows to reduce cmd.exe quoting and shim issues.",
-          "Use command plus args when shell quoting would still be fragile.",
-        ],
-        updatedAt: "runtime-default",
-      };
-    }
-    return createWindowsPowerShellConfig(platform);
-  }
-  const executable = firstNonBlank(env.SHELL) ?? "/bin/sh";
-  return {
-    kind: executable.endsWith("/bash") || executable === "bash" ? "bash" : "sh",
-    label: executable.endsWith("/bash") || executable === "bash" ? "Bash" : "POSIX shell",
-    executable,
-    syntax: "posix",
-    platform,
-    invocation: [executable, "-lc", "<commandLine>"],
-    commandLineParameter: "commandLine",
-    notes: [
-      "Write one complete POSIX shell command line.",
-      "Use POSIX shell syntax for quoting, environment expansion, pipes, redirection, and command chaining.",
-    ],
-    updatedAt: "runtime-default",
-  };
-}
-
-function createWindowsPowerShellConfig(platform: NodeJS.Platform): SanitizedCommandShellConfig {
-  return {
-    kind: "powershell",
-    label: "Windows PowerShell",
-    executable: "powershell.exe",
-    syntax: "powershell",
-    platform,
-    invocation: ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", "<commandLine>"],
-    commandLineParameter: "commandLine",
-    notes: [
-      "Write one complete PowerShell command line.",
-      "Use PowerShell syntax for variables, pipelines, quoting, and command chaining.",
-      "ExecutionPolicy is bypassed for this process so local script shims can run when allowed by policy.",
-    ],
-    updatedAt: "runtime-default",
-  };
+  return toSanitizedCommandShellConfig(undefined, { platform, env, now: "runtime-default" });
 }
 
 export function createLocalShellCommandTool(
@@ -1744,34 +1689,6 @@ function optionalPort(value: unknown): number | undefined {
     throw new Error("waitForPort must be an integer TCP port between 1 and 65535.");
   }
   return port;
-}
-
-function firstNonBlank(...values: readonly (string | undefined)[]): string | undefined {
-  for (const value of values) {
-    if (value !== undefined && value.trim().length > 0) {
-      return value.trim();
-    }
-  }
-  return undefined;
-}
-
-function usePowerShellOnWindows(env: Readonly<Record<string, string | undefined>>): boolean {
-  return env.AGENTARBOR_USE_POWERSHELL_TOOL === "1" || env.CLAUDE_CODE_USE_POWERSHELL_TOOL === "1";
-}
-
-function windowsGitBashExecutable(env: Readonly<Record<string, string | undefined>>): string | undefined {
-  const configured = firstNonBlank(
-    env.AGENTARBOR_GIT_BASH_PATH,
-    env.CLAUDE_CODE_GIT_BASH_PATH,
-    env.GIT_BASH_PATH
-  );
-  if (configured !== undefined) {
-    return configured;
-  }
-  return [
-    "C:\\Program Files\\Git\\bin\\bash.exe",
-    "C:\\Program Files (x86)\\Git\\bin\\bash.exe",
-  ].find((candidate) => existsSync(candidate));
 }
 
 async function shouldExecuteDirectly(input: {

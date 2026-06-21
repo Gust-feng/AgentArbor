@@ -1,10 +1,16 @@
-import { existsSync } from "node:fs";
 import type {
   CommandShellSettings,
   ConfiguredCommandShellKind,
   SanitizedCommandShellConfig,
   UpdateCommandShellConfigInput,
 } from "../../domain/config/index.js";
+import {
+  defaultExecutable,
+  defaultShellKind,
+  detectCommandShellOptions,
+  detectRuntimeEnvironmentTools,
+  type ResolvedCommandShellKind,
+} from "./runtime-environment-detection.js";
 import { ConfigSchemaValidationError, optionalString } from "./settings-utils.js";
 
 export function normalizeCommandShellSettings(
@@ -56,18 +62,24 @@ export function toSanitizedCommandShellConfig(
   const platform = input.platform ?? process.platform;
   const env = input.env ?? process.env;
   const normalized = normalizeCommandShellSettings(settings, input.now ?? new Date().toISOString());
-  const kind = normalized.kind === "auto" ? defaultShellKind(platform, env) : normalized.kind;
-  const executable = normalized.executable ?? defaultExecutable(kind, platform, env);
+  const availableShells = detectCommandShellOptions(platform, env);
+  const runtimeTools = detectRuntimeEnvironmentTools(platform, env);
+  const kind = normalized.kind === "auto" ? defaultShellKind(platform, env, availableShells) : normalized.kind;
+  const executable = normalized.executable ?? defaultExecutable(kind, platform, env, availableShells);
   const syntax = shellSyntax(kind);
   return {
+    configuredKind: normalized.kind,
+    autoDetected: normalized.kind === "auto",
     kind,
-    label: shellLabel(kind),
+    label: shellLabel(kind, platform, executable),
     executable,
     syntax,
     platform,
     invocation: shellInvocation(executable, syntax),
     commandLineParameter: "commandLine",
-    notes: shellNotes(syntax),
+    notes: shellNotes(syntax, normalized.kind),
+    availableShells,
+    runtimeTools,
     updatedAt: normalized.updatedAt,
   };
 }
@@ -83,69 +95,18 @@ function normalizeCommandShellKind(value: unknown): ConfiguredCommandShellKind |
     : undefined;
 }
 
-function defaultShellKind(
-  platform: NodeJS.Platform,
-  env: Readonly<Record<string, string | undefined>>
-): Exclude<ConfiguredCommandShellKind, "auto"> {
-  if (platform === "win32") {
-    if (usePowerShellOnWindows(env)) {
-      return "powershell";
-    }
-    return windowsGitBashExecutable(env) === undefined ? "powershell" : "bash";
-  }
-  const shell = optionalString(env.SHELL);
-  return shell?.endsWith("/bash") === true || shell === "bash" ? "bash" : "sh";
-}
-
-function defaultExecutable(
-  kind: Exclude<ConfiguredCommandShellKind, "auto">,
-  platform: NodeJS.Platform,
-  env: Readonly<Record<string, string | undefined>>
-): string {
-  if (kind === "cmd") {
-    return optionalString(env.ComSpec) ?? optionalString(env.COMSPEC) ?? "cmd.exe";
-  }
-  if (kind === "powershell") {
-    return "powershell.exe";
-  }
-  if (kind === "pwsh") {
-    return "pwsh";
-  }
-  if (kind === "bash") {
-    return platform === "win32"
-      ? windowsGitBashExecutable(env) ?? "bash.exe"
-      : (optionalString(env.SHELL)?.endsWith("/bash") === true ? env.SHELL! : "bash");
-  }
-  return optionalString(env.SHELL) ?? "/bin/sh";
-}
-
-function shellSyntax(kind: Exclude<ConfiguredCommandShellKind, "auto">): SanitizedCommandShellConfig["syntax"] {
+function shellSyntax(kind: ResolvedCommandShellKind): SanitizedCommandShellConfig["syntax"] {
   if (kind === "cmd") return "cmd";
   if (kind === "powershell" || kind === "pwsh") return "powershell";
   return "posix";
 }
 
-function shellLabel(kind: Exclude<ConfiguredCommandShellKind, "auto">): string {
+function shellLabel(kind: ResolvedCommandShellKind, platform: NodeJS.Platform, executable?: string): string {
   if (kind === "cmd") return "Windows Command Prompt";
   if (kind === "powershell") return "Windows PowerShell";
   if (kind === "pwsh") return "PowerShell";
-  if (kind === "bash") return "Bash";
+  if (kind === "bash") return platform === "win32" ? "Git Bash" : "Bash";
   return "POSIX shell";
-}
-
-function usePowerShellOnWindows(env: Readonly<Record<string, string | undefined>>): boolean {
-  return env.AGENTARBOR_USE_POWERSHELL_TOOL === "1" || env.CLAUDE_CODE_USE_POWERSHELL_TOOL === "1";
-}
-
-function windowsGitBashExecutable(env: Readonly<Record<string, string | undefined>>): string | undefined {
-  const configured = optionalString(env.AGENTARBOR_GIT_BASH_PATH) ?? optionalString(env.CLAUDE_CODE_GIT_BASH_PATH) ?? optionalString(env.GIT_BASH_PATH);
-  if (configured !== undefined) {
-    return configured;
-  }
-  return [
-    "C:\\Program Files\\Git\\bin\\bash.exe",
-    "C:\\Program Files (x86)\\Git\\bin\\bash.exe",
-  ].find((candidate) => existsSync(candidate));
 }
 
 function shellInvocation(executable: string, syntax: SanitizedCommandShellConfig["syntax"]): readonly string[] {
@@ -154,20 +115,29 @@ function shellInvocation(executable: string, syntax: SanitizedCommandShellConfig
   return [executable, "-lc", "<commandLine>"];
 }
 
-function shellNotes(syntax: SanitizedCommandShellConfig["syntax"]): readonly string[] {
+function shellNotes(
+  syntax: SanitizedCommandShellConfig["syntax"],
+  configuredKind: ConfiguredCommandShellKind
+): readonly string[] {
+  const autoNote = configuredKind === "auto"
+    ? ["This shell was selected by AgentArbor auto-detection from the current local environment."]
+    : [];
   if (syntax === "cmd") {
     return [
+      ...autoNote,
       "Write one complete cmd.exe command line.",
       "Use cmd syntax for environment expansion, pipes, redirection, and command chaining.",
     ];
   }
   if (syntax === "powershell") {
     return [
+      ...autoNote,
       "Write one complete PowerShell command line.",
       "Use PowerShell syntax for variables, pipelines, quoting, and command chaining.",
     ];
   }
   return [
+    ...autoNote,
     "Write one complete POSIX shell command line.",
     "Use POSIX shell syntax for quoting, environment expansion, pipes, redirection, and command chaining.",
   ];

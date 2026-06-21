@@ -594,7 +594,29 @@ export type SanitizedWorkspaceConfig = {
   readonly updatedAt: string;
 };
 
+export type CommandShellAvailability = "available" | "missing";
+
+export type SanitizedCommandShellOption = {
+  readonly kind: Exclude<ConfiguredCommandShellKind, "auto">;
+  readonly label: string;
+  readonly executable?: string;
+  readonly syntax: "cmd" | "powershell" | "posix";
+  readonly availability: CommandShellAvailability;
+  readonly reason?: string;
+};
+
+export type SanitizedRuntimeEnvironmentTool = {
+  readonly id: "node" | "python" | "git-bash";
+  readonly label: string;
+  readonly description: string;
+  readonly executable?: string;
+  readonly availability: CommandShellAvailability;
+  readonly reason?: string;
+};
+
 export type SanitizedCommandShellConfig = {
+  readonly configuredKind: ConfiguredCommandShellKind;
+  readonly autoDetected: boolean;
   readonly kind: Exclude<ConfiguredCommandShellKind, "auto">;
   readonly label: string;
   readonly executable: string;
@@ -603,6 +625,8 @@ export type SanitizedCommandShellConfig = {
   readonly invocation: readonly string[];
   readonly commandLineParameter: "commandLine";
   readonly notes: readonly string[];
+  readonly availableShells: readonly SanitizedCommandShellOption[];
+  readonly runtimeTools: readonly SanitizedRuntimeEnvironmentTool[];
   readonly updatedAt: string;
 };
 

@@ -193,10 +193,18 @@ test("panel config API persists command shell selection into capability snapshot
     assert.equal(initial.status, 200);
     assert.equal(update.status, 200);
     assert.equal(after.status, 200);
+    assert.equal(initial.body.commandShell.configuredKind, "auto");
+    assert.equal(initial.body.commandShell.autoDetected, true);
+    assert.equal(Array.isArray(initial.body.commandShell.availableShells), true);
+    assert.equal(Array.isArray(initial.body.commandShell.runtimeTools), true);
     assert.equal(update.body.commandShell.kind, "pwsh");
+    assert.equal(update.body.commandShell.configuredKind, "pwsh");
+    assert.equal(update.body.commandShell.autoDetected, false);
     assert.equal(update.body.commandShell.syntax, "powershell");
     assert.equal(update.body.capabilities.commandShell.kind, "pwsh");
+    assert.equal(update.body.capabilities.commandShell.configuredKind, "pwsh");
     assert.equal(after.body.commandShell.kind, "pwsh");
+    assert.equal(after.body.commandShell.configuredKind, "pwsh");
     assert.equal(after.body.capabilities.commandShell.kind, "pwsh");
   } finally {
     await server.close();

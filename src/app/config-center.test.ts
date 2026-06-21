@@ -88,6 +88,25 @@ test("config settings schema keeps tool and MCP settings split", async () => {
   assert.equal(settingsUtils.includes("export function asRecord"), true);
 });
 
+test("command shell settings keep runtime environment detection split", async () => {
+  const [commandShellSettings, runtimeEnvironmentDetection] = await Promise.all([
+    fs.readFile(path.join(process.cwd(), "src", "app", "config-center", "command-shell-settings.ts"), "utf8"),
+    fs.readFile(path.join(process.cwd(), "src", "app", "config-center", "runtime-environment-detection.ts"), "utf8"),
+  ]);
+
+  assert.equal(commandShellSettings.includes('from "./runtime-environment-detection.js"'), true);
+  assert.equal(commandShellSettings.includes('from "node:fs"'), false);
+  assert.equal(commandShellSettings.includes('from "node:path"'), false);
+  assert.equal(commandShellSettings.includes("function detectCommandShellOptions"), false);
+  assert.equal(commandShellSettings.includes("function detectRuntimeEnvironmentTools"), false);
+  assert.equal(commandShellSettings.includes("function findExecutableInPath"), false);
+  assert.equal(runtimeEnvironmentDetection.includes("export function detectCommandShellOptions"), true);
+  assert.equal(runtimeEnvironmentDetection.includes("export function detectRuntimeEnvironmentTools"), true);
+  assert.equal(runtimeEnvironmentDetection.includes("export function defaultShellKind"), true);
+  assert.equal(runtimeEnvironmentDetection.includes("export function defaultExecutable"), true);
+  assert.equal(runtimeEnvironmentDetection.includes("function findExecutableInPath"), true);
+});
+
 test("ConfigCenter keeps projections and workspace validation split from orchestration", async () => {
   const [configCenter, projections, workspaceSettings] = await Promise.all([
     fs.readFile(path.join(process.cwd(), "src", "app", "config-center.ts"), "utf8"),
@@ -121,16 +140,29 @@ test("command shell auto mode prefers Windows shells that avoid cmd quoting trap
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-config-shell-"));
   try {
     const fakeGitBash = path.join(directory, "bash.exe");
+    const fakeNode = path.join(directory, "node.exe");
+    const fakePython = path.join(directory, "python.exe");
     await fs.writeFile(fakeGitBash, "", "utf8");
+    await fs.writeFile(fakeNode, "", "utf8");
+    await fs.writeFile(fakePython, "", "utf8");
 
     const gitBash = toSanitizedCommandShellConfig(undefined, {
       platform: "win32",
-      env: { CLAUDE_CODE_GIT_BASH_PATH: fakeGitBash },
+      env: {
+        CLAUDE_CODE_GIT_BASH_PATH: fakeGitBash,
+        PATH: directory,
+        PATHEXT: ".EXE",
+      },
       now: "test",
     });
-    const powerShell = toSanitizedCommandShellConfig(undefined, {
+    const externalPowerShellPreference = toSanitizedCommandShellConfig(undefined, {
       platform: "win32",
       env: { CLAUDE_CODE_GIT_BASH_PATH: fakeGitBash, CLAUDE_CODE_USE_POWERSHELL_TOOL: "1" },
+      now: "test",
+    });
+    const agentPowerShellPreference = toSanitizedCommandShellConfig(undefined, {
+      platform: "win32",
+      env: { CLAUDE_CODE_GIT_BASH_PATH: fakeGitBash, AGENTARBOR_USE_POWERSHELL_TOOL: "1" },
       now: "test",
     });
     const explicitCmd = toSanitizedCommandShellConfig({ kind: "cmd", updatedAt: "test" }, {
@@ -139,11 +171,20 @@ test("command shell auto mode prefers Windows shells that avoid cmd quoting trap
       now: "test",
     });
 
+    assert.equal(gitBash.configuredKind, "auto");
+    assert.equal(gitBash.autoDetected, true);
     assert.equal(gitBash.kind, "bash");
+    assert.equal(gitBash.label, "Git Bash");
     assert.equal(gitBash.syntax, "posix");
     assert.equal(gitBash.executable, fakeGitBash);
-    assert.equal(powerShell.kind, "powershell");
-    assert.equal(powerShell.syntax, "powershell");
+    assert.equal(gitBash.availableShells.some((shell) => shell.kind === "bash" && shell.availability === "available"), true);
+    assert.equal(gitBash.runtimeTools.some((tool) => tool.id === "node" && tool.availability === "available"), true);
+    assert.equal(gitBash.runtimeTools.some((tool) => tool.id === "python" && tool.availability === "available"), true);
+    assert.equal(gitBash.runtimeTools.some((tool) => tool.id === "git-bash" && tool.availability === "available"), true);
+    assert.equal(externalPowerShellPreference.kind, "bash");
+    assert.equal(agentPowerShellPreference.kind, "powershell");
+    assert.equal(agentPowerShellPreference.syntax, "powershell");
+    assert.equal(explicitCmd.configuredKind, "cmd");
     assert.equal(explicitCmd.kind, "cmd");
   } finally {
     await fs.rm(directory, { recursive: true, force: true });

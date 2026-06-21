@@ -82,7 +82,7 @@ test("local workspace adapter keeps sandbox policy and tool families split from 
   assert.equal(commonSource.includes("export function asRecord"), true);
 });
 
-test("default command shell follows mainstream Windows fallback order", async () => {
+test("default command shell follows AgentArbor Windows auto-detection order", async () => {
   const root = await mkdtemp(path.join(tmpdir(), "agentarbor-shell-default-"));
   try {
     const fakeGitBash = path.join(root, "bash.exe");
@@ -93,16 +93,23 @@ test("default command shell follows mainstream Windows fallback order", async ()
     });
     const powerShell = createDefaultCommandShellConfig("win32", {
       CLAUDE_CODE_GIT_BASH_PATH: fakeGitBash,
+      AGENTARBOR_USE_POWERSHELL_TOOL: "1",
+    });
+    const externalPowerShellPreference = createDefaultCommandShellConfig("win32", {
+      CLAUDE_CODE_GIT_BASH_PATH: fakeGitBash,
       CLAUDE_CODE_USE_POWERSHELL_TOOL: "1",
     });
     const fallback = createDefaultCommandShellConfig("win32", {});
 
+    assert.equal(gitBash.configuredKind, "auto");
     assert.equal(gitBash.kind, "bash");
+    assert.equal(gitBash.label, "Git Bash");
     assert.equal(gitBash.syntax, "posix");
     assert.equal(gitBash.executable, fakeGitBash);
     assert.equal(powerShell.kind, "powershell");
     assert.equal(powerShell.syntax, "powershell");
-    assert.equal(fallback.kind === "bash" || fallback.kind === "powershell", true);
+    assert.equal(externalPowerShellPreference.kind, "bash");
+    assert.equal(fallback.kind === "bash" || fallback.kind === "pwsh" || fallback.kind === "powershell" || fallback.kind === "cmd", true);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -659,6 +666,7 @@ test("local shell_command falls back to shell execution for Windows cmd shims wh
     process.env.PATH = `${fakeBin}${path.delimiter}${originalPath ?? ""}`;
     const shellCommand = createLocalShellCommandTool(root, {
       commandShell: {
+        ...createDefaultCommandShellConfig("win32", {}),
         kind: "cmd",
         label: "Windows Command Prompt",
         executable: process.env.ComSpec ?? process.env.COMSPEC ?? "cmd.exe",

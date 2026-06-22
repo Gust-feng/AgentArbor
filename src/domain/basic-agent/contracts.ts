@@ -40,6 +40,14 @@ export type BasicAgentRun = {
   };
 };
 
+export type SkillJsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | readonly SkillJsonValue[]
+  | { readonly [key: string]: SkillJsonValue };
+
 export type RunEventVisibility = "compact" | "expanded" | "debug";
 
 export type RunEvent = {
@@ -120,8 +128,35 @@ export type SkillDefinition = {
   readonly lastUsedAt?: string;
   readonly summary?: string;
   readonly category?: string;
+  readonly sourceKind?: "project" | "user" | "plugin" | "admin" | "custom";
+  readonly sourceRootId?: string;
+  readonly sourcePrecedence?: number;
+  readonly stateKey?: string;
+  readonly version?: string;
+  readonly provenance?: Readonly<Record<string, SkillJsonValue>>;
+  readonly whenToUse?: string;
+  readonly disableModelInvocation?: boolean;
+  readonly userInvocable?: boolean;
   readonly scripts?: readonly string[];
   readonly references?: readonly string[];
+  readonly assets?: readonly string[];
+  readonly allowedTools?: readonly string[];
+  readonly resources?: readonly {
+    readonly kind: "script" | "reference" | "asset";
+    readonly name: string;
+    readonly relativePath?: string;
+    readonly sourcePath: string;
+    readonly contentHash?: string;
+    readonly byteLength?: number;
+    readonly loadError?: string;
+  }[];
+  readonly resourceIndex?: readonly {
+    readonly type: "script" | "reference" | "asset" | "eval";
+    readonly relativePath: string;
+    readonly exists: boolean;
+    readonly contentHash?: string;
+    readonly byteLength?: number;
+  }[];
 };
 
 export type ContextAttachmentKind = "workspace" | "file" | "project" | "web";
@@ -182,13 +217,69 @@ export type AgentDeliverable = {
   readonly createdAt: string;
 };
 
+export type ContextLedgerSkillLoadStatus = "loaded" | "failed";
+
+export type ContextLedgerSkillInjectionStatus = "loaded" | "injected" | "omitted" | "failed";
+
+export type ContextLedgerSkillMarkUsedStatus = "succeeded" | "failed" | "skipped";
+
+export type SkillSelectionMethod =
+  | "explicit"
+  | "model"
+  | "keyword"
+  | "keyword_fallback"
+  | "mixed"
+  | "unknown"
+  | (string & {});
+
+export type SkillSelectionDecisionReason = {
+  readonly code: string;
+  readonly summary: string;
+  readonly skillId?: string;
+  readonly skillName?: string;
+  readonly confidence?: number;
+};
+
+export type SkillSelectionDecisionFacts = {
+  readonly selectionMethod: SkillSelectionMethod;
+  readonly modelCallRef?: string;
+  readonly candidateSkillIds: readonly string[];
+  readonly selectedSkillIds: readonly string[];
+  readonly omittedReasons?: readonly SkillSelectionDecisionReason[];
+  readonly rejectedReasons?: readonly SkillSelectionDecisionReason[];
+  readonly confidence?: number;
+  readonly reasonSummary?: string;
+};
+
+export type ContextLedgerSkillFacts = {
+  readonly skillId: string;
+  readonly name: string;
+  readonly triggerReason: string;
+  readonly summary: string;
+  readonly sourceRef: string;
+  readonly selectedAt?: string;
+  readonly loadedAt?: string;
+  readonly bodyHash?: string;
+  readonly contentHash?: string;
+  readonly bodyCharCount?: number;
+  readonly loadStatus: ContextLedgerSkillLoadStatus;
+  readonly injectionStatus: ContextLedgerSkillInjectionStatus;
+  readonly markUsedStatus?: ContextLedgerSkillMarkUsedStatus;
+  readonly truncated: boolean;
+  readonly omitted: boolean;
+  readonly error?: string;
+  readonly warning?: string;
+  readonly selection?: SkillSelectionDecisionFacts;
+};
+
 export type ContextLedgerEntry = {
   readonly entryId: string;
   readonly kind: "goal" | "attachment" | "history" | "skill" | "tool_evidence" | "budget" | "truncation";
   readonly title: string;
   readonly summary: string;
   readonly refs: readonly ObservationRef[];
-  readonly status: "used" | "truncated" | "omitted" | "blocked";
+  readonly status: "used" | "truncated" | "omitted" | "blocked" | "failed";
+  readonly skill?: ContextLedgerSkillFacts;
 };
 
 export type ContextLedger = {
@@ -227,6 +318,17 @@ export type TriggeredSkillReadModel = {
   readonly summary: string;
   readonly sourceRef: string;
   readonly truncated: boolean;
+  readonly loadedAt?: string;
+  readonly bodyHash?: string;
+  readonly contentHash?: string;
+  readonly bodyCharCount?: number;
+  readonly loadStatus?: ContextLedgerSkillLoadStatus;
+  readonly injectionStatus?: ContextLedgerSkillInjectionStatus;
+  readonly markUsedStatus?: ContextLedgerSkillMarkUsedStatus;
+  readonly omitted?: boolean;
+  readonly error?: string;
+  readonly warning?: string;
+  readonly selection?: SkillSelectionDecisionFacts;
 };
 
 export type DesktopWorkViewReadModel = {

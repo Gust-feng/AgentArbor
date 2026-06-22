@@ -315,6 +315,17 @@ test("run capability policy exposes MCP by default while filtering disabled skil
         enabled: true,
         sourcePath: "Z:/AgentArbor/.agents/skills/enabled/SKILL.md",
         triggers: ["enabled"],
+        summary: "Short enabled skill summary.",
+        category: "review",
+        sourceKind: "project",
+        sourceRootId: "project",
+        sourcePrecedence: 100,
+        stateKey: "source:project:enabled-skill",
+        metadata: { owner: "platform", priority: 1 },
+        allowedTools: ["search", "docs__lookup"],
+        contentHash: "sha256:enabled-content",
+        bodyHash: "sha256:enabled-body",
+        validationStatus: "valid",
       },
       {
         id: "disabled-skill",
@@ -323,6 +334,16 @@ test("run capability policy exposes MCP by default while filtering disabled skil
         enabled: false,
         sourcePath: "Z:/AgentArbor/.agents/skills/disabled/SKILL.md",
         triggers: ["disabled"],
+      },
+      {
+        id: "invalid-skill",
+        name: "Invalid Skill",
+        description: "",
+        enabled: true,
+        sourcePath: "Z:/AgentArbor/.agents/skills/invalid/SKILL.md",
+        triggers: ["invalid"],
+        validationStatus: "invalid",
+        validationErrors: ["description is required"],
       },
     ],
   });
@@ -335,7 +356,19 @@ test("run capability policy exposes MCP by default while filtering disabled skil
   });
 
   assert.deepEqual(resolution.enabledSkills.map((skill) => skill.id), ["enabled-skill"]);
+  assert.equal(resolution.enabledSkills[0]?.summary, "Short enabled skill summary.");
+  assert.equal(resolution.enabledSkills[0]?.category, "review");
+  assert.equal(resolution.enabledSkills[0]?.sourceKind, "project");
+  assert.equal(resolution.enabledSkills[0]?.sourceRootId, "project");
+  assert.equal(resolution.enabledSkills[0]?.sourcePrecedence, 100);
+  assert.equal(resolution.enabledSkills[0]?.stateKey, "source:project:enabled-skill");
+  assert.deepEqual(resolution.enabledSkills[0]?.metadata, { owner: "platform", priority: 1 });
+  assert.deepEqual(resolution.enabledSkills[0]?.allowedTools, ["search", "docs__lookup"]);
+  assert.equal(resolution.enabledSkills[0]?.contentHash, "sha256:enabled-content");
+  assert.equal(resolution.enabledSkills[0]?.bodyHash, "sha256:enabled-body");
   assert.equal("sourcePath" in (resolution.enabledSkills[0] as Record<string, unknown>), false);
+  assert.equal("body" in (resolution.enabledSkills[0] as Record<string, unknown>), false);
+  assert.equal("resources" in (resolution.enabledSkills[0] as Record<string, unknown>), false);
   assert.deepEqual(resolution.allowedTools, ["search", "docs__lookup"]);
   assert.equal(resolution.toolExposures.find((tool) => tool.name === "docs__lookup")?.modelVisible, true);
   assert.equal(resolution.mcpDrafts.length, 1);

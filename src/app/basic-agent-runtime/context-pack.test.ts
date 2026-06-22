@@ -3,6 +3,7 @@ import test from "node:test";
 import { createTaskSoil } from "../../domain/soil/index.js";
 import { desktopAgentContextPack, type DesktopAgentSkillContext } from "../desktop-agent-prompts.js";
 import { DESKTOP_ROOT_AGENT } from "../agent-prompts/desktop-root-agent.js";
+import { safeDesktopAgentContextPack } from "../desktop-agent-session-projection.js";
 import { buildBasicAgentContextPack } from "./context-pack.js";
 import type { BasicAgentContextAgentDefinition } from "./context-ledger-items.js";
 
@@ -90,6 +91,48 @@ test("Basic Agent context pack includes history, task refs, readonly previews, a
   assert.equal(text.includes("api_key=sk-context-secret"), true);
   assert.equal(text.includes("[redacted-secret]"), false);
   assert.equal(text.includes("[redacted-token]"), false);
+});
+
+test("safe Desktop Agent context pack projection omits full skill body while model messages keep it", () => {
+  const taskSoil = createTaskSoil({
+    rawGoal: "review this project",
+    goalId: "goal-skill-safe-projection",
+    traceId: "trace-skill-safe-projection",
+  });
+  const skill: DesktopAgentSkillContext = {
+    skill: {
+      id: "safe-projection-review",
+      name: "Safe Projection Review",
+      description: "Review repositories.",
+      enabled: true,
+      sourcePath: "Z:/AgentArbor/.agents/skills/safe-projection/SKILL.md",
+      triggers: ["review"],
+    },
+    body: "FULL PRIVATE SKILL BODY SHOULD ONLY BE MODEL CONTEXT",
+    triggerReason: "触发词：review",
+    selectedAt: "2026-06-05T00:00:00.000Z",
+    loadStatus: "loaded",
+    loadedAt: "2026-06-05T00:00:00.000Z",
+    bodyHash: "sha256:test-skill-body",
+    contentHash: "sha256:test-skill-body",
+    bodyCharCount: 53,
+    truncated: false,
+    omitted: false,
+    summary: "技能：Safe Projection Review\n触发原因：触发词：review\n加载状态：已加载",
+  };
+
+  const pack = buildBasicAgentContextPack({
+    agentDefinition: CONTEXT_PACK_TEST_AGENT,
+    goal: "please review this project",
+    taskSoil,
+    conversationHistory: [],
+    skillContexts: [skill],
+  });
+  const safe = safeDesktopAgentContextPack(pack);
+
+  assert.equal(pack.messages.some((message) => message.content.includes("FULL PRIVATE SKILL BODY")), true);
+  assert.equal(JSON.stringify(safe).includes("FULL PRIVATE SKILL BODY"), false);
+  assert.equal(JSON.stringify(safe).includes("sha256:test-skill-body"), true);
 });
 
 test("Basic Agent context pack preserves conversation history indentation and blank lines for the model", () => {

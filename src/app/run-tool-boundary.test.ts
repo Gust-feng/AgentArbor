@@ -68,6 +68,99 @@ test("run tool boundary stays empty before a run capability snapshot exists", ()
   assert.equal(boundary.capabilityResolution, undefined);
 });
 
+test("run tool boundary audits selected skill allowed-tools without hiding normal run tools", () => {
+  const boundary = resolveRunToolBoundary({
+    agentDefinition: DESKTOP_ROOT_AGENT,
+    snapshot: capabilitySnapshot([
+      tool("search", "read-only"),
+      tool("read_file", "read-only"),
+      tool("write_file", "read-write"),
+    ]),
+    goal: "use skill-restricted tools",
+    taskSoil: createTaskSoil({ rawGoal: "use skill-restricted tools" }),
+    toolCenter: executableToolBroker(["search", "read_file", "write_file"]),
+    skillContexts: [
+      skillContext("repo-review", { allowedTools: ["read_file", "missing_tool"] }),
+    ],
+  });
+
+  assert.deepEqual(boundary.allowedTools, ["search", "read_file", "write_file"]);
+  assert.deepEqual(boundary.capabilityResolution?.allowedTools, ["search", "read_file", "write_file"]);
+  assert.deepEqual(boundary.capabilityResolution?.capabilityPlan.allowedTools, ["search", "read_file", "write_file"]);
+  assert.deepEqual(boundary.capabilityResolution?.capabilityPlan.tools?.allowedTools, ["search", "read_file", "write_file"]);
+  assert.equal(boundary.capabilityResolution?.capabilityPlan.fileOperations?.canWriteWorkspace, true);
+  assert.equal(boundary.capabilityResolution?.toolExposures.find((item) => item.name === "search")?.modelVisible, true);
+  assert.equal(
+    boundary.capabilityResolution?.warnings.some((warning) =>
+      warning === "选中技能声明了 1 个当前运行不可用工具。"
+    ),
+    true
+  );
+});
+
+test("run tool boundary uses the union of multiple selected skill allowed-tools without expanding policy", () => {
+  const boundary = resolveRunToolBoundary({
+    agentDefinition: DESKTOP_ROOT_AGENT,
+    snapshot: capabilitySnapshot([
+      tool("search", "read-only"),
+      tool("read_file", "read-only"),
+      tool("write_file", "read-write"),
+      tool("shell_command", "execute"),
+    ]),
+    goal: "use two restricted skills",
+    taskSoil: createTaskSoil({ rawGoal: "use two restricted skills" }),
+    toolCenter: executableToolBroker(["search", "read_file", "write_file", "shell_command"]),
+    skillContexts: [
+      skillContext("repo-review", { allowedTools: ["read_file", "shell_command"] }),
+      skillContext("research", { allowedTools: ["search", "missing_tool"] }),
+    ],
+  });
+
+  assert.deepEqual(boundary.allowedTools, ["search", "read_file", "write_file", "shell_command"]);
+  assert.equal(boundary.capabilityResolution?.toolExposures.find((item) => item.name === "write_file")?.modelVisible, true);
+  assert.equal(
+    boundary.capabilityResolution?.warnings.some((warning) =>
+      warning === "选中技能声明了 1 个当前运行不可用工具。"
+    ),
+    true
+  );
+});
+
+test("run tool boundary does not restrict tools when selected skills do not declare allowed-tools", () => {
+  const boundary = resolveRunToolBoundary({
+    agentDefinition: DESKTOP_ROOT_AGENT,
+    snapshot: capabilitySnapshot([
+      tool("search", "read-only"),
+      tool("read_file", "read-only"),
+    ]),
+    goal: "use unrestricted skill",
+    taskSoil: createTaskSoil({ rawGoal: "use unrestricted skill" }),
+    toolCenter: executableToolBroker(["search", "read_file"]),
+    skillContexts: [skillContext("unrestricted")],
+  });
+
+  assert.deepEqual(boundary.allowedTools, ["search", "read_file"]);
+});
+
+test("run tool boundary ignores failed or omitted skill contexts for tool restriction", () => {
+  const boundary = resolveRunToolBoundary({
+    agentDefinition: DESKTOP_ROOT_AGENT,
+    snapshot: capabilitySnapshot([
+      tool("search", "read-only"),
+      tool("read_file", "read-only"),
+    ]),
+    goal: "failed skill",
+    taskSoil: createTaskSoil({ rawGoal: "failed skill" }),
+    toolCenter: executableToolBroker(["search", "read_file"]),
+    skillContexts: [
+      skillContext("failed", { allowedTools: ["read_file"], loadStatus: "failed" }),
+      skillContext("omitted", { allowedTools: ["read_file"], omitted: true }),
+    ],
+  });
+
+  assert.deepEqual(boundary.allowedTools, ["search", "read_file"]);
+});
+
 function capabilitySnapshot(tools: readonly CapabilityToolCatalogItem[]): BasicAgentCapabilitySnapshot {
   return {
     snapshotId: "capability-snapshot-tool-boundary-test",
@@ -110,6 +203,31 @@ function capabilitySnapshot(tools: readonly CapabilityToolCatalogItem[]): BasicA
     },
     securitySummary: "Safe capability snapshot.",
     warnings: [],
+  };
+}
+
+function skillContext(
+  id: string,
+  overrides: {
+    readonly allowedTools?: readonly string[];
+    readonly loadStatus?: "loaded" | "failed";
+    readonly omitted?: boolean;
+  } = {}
+) {
+  return {
+    skill: {
+      id,
+      name: id,
+      description: `${id} skill`,
+      enabled: true,
+      sourcePath: `/skills/${id}/SKILL.md`,
+      triggers: [],
+      ...(overrides.allowedTools === undefined ? {} : { allowedTools: overrides.allowedTools }),
+    },
+    body: "Skill body.",
+    triggerReason: "test",
+    loadStatus: overrides.loadStatus ?? "loaded",
+    omitted: overrides.omitted,
   };
 }
 

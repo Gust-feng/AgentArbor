@@ -73,6 +73,7 @@ export type DesktopAgentCanvasReadModel = {
         readonly summary: string;
         readonly visibility: string;
         readonly truncated: boolean;
+        readonly skill?: NonNullable<DesktopAgentSessionResult["contextPack"]>["items"][number]["skill"];
       }[];
     };
   };
@@ -135,6 +136,7 @@ export function createDesktopAgentCanvas(input: {
                 summary: safeText(item.summary, 320),
                 visibility: item.visibility,
                 truncated: item.truncated,
+                skill: item.skill,
               })),
             },
     },

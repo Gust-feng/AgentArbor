@@ -1,5 +1,6 @@
 import type {
   ContextLedger,
+  ContextLedgerSkillFacts,
   AgentDeliverable,
   AgentDeliverableSection,
   BasicAgentRun,
@@ -8,6 +9,8 @@ import type {
   DesktopWorkViewReadModel,
   DesktopWorkViewStage,
   RunEvent,
+  SkillSelectionDecisionFacts,
+  SkillSelectionDecisionReason,
   TranscriptNode,
 } from "../../domain/basic-agent/index.js";
 import type { ObservationRef } from "../../domain/observation/index.js";
@@ -33,6 +36,7 @@ import {
   type WorkViewCanvasContextLike,
 } from "./work-session-context.js";
 import { transcriptNodesFromRunEvents } from "./work-session-transcript.js";
+import type { BasicAgentContextSkillFacts } from "./contracts.js";
 
 const DESKTOP_WORK_VIEW_ANSWER_MAX_CHARS = 128_000;
 
@@ -142,8 +146,11 @@ export function createDesktopWorkViewReadModel(
 function triggeredSkillsFor(input: CreateDesktopWorkViewReadModelInput): DesktopWorkViewReadModel["triggeredSkills"] {
   if (input.restoredContextLedger !== undefined) {
     return input.restoredContextLedger.entries
-      .filter((entry) => entry.kind === "skill" && (entry.status === "used" || entry.status === "truncated"))
+      .filter((entry) => entry.kind === "skill")
       .map((entry) => {
+        if (entry.skill !== undefined) {
+          return triggeredSkillFromFacts(entry.skill);
+        }
         const parsed = parseSkillContextSummary(entry.entryId, entry.summary);
         return {
           skillId: parsed.skillId,
@@ -160,6 +167,9 @@ function triggeredSkillsFor(input: CreateDesktopWorkViewReadModelInput): Desktop
   return items
     .filter((item) => item.sourceKind === "skill")
     .map((item) => {
+      if (item.skill !== undefined) {
+        return triggeredSkillFromFacts(item.skill);
+      }
       const parsed = parseSkillContextSummary(item.itemId, item.summary);
       return {
         skillId: parsed.skillId,
@@ -172,6 +182,104 @@ function triggeredSkillsFor(input: CreateDesktopWorkViewReadModelInput): Desktop
     });
 }
 
+type SkillFactsLike = ContextLedgerSkillFacts | BasicAgentContextSkillFacts;
+
+function triggeredSkillFromFacts(facts: SkillFactsLike): DesktopWorkViewReadModel["triggeredSkills"][number] {
+  const injectionStatus = "injectionStatus" in facts
+    ? facts.injectionStatus
+    : facts.loadStatus === "failed"
+      ? "failed"
+      : "injected";
+  return {
+    skillId: redactOrdinaryText(facts.skillId, 160),
+    name: redactOrdinaryText(facts.name, 120),
+    triggerReason: redactOrdinaryText(facts.triggerReason, 240),
+    summary: redactOrdinaryText(facts.summary, 360),
+    sourceRef: redactOrdinaryText(facts.sourceRef, 180),
+    truncated: facts.truncated,
+    loadedAt: facts.loadedAt,
+    bodyHash: facts.bodyHash,
+    contentHash: facts.contentHash,
+    bodyCharCount: facts.bodyCharCount,
+    loadStatus: facts.loadStatus,
+    injectionStatus,
+    markUsedStatus: facts.markUsedStatus,
+    omitted: facts.omitted,
+    error: facts.error === undefined ? undefined : redactOrdinaryText(facts.error, 240),
+    warning: facts.warning === undefined ? undefined : redactOrdinaryText(facts.warning, 240),
+    ...(facts.selection === undefined ? {} : { selection: skillSelectionFactsForReadModel(facts.selection) }),
+  };
+}
+
+function skillSelectionFactsForReadModel(selection: SkillSelectionDecisionFacts): SkillSelectionDecisionFacts {
+  const modelCallRef = selection.modelCallRef === undefined ? undefined : redactOrdinaryText(selection.modelCallRef, 180);
+  const omittedReasons = skillSelectionReasonsForReadModel(selection.omittedReasons);
+  const rejectedReasons = skillSelectionReasonsForReadModel(selection.rejectedReasons);
+  const confidence = normalizedConfidence(selection.confidence);
+  const reasonSummary = selection.reasonSummary === undefined ? undefined : redactOrdinaryText(selection.reasonSummary, 320);
+  const selectionMethod = redactOrdinaryText(selection.selectionMethod, 80);
+  return {
+    selectionMethod: selectionMethod.length === 0 ? "unknown" : selectionMethod,
+    candidateSkillIds: uniqueRedactedStrings(selection.candidateSkillIds, 24, 160),
+    selectedSkillIds: uniqueRedactedStrings(selection.selectedSkillIds, 24, 160),
+    ...(modelCallRef === undefined || modelCallRef.length === 0 ? {} : { modelCallRef }),
+    ...(omittedReasons === undefined ? {} : { omittedReasons }),
+    ...(rejectedReasons === undefined ? {} : { rejectedReasons }),
+    ...(confidence === undefined ? {} : { confidence }),
+    ...(reasonSummary === undefined || reasonSummary.length === 0 ? {} : { reasonSummary }),
+  };
+}
+
+function skillSelectionReasonsForReadModel(
+  reasons: readonly SkillSelectionDecisionReason[] | undefined
+): readonly SkillSelectionDecisionReason[] | undefined {
+  const safeReasons = (reasons ?? [])
+    .slice(0, 12)
+    .map((reason): SkillSelectionDecisionReason | undefined => {
+      const code = redactOrdinaryText(reason.code, 80);
+      const summary = redactOrdinaryText(reason.summary, 320);
+      const skillId = reason.skillId === undefined ? undefined : redactOrdinaryText(reason.skillId, 160);
+      const skillName = reason.skillName === undefined ? undefined : redactOrdinaryText(reason.skillName, 120);
+      const confidence = normalizedConfidence(reason.confidence);
+      if (code.length === 0 || summary.length === 0) {
+        return undefined;
+      }
+      return {
+        code,
+        summary,
+        ...(skillId === undefined || skillId.length === 0 ? {} : { skillId }),
+        ...(skillName === undefined || skillName.length === 0 ? {} : { skillName }),
+        ...(confidence === undefined ? {} : { confidence }),
+      };
+    })
+    .filter((reason): reason is SkillSelectionDecisionReason => reason !== undefined);
+  return safeReasons.length === 0 ? undefined : safeReasons;
+}
+
+function uniqueRedactedStrings(values: readonly string[], limit: number, maxChars: number): readonly string[] {
+  const selected: string[] = [];
+  const seen = new Set<string>();
+  for (const value of values) {
+    const safe = redactOrdinaryText(value, maxChars);
+    if (safe.length === 0 || seen.has(safe)) {
+      continue;
+    }
+    seen.add(safe);
+    selected.push(safe);
+    if (selected.length >= limit) {
+      break;
+    }
+  }
+  return selected;
+}
+
+function normalizedConfidence(value: number | undefined): number | undefined {
+  if (value === undefined || !Number.isFinite(value)) {
+    return undefined;
+  }
+  return Math.max(0, Math.min(1, value));
+}
+
 function parseSkillContextSummary(
   itemId: string,
   summary: string
@@ -180,8 +288,14 @@ function parseSkillContextSummary(
   const markerIndex = itemId.indexOf(skillMarker);
   const skillId = markerIndex >= 0 ? itemId.slice(markerIndex + skillMarker.length) : itemId;
   const lines = summary.split(/\r?\n/).map((line) => line.trim()).filter((line) => line.length > 0);
-  const name = stripLabel(lines.find((line) => line.startsWith("Triggered skill:")), "Triggered skill:") ?? skillId;
-  const triggerReason = stripLabel(lines.find((line) => line.startsWith("Why:")), "Why:") ?? "技能名称或描述匹配当前任务。";
+  const name =
+    stripLabel(lines.find((line) => line.startsWith("Triggered skill:")), "Triggered skill:") ??
+    stripLabel(lines.find((line) => line.startsWith("技能：")), "技能：") ??
+    skillId;
+  const triggerReason =
+    stripLabel(lines.find((line) => line.startsWith("Why:")), "Why:") ??
+    stripLabel(lines.find((line) => line.startsWith("触发原因：")), "触发原因：") ??
+    "技能名称或描述匹配当前任务。";
   return {
     skillId: redactOrdinaryText(skillId, 160),
     name: redactOrdinaryText(name, 120),

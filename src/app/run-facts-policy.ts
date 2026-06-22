@@ -163,7 +163,7 @@ function capabilityResolutionMatchesFrozenRunFacts(
     }
   }
   const enabledSkillsById = new Map(
-    snapshot.skillCatalog.filter((skill) => skill.enabled).map((skill) => [skill.id, skill])
+    snapshot.skillCatalog.filter(isSnapshotSkillRunEnabled).map((skill) => [skill.id, skill])
   );
   if (candidate.enabledSkills.length !== enabledSkillsById.size) {
     return false;
@@ -236,9 +236,32 @@ function runEnabledSkillMatchesSnapshotSkill(
   snapshotSkill: BasicAgentCapabilitySnapshot["skillCatalog"][number]
 ): boolean {
   return (
+    !runEnabledSkillLeaksCatalogOnlyFields(skill) &&
     skill.name === snapshotSkill.name &&
     skill.description === snapshotSkill.description &&
-    sameJsonValue(skill.triggers, snapshotSkill.triggers)
+    skill.summary === snapshotSkill.summary &&
+    skill.category === snapshotSkill.category &&
+    skill.contentHash === snapshotSkill.contentHash &&
+    skill.bodyHash === snapshotSkill.bodyHash &&
+    sameJsonValue(skill.triggers, snapshotSkill.triggers) &&
+    sameJsonValue(skill.metadata, snapshotSkill.metadata) &&
+    sameJsonValue(skill.allowedTools ?? [], snapshotSkill.allowedTools ?? [])
+  );
+}
+
+function isSnapshotSkillRunEnabled(skill: BasicAgentCapabilitySnapshot["skillCatalog"][number]): boolean {
+  return skill.enabled && (skill.validationStatus === undefined || skill.validationStatus === "valid");
+}
+
+function runEnabledSkillLeaksCatalogOnlyFields(
+  skill: NonNullable<RunFactCandidate["capabilityResolution"]>["enabledSkills"][number]
+): boolean {
+  const record = skill as Record<string, unknown>;
+  return (
+    record.sourcePath !== undefined ||
+    record.body !== undefined ||
+    record.resources !== undefined ||
+    record.rawResources !== undefined
   );
 }
 

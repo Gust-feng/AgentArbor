@@ -31,6 +31,7 @@ import {
 import {
   FileSystemSkillStateStore,
   resolveSkillStateStorePath,
+  type SkillRootInput,
   type SkillStateStore,
 } from "../skills/index.js";
 import type { PanelContextAttachmentSelection, PanelModelCatalogFetch, PanelProviderFetch, PanelServerOptions } from "./types.js";
@@ -61,7 +62,7 @@ export type PanelRuntime = {
   readonly runtimePaths?: FileSystemRuntimeDatabasePaths;
   readonly processRegistry: InMemoryProcessRegistry;
   readonly processTerminator: ProcessTerminator;
-  readonly skillRoots: readonly string[];
+  readonly skillRoots: readonly SkillRootInput[];
   readonly skillStateStore?: SkillStateStore;
 };
 
@@ -134,7 +135,7 @@ function assemblePanelRuntime(input: {
   readonly contextAttachmentPicker?: () => Promise<PanelContextAttachmentSelection | undefined>;
   readonly runtimeDatabase?: RuntimeDatabase;
   readonly runtimePaths?: FileSystemRuntimeDatabasePaths;
-  readonly skillRoots: readonly string[];
+  readonly skillRoots: readonly SkillRootInput[];
   readonly skillStateStore?: SkillStateStore;
   readonly processTerminator?: ProcessTerminator;
   readonly hooks: PanelRuntimeHooks;
@@ -295,8 +296,48 @@ async function capabilitySnapshotForRun(
   };
 }
 
-function resolveSkillRoots(options: PanelServerOptions): readonly string[] {
-  return options.skillRoots ?? [path.join(process.cwd(), ".agents", "skills")];
+function resolveSkillRoots(options: PanelServerOptions): readonly SkillRootInput[] {
+  if (options.skillRoots !== undefined) {
+    return options.skillRoots;
+  }
+  return [
+    ...resolveDefaultPanelSkillRoots(),
+    ...(options.additionalSkillRoots ?? []),
+  ];
+}
+
+export function resolveDefaultPanelSkillRoots(input: {
+  readonly cwd?: string;
+  readonly home?: string;
+} = {}): readonly SkillRootInput[] {
+  const projectRoot = path.join(input.cwd ?? process.cwd(), ".agents", "skills");
+  const userRoot = path.join(input.home ?? homeDirectory(), ".agents", "skills");
+  if (path.resolve(projectRoot) === path.resolve(userRoot)) {
+    return [{
+      rootPath: projectRoot,
+      sourceKind: "project",
+      sourceRootId: "project",
+      precedence: 100,
+    }];
+  }
+  return [
+    {
+      rootPath: userRoot,
+      sourceKind: "user",
+      sourceRootId: "user",
+      precedence: 10,
+    },
+    {
+      rootPath: projectRoot,
+      sourceKind: "project",
+      sourceRootId: "project",
+      precedence: 100,
+    },
+  ];
+}
+
+function homeDirectory(): string {
+  return process.env.USERPROFILE ?? process.env.HOME ?? process.cwd();
 }
 
 function resolveSkillStateStore(configDirectory: string | undefined): SkillStateStore | undefined {

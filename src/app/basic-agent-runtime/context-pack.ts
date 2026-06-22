@@ -66,38 +66,39 @@ function contextMessageForItem(item: BasicAgentContextItem): ModelMessage | unde
   if (item.visibility !== "model") {
     return undefined;
   }
+  const content = item.modelContent ?? item.summary;
   if (item.sourceKind === "system" || item.sourceKind === "skill") {
     return {
       role: "system",
-      content: item.summary,
+      content,
       ref: item.itemId,
     };
   }
   if (item.sourceKind === "conversation" || item.sourceKind === "conversation_recent_turn") {
     return {
       role: item.role ?? "user",
-      content: item.summary,
+      content,
       ref: item.itemId,
     };
   }
   if (item.sourceKind === "conversation_summary") {
     return {
       role: "system",
-      content: item.summary,
+      content,
       ref: item.itemId,
     };
   }
   if (item.sourceKind === "user_message") {
     return {
       role: "user",
-      content: item.summary,
+      content,
       ref: item.itemId,
     };
   }
   if (item.sourceKind === "tool_evidence") {
     return {
       role: "system",
-      content: item.summary,
+      content,
       ref: item.itemId,
     };
   }

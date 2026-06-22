@@ -112,6 +112,21 @@ export type DesktopAgentSessionRuntimeContext = {
   readonly goalId: string;
 };
 
+export type DesktopAgentSkillResolverContext = DesktopAgentSessionRuntimeContext & {
+  readonly goal: string;
+  readonly conversationHistory: readonly DesktopAgentConversationMessage[];
+  readonly intelligenceChannel: IntelligenceChannel;
+  readonly abortSignal?: AbortSignal;
+};
+
+export type DesktopAgentToolCenterContext = DesktopAgentSessionRuntimeContext & {
+  readonly skillContexts: readonly DesktopAgentSkillContext[];
+};
+
+export type DesktopAgentToolCenterFactory =
+  ((runtime: MinimalRuntime, context?: DesktopAgentToolCenterContext) => ToolExecutionBroker) |
+  ((runtime: MinimalRuntime) => ToolExecutionBroker);
+
 export type RunDesktopAgentSessionOptions = {
   readonly aiMode?: ModelRuntimeMode;
   readonly agentDefinition?: AgentDefinition;
@@ -120,6 +135,7 @@ export type RunDesktopAgentSessionOptions = {
   readonly taskSoilInput?: DesktopTaskSoilInput;
   readonly conversationHistory?: readonly DesktopAgentConversationMessage[];
   readonly skillContexts?: readonly DesktopAgentSkillContext[];
+  readonly resolveSkillContexts?: (context: DesktopAgentSkillResolverContext) => Promise<readonly DesktopAgentSkillContext[]>;
   readonly modelCapabilities?: ModelCapabilities;
   readonly capabilitySnapshot?: BasicAgentCapabilitySnapshot;
   readonly toolConfirmationPolicy?: ToolConfirmationPolicy;
@@ -127,7 +143,7 @@ export type RunDesktopAgentSessionOptions = {
   readonly abortSignal?: AbortSignal;
   readonly runtime?: MinimalRuntime;
   readonly createIntelligenceChannel?: (runtime: MinimalRuntime) => IntelligenceChannel;
-  readonly createToolCenter?: (runtime: MinimalRuntime) => ToolExecutionBroker;
+  readonly createToolCenter?: DesktopAgentToolCenterFactory;
   readonly onRuntimeReady?: (context: DesktopAgentSessionRuntimeContext) => void;
   readonly onModelOutputDelta?: (delta: ModelOutputDelta) => void;
 };

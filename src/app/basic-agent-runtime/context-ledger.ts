@@ -128,7 +128,7 @@ function buildContextLedgerFromItems(input: {
 }): BasicAgentContextLedger {
   const required = input.draft.filter(isRequiredContextItem);
   const selectedIds = new Set(required.map((item) => item.itemId));
-  let usedChars = required.reduce((total, item) => total + item.summary.length, 0);
+  let usedChars = required.reduce((total, item) => total + contextItemContentLength(item), 0);
   let usedInputTokens = required.reduce((total, item) => total + contextItemTokenCount(input.tokenCounter, item), 0);
   let truncatedByBudget = usedInputTokens > input.maxInputTokens || usedChars > input.maxChars || required.length > input.maxMessages;
 
@@ -136,7 +136,7 @@ function buildContextLedgerFromItems(input: {
     if (selectedIds.has(item.itemId)) {
       continue;
     }
-    const itemChars = item.summary.length;
+    const itemChars = contextItemContentLength(item);
     const itemTokens = contextItemTokenCount(input.tokenCounter, item);
     if (
       selectedIds.size >= input.maxMessages ||
@@ -186,7 +186,9 @@ function buildContextLedgerFromItems(input: {
 }
 
 function isRequiredContextItem(item: BasicAgentContextItem): boolean {
-  return item.sourceKind === "system" || item.sourceKind === "user_message";
+  return item.sourceKind === "system" ||
+    item.sourceKind === "user_message" ||
+    (item.sourceKind === "skill" && item.skill?.loadStatus === "failed");
 }
 
 function prioritizedOptionalContextItems(
@@ -219,7 +221,15 @@ function contextItemTokenCount(counter: BasicAgentTokenCounter, item: BasicAgent
       : item.sourceKind === "user_message"
         ? "user"
         : item.role ?? "user";
-  return counter.countMessage({ role, content: item.summary });
+  return counter.countMessage({ role, content: contextItemModelContent(item) });
+}
+
+function contextItemContentLength(item: BasicAgentContextItem): number {
+  return contextItemModelContent(item).length;
+}
+
+function contextItemModelContent(item: BasicAgentContextItem): string {
+  return item.modelContent ?? item.summary;
 }
 
 function insertBeforeCurrentUser(

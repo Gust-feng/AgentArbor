@@ -214,6 +214,76 @@ test("desktop-basic tool registry can restrict executors to a frozen tool catalo
   assert.equal(center.has("run_command"), false);
 });
 
+test("desktop-basic tool registry registers read_skill_resource for frozen skill resources", () => {
+  const registry = createDesktopBasicToolRegistry({
+    env: {},
+    workspaceRoot: process.cwd(),
+    playwrightAvailable: true,
+    toolCatalogNames: ["read_skill_resource"],
+    skillContexts: [{
+      skill: {
+        id: "repo-review",
+        name: "Repo Review",
+        description: "Review repositories.",
+        enabled: true,
+        sourcePath: "Z:/AgentArbor/.agents/skills/repo-review/SKILL.md",
+        triggers: ["review"],
+        resources: [{
+          kind: "reference",
+          name: "checklist.md",
+          relativePath: "references/checklist.md",
+          sourcePath: "Z:/AgentArbor/.agents/skills/repo-review/references/checklist.md",
+          byteLength: 32,
+          contentHash: "sha256:reference",
+        }],
+      },
+      body: "Use the checklist only when needed.",
+      triggerReason: "model selected repo-review",
+      loadStatus: "loaded",
+      omitted: false,
+    }],
+  });
+
+  const catalog = registry.catalog("desktop-basic");
+  const center = registry.createToolCenter("desktop-basic");
+
+  assert.deepEqual(catalog.tools.map((tool) => tool.name), ["read_skill_resource"]);
+  assert.deepEqual(catalog.allowedTools, ["read_skill_resource"]);
+  assert.equal(center.has("read_skill_resource"), true);
+});
+
+test("desktop-basic tool registry does not register read_skill_resource for omitted skill resources", () => {
+  const registry = createDesktopBasicToolRegistry({
+    env: {},
+    workspaceRoot: process.cwd(),
+    playwrightAvailable: true,
+    toolCatalogNames: ["read_skill_resource"],
+    skillContexts: [{
+      skill: {
+        id: "repo-review",
+        name: "Repo Review",
+        description: "Review repositories.",
+        enabled: true,
+        sourcePath: "Z:/AgentArbor/.agents/skills/repo-review/SKILL.md",
+        triggers: ["review"],
+        resources: [{
+          kind: "reference",
+          name: "checklist.md",
+          relativePath: "references/checklist.md",
+          sourcePath: "Z:/AgentArbor/.agents/skills/repo-review/references/checklist.md",
+        }],
+      },
+      body: "",
+      triggerReason: "model selected repo-review",
+      loadStatus: "failed",
+      omitted: true,
+    }],
+  });
+
+  assert.deepEqual(registry.catalog("desktop-basic").tools, []);
+  assert.equal(registry.createToolCenter("desktop-basic").has("read_skill_resource"), false);
+});
+
 test("desktop-basic tool registry keeps MCP tools in the dedicated mcp scope", () => {
   const registry = createDesktopBasicToolRegistry({
     env: {},

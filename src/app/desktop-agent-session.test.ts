@@ -1,4 +1,8 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { promises as fs } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 import type {
   BasicAgentCapabilitySnapshot,
@@ -19,6 +23,7 @@ import type { AgentDefinition } from "./agent-prompts/contracts.js";
 import { DESKTOP_ROOT_AGENT } from "./agent-prompts/desktop-root-agent.js";
 import { runDesktopAgentSession } from "./desktop-agent-session.js";
 import { createOpenAiStreamTextResponse } from "./panel-openai-test-fixtures.js";
+import { createReadSkillResourceTool } from "./tool-center/adapters/skill-resource-tool.js";
 import { ToolCenter } from "./tool-center/index.js";
 
 test("Desktop Agent Session answers ordinary questions without entering deep mode", async () => {
@@ -187,6 +192,39 @@ test("Desktop Agent Session projects local tool summaries and refs", async () =>
   assert.equal(toolBlock?.summary.includes("read_file: README.md · 12 bytes"), true);
   assert.equal(result.activity.some((item) => item.toolName === "read_file" && item.summary.includes("README.md")), true);
   assert.equal(channel.requests[0]?.tools?.some((tool) => tool.name === "read_file"), true);
+});
+
+test("Desktop Agent Session reads selected skill resources only on tool demand", async () => {
+  const fixture = await createSkillResourceSessionFixture();
+  try {
+    const channel = new SkillResourceToolChannel();
+    const skillContext = fixture.skillContext();
+    const result = await runDesktopAgentSession("使用 skill reference 完成回答", {
+      aiMode: "fake",
+      createIntelligenceChannel: () => channel,
+      createToolCenter: (_runtime, context) => {
+        const center = new ToolCenter();
+        center.register(createReadSkillResourceTool(context?.skillContexts ?? []));
+        return center;
+      },
+      capabilitySnapshot: desktopCapabilitySnapshot([
+        capabilityTool("read_skill_resource", "read-only"),
+      ]),
+      skillContexts: [skillContext],
+    });
+
+    assert.equal(result.status, "completed");
+    assert.equal(channel.requests.length, 2);
+    assert.equal(JSON.stringify(channel.requests[0]).includes("RESOURCE_SENTINEL"), false);
+    assert.equal(channel.requests[0]?.tools?.some((tool) => tool.name === "read_skill_resource"), true);
+    assert.equal(JSON.stringify(channel.requests[1]).includes("RESOURCE_SENTINEL"), true);
+    assert.equal(result.eventTypes.includes("tool.requested"), true);
+    assert.equal(result.eventTypes.includes("tool.completed"), true);
+    assert.equal(result.toolCallRefs.includes("call-skill-resource"), true);
+    assert.equal(result.answer?.evidenceRefs.includes("skill:resource-skill:reference:references/guide.md"), true);
+  } finally {
+    await fixture.remove();
+  }
 });
 
 test("Desktop Agent Session derives model-visible tools from capability snapshot and Task Soil permissions", async () => {
@@ -1158,6 +1196,52 @@ function textResponse(
   };
 }
 
+async function createSkillResourceSessionFixture(): Promise<{
+  skillContext(): {
+    readonly skill: any;
+    readonly body: string;
+    readonly triggerReason: string;
+    readonly loadStatus: "loaded";
+  };
+  remove(): Promise<void>;
+}> {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-session-skill-resource-"));
+  const packagePath = path.join(root, "resource-skill");
+  const sourcePath = path.join(packagePath, "SKILL.md");
+  const referencePath = path.join(packagePath, "references", "guide.md");
+  await fs.mkdir(path.dirname(referencePath), { recursive: true });
+  await fs.writeFile(sourcePath, "---\nname: resource-skill\ndescription: Resource skill.\n---\n\nUse references/guide.md when needed.", "utf8");
+  await fs.writeFile(referencePath, "RESOURCE_SENTINEL: use precise skill reference facts.", "utf8");
+  return {
+    skillContext() {
+      return {
+        skill: {
+          id: "resource-skill",
+          name: "resource-skill",
+          description: "Resource skill.",
+          enabled: true,
+          sourcePath,
+          packagePath,
+          triggers: [],
+          resources: [{
+            kind: "reference",
+            name: "guide.md",
+            relativePath: "references/guide.md",
+            sourcePath: referencePath,
+            contentHash: hashText("RESOURCE_SENTINEL: use precise skill reference facts."),
+            byteLength: Buffer.byteLength("RESOURCE_SENTINEL: use precise skill reference facts.", "utf8"),
+          }],
+          allowedTools: ["read_skill_resource"],
+        },
+        body: "Use references/guide.md when needed.",
+        triggerReason: "test-selected",
+        loadStatus: "loaded" as const,
+      };
+    },
+    remove: () => fs.rm(root, { recursive: true, force: true }),
+  };
+}
+
 class EmptyVisibleAnswerChannel implements IntelligenceChannel {
   readonly requests: ModelRequest[] = [];
 
@@ -1478,6 +1562,42 @@ class LocalToolCenter implements ToolExecutionBroker {
 
   getCallCount(): number {
     return this.calls;
+  }
+}
+
+class SkillResourceToolChannel implements IntelligenceChannel {
+  readonly requests: ModelRequest[] = [];
+
+  async request(request: ModelRequest) {
+    this.requests.push(request);
+    if (this.requests.length === 1) {
+      return {
+        responseId: "model-response-skill-resource-call",
+        requestId: request.requestId,
+        providerId: "test-provider",
+        providerKind: "fake" as const,
+        protocolKind: "openai_compatible_chat_completions" as const,
+        model: "test-model",
+        status: "completed" as const,
+        outputKind: "explanation" as const,
+        toolCalls: [{
+          callId: "call-skill-resource",
+          toolName: "read_skill_resource",
+          input: { skillId: "resource-skill", type: "reference", path: "references/guide.md" },
+        }],
+        finishReason: "tool_call" as const,
+        validation: { status: "passed" as const, checkedAt: new Date(0).toISOString(), issues: [] },
+        completedAt: new Date(0).toISOString(),
+      };
+    }
+    return {
+      ...textResponse(request, "已按需读取 skill reference 并完成回答。"),
+      responseId: "model-response-skill-resource-final",
+    };
+  }
+
+  validateResponse() {
+    return { status: "passed" as const, checkedAt: new Date(0).toISOString(), issues: [] };
   }
 }
 
@@ -1849,6 +1969,10 @@ function capabilityTool(
     enabled: true,
     availability: "available",
   };
+}
+
+function hashText(value: string): string {
+  return `sha256:${createHash("sha256").update(value, "utf8").digest("hex")}`;
 }
 
 function defaultCapabilityToolScopes(

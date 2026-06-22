@@ -184,6 +184,7 @@ function isOrdinaryAgentRuntimeEvent(type: ArborMessageType): boolean {
     type === "model.failed" ||
     type === "context.compaction.completed" ||
     type === "context.compaction.failed" ||
+    type === "skill.triggered" ||
     type === "tool.requested" ||
     type === "tool.completed" ||
     type === "tool.failed" ||

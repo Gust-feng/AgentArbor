@@ -78,13 +78,6 @@ export async function runDesktopAgentSession(
   });
 
   publishGoalReceived({ runtime, traceId, goalId, goal, taskSoil });
-  publishTriggeredSkills({
-    runtime,
-    agentId: agentDefinition.agentId,
-    traceId,
-    goalId,
-    skills: options.skillContexts ?? [],
-  });
   options.onRuntimeReady?.({ runtime, traceId, goalId });
 
   const intelligenceChannel =
@@ -105,6 +98,28 @@ export async function runDesktopAgentSession(
   }
 
   const channel = intelligenceChannel(runtime);
+  const skillContexts = options.resolveSkillContexts === undefined
+    ? options.skillContexts ?? []
+    : await options.resolveSkillContexts({
+        runtime,
+        traceId,
+        goalId,
+        goal,
+        conversationHistory: options.conversationHistory ?? [],
+        intelligenceChannel: channel,
+        abortSignal: options.abortSignal,
+      });
+  publishTriggeredSkills({
+    runtime,
+    agentId: agentDefinition.agentId,
+    traceId,
+    goalId,
+    skills: skillContexts,
+  });
+  const loopOptions: RunDesktopAgentSessionOptions = {
+    ...options,
+    skillContexts,
+  };
   const loop = prepareDesktopAgentLoop({
     runtime,
     agentDefinition,
@@ -114,7 +129,7 @@ export async function runDesktopAgentSession(
     traceId,
     goalId,
     aiMode,
-    options,
+    options: loopOptions,
   });
   const turn = await loop.turnRuntime.executeAutonomous({
     policy: loop.turnPolicy,

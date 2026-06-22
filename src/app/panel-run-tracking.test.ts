@@ -64,7 +64,7 @@ test("panel run tracking keeps shared model events in underground phase for deep
   assert.equal(tracking.run.phase, "underground");
 });
 
-test("ordinary agent trace hides deep compatibility and skill events while runtime projection keeps raw event facts", () => {
+test("ordinary agent trace keeps skill events and hides deep compatibility while runtime projection keeps raw event facts", () => {
   const eventEntries = [
     eventEntry(1, "goal.received", {}),
     eventEntry(2, "skill.triggered", { skillId: "skill-legacy" }),
@@ -88,10 +88,10 @@ test("ordinary agent trace hides deep compatibility and skill events while runti
 
   assert.deepEqual(
     visible.events.map((event) => event.type),
-    ["goal.received", "model.requested", "tool.completed"],
+    ["goal.received", "skill.triggered", "model.requested", "tool.completed"],
   );
   assert.equal(visible.currentPhase, "agent");
-  assert.equal(visible.eventCursor.eventCount, 3);
+  assert.equal(visible.eventCursor.eventCount, 4);
   assert.deepEqual(
     runtime.events.map((event) => event.type),
     eventEntries.map((entry) => entry.type),

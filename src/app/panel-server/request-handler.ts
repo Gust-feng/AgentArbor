@@ -179,7 +179,19 @@ async function handleUpdateSkillStateRequest(
   if (typeof record.enabled !== "boolean") {
     throw new PanelHttpError(400, "invalid_skill_state", "技能状态必须包含 enabled 布尔值。");
   }
-  const updated = await setPanelSkillEnabled(runtime, skillId, record.enabled);
+  const stateKey = typeof record.stateKey === "string" && record.stateKey.trim().length > 0
+    ? record.stateKey.trim()
+    : undefined;
+  let updated: boolean;
+  try {
+    updated = await setPanelSkillEnabled(runtime, skillId, record.enabled, stateKey);
+  } catch (error) {
+    throw new PanelHttpError(
+      400,
+      "ambiguous_skill_state",
+      error instanceof Error ? error.message : "技能来源不明确，无法更新状态。"
+    );
+  }
   if (!updated) {
     throw new PanelHttpError(501, "skill_state_unavailable", "当前环境没有可用的技能状态存储。");
   }

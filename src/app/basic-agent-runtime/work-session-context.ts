@@ -3,11 +3,13 @@ import type {
   ContextAttachment,
   ContextLedger,
   ContextLedgerEntry,
+  ContextLedgerSkillFacts,
 } from "../../domain/basic-agent/index.js";
 import type { ObservationRef } from "../../domain/observation/index.js";
 import type { ToolDisplayProjection, ToolResultEnvelope } from "../../domain/tools/index.js";
 import type { DesktopTaskSoilInput } from "../task-soil-workspace.js";
 import { redactOrdinaryText } from "../safe-projection.js";
+import type { BasicAgentContextSkillFacts } from "./contracts.js";
 
 export type WorkViewTaskSoilCanvasLike = {
   readonly taskSoilId: string;
@@ -36,6 +38,7 @@ export type WorkViewCanvasContextLike = {
         readonly sourceKind: string;
         readonly summary: string;
         readonly truncated: boolean;
+        readonly skill?: ContextLedgerSkillFacts | BasicAgentContextSkillFacts;
       }[];
       readonly truncationReport?: ContextLedger["truncation"];
       readonly budget?: ContextLedger["budget"];
@@ -140,7 +143,15 @@ export function contextLedgerFor(
         title: item.sourceKind === "skill" ? "触发技能" : item.sourceKind === "conversation_summary" ? "历史摘要" : "历史对话",
         summary: item.sourceKind === "skill" ? skillLedgerSummary(item.summary) : item.summary,
         refs: [{ kind: "event", id: item.itemId }],
-        status: item.truncated ? "truncated" : "used",
+        status: item.skill?.loadStatus === "failed" ? "failed" : item.truncated ? "truncated" : "used",
+        skill: item.skill === undefined
+          ? undefined
+          : {
+              ...item.skill,
+              injectionStatus: item.skill.loadStatus === "failed" ? "failed" : "injected",
+              omitted: false,
+              truncated: item.truncated || item.skill.truncated,
+            },
       })),
     ...toolEvidence.slice(0, 12).map((envelope, index): ContextLedgerEntry => ({
       entryId: `${input.run.runId}:ledger:tool-evidence:${envelope.diagnosticRef ?? index}`,
@@ -297,6 +308,9 @@ function contextLedgerSummary(entries: readonly ContextLedgerEntry[]): string {
 
 function skillLedgerSummary(summary: string): string {
   const lines = summary.split(/\r?\n/g).map((line) => line.trim()).filter((line) => line.length > 0);
+  if (lines.some((line) => line.startsWith("技能：") || line.startsWith("触发原因：") || line.startsWith("加载状态："))) {
+    return redactOrdinaryText(lines.join("\n"), 420);
+  }
   const name = lines.find((line) => line.startsWith("Triggered skill:")) ?? "Triggered skill: 技能";
   const reason = lines.find((line) => line.startsWith("Why:")) ?? "Why: 技能名称或描述匹配当前任务。";
   return redactOrdinaryText([name, reason].join("\n"), 420);

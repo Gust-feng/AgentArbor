@@ -120,24 +120,38 @@ MCP 不需要从零实现协议层。要做的是把已有 SDK adapter 接入 ru
 
 已有基础：
 
-- `src/app/skills/skill-loader.ts` 已有 `discoverSkills`、`loadSkillBody`、关键词触发。
+- `src/app/skills/skill-loader.ts` 已有 `discoverSkills`、`loadSkillBody` 和历史关键词候选 / fallback 辅助。
 - `src/app/skills/skill-state-store.ts` 已有启停状态和 `markUsed`。
 - `src/app/panel-server/skill-service.ts` 已能基于冻结 skill catalog 解析触发技能并加载正文。
 - `src/app/basic-agent-runtime/context-ledger-items.ts` 已把 skill body 注入 Context Ledger / Context Pack。
 - `src/app/desktop-agent-session-events.ts` 已有 `skill.triggered` 运行事件。
 
-未完全闭环：
+已收敛的主干口径：
 
-- `CapabilityCenter` 当前只把 enabled skills 放入 `skillCatalog`，导致 run snapshot 不能表达 disabled skills 的全量管理视图。
-- run 创建时冻结的是 skill metadata 和启停状态，不冻结 `SKILL.md` 正文；排队 run 或延迟执行 run 可能按同一 `sourcePath` 读到后来的正文。
-- `resolveTriggeredSkillContexts` 对 `markUsed` 使用 fire-and-forget，测试中能观察到调用，但失败不明确。
-- Context Ledger / Context Pack 当前主要作为 live run 上下文和 canvas/read-model 投影，不是独立持久化事实表；历史恢复可能保留不了完整 used / omitted / truncated 细节。
-- run view 目前能通过 Context Ledger 看到“技能”项，但缺少结构化的本轮 triggered skills 字段。
-- `selectTriggeredSkillsWithStrategy("llm")` 当前只是返回所有 enabled skills，不能作为正式 LLM router 能力。
+- `CapabilityCenter` 冻结全量 skill catalog 的安全 metadata、version、provenance、启停状态、hash、校验状态和 indexed resources。
+- 默认 skill discovery 已包含用户级 `$HOME/.agents/skills` 和项目级 `$CWD/.agents/skills`；项目级 precedence 更高，`sourceKind/sourceRootId/sourcePrecedence` 会进入冻结 catalog 与 run capability 投影。
+- 宿主可显式通过 `additionalSkillRoots` 追加 admin/plugin 等受管来源；这只是显式 root 接入，不是 marketplace、installer、自动更新或回滚。`skillRoots` 仍作为完整覆盖入口服务测试或自定义宿主。
+- skill 启停状态和 `markUsed` 使用 source-qualified `stateKey`；旧 `skillId` 状态只在没有多来源同 id 歧义时兼容读取。
+- `resolveTriggeredSkillContexts` 只消费 run 创建时冻结的 skill catalog；当前 skill 文件或启停状态只能影响新 run。
+- 正式选择路径由 `skill-router.ts` 通过 `skill_routing` 模型调用完成；显式 `$skill` 是强信号，keyword 只做候选召回和 fallback。
+- router 输出必须经工程层校验：只能选择本轮 frozen catalog 内 enabled / valid skill，不能凭空引用不存在的 skill，不能扩大工具边界。
+- 被选中 skill 的正文加载会校验冻结 `contentHash/bodyHash`，hash 不一致时 fail closed 且不注入正文。
+- 选中且成功加载的 skill 的 indexed `references/assets/scripts` 可通过普通只读工具 `read_skill_resource` 按需读取；reference 内容作为 tool result 回到模型，asset/script 不返回 raw body，script 不自动执行。
+- `evals/` 已作为本地质量 artifact 被 loader/doctor 索引和统计；它不属于运行时资源，不进入 frozen runtime resource index，不进入 Context Ledger / Context Pack，也不能通过 `read_skill_resource` 读取。doctor 默认做确定性 JSON 结构、case 数、routing 断言、quality/regression 的 `qualityBaseline` with/without skill 记录和字面量质量检查；显式传入模型通道时可复用正式 `skill_routing` 路径执行 routing eval。
+- Context Ledger / read-model 记录选择方式、候选、选中、拒绝/省略原因、model call ref、hash、loadedAt、truncated/omitted 状态；默认 read-model 不展示完整正文。
+- `allowed-tools` 在 AgentArbor 当前实现中只是冻结和审计声明：不能扩张工具，也不能作为全 run 白名单隐藏普通 agent 原本可见的工具；它当前不是 Claude Code 风格免确认授权。未来若要对齐免确认能力，应新增 per-tool grant 契约。
+
+仍未完全闭环：
+
+- Context Ledger / Context Pack 当前主要作为 live run 上下文和 canvas/read-model 投影，不是独立持久化事实表；历史恢复只保证安全结果、工具证据和事件，不承诺还原完整技能正文。
+- 已支持宿主显式接入 plugin/admin skill roots，但这只是受管来源接入。当前新增或计划中的 local installer 只能作为本地分发治理原语，记录明确来源 skill 包的安装、版本、来源和校验事实；它还不是 marketplace，也不代表已有远程 registry、自动更新、回滚或 enterprise managed skill 分发。
+- 已有最小 `runSkillDoctor` 本地质量门，可诊断 invalid 包、缺少路由提示、不可调用组合、缺失 declared resources、缺少或格式错误的 `evals/` artifact、过大正文、缺失/非法 quality baseline、baseline delta 不达标和字面量质量检查失败；传入模型通道时可跑 routing eval。仍缺自动生成 with/without 输出、LLM judge、跨运行触发质量统计和真实回答质量回归。
 
 开发结论：
 
 Skills 不需要重写。要做的是把 snapshot 改成全量 skill catalog，并把“本轮触发、注入、使用记录、安全展示”收口成稳定字段和测试。
+
+补充口径见 [Skills 官方兼容加载](10-Skills官方兼容加载.md)：AgentArbor 只把 Skills 作为能力包兼容层处理，metadata 常驻，body 选中后加载，`references/`、`scripts/`、`assets/` 只能由本轮已选中且成功加载的 skill 通过普通只读工具 `read_skill_resource` 按需读取；`evals/` 只服务 loader/doctor 本地质量门，不进入 frozen runtime resource index。当前不做 RAG、deep 自动触发、skill 脚本自动执行、自动生成 skill 输出质量评估，也不把完整 skill body 存入 RuntimeDatabase。
 
 ## RAG 现状与延期
 
@@ -161,7 +175,7 @@ Skills 不需要重写。要做的是把 snapshot 改成全量 skill catalog，�
 - MCP tool 执行继续经过 `allowedTools`、ToolCenter 和运行投影；MCP 默认不额外确认，命令工具仍走命令确认。
 - Skills snapshot 表达 enabled / disabled 全量技能。
 - run 创建后冻结本轮可触发 skill 集合。
-- 执行时关键词触发最多 4 个 skill，加载正文注入 Context Ledger。
+- 执行时通过 `skill_routing` 模型路由选择 skill；显式 `$skill` 是强信号，keyword 只作为候选召回和 fallback，选中后加载正文注入 Context Ledger。
 - 成功注入后记录 `markUsed`。
 - run view 展示本轮使用过的 skill 名称、触发原因、运行摘要。
 
@@ -270,11 +284,18 @@ Skills 不需要重写。要做的是把 snapshot 改成全量 skill catalog，�
 - `CapabilityCenter` 不再过滤 disabled skills；snapshot 保存全量技能安全元数据。
 - `resolveRunCapabilities.enabledSkills` 仍只包含 enabled skills，并且不携带 `sourcePath`。
 - `resolveTriggeredSkillContexts` 必须只消费 run snapshot 的 skill catalog，不读取当前 skill state。
-- 触发策略固定为 keyword，最多 4 个。
-- `selectTriggeredSkillsWithStrategy("llm")` 不进入正式运行能力。
+- 触发策略不再以 keyword 为主判断：普通 agent 应在 runtime / trace 出生后，用本轮 frozen skill catalog 的安全 metadata 调用 `skill_routing` 模型路由。
+- skill 来源必须作为冻结事实保留：默认用户级 `$HOME/.agents/skills` 与项目级 `$CWD/.agents/skills` 都可发现，项目级 precedence 更高；router 候选只接收 `sourceKind/sourceRootId/sourcePrecedence`，不得接收绝对 `sourcePath`。
+- skill state store 必须以 `stateKey` 写入启停和 `markUsed`；API/UI 更新多来源同 id skill 时必须传 `stateKey`，未传且有歧义时应失败而不是猜测。
+- 显式 `$skill` 是强信号；keyword 只作为候选召回和模型不可用/输出非法时的 fallback。
+- router 输出必须经工程层校验：只能选择本轮 frozen catalog 内 enabled / valid / loaded 的 skill，不能凭空引用不存在的 skill，不能扩大工具边界。
 - 触发后加载正文，注入 Context Ledger / Context Pack。
+- 选中且成功加载的 skill 若声明 `allowed-tools`，普通 agent 必须冻结和审计这些声明；声明不能扩张 capability snapshot、AgentDefinition profile、Task Soil permission 或 ToolCenter executable restriction，也不能作为全局白名单隐藏普通 agent 原本可见的工具。当前不实现 skill 级免确认授权。
 - 正文只进入模型上下文，不进入默认 UI raw 展示。
-- 若本轮要宣称“run 事实严格冻结”，需要在 triggered skill 投影中至少记录 `sourcePath`、正文运行摘要或 content hash、loadedAt、truncated 标记；否则只能宣称 metadata 冻结、正文按需读取。
+- `SKILL.md` frontmatter 使用标准 YAML parser；必须支持常见官方/社区 skill 包中的多行字符串、flow mapping、锚点/alias 和 merge。非法 YAML 走 disabled diagnostic，不得让发现流程崩溃。
+- triggered skill 投影至少记录选择方式、候选、选中、拒绝/省略原因、model call ref、content/body hash、loadedAt、truncated 标记；正文 hash 与 frozen catalog 不一致时 fail closed，不注入正文。
+- `read_skill_resource` 只能读取本轮 selected + loaded skill 的 indexed resource；`references/*` 可返回文本内容给模型 continuation，`assets/*` 只返回 hash/大小等事实，`scripts/*` 只返回 metadata-only 且不得执行。资源 hash 与 frozen catalog 不一致时 fail closed。
+- `evals/*` 只进入 loader 的本地包资源索引和 doctor 统计，不进入 run frozen runtime resource index，不能作为 `read_skill_resource` 的合法 type，也不能出现在模型资源提示中。
 - 成功注入后等待或可靠记录 `markUsed`；失败时不应阻塞模型主循环，但应有安全诊断事件或 warning。
 - run view 展示 skill 名称、触发原因和运行摘要，不展示完整 body。
 
@@ -352,11 +373,16 @@ MCP tests：
 Skills tests：
 
 - disabled skill 不触发，但 snapshot / 管理视图可见。
-- enabled skill 被关键词触发后正文进入 Context Pack。
+- enabled skill 被 model router 选中后正文进入 Context Pack；keyword 只作为候选召回和 fallback。
 - 触发 skill 后更新 lastUsedAt。
 - run view 显示本轮使用 skill 的名称、触发原因和运行摘要。
 - run 创建后，后续 skill 启停不影响已创建 run。
-- `llm` strategy 不进入正式运行路径。
+- `llm` candidate strategy 不直接决定选择；正式运行路径通过 `skill-router.ts` 的 `skill_routing` 模型路由选择 skill，并在失败时降级 keyword fallback。
+- 选中 skill 的 reference 不在首次 model request 中预注入；模型调用 `read_skill_resource` 后，reference 内容才作为 tool result 进入下一轮模型上下文。
+- 未选中、omitted、未索引或 hash 已变化的 skill resource 不能读取。
+- `scripts/*` 通过 `read_skill_resource` 只返回 metadata，不执行；`assets/*` 不返回 raw body。
+- `evals/*` 可被 loader / doctor 发现，但不出现在 Context Pack 资源提示中，且 `read_skill_resource` 必须拒绝 `type: "eval"`。
+- `runSkillDoctor` 默认校验 `evals/*.json` 结构、routing 断言、quality/regression 的 `qualityBaseline` with/without skill 记录、baseline delta 和字面量质量检查；传入模型通道时，应通过正式 `skill_routing` 路径执行 routing eval cases，并报告 passed / failed / skipped。
 
 Regression tests：
 
@@ -391,6 +417,7 @@ node --test dist/adapters/mcp/mcp-client.test.js dist/app/capability-center.test
 - MCP 和 Skills 都从 run 创建时冻结事实出发。
 - MCP 执行不绕过 `allowedTools`、ToolCenter 和运行投影。
 - Skills 正文只按需进入模型上下文，不泄漏到默认 read-model。
+- 至少存在可本地验收的项目级样例 skill 包，用于证明 `.agents/skills` 不是只有加载机制、没有真实能力包；若 `.agents/` 仍被忽略，最终交付必须说明样例是否建议纳入提交。
 - 禁用技能、禁用工具、不可用 MCP server 都能被安全展示或解释。
 - 所有新增外部协议对象都停留在 adapter 层。
 - 不引入 LangChain、LangGraph 或新的 agent 编排框架。

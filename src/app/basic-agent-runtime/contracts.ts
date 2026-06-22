@@ -9,6 +9,11 @@ import type {
 } from "../../domain/config/index.js";
 import type { ModelMessage, ModelOutputDelta } from "../../domain/intelligence/index.js";
 import type { ObservationRef } from "../../domain/observation/index.js";
+import type {
+  ContextLedgerSkillFacts,
+  ContextLedgerSkillLoadStatus,
+  ContextLedgerSkillMarkUsedStatus,
+} from "../../domain/basic-agent/index.js";
 import type { ToolConfirmationPolicy, ToolErrorDomain } from "../../domain/tools/index.js";
 import type { AgentRunTreeAttachment } from "../agent-run-tree-attachment.js";
 import type { MinimalRuntime } from "../runtime.js";
@@ -28,14 +33,24 @@ export type BasicAgentContextSourceKind =
   | "task_soil_ref"
   | "tool_evidence";
 
+export type BasicAgentContextSkillFacts = Omit<
+  ContextLedgerSkillFacts,
+  "injectionStatus" | "loadStatus" | "markUsedStatus"
+> & {
+  readonly loadStatus: ContextLedgerSkillLoadStatus;
+  readonly markUsedStatus?: ContextLedgerSkillMarkUsedStatus;
+};
+
 export type BasicAgentContextItem = {
   readonly itemId: string;
   readonly sourceKind: BasicAgentContextSourceKind;
   readonly role?: "user" | "assistant";
   readonly summary: string;
+  readonly modelContent?: string;
   readonly refs: readonly ObservationRef[];
   readonly visibility: "model" | "diagnostic";
   readonly truncated: boolean;
+  readonly skill?: BasicAgentContextSkillFacts;
 };
 
 export type BasicAgentContextBudget = {

@@ -12,16 +12,65 @@ test("CapabilityCenter freezes safe model, tool, skill, and MCP catalog projecti
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-capability-center-"));
   const skillRoot = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-capability-skills-"));
   try {
-    await fs.mkdir(path.join(skillRoot, "enabled"), { recursive: true });
+    await fs.mkdir(path.join(skillRoot, "repo-review"), { recursive: true });
+    await fs.mkdir(path.join(skillRoot, "repo-review", "scripts"), { recursive: true });
+    await fs.mkdir(path.join(skillRoot, "repo-review", "refs"), { recursive: true });
+    await fs.mkdir(path.join(skillRoot, "repo-review", "assets"), { recursive: true });
+    await fs.writeFile(path.join(skillRoot, "repo-review", "scripts", "review.js"), "export default function review() {}\n", "utf8");
+    await fs.writeFile(path.join(skillRoot, "repo-review", "refs", "checklist.md"), "# Checklist\n", "utf8");
+    await fs.writeFile(path.join(skillRoot, "repo-review", "assets", "logo.txt"), "asset-bytes\n", "utf8");
     await fs.writeFile(
-      path.join(skillRoot, "enabled", "SKILL.md"),
-      "---\nname: Repo Review\ndescription: Review repositories.\ntriggers: [review]\n---\n\nDo not include this body in snapshot.",
+      path.join(skillRoot, "repo-review", "SKILL.md"),
+      [
+        "---",
+        "name: repo-review",
+        "description: |",
+        "  Review repositories.",
+        "when_to_use: Use when a repository review requires a checklist.",
+        "disable-model-invocation: false",
+        "user-invocable: true",
+        "summary: Review code changes with repository context.",
+        "category: code-review",
+        "version: 2.1.0",
+        "provenance:",
+        "  registry: project",
+        "  plugin: repo-tools",
+        "  revision: 42",
+        "  verified: true",
+        "  sourcePath: do-not-leak",
+        "  token: do-not-leak",
+        "license: MIT",
+        "common: &common",
+        "  agent: desktop_agent",
+        "compatibility:",
+        "  <<: *common",
+        "  agent: desktop_agent",
+        "  platform: cross-platform",
+        "metadata:",
+        "  owner: platform",
+        "  priority: 3",
+        "  secretPath: do-not-leak",
+        "allowed-tools: [read_file, docs__lookup]",
+        "scripts: [scripts/review.js]",
+        "references: [refs/checklist.md]",
+        "assets: [assets/logo.txt]",
+        "triggers: [review]",
+        "---",
+        "",
+        "Do not include this body in snapshot.",
+      ].join("\n"),
       "utf8"
     );
-    await fs.mkdir(path.join(skillRoot, "disabled"), { recursive: true });
+    await fs.mkdir(path.join(skillRoot, "disabled-skill"), { recursive: true });
     await fs.writeFile(
-      path.join(skillRoot, "disabled", "SKILL.md"),
-      "---\nname: Disabled Skill\ndescription: Hidden.\nenabled: false\ntriggers: [review]\n---\n\nDisabled body.",
+      path.join(skillRoot, "disabled-skill", "SKILL.md"),
+      "---\nname: disabled-skill\ndescription: Hidden.\nenabled: false\ntriggers: [review]\n---\n\nDisabled body.",
+      "utf8"
+    );
+    await fs.mkdir(path.join(skillRoot, "invalid-skill"), { recursive: true });
+    await fs.writeFile(
+      path.join(skillRoot, "invalid-skill", "SKILL.md"),
+      "---\nname: invalid-skill\nenabled: true\ntriggers: [invalid]\n---\n",
       "utf8"
     );
 
@@ -59,7 +108,7 @@ test("CapabilityCenter freezes safe model, tool, skill, and MCP catalog projecti
 
     const snapshot = await new CapabilityCenter({
       configCenter,
-      skillRoots: [skillRoot],
+      skillRoots: [{ rootPath: skillRoot, sourceKind: "project", sourceRootId: "project", precedence: 100 }],
       playwrightAvailable: false,
       createMcpManager: () => fakeMcpManager({
         runtimeSnapshots: [
@@ -82,7 +131,40 @@ test("CapabilityCenter freezes safe model, tool, skill, and MCP catalog projecti
     assert.equal(snapshot.toolCatalog.allowedTools.includes("shell_command"), false);
     assert.equal(snapshot.toolCatalog.allowedTools.includes("browser_snapshot"), false);
     assert.equal(snapshot.toolCatalog.tools.find((tool) => tool.name === "browser_snapshot")?.availability, "unavailable");
-    assert.deepEqual(snapshot.skillCatalog.map((skill) => `${skill.name}:${skill.enabled}`), ["Disabled Skill:false", "Repo Review:true"]);
+    assert.deepEqual(snapshot.skillCatalog.map((skill) => `${skill.name}:${skill.enabled}`), [
+      "disabled-skill:false",
+      "invalid-skill:false",
+      "repo-review:true",
+    ]);
+    const reviewSkill = snapshot.skillCatalog.find((skill) => skill.id === "repo-review");
+    assert.equal(reviewSkill?.summary, "Review code changes with repository context.");
+    assert.equal(reviewSkill?.category, "code-review");
+    assert.equal(reviewSkill?.sourceKind, "project");
+    assert.equal(reviewSkill?.sourceRootId, "project");
+    assert.equal(reviewSkill?.sourcePrecedence, 100);
+    assert.equal(reviewSkill?.stateKey, "source:project:repo-review");
+    assert.equal(reviewSkill?.whenToUse, "Use when a repository review requires a checklist.");
+    assert.equal(reviewSkill?.disableModelInvocation, false);
+    assert.equal(reviewSkill?.userInvocable, true);
+    assert.equal(reviewSkill?.version, "2.1.0");
+    assert.deepEqual(reviewSkill?.provenance, {
+      registry: "project",
+      plugin: "repo-tools",
+      revision: 42,
+      verified: true,
+    });
+    assert.equal(reviewSkill?.license, "MIT");
+    assert.deepEqual(reviewSkill?.compatibility, { agent: "desktop_agent", platform: "cross-platform" });
+    assert.deepEqual(reviewSkill?.metadata, { owner: "platform", priority: 3 });
+    assert.deepEqual(reviewSkill?.allowedTools, ["read_file", "docs__lookup"]);
+    assert.equal(reviewSkill?.validationStatus, "valid");
+    assert.match(reviewSkill?.contentHash ?? "", /^sha256:/);
+    assert.match(reviewSkill?.bodyHash ?? "", /^sha256:/);
+    assert.deepEqual(reviewSkill?.resources?.map((resource) => resource.kind).sort(), ["asset", "reference", "script"]);
+    assert.equal(reviewSkill?.resources?.every((resource) => resource.contentHash?.startsWith("sha256:")), true);
+    const invalidSkill = snapshot.skillCatalog.find((skill) => skill.id === "invalid-skill");
+    assert.equal(invalidSkill?.validationStatus, "invalid");
+    assert.deepEqual(invalidSkill?.validationErrors, ["description is required"]);
     assert.equal(snapshot.mcpCatalog[0]?.availability, "configured");
     assert.equal(snapshot.mcpCatalog[0]?.description, "Documentation MCP service.");
     assert.equal(snapshot.mcpCatalog[0]?.runtimeStatus, "connected");
@@ -178,7 +260,6 @@ test("CapabilityCenter applies MCP enabledTools and confirmation mode before mod
     await fs.rm(directory, { recursive: true, force: true });
   }
 });
-
 
 test("CapabilityCenter uses cached MCP tools without reconnecting unchanged servers", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-capability-center-mcp-cache-"));

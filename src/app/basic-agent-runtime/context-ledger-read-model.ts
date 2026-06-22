@@ -1,4 +1,4 @@
-import type { ContextLedger, ContextLedgerEntry } from "../../domain/basic-agent/index.js";
+import type { ContextLedger, ContextLedgerEntry, ContextLedgerSkillFacts } from "../../domain/basic-agent/index.js";
 import type {
   BasicAgentContextBudget,
   BasicAgentContextItem,
@@ -18,17 +18,19 @@ export function toContextLedgerReadModel(
     entryId: item.itemId,
     kind: contextLedgerEntryKind(item.sourceKind),
     title: contextLedgerEntryTitle(item),
-    summary: safeContextText(item.sourceKind === "system" ? "当前任务的系统指令。" : item.summary, 360).text,
+    summary: readModelSummaryForItem(item),
     refs: item.refs,
-    status: item.truncated ? "truncated" : "used",
+    status: item.skill?.loadStatus === "failed" ? "failed" : item.truncated ? "truncated" : "used",
+    skill: skillFactsForEntry(item, item.skill?.loadStatus === "failed" ? "failed" : "injected"),
   }));
   const omittedEntries = omittedItems.slice(0, 12).map((item): ContextLedgerEntry => ({
     entryId: `${item.itemId}:omitted`,
     kind: contextLedgerEntryKind(item.sourceKind),
     title: contextLedgerEntryTitle(item),
-    summary: "本轮暂未使用这项上下文。",
+    summary: item.sourceKind === "skill" ? readModelSummaryForItem(item) : "本轮暂未使用这项上下文。",
     refs: item.refs,
     status: "omitted",
+    skill: skillFactsForEntry(item, "omitted"),
   }));
   const budgetEntries = contextBudgetEntries(runId, budget, truncationReport);
   const entries = [...usedEntries, ...omittedEntries, ...budgetEntries];
@@ -38,6 +40,32 @@ export function toContextLedgerReadModel(
     entries,
     budget,
     truncation: truncationReport,
+  };
+}
+
+function readModelSummaryForItem(item: BasicAgentContextItem): string {
+  if (item.sourceKind === "system") {
+    return "当前任务的系统指令。";
+  }
+  if (item.sourceKind === "skill" && item.skill !== undefined) {
+    return safeContextText(item.skill.summary, 360).text;
+  }
+  return safeContextText(item.summary, 360).text;
+}
+
+function skillFactsForEntry(
+  item: BasicAgentContextItem,
+  injectionStatus: ContextLedgerSkillFacts["injectionStatus"]
+): ContextLedgerSkillFacts | undefined {
+  if (item.skill === undefined) {
+    return undefined;
+  }
+  const status = item.skill.loadStatus === "failed" ? "failed" : injectionStatus;
+  return {
+    ...item.skill,
+    injectionStatus: status,
+    truncated: item.truncated || item.skill.truncated,
+    omitted: status === "omitted",
   };
 }
 

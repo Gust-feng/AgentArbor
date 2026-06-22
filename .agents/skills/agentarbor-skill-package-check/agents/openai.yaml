@@ -1,0 +1,4 @@
+interface:
+  display_name: "AgentArbor Skill Package Check"
+  short_description: "Validate AgentArbor skill package samples"
+  default_prompt: "Use $agentarbor-skill-package-check to validate these AgentArbor skill packages."

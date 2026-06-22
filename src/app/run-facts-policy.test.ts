@@ -144,6 +144,66 @@ test("resolveCompatibleRunFacts rejects same-snapshot capability resolutions wit
   assert.equal(resolved.capabilityResolution, undefined);
 });
 
+test("resolveCompatibleRunFacts rejects same-snapshot capability resolutions with forged skill facts", () => {
+  const createdSnapshot = capabilitySnapshotWithSkill("snapshot-created", modelConfig("created-profile", "created-model"));
+  const agentRef = agentDefinitionRef();
+  const created = {
+    runKind: "desktop" as const,
+    runMode: "agent" as const,
+    config: createdSnapshot.activeModel,
+    informationAccess: informationAccess("web", 5),
+    capabilitySnapshot: createdSnapshot,
+    agentDefinitionRef: agentRef,
+  };
+  const matching = capabilityResolutionWithSnapshotSkills({
+    snapshotId: createdSnapshot.snapshotId,
+    agentRef,
+    allowedTools: ["read_file"],
+    toolExposures: toolExposuresFor(createdSnapshot),
+    snapshot: createdSnapshot,
+  });
+  const forgedResolutions: readonly RunCapabilityResolution[] = [
+    {
+      ...matching,
+      enabledSkills: matching.enabledSkills.map((skill) => ({
+        ...skill,
+        summary: "Forged summary.",
+      })),
+    },
+    {
+      ...matching,
+      enabledSkills: matching.enabledSkills.map((skill) => ({
+        ...skill,
+        contentHash: "sha256:forged-content",
+      })),
+    },
+    {
+      ...matching,
+      enabledSkills: matching.enabledSkills.map((skill) => ({
+        ...skill,
+        allowedTools: ["shell_command"],
+      })),
+    },
+    {
+      ...matching,
+      enabledSkills: matching.enabledSkills.map((skill) => ({
+        ...skill,
+        sourcePath: "Z:/AgentArbor/.agents/skills/review/SKILL.md",
+      } as RunCapabilityResolution["enabledSkills"][number])),
+    },
+  ];
+
+  for (const forgedResolution of forgedResolutions) {
+    const resolved = resolveCompatibleRunFacts(created, {
+      capabilitySnapshot: createdSnapshot,
+      capabilityResolution: forgedResolution,
+    });
+
+    assert.equal(resolved.capabilitySnapshot, createdSnapshot);
+    assert.equal(resolved.capabilityResolution, undefined);
+  }
+});
+
 function modelConfig(profileId: string, model: string): SanitizedModelProviderConfig {
   return {
     defaultAiMode: "fake",
@@ -268,6 +328,47 @@ function capabilitySnapshot(snapshotId: string, activeModel: SanitizedModelProvi
   };
 }
 
+function capabilitySnapshotWithSkill(snapshotId: string, activeModel: SanitizedModelProviderConfig): BasicAgentCapabilitySnapshot {
+  return {
+    ...capabilitySnapshot(snapshotId, activeModel),
+    skillCatalog: [
+      {
+        id: "repo-review",
+        name: "Repo Review",
+        description: "Review code changes.",
+        enabled: true,
+        sourcePath: "Z:/AgentArbor/.agents/skills/review/SKILL.md",
+        triggers: ["review"],
+        summary: "Review changes with repository context.",
+        category: "code-review",
+        metadata: { owner: "platform", priority: 1 },
+        allowedTools: ["read_file"],
+        contentHash: "sha256:skill-content",
+        bodyHash: "sha256:skill-body",
+        validationStatus: "valid",
+      },
+      {
+        id: "disabled-skill",
+        name: "Disabled Skill",
+        description: "Disabled.",
+        enabled: false,
+        sourcePath: "Z:/AgentArbor/.agents/skills/disabled/SKILL.md",
+        triggers: ["disabled"],
+        validationStatus: "valid",
+      },
+      {
+        id: "invalid-skill",
+        name: "Invalid Skill",
+        description: "",
+        enabled: true,
+        sourcePath: "Z:/AgentArbor/.agents/skills/invalid/SKILL.md",
+        triggers: ["invalid"],
+        validationStatus: "invalid",
+      },
+    ],
+  };
+}
+
 function capabilityResolution(input: {
   readonly snapshotId: string;
   readonly agentRef: RunAgentDefinitionRef;
@@ -295,6 +396,32 @@ function capabilityResolution(input: {
     mcpDrafts: [],
     warnings: [],
     createdAt: "2026-06-07T00:00:00.000Z",
+  };
+}
+
+function capabilityResolutionWithSnapshotSkills(input: {
+  readonly snapshotId: string;
+  readonly agentRef: RunAgentDefinitionRef;
+  readonly allowedTools: readonly string[];
+  readonly toolExposures: RunCapabilityResolution["toolExposures"];
+  readonly snapshot: BasicAgentCapabilitySnapshot;
+}): RunCapabilityResolution {
+  return {
+    ...capabilityResolution(input),
+    enabledSkills: input.snapshot.skillCatalog
+      .filter((skill) => skill.enabled && (skill.validationStatus === undefined || skill.validationStatus === "valid"))
+      .map((skill) => ({
+        id: skill.id,
+        name: skill.name,
+        description: skill.description,
+        triggers: [...skill.triggers],
+        summary: skill.summary,
+        category: skill.category,
+        metadata: skill.metadata,
+        allowedTools: [...(skill.allowedTools ?? [])],
+        contentHash: skill.contentHash,
+        bodyHash: skill.bodyHash,
+      })),
   };
 }
 

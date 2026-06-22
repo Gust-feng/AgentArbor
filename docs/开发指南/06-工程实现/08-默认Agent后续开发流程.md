@@ -57,10 +57,16 @@ deep / Agent 集群是未来项目边界：不做默认可见入口，不主动�
 
 ### 6. Skills 与配置中心
 
-- Skills 先做 `SKILL.md` 元数据发现、启用状态、触发说明和按需正文注入。
+- Skills 作为官方兼容能力包加载：`SKILL.md` 元数据进入 run-created frozen catalog，普通 agent 通过 `skill_routing` 模型路由选择，显式 `$skill` 是强信号，keyword 只做候选召回和 fallback。
+- 默认发现用户级和项目级 `.agents/skills`；宿主可以显式追加 admin/plugin skill roots，但这是受管来源接入，不是 marketplace、installer、自动更新或回滚；当前不自动扫描 marketplace 或 managed skills。
+- 被选中 skill 的 body 按需注入 Context Ledger；正文和 resource 读取都校验冻结 hash，hash 不一致 fail closed。
+- `references/`、`assets/`、`scripts/` 只通过 `read_skill_resource` 按需读取；reference 内容作为 tool result 回到模型，asset/script 不返回 raw body，script 不自动执行。
+- `evals/` 只作为 loader/doctor 本地质量 artifact 被索引和校验统计，不进入 frozen runtime resource index，不进入 Context Ledger / Context Pack，也不能通过 `read_skill_resource` 读取；doctor 默认做确定性 JSON 结构、case 数、routing 断言、quality/regression 的 `qualityBaseline` with/without skill 记录和字面量质量检查，显式传入模型通道时可通过 `skill_routing` 跑 routing eval；它仍不自动生成 with/without 输出、不调用 LLM judge、不评估运行时真实回答质量。
+- `allowed-tools` 是 skill 级工具意图声明：当前只冻结、展示、审计和报告不可用声明，不扩张工具，不隐藏普通 agent 原本可见的工具，也不是 Claude Code 风格免确认授权。
+- 当前新增或计划中的 local installer 只能作为本地分发治理原语，负责把明确来源的 skill 包安装到受管 root 并记录版本/来源/校验事实；它不等于 marketplace，也不表示已有远程 registry、自动更新、回滚或企业 managed skills。
 - 配置中心统一模型 profile、默认 AI mode、工具启用状态、MCP server 元数据和工作目录。
 - secret 只能进入本地 secret store，普通 settings 只保存 `secretRef` 与必要元数据。
-- 验收：禁用的 skill/tool 不进入模型上下文；配置状态可解释且不泄漏密钥。
+- 验收：禁用的 skill/tool 不进入模型上下文；选中 skill 的正文和资源只按需进入模型 continuation；配置状态可解释且不泄漏密钥。
 
 ### 7. 质量门
 

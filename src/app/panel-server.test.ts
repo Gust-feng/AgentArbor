@@ -6,6 +6,7 @@ import path from "node:path";
 import test from "node:test";
 import { startLocalPanelServer, type PanelProviderFetch } from "./panel-server.js";
 import { ConfigCenter } from "./config-center.js";
+import { resolveDefaultPanelSkillRoots } from "./panel-server/runtime.js";
 import {
   removeTemporaryTree,
   requestJson,
@@ -167,6 +168,93 @@ test("panel skills route returns real discovered SKILL metadata only", async () 
     assert.equal(JSON.stringify(refreshed.body.skills).includes("EXTRA_BODY_SENTINEL"), false);
   } finally {
     await server.close();
+    await removeTemporaryTree(directory);
+  }
+});
+
+test("default panel skill roots include user and project scopes with project precedence", () => {
+  const roots = resolveDefaultPanelSkillRoots({
+    cwd: path.join("Z:", "AgentArbor"),
+    home: path.join("C:", "Users", "developer"),
+  });
+
+  assert.deepEqual(roots, [
+    {
+      rootPath: path.join("C:", "Users", "developer", ".agents", "skills"),
+      sourceKind: "user",
+      sourceRootId: "user",
+      precedence: 10,
+    },
+    {
+      rootPath: path.join("Z:", "AgentArbor", ".agents", "skills"),
+      sourceKind: "project",
+      sourceRootId: "project",
+      precedence: 100,
+    },
+  ]);
+});
+
+test("panel skills state route updates source-qualified skill state", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-panel-skill-state-"));
+  const userRoot = path.join(directory, "user-skills");
+  const projectRoot = path.join(directory, "project-skills");
+  try {
+    await fs.mkdir(path.join(userRoot, "shared-skill"), { recursive: true });
+    await fs.mkdir(path.join(projectRoot, "shared-skill"), { recursive: true });
+    await fs.writeFile(
+      path.join(userRoot, "shared-skill", "SKILL.md"),
+      "---\nname: shared-skill\ndescription: User skill.\n---\n\nUSER_BODY",
+      "utf8"
+    );
+    await fs.writeFile(
+      path.join(projectRoot, "shared-skill", "SKILL.md"),
+      "---\nname: shared-skill\ndescription: Project skill.\n---\n\nPROJECT_BODY",
+      "utf8"
+    );
+    const server = await startLocalPanelServer({
+      port: 0,
+      configDirectory: directory,
+      skillRoots: [
+        { rootPath: userRoot, sourceKind: "user", sourceRootId: "user", precedence: 10 },
+        { rootPath: projectRoot, sourceKind: "project", sourceRootId: "project", precedence: 100 },
+      ],
+    });
+    try {
+      const listed = await requestJson(server.url, "/api/skills");
+      const projectSkill = listed.body.skills.find((skill: { readonly sourceKind?: string }) => skill.sourceKind === "project");
+      const userSkill = listed.body.skills.find((skill: { readonly sourceKind?: string }) => skill.sourceKind === "user");
+
+      assert.equal(listed.status, 200);
+      assert.equal(projectSkill.enabled, true);
+      assert.equal(userSkill.enabled, true);
+      assert.equal(typeof projectSkill.stateKey, "string");
+
+      const ambiguous = await requestJson(server.url, "/api/skills/shared-skill/state", {
+        method: "POST",
+        body: { enabled: false },
+      });
+      assert.equal(ambiguous.status, 400);
+      assert.equal(ambiguous.body.error.code, "ambiguous_skill_state");
+
+      const updated = await requestJson(server.url, "/api/skills/shared-skill/state", {
+        method: "POST",
+        body: {
+          enabled: false,
+          stateKey: projectSkill.stateKey,
+        },
+      });
+      const refreshedProject = updated.body.skills.find((skill: { readonly sourceKind?: string }) => skill.sourceKind === "project");
+      const refreshedUser = updated.body.skills.find((skill: { readonly sourceKind?: string }) => skill.sourceKind === "user");
+
+      assert.equal(updated.status, 200);
+      assert.equal(refreshedProject.enabled, false);
+      assert.equal(refreshedUser.enabled, true);
+      assert.equal(JSON.stringify(updated.body.skills).includes("PROJECT_BODY"), false);
+      assert.equal(JSON.stringify(updated.body.skills).includes("USER_BODY"), false);
+    } finally {
+      await server.close();
+    }
+  } finally {
     await removeTemporaryTree(directory);
   }
 });

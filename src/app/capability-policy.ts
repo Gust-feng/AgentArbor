@@ -103,12 +103,27 @@ export function resolveRunCapabilities(input: ResolveRunCapabilitiesInput): RunC
     allowedTools,
     toolExposures,
     enabledSkills: input.snapshot.skillCatalog
-      .filter((skill) => skill.enabled)
+      .filter(isRunEnabledSkill)
       .map((skill): RunEnabledSkill => ({
         id: skill.id,
         name: skill.name,
         description: skill.description,
         triggers: [...skill.triggers],
+        summary: skill.summary,
+        category: skill.category,
+        sourceKind: skill.sourceKind,
+        sourceRootId: skill.sourceRootId,
+        sourcePrecedence: skill.sourcePrecedence,
+        stateKey: skill.stateKey,
+        version: skill.version,
+        provenance: skill.provenance === undefined ? undefined : { ...skill.provenance },
+        whenToUse: skill.whenToUse,
+        disableModelInvocation: skill.disableModelInvocation,
+        userInvocable: skill.userInvocable,
+        metadata: skill.metadata === undefined ? undefined : { ...skill.metadata },
+        allowedTools: skill.allowedTools === undefined ? undefined : [...skill.allowedTools],
+        contentHash: skill.contentHash,
+        bodyHash: skill.bodyHash,
       })),
     mcpDrafts: input.snapshot.mcpCatalog.map((server): CapabilityDraft => ({
       draftId: `mcp:${server.serverId}`,
@@ -123,6 +138,10 @@ export function resolveRunCapabilities(input: ResolveRunCapabilitiesInput): RunC
     warnings,
     createdAt: nowIso(),
   };
+}
+
+function isRunEnabledSkill(skill: BasicAgentCapabilitySnapshot["skillCatalog"][number]): boolean {
+  return skill.enabled && (skill.validationStatus === undefined || skill.validationStatus === "valid");
 }
 
 function capabilityPlanForResolvedRun(input: {

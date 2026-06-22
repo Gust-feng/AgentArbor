@@ -1,9 +1,10 @@
 import type { ObservationRef } from "../../domain/observation/index.js";
+import type { SkillSelectionDecisionFacts, SkillSelectionDecisionReason } from "../../domain/basic-agent/index.js";
 import type { TaskSoil } from "../../domain/soil/index.js";
 import type { ToolResultEnvelope } from "../../domain/tools/index.js";
 import type { AgentDefinition } from "../agent-prompts/contracts.js";
 import type { DesktopAgentConversationMessage, DesktopAgentSkillContext } from "../desktop-agent-contracts.js";
-import type { BasicAgentContextItem } from "./contracts.js";
+import type { BasicAgentContextItem, BasicAgentContextSkillFacts } from "./contracts.js";
 import type { BasicAgentConversationSummary } from "./conversation-compaction.js";
 import {
   safeContextText as safeText,
@@ -29,9 +30,21 @@ const MAX_HISTORY_SUMMARY_CHARS = 2_400;
 const RECENT_HISTORY_PAIR_COUNT = 4;
 const MAX_SKILL_BODY_CHARS = 4_000;
 const MAX_SKILL_REASON_CHARS = 240;
+const MAX_SKILL_SELECTION_ID_CHARS = 160;
+const MAX_SKILL_SELECTION_REF_CHARS = 180;
+const MAX_SKILL_SELECTION_METHOD_CHARS = 80;
+const MAX_SKILL_SELECTION_REASON_CHARS = 320;
+const MAX_SKILL_SELECTION_REASONS = 12;
+const MAX_SKILL_SELECTION_IDS = 24;
+const MAX_SKILL_RESOURCE_ITEMS = 12;
+const MAX_SKILL_RESOURCE_PATH_CHARS = 220;
+const MAX_SKILL_RESOURCE_NAME_CHARS = 120;
+const MAX_SKILL_RESOURCE_NOTE_CHARS = 1_200;
 const MAX_REF_SUMMARY_CHARS = 240;
 const MAX_PREVIEW_CHARS = 700;
 const MAX_TOOL_EVIDENCE_CHARS = 1_400;
+
+type RuntimeSkillResourceType = "script" | "reference" | "asset";
 
 export function buildContextLedgerDraftItems(input: BuildContextLedgerDraftInput): readonly BasicAgentContextItem[] {
   return [
@@ -77,22 +90,169 @@ function systemContextItem(agentDefinition: BasicAgentContextAgentDefinition): B
 
 function skillContextItems(skills: readonly DesktopAgentSkillContext[]): readonly BasicAgentContextItem[] {
   return skills.slice(0, 4).map((context) => {
+    const name = safeText(context.skill.name, 120);
+    const skillId = safeText(context.skill.id, 160);
+    const summary = safeText(skillSafeSummary(context), 420);
+    const skillFacts = skillFactsForContext(context, summary.text);
+    if ((context.loadStatus ?? "loaded") === "failed") {
+      return {
+        itemId: `context:skill:${context.skill.id}`,
+        sourceKind: "skill",
+        summary: summary.text,
+        refs: [{ kind: "event", id: `skill:${context.skill.id}` }],
+        visibility: "diagnostic" as const,
+        truncated: summary.truncated,
+        skill: {
+          ...skillFacts,
+          truncated: summary.truncated,
+          omitted: false,
+        },
+      };
+    }
     const body = safeText(context.body, MAX_SKILL_BODY_CHARS);
     const reason = safeText(context.triggerReason, MAX_SKILL_REASON_CHARS);
+    const resources = skillResourceIndexPrompt(context);
+    const modelContent = [
+      `Triggered skill: ${name.text}`,
+      `Why: ${reason.text}`,
+      "Use these skill instructions when relevant. Do not mention internal skill loading unless the user asks.",
+      body.text,
+      resources,
+    ].join("\n");
     return {
       itemId: `context:skill:${context.skill.id}`,
       sourceKind: "skill",
-      summary: [
-        `Triggered skill: ${safeText(context.skill.name, 120).text}`,
-        `Why: ${reason.text}`,
-        "Use these skill instructions when relevant. Do not mention internal skill loading unless the user asks.",
-        body.text,
-      ].join("\n"),
+      summary: summary.text,
+      modelContent,
       refs: [{ kind: "event", id: `skill:${context.skill.id}` }],
       visibility: "model" as const,
-      truncated: body.truncated || reason.truncated,
+      truncated: body.truncated || reason.truncated || summary.truncated || context.truncated === true,
+      skill: {
+        ...skillFacts,
+        truncated: body.truncated || reason.truncated || summary.truncated || context.truncated === true,
+        omitted: false,
+      },
     };
   });
+}
+
+function skillResourceIndexPrompt(context: DesktopAgentSkillContext): string | undefined {
+  const resources = skillResourcePromptItems(context);
+  if (resources.length === 0) {
+    return undefined;
+  }
+  const lines = [
+    "Skill resources available through read_skill_resource (contents are not preloaded):",
+    ...resources.map((resource) =>
+      `- type=${resource.type} path=${resource.relativePath}` +
+      (resource.name === undefined ? "" : ` name=${resource.name}`) +
+      (resource.byteLength === undefined ? "" : ` bytes=${resource.byteLength}`)
+    ),
+  ];
+  const note = safeText(lines.join("\n"), MAX_SKILL_RESOURCE_NOTE_CHARS);
+  return note.text;
+}
+
+function skillResourcePromptItems(context: DesktopAgentSkillContext): readonly {
+  readonly type: RuntimeSkillResourceType;
+  readonly relativePath: string;
+  readonly name?: string;
+  readonly byteLength?: number;
+}[] {
+  const discovered = (context.skill.resourceIndex ?? [])
+    .filter((resource): resource is typeof resource & { readonly type: RuntimeSkillResourceType } =>
+      isRuntimeSkillResourceType(resource.type)
+    )
+    .filter((resource) => resource.exists)
+    .map((resource) => ({
+      type: resource.type,
+      relativePath: safeResourcePath(resource.relativePath),
+      byteLength: resource.byteLength,
+    }));
+  const frozen = (context.skill.resources ?? [])
+    .filter((resource) => resource.loadError === undefined)
+    .map((resource) => ({
+      type: resource.kind,
+      relativePath: safeResourcePath(resource.relativePath ?? resource.name),
+      name: safePlain(resource.name, MAX_SKILL_RESOURCE_NAME_CHARS),
+      byteLength: resource.byteLength,
+    }));
+  const selected: {
+    type: RuntimeSkillResourceType;
+    relativePath: string;
+    name?: string;
+    byteLength?: number;
+  }[] = [];
+  const seen = new Set<string>();
+  for (const resource of [...discovered, ...frozen]) {
+    if (resource.relativePath.length === 0) {
+      continue;
+    }
+    const key = `${resource.type}:${resource.relativePath}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    selected.push(resource);
+    if (selected.length >= MAX_SKILL_RESOURCE_ITEMS) {
+      break;
+    }
+  }
+  return selected;
+}
+
+function isRuntimeSkillResourceType(value: string): value is RuntimeSkillResourceType {
+  return value === "script" || value === "reference" || value === "asset";
+}
+
+function safeResourcePath(value: string | undefined): string {
+  if (value === undefined) {
+    return "";
+  }
+  const normalized = value.replace(/\\/g, "/").replace(/^\.\//, "");
+  if (normalized.length === 0 || normalized.startsWith("/") || normalized.includes("../")) {
+    return "";
+  }
+  return safePlain(normalized, MAX_SKILL_RESOURCE_PATH_CHARS);
+}
+
+function skillFactsForContext(context: DesktopAgentSkillContext, fallbackSummary: string): BasicAgentContextSkillFacts {
+  const selection = skillSelectionFactsForContext(context.selection);
+  return {
+    skillId: context.skill.id,
+    name: context.skill.name,
+    triggerReason: context.triggerReason,
+    summary: context.summary ?? fallbackSummary,
+    sourceRef: `skill:${context.skill.id}`,
+    selectedAt: context.selectedAt,
+    loadedAt: context.loadedAt,
+    bodyHash: context.bodyHash,
+    contentHash: context.contentHash,
+    bodyCharCount: context.bodyCharCount ?? context.body.length,
+    loadStatus: context.loadStatus ?? "loaded",
+    markUsedStatus: context.markUsedStatus,
+    truncated: context.truncated === true,
+    omitted: context.omitted === true,
+    error: context.error,
+    warning: context.warning,
+    ...(selection === undefined ? {} : { selection }),
+  };
+}
+
+function skillSafeSummary(context: DesktopAgentSkillContext): string {
+  const parts = [
+    `技能：${context.skill.name}`,
+    `触发原因：${safeText(context.triggerReason, MAX_SKILL_REASON_CHARS).text}`,
+    context.loadStatus === "failed"
+      ? `加载状态：失败${context.error === undefined ? "" : `（${safeText(context.error, 160).text}）`}`
+      : "加载状态：已加载",
+    context.loadedAt === undefined ? undefined : `加载时间：${context.loadedAt}`,
+    context.contentHash ?? context.bodyHash,
+    context.bodyCharCount === undefined ? undefined : `正文字符数：${context.bodyCharCount}`,
+    context.truncated === true ? "正文已截断。" : undefined,
+    context.warning,
+  ].filter(isString);
+  return parts.join("\n");
 }
 
 function historyContextItems(
@@ -214,4 +374,82 @@ function contextRefPromptLine(ref: TaskSoil["contextRefs"][number]): string {
 
 function isString(value: unknown): value is string {
   return typeof value === "string";
+}
+
+function skillSelectionFactsForContext(
+  selection: SkillSelectionDecisionFacts | undefined
+): SkillSelectionDecisionFacts | undefined {
+  if (selection === undefined) {
+    return undefined;
+  }
+  const method = safePlain(selection.selectionMethod, MAX_SKILL_SELECTION_METHOD_CHARS);
+  const modelCallRef = selection.modelCallRef === undefined
+    ? undefined
+    : safePlain(selection.modelCallRef, MAX_SKILL_SELECTION_REF_CHARS);
+  const omittedReasons = skillSelectionReasons(selection.omittedReasons);
+  const rejectedReasons = skillSelectionReasons(selection.rejectedReasons);
+  const confidence = normalizedConfidence(selection.confidence);
+  const reasonSummary = selection.reasonSummary === undefined
+    ? undefined
+    : safeText(selection.reasonSummary, MAX_SKILL_SELECTION_REASON_CHARS).text;
+  return {
+    selectionMethod: method.length === 0 ? "unknown" : method,
+    candidateSkillIds: uniqueSafeStrings(selection.candidateSkillIds, MAX_SKILL_SELECTION_IDS, MAX_SKILL_SELECTION_ID_CHARS),
+    selectedSkillIds: uniqueSafeStrings(selection.selectedSkillIds, MAX_SKILL_SELECTION_IDS, MAX_SKILL_SELECTION_ID_CHARS),
+    ...(modelCallRef === undefined || modelCallRef.length === 0 ? {} : { modelCallRef }),
+    ...(omittedReasons === undefined ? {} : { omittedReasons }),
+    ...(rejectedReasons === undefined ? {} : { rejectedReasons }),
+    ...(confidence === undefined ? {} : { confidence }),
+    ...(reasonSummary === undefined || reasonSummary.length === 0 ? {} : { reasonSummary }),
+  };
+}
+
+function skillSelectionReasons(
+  reasons: readonly SkillSelectionDecisionReason[] | undefined
+): readonly SkillSelectionDecisionReason[] | undefined {
+  const safeReasons = (reasons ?? [])
+    .slice(0, MAX_SKILL_SELECTION_REASONS)
+    .map((reason): SkillSelectionDecisionReason | undefined => {
+      const code = safePlain(reason.code, MAX_SKILL_SELECTION_METHOD_CHARS);
+      const summary = safeText(reason.summary, MAX_SKILL_SELECTION_REASON_CHARS).text;
+      const skillId = reason.skillId === undefined ? undefined : safePlain(reason.skillId, MAX_SKILL_SELECTION_ID_CHARS);
+      const skillName = reason.skillName === undefined ? undefined : safePlain(reason.skillName, 120);
+      const confidence = normalizedConfidence(reason.confidence);
+      if (code.length === 0 || summary.length === 0) {
+        return undefined;
+      }
+      return {
+        code,
+        summary,
+        ...(skillId === undefined || skillId.length === 0 ? {} : { skillId }),
+        ...(skillName === undefined || skillName.length === 0 ? {} : { skillName }),
+        ...(confidence === undefined ? {} : { confidence }),
+      };
+    })
+    .filter((reason): reason is SkillSelectionDecisionReason => reason !== undefined);
+  return safeReasons.length === 0 ? undefined : safeReasons;
+}
+
+function uniqueSafeStrings(values: readonly string[], limit: number, maxChars: number): readonly string[] {
+  const selected: string[] = [];
+  const seen = new Set<string>();
+  for (const value of values) {
+    const safe = safePlain(value, maxChars);
+    if (safe.length === 0 || seen.has(safe)) {
+      continue;
+    }
+    seen.add(safe);
+    selected.push(safe);
+    if (selected.length >= limit) {
+      break;
+    }
+  }
+  return selected;
+}
+
+function normalizedConfidence(value: number | undefined): number | undefined {
+  if (value === undefined || !Number.isFinite(value)) {
+    return undefined;
+  }
+  return Math.max(0, Math.min(1, value));
 }

@@ -23,8 +23,14 @@ export function safeDesktopAgentContextPack(
   return {
     usageSummary: pack.usageSummary,
     items: pack.items.map((item) => ({
-      ...item,
+      itemId: item.itemId,
+      sourceKind: item.sourceKind,
+      role: item.role,
       summary: safeText(item.sourceKind === "system" ? "当前任务的系统指令。" : item.summary, 320),
+      refs: item.refs,
+      visibility: item.visibility,
+      truncated: item.truncated,
+      skill: item.skill,
     })),
     budget: pack.budget,
     truncationReport: pack.truncationReport,

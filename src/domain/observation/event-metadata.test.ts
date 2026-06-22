@@ -78,6 +78,11 @@ test("tool event refs do not collide with model or clarification refs", () => {
   assert.equal(view.refs.some((ref) => ref.kind === "user_clarification"), false);
 });
 
+test("skill triggered events stay in the ordinary agent phase", () => {
+  assert.equal(phaseForEvent("skill.triggered"), "agent");
+  assert.equal(stageForEvent("skill.triggered"), "skill_triggered");
+});
+
 test("agent fabric events expose only semantic refs for delegation and parent synthesis", () => {
   const delegationView = createRunObservationEventView(
     minimalEventEntry("agent.delegation.planned", 1, {

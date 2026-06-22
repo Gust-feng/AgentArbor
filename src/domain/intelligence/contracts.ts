@@ -30,6 +30,8 @@ export type ModelPurpose =
   | "convergence_judgment"
   | "handoff_narrative"
   | "candidate_aggregation"
+  | "skill_routing"
+  | "skill_quality_eval"
   | "desktop_intent_gate"
   | "desktop_context_compaction"
   | "desktop_agent"

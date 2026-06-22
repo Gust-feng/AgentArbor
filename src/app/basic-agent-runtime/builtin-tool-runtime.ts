@@ -8,6 +8,7 @@ import type { ToolCategory, ToolExecutor } from "../../domain/tools/index.js";
 import {
   createBrowserSnapshotTool,
 } from "../tool-center/adapters/browser-tool.js";
+import type { DesktopAgentSkillContext } from "../desktop-agent-contracts.js";
 import {
   createHttpRequestTool,
 } from "../tool-center/adapters/http-request-tool.js";
@@ -27,6 +28,9 @@ import {
   type LocalCommandProcessRegistry,
   readLocalCommandLogRef,
 } from "../tool-center/adapters/local-workspace-command-tools.js";
+import {
+  createReadSkillResourceTool,
+} from "../tool-center/adapters/skill-resource-tool.js";
 import {
   createLocalWorkspaceSandboxPolicy,
 } from "../tool-center/adapters/local-workspace-sandbox.js";
@@ -59,6 +63,8 @@ export type CreateDesktopBasicToolRegistryOptions = {
   readonly mcpManager?: McpToolExecutorProvider;
   readonly commandShell?: SanitizedCommandShellConfig;
   readonly processRegistry?: LocalCommandProcessRegistry;
+  readonly skillContexts?: readonly DesktopAgentSkillContext[];
+  readonly includeSkillResourceToolCatalog?: boolean;
 };
 
 export type ToolRegistryFetchLike = (
@@ -97,6 +103,10 @@ export function createDesktopBasicToolRegistry(
   const sandboxPolicy = createLocalWorkspaceSandboxPolicy();
   const commandShell = options.commandShell ?? createDefaultCommandShellConfig(process.platform, env);
   const playwrightAvailable = options.playwrightAvailable ?? isPackageResolvable("playwright");
+  const skillResourceTool =
+    options.includeSkillResourceToolCatalog || hasLoadedSkillResources(options.skillContexts ?? [])
+      ? [createReadSkillResourceTool(options.skillContexts ?? [])]
+      : [];
   const executors: readonly ToolExecutor[] = [
     createResearchSearchTool(researchRuntime),
     createResearchReadTool(researchRuntime),
@@ -109,6 +119,7 @@ export function createDesktopBasicToolRegistry(
     createLocalDeleteFileTool(workspaceRoot, { sandboxPolicy }),
     createLocalShellCommandTool(workspaceRoot, { sandboxPolicy, commandShell, processRegistry: options.processRegistry }),
     createLocalRunCommandTool(workspaceRoot, { sandboxPolicy, commandShell, processRegistry: options.processRegistry }),
+    ...skillResourceTool,
     createHttpRequestTool(),
     createBrowserSnapshotTool(),
   ];
@@ -171,6 +182,31 @@ function toolScopeFor(category: ToolCategory | undefined): ToolRegistryScope {
     return "workspace";
   }
   return "desktop-basic";
+}
+
+function hasLoadedSkillResources(skillContexts: readonly DesktopAgentSkillContext[]): boolean {
+  return skillContexts.some((context) => {
+    if ((context.loadStatus ?? "loaded") !== "loaded" || context.omitted === true) {
+      return false;
+    }
+    return hasDiscoveredResourceIndex(context.skill.resourceIndex) ||
+      hasFrozenCatalogResources(context.skill.resources);
+  });
+}
+
+function hasDiscoveredResourceIndex(
+  resources: DesktopAgentSkillContext["skill"]["resourceIndex"] | undefined
+): boolean {
+  return (resources ?? []).some((resource) => resource.exists === true);
+}
+
+function hasFrozenCatalogResources(
+  resources: DesktopAgentSkillContext["skill"]["resources"] | undefined
+): boolean {
+  return (resources ?? []).some((resource) =>
+    resource.loadError === undefined &&
+    (resource.kind === "reference" || resource.kind === "asset" || resource.kind === "script")
+  );
 }
 
 function parseInformationSourcePreference(value: string | undefined): readonly InformationSourceKind[] | undefined {

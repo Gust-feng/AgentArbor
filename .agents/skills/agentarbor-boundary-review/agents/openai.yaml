@@ -1,0 +1,4 @@
+interface:
+  display_name: "AgentArbor Boundary Review"
+  short_description: "Review AgentArbor architecture boundary drift"
+  default_prompt: "Use $agentarbor-boundary-review to review this AgentArbor change for ordinary-agent boundary drift."

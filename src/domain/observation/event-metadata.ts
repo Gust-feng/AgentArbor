@@ -113,7 +113,7 @@ export const EVENT_OBSERVATION_METADATA = {
   "skill.triggered": metadata({
     summary: "A desktop agent skill was matched and added as safe context.",
     scope: "runtime",
-    phase: "underground",
+    phase: "agent",
     stage: "skill_triggered",
   }),
   "agent.delegation.planned": metadata({

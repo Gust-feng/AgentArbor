@@ -387,6 +387,31 @@ function projectToolAgentContent(request: ToolCallRequest, output: unknown, trun
   const record = asRecord(output);
   const result = asRecord(record.result);
   const summary = stringOrUndefined(record.summary);
+  if (request.toolName === "read_skill_resource") {
+    const content = typeof result.content === "string"
+      ? modelVisibleTextFragment({
+          value: result.content,
+          maxLength: MODEL_TOOL_TEXT_MAX_CHARS,
+          request,
+          field: "content",
+        })
+      : undefined;
+    return {
+      summary,
+      skillId: stringOrUndefined(result.skillId),
+      path: stringOrUndefined(result.path),
+      type: stringOrUndefined(result.type),
+      contentHash: stringOrUndefined(result.contentHash),
+      byteLength: numberOrUndefined(result.byteLength),
+      charCount: numberOrUndefined(result.charCount),
+      requiresToolExecution: result.requiresToolExecution === true,
+      notExecutableByResolver: result.notExecutableByResolver === true,
+      executionNote: stringOrUndefined(result.executionNote),
+      truncated: truncated || content?.truncated === true,
+      content: content?.text,
+      rawContentRef: content?.rawRef,
+    };
+  }
   if (request.toolName === "read_file") {
     const content = typeof result.content === "string"
       ? modelVisibleTextFragment({

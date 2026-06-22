@@ -24,6 +24,7 @@ import type { MinimalRuntime } from "./runtime.js";
 import { createDesktopBasicToolRegistry } from "./basic-agent-runtime/builtin-tool-runtime.js";
 import type { McpToolExecutorProvider } from "./basic-agent-runtime/builtin-tool-runtime.js";
 import type { ToolRegistryScope } from "./basic-agent-runtime/tool-registry.js";
+import type { DesktopAgentSkillContext } from "./desktop-agent-contracts.js";
 import type { LocalCommandProcessRegistry } from "./tool-center/adapters/local-workspace-command-tools.js";
 
 export type ModelRuntimeMode = "none" | "fake" | "openai-compatible" | "openai-responses";
@@ -307,6 +308,8 @@ export function createDefaultToolCenter(input: {
   readonly toolRegistryScopes?: readonly ToolRegistryScope[];
   readonly commandShell?: SanitizedCommandShellConfig;
   readonly processRegistry?: LocalCommandProcessRegistry;
+  readonly skillContexts?: readonly DesktopAgentSkillContext[];
+  readonly includeSkillResourceToolCatalog?: boolean;
 } = {}): ToolExecutionBroker {
   return createToolCenterFromEnvironment(input);
 }
@@ -328,6 +331,8 @@ export async function createConfiguredToolCenter(
     readonly toolRegistryScopes?: readonly ToolRegistryScope[];
     readonly commandShell?: SanitizedCommandShellConfig;
     readonly processRegistry?: LocalCommandProcessRegistry;
+    readonly skillContexts?: readonly DesktopAgentSkillContext[];
+    readonly includeSkillResourceToolCatalog?: boolean;
   } = {}
 ): Promise<ToolExecutionBroker> {
   return createToolCenterFromEnvironment({
@@ -352,6 +357,8 @@ export async function createConfiguredToolCenterFactory(
     readonly toolRegistryScopes?: readonly ToolRegistryScope[];
     readonly commandShell?: SanitizedCommandShellConfig;
     readonly processRegistry?: LocalCommandProcessRegistry;
+    readonly skillContexts?: readonly DesktopAgentSkillContext[];
+    readonly includeSkillResourceToolCatalog?: boolean;
   } = {}
 ): Promise<(runtime: MinimalRuntime) => ToolExecutionBroker> {
   const env = input.env ?? await configCenter.createModelRuntimeEnvironment();
@@ -373,6 +380,8 @@ function createToolCenterFromEnvironment(input: {
   readonly toolRegistryScopes?: readonly ToolRegistryScope[];
   readonly commandShell?: SanitizedCommandShellConfig;
   readonly processRegistry?: LocalCommandProcessRegistry;
+  readonly skillContexts?: readonly DesktopAgentSkillContext[];
+  readonly includeSkillResourceToolCatalog?: boolean;
 }): ToolExecutionBroker {
   return createDesktopBasicToolRegistry(input).createToolCenterForScopes(input.toolRegistryScopes ?? ["desktop-basic"]);
 }

@@ -1,6 +1,12 @@
 import type { ObservationRef, TaskStatus } from "./common";
+import type { ModelCapabilities } from "./config";
 import type { ContextAttachment } from "./context";
-import type { ToolDisplayProjection, ToolErrorFacts, ToolResultEnvelope } from "./tools";
+import type {
+  ToolDisplayProjection,
+  ToolErrorFacts,
+  ToolFileDisplayOperation,
+  ToolResultEnvelope,
+} from "./tools";
 import type {
   PanelBasicAgentReplay,
   PanelBasicAgentRunDetail,
@@ -26,8 +32,61 @@ export type RunToolExposure = {
   readonly availability: "available" | "unavailable";
   readonly riskLevel: "low" | "medium" | "high";
   readonly operationType: "read-only" | "read-write" | "execute" | "external-submit";
+  readonly fileOperation?: ToolFileDisplayOperation;
   readonly requiresConfirmation: boolean;
+  readonly confirmationPolicy?: "prompt" | "full_access";
   readonly reason: string;
+};
+
+export type ProtocolToolCallCapabilities = {
+  readonly protocolKind: string;
+  readonly canSendToolDefinitions: boolean;
+  readonly canReceiveToolCalls: boolean;
+  readonly canRoundTripToolResults: boolean;
+};
+
+export type RunCapabilityPlanToolPolicy = {
+  readonly canExposeToModel: boolean;
+  readonly allowedTools: readonly string[];
+};
+
+export type RunCapabilityPlanFilePolicy = {
+  readonly canReadWorkspace: boolean;
+  readonly canWriteWorkspace: boolean;
+  readonly canDeleteWorkspace: boolean;
+  readonly canExecuteCommands: boolean;
+};
+
+export type RunCapabilityPlanUiPolicy = {
+  readonly canShowStreamingOutput: boolean;
+  readonly canShowToolCards: boolean;
+  readonly visibleToolNames: readonly string[];
+};
+
+export type RunCapabilityPlan = {
+  readonly protocolToolCallCapabilities: ProtocolToolCallCapabilities;
+  readonly modelCapabilities: ModelCapabilities;
+  readonly canExposeModelTools: boolean;
+  readonly tools?: RunCapabilityPlanToolPolicy;
+  readonly fileOperations?: RunCapabilityPlanFilePolicy;
+  readonly uiDisplay?: RunCapabilityPlanUiPolicy;
+  readonly allowedTools: readonly string[];
+  readonly warnings: readonly string[];
+};
+
+export type CapabilitySkillMetadataValue = string | number | boolean | readonly string[];
+
+export type RunEnabledSkill = {
+  readonly id: string;
+  readonly name: string;
+  readonly description: string;
+  readonly triggers: readonly string[];
+  readonly summary?: string;
+  readonly category?: string;
+  readonly metadata?: Readonly<Record<string, CapabilitySkillMetadataValue>>;
+  readonly allowedTools?: readonly string[];
+  readonly contentHash?: string;
+  readonly bodyHash?: string;
 };
 
 export type RunCapabilityResolution = {
@@ -37,14 +96,10 @@ export type RunCapabilityResolution = {
   readonly agentId: string;
   readonly agentDisplayName: string;
   readonly toolVisibilityProfileId: string;
+  readonly capabilityPlan: RunCapabilityPlan;
   readonly allowedTools: readonly string[];
   readonly toolExposures: readonly RunToolExposure[];
-  readonly enabledSkills: readonly {
-    readonly id: string;
-    readonly name: string;
-    readonly description: string;
-    readonly triggers: readonly string[];
-  }[];
+  readonly enabledSkills: readonly RunEnabledSkill[];
   readonly mcpDrafts: readonly {
     readonly draftId: string;
     readonly source: "mcp";
@@ -245,17 +300,65 @@ export type DesktopWorkViewAnswer = {
   readonly nextActions: readonly string[];
 };
 
+export type ContextLedgerSkillLoadStatus = "loaded" | "failed";
+
+export type ContextLedgerSkillInjectionStatus = "loaded" | "injected" | "omitted" | "failed";
+
+export type ContextLedgerSkillMarkUsedStatus = "succeeded" | "failed" | "skipped";
+
+export type ContextLedgerSkillFacts = {
+  readonly skillId: string;
+  readonly name: string;
+  readonly triggerReason: string;
+  readonly summary: string;
+  readonly sourceRef: string;
+  readonly selectedAt?: string;
+  readonly loadedAt?: string;
+  readonly bodyHash?: string;
+  readonly contentHash?: string;
+  readonly bodyCharCount?: number;
+  readonly loadStatus: ContextLedgerSkillLoadStatus;
+  readonly injectionStatus: ContextLedgerSkillInjectionStatus;
+  readonly markUsedStatus?: ContextLedgerSkillMarkUsedStatus;
+  readonly truncated: boolean;
+  readonly omitted: boolean;
+  readonly error?: string;
+  readonly warning?: string;
+};
+
+export type ContextLedgerEntry = {
+  readonly entryId: string;
+  readonly kind: "goal" | "attachment" | "history" | "skill" | "tool_evidence" | "budget" | "truncation";
+  readonly title: string;
+  readonly summary: string;
+  readonly refs: readonly ObservationRef[];
+  readonly status: "used" | "truncated" | "omitted" | "blocked" | "failed";
+  readonly skill?: ContextLedgerSkillFacts;
+};
+
+export type TriggeredSkillReadModel = {
+  readonly skillId: string;
+  readonly name: string;
+  readonly triggerReason: string;
+  readonly summary: string;
+  readonly sourceRef: string;
+  readonly truncated: boolean;
+  readonly loadedAt?: string;
+  readonly bodyHash?: string;
+  readonly contentHash?: string;
+  readonly bodyCharCount?: number;
+  readonly loadStatus?: ContextLedgerSkillLoadStatus;
+  readonly injectionStatus?: ContextLedgerSkillInjectionStatus;
+  readonly markUsedStatus?: ContextLedgerSkillMarkUsedStatus;
+  readonly omitted?: boolean;
+  readonly error?: string;
+  readonly warning?: string;
+};
+
 export type ContextLedger = {
   readonly runId: string;
   readonly summary: string;
-  readonly entries: readonly {
-    readonly entryId: string;
-    readonly kind: "goal" | "attachment" | "history" | "skill" | "tool_evidence" | "budget" | "truncation";
-    readonly title: string;
-    readonly summary: string;
-    readonly refs: readonly ObservationRef[];
-    readonly status: "used" | "truncated" | "omitted" | "blocked";
-  }[];
+  readonly entries: readonly ContextLedgerEntry[];
   readonly budget?: {
     readonly maxMessages?: number;
     readonly maxInputTokens?: number;
@@ -292,14 +395,7 @@ export type DesktopWorkView = {
   readonly currentAction: string;
   readonly contextAttachments: readonly ContextAttachment[];
   readonly contextLedger: ContextLedger;
-  readonly triggeredSkills: readonly {
-    readonly skillId: string;
-    readonly name: string;
-    readonly triggerReason: string;
-    readonly summary: string;
-    readonly sourceRef: string;
-    readonly truncated: boolean;
-  }[];
+  readonly triggeredSkills: readonly TriggeredSkillReadModel[];
   readonly pendingConfirmation?: {
     readonly confirmationId: string;
     readonly runId: string;

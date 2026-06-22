@@ -50,7 +50,15 @@ export function prepareDesktopAgentLoop(input: DesktopAgentLoopPreparationInput)
     throw new Error("Desktop Agent requires a capability snapshot before exposing tools to the model.");
   }
 
-  const toolCenter = mayExposeTools ? input.options.createToolCenter?.(input.runtime) : undefined;
+  const skillContexts = input.options.skillContexts ?? [];
+  const toolCenter = mayExposeTools
+    ? input.options.createToolCenter?.(input.runtime, {
+        runtime: input.runtime,
+        traceId: input.traceId,
+        goalId: input.goalId,
+        skillContexts,
+      })
+    : undefined;
   toolCenter?.resetCallCount();
 
   const tokenCounter = createOpenAITokenCounter(resolveActiveModelName(input.options));
@@ -59,7 +67,7 @@ export function prepareDesktopAgentLoop(input: DesktopAgentLoopPreparationInput)
     goal: input.goal,
     taskSoil: input.taskSoil,
     conversationHistory: input.options.conversationHistory ?? [],
-    skillContexts: input.options.skillContexts ?? [],
+    skillContexts,
     modelCapabilities,
     tokenCounter,
   });
@@ -84,6 +92,7 @@ export function prepareDesktopAgentLoop(input: DesktopAgentLoopPreparationInput)
     capabilityPlan,
     platform: input.options.platform,
     toolCenter,
+    skillContexts,
   });
   const turnPolicy = createDesktopAgentTurnPolicy({
     agentDefinition: input.agentDefinition,

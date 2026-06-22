@@ -206,6 +206,176 @@ test("work session read model exposes triggered skills without leaking skill bod
   assert.equal(workSession.contextLedger.entries.some((entry) => entry.kind === "skill"), true);
 });
 
+test("work session read model uses structured skill facts for injected and omitted states", () => {
+  const run = basicRun("completed");
+  const workSession = createDesktopWorkSessionReadModel({
+    run,
+    events: [event(run.runId, "final.result", "结果已生成", "completed")],
+    restoredContextLedger: {
+      runId: run.runId,
+      summary: "技能 2",
+      entries: [
+        {
+          entryId: "context:skill:repo-review",
+          kind: "skill",
+          title: "技能",
+          summary: "技能：Repo Review\n触发原因：触发词：review",
+          refs: [{ kind: "event", id: "skill:repo-review" }],
+          status: "used",
+          skill: {
+            skillId: "repo-review",
+            name: "Repo Review",
+            triggerReason: "触发词：review",
+            summary: "Repo Review：触发词：review",
+            sourceRef: "skill:repo-review",
+            selectedAt: "2026-06-05T00:00:00.000Z",
+            loadedAt: "2026-06-05T00:00:00.000Z",
+            bodyHash: "sha256:repo-review-body",
+            contentHash: "sha256:repo-review-body",
+            bodyCharCount: 120,
+            loadStatus: "loaded",
+            injectionStatus: "injected",
+            markUsedStatus: "succeeded",
+            truncated: false,
+            omitted: false,
+            selection: {
+              selectionMethod: "model",
+              modelCallRef: "model-call:skill-router-2",
+              candidateSkillIds: ["repo-review", "bulky-review", "writer"],
+              selectedSkillIds: ["repo-review"],
+              omittedReasons: [{
+                code: "selection_limit",
+                skillId: "bulky-review",
+                skillName: "Bulky Review",
+                summary: "候选匹配但超出本轮技能选择数量上限。",
+                confidence: 0.5,
+              }],
+              rejectedReasons: [{
+                code: "model_rejected",
+                skillId: "writer",
+                skillName: "Writer",
+                summary: "模型判断当前任务不需要写作技能。",
+                confidence: 0.73,
+              }],
+              confidence: 0.88,
+              reasonSummary: "模型选择 repo-review 作为本轮唯一注入技能。",
+            },
+          },
+        },
+        {
+          entryId: "context:skill:bulky-review:omitted",
+          kind: "skill",
+          title: "技能",
+          summary: "技能：Bulky Review\n触发原因：触发词：review",
+          refs: [{ kind: "event", id: "skill:bulky-review" }],
+          status: "omitted",
+          skill: {
+            skillId: "bulky-review",
+            name: "Bulky Review",
+            triggerReason: "触发词：review",
+            summary: "Bulky Review：触发词：review",
+            sourceRef: "skill:bulky-review",
+            selectedAt: "2026-06-05T00:00:00.000Z",
+            loadedAt: "2026-06-05T00:00:00.000Z",
+            bodyHash: "sha256:bulky-review-body",
+            contentHash: "sha256:bulky-review-body",
+            bodyCharCount: 4_200,
+            loadStatus: "loaded",
+            injectionStatus: "omitted",
+            markUsedStatus: "succeeded",
+            truncated: false,
+            omitted: true,
+          },
+        },
+      ],
+      truncation: {
+        truncated: true,
+        omittedItemCount: 1,
+        truncatedItemIds: [],
+      },
+    },
+  });
+
+  assert.deepEqual(workSession.triggeredSkills.map((skill) => ({
+    skillId: skill.skillId,
+    injectionStatus: skill.injectionStatus,
+    omitted: skill.omitted,
+    contentHash: skill.contentHash,
+    loadedAt: skill.loadedAt,
+  })), [
+    {
+      skillId: "repo-review",
+      injectionStatus: "injected",
+      omitted: false,
+      contentHash: "sha256:repo-review-body",
+      loadedAt: "2026-06-05T00:00:00.000Z",
+    },
+    {
+      skillId: "bulky-review",
+      injectionStatus: "omitted",
+      omitted: true,
+      contentHash: "sha256:bulky-review-body",
+      loadedAt: "2026-06-05T00:00:00.000Z",
+    },
+  ]);
+  assert.equal(workSession.triggeredSkills[0]?.selection?.selectionMethod, "model");
+  assert.equal(workSession.triggeredSkills[0]?.selection?.modelCallRef, "model-call:skill-router-2");
+  assert.deepEqual(workSession.triggeredSkills[0]?.selection?.candidateSkillIds, ["repo-review", "bulky-review", "writer"]);
+  assert.deepEqual(workSession.triggeredSkills[0]?.selection?.selectedSkillIds, ["repo-review"]);
+  assert.equal(workSession.triggeredSkills[0]?.selection?.omittedReasons?.[0]?.code, "selection_limit");
+  assert.equal(workSession.triggeredSkills[0]?.selection?.rejectedReasons?.[0]?.skillId, "writer");
+  assert.equal(workSession.triggeredSkills[0]?.selection?.confidence, 0.88);
+  assert.equal(workSession.triggeredSkills[0]?.selection?.reasonSummary, "模型选择 repo-review 作为本轮唯一注入技能。");
+  assert.equal(JSON.stringify(workSession.triggeredSkills).includes("FULL PRIVATE SKILL BODY"), false);
+});
+
+test("work session read model surfaces failed skill loading without body content", () => {
+  const run = basicRun("completed");
+  const workSession = createDesktopWorkSessionReadModel({
+    run,
+    events: [],
+    restoredContextLedger: {
+      runId: run.runId,
+      summary: "技能 1",
+      entries: [
+        {
+          entryId: "context:skill:missing-review",
+          kind: "skill",
+          title: "技能",
+          summary: "技能：Missing Review\n触发原因：触发词：review\n加载状态：失败（技能正文文件不存在。）",
+          refs: [{ kind: "event", id: "skill:missing-review" }],
+          status: "failed",
+          skill: {
+            skillId: "missing-review",
+            name: "Missing Review",
+            triggerReason: "触发词：review",
+            summary: "Missing Review：技能正文加载失败。",
+            sourceRef: "skill:missing-review",
+            selectedAt: "2026-06-05T00:00:00.000Z",
+            loadStatus: "failed",
+            injectionStatus: "failed",
+            bodyCharCount: 0,
+            truncated: false,
+            omitted: true,
+            error: "技能正文文件不存在。",
+            warning: "技能正文加载失败，本轮不会注入该技能正文。",
+          },
+        },
+      ],
+      truncation: {
+        truncated: false,
+        omittedItemCount: 0,
+        truncatedItemIds: [],
+      },
+    },
+  });
+
+  assert.equal(workSession.triggeredSkills[0]?.loadStatus, "failed");
+  assert.equal(workSession.triggeredSkills[0]?.injectionStatus, "failed");
+  assert.equal(workSession.triggeredSkills[0]?.error, "技能正文文件不存在。");
+  assert.equal(JSON.stringify(workSession.triggeredSkills).includes("FULL PRIVATE SKILL BODY"), false);
+});
+
 test("work session read model surfaces approval as the main stage", () => {
   const run = basicRun("approval_needed");
   const workSession = createDesktopWorkSessionReadModel({

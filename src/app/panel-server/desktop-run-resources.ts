@@ -15,6 +15,7 @@ import {
 import { PanelHttpError } from "./http-utils.js";
 import type { PanelRuntime } from "./runtime.js";
 import type { MinimalRuntime } from "../runtime.js";
+import type { DesktopAgentToolCenterContext } from "../desktop-agent-session-contracts.js";
 import type { DesktopRunResources, PanelRunExecutionOptions } from "./run-execution-contracts.js";
 import { effectiveDesktopCapabilitySnapshotForRun } from "./desktop-run-model-settings.js";
 import type { ToolRegistryScope } from "../basic-agent-runtime/tool-registry.js";
@@ -178,7 +179,7 @@ export function createDesktopToolCenterFactory(
 ) {
   const toolRegistryScopes: readonly ToolRegistryScope[] =
     resources.mcpManager === undefined ? ["desktop-basic"] : ["desktop-basic", "mcp"];
-  return (toolRuntime: MinimalRuntime) => createDefaultToolCenter({
+  return (toolRuntime: MinimalRuntime, context?: DesktopAgentToolCenterContext) => createDefaultToolCenter({
     runtime: toolRuntime,
     env: resources.aiEnvironment,
     fetch: providerFetch,
@@ -191,5 +192,6 @@ export function createDesktopToolCenterFactory(
     mcpManager: resources.mcpManager,
     toolRegistryScopes,
     processRegistry: resources.processRegistry,
+    skillContexts: context?.skillContexts ?? [],
   });
 }

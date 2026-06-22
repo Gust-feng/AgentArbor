@@ -2,6 +2,7 @@ import type { RuntimeDatabase } from "../../domain/runtime-database/index.js";
 import type { AgentDefinition } from "../agent-prompts/contracts.js";
 import type { ConfigCenter } from "../config-center.js";
 import type { ProcessTerminator } from "../runtime-guard/index.js";
+import type { SkillRootInput } from "../skills/index.js";
 
 export type PanelServerOptions = {
   readonly host?: string;
@@ -13,7 +14,8 @@ export type PanelServerOptions = {
   readonly modelCatalogFetch?: PanelModelCatalogFetch;
   readonly workspaceDirectoryPicker?: () => Promise<string | undefined>;
   readonly contextAttachmentPicker?: () => Promise<PanelContextAttachmentSelection | undefined>;
-  readonly skillRoots?: readonly string[];
+  readonly additionalSkillRoots?: readonly SkillRootInput[];
+  readonly skillRoots?: readonly SkillRootInput[];
   readonly desktopAgentDefinition?: AgentDefinition;
   readonly agentDefinitions?: readonly AgentDefinition[];
   readonly processTerminator?: ProcessTerminator;

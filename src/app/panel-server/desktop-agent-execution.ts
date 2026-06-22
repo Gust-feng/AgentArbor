@@ -56,7 +56,14 @@ export async function executeOrdinaryDesktopRunForPanel(
     taskSoilInput,
     agentDefinition,
     conversationHistory: options.conversationHistory,
-    skillContexts: await resolveTriggeredSkillContexts(runtime, goal, resources.capabilitySnapshot.skillCatalog),
+    resolveSkillContexts: (context) =>
+      resolveTriggeredSkillContexts(runtime, goal, resources.capabilitySnapshot.skillCatalog, {
+        intelligenceChannel: context.intelligenceChannel,
+        historySummary: skillRouterHistorySummary(context.conversationHistory),
+        traceId: context.traceId,
+        callerRef: `skill-router:${context.goalId}`,
+        abortSignal: context.abortSignal,
+      }),
     modelCapabilities: resources.capabilitySnapshot.modelCapabilities,
     capabilitySnapshot: resources.capabilitySnapshot,
     toolConfirmationPolicy: options.toolConfirmationPolicy,
@@ -93,6 +100,21 @@ export async function runOrdinaryDesktopForPanel(
     resources,
     options,
   });
+}
+
+function skillRouterHistorySummary(history: readonly { readonly role: "user" | "assistant"; readonly content: string }[]): string | undefined {
+  const recent = history.slice(-6);
+  if (recent.length === 0) {
+    return undefined;
+  }
+  return recent
+    .map((message) => `${message.role}: ${safeHistorySummaryText(message.content, 260)}`)
+    .join("\n");
+}
+
+function safeHistorySummaryText(value: string, maxLength: number): string {
+  const text = value.replace(/\s+/g, " ").trim();
+  return text.length > maxLength ? `${text.slice(0, Math.max(0, maxLength - 3))}...` : text;
 }
 
 type OrdinaryDesktopPanelFacts = {

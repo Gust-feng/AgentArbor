@@ -145,6 +145,66 @@ test("context ledger records goal, history, attachments, skills, budget, and ref
   assert.equal(json.includes("store:"), false);
 });
 
+test("context ledger skill read model keeps load facts without exposing full body", () => {
+  const taskSoil = createTaskSoil({ rawGoal: "review", goalId: "goal-skill-facts", traceId: "trace-skill-facts" });
+  const ledger = createBasicAgentContextLedger({
+    agentDefinition: LEDGER_TEST_AGENT,
+    runId: "run-skill-facts",
+    goal: "review",
+    taskSoil,
+    conversationHistory: [],
+    skillContexts: [structuredSkillContext()],
+  });
+
+  const skillItem = ledger.items.find((item) => item.sourceKind === "skill");
+  const skillEntry = ledger.readModel.entries.find((entry) => entry.kind === "skill");
+
+  assert.equal(skillItem?.modelContent?.includes("FULL PRIVATE SKILL BODY"), true);
+  assert.equal(JSON.stringify(ledger.readModel).includes("FULL PRIVATE SKILL BODY"), false);
+  assert.equal(skillEntry?.skill?.skillId, "repo-review");
+  assert.equal(skillEntry?.skill?.loadedAt, "2026-06-05T00:00:00.000Z");
+  assert.equal(skillEntry?.skill?.contentHash, "sha256:repo-review-body");
+  assert.equal(skillEntry?.skill?.injectionStatus, "injected");
+  assert.equal(skillEntry?.skill?.omitted, false);
+  assert.equal(skillEntry?.skill?.selection?.selectionMethod, "mixed");
+  assert.equal(skillEntry?.skill?.selection?.modelCallRef, "model-call:skill-router-1");
+  assert.deepEqual(skillEntry?.skill?.selection?.candidateSkillIds, ["repo-review", "writer", "disabled-review"]);
+  assert.deepEqual(skillEntry?.skill?.selection?.selectedSkillIds, ["repo-review"]);
+  assert.equal(skillEntry?.skill?.selection?.omittedReasons?.[0]?.code, "metadata_budget_omitted");
+  assert.equal(skillEntry?.skill?.selection?.rejectedReasons?.[0]?.skillId, "writer");
+  assert.equal(skillEntry?.skill?.selection?.confidence, 0.82);
+  assert.equal(skillEntry?.skill?.selection?.reasonSummary, "模型选择 repo-review，并保留 keyword fallback 候选事实。");
+});
+
+test("context ledger marks omitted loaded skills without counting them as injected", () => {
+  const taskSoil = createTaskSoil({ rawGoal: "review", goalId: "goal-skill-omitted", traceId: "trace-skill-omitted" });
+  const ledger = createBasicAgentContextLedger({
+    agentDefinition: LEDGER_TEST_AGENT,
+    runId: "run-skill-omitted",
+    goal: "review",
+    taskSoil,
+    conversationHistory: [
+      { role: "user", content: "recent user context must win budget", ref: "conversation:skill-omitted:user" },
+      { role: "assistant", content: "recent assistant context must win budget", ref: "conversation:skill-omitted:assistant" },
+    ],
+    skillContexts: [{
+      ...structuredSkillContext(),
+      body: `FULL PRIVATE SKILL BODY ${"x".repeat(3_000)}`,
+      bodyCharCount: 3_024,
+    }],
+    maxMessages: 4,
+    maxChars: 2_000,
+  });
+
+  const skillEntry = ledger.readModel.entries.find((entry) => entry.kind === "skill");
+
+  assert.equal(ledger.items.some((item) => item.sourceKind === "skill"), false);
+  assert.equal(skillEntry?.status, "omitted");
+  assert.equal(skillEntry?.skill?.injectionStatus, "omitted");
+  assert.equal(skillEntry?.skill?.omitted, true);
+  assert.equal(JSON.stringify(ledger.readModel).includes("FULL PRIVATE SKILL BODY"), false);
+});
+
 test("context ledger append preserves existing context and adds tool evidence without redaction", () => {
   const taskSoil = createTaskSoil({
     rawGoal: "answer with evidence",
@@ -360,6 +420,62 @@ test("context ledger conversation history preserves prior conversation text", ()
   assert.equal(text.includes("internal loop"), true);
 });
 
+test("context ledger exposes selected skill resource indexes without preloading resource contents", () => {
+  const taskSoil = createTaskSoil({ rawGoal: "review with skill references", goalId: "goal-skill-resources", traceId: "trace-skill-resources" });
+  const ledger = createBasicAgentContextLedger({
+    agentDefinition: LEDGER_TEST_AGENT,
+    runId: "run-skill-resources",
+    goal: "review with skill references",
+    taskSoil,
+    conversationHistory: [],
+    skillContexts: [{
+      skill: {
+        id: "repo-review",
+        name: "Repo Review",
+        description: "Review repositories.",
+        enabled: true,
+        sourcePath: "Z:/AgentArbor/.agents/skills/repo-review/SKILL.md",
+        triggers: ["review"],
+        resourceIndex: [{
+          type: "eval",
+          relativePath: "evals/review-case.json",
+          exists: true,
+          byteLength: 256,
+        }],
+        resources: [{
+          kind: "reference",
+          name: "checklist.md",
+          relativePath: "references/checklist.md",
+          sourcePath: "Z:/AgentArbor/.agents/skills/repo-review/references/checklist.md",
+          byteLength: 512,
+          contentHash: "sha256:reference",
+        }, {
+          kind: "asset",
+          name: "diagram.png",
+          relativePath: "assets/diagram.png",
+          sourcePath: "Z:/AgentArbor/.agents/skills/repo-review/assets/diagram.png",
+          byteLength: 1024,
+          contentHash: "sha256:asset",
+        }],
+      },
+      body: "Use concise review guidance.",
+      triggerReason: "model selected repo-review",
+      loadStatus: "loaded",
+      omitted: false,
+    }],
+  });
+
+  const skill = ledger.items.find((item) => item.sourceKind === "skill");
+  assert.notEqual(skill, undefined);
+  assert.match(skill?.modelContent ?? "", /read_skill_resource/);
+  assert.match(skill?.modelContent ?? "", /type=reference path=references\/checklist\.md/);
+  assert.match(skill?.modelContent ?? "", /type=asset path=assets\/diagram\.png/);
+  assert.equal((skill?.modelContent ?? "").includes("evals/review-case.json"), false);
+  assert.equal((skill?.modelContent ?? "").includes("Z:/AgentArbor"), false);
+  assert.equal((skill?.modelContent ?? "").includes("sha256:reference"), false);
+  assert.equal((skill?.modelContent ?? "").includes("full reference content"), false);
+});
+
 function skillContext(): DesktopAgentSkillContext {
   return {
     skill: {
@@ -372,6 +488,57 @@ function skillContext(): DesktopAgentSkillContext {
     },
     body: "Use concise summaries. Do not read resource files unless asked. sk-skill-secret",
     triggerReason: "goal contains summarize",
+  };
+}
+
+function structuredSkillContext(): DesktopAgentSkillContext {
+  return {
+    skill: {
+      id: "repo-review",
+      name: "Repo Review",
+      description: "Review repositories.",
+      enabled: true,
+      sourcePath: "Z:/AgentArbor/.agents/skills/repo-review/SKILL.md",
+      triggers: ["review"],
+    },
+    body: "FULL PRIVATE SKILL BODY SHOULD ONLY REACH MODEL CONTEXT",
+    triggerReason: "触发词：review",
+    selectedAt: "2026-06-05T00:00:00.000Z",
+    loadStatus: "loaded",
+    loadedAt: "2026-06-05T00:00:00.000Z",
+    bodyHash: "sha256:repo-review-body",
+    contentHash: "sha256:repo-review-body",
+    bodyCharCount: 57,
+    truncated: false,
+    omitted: false,
+    markUsedStatus: "succeeded",
+    summary: "技能：Repo Review\n触发原因：触发词：review\n加载状态：已加载\nsha256:repo-review-body",
+    selection: {
+      selectionMethod: "mixed",
+      modelCallRef: "model-call:skill-router-1",
+      candidateSkillIds: ["repo-review", "writer", "disabled-review", "repo-review"],
+      selectedSkillIds: ["repo-review"],
+      omittedReasons: [
+        {
+          code: "metadata_budget_omitted",
+          skillId: "disabled-review",
+          skillName: "Disabled Review",
+          summary: "候选 metadata 超出预算，未进入模型选择上下文。",
+          confidence: 0.4,
+        },
+      ],
+      rejectedReasons: [
+        {
+          code: "model_rejected",
+          skillId: "writer",
+          skillName: "Writer",
+          summary: "当前请求是仓库审查，不需要写作 skill。",
+          confidence: 0.76,
+        },
+      ],
+      confidence: 0.82,
+      reasonSummary: "模型选择 repo-review，并保留 keyword fallback 候选事实。",
+    },
   };
 }
 

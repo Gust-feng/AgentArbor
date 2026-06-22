@@ -438,9 +438,11 @@ test("panel server source keeps conversation restore and persistence split", asy
   assert.equal(desktopAgentExecution.includes("agentDefinitionRef: runAgentDefinitionRef(agentDefinition)"), false);
   assert.equal(desktopAgentExecution.includes("agentDefinitionRef,"), true);
   assert.equal(
-    desktopAgentExecution.includes("resolveTriggeredSkillContexts(runtime, goal, resources.capabilitySnapshot.skillCatalog)"),
+    desktopAgentExecution.includes("resolveTriggeredSkillContexts(runtime, goal, resources.capabilitySnapshot.skillCatalog, {"),
     true
   );
+  assert.equal(desktopAgentExecution.includes("historySummary: skillRouterHistorySummary(context.conversationHistory)"), true);
+  assert.equal(desktopAgentExecution.includes("callerRef: `skill-router:${context.goalId}`"), true);
   assert.equal(desktopAgentExecution.includes("config: resources.capabilitySnapshot.activeModel"), true);
   assert.equal(desktopAgentExecution.includes("informationAccess: resources.informationAccess"), true);
   assert.equal(desktopAgentExecution.includes("informationAccess: options.informationAccess"), false);
@@ -515,7 +517,7 @@ test("panel server source keeps conversation restore and persistence split", asy
     assert.equal(requestHandler.includes(privateRuntimeDetail), false);
     assert.equal(panelRuntime.includes(privateRuntimeDetail), true);
   }
-  for (const privateSkillDetail of ["discoverSkills", "loadSkillBody", "selectTriggeredSkills"]) {
+  for (const privateSkillDetail of ["discoverSkills", "loadSkillBody", "resolveSkillSelection"]) {
     assert.equal(requestHandler.includes(privateSkillDetail), false);
     assert.equal(skillService.includes(privateSkillDetail), true);
   }

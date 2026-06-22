@@ -152,6 +152,20 @@
   padding: 0;
 }
 
+.settings-panel-loading {
+  display: grid;
+  min-height: 180px;
+  place-items: center;
+  align-content: center;
+  gap: var(--space-3);
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.settings-panel-loading p {
+  margin: 0;
+}
+
 @media (max-width: 620px) {
   .settings-overlay {
     padding: var(--space-2);

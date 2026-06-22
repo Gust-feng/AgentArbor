@@ -6,7 +6,7 @@ export function SkillSettings(props: {
   readonly skills: readonly SkillDefinition[];
   readonly saving?: boolean;
   readonly onRefreshSkills: () => void;
-  readonly onUpdateSkill: (skillId: string, enabled: boolean) => void;
+  readonly onUpdateSkill: (skill: Pick<SkillDefinition, "id" | "stateKey">, enabled: boolean) => void;
 }): React.ReactElement {
   const enabledCount = props.skills.filter((skill) => skill.enabled).length;
   return (
@@ -29,10 +29,10 @@ export function SkillSettings(props: {
         <div className="skills-list" aria-label="技能列表">
           {props.skills.map((skill) => (
             <SkillRow
-              key={skill.id}
+              key={skill.stateKey ?? skill.id}
               skill={skill}
               saving={props.saving}
-              onToggle={() => props.onUpdateSkill(skill.id, !skill.enabled)}
+              onToggle={() => props.onUpdateSkill(skill, !skill.enabled)}
             />
           ))}
         </div>

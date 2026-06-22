@@ -11,6 +11,8 @@ test("panel UI settings and model modules stay split", async () => {
     capabilitySettings,
     skillSettings,
     workspaceSettings,
+    runtimeEnvironmentSettings,
+    appearanceSettings,
     modelSettings,
     modelCatalogPanel,
     modelProviderForm,
@@ -36,6 +38,8 @@ test("panel UI settings and model modules stay split", async () => {
     readPanelUiSource(path.join("components", "capability-settings.tsx")),
     readPanelUiSource(path.join("components", "skill-settings.tsx")),
     readPanelUiSource(path.join("components", "workspace-settings.tsx")),
+    readPanelUiSource(path.join("components", "runtime-environment-settings.tsx")),
+    readPanelUiSource(path.join("components", "appearance-settings.tsx")),
     readPanelUiSource(path.join("components", "model-settings.tsx")),
     readPanelUiSource(path.join("components", "model-catalog-panel.tsx")),
     readPanelUiSource(path.join("components", "model-provider-form.tsx")),
@@ -58,12 +62,18 @@ test("panel UI settings and model modules stay split", async () => {
 
   assert.equal(settingsDialog.includes('from "./skills-page"'), false);
   assert.equal(settingsDialog.includes('from "./tools-page"'), false);
-  assert.equal(settingsDialog.includes('from "./capability-settings"'), true);
-  assert.equal(settingsDialog.includes('from "./skill-settings"'), true);
+  assert.equal(settingsDialog.includes('from "./capability-settings"'), false);
+  assert.equal(settingsDialog.includes('from "./skill-settings"'), false);
   assert.equal(settingsDialog.includes('from "./confirmation-settings"'), false);
-  assert.equal(settingsDialog.includes('from "./model-settings"'), true);
+  assert.equal(settingsDialog.includes('from "./model-settings"'), false);
   assert.equal(settingsDialog.includes('from "./settings-types"'), true);
-  assert.equal(settingsDialog.includes('from "./workspace-settings"'), true);
+  assert.equal(settingsDialog.includes('from "./workspace-settings"'), false);
+  assert.equal(settingsDialog.includes("React.lazy"), true);
+  assert.equal(settingsDialog.includes('import("./model-settings")'), true);
+  assert.equal(settingsDialog.includes('import("./capability-settings")'), true);
+  assert.equal(settingsDialog.includes('import("./skill-settings")'), true);
+  assert.equal(settingsDialog.includes('import("./workspace-settings")'), true);
+  assert.equal(settingsDialog.includes('import("./appearance-settings")'), true);
   assert.equal(settingsDialog.includes('export type { McpServerForm, ModelForm, SettingsGroup, ToolForm } from "./settings-types"'), true);
   assert.equal(settingsDialog.includes("export function SettingsDialog"), true);
   assert.equal(settingsDialog.includes("initialGroup?: SettingsGroup"), true);
@@ -78,20 +88,21 @@ test("panel UI settings and model modules stay split", async () => {
   assert.equal(settingsDialog.includes('label: "外观"'), true);
   assert.equal(settingsDialog.includes('label: "关于"'), true);
   assert.equal(settingsDialog.includes('label: "确认边界"'), false);
-  assert.equal(settingsDialog.includes("<BasicCapabilitiesSettings"), true);
-  assert.equal(settingsDialog.includes("<McpServiceSettings"), true);
-  assert.equal(settingsDialog.includes("<SkillSettings"), true);
-  assert.equal(settingsDialog.includes("<WorkspaceSettings"), true);
+  assert.equal(settingsDialog.includes("<LazyModelSettings"), true);
+  assert.equal(settingsDialog.includes("<LazyBasicCapabilitiesSettings"), true);
+  assert.equal(settingsDialog.includes("<LazyMcpServiceSettings"), true);
+  assert.equal(settingsDialog.includes("<LazySkillSettings"), true);
+  assert.equal(settingsDialog.includes("<LazyWorkspaceSettings"), true);
   assert.equal(settingsDialog.includes("<ConfirmationSettings"), false);
   assert.equal(settingsDialog.includes("function Capability"), false);
   assert.equal(settingsDialog.includes("function WorkspaceSettings"), false);
   assert.equal(settingsDialog.includes("function ConfirmationSettings"), false);
-  assert.equal(settingsDialog.includes("function AppearanceSettings"), true);
+  assert.equal(settingsDialog.includes("function AppearanceSettings"), false);
   assert.equal(settingsDialog.includes("function AboutSettings"), true);
-  assert.equal(settingsDialog.includes("<AppearanceSettings config={props.config} />"), true);
+  assert.equal(settingsDialog.includes("<LazyAppearanceSettings config={props.config} />"), true);
   assert.equal(settingsDialog.includes("<AboutSettings config={props.config} />"), true);
-  assert.equal(settingsDialog.includes("useBrowserAppearanceSnapshot"), true);
-  assert.equal(settingsDialog.includes("<ThemeSwitcher"), true);
+  assert.equal(settingsDialog.includes("useBrowserAppearanceSnapshot"), false);
+  assert.equal(settingsDialog.includes("<ThemeSwitcher"), false);
   assert.equal(settingsDialog.includes("未配置独立主题"), false);
   assert.equal(settingsDialog.includes("只读：当前没有外观配置入口"), false);
   assert.equal(settingsDialog.includes("product?.version"), true);
@@ -142,6 +153,9 @@ test("panel UI settings and model modules stay split", async () => {
   assert.equal(skillSettings.includes("暂无技能"), true);
   assert.equal(skillSettings.includes('aria-label="技能列表"'), true);
   assert.equal(skillSettings.includes("SKILL.md"), true);
+  assert.equal(appearanceSettings.includes("export function AppearanceSettings"), true);
+  assert.equal(appearanceSettings.includes("useBrowserAppearanceSnapshot"), true);
+  assert.equal(appearanceSettings.includes("<ThemeSwitcher"), true);
   assert.equal(capabilitySettings.includes("网络搜索"), true);
   assert.equal(capabilitySettings.includes("网页查证"), false);
   assert.equal(capabilitySettings.includes("McpReferencePanel"), true);
@@ -158,6 +172,11 @@ test("panel UI settings and model modules stay split", async () => {
   assert.equal(capabilitySettings.includes("接入工具"), false);
   assert.equal(capabilitySettings.includes("管理助手可调用"), false);
   assert.equal(workspaceSettings.includes("export function WorkspaceSettings"), true);
+  assert.equal(workspaceSettings.includes("configuredKind"), true);
+  assert.equal(workspaceSettings.includes('from "./runtime-environment-settings"'), true);
+  assert.equal(workspaceSettings.includes("settings-runtime-list"), false);
+  assert.equal(runtimeEnvironmentSettings.includes("export function RuntimeEnvironmentSettings"), true);
+  assert.equal(runtimeEnvironmentSettings.includes("settings-runtime-list"), true);
   assert.equal(workspaceSettings.includes("这是助手可使用的本地上下文边界"), false);
   assert.equal(workspaceCommon.includes("export function PageHeader"), false);
   assert.equal(workspaceCommon.includes("export function SearchBox"), false);

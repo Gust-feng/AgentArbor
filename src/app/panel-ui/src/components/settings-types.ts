@@ -9,7 +9,8 @@ export type ToolForm = {
 export type McpServerForm = {
   readonly serverId: string;
   readonly label: string;
-  readonly transport: "stdio" | "http" | "sse";
+  readonly description: string;
+  readonly transport: "stdio" | "http";
   readonly authMode: "none" | "bearer" | "api_key" | "custom_header";
   readonly authTouched: boolean;
   readonly confirmationMode: "always" | "unsafe_only" | "never";

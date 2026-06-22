@@ -200,7 +200,7 @@ function McpServiceBoard(props: {
         ) : catalog.map((server) => {
           const selected = panelMode === "edit" && server.serverId === props.form.serverId;
           const serverStatus = mcpRuntimeStatusLabel(server.runtimeStatus ?? server.availability);
-          const serverError = mcpCompactError(server.errorSummary ?? server.lastError);
+          const serverDescription = mcpServerCardDescription(server);
           return (
             <button
               type="button"
@@ -218,13 +218,14 @@ function McpServiceBoard(props: {
                 </span>
                 <span className={`mcp-status-pill ${mcpStatusTone(server.runtimeStatus ?? server.availability)}`}>{serverStatus}</span>
               </span>
-              <span className="mcp-service-card-command">{mcpServerCardCommand(server)}</span>
+              {serverDescription !== undefined && (
+                <span className="mcp-service-card-description">{serverDescription}</span>
+              )}
               <span className="mcp-service-card-footer">
                 {mcpServerCardFacts(server).map((fact) => (
                   <span key={fact}>{fact}</span>
                 ))}
               </span>
-              {serverError !== undefined && <span className="mcp-service-card-error">错误：{serverError}</span>}
             </button>
           );
         })}
@@ -294,7 +295,6 @@ function McpServerPanel(props: {
   const visibleTools = props.selectedServer?.tools ?? [];
   const exposedTools = props.selectedServer?.exposedTools ?? [];
   const hasSavedAuth = props.selectedServer?.authSecretRefCount !== undefined && props.selectedServer.authSecretRefCount > 0;
-  const selectedError = mcpCompactError(props.selectedServer?.errorSummary ?? props.selectedServer?.lastError);
   const selectedStatus = props.selectedServer === undefined
     ? "未保存"
     : mcpRuntimeStatusLabel(props.selectedServer.runtimeStatus ?? props.selectedServer.availability);
@@ -307,30 +307,38 @@ function McpServerPanel(props: {
   const [checkingEnvironment, setCheckingEnvironment] = React.useState(false);
   const [installingEnvironment, setInstallingEnvironment] = React.useState(false);
   const [referenceState, setReferenceState] = React.useState<McpReferenceLoadState>({ status: "idle" });
+  const referenceRequestIdRef = React.useRef(0);
   React.useEffect(() => {
     setEnvironmentCheck(undefined);
   }, [props.form.transport, props.form.command, props.form.commandLine]);
   React.useEffect(() => {
-    if (!editing || props.selectedServer === undefined || props.onLoadReferences === undefined) {
-      setReferenceState({ status: "idle" });
+    referenceRequestIdRef.current += 1;
+    setReferenceState({ status: "idle" });
+  }, [editing, props.selectedServer?.serverId]);
+  const loadReferences = (): void => {
+    if (
+      !editing ||
+      props.selectedServer === undefined ||
+      props.onLoadReferences === undefined ||
+      referenceState.status === "loading" ||
+      referenceState.status === "ready"
+    ) {
       return;
     }
-    let cancelled = false;
+    const requestId = referenceRequestIdRef.current + 1;
+    referenceRequestIdRef.current = requestId;
     const serverId = props.selectedServer.serverId;
     setReferenceState({ status: "loading" });
-    props.onLoadReferences(serverId).then((references) => {
-      if (!cancelled) {
+    void props.onLoadReferences(serverId).then((references) => {
+      if (referenceRequestIdRef.current === requestId) {
         setReferenceState({ status: references.ok === false ? "failed" : "ready", references });
       }
     }).catch(() => {
-      if (!cancelled) {
+      if (referenceRequestIdRef.current === requestId) {
         setReferenceState({ status: "failed" });
       }
     });
-    return () => {
-      cancelled = true;
-    };
-  }, [editing, props.selectedServer?.serverId, props.onLoadReferences]);
+  };
   const runEnvironmentCheck = async (): Promise<void> => {
     if (props.form.transport !== "stdio" || checkingEnvironment || installingEnvironment) return;
     setCheckingEnvironment(true);
@@ -391,11 +399,10 @@ function McpServerPanel(props: {
             <div className="mcp-status-strip">
               <span>{mcpRuntimeStatusLabel(props.selectedServer.runtimeStatus ?? props.selectedServer.availability)}</span>
               <span>{transportLabel(props.selectedServer.transport)}</span>
-              <span>{visibleTools.length} 个工具</span>
+              {mcpServerCapabilityFacts(props.selectedServer).map((fact) => (
+                <span key={fact}>{fact}</span>
+              ))}
               {props.selectedServer.lastConnectedAt !== undefined && <span>最近连接：{props.selectedServer.lastConnectedAt}</span>}
-              {selectedError !== undefined && (
-                <span className="mcp-status-error">错误：{selectedError}</span>
-              )}
             </div>
           )}
           <McpConnectionFields
@@ -409,6 +416,7 @@ function McpServerPanel(props: {
             installingEnvironment={installingEnvironment}
             onCheckEnvironment={() => void runEnvironmentCheck()}
             onInstallEnvironment={() => void runEnvironmentInstall()}
+            showConfirmationMode={editing}
           />
           {editing && (
             <section className="mcp-form-section">
@@ -429,7 +437,7 @@ function McpServerPanel(props: {
                       <div className="mcp-tool-auth-header" aria-hidden="true">
                         <span>工具</span>
                         <span>启用</span>
-                        <span>自动批准</span>
+                        <span>跳过确认</span>
                       </div>
                       {visibleTools.map((tool) => {
                         const enabled = isMcpToolEnabled(activeServer, tool.name);
@@ -438,6 +446,8 @@ function McpServerPanel(props: {
                           <McpToolAuthorizationRow
                             key={tool.name}
                             title={mcpToolDisplayTitle(activeServer, tool)}
+                            detail={mcpToolDisplayDetail(tool)}
+                            meta={mcpToolDisplayMeta(tool)}
                             enabled={enabled}
                             autoApproved={autoApproved}
                             onToggle={() => props.onUpdateTool?.(activeServer.serverId, tool.name, !enabled)}
@@ -457,7 +467,7 @@ function McpServerPanel(props: {
             </section>
           )}
           {editing && (
-            <McpReferencePanel state={referenceState} />
+            <McpReferencePanel state={referenceState} onOpen={loadReferences} />
           )}
           {!editing && (
             <details className="mcp-advanced">
@@ -513,6 +523,7 @@ type McpReferenceLoadState =
 
 function McpReferencePanel(props: {
   readonly state: McpReferenceLoadState;
+  readonly onOpen: () => void;
 }): React.ReactElement {
   const references = props.state.status === "ready" || props.state.status === "failed"
     ? props.state.references
@@ -523,7 +534,14 @@ function McpReferencePanel(props: {
     (references?.resourceTemplates.length ?? 0);
   return (
     <section className="mcp-form-section">
-      <details className="mcp-tool-authorization">
+      <details
+        className="mcp-tool-authorization"
+        onToggle={(event) => {
+          if (event.currentTarget.open) {
+            props.onOpen();
+          }
+        }}
+      >
         <summary>
           <span className="mcp-tool-authorization-copy">
             <strong>提示与资源</strong>
@@ -533,12 +551,13 @@ function McpReferencePanel(props: {
           </span>
         </summary>
         <div className="mcp-tool-list">
+          {props.state.status === "idle" && <div className="capability-empty">展开后读取提示模板和资源</div>}
           {props.state.status === "loading" && <div className="capability-empty">读取中</div>}
           {props.state.status === "failed" && (
-            <div className="capability-empty">{references?.errorSummary ?? "读取失败"}</div>
+            <div className="capability-empty">读取失败，仅影响提示与资源列表</div>
           )}
           {props.state.status === "ready" && totalCount === 0 && (
-            <div className="capability-empty">暂无提示或资源</div>
+            <div className="capability-empty">该服务未暴露提示或资源</div>
           )}
           {props.state.status === "ready" && totalCount > 0 && (
             <div className="mcp-reference-table">
@@ -596,7 +615,7 @@ function McpReferenceRow(props: {
 function mcpReferenceSummary(state: McpReferenceLoadState, totalCount: number): string {
   if (state.status === "loading") return "读取中";
   if (state.status === "failed") return "读取失败";
-  if (state.status === "ready") return `${totalCount} 项`;
+  if (state.status === "ready") return totalCount === 0 ? "未暴露" : `${totalCount} 项`;
   return "未读取";
 }
 
@@ -611,6 +630,7 @@ function McpConnectionFields(props: {
   readonly installingEnvironment?: boolean;
   readonly onCheckEnvironment: () => void;
   readonly onInstallEnvironment: () => void;
+  readonly showConfirmationMode?: boolean;
 }): React.ReactElement {
   const authorizationHeaderPlaceholder = props.hasSavedAuth === true ? SAVED_API_KEY_MASK : "Bearer ...";
   const canCheckEnvironment = (props.form.commandLine.trim() || props.form.command.trim()).length > 0;
@@ -630,7 +650,6 @@ function McpConnectionFields(props: {
             options={[
               { value: "stdio", label: transportOptionLabel("stdio") },
               { value: "http", label: transportOptionLabel("http") },
-              { value: "sse", label: transportOptionLabel("sse") },
             ]}
             onChange={(value) => props.setForm(formWithTransport(props.form, transportFromValue(value)))}
           />
@@ -649,6 +668,27 @@ function McpConnectionFields(props: {
             placeholder="我的工具服务"
           />
         </label>
+        <label className="mcp-description-field" htmlFor={`${props.fieldPrefix}-description`}>
+          描述
+          <input
+            id={`${props.fieldPrefix}-description`}
+            aria-label="描述"
+            value={props.form.description}
+            spellCheck={false}
+            autoComplete="off"
+            autoCorrect="off"
+            autoCapitalize="off"
+            onChange={(event) => props.setForm({ ...props.form, description: event.target.value })}
+            placeholder="可选"
+          />
+        </label>
+        {props.showConfirmationMode === true && (
+          <McpConfirmationModeField
+            form={props.form}
+            setForm={props.setForm}
+            fieldPrefix={props.fieldPrefix}
+          />
+        )}
       </div>
       <div className="mcp-form-grid mcp-transport-params-grid">
         {props.form.transport === "stdio" ? (
@@ -728,7 +768,7 @@ function McpConnectionFields(props: {
           </>
         ) : (
           <>
-            <label className="mcp-connection-main" htmlFor={`${props.fieldPrefix}-url`}>
+            <label className="mcp-url-field" htmlFor={`${props.fieldPrefix}-url`}>
               URL
               <input
                 id={`${props.fieldPrefix}-url`}
@@ -797,20 +837,7 @@ function McpAdvancedOptions(props: {
   return (
     <div className="mcp-advanced-content">
       <div className="mcp-advanced-row">
-        <label className="mcp-confirmation-field" htmlFor={`${props.fieldPrefix}-confirmation-mode`}>
-          <span>确认策略</span>
-          <SettingsSelectControl
-            id={`${props.fieldPrefix}-confirmation-mode`}
-            ariaLabel="确认策略"
-            value={props.form.confirmationMode}
-            options={[
-              { value: "never", label: "不确认" },
-              { value: "unsafe_only", label: "只确认声明需要确认的工具" },
-              { value: "always", label: "每次确认" },
-            ]}
-            onChange={(value) => props.setForm({ ...props.form, confirmationMode: confirmationModeFromValue(value) })}
-          />
-        </label>
+        <McpConfirmationModeField form={props.form} setForm={props.setForm} fieldPrefix={props.fieldPrefix} />
       </div>
       <div className="mcp-import-block">
         <div className="mcp-import-title-row">
@@ -840,6 +867,29 @@ function McpAdvancedOptions(props: {
         />
       </div>
     </div>
+  );
+}
+
+function McpConfirmationModeField(props: {
+  readonly form: McpServerForm;
+  readonly setForm: (form: McpServerForm) => void;
+  readonly fieldPrefix: string;
+}): React.ReactElement {
+  return (
+    <label className="mcp-confirmation-field" htmlFor={`${props.fieldPrefix}-confirmation-mode`}>
+      <span>调用确认</span>
+      <SettingsSelectControl
+        id={`${props.fieldPrefix}-confirmation-mode`}
+        ariaLabel="调用确认"
+        value={props.form.confirmationMode}
+        options={[
+          { value: "never", label: "直接调用" },
+          { value: "unsafe_only", label: "按工具声明确认" },
+          { value: "always", label: "每次调用前确认" },
+        ]}
+        onChange={(value) => props.setForm({ ...props.form, confirmationMode: confirmationModeFromValue(value) })}
+      />
+    </label>
   );
 }
 
@@ -937,6 +987,8 @@ function SettingsSelectControl(props: {
 
 function McpToolAuthorizationRow(props: {
   readonly title: string;
+  readonly detail?: string;
+  readonly meta: readonly string[];
   readonly enabled: boolean;
   readonly autoApproved: boolean;
   readonly onToggle: () => void;
@@ -944,7 +996,15 @@ function McpToolAuthorizationRow(props: {
 }): React.ReactElement {
   return (
     <article className="mcp-tool-auth-row">
-      <strong>{props.title}</strong>
+      <span className="mcp-tool-auth-copy">
+        <strong>{props.title}</strong>
+        {props.detail !== undefined && <span>{props.detail}</span>}
+        {props.meta.length > 0 && (
+          <span className="mcp-tool-auth-meta">
+            {props.meta.map((item) => <span key={item}>{item}</span>)}
+          </span>
+        )}
+      </span>
       <button
         type="button"
         className="mcp-tool-auth-state"
@@ -958,7 +1018,7 @@ function McpToolAuthorizationRow(props: {
         type="button"
         className="mcp-tool-auth-state"
         aria-pressed={props.autoApproved}
-        aria-label={`${props.autoApproved ? "关闭自动批准" : "开启自动批准"} ${props.title}`}
+        aria-label={`${props.autoApproved ? "关闭跳过确认" : "开启跳过确认"} ${props.title}`}
         onClick={props.onToggleAutoApproval}
       >
         <span aria-hidden="true" />
@@ -975,6 +1035,7 @@ function formFromMcpCatalog(server: NonNullable<ToolsResponse["mcpCatalog"]>[num
     ...previous,
     serverId: server.serverId,
     label: server.label,
+    description: server.description ?? "",
     transport: server.transport,
     authMode,
     authTouched: false,
@@ -1003,6 +1064,7 @@ function emptyMcpServerForm(): McpServerForm {
   return {
     serverId: "",
     label: "",
+    description: "",
     transport: "stdio",
     authMode: "none",
     authTouched: false,
@@ -1088,6 +1150,19 @@ function mcpToolDisplayTitle(
   return localName || tool.name;
 }
 
+function mcpToolDisplayDetail(tool: NonNullable<ToolsResponse["mcpCatalog"]>[number]["tools"][number]): string | undefined {
+  const description = tool.description?.trim() ?? tool.displayDescription?.trim();
+  return description === undefined || description.length === 0 ? undefined : description;
+}
+
+function mcpToolDisplayMeta(tool: NonNullable<ToolsResponse["mcpCatalog"]>[number]["tools"][number]): readonly string[] {
+  return [
+    tool.operationLabel,
+    tool.riskLabel,
+    tool.requiresConfirmation === true ? "需确认" : "可直接调用",
+  ].filter((item): item is string => typeof item === "string" && item.trim().length > 0);
+}
+
 function mcpStatusTone(status: string): "success" | "danger" | "warning" | "neutral" {
   switch (status) {
     case "connected":
@@ -1104,20 +1179,29 @@ function mcpStatusTone(status: string): "success" | "danger" | "warning" | "neut
 }
 
 function mcpServerCardFacts(server: NonNullable<ToolsResponse["mcpCatalog"]>[number]): readonly string[] {
-  return [`${server.tools.length} 个工具`, mcpConfirmationModeLabel(server.confirmationMode)];
+  return [...mcpServerCapabilityFacts(server), mcpConfirmationModeLabel(server.confirmationMode)];
 }
 
-function mcpServerCardCommand(server: NonNullable<ToolsResponse["mcpCatalog"]>[number]): string {
-  if (server.transport === "stdio") {
-    return server.commandSummary ?? "本地命令";
+function mcpServerCapabilityFacts(server: NonNullable<ToolsResponse["mcpCatalog"]>[number]): readonly string[] {
+  const facts = [`${server.tools.length} 个工具`];
+  if (server.promptCount !== undefined) {
+    facts.push(`${server.promptCount} 个提示`);
   }
-  return server.url ?? transportLabel(server.transport);
+  if (server.resourceCount !== undefined || server.resourceTemplateCount !== undefined) {
+    facts.push(`${(server.resourceCount ?? 0) + (server.resourceTemplateCount ?? 0)} 个资源`);
+  }
+  return facts;
+}
+
+function mcpServerCardDescription(server: NonNullable<ToolsResponse["mcpCatalog"]>[number]): string | undefined {
+  const description = server.description?.trim();
+  return description === undefined || description.length === 0 ? undefined : description;
 }
 
 function mcpConfirmationModeLabel(mode?: "always" | "unsafe_only" | "never"): string {
-  if (mode === "never") return "不确认";
-  if (mode === "always") return "全部确认";
-  return "按工具声明确认";
+  if (mode === "never") return "直接调用";
+  if (mode === "always") return "每次确认";
+  return "按声明确认";
 }
 
 function isMcpToolEnabled(server: NonNullable<ToolsResponse["mcpCatalog"]>[number], toolName: string): boolean {
@@ -1138,16 +1222,14 @@ function isMcpToolAutoApproved(server: NonNullable<ToolsResponse["mcpCatalog"]>[
   return autoApprovedTools.includes(toolName) || autoApprovedTools.includes(localName);
 }
 
-function transportLabel(transport: "stdio" | "http" | "sse"): string {
-  if (transport === "http") return "HTTP";
-  if (transport === "sse") return "SSE";
-  return "本地命令";
+function transportLabel(transport: "stdio" | "http"): string {
+  if (transport === "http") return "Streamable HTTP";
+  return "stdio";
 }
 
-function transportOptionLabel(transport: "stdio" | "http" | "sse"): string {
-  if (transport === "http") return "HTTP";
-  if (transport === "sse") return "SSE";
-  return "本地命令";
+function transportOptionLabel(transport: "stdio" | "http"): string {
+  if (transport === "http") return "Streamable HTTP";
+  return "stdio";
 }
 
 function mcpFieldId(prefix: string, value: string): string {
@@ -1155,8 +1237,8 @@ function mcpFieldId(prefix: string, value: string): string {
   return safeValue.length > 0 ? `${prefix}-${safeValue}` : prefix;
 }
 
-function transportFromValue(value: string): "stdio" | "http" | "sse" {
-  return value === "http" || value === "sse" ? value : "stdio";
+function transportFromValue(value: string): "stdio" | "http" {
+  return value === "http" ? "http" : "stdio";
 }
 
 function formWithTransport(form: McpServerForm, transport: McpServerForm["transport"]): McpServerForm {
@@ -1190,8 +1272,8 @@ function formWithTransport(form: McpServerForm, transport: McpServerForm["transp
   };
 }
 
-function isNetworkMcpTransport(transport: "stdio" | "http" | "sse"): boolean {
-  return transport === "http" || transport === "sse";
+function isNetworkMcpTransport(transport: "stdio" | "http"): boolean {
+  return transport === "http";
 }
 
 function confirmationModeFromValue(value: string): "always" | "unsafe_only" | "never" {
@@ -1215,14 +1297,6 @@ function mcpRuntimeStatusLabel(status: string): string {
     default:
       return "已配置";
   }
-}
-
-function mcpCompactError(error?: string): string | undefined {
-  const trimmed = error?.replace(/\s+/g, " ").trim();
-  if (trimmed === undefined || trimmed.length === 0) return undefined;
-  const parsedMessage = parseMcpErrorJsonMessage(trimmed);
-  const compact = normalizeMcpErrorMessage(parsedMessage ?? trimmed);
-  return compact.length > 140 ? `${compact.slice(0, 137)}...` : compact;
 }
 
 function mcpEnvironmentTone(status: McpEnvironmentCheckResponse["status"]): "success" | "warning" | "danger" {
@@ -1252,19 +1326,4 @@ function mcpEnvironmentStatusText(result: McpEnvironmentCheckResponse): string {
         ? "缺少运行文件"
         : `缺少运行文件：${result.command}`;
   }
-}
-
-function parseMcpErrorJsonMessage(error: string): string | undefined {
-  const jsonStart = error.indexOf("{");
-  if (jsonStart < 0) return undefined;
-  try {
-    const parsed = JSON.parse(error.slice(jsonStart)) as { readonly error?: { readonly message?: unknown } };
-    return typeof parsed.error?.message === "string" ? parsed.error.message : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function normalizeMcpErrorMessage(message: string): string {
-  return message.replace(/^Internal error:\s*/i, "").trim();
 }

@@ -29,6 +29,7 @@ import { mergeConfigResponse, type ComposerToolConfirmationPolicy, type VisibleA
 import type { AppState } from "./app-state";
 import type { McpServerForm, ModelForm, ToolForm } from "./components/settings-types";
 import type { CommandShellKind, ModelProviderModelCatalog } from "./contracts/config";
+import type { SkillDefinition } from "./contracts/skills";
 import type { McpEnvironmentCheckResponse, McpReferenceResponse, McpServerCatalogItem } from "./contracts/tools";
 
 export type AppSettingsController = {
@@ -53,7 +54,7 @@ export type AppSettingsController = {
   readonly deleteMcpServer: (serverId: string) => Promise<void>;
   readonly updateMcpTool: (serverId: string, toolName: string, enabled: boolean, autoApproved?: boolean) => Promise<void>;
   readonly refreshSkills: () => Promise<void>;
-  readonly updateSkill: (skillId: string, enabled: boolean) => Promise<void>;
+  readonly updateSkill: (skill: Pick<SkillDefinition, "id" | "stateKey">, enabled: boolean) => Promise<void>;
 };
 
 export type AppSettingsControllerOptions = {
@@ -379,6 +380,7 @@ export function createAppSettingsController(options: AppSettingsControllerOption
           error: error instanceof Error ? error.message : "命令 shell 保存失败。",
         }));
       }
+      throw error;
     } finally {
       if (options.mountedRef.current) options.setSavingWorkspace(false);
     }
@@ -639,10 +641,10 @@ export function createAppSettingsController(options: AppSettingsControllerOption
     }
   }
 
-  async function updateSkill(skillId: string, enabled: boolean): Promise<void> {
+  async function updateSkill(skill: Pick<SkillDefinition, "id" | "stateKey">, enabled: boolean): Promise<void> {
     options.setSavingTools(true);
     try {
-      const skills = await updateSkillState(skillId, enabled);
+      const skills = await updateSkillState(skill, enabled);
       if (options.mountedRef.current) {
         options.setApp((previous) => ({ ...previous, skills, error: undefined }));
       }

@@ -225,6 +225,7 @@ export async function saveMcpServerSettings(form: McpServerForm): Promise<ToolsR
   const response = await postJson<{ readonly catalog?: ToolsResponse["mcpCatalog"] }>("/api/config/mcp", {
     serverId: normalizedServerId,
     label: form.label,
+    description: form.description,
     transport: form.transport,
     confirmationMode: form.confirmationMode,
     toolExposureMode: form.toolExposureMode,
@@ -343,9 +344,10 @@ export async function updateMcpToolState(input: {
   return { mcpCatalog: response.catalog ?? [] };
 }
 
-export async function updateSkillState(skillId: string, enabled: boolean): Promise<readonly SkillDefinition[]> {
-  const response = await postJson<{ readonly skills: readonly SkillDefinition[] }>(`/api/skills/${encodeURIComponent(skillId)}/state`, {
+export async function updateSkillState(skill: Pick<SkillDefinition, "id" | "stateKey">, enabled: boolean): Promise<readonly SkillDefinition[]> {
+  const response = await postJson<{ readonly skills: readonly SkillDefinition[] }>(`/api/skills/${encodeURIComponent(skill.id)}/state`, {
     enabled,
+    stateKey: skill.stateKey,
   });
   return response.skills;
 }
@@ -419,7 +421,7 @@ function mcpAuthConfig(form: McpServerForm, serverId: string): {
 }
 
 function isNetworkMcpTransport(transport: McpServerForm["transport"]): boolean {
-  return transport === "http" || transport === "sse";
+  return transport === "http";
 }
 
 function normalizeAuthorizationCredential(value: string): string {

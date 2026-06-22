@@ -137,7 +137,8 @@ export type ToolCatalogItem = {
 export type McpServerCatalogItem = {
   readonly serverId: string;
   readonly label: string;
-  readonly transport: "stdio" | "http" | "sse";
+  readonly description?: string;
+  readonly transport: "stdio" | "http";
   readonly enabled: boolean;
   readonly confirmationMode?: "always" | "unsafe_only" | "never";
   readonly toolExposureMode?: "none" | "all" | "selected";
@@ -152,6 +153,11 @@ export type McpServerCatalogItem = {
   readonly autoApprovedTools?: readonly string[];
   readonly lastConnectedAt?: string;
   readonly lastError?: string;
+  readonly toolsCachedAt?: string;
+  readonly promptCount?: number;
+  readonly resourceCount?: number;
+  readonly resourceTemplateCount?: number;
+  readonly referencesCachedAt?: string;
   readonly tools: readonly ToolCatalogItem[];
   readonly exposedTools?: readonly ToolCatalogItem[];
   readonly updatedAt: string;
@@ -197,7 +203,8 @@ export type McpServerPreset = {
   readonly server: {
     readonly serverId: string;
     readonly label?: string;
-    readonly transport?: "stdio" | "http" | "sse";
+    readonly description?: string;
+    readonly transport?: "stdio" | "http";
     readonly commandLine?: string;
     readonly url?: string;
     readonly envSecretRefs?: readonly string[];

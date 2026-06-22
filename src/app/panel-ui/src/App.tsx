@@ -4,7 +4,7 @@ import { isConversationWaitingForUser } from "./conversation-state";
 import { ChatActive } from "./components/chat-active";
 import { ChatEmpty } from "./components/chat-empty";
 import { Sidebar, type Screen } from "./components/sidebar";
-import { SettingsDialog, type McpServerForm, type ModelForm, type SettingsGroup, type ToolForm } from "./components/settings-dialog";
+import type { McpServerForm, ModelForm, SettingsGroup, ToolForm } from "./components/settings-types";
 import { selectLocalContextAttachment, uniqueAttachments } from "./app-attachments";
 import { applyAppBootstrap, loadAppBootstrap } from "./app-bootstrap";
 import {
@@ -42,6 +42,11 @@ import type { ContextAttachment } from "./contracts/context";
 import type { McpServerCatalogItem } from "./contracts/tools";
 import { modelOptionSupportsReasoningEffort, modelOptionsFromConfig, selectedModelOptionId } from "./model-options";
 
+const LazySettingsDialog = React.lazy(async () => {
+  const module = await import("./components/settings-dialog");
+  return { default: module.SettingsDialog };
+});
+
 export function App(): React.ReactElement {
   const [app, setApp] = useState(createInitialAppState);
   const [screen, setScreen] = useState<Screen>("chat-empty");
@@ -75,6 +80,7 @@ export function App(): React.ReactElement {
   const [mcpServerForm, setMcpServerForm] = useState<McpServerForm>({
     serverId: "",
     label: "",
+    description: "",
     transport: "stdio",
     authMode: "none",
     authTouched: false,
@@ -102,7 +108,7 @@ export function App(): React.ReactElement {
   const [contextBusy, setContextBusy] = useState(false);
   const [queuedMessages, setQueuedMessages] = useState<readonly { readonly id: string; readonly content: string }[]>([]);
   const [savingModel, setSavingModel] = useState(false);
-  const [, setSavingWorkspace] = useState(false);
+  const [savingWorkspace, setSavingWorkspace] = useState(false);
   const [savingTools, setSavingTools] = useState(false);
   const mountedRef = useRef(true);
   const pollTimer = useRef<number | undefined>(undefined);
@@ -195,6 +201,7 @@ export function App(): React.ReactElement {
         ...previous,
         serverId: firstServer.serverId,
         label: firstServer.label,
+        description: firstServer.description ?? "",
         transport: firstServer.transport,
         confirmationMode: firstServer.confirmationMode ?? "never",
         toolExposureMode: firstServer.toolExposureMode ?? "none",
@@ -586,45 +593,70 @@ export function App(): React.ReactElement {
         </main>
       </div>
 
-      <SettingsDialog
-        open={settingsOpen}
-        onClose={() => setSettingsOpen(false)}
-        initialGroup={settingsGroup}
-        config={app.config}
-        modelForm={modelForm}
-        setModelForm={setModelForm}
-        workspaceDirectory={workspaceDirectory}
-        setWorkspaceDirectory={setWorkspaceDirectory}
-        savingModel={savingModel}
-        onSaveModel={saveModelConfig}
-        onCreateCustomProfile={createCustomModelProfile}
-        onReorderModelProviders={reorderModelProviders}
-        onDeleteModelProvider={deleteModelProvider}
-        onFetchModels={fetchModelsForProfile}
-        onSaveModelCatalog={saveModelCatalog}
-        onRevealModelApiKey={revealModelApiKey}
-        modelCatalogs={modelCatalogs}
-        skills={app.skills}
-        onSaveWorkspace={(nextWorkspaceDirectory) => void saveWorkspace(nextWorkspaceDirectory)}
-        onSaveCommandShell={(kind) => void saveCommandShell(kind)}
-        tools={app.tools}
-        toolForm={toolForm}
-        setToolForm={setToolForm}
-        mcpServerForm={mcpServerForm}
-        setMcpServerForm={setMcpServerForm}
-        savingTools={savingTools}
-        onSaveTools={() => void saveTools()}
-        onSaveMcpServer={saveMcpServer}
-        onLoadMcpReferences={loadMcpReferences}
-        onImportMcpConfig={(config) => void importMcpConfig(config)}
-        onTestMcpServer={(serverId) => void testMcpServer(serverId)}
-        onCheckMcpEnvironment={checkMcpEnvironment}
-        onInstallMcpEnvironment={installMcpEnvironment}
-        onDeleteMcpServer={(serverId) => void deleteMcpServer(serverId)}
-        onUpdateMcpTool={(serverId, toolName, enabled, autoApproved) => void updateMcpTool(serverId, toolName, enabled, autoApproved)}
-        onRefreshSkills={() => void refreshSkills()}
-        onUpdateSkill={(skillId, enabled) => void updateSkill(skillId, enabled)}
-      />
+      {settingsOpen && (
+        <React.Suspense fallback={<SettingsDialogFallback onClose={() => setSettingsOpen(false)} />}>
+          <LazySettingsDialog
+            open={settingsOpen}
+            onClose={() => setSettingsOpen(false)}
+            initialGroup={settingsGroup}
+            config={app.config}
+            modelForm={modelForm}
+            setModelForm={setModelForm}
+            workspaceDirectory={workspaceDirectory}
+            setWorkspaceDirectory={setWorkspaceDirectory}
+            savingModel={savingModel}
+            savingWorkspace={savingWorkspace}
+            onSaveModel={saveModelConfig}
+            onCreateCustomProfile={createCustomModelProfile}
+            onReorderModelProviders={reorderModelProviders}
+            onDeleteModelProvider={deleteModelProvider}
+            onFetchModels={fetchModelsForProfile}
+            onSaveModelCatalog={saveModelCatalog}
+            onRevealModelApiKey={revealModelApiKey}
+            modelCatalogs={modelCatalogs}
+            skills={app.skills}
+            onSaveWorkspace={(nextWorkspaceDirectory) => void saveWorkspace(nextWorkspaceDirectory)}
+            onSaveCommandShell={saveCommandShell}
+            tools={app.tools}
+            toolForm={toolForm}
+            setToolForm={setToolForm}
+            mcpServerForm={mcpServerForm}
+            setMcpServerForm={setMcpServerForm}
+            savingTools={savingTools}
+            onSaveTools={() => void saveTools()}
+            onSaveMcpServer={saveMcpServer}
+            onLoadMcpReferences={loadMcpReferences}
+            onImportMcpConfig={(config) => void importMcpConfig(config)}
+            onTestMcpServer={(serverId) => void testMcpServer(serverId)}
+            onCheckMcpEnvironment={checkMcpEnvironment}
+            onInstallMcpEnvironment={installMcpEnvironment}
+            onDeleteMcpServer={(serverId) => void deleteMcpServer(serverId)}
+            onUpdateMcpTool={(serverId, toolName, enabled, autoApproved) => void updateMcpTool(serverId, toolName, enabled, autoApproved)}
+            onRefreshSkills={() => void refreshSkills()}
+            onUpdateSkill={(skill, enabled) => void updateSkill(skill, enabled)}
+          />
+        </React.Suspense>
+      )}
+    </div>
+  );
+}
+
+function WorkbenchChunkFallback(props: { readonly label: string }): React.ReactElement {
+  return (
+    <div className="app-bootstrap-loading" role="status" aria-label={props.label}>
+      <div className="app-bootstrap-spinner" />
+      <p>{props.label}</p>
+    </div>
+  );
+}
+
+function SettingsDialogFallback(props: { readonly onClose: () => void }): React.ReactElement {
+  return (
+    <div className="settings-overlay" role="dialog" aria-modal="true" aria-label="设置">
+      <button type="button" className="settings-backdrop" aria-label="关闭设置" onClick={props.onClose} />
+      <section className="settings-dialog">
+        <WorkbenchChunkFallback label="正在打开设置" />
+      </section>
     </div>
   );
 }

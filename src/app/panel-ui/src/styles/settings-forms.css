@@ -51,6 +51,47 @@
   overflow-wrap: anywhere;
 }
 
+.settings-runtime-list {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.settings-runtime-item {
+  display: grid;
+  grid-template-columns: minmax(72px, 0.22fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.settings-runtime-name {
+  color: var(--fg);
+  font-weight: var(--weight-strong);
+}
+
+.settings-runtime-status {
+  border-radius: 999px;
+  border: 1px solid color-mix(in oklch, var(--border) 72%, transparent);
+  padding: 2px 7px;
+  color: var(--muted);
+  line-height: 1.2;
+}
+
+.settings-runtime-item[data-status="available"] .settings-runtime-status {
+  border-color: color-mix(in oklch, var(--status-success) 48%, var(--border));
+  color: var(--status-success);
+}
+
+.settings-runtime-path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .settings-actions {
   display: flex;
   flex-wrap: wrap;

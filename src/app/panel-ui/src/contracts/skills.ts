@@ -8,5 +8,9 @@ export type SkillDefinition = {
   readonly lastUsedAt?: string;
   readonly summary?: string;
   readonly category?: string;
+  readonly sourceKind?: "project" | "user" | "plugin" | "admin" | "custom";
+  readonly sourceRootId?: string;
+  readonly sourcePrecedence?: number;
+  readonly stateKey?: string;
   readonly loadError?: string;
 };

@@ -76,8 +76,8 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(app.includes('from "./components/sidebar"'), true);
   assert.equal(app.includes('from "./components/topbar"'), false);
   assert.equal(app.includes('from "./components/chat-empty"'), true);
-  assert.equal(app.includes('from "./components/chat-active"'), true);
-  assert.equal(app.includes('from "./components/settings-dialog"'), true);
+  assert.equal(hasPanelUiModuleReference(app, "./components/chat-active"), true);
+  assert.equal(hasPanelUiModuleReference(app, "./components/settings-dialog"), true);
   assert.equal(app.includes('from "./ui-state"'), false);
   assert.equal(api.includes("export async function requestJson"), true);
   assert.equal(text.includes("export const STATUS_LABELS"), true);
@@ -274,19 +274,20 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(appState.includes("export function createInitialAppState"), true);
   assert.equal(appState.includes("transcriptNodesByRunId"), true);
   assert.equal(appState.includes("readonly skills"), true);
-  assert.equal(settingsDialog.includes('from "./capability-settings"'), true);
-  assert.equal(settingsDialog.includes('from "./skill-settings"'), true);
-  assert.equal(settingsDialog.includes('from "./workspace-settings"'), true);
+  assert.equal(hasPanelUiModuleReference(settingsDialog, "./capability-settings"), true);
+  assert.equal(hasPanelUiModuleReference(settingsDialog, "./skill-settings"), true);
+  assert.equal(hasPanelUiModuleReference(settingsDialog, "./workspace-settings"), true);
   assert.equal(settingsDialog.includes('from "./confirmation-settings"'), false);
-  assert.equal(settingsDialog.includes("<BasicCapabilitiesSettings"), true);
-  assert.equal(settingsDialog.includes("<McpServiceSettings"), true);
-  assert.equal(settingsDialog.includes("<SkillSettings"), true);
-  assert.equal(settingsDialog.includes("<WorkspaceSettings"), true);
+  assert.equal(hasJsxComponentReference(settingsDialog, "BasicCapabilitiesSettings"), true);
+  assert.equal(hasJsxComponentReference(settingsDialog, "McpServiceSettings"), true);
+  assert.equal(hasJsxComponentReference(settingsDialog, "SkillSettings"), true);
+  assert.equal(hasJsxComponentReference(settingsDialog, "WorkspaceSettings"), true);
   assert.equal(settingsDialog.includes("<ConfirmationSettings"), false);
   assert.equal(settingsDialog.includes("function Capability"), false);
   assert.equal(settingsDialog.includes("function WorkspaceSettings"), false);
   assert.equal(settingsDialog.includes("function ConfirmationSettings"), false);
-  assert.equal(settingsDialog.includes("function AppearanceSettings"), true);
+  assert.equal(hasJsxComponentReference(settingsDialog, "AppearanceSettings"), true);
+  assert.equal(settingsDialog.includes("function AppearanceSettings"), false);
   assert.equal(settingsDialog.includes("function AboutSettings"), true);
   assert.equal(settingsDialog.includes("SkillsPage"), false);
   assert.equal(settingsDialog.includes("ToolsPage"), false);
@@ -428,3 +429,11 @@ test("panel UI app shell delegates data and control work", async () => {
   assert.equal(workspaceStyles.includes(".settings-capabilities"), false);
   assert.equal(workspaceStyles.includes(".service-config-grid"), true);
 });
+
+function hasPanelUiModuleReference(source: string, modulePath: string): boolean {
+  return source.includes(`from "${modulePath}"`) || source.includes(`import("${modulePath}")`);
+}
+
+function hasJsxComponentReference(source: string, componentName: string): boolean {
+  return source.includes(`<${componentName}`) || source.includes(`<Lazy${componentName}`);
+}

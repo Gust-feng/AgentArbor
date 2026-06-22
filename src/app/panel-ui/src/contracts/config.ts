@@ -69,6 +69,7 @@ export type AppearanceConfig = {
 };
 
 export type CommandShellKind = "cmd" | "powershell" | "pwsh" | "bash" | "sh";
+export type ConfiguredCommandShellKind = CommandShellKind | "auto";
 
 export type ToolConfirmationPolicy = "prompt" | "full_access";
 
@@ -83,6 +84,8 @@ export type ToolConfirmationConfig = {
 };
 
 export type CommandShellConfig = {
+  readonly configuredKind?: ConfiguredCommandShellKind;
+  readonly autoDetected?: boolean;
   readonly kind?: CommandShellKind;
   readonly label?: string;
   readonly executable?: string;
@@ -91,7 +94,27 @@ export type CommandShellConfig = {
   readonly invocation?: readonly string[];
   readonly commandLineParameter?: "commandLine";
   readonly notes?: readonly string[];
+  readonly availableShells?: readonly CommandShellOption[];
+  readonly runtimeTools?: readonly RuntimeEnvironmentTool[];
   readonly updatedAt?: string;
+};
+
+export type CommandShellOption = {
+  readonly kind?: CommandShellKind;
+  readonly label?: string;
+  readonly executable?: string;
+  readonly syntax?: "cmd" | "powershell" | "posix";
+  readonly availability?: "available" | "missing";
+  readonly reason?: string;
+};
+
+export type RuntimeEnvironmentTool = {
+  readonly id?: "node" | "python" | "git-bash";
+  readonly label?: string;
+  readonly description?: string;
+  readonly executable?: string;
+  readonly availability?: "available" | "missing";
+  readonly reason?: string;
 };
 
 export type ModelProviderPreset = {

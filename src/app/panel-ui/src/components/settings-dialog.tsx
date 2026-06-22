@@ -15,15 +15,39 @@ import type {
 } from "../contracts/config";
 import type { SkillDefinition } from "../contracts/skills";
 import type { McpEnvironmentCheckResponse, McpReferenceResponse, ToolsResponse } from "../contracts/tools";
-import { BasicCapabilitiesSettings, McpServiceSettings } from "./capability-settings";
-import { ModelSettings } from "./model-settings";
-import { SkillSettings } from "./skill-settings";
-import { ThemeSwitcher } from "./theme-switcher";
-import { getInitialTheme } from "../app-theme";
 import type { McpServerForm, ModelForm, SettingsGroup, ToolForm } from "./settings-types";
-import { WorkspaceSettings } from "./workspace-settings";
 
 export type { McpServerForm, ModelForm, SettingsGroup, ToolForm } from "./settings-types";
+
+const LazyModelSettings = React.lazy(async () => {
+  const module = await import("./model-settings");
+  return { default: module.ModelSettings };
+});
+
+const LazyBasicCapabilitiesSettings = React.lazy(async () => {
+  const module = await import("./capability-settings");
+  return { default: module.BasicCapabilitiesSettings };
+});
+
+const LazyMcpServiceSettings = React.lazy(async () => {
+  const module = await import("./capability-settings");
+  return { default: module.McpServiceSettings };
+});
+
+const LazySkillSettings = React.lazy(async () => {
+  const module = await import("./skill-settings");
+  return { default: module.SkillSettings };
+});
+
+const LazyWorkspaceSettings = React.lazy(async () => {
+  const module = await import("./workspace-settings");
+  return { default: module.WorkspaceSettings };
+});
+
+const LazyAppearanceSettings = React.lazy(async () => {
+  const module = await import("./appearance-settings");
+  return { default: module.AppearanceSettings };
+});
 
 export function SettingsDialog(props: {
   readonly open: boolean;
@@ -34,8 +58,9 @@ export function SettingsDialog(props: {
   readonly setModelForm: (form: ModelForm) => void;
   readonly workspaceDirectory: string;
   readonly setWorkspaceDirectory: (value: string) => void;
-  readonly onSaveCommandShell: (kind: "auto" | "cmd" | "powershell" | "pwsh" | "bash" | "sh") => void;
+  readonly onSaveCommandShell: (kind: "auto" | "cmd" | "powershell" | "pwsh" | "bash" | "sh") => Promise<void> | void;
   readonly savingModel?: boolean;
+  readonly savingWorkspace?: boolean;
   readonly onSaveModel: (form?: ModelForm) => Promise<void>;
   readonly onCreateCustomProfile: (form?: ModelForm) => Promise<void>;
   readonly onReorderModelProviders: (order: readonly string[]) => Promise<void>;
@@ -62,7 +87,7 @@ export function SettingsDialog(props: {
   readonly onDeleteMcpServer: (serverId: string) => void;
   readonly onUpdateMcpTool: (serverId: string, toolName: string, enabled: boolean, autoApproved?: boolean) => void;
   readonly onRefreshSkills: () => void;
-  readonly onUpdateSkill: (skillId: string, enabled: boolean) => void;
+  readonly onUpdateSkill: (skill: Pick<SkillDefinition, "id" | "stateKey">, enabled: boolean) => void;
 }): React.ReactElement | null {
   const [activeGroup, setActiveGroup] = useState<SettingsGroup>("models");
   useEffect(() => {
@@ -122,66 +147,69 @@ export function SettingsDialog(props: {
             <h2>{activeInfo.label}</h2>
           </header>
           <div className={`settings-content ${activeGroup === "models" ? "model-settings-content" : ""}`}>
-            {activeGroup === "models" && (
-              <ModelSettings
-                config={props.config}
-                modelForm={props.modelForm}
-                setModelForm={props.setModelForm}
-                saving={props.savingModel}
-                onSave={props.onSaveModel}
-                onCreateCustomProfile={props.onCreateCustomProfile}
-                onReorderModelProviders={props.onReorderModelProviders}
-                onDeleteModelProvider={props.onDeleteModelProvider}
-                onFetchModels={props.onFetchModels}
-                onSaveModelCatalog={props.onSaveModelCatalog}
-                onRevealModelApiKey={props.onRevealModelApiKey}
-                modelCatalogs={props.modelCatalogs}
-              />
-            )}
-            {activeGroup === "basicCapabilities" && (
-              <BasicCapabilitiesSettings
-                tools={props.tools}
-                toolForm={props.toolForm}
-                setToolForm={props.setToolForm}
-                savingTools={props.savingTools}
-                onSaveTools={props.onSaveTools}
-              />
-            )}
-            {activeGroup === "mcp" && (
-              <McpServiceSettings
-                tools={props.tools}
-                mcpServerForm={props.mcpServerForm}
-                setMcpServerForm={props.setMcpServerForm}
-                savingTools={props.savingTools}
-                onSaveMcpServer={props.onSaveMcpServer}
-                onLoadMcpReferences={props.onLoadMcpReferences}
-                onImportMcpConfig={props.onImportMcpConfig}
-                onTestMcpServer={props.onTestMcpServer}
-                onCheckMcpEnvironment={props.onCheckMcpEnvironment}
-                onInstallMcpEnvironment={props.onInstallMcpEnvironment}
-                onDeleteMcpServer={props.onDeleteMcpServer}
-                onUpdateMcpTool={props.onUpdateMcpTool}
-              />
-            )}
-            {activeGroup === "skills" && (
-              <SkillSettings
-                skills={props.skills}
-                saving={props.savingTools}
-                onRefreshSkills={props.onRefreshSkills}
-                onUpdateSkill={props.onUpdateSkill}
-              />
-            )}
-            {activeGroup === "workspace" && (
-              <WorkspaceSettings
-                commandShell={props.config?.commandShell}
-                workspaceDirectory={props.workspaceDirectory}
-                setWorkspaceDirectory={props.setWorkspaceDirectory}
-                onSave={props.onSaveWorkspace}
-                onSaveCommandShell={props.onSaveCommandShell}
-              />
-            )}
-            {activeGroup === "appearance" && <AppearanceSettings config={props.config} />}
-            {activeGroup === "about" && <AboutSettings config={props.config} />}
+            <React.Suspense fallback={<SettingsPanelFallback label={`正在打开${activeInfo.label}`} />}>
+              {activeGroup === "models" && (
+                <LazyModelSettings
+                  config={props.config}
+                  modelForm={props.modelForm}
+                  setModelForm={props.setModelForm}
+                  saving={props.savingModel}
+                  onSave={props.onSaveModel}
+                  onCreateCustomProfile={props.onCreateCustomProfile}
+                  onReorderModelProviders={props.onReorderModelProviders}
+                  onDeleteModelProvider={props.onDeleteModelProvider}
+                  onFetchModels={props.onFetchModels}
+                  onSaveModelCatalog={props.onSaveModelCatalog}
+                  onRevealModelApiKey={props.onRevealModelApiKey}
+                  modelCatalogs={props.modelCatalogs}
+                />
+              )}
+              {activeGroup === "basicCapabilities" && (
+                <LazyBasicCapabilitiesSettings
+                  tools={props.tools}
+                  toolForm={props.toolForm}
+                  setToolForm={props.setToolForm}
+                  savingTools={props.savingTools}
+                  onSaveTools={props.onSaveTools}
+                />
+              )}
+              {activeGroup === "mcp" && (
+                <LazyMcpServiceSettings
+                  tools={props.tools}
+                  mcpServerForm={props.mcpServerForm}
+                  setMcpServerForm={props.setMcpServerForm}
+                  savingTools={props.savingTools}
+                  onSaveMcpServer={props.onSaveMcpServer}
+                  onLoadMcpReferences={props.onLoadMcpReferences}
+                  onImportMcpConfig={props.onImportMcpConfig}
+                  onTestMcpServer={props.onTestMcpServer}
+                  onCheckMcpEnvironment={props.onCheckMcpEnvironment}
+                  onInstallMcpEnvironment={props.onInstallMcpEnvironment}
+                  onDeleteMcpServer={props.onDeleteMcpServer}
+                  onUpdateMcpTool={props.onUpdateMcpTool}
+                />
+              )}
+              {activeGroup === "skills" && (
+                <LazySkillSettings
+                  skills={props.skills}
+                  saving={props.savingTools}
+                  onRefreshSkills={props.onRefreshSkills}
+                  onUpdateSkill={props.onUpdateSkill}
+                />
+              )}
+              {activeGroup === "workspace" && (
+                <LazyWorkspaceSettings
+                  commandShell={props.config?.commandShell}
+                  workspaceDirectory={props.workspaceDirectory}
+                  setWorkspaceDirectory={props.setWorkspaceDirectory}
+                  onSave={props.onSaveWorkspace}
+                  savingCommandShell={props.savingWorkspace}
+                  onSaveCommandShell={props.onSaveCommandShell}
+                />
+              )}
+              {activeGroup === "appearance" && <LazyAppearanceSettings config={props.config} />}
+              {activeGroup === "about" && <AboutSettings config={props.config} />}
+            </React.Suspense>
           </div>
         </div>
       </section>
@@ -199,40 +227,11 @@ const SETTINGS_GROUPS: readonly { readonly id: SettingsGroup; readonly label: st
   { id: "about", label: "关于", icon: <Info size={15} /> },
 ];
 
-function AppearanceSettings(props: { readonly config?: ConfigResponse }): React.ReactElement {
-  const browserAppearance = useBrowserAppearanceSnapshot();
-  const configuredAppearance = props.config?.appearance;
-  const documentColorScheme = configuredAppearance?.colorScheme ?? browserAppearance.documentColorScheme;
-  const [initialTheme] = useState(() => getInitialTheme());
-  const [currentStyleId, setCurrentStyleId] = useState(initialTheme.styleId);
-  const [currentColorId, setCurrentColorId] = useState(initialTheme.colorId);
+function SettingsPanelFallback(props: { readonly label: string }): React.ReactElement {
   return (
-    <div className="workspace-settings-stack">
-      <ThemeSwitcher
-        activeStyleId={currentStyleId}
-        activeColorId={currentColorId}
-        onStyleChange={setCurrentStyleId}
-        onColorChange={setCurrentColorId}
-      />
-      <section className="settings-card">
-        <h3>当前环境</h3>
-        <div className="settings-row">
-          <span>主题来源</span>
-          <div><span className="settings-value">本机偏好，立即生效</span></div>
-        </div>
-        <div className="settings-row">
-          <span>文档色彩方案</span>
-          <div><span className="settings-value">{colorSchemeLabel(documentColorScheme)}</span></div>
-        </div>
-        <div className="settings-row">
-          <span>系统偏好</span>
-          <div><span className="settings-value">{colorSchemeLabel(browserAppearance.systemColorPreference)}</span></div>
-        </div>
-        <div className="settings-row">
-          <span>界面密度</span>
-          <div><span className="settings-value">{configuredAppearance?.densityLabel ?? "标准"}</span></div>
-        </div>
-      </section>
+    <div className="settings-panel-loading" role="status" aria-label={props.label}>
+      <div className="app-bootstrap-spinner" />
+      <p>{props.label}</p>
     </div>
   );
 }
@@ -267,42 +266,4 @@ function AboutSettings(props: { readonly config?: ConfigResponse }): React.React
       </section>
     </div>
   );
-}
-
-type BrowserAppearanceSnapshot = {
-  readonly documentColorScheme: string;
-  readonly systemColorPreference: "light" | "dark" | "unknown";
-};
-
-function useBrowserAppearanceSnapshot(): BrowserAppearanceSnapshot {
-  const [snapshot, setSnapshot] = useState<BrowserAppearanceSnapshot>(() => readBrowserAppearanceSnapshot());
-  useEffect(() => {
-    setSnapshot(readBrowserAppearanceSnapshot());
-    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
-      return;
-    }
-    const media = window.matchMedia("(prefers-color-scheme: dark)");
-    const onChange = (): void => setSnapshot(readBrowserAppearanceSnapshot());
-    media.addEventListener("change", onChange);
-    return () => media.removeEventListener("change", onChange);
-  }, []);
-  return snapshot;
-}
-
-function readBrowserAppearanceSnapshot(): BrowserAppearanceSnapshot {
-  if (typeof window === "undefined" || typeof document === "undefined") {
-    return { documentColorScheme: "unknown", systemColorPreference: "unknown" };
-  }
-  const documentColorScheme = window.getComputedStyle(document.documentElement).colorScheme.trim() || "unknown";
-  const systemColorPreference = typeof window.matchMedia === "function" && window.matchMedia("(prefers-color-scheme: dark)").matches
-    ? "dark"
-    : "light";
-  return { documentColorScheme, systemColorPreference };
-}
-
-function colorSchemeLabel(value: string | undefined): string {
-  if (value === "light") return "浅色";
-  if (value === "dark") return "深色";
-  if (value === undefined || value === "unknown") return "未声明";
-  return value;
 }

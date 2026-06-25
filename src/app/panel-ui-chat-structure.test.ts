@@ -497,7 +497,8 @@ test("panel UI chat and transcript modules stay presentation-focused", async () 
   assert.equal(chatLayoutStyles.includes(".chat-empty-heading"), true);
   assert.equal(chatLayoutStyles.includes(".chat-empty-visual"), false);
   assert.equal(chatLayoutStyles.includes(".chat-empty-kinetic"), false);
-  assert.equal(chatLayoutStyles.includes("align-content: center"), true);
+  assert.equal(chatLayoutStyles.includes("align-content: start"), true);
+  assert.equal(chatLayoutStyles.includes("padding-block: clamp(112px, 16vh, 154px) 28px"), true);
   assert.equal(chatLayoutStyles.includes(".chat-empty-input-dock"), false);
   assert.equal(chatComposerStyles.includes(".chat-composer-home"), false);
   assert.equal(chatLayoutStyles.includes(".chat-empty-task-groups,"), false);

@@ -1,5 +1,14 @@
+import { createStartupIntroDefaultWindowSize } from "./panel-startup-intro-geometry.js";
+import {
+  STARTUP_MAIN_WINDOW_HEIGHT,
+  STARTUP_MAIN_WINDOW_WIDTH,
+  createStartupThemeSnapshot,
+  type StartupThemeSnapshot,
+} from "./panel-startup-theme.js";
 import type { PanelLaunchArgs } from "./panel-args.js";
 import type { PanelContextAttachmentSelection, PanelServerOptions, StartedPanelServer } from "./panel-server.js";
+
+export type PanelDesktopWindowKind = "startup" | "main";
 
 export type PanelDesktopWindowOptions = {
   readonly title: string;
@@ -7,6 +16,15 @@ export type PanelDesktopWindowOptions = {
   readonly height: number;
   readonly minWidth: number;
   readonly minHeight: number;
+  readonly kind: PanelDesktopWindowKind;
+  readonly startup: {
+    readonly initialWidth: number;
+    readonly initialHeight: number;
+    readonly theme: StartupThemeSnapshot;
+  };
+  readonly frame: false;
+  readonly transparent: true;
+  readonly hasShadow: false;
   readonly center: boolean;
   readonly backgroundColor: string;
   readonly show: boolean;
@@ -97,7 +115,8 @@ export async function startPanelDesktopSession(
 
   try {
     await dependencies.whenReady;
-    const window = dependencies.createWindow(createPanelDesktopWindowOptions());
+    const options = createPanelDesktopWindowOptions();
+    const window = dependencies.createWindow(options);
     window.onReadyToShow(() => {
       showPanelDesktopWindow(window);
     });
@@ -123,14 +142,25 @@ function showPanelDesktopWindow(window: PanelDesktopWindowHandle): void {
 }
 
 export function createPanelDesktopWindowOptions(): PanelDesktopWindowOptions {
+  const startupWindowSize = createStartupIntroDefaultWindowSize();
+  const startupTheme = createStartupThemeSnapshot(undefined, undefined);
   return {
     title: "AgentArbor Desktop Shell",
-    width: 1440,
-    height: 960,
+    width: STARTUP_MAIN_WINDOW_WIDTH,
+    height: STARTUP_MAIN_WINDOW_HEIGHT,
     minWidth: 1200,
     minHeight: 800,
+    kind: "main",
+    startup: {
+      initialWidth: startupWindowSize.width,
+      initialHeight: startupWindowSize.height,
+      theme: startupTheme,
+    },
+    frame: false,
+    transparent: true,
+    hasShadow: false,
     center: true,
-    backgroundColor: "#f5f6f7",
+    backgroundColor: "#00000000",
     show: false,
     autoHideMenuBar: true,
     webPreferences: {

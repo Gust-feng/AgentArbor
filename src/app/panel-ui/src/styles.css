@@ -29,3 +29,9 @@
 
 /* Theme switcher component */
 @import "./styles/theme-switcher.css";
+
+/*
+ * Startup intro must load after theme layers. During boot it is a temporary
+ * window-surface override, not a normal component style.
+ */
+@import "./styles/startup-intro.css";

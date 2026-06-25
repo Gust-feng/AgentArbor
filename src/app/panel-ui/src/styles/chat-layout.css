@@ -23,9 +23,9 @@
   min-height: 100%;
   margin: 0 auto;
   grid-template-columns: minmax(0, 1fr);
-  align-content: center;
+  align-content: start;
   align-items: center;
-  padding-block: 44px 28px;
+  padding-block: clamp(112px, 16vh, 154px) 28px;
 }
 
 .chat-empty-copy {
@@ -42,14 +42,17 @@
 
 .chat-empty-heading {
   margin: 0;
-  border-bottom: var(--border-width-md) solid transparent;
-  padding: 0 2px var(--space-3);
+  padding: 0 2px;
   color: var(--fg);
   font-family: var(--font-sans);
   font-size: 46px;
   font-weight: var(--weight-heading);
   letter-spacing: 0;
   line-height: 1;
+}
+
+.chat-empty-heading-title {
+  display: inline-block;
 }
 
 .system-error-line {
@@ -71,7 +74,7 @@
   }
 
   .chat-empty-grid {
-    padding-block: 24px 28px;
+    padding-block: 72px 28px;
   }
 
   .chat-empty-heading {

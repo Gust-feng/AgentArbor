@@ -1,0 +1,359 @@
+/* Startup intro: transparent final window + one renderer-drawn expanding surface. */
+
+.app-root[data-startup-intro] {
+  --startup-intro-text-print-duration: 844ms;
+  --startup-intro-char-print-duration: 110ms;
+  --startup-intro-shell-expand-duration: 720ms;
+  --startup-intro-surface-out-delay: 220ms;
+  --startup-intro-surface-out-duration: 520ms;
+  --startup-intro-app-reveal-duration: 520ms;
+  --startup-intro-workbench-reveal-delay: 0ms;
+  --startup-intro-sidebar-reveal-delay: 220ms;
+  --startup-intro-topbar-reveal-delay: 140ms;
+  --startup-intro-main-reveal-delay: 0ms;
+  --startup-intro-composer-settle-delay: 320ms;
+  --startup-intro-title-bridge-duration: 760ms;
+}
+
+.startup-intro-overlay {
+  --startup-intro-shell-bg: var(--bg);
+  --startup-intro-title-color: color-mix(in oklch, var(--fg) 92%, var(--accent-active, var(--accent)));
+}
+
+.startup-intro-overlay {
+  position: fixed;
+  z-index: 100;
+  inset: 0;
+  overflow: hidden;
+  background: transparent;
+  isolation: isolate;
+  pointer-events: auto;
+}
+
+.startup-intro-overlay[data-phase="title-handoff"] {
+  pointer-events: none;
+}
+
+html[data-desktop-startup-mode="main"],
+html[data-desktop-startup-mode="main"] body {
+  overflow: hidden;
+  background: transparent;
+}
+
+html[data-desktop-startup-mode="main"][data-style] body {
+  background: transparent;
+  background-image: none;
+  background-attachment: scroll;
+}
+
+html[data-desktop-shell="true"]:has(.app-root[data-startup-intro]) body {
+  background: transparent;
+  background-image: none;
+  background-attachment: scroll;
+}
+
+/*
+ * The real BrowserWindow starts at the final size and transparent. During the
+ * intro only .startup-intro-frame paints the shell surface, so the visible
+ * startup window can expand without native resize jitter.
+ */
+html[data-desktop-shell="true"] .app-root[data-startup-intro] {
+  position: relative;
+  width: var(--startup-intro-target-width, 100%);
+  height: var(--startup-intro-target-height, 100vh);
+  min-width: var(--startup-intro-target-width, 100%);
+  min-height: var(--startup-intro-target-height, 100vh);
+  background: transparent;
+  background-image: none;
+  border: 0;
+  box-shadow: none;
+}
+
+html[data-desktop-shell="true"] .app-root[data-startup-intro][data-sidebar-collapsed="false"] .app-sidebar {
+  width: var(--sidebar-width) !important;
+}
+
+html[data-desktop-shell="true"] .app-root[data-startup-intro][data-sidebar-collapsed="true"] .app-sidebar {
+  width: var(--sidebar-compact-width) !important;
+}
+
+.startup-intro-frame {
+  position: absolute;
+  z-index: 1;
+  left: var(--startup-intro-source-x, 0px);
+  top: var(--startup-intro-source-y, 0px);
+  width: var(--startup-intro-source-width, 100%);
+  height: var(--startup-intro-source-height, 100%);
+  background: var(--startup-intro-shell-bg, var(--bg));
+  opacity: 1;
+  pointer-events: none;
+}
+
+.startup-intro-overlay[data-phase="expanding"] .startup-intro-frame,
+.startup-intro-overlay[data-phase="title-ready"] .startup-intro-frame,
+.startup-intro-overlay[data-phase="title-handoff"] .startup-intro-frame {
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  transition:
+    left var(--startup-intro-shell-expand-duration) cubic-bezier(0.42, 0, 0.58, 1),
+    top var(--startup-intro-shell-expand-duration) cubic-bezier(0.42, 0, 0.58, 1),
+    width var(--startup-intro-shell-expand-duration) cubic-bezier(0.42, 0, 0.58, 1),
+    height var(--startup-intro-shell-expand-duration) cubic-bezier(0.42, 0, 0.58, 1);
+}
+
+.startup-intro-overlay[data-phase="title-ready"] .startup-intro-text {
+  transform: translate3d(0, 0, 0) scale(1, 1);
+  transition: none;
+  will-change: transform;
+}
+
+.startup-intro-overlay[data-phase="title-handoff"] .startup-intro-frame {
+  opacity: 0;
+  transition:
+    left var(--startup-intro-shell-expand-duration) cubic-bezier(0.42, 0, 0.58, 1),
+    top var(--startup-intro-shell-expand-duration) cubic-bezier(0.42, 0, 0.58, 1),
+    width var(--startup-intro-shell-expand-duration) cubic-bezier(0.42, 0, 0.58, 1),
+    height var(--startup-intro-shell-expand-duration) cubic-bezier(0.42, 0, 0.58, 1),
+    opacity var(--startup-intro-surface-out-duration) cubic-bezier(0.2, 0.74, 0.18, 1) var(--startup-intro-surface-out-delay);
+}
+
+.startup-intro-content {
+  position: absolute;
+  z-index: 4;
+  left: var(--startup-intro-source-x, 0px);
+  top: var(--startup-intro-source-y, 0px);
+  width: var(--startup-intro-source-width, 100%);
+  height: var(--startup-intro-source-height, 100%);
+  display: grid;
+  place-items: center;
+  box-shadow: none;
+  pointer-events: none;
+}
+
+.startup-intro-text {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  margin: 0;
+  color: var(--startup-intro-title-color);
+  font-size: 48px;
+  font-weight: var(--weight-heading);
+  letter-spacing: 0;
+  line-height: 1;
+  white-space: nowrap;
+  text-rendering: geometricPrecision;
+  opacity: 1;
+  transform: translate3d(0, 0, 0) scale(1, 1);
+  transform-origin: 50% 50%;
+  backface-visibility: hidden;
+  contain: paint;
+}
+
+.startup-intro-overlay[data-phase="title-handoff"] .startup-intro-text {
+  will-change: transform;
+}
+
+.startup-intro-solid-text {
+  display: none;
+}
+
+.startup-intro-print-text {
+  display: inline-flex;
+}
+
+.startup-intro-overlay:not([data-phase="loading"]) .startup-intro-solid-text {
+  display: inline;
+}
+
+.startup-intro-overlay:not([data-phase="loading"]) .startup-intro-print-text {
+  display: none;
+}
+
+.startup-intro-char {
+  position: relative;
+  display: inline-block;
+  opacity: 0;
+  transform: translate3d(0, 0.035em, 0);
+  transform-origin: 50% 76%;
+  animation: startup-intro-char-enter var(--startup-intro-char-print-duration) steps(2, end) both;
+  animation-delay: var(--startup-intro-char-delay);
+}
+
+.startup-intro-overlay[data-phase="loading"] .startup-intro-char {
+  will-change: opacity, transform;
+}
+
+.startup-intro-char::after {
+  position: absolute;
+  top: 0.02em;
+  right: -0.08em;
+  width: 0.08em;
+  height: 0.92em;
+  border-radius: 999px;
+  background: color-mix(in oklch, currentColor 72%, transparent);
+  opacity: 0;
+  content: "";
+  transform: scaleY(0.92);
+  transform-origin: 50% 50%;
+  animation: startup-intro-print-head var(--startup-intro-char-print-duration) steps(2, end) both;
+  animation-delay: var(--startup-intro-char-delay);
+  pointer-events: none;
+}
+
+.startup-intro-overlay:not([data-phase="loading"]) .startup-intro-char {
+  opacity: 1;
+  transform: none;
+  animation: none;
+  will-change: auto;
+}
+
+.startup-intro-overlay:not([data-phase="loading"]) .startup-intro-char::after {
+  opacity: 0;
+  animation: none;
+}
+
+.app-root[data-startup-intro] > .app-sidebar,
+.app-root[data-startup-intro] .app-workbench-header,
+.app-root[data-startup-intro] .chat-input-floating {
+  opacity: 0.001;
+  visibility: visible;
+  backface-visibility: hidden;
+  will-change: opacity;
+  pointer-events: none;
+  transition: none;
+}
+
+.app-root[data-startup-intro="title-handoff"] > .app-sidebar,
+.app-root[data-startup-intro="title-handoff"] .app-workbench-header,
+.app-root[data-startup-intro="title-handoff"] .chat-input-floating {
+  opacity: 1;
+  visibility: visible;
+  transition:
+    opacity var(--startup-intro-app-reveal-duration) cubic-bezier(0.2, 0.74, 0.18, 1),
+    visibility 0ms linear 0ms;
+  transition-delay: var(--startup-intro-workbench-reveal-delay), 0ms;
+}
+
+.app-root[data-startup-intro="title-ready"] > .app-sidebar,
+.app-root[data-startup-intro="title-ready"] .app-workbench-header,
+.app-root[data-startup-intro="title-ready"] .chat-input-floating {
+  opacity: 0.001;
+  visibility: visible;
+  transition: none;
+}
+
+.app-root[data-startup-intro] > .app-workbench {
+  opacity: 0.001;
+  visibility: visible;
+  pointer-events: none;
+  transition: none;
+}
+
+.app-root[data-startup-intro="title-handoff"] > .app-workbench {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: none;
+  transition:
+    opacity var(--startup-intro-app-reveal-duration) cubic-bezier(0.2, 0.74, 0.18, 1),
+    visibility 0ms linear 0ms;
+  transition-delay: var(--startup-intro-workbench-reveal-delay), 0ms;
+}
+
+.app-root[data-startup-intro="title-ready"] > .app-workbench {
+  opacity: 0.001;
+  visibility: visible;
+  pointer-events: none;
+  transition: none;
+}
+
+.app-root[data-startup-intro="title-handoff"] > .app-sidebar {
+  transition-delay: var(--startup-intro-sidebar-reveal-delay), 0ms;
+}
+
+.app-root[data-startup-intro="title-handoff"] > .app-workbench {
+  transition-delay: var(--startup-intro-workbench-reveal-delay), 0ms;
+}
+
+.app-root[data-startup-intro="title-handoff"] .app-workbench-header {
+  transition-delay: var(--startup-intro-topbar-reveal-delay), 0ms;
+}
+
+.app-root[data-startup-intro="title-handoff"] .chat-input-floating {
+  transition-delay: var(--startup-intro-composer-settle-delay), 0ms;
+}
+
+.app-root[data-startup-intro] .app-bootstrap-spinner {
+  animation-play-state: paused;
+}
+
+.app-root[data-startup-intro] .chat-empty-main {
+  padding: 56px 72px;
+}
+
+.app-root[data-startup-intro] .chat-empty-grid {
+  padding-block: var(--startup-intro-empty-grid-top-padding, 154px) 28px;
+}
+
+.app-root[data-startup-intro] .chat-empty-heading {
+  opacity: 0.001;
+  visibility: visible;
+  text-rendering: geometricPrecision;
+  transform: translate3d(0, 0, 0);
+  transition: none;
+  backface-visibility: hidden;
+  will-change: opacity;
+  transform-origin: 50% 56%;
+}
+
+.app-root[data-startup-intro="title-ready"] .chat-empty-heading,
+.app-root[data-startup-intro="title-handoff"] .chat-empty-heading {
+  opacity: 0.001;
+  visibility: visible;
+  transform: translate3d(0, 0, 0);
+  transition: none;
+}
+
+@keyframes startup-intro-char-enter {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 0.035em, 0);
+  }
+  48% {
+    opacity: 0.82;
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes startup-intro-print-head {
+  from,
+  76% {
+    opacity: 0.7;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@media (max-width: 520px) {
+  .startup-intro-text {
+    font-size: 30px;
+  }
+}
+
+html[data-desktop-shell="true"] .startup-intro-text {
+  font-size: 48px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .startup-intro-char,
+  .startup-intro-char::after {
+    animation-duration: 1ms !important;
+    animation-delay: 0ms !important;
+  }
+}

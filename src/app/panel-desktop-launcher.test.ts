@@ -17,8 +17,28 @@ test("panel desktop window options keep secure defaults", () => {
     height: 960,
     minWidth: 1200,
     minHeight: 800,
+    kind: "main",
+    startup: {
+      initialWidth: 556,
+      initialHeight: 136,
+      theme: {
+        styleId: "default",
+        colorId: "light",
+        backgroundColor: "#f5f7fa",
+        shellColor: "#ffffff",
+        borderColor: "#b8c5d6",
+        textColor: "#18212f",
+        mainWindow: {
+          width: 1440,
+          height: 960,
+        },
+      },
+    },
+    frame: false,
+    transparent: true,
+    hasShadow: false,
     center: true,
-    backgroundColor: "#f5f6f7",
+    backgroundColor: "#00000000",
     show: false,
     autoHideMenuBar: true,
     webPreferences: {
@@ -97,6 +117,7 @@ test("panel desktop smoke starts and closes the local server without creating a 
       host: "127.0.0.1",
       port: 0,
       smoke: true,
+      windowSmoke: false,
     },
     dependencies
   );
@@ -157,6 +178,7 @@ test("panel desktop session can load a Vite dev url while keeping the local API 
       host: "127.0.0.1",
       port: 0,
       smoke: false,
+      windowSmoke: false,
       devUrl: "http://127.0.0.1:4305/",
     },
     dependencies
@@ -221,6 +243,7 @@ test("panel desktop session loads the panel url and closes on quit", async () =>
       host: "127.0.0.1",
       port: 0,
       smoke: false,
+      windowSmoke: false,
       configDirectory: "C:/agentarbor",
     },
     dependencies
@@ -287,6 +310,7 @@ test("panel desktop session injects workspace picker only outside smoke mode", a
       host: "127.0.0.1",
       port: 0,
       smoke: true,
+      windowSmoke: false,
     },
     dependencies
   );
@@ -295,6 +319,7 @@ test("panel desktop session injects workspace picker only outside smoke mode", a
       host: "127.0.0.1",
       port: 0,
       smoke: false,
+      windowSmoke: false,
     },
     dependencies
   );
@@ -331,6 +356,7 @@ test("panel desktop session keeps ready-to-show and load fallback display idempo
       host: "127.0.0.1",
       port: 0,
       smoke: false,
+      windowSmoke: false,
     },
     dependencies
   );
@@ -369,6 +395,7 @@ test("panel desktop session does not show a destroyed window after load", async 
       host: "127.0.0.1",
       port: 0,
       smoke: false,
+      windowSmoke: false,
     },
     dependencies
   );
@@ -413,6 +440,7 @@ test("panel desktop session closes the local server when Electron startup fails"
           host: "127.0.0.1",
           port: 0,
           smoke: false,
+          windowSmoke: false,
         },
         dependencies
       ),

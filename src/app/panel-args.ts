@@ -3,6 +3,7 @@ export type PanelLaunchArgs = {
   readonly port: number;
   readonly configDirectory?: string;
   readonly smoke: boolean;
+  readonly windowSmoke: boolean;
   readonly devUrl?: string;
 };
 
@@ -27,6 +28,7 @@ function parsePanelArgsWithDefaults(
   let configDirectory: string | undefined;
   let devUrl: string | undefined;
   let smoke = false;
+  let windowSmoke = false;
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -35,6 +37,10 @@ function parsePanelArgsWithDefaults(
     }
     if (arg === "--smoke") {
       smoke = true;
+      continue;
+    }
+    if (arg === "--window-smoke") {
+      windowSmoke = true;
       continue;
     }
     if (arg === "--host") {
@@ -76,7 +82,11 @@ function parsePanelArgsWithDefaults(
     throw new Error(`Unknown panel argument: ${arg}`);
   }
 
-  return { host, port, configDirectory, smoke, devUrl };
+  if (smoke && windowSmoke) {
+    throw new Error("--smoke and --window-smoke cannot be used together.");
+  }
+
+  return { host, port, configDirectory, smoke, windowSmoke, devUrl };
 }
 
 function requireNext(argv: readonly string[], index: number, flag: string): string {

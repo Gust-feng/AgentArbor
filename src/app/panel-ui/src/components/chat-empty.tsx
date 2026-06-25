@@ -15,6 +15,7 @@ import type { ModelProviderIdentity } from "../model-provider-logos";
 type ComposerChipFeedback = "model" | "reasoning" | "access";
 
 const COMPOSER_CHIP_FEEDBACK_MS = 540;
+const EMPTY_HEADING = "今天想处理什么？";
 
 export type ChatModelOption = {
   readonly id: string;
@@ -55,6 +56,7 @@ export type ChatInputProps = AttachmentInputProps & {
   readonly onOpenSettings: () => void;
   readonly onSubmit: () => void;
   readonly onCancel?: () => void;
+  readonly autoFocus?: boolean;
   readonly running?: boolean;
   readonly placeholder?: string;
   readonly variant?: "embedded" | "floating";
@@ -72,7 +74,11 @@ export function ChatEmpty(props: ChatInputProps & {
       <main className="chat-empty-main">
         <div className="chat-empty-grid">
           <section className="chat-empty-copy" aria-label="任务输入">
-            <h1 className="chat-empty-heading">今天想处理什么？</h1>
+            <h1 className="chat-empty-heading">
+              <span className="chat-empty-heading-title" data-startup-title-anchor>
+                {EMPTY_HEADING}
+              </span>
+            </h1>
             {props.error && <div className="system-error-line">{props.error}</div>}
           </section>
         </div>
@@ -174,6 +180,9 @@ export function ChatInputBar(props: ChatInputProps): React.ReactElement {
   }, [modelMenuOpen, reasoningMenuOpen, accessMenuOpen]);
 
   useEffect(() => {
+    if (props.autoFocus === false) {
+      return;
+    }
     if (props.busy) {
       previousBusyRef.current = true;
       return;
@@ -186,7 +195,7 @@ export function ChatInputBar(props: ChatInputProps): React.ReactElement {
     didAutoFocusRef.current = true;
     previousBusyRef.current = false;
     return () => window.cancelAnimationFrame(focusFrame);
-  }, [props.busy, modelMenuOpen, reasoningMenuOpen, accessMenuOpen]);
+  }, [props.autoFocus, props.busy, modelMenuOpen, reasoningMenuOpen, accessMenuOpen]);
 
   function closeComposerPanels(): void {
     setModelMenuOpen(false);

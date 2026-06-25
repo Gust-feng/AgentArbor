@@ -9,6 +9,12 @@
   color: var(--fg);
 }
 
+html[data-desktop-shell="true"] .app-root {
+  box-shadow:
+    inset 0 0 0 1px color-mix(in oklch, var(--border-strong) 56%, transparent),
+    inset 0 1px 0 color-mix(in oklch, white 24%, transparent);
+}
+
 .app-workbench {
   display: flex;
   flex: 1 1 auto;
@@ -35,12 +41,28 @@
   background: var(--workbench-bg);
 }
 
+html[data-desktop-shell="true"] .app-workbench-header {
+  -webkit-app-region: drag;
+}
+
 .app-workbench-header-inner {
   display: flex;
   min-height: 48px;
   align-items: center;
+  justify-content: space-between;
   gap: 12px;
   padding: 0 18px;
+}
+
+html[data-desktop-shell="true"] .app-workbench-header-inner {
+  padding-right: 0;
+}
+
+.app-workbench-header-main {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 12px;
 }
 
 .app-workbench-sidebar-toggle {
@@ -60,10 +82,46 @@
     transform var(--motion-fast-duration) var(--motion-ease-snap);
 }
 
+html[data-desktop-shell="true"] .app-workbench-sidebar-toggle,
+html[data-desktop-shell="true"] .app-window-controls,
+html[data-desktop-shell="true"] .app-window-control {
+  -webkit-app-region: no-drag;
+}
+
 .app-workbench-sidebar-toggle:hover {
   border-color: color-mix(in oklch, var(--fg) 14%, transparent);
   background: var(--nav-hover-bg);
   color: var(--fg);
+}
+
+.app-window-controls {
+  display: inline-flex;
+  align-self: stretch;
+  margin-left: auto;
+}
+
+.app-window-control {
+  display: inline-flex;
+  width: 46px;
+  min-width: 46px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0;
+  background: transparent;
+  color: color-mix(in oklch, var(--muted) 72%, var(--fg));
+  transition:
+    background-color 150ms var(--motion-ease-standard),
+    color 150ms var(--motion-ease-standard);
+}
+
+.app-window-control:hover {
+  background: color-mix(in oklch, var(--fg) 7%, transparent);
+  color: var(--fg);
+}
+
+.app-window-control-close:hover {
+  background: color-mix(in oklch, var(--status-danger) 88%, black 4%);
+  color: white;
 }
 
 .app-workbench-sidebar-toggle:active {

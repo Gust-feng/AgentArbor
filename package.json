@@ -19,7 +19,8 @@
     "panel:desktop:dev": "node scripts/panel-dev.mjs --desktop",
     "panel:smoke": "pnpm build && node dist/app/panel.js --port 0 --smoke",
     "panel:desktop": "pnpm build && pnpm exec electron dist/app/panel-desktop.js",
-    "panel:desktop:smoke": "pnpm build && pnpm exec electron dist/app/panel-desktop.js --port 0 --smoke"
+    "panel:desktop:smoke": "pnpm build && pnpm exec electron dist/app/panel-desktop.js --port 0 --smoke",
+    "panel:desktop:window-smoke": "pnpm build && pnpm exec electron dist/app/panel-desktop.js --port 0 --window-smoke"
   },
   "devDependencies": {
     "@tailwindcss/vite": "4.3.0",

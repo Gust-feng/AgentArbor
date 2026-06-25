@@ -1,10 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { Minus, PanelLeftClose, PanelLeftOpen, Square, X } from "lucide-react";
 import { isConversationWaitingForUser } from "./conversation-state";
-import { ChatActive } from "./components/chat-active";
 import { ChatEmpty } from "./components/chat-empty";
 import { Sidebar, type Screen } from "./components/sidebar";
 import type { McpServerForm, ModelForm, SettingsGroup, ToolForm } from "./components/settings-types";
+import {
+  StartupIntroOverlay,
+  startupIntroTimingStyle,
+  useStartupIntro,
+} from "./app-startup-intro";
 import { selectLocalContextAttachment, uniqueAttachments } from "./app-attachments";
 import { applyAppBootstrap, loadAppBootstrap } from "./app-bootstrap";
 import {
@@ -41,6 +45,17 @@ import type { ModelProviderModelCatalog } from "./contracts/config";
 import type { ContextAttachment } from "./contracts/context";
 import type { McpServerCatalogItem } from "./contracts/tools";
 import { modelOptionSupportsReasoningEffort, modelOptionsFromConfig, selectedModelOptionId } from "./model-options";
+
+type StartupIntroRootStyle = React.CSSProperties & {
+  "--startup-intro-target-width"?: string;
+  "--startup-intro-target-height"?: string;
+  "--startup-intro-empty-grid-top-padding"?: string;
+};
+
+const LazyChatActive = React.lazy(async () => {
+  const module = await import("./components/chat-active");
+  return { default: module.ChatActive };
+});
 
 const LazySettingsDialog = React.lazy(async () => {
   const module = await import("./components/settings-dialog");
@@ -537,9 +552,26 @@ export function App(): React.ReactElement {
   };
 
   const isBootstrapping = app.config === undefined && app.conversations.length === 0 && app.error === undefined;
+  const startupIntro = useStartupIntro(isBootstrapping);
+  const startupIntroStyle = useMemo(() => {
+    const style = startupIntroTimingStyle(startupIntro.timing) as StartupIntroRootStyle;
+    if (startupIntro.reveal !== undefined) {
+      style["--startup-intro-target-width"] = `${startupIntro.reveal.targetWindow.width}px`;
+      style["--startup-intro-target-height"] = `${startupIntro.reveal.targetWindow.height}px`;
+      style["--startup-intro-empty-grid-top-padding"] = `${startupIntroEmptyGridTopPadding(startupIntro.reveal.targetWindow.height)}px`;
+    }
+    return style;
+  }, [startupIntro.reveal?.targetWindow.height, startupIntro.reveal?.targetWindow.width, startupIntro.timing]);
+  const startupIntroRootStyle = startupIntro.overlayPhase === undefined ? undefined : startupIntroStyle;
+  const startupIntroActive = startupIntro.overlayPhase !== undefined && startupIntro.reveal !== undefined;
 
   return (
-    <div className="app-root" data-sidebar-collapsed={sidebarCollapsed ? "true" : "false"}>
+      <div
+        className="app-root"
+        data-startup-intro={startupIntro.overlayPhase}
+        data-sidebar-collapsed={sidebarCollapsed ? "true" : "false"}
+        style={startupIntroRootStyle}
+    >
       <Sidebar
         currentScreen={chatScreen}
         conversations={app.conversations}
@@ -569,26 +601,29 @@ export function App(): React.ReactElement {
           {!isBootstrapping && chatScreen === "chat-empty" && (
             <ChatEmpty
               {...inputProps}
+              autoFocus={!startupIntroActive}
               error={app.error}
             />
           )}
           {!isBootstrapping && chatScreen === "chat-active" && (
-            <ChatActive
-              {...inputProps}
-              conversation={app.conversation}
-              run={currentRun.run}
-              workView={currentRun.workView}
-              transcriptNodes={currentRun.transcriptNodes}
-              detail={currentRun.detail}
-              live={currentRun.live}
-              error={app.error}
-              pendingConfirmation={pendingConfirmation}
-              onDecision={(decision, guidance) => void decideConfirmation(decision, guidance)}
-              confirmationBusy={confirmationBusy}
-              queuedMessages={queuedMessages}
-              onRemoveQueuedMessage={removeQueuedMessage}
-              onUpdateQueuedMessage={updateQueuedMessage}
-            />
+            <React.Suspense fallback={<WorkbenchChunkFallback label="正在打开会话" />}>
+              <LazyChatActive
+                {...inputProps}
+                conversation={app.conversation}
+                run={currentRun.run}
+                workView={currentRun.workView}
+                transcriptNodes={currentRun.transcriptNodes}
+                detail={currentRun.detail}
+                live={currentRun.live}
+                error={app.error}
+                pendingConfirmation={pendingConfirmation}
+                onDecision={(decision, guidance) => void decideConfirmation(decision, guidance)}
+                confirmationBusy={confirmationBusy}
+                queuedMessages={queuedMessages}
+                onRemoveQueuedMessage={removeQueuedMessage}
+                onUpdateQueuedMessage={updateQueuedMessage}
+              />
+            </React.Suspense>
           )}
         </main>
       </div>
@@ -637,6 +672,14 @@ export function App(): React.ReactElement {
           />
         </React.Suspense>
       )}
+      {startupIntroActive && startupIntro.overlayPhase !== undefined && startupIntro.reveal !== undefined && (
+        <StartupIntroOverlay
+          phase={startupIntro.overlayPhase}
+          timing={startupIntro.timing}
+          sidebarCollapsed={sidebarCollapsed}
+          reveal={startupIntro.reveal}
+        />
+      )}
     </div>
   );
 }
@@ -666,25 +709,68 @@ function WorkbenchHeader(props: {
   readonly onToggleSidebar: () => void;
 }): React.ReactElement {
   const toggleLabel = props.collapsed ? "展开侧栏" : "收起侧栏";
+  const hasDesktopWindowControls = typeof window !== "undefined" && window.agentarborDesktop !== undefined;
 
   return (
     <header className="app-workbench-header">
       <div className="app-workbench-header-inner">
-        <button
-          type="button"
-          className="app-workbench-sidebar-toggle"
-          aria-label={toggleLabel}
-          onClick={props.onToggleSidebar}
-        >
-          {props.collapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
-        </button>
+        <div className="app-workbench-header-main">
+          <button
+            type="button"
+            className="app-workbench-sidebar-toggle"
+            aria-label={toggleLabel}
+            title={toggleLabel}
+            onClick={props.onToggleSidebar}
+          >
+            {props.collapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+          </button>
+        </div>
+        {hasDesktopWindowControls && <DesktopWindowControls />}
       </div>
     </header>
   );
 }
 
+function DesktopWindowControls(): React.ReactElement {
+  return (
+    <div className="app-window-controls" aria-label="窗口控制">
+      <button
+        type="button"
+        className="app-window-control"
+        aria-label="最小化窗口"
+        title="最小化"
+        onClick={() => window.agentarborDesktop?.minimizeWindow()}
+      >
+        <Minus size={14} />
+      </button>
+      <button
+        type="button"
+        className="app-window-control"
+        aria-label="最大化或还原窗口"
+        title="最大化/还原"
+        onClick={() => window.agentarborDesktop?.toggleMaximizeWindow()}
+      >
+        <Square size={12} />
+      </button>
+      <button
+        type="button"
+        className="app-window-control app-window-control-close"
+        aria-label="关闭窗口"
+        title="关闭"
+        onClick={() => window.agentarborDesktop?.closeWindow()}
+      >
+        <X size={15} />
+      </button>
+    </div>
+  );
+}
+
 function errorText(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
+}
+
+function startupIntroEmptyGridTopPadding(targetHeight: number): number {
+  return Math.round(Math.min(Math.max(targetHeight * 0.16, 112), 154));
 }
 
 const SIDEBAR_COLLAPSED_STORAGE_KEY = "agentarbor.panel.sidebar.collapsed";

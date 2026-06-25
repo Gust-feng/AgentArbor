@@ -45,6 +45,7 @@ interface Window {
       readonly started: boolean;
       readonly durationMs: number;
     }>;
+    readonly notifyStartupOverlayReady: () => void;
     readonly notifyStartupMainReady: () => void;
     readonly notifyStartupMainHandoffVisible: () => void;
     readonly notifyStartupRendererFrameStats: (stats: {

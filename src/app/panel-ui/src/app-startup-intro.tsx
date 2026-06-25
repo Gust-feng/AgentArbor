@@ -149,9 +149,9 @@ type StartupIntroTitleBridgeTarget = {
 const STARTUP_INTRO_DEFAULT_EXPAND_MS = 720;
 const STARTUP_INTRO_EXPANSION_RESPONSE_TIMEOUT_MS = 3000;
 const STARTUP_INTRO_HOME_TITLE_FONT_SIZE_PX = 46;
-const STARTUP_INTRO_CHAR_ENTER_DELAY_MS = 160;
-const STARTUP_INTRO_CHAR_ENTER_STAGGER_MS = 82;
-const STARTUP_INTRO_CHAR_ENTER_DURATION_MS = 110;
+const STARTUP_INTRO_CHAR_ENTER_DELAY_MS = 90;
+const STARTUP_INTRO_CHAR_ENTER_STAGGER_MS = 48;
+const STARTUP_INTRO_CHAR_ENTER_DURATION_MS = 260;
 const STARTUP_INTRO_TEXT_CHAR_COUNT = Array.from(STARTUP_INTRO_TEXT).length;
 const STARTUP_INTRO_TEXT_PRINT_DURATION_MS =
   STARTUP_INTRO_CHAR_ENTER_DELAY_MS +
@@ -360,6 +360,7 @@ export function StartupIntroOverlay(props: {
   readonly sidebarCollapsed: boolean;
   readonly reveal: StartupIntroReveal;
 }): React.ReactElement {
+  useStartupIntroOverlayReady();
   const style = useMemo(
     () => startupIntroOverlayStyle(props.timing, props.reveal) as StartupIntroOverlayStyle,
     [
@@ -380,6 +381,7 @@ export function StartupIntroOverlay(props: {
       style={style}
     >
       <div className="startup-intro-frame" />
+      <StartupIntroWindowDetails sourceRect={props.reveal.startupRect} />
       <StartupIntroText
         phase={props.phase}
         timing={props.timing}
@@ -387,6 +389,56 @@ export function StartupIntroOverlay(props: {
       />
     </div>
   );
+}
+
+function StartupIntroWindowDetails(props: {
+  readonly sourceRect: StartupIntroRect;
+}): React.ReactElement {
+  const detailStyle = useMemo(
+    () => startupIntroContentStyle(props.sourceRect),
+    [props.sourceRect.height, props.sourceRect.width, props.sourceRect.x, props.sourceRect.y]
+  );
+  return (
+    <div className="startup-intro-window-ui" style={detailStyle} aria-hidden="true">
+      <div className="startup-intro-window-topbar">
+        <span />
+        <span />
+        <span />
+      </div>
+      <div className="startup-intro-window-rail">
+        <span />
+        <span />
+        <span />
+      </div>
+      <div className="startup-intro-window-body">
+        <span className="startup-intro-window-line startup-intro-window-line-wide" />
+        <span className="startup-intro-window-line" />
+        <span className="startup-intro-window-line startup-intro-window-line-short" />
+      </div>
+      <div className="startup-intro-window-composer" />
+    </div>
+  );
+}
+
+function useStartupIntroOverlayReady(): void {
+  useEffect(() => {
+    if (typeof window === "undefined" || window.agentarborDesktop === undefined) return;
+    let cancelled = false;
+    let fallbackTimeout: number | undefined;
+    const notify = () => {
+      if (cancelled) return;
+      cancelled = true;
+      if (fallbackTimeout !== undefined) window.clearTimeout(fallbackTimeout);
+      window.agentarborDesktop?.notifyStartupOverlayReady();
+    };
+    const frame = window.requestAnimationFrame(notify);
+    fallbackTimeout = window.setTimeout(notify, 80);
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(frame);
+      if (fallbackTimeout !== undefined) window.clearTimeout(fallbackTimeout);
+    };
+  }, []);
 }
 
 function StartupIntroText(props: {

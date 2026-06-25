@@ -19,8 +19,8 @@ test("panel desktop window options keep secure defaults", () => {
     minHeight: 800,
     kind: "main",
     startup: {
-      initialWidth: 556,
-      initialHeight: 136,
+      initialWidth: 718,
+      initialHeight: 404,
       theme: {
         styleId: "default",
         colorId: "light",

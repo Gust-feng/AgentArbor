@@ -12,7 +12,7 @@ export const STARTUP_INTRO_TEXT = "今天想处理什么？";
 
 const STARTUP_INTRO_DESKTOP_VIEWPORT_WIDTH = 1440;
 const STARTUP_INTRO_DESKTOP_VIEWPORT_HEIGHT = 960;
-export const STARTUP_INTRO_TEXT_FONT_SIZE_PX = 48;
+export const STARTUP_INTRO_TEXT_FONT_SIZE_PX = 46;
 const STARTUP_INTRO_TEXT_LINE_HEIGHT = 1;
 
 export function createStartupIntroDefaultWindowSize(text = STARTUP_INTRO_TEXT): StartupIntroWindowSize {
@@ -52,7 +52,7 @@ export function createStartupIntroWindowSize(
     1,
     Math.min(
       safeViewportHeight - (isMobile ? 24 : isCompact ? 38 : 80),
-      isMobile ? 128 : isCompact ? 154 : 168
+      isMobile ? 300 : isCompact ? 360 : 420
     )
   );
   const horizontalPadding = clamp(
@@ -67,12 +67,18 @@ export function createStartupIntroWindowSize(
   );
   const textDrivenWidth = measuredTextBox.width + horizontalPadding * 2;
   const textDrivenHeight = measuredTextBox.height + verticalPadding * 2;
-  const minimumSoftwareFrameWidth = textDrivenHeight * (isMobile ? 2.8 : isCompact ? 3.2 : 3.55);
+  const softwareFrameHeight = clamp(
+    Math.round(safeViewportHeight * (isMobile ? 0.44 : isCompact ? 0.5 : 0.42)),
+    isMobile ? 220 : isCompact ? 300 : 360,
+    isMobile ? 300 : isCompact ? 360 : 420
+  );
+  const balancedHeight = Math.max(textDrivenHeight, softwareFrameHeight);
+  const minimumSoftwareFrameWidth = balancedHeight * (isMobile ? 1.55 : isCompact ? 1.85 : 1.78);
   const balancedWidth = Math.max(textDrivenWidth, minimumSoftwareFrameWidth);
 
   return {
     width: roundToParityWithin(Math.min(balancedWidth, maxWidth), safeViewportWidth, maxWidth),
-    height: roundToParityWithin(Math.min(textDrivenHeight, maxHeight), safeViewportHeight, maxHeight),
+    height: roundToParityWithin(Math.min(balancedHeight, maxHeight), safeViewportHeight, maxHeight),
   };
 }
 

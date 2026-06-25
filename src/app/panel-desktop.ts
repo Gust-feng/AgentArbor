@@ -28,6 +28,7 @@ const startupHandoffFallbackTimers = new WeakMap<BrowserWindow, NodeJS.Timeout>(
 const startupNativeControlRestoreTimers = new WeakMap<BrowserWindow, NodeJS.Timeout>();
 const STARTUP_WINDOW_EXPAND_CHANNEL = "agentarbor:startup-window-expand";
 const STARTUP_WINDOW_BEGIN_EXPAND_CHANNEL = "agentarbor:startup-window-begin-expand";
+const STARTUP_OVERLAY_READY_CHANNEL = "agentarbor:startup-overlay-ready";
 const STARTUP_MAIN_READY_CHANNEL = "agentarbor:startup-main-ready";
 const STARTUP_MAIN_HANDOFF_VISIBLE_CHANNEL = "agentarbor:startup-main-handoff-visible";
 const STARTUP_RENDERER_FRAME_STATS_CHANNEL = "agentarbor:startup-renderer-frame-stats";
@@ -37,6 +38,7 @@ const WINDOW_CLOSE_CHANNEL = "agentarbor:window-close";
 const STARTUP_WINDOW_EXPAND_MS = 720;
 const STARTUP_WINDOW_REDUCED_MOTION_MS = 80;
 const STARTUP_WINDOW_RENDERER_SETTLE_MS = 80;
+const STARTUP_WINDOW_INITIAL_SHOW_FALLBACK_MS = 1200;
 const STARTUP_WINDOW_BOUNDS_FRAME_MS = 16;
 const STARTUP_MAIN_HANDOFF_VISIBLE_FALLBACK_MS = 900;
 const STARTUP_WINDOW_NATIVE_CONTROL_RESTORE_DELAY_MS = 1000;
@@ -133,6 +135,10 @@ type DesktopStartupWindowState = {
   expansionStarted: boolean;
   expansionFinished: boolean;
   expansionResult: DesktopStartupWindowExpansionResult | undefined;
+  readyToShow: boolean;
+  overlayReady: boolean;
+  showRequested: boolean;
+  showFallbackTimer: NodeJS.Timeout | undefined;
 };
 
 type DesktopMainWindowState = {
@@ -273,21 +279,31 @@ function createElectronPanelWindow(
     expansionStarted: false,
     expansionFinished: false,
     expansionResult: undefined,
+    readyToShow: false,
+    overlayReady: false,
+    showRequested: false,
+    showFallbackTimer: undefined,
   });
   mainWindowStates.set(mainWindow, {
     startupWindow: mainWindow,
   });
   registerDesktopWindowCleanup(mainWindow);
-  let mainWindowReady = false;
   let readyToShowHandler: (() => void) | undefined;
   const notifyReadyToShow = () => {
-    if (!mainWindowReady) return;
+    const state = startupWindowStates.get(mainWindow);
+    if (state === undefined || !state.readyToShow) return;
     readyToShowHandler?.();
   };
   mainWindow.once("ready-to-show", () => {
-    mainWindowReady = true;
+    const state = startupWindowStates.get(mainWindow);
+    if (state !== undefined) {
+      state.readyToShow = true;
+    }
     recordStartupWindowSmokeEvent("ready-to-show");
     notifyReadyToShow();
+    if (state !== undefined) {
+      showStartupWindowIfReady(mainWindow, state);
+    }
   });
 
   return {
@@ -300,8 +316,14 @@ function createElectronPanelWindow(
       notifyReadyToShow();
     },
     show: () => {
-      recordStartupWindowSmokeEvent("show");
-      mainWindow.show();
+      const state = startupWindowStates.get(mainWindow);
+      if (state === undefined) {
+        showWindowIfAlive(mainWindow);
+        return;
+      }
+      state.showRequested = true;
+      scheduleStartupWindowInitialShowFallback(mainWindow, state);
+      showStartupWindowIfReady(mainWindow, state);
     },
     isVisible: () => mainWindow.isVisible(),
     isDestroyed: () => mainWindow.isDestroyed(),
@@ -319,6 +341,11 @@ function registerDesktopWindowCleanup(window: BrowserWindow): void {
     if (nativeControlTimer !== undefined) {
       clearTimeout(nativeControlTimer);
       startupNativeControlRestoreTimers.delete(window);
+    }
+    const startupState = startupWindowStates.get(window);
+    if (startupState?.showFallbackTimer !== undefined) {
+      clearTimeout(startupState.showFallbackTimer);
+      startupState.showFallbackTimer = undefined;
     }
     activeWindows.delete(window);
   });
@@ -342,6 +369,15 @@ function installStartupWindowExpansionBridge(): void {
     const window = startupWindowFromPanelEvent(event);
     if (window === undefined) return createNoopStartupWindowBeginResult();
     return beginStartupWindowExpansion(window);
+  });
+  ipcMain.on(STARTUP_OVERLAY_READY_CHANNEL, (event: IpcMainEvent) => {
+    const window = panelWindowFromEvent(event);
+    if (window === undefined) return;
+    const startupState = startupWindowStates.get(window);
+    if (startupState === undefined) return;
+    startupState.overlayReady = true;
+    recordStartupWindowSmokeEvent("overlay-ready");
+    showStartupWindowIfReady(window, startupState);
   });
   ipcMain.on(STARTUP_MAIN_READY_CHANNEL, (event: IpcMainEvent) => {
     const window = panelWindowFromEvent(event);
@@ -669,6 +705,34 @@ function completeStartupWindowSmokeIfRequested(mainWindow: BrowserWindow): void 
   }, STARTUP_WINDOW_RENDERER_SETTLE_MS);
 }
 
+function scheduleStartupWindowInitialShowFallback(window: BrowserWindow, state: DesktopStartupWindowState): void {
+  if (state.showFallbackTimer !== undefined || state.overlayReady) return;
+  state.showFallbackTimer = setTimeout(() => {
+    state.showFallbackTimer = undefined;
+    if (window.isDestroyed() || window.isVisible()) return;
+    state.overlayReady = true;
+    recordStartupWindowSmokeEvent("overlay-ready");
+    recordStartupWindowSmokeEvent("overlay-ready-fallback");
+    showStartupWindowIfReady(window, state);
+  }, STARTUP_WINDOW_INITIAL_SHOW_FALLBACK_MS);
+  state.showFallbackTimer.unref();
+}
+
+function showStartupWindowIfReady(window: BrowserWindow, state: DesktopStartupWindowState): void {
+  if (!state.showRequested || !state.readyToShow || !state.overlayReady) return;
+  if (state.showFallbackTimer !== undefined) {
+    clearTimeout(state.showFallbackTimer);
+    state.showFallbackTimer = undefined;
+  }
+  showWindowIfAlive(window);
+}
+
+function showWindowIfAlive(window: BrowserWindow): void {
+  if (window.isDestroyed() || window.isVisible()) return;
+  recordStartupWindowSmokeEvent("show");
+  window.show();
+}
+
 function recordStartupWindowSmokeEvent(label: string): void {
   if (!startupWindowSmokeRequested) return;
   startupWindowSmokeEventLabels.push(label);
@@ -710,8 +774,9 @@ function validateStartupWindowSmokeTimeline(): string | undefined {
     "window-created",
     "load-url",
     "did-finish-load",
-    "show",
     "ready-to-show",
+    "overlay-ready",
+    "show",
     "main-ready",
     "expand-requested",
     "begin-expand-requested",
@@ -728,6 +793,8 @@ function validateStartupWindowSmokeTimeline(): string | undefined {
   const requiredOrder = [
     "window-created",
     "load-url",
+    "overlay-ready",
+    "show",
     "main-ready",
     "expand-requested",
     "begin-expand-requested",

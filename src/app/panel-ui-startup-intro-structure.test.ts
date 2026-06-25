@@ -80,6 +80,8 @@ function assertNativeWindowExpansion(panelDesktop: string, preload: string): voi
   assert.equal(panelDesktop.includes("STARTUP_WINDOW_BEGIN_EXPAND_CHANNEL"), true);
   assert.equal(panelDesktop.includes("DesktopStartupWindowBeginResult"), true);
   assert.equal(panelDesktop.includes("STARTUP_WINDOW_RENDERER_SETTLE_MS"), true);
+  assert.equal(panelDesktop.includes("STARTUP_OVERLAY_READY_CHANNEL"), true);
+  assert.equal(panelDesktop.includes("STARTUP_WINDOW_INITIAL_SHOW_FALLBACK_MS"), true);
   assert.equal(panelDesktop.includes("STARTUP_WINDOW_BOUNDS_FRAME_MS"), true);
   assert.equal(panelDesktop.includes("STARTUP_WINDOW_NATIVE_CONTROL_RESTORE_DELAY_MS"), true);
   assert.equal(panelDesktop.includes("STARTUP_WINDOW_SMOKE_MAX_BOUNDS_FRAME_MS"), true);
@@ -102,6 +104,21 @@ function assertNativeWindowExpansion(panelDesktop: string, preload: string): voi
   assert.equal(panelDesktop.includes("setStartupWindowShape(mainWindow, startupShape)"), false);
   assert.equal(panelDesktop.includes("startupWindowStates.set(mainWindow"), true);
   assert.equal(panelDesktop.includes("startupWindow: mainWindow"), true);
+  assert.equal(panelDesktop.includes("readyToShow: false"), true);
+  assert.equal(panelDesktop.includes("overlayReady: false"), true);
+  assert.equal(panelDesktop.includes("showRequested: false"), true);
+  assert.equal(panelDesktop.includes("showFallbackTimer: undefined"), true);
+  assert.equal(panelDesktop.includes("showStartupWindowIfReady(mainWindow, state)"), true);
+  assert.equal(panelDesktop.includes("scheduleStartupWindowInitialShowFallback(mainWindow, state)"), true);
+  assert.equal(panelDesktop.includes("showWindowIfAlive(mainWindow)"), true);
+  assert.equal(panelDesktop.includes("recordStartupWindowSmokeEvent(\"overlay-ready\")"), true);
+  assertOrder(
+    panelDesktop,
+    "state.showRequested = true",
+    "scheduleStartupWindowInitialShowFallback(mainWindow, state);\n      showStartupWindowIfReady(mainWindow, state)"
+  );
+  assertOrder(panelDesktop, "ipcMain.on(STARTUP_OVERLAY_READY_CHANNEL", "showStartupWindowIfReady(window, startupState)");
+  assertOrder(panelDesktop, '"overlay-ready"', '"show"');
   assert.equal(panelDesktop.includes("startStartupWindowExpansionIfReady"), true);
   assert.equal(panelDesktop.includes("prepareStartupWindowExpansion"), true);
   assert.equal(panelDesktop.includes("beginStartupWindowExpansion"), true);
@@ -180,6 +197,8 @@ function assertNativeWindowExpansion(panelDesktop: string, preload: string): voi
   assert.equal(preload.includes("beginStartupWindowExpansion"), true);
   assert.equal(preload.includes("DesktopStartupWindowBeginResult"), true);
   assert.equal(preload.includes("agentarbor:startup-window-begin-expand"), true);
+  assert.equal(preload.includes("notifyStartupOverlayReady: ()"), true);
+  assert.equal(preload.includes("agentarbor:startup-overlay-ready"), true);
   assert.equal(preload.includes("notifyStartupMainReady: ()"), true);
   assert.equal(preload.includes("notifyStartupMainHandoffVisible"), true);
   assert.equal(preload.includes("notifyStartupRendererFrameStats"), true);
@@ -230,6 +249,9 @@ function assertRendererHandoff(
   assert.equal(chatLayoutStyles.includes("display: inline-block"), true);
 
   assert.equal(startupIntro.includes('from "motion/react"'), false);
+  assert.equal(startupIntro.includes("useStartupIntroOverlayReady"), true);
+  assert.equal(startupIntro.includes("notifyStartupOverlayReady"), true);
+  assertOrder(startupIntro, "useStartupIntroOverlayReady();", "startupIntroOverlayStyle(props.timing, props.reveal)");
   assert.equal(startupIntro.includes("notifyStartupMainReady"), true);
   assert.equal(startupIntro.includes("notifyStartupMainHandoffVisible"), true);
   assert.equal(startupIntro.includes("nativeExpanded"), true);
@@ -412,6 +434,8 @@ function assertRendererHandoff(
   assert.equal(startupIntro.includes("window.innerWidth / 2"), false);
   assert.equal(startupIntro.includes("window.innerHeight / 2"), false);
   assert.equal(countOccurrences(startupIntro, 'className="startup-intro-text"'), 1);
+  assert.equal(countOccurrences(startupIntro, 'className="startup-intro-window-ui"'), 1);
+  assert.equal(startupIntro.includes("function StartupIntroWindowDetails"), true);
   assert.equal(countOccurrences(startupIntro, 'className="startup-intro-handoff-text"'), 0);
 
   assert.equal(styles.includes("@keyframes startup-intro-title-handoff"), false);
@@ -481,7 +505,13 @@ function assertRendererHandoff(
   assert.equal(styles.includes("--startup-intro-real-title-in-distance"), false);
   assert.equal(styles.includes("--startup-intro-overlay-release-delay"), false);
   assert.equal(styles.includes("--startup-intro-overlay-release-duration"), false);
-  assert.equal(styles.includes("background: var(--startup-intro-shell-bg, var(--bg))"), true);
+  assert.equal(styles.includes("background-color: var(--startup-intro-shell-bg, var(--bg))"), true);
+  assert.equal(styles.includes("background-image: none"), true);
+  assert.equal(styles.includes("linear-gradient("), false);
+  assert.equal(styles.includes(".startup-intro-window-ui"), true);
+  assert.equal(styles.includes(".startup-intro-window-topbar"), true);
+  assert.equal(styles.includes(".startup-intro-window-rail"), true);
+  assert.equal(styles.includes(".startup-intro-window-composer"), true);
   assert.equal(styles.includes('.startup-intro-overlay[data-phase="title-ready"] .startup-intro-frame'), true);
   assert.equal(styles.includes('.startup-intro-overlay[data-phase="title-ready"] .startup-intro-text'), true);
   assert.equal(styles.includes("transition: none"), true);
@@ -541,7 +571,7 @@ function assertStartupThemeAndEntry(
   assert.equal(appStates.includes(".app-root[data-startup-intro]"), false);
 
   assert.equal(startupIntroGeometry.includes("STARTUP_INTRO_TEXT = \"今天想处理什么？\""), true);
-  assert.equal(startupIntroGeometry.includes("STARTUP_INTRO_TEXT_FONT_SIZE_PX = 48"), true);
+  assert.equal(startupIntroGeometry.includes("STARTUP_INTRO_TEXT_FONT_SIZE_PX = 46"), true);
   assert.equal(startupIntroGeometry.includes("createStartupIntroDefaultWindowSize"), true);
   assert.equal(startupIntroGeometry.includes("estimateStartupIntroTextBox"), true);
   assert.equal(startupIntroGeometry.includes("createStartupIntroWindowSize"), true);
@@ -575,10 +605,25 @@ function assertPrintedTextStructure(styles: string): void {
   assert.equal(styles.includes("@keyframes startup-intro-char-enter"), true);
   assert.equal(styles.includes("@keyframes startup-intro-print-head"), true);
   assert.equal(styles.includes("@keyframes startup-intro-caret-blink"), false);
+  assert.equal(styles.includes("font-size: 46px"), true);
+  assert.equal(styles.includes("font-size: 48px"), false);
+  assert.equal(styles.includes("steps(2"), false);
+  assert.equal(styles.includes("content: none"), true);
+  assert.equal(styles.includes("contain: paint"), false);
+
+  const textRule = readCssRule(styles, "\n.startup-intro-text");
+  assert.equal(textRule.includes("overflow: visible"), true);
+  const solidTextRule = readCssRule(styles, "\n.startup-intro-solid-text");
+  assert.equal(solidTextRule.includes("overflow: visible"), true);
+  const printTextRule = readCssRule(styles, "\n.startup-intro-print-text");
+  assert.equal(printTextRule.includes("overflow: visible"), true);
+  const charRule = readCssRule(styles, "\n.startup-intro-char");
+  assert.equal(charRule.includes("overflow: visible"), true);
 
   const charEnter = readCssKeyframes(styles, "startup-intro-char-enter");
-  assert.deepEqual(readCssPropertyValues(charEnter, "opacity").slice(0, 3), ["0", "0.82", "1"]);
-  assert.equal(charEnter.includes("transform: translate3d(0, 0.035em, 0)"), true);
+  assert.deepEqual(readCssPropertyValues(charEnter, "opacity").slice(0, 3), ["0", "0.96", "1"]);
+  assert.equal(charEnter.includes("transform: translate3d(0, 0.16em, 0) scale(0.975)"), true);
+  assert.equal(charEnter.includes("transform: translate3d(0, 0, 0) scale(1)"), true);
 }
 
 function assertSingleStartupSurface(styles: string): void {
@@ -656,10 +701,23 @@ function assertSingleStartupSurface(styles: string): void {
   assert.equal(frameRule.includes("top: var(--startup-intro-source-y, 0px)"), true);
   assert.equal(frameRule.includes("width: var(--startup-intro-source-width, 100%)"), true);
   assert.equal(frameRule.includes("height: var(--startup-intro-source-height, 100%)"), true);
-  assert.equal(frameRule.includes("background: var(--startup-intro-shell-bg, var(--bg))"), true);
-  assert.equal(frameRule.includes("background-color:"), false);
+  assert.equal(frameRule.includes("background-color: var(--startup-intro-shell-bg, var(--bg))"), true);
+  assert.equal(frameRule.includes("background-image: none"), true);
+  assert.equal(frameRule.includes("linear-gradient("), false);
   assert.equal(frameRule.includes("box-shadow:"), false);
   assert.equal(frameRule.includes("border:"), false);
+  const windowUiRule = readCssRule(styles, ".startup-intro-window-ui");
+  assert.equal(windowUiRule.includes("left: var(--startup-intro-source-x, 0px)"), true);
+  assert.equal(windowUiRule.includes("top: var(--startup-intro-source-y, 0px)"), true);
+  assert.equal(windowUiRule.includes("width: var(--startup-intro-source-width, 100%)"), true);
+  assert.equal(windowUiRule.includes("height: var(--startup-intro-source-height, 100%)"), true);
+  assert.equal(windowUiRule.includes("opacity: 0.42"), true);
+  assert.equal(windowUiRule.includes("pointer-events: none"), true);
+  const windowUiReleaseRule = readCssRule(
+    styles,
+    '.startup-intro-overlay[data-phase="expanding"] .startup-intro-window-ui,\n.startup-intro-overlay[data-phase="title-ready"] .startup-intro-window-ui,\n.startup-intro-overlay[data-phase="title-handoff"] .startup-intro-window-ui'
+  );
+  assert.equal(windowUiReleaseRule.includes("opacity: 0"), true);
   assert.equal(styles.includes('.startup-intro-overlay[data-phase="expanding"] .startup-intro-frame'), true);
   assert.equal(styles.includes('.startup-intro-overlay[data-phase="title-handoff"] .startup-intro-frame'), true);
 }

@@ -1,8 +1,8 @@
 /* Startup intro: transparent final window + one renderer-drawn expanding surface. */
 
 .app-root[data-startup-intro] {
-  --startup-intro-text-print-duration: 844ms;
-  --startup-intro-char-print-duration: 110ms;
+  --startup-intro-text-print-duration: 734ms;
+  --startup-intro-char-print-duration: 260ms;
   --startup-intro-shell-expand-duration: 720ms;
   --startup-intro-surface-out-delay: 220ms;
   --startup-intro-surface-out-duration: 520ms;
@@ -84,7 +84,8 @@ html[data-desktop-shell="true"] .app-root[data-startup-intro][data-sidebar-colla
   top: var(--startup-intro-source-y, 0px);
   width: var(--startup-intro-source-width, 100%);
   height: var(--startup-intro-source-height, 100%);
-  background: var(--startup-intro-shell-bg, var(--bg));
+  background-color: var(--startup-intro-shell-bg, var(--bg));
+  background-image: none;
   opacity: 1;
   pointer-events: none;
 }
@@ -132,6 +133,96 @@ html[data-desktop-shell="true"] .app-root[data-startup-intro][data-sidebar-colla
   pointer-events: none;
 }
 
+.startup-intro-window-ui {
+  position: absolute;
+  z-index: 2;
+  left: var(--startup-intro-source-x, 0px);
+  top: var(--startup-intro-source-y, 0px);
+  width: var(--startup-intro-source-width, 100%);
+  height: var(--startup-intro-source-height, 100%);
+  overflow: hidden;
+  color: var(--startup-intro-title-color);
+  opacity: 0.42;
+  pointer-events: none;
+  transition: opacity 180ms var(--motion-ease-standard);
+}
+
+.startup-intro-overlay[data-phase="expanding"] .startup-intro-window-ui,
+.startup-intro-overlay[data-phase="title-ready"] .startup-intro-window-ui,
+.startup-intro-overlay[data-phase="title-handoff"] .startup-intro-window-ui {
+  opacity: 0;
+}
+
+.startup-intro-window-topbar {
+  position: absolute;
+  inset: 0 0 auto;
+  display: flex;
+  height: 48px;
+  align-items: center;
+  gap: 8px;
+  padding-inline: 18px;
+  background: color-mix(in oklch, var(--startup-intro-shell-bg, var(--bg)) 92%, var(--fg) 8%);
+}
+
+.startup-intro-window-topbar span {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: color-mix(in oklch, currentColor 28%, transparent);
+}
+
+.startup-intro-window-rail {
+  position: absolute;
+  top: 84px;
+  left: 28px;
+  display: grid;
+  gap: 14px;
+}
+
+.startup-intro-window-rail span {
+  width: 48px;
+  height: 7px;
+  border-radius: 999px;
+  background: color-mix(in oklch, currentColor 14%, transparent);
+}
+
+.startup-intro-window-rail span:nth-child(2) {
+  width: 34px;
+}
+
+.startup-intro-window-body {
+  position: absolute;
+  right: 42px;
+  bottom: 112px;
+  display: grid;
+  width: min(198px, 28%);
+  gap: 10px;
+}
+
+.startup-intro-window-line {
+  height: 7px;
+  border-radius: 999px;
+  background: color-mix(in oklch, currentColor 12%, transparent);
+}
+
+.startup-intro-window-line-wide {
+  width: 100%;
+}
+
+.startup-intro-window-line-short {
+  width: 56%;
+}
+
+.startup-intro-window-composer {
+  position: absolute;
+  right: 42px;
+  bottom: 42px;
+  width: min(226px, 32%);
+  height: 16px;
+  border-radius: 999px;
+  background: color-mix(in oklch, currentColor 10%, transparent);
+}
+
 .startup-intro-text {
   position: relative;
   z-index: 1;
@@ -139,17 +230,17 @@ html[data-desktop-shell="true"] .app-root[data-startup-intro][data-sidebar-colla
   align-items: center;
   margin: 0;
   color: var(--startup-intro-title-color);
-  font-size: 48px;
+  font-size: 46px;
   font-weight: var(--weight-heading);
   letter-spacing: 0;
   line-height: 1;
   white-space: nowrap;
   text-rendering: geometricPrecision;
   opacity: 1;
+  overflow: visible;
   transform: translate3d(0, 0, 0) scale(1, 1);
   transform-origin: 50% 50%;
   backface-visibility: hidden;
-  contain: paint;
 }
 
 .startup-intro-overlay[data-phase="title-handoff"] .startup-intro-text {
@@ -158,10 +249,12 @@ html[data-desktop-shell="true"] .app-root[data-startup-intro][data-sidebar-colla
 
 .startup-intro-solid-text {
   display: none;
+  overflow: visible;
 }
 
 .startup-intro-print-text {
   display: inline-flex;
+  overflow: visible;
 }
 
 .startup-intro-overlay:not([data-phase="loading"]) .startup-intro-solid-text {
@@ -175,10 +268,11 @@ html[data-desktop-shell="true"] .app-root[data-startup-intro][data-sidebar-colla
 .startup-intro-char {
   position: relative;
   display: inline-block;
+  overflow: visible;
   opacity: 0;
-  transform: translate3d(0, 0.035em, 0);
+  transform: translate3d(0, 0.16em, 0) scale(0.975);
   transform-origin: 50% 76%;
-  animation: startup-intro-char-enter var(--startup-intro-char-print-duration) steps(2, end) both;
+  animation: startup-intro-char-enter var(--startup-intro-char-print-duration) cubic-bezier(0.16, 1, 0.3, 1) both;
   animation-delay: var(--startup-intro-char-delay);
 }
 
@@ -187,20 +281,7 @@ html[data-desktop-shell="true"] .app-root[data-startup-intro][data-sidebar-colla
 }
 
 .startup-intro-char::after {
-  position: absolute;
-  top: 0.02em;
-  right: -0.08em;
-  width: 0.08em;
-  height: 0.92em;
-  border-radius: 999px;
-  background: color-mix(in oklch, currentColor 72%, transparent);
-  opacity: 0;
-  content: "";
-  transform: scaleY(0.92);
-  transform-origin: 50% 50%;
-  animation: startup-intro-print-head var(--startup-intro-char-print-duration) steps(2, end) both;
-  animation-delay: var(--startup-intro-char-delay);
-  pointer-events: none;
+  content: none;
 }
 
 .startup-intro-overlay:not([data-phase="loading"]) .startup-intro-char {
@@ -319,35 +400,38 @@ html[data-desktop-shell="true"] .app-root[data-startup-intro][data-sidebar-colla
 @keyframes startup-intro-char-enter {
   from {
     opacity: 0;
-    transform: translate3d(0, 0.035em, 0);
+    transform: translate3d(0, 0.16em, 0) scale(0.975);
   }
-  48% {
-    opacity: 0.82;
+  64% {
+    opacity: 0.96;
   }
   to {
     opacity: 1;
-    transform: translate3d(0, 0, 0);
+    transform: translate3d(0, 0, 0) scale(1);
   }
 }
 
 @keyframes startup-intro-print-head {
   from,
-  76% {
-    opacity: 0.7;
-  }
   to {
     opacity: 0;
   }
 }
 
-@media (max-width: 520px) {
+@media (max-width: 720px) {
   .startup-intro-text {
-    font-size: 30px;
+    font-size: 42px;
+  }
+}
+
+@media (max-width: 430px) {
+  .startup-intro-text {
+    font-size: 34px;
   }
 }
 
 html[data-desktop-shell="true"] .startup-intro-text {
-  font-size: 48px;
+  font-size: 46px;
 }
 
 @media (prefers-reduced-motion: reduce) {

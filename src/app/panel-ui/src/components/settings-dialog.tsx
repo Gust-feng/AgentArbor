@@ -15,39 +15,14 @@ import type {
 } from "../contracts/config";
 import type { SkillDefinition } from "../contracts/skills";
 import type { McpEnvironmentCheckResponse, McpReferenceResponse, ToolsResponse } from "../contracts/tools";
+import { AppearanceSettings } from "./appearance-settings";
+import { BasicCapabilitiesSettings, McpServiceSettings } from "./capability-settings";
+import { ModelSettings } from "./model-settings";
 import type { McpServerForm, ModelForm, SettingsGroup, ToolForm } from "./settings-types";
+import { SkillSettings } from "./skill-settings";
+import { WorkspaceSettings } from "./workspace-settings";
 
 export type { McpServerForm, ModelForm, SettingsGroup, ToolForm } from "./settings-types";
-
-const LazyModelSettings = React.lazy(async () => {
-  const module = await import("./model-settings");
-  return { default: module.ModelSettings };
-});
-
-const LazyBasicCapabilitiesSettings = React.lazy(async () => {
-  const module = await import("./capability-settings");
-  return { default: module.BasicCapabilitiesSettings };
-});
-
-const LazyMcpServiceSettings = React.lazy(async () => {
-  const module = await import("./capability-settings");
-  return { default: module.McpServiceSettings };
-});
-
-const LazySkillSettings = React.lazy(async () => {
-  const module = await import("./skill-settings");
-  return { default: module.SkillSettings };
-});
-
-const LazyWorkspaceSettings = React.lazy(async () => {
-  const module = await import("./workspace-settings");
-  return { default: module.WorkspaceSettings };
-});
-
-const LazyAppearanceSettings = React.lazy(async () => {
-  const module = await import("./appearance-settings");
-  return { default: module.AppearanceSettings };
-});
 
 export function SettingsDialog(props: {
   readonly open: boolean;
@@ -147,69 +122,67 @@ export function SettingsDialog(props: {
             <h2>{activeInfo.label}</h2>
           </header>
           <div className={`settings-content ${activeGroup === "models" ? "model-settings-content" : ""}`}>
-            <React.Suspense fallback={<SettingsPanelFallback label={`正在打开${activeInfo.label}`} />}>
-              {activeGroup === "models" && (
-                <LazyModelSettings
-                  config={props.config}
-                  modelForm={props.modelForm}
-                  setModelForm={props.setModelForm}
-                  saving={props.savingModel}
-                  onSave={props.onSaveModel}
-                  onCreateCustomProfile={props.onCreateCustomProfile}
-                  onReorderModelProviders={props.onReorderModelProviders}
-                  onDeleteModelProvider={props.onDeleteModelProvider}
-                  onFetchModels={props.onFetchModels}
-                  onSaveModelCatalog={props.onSaveModelCatalog}
-                  onRevealModelApiKey={props.onRevealModelApiKey}
-                  modelCatalogs={props.modelCatalogs}
-                />
-              )}
-              {activeGroup === "basicCapabilities" && (
-                <LazyBasicCapabilitiesSettings
-                  tools={props.tools}
-                  toolForm={props.toolForm}
-                  setToolForm={props.setToolForm}
-                  savingTools={props.savingTools}
-                  onSaveTools={props.onSaveTools}
-                />
-              )}
-              {activeGroup === "mcp" && (
-                <LazyMcpServiceSettings
-                  tools={props.tools}
-                  mcpServerForm={props.mcpServerForm}
-                  setMcpServerForm={props.setMcpServerForm}
-                  savingTools={props.savingTools}
-                  onSaveMcpServer={props.onSaveMcpServer}
-                  onLoadMcpReferences={props.onLoadMcpReferences}
-                  onImportMcpConfig={props.onImportMcpConfig}
-                  onTestMcpServer={props.onTestMcpServer}
-                  onCheckMcpEnvironment={props.onCheckMcpEnvironment}
-                  onInstallMcpEnvironment={props.onInstallMcpEnvironment}
-                  onDeleteMcpServer={props.onDeleteMcpServer}
-                  onUpdateMcpTool={props.onUpdateMcpTool}
-                />
-              )}
-              {activeGroup === "skills" && (
-                <LazySkillSettings
-                  skills={props.skills}
-                  saving={props.savingTools}
-                  onRefreshSkills={props.onRefreshSkills}
-                  onUpdateSkill={props.onUpdateSkill}
-                />
-              )}
-              {activeGroup === "workspace" && (
-                <LazyWorkspaceSettings
-                  commandShell={props.config?.commandShell}
-                  workspaceDirectory={props.workspaceDirectory}
-                  setWorkspaceDirectory={props.setWorkspaceDirectory}
-                  onSave={props.onSaveWorkspace}
-                  savingCommandShell={props.savingWorkspace}
-                  onSaveCommandShell={props.onSaveCommandShell}
-                />
-              )}
-              {activeGroup === "appearance" && <LazyAppearanceSettings config={props.config} />}
-              {activeGroup === "about" && <AboutSettings config={props.config} />}
-            </React.Suspense>
+            {activeGroup === "models" && (
+              <ModelSettings
+                config={props.config}
+                modelForm={props.modelForm}
+                setModelForm={props.setModelForm}
+                saving={props.savingModel}
+                onSave={props.onSaveModel}
+                onCreateCustomProfile={props.onCreateCustomProfile}
+                onReorderModelProviders={props.onReorderModelProviders}
+                onDeleteModelProvider={props.onDeleteModelProvider}
+                onFetchModels={props.onFetchModels}
+                onSaveModelCatalog={props.onSaveModelCatalog}
+                onRevealModelApiKey={props.onRevealModelApiKey}
+                modelCatalogs={props.modelCatalogs}
+              />
+            )}
+            {activeGroup === "basicCapabilities" && (
+              <BasicCapabilitiesSettings
+                tools={props.tools}
+                toolForm={props.toolForm}
+                setToolForm={props.setToolForm}
+                savingTools={props.savingTools}
+                onSaveTools={props.onSaveTools}
+              />
+            )}
+            {activeGroup === "mcp" && (
+              <McpServiceSettings
+                tools={props.tools}
+                mcpServerForm={props.mcpServerForm}
+                setMcpServerForm={props.setMcpServerForm}
+                savingTools={props.savingTools}
+                onSaveMcpServer={props.onSaveMcpServer}
+                onLoadMcpReferences={props.onLoadMcpReferences}
+                onImportMcpConfig={props.onImportMcpConfig}
+                onTestMcpServer={props.onTestMcpServer}
+                onCheckMcpEnvironment={props.onCheckMcpEnvironment}
+                onInstallMcpEnvironment={props.onInstallMcpEnvironment}
+                onDeleteMcpServer={props.onDeleteMcpServer}
+                onUpdateMcpTool={props.onUpdateMcpTool}
+              />
+            )}
+            {activeGroup === "skills" && (
+              <SkillSettings
+                skills={props.skills}
+                saving={props.savingTools}
+                onRefreshSkills={props.onRefreshSkills}
+                onUpdateSkill={props.onUpdateSkill}
+              />
+            )}
+            {activeGroup === "workspace" && (
+              <WorkspaceSettings
+                commandShell={props.config?.commandShell}
+                workspaceDirectory={props.workspaceDirectory}
+                setWorkspaceDirectory={props.setWorkspaceDirectory}
+                onSave={props.onSaveWorkspace}
+                savingCommandShell={props.savingWorkspace}
+                onSaveCommandShell={props.onSaveCommandShell}
+              />
+            )}
+            {activeGroup === "appearance" && <AppearanceSettings config={props.config} />}
+            {activeGroup === "about" && <AboutSettings config={props.config} />}
           </div>
         </div>
       </section>
@@ -226,15 +199,6 @@ const SETTINGS_GROUPS: readonly { readonly id: SettingsGroup; readonly label: st
   { id: "appearance", label: "外观", icon: <Palette size={15} /> },
   { id: "about", label: "关于", icon: <Info size={15} /> },
 ];
-
-function SettingsPanelFallback(props: { readonly label: string }): React.ReactElement {
-  return (
-    <div className="settings-panel-loading" role="status" aria-label={props.label}>
-      <div className="app-bootstrap-spinner" />
-      <p>{props.label}</p>
-    </div>
-  );
-}
 
 function AboutSettings(props: { readonly config?: ConfigResponse }): React.ReactElement {
   const product = props.config?.product;

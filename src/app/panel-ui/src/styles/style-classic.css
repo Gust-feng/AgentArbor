@@ -550,24 +550,26 @@ html[data-style="classic"] .composer-send-button {
 }
 
 html[data-style="classic"] .composer-model-chip {
-  color: color-mix(in oklch, var(--fg) 68%, var(--classic-support-ink-color));
+  color: color-mix(in oklch, var(--fg) 82%, var(--accent-active));
 }
 
 html[data-style="classic"] .composer-model-chip[aria-expanded="true"],
 html[data-style="classic"] .composer-model-chip.is-confirmed {
-  border-color: color-mix(in oklch, var(--classic-support-border-color) 72%, var(--border));
-  background: var(--classic-support-panel-fill);
-  color: var(--classic-support-ink-color);
+  border-color: color-mix(in oklch, var(--accent) 34%, var(--border));
+  background:
+    linear-gradient(180deg, color-mix(in oklch, white 22%, transparent), transparent 72%),
+    color-mix(in oklch, var(--accent-soft) 70%, var(--classic-composer-surface, var(--surface)));
+  color: color-mix(in oklch, var(--accent-active) 78%, var(--fg));
   box-shadow:
-    inset 0 1px 0 color-mix(in oklch, white 40%, transparent),
-    0 0 0 2px color-mix(in oklch, var(--classic-support-border-color) 14%, transparent);
+    inset 0 1px 0 color-mix(in oklch, white 34%, transparent),
+    0 0 0 2px color-mix(in oklch, var(--accent) 10%, transparent);
 }
 
 html[data-style="classic"] .composer-model-chip[aria-expanded="true"] .composer-model-dot,
 html[data-style="classic"] .composer-model-chip.is-confirmed .composer-model-dot {
   box-shadow:
-    0 0 0 3px color-mix(in oklch, var(--status-success) 10%, transparent),
-    0 0 10px color-mix(in oklch, var(--classic-support-border-color) 18%, transparent);
+    0 0 0 3px color-mix(in oklch, var(--accent) 10%, transparent),
+    0 0 10px color-mix(in oklch, var(--accent) 14%, transparent);
 }
 
 html[data-style="classic"] .model-menu-popover button {
@@ -577,33 +579,33 @@ html[data-style="classic"] .model-menu-popover button {
 }
 
 html[data-style="classic"] .model-menu-popover button:hover {
-  border-color: color-mix(in oklch, var(--classic-support-border-color) 34%, var(--border));
+  border-color: color-mix(in oklch, var(--accent) 20%, var(--border));
   background:
-    linear-gradient(90deg, color-mix(in srgb, var(--classic-support-fill-base) 20%, transparent), transparent 74%),
-    color-mix(in oklch, var(--surface) 97%, var(--classic-support-surface-base));
+    linear-gradient(90deg, color-mix(in srgb, var(--accent-soft) 22%, transparent), transparent 74%),
+    color-mix(in oklch, var(--surface) 97%, var(--accent-soft));
   box-shadow:
-    inset 2px 0 0 color-mix(in oklch, var(--classic-support-border-color) 18%, transparent),
+    inset 2px 0 0 color-mix(in oklch, var(--accent) 16%, transparent),
     inset 0 1px 0 color-mix(in oklch, white 36%, transparent);
 }
 
 html[data-style="classic"] .model-menu-popover button.selected {
-  border-color: color-mix(in oklch, var(--classic-support-border-color) 48%, var(--border));
+  border-color: color-mix(in oklch, var(--accent) 28%, var(--border));
   background:
-    linear-gradient(90deg, color-mix(in srgb, var(--classic-support-fill-base) 34%, transparent), transparent 76%),
-    color-mix(in oklch, var(--surface) 94%, var(--classic-support-surface-base));
+    linear-gradient(90deg, color-mix(in srgb, var(--accent-soft) 58%, transparent), transparent 76%),
+    color-mix(in oklch, var(--surface) 92%, var(--accent-soft));
   box-shadow:
-    inset 2px 0 0 color-mix(in oklch, var(--accent-strong) 40%, transparent),
+    inset 2px 0 0 color-mix(in oklch, var(--accent-strong) 54%, transparent),
     inset 0 1px 0 color-mix(in oklch, white 40%, transparent);
 }
 
 html[data-style="classic"] .model-menu-popover button.selected::after {
-  border-right-color: color-mix(in oklch, var(--accent-active) 76%, var(--classic-support-ink-color));
-  border-bottom-color: color-mix(in oklch, var(--accent-active) 76%, var(--classic-support-ink-color));
+  border-right-color: color-mix(in oklch, var(--accent-active) 82%, var(--fg));
+  border-bottom-color: color-mix(in oklch, var(--accent-active) 82%, var(--fg));
 }
 
 html[data-style="classic"] .model-menu-popover button.selected .model-option-icon {
-  border-color: color-mix(in oklch, var(--classic-support-border-color) 42%, var(--border));
-  background: color-mix(in oklch, var(--surface) 92%, var(--classic-support-surface-base));
+  border-color: color-mix(in oklch, var(--accent) 24%, var(--border));
+  background: color-mix(in oklch, var(--surface) 92%, var(--accent-soft));
 }
 
 html[data-style="classic"] .settings-backdrop,

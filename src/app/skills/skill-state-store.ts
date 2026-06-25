@@ -40,11 +40,23 @@ export class FileSystemSkillStateStore implements SkillStateStore {
     if (raw === undefined || raw.trim().length === 0) {
       return new Map();
     }
-    const parsed = JSON.parse(raw) as { readonly skills?: readonly SkillStateRecord[] };
-    return new Map((parsed.skills ?? []).map((record) => {
+    const parsed = parseSkillStateFile(raw);
+    const states = new Map((parsed.value.skills ?? []).map((record) => {
       const sanitized = sanitizeRecord(record);
       return [stateMapKeyForRecord(sanitized), sanitized] as const;
     }));
+    if (parsed.recovered) {
+      await this.writeStates(states);
+    }
+    return states;
+  }
+
+  private async writeStates(states: ReadonlyMap<string, SkillStateRecord>): Promise<void> {
+    await fs.mkdir(path.dirname(this.filePath), { recursive: true });
+    const skills = [...states.values()].sort((left, right) =>
+      stateMapKeyForRecord(left).localeCompare(stateMapKeyForRecord(right))
+    );
+    await fs.writeFile(this.filePath, `${JSON.stringify({ version: 1, skills }, null, 2)}\n`, "utf8");
   }
 
   async setEnabled(stateKey: string, enabled: boolean, target?: SkillStateTarget): Promise<SkillStateRecord> {
@@ -79,14 +91,6 @@ export class FileSystemSkillStateStore implements SkillStateStore {
     states.set(stateKey, next);
     await this.writeStates(states);
     return next;
-  }
-
-  private async writeStates(states: ReadonlyMap<string, SkillStateRecord>): Promise<void> {
-    await fs.mkdir(path.dirname(this.filePath), { recursive: true });
-    const skills = [...states.values()].sort((left, right) =>
-      stateMapKeyForRecord(left).localeCompare(stateMapKeyForRecord(right))
-    );
-    await fs.writeFile(this.filePath, `${JSON.stringify({ version: 1, skills }, null, 2)}\n`, "utf8");
   }
 }
 
@@ -151,6 +155,67 @@ export function skillStateKeyForFacts(input: {
 
 function stateMapKeyForRecord(record: SkillStateRecord): string {
   return record.stateKey ?? record.skillId;
+}
+
+function parseSkillStateFile(raw: string): {
+  readonly value: { readonly skills?: readonly SkillStateRecord[] };
+  readonly recovered: boolean;
+} {
+  try {
+    return {
+      value: JSON.parse(raw) as { readonly skills?: readonly SkillStateRecord[] },
+      recovered: false,
+    };
+  } catch (error) {
+    const objectEnd = findFirstJsonObjectEnd(raw);
+    if (objectEnd === undefined) {
+      throw error;
+    }
+    const trailing = raw.slice(objectEnd);
+    if (trailing.trim().length === 0) {
+      throw error;
+    }
+    return {
+      value: JSON.parse(raw.slice(0, objectEnd)) as { readonly skills?: readonly SkillStateRecord[] },
+      recovered: true,
+    };
+  }
+}
+
+function findFirstJsonObjectEnd(raw: string): number | undefined {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = 0; index < raw.length; index += 1) {
+    const character = raw[index];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (character === "\\") {
+      escaped = inString;
+      continue;
+    }
+    if (character === "\"") {
+      inString = !inString;
+      continue;
+    }
+    if (inString) {
+      continue;
+    }
+    if (character === "{") {
+      depth += 1;
+    } else if (character === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        return index + 1;
+      }
+      if (depth < 0) {
+        return undefined;
+      }
+    }
+  }
+  return undefined;
 }
 
 function safeStateKeySegment(value: string): string {

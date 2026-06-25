@@ -55,3 +55,30 @@ test("FileSystemSkillStateStore writes source-qualified state while reading lega
     await fs.rm(directory, { recursive: true, force: true });
   }
 });
+
+test("FileSystemSkillStateStore recovers a state file with trailing stale JSON fragments", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-skill-state-store-"));
+  try {
+    const filePath = path.join(directory, "skills-state.json");
+    await fs.writeFile(
+      filePath,
+      `${JSON.stringify({
+        version: 1,
+        skills: [
+          { skillId: "review", enabled: true },
+        ],
+      }, null, 2)}\n]\n}\n`,
+      "utf8"
+    );
+    const store = new FileSystemSkillStateStore(filePath);
+
+    const states = await store.readStates();
+    assert.equal(states.get("review")?.enabled, true);
+
+    const repaired = await fs.readFile(filePath, "utf8");
+    assert.doesNotThrow(() => JSON.parse(repaired));
+    assert.equal(repaired.includes("\n]\n}\n"), false);
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});

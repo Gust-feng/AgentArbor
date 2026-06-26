@@ -7,7 +7,8 @@
  *   - Balanced message, composer, and settings panel treatment
  *
  * Activated by: html[data-style="default"]
- * Color palettes: [data-color="light" | "dark"]
+ * Color palettes: [data-color="light" | "dark"]; the "system" preference
+ * resolves to one of these effective data-color values at runtime.
  */
 
 html[data-style="default"] {

@@ -404,3 +404,87 @@ html.theme-switching .theme-palette-preview {
     border-color 180ms var(--motion-ease-standard),
     box-shadow 180ms var(--motion-ease-standard) !important;
 }
+
+html.theme-switching[data-theme-transition="theme-sweep"] body,
+html.theme-switching[data-theme-transition="theme-sweep"] .app-root,
+html.theme-switching[data-theme-transition="theme-sweep"] .app-workbench,
+html.theme-switching[data-theme-transition="theme-sweep"] .app-sidebar,
+html.theme-switching[data-theme-transition="theme-sweep"] .chat-empty-screen,
+html.theme-switching[data-theme-transition="theme-sweep"] .chat-active-screen,
+html.theme-switching[data-theme-transition="theme-sweep"] .settings-dialog,
+html.theme-switching[data-theme-transition="theme-sweep"] .settings-content,
+html.theme-switching[data-theme-transition="theme-sweep"] .settings-card,
+html.theme-switching[data-theme-transition="theme-sweep"] .chat-input-floating,
+html.theme-switching[data-theme-transition="theme-sweep"] .chat-input-card {
+  transition-duration: 360ms;
+  transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
+}
+
+html[data-theme-transition="theme-sweep"]::view-transition-group(root) {
+  animation-name: none;
+  animation-duration: 700ms;
+  background: var(--bg);
+}
+
+html[data-theme-transition="theme-sweep"]::view-transition-image-pair(root) {
+  isolation: isolate;
+  background: var(--bg);
+}
+
+html[data-theme-transition="theme-sweep"]::view-transition-old(root),
+html[data-theme-transition="theme-sweep"]::view-transition-new(root) {
+  animation-duration: 700ms;
+  animation-fill-mode: both;
+  mix-blend-mode: normal;
+}
+
+html[data-theme-transition="theme-sweep"]::view-transition-old(root) {
+  z-index: 1;
+  animation-name: theme-sweep-old;
+}
+
+html[data-theme-transition="theme-sweep"]::view-transition-new(root) {
+  z-index: 2;
+  animation-name: theme-sweep-new;
+}
+
+@keyframes theme-sweep-old {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes theme-sweep-new {
+  0% {
+    opacity: 0.98;
+    clip-path: polygon(0 -10%, 10% -10%, -6% 110%, 0 110%);
+    transform: scale(1.006);
+    animation-timing-function: cubic-bezier(0.16, 0.9, 0.22, 1);
+  }
+
+  36% {
+    opacity: 1;
+    clip-path: polygon(0 -10%, 58% -10%, 40% 110%, 0 110%);
+    animation-timing-function: cubic-bezier(0.26, 0.68, 0.18, 1);
+  }
+
+  62% {
+    clip-path: polygon(0 -10%, 84% -10%, 72% 110%, 0 110%);
+    transform: scale(1.003);
+    animation-timing-function: cubic-bezier(0.18, 0.52, 0.12, 1);
+  }
+
+  82% {
+    clip-path: polygon(0 -10%, 104% -10%, 96% 110%, 0 110%);
+    transform: scale(1.001);
+    animation-timing-function: cubic-bezier(0.16, 0.38, 0.14, 1);
+  }
+
+  100% {
+    opacity: 1;
+    clip-path: polygon(0 -10%, 112% -10%, 112% 110%, 0 110%);
+    transform: scale(1);
+  }
+}

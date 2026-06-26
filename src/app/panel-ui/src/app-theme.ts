@@ -6,6 +6,8 @@
  * - color: the palette available inside that style
  */
 
+import { shouldUseMotion } from "./app-motion";
+
 export type StyleDefinition = {
   readonly id: ThemeStyleId;
   readonly label: string;
@@ -13,7 +15,7 @@ export type StyleDefinition = {
 };
 
 export type ThemeStyleId = "default" | "classic" | "glass";
-export type ThemeColorId = "light" | "dark" | "warm" | "forest" | "aurora" | "sunset" | "ocean";
+export type ThemeColorId = "system" | "light" | "dark" | "warm" | "forest" | "slate" | "aurora" | "sunset" | "ocean";
 
 export const STYLE_REGISTRY: readonly StyleDefinition[] = [
   {
@@ -47,6 +49,16 @@ export type ColorSchemeDefinition = {
 
 export const COLOR_REGISTRY: readonly ColorSchemeDefinition[] = [
   /* Default palettes */
+  {
+    id: "system",
+    styleId: "default",
+    label: "跟随系统",
+    swatches: [
+      { label: "背景", value: "#f5f7fa" },
+      { label: "主色", value: "#2563eb" },
+      { label: "辅色", value: "#0f131a" },
+    ],
+  },
   {
     id: "light",
     styleId: "default",
@@ -88,6 +100,16 @@ export const COLOR_REGISTRY: readonly ColorSchemeDefinition[] = [
       { label: "辅色", value: "#a06b2c" },
     ],
   },
+  {
+    id: "slate",
+    styleId: "classic",
+    label: "桑墨",
+    swatches: [
+      { label: "背景", value: "#f2efed" },
+      { label: "主色", value: "#7a3f55" },
+      { label: "辅色", value: "#63704a" },
+    ],
+  },
   /* Glass palettes */
   {
     id: "aurora",
@@ -126,13 +148,26 @@ export const DEFAULT_COLOR_ID: ThemeColorId = "light";
 export const STORAGE_STYLE_KEY = "agentarbor:style";
 export const STORAGE_COLOR_KEY = "agentarbor:color";
 const THEME_SWITCHING_CLASS = "theme-switching";
-const THEME_SWITCHING_DURATION_MS = 260;
+const THEME_TRANSITION_ATTRIBUTE = "data-theme-transition";
+const THEME_SWITCHING_DURATION_MS = 300;
+const THEME_SWEEP_SWITCHING_DURATION_MS = 720;
+
+type ThemeTransitionKind = "theme-sweep";
+type ThemeViewTransition = {
+  readonly finished?: Promise<void>;
+};
+type ViewTransitionDocument = Document & {
+  readonly startViewTransition?: (callback: () => void) => ThemeViewTransition;
+};
 
 let themeSwitchingTimer: number | undefined;
+let themeTransitionVersion = 0;
+let systemColorMedia: MediaQueryList | undefined;
+let systemColorMediaListener: (() => void) | undefined;
 
 function shouldUseThemeSwitchMotion(): boolean {
   if (typeof window === "undefined") return false;
-  return !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  return shouldUseMotion();
 }
 
 /** Return color schemes available for a given style. */
@@ -179,7 +214,7 @@ export function normalizeTheme(styleId: string | undefined, colorId: string | un
 export function applyStyle(styleId: string): AppliedTheme {
   const currentColorId = typeof document === "undefined"
     ? undefined
-    : document.documentElement.getAttribute("data-color") ?? undefined;
+    : currentColorPreference();
   return applyTheme(styleId, currentColorId);
 }
 
@@ -197,31 +232,67 @@ export function applyTheme(styleId: string | undefined, colorId: string | undefi
   if (typeof document === "undefined") return theme;
 
   const root = document.documentElement;
+  const effectiveColorId = effectiveColorIdForTheme(theme);
   const previousStyleId = root.getAttribute("data-style");
+  const previousColorPreference = root.getAttribute("data-color-preference") ?? root.getAttribute("data-color");
   const previousColorId = root.getAttribute("data-color");
   const hasAppliedTheme = previousStyleId !== null && previousColorId !== null;
-  const isChanged = previousStyleId !== theme.styleId || previousColorId !== theme.colorId;
+  const isChanged =
+    previousStyleId !== theme.styleId ||
+    previousColorPreference !== theme.colorId ||
+    previousColorId !== effectiveColorId;
   const shouldTransition = hasAppliedTheme && isChanged && shouldUseThemeSwitchMotion();
+  const transitionKind: ThemeTransitionKind | undefined = shouldTransition ? "theme-sweep" : undefined;
 
   if (themeSwitchingTimer !== undefined) {
     window.clearTimeout(themeSwitchingTimer);
     themeSwitchingTimer = undefined;
   }
+  const transitionVersion = ++themeTransitionVersion;
 
-  if (shouldTransition) {
-    root.classList.add(THEME_SWITCHING_CLASS);
-  } else {
+  const prepareTransition = (options: { readonly includeElementTransitions: boolean }): void => {
+    if (options.includeElementTransitions) {
+      root.classList.add(THEME_SWITCHING_CLASS);
+    } else {
+      root.classList.remove(THEME_SWITCHING_CLASS);
+    }
+    if (transitionKind !== undefined) {
+      root.setAttribute(THEME_TRANSITION_ATTRIBUTE, transitionKind);
+    } else {
+      root.removeAttribute(THEME_TRANSITION_ATTRIBUTE);
+    }
+  };
+  const clearTransition = (): void => {
     root.classList.remove(THEME_SWITCHING_CLASS);
+    root.removeAttribute(THEME_TRANSITION_ATTRIBUTE);
+  };
+  const commitTheme = (): void => {
+    root.setAttribute("data-style", theme.styleId);
+    root.setAttribute("data-color", effectiveColorId);
+    root.setAttribute("data-color-preference", theme.colorId);
+    configureSystemColorListener(theme);
+  };
+
+  if (!shouldTransition) {
+    clearTransition();
+    commitTheme();
+    return theme;
   }
 
-  root.setAttribute("data-style", theme.styleId);
-  root.setAttribute("data-color", theme.colorId);
-
-  if (shouldTransition) {
+  const viewTransition = transitionKind === "theme-sweep" ? startThemeViewTransition(() => {
+    prepareTransition({ includeElementTransitions: false });
+    commitTheme();
+  }) : undefined;
+  if (viewTransition !== undefined) {
+    clearAfterViewTransition(viewTransition, transitionVersion, clearTransition);
+  } else {
+    prepareTransition({ includeElementTransitions: true });
+    commitTheme();
     themeSwitchingTimer = window.setTimeout(() => {
-      root.classList.remove(THEME_SWITCHING_CLASS);
+      if (transitionVersion !== themeTransitionVersion) return;
+      clearTransition();
       themeSwitchingTimer = undefined;
-    }, THEME_SWITCHING_DURATION_MS);
+    }, transitionKind === "theme-sweep" ? THEME_SWEEP_SWITCHING_DURATION_MS : THEME_SWITCHING_DURATION_MS);
   }
 
   return theme;
@@ -274,4 +345,97 @@ export function saveColorId(colorId: string): void {
 /** Return the initial style + color to use on startup. */
 export function getInitialTheme(): AppliedTheme {
   return normalizeTheme(getSavedStyleId(), getSavedColorId());
+}
+
+function currentColorPreference(): string | undefined {
+  if (typeof document === "undefined") return undefined;
+  const root = document.documentElement;
+  return root.getAttribute("data-color-preference") ?? root.getAttribute("data-color") ?? undefined;
+}
+
+function effectiveColorIdForTheme(theme: AppliedTheme): ThemeColorId {
+  if (theme.styleId === "default" && theme.colorId === "system") {
+    return systemColorPreference();
+  }
+  return theme.colorId;
+}
+
+function startThemeViewTransition(commit: () => void): ThemeViewTransition | undefined {
+  const transitionDocument = document as ViewTransitionDocument;
+  if (typeof transitionDocument.startViewTransition !== "function") {
+    return undefined;
+  }
+  let committed = false;
+  try {
+    return transitionDocument.startViewTransition(() => {
+      committed = true;
+      commit();
+    });
+  } catch {
+    if (!committed) {
+      commit();
+    }
+    return { finished: Promise.resolve() };
+  }
+}
+
+function clearAfterViewTransition(
+  transition: ThemeViewTransition,
+  transitionVersion: number,
+  clearTransition: () => void,
+): void {
+  const finished = transition.finished ?? wait(THEME_SWEEP_SWITCHING_DURATION_MS);
+  void finished
+    .catch(() => undefined)
+    .then(() => afterNextPaint(() => {
+      if (transitionVersion !== themeTransitionVersion) return;
+      clearTransition();
+    }));
+}
+
+function wait(durationMs: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, durationMs));
+}
+
+function afterNextPaint(callback: () => void): void {
+  window.requestAnimationFrame(() => {
+    window.requestAnimationFrame(callback);
+  });
+}
+
+function systemColorPreference(): "light" | "dark" {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+    return "light";
+  }
+  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+
+function configureSystemColorListener(theme: AppliedTheme): void {
+  const shouldListen = theme.styleId === "default" && theme.colorId === "system";
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+    return;
+  }
+  if (!shouldListen) {
+    removeSystemColorListener();
+    return;
+  }
+  if (systemColorMedia !== undefined && systemColorMediaListener !== undefined) {
+    return;
+  }
+  systemColorMedia = window.matchMedia("(prefers-color-scheme: dark)");
+  systemColorMediaListener = () => {
+    const root = document.documentElement;
+    if (root.getAttribute("data-style") === "default" && currentColorPreference() === "system") {
+      applyTheme("default", "system");
+    }
+  };
+  systemColorMedia.addEventListener("change", systemColorMediaListener);
+}
+
+function removeSystemColorListener(): void {
+  if (systemColorMedia !== undefined && systemColorMediaListener !== undefined) {
+    systemColorMedia.removeEventListener("change", systemColorMediaListener);
+  }
+  systemColorMedia = undefined;
+  systemColorMediaListener = undefined;
 }

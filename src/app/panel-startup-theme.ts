@@ -1,5 +1,5 @@
 export type StartupThemeStyleId = "default" | "classic" | "glass";
-export type StartupThemeColorId = "light" | "dark" | "warm" | "forest" | "aurora" | "sunset" | "ocean";
+export type StartupThemeColorId = "system" | "light" | "dark" | "warm" | "forest" | "slate" | "aurora" | "sunset" | "ocean";
 
 export type StartupThemeSnapshot = {
   readonly styleId: StartupThemeStyleId;
@@ -29,7 +29,7 @@ export const STARTUP_MAIN_WINDOW_WIDTH = 1440;
 export const STARTUP_MAIN_WINDOW_HEIGHT = 960;
 
 const STARTUP_THEME_COLORS: Record<
-  StartupThemeColorId,
+  Exclude<StartupThemeColorId, "system">,
   Omit<StartupThemeSnapshot, "styleId" | "colorId" | "mainWindow">
 > = {
   light: {
@@ -55,6 +55,12 @@ const STARTUP_THEME_COLORS: Record<
     shellColor: "#fbfcf8",
     borderColor: "#b9c7b7",
     textColor: "#203027",
+  },
+  slate: {
+    backgroundColor: "#f2efed",
+    shellColor: "#fdf9f6",
+    borderColor: "#c9bab6",
+    textColor: "#261e22",
   },
   aurora: {
     backgroundColor: "#edf7ff",
@@ -95,9 +101,10 @@ export function createStartupThemeSnapshot(
   colorId: string | undefined
 ): StartupThemeSnapshot {
   const normalized = normalizeStartupTheme(styleId, colorId);
+  const resolvedColorId = resolveStartupThemeColorId(normalized);
   return {
     ...normalized,
-    ...STARTUP_THEME_COLORS[normalized.colorId],
+    ...STARTUP_THEME_COLORS[resolvedColorId],
     mainWindow: {
       width: STARTUP_MAIN_WINDOW_WIDTH,
       height: STARTUP_MAIN_WINDOW_HEIGHT,
@@ -111,10 +118,12 @@ function isStartupThemeStyleId(value: string | undefined): value is StartupTheme
 
 function isStartupThemeColorId(value: string | undefined): value is StartupThemeColorId {
   return (
+    value === "system" ||
     value === "light" ||
     value === "dark" ||
     value === "warm" ||
     value === "forest" ||
+    value === "slate" ||
     value === "aurora" ||
     value === "sunset" ||
     value === "ocean"
@@ -122,7 +131,24 @@ function isStartupThemeColorId(value: string | undefined): value is StartupTheme
 }
 
 function isStartupThemeColorForStyle(colorId: StartupThemeColorId, styleId: StartupThemeStyleId): boolean {
-  if (styleId === "default") return colorId === "light" || colorId === "dark";
-  if (styleId === "classic") return colorId === "warm" || colorId === "forest";
+  if (styleId === "default") return colorId === "system" || colorId === "light" || colorId === "dark";
+  if (styleId === "classic") return colorId === "warm" || colorId === "forest" || colorId === "slate";
   return colorId === "aurora" || colorId === "sunset" || colorId === "ocean";
+}
+
+function resolveStartupThemeColorId(
+  theme: Pick<StartupThemeSnapshot, "styleId" | "colorId">
+): Exclude<StartupThemeColorId, "system"> {
+  if (theme.styleId === "default" && theme.colorId === "system") {
+    return systemStartupColorPreference();
+  }
+  return theme.colorId as Exclude<StartupThemeColorId, "system">;
+}
+
+function systemStartupColorPreference(): "light" | "dark" {
+  const host = globalThis as { readonly matchMedia?: (query: string) => { readonly matches: boolean } };
+  if (typeof host.matchMedia !== "function") {
+    return "light";
+  }
+  return host.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }

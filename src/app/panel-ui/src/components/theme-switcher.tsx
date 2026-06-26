@@ -167,69 +167,23 @@ function StyleOption(props: {
 }
 
 function StylePreview(props: { readonly styleId: ThemeStyleId }): React.ReactElement {
-  if (props.styleId === "default") {
-    return (
-      <div className="style-preview style-preview-default">
-        <div className="style-preview-default-sidebar">
-          <div className="default-preview-action" />
-          <div className="default-preview-line" />
-          <div className="default-preview-line short" />
-          <div className="default-preview-line active" />
-        </div>
-        <div className="style-preview-default-content">
-          <div className="default-preview-header">
-            <div className="default-preview-toggle" />
-            <div className="default-preview-brand" />
-          </div>
-          <div className="default-preview-title" />
-          <div className="default-preview-card" />
-          <div className="default-preview-composer" />
-        </div>
-      </div>
-    );
-  }
-
-  if (props.styleId === "glass") {
-    return (
-      <div className="style-preview style-preview-glass">
-        <div className="style-preview-glass-bg" />
-        <div className="style-preview-glass-panels">
-          <div className="style-preview-glass-sidebar">
-            <div className="glass-dot" />
-            <div className="glass-line" />
-            <div className="glass-line short" />
-          </div>
-          <div className="style-preview-glass-content">
-            <div className="glass-preview-header">
-              <div className="glass-preview-toggle" />
-              <div className="glass-preview-brand" />
-            </div>
-            <div className="glass-text-line" />
-            <div className="glass-text-line short" />
-            <div className="glass-chip" />
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // Classic preview — solid colors, crisp edges
   return (
-    <div className="style-preview style-preview-classic">
-      <div className="theme-preview-body">
-        <div className="theme-preview-sidebar">
-          <div className="theme-preview-sidebar-item" />
-          <div className="theme-preview-sidebar-line" />
-          <div className="theme-preview-sidebar-line short" />
+    <div className={`style-preview style-preview-${props.styleId}`}>
+      <div className="style-preview-frame">
+        <div className="style-preview-sidebar">
+          <div className="style-preview-sidebar-action" />
+          <div className="style-preview-sidebar-line" />
+          <div className="style-preview-sidebar-line short" />
+          <div className="style-preview-sidebar-line active" />
         </div>
-        <div className="theme-preview-content">
-          <div className="theme-preview-header">
-            <div className="theme-preview-toggle" />
-            <div className="theme-preview-brand" />
+        <div className="style-preview-content">
+          <div className="style-preview-header">
+            <div className="style-preview-toggle" />
+            <div className="style-preview-brand" />
           </div>
-          <div className="theme-preview-text-line" />
-          <div className="theme-preview-text-line short" />
-          <div className="theme-preview-accent-chip" />
+          <div className="style-preview-title" />
+          <div className="style-preview-card" />
+          <div className="style-preview-composer" />
         </div>
       </div>
     </div>
@@ -242,9 +196,13 @@ function PaletteOption(props: {
   readonly onSelect: () => void;
 }): React.ReactElement {
   const { scheme, isActive, onSelect } = props;
-  const background = scheme.swatches.find((s) => s.label === "背景")?.value ?? "#f3f3f3";
+  const backgroundSwatch = scheme.swatches.find((s) => s.label === "背景")?.value ?? "#f3f3f3";
   const primary = scheme.swatches.find((s) => s.label === "主色")?.value ?? "#888";
   const secondary = scheme.swatches.find((s) => s.label === "辅色")?.value ?? "#aaa";
+  const isSystemPreview = scheme.id === "system";
+  const background = isSystemPreview
+    ? `linear-gradient(135deg, ${backgroundSwatch} 0 50%, #0f131a 50% 100%)`
+    : backgroundSwatch;
   const isDarkPreview = scheme.id === "dark";
   const previewInk = isDarkPreview ? "#e7edf6" : "#18202d";
   const previewBorder = isDarkPreview ? "#2a313c" : "#d9e0ea";

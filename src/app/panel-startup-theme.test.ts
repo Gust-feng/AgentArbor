@@ -32,8 +32,25 @@ test("startup theme snapshot keeps each style on its valid default color", () =>
   });
 });
 
+test("startup theme snapshot accepts system color only for the default style", () => {
+  assert.deepEqual(normalizeStartupTheme("default", "system"), {
+    styleId: "default",
+    colorId: "system",
+  });
+  assert.equal(createStartupThemeSnapshot("default", "system").shellColor, "#ffffff");
+  assert.deepEqual(normalizeStartupTheme("classic", "system"), {
+    styleId: "classic",
+    colorId: "warm",
+  });
+  assert.deepEqual(normalizeStartupTheme("glass", "system"), {
+    styleId: "glass",
+    colorId: "aurora",
+  });
+});
+
 test("startup theme snapshot accepts valid style color pairs", () => {
   assert.equal(createStartupThemeSnapshot("default", "dark").shellColor, "#151a22");
   assert.equal(createStartupThemeSnapshot("classic", "forest").borderColor, "#b9c7b7");
+  assert.equal(createStartupThemeSnapshot("classic", "slate").borderColor, "#c9bab6");
   assert.equal(createStartupThemeSnapshot("glass", "ocean").textColor, "#132833");
 });

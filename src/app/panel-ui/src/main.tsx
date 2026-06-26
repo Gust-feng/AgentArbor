@@ -2,7 +2,11 @@ import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { ErrorBoundary } from "./components/error-boundary";
 import { applyTheme, getInitialTheme } from "./app-theme";
+import { applyMotionPreference, applyStartupAnimationPreference } from "./app-motion";
 import "./styles.css";
+
+applyMotionPreference();
+applyStartupAnimationPreference();
 
 const startupTheme = window.agentarborDesktop?.getStartupThemeSnapshot();
 const { styleId, colorId } = startupTheme ?? getInitialTheme();

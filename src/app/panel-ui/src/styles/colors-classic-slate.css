@@ -1,0 +1,48 @@
+/*
+ * AgentArbor Panel — Classic Color: 桑墨 Slate
+ *
+ * Color seed tokens for a mulberry-ink paper workspace palette.
+ * Olive support accents keep it distinct from the warm, forest, and default blue families.
+ */
+
+html[data-style="classic"][data-color="slate"] {
+  color-scheme: light;
+
+  --bg: #f2efed;
+  --surface: #fdf9f6;
+  --fg: #261e22;
+  --muted: #6b5f62;
+  --border: #d8cbc7;
+  --border-strong: #261e22;
+  --accent: #7a3f55;
+  --secondary: #63704a;
+  --accent-soft: #eadce2;
+  --accent-strong: #6b354b;
+  --accent-hover: #58293d;
+  --accent-active: #441f31;
+  --surface-subtle: #e8dedb;
+  --surface-muted: #dccbc8;
+  --status-success: #526b3f;
+  --status-warning: #95672c;
+  --status-danger: #a4454f;
+  --primary-foreground: #fff8f7;
+  --shadow-ink: #261e22;
+  --overlay-ink: #261e22;
+  --classic-shell-bg: #f2eeea;
+  --classic-sidebar-bg: #e7ddd8;
+  --classic-paper-bg: #f7f2ef;
+  --classic-paper-highlight: rgba(255, 250, 248, 0.78);
+  --classic-paper-grid-major: rgba(112, 83, 89, 0.08);
+  --classic-paper-grid-minor: rgba(112, 83, 89, 0.045);
+  --classic-panel-surface: #fff9f5;
+  --classic-panel-muted: #f1e7e3;
+  --classic-overlay-surface: #fbf5f2;
+  --classic-composer-shell: #eee2dd;
+  --classic-composer-surface: #fbf3ef;
+  --classic-support-surface: #eef0df;
+  --classic-support-fill: #e2e6cf;
+  --classic-support-border: #a9b57b;
+  --classic-support-ink: #596632;
+  --classic-nav-hover-fill: #f6eeee;
+  --classic-nav-active-fill: #eadbe2;
+}

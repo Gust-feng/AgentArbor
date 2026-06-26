@@ -23,6 +23,7 @@ import {
   createChildAgentRun,
   completeChildAgentRun,
   startChildAgentRun,
+  failChildAgentRun,
 } from "../../domain/underground/agent-fabric.js";
 import {
   createGuardResult,
@@ -279,6 +280,44 @@ export async function exploreDeepChild(input: ExploreDeepChildInput): Promise<Ex
     completedAt: nowIso(),
   });
   return { summary, completedRun };
+}
+
+// ---------------------------------------------------------------------------
+// EP3 child 错误隔离：失败 child 的可观察降级投影
+// ---------------------------------------------------------------------------
+
+/**
+ * 构造一个失败的 child 探索结果（EP3 工程鲁棒性）。
+ *
+ * 当 exploreDeepChild 因模型 turn 异常或解析失败抛错时，调用方（DeepRunExecutor
+ * 的 spawn_children 分支）不再让单个 child 失败拖垮整 run，而是用本函数构造一份
+ * status="failed" 的 DeepChildSummary + failChildAgentRun，汇入本批 child 结果。
+ *
+ * 设计边界（AI-first / 不伪造）：
+ *   - 失败 child 的 summary 如实记录失败原因，findings/evidenceRefs 为空，confidence=0；
+ *   - 综合消息（formatChildSummary）对 status≠completed 的 child 显式标注 [status=failed]，
+ *     让父层综合模型知道该角度未产出可用证据，对其降权或忽略，而不是把它当作有效候选；
+ *   - 本函数不编造任何结论或证据，只做"诚实标记失败 + 保留可观察记录"。
+ */
+export function buildFailedChildExploration(input: {
+  readonly childRun: ChildAgentRun;
+  readonly reason: string;
+  readonly failedAt: string;
+}): ExploreDeepChildResult {
+  const childSpec = deepChildSpecFromRun(input.childRun);
+  const failedRun = failChildAgentRun(input.childRun, input.reason, input.failedAt);
+  const trimmedReason = input.reason.trim().length > 0 ? input.reason.trim() : "unknown exploration error";
+  const summary: DeepChildSummary = {
+    childRunId: input.childRun.childRunId,
+    spec: childSpec,
+    status: "failed",
+    summary: `Child exploration failed: ${trimmedReason}`,
+    findings: [],
+    evidenceRefs: [],
+    confidence: 0,
+    uncertainty: `This child's exploration failed (${trimmedReason}); no usable evidence collected.`,
+  };
+  return { summary, completedRun: failedRun };
 }
 
 // ---------------------------------------------------------------------------

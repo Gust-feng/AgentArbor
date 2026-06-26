@@ -69,6 +69,7 @@ import {
   DEEP_MAX_CHILDREN,
   deriveDeepChildren,
   exploreDeepChild,
+  buildFailedChildExploration,
 } from "./child-delegation.js";
 import { synthesizeDeepConclusion, buildParentSynthesisRecord } from "./parent-synthesis.js";
 
@@ -82,6 +83,18 @@ export const DEEP_STEP_LIMIT = 6;
 /** manager 决策/直接回答/综合 turn 默认只做单轮纯推理（工具调用并入 child 探索）。 */
 export const DEEP_MANAGER_MAX_MODEL_ROUNDS = 1;
 export const DEEP_MANAGER_MAX_TOOL_ROUNDS = 0;
+
+/**
+ * EP1/EP2：manager 决策 / direct_answer 模型轮的失败重试上限。
+ *
+ * 覆盖两类失败：模型 turn 瞬时异常（网络/超时/provider 抖动）与输出解析失败
+ * （schema 校验错误）。重试预算共享：任一类失败都消耗一次重试；重试成功则正常返回，
+ * 重试耗尽仍失败则向上抛出（run 失败，不伪造决策，守 AI-first 边界）。
+ */
+export const DEEP_MANAGER_MAX_RETRIES = 1;
+
+/** EP1：模型轮瞬时失败重试的线性退避基准（毫秒），实际退避 = 基准 × 当前尝试序号。 */
+export const DEEP_TURN_RETRY_BACKOFF_MS = 400;
 
 // ---------------------------------------------------------------------------
 // T2-7 打断/纠正/停止 control handle（FR-008）
@@ -203,6 +216,11 @@ export type DeepRunExecutorConfig = {
   readonly maxChildren?: number;
   readonly managerMaxModelRounds?: number;
   readonly managerMaxToolRounds?: number;
+  /**
+   * EP1/EP2：manager 决策 / direct_answer 模型轮的失败重试上限（默认 DEEP_MANAGER_MAX_RETRIES）。
+   * 见该常量注释的失败语义与 AI-first 边界。
+   */
+  readonly managerMaxRetries?: number;
 };
 
 /**
@@ -231,6 +249,8 @@ export type DeepRunStepRecord = {
   readonly childrenAdded?: readonly DeepChildSummary[];
   readonly depthGuardPassed?: boolean;
   readonly overflowCount?: number;
+  /** EP3：本 step 派生的 child 中探索失败（降级为 failed 投影）的数量。 */
+  readonly failedChildren?: number;
   readonly note?: string;
 };
 
@@ -304,6 +324,11 @@ export async function startDeepRun(
   const managerMaxToolRounds = Math.max(
     0,
     Math.floor(config.managerMaxToolRounds ?? DEEP_MANAGER_MAX_TOOL_ROUNDS),
+  );
+  // EP1/EP2：manager 决策 / direct_answer 模型轮失败重试上限（turn 异常 + 解析错误共享预算）。
+  const managerMaxRetries = Math.max(
+    0,
+    Math.floor(config.managerMaxRetries ?? DEEP_MANAGER_MAX_RETRIES),
   );
 
   // AI-first 边界（需求 A3）：无可用模型时拒绝运行，不 fallback 伪装。
@@ -407,6 +432,7 @@ export async function startDeepRun(
         maxChildren,
         managerMaxModelRounds,
         managerMaxToolRounds,
+        managerMaxRetries,
         childSummaries,
         evidenceRefs,
         priorDecisions: decisions,
@@ -424,6 +450,7 @@ export async function startDeepRun(
           evidenceRefs,
           managerMaxModelRounds,
           managerMaxToolRounds,
+          managerMaxRetries,
           goal,
           createdAt: nowIso(),
         });
@@ -453,6 +480,7 @@ export async function startDeepRun(
           childrenAdded: spawn.summaries,
           depthGuardPassed: spawn.depthGuardPassed,
           overflowCount: spawn.overflowCount,
+          failedChildren: spawn.failedCount,
         });
         continue;
       }
@@ -570,6 +598,8 @@ type RunManagerDecisionStepInput = {
   readonly maxChildren: number;
   readonly managerMaxModelRounds: number;
   readonly managerMaxToolRounds: number;
+  /** EP1/EP2：模型轮失败重试上限（turn 异常 + 解析错误共享预算）。 */
+  readonly managerMaxRetries: number;
   readonly childSummaries: readonly DeepChildSummary[];
   readonly evidenceRefs: readonly string[];
   readonly priorDecisions: readonly DeepDelegationDecision[];
@@ -582,6 +612,13 @@ type RunManagerDecisionStepInput = {
  * 执行一个 manager 决策 step：经 AgentTurnRuntime 调模型（deep_decision）产出
  * DeepDelegationDecision。manager 是纯推理（allowedTools=[]，单轮），工具调用并入 child。
  * T2-7：correctionContext 非空时经 deepDecisionMessages 标注"用户纠正/补充"段。
+ *
+ * EP1/EP2 工程鲁棒性（重试循环，守 AI-first 边界）：
+ *   - EP1 模型 turn 瞬时异常（网络/超时/provider 抖动）：按 DEEP_TURN_RETRY_BACKOFF_MS 退避后重试；
+ *   - EP2 输出解析失败（schema 校验错误）：把错误经 priorParseError 注入下一轮消息，让模型
+ *     据错误自我修正后重新输出（不伪造决策）；
+ *   - 两类失败共享 step.managerMaxRetries 重试预算；重试成功则正常返回，重试耗尽仍失败则
+ *     向上抛出（被 startDeepRun 的 try/catch 捕获，run 置 failed，不伪装完成）。
  */
 async function runManagerDecisionStep(
   step: RunManagerDecisionStepInput,
@@ -591,40 +628,71 @@ async function runManagerDecisionStep(
     id: step.input.run.runId,
     label: `${DEEP_MANAGER_AGENT_ID}:decision:${step.stepIndex}`,
   };
-  const turn = await executeDeepTurn({
-    turnRuntime: step.config.turnRuntime,
-    traceId: step.input.traceId,
-    goalId: step.input.goalId,
-    callerAgentId: DEEP_MANAGER_AGENT_ID,
-    callerRef,
-    purpose: "deep_decision",
-    outputContract: deepDecisionOutputContract(),
-    inputRefs: buildManagerInputRefs(step.input, step.priorDecisions),
-    messages: deepDecisionMessages({
-      goal: step.input.conversation.goal,
-      taskSoil: step.input.taskSoil,
-      stepIndex: step.stepIndex,
-      stepLimit: step.stepLimit,
-      childSummaries: step.childSummaries,
-      priorDecisionSummaries: step.priorDecisions.map((decision) => decision.decisionSummary),
-      evidenceRefs: step.evidenceRefs,
-      permissionBoundaryRefs: step.input.permissionBoundaryRefs,
-      maxChildren: step.maxChildren,
-      correctionContext: step.correctionContext,
-      // P6：传入 run 冻结的 capabilitySnapshot，让 manager 决策消息投影「可用工具清单」，
-      // 引导其设计 childSpec.allowedTools 时从真实可用工具中选取（不凭空编造）。
-      capabilitySnapshot: step.input.capabilitySnapshot,
-    }),
-    allowedTools: [],
-    maxModelRounds: step.managerMaxModelRounds,
-    maxToolRounds: step.managerMaxToolRounds,
-  });
-  const structured = extractStructuredOutput(turn.finalOutput);
-  return parseDeepDecision({
-    value: structured,
-    parentAgentId: DEEP_MANAGER_AGENT_ID,
-    createdAt: step.createdAt,
-  });
+  const inputRefs = buildManagerInputRefs(step.input, step.priorDecisions);
+  let lastError: unknown;
+  let priorParseError: string | undefined;
+  for (let attempt = 0; attempt <= step.managerMaxRetries; attempt += 1) {
+    let turn;
+    try {
+      turn = await executeDeepTurn({
+        turnRuntime: step.config.turnRuntime,
+        traceId: step.input.traceId,
+        goalId: step.input.goalId,
+        callerAgentId: DEEP_MANAGER_AGENT_ID,
+        callerRef,
+        purpose: "deep_decision",
+        outputContract: deepDecisionOutputContract(),
+        inputRefs,
+        messages: deepDecisionMessages({
+          goal: step.input.conversation.goal,
+          taskSoil: step.input.taskSoil,
+          stepIndex: step.stepIndex,
+          stepLimit: step.stepLimit,
+          childSummaries: step.childSummaries,
+          priorDecisionSummaries: step.priorDecisions.map((decision) => decision.decisionSummary),
+          evidenceRefs: step.evidenceRefs,
+          permissionBoundaryRefs: step.input.permissionBoundaryRefs,
+          maxChildren: step.maxChildren,
+          correctionContext: step.correctionContext,
+          // P6：传入 run 冻结的 capabilitySnapshot，让 manager 决策消息投影「可用工具清单」，
+          // 引导其设计 childSpec.allowedTools 时从真实可用工具中选取（不凭空编造）。
+          capabilitySnapshot: step.input.capabilitySnapshot,
+          // EP2：解析失败重试时注入错误反馈，让模型据错误自我修正。
+          priorParseError,
+        }),
+        allowedTools: [],
+        maxModelRounds: step.managerMaxModelRounds,
+        maxToolRounds: step.managerMaxToolRounds,
+      });
+    } catch (turnError) {
+      // EP1：模型 turn 瞬时异常。退避后重试（共享预算）；耗尽则记录后继续到抛出点。
+      lastError = turnError;
+      priorParseError = undefined;
+      if (attempt < step.managerMaxRetries) {
+        await sleepDeep(DEEP_TURN_RETRY_BACKOFF_MS * (attempt + 1));
+        continue;
+      }
+      break;
+    }
+    try {
+      const structured = extractStructuredOutput(turn.finalOutput);
+      return parseDeepDecision({
+        value: structured,
+        parentAgentId: DEEP_MANAGER_AGENT_ID,
+        createdAt: step.createdAt,
+      });
+    } catch (parseError) {
+      // EP2：输出解析失败。把错误注入下一轮反馈，让模型自我修正后重试（共享预算）。
+      lastError = parseError;
+      priorParseError = errorMessage(parseError);
+      if (attempt < step.managerMaxRetries) {
+        continue;
+      }
+      break;
+    }
+  }
+  // 重试耗尽仍失败：向上抛出（run 失败，守 AI-first 边界，不伪造决策）。
+  throw lastError;
 }
 
 // ---------------------------------------------------------------------------
@@ -638,6 +706,8 @@ type RunDirectAnswerStepInput = {
   readonly evidenceRefs: readonly string[];
   readonly managerMaxModelRounds: number;
   readonly managerMaxToolRounds: number;
+  /** EP1/EP2：模型轮失败重试上限（turn 异常 + 解析错误共享预算）。 */
+  readonly managerMaxRetries: number;
   readonly goal: string;
   readonly createdAt: string;
 };
@@ -645,6 +715,13 @@ type RunDirectAnswerStepInput = {
 /**
  * direct_answer 分支：证据已足够时直接产出结论级 SynthesizedConclusion（简单任务，
  * 无需多角度探索）。经 deep_direct_answer 契约调模型解析。
+ *
+ * EP1/EP2 工程鲁棒性（重试循环，与 runManagerDecisionStep 同构，守 AI-first 边界）：
+ *   - EP1 模型 turn 瞬时异常：按 DEEP_TURN_RETRY_BACKOFF_MS 退避后重试；
+ *   - EP2 输出解析失败：把错误经 priorParseError 注入下一轮消息，让模型据错误自我
+ *     修正后重新输出（不伪造结论）；
+ *   - 两类失败共享 step.managerMaxRetries 重试预算；重试成功则正常返回，重试耗尽
+ *     仍失败则向上抛出（被 startDeepRun 的 try/catch 捕获，run 置 failed，不伪装完成）。
  */
 async function runDirectAnswerStep(
   step: RunDirectAnswerStepInput,
@@ -654,31 +731,62 @@ async function runDirectAnswerStep(
     id: step.input.run.runId,
     label: `${DEEP_MANAGER_AGENT_ID}:direct_answer`,
   };
-  const turn = await executeDeepTurn({
-    turnRuntime: step.config.turnRuntime,
-    traceId: step.input.traceId,
-    goalId: step.input.goalId,
-    callerAgentId: DEEP_MANAGER_AGENT_ID,
-    callerRef,
-    purpose: "deep_direct_answer",
-    outputContract: deepDirectAnswerOutputContract(),
-    inputRefs: buildManagerInputRefs(step.input, []),
-    messages: deepDirectAnswerMessages({
-      goal: step.goal,
-      taskSoil: step.input.taskSoil,
-      decision: step.decision,
-      evidenceRefs: step.evidenceRefs,
-    }),
-    allowedTools: [],
-    maxModelRounds: step.managerMaxModelRounds,
-    maxToolRounds: step.managerMaxToolRounds,
-  });
-  const structured = extractStructuredOutput(turn.finalOutput);
-  return parseDeepDirectAnswer({
-    value: structured,
-    createdAt: step.createdAt,
-    evidenceRefs: step.evidenceRefs,
-  });
+  const inputRefs = buildManagerInputRefs(step.input, []);
+  let lastError: unknown;
+  let priorParseError: string | undefined;
+  for (let attempt = 0; attempt <= step.managerMaxRetries; attempt += 1) {
+    let turn;
+    try {
+      turn = await executeDeepTurn({
+        turnRuntime: step.config.turnRuntime,
+        traceId: step.input.traceId,
+        goalId: step.input.goalId,
+        callerAgentId: DEEP_MANAGER_AGENT_ID,
+        callerRef,
+        purpose: "deep_direct_answer",
+        outputContract: deepDirectAnswerOutputContract(),
+        inputRefs,
+        messages: deepDirectAnswerMessages({
+          goal: step.goal,
+          taskSoil: step.input.taskSoil,
+          decision: step.decision,
+          evidenceRefs: step.evidenceRefs,
+          // EP2：解析失败重试时注入错误反馈，让模型据错误自我修正。
+          priorParseError,
+        }),
+        allowedTools: [],
+        maxModelRounds: step.managerMaxModelRounds,
+        maxToolRounds: step.managerMaxToolRounds,
+      });
+    } catch (turnError) {
+      // EP1：模型 turn 瞬时异常。退避后重试（共享预算）；耗尽则记录后继续到抛出点。
+      lastError = turnError;
+      priorParseError = undefined;
+      if (attempt < step.managerMaxRetries) {
+        await sleepDeep(DEEP_TURN_RETRY_BACKOFF_MS * (attempt + 1));
+        continue;
+      }
+      break;
+    }
+    try {
+      const structured = extractStructuredOutput(turn.finalOutput);
+      return parseDeepDirectAnswer({
+        value: structured,
+        createdAt: step.createdAt,
+        evidenceRefs: step.evidenceRefs,
+      });
+    } catch (parseError) {
+      // EP2：输出解析失败。把错误注入下一轮反馈，让模型自我修正后重试（共享预算）。
+      lastError = parseError;
+      priorParseError = errorMessage(parseError);
+      if (attempt < step.managerMaxRetries) {
+        continue;
+      }
+      break;
+    }
+  }
+  // 重试耗尽仍失败：向上抛出（run 失败，守 AI-first 边界，不伪造结论）。
+  throw lastError;
 }
 
 // ---------------------------------------------------------------------------
@@ -708,6 +816,8 @@ async function runSpawnChildrenStep(
   readonly completedRuns: ChildAgentRun[];
   readonly depthGuardPassed: boolean;
   readonly overflowCount: number;
+  /** EP3：本 step 派生的 child 中探索失败（降级为 failed 投影）的数量。 */
+  readonly failedCount: number;
 }> {
   const derived = deriveDeepChildren({
     specs: step.decision.childSpecs,
@@ -720,27 +830,46 @@ async function runSpawnChildrenStep(
   });
   const summaries: DeepChildSummary[] = [];
   const completedRuns: ChildAgentRun[] = [];
+  let failedCount = 0;
   for (const childRun of derived.children) {
-    const result = await exploreDeepChild({
-      childRun,
-      goal: step.goal,
-      permissionBoundaryRefs: step.input.permissionBoundaryRefs,
-      turnRuntime: step.config.turnRuntime,
-      traceId: step.input.traceId,
-      goalId: step.input.goalId,
-      confirmationPolicy: step.input.confirmationPolicy,
-      // P6：传入 run 冻结的 capabilitySnapshot，让 child 探索消息投影「本 child 被授权可用工具」
-      // 及其能力简述，帮助 child 知道能用什么收集一手证据。
-      capabilitySnapshot: step.input.capabilitySnapshot,
-    });
-    summaries.push(result.summary);
-    completedRuns.push(result.completedRun);
+    // EP3 child 错误隔离：单个 child 探索失败（模型轮异常/解析错误/工具失败）不击穿
+    // 整个 run。失败的 child 经 buildFailedChildExploration 降级为 status=failed 投影
+    // （空 findings/evidenceRefs、confidence=0 的 summary + failChildAgentRun），累入
+    // failedCount 供 step 记录；综合模型经 formatChildSummary 的 [status=failed] 标记
+    // 自行对该 child 降权，不伪造成功探索。
+    try {
+      const result = await exploreDeepChild({
+        childRun,
+        goal: step.goal,
+        permissionBoundaryRefs: step.input.permissionBoundaryRefs,
+        turnRuntime: step.config.turnRuntime,
+        traceId: step.input.traceId,
+        goalId: step.input.goalId,
+        confirmationPolicy: step.input.confirmationPolicy,
+        // P6：传入 run 冻结的 capabilitySnapshot，让 child 探索消息投影「本 child 被授权可用工具」
+        // 及其能力简述，帮助 child 知道能用什么收集一手证据。
+        capabilitySnapshot: step.input.capabilitySnapshot,
+      });
+      summaries.push(result.summary);
+      completedRuns.push(result.completedRun);
+    } catch (childError) {
+      failedCount += 1;
+      const reason = errorMessage(childError);
+      const failed = buildFailedChildExploration({
+        childRun,
+        reason,
+        failedAt: step.createdAt,
+      });
+      summaries.push(failed.summary);
+      completedRuns.push(failed.completedRun);
+    }
   }
   return {
     summaries,
     completedRuns,
     depthGuardPassed: derived.depthGuard.passed,
     overflowCount: derived.overflowCount,
+    failedCount,
   };
 }
 
@@ -879,6 +1008,15 @@ function errorMessage(error: unknown): string {
     return error.message;
   }
   return typeof error === "string" ? error : String(error);
+}
+
+/**
+ * EP1：重试退避用的简易 sleep（基于 setTimeout 的 Promise）。线性退避时间由调用方
+ * 传入（DEEP_TURN_RETRY_BACKOFF_MS * (attempt + 1)），失败重试之间给 provider 一点
+ * 抖动恢复窗口；不参与决策语义，仅作工程鲁棒性兜底。
+ */
+function sleepDeep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 // ---------------------------------------------------------------------------

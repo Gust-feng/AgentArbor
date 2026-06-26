@@ -146,6 +146,7 @@ export type DeepDecisionMessagesInput = {
    * 仅作为能力声明帮助决策；模型实际工具调用仍经 ToolCenter/确认门。
    */
   readonly capabilitySnapshot?: BasicAgentCapabilitySnapshot;
+  readonly priorParseError?: string;
 };
 
 export type DeepDirectAnswerMessagesInput = {
@@ -153,6 +154,7 @@ export type DeepDirectAnswerMessagesInput = {
   readonly taskSoil: TaskSoil;
   readonly decision: DeepDelegationDecision;
   readonly evidenceRefs: readonly string[];
+  readonly priorParseError?: string;
 };
 
 export type DeepChildMaterialMessagesInput = {
@@ -263,7 +265,16 @@ export function deepDecisionMessages(input: DeepDecisionMessagesInput): readonly
       "请决策本轮动作并输出 JSON。",
     ].filter((line) => line.length > 0).join("\n"),
   };
-  return [system, user];
+  const parseFeedback = formatParseErrorFeedback(input.priorParseError);
+  if (parseFeedback.length === 0) {
+    return [system, user];
+  }
+  const feedback: DeepTurnMessage = {
+    role: "system",
+    ref: "context:deep:decision_parse_feedback",
+    content: parseFeedback,
+  };
+  return [system, user, feedback];
 }
 
 export function deepDirectAnswerMessages(input: DeepDirectAnswerMessagesInput): readonly DeepTurnMessage[] {
@@ -289,7 +300,16 @@ export function deepDirectAnswerMessages(input: DeepDirectAnswerMessagesInput): 
       "请输出结论 JSON。",
     ].join("\n"),
   };
-  return [system, user];
+  const parseFeedback = formatParseErrorFeedback(input.priorParseError);
+  if (parseFeedback.length === 0) {
+    return [system, user];
+  }
+  const feedback: DeepTurnMessage = {
+    role: "system",
+    ref: "context:deep:direct_answer_parse_feedback",
+    content: parseFeedback,
+  };
+  return [system, user, feedback];
 }
 
 export function deepChildMaterialMessages(input: DeepChildMaterialMessagesInput): readonly DeepTurnMessage[] {
@@ -623,11 +643,29 @@ function formatCapabilityToolSection(snapshot: BasicAgentCapabilitySnapshot | un
   return ["可用工具清单（只能从这些真实工具名中选择 allowedTools）：", ...tools].join("\n");
 }
 
+function formatParseErrorFeedback(priorParseError: string | undefined): string {
+  if (priorParseError === undefined || priorParseError.trim().length === 0) {
+    return "";
+  }
+  return [
+    "[parse feedback] Your last JSON output could not be parsed; please fix and re-output.",
+    `Last error: ${priorParseError}`,
+    "Requirement: output strictly per the contract JSON schema, all fields present and correctly typed;",
+    "output only the JSON object itself, with no markdown code fences (```) or extra prose.",
+  ].join("\n");
+}
+
 function formatChildSummary(child: DeepChildSummary, index: number): string {
+  // EP3: expose child.status; non-completed (e.g. failed) appends [status=failed] so the
+  // synthesis model down-weights it (empty findings/evidenceRefs, confidence=0) instead of
+  // treating it as normal evidence.
+  const statusTag = child.status !== undefined && child.status !== "completed"
+    ? ` [status=${child.status}]`
+    : "";
   const confidence = child.confidence !== undefined ? ` (confidence=${child.confidence})` : "";
   const uncertainty = child.uncertainty !== undefined ? `\n      uncertainty: ${child.uncertainty}` : "";
   return [
-    `  ${index + 1}. [${child.childRunId}] ${child.spec.displayName} (${child.spec.role})${confidence}`,
+    `  ${index + 1}. [${child.childRunId}] ${child.spec.displayName} (${child.spec.role})${confidence}${statusTag}`,
     `      summary: ${child.summary}`,
     `      findings: ${child.findings.join("; ") || "(none)"}`,
     `      evidenceRefs: ${child.evidenceRefs.join(", ") || "(none)"}`,

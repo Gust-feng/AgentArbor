@@ -30,7 +30,8 @@ export const PROTOCOL_BASELINE_MODEL_CAPABILITIES: ModelCapabilities = {
   supportsParallelToolCalls: false,
   supportsStructuredOutputs: false,
   supportsStreaming: true,
-  supportsVisionInput: false,
+  // Custom OpenAI-compatible models need image payloads by default; explicit capability overrides can close this.
+  supportsVisionInput: true,
   supportsReasoningEffort: false,
   supportsReasoningOutput: false,
   preferredApiStyle: "openai_compatible",

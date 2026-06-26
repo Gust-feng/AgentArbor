@@ -1,4 +1,5 @@
 import type { RunAgentDefinitionRef } from "../config/contracts.js";
+import type { ModelUsage } from "../intelligence/contracts.js";
 import type { ObservationRef } from "../observation/contracts.js";
 import type {
   ToolDisplayProjection,
@@ -115,6 +116,7 @@ export type TranscriptNode = {
   readonly toolName?: string;
   readonly display?: ToolDisplayProjection;
   readonly confirmation?: ConfirmationRequest;
+  readonly modelUsage?: ModelUsage;
   readonly refs: readonly ObservationRef[];
 };
 
@@ -177,6 +179,7 @@ export type ContextAttachment = {
     readonly available: boolean;
     readonly title?: string;
     readonly byteLength?: number;
+    readonly mimeType?: string;
     readonly truncated?: boolean;
   };
   readonly status: "ready" | "blocked";

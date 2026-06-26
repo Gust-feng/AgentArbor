@@ -12,6 +12,7 @@ export type OpenAICompatibleChatDialect = {
   readonly reasoningControl: ModelReasoningControlKind;
   readonly preserveFullAssistantMessage: boolean;
   readonly supportsStreaming: boolean;
+  readonly supportsStreamUsage: boolean;
   readonly streamDeltaMode: "incremental" | "cumulative";
 };
 
@@ -38,6 +39,7 @@ export function resolveOpenAICompatibleChatDialect(input: {
         reasoningControl: "openai_chat_reasoning_effort",
         preserveFullAssistantMessage: false,
         supportsStreaming: true,
+        supportsStreamUsage: true,
         streamDeltaMode: "incremental",
       };
     case "deepseek":
@@ -46,6 +48,7 @@ export function resolveOpenAICompatibleChatDialect(input: {
         reasoningControl: "deepseek_reasoning_effort",
         preserveFullAssistantMessage: true,
         supportsStreaming: true,
+        supportsStreamUsage: true,
         streamDeltaMode: "incremental",
       };
     case "moonshot":
@@ -54,6 +57,7 @@ export function resolveOpenAICompatibleChatDialect(input: {
         reasoningControl: "thinking_enabled_disabled",
         preserveFullAssistantMessage: true,
         supportsStreaming: true,
+        supportsStreamUsage: false,
         streamDeltaMode: "incremental",
       };
     case "glm":
@@ -63,6 +67,7 @@ export function resolveOpenAICompatibleChatDialect(input: {
           reasoningControl: "thinking_enabled_disabled",
           preserveFullAssistantMessage: true,
           supportsStreaming: true,
+          supportsStreamUsage: false,
           streamDeltaMode: "incremental",
         };
       }
@@ -71,6 +76,7 @@ export function resolveOpenAICompatibleChatDialect(input: {
         reasoningControl: "thinking_disabled",
         preserveFullAssistantMessage: true,
         supportsStreaming: false,
+        supportsStreamUsage: false,
         streamDeltaMode: "incremental",
       };
     case "minimax":
@@ -79,6 +85,7 @@ export function resolveOpenAICompatibleChatDialect(input: {
         reasoningControl: "reasoning_split",
         preserveFullAssistantMessage: true,
         supportsStreaming: true,
+        supportsStreamUsage: false,
         streamDeltaMode: "cumulative",
       };
     default:
@@ -87,6 +94,7 @@ export function resolveOpenAICompatibleChatDialect(input: {
         reasoningControl: "none",
         preserveFullAssistantMessage: false,
         supportsStreaming: true,
+        supportsStreamUsage: false,
         streamDeltaMode: "incremental",
       };
   }

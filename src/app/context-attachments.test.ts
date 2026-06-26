@@ -24,6 +24,7 @@ test("context attachment preview creates file refs with bounded file preview", a
     assert.equal(attachment.status, "ready");
     assert.equal(attachment.permissionRefs.includes("read:file:notes.md"), true);
     assert.equal(attachment.readonlyPreviewMeta.byteLength, Buffer.byteLength(secretBody));
+    assert.equal(attachment.readonlyPreviewMeta.mimeType, "text/markdown");
     assert.equal(text.includes(secretBody), true);
     assert.equal(text.includes("sk-context-secret"), true);
     assert.equal(text.includes("Bearer live-token"), true);

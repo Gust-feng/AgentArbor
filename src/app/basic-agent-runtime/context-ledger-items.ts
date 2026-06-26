@@ -345,16 +345,30 @@ function currentUserMessageItem(goal: string, taskSoil: TaskSoil): BasicAgentCon
 
 function taskSoilRefItems(taskSoil: TaskSoil): readonly BasicAgentContextItem[] {
   return taskSoil.contextRefs.map((ref, index) => {
+    const itemId = `context:task-soil:${index}`;
     const summary = safeText(contextRefPromptLine(ref), MAX_REF_SUMMARY_CHARS + MAX_PREVIEW_CHARS);
+    const modelContent = safeText(contextRefModelLine(ref, itemId), MAX_REF_SUMMARY_CHARS + 360);
+    const modelVisible = isModelVisibleContextRef(ref, taskSoil);
     return {
-      itemId: `context:task-soil:${index}`,
+      itemId,
       sourceKind: "task_soil_ref",
       summary: summary.text,
+      modelContent: modelVisible ? modelContent.text : undefined,
       refs: [{ kind: "goal", id: taskSoil.goalId ?? taskSoil.taskSoilId }],
-      visibility: "diagnostic" as const,
-      truncated: summary.truncated,
+      visibility: modelVisible ? "model" as const : "diagnostic" as const,
+      truncated: summary.truncated || (modelVisible && modelContent.truncated),
     };
   });
+}
+
+function isModelVisibleContextRef(ref: TaskSoil["contextRefs"][number], taskSoil: TaskSoil): boolean {
+  if (ref.kind === "user_goal" || ref.kind === "runtime") {
+    return false;
+  }
+  if (ref.kind === "workspace" && (ref.ref === `workspace:${taskSoil.goalId}` || ref.ref.startsWith("workspace:goal-"))) {
+    return false;
+  }
+  return ref.kind === "workspace" || ref.kind === "file" || ref.kind === "project" || ref.kind === "web";
 }
 
 function contextRefPromptLine(ref: TaskSoil["contextRefs"][number]): string {
@@ -369,7 +383,41 @@ function contextRefPromptLine(ref: TaskSoil["contextRefs"][number]): string {
     preview === undefined
       ? ""
       : ` preview=${safeText([preview.title, preview.text].filter(Boolean).join(": "), MAX_PREVIEW_CHARS).text}`;
-  return `- ${ref.kind}:${safePlain(ref.ref, 220)} summary=${safeText(ref.summary ?? "none", MAX_REF_SUMMARY_CHARS).text}${previewText}`;
+  return `- ${ref.kind}:${safePlain(ref.ref, 220)}${contextRefMetadataText(ref)} summary=${safeText(ref.summary ?? "none", MAX_REF_SUMMARY_CHARS).text}${previewText}`;
+}
+
+function contextRefModelLine(ref: TaskSoil["contextRefs"][number], fallbackAttachmentId: string): string {
+  const safeRef = modelSafeContextRef(ref.ref);
+  return [
+    "User-provided context attachment is available by reference only.",
+    `attachment_id=${safePlain(ref.attachmentId ?? safeRef ?? fallbackAttachmentId, 220)}`,
+    `kind=${ref.kind}`,
+    safeRef === undefined ? undefined : `ref=${safePlain(safeRef, 220)}`,
+    ref.title === undefined ? undefined : `title=${safeText(ref.title, 120).text}`,
+    ref.summary === undefined ? undefined : `summary=${safeText(ref.summary, MAX_REF_SUMMARY_CHARS).text}`,
+    ref.metadata?.mimeType === undefined ? undefined : `mime=${safePlain(ref.metadata.mimeType, 120)}`,
+    ref.metadata?.byteLength === undefined ? undefined : `bytes=${ref.metadata.byteLength}`,
+    ref.metadata?.truncated === true ? "preview_truncated=true" : undefined,
+    "Use available tools or model-native file/image input to inspect content; do not assume unread attachment content.",
+  ].filter(isString).join(" ");
+}
+
+function modelSafeContextRef(ref: string): string | undefined {
+  const normalized = ref.toLowerCase();
+  if (normalized.startsWith("local-file:") || normalized.startsWith("local-project:")) {
+    return undefined;
+  }
+  return ref;
+}
+
+function contextRefMetadataText(ref: TaskSoil["contextRefs"][number]): string {
+  const parts = [
+    ref.attachmentId === undefined ? undefined : ` attachment_id=${safePlain(ref.attachmentId, 220)}`,
+    ref.title === undefined ? undefined : ` title=${safeText(ref.title, 120).text}`,
+    ref.metadata?.mimeType === undefined ? undefined : ` mime=${safePlain(ref.metadata.mimeType, 120)}`,
+    ref.metadata?.byteLength === undefined ? undefined : ` bytes=${ref.metadata.byteLength}`,
+  ].filter(isString);
+  return parts.join("");
 }
 
 function isString(value: unknown): value is string {

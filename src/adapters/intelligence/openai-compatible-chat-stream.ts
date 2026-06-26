@@ -25,6 +25,7 @@ import {
   parseStructuredOutput,
   parseToolArguments,
 } from "./provider-value-utils.js";
+import { modelUsageWithTiming, openAIChatUsageFromRecord } from "./model-usage-metrics.js";
 
 export async function normalizeOpenAICompatibleStreamResponse(input: {
   request: ModelRequest;
@@ -34,7 +35,7 @@ export async function normalizeOpenAICompatibleStreamResponse(input: {
   protocolKind: "openai_compatible_chat_completions";
   model: string;
   dialect: OpenAICompatibleChatDialect;
-  latencyMs: number;
+  startedAtMs: number;
   emitDelta?: (delta: ModelOutputDelta) => void;
 }): Promise<ModelResponse> {
   let content = "";
@@ -50,10 +51,16 @@ export async function normalizeOpenAICompatibleStreamResponse(input: {
   const visibleOutputStream = createVisibleOutputStreamProjector(input.request.outputContract);
   const toolCalls = new Map<number, { id?: string; name?: string; arguments: string }>();
   const protocolExtensions = new Map<string, unknown>();
+  let firstOutputTokenAtMs: number | undefined;
+  let usage: ReturnType<typeof openAIChatUsageFromRecord> | undefined;
 
   try {
     for await (const rawEvent of input.stream) {
       const raw = asRecord(rawEvent);
+      const rawUsage = openAIChatUsageFromRecord(raw.usage);
+      if (hasTokenUsage(rawUsage)) {
+        usage = rawUsage;
+      }
       if (typeof raw.model === "string") {
         model = raw.model;
       }
@@ -103,12 +110,16 @@ export async function normalizeOpenAICompatibleStreamResponse(input: {
         }
         if (split.textDelta.length > 0) {
           content += split.textDelta;
+          const outputDelta = visibleOutputStream.push(split.textDelta);
+          if (outputDelta.length > 0 && firstOutputTokenAtMs === undefined) {
+            firstOutputTokenAtMs = Date.now();
+          }
           deltaIndex = emitVisibleOutputDelta({
             emitDelta: input.emitDelta,
             request: input.request,
             providerId: input.providerId,
             model,
-            delta: visibleOutputStream.push(split.textDelta),
+            delta: outputDelta,
             index: deltaIndex,
           });
         }
@@ -131,12 +142,16 @@ export async function normalizeOpenAICompatibleStreamResponse(input: {
     }
     if (flushed.textDelta.length > 0) {
       content += flushed.textDelta;
+      const outputDelta = visibleOutputStream.push(flushed.textDelta);
+      if (outputDelta.length > 0 && firstOutputTokenAtMs === undefined) {
+        firstOutputTokenAtMs = Date.now();
+      }
       deltaIndex = emitVisibleOutputDelta({
         emitDelta: input.emitDelta,
         request: input.request,
         providerId: input.providerId,
         model,
-        delta: visibleOutputStream.push(flushed.textDelta),
+        delta: outputDelta,
         index: deltaIndex,
       });
     }
@@ -209,13 +224,20 @@ export async function normalizeOpenAICompatibleStreamResponse(input: {
     }),
     assistantMessage,
     toolCalls: completedToolCalls.length === 0 ? undefined : completedToolCalls,
-    usage: {
-      latencyMs: input.latencyMs,
-    },
+    usage: modelUsageWithTiming({
+      usage,
+      latencyMs: Date.now() - input.startedAtMs,
+      firstTokenLatencyMs:
+        firstOutputTokenAtMs === undefined ? undefined : firstOutputTokenAtMs - input.startedAtMs,
+    }),
     finishReason: finalFinishReason,
     validation: pendingModelOutputValidation(),
     completedAt: nowIso(),
   };
+}
+
+function hasTokenUsage(value: Pick<NonNullable<ModelResponse["usage"]>, "inputTokens" | "outputTokens" | "totalTokens">): boolean {
+  return value.inputTokens !== undefined || value.outputTokens !== undefined || value.totalTokens !== undefined;
 }
 
 function failedResponseForIncompleteStreamFinish(input: {

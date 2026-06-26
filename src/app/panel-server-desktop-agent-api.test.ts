@@ -185,7 +185,7 @@ test("desktop ordinary run persists the execution-effective model settings after
   const model = "glm-effective-model";
   let requestBody: Record<string, unknown> | undefined;
   const providerFetch: PanelProviderFetch = async (_url, init) => {
-    requestBody = JSON.parse(init.body) as Record<string, unknown>;
+    requestBody = JSON.parse(init.body ?? "{}") as Record<string, unknown>;
     return createOpenAiTextResponse(model, "已使用执行期裁剪后的模型设置完成回答。");
   };
   const server = await startLocalPanelServer({ port: 0, configDirectory: directory, providerFetch });
@@ -451,7 +451,7 @@ test("desktop context overflow blocks the run instead of completing it", async (
   let providerCalls = 0;
   const providerFetch: PanelProviderFetch = async (_url, init) => {
     providerCalls += 1;
-    const body = JSON.parse(init.body) as { messages?: readonly { role?: string; content?: string }[] };
+    const body = JSON.parse(init.body ?? "{}") as { messages?: readonly { role?: string; content?: string }[] };
     const compactionRequest = body.messages?.some((message) =>
       String(message.content ?? "").includes("Context to compact:")
     ) === true;
@@ -561,7 +561,7 @@ test("desktop openai-compatible direct answer completes on natural no-tool stop"
   const secret = "sk-desktop-direct-answer-text-secret";
   const bodies: Record<string, unknown>[] = [];
   const providerFetch: PanelProviderFetch = async (_url, init) => {
-    const body = JSON.parse(init.body) as Record<string, unknown>;
+    const body = JSON.parse(init.body ?? "{}") as Record<string, unknown>;
     bodies.push(body);
     return createOpenAiTextResponse(
       "desktop-direct-answer-text-model",
@@ -616,7 +616,7 @@ test("desktop custom Chat Completions model keeps configured tools in the provid
   let modelBody: Record<string, unknown> | undefined;
   const providerFetch: PanelProviderFetch = async (url, init) => {
     assert.notEqual(url, "https://api.tavily.com/search");
-    modelBody = JSON.parse(init.body) as Record<string, unknown>;
+    modelBody = JSON.parse(init.body ?? "{}") as Record<string, unknown>;
     return createOpenAiTextResponse("vendor-new-chat-model", "我可以使用本轮暴露给我的工具。");
   };
   const server = await startLocalPanelServer({ port: 0, configDirectory: directory, providerFetch });
@@ -741,7 +741,7 @@ test("desktop run applies composer reasoning only for reasoning-capable models",
   const secret = "sk-desktop-composer-reasoning-secret";
   const bodies: Record<string, unknown>[] = [];
   const providerFetch: PanelProviderFetch = async (_url, init) => {
-    const body = JSON.parse(init.body) as Record<string, unknown>;
+    const body = JSON.parse(init.body ?? "{}") as Record<string, unknown>;
     bodies.push(body);
     return createOpenAiTextResponse("gpt-5", "ok");
   };
@@ -873,7 +873,7 @@ test("desktop default run follows the active chat-compatible profile mode", asyn
   const bodies: Record<string, unknown>[] = [];
   const providerFetch: PanelProviderFetch = async (url, init) => {
     urls.push(String(url));
-    bodies.push(JSON.parse(init.body) as Record<string, unknown>);
+    bodies.push(JSON.parse(init.body ?? "{}") as Record<string, unknown>);
     return createOpenAiTextResponse("deepseek-v4-pro", "ok");
   };
   const server = await startLocalPanelServer({ port: 0, configDirectory: directory, providerFetch });
@@ -931,7 +931,7 @@ test("desktop model override routes duplicate model ids through the selected pro
     calls.push({
       url: String(url),
       authorization: init.headers.authorization,
-      body: JSON.parse(init.body) as Record<string, unknown>,
+      body: JSON.parse(init.body ?? "{}") as Record<string, unknown>,
     });
     return createOpenAiTextResponse(sharedModel, "同名模型已通过所选服务完成。");
   };
@@ -1403,7 +1403,7 @@ test("desktop openai-compatible ordinary agent uses configured search tool befor
   const providerFetch: PanelProviderFetch = async (url, init) => {
     if (url === "https://api.tavily.com/search") {
       tavilyFetchCalls += 1;
-      const body = JSON.parse(init.body) as { api_key?: string; max_results?: number };
+      const body = JSON.parse(init.body ?? "{}") as { api_key?: string; max_results?: number };
       assert.equal(body.api_key, tavilySecret);
       assert.equal(body.max_results, 1);
       return {

@@ -7,9 +7,17 @@ const MAX_SUMMARY_LENGTH = 360;
 const MAX_PREVIEW_LENGTH = 640;
 
 export type DesktopTaskSoilContextRefInput = {
+  readonly attachmentId?: string;
   readonly ref: string;
   readonly kind: "workspace" | "file" | "project" | "web";
+  readonly title?: string;
   readonly summary?: string;
+  readonly metadata?: {
+    readonly byteLength?: number;
+    readonly mimeType?: string;
+    readonly available?: boolean;
+    readonly truncated?: boolean;
+  };
   readonly readonlyPreview?: {
     readonly title?: string;
     readonly text: string;
@@ -95,9 +103,12 @@ function createDesktopTaskSoilContextRefs(input: {
       summary: "Desktop Shell provided the current task workspace context as refs only.",
     },
     ...supplied.map((ref) => ({
+      attachmentId: ref.attachmentId,
       ref: ref.ref,
       kind: ref.kind,
+      title: ref.title === undefined ? undefined : safeText(ref.title, 120),
       summary: ref.summary === undefined ? undefined : safeText(ref.summary, MAX_SUMMARY_LENGTH),
+      metadata: cloneContextRefMetadata(ref.metadata),
       readonlyPreview:
         ref.readonlyPreview === undefined
           ? undefined
@@ -149,9 +160,12 @@ function parseContextRef(value: unknown): DesktopTaskSoilContextRefInput {
     );
   }
   return {
+    attachmentId: safeOptionalText(record.attachmentId, MAX_REF_LENGTH),
     ref: safeText(ref, MAX_REF_LENGTH),
     kind,
+    title: safeOptionalText(record.title, 120),
     summary: safeOptionalText(record.summary, MAX_SUMMARY_LENGTH),
+    metadata: parseContextRefMetadata(record.metadata ?? record.readonlyPreviewMeta),
     readonlyPreview: parseReadonlyPreview(record.readonlyPreview ?? record.preview),
   };
 }
@@ -188,6 +202,26 @@ function parseReadonlyPreview(value: unknown): DesktopTaskSoilContextRefInput["r
   return {
     title: safeOptionalText(record.title, 120),
     text: record.text,
+  };
+}
+
+function parseContextRefMetadata(value: unknown): DesktopTaskSoilContextRefInput["metadata"] {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  const record = asRecord(value);
+  const byteLength = positiveIntegerOrUndefined(record.byteLength);
+  const mimeType = safeOptionalText(record.mimeType, 120);
+  const available = booleanOrUndefined(record.available);
+  const truncated = booleanOrUndefined(record.truncated);
+  if (byteLength === undefined && mimeType === undefined && available === undefined && truncated === undefined) {
+    return undefined;
+  }
+  return {
+    byteLength,
+    mimeType,
+    available,
+    truncated,
   };
 }
 
@@ -251,6 +285,14 @@ function optionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
 }
 
+function positiveIntegerOrUndefined(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.floor(value) : undefined;
+}
+
+function booleanOrUndefined(value: unknown): boolean | undefined {
+  return typeof value === "boolean" ? value : undefined;
+}
+
 function asRecord(value: unknown): Readonly<Record<string, unknown>> {
   if (typeof value === "object" && value !== null && !Array.isArray(value)) {
     return value as Readonly<Record<string, unknown>>;
@@ -260,4 +302,10 @@ function asRecord(value: unknown): Readonly<Record<string, unknown>> {
 
 function unique(values: readonly string[]): string[] {
   return [...new Set(values)];
+}
+
+function cloneContextRefMetadata(
+  metadata: DesktopTaskSoilContextRefInput["metadata"]
+): DesktopTaskSoilContextRefInput["metadata"] {
+  return metadata === undefined ? undefined : { ...metadata };
 }

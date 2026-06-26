@@ -55,7 +55,15 @@ test("Basic Agent context pack includes history, task refs, readonly previews, a
       {
         ref: "workspace:README.md",
         kind: "file",
+        attachmentId: "ctx-readme",
+        title: "README.md",
         summary: "README context",
+        metadata: {
+          byteLength: 2048,
+          mimeType: "text/markdown",
+          available: true,
+          truncated: true,
+        },
         readonlyPreview: {
           title: "README.md",
           text: `Preview with Bearer context-token-value ${"y".repeat(1_000)}`,
@@ -77,10 +85,14 @@ test("Basic Agent context pack includes history, task refs, readonly previews, a
     ],
   });
 
-  assert.deepEqual(pack.messages.map((message) => message.role), ["system", "system", "user", "assistant", "user"]);
+  assert.deepEqual(pack.messages.map((message) => message.role), ["system", "system", "user", "assistant", "system", "user"]);
   assert.equal(pack.messages[0]?.content, CONTEXT_PACK_TEST_AGENT.prompt.systemPrompt);
+  const attachmentMessage = pack.messages.find((message) => message.ref === "context:task-soil:0");
+  assert.match(attachmentMessage?.content ?? "", /attachment_id=ctx-readme/);
+  assert.match(attachmentMessage?.content ?? "", /mime=text\/markdown/);
+  assert.equal(attachmentMessage?.content.includes("context-token-value"), false);
   assert.equal(pack.inputRefs.some((ref) => ref.kind === "trace" && ref.id === "trace-test"), true);
-  assert.equal(pack.items.some((item) => item.sourceKind === "task_soil_ref" && item.visibility === "diagnostic"), true);
+  assert.equal(pack.items.some((item) => item.sourceKind === "task_soil_ref" && item.visibility === "model"), true);
   assert.match(pack.usageSummary, /技能 1/);
   assert.equal(pack.truncationReport.truncated, true);
   assert.equal(pack.truncated, true);

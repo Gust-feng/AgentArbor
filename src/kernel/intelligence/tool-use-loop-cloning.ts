@@ -26,6 +26,7 @@ export function cloneMessages(messages: readonly ModelMessage[]): ModelMessage[]
 export function cloneModelMessage(message: ModelMessage): ModelMessage {
   return {
     ...message,
+    attachments: message.attachments?.map((attachment) => globalThis.structuredClone(attachment)),
     protocolExtensions:
       message.protocolExtensions === undefined ? undefined : globalThis.structuredClone(message.protocolExtensions),
     toolCalls: message.toolCalls?.map(cloneToolCallRequest),

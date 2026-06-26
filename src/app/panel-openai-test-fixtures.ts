@@ -17,8 +17,8 @@ export type CapturedModelMessage = {
   readonly content: string;
 };
 
-export function parseResponsesRequestBody(raw: string): ResponsesRequestBody {
-  return JSON.parse(raw) as ResponsesRequestBody;
+export function parseResponsesRequestBody(raw: string | undefined): ResponsesRequestBody {
+  return JSON.parse(raw ?? "{}") as ResponsesRequestBody;
 }
 
 export function extractResponsesMessages(body: ResponsesRequestBody | undefined): readonly CapturedModelMessage[] {

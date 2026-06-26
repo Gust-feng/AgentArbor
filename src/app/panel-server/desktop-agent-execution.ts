@@ -66,6 +66,7 @@ export async function executeOrdinaryDesktopRunForPanel(
       }),
     modelCapabilities: resources.capabilitySnapshot.modelCapabilities,
     capabilitySnapshot: resources.capabilitySnapshot,
+    workspaceRoot: resources.workspaceRoot,
     toolConfirmationPolicy: options.toolConfirmationPolicy,
     platform: process.platform,
     abortSignal: options.abortSignal,

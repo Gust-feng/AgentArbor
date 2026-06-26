@@ -48,9 +48,50 @@ export type ModelPurpose =
   | "deep_child_material"
   | "deep_synthesis";
 
+export type ModelInputAttachmentSource =
+  | {
+      readonly kind: "data";
+      readonly mimeType: string;
+      readonly data: string;
+    }
+  | {
+      readonly kind: "url";
+      readonly url: string;
+    }
+  | {
+      readonly kind: "file_id";
+      readonly fileId: string;
+    };
+
+export type ModelInputAttachment =
+  | {
+      readonly kind: "image";
+      readonly source: ModelInputAttachmentSource;
+      readonly attachmentId?: string;
+      readonly inputRef?: string;
+      readonly filename?: string;
+      readonly detail?: "auto" | "low" | "high" | "original";
+      readonly byteLength?: number;
+    }
+  | {
+      readonly kind: "file";
+      readonly source: ModelInputAttachmentSource;
+      readonly attachmentId?: string;
+      readonly inputRef?: string;
+      readonly filename: string;
+      readonly detail?: "low" | "high";
+      readonly byteLength?: number;
+    };
+
 export type ModelMessage = {
   readonly role: "system" | "user" | "assistant" | "tool";
   readonly content: string;
+  /**
+   * Ephemeral model-input attachments for a single provider request. Task Soil,
+   * panel read-models, event logs, and persisted conversations should keep file
+   * refs and metadata instead of storing raw attachment payloads.
+   */
+  readonly attachments?: readonly ModelInputAttachment[];
   readonly ref?: string;
   readonly toolCallId?: string;
   readonly toolName?: string;
@@ -154,8 +195,40 @@ export type ModelUsage = {
   readonly inputTokens?: number;
   readonly outputTokens?: number;
   readonly totalTokens?: number;
+  /**
+   * Provider-reported input tokens served from cache, such as DeepSeek
+   * prompt_cache_hit_tokens. This is a subset of inputTokens when provided.
+   */
+  readonly cachedInputTokens?: number;
+  /**
+   * Provider-reported input tokens not served from cache, such as DeepSeek
+   * prompt_cache_miss_tokens.
+   */
+  readonly uncachedInputTokens?: number;
+  /**
+   * Provider-reported reasoning output tokens when available.
+   */
+  readonly reasoningOutputTokens?: number;
   readonly estimatedCostUsd?: number;
+  /**
+   * Total provider request duration measured by the adapter.
+   */
   readonly latencyMs?: number;
+  /**
+   * Time from request dispatch to the first user-visible output token. This is
+   * only populated for real streaming responses where the adapter can observe
+   * the first visible output delta.
+   */
+  readonly firstTokenLatencyMs?: number;
+  /**
+   * Time between the first user-visible output token and request completion.
+   */
+  readonly outputDurationMs?: number;
+  /**
+   * Output token throughput derived only when outputTokens and outputDurationMs
+   * are both known.
+   */
+  readonly outputTokensPerSecond?: number;
 };
 
 export type ModelOutputDelta = {

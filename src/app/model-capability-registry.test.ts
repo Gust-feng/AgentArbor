@@ -69,9 +69,11 @@ test("unknown OpenAI-compatible chat and responses models inherit protocol tool 
 
   assert.equal(chat.supportsToolCalling, true);
   assert.equal(chat.supportsParallelToolCalls, false);
+  assert.equal(chat.supportsVisionInput, true);
   assert.equal(chat.preferredApiStyle, "chat_completions");
   assert.equal(responses.supportsToolCalling, true);
   assert.equal(responses.supportsParallelToolCalls, false);
+  assert.equal(responses.supportsVisionInput, true);
   assert.equal(responses.preferredApiStyle, "responses");
 });
 
@@ -192,10 +194,12 @@ test("model capability registry does not infer provider ownership from shared mo
   assert.equal(capabilities.contextWindowTokens, PROTOCOL_BASELINE_MODEL_CAPABILITIES.contextWindowTokens);
   assert.equal(capabilities.maxOutputTokens, PROTOCOL_BASELINE_MODEL_CAPABILITIES.maxOutputTokens);
   assert.equal(capabilities.supportsToolCalling, true);
+  assert.equal(capabilities.supportsVisionInput, true);
   assert.equal(capabilities.supportsReasoningEffort, false);
   assert.equal(gptCapabilities.contextWindowTokens, PROTOCOL_BASELINE_MODEL_CAPABILITIES.contextWindowTokens);
   assert.equal(gptCapabilities.maxOutputTokens, PROTOCOL_BASELINE_MODEL_CAPABILITIES.maxOutputTokens);
   assert.equal(gptCapabilities.supportsToolCalling, true);
+  assert.equal(gptCapabilities.supportsVisionInput, true);
   assert.equal(gptCapabilities.supportsReasoningEffort, false);
 });
 
@@ -298,8 +302,10 @@ test("protocol baseline models keep tool calling while budgets stay conservative
   assert.equal(chatBaseline.supportsToolCalling, true);
   assert.equal(chatBaseline.supportsParallelToolCalls, false);
   assert.equal(chatBaseline.supportsStructuredOutputs, false);
+  assert.equal(chatBaseline.supportsVisionInput, true);
   assert.equal(chatBaseline.preferredApiStyle, "chat_completions");
   assert.equal(responsesBaseline.supportsToolCalling, true);
+  assert.equal(responsesBaseline.supportsVisionInput, true);
   assert.equal(responsesBaseline.preferredApiStyle, "responses");
   assert.equal(overridden.contextWindowTokens, 96_000);
   assert.equal(overridden.maxOutputTokens, 12_000);

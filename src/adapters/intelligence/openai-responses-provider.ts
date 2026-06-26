@@ -39,6 +39,7 @@ export type OpenAIResponsesProviderOptions = {
   readonly stream?: boolean;
   readonly forceStreaming?: boolean;
   readonly requestSettings?: OpenAIModelRequestSettings;
+  readonly enableWebSearch?: boolean;
   readonly onOutputDelta?: (delta: ModelOutputDelta) => void;
 };
 
@@ -54,6 +55,7 @@ export class OpenAIResponsesProvider implements ModelProvider {
   private readonly stream: boolean;
   private readonly forceStreaming: boolean;
   private readonly requestSettings?: OpenAIModelRequestSettings;
+  private readonly enableWebSearch: boolean;
   private readonly onOutputDelta?: (delta: ModelOutputDelta) => void;
 
   constructor(options: OpenAIResponsesProviderOptions) {
@@ -65,6 +67,7 @@ export class OpenAIResponsesProvider implements ModelProvider {
     this.stream = options.stream ?? false;
     this.forceStreaming = options.forceStreaming === true;
     this.requestSettings = options.requestSettings;
+    this.enableWebSearch = options.enableWebSearch === true;
     this.onOutputDelta = options.onOutputDelta;
   }
 
@@ -103,7 +106,9 @@ export class OpenAIResponsesProvider implements ModelProvider {
       const stream = configuredOpenAIStream(this.stream, this.requestSettings, {
         forceStreaming: this.forceStreaming,
       });
-      const requestBody = buildResponsesRequestBody(request, this.model, stream, this.requestSettings);
+      const requestBody = buildResponsesRequestBody(request, this.model, stream, this.requestSettings, {
+        enableWebSearch: this.enableWebSearch,
+      });
 
       if (stream) {
         const stream = await client.responses.create(requestBody, { signal: options.abortSignal });
@@ -114,7 +119,7 @@ export class OpenAIResponsesProvider implements ModelProvider {
           providerKind: this.providerKind,
           protocolKind: this.protocolKind,
           model: this.model,
-          latencyMs: Date.now() - startedAt,
+          startedAtMs: startedAt,
           emitDelta: this.onOutputDelta,
         });
       }

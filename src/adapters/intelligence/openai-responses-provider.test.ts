@@ -104,6 +104,57 @@ test("OpenAI Responses adapter maps messages to input items and returns text out
   });
 });
 
+test("OpenAI Responses adapter maps image attachments to input_image parts", async () => {
+  const calls: { body: Record<string, unknown> }[] = [];
+  const fetch: FetchLike = async (_url, init) => {
+    calls.push({ body: JSON.parse(init.body) as Record<string, unknown> });
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        id: "resp-image-test",
+        model: "gpt-4.1",
+        status: "completed",
+        output: [
+          {
+            type: "message",
+            role: "assistant",
+            content: [{ type: "output_text", text: JSON.stringify({ summary: "Image received." }) }],
+          },
+        ],
+      }),
+    };
+  };
+  const provider = new OpenAIResponsesProvider({
+    baseUrl: "https://api.openai.com",
+    apiKey: "sk-test-key",
+    model: "gpt-4.1",
+    fetch,
+  });
+
+  await provider.complete(createValidModelRequest({
+    sanitizedMessages: [{
+      role: "user",
+      content: "Describe this screenshot.",
+      attachments: [{
+        kind: "image",
+        source: { kind: "data", mimeType: "image/png", data: "aW1hZ2U=" },
+        filename: "screenshot.png",
+        detail: "auto",
+      }],
+    }],
+  }));
+
+  assert.deepEqual(calls[0]?.body.input, [{
+    type: "message",
+    role: "user",
+    content: [
+      { type: "input_text", text: "Describe this screenshot." },
+      { type: "input_image", detail: "auto", image_url: "data:image/png;base64,aW1hZ2U=" },
+    ],
+  }]);
+});
+
 test("OpenAI Responses adapter maps system message to instructions", async () => {
   const calls: { body: Record<string, unknown> }[] = [];
   const fetch: FetchLike = async (_url, init) => {
@@ -240,6 +291,60 @@ test("OpenAI Responses adapter maps tools to function format and extracts tool c
   assert.equal(serializedInstructions.includes("Search the web."), false);
   assert.equal(serializedInstructions.includes("parameters"), false);
   assert.equal(serializedInstructions.includes("Allowed tools"), false);
+});
+
+test("OpenAI Responses adapter can include provider-native web search", async () => {
+  const calls: { body: Record<string, unknown> }[] = [];
+  const fetch: FetchLike = async (_url, init) => {
+    calls.push({ body: JSON.parse(init.body) as Record<string, unknown> });
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        id: "resp-web-search",
+        model: "gpt-4.1",
+        status: "completed",
+        output: [
+          {
+            type: "message",
+            role: "assistant",
+            content: [{ type: "output_text", text: JSON.stringify({ summary: "ok" }) }],
+          },
+        ],
+      }),
+    };
+  };
+  const provider = new OpenAIResponsesProvider({
+    baseUrl: "https://api.openai.com",
+    apiKey: "sk-test-key",
+    model: "gpt-4.1",
+    enableWebSearch: true,
+    fetch,
+  });
+
+  await provider.complete(createValidModelRequest({
+    tools: [
+      {
+        name: "read_file",
+        description: "Read a file.",
+        inputSchema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
+      },
+    ],
+  }));
+
+  assert.deepEqual(calls[0]?.body.tools, [
+    {
+      type: "web_search",
+      search_context_size: "medium",
+    },
+    {
+      type: "function",
+      name: "read_file",
+      description: "Read a file.",
+      parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
+      strict: false,
+    },
+  ]);
 });
 
 test("OpenAI Responses adapter gates parallel tool calls by visible tool risk", async () => {

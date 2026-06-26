@@ -57,6 +57,7 @@ export function prepareDesktopAgentLoop(input: DesktopAgentLoopPreparationInput)
         traceId: input.traceId,
         goalId: input.goalId,
         skillContexts,
+        taskSoil: input.taskSoil,
       })
     : undefined;
   toolCenter?.resetCallCount();

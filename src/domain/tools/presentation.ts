@@ -59,6 +59,38 @@ const BUILTIN_TOOL_PRESENTATION: Readonly<Record<string, ToolPresentationSeed>> 
     displayName: "搜索文件",
     displayDescription: "在本地工作区搜索文本，返回匹配文件、行号和片段。",
   },
+  list_context_attachments: {
+    displayName: "查看附件",
+    displayDescription: "列出本轮用户提供的上下文附件引用和元数据。",
+  },
+  read_context_attachment_text: {
+    displayName: "读取附件文本",
+    displayDescription: "按附件引用读取文本文件或附件项目中的文本文件。",
+  },
+  read_context_attachment_pdf_text: {
+    displayName: "读取附件 PDF 文本",
+    displayDescription: "按附件引用从文本型 PDF 中尽力抽取正文，不处理 OCR。",
+  },
+  inspect_context_attachment_table: {
+    displayName: "检查附件表格",
+    displayDescription: "按附件引用识别 CSV/TSV/XLSX 表格列、行数、sheet 和样例行。",
+  },
+  read_context_attachment_table: {
+    displayName: "读取附件表格",
+    displayDescription: "按附件引用读取 CSV/TSV/XLSX 表格的指定行窗口。",
+  },
+  inspect_context_attachment_archive: {
+    displayName: "检查附件压缩包",
+    displayDescription: "按附件引用列出 ZIP 压缩包内部条目，不解压文件。",
+  },
+  list_context_attachment_files: {
+    displayName: "浏览附件目录",
+    displayDescription: "按附件引用浏览用户提供的项目文件夹结构。",
+  },
+  search_context_attachment_files: {
+    displayName: "搜索附件文件",
+    displayDescription: "按附件引用在用户提供的文件或项目中搜索文本。",
+  },
   create_file: {
     displayName: "创建文件",
     displayDescription: "在当前工作区创建不存在的 UTF-8 文本文件，不覆盖已有文件。",

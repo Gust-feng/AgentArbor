@@ -121,6 +121,7 @@ export type DesktopAgentSkillResolverContext = DesktopAgentSessionRuntimeContext
 
 export type DesktopAgentToolCenterContext = DesktopAgentSessionRuntimeContext & {
   readonly skillContexts: readonly DesktopAgentSkillContext[];
+  readonly taskSoil: TaskSoil;
 };
 
 export type DesktopAgentToolCenterFactory =
@@ -138,6 +139,7 @@ export type RunDesktopAgentSessionOptions = {
   readonly resolveSkillContexts?: (context: DesktopAgentSkillResolverContext) => Promise<readonly DesktopAgentSkillContext[]>;
   readonly modelCapabilities?: ModelCapabilities;
   readonly capabilitySnapshot?: BasicAgentCapabilitySnapshot;
+  readonly workspaceRoot?: string;
   readonly toolConfirmationPolicy?: ToolConfirmationPolicy;
   readonly platform?: NodeJS.Platform;
   readonly abortSignal?: AbortSignal;

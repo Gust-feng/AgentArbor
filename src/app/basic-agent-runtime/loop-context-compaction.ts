@@ -296,6 +296,7 @@ function serializeToolsForTokenBudget(tools: readonly ToolDefinition[]): string 
 function cloneLoopMessage(message: ModelMessage): ModelMessage {
   return {
     ...message,
+    attachments: message.attachments?.map((attachment) => globalThis.structuredClone(attachment)),
     toolCalls: message.toolCalls?.map((toolCall) => ({
       callId: toolCall.callId,
       toolName: toolCall.toolName,

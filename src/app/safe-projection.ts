@@ -436,6 +436,195 @@ function projectToolAgentContent(request: ToolCallRequest, output: unknown, trun
       rawContentRef: content?.rawRef,
     };
   }
+  if (request.toolName === "read_context_attachment_text") {
+    const content = typeof result.content === "string"
+      ? modelVisibleTextFragment({
+          value: result.content,
+          maxLength: MODEL_TOOL_TEXT_MAX_CHARS,
+          request,
+          field: "content",
+        })
+      : undefined;
+    return {
+      summary,
+      attachmentId: stringOrUndefined(result.attachmentId),
+      kind: stringOrUndefined(result.kind),
+      title: stringOrUndefined(result.title),
+      path: stringOrUndefined(result.path),
+      mimeType: stringOrUndefined(result.mimeType),
+      bytes: numberOrUndefined(result.bytes),
+      readable: result.readable === true ? true : result.readable === false ? false : undefined,
+      binary: result.binary === true,
+      reason: stringOrUndefined(result.reason),
+      startLine: numberOrUndefined(result.startLine),
+      endLine: numberOrUndefined(result.endLine),
+      totalLines: numberOrUndefined(result.totalLines),
+      hasMoreBefore: result.hasMoreBefore === true,
+      hasMoreAfter: result.hasMoreAfter === true,
+      truncated: truncated || content?.truncated === true,
+      content: content?.text,
+      rawContentRef: content?.rawRef,
+    };
+  }
+  if (request.toolName === "read_context_attachment_pdf_text") {
+    const content = typeof result.content === "string"
+      ? modelVisibleTextFragment({
+          value: result.content,
+          maxLength: MODEL_TOOL_TEXT_MAX_CHARS,
+          request,
+          field: "content",
+        })
+      : undefined;
+    return {
+      summary,
+      attachmentId: stringOrUndefined(result.attachmentId),
+      kind: stringOrUndefined(result.kind),
+      title: stringOrUndefined(result.title),
+      path: stringOrUndefined(result.path),
+      mimeType: stringOrUndefined(result.mimeType),
+      bytes: numberOrUndefined(result.bytes),
+      format: stringOrUndefined(result.format),
+      readable: booleanOrUndefined(result.readable),
+      reason: stringOrUndefined(result.reason),
+      extraction: stringOrUndefined(result.extraction),
+      streamCount: numberOrUndefined(result.streamCount),
+      decodedStreams: numberOrUndefined(result.decodedStreams),
+      skippedStreams: numberOrUndefined(result.skippedStreams),
+      textFragments: numberOrUndefined(result.textFragments),
+      charCount: numberOrUndefined(result.charCount),
+      hasMoreAfter: result.hasMoreAfter === true,
+      truncated: truncated || content?.truncated === true,
+      content: content?.text,
+      rawContentRef: content?.rawRef,
+    };
+  }
+  if (request.toolName === "list_context_attachments") {
+    return {
+      summary,
+      count: numberOrUndefined(result.count),
+      attachments: Array.isArray(result.attachments)
+        ? result.attachments.slice(0, 80).map(projectContextAttachment)
+        : undefined,
+      truncated,
+    };
+  }
+  if (request.toolName === "inspect_context_attachment_table") {
+    return {
+      summary,
+      attachmentId: stringOrUndefined(result.attachmentId),
+      kind: stringOrUndefined(result.kind),
+      title: stringOrUndefined(result.title),
+      path: stringOrUndefined(result.path),
+      mimeType: stringOrUndefined(result.mimeType),
+      bytes: numberOrUndefined(result.bytes),
+      table: booleanOrUndefined(result.table),
+      readable: booleanOrUndefined(result.readable),
+      reason: stringOrUndefined(result.reason),
+      format: stringOrUndefined(result.format),
+      delimiter: stringOrUndefined(result.delimiter),
+      sheetName: stringOrUndefined(result.sheetName),
+      sheetIndex: numberOrUndefined(result.sheetIndex),
+      sheets: stringArray(result.sheets),
+      headerRow: booleanOrUndefined(result.headerRow),
+      totalRows: numberOrUndefined(result.totalRows),
+      dataRows: numberOrUndefined(result.dataRows),
+      columnCount: numberOrUndefined(result.columnCount),
+      columns: stringArray(result.columns),
+      sampleRows: Array.isArray(result.sampleRows) ? result.sampleRows.slice(0, 20).map(projectTableRow) : undefined,
+      truncated,
+    };
+  }
+  if (request.toolName === "read_context_attachment_table") {
+    return {
+      summary,
+      attachmentId: stringOrUndefined(result.attachmentId),
+      kind: stringOrUndefined(result.kind),
+      title: stringOrUndefined(result.title),
+      path: stringOrUndefined(result.path),
+      mimeType: stringOrUndefined(result.mimeType),
+      bytes: numberOrUndefined(result.bytes),
+      table: booleanOrUndefined(result.table),
+      readable: booleanOrUndefined(result.readable),
+      reason: stringOrUndefined(result.reason),
+      format: stringOrUndefined(result.format),
+      delimiter: stringOrUndefined(result.delimiter),
+      sheetName: stringOrUndefined(result.sheetName),
+      sheetIndex: numberOrUndefined(result.sheetIndex),
+      sheets: stringArray(result.sheets),
+      headerRow: booleanOrUndefined(result.headerRow),
+      totalRows: numberOrUndefined(result.totalRows),
+      dataRows: numberOrUndefined(result.dataRows),
+      columnCount: numberOrUndefined(result.columnCount),
+      columns: stringArray(result.columns),
+      startRow: numberOrUndefined(result.startRow),
+      requestedRowCount: numberOrUndefined(result.requestedRowCount),
+      rows: Array.isArray(result.rows) ? result.rows.slice(0, 200).map(projectTableRow) : undefined,
+      rowsReturned: numberOrUndefined(result.rowsReturned),
+      hasMoreBefore: result.hasMoreBefore === true,
+      hasMoreAfter: result.hasMoreAfter === true,
+      truncated,
+    };
+  }
+  if (request.toolName === "inspect_context_attachment_archive") {
+    return {
+      summary,
+      attachmentId: stringOrUndefined(result.attachmentId),
+      kind: stringOrUndefined(result.kind),
+      title: stringOrUndefined(result.title),
+      path: stringOrUndefined(result.path),
+      mimeType: stringOrUndefined(result.mimeType),
+      bytes: numberOrUndefined(result.bytes),
+      archive: booleanOrUndefined(result.archive),
+      readable: booleanOrUndefined(result.readable),
+      reason: stringOrUndefined(result.reason),
+      format: stringOrUndefined(result.format),
+      entryCount: numberOrUndefined(result.entryCount),
+      entriesReturned: numberOrUndefined(result.entriesReturned),
+      entries: Array.isArray(result.entries) ? result.entries.slice(0, 200).map(projectArchiveEntry) : undefined,
+      truncated,
+    };
+  }
+  if (request.toolName === "list_context_attachment_files") {
+    return {
+      summary,
+      attachmentId: stringOrUndefined(result.attachmentId),
+      kind: stringOrUndefined(result.kind),
+      title: stringOrUndefined(result.title),
+      path: stringOrUndefined(result.path),
+      depth: numberOrUndefined(result.depth),
+      maxDepth: numberOrUndefined(result.maxDepth),
+      entries: Array.isArray(result.entries) ? result.entries.slice(0, 200).map(projectDirectoryEntry) : undefined,
+      entriesReturned: numberOrUndefined(result.entriesReturned),
+      totalEntries: numberOrUndefined(result.totalEntries),
+      unreadableDirectories: numberOrUndefined(result.unreadableDirectories),
+      unreadableSamples: Array.isArray(result.unreadableSamples)
+        ? result.unreadableSamples.slice(0, 8).map(projectUnreadableDirectorySample)
+        : undefined,
+      truncated,
+    };
+  }
+  if (request.toolName === "search_context_attachment_files") {
+    return {
+      summary,
+      attachmentId: stringOrUndefined(result.attachmentId),
+      kind: stringOrUndefined(result.kind),
+      title: stringOrUndefined(result.title),
+      query: stringOrUndefined(result.query),
+      path: stringOrUndefined(result.path),
+      matches: Array.isArray(result.matches) ? result.matches.slice(0, 80).map(projectGrepMatch) : undefined,
+      searchedFiles: numberOrUndefined(result.searchedFiles),
+      skippedFiles: numberOrUndefined(result.skippedFiles),
+      skippedBinaryFiles: numberOrUndefined(result.skippedBinaryFiles),
+      skippedTooLargeFiles: numberOrUndefined(result.skippedTooLargeFiles),
+      skippedUnreadableFiles: numberOrUndefined(result.skippedUnreadableFiles),
+      skippedDirectories: numberOrUndefined(result.skippedDirectories),
+      skippedOtherEntries: numberOrUndefined(result.skippedOtherEntries),
+      skippedSamples: Array.isArray(result.skippedSamples)
+        ? result.skippedSamples.slice(0, 8).map(projectGrepSkippedSample)
+        : undefined,
+      truncated,
+    };
+  }
   if (request.toolName === "list_dir") {
     return {
       summary,
@@ -708,6 +897,83 @@ function projectDirectoryEntry(value: unknown): {
   };
 }
 
+function projectArchiveEntry(value: unknown): {
+  readonly path?: string;
+  readonly name?: string;
+  readonly kind?: string;
+  readonly bytes?: number;
+  readonly compressedBytes?: number;
+  readonly compressionMethod?: number;
+  readonly unsafePath?: boolean;
+} {
+  const record = asRecord(value);
+  return {
+    path: stringOrUndefined(record.path),
+    name: stringOrUndefined(record.name),
+    kind: stringOrUndefined(record.kind),
+    bytes: numberOrUndefined(record.bytes),
+    compressedBytes: numberOrUndefined(record.compressedBytes),
+    compressionMethod: numberOrUndefined(record.compressionMethod),
+    unsafePath: booleanOrUndefined(record.unsafePath),
+  };
+}
+
+function projectContextAttachment(value: unknown): {
+  readonly attachmentId?: string;
+  readonly kind?: string;
+  readonly format?: string;
+  readonly title?: string;
+  readonly summary?: string;
+  readonly mimeType?: string;
+  readonly byteLength?: number;
+  readonly available?: boolean;
+  readonly previewTruncated?: boolean;
+  readonly authorized?: boolean;
+  readonly ref?: string;
+  readonly canReadText?: boolean;
+  readonly canReadPdfText?: boolean;
+  readonly canReadTable?: boolean;
+  readonly canInspectArchive?: boolean;
+  readonly canListFiles?: boolean;
+  readonly canSearchFiles?: boolean;
+  readonly canUseVisionInput?: boolean;
+} {
+  const record = asRecord(value);
+  return {
+    attachmentId: stringOrUndefined(record.attachmentId),
+    kind: stringOrUndefined(record.kind),
+    format: stringOrUndefined(record.format),
+    title: stringOrUndefined(record.title),
+    summary: stringOrUndefined(record.summary),
+    mimeType: stringOrUndefined(record.mimeType),
+    byteLength: numberOrUndefined(record.byteLength),
+    available: booleanOrUndefined(record.available),
+    previewTruncated: booleanOrUndefined(record.previewTruncated),
+    authorized: booleanOrUndefined(record.authorized),
+    ref: stringOrUndefined(record.ref),
+    canReadText: booleanOrUndefined(record.canReadText),
+    canReadPdfText: booleanOrUndefined(record.canReadPdfText),
+    canReadTable: booleanOrUndefined(record.canReadTable),
+    canInspectArchive: booleanOrUndefined(record.canInspectArchive),
+    canListFiles: booleanOrUndefined(record.canListFiles),
+    canSearchFiles: booleanOrUndefined(record.canSearchFiles),
+    canUseVisionInput: booleanOrUndefined(record.canUseVisionInput),
+  };
+}
+
+function projectTableRow(value: unknown): {
+  readonly rowNumber?: number;
+  readonly values?: readonly string[];
+  readonly record?: Readonly<Record<string, string>>;
+} {
+  const record = asRecord(value);
+  return {
+    rowNumber: numberOrUndefined(record.rowNumber),
+    values: stringArray(record.values),
+    record: stringRecordOrUndefined(record.record),
+  };
+}
+
 function projectGrepMatch(value: unknown): { readonly path?: string; readonly line?: number; readonly preview?: string } {
   const record = asRecord(value);
   const preview = typeof record.preview === "string"
@@ -784,6 +1050,12 @@ function numberOrUndefined(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
+function booleanOrUndefined(value: unknown): boolean | undefined {
+  if (value === true) return true;
+  if (value === false) return false;
+  return undefined;
+}
+
 function displayActionForTool(action: string | undefined, toolName: string): string {
   if (action === undefined || action === toolName || /^[a-z][a-z0-9_:-]*$/i.test(action)) {
     return toolDisplayName(action ?? toolName);
@@ -793,6 +1065,17 @@ function displayActionForTool(action: string | undefined, toolName: string): str
 
 function stringArray(value: unknown): readonly string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function stringRecordOrUndefined(value: unknown): Readonly<Record<string, string>> | undefined {
+  const record = asRecord(value);
+  const result: Record<string, string> = {};
+  for (const [key, item] of Object.entries(record)) {
+    if (typeof item === "string") {
+      result[key] = item;
+    }
+  }
+  return Object.keys(result).length === 0 ? undefined : result;
 }
 
 function isString(value: unknown): value is string {

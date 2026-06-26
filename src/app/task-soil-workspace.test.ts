@@ -31,9 +31,17 @@ test("Desktop Task Soil input accepts refs, permission refs, and truncated reado
     taskSoilInput: {
       contextRefs: [
         {
+          attachmentId: "ctx-panel-assets",
           ref: "file:src/app/panel-assets.ts",
           kind: "file",
+          title: "panel-assets.ts",
           summary: "Panel UI source.",
+          metadata: {
+            byteLength: 1234,
+            mimeType: "text/typescript",
+            available: true,
+            truncated: false,
+          },
           readonlyPreview: {
             title: "Panel asset",
             text: "safe preview ".repeat(100),
@@ -58,6 +66,14 @@ test("Desktop Task Soil input accepts refs, permission refs, and truncated reado
   const fileRef = taskSoil.contextRefs.find((ref) => ref.ref === "file:src/app/panel-assets.ts");
 
   assert.notEqual(fileRef, undefined);
+  assert.equal(fileRef?.attachmentId, "ctx-panel-assets");
+  assert.equal(fileRef?.title, "panel-assets.ts");
+  assert.deepEqual(fileRef?.metadata, {
+    byteLength: 1234,
+    mimeType: "text/typescript",
+    available: true,
+    truncated: false,
+  });
   assert.equal(fileRef?.readonlyPreview?.title, "Panel asset");
   assert.equal(fileRef?.readonlyPreview?.text.length <= 640, true);
   assert.equal(fileRef?.readonlyPreview?.truncated, true);

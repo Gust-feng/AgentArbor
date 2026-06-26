@@ -15,11 +15,11 @@ import {
 } from "./openai-compatible-chat-protocol.js";
 import {
   asRecord,
-  numberOrUndefined,
   parseStructuredOutput,
   parseToolArguments,
 } from "./provider-value-utils.js";
 import { filterOpenAIChatProtocolExtensions } from "./openai-compatible-chat-protocol-extensions.js";
+import { modelUsageWithTiming, openAIChatUsageFromRecord } from "./model-usage-metrics.js";
 
 export function normalizeOpenAICompatibleResponse(input: {
   request: ModelRequest;
@@ -41,7 +41,6 @@ export function normalizeOpenAICompatibleResponse(input: {
   const parsedOutput = parseStructuredOutput(content);
   const toolCalls = parseToolCalls(message.tool_calls, message.function_call);
   const assistantMessage = assistantContinuationMessage({ message, content: decoded.rawContent, toolCalls });
-  const usage = asRecord(raw.usage);
   const finishReason = finishReasonForOpenAI(firstChoice.finish_reason);
   const incompleteResponse = failedResponseForIncompleteFinish({
     request: input.request,
@@ -70,12 +69,10 @@ export function normalizeOpenAICompatibleResponse(input: {
     reasoningOutput,
     assistantMessage,
     toolCalls: toolCalls.length === 0 ? undefined : toolCalls,
-    usage: {
-      inputTokens: numberOrUndefined(usage.prompt_tokens),
-      outputTokens: numberOrUndefined(usage.completion_tokens),
-      totalTokens: numberOrUndefined(usage.total_tokens),
+    usage: modelUsageWithTiming({
+      usage: openAIChatUsageFromRecord(raw.usage),
       latencyMs: input.latencyMs,
-    },
+    }),
     finishReason,
     validation: pendingModelOutputValidation(),
     completedAt: nowIso(),

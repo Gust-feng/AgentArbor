@@ -88,6 +88,13 @@ function contextMessageForItem(item: BasicAgentContextItem): ModelMessage | unde
       ref: item.itemId,
     };
   }
+  if (item.sourceKind === "task_soil_ref") {
+    return {
+      role: "system",
+      content,
+      ref: item.itemId,
+    };
+  }
   if (item.sourceKind === "user_message") {
     return {
       role: "user",

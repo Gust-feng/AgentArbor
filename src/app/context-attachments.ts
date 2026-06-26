@@ -7,6 +7,28 @@ const MAX_FILE_PREVIEW_BYTES = 96_000;
 const MAX_FILE_PREVIEW_CHARS = 8_000;
 const MAX_DIRECTORY_PREVIEW_ENTRIES = 80;
 
+const MIME_TYPE_BY_EXTENSION: Readonly<Record<string, string>> = {
+  ".csv": "text/csv",
+  ".gif": "image/gif",
+  ".html": "text/html",
+  ".js": "text/javascript",
+  ".jsx": "text/jsx",
+  ".jpeg": "image/jpeg",
+  ".jpg": "image/jpeg",
+  ".json": "application/json",
+  ".jsonl": "application/x-ndjson",
+  ".md": "text/markdown",
+  ".pdf": "application/pdf",
+  ".png": "image/png",
+  ".ts": "text/typescript",
+  ".tsx": "text/tsx",
+  ".txt": "text/plain",
+  ".webp": "image/webp",
+  ".xls": "application/vnd.ms-excel",
+  ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  ".zip": "application/zip",
+};
+
 export class ContextAttachmentPreviewError extends Error {
   constructor(
     readonly code: string,
@@ -28,6 +50,12 @@ export type CreateContextAttachmentPreviewInput = {
 export type LocalContextAttachmentSelection = {
   readonly kind: "file" | "project";
   readonly path: string;
+};
+
+export type UploadedContextAttachmentInput = {
+  readonly path: string;
+  readonly originalName: string;
+  readonly mimeType?: string;
 };
 
 export async function createContextAttachmentPreview(input: {
@@ -64,7 +92,7 @@ export async function createSelectedLocalContextAttachment(
     ? undefined
     : kind === "project"
       ? await directoryReadonlyPreview(absolutePath, title)
-      : await fileReadonlyPreview(absolutePath, title, stat.size);
+      : await fileReadonlyPreview(absolutePath, title, stat.size, mimeTypeForPath(absolutePath));
   const available = stat !== undefined &&
     ((kind === "project" && stat.isDirectory()) || (kind === "file" && stat.isFile()));
   return {
@@ -82,10 +110,41 @@ export async function createSelectedLocalContextAttachment(
       available,
       title,
       byteLength: stat?.isFile() === true ? stat.size : undefined,
+      mimeType: stat?.isFile() === true ? mimeTypeForPath(absolutePath) : undefined,
       truncated: preview?.truncated ?? false,
     },
     status: available ? "ready" : "blocked",
     warning: available ? undefined : "没有找到这个本地路径。",
+  };
+}
+
+export async function createUploadedContextAttachment(
+  input: UploadedContextAttachmentInput
+): Promise<ContextAttachment> {
+  const absolutePath = requiredAbsolutePath(input.path);
+  const stat = await fs.stat(absolutePath).catch(() => undefined);
+  if (stat?.isFile() !== true) {
+    throw new ContextAttachmentPreviewError("uploaded_attachment_missing", "上传附件保存失败。");
+  }
+  const title = safeText(path.basename(input.originalName) || path.basename(absolutePath) || "attachment", 120);
+  const mimeType = safeText(input.mimeType ?? mimeTypeForPath(title) ?? mimeTypeForPath(absolutePath) ?? "application/octet-stream", 160);
+  const preview = await fileReadonlyPreview(absolutePath, title, stat.size, mimeType);
+  return {
+    attachmentId: createId("ctx"),
+    kind: "file",
+    ref: `local-file:${absolutePath}`,
+    title,
+    summary: safeText(`上传附件：${title} · ${stat.size} bytes${preview?.truncated === true ? " · 预览已截断" : ""}`, 280),
+    readonlyPreview: preview,
+    permissionRefs: [`read:local-file:${absolutePath}`],
+    readonlyPreviewMeta: {
+      available: true,
+      title,
+      byteLength: stat.size,
+      mimeType,
+      truncated: preview?.truncated ?? false,
+    },
+    status: "ready",
   };
 }
 
@@ -123,7 +182,7 @@ async function fileSystemAttachment(input: {
   const readonlyPreview = stat !== undefined && isExpectedKind
     ? input.kind === "project"
       ? await directoryReadonlyPreview(resolved, title)
-      : await fileReadonlyPreview(resolved, title, stat.size)
+      : await fileReadonlyPreview(resolved, title, stat.size, mimeTypeForPath(resolved))
     : undefined;
   return {
     attachmentId: createId("ctx"),
@@ -140,6 +199,7 @@ async function fileSystemAttachment(input: {
       available: stat !== undefined && isExpectedKind,
       title,
       byteLength: stat?.isFile() === true ? stat.size : undefined,
+      mimeType: stat?.isFile() === true ? mimeTypeForPath(resolved) : undefined,
       truncated: readonlyPreview?.truncated ?? false,
     },
     status: stat !== undefined && isExpectedKind ? "ready" : "blocked",
@@ -173,8 +233,16 @@ function webAttachment(value: string, raw: CreateContextAttachmentPreviewInput):
 async function fileReadonlyPreview(
   absolutePath: string,
   title: string,
-  byteLength: number
+  byteLength: number,
+  mimeType?: string
 ): Promise<NonNullable<ContextAttachment["readonlyPreview"]> | undefined> {
+  if (isKnownBinaryFile(mimeType ?? mimeTypeForPath(absolutePath))) {
+    return {
+      title,
+      text: "[binary file preview omitted]",
+      truncated: false,
+    };
+  }
   const byteLimit = Math.min(byteLength, MAX_FILE_PREVIEW_BYTES);
   const handle = await fs.open(absolutePath, "r").catch(() => undefined);
   if (handle === undefined) {
@@ -299,6 +367,20 @@ function defaultFileSystemSummary(
 
 function toPortableRelativePath(workspaceRoot: string, resolved: string): string {
   return path.relative(path.resolve(workspaceRoot), resolved).replaceAll(path.sep, "/") || ".";
+}
+
+function mimeTypeForPath(filePath: string): string | undefined {
+  return MIME_TYPE_BY_EXTENSION[path.extname(filePath).toLowerCase()];
+}
+
+function isKnownBinaryFile(mimeType: string | undefined): boolean {
+  if (mimeType === undefined) {
+    return false;
+  }
+  if (mimeType.startsWith("text/") || mimeType === "application/json" || mimeType === "application/x-ndjson") {
+    return false;
+  }
+  return true;
 }
 
 function requiredText(value: string | undefined, message: string): string {

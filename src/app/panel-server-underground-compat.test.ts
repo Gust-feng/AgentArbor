@@ -484,7 +484,7 @@ test("panel openai-compatible run uses configured ToolCenter search from tools r
   const providerFetch: PanelProviderFetch = async (url, init) => {
     if (url === "https://api.tavily.com/search") {
       tavilyFetchCalls += 1;
-      const body = JSON.parse(init.body) as { api_key?: string; max_results?: number };
+      const body = JSON.parse(init.body ?? "{}") as { api_key?: string; max_results?: number };
       assert.equal(body.api_key, tavilySecret);
       assert.equal(body.max_results, 1);
       return {

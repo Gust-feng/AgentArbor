@@ -1,5 +1,6 @@
 import type { OpenAIModelRequestSettings } from "../../domain/config/index.js";
 import type {
+  ModelInputAttachment,
   ModelMessage,
   ModelRequest,
   ModelToolChoice,
@@ -42,6 +43,7 @@ export function buildOpenAICompatibleChatRequestBody(input: {
         input.request.outputContract.format === "json_object" ? { type: "json_object" } : undefined,
       ...controlFields,
       stream: input.stream ? true : undefined,
+      stream_options: input.stream && input.dialect.supportsStreamUsage ? { include_usage: true } : undefined,
     },
   }));
 }
@@ -66,7 +68,59 @@ function toOpenAIMessage(message: ModelMessage): Record<string, unknown> {
 
   return {
     role: message.role,
-    content: message.content,
+    content: toOpenAIMessageContent(message),
+  };
+}
+
+function toOpenAIMessageContent(message: ModelMessage): unknown {
+  if (message.role !== "user" || message.attachments === undefined || message.attachments.length === 0) {
+    return message.content;
+  }
+  const parts: Record<string, unknown>[] = [];
+  if (message.content.length > 0) {
+    parts.push({ type: "text", text: message.content });
+  }
+  for (const attachment of message.attachments) {
+    const part = toOpenAIContentPart(attachment);
+    if (part !== undefined) {
+      parts.push(part);
+    }
+  }
+  return parts.length === 0 ? message.content : parts;
+}
+
+function toOpenAIContentPart(attachment: ModelInputAttachment): Record<string, unknown> | undefined {
+  if (attachment.kind === "image") {
+    if (attachment.source.kind === "file_id") {
+      return {
+        type: "file",
+        file: removeUndefinedValues({
+          file_id: attachment.source.fileId,
+          filename: attachment.filename,
+        }),
+      };
+    }
+    const url = attachment.source.kind === "url"
+      ? attachment.source.url
+      : dataUrl(attachment.source.mimeType, attachment.source.data);
+    return {
+      type: "image_url",
+      image_url: removeUndefinedValues({
+        url,
+        detail: chatImageDetail(attachment.detail),
+      }),
+    };
+  }
+  if (attachment.source.kind === "url") {
+    return undefined;
+  }
+  return {
+    type: "file",
+    file: removeUndefinedValues({
+      file_id: attachment.source.kind === "file_id" ? attachment.source.fileId : undefined,
+      file_data: attachment.source.kind === "data" ? attachment.source.data : undefined,
+      filename: attachment.filename,
+    }),
   };
 }
 
@@ -105,6 +159,20 @@ function toOpenAIToolCall(toolCall: ToolCallRequest): Record<string, unknown> {
       arguments: JSON.stringify(toolCall.input),
     },
   };
+}
+
+function dataUrl(mimeType: string, data: string): string {
+  return `data:${mimeType};base64,${data}`;
+}
+
+function chatImageDetail(value: Extract<ModelInputAttachment, { readonly kind: "image" }>["detail"]): "auto" | "low" | "high" | undefined {
+  if (value === "auto" || value === "low" || value === "high") {
+    return value;
+  }
+  if (value === "original") {
+    return "high";
+  }
+  return undefined;
 }
 
 function protocolExtensionsForRequest(

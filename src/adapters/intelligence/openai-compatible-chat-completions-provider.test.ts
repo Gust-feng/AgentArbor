@@ -78,6 +78,54 @@ test("OpenAI-compatible Chat Completions adapter maps request and response throu
   assert.equal(JSON.stringify(eventLog.list()).includes("token"), false);
 });
 
+test("OpenAI-compatible Chat Completions adapter maps image attachments to image_url parts", async () => {
+  const calls: { body: Record<string, unknown> }[] = [];
+  const fetch: FetchLike = async (_url, init) => {
+    calls.push({ body: JSON.parse(init.body) as Record<string, unknown> });
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        id: "chatcmpl-image-test",
+        model: "gpt-compatible-test",
+        choices: [
+          {
+            message: { role: "assistant", content: JSON.stringify({ summary: "Image received." }) },
+            finish_reason: "stop",
+          },
+        ],
+      }),
+    };
+  };
+  const provider = new OpenAICompatibleChatCompletionsProvider({
+    baseUrl: "https://llm.example.test/",
+    apiKey: "sk-test-secret-token",
+    model: "gpt-compatible-test",
+    fetch,
+  });
+
+  await provider.complete(createValidModelRequest({
+    sanitizedMessages: [{
+      role: "user",
+      content: "Describe this screenshot.",
+      attachments: [{
+        kind: "image",
+        source: { kind: "data", mimeType: "image/png", data: "aW1hZ2U=" },
+        filename: "screenshot.png",
+        detail: "auto",
+      }],
+    }],
+  }));
+
+  assert.deepEqual(calls[0]?.body.messages, [{
+    role: "user",
+    content: [
+      { type: "text", text: "Describe this screenshot." },
+      { type: "image_url", image_url: { url: "data:image/png;base64,aW1hZ2U=", detail: "auto" } },
+    ],
+  }]);
+});
+
 test("OpenAI-compatible Chat Completions adapter appends /v1 only for bare OpenAI base URL", async () => {
   const calls: { url: string }[] = [];
   const fetch: FetchLike = async (url) => {
@@ -242,7 +290,65 @@ test("OpenAI-compatible Chat Completions adapter streams safe output deltas", as
   assert.equal(JSON.stringify(deltas).includes("{\"summary\""), false);
   assert.equal(calls.length, 1);
   assert.equal(calls[0]?.body.stream, true);
+  assert.equal(calls[0]?.body.stream_options, undefined);
   assert.equal(JSON.stringify(deltas).includes("sk-test-secret-token"), false);
+});
+
+test("OpenAI-compatible Chat adapter requests and reads DeepSeek stream usage", async () => {
+  const calls: { body: Record<string, unknown> }[] = [];
+  const fetch: FetchLike = async (_url, init) => {
+    calls.push({ body: JSON.parse(init.body) as Record<string, unknown> });
+    return {
+      ok: true,
+      status: 200,
+      body: sseChunks([
+        {
+          model: "deepseek-v4-flash",
+          choices: [{ delta: { content: "完成。" }, finish_reason: null }],
+        },
+        {
+          model: "deepseek-v4-flash",
+          choices: [{ delta: {}, finish_reason: "stop" }],
+          usage: {
+            prompt_tokens: 7200,
+            prompt_cache_hit_tokens: 2700,
+            prompt_cache_miss_tokens: 4500,
+            completion_tokens: 1200,
+            total_tokens: 8400,
+          },
+        },
+      ]),
+      json: async () => {
+        throw new Error("Streaming response should not be read through json().");
+      },
+    };
+  };
+  const provider = new OpenAICompatibleChatCompletionsProvider({
+    baseUrl: "https://api.deepseek.com",
+    apiKey: "sk-test-secret-token",
+    model: "deepseek-v4-flash",
+    providerProfileId: "deepseek",
+    fetch,
+    stream: true,
+  });
+
+  const response = await provider.complete(createValidModelRequest({
+    outputContract: {
+      contractId: "test.text.v1",
+      outputKind: "explanation",
+      format: "text",
+    },
+  }));
+
+  assert.equal(response.status, "completed");
+  assert.equal(response.textOutput, "完成。");
+  assert.deepEqual(calls[0]?.body.stream_options, { include_usage: true });
+  assert.equal(response.usage?.inputTokens, 7200);
+  assert.equal(response.usage?.cachedInputTokens, 2700);
+  assert.equal(response.usage?.uncachedInputTokens, 4500);
+  assert.equal(response.usage?.outputTokens, 1200);
+  assert.equal(response.usage?.totalTokens, 8400);
+  assert.equal(typeof response.usage?.latencyMs, "number");
 });
 
 test("OpenAI-compatible Chat adapter normalizes cumulative content snapshots from incremental profiles", async () => {

@@ -12,10 +12,10 @@ import { createVisibleOutputStreamProjector } from "../../kernel/intelligence/vi
 import { modelReasoningOutputFromText } from "./model-reasoning-output.js";
 import {
   asRecord,
-  numberOrUndefined,
   parseStructuredOutput,
   parseToolArguments,
 } from "./provider-value-utils.js";
+import { modelUsageWithTiming, openAIResponsesUsageFromRecord } from "./model-usage-metrics.js";
 
 export function normalizeOpenAIResponsesResponse(input: {
   request: ModelRequest;
@@ -31,7 +31,6 @@ export function normalizeOpenAIResponsesResponse(input: {
   const { textOutput, toolCalls, reasoningContent } = parseOutputItems(output);
   const parsedOutput = parseStructuredOutput(textOutput);
   const responseId = typeof raw.id === "string" ? raw.id : createId("model-response");
-  const usage = asRecord(raw.usage);
   const finishReason = finishReasonFromStatus(raw.status, toolCalls);
   const incompleteResponse = failedResponseForIncompleteResponsesFinish({
     request: input.request,
@@ -63,12 +62,10 @@ export function normalizeOpenAIResponsesResponse(input: {
     }),
     assistantMessage: assistantMessageFromOutput({ textOutput, toolCalls, responseId }),
     toolCalls: toolCalls.length === 0 ? undefined : toolCalls,
-    usage: {
-      inputTokens: numberOrUndefined(usage.input_tokens),
-      outputTokens: numberOrUndefined(usage.output_tokens),
-      totalTokens: numberOrUndefined(usage.total_tokens),
+    usage: modelUsageWithTiming({
+      usage: openAIResponsesUsageFromRecord(raw.usage),
       latencyMs: input.latencyMs,
-    },
+    }),
     finishReason,
     validation: pendingModelOutputValidation(),
     completedAt: nowIso(),
@@ -82,7 +79,7 @@ export async function normalizeOpenAIResponsesStreamResponse(input: {
   providerKind: "openai_compatible";
   protocolKind: "openai_responses";
   model: string;
-  latencyMs: number;
+  startedAtMs: number;
   emitDelta?: (delta: ModelOutputDelta) => void;
 }): Promise<ModelResponse> {
   let textContent = "";
@@ -94,6 +91,8 @@ export async function normalizeOpenAIResponsesStreamResponse(input: {
   let reasoningDeltaIndex = 0;
   const visibleOutputStream = createVisibleOutputStreamProjector(input.request.outputContract);
   const toolCallBuilders = new Map<number, { callId?: string; name?: string; arguments: string }>();
+  let firstOutputTokenAtMs: number | undefined;
+  let usage: ReturnType<typeof openAIResponsesUsageFromRecord> | undefined;
 
   try {
     for await (const rawEvent of input.stream) {
@@ -128,12 +127,16 @@ export async function normalizeOpenAIResponsesStreamResponse(input: {
         const delta = typeof event.delta === "string" ? event.delta : "";
         if (delta.length > 0) {
           textContent += delta;
+          const outputDelta = visibleOutputStream.push(delta);
+          if (outputDelta.length > 0 && firstOutputTokenAtMs === undefined) {
+            firstOutputTokenAtMs = Date.now();
+          }
           deltaIndex = emitVisibleOutputDelta({
             emitDelta: input.emitDelta,
             request: input.request,
             providerId: input.providerId,
             model,
-            delta: visibleOutputStream.push(delta),
+            delta: outputDelta,
             index: deltaIndex,
           });
         }
@@ -187,6 +190,10 @@ export async function normalizeOpenAIResponsesStreamResponse(input: {
       if (eventType === "response.completed") {
         const response = asRecord(event.response);
         responseStatus = typeof response.status === "string" ? response.status : "completed";
+        const responseUsage = openAIResponsesUsageFromRecord(response.usage);
+        if (hasTokenUsage(responseUsage)) {
+          usage = responseUsage;
+        }
         if (typeof response.id === "string") {
           responseId = response.id;
         }
@@ -279,13 +286,20 @@ export async function normalizeOpenAIResponsesStreamResponse(input: {
     }),
     assistantMessage: assistantMessageFromOutput({ textOutput: textContent, toolCalls, responseId }),
     toolCalls: toolCalls.length === 0 ? undefined : toolCalls,
-    usage: {
-      latencyMs: input.latencyMs,
-    },
+    usage: modelUsageWithTiming({
+      usage,
+      latencyMs: Date.now() - input.startedAtMs,
+      firstTokenLatencyMs:
+        firstOutputTokenAtMs === undefined ? undefined : firstOutputTokenAtMs - input.startedAtMs,
+    }),
     finishReason: finalFinishReason,
     validation: pendingModelOutputValidation(),
     completedAt: nowIso(),
   };
+}
+
+function hasTokenUsage(value: Pick<NonNullable<ModelResponse["usage"]>, "inputTokens" | "outputTokens" | "totalTokens">): boolean {
+  return value.inputTokens !== undefined || value.outputTokens !== undefined || value.totalTokens !== undefined;
 }
 
 function emitVisibleOutputDelta(input: {

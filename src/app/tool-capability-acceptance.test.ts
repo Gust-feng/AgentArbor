@@ -38,6 +38,14 @@ test("tool capability acceptance supports a demo-building workflow without comma
       "edit_file",
       "delete_file",
       "shell_command",
+      "list_context_attachments",
+      "read_context_attachment_text",
+      "read_context_attachment_pdf_text",
+      "inspect_context_attachment_table",
+      "read_context_attachment_table",
+      "inspect_context_attachment_archive",
+      "list_context_attachment_files",
+      "search_context_attachment_files",
       "http_request",
     ]);
     assert.equal(toolNames.includes("create_directory"), false);

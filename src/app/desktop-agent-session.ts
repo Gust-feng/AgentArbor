@@ -6,6 +6,7 @@ import type { MinimalRuntime } from "./runtime.js";
 import { createMinimalRuntime } from "./runtime.js";
 import type { BasicAgentContextPack } from "./basic-agent-runtime/index.js";
 import { DESKTOP_ROOT_AGENT } from "./agent-prompts/desktop-root-agent.js";
+import { attachDesktopFileInputsToModelMessages } from "./desktop-agent-model-input-files.js";
 import { prepareDesktopAgentLoop } from "./desktop-agent-loop-preparation.js";
 import { createTaskSoilFromDesktopInput } from "./task-soil-workspace.js";
 import type {
@@ -131,12 +132,18 @@ export async function runDesktopAgentSession(
     aiMode,
     options: loopOptions,
   });
+  const modelMessages = await attachDesktopFileInputsToModelMessages({
+    messages: loop.contextPack.messages,
+    taskSoil,
+    modelCapabilities: options.capabilitySnapshot?.modelCapabilities ?? options.modelCapabilities,
+    workspaceRoot: options.workspaceRoot,
+  });
   const turn = await loop.turnRuntime.executeAutonomous({
     policy: loop.turnPolicy,
     requestId: createId("model-request"),
     callerRef: { kind: "goal", id: goalId, label: "desktop_agent" },
     inputRefs: loop.contextPack.inputRefs,
-    sanitizedMessages: loop.contextPack.messages,
+    sanitizedMessages: modelMessages,
     constraintRefs: constraintRefsFromTaskSoil(taskSoil),
     toolChoice: "auto",
     requestedAt: nowIso(),

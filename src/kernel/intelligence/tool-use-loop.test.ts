@@ -228,6 +228,52 @@ test("executeToolUseLoop returns tool results to the model before natural comple
   assert.equal(center.getCallCount(), 1);
 });
 
+test("executeToolUseLoop preserves user message attachments across tool rounds", async () => {
+  const channel = new SequenceIntelligenceChannel([
+    toolCallResponse("model-request-test", "call-search", "web_search"),
+    textResponse("model-request-final", "Final answer after inspecting image and tool result."),
+  ]);
+  const center = new TestToolBroker();
+  center.register("web_search", async () => ({ results: [{ title: "A" }] }));
+  const request = createValidModelRequest({
+    sanitizedMessages: [{
+      role: "user",
+      content: "Describe the screenshot and search for related context.",
+      attachments: [{
+        kind: "image",
+        attachmentId: "ctx-screenshot",
+        inputRef: "local-file:C:/tmp/screenshot.png",
+        source: { kind: "data", mimeType: "image/png", data: "aW1hZ2U=" },
+        filename: "screenshot.png",
+        detail: "auto",
+        byteLength: 5,
+      }],
+      ref: "goal-test",
+    }],
+  });
+
+  const result = await executeToolUseLoop(
+    {
+      intelligenceChannel: channel,
+      toolCenter: center,
+      callerAgentId: "agent-test",
+      traceId: "trace-test",
+      goalId: "goal-test",
+      allowedTools: ["web_search"],
+      maxModelRounds: 4,
+    },
+    request
+  );
+
+  const firstUser = channel.requests[0]?.sanitizedMessages.find((message) => message.role === "user");
+  const secondUser = channel.requests[1]?.sanitizedMessages.find((message) => message.role === "user");
+  assert.equal(result.stoppedReason, "completed");
+  assert.equal(firstUser?.attachments?.[0]?.attachmentId, "ctx-screenshot");
+  assert.equal(secondUser?.attachments?.[0]?.attachmentId, "ctx-screenshot");
+  assert.equal(secondUser?.attachments?.[0]?.source.kind, "data");
+  assert.equal(JSON.stringify(secondUser).includes("aW1hZ2U="), true);
+});
+
 test("executeToolUseLoop returns tool execution failures as model-visible observations", async () => {
   const eventLog = new InMemoryEventLog();
   const channel = new SequenceIntelligenceChannel([

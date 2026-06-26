@@ -193,7 +193,7 @@ test("conversation stream stays live even when profile saved openAI.stream false
   const secret = "sk-force-live-stream-secret";
   const requestedStreams: boolean[] = [];
   const providerFetch: PanelProviderFetch = async (_url, init) => {
-    requestedStreams.push((JSON.parse(init.body) as { readonly stream?: boolean }).stream === true);
+    requestedStreams.push((JSON.parse(init.body ?? "{}") as { readonly stream?: boolean }).stream === true);
     return createOpenAiStreamTextResponse("force-live-model", [
       "第一段实时输出",
       "，随后继续补充。",
@@ -247,10 +247,14 @@ test("desktop run stream carries safe tool detail through runtime persistence", 
   const secret = "sk-tool-detail-secret";
   const rawToolOutput = "RAW_TOOL_OUTPUT_SENTINEL must not reach panel stream or runtime persistence.";
   await fs.writeFile(path.join(workspace, "notes.md"), rawToolOutput, "utf8");
-  let providerCalls = 0;
-  const providerFetch: PanelProviderFetch = async () => {
-    providerCalls += 1;
-    return providerCalls === 1
+  let desktopAgentProviderCalls = 0;
+  const providerFetch: PanelProviderFetch = async (_url, init) => {
+    const requestText = init.body ?? "";
+    if (!requestText.includes("read_file")) {
+      return createOpenAiTextResponse("desktop-tool-detail-model", "无需工具的辅助请求。");
+    }
+    desktopAgentProviderCalls += 1;
+    return desktopAgentProviderCalls === 1
       ? createOpenAiReadFileToolCallResponse("notes.md")
       : createOpenAiTextResponse("desktop-tool-detail-model", "已读取授权文件并形成摘要。");
   };

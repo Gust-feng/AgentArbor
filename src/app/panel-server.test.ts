@@ -118,7 +118,7 @@ test("panel tools route can disable web search without using the stored Tavily k
     assert.equal(disabled.status, 200);
     assert.equal(disabled.body.tools.webSearch.provider, "none");
     assert.equal(disabled.body.tools.webSearch.status, "disabled");
-    assert.equal(disabled.body.tools.webSearch.secretConfigured, true);
+    assert.equal(disabled.body.tools.webSearch.secretConfigured, false);
     assert.equal(disabled.text.includes(tavilySecret), false);
     assert.equal(run.status, 200);
     assert.equal(modelFetchCalls >= 1, true);

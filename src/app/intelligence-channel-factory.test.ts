@@ -99,7 +99,7 @@ test("openai-compatible AI config prefers frozen model provider facts over env m
       model: "snapshot-model",
     },
     fetch: async (url, init) => {
-      calls.push({ url, body: JSON.parse(init.body) as Record<string, unknown> });
+      calls.push({ url, body: JSON.parse(init.body ?? "{}") as Record<string, unknown> });
       return {
         ok: true,
         status: 200,
@@ -147,7 +147,7 @@ test("openai-responses AI config prefers frozen model provider facts over env mo
       model: "snapshot-responses-model",
     },
     fetch: async (url, init) => {
-      calls.push({ url, body: JSON.parse(init.body) as Record<string, unknown> });
+      calls.push({ url, body: JSON.parse(init.body ?? "{}") as Record<string, unknown> });
       return {
         ok: true,
         status: 200,
@@ -178,6 +178,50 @@ test("openai-responses AI config prefers frozen model provider facts over env mo
   assert.equal(config.summaryInput.model, "snapshot-responses-model");
   assert.equal(calls[0]?.url, "https://snapshot.example/responses");
   assert.equal(calls[0]?.body.model, "snapshot-responses-model");
+});
+
+test("openai-responses AI config passes model-native web search flag to provider", async () => {
+  const calls: Array<{ body: Record<string, unknown> }> = [];
+  const config = createModelRuntimeConfig({
+    mode: "openai-responses",
+    env: {
+      AGENTARBOR_MODEL_API_KEY: "sk-test",
+      AGENTARBOR_MODEL_NAME: "responses-model",
+      AGENTARBOR_MODEL_BUILTIN_WEB_SEARCH: "true",
+    },
+    fetch: async (_url, init) => {
+      calls.push({ body: JSON.parse(init.body ?? "{}") as Record<string, unknown> });
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          id: "resp-model-web-search",
+          model: "responses-model",
+          status: "completed",
+          output: [
+            {
+              type: "message",
+              role: "assistant",
+              content: [{ type: "output_text", text: JSON.stringify({ summary: "Model search enabled." }) }],
+            },
+          ],
+        }),
+      };
+    },
+  });
+
+  if (!config.enabled) {
+    throw new Error("Expected config to be enabled.");
+  }
+
+  await config.createIntelligenceChannel(createMinimalRuntime()).request(createValidModelRequest());
+
+  assert.deepEqual(calls[0]?.body.tools, [
+    {
+      type: "web_search",
+      search_context_size: "medium",
+    },
+  ]);
 });
 
 function createValidModelRequest(overrides: Partial<ModelRequest> = {}): ModelRequest {

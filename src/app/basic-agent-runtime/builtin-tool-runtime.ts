@@ -4,10 +4,14 @@ import type {
   ToolStateSettings,
 } from "../../domain/config/index.js";
 import type { InformationSourceKind } from "../../domain/research/index.js";
+import type { TaskSoil } from "../../domain/soil/index.js";
 import type { ToolCategory, ToolExecutor } from "../../domain/tools/index.js";
 import {
   createBrowserSnapshotTool,
 } from "../tool-center/adapters/browser-tool.js";
+import {
+  createContextAttachmentTools,
+} from "../tool-center/adapters/context-attachment-tools.js";
 import type { DesktopAgentSkillContext } from "../desktop-agent-contracts.js";
 import {
   createHttpRequestTool,
@@ -65,14 +69,15 @@ export type CreateDesktopBasicToolRegistryOptions = {
   readonly processRegistry?: LocalCommandProcessRegistry;
   readonly skillContexts?: readonly DesktopAgentSkillContext[];
   readonly includeSkillResourceToolCatalog?: boolean;
+  readonly taskSoil?: TaskSoil;
 };
 
 export type ToolRegistryFetchLike = (
   url: string,
   init: {
-    readonly method: "POST";
+    readonly method: "GET" | "POST";
     readonly headers: Record<string, string>;
-    readonly body: string;
+    readonly body?: string;
     readonly signal?: AbortSignal;
   }
 ) => Promise<{
@@ -119,6 +124,7 @@ export function createDesktopBasicToolRegistry(
     createLocalDeleteFileTool(workspaceRoot, { sandboxPolicy }),
     createLocalShellCommandTool(workspaceRoot, { sandboxPolicy, commandShell, processRegistry: options.processRegistry }),
     createLocalRunCommandTool(workspaceRoot, { sandboxPolicy, commandShell, processRegistry: options.processRegistry }),
+    ...createContextAttachmentTools({ taskSoil: options.taskSoil, workspaceRoot }),
     ...skillResourceTool,
     createHttpRequestTool(),
     createBrowserSnapshotTool(),

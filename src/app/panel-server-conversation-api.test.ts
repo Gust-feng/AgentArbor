@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { promises as fs } from "node:fs";
+import { request } from "node:http";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -16,6 +17,7 @@ import {
   removeTemporaryTree,
   readSseUntil,
   requestJson,
+  type RequestJsonResult,
   waitForRun,
 } from "./panel-server-test-utils.js";
 import {
@@ -351,6 +353,94 @@ test("context attachment preview feeds the Basic Agent work session read model w
     await server.close();
     await removeTemporaryTree(directory);
     await removeTemporaryTree(workspace);
+  }
+});
+
+test("context attachment upload stores multipart files as refs for conversation context", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-context-upload-"));
+  const uploadSecret = "sk-uploaded-file-secret";
+  const server = await startLocalPanelServer({ port: 0, configDirectory: directory });
+  try {
+    const upload = await requestMultipartJson(server.url, "/api/context/attachments/upload", [
+      {
+        fieldName: "files",
+        filename: "notes.md",
+        contentType: "text/markdown",
+        body: Buffer.from(`uploaded markdown ${uploadSecret}\n`, "utf8"),
+      },
+      {
+        fieldName: "files",
+        filename: "screen.png",
+        contentType: "image/png",
+        body: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      },
+    ]);
+    const attachments = upload.body.attachments as readonly {
+      readonly attachmentId: string;
+      readonly kind: string;
+      readonly ref: string;
+      readonly title: string;
+      readonly summary: string;
+      readonly permissionRefs: readonly string[];
+      readonly readonlyPreview?: { readonly text: string; readonly truncated: boolean };
+      readonly readonlyPreviewMeta: {
+        readonly available: boolean;
+        readonly byteLength?: number;
+        readonly mimeType?: string;
+        readonly truncated?: boolean;
+      };
+      readonly status: string;
+    }[];
+    const textAttachment = attachments[0];
+    const imageAttachment = attachments[1];
+    assert.equal(upload.status, 200);
+    assert.equal(attachments.length, 2);
+    assert.equal(textAttachment.title, "notes.md");
+    assert.equal(textAttachment.kind, "file");
+    assert.equal(textAttachment.status, "ready");
+    assert.equal(textAttachment.readonlyPreviewMeta.mimeType, "text/markdown");
+    assert.equal(textAttachment.readonlyPreviewMeta.byteLength, Buffer.byteLength(`uploaded markdown ${uploadSecret}\n`));
+    assert.equal(textAttachment.summary.includes(directory), false);
+    assert.equal(textAttachment.ref.startsWith("local-file:"), true);
+    assert.equal(textAttachment.permissionRefs.length, 1);
+    assert.equal(textAttachment.permissionRefs[0]?.startsWith("read:local-file:"), true);
+    assert.equal(imageAttachment.title, "screen.png");
+    assert.equal(imageAttachment.readonlyPreviewMeta.mimeType, "image/png");
+    assert.equal(imageAttachment.readonlyPreview?.text, "[binary file preview omitted]");
+
+    const savedTextPath = textAttachment.ref.slice("local-file:".length);
+    assert.equal(savedTextPath.startsWith(path.join(directory, "attachments")), true);
+    assert.equal(await fs.readFile(savedTextPath, "utf8"), `uploaded markdown ${uploadSecret}\n`);
+
+    const start = await requestJson(server.url, "/api/conversations", {
+      method: "POST",
+      body: {
+        goal: "请基于刚上传的附件回答。",
+        aiMode: "fake",
+        taskSoilInput: {
+          contextRefs: attachments.map((attachment) => ({
+            attachmentId: attachment.attachmentId,
+            ref: attachment.ref,
+            kind: attachment.kind,
+            title: attachment.title,
+            summary: attachment.summary,
+            metadata: {
+              byteLength: attachment.readonlyPreviewMeta.byteLength,
+              mimeType: attachment.readonlyPreviewMeta.mimeType,
+              available: attachment.readonlyPreviewMeta.available,
+              truncated: attachment.readonlyPreviewMeta.truncated,
+            },
+          })),
+          permissionBoundaryRefs: Array.from(new Set(attachments.flatMap((attachment) => attachment.permissionRefs))),
+        },
+      },
+    });
+    assert.equal(start.status, 202);
+    assert.equal(start.body.conversation.turns[0].content.includes(uploadSecret), false);
+    assert.equal(start.body.conversation.turns[0].content, "请基于刚上传的附件回答。");
+  } finally {
+    await server.close();
+    await removeTemporaryTree(directory);
   }
 });
 
@@ -1382,7 +1472,7 @@ test("conversation context overflow stays blocked across run views and runtime s
   let providerCalls = 0;
   const providerFetch: PanelProviderFetch = async (_url, init) => {
     providerCalls += 1;
-    const body = JSON.parse(init.body) as { messages?: readonly { role?: string; content?: string }[] };
+    const body = JSON.parse(init.body ?? "{}") as { messages?: readonly { role?: string; content?: string }[] };
     const compactionRequest = body.messages?.some((message) =>
       String(message.content ?? "").includes("Context to compact:")
     ) === true;
@@ -1563,6 +1653,71 @@ test("conversation follow-up labels missing-key failure history as a system erro
     await removeTemporaryTree(directory);
   }
 });
+
+type MultipartTestFile = {
+  readonly fieldName: string;
+  readonly filename: string;
+  readonly contentType?: string;
+  readonly body: Buffer;
+};
+
+function requestMultipartJson(
+  baseUrl: string,
+  pathname: string,
+  files: readonly MultipartTestFile[]
+): Promise<RequestJsonResult> {
+  const url = new URL(pathname, baseUrl);
+  const boundary = `----agentarbor-test-${Date.now().toString(16)}`;
+  const body = multipartBody(boundary, files);
+  return new Promise((resolve, reject) => {
+    const req = request(
+      url,
+      {
+        method: "POST",
+        headers: {
+          "content-type": `multipart/form-data; boundary=${boundary}`,
+          "content-length": body.length,
+        },
+      },
+      (response) => {
+        let text = "";
+        response.setEncoding("utf8");
+        response.on("data", (chunk) => {
+          text += chunk;
+        });
+        response.on("end", () => {
+          resolve({
+            status: response.statusCode ?? 0,
+            text,
+            body: JSON.parse(text),
+          });
+        });
+      }
+    );
+    req.on("error", reject);
+    req.write(body);
+    req.end();
+  });
+}
+
+function multipartBody(boundary: string, files: readonly MultipartTestFile[]): Buffer {
+  const chunks: Buffer[] = [];
+  for (const file of files) {
+    chunks.push(Buffer.from(`--${boundary}\r\n`, "utf8"));
+    chunks.push(Buffer.from(
+      `Content-Disposition: form-data; name="${file.fieldName}"; filename="${file.filename}"\r\n`,
+      "utf8"
+    ));
+    if (file.contentType !== undefined) {
+      chunks.push(Buffer.from(`Content-Type: ${file.contentType}\r\n`, "utf8"));
+    }
+    chunks.push(Buffer.from("\r\n", "utf8"));
+    chunks.push(file.body);
+    chunks.push(Buffer.from("\r\n", "utf8"));
+  }
+  chunks.push(Buffer.from(`--${boundary}--\r\n`, "utf8"));
+  return Buffer.concat(chunks);
+}
 
 function delayedRuntimeDatabase(
   overrides: Partial<RuntimeDatabase>

@@ -193,5 +193,6 @@ export function createDesktopToolCenterFactory(
     toolRegistryScopes,
     processRegistry: resources.processRegistry,
     skillContexts: context?.skillContexts ?? [],
+    taskSoil: context?.taskSoil,
   });
 }

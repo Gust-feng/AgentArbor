@@ -133,7 +133,7 @@ export class OpenAICompatibleChatCompletionsProvider implements ModelProvider {
           protocolKind: this.protocolKind,
           model: this.model,
           dialect: this.dialect,
-          latencyMs: Date.now() - startedAt,
+          startedAtMs: startedAt,
           emitDelta: this.onOutputDelta,
         });
         if (shouldRetryWithoutStreaming(streamed, options.abortSignal)) {

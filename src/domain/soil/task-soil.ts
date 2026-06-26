@@ -7,9 +7,17 @@ import type {
 } from "./store.js";
 
 export type TaskSoilContextRef = {
+  readonly attachmentId?: string;
   readonly ref: string;
   readonly kind: "user_goal" | "workspace" | "file" | "project" | "web" | "runtime";
+  readonly title?: string;
   readonly summary?: string;
+  readonly metadata?: {
+    readonly byteLength?: number;
+    readonly mimeType?: string;
+    readonly available?: boolean;
+    readonly truncated?: boolean;
+  };
   readonly readonlyPreview?: {
     readonly title?: string;
     readonly text: string;
@@ -123,7 +131,11 @@ export function cloneGlobalSoilView(globalSoil: GlobalSoilView): GlobalSoilView 
 }
 
 function cloneTaskSoilContextRef(ref: TaskSoilContextRef): TaskSoilContextRef {
-  return { ...ref };
+  return {
+    ...ref,
+    metadata: ref.metadata === undefined ? undefined : { ...ref.metadata },
+    readonlyPreview: ref.readonlyPreview === undefined ? undefined : { ...ref.readonlyPreview },
+  };
 }
 
 function cloneConstraint(constraint: Constraint): Constraint {

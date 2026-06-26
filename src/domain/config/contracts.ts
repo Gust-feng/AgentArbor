@@ -10,7 +10,16 @@ import type {
 
 export type ConfiguredModelRuntimeMode = "none" | "fake" | "openai-compatible" | "openai-responses";
 
-export type ConfiguredWebSearchProvider = "tavily" | "none";
+export type ConfiguredWebSearchProvider =
+  | "tavily"
+  | "exa"
+  | "zai"
+  | "google"
+  | "bing"
+  | "model_builtin"
+  | "none";
+
+export type ConfiguredWebSearchProviderKind = Exclude<ConfiguredWebSearchProvider, "none" | "model_builtin">;
 
 export type ConfiguredModelProviderKind =
   | "openai_compatible"
@@ -652,23 +661,41 @@ export type InformationAccessSettings = {
     readonly provider: ConfiguredWebSearchProvider;
     readonly updatedAt: string;
   };
-  readonly tavily: {
-    readonly providerKind: "tavily";
-    readonly maxResults: number;
-    readonly secretRef: string;
-    readonly updatedAt: string;
-  };
+  readonly tavily: WebSearchProviderSettings & { readonly providerKind: "tavily" };
+  readonly exa: WebSearchProviderSettings & { readonly providerKind: "exa" };
+  readonly zai: WebSearchProviderSettings & { readonly providerKind: "zai" };
+  readonly google: WebSearchProviderSettings & { readonly providerKind: "google" };
+  readonly bing: WebSearchProviderSettings & { readonly providerKind: "bing" };
+};
+
+export type WebSearchProviderSettings = {
+  readonly providerKind: ConfiguredWebSearchProviderKind;
+  readonly maxResults: number;
+  readonly secretRef: string;
+  readonly endpoint?: string;
+  readonly searchDepth?: string;
+  readonly searchType?: string;
+  readonly searchEngine?: string;
+  readonly engineId?: string;
+  readonly market?: string;
+  readonly updatedAt: string;
 };
 
 export type SanitizedInformationAccessConfig = {
   readonly sourcePreference: readonly ConfiguredInformationSourceKind[];
   readonly web: {
     readonly provider: ConfiguredWebSearchProvider;
-    readonly providerKind: "tavily";
+    readonly providerKind?: ConfiguredWebSearchProviderKind;
     readonly maxResults: number;
-    readonly secretRef: string;
+    readonly secretRef?: string;
     readonly secretConfigured: boolean;
     readonly secretUpdatedAt?: string;
+    readonly endpoint?: string;
+    readonly searchDepth?: string;
+    readonly searchType?: string;
+    readonly searchEngine?: string;
+    readonly engineId?: string;
+    readonly market?: string;
     readonly status: "ready" | "no-provider" | "disabled";
     readonly updatedAt: string;
   };
@@ -677,16 +704,27 @@ export type SanitizedInformationAccessConfig = {
 
 export type SanitizedWebSearchConfig = {
   readonly provider: ConfiguredWebSearchProvider;
+  readonly providerKind?: ConfiguredWebSearchProviderKind;
   readonly maxResults: number;
-  readonly secretRef: string;
+  readonly secretRef?: string;
   readonly secretConfigured: boolean;
   readonly secretUpdatedAt?: string;
+  readonly endpoint?: string;
+  readonly searchDepth?: string;
+  readonly searchType?: string;
+  readonly searchEngine?: string;
+  readonly engineId?: string;
+  readonly market?: string;
   readonly status: "ready" | "no-provider" | "disabled";
   readonly updatedAt: string;
 };
 
 export type UpdateInformationAccessConfigInput = {
   readonly sourcePreference?: readonly ConfiguredInformationSourceKind[];
+  readonly provider?: ConfiguredWebSearchProvider;
+  readonly apiKey?: string;
+  readonly maxResults?: number;
+  readonly engineId?: string;
   readonly tavilyMaxResults?: number;
   readonly tavilyApiKey?: string;
 };
@@ -697,6 +735,8 @@ export type UpdateWebSearchConfigInput = {
   readonly tavilyApiKey?: string;
   readonly maxResults?: number;
   readonly tavilyMaxResults?: number;
+  readonly engineId?: string;
+  readonly googleEngineId?: string;
 };
 
 export type SanitizedWorkspaceConfig = {
@@ -741,7 +781,7 @@ export type SanitizedCommandShellConfig = {
 };
 
 export type UpdateWorkspaceConfigInput = {
-  readonly workspaceDirectory: string;
+  readonly workspaceDirectory?: string;
 };
 
 export type UpdateCommandShellConfigInput = {

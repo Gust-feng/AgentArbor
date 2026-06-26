@@ -10,8 +10,8 @@ export class WorkspaceDirectoryValidationError extends Error {
   }
 }
 
-export async function normalizeWorkspaceDirectory(value: string): Promise<string> {
-  const normalized = path.resolve(normalizeRequiredWorkspaceString(value, "workspaceDirectory"));
+export async function normalizeWorkspaceDirectory(value: string | undefined): Promise<string> {
+  const normalized = path.resolve(normalizeOptionalString(value) ?? resolveDefaultWorkspaceDirectory());
   await ensureWorkspaceReady(normalized);
   return normalized;
 }
@@ -34,12 +34,4 @@ async function ensureWorkspaceReady(directory: string): Promise<void> {
   if (info === undefined || !info.isDirectory()) {
     throw new WorkspaceDirectoryValidationError("Workspace directory must be a directory.");
   }
-}
-
-function normalizeRequiredWorkspaceString(value: string | undefined, fieldName: string): string {
-  const normalized = normalizeOptionalString(value);
-  if (normalized === undefined) {
-    throw new WorkspaceDirectoryValidationError(`${fieldName} must be a non-empty string.`);
-  }
-  return normalized;
 }

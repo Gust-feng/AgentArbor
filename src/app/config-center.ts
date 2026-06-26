@@ -60,6 +60,7 @@ import {
   sanitizeCapabilityOverride,
   sanitizeMcpArgs,
   shouldRewriteLocalSettingsFile,
+  webSearchProviderSettings,
 } from "./config-center/settings-schema.js";
 import {
   toSanitizedInformationAccessConfig,
@@ -547,33 +548,43 @@ export class ConfigCenter {
     const current = await this.readOrCreateSettings();
     const now = new Date().toISOString();
     const currentInformation = normalizeInformationAccessSettings(current.informationAccess, now);
-    const tavilyApiKey = normalizeOptionalString(input.tavilyApiKey);
+    const apiKey = firstNonBlank(input.apiKey, input.tavilyApiKey);
+    const provider =
+      normalizeWebSearchProvider(input.provider) ??
+      (apiKey === undefined ? currentInformation.webSearch.provider : "tavily");
     const nextInformation: InformationAccessSettings = {
       sourcePreference:
         input.sourcePreference === undefined || input.sourcePreference.length === 0
           ? currentInformation.sourcePreference
           : normalizeSourcePreference(input.sourcePreference),
       webSearch: {
-        provider: tavilyApiKey === undefined ? currentInformation.webSearch.provider : "tavily",
+        provider,
         updatedAt: now,
       },
-      tavily: {
-        ...currentInformation.tavily,
-        maxResults: normalizePositiveInteger(input.tavilyMaxResults) ?? currentInformation.tavily.maxResults,
-        updatedAt: now,
-      },
+      tavily: currentInformation.tavily,
+      exa: currentInformation.exa,
+      zai: currentInformation.zai,
+      google: currentInformation.google,
+      bing: currentInformation.bing,
     };
-    if (tavilyApiKey !== undefined) {
-      await this.options.secretStore.writeSecret(nextInformation.tavily.secretRef, tavilyApiKey);
+    const updatedInformation = updateSelectedWebSearchProviderSettings(nextInformation, {
+      provider,
+      now,
+      maxResults: normalizePositiveInteger(input.maxResults) ?? normalizePositiveInteger(input.tavilyMaxResults),
+      engineId: normalizeOptionalString(input.engineId),
+    });
+    const providerSettings = webSearchProviderSettings(updatedInformation, provider);
+    if (apiKey !== undefined && providerSettings !== undefined) {
+      await this.options.secretStore.writeSecret(providerSettings.secretRef, apiKey);
     }
     await this.options.settingsStore.writeSettings({
       ...current,
       version: 3,
-      informationAccess: nextInformation,
+      informationAccess: updatedInformation,
       updatedAt: now,
     });
     return toSanitizedInformationAccessConfig({
-      settings: { ...current, informationAccess: nextInformation, updatedAt: now },
+      settings: { ...current, informationAccess: updatedInformation, updatedAt: now },
       secretStore: this.options.secretStore,
     });
   }
@@ -592,26 +603,32 @@ export class ConfigCenter {
         provider,
         updatedAt: now,
       },
-      tavily: {
-        ...currentInformation.tavily,
-        maxResults:
-          normalizePositiveInteger(input.maxResults) ??
-          normalizePositiveInteger(input.tavilyMaxResults) ??
-          currentInformation.tavily.maxResults,
-        updatedAt: now,
-      },
+      tavily: currentInformation.tavily,
+      exa: currentInformation.exa,
+      zai: currentInformation.zai,
+      google: currentInformation.google,
+      bing: currentInformation.bing,
     };
-    if (apiKey !== undefined) {
-      await this.options.secretStore.writeSecret(nextInformation.tavily.secretRef, apiKey);
+    const updatedInformation = updateSelectedWebSearchProviderSettings(nextInformation, {
+      provider,
+      now,
+      maxResults:
+        normalizePositiveInteger(input.maxResults) ??
+        normalizePositiveInteger(input.tavilyMaxResults),
+      engineId: firstNonBlank(input.engineId, input.googleEngineId),
+    });
+    const providerSettings = webSearchProviderSettings(updatedInformation, provider);
+    if (apiKey !== undefined && providerSettings !== undefined) {
+      await this.options.secretStore.writeSecret(providerSettings.secretRef, apiKey);
     }
     await this.options.settingsStore.writeSettings({
       ...current,
       version: 3,
-      informationAccess: nextInformation,
+      informationAccess: updatedInformation,
       updatedAt: now,
     });
     return toSanitizedWebSearchConfig({
-      settings: { ...current, informationAccess: nextInformation, updatedAt: now },
+      settings: { ...current, informationAccess: updatedInformation, updatedAt: now },
       secretStore: this.options.secretStore,
     });
   }
@@ -682,18 +699,31 @@ export class ConfigCenter {
     const currentInformationAccess = normalizeInformationAccessSettings(settings.informationAccess, settings.updatedAt);
     const sourcePreference = input.informationAccess?.sourcePreference ?? currentInformationAccess.sourcePreference;
     const webProvider = input.informationAccess?.web.provider ?? currentInformationAccess.webSearch.provider;
-    const tavilySecretRef = input.informationAccess?.web.secretRef ?? currentInformationAccess.tavily.secretRef;
-    const tavilyMaxResults = input.informationAccess?.web.maxResults ?? currentInformationAccess.tavily.maxResults;
-    const tavilyApiKey =
-      webProvider === "none"
+    const externalWebProvider = webProvider === "model_builtin" ? "none" : webProvider;
+    const currentProviderSettings = webSearchProviderSettings(currentInformationAccess, webProvider);
+    const webSecretRef = input.informationAccess?.web.secretRef ?? currentProviderSettings?.secretRef;
+    const webMaxResults = input.informationAccess?.web.maxResults ?? currentProviderSettings?.maxResults ?? currentInformationAccess.tavily.maxResults;
+    const webApiKey =
+      webProvider === "none" || webProvider === "model_builtin" || webSecretRef === undefined
         ? undefined
-        : await this.options.secretStore.readSecret(tavilySecretRef);
+        : await this.options.secretStore.readSecret(webSecretRef);
+    const googleEngineId = input.informationAccess?.web.engineId ?? currentProviderSettings?.engineId;
     return {
       AGENTARBOR_MODEL_API_KEY: apiKey,
       AGENTARBOR_MODEL_NAME: modelProvider.model,
       AGENTARBOR_MODEL_BASE_URL: normalizeBaseUrl(modelProvider.baseUrl) ?? DEFAULT_MODEL_PROVIDER_BASE_URL,
-      AGENTARBOR_TAVILY_API_KEY: tavilyApiKey,
-      AGENTARBOR_TAVILY_MAX_RESULTS: String(tavilyMaxResults),
+      AGENTARBOR_WEB_SEARCH_PROVIDER: externalWebProvider,
+      AGENTARBOR_WEB_SEARCH_API_KEY: webApiKey,
+      AGENTARBOR_WEB_SEARCH_MAX_RESULTS: String(webMaxResults),
+      AGENTARBOR_WEB_SEARCH_GOOGLE_ENGINE_ID: googleEngineId,
+      AGENTARBOR_MODEL_BUILTIN_WEB_SEARCH: webProvider === "model_builtin" ? "true" : undefined,
+      AGENTARBOR_TAVILY_API_KEY: externalWebProvider === "tavily" ? webApiKey : undefined,
+      AGENTARBOR_TAVILY_MAX_RESULTS: externalWebProvider === "tavily" ? String(webMaxResults) : undefined,
+      AGENTARBOR_EXA_API_KEY: externalWebProvider === "exa" ? webApiKey : undefined,
+      AGENTARBOR_ZAI_API_KEY: externalWebProvider === "zai" ? webApiKey : undefined,
+      AGENTARBOR_GOOGLE_API_KEY: externalWebProvider === "google" ? webApiKey : undefined,
+      AGENTARBOR_GOOGLE_CSE_ID: externalWebProvider === "google" ? googleEngineId : undefined,
+      AGENTARBOR_BING_API_KEY: externalWebProvider === "bing" ? webApiKey : undefined,
       AGENTARBOR_INFORMATION_SOURCE_PREFERENCE: sourcePreference.join(","),
       TAVILY_API_KEY: undefined,
       OPENAI_API_KEY: undefined,
@@ -846,6 +876,32 @@ function clearProfileModelOutsideCatalog(
         ? { ...activeProfile, model: undefined, updatedAt: now }
         : activeProfile,
     updatedAt: now,
+  };
+}
+
+function updateSelectedWebSearchProviderSettings(
+  informationAccess: InformationAccessSettings,
+  input: {
+    readonly provider: InformationAccessSettings["webSearch"]["provider"];
+    readonly now: string;
+    readonly maxResults?: number;
+    readonly engineId?: string;
+  }
+): InformationAccessSettings {
+  if (input.provider === "none" || input.provider === "model_builtin") {
+    return informationAccess;
+  }
+  const currentProvider = informationAccess[input.provider];
+  return {
+    ...informationAccess,
+    [input.provider]: {
+      ...currentProvider,
+      maxResults: input.maxResults ?? currentProvider.maxResults,
+      engineId: input.provider === "google"
+        ? (input.engineId ?? currentProvider.engineId)
+        : currentProvider.engineId,
+      updatedAt: input.now,
+    },
   };
 }
 

@@ -295,11 +295,9 @@ export function parseMcpServerImport(raw: unknown): readonly UpsertMcpServerInpu
 
 export function parseWorkspaceUpdate(raw: unknown): UpdateWorkspaceConfigInput {
   const record = asRecord(raw);
-  const workspaceDirectory = optionalString(record.workspaceDirectory);
-  if (workspaceDirectory === undefined) {
-    throw new PanelHttpError(400, "missing_workspace_directory", "工作目录不能为空。");
-  }
-  return { workspaceDirectory };
+  return {
+    workspaceDirectory: typeof record.workspaceDirectory === "string" ? record.workspaceDirectory : undefined,
+  };
 }
 
 export function parseCommandShellUpdate(raw: unknown): UpdateCommandShellConfigInput {
@@ -327,6 +325,10 @@ export function parseCommandShellUpdate(raw: unknown): UpdateCommandShellConfigI
 export function parseInformationAccessUpdate(raw: unknown): UpdateInformationAccessConfigInput {
   const record = asRecord(raw);
   return {
+    provider: parseOptionalWebSearchProvider(record.provider),
+    apiKey: optionalString(record.apiKey),
+    maxResults: numberOrUndefined(record.maxResults),
+    engineId: optionalString(record.engineId),
     tavilyApiKey: optionalString(record.tavilyApiKey),
     tavilyMaxResults: numberOrUndefined(record.tavilyMaxResults),
     sourcePreference: informationSourcePreferenceOrUndefined(record.sourcePreference),
@@ -341,6 +343,8 @@ export function parseWebSearchUpdate(raw: unknown): UpdateWebSearchConfigInput {
     tavilyApiKey: optionalString(record.tavilyApiKey),
     maxResults: numberOrUndefined(record.maxResults),
     tavilyMaxResults: numberOrUndefined(record.tavilyMaxResults),
+    engineId: optionalString(record.engineId),
+    googleEngineId: optionalString(record.googleEngineId),
   };
 }
 
@@ -489,7 +493,15 @@ function parseOptionalWebSearchProvider(value: unknown): UpdateWebSearchConfigIn
   if (value === undefined || value === null || value === "") {
     return undefined;
   }
-  if (value === "tavily" || value === "none") {
+  if (
+    value === "tavily" ||
+    value === "exa" ||
+    value === "zai" ||
+    value === "google" ||
+    value === "bing" ||
+    value === "model_builtin" ||
+    value === "none"
+  ) {
     return value;
   }
   throw new PanelHttpError(400, "invalid_web_search_provider", "搜索工具 provider 无效。");

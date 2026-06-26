@@ -3,9 +3,9 @@ import type { ToolExecutor, ToolExecutionContext } from "../../../domain/tools/i
 export type FetchLike = (
   url: string,
   init: {
-    readonly method: "POST";
+    readonly method: "GET" | "POST";
     readonly headers: Record<string, string>;
-    readonly body: string;
+    readonly body?: string;
     readonly signal?: AbortSignal;
   }
 ) => Promise<FetchLikeResponse>;
@@ -17,14 +17,23 @@ export type FetchLikeResponse = {
   readonly text?: () => Promise<string>;
 };
 
+export type WebSearchProvider = "tavily" | "exa" | "zai" | "google" | "bing" | "none";
+
 export type WebSearchToolOptions = {
+  readonly provider?: WebSearchProvider;
   readonly apiKey?: string;
   readonly maxResults?: number;
+  readonly endpoint?: string;
+  readonly googleEngineId?: string;
+  readonly tavilySearchDepth?: string;
+  readonly exaSearchType?: string;
+  readonly zaiSearchEngine?: string;
+  readonly bingMarket?: string;
   readonly fetch?: FetchLike;
 };
 
 export type WebSearchToolOutput = {
-  readonly provider: "tavily" | "none";
+  readonly provider: WebSearchProvider;
   readonly status: "completed" | "no_search_provider" | "invalid_input" | "provider_failed";
   readonly searched: boolean;
   readonly query: string;
@@ -32,11 +41,17 @@ export type WebSearchToolOutput = {
     readonly title: string;
     readonly url: string;
     readonly snippet: string;
+    readonly source?: string;
+    readonly publishedAt?: string;
   }[];
   readonly message?: string;
 };
 
 const TAVILY_SEARCH_ENDPOINT = "https://api.tavily.com/search";
+const EXA_SEARCH_ENDPOINT = "https://api.exa.ai/search";
+const ZAI_SEARCH_ENDPOINT = "https://api.z.ai/api/paas/v4/web_search";
+const GOOGLE_CUSTOM_SEARCH_ENDPOINT = "https://www.googleapis.com/customsearch/v1";
+const BING_WEB_SEARCH_ENDPOINT = "https://api.bing.microsoft.com/v7.0/search";
 const DEFAULT_MAX_RESULTS = 5;
 
 export function createWebSearchTool(options: WebSearchToolOptions = {}): ToolExecutor {
@@ -108,50 +123,224 @@ async function executeWebSearch(
 
   const fetchImpl = options.fetch ?? resolveGlobalFetch();
   const apiKey = normalizeOptionalString(options.apiKey);
-  if (apiKey === undefined || fetchImpl === undefined) {
+  const provider = normalizeProvider(options.provider);
+  const requiredMissing = requiredProviderConfigurationMissing(provider, options);
+  if (provider === "none" || apiKey === undefined || fetchImpl === undefined || requiredMissing !== undefined) {
     return {
       provider: "none",
       status: "no_search_provider",
       searched: false,
       query,
       results: [],
-      message: "No configured search provider; no live web search was performed. Set a Tavily API key to enable live search.",
+      message: requiredMissing ?? `No configured ${providerLabel(provider)} search provider; no live web search was performed.`,
     };
   }
 
-  const maxResults = Math.max(1, Math.floor(options.maxResults ?? DEFAULT_MAX_RESULTS));
-  const response = await fetchImpl(TAVILY_SEARCH_ENDPOINT, {
+  const maxResults = maxResultsForProvider(provider, options.maxResults);
+  try {
+    return await executeProviderSearch({
+      provider,
+      query,
+      apiKey,
+      maxResults,
+      fetch: fetchImpl,
+      signal: _context.abortSignal,
+      options,
+    });
+  } catch (error) {
+    return {
+      provider,
+      status: "provider_failed",
+      searched: true,
+      query,
+      results: [],
+      message: error instanceof Error ? error.message : `${providerLabel(provider)} search failed.`,
+    };
+  }
+}
+
+async function executeProviderSearch(input: {
+  readonly provider: Exclude<WebSearchProvider, "none">;
+  readonly query: string;
+  readonly apiKey: string;
+  readonly maxResults: number;
+  readonly fetch: FetchLike;
+  readonly signal?: AbortSignal;
+  readonly options: WebSearchToolOptions;
+}): Promise<WebSearchToolOutput> {
+  if (input.provider === "tavily") {
+    return searchTavily(input);
+  }
+  if (input.provider === "exa") {
+    return searchExa(input);
+  }
+  if (input.provider === "zai") {
+    return searchZai(input);
+  }
+  if (input.provider === "google") {
+    return searchGoogle(input);
+  }
+  return searchBing(input);
+}
+
+async function searchTavily(input: ProviderSearchInput): Promise<WebSearchToolOutput> {
+  const response = await input.fetch(input.options.endpoint ?? TAVILY_SEARCH_ENDPOINT, {
     method: "POST",
     headers: {
       "content-type": "application/json",
     },
     body: JSON.stringify({
-      api_key: apiKey,
-      query,
-      max_results: maxResults,
-      search_depth: "basic",
+      api_key: input.apiKey,
+      query: input.query,
+      max_results: input.maxResults,
+      search_depth: input.options.tavilySearchDepth ?? "basic",
     }),
-    signal: _context.abortSignal,
+    signal: input.signal,
   });
-
   if (!response.ok) {
-    return {
-      provider: "tavily",
-      status: "provider_failed",
-      searched: true,
-      query,
-      results: [],
-      message: `Tavily search returned HTTP ${response.status}.`,
-    };
+    return providerFailed(input, response.status);
   }
-
   const raw = await response.json();
   return {
-    provider: "tavily",
+    provider: input.provider,
     status: "completed",
     searched: true,
-    query,
-    results: resultsFromTavily(raw).slice(0, maxResults),
+    query: input.query,
+    results: resultsFromTavily(raw).slice(0, input.maxResults),
+  };
+}
+
+async function searchExa(input: ProviderSearchInput): Promise<WebSearchToolOutput> {
+  const response = await input.fetch(input.options.endpoint ?? EXA_SEARCH_ENDPOINT, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-api-key": input.apiKey,
+    },
+    body: JSON.stringify({
+      query: input.query,
+      numResults: input.maxResults,
+      type: input.options.exaSearchType ?? "auto",
+      contents: {
+        highlights: true,
+      },
+    }),
+    signal: input.signal,
+  });
+  if (!response.ok) {
+    return providerFailed(input, response.status);
+  }
+  const raw = await response.json();
+  return {
+    provider: input.provider,
+    status: "completed",
+    searched: true,
+    query: input.query,
+    results: resultsFromExa(raw).slice(0, input.maxResults),
+  };
+}
+
+async function searchZai(input: ProviderSearchInput): Promise<WebSearchToolOutput> {
+  const response = await input.fetch(input.options.endpoint ?? ZAI_SEARCH_ENDPOINT, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${input.apiKey}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      search_engine: input.options.zaiSearchEngine ?? "search-prime",
+      search_query: input.query,
+      count: input.maxResults,
+    }),
+    signal: input.signal,
+  });
+  if (!response.ok) {
+    return providerFailed(input, response.status);
+  }
+  const raw = await response.json();
+  return {
+    provider: input.provider,
+    status: "completed",
+    searched: true,
+    query: input.query,
+    results: resultsFromZai(raw).slice(0, input.maxResults),
+  };
+}
+
+async function searchGoogle(input: ProviderSearchInput): Promise<WebSearchToolOutput> {
+  const url = new URL(input.options.endpoint ?? GOOGLE_CUSTOM_SEARCH_ENDPOINT);
+  url.searchParams.set("key", input.apiKey);
+  url.searchParams.set("cx", normalizeOptionalString(input.options.googleEngineId) ?? "");
+  url.searchParams.set("q", input.query);
+  url.searchParams.set("num", String(Math.min(10, input.maxResults)));
+  const response = await input.fetch(url.toString(), {
+    method: "GET",
+    headers: {
+      accept: "application/json",
+    },
+    signal: input.signal,
+  });
+  if (!response.ok) {
+    return providerFailed(input, response.status);
+  }
+  const raw = await response.json();
+  return {
+    provider: input.provider,
+    status: "completed",
+    searched: true,
+    query: input.query,
+    results: resultsFromGoogle(raw).slice(0, input.maxResults),
+  };
+}
+
+async function searchBing(input: ProviderSearchInput): Promise<WebSearchToolOutput> {
+  const url = new URL(input.options.endpoint ?? BING_WEB_SEARCH_ENDPOINT);
+  url.searchParams.set("q", input.query);
+  url.searchParams.set("count", String(input.maxResults));
+  url.searchParams.set("responseFilter", "Webpages");
+  const market = normalizeOptionalString(input.options.bingMarket);
+  if (market !== undefined) {
+    url.searchParams.set("mkt", market);
+  }
+  const response = await input.fetch(url.toString(), {
+    method: "GET",
+    headers: {
+      accept: "application/json",
+      "Ocp-Apim-Subscription-Key": input.apiKey,
+    },
+    signal: input.signal,
+  });
+  if (!response.ok) {
+    return providerFailed(input, response.status);
+  }
+  const raw = await response.json();
+  return {
+    provider: input.provider,
+    status: "completed",
+    searched: true,
+    query: input.query,
+    results: resultsFromBing(raw).slice(0, input.maxResults),
+  };
+}
+
+type ProviderSearchInput = {
+  readonly provider: Exclude<WebSearchProvider, "none">;
+  readonly query: string;
+  readonly apiKey: string;
+  readonly maxResults: number;
+  readonly fetch: FetchLike;
+  readonly signal?: AbortSignal;
+  readonly options: WebSearchToolOptions;
+};
+
+function providerFailed(input: ProviderSearchInput, status: number): WebSearchToolOutput {
+  return {
+    provider: input.provider,
+    status: "provider_failed",
+    searched: true,
+    query: input.query,
+    results: [],
+    message: `${providerLabel(input.provider)} search returned HTTP ${status}.`,
   };
 }
 
@@ -166,17 +355,143 @@ function resultsFromTavily(raw: unknown): WebSearchToolOutput["results"] {
   const results = Array.isArray(record?.results) ? record.results : [];
   return results.map((item) => {
     const result = asRecord(item);
-    return {
+    return compactSearchResult({
       title: stringOrFallback(result?.title, "Untitled result"),
       url: stringOrFallback(result?.url, ""),
       snippet: stringOrFallback(result?.content ?? result?.snippet, ""),
-    };
+      source: stringOrUndefined(result?.source),
+    });
   });
+}
+
+function resultsFromExa(raw: unknown): WebSearchToolOutput["results"] {
+  const record = asRecord(raw);
+  const results = Array.isArray(record?.results) ? record.results : [];
+  return results.map((item) => {
+    const result = asRecord(item);
+    const highlights = Array.isArray(result?.highlights)
+      ? result.highlights.filter((highlight): highlight is string => typeof highlight === "string").join(" ")
+      : undefined;
+    return compactSearchResult({
+      title: stringOrFallback(result?.title, "Untitled result"),
+      url: stringOrFallback(result?.url, ""),
+      snippet: stringOrFallback(highlights ?? result?.text ?? result?.summary, ""),
+      publishedAt: stringOrUndefined(result?.publishedDate ?? result?.published_at),
+    });
+  });
+}
+
+function resultsFromZai(raw: unknown): WebSearchToolOutput["results"] {
+  const record = asRecord(raw);
+  const results = Array.isArray(record?.search_result) ? record.search_result : [];
+  return results.map((item) => {
+    const result = asRecord(item);
+    return compactSearchResult({
+      title: stringOrFallback(result?.title, "Untitled result"),
+      url: stringOrFallback(result?.link, ""),
+      snippet: stringOrFallback(result?.content, ""),
+      source: stringOrUndefined(result?.media),
+      publishedAt: stringOrUndefined(result?.publish_date),
+    });
+  });
+}
+
+function resultsFromGoogle(raw: unknown): WebSearchToolOutput["results"] {
+  const record = asRecord(raw);
+  const results = Array.isArray(record?.items) ? record.items : [];
+  return results.map((item) => {
+    const result = asRecord(item);
+    return compactSearchResult({
+      title: stringOrFallback(result?.title, "Untitled result"),
+      url: stringOrFallback(result?.link, ""),
+      snippet: stringOrFallback(result?.snippet, ""),
+      source: stringOrUndefined(result?.displayLink),
+      publishedAt: publishedAtFromGoogleResult(result),
+    });
+  });
+}
+
+function resultsFromBing(raw: unknown): WebSearchToolOutput["results"] {
+  const record = asRecord(raw);
+  const webPages = asRecord(record?.webPages);
+  const results = Array.isArray(webPages?.value) ? webPages.value : [];
+  return results.map((item) => {
+    const result = asRecord(item);
+    return compactSearchResult({
+      title: stringOrFallback(result?.name, "Untitled result"),
+      url: stringOrFallback(result?.url, ""),
+      snippet: stringOrFallback(result?.snippet, ""),
+      publishedAt: stringOrUndefined(result?.dateLastCrawled),
+    });
+  });
+}
+
+function compactSearchResult(input: {
+  readonly title: string;
+  readonly url: string;
+  readonly snippet: string;
+  readonly source?: string;
+  readonly publishedAt?: string;
+}): WebSearchToolOutput["results"][number] {
+  return {
+    title: input.title,
+    url: input.url,
+    snippet: input.snippet,
+    ...(input.source === undefined ? {} : { source: input.source }),
+    ...(input.publishedAt === undefined ? {} : { publishedAt: input.publishedAt }),
+  };
 }
 
 function resolveGlobalFetch(): FetchLike | undefined {
   const fetchImpl = (globalThis as { fetch?: FetchLike }).fetch;
   return typeof fetchImpl === "function" ? fetchImpl : undefined;
+}
+
+function normalizeProvider(value: WebSearchProvider | undefined): WebSearchProvider {
+  if (
+    value === "none" ||
+    value === "tavily" ||
+    value === "exa" ||
+    value === "zai" ||
+    value === "google" ||
+    value === "bing"
+  ) {
+    return value;
+  }
+  return "tavily";
+}
+
+function requiredProviderConfigurationMissing(
+  provider: WebSearchProvider,
+  options: WebSearchToolOptions
+): string | undefined {
+  if (provider === "google" && normalizeOptionalString(options.googleEngineId) === undefined) {
+    return "Google Custom Search requires a Programmable Search Engine ID.";
+  }
+  return undefined;
+}
+
+function maxResultsForProvider(provider: Exclude<WebSearchProvider, "none">, value: number | undefined): number {
+  const requested = Math.max(1, Math.floor(value ?? DEFAULT_MAX_RESULTS));
+  if (provider === "google") {
+    return Math.min(10, requested);
+  }
+  if (provider === "tavily") {
+    return Math.min(20, requested);
+  }
+  if (provider === "zai" || provider === "bing") {
+    return Math.min(50, requested);
+  }
+  return Math.min(100, requested);
+}
+
+function providerLabel(provider: WebSearchProvider): string {
+  if (provider === "exa") return "Exa";
+  if (provider === "zai") return "Z.AI";
+  if (provider === "google") return "Google Custom Search";
+  if (provider === "bing") return "Bing Web Search";
+  if (provider === "none") return "configured";
+  return "Tavily";
 }
 
 function normalizeOptionalString(value: string | undefined): string | undefined {
@@ -187,9 +502,26 @@ function stringOrFallback(value: unknown, fallback: string): string {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : fallback;
 }
 
+function stringOrUndefined(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
+
 function asRecord(value: unknown): Readonly<Record<string, unknown>> | undefined {
   if (typeof value === "object" && value !== null && !Array.isArray(value)) {
     return value as Readonly<Record<string, unknown>>;
+  }
+  return undefined;
+}
+
+function publishedAtFromGoogleResult(result: Readonly<Record<string, unknown>> | undefined): string | undefined {
+  const pageMap = asRecord(result?.pagemap);
+  const metatags = Array.isArray(pageMap?.metatags) ? pageMap.metatags : [];
+  for (const item of metatags) {
+    const tag = asRecord(item);
+    const value = stringOrUndefined(tag?.["article:published_time"] ?? tag?.["date"] ?? tag?.["datepublished"]);
+    if (value !== undefined) {
+      return value;
+    }
   }
   return undefined;
 }

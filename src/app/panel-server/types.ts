@@ -29,9 +29,9 @@ export type PanelContextAttachmentSelection = {
 export type PanelProviderFetch = (
   url: string,
   init: {
-    readonly method: "POST";
+    readonly method: "GET" | "POST";
     readonly headers: Record<string, string>;
-    readonly body: string;
+    readonly body?: string;
     readonly signal?: AbortSignal;
   }
 ) => Promise<{

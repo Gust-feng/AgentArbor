@@ -484,14 +484,48 @@ test("ConfigCenter web search provider none disables Tavily environment projecti
 
     assert.equal(disabled.provider, "none");
     assert.equal(disabled.status, "disabled");
-    assert.equal(disabled.secretConfigured, true);
+    assert.equal(disabled.secretConfigured, false);
     assert.equal(disabled.maxResults, 4);
     assert.equal(informationAccess.web.provider, "none");
     assert.equal(informationAccess.web.status, "disabled");
     assert.equal(env.AGENTARBOR_TAVILY_API_KEY, undefined);
+    assert.equal(env.AGENTARBOR_WEB_SEARCH_PROVIDER, "none");
+    assert.equal(env.AGENTARBOR_WEB_SEARCH_API_KEY, undefined);
     assert.equal(env.TAVILY_API_KEY, undefined);
     assert.equal(settingsRaw.includes(tavilySecret), false);
     assert.equal(secretsRaw.includes(tavilySecret), true);
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("ConfigCenter model built-in web search enables model-native search without external provider", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-web-search-model-builtin-"));
+  const tavilySecret = "tvly-model-builtin-secret";
+  try {
+    const settingsStore = new FileSystemNormalSettingsStore(directory);
+    const secretStore = new FileSystemLocalDevSecretStore(directory);
+    const configCenter = new ConfigCenter({ settingsStore, secretStore });
+
+    await configCenter.updateWebSearchConfig({
+      provider: "tavily",
+      apiKey: tavilySecret,
+      maxResults: 4,
+    });
+    const updated = await configCenter.updateWebSearchConfig({ provider: "model_builtin" });
+    const informationAccess = await configCenter.getInformationAccessConfig();
+    const env = await configCenter.createModelRuntimeEnvironment();
+
+    assert.equal(updated.provider, "model_builtin");
+    assert.equal(updated.status, "ready");
+    assert.equal(updated.secretConfigured, false);
+    assert.equal(updated.maxResults, 4);
+    assert.equal(informationAccess.web.provider, "model_builtin");
+    assert.equal(informationAccess.web.status, "ready");
+    assert.equal(env.AGENTARBOR_MODEL_BUILTIN_WEB_SEARCH, "true");
+    assert.equal(env.AGENTARBOR_WEB_SEARCH_PROVIDER, "none");
+    assert.equal(env.AGENTARBOR_WEB_SEARCH_API_KEY, undefined);
+    assert.equal(env.AGENTARBOR_TAVILY_API_KEY, undefined);
   } finally {
     await fs.rm(directory, { recursive: true, force: true });
   }
@@ -762,6 +796,74 @@ test("ConfigCenter repairs built-in model provider drift without overwriting cus
     assert.equal(openaiProxy?.label, "OpenAI Proxy");
     assert.equal(openaiProxy?.baseUrl, "https://openrouter.ai/api/v1");
     assert.equal(openaiProxy?.model, "deepseek-proxy-model");
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("ConfigCenter stores Exa web search keys under provider-scoped secrets", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-web-search-exa-"));
+  const exaSecret = "exa-web-search-secret";
+  try {
+    const settingsStore = new FileSystemNormalSettingsStore(directory);
+    const secretStore = new FileSystemLocalDevSecretStore(directory);
+    const configCenter = new ConfigCenter({ settingsStore, secretStore });
+
+    const updated = await configCenter.updateWebSearchConfig({
+      provider: "exa",
+      apiKey: exaSecret,
+      maxResults: 7,
+    });
+    const env = await configCenter.createModelRuntimeEnvironment();
+    const settingsRaw = await fs.readFile(settingsStore.settingsPath, "utf8");
+    const secretsRaw = await fs.readFile(secretStore.secretsPath, "utf8");
+
+    assert.equal(updated.provider, "exa");
+    assert.equal(updated.providerKind, "exa");
+    assert.equal(updated.status, "ready");
+    assert.equal(updated.secretConfigured, true);
+    assert.equal(updated.maxResults, 7);
+    assert.equal(JSON.stringify(updated).includes(exaSecret), false);
+    assert.equal(env.AGENTARBOR_WEB_SEARCH_PROVIDER, "exa");
+    assert.equal(env.AGENTARBOR_WEB_SEARCH_API_KEY, exaSecret);
+    assert.equal(env.AGENTARBOR_EXA_API_KEY, exaSecret);
+    assert.equal(env.AGENTARBOR_TAVILY_API_KEY, undefined);
+    assert.equal(settingsRaw.includes(exaSecret), false);
+    assert.equal(secretsRaw.includes(exaSecret), true);
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("ConfigCenter requires Google engine id before reporting web search ready", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-web-search-google-"));
+  const googleSecret = "google-web-search-secret";
+  try {
+    const settingsStore = new FileSystemNormalSettingsStore(directory);
+    const secretStore = new FileSystemLocalDevSecretStore(directory);
+    const configCenter = new ConfigCenter({ settingsStore, secretStore });
+
+    const withoutEngine = await configCenter.updateWebSearchConfig({
+      provider: "google",
+      apiKey: googleSecret,
+      maxResults: 3,
+    });
+    const ready = await configCenter.updateWebSearchConfig({
+      provider: "google",
+      googleEngineId: "engine-id",
+    });
+    const env = await configCenter.createModelRuntimeEnvironment();
+
+    assert.equal(withoutEngine.provider, "google");
+    assert.equal(withoutEngine.status, "no-provider");
+    assert.equal(withoutEngine.secretConfigured, true);
+    assert.equal(ready.status, "ready");
+    assert.equal(ready.engineId, "engine-id");
+    assert.equal(env.AGENTARBOR_WEB_SEARCH_PROVIDER, "google");
+    assert.equal(env.AGENTARBOR_WEB_SEARCH_API_KEY, googleSecret);
+    assert.equal(env.AGENTARBOR_GOOGLE_API_KEY, googleSecret);
+    assert.equal(env.AGENTARBOR_WEB_SEARCH_GOOGLE_ENGINE_ID, "engine-id");
+    assert.equal(env.AGENTARBOR_GOOGLE_CSE_ID, "engine-id");
   } finally {
     await fs.rm(directory, { recursive: true, force: true });
   }
@@ -1285,16 +1387,14 @@ test("ConfigCenter stores and validates workspace directory", async () => {
 
     const defaultWorkspace = await configCenter.getWorkspaceConfig();
     const updated = await configCenter.updateWorkspaceConfig({ workspaceDirectory: workspace });
+    const reset = await configCenter.updateWorkspaceConfig({ workspaceDirectory: "   " });
     const missing = path.join(workspace, "child", "missing");
-    await assert.rejects(
-      () => configCenter.updateWorkspaceConfig({ workspaceDirectory: "   " }),
-      /workspaceDirectory must be a non-empty string\./
-    );
     const autoCreated = await configCenter.updateWorkspaceConfig({ workspaceDirectory: missing });
     const settingsRaw = JSON.parse(await fs.readFile(settingsStore.settingsPath, "utf8")) as { workspaceDirectory?: string };
 
     assert.equal(defaultWorkspace.workspaceDirectory, path.join(os.homedir(), ".agentarbor", "workspace"));
     assert.equal(updated.workspaceDirectory, path.resolve(workspace));
+    assert.equal(reset.workspaceDirectory, path.join(os.homedir(), ".agentarbor", "workspace"));
     assert.equal(autoCreated.workspaceDirectory, path.resolve(missing));
     assert.equal(settingsRaw.workspaceDirectory, path.resolve(missing));
   } finally {

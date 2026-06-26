@@ -30,7 +30,7 @@ test("real AI smoke runner drives Cognitive Work Session with stubbed openai-com
   const secret = "sk-real-ai-smoke-runner-secret";
   const fetchCalls: { readonly authorization?: string; readonly body: Record<string, unknown> }[] = [];
   const providerFetch: UndergroundAiProviderFetch = async (_url, init) => {
-    const body = JSON.parse(init.body) as Record<string, unknown>;
+    const body = JSON.parse(init.body ?? "{}") as Record<string, unknown>;
     fetchCalls.push({ authorization: init.headers.authorization, body });
     const response = responseForCall(fetchCalls.length);
     return {

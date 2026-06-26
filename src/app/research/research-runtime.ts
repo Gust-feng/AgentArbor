@@ -15,7 +15,7 @@ import type { ReadonlySoilStore } from "../../domain/soil/index.js";
 import { createMinimalReadonlySoilStore } from "../../domain/soil/index.js";
 import type { Constraint } from "../../domain/constraints.js";
 import { createId, nowIso } from "../../kernel/id.js";
-import type { FetchLike as TavilyFetchLike } from "../tool-center/adapters/web-search-tool.js";
+import type { FetchLike as WebSearchFetchLike, WebSearchProvider } from "../tool-center/adapters/web-search-tool.js";
 import {
   createCodebaseInformationSourceAdapter,
   createCommandLogInformationSourceAdapter,
@@ -38,13 +38,18 @@ export type ResearchRuntimeOptions = {
 
 export type CreateDefaultResearchRuntimeOptions = {
   readonly env?: Readonly<Record<string, string | undefined>>;
-  readonly tavilyFetch?: TavilyFetchLike;
+  readonly tavilyFetch?: WebSearchFetchLike;
+  readonly webSearchFetch?: WebSearchFetchLike;
   readonly pageFetch?: PageFetchLike;
   readonly commandLogRegistry?: CommandLogReadRegistry;
   readonly codebaseRoot?: string;
   readonly soilStore?: ReadonlySoilStore;
   readonly constraints?: readonly Constraint[];
   readonly sourcePreference?: readonly InformationSourceKind[];
+  readonly webSearchProvider?: WebSearchProvider;
+  readonly webSearchApiKey?: string;
+  readonly webSearchMaxResults?: number;
+  readonly googleEngineId?: string;
   readonly tavilyMaxResults?: number;
 };
 
@@ -313,14 +318,23 @@ export function createDefaultResearchRuntime(options: CreateDefaultResearchRunti
   const soilStore =
     options.soilStore ??
     (options.constraints === undefined ? undefined : createMinimalReadonlySoilStore(options.constraints));
-  const tavilyKey = firstNonBlank(env.AGENTARBOR_TAVILY_API_KEY, env.TAVILY_API_KEY);
+  const provider = options.webSearchProvider ?? webSearchProviderFromEnv(env);
+  const apiKey = options.webSearchApiKey ?? webSearchApiKeyFromEnv(env, provider);
+  const providerSettings = webSearchSettingsFromEnv(env, provider);
   return new ResearchRuntime({
     sourcePreference: options.sourcePreference,
     adapters: [
       createWebInformationSourceAdapter({
-        apiKey: tavilyKey,
-        fetch: options.tavilyFetch,
-        maxResults: options.tavilyMaxResults,
+        provider,
+        apiKey,
+        fetch: options.webSearchFetch ?? options.tavilyFetch,
+        maxResults: options.webSearchMaxResults ?? options.tavilyMaxResults ?? providerSettings.maxResults,
+        endpoint: providerSettings.endpoint,
+        googleEngineId: options.googleEngineId ?? providerSettings.googleEngineId,
+        tavilySearchDepth: providerSettings.tavilySearchDepth,
+        exaSearchType: providerSettings.exaSearchType,
+        zaiSearchEngine: providerSettings.zaiSearchEngine,
+        bingMarket: providerSettings.bingMarket,
       }),
       createPageInformationSourceAdapter({ fetch: options.pageFetch }),
       createCommandLogInformationSourceAdapter({ registry: options.commandLogRegistry }),
@@ -332,6 +346,68 @@ export function createDefaultResearchRuntime(options: CreateDefaultResearchRunti
       createStubInformationSourceAdapter("github"),
     ],
   });
+}
+
+function webSearchProviderFromEnv(env: Readonly<Record<string, string | undefined>>): WebSearchProvider {
+  const provider = normalizeOptionalString(env.AGENTARBOR_WEB_SEARCH_PROVIDER);
+  if (provider === "model_builtin") {
+    return "none";
+  }
+  if (
+    provider === "tavily" ||
+    provider === "exa" ||
+    provider === "zai" ||
+    provider === "google" ||
+    provider === "bing" ||
+    provider === "none"
+  ) {
+    return provider;
+  }
+  if (firstNonBlank(env.AGENTARBOR_EXA_API_KEY) !== undefined) return "exa";
+  if (firstNonBlank(env.AGENTARBOR_ZAI_API_KEY) !== undefined) return "zai";
+  if (firstNonBlank(env.AGENTARBOR_GOOGLE_API_KEY) !== undefined) return "google";
+  if (firstNonBlank(env.AGENTARBOR_BING_API_KEY) !== undefined) return "bing";
+  return "tavily";
+}
+
+function webSearchApiKeyFromEnv(
+  env: Readonly<Record<string, string | undefined>>,
+  provider: WebSearchProvider
+): string | undefined {
+  if (provider === "none") {
+    return undefined;
+  }
+  const generic = env.AGENTARBOR_WEB_SEARCH_API_KEY;
+  if (provider === "exa") return firstNonBlank(generic, env.AGENTARBOR_EXA_API_KEY, env.EXA_API_KEY);
+  if (provider === "zai") return firstNonBlank(generic, env.AGENTARBOR_ZAI_API_KEY, env.ZAI_API_KEY, env.ZHIPUAI_API_KEY);
+  if (provider === "google") return firstNonBlank(generic, env.AGENTARBOR_GOOGLE_API_KEY, env.GOOGLE_API_KEY);
+  if (provider === "bing") return firstNonBlank(generic, env.AGENTARBOR_BING_API_KEY, env.BING_API_KEY);
+  return firstNonBlank(generic, env.AGENTARBOR_TAVILY_API_KEY, env.TAVILY_API_KEY);
+}
+
+function webSearchSettingsFromEnv(
+  env: Readonly<Record<string, string | undefined>>,
+  provider: WebSearchProvider
+): {
+  readonly maxResults?: number;
+  readonly endpoint?: string;
+  readonly googleEngineId?: string;
+  readonly tavilySearchDepth?: string;
+  readonly exaSearchType?: string;
+  readonly zaiSearchEngine?: string;
+  readonly bingMarket?: string;
+} {
+  const maxResults = positiveIntegerFromString(env.AGENTARBOR_WEB_SEARCH_MAX_RESULTS) ??
+    (provider === "tavily" ? positiveIntegerFromString(env.AGENTARBOR_TAVILY_MAX_RESULTS) : undefined);
+  return {
+    maxResults,
+    endpoint: firstNonBlank(env.AGENTARBOR_WEB_SEARCH_ENDPOINT),
+    googleEngineId: firstNonBlank(env.AGENTARBOR_WEB_SEARCH_GOOGLE_ENGINE_ID, env.AGENTARBOR_GOOGLE_CSE_ID),
+    tavilySearchDepth: firstNonBlank(env.AGENTARBOR_TAVILY_SEARCH_DEPTH),
+    exaSearchType: firstNonBlank(env.AGENTARBOR_EXA_SEARCH_TYPE),
+    zaiSearchEngine: firstNonBlank(env.AGENTARBOR_ZAI_SEARCH_ENGINE),
+    bingMarket: firstNonBlank(env.AGENTARBOR_BING_MARKET),
+  };
 }
 
 function firstTraceMessage(sourceSteps: readonly ResearchTraceSourceStep[]): string | undefined {
@@ -474,6 +550,14 @@ function firstNonBlank(...values: readonly (string | undefined)[]): string | und
     }
   }
   return undefined;
+}
+
+function positiveIntegerFromString(value: string | undefined): number | undefined {
+  if (value === undefined || value.trim().length === 0) {
+    return undefined;
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : undefined;
 }
 
 function defaultSourceLabel(source: InformationSourceKind): string {

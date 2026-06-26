@@ -15,7 +15,7 @@ import {
   normalizeHttpRequestFailure,
   type HttpRequestErrorFacts,
 } from "../tool-center/adapters/http-request-tool.js";
-import { createWebSearchTool, type FetchLike as TavilyFetchLike } from "../tool-center/adapters/web-search-tool.js";
+import { createWebSearchTool, type FetchLike as WebSearchFetchLike, type WebSearchProvider } from "../tool-center/adapters/web-search-tool.js";
 
 export type InformationSourceSearchRequest = {
   readonly query: string;
@@ -92,16 +92,39 @@ const DEFAULT_PAGE_READ_TIMEOUT_MS = 15_000;
 const MAX_PAGE_READ_TIMEOUT_MS = 120_000;
 
 export function createWebInformationSourceAdapter(options: {
+  readonly provider?: WebSearchProvider;
   readonly apiKey?: string;
-  readonly fetch?: TavilyFetchLike;
+  readonly fetch?: WebSearchFetchLike;
   readonly maxResults?: number;
+  readonly endpoint?: string;
+  readonly googleEngineId?: string;
+  readonly tavilySearchDepth?: string;
+  readonly exaSearchType?: string;
+  readonly zaiSearchEngine?: string;
+  readonly bingMarket?: string;
 } = {}): InformationSourceAdapter {
-  const tool = createWebSearchTool({ apiKey: options.apiKey, fetch: options.fetch, maxResults: options.maxResults });
-  const hasProvider = stringOrUndefined(options.apiKey) !== undefined && (options.fetch !== undefined || resolveGlobalWebSearchFetch() !== undefined);
+  const provider = options.provider ?? "tavily";
+  const tool = createWebSearchTool({
+    provider,
+    apiKey: options.apiKey,
+    fetch: options.fetch,
+    maxResults: options.maxResults,
+    endpoint: options.endpoint,
+    googleEngineId: options.googleEngineId,
+    tavilySearchDepth: options.tavilySearchDepth,
+    exaSearchType: options.exaSearchType,
+    zaiSearchEngine: options.zaiSearchEngine,
+    bingMarket: options.bingMarket,
+  });
+  const hasProvider =
+    provider !== "none" &&
+    stringOrUndefined(options.apiKey) !== undefined &&
+    (options.fetch !== undefined || resolveGlobalWebSearchFetch() !== undefined) &&
+    (provider !== "google" || stringOrUndefined(options.googleEngineId) !== undefined);
   return {
     source: "web",
     capability: {
-      label: "live web search",
+      label: `${provider} web search`,
       modelVisible: hasProvider,
       unavailableReason: hasProvider ? undefined : "No configured web search provider is available.",
     },
@@ -133,7 +156,8 @@ export function createWebInformationSourceAdapter(options: {
         const record = asRecord(item);
         const uri = stringOrUndefined(record.url);
         const metadata: Readonly<Record<string, string | number | boolean>> =
-          request.site === undefined ? { provider: "tavily" } : { provider: "tavily", site: request.site };
+          request.site === undefined ? { provider } : { provider, site: request.site };
+        const publishedAt = stringOrUndefined(record.publishedAt);
         return {
           refId: createResearchRefId("web", `${providerQuery}:${uri ?? index}`),
           source: "web" as const,
@@ -141,7 +165,7 @@ export function createWebInformationSourceAdapter(options: {
           uri,
           snippet: truncate(normalizeWhitespace(stringOrUndefined(record.snippet) ?? ""), 320),
           status: uri === undefined ? "no-provider" as const : "available" as const,
-          metadata,
+          metadata: publishedAt === undefined ? metadata : { ...metadata, publishedAt },
         };
       });
       return {
@@ -740,8 +764,8 @@ function resolveGlobalPageFetch(): PageFetchLike | undefined {
   return typeof fetchImpl === "function" ? fetchImpl : undefined;
 }
 
-function resolveGlobalWebSearchFetch(): TavilyFetchLike | undefined {
-  const fetchImpl = (globalThis as { fetch?: TavilyFetchLike }).fetch;
+function resolveGlobalWebSearchFetch(): WebSearchFetchLike | undefined {
+  const fetchImpl = (globalThis as { fetch?: WebSearchFetchLike }).fetch;
   return typeof fetchImpl === "function" ? fetchImpl : undefined;
 }
 

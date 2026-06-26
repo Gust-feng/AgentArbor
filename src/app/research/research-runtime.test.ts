@@ -95,7 +95,7 @@ test("ResearchRuntime searches web refs and reads selected pages through preview
   const secret = "tvly-research-secret";
   const tavilyCalls: Record<string, unknown>[] = [];
   const tavilyFetch: TavilyFetchLike = async (_url, init) => {
-    tavilyCalls.push(JSON.parse(init.body) as Record<string, unknown>);
+    tavilyCalls.push(JSON.parse(init.body ?? "{}") as Record<string, unknown>);
     return {
       ok: true,
       status: 200,

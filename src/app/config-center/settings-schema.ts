@@ -2,8 +2,10 @@ import type {
   AgentArborLocalSettings,
   ConfiguredInformationSourceKind,
   ConfiguredWebSearchProvider,
+  ConfiguredWebSearchProviderKind,
   InformationAccessSettings,
   ModelProviderProfileSettings,
+  WebSearchProviderSettings,
 } from "../../domain/config/index.js";
 import { listBuiltinModelProviderPresets } from "../../domain/config/index.js";
 import {
@@ -78,6 +80,10 @@ export {
 export { parseMcpCommandLine, sanitizeMcpArgs } from "./tool-mcp-settings.js";
 
 export const INFORMATION_TAVILY_SECRET_REF = "secret://local-dev/information-source/tavily/default/api-key";
+export const INFORMATION_EXA_SECRET_REF = "secret://local-dev/information-source/exa/default/api-key";
+export const INFORMATION_ZAI_SECRET_REF = "secret://local-dev/information-source/zai/default/api-key";
+export const INFORMATION_GOOGLE_SECRET_REF = "secret://local-dev/information-source/google/default/api-key";
+export const INFORMATION_BING_SECRET_REF = "secret://local-dev/information-source/bing/default/api-key";
 const DEFAULT_INFORMATION_SOURCE_PREFERENCE: readonly ConfiguredInformationSourceKind[] = [
   "web",
   "codebase",
@@ -88,6 +94,10 @@ const DEFAULT_INFORMATION_SOURCE_PREFERENCE: readonly ConfiguredInformationSourc
   "github",
 ];
 const DEFAULT_TAVILY_MAX_RESULTS = 5;
+const DEFAULT_EXA_MAX_RESULTS = 5;
+const DEFAULT_ZAI_MAX_RESULTS = 5;
+const DEFAULT_GOOGLE_MAX_RESULTS = 5;
+const DEFAULT_BING_MAX_RESULTS = 5;
 
 export function parseLocalSettingsFile(raw: unknown): AgentArborLocalSettings {
   const record = asRecord(raw);
@@ -118,6 +128,10 @@ export function parseLocalSettingsFile(raw: unknown): AgentArborLocalSettings {
   const informationAccess = asRecord(record.informationAccess);
   const webSearch = asRecord(informationAccess.webSearch);
   const tavily = asRecord(informationAccess.tavily);
+  const exa = asRecord(informationAccess.exa);
+  const zai = asRecord(informationAccess.zai);
+  const google = asRecord(informationAccess.google);
+  const bing = asRecord(informationAccess.bing);
   return normalizeLocalSettings({
     version: record.version === 3 ? 3 : record.version === 2 ? 2 : 1,
     modelProvider: activeProfile,
@@ -151,7 +165,41 @@ export function parseLocalSettingsFile(raw: unknown): AgentArborLocalSettings {
               secretRef:
                 optionalString(tavily.secretRef) ??
                 INFORMATION_TAVILY_SECRET_REF,
+              endpoint: optionalString(tavily.endpoint),
+              searchDepth: optionalString(tavily.searchDepth) ?? "basic",
               updatedAt: optionalString(tavily.updatedAt) ?? updatedAt,
+            },
+            exa: {
+              providerKind: "exa",
+              maxResults: positiveIntegerFromUnknown(exa.maxResults) ?? DEFAULT_EXA_MAX_RESULTS,
+              secretRef: optionalString(exa.secretRef) ?? INFORMATION_EXA_SECRET_REF,
+              endpoint: optionalString(exa.endpoint),
+              searchType: optionalString(exa.searchType) ?? "auto",
+              updatedAt: optionalString(exa.updatedAt) ?? updatedAt,
+            },
+            zai: {
+              providerKind: "zai",
+              maxResults: positiveIntegerFromUnknown(zai.maxResults) ?? DEFAULT_ZAI_MAX_RESULTS,
+              secretRef: optionalString(zai.secretRef) ?? INFORMATION_ZAI_SECRET_REF,
+              endpoint: optionalString(zai.endpoint),
+              searchEngine: optionalString(zai.searchEngine) ?? "search-prime",
+              updatedAt: optionalString(zai.updatedAt) ?? updatedAt,
+            },
+            google: {
+              providerKind: "google",
+              maxResults: positiveIntegerFromUnknown(google.maxResults) ?? DEFAULT_GOOGLE_MAX_RESULTS,
+              secretRef: optionalString(google.secretRef) ?? INFORMATION_GOOGLE_SECRET_REF,
+              endpoint: optionalString(google.endpoint),
+              engineId: optionalString(google.engineId),
+              updatedAt: optionalString(google.updatedAt) ?? updatedAt,
+            },
+            bing: {
+              providerKind: "bing",
+              maxResults: positiveIntegerFromUnknown(bing.maxResults) ?? DEFAULT_BING_MAX_RESULTS,
+              secretRef: optionalString(bing.secretRef) ?? INFORMATION_BING_SECRET_REF,
+              endpoint: optionalString(bing.endpoint),
+              market: optionalString(bing.market) ?? "en-US",
+              updatedAt: optionalString(bing.updatedAt) ?? updatedAt,
             },
           },
     workspaceDirectory: optionalString(record.workspaceDirectory),
@@ -269,6 +317,34 @@ export function createDefaultInformationAccessSettings(now: string): Information
       providerKind: "tavily",
       maxResults: DEFAULT_TAVILY_MAX_RESULTS,
       secretRef: INFORMATION_TAVILY_SECRET_REF,
+      searchDepth: "basic",
+      updatedAt: now,
+    },
+    exa: {
+      providerKind: "exa",
+      maxResults: DEFAULT_EXA_MAX_RESULTS,
+      secretRef: INFORMATION_EXA_SECRET_REF,
+      searchType: "auto",
+      updatedAt: now,
+    },
+    zai: {
+      providerKind: "zai",
+      maxResults: DEFAULT_ZAI_MAX_RESULTS,
+      secretRef: INFORMATION_ZAI_SECRET_REF,
+      searchEngine: "search-prime",
+      updatedAt: now,
+    },
+    google: {
+      providerKind: "google",
+      maxResults: DEFAULT_GOOGLE_MAX_RESULTS,
+      secretRef: INFORMATION_GOOGLE_SECRET_REF,
+      updatedAt: now,
+    },
+    bing: {
+      providerKind: "bing",
+      maxResults: DEFAULT_BING_MAX_RESULTS,
+      secretRef: INFORMATION_BING_SECRET_REF,
+      market: "en-US",
       updatedAt: now,
     },
   };
@@ -285,14 +361,43 @@ export function normalizeInformationAccessSettings(
     sourcePreference: normalizeSourcePreference(settings.sourcePreference),
     webSearch: {
       provider: normalizeWebSearchProvider(settings.webSearch?.provider) ?? "tavily",
-      updatedAt: normalizeOptionalString(settings.webSearch?.updatedAt) ?? settings.tavily.updatedAt ?? now,
+      updatedAt: normalizeOptionalString(settings.webSearch?.updatedAt) ?? settings.tavily?.updatedAt ?? now,
     },
     tavily: {
       providerKind: "tavily",
-      maxResults: normalizePositiveInteger(settings.tavily.maxResults) ?? DEFAULT_TAVILY_MAX_RESULTS,
-      secretRef: normalizeOptionalString(settings.tavily.secretRef) ?? INFORMATION_TAVILY_SECRET_REF,
-      updatedAt: normalizeOptionalString(settings.tavily.updatedAt) ?? now,
+      maxResults: normalizePositiveInteger(settings.tavily?.maxResults) ?? DEFAULT_TAVILY_MAX_RESULTS,
+      secretRef: normalizeOptionalString(settings.tavily?.secretRef) ?? INFORMATION_TAVILY_SECRET_REF,
+      endpoint: normalizeOptionalString(settings.tavily?.endpoint),
+      searchDepth: normalizeOptionalString(settings.tavily?.searchDepth) ?? "basic",
+      updatedAt: normalizeOptionalString(settings.tavily?.updatedAt) ?? now,
     },
+    exa: normalizeWebSearchProviderSettings(settings.exa, {
+      providerKind: "exa",
+      maxResults: DEFAULT_EXA_MAX_RESULTS,
+      secretRef: INFORMATION_EXA_SECRET_REF,
+      searchType: "auto",
+      updatedAt: now,
+    }),
+    zai: normalizeWebSearchProviderSettings(settings.zai, {
+      providerKind: "zai",
+      maxResults: DEFAULT_ZAI_MAX_RESULTS,
+      secretRef: INFORMATION_ZAI_SECRET_REF,
+      searchEngine: "search-prime",
+      updatedAt: now,
+    }),
+    google: normalizeWebSearchProviderSettings(settings.google, {
+      providerKind: "google",
+      maxResults: DEFAULT_GOOGLE_MAX_RESULTS,
+      secretRef: INFORMATION_GOOGLE_SECRET_REF,
+      updatedAt: now,
+    }),
+    bing: normalizeWebSearchProviderSettings(settings.bing, {
+      providerKind: "bing",
+      maxResults: DEFAULT_BING_MAX_RESULTS,
+      secretRef: INFORMATION_BING_SECRET_REF,
+      market: "en-US",
+      updatedAt: now,
+    }),
   };
 }
 
@@ -301,7 +406,35 @@ export function normalizeOptionalString(value: string | undefined): string | und
 }
 
 export function normalizeWebSearchProvider(value: ConfiguredWebSearchProvider | undefined): ConfiguredWebSearchProvider | undefined {
-  return value === "tavily" || value === "none" ? value : undefined;
+  return isWebSearchProvider(value) ? value : undefined;
+}
+
+export function isWebSearchProvider(value: unknown): value is ConfiguredWebSearchProvider {
+  return value === "tavily" ||
+    value === "exa" ||
+    value === "zai" ||
+    value === "google" ||
+    value === "bing" ||
+    value === "model_builtin" ||
+    value === "none";
+}
+
+export function isWebSearchProviderKind(value: unknown): value is ConfiguredWebSearchProviderKind {
+  return value === "tavily" ||
+    value === "exa" ||
+    value === "zai" ||
+    value === "google" ||
+    value === "bing";
+}
+
+export function webSearchProviderSettings(
+  informationAccess: InformationAccessSettings,
+  provider: ConfiguredWebSearchProvider
+): WebSearchProviderSettings | undefined {
+  if (provider === "none" || provider === "model_builtin") {
+    return undefined;
+  }
+  return informationAccess[provider];
 }
 
 export function normalizeSourcePreference(
@@ -314,7 +447,7 @@ export function normalizeSourcePreference(
 function parseWebSearchProvider(
   value: unknown
 ): NonNullable<AgentArborLocalSettings["informationAccess"]>["webSearch"]["provider"] {
-  return value === "none" ? "none" : "tavily";
+  return isWebSearchProvider(value) ? value : "tavily";
 }
 
 function parseInformationSourcePreference(value: unknown): NonNullable<AgentArborLocalSettings["informationAccess"]>["sourcePreference"] {
@@ -340,4 +473,22 @@ function isConfiguredInformationSourceKind(value: unknown): value is ConfiguredI
 
 function positiveIntegerFromUnknown(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? Math.max(1, Math.floor(value)) : undefined;
+}
+
+function normalizeWebSearchProviderSettings<T extends ConfiguredWebSearchProviderKind>(
+  settings: (WebSearchProviderSettings & { readonly providerKind: T }) | undefined,
+  fallback: WebSearchProviderSettings & { readonly providerKind: T }
+): WebSearchProviderSettings & { readonly providerKind: T } {
+  return {
+    providerKind: fallback.providerKind,
+    maxResults: normalizePositiveInteger(settings?.maxResults) ?? fallback.maxResults,
+    secretRef: normalizeOptionalString(settings?.secretRef) ?? fallback.secretRef,
+    endpoint: normalizeOptionalString(settings?.endpoint) ?? fallback.endpoint,
+    searchDepth: normalizeOptionalString(settings?.searchDepth) ?? fallback.searchDepth,
+    searchType: normalizeOptionalString(settings?.searchType) ?? fallback.searchType,
+    searchEngine: normalizeOptionalString(settings?.searchEngine) ?? fallback.searchEngine,
+    engineId: normalizeOptionalString(settings?.engineId) ?? fallback.engineId,
+    market: normalizeOptionalString(settings?.market) ?? fallback.market,
+    updatedAt: normalizeOptionalString(settings?.updatedAt) ?? fallback.updatedAt,
+  };
 }

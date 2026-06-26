@@ -1,5 +1,6 @@
 import type {
   AgentArborLocalSettings,
+  ConfiguredWebSearchProvider,
   LocalDevSecretStore,
   SanitizedInformationAccessConfig,
   SanitizedModelProviderConfig,
@@ -11,7 +12,7 @@ import {
   DEFAULT_MODEL_PROVIDER_BASE_URL,
   normalizeBaseUrl,
 } from "./model-provider-settings.js";
-import { normalizeInformationAccessSettings } from "./settings-schema.js";
+import { normalizeInformationAccessSettings, webSearchProviderSettings } from "./settings-schema.js";
 import { normalizeConfiguredWorkspaceDirectory } from "./workspace-settings.js";
 
 export async function toSanitizedModelProviderConfig(input: {
@@ -57,11 +58,17 @@ export async function toSanitizedInformationAccessConfig(input: {
     sourcePreference: [...informationAccess.sourcePreference],
     web: {
       provider: webSearch.provider,
-      providerKind: informationAccess.tavily.providerKind,
+      providerKind: webSearch.providerKind,
       maxResults: webSearch.maxResults,
       secretRef: webSearch.secretRef,
       secretConfigured: webSearch.secretConfigured,
       secretUpdatedAt: webSearch.secretUpdatedAt,
+      endpoint: webSearch.endpoint,
+      searchDepth: webSearch.searchDepth,
+      searchType: webSearch.searchType,
+      searchEngine: webSearch.searchEngine,
+      engineId: webSearch.engineId,
+      market: webSearch.market,
       status: webSearch.status,
       updatedAt: webSearch.updatedAt,
     },
@@ -79,15 +86,31 @@ export async function toSanitizedWebSearchConfig(input: {
   readonly secretStore: LocalDevSecretStore;
 }): Promise<SanitizedWebSearchConfig> {
   const informationAccess = normalizeInformationAccessSettings(input.settings.informationAccess, input.settings.updatedAt);
-  const secret = await input.secretStore.getMetadata(informationAccess.tavily.secretRef);
   const provider = informationAccess.webSearch.provider;
+  const providerSettings = webSearchProviderSettings(informationAccess, provider);
+  const secret = providerSettings === undefined
+    ? undefined
+    : await input.secretStore.getMetadata(providerSettings.secretRef);
+  const hasRequiredProviderOptions = providerHasRequiredOptions(provider, providerSettings);
+  const secretConfigured = secret?.configured === true;
   return {
     provider,
-    maxResults: informationAccess.tavily.maxResults,
-    secretRef: informationAccess.tavily.secretRef,
-    secretConfigured: secret.configured,
-    secretUpdatedAt: secret.updatedAt,
-    status: provider === "none" ? "disabled" : secret.configured ? "ready" : "no-provider",
+    providerKind: providerSettings?.providerKind,
+    maxResults: providerSettings?.maxResults ?? informationAccess.tavily.maxResults,
+    secretRef: providerSettings?.secretRef,
+    secretConfigured,
+    secretUpdatedAt: secret?.updatedAt,
+    endpoint: providerSettings?.endpoint,
+    searchDepth: providerSettings?.searchDepth,
+    searchType: providerSettings?.searchType,
+    searchEngine: providerSettings?.searchEngine,
+    engineId: providerSettings?.engineId,
+    market: providerSettings?.market,
+    status: provider === "none"
+      ? "disabled"
+      : provider === "model_builtin" || (secretConfigured && hasRequiredProviderOptions)
+        ? "ready"
+        : "no-provider",
     updatedAt: informationAccess.webSearch.updatedAt,
   };
 }
@@ -97,4 +120,20 @@ export function toSanitizedWorkspaceConfig(settings: AgentArborLocalSettings): S
     workspaceDirectory: normalizeConfiguredWorkspaceDirectory(settings.workspaceDirectory),
     updatedAt: settings.updatedAt,
   };
+}
+
+function providerHasRequiredOptions(
+  provider: ConfiguredWebSearchProvider,
+  settings: ReturnType<typeof webSearchProviderSettings>
+): boolean {
+  if (provider === "none") {
+    return false;
+  }
+  if (provider === "model_builtin") {
+    return true;
+  }
+  if (provider === "google") {
+    return typeof settings?.engineId === "string" && settings.engineId.trim().length > 0;
+  }
+  return settings !== undefined;
 }

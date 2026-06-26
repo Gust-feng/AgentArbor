@@ -478,7 +478,7 @@ test("research search tool passes site constraint into runtime query", async () 
 test("default ToolCenter passes configured Tavily max results into ResearchRuntime", async () => {
   const bodies: Record<string, unknown>[] = [];
   const fetch: FetchLike = async (_url, init) => {
-    bodies.push(JSON.parse(init.body) as Record<string, unknown>);
+    bodies.push(JSON.parse(init.body ?? "{}") as Record<string, unknown>);
     return {
       ok: true,
       status: 200,
@@ -516,7 +516,7 @@ test("default ToolCenter passes configured Tavily max results into ResearchRunti
 test("default ToolCenter folds search site into provider query without exposing the key", async () => {
   const bodies: Record<string, unknown>[] = [];
   const fetch: FetchLike = async (_url, init) => {
-    bodies.push(JSON.parse(init.body) as Record<string, unknown>);
+    bodies.push(JSON.parse(init.body ?? "{}") as Record<string, unknown>);
     return {
       ok: true,
       status: 200,
@@ -554,7 +554,7 @@ test("configured ToolCenter reads Tavily config and registers search/read withou
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-configured-tool-center-"));
   const bodies: Record<string, unknown>[] = [];
   const fetch: FetchLike = async (_url, init) => {
-    bodies.push(JSON.parse(init.body) as Record<string, unknown>);
+    bodies.push(JSON.parse(init.body ?? "{}") as Record<string, unknown>);
     return {
       ok: true,
       status: 200,
@@ -586,6 +586,54 @@ test("configured ToolCenter reads Tavily config and registers search/read withou
     assert.equal(search.status, "completed");
     assert.equal(bodies[0]?.max_results, 1);
     assert.equal(JSON.stringify(search.output).includes("tvly-configured-tool-secret"), false);
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("configured ToolCenter reads Exa web search config and routes search through Exa", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "agentarbor-configured-tool-center-exa-"));
+  const calls: { readonly headers: Record<string, string>; readonly body: Record<string, unknown> }[] = [];
+  const fetch: FetchLike = async (_url, init) => {
+    calls.push({
+      headers: init.headers,
+      body: JSON.parse(init.body ?? "{}") as Record<string, unknown>,
+    });
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        results: [{ title: "Configured Exa", url: "https://example.test/exa", highlights: ["configured exa snippet"] }],
+      }),
+    };
+  };
+  try {
+    const configCenter = new ConfigCenter({
+      settingsStore: new FileSystemNormalSettingsStore(directory),
+      secretStore: new FileSystemLocalDevSecretStore(directory),
+    });
+    await configCenter.updateWebSearchConfig({
+      provider: "exa",
+      apiKey: "exa-configured-tool-secret",
+      maxResults: 2,
+    });
+
+    const center = await createConfiguredToolCenter(configCenter, { fetch, playwrightAvailable: true });
+    const search = await center.execute(
+      { callId: "call-search-exa", toolName: "search", input: { query: "AgentArbor", sources: ["web"] } },
+      { callerAgentId: "agent-test", traceId: "trace-test", goalId: "goal-test" },
+      { callerAgentId: "agent-test", allowedTools: ["search", "read"] }
+    );
+    const output = search.output as {
+      readonly results?: readonly { readonly metadata?: Readonly<Record<string, unknown>>; readonly snippet?: string }[];
+    };
+
+    assert.equal(search.status, "completed");
+    assert.equal(calls[0]?.headers["x-api-key"], "exa-configured-tool-secret");
+    assert.equal(calls[0]?.body.numResults, 2);
+    assert.equal(output.results?.[0]?.metadata?.provider, "exa");
+    assert.equal(output.results?.[0]?.snippet, "configured exa snippet");
+    assert.equal(JSON.stringify(search.output).includes("exa-configured-tool-secret"), false);
   } finally {
     await fs.rm(directory, { recursive: true, force: true });
   }

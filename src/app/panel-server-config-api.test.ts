@@ -777,6 +777,14 @@ test("panel workspace config route stores and returns the workspace directory", 
       method: "POST",
       body: { workspaceDirectory: path.join(workspace, "created", "child") },
     });
+    const reset = await requestJson(server.url, "/api/config/workspace", {
+      method: "POST",
+      body: { workspaceDirectory: "" },
+    });
+    const implicitDefault = await requestJson(server.url, "/api/config/workspace", {
+      method: "POST",
+      body: {},
+    });
 
     assert.equal(initial.status, 200);
     assert.equal(typeof initial.body.workspace.workspaceDirectory, "string");
@@ -785,6 +793,10 @@ test("panel workspace config route stores and returns the workspace directory", 
     assert.equal(after.body.workspace.workspaceDirectory, path.resolve(workspace));
     assert.equal(created.status, 200);
     assert.equal(created.body.workspace.workspaceDirectory, path.resolve(workspace, "created", "child"));
+    assert.equal(reset.status, 200);
+    assert.equal(reset.body.workspace.workspaceDirectory, path.join(os.homedir(), ".agentarbor", "workspace"));
+    assert.equal(implicitDefault.status, 200);
+    assert.equal(implicitDefault.body.workspace.workspaceDirectory, path.join(os.homedir(), ".agentarbor", "workspace"));
   } finally {
     await server.close();
     await removeTemporaryTree(directory);

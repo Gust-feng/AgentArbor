@@ -31,6 +31,7 @@ import {
   failPanelRunJob,
 } from "./run-execution.js";
 import { handlePanelRunRoute } from "./run-routes.js";
+import { handlePanelDeepRoute } from "./deep-routes.js";
 import { listPanelSkills, refreshPanelSkills, setPanelSkillEnabled } from "./skill-service.js";
 export type { PanelModelCatalogFetch, PanelProviderFetch, PanelServerOptions, StartedPanelServer } from "./types.js";
 
@@ -111,6 +112,11 @@ async function handlePanelRequest(
       informationAccess: await runtime.configCenter.getInformationAccessConfig(),
       configDirectory: runtime.configDirectory,
     });
+    return;
+  }
+
+  // /api/deep/* —— deep 产品 API 端点族（T3-1/T3-2/T3-3）。前缀明确，置于分发链靠前。
+  if (await handlePanelDeepRoute(runtime, request, response, url)) {
     return;
   }
 

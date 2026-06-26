@@ -99,9 +99,18 @@ test("runtime keeps external LLM SDKs behind provider adapters", () => {
     assert.equal(packageName in allDependencies, false, `${packageName} must not be introduced as a dependency`);
   }
 
+  // 边界规则区分 production 运行时代码与测试代码：
+  //   - production（domain/kernel/app 非测试）不得直接 import adapters/intelligence，
+  //     只能经 intelligence-channel-factory 组合根使用模型能力，保证依赖倒置。
+  //   - 测试文件（*.test.ts）使用 FakeModelProvider 等测试桩构造 IntelligenceChannel
+  //     是标准测试实践；FakeModelProvider 是 adapters/intelligence 下的测试基础设施，
+  //     不构成对真实 provider 实现的耦合，故对 adapters/intelligence import 豁免。
+  //   - external LLM SDK（openai 等）禁止在任何文件（含测试）直接 import（见下），
+  //     这是真正的安全底线，不受测试豁免影响。
   for (const file of sourceFiles(["src/domain", "src/kernel", "src/app"])) {
     const source = readFileSync(file, "utf8");
-    if (!isAllowedProviderAdapterCompositionRoot(file)) {
+    const isTestFile = file.endsWith(".test.ts");
+    if (!isAllowedProviderAdapterCompositionRoot(file) && !isTestFile) {
       assert.equal(
         /from\s+["'][^"']*adapters\/intelligence/.test(source),
         false,

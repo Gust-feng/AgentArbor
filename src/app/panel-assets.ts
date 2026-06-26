@@ -7,8 +7,26 @@ export type PanelStaticAsset = {
   readonly body: Buffer;
 };
 
+export const PANEL_BRAND_LOGO_PATHNAME = "/favicon.svg";
+export const PANEL_BRAND_LEGACY_ICON_PATHNAME = "/favicon.ico";
+
 export function createPanelHtml(): string {
   return readPanelTextAsset("index.html");
+}
+
+export function readPanelBrandLogoAsset(): PanelStaticAsset {
+  return {
+    contentType: "image/svg+xml",
+    body: readFileSync(resolvePanelBrandLogoPath()),
+  };
+}
+
+export function resolvePanelBrandLogoPath(): string {
+  const candidates = panelAssetRoots().flatMap((root) => [
+    path.join(root, "favicon.svg"),
+    path.join(root, "public", "favicon.svg"),
+  ]);
+  return resolveFirstExistingFile(candidates, "Panel brand logo asset not found: favicon.svg");
 }
 
 export function readPanelStaticAsset(pathname: string): PanelStaticAsset | undefined {
@@ -50,8 +68,12 @@ function readPanelTextAsset(assetName: string): string {
 }
 
 function resolvePanelAssetPath(assetName: string): string {
-  for (const root of panelAssetRoots()) {
-    const candidate = path.join(root, assetName);
+  const candidates = panelAssetRoots().map((root) => path.join(root, assetName));
+  return resolveFirstExistingFile(candidates, `Panel static asset not found: ${assetName}`);
+}
+
+function resolveFirstExistingFile(candidates: readonly string[], missingMessage: string): string {
+  for (const candidate of candidates) {
     try {
       readFileSync(candidate);
       return candidate;
@@ -62,7 +84,7 @@ function resolvePanelAssetPath(assetName: string): string {
       throw error;
     }
   }
-  throw new Error(`Panel static asset not found: ${assetName}`);
+  throw new Error(missingMessage);
 }
 
 function panelAssetRoots(): readonly string[] {

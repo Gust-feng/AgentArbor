@@ -18,6 +18,14 @@ import {
   startPanelDesktopSession,
   type PanelDesktopSession,
 } from "./panel-desktop-launcher.js";
+import {
+  clearDesktopWindowMaximizeState,
+  createDesktopWindowMaximizeState,
+  readDesktopWindowPresentationState,
+  toggleDesktopWindowMaximize,
+  type DesktopWindowPresentationState,
+  type DesktopWindowMaximizeState,
+} from "./panel-desktop-window-controls.js";
 import { startLocalPanelServer } from "./panel-server.js";
 
 const activeWindows = new Set<BrowserWindow>();
@@ -34,7 +42,10 @@ const STARTUP_MAIN_HANDOFF_VISIBLE_CHANNEL = "agentarbor:startup-main-handoff-vi
 const STARTUP_RENDERER_FRAME_STATS_CHANNEL = "agentarbor:startup-renderer-frame-stats";
 const WINDOW_MINIMIZE_CHANNEL = "agentarbor:window-minimize";
 const WINDOW_TOGGLE_MAXIMIZE_CHANNEL = "agentarbor:window-toggle-maximize";
+const WINDOW_GET_STATE_CHANNEL = "agentarbor:window-get-state";
+const WINDOW_STATE_CHANGED_CHANNEL = "agentarbor:window-state-changed";
 const WINDOW_CLOSE_CHANNEL = "agentarbor:window-close";
+const DESKTOP_WINDOW_MAXIMIZE_ANIMATION_MS = 180;
 const STARTUP_WINDOW_EXPAND_MS = 720;
 const STARTUP_WINDOW_REDUCED_MOTION_MS = 80;
 const STARTUP_WINDOW_RENDERER_SETTLE_MS = 80;
@@ -143,6 +154,7 @@ type DesktopStartupWindowState = {
 
 type DesktopMainWindowState = {
   readonly startupWindow: BrowserWindow;
+  readonly maximizeState: DesktopWindowMaximizeState;
 };
 
 // NOTE: 不使用顶层 await，因为 ESM 顶层 await 会阻塞事件循环，
@@ -286,8 +298,27 @@ function createElectronPanelWindow(
   });
   mainWindowStates.set(mainWindow, {
     startupWindow: mainWindow,
+    maximizeState: createDesktopWindowMaximizeState(),
   });
   registerDesktopWindowCleanup(mainWindow);
+  mainWindow.on("unmaximize", () => {
+    const state = mainWindowStates.get(mainWindow);
+    if (state === undefined) return;
+    clearDesktopWindowMaximizeState(state.maximizeState);
+    notifyCurrentDesktopWindowState(mainWindow);
+  });
+  mainWindow.on("maximize", () => {
+    notifyCurrentDesktopWindowState(mainWindow);
+  });
+  mainWindow.on("leave-full-screen", () => {
+    const state = mainWindowStates.get(mainWindow);
+    if (state === undefined) return;
+    clearDesktopWindowMaximizeState(state.maximizeState);
+    notifyCurrentDesktopWindowState(mainWindow);
+  });
+  mainWindow.on("enter-full-screen", () => {
+    notifyCurrentDesktopWindowState(mainWindow);
+  });
   let readyToShowHandler: (() => void) | undefined;
   const notifyReadyToShow = () => {
     const state = startupWindowStates.get(mainWindow);
@@ -346,6 +377,10 @@ function registerDesktopWindowCleanup(window: BrowserWindow): void {
     if (startupState?.showFallbackTimer !== undefined) {
       clearTimeout(startupState.showFallbackTimer);
       startupState.showFallbackTimer = undefined;
+    }
+    const mainState = mainWindowStates.get(window);
+    if (mainState !== undefined) {
+      clearDesktopWindowMaximizeState(mainState.maximizeState);
     }
     activeWindows.delete(window);
   });
@@ -407,6 +442,13 @@ function installStartupWindowExpansionBridge(): void {
     recordStartupWindowSmokeRendererFrameStats(stats);
     completeStartupWindowSmokeIfRequested(window);
   });
+  ipcMain.handle(WINDOW_GET_STATE_CHANNEL, (event: IpcMainInvokeEvent): DesktopWindowPresentationState => {
+    const window = panelWindowFromEvent(event);
+    if (window === undefined) return createDefaultDesktopWindowState();
+    const state = mainWindowStates.get(window);
+    if (state === undefined) return createDefaultDesktopWindowState();
+    return readDesktopWindowPresentationState(window, state.maximizeState);
+  });
   ipcMain.on(WINDOW_MINIMIZE_CHANNEL, (event: IpcMainEvent) => {
     const window = panelWindowFromEvent(event);
     if (window === undefined) return;
@@ -415,11 +457,15 @@ function installStartupWindowExpansionBridge(): void {
   ipcMain.on(WINDOW_TOGGLE_MAXIMIZE_CHANNEL, (event: IpcMainEvent) => {
     const window = panelWindowFromEvent(event);
     if (window === undefined) return;
-    if (window.isMaximized()) {
-      window.unmaximize();
-    } else {
-      window.maximize();
-    }
+    const state = mainWindowStates.get(window);
+    if (state === undefined) return;
+    toggleDesktopWindowMaximize(window, state.maximizeState, {
+      targetBounds: desktopWindowMaximizeTargetBounds(window),
+      durationMs: DESKTOP_WINDOW_MAXIMIZE_ANIMATION_MS,
+      onStateChange: (nextState) => {
+        notifyDesktopWindowState(window, nextState);
+      },
+    });
   });
   ipcMain.on(WINDOW_CLOSE_CHANNEL, (event: IpcMainEvent) => {
     const window = panelWindowFromEvent(event);
@@ -440,6 +486,31 @@ function startupWindowFromPanelEvent(event: Pick<IpcMainEvent, "sender">): Brows
   const window = panelWindowFromEvent(event);
   if (window === undefined) return undefined;
   return startupWindowStates.has(window) ? window : undefined;
+}
+
+function createDefaultDesktopWindowState(): DesktopWindowPresentationState {
+  return {
+    maximized: false,
+    animating: false,
+  };
+}
+
+function notifyDesktopWindowState(
+  window: BrowserWindow,
+  state: DesktopWindowPresentationState
+): void {
+  if (window.isDestroyed()) return;
+  window.webContents.send(WINDOW_STATE_CHANGED_CHANNEL, state);
+}
+
+function notifyCurrentDesktopWindowState(window: BrowserWindow): void {
+  const state = mainWindowStates.get(window);
+  if (state === undefined) return;
+  notifyDesktopWindowState(window, readDesktopWindowPresentationState(window, state.maximizeState));
+}
+
+function desktopWindowMaximizeTargetBounds(window: BrowserWindow): Rectangle {
+  return screen.getDisplayMatching(window.getBounds()).workArea;
 }
 
 function readStartupWindowExpansionRequest(request: unknown): DesktopStartupWindowExpansionRequest {
@@ -669,6 +740,7 @@ function scheduleStartupWindowNativeControlRestore(startupWindow: BrowserWindow,
     if (startupWindow.isDestroyed()) return;
     startupWindow.setMinimumSize(state.targetMinWidth, state.targetMinHeight);
     startupWindow.setResizable(true);
+    startupWindow.setMaximizable(true);
     startupWindow.focus();
   }, STARTUP_WINDOW_NATIVE_CONTROL_RESTORE_DELAY_MS);
   timer.unref();

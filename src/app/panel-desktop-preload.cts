@@ -55,7 +55,7 @@ type DesktopStartupRendererVisualStats = {
 
 type DesktopStartupThemeSnapshot = {
   readonly styleId: "default" | "classic" | "glass";
-  readonly colorId: "light" | "dark" | "warm" | "forest" | "aurora" | "sunset" | "ocean";
+  readonly colorId: "system" | "light" | "dark" | "warm" | "forest" | "slate" | "aurora" | "sunset" | "ocean";
   readonly backgroundColor: string;
   readonly shellColor: string;
   readonly borderColor: string;
@@ -64,6 +64,11 @@ type DesktopStartupThemeSnapshot = {
     readonly width: number;
     readonly height: number;
   };
+};
+
+type DesktopWindowPresentationState = {
+  readonly maximized: boolean;
+  readonly animating: boolean;
 };
 
 const STARTUP_THEME_STYLE_STORAGE_KEY = "agentarbor:style";
@@ -91,6 +96,21 @@ contextBridge.exposeInMainWorld("agentarborDesktop", {
   notifyStartupRendererFrameStats: (stats: DesktopStartupRendererFrameStats) => {
     ipcRenderer.send("agentarbor:startup-renderer-frame-stats", stats);
   },
+  getWindowState: () => {
+    return ipcRenderer.invoke("agentarbor:window-get-state") as Promise<DesktopWindowPresentationState>;
+  },
+  onWindowStateChanged: (callback: (state: DesktopWindowPresentationState) => void) => {
+    const listener: Parameters<typeof ipcRenderer.on>[1] = (_event, payload: unknown) => {
+      const state = readDesktopWindowPresentationState(payload);
+      if (state !== undefined) {
+        callback(state);
+      }
+    };
+    ipcRenderer.on("agentarbor:window-state-changed", listener);
+    return () => {
+      ipcRenderer.removeListener("agentarbor:window-state-changed", listener);
+    };
+  },
   minimizeWindow: () => {
     ipcRenderer.send("agentarbor:window-minimize");
   },
@@ -102,13 +122,24 @@ contextBridge.exposeInMainWorld("agentarborDesktop", {
   },
 });
 
+function readDesktopWindowPresentationState(payload: unknown): DesktopWindowPresentationState | undefined {
+  if (payload === null || typeof payload !== "object") return undefined;
+  const candidate = payload as Partial<Record<keyof DesktopWindowPresentationState, unknown>>;
+  if (typeof candidate.maximized !== "boolean" || typeof candidate.animating !== "boolean") return undefined;
+  return {
+    maximized: candidate.maximized,
+    animating: candidate.animating,
+  };
+}
+
 function readDesktopStartupThemeSnapshot(): DesktopStartupThemeSnapshot {
   const styleId = readStorageValue(STARTUP_THEME_STYLE_STORAGE_KEY);
   const colorId = readStorageValue(STARTUP_THEME_COLOR_STORAGE_KEY);
   const normalized = normalizeDesktopStartupTheme(styleId, colorId);
+  const resolvedColorId = resolveDesktopStartupColorId(normalized);
   return {
     ...normalized,
-    ...STARTUP_THEME_COLORS[normalized.colorId],
+    ...STARTUP_THEME_COLORS[resolvedColorId],
     mainWindow: {
       width: STARTUP_MAIN_WINDOW_WIDTH,
       height: STARTUP_MAIN_WINDOW_HEIGHT,
@@ -144,10 +175,12 @@ function isDesktopStartupStyleId(value: string | undefined): value is DesktopSta
 
 function isDesktopStartupColorId(value: string | undefined): value is DesktopStartupThemeSnapshot["colorId"] {
   return (
+    value === "system" ||
     value === "light" ||
     value === "dark" ||
     value === "warm" ||
     value === "forest" ||
+    value === "slate" ||
     value === "aurora" ||
     value === "sunset" ||
     value === "ocean"
@@ -158,9 +191,18 @@ function isDesktopStartupColorForStyle(
   colorId: DesktopStartupThemeSnapshot["colorId"],
   styleId: DesktopStartupThemeSnapshot["styleId"]
 ): boolean {
-  if (styleId === "default") return colorId === "light" || colorId === "dark";
-  if (styleId === "classic") return colorId === "warm" || colorId === "forest";
+  if (styleId === "default") return colorId === "system" || colorId === "light" || colorId === "dark";
+  if (styleId === "classic") return colorId === "warm" || colorId === "forest" || colorId === "slate";
   return colorId === "aurora" || colorId === "sunset" || colorId === "ocean";
+}
+
+function resolveDesktopStartupColorId(
+  theme: Pick<DesktopStartupThemeSnapshot, "styleId" | "colorId">
+): Exclude<DesktopStartupThemeSnapshot["colorId"], "system"> {
+  if (theme.styleId === "default" && theme.colorId === "system") {
+    return typeof window.matchMedia === "function" && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  }
+  return theme.colorId as Exclude<DesktopStartupThemeSnapshot["colorId"], "system">;
 }
 
 const STARTUP_STYLE_DEFAULT_COLORS = {
@@ -197,6 +239,12 @@ const STARTUP_THEME_COLORS = {
     borderColor: "#b9c7b7",
     textColor: "#203027",
   },
+  slate: {
+    backgroundColor: "#eef1f4",
+    shellColor: "#fbfcfb",
+    borderColor: "#b8c6d3",
+    textColor: "#18222c",
+  },
   aurora: {
     backgroundColor: "#edf7ff",
     shellColor: "#f7fbff",
@@ -216,6 +264,6 @@ const STARTUP_THEME_COLORS = {
     textColor: "#132833",
   },
 } satisfies Record<
-  DesktopStartupThemeSnapshot["colorId"],
+  Exclude<DesktopStartupThemeSnapshot["colorId"], "system">,
   Omit<DesktopStartupThemeSnapshot, "styleId" | "colorId" | "mainWindow">
 >;

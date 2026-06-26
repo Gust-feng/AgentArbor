@@ -1,4 +1,5 @@
 import { createStartupIntroDefaultWindowSize } from "./panel-startup-intro-geometry.js";
+import { resolvePanelBrandLogoPath } from "./panel-assets.js";
 import {
   STARTUP_MAIN_WINDOW_HEIGHT,
   STARTUP_MAIN_WINDOW_WIDTH,
@@ -12,6 +13,7 @@ export type PanelDesktopWindowKind = "startup" | "main";
 
 export type PanelDesktopWindowOptions = {
   readonly title: string;
+  readonly icon: string;
   readonly width: number;
   readonly height: number;
   readonly minWidth: number;
@@ -146,6 +148,7 @@ export function createPanelDesktopWindowOptions(): PanelDesktopWindowOptions {
   const startupTheme = createStartupThemeSnapshot(undefined, undefined);
   return {
     title: "AgentArbor Desktop Shell",
+    icon: resolvePanelBrandLogoPath(),
     width: STARTUP_MAIN_WINDOW_WIDTH,
     height: STARTUP_MAIN_WINDOW_HEIGHT,
     minWidth: 1200,

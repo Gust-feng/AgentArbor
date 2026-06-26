@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import path from "node:path";
 import test from "node:test";
 import {
   createPanelDesktopWindowOptions,
@@ -10,8 +11,10 @@ import {
 
 test("panel desktop window options keep secure defaults", () => {
   const options = createPanelDesktopWindowOptions();
+  const { icon, ...stableOptions } = options;
 
-  assert.deepEqual(options, {
+  assert.equal(isPanelBrandLogoPath(icon), true);
+  assert.deepEqual(stableOptions, {
     title: "AgentArbor Desktop Shell",
     width: 1440,
     height: 960,
@@ -47,7 +50,7 @@ test("panel desktop window options keep secure defaults", () => {
       sandbox: true,
       webviewTag: false,
     },
-  } satisfies PanelDesktopWindowOptions);
+  } satisfies Omit<PanelDesktopWindowOptions, "icon">);
 });
 
 test("panel desktop smoke starts and closes the local server without creating a window", async () => {
@@ -495,4 +498,11 @@ function createFakePanelDesktopWindow(): FakePanelDesktopWindow {
     isVisible: () => visible,
     isDestroyed: () => destroyed,
   };
+}
+
+function isPanelBrandLogoPath(value: string): boolean {
+  return (
+    value.endsWith(path.join("src", "app", "panel-ui", "public", "favicon.svg")) ||
+    value.endsWith(path.join("dist", "app", "panel-ui", "favicon.svg"))
+  );
 }

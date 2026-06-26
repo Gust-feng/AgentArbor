@@ -1,6 +1,12 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
-import { createPanelHtml, readPanelStaticAsset } from "../panel-assets.js";
+import {
+  PANEL_BRAND_LEGACY_ICON_PATHNAME,
+  PANEL_BRAND_LOGO_PATHNAME,
+  createPanelHtml,
+  readPanelBrandLogoAsset,
+  readPanelStaticAsset,
+} from "../panel-assets.js";
 import {
   PanelHttpError,
   readJsonBody,
@@ -86,6 +92,19 @@ async function handlePanelRequest(
     return;
   }
 
+  if (
+    request.method === "GET" &&
+    (url.pathname === PANEL_BRAND_LOGO_PATHNAME || url.pathname === PANEL_BRAND_LEGACY_ICON_PATHNAME)
+  ) {
+    const asset = readPanelBrandLogoAsset();
+    response.writeHead(200, {
+      "content-type": asset.contentType,
+      "cache-control": "no-store",
+    });
+    response.end(asset.body);
+    return;
+  }
+
   if (request.method === "GET") {
     const asset = readPanelStaticAsset(url.pathname);
     if (asset !== undefined) {
@@ -96,12 +115,6 @@ async function handlePanelRequest(
       response.end(asset.body);
       return;
     }
-  }
-
-  if (request.method === "GET" && url.pathname === "/favicon.ico") {
-    response.writeHead(204, { "cache-control": "no-store" });
-    response.end();
-    return;
   }
 
   if (request.method === "GET" && url.pathname === "/health") {

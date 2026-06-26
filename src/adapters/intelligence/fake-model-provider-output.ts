@@ -16,6 +16,12 @@ import {
   fakeIntentProfileOutput,
   fakeRootletKindFromContractId,
 } from "./fake-model-provider-underground.js";
+import {
+  fakeDeepChildMaterialOutput,
+  fakeDeepDecisionOutput,
+  fakeDeepDirectAnswerOutput,
+  fakeDeepSynthesisOutput,
+} from "./fake-model-provider-deep.js";
 import { fakeGoalAnchorFromRequest } from "./fake-model-provider-common.js";
 
 export function defaultFakeStep(request: ModelRequest): FakeModelProviderStep {
@@ -70,6 +76,22 @@ export function defaultFakeOutput(request: ModelRequest): unknown {
 
   if (request.outputContract.contractId === "work_session.synthesis.v1") {
     return fakeWorkSessionSynthesisOutput(request);
+  }
+
+  if (request.outputContract.contractId === "deep.decision.v1") {
+    return fakeDeepDecisionOutput(request);
+  }
+
+  if (request.outputContract.contractId === "deep.direct_answer.v1") {
+    return fakeDeepDirectAnswerOutput(request);
+  }
+
+  if (request.outputContract.contractId === "deep.child_material.v1") {
+    return fakeDeepChildMaterialOutput(request);
+  }
+
+  if (request.outputContract.contractId === "deep.synthesis.v1") {
+    return fakeDeepSynthesisOutput(request);
   }
 
   if (request.outputContract.contractId === "convergence-advisory") {

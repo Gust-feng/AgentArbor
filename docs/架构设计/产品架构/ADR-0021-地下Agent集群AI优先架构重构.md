@@ -2,9 +2,11 @@
 
 日期：2026-05-05
 
-状态：Proposed
+状态：Superseded-by ADR-0025
 
 补充说明：本 ADR 的地下 AI-first 主线继续有效，但被 [ADR-0022-AgentArbor桌面通用Agent与双运行时架构](ADR-0022-AgentArbor桌面通用Agent与双运行时架构.md) 重新框定为 Underground Cognitive Runtime。文中“`.agentarbor` 方向交接包”在当前产品口径下统一解释为 Plan / Plan Package；`.agentarbor` 只是 Plan Package 的实现/存储形态或目录名。
+
+承接说明：本 ADR 的 AI 优先诊断价值（“确定性主线 + AI 旁路”方向错误判定、“AI 优先 + 父层收束 + 确定性守卫”目标架构）保留为历史价值，诊断正文不删除；deep 一期实现决策由 [ADR-0025-deep一期Manager自由决策循环与一层child最小闭环](ADR-0025-deep一期Manager自由决策循环与一层child最小闭环.md) 承接，本 ADR 状态标记为 Superseded-by ADR-0025，不提升为已接受状态。
 
 ## 决策
 

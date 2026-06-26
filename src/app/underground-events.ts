@@ -371,7 +371,7 @@ function cyclePayload(cycle: UndergroundEventCyclePayload | undefined): Undergro
       };
 }
 
-function safeAgentRunTreeRef(tree: AgentRunTree): {
+export function safeAgentRunTreeRef(tree: AgentRunTree): {
   readonly treeId: string;
   readonly rootRunId: string;
   readonly rootAgentId: string;

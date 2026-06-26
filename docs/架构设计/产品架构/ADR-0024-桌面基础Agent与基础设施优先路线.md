@@ -6,6 +6,8 @@
 
 承接关系：Refines [ADR-0022-AgentArbor桌面通用Agent与双运行时架构](ADR-0022-AgentArbor桌面通用Agent与双运行时架构.md) 与 [ADR-0023-LocalRuntimeLiteProfile与未来FullProfile演进边界](ADR-0023-LocalRuntimeLiteProfile与未来FullProfile演进边界.md)。ADR-0022 保留长期产品愿景；本 ADR 定义当前活跃实现路线。
 
+阶段演进（2026-05 更新）：本 ADR 的基础 Agent 路线已稳定，普通桌面 Agent 默认主线地位与 Accepted 状态不变。在此基础之上，项目已重启 `deep` 作为**并行显式入口**（一期为 Underground Cognitive Runtime 一层 child 最小闭环），由 [ADR-0025-deep一期Manager自由决策循环与一层child最小闭环](ADR-0025-deep一期Manager自由决策循环与一层child最小闭环.md) 承接 deep 一期决策。本 ADR 不废弃：基础 Agent 路线继续作为默认主线，deep 仅作为显式入口，不自动升级、不混入默认路径。下文"默认不做"列表中与 deep 入口相关的条目，其"默认不做"语义仍对普通路径有效——deep 不自动触发、不自动升级；显式 deep 入口本身已在 ADR-0025 中重启。
+
 ## 决策
 
 当前实现默认收敛为 **Desktop Basic Agent Runtime + 基础设施优先**。
@@ -30,10 +32,10 @@ Desktop Shell
 
 ## 普通优先边界
 
-桌面端当前只打磨默认普通 Agent。历史实现中已经存在的 deep / Agent 集群 / compatibility 路径作为未来能力边界保留，但本路线不要求展示入口、不扩展后端编排，也不把复杂输入自动升级到 deep。
+桌面端当前默认入口只打磨默认普通 Agent，普通 Agent 默认主线地位不变。历史实现中已经存在的 deep / Agent 集群 / compatibility 路径作为显式能力入口保留（deep 一期已按 ADR-0025 重启为显式入口，见上文"阶段演进"）；本路线仍不要求把 deep 混入默认入口、不自动扩展后端编排，也不把复杂输入自动升级到 deep。
 
 - 普通模式（`agent`）：默认入口。它是单 Agent 的 conversational / tool-assisted turn，复用 Task Soil、Skill Context、AgentTurnRuntime、ToolCenter、Confirmation Gate、RunEvent、RuntimeDatabase 和 Workbench Panel；它不自动升级到 Underground、不派生 child agent、不暴露地下内部工具。
-- 未来深入模式（`deep`）：只能在用户重新明确启动 deep 项目后，按 ADR-0022 / ADR-0021 / Underground radial growth spec 演进目标成形、rootlet 探索、候选池、收束、Plan / Handoff 等复杂组织；这些策略只能在 deep adapter 内部出现。
+- 深入模式（`deep`）：只能由用户显式触发，不在默认路径中自动升级。当前 deep 一期已按 [ADR-0025](ADR-0025-deep一期Manager自由决策循环与一层child最小闭环.md) 重启为 manager 自由决策循环与一层 child 最小闭环（一期产物为 `SynthesizedConclusion` / `DeepExplorationReport`，非 Plan / Handoff）。长期 deep 仍按 ADR-0022 / ADR-0021 / Underground radial growth spec 演进目标成形、rootlet 探索、候选池、收束、Plan / Handoff 等组织；这些策略只能在 deep 边界内部出现。
 
 因此，普通模式和未来深入模式共享执行平台，不共享思考/编排策略、用户入口和可见语义。任何未来 deep 能力都必须先证明不会改变普通模式的工具可见性、事件投影、确认语义和首屏文案。
 
@@ -58,7 +60,7 @@ Desktop Shell
 - 完整 MCP 管理器。
 - 自动化调度器与 Routines UI。
 - 深入 Agent 集群模式。
-- 可见 deep 入口和 deep 后端扩展。
+- 可见 deep 入口和 deep 后端扩展。（注：显式 deep 入口已按 [ADR-0025](ADR-0025-deep一期Manager自由决策循环与一层child最小闭环.md) 重启为**显式** deep 入口，见上文"阶段演进"；本条"默认不做"仍对普通路径有效——deep 不自动触发、不自动升级、不混入默认路径。）
 - 完整 Aboveground 执行组织。
 - Governance 回流。
 - `.agentarbor/` Plan Package 的占位资产。
@@ -80,3 +82,4 @@ Desktop Shell
 - [技术主线](../../开发指南/06-工程实现/01-技术主线.md)
 - [ADR-0022-AgentArbor桌面通用Agent与双运行时架构](ADR-0022-AgentArbor桌面通用Agent与双运行时架构.md)
 - [ADR-0023-LocalRuntimeLiteProfile与未来FullProfile演进边界](ADR-0023-LocalRuntimeLiteProfile与未来FullProfile演进边界.md)
+- [ADR-0025-deep一期Manager自由决策循环与一层child最小闭环](ADR-0025-deep一期Manager自由决策循环与一层child最小闭环.md)

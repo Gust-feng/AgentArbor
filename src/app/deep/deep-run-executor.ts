@@ -611,6 +611,9 @@ async function runManagerDecisionStep(
       permissionBoundaryRefs: step.input.permissionBoundaryRefs,
       maxChildren: step.maxChildren,
       correctionContext: step.correctionContext,
+      // P6：传入 run 冻结的 capabilitySnapshot，让 manager 决策消息投影「可用工具清单」，
+      // 引导其设计 childSpec.allowedTools 时从真实可用工具中选取（不凭空编造）。
+      capabilitySnapshot: step.input.capabilitySnapshot,
     }),
     allowedTools: [],
     maxModelRounds: step.managerMaxModelRounds,
@@ -726,6 +729,9 @@ async function runSpawnChildrenStep(
       traceId: step.input.traceId,
       goalId: step.input.goalId,
       confirmationPolicy: step.input.confirmationPolicy,
+      // P6：传入 run 冻结的 capabilitySnapshot，让 child 探索消息投影「本 child 被授权可用工具」
+      // 及其能力简述，帮助 child 知道能用什么收集一手证据。
+      capabilitySnapshot: step.input.capabilitySnapshot,
     });
     summaries.push(result.summary);
     completedRuns.push(result.completedRun);

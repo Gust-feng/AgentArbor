@@ -21,6 +21,9 @@
 import type { ModelOutputContract, ModelResponse } from "../../domain/intelligence/contracts.js";
 import type { ModelMessage } from "../../domain/intelligence/contracts.js";
 import type { TaskSoil } from "../../domain/soil/task-soil.js";
+// P6：可用工具能力声明——消息装配需要投影 capabilitySnapshot 的工具目录（能力声明，
+// 帮助决策/探索），不泄露敏感配置（密钥/命令/URL）；模型实际工具调用仍经 ToolCenter/确认门。
+import type { BasicAgentCapabilitySnapshot } from "../../domain/config/index.js";
 import type {
   CandidateDisposition,
   DeepChildSpec,
@@ -137,6 +140,12 @@ export type DeepDecisionMessagesInput = {
    * 调整派生与综合方向（非空时消息显式标注"用户纠正/补充"段，可观察影响下一 step）。
    */
   readonly correctionContext?: readonly string[];
+  /**
+   * P6 可用工具能力声明：run 启动时冻结的能力快照。携带时 manager 决策消息会投影出
+   * "可用工具清单"段，引导 manager 设计 childSpec.allowedTools 时从真实可用工具中选取。
+   * 仅作为能力声明帮助决策；模型实际工具调用仍经 ToolCenter/确认门。
+   */
+  readonly capabilitySnapshot?: BasicAgentCapabilitySnapshot;
 };
 
 export type DeepDirectAnswerMessagesInput = {
@@ -150,6 +159,12 @@ export type DeepChildMaterialMessagesInput = {
   readonly goal: string;
   readonly childSpec: DeepChildSpec;
   readonly permissionBoundaryRefs: readonly string[];
+  /**
+   * P6 可用工具能力声明：run 启动时冻结的能力快照。携带时 child 探索消息会投影出
+   * "本 child 被授权可用工具"段（childSpec.allowedTools ∩ 可用工具）及其能力简述，
+   * 帮助 child 知道能用什么收集一手证据。仅作能力声明；实际工具调用仍经 ToolCenter/确认门。
+   */
+  readonly capabilitySnapshot?: BasicAgentCapabilitySnapshot;
 };
 
 export type DeepSynthesisMessagesInput = {
@@ -165,29 +180,63 @@ export type DeepSynthesisMessagesInput = {
 
 export function deepDecisionMessages(input: DeepDecisionMessagesInput): readonly DeepTurnMessage[] {
   const correctionSection = formatCorrectionContext(input.correctionContext);
+  // P6：可用工具能力声明——投影 capabilitySnapshot 的工具目录，帮助 manager 设计
+  // childSpec.allowedTools 时从真实可用工具中选取（不凭空编造）。仅作能力声明，
+  // 模型实际工具调用仍经 ToolCenter/确认门。
+  const toolSection = formatCapabilityToolSection(input.capabilitySnapshot);
   const system: DeepTurnMessage = {
     role: "system",
     ref: "context:deep:manager_system",
     content: [
       "你是 DeepRuntime 的 manager（深层多角度探索协调者）。",
-      "你的职责是理解用户目标，逐 step 决策本轮动作，并产出可解释的决策。",
+      "你的职责是理解用户目标，逐 step 决策本轮动作，并产出可解释、有依据的决策。",
       "",
-      "可选动作（六动作，必须选择其一）：",
-      "- direct_answer：证据已足够，直接产出结论（简单任务，无需多角度探索）。",
-      "- spawn_children：需要多角度/多证据，派生多个 child 分头探索。",
-      "- wait_children：已派生的 child 仍在进行中，本轮等待。",
-      "- synthesize：child 材料已足够，进入父层综合产出结论。",
-      "- ask_user：证据/方向不足，向用户澄清（不要在证据不足时伪装成已完成判断）。",
-      "- stop：预算耗尽或目标已达成，停止运行。",
+      "可选动作（六动作，必须选择其一）及其判断标准：",
+      "- direct_answer：目标明确、答案单一、已有证据足以支撑结论时直接产出结论。",
+      "  注意：除非目标确实简单，否则不要在 step 0 就急于 direct_answer；证据不足时禁止伪装完成。",
+      "- spawn_children：需要多角度验证、多来源证据，或目标存在分歧/不确定性时，派生多个 child 分头探索。",
+      "- wait_children：已派生的 child 仍在进行中，本轮等待其结果。",
+      "- synthesize：child 探索材料已足够覆盖目标的关键维度，进入父层综合产出结论。",
+      "- ask_user：关键信息缺失、方向存在歧义、或权限/边界不清时，向用户澄清。",
+      "- stop：预算即将耗尽、目标已达成或确实无法继续推进时，停止运行。",
+      "",
+      "childSpec 设计策略（spawn_children 时）：",
+      "- 差异互补：child 之间角度互补、不重复——从不同证据来源、不同假设、不同约束维度切入，",
+      "  避免多个 child 探索同一问题；每个 child 聚焦一个可独立产出证据的子问题。",
+      "- role/objective 设计要点：role 体现视角（如「性能视角」）；objective 写清要回答的具体问题与期望证据，",
+      "  具体且可探索（便于产出有依据的发现）。",
+      "- allowedTools 从下方「可用工具清单」中真实选取，不要凭空编造不存在的工具名。",
+      "",
+      "预算意识：结合本轮 stepIndex/stepLimit 与 child 上限判断。剩余步数少或已派生接近上限时，",
+      "优先收束（synthesize 或 direct_answer）而非继续 spawn，避免预算耗尽而无结论。",
       "",
       "AI-first 边界：你的决策由语义推理产出。当证据不足时，必须选择 spawn_children",
       "（继续探索）或 ask_user（向用户澄清），不得选择 direct_answer/synthesize 伪装完成。",
-      "",
       "若用户在中途给出纠正/补充上下文，你必须据此调整本轮派生与综合方向，不能忽略。",
       "",
       `本轮约束：step ${input.stepIndex}/${input.stepLimit}，最多派生 ${input.maxChildren} 个 child。`,
-      "输出 JSON：action, decisionSummary, rationale, uncertainty, confidence(0-1),",
-      "reasoningRefs(string[]); 仅当 action=spawn_children 时给出 childSpecs 数组。",
+      toolSection,
+      "",
+      "期望输出 JSON（字段结构示例，是格式指引而非固定内容）：",
+      "  {",
+      "    \"action\": \"spawn_children\",",
+      "    \"decisionSummary\": \"一句话说明本轮决策意图\",",
+      "    \"rationale\": \"为什么选这个动作（判断依据）\",",
+      "    \"uncertainty\": \"本轮仍存在的主要不确定性\",",
+      "    \"confidence\": 0.7,",
+      "    \"reasoningRefs\": [\"ref1\", \"ref2\"],",
+      "    \"childSpecs\": [",
+      "      {",
+      "        \"specId\": \"child-a\",",
+      "        \"displayName\": \"性能视角\",",
+      "        \"role\": \"performance_angle\",",
+      "        \"objective\": \"评估 X 在高并发下的性能，给出 QPS/延迟数据\",",
+      "        \"allowedTools\": [\"toolName\"],",
+      "        \"inputRefs\": [\"ref\"]",
+      "      }",
+      "    ]",
+      "  }",
+      "仅当 action=spawn_children 时给出 childSpecs 数组；其他动作省略该字段。",
     ].join("\n"),
   };
   const contextRefs = taskSoilContextSummary(input.taskSoil);
@@ -555,6 +604,23 @@ function formatCorrectionContext(correctionContext: readonly string[] | undefine
   }
   const lines = entries.map((entry, index) => `  ${index + 1}. ${entry}`).join("\n");
   return [`User corrections / supplementary context (必须据此调整本轮派生与综合方向):`, lines].join("\n");
+}
+
+function formatCapabilityToolSection(snapshot: BasicAgentCapabilitySnapshot | undefined): string {
+  if (snapshot === undefined) {
+    return "可用工具清单：未提供冻结能力快照；不要编造工具名。";
+  }
+  const allowedTools = new Set(snapshot.toolCatalog.allowedTools);
+  const tools = snapshot.toolCatalog.tools
+    .filter((tool) => allowedTools.has(tool.name) && tool.enabled && tool.availability === "available")
+    .map((tool) => {
+      const description = tool.displayDescription || tool.description || tool.operationLabel;
+      return `  - ${tool.name}: ${description}（${tool.categoryLabel} / ${tool.operationLabel} / ${tool.confirmationLabel}）`;
+    });
+  if (tools.length === 0) {
+    return "可用工具清单：本轮没有可用工具；allowedTools 应为空数组。";
+  }
+  return ["可用工具清单（只能从这些真实工具名中选择 allowedTools）：", ...tools].join("\n");
 }
 
 function formatChildSummary(child: DeepChildSummary, index: number): string {

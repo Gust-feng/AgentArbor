@@ -31,6 +31,9 @@ import {
 } from "../../domain/underground/guard.js";
 import type { AgentTurnRuntime } from "../../kernel/intelligence/agent-turn-runtime.js";
 import { createId, nowIso } from "../../kernel/id.js";
+// P6：可用工具能力声明——child 探索消息投影 run 冻结的 capabilitySnapshot 中本 child 被授权
+// 的工具能力简述，帮助 child 知道能用什么收集一手证据。仅作能力声明；实际调用仍经确认门。
+import type { BasicAgentCapabilitySnapshot } from "../../domain/config/index.js";
 import type { DeepChildSpec, DeepChildSummary } from "./contracts.js";
 import {
   deepChildMaterialMessages,
@@ -203,6 +206,12 @@ export type ExploreDeepChildInput = {
   readonly traceId: string;
   readonly goalId: string;
   readonly confirmationPolicy?: ToolConfirmationPolicy;
+  /**
+   * P6：run 启动时冻结的能力快照。携带时 child 探索消息会投影「本 child 被授权可用工具」段
+   * （childSpec.allowedTools ∩ 可用工具）及其能力简述，帮助 child 知道能用什么收集一手证据。
+   * 仅作能力声明；模型实际工具调用仍经 ToolCenter/确认门。
+   */
+  readonly capabilitySnapshot?: BasicAgentCapabilitySnapshot;
 };
 
 export type ExploreDeepChildResult = {
@@ -247,6 +256,8 @@ export async function exploreDeepChild(input: ExploreDeepChildInput): Promise<Ex
       goal: input.goal,
       childSpec,
       permissionBoundaryRefs: input.permissionBoundaryRefs,
+      // P6：传入 run 冻结的 capabilitySnapshot，投影本 child 被授权可用工具的能力简述。
+      capabilitySnapshot: input.capabilitySnapshot,
     }),
     allowedTools: [...childSpec.allowedTools],
     maxModelRounds: input.childRun.spec.budget.maxModelRounds,
